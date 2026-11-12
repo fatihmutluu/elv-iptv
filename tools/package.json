@@ -1,0 +1,17 @@
+{
+  "name": "@elv/tools",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "check": "node bin/check.ts",
+    "test": "vitest run --reporter=dot",
+    "typecheck": "tsc --noEmit -p . --pretty false"
+  },
+  "devDependencies": {
+    "@elv/config": "workspace:*",
+    "@types/node": "24.19.2",
+    "dependency-cruiser": "18.7.2",
+    "vitest": "5.1.0"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "@elv/config",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./tsconfig.base.json": "./tsconfig.base.json",
+    "./tsconfig.pure.json": "./tsconfig.pure.json",
+    "./tsconfig.ui.json": "./tsconfig.ui.json",
+    "./biome.json": "./biome.json"
+  }
+}

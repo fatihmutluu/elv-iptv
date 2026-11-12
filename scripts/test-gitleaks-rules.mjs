@@ -1,9 +1,9 @@
 // Standalone checks for the Xtream credential shapes in .gitleaks.toml.
 // Usage: node scripts/test-gitleaks-rules.mjs
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve, dirname } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const config = resolve(dirname(fileURLToPath(import.meta.url)), '..', '.gitleaks.toml');
@@ -36,8 +36,16 @@ for (const [name, content, expected] of cases) {
   const dir = mkdtempSync(join(tmpdir(), 'elv_leaks_'));
   try {
     writeFileSync(join(dir, 'sample.txt'), content);
-    const r = spawnSync('gitleaks',
-      ['dir', dir, '--config', config, '--no-banner', '--redact', '--exit-code', '1']);
+    const r = spawnSync('gitleaks', [
+      'dir',
+      dir,
+      '--config',
+      config,
+      '--no-banner',
+      '--redact',
+      '--exit-code',
+      '1',
+    ]);
     const ok = r.status === expected;
     if (!ok) failed++;
     console.log(`${ok ? 'PASS' : 'FAIL'}: ${name} (exit ${r.status}, expected ${expected})`);

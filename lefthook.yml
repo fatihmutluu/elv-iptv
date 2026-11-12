@@ -1,0 +1,7 @@
+pre-commit:
+  jobs:
+    - name: biome
+      run: pnpm exec biome check --staged --write --no-errors-on-unmatched
+      stage_fixed: true
+    - name: gitleaks
+      run: gitleaks git --staged --config .gitleaks.toml --redact --no-banner

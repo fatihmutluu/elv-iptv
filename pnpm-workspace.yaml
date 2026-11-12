@@ -1,0 +1,9 @@
+packages:
+  - apps/*
+  - modules/*
+  - packages/*
+  - tools
+
+allowBuilds:
+  lefthook: true
+  esbuild: true

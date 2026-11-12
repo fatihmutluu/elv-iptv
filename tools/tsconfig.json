@@ -1,0 +1,11 @@
+{
+  "extends": "@elv/config/tsconfig.pure.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "tsBuildInfoFile": "../node_modules/.cache/tools.tsbuildinfo"
+  },
+  "include": ["src", "bin", "test", "vitest.config.ts"],
+  "exclude": ["test/fixtures"]
+}
