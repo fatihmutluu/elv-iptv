@@ -1,0 +1,17 @@
+{
+  "name": "@elv/domain",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run --reporter=dot --passWithNoTests",
+    "typecheck": "tsc --noEmit -p . --pretty false"
+  },
+  "devDependencies": {
+    "@elv/config": "workspace:*",
+    "vitest": "5.1.0"
+  }
+}

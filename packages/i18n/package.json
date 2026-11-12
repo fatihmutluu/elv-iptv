@@ -1,0 +1,20 @@
+{
+  "name": "@elv/i18n",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run --reporter=dot --passWithNoTests",
+    "typecheck": "tsc --noEmit -p . --pretty false"
+  },
+  "dependencies": {
+    "@elv/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "@elv/config": "workspace:*",
+    "vitest": "5.1.0"
+  }
+}

@@ -187,6 +187,83 @@ importers:
 
   packages/config: {}
 
+  packages/data:
+    dependencies:
+      '@elv/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@elv/sources':
+        specifier: workspace:*
+        version: link:../sources
+    devDependencies:
+      '@elv/config':
+        specifier: workspace:*
+        version: link:../config
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@24.19.2)(vite@8.3.8(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
+
+  packages/domain:
+    devDependencies:
+      '@elv/config':
+        specifier: workspace:*
+        version: link:../config
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@24.19.2)(vite@8.3.8(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
+
+  packages/focus-core:
+    dependencies:
+      '@elv/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      '@elv/config':
+        specifier: workspace:*
+        version: link:../config
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@24.19.2)(vite@8.3.8(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
+
+  packages/i18n:
+    dependencies:
+      '@elv/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      '@elv/config':
+        specifier: workspace:*
+        version: link:../config
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@24.19.2)(vite@8.3.8(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
+
+  packages/playback:
+    dependencies:
+      '@elv/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      '@elv/config':
+        specifier: workspace:*
+        version: link:../config
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@24.19.2)(vite@8.3.8(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
+
+  packages/sources:
+    dependencies:
+      '@elv/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      '@elv/config':
+        specifier: workspace:*
+        version: link:../config
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@24.19.2)(vite@8.3.8(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
+
   tools:
     devDependencies:
       '@elv/config':

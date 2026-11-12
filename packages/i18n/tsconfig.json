@@ -1,0 +1,7 @@
+{
+  "extends": "@elv/config/tsconfig.pure.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "../../node_modules/.cache/i18n.tsbuildinfo"
+  },
+  "include": ["src"]
+}
