@@ -1,35 +1,12 @@
-import { spawnSync } from 'node:child_process';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { cruise as cruiseDir } from './cruise.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const config = resolve(here, '..', '..', '.dependency-cruiser.cjs');
-const bin = resolve(
-  here,
-  '..',
-  'node_modules',
-  'dependency-cruiser',
-  'bin',
-  'dependency-cruiser.mjs',
-);
 
-interface Violation {
-  rule: { name: string };
-  from: string;
-  to: string;
-}
-
-function cruise(fixture: string): Violation[] {
-  const cwd = join(here, 'fixtures', fixture);
-  const r = spawnSync(
-    process.execPath,
-    [bin, '--config', config, '--output-type', 'json', '--no-cache', '.'],
-    { cwd, encoding: 'utf8' },
-  );
-  const report = JSON.parse(r.stdout) as { summary: { violations: Violation[] } };
-  return report.summary.violations.filter((v) => v.rule.name !== 'not-resolvable');
-}
+const cruise = (fixture: string) =>
+  cruiseDir(join(here, 'fixtures', fixture)).filter((v) => v.rule.name !== 'not-resolvable');
 
 const ruleNames = (fixture: string) => cruise(fixture).map((v) => v.rule.name);
 

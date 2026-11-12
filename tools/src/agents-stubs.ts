@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 const MAX_AGENTS_LINES = 50;
+const MAX_ROOT_AGENTS_LINES = 150;
 const IGNORED_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', 'android', 'ios']);
 
 function* walk(dir: string): Generator<string> {
@@ -19,7 +20,7 @@ const rel = (root: string, path: string) => relative(root, path).replace(/\\/g, 
 /**
  * Verifies the AGENTS.md convention under `rootDir`: every `AGENTS.md` has a `CLAUDE.md`
  * beside it; in sub-folders that file is exactly `@AGENTS.md` and `AGENTS.md` stays within
- * 50 lines; the root `CLAUDE.md` must import `@AGENTS.md`. Returns one message per problem.
+ * 50 lines (150 at the root); the root `CLAUDE.md` must import `@AGENTS.md`. Returns one message per problem.
  */
 export function checkAgentsStubs(rootDir: string): string[] {
   const problems: string[] = [];
@@ -36,6 +37,12 @@ export function checkAgentsStubs(rootDir: string): string[] {
       continue;
     }
     if (!hasAgents) continue;
+    const agentsLines = readFileSync(agents, 'utf8').split(/\r?\n/);
+    if (agentsLines.at(-1) === '') agentsLines.pop();
+    const cap = isRoot ? MAX_ROOT_AGENTS_LINES : MAX_AGENTS_LINES;
+    if (agentsLines.length > cap) {
+      problems.push(`${where('AGENTS.md')} has ${agentsLines.length} lines (max ${cap})`);
+    }
     if (!hasClaude) {
       problems.push(`${where('CLAUDE.md')} is missing; it must import @AGENTS.md`);
       continue;
@@ -47,17 +54,8 @@ export function checkAgentsStubs(rootDir: string): string[] {
       if (!claudeLines.includes('@AGENTS.md')) {
         problems.push(`${where('CLAUDE.md')} must contain a line "@AGENTS.md"`);
       }
-      continue;
-    }
-    if (claudeLines.filter((l) => l !== '').join('\n') !== '@AGENTS.md') {
+    } else if (claudeLines.filter((l) => l !== '').join('\n') !== '@AGENTS.md') {
       problems.push(`${where('CLAUDE.md')} must contain only "@AGENTS.md"`);
-    }
-    const agentsLines = readFileSync(agents, 'utf8').split(/\r?\n/);
-    if (agentsLines.at(-1) === '') agentsLines.pop();
-    if (agentsLines.length > MAX_AGENTS_LINES) {
-      problems.push(
-        `${where('AGENTS.md')} has ${agentsLines.length} lines (max ${MAX_AGENTS_LINES})`,
-      );
     }
   }
   return problems;

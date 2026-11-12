@@ -68,3 +68,21 @@ describe('checkAgentsStubs', () => {
     expect(checkAgentsStubs(root)).toEqual([expect.stringContaining('50')]);
   });
 });
+
+describe('checkAgentsStubs line caps', () => {
+  const lines = (n: number) => `${Array(n).fill('l').join('\n')}\n`;
+
+  it('allows a root AGENTS.md of 150 lines and rejects 151', () => {
+    const ok = tree({ 'AGENTS.md': lines(150), 'CLAUDE.md': '@AGENTS.md\n' });
+    expect(checkAgentsStubs(ok)).toEqual([]);
+    const bad = tree({ 'AGENTS.md': lines(151), 'CLAUDE.md': '@AGENTS.md\n' });
+    expect(checkAgentsStubs(bad)).toEqual([expect.stringContaining('150')]);
+  });
+
+  it('allows a package AGENTS.md of 50 lines and rejects 51', () => {
+    const ok = tree({ 'packages/x/AGENTS.md': lines(50), 'packages/x/CLAUDE.md': '@AGENTS.md\n' });
+    expect(checkAgentsStubs(ok)).toEqual([]);
+    const bad = tree({ 'packages/x/AGENTS.md': lines(51), 'packages/x/CLAUDE.md': '@AGENTS.md\n' });
+    expect(checkAgentsStubs(bad)).toEqual([expect.stringContaining('packages/x/AGENTS.md')]);
+  });
+});

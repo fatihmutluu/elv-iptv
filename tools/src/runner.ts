@@ -1,7 +1,9 @@
-/** Outcome of one check. `output` is shown only when `ok` is false. */
+/** Outcome of one check. `output` is shown only when `ok` is false; `notes` always. */
 export interface CheckOutcome {
   ok: boolean;
   output: string;
+  /** Single-line warnings or skips, printed even when the check passes. */
+  notes?: string[];
 }
 
 /** A named project check. */
@@ -55,9 +57,12 @@ export async function runChecks(
   return { results, passed: results.length - failed, failed };
 }
 
-/** Renders failures followed by the final `check: N passed, M failed` line. */
+/** Renders notes, then failures, then the final `check: N passed, M failed` line. */
 export function formatReport(report: CheckReport): string {
   let text = '';
+  for (const r of report.results) {
+    for (const note of r.notes ?? []) text += `${note}\n`;
+  }
   for (const r of report.results) {
     if (r.ok) continue;
     text += `FAIL ${r.key}\n${r.output.trimEnd()}\n\n`;

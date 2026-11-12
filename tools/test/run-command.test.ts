@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildRunCommand, type Target } from '../src/run-command.ts';
+import { buildProcessEnv, buildRunCommand, type Target } from '../src/run-command.ts';
 
 const devEnv = { DEV_HOST: 'http://h.example', DEV_USER: 'u', OTHER: 'ignored' };
 const base = { action: 'run', variant: 'development', devEnv } as const;
@@ -70,5 +70,42 @@ describe('buildRunCommand', () => {
       const build = buildRunCommand({ ...base, action: 'build', target });
       expect(build.args).toEqual(['--filter', '@elv/desktop', 'run', 'build']);
     }
+  });
+});
+
+describe('buildProcessEnv', () => {
+  const parent = {
+    PATH: '/bin',
+    DEV_HOST: 'http://shell.example',
+    DEV_SHELL_ONLY: 'x',
+    EXPO_TV: '1',
+    STORE: 'amazon',
+  };
+
+  it('drops every parent DEV_ key in production', () => {
+    const cmd = buildRunCommand({ ...base, variant: 'production', target: 'android' });
+    const env = buildProcessEnv(parent, cmd, 'production');
+    expect(Object.keys(env).filter((k) => k.startsWith('DEV_'))).toEqual([]);
+    expect(env.PATH).toBe('/bin');
+    expect(env.APP_VARIANT).toBe('production');
+  });
+
+  it('keeps only .env.local DEV_ values in development', () => {
+    const cmd = buildRunCommand({ ...base, target: 'android' });
+    const env = buildProcessEnv(parent, cmd, 'development');
+    expect(env.DEV_HOST).toBe('http://h.example');
+    expect(env.DEV_SHELL_ONLY).toBeUndefined();
+  });
+
+  it('does not inherit variant-controlling keys from the shell', () => {
+    const cmd = buildRunCommand({ ...base, target: 'android' });
+    const env = buildProcessEnv(parent, cmd, 'development');
+    expect(env.EXPO_TV).toBeUndefined();
+    expect(env.STORE).toBeUndefined();
+  });
+
+  it('skips undefined parent values', () => {
+    const cmd = buildRunCommand({ ...base, target: 'android' });
+    expect('X' in buildProcessEnv({ X: undefined }, cmd, 'development')).toBe(false);
   });
 });

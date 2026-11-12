@@ -91,3 +91,30 @@ describe('versionAtLeast', () => {
     expect(versionAtLeast('22.1.0', '24.0.0')).toBe(false);
   });
 });
+
+describe('formatReport notes', () => {
+  it('prints warnings and skips of passing checks before the summary', async () => {
+    const noisy: Check = {
+      key: 'file-size',
+      run: async () => ({
+        ok: true,
+        output: '',
+        notes: ['warn: a.ts: 450 lines (soft limit 400)'],
+      }),
+    };
+    const skipped: Check = {
+      key: 'gitleaks-rules',
+      run: async () => ({
+        ok: true,
+        output: '',
+        notes: ['skip gitleaks-rules: gitleaks is not on PATH'],
+      }),
+    };
+    const text = formatReport(await runChecks([noisy, skipped]));
+    expect(text).toBe(
+      'warn: a.ts: 450 lines (soft limit 400)\n' +
+        'skip gitleaks-rules: gitleaks is not on PATH\n' +
+        'check: 2 passed, 0 failed\n',
+    );
+  });
+});

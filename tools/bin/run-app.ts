@@ -4,7 +4,7 @@ import { parseArgs } from 'node:util';
 import { loadDevEnv } from '../src/env.ts';
 import { commandLine } from '../src/exec.ts';
 import { findRepoRoot } from '../src/root.ts';
-import { buildRunCommand, TARGETS, type Target } from '../src/run-command.ts';
+import { buildProcessEnv, buildRunCommand, TARGETS, type Target } from '../src/run-command.ts';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -18,17 +18,18 @@ if (!TARGETS.includes(target as Target) || (action !== 'run' && action !== 'buil
   process.exit(2);
 }
 
+const variant = values.production ? 'production' : 'development';
 const root = findRepoRoot(process.cwd());
 const cmd = buildRunCommand({
   target: target as Target,
   action,
-  variant: values.production ? 'production' : 'development',
+  variant,
   devEnv: loadDevEnv(resolve(root, '.env.local')),
 });
 
 const result = spawnSync(commandLine(cmd.command, cmd.args), {
   cwd: resolve(root, cmd.cwd),
-  env: { ...process.env, ...cmd.env },
+  env: buildProcessEnv(process.env, cmd, variant),
   shell: true,
   stdio: 'inherit',
 });

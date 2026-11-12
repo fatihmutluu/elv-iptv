@@ -61,8 +61,8 @@ export function buildChecks(root: string): Check[] {
           if (/\.(ts|tsx|mjs|cjs)$/.test(p)) contents[p] = readFileSync(join(root, p), 'utf8');
         }
         const { warnings, errors } = checkFileSizes(contents);
-        const lines = [...errors.map((e) => `error: ${e}`), ...warnings.map((w) => `warn: ${w}`)];
-        return { ok: errors.length === 0, output: lines.join('\n') };
+        const output = errors.map((e) => `error: ${e}`).join('\n');
+        return { ok: errors.length === 0, output, notes: warnings.map((w) => `warn: ${w}`) };
       },
     },
     {
@@ -76,7 +76,11 @@ export function buildChecks(root: string): Check[] {
     { key: 'jest', run: () => pnpm('-r', '--if-present', '--reporter=append-only', 'test:jest') },
     {
       key: 'gitleaks-rules',
-      run: () => exec('node', ['scripts/test-gitleaks-rules.mjs'], { cwd: root }),
+      run: async () => {
+        const r = await exec('node', ['scripts/test-gitleaks-rules.mjs'], { cwd: root });
+        const skipped = r.ok && /^SKIP/m.test(r.output);
+        return skipped ? { ...r, notes: ['skip gitleaks-rules: gitleaks is not on PATH'] } : r;
+      },
     },
     {
       key: 'hooks',

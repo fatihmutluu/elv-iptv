@@ -80,3 +80,27 @@ export function buildRunCommand(opts: RunOptions): RunCommand {
   }
   return { command: 'pnpm', args, env, cwd: MOBILE_APP_DIR };
 }
+
+const MANAGED_KEYS = ['APP_VARIANT', 'EXPO_TV', 'STORE'];
+
+/**
+ * Environment for the spawned process: the parent environment without any `DEV_*` key or
+ * variant-controlling key, plus the command's own env. Credentials therefore come only
+ * from `.env.local` (via `cmd.env`) and only in development.
+ */
+export function buildProcessEnv(
+  parent: Record<string, string | undefined>,
+  cmd: RunCommand,
+  variant: RunOptions['variant'],
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(parent)) {
+    if (value === undefined || key.startsWith('DEV_') || MANAGED_KEYS.includes(key)) continue;
+    env[key] = value;
+  }
+  for (const [key, value] of Object.entries(cmd.env)) {
+    if (variant === 'production' && key.startsWith('DEV_')) continue;
+    env[key] = value;
+  }
+  return env;
+}
