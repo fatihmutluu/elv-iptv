@@ -1,0 +1,91 @@
+title = "ELV IPTV"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "env-local-file"
+description = "Local environment file with credentials must never be committed"
+path = '''(^|[\/])\.env(\..+)?\.local$'''
+
+[[rules]]
+id = "xtream-path-credentials"
+description = "Xtream Codes credentials embedded in a stream URL path"
+regex = '''/(?:live|movie|series|timeshift)/([A-Za-z0-9._~%-]{3,64})/([A-Za-z0-9._~%-]{3,64})/'''
+keywords = ["/live/", "/movie/", "/series/", "/timeshift/"]
+secretGroup = 2
+
+[[rules.allowlists]]
+regexTarget = "secret"
+regexes = ['''(?i)^(username|password|user|pass|demo|example|test)$''']
+
+[[rules]]
+id = "xtream-query-credentials"
+description = "Xtream Codes credentials in a query string"
+regex = '''(?i)username=([A-Za-z0-9._~%@-]{3,64})&(?:amp;)?password=([A-Za-z0-9._~%-]{3,64})'''
+keywords = ["username="]
+secretGroup = 2
+
+[[rules.allowlists]]
+regexTarget = "secret"
+regexes = ['''(?i)^(username|password|user|pass|demo|example|test)$''']
+
+[[rules]]
+id = "xtream-port-path-credentials"
+description = "Xtream Codes credentials in a host:port/user/pass/id stream URL"
+regex = '''https?://[^/\s:]+:\d{2,5}/([A-Za-z0-9._~%-]{3,64})/([A-Za-z0-9._~%-]{3,64})/\d+'''
+keywords = ["http"]
+secretGroup = 2
+
+[[rules.allowlists]]
+regexTarget = "secret"
+regexes = [
+  '''(?i)^(username|password|user|pass|demo|example|test)$''',
+  '''(?i)^(images?|img|static|assets?|logos?|icons?|thumbs?|thumbnails?|media|files?|uploads?|content|public|docs?|guide|api|v\d+|css|js|fonts?|videos?|audio|downloads?|cache|cdn)$''',
+]
+
+[[rules]]
+id = "xtream-query-credentials-reversed"
+description = "Xtream Codes credentials in a query string, password first"
+regex = '''(?i)password=([A-Za-z0-9._~%@-]{3,64})&(?:amp;)?username=([A-Za-z0-9._~%@-]{3,64})'''
+keywords = ["password="]
+secretGroup = 1
+
+[[rules.allowlists]]
+regexTarget = "secret"
+regexes = ['''(?i)^(username|password|user|pass|demo|example|test)$''']
+
+[[rules]]
+id = "xtream-json-credentials"
+description = "Credentials in JSON, username first"
+regex = '''(?i)"username"\s*:\s*"([^"]{3,64})"\s*,\s*"password"\s*:\s*"([^"]{3,64})"'''
+keywords = ["username"]
+secretGroup = 2
+
+[[rules.allowlists]]
+regexTarget = "secret"
+regexes = ['''(?i)^(username|password|user|pass|demo|example|test)$''']
+
+[[rules]]
+id = "xtream-json-credentials-reversed"
+description = "Credentials in JSON, password first"
+regex = '''(?i)"password"\s*:\s*"([^"]{3,64})"\s*,\s*"username"\s*:\s*"([^"]{3,64})"'''
+keywords = ["password"]
+secretGroup = 1
+
+[[rules.allowlists]]
+regexTarget = "secret"
+regexes = ['''(?i)^(username|password|user|pass|demo|example|test)$''']
+
+[[allowlists]]
+description = "Documented fake sample values and known false positives"
+regexTarget = "line"
+regexes = [
+  '''realuser1''',
+  '''Xk92pQ7z''',
+  '''hw\.ramSize=\d+''',
+]
+
+[[allowlists]]
+description = "Test fixtures intentionally contain credential shapes"
+paths = ['''^scripts/test-gitleaks-rules\.mjs$''']

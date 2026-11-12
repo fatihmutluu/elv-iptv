@@ -1,0 +1,42 @@
+# Local secrets (dev credentials, signing keys). Never commit.
+.env.local
+.env.*.local
+*.local.env
+secrets/
+*.jks
+*.keystore
+*.p8
+*.p12
+*.mobileprovision
+
+# Private local notes and agent workspaces
+.superpowers/
+CLAUDE.local.md
+.claude/settings.local.json
+
+# Dependencies and caches
+node_modules/
+.pnpm-store/
+.cache/
+*.tsbuildinfo
+
+# Expo / React Native generated native projects and builds
+.expo/
+apps/*/android/
+apps/*/ios/
+dist/
+build/
+web-build/
+
+# Electron
+out/
+release/
+
+# Test and tool output
+coverage/
+test-results/
+playwright-report/
+
+# OS
+.DS_Store
+Thumbs.db

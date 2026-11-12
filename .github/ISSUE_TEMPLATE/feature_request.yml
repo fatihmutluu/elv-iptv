@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest an improvement
+labels: ["type:feature"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+    validations:
+      required: true
+  - type: checkboxes
+    id: platforms
+    attributes:
+      label: Platforms
+      options:
+        - label: Android phone or tablet
+        - label: Android TV
+        - label: Fire TV
+        - label: iPhone
+        - label: iPad
+        - label: Apple TV
+        - label: macOS
+        - label: Windows
+        - label: Linux
