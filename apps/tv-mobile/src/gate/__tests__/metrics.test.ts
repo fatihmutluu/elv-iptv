@@ -4,13 +4,19 @@ import { createRecorder, gateLine, summarize } from '../metrics';
 describe('summarize', () => {
   it('uses nearest-rank percentiles', () => {
     const samples = Array.from({ length: 100 }, (_, i) => 100 - i);
-    const m = summarize(samples, [1, 7, 3], { moves: 100, coalesced: 2, losses: 1, items: 5 });
+    const m = summarize(
+      samples,
+      [1, 7, 3],
+      { moves: 100, coalesced: 2, losses: 1, items: 5 },
+      12.345,
+    );
     expect(m).toEqual({
       moves: 100,
       coalesced: 2,
       losses: 1,
       keyToHighlightMs: { p50: 50, p95: 95, max: 100 },
       maxJsGapMs: 7,
+      maxFrameStallMs: 12.35,
       items: 5,
     });
   });
@@ -82,39 +88,42 @@ describe('createRecorder', () => {
     expect(r.finish().maxJsGapMs).toBe(21);
   });
 
-  it('reads a 30 ms stall as over the 16 ms budget, whatever frame it starts in', () => {
+  it('reads a 30 ms stall as a frame stall over 16 ms, whatever frame it starts in', () => {
     const quiet = Array.from({ length: 30 }, () => 16.7);
     for (const delta of [30.1, 33.3, 40, 46.7]) {
       const r = createRecorder(geometry);
       for (const d of [...quiet, delta, ...quiet]) r.frameDelta(d);
-      expect(r.finish().maxJsGapMs).toBeGreaterThanOrEqual(16);
+      expect(r.finish().maxFrameStallMs).toBeGreaterThanOrEqual(16);
     }
   });
 
-  it('reads a 20 ms stall as over the budget when it starts late in a frame', () => {
+  it('does not claim to detect a 20 ms stall: its delay is hard to tell from vsync slips', () => {
     const quiet = Array.from({ length: 30 }, () => 16.7);
-    const r = createRecorder(geometry);
-    for (const d of [...quiet, 33.3, ...quiet]) r.frameDelta(d);
-    expect(r.finish().maxJsGapMs).toBeGreaterThanOrEqual(16);
+    const measured = createRecorder(geometry);
+    for (const d of [...quiet, 22.9, ...quiet]) measured.frameDelta(d);
+    expect(measured.finish().maxFrameStallMs).toBeLessThan(16);
+    const lateInFrame = createRecorder(geometry);
+    for (const d of [...quiet, 33.3, ...quiet]) lateInFrame.frameDelta(d);
+    expect(lateInFrame.finish().maxFrameStallMs).toBeGreaterThanOrEqual(16);
   });
 
-  it('keeps idle vsync jitter below the budget', () => {
+  it('keeps idle vsync jitter below 16 ms', () => {
     const r = createRecorder(geometry);
     for (const d of [16.7, 12.9, 17.9, 22.5, 16.7, 27, 16.7, 16.6]) r.frameDelta(d);
-    expect(r.finish().maxJsGapMs).toBeLessThan(16);
+    expect(r.finish().maxFrameStallMs).toBeLessThan(16);
   });
 
-  it('reports the larger of the commit work and the frame stall, and resets per run', () => {
+  it('keeps the frame stall out of the JS gap, and resets per run', () => {
     const r = createRecorder(geometry);
     for (const d of [16, 16, 16, 30]) r.frameDelta(d);
     r.workStart(0);
     r.workEnd(9);
-    expect(r.finish().maxJsGapMs).toBe(18.8);
-    const w = createRecorder(geometry);
-    w.workStart(0);
-    w.workEnd(9);
-    expect(w.finish().maxJsGapMs).toBe(9);
-    expect(w.finish().maxJsGapMs).toBe(0);
+    const m = r.finish();
+    expect(m.maxJsGapMs).toBe(9);
+    expect(m.maxFrameStallMs).toBe(18.8);
+    const again = r.finish();
+    expect(again.maxJsGapMs).toBe(0);
+    expect(again.maxFrameStallMs).toBe(0);
   });
 
   it('counts a settled frame that shows a stale index and moves that never committed as losses', () => {

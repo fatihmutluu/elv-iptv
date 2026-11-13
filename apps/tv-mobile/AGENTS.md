@@ -16,9 +16,9 @@ It is a composition root: it wires modules, storage drivers, routes and stores.
 - `DEV_*` values reach `extra.dev` in development only; production builds must never contain them.
 - One `react-native` copy: the root override aliases it to `react-native-tvos`.
 - No Google Play Services or Firebase dependencies.
-- Phone and TV targets share `android/` and `ios/`. `pnpm run:app` stamps the folder
 - Phone and TV targets share `android/` and `ios/`. `pnpm run:app` stamps the folder (`.elv-prebuild.json`) and regenerates it
   when the target, variant or store changes. After changing `app.config.ts`, plugins or native dependencies, run `pnpm run:app <target> build`.
+- Placeholder images in `assets/` are generated once; replace them with final art, not code.
 
 ## Development gate (`src/gate/`)
 - Deep link `elviptv://gate/list?items=100000&auto=1&rate=20&moves=600` opens `GateListScreen`. The scheme `elviptv`
@@ -37,10 +37,10 @@ It is a composition root: it wires modules, storage drivers, routes and stores.
   repeats are acknowledged from `onFrameCommitted`. With `auto=0` it prints one line after 2 s without a move (`--real-keys`).
 - Metrics (`metrics.ts`): `t0` is the dispatch time (auto) or the key event time (real); `t1` is `performance.now()` inside
   `onFrameCommitted` (first frame after row and ring committed); key-to-highlight is `t1 - t0` per move that commit covers.
-  `maxJsGapMs` is the larger of the synchronous work per move (dispatch to the end of the list commit, ended by
-  `CommitProbe`) and a frame-stall estimate: slowest `requestAnimationFrame` delta minus 0.7 of the median delta. A 4 ms
-  `setInterval` fires once per frame on Android, so it only measured quantisation. The estimate has a resolution of about one
-  frame: `stall=30` reads >= 16 ms, `stall=20` only when it starts late in a frame; idle jitter stays below 16 ms.
+  `maxJsGapMs` is the longest synchronous work of a move (dispatch to the end of the list commit, ended by `CommitProbe`);
+  `maxFrameStallMs` estimates stalls outside dispatch: slowest `requestAnimationFrame` delta minus 0.7 of the median (a 4 ms
+  `setInterval` fires once per frame, so it cannot see tasks). Resolution about one frame: `stall=30` reads >= 16 ms, `stall=20`
+  does not reliably; idle jitter stays below 16. The tools gate only warns about it on emulators; hardware will enforce it.
 - `losses`: a committed frame whose focused index is outside `[0, items)`, outside the visible window that `TvList` reported for
   that frame, or outside the rows it rendered; plus 1 if the last committed index differs from the store's index once
   the run settles; plus every move that never got a committed frame (after a 2 s settle timeout). Moves whose net effect

@@ -11,7 +11,10 @@ export interface GateCounts {
 /** What the single `ELV_GATE` line carries. Times are milliseconds rounded to 0.01. */
 export interface GateMetrics extends GateCounts {
   keyToHighlightMs: { p50: number; p95: number; max: number };
+  /** The longest synchronous JS work of one move, from dispatch to the end of the list commit. */
   maxJsGapMs: number;
+  /** Frame-stall estimate from animation frame deltas (see `frameStall`); report-only on emulators. */
+  maxFrameStallMs: number;
 }
 
 const round = (value: number): number => Math.round(value * 100) / 100;
@@ -42,12 +45,13 @@ function frameStall(deltas: readonly number[]): number {
 
 /**
  * Summarizes key-to-highlight `samples` (ms) with nearest-rank p50/p95 and the maximum, and the event-loop `gaps`
- * (ms: the longest JS task candidates) with their maximum. Inputs are not modified.
+ * (ms: synchronous work per move) with their maximum; `frameStallMs` is passed through. Inputs are not modified.
  */
 export function summarize(
   samples: readonly number[],
   gaps: readonly number[],
   counts: GateCounts,
+  frameStallMs = 0,
 ): GateMetrics {
   const sorted = [...samples].sort((a, b) => a - b);
   let maxGap = 0;
@@ -62,6 +66,7 @@ export function summarize(
       max: round(sorted[sorted.length - 1] ?? 0),
     },
     maxJsGapMs: round(maxGap),
+    maxFrameStallMs: round(frameStallMs),
     items: counts.items,
   };
 }
@@ -153,12 +158,17 @@ export function createRecorder(geometry: { items: number }): Recorder {
     finish() {
       let total = losses + pendingT0.length;
       if (settled !== undefined && settled.index !== settled.current) total++;
-      const result = summarize(samples, [...gaps, frameStall(deltas)], {
-        moves,
-        coalesced,
-        losses: total,
-        items: geometry.items,
-      });
+      const result = summarize(
+        samples,
+        gaps,
+        {
+          moves,
+          coalesced,
+          losses: total,
+          items: geometry.items,
+        },
+        frameStall(deltas),
+      );
       samples = [];
       gaps = [];
       deltas = [];
