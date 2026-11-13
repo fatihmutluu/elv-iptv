@@ -105,12 +105,23 @@
         "packages/playback/**/*.test.ts",
         "packages/focus-core/**/*.test.ts",
         "packages/*/src/**/*-test-helpers.ts",
-        "packages/*/src/test-chunks.ts"
+        "packages/*/src/test-chunks.ts",
+        "packages/*/src/test-db.ts"
       ],
       "linter": {
         "rules": {
           "style": {
             "noRestrictedGlobals": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["packages/*/src/test-db.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": "off"
           }
         }
       }

@@ -7,7 +7,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "vitest run --reporter=dot --passWithNoTests",
+    "test": "vitest run --coverage --reporter=dot --passWithNoTests",
     "typecheck": "tsc --noEmit -p . --pretty false"
   },
   "dependencies": {
@@ -16,6 +16,10 @@
   },
   "devDependencies": {
     "@elv/config": "workspace:*",
+    "@types/better-sqlite3": "7.6.13",
+    "@vitest/coverage-v8": "catalog:",
+    "better-sqlite3": "13.0.3",
+    "fast-check": "catalog:",
     "vitest": "5.1.0"
   }
 }

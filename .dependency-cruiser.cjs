@@ -5,6 +5,8 @@
 
 const PURE = 'domain|sources|data|playback|focus-core';
 const WORKSPACE = '^(packages|modules|apps)/';
+/** The test-database helper of a pure package: the one non-test file that may use node:* and dev dependencies. */
+const TEST_DB = '^packages/[^/]+/src/test-db\\.ts$';
 /**
  * Matches packages by their folder under `node_modules`. pnpm resolves through the store
  * (`node_modules/.pnpm/<name>@<version>/node_modules/<name>/`), so an alias such as
@@ -68,7 +70,7 @@ module.exports = {
       name: 'pure-packages-no-node-builtins',
       comment: 'pure packages never import node:* or core modules; use ports from domain',
       severity: 'error',
-      from: { path: `^packages/(${PURE})/` },
+      from: { path: `^packages/(${PURE})/`, pathNot: TEST_DB },
       to: { dependencyTypes: ['core'] },
     },
     {
@@ -129,7 +131,7 @@ module.exports = {
       severity: 'error',
       from: {
         path: '^(packages|modules|apps)/[^/]+/src/',
-        pathNot: '\\.(test|spec)\\.[cm]?[jt]sx?$',
+        pathNot: ['\\.(test|spec)\\.[cm]?[jt]sx?$', TEST_DB],
       },
       to: {
         dependencyTypes: ['npm-dev'],

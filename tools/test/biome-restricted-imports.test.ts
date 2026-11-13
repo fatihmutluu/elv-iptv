@@ -88,6 +88,13 @@ beforeAll(() => {
     for (const name of GLOBALS) probeGlobal(`packages/${pkg}`, name, '-test-helpers.ts');
   }
   for (const name of GLOBALS) probeGlobal('packages/sources', name, '-helper.ts');
+  for (const pkg of PURE) {
+    mkdirSync(join(workspace, `packages/${pkg}/src`), { recursive: true });
+    writeFileSync(
+      join(workspace, `packages/${pkg}/src/test-db.ts`),
+      "import x from 'node:fs';\n\nexport const p = x;\n",
+    );
+  }
 
   const r = spawnSync(
     process.execPath,
@@ -144,6 +151,10 @@ describe('Biome restricted imports for pure packages', () => {
       expect(files.filter((f) => flaggedGlobals.has(f))).toEqual([]);
     },
   );
+
+  it.each(PURE)('allows node:fs in the test-db helper of packages/%s', (pkg) => {
+    expect(flagged.has(`packages/${pkg}/src/test-db.ts`)).toBe(false);
+  });
 
   it('still flags those globals in a non-test file of a pure package', () => {
     expect(flaggedGlobals.has('packages/sources/src/global-Blob-helper.ts')).toBe(true);

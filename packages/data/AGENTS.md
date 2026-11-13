@@ -13,3 +13,16 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
 - Source-first: `exports` points at `src/index.ts`; there is no build step.
 - Allowed workspace dependencies: `@elv/domain` and `@elv/sources`.
 - Tests live beside the code as `*.test.ts`.
+
+## Public surface (catalog import round)
+- `createSyncSqlDriver(db)` in `driver.ts` adapts a synchronous better-sqlite3-shaped database to `SqlDriver`.
+  Every call goes through one promise queue, so a `transaction` never interleaves with other statements; the `tx`
+  passed to its callback bypasses the queue and rejects nested `transaction` calls. Do not await the outer driver
+  inside a transaction callback (it would wait for itself). `batch` joins an open transaction.
+- `openCatalog(db)` in `migrate.ts` applies the open pragmas (`journal_mode=WAL`, `synchronous=NORMAL`,
+  `foreign_keys=ON`, `temp_store=MEMORY`) and migrates to `SCHEMA_VERSION` using `MIGRATIONS` in `schema.ts` (raw SQL,
+  `PRAGMA user_version`). A newer database yields `storage/schema-too-new`; a failed migration rolls back and yields
+  `storage/migration-failed`. Add a schema change as a new `MIGRATIONS` entry, never by editing an old one.
+- `foldText(text)` in `fold.ts`: Turkish-aware, accent- and punctuation-insensitive folding for `name_fold` columns.
+- `src/test-db.ts` (test helper, not exported): `testDb()`, `memorySecrets()`, `countingScheduler()`. better-sqlite3 is a
+  dev dependency imported only by this helper and tests.
