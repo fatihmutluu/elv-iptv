@@ -45,7 +45,7 @@ budgets: remote key to highlight under 100 ms, no JavaScript task over 16 ms whi
   `up` within 500 ms is `press`; a key held 500 ms fires `long` once (for `select`, `back` and the arrows) and then
   `repeat` events at a rate that starts at 8/s and rises to 24/s after 1.5 s for the arrows; a runtime that only sends
   `press` events gets presses (and its native long-press events map to `long`). Thresholds are constants with tests.
-  Changed: arrows and channel keys press on `down` (§9).
+  Changed: arrows and channel keys press on the earliest input, `down` or else the release (§9).
 - Repeats are coalesced: if the UI has not acknowledged the previous move, at most one pending move per direction is
   kept, so a slow frame never builds a backlog.
 
@@ -133,9 +133,17 @@ image tag, as long as §6 holds and the gate output format stays stable.
 
 ## 9. Decisions made during implementation
 Where sections 5 and 6 above differ, this list wins. Each line gives the decision and why.
-- Arrows and `channelUp`/`channelDown` step on `down` (the `press` carries the down time; `up` emits nothing; holding
-  gives `long` at 500 ms, then repeats); select, back, menu, playPause and digits keep press-on-up. Why: §1 measures
-  "remote key to highlight", which a user counts from pressing, and native Android TV focus moves on key down.
+- Arrows and `channelUp`/`channelDown` step on the earliest input the runtime delivers: on `down` (the `press` carries
+  the down time and the following `up` emits nothing), otherwise on an `up` without a `down` (one `press` at its time).
+  Holding an arrow gives `long` at 500 ms, then repeats; holding a channel key repeats after 500 ms without a `long`.
+  Select, back, menu, playPause and digits keep press-on-up. Why: §1 measures "remote key to highlight", which a user
+  counts from pressing, so the step must not wait for a release the runtime does not need.
+- Android TV remote events, verified on the API 36 emulator with react-native-tvos 0.88 (`adb shell input keyevent`,
+  with and without `--duration`): a tap reaches `TVEventHandler` only as its release (`eventKeyAction` 1); a hold
+  arrives as `long<Key>` with action 0 at the long-press timeout (about 430 ms) and action 1 at the release, with no
+  repeats in between; Select behaves the same (`select` 1; `longSelect` 0 and 1). The key source drops the long
+  release, so a held arrow jumps one page and does not repeat. On Android the measured key-to-highlight therefore
+  starts at the key release (a hold: at the long-press event), not at the physical press.
 - The key source is `useTvKeySource(onInput)`, not `(store)`: the host feeds a key interpreter (which needs `tick` and
   `acknowledge`) and then the store, so the source stays a thin platform adapter.
 - tvOS Menu (and its native long press) is `back`; Android `KEYCODE_MENU` stays `menu`. Why: the Apple TV remote's
@@ -154,6 +162,10 @@ Where sections 5 and 6 above differ, this list wins. Each line gives the decisio
   `maxJsGapMs` is now the longest synchronous work of a move (dispatch to end of commit; enforced: budget 16 ms,
   slack 4 ms); `maxFrameStallMs` (slowest animation-frame delta minus 0.7 of the median) only warns on emulators.
   Calibration on the emulator: idle 10.2 to 10.6 ms, a 20 ms stall 9.9 to 12.3 ms (not detected), a 30 ms stall 18.5 ms.
+  Earlier facts (AVD `elv_tv`, `pnpm gate list --runs 3 --real-keys 60`, 20 moves/s): the 4 ms `setInterval` fired about
+  every 16.7 ms idle and 22 ms at worst, vsync slips reached 27 ms, the old median-relative formula read a 30 ms stall
+  as only 13.4 ms, and the commit-333f2ec baseline had per-run JS gaps of 4.95 / 5.21 / 5.11 ms and stalls of
+  10.46 / 10.91 / 10.36 ms.
 - Janky frames: the legacy `gfxinfo` figure carries the relative rule (2-point slack); the deadline-based figure only
   warns on emulators. Why: it swung between 50 and 73 % across identical emulator runs.
 - CI compares with its own baseline file, `docs/learned/gates/list-android-tv-ci.json`, and checks only focus losses
