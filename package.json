@@ -18,7 +18,8 @@
   "scripts": {
     "check": "node tools/bin/check.ts",
     "bootstrap": "node tools/bin/bootstrap.ts",
-    "run:app": "node tools/bin/run-app.ts"
+    "run:app": "node tools/bin/run-app.ts",
+    "scaffold": "node tools/bin/scaffold.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.7",

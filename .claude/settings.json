@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true,
+    "context7@claude-plugins-official": true,
+    "commit-commands@claude-plugins-official": true,
+    "frontend-design@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "expo@claude-plugins-official": true
+  },
+  "permissions": {
+    "deny": [
+      "Read(**/.env.local)",
+      "Edit(**/.env.local)",
+      "Read(./secrets/**)",
+      "Edit(./secrets/**)",
+      "Read(**/*.jks)",
+      "Read(**/*.keystore)",
+      "Read(**/*.p8)",
+      "Read(**/*.p12)",
+      "Read(**/*.mobileprovision)",
+      "Read(**/node_modules/**)",
+      "Read(**/Pods/**)",
+      "Read(**/dist/**)",
+      "Read(**/release/**)",
+      "Read(**/build/**)",
+      "Read(**/.expo/**)",
+      "Read(**/web-build/**)",
+      "Edit(./apps/*/android/**)",
+      "Edit(./apps/*/ios/**)",
+      "Edit(**/.expo/**)"
+    ],
+    "ask": [
+      "Bash(gh release create *)",
+      "PowerShell(gh release create *)",
+      "Bash(gh repo delete *)",
+      "PowerShell(gh repo delete *)",
+      "Bash(gh repo edit *--visibility*)",
+      "PowerShell(gh repo edit *--visibility*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/block-force-push.mjs"],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/stop-check.mjs"],
+            "timeout": 180
+          }
+        ]
+      }
+    ]
+  }
+}
