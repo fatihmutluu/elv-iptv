@@ -45,6 +45,7 @@ budgets: remote key to highlight under 100 ms, no JavaScript task over 16 ms whi
   `up` within 500 ms is `press`; a key held 500 ms fires `long` once (for `select`, `back` and the arrows) and then
   `repeat` events at a rate that starts at 8/s and rises to 24/s after 1.5 s for the arrows; a runtime that only sends
   `press` events gets presses (and its native long-press events map to `long`). Thresholds are constants with tests.
+  Changed: arrows and channel keys press on `down` (§9).
 - Repeats are coalesced: if the UI has not acknowledged the previous move, at most one pending move per direction is
   kept, so a slow frame never builds a backlog.
 
@@ -57,12 +58,14 @@ budgets: remote key to highlight under 100 ms, no JavaScript task over 16 ms whi
   pops the scope and restores the opener's focus; the root scope's `back` is reported to the app.
 - `FocusStore`: `dispatch(event)`, `getState()`, `subscribe(listener)` (listeners get the changed container and new
   index only; no React import). Long `back` emits a `backLong` intent the app can route (spec §5.6: return to player).
+  Changed: Android long Back is deferred to #7 (§9).
 
 ### 5.3 Key sources (`ui-kit`)
 - `useTvKeySource(store)`: Android TV and Fire OS use react-native-tvos `TVEventHandler` key events with
   `eventKeyAction` (down/up) and `BackHandler` for Back; tvOS uses `TVEventHandler` presses, `longSelect`/long events and
   the menu key (`TVEventControl.enableTVMenuKey`). One key source per runtime; focusable rows never use `onPress`.
 - The source stamps `time` with `performance.now()` at receipt.
+- Changed: the hook is `useTvKeySource(onInput)`, tvOS Menu is `back`, and a focusable root is required (§9).
 
 ### 5.4 Windowed list (`ui-kit`)
 - `TvList<T>` props: `source: ListSource<T>`, `rowHeight`, `visibleRows`, `renderRow(item, state)`, `focusLine`
@@ -75,6 +78,7 @@ budgets: remote key to highlight under 100 ms, no JavaScript task over 16 ms whi
   positioned view. No Reanimated dependency in this gate.
 - Rows are memoized and receive only `item` and `focused`; the focused row gets `accessibilityState.selected` and its
   label so TalkBack can read it (verified later on hardware).
+- Changed: `renderRow(item, focused)` and at most 3 re-rendered rows per step instead of one slot (§9).
 
 ### 5.5 Gate screen and instrumentation (`apps/tv-mobile`, development builds only)
 - Deep link `elviptv://gate/list?items=100000&auto=1&rate=20&moves=600` opens `GateListScreen`; the scheme is
@@ -87,6 +91,8 @@ budgets: remote key to highlight under 100 ms, no JavaScript task over 16 ms whi
   the longest gap; counts of moves, coalesced repeats and focus losses (focused index not on screen after a move).
 - Results are printed once as a single logcat/console line `ELV_GATE {json}` (p50/p95/max key-to-highlight,
   max JS gap, moves, losses).
+- Changed: measured on a JS-bundled release build of the development variant; the lag sampler is replaced by
+  `maxJsGapMs` and `maxFrameStallMs`; the line also carries `scripted` (§9).
 
 ### 5.6 Gate runner and CI (`tools/`)
 - `pnpm gate list [--avd elv_tv] [--build] [--real-keys 60]`: builds the development APK when asked, installs it,
@@ -101,6 +107,8 @@ budgets: remote key to highlight under 100 ms, no JavaScript task over 16 ms whi
   until then it reports.
 - tvOS: the `tvos` CI job runs the auto-driver in the simulator via `simctl openurl` and records `ELV_GATE` output as a
   report-only artifact.
+- Changed: janky % rules, the CI baseline file, the separate tvOS job, the real-press check, comparability and the
+  per-run report (§9); the runner's flags are listed in `tools/AGENTS.md`.
 
 ## 6. Testing
 - `focus-core`: Vitest with simulated key sequences — interpreter timings (press, long, repeat ramp, coalescing),
@@ -108,7 +116,7 @@ budgets: remote key to highlight under 100 ms, no JavaScript task over 16 ms whi
   property test that any key sequence keeps the index within bounds and never loses focus. Coverage ≥ 90 % lines.
 - `ui-kit`: Jest + RNTL — `TvList` renders only the pool, re-renders one slot per step (render counter), keeps the
   focused row on the focus line, exposes `testID`s and accessibility state; the key source maps platform events to
-  `KeyInput` (mocked `TVEventHandler`).
+  `KeyInput` (mocked `TVEventHandler`). Changed: at most 3 rows per step (§9).
 - Gate: the runner is unit-tested for parsing `gfxinfo` and `ELV_GATE` lines and for the comparison rule; the real run
   is recorded in the issue with device, build and numbers.
 
@@ -122,3 +130,39 @@ budgets: remote key to highlight under 100 ms, no JavaScript task over 16 ms whi
 ## 8. Left to the builder
 Exact constants beyond those listed, the synthetic row content, the auto-driver's sequence details, and the CI emulator
 image tag, as long as §6 holds and the gate output format stays stable.
+
+## 9. Decisions made during implementation
+Where sections 5 and 6 above differ, this list wins. Each line gives the decision and why.
+- Arrows and `channelUp`/`channelDown` step on `down` (the `press` carries the down time; `up` emits nothing; holding
+  gives `long` at 500 ms, then repeats); select, back, menu, playPause and digits keep press-on-up. Why: §1 measures
+  "remote key to highlight", which a user counts from pressing, and native Android TV focus moves on key down.
+- The key source is `useTvKeySource(onInput)`, not `(store)`: the host feeds a key interpreter (which needs `tick` and
+  `acknowledge`) and then the store, so the source stays a thin platform adapter.
+- tvOS Menu (and its native long press) is `back`; Android `KEYCODE_MENU` stays `menu`. Why: the Apple TV remote's
+  Menu button is its Back button.
+- Android long Back (`backLong`) is deferred to the player OSD gate (#7). Why: `BackHandler` cannot observe a long press;
+  it needs a native key hook, and only the player needs it.
+- Rows render through `renderRow(item, focused)`: §5.4 also says rows receive only `item` and `focused`, so a boolean
+  is that state.
+- Render-count bound: at most 3 rows re-render per step (the entering slot and the rows losing and gaining focus),
+  independent of the pool size, instead of "one slot". Why: `focused` moves between two rows on every step.
+- Key events need a focused native view: the gate screen root is `focusable` with `hasTVPreferredFocus`. Why: without
+  one Android delivers no remote keys to `TVEventHandler`, not even `adb shell input keyevent`.
+- The gate is keyed on `APP_VARIANT` (app config `extra.gate`), never `__DEV__`, and is measured on a JS-bundled
+  release build of the development variant. Why: development-mode JS would make the 100 ms and 16 ms budgets meaningless.
+- The 4 ms lag sampler is replaced. It fires once per frame on React Native Android, so it measured frame quantisation.
+  `maxJsGapMs` is now the longest synchronous work of a move (dispatch to end of commit; enforced: budget 16 ms,
+  slack 4 ms); `maxFrameStallMs` (slowest animation-frame delta minus 0.7 of the median) only warns on emulators.
+  Calibration on the emulator: idle 10.2 to 10.6 ms, a 20 ms stall 9.9 to 12.3 ms (not detected), a 30 ms stall 18.5 ms.
+- Janky frames: the legacy `gfxinfo` figure carries the relative rule (2-point slack); the deadline-based figure only
+  warns on emulators. Why: it swung between 50 and 73 % across identical emulator runs.
+- CI compares with its own baseline file, `docs/learned/gates/list-android-tv-ci.json`, and checks only the budgets
+  and focus losses until a green CI run seeds it. Why: a software-GPU CI emulator is not comparable with the local one.
+- The tvOS gate is a separate report-only job (push to `main` and manual runs), not part of the required `tvos` job.
+  Why: it needs a Release build of the development variant; changing `tvos` would change what the required check validates.
+- The runner fails a real-key burst when fewer moves arrive than presses were sent. Why: a dropped remote key is a
+  user-visible failure the gate exists to catch.
+- Runs compare on items and `scripted` (every event the driver emitted), not `moves`. Why: a coalesced repeat lowers
+  `moves`, which made a run with coalescing "not comparable" instead of a warning.
+- The runner's report keeps every run next to the median and warns when the worst run breaks a budget the median meets.
+  Why: the median judges the gate but can hide a single bad run.
