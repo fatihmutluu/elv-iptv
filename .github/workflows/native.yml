@@ -51,6 +51,8 @@ jobs:
               - 'tools/src/gates/**'
               - 'tools/bin/gate.ts'
               - 'tools/src/exec.ts'
+              - 'tools/src/run-command.ts'
+              - 'tools/src/root.ts'
               - 'docs/learned/gates/**'
               - 'package.json'
               - '.npmrc'
@@ -249,7 +251,7 @@ jobs:
         run: pnpm --filter tv-mobile exec expo prebuild --clean --platform android --no-install
       - name: Build the release APK (JS bundled, debug-signed)
         working-directory: apps/tv-mobile/android
-        run: ./gradlew assembleRelease --quiet --no-daemon
+        run: ./gradlew assembleRelease --quiet --no-daemon -PreactNativeArchitectures=x86_64
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
