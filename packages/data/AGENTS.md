@@ -24,5 +24,12 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
   `PRAGMA user_version`). A newer database yields `storage/schema-too-new`; a failed migration rolls back and yields
   `storage/migration-failed`. Add a schema change as a new `MIGRATIONS` entry, never by editing an old one.
 - `foldText(text)` in `fold.ts`: Turkish-aware, accent- and punctuation-insensitive folding for `name_fold` columns.
+- `templates.ts`: `detectSegmentRules`, `toTemplate`, `resolveTemplate`. URLs become `{{name}}` templates (`user`, `pass`,
+  `userinfo`, `v<N>` segment rules, `q:<param>` credential query values); the values go to the secret store. Keys are
+  `m3uKey(sourceId, template, name)`.
+- `sources.ts`: `addXtreamSource`, `addM3uSource`, `getSource`, `updateSourceSettings`, `removeSource`, `secretKey`.
+  Credentials live only in the `SecretStore` (`source:<id>:xtream|playlist|urlvars`); `settings_json` holds none.
+  There are no foreign keys, so `removeSource` deletes from every table of the source explicitly; a new table with
+  `source_id` must be added to its list.
 - `src/test-db.ts` (test helper, not exported): `testDb()`, `memorySecrets()`, `countingScheduler()`. better-sqlite3 is a
   dev dependency imported only by this helper and tests.
