@@ -26,7 +26,7 @@ M3U and XMLTV scanners and the Xtream client.
   `err` `source-format`/`gzip-unsupported` for gzip input without a `Decompressor` and otherwise `ok`. Filters run on the
   open tag, so skipped elements are never decoded. A programme or channel that cannot be read is skipped with one
   warning and scanning resumes at the next `<programme`/`<channel` (warnings: `programme-missing-start`,
-  `-missing-channel`, `-bad-time`, `-malformed`, `-unclosed`, `-truncated`, `channel-*`, `element-too-long`,
-  `gzip-corrupt`); elements over 1 MiB are skipped. A programme without `<title>` gets `title: ''`.
+  `-missing-channel`, `-bad-time`, `-malformed`, `-unclosed`, `-truncated`, `channel-*`, `element-too-long`).
+  Elements over 1 MiB are skipped. Corrupt gzip returns `err` `source-format`/`gzip-corrupt`; an input iterable that throws returns `err` (own category/code if ElvError-shaped, else `network`/`stream-failed`); on any `err` no `done` batch is yielded and the run is a failure. A programme without `<title>` gets `title: ''`.
   Implementation: `xmltv.ts` (run loop, element handling, gzip sniffing), `xml-tokens.ts` (byte-level tag, attribute and
   text helpers), `xmltv-children.ts` (child elements), `xmltv-time.ts` (`parseXmltvTime`), `xmltv-types.ts`.

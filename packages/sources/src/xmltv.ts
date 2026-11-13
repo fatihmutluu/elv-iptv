@@ -1,4 +1,4 @@
-import { elvError, err, ok, type Result } from '@elv/domain';
+import { type ElvError, type ErrorCategory, elvError, err, ok, type Result } from '@elv/domain';
 import { createStats, MAX_WARNINGS, type ScanStats, warn } from './stats';
 import { ByteBuffer } from './utf8';
 import {
@@ -211,6 +211,25 @@ class XmltvScanner {
   }
 }
 
+const CATEGORIES: readonly string[] = ['network', 'auth', 'source-format', 'playback', 'storage'];
+
+function toElvError(e: unknown): ElvError {
+  const c = e as { category?: unknown; code?: unknown; detail?: unknown } | null;
+  if (
+    c &&
+    typeof c.code === 'string' &&
+    typeof c.category === 'string' &&
+    CATEGORIES.includes(c.category)
+  ) {
+    return elvError(
+      c.category as ErrorCategory,
+      c.code,
+      typeof c.detail === 'string' ? c.detail : undefined,
+    );
+  }
+  return elvError('network', 'stream-failed');
+}
+
 const GZIP_0 = 0x1f;
 const GZIP_1 = 0x8b;
 
@@ -220,7 +239,13 @@ const GZIP_1 = 0x8b;
  * the next `<programme` or `<channel`. A batch is yielded as soon as it holds `batchSize` programmes
  * (default 500); the last has `done: true` and the statistics. Gzip input (magic `1f 8b`) goes through
  * `opts.decompressor`; without one the generator yields nothing and returns a `source-format` /
- * `gzip-unsupported` error. A failing decompressor ends the input with a `gzip-corrupt` warning.
+ * `gzip-unsupported` error.
+ *
+ * Callers must treat the run as failed when the return value is `err`: the final `done: true` batch is
+ * then never yielded (batches already yielded stay yielded). A decompressor failure returns
+ * `source-format` / `gzip-corrupt`. An error thrown by the input iterable is never swallowed and never
+ * rethrown: it is returned as `err`, keeping its `category` and `code` when it has that shape and
+ * otherwise as `network` / `stream-failed`. Both apply to plain and gzip input alike.
  */
 export async function* scanXmltv(
   chunks: AsyncIterable<Uint8Array>,
@@ -231,8 +256,22 @@ export async function* scanXmltv(
   const held: Uint8Array[] = [];
   let heldBytes = 0;
   let ended = false;
+  let sourceError: { error: unknown } | undefined;
+  const pull = async (): Promise<IteratorResult<Uint8Array>> => {
+    try {
+      return await it.next();
+    } catch (e) {
+      sourceError = { error: e };
+      throw e;
+    }
+  };
   while (heldBytes < 2) {
-    const r = await it.next();
+    let r: IteratorResult<Uint8Array>;
+    try {
+      r = await pull();
+    } catch (e) {
+      return err(toElvError(e));
+    }
     if (r.done) {
       ended = true;
       break;
@@ -251,7 +290,7 @@ export async function* scanXmltv(
     try {
       yield* held;
       while (!finished) {
-        const r = await it.next();
+        const r = await pull();
         if (r.done) finished = true;
         else yield r.value;
       }
@@ -276,8 +315,9 @@ export async function* scanXmltv(
       } while (scanner.full);
     }
   } catch (e) {
-    if (!gzip) throw e;
-    warn(scanner.stats, 'gzip-corrupt', scanner.stats.lines + 1);
+    if (sourceError) return err(toElvError(sourceError.error));
+    if (!gzip) return err(toElvError(e));
+    return err(elvError('source-format', 'gzip-corrupt'));
   }
   for (;;) {
     scanner.run(true);
