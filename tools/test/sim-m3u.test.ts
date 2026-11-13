@@ -61,7 +61,7 @@ describe('m3uChunks', () => {
   it('live entries', () => {
     const text = render('small', demo);
     expect(text).toContain(
-      `#EXTINF:-1 tvg-id="ch1001" tvg-name="Channel 0001" tvg-logo="${BASE}/logos/1001.png" tvg-chno="1" group-title="Live Group 01",Channel 0001\n${BASE}/live/demo/demo/1001.ts\n`,
+      `#EXTINF:-1 tvg-id="ch1001" tvg-name="Channel 0001" tvg-logo="${BASE}/logos/9.png" tvg-chno="1" group-title="Live Group 01",Channel 0001\n${BASE}/live/demo/demo/1001.ts\n`,
     );
     expect(render('small', demo, { output: 'm3u8' })).toContain(
       `${BASE}/live/demo/demo/1001.m3u8\n`,

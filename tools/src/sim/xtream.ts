@@ -119,7 +119,7 @@ function vodRows(catalog: Catalog, ctx: ApiContext, categoryId: string | null): 
       name: m.name,
       stream_type: 'movie',
       stream_id: m.id,
-      stream_icon: `${ctx.baseUrl}/logos/${(m.id % 16) + 1}.png`,
+      stream_icon: `${ctx.baseUrl}/logos/${m.id % 16}.png`,
       rating: rating(m.id),
       added: String(m.added),
       category_id: m.categoryId,
@@ -134,7 +134,7 @@ function seriesRows(catalog: Catalog, ctx: ApiContext, categoryId: string | null
       num: s.id - 300_000,
       series_id: s.id,
       name: s.name,
-      cover: `${ctx.baseUrl}/logos/${(s.id % 16) + 1}.png`,
+      cover: `${ctx.baseUrl}/logos/${s.id % 16}.png`,
       plot: `Synthetic plot of ${s.name}.`,
       rating: rating(s.id),
       category_id: s.categoryId,
@@ -148,7 +148,7 @@ function vodInfo(catalog: Catalog, ctx: ApiContext, id: number): Row {
   return {
     info: {
       name: m.name,
-      movie_image: `${ctx.baseUrl}/logos/${(m.id % 16) + 1}.png`,
+      movie_image: `${ctx.baseUrl}/logos/${m.id % 16}.png`,
       plot: `Synthetic plot of ${m.name}.`,
       rating: rating(m.id),
       duration_secs: m.durationSec,
@@ -191,7 +191,7 @@ function seriesInfo(catalog: Catalog, ctx: ApiContext, id: number): Row {
     seasons,
     info: {
       name: s.name,
-      cover: `${ctx.baseUrl}/logos/${(s.id % 16) + 1}.png`,
+      cover: `${ctx.baseUrl}/logos/${s.id % 16}.png`,
       plot: `Synthetic plot of ${s.name}.`,
       rating: rating(s.id),
       category_id: s.categoryId,

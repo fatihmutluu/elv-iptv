@@ -49,7 +49,7 @@ export interface LiveChannel {
   categoryId: string;
   /** Guide id (XMLTV channel id), or null when the channel has no guide entry. */
   epgId: string | null;
-  /** Logo asset id, or null when the channel has no logo. */
+  /** Index (0-15) into the 16 served logos, or null when the channel has no logo. */
   logo: number | null;
   recipe: RecipeName;
   /** Fault spec bound to this stream (spec section 5.7), or null for a healthy stream. */
@@ -254,7 +254,7 @@ function makeLive(profile: ProfileName, shape: Shape): LiveChannel[] {
           : `Channel ${pad(i + 1)}`,
       categoryId: categoryId('live', (i % shape.liveCats) + 1),
       epgId: hasEpg ? `ch${id}` : null,
-      logo: i % 7 === 6 ? null : id,
+      logo: i % 7 === 6 ? null : id % 16,
       recipe: radio ? 'aac-radio' : (VIDEO_RECIPES[i % VIDEO_RECIPES.length] as RecipeName),
       fault: profile === 'small' ? (SMALL_FAULTS[id] ?? null) : null,
       archiveDays: compat?.startsWith('catchup-') ? 3 : 0,

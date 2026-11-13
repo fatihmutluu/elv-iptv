@@ -87,7 +87,7 @@ describe('playerApi', () => {
       name: 'Channel 0001',
       stream_type: 'live',
       stream_id: 1001,
-      stream_icon: 'http://127.0.0.1:8080/logos/1001.png',
+      stream_icon: 'http://127.0.0.1:8080/logos/9.png',
       epg_channel_id: 'ch1001',
       category_id: '1',
       custom_sid: '',

@@ -98,6 +98,17 @@ describe('api, guides and logos', () => {
     expect((await fetch(`${url}/xmltv.php?${wrong}`)).status).toBe(401);
   });
 
+  it('serves the logo of the first live channel in the playlist', async () => {
+    const { url } = await sim();
+    const text = await (await fetch(`${url}/playlists/small.m3u`)).text();
+    const logo = /tvg-logo="([^"]+)"/.exec(text)?.[1];
+    expect(logo).toBeDefined();
+    const res = await fetch(logo as string);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/png');
+    await res.arrayBuffer();
+  });
+
   it('serves logos', async () => {
     const { url } = await sim();
     const res = await fetch(`${url}/logos/3.png`);

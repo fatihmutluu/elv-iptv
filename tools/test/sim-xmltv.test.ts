@@ -50,7 +50,7 @@ describe('xmltvChunks', () => {
     expect(xml).toContain('<tv generator-info-name="elv-sim">');
     expect(xml.trimEnd().endsWith('</tv>')).toBe(true);
     expect(xml).toContain(
-      '<channel id="ch1001"><display-name>Channel 0001</display-name><icon src="/logos/1001.png"/></channel>',
+      '<channel id="ch1001"><display-name>Channel 0001</display-name><icon src="/logos/9.png"/></channel>',
     );
     const catalog = buildCatalog('small', 1);
     expect(xml.match(/<channel /g)?.length).toBe(catalog.guideChannels);

@@ -129,3 +129,17 @@ describe('accounts', () => {
     expect(findAccount('demo', null)).toBeUndefined();
   });
 });
+
+describe('logo indexes', () => {
+  it('points every logo at one of the 16 served logos', () => {
+    for (const profile of ['small', 'large', 'compat'] as const) {
+      for (const ch of buildCatalog(profile, 1).live) {
+        if (ch.logo === null) continue;
+        expect(
+          Number.isInteger(ch.logo) && ch.logo >= 0 && ch.logo <= 15,
+          `${profile} ${ch.id}`,
+        ).toBe(true);
+      }
+    }
+  });
+});
