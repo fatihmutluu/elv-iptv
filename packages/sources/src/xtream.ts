@@ -1,4 +1,12 @@
-import { type ElvError, elvError, err, ok, type Result, transportHeaders } from '@elv/domain';
+import {
+  type ElvError,
+  elvError,
+  err,
+  httpStatusError,
+  ok,
+  type Result,
+  transportHeaders,
+} from '@elv/domain';
 import { toElvError } from './scan-error';
 import { decodeUtf8 } from './utf8';
 import {
@@ -53,6 +61,19 @@ async function readAll(body: AsyncIterable<Uint8Array>, max: number): Promise<Re
 }
 
 /**
+ * Normalizes a pasted Xtream `server`: trims, prepends `http://` when there is no scheme, drops query, fragment,
+ * trailing slashes and a trailing `/player_api.php`, `/get.php` or `/xmltv.php`.
+ */
+export function normalizeXtreamServer(server: string): string {
+  const trimmed = server.trim();
+  return (trimmed.includes('://') ? trimmed : `http://${trimmed}`)
+    .replace(/[?#].*$/s, '')
+    .replace(/\/+$/, '')
+    .replace(/\/(?:player_api|get|xmltv)\.php$/i, '')
+    .replace(/\/+$/, '');
+}
+
+/**
  * Creates an Xtream client. Credentials live only in the returned object: records and error
  * details never contain them or the request URL; only `playlistUrl`, `guideUrl` and `streamUrl`
  * return URLs that include them.
@@ -60,12 +81,7 @@ async function readAll(body: AsyncIterable<Uint8Array>, max: number): Promise<Re
 export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
   const { http, transport } = options;
   const maxBody = options.maxBodyBytes ?? DEFAULT_MAX_BODY;
-  const server = options.server.trim();
-  const base = (server.includes('://') ? server : `http://${server}`)
-    .replace(/[?#].*$/s, '')
-    .replace(/\/+$/, '')
-    .replace(/\/(?:player_api|get|xmltv)\.php$/, '')
-    .replace(/\/+$/, '');
+  const base = normalizeXtreamServer(options.server);
   const user = encodeURIComponent(options.username);
   const pass = encodeURIComponent(options.password);
   const credentials = `username=${user}&password=${pass}`;
@@ -88,9 +104,7 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     const { status, body } = response.value;
     if (status < 200 || status >= 300) {
       await discard(body);
-      if (status === 401 || status === 403) return err(elvError('auth', 'unauthorized'));
-      if (status >= 500) return err(elvError('network', 'server-error'));
-      return err(elvError('network', 'http-status', `HTTP ${status}`));
+      return err(httpStatusError(status));
     }
     const bytes = await readAll(body, maxBody);
     if (!bytes.ok) return bytes;

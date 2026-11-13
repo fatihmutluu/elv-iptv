@@ -5,7 +5,8 @@ const DEFAULT_PORTS: Readonly<Record<string, string>> = { http: '80', https: '44
 const KIND_PATH = /^\/(live|movie|series)\/[^/]+\/[^/]+\/(\d+(?:\.[a-z0-9]+)?)$/i;
 const TIMESHIFT_PATH = /^\/timeshift\/[^/]+\/[^/]+\/(.+)$/i;
 const BARE_PATH = /^\/[^/]+\/[^/]+\/(\d+(?:\.[a-z0-9]+)?)$/i;
-const SECRET_PARAMS: ReadonlySet<string> = new Set([
+/** Lower-case query parameter names treated as credentials or tokens (ADR 0011); dropped from content keys. */
+export const CREDENTIAL_PARAMS: ReadonlySet<string> = new Set([
   'username',
   'password',
   'user',
@@ -34,7 +35,7 @@ function keptQuery(rest: string): string {
   const raw = rest.slice(q + 1, hash < 0 ? undefined : hash);
   const kept = raw
     .split('&')
-    .filter((pair) => pair !== '' && !SECRET_PARAMS.has(nameOf(pair).toLowerCase()));
+    .filter((pair) => pair !== '' && !CREDENTIAL_PARAMS.has(nameOf(pair).toLowerCase()));
   kept.sort((a, b) => {
     const an = nameOf(a);
     const bn = nameOf(b);

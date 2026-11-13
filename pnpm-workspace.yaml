@@ -8,6 +8,7 @@ packages:
 allowBuilds:
   lefthook: true
   esbuild: true
+  better-sqlite3: true
   # Squirrel.Windows installer builder; the app ships NSIS and MSIX instead.
   electron-winstaller: false
   # Optional native file-watcher of the Expo CLI; it falls back to Node watching without its build script.

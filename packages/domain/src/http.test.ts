@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createFetchHttpClient, type FetchLike, type HttpResponse } from './http';
+import { createFetchHttpClient, type FetchLike, type HttpResponse, httpStatusError } from './http';
 import type { Result } from './result';
 
 const enc = (s: string) => new TextEncoder().encode(s);
@@ -114,6 +114,102 @@ describe('createFetchHttpClient', () => {
       ok: false,
       error: { category, code: `http-${status}` },
     });
+    expect(httpStatusError(status)).toEqual({ category, code: `http-${status}` });
+  });
+
+  const reset = (code = 'ECONNRESET', message = 'read ECONNRESET') =>
+    Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error(message), { code }),
+    });
+
+  it.each([
+    ['ECONNRESET', 'read ECONNRESET'],
+    ['EPIPE', 'write EPIPE'],
+    ['UND_ERR_SOCKET', 'other side closed'],
+  ])(
+    'retries once when a reused connection fails with %s before any response',
+    async (code, message) => {
+      let calls = 0;
+      const client = createFetchHttpClient(async () => {
+        calls += 1;
+        if (calls === 1) throw reset(code, message);
+        return { status: 200, headers: headers({}), body: null };
+      });
+      expect((await client.get('http://h/x')).ok).toBe(true);
+      expect(calls).toBe(2);
+    },
+  );
+
+  it('retries on a cause message of "other side closed" without a code', async () => {
+    let calls = 0;
+    const client = createFetchHttpClient(async () => {
+      calls += 1;
+      if (calls === 1)
+        throw Object.assign(new TypeError('fetch failed'), {
+          cause: new Error('other side closed'),
+        });
+      return { status: 200, headers: headers({}), body: null };
+    });
+    expect((await client.get('http://h/x')).ok).toBe(true);
+    expect(calls).toBe(2);
+  });
+
+  it('does not retry other pre-response failures', async () => {
+    let calls = 0;
+    const client = createFetchHttpClient(async () => {
+      calls += 1;
+      throw new TypeError('fetch failed');
+    });
+    expect(await client.get('http://h/x')).toEqual({
+      ok: false,
+      error: { category: 'network', code: 'fetch-failed' },
+    });
+    expect(calls).toBe(1);
+  });
+
+  it('gives fetch-failed after a second reset', async () => {
+    let calls = 0;
+    const client = createFetchHttpClient(async () => {
+      calls += 1;
+      throw reset();
+    });
+    expect(await client.get('http://h/x')).toEqual({
+      ok: false,
+      error: { category: 'network', code: 'fetch-failed' },
+    });
+    expect(calls).toBe(2);
+  });
+
+  it('does not retry an aborted request', async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    const client = createFetchHttpClient(async () => {
+      calls += 1;
+      controller.abort();
+      throw reset();
+    });
+    const r = await client.get('http://h/x', { signal: controller.signal });
+    expect(r).toEqual({ ok: false, error: { category: 'network', code: 'aborted' } });
+    expect(calls).toBe(1);
+  });
+
+  it('shares one timeout budget between the attempt and its retry', async () => {
+    let calls = 0;
+    const started = Date.now();
+    const client = createFetchHttpClient(
+      (_url, init) => {
+        calls += 1;
+        if (calls === 1) return Promise.reject(reset());
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        });
+      },
+      { timeoutMs: 80 },
+    );
+    const r = await client.get('http://h/x');
+    expect(r).toEqual({ ok: false, error: { category: 'network', code: 'timeout' } });
+    expect(calls).toBe(2);
+    expect(Date.now() - started).toBeLessThan(160);
   });
 
   it('maps a thrown TypeError to fetch-failed without leaking credentials', async () => {

@@ -31,7 +31,7 @@ export const startTestSim = (): Promise<Sim> =>
 export const http: HttpClient = createFetchHttpClient(fetch as unknown as FetchLike);
 
 /** Node decompressor built on the global `DecompressionStream`. */
-const gunzipAdapter: Decompressor = {
+export const gunzipAdapter: Decompressor = {
   async *gunzip(chunks) {
     const stream = new DecompressionStream('gzip');
     const writer = stream.writable.getWriter();

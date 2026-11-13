@@ -28,20 +28,20 @@ M3U and XMLTV scanners and the Xtream client.
   comma following the last `="..."` value (warning `attr-quote`).
   Files: `m3u.ts` (line machine), `m3u-attrs.ts` (attribute, directive, URL helpers), `m3u-types.ts`.
 - Utilities: `toElvError` (input errors to `ElvError`), `decodeUtf8`, `ByteBuffer`, `decodeEntities`, `createStats`/`warn`; test helpers in `test-chunks.ts`.
-- `scanXmltv(chunks, { batchSize?, channels?, from?, to?, decompressor? })` streams an XMLTV guide into `XmltvBatch`es
+- `scanXmltv(chunks, { batchSize?, channels?, programmeChannels?, from?, to?, decompressor? })` streams an XMLTV guide into `XmltvBatch`es
   (`channels`, `programmes` with epoch-ms times, batch size counts channels plus programmes) in bounded memory; the generator returns
-  `err` `source-format`/`gzip-unsupported` for gzip input without a `Decompressor` and otherwise `ok`. Filters run on the
+  `err` `source-format`/`gzip-unsupported` for gzip input without a `Decompressor` and otherwise `ok`. `channels` filters channel events and programmes; `programmeChannels` filters only programmes and is consulted per
+  programme, so a `Set` the caller grows while reading channel batches works (channels read so far are yielded in a batch before the next programme is consulted). Filters run on the
   open tag, so skipped elements are never decoded. A programme or channel that cannot be read is skipped with one
   warning and scanning resumes at the next `<programme`/`<channel` (warnings: `programme-missing-start`,
   `-missing-channel`, `-bad-time`, `-malformed`, `-unclosed`, `-truncated`, `channel-*`, `element-too-long`).
-  Elements over 1 MiB are skipped. Corrupt gzip returns `err` `source-format`/`gzip-corrupt`; an input iterable that throws returns `err` (own category/code if ElvError-shaped, else `network`/`stream-failed`); on any `err` no `done` batch is yielded and the run is a failure. A programme without `<title>` gets `title: ''`.
-  Files: `xmltv.ts` (run loop, gzip sniffing), `xml-tokens.ts`, `xmltv-children.ts`, `xmltv-time.ts`, `xmltv-types.ts`.
+  Elements over 1 MiB are skipped. Corrupt gzip returns `err` `source-format`/`gzip-corrupt`; an input iterable that throws returns `err` (own category/code if ElvError-shaped, else `network`/`stream-failed`); on any `err` no `done` batch is yielded. A programme without `<title>` gets `title: ''`. Files: `xmltv.ts` (run loop, gzip sniffing), `xml-tokens.ts`, `xmltv-children.ts`, `xmltv-time.ts`, `xmltv-types.ts`.
 - `createXtreamClient({ http, server, username, password, transport? })` returns an `XtreamClient` over the `player_api.php`
   endpoints: `account`, `categories`, `liveStreams`/`vodStreams`/`series` (optional `categoryId` to bound one call),
   `seriesInfo`, `vodInfo`, `shortEpg`, plus `playlistUrl`, `guideUrl` and `streamUrl` (play time only). Numbers and
   numeric strings are equal, `''`/null/missing are absent, text is entity-decoded and trimmed, `category_ids` beats
   `category_id` (an empty list falls back to it), repeated ids merge (union of `categoryIds`), epoch fields are milliseconds. Errors: `auth`
-  (`invalid-credentials`, `account-<status>`, `unauthorized`), `network` (`request-failed`, `server-error`, `http-status`,
+  (`invalid-credentials`, `account-<status>`, `http-401`, `http-403`), `network` (`request-failed`, `http-<status>`,
   `stream-failed`, transport codes), `source-format` (`invalid-json`, `unexpected-shape`, `too-large`). Every method takes a last `{ signal? }` argument; an
   abort (also mid-body) is `network`/`aborted`, a stalled body `network`/`timeout`. A `server` without `://` gets
   `http://` prepended. `maxBodyBytes` (default 128 MiB) caps the one growing buffer a response is read into. Credentials appear only in

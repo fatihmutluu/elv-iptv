@@ -90,7 +90,7 @@ desktop and is testable in Node.
   (`udp`, `rtp`, `rtmp`, …) are kept and flagged so the importer can mark them unplayable on platforms that cannot.
 
 ### 5.4 XMLTV scanner
-- `scanXmltv(chunks, opts?: { batchSize?: number; channels?: ReadonlySet<string>; from?: number; to?: number; decompressor?:
+- `scanXmltv(chunks, opts?: { batchSize?: number; channels?: ReadonlySet<string>; programmeChannels?: ReadonlySet<string>; from?: number; to?: number; decompressor?:
   Decompressor }) → AsyncGenerator<XmltvBatch>`. Gzip input (magic bytes `1f 8b`) goes through the decompressor; without
   one it fails with `source-format`/`gzip-unsupported`.
 - Events: `channel { id, names, icon? }` and `programme { channel, start, stop?, title, subTitle?, desc?, categories,
@@ -100,7 +100,8 @@ desktop and is testable in Node.
   order, unknown elements and attributes (skipped), whitespace, a programme missing `stop`, a malformed or unclosed element
   (that programme is skipped with a warning and scanning resumes at the next `<programme` or `<channel`), chunk boundaries
   anywhere including inside tags, entities and multi-byte characters.
-- Filtering happens in the scanner so nothing unneeded is decoded: `channels` keeps only those channel ids, `from`/`to`
+- Filtering happens in the scanner so nothing unneeded is decoded: `channels` keeps only those channel ids (channels and programmes), `programmeChannels` keeps only the programmes of
+  those channel ids and is consulted per programme (a set the caller grows between batches works: pending channels are yielded before the next programme is consulted), `from`/`to`
   drop programmes outside the window. Multiple `title`/`desc` elements: the first one wins.
 
 ### 5.5 Xtream client

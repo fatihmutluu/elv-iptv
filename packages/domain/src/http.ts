@@ -1,4 +1,4 @@
-import { elvError, err, ok, type Result } from './result';
+import { type ElvError, elvError, err, ok, type Result } from './result';
 
 /** A response whose body streams in chunks. */
 export interface HttpResponse {
@@ -168,6 +168,27 @@ async function* streamBody(
   }
 }
 
+const RESET_CODES = new Set(['ECONNRESET', 'EPIPE', 'UND_ERR_SOCKET']);
+
+/**
+ * Whether a pre-response failure looks like a pooled keep-alive socket the server had already closed
+ * (Node/undici surface it as `fetch failed` with a reset-class `cause`).
+ */
+function isConnectionReset(e: unknown): boolean {
+  const cause = (e as { cause?: { code?: unknown; message?: unknown } } | null)?.cause;
+  const code = cause?.code ?? (e as { code?: unknown } | null)?.code;
+  if (typeof code === 'string' && RESET_CODES.has(code)) return true;
+  return typeof cause?.message === 'string' && /other side closed/i.test(cause.message);
+}
+
+/**
+ * The error for a response outside 2xx, as {@link createFetchHttpClient} reports it: `auth/http-401` and
+ * `auth/http-403`, else `network/http-<status>`. Code that sees a raw status uses it so every path reports alike.
+ */
+export function httpStatusError(status: number): ElvError {
+  return elvError(status === 401 || status === 403 ? 'auth' : 'network', `http-${status}`);
+}
+
 /**
  * Adapts a WHATWG fetch with a streaming body (Node/Electron fetch, expo/fetch). `defaults.timeoutMs`
  * covers the wait for headers; `defaults.idleTimeoutMs` (30 s unless overridden, per request too) covers
@@ -204,11 +225,14 @@ export function createFetchHttpClient(
           signal: controller.signal,
         };
         if (options?.headers) init.headers = { ...options.headers };
-        const res = await Promise.race([fetchImpl(url, init), aborted]);
+        const attempt = () => Promise.race([fetchImpl(url, init), aborted]);
+        const res = await attempt().catch((e: unknown) => {
+          if (timedOut || controller.signal.aborted || !isConnectionReset(e)) throw e;
+          return attempt();
+        });
         if (res.status < 200 || res.status >= 300) {
           await discardBody(res.body);
-          const category = res.status === 401 || res.status === 403 ? 'auth' : 'network';
-          return err(elvError(category, `http-${res.status}`));
+          return err(httpStatusError(res.status));
         }
         const headers: Record<string, string> = {};
         res.headers.forEach((value, key) => {

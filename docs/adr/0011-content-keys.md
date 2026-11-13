@@ -31,9 +31,17 @@ names are credentials or tokens (case-insensitive: `username`, `password`, `user
 `*` only in `/live|movie|series/<u>/<p>/<id>[.ext]` with a numeric id, in `/timeshift/<u>/<p>/...` and in the bare
 three-segment `/<u>/<p>/<id>` form with a numeric id. An unparsable value loses anything that looks like userinfo.
 
-Open question: panels also embed a token in the path (`https://host/<token>/<id>`) that may rotate on every refresh,
-which would change the key each time. The import spec measures this against a real panel. If URLs prove unstable, M3U
-keys fall back to name plus group.
+Refinement (catalog import): panels also embed per-account and per-stream tokens in the path
+(`https://host/<account token>/<stream token>`). The catalog never stores such values. M3U entry URLs are stored as
+templates: credential query values, Xtream credential segments and per-source constant path segments become
+`{{name}}` placeholders, and the values live in the platform secret store. A path position is a per-source constant
+segment when at least 99 % of a host's judged URLs share its value and it is at least 8 characters long (the last
+segment never counts). Every import judges its hosts again: the first 1,000 entries judge the hosts they contain at
+least 50 times, and any other host is judged on up to 50 of its URLs before its entries are written. Every value at a
+rule position becomes a placeholder, so a second account or a moved host never leaves its token in a template.
+`m3uKey` is computed over the template with every placeholder replaced by one constant, so keys survive a password or
+token change and never depend on placeholder names. Keys fall back to name plus group only if a panel rotates the
+per-stream token itself.
 
 ### Consequences
 

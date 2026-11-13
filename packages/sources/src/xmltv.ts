@@ -38,6 +38,8 @@ class XmltvScanner {
   channels: XmltvChannel[] = [];
   programmes: XmltvProgramme[] = [];
   private hint = 0;
+  /** Set when a programme waits behind unreported channels, so the caller can grow `programmeChannels` first. */
+  private flush = false;
   private kind = '';
   private readonly res: Resume = { at: 0 };
   private readonly attrs: (string | undefined)[] = [undefined, undefined, undefined];
@@ -55,7 +57,7 @@ class XmltvScanner {
     const bytes = this.buf.view;
     const len = bytes.length;
     let pos = 0;
-    while (this.programmes.length < this.size) {
+    while (!this.flush && this.programmes.length < this.size) {
       const lt = bytes.indexOf(LT, pos);
       if (lt < 0) {
         pos = len;
@@ -64,6 +66,7 @@ class XmltvScanner {
       pos = lt;
       this.kind = '';
       const next = this.step(bytes, lt);
+      if (this.flush) break;
       if (next !== NEED) {
         pos = next;
         this.hint = 0;
@@ -98,7 +101,13 @@ class XmltvScanner {
     }
     const p = matchName(bytes, lt + 1, 'programme');
     if (p < 0) return NEED;
-    if (p === 1) return this.element(bytes, lt, 'programme');
+    if (p === 1) {
+      if (this.opts.programmeChannels && this.channels.length > 0) {
+        this.flush = true;
+        return lt;
+      }
+      return this.element(bytes, lt, 'programme');
+    }
     const c = matchName(bytes, lt + 1, 'channel');
     if (c < 0) return NEED;
     if (c === 1) return this.element(bytes, lt, 'channel');
@@ -173,6 +182,7 @@ class XmltvScanner {
       return;
     }
     if (this.opts.channels && !this.opts.channels.has(channel)) return;
+    if (this.opts.programmeChannels && !this.opts.programmeChannels.has(channel)) return;
     if (startText === undefined) {
       this.fail(bytes, lt, 'programme-missing-start');
       return;
@@ -207,11 +217,12 @@ class XmltvScanner {
     const out = { channels: this.channels, programmes: this.programmes };
     this.channels = [];
     this.programmes = [];
+    this.flush = false;
     return out;
   }
 
   get full(): boolean {
-    return this.channels.length + this.programmes.length >= this.size;
+    return this.flush || this.channels.length + this.programmes.length >= this.size;
   }
 }
 
@@ -308,10 +319,11 @@ export async function* scanXmltv(
         break;
       }
       scanner.buf.append(r.value);
-      do {
+      for (;;) {
         scanner.run(false);
-        if (scanner.full) yield { ...scanner.take(), done: false };
-      } while (scanner.full);
+        if (!scanner.full) break;
+        yield { ...scanner.take(), done: false };
+      }
     }
   } finally {
     if (!exhausted) await reader.return?.();

@@ -35,6 +35,12 @@ export interface XmltvOptions {
   batchSize?: number;
   /** Keep only these channel ids (channels and programmes). */
   channels?: ReadonlySet<string>;
+  /**
+   * Keep only the programmes of these channel ids; channel events are not filtered. Consulted per programme on the
+   * open tag, so a set that the caller grows while consuming channel batches works (pending channels are yielded in a batch first), and skipped programmes are
+   * never decoded.
+   */
+  programmeChannels?: ReadonlySet<string>;
   /** Drop programmes that end at or before this instant (epoch ms). */
   from?: number;
   /** Drop programmes that start at or after this instant (epoch ms). */
