@@ -18,6 +18,8 @@ import {
   type SqlDriver,
 } from '@elv/domain';
 import Database from 'better-sqlite3';
+import type { Catalog } from '../src/sim/catalog.ts';
+import { programmesFor } from '../src/sim/xmltv.ts';
 import { gunzipAdapter, http, type Sim } from './sources-sim-helpers.ts';
 
 /** In-memory secret store that can dump its content. */
@@ -35,7 +37,7 @@ function memorySecrets(): SecretStore & { dump(): Record<string, string> } {
   };
 }
 
-/** Scheduler that counts how often it was asked to yield. */
+/** Scheduler that counts yields and gives the event loop a full turn, as the app's scheduler does. */
 function countingScheduler(): Scheduler & { readonly count: number } {
   let count = 0;
   return {
@@ -44,6 +46,7 @@ function countingScheduler(): Scheduler & { readonly count: number } {
     },
     yieldNow: async () => {
       count += 1;
+      await new Promise<void>((resolve) => setImmediate(resolve));
     },
   };
 }
@@ -110,14 +113,20 @@ const addDeps = (env: Env) => ({
   newId,
 });
 
-/** Credentials of a simulator account (password = username) as the strings that must stay out of the database. */
-function credentialNeedles(sim: Sim, user: string): string[] {
-  return [
+/**
+ * Strings that must stay out of every database column. The Xtream server URL without credentials is allowed
+ * there (logos point at it); the password alone is checked only when it is long enough not to match ordinary text.
+ */
+function credentialNeedles(sim: Sim, user: string, password = user): string[] {
+  const needles = [
     `username=${user}`,
-    `password=${user}`,
-    `/${user}/${user}/`,
-    sim.url.replace('http://', `http://${user}:${user}@`),
+    `password=${password}`,
+    `/${user}/${password}/`,
+    `${user}:${password}`,
+    sim.url.replace('http://', `http://${user}:${password}@`),
   ];
+  if (password.length >= 8) needles.push(password);
+  return needles;
 }
 
 export async function xtreamSource(
@@ -131,7 +140,7 @@ export async function xtreamSource(
     addDeps(env),
   );
   if (!added.ok) throw new Error('addXtreamSource failed');
-  env.forbidden.push(...credentialNeedles(sim, user));
+  env.forbidden.push(...credentialNeedles(sim, user, password));
   return added.value.id;
 }
 
@@ -252,4 +261,13 @@ export async function measureImport(
   const dbMb = fileBytes(env) / 1_048_576;
   const line = `${label}: ${rows} rows, ${seconds.toFixed(2)} s, ${Math.round(perSecond)} rows/s, db ${dbMb.toFixed(1)} MB, heap +${heapGrowthMb.toFixed(1)} MB`;
   return { rows, seconds, perSecond, heapGrowthMb, dbMb, line };
+}
+
+/** Programmes the simulator generates for a catalog around `now`; the importer's window must keep all of them. */
+export function generatedProgrammes(catalog: Catalog, now: Date): number {
+  let total = 0;
+  for (let i = 0; i < catalog.live.length; i++) {
+    for (const _ of programmesFor(catalog, i, now)) total++;
+  }
+  return total;
 }

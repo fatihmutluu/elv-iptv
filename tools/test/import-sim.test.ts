@@ -43,10 +43,15 @@ async function env(): Promise<Env> {
 }
 
 afterEach(() => {
+  const hits: unknown[] = [];
   for (const e of envs.splice(0)) {
-    expect(scanForSecrets(e.raw, e.forbidden)).toEqual([]);
-    e.close();
+    try {
+      hits.push(...scanForSecrets(e.raw, e.forbidden));
+    } finally {
+      e.close();
+    }
   }
+  expect(hits).toEqual([]);
 });
 
 const must = <T>(r: { ok: true; value: T } | { ok: false; error: unknown }): T => {

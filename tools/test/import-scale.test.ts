@@ -1,7 +1,14 @@
 import { importCatalog, importGuide } from '@elv/data';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildCatalog } from '../src/sim/catalog.ts';
-import { type Env, measureImport, openEnv, xtreamSource } from './import-sim-helpers.ts';
+import {
+  count,
+  type Env,
+  generatedProgrammes,
+  measureImport,
+  openEnv,
+  xtreamSource,
+} from './import-sim-helpers.ts';
 import { SIM_CLOCK, type Sim, startTestSim } from './sources-sim-helpers.ts';
 
 const enabled = process.env.SIM_HUGE === '1';
@@ -38,6 +45,9 @@ describe.skipIf(!enabled)('huge profile imported into a file database', () => {
       ['live', 'movies', 'series'],
     );
     process.stdout.write(`${report.line}\n`);
+    expect(await count(env.db, 'live')).toBe(huge.live.length);
+    expect(await count(env.db, 'movies')).toBe(huge.movies.length);
+    expect(await count(env.db, 'series')).toBe(huge.series.length);
     expect(report.rows).toBe(huge.live.length + huge.movies.length + huge.series.length);
   }, 900_000);
 
@@ -57,6 +67,9 @@ describe.skipIf(!enabled)('huge profile imported into a file database', () => {
       ['programmes'],
     );
     process.stdout.write(`${report.line}\n`);
-    expect(report.rows).toBeGreaterThan(huge.guideChannels * 7);
+    expect(await count(env.db, 'programmes')).toBe(report.rows);
+    expect(report.rows).toBe(generatedProgrammes(huge, SIM_CLOCK));
+    expect(await count(env.db, 'channel_guide')).toBe(huge.guideChannels);
+    expect(await count(env.db, 'programmes_next')).toBe(0);
   }, 1_800_000);
 });

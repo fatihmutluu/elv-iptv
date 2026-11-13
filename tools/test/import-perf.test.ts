@@ -1,14 +1,21 @@
 import { importCatalog, importGuide } from '@elv/data';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildCatalog } from '../src/sim/catalog.ts';
-import { type Env, measureImport, openEnv, xtreamSource } from './import-sim-helpers.ts';
+import {
+  count,
+  type Env,
+  generatedProgrammes,
+  measureImport,
+  openEnv,
+  xtreamSource,
+} from './import-sim-helpers.ts';
 import { SIM_CLOCK, type Sim, startTestSim } from './sources-sim-helpers.ts';
 
+const large = buildCatalog('large', 1);
 let sim: Sim;
 let env: Env;
 let sourceId: string;
 beforeAll(async () => {
-  buildCatalog('large', 1);
   sim = await startTestSim();
   env = await openEnv({ file: true });
   sourceId = await xtreamSource(env, sim, 'large');
@@ -31,7 +38,10 @@ describe('large profile imported into a file database', () => {
       ['live', 'movies', 'series'],
     );
     process.stdout.write(`${report.line}\n`);
-    expect(report.rows).toBe(95_500);
+    expect(await count(env.db, 'live')).toBe(large.live.length);
+    expect(await count(env.db, 'movies')).toBe(large.movies.length);
+    expect(await count(env.db, 'series')).toBe(large.series.length);
+    expect(report.rows).toBe(large.live.length + large.movies.length + large.series.length);
     expect(report.seconds).toBeLessThanOrEqual(20);
   }, 120_000);
 
@@ -51,7 +61,10 @@ describe('large profile imported into a file database', () => {
       ['programmes'],
     );
     process.stdout.write(`${report.line}\n`);
-    expect(report.rows).toBeGreaterThan(5000 * 7);
+    expect(await count(env.db, 'programmes')).toBe(report.rows);
+    expect(report.rows).toBe(generatedProgrammes(large, SIM_CLOCK));
+    expect(await count(env.db, 'channel_guide')).toBe(large.guideChannels);
+    expect(await count(env.db, 'programmes_next')).toBe(0);
     expect(report.seconds).toBeLessThanOrEqual(60);
   }, 240_000);
 });
