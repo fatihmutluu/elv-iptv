@@ -19,6 +19,7 @@ import {
   VarBook,
 } from './m3u-templating';
 import {
+  getSource,
   type SourceRecord,
   type SourceSettings,
   secretKey,
@@ -94,23 +95,14 @@ async function readUrlVars(deps: ImportDeps, sourceId: string): Promise<UrlVars>
   }
 }
 
-async function start(
-  c: RunCtx,
-  source: SourceRecord,
-  playlistUrl: string,
-  oldVars: UrlVars,
-  sample: readonly M3uEntry[],
-): Promise<State> {
+function start(source: SourceRecord, playlistUrl: string, sample: readonly M3uEntry[]): State {
   const urls = sample.map((e) => e.url);
   const stored = source.settings.segmentRules;
-  const rules = stored ?? detectSegmentRules(urls);
+  const rules = stored !== undefined && stored.length > 0 ? stored : detectSegmentRules(urls);
   const expected = majorityValues(rules, urls);
-  const settings: SourceSettings = { ...source.settings, segmentRules: rules };
-  if (stored === undefined) await updateSourceSettings(c.db, source.id, settings);
-  await c.deps.secrets.set(
-    secretKey(source.id, 'urlvars'),
-    JSON.stringify({ ...oldVars, ...expected }),
-  );
+  const settings: SourceSettings = { ...source.settings };
+  if (rules.length > 0) settings.segmentRules = rules;
+  else delete settings.segmentRules;
   return {
     settings,
     rules,
@@ -134,6 +126,9 @@ function liveHeaders(st: State, entry: M3uEntry): string | null {
   if (entry.headers.referer !== undefined) headers.referer = templated(st, entry.headers.referer);
   return Object.keys(headers).length === 0 ? null : JSON.stringify(headers);
 }
+
+const groupsOf = (entry: M3uEntry): readonly string[] =>
+  entry.groups.length === 0 ? [UNGROUPED] : entry.groups;
 
 function place(
   st: State,
@@ -175,7 +170,7 @@ async function processBatch(c: RunCtx, st: State, entries: readonly M3uEntry[]):
     if (vod || entry.kindHint === 'movie') {
       movies.push(row);
       st.seen.movies.add(row.key);
-      place(st, 'movie', row.key, entry.groups, fresh, links);
+      place(st, 'movie', row.key, groupsOf(entry), fresh, links);
     } else if (entry.kindHint === 'episode') {
       const group = entry.groups[0] ?? UNGROUPED;
       const folded = foldText(group);
@@ -186,7 +181,7 @@ async function processBatch(c: RunCtx, st: State, entries: readonly M3uEntry[]):
         st.seen.series.add(seriesKey);
         series.set(seriesKey, group);
       }
-      const groups = entry.groups.length === 0 ? [UNGROUPED] : entry.groups;
+      const groups = groupsOf(entry);
       place(
         st,
         'series',
@@ -205,7 +200,7 @@ async function processBatch(c: RunCtx, st: State, entries: readonly M3uEntry[]):
         headersJson: liveHeaders(st, entry),
       });
       st.seen.live.add(row.key);
-      place(st, 'live', row.key, entry.groups, fresh, links);
+      place(st, 'live', row.key, groupsOf(entry), fresh, links);
     }
   }
   for (const kind of ['live', 'movie', 'series'] as const) {
@@ -242,41 +237,41 @@ async function processBatch(c: RunCtx, st: State, entries: readonly M3uEntry[]):
   await c.deps.scheduler.yieldNow();
 }
 
-async function finish(
+/** Settings and secret values a successful run commits together with its `ok` transition. */
+interface Staged {
+  rules: SegmentRule[];
+  discovered: string[] | undefined;
+  vars: UrlVars;
+}
+
+function finish(
   c: RunCtx,
   st: State,
   playlistUrl: string,
   oldVars: UrlVars,
   guideUrls: readonly string[],
-): Promise<void> {
-  const settings = { ...st.settings };
-  const own = settings.guideUrl;
+): Staged {
+  const own = st.settings.guideUrl;
   const kept: UrlVars = {};
   for (const name of own === undefined ? [] : placeholderNames(own)) {
     if (Object.hasOwn(oldVars, name)) kept[name] = oldVars[name] as string;
   }
   const guideBook = new VarBook(kept);
-  delete settings.discoveredGuideUrls;
-  if (own === undefined && guideUrls.length > 0) {
-    settings.discoveredGuideUrls = guideUrls.map((u) =>
-      guideBook.absorb(templateGuide(u, playlistUrl)),
-    );
-  }
+  const discovered =
+    own === undefined && guideUrls.length > 0
+      ? guideUrls.map((u) => guideBook.absorb(templateGuide(u, playlistUrl)))
+      : undefined;
   const vars: UrlVars = {};
   for (const [name, value] of Object.entries(st.book.vars)) {
     if (!name.startsWith('g:')) vars[name] = value;
   }
-  await c.deps.secrets.set(
-    secretKey(c.sourceId, 'urlvars'),
-    JSON.stringify({ ...vars, ...guideBook.vars }),
-  );
-  await updateSourceSettings(c.db, c.sourceId, settings);
   c.counts.live = st.seen.live.size;
   c.counts.movies = st.seen.movies.size;
   c.counts.series = st.seen.series.size;
   c.counts.episodes = st.seen.episodes.size;
   c.counts.categories =
     st.categories.live.size + st.categories.movie.size + st.categories.series.size;
+  return { rules: st.rules, discovered, vars: { ...vars, ...guideBook.vars } };
 }
 
 async function execute(
@@ -284,7 +279,7 @@ async function execute(
   source: SourceRecord,
   playlistUrl: string,
   oldVars: UrlVars,
-): Promise<void> {
+): Promise<Staged> {
   const body = await openPlaylist(source, playlistUrl, c.deps, c.signal);
   const scan = scanM3u(body, { batchSize: c.batchSize, baseUrl: playlistUrl });
   const buffered: M3uEntry[] = [];
@@ -313,7 +308,7 @@ async function execute(
         if (batch.done && total === 0 && !present) {
           throw new Stop(elvError('source-format', 'not-a-playlist'));
         }
-        st = await start(c, source, playlistUrl, oldVars, buffered.slice(0, SAMPLE_SIZE));
+        st = start(source, playlistUrl, buffered.slice(0, SAMPLE_SIZE));
         for (let i = 0; i < buffered.length; i += c.batchSize) {
           checkAbort(c);
           await processBatch(c, st, buffered.slice(i, i + c.batchSize));
@@ -327,7 +322,7 @@ async function execute(
     await scan.return(ok(undefined));
   }
   if (st === undefined) throw new Stop(elvError('network', 'stream-failed'));
-  await finish(c, st, playlistUrl, oldVars, guideUrls);
+  return finish(c, st, playlistUrl, oldVars, guideUrls);
 }
 
 /**
@@ -347,7 +342,24 @@ export async function importM3u(
     .catch(() => undefined);
   if (playlistUrl === undefined) return err(elvError('storage', 'secret-missing'));
   const oldVars = await readUrlVars(deps, source.id);
+  let staged: Staged | undefined;
   return performRun(source, deps, opts, {
-    execute: (c) => execute(c, source, playlistUrl, oldVars),
+    execute: async (c) => {
+      staged = await execute(c, source, playlistUrl, oldVars);
+    },
+    beforeCleanup: async (tx) => {
+      if (staged === undefined) return;
+      const current = (await getSource(tx, source.id))?.settings ?? source.settings;
+      const settings: SourceSettings = { ...current };
+      if (staged.rules.length > 0) settings.segmentRules = staged.rules;
+      else delete settings.segmentRules;
+      if (staged.discovered === undefined) delete settings.discoveredGuideUrls;
+      else settings.discoveredGuideUrls = staged.discovered;
+      await updateSourceSettings(tx, source.id, settings);
+    },
+    afterCommit: async () => {
+      if (staged === undefined) return;
+      await deps.secrets.set(secretKey(source.id, 'urlvars'), JSON.stringify(staged.vars));
+    },
   });
 }

@@ -8,8 +8,7 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
 ## Rules
 - Pure TypeScript: no `react`, `react-native`, `expo*`, `electron` or `node:*` imports.
   Platform access goes through ports defined in `@elv/domain`.
-- Source-first: `exports` points at `src/index.ts`; there is no build step.
-- Allowed workspace dependencies: `@elv/domain` and `@elv/sources`.
+- Source-first: `exports` points at `src/index.ts`, no build step. Allowed workspace dependencies: `@elv/domain`, `@elv/sources`.
 - Tests live beside the code as `*.test.ts`.
 
 ## Public surface (catalog import round)
@@ -46,5 +45,6 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
 - M3U (`import-m3u.ts`, `m3u-templating.ts`, `writers-m3u.ts`; run lifecycle `performRun` in `import-run.ts`): entry URLs, logos
   and live referers are templates (rules from the first 1,000 entries, majority value expected, minority stays
   literal; clashing values get `~<n>`); `kindHint` picks the table, episodes sit under a synthetic series per `group-title`;
-  `url-tvg` goes to `settings_json.discoveredGuideUrls`; no header and no entries is `not-a-playlist`;
-  any run that stores zero items fails with `source-format/empty-source` and deletes nothing.
+  `url-tvg` goes to `discoveredGuideUrls`; no header and no entries is `not-a-playlist`; zero items is `empty-source`.
+  Rules, guide URLs and `urlvars` are staged and committed only with `ok` (settings in the cleanup transaction, the secret
+  right after; failure there is `storage/secret-write-failed`); a failed run changes neither. Groupless entries: `Ungrouped`.

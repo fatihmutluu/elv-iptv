@@ -57,6 +57,8 @@ export interface RunSteps {
   execute(c: RunCtx): Promise<void>;
   /** Runs inside the cleanup transaction, before stale rows are deleted. */
   beforeCleanup?(tx: SqlDriver, c: RunCtx): Promise<void>;
+  /** Runs after the cleanup transaction committed; a throw yields `storage/secret-write-failed` (the run stays `ok`). */
+  afterCommit?(c: RunCtx): Promise<void>;
 }
 
 /**
@@ -123,6 +125,11 @@ export async function performRun(
       // the run row stays 'running'; the original error is what the caller needs
     }
     return err(error);
+  }
+  try {
+    await steps.afterCommit?.(c);
+  } catch {
+    return err(elvError('storage', 'secret-write-failed'));
   }
   c.progress({ phase: 'cleanup', done: removed });
   return ok({ runId, counts, warnings: c.warnings, durationMs: deps.clock() - started });
