@@ -23,8 +23,8 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
   `userinfo`, `v<N>` segment rules, `q:<param>` credential query values); values go to the secret store. Known credentials
   (>= 3 chars) are masked raw and percent-encoded; rules and whole-segment matches skip the last path segment; literal
   `{{` is escaped as `{{(}}`. Keys are `m3uKey(sourceId, template, name)`.
-- `sources.ts`: `addXtreamSource`, `addM3uSource`, `getSource`, `updateSourceSettings`, `removeSource`, `removeSecrets`, `TABLES_BY_SOURCE`, `secretKey`.
-  `removeSource` deletes every table of the source explicitly (no foreign keys; a new table with `source_id` must be added
+- `source-link.ts`: `addSourceFromLink` adds a pasted `…/get.php?username=…&password=…` link as an Xtream source (`parseXtreamLink`; output sets `xtreamFormat`; guide URL and VOD flag are M3U-only), else as M3U; `keepAsM3u` opts out.
+- `sources.ts`: `addXtreamSource`, `addM3uSource`, `getSource`, `updateSourceSettings`, `removeSource`, `removeSecrets`, `TABLES_BY_SOURCE`, `secretKey`. `removeSource` deletes every table of the source explicitly (no foreign keys; a new table with `source_id` must be added
   to its list) and returns `storage/secret-delete-failed` if a secret survives (retry `removeSecrets`). M3U guide URLs are
   templated against the playlist or kept whole (`{{g:url}}`). Credentials live only in the `SecretStore`
   (`source:<id>:xtream|playlist|urlvars`); `settings_json` holds none.

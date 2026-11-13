@@ -6,5 +6,6 @@ export * from './import-types';
 export { importCatalog, loadSeriesEpisodes } from './import-xtream';
 export * from './migrate';
 export { MIGRATIONS } from './schema';
+export * from './source-link';
 export * from './sources';
 export * from './templates';

@@ -53,6 +53,19 @@ async function readAll(body: AsyncIterable<Uint8Array>, max: number): Promise<Re
 }
 
 /**
+ * Normalizes a pasted Xtream `server`: trims, prepends `http://` when there is no scheme, drops query, fragment,
+ * trailing slashes and a trailing `/player_api.php`, `/get.php` or `/xmltv.php`.
+ */
+export function normalizeXtreamServer(server: string): string {
+  const trimmed = server.trim();
+  return (trimmed.includes('://') ? trimmed : `http://${trimmed}`)
+    .replace(/[?#].*$/s, '')
+    .replace(/\/+$/, '')
+    .replace(/\/(?:player_api|get|xmltv)\.php$/i, '')
+    .replace(/\/+$/, '');
+}
+
+/**
  * Creates an Xtream client. Credentials live only in the returned object: records and error
  * details never contain them or the request URL; only `playlistUrl`, `guideUrl` and `streamUrl`
  * return URLs that include them.
@@ -60,12 +73,7 @@ async function readAll(body: AsyncIterable<Uint8Array>, max: number): Promise<Re
 export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
   const { http, transport } = options;
   const maxBody = options.maxBodyBytes ?? DEFAULT_MAX_BODY;
-  const server = options.server.trim();
-  const base = (server.includes('://') ? server : `http://${server}`)
-    .replace(/[?#].*$/s, '')
-    .replace(/\/+$/, '')
-    .replace(/\/(?:player_api|get|xmltv)\.php$/, '')
-    .replace(/\/+$/, '');
+  const base = normalizeXtreamServer(options.server);
   const user = encodeURIComponent(options.username);
   const pass = encodeURIComponent(options.password);
   const credentials = `username=${user}&password=${pass}`;
