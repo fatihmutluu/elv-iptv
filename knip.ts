@@ -1,8 +1,6 @@
 import type { KnipConfig } from 'knip';
 
 const config: KnipConfig = {
-  // The simulator's interfaces are consumed by later tasks of the stream simulator plan.
-  ignoreIssues: { 'tools/src/sim/**': ['exports', 'types'] },
   workspaces: {
     '.': { entry: ['scripts/*.mjs', '.claude/hooks/*.mjs'], ignoreBinaries: ['gitleaks'] },
     tools: {

@@ -1,11 +1,7 @@
 /** Catalog profile names (spec section 5.2). */
 export type ProfileName = 'small' | 'large' | 'compat';
 /** Media recipe a stream is generated from (spec section 5.6). */
-export type RecipeName =
-  | 'h264-aac-720p25'
-  | 'hevc-main10-1080p25'
-  | 'mpeg2-ac3-576i25'
-  | 'aac-radio';
+type RecipeName = 'h264-aac-720p25' | 'hevc-main10-1080p25' | 'mpeg2-ac3-576i25' | 'aac-radio';
 /** Edge case of the `compat` profile; each case maps to exactly one live channel. */
 export type CompatCase =
   | 'tvg-shift'
@@ -39,7 +35,7 @@ export type CompatCase =
   | 'rtmp-url'
   | 'missing-404';
 /** A group of live channels, movies or series. */
-export interface Category {
+interface Category {
   id: string;
   name: string;
   kind: 'live' | 'vod' | 'series';
@@ -64,7 +60,7 @@ export interface LiveChannel {
   compat: CompatCase | null;
 }
 /** A VOD movie. */
-export interface Movie {
+interface Movie {
   id: number;
   name: string;
   categoryId: string;
@@ -75,7 +71,7 @@ export interface Movie {
   added: number;
 }
 /** One episode of a series. */
-export interface Episode {
+interface Episode {
   id: number;
   season: number;
   episode: number;
@@ -85,14 +81,14 @@ export interface Episode {
   durationSec: number;
 }
 /** A series with all its episodes. */
-export interface Series {
+interface Series {
   id: number;
   name: string;
   categoryId: string;
   episodes: Episode[];
 }
 /** Guide time range around now, in whole days. */
-export interface GuideWindow {
+interface GuideWindow {
   daysBack: number;
   daysForward: number;
 }

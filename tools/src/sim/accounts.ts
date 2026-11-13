@@ -1,7 +1,7 @@
 import type { ProfileName } from './catalog.ts';
 
 /** How the simulator answers a connection beyond the account limit. */
-export type LimitPolicy = 'status-509' | 'status-403' | 'text-notice';
+type LimitPolicy = 'status-509' | 'status-403' | 'text-notice';
 
 /** A synthetic account defined in code; no real credentials exist here. */
 export interface Account {

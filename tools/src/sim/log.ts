@@ -1,0 +1,83 @@
+import { appendFileSync } from 'node:fs';
+
+/** One served request as the simulator records it. */
+export interface LogEntry {
+  t: string;
+  method: string;
+  path: string;
+  query: Record<string, string>;
+  headers: Record<string, string>;
+  status: number;
+  bytes: number;
+  ms: number;
+  account: string | null;
+  streamId: number | null;
+  recipe: string | null;
+  fault: string | null;
+  openConnections: number;
+}
+
+const MASK = '***';
+const USERINFO = /(\/\/[^/:@\s]+:)[^@/\s]+@/g;
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Returns a copy with secrets masked: `password` query values, the password of any
+ * `/<username>/<password>/` path pair, `user:pass@` userinfo anywhere (referer included) and
+ * the whole `authorization` header. Usernames stay visible.
+ */
+export function redact(
+  entry: LogEntry,
+  accounts: readonly { username: string; password: string }[],
+): LogEntry {
+  const pairs = accounts.map((a) => ({
+    re: new RegExp(`/${escapeRegExp(a.username)}/${escapeRegExp(a.password)}(?=/|$)`, 'g'),
+    to: `/${a.username}/${MASK}`,
+  }));
+  const clean = (text: string): string => {
+    let out = text.replace(USERINFO, `$1${MASK}@`);
+    for (const p of pairs) out = out.replace(p.re, p.to);
+    return out;
+  };
+  const query: Record<string, string> = {};
+  for (const [k, v] of Object.entries(entry.query)) {
+    query[k] = k.toLowerCase() === 'password' ? MASK : clean(v);
+  }
+  const headers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(entry.headers)) {
+    headers[k] = k.toLowerCase() === 'authorization' ? MASK : clean(v);
+  }
+  return { ...entry, path: clean(entry.path), query, headers };
+}
+
+const MAX_ENTRIES = 10_000;
+
+/** In-memory ring of the last 10,000 entries; also appends JSONL to a file when given one. */
+export class RequestLog {
+  readonly #entries: LogEntry[] = [];
+  readonly #file: string | undefined;
+
+  constructor(file?: string) {
+    this.#file = file;
+  }
+
+  /** Records an entry; callers pass it already redacted. */
+  add(e: LogEntry): void {
+    this.#entries.push(e);
+    if (this.#entries.length > MAX_ENTRIES) this.#entries.shift();
+    if (this.#file) appendFileSync(this.#file, `${JSON.stringify(e)}\n`);
+  }
+
+  /** A copy of the retained entries, oldest first. */
+  list(): LogEntry[] {
+    return [...this.#entries];
+  }
+
+  /** Forgets the in-memory entries; the file is left alone. */
+  clear(): void {
+    this.#entries.length = 0;
+  }
+}
