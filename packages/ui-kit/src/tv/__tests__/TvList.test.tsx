@@ -129,7 +129,7 @@ describe('TvList', () => {
     });
     const translateOf = () => latest;
     const topsOf = () =>
-      screen.queryAllByTestId(/^list-row-d+$/).map((r) => r.props.style.top as number);
+      screen.queryAllByTestId(/^list-row-\d+$/).map((r) => r.props.style.top as number);
 
     it('keeps every native coordinate bounded at the end of 100,000 rows', async () => {
       const { store, ui } = setup(8);
@@ -137,6 +137,7 @@ describe('TvList', () => {
       await act(async () => store.focus('l', 99_999));
       const pool = 12;
       const limit = 10 * pool * ROW_HEIGHT;
+      expect(topsOf()).toHaveLength(pool);
       expect(Math.max(...topsOf().map(Math.abs))).toBeLessThan(limit);
       expect(Math.abs(translateOf())).toBeLessThan(limit);
       expect(screen.getByTestId('list-row-99999').props.accessibilityState.selected).toBe(true);
