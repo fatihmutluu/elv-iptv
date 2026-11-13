@@ -40,6 +40,18 @@ describe('toKeyInput', () => {
     });
   });
 
+  it('keeps an Android native long press start and drops its release', () => {
+    expect(toKeyInput({ eventType: 'longDown', eventKeyAction: 0 }, 4, 'android')).toEqual({
+      key: 'down',
+      action: 'long',
+      time: 4,
+    });
+    expect(toKeyInput({ eventType: 'longDown', eventKeyAction: 1 }, 5, 'android')).toBeUndefined();
+    expect(
+      toKeyInput({ eventType: 'longSelect', eventKeyAction: 1 }, 5, 'android'),
+    ).toBeUndefined();
+  });
+
   it('returns undefined for unknown types and unknown actions', () => {
     expect(toKeyInput({ eventType: 'swipeLeft' }, 0, 'android')).toBeUndefined();
     expect(toKeyInput({ eventType: 'pan' }, 0, 'android')).toBeUndefined();

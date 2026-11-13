@@ -25,8 +25,10 @@ function platformKey(key: Key | undefined, platform: TvPlatform): Key | undefine
 
 /**
  * Converts a react-native-tvos remote event into a focus-core `KeyInput`, or `undefined` for events the focus core
- * does not use, with the tvOS Menu button (and its native long press) reported as `back`. Swipes, pans and unknown types give `undefined`. `eventKeyAction` 0 and 1 (Android) become `down` and `up`; events
- * without it (tvOS) are presses; `long*` events (tvOS) become one native `long` action.
+ * does not use, with the tvOS Menu button (and its native long press) reported as `back`. Swipes, pans and unknown
+ * types give `undefined`. `eventKeyAction` 0 and 1 (Android) become `down` and `up` (on Android TV a tap arrives only
+ * as the `up`); events without it (tvOS) are presses. A `long*` event becomes one native `long` action; on Android its
+ * release (`eventKeyAction` 1) gives `undefined`, since the long press already fired with action 0.
  */
 export function toKeyInput(
   native: { eventType: string; eventKeyAction?: number },
@@ -35,6 +37,7 @@ export function toKeyInput(
 ): KeyInput | undefined {
   const { eventType, eventKeyAction } = native;
   if (eventType.startsWith('long') && eventType.length > 4) {
+    if (eventKeyAction === 1) return undefined;
     const rest = eventType.charAt(4).toLowerCase() + eventType.slice(5);
     const key = platformKey(KEYS[rest], platform);
     return key ? { key, action: 'long', time: now } : undefined;
