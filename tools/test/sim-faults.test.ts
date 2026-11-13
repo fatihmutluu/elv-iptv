@@ -26,5 +26,7 @@ describe('parseFaults', () => {
     expect(() => parseFaults('status=abc')).toThrow(/status=abc/);
     expect(() => parseFaults('status=200,')).toThrow(FaultParseError);
     expect(() => parseFaults('status=99')).toThrow(FaultParseError);
+    expect(() => parseFaults('status=100')).toThrow(FaultParseError);
+    expect(() => parseFaults('status=600')).toThrow(FaultParseError);
   });
 });

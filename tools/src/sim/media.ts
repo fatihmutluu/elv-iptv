@@ -15,6 +15,9 @@ export interface RecipeFiles {
   segmentSec: 2;
 }
 
+/** Printed by the media tests when FFmpeg is absent; the `vitest` check turns it into a visible note. */
+export const MEDIA_SKIP_MARKER = 'FFmpeg not found, media tests skipped';
+
 /** Every recipe the catalog can reference. */
 export const ALL_RECIPES: readonly RecipeName[] = [
   'h264-aac-720p25',
@@ -45,8 +48,8 @@ const RECIPE_ARGS: Record<RecipeName, string[]> = {
     ...picture('1920x1080', 25),
     ...TONE,
     ...['-c:v', 'libx265', '-preset', 'veryfast', '-pix_fmt', 'yuv420p10le'],
-    ...['-profile:v', 'main10', '-b:v', '1000k', '-tag:v', 'hvc1'],
-    ...['-x265-params', `keyint=${GOP}:min-keyint=${GOP}:scenecut=0:log-level=error`],
+    ...['-profile:v', 'main10', '-b:v', '1000k'],
+    ...['-x265-params', `keyint=${GOP}:min-keyint=${GOP}:scenecut=0:open-gop=0:log-level=error`],
     ...AAC,
   ],
   'mpeg2-ac3-576i25': [
@@ -63,14 +66,26 @@ const RECIPE_ARGS: Record<RecipeName, string[]> = {
 const QUIET = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y'];
 const inflight = new Map<string, Promise<RecipeFiles>>();
 
-/** FFmpeg from `FFMPEG_PATH`, then PATH; null when absent. Checked with `-version`. */
+const probed = new Map<string, string | null>();
+
+/**
+ * FFmpeg from `FFMPEG_PATH`, then PATH; null when absent. Checked with `-version` once per process and
+ * `FFMPEG_PATH` value.
+ */
 export function findFfmpeg(): string | null {
-  const wanted = process.env.FFMPEG_PATH;
+  const wanted = process.env.FFMPEG_PATH ?? '';
+  const known = probed.get(wanted);
+  if (known !== undefined) return known;
+  let found: string | null = null;
   for (const candidate of wanted ? [wanted, 'ffmpeg'] : ['ffmpeg']) {
     const probe = spawnSync(candidate, ['-version'], { windowsHide: true, stdio: 'ignore' });
-    if (probe.status === 0) return candidate;
+    if (probe.status === 0) {
+      found = candidate;
+      break;
+    }
   }
-  return null;
+  probed.set(wanted, found);
+  return found;
 }
 
 function runFfmpeg(
@@ -104,7 +119,7 @@ function runFfmpeg(
 
 function recipeDir(recipe: RecipeName, cacheDir: string, seconds: number): string {
   const hash = createHash('sha256')
-    .update(JSON.stringify([RECIPE_ARGS[recipe], seconds, 'v1']))
+    .update(JSON.stringify([RECIPE_ARGS[recipe], seconds, 'v2']))
     .digest('hex')
     .slice(0, 10);
   return join(cacheDir, `${recipe}-${seconds}s-${hash}`);
@@ -139,7 +154,8 @@ async function generate(
     const hls = ['-f', 'hls', '-hls_time', '2', '-hls_playlist_type', 'vod'];
     const names = ['-hls_segment_filename', join(tmp, 'segments', 'seg%05d.ts')];
     await run([...RECIPE_ARGS[recipe], '-t', `${seconds}`, '-f', 'mpegts', loop]);
-    await run([...copy, '-movflags', '+faststart', join(tmp, 'vod.mp4')]);
+    const tag = recipe === 'hevc-main10-1080p25' ? ['-tag:v', 'hvc1'] : [];
+    await run([...copy, ...tag, '-movflags', '+faststart', join(tmp, 'vod.mp4')]);
     await run([...copy, join(tmp, 'vod.mkv')]);
     await run([...copy, ...hls, ...names, join(tmp, 'segments', 'index.m3u8')]);
     rmSync(dir, { recursive: true, force: true });
@@ -196,6 +212,7 @@ export function spawnLive(ffmpeg: string, loopTs: string): LiveProcess {
   });
   children.add(child);
   let timer: NodeJS.Timeout | undefined;
+  let stopping = false;
   child.on('error', () => child.stdout.destroy());
   child.on('close', () => {
     children.delete(child);
@@ -205,15 +222,17 @@ export function spawnLive(ffmpeg: string, loopTs: string): LiveProcess {
   return {
     stdout: child.stdout,
     stop() {
-      if (!children.has(child)) return;
+      if (stopping || !children.has(child)) return;
+      stopping = true;
       child.kill();
       timer = setTimeout(() => {
         if (!children.has(child)) return;
         if (process.platform === 'win32' && child.pid !== undefined) {
-          spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+          const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
             windowsHide: true,
             stdio: 'ignore',
           });
+          killer.on('error', () => undefined);
         } else child.kill('SIGKILL');
       }, KILL_GRACE_MS);
       timer.unref();

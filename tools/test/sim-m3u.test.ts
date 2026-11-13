@@ -170,7 +170,7 @@ describe('m3uChunks', () => {
 
   it('crlf-bom variant', () => {
     const text = render('compat', compat, { variant: 'crlf-bom' });
-    expect(text.startsWith('﻿#EXTM3U')).toBe(true);
+    expect(text.startsWith('\uFEFF#EXTM3U')).toBe(true);
     expect(text.slice(1).replaceAll('\r\n', '\n')).toBe(compatText);
     expect(text.replaceAll('\r\n', '')).not.toContain('\n');
   });

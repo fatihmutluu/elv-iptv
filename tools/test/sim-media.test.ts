@@ -4,15 +4,16 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ACCOUNTS } from '../src/sim/accounts.ts';
 import { buildCatalog } from '../src/sim/catalog.ts';
-import { ensureRecipe, findFfmpeg } from '../src/sim/media.ts';
+import { ensureRecipe, findFfmpeg, MEDIA_SKIP_MARKER } from '../src/sim/media.ts';
 import { type SimHandle, startSim } from '../src/sim/server.ts';
+import { packetPids, startsWithKeyframe } from './ts-packets.ts';
 
 const ffmpeg = findFfmpeg();
 if (ffmpeg === null && process.env.CI === 'true') {
   throw new Error('ffmpeg is required in CI');
 }
 const withFfmpeg = ffmpeg === null ? describe.skip : describe;
-if (ffmpeg === null) process.stderr.write('sim-media: FFmpeg not found, media tests skipped\n');
+if (ffmpeg === null) process.stderr.write(`sim-media: ${MEDIA_SKIP_MARKER}\n`);
 
 const demo = ACCOUNTS.find((a) => a.username === 'demo');
 if (!demo) throw new Error('demo account missing');
@@ -60,13 +61,8 @@ withFfmpeg('recipes', () => {
     });
     const data = readFileSync(files.loopTs);
     expect(data[0]).toBe(0x47);
-    const pids: number[] = [];
-    for (let i = 0; i < 10; i++) {
-      const at = i * 188;
-      expect(data[at]).toBe(0x47);
-      pids.push((((data[at + 1] as number) & 0x1f) << 8) | (data[at + 2] as number));
-    }
-    expect(pids).toContain(0);
+    expect(packetPids(data, 10)).toContain(0);
+    expect(startsWithKeyframe(data)).toBe(true);
   });
 
   it('serves VOD with ranges', async () => {
@@ -97,6 +93,10 @@ withFfmpeg('recipes', () => {
       expect(past.status).toBe(416);
       expect(past.headers.get('content-range')).toBe(`bytes */${size}`);
     }
+    const mkv = await fetch(`${sim.url}/movie/${pair}/${movie.id}.mkv`);
+    expect(mkv.status).toBe(200);
+    expect(mkv.headers.get('content-type')).toBe('video/x-matroska');
+    expect((await mkv.arrayBuffer()).byteLength).toBeGreaterThan(0);
   }, 60_000);
 });
 

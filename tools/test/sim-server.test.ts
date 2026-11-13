@@ -199,8 +199,8 @@ describe('request log', () => {
     await fetch(`${url}/live/${demo.username}/typo/1001.ts`).then((r) => r.text());
     const short = `/${demo.username}/${demo.password}/1001`;
     const other = '/alice/' + 'hunter22' + '/';
-    await fetch(`${url}${short}`).then((r) => r.text());
-    await fetch(`${url}/live${other}1001.ts`).then((r) => r.text());
+    await fetch(`${url}${short}?fault=status=404`).then((r) => r.text());
+    await fetch(`${url}/live${other}1001.ts?fault=status=404`).then((r) => r.text());
     await fetch(`${url}/movie${other}7.mp4`).then((r) => r.text());
     await fetch(`${url}/`, {
       headers: { referer: `http://h${short}` },

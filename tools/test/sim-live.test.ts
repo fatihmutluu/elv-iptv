@@ -6,16 +6,17 @@ import { Readable } from 'node:stream';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ACCOUNTS, type Account } from '../src/sim/accounts.ts';
 import { applyStreamFaults, parseFaults } from '../src/sim/faults.ts';
-import { activeChildren, ensureRecipe, findFfmpeg } from '../src/sim/media.ts';
+import { activeChildren, ensureRecipe, findFfmpeg, MEDIA_SKIP_MARKER } from '../src/sim/media.ts';
 import { hlsPlaylist } from '../src/sim/routes-live.ts';
 import { type SimHandle, startSim } from '../src/sim/server.ts';
+import { packetPids, startsWithKeyframe } from './ts-packets.ts';
 
 const ffmpeg = findFfmpeg();
 if (ffmpeg === null && process.env.CI === 'true') {
   throw new Error('ffmpeg is required in CI');
 }
 const withFfmpeg = ffmpeg === null ? describe.skip : describe;
-if (ffmpeg === null) process.stderr.write('sim-live: FFmpeg not found, media tests skipped\n');
+if (ffmpeg === null) process.stderr.write(`sim-live: ${MEDIA_SKIP_MARKER}\n`);
 
 function account(name: string): Account {
   const found = ACCOUNTS.find((a) => a.username === name);
@@ -34,6 +35,7 @@ const aborts: AbortController[] = [];
 afterEach(async () => {
   for (const c of aborts.splice(0)) c.abort();
   await Promise.all(open.splice(0).map((h) => h.close()));
+  await waitFor(() => activeChildren() === 0, 3000);
 });
 
 async function waitFor(check: () => boolean, ms = 3000): Promise<void> {
@@ -241,11 +243,8 @@ withFfmpeg('live streams', () => {
       expect(got.res.headers.get('content-type')).toBe('video/mp2t');
       const data = Buffer.from(got.first);
       expect(data[0]).toBe(0x47);
-      const pids: number[] = [];
-      for (let i = 0; i < 10 && (i + 1) * 188 <= data.length; i++) {
-        pids.push((((data[i * 188 + 1] as number) & 0x1f) << 8) | (data[i * 188 + 2] as number));
-      }
-      expect(pids).toContain(0);
+      expect(packetPids(data, 10)).toContain(0);
+      expect(startsWithKeyframe(data)).toBe(true);
       got.abort();
       await waitFor(() => activeChildren() === 0);
     }

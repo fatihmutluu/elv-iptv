@@ -181,7 +181,7 @@ export function* m3uChunks(catalog: Catalog, opts: M3uOptions): Generator<string
   const lines = truncated
     ? truncatedLines(playlistLines(catalog, opts))
     : playlistLines(catalog, opts);
-  let buffer = opts.variant === 'crlf-bom' ? '﻿' : '';
+  let buffer = opts.variant === 'crlf-bom' ? '\uFEFF' : '';
   let pending: string | null = null;
   for (const line of lines) {
     if (pending !== null) buffer += pending + eol;

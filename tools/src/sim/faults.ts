@@ -26,7 +26,7 @@ function parsePart(part: string): Fault {
   const status = STATUS.exec(part);
   if (status) {
     const code = Number(status[1]);
-    if (code >= 100 && code <= 599) return { kind: 'status', code };
+    if (code >= 200 && code <= 599) return { kind: 'status', code };
   }
   const drop = DROP.exec(part);
   if (drop) return { kind: 'drop', atSec: Number(drop[1]) };
