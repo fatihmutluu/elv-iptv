@@ -1,7 +1,7 @@
 # ELV IPTV — Foundation Design
 
 - Status: approved direction (owner delegated the framework decision on 2026-11-13; product decisions taken on the owner's behalf are logged for review)
-- Date: 2026-11-13
+- Date: 2026-11-13; revised 2026-11-13 to define the 0.1 release after a market study (owner delegated the scope decisions)
 - Scope: product rules, platforms, licensing, stack, architecture, quality system, workflow, docs, roadmap. Feature behavior is specified later, one spec per feature.
 - Evidence: internal research notes, which are not published. This spec and the ADRs record the decisions.
 
@@ -25,6 +25,8 @@ ELV IPTV is a cross-platform player for live TV, movies and series from sources 
 
 ### 1.4 Development rounds
 Breadth-first: every area reaches "plain but correct", then "average", then "excellent". Logic is final quality from the first round; presentation is iterative on real design-system components. No code written to be thrown away.
+
+Version 0.1 is the end of Round 2: a small feature set that is stable, fast and good-looking on every Round 0 platform. Heavy features stay as issues in the Round 3 milestone however often they are requested; none of them blocks 0.1, and they enter development one at a time in the order the owner picks. Data models keep the hooks those features need (for example catch-up attributes and `profile_id`) so adding them later needs no schema rework or re-import.
 
 ### 1.5 Reference apps
 Before each feature, read how reference apps solve it, critique it, and adopt an improved version; before fixing a bug, check why they do not have it. Research agents read the sources and write prose notes; implementing agents never read GPL or unlicensed sources.
@@ -51,6 +53,8 @@ Before each feature, read how reference apps solve it, critique it, and adopt an
 - Hardware not owned is tested on emulators/simulators and marked "not verified on hardware".
 - Identifiers: repository `fatihmutluu/elv-iptv`; application ID `io.github.fatihmutluu.elviptv`.
 - Store fees (Apple $99/year, Google Play $25 once) are paid only at launch. Flathub packaging is written and submitted by the owner (Flathub forbids AI-written manifests).
+- 0.1 is published as direct downloads on GitHub Releases (Android APK, desktop installers); Apple builds are installed on the owner's devices. Store submissions are Round 3 work. The direct-download path stays after launch, because IPTV players can lose a store listing without warning.
+- Android builds always target the API level that current store policy requires. The README and website name GitHub Releases and the listed stores as the only official sources, so look-alike uploads are easy to spot.
 - Placeholder platforms get a folder with a README stating they are planned; no code until scheduled.
 
 ## 3. Licensing and governance
@@ -78,7 +82,7 @@ Before each feature, read how reference apps solve it, critique it, and adopt an
 | Lint/format | Biome 2.6; lefthook git hooks; dependency-cruiser + knip for architecture and dead code |
 | Tests | Vitest (pure packages), Jest + jest-expo + RNTL (components), Maestro (Android phone/TV, iOS), XCUITest (tvOS), Playwright (Electron), Reassure (render perf), local stream simulator |
 | Builds | No EAS: `expo prebuild` + Gradle/xcodebuild + fastlane; electron-builder; GitHub Actions |
-| Sync server (Round 2) | TypeScript: Hono + Drizzle + Better Auth on Cloudflare Workers + D1 free plan; Docker image for self-hosting |
+| Sync server (after 0.1) | TypeScript: Hono + Drizzle + Better Auth on Cloudflare Workers + D1 free plan; Docker image for self-hosting |
 
 ## 5. Architecture
 
@@ -114,14 +118,17 @@ Packages are source-first (`exports` point at `src/index.ts`, no build step). Ne
 - Enforced by pnpm isolation, package `exports`, dependency-cruiser and Biome restricted imports in CI.
 
 ### 5.3 Errors and logging
-`Result` values with categorized failures (network, auth, source format, playback, storage) at package boundaries; each category maps to a localized message and a recovery action. One logger with a redaction step that strips credentials and tokens from URLs.
+`Result` values with categorized failures (network, auth, source format, playback, storage) at package boundaries; each category maps to a localized message and a recovery action. Playback errors name their category and one concrete next step, such as switching the source's stream format or checking the account's connection limit, because most "player" failures in IPTV come from the provider or the network. One logger with a redaction step that strips credentials and tokens from URLs.
 
 ### 5.4 Data
 - SQLite is the source of truth; imports stream, run off the UI thread (Electron utility process, time-sliced JS or native fallback on RN) and insert in batched transactions.
 - FTS5 search over a folded-text column produced by a TypeScript fold function with explicit Turkish İ/ı rules.
 - Stable content keys (source + provider stream ID for Xtream; normalized URL + name for M3U); user overrides, favorites and progress live in tables that playlist refreshes never cascade into.
-- Every user-scoped table carries `profile_id`; sync columns are added by the sync round.
+- Every user-scoped table carries `profile_id`; 0.1 uses one default profile, and sync columns are added with sync after 0.1.
 - Provider credentials live in secure storage only.
+- Each source carries transport settings: a custom User-Agent and Referer, and for Xtream the stream format (MPEG-TS or HLS). Per-entry M3U header directives (`#EXTVLCOPT` user agent and referrer) are honored. Playback never opens a second connection to the same source while one is active.
+- Scanners keep catch-up and time-shift attributes (M3U `catchup*` tags, Xtream archive flags) in the catalog, even though catch-up itself comes after 0.1.
+- Guide data is XMLTV (plain or gzip) from the Xtream guide endpoint or one user-supplied URL per source. Channels match by `tvg-id`, then by folded name. A configurable window of past and future days is kept, and the scanner streams so a large guide never sits in memory whole.
 
 ### 5.5 Playback
 - `PlayerEngine` contract: enqueue-and-return commands; every event carries an attempt token; progress is a clock anchor that JS extrapolates; errors have stable codes and recovery hints; capability flags per engine.
@@ -131,6 +138,7 @@ Packages are source-first (`exports` point at `src/index.ts`, no build step). Ne
 ### 5.6 Input, focus and form factors
 - The focus core models focus as indices in scopes, so it survives list recycling, and is unit-tested headlessly. Each runtime provides one key source; native focus is used only at hand-off points.
 - Every focusable element has a stable semantic ID for tests and accessibility. Layout is chosen by form factor (TV, phone, tablet, desktop).
+- The key model treats long press as its own event for OK, Back and the arrows. Default TV remote grammar: in the player OK opens the channel list, Up/Down change channel and Left opens groups; elsewhere OK confirms; long OK opens options for the focused item; Back steps out and long Back returns to the player. Leaving a list or the guide and coming back restores focus to the same item. Key remapping comes after 0.1.
 
 ### 5.7 Localization
 Adding a language means one catalog file plus store-listing texts. All user-facing strings go through Lingui; CI rejects hard-coded UI strings. First launch follows the device language when supported, otherwise English. Directional layout from the start; pseudo-locale tests.
@@ -144,7 +152,7 @@ Adding a language means one catalog file plus store-listing texts. All user-faci
 - Test-driven development for every behavior change.
 - Pure packages: Vitest, ≥90% line coverage, property tests for parsers and the focus core.
 - Components: Jest + jest-expo + RNTL. Screens are also rendered at TV/phone/tablet/desktop sizes in snapshot tests.
-- Playback: a local simulator serves FFmpeg-generated streams with scripted faults; a harness app reports a JSONL event log that tests assert on.
+- Playback: a local simulator serves FFmpeg-generated streams with scripted faults; a harness app reports a JSONL event log that tests assert on. The simulator also serves synthetic playlists, Xtream responses and guide files and logs every request with its headers, so the same fixtures drive our parser tests and a black-box compatibility pass against reference players that sets expected behavior for tags, catch-up URLs and retries.
 - E2E smoke flows: Maestro (Android TV with D-pad keys, Android phone, iOS), XCUITest (tvOS), Playwright (Electron).
 - Nightly soak and zap tests fail on growth of memory, threads or handles.
 - Owner gets a short Turkish manual test checklist at each milestone.
@@ -158,6 +166,8 @@ Adding a language means one catalog file plus store-listing texts. All user-faci
 | Foreground memory (TV) | < 300 MB at 1080p, < 400 MB at 4K |
 | Background memory | < 100 MB |
 | Lists | 100k items scroll and navigate without dropped frames |
+| Playlist import | 100k entries in < 60 s on the reference TV emulator; the first groups are browsable within 5 s |
+| Guide import | 7 days for 5,000 channels in < 60 s on the reference TV emulator, within the foreground memory budget |
 | JS thread | no task > 16 ms during navigation; imports never on the UI thread |
 
 Emulator CI enforces relative gates (+10% vs `main` fails). Absolute budgets are verified on real hardware where available.
@@ -185,41 +195,42 @@ Unchanged from the owner's goals: compliant README with the one-sentence descrip
 Toolchain for the new stack; a repository with no history from the earlier framework; governance carried over; pnpm monorepo with `tools/` checks; empty Expo app building for Android phone/TV, Fire OS, iOS and tvOS, and empty Electron app for Windows/macOS, in CI; placeholders for Vega, Tizen, webOS; Claude setup; ADRs; publishing; boards; Ideas backlog seeded from the reference-app reports.
 
 ### Round 1 — Functional foundation
-1. Proof gates as real foundation code, measured against §6.2: focus core + TV windowed list (100k items) + EPG grid on Android TV and tvOS; player core with the always-mounted OSD on Android TV and tvOS; desktop libmpv helper with DOM OSD on Windows.
-2. Sources: M3U and Xtream import; dev auto-seed.
-3. Plain menu: Live, Movies, Series lists with categories.
-4. Watch progress: resume, watched state, continue watching.
-5. Local profiles.
+1. Local stream simulator with synthetic playlists, Xtream responses, guide files and scripted faults (§6.1), shared by tests and gates.
+2. Proof gates as real foundation code, measured against §6.2: focus core + TV windowed list (100k items) + EPG grid on Android TV and tvOS; player core with the always-mounted OSD on Android TV and tvOS; desktop libmpv helper with DOM OSD on Windows.
+3. Sources: M3U and Xtream import with transport settings; XMLTV guide import (§5.4); dev auto-seed.
+4. Plain menu: Live with the guide, Movies, Series lists with categories.
+5. Watch progress: resume and watched state.
 6. Turkish and English with an in-app switch.
 
-### Round 2 — Average
-Player controls, premium home, XMLTV EPG, search, settings; UI design language finalized before this round's UI work; sync (Google sign-in, server, E2EE vault, QR sign-in on TV).
+### Round 2 — 0.1
+UI design language finalized first, then: home screen with continue watching and favorites; player controls (seek, audio and subtitle track selection, aspect); guide polish; search; minimal settings (sources, language, playback). Every §6.2 budget met and soak tests green on every Round 0 platform; release pipeline for direct downloads. The round ends with the 0.1.0 release, which the owner triggers.
 
-### Round 3 — Excellent
-Polish, advanced features, the Vega app, store launch preparation. Tizen and webOS after Vega.
+### Round 3 — After 0.1
+Heavy features, each tracked as an issue and built one at a time in the owner's order: sync with sign-in (server, E2EE vault, QR sign-in on TV), local profiles, catch-up, live time-shift, Stalker portals, advanced guide sources (several per playlist, manual matching, offsets), parental controls, external subtitle files and styling, remote key remapping, picture-in-picture and multi-view, reminders. Store launch preparation; the Vega app, then Tizen and webOS.
 
 ## 11. Risks
 | Risk | Mitigation |
 |---|---|
-| Low-end stick performance unmeasured for our stack | Round 1 gates on emulators; a cheap Fire OS stick would make it real (owner decision) |
+| Low-end stick performance unmeasured for our stack | Round 1 gates on emulators; no test stick is bought (owner, 2026-11-13), so community testers report hardware results |
+| Provider quirks (connection limits, user-agent filtering, TS vs HLS) look like player bugs | Per-source transport settings, categorized errors with a next step, simulator fault scripts |
 | JS focus core and windowed lists are ours to maintain | Headless tests; small, well-specified core |
 | Desktop frame-copy path unproven in Electron + RNW; Mac App Store sandbox | Round 1 gate; fallback: external mpv window |
 | AetherEngine single maintainer, fast release churn | Pin versions; MPVKit as insurance |
 | Own LGPL libmpv/FFmpeg builds | Pinned build recipes in CI; legal review before first store submission |
 | Hermes lacks Wasm/JIT: large XMLTV imports | Measure; native importer fallback |
 | react-native-tvos focus regressions upstream | We own focus; native hand-off points tested |
-| Store takedowns of IPTV players | Compliant metadata, reviewer demo source, alternative channels |
+| Store takedowns of IPTV players | Compliant metadata, reviewer demo source, current target API level, direct downloads on GitHub Releases |
 
 ## 12. Decisions deferred, with their trigger
 | Decision | Asked when |
 |---|---|
 | Watched threshold and progress-saving rules | Round 1 progress spec |
-| Stalker/MAC portal support | Before Round 2 planning |
-| Parental controls and adult-content handling | Round 2 settings spec |
+| Stalker/MAC portal support (not in 0.1) | When its Round 3 issue is picked |
+| Parental controls and adult-content handling (not in 0.1) | When its Round 3 issue is picked |
+| Catch-up behavior and whether it stays free | When its Round 3 issue is picked |
 | Vault recovery code | Sync spec |
 | Data controller, launch countries (KVKK/GDPR) | Before the sync server goes live |
 | Crash reporting vendor | Round 3 |
 | Legal review of licensing | Before the first store submission |
-| Buying a Fire OS test stick | Round 1 performance gates |
 | Own website domain | When the website goes live |
 | Free vs paid outcome | After community signal |
