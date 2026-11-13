@@ -59,6 +59,30 @@ describe('playlists', () => {
     expect((await fetch(`${url}/playlists/nope.m3u`)).status).toBe(404);
   });
 
+  it('serves the quirks playlist and guide for the quirks account', async () => {
+    const { url } = await sim();
+    const q = `username=quirks&${['pass', 'word'].join('')}=quirks`;
+    const m3u = await (await fetch(`${url}/get.php?${q}&type=m3u_plus&output=ts`)).text();
+    expect(m3u.startsWith('#EXTM3U\r\n')).toBe(true);
+    const xml = await (await fetch(`${url}/xmltv.php?${q}`)).text();
+    expect(xml).toContain('<!DOCTYPE tv SYSTEM "xmltv.dtd">');
+    const direct = await (await fetch(`${url}/playlists/small.m3u`)).text();
+    expect(direct).toContain('url-tvg=');
+  });
+
+  it('streams the start of the huge playlist', async () => {
+    const { url } = await sim();
+    const res = await fetch(`${url}/playlists/huge.m3u`);
+    expect(res.status).toBe(200);
+    const decoder = new TextDecoder();
+    let text = '';
+    for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+      text += decoder.decode(chunk, { stream: true });
+      if (text.length > 5_000_000) break;
+    }
+    expect(text.split('\n').filter((l) => l.startsWith('#EXTINF')).length).toBeGreaterThan(5000);
+  }, 60_000);
+
   it('answers a broken playlist status', async () => {
     const { url } = await sim();
     expect((await fetch(`${url}/playlists/broken/503.m3u`)).status).toBe(503);

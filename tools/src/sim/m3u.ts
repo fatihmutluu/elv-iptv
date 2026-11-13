@@ -1,5 +1,6 @@
 import type { Account } from './accounts.ts';
 import type { Catalog, CompatCase, LiveChannel } from './catalog.ts';
+import { quirkArchiveDays } from './quirks.ts';
 
 /** File form of a playlist: as is, UTF-8 with BOM and CRLF line ends, or cut mid-attribute. */
 export type M3uVariant = 'plain' | 'crlf-bom' | 'truncated';
@@ -144,7 +145,38 @@ function* vodLines(catalog: Catalog, ctx: Ctx, groups: Map<string, string>): Gen
   }
 }
 
+/** Entries as a real panel writes them: bare header, session data, `xui-id` everywhere, no catch-up tags. */
+function* panelLines(catalog: Catalog, opts: M3uOptions): Generator<string> {
+  const ctx: Ctx = { base: opts.baseUrl, account: opts.account, ext: opts.output };
+  const groups = new Map(catalog.categories.map((c) => [c.id, c.name]));
+  yield '#EXTM3U';
+  yield '#EXT-X-SESSION-DATA:DATA-ID="sim.panel",VALUE="synthetic"';
+  for (let i = 0; i < catalog.live.length; i++) {
+    const ch = catalog.live[i] as LiveChannel;
+    const days = quirkArchiveDays(i, ch);
+    const tvg = ch.epgId === null ? '' : ` tvg-id="${ch.epgId}"`;
+    const logo = ch.logo === null ? '' : ` tvg-logo="${ctx.base}/logos/${ch.logo}.png"`;
+    const shift = days > 0 ? ` timeshift="${days}"` : '';
+    yield `#EXTINF:-1 xui-id="${ch.id}"${tvg} tvg-name="${ch.name}"${logo}${shift} group-title="${groups.get(ch.categoryId)}",${ch.name}`;
+    yield streamUrl(ctx.base, ctx.account, 'live', ch.id, ctx.ext);
+  }
+  for (const m of catalog.movies) {
+    yield `#EXTINF:-1 xui-id="${m.id}" tvg-name="${m.name}" group-title="${groups.get(m.categoryId)}",${m.name}`;
+    yield streamUrl(ctx.base, ctx.account, 'movie', m.id, m.ext);
+  }
+  for (const s of catalog.series) {
+    for (const e of s.episodes) {
+      yield `#EXTINF:-1 xui-id="${e.id}" tvg-name="${e.title}" group-title="${groups.get(s.categoryId)}",${e.title}`;
+      yield streamUrl(ctx.base, ctx.account, 'series', e.id, e.ext);
+    }
+  }
+}
+
 function* playlistLines(catalog: Catalog, opts: M3uOptions): Generator<string> {
+  if (opts.account.quirks) {
+    yield* panelLines(catalog, opts);
+    return;
+  }
   const ctx: Ctx = { base: opts.baseUrl, account: opts.account, ext: opts.output };
   const groups = new Map(catalog.categories.map((c) => [c.id, c.name]));
   const compat = catalog.profile === 'compat';
@@ -176,7 +208,7 @@ function* truncatedLines(lines: Generator<string>): Generator<string> {
 
 /** Yields the playlist in chunks of at most ~64 KB; never builds the whole text. */
 export function* m3uChunks(catalog: Catalog, opts: M3uOptions): Generator<string> {
-  const eol = opts.variant === 'crlf-bom' ? '\r\n' : '\n';
+  const eol = opts.variant === 'crlf-bom' || opts.account.quirks ? '\r\n' : '\n';
   const truncated = opts.variant === 'truncated';
   const lines = truncated
     ? truncatedLines(playlistLines(catalog, opts))

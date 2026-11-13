@@ -44,6 +44,15 @@ export const ACCOUNTS: readonly Account[] = [
     limitPolicy: 'text-notice',
   },
   {
+    username: 'huge',
+    password: 'huge',
+    profile: 'huge',
+    maxConnections: 2,
+    status: 'Active',
+    quirks: false,
+    limitPolicy: 'status-509',
+  },
+  {
     username: 'expired',
     password: 'expired',
     profile: 'small',

@@ -33,6 +33,37 @@ function entries(text: string): string[][] {
   return out;
 }
 
+const quirks = findAccount('quirks', 'quirks') as Account;
+
+describe('quirks playlist', () => {
+  const text = render('small', quirks);
+  const lines = text.split('\r\n');
+
+  it('uses CRLF throughout and a bare header', () => {
+    expect(text.startsWith('#EXTM3U\r\n')).toBe(true);
+    expect(text.replaceAll('\r\n', '')).not.toMatch(/[\r\n]/);
+    expect(lines.filter((l) => l.startsWith('#EXT-X-SESSION-DATA:'))).toHaveLength(1);
+    expect(text).not.toContain('url-tvg');
+    expect(text).not.toContain('catchup');
+  });
+
+  it('puts xui-id on every entry, tvg-id on live only, timeshift on archive channels', () => {
+    const infs = lines.filter((l) => l.startsWith('#EXTINF'));
+    expect(infs).toHaveLength(50 + 30 + 30);
+    expect(infs.every((l) => /xui-id="\d+"/.test(l))).toBe(true);
+    expect(infs.slice(0, 50).some((l) => l.includes('tvg-id='))).toBe(true);
+    expect(infs.slice(50).some((l) => l.includes('tvg-id='))).toBe(false);
+    expect(infs.filter((l) => /timeshift="\d+"/.test(l)).length).toBeGreaterThan(0);
+  });
+
+  it('leaves the demo playlist without panel attributes', () => {
+    const demoText = render('small', demo);
+    expect(demoText).toContain('url-tvg=');
+    expect(demoText).not.toContain('xui-id');
+    expect(demoText).not.toContain('\r');
+  });
+});
+
 const compatText = render('compat', compat);
 const compatCatalog = buildCatalog('compat', 1);
 

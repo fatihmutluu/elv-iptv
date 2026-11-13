@@ -1,8 +1,7 @@
 # tools (`@elv/tools`)
 
 TypeScript scripts for the repository: project checks, app launcher, bootstrap, scaffolder.
-Node 24 runs the `.ts` files directly (type stripping), so use erasable syntax only
-(no enums, no namespaces, no constructor parameter properties) and `.ts` import suffixes.
+Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter properties), `.ts` import suffixes.
 
 ## Commands (run from anywhere; the repo root is found via `pnpm-workspace.yaml`)
 - `pnpm check` runs every check and prints failures, notes and warnings (also on a passing run),
@@ -41,7 +40,8 @@ Node 24 runs the `.ts` files directly (type stripping), so use erasable syntax o
   `/redirect/<id>.ts` (302); catch-up (`/timeshift/...`, `/streaming/timeshift.php`, `/catchup/<id>.ts`,
   `archive-|index-|timeshift_abs-` paths) answers a plain recorded file.
   TS live and VOD over `maxConnections`: 509, 403 or a notice.
-- Accounts (password = username): `demo` (small, 1 connection), `large` (2), `compat` (1), `expired`, `quirks`.
+- Accounts (password = username): `demo` (small, 1 connection), `large` (2), `compat` (1), `expired`, `quirks`
+  (real-panel shapes: CRLF playlist, +0100 guide), `huge` (500k entries, 2 connections; opt-in, not in `pnpm check`).
 - Routes: `/get.php`, `/player_api.php`, `/xmltv.php`; `/playlists/<profile>[-variant].m3u|.m3u8`,
   `/playlists/broken/<status>.m3u`, `/guides/<profile>.xml[.gz]`, `/logos/<0-15>.png`, `/_sim/requests` (GET, DELETE),
   `/_sim/events` (GET, POST JSONL <= 1 MB). Log: passwords `***`.
