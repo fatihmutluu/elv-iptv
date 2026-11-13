@@ -18,7 +18,7 @@ export interface LogEntry {
 }
 
 const MASK = '***';
-const PASSWORD_PARAM = /(password=)[^&#s]*/gi;
+const PASSWORD_PARAM = /(password=)[^&#\s]*/gi;
 const USERINFO = /(\/\/[^/:@\s]+:)[^@/\s]+@/g;
 
 function escapeRegExp(s: string): string {
@@ -76,7 +76,13 @@ export class RequestLog {
   add(e: LogEntry): void {
     this.#entries.push(e);
     if (this.#entries.length > MAX_ENTRIES) this.#entries.shift();
-    if (this.#file) appendFileSync(this.#file, `${JSON.stringify(e)}\n`);
+    if (!this.#file) return;
+    try {
+      appendFileSync(this.#file, `${JSON.stringify(e)}\n`);
+    } catch (error) {
+      this.#file = undefined;
+      process.stderr.write(`sim: log file disabled: ${(error as Error).message}\n`);
+    }
   }
 
   /** A copy of the retained entries, oldest first. */

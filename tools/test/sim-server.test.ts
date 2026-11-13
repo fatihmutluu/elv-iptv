@@ -1,8 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ACCOUNTS } from '../src/sim/accounts.ts';
 import { type LogEntry, redact } from '../src/sim/log.ts';
 import { pngLogo } from '../src/sim/png.ts';
@@ -269,6 +269,50 @@ describe('log file', () => {
     const error = await startSim({ port: 0, logFile: bad }).catch((e: Error) => e);
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toContain(bad);
+  });
+
+  it('keeps serving and reports once when the log file fails later', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'elv-sim-'));
+    const file = join(dir, 'log.jsonl');
+    const handle = await startSim({ port: 0, clock: CLOCK, logFile: file });
+    open.push(handle);
+    rmSync(file);
+    mkdirSync(file);
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      for (let i = 0; i < 3; i++) {
+        const res = await fetch(`${handle.url}/logos/1.png`);
+        expect(res.status).toBe(200);
+        await res.arrayBuffer();
+      }
+      const reports = stderr.mock.calls.filter(([text]) =>
+        String(text).includes('log file disabled'),
+      );
+      expect(reports).toHaveLength(1);
+    } finally {
+      stderr.mockRestore();
+    }
+    expect(handle.requests()).toHaveLength(3);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('masks the whole password value, including letters s', () => {
+    const entry: LogEntry = {
+      t: 'x',
+      method: 'GET',
+      path: '/',
+      query: {},
+      headers: { referer: 'http://h/get.php?password=compass&x=1' },
+      status: 200,
+      bytes: 0,
+      ms: 0,
+      account: null,
+      streamId: null,
+      recipe: null,
+      fault: null,
+      openConnections: 0,
+    };
+    expect(redact(entry, ACCOUNTS).headers.referer).toBe('http://h/get.php?password=***&x=1');
   });
 
   it('appends one JSON line per request', async () => {
