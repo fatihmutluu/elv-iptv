@@ -7,6 +7,7 @@ export {
   type M3uHeader,
   scanM3u,
 } from './m3u';
+export { toElvError } from './scan-error';
 export { createStats, type ScanStats, type ScanWarning, warn } from './stats';
 export { ByteBuffer, decodeUtf8 } from './utf8';
 export {

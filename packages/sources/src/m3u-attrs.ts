@@ -155,6 +155,11 @@ interface CatchupDraft {
   days?: number | undefined;
 }
 
+/** An empty string map without a prototype, so input-controlled keys such as `__proto__` stay plain data. */
+export function dict(): Record<string, string> {
+  return Object.create(null) as Record<string, string>;
+}
+
 /** Creates an entry with empty collections and no URL yet. */
 export function newEntry(): M3uEntry {
   return {
@@ -163,9 +168,9 @@ export function newEntry(): M3uEntry {
     duration: -1,
     groups: [],
     radio: false,
-    headers: { other: {} },
-    kodiProps: {},
-    extra: {},
+    headers: { other: dict() },
+    kodiProps: dict(),
+    extra: dict(),
     kindHint: 'live',
     nonHttp: false,
   };
@@ -247,6 +252,16 @@ function schemeEnd(url: string): number {
     if (!(alpha || (i > 0 && rest))) return -1;
   }
   return -1;
+}
+
+/**
+ * True when a non-comment playlist line can be an entry URL: it has a scheme (`xx://`) or, when `baseUrl`
+ * is set, it is a relative reference without whitespace, `<`, `{` or `"`.
+ */
+export function looksLikeUrl(raw: string, baseUrl: string | undefined): boolean {
+  const end = schemeEnd(raw);
+  if (end >= 0 && raw.startsWith('://', end)) return true;
+  return baseUrl !== undefined && baseUrl !== '' && !/[\s<{"]/.test(raw);
 }
 
 function resolve(url: string, base: string): string {

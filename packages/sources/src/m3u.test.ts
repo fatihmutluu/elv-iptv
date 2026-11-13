@@ -54,7 +54,7 @@ describe('scanM3u header', () => {
   it('parses entries when #EXTM3U is missing', async () => {
     const r = await scan('#EXTINF:-1,A\nhttp://h.example/1\n');
     expect(r.entries[0]?.name).toBe('A');
-    expect(r.header).toEqual({ guideUrls: [], attrs: {} });
+    expect(r.header).toEqual({ present: false, guideUrls: [], attrs: {} });
   });
 });
 
@@ -288,7 +288,6 @@ describe('scanM3u urls', () => {
     expect((await hint('/abs/6.ts', base)).url).toBe('http://h.example/abs/6.ts');
     expect((await hint('//other.example/7.ts', base)).url).toBe('http://other.example/7.ts');
     expect((await hint('http://k.example/8.ts', base)).url).toBe('http://k.example/8.ts');
-    expect((await hint('relative/5.ts')).url).toBe('relative/5.ts');
     expect((await hint('relative/5.ts', 'not a url')).url).toBe('relative/5.ts');
     expect((await hint('r.ts', 'http://h.example')).url).toBe('http://h.example/r.ts');
     expect((await hint('r.ts', 'http://h.example?q=1')).url).toBe('http://h.example/r.ts');

@@ -10,7 +10,7 @@ export interface M3uCatchup {
   days?: number;
 }
 
-/** One playlist entry; the URL is kept as written (relative ones resolved when a base URL is given). */
+/** One playlist entry; the string maps (`extra`, `kodiProps`, `headers.other`) have no prototype; the URL is kept as written (relative ones resolved when a base URL is given). */
 export interface M3uEntry {
   name: string;
   url: string;
@@ -34,6 +34,8 @@ export interface M3uEntry {
 
 /** The `#EXTM3U` line: guide URLs and every other attribute. */
 export interface M3uHeader {
+  /** True when an `#EXTM3U` line was seen. */
+  present: boolean;
   guideUrls: string[];
   attrs: Record<string, string>;
 }

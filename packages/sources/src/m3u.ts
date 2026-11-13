@@ -1,13 +1,17 @@
+import { err, ok, type Result } from '@elv/domain';
 import {
   applyExtHttp,
   applyKodiProp,
   applyVlcOpt,
+  dict,
   finishEntry,
+  looksLikeUrl,
   newEntry,
   parseAttrs,
   parseExtinf,
 } from './m3u-attrs';
 import type { M3uBatch, M3uEntry, M3uHeader } from './m3u-types';
+import { toElvError } from './scan-error';
 import { createStats, type ScanStats, warn } from './stats';
 import { ByteBuffer, decodeUtf8 } from './utf8';
 
@@ -150,7 +154,12 @@ class M3uScanner {
     while (end > start && ((bytes[end - 1] as number) === SPACE || bytes[end - 1] === TAB)) end--;
     if (start >= end) return;
     if (bytes[start] !== 0x23) {
-      this.url(decodeUtf8(bytes, start, end));
+      const raw = decodeUtf8(bytes, start, end);
+      if (looksLikeUrl(raw, this.baseUrl)) this.url(raw);
+      else {
+        this.stats.skipped++;
+        warn(this.stats, 'not-a-url', this.stats.lines);
+      }
       return;
     }
     const d = directiveAt(bytes, start, end);
@@ -183,7 +192,7 @@ class M3uScanner {
   }
 
   private parseHeader(payload: string): M3uHeader {
-    const header: M3uHeader = { guideUrls: [], attrs: {} };
+    const header: M3uHeader = { present: true, guideUrls: [], attrs: dict() };
     parseAttrs(payload, 0, (key, value) => {
       if (key === 'url-tvg' || key === 'x-tvg-url') {
         for (const u of value.split(',')) {
@@ -206,27 +215,38 @@ class M3uScanner {
 }
 
 /**
- * Streams an M3U/M3U8 playlist from byte chunks into typed entries in bounded memory. Never throws on bad
- * content: problems become warnings in the final batch's statistics. A batch is yielded as soon as it holds
- * `batchSize` entries (default 500); the last batch has `done: true`, the header (empty when the playlist has
- * no `#EXTM3U` line) and the statistics. Relative URLs are resolved against `baseUrl` when given.
+ * Streams an M3U/M3U8 playlist from byte chunks into typed entries in bounded memory. Never throws: bad
+ * content becomes warnings in the final batch's statistics, and a line that is not a URL (no scheme, or with
+ * `baseUrl` set containing whitespace, `<`, `{` or `"`) is skipped with a `not-a-url` warning, so an HTML or
+ * JSON body answered with status 200 yields no entries. A batch is yielded as soon as it holds `batchSize`
+ * entries (default 500); the last batch has `done: true`, the header (`present: false` when the playlist
+ * has no `#EXTM3U` line) and the statistics. Relative URLs are resolved against `baseUrl` when given.
+ *
+ * The generator returns `ok`, or `err` when the input iterable throws: the error keeps its `category`
+ * and `code` when it has that shape (an abort is `network` / `aborted`) and is otherwise `network` /
+ * `stream-failed`. On `err` no `done: true` batch is yielded and the run is a failure; batches already
+ * yielded stay yielded.
  */
 export async function* scanM3u(
   chunks: AsyncIterable<Uint8Array>,
   opts?: { batchSize?: number; baseUrl?: string | undefined },
-): AsyncGenerator<M3uBatch> {
+): AsyncGenerator<M3uBatch, Result<void>> {
   const size = Math.max(1, opts?.batchSize ?? DEFAULT_BATCH);
   const scanner = new M3uScanner(size, opts?.baseUrl);
-  for await (const chunk of chunks) {
-    scanner.buf.append(chunk);
-    do {
-      scanner.run(false);
-      if (scanner.batch.length >= size) {
-        const entries = scanner.batch;
-        scanner.batch = [];
-        yield { entries, done: false };
-      }
-    } while (scanner.batch.length >= size);
+  try {
+    for await (const chunk of chunks) {
+      scanner.buf.append(chunk);
+      do {
+        scanner.run(false);
+        if (scanner.batch.length >= size) {
+          const entries = scanner.batch;
+          scanner.batch = [];
+          yield { entries, done: false };
+        }
+      } while (scanner.batch.length >= size);
+    }
+  } catch (e) {
+    return err(toElvError(e));
   }
   for (;;) {
     scanner.run(true);
@@ -238,8 +258,9 @@ export async function* scanM3u(
   scanner.finish();
   yield {
     entries: scanner.batch,
-    header: scanner.header ?? { guideUrls: [], attrs: {} },
+    header: scanner.header ?? { present: false, guideUrls: [], attrs: dict() },
     stats: scanner.stats,
     done: true,
   };
+  return ok(undefined);
 }

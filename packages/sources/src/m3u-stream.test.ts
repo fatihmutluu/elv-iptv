@@ -57,7 +57,7 @@ describe('scanM3u batching and chunking', () => {
       }
     }
     const first = await scanM3u(source(), { batchSize: 500 }).next();
-    expect(first.value?.entries).toHaveLength(500);
+    expect((first.value as M3uBatch).entries).toHaveLength(500);
     expect(read).toBeLessThan(total);
   });
 

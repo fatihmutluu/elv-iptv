@@ -1,4 +1,5 @@
-import { type ElvError, type ErrorCategory, elvError, err, ok, type Result } from '@elv/domain';
+import { elvError, err, ok, type Result } from '@elv/domain';
+import { toElvError } from './scan-error';
 import { createStats, MAX_WARNINGS, type ScanStats, warn } from './stats';
 import { ByteBuffer } from './utf8';
 import {
@@ -210,27 +211,8 @@ class XmltvScanner {
   }
 
   get full(): boolean {
-    return this.programmes.length >= this.size;
+    return this.channels.length + this.programmes.length >= this.size;
   }
-}
-
-const CATEGORIES: readonly string[] = ['network', 'auth', 'source-format', 'playback', 'storage'];
-
-function toElvError(e: unknown): ElvError {
-  const c = e as { category?: unknown; code?: unknown; detail?: unknown } | null;
-  if (
-    c &&
-    typeof c.code === 'string' &&
-    typeof c.category === 'string' &&
-    CATEGORIES.includes(c.category)
-  ) {
-    return elvError(
-      c.category as ErrorCategory,
-      c.code,
-      typeof c.detail === 'string' ? c.detail : undefined,
-    );
-  }
-  return elvError('network', 'stream-failed');
 }
 
 const GZIP_0 = 0x1f;
