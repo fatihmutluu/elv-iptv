@@ -37,6 +37,8 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - uses: ./.github/actions/setup
         id: setup
+      - name: Install FFmpeg
+        run: command -v ffmpeg || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg)
       - name: pnpm check
         run: pnpm check
       - name: Scan full history for secrets

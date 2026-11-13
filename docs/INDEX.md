@@ -4,6 +4,7 @@
 - [CONTRIBUTING](../CONTRIBUTING.md) setup, workflow, CLA, safety rules for outside contributions.
 - [AGENTS.md](../AGENTS.md) rules for every agent and contributor (Claude Code imports it through `CLAUDE.md`).
 - [Foundation spec](superpowers/specs/2026-11-13-foundation-design.md) binding product, stack and architecture decisions.
+- [Stream simulator spec](superpowers/specs/2026-11-13-stream-simulator-design.md) the local IPTV provider simulator (`pnpm sim`).
 - `superpowers/plans/` implementation plans; they are deleted after the work is merged.
 - [ADRs](adr/README.md) accepted architecture decisions (MADR).
 - [Lessons learned](learned/README.md) short dated problem-to-rule entries.
