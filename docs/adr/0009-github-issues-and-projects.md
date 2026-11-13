@@ -30,4 +30,3 @@ GitHub Issues with a public "ELV IPTV Roadmap" project (Backlog, Next, In progre
 ## Links
 
 - [Foundation spec](../superpowers/specs/2026-11-13-foundation-design.md) sections 7.1, 7.2.
-- Research [05](../research/05-engineering-infrastructure.md), [06](../research/06-claude-code-setup.md).

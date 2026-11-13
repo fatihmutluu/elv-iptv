@@ -9,7 +9,7 @@ Users bring their own M3U or Xtream Codes source; the project ships no content. 
 - `apps/vega/`, `apps/tizen/`, `apps/webos/` planned placeholders (README only).
 - `packages/` source-first TypeScript packages: `domain`, `sources`, `data`, `playback`, `focus-core`, `i18n`,
   `ui-kit`, `features`, `config`. `modules/` will hold Expo native modules, one workspace package each.
-- `tools/` TypeScript scripts (checks, bootstrap, app launcher). `docs/` specs, ADRs, research, lessons.
+- `tools/` TypeScript scripts (checks, bootstrap, app launcher). `docs/` specs, ADRs, lessons.
 - Dependency rules (spec section 5.2) are enforced by dependency-cruiser; read them before adding imports.
 
 ## Commands
@@ -42,11 +42,11 @@ Users bring their own M3U or Xtream Codes source; the project ships no content. 
 - Never force-push. Never create releases, store builds or tags without the owner.
 - Pure packages (`domain`, `sources`, `data`, `playback`, `focus-core`) never import `react`, `react-native`,
   `expo*`, `electron` or `node:*`.
-- Implementers never read GPL or unlicensed reference sources; research notes in `docs/research/` stand in for them.
+- Implementers never read GPL or unlicensed reference sources; internal research notes stand in for them.
 - Describe the license as source-available, never with the generic term for freely reusable code. No third-party brand names in public copy.
 
 ## Pointers
 - `docs/INDEX.md` maps all documentation. Spec: `docs/superpowers/specs/2026-11-13-foundation-design.md`.
-- Research index: `docs/research/README.md`. Decisions: `docs/adr/`. Lessons: `docs/learned/README.md`.
+- Decisions: `docs/adr/`. Lessons: `docs/learned/README.md`.
 - Each package and app has its own `AGENTS.md`; read it before changing that folder.
 - Contribution rules: `CONTRIBUTING.md`. Governance: `LICENSE`, `CLA.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`.

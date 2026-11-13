@@ -30,4 +30,3 @@ One `PlayerEngine` contract: enqueue-and-return commands, an attempt token on ev
 ## Links
 
 - [Foundation spec](../superpowers/specs/2026-11-13-foundation-design.md) sections 3, 4, 5.5, 11.
-- Research [14](../research/14-rn-player-engines.md).

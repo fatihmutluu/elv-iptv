@@ -31,4 +31,3 @@ Vega gets a separate app that shares the pure packages (the Expo SDK does not ta
 ## Links
 
 - [Foundation spec](../superpowers/specs/2026-11-13-foundation-design.md) section 2.
-- Research [15](../research/15-rn-vega-tizen-webos.md).

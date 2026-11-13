@@ -32,4 +32,3 @@ Electron with a react-native-web renderer (a web-only Expo project). libmpv runs
 ## Links
 
 - [Foundation spec](../superpowers/specs/2026-11-13-foundation-design.md) sections 2, 4, 11.
-- Research [12](../research/12-desktop-strategy.md).

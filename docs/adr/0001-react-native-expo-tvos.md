@@ -31,4 +31,3 @@ React Native through Expo SDK 58 (React 19.3), with `react-native` aliased to `r
 ## Links
 
 - [Foundation spec](../superpowers/specs/2026-11-13-foundation-design.md) section 4.
-- Research [09](../research/09-framework-recheck.md), [10](../research/10-rn-tv-focus-and-player.md), [11](../research/11-rn-project-setup.md).

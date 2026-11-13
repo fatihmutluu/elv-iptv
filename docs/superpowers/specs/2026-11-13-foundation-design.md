@@ -3,7 +3,7 @@
 - Status: approved direction (owner delegated the framework decision on 2026-11-13; product decisions taken on the owner's behalf are logged for review)
 - Date: 2026-11-13
 - Scope: product rules, platforms, licensing, stack, architecture, quality system, workflow, docs, roadmap. Feature behavior is specified later, one spec per feature.
-- Evidence: `docs/research/` (03–06, 09–15). This spec records decisions; research records why.
+- Evidence: internal research notes, which are not published. This spec and the ADRs record the decisions.
 
 ## 1. Product
 
@@ -120,11 +120,11 @@ Packages are source-first (`exports` point at `src/index.ts`, no build step). Ne
 - SQLite is the source of truth; imports stream, run off the UI thread (Electron utility process, time-sliced JS or native fallback on RN) and insert in batched transactions.
 - FTS5 search over a folded-text column produced by a TypeScript fold function with explicit Turkish İ/ı rules.
 - Stable content keys (source + provider stream ID for Xtream; normalized URL + name for M3U); user overrides, favorites and progress live in tables that playlist refreshes never cascade into.
-- Every user-scoped table carries `profile_id`; sync columns are added by the sync round following research 04.
+- Every user-scoped table carries `profile_id`; sync columns are added by the sync round.
 - Provider credentials live in secure storage only.
 
 ### 5.5 Playback
-- `PlayerEngine` contract per research 14: enqueue-and-return commands; every event carries an attempt token; progress is a clock anchor that JS extrapolates; errors have stable codes and recovery hints; capability flags per engine.
+- `PlayerEngine` contract: enqueue-and-return commands; every event carries an attempt token; progress is a clock anchor that JS extrapolates; errors have stable codes and recovery hints; capability flags per engine.
 - `PlaybackService` owns the state machine and a recovery ladder (L0–L5) with a separate backoff path for provider connection limits (429/509) that never opens a second connection.
 - Video renders in native surfaces under an always-mounted JS OSD on mobile/TV; on desktop in a canvas under DOM overlays.
 
@@ -174,7 +174,7 @@ GitHub Issues + public "ELV IPTV Roadmap" project (Backlog → Next → In progr
 Shared `.claude/settings.json` with official-marketplace plugin IDs (superpowers, context7, commit-commands, frontend-design, typescript-lsp, expo skills), deny rules for secrets/signing keys/build outputs/generated code, ask rules for releases and repository deletion or visibility changes. Hooks in Node: block force pushes; a Stop hook running Biome and `tsc` on changed packages without passing file names to a shell (fail-open). Project skills: `add-package`, `github-workflow`, `add-language`. Model use: Opus for specs, plans and final reviews; Sonnet for implementation; Haiku for log triage.
 
 ## 8. Documentation
-README for humans; root `AGENTS.md` (≤150 lines) imported by `CLAUDE.md`; per-package `AGENTS.md` (≤50 lines) with a `CLAUDE.md` stub; `docs/INDEX.md`; MADR ADRs; `docs/research/` (with an index marking superseded reports); specs kept, plans deleted after merge; CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, CLA. No comments that restate code; doc comments on public APIs; file size soft 400 / hard 800 lines; everything in English.
+README for humans; root `AGENTS.md` (≤150 lines) imported by `CLAUDE.md`; per-package `AGENTS.md` (≤50 lines) with a `CLAUDE.md` stub; `docs/INDEX.md`; MADR ADRs; research notes are internal and not published (decisions live in this spec and the ADRs); specs kept, plans deleted after merge; CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, CLA. No comments that restate code; doc comments on public APIs; file size soft 400 / hard 800 lines; everything in English.
 
 ## 9. Discoverability
 Unchanged from the owner's goals: compliant README with the one-sentence description and topics in Round 0; a bilingual website on free hosting (GitHub Pages) in Rounds 1–2 with guides, FAQ, structured data and `llms.txt`; store optimization per store and language at launch; the same description everywhere; Claude flags discoverability work as features land.

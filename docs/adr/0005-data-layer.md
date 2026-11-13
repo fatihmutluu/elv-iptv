@@ -31,4 +31,3 @@ SQLite is the source of truth behind a small `SqlDriver` port: op-sqlite on nati
 ## Links
 
 - [Foundation spec](../superpowers/specs/2026-11-13-foundation-design.md) sections 4, 5.4, 11.
-- Research [13](../research/13-rn-data-state-ui-libs.md), [04](../research/04-backend-and-sync.md).

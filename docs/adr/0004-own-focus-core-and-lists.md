@@ -30,4 +30,3 @@ A pure TypeScript focus core (`packages/focus-core`): focus as indices in scopes
 ## Links
 
 - [Foundation spec](../superpowers/specs/2026-11-13-foundation-design.md) sections 4, 5.6, 6.2, 11.
-- Research [10](../research/10-rn-tv-focus-and-player.md).

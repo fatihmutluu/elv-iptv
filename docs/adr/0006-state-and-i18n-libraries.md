@@ -30,4 +30,3 @@ Zustand 5 for UI state, TanStack Query 5 for asynchronous reads, MMKV 4 for nati
 ## Links
 
 - [Foundation spec](../superpowers/specs/2026-11-13-foundation-design.md) sections 4, 5.7.
-- Research [13](../research/13-rn-data-state-ui-libs.md).

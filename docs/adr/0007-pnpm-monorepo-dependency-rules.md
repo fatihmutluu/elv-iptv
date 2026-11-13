@@ -30,4 +30,3 @@ pnpm 12 workspaces with isolated `node_modules`, Node 24 LTS pinned through `dev
 ## Links
 
 - [Foundation spec](../superpowers/specs/2026-11-13-foundation-design.md) sections 4, 5.1, 5.2.
-- Research [11](../research/11-rn-project-setup.md), [05](../research/05-engineering-infrastructure.md).
