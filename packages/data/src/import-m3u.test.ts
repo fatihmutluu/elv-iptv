@@ -168,14 +168,25 @@ describe('m3u import', () => {
     expect(dump).not.toContain(newPass);
   });
 
-  it('keeps a minority URL with a different token literal under its own key', async () => {
+  it('templates a second token on a judged host and keys it like the first', async () => {
     const odd = ['tok', 'Other0000'].join('');
-    const e = await setupM3u(`${playlist()}${extinf('Odd One', cdn(odd, 110))}`);
-    await run(e);
+    let more = '';
+    for (let i = 0; i < 200; i += 1) more += extinf(`Ch ${i}`, cdn(M3U_TOKEN, 400 + i));
+    const e = await setupM3u(
+      `${playlist()}${more}${extinf('Odd One', cdn(odd, 110))}${extinf('Same', cdn(odd, 401))}`,
+    );
+    expect((await run(e)).ok).toBe(true);
     const odds = await rows(e, "SELECT key, url_template FROM live WHERE name = 'Odd One'");
-    expect(String(odds[0]?.url_template)).toContain(odd);
-    const plain = await rows(e, "SELECT key FROM live WHERE name = 'Haber Bir'");
-    expect(odds[0]?.key).not.toBe(plain[0]?.key);
+    expect(String(odds[0]?.url_template)).toBe(
+      'http://cdn.example:8080/{{v0~1}}/hb/s/110.ts?username={{q:username}}&password={{q:password}}',
+    );
+    expect(JSON.stringify(await rows(e, 'SELECT * FROM live'))).not.toContain(odd);
+    expect((await vars(e))['v0~1']).toBe(odd);
+    const same = await rows(e, "SELECT key FROM live WHERE name IN ('Ch 1', 'Same')");
+    expect(same[0]?.key).not.toBe(same[1]?.key);
+    expect(String(same[1]?.key).replace('|Same', '')).toBe(
+      String(same[0]?.key).replace('|Ch 1', ''),
+    );
   });
 
   it('discovers guide URLs for the guide import unless the user set one', async () => {

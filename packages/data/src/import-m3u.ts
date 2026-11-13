@@ -11,13 +11,8 @@ import { type M3uEntry, scanM3u } from '@elv/sources';
 import { foldText } from './fold';
 import { checkAbort, performRun, type RunCtx, Stop, unwrap } from './import-run';
 import type { ImportDeps, ImportOptions, ImportSummary } from './import-types';
-import {
-  knownCredentials,
-  majorityValues,
-  placeholderNames,
-  SAMPLE_SIZE,
-  VarBook,
-} from './m3u-templating';
+import { RuleBook } from './m3u-rules';
+import { knownCredentials, placeholderNames, SAMPLE_SIZE, VarBook } from './m3u-templating';
 import {
   getSource,
   type SourceRecord,
@@ -26,7 +21,7 @@ import {
   templateGuide,
   updateSourceSettings,
 } from './sources';
-import { detectSegmentRules, type SegmentRule, toTemplate, type UrlVars } from './templates';
+import { keyTemplate, type SegmentRule, toTemplate, type UrlVars } from './templates';
 import { writeCategories, writePlacements } from './writers';
 import {
   type M3uLiveRow,
@@ -44,8 +39,7 @@ const UNGROUPED = 'Ungrouped';
 
 interface State {
   settings: SourceSettings;
-  rules: SegmentRule[];
-  expected: UrlVars;
+  rules: RuleBook;
   known: { username?: string; password?: string };
   book: VarBook;
   categories: Record<Kind, Map<string, number>>;
@@ -97,19 +91,13 @@ export async function readUrlVars(deps: ImportDeps, sourceId: string): Promise<U
 }
 
 function start(source: SourceRecord, playlistUrl: string, sample: readonly M3uEntry[]): State {
-  const urls = sample.map((e) => e.url);
-  const stored = source.settings.segmentRules;
-  const rules = stored !== undefined && stored.length > 0 ? stored : detectSegmentRules(urls);
-  const expected = majorityValues(rules, urls);
-  const settings: SourceSettings = { ...source.settings };
-  if (rules.length > 0) settings.segmentRules = rules;
-  else delete settings.segmentRules;
+  const rules = new RuleBook(source.settings.segmentRules);
+  rules.start(sample.map((e) => e.url));
   return {
-    settings,
+    settings: { ...source.settings },
     rules,
-    expected,
     known: knownCredentials(playlistUrl),
-    book: new VarBook(expected),
+    book: new VarBook(),
     categories: { live: new Map(), movie: new Map(), series: new Map() },
     positions: new Map(),
     placedSeries: new Set(),
@@ -118,7 +106,7 @@ function start(source: SourceRecord, playlistUrl: string, sample: readonly M3uEn
 }
 
 function templated(st: State, url: string): string {
-  return st.book.absorb(toTemplate(url, st.rules, st.known, st.expected));
+  return st.book.absorb(toTemplate(url, st.rules.rules, st.known));
 }
 
 function liveHeaders(st: State, entry: M3uEntry): string | null {
@@ -163,7 +151,7 @@ async function processBatch(c: RunCtx, st: State, entries: readonly M3uEntry[]):
   for (const entry of entries) {
     const template = templated(st, entry.url);
     const row: M3uRow = {
-      key: m3uKey(c.sourceId, template, entry.name),
+      key: m3uKey(c.sourceId, keyTemplate(template), entry.name),
       name: entry.name,
       logo: entry.tvgLogo === undefined ? null : templated(st, entry.tvgLogo),
       template,
@@ -272,7 +260,48 @@ function finish(
   c.counts.episodes = st.seen.episodes.size;
   c.counts.categories =
     st.categories.live.size + st.categories.movie.size + st.categories.series.size;
-  return { rules: st.rules, discovered, vars: { ...vars, ...guideBook.vars } };
+  return { rules: st.rules.final(), discovered, vars: { ...vars, ...guideBook.vars } };
+}
+
+/**
+ * Feeds every entry through the rule book: an entry whose host still collects URLs is held back together with
+ * every later entry (order is kept), until those hosts are judged or {@link SAMPLE_SIZE} entries wait.
+ */
+class Gate {
+  private readonly held: M3uEntry[] = [];
+  private readonly st: State;
+
+  constructor(st: State) {
+    this.st = st;
+  }
+
+  /** Entries that may be written now, in playlist order. */
+  admit(entries: readonly M3uEntry[]): M3uEntry[] {
+    const out: M3uEntry[] = [];
+    for (const entry of entries) {
+      const wait = this.st.rules.hold(entry.url);
+      if (this.held.length === 0 && !wait) {
+        out.push(entry);
+        continue;
+      }
+      this.held.push(entry);
+      if (this.st.rules.ready || this.held.length >= SAMPLE_SIZE) out.push(...this.release());
+    }
+    return out;
+  }
+
+  /** Judges the waiting hosts and returns every held entry. */
+  release(): M3uEntry[] {
+    this.st.rules.settle();
+    return this.held.splice(0);
+  }
+}
+
+async function write(c: RunCtx, st: State, entries: readonly M3uEntry[]): Promise<void> {
+  for (let i = 0; i < entries.length; i += c.batchSize) {
+    checkAbort(c);
+    await processBatch(c, st, entries.slice(i, i + c.batchSize));
+  }
 }
 
 async function execute(
@@ -285,6 +314,7 @@ async function execute(
   const scan = scanM3u(body, { batchSize: c.batchSize, baseUrl: playlistUrl });
   const buffered: M3uEntry[] = [];
   let st: State | undefined;
+  let gate: Gate | undefined;
   let total = 0;
   let guideUrls: string[] = [];
   let present = false;
@@ -303,26 +333,25 @@ async function execute(
         guideUrls = batch.header.guideUrls;
       }
       if (batch.stats !== undefined) c.warnings = batch.stats.warnings.length;
-      if (st === undefined) {
+      if (st === undefined || gate === undefined) {
         buffered.push(...batch.entries);
         if (buffered.length < SAMPLE_SIZE && !batch.done) continue;
         if (batch.done && total === 0 && !present) {
           throw new Stop(elvError('source-format', 'not-a-playlist'));
         }
         st = start(source, playlistUrl, buffered.slice(0, SAMPLE_SIZE));
-        for (let i = 0; i < buffered.length; i += c.batchSize) {
-          checkAbort(c);
-          await processBatch(c, st, buffered.slice(i, i + c.batchSize));
-        }
+        gate = new Gate(st);
+        await write(c, st, gate.admit(buffered));
         buffered.length = 0;
       } else {
-        await processBatch(c, st, batch.entries);
+        await write(c, st, gate.admit(batch.entries));
       }
     }
   } finally {
     await scan.return(ok(undefined));
   }
-  if (st === undefined) throw new Stop(elvError('network', 'stream-failed'));
+  if (st === undefined || gate === undefined) throw new Stop(elvError('network', 'stream-failed'));
+  await write(c, st, gate.release());
   return finish(c, st, playlistUrl, oldVars, guideUrls);
 }
 

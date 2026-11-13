@@ -1,7 +1,7 @@
 import { m3uKey } from '@elv/domain';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { detectSegmentRules, resolveTemplate, toTemplate } from './templates';
+import { detectSegmentRules, hostOf, keyTemplate, resolveTemplate, toTemplate } from './templates';
 
 const ALNUM = 'abcdefghijklmnopqrstuvwxyz0123456789';
 function token(length: number, seed: number): string {
@@ -231,12 +231,48 @@ describe('known credentials in encoded and embedded forms', () => {
 
   it('masks credentials embedded in a segment, the last segment and a query value', () => {
     const pw = 'hunter22';
-    const url = `https://h.example/a/${user}-${pw}.ts?token=zzz&ref=pre${pw}post`;
+    const url = `https://h.example/a/${user}-${pw}.ts?token=zzz&ref=pre_${pw}.post`;
     const { template, vars } = toTemplate(url, [], { username: user, password: pw });
     expect(template).toBe(
-      'https://h.example/a/{{user}}-{{pass}}.ts?token={{q:token}}&ref=pre{{pass}}post',
+      'https://h.example/a/{{user}}-{{pass}}.ts?token={{q:token}}&ref=pre_{{pass}}.post',
     );
     expect(resolveTemplate(template, vars)).toBe(url);
+  });
+
+  it('masks embedded credentials only at word boundaries', () => {
+    const known = { username: '1234', password: 'pw1234567' };
+    const t = toTemplate('https://h.example/a/x1234y/12345/a-1234.m3u8?n=%2F1234', [], known);
+    expect(t.template).toBe('https://h.example/a/x1234y/12345/a-{{user}}.m3u8?n=%2F{{user}}');
+  });
+
+  it('keeps the numeric stream id of an Xtream path literal', () => {
+    const known = { username: '1234', password: 'pw' };
+    const t = toTemplate('https://h.example/movie/1234/pw/1234.mp4', [], known);
+    expect(t.template).toBe('https://h.example/movie/{{user}}/{{pass}}/1234.mp4');
+  });
+
+  it('keeps keys equal across a change of short numeric credentials', () => {
+    const path = (...parts: string[]) => `http://h.example/${parts.join('/')}`;
+    const a = toTemplate(path('live', '1234', 'pw1234567', '12345.ts'), [], {
+      username: '1234',
+      password: 'pw1234567',
+    });
+    const b = toTemplate(path('live', 'abcd', 'pw7654321', '12345.ts'), [], {
+      username: 'abcd',
+      password: 'pw7654321',
+    });
+    expect(a.template).toBe('http://h.example/live/{{user}}/{{pass}}/12345.ts');
+    expect(m3uKey('s', keyTemplate(a.template), 'X')).toBe(
+      m3uKey('s', keyTemplate(b.template), 'X'),
+    );
+  });
+
+  it('finds a credential that a longer, unbounded spelling overlaps', () => {
+    const t = toTemplate('https://h.example/p/abc-xy/q', [], {
+      username: 'abc',
+      password: 'abc-x',
+    });
+    expect(t.template).toBe('https://h.example/p/{{user}}-xy/q');
   });
 
   it('masks a whole query value that only decodes to the password', () => {
@@ -266,16 +302,36 @@ describe('last segment and minority URLs', () => {
     expect(u.template).toBe('https://h.example/{{user}}/a');
   });
 
-  it('keeps a minority value literal and keeps its key distinct', () => {
+  it('templates every value at a rule position', () => {
     const common = token(24, 1);
     const other = token(24, 2);
-    const expected = { v0: common };
-    const a = toTemplate(`https://h.example/${common}/s1`, rules, NONE, expected);
-    const b = toTemplate(`https://h.example/${other}/s1`, rules, NONE, expected);
+    const a = toTemplate(`https://h.example/${common}/s1`, rules, NONE);
+    const b = toTemplate(`https://h.example/${other}/s1`, rules, NONE);
     expect(a.template).toBe('https://h.example/{{v0}}/s1');
-    expect(b.template).toBe(`https://h.example/${other}/s1`);
-    expect(b.vars).toEqual({});
-    expect(m3uKey('s', a.template, 'N')).not.toBe(m3uKey('s', b.template, 'N'));
+    expect(b.template).toBe('https://h.example/{{v0}}/s1');
+    expect(b.vars).toEqual({ v0: other });
+  });
+});
+
+describe('keyTemplate', () => {
+  it('replaces every placeholder by one constant and keeps escaped braces', () => {
+    expect(keyTemplate('https://h/{{v0~2}}/{{user:1}}/{{(}}x?t={{q:token}}')).toBe(
+      'https://h/{{*}}/{{*}}/{{(}}x?t={{*}}',
+    );
+  });
+
+  it('gives a second account the key of the first', () => {
+    const r = [{ host: 'h.example', position: 0, name: 'v0' }];
+    const a = toTemplate(`https://h.example/${token(24, 1)}/s1`, r, NONE).template;
+    const b = 'https://h.example/{{v0~1}}/s1';
+    expect(m3uKey('s', keyTemplate(a), 'N')).toBe(m3uKey('s', keyTemplate(b), 'N'));
+  });
+});
+
+describe('hostOf', () => {
+  it('reads the lower-case host with port and ignores userinfo', () => {
+    expect(hostOf('HTTP://u:p@CDN.example:8080/a')).toBe('cdn.example:8080');
+    expect(hostOf('nope')).toBeUndefined();
   });
 });
 

@@ -1,10 +1,9 @@
-import type { SegmentRule, UrlVars } from './templates';
+import type { UrlVars } from './templates';
 
 const PLACEHOLDER = /\{\{([^{}]+)\}\}/g;
-const URL_HEAD = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)([^?#]*)/i;
 const GET_PHP = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*(?:\/[^/?#]*)*\/get\.php\?([^#]*)/i;
 
-/** Sample size for rule detection and for the majority value of each rule. */
+/** Entries of the first rule judgement, and the most entries held back while a later host is judged. */
 export const SAMPLE_SIZE = 1000;
 
 /**
@@ -58,40 +57,6 @@ export function knownCredentials(playlistUrl: string): { username?: string; pass
     if (name === 'password') known.password = decode(pair.slice(eq + 1));
   }
   return known;
-}
-
-/** The most frequent value of each rule's path position in the sample (rules without a hit are left out). */
-export function majorityValues(rules: readonly SegmentRule[], sample: readonly string[]): UrlVars {
-  const parsed: { host: string; segments: string[] }[] = [];
-  for (const url of sample) {
-    const m = URL_HEAD.exec(url);
-    if (m === null) continue;
-    const authority = m[1] ?? '';
-    parsed.push({
-      host: authority.slice(authority.lastIndexOf('@') + 1).toLowerCase(),
-      segments: (m[2] ?? '') === '' ? [] : (m[2] ?? '').slice(1).split('/'),
-    });
-  }
-  const result: UrlVars = {};
-  for (const rule of rules) {
-    const counts = new Map<string, number>();
-    for (const p of parsed) {
-      const value = p.segments[rule.position];
-      if (p.host !== rule.host || value === undefined || value === '') continue;
-      if (rule.position >= p.segments.length - 1) continue;
-      counts.set(value, (counts.get(value) ?? 0) + 1);
-    }
-    let best: string | undefined;
-    let bestCount = 0;
-    for (const [value, n] of counts) {
-      if (n > bestCount) {
-        best = value;
-        bestCount = n;
-      }
-    }
-    if (best !== undefined) result[rule.name] = best;
-  }
-  return result;
 }
 
 /** Names of the placeholders in a template. */

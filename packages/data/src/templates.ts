@@ -14,6 +14,7 @@ export interface UrlVars {
 
 const URL_SPLIT = /^([a-z][a-z0-9+.-]*:\/\/)([^/?#]*)([^?#]*)(\?[^#]*)?(#.*)?$/i;
 const PLACEHOLDER = /\{\{([^{}]+)\}\}/g;
+const ESCAPE_NAME = '(';
 const NUMERIC_ID = /^\d+(?:\.[a-z0-9]+)?$/i;
 const MIN_SEGMENT_LENGTH = 8;
 const MIN_SHARE = 0.99;
@@ -42,6 +43,21 @@ function parse(url: string): Parts | undefined {
     query: m[4]?.slice(1),
     fragment: m[5] ?? '',
   };
+}
+
+/** Lower-case host (with port) of a URL; `undefined` when it has no `scheme://`. */
+export function hostOf(url: string): string | undefined {
+  return parse(url)?.host.toLowerCase();
+}
+
+/**
+ * The template a content key is computed from: every placeholder becomes the same `{{*}}`, so placeholder names,
+ * `~<n>` suffixes and the values behind them never change a key.
+ */
+export function keyTemplate(template: string): string {
+  return template.replace(PLACEHOLDER, (whole, name: string) =>
+    name === ESCAPE_NAME ? whole : '{{*}}',
+  );
 }
 
 /**
@@ -95,7 +111,8 @@ function xtreamCredentialIndexes(segs: readonly string[]): [number, number] | un
 }
 
 const MIN_KNOWN_LENGTH = 3;
-const ESCAPE_NAME = '(';
+const ALNUM = /[a-z0-9]/i;
+const ENCODED_TAIL = /%[0-9a-f]{2}$/i;
 
 const escapeLiteral = (text: string): string => text.replace(/\{\{/g, `{{${ESCAPE_NAME}}}`);
 const regexEscape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -135,8 +152,22 @@ function decodedForms(text: string): string[] {
   return forms;
 }
 
+/**
+ * Whether `text[start, end)` stands on its own: no letter or digit right before or after it (a percent escape
+ * before it counts as a separator), so a numeric credential never matches inside a longer number.
+ */
+function bounded(text: string, start: number, end: number): boolean {
+  const before = text[start - 1];
+  const after = text[end];
+  const left =
+    before === undefined ||
+    !ALNUM.test(before) ||
+    ENCODED_TAIL.test(text.slice(Math.max(0, start - 3), start));
+  return left && (after === undefined || !ALNUM.test(after));
+}
+
 interface Masker {
-  /** Escapes literal text and swaps embedded known credentials for placeholders. */
+  /** Escapes literal text and swaps embedded known credentials (at word boundaries) for placeholders. */
   literal(text: string): string;
   /** Placeholder base (`user` or `pass`) when the whole text decodes to a known credential. */
   whole(text: string): 'user' | 'pass' | undefined;
@@ -162,11 +193,18 @@ function makeMasker(known: { username?: string; password?: string }, vars: UrlVa
       if (pattern === undefined) return escapeLiteral(text);
       let out = '';
       let last = 0;
-      for (const m of text.matchAll(pattern)) {
-        const base = lookup.get(m[0]) as 'user' | 'pass';
-        out += escapeLiteral(text.slice(last, m.index));
-        out += `{{${assign(vars, base, m[0])}}}`;
-        last = m.index + m[0].length;
+      pattern.lastIndex = 0;
+      for (let m = pattern.exec(text); m !== null; m = pattern.exec(text)) {
+        const at = m.index;
+        const form = forms.find((f) => text.startsWith(f, at) && bounded(text, at, at + f.length));
+        if (form === undefined) {
+          pattern.lastIndex = at + 1;
+          continue;
+        }
+        out += escapeLiteral(text.slice(last, at));
+        out += `{{${assign(vars, lookup.get(form) as 'user' | 'pass', form)}}}`;
+        last = at + form.length;
+        pattern.lastIndex = last;
       }
       return out + escapeLiteral(text.slice(last));
     },
@@ -208,16 +246,16 @@ function templateQuery(query: string, vars: UrlVars, mask: Masker): string {
  * (segment rules of the URL's host); `q:<param>` (credential query parameters, ADR 0011 list). Literal `{{`
  * becomes `{{(}}`. {@link resolveTemplate} reverses it exactly. An unparsable value is returned unchanged.
  *
- * Segment rules and whole-segment credential matches never touch the last path segment (the resource itself).
- * Known credentials shorter than 3 characters are only replaced inside Xtream-shaped paths, so a one-character
- * password cannot rewrite unrelated text. When `expected` holds a rule's value, only a segment equal to it is
- * templated; any other value stays literal.
+ * Segment rules and whole-segment credential matches never touch the last path segment (the resource itself);
+ * every value at a rule position is templated, whatever it is. Known credentials shorter than 3 characters are
+ * only replaced inside Xtream-shaped paths, so a one-character password cannot rewrite unrelated text, and
+ * embedded credentials are replaced only at word boundaries. The numeric stream id of an Xtream-shaped path is
+ * never rewritten.
  */
 export function toTemplate(
   url: string,
   rules: readonly SegmentRule[],
   known: { username?: string; password?: string },
-  expected?: UrlVars,
 ): { template: string; vars: UrlVars } {
   const p = parse(url);
   const vars: UrlVars = {};
@@ -231,13 +269,6 @@ export function toTemplate(
     const seg = segs[rule.position];
     if (rule.host !== host || rule.position >= last || seg === undefined || seg === '') continue;
     if (names[rule.position] !== undefined) continue;
-    if (
-      expected !== undefined &&
-      Object.hasOwn(expected, rule.name) &&
-      expected[rule.name] !== seg
-    ) {
-      continue;
-    }
     vars[rule.name] = seg;
     names[rule.position] = rule.name;
   }
@@ -251,11 +282,17 @@ export function toTemplate(
     const base = names[i] === undefined && seg !== '' ? mask.whole(seg) : undefined;
     if (base !== undefined) names[i] = assign(vars, base, seg);
   }
+  const literalId = xt !== undefined && NUMERIC_ID.test(segs[last] ?? '') ? last : -1;
   let path = '';
   let run = '';
   segs.forEach((seg, i) => {
     run += '/';
     const name = names[i];
+    if (i === literalId) {
+      path += `${mask.literal(run)}${escapeLiteral(seg)}`;
+      run = '';
+      return;
+    }
     if (name === undefined) {
       run += seg;
       return;

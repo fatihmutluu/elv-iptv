@@ -19,10 +19,11 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
   migrates to `SCHEMA_VERSION` with `MIGRATIONS` in `schema.ts` (raw SQL, `PRAGMA user_version`): `storage/schema-too-new`,
   `storage/migration-failed` (rolled back). Add a schema change as a new entry, never by editing an old one.
 - `foldText(text)` (`fold.ts`): Turkish-aware, accent- and punctuation-insensitive folding for `name_fold` columns.
-- `templates.ts`: `detectSegmentRules`, `toTemplate`, `resolveTemplate`. URLs become `{{name}}` templates (`user`, `pass`,
-  `userinfo`, `v<N>` segment rules, `q:<param>` credential query values); values go to the secret store. Known credentials
-  (>= 3 chars) are masked raw and percent-encoded; rules and whole-segment matches skip the last path segment; literal
-  `{{` is escaped as `{{(}}`. Keys are `m3uKey(sourceId, template, name)`.
+- `templates.ts`: `detectSegmentRules`, `toTemplate`, `resolveTemplate`, `keyTemplate`, `hostOf`. URLs become `{{name}}` templates
+  (`user`, `pass`, `userinfo`, `v<N>` segment rules, `q:<param>` credential query values); values go to the secret store. Known
+  credentials (>= 3 chars) are masked raw and percent-encoded at word boundaries; every value at a rule position is templated;
+  rules and whole-segment matches skip the last segment; numeric Xtream ids stay literal; literal `{{` is `{{(}}`. Keys are
+  `m3uKey(sourceId, keyTemplate(template), name)` (every placeholder becomes `{{*}}`).
 - `source-link.ts`: `addSourceFromLink` adds a pasted `…/get.php?username=…&password=…` link as an Xtream source (`parseXtreamLink`; output sets `xtreamFormat`; a guide override is templated like M3U ones, `vodPlaylist` is ignored), else as M3U; `keepAsM3u` opts out.
 - `sources.ts`: `addXtreamSource`, `addM3uSource`, `getSource`, `updateSourceSettings`, `removeSource`, `removeSecrets`, `TABLES_BY_SOURCE`, `secretKey`. `removeSource` deletes every table of the source explicitly (no foreign keys; a new table with `source_id` must be added
   to its list) and returns `storage/secret-delete-failed` if a secret survives (retry `removeSecrets`). M3U guide URLs are
@@ -37,9 +38,8 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
   exceptions are ignored. Xtream: account check first, then categories, live, movies, series; `source-format/too-large`
   falls back to per-category calls; placement `position` is provider order within the category. Episodes load on
   demand (`loadSeriesEpisodes`) and survive re-imports while their series exists.
-- M3U (`import-m3u.ts`, `m3u-templating.ts`, `writers-m3u.ts`; run lifecycle `performRun` in `import-run.ts`): entry URLs, logos
-  and live referers are templates (rules from the first 1,000 entries, majority value expected, minority stays
-  literal; clashing values get `~<n>`); `kindHint` picks the table, episodes sit under a synthetic series per `group-title`;
+- M3U (`import-m3u.ts`, `m3u-rules.ts`, `m3u-templating.ts`, `writers-m3u.ts`; lifecycle `performRun` in `import-run.ts`): entry URLs,
+  logos, live referers are templates (`RuleBook` judges hosts every run: sample hosts with >= 50 URLs at once, others on up to 50 URLs while entries wait in order; clashing values `~<n>`); `kindHint` picks the table, episodes sit under a synthetic series per `group-title`;
   `url-tvg` goes to `discoveredGuideUrls`; no header and no entries is `not-a-playlist`; zero items is `empty-source`.
   Rules, guide URLs and `urlvars` are staged and committed only with `ok` (settings in the cleanup transaction, the secret
   right after; failure there is `storage/secret-write-failed`); a failed run changes neither. Groupless entries: `Ungrouped`.
