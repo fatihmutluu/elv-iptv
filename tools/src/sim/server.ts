@@ -1,6 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { findRepoRoot } from '../root.ts';
 import { ACCOUNTS } from './accounts.ts';
 import {
@@ -12,7 +11,9 @@ import {
 import { type Fault, FaultParseError, parseFaults } from './faults.ts';
 import { type LogEntry, RequestLog, redact } from './log.ts';
 import { findFfmpeg } from './media.ts';
+import { requestFaults } from './request-faults.ts';
 import { dataRoute, sendText } from './routes-data.ts';
+import { liveRoute } from './routes-live.ts';
 import { mediaRoute } from './routes-media.ts';
 
 /** Options of `startSim`; every field is optional. */
@@ -49,7 +50,7 @@ export function defaultCacheDir(): string {
 }
 
 const DEFAULT_MEDIA_SECONDS = 600;
-const routes: RouteHandler[] = [dataRoute, mediaRoute];
+const routes: RouteHandler[] = [dataRoute, mediaRoute, liveRoute];
 
 function headersOf(req: IncomingMessage): Record<string, string> {
   const out: Record<string, string> = {};
@@ -161,27 +162,6 @@ async function simRoute(
     sendText(res, 204, 'text/plain');
   } else return false;
   return true;
-}
-
-/** Applies request-level faults; true when one of them answered the request. */
-async function requestFaults(
-  req: IncomingMessage,
-  res: ServerResponse,
-  faults: Fault[],
-): Promise<boolean> {
-  for (const f of faults) if (f.kind === 'slow-start') await sleep(f.sec * 1000);
-  for (const f of faults) {
-    if (f.kind === 'status') sendText(res, f.code, 'text/plain');
-    else if (f.kind === 'text-notice') sendText(res, 200, 'text/plain', 'Max connections reached');
-    else if (f.kind === 'redirect') {
-      const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'sim'}`);
-      url.searchParams.delete('fault');
-      res.writeHead(302, { location: url.toString() });
-      res.end();
-    } else continue;
-    return true;
-  }
-  return false;
 }
 
 async function handle(

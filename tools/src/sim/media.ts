@@ -1,7 +1,8 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Readable } from 'node:stream';
 import type { RecipeName } from './catalog.ts';
 
 /** Files of one generated recipe. Segments are named `seg00000.ts` and up, 2 s each. */
@@ -170,4 +171,52 @@ export function ensureRecipe(
   inflight.set(dir, job);
   job.catch(() => inflight.delete(dir));
   return job;
+}
+
+const children = new Set<ChildProcess>();
+const KILL_GRACE_MS = 2000;
+
+/** Number of live FFmpeg children the simulator is running right now. */
+export function activeChildren(): number {
+  return children.size;
+}
+
+/** A running real-time FFmpeg copy of a recipe loop. */
+export interface LiveProcess {
+  stdout: Readable;
+  stop(): void;
+}
+
+/** Starts FFmpeg looping `loopTs` at real time as MPEG-TS on stdout. */
+export function spawnLive(ffmpeg: string, loopTs: string): LiveProcess {
+  const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-re', '-stream_loop', '-1'];
+  const child = spawn(ffmpeg, [...args, '-i', loopTs, '-c', 'copy', '-f', 'mpegts', 'pipe:1'], {
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  children.add(child);
+  let timer: NodeJS.Timeout | undefined;
+  child.on('error', () => child.stdout.destroy());
+  child.on('close', () => {
+    children.delete(child);
+    clearTimeout(timer);
+  });
+  child.stdout.on('error', () => undefined);
+  return {
+    stdout: child.stdout,
+    stop() {
+      if (!children.has(child)) return;
+      child.kill();
+      timer = setTimeout(() => {
+        if (!children.has(child)) return;
+        if (process.platform === 'win32' && child.pid !== undefined) {
+          spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+            windowsHide: true,
+            stdio: 'ignore',
+          });
+        } else child.kill('SIGKILL');
+      }, KILL_GRACE_MS);
+      timer.unref();
+    },
+  };
 }
