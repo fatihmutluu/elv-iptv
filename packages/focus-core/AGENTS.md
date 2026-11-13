@@ -17,9 +17,10 @@ Focus graph, key model and EPG cursor model.
 ## Key model (`keys.ts`, `interpreter.ts`)
 - `createKeyInterpreter()` turns `KeyInput` (`down`/`up`/`press`, caller-supplied `time`) into `KeyEvent`s
   (`press`/`long`/`repeat`). It never reads a clock; call `tick(now)` from the host loop.
-- Arrows and `channelUp`/`channelDown` step on `down`: the `press` comes with the `down` (its time), their `up` emits
-  no `press` (nor does an `up` without a `down`). Other keys press on an `up` before the threshold, so `long` stays
-  distinguishable; for them an `up` without a `down` is a `press`.
+- Arrows and `channelUp`/`channelDown` step on the earliest input: a `down` gives the `press` (its time) and the
+  following `up` nothing; an `up` without a `down` is one `press` at its time. Android TV delivers a tap only as its
+  release, so there the step and the measured latency start at the release, not at the physical press. Other keys
+  press on an `up` before the threshold, so `long` stays distinguishable; an `up` without a `down` is a `press` too.
 - Thresholds are constants in `keys.ts`: `LONG_PRESS_MS` 500, `REPEAT_START_HZ` 8, `REPEAT_FAST_HZ` 24,
   `REPEAT_RAMP_MS` 1500. Repeats start one slow interval after the long threshold and switch to the fast interval
   for repeats due at or after `LONG_PRESS_MS + REPEAT_RAMP_MS` of holding.

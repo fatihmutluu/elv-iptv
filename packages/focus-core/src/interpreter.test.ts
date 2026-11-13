@@ -119,10 +119,20 @@ describe('step keys (arrows and channel keys)', () => {
     expect(k.tick(500)).toEqual([{ key: 'up', kind: 'long', time: 500 }]);
   });
 
-  it('emits nothing for an arrow up without a down', () => {
+  it('presses once on an arrow up without a down, as Android TV delivers a tap (release only)', () => {
     const k = createKeyInterpreter();
-    expect(k.input(up('down', 9))).toEqual([]);
-    expect(k.input(up('channelDown', 9))).toEqual([]);
+    expect(k.input(up('down', 9))).toEqual([{ key: 'down', kind: 'press', time: 9 }]);
+    expect(k.input(up('channelDown', 12))).toEqual([
+      { key: 'channelDown', kind: 'press', time: 12 },
+    ]);
+    expect(k.input(up('down', 30))).toEqual([{ key: 'down', kind: 'press', time: 30 }]);
+  });
+
+  it('does not press twice when the down was seen', () => {
+    const k = createKeyInterpreter();
+    expect(k.input(down('right', 0))).toHaveLength(1);
+    expect(k.input(up('right', 80))).toEqual([]);
+    expect(k.input(up('right', 90))).toEqual([{ key: 'right', kind: 'press', time: 90 }]);
   });
 
   it('steps on down, then fires long at 500 ms and repeats while held, and nothing on release', () => {
@@ -279,7 +289,7 @@ describe('properties', () => {
     );
   });
 
-  it('presses a step key once per fresh down at its time, never on up; other keys never on down', () => {
+  it('presses a step key once per press, on its down or else on its orphan up; other keys never on down', () => {
     const steps = new Set<Key>(['up', 'down', 'channelUp']);
     fc.assert(
       fc.property(fc.array(stepArb, { maxLength: 120 }), (script) => {
@@ -297,7 +307,13 @@ describe('properties', () => {
             held.add(s.key);
           } else if (s.op === 'up') {
             const presses = k.input(up(s.key, now)).filter((e) => e.kind === 'press');
-            expect(presses.length).toBeLessThanOrEqual(steps.has(s.key) ? 0 : 1);
+            if (steps.has(s.key)) {
+              expect(presses).toEqual(
+                held.has(s.key) ? [] : [{ key: s.key, kind: 'press', time: now }],
+              );
+            } else {
+              expect(presses.length).toBeLessThanOrEqual(1);
+            }
             held.delete(s.key);
           } else if (s.op === 'tick') {
             expect(k.tick(now).every((e) => e.kind !== 'press')).toBe(true);

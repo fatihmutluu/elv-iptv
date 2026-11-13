@@ -33,9 +33,10 @@ interface Held {
 /**
  * Creates a key interpreter.
  *
- * Step keys (the arrows, `channelUp`, `channelDown`) emit their `press` on `down`, stamped with the down time, so a
- * step happens when the remote key goes down; their `up` emits no `press`. Every other key emits one `press` on an
- * `up` that comes before `LONG_PRESS_MS` (or without a `down`), so `long` stays distinguishable. A long-capable key
+ * Step keys (the arrows, `channelUp`, `channelDown`) emit their `press` on the earliest input that shows it: on `down`,
+ * stamped with the down time, and then their `up` emits nothing; an `up` without a `down` (Android TV delivers a tap
+ * only on release) is one `press` at its time. Every other key emits one `press` on an `up` that comes before
+ * `LONG_PRESS_MS` (or without a `down`), so `long` stays distinguishable. A long-capable key
  * held that long emits one `long` (stamped `downAt + LONG_PRESS_MS`, from `tick`, or from `up` if no tick saw it) and
  * no `press` on release. Repeat keys then emit `repeat` every 1000/REPEAT_START_HZ ms, switching to
  * 1000/REPEAT_FAST_HZ ms for repeats due at or after `downAt + LONG_PRESS_MS + REPEAT_RAMP_MS`. The first repeat is
@@ -72,8 +73,9 @@ export function createKeyInterpreter(opts: KeyInterpreterOptions = {}): KeyInter
     }
     const h = held.get(key);
     held.delete(key);
+    if (h === undefined) return [{ key, kind: 'press', time }];
     const capable = longKeys.has(key) || repeatKeys.has(key);
-    if (h === undefined || !capable || time - h.downAt < LONG_PRESS_MS) {
+    if (!capable || time - h.downAt < LONG_PRESS_MS) {
       return STEP_KEYS.has(key) ? [] : [{ key, kind: 'press', time }];
     }
     if (longKeys.has(key) && !h.longFired)
