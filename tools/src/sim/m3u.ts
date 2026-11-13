@@ -115,7 +115,7 @@ function compatExtras(c: CompatCase, ch: LiveChannel, ctx: Ctx): Extras {
 
 function liveTvgId(ch: LiveChannel): string | null {
   if (ch.compat === 'duplicate-id-a' || ch.compat === 'duplicate-id-b') return 'dup';
-  return ch.epgId === null ? null : `ch${ch.id}`;
+  return ch.epgId;
 }
 
 function* liveLines(catalog: Catalog, ctx: Ctx, groups: Map<string, string>): Generator<string> {

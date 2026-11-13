@@ -254,7 +254,7 @@ function makeLive(profile: ProfileName, shape: Shape): LiveChannel[] {
           ? (COMPAT_NAMES[compat] as string)
           : `Channel ${pad(i + 1)}`,
       categoryId: `live-${(i % shape.liveCats) + 1}`,
-      epgId: hasEpg ? `channel-${pad(i + 1, 5)}.sim` : null,
+      epgId: hasEpg ? `ch${id}` : null,
       logo: i % 7 === 6 ? null : id,
       recipe: radio ? 'aac-radio' : (VIDEO_RECIPES[i % VIDEO_RECIPES.length] as RecipeName),
       fault: profile === 'small' ? (SMALL_FAULTS[id] ?? null) : null,
