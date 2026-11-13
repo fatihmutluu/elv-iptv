@@ -30,3 +30,14 @@ M3U and XMLTV scanners and the Xtream client.
   Elements over 1 MiB are skipped. Corrupt gzip returns `err` `source-format`/`gzip-corrupt`; an input iterable that throws returns `err` (own category/code if ElvError-shaped, else `network`/`stream-failed`); on any `err` no `done` batch is yielded and the run is a failure. A programme without `<title>` gets `title: ''`.
   Implementation: `xmltv.ts` (run loop, element handling, gzip sniffing), `xml-tokens.ts` (byte-level tag, attribute and
   text helpers), `xmltv-children.ts` (child elements), `xmltv-time.ts` (`parseXmltvTime`), `xmltv-types.ts`.
+- `createXtreamClient({ http, server, username, password, transport? })` returns an `XtreamClient` over the `player_api.php`
+  endpoints: `account`, `categories`, `liveStreams`/`vodStreams`/`series` (optional `categoryId` to bound one call),
+  `seriesInfo`, `vodInfo`, `shortEpg`, plus `playlistUrl`, `guideUrl` and `streamUrl` (play time only). Numbers and
+  numeric strings are equal, `''`/null/missing are absent, text is entity-decoded and trimmed, `category_ids` beats
+  `category_id`, repeated ids merge (union of `categoryIds`), epoch fields are milliseconds. Errors: `auth`
+  (`invalid-credentials`, `account-<status>`, `unauthorized`), `network` (`request-failed`, `server-error`, `http-status`,
+  `stream-failed`, transport codes), `source-format` (`invalid-json`, `unexpected-shape`). Credentials appear only in
+  the three URL builders; error `detail` never holds a URL. Each response body is read into one string, so use
+  per-category calls for big providers.
+  Implementation: `xtream.ts` (client, requests, errors), `xtream-records.ts` (row mappers), `xtream-normalize.ts`
+  (`toNumber`, `toText`, `mergeById`), `xtream-types.ts`.

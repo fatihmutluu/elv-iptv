@@ -17,3 +17,6 @@ export {
   type XmltvOptions,
   type XmltvProgramme,
 } from './xmltv';
+export { createXtreamClient } from './xtream';
+export { mergeById, toNumber, toText } from './xtream-normalize';
+export type * from './xtream-types';
