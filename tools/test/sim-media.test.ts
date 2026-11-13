@@ -1,7 +1,7 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ACCOUNTS } from '../src/sim/accounts.ts';
 import { buildCatalog } from '../src/sim/catalog.ts';
 import { ensureRecipe, findFfmpeg } from '../src/sim/media.ts';
@@ -35,16 +35,19 @@ withFfmpeg('recipes', () => {
   afterAll(() => rmSync(cacheDir, { recursive: true, force: true }));
 
   it('generates a recipe once for concurrent callers', async () => {
-    const opts = { ffmpeg: ffmpeg as string, cacheDir, seconds: 4 };
-    const [a, b] = await Promise.all([
-      ensureRecipe('h264-aac-720p25', opts),
-      ensureRecipe('h264-aac-720p25', opts),
-    ]);
+    let runs = 0;
+    const opts = { ffmpeg: ffmpeg as string, cacheDir, seconds: 4, onSpawn: () => runs++ };
+    const first = ensureRecipe('h264-aac-720p25', opts);
+    const second = ensureRecipe('h264-aac-720p25', opts);
+    expect(second).toBe(first);
+    const [a, b] = await Promise.all([first, second]);
+    expect(runs).toBe(4);
     expect(a).toEqual(b);
     expect(readdirSync(cacheDir)).toHaveLength(1);
     expect(a.segmentCount).toBeGreaterThanOrEqual(2);
     const before = statSync(a.loopTs).mtimeMs;
     const c = await ensureRecipe('h264-aac-720p25', opts);
+    expect(runs).toBe(4);
     expect(c).toEqual(a);
     expect(statSync(c.loopTs).mtimeMs).toBe(before);
   });
@@ -95,6 +98,42 @@ withFfmpeg('recipes', () => {
       expect(past.headers.get('content-range')).toBe(`bytes */${size}`);
     }
   }, 60_000);
+});
+
+describe('generation failure', () => {
+  const missing = join(tmpdir(), 'sim-no-such-ffmpeg', 'ffmpeg');
+  let dir = '';
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'sim-media-fail-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('rejects, leaves no folders and retries on the next call', async () => {
+    let runs = 0;
+    const opts = { ffmpeg: missing, cacheDir: dir, seconds: 4, onSpawn: () => runs++ };
+    await expect(ensureRecipe('h264-aac-720p25', opts)).rejects.toThrow(/cannot start FFmpeg/);
+    expect(readdirSync(dir)).toEqual([]);
+    await expect(ensureRecipe('h264-aac-720p25', opts)).rejects.toThrow(/cannot start FFmpeg/);
+    expect(runs).toBe(2);
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  it.skipIf(ffmpeg === null)('succeeds after an earlier failure', async () => {
+    const base = { cacheDir: dir, seconds: 4 };
+    await expect(ensureRecipe('aac-radio', { ...base, ffmpeg: missing })).rejects.toThrow();
+    const files = await ensureRecipe('aac-radio', { ...base, ffmpeg: ffmpeg as string });
+    expect(files.segmentCount).toBeGreaterThanOrEqual(1);
+    expect(readdirSync(dir)).toHaveLength(1);
+  });
+
+  it('answers 503 with the failure text when generation fails', async () => {
+    const sim = await startSim({ port: 0, ffmpegPath: missing, cacheDir: dir });
+    open.push(sim);
+    const res = await fetch(`${sim.url}/movie/${pair}/${movie.id}.mp4`);
+    expect(res.status).toBe(503);
+    expect(res.headers.get('content-type')).toContain('text/plain');
+    expect(await res.text()).toContain('FFmpeg failed');
+  });
 });
 
 describe('vod access', () => {

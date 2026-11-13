@@ -72,7 +72,13 @@ export function findFfmpeg(): string | null {
   return null;
 }
 
-function runFfmpeg(ffmpeg: string, args: string[], recipe: RecipeName): Promise<void> {
+function runFfmpeg(
+  ffmpeg: string,
+  args: string[],
+  recipe: RecipeName,
+  onSpawn?: () => void,
+): Promise<void> {
+  onSpawn?.();
   return new Promise((resolve, reject) => {
     const child = spawn(ffmpeg, [...QUIET, ...args], {
       windowsHide: true,
@@ -121,7 +127,9 @@ async function generate(
   dir: string,
   ffmpeg: string,
   seconds: number,
+  onSpawn?: () => void,
 ): Promise<void> {
+  const run = (args: string[]): Promise<void> => runFfmpeg(ffmpeg, args, recipe, onSpawn);
   const tmp = `${dir}.tmp-${process.pid}-${Date.now()}`;
   mkdirSync(join(tmp, 'segments'), { recursive: true });
   try {
@@ -129,18 +137,10 @@ async function generate(
     const copy = ['-i', loop, '-c', 'copy'];
     const hls = ['-f', 'hls', '-hls_time', '2', '-hls_playlist_type', 'vod'];
     const names = ['-hls_segment_filename', join(tmp, 'segments', 'seg%05d.ts')];
-    await runFfmpeg(
-      ffmpeg,
-      [...RECIPE_ARGS[recipe], '-t', `${seconds}`, '-f', 'mpegts', loop],
-      recipe,
-    );
-    await runFfmpeg(ffmpeg, [...copy, '-movflags', '+faststart', join(tmp, 'vod.mp4')], recipe);
-    await runFfmpeg(ffmpeg, [...copy, join(tmp, 'vod.mkv')], recipe);
-    await runFfmpeg(
-      ffmpeg,
-      [...copy, ...hls, ...names, join(tmp, 'segments', 'index.m3u8')],
-      recipe,
-    );
+    await run([...RECIPE_ARGS[recipe], '-t', `${seconds}`, '-f', 'mpegts', loop]);
+    await run([...copy, '-movflags', '+faststart', join(tmp, 'vod.mp4')]);
+    await run([...copy, join(tmp, 'vod.mkv')]);
+    await run([...copy, ...hls, ...names, join(tmp, 'segments', 'index.m3u8')]);
     rmSync(dir, { recursive: true, force: true });
     renameSync(tmp, dir);
   } catch (error) {
@@ -149,10 +149,13 @@ async function generate(
   }
 }
 
-/** Generates (once per process and cache dir, single-flight) and returns the recipe files. */
+/**
+ * Generates (once per process and cache dir, single-flight) and returns the recipe files.
+ * `onSpawn` is called before each FFmpeg run; tests use it to count runs.
+ */
 export function ensureRecipe(
   recipe: RecipeName,
-  opts: { ffmpeg: string; cacheDir: string; seconds: number },
+  opts: { ffmpeg: string; cacheDir: string; seconds: number; onSpawn?: () => void },
 ): Promise<RecipeFiles> {
   const dir = recipeDir(recipe, opts.cacheDir, opts.seconds);
   const running = inflight.get(dir);
@@ -160,7 +163,7 @@ export function ensureRecipe(
   const job = (async () => {
     if (!existsSync(join(dir, 'segments', 'index.m3u8'))) {
       mkdirSync(opts.cacheDir, { recursive: true });
-      await generate(recipe, dir, opts.ffmpeg, opts.seconds);
+      await generate(recipe, dir, opts.ffmpeg, opts.seconds, opts.onSpawn);
     }
     return describeDir(dir);
   })();
