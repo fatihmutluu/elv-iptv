@@ -7,11 +7,12 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "vitest run --reporter=dot --passWithNoTests",
+    "test": "vitest run --coverage --reporter=dot --passWithNoTests",
     "typecheck": "tsc --noEmit -p . --pretty false"
   },
   "devDependencies": {
     "@elv/config": "workspace:*",
+    "@vitest/coverage-v8": "catalog:",
     "fast-check": "catalog:",
     "vitest": "5.1.0"
   }

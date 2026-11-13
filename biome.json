@@ -1,7 +1,11 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.6.7/schema.json",
   "extends": ["./packages/config/biome.json"],
-  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
   "files": {
     "includes": [
       "**",
@@ -21,7 +25,13 @@
   "overrides": [
     {
       "includes": ["tools/bin/**", "tools/src/cli-*.ts", "scripts/**"],
-      "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          }
+        }
+      }
     },
     {
       "includes": [
@@ -63,6 +73,19 @@
                     "message": "Pure packages never import react, react-native, expo, electron or node:*; use a port from @elv/domain (spec section 5.2)."
                   }
                 ]
+              }
+            },
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "window": "Pure packages run on non-browser runtimes (Hermes, Node); use a port from @elv/domain instead of browser globals.",
+                  "document": "Pure packages run on non-browser runtimes (Hermes, Node); use a port from @elv/domain instead of browser globals.",
+                  "localStorage": "Pure packages run on non-browser runtimes (Hermes, Node); use a port from @elv/domain instead of browser globals.",
+                  "sessionStorage": "Pure packages run on non-browser runtimes (Hermes, Node); use a port from @elv/domain instead of browser globals.",
+                  "navigator": "Pure packages run on non-browser runtimes (Hermes, Node); use a port from @elv/domain instead of browser globals.",
+                  "location": "Pure packages run on non-browser runtimes (Hermes, Node); use a port from @elv/domain instead of browser globals."
+                }
               }
             }
           }

@@ -26,12 +26,25 @@ const FORBIDDEN = [
   'node:fs',
   'node:fs/promises',
 ];
+const GLOBALS = ['window', 'document', 'localStorage', 'sessionStorage', 'navigator', 'location'];
 const ALLOWED = ['@elv/domain', './local', 'exponential-backoff', 'reactive', 'electronic'];
 
 /** Probe file path -> import specifier, linted in one Biome run over a temporary workspace. */
 const probes = new Map<string, string>();
 let flagged = new Set<string>();
+let flaggedGlobals = new Set<string>();
 let workspace = '';
+
+function probeGlobal(folder: string, name: string) {
+  const file = `${folder}/src/global-${name}.ts`;
+  mkdirSync(dirname(join(workspace, file)), { recursive: true });
+  writeFileSync(
+    join(workspace, file),
+    `export const g = ${name};
+`,
+  );
+  return file;
+}
 
 function probe(folder: string, specifier: string) {
   const file = `${folder}/src/probe-${probes.size}.ts`;
@@ -53,6 +66,8 @@ beforeAll(() => {
     for (const specifier of [...FORBIDDEN, ...ALLOWED]) probe(`packages/${pkg}`, specifier);
   }
   for (const specifier of ['react', 'react-native']) probe('packages/ui-kit', specifier);
+  for (const pkg of PURE) for (const name of GLOBALS) probeGlobal(`packages/${pkg}`, name);
+  for (const name of GLOBALS) probeGlobal('packages/ui-kit', name);
 
   const r = spawnSync(
     process.execPath,
@@ -63,6 +78,11 @@ beforeAll(() => {
   const report = JSON.parse(r.stdout) as {
     diagnostics: { category?: string; location?: { path?: string } }[];
   };
+  const pathOf = (d: { location?: { path?: string } }) =>
+    (d.location?.path ?? '').split('\\').join('/');
+  flaggedGlobals = new Set(
+    report.diagnostics.filter((d) => d.category === 'lint/style/noRestrictedGlobals').map(pathOf),
+  );
   flagged = new Set(
     report.diagnostics
       .filter((d) => d.category === 'lint/style/noRestrictedImports')
@@ -87,5 +107,16 @@ describe('Biome restricted imports for pure packages', () => {
 
   it('leaves UI packages free to import react and react-native', () => {
     expect(flaggedSpecifiers('packages/ui-kit')).toEqual([]);
+  });
+
+  it.each(PURE)('flags browser globals in packages/%s', (pkg) => {
+    const files = GLOBALS.map((name) => `packages/${pkg}/src/global-${name}.ts`);
+    expect(files.filter((f) => flaggedGlobals.has(f))).toEqual(files);
+  });
+
+  it('leaves UI packages free to use browser globals', () => {
+    expect(
+      GLOBALS.some((name) => flaggedGlobals.has(`packages/ui-kit/src/global-${name}.ts`)),
+    ).toBe(false);
   });
 });
