@@ -299,6 +299,7 @@ describe('loadSeriesEpisodes', () => {
     const eps = await rows(e, 'SELECT * FROM episodes ORDER BY episode');
     expect(eps[0]).toMatchObject({
       key: 'x:s1:episode:9001',
+      provider_id: '9001',
       series_key: 'x:s1:series:300',
       season: 1,
       episode: 1,
@@ -319,6 +320,21 @@ describe('loadSeriesEpisodes', () => {
     const after = await rows(e, 'SELECT * FROM episodes');
     expect(after).toHaveLength(1);
     expect(after[0]).toMatchObject({ title: 'Pilot v2', id: firstId });
+  });
+
+  it('stores the playback inputs of an episode in their own columns', async () => {
+    const e = await setup(sampleCatalog());
+    await run(e);
+    await loadSeriesEpisodes(e.sourceId, 'x:s1:series:300', e.deps);
+    const play = await rows(
+      e,
+      'SELECT provider_id, extension FROM episodes WHERE series_key = ? ORDER BY season, episode',
+      ['x:s1:series:300'],
+    );
+    expect(play).toEqual([
+      { provider_id: '9001', extension: 'mp4' },
+      { provider_id: '9002', extension: 'mkv' },
+    ]);
   });
 
   it('reports unknown series and failures', async () => {

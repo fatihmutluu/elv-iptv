@@ -95,10 +95,11 @@ const PLACEMENT_SQL = `INSERT INTO placements (source_id, kind, item_key, catego
   ON CONFLICT(source_id, kind, category_id, item_key) DO UPDATE SET position = excluded.position,
     run_id = excluded.run_id`;
 
-const EPISODE_SQL = `INSERT INTO episodes (source_id, key, series_key, season, episode, title, extension, duration_sec, run_id)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  ON CONFLICT(source_id, key) DO UPDATE SET series_key = excluded.series_key, season = excluded.season,
-    episode = excluded.episode, title = excluded.title, extension = excluded.extension,
+const EPISODE_SQL = `INSERT INTO episodes (source_id, key, provider_id, series_key, season, episode, title, extension,
+    duration_sec, run_id)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(source_id, key) DO UPDATE SET provider_id = excluded.provider_id, series_key = excluded.series_key,
+    season = excluded.season, episode = excluded.episode, title = excluded.title, extension = excluded.extension,
     duration_sec = excluded.duration_sec, run_id = excluded.run_id`;
 
 /** Upserts categories of one kind; `offset` is the position of the first one. */
@@ -145,7 +146,7 @@ export async function writePlacements(
   );
 }
 
-/** Upserts the episodes of one series. */
+/** Upserts the episodes of one series; `provider_id` and `extension` are what playback needs. */
 export async function writeEpisodes(
   db: SqlDriver,
   sourceId: string,
@@ -158,6 +159,7 @@ export async function writeEpisodes(
     rows.map(({ key, episode: e }) => [
       sourceId,
       key,
+      String(e.id),
       seriesKey,
       e.season,
       e.episode,

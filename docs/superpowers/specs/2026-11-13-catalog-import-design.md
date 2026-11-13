@@ -69,8 +69,8 @@ showed why the last two need care: its playlist URLs carry a per-account token s
   run_id)`, unique `(source_id, key)`.
 - `series(id INTEGER PK, source_id, key, provider_id, name, name_fold, cover, plot, rating, year, last_modified, run_id)`,
   unique `(source_id, key)`.
-- `episodes(id INTEGER PK, source_id, key, series_key, season, episode, title, extension, duration_sec, url_template,
-  run_id)`, unique `(source_id, key)`.
+- `episodes(id INTEGER PK, source_id, key, provider_id, series_key, season, episode, title, extension, duration_sec,
+  url_template, run_id)`, unique `(source_id, key)`; Xtream playback reads `provider_id` and `extension`, never the key.
 - `placements(source_id, kind, item_key, category_id, position, run_id)`, PK `(source_id, kind, category_id, item_key)`
   — many-to-many membership (`category_ids`), provider order kept in `position`.
 - `guide_channels(source_id, guide_id, name, name_fold, icon, run_id)`, PK `(source_id, guide_id)`.
@@ -78,7 +78,8 @@ showed why the last two need care: its playlist URLs carry a per-account token s
 - `programmes(source_id, guide_id, start, stop, title, sub_title, description, categories_json, episode_num, icon, run_id)`,
   PK `(source_id, guide_id, start)` `WITHOUT ROWID`.
 - Indexes only for the access paths Round 1 uses: category browse `(source_id, kind, category_id, position)`, live by
-  `num`, programmes by `(source_id, guide_id, start)`. Each index has an `EXPLAIN QUERY PLAN` test.
+  `num`, programmes by `(source_id, guide_id, start)`, episodes of a series `(source_id, series_key, season, episode)`.
+  Each index has an `EXPLAIN QUERY PLAN` test.
 - Deleting a source deletes its rows in every table and its secrets.
 
 ### 5.4 Text folding

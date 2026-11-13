@@ -95,6 +95,7 @@ CREATE TABLE episodes (
   id INTEGER PRIMARY KEY,
   source_id TEXT NOT NULL,
   key TEXT NOT NULL,
+  provider_id TEXT,
   series_key TEXT NOT NULL,
   season INTEGER,
   episode INTEGER,
@@ -105,6 +106,7 @@ CREATE TABLE episodes (
   run_id INTEGER NOT NULL,
   UNIQUE (source_id, key)
 );
+CREATE INDEX idx_episodes_series ON episodes (source_id, series_key, season, episode);
 
 CREATE TABLE placements (
   source_id TEXT NOT NULL,

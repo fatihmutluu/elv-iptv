@@ -127,5 +127,12 @@ describe('openCatalog', () => {
     );
     expect(epg).toMatch(/SEARCH programmes USING PRIMARY KEY/);
     expect(epg).not.toMatch(/TEMP B-TREE/);
+    const episodes = await plan(
+      db,
+      'SELECT provider_id, extension FROM episodes WHERE source_id = ? AND series_key = ? ORDER BY season, episode',
+      ['s', 'x:s:series:1'],
+    );
+    expect(episodes).toContain('idx_episodes_series');
+    expect(episodes).not.toMatch(/TEMP B-TREE/);
   });
 });
