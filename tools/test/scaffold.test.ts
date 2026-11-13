@@ -1,7 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { findRepoRoot } from '../src/root.ts';
 import { scaffoldFiles, writeScaffold } from '../src/scaffold.ts';
 
 const dirs: string[] = [];
@@ -13,6 +15,8 @@ const tempRoot = () => {
   dirs.push(d);
   return d;
 };
+const formatJson = (value: unknown) =>
+  `${JSON.stringify(value, null, 2).replace(/\[\s*([^\]]*?)\s*\]/g, (_, items: string) => `[${items.replace(/,\s*/g, ', ')}]`)}\n`;
 const json = (files: Record<string, string>, path: string) => JSON.parse(files[path] ?? 'null');
 
 describe('scaffoldFiles pure', () => {
@@ -99,7 +103,7 @@ describe('scaffoldFiles module', () => {
   it('exposes a native handle that is null on web', () => {
     const src = files['modules/tv-player/src/index.ts'] ?? '';
     expect(src).toContain("Platform.OS === 'web'");
-    expect(src).toContain("requireOptionalNativeModule<TvPlayerNativeModule>('TvPlayer')");
+    expect(src).toContain("requireOptionalNativeModule<Native>('TvPlayer')");
   });
 
   it('declares expo-modules-core and states that native code is not generated', () => {
@@ -147,5 +151,52 @@ describe('writeScaffold', () => {
     expect(() => writeScaffold(root, { kind: 'module', name: 'widgets' })).toThrow(
       /already exists/,
     );
+  });
+});
+
+describe('scaffold output passes the repository tooling', () => {
+  const repoRoot = findRepoRoot(import.meta.dirname);
+  const nodeModules = join(repoRoot, 'node_modules');
+  const runNode = (cwd: string, script: string, args: string[]) =>
+    spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8' });
+
+  function workspaceWith(kind: 'pure' | 'rn' | 'module', name: string): string {
+    const root = tempRoot();
+    writeScaffold(root, { kind, name });
+    writeFileSync(
+      join(root, 'biome.json'),
+      formatJson({
+        extends: [join(repoRoot, 'packages', 'config', 'biome.json').replaceAll('\\', '/')],
+        files: { includes: ['**', '!**/node_modules', '!**/*.md'] },
+      }),
+    );
+    mkdirSync(join(root, 'node_modules', '@elv'), { recursive: true });
+    symlinkSync(
+      join(repoRoot, 'packages', 'config'),
+      join(root, 'node_modules', '@elv', 'config'),
+      'junction',
+    );
+    return root;
+  }
+
+  it.each([
+    ['pure', 'sample-pure'],
+    ['rn', 'sample-rn'],
+    ['module', 'sample-module'],
+  ] as const)('%s output is clean under Biome', (kind, name) => {
+    const root = workspaceWith(kind, name);
+    const biome = join(nodeModules, '@biomejs', 'biome', 'bin', 'biome');
+    const result = runNode(root, biome, ['check', '--colors=off', '.']);
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+  });
+
+  it.each([
+    ['pure', 'sample-pure'],
+    ['rn', 'sample-rn'],
+  ] as const)('%s output type-checks', (kind, name) => {
+    const root = workspaceWith(kind, name);
+    const tsc = join(nodeModules, 'typescript', 'lib', 'tsc.js');
+    const result = runNode(root, tsc, ['--noEmit', '-p', `packages/${name}`, '--pretty', 'false']);
+    expect(result.status, result.stdout + result.stderr).toBe(0);
   });
 });

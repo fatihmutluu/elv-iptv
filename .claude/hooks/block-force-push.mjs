@@ -8,6 +8,14 @@ import { pathToFileURL } from 'node:url';
 const SEPARATORS = new Set([';', '|', '&', '\n', '(', ')', '`']);
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'pwsh', 'powershell', 'cmd', 'eval']);
 const WRAPPERS = new Set(['command', 'env', 'sudo', 'time', 'exec', 'nohup', 'nice', 'call']);
+const STDIN_SHELLS = new Set([...SHELLS].filter((s) => s !== 'eval').concat(['source', '.']));
+const CODE_FLAG = /^(-[a-z]*c|-command|-commandwithargs|\/[ck])$/i;
+const WRAPPER_VALUE_OPTIONS = {
+  sudo: new Set(['-u', '-g', '-h', '-p', '-C', '-D', '-R', '-T', '-U', '-r', '-t']),
+  env: new Set(['-u', '-C', '-S']),
+  nice: new Set(['-n']),
+  time: new Set(['-f', '-o']),
+};
 const GIT_OPTIONS_WITH_VALUE = new Set([
   '-C',
   '-c',
@@ -20,24 +28,80 @@ const GIT_OPTIONS_WITH_VALUE = new Set([
 ]);
 const FORCE_LONG_OPTIONS = ['force', 'force-with-lease', 'force-if-includes', 'mirror'];
 
-/** Drops here-document bodies: their lines are data, not commands. */
+/** Reads a here-document body starting at `from`; returns null when the delimiter never appears. */
+function readHeredocBody(command, from, delimiter, tabs) {
+  let pos = from;
+  while (pos <= command.length) {
+    const eol = command.indexOf('\n', pos);
+    const end = eol === -1 ? command.length : eol;
+    const line = command.slice(pos, end);
+    if ((tabs ? line.replace(/^\t+/, '') : line) === delimiter) {
+      return { text: command.slice(from, pos), next: eol === -1 ? command.length : eol + 1 };
+    }
+    if (eol === -1) return null;
+    pos = eol + 1;
+  }
+  return null;
+}
+
+/**
+ * Drops here-document bodies, which are data, unless the command line hands its stdin to a
+ * shell interpreter (then the body is code and stays). Operators inside quotes, `<<<` and
+ * heredocs without a terminating delimiter are left alone so nothing after them is hidden.
+ */
 function stripHeredocs(command) {
-  const kept = [];
-  let delimiter = null;
-  let tabs = false;
-  for (const line of command.split('\n')) {
-    if (delimiter !== null) {
-      if ((tabs ? line.replace(/^\t+/, '') : line) === delimiter) delimiter = null;
+  let out = '';
+  let lineStart = 0;
+  let quote = null;
+  let pending = [];
+  let i = 0;
+  while (i < command.length) {
+    const ch = command[i];
+    if (quote) {
+      if (ch === '\\' && quote === '"') {
+        out += ch + (command[i + 1] ?? '');
+        i += 2;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      out += ch;
+      i++;
       continue;
     }
-    kept.push(line);
-    const match = /<<(-?)\s*(['"]?)([A-Za-z_]\w*)\2/.exec(line);
-    if (match) {
-      tabs = match[1] === '-';
-      delimiter = match[3];
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      out += ch;
+      i++;
+      continue;
     }
+    const prev = command[i - 1];
+    if (ch === '<' && command[i + 1] === '<' && command[i + 2] !== '<' && prev !== '<' && prev !== '(') {
+      const match = /^<<(-?)\s*(['"]?)([A-Za-z_]\w*)\2/.exec(command.slice(i));
+      if (match) {
+        pending.push({ delimiter: match[3], tabs: match[1] === '-' });
+        out += match[0];
+        i += match[0].length;
+        continue;
+      }
+    }
+    if (ch === '\n') {
+      const keepBodies = pending.length > 0 && feedsShell(out.slice(lineStart));
+      out += ch;
+      i++;
+      for (const { delimiter, tabs } of pending) {
+        const body = readHeredocBody(command, i, delimiter, tabs);
+        if (!body) break;
+        if (keepBodies) out += body.text;
+        i = body.next;
+      }
+      pending = [];
+      lineStart = out.length;
+      continue;
+    }
+    out += ch;
+    i++;
   }
-  return kept.join('\n');
+  return out;
 }
 
 /** Splits a command line into segments of unquoted-aware tokens at shell separators. */
@@ -100,17 +164,40 @@ function forceReason(arg) {
   return null;
 }
 
-function checkSegment(tokens) {
+/** Index of the program token after env assignments and wrappers together with their options. */
+function leadingIndex(tokens) {
   let i = 0;
-  while (i < tokens.length && (/^\w+=/.test(tokens[i]) || WRAPPERS.has(programName(tokens[i])))) i++;
+  while (i < tokens.length) {
+    if (/^\w+=/.test(tokens[i])) {
+      i++;
+      continue;
+    }
+    const wrapper = programName(tokens[i]);
+    if (!WRAPPERS.has(wrapper)) break;
+    i++;
+    while (i < tokens.length && tokens[i].startsWith('-')) {
+      i += WRAPPER_VALUE_OPTIONS[wrapper]?.has(tokens[i]) ? 2 : 1;
+    }
+  }
+  return i;
+}
+
+/** True when some command on the line reads its stdin as shell code. */
+function feedsShell(line) {
+  return tokenize(line).some((tokens) => {
+    const program = tokens[leadingIndex(tokens)];
+    return program !== undefined && STDIN_SHELLS.has(programName(program));
+  });
+}
+
+function checkSegment(tokens) {
+  let i = leadingIndex(tokens);
   const program = tokens[i] === undefined ? '' : programName(tokens[i]);
   if (SHELLS.has(program)) {
-    for (const arg of tokens.slice(i + 1)) {
-      if (!arg.startsWith('-') && /git/i.test(arg)) {
-        const inner = parseForcePush(arg);
-        if (inner.blocked) return inner;
-      }
-    }
+    const rest = tokens.slice(i + 1);
+    const flag = rest.findIndex((t) => CODE_FLAG.test(t));
+    const payload = program === 'eval' ? rest : flag >= 0 ? rest.slice(flag + 1) : [];
+    if (payload.length > 0) return parseForcePush(payload.join(' '));
     return { blocked: false, reason: '' };
   }
   if (program !== 'git') return { blocked: false, reason: '' };

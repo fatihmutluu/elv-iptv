@@ -4,6 +4,8 @@ description: Reviews React Native TV apps for focus/D-pad navigation, 10-foot UI
 license: MIT
 ---
 
+> ELV IPTV: read `PROJECT-NOTES.md` in this folder first. Where it conflicts with the text below, the project notes win.
+
 # React Native TV Best Practices
 
 ## Overview

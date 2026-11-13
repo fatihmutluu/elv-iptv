@@ -13,7 +13,10 @@ const NAME_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 const VITEST_VERSION = '5.1.0';
 const EXPO_MODULES_CORE_VERSION = '58.1.0';
 
-const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
+const STRING_ARRAY = /\[\s*("[^"\n]*"(?:,\s*"[^"\n]*")*)\s*\]/g;
+/** Serializes JSON the way Biome formats it: two spaces, short string arrays on one line. */
+const json = (value: unknown) =>
+  `${JSON.stringify(value, null, 2).replace(STRING_ARRAY, (_, items: string) => `[${items.replace(/,\s*/g, ', ')}]`)}\n`;
 const pascal = (name: string) =>
   name
     .split('-')
@@ -106,15 +109,15 @@ function moduleSource(name: string): string {
   return [
     "import { Platform, requireOptionalNativeModule } from 'expo-modules-core';",
     '',
-    `/** Methods the native ${pascal(name)} module exposes; extend it with the first native API. */`,
-    `export interface ${type} {}`,
+    `/** Shape of the native ${pascal(name)} module; replace with an interface at the first native API. */`,
+    `export type ${type} = Record<string, never>;`,
     '',
-    `const native: ${type} | null =`,
-    `  Platform.OS === 'web' ? null : requireOptionalNativeModule<${type}>('${pascal(name)}');`,
+    `type Native = ${type};`,
     '',
     '/** Returns the native module, or `null` on web and when the native build lacks it. */',
     `export function get${type}(): ${type} | null {`,
-    '  return native;',
+    "  if (Platform.OS === 'web') return null;",
+    `  return requireOptionalNativeModule<Native>('${pascal(name)}');`,
     '}',
     '',
   ].join('\n');
