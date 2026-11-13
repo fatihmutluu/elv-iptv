@@ -8,6 +8,7 @@ import {
 import { importM3u } from './import-m3u';
 import { checkAbort, notify, performRun, type RunCtx, Stop, unwrap } from './import-run';
 import type { ImportDeps, ImportOptions, ImportProgress, ImportSummary } from './import-types';
+import { sourceExists } from './runs';
 import { getSource, type SourceRecord, secretKey } from './sources';
 import {
   type ItemWriter,
@@ -209,7 +210,8 @@ export async function importCatalog(
 
 /**
  * Fetches and stores the episodes of one Xtream series (on demand, when the user opens it), replacing the ones
- * stored before. Returns the number of episodes. An unknown series yields `source-format/unknown-series`.
+ * stored before. Returns the number of episodes. An unknown series yields `source-format/unknown-series`; a source
+ * that is gone (also one removed while the episodes load) yields `storage/source-not-found` and writes nothing.
  */
 export async function loadSeriesEpisodes(
   sourceId: string,
@@ -238,7 +240,8 @@ export async function loadSeriesEpisodes(
       key: xtreamKey(sourceId, 'episode', episode.id),
       episode,
     }));
-    await deps.db.transaction(async (tx) => {
+    const stored = await deps.db.transaction(async (tx) => {
+      if (!(await sourceExists(tx, sourceId))) return false;
       const previous = await tx.all<{ key: string }>(
         'SELECT key FROM episodes WHERE source_id = ? AND series_key = ?',
         [sourceId, seriesKey],
@@ -249,7 +252,9 @@ export async function loadSeriesEpisodes(
         'DELETE FROM episodes WHERE source_id = ? AND key = ?',
         previous.filter((p) => !keep.has(p.key)).map((p) => [sourceId, p.key]),
       );
+      return true;
     });
+    if (!stored) return err(elvError('storage', 'source-not-found'));
     notify(opts, { phase: 'episodes', done: entries.length, total: entries.length });
     await deps.scheduler.yieldNow();
     return ok(entries.length);

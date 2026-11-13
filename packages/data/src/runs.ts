@@ -11,9 +11,15 @@ const RUN_TABLES: ReadonlySet<string> = new Set([
   'programmes',
 ]);
 
+/** Whether the `sources` row still exists; inside a transaction it cannot vanish before the commit. */
+export async function sourceExists(db: SqlDriver, sourceId: string): Promise<boolean> {
+  return (await db.all('SELECT 1 FROM sources WHERE id = ? LIMIT 1', [sourceId])).length > 0;
+}
+
 /**
- * Inserts a `running` row into `import_runs` and returns its id, or `storage/import-in-progress` when a run of
- * the same source and kind is already `running` (check and insert share one transaction).
+ * Inserts a `running` row into `import_runs` and returns its id, `storage/import-in-progress` when a run of the same
+ * source and kind is already `running`, or `storage/source-not-found` when the source is gone (checks and insert
+ * share one transaction).
  */
 export async function startRun(
   db: SqlDriver,
@@ -22,6 +28,7 @@ export async function startRun(
   now: number,
 ): Promise<Result<number>> {
   return db.transaction(async (tx): Promise<Result<number>> => {
+    if (!(await sourceExists(tx, sourceId))) return err(elvError('storage', 'source-not-found'));
     const busy = await tx.all(
       "SELECT 1 FROM import_runs WHERE source_id = ? AND kind = ? AND status = 'running' LIMIT 1",
       [sourceId, kind],

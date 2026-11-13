@@ -281,19 +281,36 @@ export async function removeSecrets(id: string, secrets: SecretStore): Promise<R
     : ok(undefined);
 }
 
+/** Deletes every row of a source in the tables of {@link TABLES_BY_SOURCE} except `keep` (never the `sources` row). */
+export async function purgeSourceRows(
+  tx: SqlDriver,
+  id: string,
+  keep: readonly string[] = [],
+): Promise<void> {
+  for (const table of TABLES_BY_SOURCE) {
+    if (!keep.includes(table)) await tx.run(`DELETE FROM ${table} WHERE source_id = ?`, [id]);
+  }
+}
+
 /**
- * Deletes a source and every catalog and guide row that belongs to it, then its secrets. The rows are gone even
- * when the result is `storage/secret-delete-failed`; the caller can retry {@link removeSecrets}.
+ * Deletes a source and every catalog and guide row that belongs to it, then its secrets. While an import of the
+ * source is running nothing is deleted and the result is `storage/import-in-progress`. The rows are gone even when
+ * the result is `storage/secret-delete-failed`; the caller can retry {@link removeSecrets}.
  */
 export async function removeSource(
   id: string,
   deps: { db: SqlDriver; secrets: SecretStore },
 ): Promise<Result<void>> {
-  await deps.db.transaction(async (tx) => {
-    for (const table of TABLES_BY_SOURCE) {
-      await tx.run(`DELETE FROM ${table} WHERE source_id = ?`, [id]);
-    }
+  const busy = await deps.db.transaction(async (tx) => {
+    const running = await tx.all(
+      "SELECT 1 FROM import_runs WHERE source_id = ? AND status = 'running' LIMIT 1",
+      [id],
+    );
+    if (running.length > 0) return true;
+    await purgeSourceRows(tx, id);
     await tx.run('DELETE FROM sources WHERE id = ?', [id]);
+    return false;
   });
+  if (busy) return err(elvError('storage', 'import-in-progress'));
   return removeSecrets(id, deps.secrets);
 }

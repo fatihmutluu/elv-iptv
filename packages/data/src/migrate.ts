@@ -22,16 +22,15 @@ export async function openCatalog(
       return err(elvError('storage', 'schema-too-new', `database version ${current}`));
     }
     for (const pragma of OPEN_PRAGMAS) await db.exec(pragma);
-    if (current === SCHEMA_VERSION) {
-      await recoverRuns(db, clock());
-      return ok(undefined);
+    if (current < SCHEMA_VERSION) {
+      await db.transaction(async (tx) => {
+        for (let v = current; v < SCHEMA_VERSION; v++) {
+          await tx.exec(MIGRATIONS[v] ?? '');
+          await tx.exec(`PRAGMA user_version = ${v + 1}`);
+        }
+      });
     }
-    await db.transaction(async (tx) => {
-      for (let v = current; v < SCHEMA_VERSION; v++) {
-        await tx.exec(MIGRATIONS[v] ?? '');
-        await tx.exec(`PRAGMA user_version = ${v + 1}`);
-      }
-    });
+    await recoverRuns(db, clock());
     return ok(undefined);
   } catch (error) {
     return err(

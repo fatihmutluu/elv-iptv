@@ -13,6 +13,10 @@ async function id(r: Promise<Result<number>>): Promise<number> {
 async function fresh() {
   const t = testDb();
   await openCatalog(t.db);
+  await t.db.batch('INSERT INTO sources VALUES (?, ?, ?, ?, ?)', [
+    ['s1', 'm3u', 'One', 1, '{}'],
+    ['s2', 'm3u', 'Two', 1, '{}'],
+  ]);
   return t;
 }
 
@@ -113,6 +117,15 @@ describe('runs', () => {
     });
     expect(rows[1]).toMatchObject({ status: 'ok', finished_at: 2 });
     await id(startRun(db, 's1', 'catalog', 60));
+  });
+
+  it('refuses to start a run for a source that is gone', async () => {
+    const { db } = await fresh();
+    expect(await startRun(db, 'gone', 'catalog', 1)).toEqual({
+      ok: false,
+      error: { category: 'storage', code: 'source-not-found' },
+    });
+    expect(await db.all('SELECT id FROM import_runs')).toEqual([]);
   });
 
   it('refuses tables that are not run-scoped', async () => {

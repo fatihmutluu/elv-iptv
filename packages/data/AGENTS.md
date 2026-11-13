@@ -16,8 +16,7 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
   queue serializes calls; the `tx` of a `transaction` callback bypasses it and rejects nesting. Never await the outer
   driver inside a transaction callback. `batch` joins an open transaction.
 - `openCatalog(db)` (`migrate.ts`) applies the pragmas (WAL, `synchronous=NORMAL`, `foreign_keys=ON`, `temp_store=MEMORY`) and
-  migrates to `SCHEMA_VERSION` with `MIGRATIONS` in `schema.ts` (raw SQL, `PRAGMA user_version`): `storage/schema-too-new`,
-  `storage/migration-failed` (rolled back). Add a schema change as a new entry, never by editing an old one.
+  migrates to `SCHEMA_VERSION` with `MIGRATIONS` in `schema.ts` (raw SQL, `PRAGMA user_version`): `storage/schema-too-new`, `storage/migration-failed` (rolled back). Add a schema change as a new entry, never by editing an old one.
 - `foldText(text)` (`fold.ts`): Turkish-aware, accent- and punctuation-insensitive folding for `name_fold` columns.
 - `templates.ts`: `detectSegmentRules`, `toTemplate`, `resolveTemplate`, `keyTemplate`, `hostOf`. URLs become `{{name}}` templates
   (`user`, `pass`, `userinfo`, `v<N>` segment rules, `q:<param>` credential query values); values go to the secret store. Known
@@ -25,7 +24,7 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
   rules and whole-segment matches skip the last segment; numeric Xtream ids stay literal; literal `{{` is `{{(}}`. Keys are
   `m3uKey(sourceId, keyTemplate(template), name)` (every placeholder becomes `{{*}}`).
 - `source-link.ts`: `addSourceFromLink` adds a pasted `…/get.php?username=…&password=…` link as an Xtream source (`parseXtreamLink`; output sets `xtreamFormat`; a guide override is templated like M3U ones, `vodPlaylist` is ignored), else as M3U; `keepAsM3u` opts out.
-- `sources.ts`: `addXtreamSource`, `addM3uSource`, `getSource`, `updateSourceSettings`, `removeSource`, `removeSecrets`, `TABLES_BY_SOURCE`, `secretKey`. `removeSource` deletes every table of the source explicitly (no foreign keys; a new table with `source_id` must be added
+- `sources.ts`: `addXtreamSource`, `addM3uSource`, `getSource`, `updateSourceSettings`, `removeSource`, `removeSecrets`, `TABLES_BY_SOURCE`, `secretKey`. `removeSource` refuses while a run is `running` (`storage/import-in-progress`), deletes every table of the source explicitly (no foreign keys; a new table with `source_id` must be added
   to its list) and returns `storage/secret-delete-failed` if a secret survives (retry `removeSecrets`). M3U guide URLs are
   templated against the playlist or kept whole (`{{g:url}}`). Credentials live only in the `SecretStore`
   (`source:<id>:xtream|playlist|urlvars`); `settings_json` holds none.
@@ -34,7 +33,8 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
   `signal.aborted` before every batch. Stale rows (`run_id < current`) are deleted and the run marked `ok` in one
   transaction, only after success; failure (`failed`) and abort (`cancelled`, `network/aborted`) never delete. Only
   error category and code reach `import_runs`. `startRun` refuses a second `running` run of the same source and kind
-  (`storage/import-in-progress`); `openCatalog` marks leftover `running` runs `failed/interrupted`. `onProgress`
+  (`storage/import-in-progress`) and a missing source; a source gone at cleanup loses its rows, the run is `cancelled`
+  (`storage/source-removed`), `afterCommit` is skipped. `openCatalog` marks leftover `running` runs `failed/interrupted`. `onProgress`
   exceptions are ignored. Xtream: account check first, then categories, live, movies, series; `source-format/too-large`
   falls back to per-category calls; placement `position` is provider order within the category. Episodes load on
   demand (`loadSeriesEpisodes`) and survive re-imports while their series exists.

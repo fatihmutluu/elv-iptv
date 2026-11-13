@@ -74,6 +74,20 @@ describe('openCatalog', () => {
     expect(await db.all('PRAGMA foreign_keys')).toEqual([{ foreign_keys: 1 }]);
   });
 
+  it('recovers interrupted runs after a migration too', async () => {
+    const { db } = testDb();
+    const statements: string[] = [];
+    const recording: SqlDriver = {
+      ...db,
+      run: (sql, params) => {
+        statements.push(sql);
+        return db.run(sql, params);
+      },
+    };
+    expect((await openCatalog(recording)).ok).toBe(true);
+    expect(statements.some((s) => s.includes("error_code = 'interrupted'"))).toBe(true);
+  });
+
   it('refuses a database written by a newer version', async () => {
     const { db } = testDb();
     await db.exec('PRAGMA user_version = 2');

@@ -6,8 +6,10 @@ import {
   type ImportProgress,
   type ImportSummary,
 } from './import-types';
-import { finishRun, removeStale, startRun } from './runs';
-import type { SourceRecord } from './sources';
+import { finishRun, removeStale, sourceExists, startRun } from './runs';
+import { purgeSourceRows, type SourceRecord } from './sources';
+
+const SOURCE_REMOVED = elvError('storage', 'source-removed');
 
 /** Thrown inside a run to unwind to the failure handler; never leaves the import modules. */
 export class Stop extends Error {
@@ -76,7 +78,9 @@ export interface RunSteps {
 /**
  * The lifecycle every catalog import shares: start the run, execute, then delete stale rows and mark `ok` in one
  * transaction. A run that stored no item at all fails with `source-format/empty-source` so a provider glitch can
- * never wipe the catalog. Failure (`failed`) and abort (`cancelled`) never delete anything.
+ * never wipe the catalog. Failure (`failed`) and abort (`cancelled`) never delete anything. When the source row is
+ * gone at cleanup, the source's rows are deleted, the run is `cancelled` with `storage/source-removed` and
+ * `afterCommit` is skipped.
  */
 export async function performRun(
   source: SourceRecord,
@@ -107,6 +111,7 @@ export async function performRun(
     warningCodes: [],
   };
   let removed: number;
+  let gone = false;
   try {
     await steps.execute(c);
     checkAbort(c);
@@ -115,6 +120,17 @@ export async function performRun(
     }
     c.progress({ phase: 'cleanup', done: 0 });
     removed = await deps.db.transaction(async (tx) => {
+      if (!(await sourceExists(tx, source.id))) {
+        gone = true;
+        await purgeSourceRows(tx, source.id, ['import_runs']);
+        await finishRun(
+          tx,
+          runId,
+          { status: 'cancelled', error: SOURCE_REMOVED, counts },
+          deps.clock(),
+        );
+        return 0;
+      }
       await steps.beforeCleanup?.(tx, c);
       const stale = await removeStale(tx, source.id, runId, steps.staleTables ?? CATALOG_TABLES);
       if ((steps.kind ?? 'catalog') === 'catalog') {
@@ -142,6 +158,7 @@ export async function performRun(
     }
     return err(error);
   }
+  if (gone) return err(SOURCE_REMOVED);
   try {
     await steps.afterCommit?.(c);
   } catch {
