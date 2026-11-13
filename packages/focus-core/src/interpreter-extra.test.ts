@@ -28,17 +28,17 @@ describe('native long input', () => {
 });
 
 describe('large clock jumps', () => {
-  it('emits at most one repeat after a one-hour gap and resumes on the grid', () => {
+  it('emits one repeat after a one-hour gap and resumes on the fast grid', () => {
     const k = createKeyInterpreter();
     k.input(down('down', 0));
-    k.tick(500);
+    expect(k.tick(500)).toEqual([{ key: 'down', kind: 'long', time: 500 }]);
     const hour = 3_600_000;
-    const events = k.tick(hour);
-    expect(events.filter((e) => e.kind === 'repeat')).toHaveLength(1);
+    expect(k.tick(hour)).toEqual([{ key: 'down', kind: 'repeat', time: 625 }]);
     k.acknowledge('down');
     const next = k.tick(hour + 100);
-    expect(next.every((e) => e.time > hour)).toBe(true);
-    expect(next.length).toBeLessThanOrEqual(1);
+    expect(next).toHaveLength(1);
+    expect(next[0]).toMatchObject({ key: 'down', kind: 'repeat' });
+    expect(next[0]?.time).toBeCloseTo(hour + 1000 / 24, 6);
   });
 
   it('ignores a non-finite now', () => {
@@ -52,9 +52,11 @@ describe('large clock jumps', () => {
   it('crosses from the slow to the fast rate within one jump', () => {
     const k = createKeyInterpreter();
     k.input(down('down', 0));
-    expect(k.tick(2100).filter((e) => e.kind === 'repeat')).toHaveLength(1);
+    expect(k.tick(2100)).toEqual([
+      { key: 'down', kind: 'long', time: 500 },
+      { key: 'down', kind: 'repeat', time: 625 },
+    ]);
     k.acknowledge('down');
-    const next = k.tick(2100 + 42);
-    expect(next.filter((e) => e.kind === 'repeat').length).toBeLessThanOrEqual(1);
+    expect(k.tick(2100 + 42)).toEqual([{ key: 'down', kind: 'repeat', time: 2125 }]);
   });
 });
