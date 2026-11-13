@@ -7,3 +7,10 @@ packages:
 allowBuilds:
   lefthook: true
   esbuild: true
+  "@parcel/watcher": false
+
+minimumReleaseAgeExclude:
+  - expo@58.0.25
+
+overrides:
+  react-native: npm:react-native-tvos@0.88.1-0

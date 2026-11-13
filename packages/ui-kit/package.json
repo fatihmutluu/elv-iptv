@@ -1,0 +1,27 @@
+{
+  "name": "@elv/ui-kit",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p . --pretty false"
+  },
+  "dependencies": {
+    "@elv/domain": "workspace:*",
+    "@elv/focus-core": "workspace:*",
+    "@elv/i18n": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-native": "*"
+  },
+  "devDependencies": {
+    "@elv/config": "workspace:*",
+    "@types/react": "~19.3.0",
+    "react": "19.3.0",
+    "react-native": "npm:react-native-tvos@0.88.1-0"
+  }
+}

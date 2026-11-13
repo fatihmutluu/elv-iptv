@@ -1,0 +1,7 @@
+{
+  "extends": "@elv/config/tsconfig.ui.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "../../node_modules/.cache/ui-kit.tsbuildinfo"
+  },
+  "include": ["src"]
+}

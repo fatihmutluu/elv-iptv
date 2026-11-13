@@ -1,0 +1,9 @@
+{
+  "extends": "@elv/config/tsconfig.ui.json",
+  "compilerOptions": {
+    "types": ["jest"],
+    "allowImportingTsExtensions": true,
+    "tsBuildInfoFile": "../../node_modules/.cache/tv-mobile.tsbuildinfo"
+  },
+  "include": ["index.ts", "app.config.ts", "src", "config"]
+}
