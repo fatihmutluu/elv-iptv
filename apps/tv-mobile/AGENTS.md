@@ -17,5 +17,7 @@ It is a composition root: it wires modules, storage drivers, routes and stores.
 - `DEV_*` values reach `extra.dev` in development only; production builds must never contain them.
 - One `react-native` copy: the root override aliases it to `react-native-tvos`.
 - No Google Play Services or Firebase dependencies.
-- The iOS and tvOS projects share `ios/`; generate one at a time (`expo prebuild --clean`).
+- Phone and TV targets share `android/` and `ios/`. `pnpm run:app` stamps the folder
+  (`.elv-prebuild.json`) and regenerates it when the target, variant or store changes. After
+  changing `app.config.ts`, plugins or native dependencies, run `pnpm run:app <target> build`.
 - Placeholder images in `assets/` are generated once; replace them with final art, not code.

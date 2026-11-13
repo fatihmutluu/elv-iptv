@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { buildProcessEnv, buildRunCommand, type Target } from '../src/run-command.ts';
+import {
+  buildPrebuildCommand,
+  buildProcessEnv,
+  buildRunCommand,
+  hostError,
+  nativeProject,
+  parseRunArgs,
+  type Target,
+} from '../src/run-command.ts';
 
 const devEnv = { DEV_HOST: 'http://h.example', DEV_USER: 'u', OTHER: 'ignored' };
 const base = { action: 'run', variant: 'development', devEnv } as const;
@@ -56,10 +64,18 @@ describe('buildRunCommand', () => {
     expect(ios.args).toContain('--configuration');
   });
 
-  it('generates native projects for the build action', () => {
+  it('regenerates native projects from scratch for the build action', () => {
     const r = buildRunCommand({ ...base, action: 'build', target: 'android-tv' });
-    expect(r.args.slice(0, 3)).toEqual(['exec', 'expo', 'prebuild']);
-    expect(r.args).toContain('android');
+    expect(r.args).toEqual([
+      'exec',
+      'expo',
+      'prebuild',
+      '--clean',
+      '--platform',
+      'android',
+      '--no-install',
+    ]);
+    expect(r.env.EXPO_NO_GIT_STATUS).toBe('1');
   });
 
   it('routes desktop targets through the desktop app scripts', () => {
@@ -107,5 +123,100 @@ describe('buildProcessEnv', () => {
   it('skips undefined parent values', () => {
     const cmd = buildRunCommand({ ...base, target: 'android' });
     expect('X' in buildProcessEnv({ X: undefined }, cmd, 'development')).toBe(false);
+  });
+});
+
+describe('buildPrebuildCommand', () => {
+  it('cleans and regenerates the platform folder with the target env', () => {
+    const r = buildPrebuildCommand({ ...base, target: 'fire-tv' });
+    expect(r.cwd).toBe('apps/tv-mobile');
+    expect(r.args).toEqual([
+      'exec',
+      'expo',
+      'prebuild',
+      '--clean',
+      '--platform',
+      'android',
+      '--no-install',
+    ]);
+    expect(r.env).toMatchObject({ EXPO_TV: '1', STORE: 'amazon', EXPO_NO_GIT_STATUS: '1' });
+    expect(buildPrebuildCommand({ ...base, target: 'tvos' }).args).toContain('ios');
+  });
+
+  it('keeps DEV_ values out of production prebuilds', () => {
+    const r = buildPrebuildCommand({ ...base, variant: 'production', target: 'ios' });
+    expect(Object.keys(r.env).filter((k) => k.startsWith('DEV_'))).toEqual([]);
+  });
+
+  it('refuses desktop targets, which have no native project', () => {
+    expect(() => buildPrebuildCommand({ ...base, target: 'windows' })).toThrow(/no native project/);
+  });
+});
+
+describe('nativeProject', () => {
+  it('maps phone and TV targets to the shared platform folder and a stamp', () => {
+    expect(nativeProject({ target: 'android-tv', variant: 'development' })).toEqual({
+      dir: 'apps/tv-mobile/android',
+      stamp: { target: 'android-tv', variant: 'development', store: 'default' },
+    });
+    expect(nativeProject({ target: 'fire-tv', variant: 'production' })?.stamp.store).toBe('amazon');
+    expect(nativeProject({ target: 'tvos', variant: 'development' })?.dir).toBe(
+      'apps/tv-mobile/ios',
+    );
+  });
+
+  it('returns null for desktop targets', () => {
+    expect(nativeProject({ target: 'macos', variant: 'development' })).toBeNull();
+  });
+});
+
+describe('parseRunArgs', () => {
+  it('reads the target, the optional action and the production flag', () => {
+    expect(parseRunArgs(['android'])).toEqual({
+      ok: true,
+      target: 'android',
+      action: 'run',
+      variant: 'development',
+    });
+    expect(parseRunArgs(['tvos', 'build', '--production'])).toEqual({
+      ok: true,
+      target: 'tvos',
+      action: 'build',
+      variant: 'production',
+    });
+  });
+
+  it('turns an unknown flag into a one-line error with the usage', () => {
+    const r = parseRunArgs(['android', '--prod']);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error).toContain("'--prod'");
+    expect(r.error).toContain('usage: pnpm run:app');
+    expect(r.error).not.toContain('\n');
+  });
+
+  it.each([[[]], [['nope']], [['android', 'deploy']]])('rejects %j with the usage', (argv) => {
+    const r = parseRunArgs(argv);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/^usage: pnpm run:app </);
+  });
+});
+
+describe('hostError', () => {
+  it('refuses a desktop target on another operating system in one line', () => {
+    const message = hostError('linux', 'win32');
+    expect(message).toContain('linux');
+    expect(message).toContain('win32');
+    expect(message).not.toContain('\n');
+    expect(hostError('macos', 'linux')).not.toBeNull();
+    expect(hostError('windows', 'darwin')).not.toBeNull();
+  });
+
+  it('accepts each desktop target on its own host and leaves native targets alone', () => {
+    expect(hostError('windows', 'win32')).toBeNull();
+    expect(hostError('macos', 'darwin')).toBeNull();
+    expect(hostError('linux', 'linux')).toBeNull();
+    expect(hostError('android', 'win32')).toBeNull();
+    expect(hostError('ios', 'linux')).toBeNull();
   });
 });
