@@ -1,10 +1,12 @@
 import type { ExpoConfig } from 'expo/config';
 
+/** The build environment (`process.env` when Expo loads `app.config.ts`). */
 export type Env = Readonly<Record<string, string | undefined>>;
 
 const STORES = ['play', 'amazon', 'appstore', 'direct'] as const;
 type Store = (typeof STORES)[number];
 
+/** Inputs that do not come from the environment: the package version and the build time. */
 export interface BuildOptions {
   version: string;
   now: Date;

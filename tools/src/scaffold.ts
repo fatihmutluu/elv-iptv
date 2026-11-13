@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 /** Package shapes the scaffolder can create. */
 export type PackageKind = 'pure' | 'rn' | 'module';
 
+/** What to scaffold: the package shape and its kebab-case folder name (`@elv/<name>`). */
 export interface ScaffoldOptions {
   kind: PackageKind;
   name: string;

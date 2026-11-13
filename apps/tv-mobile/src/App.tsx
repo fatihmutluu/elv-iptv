@@ -1,6 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, View } from 'react-native';
 
+/** Root component that `index.ts` registers; a placeholder screen until Round 1. */
 export function App() {
   return (
     <View style={styles.root}>
