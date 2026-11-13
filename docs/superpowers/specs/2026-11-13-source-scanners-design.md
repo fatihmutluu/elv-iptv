@@ -47,10 +47,17 @@ desktop and is testable in Node.
 - `Decompressor` port: `gunzip(chunks: AsyncIterable<Uint8Array>) → AsyncIterable<Uint8Array>`.
 - `TransportSettings { userAgent?: string; referer?: string; xtreamFormat?: 'ts' | 'm3u8' }`, applied to every request a
   source makes (playlist, API, guide, logos, streams).
-- Content keys (spec §5.4): `xtreamKey(sourceId, kind, providerId)`; `m3uKey(sourceId, url, name)` over a normalized URL:
-  lower-case scheme and host, default port dropped, userinfo, query and fragment removed, and Xtream-shaped credential
-  segments (`/live|movie|series|timeshift/<u>/<p>/`, `/<u>/<p>/<id>`) collapsed, so rotating tokens and credentials never
-  change a key. Keys are strings; their format is internal and documented in code.
+- Content keys (spec §5.4, [ADR 0011](../../adr/0011-content-keys.md)): `xtreamKey(sourceId, kind, providerId)`;
+  `m3uKey(sourceId, url, name)` over a normalized URL: lower-case scheme and host, default port, userinfo and fragment
+  removed. Only credential and token query parameters are removed (case-insensitive: `username`, `password`, `user`,
+  `pass`, `pwd`, `token`, `auth`, `key`, `signature`, `sig`, `expires`, `e`, `st`, `hash`); all other parameters stay,
+  sorted by name, so `?channel=7` and `?channel=8` remain distinct streams. Path credentials become `*` only in
+  `/live|movie|series/<u>/<p>/<id>[.ext]` (numeric id), `/timeshift/<u>/<p>/...` and the bare three-segment
+  `/<u>/<p>/<id>` form with a numeric id. An unparsable value loses anything that looks like userinfo. Keys are strings;
+  their format is internal and documented in code.
+- `HttpClient` bodies must be iterated or discarded by the caller. `createFetchHttpClient` ends a body that is silent for
+  `idleTimeoutMs` (default 30 s, per request override) with `network` / `timeout`, and a caller abort with `network` /
+  `aborted`; a missing (`undefined`) body counts as empty.
 
 ### 5.2 Shared scanning utilities (`packages/sources`)
 - A UTF-8 slice decoder (`decodeUtf8(bytes, start, end)`) that does not depend on `TextDecoder` (absent or slow on some
@@ -60,8 +67,11 @@ desktop and is testable in Node.
 - `ScanStats { lines; entries; skipped; warnings: { code; line }[] }` (warnings capped at 100, counts uncapped).
 
 ### 5.3 M3U scanner
-- `scanM3u(chunks: AsyncIterable<Uint8Array>, opts?: { batchSize?: number }) → AsyncGenerator<M3uBatch>`; a batch holds up
-  to `batchSize` (default 500) entries; the final batch also carries the header and `ScanStats`.
+- `scanM3u(chunks: AsyncIterable<Uint8Array>, opts?: { batchSize?: number; baseUrl?: string }) → AsyncGenerator<M3uBatch,
+  Result<void>>`; a batch holds up to `batchSize` (default 500) entries; the final batch also carries the header and
+  `ScanStats`. Like the XMLTV scanner it returns `err` when the input throws (no final batch). A non-comment line is an
+  entry URL only with a scheme or, with `baseUrl`, without whitespace, `<`, `{` or `"`; other lines are skipped with a
+  `not-a-url` warning, so a login page or JSON error answered with status 200 yields no entries (`header.present` is false).
 - Header: `#EXTM3U` optional; `url-tvg` and `x-tvg-url` (comma-separated lists, both kept) and other attributes kept as a map.
 - Lines: BOM stripped; LF, CRLF and lone CR accepted; blank lines and unknown `#` lines ignored (counted); a truncated last
   line is kept if it is a URL and dropped with a warning if it is a broken `#EXTINF`.

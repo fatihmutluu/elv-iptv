@@ -14,3 +14,4 @@ MADR format. All records are Accepted as of 2026-11-13.
 | [0008](0008-polyform-shield-and-cla.md) | PolyForm Shield 1.0.0 and a contributor license agreement |
 | [0009](0009-github-issues-and-projects.md) | GitHub Issues and Projects for task management |
 | [0010](0010-future-tvs-vega-tizen-webos.md) | Future TVs: Vega as a separate app, Tizen and webOS as web bundles |
+| [0011](0011-content-keys.md) | Content keys keep distinct streams apart and drop only credentials |
