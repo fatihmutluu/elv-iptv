@@ -35,7 +35,7 @@ describe('large profile over HTTP', () => {
     const report = await measureScan('large guide', async (meter) => {
       const scan = await scanGuide(`${sim.url}/guides/large.xml`, { keep: false, meter });
       expect(scan.failed).toBe(false);
-      expect(scan.channels).toHaveLength(5000);
+      expect(scan.channelCount).toBe(5000);
       return scan.programmeCount;
     });
     process.stdout.write(`${report.line}

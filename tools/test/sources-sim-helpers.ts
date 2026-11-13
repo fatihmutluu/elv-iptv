@@ -78,13 +78,29 @@ export function must<T>(r: { ok: true; value: T } | { ok: false; error: unknown 
   return r.value;
 }
 
-/** Counts body bytes and tracks the peak heap while a scan runs. */
+/** Counts body bytes and tracks the peak live heap (sampled after a forced collection) while a scan runs. */
 export interface Meter {
   bytes: number;
+  batches: number;
+  baseHeap: number;
   peakHeap: number;
 }
 
-const newMeter = (): Meter => ({ bytes: 0, peakHeap: process.memoryUsage().heapUsed });
+const SAMPLE_EVERY = 50;
+
+/** Forces a full collection; the tools Vitest config exposes `gc` through `--expose-gc`. */
+function collectGarbage(): void {
+  const gc = (globalThis as { gc?: () => void }).gc;
+  if (!gc) throw new Error('gc is not exposed: run Vitest with execArgv --expose-gc');
+  gc();
+  gc();
+}
+
+const newMeter = (): Meter => {
+  collectGarbage();
+  const base = process.memoryUsage().heapUsed;
+  return { bytes: 0, batches: 0, baseHeap: base, peakHeap: base };
+};
 
 async function* metered(body: AsyncIterable<Uint8Array>, meter: Meter): AsyncIterable<Uint8Array> {
   for await (const chunk of body) {
@@ -93,8 +109,13 @@ async function* metered(body: AsyncIterable<Uint8Array>, meter: Meter): AsyncIte
   }
 }
 
+/** Every `SAMPLE_EVERY` batches: collect, then record the live heap, so garbage never counts as retention. */
 const sample = (meter: Meter | undefined): void => {
-  if (meter) meter.peakHeap = Math.max(meter.peakHeap, process.memoryUsage().heapUsed);
+  if (!meter) return;
+  meter.batches++;
+  if (meter.batches % SAMPLE_EVERY !== 0) return;
+  collectGarbage();
+  meter.peakHeap = Math.max(meter.peakHeap, process.memoryUsage().heapUsed);
 };
 
 export interface PlaylistScan {
@@ -102,6 +123,7 @@ export interface PlaylistScan {
   header: M3uHeader | undefined;
   stats: ScanStats | undefined;
   count: number;
+  failed: boolean;
 }
 
 /** Scans a playlist URL end to end; `keep: false` counts entries without retaining them. */
@@ -110,9 +132,22 @@ export async function scanPlaylist(
   options: { transport?: TransportSettings; keep?: boolean; meter?: Meter } = {},
 ): Promise<PlaylistScan> {
   const res = must(await http.get(url, { headers: transportHeaders(options.transport) }));
-  const out: PlaylistScan = { entries: [], header: undefined, stats: undefined, count: 0 };
+  const out: PlaylistScan = {
+    entries: [],
+    header: undefined,
+    stats: undefined,
+    count: 0,
+    failed: false,
+  };
   const body = options.meter ? metered(res.body, options.meter) : res.body;
-  for await (const batch of scanM3u(body) as AsyncIterable<M3uBatch>) {
+  const scan = scanM3u(body, { baseUrl: url });
+  for (;;) {
+    const step = await scan.next();
+    if (step.done) {
+      out.failed = !step.value.ok;
+      break;
+    }
+    const batch: M3uBatch = step.value;
     sample(options.meter);
     out.count += batch.entries.length;
     if (options.keep !== false) out.entries.push(...batch.entries);
@@ -128,6 +163,7 @@ export interface GuideScan {
   channels: XmltvChannel[];
   programmes: XmltvProgramme[];
   programmeCount: number;
+  channelCount: number;
   stats: ScanStats | undefined;
   failed: boolean;
 }
@@ -142,6 +178,7 @@ export async function scanGuide(
     channels: [],
     programmes: [],
     programmeCount: 0,
+    channelCount: 0,
     stats: undefined,
     failed: false,
   };
@@ -157,8 +194,9 @@ export async function scanGuide(
     const batch = step.value;
     sample(options.meter);
     out.programmeCount += batch.programmes.length;
-    out.channels.push(...batch.channels);
+    out.channelCount += batch.channels.length;
     if (keep) {
+      out.channels.push(...batch.channels);
       out.programmes.push(...batch.programmes);
     }
     if (batch.done) out.stats = batch.stats;
@@ -176,27 +214,20 @@ export interface ScanReport {
   line: string;
 }
 
-/** Forces a full collection; the tools Vitest config exposes `gc` through `--expose-gc`. */
-function collectGarbage(): void {
-  const gc = (globalThis as { gc?: () => void }).gc;
-  if (!gc) throw new Error('gc is not exposed: run Vitest with execArgv --expose-gc');
-  gc();
-  gc();
-}
-
-/** Times one scan; `run` returns the number of entries it counted. Heap growth is the sampled peak over the start. */
+/**
+ * Times one scan; `run` returns the number of entries it counted. Heap growth is the peak live heap
+ * (sampled after a forced collection every 50 batches) over the heap after the initial collection.
+ */
 export async function measureScan(
   label: string,
   run: (meter: Meter) => Promise<number>,
 ): Promise<ScanReport> {
-  collectGarbage();
   const meter = newMeter();
-  const base = process.memoryUsage().heapUsed;
   const started = performance.now();
   const entries = await run(meter);
   const seconds = (performance.now() - started) / 1000;
   const mb = meter.bytes / 1_048_576;
-  const heapGrowthMb = Math.max(0, meter.peakHeap - base) / 1_048_576;
+  const heapGrowthMb = Math.max(0, meter.peakHeap - meter.baseHeap) / 1_048_576;
   const perSecond = entries / seconds;
   const line = `${label}: ${entries} entries, ${mb.toFixed(1)} MB, ${seconds.toFixed(2)} s, ${Math.round(perSecond)} entries/s, heap +${heapGrowthMb.toFixed(1)} MB`;
   return { label, entries, mb, seconds, perSecond, heapGrowthMb, line };

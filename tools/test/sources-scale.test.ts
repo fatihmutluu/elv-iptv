@@ -29,12 +29,10 @@ describe.skipIf(!enabled)('huge profile over HTTP', () => {
     await sim.close();
   });
 
-  it('scans 500k playlist entries as cheaply per entry as 100k', async () => {
+  it('scans 500k playlist entries with the same live heap as 100k', async () => {
     const run = (path: string) => async (meter: Meter) => {
-      const scan = await scanPlaylist(`${sim.url}${path}`, {
-        keep: false,
-        ...(meter ? { meter } : {}),
-      });
+      const scan = await scanPlaylist(`${sim.url}${path}`, { keep: false, meter });
+      expect(scan.failed).toBe(false);
       return scan.count;
     };
     const large = await measureScan('large playlist', run('/playlists/large.m3u'));
@@ -44,21 +42,28 @@ describe.skipIf(!enabled)('huge profile over HTTP', () => {
     process.stdout.write(`${huge.line}
 `);
     expect(huge.entries).toBe(500_000);
-    expect(huge.heapGrowthMb).toBeLessThanOrEqual(large.heapGrowthMb * 1.25 + 32);
-    expect(huge.heapGrowthMb).toBeLessThan(256);
+    expect(huge.heapGrowthMb).toBeLessThanOrEqual(large.heapGrowthMb * 1.25);
     expect(huge.seconds / huge.entries).toBeLessThanOrEqual((large.seconds / large.entries) * 1.5);
   }, 300_000);
 
-  it('scans the huge guide', async () => {
-    const report = await measureScan('huge guide', async (meter) => {
-      const scan = await scanGuide(`${sim.url}/guides/huge.xml`, { keep: false, meter });
+  it('scans the huge guide with the same live heap as the large one', async () => {
+    const run = (path: string, channels: number) => async (meter: Meter) => {
+      const scan = await scanGuide(`${sim.url}${path}`, { keep: false, meter });
       expect(scan.failed).toBe(false);
-      expect(scan.channels).toHaveLength(20_000);
+      expect(scan.channelCount).toBe(channels);
       return scan.programmeCount;
-    });
-    process.stdout.write(`${report.line}
+    };
+    const large = await measureScan('large guide', run('/guides/large.xml', 5000));
+    const huge = await measureScan('huge guide', run('/guides/huge.xml', 20_000));
+    process.stdout.write(`${large.line}
 `);
-    expect(report.entries).toBeGreaterThan(20_000 * 7);
+    process.stdout.write(`${huge.line}
+`);
+    expect(huge.entries).toBeGreaterThan(20_000 * 7);
+    // The HTTP transport itself keeps about 3% of the streamed bytes alive until the next large response
+    // (measured without any scanner: +6 MB for 187 MB, +20 MB for 752 MB), so the guide cannot be held to
+    // the playlist's 1.25x ratio over HTTP. The bound below only proves the scan does not hold the guide.
+    expect(huge.heapGrowthMb).toBeLessThan(64);
   }, 600_000);
 
   it('fetches the huge VOD list category by category', async () => {

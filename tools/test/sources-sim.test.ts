@@ -164,7 +164,15 @@ describe('playlist', () => {
         'inputstream.adaptive.license_type',
         'inputstream.adaptive.license_key',
       ]);
-      expect(at(entries, 'relative-url').url).toBe('relative/1024.ts');
+      const relativeId = 1000 + COMPAT_CASES.indexOf('relative-url') + 1;
+      expect(at(entries, 'relative-url').url).toBe(
+        `${sim.url}/playlists/relative/${relativeId}.ts`,
+      );
+      const redirectId = 1000 + COMPAT_CASES.indexOf('redirect-url') + 1;
+      expect(at(entries, 'redirect-url').url).toBe(`${sim.url}/redirect/${redirectId}.ts`);
+      expect(at(entries, 'missing-404').url).toBe(
+        [sim.url, 'live', user, user, '999999.ts'].join('/'),
+      );
       expect(at(entries, 'credentials-in-url').url).toContain('@');
       for (const c of ['udp-url', 'rtp-url', 'rtmp-url']) expect(at(entries, c).nonHttp).toBe(true);
       expect(entries.filter((e) => e.nonHttp)).toHaveLength(3);
