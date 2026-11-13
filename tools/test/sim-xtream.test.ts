@@ -89,7 +89,7 @@ describe('playerApi', () => {
       stream_id: 1001,
       stream_icon: 'http://127.0.0.1:8080/logos/1001.png',
       epg_channel_id: 'ch1001',
-      category_id: 'live-1',
+      category_id: '1',
       custom_sid: '',
       tv_archive: 0,
       direct_source: '',
@@ -97,9 +97,9 @@ describe('playerApi', () => {
     });
     expect(all[0]).toHaveProperty('added');
     expect(all.find((s) => s.epg_channel_id === '')).toBeDefined();
-    const filtered = list('demo', 'get_live_streams', { category_id: 'live-2' });
+    const filtered = list('demo', 'get_live_streams', { category_id: '2' });
     expect(filtered.length).toBeGreaterThan(0);
-    expect(filtered.every((s) => s.category_id === 'live-2')).toBe(true);
+    expect(filtered.every((s) => s.category_id === '2')).toBe(true);
   });
 
   it('flags catch-up channels', () => {
@@ -115,19 +115,19 @@ describe('playerApi', () => {
       stream_type: 'movie',
       stream_id: 200001,
       name: 'Movie 0001',
-      category_id: 'vod-1',
+      category_id: '10001',
       container_extension: 'mp4',
     });
     for (const k of ['stream_icon', 'rating', 'added']) expect(vod[0]).toHaveProperty(k);
-    const filtered = list('demo', 'get_vod_streams', { category_id: 'vod-2' });
+    const filtered = list('demo', 'get_vod_streams', { category_id: '10002' });
     expect(filtered.length).toBeGreaterThan(0);
-    expect(filtered.every((v) => v.category_id === 'vod-2')).toBe(true);
+    expect(filtered.every((v) => v.category_id === '10002')).toBe(true);
     const series = list('demo', 'get_series');
     expect(series).toHaveLength(5);
     expect(series[0]).toMatchObject({
       series_id: 300001,
       name: 'Series 0001',
-      category_id: 'series-1',
+      category_id: '20001',
     });
     for (const k of ['cover', 'plot', 'last_modified']) expect(series[0]).toHaveProperty(k);
   });
@@ -144,7 +144,7 @@ describe('playerApi', () => {
     expect(movie_data).toMatchObject({
       stream_id: 200001,
       name: 'Movie 0001',
-      category_id: 'vod-1',
+      category_id: '10001',
       container_extension: 'mp4',
     });
     expect(movie_data).toHaveProperty('added');

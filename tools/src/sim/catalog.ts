@@ -222,13 +222,16 @@ const SHAPES: Record<ProfileName, Shape> = {
   },
 };
 
+const CATEGORY_BASE: Record<Category['kind'], number> = { live: 0, vod: 10000, series: 20000 };
+const categoryId = (kind: Category['kind'], n: number): string => String(CATEGORY_BASE[kind] + n);
+
 const pad = (n: number, width = 4): string => String(n).padStart(width, '0');
 
 function makeCategories(shape: Shape): Category[] {
   const out: Category[] = [];
   const add = (kind: Category['kind'], count: number, label: string) => {
     for (let i = 1; i <= count; i++)
-      out.push({ id: `${kind}-${i}`, name: `${label} ${pad(i, 2)}`, kind });
+      out.push({ id: categoryId(kind, i), name: `${label} ${pad(i, 2)}`, kind });
   };
   add('live', shape.liveCats, 'Live Group');
   add('vod', shape.vodCats, 'Movie Group');
@@ -253,7 +256,7 @@ function makeLive(profile: ProfileName, shape: Shape): LiveChannel[] {
         compat !== null && compat in COMPAT_NAMES
           ? (COMPAT_NAMES[compat] as string)
           : `Channel ${pad(i + 1)}`,
-      categoryId: `live-${(i % shape.liveCats) + 1}`,
+      categoryId: categoryId('live', (i % shape.liveCats) + 1),
       epgId: hasEpg ? `ch${id}` : null,
       logo: i % 7 === 6 ? null : id,
       recipe: radio ? 'aac-radio' : (VIDEO_RECIPES[i % VIDEO_RECIPES.length] as RecipeName),
@@ -271,7 +274,7 @@ function makeMovies(shape: Shape, next: () => number): Movie[] {
     out.push({
       id: MOVIE_BASE + i,
       name: `Movie ${pad(i + 1)}`,
-      categoryId: `vod-${(i % shape.vodCats) + 1}`,
+      categoryId: categoryId('vod', (i % shape.vodCats) + 1),
       ext: i % 4 === 3 ? 'mkv' : 'mp4',
       recipe: VIDEO_RECIPES[i % VIDEO_RECIPES.length] as RecipeName,
       durationSec: 3600 + Math.floor(next() * 5400),
@@ -303,7 +306,7 @@ function makeSeries(shape: Shape, next: () => number): Series[] {
     out.push({
       id: SERIES_BASE + s,
       name,
-      categoryId: `series-${(s % shape.seriesCats) + 1}`,
+      categoryId: categoryId('series', (s % shape.seriesCats) + 1),
       episodes,
     });
   }

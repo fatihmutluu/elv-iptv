@@ -93,7 +93,7 @@ function applyQuirks(rows: Row[]): Row[] {
   const withLogo = out.findIndex((r) => r.stream_icon === '');
   if (withLogo >= 0) (out[withLogo] as Row).stream_icon = null;
   if (out[1]) out[1] = { ...out[1], name: `${String(out[1].name)} &amp; Co` };
-  if (out[2]) out[2] = { ...out[2], category_id: 'live-999' };
+  if (out[2]) out[2] = { ...out[2], category_id: '999' };
   const first = out[0];
   const last = out.at(-1);
   if (first && last && out.length > 1)
