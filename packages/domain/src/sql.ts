@@ -17,13 +17,23 @@ export interface SqlDriver {
   run(sql: string, params?: readonly SqlValue[]): Promise<SqlRunResult>;
   /** Runs one query and returns every row. */
   all<T = Record<string, SqlValue>>(sql: string, params?: readonly SqlValue[]): Promise<T[]>;
-  /** One prepared statement executed for every parameter row inside one transaction. */
+  /**
+   * One prepared statement executed for every parameter row inside one transaction; called on the `tx` of an
+   * open transaction it joins that transaction instead.
+   */
   batch(sql: string, rows: readonly (readonly SqlValue[])[]): Promise<void>;
-  /** Runs fn in a transaction; commits when it resolves, rolls back when it throws. Not re-entrant. */
+  /**
+   * Runs fn in a transaction; commits when it resolves, rolls back when it throws. Not re-entrant. Inside `fn` use
+   * only the `tx` it receives: calls on the outer driver wait for the transaction to end, so awaiting one there
+   * never resolves.
+   */
   transaction<T>(fn: (tx: SqlDriver) => Promise<T>): Promise<T>;
 }
 
-/** Platform secret storage (Keychain, Keystore, safeStorage); values are strings. */
+/**
+ * Platform secret storage (Keychain, Keystore, safeStorage); values are strings. Keys use only letters, digits,
+ * `.`, `-` and `_`, the set the strictest platform store accepts.
+ */
 export interface SecretStore {
   get(key: string): Promise<string | undefined>;
   set(key: string, value: string): Promise<void>;
@@ -32,5 +42,9 @@ export interface SecretStore {
 
 /** Lets the host run UI work between batches of a long job. */
 export interface Scheduler {
+  /**
+   * Resolves after the host had a turn: it must yield a macrotask (a timer, `setImmediate`, a frame), because a
+   * resolved promise lets no rendering or input in.
+   */
   yieldNow(): Promise<void>;
 }

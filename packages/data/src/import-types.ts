@@ -9,7 +9,11 @@ export interface ImportDeps {
   /** Epoch milliseconds. */
   clock: () => number;
   decompressor?: Decompressor;
-  /** Overrides the Xtream client's whole-body cap; mainly useful to exercise the per-category fallback. */
+  /**
+   * Largest Xtream response body the client buffers (default 128 MiB). This is the memory and jank control for small
+   * devices: one list is parsed from one buffer, so a lower cap bounds both, and a list above it falls back to
+   * per-category calls (`source-format/too-large`).
+   */
   maxBodyBytes?: number;
 }
 
