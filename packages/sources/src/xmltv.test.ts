@@ -256,3 +256,51 @@ describe('scanXmltv property', () => {
     );
   });
 });
+
+describe('scanXmltv programmeChannels', () => {
+  const channel = (id: string) =>
+    `<channel id="${id}"><display-name>${id}</display-name></channel>`;
+  const prog = (id: string, title: string, start = '20260101000000') =>
+    `<programme start="${start}" channel="${id}"><title>${title}</title></programme>`;
+
+  it('keeps every channel event and only the programmes of listed channels', async () => {
+    const text = guide(channel('a') + channel('b') + prog('a', 'A1') + prog('b', 'B1'));
+    const r = await expectSameEverywhere(text, { programmeChannels: new Set(['b']) });
+    expect(r.channels.map((c) => c.id)).toEqual(['a', 'b']);
+    expect(r.programmes.map((p) => p.title)).toEqual(['B1']);
+  });
+
+  it('consults a set that grows between channel events and programmes', async () => {
+    const wanted = new Set<string>();
+    const text = guide(channel('a') + channel('b') + prog('a', 'A1') + prog('b', 'B1'));
+    const gen = scanXmltv(whole(text), { batchSize: 1, programmeChannels: wanted });
+    const titles: string[] = [];
+    for (;;) {
+      const step = await gen.next();
+      if (step.done) break;
+      for (const c of step.value.channels) if (c.id === 'b') wanted.add(c.id);
+      titles.push(...step.value.programmes.map((p) => p.title));
+    }
+    expect(titles).toEqual(['B1']);
+  });
+
+  it('never decodes the children of programmes of other channels', async () => {
+    const bad = guide(
+      `<programme start="20260101000000" channel="x"><title>unclosed child of a skipped programme</programme>` +
+        prog('y', 'Wanted'),
+    );
+    const r = await collect(whole(bad), { programmeChannels: new Set(['y']) });
+    expect(r.programmes.map((p) => p.title)).toEqual(['Wanted']);
+    expect(r.stats?.skipped).toBe(0);
+  });
+
+  it('combines with channels, which filters both', async () => {
+    const text = guide(channel('a') + channel('b') + prog('a', 'A1') + prog('b', 'B1'));
+    const r = await collect(whole(text), {
+      channels: new Set(['a', 'b']),
+      programmeChannels: new Set(['a']),
+    });
+    expect(r.channels.map((c) => c.id)).toEqual(['a', 'b']);
+    expect(r.programmes.map((p) => p.title)).toEqual(['A1']);
+  });
+});

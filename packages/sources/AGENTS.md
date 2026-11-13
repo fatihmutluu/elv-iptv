@@ -28,9 +28,10 @@ M3U and XMLTV scanners and the Xtream client.
   comma following the last `="..."` value (warning `attr-quote`).
   Files: `m3u.ts` (line machine), `m3u-attrs.ts` (attribute, directive, URL helpers), `m3u-types.ts`.
 - Utilities: `toElvError` (input errors to `ElvError`), `decodeUtf8`, `ByteBuffer`, `decodeEntities`, `createStats`/`warn`; test helpers in `test-chunks.ts`.
-- `scanXmltv(chunks, { batchSize?, channels?, from?, to?, decompressor? })` streams an XMLTV guide into `XmltvBatch`es
+- `scanXmltv(chunks, { batchSize?, channels?, programmeChannels?, from?, to?, decompressor? })` streams an XMLTV guide into `XmltvBatch`es
   (`channels`, `programmes` with epoch-ms times, batch size counts channels plus programmes) in bounded memory; the generator returns
-  `err` `source-format`/`gzip-unsupported` for gzip input without a `Decompressor` and otherwise `ok`. Filters run on the
+  `err` `source-format`/`gzip-unsupported` for gzip input without a `Decompressor` and otherwise `ok`. `channels` filters channel events and programmes; `programmeChannels` filters only programmes and is consulted per
+  programme, so a `Set` the caller grows while reading channel batches works (channels read so far are yielded in a batch before the next programme is consulted). Filters run on the
   open tag, so skipped elements are never decoded. A programme or channel that cannot be read is skipped with one
   warning and scanning resumes at the next `<programme`/`<channel` (warnings: `programme-missing-start`,
   `-missing-channel`, `-bad-time`, `-malformed`, `-unclosed`, `-truncated`, `channel-*`, `element-too-long`).
