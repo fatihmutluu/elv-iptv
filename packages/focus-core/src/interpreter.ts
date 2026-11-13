@@ -37,6 +37,8 @@ interface Held {
  * release. Repeat keys then emit `repeat` every 1000/REPEAT_START_HZ ms, switching to 1000/REPEAT_FAST_HZ ms for
  * repeats due at or after `downAt + LONG_PRESS_MS + REPEAT_RAMP_MS`. The first repeat is one interval after the
  * threshold. A key that only repeats (no `long`) still starts at the threshold and never presses on release after it.
+ * A tick that finds several repeats overdue emits at most one and skips to the first future slot; a non-finite `now`
+ * is ignored. A `long` action (native long press) is passed through as one `long` (a digit becomes a `press`).
  * While a repeat is unacknowledged, later due repeats of that key are dropped, never queued. A repeated `down` for a
  * held key is ignored; an `up` without a `down` counts as a `press`.
  */
@@ -49,12 +51,10 @@ export function createKeyInterpreter(opts: KeyInterpreterOptions = {}): KeyInter
   );
   const held = new Map<Key, Held>();
 
-  const intervalAt = (h: Held, due: number): number =>
-    due - h.downAt >= LONG_PRESS_MS + REPEAT_RAMP_MS ? FAST_INTERVAL_MS : SLOW_INTERVAL_MS;
-
   function input(k: KeyInput): KeyEvent[] {
     const { key, time } = k;
     if (k.action === 'press') return [{ key, kind: 'press', time }];
+    if (k.action === 'long') return [{ key, kind: isDigitKey(key) ? 'press' : 'long', time }];
     if (k.action === 'down') {
       if (!held.has(key)) {
         const downAt = time;
@@ -80,7 +80,17 @@ export function createKeyInterpreter(opts: KeyInterpreterOptions = {}): KeyInter
     return [];
   }
 
+  function advancePast(h: Held, now: number): void {
+    const rampEnd = h.downAt + LONG_PRESS_MS + REPEAT_RAMP_MS;
+    let t = h.nextRepeatAt;
+    while (t <= now && t < rampEnd) t += SLOW_INTERVAL_MS;
+    if (t <= now) t += (Math.floor((now - t) / FAST_INTERVAL_MS) + 1) * FAST_INTERVAL_MS;
+    if (t <= now) t += FAST_INTERVAL_MS;
+    h.nextRepeatAt = t;
+  }
+
   function tick(now: number): KeyEvent[] {
+    if (!Number.isFinite(now)) return [];
     const out: KeyEvent[] = [];
     for (const [key, h] of held) {
       if (now - h.downAt < LONG_PRESS_MS) continue;
@@ -88,12 +98,12 @@ export function createKeyInterpreter(opts: KeyInterpreterOptions = {}): KeyInter
         h.longFired = true;
         if (longKeys.has(key)) out.push({ key, kind: 'long', time: h.downAt + LONG_PRESS_MS });
       }
-      while (h.nextRepeatAt <= now) {
+      if (h.nextRepeatAt <= now) {
         if (!h.pending) {
           out.push({ key, kind: 'repeat', time: h.nextRepeatAt });
           h.pending = true;
         }
-        h.nextRepeatAt += intervalAt(h, h.nextRepeatAt);
+        advancePast(h, now);
       }
     }
     return out;
