@@ -39,6 +39,25 @@ describe('parseXtreamLink', () => {
     const r = parseXtreamLink(link('/get.php', 'flag&username=a%ZZ&password=b'));
     expect(r?.username).toBe('a%ZZ');
   });
+  it('takes the first non-empty value of a repeated parameter', () => {
+    const r = parseXtreamLink(
+      link(
+        '/get.php',
+        'username=&username=first&username=second&password=p1&password=&password=p2&output=&output=hls&output=ts',
+      ),
+    );
+    expect(r).toEqual({
+      server: 'http://h.example:8080',
+      username: 'first',
+      password: 'p1',
+      output: 'm3u8',
+    });
+  });
+  it('still accepts a link whose later password is empty', () => {
+    expect(parseXtreamLink(link('/get.php', 'username=a&password=b&password='))?.password).toBe(
+      'b',
+    );
+  });
   it.each([
     ['no get.php', link('/list.m3u', 'username=a&password=b')],
     ['missing password', link('/get.php', 'username=a')],
@@ -101,7 +120,7 @@ describe('addSourceFromLink', () => {
     const r = await addSourceFromLink({ name: 'Panel', url: link('/get.php', creds) }, s.deps);
     expect(r.ok && r.value.settings).toEqual({});
   });
-  it('does not store a guide URL or VOD flag on an Xtream source', async () => {
+  it('keeps a guide override on an Xtream source without raw credentials in settings', async () => {
     const s = await setup();
     const guide = `https://g.example/x.xml?${creds}`;
     const r = await addSourceFromLink(
@@ -109,8 +128,39 @@ describe('addSourceFromLink', () => {
       s.deps,
     );
     expect(r.ok && r.value.kind).toBe('xtream');
+    expect(r.ok && r.value.settings.guideUrl).toBeDefined();
+    expect(r.ok && r.value.settings.vodPlaylist).toBeUndefined();
+    const rows = JSON.stringify(await s.db.all('SELECT * FROM sources'));
+    for (const secret of [PW, enc(PW), USER, enc(USER)]) expect(rows).not.toContain(secret);
+    const vars = JSON.parse((await s.secrets.get(secretKey('src1', 'urlvars'))) ?? '{}');
+    expect(JSON.stringify(vars)).toContain(enc(PW).slice(0, 3));
+  });
+  it('keeps a guide on a foreign host as a whole secret', async () => {
+    const s = await setup();
+    const r = await addSourceFromLink(
+      { name: 'Panel', url: link('/get.php', creds), guideUrl: 'https://g.example/x.xml?t=zz' },
+      s.deps,
+    );
+    expect(r.ok && r.value.settings.guideUrl).toBe('{{g:url}}');
+    expect(await s.secrets.get(secretKey('src1', 'urlvars'))).toContain('g.example');
+  });
+  it('ignores a blank guide override', async () => {
+    const s = await setup();
+    const r = await addSourceFromLink(
+      { name: 'Panel', url: link('/get.php', creds), guideUrl: '  ' },
+      s.deps,
+    );
     expect(r.ok && r.value.settings).toEqual({});
-    expect(JSON.stringify(await s.db.all('SELECT * FROM sources'))).not.toContain('g.example');
+    expect(await s.secrets.get(secretKey('src1', 'urlvars'))).toBeUndefined();
+  });
+  it('trims the pasted URL for both kinds', async () => {
+    const s = await setup();
+    const url = 'https://cdn.example/list.m3u';
+    await addSourceFromLink({ name: 'List', url: `  ${url}\n` }, s.deps);
+    expect(await s.secrets.get(secretKey('src1', 'playlist'))).toBe(url);
+    const x = await setup();
+    const r = await addSourceFromLink({ name: 'P', url: ` ${link('/get.php', creds)} ` }, x.deps);
+    expect(r.ok && r.value.kind).toBe('xtream');
   });
   it('adds an M3U source when keepAsM3u is set', async () => {
     const s = await setup();

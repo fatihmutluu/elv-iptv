@@ -16,9 +16,9 @@ export interface LinkSourceInput {
   url: string;
   /** Skip the Xtream conversion and add the link as a plain M3U source. */
   keepAsM3u?: boolean;
-  /** M3U sources only; an Xtream source gets its guide from the panel. */
+  /** Guide override; stored templated for both kinds. An Xtream source falls back to the panel guide. */
   guideUrl?: string;
-  /** M3U sources only. */
+  /** M3U sources only; meaningless for an Xtream source and ignored there. */
   vodPlaylist?: boolean;
   transport?: TransportSettings;
 }
@@ -48,9 +48,9 @@ export function parseXtreamLink(url: string): XtreamLink | undefined {
     if (eq < 0) continue;
     const name = pair.slice(0, eq).toLowerCase();
     const value = decode(pair.slice(eq + 1));
-    if (name === 'username') username = value;
-    else if (name === 'password') password = value;
-    else if (name === 'output') {
+    if (name === 'username') username ||= value;
+    else if (name === 'password') password ||= value;
+    else if (name === 'output' && output === undefined) {
       const v = value.toLowerCase();
       if (v === 'm3u8' || v === 'hls') output = 'm3u8';
       else if (v === 'ts') output = 'ts';
@@ -70,12 +70,13 @@ export async function addSourceFromLink(
   input: LinkSourceInput,
   deps: AddSourceDeps,
 ): Promise<Result<SourceRecord>> {
-  const link = input.keepAsM3u === true ? undefined : parseXtreamLink(input.url);
+  const url = input.url.trim();
+  const link = input.keepAsM3u === true ? undefined : parseXtreamLink(url);
   if (link === undefined) {
     return addM3uSource(
       {
         name: input.name,
-        playlistUrl: input.url,
+        playlistUrl: url,
         ...(input.guideUrl === undefined ? {} : { guideUrl: input.guideUrl }),
         ...(input.vodPlaylist === undefined ? {} : { vodPlaylist: input.vodPlaylist }),
         ...(input.transport === undefined ? {} : { transport: input.transport }),
@@ -91,6 +92,7 @@ export async function addSourceFromLink(
       server: link.server,
       username: link.username,
       password: link.password,
+      ...(input.guideUrl === undefined ? {} : { guideUrl: input.guideUrl }),
       ...(transport === undefined ? {} : { transport }),
     },
     deps,

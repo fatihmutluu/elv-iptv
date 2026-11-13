@@ -98,7 +98,7 @@ Used for `name_fold` and guide name matching.
   3. Templates look like `https://host/{{v0}}/<stream token>`; `resolveStreamUrl(source, template)` rebuilds the URL.
   Keys: `m3uKey(sourceId, template, name)` — stable across password and token changes. This refines ADR 0011 (update it).
 - Logos and guide URLs that carry credentials are templated the same way.
-- **Pasted links (owner decision 17):** an M3U link of the Xtream form (`…/get.php?username=…&password=…`) is added as an Xtream source (`addSourceFromLink`), because on a real panel the M3U cannot tell movies from live channels while the Xtream API gives categories, movies, series and the guide. The server is normalized like the Xtream client does, `output` sets `xtreamFormat`, credentials go only to the `SecretStore`, and the user can choose to keep the link as an M3U source.
+- **Pasted links (owner decision 17):** an M3U link of the Xtream form (`…/get.php?username=…&password=…`) is added as an Xtream source (`addSourceFromLink`), because on a real panel the M3U cannot tell movies from live channels while the Xtream API gives categories, movies, series and the guide. The server is normalized like the Xtream client does, `output` sets `xtreamFormat`, a user guide override is kept (templated, tried before the panel guide), `vodPlaylist` is ignored, credentials go only to the `SecretStore`, and the user can choose to keep the link as an M3U source.
 
 ### 5.6 Import engine (`packages/data`)
 - `importCatalog(sourceId, deps, opts?: { signal?, onProgress?, batchSize? })` and `importGuide(…)` return

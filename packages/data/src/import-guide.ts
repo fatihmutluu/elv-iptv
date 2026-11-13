@@ -41,14 +41,14 @@ async function discard(body: AsyncIterable<Uint8Array>): Promise<void> {
 /** Guide URLs to try, in order, resolved in memory only; candidates with unresolved placeholders are dropped. */
 async function candidateUrls(source: SourceRecord, deps: ImportDeps): Promise<Result<string[]>> {
   const urls: string[] = [];
+  const vars = await readUrlVars(deps, source.id);
   if (source.kind === 'xtream') {
     const own = source.settings.guideUrl;
-    if (own !== undefined && own !== '') urls.push(own);
+    if (own !== undefined && own !== '') urls.push(resolveTemplate(own, vars));
     const client = await openClient(source, deps);
     if (!client.ok) return client;
     urls.push(client.value.guideUrl());
   } else {
-    const vars = await readUrlVars(deps, source.id);
     const templates = [
       ...(source.settings.guideUrl === undefined ? [] : [source.settings.guideUrl]),
       ...(source.settings.discoveredGuideUrls ?? []),

@@ -41,6 +41,8 @@ export interface XtreamSourceInput {
   username: string;
   password: string;
   transport?: TransportSettings;
+  /** User guide override, stored like an M3U guide URL (templated against the source's credentials). */
+  guideUrl?: string;
 }
 
 /** Input for {@link addM3uSource}. */
@@ -112,7 +114,10 @@ async function persist(
   return ok(record);
 }
 
-/** Adds an Xtream source: server, username and password go to the secret store, never to the database. */
+/**
+ * Adds an Xtream source: server, username and password go to the secret store, never to the database. A guide
+ * override is templated (credential values to `source:<id>:urlvars` under `g:` names) before it reaches `settings_json`.
+ */
 export async function addXtreamSource(
   input: XtreamSourceInput,
   deps: AddSourceDeps,
@@ -135,7 +140,14 @@ export async function addXtreamSource(
     username: input.username,
     password: input.password,
   });
-  return persist(deps, record, [[secretKey(id, 'xtream'), secret]]);
+  const secrets: [string, string][] = [[secretKey(id, 'xtream'), secret]];
+  if (input.guideUrl !== undefined && input.guideUrl.trim() !== '') {
+    const credentials = `username=${encodeURIComponent(input.username)}&password=${encodeURIComponent(input.password)}`;
+    const g = templateGuide(input.guideUrl, `${input.server}/get.php?${credentials}`);
+    settings.guideUrl = g.template;
+    secrets.push([secretKey(id, 'urlvars'), JSON.stringify(g.vars)]);
+  }
+  return persist(deps, record, secrets);
 }
 
 const URL_HEAD = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)([^?#]*)(?:\?([^#]*))?/i;

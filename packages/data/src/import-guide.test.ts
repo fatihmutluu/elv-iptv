@@ -26,6 +26,7 @@ import {
 import { emptyPanel, M3U_PASS, M3U_USER, setup } from './import-test-helpers';
 import type { ImportProgress } from './import-types';
 import { importCatalog } from './import-xtream';
+import { addSourceFromLink } from './source-link';
 import { updateSourceSettings } from './sources';
 
 describe('guide import', () => {
@@ -340,5 +341,46 @@ describe('xtream guide', () => {
     ).toEqual(['Evening']);
     const runs = JSON.stringify(await e.db.all('SELECT * FROM import_runs'));
     expect(runs).not.toContain('xmltv');
+  });
+});
+
+describe('xtream guide override', () => {
+  it('fetches the override, resolved from its template, before the panel guide', async () => {
+    const e = await setup();
+    const pw = ['pw', 'Xyz', '19'].join('');
+    const deps0 = { db: e.db, secrets: e.secrets, clock: () => 2, newId: () => 's2' };
+    const cred = ['username=demo-user', ['password', pw].join('=')].join('&');
+    const override = `http://epg.example/g.xml?${cred}`;
+    const added = await addSourceFromLink(
+      {
+        name: 'Linked',
+        url: `http://panel.example:8080/get.php?${cred}`,
+        guideUrl: override,
+      },
+      deps0,
+    );
+    expect(added.ok && added.value.kind).toBe('xtream');
+    expect(JSON.stringify(await e.db.all('SELECT settings_json FROM sources'))).not.toContain(pw);
+    const urls: string[] = [];
+    const panelHttp = e.deps.http;
+    const deps = {
+      ...e.deps,
+      http: {
+        async get(url: string, options?: HttpRequestOptions) {
+          if (!url.includes('epg.example')) return panelHttp.get(url, options);
+          urls.push(url);
+          const bytes = new TextEncoder().encode(tv(channelXml('a', 'A')));
+          return ok({
+            status: 200,
+            headers: {},
+            body: (async function* () {
+              yield bytes;
+            })(),
+          });
+        },
+      },
+    };
+    expect((await importGuide('s2', deps, { now: NOW })).ok).toBe(true);
+    expect(urls).toEqual([override]);
   });
 });
