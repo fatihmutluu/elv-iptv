@@ -18,14 +18,21 @@ import { mediaRoute } from './routes-media.ts';
 
 /** Options of `startSim`; every field is optional. */
 export interface SimOptions {
+  /** TCP port; 0 picks a free one. Defaults to 7878. */
   port?: number;
+  /** Bind address. Defaults to loopback; use 0.0.0.0 only to serve an emulator or LAN device. */
   host?: string;
+  /** Seed of the generated catalog and guides; the same seed gives the same output. Defaults to 1. */
   seed?: number;
   /** Simulator time at start; defaults to the real time. */
   clock?: Date;
+  /** Appends every request as a redacted JSONL line to this file. */
   logFile?: string;
+  /** Length in seconds of generated media recipes. Defaults to 600. */
   mediaSeconds?: number;
+  /** Folder for generated media. Defaults to `.cache/sim-media` in the repository. */
   cacheDir?: string;
+  /** FFmpeg executable. `undefined` probes `FFMPEG_PATH` then PATH; `null` means no FFmpeg, so media routes answer 503. */
   ffmpegPath?: string | null;
 }
 

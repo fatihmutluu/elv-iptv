@@ -20,6 +20,7 @@ Users bring their own M3U or Xtream Codes source; the project ships no content. 
 - `pnpm run:app <target> [build] [--production]` launches or builds a target
   (android, android-tv, fire-tv, ios, tvos, windows, macos, linux).
 - `pnpm scaffold <pure|rn|module> <name>` creates a workspace package (skill `add-package`).
+- `pnpm sim` starts the local stream simulator, a fake IPTV provider for the apps (details in `tools/AGENTS.md`).
 - `pnpm --filter <package> test` runs one package's tests. From a package folder use `pnpm -w check`.
 
 ## Definition of done
