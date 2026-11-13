@@ -69,6 +69,18 @@ describe('buildAppConfig', () => {
     expect(build({}).extra?.build).toMatchObject({ commit: 'local', branch: 'local' });
   });
 
+  it('registers the deep link scheme everywhere but the gate flag only in development', () => {
+    for (const variant of ['production', 'development', undefined]) {
+      expect(build({ APP_VARIANT: variant }).scheme).toBe('elviptv');
+    }
+    expect(build({ APP_VARIANT: 'development' }).extra?.gate).toBe(true);
+    for (const variant of ['production', undefined]) {
+      const config = build({ APP_VARIANT: variant });
+      expect(config.extra).not.toHaveProperty('gate');
+      expect(JSON.stringify(config)).not.toContain('gate');
+    }
+  });
+
   it('exposes DEV_ values in development only', () => {
     const env = { DEV_XTREAM_URL: 'http://x', DEV_XTREAM_PASS: 'secret', OTHER: 'no' };
     expect(build({ ...env, APP_VARIANT: 'development' }).extra?.dev).toEqual({

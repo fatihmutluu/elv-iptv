@@ -21,3 +21,29 @@ It is a composition root: it wires modules, storage drivers, routes and stores.
   (`.elv-prebuild.json`) and regenerates it when the target, variant or store changes. After
   changing `app.config.ts`, plugins or native dependencies, run `pnpm run:app <target> build`.
 - Placeholder images in `assets/` are generated once; replace them with final art, not code.
+
+## Development gate (`src/gate/`)
+- Deep link `elviptv://gate/list?items=100000&auto=1&rate=20&moves=600` opens `GateListScreen`. The scheme `elviptv`
+  is registered in every variant; the screen is reachable only when `extra.gate` is `true`, which
+  `build-app-config.ts` sets for `APP_VARIANT=development` only. The app reads it with `expo-constants`; never key it
+  on `__DEV__` (the gate is measured on a JS-bundled release build of the development variant).
+- `parseGateUrl` (`routes.ts`) clamps: items 1 to 1,000,000, rate 1 to 60 events per second, moves 1 to 10,000;
+  defaults 100,000 / manual / 20 / 600. `useGateParams` reads the initial URL and `url` events through
+  `react-native` `Linking`; without the flag `App` shows the placeholder.
+- Auto run: `createAutoDriver` (`driver.ts`) emits a scripted sequence through the focus store: a down-hold (`long`
+  page then `repeat` steps), page jumps (`channelDown`), single presses, then the mirror going up. It ends at index 0
+  when the list is longer than the deepest excursion (about 600 rows at 600 moves); an odd `moves` is rounded down.
+  The screen drops a `repeat` that arrives while the previous move has not committed and counts it as `coalesced`.
+- Real keys: the screen also mounts `useTvKeySource` -> `createKeyInterpreter` -> store, ticking the interpreter
+  while a key is down and acknowledging repeats from `onFrameCommitted`. With `auto=0` it prints one line after 2 s
+  without a move (`adb shell input keyevent` runs for Task 5's `--real-keys`).
+- Metrics (`metrics.ts`): `t0` is the dispatch time (auto) or the key event time (real); `t1` is `performance.now()`
+  inside `onFrameCommitted` (first frame after row and ring committed); key-to-highlight is `t1 - t0` for each move
+  that the commit covers. `maxJsGapMs` is the largest (gap - 4 ms) of a 4 ms `setInterval` while a run is active.
+  Percentiles are nearest-rank (`ceil(p * n)`-th smallest), times rounded to 0.01 ms.
+- `losses`: a committed index outside the list or outside the window `[windowStart, windowStart + visibleRows)`;
+  plus 1 if the last committed index differs from the store's index once the run settles; plus every move that never
+  got a committed frame (after a 2 s settle timeout).
+- Output: exactly one `console.log('ELV_GATE ' + JSON.stringify(metrics))` per auto run (release builds still send it
+  to logcat under `ReactNativeJS`). Gate tests: pure ones run in Vitest (`src/gate/**/*.test.ts`, no react-native),
+  component ones in Jest.

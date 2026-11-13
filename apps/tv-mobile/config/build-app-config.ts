@@ -73,6 +73,7 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
     slug: 'elv-iptv',
     version: options.version,
     orientation: 'default',
+    scheme: 'elviptv',
     icon: './assets/icon.png',
     android: {
       package: id,
@@ -98,7 +99,7 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
         run: env.GITHUB_RUN_NUMBER ?? 'local',
         builtAt: options.now.toISOString(),
       },
-      ...(development ? { dev: devValues(env) } : {}),
+      ...(development ? { dev: devValues(env), gate: true } : {}),
     },
   };
 }

@@ -263,6 +263,12 @@ importers:
 
   apps/tv-mobile:
     dependencies:
+      '@elv/focus-core':
+        specifier: workspace:*
+        version: link:../../packages/focus-core
+      '@elv/ui-kit':
+        specifier: workspace:*
+        version: link:../../packages/ui-kit
       '@react-native-tvos/config-tv':
         specifier: 0.1.7
         version: 0.1.7(expo@58.0.25)
@@ -272,6 +278,9 @@ importers:
       expo-build-properties:
         specifier: ~58.0.12
         version: 58.0.12(expo@58.0.25)
+      expo-constants:
+        specifier: ~58.0.16
+        version: 58.0.16(expo@58.0.25)(react-native-tvos@0.88.1-0(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.3.0)(react-native-tvos@0.88.1-0)(react@19.3.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)
       expo-status-bar:
         specifier: ~58.0.5
         version: 58.0.5(expo@58.0.25)(react-native-tvos@0.88.1-0(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.3.0)(react-native-tvos@0.88.1-0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0)
