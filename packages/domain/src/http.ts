@@ -13,9 +13,16 @@ export interface HttpRequestOptions {
   signal?: AbortSignal;
   /** Covers the time until the response headers arrive; a body already streaming is not timed. */
   timeoutMs?: number;
+  /** Longest silence between body chunks; the body then fails with `network` / `timeout`. */
+  idleTimeoutMs?: number;
 }
 
-/** Port for HTTP GET; platforms supply an implementation. Errors never contain credentials. */
+/**
+ * Port for HTTP GET; platforms supply an implementation. Errors never contain credentials. Callers must
+ * iterate or discard (`return()`) every response body they receive, or its connection stays open.
+ * A body that ends early fails with an error carrying `category` and `code`: `network` / `aborted`
+ * (caller abort) or `network` / `timeout` (idle).
+ */
 export interface HttpClient {
   get(url: string, options?: HttpRequestOptions): Promise<Result<HttpResponse>>;
 }
@@ -36,13 +43,16 @@ export type FetchLike = (
           releaseLock(): void;
         };
       }
-    | null;
+    | null
+    | undefined;
 }>;
 
 /** Port for gzip decoding of a chunk stream. */
 export interface Decompressor {
   gunzip(chunks: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array>;
 }
+
+const DEFAULT_IDLE_MS = 30_000;
 
 type FetchBody = Awaited<ReturnType<FetchLike>>['body'];
 
@@ -86,7 +96,7 @@ async function cancelQuietly(source: ChunkSource): Promise<void> {
 
 /** Abandons a body nobody will read (for example the body of an error response). */
 async function discardBody(body: FetchBody): Promise<void> {
-  if (body === null) return;
+  if (body === null || body === undefined) return;
   const source = openSource(body);
   await cancelQuietly(source);
   try {
@@ -96,22 +106,27 @@ async function discardBody(body: FetchBody): Promise<void> {
   }
 }
 
+function bodyError(code: 'aborted' | 'timeout'): Error {
+  return Object.assign(new Error(code), { category: 'network', code });
+}
+
 /**
  * Streams chunks until the body ends. Stopping early (break, return, throw) cancels the underlying
- * stream; an abort of `signal` mid-body cancels it and throws an Error with message 'aborted'.
+ * stream; an abort of `signal` mid-body cancels it and throws an error with `code` 'aborted'; silence longer than `idleMs` throws `code` 'timeout'.
  */
 async function* streamBody(
   body: FetchBody,
   signal: AbortSignal,
+  idleMs: number | undefined,
   dispose: () => void,
 ): AsyncGenerator<Uint8Array> {
-  if (body === null) {
+  if (body === null || body === undefined) {
     dispose();
     return;
   }
   const source = openSource(body);
   const aborted = new Promise<never>((_, reject) => {
-    const fire = () => reject(new Error('aborted'));
+    const fire = () => reject(bodyError('aborted'));
     if (signal.aborted) fire();
     else signal.addEventListener('abort', fire, { once: true });
   });
@@ -119,8 +134,23 @@ async function* streamBody(
   let finished = false;
   try {
     for (;;) {
-      if (signal.aborted) throw new Error('aborted');
-      const { done, value } = await Promise.race([source.next(), aborted]);
+      if (signal.aborted) throw bodyError('aborted');
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      const racers: Promise<{ done: boolean; value?: Uint8Array }>[] = [source.next(), aborted];
+      if (idleMs !== undefined) {
+        racers.push(
+          new Promise<never>((_, reject) => {
+            idleTimer = setTimeout(() => reject(bodyError('timeout')), idleMs);
+          }),
+        );
+      }
+      let step: { done: boolean; value?: Uint8Array };
+      try {
+        step = await Promise.race(racers);
+      } finally {
+        if (idleTimer !== undefined) clearTimeout(idleTimer);
+      }
+      const { done, value } = step;
       if (done) {
         finished = true;
         return;
@@ -138,14 +168,19 @@ async function* streamBody(
   }
 }
 
-/** Adapts a WHATWG fetch with a streaming body (Node/Electron fetch, expo/fetch). */
+/**
+ * Adapts a WHATWG fetch with a streaming body (Node/Electron fetch, expo/fetch). `defaults.timeoutMs`
+ * covers the wait for headers; `defaults.idleTimeoutMs` (30 s unless overridden, per request too) covers
+ * silence between body chunks.
+ */
 export function createFetchHttpClient(
   fetchImpl: FetchLike,
-  defaults?: { timeoutMs?: number },
+  defaults?: { timeoutMs?: number; idleTimeoutMs?: number },
 ): HttpClient {
   return {
     async get(url, options) {
       const timeoutMs = options?.timeoutMs ?? defaults?.timeoutMs;
+      const idleMs = options?.idleTimeoutMs ?? defaults?.idleTimeoutMs ?? DEFAULT_IDLE_MS;
       const controller = new AbortController();
       let timedOut = false;
       const caller = options?.signal;
@@ -160,7 +195,7 @@ export function createFetchHttpClient(
               controller.abort();
             }, timeoutMs);
       const aborted = new Promise<never>((_, reject) => {
-        controller.signal.addEventListener('abort', () => reject(new Error('aborted')));
+        controller.signal.addEventListener('abort', () => reject(bodyError('aborted')));
       });
       aborted.catch(() => {});
       let handedOff = false;
@@ -184,7 +219,7 @@ export function createFetchHttpClient(
         return ok({
           status: res.status,
           headers,
-          body: streamBody(res.body, controller.signal, dispose),
+          body: streamBody(res.body, controller.signal, idleMs, dispose),
         });
       } catch {
         if (timedOut) return err(elvError('network', 'timeout'));

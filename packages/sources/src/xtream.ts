@@ -1,4 +1,5 @@
 import { type ElvError, elvError, err, ok, type Result, transportHeaders } from '@elv/domain';
+import { toElvError } from './scan-error';
 import { decodeUtf8 } from './utf8';
 import {
   isRaw,
@@ -12,11 +13,13 @@ import {
   toSeriesInfo,
   toVodInfo,
 } from './xtream-records';
-import type { XtreamClient, XtreamClientOptions } from './xtream-types';
+import type { XtreamCallOptions, XtreamClient, XtreamClientOptions } from './xtream-types';
 
 export type * from './xtream-types';
 
 const TIMEOUT_MS = 60_000;
+const DEFAULT_MAX_BODY = 128 * 1024 * 1024;
+const FIRST_BUFFER = 64 * 1024;
 const shape = () => elvError('source-format', 'unexpected-shape');
 
 async function discard(body: AsyncIterable<Uint8Array>): Promise<void> {
@@ -27,24 +30,26 @@ async function discard(body: AsyncIterable<Uint8Array>): Promise<void> {
   }
 }
 
-async function readAll(body: AsyncIterable<Uint8Array>): Promise<Result<Uint8Array>> {
-  const chunks: Uint8Array[] = [];
+async function readAll(body: AsyncIterable<Uint8Array>, max: number): Promise<Result<Uint8Array>> {
+  let buffer = new Uint8Array(Math.min(FIRST_BUFFER, max));
   let total = 0;
   try {
     for await (const chunk of body) {
-      chunks.push(chunk);
+      if (total + chunk.length > max) return err(elvError('source-format', 'too-large'));
+      if (total + chunk.length > buffer.length) {
+        const grown = new Uint8Array(
+          Math.min(max, Math.max(buffer.length * 2, total + chunk.length)),
+        );
+        grown.set(buffer.subarray(0, total));
+        buffer = grown;
+      }
+      buffer.set(chunk, total);
       total += chunk.length;
     }
-  } catch {
-    return err(elvError('network', 'stream-failed'));
+  } catch (e) {
+    return err(toElvError(e));
   }
-  const all = new Uint8Array(total);
-  let at = 0;
-  for (const c of chunks) {
-    all.set(c, at);
-    at += c.length;
-  }
-  return ok(all);
+  return ok(buffer.subarray(0, total));
 }
 
 /**
@@ -54,8 +59,9 @@ async function readAll(body: AsyncIterable<Uint8Array>): Promise<Result<Uint8Arr
  */
 export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
   const { http, transport } = options;
-  const base = options.server
-    .trim()
+  const maxBody = options.maxBodyBytes ?? DEFAULT_MAX_BODY;
+  const server = options.server.trim();
+  const base = (server.includes('://') ? server : `http://${server}`)
     .replace(/[?#].*$/s, '')
     .replace(/\/+$/, '')
     .replace(/\/(?:player_api|get|xmltv)\.php$/, '')
@@ -66,14 +72,16 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
   const liveFormat = transport?.xtreamFormat ?? 'ts';
   const headers = transportHeaders(transport);
 
-  async function getJson(query: string): Promise<Result<unknown>> {
+  async function getJson(query: string, call?: XtreamCallOptions): Promise<Result<unknown>> {
     let response: Awaited<ReturnType<typeof http.get>>;
     try {
       response = await http.get(`${base}/player_api.php?${credentials}${query}`, {
         headers,
         timeoutMs: TIMEOUT_MS,
+        ...(call?.signal ? { signal: call.signal } : {}),
       });
     } catch {
+      if (call?.signal?.aborted) return err(elvError('network', 'aborted'));
       return err(elvError('network', 'request-failed'));
     }
     if (!response.ok) return err(elvError(response.error.category, response.error.code));
@@ -84,7 +92,7 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
       if (status >= 500) return err(elvError('network', 'server-error'));
       return err(elvError('network', 'http-status', `HTTP ${status}`));
     }
-    const bytes = await readAll(body);
+    const bytes = await readAll(body, maxBody);
     if (!bytes.ok) return bytes;
     try {
       return ok(JSON.parse(decodeUtf8(bytes.value)));
@@ -93,14 +101,18 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     }
   }
 
-  async function object(query: string): Promise<Result<Raw>> {
-    const r = await getJson(query);
+  async function object(query: string, call?: XtreamCallOptions): Promise<Result<Raw>> {
+    const r = await getJson(query, call);
     if (!r.ok) return r;
     return isRaw(r.value) ? ok(r.value) : err(shape());
   }
 
-  async function rows<T>(query: string, map: (rows: Raw[]) => T[]): Promise<Result<T[]>> {
-    const r = await getJson(query);
+  async function rows<T>(
+    query: string,
+    map: (rows: Raw[]) => T[],
+    call?: XtreamCallOptions,
+  ): Promise<Result<T[]>> {
+    const r = await getJson(query, call);
     if (!r.ok) return r;
     if (r.value === null || r.value === false) return ok([]);
     if (isRaw(r.value) && Object.keys(r.value).length === 0) return ok([]);
@@ -114,8 +126,8 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     `${base}/${path}/${user}/${pass}/${id}.${ext}`;
 
   return {
-    async account() {
-      const r = await object('');
+    async account(call) {
+      const r = await object('', call);
       if (!r.ok) return r;
       const info = r.value.user_info;
       if (!isRaw(info)) return err(shape());
@@ -125,26 +137,27 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
         typeof info.status === 'string' && info.status.trim() ? info.status.trim() : 'Active';
       return ok(toAccount(info, isRaw(r.value.server_info) ? r.value.server_info : {}, status));
     },
-    categories(kind) {
+    categories(kind, call) {
       const action = kind === 'movie' ? 'vod' : kind;
-      return rows(`&action=get_${action}_categories`, toCategories);
+      return rows(`&action=get_${action}_categories`, toCategories, call);
     },
-    liveStreams: (categoryId) =>
-      rows(`&action=get_live_streams${withCategory(categoryId)}`, toLive),
-    vodStreams: (categoryId) =>
-      rows(`&action=get_vod_streams${withCategory(categoryId)}`, toMovies),
-    series: (categoryId) => rows(`&action=get_series${withCategory(categoryId)}`, toSeries),
-    async seriesInfo(seriesId) {
-      const r = await object(`&action=get_series_info&series_id=${seriesId}`);
+    liveStreams: (categoryId, call) =>
+      rows(`&action=get_live_streams${withCategory(categoryId)}`, toLive, call),
+    vodStreams: (categoryId, call) =>
+      rows(`&action=get_vod_streams${withCategory(categoryId)}`, toMovies, call),
+    series: (categoryId, call) =>
+      rows(`&action=get_series${withCategory(categoryId)}`, toSeries, call),
+    async seriesInfo(seriesId, call) {
+      const r = await object(`&action=get_series_info&series_id=${seriesId}`, call);
       return r.ok ? ok(toSeriesInfo(r.value)) : r;
     },
-    async vodInfo(vodId) {
-      const r = await object(`&action=get_vod_info&vod_id=${vodId}`);
+    async vodInfo(vodId, call) {
+      const r = await object(`&action=get_vod_info&vod_id=${vodId}`, call);
       return r.ok ? ok(toVodInfo(r.value)) : r;
     },
-    async shortEpg(streamId, limit) {
+    async shortEpg(streamId, limit, call) {
       const tail = limit === undefined ? '' : `&limit=${limit}`;
-      const r = await object(`&action=get_short_epg&stream_id=${streamId}${tail}`);
+      const r = await object(`&action=get_short_epg&stream_id=${streamId}${tail}`, call);
       return r.ok ? ok(toEpg(r.value)) : r;
     },
     playlistUrl: () => `${base}/get.php?${credentials}&type=m3u_plus&output=${liveFormat}`,

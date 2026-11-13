@@ -86,10 +86,19 @@ export interface XtreamEpgEntry {
   desc?: string;
 }
 
+/** Per-call options of every {@link XtreamClient} method. */
+export interface XtreamCallOptions {
+  /** Aborting ends the call with `network` / `aborted`, also while the body is streaming. */
+  signal?: AbortSignal;
+}
+
 /** Options for {@link createXtreamClient}. */
 export interface XtreamClientOptions {
   http: HttpClient;
+  /** Panel address. A value without `://` gets `http://` prepended. */
   server: string;
+  /** Largest response body read into memory (default 128 MiB); bigger ones fail with `source-format` / `too-large`. */
+  maxBodyBytes?: number;
   username: string;
   password: string;
   transport?: TransportSettings;
@@ -97,15 +106,22 @@ export interface XtreamClientOptions {
 
 /** Typed access to an Xtream-style panel. Credentials stay inside the client. */
 export interface XtreamClient {
-  account(): Promise<Result<XtreamAccount>>;
-  categories(kind: 'live' | 'movie' | 'series'): Promise<Result<XtreamCategory[]>>;
+  account(options?: XtreamCallOptions): Promise<Result<XtreamAccount>>;
+  categories(
+    kind: 'live' | 'movie' | 'series',
+    options?: XtreamCallOptions,
+  ): Promise<Result<XtreamCategory[]>>;
   /** Pass `categoryId` to bound the size of one call. */
-  liveStreams(categoryId?: string): Promise<Result<XtreamLive[]>>;
-  vodStreams(categoryId?: string): Promise<Result<XtreamMovie[]>>;
-  series(categoryId?: string): Promise<Result<XtreamSeries[]>>;
-  seriesInfo(seriesId: number): Promise<Result<XtreamSeriesInfo>>;
-  vodInfo(vodId: number): Promise<Result<XtreamVodInfo>>;
-  shortEpg(streamId: number, limit?: number): Promise<Result<XtreamEpgEntry[]>>;
+  liveStreams(categoryId?: string, options?: XtreamCallOptions): Promise<Result<XtreamLive[]>>;
+  vodStreams(categoryId?: string, options?: XtreamCallOptions): Promise<Result<XtreamMovie[]>>;
+  series(categoryId?: string, options?: XtreamCallOptions): Promise<Result<XtreamSeries[]>>;
+  seriesInfo(seriesId: number, options?: XtreamCallOptions): Promise<Result<XtreamSeriesInfo>>;
+  vodInfo(vodId: number, options?: XtreamCallOptions): Promise<Result<XtreamVodInfo>>;
+  shortEpg(
+    streamId: number,
+    limit?: number,
+    options?: XtreamCallOptions,
+  ): Promise<Result<XtreamEpgEntry[]>>;
   /** M3U playlist URL for the scanner; contains the credentials. */
   playlistUrl(): string;
   /** XMLTV guide URL for the scanner; contains the credentials. */

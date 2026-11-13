@@ -36,14 +36,18 @@ function yearOf(...candidates: unknown[]): number | undefined {
   return undefined;
 }
 
-function categoryIds(raw: Raw): string[] {
-  const list = Array.isArray(raw.category_ids) ? raw.category_ids : [raw.category_id];
+function textIds(list: unknown[]): string[] {
   const ids: string[] = [];
   for (const v of list) {
     const n = toText(v);
     if (n !== undefined && !ids.includes(n)) ids.push(n);
   }
   return ids;
+}
+
+function categoryIds(raw: Raw): string[] {
+  const many = Array.isArray(raw.category_ids) ? textIds(raw.category_ids) : [];
+  return many.length > 0 ? many : textIds([raw.category_id]);
 }
 
 function put<T extends object>(target: T, key: string, value: unknown): void {
