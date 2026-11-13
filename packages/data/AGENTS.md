@@ -23,10 +23,10 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
   credentials (>= 3 chars) are masked raw and percent-encoded at word boundaries; every value at a rule position is templated;
   rules and whole-segment matches skip the last segment; numeric Xtream ids stay literal; bare `/<u>/<p>/<id>` only for known credentials; literal `{{` is `{{(}}`. Keys are
   `m3uKey(sourceId, keyTemplate(template), name)` (every placeholder becomes `{{*}}`).
-- `source-link.ts`: `addSourceFromLink` adds a pasted `…/get.php?username=…&password=…` link as an Xtream source (`parseXtreamLink`; output sets `xtreamFormat`; a guide override is templated like M3U ones, `vodPlaylist` is ignored), else as M3U; `keepAsM3u` opts out.
-- `sources.ts`: `addXtreamSource`, `addM3uSource`, `getSource`, `updateSourceSettings`, `removeSource`, `removeSecrets`, `TABLES_BY_SOURCE`, `secretKey`. `removeSource` refuses while a run is `running` (`storage/import-in-progress`), deletes every table of the source explicitly (no foreign keys; a new table with `source_id` must be added
-  to its list) and returns `storage/secret-delete-failed` if a secret survives (retry `removeSecrets`). M3U guide URLs are
-  templated against the playlist or kept whole (`{{g:url}}`). Credentials live only in the `SecretStore`
+- `source-link.ts`: `addSourceFromLink` adds a pasted `…/get.php?username=…&password=…` link as an Xtream source (`parseXtreamLink`; output sets `xtreamFormat`; a guide override is stored whole as a secret, `vodPlaylist` is ignored), else as M3U; `keepAsM3u` opts out.
+- `sources.ts`: `addXtreamSource`, `addM3uSource`, `getSource`, `updateSourceSettings`, `removeSource`, `removeSecrets`, `purgeSourceRows`, `guideSecret`, `TABLES_BY_SOURCE`, `secretKey`. `removeSource` refuses while a run is `running` (`storage/import-in-progress`), deletes every table of the source explicitly (no foreign keys; a new table with `source_id` must be added
+  to its list) and returns `storage/secret-delete-failed` if a secret survives (retry `removeSecrets`). Guide URLs (overrides,
+  discovered) are stored whole as secrets (`{{g:url}}`, `{{g:d<n>}}`). Credentials live only in the `SecretStore`
   (`source:<id>:xtream|playlist|urlvars`); `settings_json` holds none.
 - `importCatalog` / `loadSeriesEpisodes` (`import-xtream.ts`; types in `import-types.ts`; `runs.ts`, `writers.ts`). A run
   upserts with `ON CONFLICT DO UPDATE ... run_id = excluded.run_id` (stable row ids), yields after every batch, checks

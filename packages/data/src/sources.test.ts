@@ -107,7 +107,7 @@ describe('addXtreamSource', () => {
 });
 
 describe('addM3uSource', () => {
-  it('stores the playlist URL and a templated guide URL as secrets only', async () => {
+  it('stores the playlist URL and the guide URL as secrets only', async () => {
     const s = await setup();
     const playlist = `https://h.example/get.php?username=${USER}&token=${TOKEN}`;
     const r = await addM3uSource(
@@ -124,10 +124,10 @@ describe('addM3uSource', () => {
     for (const secret of [USER, TOKEN, 'get.php']) expect(text).not.toContain(secret);
     expect(s.secrets.dump()[secretKey('src1', 'playlist')]).toBe(playlist);
     const vars = JSON.parse(s.secrets.dump()[secretKey('src1', 'urlvars')] as string);
-    expect(Object.values(vars)).toContain(TOKEN);
+    expect(vars).toEqual({ 'g:url': `https://h.example/epg.xml?token=${TOKEN}` });
     const source = await getSource(s.db, 'src1');
     expect(source?.settings.vodPlaylist).toBe(true);
-    expect(source?.settings.guideUrl).toContain('{{g:q:token}}');
+    expect(source?.settings.guideUrl).toBe('{{g:url}}');
   });
 
   it('rejects an empty playlist URL and survives a failing secret store', async () => {
@@ -212,20 +212,36 @@ describe('removeSource', () => {
 
 describe('guide URLs', () => {
   const ACCT = ['acct', 'token', '0123456789'].join('');
+  const OTHER = ['acct', 'token', '9876543210'].join('');
 
-  it('templates a same-host guide URL with the playlist token segment', async () => {
+  it.each([
+    ['the playlist token', ACCT],
+    ['another token', OTHER],
+  ])('stores a same-host guide URL with %s whole as a secret', async (_label, token) => {
     const s = await setup();
     const playlist = `https://h.example/${ACCT}/list.m3u?username=${USER}`;
-    const guide = `https://h.example/${ACCT}/epg.xml?ref=${USER}-x`;
+    const guide = `https://h.example/${token}/epg.xml?ref=${USER}-x`;
     const r = await addM3uSource({ name: 'L', playlistUrl: playlist, guideUrl: guide }, s.deps);
     expect(r.ok).toBe(true);
     const text = await rowText(s.db);
-    expect(text).not.toContain(ACCT);
-    expect(text).not.toContain(USER);
-    const source = await getSource(s.db, 'src1');
-    expect(source?.settings.guideUrl).toBe('https://h.example/{{g:v0}}/epg.xml?ref={{g:user}}-x');
+    for (const secret of [ACCT, OTHER, USER]) expect(text).not.toContain(secret);
+    expect((await getSource(s.db, 'src1'))?.settings.guideUrl).toBe('{{g:url}}');
     const vars = JSON.parse(s.secrets.dump()[secretKey('src1', 'urlvars')] as string);
-    expect(vars['g:v0']).toBe(ACCT);
+    expect(vars).toEqual({ 'g:url': guide });
+  });
+
+  it('stores an Xtream guide override whole as a secret', async () => {
+    const s = await setup();
+    const guide = `https://p.example/${OTHER}/xmltv.php`;
+    const r = await addXtreamSource(
+      { name: 'X', server: 'https://p.example', username: USER, password: PW, guideUrl: guide },
+      s.deps,
+    );
+    expect(r.ok && r.value.settings.guideUrl).toBe('{{g:url}}');
+    expect(await rowText(s.db)).not.toContain(OTHER);
+    expect(JSON.parse(s.secrets.dump()[secretKey('src1', 'urlvars')] as string)).toEqual({
+      'g:url': guide,
+    });
   });
 
   it('keeps a guide URL on another host out of settings_json', async () => {
@@ -241,21 +257,17 @@ describe('guide URLs', () => {
     expect(vars['g:url']).toBe(guide);
   });
 
-  it('handles unparsable URLs, bad escapes and literal braces', async () => {
+  it('keeps unparsable URLs and literal braces as they are', async () => {
     const s = await setup();
     await addM3uSource({ name: 'L', playlistUrl: 'not a url', guideUrl: 'also not' }, s.deps);
     expect((await getSource(s.db, 'src1'))?.settings.guideUrl).toBe('{{g:url}}');
+    const guide = 'https://h.example/{{x}}/e.xml';
     await addM3uSource(
-      {
-        name: 'L',
-        playlistUrl: 'https://h.example/a.m3u?pwd=%E0%A4%A&flag',
-        guideUrl: 'https://h.example/{{x}}/e.xml',
-      },
+      { name: 'L', playlistUrl: 'https://h.example/a.m3u', guideUrl: guide },
       s.deps,
     );
-    expect((await getSource(s.db, 'src2'))?.settings.guideUrl).toBe(
-      'https://h.example/{{(}}x}}/e.xml',
-    );
+    const vars = JSON.parse(s.secrets.dump()[secretKey('src2', 'urlvars')] as string);
+    expect(vars['g:url']).toBe(guide);
   });
 });
 

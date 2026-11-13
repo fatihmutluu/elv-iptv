@@ -8,7 +8,7 @@ import {
   type SqlDriver,
   type TransportSettings,
 } from '@elv/domain';
-import { type SegmentRule, toTemplate, type UrlVars } from './templates';
+import type { SegmentRule, UrlVars } from './templates';
 
 /** Kind of source a user can add. */
 export type SourceKind = 'xtream' | 'm3u';
@@ -16,12 +16,12 @@ export type SourceKind = 'xtream' | 'm3u';
 /** Non-secret, per-source settings stored as JSON in the `sources` table. */
 export interface SourceSettings {
   transport?: TransportSettings;
-  /** User guide URL override; for M3U sources a template whose `{{g:...}}` values live in `source:<id>:urlvars`. */
+  /** User guide URL override: only the placeholder `{{g:url}}`; the URL lives in `source:<id>:urlvars`. */
   guideUrl?: string;
   vodPlaylist?: boolean;
   segmentRules?: SegmentRule[];
   guideWindow?: { daysBack: number; daysForward: number };
-  /** Guide URL templates found in the playlist header (`{{g:...}}` values live in `source:<id>:urlvars`). */
+  /** Guide URLs found in the playlist header, as placeholders `{{g:d<n>}}` whose URLs live in `source:<id>:urlvars`. */
   discoveredGuideUrls?: string[];
 }
 
@@ -41,7 +41,7 @@ export interface XtreamSourceInput {
   username: string;
   password: string;
   transport?: TransportSettings;
-  /** User guide override, stored like an M3U guide URL (templated against the source's credentials). */
+  /** User guide override, stored whole as a secret like an M3U guide URL. */
   guideUrl?: string;
 }
 
@@ -116,7 +116,7 @@ async function persist(
 
 /**
  * Adds an Xtream source: server, username and password go to the secret store, never to the database. A guide
- * override is templated (credential values to `source:<id>:urlvars` under `g:` names) before it reaches `settings_json`.
+ * override is stored whole in `source:<id>:urlvars` ({@link guideSecret}).
  */
 export async function addXtreamSource(
   input: XtreamSourceInput,
@@ -142,77 +142,25 @@ export async function addXtreamSource(
   });
   const secrets: [string, string][] = [[secretKey(id, 'xtream'), secret]];
   if (input.guideUrl !== undefined && input.guideUrl.trim() !== '') {
-    const credentials = `username=${encodeURIComponent(input.username)}&password=${encodeURIComponent(input.password)}`;
-    const g = templateGuide(input.guideUrl, `${input.server}/get.php?${credentials}`);
+    const g = guideSecret(input.guideUrl);
     settings.guideUrl = g.template;
     secrets.push([secretKey(id, 'urlvars'), JSON.stringify(g.vars)]);
   }
   return persist(deps, record, secrets);
 }
 
-const URL_HEAD = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)([^?#]*)(?:\?([^#]*))?/i;
-
-function decodeParam(value: string): string {
-  try {
-    return decodeURIComponent(value.replace(/\+/g, ' '));
-  } catch {
-    return value;
-  }
-}
-
-function playlistFacts(
-  url: string,
-): { host: string; segments: string[]; username?: string; password?: string } | undefined {
-  const m = URL_HEAD.exec(url);
-  if (m === null) return undefined;
-  const authority = m[1] ?? '';
-  const facts: { host: string; segments: string[]; username?: string; password?: string } = {
-    host: authority.slice(authority.lastIndexOf('@') + 1).toLowerCase(),
-    segments: (m[2] ?? '').slice(1).split('/'),
-  };
-  for (const pair of (m[3] ?? '').split('&')) {
-    const eq = pair.indexOf('=');
-    if (eq < 0) continue;
-    const name = pair.slice(0, eq).toLowerCase();
-    const value = decodeParam(pair.slice(eq + 1));
-    if (name === 'username' || name === 'user') facts.username = value;
-    if (name === 'password' || name === 'pass' || name === 'pwd') facts.password = value;
-  }
-  return facts;
-}
-
 /**
- * Templates a guide URL for `settings_json`. On the playlist's host the playlist's credentials and path
- * segments it shares (the account token) become placeholders; on another host the whole URL is a secret
- * (`{{g:url}}`). Variable names carry a `g:` prefix so they cannot clash with entry URL values.
+ * A guide URL as `settings_json` stores it: only the placeholder `{{g:<name>}}`, the whole URL being a secret in
+ * `source:<id>:urlvars`. Guide URLs carry tokens in too many shapes to template them part by part; the `g:`
+ * prefix keeps the name apart from entry URL values.
  */
-export function templateGuide(
-  guideUrl: string,
-  playlistUrl: string,
-): { template: string; vars: UrlVars } {
-  const playlist = playlistFacts(playlistUrl);
-  const guide = playlistFacts(guideUrl);
-  if (playlist === undefined || guide === undefined || playlist.host !== guide.host) {
-    return { template: '{{g:url}}', vars: { 'g:url': guideUrl } };
-  }
-  const rules: SegmentRule[] = [];
-  guide.segments.slice(0, -1).forEach((segment, position) => {
-    if (segment.length >= 8 && segment === playlist.segments[position]) {
-      rules.push({ host: guide.host, position, name: `v${position}` });
-    }
-  });
-  const t = toTemplate(guideUrl, rules, playlist);
-  const vars: UrlVars = {};
-  for (const [name, value] of Object.entries(t.vars)) vars[`g:${name}`] = value;
-  const template = t.template.replace(/\{\{([^{}]+)\}\}/g, (whole, name: string) =>
-    name === '(' ? whole : `{{g:${name}}}`,
-  );
-  return { template, vars };
+export function guideSecret(guideUrl: string, name = 'url'): { template: string; vars: UrlVars } {
+  return { template: `{{g:${name}}}`, vars: { [`g:${name}`]: guideUrl } };
 }
 
 /**
- * Adds an M3U source. The playlist URL is a secret. A guide URL is templated: its credential values move to
- * `source:<id>:urlvars` under `g:`-prefixed names so they cannot clash with entry URL values.
+ * Adds an M3U source. The playlist URL is a secret. A guide URL is stored whole in `source:<id>:urlvars`
+ * ({@link guideSecret}); `settings_json` holds only its placeholder.
  */
 export async function addM3uSource(
   input: M3uSourceInput,
@@ -225,7 +173,7 @@ export async function addM3uSource(
   if (input.transport !== undefined) settings.transport = input.transport;
   if (input.vodPlaylist !== undefined) settings.vodPlaylist = input.vodPlaylist;
   if (input.guideUrl !== undefined && input.guideUrl.trim() !== '') {
-    const g = templateGuide(input.guideUrl, input.playlistUrl);
+    const g = guideSecret(input.guideUrl);
     settings.guideUrl = g.template;
     Object.assign(vars, g.vars);
   }

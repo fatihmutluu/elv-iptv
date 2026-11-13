@@ -15,10 +15,10 @@ import { RuleBook } from './m3u-rules';
 import { knownCredentials, placeholderNames, SAMPLE_SIZE, VarBook } from './m3u-templating';
 import {
   getSource,
+  guideSecret,
   type SourceRecord,
   type SourceSettings,
   secretKey,
-  templateGuide,
   updateSourceSettings,
 } from './sources';
 import { keyTemplate, type SegmentRule, toTemplate, type UrlVars } from './templates';
@@ -233,26 +233,22 @@ interface Staged {
   vars: UrlVars;
 }
 
-function finish(
-  c: RunCtx,
-  st: State,
-  playlistUrl: string,
-  oldVars: UrlVars,
-  guideUrls: readonly string[],
-): Staged {
+function finish(c: RunCtx, st: State, oldVars: UrlVars, guideUrls: readonly string[]): Staged {
   const own = st.settings.guideUrl;
-  const kept: UrlVars = {};
-  for (const name of own === undefined ? [] : placeholderNames(own)) {
-    if (Object.hasOwn(oldVars, name)) kept[name] = oldVars[name] as string;
-  }
-  const guideBook = new VarBook(kept);
-  const discovered =
-    own === undefined && guideUrls.length > 0
-      ? guideUrls.map((u) => guideBook.absorb(templateGuide(u, playlistUrl)))
-      : undefined;
   const vars: UrlVars = {};
   for (const [name, value] of Object.entries(st.book.vars)) {
     if (!name.startsWith('g:')) vars[name] = value;
+  }
+  for (const name of own === undefined ? [] : placeholderNames(own)) {
+    if (Object.hasOwn(oldVars, name)) vars[name] = oldVars[name] as string;
+  }
+  let discovered: string[] | undefined;
+  if (own === undefined && guideUrls.length > 0) {
+    discovered = guideUrls.map((url, i) => {
+      const g = guideSecret(url, `d${i}`);
+      Object.assign(vars, g.vars);
+      return g.template;
+    });
   }
   c.counts.live = st.seen.live.size;
   c.counts.movies = st.seen.movies.size;
@@ -260,7 +256,7 @@ function finish(
   c.counts.episodes = st.seen.episodes.size;
   c.counts.categories =
     st.categories.live.size + st.categories.movie.size + st.categories.series.size;
-  return { rules: st.rules.final(), discovered, vars: { ...vars, ...guideBook.vars } };
+  return { rules: st.rules.final(), discovered, vars };
 }
 
 /**
@@ -352,7 +348,7 @@ async function execute(
   }
   if (st === undefined || gate === undefined) throw new Stop(elvError('network', 'stream-failed'));
   await write(c, st, gate.release());
-  return finish(c, st, playlistUrl, oldVars, guideUrls);
+  return finish(c, st, oldVars, guideUrls);
 }
 
 /**

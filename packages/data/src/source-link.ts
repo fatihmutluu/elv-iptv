@@ -16,7 +16,7 @@ export interface LinkSourceInput {
   url: string;
   /** Skip the Xtream conversion and add the link as a plain M3U source. */
   keepAsM3u?: boolean;
-  /** Guide override; stored templated for both kinds. An Xtream source falls back to the panel guide. */
+  /** Guide override; stored whole as a secret for both kinds. An Xtream source falls back to the panel guide. */
   guideUrl?: string;
   /** M3U sources only; meaningless for an Xtream source and ignored there. */
   vodPlaylist?: boolean;

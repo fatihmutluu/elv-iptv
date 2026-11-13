@@ -194,15 +194,19 @@ describe('m3u import', () => {
     const e = await setupM3u(playlist(M3U_TOKEN, M3U_USER, M3U_PASS, `#EXTM3U url-tvg="${guide}"`));
     await run(e);
     const settings = (await getSource(e.db, 's1'))?.settings;
-    expect(settings?.discoveredGuideUrls).toHaveLength(1);
+    expect(settings?.discoveredGuideUrls).toEqual(['{{g:d0}}']);
     expect(resolveTemplate(settings?.discoveredGuideUrls?.[0] ?? '', await vars(e))).toBe(guide);
 
     const own = `http://list.example:8080/xmltv.php?username=${M3U_USER}&password=${M3U_PASS}`;
-    const e2 = await setupM3u(playlist(M3U_TOKEN, M3U_USER, M3U_PASS, `#EXTM3U url-tvg="${own}"`));
+    const other = `http://list.example:8080/${['tok', 'Other0000'].join('')}/epg.xml`;
+    const header = `#EXTM3U url-tvg="${own},${other}"`;
+    const e2 = await setupM3u(playlist(M3U_TOKEN, M3U_USER, M3U_PASS, header));
     await run(e2);
     const s2 = (await getSource(e2.db, 's1'))?.settings;
-    expect(JSON.stringify(s2)).not.toContain(M3U_PASS);
-    expect(resolveTemplate(s2?.discoveredGuideUrls?.[0] ?? '', await vars(e2))).toBe(own);
+    expect(s2?.discoveredGuideUrls).toEqual(['{{g:d0}}', '{{g:d1}}']);
+    const v2 = await vars(e2);
+    expect(resolveTemplate(s2?.discoveredGuideUrls?.[0] ?? '', v2)).toBe(own);
+    expect(resolveTemplate(s2?.discoveredGuideUrls?.[1] ?? '', v2)).toBe(other);
 
     const e3 = await setupM3u(
       playlist(M3U_TOKEN, M3U_USER, M3U_PASS, `#EXTM3U url-tvg="${guide}"`),
