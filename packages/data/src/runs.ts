@@ -90,6 +90,79 @@ export async function removeStale(
   return removed;
 }
 
+/** A kind of catalog item; categories and placements carry it in their `kind` column. */
+export type CatalogKind = 'live' | 'movie' | 'series';
+
+const KINDS: readonly CatalogKind[] = ['live', 'movie', 'series'];
+const KIND_TABLES: Readonly<Record<CatalogKind, readonly string[]>> = {
+  live: ['live'],
+  movie: ['movies'],
+  series: ['series', 'episodes'],
+};
+const KIND_COUNTS: Readonly<Record<CatalogKind, string>> = {
+  live: 'live',
+  movie: 'movies',
+  series: 'series',
+};
+
+/**
+ * Kinds of which the run counted no item although rows of an older run exist: a provider glitch that empties one
+ * list must not wipe that part of the catalog.
+ */
+export async function emptiedKinds(
+  db: SqlDriver,
+  sourceId: string,
+  runId: number,
+  counts: Readonly<Record<string, number>>,
+): Promise<CatalogKind[]> {
+  const kinds: CatalogKind[] = [];
+  for (const kind of KINDS) {
+    if ((counts[KIND_COUNTS[kind]] ?? 0) > 0) continue;
+    const table = KIND_TABLES[kind][0] as string;
+    const older = await db.all(
+      `SELECT 1 FROM ${table} WHERE source_id = ? AND run_id < ? LIMIT 1`,
+      [sourceId, runId],
+    );
+    if (older.length > 0) kinds.push(kind);
+  }
+  return kinds;
+}
+
+/**
+ * Deletes the catalog rows of `sourceId` written by an older run than `runId`, kind by kind (items, categories,
+ * placements), except every row of the kinds in `keep`. Call it only after the run succeeded. Returns the number
+ * of rows removed per table.
+ */
+export async function removeStaleCatalog(
+  db: SqlDriver,
+  sourceId: string,
+  runId: number,
+  keep: readonly CatalogKind[],
+): Promise<Record<string, number>> {
+  const removed: Record<string, number> = {};
+  const add = (table: string, n: number) => {
+    removed[table] = (removed[table] ?? 0) + n;
+  };
+  for (const kind of KINDS) {
+    if (keep.includes(kind)) continue;
+    for (const table of KIND_TABLES[kind]) {
+      const r = await db.run(`DELETE FROM ${table} WHERE source_id = ? AND run_id < ?`, [
+        sourceId,
+        runId,
+      ]);
+      add(table, r.changes);
+    }
+    for (const table of ['categories', 'placements']) {
+      const r = await db.run(
+        `DELETE FROM ${table} WHERE source_id = ? AND kind = ? AND run_id < ?`,
+        [sourceId, kind, runId],
+      );
+      add(table, r.changes);
+    }
+  }
+  return removed;
+}
+
 /** Marks every `running` run as `failed` / `interrupted`; call it when the catalog is opened. */
 export async function recoverRuns(db: SqlDriver, now: number): Promise<number> {
   const r = await db.run(

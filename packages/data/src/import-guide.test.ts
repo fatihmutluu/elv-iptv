@@ -86,12 +86,14 @@ describe('guide import', () => {
     expect(await titles(e)).toHaveLength(5);
   });
 
-  it('accepts a guide whose mapped channels have no programmes', async () => {
+  it('keeps the previous guide when a new one has no programme of a mapped channel', async () => {
     const e = await ready();
     await run(e);
+    const before = await titles(e);
     e.server.body = tv(channelXml('nobody', 'Nobody'));
-    expect((await run(e)).ok).toBe(true);
-    expect(await titles(e)).toEqual([]);
+    const r = await run(e);
+    expect(r.ok && r.value.warningCodes).toEqual(['guide/empty']);
+    expect(await titles(e)).toEqual(before);
   });
 
   it('stores every programme of one huge mapped channel across many batches', async () => {

@@ -160,6 +160,10 @@ async function writeProgrammes(c: RunCtx, st: GuideState, rows: Row[]): Promise<
     await c.db.batch(STAGE_PROGRAMME_SQL, rows.slice(i, i + c.batchSize));
     await c.deps.scheduler.yieldNow();
   }
+  for (const row of rows) {
+    const guideId = row[1] as string;
+    st.staged.set(guideId, (st.staged.get(guideId) ?? 0) + 1);
+  }
   st.programmes += rows.length;
 }
 
@@ -181,6 +185,7 @@ async function execute(
     open: new Map(),
     byId: [],
     byName: [],
+    staged: new Map(),
     channels: 0,
     programmes: 0,
     seenProgrammes: 0,

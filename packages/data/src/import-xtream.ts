@@ -24,6 +24,9 @@ import {
 
 type ItemKind = 'live' | 'movie' | 'series';
 
+/** Category id and name of items the provider lists without a category (like M3U's `Ungrouped`). */
+const UNCATEGORIZED = 'Uncategorized';
+
 type Ctx = RunCtx & { client: XtreamClient };
 
 /** Builds the Xtream client of a source from its secret; `storage/secret-missing` when the secret is unusable. */
@@ -89,6 +92,19 @@ async function importList<T extends Listed>(
   const positions = new Map<string, number>();
   let done = 0;
   let placements = 0;
+  let uncategorized = false;
+
+  async function categoriesOf(item: T, only: string | undefined): Promise<readonly string[]> {
+    if (only !== undefined) return [only];
+    if (item.categoryIds.length > 0) return item.categoryIds;
+    if (!uncategorized) {
+      uncategorized = true;
+      const category = { id: UNCATEGORIZED, name: UNCATEGORIZED };
+      await writeCategories(c.db, c.sourceId, spec.kind, c.runId, [category], categories.length);
+      c.counts.categories = (c.counts.categories ?? 0) + 1;
+    }
+    return [UNCATEGORIZED];
+  }
 
   async function write(items: readonly T[], only: string | undefined, total?: number) {
     for (let i = 0; i < items.length; i += c.batchSize) {
@@ -102,7 +118,7 @@ async function importList<T extends Listed>(
       const links: [string, string, number][] = [];
       for (const { key, item } of entries) {
         seen.add(item.id);
-        for (const category of only === undefined ? item.categoryIds : [only]) {
+        for (const category of await categoriesOf(item, only)) {
           const position = positions.get(category) ?? 0;
           positions.set(category, position + 1);
           links.push([key, category, position]);

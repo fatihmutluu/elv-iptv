@@ -1,6 +1,6 @@
 import type { SqlDriver, SqlValue } from '@elv/domain';
 import { resolveMappings } from './guide-match';
-import type { RunCtx } from './import-run';
+import { type RunCtx, warn } from './import-run';
 
 const PROGRAMME_COLUMNS =
   'source_id, guide_id, start, stop, title, sub_title, description, categories_json, episode_num, icon, run_id';
@@ -29,15 +29,32 @@ export interface GuideResult {
   byId: [string, string][];
   /** `[channelKey, guideId]` pairs matched by a folded name; id matches win over them. */
   byName: [string, string][];
+  /** Programmes staged per guide id. */
+  staged: Map<string, number>;
 }
 
 /**
  * Replaces the guide of a source inside the cleanup transaction: the mappings (id matches first, then unambiguous
  * name matches of channels without one), the guide channels, and the staged programmes of mapped guide ids only.
- * Sets `counts.mapped` and `counts.programmes` to what was stored.
+ * Sets `counts.mapped` and `counts.programmes` to what was stored. A guide that would store no programme while the
+ * previous one has some is dropped instead: the previous guide stays (also its channels, via `keepTables`) and
+ * the run gets the warning `guide/empty`.
  */
 export async function commitGuide(tx: SqlDriver, c: RunCtx, g: GuideResult): Promise<void> {
   const mappings = resolveMappings(g.byId, g.byName);
+  const mapped = new Set(mappings.map(([, guideId]) => guideId));
+  const empty = ![...mapped].some((guideId) => (g.staged.get(guideId) ?? 0) > 0);
+  if (empty && (await hasProgrammes(tx, c.sourceId))) {
+    await tx.run('DELETE FROM programmes_next WHERE source_id = ? AND run_id = ?', [
+      c.sourceId,
+      c.runId,
+    ]);
+    c.keepTables.add('guide_channels');
+    warn(c, 'guide/empty');
+    c.counts.mapped = mapped.size;
+    c.counts.programmes = 0;
+    return;
+  }
   await tx.run('DELETE FROM channel_guide WHERE source_id = ?', [c.sourceId]);
   if (mappings.length > 0) {
     await tx.batch(
@@ -54,8 +71,14 @@ export async function commitGuide(tx: SqlDriver, c: RunCtx, g: GuideResult): Pro
     c.sourceId,
     c.runId,
   ]);
-  c.counts.mapped = new Set(mappings.map(([, guideId]) => guideId)).size;
+  c.counts.mapped = mapped.size;
   c.counts.programmes = swapped.changes;
+}
+
+async function hasProgrammes(tx: SqlDriver, sourceId: string): Promise<boolean> {
+  return (
+    (await tx.all('SELECT 1 FROM programmes WHERE source_id = ? LIMIT 1', [sourceId])).length > 0
+  );
 }
 
 /** Clears the staged programmes of one run; a failure here must not hide the error that ended the run. */
