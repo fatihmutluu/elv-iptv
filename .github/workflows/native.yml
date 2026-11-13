@@ -1,0 +1,228 @@
+name: Native builds
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# No workflow-level "paths:" filter: the build jobs below are required checks. A job skipped by
+# "needs" + "if" reports as skipped, which satisfies a required check; a workflow skipped by
+# "paths:" never reports at all and blocks the merge.
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      mobile: ${{ github.event_name != 'pull_request' || steps.filter.outputs.mobile == 'true' }}
+      desktop: ${{ github.event_name != 'pull_request' || steps.filter.outputs.desktop == 'true' }}
+    steps:
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        if: github.event_name == 'pull_request'
+        with:
+          filters: |
+            mobile:
+              - 'apps/tv-mobile/**'
+              - 'modules/**'
+              - 'packages/**'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - '.node-version'
+              - '.github/actions/**'
+              - '.github/workflows/native.yml'
+            desktop:
+              - 'apps/desktop/**'
+              - 'packages/**'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - '.node-version'
+              - '.github/actions/**'
+              - '.github/workflows/native.yml'
+
+  android-mobile:
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      # Restore everywhere, save only on main.
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+      - name: Generate the Android project
+        run: pnpm --filter tv-mobile exec expo prebuild --platform android --no-install
+      - name: Build the debug APK
+        working-directory: apps/tv-mobile/android
+        run: ./gradlew assembleDebug --quiet --no-daemon
+
+  android-tv:
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      EXPO_TV: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+      - name: Generate the Android TV project
+        run: pnpm --filter tv-mobile exec expo prebuild --platform android --no-install
+      - name: Build the debug APK
+        working-directory: apps/tv-mobile/android
+        run: ./gradlew assembleDebug --quiet --no-daemon
+      - name: Assert the merged manifest declares the leanback feature
+        run: |
+          manifests=$(find apps/tv-mobile/android/app/build -path '*merged_manifest*' -name AndroidManifest.xml)
+          test -n "$manifests" || { echo "no merged manifest found"; exit 1; }
+          # Word splitting is intended: grep takes every manifest path.
+          # shellcheck disable=SC2086
+          grep -q 'android.software.leanback' $manifests || { echo "leanback feature missing from merged manifest"; exit 1; }
+
+  ios:
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Expo SDK 58 needs Xcode >= 26.4 (sdk-compatibility.json); 26.4.1 is installed on macos-26.
+      - name: Select Xcode 26.4.1
+        run: sudo xcode-select -s /Applications/Xcode_26.4.1.app
+      - uses: ./.github/actions/setup
+      - name: Restore CocoaPods cache
+        id: pods-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: ${{ runner.os }}-cocoapods-ios-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-cocoapods-ios-
+      - name: Generate the iOS project
+        run: pnpm --filter tv-mobile exec expo prebuild --platform ios --no-install
+      - name: Install pods
+        working-directory: apps/tv-mobile/ios
+        run: pod install --silent
+      - name: Build for the simulator
+        working-directory: apps/tv-mobile/ios
+        run: |
+          workspace=$(ls -d ./*.xcworkspace)
+          workspace=${workspace#./}
+          xcodebuild -workspace "$workspace" -scheme "${workspace%.xcworkspace}" \
+            -sdk iphonesimulator -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO -quiet build
+      - name: Save CocoaPods cache
+        if: github.ref == 'refs/heads/main' && steps.pods-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: ${{ steps.pods-cache.outputs.cache-primary-key }}
+
+  # First place the tvOS image assets are validated: an asset-catalog error fails xcodebuild and this job.
+  tvos:
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      EXPO_TV: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select Xcode 26.4.1
+        run: sudo xcode-select -s /Applications/Xcode_26.4.1.app
+      - uses: ./.github/actions/setup
+      - name: Restore CocoaPods cache
+        id: pods-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: ${{ runner.os }}-cocoapods-tvos-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-cocoapods-tvos-
+      - name: Generate the tvOS project
+        run: pnpm --filter tv-mobile exec expo prebuild --platform ios --no-install
+      - name: Install pods
+        working-directory: apps/tv-mobile/ios
+        run: pod install --silent
+      - name: Build for the Apple TV simulator
+        working-directory: apps/tv-mobile/ios
+        run: |
+          workspace=$(ls -d ./*.xcworkspace)
+          workspace=${workspace#./}
+          xcodebuild -workspace "$workspace" -scheme "${workspace%.xcworkspace}" \
+            -sdk appletvsimulator -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO -quiet build
+      - name: Save CocoaPods cache
+        if: github.ref == 'refs/heads/main' && steps.pods-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: ${{ steps.pods-cache.outputs.cache-primary-key }}
+
+  desktop:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-26, ubuntu-24.04]
+    env:
+      # Unsigned builds: electron-builder must not look for a signing identity.
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Build the desktop app and installers
+        run: pnpm --filter @elv/desktop build
+      # Ubuntu 24.04 blocks unprivileged user namespaces, which the Chromium sandbox needs.
+      - name: Allow the Electron sandbox on Linux
+        if: runner.os == 'Linux'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: End-to-end test (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a pnpm --filter @elv/desktop test:e2e
+      - name: End-to-end test
+        if: runner.os != 'Linux'
+        run: pnpm --filter @elv/desktop test:e2e
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-${{ matrix.os }}
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.AppImage
+          if-no-files-found: error
+          retention-days: 7

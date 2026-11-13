@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "include-component-in-tag": false,
+      "extra-files": [
+        { "type": "json", "path": "apps/tv-mobile/package.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "apps/desktop/package.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "apps/desktop/renderer/package.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "apps/desktop/renderer/app.json", "jsonpath": "$.expo.version" }
+      ]
+    }
+  }
+}

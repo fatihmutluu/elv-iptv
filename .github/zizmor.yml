@@ -1,0 +1,5 @@
+rules:
+  # The "$/..." self-repository syntax is not understood by actionlint or older runners' tooling;
+  # the local composite action keeps the portable "./..." form.
+  self-repository:
+    disable: true
