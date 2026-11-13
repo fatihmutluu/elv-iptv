@@ -18,8 +18,8 @@ import {
 import { findRepoRoot } from '../src/root.ts';
 
 const USAGE =
-  'usage: pnpm gate list [--avd elv_tv] [--build] [--runs 3 (default)] [--real-keys 60] [--ci] [--out file] [--write-baseline]';
-const BASELINE = 'docs/learned/gates/list-android-tv.json';
+  'usage: pnpm gate list [--avd elv_tv] [--build] [--runs 3 (default)] [--real-keys 60] [--ci] [--baseline file] [--out file] [--write-baseline]';
+const DEFAULT_BASELINE = 'docs/learned/gates/list-android-tv.json';
 
 function fail(message: string, code = 1): never {
   process.stderr.write(`${message}\n`);
@@ -37,6 +37,7 @@ function parseCli() {
       runs: { type: 'string' },
       'real-keys': { type: 'string' },
       ci: { type: 'boolean' },
+      baseline: { type: 'string' },
       out: { type: 'string' },
       'write-baseline': { type: 'boolean' },
     },
@@ -84,7 +85,8 @@ const result = await runListGate({
 
 const device = await deviceInfo(exec, adb, await findDevice(exec, adb, values.avd));
 const commit = (await exec('git', ['rev-parse', '--short', 'HEAD'])).output.trim();
-const baselinePath = resolve(root, BASELINE);
+const baselineName = values.baseline ?? DEFAULT_BASELINE;
+const baselinePath = resolve(root, baselineName);
 
 if (values['write-baseline'] === true) {
   const refusal = baselineRefusal(result);
@@ -105,20 +107,27 @@ if (values['write-baseline'] === true) {
   };
   mkdirSync(dirname(baselinePath), { recursive: true });
   writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`);
-  process.stdout.write(`gate: baseline written to ${BASELINE}\n${summary(result)}\n`);
+  process.stdout.write(`gate: baseline written to ${baselineName}\n${summary(result)}\n`);
   process.exit(0);
 }
 
+const baselineFound = existsSync(baselinePath);
+const missingIsFailure = values.baseline === undefined;
 let outcome: CompareOutcome;
-if (existsSync(baselinePath)) {
-  const baseline = JSON.parse(readFileSync(baselinePath, 'utf8')) as Baseline;
-  outcome = compareToBaseline(result, baseline.result);
-} else {
+if (baselineFound) {
+  outcome = compareToBaseline(
+    result,
+    (JSON.parse(readFileSync(baselinePath, 'utf8')) as Baseline).result,
+  );
+} else if (missingIsFailure) {
   outcome = {
     ok: false,
-    failures: [`no baseline at ${BASELINE}; run with --write-baseline`],
+    failures: [`no baseline at ${baselineName}; run with --write-baseline`],
     warnings: [],
   };
+} else {
+  outcome = compareToBaseline(result, undefined);
+  outcome.warnings.unshift(`baseline file ${baselineName} does not exist`);
 }
 
 const outPath = resolve(
@@ -126,7 +135,10 @@ const outPath = resolve(
   values.out ?? (values.ci === true ? 'gate-artifacts/gate-list.json' : 'gate-list.json'),
 );
 mkdirSync(dirname(outPath), { recursive: true });
-writeFileSync(outPath, `${JSON.stringify({ device, commit, result, outcome }, null, 2)}\n`);
+writeFileSync(
+  outPath,
+  `${JSON.stringify({ device, commit, baseline: baselineFound ? baselineName : null, result, outcome }, null, 2)}\n`,
+);
 
 const note = (kind: 'error' | 'warning', text: string) =>
   values.ci === true

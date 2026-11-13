@@ -51,9 +51,13 @@ const limit = (baseline: number, slack: number): number =>
  * Compares a result with the committed baseline. A metric fails when it exceeds `max(baseline x 1.10, baseline +
  * slack)` or its absolute budget; any focus loss fails. The legacy janky percentage is compared; the deadline-based one
  * only warns, because it swung between 50 and 73 % across identical emulator runs. p95 and max are both compared, so
- * a run is never judged by an average that hides a stall.
+ * a run is never judged by an average that hides a stall. Without a baseline (`undefined`) only the absolute budgets
+ * and the focus-loss rule apply, and a warning says so.
  */
-export function compareToBaseline(result: GateResult, baseline: GateResult): CompareOutcome {
+export function compareToBaseline(
+  result: GateResult,
+  baseline: GateResult | undefined,
+): CompareOutcome {
   const failures: string[] = [];
   const warnings: string[] = [];
 
@@ -70,64 +74,59 @@ export function compareToBaseline(result: GateResult, baseline: GateResult): Com
   };
 
   const { metrics: m, frames: f } = result;
-  const { metrics: bm, frames: bf } = baseline;
-  if (m.items !== bm.items || m.moves !== bm.moves) {
+  if (baseline === undefined) {
+    warnings.push(
+      'no baseline: only the absolute budgets and the focus-loss rule were checked, relative limits were skipped',
+    );
+  } else if (m.items !== baseline.metrics.items || m.moves !== baseline.metrics.moves) {
     failures.push(
-      `not comparable: ${m.items} items and ${m.moves} moves, baseline has ${bm.items} and ${bm.moves}`,
+      `not comparable: ${m.items} items and ${m.moves} moves, baseline has ${baseline.metrics.items} and ${baseline.metrics.moves}`,
     );
   }
   if (m.losses > 0) failures.push(`focus losses: ${m.losses}`);
   if (m.coalesced > 0) warnings.push(`${m.coalesced} repeats were coalesced (commits fell behind)`);
 
-  relative(
-    'key-to-highlight p50',
-    m.keyToHighlightMs.p50,
-    bm.keyToHighlightMs.p50,
-    SLACK_LATENCY_MS,
-    ' ms',
-  );
-  relative(
-    'key-to-highlight p95',
-    m.keyToHighlightMs.p95,
-    bm.keyToHighlightMs.p95,
-    SLACK_LATENCY_MS,
-    ' ms',
-  );
-  relative(
-    'key-to-highlight max',
-    m.keyToHighlightMs.max,
-    bm.keyToHighlightMs.max,
-    SLACK_LATENCY_MS,
-    ' ms',
-  );
+  if (baseline !== undefined) {
+    const bk = baseline.metrics.keyToHighlightMs;
+    const k = m.keyToHighlightMs;
+    relative('key-to-highlight p50', k.p50, bk.p50, SLACK_LATENCY_MS, ' ms');
+    relative('key-to-highlight p95', k.p95, bk.p95, SLACK_LATENCY_MS, ' ms');
+    relative('key-to-highlight max', k.max, bk.max, SLACK_LATENCY_MS, ' ms');
+  }
   budget('key-to-highlight p95', m.keyToHighlightMs.p95, BUDGET_P95_MS);
-  relative('max JS gap', m.maxJsGapMs, bm.maxJsGapMs, SLACK_JS_GAP_MS, ' ms');
+  if (baseline !== undefined) {
+    relative('max JS gap', m.maxJsGapMs, baseline.metrics.maxJsGapMs, SLACK_JS_GAP_MS, ' ms');
+  }
   budget('max JS gap', m.maxJsGapMs, BUDGET_JS_GAP_MS);
   if (m.maxFrameStallMs !== undefined) {
     const stall = m.maxFrameStallMs;
+    const baseStall = baseline?.metrics.maxFrameStallMs;
     if (stall > BUDGET_JS_GAP_MS) {
       warnings.push(
         `frame stall ${stall} ms exceeds the ${BUDGET_JS_GAP_MS} ms budget (report-only on emulators)`,
       );
     }
-    if (bm.maxFrameStallMs !== undefined && stall > limit(bm.maxFrameStallMs, SLACK_JS_GAP_MS)) {
+    if (baseStall !== undefined && stall > limit(baseStall, SLACK_JS_GAP_MS)) {
       warnings.push(
-        `frame stall ${stall} ms exceeds the baseline limit (baseline ${bm.maxFrameStallMs} ms; report-only on emulators)`,
+        `frame stall ${stall} ms exceeds the baseline limit (baseline ${baseStall} ms; report-only on emulators)`,
       );
     }
   }
 
-  if (f.legacyJankyPercent !== undefined && bf.legacyJankyPercent !== undefined) {
-    relative(
-      'janky frames (legacy)',
-      f.legacyJankyPercent,
-      bf.legacyJankyPercent,
-      SLACK_JANKY_POINTS,
-      '%',
-    );
+  if (baseline !== undefined) {
+    const bf = baseline.frames;
+    if (f.legacyJankyPercent !== undefined && bf.legacyJankyPercent !== undefined) {
+      relative(
+        'janky frames (legacy)',
+        f.legacyJankyPercent,
+        bf.legacyJankyPercent,
+        SLACK_JANKY_POINTS,
+        '%',
+      );
+    }
+    relative('frame p95', f.p95, bf.p95, SLACK_LATENCY_MS, ' ms');
+    relative('frame p99', f.p99, bf.p99, SLACK_LATENCY_MS, ' ms');
   }
-  relative('frame p95', f.p95, bf.p95, SLACK_LATENCY_MS, ' ms');
-  relative('frame p99', f.p99, bf.p99, SLACK_LATENCY_MS, ' ms');
   if (f.jankyPercent > 0 || (f.legacyJankyPercent ?? 0) > 0) {
     warnings.push(
       `janky frames ${f.jankyPercent}% (legacy ${f.legacyJankyPercent ?? 'n/a'}%): target is 0 %, tolerated on emulators`,
@@ -138,7 +137,7 @@ export function compareToBaseline(result: GateResult, baseline: GateResult): Com
   if (real !== undefined) {
     if (real.losses > 0) failures.push(`real keys: focus losses: ${real.losses}`);
     budget('real-key p95', real.p95, BUDGET_P95_MS);
-    const base = baseline.realKeys;
+    const base = baseline?.realKeys;
     if (base !== undefined) {
       relative('real-key p95', real.p95, base.p95, SLACK_LATENCY_MS, ' ms');
       relative('real-key max', real.max, base.max, SLACK_LATENCY_MS, ' ms');

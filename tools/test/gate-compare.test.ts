@@ -167,3 +167,31 @@ describe('baselineRefusal', () => {
     expect(baselineRefusal(change({ p95: 101 }))).toMatch(/budget/);
   });
 });
+
+describe('compareToBaseline without a baseline', () => {
+  it('applies only the losses rule and the absolute budgets, and says so', () => {
+    const outcome = compareToBaseline(change({ p95: 60, gap: 12 }), undefined);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.warnings.join('\n')).toMatch(/no baseline.*absolute budgets/);
+  });
+
+  it('still fails on focus losses and broken budgets', () => {
+    const outcome = compareToBaseline(change({ losses: 1, p95: 101, gap: 17 }), undefined);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.failures.join('\n')).toMatch(/focus losses: 1/);
+    expect(outcome.failures.join('\n')).toMatch(/p95 101 ms exceeds the absolute budget/);
+    expect(outcome.failures.join('\n')).toMatch(/JS gap 17 ms exceeds the absolute budget/);
+  });
+
+  it('does not judge items or moves or relative growth', () => {
+    const outcome = compareToBaseline(change({ items: 5, max: 90, framesP99: 80 }), undefined);
+    expect(outcome.ok).toBe(true);
+  });
+
+  it('checks real-key losses and budget', () => {
+    const result = change({ realP95: 150, realLosses: 2 });
+    const outcome = compareToBaseline(result, undefined);
+    expect(outcome.failures.join('\n')).toMatch(/real keys: focus losses: 2/);
+    expect(outcome.failures.join('\n')).toMatch(/real-key p95 150 ms exceeds the absolute budget/);
+  });
+});
