@@ -18,7 +18,7 @@ spec section 5.2 (`docs/superpowers/specs/2026-11-13-foundation-design.md`).
 
 ## Steps
 1. Choose a lower-case kebab-case `name` that does not exist yet. The package becomes `@elv/<name>`.
-2. Run `pnpm scaffold <pure|rn|module> <name>`. It refuses to overwrite an existing folder and prints the files it wrote.
+2. Run `pnpm scaffold <pure|rn|module> <name>`. It refuses to overwrite an existing folder and prints one line naming the new folder.
 3. Fill in the generated `AGENTS.md` (keep it at 50 lines or fewer): one sentence of purpose, replace both `TODO`
    markers, state the allowed workspace dependencies from spec section 5.2. Its `CLAUDE.md` stays `@AGENTS.md`.
 4. Add the dependencies the package really imports (`workspace:*` for workspace packages, `catalog:` for shared versions),

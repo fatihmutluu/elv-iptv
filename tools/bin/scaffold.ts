@@ -13,7 +13,8 @@ if (!kind || !name) {
 
 try {
   const written = writeScaffold(findRepoRoot(process.cwd()), { kind: kind as PackageKind, name });
-  process.stdout.write(`${written.join('\n')}\n`);
+  const dir = written[0]?.split('/').slice(0, 2).join('/') ?? name;
+  process.stdout.write(`scaffold: created ${dir} (${written.length} files)\n`);
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n${usage}`);
   process.exit(1);

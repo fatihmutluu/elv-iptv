@@ -12,8 +12,8 @@
     "deny": [
       "Read(**/.env.local)",
       "Edit(**/.env.local)",
-      "Read(./secrets/**)",
-      "Edit(./secrets/**)",
+      "Read(/secrets/**)",
+      "Edit(/secrets/**)",
       "Read(**/*.jks)",
       "Read(**/*.keystore)",
       "Read(**/*.p8)",
@@ -26,8 +26,8 @@
       "Read(**/build/**)",
       "Read(**/.expo/**)",
       "Read(**/web-build/**)",
-      "Edit(./apps/*/android/**)",
-      "Edit(./apps/*/ios/**)",
+      "Edit(/apps/*/android/**)",
+      "Edit(/apps/*/ios/**)",
       "Edit(**/.expo/**)"
     ],
     "ask": [
