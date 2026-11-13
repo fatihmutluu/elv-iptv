@@ -20,6 +20,11 @@ const COMPAT_OFFSETS = [0, 180, -300] as const;
 const NAME_ONLY = 'name-only';
 const UNKNOWN = 'unknown-channel';
 const DUP = 'dup';
+const PANEL_OFFSET = 60;
+const PANEL_DOCTYPE = '<!DOCTYPE tv SYSTEM "xmltv.dtd">\n';
+
+/** `panel` writes the guide the way a real panel does: a DOCTYPE line and every time at +0100. */
+export type GuideStyle = 'plain' | 'panel';
 
 /** Formats an XMLTV time such as `20260101000000 +0000` for the given offset in minutes. */
 export function xmltvTime(date: Date, offsetMinutes: number): string {
@@ -109,12 +114,13 @@ interface GuideChannel {
   offset: number;
 }
 
-function guideChannels(catalog: Catalog): GuideChannel[] {
+function guideChannels(catalog: Catalog, style: GuideStyle): GuideChannel[] {
   const compat = catalog.profile === 'compat';
   const out: GuideChannel[] = [];
   catalog.live.forEach((ch, index) => {
     if (ch.epgId === null) return;
-    const offset = compat ? (COMPAT_OFFSETS[index % COMPAT_OFFSETS.length] as number) : 0;
+    let offset = compat ? (COMPAT_OFFSETS[index % COMPAT_OFFSETS.length] as number) : 0;
+    if (style === 'panel') offset = PANEL_OFFSET;
     out.push({ id: ch.epgId, name: ch.name, logo: ch.logo, index, offset });
   });
   if (compat) {
@@ -173,10 +179,17 @@ function* compatBroken(now: Date): Generator<string> {
   yield `<programme start="${start}" stop="${start}" channel="${UNKNOWN}"><title>Unclosed title</programme>\n`;
 }
 
-function* documentPieces(catalog: Catalog, now: Date, baseUrl: string): Generator<string> {
-  const channels = guideChannels(catalog);
+function* documentPieces(
+  catalog: Catalog,
+  now: Date,
+  baseUrl: string,
+  style: GuideStyle,
+): Generator<string> {
+  const channels = guideChannels(catalog, style);
   const compat = catalog.profile === 'compat';
-  yield '<?xml version="1.0" encoding="UTF-8"?>\n<tv generator-info-name="elv-sim">\n';
+  yield '<?xml version="1.0" encoding="UTF-8"?>\n';
+  if (style === 'panel') yield PANEL_DOCTYPE;
+  yield '<tv generator-info-name="elv-sim">\n';
   for (const ch of channels) {
     const icon = ch.logo === null ? '' : `<icon src="${baseUrl}/logos/${ch.logo}.png"/>`;
     yield `<channel id="${escAttr(ch.id)}"><display-name>${esc(ch.name)}</display-name>${icon}</channel>\n`;
@@ -193,9 +206,14 @@ function* documentPieces(catalog: Catalog, now: Date, baseUrl: string): Generato
  * Yields the XMLTV document in chunks of at most ~64 KB. Channel icons are absolute when `baseUrl` is given
  * (no trailing slash), path-only otherwise.
  */
-export function* xmltvChunks(catalog: Catalog, now: Date, baseUrl = ''): Generator<string> {
+export function* xmltvChunks(
+  catalog: Catalog,
+  now: Date,
+  baseUrl = '',
+  style: GuideStyle = 'plain',
+): Generator<string> {
   let buffer = '';
-  for (const piece of documentPieces(catalog, now, baseUrl)) {
+  for (const piece of documentPieces(catalog, now, baseUrl, style)) {
     if (buffer.length + piece.length > CHUNK_LIMIT) {
       yield buffer;
       buffer = '';

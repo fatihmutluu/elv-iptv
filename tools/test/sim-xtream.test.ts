@@ -265,6 +265,47 @@ describe('playerApi', () => {
     }
   });
 
+  it('gives every list item of every account category_ids with its category_id', () => {
+    for (const user of ['demo', 'compat', 'quirks', 'expired']) {
+      for (const action of ['get_live_streams', 'get_vod_streams', 'get_series']) {
+        for (const row of list(user, action)) {
+          const ids = row.category_ids as unknown[];
+          expect(Array.isArray(ids)).toBe(true);
+          expect(ids.every((n) => typeof n === 'number')).toBe(true);
+          expect(ids).toContain(Number(row.category_id));
+        }
+      }
+    }
+  });
+
+  it('mimics a real panel on the quirks account', () => {
+    const live = list('quirks', 'get_live_streams');
+    const nulls = live.filter((s) => s.epg_channel_id === null);
+    expect(nulls.length / live.length).toBeGreaterThanOrEqual(0.8);
+    expect(live.some((s) => s.stream_type === 'created_live')).toBe(true);
+    const vod = list('quirks', 'get_vod_streams');
+    const series = list('quirks', 'get_series');
+    for (const row of [...live, ...vod, ...series]) {
+      expect(row.thumbnail).toBe('');
+      expect(row.custom_sid).toBe('');
+    }
+    expect(series.every((s) => 'release_date' in s && 'releaseDate' in s)).toBe(true);
+    const byId = new Map<string, Set<unknown>>();
+    for (const m of vod) {
+      const key = String(m.stream_id);
+      byId.set(key, (byId.get(key) ?? new Set()).add(m.category_id));
+    }
+    expect([...byId.values()].filter((c) => c.size > 1).length).toBeGreaterThanOrEqual(3);
+    const inCategory = list('quirks', 'get_vod_streams', { category_id: '10002' });
+    expect(inCategory.every((m) => m.category_id === '10002')).toBe(true);
+  });
+
+  it('leaves the other accounts without panel-only fields', () => {
+    const live = list('demo', 'get_live_streams');
+    expect(live.some((s) => s.stream_type === 'created_live' || 'thumbnail' in s)).toBe(false);
+    expect(list('demo', 'get_series').some((s) => 'releaseDate' in s)).toBe(false);
+  });
+
   it('answers an unknown action with an empty list', () => {
     expect(call('demo', { action: 'nope' })).toEqual({ status: 200, body: [] });
   });

@@ -7,7 +7,7 @@ import { buildCatalog, type ProfileName } from './catalog.ts';
 import { baseUrlOf, type RequestMeta, type RouteHandler, type SimContext } from './context.ts';
 import { type M3uVariant, m3uChunks } from './m3u.ts';
 import { pngLogo } from './png.ts';
-import { xmltvChunks } from './xmltv.ts';
+import { type GuideStyle, xmltvChunks } from './xmltv.ts';
 import { playerApi } from './xtream.ts';
 
 const PLAYLISTS: Record<string, { profile: ProfileName; variant: M3uVariant }> = {
@@ -16,11 +16,13 @@ const PLAYLISTS: Record<string, { profile: ProfileName; variant: M3uVariant }> =
   compat: { profile: 'compat', variant: 'plain' },
   'compat-crlf-bom': { profile: 'compat', variant: 'crlf-bom' },
   'compat-truncated': { profile: 'compat', variant: 'truncated' },
+  huge: { profile: 'huge', variant: 'plain' },
 };
 const PROFILE_ACCOUNT: Record<ProfileName, string> = {
   small: 'demo',
   large: 'large',
   compat: 'compat',
+  huge: 'huge',
 };
 const LOGO_COUNT = 16;
 
@@ -75,9 +77,15 @@ async function guide(
   ctx: SimContext,
   profile: ProfileName,
   asFile: boolean,
+  style: GuideStyle = 'plain',
 ): Promise<void> {
   const accepts = /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''));
-  const chunks = xmltvChunks(buildCatalog(profile, ctx.seed), ctx.now(), baseUrlOf(req, ctx));
+  const chunks = xmltvChunks(
+    buildCatalog(profile, ctx.seed),
+    ctx.now(),
+    baseUrlOf(req, ctx),
+    style,
+  );
   if (asFile) return sendChunks(res, 200, 'application/gzip', chunks, true, false);
   const type = 'application/xml; charset=utf-8';
   return sendChunks(res, 200, type, chunks, accepts, true);
@@ -106,7 +114,8 @@ export const dataRoute: RouteHandler = async (req, res, ctx, meta) => {
       sendText(res, 401, 'text/plain');
       return true;
     }
-    if (path === '/xmltv.php') await guide(req, res, ctx, account.profile, false);
+    if (path === '/xmltv.php')
+      await guide(req, res, ctx, account.profile, false, account.quirks ? 'panel' : 'plain');
     else {
       const output = q.get('output') === 'ts' || q.get('output') === null ? 'ts' : 'm3u8';
       await playlist(req, res, ctx, account, 'plain', output);
@@ -131,7 +140,7 @@ export const dataRoute: RouteHandler = async (req, res, ctx, meta) => {
     return true;
   }
 
-  const guideMatch = /^\/guides\/(small|large|compat)\.xml(\.gz)?$/.exec(path);
+  const guideMatch = /^\/guides\/(small|large|compat|huge)\.xml(\.gz)?$/.exec(path);
   if (guideMatch) {
     await guide(req, res, ctx, guideMatch[1] as ProfileName, guideMatch[2] !== undefined);
     return true;

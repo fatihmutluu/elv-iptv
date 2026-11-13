@@ -1,5 +1,6 @@
 import { findAccount } from './accounts.ts';
 import { buildCatalog, type Catalog, type LiveChannel } from './catalog.ts';
+import { quirkArchiveDays, quirkIsCreatedLive, quirkKeepsGuideId } from './quirks.ts';
 import { programmesFor } from './xmltv.ts';
 
 /** Result of an API call: HTTP status and the JSON-serializable body. */
@@ -64,8 +65,10 @@ function accountInfo(account: NonNullable<ReturnType<typeof findAccount>>, ctx: 
   };
 }
 
-function liveRow(ch: LiveChannel, ctx: ApiContext): Row {
-  return {
+function liveRow(ch: LiveChannel, ctx: ApiContext, quirks: boolean): Row {
+  const index = ch.num - 1;
+  const archiveDays = quirks ? quirkArchiveDays(index, ch) : ch.archiveDays;
+  const row: Row = {
     num: ch.num,
     name: ch.name,
     stream_type: 'live',
@@ -74,18 +77,28 @@ function liveRow(ch: LiveChannel, ctx: ApiContext): Row {
     epg_channel_id: ch.epgId ?? '',
     added: String(CREATED_AT),
     category_id: ch.categoryId,
+    category_ids: [Number(ch.categoryId)],
     custom_sid: '',
-    tv_archive: ch.archiveDays > 0 ? 1 : 0,
+    tv_archive: archiveDays > 0 ? 1 : 0,
     direct_source: '',
-    tv_archive_duration: ch.archiveDays,
+    tv_archive_duration: archiveDays,
   };
+  if (quirks) {
+    row.epg_channel_id = quirkKeepsGuideId(index) ? ch.epgId : null;
+    row.thumbnail = '';
+    if (quirkIsCreatedLive(index)) row.stream_type = 'created_live';
+  }
+  return row;
 }
 
+/** Turns numbers into strings everywhere except `category_ids`, which a real panel keeps numeric. */
 function stringifyNumbers(value: unknown): unknown {
   if (typeof value === 'number') return String(value);
   if (Array.isArray(value)) return value.map(stringifyNumbers);
   if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, stringifyNumbers(v)]));
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, k === 'category_ids' ? v : stringifyNumbers(v)]),
+    );
   }
   return value;
 }
@@ -96,7 +109,7 @@ function applyQuirks(rows: Row[]): Row[] {
   const withLogo = out.findIndex((r) => r.stream_icon === '');
   if (withLogo >= 0) (out[withLogo] as Row).stream_icon = null;
   if (out[1]) out[1] = { ...out[1], name: `${String(out[1].name)} &amp; Co` };
-  if (out[2]) out[2] = { ...out[2], category_id: '999' };
+  if (out[2]) out[2] = { ...out[2], category_id: '999', category_ids: [999] };
   const first = out[0];
   const last = out.at(-1);
   if (first && last && out.length > 1)
@@ -114,11 +127,20 @@ function rating(id: number): string {
   return (5 + (id % 40) / 10).toFixed(1);
 }
 
-function vodRows(catalog: Catalog, ctx: ApiContext, categoryId: string | null): Row[] {
-  return catalog.movies
-    .filter((m) => categoryId === null || m.categoryId === categoryId)
-    .map((m) => ({
-      num: m.id - 200_000,
+/** Movies that a real panel lists in a second category under the same `stream_id`. */
+const MULTI_CATEGORY_MOVIES = 3;
+
+function vodRows(
+  catalog: Catalog,
+  ctx: ApiContext,
+  categoryId: string | null,
+  quirks: boolean,
+): Row[] {
+  const vodCats = catalog.categories.filter((c) => c.kind === 'vod').map((c) => c.id);
+  const rows: Row[] = [];
+  catalog.movies.forEach((m, index) => {
+    const row: Row = {
+      num: index + 1,
       name: m.name,
       stream_type: 'movie',
       stream_id: m.id,
@@ -126,23 +148,60 @@ function vodRows(catalog: Catalog, ctx: ApiContext, categoryId: string | null): 
       rating: rating(m.id),
       added: String(m.added),
       category_id: m.categoryId,
+      category_ids: [Number(m.categoryId)],
       container_extension: m.ext,
-    }));
+    };
+    if (quirks) {
+      row.thumbnail = '';
+      row.custom_sid = '';
+    }
+    const other =
+      quirks && index < MULTI_CATEGORY_MOVIES
+        ? vodCats[(vodCats.indexOf(m.categoryId) + 1) % vodCats.length]
+        : undefined;
+    const multi = other !== undefined && other !== m.categoryId;
+    if (multi) row.category_ids = [Number(m.categoryId), Number(other)];
+    if (categoryId === null || m.categoryId === categoryId) rows.push(row);
+    if (multi && (categoryId === null || other === categoryId)) {
+      rows.push({
+        ...row,
+        category_id: other,
+        category_ids: [Number(m.categoryId), Number(other)],
+      });
+    }
+  });
+  return rows;
 }
 
-function seriesRows(catalog: Catalog, ctx: ApiContext, categoryId: string | null): Row[] {
-  return catalog.series
-    .filter((s) => categoryId === null || s.categoryId === categoryId)
-    .map((s) => ({
-      num: s.id - 300_000,
+function seriesRows(
+  catalog: Catalog,
+  ctx: ApiContext,
+  categoryId: string | null,
+  quirks: boolean,
+): Row[] {
+  const rows: Row[] = [];
+  catalog.series.forEach((s, index) => {
+    if (categoryId !== null && s.categoryId !== categoryId) return;
+    const row: Row = {
+      num: index + 1,
       series_id: s.id,
       name: s.name,
       cover: `${ctx.baseUrl}/logos/${s.id % 16}.png`,
       plot: `Synthetic plot of ${s.name}.`,
       rating: rating(s.id),
       category_id: s.categoryId,
+      category_ids: [Number(s.categoryId)],
       last_modified: String(CREATED_AT),
-    }));
+    };
+    if (quirks) {
+      row.thumbnail = '';
+      row.custom_sid = '';
+      row.release_date = '2020-01-01';
+      row.releaseDate = '2020-01-01';
+    }
+    rows.push(row);
+  });
+  return rows;
 }
 
 function vodInfo(catalog: Catalog, ctx: ApiContext, id: number): Row {
@@ -264,15 +323,15 @@ export function playerApi(query: URLSearchParams, ctx: ApiContext): ApiResult {
     case 'get_live_streams': {
       const rows = catalog.live
         .filter((c) => categoryId === null || c.categoryId === categoryId)
-        .map((c) => liveRow(c, ctx));
+        .map((c) => liveRow(c, ctx, account.quirks));
       body = account.quirks ? applyQuirks(rows) : rows;
       break;
     }
     case 'get_vod_streams':
-      body = vodRows(catalog, ctx, categoryId);
+      body = vodRows(catalog, ctx, categoryId, account.quirks);
       break;
     case 'get_series':
-      body = seriesRows(catalog, ctx, categoryId);
+      body = seriesRows(catalog, ctx, categoryId, account.quirks);
       break;
     case 'get_vod_info':
       body = vodInfo(catalog, ctx, id('vod_id'));

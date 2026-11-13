@@ -52,6 +52,21 @@ describe('programmesFor', () => {
   });
 });
 
+describe('panel-style guide', () => {
+  const xml = [...xmltvChunks(buildCatalog('small', 1), NOW, '', 'panel')].join('');
+
+  it('declares a DOCTYPE and writes every time at +0100', () => {
+    expect(xml).toContain('<!DOCTYPE tv SYSTEM "xmltv.dtd">');
+    const times = [...xml.matchAll(/ (?:start|stop)="(\d{14}) ([+-]\d{4})"/g)];
+    expect(times.length).toBeGreaterThan(100);
+    expect(times.every((m) => m[2] === '+0100')).toBe(true);
+  });
+
+  it('keeps the plain guide free of the DOCTYPE', () => {
+    expect(render('small')).not.toContain('DOCTYPE');
+  });
+});
+
 describe('xmltvChunks', () => {
   it('makes icons absolute only when a base URL is given', () => {
     const catalog = buildCatalog('small', 1);

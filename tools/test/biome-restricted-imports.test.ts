@@ -26,12 +26,40 @@ const FORBIDDEN = [
   'node:fs',
   'node:fs/promises',
 ];
+const BROWSER_GLOBALS = [
+  'window',
+  'document',
+  'localStorage',
+  'sessionStorage',
+  'navigator',
+  'location',
+];
+const HERMES_GLOBALS = [
+  'TextDecoder',
+  'DecompressionStream',
+  'CompressionStream',
+  'Blob',
+  'structuredClone',
+];
+const GLOBALS = [...BROWSER_GLOBALS, ...HERMES_GLOBALS];
 const ALLOWED = ['@elv/domain', './local', 'exponential-backoff', 'reactive', 'electronic'];
 
 /** Probe file path -> import specifier, linted in one Biome run over a temporary workspace. */
 const probes = new Map<string, string>();
 let flagged = new Set<string>();
+let flaggedGlobals = new Set<string>();
 let workspace = '';
+
+function probeGlobal(folder: string, name: string, suffix = '.ts') {
+  const file = `${folder}/src/global-${name}${suffix}`;
+  mkdirSync(dirname(join(workspace, file)), { recursive: true });
+  writeFileSync(
+    join(workspace, file),
+    `export const g = ${name};
+`,
+  );
+  return file;
+}
 
 function probe(folder: string, specifier: string) {
   const file = `${folder}/src/probe-${probes.size}.ts`;
@@ -53,6 +81,13 @@ beforeAll(() => {
     for (const specifier of [...FORBIDDEN, ...ALLOWED]) probe(`packages/${pkg}`, specifier);
   }
   for (const specifier of ['react', 'react-native']) probe('packages/ui-kit', specifier);
+  for (const pkg of PURE) for (const name of GLOBALS) probeGlobal(`packages/${pkg}`, name);
+  for (const name of GLOBALS) probeGlobal('packages/ui-kit', name);
+  for (const pkg of PURE) {
+    for (const name of GLOBALS) probeGlobal(`packages/${pkg}`, name, '.test.ts');
+    for (const name of GLOBALS) probeGlobal(`packages/${pkg}`, name, '-test-helpers.ts');
+  }
+  for (const name of GLOBALS) probeGlobal('packages/sources', name, '-helper.ts');
 
   const r = spawnSync(
     process.execPath,
@@ -63,6 +98,11 @@ beforeAll(() => {
   const report = JSON.parse(r.stdout) as {
     diagnostics: { category?: string; location?: { path?: string } }[];
   };
+  const pathOf = (d: { location?: { path?: string } }) =>
+    (d.location?.path ?? '').split('\\').join('/');
+  flaggedGlobals = new Set(
+    report.diagnostics.filter((d) => d.category === 'lint/style/noRestrictedGlobals').map(pathOf),
+  );
   flagged = new Set(
     report.diagnostics
       .filter((d) => d.category === 'lint/style/noRestrictedImports')
@@ -87,5 +127,31 @@ describe('Biome restricted imports for pure packages', () => {
 
   it('leaves UI packages free to import react and react-native', () => {
     expect(flaggedSpecifiers('packages/ui-kit')).toEqual([]);
+  });
+
+  it.each(PURE)('flags browser globals in packages/%s', (pkg) => {
+    const files = GLOBALS.map((name) => `packages/${pkg}/src/global-${name}.ts`);
+    expect(files.filter((f) => flaggedGlobals.has(f))).toEqual(files);
+  });
+
+  it.each(PURE)(
+    'allows the Hermes-limited globals in tests and test helpers of packages/%s',
+    (pkg) => {
+      const files = HERMES_GLOBALS.flatMap((name) => [
+        `packages/${pkg}/src/global-${name}.test.ts`,
+        `packages/${pkg}/src/global-${name}-test-helpers.ts`,
+      ]);
+      expect(files.filter((f) => flaggedGlobals.has(f))).toEqual([]);
+    },
+  );
+
+  it('still flags those globals in a non-test file of a pure package', () => {
+    expect(flaggedGlobals.has('packages/sources/src/global-Blob-helper.ts')).toBe(true);
+  });
+
+  it('leaves UI packages free to use browser globals', () => {
+    expect(
+      GLOBALS.some((name) => flaggedGlobals.has(`packages/ui-kit/src/global-${name}.ts`)),
+    ).toBe(false);
   });
 });

@@ -33,6 +33,37 @@ function entries(text: string): string[][] {
   return out;
 }
 
+const quirks = findAccount('quirks', 'quirks') as Account;
+
+describe('quirks playlist', () => {
+  const text = render('small', quirks);
+  const lines = text.split('\r\n');
+
+  it('uses CRLF throughout and a bare header', () => {
+    expect(text.startsWith('#EXTM3U\r\n')).toBe(true);
+    expect(text.replaceAll('\r\n', '')).not.toMatch(/[\r\n]/);
+    expect(lines.filter((l) => l.startsWith('#EXT-X-SESSION-DATA:'))).toHaveLength(1);
+    expect(text).not.toContain('url-tvg');
+    expect(text).not.toContain('catchup');
+  });
+
+  it('puts xui-id on every entry, tvg-id on live only, timeshift on archive channels', () => {
+    const infs = lines.filter((l) => l.startsWith('#EXTINF'));
+    expect(infs).toHaveLength(50 + 30 + 30);
+    expect(infs.every((l) => /xui-id="\d+"/.test(l))).toBe(true);
+    expect(infs.slice(0, 50).some((l) => l.includes('tvg-id='))).toBe(true);
+    expect(infs.slice(50).some((l) => l.includes('tvg-id='))).toBe(false);
+    expect(infs.filter((l) => /timeshift="\d+"/.test(l)).length).toBeGreaterThan(0);
+  });
+
+  it('leaves the demo playlist without panel attributes', () => {
+    const demoText = render('small', demo);
+    expect(demoText).toContain('url-tvg=');
+    expect(demoText).not.toContain('xui-id');
+    expect(demoText).not.toContain('\r');
+  });
+});
+
 const compatText = render('compat', compat);
 const compatCatalog = buildCatalog('compat', 1);
 
@@ -143,7 +174,20 @@ describe('m3uChunks', () => {
       ['duplicate-id-b', (l) => expect(l[0]).toContain('tvg-id="dup"')],
       ['empty-name', (l) => expect(l[0]?.endsWith(',')).toBe(true)],
       ['long-name', (l) => expect((l[0] as string).split('",').at(-1)).toHaveLength(300)],
-      ['quotes-commas', (l) => expect(l[0]).toContain(',Channel "Quoted", With, Commas')],
+      [
+        'quotes-commas',
+        (l) => {
+          expect(l[0]).toContain(',Channel "Quoted", With, Commas');
+          expect(l[0]).toContain('tvg-name="Channel \'Quoted\', With, Commas"');
+        },
+      ],
+      [
+        'raw-quote-attr',
+        (l, id) =>
+          expect(l[0]).toBe(
+            `#EXTINF:-1 tvg-id="ch${id}" tvg-name="Channel "Raw", Quote" group-title="Live Group 03",Channel "Raw", Quote`,
+          ),
+      ],
       ['turkish-name', (l) => expect(l[0]).toContain(',Kanal İğüşöçı')],
       ['rtl-name', (l) => expect(l[0]).toContain(',قناة ٤٢')],
       ['tvg-shift', (l) => expect(l[0]).toContain('tvg-shift="-2"')],

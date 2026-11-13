@@ -1,5 +1,5 @@
 /** Catalog profile names (spec section 5.2). */
-export type ProfileName = 'small' | 'large' | 'compat';
+export type ProfileName = 'small' | 'large' | 'compat' | 'huge';
 /** Media recipe a stream is generated from (spec section 5.6). */
 export type RecipeName =
   | 'h264-aac-720p25'
@@ -37,6 +37,7 @@ export type CompatCase =
   | 'udp-url'
   | 'rtp-url'
   | 'rtmp-url'
+  | 'raw-quote-attr'
   | 'missing-404';
 /** A group of live channels, movies or series. */
 interface Category {
@@ -140,6 +141,7 @@ export const COMPAT_CASES: readonly CompatCase[] = [
   'udp-url',
   'rtp-url',
   'rtmp-url',
+  'raw-quote-attr',
   'missing-404',
 ];
 
@@ -155,10 +157,15 @@ export function rng(seed: number): () => number {
   };
 }
 
-const LIVE_BASE = 1001;
-const MOVIE_BASE = 200001;
-const SERIES_BASE = 300001;
-const EPISODE_BASE = 400001;
+/** First id of each kind; `huge` shifts them so its 500,000 entries never collide across kinds. */
+interface IdBases {
+  live: number;
+  movie: number;
+  series: number;
+  episode: number;
+}
+const DEFAULT_BASES: IdBases = { live: 1001, movie: 200001, series: 300001, episode: 400001 };
+const HUGE_BASES: IdBases = { live: 1001, movie: 100001, series: 500001, episode: 1_000_001 };
 const ADDED_BASE = 1_700_000_000;
 const VIDEO_RECIPES: readonly RecipeName[] = [
   'h264-aac-720p25',
@@ -170,6 +177,7 @@ const COMPAT_NAMES: Partial<Record<CompatCase, string>> = {
   'empty-name': '',
   'long-name': `${'Long Name '.repeat(29)}Long Name.`,
   'quotes-commas': 'Channel "Quoted", With, Commas',
+  'raw-quote-attr': 'Channel "Raw", Quote',
   'turkish-name': 'Kanal İğüşöçı',
   'rtl-name': 'قناة ٤٢',
 };
@@ -184,6 +192,7 @@ interface Shape {
   seriesCats: number;
   guideChannels: number | null;
   guideWindow: GuideWindow;
+  bases: IdBases;
 }
 
 const SHAPES: Record<ProfileName, Shape> = {
@@ -197,6 +206,7 @@ const SHAPES: Record<ProfileName, Shape> = {
     seriesCats: 3,
     guideChannels: null,
     guideWindow: { daysBack: 2, daysForward: 7 },
+    bases: DEFAULT_BASES,
   },
   large: {
     live: 25000,
@@ -208,6 +218,7 @@ const SHAPES: Record<ProfileName, Shape> = {
     seriesCats: 100,
     guideChannels: 5000,
     guideWindow: { daysBack: 0, daysForward: 7 },
+    bases: DEFAULT_BASES,
   },
   compat: {
     live: COMPAT_CASES.length,
@@ -219,11 +230,27 @@ const SHAPES: Record<ProfileName, Shape> = {
     seriesCats: 0,
     guideChannels: null,
     guideWindow: { daysBack: 2, daysForward: 7 },
+    bases: DEFAULT_BASES,
+  },
+  huge: {
+    live: 50000,
+    movies: 300000,
+    series: 6000,
+    episodesPerSeries: 25,
+    liveCats: 500,
+    vodCats: 1000,
+    seriesCats: 500,
+    guideChannels: 20000,
+    guideWindow: { daysBack: 0, daysForward: 7 },
+    bases: HUGE_BASES,
   },
 };
 
 const CATEGORY_BASE: Record<Category['kind'], number> = { live: 0, vod: 10000, series: 20000 };
 const categoryId = (kind: Category['kind'], n: number): string => String(CATEGORY_BASE[kind] + n);
+/** Category ids of one kind, built once so large catalogs share the strings. */
+const categoryIds = (kind: Category['kind'], count: number): string[] =>
+  Array.from({ length: count }, (_, i) => categoryId(kind, i + 1));
 
 const pad = (n: number, width = 4): string => String(n).padStart(width, '0');
 
@@ -241,8 +268,9 @@ function makeCategories(shape: Shape): Category[] {
 
 function makeLive(profile: ProfileName, shape: Shape): LiveChannel[] {
   const out: LiveChannel[] = [];
+  const cats = categoryIds('live', shape.liveCats);
   for (let i = 0; i < shape.live; i++) {
-    const id = LIVE_BASE + i;
+    const id = shape.bases.live + i;
     const compat = profile === 'compat' ? (COMPAT_CASES[i] as CompatCase) : null;
     const radio = compat === 'radio' || (profile !== 'compat' && (i + 1) % 25 === 0);
     let hasEpg: boolean;
@@ -256,7 +284,7 @@ function makeLive(profile: ProfileName, shape: Shape): LiveChannel[] {
         compat !== null && compat in COMPAT_NAMES
           ? (COMPAT_NAMES[compat] as string)
           : `Channel ${pad(i + 1)}`,
-      categoryId: categoryId('live', (i % shape.liveCats) + 1),
+      categoryId: cats[i % shape.liveCats] as string,
       epgId: hasEpg ? `ch${id}` : null,
       logo: i % 7 === 6 ? null : id % 16,
       recipe: radio ? 'aac-radio' : (VIDEO_RECIPES[i % VIDEO_RECIPES.length] as RecipeName),
@@ -270,11 +298,12 @@ function makeLive(profile: ProfileName, shape: Shape): LiveChannel[] {
 
 function makeMovies(shape: Shape, next: () => number): Movie[] {
   const out: Movie[] = [];
+  const cats = categoryIds('vod', shape.vodCats);
   for (let i = 0; i < shape.movies; i++) {
     out.push({
-      id: MOVIE_BASE + i,
+      id: shape.bases.movie + i,
       name: `Movie ${pad(i + 1)}`,
-      categoryId: categoryId('vod', (i % shape.vodCats) + 1),
+      categoryId: cats[i % shape.vodCats] as string,
       ext: i % 4 === 3 ? 'mkv' : 'mp4',
       recipe: VIDEO_RECIPES[i % VIDEO_RECIPES.length] as RecipeName,
       durationSec: 3600 + Math.floor(next() * 5400),
@@ -286,7 +315,8 @@ function makeMovies(shape: Shape, next: () => number): Movie[] {
 
 function makeSeries(shape: Shape, next: () => number): Series[] {
   const out: Series[] = [];
-  const perSeason = shape.episodesPerSeries / 2;
+  const perSeason = Math.ceil(shape.episodesPerSeries / 2);
+  const cats = categoryIds('series', shape.seriesCats);
   for (let s = 0; s < shape.series; s++) {
     const name = `Series ${pad(s + 1)}`;
     const episodes: Episode[] = [];
@@ -294,7 +324,7 @@ function makeSeries(shape: Shape, next: () => number): Series[] {
       const season = Math.floor(e / perSeason) + 1;
       const episode = (e % perSeason) + 1;
       episodes.push({
-        id: EPISODE_BASE + s * shape.episodesPerSeries + e,
+        id: shape.bases.episode + s * shape.episodesPerSeries + e,
         season,
         episode,
         title: `${name} S${pad(season, 2)}E${pad(episode, 2)}`,
@@ -304,9 +334,9 @@ function makeSeries(shape: Shape, next: () => number): Series[] {
       });
     }
     out.push({
-      id: SERIES_BASE + s,
+      id: shape.bases.series + s,
       name,
-      categoryId: categoryId('series', (s % shape.seriesCats) + 1),
+      categoryId: cats[s % shape.seriesCats] as string,
       episodes,
     });
   }

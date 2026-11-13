@@ -55,6 +55,9 @@ simulator is one local server that plays all these roles, deterministically, wit
   - `large`: 25,000 live and 75,000 VOD entries (100k total, the spec §6.2 import budget), 300 categories, a
     guide of 7 days for 5,000 channels.
   - `compat`: every tag and edge case of §5.4, for parser tests and the compatibility pass.
+  - `huge` (added after the real-panel probe; the owner's provider has ~115k entries and others are far larger): 50,000 live,
+    300,000 movies and 6,000 series × 25 episodes (500,000 entries), 2,000 categories, and a guide of 7 days for 20,000
+    channels. It is for opt-in benchmarks and device gates, never for `pnpm check`. Account `huge`/`huge` (2 connections).
 - Each catalog stream points at a media recipe (§5.6) and may carry a fault spec (§5.7), so faults also work through
   Xtream URLs that a client builds itself.
 
