@@ -306,19 +306,32 @@ export async function* scanXmltv(
   const input = gzip && opts.decompressor ? opts.decompressor.gunzip(replay()) : replay();
 
   const scanner = new XmltvScanner(size, opts);
+  const reader = input[Symbol.asyncIterator]();
+  let exhausted = false;
   try {
-    for await (const chunk of input) {
-      scanner.buf.append(chunk);
+    for (;;) {
+      let r: IteratorResult<Uint8Array>;
+      try {
+        r = await reader.next();
+      } catch (e) {
+        exhausted = true;
+        if (sourceError) return err(toElvError(sourceError.error));
+        return err(gzip ? elvError('source-format', 'gzip-corrupt') : toElvError(e));
+      }
+      if (r.done) {
+        exhausted = true;
+        break;
+      }
+      scanner.buf.append(r.value);
       do {
         scanner.run(false);
         if (scanner.full) yield { ...scanner.take(), done: false };
       } while (scanner.full);
     }
-  } catch (e) {
-    if (sourceError) return err(toElvError(sourceError.error));
-    if (!gzip) return err(toElvError(e));
-    return err(elvError('source-format', 'gzip-corrupt'));
+  } finally {
+    if (!exhausted) await reader.return?.();
   }
+  if (sourceError) return err(toElvError(sourceError.error));
   for (;;) {
     scanner.run(true);
     if (!scanner.full) break;

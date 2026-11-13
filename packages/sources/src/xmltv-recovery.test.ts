@@ -1,3 +1,4 @@
+import type { Decompressor } from '@elv/domain';
 import { describe, expect, it } from 'vitest';
 import { chunksOf, randomSplits, utf8 } from './test-chunks';
 import { scanXmltv } from './xmltv';
@@ -185,5 +186,71 @@ describe('scanXmltv input failures', () => {
   it('does not wrap a non-object throw as an ElvError', async () => {
     const r = await collect(failing(utf8('<tv>'), null));
     expect(r.result).toEqual({ ok: false, error: { category: 'network', code: 'stream-failed' } });
+  });
+});
+
+describe('scanXmltv hostile bodies and error attribution', () => {
+  it('stays linear on a body of unclosed unknown tags and keeps the next programme', async () => {
+    const unclosed = '<a>'.repeat(Math.floor(((1 << 20) - 4096) / 3));
+    const text = guide(
+      `<programme start="20260101000000" channel="c"><title>Hostile</title>${unclosed}</programme>` +
+        `<programme start="20260101010000" channel="c"><title>Next</title></programme>`,
+    );
+    const t0 = performance.now();
+    const r = await collect(whole(text));
+    expect(performance.now() - t0).toBeLessThan(2000);
+    expect(r.programmes.map((p) => p.title)).toEqual(['Hostile', 'Next']);
+    const distinct = Array.from({ length: 50000 }, (_, i) => `<x${i}>`).join('');
+    const t1 = performance.now();
+    const r2 = await collect(
+      whole(
+        guide(
+          `<programme start="20260101000000" channel="c">${distinct}<title>T</title></programme>`,
+        ),
+      ),
+    );
+    expect(performance.now() - t1).toBeLessThan(2000);
+    expect(r2.programmes.map((p) => p.title)).toEqual(['T']);
+  });
+
+  it('reads fields after an unclosed unknown tag and never takes a nested icon', async () => {
+    const text = guide(
+      `<programme start="20260101000000" channel="c"><br><rating><icon src="r.png"/></rating><title>T</title><icon src="p.png"/></programme>`,
+    );
+    const r = await collect(whole(text));
+    expect(r.programmes[0]?.title).toBe('T');
+    expect(r.programmes[0]?.icon).not.toBe('r.png');
+  });
+
+  it('lets scanner bugs propagate instead of reporting them as input errors', async () => {
+    const boom = {
+      has: () => {
+        throw new RangeError('scanner bug');
+      },
+    } as unknown as ReadonlySet<string>;
+    const text = guide(
+      '<programme start="20260101000000" channel="c"><title>T</title></programme>',
+    );
+    await expect(collect(whole(text), { channels: boom })).rejects.toThrow('scanner bug');
+  });
+
+  it('reports a source error that a decompressor swallowed', async () => {
+    const zipped = await gzip(
+      utf8(guide('<programme start="20260101000000" channel="c"><title>T</title></programme>')),
+    );
+    const swallowing: Decompressor = {
+      async *gunzip(chunks) {
+        try {
+          for await (const c of chunks) yield c;
+        } catch {
+          return;
+        }
+      },
+    };
+    const r = await collect(failing(zipped, { category: 'network', code: 'aborted' }), {
+      decompressor: swallowing,
+    });
+    expect(r.result).toEqual({ ok: false, error: { category: 'network', code: 'aborted' } });
+    expect(r.stats).toBeUndefined();
   });
 });
