@@ -197,7 +197,27 @@ describe('request log', () => {
       r.text(),
     );
     await fetch(`${url}/live/${demo.username}/typo/1001.ts`).then((r) => r.text());
+    const short = `/${demo.username}/${demo.password}/1001`;
+    const other = '/alice/' + 'hunter22' + '/';
+    await fetch(`${url}${short}`).then((r) => r.text());
+    await fetch(`${url}/live${other}1001.ts`).then((r) => r.text());
+    await fetch(`${url}/movie${other}7.mp4`).then((r) => r.text());
+    await fetch(`${url}/`, {
+      headers: { referer: `http://h${short}` },
+    }).then((r) => r.text());
+    await fetch(`${url}/`, {
+      headers: { referer: `http://h/live${other}1001.ts` },
+    }).then((r) => r.text());
+    const okGet = await fetch(`${url}/get.php?${creds}`);
+    expect(okGet.status).toBe(200);
+    await okGet.text();
     const entries = handle.requests();
+    const every = JSON.stringify(entries);
+    expect(every).not.toContain('hunter22');
+    expect(every).not.toContain(short);
+    expect(every).toContain('/demo/***/1001');
+    expect(every).toContain('/live/alice/***/1001.ts');
+    expect(every).toContain('/movie/alice/***/7.mp4');
     expect(entries[0]?.query.password).toBe('***');
     expect(entries[0]?.query.username).toBe('demo');
     const json = JSON.stringify(entries);
@@ -232,7 +252,7 @@ describe('request log', () => {
       fault: null,
       openConnections: 0,
     };
-    const out = redact(entry, ACCOUNTS);
+    const out = redact(entry);
     expect(out.query).toEqual({ password: '***', username: 'demo' });
     expect(out.headers.authorization).toBe('***');
     expect(out.headers.referer).toBe('http://demo:***@h/p');
@@ -312,7 +332,7 @@ describe('log file', () => {
       fault: null,
       openConnections: 0,
     };
-    expect(redact(entry, ACCOUNTS).headers.referer).toBe('http://h/get.php?password=***&x=1');
+    expect(redact(entry).headers.referer).toBe('http://h/get.php?password=***&x=1');
   });
 
   it('appends one JSON line per request', async () => {

@@ -21,28 +21,24 @@ const MASK = '***';
 const PASSWORD_PARAM = /(password=)[^&#\s]*/gi;
 const USERINFO = /(\/\/[^/:@\s]+:)[^@/\s]+@/g;
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const STREAM_PATH = /(\/(?:live|movie|series|timeshift)\/[^/\s?#]+\/)[^/\s?#]+(?=\/)/g;
+const SHORT_PATH = /(\/[^/\s?#:]+\/)[^/\s?#]+(?=\/\d+(?:$|[\s?#&]))/g;
+
+function clean(text: string): string {
+  return text
+    .replace(USERINFO, `$1${MASK}@`)
+    .replace(PASSWORD_PARAM, `$1${MASK}`)
+    .replace(STREAM_PATH, `$1${MASK}`)
+    .replace(SHORT_PATH, `$1${MASK}`);
 }
 
 /**
- * Returns a copy with secrets masked: `password` query values, `password=` values in any string, the segment
- * after a known username in Xtream stream paths (`/live|movie|series|timeshift/<user>/<secret>/`), `user:pass@` userinfo anywhere (referer included) and
- * the whole `authorization` header. Usernames stay visible.
+ * Returns a copy with secrets masked: `password` query values, `password=` values in any string, the password
+ * segment of Xtream stream paths (`/live|movie|series|timeshift/<user>/<secret>/` and the short `/<user>/<secret>/<id>`,
+ * whatever the username), `user:pass@` userinfo anywhere (referer included) and the whole `authorization`
+ * header. Usernames stay visible.
  */
-export function redact(
-  entry: LogEntry,
-  accounts: readonly { username: string; password: string }[],
-): LogEntry {
-  const pairs = accounts.map((a) => ({
-    re: new RegExp(`/(live|movie|series|timeshift)/${escapeRegExp(a.username)}/[^/]+(?=/|$)`, 'g'),
-    to: `/$1/${a.username}/${MASK}`,
-  }));
-  const clean = (text: string): string => {
-    let out = text.replace(USERINFO, `$1${MASK}@`).replace(PASSWORD_PARAM, `$1${MASK}`);
-    for (const p of pairs) out = out.replace(p.re, p.to);
-    return out;
-  };
+export function redact(entry: LogEntry): LogEntry {
   const query: Record<string, string> = {};
   for (const [k, v] of Object.entries(entry.query)) {
     query[k] = k.toLowerCase() === 'password' ? MASK : clean(v);

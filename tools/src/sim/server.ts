@@ -96,7 +96,7 @@ function track(
       fault: meta.fault,
       openConnections: meta.account === null ? 0 : ctx.connections.count(meta.account),
     };
-    ctx.log.add(redact(entry, ACCOUNTS));
+    ctx.log.add(redact(entry));
   };
   const write = res.write.bind(res) as (...a: unknown[]) => boolean;
   const end = res.end.bind(res) as (...a: unknown[]) => ServerResponse;
