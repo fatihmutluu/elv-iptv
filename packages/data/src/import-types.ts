@@ -17,6 +17,7 @@ export interface ImportDeps {
 export interface ImportOptions {
   /** Aborting ends the run as `cancelled` with `network/aborted`; the previous catalog stays. */
   signal?: AbortSignal;
+  /** Advisory; exceptions it throws are ignored and never change the outcome of a run. */
   onProgress?: (p: ImportProgress) => void;
   /** Rows per write batch (default 500); the scheduler yields after every batch. */
   batchSize?: number;

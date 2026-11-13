@@ -206,15 +206,22 @@ describe('xtream import', () => {
     expect(r.value.counts.movies).toBe(3);
   });
 
-  it('fails the whole run when a per-category call fails', async () => {
+  it('fails the run and keeps the catalog when a per-category call fails', async () => {
     const e = await setup(sampleCatalog());
+    await run(e);
+    const liveBefore = await rows(e, 'SELECT key, id FROM live ORDER BY key');
+    const placementsBefore = await count(e.db, 'placements');
     e.panel.state.bloat.add('get_live_streams');
     e.deps.maxBodyBytes = 800;
-    e.panel.state.onRequest = (a) => {
-      if (a === 'get_live_streams') e.panel.state.fail.set('get_live_streams', 500);
-    };
+    e.panel.state.failWithCategory.set('get_live_streams', 500);
     const r = await run(e);
-    expect(r.ok).toBe(false);
+    expectErr(r, 'network', 'server-error');
+    expect(e.panel.state.urls.some((u) => u.includes('get_live_streams&category_id='))).toBe(true);
+    expect(await rows(e, 'SELECT key, id FROM live ORDER BY key')).toEqual(liveBefore);
+    expect(await count(e.db, 'placements')).toBe(placementsBefore);
+    expect(await count(e.db, 'movies')).toBe(3);
+    const runs = await rows(e, 'SELECT status, error_code FROM import_runs ORDER BY id');
+    expect(runs[1]).toEqual({ status: 'failed', error_code: 'server-error' });
   });
 
   it('fails before any catalog write on account errors', async () => {

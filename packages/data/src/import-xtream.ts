@@ -43,6 +43,15 @@ class Stop extends Error {
   }
 }
 
+/** Calls `onProgress`; a throwing callback is ignored so it can never change the outcome of a run. */
+function notify(opts: ImportOptions, p: ImportProgress): void {
+  try {
+    opts.onProgress?.(p);
+  } catch {
+    // progress is advisory
+  }
+}
+
 const aborted = () => new Stop(elvError('network', 'aborted'));
 const unwrap = <T>(r: Result<T>): T => {
   if (!r.ok) throw new Stop(r.error);
@@ -222,7 +231,9 @@ async function importXtream(
   const started = deps.clock();
   let runId: number;
   try {
-    runId = await startRun(deps.db, source.id, 'catalog', started);
+    const run = await startRun(deps.db, source.id, 'catalog', started);
+    if (!run.ok) return run;
+    runId = run.value;
   } catch {
     return err(elvError('storage', 'import-failed'));
   }
@@ -235,21 +246,20 @@ async function importXtream(
     client: opened.value,
     signal: opts.signal,
     batchSize: Math.max(1, opts.batchSize ?? DEFAULT_BATCH_SIZE),
-    progress: (p) => opts.onProgress?.(p),
+    progress: (p) => notify(opts, p),
     counts,
   };
+  let removed: number;
   try {
     await execute(c);
     checkAbort(c);
     c.progress({ phase: 'cleanup', done: 0 });
-    const removed = await deps.db.transaction(async (tx) => {
+    removed = await deps.db.transaction(async (tx) => {
       await tx.run(KEEP_EPISODES, [runId, source.id, source.id, runId]);
       const stale = await removeStale(tx, source.id, runId, CATALOG_TABLES);
       await finishRun(tx, runId, { status: 'ok', counts }, deps.clock());
       return Object.values(stale).reduce((a, b) => a + b, 0);
     });
-    c.progress({ phase: 'cleanup', done: removed });
-    return ok({ runId, counts, warnings: 0, durationMs: deps.clock() - started });
   } catch (e) {
     const cancelled = opts.signal?.aborted === true;
     const error = cancelled
@@ -269,6 +279,8 @@ async function importXtream(
     }
     return err(error);
   }
+  c.progress({ phase: 'cleanup', done: removed });
+  return ok({ runId, counts, warnings: 0, durationMs: deps.clock() - started });
 }
 
 /**
@@ -330,7 +342,7 @@ export async function loadSeriesEpisodes(
         previous.filter((p) => !keep.has(p.key)).map((p) => [sourceId, p.key]),
       );
     });
-    opts.onProgress?.({ phase: 'episodes', done: entries.length, total: entries.length });
+    notify(opts, { phase: 'episodes', done: entries.length, total: entries.length });
     await deps.scheduler.yieldNow();
     return ok(entries.length);
   } catch (e) {

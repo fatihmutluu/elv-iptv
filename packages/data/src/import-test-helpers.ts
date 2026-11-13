@@ -50,15 +50,20 @@ function fakePanel(data: PanelData) {
     fail: new Map<string, number>(),
     bloat: new Set<string>(),
     urls: [] as string[],
-    onRequest: undefined as ((action: string | null) => void) | undefined,
+    failWithCategory: new Map<string, number>(),
+    onRequest: undefined as ((action: string | null) => void | Promise<void>) | undefined,
   };
   const http: HttpClient = {
     async get(url): Promise<Result<HttpResponse>> {
       state.urls.push(url);
       const u = new URL(url);
       const action = u.searchParams.get('action');
-      state.onRequest?.(action);
-      const status = action === null ? undefined : state.fail.get(action);
+      await state.onRequest?.(action);
+      const status =
+        action === null
+          ? undefined
+          : (state.fail.get(action) ??
+            (u.searchParams.has('category_id') ? state.failWithCategory.get(action) : undefined));
       if (status !== undefined) {
         async function* empty() {
           yield new Uint8Array(0);

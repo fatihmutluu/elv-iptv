@@ -37,14 +37,12 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
   `source_id` must be added to its list.
 - `src/test-db.ts` (test helper, not exported): `testDb()`, `memorySecrets()`, `countingScheduler()`. better-sqlite3 is a
   dev dependency imported only by this helper and tests.
-- `importCatalog(sourceId, deps, opts?)` and `loadSeriesEpisodes(sourceId, seriesKey, deps)` in `import-xtream.ts`
-  (`import-types.ts` holds `ImportDeps`, `ImportOptions`, `ImportProgress`, `ImportSummary`). A run (`runs.ts`:
-  `startRun`, `finishRun`, `removeStale`) upserts with `INSERT ... ON CONFLICT DO UPDATE ... run_id = excluded.run_id`
-  (`writers.ts`), so row ids stay stable; `scheduler.yieldNow()` follows every batch and `signal.aborted` is checked
-  before every batch. Stale rows of every catalog table are deleted, and the run is marked `ok`, in one transaction
-  only after success; failure (`failed`) and abort (`cancelled`, error `network/aborted`) never delete. Only the error
-  category and code reach `import_runs`. Xtream: account check first (before any catalog write), then categories, live,
-  movies, series; on `source-format/too-large` a list falls back to per-category calls. Placement `position` is the
-  provider order within its category. Episodes are not fetched at import: `loadSeriesEpisodes` stores one series on
-  demand (keeping row ids) and the next successful import keeps the episodes of series that still exist. M3U sources
-  return `source-format/unsupported-source` until the M3U importer lands.
+- `importCatalog` / `loadSeriesEpisodes` (`import-xtream.ts`; types in `import-types.ts`; `runs.ts`, `writers.ts`). A run
+  upserts with `ON CONFLICT DO UPDATE ... run_id = excluded.run_id` (stable row ids), yields after every batch, checks
+  `signal.aborted` before every batch. Stale rows (`run_id < current`) are deleted and the run marked `ok` in one
+  transaction, only after success; failure (`failed`) and abort (`cancelled`, `network/aborted`) never delete. Only
+  error category and code reach `import_runs`. `startRun` refuses a second `running` run of the same source and kind
+  (`storage/import-in-progress`); `openCatalog` marks leftover `running` runs `failed/interrupted`. `onProgress`
+  exceptions are ignored. Xtream: account check first, then categories, live, movies, series; `source-format/too-large`
+  falls back to per-category calls; placement `position` is provider order within the category. Episodes load on
+  demand (`loadSeriesEpisodes`) and survive re-imports while their series exists. M3U: `unsupported-source` for now.
