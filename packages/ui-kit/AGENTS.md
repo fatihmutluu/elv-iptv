@@ -31,6 +31,11 @@ React components for react-native and react-native-web, design tokens and TV foc
   (short timing for single steps, direct `setValue` when changes arrive within 150 ms, i.e. held keys).
 - Mid-list the focused item sits on `focusLine` (default 2) and the ring top is `focusLine * rowHeight`. At the top and
   bottom the window cannot slide (it is clamped to `[0, count - visibleRows]`), so the ring leaves the line there.
+- Native coordinates stay bounded: row tops and the content translate are relative to an anchor row that moves every
+  `8 * pool` rows (all rows re-render once then), so 100,000 rows never reach float32 limits. The offset syncs on
+  `windowStart`/`rowHeight`/anchor changes (jumping, not animating, unless it is a plain step); `source.prefetch` is called
+  with the rendered range plus one pool of margin when that range moves; `rowLabel` sets each row's accessibility label.
+- Key stamps use `performance.now()`.
 - `onFrameCommitted(index)` fires once per focused-index change, on the first animation frame after the row and ring
   committed; the gate uses it to measure key-to-highlight latency.
 - Rows get `testID` `${testID}-row-${index}` and `accessibilityState.selected`; the ring is `${testID}-ring`.

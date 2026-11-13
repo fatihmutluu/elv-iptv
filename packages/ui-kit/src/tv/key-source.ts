@@ -59,11 +59,11 @@ export function useTvKeySource(onInput: (k: KeyInput) => void): void {
     const tvos = Platform.OS === 'ios' && Platform.isTV;
     if (tvos) TVEventControl.enableTVMenuKey();
     const remote = TVEventHandler.addListener((event) => {
-      const input = toKeyInput(event, Date.now(), Platform.OS === 'ios' ? 'ios' : 'android');
+      const input = toKeyInput(event, performance.now(), Platform.OS === 'ios' ? 'ios' : 'android');
       if (input) handler.current(input);
     });
     const back = BackHandler.addEventListener('hardwareBackPress', () => {
-      handler.current({ key: 'back', action: 'press', time: Date.now() });
+      handler.current({ key: 'back', action: 'press', time: performance.now() });
       return true;
     });
     return () => {
