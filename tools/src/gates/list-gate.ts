@@ -115,6 +115,7 @@ function toMetrics(value: unknown): GateMetrics | undefined {
   }
   return {
     moves: v.moves,
+    ...(isNumber(v.scripted) ? { scripted: v.scripted } : {}),
     coalesced: v.coalesced,
     losses: v.losses,
     keyToHighlightMs: { p50: k.p50, p95: k.p95, max: k.max },
@@ -202,8 +203,10 @@ const pick = <T>(items: T[], f: (item: T) => number): number => median(items.map
 
 function medianMetrics(runs: GateMetrics[]): GateMetrics {
   const stalls = runs.map((r) => r.maxFrameStallMs).filter(isNumber);
+  const scripted = runs.map((r) => r.scripted).filter(isNumber);
   return {
     moves: pick(runs, (r) => r.moves),
+    ...(scripted.length === runs.length ? { scripted: median(scripted) } : {}),
     coalesced: pick(runs, (r) => r.coalesced),
     losses: Math.max(...runs.map((r) => r.losses)),
     keyToHighlightMs: {

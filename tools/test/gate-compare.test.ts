@@ -4,6 +4,7 @@ import { baselineRefusal, compareToBaseline, type GateResult } from '../src/gate
 const baseline: GateResult = {
   metrics: {
     moves: 600,
+    scripted: 600,
     coalesced: 0,
     losses: 0,
     keyToHighlightMs: { p50: 18, p95: 19, max: 22 },
@@ -29,6 +30,8 @@ const change = (patch: {
   gap?: number;
   losses?: number;
   coalesced?: number;
+  edgeSteps?: number;
+  scripted?: number;
   janky?: number;
   legacy?: number;
   framesP99?: number;
@@ -39,6 +42,8 @@ const change = (patch: {
 }): GateResult => ({
   metrics: {
     ...baseline.metrics,
+    moves: (patch.scripted ?? 600) - (patch.coalesced ?? 0) - (patch.edgeSteps ?? 0),
+    scripted: patch.scripted ?? 600,
     losses: patch.losses ?? 0,
     coalesced: patch.coalesced ?? 0,
     items: patch.items ?? baseline.metrics.items,
@@ -139,14 +144,34 @@ describe('compareToBaseline', () => {
     expect(compareToBaseline(old, baseline).ok).toBe(true);
   });
 
-  it('warns about coalesced repeats without failing', () => {
+  it('warns about coalesced repeats without failing, though they lower the move count', () => {
     const outcome = compareToBaseline(change({ coalesced: 3 }), baseline);
     expect(outcome.ok).toBe(true);
-    expect(outcome.warnings.join('\n')).toMatch(/coalesced/);
+    expect(outcome.failures).toEqual([]);
+    expect(outcome.warnings.join('\n')).toMatch(/3 repeats were coalesced/);
+  });
+
+  it('compares the script length, so steps that hit an edge after coalescing still compare', () => {
+    expect(compareToBaseline(change({ coalesced: 3, edgeSteps: 3 }), baseline).failures).toEqual(
+      [],
+    );
+  });
+
+  it('falls back to moves plus coalesced for lines and baselines without the scripted count', () => {
+    const old: GateResult = { ...baseline, metrics: { ...baseline.metrics } };
+    delete old.metrics.scripted;
+    expect(compareToBaseline(change({ coalesced: 3 }), old).ok).toBe(true);
+    const oldLine = change({ coalesced: 3 });
+    delete oldLine.metrics.scripted;
+    expect(compareToBaseline(oldLine, baseline).ok).toBe(true);
   });
 
   it('fails when the runs are not comparable', () => {
     expect(compareToBaseline(change({ items: 5 }), baseline).ok).toBe(false);
+    const shorter = compareToBaseline(change({ scripted: 400 }), baseline);
+    expect(shorter.failures).toEqual([
+      'not comparable: 100000 items and 400 scripted events, baseline has 100000 and 600',
+    ]);
   });
 
   it('skips real keys that the baseline lacks', () => {

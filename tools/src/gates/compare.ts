@@ -3,6 +3,8 @@ import type { FrameStats } from './gfxinfo.ts';
 /** Mirror of the `ELV_GATE` line the app prints (`apps/tv-mobile/src/gate/metrics.ts`); tools never import the app. */
 export interface GateMetrics {
   moves: number;
+  /** Events the auto-driver emitted (moves, coalesced repeats and edge steps); absent in old lines and baselines. */
+  scripted?: number;
   coalesced: number;
   losses: number;
   keyToHighlightMs: { p50: number; p95: number; max: number };
@@ -47,8 +49,12 @@ const TOLERANCE = 1.1;
 const limit = (baseline: number, slack: number): number =>
   Math.max(baseline * TOLERANCE, baseline + slack);
 
+/** The script length of a run; without `scripted` (old lines) moves plus coalesced repeats stand in for it. */
+const scriptLength = (m: GateMetrics): number => m.scripted ?? m.moves + m.coalesced;
+
 /**
- * Compares a result with the committed baseline. A metric fails when it exceeds `max(baseline x 1.10, baseline +
+ * Compares a result with the committed baseline. Runs compare when their item counts and script lengths match
+ * (coalesced repeats lower `moves`, never the script). A metric fails when it exceeds `max(baseline x 1.10, baseline +
  * slack)` or its absolute budget; any focus loss fails. The legacy janky percentage is compared; the deadline-based one
  * only warns, because it swung between 50 and 73 % across identical emulator runs. p95 and max are both compared, so
  * a run is never judged by an average that hides a stall. Without a baseline (`undefined`) only the absolute budgets
@@ -78,9 +84,12 @@ export function compareToBaseline(
     warnings.push(
       'no baseline: only the absolute budgets and the focus-loss rule were checked, relative limits were skipped',
     );
-  } else if (m.items !== baseline.metrics.items || m.moves !== baseline.metrics.moves) {
+  } else if (
+    m.items !== baseline.metrics.items ||
+    scriptLength(m) !== scriptLength(baseline.metrics)
+  ) {
     failures.push(
-      `not comparable: ${m.items} items and ${m.moves} moves, baseline has ${baseline.metrics.items} and ${baseline.metrics.moves}`,
+      `not comparable: ${m.items} items and ${scriptLength(m)} scripted events, baseline has ${baseline.metrics.items} and ${scriptLength(baseline.metrics)}`,
     );
   }
   if (m.losses > 0) failures.push(`focus losses: ${m.losses}`);
