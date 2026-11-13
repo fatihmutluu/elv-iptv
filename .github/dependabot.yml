@@ -9,6 +9,13 @@ updates:
       default-days: 7
     commit-message:
       prefix: build(deps)
+    ignore:
+      # TypeScript 7 has no tsserver yet; the editor tooling needs 6.x.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
+      # Types follow the pinned Node 24 runtime, not the newest Node.
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
     groups:
       minor-and-patch:
         update-types: [minor, patch]

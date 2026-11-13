@@ -46,6 +46,8 @@ mas:
   hardenedRuntime: false
 
 linux:
+  # The default name comes from the scoped package name, which is not a valid file name.
+  executableName: elv-iptv
   category: AudioVideo
   target:
     - AppImage
