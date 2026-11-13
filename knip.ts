@@ -46,7 +46,7 @@ const config: KnipConfig = {
     },
     'packages/*': {
       // Skeleton packages declare their spec 5.2 dependencies before any code imports them.
-      ignoreDependencies: ['@elv/domain', '@elv/sources'],
+      ignoreDependencies: ['@elv/domain'],
     },
   },
 };
