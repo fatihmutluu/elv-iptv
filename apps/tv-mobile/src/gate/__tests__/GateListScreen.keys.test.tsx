@@ -40,6 +40,23 @@ describe('GateListScreen real keys', () => {
     expect(metrics.keyToHighlightMs.max).toBeLessThan(100);
   });
 
+  it('moves on an Android TV tap, which arrives only as the release, and measures from it', async () => {
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+    await render(<GateListScreen params={manual} />);
+    await advance(400);
+    const upAt = performance.now() - 50;
+    await act(async () => {
+      mockOnInput?.({ key: 'down', action: 'up', time: upAt });
+    });
+    expect(screen.getByTestId('gate-list-row-1').props.accessibilityState.selected).toBe(true);
+    await advance(2100);
+    const metrics = onlyGateMetrics(log);
+    expect(metrics.moves).toBe(1);
+    expect(metrics.losses).toBe(0);
+    expect(metrics.keyToHighlightMs.max).toBeGreaterThanOrEqual(50);
+    expect(metrics.keyToHighlightMs.max).toBeLessThan(150);
+  });
+
   it('steps when the arrow goes down and measures from the down receipt', async () => {
     const log = jest.spyOn(console, 'log').mockImplementation(() => {});
     await render(<GateListScreen params={manual} />);
