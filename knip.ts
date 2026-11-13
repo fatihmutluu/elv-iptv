@@ -13,6 +13,15 @@ const config: KnipConfig = {
       // The TV plugin is loaded by name from app.config.ts; knip infers optional Expo packages.
       ignoreDependencies: ['@react-native-tvos/config-tv', 'expo-updates'],
     },
+    'apps/desktop': {
+      entry: ['e2e/*.spec.ts'],
+      // Needed by the packaging script and by the workspace link to the renderer export.
+      ignoreDependencies: ['@elv/desktop-renderer'],
+    },
+    'apps/desktop/renderer': {
+      // Optional Expo packages inferred from app.json.
+      ignoreDependencies: ['expo-updates'],
+    },
     'packages/ui-kit': {
       // Skeleton: spec 5.2 dependencies and the react-native toolchain arrive before any code.
       ignoreDependencies: [

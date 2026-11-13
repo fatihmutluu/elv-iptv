@@ -108,13 +108,14 @@ module.exports = {
     },
     {
       name: 'no-dev-dependencies-in-src',
-      comment: 'shipped sources only use runtime dependencies',
+      comment:
+        'shipped sources only use runtime dependencies; the electron module is supplied by the Electron runtime and must stay a devDependency for electron-builder',
       severity: 'error',
       from: {
         path: '^(packages|modules|apps)/[^/]+/src/',
         pathNot: '\\.(test|spec)\\.[cm]?[jt]sx?$',
       },
-      to: { dependencyTypes: ['npm-dev'] },
+      to: { dependencyTypes: ['npm-dev'], pathNot: '/node_modules/electron/' },
     },
     {
       name: 'no-circular',

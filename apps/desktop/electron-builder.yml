@@ -1,0 +1,51 @@
+appId: io.github.fatihmutluu.elviptv
+productName: ELV IPTV
+asar: true
+directories:
+  output: release
+  buildResources: resources
+files:
+  - dist/main/**
+  - dist/preload/**
+  - dist/renderer/**
+  - package.json
+icon: resources/icon.png
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+
+win:
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+
+# Microsoft Store package, built by a later Store job. Identity and publisher are placeholders:
+# Partner Center assigns the real values when the app name is reserved.
+appx:
+  identityName: PLACEHOLDER.StoreAssignedIdentity
+  publisher: CN=PLACEHOLDER-StoreAssignedPublisher
+  publisherDisplayName: ELV IPTV
+  applicationId: ELVIPTV
+
+mac:
+  category: public.app-category.entertainment
+  target:
+    - dmg
+dmg:
+  title: ELV IPTV
+mas:
+  entitlements: resources/entitlements.mas.plist
+  entitlementsInherit: resources/entitlements.mas.inherit.plist
+  hardenedRuntime: false
+
+linux:
+  category: AudioVideo
+  target:
+    - AppImage
