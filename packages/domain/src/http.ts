@@ -11,6 +11,7 @@ export interface HttpResponse {
 export interface HttpRequestOptions {
   headers?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
+  /** Covers the time until the response headers arrive; a body already streaming is not timed. */
   timeoutMs?: number;
 }
 
@@ -31,6 +32,7 @@ export type FetchLike = (
     | {
         getReader(): {
           read(): Promise<{ done: boolean; value?: Uint8Array }>;
+          cancel?(reason?: unknown): Promise<void>;
           releaseLock(): void;
         };
       }
@@ -44,21 +46,95 @@ export interface Decompressor {
 
 type FetchBody = Awaited<ReturnType<FetchLike>>['body'];
 
-async function* streamBody(body: FetchBody): AsyncGenerator<Uint8Array> {
-  if (body === null) return;
+interface ChunkSource {
+  next(): Promise<{ done: boolean; value?: Uint8Array }>;
+  cancel(): Promise<void>;
+  release(): void;
+}
+
+function openSource(body: NonNullable<FetchBody>): ChunkSource {
   if (Symbol.asyncIterator in body) {
-    yield* body;
-    return;
+    const it = body[Symbol.asyncIterator]();
+    return {
+      next: async () => {
+        const r = await it.next();
+        return r.done ? { done: true } : { done: false, value: r.value };
+      },
+      cancel: async () => {
+        await it.return?.();
+      },
+      release: () => {},
+    };
   }
   const reader = body.getReader();
+  return {
+    next: () => reader.read(),
+    cancel: async () => {
+      await reader.cancel?.();
+    },
+    release: () => reader.releaseLock(),
+  };
+}
+
+async function cancelQuietly(source: ChunkSource): Promise<void> {
+  try {
+    await source.cancel();
+  } catch {
+    // The stream is being abandoned; a failing cancel changes nothing for the caller.
+  }
+}
+
+/** Abandons a body nobody will read (for example the body of an error response). */
+async function discardBody(body: FetchBody): Promise<void> {
+  if (body === null) return;
+  const source = openSource(body);
+  await cancelQuietly(source);
+  try {
+    source.release();
+  } catch {
+    // Releasing a cancelled reader may throw on some runtimes; nothing left to do.
+  }
+}
+
+/**
+ * Streams chunks until the body ends. Stopping early (break, return, throw) cancels the underlying
+ * stream; an abort of `signal` mid-body cancels it and throws an Error with message 'aborted'.
+ */
+async function* streamBody(
+  body: FetchBody,
+  signal: AbortSignal,
+  dispose: () => void,
+): AsyncGenerator<Uint8Array> {
+  if (body === null) {
+    dispose();
+    return;
+  }
+  const source = openSource(body);
+  const aborted = new Promise<never>((_, reject) => {
+    const fire = () => reject(new Error('aborted'));
+    if (signal.aborted) fire();
+    else signal.addEventListener('abort', fire, { once: true });
+  });
+  aborted.catch(() => {});
+  let finished = false;
   try {
     for (;;) {
-      const { done, value } = await reader.read();
-      if (done) return;
+      if (signal.aborted) throw new Error('aborted');
+      const { done, value } = await Promise.race([source.next(), aborted]);
+      if (done) {
+        finished = true;
+        return;
+      }
       if (value !== undefined) yield value;
     }
   } finally {
-    reader.releaseLock();
+    if (!finished) await cancelQuietly(source);
+    try {
+      source.release();
+    } catch {
+      // Releasing after cancel may throw on some runtimes.
+    }
+    dispose();
   }
 }
 
@@ -87,28 +163,36 @@ export function createFetchHttpClient(
         controller.signal.addEventListener('abort', () => reject(new Error('aborted')));
       });
       aborted.catch(() => {});
+      let handedOff = false;
       try {
         const init: { headers?: Record<string, string>; signal: AbortSignal } = {
           signal: controller.signal,
         };
         if (options?.headers) init.headers = { ...options.headers };
         const res = await Promise.race([fetchImpl(url, init), aborted]);
-        if (res.status === 401 || res.status === 403)
-          return err(elvError('auth', `http-${res.status}`));
-        if (res.status < 200 || res.status >= 300)
-          return err(elvError('network', `http-${res.status}`));
+        if (res.status < 200 || res.status >= 300) {
+          await discardBody(res.body);
+          const category = res.status === 401 || res.status === 403 ? 'auth' : 'network';
+          return err(elvError(category, `http-${res.status}`));
+        }
         const headers: Record<string, string> = {};
         res.headers.forEach((value, key) => {
           headers[key.toLowerCase()] = value;
         });
-        return ok({ status: res.status, headers, body: streamBody(res.body) });
+        handedOff = true;
+        const dispose = () => caller?.removeEventListener('abort', onCallerAbort);
+        return ok({
+          status: res.status,
+          headers,
+          body: streamBody(res.body, controller.signal, dispose),
+        });
       } catch {
         if (timedOut) return err(elvError('network', 'timeout'));
         if (caller?.aborted) return err(elvError('network', 'aborted'));
         return err(elvError('network', 'fetch-failed'));
       } finally {
         if (timer !== undefined) clearTimeout(timer);
-        caller?.removeEventListener('abort', onCallerAbort);
+        if (!handedOff) caller?.removeEventListener('abort', onCallerAbort);
       }
     },
   };

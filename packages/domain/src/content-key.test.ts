@@ -25,6 +25,9 @@ describe('normalizeStreamUrl', () => {
       'https://h:8443/movie/*/*/7.mkv',
     );
     expect(normalizeStreamUrl('https://h/series/u/p/9.mp4')).toBe('https://h/series/*/*/9.mp4');
+    expect(normalizeStreamUrl('http://h/timeshift/u/p/60/2026-01-01:10-00/12.ts?x=1')).toBe(
+      'http://h/timeshift/*/*/60/2026-01-01:10-00/12.ts',
+    );
     expect(normalizeStreamUrl('https://h/hls/x.m3u8?t=1')).toBe('https://h/hls/x.m3u8');
   });
   it('returns an unparsable url trimmed', () => {
@@ -52,6 +55,9 @@ describe('keys', () => {
   it('builds stable m3u keys', () => {
     const a = m3uKey('s1', 'http://u:p@h/live/a/b/1.ts?x=1', 'News');
     expect(m3uKey('s1', 'http://h/live/c/d/1.ts?x=2', 'News')).toBe(a);
+    expect(m3uKey('s1', 'http://h/timeshift/a/b/60/t/1.ts', 'N')).toBe(
+      m3uKey('s1', 'http://h/timeshift/c/d/60/t/1.ts', 'N'),
+    );
     expect(m3uKey('s1', 'http://h/live/c/d/1.ts', 'Sports')).not.toBe(a);
   });
 });

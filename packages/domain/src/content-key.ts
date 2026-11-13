@@ -2,7 +2,7 @@ import type { ContentKind } from './source';
 
 const URL_PARTS = /^([a-z][a-z0-9+.-]*):\/\/([^/?#]*)([^?#]*)/i;
 const DEFAULT_PORTS: Readonly<Record<string, string>> = { http: '80', https: '443' };
-const KIND_PATH = /^\/(live|movie|series)\/[^/]+\/[^/]+\/([^/]+)$/;
+const KIND_PATH = /^\/(live|movie|series|timeshift)\/[^/]+\/[^/]+\/(.+)$/;
 const BARE_PATH = /^\/[^/]+\/[^/]+\/(\d+(?:\.[a-z0-9]+)?)$/i;
 
 /**

@@ -166,4 +166,153 @@ describe('createFetchHttpClient', () => {
       error: { category: 'network', code: 'aborted' },
     });
   });
+
+  function trackedReader(chunks: string[]) {
+    let i = 0;
+    const state = { cancelled: 0, released: 0 };
+    const body = {
+      getReader: () => ({
+        read: async (): Promise<{ done: boolean; value?: Uint8Array }> => {
+          const c = chunks[i++];
+          return c === undefined ? { done: true } : { done: false, value: enc(c) };
+        },
+        cancel: async () => {
+          state.cancelled++;
+        },
+        releaseLock: () => {
+          state.released++;
+        },
+      }),
+    };
+    return { body, state };
+  }
+
+  it('cancels and releases the stream when the consumer stops early', async () => {
+    const t = trackedReader(['a', 'b', 'c']);
+    const client = createFetchHttpClient(async () => ({
+      status: 200,
+      headers: headers({}),
+      body: t.body,
+    }));
+    const res = okOf(await client.get('http://h/x'));
+    for await (const _ of res.body) break;
+    expect(t.state).toEqual({ cancelled: 1, released: 1 });
+  });
+
+  it('does not cancel a fully read stream', async () => {
+    const t = trackedReader(['a']);
+    const client = createFetchHttpClient(async () => ({
+      status: 200,
+      headers: headers({}),
+      body: t.body,
+    }));
+    await collect(okOf(await client.get('http://h/x')).body);
+    expect(t.state).toEqual({ cancelled: 0, released: 1 });
+  });
+
+  it('returns an early-stopped async iterable and tolerates a reader without cancel', async () => {
+    let returned = 0;
+    const iterable = {
+      [Symbol.asyncIterator]: () => ({
+        next: async () => ({ done: false, value: enc('x') }),
+        return: async () => {
+          returned++;
+          return { done: true as const, value: undefined };
+        },
+      }),
+    };
+    const c1 = createFetchHttpClient(async () => ({
+      status: 200,
+      headers: headers({}),
+      body: iterable,
+    }));
+    for await (const _ of okOf(await c1.get('http://h/x')).body) break;
+    expect(returned).toBe(1);
+    const plain = readerBody([enc('a'), enc('b')]);
+    const c2 = createFetchHttpClient(async () => ({
+      status: 200,
+      headers: headers({}),
+      body: plain.body,
+    }));
+    for await (const _ of okOf(await c2.get('http://h/x')).body) break;
+    expect(plain.released()).toBe(true);
+  });
+
+  it('swallows failures while cancelling or releasing', async () => {
+    const body = {
+      getReader: () => ({
+        read: async () => ({ done: false, value: enc('a') }),
+        cancel: async () => {
+          throw new Error('boom');
+        },
+        releaseLock: () => {
+          throw new Error('boom');
+        },
+      }),
+    };
+    const client = createFetchHttpClient(async () => ({ status: 200, headers: headers({}), body }));
+    for await (const _ of okOf(await client.get('http://h/x')).body) break;
+  });
+
+  it('cancels the body of a non-2xx response', async () => {
+    const t = trackedReader(['err']);
+    const client = createFetchHttpClient(async () => ({
+      status: 500,
+      headers: headers({}),
+      body: t.body,
+    }));
+    expect(await client.get('http://h/x')).toEqual({
+      ok: false,
+      error: { category: 'network', code: 'http-500' },
+    });
+    expect(t.state).toEqual({ cancelled: 1, released: 1 });
+  });
+
+  it('ends the iteration with an abort error when the caller aborts mid-body', async () => {
+    let cancelled = 0;
+    let pending: () => void = () => {};
+    let n = 0;
+    const body = {
+      getReader: () => ({
+        read: (): Promise<{ done: boolean; value?: Uint8Array }> =>
+          n++ === 0
+            ? Promise.resolve({ done: false, value: enc('a') })
+            : new Promise((r) => {
+                pending = () => r({ done: true });
+              }),
+        cancel: async () => {
+          cancelled++;
+          pending();
+        },
+        releaseLock: () => {},
+      }),
+    };
+    const ctl = new AbortController();
+    const client = createFetchHttpClient(async () => ({ status: 200, headers: headers({}), body }));
+    const res = okOf(await client.get('http://h/x', { signal: ctl.signal }));
+    const seen: string[] = [];
+    const run = (async () => {
+      for await (const chunk of res.body) {
+        seen.push(new TextDecoder().decode(chunk));
+        ctl.abort();
+      }
+    })();
+    await expect(run).rejects.toThrow('aborted');
+    expect(seen).toEqual(['a']);
+    expect(cancelled).toBe(1);
+  });
+
+  it('aborts a body whose signal was already aborted before reading', async () => {
+    const t = trackedReader(['a']);
+    const ctl = new AbortController();
+    const client = createFetchHttpClient(async () => ({
+      status: 200,
+      headers: headers({}),
+      body: t.body,
+    }));
+    const res = okOf(await client.get('http://h/x', { signal: ctl.signal }));
+    ctl.abort();
+    await expect(collect(res.body)).rejects.toThrow('aborted');
+    expect(t.state.cancelled).toBe(1);
+  });
 });
