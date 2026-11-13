@@ -18,6 +18,7 @@ export interface LogEntry {
 }
 
 const MASK = '***';
+const PASSWORD_PARAM = /(password=)[^&#s]*/gi;
 const USERINFO = /(\/\/[^/:@\s]+:)[^@/\s]+@/g;
 
 function escapeRegExp(s: string): string {
@@ -25,8 +26,8 @@ function escapeRegExp(s: string): string {
 }
 
 /**
- * Returns a copy with secrets masked: `password` query values, the password of any
- * `/<username>/<password>/` path pair, `user:pass@` userinfo anywhere (referer included) and
+ * Returns a copy with secrets masked: `password` query values, `password=` values in any string, the segment
+ * after a known username in Xtream stream paths (`/live|movie|series|timeshift/<user>/<secret>/`), `user:pass@` userinfo anywhere (referer included) and
  * the whole `authorization` header. Usernames stay visible.
  */
 export function redact(
@@ -34,11 +35,11 @@ export function redact(
   accounts: readonly { username: string; password: string }[],
 ): LogEntry {
   const pairs = accounts.map((a) => ({
-    re: new RegExp(`/${escapeRegExp(a.username)}/${escapeRegExp(a.password)}(?=/|$)`, 'g'),
-    to: `/${a.username}/${MASK}`,
+    re: new RegExp(`/(live|movie|series|timeshift)/${escapeRegExp(a.username)}/[^/]+(?=/|$)`, 'g'),
+    to: `/$1/${a.username}/${MASK}`,
   }));
   const clean = (text: string): string => {
-    let out = text.replace(USERINFO, `$1${MASK}@`);
+    let out = text.replace(USERINFO, `$1${MASK}@`).replace(PASSWORD_PARAM, `$1${MASK}`);
     for (const p of pairs) out = out.replace(p.re, p.to);
     return out;
   };
@@ -58,10 +59,17 @@ const MAX_ENTRIES = 10_000;
 /** In-memory ring of the last 10,000 entries; also appends JSONL to a file when given one. */
 export class RequestLog {
   readonly #entries: LogEntry[] = [];
-  readonly #file: string | undefined;
+  #file: string | undefined;
 
+  /** Throws an error naming the path when the log file cannot be opened for appending. */
   constructor(file?: string) {
     this.#file = file;
+    if (file === undefined) return;
+    try {
+      appendFileSync(file, '');
+    } catch (error) {
+      throw new Error(`sim: cannot write log file "${file}": ${(error as Error).message}`);
+    }
   }
 
   /** Records an entry; callers pass it already redacted. */

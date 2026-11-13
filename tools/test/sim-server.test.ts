@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ACCOUNTS } from '../src/sim/accounts.ts';
@@ -190,8 +193,19 @@ describe('request log', () => {
         referer: `http://${demo.username}:${demo.password}@x/`,
       },
     }).then((r) => r.text());
-    const json = JSON.stringify(handle.requests());
+    await fetch(`${url}/`, { headers: { referer: `http://h/get.php?${creds}` } }).then((r) =>
+      r.text(),
+    );
+    await fetch(`${url}/live/${demo.username}/typo/1001.ts`).then((r) => r.text());
+    const entries = handle.requests();
+    expect(entries[0]?.query.password).toBe('***');
+    expect(entries[0]?.query.username).toBe('demo');
+    const json = JSON.stringify(entries);
+    expect(json).not.toContain(`"password":"${demo.password}"`);
     expect(json).not.toContain(`password=${demo.password}`);
+    expect(json).not.toContain(`${demo.username}&password=${demo.password}`);
+    expect(json).not.toContain('/typo/');
+    expect(json).toContain('/live/demo/***/1001.ts');
     expect(json).not.toContain(pair);
     expect(json).not.toContain(basic);
     expect(json).not.toContain(`${demo.username}:${demo.password}`);
@@ -246,6 +260,28 @@ describe('harness events', () => {
     expect(await bad.text()).toContain('line 2');
     const big = await fetch(`${url}/_sim/events`, { method: 'POST', body: 'x'.repeat(1_048_577) });
     expect(big.status).toBe(413);
+  });
+});
+
+describe('log file', () => {
+  it('rejects naming the path when the log file cannot be created', async () => {
+    const bad = join(tmpdir(), 'elv-sim-missing-dir', 'nested', 'log.jsonl');
+    const error = await startSim({ port: 0, logFile: bad }).catch((e: Error) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain(bad);
+  });
+
+  it('appends one JSON line per request', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'elv-sim-'));
+    const file = join(dir, 'log.jsonl');
+    const handle = await startSim({ port: 0, clock: CLOCK, logFile: file });
+    open.push(handle);
+    await (await fetch(`${handle.url}/logos/1.png`)).arrayBuffer();
+    await (await fetch(`${handle.url}/nothing`)).text();
+    const lines = readFileSync(file, 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(2);
+    expect(JSON.parse(lines[1] as string)).toMatchObject({ path: '/nothing', status: 404 });
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 

@@ -5,7 +5,7 @@ const USAGE =
   'usage: pnpm sim [--port 7878] [--host 127.0.0.1|0.0.0.0] [--seed 1] [--clock <ISO time>] [--log <file>] [--prepare]';
 
 function fail(message: string): never {
-  process.stderr.write(`sim: ${message}\n${USAGE}\n`);
+  process.stderr.write(`${message.startsWith('sim:') ? '' : 'sim: '}${message}\n${USAGE}\n`);
   process.exit(2);
 }
 
