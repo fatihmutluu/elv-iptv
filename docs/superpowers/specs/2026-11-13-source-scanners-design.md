@@ -130,6 +130,11 @@ The real-panel probe showed shapes the simulator lacks. Add them so tests meet t
 - Performance guard (Node, in the integration suite): the `large` playlist (100k entries) and the `large` guide scan within
   fixed ceilings (playlist ≤ 5 s, guide ≤ 30 s on the CI runner), with peak heap growth reported; the budgets in §6.2 are
   measured on devices by the gates, not here.
+- Scale benchmark (opt-in with `SIM_HUGE=1`, not part of `pnpm check`): the simulator's `huge` profile (500k entries, a
+  7-day guide for 20,000 channels) must scan with heap growth no larger than the `large` run plus 25 % and time that grows
+  roughly linearly with input size. Users bring providers far larger than the owner's; memory must not grow with the
+  playlist. The Xtream path for `huge` uses per-category calls. Results are recorded in the report and, as aggregates, in
+  the private research notes next to a run against the owner's real source.
 - Coverage ≥ 90 % lines for `domain` and `sources` (spec §6.1).
 
 ## 7. Constraints
