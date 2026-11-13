@@ -20,7 +20,8 @@
     "bootstrap": "node tools/bin/bootstrap.ts",
     "run:app": "node tools/bin/run-app.ts",
     "scaffold": "node tools/bin/scaffold.ts",
-    "sim": "node tools/bin/sim.ts"
+    "sim": "node tools/bin/sim.ts",
+    "gate": "node tools/bin/gate.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.7",

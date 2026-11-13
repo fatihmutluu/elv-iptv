@@ -23,15 +23,9 @@ const config: KnipConfig = {
       ignoreDependencies: ['expo-updates'],
     },
     'packages/ui-kit': {
-      // Skeleton: spec 5.2 dependencies and the react-native toolchain arrive before any code.
-      ignoreDependencies: [
-        '@elv/domain',
-        '@elv/focus-core',
-        '@elv/i18n',
-        '@types/react',
-        'react',
-        'react-native',
-      ],
+      // Babel config is read by jest-expo; the preset is a direct devDependency for pnpm's isolated layout.
+      entry: ['babel.config.cjs'],
+      ignoreDependencies: ['@elv/domain', '@elv/i18n', 'babel-preset-expo'],
     },
     'packages/features': {
       ignoreDependencies: [

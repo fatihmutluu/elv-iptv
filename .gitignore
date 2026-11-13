@@ -40,3 +40,7 @@ playwright-report/
 # OS
 .DS_Store
 Thumbs.db
+
+# Gate runner output
+gate-list.json
+gate-artifacts/

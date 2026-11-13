@@ -1,0 +1,41 @@
+{
+  "device": {
+    "model": "sdk_google_atv64_x86_64",
+    "release": "16",
+    "sdk": "36"
+  },
+  "build": "development variant, release APK (JS bundled, debug-signed)",
+  "commit": "88de00a",
+  "date": "2026-11-13",
+  "result": {
+    "metrics": {
+      "moves": 600,
+      "scripted": 600,
+      "coalesced": 0,
+      "losses": 0,
+      "keyToHighlightMs": {
+        "p50": 17.7,
+        "p95": 19.27,
+        "max": 20.5
+      },
+      "maxJsGapMs": 4.33,
+      "maxFrameStallMs": 10.15,
+      "items": 100000
+    },
+    "frames": {
+      "totalFrames": 605,
+      "jankyPercent": 56.2,
+      "legacyJankyPercent": 0.5,
+      "p50": 17,
+      "p90": 18,
+      "p95": 18,
+      "p99": 19
+    },
+    "realKeys": {
+      "p50": 14.19,
+      "p95": 21.04,
+      "max": 22.42,
+      "losses": 0
+    }
+  }
+}
