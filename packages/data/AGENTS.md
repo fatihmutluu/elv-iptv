@@ -21,7 +21,7 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
 - `templates.ts`: `detectSegmentRules`, `toTemplate`, `resolveTemplate`, `keyTemplate`, `hostOf`. URLs become `{{name}}` templates
   (`user`, `pass`, `userinfo`, `v<N>` segment rules, `q:<param>` credential query values); values go to the secret store. Known
   credentials (>= 3 chars) are masked raw and percent-encoded at word boundaries; every value at a rule position is templated;
-  rules and whole-segment matches skip the last segment; numeric Xtream ids stay literal; literal `{{` is `{{(}}`. Keys are
+  rules and whole-segment matches skip the last segment; numeric Xtream ids stay literal; bare `/<u>/<p>/<id>` only for known credentials; literal `{{` is `{{(}}`. Keys are
   `m3uKey(sourceId, keyTemplate(template), name)` (every placeholder becomes `{{*}}`).
 - `source-link.ts`: `addSourceFromLink` adds a pasted `…/get.php?username=…&password=…` link as an Xtream source (`parseXtreamLink`; output sets `xtreamFormat`; a guide override is templated like M3U ones, `vodPlaylist` is ignored), else as M3U; `keepAsM3u` opts out.
 - `sources.ts`: `addXtreamSource`, `addM3uSource`, `getSource`, `updateSourceSettings`, `removeSource`, `removeSecrets`, `TABLES_BY_SOURCE`, `secretKey`. `removeSource` refuses while a run is `running` (`storage/import-in-progress`), deletes every table of the source explicitly (no foreign keys; a new table with `source_id` must be added

@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { extinf, playlistUrlFor, setupM3u } from './import-test-helpers';
+import { extinf, M3U_PASS, M3U_USER, playlistUrlFor, setupM3u } from './import-test-helpers';
 import { importCatalog } from './import-xtream';
 import { getSource } from './sources';
 import { resolveTemplate, type UrlVars } from './templates';
@@ -106,6 +106,42 @@ describe('segment rules on every import', () => {
     );
     expect(placed.map((p) => p.name)).toEqual(Array.from({ length: 1080 }, (_, i) => `Ch ${i}`));
     expect(await rowsWith(e, TOKEN_B)).toBe(0);
+  });
+});
+
+describe('bounded URL variables', () => {
+  const urlvars = (e: Env) => e.secrets.dump()['source:s1:urlvars'] ?? '';
+
+  it('keeps a plain three-segment playlist out of the secret store', async () => {
+    const body = `#EXTM3U\n${Array.from({ length: 5000 }, (_, i) =>
+      extinf(`Ch ${i}`, `http://tv.example/hls/channel-${i}/1.m3u8`, 'group-title="G"'),
+    ).join('')}`;
+    const e = await setupM3u(body, {}, 'http://lists.example/free.m3u');
+    expect((await importCatalog(e.sourceId, e.deps)).ok).toBe(true);
+    expect(Object.keys(JSON.parse(urlvars(e))).length).toBeLessThanOrEqual(3);
+    expect(urlvars(e).length).toBeLessThan(2048);
+    const row = await e.db.all<{ url_template: string }>(
+      "SELECT url_template FROM live WHERE name = 'Ch 7'",
+    );
+    expect(row[0]?.url_template).toBe('http://tv.example/hls/channel-7/1.m3u8');
+  });
+
+  it('stays small for a typical token panel and still templates bare credential paths', async () => {
+    const body =
+      '#EXTM3U\n' +
+      entries('cdn1.example', TOKEN_A, 0, 5000) +
+      extinf('Bare', `http://bare.example:8080/${M3U_USER}/${M3U_PASS}/3`) +
+      extinf('Plain', 'http://plain.example/ab/cd/4');
+    const e = await setupM3u(body);
+    expect((await importCatalog(e.sourceId, e.deps)).ok).toBe(true);
+    expect(urlvars(e).length).toBeLessThan(2048);
+    const row = await e.db.all<{ url_template: string }>(
+      "SELECT url_template FROM live WHERE name IN ('Bare', 'Plain') ORDER BY name",
+    );
+    expect(row.map((r) => r.url_template)).toEqual([
+      'http://bare.example:8080/{{user}}/{{pass}}/3',
+      'http://plain.example/ab/cd/4',
+    ]);
   });
 });
 

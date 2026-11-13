@@ -96,7 +96,19 @@ export function detectSegmentRules(sample: readonly string[]): SegmentRule[] {
   return rules;
 }
 
-function xtreamCredentialIndexes(segs: readonly string[]): [number, number] | undefined {
+function decodesTo(segment: string, value: string | undefined): boolean {
+  return value !== undefined && value !== '' && decodedForms(segment).includes(value);
+}
+
+/**
+ * Positions of the Xtream credentials in a path: `/live|movie|series/<u>/<p>/<id>` and `/timeshift/<u>/<p>/...`
+ * always; the bare `/<u>/<p>/<id>` only when both segments are the known credentials, since many plain playlists
+ * share that shape and their per-stream segments would each become a secret.
+ */
+function xtreamCredentialIndexes(
+  segs: readonly string[],
+  known: { username?: string; password?: string },
+): [number, number] | undefined {
   const first = (segs[0] ?? '').toLowerCase();
   if (
     segs.length === 4 &&
@@ -106,7 +118,14 @@ function xtreamCredentialIndexes(segs: readonly string[]): [number, number] | un
     return [1, 2];
   }
   if (segs.length >= 4 && first === 'timeshift') return [1, 2];
-  if (segs.length === 3 && NUMERIC_ID.test(segs[2] as string)) return [0, 1];
+  if (
+    segs.length === 3 &&
+    NUMERIC_ID.test(segs[2] as string) &&
+    decodesTo(segs[0] as string, known.username) &&
+    decodesTo(segs[1] as string, known.password)
+  ) {
+    return [0, 1];
+  }
   return undefined;
 }
 
@@ -250,7 +269,8 @@ function templateQuery(query: string, vars: UrlVars, mask: Masker): string {
  * every value at a rule position is templated, whatever it is. Known credentials shorter than 3 characters are
  * only replaced inside Xtream-shaped paths, so a one-character password cannot rewrite unrelated text, and
  * embedded credentials are replaced only at word boundaries. The numeric stream id of an Xtream-shaped path is
- * never rewritten.
+ * never rewritten. The bare `/<u>/<p>/<id>` shape counts as Xtream-shaped only when both segments are the known
+ * credentials; otherwise only rules and credential matches apply, so plain playlists add no per-stream values.
  */
 export function toTemplate(
   url: string,
@@ -272,7 +292,7 @@ export function toTemplate(
     vars[rule.name] = seg;
     names[rule.position] = rule.name;
   }
-  const xt = xtreamCredentialIndexes(segs);
+  const xt = xtreamCredentialIndexes(segs, known);
   if (xt !== undefined && names[xt[0]] === undefined && names[xt[1]] === undefined) {
     names[xt[0]] = assign(vars, 'user', segs[xt[0]] as string);
     names[xt[1]] = assign(vars, 'pass', segs[xt[1]] as string);

@@ -90,8 +90,10 @@ Used for `name_fold` and guide name matching.
 - **Xtream sources:** server, username and password go to the `SecretStore` (`source:<id>:xtream`). Items store
   `provider_id` and `extension`; URLs are built at play time by the Xtream client (`streamUrl`). Keys: `xtreamKey`.
 - **M3U sources:** the playlist URL is a secret (`source:<id>:playlist`). Entry URLs are stored as templates:
-  1. Known credential query parameters (ADR 0011 list) and Xtream-shaped `/<kind>/<u>/<p>/` segments become placeholders;
-     known credentials embedded elsewhere are replaced only at word boundaries, and a numeric Xtream stream id never is.
+  1. Known credential query parameters (ADR 0011 list) and Xtream-shaped `/<kind>/<u>/<p>/` segments become placeholders
+     (the bare `/<u>/<p>/<id>` form only when both segments are the playlist's known credentials, so a plain playlist
+     adds no per-stream secret); known credentials embedded elsewhere are replaced only at word boundaries, and a
+     numeric Xtream stream id never is. The `urlvars` secret stays a few hundred bytes for a typical source.
   2. URL-template rules are judged on every import. The first 1,000 entries judge each host they contain at least 50
      times; any other host (fewer there, or first seen later) is judged on up to 50 of its URLs while its entries and
      every later one wait (playlist order kept, at most 1,000 waiting). A path position whose value is identical for at

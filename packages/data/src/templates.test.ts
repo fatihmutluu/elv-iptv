@@ -110,12 +110,23 @@ describe('toTemplate', () => {
     for (const url of [
       'https://h.example/movie/u1/p1/5.mkv',
       'https://h.example/timeshift/u1/p1/60/2026-01-01/7.ts',
-      'https://h.example/u1/p1/99',
     ]) {
       const { template, vars } = toTemplate(url, [], NONE);
       expect(template).toContain('{{user}}/{{pass}}');
       expect(resolveTemplate(template, vars)).toBe(url);
     }
+  });
+
+  it('templates the bare /<u>/<p>/<id> form only for the known credentials', () => {
+    expect(toTemplate('https://h.example/u1/p1/99', [], NONE).template).toBe(
+      'https://h.example/u1/p1/99',
+    );
+    const known = { username: 'u1', password: 'p 1' };
+    const t = toTemplate('https://h.example/u1/p%201/99', [], known);
+    expect(t.template).toBe('https://h.example/{{user}}/{{pass}}/99');
+    expect(toTemplate('https://h.example/u1/zz/99', [], known).template).toBe(
+      'https://h.example/u1/zz/99',
+    );
   });
 
   it('replaces known credentials found elsewhere in the path', () => {
