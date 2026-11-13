@@ -205,3 +205,115 @@ describe('keys survive credential changes', () => {
     expect(m3uKey('s1', c.template, 'X')).toBe(m3uKey('s1', d.template, 'X'));
   });
 });
+
+describe('known credentials in encoded and embedded forms', () => {
+  const user = 'bobby';
+  const nasty = ['p@ss', 'p/ss', 'p%ss', 'p+ss', 'p ss', 'a;b,c'].map((s) => `${s}x`);
+
+  it.each(nasty)('masks the password %s raw and percent-encoded', (pw) => {
+    const enc = encodeURIComponent(pw);
+    for (const form of [pw, enc, enc.toLowerCase()]) {
+      const url = `https://h.example/a/${form}/b/c.ts?x=${form}&y=1`;
+      const { template, vars } = toTemplate(url, [], { username: user, password: pw });
+      expect(template).not.toContain(form);
+      expect(template).not.toContain(enc);
+      expect(resolveTemplate(template, vars)).toBe(url);
+    }
+  });
+
+  it('masks a password that spans path segments', () => {
+    const pw = 'ab/cd/ef';
+    const url = `https://h.example/live/${user}/${pw}/9.ts`;
+    const { template, vars } = toTemplate(url, [], { username: user, password: pw });
+    expect(template).toBe('https://h.example/live/{{user}}/{{pass}}/9.ts');
+    expect(resolveTemplate(template, vars)).toBe(url);
+  });
+
+  it('masks credentials embedded in a segment, the last segment and a query value', () => {
+    const pw = 'hunter22';
+    const url = `https://h.example/a/${user}-${pw}.ts?token=zzz&ref=pre${pw}post`;
+    const { template, vars } = toTemplate(url, [], { username: user, password: pw });
+    expect(template).toBe(
+      'https://h.example/a/{{user}}-{{pass}}.ts?token={{q:token}}&ref=pre{{pass}}post',
+    );
+    expect(resolveTemplate(template, vars)).toBe(url);
+  });
+
+  it('masks a whole query value that only decodes to the password', () => {
+    const pw = 'a b c';
+    const url = 'https://h.example/p?k=a+b+c&z=a%20B%20c';
+    const t = toTemplate(url, [], { password: pw });
+    expect(t.template).toBe('https://h.example/p?k={{pass}}&z=a%20B%20c');
+    expect(resolveTemplate(t.template, t.vars)).toBe(url);
+  });
+
+  it('does not rewrite text for credentials shorter than 3 characters', () => {
+    const url = 'https://h.example/1/2/3/1.ts?n=1';
+    const t = toTemplate(url, [], { username: '1', password: '2' });
+    expect(t.template).toBe(url);
+    const xt = toTemplate('https://h.example/live/1/2/55.ts', [], { username: '1', password: '2' });
+    expect(xt.template).toBe('https://h.example/live/{{user}}/{{pass}}/55.ts');
+  });
+});
+
+describe('last segment and minority URLs', () => {
+  const rules = [{ host: 'h.example', position: 0, name: 'v0' }];
+
+  it('never applies rules or whole-segment matches to the last segment', () => {
+    const t = toTemplate('https://h.example/streamid99', rules, NONE);
+    expect(t.template).toBe('https://h.example/streamid99');
+    const u = toTemplate('https://h.example/streamid99/a', [], { username: 'streamid99' });
+    expect(u.template).toBe('https://h.example/{{user}}/a');
+  });
+
+  it('keeps a minority value literal and keeps its key distinct', () => {
+    const common = token(24, 1);
+    const other = token(24, 2);
+    const expected = { v0: common };
+    const a = toTemplate(`https://h.example/${common}/s1`, rules, NONE, expected);
+    const b = toTemplate(`https://h.example/${other}/s1`, rules, NONE, expected);
+    expect(a.template).toBe('https://h.example/{{v0}}/s1');
+    expect(b.template).toBe(`https://h.example/${other}/s1`);
+    expect(b.vars).toEqual({});
+    expect(m3uKey('s', a.template, 'N')).not.toBe(m3uKey('s', b.template, 'N'));
+  });
+});
+
+describe('literal braces', () => {
+  it('escapes and unescapes literal double braces', () => {
+    for (const url of [
+      'https://h.example/a{{user}}b/{{x}}?q={{token}}#f{{',
+      'https://h.example/{{{/}}}/{{(}}',
+      'https://h.example/a{/{b',
+    ]) {
+      const t = toTemplate(url, [], NONE);
+      expect(resolveTemplate(t.template, t.vars)).toBe(url);
+    }
+  });
+
+  it('round-trips adversarial generated URLs', () => {
+    const chunk = fc.stringMatching(/^[a-z0-9{}%@+/ &=]{0,10}$/);
+    const word = fc.stringMatching(/^[a-z0-9{}%@+/]{3,10}$/);
+    fc.assert(
+      fc.property(
+        fc.record({
+          segs: fc.array(chunk, { maxLength: 4 }),
+          query: fc.array(fc.tuple(fc.constantFrom('token', 'ref', 'u'), chunk), { maxLength: 3 }),
+          frag: chunk,
+          user: word,
+          pass: word,
+          pos: fc.integer({ min: 0, max: 3 }),
+          encode: fc.boolean(),
+        }),
+        ({ segs, query, frag, user, pass, pos, encode }) => {
+          const pw = encode ? encodeURIComponent(pass) : pass;
+          const q = query.map(([k, v]) => `${k}=${v}${pw}`).join('&');
+          const url = `https://h.example/${segs.join('/')}/${pw}/${user}${q ? `?${q}` : ''}#${frag}`;
+          const rules = [{ host: 'h.example', position: pos, name: 'v0' }];
+          const t = toTemplate(url, rules, { username: user, password: pass });
+          expect(resolveTemplate(t.template, t.vars)).toBe(url);
+        },
+      ),
+    );
+  });
+});

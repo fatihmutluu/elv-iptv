@@ -25,9 +25,13 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
   `storage/migration-failed`. Add a schema change as a new `MIGRATIONS` entry, never by editing an old one.
 - `foldText(text)` in `fold.ts`: Turkish-aware, accent- and punctuation-insensitive folding for `name_fold` columns.
 - `templates.ts`: `detectSegmentRules`, `toTemplate`, `resolveTemplate`. URLs become `{{name}}` templates (`user`, `pass`,
-  `userinfo`, `v<N>` segment rules, `q:<param>` credential query values); the values go to the secret store. Keys are
+  `userinfo`, `v<N>` segment rules, `q:<param>` credential query values); the values go to the secret store. Known
+  credentials (>= 3 chars) are masked raw and percent-encoded wherever they occur; rules and whole-segment matches skip
+  the last path segment; literal `{{` is escaped as `{{(}}`. Keys are
   `m3uKey(sourceId, template, name)`.
-- `sources.ts`: `addXtreamSource`, `addM3uSource`, `getSource`, `updateSourceSettings`, `removeSource`, `secretKey`.
+- `sources.ts`: `addXtreamSource`, `addM3uSource`, `getSource`, `updateSourceSettings`, `removeSource`, `removeSecrets`, `TABLES_BY_SOURCE`, `secretKey`.
+  `removeSource` returns `storage/secret-delete-failed` when a secret could not be deleted (rows are already gone; retry
+  `removeSecrets`). M3U guide URLs are templated against the playlist or kept whole as a secret (`{{g:url}}`).
   Credentials live only in the `SecretStore` (`source:<id>:xtream|playlist|urlvars`); `settings_json` holds none.
   There are no foreign keys, so `removeSource` deletes from every table of the source explicitly; a new table with
   `source_id` must be added to its list.

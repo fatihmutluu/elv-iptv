@@ -58,7 +58,8 @@ export interface AddSourceDeps {
   newId: () => string;
 }
 
-const TABLES_BY_SOURCE = [
+/** Every table with a `source_id` column; {@link removeSource} clears them all (no foreign keys). */
+export const TABLES_BY_SOURCE: readonly string[] = [
   'import_runs',
   'categories',
   'live',
@@ -134,6 +135,63 @@ export async function addXtreamSource(
   return persist(deps, record, [[secretKey(id, 'xtream'), secret]]);
 }
 
+const URL_HEAD = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)([^?#]*)(?:\?([^#]*))?/i;
+
+function decodeParam(value: string): string {
+  try {
+    return decodeURIComponent(value.replace(/\+/g, ' '));
+  } catch {
+    return value;
+  }
+}
+
+function playlistFacts(
+  url: string,
+): { host: string; segments: string[]; username?: string; password?: string } | undefined {
+  const m = URL_HEAD.exec(url);
+  if (m === null) return undefined;
+  const authority = m[1] ?? '';
+  const facts: { host: string; segments: string[]; username?: string; password?: string } = {
+    host: authority.slice(authority.lastIndexOf('@') + 1).toLowerCase(),
+    segments: (m[2] ?? '').slice(1).split('/'),
+  };
+  for (const pair of (m[3] ?? '').split('&')) {
+    const eq = pair.indexOf('=');
+    if (eq < 0) continue;
+    const name = pair.slice(0, eq).toLowerCase();
+    const value = decodeParam(pair.slice(eq + 1));
+    if (name === 'username' || name === 'user') facts.username = value;
+    if (name === 'password' || name === 'pass' || name === 'pwd') facts.password = value;
+  }
+  return facts;
+}
+
+/**
+ * Templates a guide URL for `settings_json`. On the playlist's host the playlist's credentials and path
+ * segments it shares (the account token) become placeholders; on another host the whole URL is a secret
+ * (`{{g:url}}`). Variable names carry a `g:` prefix so they cannot clash with entry URL values.
+ */
+function templateGuide(guideUrl: string, playlistUrl: string): { template: string; vars: UrlVars } {
+  const playlist = playlistFacts(playlistUrl);
+  const guide = playlistFacts(guideUrl);
+  if (playlist === undefined || guide === undefined || playlist.host !== guide.host) {
+    return { template: '{{g:url}}', vars: { 'g:url': guideUrl } };
+  }
+  const rules: SegmentRule[] = [];
+  guide.segments.slice(0, -1).forEach((segment, position) => {
+    if (segment.length >= 8 && segment === playlist.segments[position]) {
+      rules.push({ host: guide.host, position, name: `v${position}` });
+    }
+  });
+  const t = toTemplate(guideUrl, rules, playlist);
+  const vars: UrlVars = {};
+  for (const [name, value] of Object.entries(t.vars)) vars[`g:${name}`] = value;
+  const template = t.template.replace(/\{\{([^{}]+)\}\}/g, (whole, name: string) =>
+    name === '(' ? whole : `{{g:${name}}}`,
+  );
+  return { template, vars };
+}
+
 /**
  * Adds an M3U source. The playlist URL is a secret. A guide URL is templated: its credential values move to
  * `source:<id>:urlvars` under `g:`-prefixed names so they cannot clash with entry URL values.
@@ -149,9 +207,9 @@ export async function addM3uSource(
   if (input.transport !== undefined) settings.transport = input.transport;
   if (input.vodPlaylist !== undefined) settings.vodPlaylist = input.vodPlaylist;
   if (input.guideUrl !== undefined && input.guideUrl.trim() !== '') {
-    const t = toTemplate(input.guideUrl, [], {});
-    settings.guideUrl = t.template.replace(/\{\{([^{}]+)\}\}/g, '{{g:$1}}');
-    for (const [name, value] of Object.entries(t.vars)) vars[`g:${name}`] = value;
+    const g = templateGuide(input.guideUrl, input.playlistUrl);
+    settings.guideUrl = g.template;
+    Object.assign(vars, g.vars);
   }
   const record: SourceRecord = {
     id,
@@ -195,16 +253,29 @@ export async function updateSourceSettings(
   await db.run('UPDATE sources SET settings_json = ? WHERE id = ?', [JSON.stringify(settings), id]);
 }
 
-/** Deletes a source, every catalog and guide row that belongs to it, and its secrets. */
+/** Deletes the three secrets of a source; reports `storage/secret-delete-failed` when any deletion failed. */
+export async function removeSecrets(id: string, secrets: SecretStore): Promise<Result<void>> {
+  const results = await Promise.allSettled(
+    PARTS.map((part) => secrets.delete(secretKey(id, part))),
+  );
+  return results.some((r) => r.status === 'rejected')
+    ? err(elvError('storage', 'secret-delete-failed'))
+    : ok(undefined);
+}
+
+/**
+ * Deletes a source and every catalog and guide row that belongs to it, then its secrets. The rows are gone even
+ * when the result is `storage/secret-delete-failed`; the caller can retry {@link removeSecrets}.
+ */
 export async function removeSource(
   id: string,
   deps: { db: SqlDriver; secrets: SecretStore },
-): Promise<void> {
+): Promise<Result<void>> {
   await deps.db.transaction(async (tx) => {
     for (const table of TABLES_BY_SOURCE) {
       await tx.run(`DELETE FROM ${table} WHERE source_id = ?`, [id]);
     }
     await tx.run('DELETE FROM sources WHERE id = ?', [id]);
   });
-  for (const part of PARTS) await deps.secrets.delete(secretKey(id, part));
+  return removeSecrets(id, deps.secrets);
 }

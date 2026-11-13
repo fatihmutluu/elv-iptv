@@ -94,75 +94,190 @@ function xtreamCredentialIndexes(segs: readonly string[]): [number, number] | un
   return undefined;
 }
 
-function templateQuery(query: string, vars: UrlVars): string {
+const MIN_KNOWN_LENGTH = 3;
+const ESCAPE_NAME = '(';
+
+const escapeLiteral = (text: string): string => text.replace(/\{\{/g, `{{${ESCAPE_NAME}}}`);
+const regexEscape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function assign(vars: UrlVars, base: string, text: string): string {
+  for (let k = 0; ; k += 1) {
+    const name = k === 0 ? base : `${base}:${k}`;
+    if (!Object.hasOwn(vars, name)) {
+      vars[name] = text;
+      return name;
+    }
+    if (vars[name] === text) return name;
+  }
+}
+
+function encodings(value: string): string[] {
+  try {
+    const enc = encodeURIComponent(value);
+    const full = enc.replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+    const lower = (s: string): string => s.replace(/%[0-9A-F]{2}/g, (h) => h.toLowerCase());
+    const plus = (s: string): string => s.replace(/%20/g, '+');
+    return [value, enc, full, lower(enc), lower(full), plus(enc), plus(full)];
+  } catch {
+    return [value];
+  }
+}
+
+function decodedForms(text: string): string[] {
+  const forms = [text];
+  for (const candidate of [text, text.replace(/\+/g, ' ')]) {
+    try {
+      forms.push(decodeURIComponent(candidate));
+    } catch {
+      // not valid percent-encoding: only the raw form applies
+    }
+  }
+  return forms;
+}
+
+interface Masker {
+  /** Escapes literal text and swaps embedded known credentials for placeholders. */
+  literal(text: string): string;
+  /** Placeholder base (`user` or `pass`) when the whole text decodes to a known credential. */
+  whole(text: string): 'user' | 'pass' | undefined;
+}
+
+function makeMasker(known: { username?: string; password?: string }, vars: UrlVars): Masker {
+  const entries: { base: 'user' | 'pass'; value: string }[] = [];
+  if ((known.username ?? '').length >= MIN_KNOWN_LENGTH) {
+    entries.push({ base: 'user', value: known.username as string });
+  }
+  if ((known.password ?? '').length >= MIN_KNOWN_LENGTH) {
+    entries.push({ base: 'pass', value: known.password as string });
+  }
+  const lookup = new Map<string, 'user' | 'pass'>();
+  for (const e of entries) {
+    for (const form of encodings(e.value)) if (!lookup.has(form)) lookup.set(form, e.base);
+  }
+  const forms = [...lookup.keys()].sort((a, b) => b.length - a.length);
+  const pattern =
+    forms.length === 0 ? undefined : new RegExp(forms.map(regexEscape).join('|'), 'g');
+  return {
+    literal(text) {
+      if (pattern === undefined) return escapeLiteral(text);
+      let out = '';
+      let last = 0;
+      for (const m of text.matchAll(pattern)) {
+        const base = lookup.get(m[0]) as 'user' | 'pass';
+        out += escapeLiteral(text.slice(last, m.index));
+        out += `{{${assign(vars, base, m[0])}}}`;
+        last = m.index + m[0].length;
+      }
+      return out + escapeLiteral(text.slice(last));
+    },
+    whole(text) {
+      const decoded = decodedForms(text);
+      return entries.find((e) => decoded.includes(e.value))?.base;
+    },
+  };
+}
+
+function templateQuery(query: string, vars: UrlVars, mask: Masker): string {
   const seen = new Map<string, number>();
   return query
     .split('&')
     .map((pair) => {
       const eq = pair.indexOf('=');
-      if (eq < 0) return pair;
+      if (eq < 0) return mask.literal(pair);
       const name = pair.slice(0, eq);
+      const value = pair.slice(eq + 1);
       const lower = name.toLowerCase();
-      if (!CREDENTIAL_PARAMS.has(lower)) return pair;
-      const n = (seen.get(lower) ?? 0) + 1;
-      seen.set(lower, n);
-      const varName = n === 1 ? `q:${lower}` : `q:${lower}:${n}`;
-      vars[varName] = pair.slice(eq + 1);
-      return `${name}={{${varName}}}`;
+      if (CREDENTIAL_PARAMS.has(lower)) {
+        const n = (seen.get(lower) ?? 0) + 1;
+        seen.set(lower, n);
+        const varName = n === 1 ? `q:${lower}` : `q:${lower}:${n}`;
+        vars[varName] = value;
+        return `${escapeLiteral(name)}={{${varName}}}`;
+      }
+      const base = mask.whole(value);
+      if (base !== undefined) return `${mask.literal(name)}={{${assign(vars, base, value)}}}`;
+      return mask.literal(pair);
     })
     .join('&');
 }
 
 /**
  * Replaces everything secret in a URL with `{{name}}` placeholders and returns the values. Placeholders:
- * `userinfo`, `user` and `pass` (Xtream path segments or segments equal to the known credentials), `v<N>`
- * (segment rules of the URL's host) and `q:<param>` (credential query parameters, ADR 0011 list).
- * {@link resolveTemplate} reverses it exactly. An unparsable value is returned unchanged.
+ * `userinfo`; `user` and `pass` (Xtream-shaped path segments, and the known credentials wherever they occur
+ * raw or percent-encoded, with `:<n>` suffixes when one credential appears in several spellings); `v<N>`
+ * (segment rules of the URL's host); `q:<param>` (credential query parameters, ADR 0011 list). Literal `{{`
+ * becomes `{{(}}`. {@link resolveTemplate} reverses it exactly. An unparsable value is returned unchanged.
+ *
+ * Segment rules and whole-segment credential matches never touch the last path segment (the resource itself).
+ * Known credentials shorter than 3 characters are only replaced inside Xtream-shaped paths, so a one-character
+ * password cannot rewrite unrelated text. When `expected` holds a rule's value, only a segment equal to it is
+ * templated; any other value stays literal.
  */
 export function toTemplate(
   url: string,
   rules: readonly SegmentRule[],
   known: { username?: string; password?: string },
+  expected?: UrlVars,
 ): { template: string; vars: UrlVars } {
   const p = parse(url);
   const vars: UrlVars = {};
   if (p === undefined) return { template: url, vars };
-  const segs = [...p.segments];
-  const done = new Set<number>();
-  const put = (index: number, name: string): void => {
-    vars[name] = segs[index] as string;
-    segs[index] = `{{${name}}}`;
-    done.add(index);
-  };
+  const mask = makeMasker(known, vars);
+  const segs = p.segments;
+  const last = segs.length - 1;
+  const names: (string | undefined)[] = new Array(segs.length).fill(undefined);
   const host = p.host.toLowerCase();
   for (const rule of rules) {
-    if (rule.host === host && segs[rule.position] !== undefined && segs[rule.position] !== '') {
-      put(rule.position, rule.name);
+    const seg = segs[rule.position];
+    if (rule.host !== host || rule.position >= last || seg === undefined || seg === '') continue;
+    if (names[rule.position] !== undefined) continue;
+    if (
+      expected !== undefined &&
+      Object.hasOwn(expected, rule.name) &&
+      expected[rule.name] !== seg
+    ) {
+      continue;
     }
+    vars[rule.name] = seg;
+    names[rule.position] = rule.name;
   }
-  const xt = xtreamCredentialIndexes(p.segments);
-  if (xt !== undefined && !done.has(xt[0]) && !done.has(xt[1])) {
-    put(xt[0], 'user');
-    put(xt[1], 'pass');
+  const xt = xtreamCredentialIndexes(segs);
+  if (xt !== undefined && names[xt[0]] === undefined && names[xt[1]] === undefined) {
+    names[xt[0]] = assign(vars, 'user', segs[xt[0]] as string);
+    names[xt[1]] = assign(vars, 'pass', segs[xt[1]] as string);
   }
+  for (let i = 0; i < last; i += 1) {
+    const seg = segs[i] as string;
+    const base = names[i] === undefined && seg !== '' ? mask.whole(seg) : undefined;
+    if (base !== undefined) names[i] = assign(vars, base, seg);
+  }
+  let path = '';
+  let run = '';
   segs.forEach((seg, i) => {
-    if (done.has(i) || seg === '') return;
-    if (vars.user === undefined && seg === known.username) put(i, 'user');
-    else if (vars.pass === undefined && seg === known.password) put(i, 'pass');
+    run += '/';
+    const name = names[i];
+    if (name === undefined) {
+      run += seg;
+      return;
+    }
+    path += `${mask.literal(run)}{{${name}}}`;
+    run = '';
   });
-  let authority = p.host;
+  path += mask.literal(run);
+  let authority = escapeLiteral(p.host);
   if (p.userinfo !== undefined) {
     vars.userinfo = p.userinfo;
-    authority = `{{userinfo}}@${p.host}`;
+    authority = `{{userinfo}}@${authority}`;
   }
-  const path = p.segments.length === 0 ? '' : `/${segs.join('/')}`;
-  const query = p.query === undefined ? '' : `?${templateQuery(p.query, vars)}`;
-  return { template: `${p.scheme}${authority}${path}${query}${p.fragment}`, vars };
+  const query = p.query === undefined ? '' : `?${templateQuery(p.query, vars, mask)}`;
+  const template = `${escapeLiteral(p.scheme)}${authority}${path}${query}${mask.literal(p.fragment)}`;
+  return { template, vars };
 }
 
-/** Puts the values back into a template; placeholders without a value stay as they are. */
+/** Puts the values back into a template and unescapes literal braces; unknown placeholders stay as they are. */
 export function resolveTemplate(template: string, vars: UrlVars): string {
-  return template.replace(PLACEHOLDER, (whole, name: string) =>
-    Object.hasOwn(vars, name) ? (vars[name] as string) : whole,
-  );
+  return template.replace(PLACEHOLDER, (whole, name: string) => {
+    if (name === ESCAPE_NAME) return '{{';
+    return Object.hasOwn(vars, name) ? (vars[name] as string) : whole;
+  });
 }

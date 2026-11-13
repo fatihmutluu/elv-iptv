@@ -4,8 +4,10 @@ import {
   addM3uSource,
   addXtreamSource,
   getSource,
+  removeSecrets,
   removeSource,
   secretKey,
+  TABLES_BY_SOURCE,
   updateSourceSettings,
 } from './sources';
 import { memorySecrets, testDb } from './test-db';
@@ -205,5 +207,80 @@ describe('removeSource', () => {
     expect(keys.filter((k) => k.startsWith('source:src1:'))).toEqual([]);
     expect(keys.filter((k) => k.startsWith('source:src2:')).length).toBeGreaterThan(0);
     expect(await getSource(s.db, 'src2')).toBeDefined();
+  });
+});
+
+describe('guide URLs', () => {
+  const ACCT = ['acct', 'token', '0123456789'].join('');
+
+  it('templates a same-host guide URL with the playlist token segment', async () => {
+    const s = await setup();
+    const playlist = `https://h.example/${ACCT}/list.m3u?username=${USER}`;
+    const guide = `https://h.example/${ACCT}/epg.xml?ref=${USER}-x`;
+    const r = await addM3uSource({ name: 'L', playlistUrl: playlist, guideUrl: guide }, s.deps);
+    expect(r.ok).toBe(true);
+    const text = await rowText(s.db);
+    expect(text).not.toContain(ACCT);
+    expect(text).not.toContain(USER);
+    const source = await getSource(s.db, 'src1');
+    expect(source?.settings.guideUrl).toBe('https://h.example/{{g:v0}}/epg.xml?ref={{g:user}}-x');
+    const vars = JSON.parse(s.secrets.dump()[secretKey('src1', 'urlvars')] as string);
+    expect(vars['g:v0']).toBe(ACCT);
+  });
+
+  it('keeps a guide URL on another host out of settings_json', async () => {
+    const s = await setup();
+    const guide = `https://epg.example/${ACCT}/epg.xml`;
+    await addM3uSource(
+      { name: 'L', playlistUrl: 'https://h.example/a.m3u', guideUrl: guide },
+      s.deps,
+    );
+    expect(await rowText(s.db)).not.toContain(ACCT);
+    expect((await getSource(s.db, 'src1'))?.settings.guideUrl).toBe('{{g:url}}');
+    const vars = JSON.parse(s.secrets.dump()[secretKey('src1', 'urlvars')] as string);
+    expect(vars['g:url']).toBe(guide);
+  });
+
+  it('handles unparsable URLs, bad escapes and literal braces', async () => {
+    const s = await setup();
+    await addM3uSource({ name: 'L', playlistUrl: 'not a url', guideUrl: 'also not' }, s.deps);
+    expect((await getSource(s.db, 'src1'))?.settings.guideUrl).toBe('{{g:url}}');
+    await addM3uSource(
+      {
+        name: 'L',
+        playlistUrl: 'https://h.example/a.m3u?pwd=%E0%A4%A&flag',
+        guideUrl: 'https://h.example/{{x}}/e.xml',
+      },
+      s.deps,
+    );
+    expect((await getSource(s.db, 'src2'))?.settings.guideUrl).toBe(
+      'https://h.example/{{(}}x}}/e.xml',
+    );
+  });
+});
+
+describe('table coverage and secret removal', () => {
+  it('lists every table that has a source_id column', async () => {
+    const s = await setup();
+    const rows = await s.db.all<{ name: string }>(
+      "SELECT m.name AS name FROM sqlite_master m, pragma_table_info(m.name) c WHERE m.type = 'table' AND c.name = 'source_id'",
+    );
+    expect(rows.map((r) => r.name).sort()).toEqual([...TABLES_BY_SOURCE].sort());
+  });
+
+  it('reports failed secret deletions after the rows are gone and allows a retry', async () => {
+    const s = await setup();
+    await addM3uSource({ name: 'B', playlistUrl: 'https://h.example/a.m3u' }, s.deps);
+    const flaky = {
+      ...s.secrets,
+      delete: async (key: string) =>
+        key.endsWith('playlist') ? Promise.reject(new Error('locked')) : s.secrets.delete(key),
+    };
+    const r = await removeSource('src1', { db: s.db, secrets: flaky });
+    expect(r).toEqual({ ok: false, error: { category: 'storage', code: 'secret-delete-failed' } });
+    expect(await getSource(s.db, 'src1')).toBeUndefined();
+    expect(Object.keys(s.secrets.dump())).toEqual([secretKey('src1', 'playlist')]);
+    expect((await removeSecrets('src1', s.secrets)).ok).toBe(true);
+    expect(s.secrets.dump()).toEqual({});
   });
 });
