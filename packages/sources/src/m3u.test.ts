@@ -294,3 +294,40 @@ describe('scanM3u urls', () => {
     expect((await hint('r.ts', 'http://h.example?q=1')).url).toBe('http://h.example/r.ts');
   });
 });
+
+describe('scanM3u raw quotes inside attribute values', () => {
+  it('starts the name after the first comma following the last quoted value', async () => {
+    const r = await scan(
+      '#EXTINF:-1 tvg-id="c1" tvg-name="Channel "Raw", Quote" group-title="G",Channel "Raw", Quote\nhttp://h.example/1\n',
+    );
+    expect(r.entries).toHaveLength(1);
+    expect(r.entries[0]).toMatchObject({
+      name: 'Channel "Raw", Quote',
+      url: 'http://h.example/1',
+      tvgId: 'c1',
+      groups: ['G'],
+    });
+    expect(r.entries[0]?.tvgName).toBeUndefined();
+    expect(r.stats?.warnings).toEqual([{ code: 'attr-quote', line: 1 }]);
+  });
+
+  it('recovers from a raw quote in a middle attribute', async () => {
+    const r = await scan(
+      '#EXTINF:-1 tvg-id="a" tvg-name="x "y" z" tvg-chno="7" group-title="G;H",Name, Two\nhttp://h.example/2\n',
+    );
+    expect(r.entries[0]).toMatchObject({
+      name: 'Name, Two',
+      tvgId: 'a',
+      chno: 7,
+      groups: ['G', 'H'],
+    });
+    expect(r.entries[0]?.tvgName).toBeUndefined();
+    expect(r.stats?.warnings).toEqual([{ code: 'attr-quote', line: 1 }]);
+  });
+
+  it('does not warn for adjacent well-formed attributes or clean lines', async () => {
+    const r = await scan('#EXTINF:-1 a="1"b="2" tvg-name="N",N\nhttp://h.example/3\n');
+    expect(r.entries[0]).toMatchObject({ name: 'N', extra: { a: '1', b: '2' }, tvgName: 'N' });
+    expect(r.stats?.warnings).toEqual([]);
+  });
+});

@@ -18,7 +18,9 @@ M3U and XMLTV scanners and the Xtream client.
 ## API
 - `scanM3u(chunks, { batchSize?, baseUrl? })` streams an M3U/M3U8 playlist (byte chunks) into `M3uBatch`es of typed
   `M3uEntry` values in bounded memory; the last batch has `done: true`, the `M3uHeader` and `ScanStats`. It never
-  throws on bad content (warnings: `extinf-without-url`, `exthttp-malformed`, `line-too-long`); lines over 1 MiB are skipped.
+  throws on bad content (warnings: `extinf-without-url`, `exthttp-malformed`, `line-too-long`, `attr-quote`); lines over 1 MiB are skipped.
+  A raw quote inside an attribute value drops that attribute, keeps the clean ones and starts the name after the first
+  comma following the last `="..."` value (warning `attr-quote`).
   Implementation: `m3u.ts` (byte-level line machine), `m3u-attrs.ts` (attribute, directive and URL helpers),
   `m3u-types.ts` (types).
 - Utilities: `decodeUtf8`, `ByteBuffer`, `decodeEntities`, `createStats`/`warn`; test helpers in `test-chunks.ts`.

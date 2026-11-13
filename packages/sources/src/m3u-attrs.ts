@@ -11,11 +11,16 @@ const VOD_EXTENSIONS = new Set(['mkv', 'mp4', 'avi', 'mov', 'm4v', 'webm']);
 /**
  * Walks `key=value` pairs from `from`, calling `onAttr(lowerCaseKey, value)`. Values may be double-quoted,
  * single-quoted or bare. Returns the text after the first comma outside a value (trimmed), or `undefined`.
+ *
+ * A quoted value whose closing quote is glued to a token without `=` (a raw quote inside the value, as in
+ * `tvg-name="A "B", C"`) is passed to `onAttr` with `clean = false`, and `issues.rawQuote` is set when given.
+ * Lines without such values are walked exactly as before.
  */
 export function parseAttrs(
   line: string,
   from: number,
-  onAttr: (key: string, value: string) => void,
+  onAttr: (key: string, value: string, clean: boolean) => void,
+  issues?: { rawQuote: boolean; recover?: boolean },
 ): string | undefined {
   const n = line.length;
   let i = from;
@@ -25,7 +30,11 @@ export function parseAttrs(
       i++;
       continue;
     }
-    if (c === COMMA) return line.slice(i + 1).trim();
+    if (c === COMMA) {
+      if (!issues?.recover) return line.slice(i + 1).trim();
+      i++;
+      continue;
+    }
     let k = i;
     while (k < n) {
       const d = line.charCodeAt(k);
@@ -40,11 +49,14 @@ export function parseAttrs(
     k++;
     const q = line.charCodeAt(k);
     let value: string;
+    let clean = true;
     if (q === DQUOTE || q === SQUOTE) {
       let end = line.indexOf(q === DQUOTE ? '"' : "'", k + 1);
       if (end < 0) end = n;
       value = line.slice(k + 1, end);
       i = end + 1;
+      clean = !gluedToken(line, i);
+      if (!clean && issues) issues.rawQuote = true;
     } else {
       let e = k;
       while (e < n) {
@@ -55,9 +67,23 @@ export function parseAttrs(
       value = line.slice(k, e);
       i = e;
     }
-    if (key) onAttr(key, value);
+    if (key) onAttr(key, value, clean);
   }
   return undefined;
+}
+
+/** True when the text at `at` continues a token that has no `=`, so the quote before it was not a closing one. */
+function gluedToken(line: string, at: number): boolean {
+  const n = line.length;
+  if (at >= n) return false;
+  const first = line.charCodeAt(at);
+  if (first <= SPACE || first === COMMA) return false;
+  for (let k = at; k < n; k++) {
+    const d = line.charCodeAt(k);
+    if (d === EQUALS) return false;
+    if (d <= SPACE || d === COMMA) return true;
+  }
+  return true;
 }
 
 function num(value: string): number | undefined {
@@ -145,8 +171,37 @@ export function newEntry(): M3uEntry {
   };
 }
 
-/** Parses the text after `#EXTINF:` (duration, attributes, name) into a URL-less entry. */
-export function parseExtinf(text: string): M3uEntry {
+/**
+ * Parses the text after `#EXTINF:` (duration, attributes, name) into a URL-less entry.
+ *
+ * Real panels sometimes write a raw double quote inside an attribute value. When a value is cut that way
+ * (`issues.rawQuote` is set), the line is read again: attributes that parsed cleanly are kept, the broken
+ * ones are dropped, and the name starts after the first comma that follows the closing quote of the last
+ * `="..."` value in the line.
+ */
+export function parseExtinf(text: string, issues?: { rawQuote: boolean }): M3uEntry {
+  const seen = issues ?? { rawQuote: false };
+  const first = readExtinf(text, seen, true);
+  if (!seen.rawQuote) return first;
+  const comma = nameCommaAfterLastValue(text);
+  if (comma < 0) return first;
+  const second = readExtinf(text.slice(0, comma), { rawQuote: false, recover: true }, false);
+  second.name = text.slice(comma + 1).trim() || second.tvgName || '';
+  return second;
+}
+
+function nameCommaAfterLastValue(text: string): number {
+  const open = text.lastIndexOf('="');
+  if (open < 0) return -1;
+  const close = text.indexOf('"', open + 2);
+  return close < 0 ? -1 : text.indexOf(',', close + 1);
+}
+
+function readExtinf(
+  text: string,
+  issues: { rawQuote: boolean; recover?: boolean },
+  keepUnclean: boolean,
+): M3uEntry {
   const e = newEntry();
   const n = text.length;
   let i = 0;
@@ -163,7 +218,14 @@ export function parseExtinf(text: string): M3uEntry {
     i = j;
   }
   const draft: CatchupDraft = {};
-  const name = parseAttrs(text, i, (key, value) => applyAttr(e, key, value, draft));
+  const name = parseAttrs(
+    text,
+    i,
+    (key, value, clean) => {
+      if (clean || keepUnclean) applyAttr(e, key, value, draft);
+    },
+    issues,
+  );
   e.name = name || e.tvgName || '';
   const type =
     draft.type ?? (draft.source !== undefined || draft.days !== undefined ? 'default' : undefined);

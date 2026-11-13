@@ -162,8 +162,10 @@ class M3uScanner {
         this.stats.skipped++;
         warn(this.stats, 'extinf-without-url', this.pendingLine);
       }
-      this.pending = parseExtinf(payload);
+      const issues = { rawQuote: false };
+      this.pending = parseExtinf(payload, issues);
       this.pendingLine = this.stats.lines;
+      if (issues.rawQuote) warn(this.stats, 'attr-quote', this.pendingLine);
     } else if (d === 1) {
       this.header ??= this.parseHeader(payload);
     } else if (this.pending) {
