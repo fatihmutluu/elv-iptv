@@ -7,6 +7,7 @@ import {
   type CompareOutcome,
   compareToBaseline,
   type GateResult,
+  worstRunWarnings,
 } from '../src/gates/compare.ts';
 import {
   deviceInfo,
@@ -72,6 +73,7 @@ interface Baseline {
   result: GateResult;
 }
 
+const perRun: GateResult[] = [];
 const result = await runListGate({
   exec,
   adb,
@@ -80,7 +82,10 @@ const result = await runListGate({
   ...(values.build === true ? { build: true } : {}),
   runs,
   ...(realKeys === undefined ? {} : { realKeys }),
-  onRun: (run) => console.log(`run: ${summary(run)}`),
+  onRun: (run) => {
+    perRun.push(run);
+    console.log(`run: ${summary(run)}`);
+  },
 }).catch((error: Error) => fail(error.message));
 
 const device = await deviceInfo(exec, adb, await findDevice(exec, adb, values.avd));
@@ -129,16 +134,22 @@ if (baselineFound) {
   outcome = compareToBaseline(result, undefined);
   outcome.warnings.unshift(`baseline file ${baselineName} does not exist`);
 }
+outcome.warnings.push(...worstRunWarnings(perRun, result));
 
 const outPath = resolve(
   root,
   values.out ?? (values.ci === true ? 'gate-artifacts/gate-list.json' : 'gate-list.json'),
 );
 mkdirSync(dirname(outPath), { recursive: true });
-writeFileSync(
-  outPath,
-  `${JSON.stringify({ device, commit, baseline: baselineFound ? baselineName : null, result, outcome }, null, 2)}\n`,
-);
+const report = {
+  device,
+  commit,
+  baseline: baselineFound ? baselineName : null,
+  result,
+  runs: perRun,
+  outcome,
+};
+writeFileSync(outPath, `${JSON.stringify(report, null, 2)}\n`);
 
 const note = (kind: 'error' | 'warning', text: string) =>
   values.ci === true

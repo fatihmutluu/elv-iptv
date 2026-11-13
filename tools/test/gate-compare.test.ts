@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { baselineRefusal, compareToBaseline, type GateResult } from '../src/gates/compare.ts';
+import {
+  baselineRefusal,
+  compareToBaseline,
+  type GateResult,
+  worstRunWarnings,
+} from '../src/gates/compare.ts';
 
 const baseline: GateResult = {
   metrics: {
@@ -190,6 +195,22 @@ describe('baselineRefusal', () => {
     expect(baselineRefusal(change({ realLosses: 2 }))).toMatch(/losses/);
     expect(baselineRefusal(change({ gap: 17 }))).toMatch(/budget/);
     expect(baselineRefusal(change({ p95: 101 }))).toMatch(/budget/);
+  });
+});
+
+describe('worstRunWarnings', () => {
+  it('warns when the worst run breaks an absolute budget that the median meets', () => {
+    const runs = [change({ p95: 20, gap: 5 }), change({ p95: 130, gap: 18 }), change({ p95: 21 })];
+    expect(worstRunWarnings(runs, change({ p95: 21, gap: 8 }))).toEqual([
+      'worst run: key-to-highlight p95 130 ms exceeds the absolute budget of 100 ms (the median passes)',
+      'worst run: max JS gap 18 ms exceeds the absolute budget of 16 ms (the median passes)',
+    ]);
+  });
+
+  it('stays quiet when every run meets the budgets or the median already fails them', () => {
+    expect(worstRunWarnings([change({}), change({ p95: 99 })], change({}))).toEqual([]);
+    const bad = [change({ p95: 120 }), change({ p95: 130 })];
+    expect(worstRunWarnings(bad, change({ p95: 125 }))).toEqual([]);
   });
 });
 

@@ -157,6 +157,35 @@ export function compareToBaseline(
 }
 
 /**
+ * Warnings for an absolute budget (key-to-highlight p95, max JS gap) that the worst of `runs` breaks while the
+ * `median` meets it: the median judges the gate, but a single bad run is worth a look.
+ */
+export function worstRunWarnings(runs: readonly GateResult[], median: GateResult): string[] {
+  const warnings: string[] = [];
+  const check = (name: string, values: number[], middle: number, max: number) => {
+    const worst = Math.max(...values);
+    if (worst > max && middle <= max) {
+      warnings.push(
+        `worst run: ${name} ${worst} ms exceeds the absolute budget of ${max} ms (the median passes)`,
+      );
+    }
+  };
+  check(
+    'key-to-highlight p95',
+    runs.map((r) => r.metrics.keyToHighlightMs.p95),
+    median.metrics.keyToHighlightMs.p95,
+    BUDGET_P95_MS,
+  );
+  check(
+    'max JS gap',
+    runs.map((r) => r.metrics.maxJsGapMs),
+    median.metrics.maxJsGapMs,
+    BUDGET_JS_GAP_MS,
+  );
+  return warnings;
+}
+
+/**
  * Why a result must not become a baseline, or undefined when it may: focus losses (auto or real keys) or a broken
  * absolute budget would bake a failure into the reference.
  */
