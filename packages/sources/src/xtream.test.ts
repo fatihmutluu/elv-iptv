@@ -57,18 +57,10 @@ describe('account', () => {
       'auth',
       'account-some-odd',
     );
-    expectErr(await client(() => ({ text: '', status: 401 })).c.account(), 'auth', 'unauthorized');
-    expectErr(await client(() => ({ text: '', status: 403 })).c.account(), 'auth', 'unauthorized');
-    expectErr(
-      await client(() => ({ text: '', status: 503 })).c.account(),
-      'network',
-      'server-error',
-    );
-    expectErr(
-      await client(() => ({ text: '', status: 404 })).c.account(),
-      'network',
-      'http-status',
-    );
+    expectErr(await client(() => ({ text: '', status: 401 })).c.account(), 'auth', 'http-401');
+    expectErr(await client(() => ({ text: '', status: 403 })).c.account(), 'auth', 'http-403');
+    expectErr(await client(() => ({ text: '', status: 503 })).c.account(), 'network', 'http-503');
+    expectErr(await client(() => ({ text: '', status: 404 })).c.account(), 'network', 'http-404');
     expectErr(
       await client(() => ({ text: '<html>' })).c.account(),
       'source-format',

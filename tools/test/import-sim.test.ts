@@ -273,7 +273,7 @@ describe('failing sources', () => {
     const e = await env();
     const id = await xtreamSource(e, sim, 'demo', ['not', 'the', 'password'].join('-'));
     const result = await importCatalog(id, e.deps);
-    expect(result.ok).toBe(false);
+    expect(result).toEqual({ ok: false, error: { category: 'auth', code: 'invalid-credentials' } });
     expect(await count(e.db, 'live')).toBe(0);
   });
 

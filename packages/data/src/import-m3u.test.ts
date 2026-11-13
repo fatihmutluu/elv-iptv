@@ -1,3 +1,4 @@
+import { ok } from '@elv/domain';
 import { describe, expect, it } from 'vitest';
 import {
   count,
@@ -249,14 +250,34 @@ describe('m3u import', () => {
     const e = await setupM3u(playlist());
     await run(e);
     for (const [status, category, code] of [
-      [401, 'auth', 'unauthorized'],
-      [503, 'network', 'server-error'],
-      [404, 'network', 'http-status'],
+      [401, 'auth', 'http-401'],
+      [503, 'network', 'http-503'],
+      [404, 'network', 'http-404'],
     ] as const) {
       e.state.status = status;
       expectErr(await run(e), category, code);
     }
     expect(await count(e.db, 'live')).toBe(2);
+  });
+
+  it('reports a raw non-2xx response with the fetch client codes', async () => {
+    const e = await setupM3u(playlist());
+    const raw = (status: number) => ({
+      get: async () =>
+        ok({
+          status,
+          headers: {},
+          body: (async function* () {
+            yield new Uint8Array(0);
+          })(),
+        }),
+    });
+    for (const [status, category, code] of [
+      [403, 'auth', 'http-403'],
+      [502, 'network', 'http-502'],
+    ] as const) {
+      expectErr(await importCatalog(e.sourceId, { ...e.deps, http: raw(status) }), category, code);
+    }
   });
 
   it('fails without a stored playlist URL', async () => {

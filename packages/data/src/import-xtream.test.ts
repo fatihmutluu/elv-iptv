@@ -119,7 +119,7 @@ describe('xtream import', () => {
     const placementsBefore = await count(e.db, 'placements');
     e.panel.state.fail.set('get_vod_streams', 500);
     const r = await run(e);
-    expectErr(r, 'network', 'server-error');
+    expectErr(r, 'network', 'http-500');
     expect(await rows(e, 'SELECT key FROM movies ORDER BY key')).toEqual(before);
     expect(await count(e.db, 'placements')).toBe(placementsBefore);
     expect(await count(e.db, 'live')).toBe(3);
@@ -130,7 +130,7 @@ describe('xtream import', () => {
     expect(runs[1]).toEqual({
       status: 'failed',
       error_category: 'network',
-      error_code: 'server-error',
+      error_code: 'http-500',
     });
     const newRun = (await rows(e, 'SELECT id FROM import_runs ORDER BY id'))[1]?.id;
     const liveRuns = await rows(e, 'SELECT DISTINCT run_id FROM live');
@@ -215,13 +215,13 @@ describe('xtream import', () => {
     e.deps.maxBodyBytes = 800;
     e.panel.state.failWithCategory.set('get_live_streams', 500);
     const r = await run(e);
-    expectErr(r, 'network', 'server-error');
+    expectErr(r, 'network', 'http-500');
     expect(e.panel.state.urls.some((u) => u.includes('get_live_streams&category_id='))).toBe(true);
     expect(await rows(e, 'SELECT key, id FROM live ORDER BY key')).toEqual(liveBefore);
     expect(await count(e.db, 'placements')).toBe(placementsBefore);
     expect(await count(e.db, 'movies')).toBe(3);
     const runs = await rows(e, 'SELECT status, error_code FROM import_runs ORDER BY id');
-    expect(runs[1]).toEqual({ status: 'failed', error_code: 'server-error' });
+    expect(runs[1]).toEqual({ status: 'failed', error_code: 'http-500' });
   });
 
   it('fails before any catalog write on account errors', async () => {
@@ -347,7 +347,7 @@ describe('loadSeriesEpisodes', () => {
     expectErr(
       await loadSeriesEpisodes(e.sourceId, 'x:s1:series:300', e.deps),
       'network',
-      'server-error',
+      'http-500',
     );
     expect(await count(e.db, 'episodes')).toBe(0);
     await e.secrets.delete('source.s1.xtream');

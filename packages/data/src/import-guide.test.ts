@@ -202,11 +202,11 @@ describe('guide url choice', () => {
   it('reports the first failure when no url answers', async () => {
     const e = await ready();
     e.server.status = 403;
-    expectErr(await run(e), 'auth', 'unauthorized');
+    expectErr(await run(e), 'auth', 'http-403');
     e.server.status = 503;
-    expectErr(await run(e), 'network', 'server-error');
+    expectErr(await run(e), 'network', 'http-503');
     e.server.status = 404;
-    expectErr(await run(e), 'network', 'http-status');
+    expectErr(await run(e), 'network', 'http-404');
   });
 
   it('reports a missing source and unsupported kinds', async () => {

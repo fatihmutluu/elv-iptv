@@ -2,6 +2,7 @@ import {
   elvError,
   err,
   type HttpResponse,
+  httpStatusError,
   m3uKey,
   ok,
   type Result,
@@ -76,9 +77,7 @@ async function openPlaylist(
   const { status, body } = unwrap(response);
   if (status >= 200 && status < 300) return body;
   await discard(body);
-  if (status === 401 || status === 403) throw new Stop(elvError('auth', 'unauthorized'));
-  if (status >= 500) throw new Stop(elvError('network', 'server-error'));
-  throw new Stop(elvError('network', 'http-status', `HTTP ${status}`));
+  throw new Stop(httpStatusError(status));
 }
 
 function start(source: SourceRecord, playlistUrl: string, sample: readonly M3uEntry[]): State {

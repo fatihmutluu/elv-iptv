@@ -1,4 +1,11 @@
-import { type Decompressor, elvError, type HttpClient, ok } from '@elv/domain';
+import {
+  type Decompressor,
+  elvError,
+  err,
+  type HttpClient,
+  httpStatusError,
+  ok,
+} from '@elv/domain';
 import { expect } from 'vitest';
 import { importGuide } from './import-guide';
 import { extinf, M3U_TOKEN, setupM3u } from './import-test-helpers';
@@ -64,6 +71,7 @@ export async function setupGuide(
       const bytes =
         typeof server.body === 'string' ? new TextEncoder().encode(server.body) : server.body;
       const status = server.statuses.get(url) ?? server.status;
+      if (status < 200 || status >= 300) return err(httpStatusError(status));
       async function* chunks() {
         for (let i = 0; i < bytes.length; i += server.chunk) {
           if (server.failAfter !== undefined && i >= server.failAfter) {

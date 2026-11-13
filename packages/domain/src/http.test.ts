@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createFetchHttpClient, type FetchLike, type HttpResponse } from './http';
+import { createFetchHttpClient, type FetchLike, type HttpResponse, httpStatusError } from './http';
 import type { Result } from './result';
 
 const enc = (s: string) => new TextEncoder().encode(s);
@@ -114,6 +114,7 @@ describe('createFetchHttpClient', () => {
       ok: false,
       error: { category, code: `http-${status}` },
     });
+    expect(httpStatusError(status)).toEqual({ category, code: `http-${status}` });
   });
 
   const reset = (code = 'ECONNRESET', message = 'read ECONNRESET') =>

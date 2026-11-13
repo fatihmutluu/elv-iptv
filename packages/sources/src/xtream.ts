@@ -1,4 +1,12 @@
-import { type ElvError, elvError, err, ok, type Result, transportHeaders } from '@elv/domain';
+import {
+  type ElvError,
+  elvError,
+  err,
+  httpStatusError,
+  ok,
+  type Result,
+  transportHeaders,
+} from '@elv/domain';
 import { toElvError } from './scan-error';
 import { decodeUtf8 } from './utf8';
 import {
@@ -96,9 +104,7 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     const { status, body } = response.value;
     if (status < 200 || status >= 300) {
       await discard(body);
-      if (status === 401 || status === 403) return err(elvError('auth', 'unauthorized'));
-      if (status >= 500) return err(elvError('network', 'server-error'));
-      return err(elvError('network', 'http-status', `HTTP ${status}`));
+      return err(httpStatusError(status));
     }
     const bytes = await readAll(body, maxBody);
     if (!bytes.ok) return bytes;

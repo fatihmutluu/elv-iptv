@@ -3,6 +3,7 @@ import {
   err,
   type HttpClient,
   type HttpResponse,
+  httpStatusError,
   ok,
   type Result,
   type SqlDriver,
@@ -64,12 +65,7 @@ function fakePanel(data: PanelData) {
           ? undefined
           : (state.fail.get(action) ??
             (u.searchParams.has('category_id') ? state.failWithCategory.get(action) : undefined));
-      if (status !== undefined) {
-        async function* empty() {
-          yield new Uint8Array(0);
-        }
-        return ok({ status, headers: {}, body: empty() });
-      }
+      if (status !== undefined) return err(httpStatusError(status));
       const cat = u.searchParams.get('category_id');
       const d = state.data;
       const pick = (rows: Row[], action2: string): Row[] => {
@@ -257,6 +253,7 @@ export async function setupM3u(
   const http: HttpClient = {
     async get(url): Promise<Result<HttpResponse>> {
       state.urls.push(url);
+      if (state.status < 200 || state.status >= 300) return err(httpStatusError(state.status));
       const bytes = new TextEncoder().encode(state.body);
       async function* chunks() {
         for (let i = 0; i < bytes.length; i += state.chunk) {

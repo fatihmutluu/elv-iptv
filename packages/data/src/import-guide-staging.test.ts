@@ -1,4 +1,6 @@
+import { ok } from '@elv/domain';
 import { describe, expect, it } from 'vitest';
+import { importGuide } from './import-guide';
 import {
   channelXml,
   defaultGuide,
@@ -110,7 +112,7 @@ describe('guide staging and surfaced failures', () => {
     if (!r.ok) throw new Error('expected ok');
     expect(r.value.counts.guideUrlFallbacks).toBe(1);
     expect(r.value.warnings).toBe(1);
-    expect(r.value.warningCodes).toEqual(['network/http-status']);
+    expect(r.value.warningCodes).toEqual(['network/http-404']);
     const dump = JSON.stringify([r.value, await rows(e, 'SELECT * FROM import_runs')]);
     expect(dump).not.toContain(M3U_PASS);
     expect(dump).not.toContain('epg.example');
@@ -122,6 +124,22 @@ describe('guide staging and surfaced failures', () => {
     if (!r.ok) throw new Error('expected ok');
     expect(r.value.counts.guideUrlFallbacks).toBe(0);
     expect(r.value.warningCodes).toEqual([]);
+  });
+
+  it('reports a raw non-2xx guide response with the fetch client codes', async () => {
+    const e = await ready();
+    const http = {
+      get: async () =>
+        ok({
+          status: 401,
+          headers: {},
+          body: (async function* () {
+            yield new Uint8Array(0);
+          })(),
+        }),
+    };
+    const r = await importGuide(e.sourceId, { ...e.deps, http }, { now: NOW });
+    expectErr(r, 'auth', 'http-401');
   });
 });
 

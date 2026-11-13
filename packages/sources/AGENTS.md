@@ -41,7 +41,7 @@ M3U and XMLTV scanners and the Xtream client.
   `seriesInfo`, `vodInfo`, `shortEpg`, plus `playlistUrl`, `guideUrl` and `streamUrl` (play time only). Numbers and
   numeric strings are equal, `''`/null/missing are absent, text is entity-decoded and trimmed, `category_ids` beats
   `category_id` (an empty list falls back to it), repeated ids merge (union of `categoryIds`), epoch fields are milliseconds. Errors: `auth`
-  (`invalid-credentials`, `account-<status>`, `unauthorized`), `network` (`request-failed`, `server-error`, `http-status`,
+  (`invalid-credentials`, `account-<status>`, `http-401`, `http-403`), `network` (`request-failed`, `http-<status>`,
   `stream-failed`, transport codes), `source-format` (`invalid-json`, `unexpected-shape`, `too-large`). Every method takes a last `{ signal? }` argument; an
   abort (also mid-body) is `network`/`aborted`, a stalled body `network`/`timeout`. A `server` without `://` gets
   `http://` prepended. `maxBodyBytes` (default 128 MiB) caps the one growing buffer a response is read into. Credentials appear only in

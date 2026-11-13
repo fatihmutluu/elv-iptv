@@ -3,6 +3,7 @@ import {
   elvError,
   err,
   type HttpResponse,
+  httpStatusError,
   ok,
   type Result,
   transportHeaders,
@@ -23,12 +24,6 @@ const DAY_MS = 86_400_000;
 const DEFAULT_WINDOW = { daysBack: 1, daysForward: 7 };
 /** Length given to a programme with no `stop` when no later programme of its channel closes it. */
 const OPEN_END_MS = 30 * 60_000;
-
-function classify(status: number): ElvError {
-  if (status === 401 || status === 403) return elvError('auth', 'unauthorized');
-  if (status >= 500) return elvError('network', 'server-error');
-  return elvError('network', 'http-status');
-}
 
 async function discard(body: AsyncIterable<Uint8Array>): Promise<void> {
   try {
@@ -91,7 +86,7 @@ async function openGuide(
     const { status, body } = response.value;
     if (status >= 200 && status < 300) return { body, failed };
     await discard(body);
-    miss(classify(status));
+    miss(httpStatusError(status));
   }
   throw new Stop(first ?? elvError('source-format', 'no-guide-url'));
 }
