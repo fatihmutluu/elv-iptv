@@ -155,9 +155,11 @@ function vodRows(
       row.thumbnail = '';
       row.custom_sid = '';
     }
-    const other = vodCats[(vodCats.indexOf(m.categoryId) + 1) % vodCats.length];
-    const multi =
-      quirks && index < MULTI_CATEGORY_MOVIES && other !== undefined && other !== m.categoryId;
+    const other =
+      quirks && index < MULTI_CATEGORY_MOVIES
+        ? vodCats[(vodCats.indexOf(m.categoryId) + 1) % vodCats.length]
+        : undefined;
+    const multi = other !== undefined && other !== m.categoryId;
     if (multi) row.category_ids = [Number(m.categoryId), Number(other)];
     if (categoryId === null || m.categoryId === categoryId) rows.push(row);
     if (multi && (categoryId === null || other === categoryId)) {

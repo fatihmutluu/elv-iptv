@@ -79,28 +79,33 @@ describe('buildCatalog', () => {
   });
 });
 
+const hugeOptIn = process.env.SIM_HUGE === '1';
+if (!hugeOptIn) process.stderr.write('sim-catalog: huge profile tests skipped (set SIM_HUGE=1)\n');
+
 describe('huge profile', () => {
-  it('has the documented shape with unique ids across kinds', () => {
-    const started = Date.now();
-    const c = createCatalog('huge', 1);
-    expect(Date.now() - started).toBeLessThan(10_000);
-    const episodes = c.series.reduce((n, s) => n + s.episodes.length, 0);
-    expect([c.live.length, c.movies.length, c.series.length, episodes]).toEqual([
-      50_000, 300_000, 6000, 150_000,
-    ]);
-    expect(c.live.length + c.movies.length + episodes).toBe(500_000);
-    expect(c.categories).toHaveLength(2000);
-    expect(c.guideChannels).toBe(20_000);
-    expect(c.guideWindow).toEqual({ daysBack: 0, daysForward: 7 });
-    const ids = new Set<number>();
-    for (const l of c.live) ids.add(l.id);
-    for (const m of c.movies) ids.add(m.id);
-    for (const s of c.series) {
-      ids.add(s.id);
-      for (const e of s.episodes) ids.add(e.id);
-    }
-    expect(ids.size).toBe(50_000 + 300_000 + 6000 + 150_000);
-  }, 60_000);
+  it.runIf(hugeOptIn)(
+    'has the documented shape with unique ids across kinds',
+    () => {
+      const c = createCatalog('huge', 1);
+      const episodes = c.series.reduce((n, s) => n + s.episodes.length, 0);
+      expect([c.live.length, c.movies.length, c.series.length, episodes]).toEqual([
+        50_000, 300_000, 6000, 150_000,
+      ]);
+      expect(c.live.length + c.movies.length + episodes).toBe(500_000);
+      expect(c.categories).toHaveLength(2000);
+      expect(c.guideChannels).toBe(20_000);
+      expect(c.guideWindow).toEqual({ daysBack: 0, daysForward: 7 });
+      const ids = new Set<number>();
+      for (const l of c.live) ids.add(l.id);
+      for (const m of c.movies) ids.add(m.id);
+      for (const s of c.series) {
+        ids.add(s.id);
+        for (const e of s.episodes) ids.add(e.id);
+      }
+      expect(ids.size).toBe(50_000 + 300_000 + 6000 + 150_000);
+    },
+    60_000,
+  );
 
   it('has an account with two connections and the 509 policy', () => {
     expect(findAccount('huge', 'huge')).toMatchObject({

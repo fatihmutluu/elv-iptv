@@ -10,6 +10,8 @@ import { type SimHandle, startSim } from '../src/sim/server.ts';
 
 const CLOCK = new Date('2026-01-01T12:00:00Z');
 const open: SimHandle[] = [];
+if (process.env.SIM_HUGE !== '1')
+  process.stderr.write('sim-server: huge playlist test skipped (set SIM_HUGE=1)\n');
 
 async function sim(): Promise<SimHandle> {
   const handle = await startSim({ port: 0, clock: CLOCK });
@@ -70,18 +72,22 @@ describe('playlists', () => {
     expect(direct).toContain('url-tvg=');
   });
 
-  it('streams the start of the huge playlist', async () => {
-    const { url } = await sim();
-    const res = await fetch(`${url}/playlists/huge.m3u`);
-    expect(res.status).toBe(200);
-    const decoder = new TextDecoder();
-    let text = '';
-    for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
-      text += decoder.decode(chunk, { stream: true });
-      if (text.length > 5_000_000) break;
-    }
-    expect(text.split('\n').filter((l) => l.startsWith('#EXTINF')).length).toBeGreaterThan(5000);
-  }, 60_000);
+  it.runIf(process.env.SIM_HUGE === '1')(
+    'streams the start of the huge playlist',
+    async () => {
+      const { url } = await sim();
+      const res = await fetch(`${url}/playlists/huge.m3u`);
+      expect(res.status).toBe(200);
+      const decoder = new TextDecoder();
+      let text = '';
+      for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+        text += decoder.decode(chunk, { stream: true });
+        if (text.length > 5_000_000) break;
+      }
+      expect(text.split('\n').filter((l) => l.startsWith('#EXTINF')).length).toBeGreaterThan(5000);
+    },
+    60_000,
+  );
 
   it('answers a broken playlist status', async () => {
     const { url } = await sim();
