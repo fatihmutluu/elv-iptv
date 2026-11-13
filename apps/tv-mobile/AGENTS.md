@@ -5,7 +5,8 @@ It is a composition root: it wires modules, storage drivers, routes and stores.
 
 ## Commands
 - `pnpm run:app <target> run|build` launches or prebuilds a target (see `tools/`).
-- `pnpm --filter tv-mobile test` runs the config Vitest tests; `test:jest` runs component tests.
+- `pnpm --filter tv-mobile test` runs the config Vitest tests only; `test:jest` runs the component
+  tests; `pnpm check` runs both.
 - `pnpm --filter tv-mobile exec expo-doctor` and `exec expo install --check` are release gates.
 
 ## Rules

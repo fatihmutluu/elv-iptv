@@ -7,10 +7,22 @@ packages:
 allowBuilds:
   lefthook: true
   esbuild: true
+  # Optional native file-watcher of the Expo CLI; it falls back to Node watching without its build script.
   "@parcel/watcher": false
 
+# Single source of truth for versions shared by the app and the UI packages.
+catalog:
+  react: 19.3.0
+  react-native: npm:react-native-tvos@0.88.1-0
+  "@types/react": ~19.3.0
+
+# expo@58.0.25 was published 2026-11-12, inside pnpm's default minimum release age. It is the
+# SDK 58 patch the template pins. Remove this entry once the version is older than the age limit
+# (from 2026-11-14) and `pnpm install --frozen-lockfile` still passes.
 minimumReleaseAgeExclude:
   - expo@58.0.25
 
+# Keeps one react-native in the workspace: every dependent, including auto-installed peers,
+# gets the tvOS fork. Must equal catalog `react-native`.
 overrides:
   react-native: npm:react-native-tvos@0.88.1-0

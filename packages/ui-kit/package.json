@@ -20,8 +20,8 @@
   },
   "devDependencies": {
     "@elv/config": "workspace:*",
-    "@types/react": "~19.3.0",
-    "react": "19.3.0",
-    "react-native": "npm:react-native-tvos@0.88.1-0"
+    "@types/react": "catalog:",
+    "react": "catalog:",
+    "react-native": "catalog:"
   }
 }
