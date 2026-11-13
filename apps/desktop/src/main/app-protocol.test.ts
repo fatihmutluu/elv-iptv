@@ -46,3 +46,9 @@ describe('resolveAppFile', () => {
     expect(resolveAppFile(root, `${APP_ORIGIN}/%E0%A4%A`)).toBeNull();
   });
 });
+
+describe('resolveAppFile trailing slashes', () => {
+  it('maps a trailing-slash path to the directory path inside the root', () => {
+    expect(resolveAppFile(root, `${APP_ORIGIN}/assets/`)).toBe(resolve(root, 'assets'));
+  });
+});

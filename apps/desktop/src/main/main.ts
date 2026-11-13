@@ -1,7 +1,9 @@
+import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, net, protocol } from 'electron';
-import { APP_ORIGIN, APP_SCHEME, CONTENT_SECURITY_POLICY, resolveAppFile } from './app-protocol.ts';
+import { APP_ORIGIN, APP_SCHEME } from './app-protocol.ts';
+import { type ServeDeps, serveAppRequest } from './serve-app.ts';
 import { buildWindowOptions, WINDOW_TITLE } from './window-options.ts';
 
 const rendererDir = join(__dirname, '..', 'renderer');
@@ -11,14 +13,11 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 function serveRenderer(): void {
-  protocol.handle(APP_SCHEME, async (request) => {
-    const file = resolveAppFile(rendererDir, request.url);
-    if (file === null) return new Response('Not found', { status: 404 });
-    const response = await net.fetch(pathToFileURL(file).toString());
-    const headers = new Headers(response.headers);
-    headers.set('Content-Security-Policy', CONTENT_SECURITY_POLICY);
-    return new Response(response.body, { status: response.status, headers });
-  });
+  const deps: ServeDeps = {
+    isFile: async (path) => (await stat(path)).isFile(),
+    fetchFile: (path) => net.fetch(pathToFileURL(path).toString()),
+  };
+  protocol.handle(APP_SCHEME, (request) => serveAppRequest(rendererDir, request.url, deps));
 }
 
 function createWindow(): void {
