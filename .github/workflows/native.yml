@@ -332,20 +332,21 @@ jobs:
           log="$RUNNER_TEMP/gate-tvos-log.txt"
           : > "$log"
           xcrun simctl spawn "$udid" log stream --style compact --level debug \
-            --predicate 'subsystem == "com.facebook.react.log"' > "$log" 2>&1 &
+            --predicate 'eventMessage CONTAINS "ELV_GATE"' > "$log" 2>&1 &
           stream_pid=$!
           sleep 3
           xcrun simctl openurl "$udid" "$GATE_URL"
           out="$GITHUB_WORKSPACE/gate-tvos.txt"
           found=""
           for _ in $(seq 1 120); do
-            if grep -q 'ELV_GATE' "$log"; then found=1; break; fi
+            if grep -qF 'ELV_GATE {' "$log"; then found=1; break; fi
             sleep 1
           done
           if [ -n "$found" ]; then
-            grep 'ELV_GATE' "$log" | tail -n 1 > "$out"
+            grep -F 'ELV_GATE {' "$log" | tail -n 1 > "$out"
           else
             { echo "no ELV_GATE within 120 s"; echo "--- log tail ---"; tail -n 50 "$log"; } > "$out"
+            xcrun simctl io "$udid" screenshot "$GITHUB_WORKSPACE/gate-tvos.png" || echo "screenshot failed"
           fi
           kill "$stream_pid" 2>/dev/null || true
           cat "$out"
@@ -353,7 +354,9 @@ jobs:
         if: always()
         with:
           name: gate-tvos
-          path: gate-tvos.txt
+          path: |
+            gate-tvos.txt
+            gate-tvos.png
           if-no-files-found: warn
           retention-days: 30
 
