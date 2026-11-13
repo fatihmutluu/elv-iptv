@@ -267,3 +267,33 @@ describe('runListGate progress', () => {
     expect(seen).toEqual([30, 10, 20]);
   });
 });
+
+describe('runListGate safeguards', () => {
+  it('fails with a clear message when an adb call hangs', async () => {
+    const device = fakeAdb({ lines: [gateLine(19)] });
+    const exec: Exec = async (command, args) =>
+      args.join(' ').includes('install')
+        ? { ok: false, output: 'timed out after 120 s', timedOut: true }
+        : device.exec(command, args);
+    await expect(runListGate({ exec, sleep: noSleep })).rejects.toThrow(/adb install.*timed out/);
+  });
+
+  it('gives every adb call a timeout', async () => {
+    const device = fakeAdb({ lines: [gateLine(19)] });
+    const timeouts: (number | undefined)[] = [];
+    const exec: Exec = async (command, args, opts) => {
+      timeouts.push(opts?.timeoutMs);
+      return device.exec(command, args);
+    };
+    await runListGate({ exec, sleep: noSleep });
+    expect(timeouts.length).toBeGreaterThan(5);
+    expect(timeouts.every((t) => typeof t === 'number' && t > 0)).toBe(true);
+  });
+
+  it('fails when fewer real presses arrive than were sent', async () => {
+    const device = fakeAdb({ lines: [gateLine(19), gateLine(40, 12, 0, 58)] });
+    await expect(runListGate({ exec: device.exec, sleep: noSleep, realKeys: 60 })).rejects.toThrow(
+      /58 of 60/,
+    );
+  });
+});

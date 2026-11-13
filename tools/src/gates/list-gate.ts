@@ -13,18 +13,40 @@ const KEY_DOWN = '20';
 const KEY_BACK = '4';
 const APP_BOOT_MS = 3000;
 const BURST_IDLE_MS = 2000;
+const ADB_TIMEOUT_MS = 30_000;
+const INSTALL_TIMEOUT_MS = 180_000;
+const BUILD_TIMEOUT_MS = 30 * 60_000;
+
+/** Runs one adb command with a timeout; a hung command throws instead of blocking the gate. */
+async function adbCall(
+  exec: Exec,
+  adb: string,
+  args: string[],
+  timeoutMs = ADB_TIMEOUT_MS,
+): Promise<ExecResult> {
+  const result = await exec(adb, args, { timeoutMs });
+  if (result.timedOut === true) {
+    const shown = args[0] === '-s' ? args.slice(2) : args;
+    throw new Error(
+      `gate: adb ${shown.join(' ')} timed out after ${Math.round(timeoutMs / 1000)} s`,
+    );
+  }
+  return result;
+}
 
 /** Output of a finished process. */
 interface ExecResult {
   ok: boolean;
   output: string;
+  /** The process was killed because it ran longer than `timeoutMs`. */
+  timedOut?: boolean;
 }
 
 /** Runs a process and captures its combined output; injected so tests never start adb. */
 export type Exec = (
   command: string,
   args: string[],
-  opts?: { cwd?: string; env?: Record<string, string> },
+  opts?: { cwd?: string; env?: Record<string, string>; timeoutMs?: number },
 ) => Promise<ExecResult>;
 
 /** Options of {@link runListGate}. */
@@ -125,7 +147,7 @@ export function topActivity(dump: string): string | undefined {
 
 /** Serial of the device to measure: the emulator running `avd`, or the only attached device. */
 export async function findDevice(exec: Exec, adb: string, avd?: string): Promise<string> {
-  const listing = await exec(adb, ['devices']);
+  const listing = await adbCall(exec, adb, ['devices']);
   const serials = listing.output
     .split(/\r?\n/)
     .map((line) => line.split('\t'))
@@ -133,7 +155,7 @@ export async function findDevice(exec: Exec, adb: string, avd?: string): Promise
     .map((cols) => cols[0] as string);
   if (avd !== undefined) {
     for (const serial of serials) {
-      const name = await exec(adb, ['-s', serial, 'emu', 'avd', 'name']);
+      const name = await adbCall(exec, adb, ['-s', serial, 'emu', 'avd', 'name']);
       if (name.output.split(/\r?\n/)[0]?.trim() === avd) return serial;
     }
     throw new Error(
@@ -158,7 +180,7 @@ export async function deviceInfo(
   serial: string,
 ): Promise<{ model: string; release: string; sdk: string }> {
   const prop = async (name: string) =>
-    (await exec(adb, ['-s', serial, 'shell', 'getprop', name])).output.trim();
+    (await adbCall(exec, adb, ['-s', serial, 'shell', 'getprop', name])).output.trim();
   return {
     model: await prop('ro.product.name'),
     release: await prop('ro.build.version.release'),
@@ -231,7 +253,11 @@ async function buildApk(exec: Exec, root: string, adb: string): Promise<void> {
     },
   ];
   for (const step of steps) {
-    const done = await exec(step.command, step.args, { cwd: step.cwd, env: step.env });
+    const done = await exec(step.command, step.args, {
+      cwd: step.cwd,
+      env: step.env,
+      timeoutMs: BUILD_TIMEOUT_MS,
+    });
     if (!done.ok) {
       const tail = done.output.trim().split(/\r?\n/).slice(-5).join('\n');
       throw new Error(`gate: ${step.command} failed\n${tail}`);
@@ -258,12 +284,18 @@ export async function runListGate(opts: ListGateOptions): Promise<GateResult> {
   if (opts.build === true) await buildApk(exec, root, adb);
 
   const serial = await findDevice(exec, adb, opts.avd);
-  const dev = (...args: string[]): Promise<ExecResult> => exec(adb, ['-s', serial, ...args]);
+  const dev = (...args: string[]): Promise<ExecResult> =>
+    adbCall(exec, adb, ['-s', serial, ...args]);
   const shell = (...args: string[]) => dev('shell', ...args);
 
   const booted = await shell('getprop', 'sys.boot_completed');
   if (booted.output.trim() !== '1') throw new Error(`gate: ${serial} has not finished booting`);
-  const install = await dev('install', '-r', `${root}/${APK}`);
+  const install = await adbCall(
+    exec,
+    adb,
+    ['-s', serial, 'install', '-r', `${root}/${APK}`],
+    INSTALL_TIMEOUT_MS,
+  );
   if (!install.ok || !install.output.includes('Success')) {
     const reason = install.output.trim().split(/\r?\n/).pop() ?? '';
     throw new Error(`gate: adb install failed (${reason}); build the APK first with --build`);
@@ -335,6 +367,9 @@ export async function runListGate(opts: ListGateOptions): Promise<GateResult> {
       await sleep(POLL_MS);
     }
     const burst = await waitForLine(BURST_IDLE_MS + WAIT_MARGIN_MS);
+    if (burst.moves < presses) {
+      throw new Error(`gate: only ${burst.moves} of ${presses} real key presses reached the app`);
+    }
     const real: RealKeys = {
       p50: burst.keyToHighlightMs.p50,
       p95: burst.keyToHighlightMs.p95,

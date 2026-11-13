@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compareToBaseline, type GateResult } from '../src/gates/compare.ts';
+import { baselineRefusal, compareToBaseline, type GateResult } from '../src/gates/compare.ts';
 
 const baseline: GateResult = {
   metrics: {
@@ -130,5 +130,18 @@ describe('compareToBaseline', () => {
   it('skips real keys that the baseline lacks', () => {
     const { realKeys: _, ...noKeys } = baseline;
     expect(compareToBaseline(change({}), noKeys).ok).toBe(true);
+  });
+});
+
+describe('baselineRefusal', () => {
+  it('accepts a clean result', () => {
+    expect(baselineRefusal(baseline)).toBeUndefined();
+  });
+
+  it('refuses results with losses or a broken budget', () => {
+    expect(baselineRefusal(change({ losses: 1 }))).toMatch(/losses/);
+    expect(baselineRefusal(change({ realLosses: 2 }))).toMatch(/losses/);
+    expect(baselineRefusal(change({ gap: 17 }))).toMatch(/budget/);
+    expect(baselineRefusal(change({ p95: 101 }))).toMatch(/budget/);
   });
 });

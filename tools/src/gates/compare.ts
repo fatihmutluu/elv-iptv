@@ -131,3 +131,13 @@ export function compareToBaseline(result: GateResult, baseline: GateResult): Com
 
   return { ok: failures.length === 0, failures, warnings };
 }
+
+/**
+ * Why a result must not become a baseline, or undefined when it may: focus losses (auto or real keys) or a broken
+ * absolute budget would bake a failure into the reference.
+ */
+export function baselineRefusal(result: GateResult): string | undefined {
+  const own = compareToBaseline(result, result);
+  const reasons = own.failures.filter((f) => /losses|budget/.test(f));
+  return reasons.length === 0 ? undefined : `refusing to write a baseline: ${reasons.join('; ')}`;
+}

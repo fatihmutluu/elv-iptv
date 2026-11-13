@@ -2,7 +2,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { exec as run } from '../src/exec.ts';
-import { type CompareOutcome, compareToBaseline, type GateResult } from '../src/gates/compare.ts';
+import {
+  baselineRefusal,
+  type CompareOutcome,
+  compareToBaseline,
+  type GateResult,
+} from '../src/gates/compare.ts';
 import {
   deviceInfo,
   type Exec,
@@ -13,7 +18,7 @@ import {
 import { findRepoRoot } from '../src/root.ts';
 
 const USAGE =
-  'usage: pnpm gate list [--avd elv_tv] [--build] [--runs 3] [--real-keys 60] [--ci] [--out file] [--write-baseline]';
+  'usage: pnpm gate list [--avd elv_tv] [--build] [--runs 3 (default)] [--real-keys 60] [--ci] [--out file] [--write-baseline]';
 const BASELINE = 'docs/learned/gates/list-android-tv.json';
 
 function fail(message: string, code = 1): never {
@@ -51,7 +56,7 @@ const count = (name: string, text: string | undefined): number | undefined => {
   if (!Number.isInteger(n) || n < 1) fail(`gate: --${name} needs a positive integer. ${USAGE}`, 2);
   return n;
 };
-const runs = count('runs', values.runs);
+const runs = count('runs', values.runs) ?? 3;
 const realKeys = count('real-keys', values['real-keys']);
 
 const root = findRepoRoot(process.cwd());
@@ -72,7 +77,7 @@ const result = await runListGate({
   root,
   ...(values.avd === undefined ? {} : { avd: values.avd }),
   ...(values.build === true ? { build: true } : {}),
-  ...(runs === undefined ? {} : { runs }),
+  runs,
   ...(realKeys === undefined ? {} : { realKeys }),
   onRun: (run) => console.log(`run: ${summary(run)}`),
 }).catch((error: Error) => fail(error.message));
@@ -82,6 +87,15 @@ const commit = (await exec('git', ['rev-parse', '--short', 'HEAD'])).output.trim
 const baselinePath = resolve(root, BASELINE);
 
 if (values['write-baseline'] === true) {
+  const refusal = baselineRefusal(result);
+  if (refusal !== undefined) fail(`gate: ${refusal}`);
+  const dirty = (
+    await exec('git', ['status', '--porcelain', '--', 'apps', 'packages', 'modules'])
+  ).output.trim();
+  if (dirty !== '')
+    fail(
+      'gate: refusing to write a baseline from uncommitted app or package changes; commit them first so the commit field names what was measured',
+    );
   const baseline: Baseline = {
     device,
     build: 'development variant, release APK (JS bundled, debug-signed)',
