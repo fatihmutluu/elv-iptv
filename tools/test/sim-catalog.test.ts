@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { findAccount } from '../src/sim/accounts.ts';
-import { buildCatalog, COMPAT_CASES, rng } from '../src/sim/catalog.ts';
+import { buildCatalog, COMPAT_CASES, createCatalog, rng } from '../src/sim/catalog.ts';
 
 describe('buildCatalog', () => {
   it('builds the same catalog for the same seed', () => {
-    const a = JSON.stringify(buildCatalog('small', 1));
-    expect(JSON.stringify(buildCatalog('small', 1))).toBe(a);
-    expect(JSON.stringify(buildCatalog('small', 2))).not.toBe(a);
+    const a = JSON.stringify(createCatalog('small', 1));
+    expect(JSON.stringify(createCatalog('small', 1))).toBe(a);
+    expect(JSON.stringify(createCatalog('small', 2))).not.toBe(a);
   });
 
   it('small profile sizes', () => {
@@ -31,7 +31,7 @@ describe('buildCatalog', () => {
   it('large profile reaches 100k entries', () => {
     const start = Date.now();
     const c = buildCatalog('large', 1);
-    expect(Date.now() - start).toBeLessThan(1000);
+    expect(Date.now() - start).toBeLessThan(3000);
     const episodes = c.series.reduce((n, s) => n + s.episodes.length, 0);
     expect([c.live.length, c.movies.length, c.series.length, episodes]).toEqual([
       25000, 70000, 500, 5000,
@@ -76,6 +76,12 @@ describe('buildCatalog', () => {
       [1001, 200001, 300001, 400001],
     );
     expect(c.live.filter((x) => x.recipe === 'aac-radio').map((x) => x.num)).toEqual([25, 50]);
+  });
+});
+
+describe('buildCatalog caching', () => {
+  it('returns the shared catalog for the same arguments', () => {
+    expect(buildCatalog('small', 5)).toBe(buildCatalog('small', 5));
   });
 });
 

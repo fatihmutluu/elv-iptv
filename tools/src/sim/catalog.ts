@@ -1,10 +1,12 @@
 /** Catalog profile names (spec section 5.2). */
 export type ProfileName = 'small' | 'large' | 'compat';
+/** Media recipe a stream is generated from (spec section 5.6). */
 export type RecipeName =
   | 'h264-aac-720p25'
   | 'hevc-main10-1080p25'
   | 'mpeg2-ac3-576i25'
   | 'aac-radio';
+/** Edge case of the `compat` profile; each case maps to exactly one live channel. */
 export type CompatCase =
   | 'tvg-shift'
   | 'tvg-rec'
@@ -36,23 +38,32 @@ export type CompatCase =
   | 'rtp-url'
   | 'rtmp-url'
   | 'missing-404';
+/** A group of live channels, movies or series. */
 export interface Category {
   id: string;
   name: string;
   kind: 'live' | 'vod' | 'series';
 }
+/** A live channel of the catalog. */
 export interface LiveChannel {
   id: number;
+  /** One-based channel number in catalog order. */
   num: number;
   name: string;
   categoryId: string;
+  /** Guide id (XMLTV channel id), or null when the channel has no guide entry. */
   epgId: string | null;
+  /** Logo asset id, or null when the channel has no logo. */
   logo: number | null;
   recipe: RecipeName;
+  /** Fault spec bound to this stream (spec section 5.7), or null for a healthy stream. */
   fault: string | null;
+  /** Days of catch-up archive offered; 0 means none. */
   archiveDays: number;
+  /** Compatibility edge case this channel exercises; null outside the `compat` profile. */
   compat: CompatCase | null;
 }
+/** A VOD movie. */
 export interface Movie {
   id: number;
   name: string;
@@ -60,8 +71,10 @@ export interface Movie {
   ext: 'mp4' | 'mkv';
   recipe: RecipeName;
   durationSec: number;
+  /** Unix timestamp (seconds) when the movie was added. */
   added: number;
 }
+/** One episode of a series. */
 export interface Episode {
   id: number;
   season: number;
@@ -71,16 +84,19 @@ export interface Episode {
   recipe: RecipeName;
   durationSec: number;
 }
+/** A series with all its episodes. */
 export interface Series {
   id: number;
   name: string;
   categoryId: string;
   episodes: Episode[];
 }
+/** Guide time range around now, in whole days. */
 export interface GuideWindow {
   daysBack: number;
   daysForward: number;
 }
+/** The full deterministic content of one profile and seed. */
 export interface Catalog {
   profile: ProfileName;
   seed: number;
@@ -88,6 +104,7 @@ export interface Catalog {
   live: LiveChannel[];
   movies: Movie[];
   series: Series[];
+  /** Number of channels that carry guide programmes (those with an `epgId`). */
   guideChannels: number;
   guideWindow: GuideWindow;
 }
@@ -295,11 +312,8 @@ function makeSeries(shape: Shape, next: () => number): Series[] {
 
 const cache = new Map<string, Catalog>();
 
-/** Builds the deterministic catalog for a profile; cached per (profile, seed). */
-export function buildCatalog(profile: ProfileName, seed: number): Catalog {
-  const key = `${profile}:${seed}`;
-  const hit = cache.get(key);
-  if (hit) return hit;
+/** Builds a fresh deterministic catalog for a profile and seed, bypassing the cache. */
+export function createCatalog(profile: ProfileName, seed: number): Catalog {
   const shape = SHAPES[profile];
   const next = rng(seed);
   const live = makeLive(profile, shape);
@@ -313,6 +327,18 @@ export function buildCatalog(profile: ProfileName, seed: number): Catalog {
     guideChannels: live.filter((c) => c.epgId !== null).length,
     guideWindow: shape.guideWindow,
   };
+  return catalog;
+}
+
+/**
+ * Returns the deterministic catalog for a profile, cached per (profile, seed).
+ * The returned catalog is shared between callers and must not be mutated.
+ */
+export function buildCatalog(profile: ProfileName, seed: number): Catalog {
+  const key = `${profile}:${seed}`;
+  const hit = cache.get(key);
+  if (hit) return hit;
+  const catalog = createCatalog(profile, seed);
   cache.set(key, catalog);
   return catalog;
 }
