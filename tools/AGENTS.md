@@ -4,14 +4,15 @@ TypeScript scripts for the repository: project checks, app launcher, bootstrap, 
 Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter properties), `.ts` import suffixes.
 
 ## Commands (run from anywhere; the repo root is found via `pnpm-workspace.yaml`)
-- `pnpm check` runs every check and prints failures, notes and warnings (also on a passing run),
-  plus `check: N passed, M failed`. From inside a workspace package folder use `pnpm -w check`.
+- `pnpm check` runs every check, prints failures, notes and warnings (also when passing) and `check: N passed, M failed`; in a package folder use `pnpm -w check`.
 - `pnpm check --only <key>` runs one check (keys: biome, typecheck, deps, knip, file-size, stubs, vitest, jest, gitleaks-rules, hooks); `--json` prints JSON.
 - `pnpm bootstrap` checks versions, installs dependencies and git hooks, looks for gitleaks.
 - `pnpm run:app <target> [build] [--production]` launches or builds a target (android, android-tv, fire-tv, ios, tvos, windows, macos, linux).
-- `pnpm gate list [--avd elv_tv] [--build] [--runs 3 (default)] [--real-keys 60] [--ci] [--baseline file] [--write-baseline]` runs the TV list gate on a running
-  Android TV emulator (`src/gates/`; adb from ANDROID_HOME, the default SDK folder or PATH), compares the median with
-  `docs/learned/gates/list-android-tv.json` (or `--baseline`; a missing given file means budgets and losses only, with a warning; spec 5.6 rule), writes `gate-list.json`, exits 1 on a failure.
+- `pnpm gate list [--avd elv_tv] [--build] [--runs 3 (default)] [--real-keys 60] [--ci] [--baseline file] [--out file] [--write-baseline]`
+  runs the TV list gate on a running Android TV emulator (`src/gates/`; adb from ANDROID_HOME, the default SDK or PATH), compares
+  the median with `docs/learned/gates/list-android-tv.json` (or `--baseline`; a missing given file: budgets and losses only, warned;
+  spec 5.6), writes the median and every run to `--out` (`gate-list.json`, with `--ci` under `gate-artifacts/`), warns when the
+  worst run breaks a budget the median meets, exits 1 on a failure.
 - `pnpm scaffold <pure|rn|module> <name>` creates a workspace package (skill `add-package`).
 - `pnpm --filter @elv/tools test` runs Vitest (`sources-*`, `import-*` use the sim; `SIM_HUGE=1` adds 500k).
 
@@ -26,8 +27,7 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
 ## Rules
 - Dev credentials: `.env.local` is read by `run:app` only. `DEV_*` keys reach development
   builds through the environment, never argv, never production. Tests use temp files.
-- A new architecture rule needs a fixture case in `test/dependency-rules.test.ts`.
-- A new check goes into `src/checks.ts` and the key list above.
+- A new architecture rule needs a fixture case in `test/dependency-rules.test.ts`; a new check goes into `src/checks.ts` and the key list.
 - Keep check output quiet: no progress lines, no passing-check output.
 
 ## Stream simulator (`pnpm sim`; `src/sim/`, built-ins only; plays an IPTV provider for the apps)

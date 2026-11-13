@@ -7,6 +7,7 @@
 - [Stream simulator spec](superpowers/specs/2026-11-13-stream-simulator-design.md) the local IPTV provider simulator (`pnpm sim`).
 - [Source scanners spec](superpowers/specs/2026-11-13-source-scanners-design.md) M3U and XMLTV scanners, the Xtream client and content keys.
 - [Catalog import spec](superpowers/specs/2026-11-13-catalog-import-design.md) the SQLite catalog, the import engine, guide matching and budgets (`@elv/data`).
+- [Focus core and list gate spec](superpowers/specs/2026-11-13-focus-list-gate-design.md) the remote key model, focus store, windowed TV list and the 100k list gate (`pnpm gate list`).
 - `superpowers/plans/` implementation plans; they are deleted after the work is merged.
 - [ADRs](adr/README.md) accepted architecture decisions (MADR), including [0011 content keys](adr/0011-content-keys.md).
 - [Lessons learned](learned/README.md) short dated problem-to-rule entries.
