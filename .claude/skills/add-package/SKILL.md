@@ -23,8 +23,9 @@ spec section 5.2 (`docs/superpowers/specs/2026-11-13-foundation-design.md`).
 4. Add the dependencies the package really imports (`workspace:*` for workspace packages, `catalog:` for shared versions),
    then run `pnpm install`.
 5. Check `.dependency-cruiser.cjs`: the folder name must be listed in the rule that governs it (`PURE` list and the
-   `layer(...)` rules for packages, `^modules/` rules for modules). A new package name that no rule mentions is
-   unchecked, so extend the rule and add a fixture case in `tools/test/dependency-rules.test.ts`.
+   `layer(...)` rules for packages, `^modules/` rules for modules). `tools/test/dependency-coverage.test.ts` fails for a
+   package that no rule names, so extend the rule and add a fixture case in `tools/test/dependency-rules.test.ts`.
+   A new pure package also goes into the `noRestrictedImports` override in the root `biome.json`.
 6. Check `knip.ts`: if the package declares dependencies before any code imports them (skeleton), add a
    `workspaces['<dir>']` entry with `ignoreDependencies`, as the skeleton packages do. Remove it when code lands.
 7. Write the first failing test, then the code. Pure packages need at least 90% line coverage.

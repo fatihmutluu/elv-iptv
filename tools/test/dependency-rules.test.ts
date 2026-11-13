@@ -27,6 +27,14 @@ describe('dependency-cruiser rules', () => {
     expect(ruleNames('feature-to-feature')).toContain('no-feature-to-feature');
   });
 
+  it('lets a feature import the shared ports and shared folders and root-level files', () => {
+    expect(cruise('features-shared-folders')).toEqual([]);
+  });
+
+  it('rejects a shared folder importing a feature', () => {
+    expect(ruleNames('shared-folder-imports-feature')).toContain('no-feature-to-feature');
+  });
+
   it('rejects features importing modules', () => {
     expect(ruleNames('features-import-modules')).toContain('features-no-modules-or-apps');
   });

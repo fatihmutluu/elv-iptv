@@ -22,6 +22,52 @@
     {
       "includes": ["tools/bin/**", "tools/src/cli-*.ts", "scripts/**"],
       "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
+    },
+    {
+      "includes": [
+        "packages/domain/**",
+        "packages/sources/**",
+        "packages/data/**",
+        "packages/playback/**",
+        "packages/focus-core/**"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "react",
+                      "react/**",
+                      "react-dom",
+                      "react-dom/**",
+                      "react-native",
+                      "react-native/**",
+                      "react-native-*",
+                      "react-native-*/**",
+                      "@react-native/**",
+                      "@react-native-*/**",
+                      "expo",
+                      "expo/**",
+                      "expo-*",
+                      "expo-*/**",
+                      "@expo/**",
+                      "electron",
+                      "electron/**",
+                      "node:*",
+                      "node:*/**"
+                    ],
+                    "message": "Pure packages never import react, react-native, expo, electron or node:*; use a port from @elv/domain (spec section 5.2)."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

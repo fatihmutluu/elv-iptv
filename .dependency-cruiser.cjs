@@ -5,9 +5,17 @@
 
 const PURE = 'domain|sources|data|playback|focus-core';
 const WORKSPACE = '^(packages|modules|apps)/';
+/**
+ * Matches packages by their folder under `node_modules`. pnpm resolves through the store
+ * (`node_modules/.pnpm/<name>@<version>/node_modules/<name>/`), so an alias such as
+ * `react-native` -> `react-native-tvos` shows up under its real name.
+ */
 const npm = (names) => `(^|/)node_modules/(${names})(/|$)|^(${names})(/|$)`;
 
-const PLATFORM_LIBS = npm('react|react-dom|react-native|react-native-web|expo|expo-[^/]+|electron');
+// Plain alternatives only: dependency-cruiser rejects nested quantifiers as unsafe.
+const EXPO_LIBS = 'expo|expo-[^/]+|@expo/[^/]+';
+const RN_LIBS = 'react-native|react-native-[^/]+|@react-native/[^/]+|@react-native-[^/]+/[^/]+';
+const PLATFORM_LIBS = npm(`react|react-dom|${RN_LIBS}|${EXPO_LIBS}|electron`);
 const NAVIGATION_LIBS = npm('expo-router|@react-navigation/[^/]+|react-navigation');
 
 /** A layer rule: files under `from` may import workspace code only from the `allowed` packages. */
@@ -68,14 +76,22 @@ module.exports = {
       comment: 'features never import native modules, apps or expo packages',
       severity: 'error',
       from: { path: '^packages/features/' },
-      to: { path: `^(modules|apps)/|${npm('expo|expo-[^/]+')}` },
+      to: { path: `^(modules|apps)/|${npm(EXPO_LIBS)}` },
     },
     {
       name: 'no-feature-to-feature',
-      comment: 'a feature folder never imports another feature folder',
+      comment:
+        'a feature folder never imports another feature folder; ports/, shared/ and root-level files are shared by all features',
       severity: 'error',
       from: { path: '^packages/features/src/([^/]+)/' },
-      to: { path: '^packages/features/src/', pathNot: '^packages/features/src/$1/' },
+      to: {
+        path: '^packages/features/src/',
+        pathNot: [
+          '^packages/features/src/$1/',
+          '^packages/features/src/(ports|shared)/',
+          '^packages/features/src/[^/]+$',
+        ],
+      },
     },
     {
       name: 'modules-import-playback-only',
@@ -109,13 +125,17 @@ module.exports = {
     {
       name: 'no-dev-dependencies-in-src',
       comment:
-        'shipped sources only use runtime dependencies; the electron module is supplied by the Electron runtime and must stay a devDependency for electron-builder',
+        'shipped sources only use runtime dependencies; peer dependencies (also listed as dev for local tests) come from the app; the electron module is supplied by the Electron runtime and must stay a devDependency for electron-builder',
       severity: 'error',
       from: {
         path: '^(packages|modules|apps)/[^/]+/src/',
         pathNot: '\\.(test|spec)\\.[cm]?[jt]sx?$',
       },
-      to: { dependencyTypes: ['npm-dev'], pathNot: '/node_modules/electron/' },
+      to: {
+        dependencyTypes: ['npm-dev'],
+        dependencyTypesNot: ['npm-peer'],
+        pathNot: '/node_modules/electron/',
+      },
     },
     {
       name: 'no-circular',

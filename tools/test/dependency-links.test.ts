@@ -15,8 +15,18 @@ function put(root: string, file: string, content: string) {
 }
 
 /** A workspace package whose `exports` point at src/index.ts, like the real packages. */
-function pkg(root: string, folder: string, name: string, indexSource: string) {
-  put(root, `${folder}/package.json`, JSON.stringify({ name, exports: { '.': './src/index.ts' } }));
+function pkg(
+  root: string,
+  folder: string,
+  name: string,
+  indexSource: string,
+  manifest: Record<string, unknown> = {},
+) {
+  put(
+    root,
+    `${folder}/package.json`,
+    JSON.stringify({ name, exports: { '.': './src/index.ts' }, ...manifest }),
+  );
   put(root, `${folder}/src/index.ts`, indexSource);
 }
 
@@ -27,10 +37,17 @@ function link(root: string, consumer: string, name: string, target: string) {
   symlinkSync(join(root, target), at, 'junction');
 }
 
-/** Installs a third-party package in the pnpm virtual store and links it into `consumer`. */
-function thirdParty(root: string, consumer: string, name: string) {
-  const store = `node_modules/.pnpm/${name}@1.0.0/node_modules/${name}`;
-  put(root, `${store}/package.json`, JSON.stringify({ name, version: '1.0.0', main: 'index.js' }));
+/**
+ * Installs `realName` in the pnpm virtual store and links it into `consumer` as `name`.
+ * A different `realName` reproduces an alias such as `react-native` -> `react-native-tvos`.
+ */
+function thirdParty(root: string, consumer: string, name: string, realName = name) {
+  const store = `node_modules/.pnpm/${realName.replace('/', '+')}@1.0.0/node_modules/${realName}`;
+  put(
+    root,
+    `${store}/package.json`,
+    JSON.stringify({ name: realName, version: '1.0.0', main: 'index.js' }),
+  );
   put(root, `${store}/index.js`, 'module.exports = {};');
   link(root, consumer, name, store);
 }
@@ -70,6 +87,76 @@ describe('dependency rules over pnpm-style linked workspaces', () => {
     link(root, 'packages/sources', '@elv/domain', 'packages/domain');
     thirdParty(root, 'packages/sources', 'react-native');
     expect(names(root)).toEqual([expect.stringContaining('pure-packages-no-platform: packages')]);
+  });
+
+  it('catches a declared react-native that resolves to the react-native-tvos alias', () => {
+    const root = workspace();
+    pkg(
+      root,
+      'packages/sources',
+      '@elv/sources',
+      "import rn from 'react-native';\nexport const s = rn;",
+      { dependencies: { 'react-native': 'npm:react-native-tvos@1.0.0' } },
+    );
+    thirdParty(root, 'packages/sources', 'react-native', 'react-native-tvos');
+    expect(names(root)).toEqual([expect.stringContaining('pure-packages-no-platform: packages')]);
+  });
+
+  it.each([
+    'react-dom',
+    'react-native-mmkv',
+    '@react-native/assets-registry',
+    '@react-native-community/netinfo',
+    'expo',
+    'expo-sqlite',
+    '@expo/vector-icons',
+    'electron',
+  ])('catches a pure package importing a declared %s', (lib) => {
+    const root = workspace();
+    pkg(root, 'packages/data', '@elv/data', `import x from '${lib}';\nexport const d = x;`, {
+      dependencies: { [lib]: '1.0.0' },
+    });
+    thirdParty(root, 'packages/data', lib);
+    expect(names(root)).toEqual([expect.stringContaining('pure-packages-no-platform: packages')]);
+  });
+
+  it('catches a feature importing a scoped expo package', () => {
+    const root = workspace();
+    pkg(
+      root,
+      'packages/features',
+      '@elv/features',
+      "import icons from '@expo/vector-icons';\nexport const f = icons;",
+      { dependencies: { '@expo/vector-icons': '1.0.0' } },
+    );
+    thirdParty(root, 'packages/features', '@expo/vector-icons');
+    expect(names(root)).toEqual([expect.stringContaining('features-no-modules-or-apps: packages')]);
+  });
+
+  it('accepts react and react-native declared as peer and dev dependencies of a UI package', () => {
+    const root = workspace();
+    pkg(
+      root,
+      'packages/ui-kit',
+      '@elv/ui-kit',
+      "import r from 'react';\nimport rn from 'react-native';\nexport const u = [r, rn];",
+      {
+        peerDependencies: { react: '*', 'react-native': '*' },
+        devDependencies: { react: '1.0.0', 'react-native': 'npm:react-native-tvos@1.0.0' },
+      },
+    );
+    thirdParty(root, 'packages/ui-kit', 'react');
+    thirdParty(root, 'packages/ui-kit', 'react-native', 'react-native-tvos');
+    expect(names(root)).toEqual([]);
+  });
+
+  it('still rejects a dev-only dependency imported from shipped sources', () => {
+    const root = workspace();
+    pkg(root, 'packages/ui-kit', '@elv/ui-kit', "import t from 'tooling';\nexport const u = t;", {
+      devDependencies: { tooling: '1.0.0' },
+    });
+    thirdParty(root, 'packages/ui-kit', 'tooling');
+    expect(names(root)).toEqual([expect.stringContaining('no-dev-dependencies-in-src: packages')]);
   });
 
   it('catches a feature importing a native module through its package name', () => {
