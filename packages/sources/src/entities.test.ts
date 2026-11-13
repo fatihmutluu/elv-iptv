@@ -17,6 +17,13 @@ describe('decodeEntities', () => {
     );
   });
 
+  it.each(['constructor', 'valueof', 'valueOf', '__proto__', 'toString', 'hasOwnProperty'])(
+    'keeps &%s; literal',
+    (name) => {
+      expect(decodeEntities(`&${name};`)).toBe(`&${name};`);
+    },
+  );
+
   it('does not decode twice', () => {
     expect(decodeEntities('&amp;lt;')).toBe('&lt;');
   });

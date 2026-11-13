@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { utf8 } from './test-chunks';
 import { ByteBuffer, decodeUtf8 } from './utf8';
 
-const oracle = (b: Uint8Array): string => new TextDecoder().decode(b);
+const oracle = (b: Uint8Array): string => new TextDecoder('utf-8', { ignoreBOM: true }).decode(b);
 
 describe('decodeUtf8', () => {
   it.each(['hello', 'İğüşöçı', 'مرحبا', '😀 a 🎉', ''])('matches TextDecoder for %s', (text) => {
@@ -24,6 +24,10 @@ describe('decodeUtf8', () => {
     expect(decodeUtf8(Uint8Array.of(0x61, 0xff, 0x62))).toBe('a�b');
     expect(decodeUtf8(Uint8Array.of(0x61, 0xe2, 0x82))).toBe('a�');
     expect(decodeUtf8(Uint8Array.of(0xe2, 0x82, 0x61))).toBe('�a');
+  });
+
+  it('keeps a leading BOM as U+FEFF', () => {
+    expect(decodeUtf8(Uint8Array.of(0xef, 0xbb, 0xbf, 0x61))).toBe('﻿a');
   });
 
   it('decodes a slice', () => {

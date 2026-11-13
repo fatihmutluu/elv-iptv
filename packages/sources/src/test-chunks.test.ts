@@ -21,6 +21,13 @@ describe('test chunk helpers', () => {
     for (const s of splits) expect((await collect(s)).flat()).toEqual([1, 2, 3, 4, 5]);
   });
 
+  it('everySplit chunk lengths are [at, length - at]; offset 0 has an empty first chunk, offset length a single chunk', async () => {
+    const lengths = await Promise.all(
+      [...everySplit(bytes)].map(async (s) => (await collect(s)).map((c) => c.length)),
+    );
+    expect(lengths).toEqual([[0, 5], [1, 4], [2, 3], [3, 2], [4, 1], [5]]);
+  });
+
   it('randomSplits is deterministic and lossless', async () => {
     const big = new Uint8Array(1000).map((_, i) => i & 0xff);
     const a = await collect(randomSplits(big, 7, 10));

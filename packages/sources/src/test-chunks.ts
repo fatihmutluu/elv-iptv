@@ -17,7 +17,10 @@ export async function* chunksOf(
   if (offset < bytes.length) yield bytes.slice(offset);
 }
 
-/** Every two-chunk split of `bytes`, one per offset from 0 to `bytes.length` inclusive. */
+/**
+ * Every two-chunk split of `bytes`, one per offset `at` from 0 to `bytes.length` inclusive, with chunk
+ * lengths `[at, length - at]`. Offset 0 yields an empty first chunk; offset `length` yields a single chunk.
+ */
 export function everySplit(bytes: Uint8Array): Iterable<AsyncIterable<Uint8Array>> {
   const splits: AsyncIterable<Uint8Array>[] = [];
   for (let at = 0; at <= bytes.length; at++) {

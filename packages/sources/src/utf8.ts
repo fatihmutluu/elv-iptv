@@ -1,7 +1,10 @@
 const REPLACEMENT = 0xfffd;
 const SLICE = 4096;
 
-/** Decodes bytes[start, end) as UTF-8 with U+FFFD for invalid sequences, without `TextDecoder`. */
+/**
+ * Decodes bytes[start, end) as UTF-8 with U+FFFD for invalid sequences, without `TextDecoder`.
+ * A leading byte order mark is kept as U+FEFF; scanners strip it themselves.
+ */
 export function decodeUtf8(bytes: Uint8Array, start = 0, end: number = bytes.length): string {
   const limit = Math.min(end, bytes.length);
   let out = '';
