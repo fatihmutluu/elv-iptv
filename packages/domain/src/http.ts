@@ -168,6 +168,19 @@ async function* streamBody(
   }
 }
 
+const RESET_CODES = new Set(['ECONNRESET', 'EPIPE', 'UND_ERR_SOCKET']);
+
+/**
+ * Whether a pre-response failure looks like a pooled keep-alive socket the server had already closed
+ * (Node/undici surface it as `fetch failed` with a reset-class `cause`).
+ */
+function isConnectionReset(e: unknown): boolean {
+  const cause = (e as { cause?: { code?: unknown; message?: unknown } } | null)?.cause;
+  const code = cause?.code ?? (e as { code?: unknown } | null)?.code;
+  if (typeof code === 'string' && RESET_CODES.has(code)) return true;
+  return typeof cause?.message === 'string' && /other side closed/i.test(cause.message);
+}
+
 /**
  * Adapts a WHATWG fetch with a streaming body (Node/Electron fetch, expo/fetch). `defaults.timeoutMs`
  * covers the wait for headers; `defaults.idleTimeoutMs` (30 s unless overridden, per request too) covers
@@ -205,10 +218,8 @@ export function createFetchHttpClient(
         };
         if (options?.headers) init.headers = { ...options.headers };
         const attempt = () => Promise.race([fetchImpl(url, init), aborted]);
-        // A pooled keep-alive socket may have been closed by the server while the caller was busy;
-        // GET is idempotent, so one retry on a fresh connection is safe.
         const res = await attempt().catch((e: unknown) => {
-          if (timedOut || controller.signal.aborted) throw e;
+          if (timedOut || controller.signal.aborted || !isConnectionReset(e)) throw e;
           return attempt();
         });
         if (res.status < 200 || res.status >= 300) {
