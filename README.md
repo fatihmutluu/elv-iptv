@@ -6,6 +6,8 @@ Fast, stable IPTV player for every screen — Android TV, Fire TV, Apple TV, And
 
 Round 0 — bootstrap. The repository holds the toolchain, empty apps and project rules. The player is not usable yet.
 
+The plan for the next rounds is on the public [roadmap](https://github.com/users/fatihmutluu/projects/1).
+
 ## What it is
 
 A cross-platform player for live TV, movies and series from sources you bring: M3U/M3U8 playlists (URL or file) and Xtream Codes accounts. It is fully usable without an account; an account will only add cross-device sync.
