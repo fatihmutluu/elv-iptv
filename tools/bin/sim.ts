@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util';
-import { startSim } from '../src/sim/server.ts';
+import { ALL_RECIPES, ensureRecipe, findFfmpeg } from '../src/sim/media.ts';
+import { defaultCacheDir, startSim } from '../src/sim/server.ts';
 
 const USAGE =
   'usage: pnpm sim [--port 7878] [--host 127.0.0.1|0.0.0.0] [--seed 1] [--clock <ISO time>] [--log <file>] [--prepare]';
@@ -7,6 +8,16 @@ const USAGE =
 function fail(message: string): never {
   process.stderr.write(`${message.startsWith('sim:') ? '' : 'sim: '}${message}\n${USAGE}\n`);
   process.exit(2);
+}
+
+async function prepare(): Promise<void> {
+  const ffmpeg = findFfmpeg();
+  if (ffmpeg === null) fail('FFmpeg not found: set FFMPEG_PATH or install FFmpeg');
+  const cacheDir = defaultCacheDir();
+  const started = Date.now();
+  for (const recipe of ALL_RECIPES) await ensureRecipe(recipe, { ffmpeg, cacheDir, seconds: 600 });
+  const sec = Math.round((Date.now() - started) / 1000);
+  process.stdout.write(`sim: prepared ${ALL_RECIPES.length} recipes in ${cacheDir} (${sec}s)\n`);
 }
 
 function main(): void {
@@ -22,8 +33,11 @@ function main(): void {
     strict: true,
   });
   if (values.prepare) {
-    process.stderr.write('sim: --prepare needs media support\n');
-    process.exit(2);
+    prepare().then(
+      () => process.exit(0),
+      (error: Error) => fail(error.message),
+    );
+    return;
   }
   const port = values.port === undefined ? 7878 : Number(values.port);
   if (!Number.isInteger(port) || port < 0 || port > 65_535) fail(`invalid --port "${values.port}"`);

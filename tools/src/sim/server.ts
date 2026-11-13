@@ -1,5 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { findRepoRoot } from '../root.ts';
 import { ACCOUNTS } from './accounts.ts';
 import {
   createConnections,
@@ -9,7 +11,9 @@ import {
 } from './context.ts';
 import { type Fault, FaultParseError, parseFaults } from './faults.ts';
 import { type LogEntry, RequestLog, redact } from './log.ts';
+import { findFfmpeg } from './media.ts';
 import { dataRoute, sendText } from './routes-data.ts';
+import { mediaRoute } from './routes-media.ts';
 
 /** Options of `startSim`; every field is optional. */
 export interface SimOptions {
@@ -39,7 +43,13 @@ const DEFAULT_HOST = '127.0.0.1';
 const EVENTS_LIMIT = 1_048_576;
 const MEDIA_PATH = /^\/(live|movie|series)\/([^/]+)\/[^/]+\/(\d+)(?:\.[^/]*)?$/;
 
-const routes: RouteHandler[] = [dataRoute];
+/** Where generated media is cached unless `cacheDir` is given. */
+export function defaultCacheDir(): string {
+  return join(findRepoRoot(import.meta.dirname), '.cache', 'sim-media');
+}
+
+const DEFAULT_MEDIA_SECONDS = 600;
+const routes: RouteHandler[] = [dataRoute, mediaRoute];
 
 function headersOf(req: IncomingMessage): Record<string, string> {
   const out: Record<string, string> = {};
@@ -218,6 +228,11 @@ export async function startSim(options: SimOptions = {}): Promise<SimHandle> {
     baseUrl: '',
     log,
     connections: createConnections(),
+    media: {
+      ffmpeg: options.ffmpegPath === undefined ? findFfmpeg() : options.ffmpegPath,
+      cacheDir: options.cacheDir ?? defaultCacheDir(),
+      seconds: options.mediaSeconds ?? DEFAULT_MEDIA_SECONDS,
+    },
   };
   const server: Server = createServer((req, res) => {
     handle(req, res, ctx, events).catch(() => {

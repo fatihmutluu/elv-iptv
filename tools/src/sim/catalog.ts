@@ -1,7 +1,11 @@
 /** Catalog profile names (spec section 5.2). */
 export type ProfileName = 'small' | 'large' | 'compat';
 /** Media recipe a stream is generated from (spec section 5.6). */
-type RecipeName = 'h264-aac-720p25' | 'hevc-main10-1080p25' | 'mpeg2-ac3-576i25' | 'aac-radio';
+export type RecipeName =
+  | 'h264-aac-720p25'
+  | 'hevc-main10-1080p25'
+  | 'mpeg2-ac3-576i25'
+  | 'aac-radio';
 /** Edge case of the `compat` profile; each case maps to exactly one live channel. */
 export type CompatCase =
   | 'tvg-shift'

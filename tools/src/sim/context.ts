@@ -8,6 +8,13 @@ export interface Connections {
   count(account: string): number;
 }
 
+/** Media generation settings; `ffmpeg` is null when FFmpeg is absent. */
+interface MediaConfig {
+  ffmpeg: string | null;
+  cacheDir: string;
+  seconds: number;
+}
+
 /** Shared state handed to every route handler. */
 export interface SimContext {
   /** Simulator time: the configured clock advanced by the time since start. */
@@ -16,6 +23,7 @@ export interface SimContext {
   baseUrl: string;
   log: RequestLog;
   connections: Connections;
+  media: MediaConfig | null;
 }
 
 /** What a handler learned about the request, copied into its log line. */
