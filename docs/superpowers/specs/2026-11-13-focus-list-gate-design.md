@@ -156,10 +156,17 @@ Where sections 5 and 6 above differ, this list wins. Each line gives the decisio
   Calibration on the emulator: idle 10.2 to 10.6 ms, a 20 ms stall 9.9 to 12.3 ms (not detected), a 30 ms stall 18.5 ms.
 - Janky frames: the legacy `gfxinfo` figure carries the relative rule (2-point slack); the deadline-based figure only
   warns on emulators. Why: it swung between 50 and 73 % across identical emulator runs.
-- CI compares with its own baseline file, `docs/learned/gates/list-android-tv-ci.json`, and checks only the budgets
-  and focus losses until a green CI run seeds it. Why: a software-GPU CI emulator is not comparable with the local one.
+- CI compares with its own baseline file, `docs/learned/gates/list-android-tv-ci.json`, and checks only focus losses
+  (budgets warn, see below) until a green CI run seeds it. Why: a software-GPU CI emulator is not comparable with the
+  local one.
+- Absolute budgets are enforced on the local host-GPU emulator and on hardware; CI runs `pnpm gate list --budgets warn`,
+  which reports them as warnings while regressions against the CI baseline (issue #5: "+10 % fails") and focus losses
+  still fail. Why: on the CI emulator the per-move JS work median was 16.02 ms (runs 23.79 / 16.02 / 14.9 ms) against
+  5.1 ms locally, so the 16 ms budget measured the runner, not the code.
 - The tvOS gate is a separate report-only job (push to `main` and manual runs), not part of the required `tvos` job.
   Why: it needs a Release build of the development variant; changing `tvos` would change what the required check validates.
+- On iOS the gate line is printed with `console.error`, and the tvOS job filters the simulator log by the message text
+  (with a screenshot on timeout). Why: release builds drop info-level JS logs, and the first run captured nothing.
 - The runner fails a real-key burst when fewer moves arrive than presses were sent. Why: a dropped remote key is a
   user-visible failure the gate exists to catch.
 - Runs compare on items and `scripted` (every event the driver emitted), not `moves`. Why: a coalesced repeat lowers
