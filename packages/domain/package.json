@@ -12,6 +12,7 @@
   },
   "devDependencies": {
     "@elv/config": "workspace:*",
+    "fast-check": "catalog:",
     "vitest": "5.1.0"
   }
 }
