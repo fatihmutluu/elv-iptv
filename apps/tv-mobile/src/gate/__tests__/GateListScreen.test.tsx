@@ -1,14 +1,19 @@
-import { render, screen, waitFor } from '@testing-library/react-native';
+import { render, screen } from '@testing-library/react-native';
+import { Platform } from 'react-native';
 import { GateListScreen } from '../GateListScreen';
+import { advance, gateLines, onlyGateMetrics } from './gate-test-utils';
 
-function gateLines(spy: jest.SpyInstance): string[] {
-  return spy.mock.calls
-    .map((call) => String(call[0]))
-    .filter((line) => line.startsWith('ELV_GATE '));
-}
+const autoRun = { items: 1000, auto: true, rate: 60, moves: 20, stall: 0 };
 
 describe('GateListScreen', () => {
-  afterEach(() => jest.restoreAllMocks());
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.replaceProperty(Platform, 'OS', 'android');
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
 
   it('renders the list window for the requested item count', async () => {
     jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -23,57 +28,44 @@ describe('GateListScreen', () => {
 
   it('prints exactly one ELV_GATE line when an auto run finishes', async () => {
     const log = jest.spyOn(console, 'log').mockImplementation(() => {});
-    await render(
-      <GateListScreen params={{ items: 1000, auto: true, rate: 60, moves: 20, stall: 0 }} />,
-    );
-    await waitFor(() => expect(gateLines(log)).toHaveLength(1), { timeout: 8000 });
-    await new Promise<void>((resolve) => setTimeout(resolve, 300));
-    const lines = gateLines(log);
-    expect(lines).toHaveLength(1);
-    const metrics = JSON.parse((lines[0] ?? '').slice('ELV_GATE '.length));
+    await render(<GateListScreen params={autoRun} />);
+    await advance(2000);
+    expect(gateLines(log)).toHaveLength(1);
+    await advance(500);
+    const metrics = onlyGateMetrics(log);
     expect(metrics.items).toBe(1000);
     expect(metrics.moves).toBeGreaterThan(0);
     expect(metrics.scripted).toBe(20);
-    expect(metrics.moves + metrics.coalesced).toBeLessThanOrEqual(metrics.scripted);
+    expect(metrics.moves + (metrics.coalesced as number)).toBeLessThanOrEqual(20);
     expect(metrics.keyToHighlightMs.p95).toBeGreaterThanOrEqual(0);
     expect(metrics.losses).toBe(0);
   });
 
   it('prints nothing for a manual session', async () => {
     const log = jest.spyOn(console, 'log').mockImplementation(() => {});
-    await render(
-      <GateListScreen params={{ items: 1000, auto: false, rate: 60, moves: 20, stall: 0 }} />,
-    );
-    await new Promise<void>((resolve) => setTimeout(resolve, 200));
+    await render(<GateListScreen params={{ ...autoRun, auto: false }} />);
+    await advance(3000);
     expect(gateLines(log)).toHaveLength(0);
   });
 
   it('prints no line when the screen unmounts mid-run', async () => {
     const log = jest.spyOn(console, 'log').mockImplementation(() => {});
-    const view = await render(
-      <GateListScreen params={{ items: 1000, auto: true, rate: 20, moves: 200, stall: 0 }} />,
-    );
-    await new Promise<void>((resolve) => setTimeout(resolve, 800));
+    const view = await render(<GateListScreen params={{ ...autoRun, rate: 20, moves: 200 }} />);
+    await advance(800);
     await view.unmount();
-    await new Promise<void>((resolve) => setTimeout(resolve, 3000));
+    await advance(3000, 100);
     expect(gateLines(log)).toHaveLength(0);
   });
 
   it('prints only the new run line when the params change mid-run', async () => {
     const log = jest.spyOn(console, 'log').mockImplementation(() => {});
-    const first = { items: 1000, auto: true, rate: 20, moves: 200, stall: 0 };
+    const first = { ...autoRun, rate: 20, moves: 200 };
     const view = await render(<GateListScreen key="a" params={first} />);
-    await new Promise<void>((resolve) => setTimeout(resolve, 800));
-    await view.rerender(
-      <GateListScreen
-        key="b"
-        params={{ items: 2000, auto: true, rate: 60, moves: 20, stall: 0 }}
-      />,
-    );
-    await waitFor(() => expect(gateLines(log)).toHaveLength(1), { timeout: 8000 });
-    await new Promise<void>((resolve) => setTimeout(resolve, 3000));
-    const lines = gateLines(log);
-    expect(lines).toHaveLength(1);
-    expect(JSON.parse((lines[0] ?? '').slice('ELV_GATE '.length)).items).toBe(2000);
+    await advance(800);
+    await view.rerender(<GateListScreen key="b" params={{ ...autoRun, items: 2000 }} />);
+    await advance(2000);
+    expect(gateLines(log)).toHaveLength(1);
+    await advance(3000, 100);
+    expect(onlyGateMetrics(log).items).toBe(2000);
   });
 });
