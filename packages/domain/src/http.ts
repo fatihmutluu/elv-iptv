@@ -204,7 +204,13 @@ export function createFetchHttpClient(
           signal: controller.signal,
         };
         if (options?.headers) init.headers = { ...options.headers };
-        const res = await Promise.race([fetchImpl(url, init), aborted]);
+        const attempt = () => Promise.race([fetchImpl(url, init), aborted]);
+        // A pooled keep-alive socket may have been closed by the server while the caller was busy;
+        // GET is idempotent, so one retry on a fresh connection is safe.
+        const res = await attempt().catch((e: unknown) => {
+          if (timedOut || controller.signal.aborted) throw e;
+          return attempt();
+        });
         if (res.status < 200 || res.status >= 300) {
           await discardBody(res.body);
           const category = res.status === 401 || res.status === 403 ? 'auth' : 'network';

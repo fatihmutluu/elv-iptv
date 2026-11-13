@@ -116,6 +116,41 @@ describe('createFetchHttpClient', () => {
     });
   });
 
+  it('retries once when a reused connection was reset before any response', async () => {
+    let calls = 0;
+    const client = createFetchHttpClient(async () => {
+      calls += 1;
+      if (calls === 1) throw new TypeError('fetch failed');
+      return { status: 200, headers: headers({}), body: null };
+    });
+    const r = await client.get('http://h/x');
+    expect(r.ok).toBe(true);
+    expect(calls).toBe(2);
+  });
+
+  it('gives up after one retry and does not retry an aborted request', async () => {
+    let calls = 0;
+    const failing = createFetchHttpClient(async () => {
+      calls += 1;
+      throw new TypeError('fetch failed');
+    });
+    expect(await failing.get('http://h/x')).toEqual({
+      ok: false,
+      error: { category: 'network', code: 'fetch-failed' },
+    });
+    expect(calls).toBe(2);
+    const controller = new AbortController();
+    calls = 0;
+    const aborting = createFetchHttpClient(async () => {
+      calls += 1;
+      controller.abort();
+      throw new TypeError('fetch failed');
+    });
+    const r = await aborting.get('http://h/x', { signal: controller.signal });
+    expect(r).toEqual({ ok: false, error: { category: 'network', code: 'aborted' } });
+    expect(calls).toBe(1);
+  });
+
   it('maps a thrown TypeError to fetch-failed without leaking credentials', async () => {
     const url = 'http://user:secret@h/get.php?username=a&password=hunter2';
     const client = createFetchHttpClient(async (u) => {

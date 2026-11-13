@@ -11,8 +11,10 @@ import type { SourceRecord } from './sources';
 
 /** Thrown inside a run to unwind to the failure handler; never leaves the import modules. */
 export class Stop extends Error {
-  constructor(readonly error: ElvError) {
+  readonly error: ElvError;
+  constructor(error: ElvError) {
     super(error.code);
+    this.error = error;
   }
 }
 

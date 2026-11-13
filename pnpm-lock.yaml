@@ -471,15 +471,24 @@ importers:
       '@elv/config':
         specifier: workspace:*
         version: link:../packages/config
+      '@elv/data':
+        specifier: workspace:*
+        version: link:../packages/data
       '@elv/domain':
         specifier: workspace:*
         version: link:../packages/domain
       '@elv/sources':
         specifier: workspace:*
         version: link:../packages/sources
+      '@types/better-sqlite3':
+        specifier: 7.6.13
+        version: 7.6.13
       '@types/node':
         specifier: 24.19.2
         version: 24.19.2
+      better-sqlite3:
+        specifier: 13.0.3
+        version: 13.0.3
       dependency-cruiser:
         specifier: 18.7.2
         version: 18.7.2

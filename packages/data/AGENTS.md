@@ -9,7 +9,7 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
 - Pure TypeScript: no `react`, `react-native`, `expo*`, `electron` or `node:*` imports.
   Platform access goes through ports defined in `@elv/domain`.
 - Source-first: `exports` points at `src/index.ts`, no build step. Allowed workspace dependencies: `@elv/domain`, `@elv/sources`.
-- Tests live beside the code as `*.test.ts`; helpers `test-db.ts`, `*-test-helpers.ts` are the only places besides tests that use better-sqlite3.
+- Tests live beside the code as `*.test.ts`; helpers `test-db.ts`, `*-test-helpers.ts` are the only places besides tests that use better-sqlite3. Integration and budget tests: `tools/test/import-*.test.ts` run the engine against the simulator (SQLite on disk).
 
 ## Public surface (catalog import round)
 - `createSyncSqlDriver(db)` (`driver.ts`) adapts a synchronous better-sqlite3-shaped database to `SqlDriver`. One promise
