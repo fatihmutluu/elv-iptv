@@ -64,16 +64,43 @@ describe('createRecorder', () => {
     expect(m.losses).toBe(0);
   });
 
-  it('counts coalesced repeats and the longest gap', () => {
+  it('counts coalesced repeats', () => {
     const r = createRecorder(geometry);
     r.coalesce();
     r.coalesce();
-    r.gap(3);
-    r.gap(11.5);
-    r.gap(2);
-    const m = r.finish();
-    expect(m.coalesced).toBe(2);
-    expect(m.maxJsGapMs).toBe(11.5);
+    expect(r.finish().coalesced).toBe(2);
+  });
+
+  it('measures the synchronous work from dispatch to the end of the commit', () => {
+    const r = createRecorder(geometry);
+    r.workStart(10);
+    r.workStart(12);
+    r.workEnd(31);
+    r.workEnd(50);
+    r.workStart(100);
+    r.workEnd(104);
+    expect(r.finish().maxJsGapMs).toBe(21);
+  });
+
+  it('treats a late animation frame as a stalled JS thread', () => {
+    const r = createRecorder(geometry);
+    for (const delta of [16, 17, 16, 17, 16, 40]) r.frameDelta(delta);
+    expect(r.finish().maxJsGapMs).toBe(23);
+  });
+
+  it('does not report frame jitter below the typical frame time', () => {
+    const r = createRecorder(geometry);
+    for (const delta of [16, 16, 16]) r.frameDelta(delta);
+    expect(r.finish().maxJsGapMs).toBe(0);
+  });
+
+  it('reports the larger of the commit work and the frame stall, and resets per run', () => {
+    const r = createRecorder(geometry);
+    for (const delta of [16, 16, 16, 30]) r.frameDelta(delta);
+    r.workStart(0);
+    r.workEnd(9);
+    expect(r.finish().maxJsGapMs).toBe(14);
+    expect(r.finish().maxJsGapMs).toBe(0);
   });
 
   it('counts a settled frame that shows a stale index and moves that never committed as losses', () => {
@@ -109,6 +136,7 @@ describe('createRecorder', () => {
 
   it('resolves pending moves whose net effect left the index unchanged', () => {
     const r = createRecorder(geometry);
+    r.workStart(0);
     r.move(0);
     r.move(4);
     r.resolve(10);
@@ -116,6 +144,16 @@ describe('createRecorder', () => {
     const m = r.finish();
     expect(m.losses).toBe(0);
     expect(m.keyToHighlightMs.max).toBe(10);
+  });
+
+  it('drops a dispatch time that no commit will close', () => {
+    const r = createRecorder(geometry);
+    r.workStart(0);
+    r.move(0);
+    r.resolve(10);
+    r.workStart(20);
+    r.workEnd(23);
+    expect(r.finish().maxJsGapMs).toBe(3);
   });
 
   it('resets after finish', () => {

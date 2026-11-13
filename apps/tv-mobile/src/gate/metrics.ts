@@ -24,8 +24,18 @@ function nearestRank(sorted: readonly number[], p: number): number {
 }
 
 /**
+ * How far the slowest animation frame overshot the typical one: a JS thread that is busy delays its next
+ * `requestAnimationFrame` callback, so the overshoot is a lower bound of the longest JS task. 0 when there are no frames.
+ */
+function frameStall(deltas: readonly number[]): number {
+  if (deltas.length === 0) return 0;
+  const sorted = [...deltas].sort((a, b) => a - b);
+  return Math.max(0, (sorted[sorted.length - 1] ?? 0) - (sorted[sorted.length >> 1] ?? 0));
+}
+
+/**
  * Summarizes key-to-highlight `samples` (ms) with nearest-rank p50/p95 and the maximum, and the event-loop `gaps`
- * (ms over the 4 ms sampling interval) with their maximum. Inputs are not modified.
+ * (ms: the longest JS task candidates) with their maximum. Inputs are not modified.
  */
 export function summarize(
   samples: readonly number[],
@@ -60,8 +70,12 @@ export interface Recorder {
   move(t0: number): void;
   /** A repeat was dropped because the previous move had not committed yet. */
   coalesce(): void;
-  /** One event-loop sample: the lag in ms beyond the sampling interval. */
-  gap(ms: number): void;
+  /** A move was dispatched at `t` (ms); ignored while an earlier dispatch still waits for its commit. */
+  workStart(t: number): void;
+  /** A React commit of the list finished at `t`; the synchronous work since `workStart` is a JS task sample. */
+  workEnd(t: number): void;
+  /** The time (ms) between two consecutive animation frames while the run was active. */
+  frameDelta(ms: number): void;
   /** A frame showing `window` committed `index` at `t1` while the store's current index was `current`. */
   commit(t1: number, index: number, current: number, window: FrameWindow): void;
   /** Resolves pending moves at `t1` when their net effect left the index unchanged, so no frame was reported. */
@@ -81,6 +95,8 @@ export interface Recorder {
 export function createRecorder(geometry: { items: number }): Recorder {
   let samples: number[] = [];
   let gaps: number[] = [];
+  let deltas: number[] = [];
+  let workAt: number | undefined;
   let pendingT0: number[] = [];
   let moves = 0;
   let coalesced = 0;
@@ -95,8 +111,16 @@ export function createRecorder(geometry: { items: number }): Recorder {
     coalesce() {
       coalesced++;
     },
-    gap(ms) {
-      gaps.push(ms);
+    workStart(t) {
+      workAt ??= t;
+    },
+    workEnd(t) {
+      if (workAt === undefined) return;
+      gaps.push(t - workAt);
+      workAt = undefined;
+    },
+    frameDelta(ms) {
+      deltas.push(ms);
     },
     commit(t1, index, current, window) {
       for (const t0 of pendingT0) samples.push(t1 - t0);
@@ -114,6 +138,7 @@ export function createRecorder(geometry: { items: number }): Recorder {
       settled = { index, current };
     },
     resolve(t1) {
+      workAt = undefined;
       for (const t0 of pendingT0) samples.push(t1 - t0);
       pendingT0.length = 0;
     },
@@ -121,7 +146,7 @@ export function createRecorder(geometry: { items: number }): Recorder {
     finish() {
       let total = losses + pendingT0.length;
       if (settled !== undefined && settled.index !== settled.current) total++;
-      const result = summarize(samples, gaps, {
+      const result = summarize(samples, [...gaps, frameStall(deltas)], {
         moves,
         coalesced,
         losses: total,
@@ -129,6 +154,8 @@ export function createRecorder(geometry: { items: number }): Recorder {
       });
       samples = [];
       gaps = [];
+      deltas = [];
+      workAt = undefined;
       pendingT0 = [];
       moves = 0;
       coalesced = 0;

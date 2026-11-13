@@ -7,7 +7,15 @@ import {
   type KeyEvent,
 } from '@elv/focus-core';
 import { createSyntheticSource, type FrameWindow, TvList, useTvKeySource } from '@elv/ui-kit';
-import { type ReactElement, useCallback, useEffect, useMemo, useRef } from 'react';
+import {
+  type ReactElement,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+} from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { createAutoDriver } from './driver';
 import { createRecorder, gateLine } from './metrics';
@@ -17,7 +25,6 @@ const LIST_ID = 'list';
 const ROW_HEIGHT = 72;
 const VISIBLE_ROWS = 10;
 const FOCUS_LINE = 2;
-const LAG_INTERVAL_MS = 4;
 const WARMUP_MS = 500;
 const SETTLE_POLL_MS = 25;
 const SETTLE_TIMEOUT_MS = 2000;
@@ -47,6 +54,17 @@ const rowLabel = (item: Channel | undefined): string => item?.name ?? '';
 
 const currentIndex = (store: FocusStore): number =>
   findList(store.getState().scopes, LIST_ID)?.list.index ?? 0;
+
+/**
+ * Renders nothing. It re-renders in the same commit as the list (same store subscription) and its layout effect runs
+ * after the list's own, so `onCommit` marks the end of that commit's synchronous JS work.
+ */
+function CommitProbe({ store, onCommit }: { store: FocusStore; onCommit: () => void }): null {
+  const subscribe = useCallback((cb: () => void) => store.subscribe(cb), [store]);
+  const index = useSyncExternalStore(subscribe, () => currentIndex(store));
+  useLayoutEffect(onCommit, [index]);
+  return null;
+}
 
 /** Props of {@link GateListScreen}. */
 export interface GateListScreenProps {
@@ -91,8 +109,12 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
   const apply = useCallback(
     (event: KeyEvent, t0: number) => {
       const before = currentIndex(store);
+      recorder.workStart(performance.now());
       store.dispatch(event);
-      if (currentIndex(store) === before) return;
+      if (currentIndex(store) === before) {
+        recorder.workEnd(performance.now());
+        return;
+      }
       recorder.move(t0);
       if (frameCheck.current) return;
       frameCheck.current = true;
@@ -149,15 +171,19 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
     [recorder, store, interpreter],
   );
 
+  const onCommit = useCallback(() => recorder.workEnd(performance.now()), [recorder]);
+
   useEffect(() => {
-    let last = performance.now();
-    const id = setInterval(() => {
+    let last: number | undefined;
+    let frame = 0;
+    const tick = () => {
       const now = performance.now();
-      const gap = now - last - LAG_INTERVAL_MS;
-      last = now;
-      if (active.current && gap > 0.5) recorder.gap(gap);
-    }, LAG_INTERVAL_MS);
-    return () => clearInterval(id);
+      if (active.current && last !== undefined) recorder.frameDelta(now - last);
+      last = active.current ? now : undefined;
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
   }, [recorder]);
 
   useEffect(() => {
@@ -216,7 +242,7 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
   );
 
   return (
-    <View style={styles.root}>
+    <View style={styles.root} focusable hasTVPreferredFocus>
       <Text style={styles.header}>{`${items} items`}</Text>
       <TvList
         listId={LIST_ID}
@@ -230,6 +256,7 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
         testID="gate-list"
         onFrameCommitted={onFrameCommitted}
       />
+      <CommitProbe store={store} onCommit={onCommit} />
     </View>
   );
 }

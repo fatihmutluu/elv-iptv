@@ -5,8 +5,7 @@ It is a composition root: it wires modules, storage drivers, routes and stores.
 
 ## Commands
 - `pnpm run:app <target> run|build` launches or prebuilds a target (see `tools/`).
-- `pnpm --filter tv-mobile test` runs the config Vitest tests only; `test:jest` runs the component
-  tests; `pnpm check` runs both.
+- `pnpm --filter tv-mobile test` runs the config Vitest tests, `test:jest` the component tests; `pnpm check` both.
 - `pnpm --filter tv-mobile exec expo-doctor` and `exec expo install --check` are release gates.
 
 ## Rules
@@ -34,13 +33,14 @@ It is a composition root: it wires modules, storage drivers, routes and stores.
   page then `repeat` steps), page jumps (`channelDown`), single presses, then the mirror going up. It ends at index 0
   when the list is longer than the deepest excursion (about 600 rows at 600 moves); an odd `moves` is rounded down.
   The screen drops a `repeat` that arrives while the previous move has not committed and counts it as `coalesced`.
-- Real keys: the screen also mounts `useTvKeySource` -> `createKeyInterpreter` -> store, ticking the interpreter
-  while a key is down and acknowledging repeats from `onFrameCommitted`. With `auto=0` it prints one line after 2 s
-  without a move (for `--real-keys`).
-- Metrics (`metrics.ts`): `t0` is the dispatch time (auto) or the key event time (real); `t1` is `performance.now()`
-  inside `onFrameCommitted` (first frame after row and ring committed); key-to-highlight is `t1 - t0` for each move
-  that the commit covers. `maxJsGapMs` is the largest (gap - 4 ms) of a 4 ms `setInterval` while a run is active.
-  Percentiles are nearest-rank (`ceil(p * n)`-th smallest), rounded to 0.01 ms.
+- Real keys: the root view is `focusable` with `hasTVPreferredFocus`; with no focused view Android delivers no remote keys
+  to `TVEventHandler`. `useTvKeySource` -> `createKeyInterpreter` -> store; the interpreter ticks while a key is down and
+  repeats are acknowledged from `onFrameCommitted`. With `auto=0` it prints one line after 2 s without a move (`--real-keys`).
+- Metrics (`metrics.ts`): `t0` is the dispatch time (auto) or the key event time (real); `t1` is `performance.now()` inside
+  `onFrameCommitted` (first frame after row and ring committed); key-to-highlight is `t1 - t0` per move that commit covers.
+  `maxJsGapMs` is the longest JS task: the larger of the synchronous work per move (dispatch to the end of the list commit,
+  ended by `CommitProbe`) and the `requestAnimationFrame` overshoot (slowest frame delta minus the median). A 4 ms
+  `setInterval` fires once per frame on Android (16.7 ms idle): it measured frame quantisation. Percentiles: nearest-rank.
 - `losses`: a committed frame whose focused index is outside `[0, items)`, outside the visible window that `TvList` reported for
   that frame, or outside the rows it rendered; plus 1 if the last committed index differs from the store's index once
   the run settles; plus every move that never got a committed frame (after a 2 s settle timeout). Moves whose net effect
