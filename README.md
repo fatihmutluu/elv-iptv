@@ -20,17 +20,17 @@ A cross-platform player for live TV, movies and series from sources you bring: M
 
 | Platform | Runtime | Status |
 |---|---|---|
-| Android phone and tablet | Expo app | Round 0 |
-| Android TV / Google TV | Expo app (TV build) | Round 0 |
-| Fire TV (Fire OS 7+) | Expo app (TV build) | Round 0 |
-| iPhone and iPad (18+) | Expo app | Round 0 |
-| Apple TV (tvOS 18+) | Expo app (TV build) | Round 0 |
-| Windows 10/11 | Electron + react-native-web | Round 0 |
-| macOS | Electron + react-native-web | Round 0 |
-| Linux | Electron + react-native-web | Best effort |
-| Fire TV (Vega OS) | Separate app sharing packages | Planned, after Android TV and Fire OS are stable |
-| Samsung Tizen | Web-TV app from the react-native-web bundle | Planned, placeholder |
-| LG webOS | Web-TV app from the same bundle | Planned, after Tizen |
+| Android phone and tablet | Expo app | Scaffolded |
+| Android TV / Google TV | Expo app (TV build) | Scaffolded |
+| Fire TV (Fire OS 7+) | Expo app (TV build) | Scaffolded |
+| iPhone and iPad (18+) | Expo app | Scaffolded |
+| Apple TV (tvOS 18+) | Expo app (TV build) | Scaffolded |
+| Windows 10/11 | Electron + react-native-web | Scaffolded |
+| macOS | Electron + react-native-web | Scaffolded |
+| Linux | Electron + react-native-web | Scaffolded, best effort |
+| Fire TV (Vega OS) | Separate app sharing packages | Planned |
+| Samsung Tizen | Web-TV app from the react-native-web bundle | Planned |
+| LG webOS | Web-TV app from the same bundle | Planned |
 
 Hardware that the project does not own is tested on emulators and simulators and marked "not verified on hardware".
 

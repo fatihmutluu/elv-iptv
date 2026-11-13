@@ -1,6 +1,6 @@
 # tools (`@elv/tools`)
 
-TypeScript scripts for the repository: project checks, app launcher, bootstrap.
+TypeScript scripts for the repository: project checks, app launcher, bootstrap, scaffolder.
 Node 24 runs the `.ts` files directly (type stripping), so use erasable syntax only
 (no enums, no namespaces, no constructor parameter properties) and `.ts` import suffixes.
 
@@ -13,15 +13,19 @@ Node 24 runs the `.ts` files directly (type stripping), so use erasable syntax o
 - `pnpm bootstrap` checks versions, installs dependencies and git hooks, looks for gitleaks.
 - `pnpm run:app <target> [build] [--production]` launches or builds a target.
   Targets: android, android-tv, fire-tv, ios, tvos, windows, macos, linux.
+- `pnpm scaffold <pure|rn|module> <name>` creates a workspace package (skill `add-package`).
 - `pnpm --filter @elv/tools test` runs this package's Vitest suite.
 
 ## Layout
-- `src/` library modules, each unit-tested: `env`, `run-command`, `file-size`,
-  `agents-stubs`, `runner`, `root`, `bootstrap`, plus `checks` (check definitions) and `exec`.
+- `src/` library modules, each unit-tested: `env`, `run-command`, `prebuild-stamp`, `scaffold`,
+  `file-size`, `agents-stubs`, `runner`, `root`, `bootstrap`, plus `checks` (check definitions)
+  and `exec`.
 - `bin/` thin entry points that parse arguments and call `src/`.
-- `test/` Vitest tests, including linked-workspace tests (`dependency-links.test.ts`). `test/fixtures/<case>/` are tiny workspaces used to prove the
-  dependency-cruiser rules in `/.dependency-cruiser.cjs`; they are excluded from Biome,
-  tsc, knip and the real `deps` check.
+- `test/` Vitest tests. Linked-workspace tests (`dependency-links.test.ts`) and fixture cases
+  (`test/fixtures/<case>/`, tiny workspaces) prove the rules in `/.dependency-cruiser.cjs`;
+  fixtures are excluded from Biome, tsc, knip and the real `deps` check.
+  `dependency-coverage.test.ts` fails when a package has no rule of its own, and
+  `biome-restricted-imports.test.ts` proves the Biome import ban for pure packages.
 
 ## Rules
 - Dev credentials: `.env.local` is read by `run:app` only. `DEV_*` keys reach development

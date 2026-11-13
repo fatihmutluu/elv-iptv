@@ -14,10 +14,12 @@ Users bring their own M3U or Xtream Codes source; the project ships no content. 
 
 ## Commands
 - `pnpm bootstrap` checks versions, installs dependencies and git hooks.
-- `pnpm check` runs every check and prints only failures plus `check: N passed, M failed`.
+- `pnpm check` runs every check and prints failures, notes and warnings, plus
+  `check: N passed, M failed`.
 - `pnpm check --only <key>` runs one check; keys are listed in `tools/AGENTS.md`.
 - `pnpm run:app <target> [build] [--production]` launches or builds a target
   (android, android-tv, fire-tv, ios, tvos, windows, macos, linux).
+- `pnpm scaffold <pure|rn|module> <name>` creates a workspace package (skill `add-package`).
 - `pnpm --filter <package> test` runs one package's tests. From a package folder use `pnpm -w check`.
 
 ## Definition of done

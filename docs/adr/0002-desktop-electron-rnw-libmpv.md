@@ -22,12 +22,12 @@ Windows, macOS and Linux should reuse the TypeScript UI. The hard problem on des
 
 ## Decision outcome
 
-Electron with a react-native-web renderer (a web-only Expo project). libmpv runs in a helper process and renders offscreen; frames reach a WebGL canvas through shared memory so DOM overlays work. better-sqlite3 runs in a utility process; electron-builder packages the app. The first proof gate (Round 1) is frame-copy plus a DOM OSD on Windows; the fallback is an external mpv window. HDR passthrough is not decided here.
+Electron with a react-native-web renderer (a web-only Expo project). libmpv runs in a helper process and renders offscreen; frames reach a WebGL canvas through shared memory so DOM overlays work. better-sqlite3 runs in a utility process; electron-builder packages the app. The first proof gate (Round 1) is frame-copy plus a DOM OSD on Windows; the fallback is an external mpv window.
 
 ### Consequences
 
 - Good: one UI codebase; crash isolation; OSD in the DOM.
-- Bad: installs of roughly 200 MB or more; SDR-only canvas path; a nontrivial native build burden; shared memory under the Mac App Store sandbox is unproven.
+- Bad: the frame-copy path is unproven in Electron with react-native-web; own LGPL libmpv and FFmpeg builds are a nontrivial native build burden; shared memory under the Mac App Store sandbox is unproven.
 
 ## Links
 

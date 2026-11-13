@@ -21,9 +21,10 @@ The signature covers all your present and future contributions. Details are in [
 ## Getting started
 
 ```
-pnpm bootstrap          # checks versions, installs dependencies and git hooks
-pnpm check              # runs every check; prints only failures and a summary
-pnpm run:app <target>   # android, android-tv, fire-tv, ios, tvos, windows, macos, linux
+pnpm bootstrap                 # checks versions, installs dependencies and git hooks
+pnpm check                     # runs every check; prints failures, notes, warnings and a summary
+pnpm run:app <target>          # android, android-tv, fire-tv, ios, tvos, windows, macos, linux
+pnpm scaffold <kind> <name>    # creates a workspace package (kind: pure, rn or module)
 ```
 
 `pnpm check --only <key>` runs one check. See [tools/AGENTS.md](tools/AGENTS.md) for all keys.

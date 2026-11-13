@@ -25,7 +25,7 @@ React Native through Expo SDK 58 (React 19.3), with `react-native` aliased to `r
 
 ### Consequences
 
-- Good: one codebase reaches seven platforms; the TV fork tracks React Native releases closely; the Expo Modules API fits native engines.
+- Good: one codebase reaches phone, tablet, Android TV, Fire OS, iOS, iPadOS and tvOS; the TV fork tracks React Native releases closely; the Expo Modules API fits native engines.
 - Bad: TV focus and long lists need our own code (ADR 0004); upstream TV regressions are possible; we own the native build pipeline.
 
 ## Links
