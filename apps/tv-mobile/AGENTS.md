@@ -45,6 +45,6 @@ It is a composition root: it wires modules, storage drivers, routes and stores.
   the run settles; plus every move that never got a committed frame (after a 2 s settle timeout). Moves whose net effect
   left the index unchanged within a frame (A to B to A) get no `TvList` callback; the screen resolves them in its own
   animation frame and they are not losses. Unmounting or changing the params mid-run prints nothing for that run.
-- Output: exactly one `console.log('ELV_GATE ' + JSON.stringify(metrics))` per auto run (release builds still send it
-  to logcat under `ReactNativeJS`). Pure gate tests run in Vitest (`src/gate/**/*.test.ts`), component ones in Jest on
-  fake timers (`advance` in `__tests__/gate-test-utils.ts`), never on real waits.
+- Output: exactly one `'ELV_GATE ' + JSON.stringify(metrics)` line per auto run, `console.log` on Android (logcat
+  `ReactNativeJS`), `console.error` on iOS (release builds drop info-level logs). Pure gate tests run in Vitest
+  (`src/gate/**/*.test.ts`), component ones in Jest on fake timers (`advance` in `__tests__/gate-test-utils.ts`), no real waits.

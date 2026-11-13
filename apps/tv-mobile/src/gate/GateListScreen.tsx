@@ -16,7 +16,7 @@ import {
   useRef,
   useSyncExternalStore,
 } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { createAutoDriver } from './driver';
 import { createRecorder, gateLine } from './metrics';
 import type { GateParams } from './routes';
@@ -111,8 +111,12 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
   const ticker = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   const emit = useCallback(() => {
-    // biome-ignore lint/suspicious/noConsole: the gate runner reads this line from logcat
-    console.log(gateLine(recorder.finish()));
+    const line = gateLine(recorder.finish());
+    // Release builds on iOS drop info-level JS logs before they reach the system log; errors still get through.
+    // biome-ignore lint/suspicious/noConsole: the gate runners read this line from logcat or the simulator log
+    if (Platform.OS === 'ios') console.error(line);
+    // biome-ignore lint/suspicious/noConsole: the gate runners read this line from logcat or the simulator log
+    else console.log(line);
   }, [recorder]);
 
   const apply = useCallback(

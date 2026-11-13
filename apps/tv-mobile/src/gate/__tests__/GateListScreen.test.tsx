@@ -41,6 +41,21 @@ describe('GateListScreen', () => {
     expect(metrics.losses).toBe(0);
   });
 
+  it.each([
+    ['android', 'log', 'error'],
+    ['ios', 'error', 'log'],
+  ] as const)('prints the line on %s with console.%s, not console.%s', async (os, used, unused) => {
+    jest.replaceProperty(Platform, 'OS', os);
+    const spies = {
+      log: jest.spyOn(console, 'log').mockImplementation(() => {}),
+      error: jest.spyOn(console, 'error').mockImplementation(() => {}),
+    };
+    await render(<GateListScreen params={autoRun} />);
+    await advance(2000);
+    expect(gateLines(spies[used])).toHaveLength(1);
+    expect(gateLines(spies[unused])).toHaveLength(0);
+  });
+
   it('prints nothing for a manual session', async () => {
     const log = jest.spyOn(console, 'log').mockImplementation(() => {});
     await render(<GateListScreen params={{ ...autoRun, auto: false }} />);
