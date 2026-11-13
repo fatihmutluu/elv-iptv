@@ -13,4 +13,5 @@ Screens and view models, one folder per feature, with ports for platform service
   and are wired by each app.
 - Source-first: `exports` points at `src/index.ts`; there is no build step.
 - Component tests use Jest with `jest-expo` and `@testing-library/react-native`
-  (`*.test.tsx` beside the code), run through a `test:jest` script.
+  (`*.test.tsx` beside the code). With the first component, add a `test:jest` script
+  and the Jest dev dependencies as in `apps/tv-mobile`; `pnpm check` runs it.

@@ -14,4 +14,5 @@ React components for react-native and react-native-web, design tokens and TV foc
 - Layout forks (TV, phone, tablet, desktop) happen in a few container components chosen by an
   explicit form-factor value, never by file-name suffix.
 - Component tests use Jest with `jest-expo` and `@testing-library/react-native`
-  (`*.test.tsx` beside the component), run through a `test:jest` script.
+  (`*.test.tsx` beside the component). With the first component, add a `test:jest` script
+  and the Jest dev dependencies as in `apps/tv-mobile`; `pnpm check` runs it.

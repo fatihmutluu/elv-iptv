@@ -91,7 +91,8 @@ function agentsDoc(kind: PackageKind, name: string): string {
       '- Allowed workspace dependencies: TODO (spec section 5.2).',
       '- Source-first: `exports` points at `src/index.ts`; there is no build step.',
       '- Component tests use Jest with `jest-expo` and `@testing-library/react-native`',
-      '  (`*.test.tsx` beside the component), run through a `test:jest` script.',
+      '  (`*.test.tsx` beside the component). With the first component, add a `test:jest` script',
+      '  and the Jest dev dependencies as in `apps/tv-mobile`; `pnpm check` runs it.',
     ],
     module: [
       '- Expo native module: imports `expo-modules-core` and playback types only.',

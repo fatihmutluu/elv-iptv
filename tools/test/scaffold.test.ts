@@ -81,6 +81,11 @@ describe('scaffoldFiles rn', () => {
   it('documents the Jest component test convention', () => {
     expect(files['packages/screens/AGENTS.md']).toContain('jest-expo');
   });
+
+  it('defers the Jest setup to the first component instead of naming a missing script', () => {
+    expect(json(files, 'packages/screens/package.json').scripts['test:jest']).toBeUndefined();
+    expect(files['packages/screens/AGENTS.md']).toContain('add a `test:jest` script');
+  });
 });
 
 describe('scaffoldFiles module', () => {

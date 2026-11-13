@@ -10,7 +10,8 @@ spec section 5.2 (`docs/superpowers/specs/2026-11-13-foundation-design.md`).
 
 ## Pick the kind
 - `pure`: `packages/<name>/`, Vitest, no `react`, `react-native`, `expo*`, `electron` or `node:*`. Models, logic, ports.
-- `rn`: `packages/<name>/`, may import `react` and `react-native` (versions from the pnpm `catalog:`), Jest component tests.
+- `rn`: `packages/<name>/`, may import `react` and `react-native` (versions from the pnpm `catalog:`), Jest component tests
+  (the first component adds the `test:jest` script and Jest dependencies, as in `apps/tv-mobile`).
 - `module`: `modules/<name>/`, Expo native module. The scaffold writes `expo-module.config.json` (platforms apple,
   android, web) and a TypeScript entry that returns `null` on web. It generates no Swift or Kotlin; add those and the
   `apple.modules` / `android.modules` config entries with the module's first native API.
