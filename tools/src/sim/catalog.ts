@@ -168,10 +168,10 @@ const VIDEO_RECIPES: readonly RecipeName[] = [
 const SMALL_FAULTS: Readonly<Record<number, string>> = { 1013: 'status=503', 1014: 'drop@10s' };
 const COMPAT_NAMES: Partial<Record<CompatCase, string>> = {
   'empty-name': '',
-  'long-name': `Long ${'Name '.repeat(60)}`.trim(),
-  'quotes-commas': 'Say "Hello", Friends, Again',
-  'turkish-name': 'İstanbul Işık Çağrı Şöhret',
-  'rtl-name': 'قناة الأخبار',
+  'long-name': `${'Long Name '.repeat(29)}Long Name.`,
+  'quotes-commas': 'Channel "Quoted", With, Commas',
+  'turkish-name': 'Kanal İğüşöçı',
+  'rtl-name': 'قناة ٤٢',
 };
 
 interface Shape {
