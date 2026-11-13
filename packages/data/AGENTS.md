@@ -3,8 +3,7 @@
 Schema, migrations and repositories for catalog, EPG and user data, over the `SqlDriver` port.
 
 ## Commands
-- `pnpm --filter @elv/data typecheck` type-checks this package.
-- `pnpm --filter @elv/data test` runs its Vitest tests.
+- `pnpm --filter @elv/data typecheck` and `... test` type-check and test this package.
 - `pnpm -w check` runs every repository check.
 
 ## Rules
@@ -35,8 +34,7 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
   Credentials live only in the `SecretStore` (`source:<id>:xtream|playlist|urlvars`); `settings_json` holds none.
   There are no foreign keys, so `removeSource` deletes from every table of the source explicitly; a new table with
   `source_id` must be added to its list.
-- `src/test-db.ts` (test helper, not exported): `testDb()`, `memorySecrets()`, `countingScheduler()`. better-sqlite3 is a
-  dev dependency imported only by this helper and tests.
+- `test-db.ts`, `import-test-helpers.ts` (test helpers, not exported): `testDb()`, `memorySecrets()`, `setup()`, `setupM3u()`; better-sqlite3 only there and in tests.
 - `importCatalog` / `loadSeriesEpisodes` (`import-xtream.ts`; types in `import-types.ts`; `runs.ts`, `writers.ts`). A run
   upserts with `ON CONFLICT DO UPDATE ... run_id = excluded.run_id` (stable row ids), yields after every batch, checks
   `signal.aborted` before every batch. Stale rows (`run_id < current`) are deleted and the run marked `ok` in one
@@ -45,4 +43,8 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
   (`storage/import-in-progress`); `openCatalog` marks leftover `running` runs `failed/interrupted`. `onProgress`
   exceptions are ignored. Xtream: account check first, then categories, live, movies, series; `source-format/too-large`
   falls back to per-category calls; placement `position` is provider order within the category. Episodes load on
-  demand (`loadSeriesEpisodes`) and survive re-imports while their series exists. M3U: `unsupported-source` for now.
+  demand (`loadSeriesEpisodes`) and survive re-imports while their series exists.
+- M3U (`import-m3u.ts`, `m3u-templating.ts`, `writers-m3u.ts`; run lifecycle `performRun` in `import-run.ts`): entry URLs, logos
+  and live referers are templates (rules from the first 1,000 entries, majority value expected, minority stays
+  literal; clashing values get `~<n>`); `kindHint` picks the table, episodes sit under a synthetic series per `group-title`;
+  `url-tvg` goes to `settings_json.discoveredGuideUrls`; no header and no entries is `source-format/not-a-playlist`.

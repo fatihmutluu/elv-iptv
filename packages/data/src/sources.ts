@@ -21,6 +21,8 @@ export interface SourceSettings {
   vodPlaylist?: boolean;
   segmentRules?: SegmentRule[];
   guideWindow?: { daysBack: number; daysForward: number };
+  /** Guide URL templates found in the playlist header (`{{g:...}}` values live in `source:<id>:urlvars`). */
+  discoveredGuideUrls?: string[];
 }
 
 /** A row of the `sources` table. */
@@ -171,7 +173,10 @@ function playlistFacts(
  * segments it shares (the account token) become placeholders; on another host the whole URL is a secret
  * (`{{g:url}}`). Variable names carry a `g:` prefix so they cannot clash with entry URL values.
  */
-function templateGuide(guideUrl: string, playlistUrl: string): { template: string; vars: UrlVars } {
+export function templateGuide(
+  guideUrl: string,
+  playlistUrl: string,
+): { template: string; vars: UrlVars } {
   const playlist = playlistFacts(playlistUrl);
   const guide = playlistFacts(guideUrl);
   if (playlist === undefined || guide === undefined || playlist.host !== guide.host) {

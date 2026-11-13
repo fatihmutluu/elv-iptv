@@ -236,13 +236,15 @@ describe('xtream import', () => {
     expect(await count(e.db, 'categories')).toBe(0);
   });
 
-  it('reports unknown sources, m3u sources and missing secrets', async () => {
+  it('reports unknown sources, unsupported kinds and missing secrets', async () => {
     const e = await setup(sampleCatalog());
     expectErr(await importCatalog('nope', e.deps), 'storage', 'source-not-found');
     await e.secrets.delete('source:s1:xtream');
     expectErr(await run(e), 'storage', 'secret-missing');
     await e.db.run("INSERT INTO sources VALUES ('m', 'm3u', 'M', 1, '{}')");
-    expectErr(await importCatalog('m', e.deps), 'source-format', 'unsupported-source');
+    expectErr(await importCatalog('m', e.deps), 'storage', 'secret-missing');
+    await e.db.run("INSERT INTO sources VALUES ('o', 'other', 'O', 1, '{}')");
+    expectErr(await importCatalog('o', e.deps), 'source-format', 'unsupported-source');
   });
 
   it('turns a storage failure into a failed run', async () => {

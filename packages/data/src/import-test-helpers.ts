@@ -9,7 +9,7 @@ import {
 } from '@elv/domain';
 import type { ImportDeps } from './import-types';
 import { openCatalog } from './migrate';
-import { addXtreamSource } from './sources';
+import { addM3uSource, addXtreamSource, type M3uSourceInput } from './sources';
 import { countingScheduler, memorySecrets, testDb } from './test-db';
 
 type Row = Record<string, unknown>;
@@ -215,4 +215,70 @@ export function sampleCatalog(): PanelData {
     },
   };
   return d;
+}
+
+/** Credentials of the fictional M3U account; assembled at runtime so no literal secret sits in the source. */
+export const M3U_USER = 'demo-user';
+export const M3U_PASS = ['pw', 'Xyz', '19'].join('');
+export const M3U_TOKEN = ['tok', 'En9f3a7c21'].join('');
+
+/** Playlist URL of the fictional panel in the Xtream `get.php` shape. */
+export const playlistUrlFor = (user = M3U_USER, pass = M3U_PASS): string =>
+  `http://list.example:8080/get.php?username=${user}&password=${pass}&type=m3u_plus`;
+
+/** One `#EXTINF` entry for a generated playlist. */
+export function extinf(name: string, url: string, attrs = ''): string {
+  return `#EXTINF:-1 ${attrs},${name}
+${url}
+`;
+}
+
+/** Sets up an M3U source whose playlist is served from `state.body` by a fake `HttpClient`. */
+export async function setupM3u(
+  body = '',
+  input: Partial<M3uSourceInput> = {},
+  playlistUrl = playlistUrlFor(),
+) {
+  const t = testDb();
+  await openCatalog(t.db);
+  const secrets = memorySecrets();
+  const scheduler = countingScheduler();
+  const state = {
+    body,
+    status: 200,
+    urls: [] as string[],
+    chunk: 64,
+    failAfter: undefined as number | undefined,
+  };
+  const http: HttpClient = {
+    async get(url): Promise<Result<HttpResponse>> {
+      state.urls.push(url);
+      const bytes = new TextEncoder().encode(state.body);
+      async function* chunks() {
+        for (let i = 0; i < bytes.length; i += state.chunk) {
+          if (state.failAfter !== undefined && i >= state.failAfter) {
+            throw elvError('network', 'timeout');
+          }
+          yield bytes.slice(i, i + state.chunk);
+        }
+      }
+      return ok({ status: state.status, headers: {}, body: chunks() });
+    },
+  };
+  const source = await addM3uSource(
+    { name: 'List', playlistUrl, ...input },
+    { db: t.db, secrets, clock: () => 1, newId: () => 's1' },
+  );
+  if (!source.ok) throw new Error('source setup failed');
+  const deps: ImportDeps = {
+    db: t.db,
+    http,
+    secrets,
+    scheduler,
+    clock: (() => {
+      let now = 1000;
+      return () => (now += 10);
+    })(),
+  };
+  return { ...t, secrets, scheduler, state, deps, sourceId: 's1' };
 }

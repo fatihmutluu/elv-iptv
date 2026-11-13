@@ -1,26 +1,13 @@
-import {
-  type ElvError,
-  elvError,
-  err,
-  ok,
-  type Result,
-  type SqlDriver,
-  xtreamKey,
-} from '@elv/domain';
+import { elvError, err, ok, type Result, xtreamKey } from '@elv/domain';
 import {
   createXtreamClient,
   type XtreamCategory,
   type XtreamClient,
   type XtreamClientOptions,
 } from '@elv/sources';
-import {
-  DEFAULT_BATCH_SIZE,
-  type ImportDeps,
-  type ImportOptions,
-  type ImportProgress,
-  type ImportSummary,
-} from './import-types';
-import { finishRun, removeStale, startRun } from './runs';
+import { importM3u } from './import-m3u';
+import { checkAbort, notify, performRun, type RunCtx, Stop, unwrap } from './import-run';
+import type { ImportDeps, ImportOptions, ImportProgress, ImportSummary } from './import-types';
 import { getSource, type SourceRecord, secretKey } from './sources';
 import {
   type ItemWriter,
@@ -36,43 +23,7 @@ import {
 
 type ItemKind = 'live' | 'movie' | 'series';
 
-/** Thrown inside a run to unwind to the failure handler; never leaves this module. */
-class Stop extends Error {
-  constructor(readonly error: ElvError) {
-    super(error.code);
-  }
-}
-
-/** Calls `onProgress`; a throwing callback is ignored so it can never change the outcome of a run. */
-function notify(opts: ImportOptions, p: ImportProgress): void {
-  try {
-    opts.onProgress?.(p);
-  } catch {
-    // progress is advisory
-  }
-}
-
-const aborted = () => new Stop(elvError('network', 'aborted'));
-const unwrap = <T>(r: Result<T>): T => {
-  if (!r.ok) throw new Stop(r.error);
-  return r.value;
-};
-
-interface Ctx {
-  deps: ImportDeps;
-  db: SqlDriver;
-  sourceId: string;
-  runId: number;
-  client: XtreamClient;
-  signal: AbortSignal | undefined;
-  batchSize: number;
-  progress(p: ImportProgress): void;
-  counts: Record<string, number>;
-}
-
-function checkAbort(c: Pick<Ctx, 'signal'>): void {
-  if (c.signal?.aborted) throw aborted();
-}
+type Ctx = RunCtx & { client: XtreamClient };
 
 async function openClient(source: SourceRecord, deps: ImportDeps): Promise<Result<XtreamClient>> {
   const raw = await deps.secrets.get(secretKey(source.id, 'xtream')).catch(() => undefined);
@@ -219,7 +170,6 @@ async function execute(c: Ctx): Promise<void> {
 
 const KEEP_EPISODES =
   'UPDATE episodes SET run_id = ? WHERE source_id = ? AND series_key IN (SELECT key FROM series WHERE source_id = ? AND run_id = ?)';
-const CATALOG_TABLES = ['categories', 'live', 'movies', 'series', 'episodes', 'placements'];
 
 async function importXtream(
   source: SourceRecord,
@@ -228,59 +178,12 @@ async function importXtream(
 ): Promise<Result<ImportSummary>> {
   const opened = await openClient(source, deps);
   if (!opened.ok) return opened;
-  const started = deps.clock();
-  let runId: number;
-  try {
-    const run = await startRun(deps.db, source.id, 'catalog', started);
-    if (!run.ok) return run;
-    runId = run.value;
-  } catch {
-    return err(elvError('storage', 'import-failed'));
-  }
-  const counts: Record<string, number> = {};
-  const c: Ctx = {
-    deps,
-    db: deps.db,
-    sourceId: source.id,
-    runId,
-    client: opened.value,
-    signal: opts.signal,
-    batchSize: Math.max(1, opts.batchSize ?? DEFAULT_BATCH_SIZE),
-    progress: (p) => notify(opts, p),
-    counts,
-  };
-  let removed: number;
-  try {
-    await execute(c);
-    checkAbort(c);
-    c.progress({ phase: 'cleanup', done: 0 });
-    removed = await deps.db.transaction(async (tx) => {
-      await tx.run(KEEP_EPISODES, [runId, source.id, source.id, runId]);
-      const stale = await removeStale(tx, source.id, runId, CATALOG_TABLES);
-      await finishRun(tx, runId, { status: 'ok', counts }, deps.clock());
-      return Object.values(stale).reduce((a, b) => a + b, 0);
-    });
-  } catch (e) {
-    const cancelled = opts.signal?.aborted === true;
-    const error = cancelled
-      ? elvError('network', 'aborted')
-      : e instanceof Stop
-        ? e.error
-        : elvError('storage', 'import-failed');
-    try {
-      await finishRun(
-        deps.db,
-        runId,
-        { status: cancelled ? 'cancelled' : 'failed', error, counts },
-        deps.clock(),
-      );
-    } catch {
-      // the run row stays 'running'; the original error is what the caller needs
-    }
-    return err(error);
-  }
-  c.progress({ phase: 'cleanup', done: removed });
-  return ok({ runId, counts, warnings: 0, durationMs: deps.clock() - started });
+  return performRun(source, deps, opts, {
+    execute: (base) => execute({ ...base, client: opened.value }),
+    beforeCleanup: async (tx, c) => {
+      await tx.run(KEEP_EPISODES, [c.runId, c.sourceId, c.sourceId, c.runId]);
+    },
+  });
 }
 
 /**
@@ -296,6 +199,7 @@ export async function importCatalog(
   const source = await getSource(deps.db, sourceId);
   if (source === undefined) return err(elvError('storage', 'source-not-found'));
   if (source.kind === 'xtream') return importXtream(source, deps, opts);
+  if (source.kind === 'm3u') return importM3u(source, deps, opts);
   return err(elvError('source-format', 'unsupported-source'));
 }
 
