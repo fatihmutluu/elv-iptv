@@ -86,7 +86,8 @@ async function openPlaylist(
   throw new Stop(elvError('network', 'http-status', `HTTP ${status}`));
 }
 
-async function readUrlVars(deps: ImportDeps, sourceId: string): Promise<UrlVars> {
+/** Reads the `urlvars` secret of a source; missing or unreadable values yield an empty object. */
+export async function readUrlVars(deps: ImportDeps, sourceId: string): Promise<UrlVars> {
   const raw = await deps.secrets.get(secretKey(sourceId, 'urlvars')).catch(() => undefined);
   try {
     return raw === undefined ? {} : (JSON.parse(raw) as UrlVars);

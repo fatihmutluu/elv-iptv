@@ -25,7 +25,11 @@ type ItemKind = 'live' | 'movie' | 'series';
 
 type Ctx = RunCtx & { client: XtreamClient };
 
-async function openClient(source: SourceRecord, deps: ImportDeps): Promise<Result<XtreamClient>> {
+/** Builds the Xtream client of a source from its secret; `storage/secret-missing` when the secret is unusable. */
+export async function openClient(
+  source: SourceRecord,
+  deps: ImportDeps,
+): Promise<Result<XtreamClient>> {
   const raw = await deps.secrets.get(secretKey(source.id, 'xtream')).catch(() => undefined);
   let parsed: { server?: unknown; username?: unknown; password?: unknown } = {};
   try {

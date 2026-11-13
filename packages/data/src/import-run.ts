@@ -59,6 +59,12 @@ export interface RunSteps {
   beforeCleanup?(tx: SqlDriver, c: RunCtx): Promise<void>;
   /** Runs after the cleanup transaction committed; a throw yields `storage/secret-write-failed` (the run stays `ok`). */
   afterCommit?(c: RunCtx): Promise<void>;
+  /** Run kind recorded in `import_runs` (default `catalog`). */
+  kind?: 'catalog' | 'guide';
+  /** Tables whose stale rows go in the cleanup transaction (default: the catalog tables). */
+  staleTables?: readonly string[];
+  /** A catalog that stored no item fails with `empty-source`; guides opt out (default true). */
+  requireItems?: boolean;
 }
 
 /**
@@ -75,7 +81,7 @@ export async function performRun(
   const started = deps.clock();
   let runId: number;
   try {
-    const run = await startRun(deps.db, source.id, 'catalog', started);
+    const run = await startRun(deps.db, source.id, steps.kind ?? 'catalog', started);
     if (!run.ok) return run;
     runId = run.value;
   } catch {
@@ -97,13 +103,13 @@ export async function performRun(
   try {
     await steps.execute(c);
     checkAbort(c);
-    if (ITEM_COUNTS.every((k) => (counts[k] ?? 0) === 0)) {
+    if (steps.requireItems !== false && ITEM_COUNTS.every((k) => (counts[k] ?? 0) === 0)) {
       throw new Stop(elvError('source-format', 'empty-source'));
     }
     c.progress({ phase: 'cleanup', done: 0 });
     removed = await deps.db.transaction(async (tx) => {
       await steps.beforeCleanup?.(tx, c);
-      const stale = await removeStale(tx, source.id, runId, CATALOG_TABLES);
+      const stale = await removeStale(tx, source.id, runId, steps.staleTables ?? CATALOG_TABLES);
       await finishRun(tx, runId, { status: 'ok', counts }, deps.clock());
       return Object.values(stale).reduce((a, b) => a + b, 0);
     });

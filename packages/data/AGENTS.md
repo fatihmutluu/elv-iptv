@@ -48,3 +48,12 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
   `url-tvg` goes to `discoveredGuideUrls`; no header and no entries is `not-a-playlist`; zero items is `empty-source`.
   Rules, guide URLs and `urlvars` are staged and committed only with `ok` (settings in the cleanup transaction, the secret
   right after; failure there is `storage/secret-write-failed`); a failed run changes neither. Groupless entries: `Ungrouped`.
+- Guide (`import-guide.ts`, `guide-match.ts`; test helper `import-guide-test-helpers.ts`): `importGuide(sourceId, deps, { now })`
+  reuses `performRun` with `kind: 'guide'`, stale tables `guide_channels` + `programmes` and `requireItems: false`
+  (the empty-source rule is for catalogs). URL order: user override, then the Xtream `guideUrl()` or the M3U
+  `discoveredGuideUrls`; the first 2xx answer wins; templates resolve in memory only. Live channels load once into a
+  `ChannelIndex`; `matchGuideChannel` maps by exact guide id (all sharing channels), else a unique folded name
+  (ambiguous names map nothing). The scanner's `channels` filter is a `Set` subclass whose `has` passes undecided ids,
+  so channels reach the importer, get matched, and only mapped ids pass afterwards. Programmes are kept inside
+  `guideWindow` (default 1 day back, 7 forward from `now`); `channel_guide` is replaced in the cleanup transaction.
+  A document with no channels and no programmes fails `source-format/not-a-guide`; failure and cancel keep the old guide.
