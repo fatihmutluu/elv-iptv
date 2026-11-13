@@ -55,7 +55,9 @@ export function packagesForFiles(files, root, exists = existsSync) {
  */
 export function buildToolInvocations({ root, files, packages, tools, nodePath, hasTsconfig }) {
   const invocations = [];
-  const lintable = files.filter((f) => BIOME_FILE.test(f)).map((f) => (f.startsWith('-') ? `./${f}` : f));
+  const lintable = files
+    .filter((f) => BIOME_FILE.test(f))
+    .map((f) => (f.startsWith('-') ? `./${f}` : f));
   if (tools.biome && lintable.length > 0) {
     invocations.push({
       name: 'biome',
@@ -96,17 +98,23 @@ function resolveRealTools(root) {
     }
   };
   return {
-    biome: attempt(() => join(dirname(require.resolve('@biomejs/biome/package.json')), 'bin', 'biome')) ??
-      attempt(() => join(root, 'node_modules', '@biomejs', 'biome', 'bin', 'biome')),
-    tsc: attempt(() => require.resolve('typescript/lib/tsc.js')) ??
+    biome:
+      attempt(() =>
+        join(dirname(require.resolve('@biomejs/biome/package.json')), 'bin', 'biome'),
+      ) ?? attempt(() => join(root, 'node_modules', '@biomejs', 'biome', 'bin', 'biome')),
+    tsc:
+      attempt(() => require.resolve('typescript/lib/tsc.js')) ??
       attempt(() => join(root, 'node_modules', 'typescript', 'lib', 'tsc.js')),
   };
 }
 
 function execGit(root, args) {
   return new Promise((resolvePromise, reject) => {
-    execFile('git', args, { cwd: root, maxBuffer: 64 * 1024 * 1024, windowsHide: true }, (error, stdout) =>
-      error ? reject(error) : resolvePromise(stdout),
+    execFile(
+      'git',
+      args,
+      { cwd: root, maxBuffer: 64 * 1024 * 1024, windowsHide: true },
+      (error, stdout) => (error ? reject(error) : resolvePromise(stdout)),
     );
   });
 }
@@ -127,7 +135,11 @@ function runTool(invocation, timeout) {
       (error, stdout, stderr) => {
         if (!error) return resolvePromise({ kind: 'ok', output: '' });
         const exited = typeof error.code === 'number' && !error.killed && !error.signal;
-        resolvePromise({ kind: exited ? 'failed' : 'skipped', output: `${stdout}${stderr}`, code: error.code });
+        resolvePromise({
+          kind: exited ? 'failed' : 'skipped',
+          output: `${stdout}${stderr}`,
+          code: error.code,
+        });
       },
     );
   });
@@ -149,10 +161,14 @@ export async function runStopCheck({
   const pass = { code: 0, message: '' };
   if (input?.stop_hook_active === true) return pass;
   try {
-    const entries = parsePorcelainZ(await execGit(root, ['status', '--porcelain', '-z', '--untracked-files=all']));
+    const entries = parsePorcelainZ(
+      await execGit(root, ['status', '--porcelain', '-z', '--untracked-files=all']),
+    );
     if (entries.length === 0) return pass;
     const all = entries.map((e) => e.path);
-    const present = entries.filter((e) => !e.status.includes('D') && existsSync(join(root, e.path))).map((e) => e.path);
+    const present = entries
+      .filter((e) => !e.status.includes('D') && existsSync(join(root, e.path)))
+      .map((e) => e.path);
     const invocations = buildToolInvocations({
       root,
       files: present,

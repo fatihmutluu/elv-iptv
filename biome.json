@@ -14,7 +14,7 @@
       "!**/ios",
       "!tools/test/fixtures",
       "!docs",
-      "!.claude",
+      "!.claude/skills/react-native-tv-best-practices",
       "!**/*.md"
     ]
   },

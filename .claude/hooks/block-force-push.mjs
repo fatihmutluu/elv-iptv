@@ -75,7 +75,13 @@ function stripHeredocs(command) {
       continue;
     }
     const prev = command[i - 1];
-    if (ch === '<' && command[i + 1] === '<' && command[i + 2] !== '<' && prev !== '<' && prev !== '(') {
+    if (
+      ch === '<' &&
+      command[i + 1] === '<' &&
+      command[i + 2] !== '<' &&
+      prev !== '<' &&
+      prev !== '('
+    ) {
       const match = /^<<(-?)\s*(['"]?)([A-Za-z_]\w*)\2/.exec(command.slice(i));
       if (match) {
         pending.push({ delimiter: match[3], tabs: match[1] === '-' });
@@ -125,7 +131,8 @@ function tokenize(command) {
     const ch = command[i];
     if (quote) {
       if (ch === quote) quote = null;
-      else if (ch === '\\' && quote === '"' && /["\\]/.test(command[i + 1] ?? '')) current += command[++i];
+      else if (ch === '\\' && quote === '"' && /["\\]/.test(command[i + 1] ?? ''))
+        current += command[++i];
       else current += ch;
     } else if (ch === '"' || ch === "'") {
       quote = ch;
@@ -149,7 +156,10 @@ function tokenize(command) {
   return segments;
 }
 
-const programName = (token) => basename(token.replace(/\\/g, '/')).toLowerCase().replace(/\.exe$/, '');
+const programName = (token) =>
+  basename(token.replace(/\\/g, '/'))
+    .toLowerCase()
+    .replace(/\.exe$/, '');
 
 function forceReason(arg) {
   if (arg.startsWith('--')) {
@@ -209,7 +219,10 @@ function checkSegment(tokens) {
   for (const arg of tokens.slice(i + 1)) {
     const why = forceReason(arg);
     if (why) {
-      return { blocked: true, reason: `git push with ${why} can rewrite remote history (force-push is forbidden)` };
+      return {
+        blocked: true,
+        reason: `git push with ${why} can rewrite remote history (force-push is forbidden)`,
+      };
     }
   }
   return { blocked: false, reason: '' };

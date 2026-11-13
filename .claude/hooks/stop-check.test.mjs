@@ -48,7 +48,11 @@ function fixtureRepo() {
 
 /** Fake tool: records its argv to <name>.argv.json and exits with FAKE_EXIT (default 0). */
 function fakeTool(root, name, { exit = 0, output = '' } = {}) {
-  const script = join(root, '..', `${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`);
+  const script = join(
+    root,
+    '..',
+    `${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`,
+  );
   const log = `${script}.argv.json`;
   writeFileSync(
     script,
@@ -59,7 +63,15 @@ process.exitCode = ${exit};
 `,
   );
   temps.push(script, log);
-  return { script, calls: () => readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) };
+  return {
+    script,
+    calls: () =>
+      readFileSync(log, 'utf8')
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l)),
+  };
 }
 
 const hasLog = (tool) => {
@@ -71,9 +83,14 @@ const hasLog = (tool) => {
 };
 
 test('parsePorcelainZ keeps names with spaces and ampersands and skips rename origins', () => {
-  const out = [' M packages/domain/src/a & b.ts', '?? new file.ts', 'R  new.ts', 'old.ts', ' D gone.ts', ''].join(
-    '\0',
-  );
+  const out = [
+    ' M packages/domain/src/a & b.ts',
+    '?? new file.ts',
+    'R  new.ts',
+    'old.ts',
+    ' D gone.ts',
+    '',
+  ].join('\0');
   assert.deepEqual(parsePorcelainZ(out), [
     { status: ' M', path: 'packages/domain/src/a & b.ts' },
     { status: '??', path: 'new file.ts' },
@@ -99,12 +116,7 @@ test('packagesForFiles maps files to the nearest workspace package', () => {
     ],
     root,
   );
-  assert.deepEqual(packages, [
-    'apps/desktop',
-    'apps/desktop/renderer',
-    'packages/domain',
-    'tools',
-  ]);
+  assert.deepEqual(packages, ['apps/desktop', 'apps/desktop/renderer', 'packages/domain', 'tools']);
 });
 
 test('packagesForFiles maps a deleted file through its surviving directory', () => {
@@ -114,7 +126,10 @@ test('packagesForFiles maps a deleted file through its surviving directory', () 
 
 test('packagesForFiles ignores files outside any package', () => {
   const root = fixtureRepo();
-  assert.deepEqual(packagesForFiles(['package.json', 'scripts/x.mjs', '.claude/hooks/y.mjs'], root), []);
+  assert.deepEqual(
+    packagesForFiles(['package.json', 'scripts/x.mjs', '.claude/hooks/y.mjs'], root),
+    [],
+  );
 });
 
 test('buildToolInvocations passes each file as one argv element to node entry points', () => {
@@ -155,7 +170,10 @@ test('buildToolInvocations skips tools that cannot be resolved and packages with
     tools: { biome: '/b', tsc: '/t' },
     hasTsconfig: () => false,
   });
-  assert.deepEqual(onlyBiome.map((i) => i.name), ['biome']);
+  assert.deepEqual(
+    onlyBiome.map((i) => i.name),
+    ['biome'],
+  );
 });
 
 test('summarize keeps the first 40 lines and says how many were cut', () => {
@@ -244,7 +262,7 @@ test('real tool failures exit 2 with a concise summary', async () => {
   const root = fixtureRepo();
   write(root, 'packages/domain/src/index.ts', 'export const a: number = "x";\n');
   const biome = fakeTool(root, 'biome');
-  const tsc = fakeTool(root, 'tsc', { exit: 2, output: "index.ts(1,14): error TS2322: bad\n" });
+  const tsc = fakeTool(root, 'tsc', { exit: 2, output: 'index.ts(1,14): error TS2322: bad\n' });
   const result = await runStopCheck({
     root,
     input: {},
@@ -258,12 +276,20 @@ test('real tool failures exit 2 with a concise summary', async () => {
 test('unresolvable tools, non-repositories and tool timeouts fail open', async () => {
   const root = fixtureRepo();
   write(root, 'packages/domain/src/index.ts', 'export const a = 1;\n');
-  const none = await runStopCheck({ root, input: {}, resolveTools: () => ({ biome: null, tsc: null }) });
+  const none = await runStopCheck({
+    root,
+    input: {},
+    resolveTools: () => ({ biome: null, tsc: null }),
+  });
   assert.equal(none.code, 0);
 
   const notRepo = mkdtempSync(join(tmpdir(), 'elv_norepo_'));
   temps.push(notRepo);
-  const outside = await runStopCheck({ root: notRepo, input: {}, resolveTools: () => ({ biome: null, tsc: null }) });
+  const outside = await runStopCheck({
+    root: notRepo,
+    input: {},
+    resolveTools: () => ({ biome: null, tsc: null }),
+  });
   assert.equal(outside.code, 0);
 
   const hang = join(root, '..', `hang-${Date.now()}.mjs`);
