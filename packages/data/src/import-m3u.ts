@@ -21,6 +21,7 @@ import {
   secretKey,
   updateSourceSettings,
 } from './sources';
+import { readUrlVars } from './stream-resolver';
 import { keyTemplate, type SegmentRule, toTemplate, type UrlVars } from './templates';
 import { writeCategories, writePlacements } from './writers';
 import {
@@ -78,16 +79,6 @@ async function openPlaylist(
   if (status === 401 || status === 403) throw new Stop(elvError('auth', 'unauthorized'));
   if (status >= 500) throw new Stop(elvError('network', 'server-error'));
   throw new Stop(elvError('network', 'http-status', `HTTP ${status}`));
-}
-
-/** Reads the `urlvars` secret of a source; missing or unreadable values yield an empty object. */
-export async function readUrlVars(deps: ImportDeps, sourceId: string): Promise<UrlVars> {
-  const raw = await deps.secrets.get(secretKey(sourceId, 'urlvars')).catch(() => undefined);
-  try {
-    return raw === undefined ? {} : (JSON.parse(raw) as UrlVars);
-  } catch {
-    return {};
-  }
 }
 
 function start(source: SourceRecord, playlistUrl: string, sample: readonly M3uEntry[]): State {
@@ -354,7 +345,7 @@ async function execute(
 /**
  * Imports an M3U source: the playlist streams through the scanner into the catalog tables. Every entry URL is
  * stored as a credential-free template (segment rules, credential query parameters, the `get.php` credentials);
- * the values go to `source:<id>:urlvars`. Entries become live channels, movies or episodes by `kindHint`
+ * the values go to `source.<id>.urlvars`. Entries become live channels, movies or episodes by `kindHint`
  * (all movies for a `vodPlaylist`); episodes hang under a synthetic series per `group-title`. A body with no
  * `#EXTM3U` and no entries yields `source-format/not-a-playlist`.
  */

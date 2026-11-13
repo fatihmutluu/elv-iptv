@@ -19,7 +19,7 @@ const rows = (e: Env, sql: string, p: (string | number)[] = []) =>
   e.db.all<Record<string, unknown>>(sql, p);
 const run = (e: Env, opts = {}) => importCatalog(e.sourceId, e.deps, opts);
 const vars = async (e: Env): Promise<UrlVars> =>
-  JSON.parse((await e.secrets.get('source:s1:urlvars')) ?? '{}') as UrlVars;
+  JSON.parse((await e.secrets.get('source.s1.urlvars')) ?? '{}') as UrlVars;
 
 function expectErr(
   r: { ok: boolean; error?: { category: string; code: string } },
@@ -154,7 +154,7 @@ describe('m3u import', () => {
     const newToken = ['tok', 'Zz81p0q4m9'].join('');
     const newPass = ['pw', 'Abc', '77'].join('');
     e.state.body = playlist(newToken, M3U_USER, newPass);
-    await e.secrets.set('source:s1:playlist', playlistUrlFor(M3U_USER, newPass));
+    await e.secrets.set('source.s1.playlist', playlistUrlFor(M3U_USER, newPass));
     const r = await run(e);
     if (!r.ok) throw new Error(JSON.stringify(r.error));
     expect(await rows(e, 'SELECT id, key FROM live ORDER BY id')).toEqual(before);
@@ -261,7 +261,7 @@ describe('m3u import', () => {
 
   it('fails without a stored playlist URL', async () => {
     const e = await setupM3u(playlist());
-    await e.secrets.delete('source:s1:playlist');
+    await e.secrets.delete('source.s1.playlist');
     expectErr(await run(e), 'storage', 'secret-missing');
   });
 

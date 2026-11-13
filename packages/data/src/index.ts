@@ -8,4 +8,5 @@ export * from './migrate';
 export { MIGRATIONS } from './schema';
 export * from './source-link';
 export * from './sources';
+export * from './stream-resolver';
 export * from './templates';

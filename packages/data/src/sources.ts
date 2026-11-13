@@ -16,12 +16,12 @@ export type SourceKind = 'xtream' | 'm3u';
 /** Non-secret, per-source settings stored as JSON in the `sources` table. */
 export interface SourceSettings {
   transport?: TransportSettings;
-  /** User guide URL override: only the placeholder `{{g:url}}`; the URL lives in `source:<id>:urlvars`. */
+  /** User guide URL override: only the placeholder `{{g:url}}`; the URL lives in `source.<id>.urlvars`. */
   guideUrl?: string;
   vodPlaylist?: boolean;
   segmentRules?: SegmentRule[];
   guideWindow?: { daysBack: number; daysForward: number };
-  /** Guide URLs found in the playlist header, as placeholders `{{g:d<n>}}` whose URLs live in `source:<id>:urlvars`. */
+  /** Guide URLs found in the playlist header, as placeholders `{{g:d<n>}}` whose URLs live in `source.<id>.urlvars`. */
   discoveredGuideUrls?: string[];
 }
 
@@ -59,6 +59,7 @@ export interface AddSourceDeps {
   db: SqlDriver;
   secrets: SecretStore;
   clock: () => number;
+  /** A new unique id made of {@link SOURCE_ID} characters (a UUID fits); others are `storage/invalid-source-id`. */
   newId: () => string;
 }
 
@@ -78,9 +79,15 @@ export const TABLES_BY_SOURCE: readonly string[] = [
 ];
 const PARTS = ['xtream', 'playlist', 'urlvars'] as const;
 
-/** Secret keys: `source:<id>:xtream` (JSON server, username, password), `:playlist`, `:urlvars` (JSON {@link UrlVars}). */
+/** Characters a source id may use: the set every platform secret store accepts in a key. */
+export const SOURCE_ID = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * Secret keys: `source.<id>.xtream` (JSON server, username, password), `.playlist`, `.urlvars` (JSON
+ * {@link UrlVars}). Only letters, digits, `.`, `-` and `_`, the set the strictest platform secret store allows.
+ */
 export function secretKey(id: string, part: 'xtream' | 'playlist' | 'urlvars'): string {
-  return `source:${id}:${part}`;
+  return `source.${id}.${part}`;
 }
 
 const invalid = (): Result<never> => err(elvError('source-format', 'invalid-source'));
@@ -90,6 +97,7 @@ async function persist(
   record: SourceRecord,
   secrets: readonly (readonly [string, string])[],
 ): Promise<Result<SourceRecord>> {
+  if (!SOURCE_ID.test(record.id)) return err(elvError('storage', 'invalid-source-id'));
   const written: string[] = [];
   const rollback = async (error: ElvError): Promise<Result<never>> => {
     for (const key of written) await deps.secrets.delete(key).catch(() => undefined);
@@ -116,7 +124,7 @@ async function persist(
 
 /**
  * Adds an Xtream source: server, username and password go to the secret store, never to the database. A guide
- * override is stored whole in `source:<id>:urlvars` ({@link guideSecret}).
+ * override is stored whole in `source.<id>.urlvars` ({@link guideSecret}).
  */
 export async function addXtreamSource(
   input: XtreamSourceInput,
@@ -151,7 +159,7 @@ export async function addXtreamSource(
 
 /**
  * A guide URL as `settings_json` stores it: only the placeholder `{{g:<name>}}`, the whole URL being a secret in
- * `source:<id>:urlvars`. Guide URLs carry tokens in too many shapes to template them part by part; the `g:`
+ * `source.<id>.urlvars`. Guide URLs carry tokens in too many shapes to template them part by part; the `g:`
  * prefix keeps the name apart from entry URL values.
  */
 export function guideSecret(guideUrl: string, name = 'url'): { template: string; vars: UrlVars } {
@@ -159,7 +167,7 @@ export function guideSecret(guideUrl: string, name = 'url'): { template: string;
 }
 
 /**
- * Adds an M3U source. The playlist URL is a secret. A guide URL is stored whole in `source:<id>:urlvars`
+ * Adds an M3U source. The playlist URL is a secret. A guide URL is stored whole in `source.<id>.urlvars`
  * ({@link guideSecret}); `settings_json` holds only its placeholder.
  */
 export async function addM3uSource(

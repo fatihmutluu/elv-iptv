@@ -24,7 +24,7 @@ async function snapshot(e: Env) {
     'SELECT settings_json FROM sources WHERE id = ?',
     ['s1'],
   );
-  return { settings: source[0]?.settings_json, vars: await e.secrets.get('source:s1:urlvars') };
+  return { settings: source[0]?.settings_json, vars: await e.secrets.get('source.s1.urlvars') };
 }
 
 async function resolvesOld(e: Env, snap: Awaited<ReturnType<typeof snapshot>>) {
@@ -91,7 +91,7 @@ describe('m3u settings and secrets commit with the run', () => {
     await run(e, { signal: ctl.signal, batchSize: 300, onProgress: () => ctl.abort() });
     let settings = (await getSource(e.db, 's1'))?.settings;
     expect(settings?.segmentRules).toBeUndefined();
-    expect(await e.secrets.get('source:s1:urlvars')).toBe('{}');
+    expect(await e.secrets.get('source.s1.urlvars')).toBe('{}');
     expect((await run(e, { batchSize: 300 })).ok).toBe(true);
     settings = (await getSource(e.db, 's1'))?.settings;
     expect(settings?.segmentRules?.length).toBeGreaterThan(0);

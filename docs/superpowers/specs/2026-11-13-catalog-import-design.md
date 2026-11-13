@@ -92,9 +92,9 @@ marks after NFD, maps `ß`→`ss`, collapses whitespace and punctuation to singl
 Used for `name_fold` and guide name matching.
 
 ### 5.5 Credentials and content keys
-- **Xtream sources:** server, username and password go to the `SecretStore` (`source:<id>:xtream`). Items store
+- **Xtream sources:** server, username and password go to the `SecretStore` (`source.<id>.xtream`). Items store
   `provider_id` and `extension`; URLs are built at play time by the Xtream client (`streamUrl`). Keys: `xtreamKey`.
-- **M3U sources:** the playlist URL is a secret (`source:<id>:playlist`). Entry URLs are stored as templates:
+- **M3U sources:** the playlist URL is a secret (`source.<id>.playlist`). Entry URLs are stored as templates:
   1. Known credential query parameters (ADR 0011 list) and Xtream-shaped `/<kind>/<u>/<p>/` segments become placeholders
      (the bare `/<u>/<p>/<id>` form only when both segments are the playlist's known credentials, so a plain playlist
      adds no per-stream secret); known credentials embedded elsewhere are replaced only at word boundaries, and a
@@ -106,13 +106,16 @@ Used for `name_fold` and guide name matching.
      token). Every value at a rule position becomes a placeholder (`v<N>`, further values `v<N>~<k>`), so a second
      account or a moved host never leaves its token in a template. Rules are stored in `settings_json` (a known
      (host, position) pair keeps its name, a new one gets the next free `v<N>`, rules of hosts the run did not see are
-     dropped), their values in the `SecretStore` (`source:<id>:urlvars`). Limit: accounts that alternate inside one
+     dropped), their values in the `SecretStore` (`source.<id>.urlvars`). Limit: accounts that alternate inside one
      judged window, so that no value reaches 99 %, are not detected.
-  3. Templates look like `https://host/{{v0}}/<stream token>`; `resolveStreamUrl(source, template)` rebuilds the URL.
+  3. Templates look like `https://host/{{v0}}/<stream token>`. `createStreamResolver(sourceId, deps)` reads `urlvars` once
+     and `resolve(template)` rebuilds entry URLs, logos, referers and guide URLs in memory at play time (`undefined` when
+     a value is missing). Secret keys use only letters, digits, `.`, `-` and `_` (`source.<id>.<part>`), the set the
+     strictest platform secret store accepts; source ids are limited to the same set.
   Keys: `m3uKey(sourceId, keyTemplate(template), name)`, where `keyTemplate` turns every placeholder into `{{*}}`: stable
   across password and token changes and independent of placeholder names. This refines ADR 0011.
 - Logos are templated the same way. Guide URLs (user overrides of both source kinds and the M3U header's discovered
-  URLs) are stored whole in `source:<id>:urlvars`; `settings_json` holds only `{{g:url}}` or `{{g:d<n>}}`.
+  URLs) are stored whole in `source.<id>.urlvars`; `settings_json` holds only `{{g:url}}` or `{{g:d<n>}}`.
 - **Pasted links (owner decision 17):** an M3U link of the Xtream form (`…/get.php?username=…&password=…`) is added as an Xtream source (`addSourceFromLink`), because on a real panel the M3U cannot tell movies from live channels while the Xtream API gives categories, movies, series and the guide. The server is normalized like the Xtream client does, `output` sets `xtreamFormat`, a user guide override is kept (stored whole as a secret, tried before the panel guide), `vodPlaylist` is ignored, credentials go only to the `SecretStore`, and the user can choose to keep the link as an M3U source.
 
 ### 5.6 Import engine (`packages/data`)

@@ -15,8 +15,7 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
 - `createSyncSqlDriver(db)` (`driver.ts`) adapts a synchronous better-sqlite3-shaped database to `SqlDriver`. One promise
   queue serializes calls; the `tx` of a `transaction` callback bypasses it and rejects nesting. Never await the outer
   driver inside a transaction callback. `batch` joins an open transaction.
-- `openCatalog(db)` (`migrate.ts`) applies the pragmas (WAL, `synchronous=NORMAL`, `foreign_keys=ON`, `temp_store=MEMORY`, `journal_size_limit` 64 MiB) and
-  migrates to `SCHEMA_VERSION` with `MIGRATIONS` in `schema.ts` (raw SQL, `PRAGMA user_version`): `storage/schema-too-new`, `storage/migration-failed` (rolled back). Add a schema change as a new entry, never by editing an old one.
+- `openCatalog(db)` (`migrate.ts`) applies the pragmas (WAL, `synchronous=NORMAL`, `foreign_keys=ON`, `temp_store=MEMORY`, `journal_size_limit` 64 MiB) and migrates to `SCHEMA_VERSION` with `MIGRATIONS` in `schema.ts` (raw SQL, `PRAGMA user_version`): `storage/schema-too-new`, `storage/migration-failed` (rolled back).
 - `foldText(text)` (`fold.ts`): Turkish-aware, accent- and punctuation-insensitive folding for `name_fold` columns.
 - `templates.ts`: `detectSegmentRules`, `toTemplate`, `resolveTemplate`, `keyTemplate`, `hostOf`. URLs become `{{name}}` templates
   (`user`, `pass`, `userinfo`, `v<N>` segment rules, `q:<param>` credential query values); values go to the secret store. Known
@@ -27,7 +26,8 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
 - `sources.ts`: `addXtreamSource`, `addM3uSource`, `getSource`, `updateSourceSettings`, `removeSource`, `removeSecrets`, `purgeSourceRows`, `guideSecret`, `TABLES_BY_SOURCE`, `secretKey`. `removeSource` refuses while a run is `running` (`storage/import-in-progress`), deletes every table of the source explicitly (no foreign keys; a new table with `source_id` must be added
   to its list) and returns `storage/secret-delete-failed` if a secret survives (retry `removeSecrets`). Guide URLs (overrides,
   discovered) are stored whole as secrets (`{{g:url}}`, `{{g:d<n>}}`). Credentials live only in the `SecretStore`
-  (`source:<id>:xtream|playlist|urlvars`); `settings_json` holds none.
+  (`source.<id>.xtream|playlist|urlvars`; ids only `[A-Za-z0-9._-]`, else `storage/invalid-source-id`); `settings_json` holds none.
+  `createStreamResolver(sourceId, deps)` (`stream-resolver.ts`, with `readUrlVars`) reads `urlvars` once; `resolve(template)` rebuilds a URL in memory (`undefined` if a value is missing).
 - `importCatalog` / `loadSeriesEpisodes` (`import-xtream.ts`; types in `import-types.ts`; `runs.ts`, `writers.ts`). A run
   upserts with `ON CONFLICT DO UPDATE ... run_id = excluded.run_id` (stable row ids), yields after every batch, checks
   `signal.aborted` before every batch. Stale rows (`run_id < current`) are deleted and the run marked `ok` in one

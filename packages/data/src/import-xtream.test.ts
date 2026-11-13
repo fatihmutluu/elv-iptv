@@ -239,7 +239,7 @@ describe('xtream import', () => {
   it('reports unknown sources, unsupported kinds and missing secrets', async () => {
     const e = await setup(sampleCatalog());
     expectErr(await importCatalog('nope', e.deps), 'storage', 'source-not-found');
-    await e.secrets.delete('source:s1:xtream');
+    await e.secrets.delete('source.s1.xtream');
     expectErr(await run(e), 'storage', 'secret-missing');
     await e.db.run("INSERT INTO sources VALUES ('m', 'm3u', 'M', 1, '{}')");
     expectErr(await importCatalog('m', e.deps), 'storage', 'secret-missing');
@@ -350,7 +350,7 @@ describe('loadSeriesEpisodes', () => {
       'server-error',
     );
     expect(await count(e.db, 'episodes')).toBe(0);
-    await e.secrets.delete('source:s1:xtream');
+    await e.secrets.delete('source.s1.xtream');
     expectErr(
       await loadSeriesEpisodes(e.sourceId, 'x:s1:series:300', e.deps),
       'storage',

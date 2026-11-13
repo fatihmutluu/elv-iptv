@@ -20,7 +20,7 @@ const entries = (host: string, token: string, from: number, n: number, group = '
   ).join('');
 
 const vars = async (e: Env): Promise<UrlVars> =>
-  JSON.parse((await e.secrets.get('source:s1:urlvars')) ?? '{}') as UrlVars;
+  JSON.parse((await e.secrets.get('source.s1.urlvars')) ?? '{}') as UrlVars;
 
 async function rowsWith(e: Env, needle: string): Promise<number> {
   const r = await e.db.all<{ n: number }>(
@@ -110,7 +110,7 @@ describe('segment rules on every import', () => {
 });
 
 describe('bounded URL variables', () => {
-  const urlvars = (e: Env) => e.secrets.dump()['source:s1:urlvars'] ?? '';
+  const urlvars = (e: Env) => e.secrets.dump()['source.s1.urlvars'] ?? '';
 
   it('keeps a plain three-segment playlist out of the secret store', async () => {
     const body = `#EXTM3U\n${Array.from({ length: 5000 }, (_, i) =>
@@ -243,7 +243,7 @@ describe('no secret reaches a template or key', () => {
         const newPass = `${s.pass}9z`;
         const second = playlist(s, moved, rotated, newPass);
         e.state.body = second.body;
-        await e.secrets.set('source:s1:playlist', playlistUrlFor(enc(s.user), enc(newPass)));
+        await e.secrets.set('source.s1.playlist', playlistUrlFor(enc(s.user), enc(newPass)));
         expect((await importCatalog(e.sourceId, e.deps)).ok).toBe(true);
         await expectClean(e, [...secrets, ...rotated, newPass, enc(newPass)], second.urls);
         e.close();

@@ -11,11 +11,11 @@ import { scanXmltv, type XmltvChannel, type XmltvProgramme } from '@elv/sources'
 import { foldText } from './fold';
 import { commitGuide, dropStaging, type GuideResult, STAGE_PROGRAMME_SQL } from './guide-commit';
 import { buildChannelIndex, type ChannelIndex, matchGuideChannel } from './guide-match';
-import { readUrlVars } from './import-m3u';
 import { checkAbort, performRun, type RunCtx, Stop } from './import-run';
 import type { ImportDeps, ImportOptions, ImportSummary } from './import-types';
 import { openClient } from './import-xtream';
 import { getSource, type SourceRecord } from './sources';
+import { readUrlVars } from './stream-resolver';
 import { resolveTemplate } from './templates';
 
 const REQUEST_TIMEOUT_MS = 60_000;

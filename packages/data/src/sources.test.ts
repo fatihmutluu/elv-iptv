@@ -204,8 +204,8 @@ describe('removeSource', () => {
       expect(rows.map((r) => r.source_id)).toEqual(['src2']);
     }
     const keys = Object.keys(s.secrets.dump());
-    expect(keys.filter((k) => k.startsWith('source:src1:'))).toEqual([]);
-    expect(keys.filter((k) => k.startsWith('source:src2:')).length).toBeGreaterThan(0);
+    expect(keys.filter((k) => k.startsWith('source.src1.'))).toEqual([]);
+    expect(keys.filter((k) => k.startsWith('source.src2.')).length).toBeGreaterThan(0);
     expect(await getSource(s.db, 'src2')).toBeDefined();
   });
 });
@@ -268,6 +268,31 @@ describe('guide URLs', () => {
     );
     const vars = JSON.parse(s.secrets.dump()[secretKey('src2', 'urlvars')] as string);
     expect(vars['g:url']).toBe(guide);
+  });
+});
+
+describe('secret keys', () => {
+  const EXPO_KEY = /^[A-Za-z0-9._-]+$/;
+
+  it('uses only characters every platform secret store accepts', () => {
+    expect(secretKey('9f1c-a_b', 'urlvars')).toBe('source.9f1c-a_b.urlvars');
+    for (const part of ['xtream', 'playlist', 'urlvars'] as const) {
+      expect(secretKey('src1', part)).toMatch(EXPO_KEY);
+    }
+  });
+
+  it('refuses a source id outside that character set', async () => {
+    const s = await setup();
+    const deps = { ...s.deps, newId: () => 'bad id/1' };
+    const m3u = await addM3uSource({ name: 'L', playlistUrl: 'https://h.example/a.m3u' }, deps);
+    expect(m3u).toEqual({ ok: false, error: { category: 'storage', code: 'invalid-source-id' } });
+    const xt = await addXtreamSource(
+      { name: 'X', server: 'https://p.example', username: USER, password: PW },
+      deps,
+    );
+    expect(xt.ok).toBe(false);
+    expect(s.secrets.dump()).toEqual({});
+    expect(await s.db.all('SELECT * FROM sources')).toEqual([]);
   });
 });
 
