@@ -54,7 +54,12 @@ async function readAll(body: AsyncIterable<Uint8Array>): Promise<Result<Uint8Arr
  */
 export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
   const { http, transport } = options;
-  const base = options.server.trim().replace(/\/+$/, '');
+  const base = options.server
+    .trim()
+    .replace(/[?#].*$/s, '')
+    .replace(/\/+$/, '')
+    .replace(/\/(?:player_api|get|xmltv)\.php$/, '')
+    .replace(/\/+$/, '');
   const user = encodeURIComponent(options.username);
   const pass = encodeURIComponent(options.password);
   const credentials = `username=${user}&password=${pass}`;
@@ -98,6 +103,7 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     const r = await getJson(query);
     if (!r.ok) return r;
     if (r.value === null || r.value === false) return ok([]);
+    if (isRaw(r.value) && Object.keys(r.value).length === 0) return ok([]);
     if (!Array.isArray(r.value)) return err(shape());
     return ok(map(r.value.filter(isRaw)));
   }

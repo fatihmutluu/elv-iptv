@@ -185,6 +185,9 @@ export function toVodInfo(raw: Raw): XtreamVodInfo {
   return vod;
 }
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: detects binary garbage
+const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/;
+
 function fromBase64(value: unknown): string | undefined {
   const text = toText(value);
   if (text === undefined) return undefined;
@@ -192,7 +195,8 @@ function fromBase64(value: unknown): string | undefined {
     const bin = atob(text);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return toText(decodeUtf8(bytes));
+    const decoded = decodeUtf8(bytes);
+    return decoded.includes('�') || CONTROL.test(decoded) ? text : toText(decoded);
   } catch {
     return text;
   }

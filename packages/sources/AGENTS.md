@@ -39,5 +39,5 @@ M3U and XMLTV scanners and the Xtream client.
   `stream-failed`, transport codes), `source-format` (`invalid-json`, `unexpected-shape`). Credentials appear only in
   the three URL builders; error `detail` never holds a URL. Each response body is read into one string, so use
   per-category calls for big providers.
-  Implementation: `xtream.ts` (client, requests, errors), `xtream-records.ts` (row mappers), `xtream-normalize.ts`
+  Implementation: `xtream.ts` (client, requests, errors; `server` may be a pasted `player_api.php`/`get.php`/`xmltv.php` URL, query and fragment are dropped; an empty `{}` list reply is `[]`), `xtream-records.ts` (row mappers), `xtream-normalize.ts`
   (`toNumber`, `toText`, `mergeById`), `xtream-types.ts`.
