@@ -84,10 +84,33 @@
                   "localStorage": "Pure packages run on non-browser runtimes (Hermes, Node); use a port from @elv/domain instead of browser globals.",
                   "sessionStorage": "Pure packages run on non-browser runtimes (Hermes, Node); use a port from @elv/domain instead of browser globals.",
                   "navigator": "Pure packages run on non-browser runtimes (Hermes, Node); use a port from @elv/domain instead of browser globals.",
-                  "location": "Pure packages run on non-browser runtimes (Hermes, Node); use a port from @elv/domain instead of browser globals."
+                  "location": "Pure packages run on non-browser runtimes (Hermes, Node); use a port from @elv/domain instead of browser globals.",
+                  "TextDecoder": "Hermes lacks or limits this global; use a port from @elv/domain or a hand-written helper (allowed in tests only).",
+                  "DecompressionStream": "Hermes lacks or limits this global; use a port from @elv/domain or a hand-written helper (allowed in tests only).",
+                  "CompressionStream": "Hermes lacks or limits this global; use a port from @elv/domain or a hand-written helper (allowed in tests only).",
+                  "Blob": "Hermes lacks or limits this global; use a port from @elv/domain or a hand-written helper (allowed in tests only).",
+                  "structuredClone": "Hermes lacks or limits this global; use a port from @elv/domain or a hand-written helper (allowed in tests only)."
                 }
               }
             }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "packages/domain/**/*.test.ts",
+        "packages/sources/**/*.test.ts",
+        "packages/data/**/*.test.ts",
+        "packages/playback/**/*.test.ts",
+        "packages/focus-core/**/*.test.ts",
+        "packages/*/src/**/*-test-helpers.ts",
+        "packages/*/src/test-chunks.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedGlobals": "off"
           }
         }
       }
