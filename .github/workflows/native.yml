@@ -60,6 +60,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        id: setup
       - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
@@ -86,6 +87,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        id: setup
       - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
@@ -119,6 +121,7 @@ jobs:
       - name: Select Xcode 26.4.1
         run: sudo xcode-select -s /Applications/Xcode_26.4.1.app
       - uses: ./.github/actions/setup
+        id: setup
       - name: Restore CocoaPods cache
         id: pods-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -139,6 +142,12 @@ jobs:
           xcodebuild -workspace "$workspace" -scheme "${workspace%.xcworkspace}" \
             -sdk iphonesimulator -configuration Debug \
             CODE_SIGNING_ALLOWED=NO -quiet build
+      - name: Save the pnpm store
+        if: github.ref == 'refs/heads/main' && steps.setup.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.setup.outputs.store-path }}
+          key: ${{ steps.setup.outputs.cache-key }}
       - name: Save CocoaPods cache
         if: github.ref == 'refs/heads/main' && steps.pods-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -161,6 +170,7 @@ jobs:
       - name: Select Xcode 26.4.1
         run: sudo xcode-select -s /Applications/Xcode_26.4.1.app
       - uses: ./.github/actions/setup
+        id: setup
       - name: Restore CocoaPods cache
         id: pods-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -205,6 +215,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
+        id: setup
       - name: Build the desktop app and installers
         run: pnpm --filter @elv/desktop build
       # Ubuntu 24.04 blocks unprivileged user namespaces, which the Chromium sandbox needs.
@@ -226,3 +237,27 @@ jobs:
             apps/desktop/release/*.AppImage
           if-no-files-found: error
           retention-days: 7
+      - name: Save the pnpm store
+        if: github.ref == 'refs/heads/main' && steps.setup.outputs.cache-hit != 'true' && matrix.os == 'windows-2025'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.setup.outputs.store-path }}
+          key: ${{ steps.setup.outputs.cache-key }}
+
+  # Branch protection requires this job (`native`), not the individual build jobs above.
+  native:
+    if: always()
+    needs: [changes, android-mobile, android-tv, ios, tvos, desktop]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Fail when any native job failed or was cancelled
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+          CHANGES: ${{ needs.changes.result }}
+        run: |
+          if [ "$CHANGES" != success ]; then echo "changes: $CHANGES"; exit 1; fi
+          for r in $RESULTS; do
+            case "$r" in success|skipped) ;; *) echo "native job result: $r"; exit 1 ;; esac
+          done

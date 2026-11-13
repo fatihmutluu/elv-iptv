@@ -1,15 +1,36 @@
 name: Setup workspace
-description: Install pnpm, Node from .node-version and the frozen workspace dependencies.
+description: Install pnpm, Node from .node-version and the frozen workspace dependencies. Restores the pnpm store cache; the calling job saves it (composite actions have no post steps).
+outputs:
+  cache-hit:
+    description: Whether the pnpm store cache was restored from an exact key match.
+    value: ${{ steps.store-cache.outputs.cache-hit }}
+  cache-key:
+    description: Primary key of the pnpm store cache.
+    value: ${{ steps.store-cache.outputs.cache-primary-key }}
+  store-path:
+    description: Path of the pnpm store.
+    value: ${{ steps.store-path.outputs.path }}
 runs:
   using: composite
   steps:
     # The pnpm version comes from "packageManager" in the root package.json.
     - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
     # Node 24 comes from .node-version; it also satisfies devEngines.runtime, so pnpm downloads nothing.
+    # No "cache: pnpm" here: it would save on every ref. Restore everywhere, save only on main.
     - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version-file: .node-version
-        cache: pnpm
+    - name: Find the pnpm store
+      id: store-path
+      shell: bash
+      run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+    - name: Restore the pnpm store
+      id: store-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.store-path.outputs.path }}
+        key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: pnpm-store-${{ runner.os }}-
     - name: Install dependencies
       shell: bash
       run: pnpm install --frozen-lockfile --reporter=silent

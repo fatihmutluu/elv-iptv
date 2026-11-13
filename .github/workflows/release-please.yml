@@ -18,6 +18,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # Documented by release-please-action: labels such as autorelease: pending go through the issues API.
+      issues: write
     steps:
       # Pull requests opened with GITHUB_TOKEN do not trigger CI (docs/learned/README.md).
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0

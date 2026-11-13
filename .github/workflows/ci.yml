@@ -36,10 +36,17 @@ jobs:
           tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$HOME/.local/bin" gitleaks
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - uses: ./.github/actions/setup
+        id: setup
       - name: pnpm check
         run: pnpm check
       - name: Scan full history for secrets
         run: gitleaks git --config .gitleaks.toml --redact --no-banner
+      - name: Save the pnpm store
+        if: github.ref == 'refs/heads/main' && steps.setup.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.setup.outputs.store-path }}
+          key: ${{ steps.setup.outputs.cache-key }}
 
   pr-title:
     if: github.event_name == 'pull_request'
