@@ -49,6 +49,7 @@ export function checkAbort(c: Pick<RunCtx, 'signal'>): void {
   if (c.signal?.aborted) throw new Stop(elvError('network', 'aborted'));
 }
 
+const ITEM_COUNTS = ['live', 'movies', 'series', 'episodes'];
 const CATALOG_TABLES = ['categories', 'live', 'movies', 'series', 'episodes', 'placements'];
 
 /** Source-specific parts of a catalog run. */
@@ -60,7 +61,8 @@ export interface RunSteps {
 
 /**
  * The lifecycle every catalog import shares: start the run, execute, then delete stale rows and mark `ok` in one
- * transaction. Failure (`failed`) and abort (`cancelled`) never delete anything.
+ * transaction. A run that stored no item at all fails with `source-format/empty-source` so a provider glitch can
+ * never wipe the catalog. Failure (`failed`) and abort (`cancelled`) never delete anything.
  */
 export async function performRun(
   source: SourceRecord,
@@ -93,6 +95,9 @@ export async function performRun(
   try {
     await steps.execute(c);
     checkAbort(c);
+    if (ITEM_COUNTS.every((k) => (counts[k] ?? 0) === 0)) {
+      throw new Stop(elvError('source-format', 'empty-source'));
+    }
     c.progress({ phase: 'cleanup', done: 0 });
     removed = await deps.db.transaction(async (tx) => {
       await steps.beforeCleanup?.(tx, c);

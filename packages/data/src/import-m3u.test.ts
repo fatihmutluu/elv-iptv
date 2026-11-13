@@ -213,6 +213,17 @@ describe('m3u import', () => {
     expect(runs[1]).toEqual({ status: 'failed', error_code: 'not-a-playlist' });
   });
 
+  it('refuses a playlist with a header but no entries and keeps the catalog', async () => {
+    const e = await setupM3u(playlist());
+    await run(e);
+    e.state.body = '#EXTM3U\n';
+    expectErr(await run(e), 'source-format', 'empty-source');
+    expect(await count(e.db, 'live')).toBe(2);
+    expect(await count(e.db, 'episodes')).toBe(3);
+    const runs = await rows(e, 'SELECT status, error_code FROM import_runs ORDER BY id');
+    expect(runs.at(-1)).toEqual({ status: 'failed', error_code: 'empty-source' });
+  });
+
   it('accepts a playlist without header when it has entries', async () => {
     const e = await setupM3u(extinf('Solo', 'http://cdn.example:8080/a/b/1.ts'));
     expect((await run(e)).ok).toBe(true);

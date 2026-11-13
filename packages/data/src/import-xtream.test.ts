@@ -277,11 +277,15 @@ describe('xtream import', () => {
     for (const s of secrets) expect(dump).not.toContain(s);
   });
 
-  it('survives an empty panel', async () => {
-    const e = await setup(emptyPanel());
-    const r = await run(e);
-    expect(r.ok).toBe(true);
-    expect(await count(e.db, 'live')).toBe(0);
+  it('refuses an empty panel and keeps the previous catalog', async () => {
+    const e = await setup(sampleCatalog());
+    await run(e);
+    e.panel.state.data = emptyPanel();
+    expectErr(await run(e), 'source-format', 'empty-source');
+    expect(await count(e.db, 'live')).toBe(3);
+    expect(await count(e.db, 'movies')).toBe(3);
+    const runs = await rows(e, 'SELECT status, error_code FROM import_runs ORDER BY id');
+    expect(runs.at(-1)).toEqual({ status: 'failed', error_code: 'empty-source' });
   });
 });
 

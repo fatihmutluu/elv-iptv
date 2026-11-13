@@ -3,8 +3,7 @@
 Schema, migrations and repositories for catalog, EPG and user data, over the `SqlDriver` port.
 
 ## Commands
-- `pnpm --filter @elv/data typecheck` and `... test` type-check and test this package.
-- `pnpm -w check` runs every repository check.
+- `pnpm --filter @elv/data typecheck` / `test`; `pnpm -w check` runs every repository check.
 
 ## Rules
 - Pure TypeScript: no `react`, `react-native`, `expo*`, `electron` or `node:*` imports.
@@ -47,4 +46,5 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
 - M3U (`import-m3u.ts`, `m3u-templating.ts`, `writers-m3u.ts`; run lifecycle `performRun` in `import-run.ts`): entry URLs, logos
   and live referers are templates (rules from the first 1,000 entries, majority value expected, minority stays
   literal; clashing values get `~<n>`); `kindHint` picks the table, episodes sit under a synthetic series per `group-title`;
-  `url-tvg` goes to `settings_json.discoveredGuideUrls`; no header and no entries is `source-format/not-a-playlist`.
+  `url-tvg` goes to `settings_json.discoveredGuideUrls`; no header and no entries is `not-a-playlist`;
+  any run that stores zero items fails with `source-format/empty-source` and deletes nothing.
