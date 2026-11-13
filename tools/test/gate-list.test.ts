@@ -13,13 +13,14 @@ const GFX = readFileSync(new URL('./fixtures/gate/gfxinfo-run.txt', import.meta.
 const AUTO_URL = 'elviptv://gate/list?items=100000&auto=1&rate=20&moves=600';
 const S = '-s emulator-5554';
 
-const gateLine = (p95: number, gap = 8, losses = 0, moves = 600) =>
+const gateLine = (p95: number, gap = 8, losses = 0, moves = 600, stall = 12) =>
   `11-13 10:00:00.000  4581  4640 I ReactNativeJS: ELV_GATE ${JSON.stringify({
     moves,
     coalesced: 0,
     losses,
     keyToHighlightMs: { p50: 18, p95, max: p95 + 3 },
     maxJsGapMs: gap,
+    maxFrameStallMs: stall,
     items: 100000,
   })}`;
 
@@ -71,6 +72,14 @@ describe('parseGateLine', () => {
   it('returns the last valid line among noise', () => {
     const text = [gateLine(10), 'I ReactNativeJS: other', gateLine(30)].join('\n');
     expect(parseGateLine(text)?.keyToHighlightMs.p95).toBe(30);
+  });
+
+  it('accepts a line without the frame stall', () => {
+    const line =
+      'ELV_GATE {"moves":1,"coalesced":0,"losses":0,"keyToHighlightMs":{"p50":1,"p95":2,"max":3},"maxJsGapMs":4,"items":5}';
+    const metrics = parseGateLine(line);
+    expect(metrics?.maxJsGapMs).toBe(4);
+    expect(metrics?.maxFrameStallMs).toBeUndefined();
   });
 
   it('ignores broken or incomplete lines', () => {
@@ -130,6 +139,7 @@ describe('runListGate', () => {
     expect(result.metrics.keyToHighlightMs.p95).toBe(20);
     expect(result.metrics.keyToHighlightMs.max).toBe(23);
     expect(result.metrics.maxJsGapMs).toBe(9);
+    expect(result.metrics.maxFrameStallMs).toBe(12);
     expect(result.metrics.losses).toBe(2);
     expect(device.calls.filter((c) => c.includes('am start')).length).toBe(3);
     expect(device.calls.filter((c) => c.includes('install')).length).toBe(1);

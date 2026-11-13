@@ -12,13 +12,14 @@ export interface ExecOutcome extends CheckOutcome {
   timedOut?: boolean;
 }
 
+/** Kills a child and everything it started: `taskkill /T` on Windows, the process group elsewhere (see `detached`). */
 function killTree(pid: number | undefined): void {
   if (pid === undefined) return;
   if (process.platform === 'win32') {
     spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
   } else {
     try {
-      process.kill(pid, 'SIGKILL');
+      process.kill(-pid, 'SIGKILL');
     } catch {
       // already gone
     }
@@ -40,6 +41,7 @@ export function exec(
       env: { ...process.env, ...opts.env, NO_COLOR: '1', FORCE_COLOR: '0' },
       shell: true,
       windowsHide: true,
+      detached: process.platform !== 'win32',
     });
     let output = '';
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -47,6 +49,8 @@ export function exec(
       const ms = opts.timeoutMs;
       timer = setTimeout(() => {
         killTree(child.pid);
+        child.stdout.destroy();
+        child.stderr.destroy();
         resolve({
           ok: false,
           timedOut: true,

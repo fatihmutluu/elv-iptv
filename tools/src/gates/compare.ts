@@ -6,7 +6,10 @@ export interface GateMetrics {
   coalesced: number;
   losses: number;
   keyToHighlightMs: { p50: number; p95: number; max: number };
+  /** Longest synchronous JS work of one move (enforced). */
   maxJsGapMs: number;
+  /** Frame-stall estimate; absent in old lines and baselines. Report-only on emulators. */
+  maxFrameStallMs?: number;
   items: number;
 }
 
@@ -100,6 +103,19 @@ export function compareToBaseline(result: GateResult, baseline: GateResult): Com
   budget('key-to-highlight p95', m.keyToHighlightMs.p95, BUDGET_P95_MS);
   relative('max JS gap', m.maxJsGapMs, bm.maxJsGapMs, SLACK_JS_GAP_MS, ' ms');
   budget('max JS gap', m.maxJsGapMs, BUDGET_JS_GAP_MS);
+  if (m.maxFrameStallMs !== undefined) {
+    const stall = m.maxFrameStallMs;
+    if (stall > BUDGET_JS_GAP_MS) {
+      warnings.push(
+        `frame stall ${stall} ms exceeds the ${BUDGET_JS_GAP_MS} ms budget (report-only on emulators)`,
+      );
+    }
+    if (bm.maxFrameStallMs !== undefined && stall > limit(bm.maxFrameStallMs, SLACK_JS_GAP_MS)) {
+      warnings.push(
+        `frame stall ${stall} ms exceeds the baseline limit (baseline ${bm.maxFrameStallMs} ms; report-only on emulators)`,
+      );
+    }
+  }
 
   if (f.legacyJankyPercent !== undefined && bf.legacyJankyPercent !== undefined) {
     relative(

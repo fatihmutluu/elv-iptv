@@ -8,6 +8,7 @@ const baseline: GateResult = {
     losses: 0,
     keyToHighlightMs: { p50: 18, p95: 19, max: 22 },
     maxJsGapMs: 8,
+    maxFrameStallMs: 10,
     items: 100000,
   },
   frames: {
@@ -31,6 +32,7 @@ const change = (patch: {
   janky?: number;
   legacy?: number;
   framesP99?: number;
+  stall?: number;
   items?: number;
   realP95?: number;
   realLosses?: number;
@@ -46,6 +48,7 @@ const change = (patch: {
       max: patch.max ?? 22,
     },
     maxJsGapMs: patch.gap ?? 8,
+    maxFrameStallMs: patch.stall ?? 10,
   },
   frames: {
     ...baseline.frames,
@@ -115,6 +118,25 @@ describe('compareToBaseline', () => {
 
   it('fails when the real-key p95 exceeds its limit', () => {
     expect(compareToBaseline(change({ realP95: 36 }), baseline).ok).toBe(false);
+  });
+
+  it('only warns about the frame stall, relative to the baseline and to the budget', () => {
+    const relative = compareToBaseline(change({ stall: 16 }), baseline);
+    expect(relative.ok).toBe(true);
+    expect(relative.warnings.join(' ')).toMatch(/frame stall/);
+    const absolute = compareToBaseline(change({ stall: 40 }), change({ stall: 40 }));
+    expect(absolute.ok).toBe(true);
+    expect(absolute.warnings.join(' ')).toMatch(/frame stall.*budget/);
+    expect(compareToBaseline(change({ stall: 11 }), baseline).warnings.join(' ')).not.toMatch(
+      /frame stall/,
+    );
+  });
+
+  it('compares results that lack the frame stall, as old baselines do', () => {
+    const old: GateResult = { ...baseline, metrics: { ...baseline.metrics } };
+    delete old.metrics.maxFrameStallMs;
+    expect(compareToBaseline(change({}), old).ok).toBe(true);
+    expect(compareToBaseline(old, baseline).ok).toBe(true);
   });
 
   it('warns about coalesced repeats without failing', () => {

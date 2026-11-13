@@ -14,6 +14,19 @@ describe('exec timeout', () => {
     expect(Date.now() - started).toBeLessThan(15_000);
   });
 
+  it.skipIf(process.platform === 'win32')(
+    'does not leave a grandchild holding the call open',
+    async () => {
+      const started = Date.now();
+      const result = await exec('sh', ['-c', 'sleep 60 & wait'], {
+        cwd: process.cwd(),
+        timeoutMs: 400,
+      });
+      expect(result.timedOut).toBe(true);
+      expect(Date.now() - started).toBeLessThan(15_000);
+    },
+  );
+
   it('leaves a command that finishes in time alone', async () => {
     const result = await exec('node', ['-e', 'console.log("hi")'], {
       cwd: process.cwd(),
