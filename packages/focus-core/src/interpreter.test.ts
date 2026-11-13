@@ -101,10 +101,60 @@ describe('long', () => {
   });
 });
 
+describe('step keys (arrows and channel keys)', () => {
+  it.each<Key>(['up', 'down', 'left', 'right', 'channelUp', 'channelDown'])(
+    'presses %s on down, stamped with the down time, and emits nothing on a quick up',
+    (key) => {
+      const k = createKeyInterpreter();
+      expect(k.input(down(key, 100))).toEqual([{ key, kind: 'press', time: 100 }]);
+      expect(k.tick(300)).toEqual([]);
+      expect(k.input(up(key, 400))).toEqual([]);
+    },
+  );
+
+  it('ignores a repeated down of a held arrow', () => {
+    const k = createKeyInterpreter();
+    expect(k.input(down('up', 0))).toEqual([{ key: 'up', kind: 'press', time: 0 }]);
+    expect(k.input(down('up', 200))).toEqual([]);
+    expect(k.tick(500)).toEqual([{ key: 'up', kind: 'long', time: 500 }]);
+  });
+
+  it('emits nothing for an arrow up without a down', () => {
+    const k = createKeyInterpreter();
+    expect(k.input(up('down', 9))).toEqual([]);
+    expect(k.input(up('channelDown', 9))).toEqual([]);
+  });
+
+  it('steps on down, then fires long at 500 ms and repeats while held, and nothing on release', () => {
+    const k = createKeyInterpreter();
+    expect(k.input(down('down', 0))).toEqual([{ key: 'down', kind: 'press', time: 0 }]);
+    expect(run(k, 'down', 0, 760).map((e) => [e.kind, e.time])).toEqual([
+      ['long', 500],
+      ['repeat', 625],
+      ['repeat', 750],
+    ]);
+    expect(k.input(up('down', 760))).toEqual([]);
+  });
+
+  it('still fires the long on release of an arrow held past the threshold without a tick', () => {
+    const k = createKeyInterpreter();
+    k.input(down('left', 0));
+    expect(k.input(up('left', 900))).toEqual([{ key: 'left', kind: 'long', time: 500 }]);
+  });
+
+  it('keeps select, back, menu, playPause and digits pressing on up', () => {
+    const k = createKeyInterpreter();
+    for (const key of ['select', 'back', 'menu', 'playPause', 'digit7'] as const) {
+      expect(k.input(down(key, 0))).toEqual([]);
+      expect(k.input(up(key, 100))).toEqual([{ key, kind: 'press', time: 100 }]);
+    }
+  });
+});
+
 describe('repeat', () => {
   it('long at 500 ms then repeats every 125 ms until the ramp, then every 1000/24 ms', () => {
     const k = createKeyInterpreter();
-    k.input(down('down', 0));
+    expect(k.input(down('down', 0))).toEqual([{ key: 'down', kind: 'press', time: 0 }]);
     const events = run(k, 'down', 0, 3000);
     expect(events[0]).toEqual({ key: 'down', kind: 'long', time: 500 });
     const repeats = events.filter((e) => e.kind === 'repeat').map((e) => e.time);
@@ -127,7 +177,7 @@ describe('repeat', () => {
 
   it('repeats channel keys after the threshold without a long', () => {
     const k = createKeyInterpreter();
-    k.input(down('channelUp', 0));
+    expect(k.input(down('channelUp', 0))).toEqual([{ key: 'channelUp', kind: 'press', time: 0 }]);
     const events = run(k, 'channelUp', 0, 700);
     expect(events.map((e) => [e.kind, e.time])).toEqual([['repeat', 625]]);
     expect(k.input(up('channelUp', 700))).toEqual([]);
@@ -223,6 +273,36 @@ describe('properties', () => {
             if (e.kind !== 'repeat') continue;
             expect(pending.has(e.key)).toBe(false);
             pending.add(e.key);
+          }
+        }
+      }),
+    );
+  });
+
+  it('presses a step key once per fresh down at its time, never on up; other keys never on down', () => {
+    const steps = new Set<Key>(['up', 'down', 'channelUp']);
+    fc.assert(
+      fc.property(fc.array(stepArb, { maxLength: 120 }), (script) => {
+        const k = createKeyInterpreter();
+        const held = new Set<Key>();
+        let now = 0;
+        for (const s of script) {
+          now += s.dt;
+          if (s.op === 'down') {
+            const expected =
+              steps.has(s.key) && !held.has(s.key)
+                ? [{ key: s.key, kind: 'press', time: now }]
+                : [];
+            expect(k.input(down(s.key, now))).toEqual(expected);
+            held.add(s.key);
+          } else if (s.op === 'up') {
+            const presses = k.input(up(s.key, now)).filter((e) => e.kind === 'press');
+            expect(presses.length).toBeLessThanOrEqual(steps.has(s.key) ? 0 : 1);
+            held.delete(s.key);
+          } else if (s.op === 'tick') {
+            expect(k.tick(now).every((e) => e.kind !== 'press')).toBe(true);
+          } else {
+            k.acknowledge(s.key);
           }
         }
       }),

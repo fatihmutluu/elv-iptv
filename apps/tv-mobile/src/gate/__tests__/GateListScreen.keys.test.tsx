@@ -1,5 +1,5 @@
 import type { KeyInput } from '@elv/focus-core';
-import { act, render, waitFor } from '@testing-library/react-native';
+import { act, render, screen, waitFor } from '@testing-library/react-native';
 import { GateListScreen } from '../GateListScreen';
 
 let mockOnInput: ((k: KeyInput) => void) | undefined;
@@ -31,5 +31,29 @@ describe('GateListScreen real keys', () => {
     expect(metrics.moves).toBe(2);
     expect(metrics.losses).toBe(0);
     expect(metrics.keyToHighlightMs.max).toBeLessThan(1000);
+  });
+
+  it('steps when the arrow goes down and measures from the down receipt', async () => {
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+    await render(
+      <GateListScreen params={{ items: 1000, auto: false, rate: 20, moves: 10, stall: 0 }} />,
+    );
+    const downAt = performance.now() - 300;
+    await act(async () => {
+      mockOnInput?.({ key: 'down', action: 'down', time: downAt });
+    });
+    expect(screen.getByTestId('gate-list-row-1').props.accessibilityState.selected).toBe(true);
+    await act(async () => {
+      mockOnInput?.({ key: 'down', action: 'up', time: performance.now() });
+    });
+    await waitFor(
+      () => expect(log.mock.calls.some((c) => String(c[0]).startsWith('ELV_GATE '))).toBe(true),
+      { timeout: 6000 },
+    );
+    const line = String(log.mock.calls.find((c) => String(c[0]).startsWith('ELV_GATE '))?.[0]);
+    const metrics = JSON.parse(line.slice('ELV_GATE '.length));
+    expect(metrics.moves).toBe(1);
+    expect(metrics.losses).toBe(0);
+    expect(metrics.keyToHighlightMs.max).toBeGreaterThanOrEqual(300);
   });
 });

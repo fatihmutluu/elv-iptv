@@ -35,7 +35,7 @@ It is a composition root: it wires modules, storage drivers, routes and stores.
 - Real keys: the root view is `focusable` with `hasTVPreferredFocus`; with no focused view Android delivers no remote keys
   to `TVEventHandler`. `useTvKeySource` -> `createKeyInterpreter` -> store; the interpreter ticks while a key is down and
   repeats are acknowledged from `onFrameCommitted`. With `auto=0` it prints one line after 2 s without a move (`--real-keys`).
-- Metrics (`metrics.ts`): `t0` is the dispatch time (auto) or the key event time (real); `t1` is `performance.now()` inside
+- Metrics (`metrics.ts`): `t0` is the dispatch time (auto) or the arrow's down receipt (real); `t1` is `performance.now()` in
   `onFrameCommitted` (first frame after row and ring committed); key-to-highlight is `t1 - t0` per move that commit covers.
   `maxJsGapMs` is the longest synchronous work of a move (dispatch to the end of the list commit, ended by `CommitProbe`);
   `maxFrameStallMs` estimates stalls outside dispatch: slowest `requestAnimationFrame` delta minus 0.7 of the median (a 4 ms
