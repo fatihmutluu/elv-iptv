@@ -242,7 +242,7 @@ async function buildApk(exec: Exec, root: string, adb: string): Promise<void> {
       env: prebuild.env,
     },
     {
-      command: process.platform === 'win32' ? 'gradlew.bat' : './gradlew',
+      command: process.platform === 'win32' ? '.\\gradlew.bat' : './gradlew',
       args: ['assembleRelease', '--console=plain'],
       cwd: `${root}/${prebuild.cwd}/android`,
       env: {

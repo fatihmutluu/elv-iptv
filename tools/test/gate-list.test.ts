@@ -234,7 +234,7 @@ describe('runListGate', () => {
     await runListGate({ exec, sleep: noSleep, build: true, root: '/repo', adb: 'adb' });
     expect(builds[0]).toMatch(/expo prebuild --clean --platform android --no-install/);
     expect(builds[0]).toMatch(/apps\/tv-mobile.* development$/);
-    expect(builds[1]).toMatch(/assembleRelease --console=plain/);
+    expect(builds[1]).toMatch(/^\.[\\/]gradlew(\.bat)? assembleRelease --console=plain/);
     expect(builds[1]).toMatch(/android .*development$/);
   });
 });
