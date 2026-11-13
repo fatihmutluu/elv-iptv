@@ -148,5 +148,20 @@ CREATE TABLE programmes (
   run_id INTEGER NOT NULL,
   PRIMARY KEY (source_id, guide_id, start)
 ) WITHOUT ROWID;
+
+CREATE TABLE programmes_next (
+  source_id TEXT NOT NULL,
+  guide_id TEXT NOT NULL,
+  start INTEGER NOT NULL,
+  stop INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  sub_title TEXT,
+  description TEXT,
+  categories_json TEXT,
+  episode_num TEXT,
+  icon TEXT,
+  run_id INTEGER NOT NULL,
+  PRIMARY KEY (source_id, guide_id, start)
+) WITHOUT ROWID;
 `,
 ];

@@ -1,10 +1,14 @@
 import { type Decompressor, elvError, type HttpClient, ok } from '@elv/domain';
-import { setupM3u } from './import-test-helpers';
+import { expect } from 'vitest';
+import { importGuide } from './import-guide';
+import { extinf, M3U_TOKEN, setupM3u } from './import-test-helpers';
+import { importCatalog } from './import-xtream';
+import { getSource } from './sources';
 
 /** Fixed "now" of the guide tests: 2026-11-13 12:00 UTC. */
 export const NOW = Date.UTC(2026, 10, 13, 12, 0, 0);
 export const HOUR = 3_600_000;
-export const DAY = 24 * HOUR;
+const DAY = 24 * HOUR;
 
 /** XMLTV timestamp (UTC) for an epoch offset from {@link NOW}. */
 export function xt(offsetMs: number): string {
@@ -93,3 +97,62 @@ export const gzipped = (xml: string): Uint8Array => {
   out.set(body, 2);
   return out;
 };
+
+export type Env = Awaited<ReturnType<typeof setupGuide>>;
+
+export const stream = (id: number) => `http://cdn.example:8080/${M3U_TOKEN}/hb/s/${id}.ts`;
+export const PLAYLIST =
+  '#EXTM3U\n' +
+  extinf('Haber Bir', stream(1), 'tvg-id="haber1.tr"') +
+  extinf('Haber Bir HD', stream(2), 'tvg-id="haber1.tr"') +
+  extinf('Çağrı TV', stream(3), '') +
+  extinf('Ikiz', stream(4), '') +
+  extinf('Ikiz', stream(5), '') +
+  extinf('Quiet', stream(6), 'tvg-id="quiet.tr"');
+
+export const rows = (e: Env, sql: string, p: (string | number)[] = []) =>
+  e.db.all<Record<string, unknown>>(sql, p);
+export const settings = async (e: Env) => (await getSource(e.db, e.sourceId))?.settings ?? {};
+export const titles = async (e: Env) =>
+  (await rows(e, 'SELECT title FROM programmes ORDER BY start, guide_id')).map((p) => p.title);
+export const lastGuideRun = async (e: Env) =>
+  (await rows(e, "SELECT status FROM import_runs WHERE kind = 'guide' ORDER BY id DESC"))[0]
+    ?.status;
+
+export function defaultGuide(): string {
+  return tv(
+    channelXml('haber1.tr', 'Haber Bir'),
+    channelXml('cagri', 'ÇAĞRI TV'),
+    channelXml('ikiz', 'Ikiz'),
+    channelXml('nobody', 'Nobody'),
+    programmeXml('haber1.tr', -2 * DAY, 1, 'Too Old'),
+    programmeXml('haber1.tr', -2 * HOUR, 1, 'Ended'),
+    programmeXml('haber1.tr', -HOUR / 2, 1, 'Running'),
+    programmeXml('haber1.tr', 2 * HOUR, 1, 'Later'),
+    programmeXml('haber1.tr', 6 * DAY, 1, 'Next Week'),
+    programmeXml('haber1.tr', 9 * DAY, 1, 'Too Far'),
+    programmeXml('cagri', 3 * HOUR, 2, 'Named Match'),
+    programmeXml('ikiz', 4 * HOUR, 2, 'Ambiguous'),
+    programmeXml('nobody', 5 * HOUR, 2, 'Unmapped'),
+  );
+}
+
+export async function ready(guide = defaultGuide()): Promise<Env> {
+  const e = await setupGuide(PLAYLIST);
+  const r = await importCatalog(e.sourceId, e.deps);
+  if (!r.ok) throw new Error('catalog setup failed');
+  e.server.body = guide;
+  return e;
+}
+
+export const run = (e: Env, opts = {}) => importGuide(e.sourceId, e.deps, { now: NOW, ...opts });
+
+export function expectErr(
+  r: { ok: boolean; error?: { category: string; code: string } },
+  category: string,
+  code: string,
+) {
+  if (r.ok || r.error === undefined) throw new Error('expected error');
+  expect(r.error.category).toBe(category);
+  expect(r.error.code).toBe(code);
+}

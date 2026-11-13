@@ -44,7 +44,7 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
   Rules, guide URLs and `urlvars` are staged and committed only with `ok` (settings in the cleanup transaction, the secret
   right after; failure there is `storage/secret-write-failed`); a failed run changes neither. Groupless entries: `Ungrouped`.
 - Guide (`import-guide.ts`, `guide-match.ts`): `importGuide(sourceId, deps, { now })` reuses `performRun` (`kind: 'guide'`,
-  `requireItems: false`). URLs: user override, then Xtream `guideUrl()` or M3U `discoveredGuideUrls`; first 2xx wins; resolved
-  in memory only. Match by guide id (all sharing channels), else a unique folded name. A plain growing `Set` is the
-  scanner's `programmeChannels`; no `stop` ends at the next programme of the channel, else +30 min. Window `guideWindow`
-  (default 1 day back, 7 forward); no channels or programmes is `source-format/not-a-guide`; failure keeps the old guide.
+  `requireItems: false`). URLs: override, then Xtream `guideUrl()` or M3U `discoveredGuideUrls`; first 2xx wins, earlier failures
+  are `counts.guideUrlFallbacks` + `warningCodes` (codes only). Match by guide id, else a unique folded name (growing `Set` =
+  scanner `programmeChannels`). Programmes go to `programmes_next` and swap into `programmes` (with guide channels
+  and `channel_guide`) in the cleanup transaction; failure or cancel drops the staging rows. No `stop`: next start, else +30 min. Catalog runs drop `channel_guide` rows of vanished channels. Not XMLTV: `not-a-guide`.

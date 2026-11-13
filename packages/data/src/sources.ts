@@ -72,6 +72,7 @@ export const TABLES_BY_SOURCE: readonly string[] = [
   'guide_channels',
   'channel_guide',
   'programmes',
+  'programmes_next',
 ];
 const PARTS = ['xtream', 'playlist', 'urlvars'] as const;
 

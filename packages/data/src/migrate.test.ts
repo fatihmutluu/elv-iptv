@@ -15,6 +15,7 @@ const TABLES = [
   'guide_channels',
   'channel_guide',
   'programmes',
+  'programmes_next',
 ];
 
 async function names(db: SqlDriver, type: 'table' | 'index') {

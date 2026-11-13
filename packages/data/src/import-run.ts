@@ -42,6 +42,7 @@ export interface RunCtx {
   progress(p: ImportProgress): void;
   counts: Record<string, number>;
   warnings: number;
+  warningCodes: string[];
 }
 
 /** Unwinds the run with `network/aborted` once the caller's signal fired. */
@@ -51,6 +52,9 @@ export function checkAbort(c: Pick<RunCtx, 'signal'>): void {
 
 const ITEM_COUNTS = ['live', 'movies', 'series', 'episodes'];
 const CATALOG_TABLES = ['categories', 'live', 'movies', 'series', 'episodes', 'placements'];
+
+const DROP_STALE_MAPPINGS =
+  'DELETE FROM channel_guide WHERE source_id = ? AND channel_key NOT IN (SELECT key FROM live WHERE source_id = ?)';
 
 /** Source-specific parts of a catalog run. */
 export interface RunSteps {
@@ -98,6 +102,7 @@ export async function performRun(
     progress: (p) => notify(opts, p),
     counts,
     warnings: 0,
+    warningCodes: [],
   };
   let removed: number;
   try {
@@ -110,6 +115,9 @@ export async function performRun(
     removed = await deps.db.transaction(async (tx) => {
       await steps.beforeCleanup?.(tx, c);
       const stale = await removeStale(tx, source.id, runId, steps.staleTables ?? CATALOG_TABLES);
+      if ((steps.kind ?? 'catalog') === 'catalog') {
+        await tx.run(DROP_STALE_MAPPINGS, [source.id, source.id]);
+      }
       await finishRun(tx, runId, { status: 'ok', counts }, deps.clock());
       return Object.values(stale).reduce((a, b) => a + b, 0);
     });
@@ -138,5 +146,11 @@ export async function performRun(
     return err(elvError('storage', 'secret-write-failed'));
   }
   c.progress({ phase: 'cleanup', done: removed });
-  return ok({ runId, counts, warnings: c.warnings, durationMs: deps.clock() - started });
+  return ok({
+    runId,
+    counts,
+    warnings: c.warnings,
+    warningCodes: c.warningCodes,
+    durationMs: deps.clock() - started,
+  });
 }

@@ -5,6 +5,7 @@ import {
   type HttpResponse,
   ok,
   type Result,
+  type SqlDriver,
   transportHeaders,
 } from '@elv/domain';
 import { scanXmltv, type XmltvChannel, type XmltvProgramme } from '@elv/sources';
@@ -57,13 +58,19 @@ async function candidateUrls(source: SourceRecord, deps: ImportDeps): Promise<Re
   return ok(urls.filter((u) => u !== '' && !u.includes('{{')));
 }
 
+/** The body of the first URL that answers 2xx, plus the errors of the URLs tried before it (codes only). */
 async function openGuide(
   urls: readonly string[],
   source: SourceRecord,
   deps: ImportDeps,
   signal: AbortSignal | undefined,
-): Promise<AsyncIterable<Uint8Array>> {
+): Promise<{ body: AsyncIterable<Uint8Array>; failed: ElvError[] }> {
   let first: ElvError | undefined;
+  const failed: ElvError[] = [];
+  const miss = (e: ElvError) => {
+    failed.push(elvError(e.category, e.code));
+    first ??= failed[0];
+  };
   for (const url of urls) {
     checkAbort({ signal });
     let response: Result<HttpResponse>;
@@ -74,17 +81,17 @@ async function openGuide(
         ...(signal === undefined ? {} : { signal }),
       });
     } catch {
-      first ??= elvError('network', 'request-failed');
+      miss(elvError('network', 'request-failed'));
       continue;
     }
     if (!response.ok) {
-      first ??= elvError(response.error.category, response.error.code);
+      miss(response.error);
       continue;
     }
     const { status, body } = response.value;
-    if (status >= 200 && status < 300) return body;
+    if (status >= 200 && status < 300) return { body, failed };
     await discard(body);
-    first ??= classify(status);
+    miss(classify(status));
   }
   throw new Stop(first ?? elvError('source-format', 'no-guide-url'));
 }
@@ -94,7 +101,7 @@ const GUIDE_CHANNEL_SQL = `INSERT INTO guide_channels (source_id, guide_id, name
   ON CONFLICT(source_id, guide_id) DO UPDATE SET name = excluded.name, name_fold = excluded.name_fold,
     icon = excluded.icon, run_id = excluded.run_id`;
 
-const PROGRAMME_SQL = `INSERT INTO programmes (source_id, guide_id, start, stop, title, sub_title, description,
+const PROGRAMME_SQL = `INSERT INTO programmes_next (source_id, guide_id, start, stop, title, sub_title, description,
     categories_json, episode_num, icon, run_id)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(source_id, guide_id, start) DO UPDATE SET stop = excluded.stop, title = excluded.title,
@@ -119,6 +126,8 @@ interface GuideState {
   index: ChannelIndex;
   /** Guide ids of mapped channels; the scanner consults it per programme, so it grows as channels arrive. */
   mapped: Set<string>;
+  /** Guide channel rows, written with the cleanup transaction. */
+  channelRows: Row[];
   /** Programmes without `stop`, waiting for the next programme of their channel. */
   open: Map<string, XmltvProgramme>;
   /** `[channelKey, guideId]` pairs, written with the cleanup transaction. */
@@ -134,7 +143,7 @@ async function writeChannels(
   st: GuideState,
   channels: readonly XmltvChannel[],
 ): Promise<void> {
-  const rows: (string | number | null)[][] = [];
+  const rows: Row[] = [];
   for (const ch of channels) {
     const keys = matchGuideChannel(st.index, ch);
     if (keys.length > 0) st.mapped.add(ch.id);
@@ -145,7 +154,18 @@ async function writeChannels(
     rows.push([c.sourceId, ch.id, name, foldText(name), ch.icon ?? null, c.runId]);
   }
   st.channels += channels.length;
-  if (rows.length > 0) await c.db.batch(GUIDE_CHANNEL_SQL, rows);
+  st.channelRows.push(...rows);
+}
+
+const SWAP_PROGRAMMES = `INSERT INTO programmes SELECT * FROM programmes_next WHERE source_id = ? AND run_id = ?`;
+
+/** Clears the staged programmes of a source; a failure here must not hide the error that ended the run. */
+async function dropStaging(db: SqlDriver, sourceId: string): Promise<void> {
+  try {
+    await db.run('DELETE FROM programmes_next WHERE source_id = ?', [sourceId]);
+  } catch {
+    // the next guide run clears leftovers before it starts
+  }
 }
 
 type Row = (string | number | null)[];
@@ -189,6 +209,7 @@ async function execute(
   urls: readonly string[],
   now: number,
 ): Promise<GuideState> {
+  await c.db.run('DELETE FROM programmes_next WHERE source_id = ?', [c.sourceId]);
   const live = await c.db.all<{ key: string; guide_id: string | null; name_fold: string }>(
     'SELECT key, guide_id, name_fold FROM live WHERE source_id = ?',
     [c.sourceId],
@@ -196,6 +217,7 @@ async function execute(
   const st: GuideState = {
     index: buildChannelIndex(live),
     mapped: new Set(),
+    channelRows: [],
     open: new Map(),
     mappings: [],
     channels: 0,
@@ -204,7 +226,10 @@ async function execute(
     seenProgrammes: 0,
   };
   const window = source.settings.guideWindow ?? DEFAULT_WINDOW;
-  const body = await openGuide(urls, source, c.deps, c.signal);
+  const { body, failed } = await openGuide(urls, source, c.deps, c.signal);
+  for (const f of failed) c.warningCodes.push(`${f.category}/${f.code}`);
+  c.warnings += failed.length;
+  c.counts.guideUrlFallbacks = failed.length;
   const scan = scanXmltv(body, {
     batchSize: c.batchSize,
     programmeChannels: st.mapped,
@@ -266,14 +291,22 @@ export async function importGuide(
   if (urls.value.length === 0) return err(elvError('source-format', 'no-guide-url'));
   const now = opts.now ?? deps.clock();
   let state: GuideState | undefined;
-  return performRun(source, deps, opts, {
+  const result = await performRun(source, deps, opts, {
     kind: 'guide',
-    staleTables: ['guide_channels', 'programmes'],
+    staleTables: ['guide_channels'],
     requireItems: false,
     execute: async (c) => {
       state = await execute(c, source, urls.value, now);
     },
     beforeCleanup: async (tx, c) => {
+      await tx.run('DELETE FROM programmes WHERE source_id = ?', [c.sourceId]);
+      await tx.run(SWAP_PROGRAMMES, [c.sourceId, c.runId]);
+      await tx.run('DELETE FROM programmes_next WHERE source_id = ?', [c.sourceId]);
+      if (state !== undefined) {
+        for (let i = 0; i < state.channelRows.length; i += c.batchSize) {
+          await tx.batch(GUIDE_CHANNEL_SQL, state.channelRows.slice(i, i + c.batchSize));
+        }
+      }
       await tx.run('DELETE FROM channel_guide WHERE source_id = ?', [c.sourceId]);
       if (state === undefined || state.mappings.length === 0) return;
       await tx.batch(
@@ -282,4 +315,8 @@ export async function importGuide(
       );
     },
   });
+  const busy =
+    !result.ok && result.error.category === 'storage' && result.error.code === 'import-in-progress';
+  if (!result.ok && !busy) await dropStaging(deps.db, source.id);
+  return result;
 }

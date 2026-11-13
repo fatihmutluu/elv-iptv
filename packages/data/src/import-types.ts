@@ -43,6 +43,8 @@ export interface ImportSummary {
   runId: number;
   counts: Record<string, number>;
   warnings: number;
+  /** One `category/code` per warning that is not a plain count; never a URL or a credential. */
+  warningCodes: string[];
   durationMs: number;
 }
 

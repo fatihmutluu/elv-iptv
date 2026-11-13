@@ -3,81 +3,30 @@ import { describe, expect, it } from 'vitest';
 import { importGuide } from './import-guide';
 import {
   channelXml,
-  DAY,
+  defaultGuide,
+  expectErr,
   fakeGunzip,
   GUIDE_URL,
   gzipped,
   HOUR,
+  lastGuideRun,
   NOW,
+  PLAYLIST,
   programmeXml,
+  ready,
+  rows,
+  run,
   SECOND_URL,
+  settings,
   setupGuide,
+  titles,
   tv,
   xt,
 } from './import-guide-test-helpers';
-import { emptyPanel, extinf, M3U_PASS, M3U_TOKEN, M3U_USER, setup } from './import-test-helpers';
+import { emptyPanel, M3U_PASS, M3U_USER, setup } from './import-test-helpers';
 import type { ImportProgress } from './import-types';
 import { importCatalog } from './import-xtream';
-import { getSource, updateSourceSettings } from './sources';
-
-type Env = Awaited<ReturnType<typeof setupGuide>>;
-
-const stream = (id: number) => `http://cdn.example:8080/${M3U_TOKEN}/hb/s/${id}.ts`;
-const PLAYLIST =
-  '#EXTM3U\n' +
-  extinf('Haber Bir', stream(1), 'tvg-id="haber1.tr"') +
-  extinf('Haber Bir HD', stream(2), 'tvg-id="haber1.tr"') +
-  extinf('Çağrı TV', stream(3), '') +
-  extinf('Ikiz', stream(4), '') +
-  extinf('Ikiz', stream(5), '') +
-  extinf('Quiet', stream(6), 'tvg-id="quiet.tr"');
-
-const rows = (e: Env, sql: string, p: (string | number)[] = []) =>
-  e.db.all<Record<string, unknown>>(sql, p);
-const settings = async (e: Env) => (await getSource(e.db, e.sourceId))?.settings ?? {};
-const titles = async (e: Env) =>
-  (await rows(e, 'SELECT title FROM programmes ORDER BY start, guide_id')).map((p) => p.title);
-const lastGuideRun = async (e: Env) =>
-  (await rows(e, "SELECT status FROM import_runs WHERE kind = 'guide' ORDER BY id DESC"))[0]
-    ?.status;
-
-function defaultGuide(): string {
-  return tv(
-    channelXml('haber1.tr', 'Haber Bir'),
-    channelXml('cagri', 'ÇAĞRI TV'),
-    channelXml('ikiz', 'Ikiz'),
-    channelXml('nobody', 'Nobody'),
-    programmeXml('haber1.tr', -2 * DAY, 1, 'Too Old'),
-    programmeXml('haber1.tr', -2 * HOUR, 1, 'Ended'),
-    programmeXml('haber1.tr', -HOUR / 2, 1, 'Running'),
-    programmeXml('haber1.tr', 2 * HOUR, 1, 'Later'),
-    programmeXml('haber1.tr', 6 * DAY, 1, 'Next Week'),
-    programmeXml('haber1.tr', 9 * DAY, 1, 'Too Far'),
-    programmeXml('cagri', 3 * HOUR, 2, 'Named Match'),
-    programmeXml('ikiz', 4 * HOUR, 2, 'Ambiguous'),
-    programmeXml('nobody', 5 * HOUR, 2, 'Unmapped'),
-  );
-}
-
-async function ready(guide = defaultGuide()): Promise<Env> {
-  const e = await setupGuide(PLAYLIST);
-  const r = await importCatalog(e.sourceId, e.deps);
-  if (!r.ok) throw new Error('catalog setup failed');
-  e.server.body = guide;
-  return e;
-}
-
-const run = (e: Env, opts = {}) => importGuide(e.sourceId, e.deps, { now: NOW, ...opts });
-
-function expectErr(
-  r: { ok: boolean; error?: { category: string; code: string } },
-  category: string,
-  code: string,
-) {
-  if (r.ok || r.error === undefined) throw new Error('expected error');
-  expect(r.error.category).toBe(category);
-  expect(r.error.code).toBe(code);
-}
+import { updateSourceSettings } from './sources';
 
 describe('guide import', () => {
   it('stores channels, mappings and only mapped programmes inside the window', async () => {
