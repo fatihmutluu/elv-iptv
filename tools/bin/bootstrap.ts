@@ -37,7 +37,7 @@ if (problems.length === 0) {
 
 if (run('gitleaks', ['version']).status !== 0) {
   problems.push(
-    'gitleaks is not installed (winget install gitleaks.gitleaks | brew install gitleaks); the pre-commit hook needs it',
+    'gitleaks is not installed (Windows: winget install gitleaks.gitleaks | macOS or Linux: brew install gitleaks | Linux: a release binary from https://github.com/gitleaks/gitleaks/releases); the pre-commit hook needs it',
   );
 }
 
