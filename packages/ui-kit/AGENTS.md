@@ -31,6 +31,7 @@ React components for react-native and react-native-web, design tokens and TV foc
   `visibleRows + 4` slots; slot `i % pool` hosts item `i`, so a step re-renders the entering slot plus the rows losing
   and gaining focus (at most 3), whatever the pool size. The viewport slides with a native-driven `Animated.Value`
   (short timing for single steps, direct `setValue` when changes arrive within 150 ms, i.e. held keys).
+  `renderRow` and `rowLabel` must be stable (module-level or `useCallback`): an inline one defeats the row memo.
 - Mid-list the focused item sits on `focusLine` (default 2) and the ring top is `focusLine * rowHeight`. At the top and
   bottom the window cannot slide (it is clamped to `[0, count - visibleRows]`), so the ring leaves the line there.
 - Native coordinates stay bounded: row tops and the content translate are relative to an anchor row that moves every

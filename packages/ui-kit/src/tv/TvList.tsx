@@ -39,8 +39,9 @@ export interface TvListProps<T> {
   visibleRows: number;
   /** Row slot (0-based from the top of the viewport) where the focused item rests mid-list. Default 2. */
   focusLine?: number;
+  /** Renders one row. Pass a stable function: an inline one defeats the row memo and re-renders the pool every step. */
   renderRow: (item: T | undefined, focused: boolean) => ReactElement;
-  /** Accessibility label of a row, so a screen reader can read the focused one. */
+  /** Accessibility label of a row, so a screen reader can read the focused one. Stable, like `renderRow`. */
   rowLabel?: (item: T | undefined, index: number) => string;
   testID?: string;
   /** Called once per focused-index change, on the first animation frame after the new row and ring committed, with the window that frame showed. Not called when the index returns to its previous value before a frame. */
@@ -94,6 +95,8 @@ function clamp(value: number, min: number, max: number): number {
  * item rests on `focusLine` and the ring sits at `focusLine * rowHeight`; at the ends the window cannot slide, so the
  * ring leaves the line there. Native coordinates are relative to an anchor row that moves every
  * `8 * pool` rows (all rows re-render once then), so they stay bounded at 100,000 rows. Rows never use `onPress`.
+ * `renderRow` (and `rowLabel`) must be stable callbacks (module-level or `useCallback`): rows are memoized on them, so
+ * an inline function re-renders the whole pool on every step.
  */
 export function TvList<T>({
   listId,
