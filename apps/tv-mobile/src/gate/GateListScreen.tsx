@@ -6,7 +6,7 @@ import {
   type Key,
   type KeyEvent,
 } from '@elv/focus-core';
-import { createSyntheticSource, TvList, useTvKeySource } from '@elv/ui-kit';
+import { createSyntheticSource, type FrameWindow, TvList, useTvKeySource } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { createAutoDriver } from './driver';
@@ -73,14 +73,13 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
     [items],
   );
   const source = useMemo(() => createSyntheticSource(items, makeChannel), [items]);
-  const recorder = useMemo(
-    () => createRecorder({ items, visibleRows: VISIBLE_ROWS, focusLine: FOCUS_LINE }),
-    [items],
-  );
+  const recorder = useMemo(() => createRecorder({ items }), [items]);
   const interpreter = useMemo(() => createKeyInterpreter(), []);
   const active = useRef(!auto);
   const lastRepeat = useRef<Key | undefined>(undefined);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const lastCommitted = useRef(0);
+  const frameCheck = useRef(false);
   const held = useRef(new Set<Key>());
   const ticker = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
@@ -93,7 +92,16 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
     (event: KeyEvent, t0: number) => {
       const before = currentIndex(store);
       store.dispatch(event);
-      if (currentIndex(store) !== before) recorder.move(t0);
+      if (currentIndex(store) === before) return;
+      recorder.move(t0);
+      if (frameCheck.current) return;
+      frameCheck.current = true;
+      requestAnimationFrame(() => {
+        frameCheck.current = false;
+        if (recorder.pending() > 0 && currentIndex(store) === lastCommitted.current) {
+          recorder.resolve(performance.now());
+        }
+      });
     },
     [store, recorder],
   );
@@ -133,8 +141,9 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
   useTvKeySource(onInput);
 
   const onFrameCommitted = useCallback(
-    (index: number) => {
-      recorder.commit(performance.now(), index, currentIndex(store));
+    (index: number, window: FrameWindow) => {
+      lastCommitted.current = index;
+      recorder.commit(performance.now(), index, currentIndex(store), window);
       if (lastRepeat.current !== undefined) interpreter.acknowledge(lastRepeat.current);
     },
     [recorder, store, interpreter],
@@ -153,11 +162,12 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
 
   useEffect(() => {
     if (!auto) return;
+    let cancelled = false;
     const timers = new Set<ReturnType<typeof setTimeout>>();
     const later = (fn: () => void, ms: number) => {
       const id = setTimeout(() => {
         timers.delete(id);
-        fn();
+        if (!cancelled) fn();
       }, ms);
       timers.add(id);
     };
@@ -173,6 +183,7 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
     );
     const settleStart = { at: 0 };
     const settle = () => {
+      if (cancelled) return;
       if (recorder.pending() === 0 || performance.now() - settleStart.at > SETTLE_TIMEOUT_MS) {
         active.current = false;
         emit();
@@ -183,12 +194,15 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
     later(() => {
       active.current = true;
       void driver.start().then(() => {
+        if (cancelled) return;
         settleStart.at = performance.now();
         settle();
       });
     }, WARMUP_MS);
     return () => {
+      cancelled = true;
       driver.stop();
+      recorder.finish();
       for (const id of timers) clearTimeout(id);
     };
   }, [auto, rate, moves, recorder, apply, emit]);

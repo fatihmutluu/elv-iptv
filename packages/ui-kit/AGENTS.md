@@ -36,8 +36,9 @@ React components for react-native and react-native-web, design tokens and TV foc
   `windowStart`/`rowHeight`/anchor changes (jumping, not animating, unless it is a plain step); `source.prefetch` is called
   with the rendered range plus one pool of margin when that range moves; `rowLabel` sets each row's accessibility label.
 - Key stamps use `performance.now()`.
-- `onFrameCommitted(index)` fires once per focused-index change, on the first animation frame after the row and ring
-  committed; the gate uses it to measure key-to-highlight latency.
+- `onFrameCommitted(index, window)` fires once per focused-index change, on the first animation frame after the row and ring
+  committed, with the `FrameWindow` it showed (visible `[start, end)`, rendered `[renderedStart, renderedEnd)`); an A to B to A change
+  within one frame fires nothing; the gate uses it to measure key-to-highlight latency.
 - Rows get `testID` `${testID}-row-${index}` and `accessibilityState.selected`; the ring is `${testID}-ring`.
 - `createSyntheticSource(count, make, cacheSize)` computes items on demand with a small LRU, for gates and tests.
 - Jest is wired (`jest.config.cjs`, `babel.config.cjs`, `pnpm --filter @elv/ui-kit test:jest`). `jest-expo` is a test

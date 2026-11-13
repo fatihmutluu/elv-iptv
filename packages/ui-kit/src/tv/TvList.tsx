@@ -22,6 +22,14 @@ const REPEAT_WINDOW_MS = 150;
 /** Native coordinates are anchored every this many pools of rows, so they stay far below float32 precision limits. */
 const ANCHOR_POOLS = 8;
 
+/** What a committed frame showed: the visible rows `[start, end)` and the rows rendered `[renderedStart, renderedEnd)`. */
+export interface FrameWindow {
+  start: number;
+  end: number;
+  renderedStart: number;
+  renderedEnd: number;
+}
+
 /** Props of {@link TvList}. */
 export interface TvListProps<T> {
   listId: string;
@@ -35,8 +43,8 @@ export interface TvListProps<T> {
   /** Accessibility label of a row, so a screen reader can read the focused one. */
   rowLabel?: (item: T | undefined, index: number) => string;
   testID?: string;
-  /** Called once per focused-index change, on the first animation frame after the new row and ring committed. */
-  onFrameCommitted?: (index: number) => void;
+  /** Called once per focused-index change, on the first animation frame after the new row and ring committed, with the window that frame showed. Not called when the index returns to its previous value before a frame. */
+  onFrameCommitted?: (index: number, window: FrameWindow) => void;
 }
 
 interface RowProps<T> {
@@ -153,10 +161,16 @@ export function TvList<T>({
   useLayoutEffect(() => {
     if (shownIndex.current === index) return;
     shownIndex.current = index;
+    const shown: FrameWindow = {
+      start: windowStart,
+      end: windowStart + visibleRows,
+      renderedStart: rangeStart,
+      renderedEnd: rangeEnd,
+    };
     requestAnimationFrame(() => {
-      if (mounted.current) callback.current?.(index);
+      if (mounted.current) callback.current?.(index, shown);
     });
-  }, [index]);
+  }, [index, windowStart, visibleRows, rangeStart, rangeEnd]);
 
   const prefetchStart = Math.max(0, rangeStart - pool);
   const prefetchEnd = Math.min(count, rangeEnd + pool);

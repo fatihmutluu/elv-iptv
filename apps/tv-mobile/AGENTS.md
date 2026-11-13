@@ -36,14 +36,15 @@ It is a composition root: it wires modules, storage drivers, routes and stores.
   The screen drops a `repeat` that arrives while the previous move has not committed and counts it as `coalesced`.
 - Real keys: the screen also mounts `useTvKeySource` -> `createKeyInterpreter` -> store, ticking the interpreter
   while a key is down and acknowledging repeats from `onFrameCommitted`. With `auto=0` it prints one line after 2 s
-  without a move (`adb shell input keyevent` runs for Task 5's `--real-keys`).
+  without a move (for `--real-keys`).
 - Metrics (`metrics.ts`): `t0` is the dispatch time (auto) or the key event time (real); `t1` is `performance.now()`
   inside `onFrameCommitted` (first frame after row and ring committed); key-to-highlight is `t1 - t0` for each move
   that the commit covers. `maxJsGapMs` is the largest (gap - 4 ms) of a 4 ms `setInterval` while a run is active.
-  Percentiles are nearest-rank (`ceil(p * n)`-th smallest), times rounded to 0.01 ms.
-- `losses`: a committed index outside the list or outside the window `[windowStart, windowStart + visibleRows)`;
-  plus 1 if the last committed index differs from the store's index once the run settles; plus every move that never
-  got a committed frame (after a 2 s settle timeout).
+  Percentiles are nearest-rank (`ceil(p * n)`-th smallest), rounded to 0.01 ms.
+- `losses`: a committed frame whose focused index is outside `[0, items)`, outside the visible window that `TvList` reported for
+  that frame, or outside the rows it rendered; plus 1 if the last committed index differs from the store's index once
+  the run settles; plus every move that never got a committed frame (after a 2 s settle timeout). Moves whose net effect
+  left the index unchanged within a frame (A to B to A) get no `TvList` callback; the screen resolves them in its own
+  animation frame and they are not losses. Unmounting or changing the params mid-run prints nothing for that run.
 - Output: exactly one `console.log('ELV_GATE ' + JSON.stringify(metrics))` per auto run (release builds still send it
-  to logcat under `ReactNativeJS`). Gate tests: pure ones run in Vitest (`src/gate/**/*.test.ts`, no react-native),
-  component ones in Jest.
+  to logcat under `ReactNativeJS`). Pure gate tests run in Vitest (`src/gate/**/*.test.ts`), component ones in Jest.

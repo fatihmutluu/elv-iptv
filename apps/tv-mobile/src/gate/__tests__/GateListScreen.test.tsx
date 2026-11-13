@@ -40,4 +40,30 @@ describe('GateListScreen', () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 200));
     expect(gateLines(log)).toHaveLength(0);
   });
+
+  it('prints no line when the screen unmounts mid-run', async () => {
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const view = await render(
+      <GateListScreen params={{ items: 1000, auto: true, rate: 20, moves: 200 }} />,
+    );
+    await new Promise<void>((resolve) => setTimeout(resolve, 800));
+    await view.unmount();
+    await new Promise<void>((resolve) => setTimeout(resolve, 3000));
+    expect(gateLines(log)).toHaveLength(0);
+  });
+
+  it('prints only the new run line when the params change mid-run', async () => {
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const first = { items: 1000, auto: true, rate: 20, moves: 200 };
+    const view = await render(<GateListScreen key="a" params={first} />);
+    await new Promise<void>((resolve) => setTimeout(resolve, 800));
+    await view.rerender(
+      <GateListScreen key="b" params={{ items: 2000, auto: true, rate: 60, moves: 20 }} />,
+    );
+    await waitFor(() => expect(gateLines(log)).toHaveLength(1), { timeout: 8000 });
+    await new Promise<void>((resolve) => setTimeout(resolve, 3000));
+    const lines = gateLines(log);
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse((lines[0] ?? '').slice('ELV_GATE '.length)).items).toBe(2000);
+  });
 });

@@ -108,11 +108,31 @@ describe('TvList', () => {
     expect(onFrameCommitted).not.toHaveBeenCalled();
     await act(async () => move(store, 'down'));
     expect(onFrameCommitted).toHaveBeenCalledTimes(1);
-    expect(onFrameCommitted).toHaveBeenLastCalledWith(1);
+    expect(onFrameCommitted).toHaveBeenLastCalledWith(1, {
+      start: 0,
+      end: 8,
+      renderedStart: 0,
+      renderedEnd: 12,
+    });
     await act(async () => move(store, 'down'));
     expect(onFrameCommitted).toHaveBeenCalledTimes(2);
     await act(async () => move(store, 'up', 2));
-    expect(onFrameCommitted).toHaveBeenLastCalledWith(0);
+    expect(onFrameCommitted).toHaveBeenLastCalledWith(0, {
+      start: 0,
+      end: 8,
+      renderedStart: 0,
+      renderedEnd: 12,
+    });
+  });
+
+  it('reports no frame when the index returns to its value within one frame', async () => {
+    const { store, ui, onFrameCommitted } = setup(8);
+    await render(ui);
+    await act(async () => {
+      move(store, 'down');
+      move(store, 'up');
+    });
+    expect(onFrameCommitted).not.toHaveBeenCalled();
   });
 
   describe('coordinates and sync', () => {
@@ -171,7 +191,10 @@ describe('TvList', () => {
       await render(<StrictMode>{ui}</StrictMode>);
       await act(async () => move(store, 'down'));
       expect(onFrameCommitted).toHaveBeenCalledTimes(1);
-      expect(onFrameCommitted).toHaveBeenCalledWith(1);
+      expect(onFrameCommitted).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ start: 0, end: 8 }),
+      );
     });
 
     it('labels rows through rowLabel', async () => {

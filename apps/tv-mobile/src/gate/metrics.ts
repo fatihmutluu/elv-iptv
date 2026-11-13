@@ -1,3 +1,5 @@
+import type { FrameWindow } from '@elv/ui-kit';
+
 /** Counters a gate run reports next to the latency summary. */
 export interface GateCounts {
   moves: number;
@@ -52,23 +54,6 @@ export function gateLine(m: GateMetrics): string {
   return `ELV_GATE ${JSON.stringify(m)}`;
 }
 
-/** First visible item of the list window when `index` is focused (mirrors `TvList`'s window rule). */
-export function windowStart(
-  index: number,
-  count: number,
-  visibleRows: number,
-  focusLine: number,
-): number {
-  return Math.min(Math.max(index - focusLine, 0), Math.max(0, count - visibleRows));
-}
-
-/** List geometry the recorder uses to check that a committed index is on screen. */
-export interface RecorderGeometry {
-  items: number;
-  visibleRows: number;
-  focusLine: number;
-}
-
 /** Collects the samples and counters of one gate run. Hot paths only push numbers and bump counters. */
 export interface Recorder {
   /** A move changed the focused index; `t0` is the key time (ms). */
@@ -77,8 +62,10 @@ export interface Recorder {
   coalesce(): void;
   /** One event-loop sample: the lag in ms beyond the sampling interval. */
   gap(ms: number): void;
-  /** A frame committed `index` at `t1` while the store's current index was `current`. */
-  commit(t1: number, index: number, current: number): void;
+  /** A frame showing `window` committed `index` at `t1` while the store's current index was `current`. */
+  commit(t1: number, index: number, current: number, window: FrameWindow): void;
+  /** Resolves pending moves at `t1` when their net effect left the index unchanged, so no frame was reported. */
+  resolve(t1: number): void;
   /** Moves waiting for a committed frame. */
   pending(): number;
   /** Summarizes the run, settles the losses, and resets the recorder for the next run. */
@@ -86,12 +73,12 @@ export interface Recorder {
 }
 
 /**
- * Creates a recorder. Loss rule, evaluated per run: a committed frame whose index is not on screen (outside
- * `[0, items)` or, equivalently, outside the window `[windowStart, windowStart + visibleRows)`) is one loss; when
- * the run settles, a last committed index that differs from the store's current index is one loss; every move that
- * never got a committed frame is one loss.
+ * Creates a recorder for a list of `items`. Loss rule, evaluated per run: a committed frame whose focused index is
+ * outside `[0, items)`, outside the visible window it reported, or outside the rows it rendered is one loss; when the
+ * run settles, a last committed index that differs from the store's current index is one loss; every move that never
+ * got a committed frame is one loss.
  */
-export function createRecorder(geometry: RecorderGeometry): Recorder {
+export function createRecorder(geometry: { items: number }): Recorder {
   let samples: number[] = [];
   let gaps: number[] = [];
   let pendingT0: number[] = [];
@@ -111,19 +98,24 @@ export function createRecorder(geometry: RecorderGeometry): Recorder {
     gap(ms) {
       gaps.push(ms);
     },
-    commit(t1, index, current) {
+    commit(t1, index, current, window) {
       for (const t0 of pendingT0) samples.push(t1 - t0);
       pendingT0.length = 0;
-      const start = windowStart(index, geometry.items, geometry.visibleRows, geometry.focusLine);
       if (
         index < 0 ||
         index >= geometry.items ||
-        index < start ||
-        index >= start + geometry.visibleRows
+        index < window.start ||
+        index >= window.end ||
+        index < window.renderedStart ||
+        index >= window.renderedEnd
       ) {
         losses++;
       }
       settled = { index, current };
+    },
+    resolve(t1) {
+      for (const t0 of pendingT0) samples.push(t1 - t0);
+      pendingT0.length = 0;
     },
     pending: () => pendingT0.length,
     finish() {

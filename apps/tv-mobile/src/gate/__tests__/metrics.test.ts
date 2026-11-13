@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createRecorder, gateLine, summarize, windowStart } from '../metrics';
+import { createRecorder, gateLine, summarize } from '../metrics';
 
 describe('summarize', () => {
   it('uses nearest-rank percentiles', () => {
@@ -43,23 +43,20 @@ describe('gateLine', () => {
   });
 });
 
-describe('windowStart', () => {
-  it('keeps the focused item on the focus line and clamps at the ends', () => {
-    expect(windowStart(50, 1000, 10, 2)).toBe(48);
-    expect(windowStart(0, 1000, 10, 2)).toBe(0);
-    expect(windowStart(999, 1000, 10, 2)).toBe(990);
-    expect(windowStart(1, 5, 10, 2)).toBe(0);
-  });
-});
-
 describe('createRecorder', () => {
-  const geometry = { items: 1000, visibleRows: 10, focusLine: 2 };
+  const geometry = { items: 1000 };
+  const win = (start: number) => ({
+    start,
+    end: start + 10,
+    renderedStart: start,
+    renderedEnd: start + 14,
+  });
 
   it('measures key-to-highlight for every pending move on a commit', () => {
     const r = createRecorder(geometry);
     r.move(10);
     r.move(20);
-    r.commit(40, 2, 2);
+    r.commit(40, 2, 2, win(0));
     expect(r.pending()).toBe(0);
     const m = r.finish();
     expect(m.moves).toBe(2);
@@ -82,7 +79,7 @@ describe('createRecorder', () => {
   it('counts a settled frame that shows a stale index and moves that never committed as losses', () => {
     const stale = createRecorder(geometry);
     stale.move(0);
-    stale.commit(5, 3, 4);
+    stale.commit(5, 3, 4, win(0));
     expect(stale.finish().losses).toBe(1);
 
     const open = createRecorder(geometry);
@@ -94,14 +91,37 @@ describe('createRecorder', () => {
   it('counts a committed index outside the list as a loss', () => {
     const r = createRecorder(geometry);
     r.move(0);
-    r.commit(5, 5000, 5000);
+    r.commit(5, 5000, 5000, win(4990));
     expect(r.finish().losses).toBe(1);
+  });
+
+  it('counts a focused index outside the visible or rendered rows as a loss', () => {
+    const hidden = createRecorder(geometry);
+    hidden.move(0);
+    hidden.commit(5, 20, 20, win(0));
+    expect(hidden.finish().losses).toBe(1);
+
+    const unrendered = createRecorder(geometry);
+    unrendered.move(0);
+    unrendered.commit(5, 12, 12, { start: 5, end: 15, renderedStart: 5, renderedEnd: 12 });
+    expect(unrendered.finish().losses).toBe(1);
+  });
+
+  it('resolves pending moves whose net effect left the index unchanged', () => {
+    const r = createRecorder(geometry);
+    r.move(0);
+    r.move(4);
+    r.resolve(10);
+    expect(r.pending()).toBe(0);
+    const m = r.finish();
+    expect(m.losses).toBe(0);
+    expect(m.keyToHighlightMs.max).toBe(10);
   });
 
   it('resets after finish', () => {
     const r = createRecorder(geometry);
     r.move(0);
-    r.commit(5, 1, 1);
+    r.commit(5, 1, 1, win(0));
     r.finish();
     expect(r.finish().moves).toBe(0);
   });
