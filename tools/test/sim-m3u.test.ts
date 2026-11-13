@@ -174,7 +174,13 @@ describe('m3uChunks', () => {
       ['duplicate-id-b', (l) => expect(l[0]).toContain('tvg-id="dup"')],
       ['empty-name', (l) => expect(l[0]?.endsWith(',')).toBe(true)],
       ['long-name', (l) => expect((l[0] as string).split('",').at(-1)).toHaveLength(300)],
-      ['quotes-commas', (l) => expect(l[0]).toContain(',Channel "Quoted", With, Commas')],
+      [
+        'quotes-commas',
+        (l) => {
+          expect(l[0]).toContain(',Channel "Quoted", With, Commas');
+          expect(l[0]).toContain('tvg-name="Channel \'Quoted\', With, Commas"');
+        },
+      ],
       ['turkish-name', (l) => expect(l[0]).toContain(',Kanal İğüşöçı')],
       ['rtl-name', (l) => expect(l[0]).toContain(',قناة ٤٢')],
       ['tvg-shift', (l) => expect(l[0]).toContain('tvg-shift="-2"')],

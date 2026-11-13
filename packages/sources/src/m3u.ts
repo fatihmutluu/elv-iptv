@@ -60,10 +60,13 @@ class M3uScanner {
   private discarding = false;
   private first = true;
 
-  constructor(
-    private readonly batchSize: number,
-    private readonly baseUrl: string | undefined,
-  ) {}
+  private readonly batchSize: number;
+  private readonly baseUrl: string | undefined;
+
+  constructor(batchSize: number, baseUrl: string | undefined) {
+    this.batchSize = batchSize;
+    this.baseUrl = baseUrl;
+  }
 
   /** Processes complete lines (all remaining ones when `final`) until the batch is full or input runs out. */
   run(final: boolean): void {

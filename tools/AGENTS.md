@@ -12,7 +12,7 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
 - `pnpm run:app <target> [build] [--production]` launches or builds a target.
   Targets: android, android-tv, fire-tv, ios, tvos, windows, macos, linux.
 - `pnpm scaffold <pure|rn|module> <name>` creates a workspace package (skill `add-package`).
-- `pnpm --filter @elv/tools test` runs this package's Vitest suite.
+- `pnpm --filter @elv/tools test` runs the Vitest suite (`sources-*` tests use the sim; `SIM_HUGE=1` adds 500k).
 
 ## Layout
 - `src/` library modules, each unit-tested: `env`, `run-command`, `prebuild-stamp`, `scaffold`, `file-size`,

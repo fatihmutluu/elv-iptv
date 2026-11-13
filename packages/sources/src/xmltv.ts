@@ -41,10 +41,13 @@ class XmltvScanner {
   private readonly res: Resume = { at: 0 };
   private readonly attrs: (string | undefined)[] = [undefined, undefined, undefined];
 
-  constructor(
-    private readonly size: number,
-    private readonly opts: XmltvOptions,
-  ) {}
+  private readonly size: number;
+  private readonly opts: XmltvOptions;
+
+  constructor(size: number, opts: XmltvOptions) {
+    this.size = size;
+    this.opts = opts;
+  }
 
   /** Processes complete elements (all remaining input when `final`) until the batch is full or input runs out. */
   run(final: boolean): void {

@@ -12,7 +12,8 @@ M3U and XMLTV scanners and the Xtream client.
   Platform access goes through ports defined in `@elv/domain`.
 - Source-first: `exports` points at `src/index.ts`; there is no build step.
 - Allowed workspace dependencies: domain.
-- Tests live beside the code as `*.test.ts`.
+- Tests live beside the code as `*.test.ts`. Integration and performance tests (real HTTP against the
+  simulator, 100k entries in CI, 500k with `SIM_HUGE=1`) live in `tools/test/sources-*.test.ts`.
 
 ## API
 - `scanM3u(chunks, { batchSize?, baseUrl? })` streams an M3U/M3U8 playlist (byte chunks) into `M3uBatch`es of typed

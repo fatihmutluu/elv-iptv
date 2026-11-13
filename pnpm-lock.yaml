@@ -459,6 +459,12 @@ importers:
       '@elv/config':
         specifier: workspace:*
         version: link:../packages/config
+      '@elv/domain':
+        specifier: workspace:*
+        version: link:../packages/domain
+      '@elv/sources':
+        specifier: workspace:*
+        version: link:../packages/sources
       '@types/node':
         specifier: 24.19.2
         version: 24.19.2

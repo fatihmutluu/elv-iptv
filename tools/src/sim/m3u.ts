@@ -114,6 +114,9 @@ function compatExtras(c: CompatCase, ch: LiveChannel, ctx: Ctx): Extras {
   }
 }
 
+/** An attribute value cannot hold a double quote, so a quoted name appears with apostrophes there. */
+const attrValue = (text: string): string => text.replaceAll('"', "'");
+
 function liveTvgId(ch: LiveChannel): string | null {
   if (ch.compat === 'duplicate-id-a' || ch.compat === 'duplicate-id-b') return 'dup';
   return ch.epgId;
@@ -126,7 +129,7 @@ function* liveLines(catalog: Catalog, ctx: Ctx, groups: Map<string, string>): Ge
     const extras = ch.compat ? compatExtras(ch.compat, ch, ctx) : { attrs: '', directives: [] };
     const tvgId = liveTvgId(ch);
     const logo = ch.logo === null ? '' : ` tvg-logo="${ctx.base}/logos/${ch.logo}.png"`;
-    yield `#EXTINF:-1${tvgId === null ? '' : ` tvg-id="${tvgId}"`} tvg-name="${ch.name}"${logo} tvg-chno="${ch.num}"${extras.attrs} group-title="${groups.get(ch.categoryId)}",${ch.name}`;
+    yield `#EXTINF:-1${tvgId === null ? '' : ` tvg-id="${tvgId}"`} tvg-name="${attrValue(ch.name)}"${logo} tvg-chno="${ch.num}"${extras.attrs} group-title="${groups.get(ch.categoryId)}",${ch.name}`;
     yield* extras.directives;
     yield extras.url ?? streamUrl(ctx.base, ctx.account, 'live', ch.id, ctx.ext);
   }
