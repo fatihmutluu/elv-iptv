@@ -9,3 +9,11 @@ export {
 } from './m3u';
 export { createStats, type ScanStats, type ScanWarning, warn } from './stats';
 export { ByteBuffer, decodeUtf8 } from './utf8';
+export {
+  parseXmltvTime,
+  scanXmltv,
+  type XmltvBatch,
+  type XmltvChannel,
+  type XmltvOptions,
+  type XmltvProgramme,
+} from './xmltv';

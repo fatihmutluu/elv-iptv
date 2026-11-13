@@ -12,7 +12,8 @@ export interface ScanStats {
   warnings: ScanWarning[];
 }
 
-const MAX_WARNINGS = 100;
+/** Number of warnings a scan keeps. */
+export const MAX_WARNINGS = 100;
 
 /** Creates zeroed statistics. */
 export function createStats(): ScanStats {
