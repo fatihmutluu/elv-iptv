@@ -1,0 +1,36 @@
+{
+  "device": {
+    "model": "sdk_google_atv64_x86_64",
+    "release": "16",
+    "sdk": "36"
+  },
+  "build": "development variant, release APK (JS bundled, debug-signed), x86_64 only",
+  "commit": "0b25ea8",
+  "date": "2026-11-14",
+  "note": "CI emulator (GitHub ubuntu-24.04, KVM, software GPU). Seeded with the worst median per metric of four CI runs (43512635246, 43512749170, 43521789569, 43521817029) because single CI medians vary; absolute budgets are warnings in CI (--budgets warn).",
+  "result": {
+    "metrics": {
+      "moves": 600,
+      "scripted": 600,
+      "coalesced": 0,
+      "losses": 0,
+      "keyToHighlightMs": {
+        "p50": 19.26,
+        "p95": 23.63,
+        "max": 43.5
+      },
+      "maxJsGapMs": 16.02,
+      "maxFrameStallMs": 64.46,
+      "items": 100000
+    },
+    "frames": {
+      "totalFrames": 608,
+      "jankyPercent": 76.85,
+      "legacyJankyPercent": 1.32,
+      "p50": 16,
+      "p90": 16,
+      "p95": 16,
+      "p99": 31
+    }
+  }
+}
