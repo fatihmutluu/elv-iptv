@@ -5,7 +5,8 @@ import { Readable } from 'node:stream';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ACCOUNTS, type Account } from '../src/sim/accounts.ts';
 import { applyStreamFaults, parseFaults } from '../src/sim/faults.ts';
-import { activeChildren, findFfmpeg } from '../src/sim/media.ts';
+import { activeChildren, ensureRecipe, findFfmpeg } from '../src/sim/media.ts';
+import { hlsPlaylist } from '../src/sim/routes-live.ts';
 import { type SimHandle, startSim } from '../src/sim/server.ts';
 
 const ffmpeg = findFfmpeg();
@@ -106,6 +107,54 @@ describe('applyStreamFaults', () => {
     const parts: Buffer[] = [];
     for await (const c of out) parts.push(c as Buffer);
     expect(Buffer.concat(parts).toString()).toBe('abcdef');
+  });
+});
+
+/** Segment numbers that directly follow a discontinuity tag. */
+function taggedSegments(text: string): number[] {
+  const out: number[] = [];
+  const lines = text.split('\n');
+  for (const [i, line] of lines.entries()) {
+    if (line === '#EXT-X-DISCONTINUITY')
+      out.push(Number(/(\d+)\.ts$/.exec(lines[i + 2] ?? '')?.[1]));
+  }
+  return out;
+}
+
+const number = (text: string, tag: string): number =>
+  Number(new RegExp(`#EXT-X-${tag}:(\\d+)`).exec(text)?.[1]);
+
+describe('hlsPlaylist numbering', () => {
+  const epoch = Date.UTC(2026, 0, 1);
+  it.each([2, 3, 5])('numbers discontinuities for %i segments per RFC 8216', (count) => {
+    let previous: string | null = null;
+    for (let n = 0; n < 40; n++) {
+      const text = hlsPlaylist('h264-aac-720p25', count, epoch + n * 2000 + 500);
+      expect(number(text, 'MEDIA-SEQUENCE')).toBe(n);
+      let removed = 0;
+      for (let m = 1; m < n; m++) if (m % count === 0) removed++;
+      expect(number(text, 'DISCONTINUITY-SEQUENCE')).toBe(removed);
+      const expected = [...Array(6).keys()]
+        .map((i) => n + i)
+        .filter((s) => s > 0 && s % count === 0);
+      expect(taggedSegments(text)).toEqual(expected);
+      if (previous !== null) {
+        const leaving = n - 1 > 0 && (n - 1) % count === 0 ? 1 : 0;
+        expect(number(text, 'DISCONTINUITY-SEQUENCE')).toBe(
+          number(previous, 'DISCONTINUITY-SEQUENCE') + leaving,
+        );
+      }
+      previous = text;
+    }
+  });
+
+  it('never decreases across a segment boundary', () => {
+    const before = hlsPlaylist('h264-aac-720p25', 2, epoch + 59_999);
+    const after = hlsPlaylist('h264-aac-720p25', 2, epoch + 60_000);
+    expect(number(after, 'MEDIA-SEQUENCE')).toBe(number(before, 'MEDIA-SEQUENCE') + 1);
+    expect(number(after, 'DISCONTINUITY-SEQUENCE')).toBeGreaterThanOrEqual(
+      number(before, 'DISCONTINUITY-SEQUENCE'),
+    );
   });
 });
 
@@ -219,13 +268,21 @@ withFfmpeg('live streams', () => {
     expect(text).toContain('#EXT-X-TARGETDURATION:2');
     const seq = Number(/#EXT-X-MEDIA-SEQUENCE:(\d+)/.exec(text)?.[1]);
     expect([30, 31]).toContain(seq);
+    const files = await ensureRecipe('h264-aac-720p25', {
+      ffmpeg: ffmpeg as string,
+      cacheDir,
+      seconds: 4,
+    });
+    const count = files.segmentCount;
     expect(text.match(/#EXTINF:2\.000,/g)).toHaveLength(6);
     const segments = text.split('\n').filter((l) => l.endsWith('.ts'));
     expect(segments.map((s) => Number(/(\d+)\.ts$/.exec(s)?.[1]))).toEqual(
       [0, 1, 2, 3, 4, 5].map((i) => seq + i),
     );
-    expect(text).toContain('#EXT-X-DISCONTINUITY\n');
-    expect(text).toMatch(/#EXT-X-DISCONTINUITY-SEQUENCE:\d+/);
+    expect(number(text, 'DISCONTINUITY-SEQUENCE')).toBe(Math.floor((seq - 1) / count));
+    expect(taggedSegments(text)).toEqual(
+      segments.map((s) => Number(/(\d+)\.ts$/.exec(s)?.[1])).filter((n) => n % count === 0),
+    );
     const segment = await fetch(`${sim.url}${segments[0]}`);
     expect(segment.status).toBe(200);
     expect(segment.headers.get('content-type')).toBe('video/mp2t');

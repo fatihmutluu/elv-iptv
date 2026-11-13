@@ -186,7 +186,7 @@ describe('request log', () => {
     const handle = await sim();
     const { url } = handle;
     await fetch(`${url}/get.php?${creds}`).then((r) => r.text());
-    await fetch(`${url}/live${pair}1001.ts`).then((r) => r.text());
+    await fetch(`${url}/live${pair}1001.ts?fault=status=404`).then((r) => r.text());
     await fetch(`${url}/`, {
       headers: {
         authorization: `Basic ${basic}`,

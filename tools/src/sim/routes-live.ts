@@ -33,7 +33,11 @@ function liveChannel(account: Account, seed: number, id: number) {
   return buildCatalog(account.profile, seed).live.find((c) => c.id === id) ?? null;
 }
 
-function hlsPlaylist(recipe: RecipeName, segmentCount: number, nowMs: number): string {
+/**
+ * Sliding-window media playlist for `nowMs`. Discontinuity tags precede segments whose index wraps to 0
+ * (seq > 0, multiple of `segmentCount`); the discontinuity sequence counts those that left the window.
+ */
+export function hlsPlaylist(recipe: RecipeName, segmentCount: number, nowMs: number): string {
   const first = Math.max(0, Math.floor((nowMs - HLS_EPOCH_MS) / HLS_SEGMENT_MS));
   const wraps = first > 0 ? Math.floor((first - 1) / segmentCount) : 0;
   const lines = [
