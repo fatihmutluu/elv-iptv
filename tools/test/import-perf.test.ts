@@ -5,6 +5,7 @@ import {
   count,
   type Env,
   generatedProgrammes,
+  m3uSource,
   measureImport,
   openEnv,
   xtreamSource,
@@ -42,6 +43,28 @@ describe('large profile imported into a file database', () => {
     expect(await count(env.db, 'movies')).toBe(large.movies.length);
     expect(await count(env.db, 'series')).toBe(large.series.length);
     expect(report.rows).toBe(large.live.length + large.movies.length + large.series.length);
+    expect(report.seconds).toBeLessThanOrEqual(20);
+  }, 120_000);
+
+  it('imports the 100k-entry playlist as an M3U source within 20 s', async () => {
+    const id = await m3uSource(env, sim, 'large');
+    const episodes = large.series.reduce((n, s) => n + s.episodes.length, 0);
+    const report = await measureImport(
+      'large playlist',
+      env,
+      async (tick) => {
+        const result = await importCatalog(id, env.deps, { onProgress: tick });
+        if (!result.ok) throw new Error(`import failed: ${JSON.stringify(result.error)}`);
+        return result.value.counts;
+      },
+      ['live', 'movies', 'episodes'],
+    );
+    process.stdout.write(`${report.line}\n`);
+    expect(report.rows).toBe(large.live.length + large.movies.length + episodes);
+    expect(await count(env.db, 'live WHERE source_id = ?', [id])).toBe(large.live.length);
+    expect(await count(env.db, 'movies WHERE source_id = ?', [id])).toBe(large.movies.length);
+    expect(await count(env.db, 'episodes WHERE source_id = ?', [id])).toBe(episodes);
+    expect(await count(env.db, 'live WHERE source_id = ? AND url_template IS NULL', [id])).toBe(0);
     expect(report.seconds).toBeLessThanOrEqual(20);
   }, 120_000);
 
