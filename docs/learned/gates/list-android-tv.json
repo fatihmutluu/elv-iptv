@@ -5,7 +5,7 @@
     "sdk": "36"
   },
   "build": "development variant, release APK (JS bundled, debug-signed)",
-  "commit": "431cfb4",
+  "commit": "6428f7d",
   "date": "2026-11-13",
   "result": {
     "metrics": {
@@ -13,16 +13,16 @@
       "coalesced": 0,
       "losses": 0,
       "keyToHighlightMs": {
-        "p50": 17.78,
-        "p95": 19.24,
-        "max": 21.19
+        "p50": 17.71,
+        "p95": 19.17,
+        "max": 21.15
       },
-      "maxJsGapMs": 5.66,
+      "maxJsGapMs": 11.6,
       "items": 100000
     },
     "frames": {
       "totalFrames": 605,
-      "jankyPercent": 59.83,
+      "jankyPercent": 54.71,
       "legacyJankyPercent": 0.66,
       "p50": 17,
       "p90": 18,
@@ -30,9 +30,9 @@
       "p99": 19
     },
     "realKeys": {
-      "p50": 13.56,
-      "p95": 20.26,
-      "max": 21.92,
+      "p50": 14.02,
+      "p95": 21.92,
+      "max": 23.78,
       "losses": 0
     }
   }
