@@ -1,6 +1,6 @@
 # data (`@elv/data`)
 
-Schema, migrations and repositories over the SqlDriver port.
+Schema, migrations and repositories for catalog, EPG and user data, over the `SqlDriver` port.
 
 ## Commands
 - `pnpm --filter @elv/data typecheck` type-checks this package.
@@ -11,5 +11,5 @@ Schema, migrations and repositories over the SqlDriver port.
 - Pure TypeScript: no `react`, `react-native`, `expo*`, `electron` or `node:*` imports.
   Platform access goes through ports defined in `@elv/domain`.
 - Source-first: `exports` points at `src/index.ts`; there is no build step.
-- Allowed workspace dependencies: domain sources.
+- Allowed workspace dependencies: `@elv/domain` and `@elv/sources`.
 - Tests live beside the code as `*.test.ts`.
