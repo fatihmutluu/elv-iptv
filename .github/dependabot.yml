@@ -16,6 +16,17 @@ updates:
       # Types follow the pinned Node 24 runtime, not the newest Node.
       - dependency-name: "@types/node"
         update-types: [version-update:semver-major]
+      # Expo SDK upgrades move these together with `expo install --fix`; single bumps break the SDK pins.
+      - dependency-name: "expo"
+      - dependency-name: "expo-*"
+      - dependency-name: "@expo/*"
+      - dependency-name: "jest-expo"
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+      - dependency-name: "@types/react"
+      - dependency-name: "react-native"
+      - dependency-name: "react-native-*"
+      - dependency-name: "@react-native-tvos/*"
     groups:
       minor-and-patch:
         update-types: [minor, patch]
