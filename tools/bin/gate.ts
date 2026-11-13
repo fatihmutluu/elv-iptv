@@ -5,6 +5,7 @@ import { exec as run } from '../src/exec.ts';
 import {
   type BudgetMode,
   baselineRefusal,
+  baselineTargetRefusal,
   type CompareOutcome,
   compareToBaseline,
   type GateResult,
@@ -68,6 +69,12 @@ if (budgets !== 'fail' && budgets !== 'warn') fail(`gate: --budgets is fail or w
 const root = findRepoRoot(process.cwd());
 const adb = resolveAdb(process.env, process.platform);
 const exec: Exec = (command, args, opts) => run(command, args, { cwd: root, ...opts });
+const baselineName = values.baseline ?? DEFAULT_BASELINE;
+const baselinePath = resolve(root, baselineName);
+if (values['write-baseline'] === true) {
+  const refusal = baselineTargetRefusal(budgets, baselinePath, resolve(root, DEFAULT_BASELINE));
+  if (refusal !== undefined) fail(`gate: ${refusal}`, 2);
+}
 
 interface Baseline {
   device: Record<string, string>;
@@ -94,8 +101,6 @@ const result = await runListGate({
 
 const device = await deviceInfo(exec, adb, await findDevice(exec, adb, values.avd));
 const commit = (await exec('git', ['rev-parse', '--short', 'HEAD'])).output.trim();
-const baselineName = values.baseline ?? DEFAULT_BASELINE;
-const baselinePath = resolve(root, baselineName);
 
 if (values['write-baseline'] === true) {
   const refusal = baselineRefusal(result, budgets);

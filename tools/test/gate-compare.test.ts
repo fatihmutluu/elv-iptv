@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   baselineRefusal,
+  baselineTargetRefusal,
   compareToBaseline,
   type GateResult,
   worstRunWarnings,
@@ -195,6 +196,21 @@ describe('baselineRefusal', () => {
     expect(baselineRefusal(change({ realLosses: 2 }))).toMatch(/losses/);
     expect(baselineRefusal(change({ gap: 17 }))).toMatch(/budget/);
     expect(baselineRefusal(change({ p95: 101 }))).toMatch(/budget/);
+  });
+});
+
+describe('baselineTargetRefusal', () => {
+  const local = '/repo/docs/learned/gates/list-android-tv.json';
+  const ci = '/repo/docs/learned/gates/list-android-tv-ci.json';
+
+  it('refuses to write the default local baseline with budgets as warnings', () => {
+    expect(baselineTargetRefusal('warn', local, local)).toMatch(/--budgets warn.*--baseline/);
+  });
+
+  it('lets budgets-as-warnings write another baseline file, and budgets-fail write any', () => {
+    expect(baselineTargetRefusal('warn', ci, local)).toBeUndefined();
+    expect(baselineTargetRefusal('fail', local, local)).toBeUndefined();
+    expect(baselineTargetRefusal('fail', ci, local)).toBeUndefined();
   });
 });
 

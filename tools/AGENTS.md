@@ -12,7 +12,8 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
   runs the TV list gate on a running Android TV emulator (`src/gates/`; adb from ANDROID_HOME, the default SDK or PATH), compares
   the median with `docs/learned/gates/list-android-tv.json` (or `--baseline`; a missing given file: budgets and losses only, warned;
   spec 5.6), writes the median and every run to `--out` (`gate-list.json`, with `--ci` under `gate-artifacts/`), warns when the
-  worst run breaks a budget the median meets, exits 1 on a failure. `--budgets warn` (CI) only warns about absolute budgets.
+  worst run breaks a budget the median meets, exits 1 on a failure. `--budgets warn` (CI) only warns about absolute budgets;
+  with it `--write-baseline` refuses the local baseline and needs another `--baseline` file.
 - `pnpm scaffold <pure|rn|module> <name>` creates a workspace package (skill `add-package`).
 - `pnpm --filter @elv/tools test` runs Vitest (`sources-*`, `import-*` use the sim; `SIM_HUGE=1` adds 500k).
 
@@ -25,8 +26,7 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
   `dependency-coverage.test.ts` fails when a package has no rule of its own; `biome-restricted-imports.test.ts` proves the Biome import ban.
 
 ## Rules
-- Dev credentials: `.env.local` is read by `run:app` only. `DEV_*` keys reach development
-  builds through the environment, never argv, never production. Tests use temp files.
+- Dev credentials: `.env.local` is read by `run:app` only; `DEV_*` keys reach development builds via env, never argv or production; tests use temp files.
 - A new architecture rule needs a fixture case in `test/dependency-rules.test.ts`; a new check goes into `src/checks.ts` and the key list.
 - Keep check output quiet: no progress lines, no passing-check output.
 

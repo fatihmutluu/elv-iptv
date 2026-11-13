@@ -208,3 +208,17 @@ export function baselineRefusal(
   const reasons = own.failures.filter((f) => /losses|budget/.test(f));
   return reasons.length === 0 ? undefined : `refusing to write a baseline: ${reasons.join('; ')}`;
 }
+
+/**
+ * Why `--write-baseline` must not write `target` (a resolved path), or undefined when it may: with `--budgets warn`
+ * the absolute budgets are not enforced, so it may write only a separate baseline (such as the CI one), never the
+ * default local baseline `localDefault`, whose numbers must meet the budgets.
+ */
+export function baselineTargetRefusal(
+  budgets: BudgetMode,
+  target: string,
+  localDefault: string,
+): string | undefined {
+  if (budgets !== 'warn' || target !== localDefault) return undefined;
+  return 'refusing to write the local baseline with --budgets warn; name another file with --baseline';
+}
