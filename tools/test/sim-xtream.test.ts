@@ -224,6 +224,47 @@ describe('playerApi', () => {
     expect(plain.some((s) => s.stream_icon === null)).toBe(false);
   });
 
+  it('gives the same programme the same id in both epg actions', () => {
+    const short = call('demo', { action: 'get_short_epg', stream_id: '1001', limit: '4' }).body as {
+      epg_listings: Obj[];
+    };
+    const table = call('demo', { action: 'get_simple_data_table', stream_id: '1001' }).body as {
+      epg_listings: Obj[];
+    };
+    for (const row of short.epg_listings) {
+      const same = table.epg_listings.find((r) => r.start_timestamp === row.start_timestamp);
+      expect(same?.id).toBe(row.id);
+    }
+    const ids = table.epg_listings.map((r) => r.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('stringifies numbers on every action for the quirks account', () => {
+    const vod = call('quirks', { action: 'get_vod_info', vod_id: '200001' }).body as {
+      info: Obj;
+      movie_data: Obj;
+    };
+    expect(typeof vod.info.duration_secs).toBe('string');
+    expect(typeof vod.movie_data.stream_id).toBe('string');
+    const series = call('quirks', { action: 'get_series_info', series_id: '300001' }).body as {
+      seasons: Obj[];
+      episodes: Record<string, Obj[]>;
+    };
+    const ep = series.episodes['1']?.[0] as Obj;
+    expect(typeof ep.episode_num).toBe('string');
+    expect(typeof ep.season).toBe('string');
+    expect(typeof (ep.info as Obj).duration_secs).toBe('string');
+    expect(typeof series.seasons[0]?.season_number).toBe('string');
+    for (const action of ['get_short_epg', 'get_simple_data_table']) {
+      const rows = (call('quirks', { action, stream_id: '1001' }).body as { epg_listings: Obj[] })
+        .epg_listings;
+      expect(rows.length).toBeGreaterThan(0);
+      for (const r of rows) {
+        for (const v of Object.values(r)) expect(typeof v).toBe('string');
+      }
+    }
+  });
+
   it('answers an unknown action with an empty list', () => {
     expect(call('demo', { action: 'nope' })).toEqual({ status: 200, body: [] });
   });

@@ -2,7 +2,7 @@ import { createReadStream, statSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ACCOUNTS, type Account } from './accounts.ts';
 import { buildCatalog, type RecipeName } from './catalog.ts';
-import type { RequestMeta, RouteHandler, SimContext } from './context.ts';
+import { baseUrlOf, type RequestMeta, type RouteHandler, type SimContext } from './context.ts';
 import { ALL_RECIPES, spawnLive } from './media.ts';
 import { sendText } from './routes-data.ts';
 import {
@@ -135,7 +135,7 @@ export const liveRoute: RouteHandler = async (req, res, ctx, meta) => {
     if (!compat) return false;
     meta.account = compat.username;
     meta.streamId = Number(redirect[1]);
-    const target = `${ctx.baseUrl}/live/${compat.username}/${compat.password}/${redirect[1]}.ts`;
+    const target = `${baseUrlOf(req, ctx)}/live/${compat.username}/${compat.password}/${redirect[1]}.ts`;
     res.writeHead(302, { location: target });
     res.end();
     return true;

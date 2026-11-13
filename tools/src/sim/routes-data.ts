@@ -4,7 +4,7 @@ import { pipeline } from 'node:stream/promises';
 import { createGzip } from 'node:zlib';
 import { ACCOUNTS, type Account, findAccount } from './accounts.ts';
 import { buildCatalog, type ProfileName } from './catalog.ts';
-import type { RequestMeta, RouteHandler, SimContext } from './context.ts';
+import { baseUrlOf, type RequestMeta, type RouteHandler, type SimContext } from './context.ts';
 import { type M3uVariant, m3uChunks } from './m3u.ts';
 import { pngLogo } from './png.ts';
 import { xmltvChunks } from './xmltv.ts';
@@ -47,11 +47,6 @@ async function sendChunks(
   await (gzip ? pipeline(source, createGzip(), res) : pipeline(source, res));
 }
 
-function baseUrlOf(req: IncomingMessage, ctx: SimContext): string {
-  const host = req.headers.host;
-  return host ? `http://${host}` : ctx.baseUrl;
-}
-
 function accountFor(profile: ProfileName): Account {
   const name = PROFILE_ACCOUNT[profile];
   const account = ACCOUNTS.find((a) => a.username === name);
@@ -82,7 +77,7 @@ async function guide(
   asFile: boolean,
 ): Promise<void> {
   const accepts = /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''));
-  const chunks = xmltvChunks(buildCatalog(profile, ctx.seed), ctx.now());
+  const chunks = xmltvChunks(buildCatalog(profile, ctx.seed), ctx.now(), baseUrlOf(req, ctx));
   if (asFile) return sendChunks(res, 200, 'application/gzip', chunks, true, false);
   const type = 'application/xml; charset=utf-8';
   return sendChunks(res, 200, type, chunks, accepts, true);

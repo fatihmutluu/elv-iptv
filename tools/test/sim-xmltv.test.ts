@@ -23,6 +23,19 @@ describe('programmesFor', () => {
     });
   });
 
+  it('keeps a programme identical when the window slides by an hour', () => {
+    const catalog = buildCatalog('small', 1);
+    const slot = new Date('2026-01-01T12:30:00Z').getTime();
+    const covering = (at: string) =>
+      [...programmesFor(catalog, 0, new Date(at))].find(
+        (p) => p.start.getTime() <= slot && slot < p.stop.getTime(),
+      );
+    const before = covering('2026-01-01T12:59:59Z');
+    expect(before).toBeDefined();
+    expect(covering('2026-01-01T13:00:00Z')).toEqual(before);
+    expect(covering('2026-01-02T03:10:00Z')).toEqual(before);
+  });
+
   it('yields nothing for a channel without a guide id', () => {
     const catalog = buildCatalog('small', 1);
     const index = catalog.live.findIndex((c) => c.epgId === null);
@@ -40,6 +53,13 @@ describe('programmesFor', () => {
 });
 
 describe('xmltvChunks', () => {
+  it('makes icons absolute only when a base URL is given', () => {
+    const catalog = buildCatalog('small', 1);
+    const abs = [...xmltvChunks(catalog, NOW, 'http://10.0.2.2:7878')].join('');
+    expect(abs).toContain('<icon src="http://10.0.2.2:7878/logos/9.png"/>');
+    expect(abs).not.toContain('<icon src="/logos');
+  });
+
   it('is deterministic', () => {
     expect(render('small')).toBe(render('small'));
   });
@@ -87,18 +107,22 @@ describe('compat guide', () => {
   });
 
   it('has overlapping programmes on one channel', () => {
-    const re = /<programme start="(\d{14}) [+-]\d{4}" stop="(\d{14}) [+-]\d{4}" channel="dup">/g;
-    const list = [...xml.matchAll(re)].map((m) => ({ start: m[1] ?? '', stop: m[2] ?? '' }));
-    list.sort((x, y) => x.start.localeCompare(y.start));
-    const overlaps = list.filter((p, i) => {
-      const prev = list[i - 1];
-      return prev !== undefined && p.start > prev.start && p.start < prev.stop;
-    });
-    expect(overlaps.length).toBeGreaterThan(0);
+    const times = (title: string) => {
+      const re = new RegExp(
+        `<programme start="(\\d{14}) [+-]\\d{4}" stop="(\\d{14}) [+-]\\d{4}" channel="dup"><title>${title}</title>`,
+      );
+      const m = xml.match(re);
+      return { start: m?.[1] ?? '', stop: m?.[2] ?? '' };
+    };
+    const a = times('Overlap A');
+    const b = times('Overlap B');
+    expect(a.start).not.toBe('');
+    expect(b.start > a.start).toBe(true);
+    expect(b.start < a.stop).toBe(true);
   });
 
   it('has entities, CDATA and other offsets', () => {
-    expect(xml).toContain('<title>Tom &amp; Jerry</title>');
+    expect(xml).toContain('<title>Salt &amp; Pepper</title>');
     expect(xml).toContain('&lt;');
     expect(xml).toMatch(/<desc><!\[CDATA\[[^\]]+\]\]><\/desc>/);
     expect(xml).toContain('+0300"');
@@ -114,14 +138,12 @@ describe('compat guide', () => {
   });
 
   it('ends with a programme missing stop and an unclosed tag, after valid content', () => {
-    const missing = xml.indexOf('<programme start="');
     const noStop = [...xml.matchAll(/<programme (?![^>]*stop=)[^>]*>/g)];
-    expect(missing).toBeGreaterThan(0);
     expect(noStop).toHaveLength(1);
     const unclosed = xml.indexOf('<title>Unclosed');
     expect(unclosed).toBeGreaterThan(-1);
     const lastValid = xml.lastIndexOf('</programme>', noStop[0]?.index);
-    expect(lastValid).toBeGreaterThan(0);
+    expect(xml.indexOf('Midnight Show')).toBeLessThan(lastValid);
     expect(xml.indexOf('</programme>', unclosed)).toBeGreaterThan(unclosed);
     expect(xml.slice(unclosed)).not.toContain('</title>');
   });

@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs';
+import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -178,6 +179,29 @@ describe('routes that need no media', () => {
       `/live/${compat}/1001.ts`,
     );
     expect(sim.requests()[0]?.path).toBe('/redirect/1001.ts');
+  });
+
+  it('builds the redirect target from the request Host', async () => {
+    const sim = await startSim({ port: 0, ffmpegPath: null });
+    open.push(sim);
+    const port = new URL(sim.url).port;
+    const location = await new Promise<string>((resolve, reject) => {
+      const req = httpRequest(
+        {
+          host: '127.0.0.1',
+          port,
+          path: '/redirect/1001.ts',
+          headers: { host: `10.0.2.2:${port}` },
+        },
+        (res) => {
+          res.resume();
+          resolve(String(res.headers.location));
+        },
+      );
+      req.on('error', reject);
+      req.end();
+    });
+    expect(location.startsWith(`http://10.0.2.2:${port}/live/`)).toBe(true);
   });
 
   it('rejects bad credentials and unknown channels, and needs FFmpeg for media', async () => {

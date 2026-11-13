@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RequestLog } from './log.ts';
 
-/** Open media responses per account; the connection limit of Task 7 reads it. */
+/** Open media responses per account; the connection limit reads it. */
 export interface Connections {
   open(account: string): number;
   close(account: string): void;
@@ -56,4 +56,10 @@ export function createConnections(): Connections {
     },
     count: (account) => counts.get(account) ?? 0,
   };
+}
+
+/** The base URL as the client addressed the simulator (its `Host` header), else the bound address. */
+export function baseUrlOf(req: IncomingMessage, ctx: SimContext): string {
+  const host = req.headers.host;
+  return host ? `http://${host}` : ctx.baseUrl;
 }

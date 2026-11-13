@@ -81,15 +81,18 @@ function liveRow(ch: LiveChannel, ctx: ApiContext): Row {
   };
 }
 
-function stringifyNumbers(row: Row): Row {
-  return Object.fromEntries(
-    Object.entries(row).map(([k, v]) => [k, typeof v === 'number' ? String(v) : v]),
-  );
+function stringifyNumbers(value: unknown): unknown {
+  if (typeof value === 'number') return String(value);
+  if (Array.isArray(value)) return value.map(stringifyNumbers);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, stringifyNumbers(v)]));
+  }
+  return value;
 }
 
 /** Makes live rows look like a real panel: string numbers, null icons, entities, orphan category, duplicate id. */
 function applyQuirks(rows: Row[]): Row[] {
-  const out = rows.map(stringifyNumbers);
+  const out = [...rows];
   const withLogo = out.findIndex((r) => r.stream_icon === '');
   if (withLogo >= 0) (out[withLogo] as Row).stream_icon = null;
   if (out[1]) out[1] = { ...out[1], name: `${String(out[1].name)} &amp; Co` };
@@ -212,15 +215,13 @@ function epgRows(
   if (!channel) return { epg_listings: [] };
   const now = sec(ctx.now);
   const rows: Row[] = [];
-  let n = 0;
   for (const p of programmesFor(catalog, index, ctx.now)) {
     const start = sec(p.start);
     const stop = sec(p.stop);
     if (mode === 'short' && stop <= now) continue;
     if (mode === 'short' && rows.length >= limit) break;
-    n++;
     const row: Row = {
-      id: String(streamId * 100_000 + n),
+      id: String(start),
       epg_id: String(index + 1),
       title: b64(p.title),
       lang: 'en',
@@ -249,17 +250,16 @@ export function playerApi(query: URLSearchParams, ctx: ApiContext): ApiResult {
   const catalog = buildCatalog(account.profile, ctx.seed);
   const categoryId = query.get('category_id');
   const id = (name: string): number => Number(query.get(name));
-  const quirk = (rows: Row[]): Row[] => (account.quirks ? rows.map(stringifyNumbers) : rows);
   let body: unknown;
   switch (action) {
     case 'get_live_categories':
-      body = quirk(categoryRows(catalog, 'live'));
+      body = categoryRows(catalog, 'live');
       break;
     case 'get_vod_categories':
-      body = quirk(categoryRows(catalog, 'vod'));
+      body = categoryRows(catalog, 'vod');
       break;
     case 'get_series_categories':
-      body = quirk(categoryRows(catalog, 'series'));
+      body = categoryRows(catalog, 'series');
       break;
     case 'get_live_streams': {
       const rows = catalog.live
@@ -269,10 +269,10 @@ export function playerApi(query: URLSearchParams, ctx: ApiContext): ApiResult {
       break;
     }
     case 'get_vod_streams':
-      body = quirk(vodRows(catalog, ctx, categoryId));
+      body = vodRows(catalog, ctx, categoryId);
       break;
     case 'get_series':
-      body = quirk(seriesRows(catalog, ctx, categoryId));
+      body = seriesRows(catalog, ctx, categoryId);
       break;
     case 'get_vod_info':
       body = vodInfo(catalog, ctx, id('vod_id'));
@@ -291,5 +291,5 @@ export function playerApi(query: URLSearchParams, ctx: ApiContext): ApiResult {
     default:
       body = [];
   }
-  return { status: 200, body };
+  return { status: 200, body: account.quirks ? stringifyNumbers(body) : body };
 }
