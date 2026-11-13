@@ -8,11 +8,11 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
 - `pnpm check --only <key>` runs one check (keys: biome, typecheck, deps, knip, file-size, stubs, vitest, jest, gitleaks-rules, hooks); `--json` prints JSON.
 - `pnpm bootstrap` checks versions, installs dependencies and git hooks, looks for gitleaks.
 - `pnpm run:app <target> [build] [--production]` launches or builds a target (android, android-tv, fire-tv, ios, tvos, windows, macos, linux).
-- `pnpm gate list [--avd elv_tv] [--build] [--runs 3 (default)] [--real-keys 60] [--ci] [--baseline file] [--out file] [--write-baseline]`
+- `pnpm gate list [--avd elv_tv] [--build] [--runs 3 (default)] [--real-keys 60] [--ci] [--baseline file] [--budgets fail|warn] [--out file] [--write-baseline]`
   runs the TV list gate on a running Android TV emulator (`src/gates/`; adb from ANDROID_HOME, the default SDK or PATH), compares
   the median with `docs/learned/gates/list-android-tv.json` (or `--baseline`; a missing given file: budgets and losses only, warned;
   spec 5.6), writes the median and every run to `--out` (`gate-list.json`, with `--ci` under `gate-artifacts/`), warns when the
-  worst run breaks a budget the median meets, exits 1 on a failure.
+  worst run breaks a budget the median meets, exits 1 on a failure. `--budgets warn` (CI) only warns about absolute budgets.
 - `pnpm scaffold <pure|rn|module> <name>` creates a workspace package (skill `add-package`).
 - `pnpm --filter @elv/tools test` runs Vitest (`sources-*`, `import-*` use the sim; `SIM_HUGE=1` adds 500k).
 

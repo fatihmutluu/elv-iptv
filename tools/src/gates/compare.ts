@@ -53,19 +53,27 @@ const limit = (baseline: number, slack: number): number =>
 const scriptLength = (m: GateMetrics): number => m.scripted ?? m.moves + m.coalesced;
 
 /**
+ * How absolute-budget breaches count: `fail` (default; local host-GPU emulator and hardware) or `warn` (the
+ * software-GPU CI emulator, where regressions against its own baseline still fail).
+ */
+export type BudgetMode = 'fail' | 'warn';
+
+/**
  * Compares a result with the committed baseline. Runs compare when their item counts and script lengths match
  * (coalesced repeats lower `moves`, never the script). A metric fails when it exceeds `max(baseline x 1.10, baseline +
- * slack)` or its absolute budget; any focus loss fails. The legacy janky percentage is compared; the deadline-based one
- * only warns, because it swung between 50 and 73 % across identical emulator runs. p95 and max are both compared, so
- * a run is never judged by an average that hides a stall. Without a baseline (`undefined`) only the absolute budgets
- * and the focus-loss rule apply, and a warning says so.
+ * slack)` or its absolute budget (only a warning with `budgets: 'warn'`); any focus loss fails. The legacy janky
+ * percentage is compared; the deadline-based one only warns, because it swung between 50 and 73 % across identical
+ * emulator runs. p95 and max are both compared, so a run is never judged by an average that hides a stall. Without a
+ * baseline (`undefined`) only the absolute budgets and the focus-loss rule apply, and a warning says so.
  */
 export function compareToBaseline(
   result: GateResult,
   baseline: GateResult | undefined,
+  opts: { budgets?: BudgetMode } = {},
 ): CompareOutcome {
   const failures: string[] = [];
   const warnings: string[] = [];
+  const budgetsWarn = opts.budgets === 'warn';
 
   const relative = (name: string, value: number, base: number, slack: number, unit: string) => {
     const max = limit(base, slack);
@@ -76,7 +84,10 @@ export function compareToBaseline(
     }
   };
   const budget = (name: string, value: number, max: number) => {
-    if (value > max) failures.push(`${name} ${value} ms exceeds the absolute budget of ${max} ms`);
+    if (value <= max) return;
+    const text = `${name} ${value} ms exceeds the absolute budget of ${max} ms`;
+    if (budgetsWarn) warnings.push(`${text} (--budgets warn: reported only)`);
+    else failures.push(text);
   };
 
   const { metrics: m, frames: f } = result;
@@ -187,10 +198,13 @@ export function worstRunWarnings(runs: readonly GateResult[], median: GateResult
 
 /**
  * Why a result must not become a baseline, or undefined when it may: focus losses (auto or real keys) or a broken
- * absolute budget would bake a failure into the reference.
+ * absolute budget (unless `budgets` is `warn`) would bake a failure into the reference.
  */
-export function baselineRefusal(result: GateResult): string | undefined {
-  const own = compareToBaseline(result, result);
+export function baselineRefusal(
+  result: GateResult,
+  budgets: BudgetMode = 'fail',
+): string | undefined {
+  const own = compareToBaseline(result, result, { budgets });
   const reasons = own.failures.filter((f) => /losses|budget/.test(f));
   return reasons.length === 0 ? undefined : `refusing to write a baseline: ${reasons.join('; ')}`;
 }

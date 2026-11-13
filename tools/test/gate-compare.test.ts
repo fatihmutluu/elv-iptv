@@ -198,6 +198,39 @@ describe('baselineRefusal', () => {
   });
 });
 
+describe('compareToBaseline with budgets as warnings', () => {
+  const warn = { budgets: 'warn' } as const;
+
+  it('reports absolute-budget breaches as warnings', () => {
+    const slow = change({ p95: 120, gap: 17, realP95: 150 });
+    const outcome = compareToBaseline(slow, slow, warn);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.failures).toEqual([]);
+    const text = outcome.warnings.join('\n');
+    expect(text).toMatch(/key-to-highlight p95 120 ms exceeds the absolute budget of 100 ms/);
+    expect(text).toMatch(/max JS gap 17 ms exceeds the absolute budget of 16 ms/);
+    expect(text).toMatch(/real-key p95 150 ms exceeds the absolute budget of 100 ms/);
+  });
+
+  it('still fails regressions against the baseline and focus losses', () => {
+    expect(compareToBaseline(change({ p95: 24.01 }), baseline, warn).ok).toBe(false);
+    expect(compareToBaseline(change({ gap: 12.01 }), baseline, warn).ok).toBe(false);
+    expect(compareToBaseline(change({ losses: 1 }), baseline, warn).ok).toBe(false);
+    expect(compareToBaseline(change({ realLosses: 1 }), undefined, warn).ok).toBe(false);
+  });
+
+  it('fails the same breaches by default', () => {
+    const slow = change({ gap: 17 });
+    expect(compareToBaseline(slow, slow).ok).toBe(false);
+    expect(compareToBaseline(slow, slow, { budgets: 'fail' }).ok).toBe(false);
+  });
+
+  it('lets a baseline over the budgets be written, but never one with losses', () => {
+    expect(baselineRefusal(change({ gap: 17 }), 'warn')).toBeUndefined();
+    expect(baselineRefusal(change({ losses: 1, gap: 17 }), 'warn')).toMatch(/losses: 1$/);
+  });
+});
+
 describe('worstRunWarnings', () => {
   it('warns when the worst run breaks an absolute budget that the median meets', () => {
     const runs = [change({ p95: 20, gap: 5 }), change({ p95: 130, gap: 18 }), change({ p95: 21 })];

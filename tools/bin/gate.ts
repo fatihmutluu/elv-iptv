@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { exec as run } from '../src/exec.ts';
 import {
+  type BudgetMode,
   baselineRefusal,
   type CompareOutcome,
   compareToBaseline,
@@ -19,7 +20,7 @@ import {
 import { findRepoRoot } from '../src/root.ts';
 
 const USAGE =
-  'usage: pnpm gate list [--avd elv_tv] [--build] [--runs 3 (default)] [--real-keys 60] [--ci] [--baseline file] [--out file] [--write-baseline]';
+  'usage: pnpm gate list [--avd elv_tv] [--build] [--runs 3 (default)] [--real-keys 60] [--ci] [--baseline file] [--budgets fail|warn] [--out file] [--write-baseline]';
 const DEFAULT_BASELINE = 'docs/learned/gates/list-android-tv.json';
 
 function fail(message: string, code = 1): never {
@@ -39,6 +40,7 @@ function parseCli() {
       'real-keys': { type: 'string' },
       ci: { type: 'boolean' },
       baseline: { type: 'string' },
+      budgets: { type: 'string' },
       out: { type: 'string' },
       'write-baseline': { type: 'boolean' },
     },
@@ -60,6 +62,8 @@ const count = (name: string, text: string | undefined): number | undefined => {
 };
 const runs = count('runs', values.runs) ?? 3;
 const realKeys = count('real-keys', values['real-keys']);
+const budgets = (values.budgets ?? 'fail') as BudgetMode;
+if (budgets !== 'fail' && budgets !== 'warn') fail(`gate: --budgets is fail or warn. ${USAGE}`, 2);
 
 const root = findRepoRoot(process.cwd());
 const adb = resolveAdb(process.env, process.platform);
@@ -94,7 +98,7 @@ const baselineName = values.baseline ?? DEFAULT_BASELINE;
 const baselinePath = resolve(root, baselineName);
 
 if (values['write-baseline'] === true) {
-  const refusal = baselineRefusal(result);
+  const refusal = baselineRefusal(result, budgets);
   if (refusal !== undefined) fail(`gate: ${refusal}`);
   const dirty = (
     await exec('git', ['status', '--porcelain', '--', 'apps', 'packages', 'modules'])
@@ -123,6 +127,7 @@ if (baselineFound) {
   outcome = compareToBaseline(
     result,
     (JSON.parse(readFileSync(baselinePath, 'utf8')) as Baseline).result,
+    { budgets },
   );
 } else if (missingIsFailure) {
   outcome = {
@@ -131,7 +136,7 @@ if (baselineFound) {
     warnings: [],
   };
 } else {
-  outcome = compareToBaseline(result, undefined);
+  outcome = compareToBaseline(result, undefined, { budgets });
   outcome.warnings.unshift(`baseline file ${baselineName} does not exist`);
 }
 outcome.warnings.push(...worstRunWarnings(perRun, result));
