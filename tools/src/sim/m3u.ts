@@ -128,6 +128,11 @@ function* liveLines(catalog: Catalog, ctx: Ctx, groups: Map<string, string>): Ge
     if (catalog.profile === 'compat' && i > 0 && i % COMPAT_BLANK_EVERY === 0) yield '';
     const extras = ch.compat ? compatExtras(ch.compat, ch, ctx) : { attrs: '', directives: [] };
     const tvgId = liveTvgId(ch);
+    if (ch.compat === 'raw-quote-attr') {
+      yield `#EXTINF:-1 tvg-id="${tvgId}" tvg-name="${ch.name}" group-title="${groups.get(ch.categoryId)}",${ch.name}`;
+      yield streamUrl(ctx.base, ctx.account, 'live', ch.id, ctx.ext);
+      continue;
+    }
     const logo = ch.logo === null ? '' : ` tvg-logo="${ctx.base}/logos/${ch.logo}.png"`;
     yield `#EXTINF:-1${tvgId === null ? '' : ` tvg-id="${tvgId}"`} tvg-name="${attrValue(ch.name)}"${logo} tvg-chno="${ch.num}"${extras.attrs} group-title="${groups.get(ch.categoryId)}",${ch.name}`;
     yield* extras.directives;

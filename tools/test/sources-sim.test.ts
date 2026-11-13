@@ -126,7 +126,6 @@ describe('playlist', () => {
     it('keeps every edge case field', async () => {
       const { entries, header, stats } = await scanPlaylist(`${sim.url}/playlists/compat.m3u`);
       expect(entries).toHaveLength(COMPAT_CASES.length);
-      expect(stats?.warnings).toEqual([]);
       expect(header?.guideUrls[0]).toBe(`${sim.url}/guides/compat.xml`);
       expect(at(entries, 'tvg-shift').shiftHours).toBe(-2);
       expect(at(entries, 'tvg-rec').recordDays).toBe(3);
@@ -141,6 +140,14 @@ describe('playlist', () => {
       expect(quoted.name).toBe('Channel "Quoted", With, Commas');
       expect(quoted.tvgName).toBe("Channel 'Quoted', With, Commas");
       expect(quoted.chno).toBe(10);
+      const user = 'compat';
+      const rawId = 1000 + COMPAT_CASES.indexOf('raw-quote-attr') + 1;
+      const raw = at(entries, 'raw-quote-attr');
+      expect(raw.name).toBe('Channel "Raw", Quote');
+      expect(raw.url).toBe([sim.url, 'live', user, user, `${rawId}.ts`].join('/'));
+      expect(raw.tvgId).toBe(`ch${rawId}`);
+      expect(raw.groups).toEqual(['Live Group 03']);
+      expect(stats?.warnings.map((w) => w.code)).toEqual(['attr-quote']);
       expect(at(entries, 'turkish-name').name).toBe('Kanal İğüşöçı');
       expect(at(entries, 'rtl-name').name).toBe('قناة ٤٢');
       expect(at(entries, 'catchup-default').catchup).toMatchObject({ type: 'default', days: 3 });
@@ -174,7 +181,7 @@ describe('playlist', () => {
       const plain = await scanPlaylist(`${sim.url}/playlists/compat.m3u`);
       const cut = await scanPlaylist(`${sim.url}/playlists/compat-truncated.m3u`);
       expect(cut.entries).toEqual(plain.entries.slice(0, -1));
-      expect(cut.stats?.warnings.map((w) => w.code)).toEqual(['extinf-without-url']);
+      expect(cut.stats?.warnings.map((w) => w.code)).toEqual(['attr-quote', 'extinf-without-url']);
     });
   });
 

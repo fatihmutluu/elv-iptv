@@ -176,12 +176,20 @@ export interface ScanReport {
   line: string;
 }
 
+/** Forces a full collection; the tools Vitest config exposes `gc` through `--expose-gc`. */
+function collectGarbage(): void {
+  const gc = (globalThis as { gc?: () => void }).gc;
+  if (!gc) throw new Error('gc is not exposed: run Vitest with execArgv --expose-gc');
+  gc();
+  gc();
+}
+
 /** Times one scan; `run` returns the number of entries it counted. Heap growth is the sampled peak over the start. */
 export async function measureScan(
   label: string,
   run: (meter: Meter) => Promise<number>,
 ): Promise<ScanReport> {
-  (globalThis as { gc?: () => void }).gc?.();
+  collectGarbage();
   const meter = newMeter();
   const base = process.memoryUsage().heapUsed;
   const started = performance.now();

@@ -37,6 +37,7 @@ export type CompatCase =
   | 'udp-url'
   | 'rtp-url'
   | 'rtmp-url'
+  | 'raw-quote-attr'
   | 'missing-404';
 /** A group of live channels, movies or series. */
 interface Category {
@@ -140,6 +141,7 @@ export const COMPAT_CASES: readonly CompatCase[] = [
   'udp-url',
   'rtp-url',
   'rtmp-url',
+  'raw-quote-attr',
   'missing-404',
 ];
 
@@ -175,6 +177,7 @@ const COMPAT_NAMES: Partial<Record<CompatCase, string>> = {
   'empty-name': '',
   'long-name': `${'Long Name '.repeat(29)}Long Name.`,
   'quotes-commas': 'Channel "Quoted", With, Commas',
+  'raw-quote-attr': 'Channel "Raw", Quote',
   'turkish-name': 'Kanal İğüşöçı',
   'rtl-name': 'قناة ٤٢',
 };

@@ -181,6 +181,13 @@ describe('m3uChunks', () => {
           expect(l[0]).toContain('tvg-name="Channel \'Quoted\', With, Commas"');
         },
       ],
+      [
+        'raw-quote-attr',
+        (l, id) =>
+          expect(l[0]).toBe(
+            `#EXTINF:-1 tvg-id="ch${id}" tvg-name="Channel "Raw", Quote" group-title="Live Group 03",Channel "Raw", Quote`,
+          ),
+      ],
       ['turkish-name', (l) => expect(l[0]).toContain(',Kanal İğüşöçı')],
       ['rtl-name', (l) => expect(l[0]).toContain(',قناة ٤٢')],
       ['tvg-shift', (l) => expect(l[0]).toContain('tvg-shift="-2"')],

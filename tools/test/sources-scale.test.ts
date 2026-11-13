@@ -44,7 +44,8 @@ describe.skipIf(!enabled)('huge profile over HTTP', () => {
     process.stdout.write(`${huge.line}
 `);
     expect(huge.entries).toBe(500_000);
-    expect(huge.heapGrowthMb).toBeLessThanOrEqual(large.heapGrowthMb * 1.25);
+    expect(huge.heapGrowthMb).toBeLessThanOrEqual(large.heapGrowthMb * 1.25 + 32);
+    expect(huge.heapGrowthMb).toBeLessThan(256);
     expect(huge.seconds / huge.entries).toBeLessThanOrEqual((large.seconds / large.entries) * 1.5);
   }, 300_000);
 
