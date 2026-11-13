@@ -20,30 +20,8 @@ import { resolveTemplate } from './templates';
 const REQUEST_TIMEOUT_MS = 60_000;
 const DAY_MS = 86_400_000;
 const DEFAULT_WINDOW = { daysBack: 1, daysForward: 7 };
-
-/**
- * The `channels` filter handed to the scanner. A channel it has not decided yet passes, so the scanner reports the
- * channel and the importer can match it; once decided, only mapped guide channels pass and the scanner drops the
- * programmes of the others without building them.
- */
-class MappedChannels extends Set<string> {
-  private readonly decided = new Set<string>();
-
-  decide(id: string, mapped: boolean): void {
-    this.decided.add(id);
-    if (mapped) this.add(id);
-    else this.delete(id);
-  }
-
-  /** True once the guide channel was matched to a live channel. */
-  isMapped(id: string): boolean {
-    return super.has(id);
-  }
-
-  override has(id: string): boolean {
-    return this.decided.has(id) ? super.has(id) : true;
-  }
-}
+/** Length given to a programme with no `stop` when no later programme of its channel closes it. */
+const OPEN_END_MS = 30 * 60_000;
 
 function classify(status: number): ElvError {
   if (status === 401 || status === 403) return elvError('auth', 'unauthorized');
@@ -123,11 +101,11 @@ const PROGRAMME_SQL = `INSERT INTO programmes (source_id, guide_id, start, stop,
     sub_title = excluded.sub_title, description = excluded.description, categories_json = excluded.categories_json,
     episode_num = excluded.episode_num, icon = excluded.icon, run_id = excluded.run_id`;
 
-const programmeRow = (sourceId: string, runId: number, p: XmltvProgramme) => [
+const programmeRow = (sourceId: string, runId: number, p: XmltvProgramme, stop: number): Row => [
   sourceId,
   p.channel,
   p.start,
-  p.stop ?? p.start,
+  stop,
   p.title,
   p.subTitle ?? null,
   p.desc ?? null,
@@ -139,7 +117,10 @@ const programmeRow = (sourceId: string, runId: number, p: XmltvProgramme) => [
 
 interface GuideState {
   index: ChannelIndex;
-  filter: MappedChannels;
+  /** Guide ids of mapped channels; the scanner consults it per programme, so it grows as channels arrive. */
+  mapped: Set<string>;
+  /** Programmes without `stop`, waiting for the next programme of their channel. */
+  open: Map<string, XmltvProgramme>;
   /** `[channelKey, guideId]` pairs, written with the cleanup transaction. */
   mappings: [string, string][];
   channels: number;
@@ -156,7 +137,8 @@ async function writeChannels(
   const rows: (string | number | null)[][] = [];
   for (const ch of channels) {
     const keys = matchGuideChannel(st.index, ch);
-    st.filter.decide(ch.id, keys.length > 0);
+    if (keys.length > 0) st.mapped.add(ch.id);
+    else st.mapped.delete(ch.id);
     if (keys.length > 0) st.mappedChannels++;
     for (const key of keys) st.mappings.push([key, ch.id]);
     const name = ch.names[0] ?? ch.id;
@@ -164,6 +146,41 @@ async function writeChannels(
   }
   st.channels += channels.length;
   if (rows.length > 0) await c.db.batch(GUIDE_CHANNEL_SQL, rows);
+}
+
+type Row = (string | number | null)[];
+
+/** Turns a batch into rows; a programme without `stop` ends where the next one of its channel starts. */
+function closeOpen(c: RunCtx, st: GuideState, programmes: readonly XmltvProgramme[]): Row[] {
+  const rows: Row[] = [];
+  for (const p of programmes) {
+    const prev = st.open.get(p.channel);
+    if (prev !== undefined) {
+      st.open.delete(p.channel);
+      const stop = p.start > prev.start ? p.start : prev.start + OPEN_END_MS;
+      rows.push(programmeRow(c.sourceId, c.runId, prev, stop));
+    }
+    if (p.stop === undefined) st.open.set(p.channel, p);
+    else rows.push(programmeRow(c.sourceId, c.runId, p, p.stop));
+  }
+  return rows;
+}
+
+/** At the end of the scan the programmes still open get a fixed length. */
+function flushOpen(c: RunCtx, st: GuideState): Row[] {
+  const rows = [...st.open.values()].map((p) =>
+    programmeRow(c.sourceId, c.runId, p, p.start + OPEN_END_MS),
+  );
+  st.open.clear();
+  return rows;
+}
+
+async function writeProgrammes(c: RunCtx, st: GuideState, rows: Row[]): Promise<void> {
+  for (let i = 0; i < rows.length; i += c.batchSize) {
+    await c.db.batch(PROGRAMME_SQL, rows.slice(i, i + c.batchSize));
+    await c.deps.scheduler.yieldNow();
+  }
+  st.programmes += rows.length;
 }
 
 async function execute(
@@ -178,7 +195,8 @@ async function execute(
   );
   const st: GuideState = {
     index: buildChannelIndex(live),
-    filter: new MappedChannels(),
+    mapped: new Set(),
+    open: new Map(),
     mappings: [],
     channels: 0,
     mappedChannels: 0,
@@ -189,7 +207,7 @@ async function execute(
   const body = await openGuide(urls, source, c.deps, c.signal);
   const scan = scanXmltv(body, {
     batchSize: c.batchSize,
-    channels: st.filter,
+    programmeChannels: st.mapped,
     from: now - window.daysBack * DAY_MS,
     to: now + window.daysForward * DAY_MS,
     ...(c.deps.decompressor === undefined ? {} : { decompressor: c.deps.decompressor }),
@@ -207,14 +225,7 @@ async function execute(
       const batch = step.value;
       await writeChannels(c, st, batch.channels);
       st.seenProgrammes += batch.programmes.length;
-      const mapped = batch.programmes.filter((p) => st.filter.isMapped(p.channel));
-      if (mapped.length > 0) {
-        await c.db.batch(
-          PROGRAMME_SQL,
-          mapped.map((p) => programmeRow(c.sourceId, c.runId, p)),
-        );
-      }
-      st.programmes += mapped.length;
+      await writeProgrammes(c, st, closeOpen(c, st, batch.programmes));
       c.progress({ phase: 'guide-channels', done: st.channels });
       c.progress({ phase: 'programmes', done: st.programmes });
       await c.deps.scheduler.yieldNow();
@@ -222,6 +233,7 @@ async function execute(
   } finally {
     await scan.return(ok(undefined));
   }
+  await writeProgrammes(c, st, flushOpen(c, st));
   if (st.channels === 0 && st.seenProgrammes === 0) {
     throw new Stop(elvError('source-format', 'not-a-guide'));
   }

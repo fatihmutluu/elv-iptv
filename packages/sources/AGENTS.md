@@ -35,8 +35,7 @@ M3U and XMLTV scanners and the Xtream client.
   open tag, so skipped elements are never decoded. A programme or channel that cannot be read is skipped with one
   warning and scanning resumes at the next `<programme`/`<channel` (warnings: `programme-missing-start`,
   `-missing-channel`, `-bad-time`, `-malformed`, `-unclosed`, `-truncated`, `channel-*`, `element-too-long`).
-  Elements over 1 MiB are skipped. Corrupt gzip returns `err` `source-format`/`gzip-corrupt`; an input iterable that throws returns `err` (own category/code if ElvError-shaped, else `network`/`stream-failed`); on any `err` no `done` batch is yielded and the run is a failure. A programme without `<title>` gets `title: ''`.
-  Files: `xmltv.ts` (run loop, gzip sniffing), `xml-tokens.ts`, `xmltv-children.ts`, `xmltv-time.ts`, `xmltv-types.ts`.
+  Elements over 1 MiB are skipped. Corrupt gzip returns `err` `source-format`/`gzip-corrupt`; an input iterable that throws returns `err` (own category/code if ElvError-shaped, else `network`/`stream-failed`); on any `err` no `done` batch is yielded. A programme without `<title>` gets `title: ''`. Files: `xmltv.ts` (run loop, gzip sniffing), `xml-tokens.ts`, `xmltv-children.ts`, `xmltv-time.ts`, `xmltv-types.ts`.
 - `createXtreamClient({ http, server, username, password, transport? })` returns an `XtreamClient` over the `player_api.php`
   endpoints: `account`, `categories`, `liveStreams`/`vodStreams`/`series` (optional `categoryId` to bound one call),
   `seriesInfo`, `vodInfo`, `shortEpg`, plus `playlistUrl`, `guideUrl` and `streamUrl` (play time only). Numbers and

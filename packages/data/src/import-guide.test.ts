@@ -13,6 +13,7 @@ import {
   SECOND_URL,
   setupGuide,
   tv,
+  xt,
 } from './import-guide-test-helpers';
 import { emptyPanel, extinf, M3U_PASS, M3U_TOKEN, M3U_USER, setup } from './import-test-helpers';
 import type { ImportProgress } from './import-types';
@@ -157,16 +158,31 @@ describe('guide import', () => {
     expect(await titles(e)).toEqual([]);
   });
 
-  it('stores programmes without a stop time as zero length', async () => {
+  it('ends a programme without stop where the next one of its channel starts, else after 30 minutes', async () => {
+    const open = (h: number, title: string, channel = 'cagri') =>
+      `<programme start="${xt(h * HOUR)}" channel="${channel}"><title>${title}</title></programme>`;
     const e = await ready(
       tv(
         channelXml('cagri', 'Çağrı TV'),
-        `<programme start="20261113150000 +0000" channel="cagri"><title>Open</title></programme>`,
+        channelXml('haber1.tr', 'Haber Bir'),
+        open(1, 'First'),
+        open(3, 'Second'),
+        open(2, 'Other', 'haber1.tr'),
+        programmeXml('cagri', 4 * HOUR, 1, 'Closed'),
+        open(6, 'Last'),
       ),
     );
-    expect((await run(e)).ok).toBe(true);
-    const row = (await rows(e, 'SELECT start, stop FROM programmes'))[0];
-    expect(row?.stop).toBe(row?.start);
+    expect((await run(e, { batchSize: 2 })).ok).toBe(true);
+    const got = await rows(e, 'SELECT title, start, stop FROM programmes ORDER BY title');
+    const span = (title: string) => {
+      const r = got.find((g) => g.title === title);
+      return ((r?.stop as number) - (r?.start as number)) / HOUR;
+    };
+    expect(span('First')).toBe(2);
+    expect(span('Second')).toBe(1);
+    expect(span('Closed')).toBe(1);
+    expect(span('Last')).toBe(0.5);
+    expect(span('Other')).toBe(0.5);
   });
 });
 

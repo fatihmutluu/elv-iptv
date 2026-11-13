@@ -7,7 +7,7 @@ export const HOUR = 3_600_000;
 export const DAY = 24 * HOUR;
 
 /** XMLTV timestamp (UTC) for an epoch offset from {@link NOW}. */
-function xt(offsetMs: number): string {
+export function xt(offsetMs: number): string {
   const d = new Date(NOW + offsetMs);
   const p = (n: number, w = 2) => String(n).padStart(w, '0');
   return `${p(d.getUTCFullYear(), 4)}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())} +0000`;

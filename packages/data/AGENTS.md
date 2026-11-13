@@ -9,30 +9,25 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
 - Pure TypeScript: no `react`, `react-native`, `expo*`, `electron` or `node:*` imports.
   Platform access goes through ports defined in `@elv/domain`.
 - Source-first: `exports` points at `src/index.ts`, no build step. Allowed workspace dependencies: `@elv/domain`, `@elv/sources`.
-- Tests live beside the code as `*.test.ts`.
+- Tests live beside the code as `*.test.ts`; helpers `test-db.ts`, `*-test-helpers.ts` are the only places besides tests that use better-sqlite3.
 
 ## Public surface (catalog import round)
-- `createSyncSqlDriver(db)` in `driver.ts` adapts a synchronous better-sqlite3-shaped database to `SqlDriver`.
-  Every call goes through one promise queue, so a `transaction` never interleaves with other statements; the `tx`
-  passed to its callback bypasses the queue and rejects nested `transaction` calls. Do not await the outer driver
-  inside a transaction callback (it would wait for itself). `batch` joins an open transaction.
-- `openCatalog(db)` in `migrate.ts` applies the open pragmas (`journal_mode=WAL`, `synchronous=NORMAL`,
-  `foreign_keys=ON`, `temp_store=MEMORY`) and migrates to `SCHEMA_VERSION` using `MIGRATIONS` in `schema.ts` (raw SQL,
-  `PRAGMA user_version`). A newer database yields `storage/schema-too-new`; a failed migration rolls back and yields
-  `storage/migration-failed`. Add a schema change as a new `MIGRATIONS` entry, never by editing an old one.
-- `foldText(text)` in `fold.ts`: Turkish-aware, accent- and punctuation-insensitive folding for `name_fold` columns.
+- `createSyncSqlDriver(db)` (`driver.ts`) adapts a synchronous better-sqlite3-shaped database to `SqlDriver`. One promise
+  queue serializes calls; the `tx` of a `transaction` callback bypasses it and rejects nesting. Never await the outer
+  driver inside a transaction callback. `batch` joins an open transaction.
+- `openCatalog(db)` (`migrate.ts`) applies the pragmas (WAL, `synchronous=NORMAL`, `foreign_keys=ON`, `temp_store=MEMORY`) and
+  migrates to `SCHEMA_VERSION` with `MIGRATIONS` in `schema.ts` (raw SQL, `PRAGMA user_version`): `storage/schema-too-new`,
+  `storage/migration-failed` (rolled back). Add a schema change as a new entry, never by editing an old one.
+- `foldText(text)` (`fold.ts`): Turkish-aware, accent- and punctuation-insensitive folding for `name_fold` columns.
 - `templates.ts`: `detectSegmentRules`, `toTemplate`, `resolveTemplate`. URLs become `{{name}}` templates (`user`, `pass`,
-  `userinfo`, `v<N>` segment rules, `q:<param>` credential query values); the values go to the secret store. Known
-  credentials (>= 3 chars) are masked raw and percent-encoded wherever they occur; rules and whole-segment matches skip
-  the last path segment; literal `{{` is escaped as `{{(}}`. Keys are
-  `m3uKey(sourceId, template, name)`.
+  `userinfo`, `v<N>` segment rules, `q:<param>` credential query values); values go to the secret store. Known credentials
+  (>= 3 chars) are masked raw and percent-encoded; rules and whole-segment matches skip the last path segment; literal
+  `{{` is escaped as `{{(}}`. Keys are `m3uKey(sourceId, template, name)`.
 - `sources.ts`: `addXtreamSource`, `addM3uSource`, `getSource`, `updateSourceSettings`, `removeSource`, `removeSecrets`, `TABLES_BY_SOURCE`, `secretKey`.
-  `removeSource` returns `storage/secret-delete-failed` when a secret could not be deleted (rows are already gone; retry
-  `removeSecrets`). M3U guide URLs are templated against the playlist or kept whole as a secret (`{{g:url}}`).
-  Credentials live only in the `SecretStore` (`source:<id>:xtream|playlist|urlvars`); `settings_json` holds none.
-  There are no foreign keys, so `removeSource` deletes from every table of the source explicitly; a new table with
-  `source_id` must be added to its list.
-- `test-db.ts`, `import-test-helpers.ts` (test helpers, not exported): `testDb()`, `memorySecrets()`, `setup()`, `setupM3u()`; better-sqlite3 only there and in tests.
+  `removeSource` deletes every table of the source explicitly (no foreign keys; a new table with `source_id` must be added
+  to its list) and returns `storage/secret-delete-failed` if a secret survives (retry `removeSecrets`). M3U guide URLs are
+  templated against the playlist or kept whole (`{{g:url}}`). Credentials live only in the `SecretStore`
+  (`source:<id>:xtream|playlist|urlvars`); `settings_json` holds none.
 - `importCatalog` / `loadSeriesEpisodes` (`import-xtream.ts`; types in `import-types.ts`; `runs.ts`, `writers.ts`). A run
   upserts with `ON CONFLICT DO UPDATE ... run_id = excluded.run_id` (stable row ids), yields after every batch, checks
   `signal.aborted` before every batch. Stale rows (`run_id < current`) are deleted and the run marked `ok` in one
@@ -48,12 +43,8 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
   `url-tvg` goes to `discoveredGuideUrls`; no header and no entries is `not-a-playlist`; zero items is `empty-source`.
   Rules, guide URLs and `urlvars` are staged and committed only with `ok` (settings in the cleanup transaction, the secret
   right after; failure there is `storage/secret-write-failed`); a failed run changes neither. Groupless entries: `Ungrouped`.
-- Guide (`import-guide.ts`, `guide-match.ts`; test helper `import-guide-test-helpers.ts`): `importGuide(sourceId, deps, { now })`
-  reuses `performRun` with `kind: 'guide'`, stale tables `guide_channels` + `programmes` and `requireItems: false`
-  (the empty-source rule is for catalogs). URL order: user override, then the Xtream `guideUrl()` or the M3U
-  `discoveredGuideUrls`; the first 2xx answer wins; templates resolve in memory only. Live channels load once into a
-  `ChannelIndex`; `matchGuideChannel` maps by exact guide id (all sharing channels), else a unique folded name
-  (ambiguous names map nothing). The scanner's `channels` filter is a `Set` subclass whose `has` passes undecided ids,
-  so channels reach the importer, get matched, and only mapped ids pass afterwards. Programmes are kept inside
-  `guideWindow` (default 1 day back, 7 forward from `now`); `channel_guide` is replaced in the cleanup transaction.
-  A document with no channels and no programmes fails `source-format/not-a-guide`; failure and cancel keep the old guide.
+- Guide (`import-guide.ts`, `guide-match.ts`): `importGuide(sourceId, deps, { now })` reuses `performRun` (`kind: 'guide'`,
+  `requireItems: false`). URLs: user override, then Xtream `guideUrl()` or M3U `discoveredGuideUrls`; first 2xx wins; resolved
+  in memory only. Match by guide id (all sharing channels), else a unique folded name. A plain growing `Set` is the
+  scanner's `programmeChannels`; no `stop` ends at the next programme of the channel, else +30 min. Window `guideWindow`
+  (default 1 day back, 7 forward); no channels or programmes is `source-format/not-a-guide`; failure keeps the old guide.
