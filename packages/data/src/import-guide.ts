@@ -233,13 +233,25 @@ async function execute(
 }
 
 /**
+ * Folds the write-ahead log back into the database and truncates it. A guide swap rewrites every programme of a
+ * source, so without this the log would keep the size of the whole guide. Advisory: a busy reader only delays it.
+ */
+async function checkpoint(deps: ImportDeps): Promise<void> {
+  try {
+    await deps.db.all('PRAGMA wal_checkpoint(TRUNCATE)');
+  } catch {
+    // the next checkpoint (automatic or after the next swap) catches up
+  }
+}
+
+/**
  * Imports the XMLTV guide of a source: streams it, matches guide channels to live channels (a guide id always wins; a
  * folded name maps a channel without an id match only when it is unique both ways), stores the programmes of mapped
  * guide channels inside the time window (default one day back, seven
  * forward, relative to `opts.now`) and replaces the previous guide in one cleanup transaction. The first guide URL
  * that answers 2xx wins: the user override, then the Xtream guide or the playlist's discovered URLs. URLs are resolved
  * in memory only. A document without channels and programmes fails with `source-format/not-a-guide`; failure and
- * cancel keep the previous guide.
+ * cancel keep the previous guide. After a successful swap the write-ahead log is checkpointed and truncated.
  */
 export async function importGuide(
   sourceId: string,
@@ -270,5 +282,6 @@ export async function importGuide(
     },
   });
   if (!result.ok && runId !== undefined) await dropStaging(deps.db, source.id, runId);
+  if (result.ok) await checkpoint(deps);
   return result;
 }

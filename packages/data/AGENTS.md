@@ -15,7 +15,7 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
 - `createSyncSqlDriver(db)` (`driver.ts`) adapts a synchronous better-sqlite3-shaped database to `SqlDriver`. One promise
   queue serializes calls; the `tx` of a `transaction` callback bypasses it and rejects nesting. Never await the outer
   driver inside a transaction callback. `batch` joins an open transaction.
-- `openCatalog(db)` (`migrate.ts`) applies the pragmas (WAL, `synchronous=NORMAL`, `foreign_keys=ON`, `temp_store=MEMORY`) and
+- `openCatalog(db)` (`migrate.ts`) applies the pragmas (WAL, `synchronous=NORMAL`, `foreign_keys=ON`, `temp_store=MEMORY`, `journal_size_limit` 64 MiB) and
   migrates to `SCHEMA_VERSION` with `MIGRATIONS` in `schema.ts` (raw SQL, `PRAGMA user_version`): `storage/schema-too-new`, `storage/migration-failed` (rolled back). Add a schema change as a new entry, never by editing an old one.
 - `foldText(text)` (`fold.ts`): Turkish-aware, accent- and punctuation-insensitive folding for `name_fold` columns.
 - `templates.ts`: `detectSegmentRules`, `toTemplate`, `resolveTemplate`, `keyTemplate`, `hostOf`. URLs become `{{name}}` templates
@@ -47,4 +47,4 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
   `requireItems: false`). URLs: override, then Xtream `guideUrl()` or M3U `discoveredGuideUrls`; first 2xx wins, earlier failures
   are `counts.guideUrlFallbacks` + `warningCodes` (codes only). A guide id always wins; a folded name maps a channel without one only when unique both ways (growing `Set` =
   scanner `programmeChannels`). Programmes go to `programmes_next`; `guide-commit.ts` swaps those of mapped guide ids into `programmes` (with guide channels
-  and `channel_guide`) in the cleanup transaction; failure or cancel drops the run's staging rows. No `stop`: next start, else +30 min. Catalog runs drop `channel_guide` rows of vanished channels. Not XMLTV: `not-a-guide`.
+  and `channel_guide`) in the cleanup transaction, then `wal_checkpoint(TRUNCATE)`; failure or cancel drops the run's staging rows. No `stop`: next start, else +30 min. Catalog runs drop `channel_guide` rows of vanished channels. Not XMLTV: `not-a-guide`.

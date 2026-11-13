@@ -62,6 +62,9 @@ describe('openCatalog', () => {
       expect(await t.db.all('PRAGMA foreign_keys')).toEqual([{ foreign_keys: 1 }]);
       expect(await t.db.all('PRAGMA synchronous')).toEqual([{ synchronous: 1 }]);
       expect(await t.db.all('PRAGMA temp_store')).toEqual([{ temp_store: 2 }]);
+      expect(await t.db.all('PRAGMA journal_size_limit')).toEqual([
+        { journal_size_limit: 67_108_864 },
+      ]);
     } finally {
       t.close();
     }

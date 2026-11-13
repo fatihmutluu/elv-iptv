@@ -16,11 +16,13 @@ import {
   setupGuide,
   stream,
   tv,
+  xt,
 } from './import-guide-test-helpers';
 import { extinf, M3U_PASS, M3U_USER } from './import-test-helpers';
 import type { ImportProgress } from './import-types';
 import { importCatalog } from './import-xtream';
 import { updateSourceSettings } from './sources';
+import { fileBytes } from './test-db';
 
 describe('guide staging and surfaced failures', () => {
   const bigGuide = (shiftMin: number, n = 30) =>
@@ -120,6 +122,31 @@ describe('guide staging and surfaced failures', () => {
     if (!r.ok) throw new Error('expected ok');
     expect(r.value.counts.guideUrlFallbacks).toBe(0);
     expect(r.value.warningCodes).toEqual([]);
+  });
+});
+
+describe('write-ahead log', () => {
+  it('bounds the journal and truncates the WAL after a guide swap', async () => {
+    const e = await setupGuide(PLAYLIST, undefined, true);
+    try {
+      expect(await e.db.all('PRAGMA journal_size_limit')).toEqual([
+        { journal_size_limit: 67_108_864 },
+      ]);
+      expect((await importCatalog(e.sourceId, e.deps)).ok).toBe(true);
+      const about = 'A description of the programme that is about this long. '.repeat(8);
+      const shows = Array.from(
+        { length: 3000 },
+        (_, i) =>
+          `<programme start="${xt(i * 60_000)}" stop="${xt((i + 1) * 60_000)}" channel="haber1.tr"><title>P${i}</title><desc>${about}</desc></programme>`,
+      );
+      e.server.body = tv(channelXml('haber1.tr', 'Haber Bir'), ...shows);
+      e.server.chunk = 64 * 1024;
+      expect((await run(e, { batchSize: 500 })).ok).toBe(true);
+      expect(await rows(e, 'SELECT COUNT(*) AS n FROM programmes')).toEqual([{ n: 3000 }]);
+      expect(fileBytes(`${e.raw.name}-wal`)).toBe(0);
+    } finally {
+      e.close();
+    }
   });
 });
 

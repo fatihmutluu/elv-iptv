@@ -10,7 +10,7 @@ import {
 import type { ImportDeps } from './import-types';
 import { openCatalog } from './migrate';
 import { addM3uSource, addXtreamSource, type M3uSourceInput } from './sources';
-import { countingScheduler, memorySecrets, testDb } from './test-db';
+import { countingScheduler, memorySecrets, tempFileDb, testDb } from './test-db';
 
 type Row = Record<string, unknown>;
 
@@ -233,13 +233,17 @@ ${url}
 `;
 }
 
-/** Sets up an M3U source whose playlist is served from `state.body` by a fake `HttpClient`. */
+/**
+ * Sets up an M3U source whose playlist is served from `state.body` by a fake `HttpClient`; `file` puts the
+ * catalog in a temporary file database (WAL) instead of memory.
+ */
 export async function setupM3u(
   body = '',
   input: Partial<M3uSourceInput> = {},
   playlistUrl = playlistUrlFor(),
+  file = false,
 ) {
-  const t = testDb();
+  const t = file ? tempFileDb() : testDb();
   await openCatalog(t.db);
   const secrets = memorySecrets();
   const scheduler = countingScheduler();

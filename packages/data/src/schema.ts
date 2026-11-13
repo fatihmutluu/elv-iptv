@@ -1,9 +1,13 @@
+/** Bytes a write-ahead log is truncated back to after a checkpoint (64 MiB). */
+export const JOURNAL_SIZE_LIMIT = 67_108_864;
+
 /** Pragmas applied on every open, before migrations. `journal_mode` reports `memory` for in-memory databases. */
 export const OPEN_PRAGMAS = [
   'PRAGMA journal_mode = WAL',
   'PRAGMA synchronous = NORMAL',
   'PRAGMA foreign_keys = ON',
   'PRAGMA temp_store = MEMORY',
+  `PRAGMA journal_size_limit = ${JOURNAL_SIZE_LIMIT}`,
 ];
 
 /** Ordered migrations; entry `i` upgrades a database from `user_version` `i` to `i + 1`. */

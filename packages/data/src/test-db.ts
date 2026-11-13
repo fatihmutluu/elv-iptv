@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Scheduler, SecretStore, SqlDriver } from '@elv/domain';
@@ -26,6 +26,15 @@ export function tempFileDb(): ReturnType<typeof testDb> {
       rmSync(dir, { recursive: true, force: true });
     },
   };
+}
+
+/** Size in bytes of a file, 0 when it does not exist. Test helper. */
+export function fileBytes(path: string): number {
+  try {
+    return statSync(path).size;
+  } catch {
+    return 0;
+  }
 }
 
 /** In-memory {@link SecretStore} that can dump its content for assertions. Test helper. */

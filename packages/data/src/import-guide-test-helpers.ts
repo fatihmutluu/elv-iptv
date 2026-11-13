@@ -45,8 +45,9 @@ interface GuideServer {
 export async function setupGuide(
   playlist: string,
   input: Parameters<typeof setupM3u>[1] = { guideUrl: GUIDE_URL },
+  file = false,
 ) {
-  const e = await setupM3u(playlist, input);
+  const e = await setupM3u(playlist, input, undefined, file);
   const server: GuideServer = {
     body: tv(),
     status: 200,

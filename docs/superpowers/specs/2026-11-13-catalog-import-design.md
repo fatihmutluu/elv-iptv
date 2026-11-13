@@ -25,7 +25,9 @@ showed why the last two need care: its playlist URLs carry a per-account token s
 
 ## 3. Non-goals
 - App wiring: the op-sqlite driver, the Electron utility process, the two-connection reader/writer setup, secure-storage
-  adapters and the dev seeder are the next spec (catalog on devices, with #10).
+  adapters and the dev seeder are the next spec (catalog on devices, with #10). That spec also measures the guide swap
+  on TV sticks and decides on a pointer-based swap (two programme tables and an active-table pointer, so a swap copies
+  nothing) if the copying swap is too slow there.
 - Search (FTS5) and sorting UIs: Round 2. This spec stores a folded name column so search needs no re-import.
 - User tables (favorites, progress, profiles): added by their features with `profile_id` (spec §5.4).
 - Category selection before the first import, catch-up, Stalker: later issues.
@@ -54,7 +56,9 @@ showed why the last two need care: its playlist URLs carry a per-account token s
   `transaction`) to `SqlDriver`; it is the Electron and test driver. better-sqlite3 is a dev dependency of `data` for tests
   only (the Electron app adds it as a runtime dependency in the next spec). The op-sqlite adapter comes with the app wiring.
 - Pragmas applied on open by `openCatalog(driver)`: `journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`,
-  `temp_store=MEMORY`, then migrations.
+  `temp_store=MEMORY`, `journal_size_limit=67108864` (64 MiB), then migrations. After each successful guide swap the
+  importer runs `PRAGMA wal_checkpoint(TRUNCATE)` outside the transaction, so the log does not keep the size of a whole
+  guide (a 300k-programme swap left a 131 MB log before).
 
 ### 5.3 Schema (version 1, raw SQL, `PRAGMA user_version`)
 - `sources(id TEXT PK, kind, name, created_at, settings_json)` — non-secret settings: transport (User-Agent, Referer,
