@@ -31,7 +31,7 @@ It is a composition root: it wires modules, storage drivers, routes and stores.
 - Auto run: `createAutoDriver` (`driver.ts`) emits a scripted sequence through the focus store: a down-hold (`long`
   page then `repeat` steps), page jumps (`channelDown`), single presses, then the mirror going up. It ends at index 0
   when the list is longer than the deepest excursion (about 600 rows at 600 moves); an odd `moves` is rounded down.
-  The screen drops a `repeat` that arrives while the previous move has not committed and counts it as `coalesced`.
+  A `repeat` arriving before the previous move committed is dropped (`coalesced`); `scripted` counts every driver event.
 - Real keys: the root view is `focusable` with `hasTVPreferredFocus`; with no focused view Android delivers no remote keys
   to `TVEventHandler`. `useTvKeySource` -> `createKeyInterpreter` -> store; the interpreter ticks while a key is down and
   repeats are acknowledged from `onFrameCommitted`. With `auto=0` it prints one line after 2 s without a move (`--real-keys`).

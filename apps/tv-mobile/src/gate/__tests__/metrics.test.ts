@@ -7,11 +7,12 @@ describe('summarize', () => {
     const m = summarize(
       samples,
       [1, 7, 3],
-      { moves: 100, coalesced: 2, losses: 1, items: 5 },
+      { moves: 100, scripted: 104, coalesced: 2, losses: 1, items: 5 },
       12.345,
     );
     expect(m).toEqual({
       moves: 100,
+      scripted: 104,
       coalesced: 2,
       losses: 1,
       keyToHighlightMs: { p50: 50, p95: 95, max: 100 },
@@ -22,7 +23,7 @@ describe('summarize', () => {
   });
 
   it('handles tiny and empty inputs', () => {
-    const counts = { moves: 0, coalesced: 0, losses: 0, items: 1 };
+    const counts = { moves: 0, scripted: 0, coalesced: 0, losses: 0, items: 1 };
     expect(summarize([], [], counts).keyToHighlightMs).toEqual({ p50: 0, p95: 0, max: 0 });
     expect(summarize([], [], counts).maxJsGapMs).toBe(0);
     expect(summarize([12.3456], [], counts).keyToHighlightMs).toEqual({
@@ -34,14 +35,14 @@ describe('summarize', () => {
 
   it('does not mutate its input', () => {
     const samples = [3, 1, 2];
-    summarize(samples, [], { moves: 3, coalesced: 0, losses: 0, items: 1 });
+    summarize(samples, [], { moves: 3, scripted: 3, coalesced: 0, losses: 0, items: 1 });
     expect(samples).toEqual([3, 1, 2]);
   });
 });
 
 describe('gateLine', () => {
   it('prefixes the JSON with ELV_GATE', () => {
-    const m = summarize([1], [2], { moves: 1, coalesced: 0, losses: 0, items: 9 });
+    const m = summarize([1], [2], { moves: 1, scripted: 1, coalesced: 0, losses: 0, items: 9 });
     const line = gateLine(m);
     expect(line.startsWith('ELV_GATE {')).toBe(true);
     expect(JSON.parse(line.slice('ELV_GATE '.length))).toEqual(m);
@@ -75,6 +76,17 @@ describe('createRecorder', () => {
     r.coalesce();
     r.coalesce();
     expect(r.finish().coalesced).toBe(2);
+  });
+
+  it('counts every scripted driver event, whether it moved, was coalesced or hit an edge', () => {
+    const r = createRecorder(geometry);
+    for (let i = 0; i < 3; i++) r.scripted();
+    r.move(0);
+    r.coalesce();
+    r.commit(5, 1, 1, win(0));
+    const m = r.finish();
+    expect(m).toMatchObject({ scripted: 3, moves: 1, coalesced: 1 });
+    expect(r.finish().scripted).toBe(0);
   });
 
   it('measures the synchronous work from dispatch to the end of the commit', () => {

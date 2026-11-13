@@ -208,6 +208,7 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
     };
     const driver = createAutoDriver(
       (event) => {
+        recorder.scripted();
         if (event.kind === 'repeat' && recorder.pending() > 0) {
           recorder.coalesce();
           return;

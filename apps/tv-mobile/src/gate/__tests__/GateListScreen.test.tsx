@@ -33,7 +33,8 @@ describe('GateListScreen', () => {
     const metrics = JSON.parse((lines[0] ?? '').slice('ELV_GATE '.length));
     expect(metrics.items).toBe(1000);
     expect(metrics.moves).toBeGreaterThan(0);
-    expect(metrics.moves + metrics.coalesced).toBeLessThanOrEqual(20);
+    expect(metrics.scripted).toBe(20);
+    expect(metrics.moves + metrics.coalesced).toBeLessThanOrEqual(metrics.scripted);
     expect(metrics.keyToHighlightMs.p95).toBeGreaterThanOrEqual(0);
     expect(metrics.losses).toBe(0);
   });
