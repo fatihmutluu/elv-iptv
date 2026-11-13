@@ -16,15 +16,19 @@ describe('parseGateUrl', () => {
       auto: false,
       rate: 20,
       moves: 600,
+      stall: 0,
     });
   });
 
   it('reads every parameter', () => {
-    expect(parseGateUrl('elviptv://gate/list?items=5000&auto=1&rate=30&moves=100')).toEqual({
+    expect(
+      parseGateUrl('elviptv://gate/list?items=5000&auto=1&rate=30&moves=100&stall=30'),
+    ).toEqual({
       items: 5000,
       auto: true,
       rate: 30,
       moves: 100,
+      stall: 30,
     });
   });
 
@@ -45,5 +49,8 @@ describe('parseGateUrl', () => {
       moves: 600,
     });
     expect(parseGateUrl('elviptv://gate/list?auto=0')?.auto).toBe(false);
+    expect(parseGateUrl('elviptv://gate/list?stall=500')?.stall).toBe(200);
+    expect(parseGateUrl('elviptv://gate/list?stall=-5')?.stall).toBe(0);
+    expect(parseGateUrl('elviptv://gate/list?stall=x')?.stall).toBe(0);
   });
 });

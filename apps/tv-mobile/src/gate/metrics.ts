@@ -23,14 +23,21 @@ function nearestRank(sorted: readonly number[], p: number): number {
   return sorted[rank - 1] ?? 0;
 }
 
+/** A stalled frame is discounted by this share of the typical frame time: vsync slips of that size occur on an idle app. */
+const VSYNC_SLACK = 0.7;
+
 /**
- * How far the slowest animation frame overshot the typical one: a JS thread that is busy delays its next
- * `requestAnimationFrame` callback, so the overshoot is a lower bound of the longest JS task. 0 when there are no frames.
+ * Evidence of a long JS task from animation frames. A task of L ms started x ms after a frame callback delays the next
+ * callback to x + L, so the slowest frame delta bounds the longest task from above and (delta - frame time) from below.
+ * The estimate is the slowest delta minus 0.7 of the median delta (the typical frame time), which keeps idle
+ * vsync jitter (deltas up to about 1.5 frames on the emulator) below 16 ms while a 30 ms task reads 16 ms or more. The
+ * resolution is about one frame: a 20 ms task reads 16 ms or more only when it starts late in a frame. 0 without frames.
  */
 function frameStall(deltas: readonly number[]): number {
   if (deltas.length === 0) return 0;
   const sorted = [...deltas].sort((a, b) => a - b);
-  return Math.max(0, (sorted[sorted.length - 1] ?? 0) - (sorted[sorted.length >> 1] ?? 0));
+  const typical = sorted[sorted.length >> 1] ?? 0;
+  return Math.max(0, (sorted[sorted.length - 1] ?? 0) - VSYNC_SLACK * typical);
 }
 
 /**

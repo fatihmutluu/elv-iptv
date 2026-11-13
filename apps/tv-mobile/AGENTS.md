@@ -17,18 +17,17 @@ It is a composition root: it wires modules, storage drivers, routes and stores.
 - One `react-native` copy: the root override aliases it to `react-native-tvos`.
 - No Google Play Services or Firebase dependencies.
 - Phone and TV targets share `android/` and `ios/`. `pnpm run:app` stamps the folder
-  (`.elv-prebuild.json`) and regenerates it when the target, variant or store changes. After
-  changing `app.config.ts`, plugins or native dependencies, run `pnpm run:app <target> build`.
-- Placeholder images in `assets/` are generated once; replace them with final art, not code.
+- Phone and TV targets share `android/` and `ios/`. `pnpm run:app` stamps the folder (`.elv-prebuild.json`) and regenerates it
+  when the target, variant or store changes. After changing `app.config.ts`, plugins or native dependencies, run `pnpm run:app <target> build`.
 
 ## Development gate (`src/gate/`)
 - Deep link `elviptv://gate/list?items=100000&auto=1&rate=20&moves=600` opens `GateListScreen`. The scheme `elviptv`
   is registered in every variant; the screen is reachable only when `extra.gate` is `true`, which
   `build-app-config.ts` sets for `APP_VARIANT=development` only. The app reads it with `expo-constants`; never key it
   on `__DEV__` (the gate is measured on a JS-bundled release build of the development variant).
-- `parseGateUrl` (`routes.ts`) clamps: items 1 to 1,000,000, rate 1 to 60 events per second, moves 1 to 10,000;
-  defaults 100,000 / manual / 20 / 600. `useGateParams` reads the initial URL and `url` events through
-  `react-native` `Linking`; without the flag `App` shows the placeholder.
+- `parseGateUrl` (`routes.ts`) clamps: items 1 to 1,000,000, rate 1 to 60/s, moves 1 to 10,000, `stall` 0 to 200 ms (one busy-wait
+  mid-run to calibrate the JS gap); defaults 100,000 / manual / 20 / 600 / 0. `useGateParams` reads the initial URL and `url`
+  events through `react-native` `Linking`; without the flag `App` shows the placeholder.
 - Auto run: `createAutoDriver` (`driver.ts`) emits a scripted sequence through the focus store: a down-hold (`long`
   page then `repeat` steps), page jumps (`channelDown`), single presses, then the mirror going up. It ends at index 0
   when the list is longer than the deepest excursion (about 600 rows at 600 moves); an odd `moves` is rounded down.
@@ -38,9 +37,10 @@ It is a composition root: it wires modules, storage drivers, routes and stores.
   repeats are acknowledged from `onFrameCommitted`. With `auto=0` it prints one line after 2 s without a move (`--real-keys`).
 - Metrics (`metrics.ts`): `t0` is the dispatch time (auto) or the key event time (real); `t1` is `performance.now()` inside
   `onFrameCommitted` (first frame after row and ring committed); key-to-highlight is `t1 - t0` per move that commit covers.
-  `maxJsGapMs` is the longest JS task: the larger of the synchronous work per move (dispatch to the end of the list commit,
-  ended by `CommitProbe`) and the `requestAnimationFrame` overshoot (slowest frame delta minus the median). A 4 ms
-  `setInterval` fires once per frame on Android (16.7 ms idle): it measured frame quantisation. Percentiles: nearest-rank.
+  `maxJsGapMs` is the larger of the synchronous work per move (dispatch to the end of the list commit, ended by
+  `CommitProbe`) and a frame-stall estimate: slowest `requestAnimationFrame` delta minus 0.7 of the median delta. A 4 ms
+  `setInterval` fires once per frame on Android, so it only measured quantisation. The estimate has a resolution of about one
+  frame: `stall=30` reads >= 16 ms, `stall=20` only when it starts late in a frame; idle jitter stays below 16 ms.
 - `losses`: a committed frame whose focused index is outside `[0, items)`, outside the visible window that `TvList` reported for
   that frame, or outside the rows it rendered; plus 1 if the last committed index differs from the store's index once
   the run settles; plus every move that never got a committed frame (after a 2 s settle timeout). Moves whose net effect

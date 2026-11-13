@@ -1,4 +1,4 @@
-/** Parameters of the gate deep link `elviptv://gate/list?items=…&auto=1&rate=20&moves=600`. */
+/** Parameters of the gate deep link `elviptv://gate/list?items=…&auto=1&rate=20&moves=600&stall=0`. */
 export interface GateParams {
   /** Number of synthetic list items, 1 to 1,000,000. */
   items: number;
@@ -8,6 +8,8 @@ export interface GateParams {
   rate: number;
   /** Number of scripted moves, 1 to 10,000. */
   moves: number;
+  /** Length in ms of one synchronous busy-wait injected mid-run to calibrate the JS-gap metric, 0 to 200 (0: none). */
+  stall: number;
 }
 
 const GATE_URL = /^elviptv:\/\/gate\/list\/?(?:\?([^#]*))?(?:#.*)?$/;
@@ -19,7 +21,7 @@ function readInt(value: string | undefined, fallback: number, min: number, max: 
 
 /**
  * Parses a gate deep link. Returns `undefined` for anything that is not `elviptv://gate/list`. Missing or malformed
- * values fall back to the defaults (100,000 items, manual, 20 per second, 600 moves); numbers are clamped.
+ * values fall back to the defaults (100,000 items, manual, 20 per second, 600 moves, no stall); numbers are clamped.
  */
 export function parseGateUrl(url: string | null): GateParams | undefined {
   if (url === null) return undefined;
@@ -35,5 +37,6 @@ export function parseGateUrl(url: string | null): GateParams | undefined {
     auto: query.get('auto') === '1',
     rate: readInt(query.get('rate'), 20, 1, 60),
     moves: readInt(query.get('moves'), 600, 1, 10_000),
+    stall: readInt(query.get('stall'), 0, 0, 200),
   };
 }

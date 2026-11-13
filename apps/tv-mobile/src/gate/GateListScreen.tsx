@@ -30,6 +30,7 @@ const SETTLE_POLL_MS = 25;
 const SETTLE_TIMEOUT_MS = 2000;
 const IDLE_FLUSH_MS = 2000;
 const TICK_MS = 16;
+const STALL_OFFSET_MS = 7;
 
 interface Channel {
   number: number;
@@ -48,6 +49,14 @@ function renderChannel(item: Channel | undefined, focused: boolean): ReactElemen
       <Text style={styles.name}>{item?.name}</Text>
     </View>
   );
+}
+
+/** Blocks the JS thread for `ms`: the calibration task behind the `stall` gate parameter. */
+function busyWait(ms: number): void {
+  const end = performance.now() + ms;
+  while (performance.now() < end) {
+    // spin
+  }
 }
 
 const rowLabel = (item: Channel | undefined): string => item?.name ?? '';
@@ -78,7 +87,7 @@ export interface GateListScreenProps {
  * refs and the recorder, so a move never re-renders this screen.
  */
 export function GateListScreen({ params }: GateListScreenProps): ReactElement {
-  const { items, auto, rate, moves } = params;
+  const { items, auto, rate, moves, stall } = params;
   const store = useMemo(
     () =>
       createFocusStore({
@@ -219,6 +228,7 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
     };
     later(() => {
       active.current = true;
+      if (stall > 0) later(() => busyWait(stall), ((moves / rate) * 1000) / 2 + STALL_OFFSET_MS);
       void driver.start().then(() => {
         if (cancelled) return;
         settleStart.at = performance.now();
@@ -231,7 +241,7 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
       recorder.finish();
       for (const id of timers) clearTimeout(id);
     };
-  }, [auto, rate, moves, recorder, apply, emit]);
+  }, [auto, rate, moves, stall, recorder, apply, emit]);
 
   useEffect(
     () => () => {

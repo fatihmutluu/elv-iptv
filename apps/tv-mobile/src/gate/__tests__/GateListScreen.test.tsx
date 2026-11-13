@@ -12,7 +12,9 @@ describe('GateListScreen', () => {
 
   it('renders the list window for the requested item count', async () => {
     jest.spyOn(console, 'log').mockImplementation(() => {});
-    await render(<GateListScreen params={{ items: 100_000, auto: false, rate: 20, moves: 10 }} />);
+    await render(
+      <GateListScreen params={{ items: 100_000, auto: false, rate: 20, moves: 10, stall: 0 }} />,
+    );
     expect(screen.getByTestId('gate-list')).toBeOnTheScreen();
     expect(screen.getByText('Channel 1')).toBeOnTheScreen();
     expect(screen.queryByText('Channel 20')).toBeNull();
@@ -21,7 +23,9 @@ describe('GateListScreen', () => {
 
   it('prints exactly one ELV_GATE line when an auto run finishes', async () => {
     const log = jest.spyOn(console, 'log').mockImplementation(() => {});
-    await render(<GateListScreen params={{ items: 1000, auto: true, rate: 60, moves: 20 }} />);
+    await render(
+      <GateListScreen params={{ items: 1000, auto: true, rate: 60, moves: 20, stall: 0 }} />,
+    );
     await waitFor(() => expect(gateLines(log)).toHaveLength(1), { timeout: 8000 });
     await new Promise<void>((resolve) => setTimeout(resolve, 300));
     const lines = gateLines(log);
@@ -36,7 +40,9 @@ describe('GateListScreen', () => {
 
   it('prints nothing for a manual session', async () => {
     const log = jest.spyOn(console, 'log').mockImplementation(() => {});
-    await render(<GateListScreen params={{ items: 1000, auto: false, rate: 60, moves: 20 }} />);
+    await render(
+      <GateListScreen params={{ items: 1000, auto: false, rate: 60, moves: 20, stall: 0 }} />,
+    );
     await new Promise<void>((resolve) => setTimeout(resolve, 200));
     expect(gateLines(log)).toHaveLength(0);
   });
@@ -44,7 +50,7 @@ describe('GateListScreen', () => {
   it('prints no line when the screen unmounts mid-run', async () => {
     const log = jest.spyOn(console, 'log').mockImplementation(() => {});
     const view = await render(
-      <GateListScreen params={{ items: 1000, auto: true, rate: 20, moves: 200 }} />,
+      <GateListScreen params={{ items: 1000, auto: true, rate: 20, moves: 200, stall: 0 }} />,
     );
     await new Promise<void>((resolve) => setTimeout(resolve, 800));
     await view.unmount();
@@ -54,11 +60,14 @@ describe('GateListScreen', () => {
 
   it('prints only the new run line when the params change mid-run', async () => {
     const log = jest.spyOn(console, 'log').mockImplementation(() => {});
-    const first = { items: 1000, auto: true, rate: 20, moves: 200 };
+    const first = { items: 1000, auto: true, rate: 20, moves: 200, stall: 0 };
     const view = await render(<GateListScreen key="a" params={first} />);
     await new Promise<void>((resolve) => setTimeout(resolve, 800));
     await view.rerender(
-      <GateListScreen key="b" params={{ items: 2000, auto: true, rate: 60, moves: 20 }} />,
+      <GateListScreen
+        key="b"
+        params={{ items: 2000, auto: true, rate: 60, moves: 20, stall: 0 }}
+      />,
     );
     await waitFor(() => expect(gateLines(log)).toHaveLength(1), { timeout: 8000 });
     await new Promise<void>((resolve) => setTimeout(resolve, 3000));

@@ -15,7 +15,9 @@ describe('GateListScreen real keys', () => {
 
   it('resolves moves that return to the same index within one frame without losses', async () => {
     const log = jest.spyOn(console, 'log').mockImplementation(() => {});
-    await render(<GateListScreen params={{ items: 1000, auto: false, rate: 20, moves: 10 }} />);
+    await render(
+      <GateListScreen params={{ items: 1000, auto: false, rate: 20, moves: 10, stall: 0 }} />,
+    );
     await act(async () => {
       mockOnInput?.({ key: 'down', action: 'press', time: performance.now() });
       mockOnInput?.({ key: 'up', action: 'press', time: performance.now() });

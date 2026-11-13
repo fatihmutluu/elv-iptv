@@ -19,6 +19,8 @@ React components for react-native and react-native-web, design tokens and TV foc
 
 ## TV list and key source (`src/tv/`)
 - `useTvKeySource(onInput)` is the only place that touches `TVEventHandler`, `TVEventControl` and `BackHandler`.
+  It receives keys only while a native view is focused: a TV screen needs a focusable root (`focusable` plus
+  `hasTVPreferredFocus`), or Android delivers no remote keys at all (also not `adb shell input keyevent`).
   `toKeyInput` maps remote events to focus-core `KeyInput`: `eventKeyAction` 0/1 (Android) become `down`/`up`, events
   without it (tvOS) become `press`, `long*` events (tvOS `longSelect`, `longPlayPause`, ...) become one `long`,
   `pageUp`/`pageDown` become `channelUp`/`channelDown`; swipes, pans and unknown types give `undefined`. Android Back

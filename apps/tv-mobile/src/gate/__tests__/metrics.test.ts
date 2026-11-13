@@ -82,25 +82,39 @@ describe('createRecorder', () => {
     expect(r.finish().maxJsGapMs).toBe(21);
   });
 
-  it('treats a late animation frame as a stalled JS thread', () => {
-    const r = createRecorder(geometry);
-    for (const delta of [16, 17, 16, 17, 16, 40]) r.frameDelta(delta);
-    expect(r.finish().maxJsGapMs).toBe(23);
+  it('reads a 30 ms stall as over the 16 ms budget, whatever frame it starts in', () => {
+    const quiet = Array.from({ length: 30 }, () => 16.7);
+    for (const delta of [30.1, 33.3, 40, 46.7]) {
+      const r = createRecorder(geometry);
+      for (const d of [...quiet, delta, ...quiet]) r.frameDelta(d);
+      expect(r.finish().maxJsGapMs).toBeGreaterThanOrEqual(16);
+    }
   });
 
-  it('does not report frame jitter below the typical frame time', () => {
+  it('reads a 20 ms stall as over the budget when it starts late in a frame', () => {
+    const quiet = Array.from({ length: 30 }, () => 16.7);
     const r = createRecorder(geometry);
-    for (const delta of [16, 16, 16]) r.frameDelta(delta);
-    expect(r.finish().maxJsGapMs).toBe(0);
+    for (const d of [...quiet, 33.3, ...quiet]) r.frameDelta(d);
+    expect(r.finish().maxJsGapMs).toBeGreaterThanOrEqual(16);
+  });
+
+  it('keeps idle vsync jitter below the budget', () => {
+    const r = createRecorder(geometry);
+    for (const d of [16.7, 12.9, 17.9, 22.5, 16.7, 27, 16.7, 16.6]) r.frameDelta(d);
+    expect(r.finish().maxJsGapMs).toBeLessThan(16);
   });
 
   it('reports the larger of the commit work and the frame stall, and resets per run', () => {
     const r = createRecorder(geometry);
-    for (const delta of [16, 16, 16, 30]) r.frameDelta(delta);
+    for (const d of [16, 16, 16, 30]) r.frameDelta(d);
     r.workStart(0);
     r.workEnd(9);
-    expect(r.finish().maxJsGapMs).toBe(14);
-    expect(r.finish().maxJsGapMs).toBe(0);
+    expect(r.finish().maxJsGapMs).toBe(18.8);
+    const w = createRecorder(geometry);
+    w.workStart(0);
+    w.workEnd(9);
+    expect(w.finish().maxJsGapMs).toBe(9);
+    expect(w.finish().maxJsGapMs).toBe(0);
   });
 
   it('counts a settled frame that shows a stale index and moves that never committed as losses', () => {
