@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildChannelIndex, matchGuideChannel } from './guide-match';
+import { buildChannelIndex, matchGuideChannel, resolveMappings } from './guide-match';
 
 const rows = [
   { key: 'a', guide_id: 'haber1.tr', name_fold: 'haber bir' },
@@ -11,36 +11,71 @@ const rows = [
   { key: 'g', guide_id: null, name_fold: '' },
 ];
 const index = buildChannelIndex(rows);
+const keys = (id: string, names: string[]) => matchGuideChannel(index, { id, names }).keys;
 
 describe('guide matching', () => {
   it('maps every live channel that shares the guide id', () => {
-    expect(matchGuideChannel(index, { id: 'haber1.tr', names: ['Other'] }).sort()).toEqual([
-      'a',
-      'b',
-    ]);
+    const match = matchGuideChannel(index, { id: 'haber1.tr', names: ['Other'] });
+    expect(match.byId).toBe(true);
+    expect(match.keys.sort()).toEqual(['a', 'b']);
   });
 
   it('falls back to a unique folded name', () => {
-    expect(matchGuideChannel(index, { id: 'x', names: ['SPOR  İKİ'] })).toEqual(['c']);
+    expect(matchGuideChannel(index, { id: 'x', names: ['SPOR  İKİ'] })).toEqual({
+      keys: ['c'],
+      byId: false,
+    });
   });
 
   it('folds case and Turkish letters', () => {
-    expect(matchGuideChannel(index, { id: 'x', names: ['ÇAĞRI TV'] })).toEqual(['f']);
+    expect(keys('x', ['ÇAĞRI TV'])).toEqual(['f']);
   });
 
   it('ambiguous names are skipped', () => {
-    expect(matchGuideChannel(index, { id: 'x', names: ['Ikiz'] })).toEqual([]);
+    expect(keys('x', ['Ikiz'])).toEqual([]);
   });
 
   it('skips an ambiguous name but accepts another unique one', () => {
-    expect(matchGuideChannel(index, { id: 'x', names: ['Ikiz', 'Spor Iki'] })).toEqual(['c']);
+    expect(keys('x', ['Ikiz', 'Spor Iki'])).toEqual(['c']);
   });
 
   it('refuses names that point at different channels', () => {
-    expect(matchGuideChannel(index, { id: 'x', names: ['Spor Iki', 'Cagri TV'] })).toEqual([]);
+    expect(keys('x', ['Spor Iki', 'Cagri TV'])).toEqual([]);
   });
 
   it('ignores empty names and unknown channels', () => {
-    expect(matchGuideChannel(index, { id: 'x', names: ['', '!!!', 'Nope'] })).toEqual([]);
+    expect(keys('x', ['', '!!!', 'Nope'])).toEqual([]);
+  });
+});
+
+describe('resolveMappings', () => {
+  it('lets an id match win over a name match in either order', () => {
+    expect(resolveMappings([['k', 'exact']], [['k', 'named']])).toEqual([['k', 'exact']]);
+  });
+
+  it('drops a channel that several guide channels name and keeps repeated names of one', () => {
+    expect(
+      resolveMappings(
+        [],
+        [
+          ['k', 'one'],
+          ['k', 'two'],
+          ['m', 'same'],
+          ['m', 'same'],
+        ],
+      ),
+    ).toEqual([['m', 'same']]);
+  });
+
+  it('keeps the first id match of a channel', () => {
+    expect(
+      resolveMappings(
+        [
+          ['k', 'first'],
+          ['k', 'second'],
+        ],
+        [],
+      ),
+    ).toEqual([['k', 'first']]);
   });
 });

@@ -5,11 +5,11 @@ import {
   type HttpResponse,
   ok,
   type Result,
-  type SqlDriver,
   transportHeaders,
 } from '@elv/domain';
 import { scanXmltv, type XmltvChannel, type XmltvProgramme } from '@elv/sources';
 import { foldText } from './fold';
+import { commitGuide, dropStaging, type GuideResult, STAGE_PROGRAMME_SQL } from './guide-commit';
 import { buildChannelIndex, type ChannelIndex, matchGuideChannel } from './guide-match';
 import { readUrlVars } from './import-m3u';
 import { checkAbort, performRun, type RunCtx, Stop } from './import-run';
@@ -96,18 +96,6 @@ async function openGuide(
   throw new Stop(first ?? elvError('source-format', 'no-guide-url'));
 }
 
-const GUIDE_CHANNEL_SQL = `INSERT INTO guide_channels (source_id, guide_id, name, name_fold, icon, run_id)
-  VALUES (?, ?, ?, ?, ?, ?)
-  ON CONFLICT(source_id, guide_id) DO UPDATE SET name = excluded.name, name_fold = excluded.name_fold,
-    icon = excluded.icon, run_id = excluded.run_id`;
-
-const PROGRAMME_SQL = `INSERT INTO programmes_next (source_id, guide_id, start, stop, title, sub_title, description,
-    categories_json, episode_num, icon, run_id)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  ON CONFLICT(source_id, guide_id, start) DO UPDATE SET stop = excluded.stop, title = excluded.title,
-    sub_title = excluded.sub_title, description = excluded.description, categories_json = excluded.categories_json,
-    episode_num = excluded.episode_num, icon = excluded.icon, run_id = excluded.run_id`;
-
 const programmeRow = (sourceId: string, runId: number, p: XmltvProgramme, stop: number): Row => [
   sourceId,
   p.channel,
@@ -122,50 +110,27 @@ const programmeRow = (sourceId: string, runId: number, p: XmltvProgramme, stop: 
   runId,
 ];
 
-interface GuideState {
+interface GuideState extends GuideResult {
   index: ChannelIndex;
-  /** Guide ids of mapped channels; the scanner consults it per programme, so it grows as channels arrive. */
+  /** Guide ids of matched channels; the scanner consults it per programme, so it grows as channels arrive. */
   mapped: Set<string>;
-  /** Guide channel rows, written with the cleanup transaction. */
-  channelRows: Row[];
   /** Programmes without `stop`, waiting for the next programme of their channel. */
   open: Map<string, XmltvProgramme>;
-  /** `[channelKey, guideId]` pairs, written with the cleanup transaction. */
-  mappings: [string, string][];
   channels: number;
-  mappedChannels: number;
   programmes: number;
   seenProgrammes: number;
 }
 
-async function writeChannels(
-  c: RunCtx,
-  st: GuideState,
-  channels: readonly XmltvChannel[],
-): Promise<void> {
-  const rows: Row[] = [];
+function writeChannels(c: RunCtx, st: GuideState, channels: readonly XmltvChannel[]): void {
   for (const ch of channels) {
-    const keys = matchGuideChannel(st.index, ch);
-    if (keys.length > 0) st.mapped.add(ch.id);
+    const match = matchGuideChannel(st.index, ch);
+    if (match.keys.length > 0) st.mapped.add(ch.id);
     else st.mapped.delete(ch.id);
-    if (keys.length > 0) st.mappedChannels++;
-    for (const key of keys) st.mappings.push([key, ch.id]);
+    for (const key of match.keys) (match.byId ? st.byId : st.byName).push([key, ch.id]);
     const name = ch.names[0] ?? ch.id;
-    rows.push([c.sourceId, ch.id, name, foldText(name), ch.icon ?? null, c.runId]);
+    st.channelRows.push([c.sourceId, ch.id, name, foldText(name), ch.icon ?? null, c.runId]);
   }
   st.channels += channels.length;
-  st.channelRows.push(...rows);
-}
-
-const SWAP_PROGRAMMES = `INSERT INTO programmes SELECT * FROM programmes_next WHERE source_id = ? AND run_id = ?`;
-
-/** Clears the staged programmes of a source; a failure here must not hide the error that ended the run. */
-async function dropStaging(db: SqlDriver, sourceId: string): Promise<void> {
-  try {
-    await db.run('DELETE FROM programmes_next WHERE source_id = ?', [sourceId]);
-  } catch {
-    // the next guide run clears leftovers before it starts
-  }
 }
 
 type Row = (string | number | null)[];
@@ -197,7 +162,7 @@ function flushOpen(c: RunCtx, st: GuideState): Row[] {
 
 async function writeProgrammes(c: RunCtx, st: GuideState, rows: Row[]): Promise<void> {
   for (let i = 0; i < rows.length; i += c.batchSize) {
-    await c.db.batch(PROGRAMME_SQL, rows.slice(i, i + c.batchSize));
+    await c.db.batch(STAGE_PROGRAMME_SQL, rows.slice(i, i + c.batchSize));
     await c.deps.scheduler.yieldNow();
   }
   st.programmes += rows.length;
@@ -219,9 +184,9 @@ async function execute(
     mapped: new Set(),
     channelRows: [],
     open: new Map(),
-    mappings: [],
+    byId: [],
+    byName: [],
     channels: 0,
-    mappedChannels: 0,
     programmes: 0,
     seenProgrammes: 0,
   };
@@ -248,7 +213,7 @@ async function execute(
         break;
       }
       const batch = step.value;
-      await writeChannels(c, st, batch.channels);
+      writeChannels(c, st, batch.channels);
       st.seenProgrammes += batch.programmes.length;
       await writeProgrammes(c, st, closeOpen(c, st, batch.programmes));
       c.progress({ phase: 'guide-channels', done: st.channels });
@@ -263,14 +228,14 @@ async function execute(
     throw new Stop(elvError('source-format', 'not-a-guide'));
   }
   c.counts.guideChannels = st.channels;
-  c.counts.mapped = st.mappedChannels;
   c.counts.programmes = st.programmes;
   return st;
 }
 
 /**
- * Imports the XMLTV guide of a source: streams it, matches guide channels to live channels (guide id first, then a
- * unique folded name), stores the programmes of mapped channels inside the time window (default one day back, seven
+ * Imports the XMLTV guide of a source: streams it, matches guide channels to live channels (a guide id always wins; a
+ * folded name maps a channel without an id match only when it is unique both ways), stores the programmes of mapped
+ * guide channels inside the time window (default one day back, seven
  * forward, relative to `opts.now`) and replaces the previous guide in one cleanup transaction. The first guide URL
  * that answers 2xx wins: the user override, then the Xtream guide or the playlist's discovered URLs. URLs are resolved
  * in memory only. A document without channels and programmes fails with `source-format/not-a-guide`; failure and
@@ -291,32 +256,19 @@ export async function importGuide(
   if (urls.value.length === 0) return err(elvError('source-format', 'no-guide-url'));
   const now = opts.now ?? deps.clock();
   let state: GuideState | undefined;
+  let runId: number | undefined;
   const result = await performRun(source, deps, opts, {
     kind: 'guide',
     staleTables: ['guide_channels'],
     requireItems: false,
     execute: async (c) => {
+      runId = c.runId;
       state = await execute(c, source, urls.value, now);
     },
     beforeCleanup: async (tx, c) => {
-      await tx.run('DELETE FROM programmes WHERE source_id = ?', [c.sourceId]);
-      await tx.run(SWAP_PROGRAMMES, [c.sourceId, c.runId]);
-      await tx.run('DELETE FROM programmes_next WHERE source_id = ?', [c.sourceId]);
-      if (state !== undefined) {
-        for (let i = 0; i < state.channelRows.length; i += c.batchSize) {
-          await tx.batch(GUIDE_CHANNEL_SQL, state.channelRows.slice(i, i + c.batchSize));
-        }
-      }
-      await tx.run('DELETE FROM channel_guide WHERE source_id = ?', [c.sourceId]);
-      if (state === undefined || state.mappings.length === 0) return;
-      await tx.batch(
-        'INSERT OR IGNORE INTO channel_guide (source_id, channel_key, guide_id) VALUES (?, ?, ?)',
-        state.mappings.map(([key, guideId]) => [c.sourceId, key, guideId]),
-      );
+      if (state !== undefined) await commitGuide(tx, c, state);
     },
   });
-  const busy =
-    !result.ok && result.error.category === 'storage' && result.error.code === 'import-in-progress';
-  if (!result.ok && !busy) await dropStaging(deps.db, source.id);
+  if (!result.ok && runId !== undefined) await dropStaging(deps.db, source.id, runId);
   return result;
 }
