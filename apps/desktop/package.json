@@ -1,7 +1,7 @@
 {
   "name": "@elv/desktop",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "ELV IPTV desktop app",
   "author": "ELV IPTV contributors",
   "main": "dist/main/main.js",
