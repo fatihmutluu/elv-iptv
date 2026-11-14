@@ -29,7 +29,7 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
   (live, window end) when known. `options.softwareAudio`: software audio decoders first, extension renderers (#69).
   Buffers: 15-30 s, start 1 s, after rebuffer 2 s, target 16 MB when low-RAM (`isLowRamDevice`, < 1.5 GB) else 32 MB.
 
-## Requests and errors (`ConnectionGate`, `GatedDataSource`, `StreamHttp`, `SniffingDataSource`, `ErrorMapping`)
+## Requests and errors (`ConnectionGate`, `GatedDataSource`, `StreamHttp`, sniffing, `LoadRetry`, `ErrorMapping`)
 - Each prepare and `stop` begins a generation and force-closes older connections at once on the closer thread: the
   OkHttp call is cancelled (socket closed, also mid-connect) and an `open` in progress is interrupted. A connection is
   counted until Media3 closes it; a newer `open` waits for that (forcing again after 1,000 ms, `Log.w`).
