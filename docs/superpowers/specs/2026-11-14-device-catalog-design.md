@@ -17,8 +17,8 @@ source added on the device imports there, the plain menu (#13) lists it, the pla
 - A catalog service in `apps/tv-mobile/src/catalog/` that opens the database (`openCatalog`), adds and removes sources,
   runs imports with progress and cancellation, and answers the paged list queries the menu needs.
 - A spike first that proves op-sqlite on the Android TV emulator and the Apple TV simulator and fixes the chunk size.
-- An import gate on the Android TV emulator: the `large` simulator account and a synthetic 500k account import within
-  budget while key input stays responsive.
+- An import gate on the Android TV emulator: the `large` simulator account (25,000 live, 70,000 VOD, 500 series) and the
+  `huge` account (500,000 entries) import within budget without long JavaScript stalls.
 
 ## 3. Non-goals
 - Desktop storage (Electron utility process with better-sqlite3): part of the desktop work (#8), same ports.
@@ -53,7 +53,11 @@ Scan of 2026-11-14 (private report `.superpowers/research/reports/device-sqlite-
   transaction's connection (op-sqlite's `executeBatch` opens its own transaction).
 - Numbers stay JS doubles (ids are below 2^53 by schema); `Uint8Array` maps to blobs.
 - `AbortSignal` support: an abort during a long statement calls `interrupt()`, which rolls the open transaction back, in
-  line with the import rule "abort never deletes".
+  line with the import rule "abort never deletes". A statement that fails while its signal is aborted rejects with an
+  `AbortError`-named error, so the import engine records the run as `cancelled`; any other SQL failure rejects with
+  `storage/sql-failed` and the SQLite message in `detail`.
+- Reads outside a transaction go to the reader connection. Each statement there is its own read transaction, so a write
+  committed on the writer is visible to the next read; reads never see a writer's open transaction.
 - Build config in `apps/tv-mobile/package.json`: op-sqlite pinned exactly (19.0.5); FTS5 off for 0.1 (no search yet);
   `performanceMode` decided by the spike.
 
@@ -65,6 +69,10 @@ Scan of 2026-11-14 (private report `.superpowers/research/reports/device-sqlite-
 - `HttpClient`: the domain's `createFetchHttpClient` over a fetch whose response bodies stream. The builder checks Expo
   SDK 58's `expo/fetch` (streaming `ReadableStream` bodies) on Android and tvOS; if a platform cannot stream, that platform
   reads whole bodies within `maxBodyBytes`, which the importer already supports for Xtream JSON.
+- No `Decompressor` in 0.1: native fetch decodes `Content-Encoding: gzip`; a playlist served as a `.gz` file without
+  that header fails with the importer's `gzip-unsupported` code (guides, where gzip files are common, come in Round 2).
+- Cleartext HTTP: development builds allow it to the simulator hosts only (`10.0.2.2`, `127.0.0.1`, `localhost`) through
+  the app config (Android network security config, iOS/tvOS ATS local networking); user sources over `http` are #12.
 
 ### 5.3 Catalog service (`apps/tv-mobile/src/catalog/`)
 - `createDeviceCatalog()` opens the database with `openCatalog`, wires the adapters into `ImportDeps`, and exposes:
@@ -74,15 +82,21 @@ Scan of 2026-11-14 (private report `.superpowers/research/reports/device-sqlite-
   package's stream resolver; credentials never leave memory).
 - One instance per app process, created lazily; the database file lives in the app's documents directory (not the
   caches directory) on every platform.
-- The service is plain TypeScript with the adapters injected, so it is tested in Jest with the Node SQLite test driver and
-  in-memory secrets; only the adapters touch native modules.
+- The service is plain TypeScript with the adapters injected, so it is tested in Vitest (the app's `test` script, Node
+  environment) against `@elv/data`'s Node SQLite test database, which `@elv/data` exports under a `./testing` subpath,
+  with in-memory secrets; only the adapters touch native modules (they are mocked at the module boundary in their tests).
 
 ### 5.4 Spike (first plan task)
-- Add op-sqlite to `apps/tv-mobile`, build the Android TV release variant and the tvOS simulator variant (CI or the
-  owner's Mac when reachable), run a development route that imports from the simulator (`large`, 25,000 live + 70,000
-  VOD + 500 series, and a synthetic 500k M3U) with chunk sizes 1,000, 5,000 and 10,000, and prints one `ELV_GATE_IMPORT
-  {json}` line: duration, rows, peak JS heap if available, and the longest JS event-loop stall measured by a 16 ms
-  interval timer during the import.
+- Add op-sqlite to `apps/tv-mobile`, build the Android TV release variant of the development build, and run a
+  development route (`elviptv://gate/import?host=…&account=large|huge&batch=…`, reachable only with `extra.gate`, like
+  the list gate) that imports the simulator account with `ImportOptions.batchSize` 1,000, 5,000 and 10,000 (the
+  importer's default is 500) and prints one `ELV_GATE_IMPORT {json}` line: duration, rows, and the longest JS event-loop
+  stall measured with `performance.now()` by a 16 ms interval timer during the import (no key injection).
+- tvOS: the required `tvos` CI job proves the build with op-sqlite; the report-only `tvos-gate` job also runs the import
+  route on the Apple TV simulator (host `127.0.0.1`); the owner's Mac is used instead when reachable.
+- If the stall budget is missed at every size, the builder tries smaller batches (down to 250), records the numbers and
+  stops for a ruling; if the tvOS build or run fails, the plan's fallback task implements the Apple adapter on expo-sqlite
+  behind the same interface.
 - Pass: builds and runs on both platforms; `large` imports in under 60 s on the Android TV emulator; no stall over 100 ms
   during the import with the chosen chunk size. If tvOS fails, the fallback is expo-sqlite on Apple platforms behind the
   same adapter interface (recorded in §8).
@@ -104,5 +118,8 @@ Scan of 2026-11-14 (private report `.superpowers/research/reports/device-sqlite-
 
 ## 8. Decisions made during design
 - op-sqlite primary, expo-sqlite as the Apple fallback if the spike fails; expo-secure-store for secrets.
+- After the builder check: host parameter and simulator accounts (`large`, `huge`), dev-only cleartext to simulator
+  hosts, Vitest with a `@elv/data/testing` export, chunk = `batchSize`, tvOS through the CI jobs, stall measured by a timer
+  only, `AbortError` on interrupt during cancel, no decompressor, reads on the reader connection.
 - Adapters live in the app (layer rule: only apps wire storage drivers).
 - Desktop storage is part of the desktop work.
