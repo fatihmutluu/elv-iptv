@@ -9,7 +9,9 @@ The device catalog: `@elv/data` over the storage adapters, behind one `CatalogSe
 - Xtream bodies are capped at `DEVICE_MAX_BODY_BYTES` (4 MiB; `importSource` option `maxBodyBytes` overrides): longer lists load per category.
   Trade-off (spec 5.5): per-category calls roughly double the large import (about 9 s whole, 19 s capped) but keep the longest JS stall near 45 ms; raising the cap brings back the ~1.2 s
   whole-list `JSON.parse` stall (16 MiB: 1267 ms). Streaming parsing would remove the cap; #76 tracks it (and the 190 ms stall of the `huge` account).
-- `importSource` calls `setAbortSignal(opts.signal)` on the driver before the run and `setAbortSignal(undefined)` in `finally`, when the driver has it.
+- `importSource` runs imports one at a time through a promise queue (the op-sqlite driver has one abort slot): a later call waits; a call for a source
+  that is importing or waiting gets `storage/import-in-progress` at once and never touches the slot; one cancelled while waiting ends `network/aborted`
+  without a run. Only on its turn does it call `setAbortSignal(opts.signal)`, and `setAbortSignal(undefined)` in `finally`, when the driver has it.
 - Paged reads (`queries.ts`): provider `position` order, `limit` capped at 500 (`MAX_PAGE`), `categories` carry `itemCount`.
   A category `id` is opaque (`<source>|<kind>|<provider id>`); an unknown one gives an empty page.
 - `seasons(seriesId)` loads Xtream episodes on first use (`loadSeriesEpisodes`); `seriesId` is the `id` of an item row.

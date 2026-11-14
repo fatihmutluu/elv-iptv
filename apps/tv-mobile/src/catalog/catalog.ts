@@ -97,7 +97,11 @@ export interface CatalogService {
   addSourceFromLink(input: LinkSourceInput): Promise<Result<SourceRow>>;
   /** Refused with `storage/import-in-progress` while an import of the source runs. */
   removeSource(id: string): Promise<Result<void>>;
-  /** Cancelling through `signal` keeps the previous catalog. */
+  /**
+   * Imports run one at a time in call order; a later call waits for its turn. A call for a source whose import runs
+   * or waits is refused with `storage/import-in-progress` at once. Cancelling through `signal` keeps the previous
+   * catalog; a call cancelled while it waits ends with `network/aborted` without starting a run.
+   */
   importSource(id: string, opts?: DeviceImportOptions): Promise<Result<ImportSummary>>;
   listSources(): Promise<SourceRow[]>;
   categories(sourceId: string, kind: BrowseKind): Promise<CategoryRow[]>;
@@ -123,6 +127,20 @@ const row = (r: SourceRecord): SourceRow => ({
 
 const notFound = () => err(elvError('storage', 'item-not-found'));
 
+/** Resolves `true` once `previous` settled, or `false` as soon as `signal` aborts (also before). */
+function turnOrAbort(previous: Promise<void>, signal: AbortSignal | undefined): Promise<boolean> {
+  if (signal === undefined) return previous.then(() => true);
+  if (signal.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const onAbort = () => resolve(false);
+    signal.addEventListener('abort', onAbort, { once: true });
+    void previous.then(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve(!signal.aborted);
+    });
+  });
+}
+
 function defaultNewId(clock: () => number): () => string {
   return () => `s${clock().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -141,6 +159,8 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     maxBodyBytes: DEVICE_MAX_BODY_BYTES,
   };
   const abortable = db as SqlDriver & AbortBindable;
+  const importing = new Set<string>();
+  let lastImport: Promise<void> = Promise.resolve();
 
   const mapped = async (p: Promise<Result<SourceRecord>>): Promise<Result<SourceRow>> => {
     const r = await p;
@@ -200,13 +220,27 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     removeSource: (id) => removeSource(id, { db, secrets }),
 
     async importSource(id, opts = {}) {
-      abortable.setAbortSignal?.(opts.signal);
+      if (importing.has(id)) return err(elvError('storage', 'import-in-progress'));
+      importing.add(id);
+      const previous = lastImport;
+      let finished!: () => void;
+      const mine = new Promise<void>((resolve) => {
+        finished = resolve;
+      });
+      lastImport = previous.then(() => mine);
       try {
-        const { maxBodyBytes, ...rest } = opts;
-        const runDeps = maxBodyBytes === undefined ? importDeps : { ...importDeps, maxBodyBytes };
-        return await importCatalog(id, runDeps, rest);
+        if (!(await turnOrAbort(previous, opts.signal))) return err(elvError('network', 'aborted'));
+        abortable.setAbortSignal?.(opts.signal);
+        try {
+          const { maxBodyBytes, ...rest } = opts;
+          const runDeps = maxBodyBytes === undefined ? importDeps : { ...importDeps, maxBodyBytes };
+          return await importCatalog(id, runDeps, rest);
+        } finally {
+          abortable.setAbortSignal?.(undefined);
+        }
       } finally {
-        abortable.setAbortSignal?.(undefined);
+        importing.delete(id);
+        finished();
       }
     },
 

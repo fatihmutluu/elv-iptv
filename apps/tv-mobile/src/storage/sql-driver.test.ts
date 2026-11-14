@@ -140,6 +140,50 @@ describe('createOpSqliteDriver', () => {
     expect(writer.log).toContain('interrupt');
   });
 
+  it('abort inside a transaction rejects with AbortError and rolls the transaction back', async () => {
+    const { db, writer } = await setup();
+    const controller = new AbortController();
+    db.setAbortSignal(controller.signal);
+    const outcome = db
+      .transaction(async (tx) => {
+        await tx.run('INSERT INTO t VALUES (1)');
+        writer.hold();
+        const pending = tx.batch('INSERT INTO t VALUES (?)', [[2], [3]]);
+        await Promise.resolve();
+        controller.abort();
+        await pending;
+      })
+      .catch((e: Error) => e);
+    expect(await outcome).toMatchObject({ name: 'AbortError' });
+    expect(writer.log).toEqual([
+      'transaction:begin',
+      'tx.execute:INSERT INTO t VALUES (1)',
+      'stmt:INSERT INTO t VALUES (?)|[2]',
+      'interrupt',
+      'transaction:rollback',
+    ]);
+  });
+
+  it('setAbortSignal(undefined) detaches: a later abort interrupts nothing and failures stay sql-failed', async () => {
+    const { db, writer, reader } = await setup();
+    const controller = new AbortController();
+    db.setAbortSignal(controller.signal);
+    db.setAbortSignal(undefined);
+    controller.abort();
+    expect(writer.log).not.toContain('interrupt');
+    expect(reader.log).not.toContain('interrupt');
+    expect(await db.run('FAIL now').catch((e: unknown) => e)).toMatchObject({ code: 'sql-failed' });
+  });
+
+  it('binding a new signal detaches the previous one', async () => {
+    const { db, writer } = await setup();
+    const first = new AbortController();
+    db.setAbortSignal(first.signal);
+    db.setAbortSignal(new AbortController().signal);
+    first.abort();
+    expect(writer.log).not.toContain('interrupt');
+  });
+
   it('interrupts an already running statement when the signal fires later', async () => {
     const { db, writer, reader } = await setup();
     const controller = new AbortController();

@@ -97,7 +97,8 @@ export interface OpSqliteDriver extends SqlDriver {
   /**
    * Binds the signal of the current import run: when it aborts, `interrupt()` is called on both connections
    * (rolling back an open transaction), and a statement failing while it is aborted rejects with an
-   * `AbortError`. Pass `undefined` to detach.
+   * `AbortError`. There is one slot: binding replaces the previous signal, so bind one run at a time.
+   * Pass `undefined` to detach.
    */
   setAbortSignal(signal: AbortSignal | undefined): void;
 }

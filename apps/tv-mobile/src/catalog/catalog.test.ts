@@ -1,69 +1,15 @@
-import { countingScheduler, memorySecrets, testDb } from '@elv/data/testing';
-import { createFetchHttpClient, type FetchLike, type SqlDriver } from '@elv/domain';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { buildCatalog } from '../../../../tools/src/sim/catalog.ts';
-import { startSim } from '../../../../tools/src/sim/server.ts';
-import { type CatalogService, createCatalogService, DEVICE_MAX_BODY_BYTES } from './catalog';
+import type { CatalogService } from './catalog';
+import { addAccount, type Env, env, must, useSim } from './catalog-test-env';
 
 const small = buildCatalog('small', 1);
-const http = createFetchHttpClient(fetch as unknown as FetchLike);
-
-let sim: Awaited<ReturnType<typeof startSim>>;
-beforeAll(async () => {
-  sim = await startSim({ port: 0, clock: new Date('2026-06-15T12:00:00Z'), ffmpegPath: null });
-});
-afterAll(async () => {
-  await sim.close();
-});
-
-interface Env {
-  service: CatalogService;
-  raw: ReturnType<typeof testDb>['raw'];
-  secrets: ReturnType<typeof memorySecrets>;
-  setAbortSignal: ReturnType<typeof vi.fn>;
-}
-const closers: (() => void)[] = [];
-afterEach(() => {
-  for (const close of closers.splice(0)) close();
-});
-
-async function env(): Promise<Env> {
-  const t = testDb();
-  closers.push(t.close);
-  const setAbortSignal = vi.fn();
-  const db = Object.assign(t.db, { setAbortSignal }) as SqlDriver;
-  const { openCatalog } = await import('@elv/data');
-  await openCatalog(db);
-  const secrets = memorySecrets();
-  let n = 0;
-  const service = createCatalogService({
-    db,
-    secrets,
-    scheduler: countingScheduler(),
-    http,
-    clock: () => 1_000,
-    newId: () => `src${++n}`,
-  });
-  return { service, raw: t.raw, secrets, setAbortSignal };
-}
-
-const must = <T>(r: { ok: true; value: T } | { ok: false; error: unknown }): T => {
-  if (!r.ok) throw new Error(`unexpected failure: ${JSON.stringify(r.error)}`);
-  return r.value;
-};
+const sim = useSim();
 
 async function demo(e: Env): Promise<string> {
-  const added = must(
-    await e.service.addSource({
-      kind: 'xtream',
-      name: 'Main',
-      server: sim.url,
-      username: 'demo',
-      password: 'demo',
-    }),
-  );
-  must(await e.service.importSource(added.id));
-  return added.id;
+  const id = await addAccount(e, sim.url());
+  must(await e.service.importSource(id));
+  return id;
 }
 
 describe('sources', () => {
@@ -79,7 +25,7 @@ describe('sources', () => {
 
   it('adds a source from a pasted link', async () => {
     const e = await env();
-    const link = `${sim.url}/get.php?username=demo&password=demo&type=m3u_plus&output=ts`;
+    const link = `${sim.url()}/get.php?username=demo&password=demo&type=m3u_plus&output=ts`;
     const added = must(await e.service.addSourceFromLink({ name: 'Linked', url: link }));
     expect(added.kind).toBe('xtream');
     expect(must(await e.service.importSource(added.id)).counts.live).toBe(small.live.length);
@@ -88,16 +34,8 @@ describe('sources', () => {
   it('binds the abort signal around an import and detaches it afterwards', async () => {
     const e = await env();
     const controller = new AbortController();
-    const added = must(
-      await e.service.addSource({
-        kind: 'xtream',
-        name: 'Main',
-        server: sim.url,
-        username: 'demo',
-        password: 'demo',
-      }),
-    );
-    must(await e.service.importSource(added.id, { signal: controller.signal }));
+    const id = await addAccount(e, sim.url());
+    must(await e.service.importSource(id, { signal: controller.signal }));
     expect(e.setAbortSignal.mock.calls).toEqual([[controller.signal], [undefined]]);
   });
 
@@ -231,13 +169,13 @@ describe('resolveStream', () => {
       provider_id: string;
     };
     const request = must(await e.service.resolveStream(row.key));
-    expect(request.url).toBe(`${sim.url}/live/demo/demo/${row.provider_id}.ts`);
+    expect(request.url).toBe(`${sim.url()}/live/demo/demo/${row.provider_id}.ts`);
     expect(request.headers).toEqual({});
     const movie = e.raw
       .prepare('SELECT key, provider_id, extension FROM movies ORDER BY id LIMIT 1')
       .get() as { key: string; provider_id: string; extension: string };
     expect(must(await e.service.resolveStream(movie.key)).url).toBe(
-      `${sim.url}/movie/demo/demo/${movie.provider_id}.${movie.extension}`,
+      `${sim.url()}/movie/demo/demo/${movie.provider_id}.${movie.extension}`,
     );
     expect(id).toBeTruthy();
   });
@@ -248,7 +186,7 @@ describe('resolveStream', () => {
       await e.service.addSource({
         kind: 'xtream',
         name: 'Main',
-        server: sim.url,
+        server: sim.url(),
         username: 'demo',
         password: 'demo',
         transport: { userAgent: 'UA/1', referer: 'https://ref.example/' },
@@ -264,7 +202,7 @@ describe('resolveStream', () => {
       extension: string;
     };
     const request = must(await e.service.resolveStream(ep.key));
-    expect(request.url).toBe(`${sim.url}/series/demo/demo/${ep.provider_id}.${ep.extension}`);
+    expect(request.url).toBe(`${sim.url()}/series/demo/demo/${ep.provider_id}.${ep.extension}`);
     expect(request.headers).toEqual({ 'user-agent': 'UA/1', referer: 'https://ref.example/' });
   });
 
@@ -274,13 +212,13 @@ describe('resolveStream', () => {
       await e.service.addSource({
         kind: 'm3u',
         name: 'List',
-        playlistUrl: `${sim.url}/get.php?username=demo&password=demo&type=m3u_plus&output=ts`,
+        playlistUrl: `${sim.url()}/get.php?username=demo&password=demo&type=m3u_plus&output=ts`,
       }),
     );
     must(await e.service.importSource(added.id));
     const row = e.raw.prepare('SELECT key FROM live ORDER BY num LIMIT 1').get() as { key: string };
     expect(must(await e.service.resolveStream(row.key)).url).toBe(
-      `${sim.url}/live/demo/demo/1001.ts`,
+      `${sim.url()}/live/demo/demo/1001.ts`,
     );
   });
 
@@ -311,7 +249,7 @@ describe('credentials', () => {
       await e.service.addSource({
         kind: 'm3u',
         name: 'List',
-        playlistUrl: `${sim.url}/get.php?username=demo&password=demo&type=m3u_plus&output=ts`,
+        playlistUrl: `${sim.url()}/get.php?username=demo&password=demo&type=m3u_plus&output=ts`,
       }),
     );
     must(await e.service.importSource(m3u.id));
@@ -332,71 +270,5 @@ describe('credentials', () => {
       }
     }
     expect(hits).toEqual([]);
-  });
-});
-
-describe('bounded Xtream bodies', () => {
-  async function large(getHttp: typeof http) {
-    const t = testDb();
-    closers.push(t.close);
-    const { openCatalog } = await import('@elv/data');
-    await openCatalog(t.db);
-    let n = 0;
-    const service = createCatalogService({
-      db: t.db,
-      secrets: memorySecrets(),
-      scheduler: countingScheduler(),
-      http: getHttp,
-      clock: () => 1_000,
-      newId: () => `b${++n}`,
-    });
-    const added = must(
-      await service.addSource({
-        kind: 'xtream',
-        name: 'Large',
-        server: sim.url,
-        username: 'large',
-        password: 'large',
-      }),
-    );
-    return { service, id: added.id };
-  }
-  const recording = (urls: string[]): typeof http => ({
-    get: (url, options) => {
-      urls.push(url);
-      return http.get(url, options);
-    },
-  });
-  const perCategory = (urls: string[]) =>
-    urls.some((u) => u.includes('get_live_streams&category_id='));
-
-  it('limits response bodies to 4 MiB by default, so the large lists load per category', {
-    timeout: 30_000,
-  }, async () => {
-    expect(DEVICE_MAX_BODY_BYTES).toBe(4 * 1024 * 1024);
-    const urls: string[] = [];
-    const { service, id } = await large(recording(urls));
-    const summary = must(await service.importSource(id));
-    expect(perCategory(urls)).toBe(true);
-    expect(summary.counts.live).toBeGreaterThan(0);
-  });
-
-  it('lets the import options raise the limit, which loads the lists whole', {
-    timeout: 30_000,
-  }, async () => {
-    const urls: string[] = [];
-    const { service, id } = await large(recording(urls));
-    must(await service.importSource(id, { maxBodyBytes: 128 * 1024 * 1024 }));
-    expect(perCategory(urls)).toBe(false);
-  });
-
-  it('imports the same rows whole and per category', { timeout: 30_000 }, async () => {
-    const a = await large(http);
-    const b = await large(http);
-    const whole = must(await a.service.importSource(a.id, { maxBodyBytes: 128 * 1024 * 1024 }));
-    const bounded = must(await b.service.importSource(b.id, { maxBodyBytes: 1024 * 1024 }));
-    expect(bounded.counts.live).toBe(whole.counts.live);
-    expect(bounded.counts.movies).toBe(whole.counts.movies);
-    expect(bounded.counts.series).toBe(whole.counts.series);
   });
 });
