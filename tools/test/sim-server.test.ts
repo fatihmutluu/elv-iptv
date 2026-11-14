@@ -280,6 +280,7 @@ describe('request log', () => {
       streamId: 7,
       recipe: null,
       fault: null,
+      faultRule: null,
       openConnections: 0,
     };
     const out = redact(entry);
@@ -360,6 +361,7 @@ describe('log file', () => {
       streamId: null,
       recipe: null,
       fault: null,
+      faultRule: null,
       openConnections: 0,
     };
     expect(redact(entry).headers.referer).toBe('http://h/get.php?password=***&x=1');

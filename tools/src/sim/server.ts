@@ -8,6 +8,7 @@ import {
   type RouteHandler,
   type SimContext,
 } from './context.ts';
+import { FaultRules } from './fault-rules.ts';
 import { type Fault, FaultParseError, parseFaults } from './faults.ts';
 import { type LogEntry, RequestLog, redact } from './log.ts';
 import { findFfmpeg } from './media.ts';
@@ -101,6 +102,7 @@ function track(
       streamId: meta.streamId,
       recipe: meta.recipe,
       fault: meta.fault,
+      faultRule: meta.faultRule,
       openConnections: meta.account === null ? 0 : ctx.connections.count(meta.account),
     };
     ctx.log.add(redact(entry));
@@ -135,6 +137,29 @@ async function readBody(req: IncomingMessage, limit: number): Promise<string | n
   return total > limit ? null : Buffer.concat(parts).toString('utf8');
 }
 
+const FAULTS_LIMIT = 65_536;
+
+async function addFaultRule(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: SimContext,
+): Promise<void> {
+  const body = await readBody(req, FAULTS_LIMIT);
+  if (body === null) {
+    sendText(res, 413, 'text/plain', 'faults body over 64 KB');
+    return;
+  }
+  let input: unknown = null;
+  try {
+    input = JSON.parse(body);
+  } catch {
+    // validated as a non-object below
+  }
+  const added = ctx.faultRules.add(input);
+  if (added.ok) sendText(res, 201, 'application/json', JSON.stringify({ id: added.id }));
+  else sendText(res, 400, 'text/plain', added.error);
+}
+
 async function simRoute(
   req: IncomingMessage,
   res: ServerResponse,
@@ -146,6 +171,14 @@ async function simRoute(
     sendText(res, 200, 'application/json', JSON.stringify(ctx.log.list()));
   } else if (path === '/_sim/requests' && req.method === 'DELETE') {
     ctx.log.clear();
+    ctx.faultRules.clear();
+    sendText(res, 204, 'text/plain');
+  } else if (path === '/_sim/faults' && req.method === 'GET') {
+    sendText(res, 200, 'application/json', JSON.stringify(ctx.faultRules.list()));
+  } else if (path === '/_sim/faults' && req.method === 'POST') {
+    await addFaultRule(req, res, ctx);
+  } else if (path === '/_sim/faults' && req.method === 'DELETE') {
+    ctx.faultRules.clear();
     sendText(res, 204, 'text/plain');
   } else if (path === '/_sim/events' && req.method === 'GET') {
     sendText(res, 200, 'application/json', JSON.stringify(events));
@@ -177,7 +210,13 @@ async function handle(
   ctx: SimContext,
   events: unknown[],
 ): Promise<void> {
-  const meta: RequestMeta = { account: null, streamId: null, recipe: null, fault: null };
+  const meta: RequestMeta = {
+    account: null,
+    streamId: null,
+    recipe: null,
+    fault: null,
+    faultRule: null,
+  };
   track(req, res, ctx, meta);
   const url = new URL(req.url ?? '/', 'http://sim');
   if (url.pathname.startsWith('/_sim/')) {
@@ -214,6 +253,7 @@ export async function startSim(options: SimOptions = {}): Promise<SimHandle> {
     seed: options.seed ?? 1,
     baseUrl: '',
     log,
+    faultRules: new FaultRules(),
     connections: createConnections(),
     media: {
       ffmpeg: options.ffmpegPath === undefined ? findFfmpeg() : options.ffmpegPath,
@@ -248,6 +288,7 @@ export async function startSim(options: SimOptions = {}): Promise<SimHandle> {
     events: () => [...events],
     clear: () => {
       log.clear();
+      ctx.faultRules.clear();
       events.length = 0;
     },
     close: () =>

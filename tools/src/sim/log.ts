@@ -14,6 +14,7 @@ export interface LogEntry {
   streamId: number | null;
   recipe: string | null;
   fault: string | null;
+  faultRule: string | null;
   openConnections: number;
 }
 

@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { FaultRules } from './fault-rules.ts';
 import type { RequestLog } from './log.ts';
 
 /** Open media responses per account; the connection limit reads it. */
@@ -24,6 +25,7 @@ export interface SimContext {
   log: RequestLog;
   connections: Connections;
   media: MediaConfig | null;
+  faultRules: FaultRules;
 }
 
 /** What a handler learned about the request, copied into its log line. */
@@ -32,6 +34,8 @@ export interface RequestMeta {
   streamId: number | null;
   recipe: string | null;
   fault: string | null;
+  /** Id of the runtime fault rule that supplied `fault`, else null. */
+  faultRule: string | null;
 }
 
 /** Resolves to true when the handler answered the request. */

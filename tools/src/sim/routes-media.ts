@@ -41,8 +41,9 @@ export const mediaRoute: RouteHandler = async (req, res, ctx, meta) => {
     sendText(res, 404, 'text/plain', 'not found');
     return true;
   }
+  meta.streamId = Number(idText);
   meta.recipe = recipe;
-  const faults = await resolveFaults(req, res, meta, null);
+  const faults = await resolveFaults(req, res, ctx, meta, null, true);
   if (faults === null) return true;
   const files = await loadRecipe(res, ctx, recipe);
   if (files === null) return true;

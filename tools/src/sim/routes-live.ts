@@ -70,7 +70,7 @@ async function serveLive(
     return;
   }
   meta.recipe = channel.recipe;
-  const faults = await resolveFaults(req, res, meta, channel.fault);
+  const faults = await resolveFaults(req, res, ctx, meta, channel.fault, true);
   if (faults === null) return;
   const files = await loadRecipe(res, ctx, channel.recipe);
   if (files === null) return;
@@ -116,7 +116,7 @@ async function serveRecorded(
   account: Account | null,
 ): Promise<void> {
   meta.recipe = DEFAULT_RECIPE;
-  const faults = await resolveFaults(req, res, meta, null);
+  const faults = await resolveFaults(req, res, ctx, meta, null, false);
   if (faults === null) return;
   const files = await loadRecipe(res, ctx, DEFAULT_RECIPE);
   if (files === null) return;

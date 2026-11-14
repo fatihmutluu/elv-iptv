@@ -72,17 +72,26 @@ export function takeSlot(res: ServerResponse, ctx: SimContext, account: Account)
 
 /**
  * Resolves the faults of a media request. A `?fault=` query was already applied by the server;
- * otherwise the catalog fault applies like one. Returns the stream-level faults, or null when a
- * request-level fault answered.
+ * otherwise, with `useRules`, the newest matching runtime rule applies (and is consumed), then the
+ * catalog fault. Returns the stream-level faults, or null when a request-level fault answered.
  */
 export async function resolveFaults(
   req: IncomingMessage,
   res: ServerResponse,
+  ctx: SimContext,
   meta: RequestMeta,
   catalogFault: string | null,
+  useRules: boolean,
 ): Promise<Fault[] | null> {
   const query = new URL(req.url ?? '/', 'http://sim').searchParams.get('fault');
-  const spec = query ?? catalogFault;
+  let spec = query ?? catalogFault;
+  if (query === null && useRules && meta.account !== null && meta.streamId !== null) {
+    const rule = ctx.faultRules.take(meta.account, meta.streamId);
+    if (rule) {
+      spec = rule.spec;
+      meta.faultRule = rule.id;
+    }
+  }
   if (spec === null) return [];
   const faults = parseFaults(spec);
   if (query === null) {
