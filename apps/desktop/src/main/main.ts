@@ -8,6 +8,7 @@ import { registerPlayerIpc } from './player/ipc.ts';
 import { sweepLeftovers, systemSweepDeps } from './player/mpv/process.ts';
 import { mpvRuntimePaths } from './player/runtime-path.ts';
 import { type ServeDeps, serveAppRequest } from './serve-app.ts';
+import { focusWindow, startSingleInstance } from './single-instance.ts';
 import { buildWindowOptions, WINDOW_TITLE } from './window-options.ts';
 
 const rendererDir = join(__dirname, '..', 'renderer');
@@ -70,14 +71,21 @@ async function startPlayer(): Promise<void> {
   });
 }
 
-void app.whenReady().then(async () => {
-  serveRenderer();
-  await startPlayer();
-  createWindow();
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
+// Without the lock this launch quits before any sweep, window or engine: a second instance would kill the first's mpv.
+const hasLock = startSingleInstance(app, {
+  onSecond: () => focusWindow(BrowserWindow.getAllWindows()[0]),
 });
+
+if (hasLock) {
+  void app.whenReady().then(async () => {
+    serveRenderer();
+    await startPlayer();
+    createWindow();
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

@@ -17,6 +17,7 @@ export default defineConfig({
         'src/main/player/ipc.ts',
         'src/main/player/runtime-path.ts',
         'src/preload/player-bridge.ts',
+        'src/main/single-instance.ts',
         'src/shared/*.ts',
       ],
       exclude: ['src/**/*.test.ts'],
