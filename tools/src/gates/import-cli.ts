@@ -8,7 +8,7 @@ import { localSim } from './sim-control.ts';
 
 /** The usage line of `pnpm gate import`. */
 export const IMPORT_USAGE =
-  'usage: pnpm gate import [--avd elv_tv] [--build] [--account large|huge] [--batch 5000] [--max-body 4096] [--runs 1] [--baseline file] [--budgets warn|fail] [--out file] [--write-baseline]';
+  'usage: pnpm gate import [--avd elv_tv] [--build] [--account large|huge] [--batch 5000] [--max-body 4096] [--runs 3 (default)] [--baseline file] [--budgets warn|fail] [--out file] [--write-baseline]';
 const DEFAULT_BASELINE = 'docs/learned/gates/import-android-tv.json';
 
 /** Parsed command line values of `pnpm gate import`. */

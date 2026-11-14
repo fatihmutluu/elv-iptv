@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Exec } from '../src/gates/adb.ts';
+import { IMPORT_USAGE } from '../src/gates/import-cli.ts';
 import {
   compareImport,
   type ImportResult,
@@ -150,7 +151,7 @@ describe('runImportGate', () => {
   it('starts the simulator, sends the route and stops the simulator', async () => {
     const device = fakeAdb([importLine(18834, 45.5)]);
     const { sim, events } = fakeSim();
-    const result = await runImportGate({ exec: device.exec, sim, sleep: noSleep });
+    const result = await runImportGate({ exec: device.exec, sim, sleep: noSleep, runs: 1 });
     expect(events).toEqual(['start', 'stop']);
     expect(device.calls).toEqual([
       'devices',
@@ -199,6 +200,20 @@ describe('runImportGate', () => {
     expect(result.durationMs).toBe(20000);
     expect(result.maxStallMs).toBe(70);
     expect(device.calls.filter((c) => c.includes('install')).length).toBe(1);
+  });
+
+  it('runs three times by default and returns the median, like the list gate', async () => {
+    const device = fakeAdb([importLine(27000, 80), importLine(17600, 40), importLine(17800, 42)]);
+    const seen: number[] = [];
+    const result = await runImportGate({
+      exec: device.exec,
+      sim: fakeSim().sim,
+      sleep: noSleep,
+      onRun: (r) => seen.push(r.durationMs),
+    });
+    expect(seen).toEqual([27000, 17600, 17800]);
+    expect(result).toMatchObject({ durationMs: 17800, maxStallMs: 42 });
+    expect(IMPORT_USAGE).toContain('[--runs 3 (default)]');
   });
 
   it('says so when it reuses a running simulator and leaves it running', async () => {

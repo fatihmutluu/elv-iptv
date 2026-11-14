@@ -34,7 +34,7 @@ export interface ImportGateOptions {
   batch?: number;
   /** Per-response body cap in KiB. */
   maxBody?: number;
-  /** Number of runs; the result is the median per metric (default 1). */
+  /** Number of runs; the result is the median per metric (default 3, like the list gate; a first run is often slow). */
   runs?: number;
   root?: string;
   adb?: string;
@@ -150,9 +150,9 @@ const median = (values: number[]): number => {
 
 /**
  * Builds (optional) and installs the development app on the Android TV emulator, starts the stream simulator (or
- * reuses a running one), opens `elviptv://gate/import` `runs` times and returns the median duration and stall. The
- * simulator it started is stopped afterwards, also on failure. Every wait has a timeout; failures throw a one-line
- * `Error`.
+ * reuses a running one), opens `elviptv://gate/import` `runs` times (default 3) and returns the median duration and
+ * stall. The simulator it started is stopped afterwards, also on failure. Every wait has a timeout; failures throw a
+ * one-line `Error`.
  */
 export async function runImportGate(opts: ImportGateOptions): Promise<ImportResult> {
   const account = opts.account ?? 'large';
@@ -165,7 +165,7 @@ export async function runImportGate(opts: ImportGateOptions): Promise<ImportResu
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
   const batch = opts.batch ?? 5000;
   const maxBody = opts.maxBody ?? 4096;
-  const runs = Math.max(1, opts.runs ?? 1);
+  const runs = Math.max(1, opts.runs ?? 3);
   const timeoutMs = WAIT_MS[account];
   const url = `elviptv://gate/import?host=${EMULATOR_HOST}&account=${account}&batch=${batch}&maxBody=${maxBody}`;
 

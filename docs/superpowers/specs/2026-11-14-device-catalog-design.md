@@ -143,9 +143,10 @@ Scan of 2026-11-14 (private report `.superpowers/research/reports/device-sqlite-
   the install stalled once for 7.5 s and took 24.7 s; the four later runs did not repeat it.
 
 ### 5.5 Import gate
-- `pnpm gate import [--avd elv_tv] [--build] [--account large|huge] [--batch 5000] [--max-body 4096] [--runs 1]
+- `pnpm gate import [--avd elv_tv] [--build] [--account large|huge] [--batch 5000] [--max-body 4096] [--runs 3]
   [--baseline file] [--budgets warn|fail] [--out file] [--write-baseline]` runs the route above, starts the simulator on
-  `127.0.0.1:7878` (or reuses a running one), and compares with `docs/learned/gates/import-android-tv.json`: rows equal,
+  `127.0.0.1:7878` (or reuses a running one), and compares the median of the runs (default 3: the first run of a session
+  is often slower on the emulator) with `docs/learned/gates/import-android-tv.json`: rows equal,
   duration at most +10 % (+2 s slack), stall under 100 ms. `huge` is report-only (#76); only `large` becomes a baseline.
   Local only in 0.1.
 
