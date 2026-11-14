@@ -1,13 +1,15 @@
 package io.github.fatihmutluu.elv.media3
 
 private val CREDENTIAL_MARKERS = setOf("live", "movie", "series", "timeshift")
+private const val TOKEN_MARKER = "play"
 private val BARE_ID = Regex("""\d+(\.[A-Za-z0-9]+)?""")
 private const val MASK = "***"
 
 /**
- * Returns [url] safe for diagnostics: no query, fragment or user-info, and the user and password segments after
- * `/live/`, `/movie/`, `/series/` and `/timeshift/` replaced by `***`. The bare Xtream form `/<user>/<pass>/<id>`
- * (three segments ending in a numeric id) is masked the same way.
+ * Returns [url] safe for diagnostics: no query, fragment or user-info; the user and password segments after `/live/`,
+ * `/movie/`, `/series/` and `/timeshift/` and the token after `/play/` replaced by `***`. Without such a marker, the
+ * Xtream form `/<user>/<pass>/<id>` (the two segments before a numeric last segment, also behind a path prefix) is
+ * masked the same way.
  */
 fun redactUrl(url: String): String {
   val withoutTail = url.substringBefore('#').substringBefore('?')
@@ -25,24 +27,27 @@ fun redactUrl(url: String): String {
 
 private fun redactPath(path: String): String {
   val segments = path.split('/').toMutableList()
-  val named = segments.filter { it.isNotEmpty() }
-  if (named.size == 3 && segments.first().isEmpty() && named.none { it.lowercase() in CREDENTIAL_MARKERS } &&
-    BARE_ID.matches(named[2])
-  ) {
-    segments[1] = MASK
-    segments[2] = MASK
-    return segments.joinToString("/")
-  }
+  var marked = false
   var index = 0
   while (index < segments.size) {
-    if (segments[index].lowercase() in CREDENTIAL_MARKERS) {
-      for (offset in 1..2) {
-        if (index + offset < segments.size && segments[index + offset].isNotEmpty()) segments[index + offset] = MASK
-      }
-      index += 3
-    } else {
-      index += 1
+    val masked = when (segments[index].lowercase()) {
+      in CREDENTIAL_MARKERS -> 2
+      TOKEN_MARKER -> 1
+      else -> 0
     }
+    if (masked > 0) marked = true
+    for (offset in 1..masked) {
+      if (index + offset < segments.size && segments[index + offset].isNotEmpty()) segments[index + offset] = MASK
+    }
+    index += 1 + masked
   }
+  if (!marked) maskBareXtream(segments)
   return segments.joinToString("/")
+}
+
+private fun maskBareXtream(segments: MutableList<String>) {
+  val named = segments.indices.filter { segments[it].isNotEmpty() }
+  if (named.size < 3 || !BARE_ID.matches(segments[named.last()])) return
+  segments[named[named.size - 2]] = MASK
+  segments[named[named.size - 3]] = MASK
 }
