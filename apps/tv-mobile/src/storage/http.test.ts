@@ -64,4 +64,44 @@ describe('createDeviceHttpClient', () => {
     const res = await createDeviceHttpClient().get('https://x.test/c');
     expect(res).toEqual({ ok: false, error: { category: 'auth', code: 'http-401' } });
   });
+
+  it('keeps status and headers of a response that exposes them as prototype getters', async () => {
+    class ProtoResponse {
+      get status() {
+        return 200;
+      }
+      get headers() {
+        return new Headers({ 'X-Test': '1' });
+      }
+      get body() {
+        return null;
+      }
+      async arrayBuffer() {
+        return enc('proto').buffer;
+      }
+    }
+    mocked.fetch.mockResolvedValue(new ProtoResponse());
+    const res = await createDeviceHttpClient().get('https://x.test/d');
+    if (!res.ok) throw new Error('expected ok');
+    expect(res.value.status).toBe(200);
+    expect(res.value.headers['x-test']).toBe('1');
+    expect(await drain(res.value.body)).toBe('proto');
+  });
+
+  it('keeps the status of an empty error response without a body', async () => {
+    class ProtoResponse {
+      get status() {
+        return 403;
+      }
+      get headers() {
+        return new Headers();
+      }
+      get body() {
+        return null;
+      }
+    }
+    mocked.fetch.mockResolvedValue(new ProtoResponse());
+    const res = await createDeviceHttpClient().get('https://x.test/e');
+    expect(res).toEqual({ ok: false, error: { category: 'auth', code: 'http-403' } });
+  });
 });

@@ -8,14 +8,18 @@ interface ExpoResponse extends Omit<FetchResponse, 'body'> {
   arrayBuffer?(): Promise<ArrayBuffer>;
 }
 
-/** Wraps a response that exposes no stream so its whole body is delivered as one chunk. */
+/**
+ * Rebuilds the response from its fields: a real response keeps  and  as prototype accessors,
+ * which object spread would drop. Where it has no stream, the whole body is delivered as one chunk.
+ */
 function withWholeBody(res: ExpoResponse): FetchResponse {
-  if (res.body !== null && res.body !== undefined) return res as FetchResponse;
-  const { arrayBuffer } = res;
-  if (arrayBuffer === undefined) return { ...res, body: null };
-  const read = arrayBuffer.bind(res);
+  const { status, headers } = res;
+  if (res.body !== null && res.body !== undefined) return { status, headers, body: res.body };
+  if (typeof res.arrayBuffer !== 'function') return { status, headers, body: null };
+  const read = () => res.arrayBuffer?.() as Promise<ArrayBuffer>;
   return {
-    ...res,
+    status,
+    headers,
     body: (async function* () {
       yield new Uint8Array(await read());
     })(),
