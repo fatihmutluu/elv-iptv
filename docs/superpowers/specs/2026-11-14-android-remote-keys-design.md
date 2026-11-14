@@ -107,7 +107,9 @@ when it is missing (iOS, web, a build without it), and never put product logic i
   - Anything else → `undefined`.
 - `createAndroidKeyAdapter()`, stateful per hook instance, returns `(event, now) => KeyInput[]`, tracking held keys by
   their mapped `Key` (two codes for one key, such as `DPAD_CENTER` and `ENTER`, share one record):
-  - `time = now - max(0, event.ageMs)`.
+  - `time = now - min(max(0, event.ageMs), 100)`. Why the cap: after a JavaScript stall a quick press's down and up
+    arrive late together; back-dating the down by the whole stall would let a tick between them fire `long`. 100 ms
+    covers the normal native-to-JS delay, so latency still counts from the press.
   - A `down` of a key that is not held records it and gives one `down`; a `down` of a held key gives nothing.
   - An `up` of a held key gives one `up`, or one `cancel` when `canceled`, and clears the record.
   - An `up` of a key that is not held gives nothing. This is what keeps a key pressed on one screen from stepping the
