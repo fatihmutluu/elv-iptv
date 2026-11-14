@@ -19,8 +19,8 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` (player core spec 6.1
 - Every prepare (`load`, `retry`) builds a new media source, `playWhenReady = true`; `retry`: live at the default
   position, VOD at the current one. `stop` clears the media; `recreate` rebuilds ExoPlayer (same surface), left idle.
 - Source by URL (`SourceType.kt`): `.m3u8`/`.m3u` HLS; `.ts` and extensionless live use the TS extractor only (flags
-  `ALLOW_NON_IDR_KEYFRAMES`, `DETECT_ACCESS_UNITS`); anything else sniffs containers. A non-HLS guess answered with a
-  playlist is prepared once as HLS at the redirected URI, in the same gate generation (no error event).
+  `ALLOW_NON_IDR_KEYFRAMES`, `DETECT_ACCESS_UNITS`); anything else sniffs containers. A progressive guess answered with
+  a playlist is prepared once as HLS from the same URL, in the same gate generation (no error event).
 - States: `opening` on prepare, `buffering`, `ready`, `playing`, `paused` (playback not wanted), `ended`; a live media
   that ends sends `error network` instead. `stall` start/end: buffering while wanted after it played. `firstFrame`
   from `onRenderedFirstFrame`. `clock` anchors whenever the effective rate (speed while playing, else 0) changes, on
@@ -30,9 +30,9 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` (player core spec 6.1
 ## Requests (`ConnectionGate.kt`, `GatedDataSource.kt`, `SniffingDataSource.kt`, `LoadRetry.kt`)
 - Every prepare and `stop` begins a generation; an `open` waits until older generations closed, force-closes them after
   1,000 ms (`Log.w`), and `tryOpen` refuses or counts it in one locked step once superseded or current.
-- HTTP: default data source with `LoadCommand.headers` (`User-Agent` set apart), cross-protocol redirects. Responses
-  labelled text, HTML or JSON are read ahead 1 KB (`classifyResponse`): `#EXTM3U` is HLS, binary is media, readable
-  text is the provider notice; HLS playlists without `#EXTM3U` that read as text are notices too.
+- HTTP: default data source, `LoadCommand.headers`, cross-protocol redirects. Every response is read ahead 1 KB and
+  judged by request kind, not label (`classifyResponse`): progressive `#EXTM3U` is HLS, playlists need `#EXTM3U`,
+  readable text that is no MPEG-TS (sync search) nor, for segments, WebVTT is the notice; keys are never read.
 - `failsAtOnce`: an HTTP status skips Media3's retries on progressive media and before the first HLS manifest; then
   HLS segments and refreshes retry except 401/403/429/509. Notices and refused requests always fail at once.
 

@@ -1,6 +1,5 @@
 package io.github.fatihmutluu.elv.media3
 
-import android.net.Uri
 import android.os.Handler
 import android.os.SystemClock
 import androidx.annotation.OptIn
@@ -28,14 +27,14 @@ private inline fun <reified T : Throwable> causeOf(error: Throwable): T? {
  * Turns the player's callbacks into `onEngineEvent` payloads (without the token, which [send] adds) on the playback
  * thread: coarse states, `firstFrame`, `stall` start and end, `error` and `clock` anchors. Anchors follow the
  * effective rate (speed while playing, 0 otherwise), so start, pause, stall start and stall end each send one; seeks
- * send one too, and while playing a tick sends one at most once a second. A playlist found behind a non-HLS guess
- * is no error: [onHlsDetected] gets its URI and the engine prepares it again as HLS.
+ * send one too, and while playing a tick sends one at most once a second. A playlist found behind a progressive
+ * guess is no error: [onHlsDetected] lets the engine prepare the request again as HLS.
  */
 @OptIn(UnstableApi::class)
 internal class EventReporter(
   private val handler: Handler,
   private val send: (Map<String, Any?>) -> Unit,
-  private val onHlsDetected: (Uri) -> Unit,
+  private val onHlsDetected: () -> Unit,
 ) : Player.Listener {
   private var player: Player? = null
   private var active = false
@@ -107,9 +106,8 @@ internal class EventReporter(
 
   override fun onPlayerError(error: PlaybackException) {
     if (!active) return
-    val playlist = causeOf<HlsDetectedException>(error)
-    if (playlist != null) {
-      onHlsDetected(playlist.uri)
+    if (causeOf<HlsDetectedException>(error) != null) {
+      onHlsDetected()
       return
     }
     val status = causeOf<HttpDataSource.InvalidResponseCodeException>(error)?.responseCode

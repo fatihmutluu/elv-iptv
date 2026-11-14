@@ -13,17 +13,18 @@ import kotlin.math.min
 /** A successful response whose body is the provider's notice (connection limit), not media. */
 internal class ProviderNoticeException(val contentType: String?) : IOException("provider notice")
 
-/** A non-HLS guess answered with an HLS playlist at [uri] (after redirects); the engine prepares it as HLS. */
-internal class HlsDetectedException(val uri: Uri) : IOException("HLS playlist on a non-HLS guess")
+/** A progressive guess was answered with an HLS playlist; the engine prepares the request again as HLS. */
+internal class HlsDetectedException : IOException("HLS playlist on a progressive guess")
 
 /**
- * Judges each response with [classifyResponse] before the player sees it. Only text-labelled responses are read
- * ahead ([SNIFF_BYTES] at most); the bytes read are served first, so the player gets the full body. A notice throws
- * [ProviderNoticeException]; an HLS playlist on a non-[hls] media throws [HlsDetectedException].
+ * Judges every response of [kind] with [classifyResponse] before the player sees it, whatever its label: it reads up
+ * to [SNIFF_BYTES] ahead and serves them first, so the player gets the full body. [RequestKind.OTHER] requests (keys)
+ * are passed through unread. A notice throws [ProviderNoticeException]; a playlist on a progressive guess throws
+ * [HlsDetectedException].
  */
 @OptIn(UnstableApi::class)
-internal class SniffingDataSource(private val upstream: DataSource, private val hls: Boolean) : DataSource {
-  private var prefix = ByteArray(0)
+internal class SniffingDataSource(private val upstream: DataSource, private val kind: RequestKind) : DataSource {
+  private val prefix = ByteArray(if (kind == RequestKind.OTHER) 0 else SNIFF_BYTES)
   private var prefixLength = 0
   private var prefixRead = 0
 
@@ -35,16 +36,15 @@ internal class SniffingDataSource(private val upstream: DataSource, private val 
     prefixLength = 0
     prefixRead = 0
     val length = upstream.open(dataSpec)
+    if (kind == RequestKind.OTHER) return length
     val contentType = contentTypeOf(upstream.responseHeaders)
-    val sniff = !isHlsContentType(contentType) && isNoticeContentType(contentType, hls = false)
-    val buffer = if (sniff) ByteArray(SNIFF_BYTES) else ByteArray(0)
-    val filled = if (sniff) readAhead(buffer, length) else 0
-    when (classifyResponse(contentType, buffer, filled)) {
-      ResponseKind.HLS -> if (!hls) throw HlsDetectedException(upstream.uri ?: dataSpec.uri)
+    val labelledPlaylist = kind == RequestKind.PROGRESSIVE && isHlsContentType(contentType)
+    val filled = if (labelledPlaylist) 0 else readAhead(length)
+    when (classifyResponse(kind, contentType, prefix, filled)) {
+      ResponseKind.HLS -> if (kind == RequestKind.PROGRESSIVE) throw HlsDetectedException()
       ResponseKind.NOTICE -> throw ProviderNoticeException(contentType)
       ResponseKind.MEDIA -> Unit
     }
-    prefix = buffer
     prefixLength = filled
     return length
   }
@@ -70,11 +70,11 @@ internal class SniffingDataSource(private val upstream: DataSource, private val 
     upstream.close()
   }
 
-  private fun readAhead(buffer: ByteArray, length: Long): Int {
-    val limit = if (length == C.LENGTH_UNSET.toLong()) buffer.size else min(buffer.size.toLong(), length).toInt()
+  private fun readAhead(length: Long): Int {
+    val limit = if (length == C.LENGTH_UNSET.toLong()) prefix.size else min(prefix.size.toLong(), length).toInt()
     var filled = 0
     while (filled < limit) {
-      val read = upstream.read(buffer, filled, limit - filled)
+      val read = upstream.read(prefix, filled, limit - filled)
       if (read == C.RESULT_END_OF_INPUT) break
       filled += read
     }

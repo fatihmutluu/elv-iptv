@@ -19,16 +19,6 @@ private const val TAG = "ElvMedia3"
 /** A request of a media that a newer `load`, `retry` or `stop` superseded; it never reaches the network. */
 internal class SupersededMediaException : IOException("superseded media")
 
-/** Creates [GatedDataSource]s of one media generation over [upstream]. */
-@OptIn(UnstableApi::class)
-internal class GatedDataSourceFactory(
-  private val upstream: DataSource.Factory,
-  private val gate: ConnectionGate,
-  private val generation: Long,
-) : DataSource.Factory {
-  override fun createDataSource(): DataSource = GatedDataSource(upstream.createDataSource(), gate, generation)
-}
-
 /**
  * Reports every connection of its media generation to the [ConnectionGate]. `open` first waits until the
  * connections of older generations are closed (forcing them after [GATE_TIMEOUT_MS]) and refuses to open once its

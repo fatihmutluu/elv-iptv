@@ -2,7 +2,6 @@ package io.github.fatihmutluu.elv.media3
 
 import android.app.ActivityManager
 import android.content.Context
-import android.net.Uri
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
@@ -49,7 +48,7 @@ class Media3Engine(
   private val disposed = AtomicBoolean(false)
   private val gate = ConnectionGate()
   private val buffers = loadControlFor(lowRam(context))
-  private val reporter = EventReporter(handler, { fields -> sendEvent(fields) }, { uri -> playAsHls(uri) })
+  private val reporter = EventReporter(handler, { fields -> sendEvent(fields) }, { playAsHls() })
 
   // Playback-thread state.
   private var player: ExoPlayer? = null
@@ -182,16 +181,16 @@ class Media3Engine(
   }
 
   /**
-   * A non-HLS guess found an HLS playlist (an extensionless URL redirected to `.m3u8`): prepare the playlist URI as
-   * HLS once, in the same gate generation, since the guess's connection is already closed. Superseded media and an
-   * HLS media that found one are left alone.
+   * A progressive guess found an HLS playlist (an extensionless URL redirected to `.m3u8`): prepare the same request
+   * as HLS once ([asDetectedPlaylist] keeps the original URL), in the same gate generation, since the guess's
+   * connection is already closed. Superseded media and an already detected playlist are left alone.
    */
-  private fun playAsHls(uri: Uri) {
+  private fun playAsHls() {
     val detectedIn = generation
     post {
       val current = request ?: return@post
       if (detectedIn != generation || current.playlistDetected) return@post
-      val next = current.copy(url = uri.toString(), playlistDetected = true)
+      val next = current.asDetectedPlaylist()
       request = next
       prepare(next, next.startMs, newGeneration = false)
     }

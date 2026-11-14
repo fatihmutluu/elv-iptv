@@ -1,5 +1,6 @@
 package io.github.fatihmutluu.elv.media3
 
+import androidx.media3.common.C
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -7,10 +8,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ResponseSniffingTest {
+  private val bom = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte())
+
   private fun bytes(text: String): ByteArray = text.toByteArray(Charsets.UTF_8)
 
-  private fun classify(contentType: String?, body: ByteArray): ResponseKind =
-    classifyResponse(contentType, body, body.size)
+  private fun classify(kind: RequestKind, contentType: String?, body: ByteArray): ResponseKind =
+    classifyResponse(kind, contentType, body, body.size)
 
   /** Three MPEG-TS packets: sync byte, PID bytes and zero padding. */
   private fun tsPackets(): ByteArray =
@@ -20,6 +23,15 @@ class ResponseSniffingTest {
         packets[start * 188 + 1] = 0x40
       }
     }
+
+  /**
+   * MPEG-TS joined mid-packet: the first sync byte is at offset 88, and every byte is printable, so only the sync
+   * search (not the binary test) can tell it from text.
+   */
+  private fun printableTsFromMidPacket(): ByteArray =
+    ByteArray(1_024) { index -> if ((index - 88).mod(188) == 0) 0x47 else 'x'.code.toByte() }
+
+  private val notice = bytes("Max connections reached")
 
   @Test
   fun `the content type header is found in any case and the status line key is skipped`() {
@@ -43,64 +55,96 @@ class ResponseSniffingTest {
   }
 
   @Test
-  fun `an mpegurl content type is HLS whatever the body`() {
-    assertEquals(ResponseKind.HLS, classify("application/vnd.apple.mpegurl", ByteArray(0)))
-    assertEquals(ResponseKind.HLS, classify("audio/x-mpegurl", bytes("Max connections reached")))
+  fun `HLS requests are judged by their data type and keys are never sniffed`() {
+    assertEquals(RequestKind.MANIFEST, requestKindFor(C.DATA_TYPE_MANIFEST))
+    assertEquals(RequestKind.SEGMENT, requestKindFor(C.DATA_TYPE_MEDIA))
+    assertEquals(RequestKind.SEGMENT, requestKindFor(C.DATA_TYPE_MEDIA_INITIALIZATION))
+    assertEquals(RequestKind.OTHER, requestKindFor(C.DATA_TYPE_DRM))
+    assertEquals(RequestKind.OTHER, requestKindFor(C.DATA_TYPE_STEERING_MANIFEST))
+    assertEquals(RequestKind.OTHER, requestKindFor(C.DATA_TYPE_UNKNOWN))
   }
 
   @Test
-  fun `media content types are media without looking at the body`() {
-    assertEquals(ResponseKind.MEDIA, classify("video/mp2t", bytes("Max connections reached")))
-    assertEquals(ResponseKind.MEDIA, classify("application/octet-stream", bytes("<html>")))
-    assertEquals(ResponseKind.MEDIA, classify(null, bytes("Max connections reached")))
+  fun `a progressive notice is found whatever the label says`() {
+    for (label in listOf("video/mp2t", "application/octet-stream", "video/mp4", null, "text/plain", "text/html")) {
+      assertEquals("label $label", ResponseKind.NOTICE, classify(RequestKind.PROGRESSIVE, label, notice))
+    }
+    val html = bytes("<html><body>Limit</body></html>")
+    assertEquals(ResponseKind.NOTICE, classify(RequestKind.PROGRESSIVE, null, html))
+    assertEquals(ResponseKind.NOTICE, classify(RequestKind.PROGRESSIVE, null, bytes("{\"error\":\"limit\"}")))
+    assertEquals(ResponseKind.NOTICE, classify(RequestKind.PROGRESSIVE, null, bytes("Bağlantı sınırı aşıldı\r\n")))
   }
 
   @Test
-  fun `MPEG-TS mislabelled as text or HTML is media`() {
-    assertEquals(ResponseKind.MEDIA, classify("text/html", tsPackets()))
-    assertEquals(ResponseKind.MEDIA, classify("text/plain", tsPackets()))
+  fun `a progressive playlist is HLS by label or by body`() {
+    assertEquals(ResponseKind.HLS, classify(RequestKind.PROGRESSIVE, "application/vnd.apple.mpegurl", ByteArray(0)))
+    assertEquals(ResponseKind.HLS, classify(RequestKind.PROGRESSIVE, "audio/x-mpegurl", notice))
+    assertEquals(ResponseKind.HLS, classify(RequestKind.PROGRESSIVE, "application/octet-stream", bytes("#EXTM3U\n")))
+    assertEquals(ResponseKind.HLS, classify(RequestKind.PROGRESSIVE, "text/html", bom + bytes("\r\n  #EXTM3U\r\n")))
   }
 
   @Test
-  fun `other binary bodies under a text label are media`() {
+  fun `progressive media is media under any label`() {
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.PROGRESSIVE, "text/html", tsPackets()))
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.PROGRESSIVE, null, tsPackets()))
     val mp4 = byteArrayOf(0, 0, 0, 0x18) + bytes("ftypmp42") + ByteArray(16)
-    assertEquals(ResponseKind.MEDIA, classify("text/plain", mp4))
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.PROGRESSIVE, "text/plain", mp4))
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.PROGRESSIVE, "text/html", ByteArray(0)))
   }
 
   @Test
-  fun `a playlist under a text label is HLS, also after a byte order mark and blank lines`() {
-    assertEquals(ResponseKind.HLS, classify("text/plain", bytes("#EXTM3U\n#EXT-X-VERSION:3\n")))
-    val bom = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte())
-    assertEquals(ResponseKind.HLS, classify("text/html", bom + bytes("\r\n  #EXTM3U\r\n")))
+  fun `MPEG-TS that starts mid-packet is found by the sync search`() {
+    val joined = printableTsFromMidPacket()
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.PROGRESSIVE, "text/plain", joined))
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.SEGMENT, "text/plain", joined))
   }
 
   @Test
-  fun `a text, HTML or JSON body that is no playlist is the provider notice`() {
-    assertEquals(ResponseKind.NOTICE, classify("text/plain", bytes("Max connections reached")))
-    assertEquals(ResponseKind.NOTICE, classify("text/html", bytes("<html><body>Limit</body></html>")))
-    assertEquals(ResponseKind.NOTICE, classify("application/json", bytes("{\"error\":\"limit\"}")))
-    assertEquals(ResponseKind.NOTICE, classify("text/plain", bytes("Bağlantı sınırı aşıldı\r\n")))
+  fun `two G characters 188 bytes apart in a long notice are no sync pattern`() {
+    val text = ByteArray(600) { 'a'.code.toByte() }.also {
+      it[0] = 'G'.code.toByte()
+      it[188] = 'G'.code.toByte()
+    }
+    assertEquals(ResponseKind.NOTICE, classify(RequestKind.PROGRESSIVE, "text/html", text))
   }
 
   @Test
-  fun `an empty text body is left to the player`() {
-    assertEquals(ResponseKind.MEDIA, classify("text/html", ByteArray(0)))
+  fun `a manifest must start with EXTM3U whatever its label, or it is a notice`() {
+    for (label in listOf("application/vnd.apple.mpegurl", "text/plain", null)) {
+      assertEquals(ResponseKind.HLS, classify(RequestKind.MANIFEST, label, bytes("#EXTM3U\n#EXT-X-VERSION:3\n")))
+      assertEquals(ResponseKind.NOTICE, classify(RequestKind.MANIFEST, label, notice))
+    }
+    assertEquals(ResponseKind.HLS, classify(RequestKind.MANIFEST, null, bom + bytes("#EXTM3U\n")))
+  }
+
+  @Test
+  fun `an empty or binary manifest is left to the playlist parser`() {
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.MANIFEST, "application/vnd.apple.mpegurl", ByteArray(0)))
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.MANIFEST, "text/plain", tsPackets()))
+  }
+
+  @Test
+  fun `HLS segments are media unless they are readable text that is neither WebVTT nor MPEG-TS`() {
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.SEGMENT, "video/mp2t", tsPackets()))
+    val subtitles = bytes("WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000\n\n00:00.000 --> 00:02.000\nHi\n")
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.SEGMENT, "text/vtt", subtitles))
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.SEGMENT, "text/plain", bom + bytes("WEBVTT\n\n")))
+    val fmp4 = byteArrayOf(0, 0, 0, 0x18) + bytes("styp") + ByteArray(16)
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.SEGMENT, "video/mp4", fmp4))
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.SEGMENT, "video/mp2t", ByteArray(0)))
+    assertEquals(ResponseKind.NOTICE, classify(RequestKind.SEGMENT, "video/mp2t", notice))
+    assertEquals(ResponseKind.NOTICE, classify(RequestKind.SEGMENT, "text/html", bytes("<html>Limit</html>")))
+  }
+
+  @Test
+  fun `other requests such as keys are never judged`() {
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.OTHER, "text/html", notice))
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.OTHER, "text/html", bytes("0123456789abcdef")))
   }
 
   @Test
   fun `only the read part of the prefix buffer counts`() {
     val buffer = bytes("Max connections") + ByteArray(64)
-    assertEquals(ResponseKind.NOTICE, classifyResponse("text/plain", buffer, 15))
-  }
-
-  @Test
-  fun `a playlist body without the EXTM3U header that reads as text is a notice`() {
-    assertTrue(isPlaylistNotice(bytes("Max connections reached"), 23))
-    assertTrue(isPlaylistNotice(bytes("<html></html>"), 13))
-    assertFalse(isPlaylistNotice(bytes("#EXTM3U\n#EXTINF:2,\n1.ts\n"), 24))
-    val bom = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte())
-    assertFalse(isPlaylistNotice(bom + bytes("#EXTM3U\n"), 11))
-    assertFalse(isPlaylistNotice(ByteArray(0), 0))
-    assertFalse(isPlaylistNotice(tsPackets(), 564))
+    assertEquals(ResponseKind.NOTICE, classifyResponse(RequestKind.PROGRESSIVE, "text/plain", buffer, 15))
   }
 }
