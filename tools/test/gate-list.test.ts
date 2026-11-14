@@ -34,7 +34,12 @@ interface Device {
 }
 
 /** A scripted adb: `logcat` answers come from `lines` (one per `am start`), the foreground from `tops`. */
-function fakeAdb(opts: { lines: string[]; tops?: string[]; install?: boolean }): Device {
+function fakeAdb(opts: {
+  lines: string[];
+  tops?: string[];
+  install?: boolean;
+  sdk?: string;
+}): Device {
   const calls: string[] = [];
   let starts = 0;
   let topCalls = 0;
@@ -52,6 +57,9 @@ function fakeAdb(opts: { lines: string[]; tops?: string[]; install?: boolean }):
         : { ok: true, output: 'Success' };
     }
     if (rest.startsWith('shell getprop sys.boot_completed')) return { ok: true, output: '1\n' };
+    if (rest === 'shell getprop ro.build.version.sdk') {
+      return { ok: true, output: `${opts.sdk ?? '34'}\n` };
+    }
     if (rest.startsWith('shell am start')) starts++;
     if (rest === 'shell dumpsys activity activities') {
       const text = tops[Math.min(topCalls, tops.length - 1)] ?? '';
@@ -316,5 +324,33 @@ describe('runListGate safeguards', () => {
     await expect(runListGate({ exec: device.exec, sleep: noSleep, realKeys: 60 })).rejects.toThrow(
       /58 of 60/,
     );
+  });
+});
+
+describe('runListGate real hold', () => {
+  it('holds Down once in manual mode and records the move count', async () => {
+    const device = fakeAdb({ lines: [gateLine(19), gateLine(40, 12, 0, 13)] });
+    const result = await runListGate({ exec: device.exec, sleep: noSleep, realHold: 2000 });
+    const starts = device.calls.filter((c) => c.includes('am start'));
+    expect(starts[1]).toContain('auto=0&');
+    expect(
+      device.calls.filter((c) => c.endsWith('input keyevent --duration 2000 KEYCODE_DPAD_DOWN')),
+    ).toHaveLength(1);
+    expect(result.realHold).toEqual({ holdMs: 2000, moves: 13, expected: 13 });
+  });
+
+  it('fails when the move count is outside the tolerance', async () => {
+    const device = fakeAdb({ lines: [gateLine(19), gateLine(40, 12, 0, 9)] });
+    await expect(
+      runListGate({ exec: device.exec, sleep: noSleep, realHold: 2000 }),
+    ).rejects.toThrow('gate: a 2000 ms hold gave 9 moves, expected 13 ± 3');
+  });
+
+  it('needs API 33 and sends no key before saying so', async () => {
+    const device = fakeAdb({ lines: [gateLine(19)], sdk: '30' });
+    await expect(
+      runListGate({ exec: device.exec, sleep: noSleep, realHold: 2000 }),
+    ).rejects.toThrow('gate: --real-hold needs API 33 or newer (input keyevent --duration)');
+    expect(device.calls.some((c) => c.includes('--duration'))).toBe(false);
   });
 });

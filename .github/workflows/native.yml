@@ -47,6 +47,7 @@ jobs:
             gate:
               - 'packages/focus-core/**'
               - 'packages/ui-kit/**'
+              - 'modules/**'
               - 'apps/tv-mobile/**'
               - 'tools/src/gates/**'
               - 'tools/bin/gate.ts'

@@ -8,8 +8,8 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
 - `pnpm check --only <key>` runs one check (keys: biome, typecheck, deps, knip, file-size, stubs, vitest, jest, gitleaks-rules, hooks); `--json` prints JSON.
 - `pnpm bootstrap` checks versions, installs dependencies and git hooks, looks for gitleaks.
 - `pnpm run:app <target> [build] [--production]` launches or builds a target (android, android-tv, fire-tv, ios, tvos, windows, macos, linux).
-- `pnpm gate list [--avd elv_tv] [--build] [--runs 3 (default)] [--real-keys 60] [--ci] [--baseline file] [--budgets fail|warn] [--out file] [--write-baseline]`
-  runs the TV list gate on a running Android TV emulator (`src/gates/`; adb from ANDROID_HOME, the default SDK or PATH), compares
+- `pnpm gate list [--avd elv_tv] [--build] [--runs 3 (default)] [--real-keys 60] [--real-hold 2000] [--ci] [--baseline file] [--budgets fail|warn] [--out file] [--write-baseline]`
+  (`--real-hold <ms>`: API 33+, holds Down once, moves must match the interpreter +-3) runs the TV list gate on a running Android TV emulator (`src/gates/`; adb from ANDROID_HOME, the default SDK or PATH), compares
   the median with `docs/learned/gates/list-android-tv.json` (or `--baseline`; a missing given file: budgets and losses only, warned;
   spec 5.6), writes the median and every run to `--out` (`gate-list.json`, with `--ci` under `gate-artifacts/`), warns when the
   worst run breaks a budget the median meets, exits 1 on a failure. `--budgets warn` (CI) only warns about absolute budgets;

@@ -13,6 +13,8 @@ export interface GateMetrics {
   /** Frame-stall estimate; absent in old lines and baselines. Report-only on emulators. */
   maxFrameStallMs?: number;
   items: number;
+  /** Counts of the intents the screen received; absent in old lines. Not compared. */
+  intents?: Record<string, number>;
 }
 
 /** Key-to-highlight of a burst of real remote keys; `losses` is the burst's focus-loss count. */
@@ -23,11 +25,19 @@ export interface RealKeys {
   losses: number;
 }
 
+/** A real held Down key: the moves counted against what the interpreter predicts. Never compared with a baseline. */
+interface RealHold {
+  holdMs: number;
+  moves: number;
+  expected: number;
+}
+
 /** What one gate measurement produces (median over runs). */
 export interface GateResult {
   metrics: GateMetrics;
   frames: FrameStats;
   realKeys?: RealKeys;
+  realHold?: RealHold;
 }
 
 /** Verdict of a comparison: any failure fails the gate; warnings are reported only. */

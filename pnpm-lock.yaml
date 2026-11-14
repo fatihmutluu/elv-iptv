@@ -532,6 +532,9 @@ importers:
       '@elv/domain':
         specifier: workspace:*
         version: link:../packages/domain
+      '@elv/focus-core':
+        specifier: workspace:*
+        version: link:../packages/focus-core
       '@elv/sources':
         specifier: workspace:*
         version: link:../packages/sources
