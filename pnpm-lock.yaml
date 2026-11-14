@@ -263,6 +263,9 @@ importers:
 
   apps/tv-mobile:
     dependencies:
+      '@elv/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@elv/focus-core':
         specifier: workspace:*
         version: link:../../packages/focus-core
@@ -272,6 +275,9 @@ importers:
       '@elv/ui-kit':
         specifier: workspace:*
         version: link:../../packages/ui-kit
+      '@op-engineering/op-sqlite':
+        specifier: 19.0.5
+        version: 19.0.5(react-native-tvos@0.88.1-0(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.3.0)(react-native-tvos@0.88.1-0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0)
       '@react-native-tvos/config-tv':
         specifier: 0.1.7
         version: 0.1.7(expo@58.0.25)
@@ -1752,6 +1758,16 @@ packages:
     engines: {node: '>=18'}
     cpu: [x64]
     os: [win32]
+
+  '@op-engineering/op-sqlite@19.0.5':
+    resolution: {integrity: sha512-sG0TP2K+x5Ti4wpjMBjSCyIMpKtbHYwYLT+jySMFef4VdPjId+FMIDsxHrWpIfpYOr9BjrMK1+pdAefeSSTjcw==}
+    peerDependencies:
+      '@sqlite.org/sqlite-wasm': '*'
+      react: '*'
+      react-native: '*'
+    peerDependenciesMeta:
+      '@sqlite.org/sqlite-wasm':
+        optional: true
 
   '@oxc-parser/binding-android-arm-eabi@0.156.0':
     resolution: {integrity: sha512-RMq7DKNzEp1T51QKNLTn0NryNEt2IYfh7mZBlIdi2Ju52ltOEDMeIXv0XBpA6dL7j7ChjlcovtGcc1Jv4qMipg==}
@@ -7472,6 +7488,11 @@ snapshots:
 
   '@noxcturnal/noxcturnal-win32-x64-msvc@0.1.12':
     optional: true
+
+  '@op-engineering/op-sqlite@19.0.5(react-native-tvos@0.88.1-0(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.3.0)(react-native-tvos@0.88.1-0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0)':
+    dependencies:
+      react: 19.3.0
+      react-native: react-native-tvos@0.88.1-0(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.3.0)(react-native-tvos@0.88.1-0)(react@19.3.0)(supports-color@8.1.1)
 
   '@oxc-parser/binding-android-arm-eabi@0.156.0':
     optional: true

@@ -9,7 +9,8 @@ const config: KnipConfig = {
       ignoreDependencies: ['dependency-cruiser'],
     },
     'apps/tv-mobile': {
-      entry: ['config/*.test.ts'],
+      // The storage barrel is consumed by the device catalog service in the next task.
+      entry: ['config/*.test.ts', 'src/storage/index.ts'],
       // The TV plugin is loaded by name from app.config.ts; knip infers optional Expo packages.
       ignoreDependencies: ['@react-native-tvos/config-tv', 'expo-updates'],
     },
