@@ -144,12 +144,12 @@ Where sections 5 and 6 above differ, this list wins. Each line gives the decisio
   repeats in between; Select behaves the same (`select` 1; `longSelect` 0 and 1). The key source drops the long
   release, so a held arrow jumps one page and does not repeat. On Android the measured key-to-highlight therefore
   starts at the key release (a hold: at the long-press event), not at the physical press.
+  Superseded by the raw Android key path in `2026-11-14-android-remote-keys-design.md` (press at the `down`, holds repeat, `backLong` works).
 - The key source is `useTvKeySource(onInput)`, not `(store)`: the host feeds a key interpreter (which needs `tick` and
   `acknowledge`) and then the store, so the source stays a thin platform adapter.
 - tvOS Menu (and its native long press) is `back`; Android `KEYCODE_MENU` stays `menu`. Why: the Apple TV remote's
   Menu button is its Back button.
-- Android long Back (`backLong`) is deferred to the player OSD gate (#7). Why: `BackHandler` cannot observe a long press;
-  it needs a native key hook, and only the player needs it.
+- Android long Back (`backLong`) was deferred to the player OSD gate (#7); `2026-11-14-android-remote-keys-design.md` delivers it with the native key hook.
 - Rows render through `renderRow(item, focused)`: §5.4 also says rows receive only `item` and `focused`, so a boolean
   is that state.
 - Render-count bound: at most 3 rows re-render per step (the entering slot and the rows losing and gaining focus),
