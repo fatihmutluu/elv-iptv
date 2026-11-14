@@ -9,26 +9,19 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
 - `pnpm bootstrap` checks versions, installs dependencies and git hooks, looks for gitleaks.
 - `pnpm run:app <target> [build] [--production]` launches or builds a target (android, android-tv, fire-tv, ios, tvos, windows, macos, linux).
 - `pnpm gate list [--avd elv_tv] [--build] [--runs 3 (default)] [--real-keys 60] [--real-hold 2000] [--ci] [--baseline file] [--budgets fail|warn] [--out file] [--write-baseline]`
-  (`--real-hold <ms>`: API 33+, holds Down once, moves must match the interpreter +-3) runs the TV list gate on a running Android TV emulator (`src/gates/`; adb from ANDROID_HOME, the default SDK or PATH), compares
-  the median with `docs/learned/gates/list-android-tv.json` (or `--baseline`; a missing given file: budgets and losses only, warned;
-  spec 5.6), writes the median and every run to `--out` (`gate-list.json`, with `--ci` under `gate-artifacts/`), warns when the
-  worst run breaks a budget the median meets, exits 1 on a failure. `--budgets warn` (CI) only warns about absolute budgets;
-  with it `--write-baseline` refuses the local baseline and needs another `--baseline` file.
-- `pnpm scaffold <pure|rn|module> <name>` creates a workspace package (skill `add-package`).
-- `pnpm --filter @elv/tools test` runs Vitest (`sources-*`, `import-*` use the sim; `SIM_HUGE=1` adds 500k).
+  (`--real-hold <ms>`: API 33+, holds Down once, moves match the interpreter +-3) runs the TV list gate on a running Android TV emulator
+  (`src/gates/`; adb from ANDROID_HOME, the default SDK or PATH), compares the median with `docs/learned/gates/list-android-tv.json` (or `--baseline`;
+  a missing given file: budgets and losses only, warned; spec 5.6), writes it and every run to `--out`, exits 1 on a failure. `--budgets warn` (CI) only warns; with it `--write-baseline` needs another `--baseline` file.
+- `pnpm scaffold <pure|rn|module> <name>` creates a workspace package (skill `add-package`). `pnpm --filter @elv/tools test` runs Vitest (`sources-*`, `import-*` use the sim; `SIM_HUGE=1` adds 500k).
 
 ## Layout
-- `src/` library modules, each unit-tested: `env`, `run-command`, `prebuild-stamp`, `scaffold`, `file-size`, `agents-stubs`,
-  `runner`, `root`, `bootstrap`, `gates/` (gate runner), plus `checks` (check definitions) and `exec`.
-- `bin/` thin entry points that call `src/`. `test/` holds the Vitest tests: linked-workspace tests
-  (`dependency-links.test.ts`) and fixture cases (`test/fixtures/<case>/`, tiny workspaces) prove the rules in
-  `/.dependency-cruiser.cjs`; fixtures are excluded from Biome, tsc, knip and the real `deps` check.
-  `dependency-coverage.test.ts` fails when a package has no rule of its own; `biome-restricted-imports.test.ts` proves the Biome import ban.
+- `src/` library modules, each unit-tested (`env`, `run-command`, `scaffold`, `runner`, `gates/`, `sim/`, `mpv/`, `checks`, ...).
+- `bin/` thin entry points that call `src/`. `test/` holds the Vitest tests; fixture cases (`test/fixtures/<case>/`, tiny workspaces) prove the rules in
+  `/.dependency-cruiser.cjs` and are excluded from Biome, tsc, knip and the real `deps` check. `dependency-coverage.test.ts` fails when a package has no rule.
 
 ## Rules
-- Dev credentials: `.env.local` is read by `run:app` only; `DEV_*` keys reach development builds via env, never argv or production; tests use temp files.
-- A new architecture rule needs a fixture case in `test/dependency-rules.test.ts`; a new check goes into `src/checks.ts` and the key list.
-- Keep check output quiet: no progress lines, no passing-check output.
+- Dev credentials: `.env.local` is read by `run:app` only; `DEV_*` reach development builds via env, never argv; tests use temp files.
+- A new architecture rule needs a fixture case in `test/dependency-rules.test.ts`; a new check goes into `src/checks.ts` and the key list; checks print no progress lines.
 
 ## Stream simulator (`pnpm sim`; `src/sim/`, built-ins only; plays an IPTV provider for the apps)
 - `pnpm sim [--port 7878] [--host 127.0.0.1|0.0.0.0] [--seed 1] [--clock <ISO>] [--log <file>] [--prepare]`
@@ -48,3 +41,10 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
 - Faults: `?fault=<spec>`, parts joined by `,`: `status=<200-599>`, `slow-start=<s>`, `redirect`, `text-notice` (before
   any route), `drop@<s>`, `stall<n>s@<s>`, `rate=<kbps>`. Drop, stall and rate apply to TS and VOD responses only
   (not HLS segments or data routes). Unknown: 400. Catalog faults (1013, 1014) act like a query.
+
+## mpv runtime (`pnpm mpv fetch [--force]`, `pnpm mpv verify`; `src/mpv/`)
+- `apps/desktop/mpv-runtime.lock.json` pins runtimes per `<platform>-<arch>`; `fetch` checks the SHA-256 before `tar -xf` into a fresh folder,
+  runs the licence gate (strings only, nothing runs; no `--enable-gpl`/`--enable-nonfree`, `-Dgpl=false`), installs into gitignored `apps/desktop/resources/mpv/<key>/`.
+- Pin update: download the new archive and its `.asc`, `gpg --verify` with the mpv release key, then change URL and SHA-256 in a PR.
+- `bin/` thin entry points that call `src/`. `test/` holds the Vitest tests; fixture cases (`test/fixtures/<case>/`, tiny workspaces) prove the rules in
+  `/.dependency-cruiser.cjs` and are excluded from Biome, tsc, knip and the real `deps` check. `dependency-coverage.test.ts` fails when a package has no rule.

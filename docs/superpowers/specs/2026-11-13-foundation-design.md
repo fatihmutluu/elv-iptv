@@ -68,7 +68,7 @@ Before each feature, read how reference apps solve it, critique it, and adopt an
 | Language | TypeScript ~6.0 (`strict` + extra flags, `lib: ES2022`) |
 | Monorepo | pnpm 12 workspaces, isolated `node_modules`, Node 24 LTS pinned; no orchestrator at first |
 | Mobile + TV | Expo SDK 58, React 19.3, `react-native` aliased to `react-native-tvos@0.88.x`, `@react-native-tvos/config-tv`; one app with env-driven `app.config.ts` (`EXPO_TV`, `APP_VARIANT`, `STORE`); continuous native generation (no committed `android/`/`ios/`) |
-| Desktop | Electron + react-native-web (web-only Expo renderer); libmpv in a helper process rendering offscreen, frames copied via shared memory to a WebGL canvas so DOM OSD/menus overlay video; better-sqlite3 in a utility process; electron-builder |
+| Desktop | Electron + react-native-web (web-only Expo renderer); libmpv in a helper process rendering offscreen, frames copied via shared memory to a WebGL canvas so DOM OSD/menus overlay video; better-sqlite3 in a utility process; electron-builder | For 0.1 desktop plays through an external mpv process per window (see the [desktop player spec](2026-11-14-desktop-player-design.md)); frame-copy with DOM overlays is Round 2.
 | Native modules | Expo Modules API (Kotlin/Swift), one workspace package each under `modules/` |
 | Playback | Android/TV/Fire OS: Media3 (+ own FFmpeg audio extension, libass) default, own LGPL libmpv fallback. Apple: AetherEngine. Desktop: libmpv helper. Later: Vega W3C media/Shaka, Tizen AVPlay, webOS HTML5 |
 | Focus | Own pure-TypeScript focus core (scopes, focus memory, index resolvers, Back stack) fed by one key source per runtime |
@@ -133,7 +133,7 @@ Packages are source-first (`exports` point at `src/index.ts`, no build step). Ne
 ### 5.5 Playback
 - `PlayerEngine` contract: enqueue-and-return commands; every event carries an attempt token; progress is a clock anchor that JS extrapolates; errors have stable codes and recovery hints; capability flags per engine.
 - `PlaybackService` owns the state machine and a recovery ladder (L0–L5) with a separate backoff path for provider connection limits (429/509) that never opens a second connection.
-- Video renders in native surfaces under an always-mounted JS OSD on mobile/TV; on desktop in a canvas under DOM overlays.
+- Video renders in native surfaces under an always-mounted JS OSD on mobile/TV; on desktop in a canvas under DOM overlays. On desktop in 0.1, mpv draws in its own window or a child window and mpv's on-screen controller is the control surface; DOM overlays arrive in Round 2 ([desktop player spec](2026-11-14-desktop-player-design.md)).
 
 ### 5.6 Input, focus and form factors
 - The focus core models focus as indices in scopes, so it survives list recycling, and is unit-tested headlessly. Each runtime provides one key source; native focus is used only at hand-off points.
@@ -214,7 +214,7 @@ Heavy features, each tracked as an issue and built one at a time in the owner's 
 | Low-end stick performance unmeasured for our stack | Round 1 gates on emulators; no test stick is bought (owner, 2026-11-13), so community testers report hardware results |
 | Provider quirks (connection limits, user-agent filtering, TS vs HLS) look like player bugs | Per-source transport settings, categorized errors with a next step, simulator fault scripts |
 | JS focus core and windowed lists are ours to maintain | Headless tests; small, well-specified core |
-| Desktop frame-copy path unproven in Electron + RNW; Mac App Store sandbox | Round 1 gate; fallback: external mpv window |
+| Desktop frame-copy path unproven in Electron + RNW; Mac App Store sandbox | Round 1 gate; fallback: external mpv window | Decided 2026-11-14: 0.1 uses the external mpv process, frame-copy is Round 2 ([desktop player spec](2026-11-14-desktop-player-design.md)).
 | AetherEngine single maintainer, fast release churn | Pin versions; MPVKit as insurance |
 | Own LGPL libmpv/FFmpeg builds | Pinned build recipes in CI; legal review before first store submission |
 | Hermes lacks Wasm/JIT: large XMLTV imports | Measure; native importer fallback |
