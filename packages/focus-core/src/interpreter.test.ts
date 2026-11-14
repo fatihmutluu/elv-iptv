@@ -325,3 +325,39 @@ describe('properties', () => {
     );
   });
 });
+
+describe('cancel and late releases', () => {
+  it('cancel releases a held select without press or long', () => {
+    const k = createKeyInterpreter();
+    expect(k.input(down('select', 0))).toEqual([]);
+    expect(k.input({ key: 'select', action: 'cancel', time: 100 })).toEqual([]);
+    expect(k.tick(1000)).toEqual([]);
+  });
+
+  it('cancel stops the repeats of a held arrow', () => {
+    const k = createKeyInterpreter();
+    expect(k.input(down('down', 0))).toEqual([{ key: 'down', kind: 'press', time: 0 }]);
+    expect(k.tick(700)).toContainEqual({ key: 'down', kind: 'long', time: 500 });
+    k.acknowledge('down');
+    expect(k.input({ key: 'down', action: 'cancel', time: 800 })).toEqual([]);
+    expect(k.tick(3000)).toEqual([]);
+  });
+
+  it('cancel of a key that is not held emits nothing', () => {
+    const k = createKeyInterpreter();
+    expect(k.input({ key: 'back', action: 'cancel', time: 0 })).toEqual([]);
+  });
+
+  it('an up stamped before the threshold after tick fired long emits nothing', () => {
+    const k = createKeyInterpreter();
+    k.input(down('back', 0));
+    expect(k.tick(510)).toEqual([{ key: 'back', kind: 'long', time: 500 }]);
+    expect(k.input(up('back', 490))).toEqual([]);
+  });
+
+  it('an up before the threshold without a fired long still presses', () => {
+    const k = createKeyInterpreter();
+    k.input(down('select', 0));
+    expect(k.input(up('select', 490))).toEqual([{ key: 'select', kind: 'press', time: 490 }]);
+  });
+});

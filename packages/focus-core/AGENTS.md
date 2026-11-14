@@ -27,6 +27,8 @@ Focus graph, key model and EPG cursor model.
 - Repeats are coalesced: after a `repeat` for a key, the host must call `acknowledge(key)`; due repeats in between
   are dropped, not queued. `reset()` clears all held keys. Digits never produce `long` or `repeat`.
 - A key released after the threshold emits no `press`; a `long` the host never ticked is emitted on release.
+  An `up` of a key whose `long` a `tick` already fired emits nothing, whatever its (back-dated) time.
+- `KeyInput.action` `cancel` drops a held key and emits nothing (canceled release, lost focus); repeats stop.
 - `KeyInput.action` may be `long` for runtimes that only report a native long press: it becomes exactly one `long`
   event at the input's `time` (a digit becomes a `press`).
 - `tick(now)` ignores a non-finite `now`. If several repeats are overdue (app suspended while a key is held) it emits at
