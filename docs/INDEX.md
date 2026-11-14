@@ -10,6 +10,7 @@
 - [Focus core and list gate spec](superpowers/specs/2026-11-13-focus-list-gate-design.md) the remote key model, focus store, windowed TV list and the 100k list gate (`pnpm gate list`).
 - [Android remote keys spec](superpowers/specs/2026-11-14-android-remote-keys-design.md) the `@elv/remote-keys` module that forwards raw Android key events, so a press moves at the `down` and a hold repeats.
 - [Desktop player spec](superpowers/specs/2026-11-14-desktop-player-design.md) the 0.1 desktop engine: an LGPL mpv process over JSON IPC behind `PlayerEngine`, its runtimes and `pnpm gate desktop`.
+- [Device catalog spec](superpowers/specs/2026-11-14-device-catalog-design.md) the on-device catalog: storage adapters, the catalog service, bounded Xtream bodies and the import gate (`pnpm gate import`).
 - `superpowers/plans/` implementation plans; they are deleted after the work is merged.
 - [ADRs](adr/README.md) accepted architecture decisions (MADR), including [0011 content keys](adr/0011-content-keys.md).
 - [Lessons learned](learned/README.md) short dated problem-to-rule entries.
@@ -17,5 +18,6 @@
 - Package docs: [tools](../tools/AGENTS.md), [tv-mobile](../apps/tv-mobile/AGENTS.md), [desktop](../apps/desktop/AGENTS.md),
   [domain](../packages/domain/AGENTS.md), [sources](../packages/sources/AGENTS.md), [data](../packages/data/AGENTS.md),
   [playback](../packages/playback/AGENTS.md), [focus-core](../packages/focus-core/AGENTS.md), [i18n](../packages/i18n/AGENTS.md),
-  [ui-kit](../packages/ui-kit/AGENTS.md), [features](../packages/features/AGENTS.md), [remote-keys](../modules/remote-keys/AGENTS.md).
+  [ui-kit](../packages/ui-kit/AGENTS.md), [features](../packages/features/AGENTS.md), [remote-keys](../modules/remote-keys/AGENTS.md),
+  [engine-media3](../modules/engine-media3/AGENTS.md) (its view: [VIEW](../modules/engine-media3/VIEW.md)).
 - Platform placeholders: [vega](../apps/vega/README.md), [tizen](../apps/tizen/README.md), [webos](../apps/webos/README.md).

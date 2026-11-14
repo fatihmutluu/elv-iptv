@@ -12,6 +12,11 @@ jest.mock('@elv/remote-keys', () => ({
     },
   },
 }));
+jest.mock('@elv/engine-media3', () => ({
+  createMedia3Engine: () => null,
+  Media3Surface: () => null,
+}));
+jest.mock('@op-engineering/op-sqlite', () => ({ open: jest.fn() }));
 jest.mock('expo-constants', () => ({
   __esModule: true,
   default: {
@@ -80,6 +85,13 @@ describe('App', () => {
     await render(<App />);
     expect(await screen.findByTestId('gate-list')).toBeOnTheScreen();
     expect(screen.queryByText('ELV IPTV')).toBeNull();
+  });
+
+  it('opens the player gate from its URL in a gate build', async () => {
+    mockGate = true;
+    openedWith('elviptv://gate/player?zaps=2');
+    await render(<App />);
+    expect(await screen.findByText('No player engine on this platform')).toBeOnTheScreen();
   });
 
   it('opens the gate list from the -gateUrl launch argument in a gate build', async () => {
