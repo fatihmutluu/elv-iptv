@@ -208,6 +208,7 @@ export function createPlaybackService(deps: PlaybackServiceDeps): PlaybackServic
   const startTune = (request: TuneRequest): AttemptToken => {
     clearStartTimeout();
     lastRequest = request;
+    loaded = false;
     const token = state.attempt + 1;
     const { anchor: _anchor, firstFrameAt: _firstFrameAt, ...kept } = state;
     state = {

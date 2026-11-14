@@ -428,6 +428,40 @@ describe('commands', () => {
   });
 });
 
+describe('zap window', () => {
+  it('pause, seek and retry during the resolve of a zap do not reach the old media', async () => {
+    const { engine, service } = setup();
+    service.tune(tuneReq('A'));
+    await vi.advanceTimersByTimeAsync(400);
+    const d = deferred();
+    service.tune(tuneReq('B', { resolve: () => d.promise }));
+    const before = engine.commands.length;
+    service.pause();
+    service.play();
+    service.seek(10);
+    service.retry();
+    const names = engine.commands.slice(before).map((c) => c.name);
+    expect(names).not.toContain('pause');
+    expect(names).not.toContain('play');
+    expect(names).not.toContain('seek');
+    expect(names).not.toContain('retry');
+    expect(service.getState().item).toBe('item-B');
+  });
+
+  it('B still loads after a pause during its resolve', async () => {
+    const { engine, service } = setup();
+    service.tune(tuneReq('A'));
+    await vi.advanceTimersByTimeAsync(400);
+    const d = deferred();
+    const tb = service.tune(tuneReq('B', { resolve: () => d.promise }));
+    service.pause();
+    d.settle(ok(req('B')));
+    await flush();
+    expect(loads(engine).map((c) => c.url)).toEqual(['A', 'B']);
+    expect(loads(engine).at(-1)?.attempt).toBe(tb);
+  });
+});
+
 describe('subscription and dispose', () => {
   it('notifies on every change and unsubscribes', async () => {
     const { service } = setup();
@@ -503,6 +537,38 @@ describe('recovery hooks', () => {
       'dispose',
     ]);
     expect(s.getState().status).toEqual({ kind: 'tuning' });
+  });
+
+  it('leaves exactly one start timeout after A, B and C are tuned', async () => {
+    let timeouts = 0;
+    const e = createFakePlayerEngine({
+      now: Date.now,
+      schedule: setTimeout,
+      cancel: (h) => clearTimeout(h as never),
+      scripts: { A: [], B: [], C: [] },
+    });
+    const s = createPlaybackService({
+      engine: e,
+      clock: { now: Date.now },
+      timers: {
+        setTimeout: (f, m) => setTimeout(f, m),
+        clearTimeout: (h) => clearTimeout(h as never),
+      },
+      recovery: () => ({
+        onStartTimeout: () => {
+          timeouts += 1;
+        },
+      }),
+    });
+    s.tune(tuneReq('A'));
+    await flush();
+    s.tune(tuneReq('B'));
+    await flush();
+    s.tune(tuneReq('C'));
+    await flush();
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(timeouts).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('lets hooks drive the service through the control surface', async () => {
