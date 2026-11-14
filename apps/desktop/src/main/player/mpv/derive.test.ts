@@ -36,18 +36,65 @@ describe('deriver', () => {
     expect(all.some((e) => e.type === 'state' && e.state === 'ready')).toBe(false);
   });
 
-  it('firstFrame once, at the first restart with video-params', () => {
+  const frames = (e: EngineEvent[]) => e.filter((x) => x.type === 'firstFrame');
+
+  it('restart after video-params gives firstFrame at the restart, before playing', () => {
     const s = setup();
-    const first = play(s);
+    s.d.fileEvent({ event: 'file-loaded' });
+    s.d.property('video-params', { w: 1280 });
+    s.clock.t = 1234;
+    const first = restart(s.d);
+    expect(first[0]).toEqual({ attempt: 7, type: 'firstFrame', atMs: 1234 });
     expect(types(first).slice(0, 2)).toEqual(['firstFrame', 'state']);
-    expect(restart(s.d).some((e) => e.type === 'firstFrame')).toBe(false);
   });
 
-  it('audio-only media gets firstFrame at the first restart', () => {
-    const s = setup('vod');
+  it('restart before video-params waits and fires firstFrame when video-params arrives', () => {
+    const s = setup();
     s.d.fileEvent({ event: 'file-loaded' });
-    s.d.property('video-params', undefined);
-    expect(restart(s.d).some((e) => e.type === 'firstFrame')).toBe(true);
+    s.d.property('video-params', null);
+    expect(frames(restart(s.d))).toEqual([]);
+    s.clock.t = 1500;
+    expect(s.d.property('video-params', { w: 1280 })).toEqual([
+      { attempt: 7, type: 'firstFrame', atMs: 1500 },
+    ]);
+    expect(s.d.property('video-params', { w: 1920 })).toEqual([]);
+  });
+
+  it('video-params before any restart emits nothing until the restart', () => {
+    const s = setup();
+    expect(s.d.property('video-params', { w: 1 })).toEqual([]);
+  });
+
+  it('audio-only media (vid false) gets firstFrame at the restart', () => {
+    for (const vid of [false, 'no']) {
+      const s = setup('vod');
+      s.d.fileEvent({ event: 'file-loaded' });
+      s.d.property('vid', vid);
+      expect(frames(restart(s.d))).toHaveLength(1);
+    }
+  });
+
+  it('vid false after the restart fires firstFrame then', () => {
+    const s = setup('vod');
+    restart(s.d);
+    expect(frames(s.d.property('vid', false))).toHaveLength(1);
+    expect(s.d.property('vid', false)).toEqual([]);
+  });
+
+  it('a vid track id does not count as audio-only', () => {
+    const s = setup();
+    s.d.property('vid', 1);
+    expect(frames(restart(s.d))).toEqual([]);
+  });
+
+  it('a second restart after a seek or cache emits no second firstFrame', () => {
+    const s = setup();
+    play(s);
+    s.d.property('seeking', true);
+    expect(frames(restart(s.d))).toEqual([]);
+    s.d.property('paused-for-cache', true);
+    expect(frames(restart(s.d))).toEqual([]);
+    expect(s.d.property('video-params', { w: 2 })).toEqual([]);
   });
 
   it('paused-for-cache while playing gives stall start and end with buffering', () => {
@@ -203,13 +250,24 @@ describe('deriver', () => {
     expect(s.d.tick()).toEqual([]);
   });
 
-  it('events with no media begun produce nothing', () => {
+  it('events with no media begun produce nothing, and a late log or adopt is harmless', () => {
     const d = createDeriver({ now: () => 0, clockIntervalMs: 1000 });
     expect(d.property('pause', true)).toEqual([]);
     expect(d.fileEvent({ event: 'playback-restart' })).toEqual([]);
     expect(d.fileEvent({ event: 'client-message' })).toEqual([]);
     expect(d.tick()).toEqual([]);
-    d.log({ prefix: 'a', level: 'v', text: 't' });
+    d.log({ prefix: 'a', level: 'v', text: 'HTTP error 404 x' });
     d.adopt(3);
+    expect(d.begin(4, 'live')).toEqual([{ attempt: 4, type: 'state', state: 'opening' }]);
+    expect(d.fileEvent({ event: 'end-file', reason: 'error' })[0]).toMatchObject({
+      attempt: 4,
+      error: { code: 'unknown' },
+    });
+  });
+
+  it('other mpv events on a begun media produce nothing', () => {
+    const s = setup();
+    expect(s.d.fileEvent({ event: 'client-message' })).toEqual([]);
+    expect(s.d.fileEvent({ event: 'start-file' })).toEqual([]);
   });
 });

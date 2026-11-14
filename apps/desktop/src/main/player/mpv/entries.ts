@@ -37,7 +37,7 @@ export function createEntryTable(): EntryTable {
     },
     current() {
       const entry = currentId === undefined ? undefined : entries.get(currentId);
-      return currentId === undefined || !entry ? undefined : { entryId: currentId, ...entry };
+      return entry && currentId !== undefined ? { entryId: currentId, ...entry } : undefined;
     },
     tokenOf: (entryId) => entries.get(entryId)?.token,
     adopt(token) {

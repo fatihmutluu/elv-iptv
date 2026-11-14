@@ -27,6 +27,8 @@ interface Media {
   state: EngineState;
   restarted: boolean;
   firstFrameSent: boolean;
+  /** `video-params` is set, or `vid` says there is no video track. */
+  frameReady: boolean;
   stalled: boolean;
   paused: boolean;
   cache: boolean;
@@ -39,6 +41,12 @@ interface Media {
   lastAnchorAt: number;
 }
 
+type EventBody = EngineEvent extends infer E
+  ? E extends unknown
+    ? Omit<E, 'attempt'>
+    : never
+  : never;
+
 const num = (v: unknown): number | undefined =>
   typeof v === 'number' && Number.isFinite(v) ? v : undefined;
 
@@ -46,8 +54,7 @@ const num = (v: unknown): number | undefined =>
 export function createDeriver(opts: { now(): number; clockIntervalMs: number }): Deriver {
   let m: Media | undefined;
 
-  const ev = (media: Media, e: Record<string, unknown>): EngineEvent =>
-    ({ attempt: media.token, ...e }) as EngineEvent;
+  const ev = (media: Media, e: EventBody): EngineEvent => ({ attempt: media.token, ...e });
 
   const rate = (media: Media): number =>
     media.paused || media.cache || media.seeking || media.idle ? 0 : media.speed;
@@ -97,13 +104,16 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
     return [...out, ...settle(media), ...anchor(media)];
   };
 
+  const firstFrame = (media: Media): EngineEvent[] => {
+    if (media.firstFrameSent || !media.restarted || !media.frameReady) return [];
+    media.firstFrameSent = true;
+    return [ev(media, { type: 'firstFrame', atMs: opts.now() })];
+  };
+
   const restart = (media: Media): EngineEvent[] => {
     const out: EngineEvent[] = [];
     media.restarted = true;
-    if (!media.firstFrameSent) {
-      media.firstFrameSent = true;
-      out.push(ev(media, { type: 'firstFrame', atMs: opts.now() }));
-    }
+    out.push(...firstFrame(media));
     return [...out, ...settle(media), ...anchor(media)];
   };
 
@@ -159,6 +169,14 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
         const due = opts.now() - media.lastAnchorAt >= opts.clockIntervalMs;
         return media.restarted && due ? anchor(media) : [];
       }
+      case 'video-params':
+        if (typeof value !== 'object' || value === null) return [];
+        media.frameReady = true;
+        return firstFrame(media);
+      case 'vid':
+        if (value !== false && value !== 'no') return [];
+        media.frameReady = true;
+        return firstFrame(media);
       case 'duration':
         media.duration = num(value);
         return [];
@@ -182,6 +200,7 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
         state: 'opening',
         restarted: false,
         firstFrameSent: false,
+        frameReady: false,
         stalled: false,
         paused: false,
         cache: false,
