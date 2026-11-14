@@ -21,7 +21,7 @@ Expo project with `platforms: ["web"]` rendered by react-native-web.
 - The Electron binary downloads on first run (Electron 45 has no postinstall).
 - Never read `DEV_*` or `.env.local` here; nothing is mapped into the renderer.
 
-## mpv IPC (`src/main/player/mpv/`)
+## mpv IPC (`src/main/player/mpv/`; the engine on top: `src/main/player/AGENTS.md`)
 - `codec.ts` (JSON lines), `client.ts` (request ids, 3 s `MpvWedgedError`, events), `process.ts` (spawn the launcher
   hidden, random `\.\pipe\elv-mpv-<16 hex>` per launch, connect with retry, `quit`, pid file sweep). Unit tests use a
   fake pipe; coverage of these three files must stay at 90 % lines.

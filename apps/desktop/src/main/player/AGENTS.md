@@ -1,0 +1,31 @@
+# Desktop player engine (`src/main/player/`)
+
+`engine.ts` (`createMpvEngine`) is the desktop `PlayerEngine`: one mpv process per player window, kept across zaps,
+over the JSON IPC client (`mpv/`) and a `VideoPresenter` (`presenter/`). Read `apps/desktop/AGENTS.md` first.
+
+## Rules
+- Commands queue in order and return at once; nothing awaits mpv. One `loadfile` is in flight: its entry id comes
+  from the reply (`playlist_entry_id`, mpv 0.42.0; else `get_property playlist/0/id`) and is bound to the token before
+  the next command goes out. A `start-file` that beats the reply belongs to the loadfile in flight (measured).
+- A queued, unsent `load` is dropped when a newer `load` or a `stop` arrives (spec §11, decision 9).
+- Only the newest media emits: a replaced or stopped media is silent at once, so nothing follows `stop`.
+- A newer token on any other command tags the media's later events, also before its `start-file`.
+- mpv keeps `pause` across files: after a `load`'s loadfile the engine sends `set pause no` when mpv is paused, and a
+  file that starts while mpv is paused is derived as paused.
+- Log lines are requested at `v`: mpv logs a provider notice's `Mime-type: 'text/plain'` only there (at `warn` the
+  notice classifies as `unsupported-format`, measured). Only `fatal`, `error`, `warn`, `info` and `Mime-type:` lines
+  reach the deriver, so its 50-line window per media keeps the classifier's signals.
+- `engine-wedged` with the current token: no reply in 3 s (the process is killed), the IPC closing on its own, a
+  failed spawn, or `stop-then-load` without the old `end-file` in 3 s. With the own-window presenter an exit after an
+  unrequested `end-file reason=quit` is `player:ui` `closed` instead. The next `load` or `retry` respawns; `recreate`
+  quits (kill after 500 ms) and respawns with the same presenter.
+- `release` aborts a pending spawn (a process that still arrives is killed), quits mpv, disposes the presenter and
+  emits nothing afterwards. `elv-key fullscreen` toggles the presenter; other `elv-key` names become `player:ui` keys.
+- Recording launcher pids for the startup sweep is the spawner's job (`spawnMpv({ pidFile })`).
+
+## Tests
+- `engine.test.ts` drives the engine against `mpv/fake-mpv.ts` (a scripted mpv on a real named pipe or Unix socket).
+  `engine.contract.test.ts` runs `ENGINE_CONTRACT_CASES` over FakeMpv and, with `ELV_MPV_SPIKE=1` and `ELV_SIM_URL`,
+  over the real runtime and the simulator (one mpv window per case, about 35 s). `engine.ts` stays at 90 % lines.
+- Measured (mpv 0.42.0, 2026-11-14): while a file plays mpv answers `loadfile` at once, so loads 18 ms apart are all
+  sent; mpv aborts the superseded opens itself (simulator: one connection at a time, no 509, the newest plays).
