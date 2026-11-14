@@ -1,10 +1,14 @@
 package io.github.fatihmutluu.elv.remotekeys
 
+import android.os.SystemClock
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.lang.ref.WeakReference
 
-/** Forwards first key downs, key ups and window blur of the main window to JavaScript as `onKey`. */
+/**
+ * Forwards first key downs, key ups and window blur of the main window to JavaScript as `onKey`. `uptimeMs()` gives
+ * JavaScript the clock of the events' `eventTime`, so it can age each event when it receives it.
+ */
 class ElvRemoteKeysModule : Module() {
   private var sink: ((Map<String, Any>) -> Unit)? = null
 
@@ -12,6 +16,10 @@ class ElvRemoteKeysModule : Module() {
     Name("ElvRemoteKeys")
 
     Events("onKey")
+
+    Function("uptimeMs") {
+      SystemClock.uptimeMillis().toDouble()
+    }
 
     OnStartObserving("onKey") {
       stopSending()

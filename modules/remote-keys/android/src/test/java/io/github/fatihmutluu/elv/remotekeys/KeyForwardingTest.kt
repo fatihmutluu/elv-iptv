@@ -41,6 +41,18 @@ class KeyForwardingTest {
   }
 
   @Test
+  fun `key payload carries the event time and the canceled flag`() {
+    assertEquals(
+      mapOf("action" to "down", "keyCode" to 20, "canceled" to false, "eventTime" to 123456.0),
+      KeyForwarding.payload("down", 20, 0, 123456L),
+    )
+    assertEquals(
+      mapOf("action" to "up", "keyCode" to 23, "canceled" to true, "eventTime" to 7.0),
+      KeyForwarding.payload("up", 23, KeyEvent.FLAG_CANCELED, 7L),
+    )
+  }
+
+  @Test
   fun `wrap is idempotent`() {
     val fake = FakeCallback()
     val first = KeyForwarding.wrap(fake)

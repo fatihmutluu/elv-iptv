@@ -1,6 +1,5 @@
 package io.github.fatihmutluu.elv.remotekeys
 
-import android.os.SystemClock
 import android.view.ActionMode
 import android.view.KeyEvent
 import android.view.KeyboardShortcutGroup
@@ -21,14 +20,7 @@ class ForwardingWindowCallback(private val wrapped: Window.Callback) : Window.Ca
   override fun dispatchKeyEvent(event: KeyEvent): Boolean {
     val action = KeyForwarding.action(event.action, event.repeatCount, event.flags)
     if (action != null) {
-      KeyForwarding.emit(
-        mapOf(
-          "action" to action,
-          "keyCode" to event.keyCode,
-          "canceled" to (event.flags and KeyEvent.FLAG_CANCELED != 0),
-          "ageMs" to maxOf(0L, SystemClock.uptimeMillis() - event.eventTime).toDouble(),
-        ),
-      )
+      KeyForwarding.emit(KeyForwarding.payload(action, event.keyCode, event.flags, event.eventTime))
     }
     return wrapped.dispatchKeyEvent(event)
   }

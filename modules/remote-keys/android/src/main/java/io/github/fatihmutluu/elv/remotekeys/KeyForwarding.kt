@@ -22,6 +22,18 @@ object KeyForwarding {
   }
 
   /**
+   * Builds the `onKey` payload of a forwarded key. `eventTime` is the event's uptime stamp; JavaScript subtracts it
+   * from `uptimeMs()` on receipt, so the age includes the wait for the JS thread.
+   */
+  fun payload(action: String, keyCode: Int, flags: Int, eventTime: Long): Map<String, Any> =
+    mapOf(
+      "action" to action,
+      "keyCode" to keyCode,
+      "canceled" to (flags and KeyEvent.FLAG_CANCELED != 0),
+      "eventTime" to eventTime.toDouble(),
+    )
+
+  /**
    * Wraps [callback] so key events and focus loss reach the current sink; returns [callback] itself if already wrapped.
    * The sink is process-wide, so a wrapper that outlives its module (JS reload) reports to the new module.
    */
