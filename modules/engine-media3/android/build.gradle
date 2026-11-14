@@ -19,5 +19,15 @@ dependencies {
   implementation "androidx.media3:media3-exoplayer:$media3"
   implementation "androidx.media3:media3-exoplayer-hls:$media3"
   implementation "androidx.media3:media3-datasource:$media3"
+  // OkHttp is React Native's own at run time (4.9.2 in react-native-tvos 0.88): the extension's 4.12.0 is excluded so
+  // it does not replace that copy app-wide, and the module compiles against the same version. Every OkHttp member
+  // the extension calls exists in 4.9.2.
+  def okhttp = 'com.squareup.okhttp3:okhttp:4.9.2'
+  implementation("androidx.media3:media3-datasource-okhttp:$media3") {
+    exclude group: 'com.squareup.okhttp3', module: 'okhttp'
+  }
+  compileOnly okhttp
+  testImplementation okhttp
   testImplementation 'junit:junit:4.13.2'
+  testImplementation 'org.robolectric:robolectric:4.17'
 }

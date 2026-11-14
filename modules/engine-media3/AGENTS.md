@@ -13,11 +13,9 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
 ## Threading and view
 - ExoPlayer runs on the engine's `HandlerThread` (application looper), built at creation; JS calls post there and
   return; events run there (`emit` hops to JS). `OnDestroy` (JS reload) and `sharedObjectDidRelease` dispose engines.
-- `Media3SurfaceView` (details in `VIEW.md`): a `SurfaceView` fixed at creation (never on top) under a black zap
-  shutter (from each `load` until that media's first frame; `firstFrame` once per prepare, behind a fence), sized at
-  the video's display aspect ratio (`resizeMode` `fit` or `fill`) with black bars beside it, never over it. The engine
-  posts shutter, picture size and screen-on reports (on while playing) to the view; a surface detach is the only
-  UI-thread wait (capped at 3 s).
+- `Media3SurfaceView` (details in `VIEW.md`): a fixed `SurfaceView` (never on top) under a black zap shutter (each
+  `load` until that media's first frame, behind a fence), at the display aspect ratio (`fit`/`fill`) with bars beside
+  it; the engine posts shutter, size and screen-on reports. A surface detach is the only UI-thread wait (3 s cap).
 
 ## Playback
 - Every prepare (`load`, `retry`) builds a new media source, `playWhenReady = true`; `retry`: live at the default
@@ -31,20 +29,22 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
   (live, window end) when known. `options.softwareAudio`: software audio decoders first, extension renderers (#69).
   Buffers: 15-30 s, start 1 s, after rebuffer 2 s, target 16 MB when low-RAM (`isLowRamDevice`, < 1.5 GB) else 32 MB.
 
-## Requests and errors (`ConnectionGate`, `GatedDataSource`, `SniffingDataSource`, `LoadRetry`, `ErrorMapping`)
-- Every prepare and `stop` begins a generation; an `open` waits until older generations closed, force-closes them after
-  1,000 ms (`Log.w`), and `tryOpen` refuses or counts it in one locked step once superseded or current.
-- HTTP: default data source, `LoadCommand.headers`, cross-protocol redirects. Every response is read ahead 1 KB and
-  judged by request kind, not label (`classifyResponse`): progressive `#EXTM3U` is HLS, playlists need `#EXTM3U`,
-  readable text that is no MPEG-TS (sync search) nor, for segments, WebVTT is the notice; keys are never read.
+## Requests and errors (`ConnectionGate`, `GatedDataSource`, `StreamHttp`, `SniffingDataSource`, `ErrorMapping`)
+- Each prepare and `stop` begins a generation and force-closes older connections at once on the closer thread: the
+  OkHttp call is cancelled (socket closed, also mid-connect) and an `open` in progress is interrupted. A connection is
+  counted until Media3 closes it; a newer `open` waits for that (forcing again after 1,000 ms, `Log.w`).
+- HTTP: `media3-datasource-okhttp` on React Native's OkHttp 4.9.2 (the extension's 4.12.0 excluded): connect 3,500 ms,
+  read 10,000 ms (over the 8 s start timeout), OkHttp redirects, `LoadCommand.headers`. Responses are read ahead 1 KB
+  and judged by request kind (`classifyResponse`): progressive `#EXTM3U` is HLS, playlists need `#EXTM3U`, readable
+  text that is no MPEG-TS nor, for segments, WebVTT is the notice; keys are never read.
 - `failsAtOnce`: an HTTP status skips Media3's retries on progressive media and before the first HLS manifest; then
   HLS segments and refreshes retry except 401/403/429/509. Notices and refused requests always fail at once.
-- `mapError`: 401/403/404/429/509 keep `http-<code>`, other statuses `http-other`, a notice `connection-limit`, 2xxx and
-  behind-live-window `network`, malformed 3001/3002 `network` when live or played since prepare, other 3xxx
-  `unsupported-format`, 4xxx/5xxx/7xxx `decoder`, 6xxx `drm`, timeout `engine-wedged`, else `unknown`. `detail`: error
-  name plus `redactUrl(uri)` (no query, fragment or user-info; credential path segments `***`), no exception messages.
+- `mapError`: 401/403/404/429/509 keep `http-<code>`, other statuses `http-other`, a notice `connection-limit`; 3xxx
+  and 2006/2007 (no permission, cleartext) `unsupported-format`, but malformed 3001/3002 when live or played `network`;
+  other 2xxx, behind-live-window `network`, 4/5/7xxx `decoder`, 6xxx `drm`, timeout `engine-wedged`, else `unknown`.
+  `detail`: error name and `redactUrl(uri)` (credentials `***`), no exception text; `LoadRequest` text: no URL/header.
 
 ## Tests and rules
-- Vitest: `pnpm --filter @elv/engine-media3 test`. JVM (JUnit 4), after `pnpm run:app android-tv build`, in
+- Vitest: `pnpm --filter @elv/engine-media3 test`. JVM (JUnit 4, Robolectric), after `pnpm run:app android-tv build`, in
   `apps/tv-mobile/android`: `APP_VARIANT=development EXPO_TV=1 ./gradlew.bat :elv-engine-media3:testDebugUnitTest`
   (needs `ANDROID_HOME`). Imports `expo-modules-core`, `@elv/playback` types and the `react`/`react-native` peers only.

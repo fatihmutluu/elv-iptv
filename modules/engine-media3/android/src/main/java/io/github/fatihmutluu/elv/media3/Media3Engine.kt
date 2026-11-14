@@ -22,6 +22,8 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.sharedobjects.SharedObject
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -61,7 +63,11 @@ class Media3Engine(
   private val thread = HandlerThread("ElvMedia3").apply { start() }
   private val handler = Handler(thread.looper)
   private val disposed = AtomicBoolean(false)
-  private val gate = ConnectionGate()
+  /** Force-closes superseded connections off the playback thread; its one thread ends after 10 s idle. */
+  private val closer = ThreadPoolExecutor(0, 1, 10, TimeUnit.SECONDS, LinkedBlockingQueue()) {
+    Thread(it, "ElvMedia3Closer")
+  }
+  private val gate = ConnectionGate(closer)
   private val buffers = loadControlFor(lowRam(context))
   private val reporter = EventReporter(
     handler,

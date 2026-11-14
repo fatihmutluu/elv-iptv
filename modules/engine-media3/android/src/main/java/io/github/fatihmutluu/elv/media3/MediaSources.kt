@@ -6,7 +6,6 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.hls.HlsDataSourceFactory
 import androidx.media3.exoplayer.hls.HlsMediaSource
@@ -71,6 +70,22 @@ private class ServiceOwnedRetryPolicy(
 }
 
 /**
+ * The data sources of one media generation's requests, by kind: each one is an OkHttp request ([streamDataSource])
+ * that passes the connection gate and the response sniffing and sends [LoadRequest.headers]. A force-close of the gate
+ * cancels its call. [gateTimeoutMs] is the gate's backstop (see [GatedDataSource]).
+ */
+@OptIn(UnstableApi::class)
+internal fun requestSources(
+  request: LoadRequest,
+  gate: ConnectionGate,
+  generation: Long,
+  gateTimeoutMs: Long = GATE_TIMEOUT_MS,
+): (RequestKind) -> DataSource = { kind ->
+  val (http, calls) = streamDataSource(request.headers)
+  GatedDataSource(SniffingDataSource(http, kind), gate, generation, calls::cancel, gateTimeoutMs)
+}
+
+/**
  * Builds the media source of one generation. Every request passes the connection gate and the response sniffing;
  * HLS requests are sniffed by their Media3 data type (playlist, segment, or unsniffed key).
  */
@@ -82,14 +97,7 @@ internal fun createMediaSource(
   manifestLoaded: AtomicBoolean,
 ): MediaSource {
   val type = request.sourceType()
-  val userAgentKey = request.headers.keys.firstOrNull { it.equals("User-Agent", ignoreCase = true) }
-  val http = DefaultHttpDataSource.Factory()
-    .setAllowCrossProtocolRedirects(true)
-    .setUserAgent(userAgentKey?.let { request.headers[it] })
-    .setDefaultRequestProperties(request.headers.filterKeys { it != userAgentKey })
-  val gated = { kind: RequestKind ->
-    GatedDataSource(SniffingDataSource(http.createDataSource(), kind), gate, generation)
-  }
+  val gated = requestSources(request, gate, generation)
   val progressive = DataSource.Factory { gated(RequestKind.PROGRESSIVE) }
   val factory: MediaSource.Factory = when (type) {
     SourceType.HLS -> HlsMediaSource.Factory(HlsDataSourceFactory { dataType -> gated(requestKindFor(dataType)) })

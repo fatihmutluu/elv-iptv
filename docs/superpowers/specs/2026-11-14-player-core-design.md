@@ -158,9 +158,11 @@ Rungs, each bounded and visible as a status the OSD can show:
 ## 6. Design: native engines and the OSD
 
 ### 6.1 Android, Android TV, Fire OS: `modules/engine-media3` (`@elv/engine-media3`)
-- Expo native module, Android only, Media3 pinned to 1.11.1 (`exoplayer`, `exoplayer-hls`, `datasource`). It imports
-  only `expo-modules-core` and `@elv/playback` types (layer rule); `react` and `react-native` are peer dependencies of
-  its view component.
+- Expo native module, Android only, Media3 pinned to 1.11.1 (`exoplayer`, `exoplayer-hls`, `datasource`,
+  `datasource-okhttp`, Apache-2.0). The OkHttp data source runs on the OkHttp React Native already ships (4.9.2 in
+  react-native-tvos 0.88; the extension's own 4.12.0 is excluded, and every OkHttp member it calls exists in 4.9.2), so
+  the app keeps one copy. It imports only `expo-modules-core` and `@elv/playback` types (layer rule); `react` and
+  `react-native` are peer dependencies of its view component.
 - Shape: an engine object (an Expo shared object, one per player screen) that implements `PlayerEngine` from §5.1, and
   a view `Media3Surface` that hosts a `SurfaceView` bound to an engine. The app creates the engine, passes it to the
   service and to the view. The surface type is fixed at creation and never changed at runtime; nothing between the
@@ -171,8 +173,14 @@ Rungs, each bounded and visible as a status the OSD can show:
   decoder still renders into the old surface, so it runs ahead of queued commands and waits at most 3 s (a release in
   progress takes about 500 ms, Media3's `clearVideoSurface` up to 2 s, plus margin).
 - Connection discipline: every stream request goes through our `DataSource` wrapper with a per-engine connection gate.
-  `open` of a new request waits until the previous one is closed (bounded wait, then it closes it forcibly). With
-  `load` stopping the old media first, the simulator log must show zero overlap during zaps.
+  `open` of a new request waits until the previous one is closed. A new media (`load`, `retry`, `stop`) force-closes
+  the older connections at once on a per-engine closer thread: the OkHttp call is cancelled, which closes its socket
+  also while it connects or waits for the status line, and an `open` in progress is interrupted. A connection counts
+  until it has really closed; the wait forces again after 1,000 ms as a backstop. Connect timeout 3,500 ms, read
+  timeout 10,000 ms: above the 8 s start timeout, so the service's timers decide a silent stream's recovery (amended
+  in the final review: the default HTTP stack could not abort a connect or a status-line wait, so a "forced" request
+  stayed open beside the next one). With `load` stopping the old media first, the simulator log must show zero overlap
+  during zaps.
 - Error mapping: `HttpDataSource.InvalidResponseCodeException.responseCode` gives the `http-*` codes; a `text/*` or HTML
   body on a stream request is `connection-limit` (providers answer the limit with a notice; the simulator models it);
   Media3 `PlaybackException` error codes map to `network`, `unsupported-format`, `decoder`, `drm`. URLs in `detail` are
@@ -273,3 +281,8 @@ Rungs, each bounded and visible as a status the OSD can show:
   and x86_64, for tvOS and iOS). 7.66.1 builds for the tvOS simulator, a tvOS device and the iOS simulator, so phase 2
   pins 7.66.1 (step 1 of the §6.2 fallback order) and re-pins only when a newer tag builds with the `tvos` job's
   Xcode. The Expo integration spike is in progress (private report).
+- Final review (2026-11-14): Media3's default HTTP data source cannot abort a request that is still connecting or
+  waiting for its status line, so the gate's force-close was a no-op there and the next media opened beside it. The
+  engine now uses Media3's OkHttp data source on React Native's OkHttp, cancels superseded calls at once when a new
+  media begins and counts a connection until it has really closed (§6.1); the gate gained a `slow-start` fault run
+  (§7).

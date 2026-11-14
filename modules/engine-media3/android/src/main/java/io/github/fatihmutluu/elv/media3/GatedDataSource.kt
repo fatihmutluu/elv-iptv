@@ -11,7 +11,7 @@ import java.io.IOException
 import java.io.InterruptedIOException
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** How long a new media's first request waits for the previous media's connections before closing them. */
+/** How long a new media's first request waits for the previous media's connections before forcing them again. */
 internal const val GATE_TIMEOUT_MS = 1_000L
 
 private const val TAG = "ElvMedia3"
@@ -20,18 +20,25 @@ private const val TAG = "ElvMedia3"
 internal class SupersededMediaException : IOException("superseded media")
 
 /**
- * Reports every connection of its media generation to the [ConnectionGate]. `open` first waits until the
- * connections of older generations are closed (forcing them after [GATE_TIMEOUT_MS]) and refuses to open once its
- * own generation is superseded. Media3 calls `close` after every `open`, also a failed one.
+ * Reports every connection of its media generation to the [ConnectionGate]. `open` first waits until the connections
+ * of older generations are closed (forcing them again after [gateTimeoutMs]) and refuses to open once its own
+ * generation is superseded. A force-close cancels the upstream call ([cancelUpstream]: OkHttp closes its socket,
+ * connecting, waiting for the answer or reading) and interrupts an `open` still in progress; the connection stays
+ * counted until Media3 closes it, which it does after every `open`, also a failed one. A forced source opens no more.
  */
 @OptIn(UnstableApi::class)
 internal class GatedDataSource(
   private val upstream: DataSource,
   private val gate: ConnectionGate,
   private val generation: Long,
+  private val cancelUpstream: () -> Unit = {},
+  private val gateTimeoutMs: Long = GATE_TIMEOUT_MS,
 ) : DataSource, ForceClosable {
   private val counted = AtomicBoolean(false)
-  private val closeLock = Any()
+  private val lock = Any()
+
+  /** The thread inside `open`, guarded by [lock]. */
+  private var opening: Thread? = null
 
   @Volatile
   private var forced = false
@@ -41,25 +48,33 @@ internal class GatedDataSource(
   }
 
   override fun open(dataSpec: DataSpec): Long {
+    if (forced) throw SupersededMediaException()
     try {
-      if (!gate.awaitPreviousClosed(generation, GATE_TIMEOUT_MS)) {
-        Log.w(TAG, "closed connections of an older media after $GATE_TIMEOUT_MS ms")
+      if (!gate.awaitPreviousClosed(generation, gateTimeoutMs)) {
+        Log.w(TAG, "an older media's connections closed only after a second force-close at $gateTimeoutMs ms")
       }
     } catch (_: InterruptedException) {
       Thread.currentThread().interrupt()
       throw InterruptedIOException("interrupted at the media boundary")
     }
-    forced = false
     counted.set(true)
     if (!gate.tryOpen(generation, this)) {
       counted.set(false)
       throw SupersededMediaException()
     }
-    return upstream.open(dataSpec)
+    synchronized(lock) {
+      if (forced) throw SupersededMediaException()
+      opening = Thread.currentThread()
+    }
+    try {
+      return upstream.open(dataSpec)
+    } finally {
+      synchronized(lock) { opening = null }
+    }
   }
 
   override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-    if (forced) throw IOException("closed at the media boundary")
+    if (forced) throw SupersededMediaException()
     return upstream.read(buffer, offset, length)
   }
 
@@ -68,29 +83,17 @@ internal class GatedDataSource(
   override fun getResponseHeaders(): Map<String, List<String>> = upstream.responseHeaders
 
   override fun close() {
-    synchronized(closeLock) {
-      try {
-        upstream.close()
-      } finally {
-        uncount()
-      }
+    try {
+      upstream.close()
+    } finally {
+      if (counted.compareAndSet(true, false)) gate.closed(generation, this)
     }
   }
 
-  /** Called by the gate on the waiting loader thread; closing the upstream unblocks a read stuck on the socket. */
+  /** Called on the gate's closer thread; never closes the upstream itself (its owner may be reading it). */
   override fun forceClose() {
     forced = true
-    synchronized(closeLock) {
-      try {
-        upstream.close()
-      } catch (_: Exception) {
-      } finally {
-        uncount()
-      }
-    }
-  }
-
-  private fun uncount() {
-    if (counted.compareAndSet(true, false)) gate.closed(generation, this)
+    cancelUpstream()
+    synchronized(lock) { opening?.interrupt() }
   }
 }
