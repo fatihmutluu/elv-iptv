@@ -2,7 +2,7 @@
 export interface PlaybackConfig {
   /** Live buffering longer than this starts the recovery ladder. */
   liveStallWindowMs: number;
-  /** No first frame this long after `load` counts as a failed start. */
+  /** No `playing` this long after `load` counts as a failed start; a first frame alone is not enough. */
   startTimeoutMs: number;
   /** Time each recovery rung gets to produce a frame. */
   rungTimeoutMs: number;

@@ -128,7 +128,6 @@ export function createPlaybackServiceWith(
     if (IGNORED_IN.has(state.status.kind)) return;
     switch (event.type) {
       case 'firstFrame':
-        clearStartTimeout();
         update({ firstFrameAt: clock.now() });
         return;
       case 'clock':
@@ -141,8 +140,10 @@ export function createPlaybackServiceWith(
         hooks.onError?.(event.error);
         return;
       case 'state':
-        if (event.state === 'playing') update({ status: { kind: 'playing' } });
-        else if (event.state === 'paused') update({ status: { kind: 'paused' } });
+        if (event.state === 'playing') {
+          clearStartTimeout();
+          update({ status: { kind: 'playing' } });
+        } else if (event.state === 'paused') update({ status: { kind: 'paused' } });
         else if (event.state === 'ended') update({ status: { kind: 'idle' } });
         hooks.onState?.(event.state);
     }

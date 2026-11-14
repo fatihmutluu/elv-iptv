@@ -28,7 +28,7 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
   `nextLimitDelay(elapsedMs, attempt, config)` gives the connection-limit wait (`undefined` = give up).
 
 ## Recovery (spec sections 5.4 and 5.5; `recovery.ts`, always wired)
-- Entry: a stall of 4 s while `playing`, no `firstFrame` 8 s after `load`, or a recoverable error. Each rung takes a new
+- Entry: a stall of 4 s while `playing`, no `playing` 8 s after `load`, or a recoverable error. Each rung takes a new
   token after its gap (0, 1, 2, 4 s) and has 4 s to reach `playing`: 1 `retry`, 2 `load` again, 3 `recreate` + `load`,
   4 software audio after `decoder` (if the engine has it) or the next alternate; then `failed` (last error) + `stop`.
   30 s of `playing` restores every budget. Terminal codes fail at once; `http-404` gets one rung 2, then fails.

@@ -169,6 +169,21 @@ describe('live ladder', () => {
     expect(last(r)).toEqual({ name: 'retry', attempt: t + 1 });
   });
 
+  it('enters the ladder when a first frame is not followed by playing within 8,000 ms', async () => {
+    const r = rig({ dead: [] });
+    const t = r.service.tune(live('dead'));
+    await tick(300);
+    r.engine.emit({ attempt: t, type: 'firstFrame', atMs: Date.now() });
+    state(r, 'buffering');
+    stall(r, 'start');
+    await tick(7699);
+    expect(r.engine.commands.map((c) => c.name)).toEqual(['load']);
+    expect(status(r)).toEqual({ kind: 'tuning' });
+    await tick(1);
+    expect(status(r)).toEqual(recovering(1, 0));
+    expect(last(r)).toEqual({ name: 'retry', attempt: t + 1 });
+  });
+
   it('enters on a recoverable error and skips rung 4 when nothing is left to try', async () => {
     const r = rig({ dead: [] });
     const t = await playing(r, live('dead'));

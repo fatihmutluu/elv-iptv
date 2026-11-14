@@ -281,7 +281,7 @@ describe('failures', () => {
     expect(service.getState().status).toEqual({ kind: 'tuning' });
   });
 
-  it('firstFrame cancels the start timeout', async () => {
+  it('playing cancels the start timeout', async () => {
     const { service } = setup();
     service.tune(tuneReq('A'));
     await vi.advanceTimersByTimeAsync(20000);
