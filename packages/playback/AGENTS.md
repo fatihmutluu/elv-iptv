@@ -23,6 +23,12 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
   Scripts are keyed by URL and re-run on `retry`/`recreate`; `emit` injects any event (stale tokens too);
   `openMedias()` and `maxConcurrentMedias()` check the one-media rule. Inject fake-timer functions, no real timers.
 
+- `createPlaybackService({ engine, clock, timers, config? })`: `tune` (returns the token; a new tune supersedes the old
+  one at once), `retry`, `stop`, `play`, `pause`, `seek`, `getState`, `subscribe`, `dispose`. `DEFAULT_PLAYBACK_CONFIG`
+  holds the spec timings. Events of older tokens are dropped and counted in `staleEventsDropped`.
+- Recovery plugs in through the internal `recovery` dependency: `RecoveryHooks` (error, stall, start timeout, surface)
+  driving the service through `ServiceControl`. Without it, an error or start timeout fails the tune.
+
 ## Engine contract (spec section 5.1)
 - Commands are enqueue-and-return; results arrive as events, each echoing an `AttemptToken`.
 - Token adoption: after a command with a newer token the engine tags later events of the current media with it.
