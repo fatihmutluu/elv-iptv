@@ -74,10 +74,17 @@ Reference-app lessons already recorded in our research notes (prose, no code rea
   late events from a previous channel or rung can never change the state.
 - `PlayerEngine` (port, implemented by native modules and `FakePlayerEngine`):
   - Commands are enqueue-and-return (`void`): `load({ attempt, url, headers, kind: 'live' | 'vod', startMs?, options })`,
-    `play(attempt)`, `pause(attempt)`, `seek(attempt, positionMs)`, `stop(attempt)`, `recreate(attempt)` (release and
-    rebuild the native player instance, keeping the view and surface), `release()`.
-  - `load` replaces the current media. Contract: the engine closes the previous media's connections before it opens the
-    new URL (no overlap). This is how the service keeps one connection per account during a zap.
+    `retry(attempt)` (re-prepare the current media after an error or stall, at the live edge for live and at the last
+    position for VOD, reusing the engine instance), `play(attempt)`, `pause(attempt)`, `seek(attempt, positionMs)`,
+    `stop(attempt)`, `recreate(attempt)` (release and rebuild the native player instance, keeping the view and
+    surface), `release()`.
+  - Token adoption: every command carries a token; from the moment the engine receives a command with a newer token, it
+    tags every later event of the current media with that token. `load` starts a new media; `retry`, `recreate` and the
+    others keep the media and adopt the token.
+  - `load` replaces the current media. Contract: one media at a time. Every connection of the previous media is closed
+    before the new media's first request is opened. Within one media the engine may open several requests (HLS
+    playlist refreshes and segments); the rule is about media boundaries, which is where a zap would otherwise hold two
+    provider connections.
   - Events (`subscribe(listener) => unsubscribe`), each with `attempt`: `state` (`opening`, `buffering`, `ready`,
     `playing`, `paused`, `ended`), `firstFrame`, `clock` (a clock anchor, §5.2), `stall` (buffering with an empty forward
     buffer, with its duration), `error` (§5.3), `surface` (`created` / `destroyed`, for the gate and for surface-loss
@@ -103,7 +110,7 @@ Reference-app lessons already recorded in our research notes (prose, no code rea
 ### 5.4 Recovery ladder (live)
 Rungs, each bounded and visible as a status the OSD can show:
 - **L0 wait:** a stall shorter than the watchdog window (live 4 s) is left to the engine.
-- **L1 resume:** re-prepare the same media at the live edge (no new connection if the engine can resume).
+- **L1 resume:** `retry` the same media at the live edge (the engine reuses what it can).
 - **L2 reconnect:** `load` the same URL again (new connection after the old one closed).
 - **L3 rebuild:** `recreate` the engine instance, then `load`.
 - **L4 alternate:** the next alternative the caller supplied for this item (for example the Xtream HLS URL when TS
@@ -119,14 +126,17 @@ Rungs, each bounded and visible as a status the OSD can show:
 ### 5.5 Connection-limit path
 - `http-429`, `http-509` and `connection-limit` never enter the ladder. The service stops the media (closing its
   connection), waits with backoff (2 s, 4 s, 8 s, then 15 s, at most 60 s in total), then loads again; the status names
-  the provider limit. It never loads anything else for that account meanwhile.
+  the provider limit. After 60 s it fails with the `connection-limit` hint.
+- Account scope: `tune` carries an `accountKey` (the source id). A zap during the backoff to a channel with the same key
+  is held until the backoff ends (it keeps the `limited` state with the new token and the new item); a zap to another
+  account loads immediately and ends the backoff.
 - A zap is serialized: the new tune's `load` is sent only after the engine reported the previous media stopped (the
   engine contract in §5.1 makes this one command; the service still never issues two `load`s without a `stop`/`load`
   boundary).
 
 ### 5.6 Service API and state
 - `createPlaybackService({ engine, clock, timers, config? })`.
-- `tune(request: { item, kind, resolve: () => Promise<Result<StreamRequest>>, alternates?, startMs? }): AttemptToken`
+- `tune(request: { item, accountKey, kind, resolve: () => Promise<Result<StreamRequest>>, alternates?, startMs? }): AttemptToken`
   where `StreamRequest = { url, headers }` is built at play time by the caller (credentials stay out of the catalog;
   `@elv/data`'s `createStreamResolver` in the app). `retry()`, `stop()`, `pause()`, `play()`, `seek(ms)`.
 - `subscribe(listener)` receives `PlaybackState`: `idle | tuning | playing | paused | recovering(rung, nextAtMs) |
@@ -191,13 +201,25 @@ Rungs, each bounded and visible as a status the OSD can show:
   list gate): an always-mounted OSD (channel name, status line naming the recovery rung, a clock that reads
   `positionAt`), an auto-driver that zaps between simulator channels, and one `ELV_GATE_PLAYER {json}` line:
   `ttffColdMs`, `ttffWarmMs { p50, p95 }`, `zapMs { p50, p95, max }`, `surfaceCreated`, `staleEventsDropped`, `failures`,
-  `recoveries { rung: count }`, `overlapMs` (from the simulator log, below).
+  `recoveries { rung: count }`; the runner adds `limitResponses` and `overlapMs` from the simulator log (below).
+- Metric spans: `ttffColdMs` is the first `tune()` after the engine was created to its `firstFrame` (one value per run,
+  the app process fresh). `ttffWarmMs` is `tune()` to `firstFrame` for every later tune. `zapMs` is the driver's key
+  dispatch time to the new channel's `firstFrame`, so it includes resolving the URL and closing the old media.
 - `pnpm gate player [--avd] [--build] [--runs 3] [--baseline] [--budgets warn|fail]`: starts the simulator (FFmpeg
   required), runs the gate, reads `/_sim/requests` to compute connection overlap per account (must be 0), compares with
   `docs/learned/gates/player-android-tv.json`.
-- Budgets (§6.2): time to first frame < 2.0 s cold and < 1.0 s warm, zap p95 ≤ 2.0 s, one surface creation per run,
-  overlap 0 ms, no stale event applied. Fault runs: a `drop@5` stream recovers without user action; a 404 stream fails
-  within 10 s; a 509 stream takes the connection-limit path and never overlaps.
+- Budgets (§6.2): cold < 2.0 s, warm p50 < 1.0 s, zap p95 ≤ 2.0 s, one surface creation per run, no stale event applied,
+  and zero 509 or limit responses from the simulator on the one-connection `demo` account during the zaps (the provider's
+  own view of overlap). `overlapMs` (TS stream requests of one account whose lifetimes overlap in the simulator log) is
+  reported and warned above 0; the simulator sees a close slightly after the app sends it, so it is not a hard budget.
+  HLS segment requests carry no account in the simulator log and are excluded.
+- Fault runs (URLs built by the gate with `?fault=`): `drop@5` passes when playback is `playing` again within 10 s of the
+  first drop without user action (the run ends there; the simulator would drop again); `status=404` passes when the
+  service reaches `failed(http-404)` within 10 s; `status=509` passes when the service enters `limited` within 2 s and
+  its next load waits for the backoff (the run ends after the second backoff).
+- CI: phase 1 runs the player gate locally only (`docs/learned/gates/player-android-tv.json`); a report-only CI job is
+  added once the local gate is stable (it needs FFmpeg on the runner and a decision about the emulator's `-noaudio`).
+  The tvOS simulator run is phase 2.
 - Measured against simulator streams (H.264/AAC TS and HLS), not public test streams: CI and repo tests never depend on
   third-party hosts, and the simulator serves the same recipes every run.
 
@@ -219,5 +241,7 @@ Rungs, each bounded and visible as a status the OSD can show:
   match Expo SDK 58's, and Android can prove the contract meanwhile.
 - The FFmpeg audio extension, libass and the Android libmpv fallback are not part of the gate; each has its own issue.
 - The gate measures simulator streams, not public test streams (§7).
+- After the builder check: one media at a time (not one socket), `retry` command with token adoption, `accountKey` on
+  `tune` for the connection-limit scope, explicit metric spans, fault-run pass rules, and a local-only gate in phase 1.
 - ADR 0003 is amended: AetherEngine licence wording, MPVKit's status and the no-co-linking rule, VLCKit as the Apple
   fallback, Media3 preloading not used for live.
