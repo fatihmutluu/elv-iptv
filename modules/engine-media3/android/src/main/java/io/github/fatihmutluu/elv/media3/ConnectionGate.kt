@@ -13,7 +13,7 @@ fun interface ForceClosable {
  * Media-boundary connection gate (player core spec 5.1): every connection is counted under the generation of the
  * media that opened it, and a newer media's open waits until no older generation has an open connection. Within one
  * generation connections never wait for each other (HLS playlists and segments). Thread-safe; loader threads call
- * [opened], [closed] and [awaitPreviousClosed], the playback thread calls [beginMedia].
+ * [tryOpen], [closed] and [awaitPreviousClosed], the playback thread calls [beginMedia].
  */
 class ConnectionGate {
   private val lock = ReentrantLock()
@@ -22,7 +22,7 @@ class ConnectionGate {
   private val counts = HashMap<Long, Int>()
   private val connections = HashMap<Long, MutableSet<ForceClosable>>()
 
-  /** Makes [generation] the current media; older generations become stale and their waiters re-check. */
+  /** Makes [generation] the current media; older generations are superseded and their waiters re-check. */
   fun beginMedia(generation: Long) {
     lock.withLock {
       if (generation > current) current = generation
@@ -30,16 +30,18 @@ class ConnectionGate {
     }
   }
 
-  /** True once a newer generation began: the media is superseded and must not open connections. */
-  fun isStale(generation: Long): Boolean = lock.withLock { generation < current }
-
-  /** Counts one open connection of [generation]; [connection] is force-closed if it overstays a boundary. */
-  fun opened(generation: Long, connection: ForceClosable? = null) {
+  /**
+   * Counts one open connection of [generation] unless a newer generation already began, in one locked step, so a
+   * connection is never counted for a superseded media. [connection] is force-closed if it overstays a boundary.
+   * Returns false (nothing counted) for a superseded generation.
+   */
+  fun tryOpen(generation: Long, connection: ForceClosable? = null): Boolean =
     lock.withLock {
+      if (generation < current) return@withLock false
       counts[generation] = (counts[generation] ?: 0) + 1
       if (connection != null) connections.getOrPut(generation) { HashSet() }.add(connection)
+      true
     }
-  }
 
   /** Counts one closed connection of [generation]; a close of a generation already forced is ignored. */
   fun closed(generation: Long, connection: ForceClosable? = null) {

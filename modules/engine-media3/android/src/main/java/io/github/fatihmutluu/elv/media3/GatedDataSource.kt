@@ -59,10 +59,12 @@ internal class GatedDataSource(
       Thread.currentThread().interrupt()
       throw InterruptedIOException("interrupted at the media boundary")
     }
-    if (gate.isStale(generation)) throw SupersededMediaException()
     forced = false
     counted.set(true)
-    gate.opened(generation, this)
+    if (!gate.tryOpen(generation, this)) {
+      counted.set(false)
+      throw SupersededMediaException()
+    }
     return upstream.open(dataSpec)
   }
 
