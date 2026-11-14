@@ -12,3 +12,8 @@
 - `verify` compares the installed `BUILDINFO.json` SHA-256 with the lock, then rescans.
 - Pin update: download the new archive and its `.asc`, `gpg --verify` against the mpv release key, then change URL and
   SHA-256 in a normal PR.
+- Windows launcher: after the install, `launcher.ts` builds `apps/desktop/native/mpv-host/elv-mpv.c` into
+  `elv-mpv.exe` beside the DLL with MSVC (`vswhere` finds `vcvars64.bat`; `/W4 /WX`). libmpv is loaded at run time with
+  `LoadLibraryExW` from the exe folder, so the DLL stays replaceable (LGPL). Without Build Tools fetch fails clearly.
+- Launcher contract: `--name=value`, `--name` (yes) and `--no-name` (no) become libmpv options; `--elv-parent-pid=<pid>`
+  makes it quit mpv when that process exits. Exit codes: 2 bad argument or rejected option, 3 libmpv missing, 4 init failed.

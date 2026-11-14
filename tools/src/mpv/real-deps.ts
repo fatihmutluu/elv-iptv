@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { FetchDeps } from './fetch.ts';
+import { buildLauncher } from './launcher.ts';
 
 function run(cmd: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -47,7 +48,7 @@ function systemTar(): string {
 }
 
 /** Real side effects for `pnpm mpv`: https download, SHA-256, system tar, `gh run download`. */
-export function realDeps(log: (line: string) => void): FetchDeps {
+export function realDeps(log: (line: string) => void, root: string): FetchDeps {
   return {
     async download(url, file) {
       const res = await fetch(url, { redirect: 'follow' });
@@ -80,7 +81,15 @@ export function realDeps(log: (line: string) => void): FetchDeps {
     },
     readBytes: (file) => readFile(file),
     exists: existsSync,
-    async buildLauncher() {},
+    async buildLauncher(runtimeDir) {
+      if (process.platform !== 'win32') return;
+      const win = (p: string): string => p.replaceAll('/', String.fromCharCode(92));
+      await buildLauncher({
+        runtimeDir: win(runtimeDir),
+        source: win(`${root}/apps/desktop/native/mpv-host/elv-mpv.c`),
+      });
+      log('mpv: built elv-mpv.exe');
+    },
     log,
     readText: (file) => readFile(file, 'utf8'),
     async writeText(file, text) {

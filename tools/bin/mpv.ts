@@ -22,9 +22,10 @@ async function main(): Promise<void> {
   const lock = parseLock(
     JSON.parse(readFileSync(join(root, 'apps/desktop/mpv-runtime.lock.json'), 'utf8')),
   );
-  const deps = realDeps((line) => process.stdout.write(`${line}\n`));
+  const slashed = root.replaceAll(String.fromCharCode(92), '/');
+  const deps = realDeps((line) => process.stdout.write(`${line}\n`), slashed);
   const opts = {
-    root: root.replaceAll(String.fromCharCode(92), '/'),
+    root: slashed,
     platform: process.platform,
     arch: process.arch,
     lock,
