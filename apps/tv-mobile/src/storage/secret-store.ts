@@ -81,8 +81,8 @@ export function createSecureSecretStore(): SecretStore {
     async delete(key) {
       assertKey(key);
       const count = (await readCount(key).catch(() => undefined)) ?? 0;
-      await SecureStore.deleteItemAsync(`${key}.n`);
       await deleteChunks(key, 0, count);
+      await SecureStore.deleteItemAsync(`${key}.n`);
     },
   };
 }

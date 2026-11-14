@@ -145,3 +145,15 @@ describe('createSecureSecretStore', () => {
     await expect(store.delete('')).rejects.toThrow();
   });
 });
+
+describe('createSecureSecretStore delete retry', () => {
+  it('a failed delete can be retried until the store is empty', async () => {
+    const store = createSecureSecretStore();
+    await store.set('k', 'x'.repeat(5000));
+    mocked.failOn = 'k.1';
+    await expect(store.delete('k')).rejects.toThrow();
+    mocked.failOn = undefined;
+    await store.delete('k');
+    expect(mocked.data.size).toBe(0);
+  });
+});
