@@ -7,11 +7,12 @@
   "main": "dist/main/main.js",
   "scripts": {
     "bundle": "esbuild src/main/main.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/main/main.js --log-level=warning && esbuild src/preload/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/preload/preload.js --log-level=warning",
+    "bundle:e2e": "esbuild e2e/presenter-probe.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/e2e/presenter-probe.js --log-level=warning",
     "prepare:app": "pnpm --filter @elv/desktop-renderer --silent run export && pnpm run bundle",
     "dev": "pnpm run prepare:app && electron .",
     "build": "pnpm run prepare:app && electron-builder --publish never",
     "test": "vitest run --coverage --reporter=dot",
-    "test:e2e": "pnpm run prepare:app && playwright test --reporter=line",
+    "test:e2e": "pnpm run prepare:app && pnpm run bundle:e2e && playwright test --reporter=line",
     "typecheck": "tsc --noEmit -p . --pretty false"
   },
   "devDependencies": {

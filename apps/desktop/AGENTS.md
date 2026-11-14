@@ -7,8 +7,8 @@ Expo project with `platforms: ["web"]` rendered by react-native-web.
 - `pnpm run:app windows|macos|linux run|build` calls this package's `dev` and `build` scripts.
 - `dev` exports the renderer, bundles main and preload with esbuild into `dist/`, launches Electron.
 - `build` does the same, then `electron-builder --publish never` for the current OS into `release/`.
-- `test` runs the Vitest unit tests (run by `pnpm check`); `test:e2e` runs the Playwright `_electron`
-  smoke test against the bundled app and is not part of `pnpm check`.
+- `test` runs the Vitest unit tests (run by `pnpm check`); `test:e2e` (not in `pnpm check`) runs the Playwright
+  `_electron` smoke and, opt-in, the presenter go/no-go through `e2e/presenter-probe.ts` (`bundle:e2e`).
 
 ## Rules
 - `package.json` `main` is the bundled main process; the Expo entry lives only in `renderer/`.
@@ -38,3 +38,13 @@ Expo project with `platforms: ["web"]` rendered by react-native-web.
   doubled backslash arrives doubled, and the `%n%` length prefix is not supported. The user agent has its own option.
 - The IPC pipe is created by mpv with a DACL for the current user only (checked with `GetAccessControl`), so other
   local users cannot open it; the random name only stops same-user guessing, which a same-user process can do anyway.
+
+## Presentation (`src/main/player/presenter/`)
+- `VideoPresenter` has two implementations; `createPresenter` wires them to Electron, `choosePresenter` picks one.
+- Child window (Windows default): mpv draws (`--wid`) into a frameless video window owned by the app window and kept on
+  the area (move, resize, maximise, fullscreen, minimise, displays). It must stay `transparent`: Chromium's
+  DirectComposition output covers child windows, so an opaque one hid mpv (1 colour while it played). mpv's own
+  fullscreen is turned back to the app window. Own window: `--geometry` in physical pixels; Windows puts the frame's
+  top-left there (the title bar covers the area's top).
+- Go/no-go (Windows 10, 150 %): child passed; video in 719 ms, mpv 1200x675 px for an 800x450 DIP area, JS ping 0-5
+  ms, aligned after move, resize, area change, fullscreen. Rerun with `pnpm sim`: `ELV_MPV_SPIKE=1 pnpm test:e2e`.

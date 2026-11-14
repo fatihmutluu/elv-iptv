@@ -14,7 +14,8 @@ const config: KnipConfig = {
       ignoreDependencies: ['@react-native-tvos/config-tv', 'expo-updates'],
     },
     'apps/desktop': {
-      entry: ['e2e/*.spec.ts'],
+      // presenter-probe.ts is the test-only Electron main the presenter spec launches.
+      entry: ['e2e/*.spec.ts', 'e2e/presenter-probe.ts'],
       // Needed by the packaging script and by the workspace link to the renderer export.
       ignoreDependencies: ['@elv/desktop-renderer'],
       // Windows system tool used to check that a recorded pid is still the launcher.
