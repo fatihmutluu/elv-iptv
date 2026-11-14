@@ -14,7 +14,8 @@ export interface SimLog {
 
 /** Body of the simulator's connection-limit notice (HTTP 200); no media stream is this short. */
 const NOTICE_BYTES = 'Max connections reached'.length;
-const STREAM_PATH = /^\/(?:live|movie|series|timeshift)\/.+\.ts$/;
+/** Paths of media stream requests that carry an MPEG-TS body. */
+export const STREAM_PATH = /^\/(?:live|movie|series|timeshift)\/.+\.ts$/;
 
 /** The simulator's request log over HTTP, for a simulator reachable at `base`. */
 export function httpSimLog(base: string): SimLog {

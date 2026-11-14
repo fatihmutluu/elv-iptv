@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Exec } from '../src/gates/adb.ts';
-import { PLAYER_USAGE } from '../src/gates/player-cli.ts';
+import { PLAYER_USAGE, playerMain } from '../src/gates/player-cli.ts';
 import {
   aggregateRuns,
   comparePlayer,
@@ -390,7 +390,11 @@ describe('runPlayerGate', () => {
     f.sim.ensure = async () => ({ reused: true, stop: async () => void f.events.push('stop') });
     const seen: string[] = [];
     const exec: Exec = async (c, a, o) => {
-      seen.push(c);
+      seen.push(
+        c === 'adb'
+          ? `adb ${a.find((x) => x === 'install' || x === 'start') ?? ''}`.trim()
+          : 'build',
+      );
       return f.exec(c, a, o);
     };
     await runPlayerGate({
@@ -401,8 +405,49 @@ describe('runPlayerGate', () => {
       ffmpeg,
       runs: 1,
       onNote: (n) => notes.push(n),
-    }).catch(() => {});
+    });
     expect(notes[0]).toMatch(/reusing it/);
+    const order = seen.filter((c) => c !== 'adb');
+    expect(order.slice(0, 2)).toEqual(['build', 'build']);
+    expect(order.indexOf('adb install')).toBe(2);
+    expect(order.indexOf('adb start')).toBeGreaterThan(2);
+  });
+});
+
+describe('line validation', () => {
+  it('fails a zap run whose line ran a fault or fewer zaps than requested', async () => {
+    const faulted = fakes({ lines: [line({ fault: '404' })], entries: [[]] });
+    await expect(runPlayerGate({ ...faulted, sleep: noSleep, ffmpeg, runs: 1 })).rejects.toThrow(
+      /fault "404"/,
+    );
+    const short = fakes({ lines: [line({ zaps: 5 })], entries: [[]] });
+    await expect(runPlayerGate({ ...short, sleep: noSleep, ffmpeg, runs: 1 })).rejects.toThrow(
+      /5 zaps, requested no fault and 30/,
+    );
+    expect(short.events.at(-1)).toBe('stop');
+  });
+
+  it('fails a fault run whose line made no zap', () => {
+    const l = line({ fault: '404', faultOutcome: 'failed-in-time', zaps: 0 });
+    const out = judgeFault('404', l, [entry(0, 20, { status: 404 })], '1001');
+    expect(out.failures).toEqual(['404: the screen made 0 zaps, requested 1']);
+  });
+});
+
+describe('playerMain', () => {
+  it('refuses --write-baseline without --faults before touching a device', async () => {
+    const written: string[] = [];
+    const real = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((t: string) => {
+      written.push(t);
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      expect(await playerMain({ 'write-baseline': true }, '.')).toBe(2);
+    } finally {
+      process.stderr.write = real;
+    }
+    expect(written.join('')).toMatch(/baseline needs --faults/);
   });
 });
 

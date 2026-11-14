@@ -62,6 +62,12 @@ export async function playerMain(values: PlayerCli, root: string): Promise<numbe
   const budgets = (values.budgets ?? 'fail') as BudgetMode;
   if (budgets !== 'fail' && budgets !== 'warn') return bad('--budgets is fail or warn');
 
+  if (values['write-baseline'] === true && values.faults !== true) {
+    return bad(
+      'a baseline needs --faults: it may only record a build whose fault handling (drop5, 404, 509) passed in the same session',
+    );
+  }
+
   const baselineName = values.baseline ?? DEFAULT_BASELINE;
   const baselinePath = resolve(root, baselineName);
   if (values['write-baseline'] === true) {

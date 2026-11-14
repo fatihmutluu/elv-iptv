@@ -2,7 +2,14 @@ import { findFfmpeg } from '../sim/media.ts';
 import { buildApk, type Exec, installApk, openDevice, POLL_MS, startGate } from './adb.ts';
 import type { BudgetMode, CompareOutcome } from './compare.ts';
 import { EMULATOR_HOST, median, type SimControl } from './import-gate.ts';
-import { connectionStats, httpSimLog, type SimLog, type SimLogEntry, span } from './sim-log.ts';
+import {
+  connectionStats,
+  httpSimLog,
+  type SimLog,
+  type SimLogEntry,
+  STREAM_PATH,
+  span,
+} from './sim-log.ts';
 
 const ACCOUNT = 'demo';
 const CHANNELS = ['1001', '1002', '1003', '1004'];
@@ -23,7 +30,6 @@ const DROP_RECOVERY_MS = 10_000;
 const NOT_FOUND_FAIL_MS = 10_000;
 const FIRST_BACKOFF_MS = 2000;
 const CLOCK_ROUNDING_MS = 10;
-const STREAM_PATH = /^\/(?:live|movie|series|timeshift)\/.+\.ts$/;
 
 /** The faults a player gate run injects, with the outcome the screen must report for each. */
 const FAULT_EXPECTED = {
@@ -256,6 +262,9 @@ export function judgeFault(
   if (line.fault !== (fault as string)) {
     failures.push(`the screen ran fault "${line.fault}", expected "${fault}"`);
   }
+  if (line.zaps < FAULT_ZAPS) {
+    failures.push(`${fault}: the screen made ${line.zaps} zaps, requested ${FAULT_ZAPS}`);
+  }
   if (line.faultOutcome === 'missed') {
     failures.push(
       `${fault}: the fault outcome is missed (the stay ended without the expected state)`,
@@ -382,6 +391,11 @@ export async function runPlayerGate(opts: PlayerGateOptions): Promise<PlayerGate
     const stats: { limitResponses: number; overlapMs: number }[] = [];
     for (let i = 0; i < runs; i++) {
       const line = await play(link(zaps, ZAP_RATE, ''), (zaps / ZAP_RATE) * 1000);
+      if (line.fault !== '' || line.zaps < zaps) {
+        throw new Error(
+          `gate: the screen ran fault "${line.fault}" with ${line.zaps} zaps, requested no fault and ${zaps} zaps`,
+        );
+      }
       const stat = connectionStats(await log.entries(), ACCOUNT);
       lines.push(line);
       stats.push(stat);
