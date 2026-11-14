@@ -15,6 +15,7 @@ describe('summarize', () => {
       scripted: 104,
       coalesced: 2,
       losses: 1,
+      intents: { select: 0, long: 0, back: 0, backLong: 0, edge: 0, key: 0 },
       keyToHighlightMs: { p50: 50, p95: 95, max: 100 },
       maxJsGapMs: 7,
       maxFrameStallMs: 12.35,
@@ -69,6 +70,29 @@ describe('createRecorder', () => {
     expect(m.moves).toBe(2);
     expect(m.keyToHighlightMs).toEqual({ p50: 20, p95: 30, max: 30 });
     expect(m.losses).toBe(0);
+  });
+
+  it('counts intents and reports all six kinds, zeros included', () => {
+    const r = createRecorder(geometry);
+    r.intent('select');
+    r.intent('long');
+    r.intent('long');
+    expect(r.finish().intents).toEqual({
+      select: 1,
+      long: 2,
+      back: 0,
+      backLong: 0,
+      edge: 0,
+      key: 0,
+    });
+    expect(r.finish().intents).toEqual({
+      select: 0,
+      long: 0,
+      back: 0,
+      backLong: 0,
+      edge: 0,
+      key: 0,
+    });
   });
 
   it('counts coalesced repeats', () => {
