@@ -91,18 +91,24 @@ export async function spawnMpv(
     { windowsHide: true, stdio: 'ignore' },
   );
   const pid = child.pid ?? 0;
-  if (opts.pidFile) recordPid(opts.pidFile, pid);
+  if (opts.pidFile && pid) recordPid(opts.pidFile, pid);
 
   let exitInfo: { code: number | null; signal: string | null } | undefined;
+  let spawnError: Error | undefined;
   const exited = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
     child.once('exit', (code: number | null, signal: string | null) => {
       exitInfo = { code, signal };
-      if (opts.pidFile) forgetPid(opts.pidFile, pid);
+      if (opts.pidFile && pid) forgetPid(opts.pidFile, pid);
       if (opts.platform !== 'win32') rmSync(dirname(endpoint), { recursive: true, force: true });
       resolve(exitInfo);
     });
+    child.once('error', (error: Error) => {
+      spawnError = error;
+      exitInfo ??= { code: null, signal: null };
+      child.kill();
+      resolve(exitInfo);
+    });
   });
-  child.once('error', () => child.kill());
 
   const deadline = Date.now() + (opts.connectTimeoutMs ?? 5000);
   const retryMs = deps.retryDelayMs ?? 25;
@@ -112,6 +118,7 @@ export async function spawnMpv(
       child.kill();
       throw abortError();
     }
+    if (spawnError) throw new Error(`mpv could not start: ${spawnError.message}`);
     if (exitInfo)
       throw new Error(`mpv exited with code ${exitInfo.code ?? 'null'} before its IPC was ready`);
     if (Date.now() > deadline) {

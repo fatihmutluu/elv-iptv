@@ -12,7 +12,10 @@ const here = dirname(fileURLToPath(import.meta.url));
 const executable = resolve(here, '../../../../resources/mpv/win32-x64/elv-mpv.exe');
 const fixtureDir = resolve(here, 'fixtures');
 const record = process.env['ELV_RECORD_MPV_FIXTURES'] === '1';
-const ready = process.platform === 'win32' && existsSync(executable) && (await simulatorAnswers());
+// Opt-in: it opens mpv windows and takes about 30 s. Recording implies it.
+const optedIn = process.env['ELV_MPV_SPIKE'] === '1' || record;
+const ready =
+  optedIn && process.platform === 'win32' && existsSync(executable) && (await simulatorAnswers());
 
 /** Launcher arguments for a hidden-ish test window; the OSC stays on. */
 const TEST_ARGS = [
@@ -37,7 +40,7 @@ async function launch(): Promise<MpvProcess> {
 }
 
 // The simulator redaction applied to recorded text: the password path segment of a stream URL becomes three asterisks.
-export function redactUrls(text: string): string {
+function redactUrls(text: string): string {
   return text.replace(/\/(live|movie|series)\/([^/\s]+)\/[^/\s]+\//g, '/$1/$2/***/');
 }
 
@@ -164,9 +167,11 @@ describe.skipIf(!ready)('mpv spike against the simulator', { timeout: 120000 }, 
           writeFileSync(file, `${fixtureLines(run).join('\n')}\n`);
         }
         const recorded = readFileSync(file, 'utf8');
-        expect(recorded).not.toMatch(/\/demo\/demo\//);
-        const live = fixtureLines(run).join('\n');
-        expect(live).toMatch(spec.signature);
+        for (const m of recorded.matchAll(/\/(?:live|movie|series)\/[^/\s]+\/([^/\s]*)\//g)) {
+          expect(m[1]).toBe('***');
+        }
+        expect(recorded).toMatch(spec.signature);
+        expect(fixtureLines(run).join('\n')).toMatch(spec.signature);
         expect(run.endFile?.['reason']).toBe(spec.reason ?? 'error');
         if (spec.fileError) expect(run.endFile?.['file_error']).toBe(spec.fileError);
       } finally {

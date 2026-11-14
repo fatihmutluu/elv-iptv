@@ -25,8 +25,9 @@ Expo project with `platforms: ["web"]` rendered by react-native-web.
 - `codec.ts` (JSON lines), `client.ts` (request ids, 3 s `MpvWedgedError`, events), `process.ts` (spawn the launcher
   hidden, random `\.\pipe\elv-mpv-<16 hex>` per launch, connect with retry, `quit`, pid file sweep). Unit tests use a
   fake pipe; coverage of these three files must stay at 90 % lines.
-- `spike.integration.test.ts` runs the real launcher against `pnpm sim` (`ELV_SIM_URL`); it skips without win32, the
-  runtime or the simulator. `ELV_RECORD_MPV_FIXTURES=1` re-records `fixtures/*.jsonl` (rerun after a runtime update).
+- `spike.integration.test.ts` runs the real launcher against `pnpm sim` (`ELV_SIM_URL`). It is opt-in (opens mpv
+  windows, about 30 s): set `ELV_MPV_SPIKE=1`; it also needs win32, the runtime and the simulator, else it skips.
+  `ELV_RECORD_MPV_FIXTURES=1` implies it and re-records `fixtures/*.jsonl` (rerun after a runtime update).
 - Spike outcome (mpv 0.42.0): Lua yes and the OSC runs (`osc-visibility` replies `success`), so no scripting task.
   `loadfile replace` x10 at 300 ms: no 509, one simulator connection at a time, so `loadMode` stays `replace`.
 - Fault signatures (with `curl-enabled=no`, FFmpeg networking): `ffmpeg warn http: HTTP error <status>`; a refused

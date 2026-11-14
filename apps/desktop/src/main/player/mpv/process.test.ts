@@ -235,3 +235,23 @@ describe('systemSweepDeps', () => {
     expect(await systemSweepDeps.isLauncher(process.pid)).toBe(false);
   });
 });
+
+describe('spawnMpv start failure', () => {
+  it('rejects early when the child cannot start and records no pid', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'elv-pid-'));
+    const file = join(dir, 'mpv-pids.json');
+    try {
+      const h = harness(100000);
+      h.child.pid = undefined as unknown as number;
+      const result = spawnMpv(
+        { executable: 'x', args: [], platform: 'win32', parentPid: 1, pidFile: file },
+        h.deps,
+      );
+      setTimeout(() => h.child.emit('error', new Error('ENOENT')), 5);
+      await expect(result).rejects.toThrow(/could not start: ENOENT/);
+      expect(existsSync(file)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

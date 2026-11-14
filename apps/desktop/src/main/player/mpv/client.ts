@@ -61,7 +61,13 @@ export function createMpvClient(stream: Duplex, opts: { replyTimeoutMs: number }
         clearTimeout(entry.timer);
         entry.resolve(message as MpvReply);
       } else if ('event' in message) {
-        for (const l of [...eventListeners]) l(message);
+        for (const l of [...eventListeners]) {
+          try {
+            l(message);
+          } catch {
+            // one failing listener must not drop the rest of the chunk
+          }
+        }
       }
     }
   });
