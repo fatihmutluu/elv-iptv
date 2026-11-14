@@ -5,23 +5,23 @@
     "sdk": "36"
   },
   "build": "development variant, release APK (JS bundled, debug-signed)",
-  "commit": "0ed7e16",
+  "commit": "8f6c226",
   "date": "2026-11-14",
   "result": {
     "zaps": 30,
-    "ttffColdMs": 741.25,
+    "ttffColdMs": 628.92,
     "ttffWarmMs": {
-      "p50": 464.53,
-      "p95": 677.01
+      "p50": 466,
+      "p95": 656.76
     },
     "zapMs": {
-      "p50": 464.55,
-      "p95": 677.03,
-      "max": 1670.63
+      "p50": 466.04,
+      "p95": 656.78,
+      "max": 700.32
     },
     "surfaceCreated": 1,
     "staleEventsApplied": 0,
-    "staleEventsDropped": 1,
+    "staleEventsDropped": 0,
     "failures": 0,
     "limitResponses": 0,
     "overlapMs": 0
