@@ -10,7 +10,7 @@
     "prepare:app": "pnpm --filter @elv/desktop-renderer --silent run export && pnpm run bundle",
     "dev": "pnpm run prepare:app && electron .",
     "build": "pnpm run prepare:app && electron-builder --publish never",
-    "test": "vitest run --reporter=dot",
+    "test": "vitest run --coverage --reporter=dot",
     "test:e2e": "pnpm run prepare:app && playwright test --reporter=line",
     "typecheck": "tsc --noEmit -p . --pretty false"
   },
@@ -19,6 +19,7 @@
     "@elv/desktop-renderer": "workspace:*",
     "@playwright/test": "1.65.0",
     "@types/node": "^24.19.2",
+    "@vitest/coverage-v8": "catalog:",
     "electron": "45.3.1",
     "electron-builder": "26.18.0",
     "esbuild": "^0.28.2",

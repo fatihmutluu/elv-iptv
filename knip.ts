@@ -17,6 +17,8 @@ const config: KnipConfig = {
       entry: ['e2e/*.spec.ts'],
       // Needed by the packaging script and by the workspace link to the renderer export.
       ignoreDependencies: ['@elv/desktop-renderer'],
+      // Windows system tool used to check that a recorded pid is still the launcher.
+      ignoreBinaries: ['tasklist'],
     },
     'apps/desktop/renderer': {
       // Optional Expo packages inferred from app.json.
