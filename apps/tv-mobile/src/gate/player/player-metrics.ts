@@ -37,6 +37,11 @@ export interface PlayerRecorder {
    */
   dispatch(item: string, zapAt?: number): void;
   observe(state: PlaybackState): void;
+  /**
+   * An engine stall of the current attempt. One that ends while the service still shows `playing` is a recovery the
+   * engine made on its own (ladder rung 0, for example its own reconnect after a dropped connection).
+   */
+  stall(phase: 'start' | 'end'): void;
   surface(change: 'created' | 'destroyed'): void;
   /** The line's metrics; `final` is the service state at the end of the run. */
   finish(final: PlaybackState): PlayerMetrics;
@@ -50,6 +55,7 @@ interface Tune {
   failed: boolean;
   isDwell: boolean;
   sawRecovering: boolean;
+  stalled: boolean;
   recovered: boolean;
   sawLimited: boolean;
 }
@@ -108,6 +114,7 @@ export function createPlayerRecorder(opts: {
       failed: false,
       isDwell: opts.fault !== '' && !dwellDone && item === opts.faultItem,
       sawRecovering: false,
+      stalled: false,
       recovered: false,
       sawLimited: false,
     };
@@ -155,6 +162,11 @@ export function createPlayerRecorder(opts: {
       if (current === undefined) return;
       trackStatus(current, state.status);
       closeSpan(current, state);
+    },
+    stall(phase) {
+      if (current === undefined) return;
+      if (phase === 'start') current.stalled = true;
+      else if (current.stalled && previous?.kind === 'playing') current.recovered = true;
     },
     surface(change) {
       if (change === 'created') surfaceCreated += 1;

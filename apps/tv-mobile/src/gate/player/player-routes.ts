@@ -1,7 +1,10 @@
 /** The fault a player gate run injects into its first channel. */
-export type PlayerFault = '' | 'drop5' | '404' | '509';
+export type PlayerFault = '' | 'drop5' | '404' | '509' | 'notice' | 'stall';
 
-/** Parameters of the gate deep link `elviptv://gate/player?host=10.0.2.2:7878&account=demo&channels=1001,1002&zaps=30&rate=0.5&fault=`. */
+/** The stream form a run plays: live MPEG-TS, live HLS or a VOD movie (MP4). */
+type PlayerStream = 'ts' | 'hls' | 'vod';
+
+/** Parameters of the gate deep link `elviptv://gate/player?host=10.0.2.2:7878&account=demo&channels=1001,1002&zaps=30&rate=0.5&fault=&stream=ts`. */
 export interface PlayerGateParams {
   /** `host[:port]` of the stream simulator; only the development hosts (`10.0.2.2`, `127.0.0.1`, `localhost`). */
   host: string;
@@ -15,6 +18,8 @@ export interface PlayerGateParams {
   rate: number;
   /** Fault injected into the first channel (see {@link faultSpec}); empty for none. */
   fault: PlayerFault;
+  /** Stream form of every channel; `vod` ids are simulator movie ids and tune as VOD. */
+  stream: PlayerStream;
 }
 
 const GATE_URL = /^elviptv:\/\/gate\/player\/?(?:\?([^#]*))?(?:#.*)?$/;
@@ -24,12 +29,15 @@ const CHANNEL = /^\d{1,9}$/;
 const DEFAULT_HOST = '10.0.2.2:7878';
 const DEFAULT_CHANNELS: readonly string[] = ['1001', '1002', '1003', '1004'];
 const MAX_CHANNELS = 20;
-const FAULTS: ReadonlySet<string> = new Set(['drop5', '404', '509']);
 const FAULT_SPECS: Readonly<Record<Exclude<PlayerFault, ''>, string>> = {
   drop5: 'drop@5s',
   '404': 'status=404',
   '509': 'status=509',
+  notice: 'text-notice',
+  stall: 'stall30s@2s',
 };
+const FAULTS: ReadonlySet<string> = new Set(Object.keys(FAULT_SPECS));
+const STREAMS: ReadonlySet<string> = new Set(['ts', 'hls', 'vod']);
 
 function readHost(value: string | undefined): string {
   if (value === undefined) return DEFAULT_HOST;
@@ -61,7 +69,7 @@ function readChannels(value: string | undefined): readonly string[] {
 /**
  * Parses a player gate link. Returns `undefined` for anything that is not `elviptv://gate/player`. Missing or malformed
  * values fall back to the defaults (`10.0.2.2:7878`, `demo`, channels 1001 to 1004, 30 zaps, 0.5 per second, no
- * fault); a host outside the development hosts is replaced; zaps and rate are clamped; channels beyond 20 are cut.
+ * fault, `ts`); a host outside the development hosts is replaced; zaps and rate are clamped; channels beyond 20 are cut.
  */
 export function parsePlayerGateUrl(url: string | null): PlayerGateParams | undefined {
   if (url === null) return undefined;
@@ -74,6 +82,7 @@ export function parsePlayerGateUrl(url: string | null): PlayerGateParams | undef
   }
   const account = query.get('account');
   const fault = query.get('fault') ?? '';
+  const stream = query.get('stream') ?? 'ts';
   return {
     host: readHost(query.get('host')),
     account: account !== undefined && ACCOUNT.test(account) ? account : 'demo',
@@ -81,6 +90,7 @@ export function parsePlayerGateUrl(url: string | null): PlayerGateParams | undef
     zaps: readNumber(query.get('zaps'), 30, 1, 200, true),
     rate: readNumber(query.get('rate'), 0.5, 0.1, 5, false),
     fault: FAULTS.has(fault) ? (fault as PlayerFault) : '',
+    stream: STREAMS.has(stream) ? (stream as PlayerStream) : 'ts',
   };
 }
 
@@ -95,7 +105,11 @@ export function faultSpec(fault: PlayerFault): string | undefined {
  */
 export function streamUrl(params: PlayerGateParams, index: number): string {
   const id = params.channels[index];
-  const base = `http://${params.host}/live/${params.account}/${params.account}/${id}.ts`;
+  const { account, stream } = params;
+  const base =
+    stream === 'vod'
+      ? `http://${params.host}/movie/${account}/${account}/${id}.mp4`
+      : `http://${params.host}/live/${account}/${account}/${id}.${stream === 'hls' ? 'm3u8' : 'ts'}`;
   const spec = index === 0 ? faultSpec(params.fault) : undefined;
   return spec === undefined ? base : `${base}?fault=${spec}`;
 }

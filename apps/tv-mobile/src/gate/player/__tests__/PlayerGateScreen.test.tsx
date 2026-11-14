@@ -38,6 +38,7 @@ const params: PlayerGateParams = {
   zaps: 3,
   rate: 1,
   fault: '',
+  stream: 'ts',
 };
 
 function setup(scripts?: Record<string, readonly FakeStep[]>): FakePlayerEngine {
@@ -207,6 +208,47 @@ describe('PlayerGateScreen', () => {
     expect(m.recoveries['1']).toBeGreaterThanOrEqual(1);
   });
 
+  it('judges a drop run recovered when the engine resumes from a stall on its own', async () => {
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const engine = setup({
+      [`${HOST}/1001.ts?fault=drop@5s`]: [
+        { afterMs: 300, emit: 'firstFrame' },
+        { afterMs: 300, emit: 'state', state: 'playing' },
+        { afterMs: 5000, emit: 'stall', phase: 'start' },
+        { afterMs: 6000, emit: 'state', state: 'playing' },
+        { afterMs: 6000, emit: 'stall', phase: 'end' },
+      ],
+    });
+    await render(
+      <PlayerGateScreen
+        params={{ ...params, zaps: 1, rate: 0.1, fault: 'drop5' }}
+        createEngine={asEngine(engine)}
+      />,
+    );
+    await advance(16_000);
+    const m = onlyMetrics(log);
+    expect(m.faultOutcome).toBe('recovered');
+    expect(m.recoveries).toEqual({ '1': 0, '2': 0, '3': 0, '4': 0 });
+  });
+
+  it('ignores stalls of an older attempt', async () => {
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const engine = setup();
+    await render(
+      <PlayerGateScreen
+        params={{ ...params, zaps: 1, rate: 0.1, fault: 'drop5' }}
+        createEngine={asEngine(engine)}
+      />,
+    );
+    await advance(1000);
+    await act(async () => {
+      engine.emit({ attempt: 0, type: 'stall', phase: 'start', atMs: 0 });
+      engine.emit({ attempt: 0, type: 'stall', phase: 'end', atMs: 0 });
+    });
+    await advance(15_000);
+    expect(onlyMetrics(log).faultOutcome).toBe('missed');
+  });
+
   it('judges a 404 run failed-in-time and shows the error', async () => {
     const log = jest.spyOn(console, 'log').mockImplementation(() => {});
     const engine = setup({
@@ -245,6 +287,23 @@ describe('PlayerGateScreen', () => {
     expect(screen.getByTestId('osd-status')).toHaveTextContent('limited');
     await advance(8000);
     expect(onlyMetrics(log).faultOutcome).toBe('limited-backoff');
+  });
+
+  it('tunes the vod stream form as VOD', async () => {
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+    const engine = setup();
+    const load = jest.spyOn(engine, 'load');
+    await render(
+      <PlayerGateScreen
+        params={{ ...params, channels: ['200001'], zaps: 1, stream: 'vod' }}
+        createEngine={asEngine(engine)}
+      />,
+    );
+    await advance(100);
+    expect(load.mock.calls[0]?.[0]).toMatchObject({
+      kind: 'vod',
+      url: 'http://10.0.2.2:7878/movie/demo/demo/200001.mp4',
+    });
   });
 
   it('shows a clock that follows the engine position in its own frames', async () => {

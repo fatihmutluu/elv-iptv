@@ -18,12 +18,13 @@ describe('parsePlayerGateUrl', () => {
       zaps: 30,
       rate: 0.5,
       fault: '',
+      stream: 'ts',
     });
     expect(parsePlayerGateUrl(`${BASE}/?#x`)?.zaps).toBe(30);
   });
 
   it('reads every parameter', () => {
-    const url = `${BASE}?host=127.0.0.1:9000&account=large&channels=7,8&zaps=5&rate=1.5&fault=drop5`;
+    const url = `${BASE}?host=127.0.0.1:9000&account=large&channels=7,8&zaps=5&rate=1.5&fault=drop5&stream=hls`;
     expect(parsePlayerGateUrl(url)).toEqual({
       host: '127.0.0.1:9000',
       account: 'large',
@@ -31,6 +32,7 @@ describe('parsePlayerGateUrl', () => {
       zaps: 5,
       rate: 1.5,
       fault: 'drop5',
+      stream: 'hls',
     });
   });
 
@@ -65,8 +67,15 @@ describe('parsePlayerGateUrl', () => {
   it('accepts only known faults and plain account names', () => {
     expect(parsePlayerGateUrl(`${BASE}?fault=404`)?.fault).toBe('404');
     expect(parsePlayerGateUrl(`${BASE}?fault=509`)?.fault).toBe('509');
+    expect(parsePlayerGateUrl(`${BASE}?fault=notice`)?.fault).toBe('notice');
+    expect(parsePlayerGateUrl(`${BASE}?fault=stall`)?.fault).toBe('stall');
     expect(parsePlayerGateUrl(`${BASE}?fault=status=500`)?.fault).toBe('');
     expect(parsePlayerGateUrl(`${BASE}?account=a/b`)?.account).toBe('demo');
+  });
+
+  it('accepts only known stream forms', () => {
+    expect(parsePlayerGateUrl(`${BASE}?stream=vod`)?.stream).toBe('vod');
+    expect(parsePlayerGateUrl(`${BASE}?stream=mkv`)?.stream).toBe('ts');
   });
 });
 
@@ -83,5 +92,16 @@ describe('streamUrl', () => {
     expect(faultSpec('')).toBeUndefined();
     expect(faultSpec('404')).toBe('status=404');
     expect(faultSpec('509')).toBe('status=509');
+    expect(faultSpec('notice')).toBe('text-notice');
+    expect(faultSpec('stall')).toBe('stall30s@2s');
+  });
+
+  it('builds HLS and movie URLs for the other stream forms', () => {
+    const hls = { ...params, fault: 'notice' as const, stream: 'hls' as const };
+    expect(streamUrl(hls, 0)).toBe(
+      'http://10.0.2.2:7878/live/demo/demo/1001.m3u8?fault=text-notice',
+    );
+    const vod = { ...params, channels: ['200001'], fault: '' as const, stream: 'vod' as const };
+    expect(streamUrl(vod, 0)).toBe('http://10.0.2.2:7878/movie/demo/demo/200001.mp4');
   });
 });

@@ -126,6 +126,34 @@ describe('createPlayerRecorder', () => {
     expect(h.recorder.finish(h.state).faultOutcome).toBe('recovered');
   });
 
+  it('judges a drop run recovered when the engine ends its stall while the service plays (rung 0)', () => {
+    const h = make('drop5');
+    h.tune('a', 0);
+    h.frame(300);
+    h.status({ kind: 'playing' });
+    h.recorder.stall('start');
+    h.recorder.stall('end');
+    h.tune('b', 10_000, 10_000);
+    expect(h.recorder.finish(h.state).faultOutcome).toBe('recovered');
+  });
+
+  it('does not count a stall that a rung ended, nor a stall end without a start', () => {
+    const r = make('drop5');
+    r.tune('a', 0);
+    r.frame(300);
+    r.status({ kind: 'playing' });
+    r.recorder.stall('start');
+    r.status({ kind: 'recovering', rung: 1, nextAtMs: 6000 });
+    r.recorder.stall('end');
+    r.tune('b', 10_000, 10_000);
+    expect(r.recorder.finish(r.state).faultOutcome).toBe('missed');
+    const e = make('drop5');
+    e.tune('a', 0);
+    e.status({ kind: 'playing' });
+    e.recorder.stall('end');
+    expect(e.recorder.finish(e.state).faultOutcome).toBe('missed');
+  });
+
   it('judges a 404 run failed-in-time and a 509 run limited-backoff at the end of the run', () => {
     const f = make('404');
     f.tune('a', 0);

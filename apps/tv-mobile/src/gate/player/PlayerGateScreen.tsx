@@ -156,7 +156,7 @@ export function PlayerGateScreen({
       session.service.tune({
         item,
         accountKey: params.account,
-        kind: 'live',
+        kind: params.stream === 'vod' ? 'vod' : 'live',
         resolve: async () => ({
           ok: true,
           value: { url: streamUrl(params, wrapped), headers: {} },
@@ -182,6 +182,9 @@ export function PlayerGateScreen({
     if (session === null) return;
     const offEngine = session.engine.subscribe((event) => {
       if (event.type === 'surface') session.recorder.surface(event.change);
+      else if (event.type === 'stall' && event.attempt === session.service.getState().attempt) {
+        session.recorder.stall(event.phase);
+      }
     });
     const offService = session.service.subscribe((state) => session.recorder.observe(state));
     return () => {
