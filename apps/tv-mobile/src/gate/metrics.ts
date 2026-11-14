@@ -1,7 +1,28 @@
 import type { FrameWindow } from '@elv/ui-kit';
 
+/** The intent kinds a dispatch can produce, with how often each occurred in a run. */
+interface IntentCounts {
+  select: number;
+  long: number;
+  back: number;
+  backLong: number;
+  edge: number;
+  key: number;
+}
+
+const emptyIntents = (): IntentCounts => ({
+  select: 0,
+  long: 0,
+  back: 0,
+  backLong: 0,
+  edge: 0,
+  key: 0,
+});
+
 /** Counters a gate run reports next to the latency summary. */
 export interface GateCounts {
+  /** Dispatched intents by kind; kinds missing here count as 0. */
+  intents?: Partial<IntentCounts>;
   moves: number;
   /** Events the auto-driver emitted (the script length, coalesced and edge steps included); 0 for real keys. */
   scripted: number;
@@ -11,7 +32,9 @@ export interface GateCounts {
 }
 
 /** What the single `ELV_GATE` line carries. Times are milliseconds rounded to 0.01. */
-export interface GateMetrics extends GateCounts {
+export interface GateMetrics extends Omit<GateCounts, 'intents'> {
+  /** Intents the focus store emitted, all six kinds always present. */
+  intents: IntentCounts;
   keyToHighlightMs: { p50: number; p95: number; max: number };
   /** The longest synchronous JS work of one move, from dispatch to the end of the list commit. */
   maxJsGapMs: number;
@@ -63,6 +86,7 @@ export function summarize(
     scripted: counts.scripted,
     coalesced: counts.coalesced,
     losses: counts.losses,
+    intents: { ...emptyIntents(), ...counts.intents },
     keyToHighlightMs: {
       p50: round(nearestRank(sorted, 0.5)),
       p95: round(nearestRank(sorted, 0.95)),
@@ -83,6 +107,8 @@ export function gateLine(m: GateMetrics): string {
 export interface Recorder {
   /** A move changed the focused index; `t0` is the key time (ms). */
   move(t0: number): void;
+  /** The focus store emitted an intent of this kind. */
+  intent(kind: keyof IntentCounts): void;
   /** The auto-driver emitted one scripted event, whatever its effect. */
   scripted(): void;
   /** A repeat was dropped because the previous move had not committed yet. */
@@ -119,12 +145,16 @@ export function createRecorder(geometry: { items: number }): Recorder {
   let scripted = 0;
   let coalesced = 0;
   let losses = 0;
+  let intents = emptyIntents();
   let settled: { index: number; current: number } | undefined;
 
   return {
     move(t0) {
       moves++;
       pendingT0.push(t0);
+    },
+    intent(kind) {
+      intents[kind]++;
     },
     scripted() {
       scripted++;
@@ -175,6 +205,7 @@ export function createRecorder(geometry: { items: number }): Recorder {
           scripted,
           coalesced,
           losses: total,
+          intents,
           items: geometry.items,
         },
         frameStall(deltas),
@@ -188,6 +219,7 @@ export function createRecorder(geometry: { items: number }): Recorder {
       scripted = 0;
       coalesced = 0;
       losses = 0;
+      intents = emptyIntents();
       settled = undefined;
       return result;
     },

@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { buildPrebuildCommand } from '../run-command.ts';
 import type { GateMetrics, GateResult, RealKeys } from './compare.ts';
 import { type FrameStats, parseGfxinfo } from './gfxinfo.ts';
+import { expectedHoldMoves, HOLD_TOLERANCE } from './hold.ts';
 
 /** Package of the development variant, the only one that contains the gate screen. */
 const APP_PACKAGE = 'io.github.fatihmutluu.elviptv.dev';
@@ -11,6 +12,8 @@ const FOREGROUND_POLLS = 8;
 const WAIT_MARGIN_MS = 30_000;
 const KEY_DOWN = '20';
 const KEY_BACK = '4';
+const KEY_DOWN_NAME = 'KEYCODE_DPAD_DOWN';
+const HOLD_MIN_SDK = 33;
 const APP_BOOT_MS = 3000;
 const BURST_IDLE_MS = 2000;
 const ADB_TIMEOUT_MS = 30_000;
@@ -58,6 +61,8 @@ export interface ListGateOptions {
   build?: boolean;
   /** Number of real D-pad presses to send after the auto runs (0 or undefined: none). */
   realKeys?: number;
+  /** Duration in ms of one real held Down key (API 33+); the move count is checked against the interpreter. */
+  realHold?: number;
   /** Number of auto runs; the result is the median per metric (default 1). */
   runs?: number;
   items?: number;
@@ -364,6 +369,13 @@ export async function runListGate(opts: ListGateOptions): Promise<GateResult> {
   }
 
   const result: GateResult = { metrics: medianMetrics(autoRuns), frames: medianFrames(frameRuns) };
+  const holdMs = opts.realHold ?? 0;
+  if (holdMs > 0) {
+    const sdk = Number((await shell('getprop', 'ro.build.version.sdk')).output.trim());
+    if (!(sdk >= HOLD_MIN_SDK)) {
+      throw new Error('gate: --real-hold needs API 33 or newer (input keyevent --duration)');
+    }
+  }
   const presses = opts.realKeys ?? 0;
   if (presses > 0) {
     await start(urlFor(false));
@@ -383,6 +395,19 @@ export async function runListGate(opts: ListGateOptions): Promise<GateResult> {
       losses: burst.losses,
     };
     result.realKeys = real;
+  }
+  if (holdMs > 0) {
+    await start(urlFor(false));
+    await sleep(APP_BOOT_MS);
+    await shell('input', 'keyevent', '--duration', String(holdMs), KEY_DOWN_NAME);
+    const held = await waitForLine(holdMs + BURST_IDLE_MS + WAIT_MARGIN_MS);
+    const expected = expectedHoldMoves(holdMs);
+    if (Math.abs(held.moves - expected) > HOLD_TOLERANCE) {
+      throw new Error(
+        `gate: a ${holdMs} ms hold gave ${held.moves} moves, expected ${expected} ± ${HOLD_TOLERANCE}`,
+      );
+    }
+    result.realHold = { holdMs, moves: held.moves, expected };
   }
   return result;
 }

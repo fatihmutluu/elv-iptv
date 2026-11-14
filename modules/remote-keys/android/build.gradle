@@ -1,0 +1,19 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'io.github.fatihmutluu.elv.remotekeys'
+version = '0.0.0'
+
+android {
+  namespace 'io.github.fatihmutluu.elv.remotekeys'
+  defaultConfig {
+    versionCode 1
+    versionName '0.0.0'
+  }
+}
+
+dependencies {
+  testImplementation 'junit:junit:4.13.2'
+}

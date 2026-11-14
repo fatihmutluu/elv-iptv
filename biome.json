@@ -98,6 +98,26 @@
       }
     },
     {
+      "includes": ["packages/ui-kit/**", "packages/features/**", "apps/tv-mobile/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "react-native": {
+                    "importNames": ["Modal"],
+                    "message": "TV surfaces stay in the main window; use a focus-core scope overlay, not Modal (#43)."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": [
         "packages/domain/**/*.test.ts",
         "packages/sources/**/*.test.ts",

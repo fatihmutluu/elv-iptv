@@ -1,6 +1,8 @@
 import type { Key, KeyInput } from '@elv/focus-core';
-import { useEffect, useRef } from 'react';
+import { useContext, useEffect, useRef } from 'react';
 import { BackHandler, Platform, TVEventControl, TVEventHandler } from 'react-native';
+import { createAndroidKeyAdapter } from './android-keys';
+import { RemoteKeysContext } from './RemoteKeysProvider';
 
 /** Platforms whose remote events differ: on tvOS the Menu button is Back. */
 export type TvPlatform = 'ios' | 'android';
@@ -51,14 +53,30 @@ export function toKeyInput(
 }
 
 /**
- * Feeds remote keys to `onInput`: `TVEventHandler` for the remote, `BackHandler` for Android's Back (consumed, sent
- * as a `back` press), and the menu key on tvOS enabled for the lifetime of the hook.
+ * Feeds remote keys to `onInput`. On Android with a `RemoteKeysProvider` source it takes raw key events through a
+ * fresh adapter, skips `TVEventHandler`, and only consumes Back (it arrives as raw down/up); when the source changes or
+ * the hook unmounts, every key still held is sent as `cancel`, since its release would reach no adapter. Otherwise it
+ * uses `TVEventHandler` for the remote, `BackHandler` for Android's Back (consumed, sent as a `back` press), and the
+ * menu key on tvOS enabled for the lifetime of the hook.
  */
 export function useTvKeySource(onInput: (k: KeyInput) => void): void {
   const handler = useRef(onInput);
   handler.current = onInput;
+  const raw = useContext(RemoteKeysContext);
 
   useEffect(() => {
+    if (Platform.OS === 'android' && raw) {
+      const adapt = createAndroidKeyAdapter();
+      const sub = raw.addListener((event) => {
+        for (const input of adapt(event, performance.now())) handler.current(input);
+      });
+      const consume = BackHandler.addEventListener('hardwareBackPress', () => true);
+      return () => {
+        for (const input of adapt({ action: 'blur' }, performance.now())) handler.current(input);
+        sub.remove();
+        consume.remove();
+      };
+    }
     const tvos = Platform.OS === 'ios' && Platform.isTV;
     if (tvos) TVEventControl.enableTVMenuKey();
     const remote = TVEventHandler.addListener((event) => {
@@ -74,5 +92,5 @@ export function useTvKeySource(onInput: (k: KeyInput) => void): void {
       back.remove();
       if (tvos) TVEventControl.disableTVMenuKey();
     };
-  }, []);
+  }, [raw]);
 }

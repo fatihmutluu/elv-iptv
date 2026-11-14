@@ -1,7 +1,9 @@
 import type { KeyInput } from '@elv/focus-core';
 import { renderHook } from '@testing-library/react-native';
 import { BackHandler, Platform, TVEventControl, TVEventHandler } from 'react-native';
+import type { AndroidKeyEvent, AndroidKeySource } from '../android-keys';
 import { useTvKeySource } from '../key-source';
+import { RemoteKeysProvider } from '../RemoteKeysProvider';
 
 type RemoteEvent = { eventType: string; eventKeyAction?: number };
 
@@ -110,5 +112,163 @@ describe('useTvKeySource', () => {
     expect(second).toHaveBeenCalledTimes(1);
     expect(apis.addRemote).toHaveBeenCalledTimes(1);
     expect(apis.addBack).toHaveBeenCalledTimes(1);
+  });
+
+  describe('raw Android key source', () => {
+    function fakeSource() {
+      let listener: ((event: AndroidKeyEvent) => void) | undefined;
+      const remove = jest.fn(() => {
+        listener = undefined;
+      });
+      const addListener = jest.fn((l: (event: AndroidKeyEvent) => void) => {
+        listener = l;
+        return { remove };
+      });
+      const source: AndroidKeySource = { addListener };
+      return { source, addListener, remove, emit: (e: AndroidKeyEvent) => listener?.(e) };
+    }
+    const down: AndroidKeyEvent = { action: 'down', keyCode: 20, canceled: false, ageMs: 0 };
+
+    it('feeds raw Android keys from the provider', async () => {
+      mockTvApis('android');
+      const fake = fakeSource();
+      const onInput = jest.fn<void, [KeyInput]>();
+      await renderHook(() => useTvKeySource(onInput), {
+        wrapper: ({ children }) => (
+          <RemoteKeysProvider android={fake.source}>{children}</RemoteKeysProvider>
+        ),
+      });
+      fake.emit(down);
+      expect(onInput.mock.calls).toEqual([
+        [{ key: 'down', action: 'down', time: expect.any(Number) }],
+      ]);
+    });
+
+    it('does not subscribe to TVEventHandler when a raw source is provided', async () => {
+      const apis = mockTvApis('android');
+      await renderHook(() => useTvKeySource(() => {}), {
+        wrapper: ({ children }) => (
+          <RemoteKeysProvider android={fakeSource().source}>{children}</RemoteKeysProvider>
+        ),
+      });
+      expect(apis.addRemote).not.toHaveBeenCalled();
+    });
+
+    it('consumes Back without a second input on the raw path', async () => {
+      const apis = mockTvApis('android');
+      const onInput = jest.fn<void, [KeyInput]>();
+      await renderHook(() => useTvKeySource(onInput), {
+        wrapper: ({ children }) => (
+          <RemoteKeysProvider android={fakeSource().source}>{children}</RemoteKeysProvider>
+        ),
+      });
+      expect(apis.listeners.back?.()).toBe(true);
+      expect(onInput).not.toHaveBeenCalled();
+    });
+
+    it('cancels the held key and unsubscribes on unmount mid-hold', async () => {
+      mockTvApis('android');
+      const fake = fakeSource();
+      const onInput = jest.fn<void, [KeyInput]>();
+      const hook = await renderHook(() => useTvKeySource(onInput), {
+        wrapper: ({ children }) => (
+          <RemoteKeysProvider android={fake.source}>{children}</RemoteKeysProvider>
+        ),
+      });
+      fake.emit(down);
+      await hook.unmount();
+      fake.emit({ action: 'up', keyCode: 20, canceled: false, ageMs: 0 });
+      expect(onInput.mock.calls).toEqual([
+        [{ key: 'down', action: 'down', time: expect.any(Number) }],
+        [{ key: 'down', action: 'cancel', time: expect.any(Number) }],
+      ]);
+      expect(fake.remove).toHaveBeenCalledTimes(1);
+    });
+
+    describe('provider value changes mid-hold', () => {
+      /** Renders the hook under a provider whose value `swap` replaces. */
+      async function swappable(first: AndroidKeySource | null) {
+        let current = first;
+        const onInput = jest.fn<void, [KeyInput]>();
+        const hook = await renderHook(() => useTvKeySource(onInput), {
+          wrapper: ({ children }) => (
+            <RemoteKeysProvider android={current}>{children}</RemoteKeysProvider>
+          ),
+        });
+        const swap = async (next: AndroidKeySource | null) => {
+          current = next;
+          await hook.rerender({});
+        };
+        return { onInput, swap };
+      }
+
+      it('cancels the held key and subscribes to the new source', async () => {
+        mockTvApis('android');
+        const a = fakeSource();
+        const b = fakeSource();
+        const { onInput, swap } = await swappable(a.source);
+        a.emit(down);
+        await swap(b.source);
+        expect(onInput.mock.calls).toEqual([
+          [{ key: 'down', action: 'down', time: expect.any(Number) }],
+          [{ key: 'down', action: 'cancel', time: expect.any(Number) }],
+        ]);
+        expect(a.remove).toHaveBeenCalledTimes(1);
+        expect(b.addListener).toHaveBeenCalledTimes(1);
+        b.emit({ action: 'up', keyCode: 20, canceled: false, ageMs: 0 });
+        expect(onInput).toHaveBeenCalledTimes(2);
+        b.emit(down);
+        expect(onInput).toHaveBeenLastCalledWith({
+          key: 'down',
+          action: 'down',
+          time: expect.any(Number),
+        });
+      });
+
+      it('cancels the held key and falls back to TVEventHandler when the source becomes null', async () => {
+        const apis = mockTvApis('android');
+        const a = fakeSource();
+        const { onInput, swap } = await swappable(a.source);
+        a.emit(down);
+        await swap(null);
+        expect(onInput.mock.calls).toEqual([
+          [{ key: 'down', action: 'down', time: expect.any(Number) }],
+          [{ key: 'down', action: 'cancel', time: expect.any(Number) }],
+        ]);
+        expect(a.remove).toHaveBeenCalledTimes(1);
+        expect(apis.addRemote).toHaveBeenCalledTimes(1);
+      });
+
+      it('cancels nothing when no key is held', async () => {
+        mockTvApis('android');
+        const a = fakeSource();
+        const { onInput, swap } = await swappable(a.source);
+        await swap(fakeSource().source);
+        expect(onInput).not.toHaveBeenCalled();
+        expect(a.remove).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it('uses TVEventHandler when the provider holds null', async () => {
+      const apis = mockTvApis('android');
+      await renderHook(() => useTvKeySource(() => {}), {
+        wrapper: ({ children }) => (
+          <RemoteKeysProvider android={null}>{children}</RemoteKeysProvider>
+        ),
+      });
+      expect(apis.addRemote).toHaveBeenCalledTimes(1);
+    });
+
+    it('uses TVEventHandler on tvOS even with a source', async () => {
+      const apis = mockTvApis('ios');
+      const fake = fakeSource();
+      await renderHook(() => useTvKeySource(() => {}), {
+        wrapper: ({ children }) => (
+          <RemoteKeysProvider android={fake.source}>{children}</RemoteKeysProvider>
+        ),
+      });
+      expect(apis.addRemote).toHaveBeenCalledTimes(1);
+      expect(fake.addListener).not.toHaveBeenCalled();
+    });
   });
 });

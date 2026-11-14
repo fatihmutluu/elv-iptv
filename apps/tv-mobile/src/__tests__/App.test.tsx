@@ -1,8 +1,17 @@
 import { act, render, screen } from '@testing-library/react-native';
-import { Linking, Settings } from 'react-native';
+import { Linking, Platform, Settings } from 'react-native';
 import { App } from '../App';
 
 let mockGate = false;
+let mockListener: ((event: unknown) => void) | undefined;
+jest.mock('@elv/remote-keys', () => ({
+  remoteKeys: {
+    addListener: (l: (event: unknown) => void) => {
+      mockListener = l;
+      return { remove: () => {} };
+    },
+  },
+}));
 jest.mock('expo-constants', () => ({
   __esModule: true,
   default: {
@@ -116,5 +125,19 @@ describe('App', () => {
     expect(await screen.findByTestId('gate-list')).toBeOnTheScreen();
     await view.unmount();
     expect(remove).toHaveBeenCalled();
+  });
+
+  it('moves gate focus from the raw Android key source', async () => {
+    mockGate = true;
+    jest.replaceProperty(Platform, 'OS', 'android');
+    jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
+    openedWith('elviptv://gate/list?items=1000&auto=0');
+    const view = await render(<App />);
+    await screen.findByTestId('gate-list');
+    await act(async () =>
+      mockListener?.({ action: 'down', keyCode: 20, canceled: false, ageMs: 0 }),
+    );
+    expect(screen.getByTestId('gate-list-row-1').props.accessibilityState.selected).toBe(true);
+    await view.unmount();
   });
 });

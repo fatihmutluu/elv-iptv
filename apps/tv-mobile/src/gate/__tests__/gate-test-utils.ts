@@ -11,6 +11,7 @@ export function gateLines(spy: jest.SpyInstance): string[] {
 export function onlyGateMetrics(spy: jest.SpyInstance): Record<string, unknown> & {
   moves: number;
   losses: number;
+  intents: Record<string, number>;
   keyToHighlightMs: { p50: number; p95: number; max: number };
 } {
   const lines = gateLines(spy);

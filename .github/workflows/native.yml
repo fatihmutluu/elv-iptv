@@ -47,6 +47,7 @@ jobs:
             gate:
               - 'packages/focus-core/**'
               - 'packages/ui-kit/**'
+              - 'modules/**'
               - 'apps/tv-mobile/**'
               - 'tools/src/gates/**'
               - 'tools/bin/gate.ts'
@@ -120,9 +121,9 @@ jobs:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
       - name: Generate the Android TV project
         run: pnpm --filter tv-mobile exec expo prebuild --platform android --no-install
-      - name: Build the debug APK
+      - name: Build the debug APK and run the remote-keys JVM unit tests
         working-directory: apps/tv-mobile/android
-        run: ./gradlew assembleDebug --quiet --no-daemon
+        run: ./gradlew assembleDebug :elv-remote-keys:testDebugUnitTest --quiet --no-daemon
       - name: Assert the merged manifest declares the leanback feature
         run: |
           manifests=$(find apps/tv-mobile/android/app/build -path '*merged_manifest*' -name AndroidManifest.xml)

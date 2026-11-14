@@ -26,10 +26,13 @@ export type Key =
   | 'channelDown'
   | (typeof DIGIT_KEYS)[number];
 
-/** Raw key input from a runtime key source; `press` and native `long` are for runtimes that report no down/up. Times are in ms. */
+/**
+ * Raw key input from a runtime key source; `press` and native `long` are for runtimes that report no down/up.
+ * `cancel` releases a held key without any event, for a release the runtime reports as canceled. Times are in ms.
+ */
 export interface KeyInput {
   key: Key;
-  action: 'down' | 'up' | 'press' | 'long';
+  action: 'down' | 'up' | 'press' | 'long' | 'cancel';
   time: number;
 }
 

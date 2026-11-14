@@ -123,7 +123,7 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
     (event: KeyEvent, t0: number) => {
       const before = currentIndex(store);
       recorder.workStart(performance.now());
-      store.dispatch(event);
+      for (const intent of store.dispatch(event)) recorder.intent(intent.kind);
       if (currentIndex(store) === before) {
         recorder.workEnd(performance.now());
         return;
@@ -165,7 +165,7 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
         ticker.current ??= setInterval(() => {
           for (const e of interpreter.tick(performance.now())) deliver(e);
         }, TICK_MS);
-      } else if (k.action === 'up') {
+      } else if (k.action === 'up' || k.action === 'cancel') {
         held.current.delete(k.key);
         if (held.current.size === 0) stopTicker();
       }
