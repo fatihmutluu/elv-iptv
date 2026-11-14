@@ -13,7 +13,9 @@ Specs: [stream simulator](superpowers/specs/2026-11-13-stream-simulator-design.m
 
 ## Accounts
 - Accounts (password = username): `demo` (small, 1 connection), `large` (2), `compat` (1), `expired`, `quirks`
-  (real-panel shapes: CRLF playlist, +0100 guide), `huge` (500k entries, 2 connections; opt-in, not in `pnpm check`).
+  (real-panel shapes: CRLF playlist, +0100 guide), `huge` (500k entries, 2 connections; opt-in, not in `pnpm check`),
+  `corpus` (profile `corpus`: one live channel and one movie per recipe, delivery-quirk channels 1012 and 1013, the
+  MKV `Subtitle Series`; 1 connection, 509).
 
 ## Data routes
 - Routes: `/get.php`, `/player_api.php`, `/xmltv.php`; `/playlists/<profile>[-variant].m3u|.m3u8`,
