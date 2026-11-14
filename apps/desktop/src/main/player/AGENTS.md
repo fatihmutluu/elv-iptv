@@ -26,6 +26,14 @@ over the JSON IPC client (`mpv/`) and a `VideoPresenter` (`presenter/`). Read `a
   emits nothing afterwards. `elv-key fullscreen` toggles the presenter; other `elv-key` names become `player:ui` keys.
 - Recording launcher pids for the startup sweep is the spawner's job (`spawnMpv({ pidFile })`).
 
+## IPC (renderer proxy)
+- `ipc.ts` (`registerPlayerIpc`) serves `player:open|close|command|area` (+ dev `gate:report`); an engine belongs to the
+  webContents that opened it, so commands, areas and closes from another sender are dropped; a destroyed one releases its
+  engines. Payloads pass the guards in `shared/player-ipc.ts` (http(s) URL, no control characters in headers); a dropped
+  message logs the channel only. `factory.ts` builds the engine (spawn with `pidFile`, presenter, `onUi`); `main.ts` sweeps
+  leftover launchers first. Main stamps events with `Date.now()`; the proxy (`renderer/src/player/desktop-engine.ts`) maps
+  `atMs` with the open handshake offset and replays the `presenter` ui event to late listeners.
+
 ## Tests
 - `engine.test.ts` drives the engine against `mpv/fake-mpv.ts` (a scripted mpv on a real named pipe or Unix socket).
   `engine.contract.test.ts` runs `ENGINE_CONTRACT_CASES` over FakeMpv and, with `ELV_MPV_SPIKE=1` and `ELV_SIM_URL`,

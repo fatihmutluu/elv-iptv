@@ -15,7 +15,7 @@ Expo project with `platforms: ["web"]` rendered by react-native-web.
 - The renderer loads from `app://elv/` via `protocol.handle`; paths go through `resolveAppFile`,
   which refuses anything outside `dist/renderer`. Keep the CSP header in `app-protocol.ts`.
 - Windows keep `contextIsolation`, `sandbox` and no `nodeIntegration`; the preload is CommonJS.
-- No IPC channels yet; add each one with a typed contract and a test.
+- IPC is the player's only: channels and guards in `src/shared/player-ipc.ts`; add each with a contract and a test.
 - Put icons and entitlements in `resources/` (`build/` is gitignored). `icon.png` is placeholder art.
 - No signing in Round 0; the `appx` identity and publisher are placeholders the Store assigns later.
 - The Electron binary downloads on first run (Electron 45 has no postinstall).

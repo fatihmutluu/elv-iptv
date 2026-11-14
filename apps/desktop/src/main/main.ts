@@ -1,8 +1,12 @@
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow, net, protocol } from 'electron';
+import { app, BrowserWindow, ipcMain, net, protocol, type WebContents } from 'electron';
 import { APP_ORIGIN, APP_SCHEME } from './app-protocol.ts';
+import { createEngineFor } from './player/factory.ts';
+import { registerPlayerIpc } from './player/ipc.ts';
+import { sweepLeftovers, systemSweepDeps } from './player/mpv/process.ts';
+import { mpvRuntimePaths } from './player/runtime-path.ts';
 import { type ServeDeps, serveAppRequest } from './serve-app.ts';
 import { buildWindowOptions, WINDOW_TITLE } from './window-options.ts';
 
@@ -34,8 +38,41 @@ function createWindow(): void {
   void window.loadURL(`${APP_ORIGIN}/`);
 }
 
-void app.whenReady().then(() => {
+/** Kills mpv launchers a crashed run left behind, then serves the player IPC. */
+async function startPlayer(): Promise<void> {
+  const pidFile = join(app.getPath('userData'), 'mpv-pids.json');
+  await sweepLeftovers(pidFile, systemSweepDeps).catch(() => 0);
+  registerPlayerIpc({
+    ipcMain,
+    now: () => Date.now(),
+    log: (line) => process.stderr.write(`${line}\n`),
+    // The gate driver prints its report through main; a packaged app has no such channel.
+    gateReport: app.isPackaged ? undefined : (line) => process.stdout.write(`${line}\n`),
+    createEngine: async (owner, onUi) => {
+      const window = BrowserWindow.fromWebContents(owner as WebContents);
+      if (!window) throw new Error('the player needs an app window');
+      const runtime = mpvRuntimePaths({
+        isPackaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        appPath: app.getAppPath(),
+        platform: process.platform,
+        arch: process.arch,
+      });
+      if (!runtime) throw new Error('mpv runtime missing; run pnpm mpv fetch');
+      return createEngineFor(window, {
+        runtime,
+        platform: process.platform,
+        loadMode: 'replace',
+        pidFile,
+        onUi,
+      });
+    },
+  });
+}
+
+void app.whenReady().then(async () => {
   serveRenderer();
+  await startPlayer();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

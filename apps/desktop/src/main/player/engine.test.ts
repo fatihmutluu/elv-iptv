@@ -2,6 +2,7 @@ import type { EngineEvent, EngineState, LoadCommand } from '@elv/playback';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DESKTOP_CAPABILITIES,
+  type PlayerArea,
   type PlayerUiEvent,
   type PresenterKind,
 } from '../../shared/player-ipc.ts';
@@ -78,6 +79,7 @@ const live = (attempt: number, url = URL_A, headers: Record<string, string> = {}
 interface FakePresenter extends VideoPresenter {
   attached: MpvClient[];
   fullscreen: number;
+  areas: PlayerArea[];
   disposed: boolean;
   emit(event: PresenterEvent): void;
 }
@@ -89,10 +91,11 @@ function fakePresenter(kind: PresenterKind): FakePresenter {
     coversArea: kind === 'child-window',
     attached: [],
     fullscreen: 0,
+    areas: [],
     disposed: false,
     prepare: async () => (kind === 'child-window' ? ['--wid=4660'] : ['--geometry=320x180+0+0']),
     attach: (client) => void p.attached.push(client),
-    setArea: () => undefined,
+    setArea: (area) => void p.areas.push(area),
     toggleFullscreen: () => {
       p.fullscreen += 1;
     },
@@ -607,5 +610,25 @@ describe('MpvEngine', () => {
     expect(fake.sent.at(-1)).toEqual(['quit']);
     expect(presenter.disposed).toBe(true);
     expect(events).toHaveLength(mark);
+  });
+});
+
+describe('MpvEngine presenter commands', () => {
+  it('passes the player area and the fullscreen toggle to the presenter', async () => {
+    const { engine, presenter } = await setup();
+    const area = { x: 1, y: 2, width: 640, height: 360, visible: true };
+    engine.setArea(area);
+    engine.toggleFullscreen();
+    expect(presenter.areas).toEqual([area]);
+    expect(presenter.fullscreen).toBe(1);
+  });
+
+  it('ignores both after release', async () => {
+    const { engine, presenter } = await setup();
+    engine.release();
+    engine.setArea({ x: 0, y: 0, width: 1, height: 1, visible: false });
+    engine.toggleFullscreen();
+    expect(presenter.areas).toEqual([]);
+    expect(presenter.fullscreen).toBe(0);
   });
 });

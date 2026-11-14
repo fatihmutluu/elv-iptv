@@ -1,6 +1,7 @@
 import type { AttemptToken, EngineEvent, MediaKind, PlayerEngine } from '@elv/playback';
 import {
   DESKTOP_CAPABILITIES,
+  type PlayerArea,
   type PlayerUiEvent,
   type PresenterKind,
 } from '../../shared/player-ipc.ts';
@@ -35,6 +36,10 @@ export interface MpvEngine extends PlayerEngine {
   readonly spawns: number;
   readonly loadMode: LoadMode;
   readonly presenterKind: PresenterKind;
+  /** The latest player area from the renderer, for the presenter. */
+  setArea(area: PlayerArea): void;
+  /** Toggles the presenter's fullscreen (not a port command). */
+  toggleFullscreen(): void;
 }
 
 const OBSERVED = [
@@ -539,6 +544,12 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     capabilities: DESKTOP_CAPABILITIES,
     loadMode: deps.loadMode,
     presenterKind: presenter.kind,
+    setArea(area) {
+      if (!released) presenter.setArea(area);
+    },
+    toggleFullscreen() {
+      if (!released) presenter.toggleFullscreen();
+    },
     get spawns() {
       return spawns;
     },

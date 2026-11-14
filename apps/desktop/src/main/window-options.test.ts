@@ -20,3 +20,17 @@ describe('buildWindowOptions', () => {
     expect(options.title).toBe('ELV IPTV');
   });
 });
+
+describe('buildWindowOptions player baseline', () => {
+  const options = buildWindowOptions('/app/dist/preload/preload.js');
+
+  it('backgroundThrottling is false and the security baseline holds', () => {
+    expect(options.webPreferences).toEqual({
+      preload: '/app/dist/preload/preload.js',
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false,
+    });
+  });
+});

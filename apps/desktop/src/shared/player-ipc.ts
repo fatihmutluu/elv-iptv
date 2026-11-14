@@ -1,4 +1,4 @@
-import type { EngineCapabilities } from '@elv/playback';
+import type { AttemptToken, EngineCapabilities, EngineEvent, LoadCommand } from '@elv/playback';
 
 /** The player area in CSS pixels of the app window's content, and whether video should show there. */
 export interface PlayerArea {
@@ -31,3 +31,164 @@ export type PlayerUiEvent =
   | { type: 'presenter'; kind: PresenterKind; coversArea: boolean }
   | { type: 'key'; key: 'channel-up' | 'channel-down' | 'back' | 'fullscreen' | 'close' }
   | { type: 'closed' };
+
+/** The IPC channel names between the renderer, the preload bridge and the main process. */
+export const PLAYER_CHANNELS = Object.freeze({
+  open: 'player:open',
+  close: 'player:close',
+  command: 'player:command',
+  event: 'player:event',
+  area: 'player:area',
+  ui: 'player:ui',
+  gateReport: 'gate:report',
+} as const);
+
+/** A port command or a presenter command as it crosses the bridge (`fullscreen` is the presenter's, not the port's). */
+export type BridgeCommand =
+  | { name: 'load'; cmd: LoadCommand }
+  | { name: 'retry' | 'play' | 'pause' | 'stop' | 'recreate'; attempt: AttemptToken }
+  | { name: 'seek'; attempt: AttemptToken; positionMs: number }
+  | { name: 'release' }
+  | { name: 'fullscreen' };
+
+/** Renderer to main (`player:command`). */
+export interface PlayerCommandMessage {
+  engineId: string;
+  command: BridgeCommand;
+}
+
+/** Main to renderer (`player:event`); `atMs` fields are on the main clock and the proxy maps them. */
+export interface PlayerEventMessage {
+  engineId: string;
+  event: EngineEvent;
+}
+
+/** Renderer to main (`player:area`). */
+export interface PlayerAreaMessage {
+  engineId: string;
+  area: PlayerArea;
+}
+
+/** Main to renderer (`player:ui`). */
+export interface PlayerUiMessage {
+  engineId: string;
+  ui: PlayerUiEvent;
+}
+
+/** The reply to `player:open`: the new engine and the main clock at the time of the reply. */
+export interface PlayerOpenReply {
+  engineId: string;
+  mainNowMs: number;
+}
+
+/** What the preload exposes as `window.elv.player`; nothing else of Electron reaches the renderer. */
+export interface PlayerBridge {
+  open(): Promise<PlayerOpenReply>;
+  close(engineId: string): Promise<void>;
+  send(message: PlayerCommandMessage): void;
+  setArea(message: PlayerAreaMessage): void;
+  /** Returns the unsubscribe function. */
+  onEvent(listener: (message: PlayerEventMessage) => void): () => void;
+  /** Returns the unsubscribe function. */
+  onUi(listener: (message: PlayerUiMessage) => void): () => void;
+  /** Dev gate only: one `ELV_GATE_PLAYER {...}` line for main to print. */
+  reportGate(line: string): void;
+}
+
+const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null;
+const isAttempt = (x: unknown): x is number => Number.isInteger(x) && (x as number) >= 0;
+const isNumber = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
+const isMs = (x: unknown): x is number => isNumber(x) && x >= 0;
+const isEngineId = (x: unknown): x is string =>
+  typeof x === 'string' && x.length > 0 && x.length <= 64;
+
+const hasControlChar = (text: string): boolean => {
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+};
+
+const isStreamUrl = (x: unknown): boolean => {
+  if (typeof x !== 'string' || x.length === 0 || hasControlChar(x)) return false;
+  try {
+    const { protocol } = new URL(x);
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
+const isHeaders = (x: unknown): boolean =>
+  isRecord(x) &&
+  Object.entries(x).every(
+    ([name, value]) =>
+      name.length > 0 &&
+      !name.includes(':') &&
+      !name.includes(' ') &&
+      !hasControlChar(name) &&
+      typeof value === 'string' &&
+      !hasControlChar(value),
+  );
+
+function isLoadCommand(x: unknown): x is LoadCommand {
+  if (!isRecord(x)) return false;
+  if (!isAttempt(x['attempt']) || !isStreamUrl(x['url']) || !isHeaders(x['headers'])) return false;
+  if (x['kind'] !== 'live' && x['kind'] !== 'vod') return false;
+  if (x['startMs'] !== undefined && !isMs(x['startMs'])) return false;
+  const options = x['options'];
+  if (options === undefined) return true;
+  return (
+    isRecord(options) &&
+    (options['softwareAudio'] === undefined || typeof options['softwareAudio'] === 'boolean')
+  );
+}
+
+function isBridgeCommand(x: unknown): x is BridgeCommand {
+  if (!isRecord(x)) return false;
+  switch (x['name']) {
+    case 'load':
+      return isLoadCommand(x['cmd']);
+    case 'retry':
+    case 'play':
+    case 'pause':
+    case 'stop':
+    case 'recreate':
+      return isAttempt(x['attempt']);
+    case 'seek':
+      return isAttempt(x['attempt']) && isMs(x['positionMs']);
+    case 'release':
+    case 'fullscreen':
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** Main-side check of a `player:command` payload: shape, `http(s)` URL, header names and values without control characters. */
+export function isPlayerCommandMessage(x: unknown): x is PlayerCommandMessage {
+  return isRecord(x) && isEngineId(x['engineId']) && isBridgeCommand(x['command']);
+}
+
+/** Main-side check of a `player:area` payload. */
+export function isPlayerAreaMessage(x: unknown): x is PlayerAreaMessage {
+  if (!isRecord(x) || !isEngineId(x['engineId'])) return false;
+  const area = x['area'];
+  return (
+    isRecord(area) &&
+    isNumber(area['x']) &&
+    isNumber(area['y']) &&
+    isNumber(area['width']) &&
+    isNumber(area['height']) &&
+    typeof area['visible'] === 'boolean'
+  );
+}
+
+const GATE_PREFIX = 'ELV_GATE_PLAYER {';
+const GATE_MAX_CHARS = 64 * 1024;
+
+/** Main-side check of a `gate:report` line: the gate prefix and at most 64 KiB. */
+export function isGateReport(x: unknown): x is string {
+  return typeof x === 'string' && x.startsWith(GATE_PREFIX) && x.length <= GATE_MAX_CHARS;
+}

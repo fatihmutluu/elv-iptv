@@ -5,9 +5,11 @@
   "main": "index.ts",
   "scripts": {
     "export": "expo export -p web --output-dir ../dist/renderer",
+    "test": "vitest run --coverage --reporter=dot",
     "typecheck": "tsc --noEmit -p . --pretty false"
   },
   "dependencies": {
+    "@elv/playback": "workspace:*",
     "@expo/metro-runtime": "~58.0.17",
     "expo": "~58.0.25",
     "react": "catalog:",
@@ -17,6 +19,8 @@
   },
   "devDependencies": {
     "@elv/config": "workspace:*",
-    "@types/react": "catalog:"
+    "@types/react": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "vitest": "5.1.0"
   }
 }

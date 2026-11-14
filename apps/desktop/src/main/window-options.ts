@@ -15,6 +15,7 @@ export function buildWindowOptions(preloadPath: string): BrowserWindowConstructo
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      backgroundThrottling: false,
     },
   };
 }
