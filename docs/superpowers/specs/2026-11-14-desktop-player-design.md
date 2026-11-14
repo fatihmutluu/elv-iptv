@@ -123,9 +123,10 @@ spec on mpv 0.42.0 docs, release assets, licence files and issues (no GPL source
   before the next `loadfile` goes out, so every mpv `playlist_entry_id` maps to exactly one token; a `start-file` that
   arrives before the reply (measured) belongs to the loadfile in flight. `start-file` and `end-file` go through the
   table; property changes count for the entry between its `start-file` and `end-file` and are dropped outside that
-  window. Other commands with a newer token adopt it for the current entry (port contract). In a zap burst the engine
-  may drop a queued, not yet sent `load` that a newer `load` has superseded; only the newest media matters under the
-  token rule, and two medias are never open.
+  window. Other commands with a newer token adopt it for the current entry (port contract). Zap bursts coalesce: a
+  `load` waits until the last sent one has started and opened (`file-loaded`) or failed, at most 1 s after its
+  `start-file` (none in 3 s: `engine-wedged`), and a newer `load` replaces the waiting one, which never reaches mpv;
+  only the newest media matters under the token rule, and two medias are never open.
 - **Observed:** properties `pause`, `paused-for-cache`, `core-idle`, `seeking`, `time-pos`, `duration`, `speed`,
   `demuxer-cache-state`, `video-params`, `vid` (not `track-list` until #73); events `start-file`, `file-loaded`,
   `playback-restart`, `end-file`, `client-message`, and `log-message` after `request_log_messages v` (the notice's

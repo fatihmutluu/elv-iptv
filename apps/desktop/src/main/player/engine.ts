@@ -55,6 +55,10 @@ const LOG_LEVEL = 'v';
 const KEPT_LEVELS: ReadonlySet<string> = new Set(['fatal', 'error', 'warn', 'info']);
 const QUIT_GRACE_MS = 500;
 const END_TIMEOUT_MS = 3000;
+/** A sent load that gets no `start-file` in this time counts as a wedged mpv, like a missing reply. */
+const START_TIMEOUT_MS = 3000;
+/** How long a started load may hold the next one back while its stream opens (slow providers). */
+const OPEN_WAIT_MS = 1000;
 const CLOCK_INTERVAL_MS = 1000;
 
 type UiKey = Extract<PlayerUiEvent, { type: 'key' }>['key'];
@@ -91,6 +95,14 @@ type Op =
   | { type: 'stop' }
   | { type: 'recreate' };
 
+interface Opening {
+  slot: Slot;
+  started: boolean;
+  timer?: unknown;
+  done: Promise<void>;
+  finish(): void;
+}
+
 /** One connected mpv process and the state that dies with it (entry ids restart per process). */
 interface Live {
   proc: MpvProcess;
@@ -100,6 +112,8 @@ interface Live {
   userQuit: boolean;
   /** The load whose `loadfile` is sent but not bound yet. */
   inFlight?: Slot;
+  /** The last sent load until its stream opened (`file-loaded`) or failed; a newer load waits for it. */
+  opening?: Opening;
   endWaiters: Set<{ id: number; done(ended: boolean): void }>;
 }
 
@@ -170,10 +184,48 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       emit([{ attempt: media.token, type: 'error', error: { code: 'engine-wedged', detail } }]);
   };
 
+  const finishOpening = (L: Live): void => {
+    const opening = L.opening;
+    if (!opening) return;
+    L.opening = undefined;
+    timers.clearTimeout(opening.timer);
+    opening.finish();
+  };
+
+  const beginOpening = (L: Live, slot: Slot): void => {
+    let finish = (): void => undefined;
+    const done = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    L.opening = { slot, started: false, done, finish };
+  };
+
+  const armOpening = (L: Live, ms: number, onTimeout: () => void): void => {
+    const opening = L.opening;
+    if (!opening) return;
+    timers.clearTimeout(opening.timer);
+    opening.timer = timers.setTimeout(() => {
+      if (L.opening === opening) onTimeout();
+    }, ms);
+  };
+
+  /** Wakes a load waiting for the previous one to open, so it can see that it was superseded. */
+  let wakePending: (() => void) | undefined;
+  const superseded = (): Promise<void> =>
+    new Promise<void>((resolve) => {
+      wakePending = resolve;
+    });
+  const wake = (): void => {
+    const resolve = wakePending;
+    wakePending = undefined;
+    resolve?.();
+  };
+
   const detach = (L: Live): void => {
     if (live !== L) return;
     live = undefined;
     if (media) media.entryId = undefined;
+    finishOpening(L);
     for (const waiter of [...L.endWaiters]) waiter.done(false);
   };
 
@@ -202,6 +254,10 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   const onStartFile = (L: Live, entryId: number): void => {
     // mpv can announce the new entry before the engine has read the loadfile reply; only that load can own it.
     if (L.entries.tokenOf(entryId) === undefined && L.inFlight) bind(L, L.inFlight, entryId);
+    if (L.opening?.slot.entryId === entryId) {
+      L.opening.started = true;
+      armOpening(L, OPEN_WAIT_MS, () => finishOpening(L));
+    }
     L.entries.started(entryId);
     const current = L.entries.current();
     if (current?.entryId !== entryId) return;
@@ -218,6 +274,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     const isCurrent = entryId !== undefined && L.entries.current()?.entryId === entryId;
     const events = isCurrent ? L.deriver.fileEvent(e) : [];
     if (entryId !== undefined) L.entries.ended(entryId);
+    if (entryId !== undefined && L.opening?.slot.entryId === entryId) finishOpening(L);
     for (const waiter of [...L.endWaiters]) if (waiter.id === entryId) waiter.done(true);
     if (active) emit(events);
   };
@@ -239,6 +296,10 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
         onEndFile(L, e);
         return;
       case 'file-loaded':
+        if (L.opening?.started && L.entries.current()?.entryId === L.opening.slot.entryId)
+          finishOpening(L);
+        fromCurrent(L, L.deriver.fileEvent(e));
+        return;
       case 'playback-restart':
         fromCurrent(L, L.deriver.fileEvent(e));
         return;
@@ -341,13 +402,19 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   const runLoad = async (slot: Slot): Promise<void> => {
     const L = await ensureProcess();
     if (!L || slot !== media) return;
+    // Zap coalescing: wait until the last sent load opened or failed; a newer load replaces this one meanwhile.
+    while (L.opening && slot === media && live === L)
+      await Promise.race([L.opening.done, superseded()]);
+    if (slot !== media || live !== L) return;
     if (deps.loadMode === 'stop-then-load' && !(await stopCurrent(L))) return;
     if (slot !== media || live !== L) return;
     L.inFlight = slot;
+    beginOpening(L, slot);
     const reply = await send(L, loadfileCommand(slot.request));
     if (!reply || live !== L) return;
     if (reply.error !== 'success') {
       L.inFlight = undefined;
+      finishOpening(L);
       if (slot === media)
         emit([
           {
@@ -363,6 +430,8 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     L.inFlight = undefined;
     if (live !== L) return;
     if (entryId !== undefined) bind(L, slot, entryId);
+    if (L.opening?.slot === slot && !L.opening.started)
+      armOpening(L, START_TIMEOUT_MS, () => wedged(L, 'mpv did not start the media'));
     // mpv keeps `pause` across files; a load means play, as on the other engines.
     if (L.paused && slot === media) await send(L, ['set', 'pause', 'no']);
   };
@@ -386,9 +455,13 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
         return runLoad(op.slot);
       case 'recreate':
         return runRecreate();
-      case 'stop':
-        if (live) await send(live, ['stop']);
+      case 'stop': {
+        const L = live;
+        if (!L) return;
+        await send(L, ['stop']);
+        finishOpening(L);
         return;
+      }
       case 'command':
         if (live) await send(live, op.command);
     }
@@ -441,6 +514,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     note(token);
     media = { token, request };
     enqueue({ type: 'load', slot: media });
+    wake();
   };
 
   const command = (token: AttemptToken, cmd: MpvCommand): void => {
@@ -488,6 +562,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       adopt(attempt);
       media = undefined;
       enqueue({ type: 'stop' });
+      wake();
     },
     recreate(attempt) {
       if (released) return;
@@ -501,6 +576,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       listeners.clear();
       timers.clearTimeout(tickHandle);
       spawnAbort?.abort();
+      wake();
       offSurface();
       const L = live;
       if (L) {

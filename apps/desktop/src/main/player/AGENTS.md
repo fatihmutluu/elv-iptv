@@ -7,7 +7,10 @@ over the JSON IPC client (`mpv/`) and a `VideoPresenter` (`presenter/`). Read `a
 - Commands queue in order and return at once; nothing awaits mpv. One `loadfile` is in flight: its entry id comes
   from the reply (`playlist_entry_id`, mpv 0.42.0; else `get_property playlist/0/id`) and is bound to the token before
   the next command goes out. A `start-file` that beats the reply belongs to the loadfile in flight (measured).
-- A queued, unsent `load` is dropped when a newer `load` or a `stop` arrives (spec §11, decision 9).
+- Zap coalescing (controller ruling): a `load` waits until the last sent one got its `start-file` and then
+  `file-loaded` or its `end-file`; newer loads replace the waiting one, which never reaches mpv; `stop` and `release`
+  clear it. No `start-file` in 3 s is `engine-wedged`; after `start-file` the wait ends after 1 s at most (slow open).
+  `start-file` alone is too early: mpv sends it 1-22 ms after the reply, before connecting (measured).
 - Only the newest media emits: a replaced or stopped media is silent at once, so nothing follows `stop`.
 - A newer token on any other command tags the media's later events, also before its `start-file`.
 - mpv keeps `pause` across files: after a `load`'s loadfile the engine sends `set pause no` when mpv is paused, and a
@@ -27,5 +30,5 @@ over the JSON IPC client (`mpv/`) and a `VideoPresenter` (`presenter/`). Read `a
 - `engine.test.ts` drives the engine against `mpv/fake-mpv.ts` (a scripted mpv on a real named pipe or Unix socket).
   `engine.contract.test.ts` runs `ENGINE_CONTRACT_CASES` over FakeMpv and, with `ELV_MPV_SPIKE=1` and `ELV_SIM_URL`,
   over the real runtime and the simulator (one mpv window per case, about 35 s). `engine.ts` stays at 90 % lines.
-- Measured (mpv 0.42.0, 2026-11-14): while a file plays mpv answers `loadfile` at once, so loads 18 ms apart are all
-  sent; mpv aborts the superseded opens itself (simulator: one connection at a time, no 509, the newest plays).
+- Measured (mpv 0.42.0, 2026-11-14), ten loads 18 ms apart on a playing channel: with coalescing 2 `loadfile`s and
+  2 simulator requests; gated on `start-file` alone 10 and 6; always one connection at a time and no 509.

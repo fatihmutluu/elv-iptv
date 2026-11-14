@@ -45,6 +45,18 @@ const VOD: FakeMpvScript = [
   { afterMs: 6, event: 'playback-restart' },
 ];
 
+/** Real mpv opens a simulator stream about 380 ms after `start-file` (measured); a little slower here. */
+const SLOW_OPEN: FakeMpvScript = [
+  { afterMs: 0, event: 'start-file' },
+  { afterMs: 500, event: 'file-loaded' },
+  { afterMs: 500, property: 'vid', value: 1 },
+  { afterMs: 502, property: 'video-params', value: { w: 1280, h: 720 } },
+  { afterMs: 505, property: 'time-pos', value: 0 },
+  { afterMs: 505, event: 'playback-restart' },
+];
+const URL_NEVER_STARTS = 'http://sim.test/live/demo/demo/1007.ts';
+const URL_NEVER_OPENS = 'http://sim.test/live/demo/demo/1008.ts';
+
 const noise = Array.from({ length: 60 }, (_, i) => ({
   afterMs: 5,
   log: { prefix: 'cplayer', level: 'v', text: `Set property: osd-margin-y-offset=${i} -> 1` },
@@ -187,6 +199,47 @@ describe('MpvEngine review focus', () => {
     expect(fake.maxOpenEntries()).toBe(1);
     expect(events.every((e) => e.attempt === 10)).toBe(true);
     expect(events[0]).toEqual({ attempt: 10, type: 'state', state: 'opening' });
+  });
+
+  it('ten loads 18 ms apart with fast replies send at most two loadfile commands', async () => {
+    const urls = Array.from(
+      { length: 10 },
+      (_, i) => `http://sim.test/live/demo/demo/${2001 + i}.ts`,
+    );
+    const { engine, fake, events } = await setup({
+      scripts: Object.fromEntries(urls.map((u) => [u, SLOW_OPEN])),
+    });
+    fake.endDelayMs = 15;
+    for (let i = 1; i <= 10; i += 1) {
+      if (i > 1) await sleep(18);
+      engine.load(live(i, urls[i - 1]));
+    }
+    await vi.waitFor(() => expect(states(events, 10)).toContain('playing'), { timeout: 5000 });
+    expect(loadfiles(fake).length).toBeLessThanOrEqual(2);
+    expect(loadfiles(fake).at(-1)?.[1]).toBe(urls[9]);
+    expect(events.filter((e) => e.attempt > 1 && e.attempt < 10)).toEqual([]);
+    expect(states(events, 1).every((s) => s === 'opening')).toBe(true);
+    expect(states(events, 10)[0]).toBe('opening');
+    expect(fake.maxOpenEntries()).toBe(1);
+  });
+
+  it('stop during a pending load sends nothing more', async () => {
+    const { engine, fake, events } = await setup({ scripts: { [URL_B]: SLOW_OPEN } });
+    engine.load(live(1));
+    await playing(events, 1);
+    engine.load(live(2, URL_B));
+    await until(() => loadfiles(fake).length === 2);
+    engine.load(live(3));
+    await sleep(30);
+    expect(loadfiles(fake)).toHaveLength(2);
+    const before = fake.sent.length;
+    const stoppedAt = Date.now();
+    engine.stop(4);
+    await until(() => fake.sent.length > before);
+    expect(Date.now() - stoppedAt).toBeLessThan(250);
+    await sleep(700);
+    expect(fake.sent.slice(before)).toEqual([['stop']]);
+    expect(events.filter((e) => e.attempt >= 3)).toEqual([]);
   });
 
   it('an external mpv crash reports engine-wedged and recreate plays again', async () => {
@@ -360,6 +413,38 @@ describe('MpvEngine', () => {
     expect(errors(events)[0]).toMatchObject({ attempt: 2, error: { code: 'engine-wedged' } });
     expect(loadfiles(fake)).toHaveLength(1);
     expect(fake.killed).toBe(1);
+  });
+
+  it('a pending load gives up with engine-wedged when the load in flight never starts', async () => {
+    const shortStart: MpvEngineDeps['timers'] = {
+      setTimeout: (fn, ms) => setTimeout(fn, ms === 3000 ? 100 : ms),
+      clearTimeout: timers.clearTimeout,
+    };
+    const { engine, fake, events } = await setup({
+      scripts: { [URL_NEVER_STARTS]: [] },
+      timers: shortStart,
+    });
+    engine.load(live(1, URL_NEVER_STARTS));
+    await until(() => loadfiles(fake).length === 1);
+    engine.load(live(2));
+    await vi.waitFor(() => expect(errors(events)).toHaveLength(1));
+    expect(errors(events)[0]).toMatchObject({ attempt: 2, error: { code: 'engine-wedged' } });
+    expect(fake.killed).toBe(1);
+  });
+
+  it('a pending load goes out after 1000 ms when the load in flight never opens', async () => {
+    const { engine, fake, events } = await setup({
+      scripts: { [URL_NEVER_OPENS]: [{ afterMs: 0, event: 'start-file' }] },
+    });
+    engine.load(live(1, URL_NEVER_OPENS));
+    await until(() => loadfiles(fake).length === 1);
+    await sleep(20);
+    engine.load(live(2));
+    await sleep(600);
+    expect(loadfiles(fake)).toHaveLength(1);
+    await vi.waitFor(() => expect(loadfiles(fake)).toHaveLength(2), { timeout: 2000 });
+    await playing(events, 2);
+    expect(errors(events)).toEqual([]);
   });
 
   it('a process that starts after release is killed at once', async () => {
