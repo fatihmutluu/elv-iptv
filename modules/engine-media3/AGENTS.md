@@ -12,10 +12,10 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` (player core spec 6.1
   token, every other command adopts a newer one; events carry the token current when sent.
 
 ## Threading
-- ExoPlayer lives on the engine's `HandlerThread` (its application looper); JS calls post there and return at once;
-  listeners and events run there (`SharedObject.emit` hops to the JS thread). The UI thread never waits, except the
-  Task 6 hook `detachSurface(surface, timeoutMs)` for `surfaceDestroyed` (bounded). The player is built at creation.
-- Module `OnDestroy` (JS reload) and `sharedObjectDidRelease` dispose engines: player released, thread quit.
+- ExoPlayer lives on the engine's `HandlerThread` (its application looper), built at creation; JS calls post there
+  and return at once; listeners and events run there (`SharedObject.emit` hops to the JS thread). The UI thread never
+  waits, except the Task 6 hook `detachSurface(surface, timeoutMs)` for `surfaceDestroyed` (bounded). Module
+  `OnDestroy` (JS reload) and `sharedObjectDidRelease` dispose engines: player released, thread quit.
 
 ## Playback
 - Every prepare (`load`, `retry`) builds a new media source from the request with `playWhenReady = true`. `retry`:
@@ -27,8 +27,7 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` (player core spec 6.1
   that ends sends `error network` instead. `stall` start/end: buffering while wanted after it played. `firstFrame`
   from `onRenderedFirstFrame`. `clock` anchors whenever the effective rate (speed while playing, else 0) changes, on
   seeks and once a second while playing; `durationMs` for VOD, `liveEdgeMs` (window end) for live when known.
-- `options.softwareAudio`: rebuilds the player with software audio decoders first and extension renderers preferred;
-  without the FFmpeg extension (#69) only the platform's software codecs (AAC, MP3, Opus, ...) are added.
+- `options.softwareAudio`: rebuilds the player, software audio decoders first, extension renderers preferred (#69).
 
 ## Connection gate (`ConnectionGate.kt`, `GatedDataSource.kt`)
 - Every prepare and `stop` begins a new generation. Each request's `open` waits until no older generation has an open
@@ -39,7 +38,8 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` (player core spec 6.1
 ## Errors, redaction, load control
 - `mapError`: 401/403/404/429/509 keep `http-<code>`, other statuses `http-other`; a 2xx notice body (`text/*` on
   progressive, HTML, XHTML or JSON anywhere) is `connection-limit`; Media3 codes: 2xxx and behind-live-window `network`,
-  3xxx `unsupported-format`, 4xxx/5xxx/7xxx `decoder`, 6xxx `drm`, timeout `engine-wedged`, else `unknown`.
+  malformed (3001/3002) `network` when live or played since prepare, other 3xxx `unsupported-format`, 4xxx/5xxx/7xxx
+  `decoder`, 6xxx `drm`, timeout `engine-wedged`, else `unknown`.
 - `detail` is the Media3 error name plus `redactUrl(uri)`: no query, fragment or user-info; the two segments after
   `live|movie|series|timeshift` and the bare `/<u>/<p>/<id>` form become `***`. Never raw exception messages.
 - Buffers: 15-30 s, start 1 s, after rebuffer 2 s, target 16 MB when low-RAM (`isLowRamDevice` or < 1.5 GB) else 32 MB.

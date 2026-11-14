@@ -61,6 +61,40 @@ class ErrorMappingTest {
   }
 
   @Test
+  fun `malformed media is recoverable for live media`() {
+    val malformed = listOf(
+      PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+      PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
+    )
+    for (code in malformed) {
+      assertEquals("code $code", "network", mapError(null, null, code, live = true, played = false))
+      assertEquals("code $code", "network", mapError(null, null, code, live = true, played = true))
+    }
+  }
+
+  @Test
+  fun `malformed VOD is recoverable once it played and terminal before`() {
+    val malformed = listOf(
+      PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+      PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
+    )
+    for (code in malformed) {
+      assertEquals("code $code", "network", mapError(null, null, code, live = false, played = true))
+      assertEquals("code $code", "unsupported-format", mapError(null, null, code, live = false, played = false))
+    }
+  }
+
+  @Test
+  fun `an unsupported container or manifest stays terminal even live and after playing`() {
+    for (code in listOf(
+      PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+      PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED,
+    )) {
+      assertEquals("code $code", "unsupported-format", mapError(null, null, code, live = true, played = true))
+    }
+  }
+
+  @Test
   fun `Media3 decoder, audio output and frame processing codes are decoder`() {
     for (code in listOf(
       PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,

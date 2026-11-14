@@ -95,7 +95,7 @@ internal class EventReporter(
     val contentType = causeOf<HttpDataSource.InvalidContentTypeException>(error)?.contentType
     val uri = causeOf<HttpDataSource.HttpDataSourceException>(error)?.dataSpec?.uri
     val detail = if (uri == null) error.errorCodeName else "${error.errorCodeName} ${redactUrl(uri.toString())}"
-    sendError(mapError(status, contentType, error.errorCode), status, detail)
+    sendError(mapError(status, contentType, error.errorCode, live = live, played = played), status, detail)
   }
 
   private fun update(player: Player) {
