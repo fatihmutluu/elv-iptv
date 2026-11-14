@@ -9,18 +9,18 @@ Specs: [stream simulator](superpowers/specs/2026-11-13-stream-simulator-design.m
   `/redirect/<id>.ts` (302); catch-up (`/timeshift/...`, `/streaming/timeshift.php`, `/catchup/<id>.ts`,
   `archive-|index-|timeshift_abs-` paths) answers a plain recorded file.
   TS live and VOD over `maxConnections`: 509, 403 or a notice.
-- Accounts (password = username): `demo` (small, 1 connection), `large` (2), `compat` (1), `expired`, `quirks`
 
 ## Accounts
+- Accounts (password = username): `demo` (small, 1 connection), `large` (2), `compat` (1), `expired`, `quirks`
   (real-panel shapes: CRLF playlist, +0100 guide), `huge` (500k entries, 2 connections; opt-in, not in `pnpm check`).
-- Routes: `/get.php`, `/player_api.php`, `/xmltv.php`; `/playlists/<profile>[-variant].m3u|.m3u8`,
 
 ## Data routes
+- Routes: `/get.php`, `/player_api.php`, `/xmltv.php`; `/playlists/<profile>[-variant].m3u|.m3u8`,
   `/playlists/broken/<status>.m3u`, `/guides/<profile>.xml[.gz]`, `/logos/<0-15>.png`, `/_sim/requests` (GET, DELETE),
   `/_sim/events` (GET, POST JSONL <= 1 MB). Log: passwords `***`.
-- Faults: `?fault=<spec>`, parts joined by `,`: `status=<200-599>`, `slow-start=<s>`, `redirect`, `text-notice` (before
 
 ## Faults
+- Faults: `?fault=<spec>`, parts joined by `,`: `status=<200-599>`, `slow-start=<s>`, `redirect`, `text-notice` (before
   any route), `drop@<s>`, `stall<n>s@<s>`, `rate=<kbps>`. Drop, stall and rate apply to TS and VOD responses only
   (not HLS segments or data routes). Unknown: 400. Catalog faults (1013, 1014) act like a query.
 

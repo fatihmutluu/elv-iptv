@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { ACCOUNTS } from '../src/sim/accounts.ts';
+import { buildCatalog } from '../src/sim/catalog.ts';
 import { FaultRules } from '../src/sim/fault-rules.ts';
 import { findFfmpeg, MEDIA_SKIP_MARKER } from '../src/sim/media.ts';
 import { type SimHandle, startSim } from '../src/sim/server.ts';
@@ -86,6 +87,55 @@ describe('FaultRules', () => {
     ],
   ])('rejects %j', (input, error) => {
     expect(new FaultRules().add(input)).toEqual({ ok: false, error });
+  });
+});
+
+function accountOf(name: string) {
+  const found = ACCOUNTS.find((a) => a.username === name);
+  if (!found) throw new Error(`${name} account missing`);
+  return found;
+}
+
+describe('rule reach', () => {
+  it('leaves the expired account untouched', async () => {
+    const handle = await sim();
+    await post(handle.url, { account: 'demo', stream: '*', spec: 'status=418' });
+    const expired = accountOf('expired');
+    const path = `/live/${expired.username}/${expired.password}/1001.ts`;
+    expect(await status(`${handle.url}${path}`)).toBe(403);
+    expect(handle.requests().at(-1)).toMatchObject({ account: 'expired', faultRule: null });
+    expect(await rulesOf(handle.url)).toHaveLength(1);
+  });
+
+  it('reaches every stream URL form of the account', async () => {
+    const handle = await sim();
+    const demo = accountOf('demo');
+    const compat = accountOf('compat');
+    const catalog = buildCatalog(demo.profile, 1);
+    const movie = catalog.movies[0];
+    const episode = catalog.series[0]?.episodes[0];
+    if (!movie || !episode) throw new Error('catalog has no movie or episode');
+    const pair = `${demo.username}/${demo.password}`;
+    await post(handle.url, { account: 'demo', stream: '*', spec: 'status=418' });
+    await post(handle.url, { account: 'compat', stream: '*', spec: 'status=418' });
+    const demoPaths = [
+      `/live/${pair}/1001`,
+      `/${pair}/1001`,
+      `/live/${pair}/1001.m3u8`,
+      `/movie/${pair}/${movie.id}.mp4`,
+      `/movie/${pair}/${movie.id}.mkv`,
+      `/series/${pair}/${episode.id}.mp4`,
+    ];
+    for (const path of demoPaths) {
+      expect(await status(`${handle.url}${path}`), path).toBe(418);
+      expect(handle.requests().at(-1), path).toMatchObject({ account: 'demo', faultRule: 'r1' });
+    }
+    expect(await status(`${handle.url}/relative/1001.ts`)).toBe(418);
+    expect(handle.requests().at(-1)).toMatchObject({
+      account: compat.username,
+      streamId: 1001,
+      faultRule: 'r2',
+    });
   });
 });
 
