@@ -2,14 +2,10 @@ import { elvError, err, ok, type Result } from '@elv/domain';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PLAYBACK_CONFIG } from './config';
 import type { StreamRequest } from './engine';
-import {
-  createPlaybackService,
-  type PlaybackService,
-  type PlaybackState,
-  type RecoveryHooks,
-  type TuneRequest,
-} from './service';
-import { createFakePlayerEngine, type FakePlayerEngine } from './testing';
+import type { RecoveryHooks, ServiceControl } from './seam';
+import { createPlaybackService, createPlaybackServiceWith } from './service';
+import { createFakePlayerEngine, type FakePlayerEngine, type FakeStep } from './testing';
+import type { PlaybackService, PlaybackState, TuneRequest } from './types';
 
 const req = (url: string): StreamRequest => ({ url, headers: { 'x-a': 'b' } });
 
@@ -25,22 +21,28 @@ function deferred(): Deferred {
   return { promise, settle };
 }
 
-function setup(hooks?: RecoveryHooks): { engine: FakePlayerEngine; service: PlaybackService } {
+function setup(
+  hooks?: RecoveryHooks,
+  scripts: Record<string, readonly FakeStep[]> = {},
+): { engine: FakePlayerEngine; service: PlaybackService } {
   const engine = createFakePlayerEngine({
+    scripts,
     now: () => Date.now(),
     schedule: (fn, ms) => setTimeout(fn, ms),
     cancel: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
   });
-  const service = createPlaybackService({
+  const deps = {
     engine,
     clock: { now: () => Date.now() },
     timers: {
-      setTimeout: (fn, ms) => setTimeout(fn, ms),
-      clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
+      setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+      clearTimeout: (h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>),
     },
     config: { startTimeoutMs: 8000 },
-    ...(hooks ? { recovery: () => hooks } : {}),
-  });
+  };
+  const service = hooks
+    ? createPlaybackServiceWith(deps, () => hooks)
+    : createPlaybackService(deps);
   return { engine, service };
 }
 
@@ -100,54 +102,26 @@ describe('tune', () => {
   });
 
   it('passes headers, kind and startMs to the engine', async () => {
-    const { service } = setup();
-    const seen: unknown[] = [];
-    const engine = createFakePlayerEngine({
-      now: Date.now,
-      schedule: setTimeout,
-      cancel: (h) => clearTimeout(h as never),
-    });
-    const spy = vi.spyOn(engine, 'load').mockImplementation((c) => void seen.push(c));
-    const s2 = createPlaybackService({
-      engine,
-      clock: { now: Date.now },
-      timers: {
-        setTimeout: (f, m) => setTimeout(f, m),
-        clearTimeout: (h) => clearTimeout(h as never),
-      },
-    });
-    const t = s2.tune(tuneReq('http://a/1', { startMs: 5, kind: 'vod' }));
+    const { engine, service } = setup();
+    const spy = vi.spyOn(engine, 'load');
+    const t = service.tune(tuneReq('http://a/1', { startMs: 5, kind: 'vod' }));
     await flush();
     expect(spy).toHaveBeenCalledOnce();
-    expect(seen[0]).toEqual({
+    expect(spy.mock.calls[0]?.[0]).toStrictEqual({
       attempt: t,
       url: 'http://a/1',
       headers: { 'x-a': 'b' },
       kind: 'vod',
       startMs: 5,
     });
-    expect(service.getState().status.kind).toBe('idle');
   });
 
   it('omits startMs when not given', async () => {
-    const engine = createFakePlayerEngine({
-      now: Date.now,
-      schedule: setTimeout,
-      cancel: (h) => clearTimeout(h as never),
-    });
-    const seen: object[] = [];
-    vi.spyOn(engine, 'load').mockImplementation((c) => void seen.push(c));
-    const s = createPlaybackService({
-      engine,
-      clock: { now: Date.now },
-      timers: {
-        setTimeout: (f, m) => setTimeout(f, m),
-        clearTimeout: (h) => clearTimeout(h as never),
-      },
-    });
-    s.tune(tuneReq('http://a/1'));
+    const { engine, service } = setup();
+    const spy = vi.spyOn(engine, 'load');
+    service.tune(tuneReq('http://a/1'));
     await flush();
-    expect('startMs' in (seen[0] as object)).toBe(false);
+    expect(spy.mock.calls[0]?.[0]).not.toHaveProperty('startMs');
   });
 
   it('loads only the newest tune when resolves settle out of order', async () => {
@@ -281,49 +255,30 @@ describe('engine events', () => {
 });
 
 describe('failures', () => {
-  it('an engine error fails with the playback error and stops', async () => {
+  it('a terminal engine error fails with the playback error and stops', async () => {
     const { engine, service } = setup();
     const t = service.tune(tuneReq('A'));
     await flush();
-    engine.emit({ attempt: t, type: 'error', error: { code: 'http-404', detail: 'x' } });
+    engine.emit({ attempt: t, type: 'error', error: { code: 'http-401', detail: 'x' } });
     expect(service.getState().status).toEqual({
       kind: 'failed',
-      error: { category: 'playback', code: 'http-404', detail: 'x' },
+      error: { category: 'playback', code: 'http-401', detail: 'x' },
     });
     expect(engine.commands.at(-1)).toEqual({ name: 'stop', attempt: t });
   });
 
-  it('start timeout fails with network and stops', async () => {
-    const { engine, service } = setup();
-    const t = service.tune(tuneReq('slow'));
-    await flush();
-    engine.emit({ attempt: t, type: 'state', state: 'opening' });
-    // default script gives firstFrame at 300 ms, so use a scripted silence instead
-    service.stop();
-    const e2 = createFakePlayerEngine({
-      now: Date.now,
-      schedule: setTimeout,
-      cancel: (h) => clearTimeout(h as never),
-      scripts: { silent: [] },
-    });
-    const s2 = createPlaybackService({
-      engine: e2,
-      clock: { now: Date.now },
-      timers: {
-        setTimeout: (f, m) => setTimeout(f, m),
-        clearTimeout: (h) => clearTimeout(h as never),
-      },
-    });
-    const t2 = s2.tune(tuneReq('silent'));
+  it('the start timeout reaches the recovery 8,000 ms after the load', async () => {
+    let fired = 0;
+    const onStartTimeout = () => {
+      fired += 1;
+    };
+    const { service } = setup({ onStartTimeout }, { silent: [] });
+    service.tune(tuneReq('silent'));
     await vi.advanceTimersByTimeAsync(7999);
-    expect(s2.getState().status).toEqual({ kind: 'tuning' });
+    expect(fired).toBe(0);
     await vi.advanceTimersByTimeAsync(1);
-    expect(s2.getState().status).toEqual({
-      kind: 'failed',
-      error: { category: 'playback', code: 'network' },
-    });
-    expect(e2.commands.at(-1)).toEqual({ name: 'stop', attempt: t2 });
-    expect(engine.commands.filter((c) => c.name === 'stop')).toHaveLength(1);
+    expect(fired).toBe(1);
+    expect(service.getState().status).toEqual({ kind: 'tuning' });
   });
 
   it('firstFrame cancels the start timeout', async () => {
@@ -334,25 +289,13 @@ describe('failures', () => {
   });
 
   it('a new tune cancels the pending start timeout', async () => {
-    const e = createFakePlayerEngine({
-      now: Date.now,
-      schedule: setTimeout,
-      cancel: (h) => clearTimeout(h as never),
-      scripts: { silent: [] },
-    });
-    const s = createPlaybackService({
-      engine: e,
-      clock: { now: Date.now },
-      timers: {
-        setTimeout: (f, m) => setTimeout(f, m),
-        clearTimeout: (h) => clearTimeout(h as never),
-      },
-    });
+    const { service: s } = setup(undefined, { silent: [] });
     s.tune(tuneReq('silent'));
     await vi.advanceTimersByTimeAsync(5000);
     s.tune(tuneReq('other'));
     await vi.advanceTimersByTimeAsync(5000);
     expect(s.getState().status).toEqual({ kind: 'playing' });
+    expect(s.getState().attempt).toBe(2);
   });
 });
 
@@ -420,7 +363,7 @@ describe('commands', () => {
     const { engine, service } = setup();
     const t = service.tune(tuneReq('A'));
     await flush();
-    engine.emit({ attempt: t, type: 'error', error: { code: 'network' } });
+    engine.emit({ attempt: t, type: 'error', error: { code: 'http-401' } });
     service.retry();
     await flush();
     expect(service.getState().attempt).toBe(t + 1);
@@ -561,67 +504,54 @@ describe('robustness', () => {
 });
 
 describe('recovery hooks', () => {
-  it('routes error, stall and start timeout to the hooks instead of failing', async () => {
+  it('routes events and user actions to the hooks', async () => {
     const calls: string[] = [];
     const hooks: RecoveryHooks = {
+      onTune: (r) => {
+        calls.push(`tune:${r.item}`);
+        return false;
+      },
+      onReset: () => calls.push('reset'),
+      onSeek: () => calls.push('seek'),
+      onState: (s) => calls.push(`state:${s}`),
       onError: (e) => calls.push(`error:${e.code}`),
       onStall: (p) => calls.push(`stall:${p}`),
       onStartTimeout: () => calls.push('start-timeout'),
       onSurface: (c) => calls.push(`surface:${c}`),
       onDispose: () => calls.push('dispose'),
     };
-    const e = createFakePlayerEngine({
-      now: Date.now,
-      schedule: setTimeout,
-      cancel: (h) => clearTimeout(h as never),
-      scripts: { silent: [] },
-    });
-    const s = createPlaybackService({
-      engine: e,
-      clock: { now: Date.now },
-      timers: {
-        setTimeout: (f, m) => setTimeout(f, m),
-        clearTimeout: (h) => clearTimeout(h as never),
-      },
-      recovery: () => hooks,
-    });
+    const { engine: e, service: s } = setup(hooks, { silent: [] });
     const t = s.tune(tuneReq('silent'));
     await vi.advanceTimersByTimeAsync(8000);
     e.emit({ attempt: t, type: 'error', error: { code: 'network' } });
     e.emit({ attempt: t, type: 'stall', phase: 'start', atMs: 0 });
+    e.emit({ attempt: t, type: 'state', state: 'buffering' });
     e.surface('created');
+    s.seek(5);
+    s.retry();
+    s.stop();
     s.dispose();
     expect(calls).toEqual([
+      'tune:item-silent',
       'start-timeout',
       'error:network',
       'stall:start',
+      'state:buffering',
       'surface:created',
+      'seek',
+      'reset',
+      'reset',
       'dispose',
     ]);
-    expect(s.getState().status).toEqual({ kind: 'tuning' });
+    expect(s.getState().status).toEqual({ kind: 'idle' });
   });
 
   it('leaves exactly one start timeout after A, B and C are tuned', async () => {
     let timeouts = 0;
-    const e = createFakePlayerEngine({
-      now: Date.now,
-      schedule: setTimeout,
-      cancel: (h) => clearTimeout(h as never),
-      scripts: { A: [], B: [], C: [] },
-    });
-    const s = createPlaybackService({
-      engine: e,
-      clock: { now: Date.now },
-      timers: {
-        setTimeout: (f, m) => setTimeout(f, m),
-        clearTimeout: (h) => clearTimeout(h as never),
-      },
-      recovery: () => ({
-        onStartTimeout: () => {
-          timeouts += 1;
-        },
-      }),
-    });
+    const onStartTimeout = () => {
+      timeouts += 1;
+    };
+    const { service: s } = setup({ onStartTimeout }, { A: [], B: [], C: [] });
     expect(vi.getTimerCount()).toBe(0);
     s.tune(tuneReq('A'));
     await flush();
@@ -637,36 +567,69 @@ describe('recovery hooks', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('lets hooks drive the service through the control surface', async () => {
-    let ctl!: Parameters<NonNullable<Parameters<typeof createPlaybackService>[0]['recovery']>>[0];
+  it('a held tune keeps the status and loads only when the recovery says so', async () => {
+    let ctl!: ServiceControl;
+    let hold = false;
     const e = createFakePlayerEngine({
       now: Date.now,
       schedule: setTimeout,
       cancel: (h) => clearTimeout(h as never),
     });
-    const s = createPlaybackService({
-      engine: e,
-      clock: { now: Date.now },
-      timers: {
-        setTimeout: (f, m) => setTimeout(f, m),
-        clearTimeout: (h) => clearTimeout(h as never),
-      },
-      recovery: (c) => {
-        ctl = c;
-        return {};
-      },
+    const deps = { engine: e, clock: { now: Date.now }, timers: { setTimeout, clearTimeout } };
+    const s = createPlaybackServiceWith(deps, (c) => {
+      ctl = c;
+      return { onTune: () => hold };
     });
-    const t = s.tune(tuneReq('A'));
+    const spy = vi.spyOn(e, 'load');
+    s.tune(tuneReq('A'));
+    await flush();
+    ctl.setStatus({ kind: 'limited', nextAtMs: 9 });
+    hold = true;
+    const tb = s.tune(tuneReq('B', { startMs: 7 }));
+    await flush();
+    expect(s.getState().status).toEqual({ kind: 'limited', nextAtMs: 9 });
+    expect(loads(e)).toHaveLength(1);
+    expect(ctl.request()?.item).toBe('item-B');
+    ctl.load({ startMs: 3, options: { softwareAudio: true } });
+    expect(spy).toHaveBeenLastCalledWith({
+      ...req('B'),
+      attempt: tb,
+      kind: 'live',
+      startMs: 3,
+      options: { softwareAudio: true },
+    });
+    ctl.load({ stream: req('C') });
+    ctl.load();
+    expect(spy).toHaveBeenLastCalledWith({ ...req('C'), attempt: tb, kind: 'live', startMs: 7 });
+    expect(loads(e).map((c) => c.url)).toEqual(['A', 'B', 'C', 'C']);
+    ctl.stopMedia();
+    expect(e.commands.at(-1)).toEqual({ name: 'stop', attempt: tb });
+    expect(e.openMedias()).toBe(0);
+  });
+
+  it('lets hooks drive the service through the control surface', async () => {
+    let ctl!: ServiceControl;
+    const e = createFakePlayerEngine({
+      now: Date.now,
+      schedule: setTimeout,
+      cancel: (h) => clearTimeout(h as never),
+    });
+    const deps = { engine: e, clock: { now: Date.now }, timers: { setTimeout, clearTimeout } };
+    const s2 = createPlaybackServiceWith(deps, (c) => {
+      ctl = c;
+      return {};
+    });
+    expect(ctl.request()).toBeUndefined();
+    const t = s2.tune(tuneReq('A'));
     await flush();
     const t2 = ctl.nextAttempt();
     expect(t2).toBe(t + 1);
-    expect(ctl.currentAttempt()).toBe(t2);
     ctl.setStatus({ kind: 'recovering', rung: 1, nextAtMs: 5 });
-    expect(s.getState().status).toEqual({ kind: 'recovering', rung: 1, nextAtMs: 5 });
+    expect(s2.getState().status).toEqual({ kind: 'recovering', rung: 1, nextAtMs: 5 });
     ctl.engine.retry(t2);
     ctl.armStartTimeout(100);
     ctl.fail({ category: 'playback', code: 'x' });
-    expect(s.getState().status.kind).toBe('failed');
+    expect(s2.getState().status.kind).toBe('failed');
     ctl.armStartTimeout(100);
     ctl.clearStartTimeout();
     expect(ctl.config.limitTotalMs).toBe(60000);

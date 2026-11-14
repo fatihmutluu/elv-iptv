@@ -9,18 +9,19 @@ export type {
   EngineEvent,
   EngineState,
   LoadCommand,
+  LoadOptions,
   MediaKind,
   PlayerEngine,
   StreamRequest,
 } from './engine';
 export { classifyError, type ErrorClass, toPlaybackError } from './errors';
-export {
-  createPlaybackService,
-  type PlaybackClock,
-  type PlaybackService,
-  type PlaybackServiceDeps,
-  type PlaybackState,
-  type PlaybackStatus,
-  type PlaybackTimers,
-  type TuneRequest,
-} from './service';
+export { nextLimitDelay } from './recovery';
+export { createPlaybackService, type PlaybackServiceDeps } from './service';
+export type {
+  PlaybackClock,
+  PlaybackService,
+  PlaybackState,
+  PlaybackStatus,
+  PlaybackTimers,
+  TuneRequest,
+} from './types';

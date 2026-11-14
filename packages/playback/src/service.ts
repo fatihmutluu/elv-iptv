@@ -1,104 +1,15 @@
 import { type ElvError, elvError, type Result } from '@elv/domain';
 import { DEFAULT_PLAYBACK_CONFIG, type PlaybackConfig } from './config';
+import type { AttemptToken, EngineEvent, PlayerEngine, StreamRequest } from './engine';
+import { createRecovery } from './recovery';
+import type { LoadOverrides, RecoveryHooks, ServiceControl } from './seam';
 import type {
-  AttemptToken,
-  ClockAnchor,
-  EngineError,
-  EngineEvent,
-  MediaKind,
-  PlayerEngine,
-  StreamRequest,
-} from './engine';
-import { toPlaybackError } from './errors';
-
-/** Time source, injected so tests control it. */
-export interface PlaybackClock {
-  now(): number;
-}
-
-/** Timer source, injected so tests control it. */
-export interface PlaybackTimers {
-  setTimeout(fn: () => void, ms: number): unknown;
-  clearTimeout(handle: unknown): void;
-}
-
-/** What to play. `resolve` builds the stream request at play time so credentials stay out of the catalog. */
-export interface TuneRequest {
-  item: string;
-  accountKey: string;
-  kind: MediaKind;
-  resolve: () => Promise<Result<StreamRequest>>;
-  alternates?: readonly (() => Promise<Result<StreamRequest>>)[];
-  startMs?: number;
-}
-
-/** What the service is doing now. */
-export type PlaybackStatus =
-  | { kind: 'idle' }
-  | { kind: 'tuning' }
-  | { kind: 'playing' }
-  | { kind: 'paused' }
-  | { kind: 'recovering'; rung: 1 | 2 | 3 | 4; nextAtMs: number }
-  | { kind: 'limited'; nextAtMs: number }
-  | { kind: 'failed'; error: ElvError };
-
-/** Snapshot delivered to subscribers. Times are on the injected clock. */
-export interface PlaybackState {
-  status: PlaybackStatus;
-  attempt: AttemptToken;
-  item?: string;
-  accountKey?: string;
-  anchor?: ClockAnchor;
-  tuneAt?: number;
-  firstFrameAt?: number;
-  staleEventsDropped: number;
-}
-
-/** Playback controller; the UI talks to this, never to the engine. */
-export interface PlaybackService {
-  /** Supersedes the current tune at once and returns the new attempt token. */
-  tune(request: TuneRequest): AttemptToken;
-  /** Re-prepares loaded media, or tunes the last request again after a failure. */
-  retry(): void;
-  stop(): void;
-  play(): void;
-  pause(): void;
-  seek(positionMs: number): void;
-  getState(): PlaybackState;
-  /** Returns the unsubscribe function. */
-  subscribe(listener: (state: PlaybackState) => void): () => void;
-  dispose(): void;
-}
-
-/** @internal Surface the recovery logic uses to drive the service; not exported from the package. */
-interface ServiceControl {
-  readonly engine: PlayerEngine;
-  readonly config: PlaybackConfig;
-  now(): number;
-  getState(): PlaybackState;
-  currentAttempt(): AttemptToken;
-  /** Takes a new token for a retry rung; later events of older tokens are dropped. */
-  nextAttempt(): AttemptToken;
-  setStatus(status: PlaybackStatus): void;
-  /** Sets `failed` and stops the engine. */
-  fail(error: ElvError): void;
-  armStartTimeout(ms: number): void;
-  clearStartTimeout(): void;
-  setTimer(fn: () => void, ms: number): unknown;
-  clearTimer(handle: unknown): void;
-}
-
-/**
- * @internal Reactions to current-token events, and to every surface event whatever its token
- * (the surface belongs to the view, not the media). Without hooks, an error or start timeout fails the tune.
- */
-export interface RecoveryHooks {
-  onError?(error: EngineError): void;
-  onStall?(phase: 'start' | 'end'): void;
-  onStartTimeout?(): void;
-  onSurface?(change: 'created' | 'destroyed'): void;
-  onDispose?(): void;
-}
+  PlaybackClock,
+  PlaybackService,
+  PlaybackState,
+  PlaybackTimers,
+  TuneRequest,
+} from './types';
 
 /** Dependencies of {@link createPlaybackService}. */
 export interface PlaybackServiceDeps {
@@ -106,18 +17,29 @@ export interface PlaybackServiceDeps {
   clock: PlaybackClock;
   timers: PlaybackTimers;
   config?: Partial<PlaybackConfig>;
-  /** @internal Builds the recovery ladder and watchdog; not part of the public API. */
-  recovery?: (control: ServiceControl) => RecoveryHooks;
 }
 
-/** Creates the playback service over one engine. */
+/**
+ * Creates the playback service over one engine, with the recovery ladder, the stall watchdog and the
+ * provider connection-limit path (player core spec sections 5.4 and 5.5).
+ */
 export function createPlaybackService(deps: PlaybackServiceDeps): PlaybackService {
+  return createPlaybackServiceWith(deps, createRecovery);
+}
+
+/** @internal {@link createPlaybackService} with another recovery, for tests of the seam. */
+export function createPlaybackServiceWith(
+  deps: PlaybackServiceDeps,
+  recovery: (control: ServiceControl) => RecoveryHooks,
+): PlaybackService {
   const { engine, clock, timers } = deps;
   const config: PlaybackConfig = { ...DEFAULT_PLAYBACK_CONFIG, ...deps.config };
   const listeners = new Set<(state: PlaybackState) => void>();
   let state: PlaybackState = { status: { kind: 'idle' }, attempt: 0, staleEventsDropped: 0 };
-  let lastRequest: TuneRequest | undefined;
+  let current: TuneRequest | undefined;
+  let stream: StreamRequest | undefined;
   let loaded = false;
+  let held = false;
   let disposed = false;
   let startTimer: unknown;
 
@@ -138,8 +60,24 @@ export function createPlaybackService(deps: PlaybackServiceDeps): PlaybackServic
   };
 
   const fail = (error: ElvError): void => {
+    hooks.onReset?.();
     stopEngine();
     update({ status: { kind: 'failed', error } });
+  };
+
+  const sendLoad = (overrides: LoadOverrides = {}): void => {
+    if (overrides.stream !== undefined) stream = overrides.stream;
+    if (current === undefined || stream === undefined) return;
+    const startMs = overrides.startMs ?? current.startMs;
+    loaded = true;
+    engine.load({
+      attempt: state.attempt,
+      url: stream.url,
+      headers: stream.headers,
+      kind: current.kind,
+      ...(startMs === undefined ? {} : { startMs }),
+      ...(overrides.options === undefined ? {} : { options: overrides.options }),
+    });
   };
 
   const control: ServiceControl = {
@@ -147,19 +85,24 @@ export function createPlaybackService(deps: PlaybackServiceDeps): PlaybackServic
     config,
     now: () => clock.now(),
     getState: () => state,
-    currentAttempt: () => state.attempt,
+    request: () => current,
     nextAttempt: () => {
       update({ attempt: state.attempt + 1 });
       return state.attempt;
     },
     setStatus: (status) => update({ status }),
+    load: (overrides) => {
+      held = false;
+      sendLoad(overrides);
+    },
+    stopMedia: stopEngine,
     fail,
     armStartTimeout: (ms) => {
       clearStartTimeout();
       const token = state.attempt;
       startTimer = timers.setTimeout(() => {
         startTimer = undefined;
-        if (token === state.attempt) onStartTimeout();
+        if (token === state.attempt) hooks.onStartTimeout?.();
       }, ms);
     },
     clearStartTimeout,
@@ -167,16 +110,11 @@ export function createPlaybackService(deps: PlaybackServiceDeps): PlaybackServic
     clearTimer: (handle) => timers.clearTimeout(handle),
   };
 
-  const hooks: RecoveryHooks | undefined = deps.recovery?.(control);
-
-  function onStartTimeout(): void {
-    if (hooks) hooks.onStartTimeout?.();
-    else fail(toPlaybackError({ code: 'network' }));
-  }
+  const hooks: RecoveryHooks = recovery(control);
 
   const onEvent = (event: EngineEvent): void => {
     if (event.type === 'surface') {
-      hooks?.onSurface?.(event.change);
+      hooks.onSurface?.(event.change);
       return;
     }
     if (event.attempt !== state.attempt) {
@@ -193,16 +131,16 @@ export function createPlaybackService(deps: PlaybackServiceDeps): PlaybackServic
         update({ anchor: event.anchor });
         return;
       case 'stall':
-        hooks?.onStall?.(event.phase);
+        hooks.onStall?.(event.phase);
         return;
       case 'error':
-        if (hooks) hooks.onError?.(event.error);
-        else fail(toPlaybackError(event.error));
+        hooks.onError?.(event.error);
         return;
       case 'state':
         if (event.state === 'playing') update({ status: { kind: 'playing' } });
         else if (event.state === 'paused') update({ status: { kind: 'paused' } });
         else if (event.state === 'ended') update({ status: { kind: 'idle' } });
+        hooks.onState?.(event.state);
     }
   };
 
@@ -210,13 +148,15 @@ export function createPlaybackService(deps: PlaybackServiceDeps): PlaybackServic
 
   const startTune = (request: TuneRequest): AttemptToken => {
     clearStartTimeout();
-    lastRequest = request;
+    held = hooks.onTune?.(request) ?? false;
+    current = request;
+    stream = undefined;
     loaded = false;
     const token = state.attempt + 1;
     const { anchor: _anchor, firstFrameAt: _firstFrameAt, ...kept } = state;
     state = {
       ...kept,
-      status: { kind: 'tuning' },
+      status: held ? state.status : { kind: 'tuning' },
       attempt: token,
       item: request.item,
       accountKey: request.accountKey,
@@ -224,31 +164,23 @@ export function createPlaybackService(deps: PlaybackServiceDeps): PlaybackServic
     };
     update({});
     new Promise<Result<StreamRequest>>((settle) => settle(request.resolve())).then(
-      (result) => onResolved(token, request, result),
-      () => onResolved(token, request, { ok: false, error: elvError('network', 'resolve-failed') }),
+      (result) => onResolved(token, result),
+      () => onResolved(token, { ok: false, error: elvError('network', 'resolve-failed') }),
     );
     return token;
   };
 
-  function onResolved(
-    token: AttemptToken,
-    request: TuneRequest,
-    result: Result<StreamRequest>,
-  ): void {
-    if (disposed || token !== state.attempt || state.status.kind !== 'tuning') return;
+  function onResolved(token: AttemptToken, result: Result<StreamRequest>): void {
+    const { kind } = state.status;
+    if (disposed || token !== state.attempt || (kind !== 'tuning' && kind !== 'limited')) return;
     if (!result.ok) {
       fail(result.error);
       return;
     }
-    loaded = true;
+    stream = result.value;
+    if (held) return;
     control.armStartTimeout(config.startTimeoutMs);
-    engine.load({
-      attempt: token,
-      url: result.value.url,
-      headers: result.value.headers,
-      kind: request.kind,
-      ...(request.startMs === undefined ? {} : { startMs: request.startMs }),
-    });
+    sendLoad();
   }
 
   return {
@@ -257,11 +189,12 @@ export function createPlaybackService(deps: PlaybackServiceDeps): PlaybackServic
       return startTune(request);
     },
     retry() {
-      if (disposed || lastRequest === undefined || state.status.kind === 'idle') return;
+      if (disposed || current === undefined || state.status.kind === 'idle') return;
       if (!loaded) {
-        startTune(lastRequest);
+        startTune(current);
         return;
       }
+      hooks.onReset?.();
       const token = control.nextAttempt();
       update({ status: { kind: 'tuning' } });
       control.armStartTimeout(config.startTimeoutMs);
@@ -269,6 +202,7 @@ export function createPlaybackService(deps: PlaybackServiceDeps): PlaybackServic
     },
     stop() {
       if (disposed || state.status.kind === 'idle') return;
+      hooks.onReset?.();
       stopEngine();
       update({ status: { kind: 'idle' } });
     },
@@ -279,7 +213,9 @@ export function createPlaybackService(deps: PlaybackServiceDeps): PlaybackServic
       if (!disposed && loaded) engine.pause(state.attempt);
     },
     seek(positionMs) {
-      if (!disposed && loaded) engine.seek(state.attempt, positionMs);
+      if (disposed || !loaded) return;
+      hooks.onSeek?.();
+      engine.seek(state.attempt, positionMs);
     },
     getState: () => state,
     subscribe(listener) {
@@ -293,7 +229,7 @@ export function createPlaybackService(deps: PlaybackServiceDeps): PlaybackServic
       disposed = true;
       clearStartTimeout();
       unsubscribeEngine();
-      hooks?.onDispose?.();
+      hooks.onDispose?.();
       listeners.clear();
     },
   };

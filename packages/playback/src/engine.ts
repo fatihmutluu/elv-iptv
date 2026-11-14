@@ -10,11 +10,18 @@ export interface StreamRequest {
   headers: Readonly<Record<string, string>>;
 }
 
+/** Engine choices for one load. */
+export interface LoadOptions {
+  /** Decode audio in software; recovery rung 4 asks for it after a `decoder` error when the engine can. */
+  softwareAudio?: boolean;
+}
+
 /** Starts a new media, replacing the current one. */
 export interface LoadCommand extends StreamRequest {
   attempt: AttemptToken;
   kind: MediaKind;
   startMs?: number;
+  options?: LoadOptions;
 }
 
 /** Coarse engine playback state. */
