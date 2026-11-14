@@ -15,11 +15,13 @@ import android.view.accessibility.AccessibilityEvent
 /**
  * Delegates every [Window.Callback] method to [wrapped], including the interface's Java default methods that Kotlin
  * `by` delegation skips. Key events and focus loss are reported to [KeyForwarding]; no key is ever consumed here.
+ * Reference parameters are nullable wherever the SDK leaves them unannotated, so Kotlin adds no null checks the wrapped
+ * callback would not make; the SDK marks the panel `Menu` and `MenuItem` parameters `@NonNull`, so those cannot be.
  */
 class ForwardingWindowCallback(private val wrapped: Window.Callback) : Window.Callback {
-  override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-    val action = KeyForwarding.action(event.action, event.repeatCount, event.flags)
-    if (action != null) {
+  override fun dispatchKeyEvent(event: KeyEvent?): Boolean {
+    val action = event?.let { KeyForwarding.action(it.action, it.repeatCount, it.flags) }
+    if (event != null && action != null) {
       KeyForwarding.emit(KeyForwarding.payload(action, event.keyCode, event.flags, event.eventTime))
     }
     return wrapped.dispatchKeyEvent(event)
@@ -30,11 +32,11 @@ class ForwardingWindowCallback(private val wrapped: Window.Callback) : Window.Ca
     wrapped.onWindowFocusChanged(hasFocus)
   }
 
-  override fun dispatchKeyShortcutEvent(event: KeyEvent) = wrapped.dispatchKeyShortcutEvent(event)
-  override fun dispatchTouchEvent(event: MotionEvent) = wrapped.dispatchTouchEvent(event)
-  override fun dispatchTrackballEvent(event: MotionEvent) = wrapped.dispatchTrackballEvent(event)
-  override fun dispatchGenericMotionEvent(event: MotionEvent) = wrapped.dispatchGenericMotionEvent(event)
-  override fun dispatchPopulateAccessibilityEvent(event: AccessibilityEvent) =
+  override fun dispatchKeyShortcutEvent(event: KeyEvent?) = wrapped.dispatchKeyShortcutEvent(event)
+  override fun dispatchTouchEvent(event: MotionEvent?) = wrapped.dispatchTouchEvent(event)
+  override fun dispatchTrackballEvent(event: MotionEvent?) = wrapped.dispatchTrackballEvent(event)
+  override fun dispatchGenericMotionEvent(event: MotionEvent?) = wrapped.dispatchGenericMotionEvent(event)
+  override fun dispatchPopulateAccessibilityEvent(event: AccessibilityEvent?) =
     wrapped.dispatchPopulateAccessibilityEvent(event)
   override fun onCreatePanelView(featureId: Int): View? = wrapped.onCreatePanelView(featureId)
   override fun onCreatePanelMenu(featureId: Int, menu: Menu) = wrapped.onCreatePanelMenu(featureId, menu)

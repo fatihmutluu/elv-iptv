@@ -1,5 +1,6 @@
 package io.github.fatihmutluu.elv.remotekeys
 
+import android.app.Activity
 import android.os.SystemClock
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -29,7 +30,7 @@ class ElvRemoteKeysModule : Module() {
       }
       sink = newSink
       KeyForwarding.setSink(newSink)
-      install()
+      installOnUiThread()
     }
 
     OnStopObserving("onKey") {
@@ -41,7 +42,7 @@ class ElvRemoteKeysModule : Module() {
     }
 
     OnActivityEntersForeground {
-      install()
+      installOnUiThread()
     }
   }
 
@@ -50,8 +51,14 @@ class ElvRemoteKeysModule : Module() {
     sink = null
   }
 
-  private fun install() {
-    val window = appContext.currentActivity?.window ?: return
+  /** Window callbacks belong to the UI thread; `OnStartObserving` runs on the JS thread. */
+  private fun installOnUiThread() {
+    val activity = appContext.currentActivity ?: return
+    activity.runOnUiThread { install(activity) }
+  }
+
+  private fun install(activity: Activity) {
+    val window = activity.window ?: return
     val current = window.callback ?: return
     val wrapped = KeyForwarding.wrap(current)
     if (wrapped !== current) window.callback = wrapped
