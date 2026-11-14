@@ -80,6 +80,8 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
   let seekDisarmed = false;
   let surfaceGone = false;
   let awaitingSurface = false;
+  let paused = false;
+  let deferred = false;
 
   const clear = (handle: unknown): undefined => {
     if (handle !== undefined) ctl.clearTimer(handle);
@@ -103,6 +105,8 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
     softwareAudio = false;
     resumeFrom = undefined;
     seekDisarmed = false;
+    paused = false;
+    deferred = false;
   };
 
   const reset = (): void => {
@@ -293,6 +297,18 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
     }, delay);
   };
 
+  /** No command while paused: a pending rung or gap is dropped and the ladder restarts on `play`. */
+  const pause = (): void => {
+    if (stepTimer !== undefined || rungTimer !== undefined) {
+      deferred = true;
+      ctl.setStatus({ kind: 'paused' });
+    }
+    paused = true;
+    const waitingSurface = awaitingSurface;
+    cancelSteps();
+    awaitingSurface = waitingSurface;
+  };
+
   const budgetUsed = (): boolean =>
     budget.rung > 0 ||
     budget.notFound ||
@@ -314,13 +330,31 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
       seekDisarmed = true;
       stallTimer = clear(stallTimer);
     },
+    onPause: pause,
+    onPlay() {
+      if (!paused) return;
+      paused = false;
+      if (deferred) {
+        deferred = false;
+        budget.rung = 0;
+        escalate();
+      } else if (ctl.getState().status.kind !== 'playing') {
+        ctl.armStartTimeout(config.startTimeoutMs);
+      }
+    },
     onState(state) {
       if (state === 'ended') {
         reset();
         return;
       }
+      if (state === 'paused') {
+        pause();
+        return;
+      }
       stableTimer = clear(stableTimer);
       if (state !== 'playing') return;
+      paused = false;
+      deferred = false;
       stepTimer = clear(stepTimer);
       rungTimer = clear(rungTimer);
       stallTimer = clear(stallTimer);
@@ -335,7 +369,10 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
     onError(error) {
       const kind = classifyError(error.code);
       if (kind === 'terminal') failWith(toPlaybackError(error));
-      else if (kind === 'limit') enterLimit();
+      else if (paused) {
+        budget.lastError = error;
+        deferred = true;
+      } else if (kind === 'limit') enterLimit();
       else if (stepTimer !== undefined || awaitingSurface) budget.lastError = error;
       else if (kind === 'not-found') onNotFound(error);
       else if (error.code === 'surface-lost' && surfaceGone) {
@@ -351,7 +388,7 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
         return;
       }
       stableTimer = clear(stableTimer);
-      const watching = ctl.getState().status.kind === 'playing' && !seekDisarmed;
+      const watching = ctl.getState().status.kind === 'playing' && !seekDisarmed && !paused;
       if (!watching || awaitingSurface || stallTimer !== undefined) return;
       stallTimer = ctl.setTimer(() => {
         stallTimer = undefined;
@@ -363,7 +400,8 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
       surfaceGone = change === 'destroyed';
       if (surfaceGone || !awaitingSurface) return;
       awaitingSurface = false;
-      goTo(1);
+      if (paused) deferred = true;
+      else goTo(1);
     },
     onDispose: reset,
   };

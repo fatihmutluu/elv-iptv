@@ -513,6 +513,8 @@ describe('recovery hooks', () => {
       },
       onReset: () => calls.push('reset'),
       onSeek: () => calls.push('seek'),
+      onPause: () => calls.push('pause'),
+      onPlay: () => calls.push('play'),
       onState: (s) => calls.push(`state:${s}`),
       onError: (e) => calls.push(`error:${e.code}`),
       onStall: (p) => calls.push(`stall:${p}`),
@@ -528,6 +530,8 @@ describe('recovery hooks', () => {
     e.emit({ attempt: t, type: 'state', state: 'buffering' });
     e.surface('created');
     s.seek(5);
+    s.pause();
+    s.play();
     s.retry();
     s.stop();
     s.dispose();
@@ -539,6 +543,8 @@ describe('recovery hooks', () => {
       'state:buffering',
       'surface:created',
       'seek',
+      'pause',
+      'play',
       'reset',
       'reset',
       'dispose',

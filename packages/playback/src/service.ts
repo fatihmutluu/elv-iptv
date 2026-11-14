@@ -212,10 +212,14 @@ export function createPlaybackServiceWith(
       update({ status: { kind: 'idle' } });
     },
     play() {
-      if (!disposed && loaded) engine.play(state.attempt);
+      if (disposed || !loaded) return;
+      engine.play(state.attempt);
+      hooks.onPlay?.();
     },
     pause() {
-      if (!disposed && loaded) engine.pause(state.attempt);
+      if (disposed || !loaded) return;
+      hooks.onPause?.();
+      engine.pause(state.attempt);
     },
     seek(positionMs) {
       if (disposed || !loaded) return;

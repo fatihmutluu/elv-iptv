@@ -56,7 +56,9 @@ export interface PlaybackService {
   /** Re-prepares loaded media, or tunes the last request again after a failure. */
   retry(): void;
   stop(): void;
+  /** Resumes; recovery cut short by a pause restarts at rung 1 with the budget it had. */
   play(): void;
+  /** Pauses; no recovery command is sent until `play`, and pending rungs are dropped. */
   pause(): void;
   /** Seeks; the stall watchdog stays disarmed until the engine reports `playing` again. */
   seek(positionMs: number): void;

@@ -1,101 +1,27 @@
 import { elvError, err, ok, type Result } from '@elv/domain';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PLAYBACK_CONFIG } from './config';
-import type {
-  EngineCapabilities,
-  EngineErrorCode,
-  EngineState,
-  LoadCommand,
-  StreamRequest,
-} from './engine';
+import type { StreamRequest } from './engine';
 import { nextLimitDelay } from './recovery';
-import { createPlaybackService } from './service';
-import { createFakePlayerEngine, type FakePlayerEngine, type FakeStep } from './testing';
-import type { PlaybackService, PlaybackStatus, TuneRequest } from './types';
-
-interface Rig {
-  engine: FakePlayerEngine;
-  service: PlaybackService;
-  loads: LoadCommand[];
-  loadAt: number[];
-}
-
-function rig(
-  scripts: Record<string, readonly FakeStep[]>,
-  capabilities: Partial<EngineCapabilities> = {},
-): Rig {
-  const engine = createFakePlayerEngine({
-    scripts,
-    capabilities,
-    now: () => Date.now(),
-    schedule: (fn, ms) => setTimeout(fn, ms),
-    cancel: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
-  });
-  const loads: LoadCommand[] = [];
-  const loadAt: number[] = [];
-  const load = engine.load.bind(engine);
-  vi.spyOn(engine, 'load').mockImplementation((cmd) => {
-    loads.push(cmd);
-    loadAt.push(Date.now());
-    load(cmd);
-  });
-  const service = createPlaybackService({
-    engine,
-    clock: { now: () => Date.now() },
-    timers: {
-      setTimeout: (fn, ms) => setTimeout(fn, ms),
-      clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
-    },
-  });
-  return { engine, service, loads, loadAt };
-}
-
-const req = (url: string): StreamRequest => ({ url, headers: {} });
-const resolved = (url: string) => () => Promise.resolve(ok(req(url)));
-const live = (url: string, extra: Partial<TuneRequest> = {}): TuneRequest => ({
-  item: url,
-  accountKey: 'acc',
-  kind: 'live',
-  resolve: resolved(url),
-  ...extra,
-});
-const vod = (url: string, extra: Partial<TuneRequest> = {}): TuneRequest =>
-  live(url, { kind: 'vod', ...extra });
-const tick = (ms: number) => vi.advanceTimersByTimeAsync(ms);
-const status = (r: Rig): PlaybackStatus => r.service.getState().status;
-const token = (r: Rig) => r.service.getState().attempt;
-const last = (r: Rig) => r.engine.commands.at(-1);
-const state = (r: Rig, s: EngineState) =>
-  r.engine.emit({ attempt: token(r), type: 'state', state: s });
-const play = (r: Rig) => {
-  r.engine.emit({ attempt: token(r), type: 'firstFrame', atMs: Date.now() });
-  state(r, 'playing');
-};
-const stall = (r: Rig, phase: 'start' | 'end') =>
-  r.engine.emit({ attempt: token(r), type: 'stall', phase, atMs: Date.now() });
-const error = (r: Rig, code: EngineErrorCode) =>
-  r.engine.emit({ attempt: token(r), type: 'error', error: { code } });
-const recovering = (rung: 1 | 2 | 3 | 4, inMs: number): PlaybackStatus => ({
-  kind: 'recovering',
-  rung,
-  nextAtMs: Date.now() + inMs,
-});
-const failed = (code: string): PlaybackStatus => ({
-  kind: 'failed',
-  error: { category: 'playback', code },
-});
-const errorAt = (afterMs: number, code: EngineErrorCode): FakeStep => ({
-  afterMs,
-  emit: 'error',
-  error: { code },
-});
-
-async function playing(r: Rig, request: TuneRequest): Promise<number> {
-  const t = r.service.tune(request);
-  await tick(0);
-  play(r);
-  return t;
-}
+import {
+  error,
+  errorAt,
+  failed,
+  last,
+  live,
+  play,
+  playing,
+  type Rig,
+  recovering,
+  req,
+  resolved,
+  rig,
+  stall,
+  state,
+  status,
+  tick,
+  vod,
+} from './recovery-test-helpers';
 
 beforeEach(() => {
   vi.useFakeTimers();

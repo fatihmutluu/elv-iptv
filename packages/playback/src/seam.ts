@@ -51,6 +51,10 @@ export interface RecoveryHooks {
   /** Stop, a user retry or a failure: forget every pending step and budget. */
   onReset?(): void;
   onSeek?(): void;
+  /** The user paused; called before `pause` is sent. */
+  onPause?(): void;
+  /** The user resumed; called after `play` is sent. */
+  onPlay?(): void;
   onState?(state: EngineState): void;
   onError?(error: EngineError): void;
   onStall?(phase: 'start' | 'end'): void;
