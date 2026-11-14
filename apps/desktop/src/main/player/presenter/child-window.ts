@@ -1,14 +1,8 @@
 import type { PlayerArea } from '../../../shared/player-ipc.ts';
 import type { MpvClient } from '../mpv/client.ts';
 import { areaToScreen } from './bounds.ts';
-import type {
-  AppWindowEvent,
-  AppWindowLike,
-  PresenterEvent,
-  VideoPresenter,
-  VideoWindowLike,
-} from './types.ts';
-import { emitSurface } from './types.ts';
+import type { AppWindowEvent, AppWindowLike, VideoPresenter, VideoWindowLike } from './types.ts';
+import { createSurfaceTracker } from './types.ts';
 
 /** What the child-window presenter needs from Electron. */
 export interface ChildWindowDeps {
@@ -40,11 +34,10 @@ const FOLLOWED: readonly AppWindowEvent[] = [
  */
 export function createChildWindowPresenter(deps: ChildWindowDeps): VideoPresenter {
   const { appWindow } = deps;
-  const listeners = new Set<(event: PresenterEvent) => void>();
+  const surface = createSurfaceTracker();
   let video: VideoWindowLike | undefined;
   let hwnd = 0;
   let area: PlayerArea | undefined;
-  let surfaceLive = false;
   let disposed = false;
   let stopDisplay: (() => void) | undefined;
   let detachClient: (() => void) | undefined;
@@ -66,31 +59,32 @@ export function createChildWindowPresenter(deps: ChildWindowDeps): VideoPresente
     if (!target.isVisible()) target.showInactive();
   };
 
-  const surfaceGone = (): void => {
-    if (!surfaceLive) return;
-    surfaceLive = false;
-    emitSurface(listeners, 'destroyed');
-  };
-
   const unfollow = (): void => {
     for (const event of FOLLOWED) appWindow.removeListener(event, layout);
     stopDisplay?.();
     stopDisplay = undefined;
   };
 
+  /** The window and its HWND are kept only when both exist, so a failure never leaves `--wid=0` behind. */
   const ensureWindow = (): VideoWindowLike => {
     if (video) return video;
     const created = deps.createWindow();
+    let handle: number;
+    try {
+      handle = deps.hwndOf(created);
+    } catch (error) {
+      created.destroy();
+      throw error;
+    }
     video = created;
-    hwnd = deps.hwndOf(created);
+    hwnd = handle;
     created.on('closed', () => {
       unfollow();
-      surfaceGone();
+      surface.gone();
     });
     for (const event of FOLLOWED) appWindow.on(event, layout);
     stopDisplay = deps.onDisplayChange?.(layout);
-    surfaceLive = true;
-    emitSurface(listeners, 'created');
+    surface.created();
     layout();
     return created;
   };
@@ -103,11 +97,11 @@ export function createChildWindowPresenter(deps: ChildWindowDeps): VideoPresente
   return {
     kind: 'child-window',
     coversArea: true,
-    prepare() {
-      if (disposed) return Promise.reject(new Error('presenter disposed'));
+    async prepare() {
+      if (disposed) throw new Error('presenter disposed');
       const window = ensureWindow();
-      if (window.isDestroyed()) return Promise.reject(new Error('video window is gone'));
-      return Promise.resolve([`--wid=${hwnd}`]);
+      if (window.isDestroyed()) throw new Error('video window is gone');
+      return [`--wid=${hwnd}`];
     },
     attach(client: MpvClient) {
       if (disposed) return;
@@ -127,19 +121,16 @@ export function createChildWindowPresenter(deps: ChildWindowDeps): VideoPresente
       layout();
     },
     toggleFullscreen: toggleAppFullscreen,
-    onEvent(listener) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
+    onEvent: (listener) => surface.onEvent(listener),
     dispose() {
       if (disposed) return;
       unfollow();
       detachClient?.();
       detachClient = undefined;
       if (video && !video.isDestroyed()) video.destroy();
-      surfaceGone();
+      surface.gone();
       disposed = true;
-      listeners.clear();
+      surface.clear();
     },
   };
 }

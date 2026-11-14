@@ -45,7 +45,8 @@ export interface Probe {
   ping(times: number): Promise<number[]>;
   pressKeys(times: number): Promise<number>;
   moveBy(dx: number, dy: number): Promise<void>;
-  resizeBy(dw: number, dh: number): Promise<void>;
+  /** Drags the top-left corner by (dx, dy): the window shrinks and its content origin moves. */
+  resizeFromTopLeft(dx: number, dy: number): Promise<void>;
   videoBounds(): Rect | null;
   mpvGet(names: string[]): Promise<Record<string, unknown>>;
   /** Asks mpv for fullscreen as its OSC button does; returns what owns fullscreen afterwards. */
@@ -122,9 +123,9 @@ const probe: Probe = {
     win().setPosition(x + dx, y + dy);
     await sleep(SETTLE_MS);
   },
-  async resizeBy(dw, dh) {
-    const [w = 0, h = 0] = win().getSize();
-    win().setSize(w + dw, h + dh);
+  async resizeFromTopLeft(dx, dy) {
+    const b = win().getBounds();
+    win().setBounds({ x: b.x + dx, y: b.y + dy, width: b.width - dx, height: b.height - dy });
     await sleep(SETTLE_MS);
   },
   videoBounds() {

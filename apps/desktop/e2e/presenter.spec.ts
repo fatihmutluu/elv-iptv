@@ -124,7 +124,7 @@ for (const kind of ['child-window', 'own-window'] as const) {
         expectNear(afterMove.video, moved, 'after move');
         expect(afterMove.distinct).toBeGreaterThanOrEqual(VIDEO_BUCKETS);
 
-        await call('resizeBy', -200, -100);
+        await call('resizeFromTopLeft', 120, 60);
         const resized = await call('areaRect');
         const afterResize = {
           area: resized,
@@ -133,6 +133,7 @@ for (const kind of ['child-window', 'own-window'] as const) {
           pingsMs: await call('ping', 5),
         };
         m['afterResize'] = afterResize;
+        expect([resized.x, resized.y]).toEqual([moved.x + 120, moved.y + 60]);
         expectNear(afterResize.video, resized, 'after app resize');
         expect(afterResize.distinct).toBeGreaterThanOrEqual(VIDEO_BUCKETS);
 

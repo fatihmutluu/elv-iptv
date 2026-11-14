@@ -170,6 +170,43 @@ describe('createChildWindowPresenter', () => {
     await expect(presenter.prepare()).rejects.toThrow();
   });
 
+  it('rejects when the HWND cannot be read and never hands out --wid=0', async () => {
+    const app = fakeAppWindow();
+    const videos: ReturnType<typeof fakeVideoWindow>[] = [];
+    let failures = 1;
+    const presenter = createChildWindowPresenter({
+      appWindow: app.window,
+      createWindow: () => {
+        const video = fakeVideoWindow();
+        videos.push(video);
+        return video.window;
+      },
+      hwndOf: (window) => {
+        if (failures-- > 0) throw new Error('no native handle');
+        return nativeHwnd(window);
+      },
+    });
+    const events: PresenterEvent[] = [];
+    presenter.onEvent((e) => events.push(e));
+    let thrown: unknown;
+    const first = (() => {
+      try {
+        return presenter.prepare();
+      } catch (error) {
+        thrown = error;
+        return undefined;
+      }
+    })();
+    expect(thrown).toBeUndefined();
+    await expect(first).rejects.toThrow('no native handle');
+    expect(videos[0]?.state.destroyed).toBe(true);
+    expect(events).toEqual([]);
+    expect(app.listenerCount()).toBe(0);
+    expect(await presenter.prepare()).toEqual(['--wid=305441741']);
+    expect(videos).toHaveLength(2);
+    expect(events).toEqual([{ type: 'surface', change: 'created' }]);
+  });
+
   it('toggleFullscreen toggles the app window', async () => {
     const { app, presenter } = setup();
     await presenter.prepare();

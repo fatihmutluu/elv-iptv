@@ -61,16 +61,45 @@ export interface VideoWindowLike {
   on(event: 'closed', listener: () => void): unknown;
 }
 
-/** Tells every listener about a surface change; one that throws must not keep the others from it. */
-export function emitSurface(
-  listeners: ReadonlySet<(event: PresenterEvent) => void>,
-  change: PresenterEvent['change'],
-): void {
-  for (const listener of [...listeners]) {
-    try {
-      listener({ type: 'surface', change });
-    } catch {
-      // a listener bug is the listener's problem
+/** A presenter's surface bookkeeping: `created` once per live surface, `destroyed` once when it goes. */
+export interface SurfaceTracker {
+  created(): void;
+  /** Emits `destroyed` if a surface is live; otherwise does nothing. */
+  gone(): void;
+  onEvent(listener: (event: PresenterEvent) => void): () => void;
+  /** Drops every listener (on dispose). */
+  clear(): void;
+}
+
+/** Creates a tracker whose listeners are isolated: one that throws must not keep the others from the event. */
+export function createSurfaceTracker(): SurfaceTracker {
+  const listeners = new Set<(event: PresenterEvent) => void>();
+  let live = false;
+  const emit = (change: PresenterEvent['change']): void => {
+    for (const listener of [...listeners]) {
+      try {
+        listener({ type: 'surface', change });
+      } catch {
+        // a listener bug is the listener's problem
+      }
     }
-  }
+  };
+  return {
+    created() {
+      live = true;
+      emit('created');
+    },
+    gone() {
+      if (!live) return;
+      live = false;
+      emit('destroyed');
+    },
+    onEvent(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    clear() {
+      listeners.clear();
+    },
+  };
 }

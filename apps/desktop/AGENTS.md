@@ -46,5 +46,5 @@ Expo project with `platforms: ["web"]` rendered by react-native-web.
   DirectComposition output covers child windows, so an opaque one hid mpv (1 colour while it played). mpv's own
   fullscreen is turned back to the app window. Own window: `--geometry` in physical pixels; Windows puts the frame's
   top-left there (the title bar covers the area's top).
-- Go/no-go (Windows 10, 150 %): child passed; video in 719 ms, mpv 1200x675 px for an 800x450 DIP area, JS ping 0-5
-  ms, aligned after move, resize, area change, fullscreen. Rerun with `pnpm sim`: `ELV_MPV_SPIKE=1 pnpm test:e2e`.
+- Go/no-go (Windows 10, 150 %): child passed; video in 719-793 ms, mpv 1200x675 px for an 800x450 DIP area, JS ping
+  0-5 ms, aligned after move, resize, area change, fullscreen. Rerun with `pnpm sim`: `ELV_MPV_SPIKE=1 pnpm test:e2e`.

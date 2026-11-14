@@ -177,13 +177,20 @@ spec on mpv 0.42.0 docs, release assets, licence files and issues (no GPL source
   (Windows) and mpv's own window (macOS always; Windows when the `--wid` spike fails). The status line, area bounds,
   fullscreen and the lifetime guard are written against the interface, never against one implementation.
 - **Child window (Windows):** the presenter creates a video `BrowserWindow` (frameless, `parent` = the app window,
-  skipped in the task bar, black background, no web content, sandboxed) and passes its HWND (`getNativeWindowHandle`,
-  as uint32) to mpv as `--wid`. It keeps the window on the player area on `player:area` and on the app window's move,
-  resize, maximise, fullscreen and display changes, and hides it with the area or when the app minimises. It is
-  created once per player screen (one `surface created` per run); zaps never re-create it.
+  skipped in the task bar, transparent background, no web content, sandboxed) and passes its HWND
+  (`getNativeWindowHandle`, as uint32) to mpv as `--wid`. The background must be transparent: Chromium's
+  DirectComposition output lies above child windows, so in the go/no-go an opaque window (black or any colour) hid
+  mpv's child completely while mpv played. Prerequisite: the launcher is Per-Monitor V2 DPI aware, so mpv's child
+  fills the window in physical pixels on scaled displays. It keeps the window on the player area on `player:area`
+  and on the app window's move, resize, maximise, fullscreen and display changes, and hides it with the area or when
+  the app minimises. It is created once per player screen (one `surface created` per run); zaps never re-create it.
+  Where mpv's child is absent (between a quit and the next spawn, after a crash), the transparent window shows the
+  DOM beneath it, so the renderer paints the player area black.
 - **Own window (macOS; Windows fallback):** mpv shows its own window (`force-window`), placed over the player area on
   first show and then left to the user, while the app window shows the player screen and the status line. The window
-  survives zaps. A user close sends `closed`; mpv respawns on the next load.
+  survives zaps. A user close sends `closed`; mpv respawns on the next load. On Windows `--geometry` places the window
+  frame's top-left at the area's origin, so mpv's title bar covers about 30 DIP at the top of the area; accepted for
+  the fallback (mpv's window options stay unchanged).
 - **Controls:** mpv's OSC (seek bar, pause, audio and subtitle selection). The OSC needs Lua; the pinned libmpv's
   embedded build options list `-Dlua=luajit` and the spike confirms the OSC runs. Without Lua, the renderer shows a
   plain DOM control bar beside (not over) the video area that drives the port (play, pause, seek; tracks once #73 adds
@@ -277,7 +284,7 @@ spec on mpv 0.42.0 docs, release assets, licence files and issues (no GPL source
 ## 10. Risks
 | Risk | Mitigation |
 |---|---|
-| `--wid` into an Electron window is undocumented: Chromium may paint over or blank mpv's child window; a cross-process child window shares the input queue, so a hung mpv can stall the app's input; alignment lags while dragging | A spike on this PC; the 3 s IPC watchdog kills a wedged mpv; fallback is the own-window presenter (§5.6) |
+| `--wid` into an Electron window is undocumented: Chromium may paint over or blank mpv's child window; a cross-process child window shares the input queue, so a hung mpv can stall the app's input; alignment lags while dragging | Measured on this PC (2026-11-14): Chromium's DirectComposition painted over the child of an opaque video window; a transparent video window shows mpv (video in 719-793 ms, aligned after move, resize and fullscreen, JS ping 0-5 ms), so Windows uses the child window. The 3 s IPC watchdog kills a wedged mpv. Fallbacks: set `WINDOWS_DEFAULT_PRESENTER` to `own-window`, or the app-wide `disable-direct-composition` switch (also measured working); the gate's `videoVisible` catches a blank window |
 | No pinnable LGPL mpv executable; the official LGPL libmpv bundles FFmpeg and dozens of libraries statically with only `LICENSE.LGPL` | Our launcher keeps the DLL replaceable; the 0.1 licence gate on the embedded configuration; the per-library notice list (#77) and our own Windows build before a public release; legal review before the first store submission (foundation §12) |
 | An LGPL mpv CLI is upstream-discouraged, and the macOS build of FFmpeg, mpv and dependencies takes days | Licence gate in the workflow; launcher fallback over our own libmpv; the iPad app for the owner's test |
 | The one-media rule and the error codes depend on mpv internals and log text | Simulator-log overlap in the gate; stop-then-load fallback; log fixtures per runtime; `curl-enabled=no` |

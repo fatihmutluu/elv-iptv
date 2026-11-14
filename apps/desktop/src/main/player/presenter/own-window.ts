@@ -2,8 +2,8 @@ import type { PlayerArea } from '../../../shared/player-ipc.ts';
 import type { MpvClient } from '../mpv/client.ts';
 import type { Rect } from './bounds.ts';
 import { areaToScreen } from './bounds.ts';
-import type { AppWindowLike, PresenterEvent, VideoPresenter } from './types.ts';
-import { emitSurface } from './types.ts';
+import type { AppWindowLike, VideoPresenter } from './types.ts';
+import { createSurfaceTracker } from './types.ts';
 
 /** What the own-window presenter needs from Electron. */
 export interface OwnWindowDeps {
@@ -22,11 +22,10 @@ const DEFAULT_FIRST_AREA_TIMEOUT_MS = 1000;
  */
 export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
   const { appWindow } = deps;
-  const listeners = new Set<(event: PresenterEvent) => void>();
+  const surface = createSurfaceTracker();
   let visibleArea: PlayerArea | undefined;
   let client: MpvClient | undefined;
   let detachClient: (() => void) | undefined;
-  let surfaceLive = false;
   let disposed = false;
   const waiters = new Set<{ resolve(args: string[]): void; reject(error: Error): void }>();
 
@@ -51,12 +50,6 @@ export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
       height: content.height / zoom,
       visible: true,
     };
-  };
-
-  const surfaceGone = (): void => {
-    if (!surfaceLive) return;
-    surfaceLive = false;
-    emitSurface(listeners, 'destroyed');
   };
 
   const detach = (): void => {
@@ -94,16 +87,15 @@ export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
     attach(next) {
       if (disposed) return;
       detach();
-      surfaceGone();
+      surface.gone();
       client = next;
       const offClose = next.onClose(() => {
         if (client !== next) return;
         detach();
-        surfaceGone();
+        surface.gone();
       });
       detachClient = offClose;
-      surfaceLive = true;
-      emitSurface(listeners, 'created');
+      surface.created();
     },
     setArea(area) {
       if (disposed || !area.visible) return;
@@ -113,17 +105,14 @@ export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
     toggleFullscreen() {
       client?.command(['cycle', 'fullscreen']).catch(() => undefined);
     },
-    onEvent(listener) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
+    onEvent: (listener) => surface.onEvent(listener),
     dispose() {
       if (disposed) return;
       disposed = true;
       for (const waiter of [...waiters]) waiter.reject(new Error('presenter disposed'));
       detach();
-      surfaceGone();
-      listeners.clear();
+      surface.gone();
+      surface.clear();
     },
   };
 }
