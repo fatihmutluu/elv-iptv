@@ -12,3 +12,6 @@ Device implementations of the `@elv/domain` ports used by `@elv/data`. Only thes
 - `createMacrotaskScheduler()` yields a `setTimeout(0)`; `createDeviceHttpClient()` is the domain fetch client over `expo/fetch`,
   reading the whole body as one chunk where a response has no stream.
 - Tests (Vitest) mock `@op-engineering/op-sqlite` and `expo/fetch` at the module boundary; `op-sqlite-fake.ts` is the recording fake.
+- `createSecureSecretStore()` is the `SecretStore` over `expo-secure-store` (async API only). Values split into chunks of at most 1,800 UTF-8 bytes
+  (`<key>.<i>`, count in `<key>.n`, written last); a failed `set` leaves no secret. A missing chunk, bad index or store error reads as `undefined`
+  and logs nothing; invalid keys throw. Tests mock `expo-secure-store`.
