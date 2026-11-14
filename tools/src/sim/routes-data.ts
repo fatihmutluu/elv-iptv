@@ -17,12 +17,14 @@ const PLAYLISTS: Record<string, { profile: ProfileName; variant: M3uVariant }> =
   'compat-crlf-bom': { profile: 'compat', variant: 'crlf-bom' },
   'compat-truncated': { profile: 'compat', variant: 'truncated' },
   huge: { profile: 'huge', variant: 'plain' },
+  corpus: { profile: 'corpus', variant: 'plain' },
 };
 const PROFILE_ACCOUNT: Record<ProfileName, string> = {
   small: 'demo',
   large: 'large',
   compat: 'compat',
   huge: 'huge',
+  corpus: 'corpus',
 };
 const LOGO_COUNT = 16;
 
@@ -140,7 +142,7 @@ export const dataRoute: RouteHandler = async (req, res, ctx, meta) => {
     return true;
   }
 
-  const guideMatch = /^\/guides\/(small|large|compat|huge)\.xml(\.gz)?$/.exec(path);
+  const guideMatch = /^\/guides\/(small|large|compat|huge|corpus)\.xml(\.gz)?$/.exec(path);
   if (guideMatch) {
     await guide(req, res, ctx, guideMatch[1] as ProfileName, guideMatch[2] !== undefined);
     return true;

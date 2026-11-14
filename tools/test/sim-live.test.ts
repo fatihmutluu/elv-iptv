@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,9 +6,10 @@ import { Readable } from 'node:stream';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ACCOUNTS, type Account } from '../src/sim/accounts.ts';
 import { applyStreamFaults, parseFaults } from '../src/sim/faults.ts';
+import { hlsPlaylist } from '../src/sim/hls.ts';
 import { activeChildren, ensureRecipe, findFfmpeg, MEDIA_SKIP_MARKER } from '../src/sim/media.ts';
-import { hlsPlaylist } from '../src/sim/routes-live.ts';
 import { type SimHandle, startSim } from '../src/sim/server.ts';
+import { removeCache } from './media-cache.ts';
 import { packetPids, startsWithKeyframe } from './ts-packets.ts';
 
 const ffmpeg = findFfmpeg();
@@ -222,7 +223,7 @@ withFfmpeg('live streams', () => {
   beforeAll(() => {
     cacheDir = mkdtempSync(join(tmpdir(), 'sim-live-'));
   });
-  afterAll(() => rmSync(cacheDir, { recursive: true, force: true }));
+  afterAll(() => removeCache(cacheDir));
   const start = async (clock?: Date): Promise<SimHandle> => {
     const sim = await startSim({
       port: 0,
@@ -252,6 +253,14 @@ withFfmpeg('live streams', () => {
     const entry = sim.requests()[0];
     expect(entry?.streamId).toBe(1001);
     expect(entry?.recipe).toBeTruthy();
+  }, 60_000);
+
+  it('close resolves only after the live ffmpeg child has exited', async () => {
+    const sim = await start();
+    await hold(`${sim.url}/live/${demo}/1001.ts`);
+    expect(activeChildren()).toBe(1);
+    await sim.close();
+    expect(activeChildren()).toBe(0);
   }, 60_000);
 
   it('frees the slot and kills ffmpeg when the client aborts', async () => {
