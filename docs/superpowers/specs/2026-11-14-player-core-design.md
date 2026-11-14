@@ -109,6 +109,9 @@ Reference-app lessons already recorded in our research notes (prose, no code rea
   (#63 builds the messages).
 
 ### 5.4 Recovery ladder (live)
+The ladder starts on a stall longer than the watchdog window while playing, on a recoverable error, or when the start
+timeout (8 s) passes after `load` without the first `playing`. The start timeout ends at `playing`, not at
+`firstFrame` (amended during the build): a first frame without playback is not a started stream.
 Rungs, each bounded and visible as a status the OSD can show:
 - **L0 wait:** a stall shorter than the watchdog window (live 4 s) is left to the engine.
 - **L1 resume:** `retry` the same media at the live edge (the engine reuses what it can).
@@ -156,13 +159,17 @@ Rungs, each bounded and visible as a status the OSD can show:
 
 ### 6.1 Android, Android TV, Fire OS: `modules/engine-media3` (`@elv/engine-media3`)
 - Expo native module, Android only, Media3 pinned to 1.11.1 (`exoplayer`, `exoplayer-hls`, `datasource`). It imports
-  only `expo-modules-core` and `@elv/playback` types (layer rule).
+  only `expo-modules-core` and `@elv/playback` types (layer rule); `react` and `react-native` are peer dependencies of
+  its view component.
 - Shape: an engine object (an Expo shared object, one per player screen) that implements `PlayerEngine` from §5.1, and
   a view `Media3Surface` that hosts a `SurfaceView` bound to an engine. The app creates the engine, passes it to the
   service and to the view. The surface type is fixed at creation and never changed at runtime; nothing between the
   surface and the window paints an opaque background, so the React Native OSD composes above it.
 - Threading: the ExoPlayer instance lives on a dedicated playback thread (its application looper). Commands from JS are
-  posted there and return immediately; events are sent from there. The UI thread never waits for the player.
+  posted there and return immediately; events are sent from there. The UI thread never waits for the player, with one
+  bounded exception: a surface detach (`surfaceDestroyed`, or an engine swap on one view) must not return while the
+  decoder still renders into the old surface, so it runs ahead of queued commands and waits at most 3 s (a release in
+  progress takes about 500 ms, Media3's `clearVideoSurface` up to 2 s, plus margin).
 - Connection discipline: every stream request goes through our `DataSource` wrapper with a per-engine connection gate.
   `open` of a new request waits until the previous one is closed (bounded wait, then it closes it forcibly). With
   `load` stopping the old media first, the simulator log must show zero overlap during zaps.
@@ -222,7 +229,10 @@ Rungs, each bounded and visible as a status the OSD can show:
 - Fault runs (URLs built by the gate with `?fault=`): `drop@5` passes when playback is `playing` again within 10 s of the
   first drop without user action (the run ends there; the simulator would drop again); `status=404` passes when the
   service reaches `failed(http-404)` within 10 s; `status=509` passes when the service enters `limited` within 2 s and
-  its next load waits for the backoff (the run ends after the second backoff).
+  its next load waits for the backoff (the run ends after the second backoff). Media3 reconnects a dropped live TS
+  request on its own, so on the device `drop@5` usually recovers at L0 (a short stall, no rung): a stall of the current
+  attempt that ends while the service still shows `playing` counts as recovered, and the simulator log must show the
+  reconnect within 10 s of the drop.
 - CI: phase 1 runs the player gate locally only (`docs/learned/gates/player-android-tv.json`); a report-only CI job is
   added once the local gate is stable (it needs FFmpeg on the runner and a decision about the emulator's `-noaudio`).
   The tvOS simulator run is phase 2.
@@ -253,3 +263,10 @@ Rungs, each bounded and visible as a status the OSD can show:
   stretched picture or a screensaver during a film is an operational defect for 0.1.
 - ADR 0003 is amended: AetherEngine licence wording, MPVKit's status and the no-co-linking rule, VLCKit as the Apple
   fallback, Media3 preloading not used for live.
+- During the build: the start timeout spans `load` to the first `playing`, not `firstFrame` (§5.4); the surface detach
+  is the one bounded UI-thread wait (§6.1).
+- Apple build spike (2026-11-14, Xcode 26.4.1, Swift 6.3.1): AetherEngine 7.67.0 does not build
+  (`PerFrameBenchmark.swift:261`, "unable to type-check this expression in reasonable time", deterministic on arm64
+  and x86_64, for tvOS and iOS). 7.66.1 builds for the tvOS simulator, a tvOS device and the iOS simulator, so phase 2
+  pins 7.66.1 (step 1 of the §6.2 fallback order) and re-pins only when a newer tag builds with the `tvos` job's
+  Xcode. The Expo integration spike is in progress (private report).

@@ -10,8 +10,9 @@
 - [Focus core and list gate spec](superpowers/specs/2026-11-13-focus-list-gate-design.md) the remote key model, focus store, windowed TV list and the 100k list gate (`pnpm gate list`).
 - [Android remote keys spec](superpowers/specs/2026-11-14-android-remote-keys-design.md) the `@elv/remote-keys` module that forwards raw Android key events, so a press moves at the `down` and a hold repeats.
 - [Device catalog spec](superpowers/specs/2026-11-14-device-catalog-design.md) the on-device catalog: storage adapters, the catalog service, bounded Xtream bodies and the import gate (`pnpm gate import`).
+- [Player core spec](superpowers/specs/2026-11-14-player-core-design.md) the `PlayerEngine` port, the playback service with its recovery ladder and connection-limit path, the Media3 engine and the player gate (`pnpm gate player`, baseline `learned/gates/player-android-tv.json`).
 - `superpowers/plans/` implementation plans; they are deleted after the work is merged.
-- [ADRs](adr/README.md) accepted architecture decisions (MADR), including [0011 content keys](adr/0011-content-keys.md).
+- [ADRs](adr/README.md) accepted architecture decisions (MADR), including [0003 playback engines](adr/0003-playback-engines.md) (amended for the player core) and [0011 content keys](adr/0011-content-keys.md).
 - [Lessons learned](learned/README.md) short dated problem-to-rule entries.
 - Governance: [LICENSE](../LICENSE), [CLA](../CLA.md), [Code of Conduct](../CODE_OF_CONDUCT.md), [Security](../SECURITY.md).
 - Package docs: [tools](../tools/AGENTS.md), [tv-mobile](../apps/tv-mobile/AGENTS.md), [desktop](../apps/desktop/AGENTS.md),
