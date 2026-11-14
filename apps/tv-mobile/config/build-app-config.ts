@@ -1,5 +1,5 @@
 import type { ExpoConfig } from 'expo/config';
-import { DEV_CLEARTEXT_HOSTS, withDevCleartext } from './with-dev-cleartext';
+import { DEV_CLEARTEXT_HOSTS, withDevCleartext } from './with-dev-cleartext.ts';
 
 /** The build environment (`process.env` when Expo loads `app.config.ts`). */
 export type Env = Readonly<Record<string, string | undefined>>;
