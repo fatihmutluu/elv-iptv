@@ -49,6 +49,19 @@ static HMODULE load_libmpv(void)
     return LoadLibraryExW(path, NULL, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
 }
 
+/*
+ * Per-Monitor V2 like the official mpv.exe: mpv's windows then work in physical pixels, so --geometry lands where
+ * the app put it and a --wid child fills its parent on scaled displays. Without it Windows scales mpv's windows.
+ */
+static void become_dpi_aware(void)
+{
+    typedef BOOL (WINAPI *set_context_fn)(DPI_AWARENESS_CONTEXT);
+    HMODULE user32 = LoadLibraryExW(L"user32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    set_context_fn set_context = user32 ? (set_context_fn)GetProcAddress(user32, "SetProcessDpiAwarenessContext") : NULL;
+    if (set_context)
+        set_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+}
+
 /* Hard stop: a stalled provider connection must never keep this process (and its pipe) alive. */
 static DWORD WINAPI watchdog(LPVOID ms)
 {
@@ -111,7 +124,7 @@ static int apply_args(int argc, wchar_t **argv, set_option_string_fn set_option,
 
 int wmain(int argc, wchar_t **argv)
 {
-    HMODULE lib = load_libmpv();
+    HMODULE lib;
     create_fn create;
     set_option_string_fn set_option;
     initialize_fn initialize;
@@ -123,6 +136,8 @@ int wmain(int argc, wchar_t **argv)
     DWORD parent_pid = 0;
     int code;
 
+    become_dpi_aware();
+    lib = load_libmpv();
     if (!lib)
         return 3;
     create = (create_fn)symbol(lib, "mpv_create");

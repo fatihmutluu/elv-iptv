@@ -120,6 +120,20 @@ describe.skipIf(!enabled)('elv-mpv.exe', () => {
     expect(osc.data.visibility).toBe('auto');
   });
 
+  it('is per-monitor DPI aware, so --geometry and --wid sizes are physical pixels', async () => {
+    const { child, pipe } = start();
+    await ask(pipe, ['get_property', 'mpv-version']);
+    const script =
+      'Add-Type -Namespace Elv -Name Dpi -MemberDefinition \'[DllImport("shcore.dll")] public static extern int GetProcessDpiAwareness(System.IntPtr h, out int v);\';' +
+      ` $v = -1; [void][Elv.Dpi]::GetProcessDpiAwareness([System.Diagnostics.Process]::GetProcessById(${child.pid}).Handle, [ref]$v); $v`;
+    const out = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      encoding: 'utf8',
+      timeout: 15000,
+    });
+    // PROCESS_PER_MONITOR_DPI_AWARE; Per-Monitor V2 reports the same value here.
+    expect(out.stdout.trim()).toBe('2');
+  }, 20000);
+
   it('lets the caller override a hardened default', async () => {
     const { pipe } = start(['--ytdl=yes']);
     expect(JSON.parse(await ask(pipe, ['get_property', 'ytdl'])).data).toBe(true);
