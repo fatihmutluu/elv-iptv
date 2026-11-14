@@ -32,15 +32,15 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
   token after its gap (0, 1, 2, 4 s) and has 4 s to reach `playing`: 1 `retry`, 2 `load` again, 3 `recreate` + `load`,
   4 software audio after `decoder` (if the engine has it) or the next alternate; then `failed` (last error) + `stop`.
   30 s of `playing` restores every budget. Terminal codes fail at once; `http-404` gets one rung 2, then fails.
-- Limit path (`http-429`, `http-509`, `connection-limit`, never the ladder): `stop`, `limited { nextAtMs }`, wait
-  2, 4, 8, then 15 s, `load` again; `failed(connection-limit)` once the next try would pass 60 s. A same-account `tune`
-  during the wait is held (keeps `limited`, loads with its own token when it ends); another account loads at once.
+- Limit path (`http-429`, `http-509`, `connection-limit`, never the ladder): `stop`, `limited { nextAtMs }` (events of
+  the stopped media are ignored), wait 2, 4, 8, then 15 s, `load` again; `failed(connection-limit)` once the next try
+  would pass 60 s. A same-account `tune` during the wait is held (keeps `limited`, loads with its own token when it
+  ends); another account loads at once.
 - VOD: reloads resume where the failure happened; `network` reconnects with the same backoff for up to 120 s.
 - A user seek disarms the stall watchdog until the next `playing`. `surface-lost` while the surface is gone waits for
   `surface created`, then runs rung 1 once. Stop, a new tune, a user retry, `ended` and `dispose` drop pending steps.
-- Seam (internal, `seam.ts`, not exported): the service calls `RecoveryHooks` (surface events whatever their token) and
-  recovery drives it through `ServiceControl`; tests swap the recovery with `createPlaybackServiceWith`. The start
-  timeout and rung timers are armed before their command is sent.
+- Seam (internal `seam.ts`): the service calls `RecoveryHooks` (surface events whatever their token), recovery drives
+  it via `ServiceControl`; tests use `createPlaybackServiceWith`. Timeouts are armed before their command is sent.
 
 ## Engine contract (spec section 5.1)
 - Commands are enqueue-and-return; results arrive as events, each echoing an `AttemptToken`.

@@ -7,9 +7,12 @@ import type {
   PlaybackClock,
   PlaybackService,
   PlaybackState,
+  PlaybackStatus,
   PlaybackTimers,
   TuneRequest,
 } from './types';
+
+const IGNORED_IN: ReadonlySet<PlaybackStatus['kind']> = new Set(['idle', 'failed', 'limited']);
 
 /** Dependencies of {@link createPlaybackService}. */
 export interface PlaybackServiceDeps {
@@ -121,7 +124,8 @@ export function createPlaybackServiceWith(
       state = { ...state, staleEventsDropped: state.staleEventsDropped + 1 };
       return;
     }
-    if (state.status.kind === 'idle' || state.status.kind === 'failed') return;
+    // While limited the media is stopped; its queued events still carry the current token.
+    if (IGNORED_IN.has(state.status.kind)) return;
     switch (event.type) {
       case 'firstFrame':
         clearStartTimeout();

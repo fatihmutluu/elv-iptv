@@ -434,6 +434,26 @@ describe('connection limit', () => {
     expect(r.loads).toHaveLength(2);
     expect(status(r)).toEqual({ kind: 'playing' });
   });
+
+  const lateEvents: [string, (r: Rig) => void][] = [
+    ['a network error', (r) => error(r, 'network')],
+    ['a paused state', (r) => state(r, 'paused')],
+    ['the http-509 behind a provider notice', (r) => error(r, 'http-509')],
+    ['an http-404', (r) => error(r, 'http-404')],
+  ];
+  it.each(lateEvents)('ignores %s from the stopped media during the backoff', async (_, late) => {
+    const r = rig({ busy: [] });
+    const t = await playing(r, live('busy'));
+    error(r, 'connection-limit');
+    const limited = { kind: 'limited', nextAtMs: Date.now() + 2000 };
+    late(r);
+    expect(status(r)).toEqual(limited);
+    await tick(1999);
+    expect(r.engine.commands.map((c) => c.name)).toEqual(['load', 'stop']);
+    expect(status(r)).toEqual(limited);
+    await tick(1);
+    expect(last(r)).toEqual({ name: 'load', attempt: t + 1, url: 'busy' });
+  });
 });
 
 describe('vod', () => {
