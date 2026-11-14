@@ -239,6 +239,15 @@ describe('Media3Surface', () => {
     expect(props?.engine).toBe(native.engine);
   });
 
+  it('passes the resize mode to the native view and leaves the default to native', async () => {
+    const { native, engine, Media3Surface } = await engineWithView();
+    expect(Media3Surface({ engine, resizeMode: 'fill' })?.props).toEqual({
+      engine: native.engine,
+      resizeMode: 'fill',
+    });
+    expect(Media3Surface({ engine })?.props).toEqual({ engine: native.engine });
+  });
+
   it('keeps one native component type across renders', async () => {
     const { engine, Media3Surface } = await engineWithView();
     expect(Media3Surface({ engine })?.type).toBe(Media3Surface({ engine })?.type);

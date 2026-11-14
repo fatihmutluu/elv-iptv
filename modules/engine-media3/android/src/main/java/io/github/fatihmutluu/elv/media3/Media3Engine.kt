@@ -11,6 +11,8 @@ import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -33,9 +35,16 @@ private val SOFTWARE_AUDIO_FIRST = MediaCodecSelector { mimeType, secure, tunnel
   if (MimeTypes.isAudio(mimeType)) MediaCodecUtil.getDecoderInfosSortedBySoftwareOnly(decoders) else decoders
 }
 
-/** Receives the zap shutter's state on the playback thread: the load serial [media] and whether it [framed]. */
-internal fun interface ShutterSink {
+/** Receives what the surface view shows, on the playback thread; [Media3Engine.bindView] sends the state first. */
+internal interface ViewSink {
+  /** The zap shutter: the load serial [media] and whether its first frame rendered. */
   fun onShutter(media: Long, framed: Boolean)
+
+  /** Media3's decoded picture size; zero while no video renders (the view then keeps the last shape). */
+  fun onVideoSize(width: Int, height: Int, pixelRatio: Float)
+
+  /** Whether playback wants the screen kept on ([keepsScreenOn]). */
+  fun onScreenOn(on: Boolean)
 }
 
 /**
@@ -54,7 +63,18 @@ class Media3Engine(
   private val disposed = AtomicBoolean(false)
   private val gate = ConnectionGate()
   private val buffers = loadControlFor(lowRam(context))
-  private val reporter = EventReporter(handler, { fields -> sendEvent(fields) }, { playAsHls() }, { onFramed() })
+  private val reporter = EventReporter(
+    handler,
+    { fields -> sendEvent(fields) },
+    { playAsHls() },
+    { onFramed() },
+    { cue, played -> onCue(cue, played) },
+  )
+  private val pictures = object : Player.Listener {
+    override fun onVideoSizeChanged(videoSize: VideoSize) {
+      view?.onVideoSize(videoSize.width, videoSize.height, videoSize.pixelWidthHeightRatio)
+    }
+  }
 
   /** The surface the view offers, written on the UI thread; an attach that a detach overtook is skipped. */
   @Volatile private var offered: Surface? = null
@@ -68,7 +88,8 @@ class Media3Engine(
   private var surface: Surface? = null
   private var media = 0L
   private var framed = false
-  private var shutter: ShutterSink? = null
+  private var screenOn = false
+  private var view: ViewSink? = null
 
   /** The engine is passed to the surface view as a prop; let pending view updates apply before it goes. */
   override val releasesAfterPendingViewUpdates: Boolean = true
@@ -88,7 +109,7 @@ class Media3Engine(
     request = next
     media += 1
     framed = false
-    shutter?.onShutter(media, false)
+    view?.onShutter(media, false)
     prepare(next, next.startMs)
   }
 
@@ -117,7 +138,7 @@ class Media3Engine(
     if (current.isCurrentMediaItemSeekable) current.seekTo(positionMs.coerceAtLeast(0L))
   }
 
-  /** Stops the media and closes its connections; later requests of it are refused by the gate. */
+  /** Stops the media and closes its connections; later requests of it are refused by the gate. The screen may sleep. */
   fun stop(attempt: Int) = post {
     adopt(attempt)
     reporter.end()
@@ -125,6 +146,7 @@ class Media3Engine(
     beginGeneration()
     player?.stop()
     player?.clearMediaItems()
+    onCue(ScreenCue.STOP, played = false)
   }
 
   /** Releases ExoPlayer and builds a new one on the same thread and surface; it stays idle until `load` or `retry`. */
@@ -168,14 +190,16 @@ class Media3Engine(
     return !posted || detached.await(timeoutMs, TimeUnit.MILLISECONDS)
   }
 
-  /** Zap shutter hook: [sink] gets the current state now and every change from now on, on the playback thread. */
-  internal fun bindShutter(sink: ShutterSink) = post {
-    shutter = sink
+  /** Surface view hook: [sink] gets the current state now and every change from now on, on the playback thread. */
+  internal fun bindView(sink: ViewSink) = post {
+    view = sink
     sink.onShutter(media, framed)
+    player?.videoSize?.let { sink.onVideoSize(it.width, it.height, it.pixelWidthHeightRatio) }
+    sink.onScreenOn(screenOn)
   }
 
-  internal fun unbindShutter(sink: ShutterSink) = post {
-    if (shutter === sink) shutter = null
+  internal fun unbindView(sink: ViewSink) = post {
+    if (view === sink) view = null
   }
 
   /** Releases the player and ends the playback thread; later commands do nothing. Safe to call twice. */
@@ -199,6 +223,7 @@ class Media3Engine(
       } catch (e: Exception) {
         Log.e(TAG, "engine command failed: ${e.javaClass.simpleName}")
         sendEvent(mapOf("type" to "error", "error" to mapOf("code" to "unknown", "detail" to e.javaClass.simpleName)))
+        onCue(ScreenCue.ERROR, played = false)
       }
     }
   }
@@ -218,7 +243,15 @@ class Media3Engine(
   private fun onFramed() {
     if (framed || media == 0L) return
     framed = true
-    shutter?.onShutter(media, true)
+    view?.onShutter(media, true)
+  }
+
+  /** A state, an error or `stop`: the view keeps the screen on or lets it sleep ([keepsScreenOn]). */
+  private fun onCue(cue: ScreenCue, played: Boolean) {
+    val next = keepsScreenOn(screenOn, cue, played)
+    if (next == screenOn) return
+    screenOn = next
+    view?.onScreenOn(next)
   }
 
   private fun adopt(attempt: Int) {
@@ -302,6 +335,7 @@ class Media3Engine(
       .build()
       .also { built ->
         built.addListener(reporter)
+        built.addListener(pictures)
         surface?.let { built.setVideoSurface(it) }
       }
   }
@@ -310,6 +344,7 @@ class Media3Engine(
     val old = player ?: return
     player = null
     old.removeListener(reporter)
+    old.removeListener(pictures)
     old.release()
   }
 

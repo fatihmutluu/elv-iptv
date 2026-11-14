@@ -1,7 +1,9 @@
 package io.github.fatihmutluu.elv.media3
 
 import android.content.Context
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -20,11 +22,14 @@ private const val TAG = "ElvMedia3"
  */
 private const val DETACH_TIMEOUT_MS = 3_000L
 
+private fun exactly(size: Int) = View.MeasureSpec.makeMeasureSpec(size.coerceAtLeast(0), View.MeasureSpec.EXACTLY)
+
 /**
  * The `Media3Surface` view (player core spec 6.1): a `SurfaceView`, created once and never re-typed or put on top,
- * under a black zap shutter. Neither paints anything else, so React Native views drawn above compose over the video.
+ * under a black zap shutter. The surface is sized and centred at the video's display aspect ratio ([SurfaceFit]);
+ * the view paints black bars beside it, never over it, so React Native views drawn above compose over the video.
  * Surface callbacks attach and detach the surface on the bound engine's playback thread; the engine drives the
- * shutter from every `load` until that media's first frame, posted straight to this view (no JavaScript round trip).
+ * shutter, the picture shape and the screen-on flag, posted straight to this view (no JavaScript round trip).
  */
 class Media3SurfaceView(context: Context, appContext: AppContext) :
   ExpoView(context, appContext),
@@ -33,9 +38,13 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
   private val shutterView = View(context)
   private val main = Handler(Looper.getMainLooper())
   private val shutter = ZapShutter()
+  private val fit = SurfaceFit()
+  private val bars = Paint().apply { color = Color.BLACK }
+  private var placed = VideoRect(0, 0, 0, 0)
   private var engine: Media3Engine? = null
   private var binding: Binding? = null
   private var surface: Surface? = null
+  private var screenWanted = false
 
   init {
     surfaceView.isFocusable = false
@@ -49,19 +58,30 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
 
   /**
    * Binds the view to [next] (null unbinds): the surface moves from the previous engine, which must let go of it
-   * first, and the shutter covers until [next] reports its state.
+   * first; the shutter covers, the surface fills the view and the screen may sleep until [next] reports its state.
    */
   fun bind(next: Media3Engine?) {
     if (next === engine) return
     engine?.let { old ->
-      binding?.let { old.unbindShutter(it) }
+      binding?.let { old.unbindView(it) }
       surface?.let { detach(old, it) }
     }
     engine = next
     shutter.reset()
     showShutter(shutter.covers)
-    binding = next?.let { bound -> Binding().also { bound.bindShutter(it) } }
+    fit.reset()
+    placeSurface()
+    keepScreen(false)
+    binding = next?.let { bound -> Binding().also { bound.bindView(it) } }
     surface?.let { next?.attachSurface(it) }
+  }
+
+  /** The `resizeMode` prop: `fit` (default) or `fill`. */
+  fun setResizeMode(name: String?) {
+    val next = ResizeMode.of(name)
+    if (next == fit.mode) return
+    fit.mode = next
+    placeSurface()
   }
 
   override fun surfaceCreated(holder: SurfaceHolder) {
@@ -78,20 +98,62 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
     engine?.let { detach(it, destroyed) }
   }
 
-  /** React Native lays out this view only; both children fill it. */
+  /** React Native lays out this view only: the shutter fills it, the surface takes its fitted rectangle. */
   override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
     val width = MeasureSpec.getSize(widthMeasureSpec)
     val height = MeasureSpec.getSize(heightMeasureSpec)
     setMeasuredDimension(width, height)
-    val exactWidth = MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY)
-    val exactHeight = MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY)
-    surfaceView.measure(exactWidth, exactHeight)
-    shutterView.measure(exactWidth, exactHeight)
+    shutterView.measure(exactly(width), exactly(height))
+    val rect = fit.rect(width, height)
+    surfaceView.measure(exactly(rect.width), exactly(rect.height))
   }
 
   override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
-    surfaceView.layout(0, 0, r - l, b - t)
     shutterView.layout(0, 0, r - l, b - t)
+    placeSurface(r - l, b - t)
+  }
+
+  override fun onAttachedToWindow() {
+    super.onAttachedToWindow()
+    keepScreenOn = screenWanted
+  }
+
+  override fun onDetachedFromWindow() {
+    keepScreenOn = false
+    super.onDetachedFromWindow()
+  }
+
+  /** Bars beside the surface only; the clip keeps a `fill` crop inside the view. */
+  override fun dispatchDraw(canvas: Canvas) {
+    val w = width.toFloat()
+    val h = height.toFloat()
+    canvas.clipRect(0f, 0f, w, h)
+    if (placed.top > 0) canvas.drawRect(0f, 0f, w, placed.top.toFloat(), bars)
+    if (placed.bottom < height) canvas.drawRect(0f, placed.bottom.toFloat(), w, h, bars)
+    if (placed.left > 0) canvas.drawRect(0f, 0f, placed.left.toFloat(), h, bars)
+    if (placed.right < width) canvas.drawRect(placed.right.toFloat(), 0f, w, h, bars)
+    super.dispatchDraw(canvas)
+  }
+
+  /**
+   * Sizes and centres the surface in a [width] x [height] view; called from layout and when the shape or the mode
+   * changes, which needs no layout pass (React Native would not run one for this view).
+   */
+  private fun placeSurface(width: Int = this.width, height: Int = this.height) {
+    val rect = fit.rect(width, height)
+    if (surfaceView.measuredWidth != rect.width || surfaceView.measuredHeight != rect.height) {
+      surfaceView.measure(exactly(rect.width), exactly(rect.height))
+    }
+    surfaceView.layout(rect.left, rect.top, rect.right, rect.bottom)
+    if (rect == placed) return
+    placed = rect
+    invalidate()
+  }
+
+  /** The screen stays on only while the bound engine plays and this view is in a window. */
+  private fun keepScreen(on: Boolean) {
+    screenWanted = on
+    keepScreenOn = on && isAttachedToWindow
   }
 
   private fun detach(from: Media3Engine, old: Surface) {
@@ -104,11 +166,16 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
   }
 
   /** One binding per bound engine, so reports still queued from a previous engine are ignored. */
-  private inner class Binding : ShutterSink {
-    override fun onShutter(media: Long, framed: Boolean) {
-      main.post {
-        if (binding === this) showShutter(shutter.update(media, framed))
-      }
+  private inner class Binding : ViewSink {
+    override fun onShutter(media: Long, framed: Boolean) = onMain { showShutter(shutter.update(media, framed)) }
+
+    override fun onVideoSize(width: Int, height: Int, pixelRatio: Float) =
+      onMain { if (fit.video(width, height, pixelRatio)) placeSurface() }
+
+    override fun onScreenOn(on: Boolean) = onMain { keepScreen(on) }
+
+    private fun onMain(apply: () -> Unit) {
+      main.post { if (binding === this) apply() }
     }
   }
 }

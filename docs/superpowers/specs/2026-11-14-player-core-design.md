@@ -177,6 +177,10 @@ Rungs, each bounded and visible as a status the OSD can show:
   `stall` events when buffering with an empty forward buffer.
 - Zap presentation: the surface stays alive across channel changes. A shutter (a native black view above the surface,
   under the OSD) covers it from `load` until `firstFrame`, so no stale or garbage frame shows on overlay-plane devices.
+- Picture and screen (plan amendment): the surface keeps the video's display aspect ratio (decoded size and pixel
+  aspect ratio), centred with black bars beside it (`resizeMode` `fit`, default; `fill` crops), and keeps its last
+  shape across a zap until the new media reports its own; the view keeps the screen on while the engine plays (and
+  buffers after it played) and lets it sleep on pause, end, error, `stop` and detach, natively, without JS.
 - Clock: anchors use `SystemClock.uptimeMillis`; the TypeScript side maps them to `performance.now()` with a synchronous
   `uptimeMs()` call, the same pattern as `@elv/remote-keys`.
 
@@ -245,5 +249,7 @@ Rungs, each bounded and visible as a status the OSD can show:
 - The gate measures simulator streams, not public test streams (§7).
 - After the builder check: one media at a time (not one socket), `retry` command with token adoption, `accountKey` on
   `tune` for the connection-limit scope, explicit metric spans, fault-run pass rules, and a local-only gate in phase 1.
+- Plan amendment after the surface view: aspect fit and keep-screen-on belong to the engine view (§6.1), because a
+  stretched picture or a screensaver during a film is an operational defect for 0.1.
 - ADR 0003 is amended: AetherEngine licence wording, MPVKit's status and the no-co-linking rule, VLCKit as the Apple
   fallback, Media3 preloading not used for live.

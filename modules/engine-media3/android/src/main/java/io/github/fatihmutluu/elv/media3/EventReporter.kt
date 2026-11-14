@@ -31,6 +31,7 @@ private inline fun <reified T : Throwable> causeOf(error: Throwable): T? {
  * send one too, and while playing a tick sends one at most once a second. `firstFrame` is sent once per prepare and
  * never for a frame of the media before it ([FirstFrameFence]); [onFirstFrame] then lifts the zap shutter. A playlist
  * found behind a progressive guess is no error: [onHlsDetected] lets the engine prepare the request again as HLS.
+ * Every state and error sent is also handed to [onCue], with whether this prepare played, for the screen-on rule.
  */
 @OptIn(UnstableApi::class)
 internal class EventReporter(
@@ -38,6 +39,7 @@ internal class EventReporter(
   private val send: (Map<String, Any?>) -> Unit,
   private val onHlsDetected: () -> Unit,
   private val onFirstFrame: () -> Unit,
+  private val onCue: (ScreenCue, Boolean) -> Unit,
 ) : Player.Listener {
   private var player: Player? = null
   private var active = false
@@ -167,7 +169,10 @@ internal class EventReporter(
     if (rate > 0f) handler.postDelayed(tick, TICK_MS)
   }
 
-  private fun sendState(state: String) = send(mapOf("type" to "state", "state" to state))
+  private fun sendState(state: String) {
+    send(mapOf("type" to "state", "state" to state))
+    ScreenCue.ofState(state)?.let { onCue(it, played) }
+  }
 
   private fun sendStall(phase: String) =
     send(mapOf("type" to "stall", "phase" to phase, "atMs" to SystemClock.uptimeMillis().toDouble()))
@@ -176,6 +181,7 @@ internal class EventReporter(
     val error = mutableMapOf<String, Any?>("code" to code, "detail" to detail)
     if (httpStatus != null) error["httpStatus"] = httpStatus
     send(mapOf("type" to "error", "error" to error))
+    onCue(ScreenCue.ERROR, played)
   }
 
   private companion object {

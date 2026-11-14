@@ -145,8 +145,13 @@ export function createMedia3Engine(): PlayerEngine | null {
 export interface Media3SurfaceProps {
   /** An engine from {@link createMedia3Engine}; one surface per engine. */
   engine: PlayerEngine;
-  /** Layout only: the surface paints no background, so whatever is drawn above it composes over the video. */
+  /** Layout only: nothing is painted over the video, so whatever is drawn above the view composes over it. */
   style?: StyleProp<ViewStyle>;
+  /**
+   * How the picture meets the view at its display aspect ratio, centred: `fit` (the default) shows all of it with
+   * black bars beside it, `fill` covers the view and crops the overflow.
+   */
+  resizeMode?: 'fit' | 'fill';
   testID?: string;
 }
 
@@ -154,6 +159,7 @@ interface NativeSurfaceProps {
   /** The shared object; expo-modules-core passes it to native as its registry id. */
   engine: NativeEngine;
   style?: StyleProp<ViewStyle>;
+  resizeMode?: 'fit' | 'fill';
   testID?: string;
 }
 
@@ -165,12 +171,18 @@ const NativeSurfaceView: ComponentType<NativeSurfaceProps> | null =
 
 /**
  * The video surface of a Media3 engine (player core spec 6.1): a `SurfaceView` fixed at creation with a black zap
- * shutter above it that the engine shows from every `load` until that media's first frame, natively. The engine
- * sends `surface` `created` and `destroyed` events as the view's surface comes and goes. Renders nothing where the
- * native module is absent, or for an engine this module did not create or that was released.
+ * shutter above it that the engine shows from every `load` until that media's first frame, natively. The picture
+ * keeps its display aspect ratio (`resizeMode`), and the screen stays on while the engine plays. The engine sends
+ * `surface` `created` and `destroyed` events as the view's surface comes and goes. Renders nothing where the native
+ * module is absent, or for an engine this module did not create or that was released.
  */
-export function Media3Surface({ engine, style, testID }: Media3SurfaceProps): ReactElement | null {
+export function Media3Surface({
+  engine,
+  style,
+  resizeMode,
+  testID,
+}: Media3SurfaceProps): ReactElement | null {
   const native = handles.get(engine);
   if (NativeSurfaceView === null || native === undefined) return null;
-  return createElement(NativeSurfaceView, { engine: native, style, testID });
+  return createElement(NativeSurfaceView, { engine: native, style, resizeMode, testID });
 }

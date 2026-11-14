@@ -5,19 +5,19 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
 ## API and contract
 - `createMedia3Engine(): PlayerEngine | null` (`src/index.ts`; `null` without the native module `ElvEngineMedia3`)
   creates a native `Engine` shared object; `release()` frees it (later calls are no-ops). `Media3Surface({ engine,
-  style?, testID? })` renders `Media3SurfaceView` bound to that object (one view per engine), else `null`.
+  style?, resizeMode?, testID? })` renders `Media3SurfaceView` bound to that object (one view per engine), else `null`.
 - Native: `load(flattened LoadCommand)`, `retry`, `play`, `pause`, `seek`, `stop`, `recreate`, event `onEngineEvent`
   (`atMs` uptime; TS maps it to `performance.now() - max(0, uptimeMs() - atMs)`), sync `uptimeMs()`. `load` takes its
   token, others adopt a newer one; events carry the current token. Capabilities: all but live seek and track choice.
 
-## Threading, view and zap shutter
+## Threading and view
 - ExoPlayer runs on the engine's `HandlerThread` (application looper), built at creation; JS calls post there and
   return; events run there (`emit` hops to JS). `OnDestroy` (JS reload) and `sharedObjectDidRelease` dispose engines.
-- `Media3SurfaceView`: a `SurfaceView` fixed at creation (never on top) under a black shutter `View`, nothing else
-  painted. Surface callbacks attach (posted) and detach the surface (`surface created/destroyed`); a detach (destroy,
-  engine swap) is the only UI-thread wait, run ahead of queued commands and capped at 3 s. The shutter covers from
-  each `load` (a new media serial; `ZapShutter` drops older ones) until its first frame. `firstFrame` goes once per
-  prepare, after a player-message fence behind its `stop` (`FirstFrameFence`), so a stopped media's frame never counts.
+- `Media3SurfaceView` (details in `VIEW.md`): a `SurfaceView` fixed at creation (never on top) under a black zap
+  shutter (from each `load` until that media's first frame; `firstFrame` once per prepare, behind a fence), sized at
+  the video's display aspect ratio (`resizeMode` `fit` or `fill`) with black bars beside it, never over it. The engine
+  posts shutter, picture size and screen-on reports (on while playing) to the view; a surface detach is the only
+  UI-thread wait (capped at 3 s).
 
 ## Playback
 - Every prepare (`load`, `retry`) builds a new media source, `playWhenReady = true`; `retry`: live at the default
