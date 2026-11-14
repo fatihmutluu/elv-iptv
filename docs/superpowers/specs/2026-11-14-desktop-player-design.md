@@ -87,8 +87,9 @@ spec on mpv 0.42.0 docs, release assets, licence files and issues (no GPL source
   workflow and in the fetch script refuses a runtime whose embedded configuration contains `-Dgpl=true`,
   `--enable-gpl` or `--enable-nonfree`, or a library missing from the licence allowlist.
 - `pnpm mpv fetch` (a `tools` script, called by the desktop `dev` and `build`) downloads the runtime by SHA-256 pin into
-  the gitignored `apps/desktop/resources/mpv/<platform>-<arch>/`, from a runtime pre-release the owner creates (owner
-  question, §9) or until then the pinned workflow artifact through `gh`. electron-builder `extraResources` copies the
+  the gitignored `apps/desktop/resources/mpv/<platform>-<arch>/`: on Windows the official upstream LGPL libmpv archive
+  (pinned URL and SHA-256) plus our launcher built locally; on macOS the pinned workflow artifact through `gh` (re-run
+  the workflow when it expires). No release or tag of this repository is involved (controller decision, §9). electron-builder `extraResources` copies the
   folder with its notices to `resources/mpv/`, outside asar.
 
 ### 5.3 Engine commands
@@ -249,8 +250,10 @@ spec on mpv 0.42.0 docs, release assets, licence files and issues (no GPL source
   parent as the lifetime guard; the orphan run tests both.
 - If the macOS runtime slips, the owner's Mac test falls back to the iPad app on Apple Silicon ("Designed for iPad")
   with the Apple engine: a mitigation, not a goal.
-- Owner questions: creating the runtime pre-release that holds the pinned binaries (releases need the owner); signing
-  `elv-mpv.exe` and the macOS helper before a public release.
+- Resolved by the controller (owner delegated development decisions): no runtime pre-release; binaries come from
+  upstream (Windows) or the CI artifact (macOS), pinned by SHA-256. Signing `elv-mpv.exe` and the macOS helper is not
+  needed for the owner's 0.1 test (Windows 10 has no Smart App Control; macOS ad-hoc signing and an "Open anyway"
+  step) and is tracked as an issue before any public release.
 - The first implementation task amends ADR 0002 and foundation §4, §5.5 and §11 (0.1 uses the external mpv process;
   frame-copy is Round 2). Implementation starts once #7 phase 1 (`@elv/playback`) is on `main`.
 
@@ -262,5 +265,5 @@ spec on mpv 0.42.0 docs, release assets, licence files and issues (no GPL source
 | An LGPL mpv CLI is upstream-discouraged, and the macOS build of FFmpeg, mpv and dependencies takes days | Licence gate in the workflow; launcher fallback over our own libmpv; the iPad app for the owner's test |
 | The one-media rule and the error codes depend on mpv internals and log text | Simulator-log overlap in the gate; stop-then-load fallback; log fixtures per runtime; `curl-enabled=no` |
 | An orphan mpv after a crash holds the provider's only connection | `--input-ipc-client` on macOS, the `--wid` parent and a pid sweep on Windows; the orphan gate run |
-| Unsigned executables are blocked by Smart App Control and Gatekeeper | Owner test builds run locally or ad-hoc signed; signing is an owner question before release |
+| Unsigned executables are blocked by Smart App Control and Gatekeeper | Owner test builds run locally or ad-hoc signed; signing is a tracked issue before release |
 | Two windows on macOS (a second Dock icon, focus changes) feel unpolished | Accepted for 0.1; the Round 2 integrated design removes it |
