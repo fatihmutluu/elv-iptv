@@ -18,7 +18,8 @@ delivers TV keys only at release and never repeats holds (issue #43). Spec: `doc
 - `KeyForwarding.action`: forward `ACTION_DOWN` only with `repeatCount == 0`, every `ACTION_UP` (with `canceled` from
   `FLAG_CANCELED`); drop `ACTION_MULTIPLE` and `FLAG_FALLBACK` events. Window focus loss sends `blur`.
 - Never consume a key: `dispatchKeyEvent` always returns the wrapped callback's result.
-- Events are sent only while JS observes (`OnStartObserving` / `OnStopObserving`).
+- Events go to a process-wide sink in `KeyForwarding`, set on `OnStartObserving` and cleared (only if still its own) on
+  `OnStopObserving` / `OnDestroy`, so a JS reload (new module, same window) reattaches. Sink failures never block delegation.
 
 ## Rules
 - Imports `expo-modules-core` and playback types only; the app wires the module.

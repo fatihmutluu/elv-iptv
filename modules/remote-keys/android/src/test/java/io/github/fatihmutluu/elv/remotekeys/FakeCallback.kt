@@ -25,7 +25,10 @@ class FakeCallback : Window.Callback {
   override fun onMenuItemSelected(featureId: Int, item: MenuItem) = false
   override fun onWindowAttributesChanged(attrs: WindowManager.LayoutParams?) {}
   override fun onContentChanged() {}
-  override fun onWindowFocusChanged(hasFocus: Boolean) {}
+  val focusChanges = mutableListOf<Boolean>()
+  override fun onWindowFocusChanged(hasFocus: Boolean) {
+    focusChanges.add(hasFocus)
+  }
   override fun onAttachedToWindow() {}
   override fun onDetachedFromWindow() {}
   override fun onPanelClosed(featureId: Int, menu: Menu) {}

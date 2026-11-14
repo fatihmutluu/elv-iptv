@@ -15,16 +15,13 @@ import android.view.accessibility.AccessibilityEvent
 
 /**
  * Delegates every [Window.Callback] method to [wrapped], including the interface's Java default methods that Kotlin
- * `by` delegation skips. Key events and focus loss are reported to [onEvent]; no key is ever consumed here.
+ * `by` delegation skips. Key events and focus loss are reported to [KeyForwarding]; no key is ever consumed here.
  */
-class ForwardingWindowCallback(
-  private val wrapped: Window.Callback,
-  private val onEvent: (Map<String, Any>) -> Unit,
-) : Window.Callback {
+class ForwardingWindowCallback(private val wrapped: Window.Callback) : Window.Callback {
   override fun dispatchKeyEvent(event: KeyEvent): Boolean {
     val action = KeyForwarding.action(event.action, event.repeatCount, event.flags)
     if (action != null) {
-      onEvent(
+      KeyForwarding.emit(
         mapOf(
           "action" to action,
           "keyCode" to event.keyCode,
@@ -37,7 +34,7 @@ class ForwardingWindowCallback(
   }
 
   override fun onWindowFocusChanged(hasFocus: Boolean) {
-    if (!hasFocus) onEvent(mapOf("action" to "blur"))
+    if (!hasFocus) KeyForwarding.emit(mapOf("action" to "blur"))
     wrapped.onWindowFocusChanged(hasFocus)
   }
 

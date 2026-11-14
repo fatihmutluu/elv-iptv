@@ -3,8 +3,11 @@ package io.github.fatihmutluu.elv.remotekeys
 import android.view.KeyEvent
 import android.view.Window
 
-/** Decides which window key events reach JavaScript and wraps window callbacks. */
+/** Decides which window key events reach JavaScript, wraps window callbacks and holds the current event sink. */
 object KeyForwarding {
+  @Volatile
+  private var sink: ((Map<String, Any>) -> Unit)? = null
+
   /**
    * Returns "down" for a first key press, "up" for any release, and null for events JavaScript must not see:
    * auto-repeats, ACTION_MULTIPLE and synthesized fallback events.
@@ -18,7 +21,28 @@ object KeyForwarding {
     }
   }
 
-  /** Wraps [callback] so key events and focus loss go to [onEvent]; returns [callback] itself if already wrapped. */
-  fun wrap(callback: Window.Callback, onEvent: (Map<String, Any>) -> Unit): Window.Callback =
-    if (callback is ForwardingWindowCallback) callback else ForwardingWindowCallback(callback, onEvent)
+  /**
+   * Wraps [callback] so key events and focus loss reach the current sink; returns [callback] itself if already wrapped.
+   * The sink is process-wide, so a wrapper that outlives its module (JS reload) reports to the new module.
+   */
+  fun wrap(callback: Window.Callback): Window.Callback =
+    if (callback is ForwardingWindowCallback) callback else ForwardingWindowCallback(callback)
+
+  /** Makes [newSink] the receiver of all forwarded events, replacing any earlier one. */
+  fun setSink(newSink: (Map<String, Any>) -> Unit) {
+    sink = newSink
+  }
+
+  /** Removes [oldSink] if it is still the current sink; a newer module's sink is left alone. */
+  fun clearSink(oldSink: (Map<String, Any>) -> Unit) {
+    if (sink === oldSink) sink = null
+  }
+
+  /** Delivers [payload] to the current sink; a failing sink never propagates to the key dispatch. */
+  fun emit(payload: Map<String, Any>) {
+    try {
+      sink?.invoke(payload)
+    } catch (_: Exception) {
+    }
+  }
 }
