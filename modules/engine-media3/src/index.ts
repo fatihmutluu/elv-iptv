@@ -6,9 +6,11 @@ import type {
   LoadCommand,
   PlayerEngine,
 } from '@elv/playback';
-import { requireOptionalNativeModule } from 'expo-modules-core';
+import { requireNativeViewManager, requireOptionalNativeModule } from 'expo-modules-core';
+import { type ComponentType, createElement, type ReactElement } from 'react';
+import type { StyleProp, ViewStyle } from 'react-native';
 
-/** The JS clock of React Native and Node; declared here because this package has no DOM or React Native types. */
+/** The JS clock of React Native and Node; declared here because the package compiles without DOM types. */
 declare const performance: { now(): number };
 
 /** The `load` argument of the native engine: a flattened {@link LoadCommand}. */
@@ -81,6 +83,9 @@ function received(event: NativeEngineEvent, module: NativeEngineModule): EngineE
   return { ...event, atMs: toJs(event.atMs) };
 }
 
+/** The native shared object behind each live engine this module created; `Media3Surface` binds its view to it. */
+const handles = new WeakMap<PlayerEngine, NativeEngine>();
+
 function wrap(module: NativeEngineModule): PlayerEngine {
   const native = new module.Engine();
   const listeners = new Set<(event: EngineEvent) => void>();
@@ -96,7 +101,7 @@ function wrap(module: NativeEngineModule): PlayerEngine {
       if (!released) send(...args);
     };
 
-  return {
+  const engine: PlayerEngine = {
     capabilities: CAPABILITIES,
     load: command((cmd: LoadCommand) => native.load(toNativeLoad(cmd))),
     retry: command((attempt: AttemptToken) => native.retry(attempt)),
@@ -108,6 +113,7 @@ function wrap(module: NativeEngineModule): PlayerEngine {
     release() {
       if (released) return;
       released = true;
+      handles.delete(engine);
       listeners.clear();
       subscription.remove();
       native.release();
@@ -120,6 +126,8 @@ function wrap(module: NativeEngineModule): PlayerEngine {
       };
     },
   };
+  handles.set(engine, native);
+  return engine;
 }
 
 const nativeModule = requireOptionalNativeModule<NativeEngineModule>('ElvEngineMedia3');
@@ -131,4 +139,38 @@ const nativeModule = requireOptionalNativeModule<NativeEngineModule>('ElvEngineM
  */
 export function createMedia3Engine(): PlayerEngine | null {
   return nativeModule === null ? null : wrap(nativeModule);
+}
+
+/** Props of {@link Media3Surface}. */
+export interface Media3SurfaceProps {
+  /** An engine from {@link createMedia3Engine}; one surface per engine. */
+  engine: PlayerEngine;
+  /** Layout only: the surface paints no background, so whatever is drawn above it composes over the video. */
+  style?: StyleProp<ViewStyle>;
+  testID?: string;
+}
+
+interface NativeSurfaceProps {
+  /** The shared object; expo-modules-core passes it to native as its registry id. */
+  engine: NativeEngine;
+  style?: StyleProp<ViewStyle>;
+  testID?: string;
+}
+
+/** One component type for the app's lifetime: a new type per render would remount the view and its surface. */
+const NativeSurfaceView: ComponentType<NativeSurfaceProps> | null =
+  nativeModule === null
+    ? null
+    : requireNativeViewManager<NativeSurfaceProps>('ElvEngineMedia3', 'Media3SurfaceView');
+
+/**
+ * The video surface of a Media3 engine (player core spec 6.1): a `SurfaceView` fixed at creation with a black zap
+ * shutter above it that the engine shows from every `load` until that media's first frame, natively. The engine
+ * sends `surface` `created` and `destroyed` events as the view's surface comes and goes. Renders nothing where the
+ * native module is absent, or for an engine this module did not create or that was released.
+ */
+export function Media3Surface({ engine, style, testID }: Media3SurfaceProps): ReactElement | null {
+  const native = handles.get(engine);
+  if (NativeSurfaceView === null || native === undefined) return null;
+  return createElement(NativeSurfaceView, { engine: native, style, testID });
 }

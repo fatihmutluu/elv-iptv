@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.content.Context
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import android.util.Log
 import android.view.Surface
 import androidx.annotation.OptIn
@@ -32,6 +33,11 @@ private val SOFTWARE_AUDIO_FIRST = MediaCodecSelector { mimeType, secure, tunnel
   if (MimeTypes.isAudio(mimeType)) MediaCodecUtil.getDecoderInfosSortedBySoftwareOnly(decoders) else decoders
 }
 
+/** Receives the zap shutter's state on the playback thread: the load serial [media] and whether it [framed]. */
+internal fun interface ShutterSink {
+  fun onShutter(media: Long, framed: Boolean)
+}
+
 /**
  * The `PlayerEngine` of player core spec 5.1 on Media3, one per player screen (an Expo shared object). ExoPlayer
  * lives on this engine's own playback thread (its application looper): JavaScript calls post there and return at
@@ -48,7 +54,10 @@ class Media3Engine(
   private val disposed = AtomicBoolean(false)
   private val gate = ConnectionGate()
   private val buffers = loadControlFor(lowRam(context))
-  private val reporter = EventReporter(handler, { fields -> sendEvent(fields) }, { playAsHls() })
+  private val reporter = EventReporter(handler, { fields -> sendEvent(fields) }, { playAsHls() }, { onFramed() })
+
+  /** The surface the view offers, written on the UI thread; an attach that a detach overtook is skipped. */
+  @Volatile private var offered: Surface? = null
 
   // Playback-thread state.
   private var player: ExoPlayer? = null
@@ -57,6 +66,9 @@ class Media3Engine(
   private var generation = 0L
   private var request: LoadRequest? = null
   private var surface: Surface? = null
+  private var media = 0L
+  private var framed = false
+  private var shutter: ShutterSink? = null
 
   /** The engine is passed to the surface view as a prop; let pending view updates apply before it goes. */
   override val releasesAfterPendingViewUpdates: Boolean = true
@@ -65,12 +77,18 @@ class Media3Engine(
     post { player = buildPlayer(softwareAudio = false) }
   }
 
-  /** Starts a new media: the previous one is stopped and a new connection-gate generation begins. */
+  /**
+   * Starts a new media: the previous one is stopped, a new connection-gate generation begins and the zap shutter
+   * covers the surface until this media's first frame.
+   */
   internal fun load(attempt: Int, next: LoadRequest) = post {
     reporter.end()
     player?.stop()
     token = attempt
     request = next
+    media += 1
+    framed = false
+    shutter?.onShutter(media, false)
     prepare(next, next.startMs)
   }
 
@@ -117,28 +135,47 @@ class Media3Engine(
     player = buildPlayer(playerSoftwareAudio)
   }
 
-  /** Surface view hook: renders into [next] from now on and reports `surface created`. */
-  fun attachSurface(next: Surface) = post {
-    surface = next
-    player?.setVideoSurface(next)
-    sendEvent(mapOf("type" to "surface", "change" to "created"))
+  /** Surface view hook (UI thread, returns at once): renders into [next] and reports `surface created` once. */
+  fun attachSurface(next: Surface) {
+    offered = next
+    post {
+      if (offered !== next || surface === next) return@post
+      surface = next
+      player?.setVideoSurface(next)
+      sendEvent(mapOf("type" to "surface", "change" to "created"))
+    }
   }
 
   /**
    * Surface view hook for `surfaceDestroyed`, which must not return while the decoder still renders into [old]:
-   * waits up to [timeoutMs] for the playback thread to detach it. Returns false on timeout.
+   * detaches it on the playback thread, ahead of queued commands (inline when called there), and waits up to
+   * [timeoutMs] for that. Returns false on timeout.
    */
   fun detachSurface(old: Surface, timeoutMs: Long): Boolean {
+    if (offered === old) offered = null
+    if (Looper.myLooper() === thread.looper) {
+      detachNow(old)
+      return true
+    }
     val detached = CountDownLatch(1)
-    val posted = handler.post {
-      if (surface === old) {
-        surface = null
-        player?.clearVideoSurface(old)
-        if (!disposed.get()) sendEvent(mapOf("type" to "surface", "change" to "destroyed"))
+    val posted = handler.postAtFrontOfQueue {
+      try {
+        detachNow(old)
+      } finally {
+        detached.countDown()
       }
-      detached.countDown()
     }
     return !posted || detached.await(timeoutMs, TimeUnit.MILLISECONDS)
+  }
+
+  /** Zap shutter hook: [sink] gets the current state now and every change from now on, on the playback thread. */
+  internal fun bindShutter(sink: ShutterSink) = post {
+    shutter = sink
+    sink.onShutter(media, framed)
+  }
+
+  internal fun unbindShutter(sink: ShutterSink) = post {
+    if (shutter === sink) shutter = null
   }
 
   /** Releases the player and ends the playback thread; later commands do nothing. Safe to call twice. */
@@ -164,6 +201,24 @@ class Media3Engine(
         sendEvent(mapOf("type" to "error", "error" to mapOf("code" to "unknown", "detail" to e.javaClass.simpleName)))
       }
     }
+  }
+
+  private fun detachNow(old: Surface) {
+    if (surface !== old) return
+    surface = null
+    try {
+      player?.clearVideoSurface(old)
+    } catch (e: Exception) {
+      Log.e(TAG, "surface detach failed: ${e.javaClass.simpleName}")
+    }
+    sendEvent(mapOf("type" to "surface", "change" to "destroyed"))
+  }
+
+  /** The current prepare rendered its first frame: the media's shutter lifts. */
+  private fun onFramed() {
+    if (framed || media == 0L) return
+    framed = true
+    shutter?.onShutter(media, true)
   }
 
   private fun adopt(attempt: Int) {

@@ -34,8 +34,9 @@ class LoadArgs : Record {
 
 /**
  * Exposes the Media3 engine as the shared object class `Engine` with the player core spec 5.1 commands and the
- * `onEngineEvent` event, plus `uptimeMs()`, the clock of every event's `atMs`. Engines still alive when the module
- * goes (JavaScript reload) are disposed, so no player outlives its runtime.
+ * `onEngineEvent` event, plus `uptimeMs()`, the clock of every event's `atMs`, and the view `Media3SurfaceView`
+ * whose `engine` prop binds it to an engine. Engines still alive when the module goes (JavaScript reload) are
+ * disposed, so no player outlives its runtime.
  */
 class ElvEngineMedia3Module : Module() {
   private val engines: MutableSet<Media3Engine> = Collections.synchronizedSet(mutableSetOf())
@@ -77,6 +78,12 @@ class ElvEngineMedia3Module : Module() {
       Function("stop") { engine: Media3Engine, attempt: Int -> engine.stop(attempt) }
 
       Function("recreate") { engine: Media3Engine, attempt: Int -> engine.recreate(attempt) }
+    }
+
+    View(Media3SurfaceView::class) {
+      Prop("engine") { view: Media3SurfaceView, engine: Media3Engine? -> view.bind(engine) }
+
+      OnViewDestroys { view: Media3SurfaceView -> view.bind(null) }
     }
   }
 }

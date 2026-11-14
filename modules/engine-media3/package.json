@@ -15,10 +15,15 @@
     "expo-modules-core": "58.1.0"
   },
   "peerDependencies": {
-    "expo": "*"
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
   },
   "devDependencies": {
     "@elv/config": "workspace:*",
+    "@types/react": "catalog:",
+    "react": "catalog:",
+    "react-native": "catalog:",
     "vitest": "5.1.0"
   }
 }

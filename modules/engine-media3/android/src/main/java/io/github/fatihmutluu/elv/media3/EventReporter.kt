@@ -9,6 +9,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
 import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TICK_MS = 1_000L
@@ -27,14 +28,16 @@ private inline fun <reified T : Throwable> causeOf(error: Throwable): T? {
  * Turns the player's callbacks into `onEngineEvent` payloads (without the token, which [send] adds) on the playback
  * thread: coarse states, `firstFrame`, `stall` start and end, `error` and `clock` anchors. Anchors follow the
  * effective rate (speed while playing, 0 otherwise), so start, pause, stall start and stall end each send one; seeks
- * send one too, and while playing a tick sends one at most once a second. A playlist found behind a progressive
- * guess is no error: [onHlsDetected] lets the engine prepare the request again as HLS.
+ * send one too, and while playing a tick sends one at most once a second. `firstFrame` is sent once per prepare and
+ * never for a frame of the media before it ([FirstFrameFence]); [onFirstFrame] then lifts the zap shutter. A playlist
+ * found behind a progressive guess is no error: [onHlsDetected] lets the engine prepare the request again as HLS.
  */
 @OptIn(UnstableApi::class)
 internal class EventReporter(
   private val handler: Handler,
   private val send: (Map<String, Any?>) -> Unit,
   private val onHlsDetected: () -> Unit,
+  private val onFirstFrame: () -> Unit,
 ) : Player.Listener {
   private var player: Player? = null
   private var active = false
@@ -44,17 +47,22 @@ internal class EventReporter(
   private var stalled = false
   private var anchoredRate: Float? = null
   private var manifestLoaded: AtomicBoolean? = null
+  private val frames = FirstFrameFence()
+  private var prepares = 0L
   private val tick = Runnable { player?.let { anchor(it) } }
 
   /**
-   * Starts reporting a new prepare of [player]: forgets the previous one and reports `opening`. [manifestLoaded] is
-   * set once the media's timeline is known.
+   * Starts reporting a new prepare of [player], called after its `stop`: forgets the previous one, sends the
+   * first-frame fence and reports `opening`. [manifestLoaded] is set once the media's timeline is known.
    */
-  fun begin(player: Player, live: Boolean, manifestLoaded: AtomicBoolean) {
+  fun begin(player: ExoPlayer, live: Boolean, manifestLoaded: AtomicBoolean) {
     end()
     this.player = player
     this.live = live
     this.manifestLoaded = manifestLoaded
+    val prepare = ++prepares
+    frames.begin(prepare)
+    player.createMessage { _, _ -> frames.passed(prepare) }.setLooper(handler.looper).send()
     active = true
     sendState("opening")
   }
@@ -101,7 +109,9 @@ internal class EventReporter(
   }
 
   override fun onRenderedFirstFrame() {
-    if (active) send(mapOf("type" to "firstFrame", "atMs" to SystemClock.uptimeMillis().toDouble()))
+    if (!active || !frames.accept()) return
+    send(mapOf("type" to "firstFrame", "atMs" to SystemClock.uptimeMillis().toDouble()))
+    onFirstFrame()
   }
 
   override fun onPlayerError(error: PlaybackException) {

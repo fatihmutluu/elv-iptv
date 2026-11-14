@@ -4,11 +4,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 declare const performance: { now(): number };
 
 const requireOptionalNativeModule = vi.fn();
-vi.mock('expo-modules-core', () => ({ requireOptionalNativeModule }));
+const requireNativeViewManager = vi.fn();
+vi.mock('expo-modules-core', () => ({ requireOptionalNativeModule, requireNativeViewManager }));
+
+async function load() {
+  vi.resetModules();
+  return import('./index');
+}
 
 async function create(): Promise<PlayerEngine | null> {
-  vi.resetModules();
-  return (await import('./index')).createMedia3Engine();
+  return (await load()).createMedia3Engine();
 }
 
 type NativeListener = (event: Record<string, unknown>) => void;
@@ -37,7 +42,7 @@ function fakeNative() {
       };
     }),
   };
-  const Engine = vi.fn(function Engine() {
+  const Engine = vi.fn(function construct() {
     return engine;
   });
   const uptimeMs = vi.fn(() => clock.uptime);
@@ -50,6 +55,7 @@ function fakeNative() {
 
 afterEach(() => {
   requireOptionalNativeModule.mockReset();
+  requireNativeViewManager.mockReset();
   vi.restoreAllMocks();
 });
 
@@ -202,5 +208,54 @@ describe('createMedia3Engine', () => {
     expect(native.engine.play).not.toHaveBeenCalled();
     expect(native.engine.load).not.toHaveBeenCalled();
     expect(events).toEqual([]);
+  });
+});
+
+/** Stands in for the native view component that `requireNativeViewManager` returns. */
+function SurfaceView() {
+  return null;
+}
+
+describe('Media3Surface', () => {
+  const foreign = { release() {} } as unknown as PlayerEngine;
+
+  async function engineWithView() {
+    const native = fakeNative();
+    requireNativeViewManager.mockReturnValue(SurfaceView);
+    const { createMedia3Engine, Media3Surface } = await load();
+    const engine = createMedia3Engine();
+    if (engine === null) throw new Error('engine expected');
+    return { native, engine, Media3Surface };
+  }
+
+  it('renders the native surface view bound to the native engine object', async () => {
+    const { native, engine, Media3Surface } = await engineWithView();
+    const style = { flex: 1 };
+    const element = Media3Surface({ engine, style, testID: 'video' });
+    expect(requireNativeViewManager).toHaveBeenCalledWith('ElvEngineMedia3', 'Media3SurfaceView');
+    expect(element?.type).toBe(SurfaceView);
+    const props = element?.props as { engine: unknown } | undefined;
+    expect(props).toEqual({ engine: native.engine, style, testID: 'video' });
+    expect(props?.engine).toBe(native.engine);
+  });
+
+  it('keeps one native component type across renders', async () => {
+    const { engine, Media3Surface } = await engineWithView();
+    expect(Media3Surface({ engine })?.type).toBe(Media3Surface({ engine })?.type);
+    expect(requireNativeViewManager).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders nothing where the native module is absent', async () => {
+    requireOptionalNativeModule.mockReturnValue(null);
+    const { Media3Surface } = await load();
+    expect(Media3Surface({ engine: foreign })).toBeNull();
+    expect(requireNativeViewManager).not.toHaveBeenCalled();
+  });
+
+  it('renders nothing for an engine it did not create or one already released', async () => {
+    const { engine, Media3Surface } = await engineWithView();
+    expect(Media3Surface({ engine: foreign })).toBeNull();
+    engine.release();
+    expect(Media3Surface({ engine })).toBeNull();
   });
 });
