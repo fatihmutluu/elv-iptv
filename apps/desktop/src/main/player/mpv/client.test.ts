@@ -129,18 +129,3 @@ describe('listener isolation', () => {
     expect(seen).toEqual(['a', 'b']);
   });
 });
-
-describe('listener isolation', () => {
-  it('keeps delivering to later listeners when one throws', async () => {
-    const p = fakePipe();
-    const c = createMpvClient(p.stream, { replyTimeoutMs: 3000 });
-    const seen: string[] = [];
-    c.onEvent(() => {
-      throw new Error('boom');
-    });
-    c.onEvent((e) => seen.push(e.event));
-    p.feed('{"event":"a"}\n{"event":"b"}\n');
-    await tick();
-    expect(seen).toEqual(['a', 'b']);
-  });
-});
