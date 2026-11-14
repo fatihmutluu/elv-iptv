@@ -65,7 +65,7 @@ spec on mpv 0.42.0 docs, release assets, licence files and issues (no GPL source
 
 ### 5.1 Process layout
 - Main process: `MpvEngine` implements `PlayerEngine`, one per player window, and owns one mpv process (started with
-  the engine, kept across zaps), one IPC connection and, on Windows, one video window. Asynchronous I/O only.
+  the engine, kept across zaps), one IPC connection and one `VideoPresenter` (§5.6). Asynchronous I/O only.
 - Preload: exposes a frozen `window.elv.player` through `contextBridge`; no raw `ipcRenderer` reaches the page.
 - Renderer: `createDesktopEngine()` returns a `PlayerEngine` proxy over `window.elv.player`; `PlaybackService` and the
   player screen use it exactly like the Android engine.
@@ -76,21 +76,25 @@ spec on mpv 0.42.0 docs, release assets, licence files and issues (no GPL source
   (`input-default-bindings`, `input-vo-keyboard`, `osc`), and runs until mpv shuts down. It links dynamically to the
   official LGPL `libmpv-2.dll` of mpv 0.42.0 (zip SHA-256
   `8e5f77430efc53ef175804ba6618527e3af0448a0dcabf04d3cc72659d1a6fce`; GPG signature checked whenever the pin changes).
-  It is a separate process, so libmpv never loads into Electron and users can still replace the DLL.
+  It is a separate process, so libmpv never loads into Electron and users can still replace the DLL. The launcher also
+  quits mpv when the app process exits (`--elv-parent-pid`), whichever presenter is in use (§5.5).
 - **macOS arm64:** built by us in a GitHub Actions macOS job: FFmpeg (shared libraries, no `--enable-gpl` or
   `--enable-nonfree`, VideoToolbox on), libplacebo, libass with FreeType, FriBidi and HarfBuzz, LuaJIT (the OSC is
   Lua), mpv 0.42.0 with `-Dgpl=false` and the CLI on; GPL dependencies off (rubberband, dvdnav, cdio). Dylibs are
   relocated beside the binary and re-signed ad hoc (Apple Silicon refuses unsigned code). mpv 0.42 needs FFmpeg 6.1+
   and libplacebo 7.387+. If the LGPL CLI misbehaves, macOS takes the Windows launcher shape over our own LGPL libmpv.
-- One workflow, `mpv-runtime.yml`, produces both as `<platform>-<arch>/` with the binaries, `LICENSES/` (one text per
-  bundled component) and `BUILDINFO.json` (versions, source URLs and hashes, configure flags). A licence gate in the
-  workflow and in the fetch script refuses a runtime whose embedded configuration contains `-Dgpl=true`,
-  `--enable-gpl` or `--enable-nonfree`, or a library missing from the licence allowlist.
-- `pnpm mpv fetch` (a `tools` script, called by the desktop `dev` and `build`) downloads the runtime by SHA-256 pin into
-  the gitignored `apps/desktop/resources/mpv/<platform>-<arch>/`: on Windows the official upstream LGPL libmpv archive
-  (pinned URL and SHA-256) plus our launcher built locally; on macOS the pinned workflow artifact through `gh` (re-run
-  the workflow when it expires). No release or tag of this repository is involved (controller decision, §9). electron-builder `extraResources` copies the
-  folder with its notices to `resources/mpv/`, outside asar.
+- The workflow `mpv-runtime.yml` builds the macOS runtime as `darwin-arm64/` with the binaries, the licence texts and
+  `BUILDINFO.json` (versions, source URLs and hashes, configure flags). The committed lock file
+  `apps/desktop/mpv-runtime.lock.json` pins it (run id, artifact name, SHA-256) and the Windows archive (URL, SHA-256);
+  a new workflow run updates the lock in a normal PR.
+- Licence gate for 0.1 (owner test only), in the workflow and in the fetch script: the embedded FFmpeg configuration of
+  the pinned binaries has no `--enable-gpl` and no `--enable-nonfree`, and the mpv build options say `gpl=false`. A
+  full per-library notice list is required before any public release and belongs to #77.
+- `pnpm mpv fetch` (a `tools` script, called by the desktop `dev` and `build`) verifies the lock's SHA-256 and installs
+  the runtime into the gitignored `apps/desktop/resources/mpv/<platform>-<arch>/`: on Windows the official upstream
+  LGPL libmpv archive plus our launcher built locally; on macOS the pinned workflow artifact through `gh` (re-run the
+  workflow when it expires). No release or tag of this repository is involved (controller decision, §9).
+  electron-builder `extraResources` copies the folder with its notices to `resources/mpv/`, outside asar.
 
 ### 5.3 Engine commands
 - Launch options, fixed and never read from a user config: `no-config`, `idle=yes`, `force-window=immediate`,
@@ -106,22 +110,25 @@ spec on mpv 0.42.0 docs, release assets, licence files and issues (no GPL source
 - `play`/`pause`: `set pause no|yes`. `seek`: `seek <s> absolute`. `stop`: `stop`. `recreate`: `quit`, kill after
   500 ms, respawn on the same window. `release`: `quit`, close the video window, drop listeners. Commands are queued
   and written in order; nothing awaits mpv; a failed reply becomes an `error` event.
-- Capabilities: `mpegTsOverHttp`, `hls`, `recreate`, `audioTrackSelection`, `subtitleTrackSelection` true; `liveSeek`
-  and `softwareAudioFallback` false (FFmpeg already decodes audio in software, so rung 4 goes to the alternates).
+- Capabilities: `mpegTsOverHttp`, `hls` and `recreate` true; `liveSeek` and `softwareAudioFallback` false (FFmpeg
+  already decodes audio in software, so rung 4 goes to the alternates); `audioTrackSelection` and
+  `subtitleTrackSelection` false in 0.1, because the port has no track commands yet and mpv's OSC handles tracks (#73
+  flips them).
 
 ### 5.4 Engine events, tokens and one media
 - **Entry table:** each `loadfile` is tagged with its command's token. After its reply the engine reads
   `playlist/0/id` (a replace leaves one entry) before it sends the next `loadfile`, so every mpv `playlist_entry_id`
   maps to exactly one token. `start-file` and `end-file` go through the table; property changes count for the entry
   between its `start-file` and `end-file` and are dropped outside that window. Other commands with a newer token adopt
-  it for the current entry (port contract).
+  it for the current entry (port contract). In a zap burst the engine may drop a queued, not yet sent `load` that a
+  newer `load` has superseded; only the newest media matters under the token rule, and two medias are never open.
 - **Observed:** properties `pause`, `paused-for-cache`, `core-idle`, `seeking`, `time-pos`, `duration`, `speed`,
-  `demuxer-cache-state`, `video-params`, `track-list`; events `start-file`, `file-loaded`, `playback-restart`,
-  `end-file`, `client-message`, and `log-message` after `request_log_messages`.
+  `demuxer-cache-state`, `video-params` (not `track-list` until #73); events `start-file`, `file-loaded`,
+  `playback-restart`, `end-file`, `client-message`, and `log-message` after `request_log_messages`.
 - **States:** `opening` on `start-file`; `buffering` from `file-loaded` until playback restarts, and while
   `paused-for-cache`; `playing` on `playback-restart` while not paused; `paused` from `pause`; `ended` on
   `end-file eof` for VOD. For live, `end-file eof` is a `network` error: a live stream has no end, and the ladder
-  reconnects.
+  reconnects. The engine never emits the optional `ready`; the service's start timeout ends at the first `playing`.
 - **firstFrame:** the first `playback-restart` of a media with `video-params` set (audio-only media: the first
   restart). **stall:** `paused-for-cache` turning true and false while playing.
 - **Clock:** anchors from `time-pos`, with `atMs` read when the message arrives and mapped to the renderer clock
@@ -148,8 +155,9 @@ spec on mpv 0.42.0 docs, release assets, licence files and issues (no GPL source
 ### 5.5 IPC
 - **mpv transport:** macOS uses `--input-ipc-client=fd://3` over the spawn's socketpair, so mpv quits when the app's
   end closes and a crashed app cannot leave a stream open. Windows uses `--input-ipc-server` on
-  `\\.\pipe\elv-mpv-<random>`; there mpv quits when its `--wid` parent window dies with the app, and main kills a
-  recorded leftover mpv pid on start. Only main connects; the endpoint name is random per process and never logged.
+  `\\.\pipe\elv-mpv-<random>`; there the launcher quits mpv when the app process exits (it waits on the parent process
+  handle given by `--elv-parent-pid`), which holds for both presenters, and main kills a recorded leftover mpv pid on
+  start. Only main connects; the endpoint name is random per process and never logged.
 - **Renderer and main:** one contract module, `apps/desktop/src/shared/player-ipc.ts`, with types and runtime guards
   shared by main, preload and renderer:
   - `player:open` / `player:close` (invoke): create or release the engine of the calling window. `open` returns the
@@ -157,29 +165,36 @@ spec on mpv 0.42.0 docs, release assets, licence files and issues (no GPL source
     pattern `@elv/remote-keys` uses for `uptimeMs`).
   - `player:command` (send, renderer to main): `{ engineId, command }`, one variant per port command, no reply.
   - `player:event` (main to renderer): `{ engineId, event }`, a port `EngineEvent` with `atMs` on the renderer clock.
-  - `player:area` (send): the player area in CSS pixels and its visibility, for the video window (Windows) or the first
-    placement of mpv's window (macOS).
-  - `player:ui` (main to renderer): presentation events outside the port: `key` (bindings pressed in the mpv window:
-    channel up and down, Back, fullscreen) and `closed` (the user closed mpv's window on macOS; the app calls `stop()`).
+  - `player:area` (send): the player area in CSS pixels and its visibility, handed to the presenter (§5.6).
+  - `player:ui` (main to renderer): presentation events outside the port: `presenter` (its kind and whether it covers
+    the player area), `key` (bindings pressed in the mpv window: channel up and down, Back, fullscreen) and `closed`
+    (the user closed mpv's own window; the app calls `stop()`).
 - Main checks every message with the guards: an unknown engine, a wrong shape, a URL that is not `http` or `https`, or
   header names and values with control characters are dropped and logged without the payload.
 
 ### 5.6 Presentation
-- **Windows:** the engine creates a video `BrowserWindow` (frameless, `parent` = the app window, skipped in the task
-  bar, black background, no web content, sandboxed) and passes its HWND (`getNativeWindowHandle`, as uint32) to mpv as
-  `--wid`. Main keeps it on the player area on `player:area` and on the app window's move, resize, maximise,
-  fullscreen and display changes, and hides it with the area or when the app minimises. It is created once per player
-  screen (one `surface created` per run); zaps never re-create it.
-- **macOS:** mpv shows its own window (`force-window`), placed over the player area on first show and then left to the
-  user, while the app window shows the player screen and the status line. The window survives zaps. A user close
-  sends `closed`; mpv respawns on the next load.
-- **Controls:** mpv's OSC (seek bar, pause, audio and subtitle selection). Our bindings file keeps mpv's defaults and
-  adds PageUp/PageDown for channel up/down, Escape for Back, `f` and double-click for fullscreen, each as
-  `script-message elv-key <name>`, forwarded as `player:ui` `key`. On Windows fullscreen is the app window's (the video
-  window follows); mpv's own fullscreen is not used with `--wid`.
-- **Status:** nothing draws over the child window, so on Windows the DOM status line (tuning, recovery rung, provider
-  limit, failure with Retry) sits outside the video rect; on a failure the video window hides and the Retry card shows
-  in the player area.
+- **`VideoPresenter`:** one interface with two first-class implementations from the start: the child window below
+  (Windows) and mpv's own window (macOS always; Windows when the `--wid` spike fails). The status line, area bounds,
+  fullscreen and the lifetime guard are written against the interface, never against one implementation.
+- **Child window (Windows):** the presenter creates a video `BrowserWindow` (frameless, `parent` = the app window,
+  skipped in the task bar, black background, no web content, sandboxed) and passes its HWND (`getNativeWindowHandle`,
+  as uint32) to mpv as `--wid`. It keeps the window on the player area on `player:area` and on the app window's move,
+  resize, maximise, fullscreen and display changes, and hides it with the area or when the app minimises. It is
+  created once per player screen (one `surface created` per run); zaps never re-create it.
+- **Own window (macOS; Windows fallback):** mpv shows its own window (`force-window`), placed over the player area on
+  first show and then left to the user, while the app window shows the player screen and the status line. The window
+  survives zaps. A user close sends `closed`; mpv respawns on the next load.
+- **Controls:** mpv's OSC (seek bar, pause, audio and subtitle selection). The OSC needs Lua; the pinned libmpv's
+  embedded build options list `-Dlua=luajit` and the spike confirms the OSC runs. Without Lua, the renderer shows a
+  plain DOM control bar beside (not over) the video area that drives the port (play, pause, seek; tracks once #73 adds
+  them). Our bindings file keeps mpv's defaults and adds PageUp/PageDown for channel up/down, Escape for Back, `f` and
+  double-click for fullscreen, each as `script-message elv-key <name>`, forwarded as `player:ui` `key`. With the child
+  window, fullscreen is the app window's (the video window follows); mpv's own fullscreen is not used with `--wid`.
+- **App window:** the player window sets `backgroundThrottling: false`, so the renderer's timers (ladder, watchdog,
+  limit backoff) keep running when mpv's window covers or occludes the app.
+- **Status:** nothing draws over a presenter that covers the area (the child window), so there the DOM status line
+  (tuning, recovery rung, provider limit, failure with Retry) sits outside the video rect; on a failure the video
+  window hides and the Retry card shows in the player area.
 
 ### 5.7 Security and privacy
 - The app window keeps `sandbox`, `contextIsolation` and no `nodeIntegration`; the CSP is unchanged.
@@ -229,8 +244,8 @@ spec on mpv 0.42.0 docs, release assets, licence files and issues (no GPL source
 - Whether Windows can switch to `--input-ipc-client=handle://` (no named endpoint, mpv quits with the app) if Node can
   hand over a suitable inheritable duplex pipe.
 - The macOS helper's bundle shape (a minimal `.app` wrapper so the Dock and menu bar show the product name, not mpv).
-- The workflow toolchains (MSYS2 mingw-w64 on `windows-latest`; Xcode, meson and ninja on a macOS arm64 runner),
-  caching and the electron-builder wiring.
+- Toolchains: MSVC Build Tools (found with `vswhere`) for the launcher on Windows; Xcode, meson and ninja on a macOS
+  arm64 runner for the workflow; its caching and the electron-builder wiring.
 
 ## 9. Decisions made during design
 - 0.1 desktop playback is an LGPL mpv process per player window, driven over JSON IPC by an engine in the Electron main
@@ -238,16 +253,17 @@ spec on mpv 0.42.0 docs, release assets, licence files and issues (no GPL source
   Frame-copy with DOM overlays moves to Round 2 (new issue), with IPTVnator's MIT code as the base and libmpv's D3D11
   render API to evaluate.
 - Windows presents through `--wid` into a dedicated child window; macOS through mpv's own window, because `wid` renders
-  black inside Electron there. mpv's OSC is the 0.1 control surface. `loadfile replace` is the default one-media
+  black inside Electron there; the own-window presenter is also the Windows fallback (§11). mpv's OSC is the 0.1
+  control surface. `loadfile replace` is the default one-media
   mechanism, verified by the gate, with stop-then-load as the recorded fallback.
 - After the licence check: no LGPL mpv executable exists for Windows, so Windows uses our launcher over the official
   LGPL libmpv 0.42.0 instead of a pinned third-party player build; macOS uses our own LGPL mpv build from CI. Our own
   Windows mpv and FFmpeg build with replaceable DLLs is a follow-up issue before any public release. No GPL in shipped
-  builds; notices and build information ship with every runtime.
+  builds; the LGPL text and build information ship with every runtime (the per-library list: #77).
 - `curl-enabled=no` in 0.1: the libcurl backend is a week old and changes log text and connection reuse; FFmpeg
   networking is the proven path. Revisit after 0.1.
-- macOS uses `--input-ipc-client` so mpv cannot outlive the app; Windows keeps `--input-ipc-server` with the `--wid`
-  parent as the lifetime guard; the orphan run tests both.
+- macOS uses `--input-ipc-client` so mpv cannot outlive the app; Windows keeps `--input-ipc-server` with the launcher's
+  parent-process watch as the lifetime guard; the orphan run tests both.
 - If the macOS runtime slips, the owner's Mac test falls back to the iPad app on Apple Silicon ("Designed for iPad")
   with the Apple engine: a mitigation, not a goal.
 - Resolved by the controller (owner delegated development decisions): no runtime pre-release; binaries come from
@@ -255,15 +271,46 @@ spec on mpv 0.42.0 docs, release assets, licence files and issues (no GPL source
   needed for the owner's 0.1 test (Windows 10 has no Smart App Control; macOS ad-hoc signing and an "Open anyway"
   step) and is tracked as an issue before any public release.
 - The first implementation task amends ADR 0002 and foundation §4, §5.5 and §11 (0.1 uses the external mpv process;
-  frame-copy is Round 2). Implementation starts once #7 phase 1 (`@elv/playback`) is on `main`.
+  frame-copy is Round 2). Tasks that need the port start after `feat/player-core` (#7 phase 1, `@elv/playback`) is
+  merged into this branch (§11).
 
 ## 10. Risks
 | Risk | Mitigation |
 |---|---|
-| `--wid` into an Electron window is undocumented: Chromium may paint over or blank mpv's child window; a cross-process child window shares the input queue, so a hung mpv can stall the app's input; alignment lags while dragging | First task is a spike on this PC; the 3 s IPC watchdog kills a wedged mpv; fallback is mpv's own window as on macOS (presentation change only) |
-| No pinnable LGPL mpv executable; the official LGPL libmpv bundles FFmpeg and dozens of libraries statically with only `LICENSE.LGPL` | Our launcher keeps the DLL replaceable; notices generated for every bundled library; own Windows build before a public release; legal review before the first store submission (foundation §12) |
+| `--wid` into an Electron window is undocumented: Chromium may paint over or blank mpv's child window; a cross-process child window shares the input queue, so a hung mpv can stall the app's input; alignment lags while dragging | A spike on this PC; the 3 s IPC watchdog kills a wedged mpv; fallback is the own-window presenter (§5.6) |
+| No pinnable LGPL mpv executable; the official LGPL libmpv bundles FFmpeg and dozens of libraries statically with only `LICENSE.LGPL` | Our launcher keeps the DLL replaceable; the 0.1 licence gate on the embedded configuration; the per-library notice list (#77) and our own Windows build before a public release; legal review before the first store submission (foundation §12) |
 | An LGPL mpv CLI is upstream-discouraged, and the macOS build of FFmpeg, mpv and dependencies takes days | Licence gate in the workflow; launcher fallback over our own libmpv; the iPad app for the owner's test |
 | The one-media rule and the error codes depend on mpv internals and log text | Simulator-log overlap in the gate; stop-then-load fallback; log fixtures per runtime; `curl-enabled=no` |
-| An orphan mpv after a crash holds the provider's only connection | `--input-ipc-client` on macOS, the `--wid` parent and a pid sweep on Windows; the orphan gate run |
+| An orphan mpv after a crash holds the provider's only connection | `--input-ipc-client` on macOS, the launcher's parent watch and a pid sweep on Windows; the orphan gate run |
 | Unsigned executables are blocked by Smart App Control and Gatekeeper | Owner test builds run locally or ad-hoc signed; signing is a tracked issue before release |
 | Two windows on macOS (a second Dock icon, focus changes) feel unpolished | Accepted for 0.1; the Round 2 integrated design removes it |
+
+## 11. Decisions after the builder check
+Controller decisions of 2026-11-14 on the builder's nine questions; the sections above already follow them.
+1. **Lua:** the first spike checks that the pinned LGPL libmpv has Lua (the OSC needs it). If not, the fallback is a
+   plain DOM control bar in the renderer beside, not over, the video area, driving the port (play, pause, seek; tracks
+   once #73 adds them); the plan keeps it as a conditional task.
+2. **Presentation:** a `VideoPresenter` interface with two first-class implementations from the start, child window
+   (`--wid`, Windows) and separate mpv window (macOS always; Windows fallback if the spike fails). Everything else
+   (status line, area bounds, fullscreen, lifetime guard) is written against the interface. Consequence: the Windows
+   lifetime guard moves from the `--wid` parent to the launcher's parent-process watch, so it holds for both.
+3. **Tracks of work:** Windows first, as its own mergeable track; macOS (CI runtime build, `fd://3` IPC, the
+   own-window presenter on macOS, the gate on the owner's Mac over SSH) is a second track after Windows is green.
+   GitHub Actions macOS runners build the runtime.
+4. **macOS runtime pin:** the committed `apps/desktop/mpv-runtime.lock.json` records the workflow run id, the artifact
+   name and the SHA-256; re-running the workflow updates the lock in a normal PR; `pnpm mpv fetch` verifies the hash.
+5. **Track capabilities** are `false` on desktop in 0.1 (no track commands in the port; mpv's OSC handles tracks);
+   `track-list` is not observed yet. #73 flips them.
+6. **`ready` is optional:** the desktop engine does not emit it (`opening`, `buffering`, then `playing`, `paused` or
+   `ended`); the service's start timeout ends at the first `playing`.
+7. **`backgroundThrottling: false`** on the player window, so renderer timers (ladder, watchdog, limit backoff) are
+   not throttled when mpv's window covers or occludes the app.
+8. **Licence gate for 0.1** (owner test only): the embedded FFmpeg configuration of the pinned binaries has no
+   `--enable-gpl` and no `--enable-nonfree`, and the mpv build information says `gpl=false`. A full per-library notice
+   list is required before any public release and is part of #77's scope.
+9. **Zap bursts:** the engine may drop a queued, not yet sent `load` whose token a newer `load` has superseded; only
+   the newest media matters under the token rule; never two medias open.
+
+Dependency: the `PlayerEngine` port lives on `feat/player-core`. Tasks that need it follow a task that merges
+`feat/player-core` into `feat/desktop-player` (a normal merge, never a rebase or force-push); the spike, the launcher,
+the fetch script and the licence gate come first and do not need it.
