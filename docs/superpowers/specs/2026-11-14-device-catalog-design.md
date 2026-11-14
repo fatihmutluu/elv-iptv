@@ -76,8 +76,8 @@ Scan of 2026-11-14 (private report `.superpowers/research/reports/device-sqlite-
   bound that read. Xtream JSON is parsed from one buffer either way, which is why devices cap it (§5.3).
 - No `Decompressor` in 0.1: native fetch decodes `Content-Encoding: gzip`; a playlist served as a `.gz` file without
   that header fails with the importer's `gzip-unsupported` code (guides, where gzip files are common, come in Round 2).
-- Cleartext HTTP: development builds allow it to the simulator hosts only (`10.0.2.2`, `127.0.0.1`, `localhost`) through
-  the app config (Android network security config, iOS/tvOS ATS local networking); user sources over `http` are #12.
+- Cleartext HTTP: every variant allows it (decision 26: users bring providers that serve plain HTTP) through the app
+  config (Android `usesCleartextTraffic`, Apple ATS `NSAllowsArbitraryLoads`; no local-networking key, see the lessons).
 
 ### 5.3 Catalog service (`apps/tv-mobile/src/catalog/`)
 - `createDeviceCatalog()` opens the database with `openCatalog`, wires the adapters into `ImportDeps`, and exposes:
@@ -167,8 +167,8 @@ Scan of 2026-11-14 (private report `.superpowers/research/reports/device-sqlite-
 
 ## 8. Decisions made during design
 - op-sqlite primary, expo-sqlite as the Apple fallback if the spike fails; expo-secure-store for secrets.
-- After the builder check: host parameter and simulator accounts (`large`, `huge`), dev-only cleartext to simulator
-  hosts, Vitest with a `@elv/data/testing` export, chunk = `batchSize`, tvOS through the CI jobs, stall measured by a timer
+- After the builder check: host parameter and simulator accounts (`large`, `huge`), cleartext to simulator
+  hosts (later widened to every variant and host, decision 26), Vitest with a `@elv/data/testing` export, chunk = `batchSize`, tvOS through the CI jobs, stall measured by a timer
   only, `AbortError` on interrupt during cancel, no decompressor, reads on the reader connection.
 - Adapters live in the app (layer rule: only apps wire storage drivers).
 - Desktop storage is part of the desktop work.
