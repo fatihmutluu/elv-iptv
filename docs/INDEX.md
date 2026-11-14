@@ -10,6 +10,7 @@
 - [Focus core and list gate spec](superpowers/specs/2026-11-13-focus-list-gate-design.md) the remote key model, focus store, windowed TV list and the 100k list gate (`pnpm gate list`).
 - [Android remote keys spec](superpowers/specs/2026-11-14-android-remote-keys-design.md) the `@elv/remote-keys` module that forwards raw Android key events, so a press moves at the `down` and a hold repeats.
 - [Device catalog spec](superpowers/specs/2026-11-14-device-catalog-design.md) the on-device catalog: storage adapters, the catalog service, bounded Xtream bodies and the import gate (`pnpm gate import`).
+- [Simulator corpus spec](superpowers/specs/2026-11-14-sim-corpus-design.md) runtime fault rules, delivery quirks, the format recipes, subtitles and the `corpus` account of the simulator.
 - `superpowers/plans/` implementation plans; they are deleted after the work is merged.
 - [ADRs](adr/README.md) accepted architecture decisions (MADR), including [0011 content keys](adr/0011-content-keys.md).
 - [Lessons learned](learned/README.md) short dated problem-to-rule entries.
