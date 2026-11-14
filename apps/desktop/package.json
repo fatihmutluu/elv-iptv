@@ -15,6 +15,9 @@
     "test:e2e": "pnpm run prepare:app && pnpm run bundle:e2e && playwright test --reporter=line",
     "typecheck": "tsc --noEmit -p . --pretty false"
   },
+  "dependencies": {
+    "@elv/playback": "workspace:*"
+  },
   "devDependencies": {
     "@elv/config": "workspace:*",
     "@elv/desktop-renderer": "workspace:*",
