@@ -117,6 +117,7 @@ describe('FakePlayerEngine', () => {
     expect(events).toEqual([]);
     expect(engine.commands.map((c) => c.name)).toEqual(['load', 'play', 'pause', 'seek']);
     expect(engine.commands[0]).toMatchObject({ attempt: 1, url: 'u' });
+    expect(engine.commands[3]).toEqual({ name: 'seek', attempt: 4, positionMs: 1234 });
   });
 
   it('stop ends the media and cancels pending steps', () => {

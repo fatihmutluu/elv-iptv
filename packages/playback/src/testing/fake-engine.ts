@@ -32,6 +32,7 @@ export interface FakeCommand {
   name: string;
   attempt?: AttemptToken;
   url?: string;
+  positionMs?: number;
 }
 
 /** Scriptable engine for service and screen tests. */
@@ -156,8 +157,8 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
       commands.push({ name: 'pause', attempt });
       adopt(attempt);
     },
-    seek(attempt) {
-      commands.push({ name: 'seek', attempt });
+    seek(attempt, positionMs) {
+      commands.push({ name: 'seek', attempt, positionMs });
       adopt(attempt);
     },
     stop(attempt) {
