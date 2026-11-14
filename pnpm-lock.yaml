@@ -263,6 +263,9 @@ importers:
 
   apps/tv-mobile:
     dependencies:
+      '@elv/data':
+        specifier: workspace:*
+        version: link:../../packages/data
       '@elv/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -272,6 +275,9 @@ importers:
       '@elv/remote-keys':
         specifier: workspace:*
         version: link:../../modules/remote-keys
+      '@elv/sources':
+        specifier: workspace:*
+        version: link:../../packages/sources
       '@elv/ui-kit':
         specifier: workspace:*
         version: link:../../packages/ui-kit

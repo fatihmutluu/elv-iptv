@@ -11,9 +11,11 @@
     "typecheck": "tsc --noEmit -p . --pretty false"
   },
   "dependencies": {
+    "@elv/data": "workspace:*",
     "@elv/domain": "workspace:*",
     "@elv/focus-core": "workspace:*",
     "@elv/remote-keys": "workspace:*",
+    "@elv/sources": "workspace:*",
     "@elv/ui-kit": "workspace:*",
     "@op-engineering/op-sqlite": "19.0.5",
     "@react-native-tvos/config-tv": "0.1.7",
