@@ -69,16 +69,21 @@ when it is missing (iOS, web, a build without it), and never put product logic i
 ### 6.1 Native module (`modules/remote-keys`)
 - Created with `pnpm scaffold module remote-keys` (skill `add-package`); `expo-module.config.json` lists only the
   `android` platform and its module class. The TypeScript entry imports only `expo-modules-core`.
-- Kotlin module `ElvRemoteKeys` with one event `onKey`. Payload:
-  `{ action: 'down' | 'up', keyCode: number, canceled: boolean, ageMs: number }` for keys, where
-  `ageMs = SystemClock.uptimeMillis() - event.eventTime` at the moment of sending (never negative), and
-  `{ action: 'blur' }` when the window loses focus (`onWindowFocusChanged(false)`: a dialog, the dev menu, Home),
-  because the release of a key held at that moment goes to another window and never reaches ours.
+- Kotlin module `ElvRemoteKeys` with one event `onKey` and one synchronous function `uptimeMs()`
+  (`SystemClock.uptimeMillis()`). Native payload: `{ action: 'down' | 'up', keyCode: number, canceled: boolean,
+  eventTime: number }` for keys (`eventTime` is `KeyEvent.eventTime`, uptime milliseconds), and `{ action: 'blur' }`
+  when the window loses focus (`onWindowFocusChanged(false)`: a dialog, the dev menu, Home), because the release of a
+  key held at that moment goes to another window and never reaches ours.
+- The TypeScript entry turns each key payload into `{ action, keyCode, canceled, ageMs }` when its listener receives
+  it, with `ageMs = max(0, uptimeMs() - eventTime)`. `ageMs` is measured at JS receipt, so the native-to-JS wait
+  (a busy JS thread) counts; `blur` passes unchanged.
 - Forwarding rule, a pure Kotlin function so it can be unit-tested on the JVM: forward `ACTION_DOWN` only when
-  `repeatCount == 0`; forward every `ACTION_UP` (with `canceled` from `FLAG_CANCELED`); ignore `ACTION_MULTIPLE` and
+  `repeatCount == 0`; forward every `ACTION_UP` (with `canceled` from `FLAG_CANCELED`); ignore `ACTION_MULTIPLE`,
   every event with `FLAG_FALLBACK` (Android re-dispatches an unhandled `ESCAPE`, `BUTTON_B` or `BUTTON_A` as a
-  fallback Back or Select; the original already arrived). System auto-repeats are dropped because the focus core runs
-  its own repeat clock.
+  fallback Back or Select; the original already arrived) and every event with `FLAG_SOFT_KEYBOARD` (keys an IME
+  injects into a focused text field; they must not also move focus-core focus). System auto-repeats are dropped
+  because the focus core runs its own repeat clock. Hardware D-pad keys are still forwarded while a native text
+  field has focus; a text-entry mode that suspends the key source is issue #48.
 - Capture: a `Window.Callback` that delegates every method to the callback it wraps, including the interface's default
   methods (Kotlin `by` delegation skips Java default methods, so those are overridden explicitly).
   `dispatchKeyEvent` forwards first, then returns the wrapped callback's result: the module never consumes a key.
@@ -86,7 +91,13 @@ when it is missing (iOS, web, a build without it), and never put product logic i
 - Install on `OnActivityEntersForeground` and when JavaScript starts observing `onKey`, on the current activity;
   installing is idempotent (a window whose callback is already ours is left alone). The module never unwraps (another
   library may have wrapped ours); when JavaScript stops observing, it stops sending.
-- Threading: `dispatchKeyEvent` runs on the main thread; `sendEvent` is used as is.
+- Threading: `dispatchKeyEvent` runs on the main thread; `sendEvent` is used as is. `OnStartObserving` is called from
+  the JS thread, so installing is posted to the UI thread (`Activity.runOnUiThread`) from both hooks.
+- Reference parameters of the delegating callback are nullable wherever the SDK leaves them unannotated, so Kotlin's
+  generated null checks cannot throw where the wrapped Java callback would not; the SDK's `@NonNull` panel `Menu` and
+  `MenuItem` parameters cannot be declared nullable (Kotlin rejects the override).
+- Raw Back depends on Android dispatching `KEYCODE_BACK` to the window. Opting in to predictive back
+  (`enableOnBackInvokedCallback`, API 33+) would stop that, removing Back and long Back from the raw path.
 - JS API (`src/index.ts`): `remoteKeys: RemoteKeySource | null`, where
   `RemoteKeySource = { addListener(listener: (e: RemoteKeyEvent) => void): { remove(): void } }`, built on
   `requireOptionalNativeModule('ElvRemoteKeys')`; `null` when the native module is absent (iOS, web).
@@ -107,9 +118,10 @@ when it is missing (iOS, web, a build without it), and never put product logic i
   - Anything else → `undefined`.
 - `createAndroidKeyAdapter()`, stateful per hook instance, returns `(event, now) => KeyInput[]`, tracking held keys by
   their mapped `Key` (two codes for one key, such as `DPAD_CENTER` and `ENTER`, share one record):
-  - `time = now - min(max(0, event.ageMs), 100)`. Why the cap: after a JavaScript stall a quick press's down and up
-    arrive late together; back-dating the down by the whole stall would let a tick between them fire `long`. 100 ms
-    covers the normal native-to-JS delay, so latency still counts from the press.
+  - `time = now - min(max(0, event.ageMs), 100)`. Why the cap: `ageMs` includes the native-to-JS wait, so after a
+    JavaScript stall a quick press's down and up arrive late together, each with a large age; back-dating the down by
+    the whole stall would let a tick between them fire `long`. 100 ms covers the normal native-to-JS delay, so
+    latency still counts from the press.
   - A `down` of a key that is not held records it and gives one `down`; a `down` of a held key gives nothing.
   - An `up` of a held key gives one `up`, or one `cancel` when `canceled`, and clears the record.
   - An `up` of a key that is not held gives nothing. This is what keeps a key pressed on one screen from stepping the
@@ -122,6 +134,9 @@ when it is missing (iOS, web, a build without it), and never put product logic i
   - On Android with a source from the provider: subscribe to it through a fresh adapter; do not subscribe to
     `TVEventHandler` (it would deliver every key a second time); keep the `BackHandler` listener but only to consume
     the default (return `true`), without forwarding, because Back already arrives as raw down and up.
+  - When the provider value changes or the hook unmounts, the cleanup feeds the adapter's `blur` output (one `cancel`
+    per held key) to the handler before unsubscribing: the release of a key held across the swap goes to the old,
+    removed listener, and the new adapter would drop it as an orphan, so the key would otherwise repeat forever.
   - Everywhere else (tvOS, Android without a provider or with `null`): today's behaviour, unchanged.
   - Key stamps stay on the `performance.now()` clock.
 - `toKeyInput` stays for the `TVEventHandler` path. The ui-kit rule "only `useTvKeySource` touches `TVEventHandler`,
@@ -167,10 +182,14 @@ when it is missing (iOS, web, a build without it), and never put product logic i
 
 ## 7. Testing
 - Kotlin: a JVM unit test for the forwarding rule (down with repeat 0 forwarded, down with repeat > 0 dropped, up
-  forwarded with `canceled`, multiple and fallback events ignored), run by Gradle in the `android-tv` CI job.
+  forwarded with `canceled`, multiple, fallback and soft-keyboard events ignored) and the key payload (`eventTime`,
+  `canceled`), run by Gradle in the `android-tv` CI job. TypeScript (Vitest): `ageMs` computed at receipt from a mocked
+  `uptimeMs()`, never negative, `blur` unchanged.
 - ui-kit (Jest, as the existing key-source tests): the key-code table; the adapter (time from `ageMs`, seen and unseen
-  ups, `cancel`, `blur` cancelling every held key, two codes of one key, unmapped codes); `useTvKeySource` with a fake provider source (no `TVEventHandler` subscription, Back
-  consumed without a second input, cleanup removes the listener, tvOS and provider-less Android unchanged).
+  ups, `cancel`, `blur` cancelling every held key, two codes of one key, unmapped codes); `useTvKeySource` with a fake
+  provider source (no `TVEventHandler` subscription, Back consumed without a second input, cleanup removes the
+  listener, a provider value change or unmount mid-hold cancels the held key, tvOS and provider-less Android
+  unchanged).
 - focus-core (Vitest): `cancel` while held, after `long`, during repeats, and for a key that is not held; an `up` stamped
   before the threshold but arriving after `tick` fired `long` emits nothing.
 - tv-mobile (Jest): the gate screen with a fake source — a hold produces press, one page at 500 ms, repeats until the
@@ -199,3 +218,13 @@ when it is missing (iOS, web, a build without it), and never put product logic i
 - How autolinking finds a workspace module from `apps/tv-mobile` under pnpm (dependency link versus a modules
   directory setting), and the Gradle project name for the module's unit test.
 - Names of internal helpers and test files.
+
+## 10. Decisions made during implementation
+- 2026-11-14, final review: `ageMs` is computed in JavaScript at receipt (native sends `eventTime`, the module exposes
+  a synchronous `uptimeMs()`) instead of on the main thread at send time, so the native-to-JS wait counts and the
+  100 ms cap guards what it says (§6.1, §6.2). Cost: one synchronous JSI call per key event.
+- 2026-11-14, final review: installing the window callback is posted to the UI thread, because `OnStartObserving`
+  runs on the JS thread (§6.1).
+- 2026-11-14, final review: a provider value change or unmount cancels every held key before unsubscribing (§6.2).
+- 2026-11-14, final review: `FLAG_SOFT_KEYBOARD` events are dropped natively; hardware keys in text fields are
+  issue #48 (§6.1).

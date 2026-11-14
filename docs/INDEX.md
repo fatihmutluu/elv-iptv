@@ -16,5 +16,5 @@
 - Package docs: [tools](../tools/AGENTS.md), [tv-mobile](../apps/tv-mobile/AGENTS.md), [desktop](../apps/desktop/AGENTS.md),
   [domain](../packages/domain/AGENTS.md), [sources](../packages/sources/AGENTS.md), [data](../packages/data/AGENTS.md),
   [playback](../packages/playback/AGENTS.md), [focus-core](../packages/focus-core/AGENTS.md), [i18n](../packages/i18n/AGENTS.md),
-  [ui-kit](../packages/ui-kit/AGENTS.md), [features](../packages/features/AGENTS.md).
+  [ui-kit](../packages/ui-kit/AGENTS.md), [features](../packages/features/AGENTS.md), [remote-keys](../modules/remote-keys/AGENTS.md).
 - Platform placeholders: [vega](../apps/vega/README.md), [tizen](../apps/tizen/README.md), [webos](../apps/webos/README.md).

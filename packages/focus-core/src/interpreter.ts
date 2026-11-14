@@ -34,18 +34,18 @@ interface Held {
  * Creates a key interpreter.
  *
  * Step keys (the arrows, `channelUp`, `channelDown`) emit their `press` on the earliest input that shows it: on `down`,
- * stamped with the down time, and then their `up` emits nothing; an `up` without a `down` (Android TV delivers a tap
- * only on release) is one `press` at its time. Every other key emits one `press` on an `up` that comes before
- * `LONG_PRESS_MS` (or without a `down`), so `long` stays distinguishable. A long-capable key
- * held that long emits one `long` (stamped `downAt + LONG_PRESS_MS`, from `tick`, or from `up` if no tick saw it) and
- * no `press` on release; an `up` of a key whose `long` `tick` already fired emits nothing whatever its time (a
- * back-dated release can land just under the threshold). A `cancel` input drops the held key and emits nothing. Repeat keys then emit `repeat` every 1000/REPEAT_START_HZ ms, switching to
- * 1000/REPEAT_FAST_HZ ms for repeats due at or after `downAt + LONG_PRESS_MS + REPEAT_RAMP_MS`. The first repeat is
- * one interval after the threshold. A key that only repeats (no `long`) still starts at the threshold.
- * A tick that finds several repeats overdue emits at most one and skips to the first future slot; a non-finite `now`
- * is ignored. A `long` action (native long press) is passed through as one `long` (a digit becomes a `press`).
- * While a repeat is unacknowledged, later due repeats of that key are dropped, never queued. A repeated `down` for a
- * held key is ignored.
+ * stamped with the down time, and then their `up` emits nothing; an `up` without a `down` (the Android `TVEventHandler`
+ * fallback delivers a tap only on release) is one `press` at its time. Every other key emits one `press` on an `up`
+ * that comes before `LONG_PRESS_MS` (or without a `down`), so `long` stays distinguishable. A long-capable key held
+ * that long emits one `long` (stamped `downAt + LONG_PRESS_MS`, from `tick`, or from `up` if no tick saw it) and no
+ * `press` on release; an `up` of a key whose `long` `tick` already fired emits nothing whatever its time (a back-dated
+ * release can land just under the threshold). A `cancel` input drops the held key and emits nothing.
+ * Repeat keys then emit `repeat` every 1000/REPEAT_START_HZ ms, switching to 1000/REPEAT_FAST_HZ ms for repeats due
+ * at or after `downAt + LONG_PRESS_MS + REPEAT_RAMP_MS`. The first repeat is one interval after the threshold. A key
+ * that only repeats (no `long`) still starts at the threshold. A tick that finds several repeats overdue emits at most
+ * one and skips to the first future slot; a non-finite `now` is ignored. A `long` action (native long press) is passed
+ * through as one `long` (a digit becomes a `press`). While a repeat is unacknowledged, later due repeats of that key
+ * are dropped, never queued. A repeated `down` for a held key is ignored.
  */
 export function createKeyInterpreter(opts: KeyInterpreterOptions = {}): KeyInterpreter {
   const longKeys = new Set<Key>(

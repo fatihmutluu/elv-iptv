@@ -34,7 +34,7 @@ It is a composition root: it wires modules, storage drivers, routes and stores.
   events feed `useTvKeySource`; elsewhere `TVEventHandler` does, which needs the `focusable` root with `hasTVPreferredFocus`.
   `useTvKeySource` -> `createKeyInterpreter` -> store; the ticker runs while a key is down and stops on `up` or `cancel`; repeats
   are acknowledged from `onFrameCommitted`. With `auto=0` it prints one line after 2 s without a move (`--real-keys`).
-- Metrics (`metrics.ts`): `t0` is the dispatch time (auto) or the receipt of the key's first event (real: the press, i.e. the `down`); `t1` is `performance.now()` in
+- Metrics (`metrics.ts`): `t0` is the dispatch time (auto) or the key's first input (real: the `down`, back-dated by its age at JS receipt, at most 100 ms); `t1` is `performance.now()` in
   `onFrameCommitted` (first frame after row and ring committed); key-to-highlight is `t1 - t0` per move that commit covers.
   `maxJsGapMs` is the longest synchronous work of a move (dispatch to the end of the list commit, ended by `CommitProbe`);
   `maxFrameStallMs` estimates stalls outside dispatch: slowest `requestAnimationFrame` delta minus 0.7 of the median (a 4 ms
