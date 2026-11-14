@@ -1,5 +1,4 @@
 import type { ExpoConfig } from 'expo/config';
-import { DEV_CLEARTEXT_HOSTS, withDevCleartext } from './with-dev-cleartext.ts';
 
 /** The build environment (`process.env` when Expo loads `app.config.ts`). */
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -44,15 +43,11 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
     [
       'expo-build-properties',
       {
-        android: { minSdkVersion: MIN_ANDROID_SDK, usesCleartextTraffic: false },
+        android: { minSdkVersion: MIN_ANDROID_SDK, usesCleartextTraffic: true },
         ios: { deploymentTarget: MIN_APPLE_OS },
       },
     ],
   ];
-  // Expo accepts a plugin function in place of its module name, though its config type lists only strings.
-  if (development) {
-    plugins.push([withDevCleartext as unknown as string, { hosts: DEV_CLEARTEXT_HOSTS }]);
-  }
   if (tv) {
     plugins.push([
       '@react-native-tvos/config-tv',
@@ -92,7 +87,9 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
       supportsTablet: true,
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
-        ...(development ? { NSAppTransportSecurity: { NSAllowsLocalNetworking: true } } : {}),
+        // Users bring plain-HTTP providers. Never add NSAllowsLocalNetworking here: when both keys are
+        // present Apple ignores NSAllowsArbitraryLoads, so plain HTTP is blocked again.
+        NSAppTransportSecurity: { NSAllowsArbitraryLoads: true },
       },
     },
     plugins,
