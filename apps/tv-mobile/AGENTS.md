@@ -25,8 +25,8 @@ It is a composition root: it wires modules, storage drivers, routes and stores.
   `build-app-config.ts` sets for `APP_VARIANT=development` only. The app reads it with `expo-constants`; never key it
   on `__DEV__` (the gate is measured on a JS-bundled release build of the development variant).
 - `parseGateUrl` (`routes.ts`) clamps: items 1 to 1,000,000, rate 1 to 60/s, moves 1 to 10,000, `stall` 0 to 200 ms (one busy-wait
-  mid-run to calibrate the JS gap); defaults 100,000 / manual / 20 / 600 / 0. `useGateParams` reads the initial URL and `url`
-  events through `react-native` `Linking`; without the flag `App` shows the placeholder.
+  mid-run to calibrate the JS gap); defaults 100,000 / manual / 20 / 600 / 0. `useGateParams` reads the iOS/tvOS launch argument `-gateUrl <url>`
+  (`Settings`; skips the tvOS "Open in …?" prompt of `simctl openurl`), else the initial URL and `url` events (`Linking`); without the flag, nothing.
 - Auto run: `createAutoDriver` (`driver.ts`) emits a scripted sequence through the focus store: a down-hold (`long`
   page then `repeat` steps), page jumps (`channelDown`), single presses, then the mirror going up. It ends at index 0
   when the list is longer than the deepest excursion (about 600 rows at 600 moves); an odd `moves` is rounded down.

@@ -105,7 +105,7 @@ budgets: remote key to highlight under 100 ms, no JavaScript task over 16 ms whi
 - CI: a `gate-list` job in `native.yml` (Ubuntu runner with KVM, the Android TV system image, pinned emulator action)
   runs the gate three times and compares the median. The job is required only after five green runs on `main`;
   until then it reports.
-- tvOS: the `tvos` CI job runs the auto-driver in the simulator via `simctl openurl` and records `ELV_GATE` output as a
+- tvOS: the `tvos` CI job runs the auto-driver in the simulator and records `ELV_GATE` output as a
   report-only artifact.
 - Changed: janky % rules, the CI baseline file, the separate tvOS job, the real-press check, comparability and the
   per-run report (§9); the runner's flags are listed in `tools/AGENTS.md`.
@@ -179,6 +179,9 @@ Where sections 5 and 6 above differ, this list wins. Each line gives the decisio
   Why: it needs a Release build of the development variant; changing `tvos` would change what the required check validates.
 - On iOS the gate line is printed with `console.error`, and the tvOS job filters the simulator log by the message text
   (with a screenshot on timeout). Why: release builds drop info-level JS logs, and the first run captured nothing.
+- The tvOS job starts the gate with `simctl launch … -gateUrl <url>`, which the development build reads from
+  `NSUserDefaults` through `Settings`, ahead of the initial URL. Why: `simctl openurl` shows an "Open in …?" prompt on
+  tvOS that nobody answers in CI (#44).
 - The runner fails a real-key burst when fewer moves arrive than presses were sent. Why: a dropped remote key is a
   user-visible failure the gate exists to catch.
 - Runs compare on items and `scripted` (every event the driver emitted), not `moves`. Why: a coalesced repeat lowers
