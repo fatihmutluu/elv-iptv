@@ -10,6 +10,8 @@ export interface FetchDeps {
   readBytes(file: string): Promise<Uint8Array>;
   exists(path: string): boolean;
   buildLauncher(runtimeDir: string): Promise<void>;
+  /** SHA-256 of the launcher source (`elv-mpv.c`), or null where no launcher is built. */
+  launcherSourceHash(): Promise<string | null>;
   log(line: string): void;
   readText(file: string): Promise<string>;
   writeText(file: string, text: string): Promise<void>;
@@ -103,6 +105,23 @@ async function readInstalled(
   }
 }
 
+/** Builds the launcher and records the source hash it was built from in `elv-mpv.stamp`. */
+async function buildStamped(dir: string, hash: string | null, deps: FetchDeps): Promise<void> {
+  await deps.buildLauncher(dir);
+  if (hash !== null) await deps.writeText(`${dir}/elv-mpv.stamp`, `${hash}\n`);
+}
+
+/** A current runtime keeps its launcher only while the stamp matches `elv-mpv.c` and the exe exists. */
+async function refreshLauncher(dir: string, key: string, deps: FetchDeps): Promise<void> {
+  const hash = await deps.launcherSourceHash();
+  if (hash === null) return;
+  const stamp = `${dir}/elv-mpv.stamp`;
+  const built = deps.exists(stamp) ? (await deps.readText(stamp)).trim() : null;
+  if (built === hash && deps.exists(`${dir}/elv-mpv.exe`)) return;
+  deps.log(`mpv: ${key} elv-mpv.exe is out of date with elv-mpv.c; rebuilding`);
+  await buildStamped(dir, hash, deps);
+}
+
 async function obtainArchive(
   root: string,
   key: string,
@@ -145,6 +164,7 @@ export async function fetchRuntime(opts: FetchOptions, deps: FetchDeps): Promise
   const dir = runtimeDir(opts.root, key);
   const installed = opts.force === true ? null : await readInstalled(dir, deps);
   if (installed?.sha256 === entry.sha256) {
+    await refreshLauncher(dir, key, deps);
     deps.log(summary(key, 'current', entry.mpv, installed.licence));
     return { status: 'current', dir, verdict: installed.licence };
   }
@@ -160,7 +180,7 @@ export async function fetchRuntime(opts: FetchOptions, deps: FetchDeps): Promise
   }
   await deps.removeDir(dir);
   await deps.installDir(staging, dir);
-  await deps.buildLauncher(dir);
+  await buildStamped(dir, await deps.launcherSourceHash(), deps);
   const { ffmpegConfig, mpvOptions, lua } = verdict;
   const info = {
     key,

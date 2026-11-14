@@ -49,6 +49,7 @@ function systemTar(): string {
 
 /** Real side effects for `pnpm mpv`: https download, SHA-256, system tar, `gh run download`. */
 export function realDeps(log: (line: string) => void, root: string): FetchDeps {
+  const launcherSource = `${root}/apps/desktop/native/mpv-host/elv-mpv.c`;
   return {
     async download(url, file) {
       const res = await fetch(url, { redirect: 'follow' });
@@ -84,11 +85,14 @@ export function realDeps(log: (line: string) => void, root: string): FetchDeps {
     async buildLauncher(runtimeDir) {
       if (process.platform !== 'win32') return;
       const win = (p: string): string => p.replaceAll('/', String.fromCharCode(92));
-      await buildLauncher({
-        runtimeDir: win(runtimeDir),
-        source: win(`${root}/apps/desktop/native/mpv-host/elv-mpv.c`),
-      });
+      await buildLauncher({ runtimeDir: win(runtimeDir), source: win(launcherSource) });
       log('mpv: built elv-mpv.exe');
+    },
+    async launcherSourceHash() {
+      if (process.platform !== 'win32') return null;
+      return createHash('sha256')
+        .update(await readFile(launcherSource))
+        .digest('hex');
     },
     log,
     readText: (file) => readFile(file, 'utf8'),

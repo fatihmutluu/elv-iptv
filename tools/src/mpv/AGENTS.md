@@ -23,4 +23,5 @@
   Manual check for the watchdog (no automated test can force a stuck shutdown): play from a socket that accepts and
   never answers, kill the parent, and confirm `elv-mpv.exe` is gone within about 4 s.
 - The launcher is Per-Monitor V2 DPI aware (like mpv.exe), so `--geometry` and a `--wid` child use physical pixels.
-  `fetch` skips a current runtime: after changing `elv-mpv.c` run `pnpm mpv fetch --force` (the archive is cached).
+  `elv-mpv.stamp` holds the SHA-256 of the `elv-mpv.c` it was built from; `fetch` rebuilds the launcher of a current
+  runtime when the stamp is missing or differs, or the exe is gone.

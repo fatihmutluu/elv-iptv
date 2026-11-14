@@ -24,6 +24,7 @@ interface Fake {
   downloadedTo: string[];
   logs: string[];
   extractedTo: string[];
+  builds: string[];
 }
 
 function fake(
@@ -34,6 +35,7 @@ function fake(
     cached?: boolean;
     extraPaths?: string[];
     symlinks?: string[];
+    launcherHash?: string | null;
   } = {},
 ): Fake {
   const written = new Map<string, string>(Object.entries(opts.files ?? {}));
@@ -41,6 +43,7 @@ function fake(
   const downloadedTo: string[] = [];
   const logs: string[] = [];
   const extractedTo: string[] = [];
+  const builds: string[] = [];
   const deps: FetchDeps = {
     async download(url, file) {
       downloads.push(url);
@@ -65,7 +68,11 @@ function fake(
       return new Uint8Array();
     },
     exists: (p) => written.has(p) || (opts.cached === true && p.endsWith('.zip')),
-    async buildLauncher() {},
+    async buildLauncher(dir) {
+      builds.push(dir);
+      written.set(`${dir}/elv-mpv.exe`, 'exe');
+    },
+    launcherSourceHash: async () => opts.launcherHash ?? null,
     log: (l) => logs.push(l),
     async readText(file) {
       const v = written.get(file);
@@ -98,7 +105,7 @@ function fake(
       for (const k of [...written.keys()]) if (k.startsWith(`${dir}/`)) written.delete(k);
     },
   };
-  return { deps, written, downloads, downloadedTo, logs, extractedTo };
+  return { deps, written, downloads, downloadedTo, logs, extractedTo, builds };
 }
 
 const base = { root: '/repo', platform: 'win32', arch: 'x64' };
@@ -186,6 +193,60 @@ describe('fetchRuntime', () => {
     const f = fake({ symlinks: ['libmpv-link.dll'] });
     await expect(fetchRuntime({ ...base, lock: LOCK }, f.deps)).rejects.toThrow(/symlink/);
     expect([...f.written.keys()].some((k) => k.includes('resources/mpv/win32-x64'))).toBe(false);
+  });
+});
+
+describe('fetchRuntime launcher stamp', () => {
+  const dir = '/repo/apps/desktop/resources/mpv/win32-x64';
+  const info = JSON.stringify({
+    sha256: HASH,
+    licence: { ffmpegConfig: 'c', mpvOptions: 'o', lua: true },
+  });
+  const exe = `${dir}/elv-mpv.exe`;
+  const stamp = `${dir}/elv-mpv.stamp`;
+  const current = (extra: Record<string, string>): Record<string, string> => ({
+    [`${dir}/BUILDINFO.json`]: info,
+    [exe]: 'exe',
+    ...extra,
+  });
+
+  it('stamps the launcher with its source hash after an install', async () => {
+    const f = fake({ launcherHash: 'src1' });
+    await fetchRuntime({ ...base, lock: LOCK }, f.deps);
+    expect(f.builds).toEqual([dir]);
+    expect(f.written.get(stamp)).toBe('src1\n');
+  });
+
+  it('rebuilds the launcher of a current runtime when the stamp is missing or differs', async () => {
+    for (const files of [current({}), current({ [stamp]: 'old\n' })]) {
+      const f = fake({ files, launcherHash: 'src2' });
+      const r = await fetchRuntime({ ...base, lock: LOCK }, f.deps);
+      expect(r.status).toBe('current');
+      expect(f.downloads).toEqual([]);
+      expect(f.builds).toEqual([dir]);
+      expect(f.written.get(stamp)).toBe('src2\n');
+      expect(f.logs).toContain(
+        'mpv: win32-x64 elv-mpv.exe is out of date with elv-mpv.c; rebuilding',
+      );
+    }
+  });
+
+  it('rebuilds a missing launcher even when the stamp matches', async () => {
+    const files = current({ [stamp]: 'src3\n' });
+    delete files[exe];
+    const f = fake({ files, launcherHash: 'src3' });
+    await fetchRuntime({ ...base, lock: LOCK }, f.deps);
+    expect(f.builds).toEqual([dir]);
+  });
+
+  it('keeps a launcher whose stamp matches, and builds nothing where there is no launcher', async () => {
+    const stamped = fake({ files: current({ [stamp]: 'src4\n' }), launcherHash: 'src4' });
+    await fetchRuntime({ ...base, lock: LOCK }, stamped.deps);
+    expect(stamped.builds).toEqual([]);
+    const none = fake({ files: current({}), launcherHash: null });
+    await fetchRuntime({ ...base, lock: LOCK }, none.deps);
+    expect(none.builds).toEqual([]);
+    expect(none.written.has(stamp)).toBe(false);
   });
 });
 
