@@ -20,18 +20,18 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
 - `EngineError` and the 14 `EngineErrorCode`s; `toPlaybackError` gives `elvError('playback', code)`;
   `classifyError` gives `terminal | not-found | limit | recoverable`.
 - `@elv/playback/testing`: `createFakePlayerEngine({ scripts, now, schedule, cancel })`, a scriptable engine for tests.
-  Scripts are keyed by URL and re-run on `retry`/`recreate`; `emit` injects any event (stale tokens too);
-  `openMedias()` and `maxConcurrentMedias()` check the one-media rule. Inject fake-timer functions, no real timers.
+  Scripts are keyed by URL and re-run on `retry` (`recreate` idles until a `load` or `retry`); `emit` injects any
+  event (stale tokens too); `openMedias()`, `maxConcurrentMedias()` check the one-media rule. Inject fake timers.
 - `createPlaybackService({ engine, clock, timers, config? })`: `tune` (returns the token; a new tune supersedes the old
-  one at once), `retry`, `stop`, `play`, `pause`, `seek`, `getState`, `subscribe`, `dispose`. `DEFAULT_PLAYBACK_CONFIG`
-  holds the spec timings. Events of older tokens are dropped and counted in `staleEventsDropped`.
-  `nextLimitDelay(elapsedMs, attempt, config)` gives the connection-limit wait (`undefined` = give up).
+  one at once), `retry`, `stop`, `play`, `pause`, `seek`, `getState`, `subscribe`, `dispose`. The frozen
+  `DEFAULT_PLAYBACK_CONFIG` holds the spec timings; a `resolve` unsettled after 5 s fails with `network`/`timeout`.
+  Older tokens' events are dropped (`staleEventsDropped`). `nextLimitDelay(elapsedMs, attempt, config)`: limit wait.
 
 ## Recovery (spec sections 5.4 and 5.5; `recovery.ts`, always wired)
 - Entry: a stall of 4 s while `playing`, no `playing` 8 s after `load`, or a recoverable error. Each rung takes a new
   token after its gap (0, 1, 2, 4 s) and has 4 s to reach `playing`: 1 `retry`, 2 `load` again, 3 `recreate` + `load`,
   4 software audio after `decoder` (if the engine has it) or the next alternate; then `failed` (last error) + `stop`.
-  30 s of `playing` restores every budget. Terminal codes fail at once; `http-404` gets one rung 2, then fails.
+  30 s of `playing` restores every budget. Terminal codes fail at once; `http-404` gets one rung 2 only, then fails.
 - Limit path (`http-429`, `http-509`, `connection-limit`; never the ladder): `stop`, `limited { nextAtMs }` (the
   stopped media's events are ignored), wait 2, 4, 8, then 15 s, `load`; past 60 s `failed(connection-limit)`. A
   same-account `tune` is held until the wait ends (keeps `limited`, loads with its own token); others load at once.

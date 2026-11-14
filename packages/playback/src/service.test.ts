@@ -74,7 +74,17 @@ describe('config', () => {
       limitBackoffMs: [2000, 4000, 8000, 15000],
       limitTotalMs: 60000,
       vodReconnectWindowMs: 120000,
+      resolveTimeoutMs: 5000,
     });
+  });
+
+  it('cannot be changed at run time', () => {
+    expect(Object.isFrozen(DEFAULT_PLAYBACK_CONFIG)).toBe(true);
+    expect(Object.isFrozen(DEFAULT_PLAYBACK_CONFIG.ladderGapsMs)).toBe(true);
+    expect(Object.isFrozen(DEFAULT_PLAYBACK_CONFIG.limitBackoffMs)).toBe(true);
+    expect(() => {
+      (DEFAULT_PLAYBACK_CONFIG as { startTimeoutMs: number }).startTimeoutMs = 1;
+    }).toThrow(TypeError);
   });
 });
 
@@ -162,6 +172,36 @@ describe('tune', () => {
       error: { category: 'auth', code: 'expired' },
     });
     expect(loads(engine)).toHaveLength(0);
+  });
+
+  it('fails with network/timeout when resolve does not settle within 5,000 ms', async () => {
+    const { engine, service } = setup();
+    const late = deferred();
+    service.tune(tuneReq('A', { resolve: () => late.promise }));
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(service.getState().status).toEqual({ kind: 'tuning' });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(service.getState().status).toEqual({
+      kind: 'failed',
+      error: { category: 'network', code: 'timeout' },
+    });
+    late.settle(ok(req('A')));
+    await flush();
+    expect(loads(engine)).toHaveLength(0);
+  });
+
+  it('times only the newest resolve and none after it settled or the tune stopped', async () => {
+    const { engine, service } = setup();
+    service.tune(tuneReq('A', { resolve: () => new Promise(() => {}) }));
+    await vi.advanceTimersByTimeAsync(3000);
+    service.tune(tuneReq('B'));
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(service.getState().status).toEqual({ kind: 'playing' });
+    service.tune(tuneReq('C', { resolve: () => new Promise(() => {}) }));
+    service.stop();
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(service.getState().status).toEqual({ kind: 'idle' });
+    expect(loads(engine).map((c) => c.url)).toEqual(['B']);
   });
 
   it('fails the tune when resolve rejects', async () => {

@@ -16,16 +16,22 @@ export interface PlaybackConfig {
   limitTotalMs: number;
   /** VOD reconnect attempts stop after this window. */
   vodReconnectWindowMs: number;
+  /**
+   * A tune whose `resolve` has not settled after this long fails with `network`/`timeout` instead of staying in
+   * `tuning`. Resolving is local work (a stored template and a secret-store read), so the bound only catches a hang.
+   */
+  resolveTimeoutMs: number;
 }
 
-/** Spec defaults. */
-export const DEFAULT_PLAYBACK_CONFIG: PlaybackConfig = {
+/** Spec defaults, frozen so no caller can change them for every service. */
+export const DEFAULT_PLAYBACK_CONFIG: Readonly<PlaybackConfig> = Object.freeze({
   liveStallWindowMs: 4000,
   startTimeoutMs: 8000,
   rungTimeoutMs: 4000,
-  ladderGapsMs: [0, 1000, 2000, 4000],
+  ladderGapsMs: Object.freeze([0, 1000, 2000, 4000] as const),
   stableRestoreMs: 30000,
-  limitBackoffMs: [2000, 4000, 8000, 15000],
+  limitBackoffMs: Object.freeze([2000, 4000, 8000, 15000]),
   limitTotalMs: 60000,
   vodReconnectWindowMs: 120000,
-};
+  resolveTimeoutMs: 5000,
+});

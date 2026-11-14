@@ -87,15 +87,28 @@ describe('FakePlayerEngine', () => {
     expect(events.find((e) => e.type === 'firstFrame')).toBeUndefined();
   });
 
-  it('re-runs the script on retry and recreate', () => {
+  it('re-runs the script on retry', () => {
     const { engine, events } = setup({ u: [{ afterMs: 5, emit: 'firstFrame' }] });
     engine.load(load('u', 1));
     vi.advanceTimersByTime(5);
     engine.retry(2);
     vi.advanceTimersByTime(5);
-    engine.recreate(3);
+    expect(events.map((e) => e.attempt)).toEqual([1, 2]);
+    expect(engine.openMedias()).toBe(1);
+  });
+
+  it('leaves the engine idle after recreate until a load or retry', () => {
+    const { engine, events } = setup({ u: [{ afterMs: 5, emit: 'firstFrame' }] });
+    engine.load(load('u', 1));
+    engine.recreate(2);
+    vi.advanceTimersByTime(1000);
+    expect(events).toEqual([]);
+    engine.retry(3);
     vi.advanceTimersByTime(5);
-    expect(events.map((e) => e.attempt)).toEqual([1, 2, 3]);
+    engine.recreate(4);
+    engine.load(load('u', 5));
+    vi.advanceTimersByTime(5);
+    expect(events.map((e) => e.attempt)).toEqual([3, 5]);
     expect(engine.openMedias()).toBe(1);
   });
 

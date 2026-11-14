@@ -253,6 +253,18 @@ describe('error classes', () => {
     expect(last(r)).toEqual({ name: 'stop', attempt: t + 1 });
   });
 
+  it('http-404 followed by a silent rung 2 fails when the rung times out, without rungs 3 and 4', async () => {
+    const r = rig({ gone: [], alt: [] });
+    const t = r.service.tune(live('gone', { alternates: [resolved('alt')] }));
+    await tick(0);
+    error(r, 'http-404');
+    await tick(1000);
+    expect(r.loads.map((l) => l.attempt)).toEqual([t, t + 1]);
+    await tick(4000);
+    expect(status(r)).toEqual(failed('http-404'));
+    expect(r.engine.commands.map((c) => c.name)).toEqual(['load', 'load', 'stop']);
+  });
+
   it('http-404 after the ladder reached rung 2 fails at once', async () => {
     const r = rig({ dead: [] });
     await playing(r, live('dead'));

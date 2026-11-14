@@ -45,6 +45,7 @@ export function createPlaybackServiceWith(
   let held = false;
   let disposed = false;
   let startTimer: unknown;
+  let resolveTimer: unknown;
 
   const update = (patch: Partial<PlaybackState>): void => {
     state = { ...state, ...patch };
@@ -54,6 +55,11 @@ export function createPlaybackServiceWith(
   const clearStartTimeout = (): void => {
     if (startTimer !== undefined) timers.clearTimeout(startTimer);
     startTimer = undefined;
+  };
+
+  const clearResolveTimeout = (): void => {
+    if (resolveTimer !== undefined) timers.clearTimeout(resolveTimer);
+    resolveTimer = undefined;
   };
 
   const stopEngine = (): void => {
@@ -168,6 +174,11 @@ export function createPlaybackServiceWith(
       tuneAt: clock.now(),
     };
     update({});
+    clearResolveTimeout();
+    resolveTimer = timers.setTimeout(() => {
+      resolveTimer = undefined;
+      onResolved(token, { ok: false, error: elvError('network', 'timeout') });
+    }, config.resolveTimeoutMs);
     new Promise<Result<StreamRequest>>((settle) => settle(request.resolve())).then(
       (result) => onResolved(token, result),
       () => onResolved(token, { ok: false, error: elvError('network', 'resolve-failed') }),
@@ -176,6 +187,7 @@ export function createPlaybackServiceWith(
   };
 
   function onResolved(token: AttemptToken, result: Result<StreamRequest>): void {
+    if (token === state.attempt) clearResolveTimeout();
     const { kind } = state.status;
     if (disposed || token !== state.attempt || (kind !== 'tuning' && kind !== 'limited')) return;
     if (!result.ok) {
@@ -208,6 +220,7 @@ export function createPlaybackServiceWith(
     stop() {
       if (disposed || state.status.kind === 'idle') return;
       hooks.onReset?.();
+      clearResolveTimeout();
       stopEngine();
       update({ status: { kind: 'idle' } });
     },
@@ -237,6 +250,7 @@ export function createPlaybackServiceWith(
       if (disposed) return;
       disposed = true;
       clearStartTimeout();
+      clearResolveTimeout();
       unsubscribeEngine();
       hooks.onDispose?.();
       listeners.clear();

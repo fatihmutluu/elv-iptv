@@ -207,7 +207,8 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
     }
   };
 
-  const goTo = (rung: Rung): void => {
+  /** Enters `rung` after its gap; a rung that does not reach `playing` in time calls `onTimeout`. */
+  const goTo = (rung: Rung, onTimeout: () => void = () => escalate()): void => {
     const action = rungAction(rung);
     if (action === undefined) {
       giveUp();
@@ -218,7 +219,7 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
     after(gap, () => {
       budget.rung = rung;
       const token = ctl.nextAttempt();
-      watch(() => escalate());
+      watch(onTimeout);
       action(token);
     });
   };
@@ -241,7 +242,7 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
     budget.notFound = true;
     cancelSteps();
     freeze();
-    goTo(2);
+    goTo(2, giveUp);
   };
 
   const reconnectVod = (error: EngineError): void => {

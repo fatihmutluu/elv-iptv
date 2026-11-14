@@ -147,7 +147,7 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
     recreate(attempt) {
       commands.push({ name: 'recreate', attempt });
       adopt(attempt);
-      runScript();
+      cancelScript();
     },
     play(attempt) {
       commands.push({ name: 'play', attempt });
