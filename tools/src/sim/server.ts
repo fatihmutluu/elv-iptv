@@ -48,6 +48,7 @@ export interface SimHandle {
   close(): Promise<void>;
 }
 
+const LIVE_EXIT_WAIT_MS = 5000;
 const DEFAULT_PORT = 7878;
 const DEFAULT_HOST = '127.0.0.1';
 const EVENTS_LIMIT = 1_048_576;
@@ -59,7 +60,7 @@ export function defaultCacheDir(): string {
 }
 
 const DEFAULT_MEDIA_SECONDS = 600;
-const routes: RouteHandler[] = [dataRoute, mediaRoute, liveRoute, hlsRoute];
+const routes: RouteHandler[] = [dataRoute, mediaRoute, hlsRoute, liveRoute];
 
 function headersOf(req: IncomingMessage): Record<string, string> {
   const out: Record<string, string> = {};
@@ -255,6 +256,7 @@ export async function startSim(options: SimOptions = {}): Promise<SimHandle> {
     baseUrl: '',
     log,
     faultRules: new FaultRules(),
+    liveProcesses: new Set(),
     connections: createConnections(),
     media: {
       ffmpeg: options.ffmpegPath === undefined ? findFfmpeg() : options.ffmpegPath,
@@ -292,10 +294,19 @@ export async function startSim(options: SimOptions = {}): Promise<SimHandle> {
       ctx.faultRules.clear();
       events.length = 0;
     },
-    close: () =>
-      new Promise<void>((resolve) => {
+    close: async () => {
+      await new Promise<void>((resolve) => {
         server.close(() => resolve());
         server.closeAllConnections();
-      }),
+      });
+      const live = [...ctx.liveProcesses];
+      for (const p of live) p.stop();
+      let timer: NodeJS.Timeout | undefined;
+      const limit = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, LIVE_EXIT_WAIT_MS);
+      });
+      await Promise.race([Promise.all(live.map((p) => p.exited)), limit]);
+      clearTimeout(timer);
+    },
   };
 }

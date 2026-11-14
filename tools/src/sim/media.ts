@@ -290,6 +290,8 @@ export function activeChildren(): number {
 /** A running real-time FFmpeg copy of a recipe loop. */
 export interface LiveProcess {
   stdout: Readable;
+  /** Resolves once the FFmpeg process has exited and been forgotten. */
+  exited: Promise<void>;
   stop(): void;
 }
 
@@ -307,14 +309,24 @@ export function spawnLive(ffmpeg: string, loopTs: string): LiveProcess {
   children.add(child);
   let timer: NodeJS.Timeout | undefined;
   let stopping = false;
-  child.on('error', () => child.stdout.destroy());
-  child.on('close', () => {
-    children.delete(child);
-    clearTimeout(timer);
+  const exited = new Promise<void>((resolve) => {
+    child.on('close', () => {
+      children.delete(child);
+      clearTimeout(timer);
+      resolve();
+    });
+    child.on('error', () => {
+      child.stdout.destroy();
+      if (child.pid === undefined) {
+        children.delete(child);
+        resolve();
+      }
+    });
   });
   child.stdout.on('error', () => undefined);
   return {
     stdout: child.stdout,
+    exited,
     stop() {
       if (stopping || !children.has(child)) return;
       stopping = true;

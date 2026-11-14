@@ -72,6 +72,11 @@ export const hlsRoute: RouteHandler = async (req, res, ctx, meta) => {
     sendText(res, 404, 'text/plain', 'not found');
     return true;
   }
+  const seq = groups.seq === undefined ? 0 : Number(groups.seq);
+  if (!Number.isSafeInteger(seq)) {
+    sendText(res, 404, 'text/plain', 'not found');
+    return true;
+  }
   meta.recipe = recipe;
   const files = await loadRecipe(res, ctx, recipe);
   if (files === null) return true;
@@ -82,9 +87,9 @@ export const hlsRoute: RouteHandler = async (req, res, ctx, meta) => {
   } else if (groups.mode === 'vod') {
     sendText(res, 200, 'application/vnd.apple.mpegurl', vodPlaylist(files.durations, uri));
   } else if (lang === null) {
-    await serveSegment(res, files, Number(groups.seq));
+    await serveSegment(res, files, seq);
   } else {
-    await serveCues(res, ctx, files, lang, Number(groups.seq));
+    await serveCues(res, ctx, files, lang, seq);
   }
   return true;
 };

@@ -1,13 +1,13 @@
 import { mkdtempSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { ACCOUNTS, findAccount } from '../src/sim/accounts.ts';
 import { buildCatalog, createCatalog } from '../src/sim/catalog.ts';
-import { activeChildren, findFfmpeg, MEDIA_SKIP_MARKER } from '../src/sim/media.ts';
+import { findFfmpeg, MEDIA_SKIP_MARKER } from '../src/sim/media.ts';
 import { ALL_RECIPES } from '../src/sim/recipes.ts';
 import { type SimHandle, startSim } from '../src/sim/server.ts';
+import { removeCache } from './media-cache.ts';
 
 const ffmpeg = findFfmpeg();
 if (ffmpeg === null && process.env.CI === 'true') throw new Error('ffmpeg is required in CI');
@@ -143,11 +143,7 @@ withFfmpeg('corpus routes with media', () => {
   beforeAll(() => {
     cacheDir = mkdtempSync(join(tmpdir(), 'sim-corpus-'));
   });
-  afterAll(async () => {
-    const until = Date.now() + 3000;
-    while (activeChildren() > 0 && Date.now() < until) await new Promise((r) => setTimeout(r, 25));
-    await rm(cacheDir, { recursive: true, force: true });
-  });
+  afterAll(() => removeCache(cacheDir));
 
   it('labels the web-page edge channel as HTML', async () => {
     const h = await startSim({ port: 0, mediaSeconds: 4, cacheDir, ffmpegPath: ffmpeg });

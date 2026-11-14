@@ -69,6 +69,8 @@ async function serveLive(
     return;
   }
   const live = spawnLive(ffmpeg, files.loopTs);
+  ctx.liveProcesses.add(live);
+  void live.exited.then(() => ctx.liveProcesses.delete(live));
   res.once('close', live.stop);
   await pipeFaulted(res, live.stdout, faults);
   live.stop();

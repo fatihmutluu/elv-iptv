@@ -1,5 +1,4 @@
 import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -7,6 +6,7 @@ import {
   ENCODER_SKIP_MARKER,
   ensureRecipe,
   findFfmpeg,
+  type LiveProcess,
   missingEncoders,
   parseEncoders,
   recipeDirName,
@@ -14,6 +14,7 @@ import {
 } from '../src/sim/media.ts';
 import { ALL_RECIPES, type RecipeName, switchSeconds } from '../src/sim/recipes.ts';
 import { streamLines } from './ffmpeg-probe.ts';
+import { removeCache } from './media-cache.ts';
 
 it.each([
   [4, 2],
@@ -73,11 +74,13 @@ withFfmpeg('new recipes', () => {
   beforeAll(() => {
     cacheDir = mkdtempSync(join(tmpdir(), 'sim-recipes-'));
   });
-  afterAll(() => rm(cacheDir, { recursive: true, force: true }));
-  const live: { stop(): void }[] = [];
-  afterEach(() => {
-    for (const l of live.splice(0)) l.stop();
+  const live: LiveProcess[] = [];
+  afterEach(async () => {
+    const procs = live.splice(0);
+    for (const l of procs) l.stop();
+    await Promise.all(procs.map((l) => l.exited));
   });
+  afterAll(() => removeCache(cacheDir));
 
   function skipReason(r: RecipeName): boolean {
     const missing = missingEncoders(ffmpeg as string, r);

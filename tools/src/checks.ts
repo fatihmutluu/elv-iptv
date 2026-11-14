@@ -81,7 +81,7 @@ export function buildChecks(root: string): Check[] {
         if (r.ok && r.output.includes(MEDIA_SKIP_MARKER))
           notes.push(`skip vitest: ${MEDIA_SKIP_MARKER} (FFmpeg is not on PATH)`);
         if (r.ok && r.output.includes(ENCODER_SKIP_MARKER))
-          notes.push(`skip vitest: ${ENCODER_SKIP_MARKER} (see the sim-recipes output)`);
+          notes.push(`skip vitest: ${ENCODER_SKIP_MARKER} (see the test output)`);
         return notes.length > 0 ? { ...r, notes } : r;
       },
     },

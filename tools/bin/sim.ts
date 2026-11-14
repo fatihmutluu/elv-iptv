@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 import { ensureRecipe, findFfmpeg, missingEncoders } from '../src/sim/media.ts';
-import { ALL_RECIPES, RECIPES } from '../src/sim/recipes.ts';
+import { ALL_RECIPES } from '../src/sim/recipes.ts';
 import { defaultCacheDir, startSim } from '../src/sim/server.ts';
 
 const USAGE =
@@ -19,8 +19,9 @@ async function prepare(): Promise<void> {
   let prepared = 0;
   const skipped: string[] = [];
   for (const recipe of ALL_RECIPES) {
-    if (missingEncoders(ffmpeg, recipe).length > 0) {
-      skipped.push(`skipped ${recipe} (no ${RECIPES[recipe].encoders.join(' ')})`);
+    const missing = missingEncoders(ffmpeg, recipe);
+    if (missing.length > 0) {
+      skipped.push(`skipped ${recipe} (no ${missing.join(' ')})`);
       continue;
     }
     await ensureRecipe(recipe, { ffmpeg, cacheDir, seconds: 600 });

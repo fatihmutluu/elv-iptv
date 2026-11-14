@@ -50,8 +50,8 @@ Specs: [stream simulator](superpowers/specs/2026-11-13-stream-simulator-design.m
 ## Faults
 - Faults: `?fault=<spec>`, parts joined by `,`: `status=<200-599>`, `slow-start=<s>`, `redirect`, `text-notice` (before
   any route), `drop@<s>`, `stall<n>s@<s>`, `rate=<kbps>`, `type=<mime>`, `redirect=hls`. Drop, stall and rate apply
-  to TS and VOD files only (not playlists, `/hls/` responses or data routes). Unknown: 400. Catalog faults (1013,
-  1014) act like a query.
+  to TS and VOD files only (not playlists, `/hls/` responses or data routes). Unknown: 400. Catalog faults (`small` 1013 and
+  1014, `corpus` 1012 and 1013) apply when no query or rule does.
 - `type=<mime>` relabels the `Content-Type` of live TS, the live and VOD `.m3u8` at the account URL and movie/episode
   files (also ranged ones); the body is unchanged. Not catch-up, `/hls/` responses or data routes. The first `type`
   part wins.
@@ -78,7 +78,13 @@ Rules attach a fault spec to the streams of one account at run time, for players
   (no FFmpeg, connection limit); at 0 it is removed. Parallel requests consume it once each.
 - A plain `redirect` rule without a `count` redirects every retry, a loop the client must break: give it a count.
 - Log: each entry has `faultRule` (the rule id or null); `fault` is the applied spec from any source.
-- Resets: `DELETE /_sim/faults`, `DELETE /_sim/requests` and `SimHandle.clear()` remove every rule.
+- A counted `redirect=hls` rule also spends one count on the `.m3u8` it redirected to, because that request matches the
+  rule too.
+- On a subtitle recipe a rule reaches only the master-playlist fetch at the account URL. Players refresh the
+  account-free `/hls/<recipe>/live.m3u8` and fetch account-free segments, so mid-stream HLS faults cannot be set by rule.
+- Resets: `DELETE /_sim/faults`, `DELETE /_sim/requests` and `SimHandle.clear()` remove every rule. Gates must POST
+  rules after `DELETE /_sim/requests`, because the DELETE clears them.
+- A rule is consumed before a cold recipe is generated, so the corpus gate should run `pnpm sim --prepare` first.
 
 ## Recipes
 Generated with FFmpeg into the cache (`pnpm sim --prepare` fills it); `recipes.ts` holds the definitions. Every copy

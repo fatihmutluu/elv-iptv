@@ -1,5 +1,4 @@
 import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -17,6 +16,7 @@ import { firstVideoPts } from '../src/sim/mpegts.ts';
 import type { RecipeName } from '../src/sim/recipes.ts';
 import { type SimHandle, startSim } from '../src/sim/server.ts';
 import { streamLines } from './ffmpeg-probe.ts';
+import { removeCache } from './media-cache.ts';
 
 const ffmpeg = findFfmpeg();
 if (ffmpeg === null && process.env.CI === 'true') throw new Error('ffmpeg is required in CI');
@@ -66,6 +66,24 @@ describe('hls routes without media', () => {
     }
   });
 
+  it('does not treat /hls/relative/<id>.ts as a live stream', async () => {
+    const sim = await start();
+    expect((await fetch(`${sim.url}/hls/relative/1001.ts`)).status).toBe(404);
+    expect(sim.requests().at(-1)?.streamId).toBeNull();
+  });
+
+  it('answers 404 for segment numbers beyond the safe integer range', async () => {
+    const sim = await start();
+    const huge = '9'.repeat(400);
+    for (const path of [
+      `/hls/h264-aac-720p25/${huge}.ts`,
+      `/hls/h264-aac-720p25/9007199254740993.ts`,
+      `/hls/${r}/subs/tur/${huge}.vtt`,
+    ]) {
+      expect((await fetch(`${sim.url}${path}`)).status, path).toBe(404);
+    }
+  });
+
   it('applies rules and query faults to the VOD playlist', async () => {
     const sim = await start();
     await fetch(`${sim.url}/_sim/faults`, {
@@ -90,7 +108,7 @@ withFfmpeg('hls with media', () => {
     await ensureRecipe(r, opts());
     await ensureRecipe('h264-aac-720p25', opts());
   }, 60_000);
-  afterAll(() => rm(cacheDir, { recursive: true, force: true }));
+  afterAll(() => removeCache(cacheDir));
 
   const start = async (): Promise<SimHandle> => {
     const sim = await startSim({

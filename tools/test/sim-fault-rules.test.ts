@@ -1,13 +1,13 @@
 import { mkdtempSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ACCOUNTS } from '../src/sim/accounts.ts';
 import { buildCatalog } from '../src/sim/catalog.ts';
 import { FaultRules } from '../src/sim/fault-rules.ts';
 import { findFfmpeg, MEDIA_SKIP_MARKER } from '../src/sim/media.ts';
 import { type SimHandle, startSim } from '../src/sim/server.ts';
+import { removeCache } from './media-cache.ts';
 
 const CLOCK = new Date('2026-01-01T12:00:00Z');
 const open: SimHandle[] = [];
@@ -252,8 +252,11 @@ const withFfmpeg = ffmpeg === null ? describe.skip : describe;
 if (ffmpeg === null) process.stderr.write(`sim-fault-rules: ${MEDIA_SKIP_MARKER}\n`);
 
 withFfmpeg('rules on live streams', () => {
-  const cacheDir = ffmpeg === null ? '' : mkdtempSync(join(tmpdir(), 'sim-rules-'));
-  afterAll(() => rm(cacheDir, { recursive: true, force: true, maxRetries: 25, retryDelay: 400 }));
+  let cacheDir = '';
+  beforeAll(() => {
+    cacheDir = mkdtempSync(join(tmpdir(), 'sim-rules-'));
+  });
+  afterAll(() => removeCache(cacheDir));
 
   it('drops a live stream by rule', async () => {
     const handle = await sim(ffmpeg, cacheDir);
