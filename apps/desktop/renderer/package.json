@@ -1,7 +1,7 @@
 {
   "name": "@elv/desktop-renderer",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "main": "index.ts",
   "scripts": {
     "export": "expo export -p web --output-dir ../dist/renderer",
