@@ -37,7 +37,8 @@ Schema, migrations and repositories for catalog, EPG and user data, over the `Sq
   (`failed`) and abort (`cancelled`, `network/aborted`) never delete. A source gone at cleanup loses its rows, the run is
   `cancelled` (`storage/source-removed`). Only category and code reach `import_runs`; summaries carry `warningCodes`.
   `ImportDeps.maxBodyBytes` is the device memory/jank cap of one Xtream response. HTTP failures use `httpStatusError` codes.
-- Xtream (`import-xtream.ts`, `writers.ts`): account, categories, live, movies, series; `too-large` falls back to per-category calls; `position` is provider order; items without a category go to `Uncategorized`. `loadSeriesEpisodes` stores episodes on demand
+- Xtream (`import-xtream.ts`, `writers.ts`): account, categories, live, movies, series; `too-large` falls back to per-category calls, and a category
+  (or `get_series_info`) still over `maxBodyBytes` is fetched once more without the cap (one stall beats no catalog); `position` is provider order; items without a category go to `Uncategorized`. `loadSeriesEpisodes` stores episodes on demand
   (`provider_id` + `extension` for playback; refused for a source removed meanwhile); they survive re-imports with their series.
 - M3U (`import-m3u.ts`, `m3u-rules.ts`, `m3u-templating.ts`, `writers-m3u.ts`): entry URLs, logos, referers are templates.
   `RuleBook` judges hosts on every import (sample hosts with >= 50 URLs at once, others on up to 50 URLs while entries wait in order); clashing values get `~<n>`. `kindHint` picks the table; episodes sit under a synthetic series per `group-title`;

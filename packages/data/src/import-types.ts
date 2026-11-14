@@ -12,7 +12,8 @@ export interface ImportDeps {
   /**
    * Largest Xtream response body the client buffers (default 128 MiB). This is the memory and jank control for small
    * devices: one list is parsed from one buffer, so a lower cap bounds both, and a list above it falls back to
-   * per-category calls (`source-format/too-large`).
+   * per-category calls (`source-format/too-large`). A single category or series info still above it is fetched once
+   * more without the cap.
    */
   maxBodyBytes?: number;
 }

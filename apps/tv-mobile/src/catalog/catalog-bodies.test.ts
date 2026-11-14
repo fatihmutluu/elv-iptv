@@ -38,6 +38,18 @@ describe('bounded Xtream bodies', () => {
     expect(perCategory(urls)).toBe(false);
   });
 
+  it('retries each category over a 64 KiB cap once without it', { timeout: 60_000 }, async () => {
+    const urls: string[] = [];
+    const { service, id } = await large(recording(urls));
+    const whole = await large(http);
+    const reference = must(
+      await whole.service.importSource(whole.id, { maxBodyBytes: 128 * 1024 * 1024 }),
+    );
+    const capped = must(await service.importSource(id, { maxBodyBytes: 64 * 1024 }));
+    expect(capped.counts).toEqual(reference.counts);
+    expect(urls.filter((u) => u.endsWith('get_live_streams&category_id=1'))).toHaveLength(2);
+  });
+
   it('imports the same rows whole and per category', { timeout: 30_000 }, async () => {
     const a = await large(http);
     const b = await large(http);
