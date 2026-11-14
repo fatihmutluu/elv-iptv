@@ -33,6 +33,13 @@ class SourceTypeTest {
   }
 
   @Test
+  fun `a playlist detected in the response makes any URL HLS`() {
+    assertEquals(SourceType.HLS, sourceTypeFor("http://h/play/abc", live = true, playlistDetected = true))
+    assertEquals(SourceType.HLS, sourceTypeFor("http://h/u/p/1001.ts", live = true, playlistDetected = true))
+    assertEquals(SourceType.HLS, sourceTypeFor("http://h/movie/u/p/5", live = false, playlistDetected = true))
+  }
+
+  @Test
   fun `the query and a dot in the host do not count as an extension`() {
     assertEquals(SourceType.TS, sourceTypeFor("http://provider.example/u/p/7?ext=.mp4", live = true))
     assertEquals(SourceType.PROGRESSIVE, sourceTypeFor("http://provider.example/get?x=1.m3u8", live = false))

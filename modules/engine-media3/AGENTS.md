@@ -11,37 +11,37 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` (player core spec 6.1
   other commands adopt a newer one; events carry the token current when sent.
 
 ## Threading
-- ExoPlayer lives on the engine's `HandlerThread` (its application looper), built at creation; JS calls post there
-  and return at once; listeners and events run there (`SharedObject.emit` hops to the JS thread). The UI thread never
-  waits, except the Task 6 hook `detachSurface(surface, timeoutMs)` for `surfaceDestroyed` (bounded). Module
-  `OnDestroy` (JS reload) and `sharedObjectDidRelease` dispose engines: player released, thread quit.
+- ExoPlayer runs on the engine's `HandlerThread` (application looper), built at creation; JS calls post there and
+  return; listeners and events run there (`emit` hops to JS). The UI thread never waits, except the Task 6 hook
+  `detachSurface(surface, timeoutMs)` (bounded). `OnDestroy` (JS reload) and `sharedObjectDidRelease` dispose engines.
 
 ## Playback
-- Every prepare (`load`, `retry`) builds a new media source from the request with `playWhenReady = true`. `retry`:
-  live at the default position, VOD at the current one. `stop` clears the media. `recreate` releases and rebuilds
-  ExoPlayer with the same surface and leaves it idle; the service follows with `load`.
+- Every prepare (`load`, `retry`) builds a new media source, `playWhenReady = true`; `retry`: live at the default
+  position, VOD at the current one. `stop` clears the media; `recreate` rebuilds ExoPlayer (same surface), left idle.
 - Source by URL (`SourceType.kt`): `.m3u8`/`.m3u` HLS; `.ts` and extensionless live use the TS extractor only (flags
-  `ALLOW_NON_IDR_KEYFRAMES`, `DETECT_ACCESS_UNITS`); anything else sniffs containers (MP4, MKV, ...).
+  `ALLOW_NON_IDR_KEYFRAMES`, `DETECT_ACCESS_UNITS`); anything else sniffs containers. A non-HLS guess answered with a
+  playlist is prepared once as HLS at the redirected URI, in the same gate generation (no error event).
 - States: `opening` on prepare, `buffering`, `ready`, `playing`, `paused` (playback not wanted), `ended`; a live media
   that ends sends `error network` instead. `stall` start/end: buffering while wanted after it played. `firstFrame`
   from `onRenderedFirstFrame`. `clock` anchors whenever the effective rate (speed while playing, else 0) changes, on
   seeks and once a second while playing; `durationMs` for VOD, `liveEdgeMs` (window end) for live when known.
 - `options.softwareAudio`: rebuilds the player, software audio decoders first, extension renderers preferred (#69).
 
-## Connection gate (`ConnectionGate.kt`, `GatedDataSource.kt`)
-- Every prepare and `stop` begins a new generation. Each request's `open` waits until no older generation has an open
-  connection; after 1,000 ms it force-closes them (`Log.w`). A superseded generation's `open` is refused.
-- HTTP: default data source, `User-Agent` and other `LoadCommand.headers`, cross-protocol redirects. `failsAtOnce`: an
-  HTTP status skips Media3's retries on progressive media and before the first HLS manifest; then HLS segments and
-  refreshes retry except 401/403/429/509. Notices and refused requests always fail at once; other I/O retries.
+## Requests (`ConnectionGate.kt`, `GatedDataSource.kt`, `SniffingDataSource.kt`, `LoadRetry.kt`)
+- Every prepare and `stop` begins a generation; an `open` waits until older generations closed, force-closes them after
+  1,000 ms (`Log.w`), and `tryOpen` refuses or counts it in one locked step once superseded or current.
+- HTTP: default data source with `LoadCommand.headers` (`User-Agent` set apart), cross-protocol redirects. Responses
+  labelled text, HTML or JSON are read ahead 1 KB (`classifyResponse`): `#EXTM3U` is HLS, binary is media, readable
+  text is the provider notice; HLS playlists without `#EXTM3U` that read as text are notices too.
+- `failsAtOnce`: an HTTP status skips Media3's retries on progressive media and before the first HLS manifest; then
+  HLS segments and refreshes retry except 401/403/429/509. Notices and refused requests always fail at once.
 
 ## Errors, redaction, load control
-- `mapError`: 401/403/404/429/509 keep `http-<code>`, other statuses `http-other`; a 2xx notice body (`text/*` on
-  progressive, HTML, XHTML or JSON anywhere) is `connection-limit`; Media3 codes: 2xxx and behind-live-window `network`,
-  malformed (3001/3002) `network` when live or played since prepare, other 3xxx `unsupported-format`, 4xxx/5xxx/7xxx
-  `decoder`, 6xxx `drm`, timeout `engine-wedged`, else `unknown`.
-- `detail` is the Media3 error name plus `redactUrl(uri)`: no query, fragment or user-info; the two segments after
-  `live|movie|series|timeshift` and the bare `/<u>/<p>/<id>` form become `***`. Never raw exception messages.
+- `mapError`: 401/403/404/429/509 keep `http-<code>`, other statuses `http-other`; a notice is `connection-limit`;
+  2xxx and behind-live-window `network`; malformed 3001/3002 `network` when live or played since prepare, other 3xxx
+  `unsupported-format`; 4xxx/5xxx/7xxx `decoder`; 6xxx `drm`; timeout `engine-wedged`; else `unknown`. `detail`: the
+  error name plus `redactUrl(uri)` (no query, fragment, user-info; the two segments after `live|movie|series|timeshift`
+  and the bare `/<u>/<p>/<id>` form become `***`), never raw exception messages.
 - Buffers: 15-30 s, start 1 s, after rebuffer 2 s, target 16 MB when low-RAM (`isLowRamDevice` or < 1.5 GB) else 32 MB.
 
 ## Tests and rules

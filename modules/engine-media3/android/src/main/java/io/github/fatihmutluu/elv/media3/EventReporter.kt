@@ -1,5 +1,6 @@
 package io.github.fatihmutluu.elv.media3
 
+import android.net.Uri
 import android.os.Handler
 import android.os.SystemClock
 import androidx.annotation.OptIn
@@ -27,12 +28,14 @@ private inline fun <reified T : Throwable> causeOf(error: Throwable): T? {
  * Turns the player's callbacks into `onEngineEvent` payloads (without the token, which [send] adds) on the playback
  * thread: coarse states, `firstFrame`, `stall` start and end, `error` and `clock` anchors. Anchors follow the
  * effective rate (speed while playing, 0 otherwise), so start, pause, stall start and stall end each send one; seeks
- * send one too, and while playing a tick sends one at most once a second.
+ * send one too, and while playing a tick sends one at most once a second. A playlist found behind a non-HLS guess
+ * is no error: [onHlsDetected] gets its URI and the engine prepares it again as HLS.
  */
 @OptIn(UnstableApi::class)
 internal class EventReporter(
   private val handler: Handler,
   private val send: (Map<String, Any?>) -> Unit,
+  private val onHlsDetected: (Uri) -> Unit,
 ) : Player.Listener {
   private var player: Player? = null
   private var active = false
@@ -104,11 +107,22 @@ internal class EventReporter(
 
   override fun onPlayerError(error: PlaybackException) {
     if (!active) return
+    val playlist = causeOf<HlsDetectedException>(error)
+    if (playlist != null) {
+      onHlsDetected(playlist.uri)
+      return
+    }
     val status = causeOf<HttpDataSource.InvalidResponseCodeException>(error)?.responseCode
     val contentType = causeOf<HttpDataSource.InvalidContentTypeException>(error)?.contentType
+    val notice = causeOf<ProviderNoticeException>(error)
     val uri = causeOf<HttpDataSource.HttpDataSourceException>(error)?.dataSpec?.uri
-    val detail = if (uri == null) error.errorCodeName else "${error.errorCodeName} ${redactUrl(uri.toString())}"
-    sendError(mapError(status, contentType, error.errorCode, live = live, played = played), status, detail)
+    val detail = when {
+      notice != null -> "${error.errorCodeName} provider notice ${notice.contentType.orEmpty()}".trimEnd()
+      uri != null -> "${error.errorCodeName} ${redactUrl(uri.toString())}"
+      else -> error.errorCodeName
+    }
+    val code = mapError(status, contentType, error.errorCode, notice = notice != null, live = live, played = played)
+    sendError(code, status, detail)
   }
 
   private fun update(player: Player) {

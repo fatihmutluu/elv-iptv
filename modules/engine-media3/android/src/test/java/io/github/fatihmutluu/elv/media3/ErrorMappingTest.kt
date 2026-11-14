@@ -36,6 +36,15 @@ class ErrorMappingTest {
   }
 
   @Test
+  fun `a sniffed provider notice is connection-limit unless an HTTP error status came first`() {
+    val unspecified = PlaybackException.ERROR_CODE_IO_UNSPECIFIED
+    assertEquals("connection-limit", mapError(null, null, unspecified, notice = true))
+    assertEquals("connection-limit", mapError(200, null, unspecified, notice = true, live = true, played = true))
+    assertEquals("http-403", mapError(403, null, badStatus, notice = true))
+    assertEquals("network", mapError(null, null, unspecified, notice = false))
+  }
+
+  @Test
   fun `Media3 network codes are network`() {
     for (code in listOf(
       PlaybackException.ERROR_CODE_IO_UNSPECIFIED,

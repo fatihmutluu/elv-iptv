@@ -9,8 +9,10 @@ private val TS_EXTENSIONS = setOf("ts", "mts", "m2ts")
 /**
  * Picks the source type from the last path segment's extension: `m3u8`/`m3u` is HLS, `ts` is MPEG-TS, any other
  * extension sniffs the container. Without an extension live URLs are MPEG-TS (the Xtream default) and VOD sniffs.
+ * [playlistDetected] (the response of an earlier guess was an HLS playlist) makes any URL HLS.
  */
-fun sourceTypeFor(url: String, live: Boolean): SourceType {
+fun sourceTypeFor(url: String, live: Boolean, playlistDetected: Boolean = false): SourceType {
+  if (playlistDetected) return SourceType.HLS
   val withoutTail = url.substringBefore('#').substringBefore('?')
   val schemeEnd = withoutTail.indexOf("://")
   val path = if (schemeEnd < 0) {

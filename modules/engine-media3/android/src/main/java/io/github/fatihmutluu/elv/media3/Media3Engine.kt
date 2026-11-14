@@ -2,6 +2,7 @@ package io.github.fatihmutluu.elv.media3
 
 import android.app.ActivityManager
 import android.content.Context
+import android.net.Uri
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
@@ -48,7 +49,7 @@ class Media3Engine(
   private val disposed = AtomicBoolean(false)
   private val gate = ConnectionGate()
   private val buffers = loadControlFor(lowRam(context))
-  private val reporter = EventReporter(handler) { fields -> sendEvent(fields) }
+  private val reporter = EventReporter(handler, { fields -> sendEvent(fields) }, { uri -> playAsHls(uri) })
 
   // Playback-thread state.
   private var player: ExoPlayer? = null
@@ -180,7 +181,23 @@ class Media3Engine(
     gate.beginMedia(generation)
   }
 
-  private fun prepare(next: LoadRequest, positionMs: Long?) {
+  /**
+   * A non-HLS guess found an HLS playlist (an extensionless URL redirected to `.m3u8`): prepare the playlist URI as
+   * HLS once, in the same gate generation, since the guess's connection is already closed. Superseded media and an
+   * HLS media that found one are left alone.
+   */
+  private fun playAsHls(uri: Uri) {
+    val detectedIn = generation
+    post {
+      val current = request ?: return@post
+      if (detectedIn != generation || current.playlistDetected) return@post
+      val next = current.copy(url = uri.toString(), playlistDetected = true)
+      request = next
+      prepare(next, next.startMs, newGeneration = false)
+    }
+  }
+
+  private fun prepare(next: LoadRequest, positionMs: Long?, newGeneration: Boolean = true) {
     reporter.end()
     if (player == null || playerSoftwareAudio != next.softwareAudio) {
       releasePlayer()
@@ -188,7 +205,7 @@ class Media3Engine(
     }
     val current = player ?: return
     current.stop()
-    beginGeneration()
+    if (newGeneration) beginGeneration()
     val manifestLoaded = AtomicBoolean(false)
     reporter.begin(current, next.live, manifestLoaded)
     val source = createMediaSource(next, gate, generation, manifestLoaded)
