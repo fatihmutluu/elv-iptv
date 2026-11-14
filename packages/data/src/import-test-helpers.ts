@@ -44,12 +44,16 @@ export function emptyPanel(): PanelData {
 const idsOf = (row: Row): string[] =>
   Array.isArray(row.category_ids) ? row.category_ids.map(String) : [String(row.category_id ?? '')];
 
-/** Fake panel behind an `HttpClient`; `fail` maps an action to an HTTP status, `bloat` pads whole-list bodies. */
+/**
+ * Fake panel behind an `HttpClient`; `fail` maps an action to an HTTP status, `bloat` pads whole-list bodies (and the
+ * `get_series_info` object), `bloatCategory` pads per-category bodies too.
+ */
 function fakePanel(data: PanelData) {
   const state = {
     data,
     fail: new Map<string, number>(),
     bloat: new Set<string>(),
+    bloatCategory: new Set<string>(),
     urls: [] as string[],
     failWithCategory: new Map<string, number>(),
     onRequest: undefined as ((action: string | null) => void | Promise<void>) | undefined,
@@ -70,9 +74,9 @@ function fakePanel(data: PanelData) {
       const d = state.data;
       const pick = (rows: Row[], action2: string): Row[] => {
         const matching = cat === null ? rows : rows.filter((r) => idsOf(r).includes(cat));
-        return cat === null && state.bloat.has(action2)
-          ? matching.map((r) => ({ ...r, pad: 'x'.repeat(400) }))
-          : matching;
+        const padded =
+          state.bloat.has(action2) && (cat === null || state.bloatCategory.has(action2));
+        return padded ? matching.map((r) => ({ ...r, pad: 'x'.repeat(400) })) : matching;
       };
       let json: unknown;
       switch (action) {
@@ -97,9 +101,11 @@ function fakePanel(data: PanelData) {
         case 'get_series':
           json = pick(d.series, action);
           break;
-        case 'get_series_info':
-          json = d.seriesInfo[u.searchParams.get('series_id') ?? ''] ?? [];
+        case 'get_series_info': {
+          const info = d.seriesInfo[u.searchParams.get('series_id') ?? ''] ?? [];
+          json = state.bloat.has(action) ? { ...(info as object), pad: 'x'.repeat(4000) } : info;
           break;
+        }
         default:
           return err(elvError('network', 'request-failed'));
       }

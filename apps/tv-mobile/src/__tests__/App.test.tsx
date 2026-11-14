@@ -12,6 +12,7 @@ jest.mock('@elv/remote-keys', () => ({
     },
   },
 }));
+jest.mock('@op-engineering/op-sqlite', () => ({ open: jest.fn() }));
 jest.mock('expo-constants', () => ({
   __esModule: true,
   default: {

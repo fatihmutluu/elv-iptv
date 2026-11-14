@@ -9,7 +9,8 @@ const config: KnipConfig = {
       ignoreDependencies: ['dependency-cruiser'],
     },
     'apps/tv-mobile': {
-      entry: ['config/*.test.ts'],
+      // The catalog barrel is consumed by the menu screens in a later task.
+      entry: ['config/*.test.ts', 'src/catalog/index.ts', 'src/storage/index.ts'],
       // The TV plugin is loaded by name from app.config.ts; knip infers optional Expo packages.
       // @elv/engine-media3 is linked for its native code; the player screen imports it in player core Task 7.
       ignoreDependencies: ['@elv/engine-media3', '@react-native-tvos/config-tv', 'expo-updates'],

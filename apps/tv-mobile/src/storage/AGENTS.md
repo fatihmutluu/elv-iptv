@@ -1,0 +1,21 @@
+# storage adapters (`apps/tv-mobile/src/storage/`)
+
+Device implementations of the `@elv/domain` ports used by `@elv/data`. Only these files touch op-sqlite, `expo/fetch` and `Settings`.
+
+## Rules
+- `createOpSqliteDriver(name)`: op-sqlite pinned exactly 19.0.5, FTS5 off (`op-sqlite` key in the app's package.json; Android reads only that file).
+  A writer and a reader connection, one promise queue each; `all` outside a transaction reads on the reader. `createOpSqliteDriver(name, location)`
+  opens both in `location`; `databaseLocation(Platform.OS)` is `${IOS_LIBRARY_PATH}/Caches` on Apple platforms, `undefined` (databases directory) on Android.
+- `tx` of `transaction` bypasses the queue, rejects nesting, and `tx.batch` loops a prepared statement; outside a transaction `batch` is one `executeBatch`.
+- `setAbortSignal(signal)` binds an import run (one slot per driver: bind one run at a time, as the catalog's import queue does): abort calls `interrupt()`
+  on both connections (a menu read running then fails too) and any statement failing while it is aborted rejects with `AbortError`; `undefined` detaches.
+  Other failures reject with `SqlFailedError` (`storage/sql-failed`, SQLite message in `detail`). Errors thrown by a transaction callback pass through unchanged.
+- `exec` splits scripts with `splitSqlStatements` (quotes and comments aware; trigger bodies unsupported).
+- `createMacrotaskScheduler()` yields a `setTimeout(0)`; `createDeviceHttpClient()` is the domain fetch client over `expo/fetch`,
+  reading the whole body as one chunk where a response has no stream (`arrayBuffer()`: `maxBodyBytes` cannot bound that read).
+- `createSettingsStore(key)` keeps one string in React Native `Settings` (NSUserDefaults; Apple only, about 500 KB on tvOS); failures read as nothing.
+- Tests (Vitest) mock `@op-engineering/op-sqlite`, `expo/fetch` and `react-native` at the module boundary; `op-sqlite-fake.ts` is the recording fake.
+- `createSecureSecretStore()` is the `SecretStore` over `expo-secure-store` (async API only). Values split into chunks of at most 1,800 UTF-8 bytes
+  (`<key>.<i>`, count in `<key>.n`, written last); a failed `set` leaves no secret. A missing chunk, bad index or store error reads as `undefined`
+  and logs nothing; invalid keys throw. Tests mock `expo-secure-store`.
+- Simulator builds need ad-hoc signing (`CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=YES CODE_SIGNING_ALLOWED=YES`) for the secure store: unsigned (`CODE_SIGNING_ALLOWED=NO`) the app has no Keychain access and imports fail with `storage/secret-store-failed`.

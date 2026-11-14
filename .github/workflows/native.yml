@@ -287,6 +287,7 @@ jobs:
       EXPO_TV: "1"
       APP_VARIANT: development
       GATE_URL: elviptv://gate/list?items=100000&auto=1&rate=20&moves=600
+      IMPORT_GATE_URL: elviptv://gate/import?host=127.0.0.1:7878&account=large&batch=5000&maxBody=4096
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -301,6 +302,7 @@ jobs:
         working-directory: apps/tv-mobile/ios
         run: pod install --silent
       # Release bundles the JS; a Debug build would need Metro.
+      # Ad-hoc signing: an unsigned simulator build has no Keychain access, so the secure store fails (#72).
       - name: Build for the Apple TV simulator
         working-directory: apps/tv-mobile/ios
         run: |
@@ -308,7 +310,7 @@ jobs:
           workspace=${workspace#./}
           xcodebuild -workspace "$workspace" -scheme "${workspace%.xcworkspace}" \
             -sdk appletvsimulator -configuration Release -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO -quiet build
+            CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=YES CODE_SIGNING_ALLOWED=YES -quiet build
       - name: Run the list gate on an Apple TV simulator
         working-directory: apps/tv-mobile/ios
         run: |
@@ -354,6 +356,49 @@ jobs:
           fi
           kill "$stream_pid" 2>/dev/null || true
           cat "$out"
+      # Report-only: the numbers go to the artifact, they never fail the job. The simulator runs on the runner
+      # (catalogs need no FFmpeg) and the app reaches it over the simulator's shared loopback.
+      - name: Run the import gate on the Apple TV simulator
+        working-directory: apps/tv-mobile/ios
+        run: |
+          set -uo pipefail
+          out="$GITHUB_WORKSPACE/gate-tvos-import.txt"
+          udid=$(xcrun simctl list devices booted -j |
+            jq -r '[.devices | to_entries[] | select(.key | test("tvOS")) | .value[] | select(.name | test("Apple TV"))] | .[0].udid // empty')
+          app=$(find build/Build/Products/Release-appletvsimulator -maxdepth 1 -name '*.app' | head -n 1)
+          if [ -z "$udid" ] || [ -z "$app" ]; then
+            echo "no booted Apple TV simulator or app" > "$out"
+            cat "$out"
+            exit 0
+          fi
+          bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
+          (cd "$GITHUB_WORKSPACE" && exec node tools/bin/sim.ts --port 7878 --host 127.0.0.1) > "$RUNNER_TEMP/sim.txt" 2>&1 &
+          sim_pid=$!
+          for _ in $(seq 1 30); do
+            if curl -s -o /dev/null http://127.0.0.1:7878/; then break; fi
+            sleep 1
+          done
+          log="$RUNNER_TEMP/gate-tvos-import-log.txt"
+          : > "$log"
+          xcrun simctl terminate "$udid" "$bundle_id" || true
+          xcrun simctl spawn "$udid" log stream --style compact --level debug \
+            --predicate 'eventMessage CONTAINS "ELV_GATE_IMPORT"' > "$log" 2>&1 &
+          stream_pid=$!
+          sleep 3
+          xcrun simctl launch "$udid" "$bundle_id" -gateUrl "$IMPORT_GATE_URL"
+          found=""
+          for _ in $(seq 1 240); do
+            if grep -qF 'ELV_GATE_IMPORT {' "$log"; then found=1; break; fi
+            sleep 1
+          done
+          if [ -n "$found" ]; then
+            grep -F 'ELV_GATE_IMPORT {' "$log" | tail -n 1 > "$out"
+          else
+            { echo "no ELV_GATE_IMPORT within 240 s"; echo "--- log tail ---"; tail -n 50 "$log"; echo "--- sim tail ---"; tail -n 20 "$RUNNER_TEMP/sim.txt"; } > "$out"
+          fi
+          kill "$stream_pid" "$sim_pid" 2>/dev/null || true
+          cat "$out"
+          exit 0
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -361,6 +406,7 @@ jobs:
           path: |
             gate-tvos.txt
             gate-tvos.png
+            gate-tvos-import.txt
           if-no-files-found: warn
           retention-days: 30
 

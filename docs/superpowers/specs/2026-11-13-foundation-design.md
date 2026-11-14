@@ -74,11 +74,11 @@ Before each feature, read how reference apps solve it, critique it, and adopt an
 | Focus | Own pure-TypeScript focus core (scopes, focus memory, index resolvers, Back stack) fed by one key source per runtime |
 | Lists | Own windowed list and EPG grid on TV; LegendList behind an `ElvList` adapter for touch/mouse |
 | State | Zustand 5 (UI state), TanStack Query 5 (async), MMKV 4 (native key-value); player progress kept out of React state |
-| Data | `SqlDriver` port: op-sqlite (native; expo-sqlite fallback), better-sqlite3 (Electron); raw SQL + FTS5 for catalog/EPG; Drizzle for synced user tables shared with the server |
+| Data | `SqlDriver` port: op-sqlite 19 (native, primary; expo-sqlite 58 is the fallback), better-sqlite3 (Electron); raw SQL + FTS5 for catalog/EPG; Drizzle for synced user tables shared with the server |
 | Parsing | Own byte-level streaming M3U and XMLTV scanners in TypeScript; native importer only if budgets are missed |
 | Images | expo-image (native), main-process image proxy (desktop) |
 | i18n | Lingui 6 with the `Intl.PluralRules` polyfill on Hermes; English source, Turkish second |
-| Secrets | expo-secure-store (native), Electron `safeStorage`; stream URLs built at play time so credentials never enter the catalog DB |
+| Secrets | expo-secure-store (native; async calls only, large values chunked), Electron `safeStorage`; stream URLs built at play time so credentials never enter the catalog DB |
 | Lint/format | Biome 2.6; lefthook git hooks; dependency-cruiser + knip for architecture and dead code |
 | Tests | Vitest (pure packages), Jest + jest-expo + RNTL (components), Maestro (Android phone/TV, iOS), XCUITest (tvOS), Playwright (Electron), Reassure (render perf), local stream simulator |
 | Builds | No EAS: `expo prebuild` + Gradle/xcodebuild + fastlane; electron-builder; GitHub Actions |

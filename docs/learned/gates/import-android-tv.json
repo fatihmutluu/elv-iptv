@@ -1,0 +1,18 @@
+{
+  "device": {
+    "model": "sdk_google_atv64_x86_64",
+    "release": "16",
+    "sdk": "36"
+  },
+  "build": "development variant, release APK (JS bundled, debug-signed)",
+  "commit": "6ba8220",
+  "date": "2026-11-14",
+  "result": {
+    "account": "large",
+    "batch": 5000,
+    "maxBody": 4096,
+    "rows": 95500,
+    "durationMs": 17773,
+    "maxStallMs": 44
+  }
+}
