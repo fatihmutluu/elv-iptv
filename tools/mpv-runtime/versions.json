@@ -48,6 +48,15 @@
     "version": "0.42.0",
     "url": "https://github.com/mpv-player/mpv/archive/v0.42.0/mpv-0.42.0.tar.gz",
     "sha256": "bcfebbfa2b65a6d88dc97ea18117831072373e38b5785a2afb874ed4df5070dd",
+    "backports": [
+      {
+        "path": "video/out/mac/view.swift",
+        "why": "mpv #18818 (after 0.42.0): a Swift build without Vulkan fails with cannot find type 'MetalLayer'",
+        "url": "https://raw.githubusercontent.com/mpv-player/mpv/f32e7ef1e8cd31378a3fb171ed1fa887f8df501f/video/out/mac/view.swift",
+        "sha256Before": "e2c158fe3e48b06394a0e47f1cdf9fd35eaf1a8533c759c548e6c257ae776e57",
+        "sha256": "07c6ad8da7e84df0685f9914c0fe61a88f867845205d6abef02a17c42034587a"
+      }
+    ],
     "licences": ["LICENSE.LGPL", "Copyright"]
   }
 }

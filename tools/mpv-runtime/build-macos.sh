@@ -55,6 +55,25 @@ clone() {
   fi
 }
 
+# Replaces files of an unpacked source with their upstream version from a later commit (versions.json "backports");
+# the file must match "sha256Before" and the download "sha256".
+backport() {
+  local name="$1" path url before after file
+  while IFS=$'\t' read -r path url before after; do
+    file="$work/src/$name/$path"
+    if [ "$(shasum -a 256 "$file" | awk '{print $1}')" != "$before" ]; then
+      echo "$name: $path is not the file the backport replaces" >&2
+      exit 1
+    fi
+    curl -fsSL --retry 5 --retry-all-errors -o "$file" "$url"
+    if [ "$(shasum -a 256 "$file" | awk '{print $1}')" != "$after" ]; then
+      echo "$name: SHA-256 mismatch for $url" >&2
+      exit 1
+    fi
+    echo "$name: backported $path from $url"
+  done < <(jq -r --arg n "$name" '.[$n].backports // [] | .[] | [.path, .url, .sha256Before, .sha256] | @tsv' "$versions")
+}
+
 meson_build() {
   local name="$1"
   shift
@@ -93,6 +112,7 @@ mkdir -p "$work/build/ffmpeg"
 make -C "$work/build/ffmpeg" -j"$jobs"
 make -C "$work/build/ffmpeg" install
 unpack mpv
+backport mpv
 meson_build mpv "${mpv_flags[@]}"
 
 echo "==> bundle"
@@ -110,6 +130,7 @@ plutil -insert LSMinimumSystemVersion -string "$MACOSX_DEPLOYMENT_TARGET" "$cont
 plutil -lint "$contents/Info.plist"
 
 links() { otool -L "$1" | tail -n +2 | awk '{print $1}'; }
+rpaths() { otool -l "$1" | awk '$1 == "cmd" && $2 == "LC_RPATH" { getline; getline; print $2 }'; }
 
 # The library in $prefix/lib that a load command names; nothing for a system library.
 own_lib() {
@@ -142,17 +163,21 @@ for file in "$contents/MacOS/mpv" "$fw"/*.dylib; do
   case "$file" in
     *.dylib) install_name_tool -id "@executable_path/../Frameworks/$(basename "$file")" "$file" ;;
   esac
+  deps="$(links "$file")"
   while read -r dep; do
-    if [ -n "$(own_lib "$dep")" ]; then
+    if [ -n "$dep" ] && [ -n "$(own_lib "$dep")" ]; then
       install_name_tool -change "$dep" "@executable_path/../Frameworks/$(basename "$dep")" "$file"
     fi
-  done < <(links "$file")
+  done <<<"$deps"
+  paths="$(rpaths "$file")"
   while read -r rpath; do
-    case "$rpath" in "$work"/*) install_name_tool -delete_rpath "$rpath" "$file" ;; esac
-  done < <(otool -l "$file" | awk '$1 == "cmd" && $2 == "LC_RPATH" { getline; getline; print $2 }')
+    if [ -n "$rpath" ] && [ "$rpath" != /usr/lib/swift ]; then
+      install_name_tool -delete_rpath "$rpath" "$file"
+    fi
+  done <<<"$paths"
 done
 
-# Nothing may load from the build folder or Homebrew, and the archive must hold no symlinks.
+# Nothing may load from the build machine (prefix, Xcode, Homebrew), and the archive must hold no symlinks.
 fail=0
 for file in "$contents/MacOS/mpv" "$fw"/*.dylib; do
   while read -r dep; do
@@ -170,10 +195,12 @@ for file in "$contents/MacOS/mpv" "$fw"/*.dylib; do
         ;;
     esac
   done < <(links "$file")
-  if otool -l "$file" | grep -A2 LC_RPATH | grep -qF "$work"; then
-    echo "$file: keeps an rpath into $work" >&2
-    fail=1
-  fi
+  while read -r rpath; do
+    if [ -n "$rpath" ] && [ "$rpath" != /usr/lib/swift ]; then
+      echo "$file: keeps the rpath $rpath" >&2
+      fail=1
+    fi
+  done < <(rpaths "$file")
 done
 if [ -n "$(find "$app" -type l)" ]; then
   echo "the bundle contains symlinks" >&2
