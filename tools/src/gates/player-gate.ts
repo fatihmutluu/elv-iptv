@@ -1,5 +1,13 @@
 import { findFfmpeg } from '../sim/media.ts';
-import { buildApk, type Exec, installApk, openDevice, POLL_MS, startGate } from './adb.ts';
+import {
+  APP_PACKAGE,
+  buildApk,
+  type Exec,
+  installApk,
+  openDevice,
+  POLL_MS,
+  startGate,
+} from './adb.ts';
 import type { BudgetMode, CompareOutcome } from './compare.ts';
 import { EMULATOR_HOST, median, type SimControl } from './import-gate.ts';
 import {
@@ -395,9 +403,11 @@ const link = (zaps: number, rate: number, fault: string): string =>
 
 /**
  * Builds (optional) and installs the development app, starts the stream simulator (or reuses a running one), opens
- * `elviptv://gate/player` for `runs` zap runs and, with `faults`, one run per fault, clearing the simulator log after
- * the app was force-stopped (a stopped app's closing requests stay out of the next run's log) and before each start. Fails at once without FFmpeg. The simulator it started is stopped afterwards. Every wait has a timeout;
- * failures throw a one-line `Error`.
+ * `elviptv://gate/player` for `runs` zap runs and, with `faults`, one run per fault. The simulator log is cleared after
+ * the app was force-stopped, before each start (a stopped app's closing requests stay out of the next run), and read
+ * after the line once the app was stopped again, so every request of the run has ended and is in the log. Fails at
+ * once without FFmpeg. The simulator it started is stopped afterwards. Every wait has a timeout; failures throw a
+ * one-line `Error`.
  */
 export async function runPlayerGate(opts: PlayerGateOptions): Promise<PlayerGateOutput> {
   const lookup = opts.ffmpeg ?? findFfmpeg;
@@ -428,7 +438,11 @@ export async function runPlayerGate(opts: PlayerGateOptions): Promise<PlayerGate
         const line = parsePlayerLine(
           (await device.dev('logcat', '-d', '-s', 'ReactNativeJS:V')).output,
         );
-        if (line !== undefined) return line;
+        if (line !== undefined) {
+          await device.shell('am', 'force-stop', APP_PACKAGE);
+          await sleep(POLL_MS);
+          return line;
+        }
         await sleep(POLL_MS);
       }
       throw new Error(

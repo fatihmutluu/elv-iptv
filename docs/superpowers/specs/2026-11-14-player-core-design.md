@@ -234,7 +234,8 @@ Rungs, each bounded and visible as a status the OSD can show:
   own view of overlap; only the answer a request's own `?fault=` forces is excluded). `overlapMs` (TS stream requests
   of one account, whatever their answer, whose lifetimes overlap in the simulator log; the worst run) is reported and
   warned above 0; the simulator sees a close slightly after the app sends it, so it is not a hard budget. HLS segment
-  requests carry no account in the simulator log and are excluded. A time one run did not measure is warned about.
+  requests carry no account in the simulator log and are excluded. The runner reads the log after stopping the app,
+  so requests still open at the end are logged too. A time one run did not measure is warned about.
 - Fault runs (URLs built by the gate with `?fault=`): `drop@5` passes when playback is `playing` again within 10 s of the
   first drop without user action (the run ends there; the simulator would drop again); `status=404` passes when the
   service reaches `failed(http-404)` within 10 s; `status=509` passes when the service enters `limited` within 2 s and

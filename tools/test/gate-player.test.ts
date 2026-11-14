@@ -93,7 +93,10 @@ function fakes(opts: { lines: PlayerLine[]; entries?: SimLogEntry[][]; install?:
   };
   const log: SimLog = {
     clear: async () => void events.push('clear'),
-    entries: async () => (opts.entries ?? [])[reads++] ?? [],
+    entries: async () => {
+      events.push('read');
+      return (opts.entries ?? [])[reads++] ?? [];
+    },
   };
   return { exec, sim, log, calls, urls, events };
 }
@@ -355,7 +358,11 @@ describe('runPlayerGate', () => {
         'elviptv://gate/player?host=10.0.2.2:7878&account=demo&channels=1001,1002,1003,1004&zaps=12&rate=0.5&fault=',
       ),
     );
-    expect(f.events).toEqual(['start', ...Array(3).fill(['force-stop', 'clear']).flat(), 'stop']);
+    expect(f.events).toEqual([
+      'start',
+      ...Array(3).fill(['force-stop', 'clear', 'force-stop', 'read']).flat(),
+      'stop',
+    ]);
     expect(runs).toHaveLength(3);
     expect(out.result.zaps).toBe(30);
     expect(out.runs).toHaveLength(3);
