@@ -42,8 +42,8 @@ The single Expo app (phone, tablet, TV; Android, Fire OS, Apple): a composition 
   the run settles; plus every move that never got a committed frame (after a 2 s settle timeout). Moves whose net effect
   left the index unchanged within a frame (A to B to A) get no `TvList` callback; the screen resolves them in its own
   animation frame and they are not losses. Unmounting or changing the params mid-run prints nothing for that run.
-- Import gate: `elviptv://gate/import?host=10.0.2.2:7878&account=large|huge&batch=500..20000` (`src/gate/import/`, development hosts only) imports a simulator
-  account into a new `gate-import-<time>.db`, prints one `ELV_GATE_IMPORT {account,batch,rows,durationMs,maxStallMs}` line (`error` on failure);
+- Import gate: `elviptv://gate/import?host=10.0.2.2:7878&account=large|huge&batch=500..20000` (`src/gate/import/`, dev hosts only; `&maxBody=` KiB, 256..131072, default 4096) imports a simulator
+  account into a new `gate-import-<time>.db`, prints one `ELV_GATE_IMPORT {account,batch,maxBody,rows,durationMs,maxStallMs}` line (`error` on failure);
   `maxStallMs` = longest gap of a 16 ms `setInterval` minus 16 during the import.
 - Output: one `'ELV_GATE ' + JSON.stringify(metrics)` line per run (`intents`: counts of the six intent kinds, zeros kept), `console.log`
   on Android (logcat `ReactNativeJS`), `console.error` on iOS (release builds drop info logs). Pure gate tests run in Vitest

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CatalogService } from '../../catalog';
 import { importLine, runImport } from './run-import';
 
-const params = { host: '10.0.2.2:7878', account: 'large', batch: 1000 } as const;
+const params = { host: '10.0.2.2:7878', account: 'large', batch: 1000, maxBody: 2048 } as const;
 
 function fakeCatalog(importResult: Awaited<ReturnType<CatalogService['importSource']>>) {
   const addSource = vi.fn(async () => ok({ id: 's1', kind: 'xtream', name: 'gate', createdAt: 1 }));
@@ -34,10 +34,11 @@ describe('runImport', () => {
       username: 'large',
       password: 'large',
     });
-    expect(importSource).toHaveBeenCalledWith('s1', { batchSize: 1000 });
+    expect(importSource).toHaveBeenCalledWith('s1', { batchSize: 1000, maxBodyBytes: 2048 * 1024 });
     expect(result).toEqual({
       account: 'large',
       batch: 1000,
+      maxBody: 2048,
       rows: 17,
       durationMs: 321.4,
       maxStallMs: 42,
@@ -48,7 +49,12 @@ describe('runImport', () => {
     const { catalog } = fakeCatalog(err(elvError('network', 'timeout')));
     const stop = vi.fn(() => 5);
     const result = await runImport(catalog, params, () => ({ stop }));
-    expect(result).toMatchObject({ account: 'large', batch: 1000, error: 'network/timeout' });
+    expect(result).toMatchObject({
+      account: 'large',
+      batch: 1000,
+      maxBody: 2048,
+      error: 'network/timeout',
+    });
     expect(stop).toHaveBeenCalledOnce();
   });
 });
@@ -58,12 +64,13 @@ describe('importLine', () => {
     const line = importLine({
       account: 'large',
       batch: 500,
+      maxBody: 4096,
       rows: 1,
       durationMs: 2,
       maxStallMs: 3,
     });
     expect(line).toBe(
-      'ELV_GATE_IMPORT {"account":"large","batch":500,"rows":1,"durationMs":2,"maxStallMs":3}',
+      'ELV_GATE_IMPORT {"account":"large","batch":500,"maxBody":4096,"rows":1,"durationMs":2,"maxStallMs":3}',
     );
   });
 });

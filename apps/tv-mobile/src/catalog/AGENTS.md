@@ -6,6 +6,7 @@ The device catalog: `@elv/data` over the storage adapters, behind one `CatalogSe
 - `createCatalogService(deps)` (`catalog.ts`) is plain TypeScript with `db`, `secrets`, `scheduler`, `http`, `clock` (and optional `newId`) injected;
   it imports no native module. `createDeviceCatalog()` (`device.ts`) wires the real adapters, opens `catalog.db` once per process
   (a failed open rejects with `CatalogOpenError` and is retried by the next call) and is only smoke-tested with mocked adapters.
+- Xtream bodies are capped at `DEVICE_MAX_BODY_BYTES` (4 MiB; `importSource` option `maxBodyBytes` overrides): longer lists load per category.
 - `importSource` calls `setAbortSignal(opts.signal)` on the driver before the run and `setAbortSignal(undefined)` in `finally`, when the driver has it.
 - Paged reads (`queries.ts`): provider `position` order, `limit` capped at 500 (`MAX_PAGE`), `categories` carry `itemCount`.
   A category `id` is opaque (`<source>|<kind>|<provider id>`); an unknown one gives an empty page.

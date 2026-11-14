@@ -18,7 +18,13 @@ async function run(params: ImportParams): Promise<ImportResult> {
   const opened = await openCatalog(db);
   if (!opened.ok) {
     const error = `${opened.error.category}/${opened.error.code}`;
-    return { account: params.account, batch: params.batch, error, maxStallMs: 0 };
+    return {
+      account: params.account,
+      batch: params.batch,
+      maxBody: params.maxBody,
+      error,
+      maxStallMs: 0,
+    };
   }
   const catalog = createCatalogService({
     db,
@@ -43,6 +49,7 @@ export function ImportGateScreen({ params }: { params: ImportParams }) {
         (e: unknown): ImportResult => ({
           account: params.account,
           batch: params.batch,
+          maxBody: params.maxBody,
           error: e instanceof Error ? e.name : 'unknown',
           maxStallMs: 0,
         }),

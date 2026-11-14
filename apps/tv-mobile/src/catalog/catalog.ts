@@ -46,6 +46,18 @@ import {
 
 export type { BrowseKind, CategoryRow, EpisodeRow, ItemRow, SeasonRow } from './queries';
 
+/**
+ * Default largest Xtream response body (4 MiB): bigger lists load per category, which bounds memory and the longest
+ * JS task of an import on small devices.
+ */
+export const DEVICE_MAX_BODY_BYTES = 4 * 1024 * 1024;
+
+/** {@link ImportOptions} plus the body limit the gate varies. */
+export interface DeviceImportOptions extends ImportOptions {
+  /** Overrides {@link DEVICE_MAX_BODY_BYTES} for this run. */
+  maxBodyBytes?: number;
+}
+
 /** Everything the service needs from the platform. */
 export interface CatalogDeps {
   /** A driver with `setAbortSignal` (the op-sqlite one) gets the signal of each import run. */
@@ -86,7 +98,7 @@ export interface CatalogService {
   /** Refused with `storage/import-in-progress` while an import of the source runs. */
   removeSource(id: string): Promise<Result<void>>;
   /** Cancelling through `signal` keeps the previous catalog. */
-  importSource(id: string, opts?: ImportOptions): Promise<Result<ImportSummary>>;
+  importSource(id: string, opts?: DeviceImportOptions): Promise<Result<ImportSummary>>;
   listSources(): Promise<SourceRow[]>;
   categories(sourceId: string, kind: BrowseKind): Promise<CategoryRow[]>;
   /** A page in provider order; `limit` is capped at 500; an unknown category is an empty page. */
@@ -120,7 +132,14 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
   const { db, secrets, clock } = deps;
   const newId = deps.newId ?? defaultNewId(clock);
   const addDeps = { db, secrets, clock, newId };
-  const importDeps: ImportDeps = { db, http: deps.http, secrets, scheduler: deps.scheduler, clock };
+  const importDeps: ImportDeps = {
+    db,
+    http: deps.http,
+    secrets,
+    scheduler: deps.scheduler,
+    clock,
+    maxBodyBytes: DEVICE_MAX_BODY_BYTES,
+  };
   const abortable = db as SqlDriver & AbortBindable;
 
   const mapped = async (p: Promise<Result<SourceRecord>>): Promise<Result<SourceRow>> => {
@@ -183,7 +202,9 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     async importSource(id, opts = {}) {
       abortable.setAbortSignal?.(opts.signal);
       try {
-        return await importCatalog(id, importDeps, opts);
+        const { maxBodyBytes, ...rest } = opts;
+        const runDeps = maxBodyBytes === undefined ? importDeps : { ...importDeps, maxBodyBytes };
+        return await importCatalog(id, runDeps, rest);
       } finally {
         abortable.setAbortSignal?.(undefined);
       }

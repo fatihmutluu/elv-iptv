@@ -14,13 +14,16 @@ describe('parseImportUrl', () => {
       host: '10.0.2.2:7878',
       account: 'large',
       batch: 1000,
+      maxBody: 4096,
     });
   });
 
   it('reads every parameter', () => {
     expect(
-      parseImportUrl('elviptv://gate/import?host=127.0.0.1:9000&account=huge&batch=5000'),
-    ).toEqual({ host: '127.0.0.1:9000', account: 'huge', batch: 5000 });
+      parseImportUrl(
+        'elviptv://gate/import?host=127.0.0.1:9000&account=huge&batch=5000&maxBody=1024',
+      ),
+    ).toEqual({ host: '127.0.0.1:9000', account: 'huge', batch: 5000, maxBody: 1024 });
   });
 
   it('accepts a trailing slash and ignores unknown parameters', () => {
@@ -32,6 +35,12 @@ describe('parseImportUrl', () => {
     expect(parseImportUrl('elviptv://gate/import?batch=99999')?.batch).toBe(20_000);
     expect(parseImportUrl('elviptv://gate/import?batch=x')?.batch).toBe(1000);
     expect(parseImportUrl('elviptv://gate/import?batch=')?.batch).toBe(1000);
+  });
+
+  it('clamps maxBody to 256..131072 KiB and falls back on garbage', () => {
+    expect(parseImportUrl('elviptv://gate/import?maxBody=1')?.maxBody).toBe(256);
+    expect(parseImportUrl('elviptv://gate/import?maxBody=999999')?.maxBody).toBe(131_072);
+    expect(parseImportUrl('elviptv://gate/import?maxBody=x')?.maxBody).toBe(4096);
   });
 
   it('accepts only the known accounts', () => {

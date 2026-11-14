@@ -3,7 +3,7 @@ import { createFetchHttpClient, type FetchLike, type SqlDriver } from '@elv/doma
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildCatalog } from '../../../../tools/src/sim/catalog.ts';
 import { startSim } from '../../../../tools/src/sim/server.ts';
-import { type CatalogService, createCatalogService } from './catalog';
+import { type CatalogService, createCatalogService, DEVICE_MAX_BODY_BYTES } from './catalog';
 
 const small = buildCatalog('small', 1);
 const http = createFetchHttpClient(fetch as unknown as FetchLike);
@@ -332,5 +332,71 @@ describe('credentials', () => {
       }
     }
     expect(hits).toEqual([]);
+  });
+});
+
+describe('bounded Xtream bodies', () => {
+  async function large(getHttp: typeof http) {
+    const t = testDb();
+    closers.push(t.close);
+    const { openCatalog } = await import('@elv/data');
+    await openCatalog(t.db);
+    let n = 0;
+    const service = createCatalogService({
+      db: t.db,
+      secrets: memorySecrets(),
+      scheduler: countingScheduler(),
+      http: getHttp,
+      clock: () => 1_000,
+      newId: () => `b${++n}`,
+    });
+    const added = must(
+      await service.addSource({
+        kind: 'xtream',
+        name: 'Large',
+        server: sim.url,
+        username: 'large',
+        password: 'large',
+      }),
+    );
+    return { service, id: added.id };
+  }
+  const recording = (urls: string[]): typeof http => ({
+    get: (url, options) => {
+      urls.push(url);
+      return http.get(url, options);
+    },
+  });
+  const perCategory = (urls: string[]) =>
+    urls.some((u) => u.includes('get_live_streams&category_id='));
+
+  it('limits response bodies to 4 MiB by default, so the large lists load per category', {
+    timeout: 30_000,
+  }, async () => {
+    expect(DEVICE_MAX_BODY_BYTES).toBe(4 * 1024 * 1024);
+    const urls: string[] = [];
+    const { service, id } = await large(recording(urls));
+    const summary = must(await service.importSource(id));
+    expect(perCategory(urls)).toBe(true);
+    expect(summary.counts.live).toBeGreaterThan(0);
+  });
+
+  it('lets the import options raise the limit, which loads the lists whole', {
+    timeout: 30_000,
+  }, async () => {
+    const urls: string[] = [];
+    const { service, id } = await large(recording(urls));
+    must(await service.importSource(id, { maxBodyBytes: 128 * 1024 * 1024 }));
+    expect(perCategory(urls)).toBe(false);
+  });
+
+  it('imports the same rows whole and per category', { timeout: 30_000 }, async () => {
+    const a = await large(http);
+    const b = await large(http);
+    const whole = must(await a.service.importSource(a.id, { maxBodyBytes: 128 * 1024 * 1024 }));
+    const bounded = must(await b.service.importSource(b.id, { maxBodyBytes: 1024 * 1024 }));
+    expect(bounded.counts.live).toBe(whole.counts.live);
+    expect(bounded.counts.movies).toBe(whole.counts.movies);
+    expect(bounded.counts.series).toBe(whole.counts.series);
   });
 });
