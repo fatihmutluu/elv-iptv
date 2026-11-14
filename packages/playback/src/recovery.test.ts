@@ -129,7 +129,7 @@ describe('live ladder', () => {
   });
 
   it('uses software audio as rung 4 after a decoder error when the engine has it', async () => {
-    const r = rig({ dead: [] }, { softwareAudioFallback: true, recreate: false });
+    const r = rig({ dead: [], next: [] }, { softwareAudioFallback: true, recreate: false });
     const t = await playing(r, live('dead', { alternates: [resolved('alt')] }));
     error(r, 'decoder');
     error(r, 'decoder');
@@ -148,6 +148,9 @@ describe('live ladder', () => {
     error(r, 'network');
     await tick(1000);
     expect(r.loads.at(-1)).toMatchObject({ attempt: t + 6, ...soft });
+    await playing(r, live('next'));
+    expect(r.loads.at(-1)?.url).toBe('next');
+    expect(r.loads.at(-1)).not.toHaveProperty('options');
   });
 
   it('fails when the alternate cannot be resolved', async () => {
