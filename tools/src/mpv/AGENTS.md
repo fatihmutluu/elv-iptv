@@ -22,6 +22,10 @@
   `Frameworks/` loaded from `@executable_path/../Frameworks/`, licences and `BUILDINFO.json` in `Resources/`), signed
   ad hoc. The job summary prints the lock entry (run id, SHA-256); the artifact expires after 90 days: re-run the
   workflow and update the lock in a normal PR. Source pin update: check the upstream signature or release digest.
+  `backports` replace one source file with its upstream version from a later commit (SHA-256 before and after);
+  drop each one when a release contains it.
+- The macOS build has no Vulkan, so `gpu`/`gpu-next` find no GPU context and mpv draws through `cocoa-cb`
+  (`vo=libmpv`, OpenGL).
 - Mac without `gh`: on a PC `gh run download <runId> -n mpv-runtime-darwin-arm64 -D .cache/mpv/darwin-arm64`, copy the
   `.tar.gz` into the Mac checkout's `.cache/mpv/darwin-arm64/`, then `pnpm mpv fetch` there uses it.
 - Windows launcher: after the install, `launcher.ts` builds `apps/desktop/native/mpv-host/elv-mpv.c` into

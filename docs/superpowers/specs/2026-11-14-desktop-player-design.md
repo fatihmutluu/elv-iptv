@@ -83,6 +83,8 @@ spec on mpv 0.42.0 docs, release assets, licence files and issues (no GPL source
   Lua), mpv 0.42.0 with `-Dgpl=false` and the CLI on; GPL dependencies off (rubberband, dvdnav, cdio). Dylibs are
   relocated beside the binary and re-signed ad hoc (Apple Silicon refuses unsigned code). mpv 0.42 needs FFmpeg 6.1+
   and libplacebo 7.387+. If the LGPL CLI misbehaves, macOS takes the Windows launcher shape over our own LGPL libmpv.
+  Built 2026-11-14 (Task 15): `ELV IPTV Player.app` with FFmpeg 9.0.2, libplacebo 7.387.0 and mpv 0.42.0 plus one
+  upstream file backport (#18818, the Swift build without Vulkan); no Vulkan, so mpv draws through `cocoa-cb`.
 - The workflow `mpv-runtime.yml` builds the macOS runtime as `darwin-arm64/` with the binaries, the licence texts and
   `BUILDINFO.json` (versions, source URLs and hashes, configure flags). The committed lock file
   `apps/desktop/mpv-runtime.lock.json` pins it (run id, artifact name, SHA-256) and the Windows archive (URL, SHA-256);
