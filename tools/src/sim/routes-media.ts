@@ -1,11 +1,12 @@
 import { buildCatalog } from './catalog.ts';
 import type { RouteHandler } from './context.ts';
 import { mediaType } from './faults.ts';
-import type { RecipeName } from './recipes.ts';
+import { masterPlaylist, segmentUri, vodPlaylist } from './hls.ts';
+import { RECIPES, type RecipeName } from './recipes.ts';
 import { sendText } from './routes-data.ts';
 import { authorize, loadRecipe, resolveFaults, sendFile } from './stream-io.ts';
 
-const VOD_PATH = /^\/(movie|series)\/([^/]+)\/([^/]+)\/(\d+)\.(mp4|mkv)$/;
+const VOD_PATH = /^\/(movie|series)\/([^/]+)\/([^/]+)\/(\d+)\.(mp4|mkv|m3u8)$/;
 const TYPES = { mp4: 'video/mp4', mkv: 'video/x-matroska' } as const;
 
 function findRecipe(
@@ -23,7 +24,10 @@ function findRecipe(
   return null;
 }
 
-/** On-demand movies and episodes: generated media with `Range` support. */
+/**
+ * On-demand movies and episodes: generated media with `Range` support, and as `.m3u8` the VOD media
+ * playlist (a master playlist for subtitle recipes), which takes no connection slot.
+ */
 export const mediaRoute: RouteHandler = async (req, res, ctx, meta) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') return false;
   const match = VOD_PATH.exec(new URL(req.url ?? '/', 'http://sim').pathname);
@@ -34,7 +38,7 @@ export const mediaRoute: RouteHandler = async (req, res, ctx, meta) => {
     string,
     string,
     string,
-    'mp4' | 'mkv',
+    'mp4' | 'mkv' | 'm3u8',
   ];
   const account = authorize(res, meta, user, pass);
   if (!account) return true;
@@ -49,6 +53,13 @@ export const mediaRoute: RouteHandler = async (req, res, ctx, meta) => {
   if (faults === null) return true;
   const files = await loadRecipe(res, ctx, recipe);
   if (files === null) return true;
+  if (ext === 'm3u8') {
+    const body = RECIPES[recipe].subtitles
+      ? masterPlaylist(recipe, 'vod')
+      : vodPlaylist(files.durations, segmentUri(recipe));
+    sendText(res, 200, mediaType(faults, 'application/vnd.apple.mpegurl'), body);
+    return true;
+  }
   const file = ext === 'mp4' ? files.vodMp4 : files.vodMkv;
   await sendFile(req, res, ctx, { file, type: mediaType(faults, TYPES[ext]), account, faults });
   return true;

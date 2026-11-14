@@ -6,8 +6,8 @@ import { Readable } from 'node:stream';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ACCOUNTS, type Account } from '../src/sim/accounts.ts';
 import { applyStreamFaults, parseFaults } from '../src/sim/faults.ts';
+import { hlsPlaylist } from '../src/sim/hls.ts';
 import { activeChildren, ensureRecipe, findFfmpeg, MEDIA_SKIP_MARKER } from '../src/sim/media.ts';
-import { hlsPlaylist } from '../src/sim/routes-live.ts';
 import { type SimHandle, startSim } from '../src/sim/server.ts';
 import { packetPids, startsWithKeyframe } from './ts-packets.ts';
 

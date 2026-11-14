@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { ACCOUNTS } from '../src/sim/accounts.ts';
 import { buildCatalog } from '../src/sim/catalog.ts';
-import { findFfmpeg, MEDIA_SKIP_MARKER } from '../src/sim/media.ts';
+import { activeChildren, findFfmpeg, MEDIA_SKIP_MARKER } from '../src/sim/media.ts';
 import { hlsRedirectPath } from '../src/sim/request-faults.ts';
 import { type SimHandle, startSim } from '../src/sim/server.ts';
 import { packetPids } from './ts-packets.ts';
@@ -111,7 +112,11 @@ withFfmpeg('delivery quirks with media', () => {
   beforeAll(() => {
     cacheDir = mkdtempSync(join(tmpdir(), 'sim-delivery-'));
   });
-  afterAll(() => rmSync(cacheDir, { recursive: true, force: true }));
+  afterAll(async () => {
+    const until = Date.now() + 3000;
+    while (activeChildren() > 0 && Date.now() < until) await new Promise((r) => setTimeout(r, 25));
+    await rm(cacheDir, { recursive: true, force: true });
+  });
 
   it('extensionless live URLs serve TS', async () => {
     const handle = await sim(ffmpeg, cacheDir);

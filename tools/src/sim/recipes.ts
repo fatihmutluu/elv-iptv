@@ -12,6 +12,9 @@ export type RecipeName =
   | 'h264-aac-res-switch'
   | 'h264-2audio-subs-720p25';
 
+/** ISO 639-2 code of a generated subtitle language. */
+export type SubtitleLang = 'tur' | 'eng';
+
 /** How FFmpeg generates one recipe. */
 export interface RecipeDef {
   /** Encoder arguments placed before `-t`; with `parts` they follow `-f concat -i parts.txt`. */
@@ -22,6 +25,8 @@ export interface RecipeDef {
   mp4Args: readonly string[];
   /** Video-only part encodes (arguments before `-t`) that alternate to form the loop. */
   parts?: { a: readonly string[]; b: readonly string[] };
+  /** Subtitle languages (MP4, MKV and WebVTT) and the variant attributes of the master playlist. */
+  subtitles?: { langs: readonly SubtitleLang[]; streamInf: string };
 }
 
 const PIC = (size: string, rate: number | string): string[] => [
@@ -250,6 +255,11 @@ export const RECIPES: Readonly<Record<RecipeName, RecipeDef>> = {
     ],
     encoders: ['libx264'],
     mp4Args: [],
+    subtitles: {
+      langs: ['tur', 'eng'],
+      streamInf:
+        'BANDWIDTH=700000,CODECS="avc1.64001f,mp4a.40.2",RESOLUTION=1280x720,FRAME-RATE=25.000',
+    },
   },
 };
 

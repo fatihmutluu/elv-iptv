@@ -1,11 +1,31 @@
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
-import { RECIPES, type RecipeName, switchSeconds } from './recipes.ts';
+import { parseDurations } from './hls.ts';
+import {
+  RECIPES,
+  type RecipeDef,
+  type RecipeName,
+  type SubtitleLang,
+  switchSeconds,
+} from './recipes.ts';
+import { srtText } from './subtitles.ts';
 
-/** Files of one generated recipe. Segments are named `seg00000.ts` and up, 2 s each. */
+/**
+ * Files of one generated recipe. Segments are named `seg00000.ts` and up. `segmentSec` is the nominal
+ * length the live window lists (`#EXTINF:2.000` for every recipe, spec 5.4); `durations` are the real
+ * lengths from FFmpeg's `segments/index.m3u8` (2.002 s at 29.97 fps), which VOD playlists list.
+ */
 export interface RecipeFiles {
   loopTs: string;
   vodMp4: string;
@@ -13,6 +33,7 @@ export interface RecipeFiles {
   segmentsDir: string;
   segmentCount: number;
   segmentSec: 2;
+  durations: number[];
 }
 
 /** Printed by the media tests when FFmpeg is absent; the `vitest` check turns it into a visible note. */
@@ -85,9 +106,10 @@ const ORIGINAL: readonly RecipeName[] = [
 /** Cache folder name of a recipe: the name, the loop length and a hash of everything that shapes the media. */
 export function recipeDirName(recipe: RecipeName, seconds: number): string {
   const def = RECIPES[recipe];
-  const input = ORIGINAL.includes(recipe)
+  const input: unknown[] = ORIGINAL.includes(recipe)
     ? [def.args, seconds, 'v2']
     : [def.args, seconds, 'v2', def.mp4Args, def.parts ?? null];
+  if (def.subtitles) input.push(def.subtitles, 'subs-v1');
   const hash = createHash('sha256').update(JSON.stringify(input)).digest('hex').slice(0, 10);
   return `${recipe}-${seconds}s-${hash}`;
 }
@@ -126,6 +148,7 @@ function recipeDir(recipe: RecipeName, cacheDir: string, seconds: number): strin
 function describeDir(dir: string): RecipeFiles {
   const segmentsDir = join(dir, 'segments');
   const segmentCount = readdirSync(segmentsDir).filter((f) => /^seg\d+\.ts$/.test(f)).length;
+  const index = readFileSync(join(segmentsDir, 'index.m3u8'), 'utf8');
   return {
     loopTs: join(dir, 'loop.ts'),
     vodMp4: join(dir, 'vod.mp4'),
@@ -133,6 +156,43 @@ function describeDir(dir: string): RecipeFiles {
     segmentsDir,
     segmentCount,
     segmentSec: 2,
+    durations: parseDurations(index),
+  };
+}
+
+/**
+ * FFmpeg arguments, inputs included, that copy the loop into MP4 and MKV. Subtitle recipes add one SRT
+ * input per language (the caller writes `srt(lang)`), mark the first audio track default and no
+ * subtitle default (spec 5.5).
+ */
+function vodArgs(
+  def: RecipeDef,
+  loop: string,
+  srt: (lang: SubtitleLang) => string,
+): { mp4: string[]; mkv: string[] } {
+  const subtitles = def.subtitles;
+  if (!subtitles) {
+    const copy = ['-i', loop, '-map', '0', '-c', 'copy'];
+    return { mp4: [...copy, ...def.mp4Args, '-movflags', '+faststart'], mkv: copy };
+  }
+  const inputs = subtitles.langs.flatMap((lang) => ['-i', srt(lang)]);
+  const maps = subtitles.langs.flatMap((_, n) => ['-map', `${n + 1}`]);
+  const head = ['-i', loop, ...inputs, '-map', '0', ...maps, '-c:v', 'copy', '-c:a', 'copy'];
+  const tags = subtitles.langs.flatMap((lang, n) => [`-metadata:s:s:${n}`, `language=${lang}`]);
+  const flags = ['-disposition:a:0', 'default', '-disposition:a:1', '0'];
+  for (const n of subtitles.langs.keys()) flags.push(`-disposition:s:${n}`, '0');
+  return {
+    mp4: [
+      ...head,
+      '-c:s',
+      'mov_text',
+      ...def.mp4Args,
+      '-movflags',
+      '+faststart',
+      ...tags,
+      ...flags,
+    ],
+    mkv: [...head, '-c:s', 'srt', ...tags, ...flags],
   };
 }
 
@@ -180,8 +240,13 @@ async function generate(
     } else {
       await run([...def.args, '-t', `${seconds}`, '-f', 'mpegts', loop]);
     }
-    await run([...copy, ...def.mp4Args, '-movflags', '+faststart', join(tmp, 'vod.mp4')]);
-    await run([...copy, join(tmp, 'vod.mkv')]);
+    const langs = def.subtitles?.langs ?? [];
+    const srt = (lang: SubtitleLang): string => join(tmp, `subs-${lang}.srt`);
+    for (const lang of langs) writeFileSync(srt(lang), srtText(lang, seconds));
+    const vod = vodArgs(def, loop, srt);
+    await run([...vod.mp4, join(tmp, 'vod.mp4')]);
+    await run([...vod.mkv, join(tmp, 'vod.mkv')]);
+    for (const lang of langs) rmSync(srt(lang), { force: true });
     await run([...copy, ...hls, ...names, join(tmp, 'segments', 'index.m3u8')]);
     rmSync(dir, { recursive: true, force: true });
     renameSync(tmp, dir);

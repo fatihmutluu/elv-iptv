@@ -14,6 +14,7 @@ import { type LogEntry, RequestLog, redact } from './log.ts';
 import { findFfmpeg } from './media.ts';
 import { requestFaults } from './request-faults.ts';
 import { dataRoute, sendText } from './routes-data.ts';
+import { hlsRoute } from './routes-hls.ts';
 import { liveRoute } from './routes-live.ts';
 import { mediaRoute } from './routes-media.ts';
 
@@ -58,7 +59,7 @@ export function defaultCacheDir(): string {
 }
 
 const DEFAULT_MEDIA_SECONDS = 600;
-const routes: RouteHandler[] = [dataRoute, mediaRoute, liveRoute];
+const routes: RouteHandler[] = [dataRoute, mediaRoute, liveRoute, hlsRoute];
 
 function headersOf(req: IncomingMessage): Record<string, string> {
   const out: Record<string, string> = {};
