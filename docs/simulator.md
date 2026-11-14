@@ -4,8 +4,9 @@ Specs: [stream simulator](superpowers/specs/2026-11-13-stream-simulator-design.m
 [simulator corpus](superpowers/specs/2026-11-14-sim-corpus-design.md).
 
 ## Streams
-- Streams: VOD `/movie|series/<u>/<p>/<id>.mp4|mkv` (`Range`); live `/live/<u>/<p>/<id>.ts`, `/<u>/<p>/<id>`,
-  `*/relative/<id>.ts` (FFmpeg loop, killed on disconnect); `.m3u8` (6x2 s window, `/hls/<recipe>/<seq>.ts`);
+- Streams: VOD `/movie|series/<u>/<p>/<id>.mp4|mkv` (`Range`); live `/live/<u>/<p>/<id>.ts`, `/live/<u>/<p>/<id>` (no extension, TS),
+  `/<u>/<p>/<id>` (short form, TS), `*/relative/<id>.ts` (FFmpeg loop, killed on disconnect); `.m3u8` (6x2 s window,
+  `/hls/<recipe>/<seq>.ts`);
   `/redirect/<id>.ts` (302); catch-up (`/timeshift/...`, `/streaming/timeshift.php`, `/catchup/<id>.ts`,
   `archive-|index-|timeshift_abs-` paths) answers a plain recorded file.
   TS live and VOD over `maxConnections`: 509, 403 or a notice.
@@ -21,8 +22,13 @@ Specs: [stream simulator](superpowers/specs/2026-11-13-stream-simulator-design.m
 
 ## Faults
 - Faults: `?fault=<spec>`, parts joined by `,`: `status=<200-599>`, `slow-start=<s>`, `redirect`, `text-notice` (before
-  any route), `drop@<s>`, `stall<n>s@<s>`, `rate=<kbps>`. Drop, stall and rate apply to TS and VOD responses only
+  any route), `drop@<s>`, `stall<n>s@<s>`, `rate=<kbps>`, `type=<mime>`, `redirect=hls`. Drop, stall and rate apply to TS and VOD responses only
   (not HLS segments or data routes). Unknown: 400. Catalog faults (1013, 1014) act like a query.
+- `type=<mime>` relabels the `Content-Type` of live TS, the live `.m3u8` and movie/episode responses (also ranged
+  ones); the body is unchanged. Not catch-up, HLS segments or data routes. The first `type` part wins.
+- `redirect=hls` answers 302 to `/live/<u>/<p>/<id>.m3u8` (query kept, `fault` dropped) for `/live/<u>/<p>/<id>[.ts]`
+  and `/<u>/<p>/<id>`. Any other path (the `.m3u8` itself, movies, data routes) skips it and is served normally,
+  so a rule without a `count` redirects the TS once and then serves the playlist.
 
 ## Runtime fault rules
 Rules attach a fault spec to the streams of one account at run time, for players that build their own URLs.

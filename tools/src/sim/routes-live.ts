@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ACCOUNTS, type Account } from './accounts.ts';
 import { buildCatalog, type RecipeName } from './catalog.ts';
 import { baseUrlOf, type RequestMeta, type RouteHandler, type SimContext } from './context.ts';
+import { mediaType } from './faults.ts';
 import { ALL_RECIPES, spawnLive } from './media.ts';
 import { sendText } from './routes-data.ts';
 import {
@@ -76,12 +77,15 @@ async function serveLive(
   if (files === null) return;
   if (playlist) {
     const body = hlsPlaylist(channel.recipe, files.segmentCount, ctx.now().getTime());
-    sendText(res, 200, 'application/vnd.apple.mpegurl', body);
+    sendText(res, 200, mediaType(faults, 'application/vnd.apple.mpegurl'), body);
     return;
   }
   const ffmpeg = ctx.media?.ffmpeg;
   if (!ffmpeg || !takeSlot(res, ctx, account)) return;
-  res.writeHead(200, { 'content-type': 'video/mp2t', 'cache-control': 'no-store' });
+  res.writeHead(200, {
+    'content-type': mediaType(faults, 'video/mp2t'),
+    'cache-control': 'no-store',
+  });
   if (req.method === 'HEAD') {
     res.end();
     return;

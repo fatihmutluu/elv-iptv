@@ -1,5 +1,6 @@
 import { buildCatalog, type RecipeName } from './catalog.ts';
 import type { RouteHandler } from './context.ts';
+import { mediaType } from './faults.ts';
 import { sendText } from './routes-data.ts';
 import { authorize, loadRecipe, resolveFaults, sendFile } from './stream-io.ts';
 
@@ -48,6 +49,6 @@ export const mediaRoute: RouteHandler = async (req, res, ctx, meta) => {
   const files = await loadRecipe(res, ctx, recipe);
   if (files === null) return true;
   const file = ext === 'mp4' ? files.vodMp4 : files.vodMkv;
-  await sendFile(req, res, ctx, { file, type: TYPES[ext], account, faults });
+  await sendFile(req, res, ctx, { file, type: mediaType(faults, TYPES[ext]), account, faults });
   return true;
 };

@@ -98,7 +98,9 @@ export async function resolveFaults(
     meta.fault = spec;
     if (await requestFaults(req, res, faults)) return null;
   }
-  return faults.filter((f) => f.kind === 'drop' || f.kind === 'stall' || f.kind === 'rate');
+  return faults.filter(
+    (f) => f.kind === 'drop' || f.kind === 'stall' || f.kind === 'rate' || f.kind === 'type',
+  );
 }
 
 /** Generated recipe files; answers 503 and returns null without FFmpeg or when generation fails. */

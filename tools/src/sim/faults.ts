@@ -8,7 +8,9 @@ export type Fault =
   | { kind: 'slow-start'; sec: number }
   | { kind: 'redirect' }
   | { kind: 'text-notice' }
-  | { kind: 'rate'; kbps: number };
+  | { kind: 'rate'; kbps: number }
+  | { kind: 'type'; mime: string }
+  | { kind: 'redirect-hls' };
 
 /** Thrown for a fault spec part that is unknown or malformed. */
 export class FaultParseError extends Error {}
@@ -19,9 +21,12 @@ const DROP = new RegExp(`^drop@${NUM}s$`);
 const STALL = new RegExp(`^stall${NUM}s@${NUM}s$`);
 const SLOW = new RegExp(`^slow-start=${NUM}$`);
 const RATE = /^rate=(\d+)$/;
+const TOKEN = '[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*';
+const TYPE = new RegExp(`^type=(${TOKEN}/${TOKEN})$`);
 
 function parsePart(part: string): Fault {
   if (part === 'redirect') return { kind: 'redirect' };
+  if (part === 'redirect=hls') return { kind: 'redirect-hls' };
   if (part === 'text-notice') return { kind: 'text-notice' };
   const status = STATUS.exec(part);
   if (status) {
@@ -36,6 +41,8 @@ function parsePart(part: string): Fault {
   if (slow) return { kind: 'slow-start', sec: Number(slow[1]) };
   const rate = RATE.exec(part);
   if (rate && Number(rate[1]) > 0) return { kind: 'rate', kbps: Number(rate[1]) };
+  const type = TYPE.exec(part);
+  if (type) return { kind: 'type', mime: type[1] as string };
   throw new FaultParseError(`unknown or malformed fault "${part}"`);
 }
 
@@ -43,6 +50,12 @@ function parsePart(part: string): Fault {
 export function parseFaults(spec: string): Fault[] {
   if (spec === '') return [];
   return spec.split(',').map(parsePart);
+}
+
+/** The content type a `type=<mime>` fault asks for, or `fallback` when there is none. */
+export function mediaType(faults: readonly Fault[], fallback: string): string {
+  const found = faults.find((f) => f.kind === 'type');
+  return found ? found.mime : fallback;
 }
 
 /**
