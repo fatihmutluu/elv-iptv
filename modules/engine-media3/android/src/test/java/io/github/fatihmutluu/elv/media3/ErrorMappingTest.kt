@@ -58,6 +58,17 @@ class ErrorMappingTest {
   }
 
   @Test
+  fun `a platform policy block is terminal, so the ladder never retries it`() {
+    for (code in listOf(
+      PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED,
+      PlaybackException.ERROR_CODE_IO_NO_PERMISSION,
+    )) {
+      assertEquals("code $code", "unsupported-format", mapError(null, null, code))
+      assertEquals("code $code", "unsupported-format", mapError(null, null, code, live = true, played = true))
+    }
+  }
+
+  @Test
   fun `Media3 parsing codes are unsupported-format`() {
     for (code in listOf(
       PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
