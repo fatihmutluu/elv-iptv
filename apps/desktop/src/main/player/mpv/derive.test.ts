@@ -56,8 +56,51 @@ describe('deriver', () => {
     s.clock.t = 1500;
     expect(s.d.property('video-params', { w: 1280 })).toEqual([
       { attempt: 7, type: 'firstFrame', atMs: 1500 },
+      { attempt: 7, type: 'state', state: 'playing' },
     ]);
     expect(s.d.property('video-params', { w: 1920 })).toEqual([]);
+  });
+
+  it('late video-params: opening, firstFrame, playing in that order, playing held until then', () => {
+    const s = setup();
+    const all: EngineEvent[] = [...s.begin];
+    all.push(...s.d.fileEvent({ event: 'file-loaded' }));
+    all.push(...restart(s.d));
+    expect(states(all)).toEqual(['opening', 'buffering']);
+    all.push(...s.d.property('video-params', { w: 1280 }));
+    expect(types(all.filter((e) => e.type !== 'clock'))).toEqual([
+      'state',
+      'state',
+      'firstFrame',
+      'state',
+    ]);
+    expect(states(all)).toEqual(['opening', 'buffering', 'playing']);
+  });
+
+  it('late video-params after a stall start emits firstFrame and the current state only', () => {
+    const s = setup();
+    s.d.fileEvent({ event: 'file-loaded' });
+    restart(s.d);
+    s.d.property('paused-for-cache', true);
+    const late = s.d.property('video-params', { w: 1 });
+    expect(types(late)).toEqual(['firstFrame']);
+    expect(states(s.d.property('paused-for-cache', false))).toEqual(['playing']);
+  });
+
+  it('late video-params while paused emits firstFrame and no playing', () => {
+    const s = setup();
+    s.d.fileEvent({ event: 'file-loaded' });
+    restart(s.d);
+    expect(states(s.d.property('pause', true))).toEqual(['paused']);
+    expect(types(s.d.property('video-params', { w: 1 }))).toEqual(['firstFrame']);
+  });
+
+  it('late video-params after the media ended emits nothing', () => {
+    const s = setup('vod');
+    s.d.fileEvent({ event: 'file-loaded' });
+    restart(s.d);
+    s.d.fileEvent({ event: 'end-file', reason: 'stop' });
+    expect(s.d.property('video-params', { w: 1 })).toEqual([]);
   });
 
   it('video-params before any restart emits nothing until the restart', () => {

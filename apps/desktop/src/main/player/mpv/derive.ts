@@ -83,7 +83,8 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
 
   const settle = (media: Media): EngineEvent[] => {
     if (!media.restarted) return [];
-    return setState(media, media.paused ? 'paused' : media.cache ? 'buffering' : 'playing');
+    const target = media.paused ? 'paused' : media.cache ? 'buffering' : 'playing';
+    return target === 'playing' && !media.firstFrameSent ? [] : setState(media, target);
   };
 
   const changed = (media: Media, fn: () => boolean): EngineEvent[] =>
@@ -108,6 +109,11 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
     if (media.firstFrameSent || !media.restarted || !media.frameReady) return [];
     media.firstFrameSent = true;
     return [ev(media, { type: 'firstFrame', atMs: opts.now() })];
+  };
+
+  const frameThenSettle = (media: Media): EngineEvent[] => {
+    const frame = firstFrame(media);
+    return frame.length === 0 ? [] : [...frame, ...settle(media)];
   };
 
   const restart = (media: Media): EngineEvent[] => {
@@ -172,11 +178,11 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
       case 'video-params':
         if (typeof value !== 'object' || value === null) return [];
         media.frameReady = true;
-        return firstFrame(media);
+        return frameThenSettle(media);
       case 'vid':
         if (value !== false && value !== 'no') return [];
         media.frameReady = true;
-        return firstFrame(media);
+        return frameThenSettle(media);
       case 'duration':
         media.duration = num(value);
         return [];
