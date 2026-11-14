@@ -68,6 +68,7 @@ class Media3Engine(
     Thread(it, "ElvMedia3Closer")
   }
   private val gate = ConnectionGate(closer)
+  private val http = engineHttpClient()
   private val buffers = loadControlFor(lowRam(context))
   private val reporter = EventReporter(
     handler,
@@ -215,6 +216,7 @@ class Media3Engine(
     handler.post {
       reporter.end()
       releasePlayer()
+      http.dispatcher.executorService.shutdown()
       thread.quitSafely()
     }
   }
@@ -301,7 +303,7 @@ class Media3Engine(
     if (newGeneration) beginGeneration()
     val manifestLoaded = AtomicBoolean(false)
     reporter.begin(current, next.live, manifestLoaded)
-    val source = createMediaSource(next, gate, generation, manifestLoaded)
+    val source = createMediaSource(next, gate, generation, manifestLoaded, http)
     if (positionMs == null) current.setMediaSource(source, true) else current.setMediaSource(source, positionMs)
     current.playWhenReady = true
     current.prepare()
@@ -346,12 +348,14 @@ class Media3Engine(
       }
   }
 
+  /** The gate outlives the player: a released player's forced connections that never closed are forgotten. */
   private fun releasePlayer() {
     val old = player ?: return
     player = null
     old.removeListener(reporter)
     old.removeListener(pictures)
     old.release()
+    gate.dropForced()
   }
 
   private companion object {

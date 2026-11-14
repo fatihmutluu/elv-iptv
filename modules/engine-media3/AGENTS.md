@@ -20,9 +20,8 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
 ## Playback
 - Every prepare (`load`, `retry`) builds a new media source, `playWhenReady = true`; `retry`: live at the default
   position, VOD at the current one. `stop` clears the media; `recreate` rebuilds ExoPlayer (same surface), left idle.
-- Source by URL (`SourceType.kt`): `.m3u8`/`.m3u` HLS; `.ts` and extensionless live use the TS extractor only (flags
-  `ALLOW_NON_IDR_KEYFRAMES`, `DETECT_ACCESS_UNITS`); anything else sniffs containers. A progressive guess answered with
-  a playlist is prepared once as HLS from the same URL, in the same gate generation (no error event).
+- Source (`SourceType.kt`): `.m3u8`/`.m3u` HLS; `.ts` and extensionless live: TS extractor only (non-IDR keyframes,
+  access units); else sniffed. A playlist answer is prepared once as HLS (same URL, same generation).
 - States: `opening` on prepare, `buffering`, `ready`, `playing`, `paused` (not wanted), `ended`; a live media that
   ends sends `error network`. `stall`: buffering while wanted after it played. `clock` anchors when the effective rate
   (speed while playing, else 0) changes, on seeks and once a second while playing; `durationMs` (VOD), `liveEdgeMs`
@@ -32,11 +31,12 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
 ## Requests and errors (`ConnectionGate`, `GatedDataSource`, `StreamHttp`, sniffing, `LoadRetry`, `ErrorMapping`)
 - Each prepare and `stop` begins a generation and force-closes older connections at once on the closer thread: the
   OkHttp call is cancelled (socket closed, also mid-connect) and an `open` in progress is interrupted. A connection is
-  counted until Media3 closes it; a newer `open` waits for that (forcing again after 1,000 ms, `Log.w`).
-- HTTP: `media3-datasource-okhttp` on React Native's OkHttp 4.9.2 (the extension's 4.12.0 excluded): connect 3,500 ms,
-  read 10,000 ms (over the 8 s start timeout), OkHttp redirects, `LoadCommand.headers`. Responses are read ahead 1 KB
-  and judged by request kind (`classifyResponse`): progressive `#EXTM3U` is HLS, playlists need `#EXTM3U`, readable
-  text that is no MPEG-TS nor, for segments, WebVTT is the notice; keys are never read.
+  counted until Media3 closes it; a newer `open` waits, forcing again after 1,000 ms and dropping cancelled ones
+  1,500 ms later (`Log.w` each); `releasePlayer` drops them at once (the gate outlives `recreate`).
+- HTTP: `media3-datasource-okhttp`, one client per engine (own dispatcher: 64 calls, 16 per host; shared pool),
+  connect 3,500 ms, read 10,000 ms (over the 8 s start timeout), redirects, `LoadCommand.headers`, else `http.agent`.
+  Run-time OkHttp is React Native's; it must match the `compileOnly` 4.9.2 pin (check on every React Native bump).
+  Responses are read ahead 1 KB and judged by kind (`classifyResponse`, keys unread): HLS on a guess, notices fail.
 - `failsAtOnce`: an HTTP status skips Media3's retries on progressive media and before the first HLS manifest; then
   HLS segments and refreshes retry except 401/403/429/509. Notices and refused requests always fail at once.
 - `mapError`: 401/403/404/429/509 keep `http-<code>`, other statuses `http-other`, a notice `connection-limit`; 3xxx
@@ -45,6 +45,6 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
   `detail`: error name and `redactUrl(uri)` (credentials `***`), no exception text; `LoadRequest` text: no URL/header.
 
 ## Tests and rules
-- Vitest: `pnpm --filter @elv/engine-media3 test`. JVM (JUnit 4, Robolectric), after `pnpm run:app android-tv build`, in
-  `apps/tv-mobile/android`: `APP_VARIANT=development EXPO_TV=1 ./gradlew.bat :elv-engine-media3:testDebugUnitTest`
-  (needs `ANDROID_HOME`). Imports `expo-modules-core`, `@elv/playback` types and the `react`/`react-native` peers only.
+- Vitest: `pnpm --filter @elv/engine-media3 test`. JVM (JUnit 4, Robolectric; `ANDROID_HOME`), after the app build,
+  in `apps/tv-mobile/android`: `APP_VARIANT=development EXPO_TV=1 ./gradlew.bat :elv-engine-media3:testDebugUnitTest`.
+  Imports `expo-modules-core`, `@elv/playback` types and the `react`/`react-native` peers only.

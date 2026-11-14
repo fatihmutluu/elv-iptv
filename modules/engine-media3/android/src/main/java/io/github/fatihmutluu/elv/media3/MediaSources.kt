@@ -20,6 +20,7 @@ import androidx.media3.extractor.text.SubtitleParser
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import androidx.media3.extractor.ts.TsExtractor
 import java.util.concurrent.atomic.AtomicBoolean
+import okhttp3.Call
 
 /** IPTV MPEG-TS often lacks IDR flags and access unit delimiters. */
 private const val TS_FLAGS =
@@ -79,9 +80,10 @@ internal fun requestSources(
   request: LoadRequest,
   gate: ConnectionGate,
   generation: Long,
+  client: Call.Factory,
   gateTimeoutMs: Long = GATE_TIMEOUT_MS,
 ): (RequestKind) -> DataSource = { kind ->
-  val (http, calls) = streamDataSource(request.headers)
+  val (http, calls) = streamDataSource(request.headers, client)
   GatedDataSource(SniffingDataSource(http, kind), gate, generation, calls::cancel, gateTimeoutMs)
 }
 
@@ -95,9 +97,10 @@ internal fun createMediaSource(
   gate: ConnectionGate,
   generation: Long,
   manifestLoaded: AtomicBoolean,
+  client: Call.Factory,
 ): MediaSource {
   val type = request.sourceType()
-  val gated = requestSources(request, gate, generation)
+  val gated = requestSources(request, gate, generation, client)
   val progressive = DataSource.Factory { gated(RequestKind.PROGRESSIVE) }
   val factory: MediaSource.Factory = when (type) {
     SourceType.HLS -> HlsMediaSource.Factory(HlsDataSourceFactory { dataType -> gated(requestKindFor(dataType)) })

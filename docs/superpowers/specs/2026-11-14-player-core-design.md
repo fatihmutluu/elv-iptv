@@ -176,11 +176,14 @@ Rungs, each bounded and visible as a status the OSD can show:
   `open` of a new request waits until the previous one is closed. A new media (`load`, `retry`, `stop`) force-closes
   the older connections at once on a per-engine closer thread: the OkHttp call is cancelled, which closes its socket
   also while it connects or waits for the status line, and an `open` in progress is interrupted. A connection counts
-  until it has really closed; the wait forces again after 1,000 ms as a backstop. Connect timeout 3,500 ms, read
-  timeout 10,000 ms: above the 8 s start timeout, so the service's timers decide a silent stream's recovery (amended
-  in the final review: the default HTTP stack could not abort a connect or a status-line wait, so a "forced" request
-  stayed open beside the next one). With `load` stopping the old media first, the simulator log must show zero overlap
-  during zaps.
+  until it has really closed; the wait forces again after 1,000 ms as a backstop and drops a connection whose call
+  was cancelled but that never closed 1,500 ms later (the cancel closed its socket, so the provider sees no overlap);
+  releasing a player drops its forced connections at once, since the gate outlives `recreate`. Each engine has its own
+  OkHttp client and dispatcher (64 calls, 16 per host); without a source agent it sends the platform `http.agent`, as
+  the default stack did. Connect timeout 3,500 ms, read timeout 10,000 ms: above the 8 s start timeout, so the
+  service's timers decide a silent stream's recovery (amended in the final review: the default HTTP stack could not
+  abort a connect or a status-line wait, so a "forced" request stayed open beside the next one). With `load` stopping
+  the old media first, the simulator log must show zero overlap during zaps.
 - Error mapping: `HttpDataSource.InvalidResponseCodeException.responseCode` gives the `http-*` codes; a `text/*` or HTML
   body on a stream request is `connection-limit` (providers answer the limit with a notice; the simulator models it);
   Media3 `PlaybackException` error codes map to `network`, `unsupported-format`, `decoder`, `drm`. URLs in `detail` are

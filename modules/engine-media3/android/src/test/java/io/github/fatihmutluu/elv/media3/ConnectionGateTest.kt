@@ -2,11 +2,14 @@ package io.github.fatihmutluu.elv.media3
 
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -20,6 +23,12 @@ class ConnectionGateTest {
   private val inline = Executor { it.run() }
 
   private fun elapsedMs(since: Long): Long = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - since)
+
+  /** Runs one wait of generation 2 on its own (daemon) thread, so a wait that never ends cannot hang the suite. */
+  private fun waitFor2(gate: ConnectionGate, timeoutMs: Long): Pair<Thread, AtomicReference<BoundaryWait?>> {
+    val result = AtomicReference<BoundaryWait?>()
+    return thread(isDaemon = true) { result.set(gate.awaitPreviousClosed(2, timeoutMs)) } to result
+  }
 
   private fun later(delayMs: Long, action: () -> Unit): Thread =
     Thread {
@@ -41,7 +50,7 @@ class ConnectionGateTest {
   fun `the first media opens without waiting`() {
     val gate = ConnectionGate(inline)
     gate.beginMedia(1)
-    assertTrue(gate.awaitPreviousClosed(1, 0))
+    assertEquals(BoundaryWait.CLOSED, gate.awaitPreviousClosed(1, 0))
   }
 
   @Test
@@ -50,7 +59,7 @@ class ConnectionGateTest {
     gate.beginMedia(1)
     assertTrue(gate.tryOpen(1))
     assertTrue(gate.tryOpen(1))
-    assertTrue(gate.awaitPreviousClosed(1, 0))
+    assertEquals(BoundaryWait.CLOSED, gate.awaitPreviousClosed(1, 0))
   }
 
   @Test
@@ -61,7 +70,7 @@ class ConnectionGateTest {
     gate.beginMedia(2)
     val start = System.nanoTime()
     val closer = later(200) { gate.closed(1) }
-    assertTrue(gate.awaitPreviousClosed(2, patientMs))
+    assertEquals(BoundaryWait.CLOSED, gate.awaitPreviousClosed(2, patientMs))
     val waited = elapsedMs(start)
     closer.join()
     assertTrue("waited $waited ms", waited >= 150)
@@ -83,7 +92,7 @@ class ConnectionGateTest {
       Thread.sleep(150)
       gate.closed(1)
     }
-    assertTrue(gate.awaitPreviousClosed(3, patientMs))
+    assertEquals(BoundaryWait.CLOSED, gate.awaitPreviousClosed(3, patientMs))
     val waited = elapsedMs(start)
     closer.join()
     assertTrue("waited $waited ms", waited >= 200)
@@ -100,7 +109,7 @@ class ConnectionGateTest {
     gate.beginMedia(2)
     assertEquals(1, first.forced.get())
     assertEquals(1, second.forced.get())
-    assertTrue(gate.awaitPreviousClosed(2, 0))
+    assertEquals(BoundaryWait.CLOSED, gate.awaitPreviousClosed(2, 0))
   }
 
   @Test
@@ -127,7 +136,7 @@ class ConnectionGateTest {
     assertEquals(1, queued.size)
     queued.single().run()
     assertEquals(1, open.forced.get())
-    assertTrue(gate.awaitPreviousClosed(2, 0))
+    assertEquals(BoundaryWait.CLOSED, gate.awaitPreviousClosed(2, 0))
   }
 
   @Test
@@ -141,7 +150,7 @@ class ConnectionGateTest {
     assertEquals(1, forced.get())
     val start = System.nanoTime()
     val owner = later(300) { gate.closed(1, stuck) }
-    assertTrue(gate.awaitPreviousClosed(2, patientMs))
+    assertEquals(BoundaryWait.CLOSED, gate.awaitPreviousClosed(2, patientMs))
     val waited = elapsedMs(start)
     owner.join()
     assertTrue("waited $waited ms", waited >= 250)
@@ -160,11 +169,11 @@ class ConnectionGateTest {
     gate.tryOpen(1, closedOnSecondForce)
     gate.beginMedia(2)
     val start = System.nanoTime()
-    assertFalse(gate.awaitPreviousClosed(2, 200))
+    assertEquals(BoundaryWait.CLOSED_AFTER_FORCE, gate.awaitPreviousClosed(2, 200))
     val waited = elapsedMs(start)
     assertTrue("waited $waited ms", waited >= 200)
     assertEquals(2, forced.get())
-    assertTrue(gate.awaitPreviousClosed(2, 0))
+    assertEquals(BoundaryWait.CLOSED, gate.awaitPreviousClosed(2, 0))
   }
 
   @Test
@@ -179,7 +188,7 @@ class ConnectionGateTest {
     gate.beginMedia(2)
     assertEquals(0, first.forced.get())
     assertEquals(1, second.forced.get())
-    assertTrue(gate.awaitPreviousClosed(2, 0))
+    assertEquals(BoundaryWait.CLOSED, gate.awaitPreviousClosed(2, 0))
   }
 
   @Test
@@ -190,7 +199,7 @@ class ConnectionGateTest {
     gate.closed(1)
     gate.beginMedia(2)
     assertFalse(gate.tryOpen(1))
-    assertTrue(gate.awaitPreviousClosed(2, 0))
+    assertEquals(BoundaryWait.CLOSED, gate.awaitPreviousClosed(2, 0))
     assertTrue(gate.tryOpen(2))
     gate.beginMedia(1)
     assertTrue(gate.tryOpen(2))
@@ -206,7 +215,7 @@ class ConnectionGateTest {
     gate.beginMedia(2)
     val start = System.nanoTime()
     val zap = later(100) { gate.beginMedia(3) }
-    assertTrue(gate.awaitPreviousClosed(2, patientMs))
+    assertEquals(BoundaryWait.SUPERSEDED, gate.awaitPreviousClosed(2, patientMs))
     val waited = elapsedMs(start)
     zap.join()
     assertTrue("waited $waited ms", waited >= 50)
@@ -235,5 +244,95 @@ class ConnectionGateTest {
     waiter.interrupt()
     waiter.join(patientMs)
     assertTrue(failure.get() is InterruptedException)
+  }
+
+  @Test
+  fun `a forced connection that never reports closed is dropped 1,500 ms after the second force-close`() {
+    val gate = ConnectionGate(inline)
+    val forced = AtomicInteger()
+    gate.beginMedia(1)
+    gate.tryOpen(1) { forced.incrementAndGet() }
+    gate.beginMedia(2)
+    val start = System.nanoTime()
+    val (waiter, result) = waitFor2(gate, 200)
+    waiter.join(patientMs)
+    val waited = elapsedMs(start)
+    assertEquals(BoundaryWait.DROPPED, result.get())
+    assertTrue("waited $waited ms", waited >= 200 + DROP_AFTER_MS)
+    assertEquals("forced by the new media and by the backstop", 2, forced.get())
+    assertEquals(BoundaryWait.CLOSED, gate.awaitPreviousClosed(2, 0))
+  }
+
+  @Test
+  fun `a connection whose force-close has not finished is never dropped`() {
+    val queued = LinkedBlockingQueue<Runnable>()
+    val gate = ConnectionGate { queued.put(it) }
+    gate.beginMedia(1)
+    gate.tryOpen(1) {}
+    gate.beginMedia(2)
+    val (waiter, result) = waitFor2(gate, 100)
+    waiter.join(100 + DROP_AFTER_MS + 700)
+    assertTrue("dropped before its force-close ran", waiter.isAlive)
+    assertNull(result.get())
+    while (queued.isNotEmpty()) queued.take().run()
+    waiter.join(patientMs)
+    assertEquals(BoundaryWait.DROPPED, result.get())
+  }
+
+  @Test
+  fun `a connection without a closer is never dropped`() {
+    val gate = ConnectionGate(inline)
+    gate.beginMedia(1)
+    gate.tryOpen(1)
+    gate.beginMedia(2)
+    val (waiter, result) = waitFor2(gate, 100)
+    waiter.join(100 + DROP_AFTER_MS + 700)
+    assertTrue(waiter.isAlive)
+    gate.closed(1)
+    waiter.join(patientMs)
+    assertEquals(BoundaryWait.CLOSED_AFTER_FORCE, result.get())
+  }
+
+  @Test
+  fun `a released player's forced connections are dropped at once`() {
+    val gate = ConnectionGate(inline)
+    gate.beginMedia(1)
+    gate.tryOpen(1) {}
+    gate.beginMedia(2)
+    gate.dropForced()
+    val (waiter, result) = waitFor2(gate, patientMs)
+    waiter.join(patientMs)
+    assertEquals(BoundaryWait.CLOSED, result.get())
+  }
+
+  @Test
+  fun `a dropped connection's late close does not uncount another connection of its media`() {
+    val gate = ConnectionGate(inline)
+    val dropped = ForceClosable {}
+    gate.beginMedia(1)
+    gate.tryOpen(1, dropped)
+    gate.tryOpen(1)
+    gate.beginMedia(2)
+    gate.dropForced()
+    gate.closed(1, dropped)
+    val (waiter, result) = waitFor2(gate, patientMs)
+    waiter.join(300)
+    assertTrue("the late close uncounted the open connection", waiter.isAlive)
+    gate.closed(1)
+    waiter.join(patientMs)
+    assertEquals(BoundaryWait.CLOSED, result.get())
+  }
+
+  @Test
+  fun `a waiter superseded during the second wait reports superseded, not a forced close`() {
+    val gate = ConnectionGate(inline)
+    gate.beginMedia(1)
+    gate.tryOpen(1) {}
+    gate.beginMedia(2)
+    val (waiter, result) = waitFor2(gate, 100)
+    val zap = later(400) { gate.beginMedia(3) }
+    waiter.join(patientMs)
+    zap.join()
+    assertEquals(BoundaryWait.SUPERSEDED, result.get())
   }
 }

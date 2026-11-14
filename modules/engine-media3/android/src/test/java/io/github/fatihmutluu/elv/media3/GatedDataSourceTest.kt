@@ -21,6 +21,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.shadows.ShadowLog
 
 /** Waits use lower bounds or generous timeouts only, as in [ConnectionGateTest]. */
 @OptIn(UnstableApi::class)
@@ -34,6 +35,24 @@ class GatedDataSourceTest {
     override fun getUri(): Uri? = null
 
     override fun close() = Unit
+  }
+
+  /** Opens at once; its owner then stays parked (a full sample queue) and never reads or closes it. */
+  private class Parked : Upstream() {
+    override fun open(dataSpec: DataSpec): Long = C.LENGTH_UNSET.toLong()
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int = throw UnsupportedOperationException()
+  }
+
+  /** Opens [source] on a daemon thread; returns the thread and the milliseconds the open took (0 until it returns). */
+  private fun openLater(source: GatedDataSource): Pair<Thread, AtomicLong> {
+    val tookMs = AtomicLong()
+    val start = System.nanoTime()
+    val opener = thread(isDaemon = true) {
+      source.open(spec)
+      tookMs.set(maxOf(1L, (System.nanoTime() - start) / 1_000_000))
+    }
+    return opener to tookMs
   }
 
   /** An open that waits for its answer the way OkHttp's call wait does: only an interrupt ends it. */
@@ -133,7 +152,7 @@ class GatedDataSourceTest {
     owner.join(5_000)
     assertTrue("the stuck read did not end", !owner.isAlive)
     assertTrue("${failure.get()}", failure.get() is IOException)
-    assertTrue(gate.awaitPreviousClosed(2, 0))
+    assertEquals(BoundaryWait.CLOSED, gate.awaitPreviousClosed(2, 0))
   }
 
   @Test
@@ -145,5 +164,33 @@ class GatedDataSourceTest {
     val failure = runCatching { GatedDataSource(upstream, gate, 1).open(spec) }.exceptionOrNull()
     assertTrue("$failure", failure is SupersededMediaException)
     assertEquals(1L, upstream.entered.count)
+  }
+
+  @Test
+  fun `a forced connection that never closes is dropped with a warning, and only then the next media opens`() {
+    ShadowLog.clear()
+    val gate = ConnectionGate(Executors.newSingleThreadExecutor())
+    gate.beginMedia(1)
+    GatedDataSource(Parked(), gate, 1).open(spec)
+    gate.beginMedia(2)
+    val (opener, tookMs) = openLater(GatedDataSource(Parked(), gate, 2, gateTimeoutMs = 200))
+    opener.join(10_000)
+    assertTrue("the next media never opened", tookMs.get() > 0)
+    assertTrue("opened after ${tookMs.get()} ms", tookMs.get() >= 200 + DROP_AFTER_MS)
+    val warnings = ShadowLog.getLogsForTag("ElvMedia3").map { it.msg }
+    assertTrue("$warnings", warnings.any { it.contains("dropped") })
+    assertTrue("$warnings", warnings.none { it.contains("http") || it.contains("closed only after") })
+  }
+
+  @Test
+  fun `after a recreate released the player, its stuck connection does not hold up the next media`() {
+    val gate = ConnectionGate { it.run() }
+    gate.beginMedia(1)
+    GatedDataSource(Parked(), gate, 1).open(spec)
+    gate.beginMedia(2)
+    gate.dropForced()
+    val (opener, tookMs) = openLater(GatedDataSource(Parked(), gate, 2, gateTimeoutMs = 10_000))
+    opener.join(5_000)
+    assertTrue("the next media waited for the stuck connection", tookMs.get() > 0)
   }
 }

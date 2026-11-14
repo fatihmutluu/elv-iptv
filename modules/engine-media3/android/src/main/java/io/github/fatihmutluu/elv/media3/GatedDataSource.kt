@@ -24,7 +24,8 @@ internal class SupersededMediaException : IOException("superseded media")
  * of older generations are closed (forcing them again after [gateTimeoutMs]) and refuses to open once its own
  * generation is superseded. A force-close cancels the upstream call ([cancelUpstream]: OkHttp closes its socket,
  * connecting, waiting for the answer or reading) and interrupts an `open` still in progress; the connection stays
- * counted until Media3 closes it, which it does after every `open`, also a failed one. A forced source opens no more.
+ * counted until Media3 closes it, which it does after every `open`, also a failed one, or until the gate drops it
+ * ([ConnectionGate.dropForced], [DROP_AFTER_MS]). A forced source opens no more.
  */
 @OptIn(UnstableApi::class)
 internal class GatedDataSource(
@@ -50,8 +51,12 @@ internal class GatedDataSource(
   override fun open(dataSpec: DataSpec): Long {
     if (forced) throw SupersededMediaException()
     try {
-      if (!gate.awaitPreviousClosed(generation, gateTimeoutMs)) {
-        Log.w(TAG, "an older media's connections closed only after a second force-close at $gateTimeoutMs ms")
+      when (gate.awaitPreviousClosed(generation, gateTimeoutMs)) {
+        BoundaryWait.CLOSED_AFTER_FORCE ->
+          Log.w(TAG, "an older media's connections closed only after a second force-close at $gateTimeoutMs ms")
+        BoundaryWait.DROPPED ->
+          Log.w(TAG, "dropped older connections still open $DROP_AFTER_MS ms after their cancel, without a close")
+        BoundaryWait.CLOSED, BoundaryWait.SUPERSEDED -> Unit
       }
     } catch (_: InterruptedException) {
       Thread.currentThread().interrupt()

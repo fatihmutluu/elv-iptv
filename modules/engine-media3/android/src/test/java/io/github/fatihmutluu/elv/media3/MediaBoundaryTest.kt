@@ -80,6 +80,8 @@ class MediaBoundaryTest {
     }
   }
 
+  private val client = engineHttpClient()
+
   private fun request(url: String) =
     LoadRequest(url = url, headers = emptyMap(), live = true, startMs = null, softwareAudio = false)
 
@@ -99,13 +101,13 @@ class MediaBoundaryTest {
       val gate = ConnectionGate(Executors.newSingleThreadExecutor())
       gate.beginMedia(1)
       val slow = server.url("1001.ts")
-      val first = thread { load(requestSources(request(slow), gate, 1)(RequestKind.PROGRESSIVE), slow) }
+      val first = thread { load(requestSources(request(slow), gate, 1, client)(RequestKind.PROGRESSIVE), slow) }
       assertNotNull("the first request never arrived", server.accepted.poll(5, SECONDS))
 
       val begun = System.nanoTime()
       gate.beginMedia(2)
       val next = server.url("1002.ts")
-      val second = thread { load(requestSources(request(next), gate, 2)(RequestKind.PROGRESSIVE), next) }
+      val second = thread { load(requestSources(request(next), gate, 2, client)(RequestKind.PROGRESSIVE), next) }
       val arrived = server.accepted.poll(15, SECONDS)
       assertNotNull("the next media's request never arrived", arrived)
       val afterMs = TimeUnit.NANOSECONDS.toMillis(arrived!!.atNs - begun)

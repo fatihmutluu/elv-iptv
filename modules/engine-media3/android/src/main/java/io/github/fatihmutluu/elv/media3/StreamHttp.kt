@@ -6,6 +6,7 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import java.util.concurrent.TimeUnit
 import okhttp3.Call
+import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -23,15 +24,31 @@ internal const val CONNECT_TIMEOUT_MS = 3_500L
  */
 internal const val READ_TIMEOUT_MS = 10_000L
 
+/** Calls one engine's client runs at once, in all and per host: the gate, not OkHttp, bounds the real connections. */
+private const val MAX_REQUESTS = 64
+private const val MAX_REQUESTS_PER_HOST = 16
+
 /**
- * The engines' HTTP client: React Native's OkHttp library (no second copy), its own connection pool and dispatcher,
- * the stream timeouts, and OkHttp's redirects (http and https both ways).
+ * The base of the engines' HTTP clients: React Native's OkHttp library (no second copy), one connection pool, the
+ * stream timeouts, and OkHttp's redirects (http and https both ways).
  */
 private val streamClient: OkHttpClient by lazy {
   OkHttpClient.Builder()
     .connectTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
     .readTimeout(READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
     .build()
+}
+
+/**
+ * One engine's client: the shared pool and timeouts with its own dispatcher, so OkHttp's default of five calls per
+ * host only adds queueing and one engine never waits for another's calls.
+ */
+internal fun engineHttpClient(): OkHttpClient {
+  val dispatcher = Dispatcher().apply {
+    maxRequests = MAX_REQUESTS
+    maxRequestsPerHost = MAX_REQUESTS_PER_HOST
+  }
+  return streamClient.newBuilder().dispatcher(dispatcher).build()
 }
 
 /**
@@ -58,15 +75,16 @@ internal class CancellableCalls(private val client: Call.Factory) : Call.Factory
 }
 
 /**
- * An OkHttp data source for one request that sends [headers] (a `User-Agent` entry, in any case, becomes the agent),
- * and the canceller of its calls.
+ * An OkHttp data source for one request over [client] that sends [headers] and the canceller of its calls. A
+ * `User-Agent` entry, in any case, becomes the agent; without one it sends the platform's (`http.agent`), as Media3's
+ * default data source did, since some providers refuse a library's agent.
  */
 @OptIn(UnstableApi::class)
-internal fun streamDataSource(headers: Map<String, String>): Pair<DataSource, CancellableCalls> {
+internal fun streamDataSource(headers: Map<String, String>, client: Call.Factory): Pair<DataSource, CancellableCalls> {
   val userAgentKey = headers.keys.firstOrNull { it.equals("User-Agent", ignoreCase = true) }
-  val calls = CancellableCalls(streamClient)
+  val calls = CancellableCalls(client)
   val source = OkHttpDataSource.Factory(calls)
-    .setUserAgent(userAgentKey?.let { headers[it] })
+    .setUserAgent(userAgentKey?.let { headers[it] } ?: System.getProperty("http.agent"))
     .setDefaultRequestProperties(headers.filterKeys { it != userAgentKey })
     .createDataSource()
   return source to calls
