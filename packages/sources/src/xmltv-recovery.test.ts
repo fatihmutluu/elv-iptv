@@ -190,26 +190,40 @@ describe('scanXmltv input failures', () => {
 });
 
 describe('scanXmltv hostile bodies and error attribution', () => {
+  /**
+   * Time budget for scanning a hostile body of `size` characters: 2 s, or 20 times a well-formed guide of the same
+   * size on a slow runner. A quadratic scan of these bodies is hundreds of times slower than the control, so the
+   * check still catches it while a loaded CI machine no longer fails it.
+   */
+  async function linearBudget(size: number): Promise<number> {
+    const filler = 'x'.repeat(Math.max(0, size - 200));
+    const control = guide(
+      `<programme start="20260101000000" channel="c"><title>${filler}</title></programme>`,
+    );
+    const t = performance.now();
+    await collect(whole(control));
+    return Math.max(2000, (performance.now() - t) * 20);
+  }
+
   it('stays linear on a body of unclosed unknown tags and keeps the next programme', async () => {
     const unclosed = '<a>'.repeat(Math.floor(((1 << 20) - 4096) / 3));
     const text = guide(
       `<programme start="20260101000000" channel="c"><title>Hostile</title>${unclosed}</programme>` +
         `<programme start="20260101010000" channel="c"><title>Next</title></programme>`,
     );
+    const budget = await linearBudget(text.length);
     const t0 = performance.now();
     const r = await collect(whole(text));
-    expect(performance.now() - t0).toBeLessThan(2000);
+    expect(performance.now() - t0).toBeLessThan(budget);
     expect(r.programmes.map((p) => p.title)).toEqual(['Hostile', 'Next']);
     const distinct = Array.from({ length: 50000 }, (_, i) => `<x${i}>`).join('');
-    const t1 = performance.now();
-    const r2 = await collect(
-      whole(
-        guide(
-          `<programme start="20260101000000" channel="c">${distinct}<title>T</title></programme>`,
-        ),
-      ),
+    const distinctText = guide(
+      `<programme start="20260101000000" channel="c">${distinct}<title>T</title></programme>`,
     );
-    expect(performance.now() - t1).toBeLessThan(2000);
+    const distinctBudget = await linearBudget(distinctText.length);
+    const t1 = performance.now();
+    const r2 = await collect(whole(distinctText));
+    expect(performance.now() - t1).toBeLessThan(distinctBudget);
     expect(r2.programmes.map((p) => p.title)).toEqual(['T']);
   });
 
