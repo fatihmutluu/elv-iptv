@@ -12,14 +12,30 @@ const good = {
   sha256: HASH,
 };
 
+const committed = (): ReturnType<typeof parseLock> => {
+  const root = findRepoRoot(import.meta.dirname);
+  return parseLock(
+    JSON.parse(readFileSync(join(root, 'apps/desktop/mpv-runtime.lock.json'), 'utf8')),
+  );
+};
+
 describe('mpv runtime lock', () => {
   it('parses the committed lock', () => {
-    const root = findRepoRoot(import.meta.dirname);
-    const json = JSON.parse(readFileSync(join(root, 'apps/desktop/mpv-runtime.lock.json'), 'utf8'));
-    const entry = parseLock(json)['win32-x64'];
+    const entry = committed()['win32-x64'];
     expect(entry?.sha256).toBe(HASH);
     expect(entry?.kind).toBe('upstream-libmpv');
     expect(entry && 'url' in entry && entry.url.startsWith('https://')).toBe(true);
+  });
+
+  it('pins the macOS runtime to the mpv-runtime.yml artifact of this repository', () => {
+    const entry = committed()['darwin-arm64'];
+    expect(entry).toMatchObject({
+      kind: 'workflow-artifact',
+      mpv: '0.42.0',
+      repo: 'fatihmutluu/elv-iptv',
+      artifact: 'mpv-runtime-darwin-arm64',
+      file: 'mpv-runtime-darwin-arm64.tar.gz',
+    });
   });
 
   it('rejects a sha256 that is not 64 lowercase hex', () => {
