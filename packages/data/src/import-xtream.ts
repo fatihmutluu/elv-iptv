@@ -27,13 +27,46 @@ type ItemKind = 'live' | 'movie' | 'series';
 /** Category id and name of items the provider lists without a category (like M3U's `Ungrouped`). */
 const UNCATEGORIZED = 'Uncategorized';
 
-type Ctx = RunCtx & { client: XtreamClient };
+/**
+ * Clients of one source: `client` bounds bodies to `ImportDeps.maxBodyBytes`; `retries` are tried in turn on a body
+ * over that cap (the same source without the cap; empty when there is no cap).
+ */
+interface Clients {
+  client: XtreamClient;
+  retries: readonly XtreamClient[];
+}
+
+type Ctx = RunCtx & Clients;
+
+const isTooLarge = (e: { category: string; code: string }) =>
+  e.category === 'source-format' && e.code === 'too-large';
+
+/**
+ * Calls `fn` with the capped client and, while the body is over the cap, once more with each retry client: one stall
+ * on an oversized category or series beats a missing catalog.
+ */
+async function withinCap<T>(
+  clients: Clients,
+  fn: (client: XtreamClient) => Promise<Result<T>>,
+): Promise<Result<T>> {
+  let result = await fn(clients.client);
+  for (const client of clients.retries) {
+    if (result.ok || !isTooLarge(result.error)) break;
+    result = await fn(client);
+  }
+  return result;
+}
 
 /** Builds the Xtream client of a source from its secret; `storage/secret-missing` when the secret is unusable. */
 export async function openClient(
   source: SourceRecord,
   deps: ImportDeps,
 ): Promise<Result<XtreamClient>> {
+  const opened = await openClients(source, deps);
+  return opened.ok ? ok(opened.value.client) : opened;
+}
+
+async function openClients(source: SourceRecord, deps: ImportDeps): Promise<Result<Clients>> {
   const raw = await deps.secrets.get(secretKey(source.id, 'xtream')).catch(() => undefined);
   let parsed: { server?: unknown; username?: unknown; password?: unknown } = {};
   try {
@@ -47,8 +80,12 @@ export async function openClient(
   }
   const options: XtreamClientOptions = { http: deps.http, server, username, password };
   if (source.settings.transport !== undefined) options.transport = source.settings.transport;
-  if (deps.maxBodyBytes !== undefined) options.maxBodyBytes = deps.maxBodyBytes;
-  return ok(createXtreamClient(options));
+  if (deps.maxBodyBytes === undefined)
+    return ok({ client: createXtreamClient(options), retries: [] });
+  return ok({
+    client: createXtreamClient({ ...options, maxBodyBytes: deps.maxBodyBytes }),
+    retries: [createXtreamClient(options)],
+  });
 }
 
 async function importCategories(c: Ctx): Promise<Record<ItemKind, XtreamCategory[]>> {
@@ -80,7 +117,7 @@ interface ListSpec<T extends Listed> {
   phase: ImportProgress['phase'];
   countKey: string;
   writer: ItemWriter<T>;
-  fetch(categoryId?: string): Promise<Result<T[]>>;
+  fetch(client: XtreamClient, categoryId?: string): Promise<Result<T[]>>;
 }
 
 async function importList<T extends Listed>(
@@ -135,13 +172,16 @@ async function importList<T extends Listed>(
   }
 
   checkAbort(c);
-  const whole = await spec.fetch();
+  const whole = await spec.fetch(c.client);
   if (whole.ok) {
     await write(whole.value, undefined, whole.value.length);
-  } else if (whole.error.category === 'source-format' && whole.error.code === 'too-large') {
+  } else if (isTooLarge(whole.error)) {
     for (const category of categories) {
       checkAbort(c);
-      await write(unwrap(await spec.fetch(category.id)), category.id);
+      await write(
+        unwrap(await withinCap(c, (client) => spec.fetch(client, category.id))),
+        category.id,
+      );
     }
   } else {
     throw new Stop(whole.error);
@@ -161,7 +201,7 @@ async function execute(c: Ctx): Promise<void> {
       phase: 'live',
       countKey: 'live',
       writer: liveWriter,
-      fetch: (id) => c.client.liveStreams(id, call),
+      fetch: (client, id) => client.liveStreams(id, call),
     },
     cats.live,
   );
@@ -172,7 +212,7 @@ async function execute(c: Ctx): Promise<void> {
       phase: 'movies',
       countKey: 'movies',
       writer: movieWriter,
-      fetch: (id) => c.client.vodStreams(id, call),
+      fetch: (client, id) => client.vodStreams(id, call),
     },
     cats.movie,
   );
@@ -183,7 +223,7 @@ async function execute(c: Ctx): Promise<void> {
       phase: 'series',
       countKey: 'series',
       writer: seriesWriter,
-      fetch: (id) => c.client.series(id, call),
+      fetch: (client, id) => client.series(id, call),
     },
     cats.series,
   );
@@ -197,10 +237,10 @@ async function importXtream(
   deps: ImportDeps,
   opts: ImportOptions,
 ): Promise<Result<ImportSummary>> {
-  const opened = await openClient(source, deps);
+  const opened = await openClients(source, deps);
   if (!opened.ok) return opened;
   return performRun(source, deps, opts, {
-    execute: (base) => execute({ ...base, client: opened.value }),
+    execute: (base) => execute({ ...base, ...opened.value }),
     beforeCleanup: async (tx, c) => {
       await tx.run(KEEP_EPISODES, [c.runId, c.sourceId, c.sourceId, c.runId]);
     },
@@ -226,8 +266,9 @@ export async function importCatalog(
 
 /**
  * Fetches and stores the episodes of one Xtream series (on demand, when the user opens it), replacing the ones
- * stored before. Returns the number of episodes. An unknown series yields `source-format/unknown-series`; a source
- * that is gone (also one removed while the episodes load) yields `storage/source-not-found` and writes nothing.
+ * stored before. An info body over `ImportDeps.maxBodyBytes` is fetched once more without the cap. Returns the
+ * number of episodes. An unknown series yields `source-format/unknown-series`; a source that is gone (also one
+ * removed while the episodes load) yields `storage/source-not-found` and writes nothing.
  */
 export async function loadSeriesEpisodes(
   sourceId: string,
@@ -239,7 +280,7 @@ export async function loadSeriesEpisodes(
   if (source === undefined || source.kind !== 'xtream') {
     return err(elvError('storage', 'source-not-found'));
   }
-  const opened = await openClient(source, deps);
+  const opened = await openClients(source, deps);
   if (!opened.ok) return opened;
   try {
     const row = (
@@ -251,7 +292,8 @@ export async function loadSeriesEpisodes(
     if (row?.provider_id == null) return err(elvError('source-format', 'unknown-series'));
     checkAbort({ signal: opts.signal });
     const call = opts.signal === undefined ? undefined : { signal: opts.signal };
-    const info = unwrap(await opened.value.seriesInfo(Number(row.provider_id), call));
+    const id = Number(row.provider_id);
+    const info = unwrap(await withinCap(opened.value, (client) => client.seriesInfo(id, call)));
     const entries = info.episodes.map((episode) => ({
       key: xtreamKey(sourceId, 'episode', episode.id),
       episode,
