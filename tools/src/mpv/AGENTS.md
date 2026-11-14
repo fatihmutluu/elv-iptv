@@ -17,3 +17,8 @@
   `LoadLibraryExW` from the exe folder, so the DLL stays replaceable (LGPL). Without Build Tools fetch fails clearly.
 - Launcher contract: `--name=value`, `--name` (yes) and `--no-name` (no) become libmpv options; `--elv-parent-pid=<pid>`
   makes it quit mpv when that process exits. Exit codes: 2 bad argument or rejected option, 3 libmpv missing, 4 init failed.
+- Hardening: before the caller's arguments the launcher sets `config=no`, `load-scripts=no`, `ytdl=no` and
+  `load-unsafe-playlists=no` (the caller may override). The OSC is built in and still runs (`user-data/osc` exists).
+  A watchdog thread ends the process 3 s after quit or shutdown starts. Exit 5: the parent pid cannot be opened.
+  Manual check for the watchdog (no automated test can force a stuck shutdown): play from a socket that accepts and
+  never answers, kill the parent, and confirm `elv-mpv.exe` is gone within about 4 s.

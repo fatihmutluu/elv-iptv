@@ -2,7 +2,8 @@
  * elv-mpv: a small host that loads the official LGPL libmpv-2.dll from its own folder (dynamically, so the
  * DLL stays replaceable), hands it the --name=value, --name and --no-name options, and runs until mpv shuts
  * down or the process named by --elv-parent-pid exits. Exit codes: 0 normal, 2 bad argument or rejected
- * option, 3 libmpv or a symbol missing, 4 mpv_initialize failed. It never prints its arguments.
+ * option, 3 libmpv or a symbol missing, 4 mpv_initialize failed, 5 parent pid not openable. It never prints
+ * its arguments. A watchdog ends the process 3 s after quit or shutdown begins, whatever mpv is doing.
  */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -48,6 +49,21 @@ static HMODULE load_libmpv(void)
     return LoadLibraryExW(path, NULL, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
 }
 
+/* Hard stop: a stalled provider connection must never keep this process (and its pipe) alive. */
+static DWORD WINAPI watchdog(LPVOID ms)
+{
+    Sleep((DWORD)(ULONG_PTR)ms);
+    TerminateProcess(GetCurrentProcess(), 1);
+    return 0;
+}
+
+static void arm_watchdog(DWORD ms)
+{
+    HANDLE t = CreateThread(NULL, 0, watchdog, (LPVOID)(ULONG_PTR)ms, 0, NULL);
+    if (t)
+        CloseHandle(t);
+}
+
 /* Returns 0, or 2 when an argument is malformed or mpv rejects it. */
 static int apply_args(int argc, wchar_t **argv, set_option_string_fn set_option, mpv_handle *h, DWORD *parent_pid)
 {
@@ -61,9 +77,9 @@ static int apply_args(int argc, wchar_t **argv, set_option_string_fn set_option,
             return 2;
         arg += 2;
         if (wcsncmp(arg, L"elv-parent-pid=", 15) == 0) {
-            wchar_t *end;
-            unsigned long pid = wcstoul(arg + 15, &end, 10);
-            if (end == arg + 15 || *end != L'\0' || pid == 0)
+            wchar_t *end = (wchar_t *)arg;
+            unsigned long pid = iswdigit(arg[15]) ? wcstoul(arg + 15, &end, 10) : 0;
+            if (pid == 0 || *end != L'\0')
                 return 2;
             *parent_pid = (DWORD)pid;
             continue;
@@ -121,22 +137,25 @@ int wmain(int argc, wchar_t **argv)
     if (!h)
         return 3;
 
+    /* Hardened defaults first; the caller's arguments may still override them. */
+    set_option(h, "config", "no");
+    set_option(h, "load-scripts", "no");
+    set_option(h, "ytdl", "no");
+    set_option(h, "load-unsafe-playlists", "no");
     set_option(h, "input-default-bindings", "yes");
     set_option(h, "input-vo-keyboard", "yes");
     set_option(h, "osc", "yes");
     code = apply_args(argc, argv, set_option, h, &parent_pid);
+    if (code == 0 && parent_pid != 0 && !(parent = OpenProcess(SYNCHRONIZE, FALSE, parent_pid)))
+        code = 5;
     if (code == 0 && initialize(h) < 0)
         code = 4;
     if (code != 0) {
+        arm_watchdog(3000);
         destroy(h);
         return code;
     }
 
-    if (parent_pid != 0) {
-        parent = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
-        if (!parent)
-            command(h, "quit");
-    }
     for (;;) {
         mpv_event *ev = wait_event(h, 0.25);
         if (ev->event_id == MPV_EVENT_SHUTDOWN)
@@ -144,11 +163,13 @@ int wmain(int argc, wchar_t **argv)
         if (parent && WaitForSingleObject(parent, 0) == WAIT_OBJECT_0) {
             CloseHandle(parent);
             parent = NULL;
+            arm_watchdog(3000);
             command(h, "quit");
         }
     }
     if (parent)
         CloseHandle(parent);
+    arm_watchdog(3000);
     destroy(h);
     return 0;
 }

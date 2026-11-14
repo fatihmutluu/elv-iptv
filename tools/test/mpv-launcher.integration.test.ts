@@ -100,6 +100,41 @@ describe.skipIf(!enabled)('elv-mpv.exe', () => {
     expect(Date.now() - t0).toBeLessThan(2000);
   }, 15000);
 
+  it('starts hardened without any caller flags and still runs the OSC', async () => {
+    const pipe = `\\\\.\\pipe\\elv-test-${randomBytes(6).toString('hex')}`;
+    const child = spawn(
+      exe,
+      ['--idle=yes', '--vo=null', '--ao=null', `--input-ipc-server=${pipe}`],
+      { stdio: 'ignore' },
+    );
+    children.push(child);
+    for (const [name, want] of [
+      ['config', false],
+      ['load-scripts', false],
+      ['ytdl', false],
+      ['load-unsafe-playlists', false],
+    ] as const) {
+      expect(JSON.parse(await ask(pipe, ['get_property', name])).data).toBe(want);
+    }
+    const osc = JSON.parse(await ask(pipe, ['get_property', 'user-data/osc']));
+    expect(osc.data.visibility).toBe('auto');
+  });
+
+  it('lets the caller override a hardened default', async () => {
+    const { pipe } = start(['--ytdl=yes']);
+    expect(JSON.parse(await ask(pipe, ['get_property', 'ytdl'])).data).toBe(true);
+  });
+
+  it('rejects a parent pid that does not start with a digit with exit code 2', async () => {
+    const { child } = start(['--elv-parent-pid=+5']);
+    expect(await exited(child)).toBe(2);
+  });
+
+  it('exits 5 when the parent pid cannot be opened', async () => {
+    const { child } = start(['--elv-parent-pid=4000000']);
+    expect(await exited(child)).toBe(5);
+  });
+
   it('rejects an unknown option with exit code 2', async () => {
     const { child } = start(['--no-such-option-elv=1']);
     expect(await exited(child)).toBe(2);
