@@ -330,13 +330,15 @@ jobs:
           app=$(find build/Build/Products/Release-appletvsimulator -maxdepth 1 -name '*.app' | head -n 1)
           test -n "$app" || { echo "no .app found"; exit 1; }
           xcrun simctl install "$udid" "$app"
+          bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
           log="$RUNNER_TEMP/gate-tvos-log.txt"
           : > "$log"
           xcrun simctl spawn "$udid" log stream --style compact --level debug \
             --predicate 'eventMessage CONTAINS "ELV_GATE"' > "$log" 2>&1 &
           stream_pid=$!
           sleep 3
-          xcrun simctl openurl "$udid" "$GATE_URL"
+          # A launch argument, not `simctl openurl`: tvOS asks "Open in …?" for a URL and nobody presses Open (#44).
+          xcrun simctl launch "$udid" "$bundle_id" -gateUrl "$GATE_URL"
           out="$GITHUB_WORKSPACE/gate-tvos.txt"
           found=""
           for _ in $(seq 1 120); do
