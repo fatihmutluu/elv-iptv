@@ -189,8 +189,9 @@ class Media3Engine(
     val current = player ?: return
     current.stop()
     beginGeneration()
-    reporter.begin(current, next.live)
-    val source = createMediaSource(next, gate, generation)
+    val manifestLoaded = AtomicBoolean(false)
+    reporter.begin(current, next.live, manifestLoaded)
+    val source = createMediaSource(next, gate, generation, manifestLoaded)
     if (positionMs == null) current.setMediaSource(source, true) else current.setMediaSource(source, positionMs)
     current.playWhenReady = true
     current.prepare()

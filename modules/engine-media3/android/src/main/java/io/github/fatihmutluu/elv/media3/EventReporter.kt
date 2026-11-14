@@ -6,8 +6,10 @@ import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
+import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TICK_MS = 1_000L
 
@@ -39,13 +41,18 @@ internal class EventReporter(
   private var played = false
   private var stalled = false
   private var anchoredRate: Float? = null
+  private var manifestLoaded: AtomicBoolean? = null
   private val tick = Runnable { player?.let { anchor(it) } }
 
-  /** Starts reporting a new prepare of [player]: forgets the previous one and reports `opening`. */
-  fun begin(player: Player, live: Boolean) {
+  /**
+   * Starts reporting a new prepare of [player]: forgets the previous one and reports `opening`. [manifestLoaded] is
+   * set once the media's timeline is known.
+   */
+  fun begin(player: Player, live: Boolean, manifestLoaded: AtomicBoolean) {
     end()
     this.player = player
     this.live = live
+    this.manifestLoaded = manifestLoaded
     active = true
     sendState("opening")
   }
@@ -73,6 +80,12 @@ internal class EventReporter(
     ) {
       update(player)
     }
+  }
+
+  /** `setMediaSource` publishes a placeholder window at once; the source's own window arrives with its manifest. */
+  override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+    if (!active || reason != Player.TIMELINE_CHANGE_REASON_SOURCE_UPDATE || timeline.isEmpty) return
+    if (!timeline.getWindow(0, Timeline.Window()).isPlaceholder) manifestLoaded?.set(true)
   }
 
   override fun onPositionDiscontinuity(

@@ -3,13 +3,12 @@
 Android-only Expo module: the Media3 1.11.1 `PlayerEngine` (player core spec 6.1); the surface view comes in Task 6.
 
 ## API and contract
-- `createMedia3Engine(): PlayerEngine | null` (`src/index.ts`); `null` where the native module `ElvEngineMedia3` is
-  absent. Each call creates a native `Engine` shared object; `release()` frees it (later calls are no-ops).
-- Native: commands `load(flattened LoadCommand)`, `retry`, `play`, `pause`, `seek`, `stop`, `recreate`, event
-  `onEngineEvent` (an `EngineEvent` whose `atMs` values are uptime stamps), sync `uptimeMs()`. TS maps
-  `atMs = performance.now() - max(0, uptimeMs() - atMs)` per event, like `@elv/remote-keys`.
-- Capabilities: TS, HLS, software audio and recreate yes; live seek and track selection no. Token: `load` takes its
-  token, every other command adopts a newer one; events carry the token current when sent.
+- `createMedia3Engine(): PlayerEngine | null` (`src/index.ts`), `null` without the native module `ElvEngineMedia3`;
+  each call creates a native `Engine` shared object, `release()` frees it (later calls are no-ops).
+- Native: `load(flattened LoadCommand)`, `retry`, `play`, `pause`, `seek`, `stop`, `recreate`, event `onEngineEvent`
+  (`atMs` in uptime), sync `uptimeMs()`; TS maps `atMs = performance.now() - max(0, uptimeMs() - atMs)` per event.
+- Capabilities: TS, HLS, software audio and recreate yes; live seek and track selection no. `load` takes its token,
+  other commands adopt a newer one; events carry the token current when sent.
 
 ## Threading
 - ExoPlayer lives on the engine's `HandlerThread` (its application looper), built at creation; JS calls post there
@@ -32,8 +31,9 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` (player core spec 6.1
 ## Connection gate (`ConnectionGate.kt`, `GatedDataSource.kt`)
 - Every prepare and `stop` begins a new generation. Each request's `open` waits until no older generation has an open
   connection; after 1,000 ms it force-closes them (`Log.w`). A superseded generation's `open` is refused.
-- HTTP: default data source, `User-Agent` and other `LoadCommand.headers`, cross-protocol redirects. HTTP status errors,
-  notices and refused requests fail at once (the service owns retries); other I/O keeps Media3's retries.
+- HTTP: default data source, `User-Agent` and other `LoadCommand.headers`, cross-protocol redirects. `failsAtOnce`: an
+  HTTP status skips Media3's retries on progressive media and before the first HLS manifest; then HLS segments and
+  refreshes retry except 401/403/429/509. Notices and refused requests always fail at once; other I/O retries.
 
 ## Errors, redaction, load control
 - `mapError`: 401/403/404/429/509 keep `http-<code>`, other statuses `http-other`; a 2xx notice body (`text/*` on

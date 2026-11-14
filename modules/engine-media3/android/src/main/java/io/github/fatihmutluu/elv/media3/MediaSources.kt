@@ -18,6 +18,7 @@ import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.text.SubtitleParser
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import androidx.media3.extractor.ts.TsExtractor
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** One `load`: what to play and how. Built from the JavaScript `LoadCommand`; never persisted. */
 internal data class LoadRequest(
@@ -34,7 +35,7 @@ private const val TS_FLAGS =
 
 private fun tsCapableFactory(): DefaultExtractorsFactory = DefaultExtractorsFactory().setTsExtractorFlags(TS_FLAGS)
 
-/** Only the MPEG-TS extractor, configured like [DefaultExtractorsFactory] does it, so nothing else sniffs the stream. */
+/** Only the MPEG-TS extractor, configured as [DefaultExtractorsFactory] does it, so nothing else sniffs the stream. */
 @OptIn(UnstableApi::class)
 private class TsOnlyExtractorsFactory : ExtractorsFactory {
   private val delegate = tsCapableFactory()
@@ -54,25 +55,35 @@ private class TsOnlyExtractorsFactory : ExtractorsFactory {
 }
 
 /**
- * HTTP status errors, provider notices and superseded requests fail at once instead of Media3's silent retries: the
- * playback service owns recovery, and a retry would open another provider connection. Other I/O errors keep the
- * default retries, which ride out short network drops (ladder rung 0).
+ * Applies [failsAtOnce]: a failure the playback service must see goes to it at once instead of Media3's silent
+ * retries, which would also open more provider connections. [manifestLoaded] turns true once the media's timeline
+ * is known (the first HLS manifest loaded).
  */
 @OptIn(UnstableApi::class)
-private object ServiceOwnedRetryPolicy : DefaultLoadErrorHandlingPolicy() {
-  override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long =
-    when (loadErrorInfo.exception) {
-      is HttpDataSource.InvalidResponseCodeException,
-      is HttpDataSource.InvalidContentTypeException,
-      is SupersededMediaException,
-      -> C.TIME_UNSET
-      else -> super.getRetryDelayMsFor(loadErrorInfo)
+private class ServiceOwnedRetryPolicy(
+  private val hls: Boolean,
+  private val manifestLoaded: AtomicBoolean,
+) : DefaultLoadErrorHandlingPolicy() {
+  override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
+    val error = loadErrorInfo.exception
+    val refused = error is HttpDataSource.InvalidContentTypeException || error is SupersededMediaException
+    val status = (error as? HttpDataSource.InvalidResponseCodeException)?.responseCode
+    return if (failsAtOnce(status, refused, hls, manifestLoaded.get())) {
+      C.TIME_UNSET
+    } else {
+      super.getRetryDelayMsFor(loadErrorInfo)
     }
+  }
 }
 
 /** Builds the media source of one generation: every request passes the connection gate. */
 @OptIn(UnstableApi::class)
-internal fun createMediaSource(request: LoadRequest, gate: ConnectionGate, generation: Long): MediaSource {
+internal fun createMediaSource(
+  request: LoadRequest,
+  gate: ConnectionGate,
+  generation: Long,
+  manifestLoaded: AtomicBoolean,
+): MediaSource {
   val type = sourceTypeFor(request.url, request.live)
   val userAgentKey = request.headers.keys.firstOrNull { it.equals("User-Agent", ignoreCase = true) }
   val http = DefaultHttpDataSource.Factory()
@@ -86,5 +97,6 @@ internal fun createMediaSource(request: LoadRequest, gate: ConnectionGate, gener
     SourceType.HLS -> HlsMediaSource.Factory(dataSources)
     SourceType.TS -> ProgressiveMediaSource.Factory(dataSources, TsOnlyExtractorsFactory())
     SourceType.PROGRESSIVE -> ProgressiveMediaSource.Factory(dataSources, tsCapableFactory())
-  }.setLoadErrorHandlingPolicy(ServiceOwnedRetryPolicy).createMediaSource(item)
+  }.setLoadErrorHandlingPolicy(ServiceOwnedRetryPolicy(type == SourceType.HLS, manifestLoaded))
+    .createMediaSource(item)
 }
