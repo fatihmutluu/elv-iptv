@@ -560,12 +560,16 @@ describe('recovery hooks', () => {
         },
       }),
     });
+    expect(vi.getTimerCount()).toBe(0);
     s.tune(tuneReq('A'));
     await flush();
+    expect(vi.getTimerCount()).toBe(1);
     s.tune(tuneReq('B'));
     await flush();
+    expect(vi.getTimerCount()).toBe(1);
     s.tune(tuneReq('C'));
     await flush();
+    expect(vi.getTimerCount()).toBe(1);
     await vi.advanceTimersByTimeAsync(20000);
     expect(timeouts).toBe(1);
     expect(vi.getTimerCount()).toBe(0);
