@@ -1,6 +1,7 @@
 package io.github.fatihmutluu.elv.remotekeys
 
 import android.view.KeyEvent
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
@@ -9,6 +10,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class KeyForwardingTest {
+  @After
+  fun clearSink() {
+    val probe: (Map<String, Any>) -> Unit = {}
+    KeyForwarding.setSink(probe)
+    KeyForwarding.clearSink(probe)
+  }
+
   @Test
   fun `first down is forwarded`() {
     assertEquals("down", KeyForwarding.action(KeyEvent.ACTION_DOWN, 0, 0))
@@ -41,6 +49,12 @@ class KeyForwardingTest {
   }
 
   @Test
+  fun `keys injected by a soft keyboard are dropped`() {
+    assertNull(KeyForwarding.action(KeyEvent.ACTION_DOWN, 0, KeyEvent.FLAG_SOFT_KEYBOARD))
+    assertNull(KeyForwarding.action(KeyEvent.ACTION_UP, 0, KeyEvent.FLAG_SOFT_KEYBOARD))
+  }
+
+  @Test
   fun `key payload carries the event time and the canceled flag`() {
     assertEquals(
       mapOf("action" to "down", "keyCode" to 20, "canceled" to false, "eventTime" to 123456.0),
@@ -50,6 +64,15 @@ class KeyForwardingTest {
       mapOf("action" to "up", "keyCode" to 23, "canceled" to true, "eventTime" to 7.0),
       KeyForwarding.payload("up", 23, KeyEvent.FLAG_CANCELED, 7L),
     )
+  }
+
+  @Test
+  fun `the after hook leaves no sink behind`() {
+    val events = mutableListOf<Map<String, Any>>()
+    KeyForwarding.setSink { events.add(it) }
+    clearSink()
+    KeyForwarding.emit(mapOf("action" to "blur"))
+    assertEquals(emptyList<Map<String, Any>>(), events)
   }
 
   @Test
