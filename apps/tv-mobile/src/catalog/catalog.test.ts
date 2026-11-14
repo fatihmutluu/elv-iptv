@@ -17,10 +17,22 @@ describe('sources', () => {
     const e = await env();
     const id = await demo(e);
     expect(await e.service.listSources()).toEqual([
-      { id, kind: 'xtream', name: 'Main', createdAt: 1_000 },
+      { id, kind: 'xtream', name: 'Main', createdAt: 1_000, needsImport: false },
     ]);
     const live = await e.service.categories(id, 'live');
     expect(live.length).toBeGreaterThan(0);
+  });
+
+  it('marks a source for import until an import succeeded', async () => {
+    const e = await env();
+    const id = await addAccount(e, sim.url());
+    expect((await e.service.listSources())[0]?.needsImport).toBe(true);
+    const controller = new AbortController();
+    controller.abort();
+    await e.service.importSource(id, { signal: controller.signal });
+    expect((await e.service.listSources())[0]?.needsImport).toBe(true);
+    must(await e.service.importSource(id));
+    expect((await e.service.listSources())[0]?.needsImport).toBe(false);
   });
 
   it('adds a source from a pasted link', async () => {

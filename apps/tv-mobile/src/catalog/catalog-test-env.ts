@@ -40,7 +40,7 @@ export interface Env {
 
 /** Opens a migrated in-memory catalog with a recording `setAbortSignal` and wires a service over it. Test helper. */
 export async function env(
-  overrides: Partial<CatalogDeps> = {},
+  overrides: Partial<CatalogDeps> & { secrets?: ReturnType<typeof memorySecrets> } = {},
   wrap: (db: SqlDriver) => SqlDriver = (db) => db,
 ): Promise<Env> {
   const t = testDb();
@@ -49,17 +49,18 @@ export async function env(
   const db = wrap(Object.assign(t.db, { setAbortSignal }) as SqlDriver);
   const { openCatalog } = await import('@elv/data');
   await openCatalog(db);
-  const secrets = memorySecrets();
   let n = 0;
-  const service = createCatalogService({
+  const deps: CatalogDeps = {
     db,
-    secrets,
+    secrets: memorySecrets(),
     scheduler: countingScheduler(),
     http,
     clock: () => 1_000,
     newId: () => `src${++n}`,
     ...overrides,
-  });
+  };
+  const secrets = overrides.secrets ?? (deps.secrets as ReturnType<typeof memorySecrets>);
+  const service = createCatalogService(deps);
   return { service, db, raw: t.raw, secrets, setAbortSignal };
 }
 

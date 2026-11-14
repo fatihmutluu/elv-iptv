@@ -3,10 +3,11 @@ import { createFakeOpSqlite } from './op-sqlite-fake';
 
 const fake = vi.hoisted(() => ({ current: undefined as unknown }));
 vi.mock('@op-engineering/op-sqlite', () => ({
+  IOS_LIBRARY_PATH: '/app/Library',
   open: (o: { name: string }) => (fake.current as { open(o: unknown): unknown }).open(o),
 }));
 
-import { createOpSqliteDriver, splitSqlStatements } from './sql-driver';
+import { createOpSqliteDriver, databaseLocation, splitSqlStatements } from './sql-driver';
 
 async function setup() {
   const f = createFakeOpSqlite();
@@ -29,10 +30,25 @@ describe('splitSqlStatements', () => {
   });
 });
 
+describe('databaseLocation', () => {
+  it('puts databases in Library/Caches on Apple platforms and in the default directory elsewhere', () => {
+    expect(databaseLocation('ios')).toBe('/app/Library/Caches');
+    expect(databaseLocation('android')).toBeUndefined();
+  });
+});
+
 describe('createOpSqliteDriver', () => {
   it('opens a writer and a reader on the same file', async () => {
     const { f } = await setup();
     expect(f.opened).toEqual([{ name: 'catalog.db' }, { name: 'catalog.db' }]);
+  });
+
+  it('opens both connections in the given location', async () => {
+    const f = createFakeOpSqlite();
+    fake.current = f;
+    await createOpSqliteDriver('catalog.db', '/app/Library/Caches');
+    const where = { name: 'catalog.db', location: '/app/Library/Caches' };
+    expect(f.opened).toEqual([where, where]);
   });
 
   it('exec splits statements outside literals', async () => {

@@ -1,5 +1,5 @@
 import type { SqlDriver, SqlRunResult, SqlValue } from '@elv/domain';
-import { open } from '@op-engineering/op-sqlite';
+import { IOS_LIBRARY_PATH, open } from '@op-engineering/op-sqlite';
 
 /** The result of one op-sqlite statement. */
 interface OpResult {
@@ -104,13 +104,27 @@ export interface OpSqliteDriver extends SqlDriver {
 }
 
 /**
- * Opens `name` twice (WAL): a writer for writes and transactions and a reader for plain `all` calls, so list
- * queries are not queued behind an import batch. Each connection has its own promise queue; `transaction`
- * hands out a `tx` that bypasses the queue, rejects nesting, and lets `batch` join it.
+ * The op-sqlite `location` of the app's databases for `Platform.OS`: `Library/Caches` on Apple platforms (iOS, iPadOS,
+ * tvOS), because tvOS hardware gives apps only purgeable storage and iOS backs `Library` up to iCloud; `undefined`
+ * (op-sqlite's default databases directory) on Android.
  */
-export async function createOpSqliteDriver(name: string): Promise<OpSqliteDriver> {
-  const writer = open({ name }) as unknown as OpConnection;
-  const reader = open({ name }) as unknown as OpConnection;
+export function databaseLocation(os: string): string | undefined {
+  return os === 'ios' ? `${IOS_LIBRARY_PATH}/Caches` : undefined;
+}
+
+/**
+ * Opens `name` twice (WAL) in `location` (an absolute directory; op-sqlite's default when omitted): a writer for writes
+ * and transactions and a reader for plain `all` calls, so list queries are not queued behind an import batch. Each
+ * connection has its own promise queue; `transaction` hands out a `tx` that bypasses the queue, rejects nesting, and
+ * lets `batch` join it.
+ */
+export async function createOpSqliteDriver(
+  name: string,
+  location?: string,
+): Promise<OpSqliteDriver> {
+  const options = location === undefined ? { name } : { name, location };
+  const writer = open(options) as unknown as OpConnection;
+  const reader = open(options) as unknown as OpConnection;
   let signal: AbortSignal | undefined;
   const onAbort = () => {
     writer.interrupt();

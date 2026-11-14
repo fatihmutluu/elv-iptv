@@ -29,6 +29,7 @@ import {
   transportHeaders,
 } from '@elv/domain';
 import { createXtreamClient } from '@elv/sources';
+import { type ManifestStore, saveManifest } from './manifest';
 import {
   type BrowseKind,
   type CategoryRow,
@@ -44,6 +45,7 @@ import {
   type SeasonRow,
 } from './queries';
 
+export type { ManifestEntry, ManifestStore } from './manifest';
 export type { BrowseKind, CategoryRow, EpisodeRow, ItemRow, SeasonRow } from './queries';
 
 /**
@@ -69,6 +71,8 @@ export interface CatalogDeps {
   clock: () => number;
   /** A new source id of letters, digits, `.`, `-` and `_`; defaults to clock plus random digits. */
   newId?: () => string;
+  /** Apple platforms: rewritten after every add, remove and import (see `reconcileManifest`). */
+  manifest?: ManifestStore;
 }
 
 /** A source as the menu shows it. */
@@ -77,6 +81,11 @@ export interface SourceRow {
   kind: SourceKind;
   name: string;
   createdAt: number;
+  /**
+   * No catalog import of the source has succeeded yet: a new source, or one restored from the manifest after the OS
+   * purged the caches. The menu imports it.
+   */
+  needsImport: boolean;
 }
 
 /** Input of {@link CatalogService.addSource}. */
@@ -123,7 +132,12 @@ const row = (r: SourceRecord): SourceRow => ({
   kind: r.kind,
   name: r.name,
   createdAt: r.createdAt,
+  needsImport: true,
 });
+
+const LIST_SOURCES = `SELECT s.id, s.kind, s.name, s.created_at,
+  EXISTS (SELECT 1 FROM import_runs r WHERE r.source_id = s.id AND r.kind = 'catalog' AND r.status = 'ok') AS imported
+  FROM sources s ORDER BY s.created_at, s.id`;
 
 const notFound = () => err(elvError('storage', 'item-not-found'));
 
@@ -161,10 +175,14 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
   const abortable = db as SqlDriver & AbortBindable;
   const importing = new Set<string>();
   let lastImport: Promise<void> = Promise.resolve();
+  const { manifest } = deps;
+  const syncManifest = () => (manifest === undefined ? undefined : saveManifest(db, manifest));
 
   const mapped = async (p: Promise<Result<SourceRecord>>): Promise<Result<SourceRow>> => {
     const r = await p;
-    return r.ok ? ok(row(r.value)) : r;
+    if (!r.ok) return r;
+    await syncManifest();
+    return ok(row(r.value));
   };
 
   async function logoOf(items: ItemRow[], sourceId: string): Promise<ItemRow[]> {
@@ -217,7 +235,11 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
         input.kind === 'xtream' ? addXtreamSource(input, addDeps) : addM3uSource(input, addDeps),
       ),
     addSourceFromLink: (input) => mapped(addSourceFromLink(input, addDeps)),
-    removeSource: (id) => removeSource(id, { db, secrets }),
+    async removeSource(id) {
+      const removed = await removeSource(id, { db, secrets });
+      await syncManifest();
+      return removed;
+    },
 
     async importSource(id, opts = {}) {
       if (importing.has(id)) return err(elvError('storage', 'import-in-progress'));
@@ -241,14 +263,25 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       } finally {
         importing.delete(id);
         finished();
+        await syncManifest();
       }
     },
 
     async listSources() {
-      const rows = await db.all<{ id: string; kind: SourceKind; name: string; created_at: number }>(
-        'SELECT id, kind, name, created_at FROM sources ORDER BY created_at, id',
-      );
-      return rows.map((r) => ({ id: r.id, kind: r.kind, name: r.name, createdAt: r.created_at }));
+      const rows = await db.all<{
+        id: string;
+        kind: SourceKind;
+        name: string;
+        created_at: number;
+        imported: number;
+      }>(LIST_SOURCES);
+      return rows.map((r) => ({
+        id: r.id,
+        kind: r.kind,
+        name: r.name,
+        createdAt: r.created_at,
+        needsImport: r.imported === 0,
+      }));
     },
 
     categories: (sourceId, kind) => queryCategories(db, sourceId, kind),

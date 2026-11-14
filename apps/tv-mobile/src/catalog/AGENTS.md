@@ -6,6 +6,10 @@ The device catalog: `@elv/data` over the storage adapters, behind one `CatalogSe
 - `createCatalogService(deps)` (`catalog.ts`) is plain TypeScript with `db`, `secrets`, `scheduler`, `http`, `clock` (and optional `newId`) injected;
   it imports no native module. `createDeviceCatalog()` (`device.ts`) wires the real adapters, opens `catalog.db` once per process
   (a failed open rejects with `CatalogOpenError` and is retried by the next call) and is only smoke-tested with mocked adapters.
+- Location: `Library/Caches` on iOS, iPadOS and tvOS (tvOS hardware allows only purgeable storage; iOS `Library` is backed up), the databases
+  directory on Android. Apple builds pass `manifest` (`Settings` key `elv.catalog.sources`): ids, kinds, names, `createdAt`, `settings_json`,
+  never credentials, rewritten after every add, remove and import. `reconcileManifest` (`manifest.ts`) runs after `openCatalog`: an empty
+  database gets the manifest's sources back with the same ids (content and secret keys match); `SourceRow.needsImport` stays true until an import succeeds.
 - Xtream bodies are capped at `DEVICE_MAX_BODY_BYTES` (4 MiB; `importSource` option `maxBodyBytes` overrides): longer lists load per category,
   and a category or series info still over the cap is fetched once more without it (`@elv/data`). Trade-off (spec 5.3): per-category calls roughly double the large import (about 9 s whole, 19 s capped) but keep the longest JS stall near 45 ms; raising the cap brings back the ~1.2 s
   whole-list `JSON.parse` stall (16 MiB: 1267 ms). Streaming parsing would remove the cap; #76 tracks it (and the 190 ms stall of the `huge` account).

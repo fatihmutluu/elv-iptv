@@ -7,6 +7,7 @@ import {
   createMacrotaskScheduler,
   createOpSqliteDriver,
   createSecureSecretStore,
+  databaseLocation,
 } from '../../storage';
 import type { ImportParams } from './route';
 import { type ImportResult, importLine, runImport } from './run-import';
@@ -14,7 +15,10 @@ import { startStallMeter } from './stall-meter';
 
 async function run(params: ImportParams): Promise<ImportResult> {
   // A new database file per run, so a run never reuses the rows of an earlier one (development builds only).
-  const db = await createOpSqliteDriver(`gate-import-${Date.now()}.db`);
+  const db = await createOpSqliteDriver(
+    `gate-import-${Date.now()}.db`,
+    databaseLocation(Platform.OS),
+  );
   const opened = await openCatalog(db);
   if (!opened.ok) {
     const error = `${opened.error.category}/${opened.error.code}`;
