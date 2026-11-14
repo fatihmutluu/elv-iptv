@@ -1,7 +1,7 @@
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow, ipcMain, net, protocol, type WebContents } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, net, protocol, type WebContents } from 'electron';
 import { APP_ORIGIN, APP_SCHEME } from './app-protocol.ts';
 import { createEngineFor } from './player/factory.ts';
 import { registerPlayerIpc } from './player/ipc.ts';
@@ -78,6 +78,8 @@ const hasLock = startSingleInstance(app, {
 
 if (hasLock) {
   void app.whenReady().then(async () => {
+    // The default menu reloads the page on Ctrl+R / Cmd+R; development keeps it for the developer tools.
+    if (app.isPackaged) Menu.setApplicationMenu(null);
     serveRenderer();
     await startPlayer();
     createWindow();

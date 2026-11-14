@@ -26,14 +26,23 @@ function fakeIpcMain() {
   };
 }
 
+interface Navigation {
+  isMainFrame: boolean;
+  isSameDocument: boolean;
+}
+
 interface FakeContents extends WebContentsLike {
   sent: Array<{ channel: string; payload: unknown }>;
   destroy(): void;
+  navigate(details: Navigation): void;
+  crash(): void;
 }
 
 function fakeContents(id: number): FakeContents {
   let destroyed = false;
   const onDestroyed: Array<() => void> = [];
+  const onNavigate: Array<(d: Navigation) => void> = [];
+  const onCrash: Array<() => void> = [];
   return {
     id,
     sent: [],
@@ -42,6 +51,16 @@ function fakeContents(id: number): FakeContents {
       this.sent.push({ channel, payload });
     },
     once: (_event, listener) => void onDestroyed.push(listener),
+    on(event: string, listener: unknown) {
+      if (event === 'did-start-navigation') onNavigate.push(listener as (d: Navigation) => void);
+      else onCrash.push(listener as () => void);
+    },
+    navigate(details: Navigation) {
+      for (const l of onNavigate) l(details);
+    },
+    crash() {
+      for (const l of onCrash) l();
+    },
     destroy() {
       destroyed = true;
       for (const l of onDestroyed) l();
@@ -52,6 +71,8 @@ function fakeContents(id: number): FakeContents {
 interface StubEngine extends MpvEngine {
   calls: unknown[][];
   released: number;
+  started: number;
+  onStart?: () => void;
   emit(event: EngineEvent): void;
 }
 
@@ -60,6 +81,12 @@ function stubEngine(): StubEngine {
   const e = {
     calls: [] as unknown[][],
     released: 0,
+    started: 0,
+    onStart: undefined as (() => void) | undefined,
+    start: () => {
+      e.started += 1;
+      e.onStart?.();
+    },
     capabilities: {},
     spawns: 0,
     loadMode: 'replace',
@@ -126,8 +153,123 @@ describe('registerPlayerIpc', () => {
     expect(reply.engineId).toEqual(expect.any(String));
     expect(reply.mainNowMs).toBe(777);
     expect(t.createEngine).toHaveBeenCalledWith(a, expect.any(Function));
-    const other = await open(t, a);
-    expect(other.engineId).not.toBe(reply.engineId);
+  });
+
+  it('a second open from the same window releases the first engine', async () => {
+    const t = setup();
+    const a = fakeContents(1);
+    const b = fakeContents(2);
+    const first = await open(t, a);
+    await open(t, b);
+    const second = await open(t, a);
+    expect(second.engineId).not.toBe(first.engineId);
+    expect(t.engines.map((e) => e.released)).toEqual([1, 0, 0]);
+    t.emit(PLAYER_CHANNELS.command, a, {
+      engineId: first.engineId,
+      command: { name: 'stop', attempt: 1 },
+    });
+    expect(t.engines[0]?.calls).toEqual([]);
+  });
+
+  it('starts the engine after subscribing, so its first events reach the renderer', async () => {
+    const t = setup();
+    const a = fakeContents(1);
+    t.createEngine.mockImplementationOnce(async () => {
+      const engine = stubEngine();
+      engine.onStart = () => engine.emit({ attempt: 0, type: 'surface', change: 'created' });
+      t.engines.push(engine);
+      return engine;
+    });
+    const reply = await open(t, a);
+    expect(t.engines[0]?.started).toBe(1);
+    expect(a.sent).toEqual([
+      {
+        channel: PLAYER_CHANNELS.event,
+        payload: {
+          engineId: reply.engineId,
+          event: { attempt: 0, type: 'surface', change: 'created' },
+        },
+      },
+    ]);
+  });
+
+  it('does not start an engine whose window died while it was being created', async () => {
+    const t = setup();
+    const a = fakeContents(1);
+    t.createEngine.mockImplementationOnce(async () => {
+      const engine = stubEngine();
+      t.engines.push(engine);
+      a.destroy();
+      return engine;
+    });
+    await expect(open(t, a)).rejects.toThrow();
+    expect(t.engines[0]?.started).toBe(0);
+  });
+
+  it('a main-frame cross-document navigation releases the window engines', async () => {
+    const t = setup();
+    const a = fakeContents(1);
+    await open(t, a);
+    a.navigate({ isMainFrame: false, isSameDocument: false });
+    a.navigate({ isMainFrame: true, isSameDocument: true });
+    expect(t.engines[0]?.released).toBe(0);
+    a.navigate({ isMainFrame: true, isSameDocument: false });
+    expect(t.engines[0]?.released).toBe(1);
+    await open(t, a);
+    expect(t.engines[1]?.released).toBe(0);
+  });
+
+  it('a renderer crash releases the window engines', async () => {
+    const t = setup();
+    const a = fakeContents(1);
+    const b = fakeContents(2);
+    await open(t, a);
+    await open(t, b);
+    a.crash();
+    expect(t.engines.map((e) => e.released)).toEqual([1, 0]);
+  });
+
+  it('samples the clock on arrival and at the reply and sends the mean', async () => {
+    const ipc = fakeIpcMain();
+    const times = [100, 300];
+    registerPlayerIpc({
+      ipcMain: ipc.ipcMain,
+      createEngine: async () => stubEngine(),
+      now: () => times.shift() ?? 0,
+      log: () => undefined,
+    });
+    const reply = (await ipc.invoke(PLAYER_CHANNELS.open, fakeContents(1))) as {
+      mainNowMs: number;
+    };
+    expect(reply.mainNowMs).toBe(200);
+  });
+
+  it('a throwing engine does not escape the handlers and only the channel is logged', async () => {
+    const t = setup();
+    const a = fakeContents(1);
+    const ra = await open(t, a);
+    const engine = t.engines[0];
+    if (!engine) throw new Error('no engine');
+    engine.load = () => {
+      throw new Error('boom http://sim.test/live/demo/demo/1.ts');
+    };
+    engine.setArea = () => {
+      throw new Error('boom');
+    };
+    expect(() =>
+      t.emit(PLAYER_CHANNELS.command, a, {
+        engineId: ra.engineId,
+        command: { name: 'load', cmd: LOAD },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      t.emit(PLAYER_CHANNELS.area, a, {
+        engineId: ra.engineId,
+        area: { x: 0, y: 0, width: 1, height: 1, visible: true },
+      }),
+    ).not.toThrow();
+    expect(t.logs).toHaveLength(2);
+    for (const line of t.logs) expect(line).not.toContain('demo');
   });
 
   it("commands reach only the sender's engine", async () => {
@@ -260,10 +402,9 @@ describe('registerPlayerIpc', () => {
     const a = fakeContents(1);
     const b = fakeContents(2);
     await open(t, a);
-    await open(t, a);
     await open(t, b);
     a.destroy();
-    expect(t.engines.map((e) => e.released)).toEqual([1, 1, 0]);
+    expect(t.engines.map((e) => e.released)).toEqual([1, 0]);
   });
 
   it('releases an engine whose webContents died while it was being created', async () => {

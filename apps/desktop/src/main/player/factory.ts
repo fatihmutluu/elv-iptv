@@ -18,7 +18,10 @@ export interface EngineFactoryDeps {
   onUi(event: PlayerUiEvent): void;
 }
 
-/** Builds the mpv engine for an app window with the platform's presenter; mpv starts at the first command. */
+/**
+ * Builds the mpv engine for an app window with the platform's presenter. mpv and the video surface start at the
+ * engine's `start()`, which the IPC layer calls after subscribing, so the first `surface` event is not lost.
+ */
 export async function createEngineFor(
   owner: BrowserWindow,
   deps: EngineFactoryDeps,
@@ -47,6 +50,7 @@ export async function createEngineFor(
       clearTimeout: (h) => clearTimeout(h as NodeJS.Timeout),
     },
     onUi: deps.onUi,
+    deferStart: true,
   });
   deps.onUi({ type: 'presenter', kind: presenter.kind, coversArea: presenter.coversArea });
   return engine;

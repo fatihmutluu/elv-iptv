@@ -28,6 +28,11 @@ export interface MpvEngineDeps {
   timers: { setTimeout(fn: () => void, ms: number): unknown; clearTimeout(h: unknown): void };
   /** Presentation events outside the port (`player:ui`). */
   onUi(event: PlayerUiEvent): void;
+  /**
+   * Start mpv (and the presenter's surface) at `start()` instead of at creation, so the owner can subscribe first and
+   * not miss the surface events that starting emits.
+   */
+  deferStart?: boolean;
 }
 
 /** The desktop `PlayerEngine`: one mpv process per player window, kept across zaps. */
@@ -36,6 +41,8 @@ export interface MpvEngine extends PlayerEngine {
   readonly spawns: number;
   readonly loadMode: LoadMode;
   readonly presenterKind: PresenterKind;
+  /** Starts mpv now; only needed with `deferStart` (a `load` starts it too). Idempotent. */
+  start(): void;
   /** The latest player area from the renderer, for the presenter. */
   setArea(area: PlayerArea): void;
   /** Toggles the presenter's fullscreen (not a port command). */
@@ -538,12 +545,15 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     tickHandle = timers.setTimeout(tick, CLOCK_INTERVAL_MS);
   };
   tickHandle = timers.setTimeout(tick, CLOCK_INTERVAL_MS);
-  void ensureProcess();
+  if (!deps.deferStart) void ensureProcess();
 
   return {
     capabilities: DESKTOP_CAPABILITIES,
     loadMode: deps.loadMode,
     presenterKind: presenter.kind,
+    start() {
+      if (!released) void ensureProcess();
+    },
     setArea(area) {
       if (!released) presenter.setArea(area);
     },

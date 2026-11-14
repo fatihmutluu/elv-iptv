@@ -139,6 +139,7 @@ interface SetupOptions {
   spawn?: (fake: FakeMpv) => MpvEngineDeps['spawn'];
   timers?: MpvEngineDeps['timers'];
   ready?: boolean;
+  deferStart?: boolean;
 }
 
 async function setup(o: SetupOptions = {}) {
@@ -154,6 +155,7 @@ async function setup(o: SetupOptions = {}) {
     now: () => Date.now(),
     timers: o.timers ?? timers,
     onUi: (event) => ui.push(event),
+    ...(o.deferStart ? { deferStart: true } : {}),
   });
   const events: EngineEvent[] = [];
   engine.subscribe((e) => events.push(e));
@@ -630,5 +632,38 @@ describe('MpvEngine presenter commands', () => {
     engine.toggleFullscreen();
     expect(presenter.areas).toEqual([]);
     expect(presenter.fullscreen).toBe(0);
+  });
+});
+
+describe('MpvEngine deferred start', () => {
+  it('spawns nothing until start() when deferStart is set', async () => {
+    const { fake, engine } = await setup({ deferStart: true, ready: false });
+    await sleep(60);
+    expect(fake.connections).toBe(0);
+    expect(engine.spawns).toBe(0);
+    engine.start();
+    engine.start();
+    await vi.waitFor(() => expect(fake.connections).toBe(1));
+    expect(engine.spawns).toBe(1);
+  });
+
+  it('start() does nothing after release', async () => {
+    const { fake, engine } = await setup({ deferStart: true, ready: false });
+    engine.release();
+    engine.start();
+    await sleep(60);
+    expect(fake.connections).toBe(0);
+  });
+
+  it('a load before start() still starts mpv once', async () => {
+    const { fake, engine, events } = await setup({
+      deferStart: true,
+      ready: false,
+      scripts: { [URL_A]: FAKE_PLAYING },
+    });
+    engine.load(live(1));
+    engine.start();
+    await playing(events, 1);
+    expect(fake.connections).toBe(1);
   });
 });

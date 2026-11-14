@@ -98,6 +98,9 @@ export interface PlayerBridge {
 const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null;
 const isAttempt = (x: unknown): x is number => Number.isInteger(x) && (x as number) >= 0;
 const isNumber = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
+const MAX_AREA_VALUE = 1_000_000;
+const isCoordinate = (x: unknown): x is number => isNumber(x) && Math.abs(x) <= MAX_AREA_VALUE;
+const isExtent = (x: unknown): x is number => isCoordinate(x) && x >= 0;
 const isMs = (x: unknown): x is number => isNumber(x) && x >= 0;
 const isEngineId = (x: unknown): x is string =>
   typeof x === 'string' && x.length > 0 && x.length <= 64;
@@ -111,7 +114,8 @@ const hasControlChar = (text: string): boolean => {
 };
 
 const isStreamUrl = (x: unknown): boolean => {
-  if (typeof x !== 'string' || x.length === 0 || hasControlChar(x)) return false;
+  // `new URL` accepts `http:x/a.ts`, which mpv would open as a path
+  if (typeof x !== 'string' || !/^https?:[/][/]/i.test(x) || hasControlChar(x)) return false;
   try {
     const { protocol } = new URL(x);
     return protocol === 'http:' || protocol === 'https:';
@@ -177,10 +181,10 @@ export function isPlayerAreaMessage(x: unknown): x is PlayerAreaMessage {
   const area = x['area'];
   return (
     isRecord(area) &&
-    isNumber(area['x']) &&
-    isNumber(area['y']) &&
-    isNumber(area['width']) &&
-    isNumber(area['height']) &&
+    isCoordinate(area['x']) &&
+    isCoordinate(area['y']) &&
+    isExtent(area['width']) &&
+    isExtent(area['height']) &&
     typeof area['visible'] === 'boolean'
   );
 }
@@ -188,7 +192,12 @@ export function isPlayerAreaMessage(x: unknown): x is PlayerAreaMessage {
 const GATE_PREFIX = 'ELV_GATE_PLAYER {';
 const GATE_MAX_CHARS = 64 * 1024;
 
-/** Main-side check of a `gate:report` line: the gate prefix and at most 64 KiB. */
+/** Main-side check of a `gate:report` line: the gate prefix, at most 64 KiB, one line without control characters. */
 export function isGateReport(x: unknown): x is string {
-  return typeof x === 'string' && x.startsWith(GATE_PREFIX) && x.length <= GATE_MAX_CHARS;
+  return (
+    typeof x === 'string' &&
+    x.startsWith(GATE_PREFIX) &&
+    x.length <= GATE_MAX_CHARS &&
+    !hasControlChar(x)
+  );
 }

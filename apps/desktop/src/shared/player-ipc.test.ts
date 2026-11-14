@@ -56,7 +56,14 @@ describe('isPlayerCommandMessage', () => {
   });
 
   it('drops a file: url', () => {
-    for (const url of ['file:///etc/passwd', 'javascript:alert(1)', 'not a url', '', 'ftp://x/y']) {
+    for (const url of [
+      'http:x/a.ts',
+      'file:///etc/passwd',
+      'javascript:alert(1)',
+      'not a url',
+      '',
+      'ftp://x/y',
+    ]) {
       expect(isPlayerCommandMessage(msg({ name: 'load', cmd: { ...load, url } }))).toBe(false);
     }
   });
@@ -128,6 +135,10 @@ describe('isPlayerAreaMessage', () => {
       { engineId: 'e1', area: { ...area, x: Number.NaN } },
       { engineId: 'e1', area: { ...area, width: Number.POSITIVE_INFINITY } },
       { engineId: 'e1', area: { ...area, height: '450' } },
+      { engineId: 'e1', area: { ...area, x: 1e7 } },
+      { engineId: 'e1', area: { ...area, y: -1e7 } },
+      { engineId: 'e1', area: { ...area, width: -1 } },
+      { engineId: 'e1', area: { ...area, height: -0.5 } },
       { engineId: 'e1', area: { ...area, visible: 1 } },
       { engineId: 'e1', area: { x: 0, y: 0, width: 1, height: 1 } },
     ];
@@ -144,6 +155,8 @@ describe('isGateReport', () => {
     expect(isGateReport('hello')).toBe(false);
     expect(isGateReport('ELV_GATE_PLAYER')).toBe(false);
     expect(isGateReport(7)).toBe(false);
+    expect(isGateReport('ELV_GATE_PLAYER {"a":1}\nsecond line')).toBe(false);
+    expect(isGateReport('ELV_GATE_PLAYER {"a":1}\r')).toBe(false);
     expect(isGateReport(`ELV_GATE_PLAYER {"x":"${'a'.repeat(64 * 1024)}"}`)).toBe(false);
     expect(isGateReport(`ELV_GATE_PLAYER {${'a'.repeat(64 * 1024 - 17)}`)).toBe(true);
   });

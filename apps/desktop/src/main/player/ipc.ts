@@ -16,6 +16,11 @@ export interface WebContentsLike {
   isDestroyed(): boolean;
   send(channel: string, ...args: unknown[]): void;
   once(event: 'destroyed', listener: () => void): unknown;
+  on(
+    event: 'did-start-navigation',
+    listener: (details: { isMainFrame: boolean; isSameDocument: boolean }) => void,
+  ): unknown;
+  on(event: 'render-process-gone', listener: () => void): unknown;
 }
 
 type IpcListener = (event: { sender: WebContentsLike }, ...args: unknown[]) => unknown;
@@ -48,8 +53,9 @@ interface Entry {
 }
 
 /**
- * Serves the renderer's player proxy: `player:open` creates an engine owned by the calling webContents, commands and
- * area updates reach only that owner's engines, events flow back to the owner only. Every payload is validated; an
+ * Serves the renderer's player proxy: `player:open` creates the engine owned by the calling webContents (a second open
+ * releases the first), commands and area updates reach only that owner's engine, events flow back to the owner only.
+ * A main-frame navigation, a renderer crash or the webContents going away releases its engine. Every payload is validated; an
  * invalid one is dropped with a log line that names the channel but never the payload. Returns the disposer.
  */
 export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
@@ -86,10 +92,17 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       watched.delete(owner.id);
       releaseOwnedBy(owner);
     });
+    // A reload or navigation keeps the webContents but drops the page that owns the engine.
+    owner.on('did-start-navigation', (details) => {
+      if (details.isMainFrame && !details.isSameDocument) releaseOwnedBy(owner);
+    });
+    owner.on('render-process-gone', () => releaseOwnedBy(owner));
   };
 
   const onOpen: IpcListener = async ({ sender }): Promise<PlayerOpenReply> => {
+    const arrivedAtMs = deps.now();
     watch(sender);
+    releaseOwnedBy(sender);
     counter += 1;
     const engineId = `engine-${counter}`;
     const engine = await deps.createEngine(sender, (ui) => {
@@ -105,14 +118,29 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       sendTo(sender, PLAYER_CHANNELS.event, message);
     });
     entries.set(engineId, { owner: sender, engine, unsubscribe });
-    return { engineId, mainNowMs: deps.now() };
+    // Subscribed first, so the surface events that starting mpv emits reach the renderer.
+    engine.start();
+    // The renderer takes the midpoint of its round trip; the mean of arrival and reply is the closest main-side match.
+    return { engineId, mainNowMs: (arrivedAtMs + deps.now()) / 2 };
+  };
+
+  /** Runs a handler body; a throw is logged by channel only (messages and errors can carry stream URLs). */
+  const guarded = (channel: string, body: () => void): void => {
+    try {
+      body();
+    } catch {
+      log(`player ipc: a ${channel} message failed`);
+    }
   };
 
   const onClose: IpcListener = ({ sender }, engineId) => {
     if (typeof engineId === 'string' && ownedEntry(sender, engineId)) release(engineId);
   };
 
-  const onCommand: IpcListener = ({ sender }, message) => {
+  const onCommand: IpcListener = ({ sender }, message) =>
+    guarded(PLAYER_CHANNELS.command, () => dispatchCommand(sender, message));
+
+  const dispatchCommand = (sender: WebContentsLike, message: unknown): void => {
     if (!isPlayerCommandMessage(message)) {
       log(`player ipc: dropped an invalid ${PLAYER_CHANNELS.command} message`);
       return;
@@ -149,7 +177,10 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     }
   };
 
-  const onArea: IpcListener = ({ sender }, message) => {
+  const onArea: IpcListener = ({ sender }, message) =>
+    guarded(PLAYER_CHANNELS.area, () => dispatchArea(sender, message));
+
+  const dispatchArea = (sender: WebContentsLike, message: unknown): void => {
     if (!isPlayerAreaMessage(message)) {
       log(`player ipc: dropped an invalid ${PLAYER_CHANNELS.area} message`);
       return;

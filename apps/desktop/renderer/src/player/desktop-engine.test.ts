@@ -145,19 +145,48 @@ describe('createDesktopEngine', () => {
     expect(ui).toEqual([{ type: 'key', key: 'back' }]);
   });
 
-  it('applies messages that arrive before the open reply, and drops other engines', async () => {
+  it('delivers events that beat the open reply to the first subscriber, mapped, and drops other engines', async () => {
     const f = fakeBridge(undefined, () => {
       f.ui('e1', { type: 'presenter', kind: 'child-window', coversArea: true });
       f.ui('zz', { type: 'closed' });
       f.event('e1', { attempt: 0, type: 'surface', change: 'created' });
+      f.event('zz', { attempt: 0, type: 'surface', change: 'destroyed' });
+      f.event('e1', { attempt: 0, type: 'firstFrame', atMs: 51_000 });
     });
-    const engine = await createDesktopEngine(f.bridge, () => 0);
-    const events: EngineEvent[] = [];
+    const engine = await createDesktopEngine(f.bridge, () => 1000);
+    const first: EngineEvent[] = [];
+    const second: EngineEvent[] = [];
     const ui: PlayerUiEvent[] = [];
-    engine.subscribe((e) => events.push(e));
+    engine.subscribe((e) => first.push(e));
+    engine.subscribe((e) => second.push(e));
     engine.onUi((e) => ui.push(e));
     expect(ui).toEqual([{ type: 'presenter', kind: 'child-window', coversArea: true }]);
-    expect(events).toEqual([]);
+    expect(first).toEqual([
+      { attempt: 0, type: 'surface', change: 'created' },
+      { attempt: 0, type: 'firstFrame', atMs: 1000 },
+    ]);
+    expect(second).toEqual([]);
+  });
+
+  it('delivers an event that arrives after the reply but before any subscriber to the first one', async () => {
+    const f = fakeBridge();
+    const engine = await createDesktopEngine(f.bridge, () => 0);
+    f.event('e1', { attempt: 0, type: 'surface', change: 'created' });
+    const seen: EngineEvent[] = [];
+    engine.subscribe((e) => seen.push(e));
+    f.event('e1', { attempt: 0, type: 'state', state: 'opening' });
+    expect(seen.map((e) => e.type)).toEqual(['surface', 'state']);
+  });
+
+  it('a throwing ui listener does not break the presenter replay', async () => {
+    const f = fakeBridge();
+    const engine = await createDesktopEngine(f.bridge, () => 0);
+    f.ui('e1', { type: 'presenter', kind: 'child-window', coversArea: true });
+    expect(() =>
+      engine.onUi(() => {
+        throw new Error('ui bug');
+      }),
+    ).not.toThrow();
   });
 
   it('replays the presenter state to a later ui listener', async () => {

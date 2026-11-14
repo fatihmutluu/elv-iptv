@@ -39,6 +39,8 @@ export interface DesktopEngine extends PlayerEngine {
   onUi(listener: (event: PlayerUiEvent) => void): () => void;
 }
 
+const MAX_HELD_EVENTS = 100;
+
 const shiftAnchor = (event: EngineEvent, offset: number): EngineEvent => {
   switch (event.type) {
     case 'firstFrame':
@@ -65,12 +67,19 @@ export async function createDesktopEngine(
   let engineId: string | undefined;
   let offset = 0;
   let released = false;
+  let everSubscribed = false;
+  const heldEvents: EngineEvent[] = [];
   let presenter: Extract<PlayerUiEvent, { type: 'presenter' }> | undefined;
   const earlyEvents: PlayerEventMessage[] = [];
   const earlyUi: PlayerUiMessage[] = [];
 
   const deliverEvent = (event: EngineEvent): void => {
     const mapped = shiftAnchor(event, offset);
+    // Nobody can have subscribed before the open reply; the first subscriber gets what came before it.
+    if (!everSubscribed) {
+      if (heldEvents.length < MAX_HELD_EVENTS) heldEvents.push(mapped);
+      return;
+    }
     for (const listener of [...listeners]) {
       try {
         listener(mapped);
@@ -145,6 +154,16 @@ export async function createDesktopEngine(
     subscribe(listener) {
       if (released) return () => undefined;
       listeners.add(listener);
+      if (!everSubscribed) {
+        everSubscribed = true;
+        for (const held of heldEvents.splice(0)) {
+          try {
+            listener(held);
+          } catch {
+            // a listener bug must not stop the others
+          }
+        }
+      }
       return () => {
         listeners.delete(listener);
       };
@@ -152,7 +171,13 @@ export async function createDesktopEngine(
     onUi(listener) {
       if (released) return () => undefined;
       uiListeners.add(listener);
-      if (presenter) listener(presenter);
+      if (presenter) {
+        try {
+          listener(presenter);
+        } catch {
+          // same isolation as deliverUi
+        }
+      }
       return () => {
         uiListeners.delete(listener);
       };

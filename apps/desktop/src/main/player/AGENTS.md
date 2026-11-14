@@ -27,12 +27,14 @@ over the JSON IPC client (`mpv/`) and a `VideoPresenter` (`presenter/`). Read `a
 - Recording launcher pids for the startup sweep is the spawner's job (`spawnMpv({ pidFile })`).
 
 ## IPC (renderer proxy)
-- `ipc.ts` (`registerPlayerIpc`) serves `player:open|close|command|area` (+ dev `gate:report`); an engine belongs to the
-  webContents that opened it, so commands, areas and closes from another sender are dropped; a destroyed one releases its
-  engines. Payloads pass the guards in `shared/player-ipc.ts` (http(s) URL, no control characters in headers); a dropped
-  message logs the channel only. `factory.ts` builds the engine (spawn with `pidFile`, presenter, `onUi`); `main.ts` sweeps
-  leftover launchers first. Main stamps events with `Date.now()`; the proxy (`renderer/src/player/desktop-engine.ts`) maps
-  `atMs` with the open handshake offset and replays the `presenter` ui event to late listeners.
+- `ipc.ts` (`registerPlayerIpc`) serves `player:open|close|command|area` (+ dev `gate:report`). One engine per webContents (a
+  second open releases the first); other senders' messages are dropped. A main-frame navigation, a renderer crash or
+  `destroyed` releases it. Payloads pass the guards in `shared/player-ipc.ts`; a drop or a throw logs the channel only.
+- `factory.ts` builds the engine with `deferStart`: `ipc.ts` subscribes, then calls `engine.start()`, so the first
+  `surface created` (the video window is kept across zaps) reaches the renderer. `main.ts` takes the single-instance
+  lock, then sweeps leftover launchers; packaged builds drop the default menu (Ctrl+R would reload).
+- Main stamps events with `Date.now()`; the proxy (`renderer/src/player/desktop-engine.ts`) maps `atMs` with the open
+  handshake offset, holds events until the first `subscribe` and replays the `presenter` ui event to late listeners.
 
 ## Tests
 - `engine.test.ts` drives the engine against `mpv/fake-mpv.ts` (a scripted mpv on a real named pipe or Unix socket).
