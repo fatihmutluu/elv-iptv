@@ -3,10 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const platform = vi.hoisted(() => ({ OS: 'android' }));
 vi.mock('react-native', () => ({ Platform: platform }));
 
+const migrated = async (sql: string): Promise<unknown[]> =>
+  sql.includes('user_version') ? [{ user_version: 1 }] : [];
 const driver = {
   exec: vi.fn(async () => undefined),
   run: vi.fn(async () => ({ changes: 0 })),
-  all: vi.fn(async (sql: string) => (sql.includes('user_version') ? [{ user_version: 1 }] : [])),
+  all: vi.fn(migrated),
   batch: vi.fn(async () => undefined),
   transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(driver)),
   setAbortSignal: vi.fn(),
@@ -29,6 +31,8 @@ beforeEach(() => {
   createOpSqliteDriver.mockClear();
   createSettingsStore.mockClear();
   manifest.read.mockClear();
+  manifest.write.mockClear();
+  driver.all.mockImplementation(migrated);
 });
 
 describe('createDeviceCatalog', () => {
@@ -51,6 +55,27 @@ describe('createDeviceCatalog', () => {
     expect(createOpSqliteDriver).toHaveBeenCalledWith('catalog.db', '/app/Library/Caches');
     expect(createSettingsStore).toHaveBeenCalledWith('elv.catalog.sources');
     expect(manifest.read).toHaveBeenCalled();
+  });
+
+  it('opens the catalog when the manifest cannot be reconciled, logging only a category', async () => {
+    platform.OS = 'ios';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    driver.all.mockImplementation(async (sql: string) => {
+      if (sql.includes('settings_json FROM sources')) throw new Error('disk I/O at /secret/path');
+      return migrated(sql);
+    });
+    try {
+      const { createDeviceCatalog } = await import('./device');
+      const catalog = await createDeviceCatalog();
+      expect(warn).toHaveBeenCalledWith('catalog: storage/manifest-failed');
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('secret');
+      expect(manifest.write).not.toHaveBeenCalled();
+      driver.all.mockImplementation(migrated);
+      await catalog.removeSource('gone');
+      expect(manifest.write).toHaveBeenCalledWith('{"v":1,"sources":[]}');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('rejects, and retries later, when the database cannot be opened', async () => {

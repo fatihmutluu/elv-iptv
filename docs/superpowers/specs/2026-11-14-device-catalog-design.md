@@ -93,7 +93,9 @@ Scan of 2026-11-14 (private report `.superpowers/research/reports/device-sqlite-
   `NSUserDefaults` through React Native `Settings` (key `elv.catalog.sources`) and rewritten after every add, remove and
   import. After `openCatalog`, `reconcileManifest` gives an empty database the manifest's sources back with the same ids,
   so content keys and secret keys match again; `SourceRow.needsImport` (no successful catalog run yet) tells the menu to
-  import them. User data that cannot be rebuilt (favorites, progress) needs another home on tvOS: #79.
+  import them. A failing reconcile never stops the catalog from opening: it logs a categorized warning without values,
+  keeps the database as it is, and the next successful write rewrites the manifest. User data that cannot be rebuilt
+  (favorites, progress) needs another home on tvOS: #79.
 - Imports run one at a time through a promise queue in the service: a later call waits for its turn; a call for a source
   that is importing or waiting is refused with `storage/import-in-progress` at once without touching the driver's abort
   slot; a call cancelled while it waits ends with `network/aborted` without starting a run. Only the running import's

@@ -266,8 +266,9 @@ export async function importCatalog(
 
 /**
  * Fetches and stores the episodes of one Xtream series (on demand, when the user opens it), replacing the ones
- * stored before. An info body over `ImportDeps.maxBodyBytes` is fetched once more without the cap. Returns the number of episodes. An unknown series yields `source-format/unknown-series`; a source
- * that is gone (also one removed while the episodes load) yields `storage/source-not-found` and writes nothing.
+ * stored before. An info body over `ImportDeps.maxBodyBytes` is fetched once more without the cap. Returns the
+ * number of episodes. An unknown series yields `source-format/unknown-series`; a source that is gone (also one
+ * removed while the episodes load) yields `storage/source-not-found` and writes nothing.
  */
 export async function loadSeriesEpisodes(
   sourceId: string,

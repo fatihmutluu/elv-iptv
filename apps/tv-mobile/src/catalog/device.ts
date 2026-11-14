@@ -1,5 +1,5 @@
 import { openCatalog } from '@elv/data';
-import type { ElvError } from '@elv/domain';
+import type { ElvError, SqlDriver } from '@elv/domain';
 import { Platform } from 'react-native';
 import {
   createDeviceHttpClient,
@@ -10,7 +10,7 @@ import {
   databaseLocation,
 } from '../storage';
 import { type CatalogService, createCatalogService } from './catalog';
-import { reconcileManifest } from './manifest';
+import { type ManifestStore, reconcileManifest } from './manifest';
 
 /**
  * File name of the catalog database: in `Library/Caches` on Apple platforms (tvOS hardware gives apps only purgeable
@@ -42,12 +42,25 @@ export function createDeviceCatalog(): Promise<CatalogService> {
   return instance;
 }
 
+/**
+ * A failed read or restore of the manifest never stops the catalog from opening: the database stays as it is, the
+ * warning carries only a category and code, and the service rewrites the manifest on its next successful write.
+ */
+async function reconcile(db: SqlDriver, manifest: ManifestStore): Promise<void> {
+  try {
+    await reconcileManifest(db, manifest);
+  } catch {
+    // biome-ignore lint/suspicious/noConsole: a categorized warning without values; there is no logging port yet
+    console.warn('catalog: storage/manifest-failed');
+  }
+}
+
 async function open(): Promise<CatalogService> {
   const db = await createOpSqliteDriver(DATABASE_NAME, databaseLocation(Platform.OS));
   const opened = await openCatalog(db);
   if (!opened.ok) throw new CatalogOpenError(opened.error);
   const manifest = Platform.OS === 'ios' ? createSettingsStore(MANIFEST_KEY) : undefined;
-  if (manifest !== undefined) await reconcileManifest(db, manifest);
+  if (manifest !== undefined) await reconcile(db, manifest);
   return createCatalogService({
     db,
     secrets: createSecureSecretStore(),
