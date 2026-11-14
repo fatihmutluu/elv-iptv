@@ -11,7 +11,8 @@ const config: KnipConfig = {
     'apps/tv-mobile': {
       entry: ['config/*.test.ts'],
       // The TV plugin is loaded by name from app.config.ts; knip infers optional Expo packages.
-      ignoreDependencies: ['@react-native-tvos/config-tv', 'expo-updates'],
+      // @elv/engine-media3 is linked for its native code; the player screen imports it in player core Task 7.
+      ignoreDependencies: ['@elv/engine-media3', '@react-native-tvos/config-tv', 'expo-updates'],
     },
     'apps/desktop': {
       entry: ['e2e/*.spec.ts'],

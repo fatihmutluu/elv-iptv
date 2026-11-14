@@ -1,0 +1,23 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'io.github.fatihmutluu.elv.media3'
+version = '0.0.0'
+
+android {
+  namespace 'io.github.fatihmutluu.elv.media3'
+  defaultConfig {
+    versionCode 1
+    versionName '0.0.0'
+  }
+}
+
+dependencies {
+  def media3 = '1.11.1'
+  implementation "androidx.media3:media3-exoplayer:$media3"
+  implementation "androidx.media3:media3-exoplayer-hls:$media3"
+  implementation "androidx.media3:media3-datasource:$media3"
+  testImplementation 'junit:junit:4.13.2'
+}
