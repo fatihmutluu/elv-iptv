@@ -42,8 +42,11 @@ export interface PlayerIpcDeps {
   now(): number;
   /** Receives drop notices; never a payload (payloads carry stream URLs). */
   log(line: string): void;
-  /** Dev gate only: receives each valid `gate:report` line. The channel is not registered without it. */
-  gateReport?(line: string): void;
+  /**
+   * Dev gate only: receives each valid `gate:report` line and the sender's engine (`undefined` when it has none). The
+   * channel is not registered without it.
+   */
+  gateReport?(line: string, engine: MpvEngine | undefined): void;
 }
 
 interface Entry {
@@ -195,9 +198,11 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     entry.engine.setArea(message.area);
   };
 
-  const onGate: IpcListener = (_event, line) => {
-    if (isGateReport(line)) deps.gateReport?.(line);
-    else log(`player ipc: dropped an invalid ${PLAYER_CHANNELS.gateReport} message`);
+  const onGate: IpcListener = ({ sender }, line) => {
+    if (isGateReport(line)) {
+      const owned = [...entries.values()].find((entry) => entry.owner.id === sender.id);
+      deps.gateReport?.(line, owned?.engine);
+    } else log(`player ipc: dropped an invalid ${PLAYER_CHANNELS.gateReport} message`);
   };
 
   ipcMain.handle(PLAYER_CHANNELS.open, onOpen);

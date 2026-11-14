@@ -121,7 +121,7 @@ const LOAD: LoadCommand = {
   kind: 'live',
 };
 
-function setup(extra: { gateReport?: (line: string) => void } = {}) {
+function setup(extra: { gateReport?: (line: string, engine: MpvEngine | undefined) => void } = {}) {
   const ipc = fakeIpcMain();
   const engines: StubEngine[] = [];
   const uiSinks: Array<(e: PlayerUiEvent) => void> = [];
@@ -456,6 +456,17 @@ describe('registerPlayerIpc', () => {
     t.emit(PLAYER_CHANNELS.gateReport, a, 'something else');
     expect(reports).toEqual(['ELV_GATE_PLAYER {"ok":true}']);
     expect(t.logs).toHaveLength(1);
+  });
+
+  it('hands a gate report the engine of the window that sent it, or none without one', async () => {
+    const seen: Array<MpvEngine | undefined> = [];
+    const t = setup({ gateReport: (_line, engine) => seen.push(engine) });
+    const a = fakeContents(1);
+    const b = fakeContents(2);
+    await open(t, a);
+    t.emit(PLAYER_CHANNELS.gateReport, a, 'ELV_GATE_PLAYER {"ok":true}');
+    t.emit(PLAYER_CHANNELS.gateReport, b, 'ELV_GATE_PLAYER {"ok":true}');
+    expect(seen).toEqual([t.engines[0], undefined]);
   });
 
   it('has no gate channel without a sink', () => {

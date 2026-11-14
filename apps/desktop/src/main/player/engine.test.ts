@@ -228,6 +228,20 @@ describe('MpvEngine review focus', () => {
     expect(fake.maxOpenEntries()).toBe(1);
   });
 
+  it('maxHoldMs is 0 until a load had to wait, then the longest wait of a load that went out', async () => {
+    const { engine, fake, events } = await setup({ scripts: { [URL_B]: SLOW_OPEN } });
+    expect(engine.maxHoldMs).toBe(0);
+    engine.load(live(1));
+    await playing(events, 1);
+    expect(engine.maxHoldMs).toBe(0);
+    engine.load(live(2, URL_B));
+    await until(() => loadfiles(fake).length === 2);
+    engine.load(live(3));
+    await vi.waitFor(() => expect(loadfiles(fake)).toHaveLength(3), { timeout: 3000 });
+    expect(engine.maxHoldMs).toBeGreaterThanOrEqual(300);
+    expect(engine.maxHoldMs).toBeLessThanOrEqual(1100);
+  });
+
   it('stop during a pending load sends nothing more', async () => {
     const { engine, fake, events } = await setup({ scripts: { [URL_B]: SLOW_OPEN } });
     engine.load(live(1));

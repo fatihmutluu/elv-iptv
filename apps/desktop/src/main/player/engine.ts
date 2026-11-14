@@ -39,6 +39,8 @@ export interface MpvEngineDeps {
 export interface MpvEngine extends PlayerEngine {
   /** mpv processes started so far (the gate's `mpvSpawns`). */
   readonly spawns: number;
+  /** The longest a load that went out waited for the previous one to open (the gate's coalescing wait), in ms. */
+  readonly maxHoldMs: number;
   readonly loadMode: LoadMode;
   readonly presenterKind: PresenterKind;
   /** Starts mpv now; only needed with `deferStart` (a `load` starts it too). Idempotent. */
@@ -154,6 +156,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   let pumping = false;
   let released = false;
   let spawns = 0;
+  let maxHoldMs = 0;
   let latestToken: AttemptToken = 0;
   let media: Slot | undefined;
   let live: Live | undefined;
@@ -415,9 +418,11 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     const L = await ensureProcess();
     if (!L || slot !== media) return;
     // Zap coalescing: wait until the last sent load opened or failed; a newer load replaces this one meanwhile.
+    const heldAt = deps.now();
     while (L.opening && slot === media && live === L)
       await Promise.race([L.opening.done, superseded()]);
     if (slot !== media || live !== L) return;
+    maxHoldMs = Math.max(maxHoldMs, deps.now() - heldAt);
     if (deps.loadMode === 'stop-then-load' && !(await stopCurrent(L))) return;
     if (slot !== media || live !== L) return;
     L.inFlight = slot;
@@ -562,6 +567,9 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     },
     get spawns() {
       return spawns;
+    },
+    get maxHoldMs() {
+      return maxHoldMs;
     },
     load(cmd) {
       if (released) return;
