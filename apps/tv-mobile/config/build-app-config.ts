@@ -1,4 +1,5 @@
 import type { ExpoConfig } from 'expo/config';
+import { DEV_CLEARTEXT_HOSTS, withDevCleartext } from './with-dev-cleartext';
 
 /** The build environment (`process.env` when Expo loads `app.config.ts`). */
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -43,11 +44,15 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
     [
       'expo-build-properties',
       {
-        android: { minSdkVersion: MIN_ANDROID_SDK, usesCleartextTraffic: development },
+        android: { minSdkVersion: MIN_ANDROID_SDK, usesCleartextTraffic: false },
         ios: { deploymentTarget: MIN_APPLE_OS },
       },
     ],
   ];
+  // Expo accepts a plugin function in place of its module name, though its config type lists only strings.
+  if (development) {
+    plugins.push([withDevCleartext as unknown as string, { hosts: DEV_CLEARTEXT_HOSTS }]);
+  }
   if (tv) {
     plugins.push([
       '@react-native-tvos/config-tv',
