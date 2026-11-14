@@ -15,6 +15,8 @@ describe('parseImportUrl', () => {
       account: 'large',
       batch: 1000,
       maxBody: 4096,
+      series: false,
+      probeReads: false,
     });
   });
 
@@ -23,7 +25,25 @@ describe('parseImportUrl', () => {
       parseImportUrl(
         'elviptv://gate/import?host=127.0.0.1:9000&account=huge&batch=5000&maxBody=1024',
       ),
-    ).toEqual({ host: '127.0.0.1:9000', account: 'huge', batch: 5000, maxBody: 1024 });
+    ).toEqual({
+      host: '127.0.0.1:9000',
+      account: 'huge',
+      batch: 5000,
+      maxBody: 1024,
+      series: false,
+      probeReads: false,
+    });
+  });
+
+  it('turns the series and reader probes on with 1 only', () => {
+    expect(parseImportUrl('elviptv://gate/import?series=1&probeReads=1')).toMatchObject({
+      series: true,
+      probeReads: true,
+    });
+    expect(parseImportUrl('elviptv://gate/import?series=true&probeReads=0')).toMatchObject({
+      series: false,
+      probeReads: false,
+    });
   });
 
   it('accepts a trailing slash and ignores unknown parameters', () => {

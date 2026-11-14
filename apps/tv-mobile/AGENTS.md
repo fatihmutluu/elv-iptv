@@ -42,9 +42,9 @@ The single Expo app (phone, tablet, TV; Android, Fire OS, Apple): a composition 
   the run settles; plus every move that never got a committed frame (after a 2 s settle timeout). Moves whose net effect
   left the index unchanged within a frame (A to B to A) get no `TvList` callback; the screen resolves them in its own
   animation frame and they are not losses. Unmounting or changing the params mid-run prints nothing for that run.
-- Import gate: `elviptv://gate/import?host=10.0.2.2:7878&account=large|huge&batch=500..20000` (`src/gate/import/`, dev hosts only; `&maxBody=` KiB, 256..131072, default 4096) imports a simulator
-  account into a new `gate-import-<time>.db`, prints one `ELV_GATE_IMPORT {account,batch,maxBody,rows,durationMs,maxStallMs}` line (`error` on failure);
-  `maxStallMs` = longest gap of a 16 ms `setInterval` minus 16 during the import.
+- Import gate: `elviptv://gate/import?host=10.0.2.2:7878&account=large|huge&batch=500..20000&maxBody=256..131072` (KiB, default 4096; `src/gate/import/`, dev hosts only)
+  imports a simulator account into a new `gate-import-<time>.db`, prints one `ELV_GATE_IMPORT {account,batch,maxBody,rows,durationMs,maxStallMs}` line (`error` on failure; `maxStallMs`: longest 16 ms `setInterval` gap minus 16).
+  `&probeReads=1` times the live categories every 50 ms during it (`maxReadMs`, `reads`, `readErrors`); `&series=1` then opens the first series (`seasons`, `episodes`, `seriesMs` or `seriesError`; episodes load via `tx.batch`).
 - Output: one `'ELV_GATE ' + JSON.stringify(metrics)` line per run (`intents`: counts of the six intent kinds, zeros kept), `console.log`
   on Android (logcat `ReactNativeJS`), `console.error` on iOS (release builds drop info logs). Pure gate tests run in Vitest
   (`src/gate/**/*.test.ts`), component ones in Jest on fake timers (`advance` in `__tests__/gate-test-utils.ts`).
