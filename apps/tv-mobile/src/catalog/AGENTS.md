@@ -11,8 +11,10 @@ The device catalog: `@elv/data` over the storage adapters, behind one `CatalogSe
   never credentials, rewritten after every add, remove and import. `reconcileManifest` (`manifest.ts`) runs after `openCatalog`: an empty
   database gets the manifest's sources back with the same ids (content and secret keys match); `SourceRow.needsImport` stays true until an import succeeds.
 - Xtream bodies are capped at `DEVICE_MAX_BODY_BYTES` (4 MiB; `importSource` option `maxBodyBytes` overrides): longer lists load per category,
-  and a category or series info still over the cap is fetched once more without it (`@elv/data`). Trade-off (spec 5.3): per-category calls roughly double the large import (about 9 s whole, 19 s capped) but keep the longest JS stall near 45 ms; raising the cap brings back the ~1.2 s
-  whole-list `JSON.parse` stall (16 MiB: 1267 ms). Streaming parsing would remove the cap; #76 tracks it (and the 190 ms stall of the `huge` account).
+  and a category or series info still over the cap is fetched once more without it (`@elv/data`). Trade-off (spec 5.3): per-category calls roughly
+  double the large import (about 9 s whole, 19 s capped) but keep the longest JS stall near 45 ms; raising the cap brings back the ~1.2 s whole-list
+  `JSON.parse` stall (16 MiB: 1267 ms). Streaming parsing would remove the cap; #76 tracks it (and the 190 ms stall of the `huge` account).
+  Known 0.1 limit (#76): on the per-category path, items without a category (only in the whole list) are not imported, and earlier ones are deleted.
 - `importSource` runs imports one at a time through a promise queue (the op-sqlite driver has one abort slot): a later call waits; a call for a source
   that is importing or waiting gets `storage/import-in-progress` at once and never touches the slot; one cancelled while waiting ends `network/aborted`
   without a run. Only on its turn does it call `setAbortSignal(opts.signal)`, and `setAbortSignal(undefined)` in `finally`, when the driver has it.

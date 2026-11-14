@@ -9,7 +9,7 @@ interface ExpoResponse extends Omit<FetchResponse, 'body'> {
 }
 
 /**
- * Rebuilds the response from its fields: a real response keeps  and  as prototype accessors,
+ * Rebuilds the response from its fields: a real response keeps `status` and `headers` as prototype accessors,
  * which object spread would drop. Where it has no stream, the whole body is delivered as one chunk.
  */
 function withWholeBody(res: ExpoResponse): FetchResponse {
@@ -30,8 +30,9 @@ const deviceFetch: FetchLike = async (url, init) =>
   withWholeBody((await expoFetch(url, init)) as unknown as ExpoResponse);
 
 /**
- * The domain fetch client over `expo/fetch`, whose response bodies stream. Where a platform returns no stream
- * the whole body is read and delivered as one chunk; the importer bounds that with `maxBodyBytes`.
+ * The domain fetch client over `expo/fetch`, whose response bodies stream. Where a platform returns no stream,
+ * `arrayBuffer()` reads the whole body into memory as one chunk: `maxBodyBytes` rejects it only after that read and
+ * cannot bound the memory it takes.
  */
 export function createDeviceHttpClient(): HttpClient {
   return createFetchHttpClient(deviceFetch);

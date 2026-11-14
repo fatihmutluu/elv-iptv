@@ -9,9 +9,9 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
 - `pnpm bootstrap` checks versions, installs dependencies and git hooks, looks for gitleaks.
 - `pnpm run:app <target> [build] [--production]` launches or builds a target (android, android-tv, fire-tv, ios, tvos, windows, macos, linux).
 - `pnpm gate list [--avd elv_tv] [--build] [--runs 3 (default)] [--real-keys 60] [--real-hold 2000] [--ci] [--baseline file] [--budgets fail|warn] [--out file] [--write-baseline]`
-  runs the TV list gate on a running Android TV emulator (`src/gates/`; adb from ANDROID_HOME, the default SDK or PATH; `--real-hold <ms>`: API 33+, moves match the interpreter +-3),
+  runs the TV list gate on a running Android TV emulator (`src/gates/`; adb from ANDROID_HOME, the default SDK or PATH; `--real-hold <ms>`: API 33+, holds Down once, moves match the interpreter +-3),
   compares the median with `docs/learned/gates/list-android-tv.json` (or `--baseline`; a missing given file: budgets and losses only, warned; spec 5.6), writes the median and
-  every run to `--out` (`gate-list.json`, with `--ci` under `gate-artifacts/`), exits 1 on a failure. `--budgets warn` (CI) only warns about absolute budgets; with it `--write-baseline` needs another `--baseline` file.
+  every run to `--out` (`gate-list.json`, with `--ci` under `gate-artifacts/`), warns when the worst run breaks a budget the median meets, exits 1 on a failure; `--budgets warn` (CI) only warns about absolute budgets, and with it `--write-baseline` refuses the local baseline and needs another `--baseline` file.
 - `pnpm gate import [--avd elv_tv] [--build] [--account large|huge] [--batch 5000] [--max-body 4096] [--runs 1] [--baseline file] [--budgets warn|fail] [--out file] [--write-baseline]`
   starts the simulator on 127.0.0.1:7878 (or reuses a running one), opens `elviptv://gate/import` on the emulator (host `10.0.2.2:7878`), compares with `docs/learned/gates/import-android-tv.json`: rows equal, duration +10 % (+2 s), stall under 100 ms (`large` only; `huge` is report-only, #76). Only `large` becomes a baseline.
 - `pnpm scaffold <pure|rn|module> <name>` creates a workspace package (skill `add-package`).

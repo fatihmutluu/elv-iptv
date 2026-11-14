@@ -12,7 +12,7 @@ Device implementations of the `@elv/domain` ports used by `@elv/data`. Only thes
   Other failures reject with `SqlFailedError` (`storage/sql-failed`, SQLite message in `detail`). Errors thrown by a transaction callback pass through unchanged.
 - `exec` splits scripts with `splitSqlStatements` (quotes and comments aware; trigger bodies unsupported).
 - `createMacrotaskScheduler()` yields a `setTimeout(0)`; `createDeviceHttpClient()` is the domain fetch client over `expo/fetch`,
-  reading the whole body as one chunk where a response has no stream.
+  reading the whole body as one chunk where a response has no stream (`arrayBuffer()`: `maxBodyBytes` cannot bound that read).
 - `createSettingsStore(key)` keeps one string in React Native `Settings` (NSUserDefaults; Apple only, about 500 KB on tvOS); failures read as nothing.
 - Tests (Vitest) mock `@op-engineering/op-sqlite`, `expo/fetch` and `react-native` at the module boundary; `op-sqlite-fake.ts` is the recording fake.
 - `createSecureSecretStore()` is the `SecretStore` over `expo-secure-store` (async API only). Values split into chunks of at most 1,800 UTF-8 bytes
