@@ -11,6 +11,7 @@ import {
   type GateResult,
   worstRunWarnings,
 } from '../src/gates/compare.ts';
+import { IMPORT_USAGE, importMain } from '../src/gates/import-cli.ts';
 import {
   deviceInfo,
   type Exec,
@@ -45,6 +46,9 @@ function parseCli() {
       budgets: { type: 'string' },
       out: { type: 'string' },
       'write-baseline': { type: 'boolean' },
+      account: { type: 'string' },
+      batch: { type: 'string' },
+      'max-body': { type: 'string' },
     },
   });
 }
@@ -54,7 +58,12 @@ try {
   fail(`gate: ${(error as Error).message.split('. ')[0]}. ${USAGE}`, 2);
 }
 const { values, positionals } = parsed;
-if (positionals[0] !== 'list' || positionals.length !== 1) fail(USAGE, 2);
+if (positionals.length !== 1 || (positionals[0] !== 'list' && positionals[0] !== 'import')) {
+  fail(`${USAGE}\n${IMPORT_USAGE}`, 2);
+}
+if (positionals[0] === 'import') {
+  process.exit(await importMain(values, findRepoRoot(process.cwd())));
+}
 
 const count = (name: string, text: string | undefined): number | undefined => {
   if (text === undefined) return undefined;

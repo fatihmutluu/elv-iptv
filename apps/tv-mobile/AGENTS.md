@@ -21,7 +21,7 @@ The single Expo app (phone, tablet, TV; Android, Fire OS, Apple): a composition 
   `build-app-config.ts` sets for `APP_VARIANT=development` only. The app reads it with `expo-constants`; never key it
   on `__DEV__` (the gate is measured on a JS-bundled release build of the development variant).
 - `parseGateUrl` (`routes.ts`) clamps: items 1 to 1,000,000, rate 1 to 60/s, moves 1 to 10,000, `stall` 0 to 200 ms (one busy-wait
-  mid-run to calibrate the JS gap); defaults 100,000 / manual / 20 / 600 / 0. `useGateParams` reads the iOS/tvOS launch argument `-gateUrl <url>`
+  mid-run to calibrate the JS gap); defaults 100,000 / manual / 20 / 600 / 0. `useGateRoute` (`useGateParams.ts`) reads the iOS/tvOS launch argument `-gateUrl <url>`
   (`Settings`; skips the tvOS "Open in …?" prompt of `simctl openurl`), else the initial URL and `url` events (`Linking`); without the flag, nothing.
 - Auto run: `createAutoDriver` (`driver.ts`) emits a scripted sequence through the focus store: a down-hold (`long`
   page then `repeat` steps), page jumps (`channelDown`), single presses, then the mirror going up. It ends at index 0
