@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type FetchDeps, fetchRuntime } from '../src/mpv/fetch.ts';
+import { type FetchDeps, fetchRuntime, verifyRuntime } from '../src/mpv/fetch.ts';
 import { parseLock } from '../src/mpv/lock.ts';
 
 const HASH = 'a'.repeat(64);
@@ -7,7 +7,7 @@ const LOCK = parseLock({
   'win32-x64': {
     kind: 'upstream-libmpv',
     mpv: '0.42.0',
-    url: 'https://example.org/x.zip',
+    url: 'https://github.com/mpv-player/mpv/releases/download/v0.42.0/x.zip',
     sha256: HASH,
   },
 });
@@ -21,20 +21,30 @@ interface Fake {
   deps: FetchDeps;
   written: Map<string, string>;
   downloads: string[];
+  downloadedTo: string[];
   logs: string[];
   extractedTo: string[];
 }
 
 function fake(
-  opts: { hash?: string; dll?: Uint8Array; files?: Record<string, string>; cached?: boolean } = {},
+  opts: {
+    hash?: string;
+    dll?: Uint8Array;
+    files?: Record<string, string>;
+    cached?: boolean;
+    extraPaths?: string[];
+    symlinks?: string[];
+  } = {},
 ): Fake {
   const written = new Map<string, string>(Object.entries(opts.files ?? {}));
   const downloads: string[] = [];
+  const downloadedTo: string[] = [];
   const logs: string[] = [];
   const extractedTo: string[] = [];
   const deps: FetchDeps = {
     async download(url, file) {
       downloads.push(url);
+      downloadedTo.push(file);
       written.set(file, 'archive');
     },
     async ghArtifact() {
@@ -48,6 +58,7 @@ function fake(
       written.set(`${dir}/libmpv-2.dll`, 'dll');
       written.set(`${dir}/LICENSE.LGPL`, 'lic');
       written.set(`${dir}/include/mpv/client.h`, 'h');
+      for (const p of opts.extraPaths ?? []) written.set(`${dir}/${p}`, 'x');
     },
     async readBytes(file) {
       if (file.endsWith('libmpv-2.dll')) return opts.dll ?? LGPL;
@@ -73,11 +84,21 @@ function fake(
         .filter((k) => k.startsWith(`${dir}/`))
         .map((k) => k.slice(dir.length + 1));
     },
+    async rename(from, to) {
+      const v = written.get(from);
+      if (v === undefined) throw new Error('missing');
+      written.delete(from);
+      written.set(to, v);
+    },
+    async findSymlinks() {
+      return opts.symlinks ?? [];
+    },
     async removeDir(dir) {
+      written.delete(dir);
       for (const k of [...written.keys()]) if (k.startsWith(`${dir}/`)) written.delete(k);
     },
   };
-  return { deps, written, downloads, logs, extractedTo };
+  return { deps, written, downloads, downloadedTo, logs, extractedTo };
 }
 
 const base = { root: '/repo', platform: 'win32', arch: 'x64' };
@@ -135,5 +156,50 @@ describe('fetchRuntime', () => {
     const r = await fetchRuntime({ ...base, lock: LOCK }, f.deps);
     expect(r.status).toBe('installed');
     expect(f.downloads).toEqual([]);
+  });
+
+  it('deletes a downloaded file whose SHA-256 mismatches', async () => {
+    const f = fake({ hash: 'b'.repeat(64) });
+    await expect(fetchRuntime({ ...base, lock: LOCK }, f.deps)).rejects.toThrow(/SHA-256/);
+    expect(
+      [...f.written.keys()].filter((k) => k.includes('.cache/mpv') && k.includes('x.zip')),
+    ).toEqual([]);
+  });
+
+  it('downloads to a temporary name first', async () => {
+    const f = fake();
+    await fetchRuntime({ ...base, lock: LOCK }, f.deps);
+    expect(f.downloadedTo[0]).toMatch(/x\.zip\.part$/);
+  });
+
+  it.each(['../evil.dll', 'a/../../evil.dll', '/etc/passwd', 'C:/Windows/evil.dll', 'a\\..\\b'])(
+    'refuses a hostile entry %s and removes the staging folder',
+    async (path) => {
+      const f = fake({ extraPaths: [path] });
+      await expect(fetchRuntime({ ...base, lock: LOCK }, f.deps)).rejects.toThrow(/outside|unsafe/);
+      expect([...f.written.keys()].some((k) => k.includes('staging-win32-x64/'))).toBe(false);
+      expect([...f.written.keys()].some((k) => k.includes('resources/mpv/win32-x64'))).toBe(false);
+    },
+  );
+
+  it('refuses a symlink in the archive', async () => {
+    const f = fake({ symlinks: ['libmpv-link.dll'] });
+    await expect(fetchRuntime({ ...base, lock: LOCK }, f.deps)).rejects.toThrow(/symlink/);
+    expect([...f.written.keys()].some((k) => k.includes('resources/mpv/win32-x64'))).toBe(false);
+  });
+});
+
+describe('verifyRuntime', () => {
+  const dir = '/repo/apps/desktop/resources/mpv/win32-x64';
+  it('refuses an install whose BUILDINFO hash differs from the lock', async () => {
+    const f = fake({
+      files: {
+        [`${dir}/BUILDINFO.json`]: JSON.stringify({ sha256: 'c'.repeat(64) }),
+        [`${dir}/libmpv-2.dll`]: 'dll',
+      },
+    });
+    await expect(verifyRuntime({ ...base, lock: LOCK }, f.deps)).rejects.toThrow(
+      /does not match the lock/,
+    );
   });
 });

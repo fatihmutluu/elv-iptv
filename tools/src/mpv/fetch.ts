@@ -16,6 +16,9 @@ export interface FetchDeps {
   /** Moves the staged directory to its final place, replacing what was there. */
   installDir(from: string, to: string): Promise<void>;
   removeDir(dir: string): Promise<void>;
+  rename(from: string, to: string): Promise<void>;
+  /** Relative paths of symbolic links under a directory. */
+  findSymlinks(dir: string): Promise<string[]>;
   /** Relative paths (forward slashes) of every file under a directory. */
   listFiles(dir: string): Promise<string[]>;
 }
@@ -38,8 +41,33 @@ function runtimeDir(root: string, key: string): string {
   return `${root}/apps/desktop/resources/mpv/${key}`;
 }
 
-async function scanDir(dir: string, deps: FetchDeps): Promise<LicenceVerdict> {
-  const names = (await deps.listFiles(dir)).filter((n) => BINARY.test(n));
+/** Names that could escape the staging folder: absolute, drive-letter, UNC or containing a parent segment. */
+function unsafeNames(names: string[]): string[] {
+  return names.filter((n) => {
+    const slashed = n.replaceAll(String.fromCharCode(92), '/');
+    return (
+      slashed.startsWith('/') || /^[A-Za-z]:/.test(slashed) || slashed.split('/').includes('..')
+    );
+  });
+}
+
+async function assertContained(dir: string, key: string, deps: FetchDeps): Promise<string[]> {
+  const names = await deps.listFiles(dir);
+  const bad = unsafeNames(names);
+  const links = await deps.findSymlinks(dir);
+  if (bad.length > 0 || links.length > 0) {
+    await deps.removeDir(dir);
+    const why =
+      bad.length > 0
+        ? `unsafe path outside the staging folder: ${bad[0]}`
+        : `symlink in archive: ${links[0]}`;
+    throw new Error(`mpv: ${key} refused the archive (${why})`);
+  }
+  return names;
+}
+
+async function scanDir(dir: string, deps: FetchDeps, all?: string[]): Promise<LicenceVerdict> {
+  const names = (all ?? (await deps.listFiles(dir))).filter((n) => BINARY.test(n));
   const files = [];
   for (const name of names) files.push({ name, bytes: await deps.readBytes(`${dir}/${name}`) });
   return scanLicence(files);
@@ -88,13 +116,16 @@ async function obtainArchive(
   if (deps.exists(file) && (await deps.sha256(file)) === entry.sha256) return file;
   if (entry.kind === 'upstream-libmpv') {
     deps.log(`mpv: ${key} downloading ${name}`);
-    await deps.download(entry.url, file);
+    const part = `${file}.part`;
+    await deps.download(entry.url, part);
+    await deps.rename(part, file);
   } else {
     deps.log(`mpv: ${key} downloading workflow artifact ${entry.artifact}`);
     await deps.ghArtifact(entry, cache);
   }
   const actual = await deps.sha256(file);
   if (actual !== entry.sha256) {
+    await deps.removeDir(file);
     throw new Error(
       `mpv: ${key} SHA-256 mismatch for ${name}: expected ${entry.sha256}, got ${actual}`,
     );
@@ -121,7 +152,8 @@ export async function fetchRuntime(opts: FetchOptions, deps: FetchDeps): Promise
   const staging = `${opts.root}/.cache/mpv/staging-${key}`;
   await deps.removeDir(staging);
   await deps.extract(archive, staging);
-  const verdict = await scanDir(staging, deps);
+  const names = await assertContained(staging, key, deps);
+  const verdict = await scanDir(staging, deps, names);
   if (!verdict.ok) {
     await deps.removeDir(staging);
     throw new Error(`mpv: ${key} refused by the licence gate: ${verdict.problems.join('; ')}`);
@@ -153,6 +185,11 @@ export async function verifyRuntime(
   const dir = runtimeDir(opts.root, key);
   if (!deps.exists(`${dir}/BUILDINFO.json`))
     throw new Error(`mpv: ${key} is not installed; run pnpm mpv fetch`);
+  const info = await readInstalled(dir, deps);
+  if (info?.sha256 !== entry.sha256)
+    throw new Error(
+      `mpv: ${key} installed runtime does not match the lock; run pnpm mpv fetch --force`,
+    );
   const verdict = await scanDir(dir, deps);
   if (!verdict.ok)
     throw new Error(`mpv: ${key} refused by the licence gate: ${verdict.problems.join('; ')}`);

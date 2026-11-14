@@ -43,13 +43,17 @@ function sha(obj: Record<string, unknown>, path: string): string {
   return v;
 }
 
+/** The only host and path prefix an upstream runtime may be downloaded from. */
+const UPSTREAM = 'https://github.com/mpv-player/mpv/releases/download/';
+
 function parseEntry(value: unknown, path: string): LockEntry {
   const o = record(value, path);
   const mpv = str(o, 'mpv', path);
   const kind = o.kind;
   if (kind === 'upstream-libmpv') {
     const url = str(o, 'url', path);
-    if (!url.startsWith('https://')) throw new LockError(`${path}.url`, 'must start with https://');
+    if (!url.startsWith(UPSTREAM))
+      throw new LockError(`${path}.url`, `must start with ${UPSTREAM}`);
     return { kind, mpv, url, sha256: sha(o, path) };
   }
   if (kind === 'workflow-artifact') {

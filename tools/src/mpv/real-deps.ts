@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
-import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -17,6 +17,16 @@ function run(cmd: string, args: string[]): Promise<void> {
   });
 }
 
+async function symlinksUnder(dir: string, prefix = ''): Promise<string[]> {
+  const out: string[] = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+    if (entry.isSymbolicLink()) out.push(rel);
+    else if (entry.isDirectory()) out.push(...(await symlinksUnder(join(dir, entry.name), rel)));
+  }
+  return out;
+}
+
 async function walk(dir: string, prefix = ''): Promise<string[]> {
   const out: string[] = [];
   for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -29,9 +39,11 @@ async function walk(dir: string, prefix = ''): Promise<string[]> {
 
 /** The system `tar` (bsdtar ships with Windows 10+ and macOS; Git Bash's GNU tar cannot read zip). */
 function systemTar(): string {
-  return process.platform === 'win32'
-    ? join(process.env.SystemRoot ?? 'C:Windows', 'System32', 'tar.exe')
-    : 'tar';
+  if (process.platform !== 'win32') return 'tar';
+  const windir = process.env.SystemRoot ?? process.env.windir;
+  if (windir === undefined)
+    throw new Error('mpv: cannot find the Windows directory (SystemRoot) for tar.exe');
+  return join(windir, 'System32', 'tar.exe');
 }
 
 /** Real side effects for `pnpm mpv`: https download, SHA-256, system tar, `gh run download`. */
@@ -82,5 +94,7 @@ export function realDeps(log: (line: string) => void): FetchDeps {
     },
     removeDir: (dir) => rm(dir, { recursive: true, force: true }),
     listFiles: (dir) => walk(dir),
+    findSymlinks: (dir) => symlinksUnder(dir),
+    rename: (from, to) => rename(from, to),
   };
 }

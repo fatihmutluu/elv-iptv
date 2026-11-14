@@ -8,7 +8,7 @@ const HASH = '8e5f77430efc53ef175804ba6618527e3af0448a0dcabf04d3cc72659d1a6fce';
 const good = {
   mpv: '0.42.0',
   kind: 'upstream-libmpv',
-  url: 'https://example.org/a.zip',
+  url: 'https://github.com/mpv-player/mpv/releases/download/v0.42.0/a.zip',
   sha256: HASH,
 };
 
@@ -32,6 +32,12 @@ describe('mpv runtime lock', () => {
   it('rejects an http url', () => {
     expect(() => parseLock({ 'win32-x64': { ...good, url: 'http://example.org/a.zip' } })).toThrow(
       /win32-x64\.url/,
+    );
+  });
+
+  it('rejects an https url on another host', () => {
+    expect(() => parseLock({ 'win32-x64': { ...good, url: 'https://example.org/a.zip' } })).toThrow(
+      /win32-x64.url/,
     );
   });
 
