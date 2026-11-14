@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@elv/focus-core": "workspace:*",
+    "@elv/remote-keys": "workspace:*",
     "@elv/ui-kit": "workspace:*",
     "@react-native-tvos/config-tv": "0.1.7",
     "expo": "~58.0.25",

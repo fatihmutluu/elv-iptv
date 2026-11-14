@@ -123,6 +123,9 @@ jobs:
       - name: Build the debug APK
         working-directory: apps/tv-mobile/android
         run: ./gradlew assembleDebug --quiet --no-daemon
+      - name: Run the remote-keys JVM unit tests
+        working-directory: apps/tv-mobile/android
+        run: ./gradlew :elv-remote-keys:testDebugUnitTest --no-daemon --quiet
       - name: Assert the merged manifest declares the leanback feature
         run: |
           manifests=$(find apps/tv-mobile/android/app/build -path '*merged_manifest*' -name AndroidManifest.xml)

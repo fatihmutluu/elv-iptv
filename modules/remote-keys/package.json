@@ -1,0 +1,23 @@
+{
+  "name": "@elv/remote-keys",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run --reporter=dot --passWithNoTests",
+    "typecheck": "tsc --noEmit -p . --pretty false"
+  },
+  "dependencies": {
+    "expo-modules-core": "58.1.0"
+  },
+  "peerDependencies": {
+    "expo": "*"
+  },
+  "devDependencies": {
+    "@elv/config": "workspace:*",
+    "vitest": "5.1.0"
+  }
+}

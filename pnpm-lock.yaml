@@ -266,6 +266,9 @@ importers:
       '@elv/focus-core':
         specifier: workspace:*
         version: link:../../packages/focus-core
+      '@elv/remote-keys':
+        specifier: workspace:*
+        version: link:../../modules/remote-keys
       '@elv/ui-kit':
         specifier: workspace:*
         version: link:../../packages/ui-kit
@@ -318,6 +321,22 @@ importers:
       test-renderer:
         specifier: 1.3.1
         version: 1.3.1(@types/react@19.3.0)(react@19.3.0)
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@24.19.2)(@vitest/coverage-v8@5.1.0)(jsdom@26.1.0(supports-color@8.1.1))(vite@8.3.8(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
+
+  modules/remote-keys:
+    dependencies:
+      expo:
+        specifier: '*'
+        version: 58.0.25(@babel/core@7.29.13(supports-color@8.1.1))(@expo/metro-runtime@58.0.17)(react-dom@19.3.0(react@19.3.0))(react-native-tvos@0.88.1-0(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.3.0)(react-native-tvos@0.88.1-0)(react@19.3.0)(supports-color@8.1.1))(react-native-web@0.21.4(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)(supports-color@8.1.1)(typescript@6.0.3)
+      expo-modules-core:
+        specifier: 58.1.0
+        version: 58.1.0(react-native-tvos@0.88.1-0(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.3.0)(react-native-tvos@0.88.1-0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0)
+    devDependencies:
+      '@elv/config':
+        specifier: workspace:*
+        version: link:../../packages/config
       vitest:
         specifier: 5.1.0
         version: 5.1.0(@types/node@24.19.2)(@vitest/coverage-v8@5.1.0)(jsdom@26.1.0(supports-color@8.1.1))(vite@8.3.8(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))

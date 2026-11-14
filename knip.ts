@@ -11,7 +11,8 @@ const config: KnipConfig = {
     'apps/tv-mobile': {
       entry: ['config/*.test.ts'],
       // The TV plugin is loaded by name from app.config.ts; knip infers optional Expo packages.
-      ignoreDependencies: ['@react-native-tvos/config-tv', 'expo-updates'],
+      // @elv/remote-keys is autolinked natively until the app imports it.
+      ignoreDependencies: ['@react-native-tvos/config-tv', 'expo-updates', '@elv/remote-keys'],
     },
     'apps/desktop': {
       entry: ['e2e/*.spec.ts'],
