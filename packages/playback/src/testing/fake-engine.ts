@@ -1,5 +1,6 @@
 import type {
   AttemptToken,
+  ClockAnchor,
   EngineCapabilities,
   EngineError,
   EngineEvent,
@@ -73,8 +74,17 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
   let open = 0;
   let maxOpen = 0;
   let released = false;
+  let last: ClockAnchor = { positionMs: 0, atMs: opts.now(), rate: 0 };
+  let failed = false;
+
+  const note = (event: EngineEvent): void => {
+    if (event.attempt !== token || url === undefined) return;
+    if (event.type === 'clock') last = event.anchor;
+    if (event.type === 'error') failed = true;
+  };
 
   const deliver = (event: EngineEvent): void => {
+    note(event);
     for (const listener of [...listeners]) listener(event);
   };
 
@@ -117,6 +127,16 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
     }
   };
 
+  /** A paused or resumed media anchors where its latest anchor has moved to; a failed media is idle and anchors nothing. */
+  const anchorNow = (rate: number): void => {
+    if (url === undefined || failed) return;
+    const atMs = opts.now();
+    const positionMs = last.positionMs + Math.max(0, atMs - last.atMs) * last.rate;
+    last = { positionMs, atMs, rate };
+    const anchor = last;
+    handles.push(opts.schedule(() => deliver({ attempt: token, type: 'clock', anchor }), 0));
+  };
+
   const closeMedia = (): void => {
     cancelScript();
     if (open > 0) open -= 1;
@@ -135,6 +155,8 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
       if (url !== undefined) closeMedia();
       token = cmd.attempt;
       url = cmd.url;
+      last = { positionMs: cmd.startMs ?? 0, atMs: opts.now(), rate: 0 };
+      failed = false;
       open += 1;
       maxOpen = Math.max(maxOpen, open);
       runScript();
@@ -142,6 +164,7 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
     retry(attempt) {
       commands.push({ name: 'retry', attempt });
       adopt(attempt);
+      failed = false;
       runScript();
     },
     recreate(attempt) {
@@ -152,10 +175,12 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
     play(attempt) {
       commands.push({ name: 'play', attempt });
       adopt(attempt);
+      anchorNow(1);
     },
     pause(attempt) {
       commands.push({ name: 'pause', attempt });
       adopt(attempt);
+      anchorNow(0);
     },
     seek(attempt, positionMs) {
       commands.push({ name: 'seek', attempt, positionMs });
