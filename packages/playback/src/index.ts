@@ -22,7 +22,5 @@ export {
   type PlaybackState,
   type PlaybackStatus,
   type PlaybackTimers,
-  type RecoveryHooks,
-  type ServiceControl,
   type TuneRequest,
 } from './service';

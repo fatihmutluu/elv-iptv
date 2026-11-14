@@ -26,8 +26,9 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
 - `createPlaybackService({ engine, clock, timers, config? })`: `tune` (returns the token; a new tune supersedes the old
   one at once), `retry`, `stop`, `play`, `pause`, `seek`, `getState`, `subscribe`, `dispose`. `DEFAULT_PLAYBACK_CONFIG`
   holds the spec timings. Events of older tokens are dropped and counted in `staleEventsDropped`.
-- Recovery plugs in through the internal `recovery` dependency: `RecoveryHooks` (error, stall, start timeout, surface)
-  driving the service through `ServiceControl`. Without it, an error or start timeout fails the tune.
+- Recovery plugs in through the internal `recovery` dependency (not exported from the index): `RecoveryHooks`
+  (error, stall, start timeout, and surface events whatever their token) driving the service through `ServiceControl`.
+  Without it, an error or start timeout fails the tune. The start timeout is armed before `load`/`retry` is sent.
 
 ## Engine contract (spec section 5.1)
 - Commands are enqueue-and-return; results arrive as events, each echoing an `AttemptToken`.

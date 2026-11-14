@@ -498,6 +498,68 @@ describe('subscription and dispose', () => {
   });
 });
 
+describe('robustness', () => {
+  it('keeps a synchronous load error instead of a later start timeout', async () => {
+    const { engine, service } = setup();
+    const load = engine.load.bind(engine);
+    vi.spyOn(engine, 'load').mockImplementation((cmd) => {
+      load(cmd);
+      engine.emit({ attempt: cmd.attempt, type: 'error', error: { code: 'http-401' } });
+    });
+    service.tune(tuneReq('A'));
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(service.getState().status).toEqual({
+      kind: 'failed',
+      error: { category: 'playback', code: 'http-401' },
+    });
+    expect(engine.commands.filter((c) => c.name === 'stop')).toHaveLength(1);
+  });
+
+  it('keeps a synchronous retry error instead of a later start timeout', async () => {
+    const { engine, service } = setup();
+    service.tune(tuneReq('A'));
+    await vi.advanceTimersByTimeAsync(400);
+    const retry = engine.retry.bind(engine);
+    vi.spyOn(engine, 'retry').mockImplementation((attempt) => {
+      retry(attempt);
+      engine.emit({ attempt, type: 'error', error: { code: 'http-401' } });
+    });
+    service.retry();
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(service.getState().status).toEqual({
+      kind: 'failed',
+      error: { category: 'playback', code: 'http-401' },
+    });
+  });
+
+  it('fails the tune when the resolver throws synchronously', async () => {
+    const { engine, service } = setup();
+    const throwing = tuneReq('A', {
+      resolve: () => {
+        throw new Error('boom');
+      },
+    });
+    expect(() => service.tune(throwing)).not.toThrow();
+    await flush();
+    expect(service.getState().status).toEqual({
+      kind: 'failed',
+      error: { category: 'network', code: 'resolve-failed' },
+    });
+    expect(loads(engine)).toHaveLength(0);
+  });
+
+  it('delivers surface events tagged with the previous token to the hooks', async () => {
+    const seen: string[] = [];
+    const { engine, service } = setup({ onSurface: (c) => seen.push(c) });
+    service.tune(tuneReq('A'));
+    await flush();
+    service.tune(tuneReq('B', { resolve: () => new Promise(() => {}) }));
+    engine.surface('destroyed');
+    expect(seen).toEqual(['destroyed']);
+    expect(service.getState().staleEventsDropped).toBe(0);
+  });
+});
+
 describe('recovery hooks', () => {
   it('routes error, stall and start timeout to the hooks instead of failing', async () => {
     const calls: string[] = [];
