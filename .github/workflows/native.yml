@@ -415,6 +415,10 @@ jobs:
     if: needs.changes.outputs.desktop == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    # actions: read lets `pnpm mpv fetch` download the pinned macOS runtime artifact of mpv-runtime.yml.
+    permissions:
+      contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -422,6 +426,8 @@ jobs:
     env:
       # Unsigned builds: electron-builder must not look for a signing identity.
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      # `gh run download` on macOS; the token is read-only.
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

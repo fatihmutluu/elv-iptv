@@ -41,19 +41,24 @@ describe('mpv runtime lock', () => {
     );
   });
 
-  it('parses a workflow artifact entry', () => {
-    const lock = parseLock({
-      'darwin-arm64': {
-        kind: 'workflow-artifact',
-        mpv: '0.42.0',
-        repo: 'o/r',
-        runId: 5,
-        artifact: 'a',
-        file: 'f.tgz',
-        sha256: HASH,
-      },
-    });
-    expect(lock['darwin-arm64']?.kind).toBe('workflow-artifact');
+  const artifact = {
+    kind: 'workflow-artifact',
+    mpv: '0.42.0',
+    repo: 'fatihmutluu/elv-iptv',
+    runId: 5,
+    artifact: 'mpv-runtime-darwin-arm64',
+    file: 'mpv-runtime-darwin-arm64.tar.gz',
+    sha256: HASH,
+  };
+
+  it('parses a workflow-artifact entry', () => {
+    expect(parseLock({ 'darwin-arm64': artifact })['darwin-arm64']).toEqual(artifact);
+  });
+
+  it.each([1.5, '5', 0, -3])('rejects a non-integer runId (%s)', (runId) => {
+    expect(() => parseLock({ 'darwin-arm64': { ...artifact, runId } })).toThrow(
+      /darwin-arm64\.runId must be a positive integer/,
+    );
   });
 
   it('rejects an unknown kind and a non-object', () => {

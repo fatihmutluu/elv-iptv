@@ -37,7 +37,8 @@ export interface FetchOptions {
   force?: boolean;
 }
 
-const BINARY = /(\.dll|\.dylib|\.so(\.\d+)*|\/mpv|^mpv)$/;
+/** Files that embed the FFmpeg configuration or the mpv build options; other dylibs carry neither. */
+const BINARY = /(\.dll|(^|\/)libav(codec|format|util)[^/]*\.dylib|\.so(\.\d+)*|(^|\/)mpv)$/;
 
 function runtimeDir(root: string, key: string): string {
   return `${root}/apps/desktop/resources/mpv/${key}`;
@@ -128,18 +129,21 @@ async function obtainArchive(
   entry: LockEntry,
   deps: FetchDeps,
 ): Promise<string> {
-  const cache = `${root}/.cache/mpv`;
+  const cache = `${root}/.cache/mpv/${key}`;
   const name =
     entry.kind === 'upstream-libmpv' ? (entry.url.split('/').pop() as string) : entry.file;
   const file = `${cache}/${name}`;
-  if (deps.exists(file) && (await deps.sha256(file)) === entry.sha256) return file;
+  if (deps.exists(file)) {
+    if ((await deps.sha256(file)) === entry.sha256) return file;
+    await deps.removeDir(file);
+  }
   if (entry.kind === 'upstream-libmpv') {
     deps.log(`mpv: ${key} downloading ${name}`);
     const part = `${file}.part`;
     await deps.download(entry.url, part);
     await deps.rename(part, file);
   } else {
-    deps.log(`mpv: ${key} downloading workflow artifact ${entry.artifact}`);
+    deps.log(`mpv: ${key} downloading workflow artifact ${entry.artifact} of run ${entry.runId}`);
     await deps.ghArtifact(entry, cache);
   }
   const actual = await deps.sha256(file);
@@ -192,6 +196,21 @@ export async function fetchRuntime(opts: FetchOptions, deps: FetchDeps): Promise
   await deps.writeText(`${dir}/BUILDINFO.json`, `${JSON.stringify(info, null, 2)}\n`);
   deps.log(summary(key, 'installed', entry.mpv, verdict));
   return { status: 'installed', dir, verdict };
+}
+
+/**
+ * Applies the licence gate to the binaries under any directory, without a lock entry: the CI build
+ * checks its output with it before upload.
+ */
+export async function verifyDirectory(dir: string, deps: FetchDeps): Promise<LicenceVerdict> {
+  const verdict = await scanDir(dir, deps);
+  if (!verdict.ok)
+    throw new Error(`mpv: ${dir} refused by the licence gate: ${verdict.problems.join('; ')}`);
+  const lua = verdict.lua ? 'yes' : 'no';
+  deps.log(
+    `mpv: ${dir} passed the licence gate (ffmpeg without gpl/nonfree; mpv gpl=false; lua ${lua})`,
+  );
+  return verdict;
 }
 
 /** Rescans the installed runtime for the platform and applies the licence gate again. */

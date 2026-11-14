@@ -78,7 +78,8 @@ export function realDeps(log: (line: string) => void, root: string): FetchDeps {
     },
     async extract(archive, dir) {
       await mkdir(dir, { recursive: true });
-      await run(systemTar(), ['-xf', archive, '-C', dir]);
+      const flags = archive.endsWith('.tar.gz') ? '-xzf' : '-xf';
+      await run(systemTar(), [flags, archive, '-C', dir]);
     },
     readBytes: (file) => readFile(file),
     exists: existsSync,

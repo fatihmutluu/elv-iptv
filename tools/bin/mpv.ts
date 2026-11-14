@@ -1,35 +1,41 @@
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { fetchRuntime, verifyRuntime } from '../src/mpv/fetch.ts';
+import { fetchRuntime, verifyDirectory, verifyRuntime } from '../src/mpv/fetch.ts';
 import { parseLock } from '../src/mpv/lock.ts';
 import { realDeps } from '../src/mpv/real-deps.ts';
 import { findRepoRoot } from '../src/root.ts';
 
-const USAGE = 'usage: pnpm mpv fetch [--force] | pnpm mpv verify';
+const USAGE = 'usage: pnpm mpv fetch [--force] | pnpm mpv verify [--dir <folder>]';
+
+const slash = (p: string): string => p.replaceAll(String.fromCharCode(92), '/');
 
 async function main(): Promise<void> {
   const { positionals, values } = parseArgs({
     allowPositionals: true,
-    options: { force: { type: 'boolean', default: false } },
+    options: { force: { type: 'boolean', default: false }, dir: { type: 'string' } },
   });
   const command = positionals[0];
   if (command !== 'fetch' && command !== 'verify') {
     process.stderr.write(`${USAGE}\n`);
     process.exit(2);
   }
-  const root = findRepoRoot(import.meta.dirname);
+  const root = slash(findRepoRoot(import.meta.dirname));
+  const deps = realDeps((line) => process.stdout.write(`${line}\n`), root);
+  if (values.dir !== undefined) {
+    if (command !== 'verify') {
+      process.stderr.write(`${USAGE}\n`);
+      process.exit(2);
+    }
+    const verdict = await verifyDirectory(slash(resolve(values.dir)), deps);
+    process.stdout.write(`mpv: FFmpeg configuration: ${verdict.ffmpegConfig}\n`);
+    process.stdout.write(`mpv: mpv build options: ${verdict.mpvOptions}\n`);
+    return;
+  }
   const lock = parseLock(
     JSON.parse(readFileSync(join(root, 'apps/desktop/mpv-runtime.lock.json'), 'utf8')),
   );
-  const slashed = root.replaceAll(String.fromCharCode(92), '/');
-  const deps = realDeps((line) => process.stdout.write(`${line}\n`), slashed);
-  const opts = {
-    root: slashed,
-    platform: process.platform,
-    arch: process.arch,
-    lock,
-  };
+  const opts = { root, platform: process.platform, arch: process.arch, lock };
   const result =
     command === 'fetch'
       ? await fetchRuntime({ ...opts, force: values.force }, deps)
