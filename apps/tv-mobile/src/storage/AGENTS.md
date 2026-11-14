@@ -15,3 +15,4 @@ Device implementations of the `@elv/domain` ports used by `@elv/data`. Only thes
 - `createSecureSecretStore()` is the `SecretStore` over `expo-secure-store` (async API only). Values split into chunks of at most 1,800 UTF-8 bytes
   (`<key>.<i>`, count in `<key>.n`, written last); a failed `set` leaves no secret. A missing chunk, bad index or store error reads as `undefined`
   and logs nothing; invalid keys throw. Tests mock `expo-secure-store`.
+- Simulator builds need ad-hoc signing (`CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=YES CODE_SIGNING_ALLOWED=YES`) for the secure store: unsigned (`CODE_SIGNING_ALLOWED=NO`) the app has no Keychain access and imports fail with `storage/secret-store-failed`.

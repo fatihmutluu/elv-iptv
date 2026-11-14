@@ -302,6 +302,7 @@ jobs:
         working-directory: apps/tv-mobile/ios
         run: pod install --silent
       # Release bundles the JS; a Debug build would need Metro.
+      # Ad-hoc signing: an unsigned simulator build has no Keychain access, so the secure store fails (#72).
       - name: Build for the Apple TV simulator
         working-directory: apps/tv-mobile/ios
         run: |
@@ -309,7 +310,7 @@ jobs:
           workspace=${workspace#./}
           xcodebuild -workspace "$workspace" -scheme "${workspace%.xcworkspace}" \
             -sdk appletvsimulator -configuration Release -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO -quiet build
+            CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=YES CODE_SIGNING_ALLOWED=YES -quiet build
       - name: Run the list gate on an Apple TV simulator
         working-directory: apps/tv-mobile/ios
         run: |
