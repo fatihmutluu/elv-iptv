@@ -223,16 +223,19 @@ Rungs, each bounded and visible as a status the OSD can show:
   `docs/learned/gates/player-android-tv.json`.
 - Budgets (§6.2): cold < 2.0 s, warm p50 < 1.0 s, zap p95 ≤ 2.0 s, one surface creation per run, no stale event applied,
   and zero 509 or limit responses from the simulator on the one-connection `demo` account during the zaps (the provider's
-  own view of overlap). `overlapMs` (TS stream requests of one account whose lifetimes overlap in the simulator log) is
-  reported and warned above 0; the simulator sees a close slightly after the app sends it, so it is not a hard budget.
-  HLS segment requests carry no account in the simulator log and are excluded.
+  own view of overlap; only the answer a request's own `?fault=` forces is excluded). `overlapMs` (TS stream requests
+  of one account, whatever their answer, whose lifetimes overlap in the simulator log; the worst run) is reported and
+  warned above 0; the simulator sees a close slightly after the app sends it, so it is not a hard budget. HLS segment
+  requests carry no account in the simulator log and are excluded. A time one run did not measure is warned about.
 - Fault runs (URLs built by the gate with `?fault=`): `drop@5` passes when playback is `playing` again within 10 s of the
   first drop without user action (the run ends there; the simulator would drop again); `status=404` passes when the
   service reaches `failed(http-404)` within 10 s; `status=509` passes when the service enters `limited` within 2 s and
   its next load waits for the backoff (the run ends after the second backoff). Media3 reconnects a dropped live TS
   request on its own, so on the device `drop@5` usually recovers at L0 (a short stall, no rung): a stall of the current
   attempt that ends while the service still shows `playing` counts as recovered, and the simulator log must show the
-  reconnect within 10 s of the drop.
+  reconnect within 10 s of the drop. `slow-start=3` (added in the final review) holds the first answer back 3 s and
+  zaps away after 800 ms: it passes when the zap shows its frame and `demo` got no limit answer, so the slow request
+  was closed before the next channel's opened (overlap warns).
 - CI: phase 1 runs the player gate locally only (`docs/learned/gates/player-android-tv.json`); a report-only CI job is
   added once the local gate is stable (it needs FFmpeg on the runner and a decision about the emulator's `-noaudio`).
   The tvOS simulator run is phase 2.

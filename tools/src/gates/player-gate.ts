@@ -16,6 +16,8 @@ const CHANNELS = ['1001', '1002', '1003', '1004'];
 const ZAP_RATE = 0.5;
 /** A fault run needs one stay on the faulted channel; the lowest rate the screen accepts makes it 10 s long. */
 const FAULT_RATE = 0.1;
+/** A slow-start run zaps 800 ms after the first tune, while that request still waits for its 3 s late answer. */
+const SLOW_START_RATE = 1.25;
 const FAULT_ZAPS = 1;
 const LINE_MARGIN_MS = 60_000;
 
@@ -36,10 +38,11 @@ const FAULT_EXPECTED = {
   drop5: 'recovered',
   '404': 'failed-in-time',
   '509': 'limited-backoff',
+  slowstart: 'left',
 } as const;
 type Fault = keyof typeof FAULT_EXPECTED;
 /** Fault names in run order. */
-const FAULTS: Fault[] = ['drop5', '404', '509'];
+const FAULTS: Fault[] = ['drop5', '404', '509', 'slowstart'];
 
 type Nullable = number | null;
 
@@ -70,16 +73,18 @@ export interface PlayerResult {
   failures: number;
   /** Connection-limit answers on account `demo` during the zap runs (simulator log). */
   limitResponses: number;
-  /** Time two TS streams of account `demo` were open together (simulator log), median over runs. */
+  /** Time two TS streams of account `demo` were open together (simulator log), worst run. */
   overlapMs: number;
 }
 
-/** Verdict on one fault run. */
+/** Verdict on one fault run, with the simulator's connection numbers of that run. */
 export interface FaultReport {
   fault: Fault;
   line: PlayerLine;
   failures: string[];
   warnings: string[];
+  limitResponses: number;
+  overlapMs: number;
 }
 
 /** What {@link runPlayerGate} measured. */
@@ -151,7 +156,7 @@ const medianOrNull = (values: Nullable[]): Nullable => {
 };
 const worst = (values: number[]): number => Math.max(...values);
 
-/** Combines the zap runs: median times, worst counters. `stats` holds the simulator numbers of each run. */
+/** Combines the zap runs: median times, worst counters and overlap. `stats` holds the simulator numbers of each run. */
 export function aggregateRuns(
   lines: readonly PlayerLine[],
   stats: readonly { limitResponses: number; overlapMs: number }[],
@@ -174,20 +179,30 @@ export function aggregateRuns(
     staleEventsDropped: worst(pick((l) => l.staleEventsDropped)),
     failures: worst(pick((l) => l.failures)),
     limitResponses: worst(stats.map((s) => s.limitResponses)),
-    overlapMs: median(stats.map((s) => s.overlapMs)),
+    overlapMs: worst(stats.map((s) => s.overlapMs)),
   };
 }
+
+const TIMES: readonly [string, (r: PlayerResult) => Nullable][] = [
+  ['cold start', (r) => r.ttffColdMs],
+  ['warm start p50', (r) => r.ttffWarmMs.p50],
+  ['warm start p95', (r) => r.ttffWarmMs.p95],
+  ['zap p50', (r) => r.zapMs.p50],
+  ['zap p95', (r) => r.zapMs.p95],
+  ['zap max', (r) => r.zapMs.max],
+];
 
 /**
  * Compares a result with the baseline. Absolute budgets (cold under 2,000 ms, warm p50 under 1,000 ms, zap p95 at most
  * 2,000 ms) are only warnings with `budgets: 'warn'`; an unmeasured time, `surfaceCreated` other than 1, a stale event
- * applied, a failed tune and any limit response on `demo` always fail. Overlap above 0 warns. Against a baseline each
- * time may grow 10 % (plus 50 ms slack); runs with another zap count are not comparable.
+ * applied, a failed tune and any limit response on `demo` always fail. Overlap above 0 warns, and so does a time one
+ * of `runs` did not measure while the result has it from the others (the median hides that run). Against a baseline
+ * each time may grow 10 % (plus 50 ms slack); runs with another zap count are not comparable.
  */
 export function comparePlayer(
   result: PlayerResult,
   baseline: PlayerResult | undefined,
-  opts: { budgets?: BudgetMode } = {},
+  opts: { budgets?: BudgetMode; runs?: readonly PlayerResult[] } = {},
 ): CompareOutcome {
   const failures: string[] = [];
   const warnings: string[] = [];
@@ -240,6 +255,13 @@ export function comparePlayer(
   if (result.overlapMs > 0) {
     warnings.push(`two ${ACCOUNT} streams were open together for ${result.overlapMs} ms`);
   }
+  (opts.runs ?? []).forEach((run, i) => {
+    for (const [name, value] of TIMES) {
+      if (value(run) === null && value(result) !== null) {
+        warnings.push(`run ${i + 1}: ${name} was not measured; the result uses the other runs`);
+      }
+    }
+  });
   return { ok: failures.length === 0, failures, warnings };
 }
 
@@ -247,8 +269,10 @@ export function comparePlayer(
  * Judges one fault run against spec 7. The screen's `faultOutcome` must be the expected one (`missed` fails); the
  * windows come from the simulator log of the faulted channel: a dropped stream must be requested again within 10 s of
  * the drop, a 404 must have been answered for the last time within 10 s of the first request, and after a 509 the
- * next request may come only after the 2,000 ms backoff. The line carries no timestamps, so "back to playing",
- * "failed" and "limited" times are bounded through the requests only (reported as a gap in the task report).
+ * next request may come only after the 2,000 ms backoff. A slow start (its answer held back 3 s, left by a zap after
+ * 800 ms) needs the zap's frame, a request after the zap and no limit answer on `demo` (the slow request answered
+ * 509 means it was still open beside the next channel's); overlap warns. The line carries no timestamps, so "back to
+ * playing", "failed" and "limited" times are bounded through the requests only.
  */
 export function judgeFault(
   fault: Fault,
@@ -292,6 +316,8 @@ export function judgeFault(
         `drop5: reconnect came ${again.start - first.end} ms after the drop, limit ${DROP_RECOVERY_MS} ms`,
       );
     }
+  } else if (fault === 'slowstart') {
+    judgeSlowStart(line, entries, channel, failures, warnings);
   } else if (fault === '404') {
     const notFound = own.filter((e) => e.status === 404);
     const last = notFound[notFound.length - 1];
@@ -314,6 +340,30 @@ export function judgeFault(
     }
   }
   return { failures, warnings };
+}
+
+function judgeSlowStart(
+  line: PlayerLine,
+  entries: readonly SimLogEntry[],
+  channel: string,
+  failures: string[],
+  warnings: string[],
+): void {
+  if (line.zapMs.max === null)
+    failures.push('slowstart: the zap away from the slow channel showed no frame');
+  const after = entries.some(
+    (e) => e.account === ACCOUNT && STREAM_PATH.test(e.path) && String(e.streamId) !== channel,
+  );
+  if (!after) failures.push('slowstart: the simulator saw no request after the zap');
+  const { limitResponses, overlapMs } = connectionStats(entries, ACCOUNT);
+  if (limitResponses > 0) {
+    failures.push(
+      `slowstart: ${limitResponses} limit responses on ${ACCOUNT}: the slow request stayed open beside the next channel`,
+    );
+  }
+  if (overlapMs > 0) {
+    warnings.push(`slowstart: two ${ACCOUNT} streams were open together for ${overlapMs} ms`);
+  }
 }
 
 /** Options of {@link runPlayerGate}. */
@@ -345,8 +395,8 @@ const link = (zaps: number, rate: number, fault: string): string =>
 
 /**
  * Builds (optional) and installs the development app, starts the stream simulator (or reuses a running one), opens
- * `elviptv://gate/player` for `runs` zap runs and, with `faults`, one run per fault, clearing the simulator log before
- * each. Fails at once without FFmpeg. The simulator it started is stopped afterwards. Every wait has a timeout;
+ * `elviptv://gate/player` for `runs` zap runs and, with `faults`, one run per fault, clearing the simulator log after
+ * the app was force-stopped (a stopped app's closing requests stay out of the next run's log) and before each start. Fails at once without FFmpeg. The simulator it started is stopped afterwards. Every wait has a timeout;
  * failures throw a one-line `Error`.
  */
 export async function runPlayerGate(opts: PlayerGateOptions): Promise<PlayerGateOutput> {
@@ -372,8 +422,7 @@ export async function runPlayerGate(opts: PlayerGateOptions): Promise<PlayerGate
     await installApk(exec, adb, device.serial, root);
 
     const play = async (url: string, stayMs: number): Promise<PlayerLine> => {
-      await log.clear();
-      await startGate(device, sleep, url);
+      await startGate(device, sleep, url, { afterStop: () => log.clear() });
       const timeoutMs = stayMs + LINE_MARGIN_MS;
       for (let waited = 0; waited <= timeoutMs; waited += POLL_MS) {
         const line = parsePlayerLine(
@@ -404,12 +453,11 @@ export async function runPlayerGate(opts: PlayerGateOptions): Promise<PlayerGate
 
     const faults: FaultReport[] = [];
     for (const fault of opts.faults === true ? FAULTS : []) {
-      const line = await play(
-        link(FAULT_ZAPS, FAULT_RATE, fault),
-        (FAULT_ZAPS / FAULT_RATE) * 1000,
-      );
-      const verdict = judgeFault(fault, line, await log.entries(), CHANNELS[0] as string);
-      const report = { fault, line, ...verdict };
+      const rate = fault === 'slowstart' ? SLOW_START_RATE : FAULT_RATE;
+      const line = await play(link(FAULT_ZAPS, rate, fault), (FAULT_ZAPS / rate) * 1000);
+      const entries = await log.entries();
+      const verdict = judgeFault(fault, line, entries, CHANNELS[0] as string);
+      const report = { fault, line, ...verdict, ...connectionStats(entries, ACCOUNT) };
       faults.push(report);
       opts.onFault?.(report);
     }

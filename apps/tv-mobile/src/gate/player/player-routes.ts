@@ -1,8 +1,8 @@
 /** The fault a player gate run injects into its first channel. */
-export type PlayerFault = '' | 'drop5' | '404' | '509' | 'notice' | 'stall';
+export type PlayerFault = '' | 'drop5' | '404' | '509' | 'notice' | 'stall' | 'slowstart';
 
 /** The stream form a run plays: live MPEG-TS, live HLS or a VOD movie (MP4). */
-type PlayerStream = 'ts' | 'hls' | 'vod';
+export type PlayerStream = 'ts' | 'hls' | 'vod';
 
 /** Parameters of the gate deep link `elviptv://gate/player?host=10.0.2.2:7878&account=demo&channels=1001,1002&zaps=30&rate=0.5&fault=&stream=ts`. */
 export interface PlayerGateParams {
@@ -35,6 +35,7 @@ const FAULT_SPECS: Readonly<Record<Exclude<PlayerFault, ''>, string>> = {
   '509': 'status=509',
   notice: 'text-notice',
   stall: 'stall30s@2s',
+  slowstart: 'slow-start=3',
 };
 const FAULTS: ReadonlySet<string> = new Set(Object.keys(FAULT_SPECS));
 const STREAMS: ReadonlySet<string> = new Set(['ts', 'hls', 'vod']);

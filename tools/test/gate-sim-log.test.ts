@@ -55,13 +55,25 @@ describe('connectionStats', () => {
     expect(connectionStats(list, 'demo').limitResponses).toBe(3);
   });
 
-  it('does not count answers forced by a fault query, nor treat limit answers as streams', () => {
+  it('does not count an answer forced by the request fault itself, but counts every other limit answer', () => {
     const list = [
       entry({ status: 509, bytes: 0, ms: 2, query: { fault: 'status=509' } }),
-      entry({ status: 200, bytes: 23, ms: 5000 }),
-      entry({ start: 0, ms: 5000 }),
+      entry({ status: 429, bytes: 0, ms: 2, query: { fault: 'drop@5s,status=429' } }),
+      entry({ status: 200, bytes: 23, ms: 2, query: { fault: 'text-notice' } }),
+      entry({ start: 3000, status: 509, bytes: 0, ms: 2, query: { fault: 'slow-start=3' } }),
+      entry({ start: 6000, status: 200, bytes: 23, ms: 2, query: { fault: 'status=509' } }),
     ];
-    expect(connectionStats(list, 'demo')).toEqual({ limitResponses: 1, overlapMs: 0 });
+    expect(connectionStats(list, 'demo').limitResponses).toBe(2);
+  });
+
+  it('counts the lifetime of every stream request whatever its answer', () => {
+    const list = [
+      entry({ start: 0, ms: 3000, status: 509, bytes: 0, query: { fault: 'slow-start=3' } }),
+      entry({ start: 1000, ms: 1000, status: 200, bytes: 23 }),
+      entry({ start: 2500, ms: 1000 }),
+      entry({ start: 2600, ms: 10, status: 404, bytes: 0, path: '/live/demo/demo/1002.ts' }),
+    ];
+    expect(connectionStats(list, 'demo').overlapMs).toBe(1000 + 500 + 10 + 10);
   });
 
   it('ignores HLS segments without an account and other accounts', () => {

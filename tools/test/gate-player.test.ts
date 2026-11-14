@@ -44,9 +44,16 @@ const entry = (start: number, ms: number, over: Partial<SimLogEntry> = {}): SimL
   ...over,
 });
 
+const forced509 = { status: 509, bytes: 0, query: { fault: 'status=509' } };
+const slow = (start: number, ms: number, over: Partial<SimLogEntry> = {}) =>
+  entry(start, ms, { query: { fault: 'slow-start=3' }, bytes: 0, ...over });
+const next = (start: number, ms: number) =>
+  entry(start, ms, { streamId: 1002, path: '/live/demo/demo/1002.ts' });
+
 function fakes(opts: { lines: PlayerLine[]; entries?: SimLogEntry[][]; install?: boolean }) {
   const calls: string[] = [];
   const urls: string[] = [];
+  const events: string[] = [];
   let starts = 0;
   let reads = 0;
   const exec: Exec = async (_c, args) => {
@@ -55,6 +62,7 @@ function fakes(opts: { lines: PlayerLine[]; entries?: SimLogEntry[][]; install?:
     if (text === 'devices')
       return { ok: true, output: 'List of devices attached\nemulator-5554\tdevice\n' };
     const rest = text.replace(/^-s emulator-5554 /, '');
+    if (rest.startsWith('shell am force-stop')) events.push('force-stop');
     if (rest.startsWith('install'))
       return {
         ok: opts.install !== false,
@@ -77,7 +85,6 @@ function fakes(opts: { lines: PlayerLine[]; entries?: SimLogEntry[][]; install?:
     }
     return { ok: true, output: '' };
   };
-  const events: string[] = [];
   const sim = {
     ensure: async () => {
       events.push('start');
@@ -120,7 +127,7 @@ describe('parsePlayerLine', () => {
 });
 
 describe('aggregateRuns', () => {
-  it('takes the median of times and the worst of counters', () => {
+  it('takes the median of times and the worst run of counters and overlap', () => {
     const result = aggregateRuns(
       [
         line({ ttffColdMs: 900 }),
@@ -136,7 +143,7 @@ describe('aggregateRuns', () => {
     expect(result.ttffColdMs).toBe(1200);
     expect(result.surfaceCreated).toBe(2);
     expect(result.limitResponses).toBe(2);
-    expect(result.overlapMs).toBe(20);
+    expect(result.overlapMs).toBe(30);
   });
 
   it('keeps a metric null when no run measured it', () => {
@@ -197,6 +204,16 @@ describe('comparePlayer', () => {
       ]),
     );
     expect(out.warnings.join('\n')).toMatch(/open together for 40 ms/);
+  });
+
+  it('warns about a time one run did not measure when the result has one from the others', () => {
+    const runs = [result(), result({ ttffColdMs: null, zapMs: { p50: 1, p95: null, max: 1 } })];
+    const out = comparePlayer(result(), result(), { runs });
+    expect(out.ok).toBe(true);
+    expect(out.warnings).toEqual([
+      'run 2: cold start was not measured; the result uses the other runs',
+      'run 2: zap p95 was not measured; the result uses the other runs',
+    ]);
   });
 
   it('fails a time that grows more than 10 percent plus 50 ms slack over the baseline', () => {
@@ -283,6 +300,35 @@ describe('judgeFault', () => {
     ).toMatch(/no 509/);
   });
 
+  it('passes a slow start left by a zap whose next request came after the slow one closed', () => {
+    const entries = [slow(0, 800), next(805, 2000)];
+    expect(judgeFault('slowstart', run('slowstart', 'left'), entries, '1001')).toEqual({
+      failures: [],
+      warnings: [],
+    });
+  });
+
+  it('fails a slow start whose request stayed open beside the next one, and warns about overlap', () => {
+    const late = slow(0, 3000, { status: 509, bytes: 0 });
+    const out = judgeFault('slowstart', run('slowstart', 'left'), [late, next(1800, 2000)], '1001');
+    expect(out.failures).toEqual([
+      'slowstart: 1 limit responses on demo: the slow request stayed open beside the next channel',
+    ]);
+    expect(out.warnings).toEqual(['slowstart: two demo streams were open together for 1200 ms']);
+    const unseen = judgeFault(
+      'slowstart',
+      run('slowstart', 'left'),
+      [slow(0, 800)],
+      '1001',
+    ).failures;
+    expect(unseen).toEqual(['slowstart: the simulator saw no request after the zap']);
+    const noFrame = line({ fault: 'slowstart', faultOutcome: 'left', zaps: 1 });
+    noFrame.zapMs = { p50: null, p95: null, max: null };
+    expect(
+      judgeFault('slowstart', noFrame, [slow(0, 800), next(805, 10)], '1001').failures,
+    ).toEqual(['slowstart: the zap away from the slow channel showed no frame']);
+  });
+
   it('fails when the simulator saw nothing for the channel or the screen ran another fault', () => {
     const other = [entry(0, 100, { streamId: 1002, path: '/live/demo/demo/1002.ts' })];
     expect(judgeFault('404', run('', 'failed-in-time'), other, '1001').failures).toEqual([
@@ -309,7 +355,7 @@ describe('runPlayerGate', () => {
         'elviptv://gate/player?host=10.0.2.2:7878&account=demo&channels=1001,1002,1003,1004&zaps=12&rate=0.5&fault=',
       ),
     );
-    expect(f.events).toEqual(['start', 'clear', 'clear', 'clear', 'stop']);
+    expect(f.events).toEqual(['start', ...Array(3).fill(['force-stop', 'clear']).flat(), 'stop']);
     expect(runs).toHaveLength(3);
     expect(out.result.zaps).toBe(30);
     expect(out.runs).toHaveLength(3);
@@ -333,12 +379,14 @@ describe('runPlayerGate', () => {
         line({ fault: 'drop5', faultOutcome: 'recovered', zaps: 1 }),
         line({ fault: '404', faultOutcome: 'failed-in-time', zaps: 1 }),
         line({ fault: '509', faultOutcome: 'missed', zaps: 1 }),
+        line({ fault: 'slowstart', faultOutcome: 'left', zaps: 1 }),
       ],
       entries: [
         [],
         [entry(0, 5000), entry(5200, 100)],
         [entry(0, 10, { status: 404 })],
-        [entry(0, 5, { status: 509 }), entry(2500, 5, { status: 509 })],
+        [entry(0, 5, forced509), entry(2500, 5, forced509)],
+        [slow(0, 800), next(810, 2000)],
       ],
     });
     const reports: string[] = [];
@@ -351,14 +399,20 @@ describe('runPlayerGate', () => {
       onFault: (r) => reports.push(r.fault),
     });
     expect(f.urls.slice(1)).toEqual(
-      ['drop5', '404', '509'].map(
+      [...['drop5', '404', '509'].map((x) => `0.1&fault=${x}`), '1.25&fault=slowstart'].map(
         (x) =>
-          `elviptv://gate/player?host=10.0.2.2:7878&account=demo&channels=1001,1002,1003,1004&zaps=1&rate=0.1&fault=${x}`,
+          `elviptv://gate/player?host=10.0.2.2:7878&account=demo&channels=1001,1002,1003,1004&zaps=1&rate=${x}`,
       ),
     );
-    expect(reports).toEqual(['drop5', '404', '509']);
-    expect(out.faults.map((x) => x.failures.length)).toEqual([0, 0, 1]);
+    expect(reports).toEqual(['drop5', '404', '509', 'slowstart']);
+    expect(out.faults.map((x) => x.failures.length)).toEqual([0, 0, 1, 0]);
     expect(out.faults[2]?.failures[0]).toMatch(/missed/);
+    expect(out.faults.map((x) => [x.limitResponses, x.overlapMs])).toEqual([
+      [0, 0],
+      [0, 0],
+      [0, 0],
+      [0, 0],
+    ]);
   });
 
   it('fails clearly without FFmpeg, before starting anything', async () => {
@@ -381,7 +435,7 @@ describe('runPlayerGate', () => {
     await expect(
       runPlayerGate({ ...silent, sleep: noSleep, ffmpeg, runs: 1, zaps: 1 }),
     ).rejects.toThrow(/no ELV_GATE_PLAYER line within 62 s/);
-    expect(silent.events).toEqual(['start', 'clear', 'stop']);
+    expect(silent.events).toEqual(['start', 'force-stop', 'clear', 'stop']);
   });
 
   it('builds first with --build and notes a reused simulator', async () => {

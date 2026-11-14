@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { faultSpec, parsePlayerGateUrl, streamUrl } from '../player-routes';
+import { faultSpec, type PlayerStream, parsePlayerGateUrl, streamUrl } from '../player-routes';
 
 const BASE = 'elviptv://gate/player';
 
@@ -69,12 +69,16 @@ describe('parsePlayerGateUrl', () => {
     expect(parsePlayerGateUrl(`${BASE}?fault=509`)?.fault).toBe('509');
     expect(parsePlayerGateUrl(`${BASE}?fault=notice`)?.fault).toBe('notice');
     expect(parsePlayerGateUrl(`${BASE}?fault=stall`)?.fault).toBe('stall');
+    expect(parsePlayerGateUrl(`${BASE}?fault=slowstart`)?.fault).toBe('slowstart');
     expect(parsePlayerGateUrl(`${BASE}?fault=status=500`)?.fault).toBe('');
     expect(parsePlayerGateUrl(`${BASE}?account=a/b`)?.account).toBe('demo');
   });
 
   it('accepts only known stream forms', () => {
-    expect(parsePlayerGateUrl(`${BASE}?stream=vod`)?.stream).toBe('vod');
+    const forms: PlayerStream[] = ['ts', 'hls', 'vod'];
+    for (const form of forms) {
+      expect(parsePlayerGateUrl(`${BASE}?stream=${form}`)?.stream).toBe(form);
+    }
     expect(parsePlayerGateUrl(`${BASE}?stream=mkv`)?.stream).toBe('ts');
   });
 });
@@ -94,6 +98,7 @@ describe('streamUrl', () => {
     expect(faultSpec('509')).toBe('status=509');
     expect(faultSpec('notice')).toBe('text-notice');
     expect(faultSpec('stall')).toBe('stall30s@2s');
+    expect(faultSpec('slowstart')).toBe('slow-start=3');
   });
 
   it('builds HLS and movie URLs for the other stream forms', () => {

@@ -41,16 +41,23 @@ export function span(entry: SimLogEntry): { start: number; end: number } {
   return { start: end - entry.ms, end };
 }
 
+const isNotice = (entry: SimLogEntry): boolean =>
+  entry.status === 200 && entry.bytes === NOTICE_BYTES;
+
+/** Whether the request's own `?fault=` produced this answer (`status=509`, `status=429` or `text-notice`). */
+function forcedByFault(entry: SimLogEntry): boolean {
+  const parts = (entry.query.fault ?? '').split(',');
+  return isNotice(entry) ? parts.includes('text-notice') : parts.includes(`status=${entry.status}`);
+}
+
 const isLimit = (entry: SimLogEntry): boolean =>
-  entry.query.fault === undefined &&
-  (entry.status === 509 ||
-    entry.status === 429 ||
-    (entry.status === 200 && entry.bytes === NOTICE_BYTES));
+  (entry.status === 509 || entry.status === 429 || isNotice(entry)) && !forcedByFault(entry);
 
 /**
- * Connection-limit answers and stream overlap of one account. `limitResponses` counts 509, 429 and notice answers
- * the account got on its own (a response forced by a `?fault=` query is not a real limit). `overlapMs` sums, over
- * every pair of served TS stream requests of the account, the time both were open. Entries without the account
+ * Connection-limit answers and stream overlap of one account. `limitResponses` counts the 509, 429 and notice answers
+ * the account got, except an answer its request's own `?fault=` forced (a `status=509` fault answering 509 is not a
+ * limit; a slow-start request answered 509 because another one was open is). `overlapMs` sums, over every pair of
+ * TS stream requests of the account, whatever their answer, the time both were open. Entries without the account
  * (HLS segments, other accounts) are ignored.
  */
 export function connectionStats(
@@ -60,7 +67,7 @@ export function connectionStats(
   const own = entries.filter((e) => e.account === account);
   const limitResponses = own.filter(isLimit).length;
   const spans = own
-    .filter((e) => e.status === 200 && STREAM_PATH.test(e.path) && e.bytes !== NOTICE_BYTES)
+    .filter((e) => STREAM_PATH.test(e.path))
     .map(span)
     .sort((a, b) => a.start - b.start);
   let overlapMs = 0;

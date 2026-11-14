@@ -43,7 +43,7 @@ const summary = (r: PlayerResult): string =>
   `gate player: ${r.zaps} zaps, cold ${ms(r.ttffColdMs)}, warm p50 ${ms(r.ttffWarmMs.p50)} p95 ${ms(r.ttffWarmMs.p95)}, zap p50/p95/max ${ms(r.zapMs.p50)}/${ms(r.zapMs.p95)}/${ms(r.zapMs.max)}, surfaces ${r.surfaceCreated}, stale ${r.staleEventsApplied}, limit responses ${r.limitResponses}, overlap ${r.overlapMs} ms`;
 
 const faultSummary = (f: FaultReport): string =>
-  `gate player: fault ${f.fault}: ${f.line.faultOutcome ?? 'no outcome'}${f.failures.length === 0 ? '' : ' (FAILED)'}`;
+  `gate player: fault ${f.fault}: ${f.line.faultOutcome ?? 'no outcome'}, limit responses ${f.limitResponses}, overlap ${f.overlapMs} ms${f.failures.length === 0 ? '' : ' (FAILED)'}`;
 
 /** Runs `pnpm gate player` and returns the process exit code; usage errors are returned as code 2. */
 export async function playerMain(values: PlayerCli, root: string): Promise<number> {
@@ -64,7 +64,7 @@ export async function playerMain(values: PlayerCli, root: string): Promise<numbe
 
   if (values['write-baseline'] === true && values.faults !== true) {
     return bad(
-      'a baseline needs --faults: it may only record a build whose fault handling (drop5, 404, 509) passed in the same session',
+      'a baseline needs --faults: it may only record a build whose fault handling (drop5, 404, 509, slowstart) passed in the same session',
     );
   }
 
@@ -97,7 +97,7 @@ export async function playerMain(values: PlayerCli, root: string): Promise<numbe
     process.stderr.write(`${(error as Error).message}\n`);
     return 1;
   }
-  const { result, faults } = output;
+  const { result, faults, runs: perRun } = output;
   const faultFailures = faults.flatMap((f) => f.failures);
   const faultWarnings = faults.flatMap((f) => f.warnings);
 
@@ -105,9 +105,10 @@ export async function playerMain(values: PlayerCli, root: string): Promise<numbe
   const commit = (await exec('git', ['rev-parse', '--short', 'HEAD'])).output.trim();
 
   if (values['write-baseline'] === true) {
-    const own = comparePlayer(result, result, { budgets });
+    const own = comparePlayer(result, result, { budgets, runs: perRun });
     const failures = [...own.failures, ...faultFailures];
     if (failures.length > 0) return bad(`refusing to write a baseline: ${failures.join('; ')}`);
+    for (const w of [...own.warnings, ...faultWarnings]) process.stdout.write(`warn: ${w}\n`);
     const dirty = (
       await exec('git', ['status', '--porcelain', '--', 'apps', 'packages', 'modules'])
     ).output.trim();
@@ -133,7 +134,7 @@ export async function playerMain(values: PlayerCli, root: string): Promise<numbe
   const baseline = found
     ? (JSON.parse(readFileSync(baselinePath, 'utf8')) as Baseline).result
     : undefined;
-  const outcome = comparePlayer(result, baseline, { budgets });
+  const outcome = comparePlayer(result, baseline, { budgets, runs: perRun });
   if (!found && values.baseline === undefined) {
     outcome.failures.unshift(`no baseline at ${baselineName}; run with --write-baseline`);
   }
