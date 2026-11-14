@@ -166,7 +166,7 @@ describe('useTvKeySource', () => {
       expect(onInput).not.toHaveBeenCalled();
     });
 
-    it('unsubscribes on unmount mid-hold', async () => {
+    it('cancels the held key and unsubscribes on unmount mid-hold', async () => {
       mockTvApis('android');
       const fake = fakeSource();
       const onInput = jest.fn<void, [KeyInput]>();
@@ -178,8 +178,75 @@ describe('useTvKeySource', () => {
       fake.emit(down);
       await hook.unmount();
       fake.emit({ action: 'up', keyCode: 20, canceled: false, ageMs: 0 });
-      expect(onInput).toHaveBeenCalledTimes(1);
+      expect(onInput.mock.calls).toEqual([
+        [{ key: 'down', action: 'down', time: expect.any(Number) }],
+        [{ key: 'down', action: 'cancel', time: expect.any(Number) }],
+      ]);
       expect(fake.remove).toHaveBeenCalledTimes(1);
+    });
+
+    describe('provider value changes mid-hold', () => {
+      /** Renders the hook under a provider whose value `swap` replaces. */
+      async function swappable(first: AndroidKeySource | null) {
+        let current = first;
+        const onInput = jest.fn<void, [KeyInput]>();
+        const hook = await renderHook(() => useTvKeySource(onInput), {
+          wrapper: ({ children }) => (
+            <RemoteKeysProvider android={current}>{children}</RemoteKeysProvider>
+          ),
+        });
+        const swap = async (next: AndroidKeySource | null) => {
+          current = next;
+          await hook.rerender({});
+        };
+        return { onInput, swap };
+      }
+
+      it('cancels the held key and subscribes to the new source', async () => {
+        mockTvApis('android');
+        const a = fakeSource();
+        const b = fakeSource();
+        const { onInput, swap } = await swappable(a.source);
+        a.emit(down);
+        await swap(b.source);
+        expect(onInput.mock.calls).toEqual([
+          [{ key: 'down', action: 'down', time: expect.any(Number) }],
+          [{ key: 'down', action: 'cancel', time: expect.any(Number) }],
+        ]);
+        expect(a.remove).toHaveBeenCalledTimes(1);
+        expect(b.addListener).toHaveBeenCalledTimes(1);
+        b.emit({ action: 'up', keyCode: 20, canceled: false, ageMs: 0 });
+        expect(onInput).toHaveBeenCalledTimes(2);
+        b.emit(down);
+        expect(onInput).toHaveBeenLastCalledWith({
+          key: 'down',
+          action: 'down',
+          time: expect.any(Number),
+        });
+      });
+
+      it('cancels the held key and falls back to TVEventHandler when the source becomes null', async () => {
+        const apis = mockTvApis('android');
+        const a = fakeSource();
+        const { onInput, swap } = await swappable(a.source);
+        a.emit(down);
+        await swap(null);
+        expect(onInput.mock.calls).toEqual([
+          [{ key: 'down', action: 'down', time: expect.any(Number) }],
+          [{ key: 'down', action: 'cancel', time: expect.any(Number) }],
+        ]);
+        expect(a.remove).toHaveBeenCalledTimes(1);
+        expect(apis.addRemote).toHaveBeenCalledTimes(1);
+      });
+
+      it('cancels nothing when no key is held', async () => {
+        mockTvApis('android');
+        const a = fakeSource();
+        const { onInput, swap } = await swappable(a.source);
+        await swap(fakeSource().source);
+        expect(onInput).not.toHaveBeenCalled();
+        expect(a.remove).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('uses TVEventHandler when the provider holds null', async () => {

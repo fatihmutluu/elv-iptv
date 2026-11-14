@@ -54,8 +54,9 @@ export function toKeyInput(
 
 /**
  * Feeds remote keys to `onInput`. On Android with a `RemoteKeysProvider` source it takes raw key events through a
- * fresh adapter, skips `TVEventHandler`, and only consumes Back (it arrives as raw down/up). Otherwise it uses
- * `TVEventHandler` for the remote, `BackHandler` for Android's Back (consumed, sent as a `back` press), and the
+ * fresh adapter, skips `TVEventHandler`, and only consumes Back (it arrives as raw down/up); when the source changes or
+ * the hook unmounts, every key still held is sent as `cancel`, since its release would reach no adapter. Otherwise it
+ * uses `TVEventHandler` for the remote, `BackHandler` for Android's Back (consumed, sent as a `back` press), and the
  * menu key on tvOS enabled for the lifetime of the hook.
  */
 export function useTvKeySource(onInput: (k: KeyInput) => void): void {
@@ -71,6 +72,7 @@ export function useTvKeySource(onInput: (k: KeyInput) => void): void {
       });
       const consume = BackHandler.addEventListener('hardwareBackPress', () => true);
       return () => {
+        for (const input of adapt({ action: 'blur' }, performance.now())) handler.current(input);
         sub.remove();
         consume.remove();
       };
