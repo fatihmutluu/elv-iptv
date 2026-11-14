@@ -1,6 +1,7 @@
-import { buildCatalog, type RecipeName } from './catalog.ts';
+import { buildCatalog } from './catalog.ts';
 import type { RouteHandler } from './context.ts';
 import { mediaType } from './faults.ts';
+import type { RecipeName } from './recipes.ts';
 import { sendText } from './routes-data.ts';
 import { authorize, loadRecipe, resolveFaults, sendFile } from './stream-io.ts';
 

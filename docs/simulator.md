@@ -50,3 +50,20 @@ Rules attach a fault spec to the streams of one account at run time, for players
 - A plain `redirect` rule without a `count` redirects every retry, a loop the client must break: give it a count.
 - Log: each entry has `faultRule` (the rule id or null); `fault` is the applied spec from any source.
 - Resets: `DELETE /_sim/faults`, `DELETE /_sim/requests` and `SimHandle.clear()` remove every rule.
+
+## Recipes
+Generated with FFmpeg into the cache (`pnpm sim --prepare` fills it); `recipes.ts` holds the definitions. Every copy
+(MP4, MKV, HLS, live) uses `-map 0`, otherwise a second audio track would be dropped. A recipe whose encoder the FFmpeg
+build lacks is skipped (`--prepare` names it; the recipe tests print a note, and fail under `CI=true`).
+- `h264-aac-720p25`: H.264 High 720p25, AAC stereo.
+- `hevc-main10-1080p25`: HEVC Main10 1080p25, AAC; MP4 tagged `hvc1`.
+- `mpeg2-ac3-576i25`: MPEG-2 interlaced 576i25, AC-3.
+- `aac-radio`: audio only, AAC.
+- `hevc-main-1080p25`: 8-bit HEVC Main 1080p25, AAC; MP4 tagged `hvc1`.
+- `h264-aac-1080i25`: interlaced H.264 1080i25 (top field first), AAC.
+- `h264-eac3-720p50`: H.264 720p50, E-AC-3 5.1.
+- `h264-mp2-576p25`: H.264 576p25 with SAR 64:45, MP2 stereo. MP2 in MP4 reads back as MP3, so the movie is MKV.
+- `h264-mp3-720p30`: H.264 720p29.97, MP3 (`libmp3lame`; skipped when absent). Segments are 2.002 s long at that rate.
+- `h264-aac-res-switch`: H.264 that switches 720p to 1080p every `switchSeconds` (2 s multiples, 30 s at most for 60 s
+  loops and longer). Built from video-only parts joined with one continuous tone so segments stay exactly 2 s.
+- `h264-2audio-subs-720p25`: H.264 720p25 with two AAC tracks (`tur`, `eng`); the subtitle tracks are added later.

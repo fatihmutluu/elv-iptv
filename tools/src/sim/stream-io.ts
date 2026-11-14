@@ -3,10 +3,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { type Account, findAccount } from './accounts.ts';
-import type { RecipeName } from './catalog.ts';
 import type { RequestMeta, SimContext } from './context.ts';
 import { applyStreamFaults, type Fault, parseFaults } from './faults.ts';
 import { ensureRecipe, type RecipeFiles } from './media.ts';
+import type { RecipeName } from './recipes.ts';
 import { requestFaults } from './request-faults.ts';
 import { sendText } from './routes-data.ts';
 

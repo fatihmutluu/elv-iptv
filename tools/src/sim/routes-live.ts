@@ -1,10 +1,12 @@
 import { createReadStream, statSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ACCOUNTS, type Account } from './accounts.ts';
-import { buildCatalog, type RecipeName } from './catalog.ts';
+import { buildCatalog } from './catalog.ts';
 import { baseUrlOf, type RequestMeta, type RouteHandler, type SimContext } from './context.ts';
 import { mediaType } from './faults.ts';
-import { ALL_RECIPES, spawnLive } from './media.ts';
+import { spawnLive } from './media.ts';
+import type { RecipeName } from './recipes.ts';
+import { ALL_RECIPES } from './recipes.ts';
 import { sendText } from './routes-data.ts';
 import {
   authorize,
