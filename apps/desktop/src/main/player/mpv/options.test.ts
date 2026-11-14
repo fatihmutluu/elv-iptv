@@ -45,9 +45,9 @@ describe('headerOptions', () => {
     expect(headerOptions({ Referer: 'http://r/' })).toEqual({ referrer: 'http://r/' });
     expect(headerOptions({ referrer: 'http://r/' })).toEqual({ referrer: 'http://r/' });
   });
-  it('escapes commas and backslashes in http-header-fields', () => {
+  it('escapes only commas in http-header-fields and leaves backslashes alone', () => {
     expect(headerOptions({ 'X-A': 'a,b', 'X-B': 'c\\d' })).toEqual({
-      'http-header-fields': 'X-A: a\\,b,X-B: c\\\\d',
+      'http-header-fields': 'X-A: a\\,b,X-B: c\\d',
     });
   });
   it('returns nothing for no headers', () => {

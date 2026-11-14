@@ -95,7 +95,7 @@ describe('classifyEnd rules', () => {
   it('detail never contains the password segment, queries or user-info', () => {
     const e = run([line('HTTP error 404 for http://u:p@h/live/demo/password/1.ts?token=abc')]);
     expect(e?.detail).not.toMatch(/password|token|u:p/);
-    expect(e?.detail).toContain('/live/demo/***/1.ts');
+    expect(e?.detail).toContain('/live/***/***/1.ts');
   });
   it('detail is at most 200 characters', () => {
     expect(run([line(`HTTP error 404 ${'x'.repeat(500)}`)])?.detail).toHaveLength(200);

@@ -104,7 +104,9 @@ spec on mpv 0.42.0 docs, release assets, licence files and issues (no GPL source
   Stream URLs and headers never appear in argv.
 - `load`: `loadfile <url> replace -1 <options>`; the options carry the request headers (`user-agent`, `referrer`, the
   rest in `http-header-fields`), `start` for `startMs` and the per-kind cache limits. mpv resets per-file options when
-  the file ends, so one channel's headers never reach the next.
+  the file ends, so one channel's headers never reach the next. In `http-header-fields` only the comma is escaped (with a
+  backslash); backslashes are left alone because the pinned mpv 0.42.0 keeps a doubled backslash doubled
+  (`docs/learned/README.md`).
 - `retry`: the same `loadfile` for the current URL and options under the new token (live at the edge; VOD with `start`
   at the last anchored position). On mpv, ladder rungs 1 and 2 send the same command and differ only in token.
 - `play`/`pause`: `set pause no|yes`. `seek`: `seek <s> absolute`. `stop`: `stop`. `recreate`: `quit`, kill after

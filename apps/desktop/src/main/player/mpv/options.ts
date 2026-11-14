@@ -27,7 +27,7 @@ export function launchArgs(p: {
   return [...LAUNCH_OPTIONS, `--input-conf=${p.inputConf}`, ...p.presenterArgs, ...p.transportArgs];
 }
 
-const escapeField = (value: string): string => value.replace(/[\\,]/g, (c) => `\\${c}`);
+const escapeField = (value: string): string => value.replace(/,/g, '\\,');
 
 /** Maps request headers to mpv's `user-agent`, `referrer` and `http-header-fields` options. */
 export function headerOptions(headers: Readonly<Record<string, string>>): Record<string, string> {
