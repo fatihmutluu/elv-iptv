@@ -26,7 +26,7 @@ ELV IPTV is a cross-platform player for live TV, movies and series from sources 
 ### 1.4 Development rounds
 Breadth-first: every area reaches "plain but correct", then "average", then "excellent". Logic is final quality from the first round; presentation is iterative on real design-system components. No code written to be thrown away.
 
-Version 0.1 is the end of Round 2: a small feature set that is stable, fast and good-looking on every Round 0 platform. Heavy features stay as issues in the Round 3 milestone however often they are requested; none of them blocks 0.1, and they enter development one at a time in the order the owner picks. Data models keep the hooks those features need (for example catch-up attributes and `profile_id`) so adding them later needs no schema rework or re-import.
+Version 0.1 is the end of Round 1 (owner decision 2026-11-14): a plain player that is flawless in operation, not in features. It opens every common live and VOD format, plays without stalls or wrong states, and supports seeking, audio-track and subtitle selection, from a deliberately plain menu without images or design work. It runs on Android TV, Android phones, Apple TV, iPhone/iPad, Windows and macOS; the owner tests it on macOS, iPhone and Windows and approves it before anything else starts. Round 2 then fixes the design language (sample images and a design document), restyles the 0.1 app to it and adds features one at a time in the owner's order, each following the design language. Heavy features stay as issues in the Round 3 milestone however often they are requested and enter development one at a time in the order the owner picks. Data models keep the hooks those features need (for example catch-up attributes and `profile_id`) so adding them later needs no schema rework or re-import.
 
 ### 1.5 Reference apps
 Before each feature, read how reference apps solve it, critique it, and adopt an improved version; before fixing a bug, check why they do not have it. Research agents read the sources and write prose notes; implementing agents never read GPL or unlicensed sources.
@@ -194,16 +194,16 @@ Unchanged from the owner's goals: compliant README with the one-sentence descrip
 ### Round 0 — Bootstrap (clean slate)
 Toolchain for the new stack; a repository with no history from the earlier framework; governance carried over; pnpm monorepo with `tools/` checks; empty Expo app building for Android phone/TV, Fire OS, iOS and tvOS, and empty Electron app for Windows/macOS, in CI; placeholders for Vega, Tizen, webOS; Claude setup; ADRs; publishing; boards; Ideas backlog seeded from the reference-app reports.
 
-### Round 1 — Functional foundation
-1. Local stream simulator with synthetic playlists, Xtream responses, guide files and scripted faults (§6.1), shared by tests and gates.
-2. Proof gates as real foundation code, measured against §6.2: focus core + TV windowed list (100k items) + EPG grid on Android TV and tvOS; player core with the always-mounted OSD on Android TV and tvOS; desktop libmpv helper with DOM OSD on Windows.
-3. Sources: M3U and Xtream import with transport settings; XMLTV guide import (§5.4); dev auto-seed.
-4. Plain menu: Live with the guide, Movies, Series lists with categories.
-5. Watch progress: resume and watched state.
-6. Turkish and English with an in-app switch.
+### Round 1 — Version 0.1: a plain, flawless player
+1. Local stream simulator with synthetic playlists, Xtream responses, guide files, scripted faults and a format corpus (§6.1), shared by tests and gates.
+2. Proof gates as real foundation code, measured against §6.2: focus core + TV windowed list (100k items); player core with the always-mounted OSD on Android (Media3) and Apple platforms; desktop libmpv helper with DOM OSD on Windows and macOS.
+3. Sources: M3U and Xtream import with transport settings into the device catalog; a plain screen to add and remove a source; dev auto-seed.
+4. Plain menu: Live, Movies and Series with categories, seasons and episodes (no images, no guide).
+5. Playback: every common format (corpus gate), VOD seek, audio and subtitle track selection, AC-3/E-AC-3 through an LGPL FFmpeg audio extension on Android.
+6. Strings in English and Turkish chosen from the device language.
 
-### Round 2 — 0.1
-UI design language finalized first, then: home screen with continue watching and favorites; player controls (seek, audio and subtitle track selection, aspect); guide polish; search; minimal settings (sources, language, playback). Every §6.2 budget met and soak tests green on every Round 0 platform; release pipeline for direct downloads. The round ends with the 0.1.0 release, which the owner triggers.
+### Round 2 — Design language and the first features
+Starts after the owner approved 0.1. The UI design language is agreed first (sample images and a design document), the 0.1 app is restyled to it, then features are added one at a time in the owner's order, each following the design language: the guide with XMLTV import and the EPG grid, home with continue watching and favorites, resume and watched state, search, minimal settings, an in-app language switch, aspect and player polish. Every §6.2 budget met and soak tests green on every Round 0 platform; release pipeline for direct downloads.
 
 ### Round 3 — After 0.1
 Heavy features, each tracked as an issue and built one at a time in the owner's order: sync with sign-in (server, E2EE vault, QR sign-in on TV), local profiles, catch-up, live time-shift, Stalker portals, advanced guide sources (several per playlist, manual matching, offsets), parental controls, external subtitle files and styling, remote key remapping, picture-in-picture and multi-view, reminders. Store launch preparation; the Vega app, then Tizen and webOS.

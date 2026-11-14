@@ -23,8 +23,9 @@ infinite retries, a second connection opened during a zap, and video surfaces re
   against the local simulator; a report-only tvOS simulator run in CI.
 
 ## 3. Non-goals
-- Player controls UI beyond a minimal gate OSD (seek bar, tracks, aspect: Round 2), subtitles rendering choices beyond
-  what the engine shows by default, catch-up and time-shift (#27, #28), picture-in-picture (#34), external players.
+- VOD controls and track selection (seek, pause, audio and subtitle tracks): part of 0.1, specified separately in #73
+  on top of this port. Aspect, subtitle styling, catch-up and time-shift (#27, #28), picture-in-picture (#34) and
+  external players come after 0.1.
 - Desktop playback (#8, libmpv helper) and Vega/Tizen/webOS engines.
 - Screens that pick channels (#13); the gate drives the service directly.
 
@@ -188,7 +189,8 @@ Rungs, each bounded and visible as a status the OSD can show:
   recorded in §10 and in ADR 0003.
 - Verified in CI only (no Mac on the development PC): the report-only `tvos-gate` job runs the player gate on the Apple
   TV simulator against the simulator streams.
-- Phase 2 gets its own plan after phase 1 (playback core and Android) is merged; #7 stays open until both are done.
+- Phase 2 gets its own plan after phase 1 (playback core and Android) is merged and covers tvOS and iOS/iPadOS (the
+  owner tests 0.1 on an iPhone); #7 stays open until both are done.
 
 ### 6.3 Player view and OSD in the app
 - `apps/tv-mobile` wires the engine module, the service and the stream resolver. The OSD is a React Native layer that is
