@@ -119,6 +119,8 @@ export function createGateRun(deps: GateRunDeps): GateRun {
       engine.subscribe((event: EngineEvent) => {
         if (event.type === 'surface') recorder.surface(event.change);
         else if (event.type === 'error') recorder.engineError(event.error.code);
+        else if (event.type === 'stall' && event.attempt === service.getState().attempt)
+          recorder.stall(event.phase);
         listener(event);
       }),
   };

@@ -34,3 +34,15 @@ describe('buildWindowOptions player baseline', () => {
     });
   });
 });
+
+describe('buildWindowOptions gate mode', () => {
+  it('tells the preload only when main started in gate mode', () => {
+    expect(buildWindowOptions('/p.js').webPreferences?.additionalArguments).toBeUndefined();
+    expect(
+      buildWindowOptions('/p.js', { gate: false }).webPreferences?.additionalArguments,
+    ).toBeUndefined();
+    expect(buildWindowOptions('/p.js', { gate: true }).webPreferences?.additionalArguments).toEqual(
+      ['--elv-gate-mode'],
+    );
+  });
+});

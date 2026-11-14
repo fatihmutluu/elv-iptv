@@ -6,6 +6,7 @@ import {
   GATE_VIDEO_BUCKETS,
   mergeGateLine,
   parseGateFlag,
+  sampleRect,
 } from './gate.ts';
 
 describe('parseGateFlag', () => {
@@ -166,5 +167,22 @@ describe('createVideoSampler', () => {
     await vi.advanceTimersByTimeAsync(1100);
     expect(await t.sampler.result()).toEqual({ videoVisible: null, distinct: 0 });
     vi.useRealTimers();
+  });
+});
+
+describe('sampleRect', () => {
+  const content = { x: 100, y: 40, width: 1280, height: 720 };
+  const area = { x: 10, y: 20, width: 800, height: 450, visible: true };
+
+  it('is the last area in screen DIPs, scaled by the page zoom', () => {
+    expect(sampleRect(content, area, 1)).toEqual({ x: 110, y: 60, width: 800, height: 450 });
+    expect(sampleRect(content, area, 1.5)).toEqual({ x: 115, y: 70, width: 1200, height: 675 });
+  });
+
+  it('falls back to the middle half without an area or with an empty one', () => {
+    const middle = centerRect(content);
+    expect(sampleRect(content, undefined, 1)).toEqual(middle);
+    expect(sampleRect(content, { ...area, width: 0 }, 1)).toEqual(middle);
+    expect(sampleRect(content, { ...area, visible: false }, 1)).toEqual(middle);
   });
 });

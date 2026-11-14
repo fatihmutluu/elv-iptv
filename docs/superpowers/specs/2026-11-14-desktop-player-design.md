@@ -100,7 +100,7 @@ spec on mpv 0.42.0 docs, release assets, licence files and issues (no GPL source
 - Launch options, fixed and never read from a user config: `no-config`, `idle=yes`, `force-window=immediate`,
   `keep-open=no`, `ytdl=no`, `load-scripts=no` (the built-in OSC stays), `save-position-on-quit=no`,
   `resume-playback=no`, `terminal=no`, `title=ELV IPTV`, `hwdec=auto-safe`, `network-timeout=10`, `curl-enabled=no`
-  (§9), `input-conf` pointing at our bindings, `wid` (Windows) or `geometry` (macOS), and the IPC transport (§5.5).
+  (§9), `script-opts=osc-idlescreen=no` (the OSC's idle logo; no runtime switch works), `input-conf` pointing at our bindings, `wid` (Windows) or `geometry` (macOS), and the IPC transport (§5.5).
   Stream URLs and headers never appear in argv.
 - `load`: `loadfile <url> replace -1 <options>`; the options carry the request headers (`user-agent`, `referrer`, the
   rest in `http-header-fields`), `start` for `startMs` and the per-kind cache limits. mpv resets per-file options when

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { faultSpec, parseGateParams, streamUrl, vodUrl } from './params.ts';
+import { faultSpec, parseGateParams, resolveGate, streamUrl, vodUrl } from './params.ts';
 
 const DEFAULTS = {
   base: 'http://127.0.0.1:7878',
@@ -94,7 +94,7 @@ describe('parseGateParams', () => {
   });
 
   it('accepts only the known faults', () => {
-    for (const fault of ['drop5', '404', '509', 'notice']) {
+    for (const fault of ['drop5', '404', '509', 'notice', 'stall', 'slowstart']) {
       expect(parseGateParams(`elv-gate=player&fault=${fault}`)?.fault).toBe(fault);
     }
     expect(parseGateParams('elv-gate=player&fault=boom')?.fault).toBe('');
@@ -127,5 +127,20 @@ describe('stream urls', () => {
     expect(faultSpec('404')).toBe('status=404');
     expect(faultSpec('509')).toBe('status=509');
     expect(faultSpec('notice')).toBe('text-notice');
+    expect(faultSpec('stall')).toBe('stall30s@2s');
+    expect(faultSpec('slowstart')).toBe('slow-start=3');
+  });
+});
+
+describe('resolveGate', () => {
+  const search = '?elv-gate=player&zaps=3';
+  it('parses the gate only when the preload says main is in gate mode', () => {
+    expect(resolveGate(search, { gate: true })?.zaps).toBe(3);
+    expect(resolveGate(search, { gate: false })).toBeUndefined();
+    expect(resolveGate(search, {})).toBeUndefined();
+    expect(resolveGate(search, undefined)).toBeUndefined();
+  });
+  it('is undefined for a normal query in gate mode', () => {
+    expect(resolveGate('', { gate: true })).toBeUndefined();
   });
 });

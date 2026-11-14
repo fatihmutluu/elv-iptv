@@ -28,16 +28,11 @@ function Player({ session }: { session: Session }): ReactElement {
   const { service } = session.run;
   const state = useSyncExternalStore(service.subscribe, service.getState);
   const item = state.item === undefined ? 'none' : state.item;
-  const [framed, setFramed] = useState(false);
-  useEffect(() => {
-    if (state.firstFrameAt !== undefined) setFramed(true);
-  }, [state.firstFrameAt]);
   return (
     <PlayerView
       engine={session.engine}
       status={`channel ${item}: ${statusCode(state.status)}`}
       failed={state.status.kind === 'failed'}
-      framed={framed}
     />
   );
 }
@@ -45,7 +40,7 @@ function Player({ session }: { session: Session }): ReactElement {
 /**
  * Development gate for playback (`?elv-gate=player&...`): zaps between simulator channels over the real mpv engine and
  * hands the single `ELV_GATE_PLAYER` line to main, which adds its own measurements and prints it. Channel keys from the
- * player window zap too. The player stays mounted after the run.
+ * player window zap too. Main quits the app once it has printed the line.
  */
 export function GateScreen({ params }: { params: GateParams }): ReactElement {
   const [session, setSession] = useState<Session | null>(null);

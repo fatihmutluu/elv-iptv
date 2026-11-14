@@ -8,7 +8,7 @@ import {
   useState,
 } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { areaHidden, createAreaSender, statusPlacement } from './area.ts';
+import { createAreaSender, statusPlacement } from './area.ts';
 import type { DesktopEngine } from './desktop-engine.ts';
 
 /** Props of {@link PlayerView}. */
@@ -18,24 +18,16 @@ export interface PlayerViewProps {
   status: string;
   /** True while the service status is `failed`: the video is hidden so the Retry card shows in the player area. */
   failed?: boolean;
-  /** True once the session has shown a frame; until then the video stays hidden (mpv's idle logo). Default true. */
-  framed?: boolean;
 }
 
 /**
  * The player area: it paints black (the video window is transparent, so the page shows through whenever mpv's window
  * is absent), reports its layout rect to main by `onLayout` and on window resize, and places the status line.
  */
-export function PlayerView({
-  engine,
-  status,
-  failed = false,
-  framed = true,
-}: PlayerViewProps): ReactElement {
+export function PlayerView({ engine, status, failed = false }: PlayerViewProps): ReactElement {
   const areaRef = useRef<ElementRef<typeof View>>(null);
-  const hidden = areaHidden({ failed, framed });
-  const hiddenRef = useRef(hidden);
-  hiddenRef.current = hidden;
+  const failedRef = useRef(failed);
+  failedRef.current = failed;
   const sender = useMemo(() => createAreaSender((area) => engine.setArea(area)), [engine]);
   const [coversArea, setCoversArea] = useState<boolean | undefined>(undefined);
 
@@ -49,13 +41,13 @@ export function PlayerView({
 
   const measure = useCallback((): void => {
     areaRef.current?.measureInWindow((x, y, width, height) => {
-      sender.update({ x, y, width, height }, hiddenRef.current);
+      sender.update({ x, y, width, height }, failedRef.current);
     });
   }, [sender]);
 
   useEffect(() => {
-    sender.update(undefined, hidden);
-  }, [sender, hidden]);
+    sender.update(undefined, failed);
+  }, [sender, failed]);
 
   useEffect(() => {
     window.addEventListener('resize', measure);

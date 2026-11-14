@@ -47,6 +47,8 @@ export interface MpvEngine extends PlayerEngine {
   start(): void;
   /** The latest player area from the renderer, for the presenter. */
   setArea(area: PlayerArea): void;
+  /** The last area `setArea` received (the gate samples it). */
+  readonly lastArea: PlayerArea | undefined;
   /** Toggles the presenter's fullscreen (not a port command). */
   toggleFullscreen(): void;
 }
@@ -157,6 +159,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   let released = false;
   let spawns = 0;
   let maxHoldMs = 0;
+  let lastArea: PlayerArea | undefined;
   let latestToken: AttemptToken = 0;
   let media: Slot | undefined;
   let live: Live | undefined;
@@ -560,13 +563,18 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       if (!released) void ensureProcess();
     },
     setArea(area) {
-      if (!released) presenter.setArea(area);
+      if (released) return;
+      lastArea = area;
+      presenter.setArea(area);
     },
     toggleFullscreen() {
       if (!released) presenter.toggleFullscreen();
     },
     get spawns() {
       return spawns;
+    },
+    get lastArea() {
+      return lastArea;
     },
     get maxHoldMs() {
       return maxHoldMs;

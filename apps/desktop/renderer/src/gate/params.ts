@@ -1,5 +1,5 @@
 /** The fault a player gate run injects into its first channel. */
-export type GateFault = '' | 'drop5' | '404' | '509' | 'notice';
+export type GateFault = '' | 'drop5' | '404' | '509' | 'notice' | 'stall' | 'slowstart';
 
 /**
  * Parameters of the gate query
@@ -29,12 +29,21 @@ const ACCOUNT = /^[A-Za-z0-9_-]{1,32}$/;
 const ID = /^\d{1,9}$/;
 const BASE = /^http:\/\/([a-z0-9.]+)(?::(\d{1,5}))?$/;
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
-const FAULTS: ReadonlySet<string> = new Set(['drop5', '404', '509', 'notice']);
+const FAULTS: ReadonlySet<string> = new Set([
+  'drop5',
+  '404',
+  '509',
+  'notice',
+  'stall',
+  'slowstart',
+]);
 const FAULT_SPECS: Readonly<Record<Exclude<GateFault, ''>, string>> = {
   drop5: 'drop@5s',
   '404': 'status=404',
   '509': 'status=509',
   notice: 'text-notice',
+  stall: 'stall30s@2s',
+  slowstart: 'slow-start=3',
 };
 
 function isPrivateHost(host: string): boolean {
@@ -111,4 +120,15 @@ export function streamUrl(params: GateParams, index: number): string {
 /** The movie URL for the VOD part; `params.vod` must be set. */
 export function vodUrl(params: GateParams): string {
   return `${params.base}/movie/${params.account}/${params.account}/${params.vod}.mp4`;
+}
+
+/**
+ * The gate parameters for a page, only when the preload says main started in gate mode (`window.elv.gate`); a page
+ * that merely carries the query gets none.
+ */
+export function resolveGate(
+  search: string,
+  elv: { readonly gate?: boolean } | undefined,
+): GateParams | undefined {
+  return elv?.gate === true ? parseGateParams(search) : undefined;
 }

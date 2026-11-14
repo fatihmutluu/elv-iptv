@@ -156,6 +156,54 @@ describe('createPlayerRecorder', () => {
     expect(h.recorder.finish(h.state).faultOutcome).toBe('missed');
   });
 
+  it('judges a run that zapped away before the faulted channel played as left', () => {
+    const s = make('slowstart');
+    s.tune('a', 0);
+    s.tune('b', 800, 800);
+    s.frame(1500);
+    s.status({ kind: 'playing' });
+    const m = s.recorder.finish(s.state);
+    expect(m.faultOutcome).toBe('left');
+    expect(m.zapMs.max).toBe(700);
+    const stayed = make('slowstart');
+    stayed.tune('a', 0);
+    expect(stayed.recorder.finish(stayed.state).faultOutcome).toBe('missed');
+    const played = make('slowstart');
+    played.tune('a', 0);
+    played.status({ kind: 'playing' });
+    played.tune('b', 800, 800);
+    expect(played.recorder.finish(played.state).faultOutcome).toBe('missed');
+  });
+
+  it('judges a stall run recovered when the engine ends its stall while the service plays', () => {
+    const h = make('stall');
+    h.tune('a', 0);
+    h.frame(300);
+    h.status({ kind: 'playing' });
+    h.recorder.stall('start');
+    h.recorder.stall('end');
+    h.tune('b', 10_000, 10_000);
+    expect(h.recorder.finish(h.state).faultOutcome).toBe('recovered');
+  });
+
+  it('does not count a stall that a rung ended, nor a stall end without a start', () => {
+    const r = make('stall');
+    r.tune('a', 0);
+    r.frame(300);
+    r.status({ kind: 'playing' });
+    r.recorder.stall('start');
+    r.status({ kind: 'recovering', rung: 1, nextAtMs: 6000 });
+    r.recorder.stall('end');
+    r.tune('b', 10_000, 10_000);
+    expect(r.recorder.finish(r.state).faultOutcome).toBe('missed');
+    const e = make('stall');
+    e.tune('a', 0);
+    e.status({ kind: 'playing' });
+    e.recorder.stall('end');
+    expect(e.recorder.finish(e.state).faultOutcome).toBe('missed');
+    make().recorder.stall('start');
+  });
+
   it('judges a notice run limited-backoff', () => {
     const h = make('notice');
     h.tune('a', 0);

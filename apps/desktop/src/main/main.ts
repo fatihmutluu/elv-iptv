@@ -5,10 +5,10 @@ import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, ipcMain, Menu, net, protocol, type WebContents } from 'electron';
 import { APP_ORIGIN, APP_SCHEME } from './app-protocol.ts';
 import {
-  centerRect,
   createVideoSampler,
   mergeGateLine,
   parseGateFlag,
+  sampleRect,
   type VideoSampler,
 } from './gate.ts';
 import type { MpvEngine } from './player/engine.ts';
@@ -40,19 +40,23 @@ const samplers = new WeakMap<MpvEngine, VideoSampler>();
 
 /** Prints the gate line with main's measurements and quits: a gate run is one line long. */
 async function printGateLine(line: string, engine: MpvEngine | undefined): Promise<void> {
-  const sample = engine ? await samplers.get(engine)?.result() : undefined;
-  const merged =
-    engine && sample
-      ? mergeGateLine(line, {
-          mpvSpawns: engine.spawns,
-          loadMode: engine.loadMode,
-          presenter: engine.presenterKind,
-          videoVisible: sample.videoVisible,
-          distinct: sample.distinct,
-          coalesceMaxMs: Math.round(engine.maxHoldMs),
-        })
-      : null;
-  if (merged === null) process.stderr.write('gate: the report was refused\n');
+  const sampler = engine ? samplers.get(engine) : undefined;
+  if (!engine || !sampler) {
+    process.stderr.write('gate: no engine or sampler for the sender of the report\n');
+    app.quit();
+    return;
+  }
+  const sample = await sampler.result();
+  const merged = mergeGateLine(line, {
+    mpvSpawns: engine.spawns,
+    loadMode: engine.loadMode,
+    presenter: engine.presenterKind,
+    videoVisible: sample.videoVisible,
+    distinct: sample.distinct,
+    coalesceMaxMs: Math.round(engine.maxHoldMs),
+  });
+  if (merged === null)
+    process.stderr.write('gate: the report line was refused (malformed or carries an address)\n');
   else process.stdout.write(`${merged}\n`);
   app.quit();
 }
@@ -71,7 +75,9 @@ function serveRenderer(): void {
 
 function createWindow(): void {
   const window = new BrowserWindow(
-    buildWindowOptions(join(__dirname, '..', 'preload', 'preload.js')),
+    buildWindowOptions(join(__dirname, '..', 'preload', 'preload.js'), {
+      gate: gateQuery !== null,
+    }),
   );
   window.setMenuBarVisibility(false);
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -116,7 +122,14 @@ async function startPlayer(): Promise<void> {
           engine,
           createVideoSampler({
             subscribe: (listener) => engine.subscribe(listener),
-            sample: () => sampleArea(centerRect(window.getContentBounds())),
+            sample: () =>
+              sampleArea(
+                sampleRect(
+                  window.getContentBounds(),
+                  engine.lastArea,
+                  window.webContents.getZoomFactor(),
+                ),
+              ),
             setTimeout: (fn, ms) => setTimeout(fn, ms),
             delayMs: 1000,
           }),

@@ -37,9 +37,8 @@ over the JSON IPC client (`mpv/`) and a `VideoPresenter` (`presenter/`). Read `a
   handshake offset, holds events until the first `subscribe` and replays the `presenter` ui event to late listeners.
 - The renderer's dev gate (`renderer/src/gate/AGENTS.md`) reads `engine.spawns`, `loadMode`, `presenterKind` and `maxHoldMs`
   (longest coalescing wait) through `registerPlayerIpc`'s `gateReport(line, engine)`. mpv's idle logo (an OSC feature)
-  cannot be switched off at runtime (`set script-opts`, `change-list`, `script-message` measured: no effect), and
-  `--script-opts=osc-idlescreen=no` is not in the fixed launch options, so `PlayerView` keeps the area hidden until
-  the first frame.
+  cannot be switched off at runtime (`set script-opts`, `change-list`, `script-message` measured: no effect), so
+  `--script-opts=osc-idlescreen=no` is a fixed launch option. `engine.lastArea` is the gate's sample rect.
 
 ## Tests
 - `engine.test.ts` drives the engine against `mpv/fake-mpv.ts` (a scripted mpv on a real named pipe or Unix socket).

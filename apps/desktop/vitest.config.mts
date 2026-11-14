@@ -19,6 +19,7 @@ export default defineConfig({
         'src/preload/player-bridge.ts',
         'src/main/single-instance.ts',
         'src/main/gate.ts',
+        'src/preload/gate-flag.ts',
         'src/shared/*.ts',
       ],
       exclude: ['src/**/*.test.ts'],

@@ -26,6 +26,7 @@ describe('launchArgs', () => {
       '--hwdec=auto-safe',
       '--network-timeout=10',
       '--curl-enabled=no',
+      '--script-opts=osc-idlescreen=no',
     ]);
     expect(args.slice(LAUNCH_OPTIONS.length)).toEqual([
       '--input-conf=C:\\r\\mpv-input.conf',

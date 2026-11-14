@@ -242,6 +242,14 @@ describe('MpvEngine review focus', () => {
     expect(engine.maxHoldMs).toBeLessThanOrEqual(1100);
   });
 
+  it('remembers the last area it was given', async () => {
+    const { engine } = await setup();
+    expect(engine.lastArea).toBeUndefined();
+    const area = { x: 1, y: 2, width: 3, height: 4, visible: true };
+    engine.setArea(area);
+    expect(engine.lastArea).toEqual(area);
+  });
+
   it('stop during a pending load sends nothing more', async () => {
     const { engine, fake, events } = await setup({ scripts: { [URL_B]: SLOW_OPEN } });
     engine.load(live(1));

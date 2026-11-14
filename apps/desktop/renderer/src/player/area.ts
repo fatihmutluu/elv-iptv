@@ -48,11 +48,3 @@ export function createAreaSender(send: (area: PlayerArea) => void): AreaSender {
 export function statusPlacement(coversArea: boolean | undefined): 'below' | 'inside' {
   return coversArea === true ? 'below' : 'inside';
 }
-
-/**
- * True when the area must send `visible: false`: while the service has failed (the Retry card shows in the area), and
- * before any frame was shown (mpv paints its idle logo there; the black page shows instead).
- */
-export function areaHidden(state: { failed: boolean; framed: boolean }): boolean {
-  return state.failed || !state.framed;
-}

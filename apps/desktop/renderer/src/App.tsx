@@ -1,12 +1,14 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { GateScreen } from './gate/GateScreen.tsx';
-import { parseGateParams } from './gate/params.ts';
+import { resolveGate } from './gate/params.ts';
+
+// Computed once: a re-render must never hand the gate new params, which would restart the run. Main loads the query only
+// for an unpackaged `--elv-gate=` launch, and the preload flags gate mode; a page with just the query gets no gate.
+const GATE = resolveGate(window.location.search, window.elv);
 
 /** Placeholder root of the desktop renderer; the shared feature screens replace it later. */
 export function App() {
-  // Main loads the gate query only for an unpackaged `--elv-gate=` launch; a normal launch has no query.
-  const gate = parseGateParams(window.location.search);
-  if (gate) return <GateScreen params={gate} />;
+  if (GATE) return <GateScreen params={GATE} />;
   return (
     <View style={styles.root}>
       <Text style={styles.title}>ELV IPTV</Text>

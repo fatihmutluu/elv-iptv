@@ -16,6 +16,8 @@ export const LAUNCH_OPTIONS: readonly string[] = [
   '--hwdec=auto-safe',
   '--network-timeout=10',
   '--curl-enabled=no',
+  // The OSC paints a logo on the idle window before the first load; it is only reachable as a launch option.
+  '--script-opts=osc-idlescreen=no',
 ];
 
 /** Builds the full argv. Stream URLs and headers never appear here; they travel over IPC. */

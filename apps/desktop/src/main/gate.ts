@@ -1,5 +1,6 @@
 import type { EngineEvent } from '@elv/playback';
-import type { Rect } from './player/presenter/bounds.ts';
+import type { PlayerArea } from '../shared/player-ipc.ts';
+import { areaToScreen, type Rect } from './player/presenter/bounds.ts';
 
 const FLAG = '--elv-gate=';
 const MAX_QUERY_CHARS = 2048;
@@ -61,7 +62,7 @@ export function mergeGateLine(line: string, extras: GateExtras): string | null {
   return `${LINE_PREFIX}${JSON.stringify({ ...body, ...extras })}`;
 }
 
-/** The middle half of a window's content bounds: the player area of the gate screen, clear of its status line. */
+/** The middle half of a window's content bounds: the fallback when no player area is known. */
 export function centerRect(bounds: Rect): Rect {
   return {
     x: bounds.x + Math.round(bounds.width / 4),
@@ -69,6 +70,15 @@ export function centerRect(bounds: Rect): Rect {
     width: Math.round(bounds.width / 2),
     height: Math.round(bounds.height / 2),
   };
+}
+
+/**
+ * The screen rect (DIPs) to sample: the engine's last area mapped like the presenter does (content origin plus the area
+ * scaled by the page zoom), or the middle half of the content when no usable area is known.
+ */
+export function sampleRect(content: Rect, area: PlayerArea | undefined, zoomFactor: number): Rect {
+  if (!area?.visible || area.width <= 0 || area.height <= 0) return centerRect(content);
+  return areaToScreen(content, area, zoomFactor);
 }
 
 /** What the sampler concluded about the picture. */

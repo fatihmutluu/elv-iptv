@@ -1,8 +1,11 @@
 import type { EngineErrorCode, PlaybackState } from '@elv/playback';
 import type { GateFault } from './params.ts';
 
-/** How a fault run ended on the faulted channel. */
-type FaultOutcome = 'recovered' | 'failed-in-time' | 'limited-backoff' | 'missed';
+/**
+ * How a fault run ended on the faulted channel; `left`: a zap went away before the faulted channel played (the
+ * expected outcome of a slow start).
+ */
+type FaultOutcome = 'recovered' | 'failed-in-time' | 'limited-backoff' | 'left' | 'missed';
 
 /** The VOD part's outcome: it played, and playing resumed at the seek target. */
 export interface VodResult {
@@ -50,6 +53,11 @@ export interface PlayerRecorder {
   surface(change: 'created' | 'destroyed'): void;
   /** Notes an error the engine reported, before the service reacts to it. */
   engineError(code: EngineErrorCode): void;
+  /**
+   * An engine stall of the current attempt. One that ends while the service still shows `playing` is a recovery the
+   * ladder never saw (rung 0).
+   */
+  stall(phase: 'start' | 'end'): void;
   /** The line's metrics; `final` is the service state at the end of the live part, `vod` the VOD part's outcome. */
   finish(final: PlaybackState, vod?: VodResult): PlayerMetrics;
 }
@@ -62,6 +70,8 @@ interface Tune {
   failed: boolean;
   isDwell: boolean;
   sawRecovering: boolean;
+  stalled: boolean;
+  played: boolean;
   recovered: boolean;
   sawLimited: boolean;
 }
@@ -100,17 +110,18 @@ export function createPlayerRecorder(opts: {
   let dwellDone = false;
   let outcome: FaultOutcome | null = null;
 
-  const endDwell = (): void => {
+  const endDwell = (zapped: boolean): void => {
     if (current === undefined || !current.isDwell) return;
     dwellDone = true;
     if (current.sawLimited) outcome = 'limited-backoff';
     else if (current.failed) outcome = 'failed-in-time';
     else if (current.recovered) outcome = 'recovered';
+    else if (zapped && !current.played) outcome = 'left';
     else outcome = 'missed';
   };
 
   const startTune = (state: PlaybackState): void => {
-    endDwell();
+    endDwell(true);
     tunes += 1;
     const item = state.item ?? '';
     current = {
@@ -121,6 +132,8 @@ export function createPlayerRecorder(opts: {
       failed: false,
       isDwell: opts.fault !== '' && !dwellDone && item === opts.faultItem,
       sawRecovering: false,
+      stalled: false,
+      played: false,
       recovered: false,
       sawLimited: false,
     };
@@ -135,8 +148,10 @@ export function createPlayerRecorder(opts: {
       if (previous?.kind !== 'recovering' || previous.rung !== status.rung) {
         recoveries[String(status.rung) as keyof typeof recoveries] += 1;
       }
-    } else if (status.kind === 'playing' && tune.sawRecovering) tune.recovered = true;
-    else if (status.kind === 'limited') tune.sawLimited = true;
+    } else if (status.kind === 'playing') {
+      tune.played = true;
+      if (tune.sawRecovering) tune.recovered = true;
+    } else if (status.kind === 'limited') tune.sawLimited = true;
     else if (status.kind === 'failed' && !tune.failed) {
       tune.failed = true;
       failures += 1;
@@ -172,11 +187,16 @@ export function createPlayerRecorder(opts: {
     surface(change) {
       if (change === 'created') surfaceCreated += 1;
     },
+    stall(phase) {
+      if (current === undefined) return;
+      if (phase === 'start') current.stalled = true;
+      else if (current.stalled && previous?.kind === 'playing') current.recovered = true;
+    },
     engineError(code) {
       if (code === 'engine-wedged') wedged += 1;
     },
     finish(final, vod) {
-      endDwell();
+      endDwell(false);
       const warmSorted = ascending(warm);
       const zapSorted = ascending(zapSpans);
       return {

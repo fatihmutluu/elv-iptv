@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PlayerArea } from '../../../src/shared/player-ipc.ts';
-import { areaHidden, createAreaSender, statusPlacement } from './area.ts';
+import { createAreaSender, statusPlacement } from './area.ts';
 
 const rect = { x: 0, y: 0, width: 800, height: 450 };
 
@@ -59,15 +59,5 @@ describe('statusPlacement', () => {
   it('puts it inside the area otherwise, also before the presenter is known', () => {
     expect(statusPlacement(false)).toBe('inside');
     expect(statusPlacement(undefined)).toBe('inside');
-  });
-});
-
-describe('areaHidden', () => {
-  it('hides the video until a first frame was shown, so the idle logo never shows', () => {
-    expect(areaHidden({ failed: false, framed: false })).toBe(true);
-    expect(areaHidden({ failed: false, framed: true })).toBe(false);
-  });
-  it('hides it while failed, so the Retry card shows in the area', () => {
-    expect(areaHidden({ failed: true, framed: true })).toBe(true);
   });
 });
