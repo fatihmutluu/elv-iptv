@@ -35,3 +35,7 @@ React components for react-native and react-native-web, design tokens and TV foc
   `Animated.timing`, while page jumps and source swaps snap via `setValue`.
 - `onFrameCommitted(index, window)` fires on the first animation frame after a focused-index commit.
 - `createSyntheticSource(count, make, cacheSize)` computes items on demand with a small LRU.
+- `ElvList` (`src/list/ElvList.tsx`) wraps `ListSource<T>` across form factors: delegates to `TvList` on `'tv'`
+  (syncing `FocusStore` list index with `selectedIndex` / `onSelectIndex` without stealing active focus) and renders
+  a fixed-height `VirtualizedList` (`getItemLayout`, windowed prefetch, `initialScrollIndex` restoration, and desktop
+  `ArrowUp`/`ArrowDown`/`PageUp`/`PageDown`/`Enter` keys) on `'phone' | 'tablet' | 'desktop'`.
