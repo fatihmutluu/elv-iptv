@@ -369,7 +369,7 @@ test('imports the large simulator catalog in utilityProcess without stalling ren
     );
   } finally {
     await app.close().catch(() => {});
-    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(userDataDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });
 
@@ -460,7 +460,7 @@ test('recovers transparently when the catalog utilityProcess crashes', async () 
     expect(respawnedPid).not.toBe(firstPid);
   } finally {
     await app.close().catch(() => {});
-    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(userDataDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });
 
@@ -507,6 +507,6 @@ test('fails closed on headless Linux when safeStorage falls back to basic_text',
     expect(existsSync(join(userDataDir, 'secrets.json'))).toBe(false);
   } finally {
     await app.close().catch(() => {});
-    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(userDataDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });

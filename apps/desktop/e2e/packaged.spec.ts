@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from 'node:child_process';
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -127,7 +127,15 @@ async function firstAppPage(wsUrl: string): Promise<{ close: () => Promise<void>
   while (Date.now() < deadline) {
     for (const context of browser.contexts()) {
       const page = context.pages()[0];
-      if (page) return { close: () => browser.close(), page };
+      if (page) {
+        return {
+          close: async () => {
+            await page.evaluate(() => window.close()).catch(() => {});
+            await browser.close().catch(() => {});
+          },
+          page,
+        };
+      }
     }
     await new Promise((r) => setTimeout(r, 100));
   }
@@ -140,8 +148,21 @@ async function stopProcess(child: ChildProcess): Promise<void> {
   const exited = new Promise<void>((resolvePromise) => {
     child.once('exit', () => resolvePromise());
   });
-  child.kill();
+  // Allow graceful `window.close()` -> `window-all-closed` -> `before-quit` to finish first on non-macOS.
+  if (process.platform !== 'darwin') {
+    await Promise.race([exited, new Promise<void>((r) => setTimeout(r, 2_000))]);
+    if (child.exitCode !== null || child.signalCode !== null) return;
+  }
+  if (process.platform === 'win32' && child.pid !== undefined) {
+    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+  } else {
+    child.kill();
+  }
   await Promise.race([exited, new Promise<void>((r) => setTimeout(r, 5_000))]);
+}
+
+function removeUserDataDir(userDataDir: string): void {
+  rmSync(userDataDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
 }
 
 test('packaged desktop binary boots from app.asar with production fuses enabled', async () => {
@@ -167,7 +188,7 @@ test('packaged desktop binary boots from app.asar with production fuses enabled'
   } finally {
     await closeBrowser?.().catch(() => {});
     await stopProcess(child);
-    rmSync(userDataDir, { recursive: true, force: true });
+    removeUserDataDir(userDataDir);
   }
 });
 
@@ -230,7 +251,7 @@ test('the packaged app opens an engine', async () => {
   } finally {
     await closeBrowser?.().catch(() => {});
     await stopProcess(child);
-    rmSync(userDataDir, { recursive: true, force: true });
+    removeUserDataDir(userDataDir);
   }
 });
 
@@ -277,6 +298,6 @@ test('the packaged app opens the catalog utility process and queries SQLite', as
   } finally {
     await closeBrowser?.().catch(() => {});
     await stopProcess(child);
-    rmSync(userDataDir, { recursive: true, force: true });
+    removeUserDataDir(userDataDir);
   }
 });
