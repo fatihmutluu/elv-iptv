@@ -218,7 +218,7 @@ describe('ffmpeg-media3 fetch, archive safety and verify', () => {
   it('handles USTAR prefix/PAX headers and rejects path traversal, symlinks and PAX linkpaths', async () => {
     const work = makeTempDir();
     const validTar = join(work, 'valid-pax.tar.gz');
-    const paxLine = '27 path=nested/hello.txt\n';
+    const paxLine = '25 path=nested/hello.txt\n';
     writeFileSync(
       validTar,
       makeTarGz([
@@ -281,6 +281,80 @@ describe('ffmpeg-media3 fetch, archive safety and verify', () => {
     const realDeps = createRealFetchDeps(fakeRepo);
     expect(realDeps.readLock().ffmpegVersion).toBe('9.0.2');
     expect(await realDeps.sha256File(validTar)).toHaveLength(64);
+  });
+
+  it('rejects hardlinks, malformed octals, global/size PAX headers, truncated archives without EOF and size-cap bombs', () => {
+    const work = makeTempDir();
+
+    const hardlinkTar = join(work, 'hardlink.tar.gz');
+    writeFileSync(
+      hardlinkTar,
+      makeTarGz([{ name: 'a.txt', typeflag: '1', linkname: 'BUILDINFO.json' }]),
+    );
+    expect(() => extractTarGz(hardlinkTar, join(work, 'hl'))).toThrow(/unsupported tar entry/i);
+
+    // Malformed octal ("00000000079\0") in size field
+    const badHeader = Buffer.alloc(512, 0);
+    badHeader.write('bad.txt', 0, 100, 'utf8');
+    badHeader.write('0000644\0', 100, 8, 'ascii');
+    badHeader.write('00000000079\0', 124, 12, 'ascii');
+    badHeader.write('0', 156, 1, 'ascii');
+    badHeader.write('ustar\0', 257, 6, 'ascii');
+    const badOctalTar = join(work, 'badoctal.tar.gz');
+    writeFileSync(badOctalTar, gzipSync(Buffer.concat([badHeader, Buffer.alloc(1024, 0)])));
+    expect(() => extractTarGz(badOctalTar, join(work, 'oct'))).toThrow(/invalid octal/i);
+
+    // Truncated tar on 512-byte boundary without all-zero EOF block
+    const noEofHeader = Buffer.alloc(512, 0);
+    noEofHeader.write('ok.txt', 0, 100, 'utf8');
+    noEofHeader.write('0000644\0', 100, 8, 'ascii');
+    noEofHeader.write('00000000002\0', 124, 12, 'ascii');
+    noEofHeader.write('0', 156, 1, 'ascii');
+    const payload512 = Buffer.alloc(512, 0);
+    payload512.write('hi', 0, 2, 'utf8');
+    const noEofTar = join(work, 'noeof.tar.gz');
+    writeFileSync(noEofTar, gzipSync(Buffer.concat([noEofHeader, payload512])));
+    expect(() => extractTarGz(noEofTar, join(work, 'noeof'))).toThrow(/eof|truncated/i);
+
+    // Global PAX ('g') and PAX size= override are rejected
+    const paxGlobalTar = join(work, 'paxglobal.tar.gz');
+    writeFileSync(
+      paxGlobalTar,
+      makeTarGz([
+        { name: 'PaxHeader/global', typeflag: 'g', content: Buffer.from('16 comment=abc\n') },
+        { name: 'a.txt', typeflag: '0', content: Buffer.from('x') },
+      ]),
+    );
+    expect(() => extractTarGz(paxGlobalTar, join(work, 'paxg'))).toThrow(/global|unsupported/i);
+
+    const paxSizeTar = join(work, 'paxsize.tar.gz');
+    writeFileSync(
+      paxSizeTar,
+      makeTarGz([
+        { name: 'PaxHeader/sz', typeflag: 'x', content: Buffer.from('12 size=100\n') },
+        { name: 'a.txt', typeflag: '0', content: Buffer.from('x') },
+      ]),
+    );
+    expect(() => extractTarGz(paxSizeTar, join(work, 'paxsz'))).toThrow(/pax.*size/i);
+
+    const badPaxLenTar = join(work, 'badpaxlen.tar.gz');
+    writeFileSync(
+      badPaxLenTar,
+      makeTarGz([
+        { name: 'PaxHeader/bad', typeflag: 'x', content: Buffer.from('99 path=foo\n') },
+        { name: 'a.txt', typeflag: '0', content: Buffer.from('x') },
+      ]),
+    );
+    expect(() => extractTarGz(badPaxLenTar, join(work, 'paxbad'))).toThrow(/pax/i);
+
+    // Size cap enforcement
+    const capTar = join(work, 'cap.tar.gz');
+    writeFileSync(
+      capTar,
+      makeTarGz([{ name: 'big.bin', typeflag: '0', content: Buffer.alloc(4096, 1) }]),
+    );
+    expect(() => extractTarGz(capTar, join(work, 'capout'), { maxOutputBytes: 1024 })).toThrow();
+    expect(() => extractTarGz(capTar, join(work, 'capcnt'), { maxEntries: 0 })).toThrow();
   });
 
   it('runs pnpm ffmpeg-media3 fetch before expo prebuild in buildApk', async () => {

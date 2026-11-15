@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { scanLicence } from './licence.ts';
 import type { FfmpegMedia3Lock } from './lock.ts';
@@ -113,8 +113,6 @@ export async function fetchFfmpegMedia3(opts: FetchOptions, deps: FetchDeps): Pr
 
     rmSync(deps.vendorDir, { recursive: true, force: true });
     mkdirSync(join(deps.vendorDir, '..'), { recursive: true });
-    // Copy via rename on same volume
-    const { renameSync } = await import('node:fs');
     renameSync(stagingDir, deps.vendorDir);
   } catch (err) {
     rmSync(stagingDir, { recursive: true, force: true });

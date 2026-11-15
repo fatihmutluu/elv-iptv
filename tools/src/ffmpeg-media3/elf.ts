@@ -60,7 +60,7 @@ const EXPECTED_ARCH: Record<FfmpegMedia3Abi, { elfClass: 32 | 64; machine: numbe
 const REQUIRED_NEEDED: Record<FfmpegMedia3Library, readonly string[]> = {
   'libavutil.so': [],
   'libswresample.so': ['libavutil.so'],
-  'libavcodec.so': ['libavutil.so'],
+  'libavcodec.so': ['libswresample.so', 'libavutil.so'],
   'libffmpegJNI.so': ['libavcodec.so', 'libswresample.so', 'libavutil.so'],
 };
 
@@ -76,12 +76,15 @@ const ALLOWED_NEEDED = new Set<string>([
 ]);
 
 function readCString(bytes: Uint8Array, start: number, limit: number): string {
-  if (start < 0 || start >= limit || start >= bytes.length) {
+  const max = Math.min(limit, bytes.length);
+  if (start < 0 || start >= max) {
     throw new Error(`ELF dynamic string offset ${start} out of range`);
   }
   let end = start;
-  const max = Math.min(limit, bytes.length);
   while (end < max && bytes[end] !== 0) end += 1;
+  if (end >= max || bytes[end] !== 0) {
+    throw new Error(`ELF dynamic string at offset ${start} is missing NUL terminator`);
+  }
   return Buffer.from(bytes.subarray(start, end)).toString('utf8');
 }
 
@@ -123,18 +126,33 @@ export function parseElfSharedObject(bytes: Uint8Array, label: string): ElfInspe
   let phoff = 0;
   let phentsize = 0;
   let phnum = 0;
+  let shoff = 0;
+  let shentsize = 0;
+  let shnum = 0;
   if (elfClass === 32) {
     phoff = view.getUint32(28, true);
+    shoff = view.getUint32(32, true);
     phentsize = view.getUint16(42, true);
     phnum = view.getUint16(44, true);
+    shentsize = view.getUint16(46, true);
+    shnum = view.getUint16(48, true);
     if (phentsize < 32) throw new Error(`${label}: invalid ELF32 phentsize ${phentsize}`);
+    if (shnum > 0 && (shentsize < 40 || shoff === 0 || shoff + shnum * shentsize > bytes.length)) {
+      throw new Error(`${label}: section header table exceeds file size`);
+    }
   } else {
     phoff = Number(view.getBigUint64(32, true));
+    shoff = Number(view.getBigUint64(40, true));
     phentsize = view.getUint16(54, true);
     phnum = view.getUint16(56, true);
+    shentsize = view.getUint16(58, true);
+    shnum = view.getUint16(60, true);
     if (phentsize < 56) throw new Error(`${label}: invalid ELF64 phentsize ${phentsize}`);
+    if (shnum > 0 && (shentsize < 64 || shoff === 0 || shoff + shnum * shentsize > bytes.length)) {
+      throw new Error(`${label}: section header table exceeds file size`);
+    }
   }
-  if (phoff + phnum * phentsize > bytes.length) {
+  if (phoff === 0 || phnum === 0 || phoff + phnum * phentsize > bytes.length) {
     throw new Error(`${label}: program header table exceeds file size`);
   }
 
@@ -149,19 +167,25 @@ export function parseElfSharedObject(bytes: Uint8Array, label: string): ElfInspe
     let offset = 0;
     let vaddr = 0;
     let filesz = 0;
+    let memsz = 0;
     let align = 0;
     if (elfClass === 32) {
       offset = view.getUint32(p + 4, true);
       vaddr = view.getUint32(p + 8, true);
       filesz = view.getUint32(p + 16, true);
+      memsz = view.getUint32(p + 20, true);
       align = view.getUint32(p + 28, true);
     } else {
       offset = Number(view.getBigUint64(p + 8, true));
       vaddr = Number(view.getBigUint64(p + 16, true));
       filesz = Number(view.getBigUint64(p + 32, true));
+      memsz = Number(view.getBigUint64(p + 40, true));
       align = Number(view.getBigUint64(p + 48, true));
     }
     if (pType === PT_LOAD) {
+      if (filesz > memsz || offset + filesz > bytes.length) {
+        throw new Error(`${label}: PT_LOAD segment exceeds file bounds or memsz`);
+      }
       loadSegments.push({ offset, vaddr, align });
       loadRanges.push({ offset, vaddr, filesz });
     } else if (pType === PT_DYNAMIC) {
@@ -170,18 +194,25 @@ export function parseElfSharedObject(bytes: Uint8Array, label: string): ElfInspe
     }
   }
 
-  if (dynOffset < 0 || dynOffset + dynSize > bytes.length) {
+  if (dynOffset < 0 || dynSize <= 0 || dynOffset + dynSize > bytes.length) {
     throw new Error(`${label}: missing or out-of-bounds PT_DYNAMIC segment`);
   }
 
   const entrySize = elfClass === 32 ? 8 : 16;
   const rawDyn: Array<[number, number]> = [];
+  let sawDtNull = false;
   for (let off = dynOffset; off + entrySize <= dynOffset + dynSize; off += entrySize) {
     const tag = elfClass === 32 ? view.getInt32(off, true) : Number(view.getBigInt64(off, true));
     const val =
       elfClass === 32 ? view.getUint32(off + 4, true) : Number(view.getBigUint64(off + 8, true));
-    if (tag === DT_NULL) break;
+    if (tag === DT_NULL) {
+      sawDtNull = true;
+      break;
+    }
     rawDyn.push([tag, val]);
+  }
+  if (!sawDtNull) {
+    throw new Error(`${label}: PT_DYNAMIC segment is missing DT_NULL terminator`);
   }
 
   let strtabVaddr = -1;
@@ -191,10 +222,14 @@ export function parseElfSharedObject(bytes: Uint8Array, label: string): ElfInspe
     if (tag === DT_STRSZ) strtabSize = val;
   }
   const strtabFileOffset = strtabVaddr >= 0 ? vaddrToFileOffset(strtabVaddr, loadRanges) : null;
-  if (strtabFileOffset === null || strtabFileOffset + strtabSize > bytes.length) {
-    throw new Error(`${label}: unable to map DT_STRTAB into file bounds`);
+  if (
+    strtabFileOffset === null ||
+    strtabSize <= 0 ||
+    strtabFileOffset + strtabSize > bytes.length
+  ) {
+    throw new Error(`${label}: missing DT_STRSZ or out-of-bounds DT_STRTAB`);
   }
-  const strtabEnd = strtabSize > 0 ? strtabFileOffset + strtabSize : bytes.length;
+  const strtabEnd = strtabFileOffset + strtabSize;
 
   let soname: string | null = null;
   const needed: string[] = [];

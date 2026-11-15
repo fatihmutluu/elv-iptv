@@ -37,6 +37,11 @@ const FORBIDDEN_PATTERNS: ReadonlyArray<{ label: string; regex: RegExp }> = [
   { label: '--enable-version3', regex: /--enable-version3\b/ },
   { label: '--enable-static', regex: /--enable-static\b/ },
   { label: 'GPL version 2/3 licence string', regex: /\bGPL version [23]\b/ },
+  { label: 'LGPL version 3 licence string', regex: /\bLGPL version 3\b/ },
+  {
+    label: 'nonfree and unredistributable licence string',
+    regex: /nonfree and unredistributable/i,
+  },
   { label: 'x264', regex: /\blibx264\b|\bx264\b/ },
   { label: 'x265', regex: /\blibx265\b|\bx265\b/ },
   { label: 'libfdk-aac', regex: /\blibfdk[-_]aac\b/ },
@@ -47,6 +52,8 @@ const EXPECTED_SO_PATHS = new Set<string>(
     FFMPEG_MEDIA3_LIBRARIES.map((lib) => `jniLibs/${abi}/${lib}`),
   ),
 );
+
+const ALLOWED_BUNDLE_FILES = new Set<string>([...REQUIRED_FILES, ...EXPECTED_SO_PATHS]);
 
 const FFMPEG_OWNED_LIBS = new Set<FfmpegMedia3Library>([
   'libavutil.so',
@@ -61,9 +68,9 @@ function walkTree(
   seenSoPaths: string[],
 ): void {
   for (const name of readdirSync(curDir)) {
-    if (name === '.ffmpeg-media3-sha256') continue;
     const full = join(curDir, name);
     const rel = relative(rootDir, full).replace(/\\/g, '/');
+    if (rel === '.ffmpeg-media3-sha256') continue;
     const stat = lstatSync(full);
     if (stat.isSymbolicLink()) {
       findings.push(`${rel}: symlinks are forbidden in Android runtime bundles`);
@@ -73,10 +80,16 @@ function walkTree(
       walkTree(rootDir, full, findings, seenSoPaths);
       continue;
     }
+    if (!stat.isFile()) {
+      findings.push(`${rel}: special files are forbidden in Android runtime bundles`);
+      continue;
+    }
     if (rel.endsWith('.a')) {
       findings.push(`${rel}: static archive (.a) is forbidden`);
     } else if (rel.endsWith('.so') || /\.so\.\d+/.test(rel)) {
       seenSoPaths.push(rel);
+    } else if (!ALLOWED_BUNDLE_FILES.has(rel)) {
+      findings.push(`${rel}: unexpected file not in the 23-file ffmpeg-media3 allowlist`);
     }
   }
 }

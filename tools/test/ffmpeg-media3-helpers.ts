@@ -12,7 +12,19 @@ export interface SyntheticElfOptions {
   elfType?: number;
   soname?: string | null;
   needed?: string[];
-  loadAligns?: Array<{ offset: number; vaddr: number; align: number }>;
+  loadAligns?: Array<{
+    offset: number;
+    vaddr: number;
+    align: number;
+    filesz?: number;
+    memsz?: number;
+  }>;
+  shoff?: number;
+  shentsize?: number;
+  shnum?: number;
+  omitDtNull?: boolean;
+  strszOverride?: number | null;
+  unterminatedDynstr?: boolean;
   rpath?: string;
   runpath?: string;
   textRelTag?: boolean;
@@ -43,13 +55,16 @@ export function buildSyntheticElf(opts: SyntheticElfOptions = {}): Uint8Array {
   const neededOffs = needed.map(addStr);
   const rpathOff = opts.rpath ? addStr(opts.rpath) : null;
   const runpathOff = opts.runpath ? addStr(opts.runpath) : null;
-  const dynstrBytes = Buffer.from(`${strings.join('\0')}\0`, 'utf8');
+  const dynstrBytes = Buffer.from(
+    opts.unterminatedDynstr ? strings.join('\0') : `${strings.join('\0')}\0`,
+    'utf8',
+  );
 
   const dynOffset = 0x1000;
   const strtabOffset = 0x1800;
   const extraOffset = 0x2000;
   const extraBytes = Buffer.from(opts.extraText ?? '', 'latin1');
-  const totalSize = Math.max(0x5000, extraOffset + extraBytes.length + 64);
+  const totalSize = Math.max(0x7000, extraOffset + extraBytes.length + 64);
   const buf = Buffer.alloc(totalSize, 0);
 
   buf[0] = 0x7f;
@@ -64,12 +79,14 @@ export function buildSyntheticElf(opts: SyntheticElfOptions = {}): Uint8Array {
   if (sonameOff !== null) dynEntries.push([14, sonameOff]);
   for (const off of neededOffs) dynEntries.push([1, off]);
   dynEntries.push([5, strtabOffset]);
-  dynEntries.push([10, dynstrBytes.length]);
+  if (opts.strszOverride !== null) {
+    dynEntries.push([10, opts.strszOverride ?? dynstrBytes.length]);
+  }
   if (rpathOff !== null) dynEntries.push([15, rpathOff]);
   if (runpathOff !== null) dynEntries.push([29, runpathOff]);
   if (opts.textRelTag) dynEntries.push([22, 0]);
   if (opts.flags !== undefined) dynEntries.push([30, opts.flags]);
-  dynEntries.push([0, 0]);
+  if (!opts.omitDtNull) dynEntries.push([0, 0]);
 
   dynstrBytes.copy(buf, strtabOffset);
   extraBytes.copy(buf, extraOffset);
@@ -83,17 +100,22 @@ export function buildSyntheticElf(opts: SyntheticElfOptions = {}): Uint8Array {
     buf.writeUInt16LE(machine, 18);
     buf.writeUInt32LE(1, 20);
     buf.writeUInt32LE(phoff, 28);
+    buf.writeUInt32LE(opts.shoff ?? 0, 32);
     buf.writeUInt16LE(ehsize, 40);
     buf.writeUInt16LE(phentsize, 42);
     buf.writeUInt16LE(phnum, 44);
+    buf.writeUInt16LE(opts.shentsize ?? 0, 46);
+    buf.writeUInt16LE(opts.shnum ?? 0, 48);
 
     let p = phoff;
     for (const seg of loadSegments) {
+      const filesz = seg.filesz ?? 0x3000;
+      const memsz = seg.memsz ?? filesz;
       buf.writeUInt32LE(1, p);
       buf.writeUInt32LE(seg.offset, p + 4);
       buf.writeUInt32LE(seg.vaddr, p + 8);
-      buf.writeUInt32LE(0x3000, p + 16);
-      buf.writeUInt32LE(0x3000, p + 20);
+      buf.writeUInt32LE(filesz, p + 16);
+      buf.writeUInt32LE(memsz, p + 20);
       buf.writeUInt32LE(5, p + 24);
       buf.writeUInt32LE(seg.align, p + 28);
       p += phentsize;
@@ -121,18 +143,23 @@ export function buildSyntheticElf(opts: SyntheticElfOptions = {}): Uint8Array {
     buf.writeUInt16LE(machine, 18);
     buf.writeUInt32LE(1, 20);
     buf.writeBigUInt64LE(BigInt(phoff), 32);
+    buf.writeBigUInt64LE(BigInt(opts.shoff ?? 0), 40);
     buf.writeUInt16LE(ehsize, 52);
     buf.writeUInt16LE(phentsize, 54);
     buf.writeUInt16LE(phnum, 56);
+    buf.writeUInt16LE(opts.shentsize ?? 0, 58);
+    buf.writeUInt16LE(opts.shnum ?? 0, 60);
 
     let p = phoff;
     for (const seg of loadSegments) {
+      const filesz = seg.filesz ?? 0x3000;
+      const memsz = seg.memsz ?? filesz;
       buf.writeUInt32LE(1, p);
       buf.writeUInt32LE(5, p + 4);
       buf.writeBigUInt64LE(BigInt(seg.offset), p + 8);
       buf.writeBigUInt64LE(BigInt(seg.vaddr), p + 16);
-      buf.writeBigUInt64LE(0x3000n, p + 32);
-      buf.writeBigUInt64LE(0x3000n, p + 40);
+      buf.writeBigUInt64LE(BigInt(filesz), p + 32);
+      buf.writeBigUInt64LE(BigInt(memsz), p + 40);
       buf.writeBigUInt64LE(BigInt(seg.align), p + 48);
       p += phentsize;
     }

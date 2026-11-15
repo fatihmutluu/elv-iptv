@@ -52,7 +52,7 @@ describe('ffmpeg-media3 ELF32/ELF64 inspector and 16 KB ABI verifier', () => {
     expect(findingsCongruence.some((f) => f.includes('congruent'))).toBe(true);
   });
 
-  it('rejects static FFmpeg linking when libffmpegJNI.so omits DT_NEEDED libavcodec.so', () => {
+  it('rejects static FFmpeg linking when libffmpegJNI.so omits DT_NEEDED libavcodec.so or libavcodec.so omits libswresample.so', () => {
     const staticallyLinkedJni = buildSyntheticElf({
       soname: 'libffmpegJNI.so',
       needed: ['liblog.so', 'libc.so'],
@@ -61,6 +61,13 @@ describe('ffmpeg-media3 ELF32/ELF64 inspector and 16 KB ABI verifier', () => {
     expect(findings.some((f) => f.includes('libavcodec.so'))).toBe(true);
     expect(findings.some((f) => f.includes('libswresample.so'))).toBe(true);
     expect(findings.some((f) => f.includes('libavutil.so'))).toBe(true);
+
+    const avcodecWithoutSwresample = buildSyntheticElf({
+      soname: 'libavcodec.so',
+      needed: ['libavutil.so', 'libc.so'],
+    });
+    const codecFindings = verifyAbiLibrary('arm64-v8a', 'libavcodec.so', avcodecWithoutSwresample);
+    expect(codecFindings.some((f) => f.includes('libswresample.so'))).toBe(true);
   });
 
   it('rejects wrong ABI machine, versioned SONAME, disallowed DT_NEEDED, RPATH and TEXTREL', () => {
@@ -120,5 +127,55 @@ describe('ffmpeg-media3 ELF32/ELF64 inspector and 16 KB ABI verifier', () => {
     const notDyn = buildSyntheticElf({ elfType: 2, soname: 'libavutil.so', needed: ['libc.so'] });
     expect(() => parseElfSharedObject(notDyn, 'exec.so')).toThrow(/ET_DYN/);
     expect(verifyAbiLibrary('arm64-v8a', 'libavutil.so', new Uint8Array([0, 1]))).not.toEqual([]);
+  });
+
+  it('rejects truncated PT_LOAD, truncated section headers, missing DT_NULL, zero DT_STRSZ and unterminated .dynstr', () => {
+    const full = buildSyntheticElf({ soname: 'libavutil.so', needed: ['libc.so'] });
+    const truncatedLoad = full.subarray(0, 0x5000);
+    expect(verifyAbiLibrary('arm64-v8a', 'libavutil.so', truncatedLoad)).not.toEqual([]);
+
+    const fileszExceedsMemsz = buildSyntheticElf({
+      soname: 'libavutil.so',
+      needed: ['libc.so'],
+      loadAligns: [{ offset: 0, vaddr: 0, align: 16384, filesz: 0x3000, memsz: 0x2000 }],
+    });
+    expect(verifyAbiLibrary('arm64-v8a', 'libavutil.so', fileszExceedsMemsz)).not.toEqual([]);
+
+    const truncatedSections = buildSyntheticElf({
+      soname: 'libavutil.so',
+      needed: ['libc.so'],
+      shoff: 0x6f00,
+      shentsize: 64,
+      shnum: 10,
+    });
+    expect(verifyAbiLibrary('arm64-v8a', 'libavutil.so', truncatedSections)).not.toEqual([]);
+
+    const missingDtNull = buildSyntheticElf({
+      soname: 'libavutil.so',
+      needed: ['libc.so'],
+      omitDtNull: true,
+    });
+    expect(verifyAbiLibrary('arm64-v8a', 'libavutil.so', missingDtNull)).not.toEqual([]);
+
+    const missingStrsz = buildSyntheticElf({
+      soname: 'libavutil.so',
+      needed: ['libc.so'],
+      strszOverride: null,
+    });
+    expect(verifyAbiLibrary('arm64-v8a', 'libavutil.so', missingStrsz)).not.toEqual([]);
+
+    const zeroStrsz = buildSyntheticElf({
+      soname: 'libavutil.so',
+      needed: ['libc.so'],
+      strszOverride: 0,
+    });
+    expect(verifyAbiLibrary('arm64-v8a', 'libavutil.so', zeroStrsz)).not.toEqual([]);
+
+    const unterminatedDynstr = buildSyntheticElf({
+      soname: 'libavutil.so',
+      needed: ['libc.so'],
+      unterminatedDynstr: true,
+    });
+    expect(verifyAbiLibrary('arm64-v8a', 'libavutil.so', unterminatedDynstr)).not.toEqual([]);
   });
 });

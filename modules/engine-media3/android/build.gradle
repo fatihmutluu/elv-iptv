@@ -14,7 +14,7 @@ android {
     versionCode 1
     versionName '0.0.0'
     testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
-    consumerProguardFiles new File(ffmpegVendorDir, 'proguard-rules.txt')
+    consumerProguardFiles 'consumer-rules.pro', new File(ffmpegVendorDir, 'proguard-rules.txt')
   }
   sourceSets {
     main {

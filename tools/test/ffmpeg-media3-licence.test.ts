@@ -39,6 +39,8 @@ describe('ffmpeg-media3 licence and bundle gate', () => {
     '--enable-static',
     'libavcodec license: GPL version 2 or later',
     'libavcodec license: GPL version 3 or later',
+    'libavcodec license: LGPL version 3 or later',
+    'libavcodec license: nonfree and unredistributable',
     'libx264',
     'libx265',
     'libfdk-aac',
@@ -89,6 +91,23 @@ describe('ffmpeg-media3 licence and bundle gate', () => {
     expect(res.findings.some((f) => f.includes('ExperimentalFfmpegVideoRenderer'))).toBe(true);
     expect(res.findings.some((f) => f.includes('libavcodec.a'))).toBe(true);
     expect(res.findings.some((f) => f.includes('libextra.so'))).toBe(true);
+  });
+
+  it('enforces a strict allowlist of the exact 23 bundle files (ignoring .ffmpeg-media3-sha256)', () => {
+    const dir = makeTempDir();
+    populateValidBundle(dir);
+    writeFileSync(join(dir, '.ffmpeg-media3-sha256'), `${'a'.repeat(64)}\n`);
+    expect(scanLicence(dir)).toEqual({ ok: true, findings: [] });
+
+    writeFileSync(
+      join(dir, 'java/androidx/media3/decoder/ffmpeg/SneakyInjected.java'),
+      'package androidx.media3.decoder.ffmpeg;\nclass SneakyInjected {}\n',
+    );
+    writeFileSync(join(dir, 'extra.jar'), 'PK\x03\x04');
+    const res = scanLicence(dir);
+    expect(res.ok).toBe(false);
+    expect(res.findings.some((f) => f.includes('SneakyInjected.java'))).toBe(true);
+    expect(res.findings.some((f) => f.includes('extra.jar'))).toBe(true);
   });
 
   it('rejects symlinks inside the bundle when supported by the host OS', () => {

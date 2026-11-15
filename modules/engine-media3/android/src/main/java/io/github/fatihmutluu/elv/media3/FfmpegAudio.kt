@@ -15,7 +15,6 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.metadata.MetadataOutput
 import androidx.media3.exoplayer.text.TextOutput
 import androidx.media3.exoplayer.video.VideoRendererEventListener
-import java.util.concurrent.atomic.AtomicBoolean
 
 /** Software decoders first for audio only; video keeps the platform order. */
 @OptIn(UnstableApi::class)
@@ -39,12 +38,24 @@ internal fun extensionRendererModeFor(softwareAudio: Boolean): Int =
 @OptIn(UnstableApi::class)
 internal object FfmpegAudio {
   val LIBRARIES: Array<String> = arrayOf("avutil", "swresample", "avcodec", "ffmpegJNI")
-  private val configured = AtomicBoolean(false)
+  private var configured = false
 
+  @Synchronized
   fun ensureConfigured() {
-    if (configured.compareAndSet(false, true)) {
-      FfmpegLibrary.setLibraries(*LIBRARIES)
+    ensureConfiguredWith { FfmpegLibrary.setLibraries(*LIBRARIES) }
+  }
+
+  @Synchronized
+  internal fun ensureConfiguredWith(applyLibraries: () -> Unit) {
+    if (!configured) {
+      applyLibraries()
+      configured = true
     }
+  }
+
+  @Synchronized
+  internal fun resetForTest() {
+    configured = false
   }
 
   fun isAvailable(): Boolean {

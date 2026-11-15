@@ -7,6 +7,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
@@ -16,6 +17,17 @@ import type { DownloadArtifactOptions, FetchDeps } from './fetch.ts';
 import { parseLock } from './lock.ts';
 
 const execFileAsync = promisify(execFile);
+
+const DEFAULT_MAX_ARCHIVE_BYTES = 32 * 1024 * 1024;
+const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+const DEFAULT_MAX_ENTRIES = 128;
+
+/** Safety caps for {@link extractTarGz}. */
+export interface TarExtractLimits {
+  maxArchiveBytes?: number;
+  maxOutputBytes?: number;
+  maxEntries?: number;
+}
 
 function readNullTerminated(buf: Uint8Array, start: number, length: number): string {
   let end = start;
@@ -27,11 +39,56 @@ function readNullTerminated(buf: Uint8Array, start: number, length: number): str
 function parseOctal(buf: Uint8Array, start: number, length: number): number {
   const raw = readNullTerminated(buf, start, length).trim();
   if (raw === '') return 0;
+  if (!/^[0-7]+$/.test(raw)) {
+    throw new Error(`Invalid octal field "${raw}" in tar header`);
+  }
   const value = Number.parseInt(raw, 8);
-  if (Number.isNaN(value) || value < 0) {
+  if (!Number.isSafeInteger(value) || value < 0) {
     throw new Error(`Invalid octal field "${raw}" in tar header`);
   }
   return value;
+}
+
+function parsePaxExtendedHeader(payload: Uint8Array): string | null {
+  let pos = 0;
+  let pathOverride: string | null = null;
+  while (pos < payload.length) {
+    let spaceIdx = pos;
+    while (spaceIdx < payload.length && payload[spaceIdx] !== 0x20) spaceIdx += 1;
+    if (spaceIdx >= payload.length) {
+      throw new Error('Malformed PAX extended header record');
+    }
+    const lenStr = Buffer.from(payload.subarray(pos, spaceIdx)).toString('ascii');
+    if (!/^\d+$/.test(lenStr)) {
+      throw new Error(`Invalid PAX record length "${lenStr}"`);
+    }
+    const recordLen = Number.parseInt(lenStr, 10);
+    if (
+      recordLen < 5 ||
+      pos + recordLen > payload.length ||
+      payload[pos + recordLen - 1] !== 0x0a
+    ) {
+      throw new Error('Truncated or malformed PAX extended header record');
+    }
+    const body = Buffer.from(payload.subarray(spaceIdx + 1, pos + recordLen - 1)).toString('utf8');
+    const eqIdx = body.indexOf('=');
+    if (eqIdx <= 0) {
+      throw new Error('Malformed PAX key=value entry');
+    }
+    const key = body.slice(0, eqIdx);
+    const val = body.slice(eqIdx + 1);
+    if (key === 'linkpath') {
+      throw new Error('Unsupported tar entry type: PAX linkpath is forbidden');
+    }
+    if (key === 'size') {
+      throw new Error('Unsupported PAX size override in tar header');
+    }
+    if (key === 'path') {
+      pathOverride = val;
+    }
+    pos += recordLen;
+  }
+  return pathOverride;
 }
 
 function resolveSafeEntryPath(destDir: string, entryName: string): string {
@@ -54,15 +111,36 @@ function resolveSafeEntryPath(destDir: string, entryName: string): string {
 
 /**
  * Safely extracts a `.tar.gz` archive into `destDir` using Node's built-in `zlib`,
- * rejecting path traversal, hardlinks, symlinks and device nodes on every OS.
+ * enforcing size/entry caps and rejecting path traversal, hardlinks, symlinks and special files.
  */
-export function extractTarGz(archivePath: string, destDir: string): void {
-  const tar = gunzipSync(readFileSync(archivePath));
+export function extractTarGz(
+  archivePath: string,
+  destDir: string,
+  limits: TarExtractLimits = {},
+): void {
+  const maxArchiveBytes = limits.maxArchiveBytes ?? DEFAULT_MAX_ARCHIVE_BYTES;
+  const maxOutputBytes = limits.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+  const maxEntries = limits.maxEntries ?? DEFAULT_MAX_ENTRIES;
+
+  const archiveSize = statSync(archivePath).size;
+  if (archiveSize > maxArchiveBytes) {
+    throw new Error(
+      `Compressed archive ${archivePath} (${archiveSize} bytes) exceeds limit ${maxArchiveBytes}`,
+    );
+  }
+
+  const tar = gunzipSync(readFileSync(archivePath), { maxOutputLength: maxOutputBytes });
+  if (tar.length === 0 || tar.length % 512 !== 0) {
+    throw new Error(`Truncated or misaligned tar stream (${tar.length} bytes)`);
+  }
   mkdirSync(destDir, { recursive: true });
 
   let offset = 0;
   let pendingLongName: string | null = null;
   let pendingPaxPath: string | null = null;
+  let sawEof = false;
+  let fileEntries = 0;
+  let totalWritten = 0;
 
   while (offset + 512 <= tar.length) {
     const header = tar.subarray(offset, offset + 512);
@@ -75,7 +153,13 @@ export function extractTarGz(archivePath: string, destDir: string): void {
         break;
       }
     }
-    if (allZero) break;
+    if (allZero) {
+      if (pendingLongName !== null || pendingPaxPath !== null) {
+        throw new Error('Dangling tar metadata header at EOF');
+      }
+      sawEof = true;
+      break;
+    }
 
     const name = readNullTerminated(header, 0, 100);
     const prefix = readNullTerminated(header, 345, 155);
@@ -88,21 +172,21 @@ export function extractTarGz(archivePath: string, destDir: string): void {
     }
     const payload = tar.subarray(offset, offset + size);
     const padded = size + ((512 - (size % 512)) % 512);
+    if (offset + padded > tar.length) {
+      throw new Error(`Truncated tar padding for "${name}"`);
+    }
     offset += padded;
 
     if (typeflag === 'L') {
       pendingLongName = readNullTerminated(payload, 0, payload.length);
       continue;
     }
-    if (typeflag === 'x' || typeflag === 'g') {
-      const paxText = Buffer.from(payload).toString('utf8');
-      if (/(?:^|\n)\d+ linkpath=/.test(paxText)) {
-        throw new Error('Unsupported tar entry type: PAX linkpath is forbidden');
-      }
-      if (typeflag === 'x') {
-        const match = /(?:^|\n)\d+ path=([^\n]+)\n/.exec(paxText);
-        if (match?.[1]) pendingPaxPath = match[1];
-      }
+    if (typeflag === 'g') {
+      throw new Error('Unsupported tar entry type "g": global PAX headers are forbidden');
+    }
+    if (typeflag === 'x') {
+      const paxPath = parsePaxExtendedHeader(payload);
+      if (paxPath !== null) pendingPaxPath = paxPath;
       continue;
     }
 
@@ -119,13 +203,26 @@ export function extractTarGz(archivePath: string, destDir: string): void {
     }
     if (typeflag !== '0') {
       throw new Error(
-        `Unsupported tar entry type "${typeflag}" for "${combinedName}" (symlinks and special files are forbidden)`,
+        `Unsupported tar entry type "${typeflag}" for "${combinedName}" (symlinks, hardlinks and special files are forbidden)`,
       );
+    }
+
+    fileEntries += 1;
+    if (fileEntries > maxEntries) {
+      throw new Error(`Tar archive exceeds maximum allowed file count (${maxEntries})`);
+    }
+    totalWritten += payload.length;
+    if (totalWritten > maxOutputBytes) {
+      throw new Error(`Tar archive extracted bytes exceed limit (${maxOutputBytes})`);
     }
 
     const fullPath = resolveSafeEntryPath(destDir, combinedName);
     mkdirSync(dirname(fullPath), { recursive: true });
     writeFileSync(fullPath, payload);
+  }
+
+  if (!sawEof) {
+    throw new Error('Truncated tar archive: missing all-zero EOF block');
   }
 }
 

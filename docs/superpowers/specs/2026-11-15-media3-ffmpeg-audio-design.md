@@ -78,7 +78,7 @@ legal notices into `@elv/engine-media3`.
 - **Android NDK `28.2.13676358`, `androidMinSdk: 28`:** matches the workspace minimum SDK (`API 28`, Fire OS 7 baseline)
   and compiles cleanly with 16 KB alignment across `arm64-v8a` (`aarch64-linux-android28-clang`), `armeabi-v7a`
   (`armv7a-linux-androideabi28-clang`, `-march=armv7-a -mfloat-abi=softfp -mfpu=neon`) and `x86_64`
-  (`x86_64-linux-android28-clang`; `--disable-x86asm` avoids NASM relocation hazards while keeping SSE/AVX intrinsics).
+  (`x86_64-linux-android28-clang`; `--disable-asm` avoids NASM relocation hazards while keeping SSE/AVX intrinsics).
 - **Enabled FFmpeg components:** `--disable-everything --disable-programs --disable-doc --disable-network
   --disable-avdevice --disable-avformat --disable-avfilter --disable-swscale --disable-autodetect
   --enable-avutil --enable-swresample --enable-avcodec` plus the 14 built-in LGPL-2.1+ audio decoders supported by
