@@ -1,11 +1,31 @@
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
-import type { RecipeName } from './catalog.ts';
+import { parseDurations } from './hls.ts';
+import {
+  RECIPES,
+  type RecipeDef,
+  type RecipeName,
+  type SubtitleLang,
+  switchSeconds,
+} from './recipes.ts';
+import { srtText } from './subtitles.ts';
 
-/** Files of one generated recipe. Segments are named `seg00000.ts` and up, 2 s each. */
+/**
+ * Files of one generated recipe. Segments are named `seg00000.ts` and up. `segmentSec` is the nominal
+ * length the live window lists (`#EXTINF:2.000` for every recipe, spec 5.4); `durations` are the real
+ * lengths from FFmpeg's `segments/index.m3u8` (2.002 s at 29.97 fps), which VOD playlists list.
+ */
 export interface RecipeFiles {
   loopTs: string;
   vodMp4: string;
@@ -13,55 +33,14 @@ export interface RecipeFiles {
   segmentsDir: string;
   segmentCount: number;
   segmentSec: 2;
+  durations: number[];
 }
 
 /** Printed by the media tests when FFmpeg is absent; the `vitest` check turns it into a visible note. */
 export const MEDIA_SKIP_MARKER = 'FFmpeg not found, media tests skipped';
 
-/** Every recipe the catalog can reference. */
-export const ALL_RECIPES: readonly RecipeName[] = [
-  'h264-aac-720p25',
-  'hevc-main10-1080p25',
-  'mpeg2-ac3-576i25',
-  'aac-radio',
-];
-
-const TONE = ['-f', 'lavfi', '-i', 'sine=frequency=1000:sample_rate=48000'];
-const GOP = '25';
-const AAC = ['-c:a', 'aac', '-b:a', '64k', '-ac', '2'];
-
-function picture(size: string, rate: number): string[] {
-  return ['-f', 'lavfi', '-i', `testsrc=size=${size}:rate=${rate}`];
-}
-
-/** Encoder arguments per recipe, placed before `-t` and the output file. */
-const RECIPE_ARGS: Record<RecipeName, string[]> = {
-  'h264-aac-720p25': [
-    ...picture('1280x720', 25),
-    ...TONE,
-    ...['-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p'],
-    ...['-b:v', '500k', '-maxrate', '500k', '-bufsize', '1000k'],
-    ...['-g', GOP, '-keyint_min', GOP, '-sc_threshold', '0'],
-    ...AAC,
-  ],
-  'hevc-main10-1080p25': [
-    ...picture('1920x1080', 25),
-    ...TONE,
-    ...['-c:v', 'libx265', '-preset', 'veryfast', '-pix_fmt', 'yuv420p10le'],
-    ...['-profile:v', 'main10', '-b:v', '1000k'],
-    ...['-x265-params', `keyint=${GOP}:min-keyint=${GOP}:scenecut=0:open-gop=0:log-level=error`],
-    ...AAC,
-  ],
-  'mpeg2-ac3-576i25': [
-    ...picture('720x576', 50),
-    ...TONE,
-    ...['-vf', 'tinterlace=mode=interleave_top,format=yuv420p'],
-    ...['-c:v', 'mpeg2video', '-b:v', '1500k', '-maxrate', '1500k', '-bufsize', '1200k'],
-    ...['-flags', '+ildct+ilme', '-g', GOP],
-    ...['-c:a', 'ac3', '-b:a', '96k', '-ac', '2'],
-  ],
-  'aac-radio': [...TONE, ...AAC],
-};
+/** Printed by the recipe tests when FFmpeg lacks an encoder; the `vitest` check turns it into a note. */
+export const ENCODER_SKIP_MARKER = 'FFmpeg lacks an encoder, recipe tests skipped';
 
 const QUIET = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y'];
 const inflight = new Map<string, Promise<RecipeFiles>>();
@@ -117,17 +96,59 @@ function runFfmpeg(
   });
 }
 
+const ORIGINAL: readonly RecipeName[] = [
+  'h264-aac-720p25',
+  'hevc-main10-1080p25',
+  'mpeg2-ac3-576i25',
+  'aac-radio',
+];
+
+/** Cache folder name of a recipe: the name, the loop length and a hash of everything that shapes the media. */
+export function recipeDirName(recipe: RecipeName, seconds: number): string {
+  const def = RECIPES[recipe];
+  const input: unknown[] = ORIGINAL.includes(recipe)
+    ? [def.args, seconds, 'v2']
+    : [def.args, seconds, 'v2', def.mp4Args, def.parts ?? null];
+  if (def.subtitles) input.push(def.subtitles, 'subs-v1');
+  const hash = createHash('sha256').update(JSON.stringify(input)).digest('hex').slice(0, 10);
+  return `${recipe}-${seconds}s-${hash}`;
+}
+
+/** Encoder names in the output of `ffmpeg -encoders`; the legend lines are not encoders. */
+export function parseEncoders(listing: string): Set<string> {
+  const names = new Set<string>();
+  for (const line of listing.split('\n')) {
+    const m = /^\s*[VASD][A-Z.]{5}\s+(\S+)/.exec(line);
+    if (m?.[1] && m[1] !== '=') names.add(m[1]);
+  }
+  return names;
+}
+
+const encoderCache = new Map<string, Set<string>>();
+
+/** External encoders the recipe needs that this FFmpeg build lacks. */
+export function missingEncoders(ffmpeg: string, recipe: RecipeName): string[] {
+  let known = encoderCache.get(ffmpeg);
+  if (!known) {
+    const out = spawnSync(ffmpeg, ['-hide_banner', '-encoders'], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    known = parseEncoders(out.stdout ?? '');
+    encoderCache.set(ffmpeg, known);
+  }
+  const have = known;
+  return RECIPES[recipe].encoders.filter((e) => !have.has(e));
+}
+
 function recipeDir(recipe: RecipeName, cacheDir: string, seconds: number): string {
-  const hash = createHash('sha256')
-    .update(JSON.stringify([RECIPE_ARGS[recipe], seconds, 'v2']))
-    .digest('hex')
-    .slice(0, 10);
-  return join(cacheDir, `${recipe}-${seconds}s-${hash}`);
+  return join(cacheDir, recipeDirName(recipe, seconds));
 }
 
 function describeDir(dir: string): RecipeFiles {
   const segmentsDir = join(dir, 'segments');
   const segmentCount = readdirSync(segmentsDir).filter((f) => /^seg\d+\.ts$/.test(f)).length;
+  const index = readFileSync(join(segmentsDir, 'index.m3u8'), 'utf8');
   return {
     loopTs: join(dir, 'loop.ts'),
     vodMp4: join(dir, 'vod.mp4'),
@@ -135,6 +156,43 @@ function describeDir(dir: string): RecipeFiles {
     segmentsDir,
     segmentCount,
     segmentSec: 2,
+    durations: parseDurations(index),
+  };
+}
+
+/**
+ * FFmpeg arguments, inputs included, that copy the loop into MP4 and MKV. Subtitle recipes add one SRT
+ * input per language (the caller writes `srt(lang)`), mark the first audio track default and no
+ * subtitle default (spec 5.5).
+ */
+function vodArgs(
+  def: RecipeDef,
+  loop: string,
+  srt: (lang: SubtitleLang) => string,
+): { mp4: string[]; mkv: string[] } {
+  const subtitles = def.subtitles;
+  if (!subtitles) {
+    const copy = ['-i', loop, '-map', '0', '-c', 'copy'];
+    return { mp4: [...copy, ...def.mp4Args, '-movflags', '+faststart'], mkv: copy };
+  }
+  const inputs = subtitles.langs.flatMap((lang) => ['-i', srt(lang)]);
+  const maps = subtitles.langs.flatMap((_, n) => ['-map', `${n + 1}`]);
+  const head = ['-i', loop, ...inputs, '-map', '0', ...maps, '-c:v', 'copy', '-c:a', 'copy'];
+  const tags = subtitles.langs.flatMap((lang, n) => [`-metadata:s:s:${n}`, `language=${lang}`]);
+  const flags = ['-disposition:a:0', 'default', '-disposition:a:1', '0'];
+  for (const n of subtitles.langs.keys()) flags.push(`-disposition:s:${n}`, '0');
+  return {
+    mp4: [
+      ...head,
+      '-c:s',
+      'mov_text',
+      ...def.mp4Args,
+      '-movflags',
+      '+faststart',
+      ...tags,
+      ...flags,
+    ],
+    mkv: [...head, '-c:s', 'srt', ...tags, ...flags],
   };
 }
 
@@ -150,13 +208,45 @@ async function generate(
   mkdirSync(join(tmp, 'segments'), { recursive: true });
   try {
     const loop = join(tmp, 'loop.ts');
-    const copy = ['-i', loop, '-c', 'copy'];
+    const copy = ['-i', loop, '-map', '0', '-c', 'copy'];
     const hls = ['-f', 'hls', '-hls_time', '2', '-hls_playlist_type', 'vod'];
     const names = ['-hls_segment_filename', join(tmp, 'segments', 'seg%05d.ts')];
-    await run([...RECIPE_ARGS[recipe], '-t', `${seconds}`, '-f', 'mpegts', loop]);
-    const tag = recipe === 'hevc-main10-1080p25' ? ['-tag:v', 'hvc1'] : [];
-    await run([...copy, ...tag, '-movflags', '+faststart', join(tmp, 'vod.mp4')]);
-    await run([...copy, join(tmp, 'vod.mkv')]);
+    const def = RECIPES[recipe];
+    if (def.parts) {
+      const step = switchSeconds(seconds);
+      const partA = join(tmp, 'part-a.ts');
+      const partB = join(tmp, 'part-b.ts');
+      const list = join(tmp, 'parts.txt');
+      await run([...def.parts.a, '-t', `${step}`, '-f', 'mpegts', partA]);
+      await run([...def.parts.b, '-t', `${step}`, '-f', 'mpegts', partB]);
+      const lines = Array.from(
+        { length: Math.ceil(seconds / step) },
+        (_, i) => `file '${i % 2 === 0 ? 'part-a.ts' : 'part-b.ts'}'`,
+      );
+      writeFileSync(list, `${lines.join('\n')}\n`);
+      await run([
+        '-f',
+        'concat',
+        '-i',
+        list,
+        ...def.args,
+        '-t',
+        `${seconds}`,
+        '-f',
+        'mpegts',
+        loop,
+      ]);
+      for (const f of [partA, partB, list]) rmSync(f, { force: true });
+    } else {
+      await run([...def.args, '-t', `${seconds}`, '-f', 'mpegts', loop]);
+    }
+    const langs = def.subtitles?.langs ?? [];
+    const srt = (lang: SubtitleLang): string => join(tmp, `subs-${lang}.srt`);
+    for (const lang of langs) writeFileSync(srt(lang), srtText(lang, seconds));
+    const vod = vodArgs(def, loop, srt);
+    await run([...vod.mp4, join(tmp, 'vod.mp4')]);
+    await run([...vod.mkv, join(tmp, 'vod.mkv')]);
+    for (const lang of langs) rmSync(srt(lang), { force: true });
     await run([...copy, ...hls, ...names, join(tmp, 'segments', 'index.m3u8')]);
     rmSync(dir, { recursive: true, force: true });
     renameSync(tmp, dir);
@@ -200,27 +290,43 @@ export function activeChildren(): number {
 /** A running real-time FFmpeg copy of a recipe loop. */
 export interface LiveProcess {
   stdout: Readable;
+  /** Resolves once the FFmpeg process has exited and been forgotten. */
+  exited: Promise<void>;
   stop(): void;
 }
 
 /** Starts FFmpeg looping `loopTs` at real time as MPEG-TS on stdout. */
 export function spawnLive(ffmpeg: string, loopTs: string): LiveProcess {
   const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-re', '-stream_loop', '-1'];
-  const child = spawn(ffmpeg, [...args, '-i', loopTs, '-c', 'copy', '-f', 'mpegts', 'pipe:1'], {
-    windowsHide: true,
-    stdio: ['ignore', 'pipe', 'ignore'],
-  });
+  const child = spawn(
+    ffmpeg,
+    [...args, '-i', loopTs, '-map', '0', '-c', 'copy', '-f', 'mpegts', 'pipe:1'],
+    {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    },
+  );
   children.add(child);
   let timer: NodeJS.Timeout | undefined;
   let stopping = false;
-  child.on('error', () => child.stdout.destroy());
-  child.on('close', () => {
-    children.delete(child);
-    clearTimeout(timer);
+  const exited = new Promise<void>((resolve) => {
+    child.on('close', () => {
+      children.delete(child);
+      clearTimeout(timer);
+      resolve();
+    });
+    child.on('error', () => {
+      child.stdout.destroy();
+      if (child.pid === undefined) {
+        children.delete(child);
+        resolve();
+      }
+    });
   });
   child.stdout.on('error', () => undefined);
   return {
     stdout: child.stdout,
+    exited,
     stop() {
       if (stopping || !children.has(child)) return;
       stopping = true;

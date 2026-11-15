@@ -6,6 +6,7 @@ import { ACCOUNTS } from '../src/sim/accounts.ts';
 import { buildCatalog } from '../src/sim/catalog.ts';
 import { ensureRecipe, findFfmpeg, MEDIA_SKIP_MARKER } from '../src/sim/media.ts';
 import { type SimHandle, startSim } from '../src/sim/server.ts';
+import { removeCache } from './media-cache.ts';
 import { packetPids, startsWithKeyframe } from './ts-packets.ts';
 
 const ffmpeg = findFfmpeg();
@@ -33,7 +34,7 @@ withFfmpeg('recipes', () => {
   beforeAll(() => {
     cacheDir = mkdtempSync(join(tmpdir(), 'sim-media-'));
   });
-  afterAll(() => rmSync(cacheDir, { recursive: true, force: true }));
+  afterAll(() => removeCache(cacheDir));
 
   it('generates a recipe once for concurrent callers', async () => {
     let runs = 0;

@@ -35,16 +35,5 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
   prints the URL (emulator: `http://10.0.2.2:<port>`); bind `0.0.0.0` only when asked.
 - FFmpeg (`FFMPEG_PATH`, then PATH; none: media 503, media tests skip) caches media in `<repo>/.cache/sim-media/`;
   `--prepare` builds all recipes at full length, prints one line, exits 0.
-- Streams: VOD `/movie|series/<u>/<p>/<id>.mp4|mkv` (`Range`); live `/live/<u>/<p>/<id>.ts`, `/<u>/<p>/<id>`,
-  `*/relative/<id>.ts` (FFmpeg loop, killed on disconnect); `.m3u8` (6x2 s window, `/hls/<recipe>/<seq>.ts`);
-  `/redirect/<id>.ts` (302); catch-up (`/timeshift/...`, `/streaming/timeshift.php`, `/catchup/<id>.ts`,
-  `archive-|index-|timeshift_abs-` paths) answers a plain recorded file.
-  TS live and VOD over `maxConnections`: 509, 403 or a notice.
-- Accounts (password = username): `demo` (small, 1 connection), `large` (2), `compat` (1), `expired`, `quirks`
-  (real-panel shapes: CRLF playlist, +0100 guide), `huge` (500k entries, 2 connections; opt-in, not in `pnpm check`).
-- Routes: `/get.php`, `/player_api.php`, `/xmltv.php`; `/playlists/<profile>[-variant].m3u|.m3u8`,
-  `/playlists/broken/<status>.m3u`, `/guides/<profile>.xml[.gz]`, `/logos/<0-15>.png`, `/_sim/requests` (GET, DELETE),
-  `/_sim/events` (GET, POST JSONL <= 1 MB). Log: passwords `***`.
-- Faults: `?fault=<spec>`, parts joined by `,`: `status=<200-599>`, `slow-start=<s>`, `redirect`, `text-notice` (before
-  any route), `drop@<s>`, `stall<n>s@<s>`, `rate=<kbps>`. Drop, stall and rate apply to TS and VOD responses only
-  (not HLS segments or data routes). Unknown: 400. Catalog faults (1013, 1014) act like a query.
+- Streams, accounts (synthetic, password = username), data routes, faults, runtime fault rules (`/_sim/faults`) and
+  recipes: [`docs/simulator.md`](../docs/simulator.md).

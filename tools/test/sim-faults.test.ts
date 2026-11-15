@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FaultParseError, parseFaults } from '../src/sim/faults.ts';
+import { FaultParseError, mediaType, parseFaults } from '../src/sim/faults.ts';
 
 describe('parseFaults', () => {
   it('parses each fault', () => {
@@ -28,5 +28,17 @@ describe('parseFaults', () => {
     expect(() => parseFaults('status=99')).toThrow(FaultParseError);
     expect(() => parseFaults('status=100')).toThrow(FaultParseError);
     expect(() => parseFaults('status=600')).toThrow(FaultParseError);
+  });
+
+  it('parses delivery quirks', () => {
+    expect(parseFaults('type=text/html')).toEqual([{ kind: 'type', mime: 'text/html' }]);
+    expect(parseFaults('type=application/octet-stream,redirect=hls')).toEqual([
+      { kind: 'type', mime: 'application/octet-stream' },
+      { kind: 'redirect-hls' },
+    ]);
+    for (const bad of ['type=html', 'type=text/html;charset=x', 'redirect=dash', 'type='])
+      expect(() => parseFaults(bad)).toThrow(bad);
+    expect(mediaType(parseFaults('drop@1s,type=text/html'), 'video/mp2t')).toBe('text/html');
+    expect(mediaType([], 'video/mp2t')).toBe('video/mp2t');
   });
 });

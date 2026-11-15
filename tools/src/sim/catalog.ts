@@ -1,114 +1,18 @@
-/** Catalog profile names (spec section 5.2). */
-export type ProfileName = 'small' | 'large' | 'compat' | 'huge';
-/** Media recipe a stream is generated from (spec section 5.6). */
-export type RecipeName =
-  | 'h264-aac-720p25'
-  | 'hevc-main10-1080p25'
-  | 'mpeg2-ac3-576i25'
-  | 'aac-radio';
-/** Edge case of the `compat` profile; each case maps to exactly one live channel. */
-export type CompatCase =
-  | 'tvg-shift'
-  | 'tvg-rec'
-  | 'radio'
-  | 'extgrp'
-  | 'no-tvg-id'
-  | 'duplicate-id-a'
-  | 'duplicate-id-b'
-  | 'empty-name'
-  | 'long-name'
-  | 'quotes-commas'
-  | 'turkish-name'
-  | 'rtl-name'
-  | 'catchup-default'
-  | 'catchup-append'
-  | 'catchup-shift'
-  | 'catchup-flussonic'
-  | 'catchup-flussonic-hls'
-  | 'catchup-xc'
-  | 'catchup-fs'
-  | 'vlcopt-user-agent'
-  | 'vlcopt-referrer'
-  | 'exthttp'
-  | 'kodiprop-clearkey'
-  | 'relative-url'
-  | 'redirect-url'
-  | 'credentials-in-url'
-  | 'udp-url'
-  | 'rtp-url'
-  | 'rtmp-url'
-  | 'raw-quote-attr'
-  | 'missing-404';
-/** A group of live channels, movies or series. */
-interface Category {
-  id: string;
-  name: string;
-  kind: 'live' | 'vod' | 'series';
-}
-/** A live channel of the catalog. */
-export interface LiveChannel {
-  id: number;
-  /** One-based channel number in catalog order. */
-  num: number;
-  name: string;
-  categoryId: string;
-  /** Guide id (XMLTV channel id), or null when the channel has no guide entry. */
-  epgId: string | null;
-  /** Index (0-15) into the 16 served logos, or null when the channel has no logo. */
-  logo: number | null;
-  recipe: RecipeName;
-  /** Fault spec bound to this stream (spec section 5.7), or null for a healthy stream. */
-  fault: string | null;
-  /** Days of catch-up archive offered; 0 means none. */
-  archiveDays: number;
-  /** Compatibility edge case this channel exercises; null outside the `compat` profile. */
-  compat: CompatCase | null;
-}
-/** A VOD movie. */
-interface Movie {
-  id: number;
-  name: string;
-  categoryId: string;
-  ext: 'mp4' | 'mkv';
-  recipe: RecipeName;
-  durationSec: number;
-  /** Unix timestamp (seconds) when the movie was added. */
-  added: number;
-}
-/** One episode of a series. */
-interface Episode {
-  id: number;
-  season: number;
-  episode: number;
-  title: string;
-  ext: 'mp4' | 'mkv';
-  recipe: RecipeName;
-  durationSec: number;
-}
-/** A series with all its episodes. */
-interface Series {
-  id: number;
-  name: string;
-  categoryId: string;
-  episodes: Episode[];
-}
-/** Guide time range around now, in whole days. */
-interface GuideWindow {
-  daysBack: number;
-  daysForward: number;
-}
-/** The full deterministic content of one profile and seed. */
-export interface Catalog {
-  profile: ProfileName;
-  seed: number;
-  categories: Category[];
-  live: LiveChannel[];
-  movies: Movie[];
-  series: Series[];
-  /** Number of channels that carry guide programmes (those with an `epgId`). */
-  guideChannels: number;
-  guideWindow: GuideWindow;
-}
+import type {
+  Catalog,
+  Category,
+  CompatCase,
+  Episode,
+  GuideWindow,
+  LiveChannel,
+  Movie,
+  ProfileName,
+  Series,
+} from './catalog-types.ts';
+import { corpusCatalog } from './corpus.ts';
+import type { RecipeName } from './recipes.ts';
+
+export type { Catalog, CompatCase, LiveChannel, ProfileName };
 
 /** Every compatibility edge case, one live channel each in the `compat` profile. */
 export const COMPAT_CASES: readonly CompatCase[] = [
@@ -195,7 +99,7 @@ interface Shape {
   bases: IdBases;
 }
 
-const SHAPES: Record<ProfileName, Shape> = {
+const SHAPES: Record<Exclude<ProfileName, 'corpus'>, Shape> = {
   small: {
     live: 50,
     movies: 30,
@@ -347,6 +251,7 @@ const cache = new Map<string, Catalog>();
 
 /** Builds a fresh deterministic catalog for a profile and seed, bypassing the cache. */
 export function createCatalog(profile: ProfileName, seed: number): Catalog {
+  if (profile === 'corpus') return corpusCatalog(seed);
   const shape = SHAPES[profile];
   const next = rng(seed);
   const live = makeLive(profile, shape);
