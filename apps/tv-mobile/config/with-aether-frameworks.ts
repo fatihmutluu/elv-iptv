@@ -67,12 +67,17 @@ export function applyAetherFrameworks(project: XcodeProject, scriptFromSrcRoot: 
   const { uuid, firstTarget } = project.getFirstTarget();
   const target = firstTarget as unknown as NativeTarget;
   removeEmbedPhases(project, target);
-  project.addBuildPhase([], 'PBXShellScriptBuildPhase', AETHER_EMBED_PHASE, uuid, {
+  const added = project.addBuildPhase([], 'PBXShellScriptBuildPhase', AETHER_EMBED_PHASE, uuid, {
     shellPath: '/bin/sh',
     shellScript: `/bin/sh "\${SRCROOT}/${scriptFromSrcRoot}"`,
     inputPaths: [],
     outputPaths: [],
-  });
+  }) as { uuid: string };
+  const shell = objects(project, 'PBXShellScriptBuildPhase');
+  const phase = shell[added.uuid] as PbxObject | undefined;
+  if (phase !== undefined) {
+    phase.alwaysOutOfDate = 1;
+  }
   excludeTvSimulatorX86(project, target);
 }
 

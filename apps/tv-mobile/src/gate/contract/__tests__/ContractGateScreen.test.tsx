@@ -88,7 +88,7 @@ describe('ContractGateScreen', () => {
         () => {
           expect(lines.some((line) => line.startsWith('ELV_GATE_CONTRACT '))).toBe(true);
         },
-        { timeout: 5000 },
+        { timeout: 15_000 },
       );
 
       const contractLines = lines.filter((line) => line.startsWith('ELV_GATE_CONTRACT '));

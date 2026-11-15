@@ -69,12 +69,13 @@ describe('withAetherFrameworks', () => {
     expect(phases.at(-1)?.value).toBe(embeds[0]?.value);
   });
 
-  it('runs the module script relative to SRCROOT', () => {
+  it('runs the module script relative to SRCROOT on every build without dependency warnings', () => {
     const project = parse();
     applyAetherFrameworks(project, SCRIPT);
     const shell = section(project, 'PBXShellScriptBuildPhase');
     const phase = Object.values(shell).find((p) => unquote(p.name ?? '""') === AETHER_EMBED_PHASE);
     expect(unquote(phase?.shellScript)).toBe(`/bin/sh "\${SRCROOT}/${SCRIPT}"`);
+    expect(phase?.alwaysOutOfDate).toBe(1);
     expect(aetherEmbedScriptPath(APP_ROOT).replaceAll('\\', '/')).toMatch(
       /\/modules\/engine-aether\/ios\/embed-frameworks\.sh$/,
     );

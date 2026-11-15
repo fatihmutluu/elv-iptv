@@ -118,11 +118,15 @@ check_app() {
 
   [ -d "$app/AetherEngine_AetherEngine.bundle" ] || fail "missing $app/AetherEngine_AetherEngine.bundle"
 
-  if ! otool -L "$main_bin" | grep -q '@rpath/AetherLibavcodec\.framework/'; then
-    fail "main executable does not link @rpath/AetherLibavcodec.framework"
+  link_bin="$main_bin"
+  if [ -f "$app/$exec_name.debug.dylib" ]; then
+    link_bin="$app/$exec_name.debug.dylib"
+  fi
+  if ! otool -L "$link_bin" | grep -q '@rpath/AetherLibavcodec\.framework/'; then
+    fail "main executable ($link_bin) does not link @rpath/AetherLibavcodec.framework"
   fi
 
-  if codesign -dv "$main_bin" >/dev/null 2>&1; then
+  if [ -d "$app/_CodeSignature" ]; then
     codesign --verify --deep --strict "$app" >/dev/null 2>&1 || fail "codesign --verify --deep --strict failed on $app"
   fi
 }

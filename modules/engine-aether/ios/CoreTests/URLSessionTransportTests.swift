@@ -182,14 +182,32 @@ struct URLSessionTransportTests {
         cont?.resume(returning: error)
       }
 
-      func wait() async -> ReaderFailure? {
-        await withCheckedContinuation { cont in
-          let ready: ReaderFailure?? = lock.withLock {
-            if let done = completed { return done }
-            continuation = cont
+      func wait(timeoutMs: UInt64 = 2_000) async -> ReaderFailure?? {
+        await withTaskGroup(of: ReaderFailure??.self) { group in
+          group.addTask {
+            let err = await withCheckedContinuation { cont in
+              let ready: ReaderFailure?? = self.lock.withLock {
+                if let done = self.completed { return done }
+                self.continuation = cont
+                return nil
+              }
+              if let ready { cont.resume(returning: ready) }
+            }
+            return .some(err)
+          }
+          group.addTask {
+            try? await Task.sleep(nanoseconds: timeoutMs * 1_000_000)
+            let pending: CheckedContinuation<ReaderFailure?, Never>? = self.lock.withLock {
+              let c = self.continuation
+              self.continuation = nil
+              return c
+            }
+            pending?.resume(returning: nil)
             return nil
           }
-          if let ready { cont.resume(returning: ready) }
+          let first = await group.next() ?? nil
+          group.cancelAll()
+          return first
         }
       }
     }
@@ -229,17 +247,22 @@ struct URLSessionTransportTests {
     transport1.suspend()
     transport1.cancel()
     let err1 = await recorder1.wait()
-    #expect(err1 == .transport(domain: NSURLErrorDomain, code: NSURLErrorCancelled))
+    #expect(err1 == .some(.transport(domain: NSURLErrorDomain, code: NSURLErrorCancelled)))
     session1.dispose()
 
-    // Case 2: pre-start suspend -> start -> session.dispose() completes cleanly while suspended.
+    // Case 2: pre-start suspend -> start -> session.dispose() cancels + balances suspended tasks
+    // synchronously before invalidateAndCancel() so macOS 26 URLSession never hangs waiting on suspendCount == 1.
     let session2 = EngineHttpSession()
     let transport2 = URLSessionTransport(session: session2)
     let recorder2 = CompletionRecorder()
     transport2.suspend()
     transport2.start(url: localUrl, headers: [:], delegate: recorder2)
     session2.dispose()
+    #expect(transport2.isCancelledByCaller)
     let err2 = await recorder2.wait()
     #expect(err2 != nil)
+    if let unwrapped = err2 {
+      #expect(unwrapped != nil)
+    }
   }
 }

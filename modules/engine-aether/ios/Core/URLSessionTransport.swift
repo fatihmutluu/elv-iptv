@@ -43,6 +43,12 @@ public final class EngineHttpSession: HttpTaskSession, @unchecked Sendable {
       }
     }
 
+    func snapshotTransports() -> [URLSessionTransport] {
+      lock.withLock {
+        entries.values.map(\.transport)
+      }
+    }
+
     private func lookup(_ taskId: Int) -> TaskEntry? {
       lock.withLock { entries[taskId] }
     }
@@ -134,9 +140,11 @@ public final class EngineHttpSession: HttpTaskSession, @unchecked Sendable {
       invalidated = true
       return true
     }
-    if shouldInvalidate {
-      urlSession.invalidateAndCancel()
+    guard shouldInvalidate else { return }
+    for transport in mux.snapshotTransports() {
+      transport.cancel()
     }
+    urlSession.invalidateAndCancel()
   }
 }
 
@@ -152,6 +160,10 @@ public final class URLSessionTransport: ByteTransport, @unchecked Sendable {
 
   public init(session: HttpTaskSession) {
     self.session = session
+  }
+
+  public var isCancelledByCaller: Bool {
+    lock.withLock { isCancelled }
   }
 
   public func start(url: URL, headers: [String: String], delegate: ByteTransportDelegate) {
