@@ -21,6 +21,7 @@ import {
 } from '../src/ffmpeg-media3/fetch.ts';
 import type { FfmpegMedia3Lock } from '../src/ffmpeg-media3/lock.ts';
 import { createRealFetchDeps, extractTarGz } from '../src/ffmpeg-media3/real-deps.ts';
+import { buildApk, type Exec } from '../src/gates/adb.ts';
 import { populateValidBundle } from './ffmpeg-media3-helpers.ts';
 
 const tempDirs: string[] = [];
@@ -280,5 +281,22 @@ describe('ffmpeg-media3 fetch, archive safety and verify', () => {
     const realDeps = createRealFetchDeps(fakeRepo);
     expect(realDeps.readLock().ffmpegVersion).toBe('9.0.2');
     expect(await realDeps.sha256File(validTar)).toHaveLength(64);
+  });
+
+  it('runs pnpm ffmpeg-media3 fetch before expo prebuild in buildApk', async () => {
+    const work = makeTempDir();
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const fakeExec: Exec = async (command, args) => {
+      calls.push({ command, args });
+      return { ok: true, output: '' };
+    };
+    await buildApk(fakeExec, work, '/sdk/platform-tools/adb');
+    expect(calls.length).toBe(3);
+    expect(calls[0]).toEqual({
+      command: 'node',
+      args: ['tools/bin/ffmpeg-media3.ts', 'fetch'],
+    });
+    expect(calls[1]?.args).toContain('prebuild');
+    expect(calls[2]?.args).toContain('assembleRelease');
   });
 });

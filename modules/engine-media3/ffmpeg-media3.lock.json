@@ -4,6 +4,6 @@
   "artifactName": "ffmpeg-media3-android",
   "ffmpegVersion": "9.0.2",
   "media3Version": "1.11.1",
-  "runId": null,
-  "sha256": null
+  "runId": "43707260644",
+  "sha256": "febcc8ea4638531fb962d9bc3361c1299acf58cabefdbbe4f5e1b96cb2829a71"
 }
