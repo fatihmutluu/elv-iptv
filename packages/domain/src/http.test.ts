@@ -422,4 +422,66 @@ describe('createFetchHttpClient', () => {
     await expect(collect(res.body)).rejects.toThrow('aborted');
     expect(t.state.cancelled).toBe(1);
   });
+
+  it('streams and discards @@asyncIterator bodies when Symbol.asyncIterator is undefined', async () => {
+    const OriginalSymbol = globalThis.Symbol;
+    const FakeSymbol = Object.assign(
+      ((description?: string | number) => OriginalSymbol(description)) as typeof Symbol,
+      {
+        for: OriginalSymbol.for.bind(OriginalSymbol),
+        keyFor: OriginalSymbol.keyFor.bind(OriginalSymbol),
+        asyncIterator: undefined as unknown as typeof Symbol.asyncIterator,
+      },
+    );
+    (globalThis as { Symbol: typeof Symbol }).Symbol = FakeSymbol;
+    try {
+      let returned = 0;
+      const makeBabelBody = (chunks: Uint8Array[]) => {
+        let idx = 0;
+        const gen = {
+          '@@asyncIterator'() {
+            return gen;
+          },
+          next: async () =>
+            idx < chunks.length
+              ? { done: false as const, value: chunks[idx++] as Uint8Array }
+              : { done: true as const, value: undefined },
+          return: async () => {
+            returned++;
+            return { done: true as const, value: undefined };
+          },
+        };
+        return gen as unknown as AsyncIterable<Uint8Array>;
+      };
+
+      const okClient = createFetchHttpClient(async () => ({
+        status: 200,
+        headers: headers({}),
+        body: makeBabelBody([enc('he'), enc('rmes')]),
+      }));
+      const okRes = okOf(await okClient.get('http://h/x'));
+      const fallbackMethod = (
+        okRes.body as unknown as Record<string, () => AsyncIterator<Uint8Array>>
+      )['@@asyncIterator'];
+      expect(typeof fallbackMethod).toBe('function');
+      const it = fallbackMethod?.call(okRes.body) as AsyncIterator<Uint8Array>;
+      const pieces: string[] = [];
+      for (;;) {
+        const step = await it.next();
+        if (step.done) break;
+        pieces.push(new TextDecoder().decode(step.value));
+      }
+      expect(pieces.join('')).toBe('hermes');
+
+      const errClient = createFetchHttpClient(async () => ({
+        status: 503,
+        headers: headers({}),
+        body: makeBabelBody([enc('err')]),
+      }));
+      expect((await errClient.get('http://h/x')).ok).toBe(false);
+      expect(returned).toBe(1);
+    } finally {
+      (globalThis as { Symbol: typeof Symbol }).Symbol = OriginalSymbol;
+    }
+  });
 });

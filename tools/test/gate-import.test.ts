@@ -1,3 +1,4 @@
+import { createServer } from 'node:http';
 import { describe, expect, it } from 'vitest';
 import type { Exec } from '../src/gates/adb.ts';
 import { IMPORT_USAGE } from '../src/gates/import-cli.ts';
@@ -7,6 +8,7 @@ import {
   parseImportLine,
   runImportGate,
 } from '../src/gates/import-gate.ts';
+import { localSim } from '../src/gates/sim-control.ts';
 
 const PKG = 'io.github.fatihmutluu.elviptv.dev';
 const S = '-s emulator-5554';
@@ -299,5 +301,69 @@ describe('runImportGate', () => {
     await expect(
       runImportGate({ exec: device.exec, sim: fakeSim().sim, sleep: noSleep, account: 'tiny' }),
     ).rejects.toThrow(/large or huge/);
+  });
+
+  it('clears the simulator request log and fault rules at the start of runImportGate', async () => {
+    const device = fakeAdb([importLine(18000, 45)]);
+    const events: string[] = [];
+    const sim = {
+      ensure: async () => {
+        events.push('ensure');
+        return {
+          reused: true,
+          reset: async () => {
+            events.push('reset');
+          },
+          stop: async () => {
+            events.push('stop');
+          },
+        };
+      },
+    };
+    await runImportGate({ exec: device.exec, sim, sleep: noSleep, runs: 1 });
+    expect(events).toEqual(['ensure', 'reset', 'stop']);
+  });
+});
+
+describe('localSim probe', () => {
+  it('recognizes a simulator only when /_sim/requests returns a 200 JSON array', async () => {
+    let mode: 'foreign' | 'sim' = 'foreign';
+    let deleted = 0;
+    const server = createServer((req, res) => {
+      if (mode === 'foreign') {
+        res.writeHead(200, { 'content-type': 'text/html' });
+        res.end('<html>not sim</html>');
+        return;
+      }
+      if (req.url === '/_sim/requests' && req.method === 'GET') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end('[]');
+        return;
+      }
+      if (req.url === '/_sim/requests' && req.method === 'DELETE') {
+        deleted++;
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    try {
+      const control = (
+        localSim as typeof localSim & { forPort?: (p: number) => typeof localSim }
+      ).forPort?.(port);
+      expect(control).toBeDefined();
+      await expect(control?.ensure()).rejects.toThrow(/already in use/);
+      mode = 'sim';
+      const ensured = await control?.ensure();
+      expect(ensured?.reused).toBe(true);
+      await (ensured as { reset?: () => Promise<void> } | undefined)?.reset?.();
+      expect(deleted).toBe(1);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

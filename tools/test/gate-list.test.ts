@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   type Exec,
@@ -7,6 +9,7 @@ import {
   runListGate,
   topActivity,
 } from '../src/gates/list-gate.ts';
+import { readStamp, STAMP_FILE } from '../src/prebuild-stamp.ts';
 
 const PKG = 'io.github.fatihmutluu.elviptv.dev';
 const GFX = readFileSync(new URL('./fixtures/gate/gfxinfo-run.txt', import.meta.url), 'utf8');
@@ -269,17 +272,42 @@ describe('runListGate', () => {
 });
 
 describe('runListGate build environment', () => {
-  it('points Gradle at the SDK that holds adb', async () => {
-    const adb = '/sdk/platform-tools/adb';
-    const device = fakeAdb({ lines: [gateLine(19)] });
-    let gradleEnv: Record<string, string> | undefined;
-    const exec: Exec = async (command, args, opts) => {
-      if (command === adb) return device.exec(command, args);
-      if (args.includes('assembleRelease')) gradleEnv = opts?.env;
-      return { ok: true, output: '' };
-    };
-    await runListGate({ exec, sleep: noSleep, build: true, root: '/repo', adb });
-    expect(gradleEnv?.ANDROID_HOME).toBe('/sdk');
+  it('points Gradle at the SDK that holds adb, scrubs shell DEV_/STORE env, and writes the prebuild stamp', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'elv_gate_build_'));
+    mkdirSync(join(root, 'apps', 'tv-mobile', 'android'), { recursive: true });
+    const prevDev = process.env.DEV_SHELL_LEAK;
+    const prevStore = process.env.STORE;
+    process.env.DEV_SHELL_LEAK = 'leaked-secret';
+    process.env.STORE = 'amazon';
+    try {
+      const adb = '/sdk/platform-tools/adb';
+      const device = fakeAdb({ lines: [gateLine(19)] });
+      const envs: Record<string, string>[] = [];
+      const exec: Exec = async (command, args, opts) => {
+        if (command === adb) return device.exec(command, args);
+        if (opts?.env !== undefined) envs.push(opts.env);
+        return { ok: true, output: '' };
+      };
+      await runListGate({ exec, sleep: noSleep, build: true, root, adb });
+      expect(envs).toHaveLength(2);
+      expect(envs[1]?.ANDROID_HOME).toBe('/sdk');
+      for (const env of envs) {
+        expect(env.PATH ?? env.Path).toBeDefined();
+        expect(env.DEV_SHELL_LEAK).toBeUndefined();
+        expect(env.STORE).toBeUndefined();
+      }
+      expect(readStamp(join(root, 'apps', 'tv-mobile', 'android', STAMP_FILE))).toEqual({
+        target: 'android-tv',
+        variant: 'development',
+        store: 'default',
+      });
+    } finally {
+      if (prevDev === undefined) delete process.env.DEV_SHELL_LEAK;
+      else process.env.DEV_SHELL_LEAK = prevDev;
+      if (prevStore === undefined) delete process.env.STORE;
+      else process.env.STORE = prevStore;
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -344,6 +372,13 @@ describe('runListGate real hold', () => {
     await expect(
       runListGate({ exec: device.exec, sleep: noSleep, realHold: 2000 }),
     ).rejects.toThrow('gate: a 2000 ms hold gave 9 moves, expected 13 ± 3');
+  });
+
+  it('fails when the held run reports focus losses', async () => {
+    const device = fakeAdb({ lines: [gateLine(19), gateLine(40, 12, 2, 13)] });
+    await expect(
+      runListGate({ exec: device.exec, sleep: noSleep, realHold: 2000 }),
+    ).rejects.toThrow('gate: a 2000 ms hold reported 2 focus losses');
   });
 
   it('needs API 33 and sends no key before saying so', async () => {

@@ -4,7 +4,9 @@ import type { LogEntry } from '../sim/log.ts';
 export type SimLogEntry = Pick<
   LogEntry,
   't' | 'path' | 'query' | 'status' | 'bytes' | 'ms' | 'account' | 'streamId'
->;
+> & {
+  fault?: LogEntry['fault'];
+};
 
 /** Reads and clears the simulator's request log. */
 export interface SimLog {
@@ -14,8 +16,12 @@ export interface SimLog {
 
 /** Body of the simulator's connection-limit notice (HTTP 200); no media stream is this short. */
 const NOTICE_BYTES = 'Max connections reached'.length;
-/** Paths of media stream requests that carry an MPEG-TS body. */
-export const STREAM_PATH = /^\/(?:live|movie|series|timeshift)\/.+\.ts$/;
+/**
+ * Paths of media stream requests that carry a stream body (TS live, short-form live, timeshift, and MP4/MKV VOD),
+ * excluding HLS `.m3u8` playlists and segment/data routes.
+ */
+export const STREAM_PATH =
+  /^(?:\/live\/[^/]+\/[^/]+\/\d+(?:\.ts)?|\/(?:movie|series)\/[^/]+\/[^/]+\/\d+\.(?:ts|mp4|mkv)|\/timeshift\/.+\.ts|\/streaming\/timeshift\.php|\/relative\/\d+\.ts|\/(?!_sim\/|hls\/|playlists\/|guides\/|logos\/|redirect\/|catchup\/)[^/]+\/[^/]+\/\d+)$/;
 
 /** The simulator's request log over HTTP, for a simulator reachable at `base`. */
 export function httpSimLog(base: string): SimLog {
@@ -44,9 +50,9 @@ export function span(entry: SimLogEntry): { start: number; end: number } {
 const isNotice = (entry: SimLogEntry): boolean =>
   entry.status === 200 && entry.bytes === NOTICE_BYTES;
 
-/** Whether the request's own `?fault=` produced this answer (`status=509`, `status=429` or `text-notice`). */
+/** Whether the request's own `?fault=` or runtime/catalog `fault` produced this answer (`status=509`, `status=429` or `text-notice`). */
 function forcedByFault(entry: SimLogEntry): boolean {
-  const parts = (entry.query.fault ?? '').split(',');
+  const parts = (entry.fault ?? entry.query.fault ?? '').split(',');
   return isNotice(entry) ? parts.includes('text-notice') : parts.includes(`status=${entry.status}`);
 }
 

@@ -1,5 +1,27 @@
 import { describe, expect, it } from 'vitest';
-import { exec } from '../src/exec.ts';
+import { commandLine, exec } from '../src/exec.ts';
+
+describe('commandLine and shell safety', () => {
+  it('quotes a command path containing spaces on Windows and POSIX', () => {
+    expect(
+      commandLine('C:\\Program Files\\Android\\Sdk\\platform-tools\\adb.exe', ['devices'], 'win32'),
+    ).toBe('"C:\\Program Files\\Android\\Sdk\\platform-tools\\adb.exe" devices');
+    expect(commandLine('/opt/android sdk/adb', ['devices'], 'linux')).toBe(
+      '"/opt/android sdk/adb" devices',
+    );
+  });
+
+  it('executes a command path with spaces and does not expand %VAR% on Windows', async () => {
+    const script = 'process.stdout.write(JSON.stringify(process.argv.slice(1)))';
+    const result = await exec(
+      process.execPath,
+      ['-e', script, '%ELV_EXPAND_PROBE%', 'a %ELV_EXPAND_PROBE% b'],
+      { cwd: process.cwd(), env: { ELV_EXPAND_PROBE: 'LEAKED' } },
+    );
+    expect(result.ok, result.output).toBe(true);
+    expect(JSON.parse(result.output)).toEqual(['%ELV_EXPAND_PROBE%', 'a %ELV_EXPAND_PROBE% b']);
+  });
+});
 
 describe('exec timeout', () => {
   it('kills a hung command and reports the timeout', async () => {
@@ -14,18 +36,27 @@ describe('exec timeout', () => {
     expect(Date.now() - started).toBeLessThan(15_000);
   });
 
-  it.skipIf(process.platform === 'win32')(
-    'does not leave a grandchild holding the call open',
-    async () => {
-      const started = Date.now();
-      const result = await exec('sh', ['-c', 'sleep 60 & wait'], {
-        cwd: process.cwd(),
-        timeoutMs: 400,
-      });
-      expect(result.timedOut).toBe(true);
-      expect(Date.now() - started).toBeLessThan(15_000);
-    },
-  );
+  it('kills the entire grandchild tree before resolving on timeout', async () => {
+    const script =
+      "const g = require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(()=>{},60000)'], { stdio: 'ignore' }); console.log('GPID=' + g.pid); setTimeout(()=>{},60000);";
+    const result = await exec('node', ['-e', script], {
+      cwd: process.cwd(),
+      timeoutMs: 500,
+    });
+    expect(result.timedOut).toBe(true);
+    const match = /GPID=(\d+)/.exec(result.output);
+    expect(match).not.toBeNull();
+    const grandchildPid = Number(match?.[1]);
+    let alive = false;
+    try {
+      process.kill(grandchildPid, 0);
+      alive = true;
+      process.kill(grandchildPid, 'SIGKILL');
+    } catch {
+      alive = false;
+    }
+    expect(alive).toBe(false);
+  });
 
   it('leaves a command that finishes in time alone', async () => {
     const result = await exec('node', ['-e', 'console.log("hi")'], {
