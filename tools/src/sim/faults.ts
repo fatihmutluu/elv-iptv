@@ -14,6 +14,7 @@ export type Fault =
   | { kind: 'rate'; kbps: number }
   | { kind: 'type'; mime: string }
   | { kind: 'redirect-hls' }
+  | { kind: 'empty' }
   | { kind: 'burst'; sec: number };
 
 /** Thrown for a fault spec part that is unknown or malformed. */
@@ -34,6 +35,7 @@ function parsePart(part: string): Fault {
   if (part === 'redirect') return { kind: 'redirect' };
   if (part === 'redirect=hls') return { kind: 'redirect-hls' };
   if (part === 'text-notice') return { kind: 'text-notice' };
+  if (part === 'empty') return { kind: 'empty' };
   const status = STATUS.exec(part);
   if (status) {
     const code = Number(status[1]);

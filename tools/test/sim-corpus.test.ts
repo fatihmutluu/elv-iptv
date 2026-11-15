@@ -49,7 +49,7 @@ const api = async (h: SimHandle, params: string): Promise<unknown> =>
 
 describe('corpus catalog', () => {
   it('has the documented shape', () => {
-    expect(c.live.map((x) => x.id)).toEqual(Array.from({ length: 13 }, (_, i) => 1001 + i));
+    expect(c.live.map((x) => x.id)).toEqual(Array.from({ length: 14 }, (_, i) => 1001 + i));
     expect(c.movies.map((m) => m.id)).toEqual(Array.from({ length: 12 }, (_, i) => 200001 + i));
     expect(c.series.map((s) => [s.id, s.name])).toEqual([[300001, 'Subtitle Series']]);
     const eps = c.series[0]?.episodes ?? [];
@@ -78,6 +78,7 @@ describe('corpus catalog', () => {
     expect(c.live.slice(11).map((x) => [x.name, x.recipe, x.fault])).toEqual([
       ['Stream labelled as a web page', 'h264-aac-720p25', 'type=text/html'],
       ['Redirect to HLS', 'h264-aac-720p25', 'redirect=hls'],
+      ['Stream labelled as a playlist', 'h264-aac-720p25', 'type=application/vnd.apple.mpegurl'],
     ]);
     const subs = c.movies.filter((m) => m.recipe === 'h264-2audio-subs-720p25').map((m) => m.ext);
     expect(subs).toEqual(['mp4', 'mkv']);
@@ -112,7 +113,7 @@ describe('corpus routes', () => {
       `${h.url}/get.php?username=${account?.username}&password=${account?.password}&type=m3u_plus&output=ts`,
     );
     const text = await get.text();
-    expect(text.split('\n').filter((l) => l.startsWith('#EXTINF'))).toHaveLength(31);
+    expect(text.split('\n').filter((l) => l.startsWith('#EXTINF'))).toHaveLength(32);
     expect(text).toContain('group-title="Edge cases"');
     expect((await fetch(`${h.url}/playlists/corpus.m3u`)).status).toBe(200);
     expect(await (await fetch(`${h.url}/guides/corpus.xml`)).text()).toMatch(/^<\?xml/);
@@ -135,6 +136,9 @@ describe('corpus routes', () => {
     expect(res.headers.get('location')).toBe(`${h.url}/live/${pair}/1013.m3u8`);
     const next = await fetch(`${h.url}/live/${pair}/1013.m3u8`, { redirect: 'manual' });
     expect(next.status).toBe(503);
+    const bare = await fetch(`${h.url}/${pair}/1013`, { redirect: 'manual' });
+    expect(bare.status).toBe(302);
+    expect(bare.headers.get('location')).toBe(`${h.url}/live/${pair}/1013.m3u8`);
   });
 });
 
@@ -151,6 +155,18 @@ withFfmpeg('corpus routes with media', () => {
     const res = await fetch(`${h.url}/live/${pair}/1012.ts`);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('text/html');
+    const reader = res.body?.getReader();
+    const chunk = await reader?.read();
+    await reader?.cancel();
+    expect(chunk?.value?.[0]).toBe(0x47);
+  }, 60_000);
+
+  it('labels the playlist edge channel as an HLS playlist', async () => {
+    const h = await startSim({ port: 0, mediaSeconds: 4, cacheDir, ffmpegPath: ffmpeg });
+    open.push(h);
+    const res = await fetch(`${h.url}/live/${pair}/1014.ts`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/vnd.apple.mpegurl');
     const reader = res.body?.getReader();
     const chunk = await reader?.read();
     await reader?.cancel();

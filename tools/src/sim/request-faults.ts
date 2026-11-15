@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { ACCOUNTS } from './accounts.ts';
-import type { Fault } from './faults.ts';
+import { type Fault, mediaType } from './faults.ts';
 import { sendText } from './routes-data.ts';
 
 const LIVE_FORM = /^\/live\/([^/]+\/[^/]+\/\d+)(?:\.ts)?$/;
@@ -42,7 +42,10 @@ export async function requestFaults(
   for (const f of faults) {
     if (f.kind === 'status') sendText(res, f.code, 'text/plain');
     else if (f.kind === 'text-notice') sendText(res, 200, 'text/plain', 'Max connections reached');
-    else if (f.kind === 'redirect' || f.kind === 'redirect-hls') {
+    else if (f.kind === 'empty') {
+      res.writeHead(200, { 'content-type': mediaType(faults, 'text/plain'), 'content-length': 0 });
+      res.end();
+    } else if (f.kind === 'redirect' || f.kind === 'redirect-hls') {
       const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'sim'}`);
       url.searchParams.delete('fault');
       let location = url.toString();
