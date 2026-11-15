@@ -1,5 +1,5 @@
 import type { KeyEvent } from './keys';
-import { type ListState, moveList } from './list';
+import { clampIndex, type ListState, moveList } from './list';
 import {
   createScope,
   type FocusState,
@@ -18,7 +18,7 @@ export type Intent =
   | { kind: 'edge'; listId: string; side: 'start' | 'end' }
   | { kind: 'key'; event: KeyEvent };
 
-/** Change reported to subscribers: the list whose index changed and its new index. */
+/** Change reported to subscribers on a focus, active-list, emptiness, or scope transition. */
 export interface FocusChange {
   listId: string;
   index: number;
@@ -29,7 +29,7 @@ export interface FocusStore {
   /** Applies one key event to the active list of the top scope and returns the intents for the app. */
   dispatch(event: KeyEvent): Intent[];
   getState(): FocusState;
-  /** Listeners run only when a list's visible index changes. Returns an unsubscribe function. */
+  /** Listeners run FIFO on every focus, active-list, emptiness, or scope transition. Returns an unsubscribe function. */
   subscribe(listener: (change: FocusChange) => void): () => void;
   /** Pushes a scope over the current one. Throws if `active` is not among `lists`. */
   pushScope(id: string, lists: readonly ListState[], active: string): void;
@@ -37,8 +37,12 @@ export interface FocusStore {
   popScope(): void;
   /** Sets the item count of the topmost list with this id; its index is clamped. Unknown ids are ignored. */
   setCount(listId: string, count: number): void;
-  /** Moves focus to `index` (clamped) of the topmost list with this id and makes it active. Unknown ids are ignored. */
-  focus(listId: string, index: number): void;
+  /** Moves focus to `index` (clamped, or kept if omitted) of the topmost list with this id and makes it active. */
+  focus(listId: string, index?: number): void;
+  /** Makes the topmost list with `listId` active, preserving its focus memory. Returns `false` for unknown ids. */
+  activate(listId: string): boolean;
+  /** Whether `listId` is the `active` list of the topmost scope. */
+  isActive(listId: string): boolean;
 }
 
 /**
@@ -53,30 +57,28 @@ export function createFocusStore(root: {
 }): FocusStore {
   let scopes: readonly ScopeState[] = [createScope(root.id, root.lists, root.active)];
   const listeners = new Set<(change: FocusChange) => void>();
+  const queue: FocusChange[] = [];
+  let flushing = false;
 
-  const emit = (change: FocusChange): void => {
-    for (const l of [...listeners]) l(change);
-  };
-
-  function visibleIndex(list: readonly ScopeState[], id: string): number | undefined {
-    return findList(list, id)?.list.index;
-  }
-
-  function notifyDiff(
-    before: readonly ScopeState[],
-    after: readonly ScopeState[],
-    ids: Iterable<string>,
-  ): void {
-    for (const id of ids) {
-      const a = visibleIndex(after, id);
-      if (a !== undefined && a !== visibleIndex(before, id)) emit({ listId: id, index: a });
+  function enqueue(change: FocusChange): void {
+    queue.push(change);
+    if (flushing) return;
+    flushing = true;
+    try {
+      while (queue.length > 0) {
+        const next = queue.shift() as FocusChange;
+        for (const l of [...listeners]) {
+          if (listeners.has(l)) l(next);
+        }
+      }
+    } finally {
+      queue.length = 0;
+      flushing = false;
     }
   }
 
-  function update(next: readonly ScopeState[], id: string): void {
-    const before = scopes;
-    scopes = next;
-    notifyDiff(before, next, [id]);
+  function visibleIndex(list: readonly ScopeState[], id: string): number | undefined {
+    return findList(list, id)?.list.index;
   }
 
   function dispatch(event: KeyEvent): Intent[] {
@@ -98,7 +100,8 @@ export function createFocusStore(root: {
     }
     const result = moveList(list, event);
     if (result.kind === 'moved') {
-      update(setListIndex(scopes, scopes.length - 1, list.id, result.index), list.id);
+      scopes = setListIndex(scopes, scopes.length - 1, list.id, result.index);
+      enqueue({ listId: list.id, index: result.index });
       return [];
     }
     if (result.kind === 'edge') return [{ kind: 'edge', listId: list.id, side: result.side }];
@@ -109,15 +112,41 @@ export function createFocusStore(root: {
     const scope = createScope(id, lists, active);
     const before = scopes;
     scopes = [...scopes, scope];
-    notifyDiff(before, scopes, Object.keys(scope.lists));
+    for (const listId of Object.keys(scope.lists)) {
+      if (listId === scope.active) continue;
+      const next = (scope.lists[listId] as ListState).index;
+      if (next !== visibleIndex(before, listId)) enqueue({ listId, index: next });
+    }
+    enqueue({ listId: scope.active, index: (scope.lists[scope.active] as ListState).index });
   }
 
   function popScope(): void {
     if (scopes.length <= 1) return;
-    const before = scopes;
     const popped = scopes[scopes.length - 1] as ScopeState;
     scopes = scopes.slice(0, -1);
-    notifyDiff(before, scopes, Object.keys(popped.lists));
+    const restored = scopes[scopes.length - 1] as ScopeState;
+    for (const listId of Object.keys(popped.lists)) {
+      if (listId === restored.active) continue;
+      const next = visibleIndex(scopes, listId);
+      if (next !== undefined && next !== (popped.lists[listId] as ListState).index) {
+        enqueue({ listId, index: next });
+      }
+    }
+    enqueue({
+      listId: restored.active,
+      index: (restored.lists[restored.active] as ListState).index,
+    });
+  }
+
+  function focusList(listId: string, index?: number): boolean {
+    const found = findList(scopes, listId);
+    if (!found) return false;
+    const nextIndex = index === undefined ? found.list.index : clampIndex(index, found.list.count);
+    const wasActive = (scopes[found.scope] as ScopeState).active === listId;
+    if (wasActive && nextIndex === found.list.index) return true;
+    scopes = setListIndex(scopes, found.scope, listId, nextIndex, true);
+    enqueue({ listId, index: nextIndex });
+    return true;
   }
 
   return {
@@ -133,11 +162,22 @@ export function createFocusStore(root: {
     popScope,
     setCount(listId, count) {
       const found = findList(scopes, listId);
-      if (found) update(withCount(scopes, found.scope, listId, count), listId);
+      if (!found) return;
+      const nextCount = Math.max(0, Math.floor(count) || 0);
+      if (nextCount === found.list.count) return;
+      const nextIndex = clampIndex(found.list.index, nextCount);
+      scopes = withCount(scopes, found.scope, listId, nextCount);
+      if (nextIndex !== found.list.index || found.list.count > 0 !== nextCount > 0) {
+        enqueue({ listId, index: nextIndex });
+      }
     },
     focus(listId, index) {
-      const found = findList(scopes, listId);
-      if (found) update(setListIndex(scopes, found.scope, listId, index, true), listId);
+      focusList(listId, index);
+    },
+    activate: (listId) => focusList(listId),
+    isActive(listId) {
+      const top = scopes[scopes.length - 1] as ScopeState;
+      return top.active === listId;
     },
   };
 }

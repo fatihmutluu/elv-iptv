@@ -2,11 +2,21 @@ package io.github.fatihmutluu.elv.remotekeys
 
 import android.view.KeyEvent
 import android.view.Window
+import java.util.WeakHashMap
+import java.util.concurrent.atomic.AtomicReference
 
 /** Decides which window key events reach JavaScript, wraps window callbacks and holds the current event sink. */
 object KeyForwarding {
-  @Volatile
-  private var sink: ((Map<String, Any>) -> Unit)? = null
+  private val BLUR_PAYLOAD: Map<String, Any> = mapOf("action" to "blur")
+  private val sink = AtomicReference<((Map<String, Any>) -> Unit)?>(null)
+
+  /**
+   * UI-thread registry of windows already wrapped by [ForwardingWindowCallback], keyed weakly with a [Boolean] value so
+   * the map never retains a strong `value -> callback (Activity) -> Window (key)` cycle across destroyed activities.
+   * Keyed by [Any] internally so pure-JVM JUnit tests can verify guarding and GC without instantiating the Android SDK's
+   * stubbed [Window] constructor, while [wrap] enforces [Window] for production callers.
+   */
+  private val wrappedWindows = WeakHashMap<Any, Boolean>()
 
   /**
    * Returns "down" for a first key press, "up" for any release, and null for events JavaScript must not see:
@@ -34,6 +44,19 @@ object KeyForwarding {
     )
 
   /**
+   * Wraps [callback] for [window] on the UI thread unless [window] already has a [ForwardingWindowCallback] in its
+   * chain, preventing double-wrapping if another library wraps `window.callback` after us.
+   */
+  fun wrap(window: Window, callback: Window.Callback): Window.Callback = wrapWindow(window, callback)
+
+  internal fun wrapWindow(windowKey: Any, callback: Window.Callback): Window.Callback {
+    if (wrappedWindows.containsKey(windowKey)) return callback
+    val wrapper = wrap(callback) as ForwardingWindowCallback
+    wrappedWindows[windowKey] = true
+    return wrapper
+  }
+
+  /**
    * Wraps [callback] so key events and focus loss reach the current sink; returns [callback] itself if already wrapped.
    * The sink is process-wide, so a wrapper that outlives its module (JS reload) reports to the new module.
    */
@@ -42,18 +65,23 @@ object KeyForwarding {
 
   /** Makes [newSink] the receiver of all forwarded events, replacing any earlier one. */
   fun setSink(newSink: (Map<String, Any>) -> Unit) {
-    sink = newSink
+    sink.set(newSink)
   }
 
-  /** Removes [oldSink] if it is still the current sink; a newer module's sink is left alone. */
+  /** Removes [oldSink] atomically if it is still the current sink; a newer module's sink is left alone. */
   fun clearSink(oldSink: (Map<String, Any>) -> Unit) {
-    if (sink === oldSink) sink = null
+    sink.compareAndSet(oldSink, null)
+  }
+
+  /** Emits a window blur event to cancel held keys on focus loss or activity backgrounding. */
+  fun emitBlur() {
+    emit(BLUR_PAYLOAD)
   }
 
   /** Delivers [payload] to the current sink; a failing sink never propagates to the key dispatch. */
   fun emit(payload: Map<String, Any>) {
     try {
-      sink?.invoke(payload)
+      sink.get()?.invoke(payload)
     } catch (_: Exception) {
     }
   }

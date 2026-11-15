@@ -25,5 +25,9 @@ describe('key constants', () => {
   it('recognises digit keys only', () => {
     expect(isDigitKey('digit7')).toBe(true);
     expect(isDigitKey('select')).toBe(false);
+    expect(isDigitKey('play')).toBe(false);
+    expect(isDigitKey('pause')).toBe(false);
+    expect(isDigitKey('rewind')).toBe(false);
+    expect(isDigitKey('fastForward')).toBe(false);
   });
 });
