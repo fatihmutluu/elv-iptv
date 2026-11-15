@@ -460,9 +460,22 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     if (slot !== media || live !== L) return;
     const fields = headerFields(slot.request.headers);
     if (fields.length > 0 || L.hasCustomHeaders) {
+      if (fields.length > 0) L.hasCustomHeaders = true;
       const propReply = await send(L, ['set_property', 'http-header-fields', fields]);
-      if (!propReply || live !== L || slot !== media) return;
-      L.hasCustomHeaders = fields.length > 0;
+      if (!propReply || live !== L) return;
+      if (propReply.error !== 'success') {
+        if (slot === media)
+          emit([
+            {
+              attempt: slot.token,
+              type: 'error',
+              error: { code: 'unknown', detail: `http-header-fields: ${propReply.error}` },
+            },
+          ]);
+        return;
+      }
+      if (fields.length === 0) L.hasCustomHeaders = false;
+      if (slot !== media) return;
     }
     L.inFlight = slot;
     beginOpening(L, slot);
@@ -517,8 +530,8 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
         const L = live;
         if (!L) return;
         if (L.hasCustomHeaders) {
-          await send(L, ['set_property', 'http-header-fields', []]);
-          L.hasCustomHeaders = false;
+          const propReply = await send(L, ['set_property', 'http-header-fields', []]);
+          if (propReply?.error === 'success') L.hasCustomHeaders = false;
         }
         await send(L, ['stop']);
         finishOpening(L);
