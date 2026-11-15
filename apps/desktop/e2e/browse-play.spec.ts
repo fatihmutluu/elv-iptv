@@ -226,14 +226,18 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
     await expect(window.getByTestId('player-osd')).toBeVisible();
     await expect(window.getByTestId('osd-title')).toHaveText(ch1Label.trim());
 
-    await expect(window.getByTestId('player-area')).toBeVisible();
-    await expect(window.getByTestId('player-status')).toHaveCount(0);
-    const areaBox = await window.getByTestId('player-area').boundingBox();
-    const osdBox = await window.getByTestId('player-osd').boundingBox();
-    expect(areaBox).not.toBeNull();
-    expect(osdBox).not.toBeNull();
-    expect((areaBox?.height ?? 0) > 50).toBe(true);
-    expect((areaBox?.y ?? 0) + (areaBox?.height ?? 0)).toBeLessThanOrEqual((osdBox?.y ?? 0) + 1);
+    if (hasMpv) {
+      await expect(window.getByTestId('player-area')).toBeVisible();
+      await expect(window.getByTestId('player-status')).toHaveCount(0);
+      const areaBox = await window.getByTestId('player-area').boundingBox();
+      const osdBox = await window.getByTestId('player-osd').boundingBox();
+      expect(areaBox).not.toBeNull();
+      expect(osdBox).not.toBeNull();
+      expect((areaBox?.height ?? 0) > 50).toBe(true);
+      expect((areaBox?.y ?? 0) + (areaBox?.height ?? 0)).toBeLessThanOrEqual((osdBox?.y ?? 0) + 1);
+    } else {
+      await expect(window.getByTestId('player-area')).toHaveCount(0);
+    }
 
     if (canPlayMedia) {
       await expect(window.getByTestId('osd-status')).toHaveText(/^(Playing|Oynatılıyor)$/, {
