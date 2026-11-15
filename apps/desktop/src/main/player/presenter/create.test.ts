@@ -34,6 +34,10 @@ vi.mock('electron', () => {
         electron.dipCalls.push(rect);
         return { x: rect.x * 2, y: rect.y * 2, width: rect.width * 2, height: rect.height * 2 };
       },
+      getDisplayMatching: () => ({
+        workArea: { x: 0, y: 30, width: 2056, height: 1299 },
+        scaleFactor: 2,
+      }),
     },
   };
 });
@@ -75,15 +79,15 @@ describe('createPresenter', () => {
     expect(listenerTotal()).toBe(0);
   });
 
-  it('own-window converts DIPs with dipToScreenRect on Windows only', async () => {
-    const app = fakeAppWindow({ x: 10, y: 20, width: 1280, height: 720 });
+  it('own-window converts DIPs with dipToScreenRect on Windows and display workArea backing pixels on macOS', async () => {
+    const app = fakeAppWindow({ x: 10, y: 50, width: 1280, height: 720 });
     const appWindow = app.window as unknown as BrowserWindow;
     const windows = createPresenter('own-window', appWindow, 'win32');
     windows.setArea(AREA);
-    expect(await windows.prepare()).toEqual(['--geometry=1280x720+20+40']);
+    expect(await windows.prepare()).toEqual(['--geometry=1280x720+20+100']);
     const mac = createPresenter('own-window', appWindow, 'darwin');
     mac.setArea(AREA);
-    expect(await mac.prepare()).toEqual(['--geometry=640x360+10+20']);
+    expect(await mac.prepare()).toEqual(['--geometry=1280x720+20+40']);
     expect(electron.dipCalls).toHaveLength(1);
   });
 });

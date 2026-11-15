@@ -2,8 +2,11 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { classifyEnd, type MpvLogLine } from './errors.ts';
 
-function fixture(name: string): { logs: MpvLogLine[]; reason: string; fileError?: string } {
-  const lines = readFileSync(new URL(`./fixtures/${name}.jsonl`, import.meta.url), 'utf8')
+function fixture(
+  name: string,
+  dir = 'fixtures',
+): { logs: MpvLogLine[]; reason: string; fileError?: string } {
+  const lines = readFileSync(new URL(`./${dir}/${name}.jsonl`, import.meta.url), 'utf8')
     .split('\n')
     .filter(Boolean)
     .map((l) => JSON.parse(l) as Record<string, string>);
@@ -18,27 +21,32 @@ function fixture(name: string): { logs: MpvLogLine[]; reason: string; fileError?
 }
 const err = (o: ReturnType<typeof classifyEnd>) => (o.kind === 'error' ? o.error : undefined);
 
-describe('classifyEnd from recorded fixtures', () => {
+describe.each([
+  ['win32', 'fixtures'],
+  ['darwin', 'fixtures/darwin'],
+] as const)('classifyEnd from recorded %s fixtures', (_platform, dir) => {
   it.each([
     ['404', 'http-404', 404],
     ['403', 'http-403', 403],
     ['509', 'http-509', 509],
   ])('%s maps to %s', (name, code, httpStatus) => {
-    const f = fixture(String(name));
+    const f = fixture(String(name), dir);
     const e = err(classifyEnd({ ...f, mediaKind: 'live' }));
     expect(e).toMatchObject({ code, httpStatus });
     expect(e?.detail).toContain(String(httpStatus));
   });
   it('notice maps to connection-limit', () => {
-    expect(err(classifyEnd({ ...fixture('notice'), mediaKind: 'live' }))?.code).toBe(
+    expect(err(classifyEnd({ ...fixture('notice', dir), mediaKind: 'live' }))?.code).toBe(
       'connection-limit',
     );
   });
   it('refused maps to network', () => {
-    expect(err(classifyEnd({ ...fixture('refused'), mediaKind: 'live' }))?.code).toBe('network');
+    expect(err(classifyEnd({ ...fixture('refused', dir), mediaKind: 'live' }))?.code).toBe(
+      'network',
+    );
   });
   it('drop5 on live is network with live-eof', () => {
-    expect(err(classifyEnd({ ...fixture('drop5'), mediaKind: 'live' }))).toEqual({
+    expect(err(classifyEnd({ ...fixture('drop5', dir), mediaKind: 'live' }))).toEqual({
       code: 'network',
       detail: 'live-eof',
     });

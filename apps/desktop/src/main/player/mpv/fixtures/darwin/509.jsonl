@@ -1,0 +1,30 @@
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Waiting for scripts..."}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: user-data/osc/visibility=\"auto\" -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: sub-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: osd-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: sub-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: osd-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: user-data/osc/margins={\"l\":0,\"t\":0,\"b\":0,\"r\":0} -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: sub-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: osd-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: sub-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: osd-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: user-data/osc/margins={\"l\":0,\"t\":0,\"b\":0,\"r\":0} -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Done loading scripts."}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Running hook: auto_profiles/on_before_start_file"}
+{"event":"log-message","prefix":"cplayer","level":"warn","text":"client removed during hook handling"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Running hook: auto_profiles/on_load"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Failed sending hook command auto_profiles/on_load. Removing hook."}
+{"event":"log-message","prefix":"stream_callback","level":"v","text":"Opening http://127.0.0.1:7879/live/demo/***/1001.ts?fault=status=509"}
+{"event":"log-message","prefix":"ffmpeg","level":"v","text":"Opening http://127.0.0.1:7879/live/demo/***/1001.ts?fault=status=509"}
+{"event":"log-message","prefix":"ffmpeg","level":"warn","text":"http: HTTP error 509 Bandwidth Limit Exceeded"}
+{"event":"log-message","prefix":"stream","level":"error","text":"Failed to open http://127.0.0.1:7879/live/demo/***/1001.ts?fault=status=509."}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Opening failed or was aborted: http://127.0.0.1:7879/live/demo/***/1001.ts?fault=status=509"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Running hook: osc/on_unload"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: sub-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: osd-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: sub-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: osd-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: user-data/osc/margins={\"l\":0,\"t\":0,\"b\":0,\"r\":0} -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"finished playback, loading failed (reason 4)"}
+{"event":"end-file","reason":"error","file_error":"loading failed","playlist_entry_id":1}

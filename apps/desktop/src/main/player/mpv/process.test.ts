@@ -16,6 +16,7 @@ import {
 class FakeChild extends EventEmitter {
   pid = 4321;
   killed = false;
+  stdio: Array<Duplex | null> = [null, null, null];
   kill(): boolean {
     this.killed = true;
     queueMicrotask(() => this.emit('exit', null, 'SIGKILL'));
@@ -47,6 +48,9 @@ function harness(connectFailures = 0) {
   const deps: SpawnDeps = {
     spawn: ((cmd: string, args: string[], options: Record<string, unknown>) => {
       spawnCalls.push({ cmd, args, options });
+      if (Array.isArray(options['stdio']) && options['stdio'][3] === 'pipe') {
+        child.stdio = [null, null, null, socket];
+      }
       return child;
     }) as unknown as SpawnDeps['spawn'],
     connect: ((path: string) => {
@@ -76,8 +80,12 @@ describe('transportArgs', () => {
     expect(args.join(' ')).not.toMatch(/https?:/);
   });
 
-  it('for other platforms has only the socket path', () => {
-    expect(transportArgs('darwin', '/tmp/x/mpv.sock', 77)).toEqual([
+  it('transportArgs for darwin uses fd://3', () => {
+    expect(transportArgs('darwin', 'elv-mpv-abc', 77)).toEqual(['--input-ipc-client=fd://3']);
+  });
+
+  it('for linux has only the socket path', () => {
+    expect(transportArgs('linux', '/tmp/x/mpv.sock', 77)).toEqual([
       '--input-ipc-server=/tmp/x/mpv.sock',
     ]);
   });
@@ -105,6 +113,116 @@ describe('spawnMpv', () => {
       /^--input-ipc-server=\\\\\.\\pipe\\elv-mpv-[0-9a-f]{16}$/,
     );
     expect(h.connectPaths[0]).toMatch(/^\\\\\.\\pipe\\elv-mpv-[0-9a-f]{16}$/);
+  });
+
+  it('darwin spawn passes fd 3 and no pipe', async () => {
+    const h = harness();
+    const proc = await spawnMpv(
+      {
+        executable: '/Applications/ELV IPTV Player.app/Contents/MacOS/mpv',
+        args: ['--idle=yes'],
+        platform: 'darwin',
+        parentPid: 99,
+      },
+      h.deps,
+    );
+    expect(proc.pid).toBe(4321);
+    expect(h.connectPaths).toEqual([]);
+    const call = h.spawnCalls[0];
+    if (!call) throw new Error('spawn was not called');
+    expect(call.options).toMatchObject({
+      windowsHide: true,
+      stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
+    });
+    expect(call.args).toEqual(['--idle=yes', '--input-ipc-client=fd://3']);
+    void proc.client.command(['get_property', 'mpv-version']).catch(() => undefined);
+    await new Promise((r) => setImmediate(r));
+    expect(h.socket.written.join('')).toContain('"mpv-version"');
+    h.child.exit(0);
+    await expect(proc.exited).resolves.toEqual({ code: 0, signal: null });
+  });
+
+  function darwinWindowDeps(widthForAttempt: (attempt: number) => number) {
+    const children: FakeChild[] = [];
+    const deps: SpawnDeps = {
+      spawn: (() => {
+        const child = new FakeChild();
+        const attempt = children.length;
+        child.pid = 5000 + attempt;
+        const sock = new Duplex({
+          read() {},
+          write(chunk: Buffer, _e, cb) {
+            for (const line of chunk.toString().split('\n')) {
+              if (!line) continue;
+              const req = JSON.parse(line) as { request_id: number };
+              const data = widthForAttempt(attempt);
+              setImmediate(() =>
+                sock.push(
+                  `${JSON.stringify({ request_id: req.request_id, error: 'success', data })}\n`,
+                ),
+              );
+            }
+            cb();
+          },
+        });
+        child.stdio = [null, null, null, sock];
+        children.push(child);
+        return child;
+      }) as unknown as SpawnDeps['spawn'],
+      connect: (() => {
+        throw new Error('unused');
+      }) as unknown as SpawnDeps['connect'],
+      retryDelayMs: 2,
+      darwinWindowTimeoutMs: 15,
+    };
+    return { children, deps };
+  }
+
+  it('darwin spawn with --force-window=immediate retries when osd-width stays 0', async () => {
+    const { children, deps } = darwinWindowDeps((i) => (i === 0 ? 0 : 640));
+    const proc = await spawnMpv(
+      {
+        executable: '/Applications/ELV IPTV Player.app/Contents/MacOS/mpv',
+        args: ['--idle=yes', '--force-window=immediate'],
+        platform: 'darwin',
+        parentPid: 99,
+      },
+      deps,
+    );
+    expect(children).toHaveLength(2);
+    expect(children[0]?.killed).toBe(true);
+    expect(proc.pid).toBe(5001);
+    children[1]?.exit(0);
+    await proc.exited;
+  });
+
+  it('darwin spawn with --force-window=immediate rejects when osd-width never initializes', async () => {
+    const { children, deps } = darwinWindowDeps(() => 0);
+    await expect(
+      spawnMpv(
+        {
+          executable: '/Applications/ELV IPTV Player.app/Contents/MacOS/mpv',
+          args: ['--force-window=immediate'],
+          platform: 'darwin',
+          parentPid: 99,
+          connectTimeoutMs: 25,
+        },
+        deps,
+      ),
+    ).rejects.toThrow(/window did not initialize/);
+    expect(children[0]?.killed).toBe(true);
+  });
+
+  it('linux spawn uses a temporary Unix socket and cleans its directory on exit', async () => {
+    const h = harness();
+    const proc = await spawnMpv(
+      { executable: 'mpv', args: ['--idle=yes'], platform: 'linux', parentPid: 99 },
+      h.deps,
+    );
+    const sockPath = h.connectPaths[0] ?? '';
+    expect(sockPath).toMatch(/\.sock$/);
+    h.child.exit(0);
+    await proc.exited;
   });
 
   it('uses a different pipe name on every launch', async () => {
@@ -253,5 +371,16 @@ describe('spawnMpv start failure', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('darwin spawn rejects when the child cannot start', async () => {
+    const h = harness();
+    h.child.pid = undefined as unknown as number;
+    const result = spawnMpv(
+      { executable: '/missing/mpv', args: [], platform: 'darwin', parentPid: 1 },
+      h.deps,
+    );
+    setTimeout(() => h.child.emit('error', new Error('ENOENT')), 5);
+    await expect(result).rejects.toThrow(/could not start: ENOENT/);
   });
 });

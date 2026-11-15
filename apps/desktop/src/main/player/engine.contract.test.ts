@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { PlayerEngine } from '@elv/playback';
@@ -10,17 +9,20 @@ import { createFakeMpv, FAKE_PLAYING, fakeHttpError } from './mpv/fake-mpv.ts';
 import { launchArgs } from './mpv/options.ts';
 import { type MpvProcess, spawnMpv } from './mpv/process.ts';
 import type { VideoPresenter } from './presenter/types.ts';
+import { mpvRuntimePaths } from './runtime-path.ts';
 import { SIM_URL, simLiveUrl, simulatorAnswers } from './testing/sim-streams.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const executable = resolve(here, '../../../resources/mpv/win32-x64/elv-mpv.exe');
-const inputConf = resolve(here, '../../../resources/mpv-input.conf');
+const runtime = mpvRuntimePaths({
+  isPackaged: false,
+  resourcesPath: '',
+  appPath: resolve(here, '../../..'),
+  platform: process.platform,
+  arch: process.arch,
+});
 // Opt-in like the spike: it opens an mpv window per case and needs the simulator (`ELV_SIM_URL`).
 const realReady =
-  process.env['ELV_MPV_SPIKE'] === '1' &&
-  process.platform === 'win32' &&
-  existsSync(executable) &&
-  (await simulatorAnswers());
+  process.env['ELV_MPV_SPIKE'] === '1' && runtime !== null && (await simulatorAnswers());
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -128,7 +130,7 @@ async function realHarness(): Promise<EngineContractHarness> {
   const engine = engineFor(
     async (args, signal) => {
       const p = await spawnMpv({
-        executable,
+        executable: runtime?.executable ?? '',
         args,
         platform: process.platform,
         parentPid: process.pid,
@@ -143,7 +145,15 @@ async function realHarness(): Promise<EngineContractHarness> {
       return p;
     },
     argsPresenter('own-window', ['--geometry=320x180+20+20']),
-    [...launchArgs({ inputConf, presenterArgs: [], transportArgs: [] }), '--ao=null'],
+    [
+      ...launchArgs({
+        inputConf: runtime?.inputConf ?? '',
+        presenterArgs: [],
+        transportArgs: [],
+        platform: process.platform,
+      }),
+      '--ao=null',
+    ],
   );
   const settle = quietSettle(engine, { minMs: 1500, quietMs: 400, maxMs: 5000 });
   await vi.waitFor(() => expect(processes).toHaveLength(1), { timeout: 5000 });

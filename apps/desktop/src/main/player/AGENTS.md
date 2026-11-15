@@ -20,8 +20,8 @@ over the JSON IPC client (`mpv/`) and a `VideoPresenter` (`presenter/`). Read `a
   reach the deriver, so its 50-line window per media keeps the classifier's signals.
 - `engine-wedged` with the current token: no reply in 3 s (the process is killed), the IPC closing on its own, a
   failed spawn, or `stop-then-load` without the old `end-file` in 3 s. With the own-window presenter an exit after an
-  unrequested `end-file reason=quit` is `player:ui` `closed` instead. The next `load` or `retry` respawns; `recreate`
-  quits (kill after 500 ms) and respawns with the same presenter.
+  unrequested `end-file reason=quit`, or a clean exit (`code 0`) with no current file, is `player:ui` `closed` instead.
+  The next `load` or `retry` respawns; `recreate` quits (kill after 500 ms) and respawns with the same presenter.
 - `release` aborts a pending spawn (a process that still arrives is killed), quits mpv, disposes the presenter and
   emits nothing afterwards. `elv-key fullscreen` toggles the presenter; other `elv-key` names become `player:ui` keys.
 - Recording launcher pids for the startup sweep is the spawner's job (`spawnMpv({ pidFile })`).

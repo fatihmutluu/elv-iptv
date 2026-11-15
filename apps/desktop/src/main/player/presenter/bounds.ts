@@ -62,6 +62,21 @@ export function cropInThumbnail(
   return crop;
 }
 
+/**
+ * Maps a screen rect (points, top-left of the primary display) to mpv's macOS `--geometry` units:
+ * backing pixels (`scaleFactor`) measured top-down from the display's `workArea` (`NSScreen.visibleFrame`) top-left.
+ */
+export function macOwnWindowGeometry(dip: Rect, workArea: Rect, scaleFactor: number): Rect {
+  const left = (dip.x - workArea.x) * scaleFactor;
+  const top = (dip.y - workArea.y) * scaleFactor;
+  return roundEdges(
+    left,
+    top,
+    left + Math.max(0, dip.width) * scaleFactor,
+    top + Math.max(0, dip.height) * scaleFactor,
+  );
+}
+
 /** Counts the distinct colours of a BGRA bitmap after reducing each channel to 5 bits (alpha ignored). */
 export function countBuckets(bgra: Uint8Array): number {
   const seen = new Set<number>();

@@ -1,5 +1,6 @@
 import { BrowserWindow, screen } from 'electron';
 import type { PresenterKind } from '../../../shared/player-ipc.ts';
+import { macOwnWindowGeometry } from './bounds.ts';
 import { createChildWindowPresenter } from './child-window.ts';
 import { createOwnWindowPresenter } from './own-window.ts';
 import type { VideoPresenter } from './types.ts';
@@ -30,8 +31,13 @@ export function createPresenter(
   }
   return createOwnWindowPresenter({
     appWindow,
-    // macOS geometry units and origin are measured in track B (Task 16).
-    toScreenPixels: (rect) =>
-      platform === 'win32' ? screen.dipToScreenRect(appWindow, rect) : rect,
+    toScreenPixels: (rect) => {
+      if (platform === 'win32') return screen.dipToScreenRect(appWindow, rect);
+      if (platform === 'darwin') {
+        const display = screen.getDisplayMatching(rect);
+        return macOwnWindowGeometry(rect, display.workArea, display.scaleFactor);
+      }
+      return rect;
+    },
   });
 }

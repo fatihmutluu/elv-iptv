@@ -17,19 +17,42 @@ describe('mpvRuntimePaths', () => {
     expect(paths).toEqual({ executable: exe, inputConf: join('/res', 'mpv-input.conf') });
   });
 
-  it('finds the packaged macOS runtime inside the player app bundle', () => {
-    const exe = join('/res', 'mpv', 'ELV IPTV Player.app', 'Contents', 'MacOS', 'mpv');
-    const paths = mpvRuntimePaths(
-      {
-        isPackaged: true,
-        resourcesPath: '/res',
-        appPath: '/app',
-        platform: 'darwin',
-        arch: 'arm64',
-      },
-      present(exe),
+  it('darwin runtime path points into the .app', () => {
+    const packagedExe = join('/res', 'mpv', 'ELV IPTV Player.app', 'Contents', 'MacOS', 'mpv');
+    const devExe = join(
+      '/app',
+      'resources',
+      'mpv',
+      'darwin-arm64',
+      'ELV IPTV Player.app',
+      'Contents',
+      'MacOS',
+      'mpv',
     );
-    expect(paths?.executable).toBe(exe);
+    expect(
+      mpvRuntimePaths(
+        {
+          isPackaged: true,
+          resourcesPath: '/res',
+          appPath: '/app',
+          platform: 'darwin',
+          arch: 'arm64',
+        },
+        present(packagedExe),
+      ),
+    ).toEqual({ executable: packagedExe, inputConf: join('/res', 'mpv-input.conf') });
+    expect(
+      mpvRuntimePaths(
+        {
+          isPackaged: false,
+          resourcesPath: '/res',
+          appPath: '/app',
+          platform: 'darwin',
+          arch: 'arm64',
+        },
+        present(devExe),
+      ),
+    ).toEqual({ executable: devExe, inputConf: join('/app', 'resources', 'mpv-input.conf') });
   });
 
   it('finds the development runtime under resources/mpv/<platform>-<arch>', () => {

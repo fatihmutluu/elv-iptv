@@ -8,7 +8,10 @@ import { createSurfaceTracker } from './types.ts';
 /** What the own-window presenter needs from Electron. */
 export interface OwnWindowDeps {
   appWindow: AppWindowLike;
-  /** Screen DIPs to the units of mpv's `--geometry` (Windows: physical pixels, `screen.dipToScreenRect`). */
+  /**
+   * Screen DIPs to the units of mpv's `--geometry`: physical pixels on Windows (`screen.dipToScreenRect`),
+   * work-area backing pixels on macOS (`macOwnWindowGeometry`).
+   */
   toScreenPixels(rect: Rect): Rect;
   /** How long `prepare` waits for a first visible area before it uses the content bounds (default 1,000 ms). */
   firstAreaTimeoutMs?: number;
