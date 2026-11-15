@@ -43,4 +43,8 @@ Thumbs.db
 
 # Gate runner output
 gate-list.json
+gate-desktop.json
 gate-artifacts/
+
+# Fetched mpv runtime (pnpm mpv fetch)
+apps/desktop/resources/mpv/

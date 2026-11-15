@@ -1,0 +1,30 @@
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Waiting for scripts..."}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: user-data/osc/visibility=\"auto\" -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: sub-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: osd-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: sub-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: osd-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: user-data/osc/margins={\"r\":0,\"b\":0,\"t\":0,\"l\":0} -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Done loading scripts."}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Running hook: auto_profiles/on_before_start_file"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Failed sending hook command auto_profiles/on_before_start_file. Removing hook."}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Running hook: auto_profiles/on_load"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Failed sending hook command auto_profiles/on_load. Removing hook."}
+{"event":"log-message","prefix":"stream_callback","level":"v","text":"Opening http://127.0.0.1:7878/live/demo/***/1001.ts?fault=status=403"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: sub-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: osd-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"curl","level":"v","text":"Opening http://127.0.0.1:7878/live/demo/***/1001.ts?fault=status=403"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: sub-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: osd-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: user-data/osc/margins={\"r\":0,\"b\":0,\"t\":0,\"l\":0} -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: sub-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: osd-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: sub-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: osd-margin-y-offset=0 -> 1"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Set property: user-data/osc/margins={\"r\":0,\"b\":0,\"t\":0,\"l\":0} -> 1"}
+{"event":"log-message","prefix":"ffmpeg","level":"v","text":"Opening http://127.0.0.1:7878/live/demo/***/1001.ts?fault=status=403"}
+{"event":"log-message","prefix":"ffmpeg","level":"warn","text":"http: HTTP error 403 Forbidden"}
+{"event":"log-message","prefix":"stream","level":"error","text":"Failed to open http://127.0.0.1:7878/live/demo/***/1001.ts?fault=status=403."}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Opening failed or was aborted: http://127.0.0.1:7878/live/demo/***/1001.ts?fault=status=403"}
+{"event":"log-message","prefix":"cplayer","level":"v","text":"Running hook: osc/on_unload"}
+{"event":"end-file","reason":"error","file_error":"loading failed","playlist_entry_id":1}

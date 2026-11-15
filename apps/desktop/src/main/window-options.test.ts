@@ -20,3 +20,29 @@ describe('buildWindowOptions', () => {
     expect(options.title).toBe('ELV IPTV');
   });
 });
+
+describe('buildWindowOptions player baseline', () => {
+  const options = buildWindowOptions('/app/dist/preload/preload.js');
+
+  it('backgroundThrottling is false and the security baseline holds', () => {
+    expect(options.webPreferences).toEqual({
+      preload: '/app/dist/preload/preload.js',
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false,
+    });
+  });
+});
+
+describe('buildWindowOptions gate mode', () => {
+  it('tells the preload only when main started in gate mode', () => {
+    expect(buildWindowOptions('/p.js').webPreferences?.additionalArguments).toBeUndefined();
+    expect(
+      buildWindowOptions('/p.js', { gate: false }).webPreferences?.additionalArguments,
+    ).toBeUndefined();
+    expect(buildWindowOptions('/p.js', { gate: true }).webPreferences?.additionalArguments).toEqual(
+      ['--elv-gate-mode'],
+    );
+  });
+});

@@ -129,6 +129,20 @@ describe('FakePlayerEngine', () => {
     vi.advanceTimersByTime(1000);
     expect(events).toEqual([]);
     expect(engine.commands.map((c) => c.name)).toEqual(['load', 'play', 'pause', 'seek']);
+  });
+
+  it('anchors the clock on play and pause when anchorOnPlayPause is set', () => {
+    const { engine, events } = setup({ u: [] }, { anchorOnPlayPause: true });
+    engine.load(load('u', 1));
+    engine.play(2);
+    engine.pause(3);
+    engine.seek(4, 1234);
+    vi.advanceTimersByTime(1000);
+    expect(events.map((e) => e.type === 'clock' && [e.attempt, e.anchor.rate])).toEqual([
+      [4, 1],
+      [4, 0],
+    ]);
+    expect(engine.commands.map((c) => c.name)).toEqual(['load', 'play', 'pause', 'seek']);
     expect(engine.commands[0]).toMatchObject({ attempt: 1, url: 'u' });
     expect(engine.commands[3]).toEqual({ name: 'seek', attempt: 4, positionMs: 1234 });
   });

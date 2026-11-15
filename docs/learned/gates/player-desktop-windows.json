@@ -1,0 +1,41 @@
+{
+  "device": {
+    "platform": "win32",
+    "arch": "x64",
+    "release": "10.0.19045",
+    "cpu": "AMD Ryzen 5 7500F 6-Core Processor"
+  },
+  "build": "unpackaged desktop bundle, pinned LGPL mpv 0.42.0",
+  "commit": "90da2c3",
+  "date": "2026-11-15",
+  "result": {
+    "zaps": 30,
+    "ttffColdMs": 839.4,
+    "ttffWarmMs": {
+      "p50": 420.2,
+      "p95": 451.3
+    },
+    "zapMs": {
+      "p50": 420.2,
+      "p95": 451.3,
+      "max": 500.3
+    },
+    "surfaceCreated": 1,
+    "mpvSpawns": 1,
+    "staleEventsApplied": 0,
+    "staleEventsDropped": 0,
+    "failures": 0,
+    "engineWedged": 0,
+    "coalesceMaxMs": 0,
+    "loadMode": "replace",
+    "presenter": "child-window",
+    "videoVisible": null,
+    "distinct": 0,
+    "vod": {
+      "playing": true,
+      "seeked": true
+    },
+    "limitResponses": 0,
+    "overlapMs": 0
+  }
+}

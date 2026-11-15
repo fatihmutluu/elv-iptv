@@ -2,6 +2,7 @@
   "extends": "@elv/config/tsconfig.ui.json",
   "compilerOptions": {
     "allowImportingTsExtensions": true,
+    "lib": ["ES2022", "DOM"],
     "tsBuildInfoFile": "../../../node_modules/.cache/desktop-renderer.tsbuildinfo"
   },
   "include": ["index.ts", "src"]
