@@ -55,16 +55,17 @@ export function PlayerView({ engine, status, failed = false }: PlayerViewProps):
   }, [measure]);
 
   const below = statusPlacement(coversArea) === 'below';
+  const hasStatus = status.length > 0;
   return (
     <View style={styles.root}>
       <View ref={areaRef} onLayout={measure} style={styles.area} testID="player-area">
-        {below ? null : (
+        {!hasStatus || below ? null : (
           <Text style={[styles.status, styles.inside]} testID="player-status">
             {status}
           </Text>
         )}
       </View>
-      {below ? (
+      {hasStatus && below ? (
         <View style={styles.strip}>
           <Text style={styles.status} testID="player-status">
             {status}

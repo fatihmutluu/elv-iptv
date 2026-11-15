@@ -1,5 +1,5 @@
 import type { CatalogService } from '@elv/data';
-import { createLazyCatalog, SourcesScreen } from '@elv/features';
+import { type AppLifecyclePort, AppShell, createLazyCatalog, type VideoHost } from '@elv/features';
 import { createAppI18n, resolveLocale } from '@elv/i18n';
 import { remoteKeys } from '@elv/remote-keys';
 import { FormFactorProvider, I18nProvider, RemoteKeysProvider } from '@elv/ui-kit';
@@ -7,16 +7,18 @@ import Constants from 'expo-constants';
 import { getLocales } from 'expo-localization';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useState } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { AppState, Platform, StyleSheet, View } from 'react-native';
 import { createDeviceCatalog } from './catalog';
 import { ContractGateScreen } from './gate/contract/ContractGateScreen';
 import { GateListScreen } from './gate/GateListScreen';
 import { ImportGateScreen } from './gate/import/ImportGateScreen';
 import { PlayerGateScreen } from './gate/player/PlayerGateScreen';
 import { useGateRoute } from './gate/useGateParams';
+import { PlayerSurface } from './playback/PlayerSurface';
+import { createPlatformEngine } from './playback/platform-engine';
 import { createSecureSecretStore } from './storage';
 
-function SourcesRoot() {
+function AppRoot() {
   const [refreshToken, setRefreshToken] = useState(0);
 
   const i18n = useMemo(() => {
@@ -36,6 +38,41 @@ function SourcesRoot() {
   }, []);
 
   const catalog = useMemo(() => createLazyCatalog(openSharedCatalog), [openSharedCatalog]);
+
+  const videoHost = useMemo<VideoHost>(
+    () => ({
+      open() {
+        const engine = createPlatformEngine();
+        if (engine === null) return null;
+        return {
+          engine,
+          renderSurface: ({ testID }) => (
+            <PlayerSurface
+              engine={engine}
+              style={styles.surface}
+              {...(testID !== undefined ? { testID } : {})}
+            />
+          ),
+        };
+      },
+    }),
+    [],
+  );
+
+  const appLifecycle = useMemo<AppLifecyclePort>(
+    () => ({
+      subscribe(listener) {
+        const sub = AppState.addEventListener('change', (nextState) => {
+          if (nextState === 'active') listener('active');
+          else if (nextState === 'background') listener('background');
+        });
+        return () => {
+          sub.remove();
+        };
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -70,7 +107,12 @@ function SourcesRoot() {
   return (
     <FormFactorProvider>
       <I18nProvider i18n={i18n}>
-        <SourcesScreen catalog={catalog} externalRefreshToken={refreshToken} />
+        <AppShell
+          catalog={catalog}
+          videoHost={videoHost}
+          appLifecycle={appLifecycle}
+          externalRefreshToken={refreshToken}
+        />
         <StatusBar style="light" />
       </I18nProvider>
     </FormFactorProvider>
@@ -80,8 +122,8 @@ function SourcesRoot() {
 /**
  * Root component that `index.ts` registers, with the raw Android key source provided to both branches.
  * Development builds (`extra.gate`) open the list, import, player or contract gate when an `elviptv://gate/*`
- * link started the app (holding off `SourcesRoot` until `Linking.getInitialURL()` settles so gate runs
- * never open `catalog.db`, localization, or `SourcesScreen`); otherwise mounts `SourcesScreen` (#71).
+ * link started the app (holding off `AppRoot` until `Linking.getInitialURL()` settles so gate runs
+ * never open `catalog.db`, localization, or `AppShell`); otherwise mounts `AppShell` (#13).
  */
 export function App() {
   const gate = useGateRoute();
@@ -116,11 +158,12 @@ export function App() {
 
   return (
     <RemoteKeysProvider android={remoteKeys}>
-      <SourcesRoot />
+      <AppRoot />
     </RemoteKeysProvider>
   );
 }
 
 const styles = StyleSheet.create({
   pending: { flex: 1, backgroundColor: '#0b0e14' },
+  surface: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
 });

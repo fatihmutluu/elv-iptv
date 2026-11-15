@@ -28,6 +28,7 @@ module.exports = {
     `[/\\\\]node_modules[/\\\\](?!(${esmPackages}))`,
     ...jestExpoPreset.transformIgnorePatterns.slice(1),
   ],
-  testTimeout: 20_000,
+  // Cold Babel lazy-getter transforms (TextInput + ScrollView + VirtualizedList) under parallel `pnpm check` take ~20s on 2-vCPU CI runners.
+  testTimeout: 45_000,
   testMatch: ['<rootDir>/src/**/__tests__/**/*.test.{ts,tsx}'],
 };

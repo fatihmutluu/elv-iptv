@@ -40,7 +40,7 @@ export interface TvListProps<T> {
   /** Row slot (0-based from the top of the viewport) where the focused item rests mid-list. Default 2. */
   focusLine?: number;
   /** Renders one row. Pass a stable function: an inline one defeats the row memo and re-renders the pool every step. */
-  renderRow: (item: T | undefined, focused: boolean) => ReactElement;
+  renderRow: (item: T | undefined, focused: boolean, index: number) => ReactElement;
   /** Accessibility label of a row, so a screen reader can read the focused one. Stable, like `renderRow`. */
   rowLabel?: (item: T | undefined, index: number) => string;
   testID?: string;
@@ -54,7 +54,7 @@ interface RowProps<T> {
   height: number;
   focused: boolean;
   item: T | undefined;
-  renderRow: (item: T | undefined, focused: boolean) => ReactElement;
+  renderRow: (item: T | undefined, focused: boolean, index: number) => ReactElement;
   rowLabel?: (item: T | undefined, index: number) => string;
   testID?: string;
 }
@@ -76,7 +76,7 @@ function RowImpl<T>({
       accessibilityState={{ selected: focused }}
       style={{ position: 'absolute', left: 0, right: 0, top, height }}
     >
-      {renderRow(item, focused)}
+      {renderRow(item, focused, index)}
     </View>
   );
 }

@@ -19,24 +19,28 @@ export interface SourcesScreenProps {
   externalRefreshToken?: number;
   onOpenMenu?: () => void;
   onBack?: () => void;
+  onFocusTopNav?: () => void;
+  isActiveScope?: boolean;
 }
 
 function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
   const formFactor = useFormFactor();
   const i18n = useI18n();
   const isTv = formFactor === 'tv';
+  const isActiveScope = props.isActiveScope ?? true;
   const twoColumn = formFactor !== 'phone';
   const ctrl = useSourcesController(props);
   const tv = useTvSourcesNavigation({
-    isTv,
+    isTv: isTv && isActiveScope,
     ctrl,
     ...(props.onOpenMenu !== undefined ? { onOpenMenu: props.onOpenMenu } : {}),
     ...(props.onBack !== undefined ? { onBack: props.onBack } : {}),
+    ...(props.onFocusTopNav !== undefined ? { onFocusTopNav: props.onFocusTopNav } : {}),
   });
 
   return (
     <View style={styles.root}>
-      {isTv ? (
+      {isTv && isActiveScope ? (
         <>
           <View
             testID="sources-tv-focus-anchor"
@@ -49,6 +53,7 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
             controls={tv.controls}
             onSelectIndex={tv.handleSelectIndex}
             onBackIntent={tv.handleBackIntent}
+            {...(tv.onFocusTopNav !== undefined ? { onFocusTopNav: tv.onFocusTopNav } : {})}
           />
         </>
       ) : null}

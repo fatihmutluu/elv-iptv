@@ -9,7 +9,7 @@ The single Expo app (phone, tablet, TV; Android, Fire OS, Apple): a composition 
 - `app.config.ts` only calls `config/build-app-config.ts`; put logic and tests there.
 - Build variants come from env: `APP_VARIANT` (development|production), `EXPO_TV=1`, `STORE` (play|amazon|appstore|direct). No Gradle product flavors.
 - `DEV_*` values embed as `extra.seed` only in native debug `getAppConfig.js` assets (`isNativeDebugConfigEmbed`, `#10`, `src/seed/dev-seeder.ts` behind `__DEV__`, sitting in plaintext in the debug binary's `app.config` asset on device storage until copied to `SecretStore`); Metro manifests/bundles and production builds carry zero `DEV_*` or `extra.dev`. Plain HTTP is allowed in every variant (`#12`:
-  M3U/XMLTV/Xtream LAN and ISP servers have no fixed domain list and routinely serve plain HTTP on arbitrary ports — Android `usesCleartextTraffic: true`, Apple `NSAllowsArbitraryLoads` without `NSAllowsLocalNetworking`). `App.tsx` mounts `SourcesScreen` (`#71`) outside gates.
+  M3U/XMLTV/Xtream LAN and ISP servers have no fixed domain list and routinely serve plain HTTP on arbitrary ports — Android `usesCleartextTraffic: true`, Apple `NSAllowsArbitraryLoads` without `NSAllowsLocalNetworking`). `App.tsx` mounts `AppShell` (`#13`) with `createPlatformEngine` + `PlayerSurface` (`AetherEngine` on Apple, `Media3` on Android) + `AppState` outside gates.
 - Android sets `blockedPermissions` (`READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE`, `#19`) and `predictiveBackGestureEnabled: false` (keeps `KEYCODE_BACK` in `@elv/remote-keys`). One `react-native` copy (`react-native-tvos`); no Google Play Services or Firebase (`tools/bin/release-hygiene.ts` enforces `#11` and `#19` in CI).
 - Phone and TV share `android/` and `ios/`; `pnpm run:app` stamps `.elv-prebuild.json` and regenerates when target, variant or store changes (`pnpm run:app <target> build` after config/plugin/native edits).
 
@@ -20,7 +20,7 @@ The single Expo app (phone, tablet, TV; Android, Fire OS, Apple): a composition 
   on `__DEV__` (the gate is measured on a JS-bundled release build of the development variant).
 - `parseGateUrl` (`routes.ts`) clamps: items 1 to 1,000,000, rate 1 to 60/s, moves 1 to 10,000, `stall` 0 to 200 ms (one busy-wait
   mid-run to calibrate the JS gap); defaults 100,000 / manual / 20 / 600 / 0. `useGateRoute` (`useGateParams.ts`) reads the iOS/tvOS launch argument `-gateUrl <url>`
-  (`Settings`; skips the tvOS "Open in …?" prompt of `simctl openurl`), else `'pending'` until `Linking.getInitialURL()` settles (`App` holds off `SourcesScreen` / `catalog.db`) plus `url` events; without the flag, `undefined` synchronously.
+  (`Settings`; skips the tvOS "Open in …?" prompt of `simctl openurl`), else `'pending'` until `Linking.getInitialURL()` settles (`App` holds off `AppRoot` / `catalog.db`) plus `url` events; without the flag, `undefined` synchronously.
 - Auto run: `createAutoDriver` (`driver.ts`) emits a scripted sequence through the focus store: a down-hold (`long`
   page then `repeat` steps), page jumps (`channelDown`), single presses, then the mirror going up. It ends at index 0
   when the list is longer than the deepest excursion (about 600 rows at 600 moves); an odd `moves` is rounded down.
