@@ -318,6 +318,30 @@ msgstr "Diziler"
 msgid "nav.sources"
 msgstr "Kaynaklar"
 
+msgid "nav.notices"
+msgstr "Lisanslar"
+
+msgid "notices.title"
+msgstr "Üçüncü taraf yazılım bildirimleri"
+
+msgid "notices.lgplSummary"
+msgstr "ELV IPTV, LGPL medya kütüphanelerini (AetherEngine, FFmpeg, libmpv) dinamik olarak bağlar; böylece bu bileşenleri incelemekte, yeniden bağlamakta veya değiştirmekte özgür kalırsınız. Tam sürüm etiketleri, derleme tarifleri ve kaynak bağlantıları aşağıda çevrimdışı olarak listelenmiştir."
+
+msgid "notices.version"
+msgstr "Sürüm"
+
+msgid "notices.license"
+msgstr "Lisans"
+
+msgid "notices.platforms"
+msgstr "Platformlar"
+
+msgid "notices.source"
+msgstr "Kaynak"
+
+msgid "notices.unmodified"
+msgstr "Değiştirilmemiş üst akış sürümü"
+
 msgid "browse.categories"
 msgstr "Kategoriler"
 
