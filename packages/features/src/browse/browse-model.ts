@@ -13,6 +13,7 @@ export interface SeriesDetailState {
   readonly series: ItemRow;
   readonly selectedSeasonIndex: number;
   readonly selectedEpisodeIndex: number;
+  readonly activePane?: 'seasons' | 'episodes';
 }
 
 /** Per-tab focus and drilldown memory preserved across tab switches and PlayerScreen visits. */
@@ -20,6 +21,7 @@ export interface TabBrowseMemory {
   readonly categoryId?: string;
   readonly categoryIndex: number;
   readonly itemIndex: number;
+  readonly activePane?: 'categories' | 'items';
   readonly seriesDetail?: SeriesDetailState;
 }
 
