@@ -357,22 +357,62 @@ describe('m3u import', () => {
     expect(JSON.stringify(live)).not.toContain('second');
   });
 
-  it('stores the user agent and a templated referer of a live entry', async () => {
-    const referer = `http://cdn.example/r?token=${M3U_TOKEN}`;
+  it('stores user agent, templated referer, EXTHTTP other headers on live/movies/episodes, and timeshift fallback', async () => {
+    const referer = `http://ref.example/${M3U_TOKEN}/player`;
     const body = [
       '#EXTM3U',
-      '#EXTINF:-1,H',
+      '#EXTINF:-1 timeshift="7",Live H',
       '#EXTVLCOPT:http-user-agent=Probe/1',
       `#EXTVLCOPT:http-referrer=${referer}`,
-      'http://cdn.example/a/b/c/1.ts',
+      '#EXTHTTP:{"X-Custom":"val1","Authorization":"Bearer s3cret-jwt"}',
+      'http://cdn.example/live/ch1.m3u8',
+      '#EXTINF:-1 group-title="Films",Movie H',
+      '#EXTHTTP:{"User-Agent":"MovieUA/2","Referer":"http://ref.example/' +
+        M3U_TOKEN +
+        '/vod","X-Vod":"ok"}',
+      'http://cdn.example/movie/m1.mp4',
+      '#EXTINF:-1 group-title="Show S",Ep H',
+      '#EXTHTTP:{"User-Agent":"EpUA/3","X-Ep":"yes"}',
+      'http://cdn.example/series/e1.mkv',
       '',
     ].join('\n');
     const e = await setupM3u(body);
-    await run(e);
-    const live = await rows(e, 'SELECT headers_json FROM live');
-    const headers = JSON.parse(String(live[0]?.headers_json)) as Record<string, string>;
-    expect(headers.userAgent).toBe('Probe/1');
-    expect(headers.referer).not.toContain(M3U_TOKEN);
-    expect(resolveTemplate(headers.referer ?? '', await vars(e))).toBe(referer);
+    expect((await run(e)).ok).toBe(true);
+    const v = await vars(e);
+
+    const live = await rows(e, 'SELECT catchup_days, headers_json FROM live');
+    expect(live[0]?.catchup_days).toBe(7);
+    const liveH = JSON.parse(String(live[0]?.headers_json)) as {
+      userAgent?: string;
+      referer?: string;
+      other?: Record<string, string>;
+    };
+    expect(liveH.userAgent).toBe('Probe/1');
+    expect(liveH.referer).not.toContain(M3U_TOKEN);
+    expect(resolveTemplate(liveH.referer ?? '', v)).toBe(referer);
+    expect(liveH.other?.['x-custom']).toBe('val1');
+    expect(liveH.other?.authorization).not.toContain('s3cret-jwt');
+    expect(resolveTemplate(liveH.other?.authorization ?? '', v)).toBe('Bearer s3cret-jwt');
+
+    const movies = await rows(e, 'SELECT headers_json FROM movies');
+    const movieH = JSON.parse(String(movies[0]?.headers_json)) as typeof liveH;
+    expect(movieH.userAgent).toBe('MovieUA/2');
+    expect(movieH.referer).not.toContain(M3U_TOKEN);
+    expect(resolveTemplate(movieH.referer ?? '', v)).toBe(`http://ref.example/${M3U_TOKEN}/vod`);
+    expect(movieH.other).toEqual({ 'x-vod': 'ok' });
+
+    const eps = await rows(e, 'SELECT headers_json FROM episodes');
+    const epH = JSON.parse(String(eps[0]?.headers_json)) as typeof liveH;
+    expect(epH.userAgent).toBe('EpUA/3');
+    expect(epH.other).toEqual({ 'x-ep': 'yes' });
+  });
+
+  it('reports exact deduplicated SQL counts when duplicate entries appear across batches', async () => {
+    const dup = extinf('Dup Live', cdn(M3U_TOKEN, 777), 'group-title="News"');
+    const e = await setupM3u(`#EXTM3U\n${dup}${dup}${dup}`);
+    const r = await run(e, { batchSize: 1 });
+    if (!r.ok) throw new Error(JSON.stringify(r.error));
+    expect(r.value.counts.live).toBe(1);
+    expect(await count(e.db, 'live')).toBe(1);
   });
 });

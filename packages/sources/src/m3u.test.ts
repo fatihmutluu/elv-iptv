@@ -160,6 +160,20 @@ describe('scanM3u directives', () => {
     expect(h.headers.referer).toBe('R3');
   });
 
+  it('ignores null, empty and non-primitive header values in EXTVLCOPT and EXTHTTP', async () => {
+    const e = await one(
+      [
+        '#EXTINF:-1,A',
+        '#EXTVLCOPT:http-user-agent=   ',
+        '#EXTVLCOPT:http-referrer=',
+        '#EXTHTTP:{"User-Agent":null,"Referer":"  ","X-Null":null,"X-Empty":"","X-Obj":{},"X-Ok":" yes "}',
+        'http://h.example/1',
+        '',
+      ].join('\n'),
+    );
+    expect(e.headers).toEqual({ other: { 'x-ok': 'yes' } });
+  });
+
   it('warns on malformed EXTHTTP and keeps the entry', async () => {
     for (const bad of ['{nope', '[1]', '"s"', 'null']) {
       const r = await scan(`#EXTINF:-1,A\n#EXTHTTP:${bad}\nhttp://h.example/1\n`);
@@ -319,6 +333,19 @@ describe('scanM3u raw quotes inside attribute values', () => {
       tvgId: 'a',
       chno: 7,
       groups: ['G', 'H'],
+    });
+    expect(r.entries[0]?.tvgName).toBeUndefined();
+    expect(r.stats?.warnings).toEqual([{ code: 'attr-quote', line: 1 }]);
+  });
+
+  it('recovers from a raw quote with an inner comma inside the last attribute', async () => {
+    const r = await scan(
+      '#EXTINF:-1 tvg-id="c1" tvg-name="Channel "Raw", Quote",Channel "Raw", Quote\nhttp://h.example/4\n',
+    );
+    expect(r.entries[0]).toMatchObject({
+      name: 'Channel "Raw", Quote',
+      url: 'http://h.example/4',
+      tvgId: 'c1',
     });
     expect(r.entries[0]?.tvgName).toBeUndefined();
     expect(r.stats?.warnings).toEqual([{ code: 'attr-quote', line: 1 }]);

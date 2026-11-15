@@ -118,6 +118,7 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
   async function object(query: string, call?: XtreamCallOptions): Promise<Result<Raw>> {
     const r = await getJson(query, call);
     if (!r.ok) return r;
+    if (Array.isArray(r.value) && r.value.length === 0) return ok({});
     return isRaw(r.value) ? ok(r.value) : err(shape());
   }
 

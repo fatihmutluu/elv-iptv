@@ -1,6 +1,6 @@
+import type { CatalogService } from '@elv/data';
 import { describe, expect, it } from 'vitest';
 import { buildCatalog } from '../../../../tools/src/sim/catalog.ts';
-import type { CatalogService } from './catalog';
 import { addAccount, type Env, env, must, useSim } from './catalog-test-env';
 
 const small = buildCatalog('small', 1);
@@ -146,7 +146,7 @@ describe('re-import', () => {
 });
 
 describe('remove', () => {
-  it('refuses to remove a source during an import', async () => {
+  it('aborts an in-flight import and removes the source when removeSource is called', async () => {
     const e = await env();
     const id = await demo(e);
     let removal: ReturnType<CatalogService['removeSource']> | undefined;
@@ -155,9 +155,13 @@ describe('remove', () => {
         removal ??= e.service.removeSource(id);
       },
     });
-    expect(r.ok).toBe(true);
-    expect(await removal).toMatchObject({ ok: false, error: { code: 'import-in-progress' } });
-    expect(await e.service.listSources()).toHaveLength(1);
+    expect(r).toMatchObject({ ok: false, error: { code: 'aborted' } });
+    expect(await removal).toEqual({ ok: true, value: undefined });
+    expect(await e.service.listSources()).toEqual([]);
+    for (const table of ['live', 'movies', 'series', 'categories', 'placements', 'import_runs']) {
+      expect(e.raw.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });
+    }
+    expect(e.secrets.dump()).toEqual({});
   });
 
   it('deletes rows and secrets', async () => {

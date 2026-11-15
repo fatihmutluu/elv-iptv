@@ -238,7 +238,7 @@ async function execute(
  */
 async function checkpoint(deps: ImportDeps): Promise<void> {
   try {
-    await deps.db.all('PRAGMA wal_checkpoint(TRUNCATE)');
+    await deps.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   } catch {
     // the next checkpoint (automatic or after the next swap) catches up
   }
