@@ -83,6 +83,26 @@ describe('parsePlayerGateUrl', () => {
     }
     expect(parsePlayerGateUrl(`${BASE}?stream=mkv`)?.stream).toBe('ts');
   });
+
+  it('reads soak minutes and leaves them out of a normal run', () => {
+    expect(parsePlayerGateUrl(BASE)?.soak).toBeUndefined();
+    expect(parsePlayerGateUrl(BASE)).not.toHaveProperty('soak');
+    expect(parsePlayerGateUrl(`${BASE}?soak=30&stream=vod`)).toMatchObject({
+      soak: 30,
+      stream: 'vod',
+    });
+  });
+
+  it('clamps soak minutes to 1-180 and drops malformed ones', () => {
+    expect(parsePlayerGateUrl(`${BASE}?soak=0`)?.soak).toBe(1);
+    expect(parsePlayerGateUrl(`${BASE}?soak=1`)?.soak).toBe(1);
+    expect(parsePlayerGateUrl(`${BASE}?soak=180`)?.soak).toBe(180);
+    expect(parsePlayerGateUrl(`${BASE}?soak=500`)?.soak).toBe(180);
+    expect(parsePlayerGateUrl(`${BASE}?soak=abc`)?.soak).toBeUndefined();
+    expect(parsePlayerGateUrl(`${BASE}?soak=1.5`)?.soak).toBeUndefined();
+    expect(parsePlayerGateUrl(`${BASE}?soak=-5`)?.soak).toBeUndefined();
+    expect(parsePlayerGateUrl(`${BASE}?soak=`)?.soak).toBeUndefined();
+  });
 });
 
 describe('streamUrl', () => {

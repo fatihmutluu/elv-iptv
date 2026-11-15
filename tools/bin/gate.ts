@@ -11,6 +11,7 @@ import {
   type GateResult,
   worstRunWarnings,
 } from '../src/gates/compare.ts';
+import { CONTRACT_USAGE, contractMain } from '../src/gates/contract-cli.ts';
 import { IMPORT_USAGE, importMain } from '../src/gates/import-cli.ts';
 import {
   deviceInfo,
@@ -52,6 +53,14 @@ function parseCli() {
       zaps: { type: 'string' },
       faults: { type: 'boolean' },
       'max-body': { type: 'string' },
+      target: { type: 'string' },
+      app: { type: 'string' },
+      device: { type: 'string' },
+      channels: { type: 'string' },
+      stream: { type: 'string' },
+      rate: { type: 'string' },
+      soak: { type: 'string' },
+      stress: { type: 'boolean' },
     },
   });
 }
@@ -63,15 +72,21 @@ try {
 const { values, positionals } = parsed;
 if (
   positionals.length !== 1 ||
-  (positionals[0] !== 'list' && positionals[0] !== 'import' && positionals[0] !== 'player')
+  (positionals[0] !== 'list' &&
+    positionals[0] !== 'import' &&
+    positionals[0] !== 'player' &&
+    positionals[0] !== 'contract')
 ) {
-  fail(`${USAGE}\n${IMPORT_USAGE}\n${PLAYER_USAGE}`, 2);
+  fail(`${USAGE}\n${IMPORT_USAGE}\n${PLAYER_USAGE}\n${CONTRACT_USAGE}`, 2);
 }
 if (positionals[0] === 'import') {
   process.exit(await importMain(values, findRepoRoot(process.cwd())));
 }
 if (positionals[0] === 'player') {
   process.exit(await playerMain(values, findRepoRoot(process.cwd())));
+}
+if (positionals[0] === 'contract') {
+  process.exit(await contractMain(values, findRepoRoot(process.cwd())));
 }
 
 const count = (name: string, text: string | undefined): number | undefined => {

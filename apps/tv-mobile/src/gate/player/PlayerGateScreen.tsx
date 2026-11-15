@@ -116,6 +116,11 @@ const settled = (state: PlaybackState): boolean =>
   state.status.kind === 'failed' ||
   state.status.kind === 'limited';
 
+const soakEnded = (state: PlaybackState, stream: PlayerGateParams['stream']): boolean =>
+  state.status.kind === 'failed' ||
+  state.status.kind === 'limited' ||
+  (stream === 'vod' && state.status.kind === 'ended');
+
 interface Session {
   engine: PlayerEngine;
   service: PlaybackService;
@@ -128,7 +133,16 @@ function useSession(params: PlayerGateParams, createEngine: () => PlayerEngine |
     if (engine === null) return null;
     const service = createPlaybackService({ engine, clock, timers });
     const faultItem = params.channels[0] ?? '';
-    return { engine, service, recorder: createPlayerRecorder({ fault: params.fault, faultItem }) };
+    return {
+      engine,
+      service,
+      recorder: createPlayerRecorder({
+        fault: params.fault,
+        faultItem,
+        soak: params.soak,
+        now: clock.now,
+      }),
+    };
     // The engine is created once per screen instance; `App` re-keys the screen when the route changes.
   }, []);
 }
@@ -213,6 +227,21 @@ export function PlayerGateScreen({
       printed = true;
       print(playerLine(session.recorder.finish(session.service.getState())));
     };
+    if (params.soak !== undefined) {
+      tuneTo(0);
+      if (soakEnded(session.service.getState(), params.stream)) emit();
+      else {
+        stopWaiting = session.service.subscribe((state) => {
+          if (soakEnded(state, params.stream)) emit();
+        });
+        later(emit, params.soak * 60_000);
+      }
+      return () => {
+        cancelled = true;
+        stopWaiting?.();
+        for (const id of pending) clearTimeout(id);
+      };
+    }
     const driver = createZapDriver(
       (next, zap) => tuneTo(next, zap ? performance.now() : undefined),
       { channels: params.channels.length, zaps: params.zaps, rate: params.rate, schedule: later },

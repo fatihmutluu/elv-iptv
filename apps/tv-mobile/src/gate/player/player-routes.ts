@@ -28,6 +28,11 @@ export interface PlayerGateParams {
   fault: PlayerFault;
   /** Stream form of every channel; `vod` ids are simulator movie ids and tune as VOD. */
   stream: PlayerStream;
+  /**
+   * Soak minutes, 1 to 180: the run stays on `channels[0]` without automatic zaps and prints after this hold (VOD:
+   * at the end of the movie if that comes first). Absent for a normal zap run.
+   */
+  soak?: number;
 }
 
 const GATE_URL = /^elviptv:\/\/gate\/player\/?(?:\?([^#]*))?(?:#.*)?$/;
@@ -37,6 +42,7 @@ const CHANNEL = /^\d{1,9}$/;
 const DEFAULT_HOST = '10.0.2.2:7878';
 const DEFAULT_CHANNELS: readonly string[] = ['1001', '1002', '1003', '1004'];
 const MAX_CHANNELS = 20;
+const MAX_SOAK_MINUTES = 180;
 const FAULT_SPECS: Readonly<Record<Exclude<PlayerFault, ''>, string>> = {
   drop5: 'drop@5s',
   '404': 'status=404',
@@ -79,7 +85,8 @@ function readChannels(value: string | undefined): readonly string[] {
 /**
  * Parses a player gate link. Returns `undefined` for anything that is not `elviptv://gate/player`. Missing or malformed
  * values fall back to the defaults (`10.0.2.2:7878`, `demo`, channels 1001 to 1004, 30 zaps, 0.5 per second, no
- * fault, `ts`); a host outside the development hosts is replaced; zaps and rate are clamped; channels beyond 20 are cut.
+ * fault, `ts`, no soak); a host outside the development hosts is replaced; zaps, rate and soak are clamped; channels
+ * beyond 20 are cut.
  */
 export function parsePlayerGateUrl(url: string | null): PlayerGateParams | undefined {
   if (url === null) return undefined;
@@ -93,6 +100,7 @@ export function parsePlayerGateUrl(url: string | null): PlayerGateParams | undef
   const account = query.get('account');
   const fault = query.get('fault') ?? '';
   const stream = query.get('stream') ?? 'ts';
+  const soak = query.get('soak');
   return {
     host: readHost(query.get('host')),
     account: account !== undefined && ACCOUNT.test(account) ? account : 'demo',
@@ -101,6 +109,9 @@ export function parsePlayerGateUrl(url: string | null): PlayerGateParams | undef
     rate: readNumber(query.get('rate'), 0.5, 0.05, 5, false),
     fault: FAULTS.has(fault) ? (fault as PlayerFault) : '',
     stream: STREAMS.has(stream) ? (stream as PlayerStream) : 'ts',
+    ...(soak !== undefined && /^\d+$/.test(soak)
+      ? { soak: readNumber(soak, 1, 1, MAX_SOAK_MINUTES, true) }
+      : {}),
   };
 }
 

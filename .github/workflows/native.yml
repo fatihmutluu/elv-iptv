@@ -524,6 +524,24 @@ jobs:
           kill "$stream_pid" "$sim_pid" 2>/dev/null || true
           cat "$out"
           exit 0
+      - name: Install FFmpeg
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: brew install ffmpeg
+      - name: Run the engine contract and player gates on the Apple TV simulator
+        run: |
+          set -uo pipefail
+          app=$(find apps/tv-mobile/ios/build/Build/Products/Release-appletvsimulator -maxdepth 1 -name '*.app' | head -n 1)
+          if [ -z "$app" ]; then
+            echo "no .app found"
+            exit 1
+          fi
+          status=0
+          pnpm gate contract --target tvos --app "$app" || status=$?
+          pnpm gate player --target tvos --app "$app" --runs 1 --faults --budgets warn \
+            --baseline docs/learned/gates/player-tvos-ci.json \
+            --out gate-artifacts/gate-player-tvos.json || status=$?
+          exit "$status"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -532,6 +550,7 @@ jobs:
             gate-tvos.txt
             gate-tvos.png
             gate-tvos-import.txt
+            gate-artifacts/gate-player-tvos.json
           if-no-files-found: warn
           retention-days: 30
 

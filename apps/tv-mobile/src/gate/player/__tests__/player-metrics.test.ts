@@ -6,8 +6,9 @@ import type { PlayerFault } from '../player-routes';
 
 type Status = PlaybackState['status'];
 
-function make(fault: PlayerFault = '') {
-  const recorder = createPlayerRecorder({ fault, faultItem: 'a' });
+function make(fault: PlayerFault = '', soak?: number) {
+  let now = 0;
+  const recorder = createPlayerRecorder({ fault, faultItem: 'a', soak, now: () => now });
   let attempt = 0;
   let state: PlaybackState = { status: { kind: 'idle' }, attempt: 0, staleEventsDropped: 0 };
   const show = (patch: Partial<PlaybackState>) => {
@@ -18,6 +19,10 @@ function make(fault: PlayerFault = '') {
     recorder,
     get state() {
       return state;
+    },
+    /** Moves the recorder's clock to `ms`. */
+    at(ms: number) {
+      now = ms;
     },
     /** What a `service.tune` does: the recorder is told, then the service notifies. */
     tune(item: string, at: number, zapAt?: number) {
@@ -208,5 +213,109 @@ describe('createPlayerRecorder', () => {
     const h = make();
     const m = h.recorder.finish(h.state);
     expect(playerLine(m)).toBe(`ELV_GATE_PLAYER ${JSON.stringify(m)}`);
+  });
+
+  it('reports the final status kind and no soak block in a normal run', () => {
+    const h = make();
+    h.tune('a', 0);
+    expect(h.recorder.finish(h.state)).toMatchObject({ final: 'other', soak: null });
+    h.status({ kind: 'playing' });
+    expect(h.recorder.finish(h.state).final).toBe('playing');
+    h.status({ kind: 'limited', nextAtMs: 2000 });
+    expect(h.recorder.finish(h.state).final).toBe('limited');
+    h.status({ kind: 'failed', error: elvError('playback', 'http-404') });
+    expect(h.recorder.finish(h.state).final).toBe('failed');
+    h.status({ kind: 'recovering', rung: 1, nextAtMs: 5 });
+    expect(h.recorder.finish(h.state).final).toBe('other');
+    h.status({ kind: 'ended' });
+    expect(h.recorder.finish(h.state).final).toBe('other');
+  });
+});
+
+describe('soak metrics', () => {
+  it('measures a live soak from the first frame to the print', () => {
+    const h = make('', 1);
+    h.tune('a', 0);
+    h.at(100);
+    h.recorder.stall('start');
+    h.at(200);
+    h.recorder.stall('end');
+    h.frame(500);
+    h.status({ kind: 'playing' });
+    h.show({ anchor: { positionMs: 10_000, atMs: 700, rate: 1 } });
+    h.at(10_000);
+    h.recorder.stall('start');
+    h.at(11_500);
+    h.recorder.stall('end');
+    h.recorder.stall('end');
+    h.at(50_000);
+    h.recorder.stall('start');
+    h.show({ anchor: { positionMs: 69_400, atMs: 60_000, rate: 1 } });
+    h.at(60_500.256);
+    const m = h.recorder.finish(h.state);
+    expect(m.final).toBe('playing');
+    expect(m.zaps).toBe(0);
+    expect(m.soak).toEqual({
+      minutes: 1,
+      playedMs: 60_000.26,
+      positionAdvancedMs: 60_100.26,
+      stalls: 2,
+      longestStallMs: 10_500.26,
+      ended: false,
+      durationMs: null,
+    });
+  });
+
+  it('takes the first anchor seen after the first frame', () => {
+    const h = make('', 5);
+    h.tune('a', 0);
+    h.show({ anchor: { positionMs: 0, atMs: 100, rate: 1 } });
+    h.frame(500);
+    h.show({ anchor: { positionMs: 5000, atMs: 600, rate: 1 } });
+    h.show({ anchor: { positionMs: 9000, atMs: 4600, rate: 1 } });
+    h.at(5000);
+    expect(h.recorder.finish(h.state).soak?.positionAdvancedMs).toBe(9400 - 4900);
+  });
+
+  it('reports zeros for a soak without a frame or an anchor', () => {
+    const h = make('', 3);
+    h.tune('a', 0);
+    h.recorder.stall('start');
+    h.status({ kind: 'failed', error: elvError('playback', 'http-404') });
+    h.at(4000);
+    const m = h.recorder.finish(h.state);
+    expect(m.final).toBe('failed');
+    expect(m.soak).toEqual({
+      minutes: 3,
+      playedMs: 0,
+      positionAdvancedMs: 0,
+      stalls: 0,
+      longestStallMs: 0,
+      ended: false,
+      durationMs: null,
+    });
+  });
+
+  it('records the end and the duration of a VOD soak', () => {
+    const h = make('', 2);
+    h.tune('a', 0);
+    h.frame(300);
+    h.status({ kind: 'playing' });
+    h.show({ anchor: { positionMs: 0, atMs: 300, rate: 1, durationMs: 60_000 } });
+    h.at(60_300);
+    h.show({
+      status: { kind: 'ended' },
+      anchor: { positionMs: 60_000, atMs: 60_300, rate: 0, durationMs: 60_000 },
+    });
+    h.at(61_000);
+    const m = h.recorder.finish(h.state);
+    expect(m.final).toBe('other');
+    expect(m.soak).toMatchObject({
+      minutes: 2,
+      playedMs: 60_700,
+      positionAdvancedMs: 60_000,
+      ended: true,
+      durationMs: 60_000,
+    });
   });
 });
