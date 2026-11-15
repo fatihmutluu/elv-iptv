@@ -10,6 +10,7 @@ import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.video.MediaCodecVideoDecoderException
 import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TICK_MS = 1_000L
@@ -131,7 +132,16 @@ internal class EventReporter(
       uri != null -> "${error.errorCodeName} ${redactUrl(uri.toString())}"
       else -> error.errorCodeName
     }
-    val code = mapError(status, contentType, error.errorCode, notice = notice != null, live = live, played = played)
+    val surfaceLost = causeOf<MediaCodecVideoDecoderException>(error)?.let { !it.isSurfaceValid } == true
+    val code = mapError(
+      status,
+      contentType,
+      error.errorCode,
+      notice = notice != null,
+      live = live,
+      played = played,
+      surfaceLost = surfaceLost,
+    )
     sendError(code, status, detail)
   }
 

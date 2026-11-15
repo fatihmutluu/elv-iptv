@@ -36,17 +36,23 @@ internal class SniffingDataSource(private val upstream: DataSource, private val 
     prefixLength = 0
     prefixRead = 0
     val length = upstream.open(dataSpec)
-    if (kind == RequestKind.OTHER) return length
-    val contentType = contentTypeOf(upstream.responseHeaders)
-    val labelledPlaylist = kind == RequestKind.PROGRESSIVE && isHlsContentType(contentType)
-    val filled = if (labelledPlaylist) 0 else readAhead(length)
-    when (classifyResponse(kind, contentType, prefix, filled)) {
-      ResponseKind.HLS -> if (kind == RequestKind.PROGRESSIVE) throw HlsDetectedException()
-      ResponseKind.NOTICE -> throw ProviderNoticeException(contentType)
-      ResponseKind.MEDIA -> Unit
+    try {
+      if (kind == RequestKind.OTHER) return length
+      if (dataSpec.position > 0L && hasContentRange(upstream.responseHeaders)) return length
+      val contentType = contentTypeOf(upstream.responseHeaders)
+      val labelledPlaylist = kind == RequestKind.PROGRESSIVE && isHlsContentType(contentType)
+      val filled = if (labelledPlaylist) 0 else readAhead(length)
+      when (classifyResponse(kind, contentType, prefix, filled)) {
+        ResponseKind.HLS -> if (kind == RequestKind.PROGRESSIVE) throw HlsDetectedException()
+        ResponseKind.NOTICE -> throw ProviderNoticeException(contentType)
+        ResponseKind.MEDIA -> Unit
+      }
+      prefixLength = filled
+      return length
+    } catch (t: Throwable) {
+      runCatching { upstream.close() }
+      throw t
     }
-    prefixLength = filled
-    return length
   }
 
   override fun read(buffer: ByteArray, offset: Int, length: Int): Int {

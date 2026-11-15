@@ -1,5 +1,13 @@
 /** The fault a player gate run injects into its first channel. */
-export type PlayerFault = '' | 'drop5' | '404' | '509' | 'notice' | 'stall' | 'slowstart';
+export type PlayerFault =
+  | ''
+  | 'drop5'
+  | '404'
+  | '509'
+  | 'notice'
+  | 'stall'
+  | 'silent'
+  | 'slowstart';
 
 /** The stream form a run plays: live MPEG-TS, live HLS or a VOD movie (MP4). */
 export type PlayerStream = 'ts' | 'hls' | 'vod';
@@ -14,7 +22,7 @@ export interface PlayerGateParams {
   channels: readonly string[];
   /** Number of automatic zaps after the first tune, 1 to 200. */
   zaps: number;
-  /** Automatic zaps per second, 0.1 to 5. */
+  /** Automatic zaps per second, 0.05 to 5. */
   rate: number;
   /** Fault injected into the first channel (see {@link faultSpec}); empty for none. */
   fault: PlayerFault;
@@ -35,6 +43,7 @@ const FAULT_SPECS: Readonly<Record<Exclude<PlayerFault, ''>, string>> = {
   '509': 'status=509',
   notice: 'text-notice',
   stall: 'stall30s@2s',
+  silent: 'stall30s@0s',
   slowstart: 'slow-start=3',
 };
 const FAULTS: ReadonlySet<string> = new Set(Object.keys(FAULT_SPECS));
@@ -89,7 +98,7 @@ export function parsePlayerGateUrl(url: string | null): PlayerGateParams | undef
     account: account !== undefined && ACCOUNT.test(account) ? account : 'demo',
     channels: readChannels(query.get('channels')),
     zaps: readNumber(query.get('zaps'), 30, 1, 200, true),
-    rate: readNumber(query.get('rate'), 0.5, 0.1, 5, false),
+    rate: readNumber(query.get('rate'), 0.5, 0.05, 5, false),
     fault: FAULTS.has(fault) ? (fault as PlayerFault) : '',
     stream: STREAMS.has(stream) ? (stream as PlayerStream) : 'ts',
   };

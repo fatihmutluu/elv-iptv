@@ -1,6 +1,7 @@
 package io.github.fatihmutluu.elv.media3
 
 import java.util.concurrent.Executor
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
@@ -46,8 +47,12 @@ class ConnectionGate(private val closer: Executor) {
   private val lock = ReentrantLock()
   private val changed = lock.newCondition()
   private var current = 0L
+  private var releasedBefore = 0L
   private val counts = HashMap<Long, Int>()
   private val connections = HashMap<Long, MutableSet<ForceClosable>>()
+
+  /** Registered connections currently queued or running on [closer]. */
+  private val forcing = HashSet<ForceClosable>()
 
   /** Registered connections whose force-close finished: their call is cancelled. */
   private val cancelled = HashSet<ForceClosable>()
@@ -62,7 +67,7 @@ class ConnectionGate(private val closer: Executor) {
     val superseded = lock.withLock {
       if (generation > current) current = generation
       changed.signalAll()
-      connectionsOlderThan(current)
+      connectionsOlderThan(current).also { forcing.addAll(it) }
     }
     forceClose(superseded)
   }
@@ -84,6 +89,7 @@ class ConnectionGate(private val closer: Executor) {
   fun closed(generation: Long, connection: ForceClosable? = null) {
     lock.withLock {
       if (connection != null) {
+        forcing.remove(connection)
         cancelled.remove(connection)
         if (connections[generation]?.remove(connection) != true) return
       }
@@ -92,11 +98,17 @@ class ConnectionGate(private val closer: Executor) {
   }
 
   /**
-   * Forgets every connection whose force-close finished: the player that owned it was released, so its close may never
-   * come (a loader parked on a full buffer only closes when its period is released).
+   * Forgets every superseded connection of a released player once its force-close has finished: the player that owned
+   * it was released, so its close may never come (a loader parked on a full buffer only closes when its period is
+   * released). Any older connection not yet queued for force-close is queued now.
    */
   fun dropForced() {
-    lock.withLock { drop(Long.MAX_VALUE) }
+    val unforced = lock.withLock {
+      if (current > releasedBefore) releasedBefore = current
+      drop(releasedBefore)
+      connectionsOlderThan(releasedBefore).filter { it !in cancelled && it !in forcing }.also { forcing.addAll(it) }
+    }
+    forceClose(unforced)
   }
 
   /**
@@ -112,7 +124,7 @@ class ConnectionGate(private val closer: Executor) {
       Older.SUPERSEDED -> return BoundaryWait.SUPERSEDED
       Older.OPEN -> Unit
     }
-    forceClose(lock.withLock { connectionsOlderThan(generation) })
+    forceClose(lock.withLock { connectionsOlderThan(generation).also { forcing.addAll(it) } })
     var dropped = false
     while (true) {
       when (waitForOlder(generation, DROP_AFTER_MS)) {
@@ -174,16 +186,24 @@ class ConnectionGate(private val closer: Executor) {
 
   private fun forceClose(overstaying: List<ForceClosable>) {
     if (overstaying.isEmpty()) return
-    closer.execute {
-      for (connection in overstaying) {
-        try {
-          connection.forceClose()
-        } catch (_: Exception) {
-        }
-        lock.withLock {
-          if (connections.values.any { connection in it }) cancelled.add(connection)
+    try {
+      closer.execute {
+        for (connection in overstaying) {
+          try {
+            connection.forceClose()
+          } catch (_: Exception) {
+          }
+          lock.withLock {
+            forcing.remove(connection)
+            if (connections.values.any { connection in it }) {
+              cancelled.add(connection)
+              if (releasedBefore > 0L) drop(releasedBefore)
+            }
+          }
         }
       }
+    } catch (_: RejectedExecutionException) {
+      lock.withLock { forcing.removeAll(overstaying.toSet()) }
     }
   }
 }

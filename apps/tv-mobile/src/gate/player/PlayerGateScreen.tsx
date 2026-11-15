@@ -111,6 +111,7 @@ function print(line: string): void {
 
 const settled = (state: PlaybackState): boolean =>
   state.firstFrameAt !== undefined ||
+  state.status.kind === 'ended' ||
   state.status.kind === 'failed' ||
   state.status.kind === 'limited';
 

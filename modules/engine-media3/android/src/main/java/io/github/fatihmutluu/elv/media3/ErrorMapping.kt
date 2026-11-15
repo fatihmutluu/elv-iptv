@@ -21,12 +21,14 @@ fun mapError(
   notice: Boolean = false,
   live: Boolean = false,
   played: Boolean = false,
+  surfaceLost: Boolean = false,
 ): String {
   if (responseCode != null && responseCode !in 200..299) {
     return if (responseCode in NAMED_STATUSES) "http-$responseCode" else "http-other"
   }
   if (notice) return "connection-limit"
   if (contentType != null && isNoticeContentType(contentType, hls = false)) return "connection-limit"
+  if (surfaceLost) return "surface-lost"
   return when (playbackErrorCode) {
     PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE -> "connection-limit"
     PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "http-other"
