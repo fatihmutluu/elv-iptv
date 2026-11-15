@@ -1,0 +1,9 @@
+{
+  "repository": "fatihmutluu/elv-iptv",
+  "workflow": "ffmpeg-media3.yml",
+  "artifactName": "ffmpeg-media3-android",
+  "ffmpegVersion": "9.0.2",
+  "media3Version": "1.11.1",
+  "runId": null,
+  "sha256": null
+}

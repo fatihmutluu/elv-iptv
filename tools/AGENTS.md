@@ -16,11 +16,12 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
   starts the simulator on 127.0.0.1:7878 (or reuses a running one), opens `elviptv://gate/import` on the emulator (host `10.0.2.2:7878`) `--runs` times, compares the median with `docs/learned/gates/import-android-tv.json`: rows equal, duration +10 % (+2 s), stall under 100 ms (`large` only; `huge` is report-only, #76). Only `large` becomes a baseline.
 - `pnpm gate player [--avd elv_tv] [--build] [--runs 3 (default)] [--zaps 30] [--faults] [--baseline file] [--budgets warn|fail] [--out file] [--write-baseline]` needs FFmpeg; zap runs (median of times, worst run of counters and overlap, a warning for a time one run missed; budgets per spec 7) and `--faults` runs (drop5, 404, 509 at rate 0.1, slowstart zapped after 0.8 s; windows and limits from the simulator log, cleared after a force-stop and read after another one) against `docs/learned/gates/player-android-tv.json`; `--write-baseline` needs `--faults`.
 - `pnpm scaffold <pure|rn|module> <name>` creates a workspace package (skill `add-package`).
+- `pnpm ffmpeg-media3 fetch [--force]` and `pnpm ffmpeg-media3 verify [--dir <folder>]` install and verify the LGPL-2.1+ Android FFmpeg + Media3 JNI bundle (`modules/engine-media3/ffmpeg-media3.lock.json`, 16 KB ELF alignment, dynamic `DT_NEEDED`).
 - `pnpm --filter @elv/tools test` runs Vitest (`sources-*`, `import-*` use the sim; `SIM_HUGE=1` adds 500k).
 
 ## Layout
 - `src/` library modules, each unit-tested: `env`, `run-command`, `prebuild-stamp`, `scaffold`, `file-size`, `agents-stubs`,
-  `runner`, `root`, `bootstrap`, `gates/` (gate runner), plus `checks` (check definitions) and `exec`.
+  `runner`, `root`, `bootstrap`, `ffmpeg-media3/`, `gates/` (gate runner), plus `checks` (check definitions) and `exec`.
 - `bin/` thin entry points that call `src/`. `test/` holds the Vitest tests: linked-workspace tests
   (`dependency-links.test.ts`) and fixture cases (`test/fixtures/<case>/`, tiny workspaces) prove the rules in
   `/.dependency-cruiser.cjs`; fixtures are excluded from Biome, tsc, knip and the real `deps` check.
