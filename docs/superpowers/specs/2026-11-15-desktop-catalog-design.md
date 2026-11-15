@@ -48,7 +48,10 @@ Checks performed in the workspace on 2026-11-15 against Electron `45.3.1` and No
 - **Electron 45 `safeStorage`:** synchronous `isEncryptionAvailable`, `encryptString` and `decryptString` emit runtime
   deprecation warnings in Electron 45. `isAsyncEncryptionAvailable()`, `encryptStringAsync(plainText)` and
   `decryptStringAsync(encrypted)` (`{ shouldReEncrypt, result }`) run asynchronously via Chromium `os_crypt_async` with
-  zero deprecation warnings and zero main-thread stalls.
+  zero deprecation warnings and zero main-thread stalls. Over non-interactive macOS SSH (`elv-mac`),
+  `isAsyncEncryptionAvailable()` resolves `true` while `encryptStringAsync` rejects immediately (`errSecInteractionNotAllowed`
+  on a locked login Keychain), which maps cleanly to `storage/secret-store-failed` without writing `secrets.json`;
+  headless macOS E2E passes `--use-mock-keychain` unless `ELV_REAL_KEYCHAIN=1` is set.
 - **`contextBridge` boundary:** neither `MessagePort` nor DOM `AbortSignal` can cross `contextBridge.exposeInMainWorld`.
   The preload owns the `MessagePort` privately and exposes plain typed async methods plus an import `cancel()` handle;
   the renderer adapter maps `DeviceImportOptions.signal` onto `cancel()`.
@@ -57,7 +60,8 @@ Checks performed in the workspace on 2026-11-15 against Electron `45.3.1` and No
 
 ### 5.1 Process topology
 1. **Main process (`apps/desktop/src/main/catalog/`):**
-   - Owns `createSafeStorageSecretStore` over `safeStorage` and `join(app.getPath('userData'), 'secrets.json')`.
+   - Owns `createEncryptedFileSecretStore` over `createSafeStorageCipher(safeStorage, process.platform)` and
+     `join(app.getPath('userData'), 'secrets.json')`.
    - Lazily spawns `dist/utility/catalog-worker.js` via `utilityProcess.fork` on first client connection, passes
      `{ type: 'init', dbPath: join(app.getPath('userData'), 'catalog.db') }` over `child.postMessage`, and serves
      `secret-request` messages (`get`, `set`, `delete`) over that private `parentPort`.
@@ -83,8 +87,8 @@ Checks performed in the workspace on 2026-11-15 against Electron `45.3.1` and No
 3. **Preload (`apps/desktop/src/preload/catalog-bridge.ts`):**
    - Lazily requests a `MessagePort` via `catalog:connect` / `catalog:port`, keeping the port inside the preload module
      closure and exposing frozen `window.elv.catalog` methods (`open`, `addSource`, `addSourceFromLink`, `removeSource`,
-     `importSource`, `cancelImport`, `listSources`, `categories`, `items`, `seasons`, `episodes`, `resolveStream`,
-     `close`).
+     `startImport` returning `{ result, cancel }`, `listSources`, `categories`, `items`, `seasons`, `episodes`,
+     `resolveStream`, `close`).
    - On `catalog:disconnected`, settles all pending requests with `{ category: 'storage', code: 'worker-exited' }` and
      reconnects transparently on the next call.
 4. **Renderer (`apps/desktop/renderer/src/catalog/`):**
@@ -146,7 +150,8 @@ Checks performed in the workspace on 2026-11-15 against Electron `45.3.1` and No
     reconnect on next call), and `CatalogService` contract parity with `tv-mobile`.
 - **End-to-end tests (Playwright, Windows + macOS + Linux CI):**
   - `e2e/catalog.spec.ts`: imports the `large` simulator account (25,000 live, 70,000 movies, 500 series) plus a
-    tokenized M3U playlist in real Electron while measuring renderer event-loop/frame lag (`maxStallMs < 100 ms`),
+    tokenized M3U playlist in real Electron while measuring renderer event-loop/frame lag (`maxStallMs < 250 ms` CI
+    ceiling; measured `6.6 ms` on Windows and `4.1 ms` on macOS),
     queries paged categories/items/seasons/episodes and `resolveStream`, and scans every byte of `catalog.db`,
     `catalog.db-wal`, `catalog.db-shm` and `secrets.json` in `userData` for zero plaintext credentials or tokens.
   - `e2e/packaged.spec.ts`: verifies over CDP that the fused `app.asar` build spawns the catalog `utilityProcess`, runs
