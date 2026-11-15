@@ -7,7 +7,7 @@ import Constants from 'expo-constants';
 import { getLocales } from 'expo-localization';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useState } from 'react';
-import { Platform } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { createDeviceCatalog } from './catalog';
 import { GateListScreen } from './gate/GateListScreen';
 import { ImportGateScreen } from './gate/import/ImportGateScreen';
@@ -15,13 +15,7 @@ import { PlayerGateScreen } from './gate/player/PlayerGateScreen';
 import { useGateRoute } from './gate/useGateParams';
 import { createSecureSecretStore } from './storage';
 
-/**
- * Root component that `index.ts` registers, with the raw Android key source provided to both branches.
- * Development builds (`extra.gate`) open the list, import or player gate when an `elviptv://gate/*`
- * link started the app; otherwise mounts the cross-platform `SourcesScreen` (#71).
- */
-export function App() {
-  const gate = useGateRoute();
+function SourcesRoot() {
   const [refreshToken, setRefreshToken] = useState(0);
 
   const i18n = useMemo(() => {
@@ -43,7 +37,6 @@ export function App() {
   const catalog = useMemo(() => createLazyCatalog(openSharedCatalog), [openSharedCatalog]);
 
   useEffect(() => {
-    if (gate !== undefined) return;
     let cancelled = false;
     if (__DEV__) {
       const { normalizeSeedForTarget, readEmbeddedDevSeed, runDevSeedOnce } =
@@ -71,7 +64,36 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [gate, openSharedCatalog]);
+  }, [openSharedCatalog]);
+
+  return (
+    <FormFactorProvider>
+      <I18nProvider i18n={i18n}>
+        <SourcesScreen catalog={catalog} externalRefreshToken={refreshToken} />
+        <StatusBar style="light" />
+      </I18nProvider>
+    </FormFactorProvider>
+  );
+}
+
+/**
+ * Root component that `index.ts` registers, with the raw Android key source provided to both branches.
+ * Development builds (`extra.gate`) open the list, import or player gate when an `elviptv://gate/*`
+ * link started the app (holding off `SourcesRoot` until `Linking.getInitialURL()` settles so gate runs
+ * never open `catalog.db`, localization, or `SourcesScreen`); otherwise mounts `SourcesScreen` (#71).
+ */
+export function App() {
+  const gate = useGateRoute();
+
+  if (gate === 'pending') {
+    return (
+      <RemoteKeysProvider android={remoteKeys}>
+        <View style={styles.pending}>
+          <StatusBar style="light" />
+        </View>
+      </RemoteKeysProvider>
+    );
+  }
 
   if (gate !== undefined) {
     return (
@@ -90,12 +112,11 @@ export function App() {
 
   return (
     <RemoteKeysProvider android={remoteKeys}>
-      <FormFactorProvider>
-        <I18nProvider i18n={i18n}>
-          <SourcesScreen catalog={catalog} externalRefreshToken={refreshToken} />
-          <StatusBar style="light" />
-        </I18nProvider>
-      </FormFactorProvider>
+      <SourcesRoot />
     </RemoteKeysProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  pending: { flex: 1, backgroundColor: '#0b0e14' },
+});

@@ -10,8 +10,7 @@ import { resolveGate } from './gate/params.ts';
 // for an unpackaged `--elv-gate=` launch, and the preload flags gate mode; a page with just the query gets no gate.
 const GATE = resolveGate(window.location.search, window.elv);
 
-/** Root of the desktop renderer: mounts the gate harness on `--elv-gate=` launches and `SourcesScreen` (#71) otherwise. */
-export function App() {
+function SourcesRoot() {
   const [refreshToken, setRefreshToken] = useState(0);
 
   const i18n = useMemo(() => {
@@ -22,15 +21,12 @@ export function App() {
   const catalog = useMemo(() => createLazyCatalog(() => createDesktopCatalog()), []);
 
   useEffect(() => {
-    if (GATE) return;
     const bridge = window.elv?.catalog;
     if (!bridge || typeof bridge.onChanged !== 'function') return;
     return bridge.onChanged(() => {
       setRefreshToken((n) => n + 1);
     });
   }, []);
-
-  if (GATE) return <GateScreen params={GATE} />;
 
   return (
     <FormFactorProvider value="desktop">
@@ -39,4 +35,10 @@ export function App() {
       </I18nProvider>
     </FormFactorProvider>
   );
+}
+
+/** Root of the desktop renderer: mounts the gate harness on `--elv-gate=` launches and `SourcesScreen` (#71) otherwise. */
+export function App() {
+  if (GATE) return <GateScreen params={GATE} />;
+  return <SourcesRoot />;
 }

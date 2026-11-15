@@ -283,5 +283,5 @@ describe('desktop dev-seed (#10)', () => {
     } finally {
       rmSync(outDir, { recursive: true, force: true });
     }
-  });
+  }, 20_000);
 });

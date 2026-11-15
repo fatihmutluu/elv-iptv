@@ -1,8 +1,12 @@
+import * as opSqlite from '@op-engineering/op-sqlite';
 import { act, render, screen } from '@testing-library/react-native';
+import * as expoLocalization from 'expo-localization';
+import * as expoSecureStore from 'expo-secure-store';
 import { Linking, Platform, Settings } from 'react-native';
 import { App } from '../App';
 
 let mockGate = false;
+let mockSeed: Record<string, unknown> | undefined;
 let mockListener: ((event: unknown) => void) | undefined;
 jest.mock('@elv/remote-keys', () => ({
   remoteKeys: {
@@ -18,7 +22,7 @@ jest.mock('@elv/engine-media3', () => ({
 }));
 jest.mock('@op-engineering/op-sqlite', () => ({ open: jest.fn() }));
 jest.mock('expo-localization', () => ({
-  getLocales: () => [{ languageTag: 'en-US', languageCode: 'en' }],
+  getLocales: jest.fn(() => [{ languageTag: 'en-US', languageCode: 'en' }]),
 }));
 jest.mock('expo-secure-store', () => ({
   getItemAsync: jest.fn(async () => null),
@@ -30,7 +34,12 @@ jest.mock('expo-constants', () => ({
   __esModule: true,
   default: {
     get expoConfig() {
-      return { extra: mockGate ? { gate: true } : {} };
+      return {
+        extra: {
+          ...(mockGate ? { gate: true } : {}),
+          ...(mockSeed === undefined ? {} : { seed: mockSeed }),
+        },
+      };
     },
   },
 }));
@@ -62,8 +71,10 @@ function launchedWith(value: unknown) {
 }
 
 afterEach(() => {
+  jest.clearAllMocks();
   jest.restoreAllMocks();
   mockGate = false;
+  mockSeed = undefined;
 });
 
 describe('App', () => {
@@ -86,17 +97,33 @@ describe('App', () => {
     mockGate = true;
     openedWith(null);
     await render(<App />);
+    expect(await screen.findByTestId('sources-screen')).toBeOnTheScreen();
     expect(screen.getByText('ELV IPTV')).toBeOnTheScreen();
-    expect(screen.getByTestId('sources-screen')).toBeOnTheScreen();
     expect(screen.queryByTestId('gate-list')).toBeNull();
   });
 
-  it('opens the gate list from the initial URL in a gate build', async () => {
+  it('opens the gate list from the initial URL in a gate build without touching catalog, i18n, or dev seed', async () => {
     mockGate = true;
+    mockSeed = {
+      kind: 'm3u',
+      name: 'Dev Sim',
+      playlistUrl: 'http://127.0.0.1:7878/m3u/demo.m3u',
+    };
     openedWith(GATE_URL);
     await render(<App />);
     expect(await screen.findByTestId('gate-list')).toBeOnTheScreen();
     expect(screen.queryByTestId('sources-screen')).toBeNull();
+    expect(opSqlite.open).not.toHaveBeenCalled();
+    expect(expoLocalization.getLocales).not.toHaveBeenCalled();
+    expect(expoSecureStore.getItemAsync).not.toHaveBeenCalled();
+  });
+
+  it('falls back to SourcesScreen when getInitialURL rejects in a gate build', async () => {
+    mockGate = true;
+    jest.spyOn(Linking, 'getInitialURL').mockRejectedValue(new Error('bridge unavailable'));
+    jest.spyOn(Linking, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+    await render(<App />);
+    expect(await screen.findByTestId('sources-screen')).toBeOnTheScreen();
   });
 
   it('opens the player gate from its URL in a gate build', async () => {
@@ -137,13 +164,14 @@ describe('App', () => {
     openedWith(null);
     launchedWith(42);
     await render(<App />);
-    expect(screen.getByTestId('sources-screen')).toBeOnTheScreen();
+    expect(await screen.findByTestId('sources-screen')).toBeOnTheScreen();
   });
 
   it('opens the gate list from a URL event and unsubscribes on unmount', async () => {
     mockGate = true;
     const { add, remove } = openedWith(null);
     const view = await render(<App />);
+    await screen.findByTestId('sources-screen');
     const handler = add.mock.calls[0]?.[1] as (event: { url: string }) => void;
     await act(async () => handler({ url: GATE_URL }));
     expect(await screen.findByTestId('gate-list')).toBeOnTheScreen();
