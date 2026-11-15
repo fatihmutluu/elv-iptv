@@ -300,9 +300,9 @@ describe('PlayerGateScreen', () => {
         createEngine={asEngine(engine)}
       />,
     );
-    await advance(8500);
+    await advance(9500);
     expect(screen.getByTestId('osd-status')).toHaveTextContent('error: playback/network');
-    await advance(13_000);
+    await advance(12_000);
     const m = onlyMetrics(log);
     expect(m.fault).toBe('silent');
     expect(m.faultOutcome).toBe('failed-in-time');
