@@ -167,12 +167,21 @@ describe('@elv/i18n', () => {
     }
   });
 
-  it('formats navigation, browse, series, and player strings in English and Turkish', () => {
+  it('formats navigation, browse, series, player, and notices strings in English and Turkish', () => {
     const en = createAppI18n('en');
     expect(en.t('nav.live')).toBe('Live');
     expect(en.t('nav.movies')).toBe('Movies');
     expect(en.t('nav.series')).toBe('Series');
     expect(en.t('nav.sources')).toBe('Sources');
+    expect(en.t('nav.notices')).toBe('Notices');
+    expect(en.t('notices.title')).toBe('Third-party software notices');
+    expect(en.t('notices.lgplSummary')).toContain('LGPL');
+    expect(en.t('notices.version')).toBe('Version');
+    expect(en.t('notices.license')).toBe('License');
+    expect(en.t('notices.platforms')).toBe('Platforms');
+    expect(en.t('notices.source')).toBe('Source');
+    expect(en.t('notices.unmodified')).toContain('Unmodified');
+    expect(en.t('notices.backToList')).toBe('Back to notices');
     expect(en.t('browse.categoryCount', { name: 'General', count: 25000 })).toBe('General (25000)');
     expect(en.t('series.seasonCount', { season: 2, count: 8 })).toBe('Season 2 (8)');
     expect(en.t('series.episodeTitled', { episode: 1, title: 'Pilot' })).toBe('E1 · Pilot');
@@ -185,6 +194,15 @@ describe('@elv/i18n', () => {
     expect(tr.t('nav.movies')).toBe('Filmler');
     expect(tr.t('nav.series')).toBe('Diziler');
     expect(tr.t('nav.sources')).toBe('Kaynaklar');
+    expect(tr.t('nav.notices')).toBe('Lisanslar');
+    expect(tr.t('notices.title')).toBe('Üçüncü taraf yazılım bildirimleri');
+    expect(tr.t('notices.lgplSummary')).toContain('LGPL');
+    expect(tr.t('notices.version')).toBe('Sürüm');
+    expect(tr.t('notices.license')).toBe('Lisans');
+    expect(tr.t('notices.platforms')).toBe('Platformlar');
+    expect(tr.t('notices.source')).toBe('Kaynak');
+    expect(tr.t('notices.unmodified')).toContain('Değiştirilmemiş');
+    expect(tr.t('notices.backToList')).toBe('Bildirimlere dön');
     expect(tr.t('browse.categoryCount', { name: 'Genel', count: 42 })).toBe('Genel (42)');
     expect(tr.t('series.seasonCount', { season: 2, count: 8 })).toBe('2. Sezon (8)');
     expect(tr.t('series.episodeTitled', { episode: 1, title: 'Başlangıç' })).toBe('B1 · Başlangıç');

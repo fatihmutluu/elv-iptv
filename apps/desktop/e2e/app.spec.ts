@@ -19,6 +19,11 @@ test('opens a window titled ELV IPTV that mounts SourcesScreen on desktop', asyn
       () => typeof (globalThis as { require?: unknown }).require !== 'undefined',
     );
     expect(hasNodeRequire).toBe(false);
+
+    await window.getByTestId('nav-tab-notices').click();
+    await expect(window.getByTestId('notices-screen')).toBeVisible();
+    await expect(window.getByTestId('notices-item-desktop-libmpv')).toBeVisible();
+    await expect(window.getByTestId('notices-detail-name')).toContainText('AetherEngine');
   } finally {
     await app.close();
     rmSync(userDataDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });

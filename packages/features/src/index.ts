@@ -1,5 +1,6 @@
 export { AppShell, type AppShellProps, type AppTab } from './AppShell';
 export * from './browse';
+export * from './notices';
 export * from './player';
 export {
   type AppLifecyclePort,
