@@ -30,6 +30,11 @@ export interface CatalogPortMessage {
   connectId: number;
 }
 
+/** Main to preload (`catalog:disconnected`): signals that the catalog utility process exited. */
+export interface CatalogDisconnectedMessage {
+  reason: 'worker-exited';
+}
+
 /** Discriminated RPC call payload sent over a client `MessagePort` to the catalog utility process. */
 export type CatalogRpcMethodCall =
   | { method: 'ping' }
