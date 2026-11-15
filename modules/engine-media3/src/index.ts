@@ -21,6 +21,8 @@ interface NativeLoadCommand {
   kind: LoadCommand['kind'];
   startMs?: number;
   softwareAudio?: boolean;
+  audioTrackId?: string;
+  subtitleTrackId?: string | null;
 }
 
 /** An `onEngineEvent` payload; its `atMs` values are `SystemClock.uptimeMillis()` stamps. */
@@ -33,6 +35,8 @@ interface NativeEngine {
   play(attempt: AttemptToken): void;
   pause(attempt: AttemptToken): void;
   seek(attempt: AttemptToken, positionMs: number): void;
+  selectAudioTrack(attempt: AttemptToken, id: string): void;
+  selectSubtitleTrack(attempt: AttemptToken, id: string | null): void;
   stop(attempt: AttemptToken): void;
   recreate(attempt: AttemptToken): void;
   /** SharedObject release: detaches the JS object; the native side then releases the player. */
@@ -54,8 +58,8 @@ const CAPABILITIES: EngineCapabilities = Object.freeze({
   liveSeek: false,
   softwareAudioFallback: true,
   recreate: true,
-  audioTrackSelection: false,
-  subtitleTrackSelection: false,
+  audioTrackSelection: true,
+  subtitleTrackSelection: true,
 });
 
 function toNativeLoad(cmd: LoadCommand): NativeLoadCommand {
@@ -67,6 +71,8 @@ function toNativeLoad(cmd: LoadCommand): NativeLoadCommand {
     kind,
     ...(startMs === undefined ? {} : { startMs }),
     ...(options?.softwareAudio === undefined ? {} : { softwareAudio: options.softwareAudio }),
+    ...(options?.audioTrackId === undefined ? {} : { audioTrackId: options.audioTrackId }),
+    ...(options?.subtitleTrackId === undefined ? {} : { subtitleTrackId: options.subtitleTrackId }),
   };
 }
 
@@ -108,6 +114,12 @@ function wrap(module: NativeEngineModule): PlayerEngine {
     play: command((attempt: AttemptToken) => native.play(attempt)),
     pause: command((attempt: AttemptToken) => native.pause(attempt)),
     seek: command((attempt: AttemptToken, positionMs: number) => native.seek(attempt, positionMs)),
+    selectAudioTrack: command((attempt: AttemptToken, id: string) =>
+      native.selectAudioTrack(attempt, id),
+    ),
+    selectSubtitleTrack: command((attempt: AttemptToken, id: string | null) =>
+      native.selectSubtitleTrack(attempt, id),
+    ),
     stop: command((attempt: AttemptToken) => native.stop(attempt)),
     recreate: command((attempt: AttemptToken) => native.recreate(attempt)),
     release() {
@@ -170,11 +182,11 @@ const NativeSurfaceView: ComponentType<NativeSurfaceProps> | null =
     : requireNativeViewManager<NativeSurfaceProps>('ElvEngineMedia3', 'Media3SurfaceView');
 
 /**
- * The video surface of a Media3 engine (player core spec 6.1): a `SurfaceView` fixed at creation with a black zap
- * shutter above it that the engine shows from every `load` until that media's first frame, natively. The picture
- * keeps its display aspect ratio (`resizeMode`), and the screen stays on while the engine plays. The engine sends
- * `surface` `created` and `destroyed` events as the view's surface comes and goes. Renders nothing where the native
- * module is absent, or for an engine this module did not create or that was released.
+ * The video surface of a Media3 engine (player core spec 6.1): a `SurfaceView` fixed at creation and a `SubtitleView`
+ * above it, both under a black zap shutter that the engine shows from every `load` until that media's first frame,
+ * natively. The picture keeps its display aspect ratio (`resizeMode`), and the screen stays on while the engine plays.
+ * The engine sends `surface` `created` and `destroyed` events as the view's surface comes and goes. Renders nothing
+ * where the native module is absent, or for an engine this module did not create or that was released.
  */
 export function Media3Surface({
   engine,

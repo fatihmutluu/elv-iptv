@@ -11,7 +11,10 @@ import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
+import androidx.media3.common.text.Cue
+import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
@@ -36,6 +39,9 @@ internal interface ViewSink {
 
   /** Whether playback wants the screen kept on ([keepsScreenOn]). */
   fun onScreenOn(on: Boolean)
+
+  /** Active text/bitmap subtitle cues to render inside `SubtitleView` (empty clears visible subtitles). */
+  fun onCues(cues: List<Cue>) = Unit
 }
 
 /**
@@ -89,11 +95,32 @@ class Media3Engine : SharedObject {
     { onFramed() },
     { cue, played -> onCue(cue, played) },
   )
+  private val tracksBridge = TrackSelectorBridge(
+    onTracks = { snapshot ->
+      if (request != null) sendEvent(mapOf("type" to "tracks", "tracks" to snapshot))
+    },
+    onClearCues = { clearCues() },
+  )
   private val pictures = object : Player.Listener {
     override fun onVideoSizeChanged(videoSize: VideoSize) {
       view?.onVideoSize(videoSize.width, videoSize.height, videoSize.pixelWidthHeightRatio)
     }
+
+    override fun onTracksChanged(tracks: Tracks) {
+      val current = player ?: return
+      if (request == null) return
+      tracksBridge.onTracksChanged(current, tracks)
+    }
+
+    override fun onCues(cueGroup: CueGroup) {
+      if (request == null || tracksBridge.isTextDisabled) return
+      currentCues = cueGroup.cues
+      view?.onCues(cueGroup.cues)
+    }
   }
+
+  /** Optional hook for JVM/instrumentation tests without a React `AppContext` to observe outgoing engine events. */
+  internal var eventObserverForTest: ((Map<String, Any?>) -> Unit)? = null
 
   /** The surface the view offers, written on the UI thread; an attach that a detach overtook is skipped. */
   @Volatile private var offered: Surface? = null
@@ -104,6 +131,8 @@ class Media3Engine : SharedObject {
   private var token = 0
   private var generation = 0L
   private var request: LoadRequest? = null
+  private var lastVodPositionMs: Long? = null
+  private var currentCues: List<Cue> = emptyList()
   private var surface: Surface? = null
   private var media = 0L
   private var framed = false
@@ -114,24 +143,28 @@ class Media3Engine : SharedObject {
   override val releasesAfterPendingViewUpdates: Boolean = true
 
   /**
-   * Starts a new media: the previous one is stopped, a new connection-gate generation begins and the zap shutter
-   * covers the surface until this media's first frame.
+   * Starts a new media: the previous one is stopped, a new connection-gate generation begins, stale subtitle cues are
+   * cleared and the zap shutter covers the surface until this media's first frame.
    */
   internal fun load(attempt: Int, next: LoadRequest) = post {
     reporter.end()
     token = attempt
     request = next
+    lastVodPositionMs = if (next.live) null else next.startMs?.coerceAtLeast(0L)
+    tracksBridge.onLoad(next)
+    clearCues()
     media += 1
     framed = false
     view?.onShutter(media, false)
     prepare(next, next.startMs)
   }
 
-  /** Re-prepares the current media with a fresh connection: live at the edge, VOD at the current position. */
+  /** Re-prepares the current media with a fresh connection: live at the edge, VOD at the last known position. */
   fun retry(attempt: Int) = post {
     adopt(attempt)
     val current = request ?: return@post
-    val position = if (current.live) null else player?.currentPosition
+    snapshotVodPosition()
+    val position = if (current.live) null else (lastVodPositionMs ?: current.startMs)
     prepare(current, position)
   }
 
@@ -148,8 +181,22 @@ class Media3Engine : SharedObject {
   /** Seeks when the media allows it; raw live MPEG-TS has no seek. */
   fun seek(attempt: Int, positionMs: Long) = post {
     adopt(attempt)
+    val clamped = positionMs.coerceAtLeast(0L)
+    if (request?.live == false) lastVodPositionMs = clamped
     val current = player ?: return@post
-    if (current.isCurrentMediaItemSeekable) current.seekTo(positionMs.coerceAtLeast(0L))
+    if (current.isCurrentMediaItemSeekable) current.seekTo(clamped)
+  }
+
+  /** Selects audio track [id] on the current media without restarting playback. */
+  fun selectAudioTrack(attempt: Int, id: String) = post {
+    adopt(attempt)
+    tracksBridge.selectAudioTrack(player, id)
+  }
+
+  /** Selects subtitle track [id] on the current media, or disables subtitles and clears cues when [id] is `null`. */
+  fun selectSubtitleTrack(attempt: Int, id: String?) = post {
+    adopt(attempt)
+    tracksBridge.selectSubtitleTrack(player, id)
   }
 
   /** Stops the media and closes its connections; later requests of it are refused by the gate. The screen may sleep. */
@@ -157,6 +204,9 @@ class Media3Engine : SharedObject {
     adopt(attempt)
     reporter.end()
     request = null
+    lastVodPositionMs = null
+    tracksBridge.onStop()
+    clearCues()
     beginGeneration()
     player?.stop()
     player?.clearMediaItems()
@@ -166,6 +216,9 @@ class Media3Engine : SharedObject {
   /** Releases ExoPlayer and builds a new one on the same thread and surface; it stays idle until `load` or `retry`. */
   fun recreate(attempt: Int) = post {
     adopt(attempt)
+    snapshotVodPosition()
+    tracksBridge.onPrepareReuse()
+    clearCues()
     reporter.end()
     beginGeneration()
     releasePlayer()
@@ -211,6 +264,7 @@ class Media3Engine : SharedObject {
     sink.onShutter(media, framed)
     player?.videoSize?.let { sink.onVideoSize(it.width, it.height, it.pixelWidthHeightRatio) }
     sink.onScreenOn(screenOn)
+    sink.onCues(currentCues)
   }
 
   internal fun unbindView(sink: ViewSink) = post {
@@ -228,6 +282,9 @@ class Media3Engine : SharedObject {
     handler.post {
       reporter.end()
       request = null
+      lastVodPositionMs = null
+      tracksBridge.onStop()
+      clearCues()
       onCue(ScreenCue.STOP, played = false)
       beginGeneration()
       http.dispatcher.cancelAll()
@@ -264,6 +321,20 @@ class Media3Engine : SharedObject {
     sendEvent(mapOf("type" to "surface", "change" to "destroyed"))
   }
 
+  private fun snapshotVodPosition() {
+    val currentRequest = request ?: return
+    if (currentRequest.live) return
+    val p = player ?: return
+    if (p.mediaItemCount > 0) {
+      lastVodPositionMs = p.currentPosition.coerceAtLeast(0L)
+    }
+  }
+
+  private fun clearCues() {
+    currentCues = emptyList()
+    view?.onCues(emptyList())
+  }
+
   /** The current prepare rendered its first frame: the media's shutter lifts. */
   private fun onFramed() {
     if (framed || media == 0L) return
@@ -284,8 +355,11 @@ class Media3Engine : SharedObject {
   }
 
   private fun sendEvent(fields: Map<String, Any?>) {
-    if (disposed.get() || !hasAppContext) return
-    emit(EVENT, fields + ("attempt" to token))
+    if (disposed.get()) return
+    val payload = fields + ("attempt" to token)
+    eventObserverForTest?.invoke(payload)
+    if (!hasAppContext) return
+    emit(EVENT, payload)
   }
 
   private fun beginGeneration() {
@@ -311,6 +385,7 @@ class Media3Engine : SharedObject {
 
   private fun prepare(next: LoadRequest, positionMs: Long?, newGeneration: Boolean = true) {
     reporter.end()
+    tracksBridge.onPrepareReuse()
     if (newGeneration) beginGeneration()
     if (player == null || playerSoftwareAudio != next.softwareAudio) {
       releasePlayer()
@@ -319,6 +394,7 @@ class Media3Engine : SharedObject {
       player?.stop()
     }
     val current = player ?: return
+    tracksBridge.applyInitialParameters(current)
     val manifestLoaded = AtomicBoolean(false)
     reporter.begin(current, next.live, manifestLoaded)
     val source = createMediaSource(next, gate, generation, manifestLoaded, http)

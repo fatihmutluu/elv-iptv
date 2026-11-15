@@ -29,6 +29,8 @@ function fakeNative() {
     play: vi.fn(),
     pause: vi.fn(),
     seek: vi.fn(),
+    selectAudioTrack: vi.fn(),
+    selectSubtitleTrack: vi.fn(),
     stop: vi.fn(),
     recreate: vi.fn(),
     release: vi.fn(),
@@ -76,8 +78,8 @@ describe('createMedia3Engine', () => {
       liveSeek: false,
       softwareAudioFallback: true,
       recreate: true,
-      audioTrackSelection: false,
-      subtitleTrackSelection: false,
+      audioTrackSelection: true,
+      subtitleTrackSelection: true,
     });
   });
 
@@ -90,12 +92,15 @@ describe('createMedia3Engine', () => {
       headers: { 'User-Agent': 'ua' },
       kind: 'live',
       startMs: 5_000,
-      options: { softwareAudio: true },
+      options: { softwareAudio: true, audioTrackId: '1:0', subtitleTrackId: null },
     });
     engine?.retry(4);
     engine?.play(4);
     engine?.pause(4);
     engine?.seek(5, 12_000);
+    engine?.selectAudioTrack?.(5, '1:1');
+    engine?.selectSubtitleTrack?.(5, '2:0');
+    engine?.selectSubtitleTrack?.(6, null);
     engine?.stop(6);
     engine?.recreate(7);
     expect(native.engine.load).toHaveBeenCalledWith({
@@ -105,11 +110,16 @@ describe('createMedia3Engine', () => {
       kind: 'live',
       startMs: 5_000,
       softwareAudio: true,
+      audioTrackId: '1:0',
+      subtitleTrackId: null,
     });
     expect(native.engine.retry).toHaveBeenCalledWith(4);
     expect(native.engine.play).toHaveBeenCalledWith(4);
     expect(native.engine.pause).toHaveBeenCalledWith(4);
     expect(native.engine.seek).toHaveBeenCalledWith(5, 12_000);
+    expect(native.engine.selectAudioTrack).toHaveBeenCalledWith(5, '1:1');
+    expect(native.engine.selectSubtitleTrack).toHaveBeenNthCalledWith(1, 5, '2:0');
+    expect(native.engine.selectSubtitleTrack).toHaveBeenNthCalledWith(2, 6, null);
     expect(native.engine.stop).toHaveBeenCalledWith(6);
     expect(native.engine.recreate).toHaveBeenCalledWith(7);
   });
@@ -171,6 +181,16 @@ describe('createMedia3Engine', () => {
       { attempt: 1, type: 'state', state: 'playing' },
       { attempt: 1, type: 'error', error: { code: 'http-509', httpStatus: 509, detail: 'x' } },
       { attempt: 1, type: 'surface', change: 'destroyed' },
+      {
+        attempt: 1,
+        type: 'tracks',
+        tracks: {
+          audio: [{ id: '1:0', language: 'tr' }],
+          subtitles: [],
+          selectedAudioId: '1:0',
+          selectedSubtitleId: null,
+        },
+      },
     ];
     for (const event of unchanged) native.emit(event);
     expect(events).toEqual(unchanged);
