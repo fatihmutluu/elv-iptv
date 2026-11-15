@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ACCOUNTS, type Account } from './accounts.ts';
 import { buildCatalog } from './catalog.ts';
 import { baseUrlOf, type RequestMeta, type RouteHandler, type SimContext } from './context.ts';
-import { mediaType } from './faults.ts';
+import { burstSeconds, mediaType } from './faults.ts';
 import { hlsPlaylist, masterPlaylist } from './hls.ts';
 import { spawnLive } from './media.ts';
 import { RECIPES, type RecipeName } from './recipes.ts';
@@ -70,7 +70,7 @@ async function serveLive(
     res.end();
     return;
   }
-  const live = spawnLive(ffmpeg, files.loopTs, ctx.children);
+  const live = spawnLive(ffmpeg, files.loopTs, ctx.children, { burstSec: burstSeconds(faults) });
   ctx.liveProcesses.add(live);
   void live.exited.then(() => ctx.liveProcesses.delete(live));
   res.once('close', live.stop);

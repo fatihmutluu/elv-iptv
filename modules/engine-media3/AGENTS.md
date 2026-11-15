@@ -7,7 +7,7 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
   creates a native `Engine` shared object; `release()` frees it (later calls are no-ops). `Media3Surface({ engine,
   style?, resizeMode?, testID? })` renders `Media3SurfaceView` bound to that object (one view per engine), else `null`.
 - Native: `load(flattened LoadCommand)`, `retry`, `play`, `pause`, `seek`, `selectAudioTrack`, `selectSubtitleTrack`,
-  `stop`, `recreate`, event `onEngineEvent` (`atMs` uptime -> JS `performance.now() - max(0, uptimeMs() - atMs)`), sync
+  `stop`, `recreate`, event `onEngineEvent` (`atMs` uptime, mapped via `@elv/playback`'s `bridgeNativeEngine`), sync
   `uptimeMs()`. `load` takes its token, others adopt a newer one. Capabilities: all true except `liveSeek: false`.
 
 ## Threading and view

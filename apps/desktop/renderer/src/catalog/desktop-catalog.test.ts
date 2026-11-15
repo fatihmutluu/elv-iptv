@@ -60,6 +60,7 @@ function makeFakeBridge(overrides?: Partial<CatalogBridge>): {
     episodes: async () => [],
     resolveStream: async () =>
       ok({ url: 'http://127.0.0.1:7879/live/demo/demo/1.ts', headers: {} }),
+    onChanged: () => () => undefined,
     close: async () => undefined,
   };
 

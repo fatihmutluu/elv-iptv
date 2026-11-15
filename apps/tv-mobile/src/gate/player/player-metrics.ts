@@ -1,4 +1,4 @@
-import type { PlaybackState } from '@elv/playback';
+import { type ClockAnchor, type PlaybackState, positionAt } from '@elv/playback';
 import type { PlayerFault } from './player-routes';
 
 /**
@@ -6,6 +6,25 @@ import type { PlayerFault } from './player-routes';
  * expected outcome of a slow start).
  */
 type FaultOutcome = 'recovered' | 'failed-in-time' | 'limited-backoff' | 'left' | 'missed';
+
+type PlayerFinal = 'playing' | 'failed' | 'limited' | 'other';
+
+interface SoakMetrics {
+  /** The run's soak minutes. */
+  minutes: number;
+  /** First frame to the line; 0 without a frame. */
+  playedMs: number;
+  /** Position at the line minus the position at the first frame (from the first anchor after it); 0 without one. */
+  positionAdvancedMs: number;
+  /** Engine stall starts of the current attempt after the first frame. */
+  stalls: number;
+  /** Longest of those stalls, start to end; one still open counts until the line. */
+  longestStallMs: number;
+  /** The service reached `ended`. */
+  ended: boolean;
+  /** Duration of the last anchor; `null` when it had none. */
+  durationMs: number | null;
+}
 
 /** What the single `ELV_GATE_PLAYER` line carries. Times are milliseconds rounded to 0.01; `null`: nothing measured. */
 export interface PlayerMetrics {
@@ -30,6 +49,10 @@ export interface PlayerMetrics {
   faultOutcome: FaultOutcome | null;
   /** Zaps dispatched. */
   zaps: number;
+  /** The service status kind when the line is printed. */
+  final: PlayerFinal;
+  /** Soak measurements; `null` in a normal run. */
+  soak: SoakMetrics | null;
 }
 
 /** Records the gate's spans and counters from the playback service's states. */
@@ -46,7 +69,7 @@ export interface PlayerRecorder {
    */
   stall(phase: 'start' | 'end'): void;
   surface(change: 'created' | 'destroyed'): void;
-  /** The line's metrics; `final` is the service state at the end of the run. */
+  /** The line's metrics; `final` is the service state at the end of the run, the print time is `now()`. */
   finish(final: PlaybackState): PlayerMetrics;
 }
 
@@ -74,11 +97,81 @@ function nearestRank(sorted: readonly number[], p: number): number | null {
 
 const ascending = (values: readonly number[]): number[] => [...values].sort((a, b) => a - b);
 
-/** Creates a recorder for a run with `fault` injected into `faultItem` (`channels[0]`). */
+const finalKind = (status: PlaybackState['status']): PlayerFinal =>
+  status.kind === 'playing' || status.kind === 'failed' || status.kind === 'limited'
+    ? status.kind
+    : 'other';
+
+interface SoakTracker {
+  observe(state: PlaybackState): void;
+  stall(phase: 'start' | 'end'): void;
+  finish(final: PlaybackState, minutes: number): SoakMetrics;
+}
+
+function createSoakTracker(now: () => number): SoakTracker {
+  let firstFrameAt: number | undefined;
+  let firstAnchor: ClockAnchor | undefined;
+  let lastAnchor: ClockAnchor | undefined;
+  let ended = false;
+  let stalls = 0;
+  let stallStart: number | undefined;
+  let longest = 0;
+  return {
+    observe(state) {
+      if (state.status.kind === 'ended') ended = true;
+      firstFrameAt ??= state.firstFrameAt;
+      const previousAnchor = lastAnchor;
+      if (state.anchor !== undefined) lastAnchor = state.anchor;
+      if (
+        firstFrameAt !== undefined &&
+        state.anchor !== undefined &&
+        state.anchor !== previousAnchor
+      ) {
+        firstAnchor ??= state.anchor;
+      }
+    },
+    stall(phase) {
+      if (firstFrameAt === undefined) return;
+      if (phase === 'start') {
+        stalls += 1;
+        stallStart ??= now();
+      } else if (stallStart !== undefined) {
+        longest = Math.max(longest, now() - stallStart);
+        stallStart = undefined;
+      }
+    },
+    finish(final, minutes) {
+      const at = now();
+      const open = stallStart === undefined ? 0 : at - stallStart;
+      const anchor = final.anchor ?? lastAnchor;
+      const advanced =
+        anchor === undefined || firstAnchor === undefined || firstFrameAt === undefined
+          ? 0
+          : positionAt(anchor, at) - positionAt(firstAnchor, firstFrameAt);
+      return {
+        minutes,
+        playedMs: firstFrameAt === undefined ? 0 : round(at - firstFrameAt),
+        positionAdvancedMs: round(advanced),
+        stalls,
+        longestStallMs: round(Math.max(longest, open)),
+        ended,
+        durationMs: anchor?.durationMs ?? null,
+      };
+    },
+  };
+}
+
+/**
+ * Creates a recorder for a run with `fault` injected into `faultItem` (`channels[0]`); `soak` (minutes) adds the soak
+ * block to the line, `now` is the service clock.
+ */
 export function createPlayerRecorder(opts: {
   fault: PlayerFault;
   faultItem: string;
+  soak?: number;
+  now: () => number;
 }): PlayerRecorder {
+  const soak = createSoakTracker(opts.now);
   let expected: string | undefined;
   let pendingZap: number | undefined;
   let awaiting = false;
@@ -170,9 +263,11 @@ export function createPlayerRecorder(opts: {
       if (current === undefined) return;
       trackStatus(current, state.status);
       closeSpan(current, state);
+      soak.observe(state);
     },
     stall(phase) {
       if (current === undefined) return;
+      soak.stall(phase);
       if (phase === 'start') current.stalled = true;
       else if (current.stalled && previous?.kind === 'playing') current.recovered = true;
     },
@@ -199,6 +294,8 @@ export function createPlayerRecorder(opts: {
         fault: opts.fault,
         faultOutcome: opts.fault === '' ? null : (outcome ?? 'missed'),
         zaps,
+        final: finalKind(final.status),
+        soak: opts.soak === undefined ? null : soak.finish(final, opts.soak),
       };
     },
   };

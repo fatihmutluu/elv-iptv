@@ -1,5 +1,6 @@
 import type {
   AttemptToken,
+  ClockAnchor,
   EngineCapabilities,
   EngineError,
   EngineEvent,
@@ -27,7 +28,7 @@ export interface FakeEngineOptions {
   now: () => number;
   schedule: (fn: () => void, ms: number) => unknown;
   cancel: (handle: unknown) => void;
-  /** Emits a `clock` anchor (rate 1 / 0) after `play` / `pause`, as real engines do; off by default. */
+  /** Emits an extrapolated `clock` anchor (rate 1 / 0) after `play` / `pause`, as real engines do; off by default. */
   anchorOnPlayPause?: boolean;
 }
 
@@ -78,9 +79,17 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
   let open = 0;
   let maxOpen = 0;
   let released = false;
-  let positionMs = 0;
+  let last: ClockAnchor = { positionMs: 0, atMs: opts.now(), rate: 0 };
+  let failed = false;
+
+  const note = (event: EngineEvent): void => {
+    if (event.attempt !== token || url === undefined) return;
+    if (event.type === 'clock') last = event.anchor;
+    if (event.type === 'error') failed = true;
+  };
 
   const deliver = (event: EngineEvent): void => {
+    note(event);
     for (const listener of [...listeners]) listener(event);
   };
 
@@ -102,7 +111,6 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
       case 'firstFrame':
         return { attempt, type: 'firstFrame', atMs };
       case 'clock':
-        positionMs = step.positionMs;
         return {
           attempt,
           type: 'clock',
@@ -126,19 +134,14 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
     }
   };
 
+  /** A paused or resumed media anchors where its latest anchor has moved to; a failed media is idle and anchors nothing. */
   const anchorNow = (rate: number): void => {
-    if (url === undefined || !opts.anchorOnPlayPause) return;
-    handles.push(
-      opts.schedule(
-        () =>
-          deliver({
-            attempt: token,
-            type: 'clock',
-            anchor: { positionMs, atMs: opts.now(), rate },
-          }),
-        0,
-      ),
-    );
+    if (url === undefined || failed || !opts.anchorOnPlayPause) return;
+    const atMs = opts.now();
+    const positionMs = last.positionMs + Math.max(0, atMs - last.atMs) * last.rate;
+    last = { positionMs, atMs, rate };
+    const anchor = last;
+    handles.push(opts.schedule(() => deliver({ attempt: token, type: 'clock', anchor }), 0));
   };
 
   const closeMedia = (): void => {
@@ -159,7 +162,8 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
       if (url !== undefined) closeMedia();
       token = cmd.attempt;
       url = cmd.url;
-      positionMs = cmd.startMs ?? 0;
+      last = { positionMs: cmd.startMs ?? 0, atMs: opts.now(), rate: 0 };
+      failed = false;
       open += 1;
       maxOpen = Math.max(maxOpen, open);
       runScript();
@@ -167,6 +171,7 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
     retry(attempt) {
       commands.push({ name: 'retry', attempt });
       adopt(attempt);
+      failed = false;
       runScript();
     },
     recreate(attempt) {
@@ -187,7 +192,7 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
     seek(attempt, nextPos) {
       commands.push({ name: 'seek', attempt, positionMs: nextPos });
       adopt(attempt);
-      positionMs = nextPos;
+      last = { ...last, positionMs: nextPos, atMs: opts.now() };
     },
     selectAudioTrack(attempt, id) {
       commands.push({ name: 'selectAudioTrack', attempt, trackId: id });

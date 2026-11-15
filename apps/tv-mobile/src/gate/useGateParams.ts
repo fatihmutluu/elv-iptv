@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 import { useEffect, useState } from 'react';
 import { Linking, Platform, Settings } from 'react-native';
+import { type ContractGateParams, parseContractGateUrl } from './contract/contract-routes';
 import { type ImportParams, parseImportUrl } from './import/route';
 import { type PlayerGateParams, parsePlayerGateUrl } from './player/player-routes';
 import { type GateParams, parseGateUrl } from './routes';
@@ -9,7 +10,8 @@ import { type GateParams, parseGateUrl } from './routes';
 export type GateRoute =
   | { name: 'list'; params: GateParams }
   | { name: 'import'; params: ImportParams }
-  | { name: 'player'; params: PlayerGateParams };
+  | { name: 'player'; params: PlayerGateParams }
+  | { name: 'contract'; params: ContractGateParams };
 
 function parseRoute(url: string | null): GateRoute | undefined {
   const list = parseGateUrl(url);
@@ -17,7 +19,9 @@ function parseRoute(url: string | null): GateRoute | undefined {
   const imported = parseImportUrl(url);
   if (imported !== undefined) return { name: 'import', params: imported };
   const player = parsePlayerGateUrl(url);
-  return player === undefined ? undefined : { name: 'player', params: player };
+  if (player !== undefined) return { name: 'player', params: player };
+  const contract = parseContractGateUrl(url);
+  return contract === undefined ? undefined : { name: 'contract', params: contract };
 }
 
 /** `NSUserDefaults` key of the launch argument `-gateUrl <url>` (`xcrun simctl launch <udid> <bundle id> -gateUrl …`). */
@@ -43,21 +47,31 @@ function launchArgumentUrl(): string | null {
 }
 
 /**
- * The gate route from the `-gateUrl` launch argument (iOS, tvOS), else from the URL that opened the app, or from a
- * URL that arrived later; `undefined` when there is none. Always `undefined` (nothing is read and no listener is added)
- * unless the build carries the gate flag.
+ * The gate route from the `-gateUrl` launch argument (iOS, tvOS), else `'pending'` until the initial URL settles, or
+ * from a URL that arrived later; `undefined` when there is none. Always `undefined` synchronously (nothing is read and
+ * no listener is added) unless the build carries the gate flag (`extra.gate`).
  */
-export function useGateRoute(): GateRoute | undefined {
-  const [params, setParams] = useState<GateRoute | undefined>(() =>
-    isGateBuild() ? parseRoute(launchArgumentUrl()) : undefined,
-  );
+export function useGateRoute(): GateRoute | 'pending' | undefined {
+  const [params, setParams] = useState<GateRoute | 'pending' | undefined>(() => {
+    if (!isGateBuild()) return undefined;
+    return parseRoute(launchArgumentUrl()) ?? 'pending';
+  });
   useEffect(() => {
     if (!isGateBuild()) return;
     let alive = true;
-    void Linking.getInitialURL().then((url) => {
-      const parsed = parseRoute(url ?? null);
-      if (alive && parsed !== undefined) setParams((current) => current ?? parsed);
-    });
+    void Linking.getInitialURL().then(
+      (url) => {
+        const parsed = parseRoute(url ?? null);
+        if (alive) {
+          setParams((current) => (current === 'pending' ? parsed : (current ?? parsed)));
+        }
+      },
+      () => {
+        if (alive) {
+          setParams((current) => (current === 'pending' ? undefined : current));
+        }
+      },
+    );
     const subscription = Linking.addEventListener('url', ({ url }) => {
       const parsed = parseRoute(url);
       if (parsed !== undefined) setParams(parsed);

@@ -1,10 +1,8 @@
-import type {
-  AttemptToken,
-  ClockAnchor,
-  EngineCapabilities,
-  EngineEvent,
-  LoadCommand,
-  PlayerEngine,
+import {
+  bridgeNativeEngine,
+  type EngineCapabilities,
+  type NativeEngineHandle,
+  type PlayerEngine,
 } from '@elv/playback';
 import { requireNativeViewManager, requireOptionalNativeModule } from 'expo-modules-core';
 import { type ComponentType, createElement, type ReactElement } from 'react';
@@ -13,42 +11,8 @@ import type { StyleProp, ViewStyle } from 'react-native';
 /** The JS clock of React Native and Node; declared here because the package compiles without DOM types. */
 declare const performance: { now(): number };
 
-/** The `load` argument of the native engine: a flattened {@link LoadCommand}. */
-interface NativeLoadCommand {
-  attempt: AttemptToken;
-  url: string;
-  headers: Readonly<Record<string, string>>;
-  kind: LoadCommand['kind'];
-  startMs?: number;
-  softwareAudio?: boolean;
-  audioTrackId?: string;
-  subtitleTrackId?: string | null;
-}
-
-/** An `onEngineEvent` payload; its `atMs` values are `SystemClock.uptimeMillis()` stamps. */
-type NativeEngineEvent = EngineEvent;
-
-/** The native `ElvEngineMedia3.Engine` shared object. */
-interface NativeEngine {
-  load(command: NativeLoadCommand): void;
-  retry(attempt: AttemptToken): void;
-  play(attempt: AttemptToken): void;
-  pause(attempt: AttemptToken): void;
-  seek(attempt: AttemptToken, positionMs: number): void;
-  selectAudioTrack(attempt: AttemptToken, id: string): void;
-  selectSubtitleTrack(attempt: AttemptToken, id: string | null): void;
-  stop(attempt: AttemptToken): void;
-  recreate(attempt: AttemptToken): void;
-  /** SharedObject release: detaches the JS object; the native side then releases the player. */
-  release(): void;
-  addListener(
-    eventName: 'onEngineEvent',
-    listener: (event: NativeEngineEvent) => void,
-  ): { remove(): void };
-}
-
 interface NativeEngineModule {
-  Engine: new () => NativeEngine;
+  Engine: new () => NativeEngineHandle;
   uptimeMs(): number;
 }
 
@@ -62,80 +26,21 @@ const CAPABILITIES: EngineCapabilities = Object.freeze({
   subtitleTrackSelection: true,
 });
 
-function toNativeLoad(cmd: LoadCommand): NativeLoadCommand {
-  const { attempt, url, headers, kind, startMs, options } = cmd;
-  return {
-    attempt,
-    url,
-    headers,
-    kind,
-    ...(startMs === undefined ? {} : { startMs }),
-    ...(options?.softwareAudio === undefined ? {} : { softwareAudio: options.softwareAudio }),
-    ...(options?.audioTrackId === undefined ? {} : { audioTrackId: options.audioTrackId }),
-    ...(options?.subtitleTrackId === undefined ? {} : { subtitleTrackId: options.subtitleTrackId }),
-  };
-}
-
-/** Maps native uptime stamps to `performance.now()`; a stamp is never placed after the moment of receipt. */
-function received(event: NativeEngineEvent, module: NativeEngineModule): EngineEvent {
-  if (event.type !== 'firstFrame' && event.type !== 'stall' && event.type !== 'clock') return event;
-  const now = performance.now();
-  const uptime = module.uptimeMs();
-  const toJs = (atMs: number): number => now - Math.max(0, uptime - atMs);
-  if (event.type === 'clock') {
-    const anchor: ClockAnchor = { ...event.anchor, atMs: toJs(event.anchor.atMs) };
-    return { ...event, anchor };
-  }
-  return { ...event, atMs: toJs(event.atMs) };
-}
-
 /** The native shared object behind each live engine this module created; `Media3Surface` binds its view to it. */
-const handles = new WeakMap<PlayerEngine, NativeEngine>();
+const handles = new WeakMap<PlayerEngine, NativeEngineHandle>();
 
 function wrap(module: NativeEngineModule): PlayerEngine {
   const native = new module.Engine();
-  const listeners = new Set<(event: EngineEvent) => void>();
-  let released = false;
-  const subscription = native.addListener('onEngineEvent', (event) => {
-    if (listeners.size === 0) return;
-    const mapped = received(event, module);
-    for (const listener of [...listeners]) listener(mapped);
-  });
-  const command =
-    <A extends unknown[]>(send: (...args: A) => void) =>
-    (...args: A): void => {
-      if (!released) send(...args);
-    };
-
-  const engine: PlayerEngine = {
+  const bridged = bridgeNativeEngine(native, {
     capabilities: CAPABILITIES,
-    load: command((cmd: LoadCommand) => native.load(toNativeLoad(cmd))),
-    retry: command((attempt: AttemptToken) => native.retry(attempt)),
-    play: command((attempt: AttemptToken) => native.play(attempt)),
-    pause: command((attempt: AttemptToken) => native.pause(attempt)),
-    seek: command((attempt: AttemptToken, positionMs: number) => native.seek(attempt, positionMs)),
-    selectAudioTrack: command((attempt: AttemptToken, id: string) =>
-      native.selectAudioTrack(attempt, id),
-    ),
-    selectSubtitleTrack: command((attempt: AttemptToken, id: string | null) =>
-      native.selectSubtitleTrack(attempt, id),
-    ),
-    stop: command((attempt: AttemptToken) => native.stop(attempt)),
-    recreate: command((attempt: AttemptToken) => native.recreate(attempt)),
+    uptimeMs: () => module.uptimeMs(),
+    now: () => performance.now(),
+  });
+  const engine: PlayerEngine = {
+    ...bridged,
     release() {
-      if (released) return;
-      released = true;
       handles.delete(engine);
-      listeners.clear();
-      subscription.remove();
-      native.release();
-    },
-    subscribe(listener) {
-      if (released) return () => {};
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
+      bridged.release();
     },
   };
   handles.set(engine, native);
@@ -169,7 +74,7 @@ export interface Media3SurfaceProps {
 
 interface NativeSurfaceProps {
   /** The shared object; expo-modules-core passes it to native as its registry id. */
-  engine: NativeEngine;
+  engine: NativeEngineHandle;
   style?: StyleProp<ViewStyle>;
   resizeMode?: 'fit' | 'fill';
   testID?: string;

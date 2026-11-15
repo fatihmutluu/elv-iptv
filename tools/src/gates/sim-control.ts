@@ -21,6 +21,7 @@ async function answers(port: number): Promise<boolean> {
 function simControlForPort(port: number): SimControl {
   const reset = () => httpSimLog(`http://127.0.0.1:${port}`).clear();
   return {
+    running: () => answers(port),
     async ensure() {
       if (await answers(port)) return { reused: true, reset, stop: async () => {} };
       const sim = await startSim({ port, host: '127.0.0.1', seed: 1 });

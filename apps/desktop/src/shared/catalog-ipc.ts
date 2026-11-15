@@ -18,6 +18,7 @@ export const CATALOG_CHANNELS = Object.freeze({
   connect: 'catalog:connect',
   port: 'catalog:port',
   disconnected: 'catalog:disconnected',
+  changed: 'catalog:changed',
 } as const);
 
 /** Preload to main (`catalog:connect`): requests a dedicated `MessagePort` to the catalog worker. */
@@ -93,6 +94,7 @@ export interface CatalogBridge {
   seasons(seriesId: number): Promise<Result<SeasonRow[]>>;
   episodes(seriesId: number, season: number): Promise<EpisodeRow[]>;
   resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
+  onChanged(listener: () => void): () => void;
   close(): Promise<void>;
 }
 

@@ -2,9 +2,11 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { STAMP_FILE, writeStamp } from '../prebuild-stamp.ts';
 import { buildPrebuildCommand, buildProcessEnv, nativeProject } from '../run-command.ts';
+import type { GateDevice } from './gate-device.ts';
 
 /** Package of the development variant, the only one that contains the gate screen. */
 export const APP_PACKAGE = 'io.github.fatihmutluu.elviptv.dev';
+const ANDROID_SIM_HOST = '10.0.2.2:7878';
 const APK = 'apps/tv-mobile/android/app/build/outputs/apk/release/app-release.apk';
 export const POLL_MS = 1000;
 const ADB_TIMEOUT_MS = 30_000;
@@ -238,4 +240,27 @@ export async function startGate(
       `gate: ${again} holds the foreground, not the app; dismiss it on the device and rerun`,
     );
   }
+}
+
+/** Opens the booted Android TV emulator as a {@link GateDevice}. */
+export async function androidGateDevice(
+  exec: Exec,
+  opts: { adb: string; root: string; avd?: string; sleep: (ms: number) => Promise<void> },
+): Promise<GateDevice> {
+  const dev = await openDevice(exec, opts.adb, opts.avd);
+  return {
+    simHost: ANDROID_SIM_HOST,
+    describe: () => deviceInfo(exec, opts.adb, dev.serial),
+    install: () => installApk(exec, opts.adb, dev.serial, opts.root),
+    start: (url, startOpts) => startGate(dev, opts.sleep, url, startOpts),
+    async stop() {
+      await dev.shell('am', 'force-stop', APP_PACKAGE);
+    },
+    async readLog() {
+      return (await dev.dev('logcat', '-d', '-s', 'ReactNativeJS:V')).output;
+    },
+    crashesSince: async () => [],
+    memoryMb: async () => null,
+    close: async () => {},
+  };
 }

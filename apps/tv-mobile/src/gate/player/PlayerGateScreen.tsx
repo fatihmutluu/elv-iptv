@@ -1,4 +1,3 @@
-import { createMedia3Engine, Media3Surface } from '@elv/engine-media3';
 import { createKeyInterpreter, type KeyInput } from '@elv/focus-core';
 import {
   createPlaybackService,
@@ -20,6 +19,8 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
+import { PlayerSurface } from '../../playback/PlayerSurface';
+import { createPlatformEngine } from '../../playback/platform-engine';
 import { createZapDriver } from './player-driver';
 import { createPlayerRecorder, playerLine } from './player-metrics';
 import { type PlayerGateParams, streamUrl } from './player-routes';
@@ -30,7 +31,7 @@ const SETTLE_TIMEOUT_MS = 15_000;
 /** Props of {@link PlayerGateScreen}. */
 export interface PlayerGateScreenProps {
   params: PlayerGateParams;
-  /** Creates the engine; the Media3 engine by default, a fake in tests. Returns null where none exists. */
+  /** Creates the engine; the platform engine by default, a fake in tests. Returns null where none exists. */
   createEngine?: () => PlayerEngine | null;
 }
 
@@ -110,10 +111,15 @@ function print(line: string): void {
 }
 
 const settled = (state: PlaybackState): boolean =>
-  state.firstFrameAt !== undefined ||
+  (state.firstFrameAt !== undefined && state.status.kind === 'playing') ||
   state.status.kind === 'ended' ||
   state.status.kind === 'failed' ||
   state.status.kind === 'limited';
+
+const soakEnded = (state: PlaybackState, stream: PlayerGateParams['stream']): boolean =>
+  state.status.kind === 'failed' ||
+  state.status.kind === 'limited' ||
+  (stream === 'vod' && state.status.kind === 'ended');
 
 interface Session {
   engine: PlayerEngine;
@@ -127,7 +133,16 @@ function useSession(params: PlayerGateParams, createEngine: () => PlayerEngine |
     if (engine === null) return null;
     const service = createPlaybackService({ engine, clock, timers });
     const faultItem = params.channels[0] ?? '';
-    return { engine, service, recorder: createPlayerRecorder({ fault: params.fault, faultItem }) };
+    return {
+      engine,
+      service,
+      recorder: createPlayerRecorder({
+        fault: params.fault,
+        faultItem,
+        soak: params.soak,
+        now: clock.now,
+      }),
+    };
     // The engine is created once per screen instance; `App` re-keys the screen when the route changes.
   }, []);
 }
@@ -140,7 +155,7 @@ function useSession(params: PlayerGateParams, createEngine: () => PlayerEngine |
  */
 export function PlayerGateScreen({
   params,
-  createEngine = createMedia3Engine,
+  createEngine = createPlatformEngine,
 }: PlayerGateScreenProps): ReactElement {
   const session = useSession(params, createEngine);
   const index = useRef(0);
@@ -212,6 +227,21 @@ export function PlayerGateScreen({
       printed = true;
       print(playerLine(session.recorder.finish(session.service.getState())));
     };
+    if (params.soak !== undefined) {
+      tuneTo(0);
+      if (soakEnded(session.service.getState(), params.stream)) emit();
+      else {
+        stopWaiting = session.service.subscribe((state) => {
+          if (soakEnded(state, params.stream)) emit();
+        });
+        later(emit, params.soak * 60_000);
+      }
+      return () => {
+        cancelled = true;
+        stopWaiting?.();
+        for (const id of pending) clearTimeout(id);
+      };
+    }
     const driver = createZapDriver(
       (next, zap) => tuneTo(next, zap ? performance.now() : undefined),
       { channels: params.channels.length, zaps: params.zaps, rate: params.rate, schedule: later },
@@ -253,7 +283,7 @@ export function PlayerGateScreen({
   }
   return (
     <View style={styles.root} focusable hasTVPreferredFocus>
-      <Media3Surface
+      <PlayerSurface
         engine={session.engine}
         style={StyleSheet.absoluteFill}
         testID="player-surface"
