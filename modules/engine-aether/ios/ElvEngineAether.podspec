@@ -21,7 +21,7 @@ Pod::Spec.new do |s|
     'EXCLUDED_ARCHS[sdk=appletvsimulator*]' => 'x86_64',
   }
 
-  s.source_files = 'Engine/**/*.swift'
+  s.source_files = 'Core/**/*.swift', 'Engine/**/*.swift'
 
   raise 'spm_dependency missing' unless respond_to?(:spm_dependency, true)
 

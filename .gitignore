@@ -24,6 +24,7 @@ node_modules/
 .expo/
 apps/*/android/
 apps/*/ios/
+modules/engine-aether/ios/.build/
 dist/
 build/
 web-build/

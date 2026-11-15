@@ -272,6 +272,8 @@ jobs:
           persist-credentials: false
       - name: Select Xcode 26.4.1
         run: sudo xcode-select -s /Applications/Xcode_26.4.1.app
+      - name: Run the Apple engine Swift unit tests
+        run: swift test --package-path modules/engine-aether/ios
       - uses: ./.github/actions/setup
         id: setup
       - name: Restore CocoaPods cache
