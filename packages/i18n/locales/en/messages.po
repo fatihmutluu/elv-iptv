@@ -342,6 +342,9 @@ msgstr "Source"
 msgid "notices.unmodified"
 msgstr "Unmodified upstream release"
 
+msgid "notices.backToList"
+msgstr "Back to notices"
+
 msgid "browse.categories"
 msgstr "Categories"
 

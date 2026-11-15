@@ -342,6 +342,9 @@ msgstr "Kaynak"
 msgid "notices.unmodified"
 msgstr "Değiştirilmemiş üst akış sürümü"
 
+msgid "notices.backToList"
+msgstr "Bildirimlere dön"
+
 msgid "browse.categories"
 msgstr "Kategoriler"
 

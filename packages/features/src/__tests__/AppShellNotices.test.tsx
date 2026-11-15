@@ -98,6 +98,11 @@ describe('AppShell Notices tab', () => {
         expect(screen.getByTestId('nav-tab-notices').props.accessibilityState.selected).toBe(true);
         expect(screen.getByTestId('notices-screen')).toBeTruthy();
         expect(screen.getByText('ELV IPTV')).toBeTruthy();
+        if (formFactor === 'phone') {
+          expect(screen.queryByTestId('notices-detail')).toBeNull();
+          await fireEvent.press(screen.getByTestId('notices-list-row-0'));
+          expect(screen.getByTestId('notices-back-to-list')).toHaveTextContent('Back to notices');
+        }
         expect(screen.getByTestId('notices-detail-name')).toHaveTextContent('AetherEngine');
         expect(screen.getByTestId('notices-detail-version')).toHaveTextContent(/7\.66\.1/);
       } finally {
@@ -112,7 +117,6 @@ describe('AppShell Notices tab', () => {
     jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
 
     let keyListener: ((e: AndroidKeyEvent) => void) | undefined;
-    let ageMs = 0;
     const androidSource: AndroidKeySource = {
       addListener: (l) => {
         keyListener = l;
@@ -125,10 +129,8 @@ describe('AppShell Notices tab', () => {
     };
     const pressKey = async (keyCode: number) => {
       await act(async () => {
-        ageMs += 10;
-        keyListener?.({ action: 'down', keyCode, canceled: false, ageMs });
-        ageMs += 10;
-        keyListener?.({ action: 'up', keyCode, canceled: false, ageMs });
+        keyListener?.({ action: 'down', keyCode, canceled: false, ageMs: 0 });
+        keyListener?.({ action: 'up', keyCode, canceled: false, ageMs: 0 });
       });
     };
 

@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -353,6 +353,9 @@ describe('third-party notices generator and drift verifier', () => {
       'https://github.com/pmndrs/zustand',
       'MIT License\n',
     );
+    rmSync(join(repo, 'node_modules/zustand/LICENSE'));
+    writeRepoFile(repo, 'node_modules/zustand/license/nested.txt', 'nested file in license dir\n');
+    writeRepoFile(repo, 'node_modules/zustand/NOTICE.txt', 'MIT License\n');
     writeRepoFile(
       repo,
       'packages/features/package.json',
@@ -385,7 +388,6 @@ describe('third-party notices generator and drift verifier', () => {
     expect((await check.run()).ok).toBe(true);
 
     const outPath = join(repo, NOTICES_OUTPUT_REL);
-    cpSync(outPath, `${outPath}.bak`);
     writeFileSync(outPath, '// stale\n');
     const res = await check.run();
     expect(res.ok).toBe(false);

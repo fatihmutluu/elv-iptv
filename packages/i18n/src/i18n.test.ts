@@ -180,6 +180,7 @@ describe('@elv/i18n', () => {
     expect(en.t('notices.platforms')).toBe('Platforms');
     expect(en.t('notices.source')).toBe('Source');
     expect(en.t('notices.unmodified')).toContain('Unmodified');
+    expect(en.t('notices.backToList')).toBe('Back to notices');
     expect(en.t('browse.categoryCount', { name: 'General', count: 25000 })).toBe('General (25000)');
     expect(en.t('series.seasonCount', { season: 2, count: 8 })).toBe('Season 2 (8)');
     expect(en.t('series.episodeTitled', { episode: 1, title: 'Pilot' })).toBe('E1 · Pilot');
@@ -200,6 +201,7 @@ describe('@elv/i18n', () => {
     expect(tr.t('notices.platforms')).toBe('Platformlar');
     expect(tr.t('notices.source')).toBe('Kaynak');
     expect(tr.t('notices.unmodified')).toContain('Değiştirilmemiş');
+    expect(tr.t('notices.backToList')).toBe('Bildirimlere dön');
     expect(tr.t('browse.categoryCount', { name: 'Genel', count: 42 })).toBe('Genel (42)');
     expect(tr.t('series.seasonCount', { season: 2, count: 8 })).toBe('2. Sezon (8)');
     expect(tr.t('series.episodeTitled', { episode: 1, title: 'Başlangıç' })).toBe('B1 · Başlangıç');

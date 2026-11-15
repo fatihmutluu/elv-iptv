@@ -155,8 +155,12 @@ function readPackageNoticeText(
   license: string,
   url: string,
 ): string {
-  const files = readdirSync(pkgDir)
-    .filter((f) => /^(?:licen[cs]e|copying|copyright|notice)(?:\.[A-Za-z0-9]+)?$/i.test(f))
+  const files = readdirSync(pkgDir, { withFileTypes: true })
+    .filter(
+      (d) =>
+        d.isFile() && /^(?:licen[cs]e|copying|copyright|notice)(?:\.[A-Za-z0-9]+)?$/i.test(d.name),
+    )
+    .map((d) => d.name)
     .sort(asciiCompare);
 
   const chunks: string[] = [];

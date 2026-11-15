@@ -2,12 +2,13 @@ import { createFocusStore, type FocusStore, type KeyEvent } from '@elv/focus-cor
 import { ElvList, type ListSource, useFormFactor, useI18n, useKeyInterpreter } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
+  type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
-  ScrollView,
   Text,
   View,
 } from 'react-native';
+import { NoticesDetailPane } from './NoticesDetailPane';
 import { THIRD_PARTY_NOTICES, type ThirdPartyNotice } from './notices-data';
 import { noticesStyles as styles } from './notices-styles';
 
@@ -34,6 +35,8 @@ export interface ThirdPartyNoticesScreenProps {
   onFocusTopNav?: () => void;
   /** Whether this screen owns TV remote focus (`false` while Top Nav owns focus). */
   isActiveScope?: boolean;
+  /** Optional observer notified with the clamped Y offset when TV D-pad step-scrolls the detail pane. */
+  onDetailStepScroll?: (offsetY: number) => void;
 }
 
 function createNoticesListSource(items: readonly ThirdPartyNotice[]): ListSource<ThirdPartyNotice> {
@@ -84,16 +87,24 @@ export function ThirdPartyNoticesScreen({
   onBack,
   onFocusTopNav,
   isActiveScope = true,
+  onDetailStepScroll,
 }: ThirdPartyNoticesScreenProps): ReactElement {
   const formFactor = useFormFactor();
   const i18n = useI18n();
   const isTv = formFactor === 'tv';
   const isPhone = formFactor === 'phone';
-  const visibleRows = isPhone ? VISIBLE_ROWS_PHONE : VISIBLE_ROWS_DEFAULT;
   const rowHeight = isTv ? ROW_HEIGHT_TV : ROW_HEIGHT_POINTER;
+  const defaultVisibleRows = isPhone ? VISIBLE_ROWS_PHONE : VISIBLE_ROWS_DEFAULT;
 
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [detailFocused, setDetailFocused] = useState(false);
+  const [phonePane, setPhonePane] = useState<'list' | 'detail'>('list');
+  const [measuredListHeight, setMeasuredListHeight] = useState(0);
+
+  const visibleRows =
+    measuredListHeight > 0
+      ? Math.max(1, Math.floor(measuredListHeight / rowHeight))
+      : defaultVisibleRows;
 
   const safeSelected =
     notices.length > 0 ? Math.min(Math.max(0, Math.floor(selectedIndex)), notices.length - 1) : 0;
@@ -124,10 +135,14 @@ export function ThirdPartyNoticesScreen({
   onBackRef.current = onBack;
   const onFocusTopNavRef = useRef(onFocusTopNav);
   onFocusTopNavRef.current = onFocusTopNav;
+  const onDetailStepScrollRef = useRef(onDetailStepScroll);
+  onDetailStepScrollRef.current = onDetailStepScroll;
   const detailFocusedRef = useRef(detailFocused);
   detailFocusedRef.current = detailFocused;
   const detailScrollRef = useRef<ScrollToTarget | null>(null);
   const detailOffsetRef = useRef(0);
+  const detailViewportHeightRef = useRef(0);
+  const detailContentHeightRef = useRef(0);
 
   const bindDetailScrollRef = useCallback((node: unknown) => {
     detailScrollRef.current = node as ScrollToTarget | null;
@@ -135,21 +150,50 @@ export function ThirdPartyNoticesScreen({
 
   useLayoutEffect(() => {
     if (!isTv) return;
-    syncNoticesScopeActive(store, isActiveScope);
+    const effectiveDetailFocused = isActiveScope && detailFocused;
     if (!isActiveScope && detailFocusedRef.current) {
       detailFocusedRef.current = false;
       setDetailFocused(false);
     }
-  }, [isActiveScope, isTv, store]);
+    syncNoticesScopeActive(store, isActiveScope && !effectiveDetailFocused);
+  }, [detailFocused, isActiveScope, isTv, store]);
+
+  const handleListPaneLayout = useCallback((event: LayoutChangeEvent) => {
+    const height = Math.floor(event.nativeEvent.layout.height);
+    if (height > 0) {
+      setMeasuredListHeight((prev) => (prev === height ? prev : height));
+    }
+  }, []);
 
   const handleSelectNotice = useCallback((index: number) => {
     detailOffsetRef.current = 0;
+    detailContentHeightRef.current = 0;
     detailScrollRef.current?.scrollTo({ y: 0, animated: false });
     setSelectedIndex(index);
   }, []);
 
+  const handleActivateNotice = useCallback(
+    (index: number) => {
+      handleSelectNotice(index);
+      if (isPhone) setPhonePane('detail');
+    },
+    [handleSelectNotice, isPhone],
+  );
+
+  const handleBackToList = useCallback(() => {
+    setPhonePane('list');
+  }, []);
+
   const handleDetailScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     detailOffsetRef.current = Math.max(0, event.nativeEvent.contentOffset.y);
+  }, []);
+
+  const handleDetailScrollLayout = useCallback((event: LayoutChangeEvent) => {
+    detailViewportHeightRef.current = Math.max(0, event.nativeEvent.layout.height);
+  }, []);
+
+  const handleDetailContentSizeChange = useCallback((_width: number, height: number) => {
+    detailContentHeightRef.current = Math.max(0, height);
   }, []);
 
   const handleTvKey = useCallback(
@@ -167,9 +211,13 @@ export function ThirdPartyNoticesScreen({
           else if (event.key === 'channelDown') delta = DETAIL_SCROLL_STEP * 2;
           else if (event.key === 'channelUp') delta = -DETAIL_SCROLL_STEP * 2;
           if (delta !== 0) {
-            const nextOffset = Math.max(0, detailOffsetRef.current + delta);
+            const vh = detailViewportHeightRef.current;
+            const ch = detailContentHeightRef.current;
+            const rawNext = Math.max(0, detailOffsetRef.current + delta);
+            const nextOffset = vh > 0 && ch > 0 ? Math.min(rawNext, Math.max(0, ch - vh)) : rawNext;
             detailOffsetRef.current = nextOffset;
             detailScrollRef.current?.scrollTo({ y: nextOffset, animated: false });
+            onDetailStepScrollRef.current?.(nextOffset);
           }
         }
         return;
@@ -246,15 +294,8 @@ export function ThirdPartyNoticesScreen({
     [isTv],
   );
 
-  const detailMetaRows =
-    selected === undefined
-      ? []
-      : ([
-          ['version', `${i18n.t('notices.version')}: ${selected.version}`],
-          ['license', `${i18n.t('notices.license')}: ${selected.license}`],
-          ['platforms', `${i18n.t('notices.platforms')}: ${selected.platforms.join(', ')}`],
-          ['source', `${i18n.t('notices.source')}: ${selected.sourceUrl}`],
-        ] as const);
+  const showListPane = !isPhone || phonePane === 'list';
+  const showDetailPane = !isPhone || phonePane === 'detail';
 
   return (
     <View
@@ -275,73 +316,44 @@ export function ThirdPartyNoticesScreen({
       </View>
 
       <View style={[styles.panes, isPhone ? styles.panesPhone : styles.panesSplit]}>
-        <View
-          style={[
-            styles.listPane,
-            isPhone ? styles.listPanePhone : isTv ? styles.listPaneTv : styles.listPaneWide,
-          ]}
-        >
-          <ElvList
-            listId={NOTICES_LIST_ID}
-            store={store}
-            source={source}
-            rowHeight={rowHeight}
-            visibleRows={visibleRows}
-            selectedIndex={safeSelected}
-            onSelectIndex={handleSelectNotice}
-            onActivateIndex={handleSelectNotice}
-            renderRow={renderRow}
-            rowLabel={rowLabel}
-            testID="notices-list"
-          />
-        </View>
-
-        <View
-          testID="notices-detail"
-          accessibilityState={{ selected: isTv && detailFocused }}
-          style={[styles.detailPane, isTv && detailFocused ? styles.detailPaneFocused : null]}
-        >
-          <ScrollView
-            ref={bindDetailScrollRef}
-            testID="notices-detail-scroll"
-            onScroll={handleDetailScroll}
-            scrollEventThrottle={32}
-            {...(isTv ? { focusable: false } : {})}
-            contentContainerStyle={styles.detailContent}
+        {showListPane ? (
+          <View
+            testID="notices-list-pane"
+            onLayout={handleListPaneLayout}
+            style={[
+              styles.listPane,
+              isPhone ? styles.listPanePhone : isTv ? styles.listPaneTv : styles.listPaneWide,
+            ]}
           >
-            {selected !== undefined ? (
-              <>
-                <Text
-                  testID="notices-detail-name"
-                  style={[styles.detailName, isTv ? styles.detailNameTv : null]}
-                >
-                  {selected.name}
-                </Text>
-                {detailMetaRows.map(([key, text]) => (
-                  <Text
-                    key={key}
-                    testID={`notices-detail-${key}`}
-                    style={[styles.detailMeta, isTv ? styles.detailMetaTv : null]}
-                  >
-                    {text}
-                  </Text>
-                ))}
-                <Text
-                  testID="notices-detail-modification"
-                  style={[styles.detailSection, isTv ? styles.detailSectionTv : null]}
-                >
-                  {selected.modificationNote ?? i18n.t('notices.unmodified')}
-                </Text>
-                <Text
-                  testID="notices-detail-text"
-                  style={[styles.detailText, isTv ? styles.detailSectionTv : null]}
-                >
-                  {selected.noticeText}
-                </Text>
-              </>
-            ) : null}
-          </ScrollView>
-        </View>
+            <ElvList
+              listId={NOTICES_LIST_ID}
+              store={store}
+              source={source}
+              rowHeight={rowHeight}
+              visibleRows={visibleRows}
+              selectedIndex={safeSelected}
+              onSelectIndex={handleSelectNotice}
+              onActivateIndex={handleActivateNotice}
+              renderRow={renderRow}
+              rowLabel={rowLabel}
+              testID="notices-list"
+            />
+          </View>
+        ) : null}
+
+        {showDetailPane ? (
+          <NoticesDetailPane
+            selected={selected}
+            isTv={isTv}
+            isPhone={isPhone}
+            detailFocused={detailFocused}
+            bindScrollRef={bindDetailScrollRef}
+            onScroll={handleDetailScroll}
+            onScrollLayout={handleDetailScrollLayout}
+            onContentSizeChange={handleDetailContentSizeChange}
+            onBackToList={handleBackToList}
+          />
+        ) : null}
       </View>
     </View>
   );

@@ -139,6 +139,7 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'notices.platforms': 'Platformlar',
   'notices.source': 'Kaynak',
   'notices.unmodified': 'Değiştirilmemiş üst akış sürümü',
+  'notices.backToList': 'Bildirimlere dön',
   'browse.categories': 'Kategoriler',
   'browse.items': 'İçerikler',
   'browse.categoryCount': '{name} ({count})',

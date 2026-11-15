@@ -133,6 +133,7 @@ export const enMessages = {
   'notices.platforms': 'Platforms',
   'notices.source': 'Source',
   'notices.unmodified': 'Unmodified upstream release',
+  'notices.backToList': 'Back to notices',
   'browse.categories': 'Categories',
   'browse.items': 'Items',
   'browse.categoryCount': '{name} ({count})',
