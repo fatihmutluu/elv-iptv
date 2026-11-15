@@ -151,12 +151,14 @@ describe('MpvEngine audio and subtitle track selection', () => {
         events.some((e) => e.attempt === 3 && e.type === 'state' && e.state === 'playing'),
       ).toBe(true),
     );
-    const retryCommands = fake.sent.slice(beforeRetry);
-    expect(retryCommands).toContainEqual(['set_property', 'aid', 2]);
-    expect(retryCommands).toContainEqual(['set_property', 'sid', 'no']);
-    expect(tracksEvents(events).at(-1)).toMatchObject({
-      attempt: 3,
-      tracks: { selectedAudioId: 'a:2', selectedSubtitleId: null },
+    await vi.waitFor(() => {
+      const retryCommands = fake.sent.slice(beforeRetry);
+      expect(retryCommands).toContainEqual(['set_property', 'aid', 2]);
+      expect(retryCommands).toContainEqual(['set_property', 'sid', 'no']);
+      expect(tracksEvents(events).at(-1)).toMatchObject({
+        attempt: 3,
+        tracks: { selectedAudioId: 'a:2', selectedSubtitleId: null },
+      });
     });
 
     // Also honors explicit LoadCommand.options on service-driven recovery reload

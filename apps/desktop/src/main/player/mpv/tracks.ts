@@ -141,20 +141,26 @@ function mediaTracksEqual(a: MediaTracks | undefined, b: MediaTracks): boolean {
   );
 }
 
+function sameLanguage(a: string | undefined, b: string | undefined): boolean {
+  return a !== undefined && b !== undefined && a.toLowerCase() === b.toLowerCase();
+}
+
 function resolveChoice(
   tracks: readonly TrackInfo[],
   wanted: TrackPreference,
 ): TrackInfo | undefined {
   const exact = tracks.find((t) => t.id === wanted.id);
-  if (exact && (wanted.language === undefined || exact.language === wanted.language)) {
+  if (exact && (wanted.language === undefined || sameLanguage(exact.language, wanted.language))) {
     return exact;
   }
   if (wanted.language !== undefined && wanted.label !== undefined) {
-    const both = tracks.find((t) => t.language === wanted.language && t.label === wanted.label);
+    const both = tracks.find(
+      (t) => sameLanguage(t.language, wanted.language) && t.label === wanted.label,
+    );
     if (both) return both;
   }
   if (wanted.language !== undefined) {
-    const byLang = tracks.find((t) => t.language === wanted.language);
+    const byLang = tracks.find((t) => sameLanguage(t.language, wanted.language));
     if (byLang) return byLang;
   }
   if (wanted.label !== undefined) {
@@ -164,11 +170,17 @@ function resolveChoice(
   return exact;
 }
 
-function toPreference(id: string, matched: TrackInfo | undefined): TrackPreference {
+function toPreference(
+  id: string,
+  matched: TrackInfo | undefined,
+  previous?: TrackPreference,
+): TrackPreference {
+  const language = matched?.language ?? (previous?.id === id ? previous.language : undefined);
+  const label = matched?.label ?? (previous?.id === id ? previous.label : undefined);
   return {
     id,
-    ...(matched?.language === undefined ? {} : { language: matched.language }),
-    ...(matched?.label === undefined ? {} : { label: matched.label }),
+    ...(language === undefined ? {} : { language }),
+    ...(label === undefined ? {} : { label }),
   };
 }
 
@@ -193,7 +205,8 @@ export function createTrackTracker(): TrackTracker {
   let aid: unknown = 'auto';
   let sid: unknown = 'auto';
   let lastEmitted: MediaTracks | undefined;
-  let reconciled = false;
+  let audioReconciled = false;
+  let subReconciled = false;
   let audioPref: TrackPreference | undefined;
   let subPref: SubtitlePreference = { kind: 'default' };
 
@@ -203,16 +216,44 @@ export function createTrackTracker(): TrackTracker {
     aid = 'auto';
     sid = 'auto';
     lastEmitted = undefined;
-    reconciled = false;
+    audioReconciled = false;
+    subReconciled = false;
   };
 
   const currentTracks = (): MediaTracks | undefined =>
     Array.isArray(rawTrackList) ? inspectMpvTracks(rawTrackList, aid, sid) : undefined;
 
+  const backfillMetadata = (snapshot: MediaTracks): void => {
+    if (
+      audioReconciled &&
+      audioPref !== undefined &&
+      audioPref.language === undefined &&
+      audioPref.label === undefined
+    ) {
+      const currentId = audioPref.id;
+      const exact = snapshot.audio.find((t) => t.id === currentId);
+      if (exact) audioPref = toPreference(exact.id, exact, audioPref);
+    }
+    if (
+      subReconciled &&
+      subPref.kind === 'selected' &&
+      subPref.choice.language === undefined &&
+      subPref.choice.label === undefined
+    ) {
+      const currentId = subPref.choice.id;
+      const exact = snapshot.subtitles.find((t) => t.id === currentId);
+      if (exact) {
+        subPref = { kind: 'selected', choice: toPreference(exact.id, exact, subPref.choice) };
+      }
+    }
+  };
+
   const emitIfChanged = (): EngineEvent[] => {
     if (token === undefined) return [];
     const next = currentTracks();
-    if (!next || mediaTracksEqual(lastEmitted, next)) return [];
+    if (!next) return [];
+    backfillMetadata(next);
+    if (mediaTracksEqual(lastEmitted, next)) return [];
     lastEmitted = next;
     return [{ attempt: token, type: 'tracks', tracks: next }];
   };
@@ -266,7 +307,8 @@ export function createTrackTracker(): TrackTracker {
       const cmd = parseAudioTrackCommand(id);
       if (!cmd) return undefined;
       const matched = currentTracks()?.audio.find((t) => t.id === id);
-      audioPref = toPreference(id, matched);
+      audioPref = toPreference(id, matched, audioPref);
+      if (token !== undefined) audioReconciled = true;
       return cmd;
     },
 
@@ -277,40 +319,57 @@ export function createTrackTracker(): TrackTracker {
         subPref = { kind: 'off' };
       } else {
         const matched = currentTracks()?.subtitles.find((t) => t.id === id);
-        subPref = { kind: 'selected', choice: toPreference(id, matched) };
+        const prev = subPref.kind === 'selected' ? subPref.choice : undefined;
+        subPref = { kind: 'selected', choice: toPreference(id, matched, prev) };
       }
+      if (token !== undefined) subReconciled = true;
       return cmd;
     },
 
     reconcileCommands() {
-      if (reconciled) return [];
+      if (audioReconciled && subReconciled) return [];
       const snapshot = currentTracks();
       if (!snapshot) return [];
-      reconciled = true;
       const commands: MpvCommand[] = [];
 
-      if (audioPref !== undefined) {
-        const resolved = resolveChoice(snapshot.audio, audioPref);
-        if (resolved) {
-          audioPref = toPreference(resolved.id, resolved);
-          if (snapshot.selectedAudioId !== resolved.id) {
-            const cmd = parseAudioTrackCommand(resolved.id);
-            if (cmd) commands.push(cmd);
+      if (!audioReconciled) {
+        if (audioPref === undefined) {
+          audioReconciled = true;
+        } else {
+          const resolved = resolveChoice(snapshot.audio, audioPref);
+          if (resolved) {
+            audioReconciled = true;
+            audioPref = toPreference(resolved.id, resolved, audioPref);
+            if (snapshot.selectedAudioId !== resolved.id) {
+              const cmd = parseAudioTrackCommand(resolved.id);
+              if (cmd) commands.push(cmd);
+            }
           }
         }
       }
 
-      if (subPref.kind === 'off') {
-        if (sid !== false && sid !== 'no') {
-          commands.push(['set_property', 'sid', 'no']);
-        }
-      } else if (subPref.kind === 'selected') {
-        const resolved = resolveChoice(snapshot.subtitles, subPref.choice);
-        if (resolved) {
-          subPref = { kind: 'selected', choice: toPreference(resolved.id, resolved) };
-          if (snapshot.selectedSubtitleId !== resolved.id) {
-            const cmd = parseSubtitleTrackCommand(resolved.id);
-            if (cmd) commands.push(cmd);
+      if (!subReconciled) {
+        if (subPref.kind === 'default') {
+          subReconciled = true;
+        } else if (subPref.kind === 'off') {
+          if (sid === 'no' || (sid === false && snapshot.subtitles.length > 0)) {
+            subReconciled = true;
+          } else if (sid !== false) {
+            subReconciled = true;
+            commands.push(['set_property', 'sid', 'no']);
+          }
+        } else {
+          const resolved = resolveChoice(snapshot.subtitles, subPref.choice);
+          if (resolved) {
+            subReconciled = true;
+            subPref = {
+              kind: 'selected',
+              choice: toPreference(resolved.id, resolved, subPref.choice),
+            };
+            if (snapshot.selectedSubtitleId !== resolved.id) {
+              const cmd = parseSubtitleTrackCommand(resolved.id);
+              if (cmd) commands.push(cmd);
+            }
           }
         }
       }

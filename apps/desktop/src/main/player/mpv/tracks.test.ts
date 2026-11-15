@@ -146,4 +146,59 @@ describe('createTrackTracker', () => {
       ['set_property', 'sid', 'no'],
     ]);
   });
+
+  it('does not latch reconciled on empty or audio-only initial track-list updates', () => {
+    const tracker = createTrackTracker();
+    tracker.onLoad();
+    tracker.beginMedia(1);
+    tracker.property('track-list', SAMPLE_TRACK_LIST);
+    expect(tracker.selectAudio('a:2')).toEqual(['set_property', 'aid', 2]);
+    expect(tracker.selectSubtitle('s:2')).toEqual(['set_property', 'sid', 2]);
+
+    // Reload: mpv first emits an empty track-list before file-loaded / HLS renditions populate
+    tracker.onLoad({ audioTrackId: 'a:2', subtitleTrackId: 's:2' });
+    tracker.beginMedia(2);
+    tracker.property('track-list', []);
+    tracker.property('aid', false);
+    tracker.property('sid', false);
+    expect(tracker.reconcileCommands()).toEqual([]);
+
+    // Next update: audio tracks arrive first (English shifted to id=3), subtitles still absent
+    tracker.property('track-list', [
+      { id: 1, type: 'audio', lang: 'tur', title: 'Turkish', selected: true },
+      { id: 3, type: 'audio', lang: 'eng', title: 'English', selected: false },
+    ]);
+    tracker.property('aid', 1);
+    expect(tracker.reconcileCommands()).toEqual([['set_property', 'aid', 3]]);
+
+    // Third update: subtitle tracks arrive (English shifted to id=4) while audio is already reconciled
+    tracker.property('track-list', [
+      { id: 1, type: 'audio', lang: 'tur', title: 'Turkish', selected: false },
+      { id: 3, type: 'audio', lang: 'eng', title: 'English', selected: true },
+      { id: 1, type: 'sub', lang: 'tur', title: 'Turkish SRT', selected: true },
+      { id: 4, type: 'sub', lang: 'eng', title: 'English SRT', selected: false },
+    ]);
+    tracker.property('aid', 3);
+    tracker.property('sid', 1);
+    expect(tracker.reconcileCommands()).toEqual([['set_property', 'sid', 4]]);
+    expect(tracker.reconcileCommands()).toEqual([]);
+  });
+
+  it('keeps subtitle Off pending across empty initial track-list and respects explicit selection on new media', () => {
+    const tracker = createTrackTracker();
+    tracker.onLoad({ audioTrackId: 'a:2', subtitleTrackId: null });
+    tracker.beginMedia(1);
+    tracker.property('track-list', []);
+    tracker.property('aid', false);
+    tracker.property('sid', false);
+    expect(tracker.reconcileCommands()).toEqual([]);
+
+    // User explicitly switches audio on the active media before populated track-list arrives
+    expect(tracker.selectAudio('a:1')).toEqual(['set_property', 'aid', 1]);
+
+    tracker.property('track-list', SAMPLE_TRACK_LIST);
+    tracker.property('aid', 1);
+    tracker.property('sid', 1);
+    expect(tracker.reconcileCommands()).toEqual([['set_property', 'sid', 'no']]);
+  });
 });

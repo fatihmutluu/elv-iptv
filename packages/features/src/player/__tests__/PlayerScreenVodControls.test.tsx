@@ -171,6 +171,7 @@ describe('PlayerScreen VOD controls, hold-seek, and track picker', () => {
         ),
       };
 
+      const loadSpy = jest.spyOn(engine, 'load');
       const view = await render(
         <FormFactorProvider value={formFactor}>
           <I18nProvider i18n={createAppI18n('en')}>
@@ -229,6 +230,28 @@ describe('PlayerScreen VOD controls, hold-seek, and track picker', () => {
 
       await fireEvent.press(screen.getByTestId('player-play-pause'));
       expect(engine.commands.some((c) => c.name === 'play')).toBe(true);
+
+      // EOF ended -> -10s / scrub reloads at seek target instead of staying ended or resetting to 0:00
+      const endedAttempt = engine.commands.filter((c) => c.name === 'play').at(-1)?.attempt ?? 3;
+      await act(async () => {
+        engine.emit({
+          attempt: endedAttempt,
+          type: 'clock',
+          anchor: { positionMs: 120_000, atMs: manual.now(), rate: 1, durationMs: 120_000 },
+        });
+        engine.emit({ attempt: endedAttempt, type: 'state', state: 'ended' });
+      });
+      expect(screen.getByTestId('player-play-pause')).toHaveTextContent('Play');
+      await fireEvent.press(screen.getByTestId('player-seek-back'));
+      expect(loadSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: 'vod', startMs: 110_000 }),
+      );
+      await act(async () => {
+        manual.advance(350);
+      });
+      expect(screen.getByTestId('player-play-pause')).toHaveTextContent('Pause');
+      await fireEvent.press(screen.getByTestId('player-play-pause'));
+      expect(engine.commands.at(-1)?.name).toBe('pause');
 
       await view.unmount();
     },

@@ -339,10 +339,11 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
       resumeFrom = undefined;
       resumeMs = clamped;
       if (!isVod()) return;
+      const kind = ctl.getState().status.kind;
       if (
-        !paused &&
-        (ctl.getState().status.kind === 'recovering' ||
-          (budget.vodStart !== undefined && ctl.getState().status.kind !== 'playing'))
+        kind === 'ended' ||
+        (!paused &&
+          (kind === 'recovering' || (budget.vodStart !== undefined && kind !== 'playing')))
       ) {
         cancelSteps();
         budget = freshBudget();

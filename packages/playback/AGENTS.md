@@ -27,8 +27,9 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
   the framework-free suite every engine runs through an `EngineContractHarness` (`contract.ts`; the fake: `contract.test.ts`).
 - `createPlaybackService({ engine, clock, timers, config? })`: `tune`, `retry` (replays `ended` VOD from 0, resumes
   `failed`/post-`recreate` VOD from `lastVodPositionMs`), `stop`, `play`, `pause`, `seek` (updates `anchor`, disarms
-  stall + VOD reconnect), `selectAudioTrack`, `selectSubtitleTrack`, `getState`, `subscribe`, `dispose`. `pause`/`play`
-  advance `attempt`; `anchor` freezes on non-playing states. `DEFAULT_PLAYBACK_CONFIG` holds spec timings.
+  stall + VOD reconnect, and reloads `ended`/`recovering` VOD at clamped target), `selectAudioTrack`, `selectSubtitleTrack`
+  (reconciled across reloads by exact id + `(language, label)` in `track-preferences.ts`), `getState`, `subscribe`, `dispose`.
+  `pause`/`play` advance `attempt`; `anchor` freezes on non-playing states. `DEFAULT_PLAYBACK_CONFIG` holds spec timings.
 
 ## Recovery (spec sections 5.4 and 5.5; `recovery.ts`, always wired)
 - Entry: a stall of 4 s while `playing`, no `playing` 5 s after live `load` (8 s VOD), or a recoverable error. Fast
