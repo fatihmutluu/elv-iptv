@@ -1,0 +1,41 @@
+{
+  "device": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "release": "25.5.0",
+    "cpu": "Apple M3 Max"
+  },
+  "build": "unpackaged desktop bundle, pinned LGPL mpv 0.42.0",
+  "commit": "b976353",
+  "date": "2026-11-15",
+  "result": {
+    "zaps": 30,
+    "ttffColdMs": 768.4,
+    "ttffWarmMs": {
+      "p50": 450.5,
+      "p95": 523.4
+    },
+    "zapMs": {
+      "p50": 450.5,
+      "p95": 523.4,
+      "max": 544.1
+    },
+    "surfaceCreated": 1,
+    "mpvSpawns": 1,
+    "staleEventsApplied": 0,
+    "staleEventsDropped": 0,
+    "failures": 0,
+    "engineWedged": 0,
+    "coalesceMaxMs": 0,
+    "loadMode": "replace",
+    "presenter": "own-window",
+    "videoVisible": null,
+    "distinct": 0,
+    "vod": {
+      "playing": true,
+      "seeked": true
+    },
+    "limitResponses": 0,
+    "overlapMs": 0
+  }
+}
