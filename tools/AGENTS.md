@@ -10,7 +10,8 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
 - `pnpm run:app <target> [build] [--production]` launches or builds a target (android, android-tv, fire-tv, ios, tvos, windows, macos, linux).
 - `pnpm gate list [flags]` runs the TV list gate on a running Android TV emulator; flags, baseline and budget rules: `src/gates/AGENTS.md`.
 - `pnpm gate import [flags]` runs the on-device catalog import gate on the Android TV emulator; flags, baseline and budget rules: `src/gates/AGENTS.md`.
-- `pnpm gate player [flags]` runs the Android TV player zap and fault gate (needs FFmpeg); flags, baseline and budget rules: `src/gates/AGENTS.md`.
+- `pnpm gate player [flags]` runs the player zap, fault, soak and stress gate on Android TV, tvOS and iOS simulators; flags, baselines and budget rules: `src/gates/AGENTS.md`.
+- `pnpm gate contract [flags]` runs the shared `PlayerEngine` contract gate on Android TV, tvOS and iOS simulators; flags: `src/gates/AGENTS.md`.
 - `pnpm gate desktop [flags]` runs the desktop mpv player zap, VOD, fault and orphan gate (Windows / macOS); flags, baseline and budget rules: `src/gates/AGENTS.md`.
 - `pnpm mpv fetch [--force]` / `pnpm mpv verify [--dir <folder>]` install and rescan the pinned mpv runtime for desktop; builds the Windows `elv-mpv.exe` launcher; macOS gets our CI build (`mpv-runtime/`, workflow `mpv-runtime.yml`) through `gh`; rules: `src/mpv/AGENTS.md`.
 - `pnpm scaffold <pure|rn|module> <name>` creates a workspace package (skill `add-package`).

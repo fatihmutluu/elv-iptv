@@ -147,6 +147,34 @@ describe('FakePlayerEngine', () => {
     expect(engine.commands[3]).toEqual({ name: 'seek', attempt: 4, positionMs: 1234 });
   });
 
+  it('a pause anchors where the latest clock anchor has moved to by then', () => {
+    const { engine, events } = setup({ u: [] }, { anchorOnPlayPause: true });
+    engine.load(load('u', 1));
+    engine.emit({
+      attempt: 1,
+      type: 'clock',
+      anchor: { positionMs: 30_000, atMs: Date.now(), rate: 1 },
+    });
+    vi.advanceTimersByTime(500);
+    engine.pause(2);
+    vi.advanceTimersByTime(0);
+    expect(events.at(-1)).toMatchObject({
+      attempt: 2,
+      type: 'clock',
+      anchor: { positionMs: 30_500, rate: 0 },
+    });
+  });
+
+  it('a failed media anchors nothing on play or pause', () => {
+    const { engine, events } = setup({ u: [] }, { anchorOnPlayPause: true });
+    engine.load(load('u', 1));
+    engine.emit({ attempt: 1, type: 'error', error: { code: 'network' } });
+    engine.pause(2);
+    engine.play(3);
+    vi.advanceTimersByTime(10);
+    expect(events.filter((e) => e.type === 'clock')).toEqual([]);
+  });
+
   it('stop ends the media and cancels pending steps', () => {
     const { engine, events } = setup();
     engine.load(load('u'));

@@ -49,15 +49,19 @@ Specs: [stream simulator](superpowers/specs/2026-11-13-stream-simulator-design.m
 
 ## Faults
 - Faults: `?fault=<spec>`, parts joined by `,`: `status=<200-599>`, `slow-start=<s>`, `redirect`, `text-notice` (before
-  any route), `drop@<s>`, `stall<n>s@<s>`, `rate=<kbps>`, `type=<mime>`, `redirect=hls`. Drop, stall and rate apply
-  to TS and VOD files only (not playlists, `/hls/` responses or data routes). Unknown: 400. Catalog faults (`small` 1013 and
-  1014, `corpus` 1012 and 1013) apply when no query or rule does.
+  any route), `drop@<s>`, `stall<n>s@<s>`, `rate=<kbps>`, `type=<mime>`, `redirect=hls`, `burst=<s>`. Drop, stall
+  and rate apply to TS and VOD files only (not playlists, `/hls/` responses or data routes). Unknown: 400. Catalog
+  faults (`small` 1013 and 1014, `corpus` 1012 and 1013) apply when no query or rule does.
 - `type=<mime>` relabels the `Content-Type` of live TS, the live and VOD `.m3u8` at the account URL and movie/episode
   files (also ranged ones); the body is unchanged. Not catch-up, `/hls/` responses or data routes. The first `type`
   part wins.
 - `redirect=hls` answers 302 to `/live/<u>/<p>/<id>.m3u8` (query kept, `fault` dropped) for `/live/<u>/<p>/<id>[.ts]`
   and `/<u>/<p>/<id>`. Any other path (the `.m3u8` itself, movies, data routes) skips it and is served normally,
   so a rule without a `count` redirects the TS once and then serves the playlist.
+- `burst=<s>` (number > 0, at most 30) makes live TS (every account URL form, from `?fault=`, rules or the catalog)
+  hand over its first `<s>` seconds at once and the rest in real time, like panels that send their buffer at
+  connect: FFmpeg reads with `-readrate 1 -readrate_initial_burst <s>` instead of `-re`. Playlists, VOD, catch-up
+  and data routes ignore it.
 
 ## Runtime fault rules
 Rules attach a fault spec to the streams of one account at run time, for players that build their own URLs.

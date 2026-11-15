@@ -24,6 +24,7 @@ node_modules/
 .expo/
 apps/*/android/
 apps/*/ios/
+modules/engine-aether/ios/.build/
 modules/engine-media3/vendor/
 dist/
 build/

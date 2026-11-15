@@ -1,0 +1,31 @@
+{
+  "device": {
+    "platform": "tvos",
+    "name": "Apple TV 4K (3rd generation)",
+    "runtime": "tvOS-26-4",
+    "udid": "87D813FF-FECC-4B8C-9DE0-43FD7655330B"
+  },
+  "build": "development variant, release simulator app (JS bundled, ad-hoc signed)",
+  "commit": "b283b75",
+  "date": "2026-11-15",
+  "result": {
+    "zaps": 30,
+    "burstSec": 8,
+    "ttffColdMs": 226.57,
+    "ttffWarmMs": {
+      "p50": 90.88,
+      "p95": 147.12
+    },
+    "zapMs": {
+      "p50": 90.89,
+      "p95": 147.14,
+      "max": 165.89
+    },
+    "surfaceCreated": 1,
+    "staleEventsApplied": 0,
+    "staleEventsDropped": 0,
+    "failures": 0,
+    "limitResponses": 0,
+    "overlapMs": 0
+  }
+}

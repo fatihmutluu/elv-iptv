@@ -1,5 +1,4 @@
 import type { CatalogService } from '@elv/data';
-import { createMedia3Engine, Media3Surface } from '@elv/engine-media3';
 import { type AppLifecyclePort, AppShell, createLazyCatalog, type VideoHost } from '@elv/features';
 import { createAppI18n, resolveLocale } from '@elv/i18n';
 import { remoteKeys } from '@elv/remote-keys';
@@ -10,10 +9,13 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useState } from 'react';
 import { AppState, Platform, StyleSheet, View } from 'react-native';
 import { createDeviceCatalog } from './catalog';
+import { ContractGateScreen } from './gate/contract/ContractGateScreen';
 import { GateListScreen } from './gate/GateListScreen';
 import { ImportGateScreen } from './gate/import/ImportGateScreen';
 import { PlayerGateScreen } from './gate/player/PlayerGateScreen';
 import { useGateRoute } from './gate/useGateParams';
+import { PlayerSurface } from './playback/PlayerSurface';
+import { createPlatformEngine } from './playback/platform-engine';
 import { createSecureSecretStore } from './storage';
 
 function AppRoot() {
@@ -40,21 +42,18 @@ function AppRoot() {
   const videoHost = useMemo<VideoHost>(
     () => ({
       open() {
-        if (Platform.OS === 'android') {
-          const engine = createMedia3Engine();
-          if (engine === null) return null;
-          return {
-            engine,
-            renderSurface: ({ testID }) => (
-              <Media3Surface
-                engine={engine}
-                style={styles.surface}
-                {...(testID !== undefined ? { testID } : {})}
-              />
-            ),
-          };
-        }
-        return null;
+        const engine = createPlatformEngine();
+        if (engine === null) return null;
+        return {
+          engine,
+          renderSurface: ({ testID }) => (
+            <PlayerSurface
+              engine={engine}
+              style={styles.surface}
+              {...(testID !== undefined ? { testID } : {})}
+            />
+          ),
+        };
       },
     }),
     [],
@@ -122,7 +121,7 @@ function AppRoot() {
 
 /**
  * Root component that `index.ts` registers, with the raw Android key source provided to both branches.
- * Development builds (`extra.gate`) open the list, import or player gate when an `elviptv://gate/*`
+ * Development builds (`extra.gate`) open the list, import, player or contract gate when an `elviptv://gate/*`
  * link started the app (holding off `AppRoot` until `Linking.getInitialURL()` settles so gate runs
  * never open `catalog.db`, localization, or `AppShell`); otherwise mounts `AppShell` (#13).
  */
@@ -148,6 +147,9 @@ export function App() {
         )}
         {gate.name === 'player' && (
           <PlayerGateScreen key={JSON.stringify(gate)} params={gate.params} />
+        )}
+        {gate.name === 'contract' && (
+          <ContractGateScreen key={JSON.stringify(gate)} params={gate.params} />
         )}
         <StatusBar style="light" />
       </RemoteKeysProvider>

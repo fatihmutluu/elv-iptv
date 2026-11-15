@@ -1,6 +1,9 @@
 import { type Readable, Transform } from 'node:stream';
 
-/** One injected failure, parsed from a fault spec such as `status=403,drop@10s`. */
+/**
+ * One injected failure, parsed from a fault spec such as `status=403,drop@10s`. `burst` makes live
+ * TS hand over its first seconds at once.
+ */
 export type Fault =
   | { kind: 'status'; code: number }
   | { kind: 'drop'; atSec: number }
@@ -10,7 +13,8 @@ export type Fault =
   | { kind: 'text-notice' }
   | { kind: 'rate'; kbps: number }
   | { kind: 'type'; mime: string }
-  | { kind: 'redirect-hls' };
+  | { kind: 'redirect-hls' }
+  | { kind: 'burst'; sec: number };
 
 /** Thrown for a fault spec part that is unknown or malformed. */
 export class FaultParseError extends Error {}
@@ -20,6 +24,8 @@ const STATUS = /^status=(\d{3})$/;
 const DROP = new RegExp(`^drop@${NUM}s$`);
 const STALL = new RegExp(`^stall${NUM}s@${NUM}s$`);
 const SLOW = new RegExp(`^slow-start=${NUM}$`);
+const BURST = new RegExp(`^burst=${NUM}$`);
+const MAX_BURST_SEC = 30;
 const RATE = /^rate=(\d+)$/;
 const TOKEN = '[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*';
 const TYPE = new RegExp(`^type=(${TOKEN}/${TOKEN})$`);
@@ -39,6 +45,11 @@ function parsePart(part: string): Fault {
   if (stall) return { kind: 'stall', forSec: Number(stall[1]), atSec: Number(stall[2]) };
   const slow = SLOW.exec(part);
   if (slow) return { kind: 'slow-start', sec: Number(slow[1]) };
+  const burst = BURST.exec(part);
+  if (burst) {
+    const sec = Number(burst[1]);
+    if (sec > 0 && sec <= MAX_BURST_SEC) return { kind: 'burst', sec };
+  }
   const rate = RATE.exec(part);
   if (rate && Number(rate[1]) > 0) return { kind: 'rate', kbps: Number(rate[1]) };
   const type = TYPE.exec(part);
@@ -56,6 +67,12 @@ export function parseFaults(spec: string): Fault[] {
 export function mediaType(faults: readonly Fault[], fallback: string): string {
   const found = faults.find((f) => f.kind === 'type');
   return found ? found.mime : fallback;
+}
+
+/** Seconds of a `burst=<s>` fault (the first one wins), or 0 when there is none. */
+export function burstSeconds(faults: readonly Fault[]): number {
+  const found = faults.find((f) => f.kind === 'burst');
+  return found ? found.sec : 0;
 }
 
 /**

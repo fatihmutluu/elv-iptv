@@ -1,0 +1,31 @@
+{
+  "device": {
+    "platform": "ios",
+    "name": "iPhone 17 Pro",
+    "runtime": "iOS-26-4",
+    "udid": "75A8857E-F62D-467B-B204-841DAA2A5E60"
+  },
+  "build": "development variant, release simulator app (JS bundled, ad-hoc signed)",
+  "commit": "6ff6142",
+  "date": "2026-11-15",
+  "result": {
+    "zaps": 30,
+    "burstSec": 8,
+    "ttffColdMs": 272.61,
+    "ttffWarmMs": {
+      "p50": 108.93,
+      "p95": 140.58
+    },
+    "zapMs": {
+      "p50": 108.95,
+      "p95": 140.59,
+      "max": 153.08
+    },
+    "surfaceCreated": 1,
+    "staleEventsApplied": 0,
+    "staleEventsDropped": 0,
+    "failures": 0,
+    "limitResponses": 0,
+    "overlapMs": 0
+  }
+}

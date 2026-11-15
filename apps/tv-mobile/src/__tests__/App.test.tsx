@@ -1,5 +1,7 @@
+import type { CatalogService } from '@elv/data';
+import type { PlayerEngine } from '@elv/playback';
 import * as opSqlite from '@op-engineering/op-sqlite';
-import { act, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import * as expoLocalization from 'expo-localization';
 import * as expoSecureStore from 'expo-secure-store';
 import { AppState, Linking, Platform, Settings } from 'react-native';
@@ -8,6 +10,19 @@ import { App } from '../App';
 let mockGate = false;
 let mockSeed: Record<string, unknown> | undefined;
 let mockListener: ((event: unknown) => void) | undefined;
+let mockAetherEngine: PlayerEngine | null = null;
+let mockMedia3Engine: PlayerEngine | null = null;
+let mockCatalogOverride: CatalogService | undefined;
+jest.mock('../catalog', () => {
+  const actual = jest.requireActual<typeof import('../catalog')>('../catalog');
+  return {
+    ...actual,
+    createDeviceCatalog: (...args: Parameters<typeof actual.createDeviceCatalog>) =>
+      mockCatalogOverride !== undefined
+        ? Promise.resolve(mockCatalogOverride)
+        : actual.createDeviceCatalog(...args),
+  };
+});
 jest.mock('@elv/remote-keys', () => ({
   remoteKeys: {
     addListener: (l: (event: unknown) => void) => {
@@ -16,9 +31,19 @@ jest.mock('@elv/remote-keys', () => ({
     },
   },
 }));
+jest.mock('@elv/engine-aether', () => ({
+  createAetherEngine: () => mockAetherEngine,
+  AetherSurface: ({ testID }: { testID?: string }) => {
+    const { View } = require('react-native');
+    return <View testID={testID ?? 'aether-surface'} accessibilityLabel="aether-surface" />;
+  },
+}));
 jest.mock('@elv/engine-media3', () => ({
-  createMedia3Engine: () => null,
-  Media3Surface: () => null,
+  createMedia3Engine: () => mockMedia3Engine,
+  Media3Surface: ({ testID }: { testID?: string }) => {
+    const { View } = require('react-native');
+    return <View testID={testID ?? 'media3-surface'} accessibilityLabel="media3-surface" />;
+  },
 }));
 jest.mock('@op-engineering/op-sqlite', () => ({ open: jest.fn() }));
 jest.mock('expo-localization', () => ({
@@ -75,6 +100,9 @@ afterEach(() => {
   jest.restoreAllMocks();
   mockGate = false;
   mockSeed = undefined;
+  mockAetherEngine = null;
+  mockMedia3Engine = null;
+  mockCatalogOverride = undefined;
 });
 
 describe('App', () => {
@@ -207,5 +235,109 @@ describe('App', () => {
     );
     expect(screen.getByTestId('gate-list-row-1').props.accessibilityState.selected).toBe(true);
     await view.unmount();
+  });
+
+  it('opens the contract gate from its URL in a gate build without touching catalog, i18n, or dev seed', async () => {
+    mockGate = true;
+    mockSeed = {
+      kind: 'm3u',
+      name: 'Dev Sim',
+      playlistUrl: 'http://127.0.0.1:7878/m3u/demo.m3u',
+    };
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue({ ok: true, json: async () => [] } as unknown as Response);
+    openedWith('elviptv://gate/contract?host=127.0.0.1:7878&account=demo');
+    const view = await render(<App />);
+    expect(await screen.findByTestId('contract-status')).toBeOnTheScreen();
+    expect(screen.queryByTestId('sources-screen')).toBeNull();
+    expect(opSqlite.open).not.toHaveBeenCalled();
+    expect(expoLocalization.getLocales).not.toHaveBeenCalled();
+    expect(expoSecureStore.getItemAsync).not.toHaveBeenCalled();
+    await view.unmount();
+  });
+
+  it('wires Apple AetherEngine and AetherSurface into AppShell PlayerScreen on iOS/tvOS', async () => {
+    jest.replaceProperty(Platform, 'OS', 'ios');
+    jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(false);
+    const loadedUrls: string[] = [];
+    let released = false;
+    mockAetherEngine = {
+      capabilities: {
+        mpegTsOverHttp: true,
+        hls: true,
+        liveSeek: false,
+        softwareAudioFallback: true,
+        recreate: true,
+        audioTrackSelection: true,
+        subtitleTrackSelection: true,
+      },
+      subscribe: () => () => {},
+      load: (cmd) => {
+        loadedUrls.push(cmd.url);
+      },
+      retry: () => {},
+      play: () => {},
+      pause: () => {},
+      seek: () => {},
+      stop: () => {},
+      recreate: () => {},
+      release: () => {
+        released = true;
+      },
+    };
+    const stubCatalog = {
+      listSources: async () => [
+        {
+          id: 'src-1',
+          kind: 'm3u',
+          name: 'Synthetic Source',
+          createdAt: 1,
+          lastSyncAt: 1,
+          lastError: null,
+        },
+      ],
+      categories: async (_sourceId: string, kind: string) =>
+        kind === 'live'
+          ? [
+              {
+                id: 'cat-1',
+                sourceId: 'src-1',
+                kind: 'live',
+                name: 'General',
+                itemCount: 1,
+                sortOrder: 0,
+              },
+            ]
+          : [],
+      items: async () => [
+        {
+          key: 'ck-1',
+          sourceId: 'src-1',
+          categoryId: 'cat-1',
+          kind: 'live',
+          name: 'Channel 0001',
+          channelNum: 1,
+          sortOrder: 0,
+        },
+      ],
+      resolveStream: async () => ({
+        ok: true,
+        value: { url: 'http://127.0.0.1:7878/live/demo/1001.ts', headers: {} },
+      }),
+    } as unknown as CatalogService;
+    mockCatalogOverride = stubCatalog;
+    openedWith(null);
+
+    const view = await render(<App />);
+    const row = await screen.findByTestId('browse-items-list-row-0');
+    await fireEvent.press(row);
+
+    const surface = await screen.findByTestId('player-surface');
+    expect(surface.props.accessibilityLabel).toBe('aether-surface');
+    expect(loadedUrls).toEqual(['http://127.0.0.1:7878/live/demo/1001.ts']);
+
+    await view.unmount();
+    expect(released).toBe(true);
   });
 });

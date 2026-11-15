@@ -245,17 +245,27 @@ jobs:
           restore-keys: ${{ runner.os }}-cocoapods-ios-
       - name: Generate the iOS project
         run: pnpm --filter tv-mobile exec expo prebuild --platform ios --no-install
+      - name: Restore AetherEngine SwiftPM cache
+        id: spm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/tv-mobile/ios/build/SourcePackages
+          key: ${{ runner.os }}-spm-ios-aether-7.66.1
       - name: Install pods
         working-directory: apps/tv-mobile/ios
         run: pod install --silent
+      - name: Check the generated Xcode project
+        run: sh modules/engine-aether/scripts/check-build.sh project apps/tv-mobile/ios
       - name: Build for the simulator
         working-directory: apps/tv-mobile/ios
         run: |
           workspace=$(ls -d ./*.xcworkspace)
           workspace=${workspace#./}
           xcodebuild -workspace "$workspace" -scheme "${workspace%.xcworkspace}" \
-            -sdk iphonesimulator -configuration Debug \
+            -sdk iphonesimulator -configuration Debug -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO -quiet build
+      - name: Check the built app bundle
+        run: sh modules/engine-aether/scripts/check-build.sh app "$(find apps/tv-mobile/ios/build/Build/Products -maxdepth 2 -name '*.app' | head -n 1)"
       - name: Verify iOS release hygiene (#12)
         env:
           APP_VARIANT: production
@@ -280,6 +290,12 @@ jobs:
         with:
           path: ~/Library/Caches/CocoaPods
           key: ${{ steps.pods-cache.outputs.cache-primary-key }}
+      - name: Save AetherEngine SwiftPM cache
+        if: github.ref == 'refs/heads/main' && steps.spm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/tv-mobile/ios/build/SourcePackages
+          key: ${{ steps.spm-cache.outputs.cache-primary-key }}
 
   # First place the tvOS image assets are validated: an asset-catalog error fails xcodebuild and this job.
   tvos:
@@ -295,6 +311,8 @@ jobs:
           persist-credentials: false
       - name: Select Xcode 26.4.1
         run: sudo xcode-select -s /Applications/Xcode_26.4.1.app
+      - name: Run the Apple engine Swift unit tests
+        run: swift test --package-path modules/engine-aether/ios
       - uses: ./.github/actions/setup
         id: setup
       - name: Restore CocoaPods cache
@@ -306,17 +324,27 @@ jobs:
           restore-keys: ${{ runner.os }}-cocoapods-tvos-
       - name: Generate the tvOS project
         run: pnpm --filter tv-mobile exec expo prebuild --platform ios --no-install
+      - name: Restore AetherEngine SwiftPM cache
+        id: spm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/tv-mobile/ios/build/SourcePackages
+          key: ${{ runner.os }}-spm-tvos-aether-7.66.1
       - name: Install pods
         working-directory: apps/tv-mobile/ios
         run: pod install --silent
+      - name: Check the generated Xcode project
+        run: sh modules/engine-aether/scripts/check-build.sh project apps/tv-mobile/ios
       - name: Build for the Apple TV simulator
         working-directory: apps/tv-mobile/ios
         run: |
           workspace=$(ls -d ./*.xcworkspace)
           workspace=${workspace#./}
           xcodebuild -workspace "$workspace" -scheme "${workspace%.xcworkspace}" \
-            -sdk appletvsimulator -configuration Debug \
+            -sdk appletvsimulator -configuration Debug -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO -quiet build
+      - name: Check the built app bundle
+        run: sh modules/engine-aether/scripts/check-build.sh app "$(find apps/tv-mobile/ios/build/Build/Products -maxdepth 2 -name '*.app' | head -n 1)"
       - name: Verify tvOS release hygiene (#12)
         env:
           APP_VARIANT: production
@@ -335,6 +363,12 @@ jobs:
         with:
           path: ~/Library/Caches/CocoaPods
           key: ${{ steps.pods-cache.outputs.cache-primary-key }}
+      - name: Save AetherEngine SwiftPM cache
+        if: github.ref == 'refs/heads/main' && steps.spm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/tv-mobile/ios/build/SourcePackages
+          key: ${{ steps.spm-cache.outputs.cache-primary-key }}
 
   # Report-only until five green runs on main; then drop continue-on-error and add the job to the "native" needs
   # (spec 2026-11-13-focus-list-gate, sections 5.6 and 9). The CI emulator (software GPU) is not comparable with the
@@ -413,7 +447,7 @@ jobs:
   tvos-gate:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: macos-26
-    timeout-minutes: 60
+    timeout-minutes: 120
     continue-on-error: true
     env:
       EXPO_TV: "1"
@@ -430,6 +464,11 @@ jobs:
         id: setup
       - name: Generate the tvOS project (development variant)
         run: pnpm --filter tv-mobile exec expo prebuild --clean --platform ios --no-install
+      - name: Restore AetherEngine SwiftPM cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/tv-mobile/ios/build/SourcePackages
+          key: ${{ runner.os }}-spm-tvos-aether-7.66.1
       - name: Install pods
         working-directory: apps/tv-mobile/ios
         run: pod install --silent
@@ -536,6 +575,25 @@ jobs:
           kill "$stream_pid" "$sim_pid" 2>/dev/null || true
           cat "$out"
           exit 0
+      - name: Install FFmpeg
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: brew install ffmpeg
+      - name: Run the engine contract and player gates on the Apple TV simulator
+        run: |
+          set -uo pipefail
+          app=$(find apps/tv-mobile/ios/build/Build/Products/Release-appletvsimulator -maxdepth 1 -name '*.app' | head -n 1)
+          if [ -z "$app" ]; then
+            echo "no .app found"
+            exit 1
+          fi
+          status=0
+          pnpm sim --prepare || status=$?
+          pnpm gate contract --target tvos --app "$app" || status=$?
+          pnpm gate player --target tvos --app "$app" --burst 8 --runs 1 --faults --budgets warn \
+            --baseline docs/learned/gates/player-tvos-ci.json \
+            --out gate-artifacts/gate-player-tvos.json || status=$?
+          exit "$status"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -544,6 +602,7 @@ jobs:
             gate-tvos.txt
             gate-tvos.png
             gate-tvos-import.txt
+            gate-artifacts/gate-player-tvos.json
           if-no-files-found: warn
           retention-days: 30
 
