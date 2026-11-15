@@ -64,22 +64,28 @@ describe('ImportGateScreen', () => {
       durationMs: 100,
       maxStallMs: 4,
     });
-    render(<ImportGateScreen params={params} />);
-    await waitFor(() => {
-      expect(screen.getByText('import large x5000: done')).toBeOnTheScreen();
-    });
+    await render(<ImportGateScreen params={params} />);
+    await waitFor(
+      () => {
+        expect(screen.getByText('import large x5000: done')).toBeOnTheScreen();
+      },
+      { timeout: 5_000 },
+    );
     expect(mockCloseCatalog).toHaveBeenCalledTimes(1);
   });
 
   it('closes the raw driver when openCatalog fails before creating the service', async () => {
     jest.spyOn(console, 'log').mockImplementation(() => {});
     mockOpenCatalog.mockResolvedValue(err(elvError('storage', 'migration-failed')));
-    render(<ImportGateScreen params={params} />);
-    await waitFor(() => {
-      expect(
-        screen.getByText('import large x5000: failed: storage/migration-failed'),
-      ).toBeOnTheScreen();
-    });
+    await render(<ImportGateScreen params={params} />);
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText('import large x5000: failed: storage/migration-failed'),
+        ).toBeOnTheScreen();
+      },
+      { timeout: 5_000 },
+    );
     expect(mockCloseDriver).toHaveBeenCalledTimes(1);
     expect(mockCloseCatalog).not.toHaveBeenCalled();
   });

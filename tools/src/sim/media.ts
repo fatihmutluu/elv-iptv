@@ -295,17 +295,53 @@ export interface LiveProcess {
   stop(): void;
 }
 
-/** Starts FFmpeg looping `loopTs` at real time as MPEG-TS on stdout. */
-export function spawnLive(ffmpeg: string, loopTs: string, pool?: Set<ChildProcess>): LiveProcess {
-  const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-re', '-stream_loop', '-1'];
-  const child = spawn(
-    ffmpeg,
-    [...args, '-i', loopTs, '-map', '0', '-c', 'copy', '-f', 'mpegts', 'pipe:1'],
-    {
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    },
-  );
+/**
+ * FFmpeg arguments that loop `loopTs` as MPEG-TS on stdout: at real time (`-re`), or with a
+ * `burstSec` above 0 handing over the first `burstSec` seconds at once and the rest in real time.
+ */
+export function liveArgs(loopTs: string, burstSec = 0): string[] {
+  const pace =
+    burstSec > 0 ? ['-readrate', '1', '-readrate_initial_burst', String(burstSec)] : ['-re'];
+  return [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-nostdin',
+    ...pace,
+    '-stream_loop',
+    '-1',
+    '-i',
+    loopTs,
+    '-map',
+    '0',
+    '-c',
+    'copy',
+    '-f',
+    'mpegts',
+    'pipe:1',
+  ];
+}
+
+interface LiveOptions {
+  /** Seconds handed over at once before real-time pacing; 0 or absent reads at real time. */
+  burstSec?: number;
+  /** Per-instance child process pool when isolating simulator instances. */
+  pool?: Set<ChildProcess>;
+}
+
+/** Starts FFmpeg looping `loopTs` as MPEG-TS on stdout, paced per `liveArgs`. */
+export function spawnLive(
+  ffmpeg: string,
+  loopTs: string,
+  poolOrOpts?: Set<ChildProcess> | LiveOptions,
+  maybeOpts: LiveOptions = {},
+): LiveProcess {
+  const pool = poolOrOpts instanceof Set ? poolOrOpts : poolOrOpts?.pool;
+  const opts = poolOrOpts instanceof Set || poolOrOpts === undefined ? maybeOpts : poolOrOpts;
+  const child = spawn(ffmpeg, liveArgs(loopTs, opts.burstSec), {
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
   children.add(child);
   pool?.add(child);
   const forget = (): void => {

@@ -9,6 +9,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { createDeviceCatalog } from './catalog';
+import { ContractGateScreen } from './gate/contract/ContractGateScreen';
 import { GateListScreen } from './gate/GateListScreen';
 import { ImportGateScreen } from './gate/import/ImportGateScreen';
 import { PlayerGateScreen } from './gate/player/PlayerGateScreen';
@@ -78,7 +79,7 @@ function SourcesRoot() {
 
 /**
  * Root component that `index.ts` registers, with the raw Android key source provided to both branches.
- * Development builds (`extra.gate`) open the list, import or player gate when an `elviptv://gate/*`
+ * Development builds (`extra.gate`) open the list, import, player or contract gate when an `elviptv://gate/*`
  * link started the app (holding off `SourcesRoot` until `Linking.getInitialURL()` settles so gate runs
  * never open `catalog.db`, localization, or `SourcesScreen`); otherwise mounts `SourcesScreen` (#71).
  */
@@ -104,6 +105,9 @@ export function App() {
         )}
         {gate.name === 'player' && (
           <PlayerGateScreen key={JSON.stringify(gate)} params={gate.params} />
+        )}
+        {gate.name === 'contract' && (
+          <ContractGateScreen key={JSON.stringify(gate)} params={gate.params} />
         )}
         <StatusBar style="light" />
       </RemoteKeysProvider>

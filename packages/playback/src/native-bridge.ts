@@ -1,0 +1,107 @@
+import type {
+  AttemptToken,
+  ClockAnchor,
+  EngineCapabilities,
+  EngineEvent,
+  LoadCommand,
+  MediaKind,
+  PlayerEngine,
+} from './engine';
+
+/** The `load` argument of a native engine shared object: a flattened {@link LoadCommand}. */
+export interface NativeLoadCommand {
+  attempt: AttemptToken;
+  url: string;
+  headers: Readonly<Record<string, string>>;
+  kind: MediaKind;
+  startMs?: number;
+  softwareAudio?: boolean;
+}
+
+/** Handle to a native engine shared object (`ElvEngineMedia3.Engine` or `ElvEngineAether.Engine`). */
+export interface NativeEngineHandle {
+  load(command: NativeLoadCommand): void;
+  retry(attempt: AttemptToken): void;
+  play(attempt: AttemptToken): void;
+  pause(attempt: AttemptToken): void;
+  seek(attempt: AttemptToken, positionMs: number): void;
+  stop(attempt: AttemptToken): void;
+  recreate(attempt: AttemptToken): void;
+  release(): void;
+  addListener(
+    eventName: 'onEngineEvent',
+    listener: (event: EngineEvent) => void,
+  ): { remove(): void };
+}
+
+function toNativeLoad(cmd: LoadCommand): NativeLoadCommand {
+  const { attempt, url, headers, kind, startMs, options } = cmd;
+  return {
+    attempt,
+    url,
+    headers,
+    kind,
+    ...(startMs === undefined ? {} : { startMs }),
+    ...(options?.softwareAudio === undefined ? {} : { softwareAudio: options.softwareAudio }),
+  };
+}
+
+function mapEventClock(event: EngineEvent, uptimeMs: () => number, now: () => number): EngineEvent {
+  if (event.type !== 'firstFrame' && event.type !== 'stall' && event.type !== 'clock') return event;
+  const jsNow = now();
+  const uptime = uptimeMs();
+  const toJs = (atMs: number): number => jsNow - Math.max(0, uptime - atMs);
+  if (event.type === 'clock') {
+    const anchor: ClockAnchor = { ...event.anchor, atMs: toJs(event.anchor.atMs) };
+    return { ...event, anchor };
+  }
+  return { ...event, atMs: toJs(event.atMs) };
+}
+
+/**
+ * Wraps a native engine shared object behind the {@link PlayerEngine} port: flattens `LoadCommand`,
+ * maps native monotonic `atMs` stamps onto `now()` without placing any stamp into the future,
+ * snapshots subscribers per event, and turns commands after `release()` into no-ops.
+ */
+export function bridgeNativeEngine(
+  native: NativeEngineHandle,
+  opts: { capabilities: EngineCapabilities; uptimeMs: () => number; now: () => number },
+): PlayerEngine {
+  const listeners = new Set<(event: EngineEvent) => void>();
+  let released = false;
+  const subscription = native.addListener('onEngineEvent', (event) => {
+    if (listeners.size === 0) return;
+    const mapped = mapEventClock(event, opts.uptimeMs, opts.now);
+    for (const listener of [...listeners]) listener(mapped);
+  });
+  const command =
+    <A extends unknown[]>(send: (...args: A) => void) =>
+    (...args: A): void => {
+      if (!released) send(...args);
+    };
+
+  return {
+    capabilities: opts.capabilities,
+    load: command((cmd: LoadCommand) => native.load(toNativeLoad(cmd))),
+    retry: command((attempt: AttemptToken) => native.retry(attempt)),
+    play: command((attempt: AttemptToken) => native.play(attempt)),
+    pause: command((attempt: AttemptToken) => native.pause(attempt)),
+    seek: command((attempt: AttemptToken, positionMs: number) => native.seek(attempt, positionMs)),
+    stop: command((attempt: AttemptToken) => native.stop(attempt)),
+    recreate: command((attempt: AttemptToken) => native.recreate(attempt)),
+    release() {
+      if (released) return;
+      released = true;
+      listeners.clear();
+      subscription.remove();
+      native.release();
+    },
+    subscribe(listener) {
+      if (released) return () => {};
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+}

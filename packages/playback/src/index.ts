@@ -15,6 +15,11 @@ export type {
   StreamRequest,
 } from './engine';
 export { classifyError, type ErrorClass, toPlaybackError } from './errors';
+export {
+  bridgeNativeEngine,
+  type NativeEngineHandle,
+  type NativeLoadCommand,
+} from './native-bridge';
 export { nextLimitDelay } from './recovery';
 export { createPlaybackService, type PlaybackServiceDeps } from './service';
 export type {

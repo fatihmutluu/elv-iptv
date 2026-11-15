@@ -100,7 +100,12 @@ export async function resolveFaults(
     if (await requestFaults(req, res, faults)) return null;
   }
   return faults.filter(
-    (f) => f.kind === 'drop' || f.kind === 'stall' || f.kind === 'rate' || f.kind === 'type',
+    (f) =>
+      f.kind === 'drop' ||
+      f.kind === 'stall' ||
+      f.kind === 'rate' ||
+      f.kind === 'type' ||
+      f.kind === 'burst',
   );
 }
 

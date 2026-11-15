@@ -1,8 +1,7 @@
 import { buildApk, type Exec, installApk, openDevice, POLL_MS, startGate } from './adb.ts';
 import type { BudgetMode, CompareOutcome } from './compare.ts';
 
-/** Where the app reaches the host's simulator from the Android emulator. */
-export const EMULATOR_HOST = '10.0.2.2:7878';
+const EMULATOR_HOST = '10.0.2.2:7878';
 const STALL_BUDGET_MS = 100;
 const DURATION_TOLERANCE = 1.1;
 const DURATION_SLACK_MS = 2000;
@@ -20,6 +19,7 @@ export interface ImportResult {
 
 /** The simulator the gate talks to: started for the run, or an already running one that is left alone. */
 export interface SimControl {
+  running?(): Promise<boolean>;
   ensure(): Promise<{ reused: boolean; reset?(): Promise<void>; stop(): Promise<void> }>;
 }
 
