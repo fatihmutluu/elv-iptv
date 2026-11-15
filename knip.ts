@@ -32,7 +32,7 @@ const config: KnipConfig = {
     'packages/ui-kit': {
       // Babel config is read by jest-expo; the preset is a direct devDependency for pnpm's isolated layout.
       entry: ['babel.config.cjs'],
-      ignoreDependencies: ['@elv/domain', '@elv/i18n', 'babel-preset-expo'],
+      ignoreDependencies: ['@elv/domain', 'babel-jest', 'babel-preset-expo'],
     },
     'packages/features': {
       ignoreDependencies: [
