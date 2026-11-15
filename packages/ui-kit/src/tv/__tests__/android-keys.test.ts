@@ -1,4 +1,4 @@
-import type { Key } from '@elv/focus-core';
+import { createKeyInterpreter, type Key } from '@elv/focus-core';
 import { createAndroidKeyAdapter, mapAndroidKeyCode } from '../android-keys';
 
 const down = (keyCode: number, ageMs = 0) => ({
@@ -28,8 +28,10 @@ const TABLE: [number, Key][] = [
   [111, 'back'],
   [82, 'menu'],
   [85, 'playPause'],
-  [126, 'playPause'],
-  [127, 'playPause'],
+  [126, 'play'],
+  [127, 'pause'],
+  [89, 'rewind'],
+  [90, 'fastForward'],
   [166, 'channelUp'],
   [92, 'channelUp'],
   [167, 'channelDown'],
@@ -43,7 +45,7 @@ describe('mapAndroidKeyCode', () => {
     expect(mapAndroidKeyCode(code)).toBe(key);
   });
 
-  it.each([24, 89, 0])('leaves other codes unmapped (%i)', (code) => {
+  it.each([24, 25, 0])('leaves other codes unmapped (%i)', (code) => {
     expect(mapAndroidKeyCode(code)).toBeUndefined();
   });
 });
@@ -79,12 +81,36 @@ describe('createAndroidKeyAdapter', () => {
     expect(createAndroidKeyAdapter()(up(20), 1000)).toEqual([]);
   });
 
-  it('ignores a second down of a held key, also from another code of the same key', () => {
+  it('tracks active keyCodes per Key, ignoring orphan ups of unheld alias codes and releasing only on the last lift', () => {
     const adapt = createAndroidKeyAdapter();
-    adapt(down(23), 1000);
-    expect(adapt(down(66), 1010)).toEqual([]);
-    expect(adapt(up(66), 1100)).toEqual([{ key: 'select', action: 'up', time: 1100 }]);
-    expect(adapt(up(23), 1110)).toEqual([]);
+    expect(adapt(down(23), 1000)).toEqual([{ key: 'select', action: 'down', time: 1000 }]);
+    expect(adapt(up(66), 1020)).toEqual([]);
+    expect(adapt(down(66), 1030)).toEqual([]);
+    expect(adapt(up(66), 1100)).toEqual([]);
+    expect(adapt(up(23), 1150)).toEqual([{ key: 'select', action: 'up', time: 1150 }]);
+  });
+
+  it('preserves raw hold duration across JS stalls so an 80ms tap never becomes backLong and a 600ms hold stays long', () => {
+    const adapt = createAndroidKeyAdapter();
+    const interpreter = createKeyInterpreter();
+
+    const tapDown = adapt(down(4, 5), 1005);
+    const tapUp = adapt(up(4, 525), 1605);
+    expect(tapDown).toEqual([{ key: 'back', action: 'down', time: 1000 }]);
+    expect(tapUp).toEqual([{ key: 'back', action: 'up', time: 1080 }]);
+    expect(tapDown.flatMap((k) => interpreter.input(k))).toEqual([]);
+    expect(tapUp.flatMap((k) => interpreter.input(k))).toEqual([
+      { key: 'back', kind: 'press', time: 1080 },
+    ]);
+
+    const holdDown = adapt(down(4, 700), 1700);
+    const holdUp = adapt(up(4, 105), 1705);
+    expect(holdDown).toEqual([{ key: 'back', action: 'down', time: 1600 }]);
+    expect(holdUp).toEqual([{ key: 'back', action: 'up', time: 2200 }]);
+    expect(holdDown.flatMap((k) => interpreter.input(k))).toEqual([]);
+    expect(holdUp.flatMap((k) => interpreter.input(k))).toEqual([
+      { key: 'back', kind: 'long', time: 2100 },
+    ]);
   });
 
   it('tracks two held keys independently', () => {

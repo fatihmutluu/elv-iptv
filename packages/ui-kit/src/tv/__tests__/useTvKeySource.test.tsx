@@ -11,15 +11,26 @@ type RemoteEvent = { eventType: string; eventKeyAction?: number };
 function mockTvApis(os: 'android' | 'ios', isTV = true) {
   jest.replaceProperty(Platform, 'OS', os);
   jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(isTV);
+  const remoteSet = new Set<(event: RemoteEvent) => void>();
   const listeners: {
-    remote?: (event: RemoteEvent) => void;
+    remote: (event: RemoteEvent) => void;
     back?: (...args: never[]) => boolean | null | undefined;
-  } = {};
+  } = {
+    remote: (event) => {
+      for (const fn of remoteSet) fn(event);
+    },
+  };
   const removeRemote = jest.fn();
   const removeBack = jest.fn();
   const addRemote = jest.spyOn(TVEventHandler, 'addListener').mockImplementation((listener) => {
-    listeners.remote = listener as (event: RemoteEvent) => void;
-    return { remove: removeRemote };
+    const fn = listener as (event: RemoteEvent) => void;
+    remoteSet.add(fn);
+    return {
+      remove: () => {
+        remoteSet.delete(fn);
+        removeRemote();
+      },
+    };
   });
   const addBack = jest
     .spyOn(BackHandler, 'addEventListener')
@@ -59,10 +70,11 @@ describe('useTvKeySource', () => {
     ]);
   });
 
-  it('enables the tvOS menu key while mounted, maps Menu to back, and disables it on unmount', async () => {
+  it('enables the tvOS menu key while mounted, maps Menu to back, and refcounts across hooks', async () => {
     const apis = mockTvApis('ios');
     const onInput = jest.fn<void, [KeyInput]>();
-    const hook = await renderHook(() => useTvKeySource(onInput));
+    const first = await renderHook(() => useTvKeySource(onInput));
+    const second = await renderHook(() => useTvKeySource(() => {}));
     expect(apis.enableMenu).toHaveBeenCalledTimes(1);
     expect(apis.disableMenu).not.toHaveBeenCalled();
     apis.listeners.remote?.({ eventType: 'menu' });
@@ -71,7 +83,9 @@ describe('useTvKeySource', () => {
       action: 'press',
       time: expect.any(Number),
     });
-    await hook.unmount();
+    await second.unmount();
+    expect(apis.disableMenu).not.toHaveBeenCalled();
+    await first.unmount();
     expect(apis.disableMenu).toHaveBeenCalledTimes(1);
     expect(apis.enableMenu).toHaveBeenCalledTimes(1);
   });
@@ -154,16 +168,28 @@ describe('useTvKeySource', () => {
       expect(apis.addRemote).not.toHaveBeenCalled();
     });
 
-    it('consumes Back without a second input on the raw path', async () => {
+    it('consumes Back without a duplicate input after a raw KEYCODE_BACK cycle, but synthesizes press when BackHandler fires standalone', async () => {
       const apis = mockTvApis('android');
+      const fake = fakeSource();
       const onInput = jest.fn<void, [KeyInput]>();
       await renderHook(() => useTvKeySource(onInput), {
         wrapper: ({ children }) => (
-          <RemoteKeysProvider android={fakeSource().source}>{children}</RemoteKeysProvider>
+          <RemoteKeysProvider android={fake.source}>{children}</RemoteKeysProvider>
         ),
       });
+      fake.emit({ action: 'down', keyCode: 4, canceled: false, ageMs: 0 });
+      fake.emit({ action: 'up', keyCode: 4, canceled: false, ageMs: 0 });
       expect(apis.listeners.back?.()).toBe(true);
-      expect(onInput).not.toHaveBeenCalled();
+      expect(onInput.mock.calls).toEqual([
+        [{ key: 'back', action: 'down', time: expect.any(Number) }],
+        [{ key: 'back', action: 'up', time: expect.any(Number) }],
+      ]);
+
+      onInput.mockClear();
+      expect(apis.listeners.back?.()).toBe(true);
+      expect(onInput.mock.calls).toEqual([
+        [{ key: 'back', action: 'press', time: expect.any(Number) }],
+      ]);
     });
 
     it('cancels the held key and unsubscribes on unmount mid-hold', async () => {
@@ -269,6 +295,102 @@ describe('useTvKeySource', () => {
       });
       expect(apis.addRemote).toHaveBeenCalledTimes(1);
       expect(fake.addListener).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('web DOM key source', () => {
+    function setupFakeWebWindow() {
+      const handlers = new Map<string, Set<(event: unknown) => void>>();
+      const win = {
+        document: { activeElement: null as unknown },
+        addEventListener: jest.fn((type: string, fn: (event: unknown) => void) => {
+          let set = handlers.get(type);
+          if (!set) {
+            set = new Set();
+            handlers.set(type, set);
+          }
+          set.add(fn);
+        }),
+        removeEventListener: jest.fn((type: string, fn: (event: unknown) => void) => {
+          handlers.get(type)?.delete(fn);
+        }),
+      };
+      const emit = (type: string, event?: unknown) => {
+        for (const fn of handlers.get(type) ?? []) fn(event);
+      };
+      return { win, emit };
+    }
+
+    it('maps web keyboard events without touching undefined TVEventHandler/TVEventControl, drops auto-repeats, cancels on blur, and lets HTML inputs edit text', async () => {
+      jest.replaceProperty(Platform, 'OS', 'web' as typeof Platform.OS);
+      const savedHandler = TVEventHandler.addListener;
+      const savedEnable = TVEventControl.enableTVMenuKey;
+      (TVEventHandler as { addListener?: unknown }).addListener = undefined;
+      (TVEventControl as { enableTVMenuKey?: unknown }).enableTVMenuKey = undefined;
+      const prevWindow = (globalThis as { window?: unknown }).window;
+      const { win, emit } = setupFakeWebWindow();
+      (globalThis as { window?: unknown }).window = win;
+
+      try {
+        const onInput = jest.fn<void, [KeyInput]>();
+        const hook = await renderHook(() => useTvKeySource(onInput));
+
+        emit('keydown', { key: 'ArrowDown', repeat: false, preventDefault: jest.fn() });
+        emit('keydown', { key: 'ArrowDown', repeat: true, preventDefault: jest.fn() });
+        emit('keyup', { key: 'ArrowDown' });
+        emit('keydown', { key: ' ', repeat: false, preventDefault: jest.fn() });
+        emit('keyup', { key: ' ' });
+        emit('keydown', { key: 'PageUp', repeat: false, preventDefault: jest.fn() });
+        emit('keyup', { key: 'PageUp' });
+        emit('keydown', { key: 'MediaFastForward', repeat: false });
+        emit('keyup', { key: 'MediaFastForward' });
+        emit('keydown', { key: '7', repeat: false });
+        emit('keyup', { key: '7' });
+        emit('keydown', { key: 'Backspace', repeat: false, preventDefault: jest.fn() });
+        emit('keyup', { key: 'Backspace' });
+        emit('keydown', { key: 'ArrowDown', ctrlKey: true });
+
+        expect(onInput.mock.calls.map(([k]) => `${k.key}:${k.action}`)).toEqual([
+          'down:down',
+          'down:up',
+          'select:down',
+          'select:up',
+          'channelUp:down',
+          'channelUp:up',
+          'fastForward:down',
+          'fastForward:up',
+          'digit7:down',
+          'digit7:up',
+          'back:down',
+          'back:up',
+        ]);
+
+        onInput.mockClear();
+        const inputBlur = jest.fn(() => {
+          win.document.activeElement = null;
+        });
+        const htmlInput = { tagName: 'INPUT', blur: inputBlur };
+        win.document.activeElement = htmlInput;
+        emit('keydown', { key: 'Backspace', target: htmlInput });
+        emit('keydown', { key: 'ArrowLeft', target: htmlInput });
+        emit('keydown', { key: 'Escape', target: htmlInput, preventDefault: jest.fn() });
+        emit('keyup', { key: 'Escape', target: null });
+        expect(inputBlur).toHaveBeenCalledTimes(1);
+        expect(onInput).not.toHaveBeenCalled();
+
+        emit('keydown', { key: 'Enter', repeat: false });
+        emit('blur');
+        expect(onInput.mock.calls.map(([k]) => `${k.key}:${k.action}`)).toEqual([
+          'select:down',
+          'select:cancel',
+        ]);
+
+        await hook.unmount();
+      } finally {
+        (TVEventHandler as { addListener?: unknown }).addListener = savedHandler;
+        (TVEventControl as { enableTVMenuKey?: unknown }).enableTVMenuKey = savedEnable;
+        (globalThis as { window?: unknown }).window = prevWindow;
+      }
     });
   });
 });
