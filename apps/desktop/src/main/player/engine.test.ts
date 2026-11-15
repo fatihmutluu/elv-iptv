@@ -298,6 +298,43 @@ describe('MpvEngine review focus', () => {
     expect(errors(events)).toEqual([]);
   });
 
+  it('a clean own-window exit while idle is a user close, not a crash', async () => {
+    const { engine, fake, events, ui } = await setup({ kind: 'own-window' });
+    fake.userQuit();
+    await vi.waitFor(() => expect(ui).toContainEqual({ type: 'closed' }));
+    expect(errors(events)).toEqual([]);
+    engine.load(live(1, URL_B));
+    await playing(events, 1);
+    expect(engine.spawns).toBe(2);
+  });
+
+  it('a clean own-window exit in a recovery gap is a user close, not engine-wedged', async () => {
+    const { engine, fake, events, ui } = await setup({
+      kind: 'own-window',
+      scripts: { [URL_A]: fakeHttpError(503, 'Service Unavailable') },
+    });
+    engine.load(live(1, URL_A));
+    await vi.waitFor(() => expect(errors(events)).toHaveLength(1));
+    expect(errors(events)[0]).toMatchObject({ attempt: 1, error: { code: 'http-other' } });
+    fake.userQuit();
+    await vi.waitFor(() => expect(ui).toContainEqual({ type: 'closed' }));
+    await sleep(50);
+    expect(errors(events)).toHaveLength(1);
+  });
+
+  it('a crash in a recovery gap with own-window still reports engine-wedged', async () => {
+    const { engine, fake, events, ui } = await setup({
+      kind: 'own-window',
+      scripts: { [URL_A]: fakeHttpError(503, 'Service Unavailable') },
+    });
+    engine.load(live(1, URL_A));
+    await vi.waitFor(() => expect(errors(events)).toHaveLength(1));
+    fake.crash();
+    await vi.waitFor(() => expect(errors(events)).toHaveLength(2));
+    expect(errors(events)[1]).toMatchObject({ attempt: 1, error: { code: 'engine-wedged' } });
+    expect(ui).toEqual([]);
+  });
+
   it('release during spawn kills the process and emits nothing', async () => {
     const { engine, fake, events, ui, presenter } = await setup({
       spawnDelayMs: 200,

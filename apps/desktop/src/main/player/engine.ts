@@ -338,12 +338,40 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     }
   };
 
+  const waitCleanExit = async (proc: MpvProcess): Promise<boolean> => {
+    let timer: unknown;
+    const timedOut = new Promise<false>((resolve) => {
+      timer = timers.setTimeout(() => resolve(false), QUIT_GRACE_MS);
+    });
+    const clean = await Promise.race([
+      proc.exited.then((info) => info.code === 0 && info.signal === null),
+      timedOut,
+    ]);
+    timers.clearTimeout(timer);
+    return clean;
+  };
+
   const onClosed = (L: Live): void => {
     if (live !== L) return;
+    const noCurrentFile = L.entries.current() === undefined;
+    const tokenAtClose = media?.token;
     detach(L);
+    if (presenter.kind === 'own-window' && L.userQuit) {
+      L.proc.kill();
+      ui({ type: 'closed' });
+      return;
+    }
+    if (presenter.kind === 'own-window' && noCurrentFile) {
+      void waitCleanExit(L.proc).then((clean) => {
+        L.proc.kill();
+        if (clean) ui({ type: 'closed' });
+        else if (tokenAtClose !== undefined && media?.token === tokenAtClose)
+          reportWedged('mpv exited');
+      });
+      return;
+    }
     L.proc.kill();
-    if (presenter.kind === 'own-window' && L.userQuit) ui({ type: 'closed' });
-    else reportWedged('mpv exited');
+    reportWedged('mpv exited');
   };
 
   const connect = (proc: MpvProcess): Live => {
