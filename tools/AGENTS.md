@@ -8,21 +8,19 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
 - `pnpm check --only <key>` runs one check (keys: biome, typecheck, deps, knip, file-size, stubs, vitest, jest, gitleaks-rules, hooks); `--json` prints JSON.
 - `pnpm bootstrap` checks versions, installs dependencies and git hooks, looks for gitleaks.
 - `pnpm run:app <target> [build] [--production]` launches or builds a target (android, android-tv, fire-tv, ios, tvos, windows, macos, linux).
-- `pnpm gate list [--avd elv_tv] [--build] [--runs 3 (default)] [--real-keys 60] [--real-hold 2000] [--ci] [--baseline file] [--budgets fail|warn] [--out file] [--write-baseline]`
-  runs the TV list gate on a running Android TV emulator (`src/gates/`; adb from ANDROID_HOME, the default SDK or PATH; `--real-hold <ms>`: API 33+, holds Down once, moves match the interpreter +-3),
-  compares the median with `docs/learned/gates/list-android-tv.json` (or `--baseline`; a missing given file: budgets and losses only, warned; spec 5.6), writes the median and
-  every run to `--out` (`gate-list.json`, with `--ci` under `gate-artifacts/`), warns when the worst run breaks a budget the median meets, exits 1 on a failure; `--budgets warn` (CI) only warns about absolute budgets, and with it `--write-baseline` refuses the local baseline and needs another `--baseline` file.
-- `pnpm gate import [--avd elv_tv] [--build] [--account large|huge] [--batch 5000] [--max-body 4096] [--runs 3 (default)] [--baseline file] [--budgets warn|fail] [--out file] [--write-baseline]`
-  starts the simulator on 127.0.0.1:7878 (or reuses a running one), opens `elviptv://gate/import` on the emulator (host `10.0.2.2:7878`) `--runs` times, compares the median with `docs/learned/gates/import-android-tv.json`: rows equal, duration +10 % (+2 s), stall under 100 ms (`large` only; `huge` is report-only, #76). Only `large` becomes a baseline.
-- `pnpm gate player [--target android-tv|tvos|ios] [--avd elv_tv] [--build] [--app <.app>] [--device <name>] [--channels 1001,1002,...] [--stream ts|hls|vod] [--rate 0.5] [--burst 0] [--soak <min>] [--stress] [--runs 3] [--zaps 30] [--faults] [--baseline file] [--budgets warn|fail] [--out file] [--write-baseline]`
-  runs zap, fault (`drop5,404,509,slowstart,silent` + Apple `notice,stall`), soak (`--soak`, memory + position) or stress (3x200 at 5/s) runs against `docs/learned/gates/player-<android-tv|tvos-sim|ios-sim>.json`; `--burst <s>` (0-30 s) adds a live TS initial burst (Apple burst > 0 uses spec 7 budgets, burst 0 uses 4/3/4 s realtime ceilings); FFmpeg is required only when starting a local simulator; `--write-baseline` needs `--faults`.
-- `pnpm gate contract [--target android-tv|tvos|ios] [--avd elv_tv] [--build] [--app <.app>] [--device <name>] [--out file]` opens `elviptv://gate/contract` and waits <= 180 s for `ELV_GATE_CONTRACT`.
+- `pnpm gate list [flags]` runs the TV list gate on a running Android TV emulator; flags, baseline and budget rules: `src/gates/AGENTS.md`.
+- `pnpm gate import [flags]` runs the on-device catalog import gate on the Android TV emulator; flags, baseline and budget rules: `src/gates/AGENTS.md`.
+- `pnpm gate player [flags]` runs the player zap, fault, soak and stress gate on Android TV, tvOS and iOS simulators; flags, baselines and budget rules: `src/gates/AGENTS.md`.
+- `pnpm gate contract [flags]` runs the shared `PlayerEngine` contract gate on Android TV, tvOS and iOS simulators; flags: `src/gates/AGENTS.md`.
+- `pnpm gate desktop [flags]` runs the desktop mpv player zap, VOD, fault and orphan gate (Windows / macOS); flags, baseline and budget rules: `src/gates/AGENTS.md`.
+- `pnpm mpv fetch [--force]` / `pnpm mpv verify [--dir <folder>]` install and rescan the pinned mpv runtime for desktop; builds the Windows `elv-mpv.exe` launcher; macOS gets our CI build (`mpv-runtime/`, workflow `mpv-runtime.yml`) through `gh`; rules: `src/mpv/AGENTS.md`.
 - `pnpm scaffold <pure|rn|module> <name>` creates a workspace package (skill `add-package`).
+- `pnpm ffmpeg-media3 fetch [--force]` and `pnpm ffmpeg-media3 verify [--dir <folder>]` install and verify the LGPL-2.1+ Android FFmpeg + Media3 JNI bundle (`modules/engine-media3/ffmpeg-media3.lock.json`, 16 KB ELF alignment, dynamic `DT_NEEDED`).
 - `pnpm --filter @elv/tools test` runs Vitest (`sources-*`, `import-*` use the sim; `SIM_HUGE=1` adds 500k).
 
 ## Layout
 - `src/` library modules, each unit-tested: `env`, `run-command`, `prebuild-stamp`, `scaffold`, `file-size`, `agents-stubs`,
-  `runner`, `root`, `bootstrap`, `gates/` (gate runner), plus `checks` (check definitions) and `exec`.
+  `runner`, `root`, `bootstrap`, `mpv/`, `ffmpeg-media3/`, `gates/` (gate runner), plus `checks` (check definitions) and `exec`.
 - `bin/` thin entry points that call `src/`. `test/` holds the Vitest tests: linked-workspace tests
   (`dependency-links.test.ts`) and fixture cases (`test/fixtures/<case>/`, tiny workspaces) prove the rules in
   `/.dependency-cruiser.cjs`; fixtures are excluded from Biome, tsc, knip and the real `deps` check.

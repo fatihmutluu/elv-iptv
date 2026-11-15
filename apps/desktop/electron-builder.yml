@@ -1,6 +1,7 @@
 appId: io.github.fatihmutluu.elviptv
 productName: ELV IPTV
 asar: true
+npmRebuild: false
 directories:
   output: release
   buildResources: resources
@@ -8,7 +9,17 @@ files:
   - dist/main/**
   - dist/preload/**
   - dist/renderer/**
+  - dist/utility/**
   - package.json
+  - node_modules/better-sqlite3/package.json
+  - node_modules/better-sqlite3/lib/**
+  - node_modules/better-sqlite3/prebuilds/**
+  - "!node_modules/@elv/**"
+  - "!**/node_modules/node-addon-api/**"
+  - "!**/node_modules/better-sqlite3/deps/**"
+  - "!**/node_modules/better-sqlite3/src/**"
+asarUnpack:
+  - "**/node_modules/better-sqlite3/prebuilds/**"
 icon: resources/icon.png
 electronFuses:
   runAsNode: false
@@ -19,6 +30,11 @@ electronFuses:
   onlyLoadAppFromAsar: true
 
 win:
+  extraResources:
+    - from: resources/mpv/win32-x64
+      to: mpv
+    - from: resources/mpv-input.conf
+      to: mpv-input.conf
   target:
     - nsis
 nsis:
@@ -36,6 +52,14 @@ appx:
 
 mac:
   category: public.app-category.entertainment
+  # Ad-hoc sign (`-`) without hardened runtime so Apple Silicon accepts the fused bundle + extraResources before #77.
+  identity: "-"
+  hardenedRuntime: false
+  extraResources:
+    - from: resources/mpv/darwin-arm64
+      to: mpv
+    - from: resources/mpv-input.conf
+      to: mpv-input.conf
   target:
     - dmg
 dmg:

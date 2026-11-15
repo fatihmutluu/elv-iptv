@@ -70,6 +70,7 @@ describe('ContractGateScreen', () => {
         now: () => Date.now(),
         schedule: (fn, ms) => setTimeout(fn, ms),
         cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+        anchorOnPlayPause: true,
       });
 
     try {

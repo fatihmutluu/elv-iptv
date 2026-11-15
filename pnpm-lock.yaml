@@ -207,6 +207,19 @@ importers:
         version: 6.0.3
 
   apps/desktop:
+    dependencies:
+      '@elv/data':
+        specifier: workspace:*
+        version: link:../../packages/data
+      '@elv/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@elv/playback':
+        specifier: workspace:*
+        version: link:../../packages/playback
+      better-sqlite3:
+        specifier: 13.0.3
+        version: 13.0.3
     devDependencies:
       '@elv/config':
         specifier: workspace:*
@@ -217,9 +230,15 @@ importers:
       '@playwright/test':
         specifier: 1.65.0
         version: 1.65.0
+      '@types/better-sqlite3':
+        specifier: 7.6.13
+        version: 7.6.13
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2
+      '@vitest/coverage-v8':
+        specifier: 'catalog:'
+        version: 5.1.0(vitest@5.1.0)
       electron:
         specifier: 45.3.1
         version: 45.3.1(supports-color@8.1.1)
@@ -235,6 +254,15 @@ importers:
 
   apps/desktop/renderer:
     dependencies:
+      '@elv/data':
+        specifier: workspace:*
+        version: link:../../../packages/data
+      '@elv/domain':
+        specifier: workspace:*
+        version: link:../../../packages/domain
+      '@elv/playback':
+        specifier: workspace:*
+        version: link:../../../packages/playback
       '@expo/metro-runtime':
         specifier: ~58.0.17
         version: 58.0.17(@expo/log-box@58.0.15)(expo@58.0.25)(react-dom@19.3.0(react@19.3.0))(react-native-tvos@0.88.1-0(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.3.0)(react-native-tvos@0.88.1-0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0)
@@ -260,6 +288,12 @@ importers:
       '@types/react':
         specifier: 'catalog:'
         version: 19.3.0
+      '@vitest/coverage-v8':
+        specifier: 'catalog:'
+        version: 5.1.0(vitest@5.1.0)
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@24.19.2)(@vitest/coverage-v8@5.1.0)(jsdom@26.1.0(supports-color@8.1.1))(vite@8.3.8(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
 
   apps/tv-mobile:
     dependencies:

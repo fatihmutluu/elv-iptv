@@ -262,9 +262,9 @@ describe('runPlayerGate (Android)', () => {
     });
     expect(notes[0]).toMatch(/reusing it/);
     const order = seen.filter((c) => c !== 'adb');
-    expect(order.slice(0, 2)).toEqual(['build', 'build']);
-    expect(order.indexOf('adb install')).toBe(2);
-    expect(order.indexOf('adb start')).toBeGreaterThan(2);
+    expect(order.slice(0, 3)).toEqual(['build', 'build', 'build']);
+    expect(order.indexOf('adb install')).toBe(3);
+    expect(order.indexOf('adb start')).toBeGreaterThan(3);
   });
 
   it('fails a zap run whose line ran a fault or fewer zaps than requested', async () => {

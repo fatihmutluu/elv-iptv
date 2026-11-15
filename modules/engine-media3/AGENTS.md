@@ -25,8 +25,8 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
 - States: `opening` on prepare, `buffering`, `ready`, `playing`, `paused` (not wanted), `ended`; a live media that
   ends sends `error network`. `stall`: buffering while wanted after it played. `clock` anchors when the effective rate
   (speed while playing, else 0) changes, on seeks and once a second while playing; `durationMs` (VOD), `liveEdgeMs`
-  (live, window end) when known. Extension renderers are `ON` by default (`PREFER` + software audio first when
-  `options.softwareAudio` is set, #69). Buffers: 15-30 s, start 1 s, after rebuffer 2 s, 16 MB low-RAM else 32 MB.
+  (live, window end) when known. `FfmpegAudio` configures LGPL-2.1+ FFmpeg 9.0.2 + `FfmpegAudioRenderer` (`ON` default,
+  `PREFER` + software audio first when `options.softwareAudio`, #69; notices in `assets/licenses/ffmpeg-media3/`).
 
 ## Requests and errors (`ConnectionGate`, `GatedDataSource`, `StreamHttp`, sniffing, `LoadRetry`, `ErrorMapping`)
 - Every prepare, `stop`, `recreate` and `dispose` begins a generation before stopping/releasing ExoPlayer and
@@ -45,6 +45,6 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
   `detail`: error name and `redactUrl(uri)` (credentials `***`), no exception text; `LoadRequest` text: no URL/header.
 
 ## Tests and rules
-- Vitest: `pnpm --filter @elv/engine-media3 test`. JVM (JUnit 4, Robolectric; `ANDROID_HOME`), after the app build,
-  in `apps/tv-mobile/android`: `APP_VARIANT=development EXPO_TV=1 ./gradlew.bat :elv-engine-media3:testDebugUnitTest`.
+- Vitest: `pnpm --filter @elv/engine-media3 test`. JVM/device (`ANDROID_HOME`, in `apps/tv-mobile/android`, `EXPO_TV=1`):
+  `./gradlew.bat :elv-engine-media3:testDebugUnitTest` and `:elv-engine-media3:connectedDebugAndroidTest` (`pnpm sim --port 7880`).
   Imports `expo-modules-core`, `@elv/playback` types and the `react`/`react-native` peers only.

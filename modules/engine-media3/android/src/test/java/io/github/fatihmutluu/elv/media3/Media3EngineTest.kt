@@ -7,6 +7,8 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
@@ -29,6 +31,75 @@ class Media3EngineTest {
     assertEquals(
       DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER,
       extensionRendererModeFor(softwareAudio = true),
+    )
+  }
+
+  @Test
+  fun `configures FfmpegLibrary topological shared library order before building renderers (#69)`() {
+    assertEquals(
+      listOf("avutil", "swresample", "avcodec", "ffmpegJNI"),
+      FfmpegAudio.LIBRARIES.toList(),
+    )
+    FfmpegAudio.ensureConfigured()
+    FfmpegAudio.ensureConfigured()
+  }
+
+  @Test
+  fun `blocks concurrent ensureConfigured callers until setLibraries finishes (#69)`() {
+    FfmpegAudio.resetForTest()
+    try {
+      val entered = CountDownLatch(1)
+      val release = CountDownLatch(1)
+      val finishedSetup = AtomicBoolean(false)
+      val invocations = AtomicInteger(0)
+      val callerSawFinished = AtomicBoolean(false)
+
+      val t1 = thread {
+        FfmpegAudio.ensureConfiguredWith {
+          invocations.incrementAndGet()
+          entered.countDown()
+          assertTrue(release.await(5, TimeUnit.SECONDS))
+          finishedSetup.set(true)
+        }
+      }
+      assertTrue(entered.await(5, TimeUnit.SECONDS))
+
+      val t2 = thread {
+        FfmpegAudio.ensureConfiguredWith {
+          invocations.incrementAndGet()
+        }
+        callerSawFinished.set(finishedSetup.get())
+      }
+
+      Thread.sleep(100)
+      release.countDown()
+      t1.join(5_000)
+      t2.join(5_000)
+
+      assertEquals(1, invocations.get())
+      assertTrue("concurrent caller returned before setLibraries finished", callerSawFinished.get())
+    } finally {
+      FfmpegAudio.resetForTest()
+      FfmpegAudio.ensureConfigured()
+    }
+  }
+
+  @Test
+  fun `builds MediaCodecAudioRenderer then FfmpegAudioRenderer by default and FfmpegAudioRenderer first when softwareAudio is true (#69)`() {
+    val app = RuntimeEnvironment.getApplication()
+    assertEquals(
+      listOf(
+        "androidx.media3.exoplayer.audio.MediaCodecAudioRenderer",
+        "androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer",
+      ),
+      audioRendererClassNamesFor(app, softwareAudio = false),
+    )
+    assertEquals(
+      listOf(
+        "androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer",
+        "androidx.media3.exoplayer.audio.MediaCodecAudioRenderer",
+      ),
+      audioRendererClassNamesFor(app, softwareAudio = true),
     )
   }
 

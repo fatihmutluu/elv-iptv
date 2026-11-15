@@ -26,6 +26,8 @@ export interface FakeEngineOptions {
   now: () => number;
   schedule: (fn: () => void, ms: number) => unknown;
   cancel: (handle: unknown) => void;
+  /** Emits an extrapolated `clock` anchor (rate 1 / 0) after `play` / `pause`, as real engines do; off by default. */
+  anchorOnPlayPause?: boolean;
 }
 
 /** A command the fake received, recorded for assertions. */
@@ -129,7 +131,7 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
 
   /** A paused or resumed media anchors where its latest anchor has moved to; a failed media is idle and anchors nothing. */
   const anchorNow = (rate: number): void => {
-    if (url === undefined || failed) return;
+    if (url === undefined || failed || !opts.anchorOnPlayPause) return;
     const atMs = opts.now();
     const positionMs = last.positionMs + Math.max(0, atMs - last.atMs) * last.rate;
     last = { positionMs, atMs, rate };

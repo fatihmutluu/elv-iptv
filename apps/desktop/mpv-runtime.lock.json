@@ -1,0 +1,17 @@
+{
+  "win32-x64": {
+    "kind": "upstream-libmpv",
+    "mpv": "0.42.0",
+    "url": "https://github.com/mpv-player/mpv/releases/download/v0.42.0/libmpv-v0.42.0-x86_64-w64-mingw32-lgpl.zip",
+    "sha256": "8e5f77430efc53ef175804ba6618527e3af0448a0dcabf04d3cc72659d1a6fce"
+  },
+  "darwin-arm64": {
+    "kind": "workflow-artifact",
+    "mpv": "0.42.0",
+    "repo": "fatihmutluu/elv-iptv",
+    "runId": 43641362989,
+    "artifact": "mpv-runtime-darwin-arm64",
+    "file": "mpv-runtime-darwin-arm64.tar.gz",
+    "sha256": "10eb65c586d944d0a96b47f6226834d6bc43c9f3ced6d9d6bae9518f50cc48b6"
+  }
+}

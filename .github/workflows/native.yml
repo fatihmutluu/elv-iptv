@@ -37,10 +37,13 @@ jobs:
               - 'apps/tv-mobile/**'
               - 'modules/**'
               - 'packages/**'
+              - 'tools/src/root.ts'
               - 'tools/src/prebuild-stamp.ts'
               - 'tools/src/env.ts'
               - 'tools/src/release-hygiene.ts'
               - 'tools/bin/release-hygiene.ts'
+              - 'tools/src/ffmpeg-media3/**'
+              - 'tools/bin/ffmpeg-media3.ts'
               - 'package.json'
               - '.npmrc'
               - 'pnpm-lock.yaml'
@@ -61,6 +64,8 @@ jobs:
               - 'tools/src/prebuild-stamp.ts'
               - 'tools/src/run-command.ts'
               - 'tools/src/root.ts'
+              - 'tools/src/ffmpeg-media3/**'
+              - 'tools/bin/ffmpeg-media3.ts'
               - 'docs/learned/gates/**'
               - 'package.json'
               - '.npmrc'
@@ -73,6 +78,9 @@ jobs:
               - 'apps/desktop/**'
               - 'modules/**'
               - 'packages/**'
+              - 'tools/src/mpv/**'
+              - 'tools/bin/mpv.ts'
+              - 'tools/src/root.ts'
               - 'tools/src/prebuild-stamp.ts'
               - 'tools/src/env.ts'
               - 'tools/src/release-hygiene.ts'
@@ -90,12 +98,25 @@ jobs:
     if: needs.changes.outputs.mobile == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
         id: setup
+      - name: Restore FFmpeg Media3 runtime cache
+        id: ffmpeg-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/ffmpeg-media3
+          key: ffmpeg-media3-${{ hashFiles('modules/engine-media3/ffmpeg-media3.lock.json') }}
+      - name: Fetch and verify LGPL FFmpeg Media3 runtime (#69)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm ffmpeg-media3 fetch
       - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
@@ -126,12 +147,21 @@ jobs:
             --gradle-deps "$RUNNER_TEMP/gradle-deps-mobile.txt" \
             "${manifest_args[@]}" \
             --artifact "$RUNNER_TEMP/bundle-mobile"
+      - name: Save FFmpeg Media3 runtime cache
+        if: github.ref == 'refs/heads/main' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/ffmpeg-media3
+          key: ${{ steps.ffmpeg-cache.outputs.cache-primary-key }}
 
   android-tv:
     needs: changes
     if: needs.changes.outputs.mobile == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
     env:
       EXPO_TV: "1"
     steps:
@@ -140,6 +170,15 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
         id: setup
+      - name: Restore FFmpeg Media3 runtime cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/ffmpeg-media3
+          key: ffmpeg-media3-${{ hashFiles('modules/engine-media3/ffmpeg-media3.lock.json') }}
+      - name: Fetch and verify LGPL FFmpeg Media3 runtime (#69)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm ffmpeg-media3 fetch
       - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
@@ -341,6 +380,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     continue-on-error: true
+    permissions:
+      contents: read
+      actions: read
     env:
       EXPO_TV: "1"
       APP_VARIANT: development
@@ -350,6 +392,15 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
         id: setup
+      - name: Restore FFmpeg Media3 runtime cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/ffmpeg-media3
+          key: ffmpeg-media3-${{ hashFiles('modules/engine-media3/ffmpeg-media3.lock.json') }}
+      - name: Fetch and verify LGPL FFmpeg Media3 runtime (#69)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm ffmpeg-media3 fetch
       - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
@@ -560,19 +611,34 @@ jobs:
     if: needs.changes.outputs.desktop == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    # actions: read lets `pnpm mpv fetch` download the pinned macOS runtime artifact of mpv-runtime.yml.
+    permissions:
+      contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:
         os: [windows-2025, macos-26, ubuntu-24.04]
     env:
-      # Unsigned builds: electron-builder must not look for a signing identity.
+      # Unsigned builds: electron-builder must not look for a signing identity,
+      # while macOS still needs its ad-hoc (`-`) signature applied after fuse flipping on PRs.
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      CSC_FOR_PULL_REQUEST: "true"
+      # `gh run download` on macOS; the token is read-only.
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
         id: setup
+      - name: Restore mpv runtime cache
+        id: mpv-cache
+        if: runner.os != 'Linux'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/mpv
+          key: mpv-${{ runner.os }}-${{ hashFiles('apps/desktop/mpv-runtime.lock.json') }}
       - name: Build the desktop app and installers
         run: pnpm --filter @elv/desktop build
       - name: Verify desktop app.asar release hygiene
@@ -608,6 +674,12 @@ jobs:
             apps/desktop/release/*.AppImage
           if-no-files-found: error
           retention-days: 7
+      - name: Save mpv runtime cache
+        if: github.ref == 'refs/heads/main' && runner.os != 'Linux' && steps.mpv-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/mpv
+          key: ${{ steps.mpv-cache.outputs.cache-primary-key }}
       - name: Save the pnpm store
         if: github.ref == 'refs/heads/main' && steps.setup.outputs.cache-hit != 'true' && matrix.os == 'windows-2025'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

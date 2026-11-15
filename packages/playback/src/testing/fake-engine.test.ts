@@ -120,8 +120,19 @@ describe('FakePlayerEngine', () => {
     expect(engine.openMedias()).toBe(0);
   });
 
-  it('records play, pause and seek and anchors the clock on play and pause', () => {
+  it('records play, pause and seek without scripting', () => {
     const { engine, events } = setup({ u: [] });
+    engine.load(load('u', 1));
+    engine.play(2);
+    engine.pause(3);
+    engine.seek(4, 1234);
+    vi.advanceTimersByTime(1000);
+    expect(events).toEqual([]);
+    expect(engine.commands.map((c) => c.name)).toEqual(['load', 'play', 'pause', 'seek']);
+  });
+
+  it('anchors the clock on play and pause when anchorOnPlayPause is set', () => {
+    const { engine, events } = setup({ u: [] }, { anchorOnPlayPause: true });
     engine.load(load('u', 1));
     engine.play(2);
     engine.pause(3);
@@ -137,7 +148,7 @@ describe('FakePlayerEngine', () => {
   });
 
   it('a pause anchors where the latest clock anchor has moved to by then', () => {
-    const { engine, events } = setup({ u: [] });
+    const { engine, events } = setup({ u: [] }, { anchorOnPlayPause: true });
     engine.load(load('u', 1));
     engine.emit({
       attempt: 1,
@@ -155,7 +166,7 @@ describe('FakePlayerEngine', () => {
   });
 
   it('a failed media anchors nothing on play or pause', () => {
-    const { engine, events } = setup({ u: [] });
+    const { engine, events } = setup({ u: [] }, { anchorOnPlayPause: true });
     engine.load(load('u', 1));
     engine.emit({ attempt: 1, type: 'error', error: { code: 'network' } });
     engine.pause(2);

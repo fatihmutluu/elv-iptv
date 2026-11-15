@@ -12,6 +12,7 @@ import {
   worstRunWarnings,
 } from '../src/gates/compare.ts';
 import { CONTRACT_USAGE, contractMain } from '../src/gates/contract-cli.ts';
+import { DESKTOP_USAGE, desktopMain } from '../src/gates/desktop-cli.ts';
 import { IMPORT_USAGE, importMain } from '../src/gates/import-cli.ts';
 import {
   deviceInfo,
@@ -52,6 +53,7 @@ function parseCli() {
       batch: { type: 'string' },
       zaps: { type: 'string' },
       faults: { type: 'boolean' },
+      sim: { type: 'string' },
       'max-body': { type: 'string' },
       target: { type: 'string' },
       app: { type: 'string' },
@@ -76,9 +78,10 @@ if (
   (positionals[0] !== 'list' &&
     positionals[0] !== 'import' &&
     positionals[0] !== 'player' &&
-    positionals[0] !== 'contract')
+    positionals[0] !== 'contract' &&
+    positionals[0] !== 'desktop')
 ) {
-  fail(`${USAGE}\n${IMPORT_USAGE}\n${PLAYER_USAGE}\n${CONTRACT_USAGE}`, 2);
+  fail(`${USAGE}\n${IMPORT_USAGE}\n${PLAYER_USAGE}\n${CONTRACT_USAGE}\n${DESKTOP_USAGE}`, 2);
 }
 if (positionals[0] === 'import') {
   process.exit(await importMain(values, findRepoRoot(process.cwd())));
@@ -88,6 +91,9 @@ if (positionals[0] === 'player') {
 }
 if (positionals[0] === 'contract') {
   process.exit(await contractMain(values, findRepoRoot(process.cwd())));
+}
+if (positionals[0] === 'desktop') {
+  process.exit(await desktopMain(values, findRepoRoot(process.cwd())));
 }
 
 const count = (name: string, text: string | undefined): number | undefined => {

@@ -25,6 +25,7 @@ node_modules/
 apps/*/android/
 apps/*/ios/
 modules/engine-aether/ios/.build/
+modules/engine-media3/vendor/
 dist/
 build/
 web-build/
@@ -44,4 +45,8 @@ Thumbs.db
 
 # Gate runner output
 gate-list.json
+gate-desktop.json
 gate-artifacts/
+
+# Fetched mpv runtime (pnpm mpv fetch)
+apps/desktop/resources/mpv/

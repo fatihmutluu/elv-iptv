@@ -32,3 +32,7 @@ Electron with a react-native-web renderer (a web-only Expo project). libmpv runs
 ## Links
 
 - [Foundation spec](../superpowers/specs/2026-11-13-foundation-design.md) sections 2, 4, 11.
+
+## Amendment 2026-11-14: 0.1 uses an external mpv process
+
+Version 0.1 plays on desktop through one external mpv process per player window, driven over JSON IPC by an engine in the Electron main process behind the `PlayerEngine` port. mpv draws into a child window on Windows and into its own window on macOS, and its on-screen controller is the control surface. The frame-copy design with DOM overlays described above moves to Round 2. Windows uses a small launcher of ours over the official LGPL libmpv build; the runtimes are pinned in `apps/desktop/mpv-runtime.lock.json` and installed by `pnpm mpv fetch` behind a licence gate. See the [desktop player spec](../superpowers/specs/2026-11-14-desktop-player-design.md).
