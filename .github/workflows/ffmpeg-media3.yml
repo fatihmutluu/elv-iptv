@@ -38,7 +38,7 @@ jobs:
           sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
           ndk_dir="${sdk_root}/ndk/${ndk_ver}"
           if [[ ! -d "$ndk_dir" ]]; then
-            yes | "${sdk_root}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk_root" --install "ndk;${ndk_ver}" >/dev/null
+            (yes || true) | "${sdk_root}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk_root" --install "ndk;${ndk_ver}" >/dev/null
           fi
           echo "ANDROID_NDK_HOME=${ndk_dir}" >> "$GITHUB_ENV"
 
