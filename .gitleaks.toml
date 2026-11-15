@@ -9,56 +9,70 @@ description = "Local environment file with credentials must never be committed"
 path = '''(^|[\/])\.env(\..+)?\.local$'''
 
 [[rules]]
+id = "dev-xtream-env-secret"
+description = "DEV_XTREAM_* environment variable assignment with a real value"
+regex = '''(?i)\bDEV_XTREAM_(?:SERVER|USERNAME|PASSWORD)\s*=\s*['"]?([^\s'"#]{3,256})'''
+keywords = ["DEV_XTREAM_"]
+secretGroup = 1
+
+[[rules.allowlists]]
+regexTarget = "secret"
+regexes = [
+  '''(?i)^(username|password|user|pass|demo|example|test|secret)$''',
+  '''(?i)^https?://(?:localhost|127\.0\.0\.1|10\.0\.2\.2|x)(?::\d+)?/?$''',
+]
+
+[[rules]]
 id = "xtream-path-credentials"
 description = "Xtream Codes credentials embedded in a stream URL path"
-regex = '''/(?:live|movie|series|timeshift)/([A-Za-z0-9._~%-]{3,64})/([A-Za-z0-9._~%-]{3,64})/'''
+regex = '''/(?:live|movie|series|timeshift)/([^/\s"&?#'`<>{}]{3,64})/([^/\s"&?#'`<>{}]{3,64})/'''
 keywords = ["/live/", "/movie/", "/series/", "/timeshift/"]
 secretGroup = 2
 
 [[rules.allowlists]]
 regexTarget = "secret"
-regexes = ['''(?i)^(username|password|user|pass|demo|example|test)$''']
+regexes = ['''(?i)^(username|password|user|pass|demo|example|test|\*+)$''']
 
 [[rules]]
 id = "xtream-query-credentials"
 description = "Xtream Codes credentials in a query string"
-regex = '''(?i)username=([A-Za-z0-9._~%@-]{3,64})&(?:amp;)?password=([A-Za-z0-9._~%-]{3,64})'''
+regex = '''(?i)username=([^/\s"&?#'`<>{}]{3,64})&(?:amp;)?password=([^/\s"&?#'`<>{}]{3,64})'''
 keywords = ["username="]
 secretGroup = 2
 
 [[rules.allowlists]]
 regexTarget = "secret"
-regexes = ['''(?i)^(username|password|user|pass|demo|example|test)$''']
+regexes = ['''(?i)^(username|password|user|pass|demo|example|test|\*+)$''']
 
 [[rules]]
 id = "xtream-port-path-credentials"
-description = "Xtream Codes credentials in a host:port/user/pass/id stream URL"
-regex = '''https?://[^/\s:]+:\d{2,5}/([A-Za-z0-9._~%-]{3,64})/([A-Za-z0-9._~%-]{3,64})/\d+'''
+description = "Xtream Codes credentials in a host[:port]/user/pass/id stream URL"
+regex = '''https?://[^/\s'`<>{}]+/([A-Za-z0-9._~%-]{3,64})/([^/\s"&?#'`<>{}]{3,64})/\d+(?:\.(?:ts|m3u8|mp4|mkv))?(?:$|[?#\s"'`<>])'''
 keywords = ["http"]
 secretGroup = 2
 
 [[rules.allowlists]]
 regexTarget = "secret"
 regexes = [
-  '''(?i)^(username|password|user|pass|demo|example|test)$''',
-  '''(?i)^(images?|img|static|assets?|logos?|icons?|thumbs?|thumbnails?|media|files?|uploads?|content|public|docs?|guide|api|v\d+|css|js|fonts?|videos?|audio|downloads?|cache|cdn)$''',
+  '''(?i)^(username|password|user|pass|demo|example|test|\*+)$''',
+  '''(?i)^(images?|img|static|assets?|logos?|icons?|thumbs?|thumbnails?|media|files?|uploads?|content|public|docs?|guide|api|v\d+|css|js|fonts?|videos?|audio|downloads?|cache|cdn|html|rfc|blog|posts?|news|items?|issues?|pulls?|pr|users?|status|archive|relative|hls|playlists?|channel-\d+)$''',
 ]
 
 [[rules]]
 id = "xtream-query-credentials-reversed"
 description = "Xtream Codes credentials in a query string, password first"
-regex = '''(?i)password=([A-Za-z0-9._~%@-]{3,64})&(?:amp;)?username=([A-Za-z0-9._~%@-]{3,64})'''
+regex = '''(?i)password=([^/\s"&?#'`<>{}]{3,64})&(?:amp;)?username=([^/\s"&?#'`<>{}]{3,64})'''
 keywords = ["password="]
 secretGroup = 1
 
 [[rules.allowlists]]
 regexTarget = "secret"
-regexes = ['''(?i)^(username|password|user|pass|demo|example|test)$''']
+regexes = ['''(?i)^(username|password|user|pass|demo|example|test|\*+)$''']
 
 [[rules]]
 id = "xtream-json-credentials"
 description = "Credentials in JSON, username first"
-regex = '''(?i)"username"\s*:\s*"([^"]{3,64})"\s*,\s*"password"\s*:\s*"([^"]{3,64})"'''
+regex = '''(?i)"username"\s*:\s*"([^"\r\n]{3,64})"(?:[^{}\r\n]{0,500}?)"password"\s*:\s*"([^"\r\n]{3,64})"'''
 keywords = ["username"]
 secretGroup = 2
 
@@ -69,7 +83,7 @@ regexes = ['''(?i)^(username|password|user|pass|demo|example|test)$''']
 [[rules]]
 id = "xtream-json-credentials-reversed"
 description = "Credentials in JSON, password first"
-regex = '''(?i)"password"\s*:\s*"([^"]{3,64})"\s*,\s*"username"\s*:\s*"([^"]{3,64})"'''
+regex = '''(?i)"password"\s*:\s*"([^"\r\n]{3,64})"(?:[^{}\r\n]{0,500}?)"username"\s*:\s*"([^"\r\n]{3,64})"'''
 keywords = ["password"]
 secretGroup = 1
 

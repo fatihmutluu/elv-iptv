@@ -1,11 +1,28 @@
 import { spawn } from 'node:child_process';
 import type { CheckOutcome } from './runner.ts';
 
-const quote = (arg: string) =>
-  /^[\w@%+=:,./-]+$/.test(arg) ? arg : `"${arg.replace(/"/g, '\\"')}"`;
-/** Joins a command and arguments into one shell line, quoting where needed. */
-export const commandLine = (command: string, args: string[]) =>
-  [command, ...args.map(quote)].join(' ');
+const KILL_TIMEOUT_MS = 2000;
+const KILL_POLL_MS = 15;
+
+function quote(arg: string, platform: string): string {
+  if (platform === 'win32') {
+    if (/^[A-Za-z0-9_@+=:,./-]+$/.test(arg)) return arg;
+    const escaped = arg.replace(/"/g, '\\"');
+    if (!escaped.includes('%')) return `"${escaped}"`;
+    return escaped
+      .split('%')
+      .map((part) => (part === '' ? '' : `"${part}"`))
+      .join('^%');
+  }
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(arg) ? arg : `"${arg.replace(/(["\\$`])/g, '\\$1')}"`;
+}
+
+/** Joins a command and arguments into one shell line, quoting where needed and preventing `%` expansion on Windows. */
+export const commandLine = (
+  command: string,
+  args: string[],
+  platform: string = process.platform,
+): string => [quote(command, platform), ...args.map((a) => quote(a, platform))].join(' ');
 
 /** A finished process; `timedOut` is set when it was killed for exceeding `timeoutMs`. */
 export interface ExecOutcome extends CheckOutcome {
@@ -74,18 +91,59 @@ export function createGroupForwarder(host: SignalHost): GroupForwarder {
 
 const liveGroups = createGroupForwarder(process);
 
-/** Kills a child and everything it started: `taskkill /T` on Windows, its process group elsewhere. */
-function killTree(pid: number | undefined): void {
-  if (pid === undefined) return;
-  if (process.platform === 'win32') {
-    spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-  } else {
-    try {
-      process.kill(-pid, 'SIGKILL');
-    } catch {
-      // already gone
-    }
+/**
+ * Sends `SIGKILL` to POSIX process group `-pid` and waits (bounded by `timeoutMs`) until
+ * `kill(-pid, 0)` throws (`ESRCH`), ensuring all children and grandchildren have terminated and been reaped.
+ */
+export async function killPosixGroup(
+  pid: number,
+  host: { kill(pid: number, signal: NodeJS.Signals | 0): unknown } = process,
+  timeoutMs: number = KILL_TIMEOUT_MS,
+  pollMs: number = KILL_POLL_MS,
+): Promise<void> {
+  try {
+    host.kill(-pid, 'SIGKILL');
+  } catch {
+    return;
   }
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      host.kill(-pid, 0);
+    } catch {
+      return;
+    }
+    if (Date.now() >= deadline) return;
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(resolve, pollMs);
+      t.unref();
+    });
+  }
+}
+
+/** Kills a child and everything it started: `taskkill /T` on Windows (bounded by 2 s), its process group elsewhere. */
+function killTree(pid: number | undefined): Promise<void> {
+  if (pid === undefined) return Promise.resolve();
+  if (process.platform === 'win32') {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (): void => {
+        if (done) return;
+        done = true;
+        clearTimeout(cap);
+        resolve();
+      };
+      const cap = setTimeout(finish, KILL_TIMEOUT_MS);
+      cap.unref();
+      const killer = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+      });
+      killer.on('error', finish);
+      killer.on('close', finish);
+    });
+  }
+  return killPosixGroup(pid);
 }
 
 /**
@@ -95,13 +153,19 @@ function killTree(pid: number | undefined): void {
 export function exec(
   command: string,
   args: string[],
-  opts: { cwd: string; env?: Record<string, string>; timeoutMs?: number },
+  opts: {
+    cwd: string;
+    env?: Record<string, string>;
+    replaceEnv?: boolean;
+    timeoutMs?: number;
+  },
 ): Promise<ExecOutcome> {
   return new Promise((resolve) => {
     const detached = ownGroup(process.platform, opts.timeoutMs);
+    const baseEnv = opts.replaceEnv === true ? opts.env : { ...process.env, ...opts.env };
     const child = spawn(commandLine(command, args), {
       cwd: opts.cwd,
-      env: { ...process.env, ...opts.env, NO_COLOR: '1', FORCE_COLOR: '0' },
+      env: { ...baseEnv, NO_COLOR: '1', FORCE_COLOR: '0' },
       shell: true,
       windowsHide: true,
       detached,
@@ -109,8 +173,12 @@ export function exec(
     const pid = child.pid;
     if (detached && pid !== undefined) liveGroups.add(pid);
     let output = '';
+    let timedOut = false;
+    let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const settle = (outcome: ExecOutcome): void => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       if (pid !== undefined) liveGroups.remove(pid);
       resolve(outcome);
@@ -118,13 +186,15 @@ export function exec(
     if (opts.timeoutMs !== undefined) {
       const ms = opts.timeoutMs;
       timer = setTimeout(() => {
-        killTree(pid);
-        child.stdout.destroy();
-        child.stderr.destroy();
-        settle({
-          ok: false,
-          timedOut: true,
-          output: `${output}\n${command}: timed out after ${Math.round(ms / 1000)} s`,
+        timedOut = true;
+        void killTree(pid).then(() => {
+          child.stdout.destroy();
+          child.stderr.destroy();
+          settle({
+            ok: false,
+            timedOut: true,
+            output: `${output}\n${command}: timed out after ${Math.round(ms / 1000)} s`,
+          });
         });
       }, ms);
     }
@@ -134,7 +204,11 @@ export function exec(
     child.stderr.on('data', (d: Buffer) => {
       output += d.toString();
     });
-    child.on('error', (e) => settle({ ok: false, output: `${command}: ${e.message}` }));
-    child.on('close', (code) => settle({ ok: code === 0, output }));
+    child.on('error', (e) => {
+      if (!timedOut) settle({ ok: false, output: `${command}: ${e.message}` });
+    });
+    child.on('close', (code) => {
+      if (!timedOut) settle({ ok: code === 0, output });
+    });
   });
 }

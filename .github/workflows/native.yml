@@ -37,6 +37,10 @@ jobs:
               - 'apps/tv-mobile/**'
               - 'modules/**'
               - 'packages/**'
+              - 'tools/src/prebuild-stamp.ts'
+              - 'tools/src/env.ts'
+              - 'tools/src/release-hygiene.ts'
+              - 'tools/bin/release-hygiene.ts'
               - 'package.json'
               - '.npmrc'
               - 'pnpm-lock.yaml'
@@ -45,13 +49,16 @@ jobs:
               - '.github/actions/**'
               - '.github/workflows/native.yml'
             gate:
-              - 'packages/focus-core/**'
-              - 'packages/ui-kit/**'
+              - 'packages/**'
               - 'modules/**'
               - 'apps/tv-mobile/**'
               - 'tools/src/gates/**'
+              - 'tools/src/sim/**'
               - 'tools/bin/gate.ts'
+              - 'tools/bin/sim.ts'
               - 'tools/src/exec.ts'
+              - 'tools/src/env.ts'
+              - 'tools/src/prebuild-stamp.ts'
               - 'tools/src/run-command.ts'
               - 'tools/src/root.ts'
               - 'docs/learned/gates/**'
@@ -66,6 +73,10 @@ jobs:
               - 'apps/desktop/**'
               - 'modules/**'
               - 'packages/**'
+              - 'tools/src/prebuild-stamp.ts'
+              - 'tools/src/env.ts'
+              - 'tools/src/release-hygiene.ts'
+              - 'tools/bin/release-hygiene.ts'
               - 'package.json'
               - '.npmrc'
               - 'pnpm-lock.yaml'
@@ -98,6 +109,23 @@ jobs:
       - name: Build the debug APK
         working-directory: apps/tv-mobile/android
         run: ./gradlew assembleDebug --quiet --no-daemon
+      - name: Verify Android mobile release hygiene (#11, #12, #19)
+        env:
+          APP_VARIANT: production
+        run: |
+          set -euo pipefail
+          (cd apps/tv-mobile/android && ./gradlew :app:dependencies --configuration releaseRuntimeClasspath --no-daemon) > "$RUNNER_TEMP/gradle-deps-mobile.txt"
+          pnpm --filter tv-mobile exec expo export --platform android --output-dir "$RUNNER_TEMP/bundle-mobile"
+          pnpm --filter tv-mobile exec expo config --type public --json > "$RUNNER_TEMP/bundle-mobile/app.config.json"
+          manifest_args=()
+          while IFS= read -r m; do
+            manifest_args+=(--android-manifest "$m")
+          done < <(find apps/tv-mobile/android/app/build -path '*merged_manifest*' -name AndroidManifest.xml)
+          test "${#manifest_args[@]}" -gt 0 || { echo "no merged manifest found"; exit 1; }
+          node tools/bin/release-hygiene.ts \
+            --gradle-deps "$RUNNER_TEMP/gradle-deps-mobile.txt" \
+            "${manifest_args[@]}" \
+            --artifact "$RUNNER_TEMP/bundle-mobile"
 
   android-tv:
     needs: changes
@@ -124,13 +152,36 @@ jobs:
       - name: Build the debug APK and run the native modules' JVM unit tests
         working-directory: apps/tv-mobile/android
         run: ./gradlew assembleDebug :elv-remote-keys:testDebugUnitTest :elv-engine-media3:testDebugUnitTest --quiet --no-daemon
-      - name: Assert the merged manifest declares the leanback feature
+      - name: Verify Android TV and Fire OS release hygiene (#11, #12, #19)
+        env:
+          APP_VARIANT: production
         run: |
-          manifests=$(find apps/tv-mobile/android/app/build -path '*merged_manifest*' -name AndroidManifest.xml)
-          test -n "$manifests" || { echo "no merged manifest found"; exit 1; }
-          # Word splitting is intended: grep takes every manifest path.
-          # shellcheck disable=SC2086
-          grep -q 'android.software.leanback' $manifests || { echo "leanback feature missing from merged manifest"; exit 1; }
+          set -euo pipefail
+          (cd apps/tv-mobile/android && ./gradlew :app:dependencies --configuration releaseRuntimeClasspath --no-daemon) > "$RUNNER_TEMP/gradle-deps-tv.txt"
+          pnpm --filter tv-mobile exec expo export --platform android --output-dir "$RUNNER_TEMP/bundle-tv"
+          pnpm --filter tv-mobile exec expo config --type public --json > "$RUNNER_TEMP/bundle-tv/app.config.json"
+          manifest_args=()
+          while IFS= read -r m; do
+            manifest_args+=(--android-manifest "$m")
+          done < <(find apps/tv-mobile/android/app/build -path '*merged_manifest*' -name AndroidManifest.xml)
+          test "${#manifest_args[@]}" -gt 0 || { echo "no merged manifest found"; exit 1; }
+          node tools/bin/release-hygiene.ts --tv \
+            --gradle-deps "$RUNNER_TEMP/gradle-deps-tv.txt" \
+            "${manifest_args[@]}" \
+            --artifact "$RUNNER_TEMP/bundle-tv"
+          STORE=amazon pnpm --filter tv-mobile exec expo prebuild --clean --platform android --no-install
+          (cd apps/tv-mobile/android && STORE=amazon ./gradlew :app:processDebugMainManifest :app:dependencies --configuration releaseRuntimeClasspath --no-daemon) > "$RUNNER_TEMP/gradle-deps-amazon.txt"
+          mkdir -p "$RUNNER_TEMP/bundle-amazon"
+          STORE=amazon pnpm --filter tv-mobile exec expo config --type public --json > "$RUNNER_TEMP/bundle-amazon/app.config.json"
+          amazon_manifests=()
+          while IFS= read -r m; do
+            amazon_manifests+=(--android-manifest "$m")
+          done < <(find apps/tv-mobile/android/app/build -path '*merged_manifest*' -name AndroidManifest.xml)
+          test "${#amazon_manifests[@]}" -gt 0 || { echo "no Fire OS merged manifest found"; exit 1; }
+          node tools/bin/release-hygiene.ts --tv \
+            --gradle-deps "$RUNNER_TEMP/gradle-deps-amazon.txt" \
+            "${amazon_manifests[@]}" \
+            --artifact "$RUNNER_TEMP/bundle-amazon"
 
   ios:
     needs: changes
@@ -151,7 +202,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/Library/Caches/CocoaPods
-          key: ${{ runner.os }}-cocoapods-ios-${{ hashFiles('pnpm-lock.yaml') }}
+          key: ${{ runner.os }}-cocoapods-ios-${{ hashFiles('pnpm-lock.yaml', 'modules/*/ios/*.podspec', 'apps/tv-mobile/config/**') }}
           restore-keys: ${{ runner.os }}-cocoapods-ios-
       - name: Generate the iOS project
         run: pnpm --filter tv-mobile exec expo prebuild --platform ios --no-install
@@ -166,6 +217,18 @@ jobs:
           xcodebuild -workspace "$workspace" -scheme "${workspace%.xcworkspace}" \
             -sdk iphonesimulator -configuration Debug \
             CODE_SIGNING_ALLOWED=NO -quiet build
+      - name: Verify iOS release hygiene (#12)
+        env:
+          APP_VARIANT: production
+        run: |
+          set -euo pipefail
+          pnpm --filter tv-mobile exec expo export --platform ios --output-dir "$RUNNER_TEMP/bundle-ios"
+          pnpm --filter tv-mobile exec expo config --type public --json > "$RUNNER_TEMP/bundle-ios/app.config.json"
+          plist=$(find apps/tv-mobile/ios -maxdepth 2 -name Info.plist | head -n 1)
+          test -n "$plist" || { echo "no iOS Info.plist found"; exit 1; }
+          node tools/bin/release-hygiene.ts \
+            --apple-plist "$plist" \
+            --artifact "$RUNNER_TEMP/bundle-ios"
       - name: Save the pnpm store
         if: github.ref == 'refs/heads/main' && steps.setup.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -200,7 +263,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/Library/Caches/CocoaPods
-          key: ${{ runner.os }}-cocoapods-tvos-${{ hashFiles('pnpm-lock.yaml') }}
+          key: ${{ runner.os }}-cocoapods-tvos-${{ hashFiles('pnpm-lock.yaml', 'modules/*/ios/*.podspec', 'apps/tv-mobile/config/**') }}
           restore-keys: ${{ runner.os }}-cocoapods-tvos-
       - name: Generate the tvOS project
         run: pnpm --filter tv-mobile exec expo prebuild --platform ios --no-install
@@ -215,6 +278,18 @@ jobs:
           xcodebuild -workspace "$workspace" -scheme "${workspace%.xcworkspace}" \
             -sdk appletvsimulator -configuration Debug \
             CODE_SIGNING_ALLOWED=NO -quiet build
+      - name: Verify tvOS release hygiene (#12)
+        env:
+          APP_VARIANT: production
+        run: |
+          set -euo pipefail
+          pnpm --filter tv-mobile exec expo export --platform ios --output-dir "$RUNNER_TEMP/bundle-tvos"
+          pnpm --filter tv-mobile exec expo config --type public --json > "$RUNNER_TEMP/bundle-tvos/app.config.json"
+          plist=$(find apps/tv-mobile/ios -maxdepth 2 -name Info.plist | head -n 1)
+          test -n "$plist" || { echo "no tvOS Info.plist found"; exit 1; }
+          node tools/bin/release-hygiene.ts \
+            --apple-plist "$plist" \
+            --artifact "$RUNNER_TEMP/bundle-tvos"
       - name: Save CocoaPods cache
         if: github.ref == 'refs/heads/main' && steps.pods-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -265,9 +340,15 @@ jobs:
           api-level: 36
           target: android-tv
           arch: x86_64
+          cores: 4
+          ram-size: 4096M
+          heap-size: 512M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          script: pnpm gate list --ci --budgets warn --baseline docs/learned/gates/list-android-tv-ci.json
+          script: |
+            adb wait-for-device
+            sleep 10
+            pnpm gate list --ci --budgets warn --baseline docs/learned/gates/list-android-tv-ci.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -336,6 +417,8 @@ jobs:
           bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
           log="$RUNNER_TEMP/gate-tvos-log.txt"
           : > "$log"
+          stream_pid=""
+          trap '[ -n "$stream_pid" ] && kill "$stream_pid" 2>/dev/null || true' EXIT
           xcrun simctl spawn "$udid" log stream --style compact --level debug \
             --predicate 'eventMessage CONTAINS "ELV_GATE"' > "$log" 2>&1 &
           stream_pid=$!
@@ -372,6 +455,9 @@ jobs:
             exit 0
           fi
           bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
+          sim_pid=""
+          stream_pid=""
+          trap 'kill ${stream_pid:+"$stream_pid"} ${sim_pid:+"$sim_pid"} 2>/dev/null || true' EXIT
           (cd "$GITHUB_WORKSPACE" && exec node tools/bin/sim.ts --port 7878 --host 127.0.0.1) > "$RUNNER_TEMP/sim.txt" 2>&1 &
           sim_pid=$!
           for _ in $(seq 1 30); do
@@ -430,15 +516,29 @@ jobs:
         id: setup
       - name: Build the desktop app and installers
         run: pnpm --filter @elv/desktop build
+      - name: Verify desktop app.asar release hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          asar_args=()
+          while IFS= read -r a; do
+            asar_args+=(--artifact "$a")
+          done < <(find apps/desktop/release -name app.asar)
+          test "${#asar_args[@]}" -gt 0 || { echo "no packaged app.asar found"; exit 1; }
+          node tools/bin/release-hygiene.ts "${asar_args[@]}"
       # Ubuntu 24.04 blocks unprivileged user namespaces, which the Chromium sandbox needs.
       - name: Allow the Electron sandbox on Linux
         if: runner.os == 'Linux'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: End-to-end test (Linux)
+      - name: End-to-end test including packaged app.asar (Linux)
         if: runner.os == 'Linux'
+        env:
+          ELV_E2E_PACKAGED: "1"
         run: xvfb-run -a pnpm --filter @elv/desktop test:e2e
-      - name: End-to-end test
+      - name: End-to-end test including packaged app.asar
         if: runner.os != 'Linux'
+        env:
+          ELV_E2E_PACKAGED: "1"
         run: pnpm --filter @elv/desktop test:e2e
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

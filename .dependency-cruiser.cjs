@@ -130,7 +130,7 @@ module.exports = {
         'shipped sources only use runtime dependencies; peer dependencies (also listed as dev for local tests) come from the app; the electron module is supplied by the Electron runtime and must stay a devDependency for electron-builder',
       severity: 'error',
       from: {
-        path: '^(packages|modules|apps)/[^/]+/src/',
+        path: '^(packages|modules|apps)/[^/]+/(renderer/)?src/',
         pathNot: ['\\.(test|spec)\\.[cm]?[jt]sx?$', TEST_DB],
       },
       to: {

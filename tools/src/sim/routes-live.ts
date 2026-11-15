@@ -59,16 +59,18 @@ async function serveLive(
     return;
   }
   const ffmpeg = ctx.media?.ffmpeg;
-  if (!ffmpeg || !takeSlot(res, ctx, account)) return;
+  if (!ffmpeg) return;
+  const head = req.method === 'HEAD';
+  if (!head && !takeSlot(res, ctx, account)) return;
   res.writeHead(200, {
     'content-type': mediaType(faults, 'video/mp2t'),
     'cache-control': 'no-store',
   });
-  if (req.method === 'HEAD') {
+  if (head) {
     res.end();
     return;
   }
-  const live = spawnLive(ffmpeg, files.loopTs);
+  const live = spawnLive(ffmpeg, files.loopTs, ctx.children);
   ctx.liveProcesses.add(live);
   void live.exited.then(() => ctx.liveProcesses.delete(live));
   res.once('close', live.stop);

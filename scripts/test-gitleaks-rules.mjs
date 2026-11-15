@@ -20,7 +20,37 @@ const cases = [
   ['json, username first', '{"username":"zq8sample","password":"Qm47tLw9"}\n', 1],
   ['json, password first', '{"password":"Qm47tLw9","username":"zq8sample"}\n', 1],
   ['live path', 'http://h.example:8080/live/zq8sample/Qm47tLw9/1.ts\n', 1],
+  [
+    'live path with special password chars',
+    'http://h.example:8080/live/zq8sample/Q!m47tLw+@9/1.ts\n',
+    1,
+  ],
+  ['query with special password chars', 'get.php?username=zq8sample&password=Q!m47tLw+@9\n', 1],
+  [
+    'query reversed with special password chars',
+    'get.php?password=Q!m47tLw+@9&username=zq8sample\n',
+    1,
+  ],
+  ['portless short-form stream url', 'http://h.example/zq8sample/Q!m47tLw+9/12345\n', 1],
+  ['dev xtream password env', 'DEV_XTREAM_PASSWORD=Qm47!tLw+9\n', 1],
+  ['dev xtream server env', 'DEV_XTREAM_SERVER="http://panel.example.net:8080"\n', 1],
+  ['dev xtream username env', 'export DEV_XTREAM_USERNAME=zq8sample\n', 1],
+  [
+    'json non-adjacent username first',
+    '{"server":"http://h.example","username":"zq8sample","port":8080,"password":"Qm47!tLw+9"}\n',
+    1,
+  ],
+  [
+    'json non-adjacent password first',
+    '{"password":"Qm47!tLw+9","active":true,"username":"zq8sample"}\n',
+    1,
+  ],
   ['placeholder port path', 'http://h.example:8080/username/password/12345\n', 0],
+  [
+    'placeholder dev xtream env',
+    'DEV_XTREAM_PASSWORD=password\nDEV_XTREAM_USERNAME=demo\nDEV_XTREAM_SERVER=http://localhost:7878\n',
+    0,
+  ],
   ['placeholder query', 'get.php?password=example&username=demo\n', 0],
   ['placeholder json', '{"username":"user","password":"pass"}\n', 0],
   ['placeholder json reversed', '{"password":"test","username":"demo"}\n', 0],
@@ -29,6 +59,13 @@ const cases = [
   ['ordinary docs url', 'http://localhost:3000/docs/guide/1\n', 0],
   ['ordinary asset url', 'http://localhost:8080/static/assets/2024\n', 0],
   ['versioned api url', 'http://localhost:8080/api/v2/42\n', 0],
+  [
+    'js template literal url',
+    ['const u = `http://h:8080/live/$', '{user}/$', '{pass}/1.ts`;\n'].join(''),
+    0,
+  ],
+  ['docs placeholder url', 'Stream shape: `/live/<u>/<p>/<id>.ts`\n', 0],
+  ['urlvars template url', 'http://bare.example:8080/{{user}}/{{pass}}/3\n', 0],
 ];
 
 let failed = 0;

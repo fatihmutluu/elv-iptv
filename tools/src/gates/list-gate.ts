@@ -232,6 +232,9 @@ export async function runListGate(opts: ListGateOptions): Promise<GateResult> {
         `gate: a ${holdMs} ms hold gave ${held.moves} moves, expected ${expected} ± ${HOLD_TOLERANCE}`,
       );
     }
+    if (held.losses > 0) {
+      throw new Error(`gate: a ${holdMs} ms hold reported ${held.losses} focus losses`);
+    }
     result.realHold = { holdMs, moves: held.moves, expected };
   }
   return result;

@@ -5,6 +5,7 @@ import {
   httpStatusError,
   m3uKey,
   ok,
+  openAsyncIterator,
   type Result,
   transportHeaders,
 } from '@elv/domain';
@@ -67,7 +68,7 @@ interface State {
 
 async function discard(body: HttpResponse['body']): Promise<void> {
   try {
-    await body[Symbol.asyncIterator]().return?.();
+    await openAsyncIterator(body).return?.();
   } catch {
     // the response is already classified by its status
   }

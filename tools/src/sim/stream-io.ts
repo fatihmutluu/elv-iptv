@@ -52,6 +52,7 @@ export function authorize(
  * the account policy and returns false. The slot is released when the response finishes or closes.
  */
 export function takeSlot(res: ServerResponse, ctx: SimContext, account: Account): boolean {
+  if (res.closed || res.destroyed) return false;
   if (ctx.connections.open(account.username) > account.maxConnections) {
     ctx.connections.close(account.username);
     if (account.limitPolicy === 'status-509') sendText(res, 509, 'text/plain');
@@ -109,6 +110,7 @@ export async function loadRecipe(
   ctx: SimContext,
   recipe: RecipeName,
 ): Promise<RecipeFiles | null> {
+  if (res.closed || res.destroyed) return null;
   const media = ctx.media;
   if (media === null || media.ffmpeg === null) {
     sendText(res, 503, 'text/plain', 'FFmpeg not found: set FFMPEG_PATH or install FFmpeg');
@@ -120,7 +122,7 @@ export async function loadRecipe(
       cacheDir: media.cacheDir,
       seconds: media.seconds,
     });
-    return res.destroyed ? null : files;
+    return res.closed || res.destroyed ? null : files;
   } catch (error) {
     sendText(res, 503, 'text/plain', `FFmpeg failed: ${(error as Error).message}`);
     return null;

@@ -1,3 +1,4 @@
+import type { ChildProcess } from 'node:child_process';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { FaultRules } from './fault-rules.ts';
 import type { RequestLog } from './log.ts';
@@ -29,6 +30,8 @@ export interface SimContext {
   faultRules: FaultRules;
   /** Live FFmpeg copies this server started and that have not exited yet. */
   liveProcesses: Set<LiveProcess>;
+  /** Per-instance child process pool for `spawnLive` when isolating multiple simulator instances. */
+  children?: Set<ChildProcess>;
 }
 
 /** What a handler learned about the request, copied into its log line. */

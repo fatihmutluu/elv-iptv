@@ -37,10 +37,23 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - uses: ./.github/actions/setup
         id: setup
+      - name: Install Hermes CLI v0.13.0
+        env:
+          HERMES_VERSION: v0.13.0
+          HERMES_SHA256: aead6eb0b8f563bb022354352eae32dad96c933330b6c1941b6db17674ca68ae
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/hermes-cli.tar.gz" \
+            "https://github.com/facebook/hermes/releases/download/${HERMES_VERSION}/hermes-cli-linux.tar.gz"
+          echo "${HERMES_SHA256}  $RUNNER_TEMP/hermes-cli.tar.gz" | sha256sum --check --quiet
+          mkdir -p "$HOME/.local/hermes-${HERMES_VERSION}"
+          tar -xzf "$RUNNER_TEMP/hermes-cli.tar.gz" -C "$HOME/.local/hermes-${HERMES_VERSION}"
+          echo "$HOME/.local/hermes-${HERMES_VERSION}" >> "$GITHUB_PATH"
       - name: Install FFmpeg
         run: command -v ffmpeg || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg)
       - name: pnpm check
         run: pnpm check
+      - name: Run source scanners under Hermes (#37)
+        run: node tools/bin/hermes-sources.ts --require-runtime --benchmark large
       - name: Scan full history for secrets
         run: gitleaks git --config .gitleaks.toml --redact --no-banner
       - name: Save the pnpm store

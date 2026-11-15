@@ -182,6 +182,42 @@ describe('request faults', () => {
     expect(bad.status).toBe(400);
     expect(await bad.text()).toContain('explode');
   });
+
+  it('populates account and streamId on short-form URLs with ?fault= and aborts slow-start with 499 on disconnect', async () => {
+    const handle = await sim();
+    const shortRes = await fetch(
+      `${handle.url}/${demo.username}/${demo.password}/1001?fault=status=509`,
+    );
+    expect(shortRes.status).toBe(509);
+    await shortRes.text();
+    expect(handle.requests().at(-1)).toMatchObject({
+      path: '/demo/***/1001',
+      status: 509,
+      account: 'demo',
+      streamId: 1001,
+      fault: 'status=509',
+    });
+
+    const ac = new AbortController();
+    const t0 = performance.now();
+    const aborted = fetch(
+      `${handle.url}/${demo.username}/${demo.password}/1001?fault=slow-start=10`,
+      {
+        signal: ac.signal,
+      },
+    ).catch(() => null);
+    setTimeout(() => ac.abort(), 80);
+    await aborted;
+    await vi.waitFor(() => expect(handle.requests()).toHaveLength(2));
+    expect(performance.now() - t0).toBeLessThan(1500);
+    expect(handle.requests().at(-1)).toMatchObject({
+      path: '/demo/***/1001',
+      status: 499,
+      account: 'demo',
+      streamId: 1001,
+      fault: 'slow-start=10',
+    });
+  });
 });
 
 describe('request log', () => {
@@ -311,6 +347,27 @@ describe('harness events', () => {
     expect(await bad.text()).toContain('line 2');
     const big = await fetch(`${url}/_sim/events`, { method: 'POST', body: 'x'.repeat(1_048_577) });
     expect(big.status).toBe(413);
+  });
+
+  it('caps events at 10,000 and clears them on DELETE /_sim/events and DELETE /_sim/requests', async () => {
+    const { url } = await sim();
+    const batch = Array.from({ length: 5005 }, (_, i) => JSON.stringify({ n: i })).join('\n');
+    await fetch(`${url}/_sim/events`, { method: 'POST', body: batch });
+    const batch2 = Array.from({ length: 5005 }, (_, i) => JSON.stringify({ n: 5005 + i })).join(
+      '\n',
+    );
+    await fetch(`${url}/_sim/events`, { method: 'POST', body: batch2 });
+    const capped = (await (await fetch(`${url}/_sim/events`)).json()) as { n: number }[];
+    expect(capped).toHaveLength(10_000);
+    expect(capped[0]?.n).toBe(10);
+    expect(capped.at(-1)?.n).toBe(10_009);
+
+    expect((await fetch(`${url}/_sim/events`, { method: 'DELETE' })).status).toBe(204);
+    expect(await (await fetch(`${url}/_sim/events`)).json()).toEqual([]);
+
+    await fetch(`${url}/_sim/events`, { method: 'POST', body: '{"k":1}\n' });
+    expect((await fetch(`${url}/_sim/requests`, { method: 'DELETE' })).status).toBe(204);
+    expect(await (await fetch(`${url}/_sim/events`)).json()).toEqual([]);
   });
 });
 

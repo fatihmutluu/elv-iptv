@@ -406,4 +406,47 @@ describe('xtream guide override', () => {
     expect((await importGuide('s2', deps, { now: NOW })).ok).toBe(true);
     expect(urls).toEqual([override]);
   });
+
+  it('discards non-2xx @@asyncIterator bodies in catalog and guide imports when Symbol.asyncIterator is undefined', async () => {
+    const e = await ready();
+    const OriginalSymbol = globalThis.Symbol;
+    const FakeSymbol = Object.assign(
+      ((description?: string | number) => OriginalSymbol(description)) as typeof Symbol,
+      {
+        for: OriginalSymbol.for.bind(OriginalSymbol),
+        keyFor: OriginalSymbol.keyFor.bind(OriginalSymbol),
+        asyncIterator: undefined as unknown as typeof Symbol.asyncIterator,
+      },
+    );
+    let discarded = 0;
+    const makeBabelBody = () => {
+      const gen = {
+        '@@asyncIterator'() {
+          return gen;
+        },
+        next: async () => ({ done: true as const, value: undefined }),
+        return: async () => {
+          discarded++;
+          return { done: true as const, value: undefined };
+        },
+      };
+      return gen as unknown as AsyncIterable<Uint8Array>;
+    };
+    const failingDeps = {
+      ...e.deps,
+      http: {
+        async get() {
+          return ok({ status: 502, headers: {}, body: makeBabelBody() });
+        },
+      },
+    };
+    (globalThis as { Symbol: typeof Symbol }).Symbol = FakeSymbol;
+    try {
+      expectErr(await importCatalog(e.sourceId, failingDeps), 'network', 'http-502');
+      expectErr(await importGuide(e.sourceId, failingDeps, { now: NOW }), 'network', 'http-502');
+      expect(discarded).toBe(2);
+    } finally {
+      (globalThis as { Symbol: typeof Symbol }).Symbol = OriginalSymbol;
+    }
+  });
 });

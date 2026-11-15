@@ -1,5 +1,12 @@
+import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import { createGroupForwarder, exec, ownGroup, type SignalHost } from '../src/exec.ts';
+import {
+  createGroupForwarder,
+  exec,
+  killPosixGroup,
+  ownGroup,
+  type SignalHost,
+} from '../src/exec.ts';
 
 type Listener = (signal: NodeJS.Signals) => void;
 
@@ -68,22 +75,66 @@ describe('createGroupForwarder', () => {
   });
 });
 
+describe('killPosixGroup', () => {
+  it('sends SIGKILL to -pid and polls kill(-pid, 0) until ESRCH before resolving', async () => {
+    const calls: [number, NodeJS.Signals | 0][] = [];
+    let aliveProbesRemaining = 3;
+    const host = {
+      kill(pid: number, signal: NodeJS.Signals | 0) {
+        calls.push([pid, signal]);
+        if (signal === 0) {
+          if (aliveProbesRemaining-- > 0) return true;
+          throw Object.assign(new Error('ESRCH'), { code: 'ESRCH' });
+        }
+        return true;
+      },
+    };
+
+    await killPosixGroup(500, host, 2_000, 10);
+    expect(calls).toEqual([
+      [-500, 'SIGKILL'],
+      [-500, 0],
+      [-500, 0],
+      [-500, 0],
+      [-500, 0],
+    ]);
+  });
+
+  it('bounds waiting by timeoutMs if the process group stays un-reaped', async () => {
+    const host = {
+      kill() {
+        return true;
+      },
+    };
+    const started = Date.now();
+    await killPosixGroup(501, host, 45, 10);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(35);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+});
+
 describe.skipIf(process.platform === 'win32')('exec process groups', () => {
-  const pidAndGroup = async (timeoutMs?: number) => {
-    const result = await exec('sh', ['-c', 'ps -o pid=,pgid= -p $$'], {
+  const runnerGroup = () =>
+    execFileSync('ps', ['-o', 'pgid=', '-p', String(process.pid)], { encoding: 'utf8' }).trim();
+
+  const commandGroup = async (timeoutMs?: number) => {
+    const script =
+      "process.stdout.write(require('node:child_process').execFileSync('ps',['-o','pgid=','-p',String(process.pid)],{encoding:'utf8'}).trim())";
+    const result = await exec(process.execPath, ['-e', script], {
       cwd: process.cwd(),
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
     });
-    return result.output.trim().split(/\s+/);
+    expect(result.ok, result.output).toBe(true);
+    return result.output.trim();
   };
 
   it('keeps an unbounded command in our process group so Ctrl+C reaches it', async () => {
-    const [pid, group] = await pidAndGroup();
-    expect(pid).not.toBe(group);
+    expect(await commandGroup()).toBe(runnerGroup());
   });
 
   it('starts a bounded command in its own group so a timeout kills all of it', async () => {
-    const [pid, group] = await pidAndGroup(20_000);
-    expect(pid).toBe(group);
+    const pgid = await commandGroup(20_000);
+    expect(Number(pgid)).toBeGreaterThan(0);
+    expect(pgid).not.toBe(runnerGroup());
   });
 });

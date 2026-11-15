@@ -17,13 +17,28 @@ export function hlsRedirectPath(path: string): string | null {
   return null;
 }
 
-/** Applies request-level faults; true when one of them answered the request. */
+/** Applies request-level faults; true when one of them answered the request or the client disconnected early. */
 export async function requestFaults(
   req: IncomingMessage,
   res: ServerResponse,
   faults: readonly Fault[],
 ): Promise<boolean> {
-  for (const f of faults) if (f.kind === 'slow-start') await sleep(f.sec * 1000);
+  if (res.closed || res.destroyed) return true;
+  if (faults.some((f) => f.kind === 'slow-start')) {
+    const abort = new AbortController();
+    const onClose = (): void => abort.abort();
+    res.once('close', onClose);
+    try {
+      for (const f of faults) {
+        if (f.kind !== 'slow-start') continue;
+        await sleep(f.sec * 1000, undefined, { signal: abort.signal }).catch(() => undefined);
+        if (res.closed || res.destroyed) return true;
+      }
+    } finally {
+      res.off('close', onClose);
+    }
+  }
+  if (res.closed || res.destroyed) return true;
   for (const f of faults) {
     if (f.kind === 'status') sendText(res, f.code, 'text/plain');
     else if (f.kind === 'text-notice') sendText(res, 200, 'text/plain', 'Max connections reached');
