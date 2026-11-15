@@ -36,9 +36,7 @@ const config: KnipConfig = {
     },
     'packages/features': {
       ignoreDependencies: [
-        '@elv/domain',
         '@elv/focus-core',
-        '@elv/i18n',
         '@elv/ui-kit',
         '@types/react',
         'react',

@@ -8,9 +8,11 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "test": "vitest run --coverage --reporter=dot --passWithNoTests",
     "typecheck": "tsc --noEmit -p . --pretty false"
   },
   "dependencies": {
+    "@elv/data": "workspace:*",
     "@elv/domain": "workspace:*",
     "@elv/focus-core": "workspace:*",
     "@elv/i18n": "workspace:*",
@@ -23,7 +25,9 @@
   "devDependencies": {
     "@elv/config": "workspace:*",
     "@types/react": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
     "react": "catalog:",
-    "react-native": "catalog:"
+    "react-native": "catalog:",
+    "vitest": "5.1.0"
   }
 }
