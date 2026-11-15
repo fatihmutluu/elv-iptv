@@ -9,6 +9,8 @@ const FORBIDDEN_ANDROID_PERMISSIONS = [
 const DEV_PACKAGE_ID = 'io.github.fatihmutluu.elviptv.dev';
 const DEV_KEY_PATTERN = /(?<![A-Za-z0-9_])DEV_[A-Z0-9]+(?:_[A-Z0-9]+)*/g;
 const GATE_FLAG_PATTERN = /(?:"gate"\s*:\s*true\b|\bgate\s*:\s*!0\b)/;
+const DEV_SEED_MARKER = 'elv.dev.seeded';
+const DEV_SEED_PAYLOAD_PATTERN = /(?:"seed"\s*:\s*\{|\bseed\s*:\s*\{\s*kind\s*:)/;
 
 export interface ManifestCheckOptions {
   readonly tv?: boolean;
@@ -126,6 +128,14 @@ function scanDecodedText(label: string, text: string, seen: Set<string>, errors:
   if (text.includes(DEV_PACKAGE_ID) && !seen.has('dev-id')) {
     seen.add('dev-id');
     errors.push(`${label}: references development identifier "${DEV_PACKAGE_ID}"`);
+  }
+  if (text.includes(DEV_SEED_MARKER) && !seen.has('dev-seed-marker')) {
+    seen.add('dev-seed-marker');
+    errors.push(`${label}: contains development seeder marker "${DEV_SEED_MARKER}"`);
+  }
+  if (DEV_SEED_PAYLOAD_PATTERN.test(text) && !seen.has('dev-seed-payload')) {
+    seen.add('dev-seed-payload');
+    errors.push(`${label}: embeds development extra.seed payload`);
   }
 }
 

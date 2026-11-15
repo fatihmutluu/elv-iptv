@@ -66,6 +66,17 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
 
   const pendingCalls = new Map<number, PendingCall>();
   const cancelledBeforeSend = new Set<number>();
+  const changedListeners = new Set<() => void>();
+
+  ipc.on(CATALOG_CHANNELS.changed, () => {
+    for (const listener of [...changedListeners]) {
+      try {
+        listener();
+      } catch {
+        // isolate renderer change callbacks
+      }
+    }
+  });
 
   const settlePendingWithError = (error: ElvError): void => {
     for (const call of pendingCalls.values()) {
@@ -265,6 +276,12 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
     seasons: (seriesId) => callResult({ method: 'seasons', seriesId }),
     episodes: (seriesId, season) => callValue({ method: 'episodes', seriesId, season }),
     resolveStream: (itemKey) => callResult({ method: 'resolveStream', itemKey }),
+    onChanged(listener: () => void): () => void {
+      changedListeners.add(listener);
+      return () => {
+        changedListeners.delete(listener);
+      };
+    },
     async close(): Promise<void> {
       dropActivePort(elvError('storage', 'closed'));
     },

@@ -11,7 +11,8 @@ React components for react-native and react-native-web, design tokens and TV foc
 - May import `react` and `react-native`; never `expo-*`, navigation libraries or `electron`.
 - Allowed workspace dependencies: `@elv/domain`, `@elv/focus-core`, `@elv/i18n`.
 - Never imports `features`, `modules/*` or `apps/*`. Source-first (`exports` points at `src/index.ts`).
-- Layout forks happen in container components via an explicit form-factor value, never by file-name suffix.
+- Layout forks happen in container components via `useFormFactor()` (`FormFactorProvider` / `detectFormFactor`: `'tv' | 'phone' | 'tablet' | 'desktop'`), never by file-name suffix.
+- Localization hooks (`I18nProvider`, `useI18n`) subscribe to `@elv/i18n`'s pure `AppI18n` via `useSyncExternalStore`.
 - TV code never uses `Modal` (Biome enforces it); overlays are focus-core scopes in the main window.
 
 ## TV list, key source and text-entry suspension (`src/tv/`)

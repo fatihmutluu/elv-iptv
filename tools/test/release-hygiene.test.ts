@@ -212,6 +212,28 @@ describe('checkReleaseArtifactBuffer & runReleaseHygiene', () => {
     expect(checkReleaseArtifactBuffer('app.asar', devBundleId).join('\n')).toContain('.dev');
   });
 
+  it('rejects elv.dev.seeded and embedded extra.seed payloads in UTF-8 and UTF-16LE (#10)', () => {
+    const seededMarkerUtf8 = Buffer.from('await secrets.get("elv.dev.seeded")', 'utf8');
+    const seededMarkerUtf16 = Buffer.concat([
+      Buffer.from([0xfe]),
+      Buffer.from('const k="elv.dev.seeded";', 'utf16le'),
+    ]);
+    const seedPayloadUtf8 = Buffer.from(
+      '{"extra":{"store":"direct","seed":{"kind":"xtream","server":"http://127.0.0.1:7878"}}}',
+      'utf8',
+    );
+    const seedPayloadUtf16 = Buffer.from('{"seed":{"kind":"xtream","name":"Sim"}}', 'utf16le');
+
+    expect(
+      checkReleaseArtifactBuffer('index.android.bundle', seededMarkerUtf8).join('\n'),
+    ).toContain('elv.dev.seeded');
+    expect(checkReleaseArtifactBuffer('app.asar', seededMarkerUtf16).join('\n')).toContain(
+      'elv.dev.seeded',
+    );
+    expect(checkReleaseArtifactBuffer('app.config', seedPayloadUtf8).join('\n')).toContain('seed');
+    expect(checkReleaseArtifactBuffer('app.config', seedPayloadUtf16).join('\n')).toContain('seed');
+  });
+
   it('walks artifact directories and fails on missing paths or hygiene violations via runReleaseHygiene', () => {
     const dir = makeTempDir();
     const depsFile = join(dir, 'deps.txt');

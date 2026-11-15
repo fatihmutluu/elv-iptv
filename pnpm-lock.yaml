@@ -260,9 +260,18 @@ importers:
       '@elv/domain':
         specifier: workspace:*
         version: link:../../../packages/domain
+      '@elv/features':
+        specifier: workspace:*
+        version: link:../../../packages/features
+      '@elv/i18n':
+        specifier: workspace:*
+        version: link:../../../packages/i18n
       '@elv/playback':
         specifier: workspace:*
         version: link:../../../packages/playback
+      '@elv/ui-kit':
+        specifier: workspace:*
+        version: link:../../../packages/ui-kit
       '@expo/metro-runtime':
         specifier: ~58.0.17
         version: 58.0.17(@expo/log-box@58.0.15)(expo@58.0.25)(react-dom@19.3.0(react@19.3.0))(react-native-tvos@0.88.1-0(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.3.0)(react-native-tvos@0.88.1-0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0)
@@ -309,9 +318,15 @@ importers:
       '@elv/engine-media3':
         specifier: workspace:*
         version: link:../../modules/engine-media3
+      '@elv/features':
+        specifier: workspace:*
+        version: link:../../packages/features
       '@elv/focus-core':
         specifier: workspace:*
         version: link:../../packages/focus-core
+      '@elv/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
       '@elv/playback':
         specifier: workspace:*
         version: link:../../packages/playback
@@ -339,6 +354,9 @@ importers:
       expo-constants:
         specifier: ~58.0.16
         version: 58.0.16(expo@58.0.25)(react-native-tvos@0.88.1-0(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.3.0)(react-native-tvos@0.88.1-0)(react@19.3.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)
+      expo-localization:
+        specifier: ~58.0.5
+        version: 58.0.5(expo@58.0.25)(react@19.3.0)
       expo-secure-store:
         specifier: ~58.0.3
         version: 58.0.3(expo@58.0.25)
@@ -505,6 +523,9 @@ importers:
 
   packages/features:
     dependencies:
+      '@elv/data':
+        specifier: workspace:*
+        version: link:../data
       '@elv/domain':
         specifier: workspace:*
         version: link:../domain
@@ -521,15 +542,39 @@ importers:
       '@elv/config':
         specifier: workspace:*
         version: link:../config
+      '@testing-library/react-native':
+        specifier: 14.1.0
+        version: 14.1.0(jest@30.5.2(@types/node@24.19.2)(supports-color@8.1.1))(react-native-tvos@0.88.1-0(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.3.0)(react-native-tvos@0.88.1-0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0)(test-renderer@1.3.1(@types/react@19.3.0)(react@19.3.0))
+      '@types/jest':
+        specifier: ^30.0.0
+        version: 30.0.0
       '@types/react':
         specifier: 'catalog:'
         version: 19.3.0
+      '@vitest/coverage-v8':
+        specifier: 'catalog:'
+        version: 5.1.0(vitest@5.1.0)
+      babel-preset-expo:
+        specifier: ~58.0.25
+        version: 58.0.25(@babel/core@7.29.13(supports-color@8.1.1))(@babel/runtime@7.29.14)(expo@58.0.25)(react-refresh@0.14.2)(supports-color@8.1.1)
+      jest:
+        specifier: 30.5.2
+        version: 30.5.2(@types/node@24.19.2)(supports-color@8.1.1)
+      jest-expo:
+        specifier: ~58.0.14
+        version: 58.0.14(@babel/core@7.29.13(supports-color@8.1.1))(@react-native/jest-preset@0.88.1(@babel/core@7.29.13(supports-color@8.1.1))(react@19.3.0)(supports-color@8.1.1))(@types/react@19.3.0)(expo@58.0.25)(jest@30.5.2(@types/node@24.19.2)(supports-color@8.1.1))(react-native-tvos@0.88.1-0(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.3.0)(react-native-tvos@0.88.1-0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0)(supports-color@8.1.1)
       react:
         specifier: 'catalog:'
         version: 19.3.0
       react-native:
         specifier: npm:react-native-tvos@0.88.1-0
         version: react-native-tvos@0.88.1-0(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.3.0)(react-native-tvos@0.88.1-0)(react@19.3.0)(supports-color@8.1.1)
+      test-renderer:
+        specifier: 1.3.1
+        version: 1.3.1(@types/react@19.3.0)(react@19.3.0)
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@24.19.2)(@vitest/coverage-v8@5.1.0)(jsdom@26.1.0(supports-color@8.1.1))(vite@8.3.8(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
 
   packages/focus-core:
     dependencies:
@@ -555,10 +600,19 @@ importers:
       '@elv/domain':
         specifier: workspace:*
         version: link:../domain
+      '@formatjs/intl-pluralrules':
+        specifier: 7.0.4
+        version: 7.0.4
+      '@lingui/core':
+        specifier: 6.12.0
+        version: 6.12.0(@babel/core@7.29.13(supports-color@8.1.1))
     devDependencies:
       '@elv/config':
         specifier: workspace:*
         version: link:../config
+      '@vitest/coverage-v8':
+        specifier: 'catalog:'
+        version: 5.1.0(vitest@5.1.0)
       vitest:
         specifier: 5.1.0
         version: 5.1.0(@types/node@24.19.2)(@vitest/coverage-v8@5.1.0)(jsdom@26.1.0(supports-color@8.1.1))(vite@8.3.8(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
@@ -1628,6 +1682,18 @@ packages:
     resolution: {integrity: sha512-EbxYllZ7/ozONVZd425cm4XnolfW+AmSFT5aP7Jdno6oc3WrYQcHz2CO20z/2rwWwYgztmV2PXvYH+BQ8YFjqg==}
     hasBin: true
 
+  '@formatjs/bigdecimal@0.2.10':
+    resolution: {integrity: sha512-npIs6UARNOg5amJY5UOVsd6HUQQfzYjet0sa0SWIqzsnVhxLSpaIx2DjoIVrr/vqmjURjvroeW6dItjfy3Uf8A==}
+
+  '@formatjs/fast-memoize@3.1.7':
+    resolution: {integrity: sha512-zXfhLpvA6T7+efdt9JLbBwZ00tT7NsBMDVnDu8rpHeNNv8KfRZAMo2gkG0k9lK/Nzc//3kJ9pImsfuJxk3KhUA==}
+
+  '@formatjs/intl-localematcher@0.10.1':
+    resolution: {integrity: sha512-gBqglQK9rXuHsLmM8wzTMBy4Xo4d0jamirIVKuEL8F1rwbskWdpMA1kZarSkny+uvr5q/K6GSzE0Rcq1wZLl3g==}
+
+  '@formatjs/intl-pluralrules@7.0.4':
+    resolution: {integrity: sha512-EeQ8YUs1QOpYLUiNHkHfR1rsOMtQUBQXEQwR9WmJRWfzvVXeYZ7vBeMARtlb2KuHUgdmfXjoin5oNn68hjyrEQ==}
+
   '@isaacs/cliui@8.0.2':
     resolution: {integrity: sha512-O8jcjabXaleOG9DQ0+ARXWZBTfnP4WNAqzuiJK7ll44AmxGKv/J2M4TPjxjY3znBCfvBXFzucm1twdyFybFqEA==}
     engines: {node: '>=12'}
@@ -1792,6 +1858,32 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
+  '@lingui/babel-plugin-lingui-macro@6.12.0':
+    resolution: {integrity: sha512-hG7KVmE8loEOJwDQyjheJzrtpxKbvFFJ+wQ5k0N7dO9ED03mRG0HO2XCjZUsB+UZEu0CUn/k3yrwJAQ8/4/dEQ==}
+    engines: {node: '>=22.19.0'}
+    peerDependencies:
+      '@babel/core': ^7.20.12 || ^8.0.0
+    peerDependenciesMeta:
+      '@babel/core':
+        optional: true
+
+  '@lingui/conf@6.12.0':
+    resolution: {integrity: sha512-A4Xcip2Mcgd0iN/rs3RpxDc8MPlYiET9elP44knC7IVpJwH5zb7feK8NFsdtFQ3YlJebdLz6Qk6zjrCbq5TZKg==}
+    engines: {node: '>=22.19.0'}
+
+  '@lingui/core@6.12.0':
+    resolution: {integrity: sha512-ya/N3Jb64MiaovtEy58NleSsKFL0iTRqRxEZDXtzNllbd47yOFe3hENFD4OaI2wJByjZMZfJprfw4p9jQeYPTQ==}
+    engines: {node: '>=22.19.0'}
+    peerDependencies:
+      babel-plugin-macros: 2 || 3
+    peerDependenciesMeta:
+      babel-plugin-macros:
+        optional: true
+
+  '@lingui/message-utils@6.12.0':
+    resolution: {integrity: sha512-WIRy9tnthJVudnEcNdnNNh2ZMyeSoM1eTrB8BDK5A/+BefWoHSH/Pue7wEAhRlepPgVNp+lv+/ax5O16EEqlBg==}
+    engines: {node: '>=22.19.0'}
+
   '@malept/cross-spawn-promise@2.0.0':
     resolution: {integrity: sha512-1DpKU0Z5ThltBwjNySMC14g0CkbyhCaz9FkhxqNsZI6uAPJXFS8cMXlBKo26FJ8ZuW6S9GCMcR9IO5k2X5/9Fg==}
     engines: {node: '>= 12.13.0'}
@@ -1799,6 +1891,12 @@ packages:
   '@malept/flatpak-bundler@0.4.0':
     resolution: {integrity: sha512-9QOtNffcOF/c1seMCDnjckb3R9WHcG34tky+FHpNKKCW0wc/scYLwMtO+ptyGUfMW0/b/n4qRiALlaFHc9Oj7Q==}
     engines: {node: '>= 10.0.0'}
+
+  '@messageformat/date-skeleton@1.1.0':
+    resolution: {integrity: sha512-rmGAfB1tIPER+gh3p/RgA+PVeRE/gxuQ2w4snFWPF5xtb5mbWR7Cbw7wCOftcUypbD6HVoxrVdyyghPm3WzP5A==}
+
+  '@messageformat/parser@5.2.0':
+    resolution: {integrity: sha512-sc3hNZ0JtC32GhL5nUgPbh2ilcwji4G+Vmj/vhMd8hZaH//NDOvkfwKK1mFnRWG5h2DpksN8xr/HB5/+vMg3iw==}
 
   '@napi-rs/wasm-runtime@1.2.6':
     resolution: {integrity: sha512-mRyDmEw9/fCDXCGfL1sbgIw/GUK0PVxRW4YwgPN61F3LQ+fSyoBFarJVzgGyhF6kRzEQZ0FejDqm4WLXSeqQmw==}
@@ -1817,6 +1915,10 @@ packages:
   '@noble/hashes@1.8.0':
     resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
     engines: {node: ^14.21.3 || >=16}
+
+  '@noble/hashes@2.4.0':
+    resolution: {integrity: sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA==}
+    engines: {node: '>= 20.19.0'}
 
   '@noxcturnal/noxcturnal-darwin-arm64@0.1.12':
     resolution: {integrity: sha512-46MqSBhSPSL/LbY0ZhH2Zh+MJUOLWuwEuk6FQLFeJYFepENuNoWinZO/P7xX3dZQ3g2OrJiPE6iWKMBgoeF+gA==}
@@ -3500,6 +3602,12 @@ packages:
       expo: '*'
       react: '*'
 
+  expo-localization@58.0.5:
+    resolution: {integrity: sha512-2wyZl/5wn95l38AAtdaUAq2VMJWbGbgQQDEuIEkkemmsA/BZ8gS21Nq+7I2X9hDfL5Z+4hlyLVdPtDIH0vvt1A==}
+    peerDependencies:
+      expo: '*'
+      react: '*'
+
   expo-modules-autolinking@58.1.0:
     resolution: {integrity: sha512-JAegkS+nC4LVEgKMHAnpWhUxs1BYHHaTJnncVW2EQION1bVz0y8/wEglAeGV+oq4BNS1V7s8zCMTZU0hMi28bA==}
     hasBin: true
@@ -4416,6 +4524,10 @@ packages:
     resolution: {integrity: sha512-WkUDrojuJs0xkgGf2udWxa3yGBRxPtxUkB79i6aCZLRgc7PM8fZe9TosfPDcvEpQZbuFASnHYmRLBLUbmLOIIA==}
     engines: {node: '>= 12.0.0'}
 
+  lilconfig@3.1.5:
+    resolution: {integrity: sha512-aRAOI9Ia43ygL4o1EOmC/sc/0OFxrm7qcQngiIyWaqVnSnz932ybJ07zyCcgMNGSDP8Yxaf88Xj1zHEXmvQ4SA==}
+    engines: {node: '>=14'}
+
   lines-and-columns@1.2.4:
     resolution: {integrity: sha512-7ylylesZQ/PV29jhEDl3Ufjo6ZX7gCqJr5F7PKrqc93v7fzSymt1BpwEU8nAUXs8qzzvqhbjhK5QZg6Mt/HkBg==}
 
@@ -4683,6 +4795,9 @@ packages:
   mkdirp@0.5.6:
     resolution: {integrity: sha512-FP+p8RB8OWpF3YZBCrP5gtADmtXApB5AMLn+vdyA+PyxCjrCs00mjyUozssO33cwDeT3wNGdLxJ5M//YqtHAJw==}
     hasBin: true
+
+  moo@0.5.3:
+    resolution: {integrity: sha512-m2fmM2dDm7GZQsY7KK2cme8agi+AAljILjQnof7p1ZMDe6dQ4bdnSMx0cPppudoeNv5hEFQirN6u+O4fDE0IWA==}
 
   ms@2.0.0:
     resolution: {integrity: sha512-Tpp60P6IUJDTuOq/5Z8cdskzJujfwqfOTkrwIwj7IRISpnkJnT6SyJ4PCPnGMoFjC9ddhal5KVIYtAt97ix05A==}
@@ -5317,6 +5432,9 @@ packages:
 
   rrweb-cssom@0.8.0:
     resolution: {integrity: sha512-guoltQEx+9aMf2gDZ0s62EcV8lsXR+0w8915TC3ITdn2YueuNjdAYh/levpU9nFaoChh9RUS5ZdQMrKfVEN9tw==}
+
+  rtl-detect@1.1.2:
+    resolution: {integrity: sha512-PGMBq03+TTG/p/cRB7HCLKJ1MgDIi07+QU1faSjiYRfmY5UsAttV9Hs08jDAHVwcOwmVLcSJkpwyfXszVjWfIQ==}
 
   safe-buffer@5.1.2:
     resolution: {integrity: sha512-Gd2UZBJDkXlY7GbJxfsE8/nvKkUEU1G38c1siN6QP6a9PT9MmHB8GnpscSmMJSoF8LOIrt8ud/wPtojys4G6+g==}
@@ -7254,6 +7372,19 @@ snapshots:
       chalk: 4.1.2
       js-yaml: 4.3.2
 
+  '@formatjs/bigdecimal@0.2.10': {}
+
+  '@formatjs/fast-memoize@3.1.7': {}
+
+  '@formatjs/intl-localematcher@0.10.1':
+    dependencies:
+      '@formatjs/fast-memoize': 3.1.7
+
+  '@formatjs/intl-pluralrules@7.0.4':
+    dependencies:
+      '@formatjs/bigdecimal': 0.2.10
+      '@formatjs/intl-localematcher': 0.10.1
+
   '@isaacs/cliui@8.0.2':
     dependencies:
       string-width: 5.1.2
@@ -7552,6 +7683,33 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
 
+  '@lingui/babel-plugin-lingui-macro@6.12.0(@babel/core@7.29.13(supports-color@8.1.1))':
+    dependencies:
+      '@lingui/conf': 6.12.0
+      '@lingui/message-utils': 6.12.0
+    optionalDependencies:
+      '@babel/core': 7.29.13(supports-color@8.1.1)
+
+  '@lingui/conf@6.12.0':
+    dependencies:
+      jest-validate: 29.7.0
+      jiti: 2.7.0
+      lilconfig: 3.1.5
+      normalize-path: 3.0.0
+
+  '@lingui/core@6.12.0(@babel/core@7.29.13(supports-color@8.1.1))':
+    dependencies:
+      '@lingui/babel-plugin-lingui-macro': 6.12.0(@babel/core@7.29.13(supports-color@8.1.1))
+      '@lingui/message-utils': 6.12.0
+    transitivePeerDependencies:
+      - '@babel/core'
+
+  '@lingui/message-utils@6.12.0':
+    dependencies:
+      '@messageformat/date-skeleton': 1.1.0
+      '@messageformat/parser': 5.2.0
+      '@noble/hashes': 2.4.0
+
   '@malept/cross-spawn-promise@2.0.0':
     dependencies:
       cross-spawn: 7.0.6
@@ -7564,6 +7722,12 @@ snapshots:
       tmp-promise: 3.0.3
     transitivePeerDependencies:
       - supports-color
+
+  '@messageformat/date-skeleton@1.1.0': {}
+
+  '@messageformat/parser@5.2.0':
+    dependencies:
+      moo: 0.5.3
 
   '@napi-rs/wasm-runtime@1.2.6(@emnapi/core@2.0.0-beta.2)(@emnapi/runtime@2.0.0-beta.2)':
     dependencies:
@@ -7580,6 +7744,8 @@ snapshots:
     optional: true
 
   '@noble/hashes@1.8.0': {}
+
+  '@noble/hashes@2.4.0': {}
 
   '@noxcturnal/noxcturnal-darwin-arm64@0.1.12':
     optional: true
@@ -9187,6 +9353,12 @@ snapshots:
       expo: 58.0.25(@babel/core@7.29.13(supports-color@8.1.1))(@expo/metro-runtime@58.0.17)(react-dom@19.3.0(react@19.3.0))(react-native-tvos@0.88.1-0(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.3.0)(react-native-tvos@0.88.1-0)(react@19.3.0)(supports-color@8.1.1))(react-native-web@0.21.4(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)(supports-color@8.1.1)(typescript@6.0.3)
       react: 19.3.0
 
+  expo-localization@58.0.5(expo@58.0.25)(react@19.3.0):
+    dependencies:
+      expo: 58.0.25(@babel/core@7.29.13(supports-color@8.1.1))(@expo/metro-runtime@58.0.17)(react-dom@19.3.0(react@19.3.0))(react-native-tvos@0.88.1-0(@babel/core@7.29.13(supports-color@8.1.1))(@types/react@19.3.0)(react-native-tvos@0.88.1-0)(react@19.3.0)(supports-color@8.1.1))(react-native-web@0.21.4(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)(supports-color@8.1.1)(typescript@6.0.3)
+      react: 19.3.0
+      rtl-detect: 1.1.2
+
   expo-modules-autolinking@58.1.0(supports-color@8.1.1)(typescript@6.0.3):
     dependencies:
       '@expo/platforms': 58.0.1
@@ -10380,6 +10552,8 @@ snapshots:
       lightningcss-win32-arm64-msvc: 1.33.0
       lightningcss-win32-x64-msvc: 1.33.0
 
+  lilconfig@3.1.5: {}
+
   lines-and-columns@1.2.4: {}
 
   locate-path@5.0.0:
@@ -10837,6 +11011,8 @@ snapshots:
   mkdirp@0.5.6:
     dependencies:
       minimist: 1.2.8
+
+  moo@0.5.3: {}
 
   ms@2.0.0: {}
 
@@ -11416,6 +11592,8 @@ snapshots:
       '@rolldown/binding-win32-x64-msvc': 1.2.19
 
   rrweb-cssom@0.8.0: {}
+
+  rtl-detect@1.1.2: {}
 
   safe-buffer@5.1.2: {}
 

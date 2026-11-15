@@ -15,11 +15,23 @@ const config: KnipConfig = {
       // The catalog barrel is consumed by the menu screens in a later task.
       entry: ['config/*.test.ts', 'src/catalog/index.ts', 'src/storage/index.ts'],
       // The TV plugin is loaded by name from app.config.ts; knip infers optional Expo packages.
-      ignoreDependencies: ['@elv/sources', '@react-native-tvos/config-tv', 'expo-updates'],
+      ignoreDependencies: [
+        '@elv/sources',
+        '@react-native-tvos/config-tv',
+        'babel-jest',
+        'expo-updates',
+      ],
     },
     'apps/desktop': {
       // presenter-probe.ts is the test-only Electron main the presenter spec launches.
-      entry: ['e2e/*.spec.ts', 'e2e/presenter-probe.ts'],
+      entry: [
+        'e2e/*.spec.ts',
+        'e2e/presenter-probe.ts',
+        'scripts/*.mjs',
+        'src/main/main.ts',
+        'src/preload/preload.ts',
+        'src/utility/catalog-worker.ts',
+      ],
       // Needed by the packaging script and by the workspace link to the renderer export.
       ignoreDependencies: ['@elv/desktop-renderer'],
       // Windows system tool used to check that a recorded pid is still the launcher.
@@ -34,18 +46,11 @@ const config: KnipConfig = {
     'packages/ui-kit': {
       // Babel config is read by jest-expo; the preset is a direct devDependency for pnpm's isolated layout.
       entry: ['babel.config.cjs'],
-      ignoreDependencies: ['@elv/domain', '@elv/i18n', 'babel-preset-expo'],
+      ignoreDependencies: ['@elv/domain', 'babel-jest', 'babel-preset-expo'],
     },
     'packages/features': {
-      ignoreDependencies: [
-        '@elv/domain',
-        '@elv/focus-core',
-        '@elv/i18n',
-        '@elv/ui-kit',
-        '@types/react',
-        'react',
-        'react-native',
-      ],
+      entry: ['babel.config.cjs'],
+      ignoreDependencies: ['babel-jest', 'babel-preset-expo'],
     },
     'packages/*': {
       // Skeleton packages declare their spec 5.2 dependencies before any code imports them.
