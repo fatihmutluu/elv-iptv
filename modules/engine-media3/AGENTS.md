@@ -45,6 +45,6 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
   `detail`: error name and `redactUrl(uri)` (credentials `***`), no exception text; `LoadRequest` text: no URL/header.
 
 ## Tests and rules
-- Vitest: `pnpm --filter @elv/engine-media3 test`. JVM (JUnit 4, Robolectric; `ANDROID_HOME`), after the app build,
-  in `apps/tv-mobile/android`: `APP_VARIANT=development EXPO_TV=1 ./gradlew.bat :elv-engine-media3:testDebugUnitTest`.
+- Vitest: `pnpm --filter @elv/engine-media3 test`. JVM/device (`ANDROID_HOME`, in `apps/tv-mobile/android`, `EXPO_TV=1`):
+  `./gradlew.bat :elv-engine-media3:testDebugUnitTest` and `:elv-engine-media3:connectedDebugAndroidTest` (`pnpm sim --port 7880`).
   Imports `expo-modules-core`, `@elv/playback` types and the `react`/`react-native` peers only.
