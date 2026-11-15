@@ -1,8 +1,8 @@
 # Documentation index
 
-- [README](../README.md) what the project is, platforms, pledge, license.
-- [CONTRIBUTING](../CONTRIBUTING.md) setup, workflow, CLA, safety rules for outside contributions.
-- [AGENTS.md](../AGENTS.md) rules for every agent and contributor (Claude Code imports it through `CLAUDE.md`).
+- [README](../README.md) mission, roadmap, platforms, how to help, license.
+- [CONTRIBUTING](../CONTRIBUTING.md) setup, TDD + AI agent workflow, CLA, safety rules for outside contributions.
+- [AGENTS.md](../AGENTS.md) rules for every agent and contributor (paired with [CLAUDE.md](../CLAUDE.md) and [GEMINI.md](../GEMINI.md)).
 - [Foundation spec](superpowers/specs/2026-11-13-foundation-design.md) binding product, stack and architecture decisions.
 - [Stream simulator spec](superpowers/specs/2026-11-13-stream-simulator-design.md) the local IPTV provider simulator (`pnpm sim`).
 - [Simulator reference](simulator.md) routes, accounts, faults, runtime fault rules and recipes of `pnpm sim`.
@@ -13,7 +13,7 @@
 - [Device catalog spec](superpowers/specs/2026-11-14-device-catalog-design.md) the on-device catalog: storage adapters, the catalog service, bounded Xtream bodies and the import gate (`pnpm gate import`).
 - [Simulator corpus spec](superpowers/specs/2026-11-14-sim-corpus-design.md) runtime fault rules, delivery quirks, the format recipes, subtitles and the `corpus` account of the simulator.
 - `superpowers/plans/` implementation plans; they are deleted after the work is merged.
-- [ADRs](adr/README.md) accepted architecture decisions (MADR), including [0011 content keys](adr/0011-content-keys.md).
+- [ADRs](adr/README.md) accepted architecture decisions (MADR), including [0011 content keys](adr/0011-content-keys.md) and [0012 the GPL-3.0 license](adr/0012-gpl-3-and-cla.md).
 - [Lessons learned](learned/README.md) short dated problem-to-rule entries.
 - Governance: [LICENSE](../LICENSE), [CLA](../CLA.md), [Code of Conduct](../CODE_OF_CONDUCT.md), [Security](../SECURITY.md).
 - Package docs: [tools](../tools/AGENTS.md), [tv-mobile](../apps/tv-mobile/AGENTS.md), [desktop](../apps/desktop/AGENTS.md),

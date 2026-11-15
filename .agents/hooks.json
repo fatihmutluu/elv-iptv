@@ -1,0 +1,25 @@
+{
+  "elv-safety-guard": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./hooks/guard-pre-tool.mjs",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "elv-stop-check": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "node ./hooks/stop-check-agy.mjs",
+        "timeout": 180
+      }
+    ]
+  }
+}

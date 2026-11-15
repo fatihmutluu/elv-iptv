@@ -25,7 +25,13 @@ const pascal = (name: string) =>
     .join('');
 
 function manifest(kind: PackageKind, name: string): unknown {
-  const base = { name: `@elv/${name}`, private: true, version: '0.0.0', type: 'module' };
+  const base = {
+    name: `@elv/${name}`,
+    private: true,
+    version: '0.0.0',
+    license: 'GPL-3.0-only',
+    type: 'module',
+  };
   const exports = { '.': './src/index.ts' };
   const typecheck = 'tsc --noEmit -p . --pretty false';
   if (kind === 'pure') {

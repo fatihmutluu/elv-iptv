@@ -1,6 +1,6 @@
 # 0008 PolyForm Shield 1.0.0 and a contributor license agreement
 
-- Status: Accepted
+- Status: Superseded by [0012](0012-gpl-3-and-cla.md) on 2026-11-15
 - Date: 2026-11-13
 
 ## Context and problem

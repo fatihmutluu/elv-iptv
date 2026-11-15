@@ -2,7 +2,10 @@ import type { KnipConfig } from 'knip';
 
 const config: KnipConfig = {
   workspaces: {
-    '.': { entry: ['scripts/*.mjs', '.claude/hooks/*.mjs'], ignoreBinaries: ['gitleaks'] },
+    '.': {
+      entry: ['scripts/*.mjs', '.agents/hooks/*.mjs', '.claude/hooks/*.mjs'],
+      ignoreBinaries: ['gitleaks'],
+    },
     tools: {
       entry: ['bin/*.ts'],
       project: ['bin/**/*.ts', 'src/**/*.ts', 'test/*.ts'],

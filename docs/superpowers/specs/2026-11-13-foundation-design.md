@@ -1,7 +1,7 @@
 # ELV IPTV — Foundation Design
 
 - Status: approved direction (owner delegated the framework decision on 2026-11-13; product decisions taken on the owner's behalf are logged for review)
-- Date: 2026-11-13; revised 2026-11-13 to define the 0.1 release after a market study (owner delegated the scope decisions)
+- Date: 2026-11-13; revised 2026-11-13 to define the 0.1 release after a market study (owner delegated the scope decisions); revised 2026-11-15 for `GPL-3.0-only` (ADR 0012), versioned milestones (`0.1` plain flawless player -> `0.2` design language & core UX -> `0.3` advanced features), and `.agents/` + `GEMINI.md` contributor parity alongside `.claude/`
 - Scope: product rules, platforms, licensing, stack, architecture, quality system, workflow, docs, roadmap. Feature behavior is specified later, one spec per feature.
 - Evidence: internal research notes, which are not published. This spec and the ADRs record the decisions.
 
@@ -26,7 +26,7 @@ ELV IPTV is a cross-platform player for live TV, movies and series from sources 
 ### 1.4 Development rounds
 Breadth-first: every area reaches "plain but correct", then "average", then "excellent". Logic is final quality from the first round; presentation is iterative on real design-system components. No code written to be thrown away.
 
-Version 0.1 is the end of Round 2: a small feature set that is stable, fast and good-looking on every Round 0 platform. Heavy features stay as issues in the Round 3 milestone however often they are requested; none of them blocks 0.1, and they enter development one at a time in the order the owner picks. Data models keep the hooks those features need (for example catch-up attributes and `profile_id`) so adding them later needs no schema rework or re-import.
+Version `0.1` (end of Round 1, revised 2026-11-14/15) is a deliberately plain, rock-solid live TV, movie and series player on Android TV/Fire OS, Android, Apple TV, iPhone/iPad, Windows and macOS — every playback, catalog and list budget met before visual styling begins. Version `0.2` (Round 2) establishes the shared UI/UX design language, restyles the app, and adds the XMLTV EPG grid, home/favorites, watch progress/resume, search, essential settings and the GitHub Releases pipeline. Heavy features stay in Version `0.3` and beyond, entering development one at a time without blocking `0.1` or `0.2`. Data models keep the hooks those features need (for example catch-up attributes and `profile_id`) so adding them later needs no schema rework or re-import.
 
 ### 1.5 Reference apps
 Before each feature, read how reference apps solve it, critique it, and adopt an improved version; before fixing a bug, check why they do not have it. Research agents read the sources and write prose notes; implementing agents never read GPL or unlicensed sources.
@@ -58,8 +58,8 @@ Before each feature, read how reference apps solve it, critique it, and adopt an
 - Placeholder platforms get a folder with a README stating they are planned; no code until scheduled.
 
 ## 3. Licensing and governance
-- Project license **PolyForm Shield 1.0.0**, described as "source-available", never "open source". CLA via the CLA Assistant Lite GitHub Action (step-security fork, pinned). README pledge: free forever if the community supports development; otherwise a paid app.
-- Third-party code keeps its own license. libmpv and FFmpeg are our own LGPL builds, linked dynamically. AetherEngine is LGPL-3.0 with an App Store exception. No GPL components in shipped builds (this excludes teletext via libzvbi for now). MPL-2.0 files may only be reused as separate, unmodified-license files. An in-app third-party licenses screen is generated from dependencies.
+- Project license **GPL-3.0-only** since 2026-11-15 (ADR 0012); it replaced PolyForm Shield 1.0.0. The project is described as open source. Contributions come under the unchanged CLA via the CLA Assistant Lite GitHub Action (step-security fork, pinned); the CLA lets the owner relicense, including a commercial release, while released versions stay under GPL-3.0. The README states the mission and these terms instead of the earlier pledge.
+- Third-party code keeps its own license. libmpv and FFmpeg are our own LGPL builds, linked dynamically. AetherEngine is LGPL-3.0 with an App Store exception. No third-party GPL components in shipped builds (this excludes teletext via libzvbi for now), so the owner's relicensing right and store distribution stay possible. MPL-2.0 files may only be reused as separate, unmodified-license files. An in-app third-party licenses screen is generated from dependencies.
 
 ## 4. Technology stack
 
@@ -175,16 +175,16 @@ Emulator CI enforces relative gates (+10% vs `main` fails). Absolute budgets are
 ## 7. Development workflow
 
 ### 7.1 Git and GitHub
-Trunk-based with protected `main`, short-lived branches, squash-merged PRs with Conventional Commit titles and why-focused bodies, release-please with one `version.txt`, CI on every PR (Biome, `tsc`, dependency rules, file sizes, AGENTS/CLAUDE stubs, unit tests, gitleaks, builds per platform), actions pinned to SHAs, Dependabot for npm and actions, gitleaks in pre-commit and CI with push protection, CODEOWNERS on `.claude/**`, `AGENTS.md`, `CLAUDE.md`, `.github/**`. Claude merges its own PRs after CI passes; releases and store builds wait for the owner.
+Trunk-based with protected `main`, short-lived branches, squash-merged PRs with Conventional Commit titles and why-focused bodies, release-please with one `version.txt`, CI on every PR (Biome, `tsc`, dependency rules, file sizes, AGENTS/CLAUDE stubs, unit tests, gitleaks, builds per platform), actions pinned to SHAs, Dependabot for npm and actions, gitleaks in pre-commit and CI with push protection, CODEOWNERS on `.agents/**`, `.claude/**`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/**`. Maintainer agents merge their own PRs after CI passes; releases and store builds wait for the owner.
 
 ### 7.2 Task management
-GitHub Issues + public "ELV IPTV Roadmap" project (Backlog → Next → In progress → In review → Done), milestones Round 0–3, labels `type:*`, `area:*`, `platform:*`. Private "ELV IPTV Ideas" project with draft items that never enter development without the owner's approval.
+GitHub Issues + public "ELV IPTV Roadmap" project (Backlog → Next → In progress → In review → Done), version milestones (`0.1`, `0.2`, `0.3`, …), labels `type:*`, `area:*`, `platform:*`. Private "ELV IPTV Ideas" project with draft items that never enter development without the owner's approval.
 
-### 7.3 Claude Code setup
-Shared `.claude/settings.json` with official-marketplace plugin IDs (superpowers, context7, commit-commands, frontend-design, typescript-lsp, expo skills), deny rules for secrets/signing keys/build outputs/generated code, ask rules for releases and repository deletion or visibility changes. Hooks in Node: block force pushes; a Stop hook running Biome and `tsc` on changed packages without passing file names to a shell (fail-open). Project skills: `add-package`, `github-workflow`, `add-language`. Model use: Opus for specs, plans and final reviews; Sonnet for implementation; Haiku for log triage.
+### 7.3 Agent harness setup (Claude Code, Antigravity and Gemini CLI)
+Shared `.claude/settings.json` (Claude Code) and `.agents/hooks.json` + `GEMINI.md` (Google Antigravity and Gemini CLI) enforce identical rules and workflows for maintainers and outside contributors: official plugin/skill recommendations (Superpowers, Context7, frontend-design, Expo skills), deny guards for secrets/signing keys and generated `apps/*/android` + `apps/*/ios` folders, confirmation gates for releases and repo deletion/visibility changes, `PreToolUse` force-push blocking, and `Stop` hooks running Biome and `tsc` on changed packages without passing file names through a shell (fail-open). Project skills live in both `.claude/skills/` and `.agents/skills/`: `add-package`, `github-workflow`, `react-native-tv-best-practices`. Model routing by risk tier: frontier reasoning (`Gemini 4 Carbon (High)` or `Claude Opus`) for specs, plans, native/concurrency code and final reviews; standard coding (`Carbon (Medium)` or `Sonnet`) for well-specified implementation and task reviews; mechanical (`Hydrogen (XHigh)`) for low-risk boilerplate; lightweight (`3.8 Flash` or `Haiku`) for read-only log/doc triage only.
 
 ## 8. Documentation
-README for humans; root `AGENTS.md` (≤150 lines) imported by `CLAUDE.md`; per-package `AGENTS.md` (≤50 lines) with a `CLAUDE.md` stub; `docs/INDEX.md`; MADR ADRs; research notes are internal and not published (decisions live in this spec and the ADRs); specs kept, plans deleted after merge; CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, CLA. No comments that restate code; doc comments on public APIs; file size soft 400 / hard 800 lines; everything in English.
+README for humans; root `AGENTS.md` (≤150 lines) imported by `CLAUDE.md` and paired with `GEMINI.md`; per-package `AGENTS.md` (≤50 lines) with a `CLAUDE.md` stub; `docs/INDEX.md`; MADR ADRs; research notes are internal and not published (decisions live in this spec and the ADRs); specs kept, plans deleted after merge; CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, CLA. No comments that restate code; doc comments on public APIs; file size soft 400 / hard 800 lines; everything in English.
 
 ## 9. Discoverability
 Unchanged from the owner's goals: compliant README with the one-sentence description and topics in Round 0; a bilingual website on free hosting (GitHub Pages) in Rounds 1–2 with guides, FAQ, structured data and `llms.txt`; store optimization per store and language at launch; the same description everywhere; Claude flags discoverability work as features land.

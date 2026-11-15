@@ -19,11 +19,18 @@ function trackedAndNewFiles(root: string): string[] {
 }
 
 function hookTests(root: string): string[] {
-  const dir = join(root, '.claude', 'hooks');
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir, { recursive: true, encoding: 'utf8' })
-    .filter((f) => /\.test\.[cm]?js$/.test(f))
-    .map((f) => join(dir, f));
+  const found: string[] = [];
+  for (const rel of [
+    ['.claude', 'hooks'],
+    ['.agents', 'hooks'],
+  ]) {
+    const dir = join(root, ...rel);
+    if (!existsSync(dir)) continue;
+    for (const f of readdirSync(dir, { recursive: true, encoding: 'utf8' })) {
+      if (/\.test\.[cm]?js$/.test(f)) found.push(join(dir, f));
+    }
+  }
+  return found;
 }
 
 /** Builds every project check, bound to the repository `root`. */

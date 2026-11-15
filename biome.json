@@ -18,6 +18,7 @@
       "!**/ios",
       "!tools/test/fixtures",
       "!docs",
+      "!.agents/skills/react-native-tv-best-practices",
       "!.claude/skills/react-native-tv-best-practices",
       "!**/*.md"
     ]
