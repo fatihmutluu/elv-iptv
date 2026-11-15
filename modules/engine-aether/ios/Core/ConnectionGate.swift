@@ -15,6 +15,7 @@ public final class ConnectionGate: @unchecked Sendable {
 
   private struct Waiter {
     let generation: Int
+    let acquiresSlot: Bool
     let forceClose: @Sendable () -> Void
     let continuation: CheckedContinuation<WaitOutcome, Never>
   }
@@ -50,8 +51,21 @@ public final class ConnectionGate: @unchecked Sendable {
     }
   }
 
+  /// Waits until all older generations closed and settled without acquiring an open slot; returns false if superseded.
+  public func waitForClosed(before generation: Int) async -> Bool {
+    await wait(generation: generation, acquiresSlot: false, forceClose: {})
+  }
+
   /// Waits until all older generations closed (or force-closes them after `forceCloseAfterMs`); returns false if superseded.
   public func open(generation: Int, forceClose: @escaping @Sendable () -> Void) async -> Bool {
+    await wait(generation: generation, acquiresSlot: true, forceClose: forceClose)
+  }
+
+  private func wait(
+    generation: Int,
+    acquiresSlot: Bool,
+    forceClose: @escaping @Sendable () -> Void
+  ) async -> Bool {
     let id = UUID()
     let timeoutNs = UInt64(forceCloseAfterMs) * 1_000_000
 
@@ -70,12 +84,15 @@ public final class ConnectionGate: @unchecked Sendable {
             supersededOthers = drainSupersededWaitersLocked()
           }
           if !hasOpenOlderThanLocked(generation) {
-            recordOpenLocked(generation: generation, forceClose: forceClose)
+            if acquiresSlot {
+              recordOpenLocked(generation: generation, forceClose: forceClose)
+            }
             immediate = .acquired
             return
           }
           waiters[id] = Waiter(
             generation: generation,
+            acquiresSlot: acquiresSlot,
             forceClose: forceClose,
             continuation: continuation
           )
@@ -119,15 +136,17 @@ public final class ConnectionGate: @unchecked Sendable {
     let remainingMs: Double = lock.withLock {
       settleAfterCloseMs > 0 ? max(0.0, lastClosedDeadlineMs - uptimeMs()) : 0.0
     }
-    guard remainingMs > 0 else { return true }
-
-    try? await Task.sleep(nanoseconds: UInt64((remainingMs * 1_000_000.0).rounded(.up)))
+    if remainingMs > 0 {
+      try? await Task.sleep(nanoseconds: UInt64((remainingMs * 1_000_000.0).rounded(.up)))
+    }
 
     var readyToWake: [(CheckedContinuation<WaitOutcome, Never>, WaitOutcome)] = []
     let stillValid: Bool = lock.withLock {
       if Task.isCancelled || generation < currentGeneration {
-        releaseSlotLocked(generation: generation)
-        readyToWake = wakeEligibleWaitersLocked()
+        if acquiresSlot {
+          releaseSlotLocked(generation: generation)
+          readyToWake = wakeEligibleWaitersLocked()
+        }
         return false
       }
       return true
@@ -168,7 +187,9 @@ public final class ConnectionGate: @unchecked Sendable {
           closures.append(contentsOf: removed.forceCloses)
         }
       }
-      recordOpenLocked(generation: waiter.generation, forceClose: waiter.forceClose)
+      if waiter.acquiresSlot {
+        recordOpenLocked(generation: waiter.generation, forceClose: waiter.forceClose)
+      }
       resumed = (waiter.continuation, closures.isEmpty ? .acquired : .forced(closures))
       wokeOthers = wakeEligibleWaitersLocked()
     }
@@ -231,7 +252,9 @@ public final class ConnectionGate: @unchecked Sendable {
         results.append((waiter.continuation, .superseded))
       } else if !hasOpenOlderThanLocked(waiter.generation) {
         waiters.removeValue(forKey: id)
-        recordOpenLocked(generation: waiter.generation, forceClose: waiter.forceClose)
+        if waiter.acquiresSlot {
+          recordOpenLocked(generation: waiter.generation, forceClose: waiter.forceClose)
+        }
         results.append((waiter.continuation, .acquired))
       }
     }

@@ -7,6 +7,7 @@ import Foundation
 @MainActor
 final class EngineMainDriver: EngineSink {
   private weak var owner: EngineObject?
+  private let ownerId: ObjectIdentifier
   let backend: AetherBackend
   private(set) var core: EngineCore!
   weak var boundSurface: AetherSurfaceView?
@@ -14,6 +15,7 @@ final class EngineMainDriver: EngineSink {
 
   init(owner: EngineObject, gate: ConnectionGate, httpSession: EngineHttpSession) {
     self.owner = owner
+    self.ownerId = ObjectIdentifier(owner)
     self.backend = AetherBackend(gate: gate, httpSession: httpSession)
     self.core = EngineCore(
       backend: backend,
@@ -36,8 +38,9 @@ final class EngineMainDriver: EngineSink {
   func setKeepScreenOn(_ on: Bool) {
     if let surface = boundSurface {
       surface.applyScreenOn(on, from: owner)
-    } else if !on, let owner {
-      IdleTimer.setHeld(false, owner: owner)
+    }
+    if !on {
+      IdleTimer.setHeld(false, ownerId: ownerId)
     }
   }
 
@@ -60,18 +63,14 @@ final class EngineMainDriver: EngineSink {
     core.surfaceChanged(available: false)
     boundSurface = nil
     backend.bindPlayerView(nil)
-    if let owner {
-      IdleTimer.setHeld(false, owner: owner)
-    }
+    IdleTimer.setHeld(false, ownerId: ownerId)
   }
 
   func detachDestroyedPlayerView(_ view: AetherPlayerView) {
     if boundSurface == nil {
       core.surfaceChanged(available: false)
       backend.unbindIfMatching(view)
-      if let owner {
-        IdleTimer.setHeld(false, owner: owner)
-      }
+      IdleTimer.setHeld(false, ownerId: ownerId)
     }
   }
 
@@ -91,9 +90,7 @@ final class EngineMainDriver: EngineSink {
       boundSurface = nil
     }
     core.release()
-    if let owner {
-      IdleTimer.setHeld(false, owner: owner)
-    }
+    IdleTimer.setHeld(false, ownerId: ownerId)
   }
 }
 
@@ -192,8 +189,7 @@ final class EngineObject: SharedObject {
     guard shouldDispose else { return }
     httpSession.dispose()
     onDisposed(self)
-    enqueueMain { [weak self] in
-      guard let self else { return }
+    enqueueMain {
       self.driver?.dispose()
       self.driver = nil
     }

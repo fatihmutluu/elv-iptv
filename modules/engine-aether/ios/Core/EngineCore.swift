@@ -4,7 +4,7 @@ import Foundation
 @MainActor
 public final class EngineCore {
   private let backend: PlayerBackend
-  private let sink: EngineSink
+  private weak var sink: EngineSink?
   private let uptimeMs: () -> Double
 
   private var token = 0
@@ -54,15 +54,15 @@ public final class EngineCore {
       active = false
       errorReported = true
       setScreenOn(false)
-      sink.send(.state(attempt: token, state: .opening))
+      emit(.state(attempt: token, state: .opening))
       let redacted = redactUrl(request.url)
       let detail = redacted.isEmpty ? "invalidUrl" : "invalidUrl \(redacted)"
-      sink.send(.error(attempt: token, error: MappedError(code: "unsupported-format", detail: detail)))
+      emit(.error(attempt: token, error: MappedError(code: "unsupported-format", detail: detail)))
       return
     }
 
     active = true
-    sink.send(.state(attempt: token, state: .opening))
+    emit(.state(attempt: token, state: .opening))
     backend.start(plan, options: loadOptions(for: plan, request: request), serial: serial)
   }
 
@@ -85,7 +85,7 @@ public final class EngineCore {
     backend.stopMedia()
     resetSerialState(startMs: resumeMs)
     active = true
-    sink.send(.state(attempt: token, state: .opening))
+    emit(.state(attempt: token, state: .opening))
     backend.start(plan, options: loadOptions(for: plan, request: request), serial: serial)
   }
 
@@ -136,7 +136,7 @@ public final class EngineCore {
       let url = currentRequest?.url ?? ""
       let mapped = mapFailure(.rebuildFailed, url: url, live: currentRequest?.live ?? true, played: false)
       setScreenOn(false)
-      sink.send(.error(attempt: token, error: mapped))
+      emit(.error(attempt: token, error: mapped))
     }
   }
 
@@ -158,19 +158,18 @@ public final class EngineCore {
     case .opened:
       guard !openedReported, !played else { return }
       openedReported = true
-      sink.send(.state(attempt: token, state: .buffering))
+      emit(.state(attempt: token, state: .buffering))
 
     case .ready:
       guard !played else { return }
-      sink.send(.state(attempt: token, state: .ready))
+      emit(.state(attempt: token, state: .ready))
 
     case .audioOnly:
       audioOnly = true
       if pendingPlaying && !framed {
         framed = true
         pendingPlaying = false
-        let now = uptimeMs()
-        sink.send(.firstFrame(attempt: token, atMs: now))
+        emit(.firstFrame(attempt: token, atMs: uptimeMs()))
         enterPlaying()
       }
 
@@ -180,8 +179,7 @@ public final class EngineCore {
       if !audioOnly {
         setShutter(covered: false)
       }
-      let now = uptimeMs()
-      sink.send(.firstFrame(attempt: token, atMs: now))
+      emit(.firstFrame(attempt: token, atMs: uptimeMs()))
       if pendingPlaying {
         pendingPlaying = false
         enterPlaying()
@@ -210,9 +208,9 @@ public final class EngineCore {
     guard !released, available != surfaceAvailable else { return }
     surfaceAvailable = available
     if available {
-      sink.send(.surface(attempt: token, change: .created))
+      emit(.surface(attempt: token, change: .created))
     } else {
-      sink.send(.surface(attempt: token, change: .destroyed))
+      emit(.surface(attempt: token, change: .destroyed))
       if active && !errorReported {
         serial += 1
         active = false
@@ -221,7 +219,7 @@ public final class EngineCore {
         setScreenOn(false)
         let redacted = redactUrl(currentRequest?.url ?? "")
         let detail = redacted.isEmpty ? "surfaceLost" : "surfaceLost \(redacted)"
-        sink.send(.error(attempt: token, error: MappedError(code: "surface-lost", detail: detail)))
+        emit(.error(attempt: token, error: MappedError(code: "surface-lost", detail: detail)))
       }
     }
   }
@@ -231,10 +229,12 @@ public final class EngineCore {
     (shutterCovered, screenOn)
   }
 
+  private func emit(_ event: EngineEventOut) {
+    sink?.send(event)
+  }
+
   private func adopt(_ attempt: Int) {
-    if attempt > token {
-      token = attempt
-    }
+    if attempt > token { token = attempt }
   }
 
   private func resetSerialState(startMs: Double?) {
@@ -264,8 +264,7 @@ public final class EngineCore {
       if !framed {
         if audioOnly {
           framed = true
-          let now = uptimeMs()
-          sink.send(.firstFrame(attempt: token, atMs: now))
+          emit(.firstFrame(attempt: token, atMs: uptimeMs()))
           enterPlaying()
         } else {
           pendingPlaying = true
@@ -278,16 +277,16 @@ public final class EngineCore {
       pendingPlaying = false
       stalled = false
       setScreenOn(false)
-      sink.send(.state(attempt: token, state: .paused))
+      emit(.state(attempt: token, state: .paused))
       emitAnchor(rate: 0, atMs: uptimeMs())
 
     case .rebuffering, .stalled:
       guard played, !stalled else { return }
       stalled = true
       let now = uptimeMs()
-      sink.send(.stall(attempt: token, phase: .start, atMs: now))
+      emit(.stall(attempt: token, phase: .start, atMs: now))
       setScreenOn(true)
-      sink.send(.state(attempt: token, state: .buffering))
+      emit(.state(attempt: token, state: .buffering))
       emitAnchor(rate: 0, atMs: now)
 
     case .ended:
@@ -303,9 +302,9 @@ public final class EngineCore {
         errorReported = true
         let redacted = redactUrl(currentRequest?.url ?? "")
         let detail = redacted.isEmpty ? "liveEnded" : "liveEnded \(redacted)"
-        sink.send(.error(attempt: token, error: MappedError(code: "network", detail: detail)))
+        emit(.error(attempt: token, error: MappedError(code: "network", detail: detail)))
       } else {
-        sink.send(.state(attempt: token, state: .ended))
+        emit(.state(attempt: token, state: .ended))
       }
     }
   }
@@ -317,11 +316,11 @@ public final class EngineCore {
     setScreenOn(true)
     if wasStalled {
       let now = uptimeMs()
-      sink.send(.stall(attempt: token, phase: .end, atMs: now))
-      sink.send(.state(attempt: token, state: .playing))
+      emit(.stall(attempt: token, phase: .end, atMs: now))
+      emit(.state(attempt: token, state: .playing))
       emitAnchor(rate: 1.0, atMs: now)
     } else {
-      sink.send(.state(attempt: token, state: .playing))
+      emit(.state(attempt: token, state: .playing))
     }
   }
 
@@ -357,7 +356,7 @@ public final class EngineCore {
     lastAnchoredPositionMs = positionMs
     lastClockRate = rate
     lastClockUptimeMs = atMs
-    sink.send(
+    emit(
       .clock(
         attempt: token,
         anchor: ClockAnchorOut(
@@ -383,17 +382,17 @@ public final class EngineCore {
       live: currentRequest?.live ?? true,
       played: played
     )
-    sink.send(.error(attempt: token, error: mapped))
+    emit(.error(attempt: token, error: mapped))
   }
 
   private func setShutter(covered: Bool) {
     shutterCovered = covered
-    sink.setShutter(covered: covered)
+    sink?.setShutter(covered: covered)
   }
 
   private func setScreenOn(_ on: Bool) {
     guard on != screenOn else { return }
     screenOn = on
-    sink.setKeepScreenOn(on)
+    sink?.setKeepScreenOn(on)
   }
 }

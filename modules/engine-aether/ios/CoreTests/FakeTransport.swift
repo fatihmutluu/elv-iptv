@@ -20,25 +20,34 @@ final class FakeTransport: ByteTransport, @unchecked Sendable {
   var onCancel: (@Sendable (FakeTransport) -> Void)?
 
   func start(url: URL, headers: [String: String], delegate: ByteTransportDelegate) {
-    let hook: (@Sendable (FakeTransport) -> Void)? = lock.withLock {
+    let outcome: (hook: (@Sendable (FakeTransport) -> Void)?, cancelledNow: Bool) = lock.withLock {
       self.startedUrl = url
       self.startedHeaders = headers
       self.delegate = delegate
       self.startCount += 1
-      return self.onStart
+      let completeImmediately = self.isCancelled && self.completeOnCancel && !self.didComplete
+      if completeImmediately {
+        self.didComplete = true
+      }
+      return (self.onStart, completeImmediately)
     }
-    hook?(self)
+    outcome.hook?(self)
+    if outcome.cancelledNow {
+      delegate.transportDidComplete(
+        error: .transport(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+      )
+    }
   }
 
   func cancel() {
     let outcome: (hook: (@Sendable (FakeTransport) -> Void)?, del: ByteTransportDelegate?) = lock.withLock {
       self.cancelCount += 1
       self.isCancelled = true
-      let shouldComplete = self.completeOnCancel && !self.didComplete
-      if shouldComplete {
-        self.didComplete = true
+      guard let del = self.delegate, self.completeOnCancel, !self.didComplete else {
+        return (self.onCancel, nil)
       }
-      return (self.onCancel, shouldComplete ? self.delegate : nil)
+      self.didComplete = true
+      return (self.onCancel, del)
     }
     outcome.hook?(self)
     outcome.del?.transportDidComplete(

@@ -132,4 +132,77 @@ struct ConnectionGateTests {
     #expect(thirdOpened)
     gate.closed(generation: 3)
   }
+
+  @Test("waitForClosed waits for older open slot and settle window without acquiring an open slot")
+  func waitForClosedWaitsForOlderAndSettleWithoutAcquiringSlot() async throws {
+    let gate = ConnectionGate(forceCloseAfterMs: 1_000, settleAfterCloseMs: 40)
+
+    let coldStart = ProcessInfo.processInfo.systemUptime
+    let coldReady = await gate.waitForClosed(before: 1)
+    let coldElapsedMs = (ProcessInfo.processInfo.systemUptime - coldStart) * 1_000.0
+    #expect(coldReady)
+    #expect(coldElapsedMs < 20)
+
+    let tsOpened = await gate.open(generation: 2, forceClose: {})
+    #expect(tsOpened)
+
+    let hlsDone = AtomicFlag()
+    let hlsTask = Task {
+      let ok = await gate.waitForClosed(before: 3)
+      hlsDone.set(true)
+      return ok
+    }
+    try await Task.sleep(nanoseconds: 30_000_000)
+    #expect(!hlsDone.get())
+
+    let closeStart = ProcessInfo.processInfo.systemUptime
+    gate.closed(generation: 2)
+    let hlsReady = await hlsTask.value
+    let settleElapsedMs = (ProcessInfo.processInfo.systemUptime - closeStart) * 1_000.0
+    #expect(hlsReady)
+    #expect(settleElapsedMs >= 30)
+
+    // Generation 3 must NOT hold an open slot: generation 4 opens immediately without waiting 1,000 ms.
+    let gen4Start = ProcessInfo.processInfo.systemUptime
+    let gen4Opened = await gate.open(generation: 4, forceClose: {})
+    let gen4ElapsedMs = (ProcessInfo.processInfo.systemUptime - gen4Start) * 1_000.0
+    #expect(gen4Opened)
+    #expect(gen4ElapsedMs < 50)
+    gate.closed(generation: 4)
+  }
+
+  @Test("waitForClosed returns false immediately when superseded")
+  func waitForClosedReturnsFalseWhenSuperseded() async throws {
+    let gate = ConnectionGate(forceCloseAfterMs: 1_000, settleAfterCloseMs: 60)
+    #expect(await gate.open(generation: 1, forceClose: {}))
+
+    let waiterTask = Task {
+      await gate.waitForClosed(before: 2)
+    }
+    try await Task.sleep(nanoseconds: 20_000_000)
+    gate.advance(to: 3)
+
+    #expect(await waiterTask.value == false)
+    #expect(await gate.waitForClosed(before: 2) == false)
+
+    gate.closed(generation: 1)
+    #expect(await gate.waitForClosed(before: 3) == true)
+  }
+
+  @Test("advance(to: N) followed by waitForClosed(before: N) or open(generation: N) waits on N-1 and succeeds")
+  func advanceThenWaitOrOpenSameGenerationSucceeds() async throws {
+    let gate = ConnectionGate(forceCloseAfterMs: 1_000, settleAfterCloseMs: 25)
+    gate.advance(to: 1)
+    #expect(await gate.open(generation: 1, forceClose: {}))
+
+    gate.advance(to: 2)
+    let hlsTask = Task { await gate.waitForClosed(before: 2) }
+    try await Task.sleep(nanoseconds: 15_000_000)
+    gate.closed(generation: 1)
+    #expect(await hlsTask.value == true)
+
+    gate.advance(to: 3)
+    #expect(await gate.open(generation: 3, forceClose: {}))
+    gate.closed(generation: 3)
+  }
 }

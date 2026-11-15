@@ -1,7 +1,27 @@
 import Foundation
 
+/// Minimal task lifecycle seam over `URLSessionDataTask` so unit tests can verify lock-serialized suspend/resume/cancel.
+public protocol HttpTaskControlling: AnyObject, Sendable {
+  var taskIdentifier: Int { get }
+  func resume()
+  func suspend()
+  func cancel()
+}
+
+extension URLSessionDataTask: HttpTaskControlling {}
+
+/// Session seam creating and tracking `HttpTaskControlling` instances for `URLSessionTransport`.
+public protocol HttpTaskSession: AnyObject, Sendable {
+  func makeDataTask(
+    for request: URLRequest,
+    origin: StreamOrigin?,
+    transport: URLSessionTransport
+  ) -> HttpTaskControlling?
+  func unregister(taskId: Int)
+}
+
 /// Per-`EngineObject` ephemeral `URLSession` (`httpMaximumConnectionsPerHost = 1`, no cache, origin-scoped redirects).
-final class EngineHttpSession: @unchecked Sendable {
+public final class EngineHttpSession: HttpTaskSession, @unchecked Sendable {
   fileprivate final class DelegateMux: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private struct TaskEntry {
       let transport: URLSessionTransport
@@ -71,10 +91,12 @@ final class EngineHttpSession: @unchecked Sendable {
     }
   }
 
-  fileprivate let mux = DelegateMux()
-  fileprivate let urlSession: URLSession
+  private let stateLock = NSLock()
+  private var invalidated = false
+  private let mux = DelegateMux()
+  private let urlSession: URLSession
 
-  init() {
+  public init() {
     let config = URLSessionConfiguration.ephemeral
     config.httpMaximumConnectionsPerHost = 1
     config.urlCache = nil
@@ -89,26 +111,50 @@ final class EngineHttpSession: @unchecked Sendable {
     self.urlSession = URLSession(configuration: config, delegate: mux, delegateQueue: queue)
   }
 
-  func dispose() {
-    urlSession.invalidateAndCancel()
+  public func makeDataTask(
+    for request: URLRequest,
+    origin: StreamOrigin?,
+    transport: URLSessionTransport
+  ) -> HttpTaskControlling? {
+    stateLock.withLock {
+      guard !invalidated else { return nil }
+      let dataTask = urlSession.dataTask(with: request)
+      mux.register(taskId: dataTask.taskIdentifier, transport: transport, origin: origin)
+      return dataTask
+    }
+  }
+
+  public func unregister(taskId: Int) {
+    mux.unregister(taskId: taskId)
+  }
+
+  public func dispose() {
+    let shouldInvalidate: Bool = stateLock.withLock {
+      if invalidated { return false }
+      invalidated = true
+      return true
+    }
+    if shouldInvalidate {
+      urlSession.invalidateAndCancel()
+    }
   }
 }
 
-/// `URLSessionDataTask`-backed `ByteTransport` with immediate cancellation and balanced suspend/resume.
-final class URLSessionTransport: ByteTransport, @unchecked Sendable {
-  private let session: EngineHttpSession
+/// `URLSessionDataTask`-backed `ByteTransport` with lock-serialized cancellation and balanced suspend/resume.
+public final class URLSessionTransport: ByteTransport, @unchecked Sendable {
+  private let session: HttpTaskSession
   private let lock = NSLock()
-  private var task: URLSessionDataTask?
+  private var task: HttpTaskControlling?
   private var delegate: ByteTransportDelegate?
   private var isCancelled = false
   private var isCompleted = false
   private var isTaskSuspended = false
 
-  init(session: EngineHttpSession) {
+  public init(session: HttpTaskSession) {
     self.session = session
   }
 
-  func start(url: URL, headers: [String: String], delegate: ByteTransportDelegate) {
+  public func start(url: URL, headers: [String: String], delegate: ByteTransportDelegate) {
     var request = URLRequest(
       url: url,
       cachePolicy: .reloadIgnoringLocalCacheData,
@@ -121,61 +167,70 @@ final class URLSessionTransport: ByteTransport, @unchecked Sendable {
       request.setValue("close", forHTTPHeaderField: "Connection")
     }
 
-    let dataTask = session.urlSession.dataTask(with: request)
-    let taskId = dataTask.taskIdentifier
-    let origin = StreamOrigin(url: url)
-
-    let cancelledBeforeStart: Bool = lock.withLock {
-      if isCancelled {
-        isCompleted = true
-        return true
-      }
-      self.delegate = delegate
-      self.task = dataTask
-      return false
-    }
-
-    if cancelledBeforeStart {
-      dataTask.cancel()
+    guard let dataTask = session.makeDataTask(
+      for: request,
+      origin: StreamOrigin(url: url),
+      transport: self
+    ) else {
       delegate.transportDidComplete(
         error: .transport(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
       )
       return
     }
 
-    session.mux.register(taskId: taskId, transport: self, origin: origin)
-    dataTask.resume()
+    let cancelledBeforeStart: Bool = lock.withLock {
+      if isCancelled {
+        isCompleted = true
+        dataTask.cancel()
+        return true
+      }
+      self.delegate = delegate
+      self.task = dataTask
+      dataTask.resume()
+      if isTaskSuspended {
+        dataTask.suspend()
+      }
+      return false
+    }
+
+    if cancelledBeforeStart {
+      session.unregister(taskId: dataTask.taskIdentifier)
+      delegate.transportDidComplete(
+        error: .transport(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+      )
+    }
   }
 
-  func cancel() {
-    let currentTask: URLSessionDataTask? = lock.withLock {
-      guard !isCancelled else { return nil }
+  public func cancel() {
+    lock.withLock {
+      guard !isCancelled else { return }
+      let wasSuspended = isTaskSuspended
       isCancelled = true
       isTaskSuspended = false
-      return task
+      task?.cancel()
+      if wasSuspended {
+        task?.resume()
+      }
     }
-    currentTask?.cancel()
   }
 
-  func suspend() {
-    let currentTask: URLSessionDataTask? = lock.withLock {
-      guard !isCancelled, !isCompleted, !isTaskSuspended else { return nil }
+  public func suspend() {
+    lock.withLock {
+      guard !isCancelled, !isCompleted, !isTaskSuspended else { return }
       isTaskSuspended = true
-      return task
+      task?.suspend()
     }
-    currentTask?.suspend()
   }
 
-  func resume() {
-    let currentTask: URLSessionDataTask? = lock.withLock {
-      guard !isCancelled, !isCompleted, isTaskSuspended else { return nil }
+  public func resume() {
+    lock.withLock {
+      guard !isCancelled, !isCompleted, isTaskSuspended else { return }
       isTaskSuspended = false
-      return task
+      task?.resume()
     }
-    currentTask?.resume()
   }
 
-  fileprivate func didReceiveResponse(status: Int, contentType: String?) {
+  public func didReceiveResponse(status: Int, contentType: String?) {
     let del: ByteTransportDelegate? = lock.withLock {
       guard !isCompleted else { return nil }
       return delegate
@@ -183,7 +238,7 @@ final class URLSessionTransport: ByteTransport, @unchecked Sendable {
     del?.transportDidReceive(status: status, contentType: contentType)
   }
 
-  fileprivate func didReceiveData(_ data: Data) {
+  public func didReceiveData(_ data: Data) {
     let del: ByteTransportDelegate? = lock.withLock {
       guard !isCompleted else { return nil }
       return delegate
@@ -191,14 +246,18 @@ final class URLSessionTransport: ByteTransport, @unchecked Sendable {
     del?.transportDidReceive(data)
   }
 
-  fileprivate func didComplete(error: ReaderFailure?) {
+  public func didComplete(error: ReaderFailure?) {
     let del: ByteTransportDelegate? = lock.withLock {
       guard !isCompleted else { return nil }
+      let wasSuspended = isTaskSuspended
       isCompleted = true
       isTaskSuspended = false
+      if wasSuspended {
+        task?.resume()
+      }
+      task = nil
       let d = delegate
       delegate = nil
-      task = nil
       return d
     }
     del?.transportDidComplete(error: error)

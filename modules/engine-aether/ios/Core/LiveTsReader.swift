@@ -1,38 +1,17 @@
 import Foundation
 
-/// Outcome of opening `LiveTsReader` against the live stream endpoint.
-public enum ReaderOpen: Equatable, Sendable {
-  case media(formatHint: String?)
-  case playlist
-  case failed(ReaderFailure)
-  case superseded
-}
-
 /// Forward-only live MPEG-TS reader with 1,024-byte response sniffing, gate coordination, and single-drop reconnect.
 public final class LiveTsReader: @unchecked Sendable {
   private final class TransportRelay: ByteTransportDelegate, @unchecked Sendable {
     let connectionId: Int
     weak var owner: LiveTsReader?
-
-    init(connectionId: Int, owner: LiveTsReader) {
-      self.connectionId = connectionId
-      self.owner = owner
-    }
-
-    func transportDidReceive(status: Int, contentType: String?) {
-      owner?.handleStatus(connectionId: connectionId, status: status, contentType: contentType)
-    }
-    func transportDidReceive(_ data: Data) {
-      owner?.handleData(connectionId: connectionId, data: data)
-    }
-    func transportDidComplete(error: ReaderFailure?) {
-      owner?.handleComplete(connectionId: connectionId, error: error)
-    }
+    init(connectionId: Int, owner: LiveTsReader) { self.connectionId = connectionId; self.owner = owner }
+    func transportDidReceive(status: Int, contentType: String?) { owner?.handleStatus(connectionId: connectionId, status: status, contentType: contentType) }
+    func transportDidReceive(_ data: Data) { owner?.handleData(connectionId: connectionId, data: data) }
+    func transportDidComplete(error: ReaderFailure?) { owner?.handleComplete(connectionId: connectionId, error: error) }
   }
 
-  private enum Phase {
-    case idle, waitingGate, sniffing, streaming, finished
-  }
+  private enum Phase { case idle, waitingGate, sniffing, streaming, finished }
 
   private let url: URL
   private let headers: [String: String]
@@ -50,6 +29,7 @@ public final class LiveTsReader: @unchecked Sendable {
   private var activeConnectionId = 0
   private var activeTransport: ByteTransport?
   private var transportInFlight = false
+  private var inFlightSelf: LiveTsReader?
 
   private var openContinuation: CheckedContinuation<ReaderOpen, Never>?
   private var sniffStatus: Int?
@@ -73,6 +53,12 @@ public final class LiveTsReader: @unchecked Sendable {
     self.generation = generation
     self.gate = gate
     self.makeTransport = makeTransport
+  }
+
+  deinit {
+    if gateAcquired && !gateClosed {
+      gate.closed(generation: generation)
+    }
   }
 
   public var lastFailure: ReaderFailure? {
@@ -261,6 +247,7 @@ public final class LiveTsReader: @unchecked Sendable {
       guard connectionId == activeConnectionId else { return }
       transportInFlight = false
       activeTransport = nil
+      inFlightSelf = nil
 
       if abortedByCaller {
         phase = .finished
@@ -334,6 +321,7 @@ public final class LiveTsReader: @unchecked Sendable {
     let transport = makeTransport()
     activeTransport = transport
     transportInFlight = true
+    inFlightSelf = self
     fifo.attachTransport(transport)
     return (transport, TransportRelay(connectionId: connId, owner: self))
   }

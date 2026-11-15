@@ -12,17 +12,18 @@ final class AetherBackend: PlayerBackend {
   private let httpSession: EngineHttpSession
 
   private var engine: AetherEngine?
-  private var cancellables = Set<AnyCancellable>()
+  var cancellables = Set<AnyCancellable>()
   private weak var boundPlayerView: AetherPlayerView?
   private var gravity: AVLayerVideoGravity = .resizeAspect
 
-  private var activeLoadSerial = 0
-  private var errorReportedSerial = 0
-  private var loggedRouteSerial = 0
+  var activeLoadSerial = 0
+  var engineLoadSerial = 0
+  var errorReportedSerial = 0
+  var loggedRouteSerial = 0
   private var gateGeneration = 0
 
-  private var loadStartUptimeMs: Double = 0
-  private var openedMsForSerial: Double?
+  var loadStartUptimeMs: Double = 0
+  var openedMsForSerial: Double?
 
   private var currentReader: LiveTsReader?
   private var loadTask: Task<Void, Never>?
@@ -59,6 +60,8 @@ final class AetherBackend: PlayerBackend {
   }
 
   func start(_ plan: MediaPlan, options: EngineLoadOptions, serial: Int) {
+    activeLoadSerial = 0
+    engineLoadSerial = 0
     cancelTasksAndReader()
 
     let currentEngine: AetherEngine
@@ -74,6 +77,7 @@ final class AetherBackend: PlayerBackend {
     }
 
     activeLoadSerial = serial
+    engineLoadSerial = 0
     errorReportedSerial = 0
     loggedRouteSerial = 0
     loadStartUptimeMs = ProcessInfo.processInfo.systemUptime * 1_000.0
@@ -81,16 +85,27 @@ final class AetherBackend: PlayerBackend {
 
     gateGeneration += 1
     let generation = gateGeneration
+    gate.advance(to: generation)
     let loadOpts = aetherOptions(options)
 
     loadTask = Task { @MainActor [weak self] in
-      guard let self, self.activeLoadSerial == serial else { return }
+      guard let self, self.activeLoadSerial == serial, !Task.isCancelled else { return }
       do {
         switch plan {
         case let .hls(url, _):
+          guard await self.gate.waitForClosed(before: generation),
+                self.activeLoadSerial == serial,
+                !Task.isCancelled
+          else { return }
+          self.engineLoadSerial = serial
           _ = try await currentEngine.load(url: url, options: loadOpts)
 
         case let .vod(url, startSeconds):
+          guard await self.gate.waitForClosed(before: generation),
+                self.activeLoadSerial == serial,
+                !Task.isCancelled
+          else { return }
+          self.engineLoadSerial = serial
           _ = try await currentEngine.load(url: url, startPosition: startSeconds, options: loadOpts)
 
         case let .liveTs(url):
@@ -104,24 +119,38 @@ final class AetherBackend: PlayerBackend {
           )
           self.currentReader = reader
           let verdict = await reader.open()
-          guard self.activeLoadSerial == serial else {
+          guard self.activeLoadSerial == serial, !Task.isCancelled else {
             reader.close()
             if self.currentReader === reader { self.currentReader = nil }
             return
           }
           switch verdict {
           case let .media(hint):
+            self.engineLoadSerial = serial
             _ = try await currentEngine.load(source: .custom(reader, formatHint: hint), options: loadOpts)
+
           case .playlist:
+            reader.close()
             if self.currentReader === reader { self.currentReader = nil }
+            self.gateGeneration += 1
+            let playlistGeneration = self.gateGeneration
+            self.gate.advance(to: playlistGeneration)
+            guard await self.gate.waitForClosed(before: playlistGeneration),
+                  self.activeLoadSerial == serial,
+                  !Task.isCancelled
+            else { return }
             var hlsOpts = options
             hlsOpts.isLive = true
+            self.engineLoadSerial = serial
             _ = try await currentEngine.load(url: url, options: aetherOptions(hlsOpts))
+
           case let .failed(rf):
+            reader.close()
             if self.currentReader === reader { self.currentReader = nil }
             guard self.errorReportedSerial != serial else { return }
             self.errorReportedSerial = serial
             self.onObservation?(.failure(.reader(rf)), serial)
+
           case .superseded:
             reader.close()
             if self.currentReader === reader { self.currentReader = nil }
@@ -144,6 +173,7 @@ final class AetherBackend: PlayerBackend {
 
   func stopMedia() {
     activeLoadSerial = 0
+    engineLoadSerial = 0
     gateGeneration += 1
     gate.advance(to: gateGeneration)
     cancelTasksAndReader()
@@ -155,17 +185,18 @@ final class AetherBackend: PlayerBackend {
 
   func seek(toSeconds: Double) {
     guard let engine, !engine.isLive else { return }
-    let serial = activeLoadSerial
+    let serial = engineLoadSerial
     guard serial > 0 else { return }
     seekTask?.cancel()
     seekTask = Task { @MainActor [weak self] in
-      guard let self, self.activeLoadSerial == serial else { return }
+      guard let self, self.engineLoadSerial == serial else { return }
       await engine.seek(to: toSeconds)
     }
   }
 
   func rebuild() throws {
     activeLoadSerial = 0
+    engineLoadSerial = 0
     gateGeneration += 1
     gate.advance(to: gateGeneration)
     cancelTasksAndReader()
@@ -183,6 +214,7 @@ final class AetherBackend: PlayerBackend {
 
   func dispose() {
     activeLoadSerial = 0
+    engineLoadSerial = 0
     gateGeneration += 1
     gate.advance(to: gateGeneration)
     cancelTasksAndReader()
@@ -208,21 +240,10 @@ final class AetherBackend: PlayerBackend {
     currentReader = nil
   }
 
-  private func forwardReaderFaultIfPresent(serial: Int) {
+  func forwardReaderFaultIfPresent(serial: Int) {
     if let rf = currentReader?.lastFailure {
       onObservation?(.readerFault(rf), serial)
     }
-  }
-
-  private func maybeLogRouteDiagnostics(from target: AetherEngine, serial: Int) {
-    guard loggedRouteSerial != serial, target.videoRoute != .none else { return }
-    let audioReady = target.audioDelivery != .none
-      || target.playbackPhase == .playing
-      || target.hasFirstFrameReadyForDisplay
-    guard audioReady else { return }
-    loggedRouteSerial = serial
-    let openMs = openedMsForSerial ?? max(0, (ProcessInfo.processInfo.systemUptime * 1_000.0) - loadStartUptimeMs)
-    NSLog("ELV_AETHER route=%@ open=%.0f audio=%@", target.videoRoute.rawValue, openMs, target.audioDelivery.rawValue)
   }
 
   private func ensureEngine() throws -> AetherEngine {
@@ -241,156 +262,5 @@ final class AetherBackend: PlayerBackend {
     }
     engine = fresh
     return fresh
-  }
-
-  private func subscribe(to target: AetherEngine) {
-    target.$startupProgress
-      .sink { [weak self, weak target] progress in
-        MainActor.assumeIsolated {
-          guard let self, let target, self.activeLoadSerial > 0, let progress else { return }
-          let serial = self.activeLoadSerial
-          if progress.checkpoint >= .sourceOpened {
-            if self.openedMsForSerial == nil {
-              self.openedMsForSerial = max(0, (ProcessInfo.processInfo.systemUptime * 1_000.0) - self.loadStartUptimeMs)
-            }
-            self.onObservation?(.opened, serial)
-          }
-          if progress.checkpoint == .ready {
-            self.onObservation?(.ready, serial)
-            self.maybeLogRouteDiagnostics(from: target, serial: serial)
-          }
-        }
-      }
-      .store(in: &cancellables)
-
-    target.$videoRoute
-      .sink { [weak self, weak target] route in
-        MainActor.assumeIsolated {
-          guard let self, let target, self.activeLoadSerial > 0 else { return }
-          let serial = self.activeLoadSerial
-          if route == .audio {
-            self.onObservation?(.audioOnly, serial)
-          }
-          self.maybeLogRouteDiagnostics(from: target, serial: serial)
-        }
-      }
-      .store(in: &cancellables)
-
-    target.$audioDelivery
-      .sink { [weak self, weak target] _ in
-        MainActor.assumeIsolated {
-          guard let self, let target, self.activeLoadSerial > 0 else { return }
-          self.maybeLogRouteDiagnostics(from: target, serial: self.activeLoadSerial)
-        }
-      }
-      .store(in: &cancellables)
-
-    target.$hasFirstFrameReadyForDisplay
-      .sink { [weak self, weak target] ready in
-        MainActor.assumeIsolated {
-          guard let self, let target, self.activeLoadSerial > 0, ready else { return }
-          let serial = self.activeLoadSerial
-          self.maybeLogRouteDiagnostics(from: target, serial: serial)
-          self.onObservation?(.firstFrame, serial)
-        }
-      }
-      .store(in: &cancellables)
-
-    target.$playbackPhase
-      .sink { [weak self, weak target] phase in
-        MainActor.assumeIsolated {
-          guard let self, let target, self.activeLoadSerial > 0 else { return }
-          let serial = self.activeLoadSerial
-          switch phase {
-          case .idle, .error: break
-          case .loading: self.onObservation?(.phase(.loading), serial)
-          case .playing:
-            self.maybeLogRouteDiagnostics(from: target, serial: serial)
-            self.onObservation?(.phase(.playing), serial)
-          case .paused: self.onObservation?(.phase(.paused), serial)
-          case .seeking: self.onObservation?(.phase(.seeking), serial)
-          case .rebuffering: self.onObservation?(.phase(.rebuffering), serial)
-          case .stalled: self.onObservation?(.phase(.stalled), serial)
-          case .ended:
-            self.forwardReaderFaultIfPresent(serial: serial)
-            self.onObservation?(.phase(.ended), serial)
-          }
-        }
-      }
-      .store(in: &cancellables)
-
-    target.$state
-      .sink { [weak self, weak target] state in
-        MainActor.assumeIsolated {
-          guard let self, let target, self.activeLoadSerial > 0 else { return }
-          let serial = self.activeLoadSerial
-          switch state {
-          case .error:
-            guard self.errorReportedSerial != serial else { return }
-            self.errorReportedSerial = serial
-            self.forwardReaderFaultIfPresent(serial: serial)
-            let kind = target.errorInfo?.kind.rawValue ?? "unknown"
-            let domain = target.errorInfo?.underlyingDomain
-            let code = target.errorInfo?.underlyingCode
-            self.onObservation?(
-              .failure(.engine(kind: kind, underlyingDomain: domain, underlyingCode: code)),
-              serial
-            )
-          case .ended:
-            self.forwardReaderFaultIfPresent(serial: serial)
-            self.onObservation?(.phase(.ended), serial)
-          default:
-            break
-          }
-        }
-      }
-      .store(in: &cancellables)
-
-    target.liveSourceReset
-      .sink { [weak self] in
-        MainActor.assumeIsolated {
-          guard let self, self.activeLoadSerial > 0 else { return }
-          let serial = self.activeLoadSerial
-          guard self.errorReportedSerial != serial else { return }
-          self.errorReportedSerial = serial
-          self.forwardReaderFaultIfPresent(serial: serial)
-          self.onObservation?(.failure(.liveSourceReset), serial)
-        }
-      }
-      .store(in: &cancellables)
-
-    target.clock.$currentTime
-      .sink { [weak self, weak target] currentTime in
-        MainActor.assumeIsolated {
-          guard let self, let target, self.activeLoadSerial > 0 else { return }
-          self.emitClockSnapshot(from: target, positionSeconds: currentTime, durationOverride: nil)
-        }
-      }
-      .store(in: &cancellables)
-
-    target.$duration
-      .sink { [weak self, weak target] newDuration in
-        MainActor.assumeIsolated {
-          guard let self, let target, self.activeLoadSerial > 0, newDuration > 0, !target.isLive else { return }
-          self.emitClockSnapshot(from: target, positionSeconds: target.currentTime, durationOverride: newDuration)
-        }
-      }
-      .store(in: &cancellables)
-  }
-
-  private func emitClockSnapshot(from target: AetherEngine, positionSeconds: Double, durationOverride: Double?) {
-    let rate: Double = (target.playbackPhase == .playing || target.state == .playing) ? 1.0 : 0.0
-    let rawDuration = durationOverride ?? target.duration
-    let durationSeconds: Double? = (!target.isLive && rawDuration > 0) ? rawDuration : nil
-    let liveEdgeSeconds: Double? = (target.isLive && target.liveEdgeTime > 0) ? target.liveEdgeTime : nil
-    onObservation?(
-      .clock(
-        positionSeconds: positionSeconds,
-        rate: rate,
-        durationSeconds: durationSeconds,
-        liveEdgeSeconds: liveEdgeSeconds
-      ),
-      activeLoadSerial
-    )
   }
 }

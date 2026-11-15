@@ -69,6 +69,14 @@ public enum ReaderFailure: Equatable, Sendable {
   case transport(domain: String, code: Int)
 }
 
+/// Outcome of opening `LiveTsReader` against the live stream endpoint.
+public enum ReaderOpen: Equatable, Sendable {
+  case media(formatHint: String?)
+  case playlist
+  case failed(ReaderFailure)
+  case superseded
+}
+
 /// Failure observed from `AetherEngine` or `LiveTsReader`.
 public enum BackendFailure: Equatable, Sendable {
   case engine(kind: String, underlyingDomain: String?, underlyingCode: Int?)

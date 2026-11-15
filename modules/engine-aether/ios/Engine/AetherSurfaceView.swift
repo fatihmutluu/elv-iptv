@@ -28,6 +28,7 @@ final class AetherSurfaceView: ExpoView {
   private let shutterView = ShutterOverlayView(frame: .zero)
 
   private weak var boundEngine: EngineObject?
+  private var boundOwnerId: ObjectIdentifier?
   private var appInBackground = false
   private var wantsScreenOn = false
   private(set) var currentVideoGravity: AVLayerVideoGravity = .resizeAspect
@@ -47,11 +48,15 @@ final class AetherSurfaceView: ExpoView {
       NotificationCenter.default.removeObserver(token)
     }
     let engine = boundEngine
+    let ownerId = boundOwnerId
     let view = playerView
-    if let engine {
+    if engine != nil || ownerId != nil {
       DispatchQueue.main.async {
         MainActor.assumeIsolated {
-          engine.withDriver { driver in
+          if let ownerId {
+            IdleTimer.setHeld(false, ownerId: ownerId)
+          }
+          engine?.withDriver { driver in
             driver.detachDestroyedPlayerView(view)
           }
         }
@@ -85,15 +90,19 @@ final class AetherSurfaceView: ExpoView {
   @MainActor
   func bind(_ engine: EngineObject?) {
     guard boundEngine !== engine else { return }
+    if let prevId = boundOwnerId {
+      IdleTimer.setHeld(false, ownerId: prevId)
+      boundOwnerId = nil
+    }
     if let previous = boundEngine {
       wantsScreenOn = false
-      refreshIdleTimer()
       previous.withDriver { driver in
         driver.unbindSurface(self)
       }
       boundEngine = nil
     }
     boundEngine = engine
+    boundOwnerId = engine.map(ObjectIdentifier.init)
     if let engine {
       engine.withDriver { driver in
         driver.bindSurface(self)
@@ -130,11 +139,14 @@ final class AetherSurfaceView: ExpoView {
 
   @MainActor
   func detachEngineReference(_ engine: EngineObject?) {
-    guard let engine, boundEngine === engine else { return }
+    guard engine == nil || boundEngine === engine else { return }
     boundEngine = nil
     wantsScreenOn = false
     shutterView.isHidden = false
-    refreshIdleTimer()
+    if let prevId = boundOwnerId {
+      boundOwnerId = nil
+      IdleTimer.setHeld(false, ownerId: prevId)
+    }
   }
 
   @MainActor
@@ -209,8 +221,8 @@ final class AetherSurfaceView: ExpoView {
 
   @MainActor
   private func refreshIdleTimer() {
-    guard let engine = boundEngine else { return }
-    let shouldHold = wantsScreenOn && window != nil && !appInBackground
-    IdleTimer.setHeld(shouldHold, owner: engine)
+    guard let ownerId = boundOwnerId else { return }
+    let shouldHold = boundEngine != nil && wantsScreenOn && window != nil && !appInBackground
+    IdleTimer.setHeld(shouldHold, ownerId: ownerId)
   }
 }
