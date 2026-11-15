@@ -1,6 +1,7 @@
 package io.github.fatihmutluu.elv.remotekeys
 
 import android.view.KeyEvent
+import java.lang.ref.WeakReference
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotSame
@@ -123,4 +124,69 @@ class KeyForwardingTest {
     KeyForwarding.clearSink(failing)
     assertEquals(listOf(true, false), fake.focusChanges)
   }
+
+  @Test
+  fun `wrapWindow does not double-wrap when a third-party callback wraps our wrapper`() {
+    val windowA = Any()
+    val baseA = FakeCallback()
+    val first = KeyForwarding.wrapWindow(windowA, baseA)
+    assertTrue(first is ForwardingWindowCallback)
+
+    // Simulate a third-party library wrapping window.callback after ElvRemoteKeysModule installed.
+    val thirdParty = object : android.view.Window.Callback by first {
+      override fun onWindowFocusChanged(hasFocus: Boolean) {
+        first.onWindowFocusChanged(hasFocus)
+      }
+    }
+    val second = KeyForwarding.wrapWindow(windowA, thirdParty)
+    assertSame(thirdParty, second)
+
+    val events = mutableListOf<Map<String, Any>>()
+    KeyForwarding.setSink { events.add(it) }
+    second.onWindowFocusChanged(false)
+    assertEquals(listOf(mapOf("action" to "blur")), events)
+    assertEquals(listOf(false), baseA.focusChanges)
+
+    // A distinct window still receives its own wrapper.
+    val windowB = Any()
+    val baseB = FakeCallback()
+    val otherWrapped = KeyForwarding.wrapWindow(windowB, baseB)
+    assertNotSame(baseB, otherWrapped)
+    assertTrue(otherWrapped is ForwardingWindowCallback)
+  }
+
+  @Test
+  fun `emitBlur sends blur payload for background transitions and ignores absent sink`() {
+    // Safe no-op when no sink is set.
+    KeyForwarding.emitBlur()
+
+    val events = mutableListOf<Map<String, Any>>()
+    KeyForwarding.setSink { events.add(it) }
+    KeyForwarding.emitBlur()
+    assertEquals(listOf(mapOf("action" to "blur")), events)
+  }
+
+  @Test
+  fun `wrapWindow allows garbage collection when callback strongly references windowKey`() {
+    val weakWindow = wrapTransientWindow()
+    for (attempt in 0 until 50) {
+      if (weakWindow.get() == null) break
+      System.gc()
+      Thread.sleep(10)
+    }
+    assertNull(weakWindow.get())
+  }
+
+  private fun wrapTransientWindow(): WeakReference<Any> {
+    val windowKey = Any()
+    // Mirrors Android's Activity: implements Window.Callback and holds a strong field reference to its Window.
+    val activityCallback = ActivityLikeCallback(windowKey)
+    KeyForwarding.wrapWindow(windowKey, activityCallback)
+    return WeakReference(windowKey)
+  }
+
+  private class ActivityLikeCallback(
+    @Suppress("unused")
+    val ownedWindow: Any,
+  ) : android.view.Window.Callback by FakeCallback()
 }

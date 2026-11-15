@@ -151,12 +151,14 @@ describe('TvList', () => {
     const topsOf = () =>
       screen.queryAllByTestId(/^list-row-\d+$/).map((r) => r.props.style.top as number);
 
-    it('keeps every native coordinate bounded at the end of 100,000 rows', async () => {
+    it('keeps every native coordinate bounded at the end of 100,000 rows without re-anchoring every 100 rows', async () => {
       const { store, ui } = setup(8);
       await render(ui);
+      await act(async () => store.focus('l', 200));
+      expect(screen.getByTestId('list-row-200').props.style.top).toBe(200 * ROW_HEIGHT);
       await act(async () => store.focus('l', 99_999));
       const pool = 12;
-      const limit = 10 * pool * ROW_HEIGHT;
+      const limit = 514 * pool * ROW_HEIGHT;
       expect(topsOf()).toHaveLength(pool);
       expect(Math.max(...topsOf().map(Math.abs))).toBeLessThan(limit);
       expect(Math.abs(translateOf())).toBeLessThan(limit);
@@ -205,16 +207,193 @@ describe('TvList', () => {
       expect(screen.getByTestId('list-row-3').props.accessibilityLabel).toBe('Item 3 #3');
     });
 
-    it('prefetches when the rendered range moves, not on every render', async () => {
+    it('prefetches in quantized half-pool buckets rather than on every 1-row step', async () => {
       const { store, ui, prefetchSpy } = setup(8);
       await render(ui);
       expect(prefetchSpy).toHaveBeenCalledWith(0, 24);
       const calls = prefetchSpy.mock.calls.length;
       await act(async () => move(store, 'up'));
       expect(prefetchSpy.mock.calls.length).toBe(calls);
-      await act(async () => move(store, 'down', 10));
-      expect(prefetchSpy.mock.calls.length).toBeGreaterThan(calls);
-      expect(prefetchSpy).toHaveBeenLastCalledWith(expect.any(Number), expect.any(Number));
+      await act(async () => move(store, 'down', 5));
+      const afterFirstBucket = prefetchSpy.mock.calls.length;
+      expect(afterFirstBucket).toBe(calls + 1);
+      expect(prefetchSpy).toHaveBeenLastCalledWith(0, 30);
+      for (let step = 0; step < 4; step++) {
+        await act(async () => move(store, 'down', 1));
+      }
+      expect(prefetchSpy.mock.calls.length).toBe(afterFirstBucket);
+    });
+
+    it('animates 1-row steps with timing but snaps page jumps and source swaps with setValue', async () => {
+      let now = 1000;
+      jest.spyOn(performance, 'now').mockImplementation(() => now);
+      const setValueSpy = jest.spyOn(Animated.Value.prototype, 'setValue');
+      const timingSpy = jest.spyOn(Animated, 'timing');
+      const { store, ui } = setup(8);
+      const view = await render(ui);
+      await act(async () => store.focus('l', 10));
+      const nextTurn = () => {
+        timingSpy.mockClear();
+        setValueSpy.mockClear();
+        now += 500;
+      };
+
+      nextTurn();
+      await act(async () => move(store, 'down', 1));
+      expect(timingSpy).toHaveBeenCalledTimes(1);
+      expect(setValueSpy).not.toHaveBeenCalled();
+
+      nextTurn();
+      await act(async () => store.dispatch({ key: 'channelDown', kind: 'press', time: now }));
+      expect(timingSpy).not.toHaveBeenCalled();
+      expect(setValueSpy).toHaveBeenCalledTimes(1);
+
+      nextTurn();
+      await act(async () => store.focus('l', 22));
+      nextTurn();
+      await view.rerender(
+        cloneElement(ui, { source: createSyntheticSource(22, (i) => `Alt ${i}`) }),
+      );
+      expect(timingSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('active state, empty source, clamping, FocusRing a11y and off-screen prefetch isolation', () => {
+    it('shows FocusRing and selected row only on the active list of the top scope, and hides both when empty', async () => {
+      const store = createFocusStore({
+        id: 'root',
+        lists: [
+          { id: 'cats', count: 5, index: 1, orientation: 'vertical', pageSize: 5 },
+          { id: 'chans', count: 5, index: 2, orientation: 'vertical', pageSize: 5 },
+        ],
+        active: 'cats',
+      });
+      const src = createSyntheticSource(5, (i) => `Row ${i}`);
+      const renderItem = (item: string | undefined, focused: boolean) => (
+        <Text>{`${item}${focused ? '*' : ''}`}</Text>
+      );
+      const pane = (id: string) => (
+        <TvList
+          listId={id}
+          store={store}
+          source={src}
+          rowHeight={ROW_HEIGHT}
+          visibleRows={5}
+          renderRow={renderItem}
+          testID={id}
+        />
+      );
+      const isSelected = (id: string) => screen.getByTestId(id).props.accessibilityState.selected;
+      await render(
+        <>
+          {pane('cats')}
+          {pane('chans')}
+        </>,
+      );
+
+      const catsRing = screen.getByTestId('cats-ring');
+      expect(catsRing.props.pointerEvents).toBe('none');
+      expect(catsRing.props.accessible).toBe(false);
+      expect(catsRing.props.importantForAccessibility).toBe('no');
+      expect(screen.queryByTestId('chans-ring')).toBeNull();
+      expect(isSelected('cats-row-1')).toBe(true);
+      expect(isSelected('chans-row-2')).toBe(false);
+
+      await act(async () => void store.activate('chans'));
+      expect(screen.queryByTestId('cats-ring')).toBeNull();
+      expect(screen.getByTestId('chans-ring')).toBeTruthy();
+      expect(isSelected('cats-row-1')).toBe(false);
+      expect(isSelected('chans-row-2')).toBe(true);
+
+      await act(async () =>
+        store.pushScope(
+          'dlg',
+          [{ id: 'd', count: 3, index: 0, orientation: 'vertical', pageSize: 3 }],
+          'd',
+        ),
+      );
+      expect(screen.queryByTestId('cats-ring')).toBeNull();
+      expect(screen.queryByTestId('chans-ring')).toBeNull();
+
+      await act(async () => store.popScope());
+      expect(screen.getByTestId('chans-ring')).toBeTruthy();
+      expect(isSelected('chans-row-2')).toBe(true);
+
+      await render(setup(5, 0).ui);
+      expect(screen.queryByTestId('list-ring')).toBeNull();
+    });
+
+    it('clamps out-of-range store index and compact focusLine inside the viewport', async () => {
+      const store = createFocusStore({
+        id: 'root',
+        lists: [{ id: 'l', count: 50, index: 25, orientation: 'vertical', pageSize: 5 }],
+        active: 'l',
+      });
+      const shortSource = createSyntheticSource(5, (i) => `Item ${i}`);
+      const props = {
+        listId: 'l',
+        store,
+        source: shortSource,
+        rowHeight: ROW_HEIGHT,
+        visibleRows: 2,
+        focusLine: 5,
+      };
+      await render(
+        <TvList {...props} renderRow={(item) => <Text>{item}</Text>} testID="compact" />,
+      );
+      expect(screen.getByTestId('compact-ring').props.style.top).toBe(1 * ROW_HEIGHT);
+      expect(screen.getByTestId('compact-row-4').props.accessibilityState).toEqual({
+        selected: true,
+      });
+    });
+
+    it('re-renders zero visible rows when source.onChange fires for off-screen items', async () => {
+      const items = new Map<number, { label: string }>();
+      for (let i = 0; i < 20; i++) items.set(i, { label: `Row ${i}` });
+      items.delete(2);
+      const listeners = new Set<() => void>();
+      const source = {
+        count: () => 100,
+        get: (i: number) => items.get(i),
+        prefetch: () => {},
+        onChange: (fn: () => void) => {
+          listeners.add(fn);
+          return () => listeners.delete(fn);
+        },
+      };
+      const store = createFocusStore({
+        id: 'root',
+        lists: [{ id: 'l', count: 100, index: 0, orientation: 'vertical', pageSize: 5 }],
+        active: 'l',
+      });
+      const rendered: number[] = [];
+      const renderRow = (item: { label: string } | undefined) => {
+        rendered.push(1);
+        return <Text>{item?.label ?? '...'}</Text>;
+      };
+      const props = {
+        listId: 'l',
+        store,
+        source,
+        rowHeight: ROW_HEIGHT,
+        visibleRows: 4,
+        renderRow,
+      };
+      await render(<TvList {...props} testID="iso" />);
+      rendered.length = 0;
+
+      await act(async () => {
+        items.set(50, { label: 'Offscreen 50' });
+        for (const fn of listeners) fn();
+      });
+      expect(rendered).toHaveLength(0);
+
+      await act(async () => {
+        items.set(2, { label: 'Row 2' });
+        for (const fn of listeners) fn();
+      });
+      expect(rendered).toHaveLength(1);
+      expect(screen.getByText('Row 2')).toBeTruthy();
     });
   });
 });

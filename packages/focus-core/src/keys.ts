@@ -22,6 +22,10 @@ export type Key =
   | 'back'
   | 'menu'
   | 'playPause'
+  | 'play'
+  | 'pause'
+  | 'rewind'
+  | 'fastForward'
   | 'channelUp'
   | 'channelDown'
   | (typeof DIGIT_KEYS)[number];

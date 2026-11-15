@@ -28,7 +28,7 @@ class ForwardingWindowCallback(private val wrapped: Window.Callback) : Window.Ca
   }
 
   override fun onWindowFocusChanged(hasFocus: Boolean) {
-    if (!hasFocus) KeyForwarding.emit(mapOf("action" to "blur"))
+    if (!hasFocus) KeyForwarding.emitBlur()
     wrapped.onWindowFocusChanged(hasFocus)
   }
 
