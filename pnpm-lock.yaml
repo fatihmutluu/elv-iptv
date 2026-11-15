@@ -501,6 +501,9 @@ importers:
       '@elv/i18n':
         specifier: workspace:*
         version: link:../i18n
+      '@elv/playback':
+        specifier: workspace:*
+        version: link:../playback
       '@elv/ui-kit':
         specifier: workspace:*
         version: link:../ui-kit

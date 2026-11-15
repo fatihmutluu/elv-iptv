@@ -17,6 +17,7 @@
     "@elv/domain": "workspace:*",
     "@elv/focus-core": "workspace:*",
     "@elv/i18n": "workspace:*",
+    "@elv/playback": "workspace:*",
     "@elv/ui-kit": "workspace:*"
   },
   "peerDependencies": {
