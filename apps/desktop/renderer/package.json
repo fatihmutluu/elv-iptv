@@ -10,6 +10,8 @@
     "typecheck": "tsc --noEmit -p . --pretty false"
   },
   "dependencies": {
+    "@elv/data": "workspace:*",
+    "@elv/domain": "workspace:*",
     "@elv/playback": "workspace:*",
     "@expo/metro-runtime": "~58.0.17",
     "expo": "~58.0.25",
