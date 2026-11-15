@@ -1,7 +1,7 @@
 # 0003 Playback engines behind one PlayerEngine contract
 
 - Status: Accepted
-- Date: 2026-11-13, amended 2026-11-14
+- Date: 2026-11-13, amended 2026-11-14, 2026-11-15
 
 ## Context and problem
 
@@ -34,6 +34,23 @@ One `PlayerEngine` contract: enqueue-and-return commands, an attempt token on ev
   clash). The Apple fallback is VLCKit (TVVLCKit on tvOS, LGPL-2.1).
 - Media3 preloading (`DefaultPreloadManager`) is not used for live channels: it targets VOD feeds and would hold extra
   connections, which one-connection providers punish. A zap loads one media at a time.
+
+### Amendment 2026-11-15 (Apple engine)
+
+- Build integration: `@elv/engine-aether` (`modules/engine-aether`, tvOS, iOS and iPadOS) integrates `AetherEngine`
+  `7.66.1` via React Native's CocoaPods `spm_dependency` paired with our own `[ELV] Embed AetherEngine frameworks` build
+  phase (`with-aether-frameworks.ts` + `embed-frameworks.sh`), which strips headers, `lipo`-thins, inner-signs and
+  copies `.dSYM`s for the nine dynamic `AetherLib*.framework` binaries without modifying `AetherEngine`.
+- Forward-only live TS reader: raw live MPEG-TS (including audio-only radio channels) opens through our own
+  `LiveTsReader` (`IOReader`) and `ConnectionGate` over a per-engine `URLSession`, avoiding `AVIOReader`'s 256 KiB
+  initial read stall, cancelling superseded stream sockets immediately with zero provider overlap, and routing audio-only
+  TS to `AetherEngine`'s libavcodec `AudioPlaybackHost`.
+- Licence duties (`#98` before shipping `0.1` builds): in-app third-party notices must publish the exact `AetherEngine`
+  tag (`7.66.1`), its LGPL-3.0 + app-store/DRM exception text and any modifications (none in `0.1`), keep the nine
+  `AetherLib*.framework` FFmpeg/codec libraries dynamic with their LGPL notice and source link, and include `libdovi`'s
+  permissive notice alongside `dav1d`/`zimg`/`zvbi`.
+- Fallback rule: `VLCKit` (`TVVLCKit` / `MobileVLCKit`, LGPL-2.1) remains the unlinked Apple fallback and is never
+  co-linked into the same binary as `AetherEngine`.
 
 ### Consequences
 

@@ -202,17 +202,37 @@ Rungs, each bounded and visible as a status the OSD can show:
 - Clock: anchors use `SystemClock.uptimeMillis`; the TypeScript side maps them to `performance.now()` with a synchronous
   `uptimeMs()` call, the same pattern as `@elv/remote-keys`.
 
-### 6.2 Apple TV (then iOS): `modules/engine-aether`, second phase
-- Same contract and view shape, implemented with AetherEngine pinned to an exact tag, optional components off, FFmpeg
-  dynamic, and `AetherPlayerView` with hit-testing disabled so remote focus stays on React Native views.
-- First a build spike in CI: build the tvOS app with the pinned AetherEngine using the Xcode that the `tvos` job uses
-  (26.4.1). If it does not build, try in this order: the newest AetherEngine tag that builds with Swift 6.2/6.3; the
-  `tvos` job on Xcode 27 if Expo SDK 58 builds with it; TVVLCKit 3.x (LGPL-2.1) as the engine. The outcome is
-  recorded in §10 and in ADR 0003.
-- Verified in CI only (no Mac on the development PC): the report-only `tvos-gate` job runs the player gate on the Apple
-  TV simulator against the simulator streams.
-- Phase 2 gets its own plan after phase 1 (playback core and Android) is merged and covers tvOS and iOS/iPadOS (the
-  owner tests 0.1 on an iPhone); #7 stays open until both are done.
+### 6.2 Apple TV, iPhone and iPad: `modules/engine-aether`, second phase
+- Same contract and view shape (`createAetherEngine`, `AetherSurface`, `aetherEngineVersion`) across tvOS, iOS and iPadOS,
+  implemented with `AetherEngine` pinned to exact tag `7.66.1`, optional traits off, the nine LGPL `AetherLib*.framework`
+  binaries kept dynamic, and `AetherPlayerView` (`isUserInteractionEnabled = false`) behind a native black zap shutter
+  (`AetherSurfaceView`) so TV remote focus and touch overlays stay on React Native views.
+- Module layout: `ios/Core/` (`ElvAetherCore`, importing `Foundation` only and verified via `swift test` on macOS) holds
+  `EngineCore`, `LiveTsReader`, `ByteFifo`, `ConnectionGate`, `ResponseSniffing`, `MediaPlan`, `ErrorMapping`, `Redaction`
+  and `StreamHttp`; `ios/Engine/` holds `EngineObject` (locked epoch + token fencing between JSI and `@MainActor`),
+  `EngineMainDriver`, `AetherBackend`, `AetherSurfaceView`, `URLSessionTransport` and process-wide `IdleTimer`.
+- Build plumbing: `ElvEngineAether.podspec` pulls `AetherEngine` `7.66.1` via React Native's `spm_dependency`, which links
+  the Swift package into the static module pod without embedding its dynamic binary targets. `with-aether-frameworks.ts`
+  (plus a Podfile `post_integrate` hook keeping the phase after `[CP] Embed Pods Frameworks`) installs `[ELV] Embed
+  AetherEngine frameworks` (`embed-frameworks.sh`), which strips `Headers`/`PrivateHeaders`/`Modules`, `lipo`-thins to
+  `ARCHS` (`EXCLUDED_ARCHS[sdk=appletvsimulator*] = x86_64`), signs each inner framework before Xcode signs the outer
+  `.app`, copies `AetherEngine_AetherEngine.bundle`, and copies `tvos-arm64`/`ios-arm64` `.dSYM`s into `.xcarchive`s;
+  `scripts/check-build.sh` enforces these invariants on the generated project, `.app` and `.xcarchive`.
+- Forward-only live TS reader: `.liveTs` opens through our `LiveTsReader` (`IOReader`, `seek == -1`,
+  `discImageProbeEnabled = false`) over one ephemeral `URLSession` per engine (`httpMaximumConnectionsPerHost = 1`,
+  `Connection: close`, no cache, 10 s request timeout, origin-scoped redirect header stripping) rather than AetherEngine's
+  built-in URL source (whose `AVIOReader` blocks until its first 256 KiB fills, keeps superseded sockets open across zaps,
+  and routes audio-only URLs to bare `AVPlayer`, failing on MPEG-TS with `-11850`). `ConnectionGate` waits up to 1,000 ms
+  for older generations to close plus a 25 ms post-close CFNetwork socket-teardown settle window so one-connection
+  providers see zero overlap. `LiveTsReader` sniffs status and up to 1,024 bytes (`classifyProgressive`: non-2xx -> `http-*`,
+  HTML/JSON/`text/*` -> `connection-limit`, mpegurl/`#EXTM3U` -> closes the GET and reloads as HLS in the same serial,
+  TS sync -> `.custom(reader, formatHint: "mpegts")` fed by partial-read `ByteFifo` with > 8 MiB / < 4 MiB backpressure
+  and one reconnect after a mid-stream drop) and routes audio-only TS to AetherEngine's libavcodec `AudioPlaybackHost`.
+- Verification and devices: verified on a local Mac against `Apple TV 4K (3rd generation)`, `iPhone 17 Pro` and
+  `iPad Pro 11-inch (M4)` simulators (baselines `docs/learned/gates/player-tvos-sim.json` and
+  `docs/learned/gates/player-ios-sim.json`), in CI via the report-only `tvos-gate` job in `native.yml`, and prepared for
+  physical-device sideloading via unsigned `generic/platform=tvOS` and `generic/platform=iOS` archives plus
+  `apps/tv-mobile/APPLE-DEVICE.md`.
 
 ### 6.3 Player view and OSD in the app
 - `apps/tv-mobile` wires the engine module, the service and the stream resolver. The OSD is a React Native layer that is
@@ -229,28 +249,40 @@ Rungs, each bounded and visible as a status the OSD can show:
 - Metric spans: `ttffColdMs` is the first `tune()` after the engine was created to its `firstFrame` (one value per run,
   the app process fresh). `ttffWarmMs` is `tune()` to `firstFrame` for every later tune. `zapMs` is the driver's key
   dispatch time to the new channel's `firstFrame`, so it includes resolving the URL and closing the old media.
-- `pnpm gate player [--avd] [--build] [--runs 3] [--baseline] [--budgets warn|fail]`: starts the simulator (FFmpeg
-  required), runs the gate, reads `/_sim/requests` to compute connection overlap per account (must be 0), compares with
-  `docs/learned/gates/player-android-tv.json`.
-- Budgets (§6.2): cold < 2.0 s, warm p50 < 1.0 s, zap p95 ≤ 2.0 s, one surface creation per run, no stale event applied,
-  and zero 509 or limit responses from the simulator on the one-connection `demo` account during the zaps (the provider's
-  own view of overlap; only the answer a request's own `?fault=` forces is excluded). `overlapMs` (TS stream requests
-  of one account, whatever their answer, whose lifetimes overlap in the simulator log; the worst run) is reported and
-  warned above 0; the simulator sees a close slightly after the app sends it, so it is not a hard budget. HLS segment
-  requests carry no account in the simulator log and are excluded. The runner reads the log after stopping the app,
-  so requests still open at the end are logged too. A time one run did not measure is warned about.
-- Fault runs (URLs built by the gate with `?fault=`): `drop@5` passes when playback is `playing` again within 10 s of the
-  first drop without user action (the run ends there; the simulator would drop again); `status=404` passes when the
-  service reaches `failed(http-404)` within 10 s; `status=509` passes when the service enters `limited` within 2 s and
-  its next load waits for the backoff (the run ends after the second backoff). Media3 reconnects a dropped live TS
-  request on its own, so on the device `drop@5` usually recovers at L0 (a short stall, no rung): a stall of the current
-  attempt that ends while the service still shows `playing` counts as recovered, and the simulator log must show the
-  reconnect within 10 s of the drop. `slow-start=3` (added in the final review) holds the first answer back 3 s and
-  zaps away after 800 ms: it passes when the zap shows its frame and `demo` got no limit answer, so the slow request
-  was closed before the next channel's opened (overlap warns).
-- CI: phase 1 runs the player gate locally only (`docs/learned/gates/player-android-tv.json`); a report-only CI job is
-  added once the local gate is stable (it needs FFmpeg on the runner and a decision about the emulator's `-noaudio`).
-  The tvOS simulator run is phase 2.
+- `pnpm gate player [--target android-tv|tvos|ios] [--avd] [--build] [--app <.app>] [--device <name>] [--stream ts|hls|vod] [--burst <s>] [--soak <min>] [--stress] [--runs 3] [--faults] [--baseline] [--budgets warn|fail]`:
+  starts the simulator (FFmpeg required), runs the gate, reads `/_sim/requests` to compute connection overlap per account
+  (must be 0), and compares with `docs/learned/gates/player-android-tv.json`, `player-tvos-sim.json` or
+  `player-ios-sim.json`. `pnpm gate contract --target tvos|ios --app <.app>` runs the shared `ENGINE_CONTRACT_CASES`
+  suite on `elviptv://gate/contract`.
+- Budgets (§6.2) and Apple live TS profiles: `--burst <s>` (0-30 s, via FFmpeg `-readrate 1 -readrate_initial_burst <s>`)
+  models real providers' initial GOP/preroll burst. Android and `--burst > 0` Apple runs (`--burst 8` for baselines and
+  CI) enforce cold < 2.0 s, warm p50 < 1.0 s, zap p95 ≤ 2.0 s; unbursted `--burst 0` Apple real-time TS enforces cold
+  < 4.0 s, warm p50 < 3.0 s, zap p95 ≤ 4.0 s; every zap run requires one surface creation per run, no stale event
+  applied, and zero 509 or limit responses from the simulator on the one-connection `demo` account during the zaps (the
+  provider's own view of overlap; only the answer a request's own `?fault=` forces is excluded). `overlapMs` (TS stream
+  requests of one account, whatever their answer, whose lifetimes overlap in the simulator log; the worst run) is
+  reported and warned above 0; the simulator sees a close slightly after the app sends it, so it is not a hard budget.
+  HLS segment requests carry no account in the simulator log and are excluded. The runner reads the log after stopping
+  the app, so requests still open at the end are logged too. A time one run did not measure is warned about.
+- Soak and stress modes: `--soak <min>` holds `channels[0]` without zaps and requires 0 failed tunes, 0 stalls, 0
+  recovery rungs, 0 crashes, memory growth ≤ 100 MB (warning above 32 MB), and media position advancing within 2,000 ms
+  of `playedMs` on live streams or reaching `ended` within 2,000 ms of `durationMs` on VOD movies. `--stress` runs
+  `3 x 200` zaps at `5/s` and judges counters only (`final: 'playing'`, 0 failures, 0 stale events, 1 surface, 0 limit
+  responses, 0 crashes).
+- Fault runs (URLs built by the gate with `?fault=`): `drop@5` (`drop5`) passes when playback is `playing` again within
+  10 s of the first drop without user action (`rate = 0.05` when `burst > 0` so playback reaches the post-burst drop);
+  `status=404` (`404`) and `silent` pass when the service reaches `failed` within 10 s (Apple runs `notice` and `silent`
+  alongside the 5 shared faults); `status=509` (`509`) and `notice` pass when the service enters `limited` within 2 s and
+  its next load waits for the backoff (the run ends after the second backoff). Media3 and `LiveTsReader` reconnect a
+  dropped live TS request on their own, so on the device `drop@5` usually recovers at L0 (a short stall, no rung): a
+  stall of the current attempt that ends while the service still shows `playing` counts as recovered, and the simulator
+  log must show the reconnect within 10 s of the drop. `stall` (`stall30s@2s`) passes when the service recovers and opens
+  a replacement request within `10 s + burstSec` with 0 limit responses. `slow-start=3` (`slowstart`, added in the final
+  review) holds the first answer back 3 s and zaps away after 800 ms: it passes when the zap shows its frame and `demo`
+  got no limit answer, so the slow request was closed before the next channel's opened (overlap warns).
+- CI: Android runs the player gate locally (`docs/learned/gates/player-android-tv.json`); `native.yml`'s report-only
+  `tvos-gate` job pre-warms simulator media (`pnpm sim --prepare`) and runs `pnpm gate contract --target tvos` plus
+  `pnpm gate player --target tvos --burst 8 --runs 1 --faults --budgets warn` on `macos-26`.
 - Measured against simulator streams (H.264/AAC TS and HLS), not public test streams: CI and repo tests never depend on
   third-party hosts, and the simulator serves the same recipes every run.
 
@@ -284,9 +316,27 @@ Rungs, each bounded and visible as a status the OSD can show:
   (`PerFrameBenchmark.swift:261`, "unable to type-check this expression in reasonable time", deterministic on arm64
   and x86_64, for tvOS and iOS). 7.66.1 builds for the tvOS simulator, a tvOS device and the iOS simulator, so phase 2
   pins 7.66.1 (step 1 of the §6.2 fallback order) and re-pins only when a newer tag builds with the `tvos` job's
-  Xcode. The Expo integration spike is in progress (private report).
+  Xcode.
 - Final review (2026-11-14): Media3's default HTTP data source cannot abort a request that is still connecting or
   waiting for its status line, so the gate's force-close was a no-op there and the next media opened beside it. The
   engine now uses Media3's OkHttp data source on React Native's OkHttp, cancels superseded calls at once when a new
   media begins and counts a connection until it has really closed (§6.1); the gate gained a `slow-start` fault run
   (§7).
+- Apple phase 2 (2026-11-15):
+  - Expo integration: `spm_dependency` in `ElvEngineAether.podspec` compiles `AetherEngine` `7.66.1` into the static pod
+    without embedding its dynamic `AetherLib*.framework` targets; `with-aether-frameworks.ts` + Podfile `post_integrate`
+    + `embed-frameworks.sh` (`[ELV] Embed AetherEngine frameworks` as the final app phase) handle header stripping,
+    `lipo`-thinning, inner-first signing, resource-bundle copy and archive `.dSYM` placement cleanly for both tvOS and
+    iOS/iPadOS.
+  - 256 KiB initial AVIO read & `LiveTsReader`: AetherEngine's built-in `AVIOReader` waits until its 256 KiB buffer fills
+    (~4 s on a 500 kbit/s real-time TS stream) before probing and leaves cancelled URL sockets open across rapid zaps.
+    Feeding `.liveTs` through our `LiveTsReader` (`IOReader`, 1,024-byte status/body sniff + partial-read `ByteFifo`) and
+    `ConnectionGate` (with a 25 ms post-close settle window so CFNetwork flushes socket `FIN`s before the next `GET`)
+    eliminated both.
+  - Live TS startup values: Candidate C (`liveStartupGraceSeconds = 0`, `liveStartupSingleSegmentMinimumSeconds = 1.0`,
+    default probe limits) won the 4-candidate tuning matrix (`--burst 8` cold/warm p50/zap p95 `289.9 / 137.0 / 218.1 ms`,
+    `--burst 0` `759.3 / 652.2 / 722.6 ms`, 0 stalls across a 10-minute `--burst 0` soak).
+  - Audio-only live MPEG-TS (radio): Path A shipped without fallback hosts — opening audio-only TS through `LiveTsReader`
+    (`IOReader`) bypasses AetherEngine's bare-`AVPlayer` URL audio host (`-11850`) and decodes through its libavcodec
+    `AudioPlaybackHost` (`route=audio`, `audio=decoded`), keeping the video shutter black while emitting `firstFrame` at
+    initial `playing`.
