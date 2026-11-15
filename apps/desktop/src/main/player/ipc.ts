@@ -197,6 +197,12 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       case 'seek':
         engine.seek(command.attempt, command.positionMs);
         break;
+      case 'selectAudioTrack':
+        engine.selectAudioTrack?.(command.attempt, command.id);
+        break;
+      case 'selectSubtitleTrack':
+        engine.selectSubtitleTrack?.(command.attempt, command.id);
+        break;
       case 'fullscreen':
         engine.toggleFullscreen();
         break;

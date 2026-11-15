@@ -24,8 +24,8 @@ const CAPABILITIES: EngineCapabilities = Object.freeze({
   liveSeek: false,
   softwareAudioFallback: false,
   recreate: true,
-  audioTrackSelection: false,
-  subtitleTrackSelection: false,
+  audioTrackSelection: true,
+  subtitleTrackSelection: true,
 });
 
 /** The renderer's `PlayerEngine` for the desktop app, plus the presenter's controls. */
@@ -135,6 +135,10 @@ export async function createDesktopEngine(
     play: (attempt) => send({ name: 'play', attempt }),
     pause: (attempt) => send({ name: 'pause', attempt }),
     seek: (attempt, positionMs) => send({ name: 'seek', attempt, positionMs }),
+    selectAudioTrack: (attempt, trackId) =>
+      send({ name: 'selectAudioTrack', attempt, id: trackId }),
+    selectSubtitleTrack: (attempt, trackId) =>
+      send({ name: 'selectSubtitleTrack', attempt, id: trackId }),
     stop: (attempt) => send({ name: 'stop', attempt }),
     recreate: (attempt) => send({ name: 'recreate', attempt }),
     toggleFullscreen: () => send({ name: 'fullscreen' }),

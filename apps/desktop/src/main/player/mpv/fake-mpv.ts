@@ -80,6 +80,9 @@ const LEVELS = ['fatal', 'error', 'warn', 'info', 'status', 'v', 'debug', 'trace
 /** Per-file properties mpv resets when the next file starts. */
 const PER_FILE: ReadonlyArray<[string, unknown]> = [
   ['vid', 'auto'],
+  ['aid', 'auto'],
+  ['sid', 'auto'],
+  ['track-list', undefined],
   ['video-params', undefined],
   ['time-pos', undefined],
   ['duration', undefined],
@@ -332,6 +335,8 @@ export function createFakeMpv(opts: {
         ['core-idle', true],
         ['speed', 1],
         ['vid', 'auto'],
+        ['aid', 'auto'],
+        ['sid', 'auto'],
       ]),
       nextEntryId: 0,
       playlist: [],

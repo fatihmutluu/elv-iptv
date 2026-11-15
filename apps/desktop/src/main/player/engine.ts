@@ -11,6 +11,7 @@ import { createDeriver, type Deriver } from './mpv/derive.ts';
 import { createEntryTable, type EntryTable } from './mpv/entries.ts';
 import { headerFields, loadfileCommand } from './mpv/options.ts';
 import type { MpvProcess } from './mpv/process.ts';
+import { createTrackTracker } from './mpv/tracks.ts';
 import type { VideoPresenter } from './presenter/types.ts';
 
 /** How `load` replaces the media: mpv's `loadfile replace`, or `stop`, the old entry's `end-file`, then `loadfile`. */
@@ -64,7 +65,11 @@ const OBSERVED = [
   'demuxer-cache-state',
   'video-params',
   'vid',
+  'track-list',
+  'aid',
+  'sid',
 ] as const;
+const TRACK_PROPS: ReadonlySet<string> = new Set(['track-list', 'aid', 'sid']);
 const OBSERVED_NAMES: ReadonlySet<string> = new Set(OBSERVED);
 /** mpv logs a provider notice's `Mime-type` line only at `v`; `keepLog` drops the rest of that chatter. */
 const LOG_LEVEL = 'v';
@@ -155,6 +160,7 @@ const withStart = (request: MediaRequest, startMs: number | undefined): MediaReq
 export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   const { presenter, timers } = deps;
   const listeners = new Set<(event: EngineEvent) => void>();
+  const tracks = createTrackTracker();
   const queue: Op[] = [];
   let pumping = false;
   let released = false;
@@ -280,6 +286,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     L.entries.started(entryId);
     const current = L.entries.current();
     if (current?.entryId !== entryId) return;
+    tracks.beginMedia(current.token);
     const events = L.deriver.begin(current.token, current.kind);
     // mpv keeps `pause` across files and reports no change for the new one.
     if (L.paused) events.push(...L.deriver.property('pause', true));
@@ -292,6 +299,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     const active = isActive(L, entryId);
     const isCurrent = entryId !== undefined && L.entries.current()?.entryId === entryId;
     const events = isCurrent ? L.deriver.fileEvent(e) : [];
+    if (isCurrent) tracks.onRetryOrRecreate();
     if (entryId !== undefined) L.entries.ended(entryId);
     if (entryId !== undefined && L.opening?.slot.entryId === entryId) finishOpening(L);
     for (const waiter of [...L.endWaiters]) if (waiter.id === entryId) waiter.done(true);
@@ -318,6 +326,9 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
         if (L.opening?.started && L.entries.current()?.entryId === L.opening.slot.entryId)
           finishOpening(L);
         fromCurrent(L, L.deriver.fileEvent(e));
+        if (isActive(L, L.entries.current()?.entryId)) {
+          for (const cmd of tracks.reconcileCommands()) void send(L, cmd);
+        }
         return;
       case 'playback-restart':
         fromCurrent(L, L.deriver.fileEvent(e));
@@ -325,6 +336,17 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       case 'property-change': {
         const name = String(e['name']);
         if (name === 'pause') L.paused = e['data'] === true;
+        if (TRACK_PROPS.has(name)) {
+          fromCurrent(L, tracks.property(name, e['data']));
+          if (
+            name === 'track-list' &&
+            L.opening === undefined &&
+            isActive(L, L.entries.current()?.entryId)
+          ) {
+            for (const cmd of tracks.reconcileCommands()) void send(L, cmd);
+          }
+          return;
+        }
         if (OBSERVED_NAMES.has(name)) fromCurrent(L, L.deriver.property(name, e['data']));
         return;
       }
@@ -574,6 +596,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   /** Port contract: a newer token tags the current media's later events, wherever its entry is. */
   const adopt = (token: AttemptToken): void => {
     note(token);
+    tracks.adopt(token);
     if (!media || token <= media.token) return;
     media.token = token;
     const L = live;
@@ -636,11 +659,13 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     },
     load(cmd) {
       if (released) return;
+      tracks.onLoad(cmd.options);
       const { url, headers, kind } = cmd;
       startMedia(cmd.attempt, withStart({ url, headers, kind }, cmd.startMs));
     },
     retry(attempt) {
       if (released || !media) return;
+      tracks.onRetryOrRecreate();
       const { request, lastPositionMs } = media;
       // live reconnects at the edge; VOD resumes where the last anchor saw it
       const startMs = request.kind === 'vod' ? (lastPositionMs ?? request.startMs) : undefined;
@@ -649,9 +674,22 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     play: (attempt) => command(attempt, ['set', 'pause', 'no']),
     pause: (attempt) => command(attempt, ['set', 'pause', 'yes']),
     seek: (attempt, positionMs) => command(attempt, ['seek', positionMs / 1000, 'absolute']),
+    selectAudioTrack(attempt, id) {
+      if (released) return;
+      adopt(attempt);
+      const cmd = tracks.selectAudio(id);
+      if (cmd) enqueue({ type: 'command', command: cmd });
+    },
+    selectSubtitleTrack(attempt, id) {
+      if (released) return;
+      adopt(attempt);
+      const cmd = tracks.selectSubtitle(id);
+      if (cmd) enqueue({ type: 'command', command: cmd });
+    },
     stop(attempt) {
       if (released) return;
       adopt(attempt);
+      tracks.onStop();
       media = undefined;
       enqueue({ type: 'stop' });
       wake();
@@ -659,11 +697,13 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     recreate(attempt) {
       if (released) return;
       adopt(attempt);
+      tracks.onRetryOrRecreate();
       enqueue({ type: 'recreate' });
     },
     release() {
       if (released) return;
       released = true;
+      tracks.onStop();
       queue.length = 0;
       listeners.clear();
       timers.clearTimeout(tickHandle);
