@@ -26,6 +26,8 @@ const config: KnipConfig = {
       ignoreBinaries: ['tasklist'],
     },
     'apps/desktop/renderer': {
+      // The catalog barrel is consumed by the menu screens in a later task.
+      entry: ['src/catalog/index.ts'],
       // Optional Expo packages inferred from app.json.
       ignoreDependencies: ['expo-updates'],
     },

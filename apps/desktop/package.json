@@ -12,7 +12,7 @@
   },
   "main": "dist/main/main.js",
   "scripts": {
-    "bundle": "esbuild src/main/main.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/main/main.js --log-level=warning && esbuild src/preload/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/preload/preload.js --log-level=warning",
+    "bundle": "esbuild src/main/main.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/main/main.js --log-level=warning && esbuild src/preload/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/preload/preload.js --log-level=warning && esbuild src/utility/catalog-worker.ts --bundle --platform=node --format=cjs --external:electron --external:better-sqlite3 --outfile=dist/utility/catalog-worker.js --log-level=warning",
     "bundle:e2e": "esbuild e2e/presenter-probe.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/e2e/presenter-probe.js --log-level=warning",
     "prepare:app": "pnpm -w mpv fetch && pnpm --filter @elv/desktop-renderer --silent run export && pnpm run bundle",
     "dev": "pnpm run prepare:app && electron .",

@@ -10,7 +10,7 @@ export interface UtilityChildLike<TPort = unknown> {
 }
 
 /** Subset of Electron's `MessageChannelMain` returned by `createChannel`. */
-export interface PortPairLike<TPort = unknown> {
+interface PortPairLike<TPort = unknown> {
   readonly port1: TPort;
   readonly port2: TPort;
 }
