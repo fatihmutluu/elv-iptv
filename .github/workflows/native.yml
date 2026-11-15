@@ -73,6 +73,8 @@ jobs:
               - 'apps/desktop/**'
               - 'modules/**'
               - 'packages/**'
+              - 'tools/src/mpv/**'
+              - 'tools/bin/mpv.ts'
               - 'tools/src/prebuild-stamp.ts'
               - 'tools/src/env.ts'
               - 'tools/src/release-hygiene.ts'
@@ -520,6 +522,13 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
         id: setup
+      - name: Restore mpv runtime cache
+        id: mpv-cache
+        if: runner.os != 'Linux'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/mpv
+          key: mpv-${{ runner.os }}-${{ hashFiles('apps/desktop/mpv-runtime.lock.json') }}
       - name: Build the desktop app and installers
         run: pnpm --filter @elv/desktop build
       - name: Verify desktop app.asar release hygiene
@@ -555,6 +564,12 @@ jobs:
             apps/desktop/release/*.AppImage
           if-no-files-found: error
           retention-days: 7
+      - name: Save mpv runtime cache
+        if: github.ref == 'refs/heads/main' && runner.os != 'Linux' && steps.mpv-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/mpv
+          key: ${{ steps.mpv-cache.outputs.cache-primary-key }}
       - name: Save the pnpm store
         if: github.ref == 'refs/heads/main' && steps.setup.outputs.cache-hit != 'true' && matrix.os == 'windows-2025'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

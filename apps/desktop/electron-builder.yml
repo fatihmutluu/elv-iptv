@@ -19,6 +19,11 @@ electronFuses:
   onlyLoadAppFromAsar: true
 
 win:
+  extraResources:
+    - from: resources/mpv/win32-x64
+      to: mpv
+    - from: resources/mpv-input.conf
+      to: mpv-input.conf
   target:
     - nsis
 nsis:
@@ -36,6 +41,11 @@ appx:
 
 mac:
   category: public.app-category.entertainment
+  extraResources:
+    - from: resources/mpv/darwin-arm64
+      to: mpv
+    - from: resources/mpv-input.conf
+      to: mpv-input.conf
   target:
     - dmg
 dmg:
