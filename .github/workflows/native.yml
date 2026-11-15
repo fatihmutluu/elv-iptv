@@ -513,8 +513,10 @@ jobs:
       matrix:
         os: [windows-2025, macos-26, ubuntu-24.04]
     env:
-      # Unsigned builds: electron-builder must not look for a signing identity.
+      # Unsigned builds: electron-builder must not look for a signing identity,
+      # while macOS still needs its ad-hoc (`-`) signature applied after fuse flipping on PRs.
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      CSC_FOR_PULL_REQUEST: "true"
       # `gh run download` on macOS; the token is read-only.
       GH_TOKEN: ${{ github.token }}
     steps:
