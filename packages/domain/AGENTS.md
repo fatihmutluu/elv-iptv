@@ -21,6 +21,7 @@ Models, ids, Result/errors, clock, logging and the ports (storage, sql, http, ke
   inside `transaction(fn)` use only the `tx` it receives (awaiting the outer driver there never resolves); `tx.batch`
   joins the open transaction; transactions do not nest. `SecretStore` keys use only letters, digits, `.`, `-`, `_`.
   `Scheduler.yieldNow()` must yield a macrotask (timer, `setImmediate`, frame), never just a resolved promise.
+- `isAsyncIterable`, `openAsyncIterator` in `async-iterable.ts`: resolve `[Symbol.asyncIterator]` first and fall back to Babel's `'@@asyncIterator'` method (with receiver preserved) when `Symbol.asyncIterator` is `undefined` in Hermes.
 - `SourceKind`, `ContentKind`, `TransportSettings`, `transportHeaders` in `source.ts`.
 - `normalizeStreamUrl`, `xtreamKey`, `m3uKey` in `content-key.ts`: credential-free catalog identity that keeps distinct streams apart (ADR 0011).
 - The tsconfig adds the `DOM` lib for `AbortController`, timers and `Response` types only; no runtime DOM use.

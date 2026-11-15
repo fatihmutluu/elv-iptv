@@ -1,3 +1,4 @@
+import { isAsyncIterable, openAsyncIterator } from './async-iterable';
 import { type ElvError, elvError, err, ok, type Result } from './result';
 
 /** A response whose body streams in chunks. */
@@ -62,9 +63,15 @@ interface ChunkSource {
   release(): void;
 }
 
+function asyncIteratorKey(): typeof Symbol.asyncIterator {
+  return typeof Symbol.asyncIterator === 'symbol'
+    ? Symbol.asyncIterator
+    : ('@@asyncIterator' as unknown as typeof Symbol.asyncIterator);
+}
+
 function openSource(body: NonNullable<FetchBody>): ChunkSource {
-  if (Symbol.asyncIterator in body) {
-    const it = body[Symbol.asyncIterator]();
+  if (isAsyncIterable(body)) {
+    const it = openAsyncIterator(body);
     return {
       next: async () => {
         const r = await it.next();
@@ -124,7 +131,7 @@ function streamBody(
   if (body === null || body === undefined) {
     dispose();
     return {
-      [Symbol.asyncIterator]: () => ({
+      [asyncIteratorKey()]: () => ({
         next: async () => ({ done: true, value: undefined }),
         return: async () => ({ done: true, value: undefined }),
       }),
@@ -165,7 +172,7 @@ function streamBody(
   };
 
   const iterator: AsyncIterableIterator<Uint8Array> = {
-    [Symbol.asyncIterator]() {
+    [asyncIteratorKey()]() {
       return iterator;
     },
     async next(): Promise<IteratorResult<Uint8Array>> {

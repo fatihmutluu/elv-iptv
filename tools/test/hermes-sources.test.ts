@@ -24,7 +24,7 @@ describe('Hermes source scanner verification (#37)', () => {
     if (hermesCli !== undefined) {
       expect(report.executed).toBe(true);
       expect(report.result?.runtime).toBe('hermes');
-      expect(report.result?.polyfillsNeeded).toEqual(['Symbol.asyncIterator']);
+      expect(report.result?.polyfillsNeeded).toEqual([]);
       expect(report.result?.assertionsPassed).toBeGreaterThanOrEqual(10);
       expect(report.result?.m3u.entries).toBe(110);
       expect(report.result?.m3u.mbPerSec).toBeGreaterThan(0);

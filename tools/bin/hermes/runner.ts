@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { exec } from '../../src/exec.ts';
@@ -96,11 +96,9 @@ export async function runHermesSources(options: RunHermesOptions): Promise<RunHe
     const entryPath = join(options.root, 'tools', 'bin', 'hermes', 'entry.ts');
     const es2022Path = join(scratch, 'sources-es2022.js');
     const es2017Path = join(scratch, 'sources-es2017.js');
+    const transformPath = join(scratch, 'transform.cjs');
     const bundlePath = join(scratch, 'sources-bundle.js');
     const bytecodePath = join(scratch, 'sources-bundle.hbc');
-
-    const asyncIterPolyfill =
-      'if(typeof Symbol==="function"&&!Symbol.asyncIterator){Object.defineProperty(Symbol,"asyncIterator",{value:Symbol.for("Symbol.asyncIterator")});globalThis.__ELV_POLYFILLED_ASYNC_ITERATOR__=true;}';
 
     for (const [target, out] of [
       ['es2022', es2022Path],
@@ -119,7 +117,6 @@ export async function runHermesSources(options: RunHermesOptions): Promise<RunHe
           `--target=${target}`,
           '--platform=neutral',
           '--main-fields=module,main',
-          `--banner:js=${asyncIterPolyfill}`,
           `--define:__ELV_BENCHMARK_PROFILE__="${options.benchmark}"`,
           `--outfile=${out}`,
         ],
@@ -143,39 +140,33 @@ export async function runHermesSources(options: RunHermesOptions): Promise<RunHe
       return { compiledBytes, executed: false };
     }
 
-    const transformScript = [
-      "const fs = require('node:fs');",
-      "const { createRequire } = require('node:module');",
-      "const preset = require.resolve('babel-preset-expo');",
-      "const babel = createRequire(preset)('@babel/core');",
-      'const input = process.argv[1];',
-      'const output = process.argv[2];',
-      'const banner = process.argv[3];',
-      'const code = fs.readFileSync(input, "utf8");',
-      'const out = babel.transformSync(code, {',
-      '  filename: input,',
-      '  babelrc: false,',
-      '  configFile: false,',
-      '  compact: false,',
-      "  caller: { name: 'metro', bundler: 'metro', platform: 'android' },",
-      "  presets: [[preset, { unstable_transformProfile: 'default', enableBabelRuntime: false, modules: false }]],",
-      '});',
-      'fs.writeFileSync(output, banner + "\\n" + out.code, "utf8");',
-    ].join(' ');
+    writeFileSync(
+      transformPath,
+      [
+        "'use strict';",
+        "const fs = require('node:fs');",
+        "const { createRequire } = require('node:module');",
+        "const preset = require.resolve('babel-preset-expo', { paths: [process.cwd()] });",
+        "const babel = createRequire(preset)('@babel/core');",
+        'const input = process.argv[2];',
+        'const output = process.argv[3];',
+        "const code = fs.readFileSync(input, 'utf8');",
+        'const out = babel.transformSync(code, {',
+        '  filename: input,',
+        '  babelrc: false,',
+        '  configFile: false,',
+        '  compact: false,',
+        "  caller: { name: 'metro', bundler: 'metro', platform: 'android' },",
+        "  presets: [[preset, { unstable_transformProfile: 'default', enableBabelRuntime: false, modules: false }]],",
+        '});',
+        "fs.writeFileSync(output, out.code, 'utf8');",
+      ].join('\n'),
+      'utf8',
+    );
 
     const lowered = await exec(
       'pnpm',
-      [
-        '--filter',
-        '@elv/ui-kit',
-        'exec',
-        'node',
-        '-e',
-        transformScript,
-        es2022Path,
-        bundlePath,
-        asyncIterPolyfill,
-      ],
+      ['--filter', 'tv-mobile', 'exec', 'node', transformPath, es2022Path, bundlePath],
       { cwd: options.root, timeoutMs: 60_000 },
     );
     if (!lowered.ok) {

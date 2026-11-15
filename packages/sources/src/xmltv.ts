@@ -1,4 +1,4 @@
-import { elvError, err, ok, type Result } from '@elv/domain';
+import { elvError, err, ok, openAsyncIterator, type Result } from '@elv/domain';
 import { toElvError } from './scan-error';
 import { createStats, MAX_WARNINGS, type ScanStats, warn } from './stats';
 import { ByteBuffer } from './utf8';
@@ -248,7 +248,7 @@ export async function* scanXmltv(
   opts: XmltvOptions = {},
 ): AsyncGenerator<XmltvBatch, Result<void>> {
   const size = Math.max(1, opts.batchSize ?? DEFAULT_BATCH);
-  const it = chunks[Symbol.asyncIterator]();
+  const it = openAsyncIterator(chunks);
   const held: Uint8Array[] = [];
   let heldBytes = 0;
   let ended = false;
@@ -302,7 +302,7 @@ export async function* scanXmltv(
   const input = gzip && opts.decompressor ? opts.decompressor.gunzip(replay()) : replay();
 
   const scanner = new XmltvScanner(size, opts);
-  const reader = input[Symbol.asyncIterator]();
+  const reader = openAsyncIterator(input);
   let exhausted = false;
   try {
     for (;;) {

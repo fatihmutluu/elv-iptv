@@ -1,4 +1,4 @@
-import { type HttpClient, ok } from '@elv/domain';
+import { type HttpClient, isAsyncIterable, ok, openAsyncIterator } from '@elv/domain';
 import { createXtreamClient, scanM3u, scanXmltv } from '@elv/sources';
 import { ACCOUNTS, type Account } from '../../src/sim/accounts.ts';
 import { createCatalog, type ProfileName } from '../../src/sim/catalog.ts';
@@ -176,7 +176,6 @@ async function verifyXtreamCorrectness(): Promise<void> {
       }
       return ok({
         status: 200,
-        url,
         headers: {},
         body: sliceEvery(encodeUtf8(JSON.stringify(payload)), 7),
       });
@@ -282,10 +281,15 @@ async function main(): Promise<void> {
     asyncIterator: typeof Symbol.asyncIterator,
   };
   const polyfillsNeeded: string[] = [];
-  if (g.__ELV_POLYFILLED_ASYNC_ITERATOR__ === true) {
-    polyfillsNeeded.push('Symbol.asyncIterator');
-  }
   if (typeof g.atob !== 'function') polyfillsNeeded.push('atob');
+  assert(polyfillsNeeded.length === 0, `unexpected polyfills needed: ${polyfillsNeeded.join(',')}`);
+
+  const genSample = sliceEvery(encodeUtf8('ok'), 1);
+  assert(isAsyncIterable(genSample), 'isAsyncIterable recognizes Babel AsyncGenerator on Hermes');
+  const rawIt = openAsyncIterator(genSample);
+  const firstStep = await rawIt.next();
+  assert(!firstStep.done && firstStep.value.byteLength === 1, 'openAsyncIterator reads chunk');
+  await rawIt.return?.();
 
   await verifyM3uCorrectness();
   await verifyXmltvCorrectness();
