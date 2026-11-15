@@ -1,5 +1,5 @@
+import { DEVICE_MAX_BODY_BYTES } from '@elv/data';
 import { describe, expect, it } from 'vitest';
-import { DEVICE_MAX_BODY_BYTES } from './catalog';
 import { addAccount, env, http, must, useSim } from './catalog-test-env';
 
 const sim = useSim();

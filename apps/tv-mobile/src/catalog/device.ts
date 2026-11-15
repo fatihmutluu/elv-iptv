@@ -1,4 +1,10 @@
-import { openCatalog } from '@elv/data';
+import {
+  type CatalogService,
+  createCatalogService,
+  type ManifestStore,
+  openCatalog,
+  reconcileManifest,
+} from '@elv/data';
 import type { ElvError, SqlDriver } from '@elv/domain';
 import { Platform } from 'react-native';
 import {
@@ -9,8 +15,6 @@ import {
   createSettingsStore,
   databaseLocation,
 } from '../storage';
-import { type CatalogService, createCatalogService } from './catalog';
-import { type ManifestStore, reconcileManifest } from './manifest';
 
 /**
  * File name of the catalog database: in `Library/Caches` on Apple platforms (tvOS hardware gives apps only purgeable
@@ -58,7 +62,10 @@ async function reconcile(db: SqlDriver, manifest: ManifestStore): Promise<void> 
 async function open(): Promise<CatalogService> {
   const db = await createOpSqliteDriver(DATABASE_NAME, databaseLocation(Platform.OS));
   const opened = await openCatalog(db);
-  if (!opened.ok) throw new CatalogOpenError(opened.error);
+  if (!opened.ok) {
+    await db.close?.();
+    throw new CatalogOpenError(opened.error);
+  }
   const manifest = Platform.OS === 'ios' ? createSettingsStore(MANIFEST_KEY) : undefined;
   if (manifest !== undefined) await reconcile(db, manifest);
   return createCatalogService({

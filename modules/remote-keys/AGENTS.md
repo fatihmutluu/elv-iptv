@@ -17,19 +17,18 @@ Spec: `docs/superpowers/specs/2026-11-14-android-remote-keys-design.md`.
 
 ## Capture rules (spec 6.1)
 - `ForwardingWindowCallback` wraps `window.callback` of the current activity, on the UI thread, on
-  `OnActivityEntersForeground` and when JS starts observing `onKey` (that hook runs on the JS thread); wrapping is
-  idempotent and never unwrapped. It delegates every `Window.Callback` method, including the Java default ones, with
-  nullable reference parameters where the SDK allows. Main window only: dialogs and other windows are not seen.
+  `OnActivityEntersForeground` and when JS starts observing `onKey` (that hook runs on the JS thread); a UI-thread
+  `WeakHashMap<Window, Boolean>` prevents double-wrapping without retaining the callback/activity strongly.
+  It delegates every `Window.Callback` method, including Java default ones, with nullable reference parameters where allowed.
 - `KeyForwarding.action`: forward `ACTION_DOWN` only with `repeatCount == 0`, every `ACTION_UP` (with `canceled` from
   `FLAG_CANCELED`); drop `ACTION_MULTIPLE`, `FLAG_FALLBACK` and `FLAG_SOFT_KEYBOARD` (IME-injected) events. Window
-  focus loss sends `blur`.
+  focus loss (`onWindowFocusChanged(false)`) and `OnActivityEntersBackground` (TV standby without lockscreen) send `blur`.
 - Never consume a key: `dispatchKeyEvent` always returns the wrapped callback's result. While a native text field has
-  focus the raw path still forwards hardware D-pad keys; a text-entry mode that suspends the key source is issue #48.
+  focus, `@elv/ui-kit` suspends non-`back` keys on the JS side (`TvTextInput` / `TextEntryBoundary`, issue #48).
 - Raw Back depends on Android dispatching `KEYCODE_BACK` to the window; enabling `enableOnBackInvokedCallback`
   (predictive back) on API 33+ would remove Back and long Back from the raw path.
-- Events go to a process-wide sink in `KeyForwarding`, set on `OnStartObserving` and cleared (only if still its own) on
-  `OnStopObserving` / `OnDestroy`, so a JS reload (new module, same window) reattaches. Sink failures never block
-  delegation.
+- Events go to a process-wide `AtomicReference` sink in `KeyForwarding`, set on `OnStartObserving` and cleared via
+  `compareAndSet` on `OnStopObserving` / `OnDestroy`, so a JS reload reattaches cleanly. Sink failures never block delegation.
 
 ## Rules
 - Imports `expo-modules-core` and playback types only; the app wires the module.

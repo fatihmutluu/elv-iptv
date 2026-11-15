@@ -126,26 +126,29 @@ describe('bounded URL variables', () => {
     expect(row[0]?.url_template).toBe('http://tv.example/hls/channel-7/1.m3u8');
   });
 
-  it('stays small for a typical token panel and still templates bare credential paths', async () => {
+  it('stays small for a typical token panel and templates bare or single-host backup paths', async () => {
     const body =
       '#EXTM3U\n' +
       entries('cdn1.example', TOKEN_A, 0, 5000) +
       extinf('Bare', `http://bare.example:8080/${M3U_USER}/${M3U_PASS}/3`) +
-      extinf('Plain', 'http://plain.example/ab/cd/4');
+      extinf('Backup', 'http://backup.example/u9/p9/4') +
+      extinf('Plain', 'http://plain.example/hls/news/index.m3u8');
     const e = await setupM3u(body);
     expect((await importCatalog(e.sourceId, e.deps)).ok).toBe(true);
     expect(urlvars(e).length).toBeLessThan(2048);
-    const row = await e.db.all<{ url_template: string }>(
-      "SELECT url_template FROM live WHERE name IN ('Bare', 'Plain') ORDER BY name",
+    const row = await e.db.all<{ name: string; url_template: string }>(
+      "SELECT name, url_template FROM live WHERE name IN ('Bare', 'Backup', 'Plain') ORDER BY name",
     );
-    expect(row.map((r) => r.url_template)).toEqual([
-      'http://bare.example:8080/{{user}}/{{pass}}/3',
-      'http://plain.example/ab/cd/4',
-    ]);
+    expect(row.find((r) => r.name === 'Bare')?.url_template).not.toContain(M3U_PASS);
+    expect(row.find((r) => r.name === 'Backup')?.url_template).not.toContain('u9');
+    expect(row.find((r) => r.name === 'Backup')?.url_template).not.toContain('p9');
+    expect(row.find((r) => r.name === 'Plain')?.url_template).toBe(
+      'http://plain.example/hls/news/index.m3u8',
+    );
   });
 });
 
-type Shape = 'token' | 'xtream' | 'query';
+type Shape = 'token' | 'xtream' | 'query' | 'bare';
 
 interface Block {
   host: number;
@@ -157,20 +160,54 @@ interface Scenario {
   tokens: string[];
   user: string;
   pass: string;
+  shortUser: string;
+  shortPass: string;
+  logoToken: string;
+  refToken: string;
+  playlistStyle: 'get.php' | 'alias-query' | 'userinfo' | 'plain';
   shapes: [Shape, Shape, Shape, Shape];
   later: Block[];
 }
 
 const enc = encodeURIComponent;
 
-function urlFor(s: Scenario, host: string, shape: Shape, token: string, id: number, pass: string) {
-  if (shape === 'token') return `https://${host}/${token}/strm${id.toString(36)}q`;
-  if (shape === 'xtream') return `http://${host}/live/${enc(s.user)}/${enc(pass)}/${id}.ts`;
-  return `http://${host}/play/${id}.m3u8?username=${enc(s.user)}&${['pass', 'word'].join('')}=${enc(pass)}&token=${token}`;
+function playlistUrlOf(s: Scenario, user: string, pass: string): string {
+  if (s.playlistStyle === 'get.php') return playlistUrlFor(enc(user), enc(pass));
+  if (s.playlistStyle === 'alias-query') {
+    return `https://list.example/m3u/download?user=${enc(user)}&pwd=${enc(pass)}`;
+  }
+  if (s.playlistStyle === 'userinfo') {
+    return `https://${enc(user)}:${enc(pass)}@list.example/playlist.m3u`;
+  }
+  return 'https://list.example/custom-list.m3u';
 }
 
-/** Builds a playlist: a 1,000-entry sample over three hosts (one account each), then later blocks. */
-function playlist(s: Scenario, hosts: string[], tokens: string[], pass: string) {
+function urlFor(
+  s: Scenario,
+  host: string,
+  shape: Shape,
+  token: string,
+  id: number,
+  pass: string,
+  shortPass: string,
+) {
+  const port = id % 7 === 0 ? (shape === 'token' ? ':443' : ':80') : '';
+  if (shape === 'token') return `https://${host}${port}/${token}/strm${id.toString(36)}q`;
+  if (shape === 'xtream') return `http://${host}${port}/live/${enc(s.user)}/${enc(pass)}/${id}.ts`;
+  if (shape === 'bare') return `http://${host}${port}/${s.shortUser}/${shortPass}/${id}.ts`;
+  return `http://${host}${port}/play/${id}.m3u8?username=${enc(s.user)}&${['pass', 'word'].join('')}=${enc(pass)}&token=${token}`;
+}
+
+/** Builds a playlist covering mixed accounts, single-entry backup host, dedicated logo/referer hosts, and all #40 shapes. */
+function playlist(
+  s: Scenario,
+  hosts: string[],
+  tokens: string[],
+  pass: string,
+  shortPass: string,
+  logoToken: string,
+  refToken: string,
+) {
   const urls = new Map<string, string>();
   let body = '#EXTM3U\n';
   let id = 0;
@@ -178,22 +215,36 @@ function playlist(s: Scenario, hosts: string[], tokens: string[], pass: string) 
     const host = hosts[h] as string;
     const token = tokens[account] as string;
     const shape = s.shapes[h] as Shape;
-    const url = urlFor(s, host, shape, token, id, pass);
+    const url = urlFor(s, host, shape, token, id, pass, shortPass);
     const logo =
-      shape === 'token'
-        ? `https://${host}/${token}/logo${id}.png`
-        : `https://img.example/${id}.png`;
+      id % 5 === 0
+        ? `https://logos-dedicated.example/${logoToken}/logo${id}.png`
+        : shape === 'token'
+          ? `https://${host}/${token}/logo${id}.png`
+          : `https://img.example/${id}.png`;
     urls.set(`Ch ${id}`, url);
-    body += extinf(`Ch ${id}`, url, `tvg-logo="${logo}" group-title="G${h}"`);
+    body += `#EXTINF:-1 tvg-logo="${logo}" group-title="G${h}",Ch ${id}\n`;
+    if (id % 9 === 0) {
+      body += `#EXTVLCOPT:http-referrer=https://ref-dedicated.example/${refToken}/embed\n`;
+    }
+    body += `${url}\n`;
     id += 1;
   };
-  for (let i = 0; i < 1000; i += 1) add(i % 3, i % 3);
-  const started = new Set([0, 1, 2]);
-  for (const b of s.later) {
-    const count = started.has(b.host) ? b.count : Math.max(b.count, 50);
-    started.add(b.host);
-    for (let i = 0; i < count; i += 1) add(b.host, b.account);
+  for (let i = 0; i < 600; i += 1) {
+    const h = i % 3;
+    const account = h === 0 ? i % 2 : h;
+    add(h, account);
   }
+  for (const b of s.later) {
+    for (let i = 0; i < b.count; i += 1) add(b.host, b.account);
+  }
+  const singleBackup = `https://single-backup.example/${tokens[3] as string}/s${id}`;
+  urls.set(`Ch ${id}`, singleBackup);
+  body += extinf(`Ch ${id}`, singleBackup, 'group-title="Backup"');
+  id += 1;
+  const singleBare = `http://single-bare.example/${s.shortUser}/${shortPass}/${id}.ts`;
+  urls.set(`Ch ${id}`, singleBare);
+  body += extinf(`Ch ${id}`, singleBare, 'group-title="Backup"');
   return { body, urls };
 }
 
@@ -209,13 +260,18 @@ async function expectClean(e: Env, secrets: string[], urls: Map<string, string>)
 }
 
 describe('no secret reaches a template or key', () => {
-  const shape = fc.constantFrom<Shape>('token', 'xtream', 'query');
+  const shape = fc.constantFrom<Shape>('token', 'xtream', 'query', 'bare');
   const scenario: fc.Arbitrary<Scenario> = fc.record({
     tokens: fc
       .uniqueArray(fc.stringMatching(/^[a-z0-9]{10,14}$/), { minLength: 5, maxLength: 5 })
       .map((list) => list.map((t) => `T${t}`)),
     user: fc.stringMatching(/^[a-z0-9]{3,8}$/).map((u) => `U${u}`),
     pass: fc.stringMatching(/^[a-z0-9@/+ %]{4,10}$/).map((p) => `P${p}`),
+    shortUser: fc.stringMatching(/^[a-z0-9]{3,5}$/).map((u) => `SU${u}`),
+    shortPass: fc.stringMatching(/^[a-z0-9]{3,5}$/).map((p) => `SP${p}`),
+    logoToken: fc.stringMatching(/^[a-z0-9]{10,12}$/).map((t) => `L${t}`),
+    refToken: fc.stringMatching(/^[a-z0-9]{10,12}$/).map((t) => `R${t}`),
+    playlistStyle: fc.constantFrom('get.php', 'alias-query', 'userinfo', 'plain'),
     shapes: fc.tuple(shape, shape, shape, shape),
     later: fc.array(
       fc.record({
@@ -227,25 +283,50 @@ describe('no secret reaches a template or key', () => {
     ),
   });
 
-  it('holds for later accounts, new hosts, host moves and rotated credentials', async () => {
+  it('holds for mixed accounts, single-entry hosts, bare paths, logo/referer hosts and rotated credentials', async () => {
     await fc.assert(
       fc.asyncProperty(scenario, async (s) => {
         const hosts = ['cdn1.example', 'cdn2.example', 'cdn3.example', 'cdn4.example'];
         const tokens = s.tokens.slice(0, 4);
-        const first = playlist(s, hosts, tokens, s.pass);
-        const e = await setupM3u(first.body, {}, playlistUrlFor(enc(s.user), enc(s.pass)));
+        const first = playlist(s, hosts, tokens, s.pass, s.shortPass, s.logoToken, s.refToken);
+        const e = await setupM3u(first.body, {}, playlistUrlOf(s, s.user, s.pass));
         expect((await importCatalog(e.sourceId, e.deps)).ok).toBe(true);
-        const secrets = [...tokens, s.user, s.pass, enc(s.user), enc(s.pass)];
+        const secrets = [
+          ...tokens,
+          s.user,
+          s.pass,
+          enc(s.user),
+          enc(s.pass),
+          s.shortUser,
+          s.shortPass,
+          s.logoToken,
+          s.refToken,
+        ];
         await expectClean(e, secrets, first.urls);
 
         const moved = ['cdn5.example', ...hosts.slice(1)];
         const rotated = [s.tokens[4] as string, ...tokens.slice(1)];
         const newPass = `${s.pass}9z`;
-        const second = playlist(s, moved, rotated, newPass);
+        const newShortPass = `${s.shortPass}9`;
+        const newLogoToken = `${s.logoToken}9`;
+        const newRefToken = `${s.refToken}9`;
+        const second = playlist(
+          s,
+          moved,
+          rotated,
+          newPass,
+          newShortPass,
+          newLogoToken,
+          newRefToken,
+        );
         e.state.body = second.body;
-        await e.secrets.set('source.s1.playlist', playlistUrlFor(enc(s.user), enc(newPass)));
+        await e.secrets.set('source.s1.playlist', playlistUrlOf(s, s.user, newPass));
         expect((await importCatalog(e.sourceId, e.deps)).ok).toBe(true);
-        await expectClean(e, [...secrets, ...rotated, newPass, enc(newPass)], second.urls);
+        await expectClean(
+          e,
+          [...secrets, ...rotated, newPass, enc(newPass), newShortPass, newLogoToken, newRefToken],
+          second.urls,
+        );
         e.close();
       }),
       { numRuns: 12 },

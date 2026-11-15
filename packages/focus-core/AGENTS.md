@@ -17,11 +17,11 @@ Focus graph, key model and EPG cursor model.
 ## Key model (`keys.ts`, `interpreter.ts`)
 - `createKeyInterpreter()` turns `KeyInput` (`down`/`up`/`press`, caller-supplied `time`) into `KeyEvent`s
   (`press`/`long`/`repeat`). It never reads a clock; call `tick(now)` from the host loop.
-- Arrows and `channelUp`/`channelDown` step on the earliest input: a `down` gives the `press` (its time) and the
-  following `up` nothing; an `up` without a `down` is one `press` at its time. The Android `TVEventHandler` fallback
-  (no raw key source) delivers a tap only as its release, so there the step and the measured latency start at the
-  release; the raw path delivers the `down`. Other keys press on an `up` before the threshold, so `long` stays
-  distinguishable; an `up` without a `down` is a `press` too.
+- Arrows, `channelUp`/`channelDown`, and `rewind`/`fastForward` step on the earliest input: a `down` gives the `press`
+  (its time) and the following `up` nothing; an `up` without a `down` is one `press` at its time. The Android
+  `TVEventHandler` fallback (no raw key source) delivers a tap only as its release, so there the step starts at the
+  release; the raw path delivers the `down`. Other keys (`select`, `back`, `menu`, `playPause`, `play`, `pause`, digits)
+  press on an `up` before the threshold, so `long` stays distinguishable; an `up` without a `down` is a `press` too.
 - Thresholds are constants in `keys.ts`: `LONG_PRESS_MS` 500, `REPEAT_START_HZ` 8, `REPEAT_FAST_HZ` 24,
   `REPEAT_RAMP_MS` 1500. Repeats start one slow interval after the long threshold and switch to the fast interval
   for repeats due at or after `LONG_PRESS_MS + REPEAT_RAMP_MS` of holding.
@@ -44,6 +44,6 @@ Focus graph, key model and EPG cursor model.
 - `createFocusStore` keeps a scope stack. `dispatch` returns intents: `select`/`long` (not for empty lists), `back`
   (root only; a pushed scope is popped instead), `backLong` (never pops), `edge`, and `key` for unconsumed keys.
 - The index of every list is its focus memory: `popScope` restores the opener as it was, clamped if `setCount`
-  shrank it meanwhile. `setCount` and `focus` address the topmost list with that id; unknown ids are ignored.
-- `subscribe` listeners get `{listId, index}` only when a list's visible index changes, including via `focus`,
-  `setCount`, and push/pop when a list id is shared between scopes.
+  shrank it meanwhile. `setCount`, `focus(id, index?)` and `activate(id)` address the topmost list with that id;
+  `isActive(id)` is true iff `id` is the top scope's `active` list.
+- `subscribe` listeners run FIFO on index, active-list, emptiness, and `pushScope`/`popScope` transitions.

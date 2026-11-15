@@ -1,4 +1,4 @@
-import { type HttpRequestOptions, ok } from '@elv/domain';
+import { type HttpRequestOptions, ok, type SqlValue } from '@elv/domain';
 import { describe, expect, it } from 'vitest';
 import { importGuide } from './import-guide';
 import {
@@ -49,6 +49,27 @@ describe('guide import', () => {
     ]);
     expect(r.value.counts).toMatchObject({ guideChannels: 4, mapped: 2, programmes: 5 });
     expect(await lastGuideRun(e)).toBe('ok');
+  });
+
+  it('runs PRAGMA wal_checkpoint(TRUNCATE) through db.exec (writer) rather than db.all (reader)', async () => {
+    const e = await ready();
+    const execSql: string[] = [];
+    const allSql: string[] = [];
+    const recordingDb = {
+      ...e.db,
+      exec: (sql: string) => {
+        execSql.push(sql);
+        return e.db.exec(sql);
+      },
+      all: <T>(sql: string, params?: readonly SqlValue[]) => {
+        allSql.push(sql);
+        return e.db.all<T>(sql, params);
+      },
+    };
+    const r = await importGuide(e.sourceId, { ...e.deps, db: recordingDb }, { now: NOW });
+    expect(r.ok).toBe(true);
+    expect(execSql.some((s) => s.includes('wal_checkpoint(TRUNCATE)'))).toBe(true);
+    expect(allSql.some((s) => s.includes('wal_checkpoint'))).toBe(false);
   });
 
   it('honours the configured window', async () => {

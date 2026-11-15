@@ -77,10 +77,18 @@ const DROP_STALE_MAPPINGS =
 /** Source-specific parts of a catalog run. */
 export interface RunSteps {
   execute(c: RunCtx): Promise<void>;
+  /** Runs after `execute` and item checks, before the SQLite cleanup transaction commits. */
+  beforeCommit?(c: RunCtx): Promise<void>;
   /** Runs inside the cleanup transaction, before stale rows are deleted. */
   beforeCleanup?(tx: SqlDriver, c: RunCtx): Promise<void>;
-  /** Runs after the cleanup transaction committed; a throw yields `storage/secret-write-failed` (the run stays `ok`). */
+  /** Runs after the cleanup transaction committed (e.g. pruning superseded secret keys). */
   afterCommit?(c: RunCtx): Promise<void>;
+  /** Runs when a run fails, cancels or discovers its source was removed, to roll back staged state. */
+  onAbortOrFail?(
+    c: RunCtx,
+    outcome: 'failed' | 'cancelled' | 'source-removed',
+    error: ElvError,
+  ): Promise<void>;
   /** Run kind recorded in `import_runs` (default `catalog`). */
   kind?: 'catalog' | 'guide';
   /** Tables whose stale rows a guide run deletes at cleanup; catalog runs delete per kind instead. */
@@ -134,6 +142,7 @@ export async function performRun(
     if (steps.requireItems !== false && ITEM_COUNTS.every((k) => (counts[k] ?? 0) === 0)) {
       throw new Stop(elvError('source-format', 'empty-source'));
     }
+    await steps.beforeCommit?.(c);
     c.progress({ phase: 'cleanup', done: 0 });
     removed = await deps.db.transaction(async (tx) => {
       if (!(await sourceExists(tx, source.id))) {
@@ -168,6 +177,9 @@ export async function performRun(
       : e instanceof Stop
         ? e.error
         : elvError('storage', 'import-failed');
+    await steps
+      .onAbortOrFail?.(c, cancelled ? 'cancelled' : 'failed', error)
+      .catch(() => undefined);
     try {
       await finishRun(
         deps.db,
@@ -180,7 +192,10 @@ export async function performRun(
     }
     return err(error);
   }
-  if (gone) return err(SOURCE_REMOVED);
+  if (gone) {
+    await steps.onAbortOrFail?.(c, 'source-removed', SOURCE_REMOVED).catch(() => undefined);
+    return err(SOURCE_REMOVED);
+  }
   try {
     await steps.afterCommit?.(c);
   } catch {

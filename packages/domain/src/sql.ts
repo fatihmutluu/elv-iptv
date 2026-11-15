@@ -28,6 +28,8 @@ export interface SqlDriver {
    * never resolves.
    */
   transaction<T>(fn: (tx: SqlDriver) => Promise<T>): Promise<T>;
+  /** Closes the underlying database connection(s) once queued work finishes. */
+  close?(): Promise<void>;
 }
 
 /**

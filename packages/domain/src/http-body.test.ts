@@ -124,4 +124,54 @@ describe('createFetchHttpClient body failures', () => {
     }));
     expect((await failing.get('http://h/x')).ok).toBe(false);
   });
+
+  it('cancels the stream and detaches the caller abort listener when return() is called before next()', async () => {
+    let cancelled = 0;
+    let released = 0;
+    let fetchSignal: AbortSignal | undefined;
+    const body = {
+      getReader: () => ({
+        read: async () => ({ done: false, value: enc('a') }),
+        cancel: async () => {
+          cancelled++;
+        },
+        releaseLock: () => {
+          released++;
+        },
+      }),
+    };
+    const ctl = new AbortController();
+    const client = createFetchHttpClient(async (_url, init) => {
+      fetchSignal = init.signal;
+      return { status: 200, headers: headers({}), body };
+    });
+    const res = okOf(await client.get('http://h/x', { signal: ctl.signal }));
+    const it = res.body[Symbol.asyncIterator]();
+    await it.return?.(undefined);
+    expect(cancelled).toBe(1);
+    expect(released).toBe(1);
+    ctl.abort();
+    expect(fetchSignal?.aborted).toBe(false);
+    expect(await it.next()).toEqual({ done: true, value: undefined });
+  });
+
+  it('aborts the fetch signal when idleTimeoutMs fires while still reporting network/timeout', async () => {
+    let fetchSignal: AbortSignal | undefined;
+    const body = {
+      getReader: () => ({
+        read: (): Promise<{ done: boolean; value?: Uint8Array }> => new Promise(() => {}),
+        releaseLock: () => {},
+      }),
+    };
+    const client = createFetchHttpClient(
+      async (_url, init) => {
+        fetchSignal = init.signal;
+        return { status: 200, headers: headers({}), body };
+      },
+      { idleTimeoutMs: 15 },
+    );
+    const res = okOf(await client.get('http://h/x'));
+    await expect(collect(res.body)).rejects.toMatchObject({ category: 'network', code: 'timeout' });
+    expect(fetchSignal?.aborted).toBe(true);
+  });
 });

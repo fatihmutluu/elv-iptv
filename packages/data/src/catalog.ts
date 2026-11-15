@@ -1,23 +1,4 @@
 import {
-  addM3uSource,
-  addSourceFromLink,
-  addXtreamSource,
-  createStreamResolver,
-  getSource,
-  type ImportDeps,
-  type ImportOptions,
-  type ImportSummary,
-  importCatalog,
-  type LinkSourceInput,
-  loadSeriesEpisodes,
-  type M3uSourceInput,
-  removeSource,
-  type SourceKind,
-  type SourceRecord,
-  secretKey,
-  type XtreamSourceInput,
-} from '@elv/data';
-import {
   elvError,
   err,
   type HttpClient,
@@ -29,6 +10,8 @@ import {
   transportHeaders,
 } from '@elv/domain';
 import { createXtreamClient } from '@elv/sources';
+import type { ImportDeps, ImportOptions, ImportSummary } from './import-types';
+import { importCatalog, loadSeriesEpisodes } from './import-xtream';
 import { type ManifestStore, saveManifest } from './manifest';
 import {
   type BrowseKind,
@@ -44,15 +27,28 @@ import {
   querySeries,
   type SeasonRow,
 } from './queries';
-
-export type { ManifestEntry, ManifestStore } from './manifest';
-export type { BrowseKind, CategoryRow, EpisodeRow, ItemRow, SeasonRow } from './queries';
+import { addSourceFromLink, type LinkSourceInput } from './source-link';
+import {
+  addM3uSource,
+  addXtreamSource,
+  getSource,
+  type M3uSourceInput,
+  removeSource,
+  type SourceKind,
+  type SourceRecord,
+  secretKey,
+  type XtreamSourceInput,
+} from './sources';
+import { createStreamResolver, type StreamResolver } from './stream-resolver';
 
 /**
  * Default largest Xtream response body (4 MiB): bigger lists load per category, which bounds memory and the longest
  * JS task of an import on small devices.
  */
 export const DEVICE_MAX_BODY_BYTES = 4 * 1024 * 1024;
+
+/** Default batch size (5,000 rows per transaction) for `CatalogService.importSource`. */
+export const DEVICE_BATCH_SIZE = 5_000;
 
 /** {@link ImportOptions} plus the body limit the gate varies. */
 export interface DeviceImportOptions extends ImportOptions {
@@ -100,11 +96,11 @@ export interface StreamRequest {
   headers: Record<string, string>;
 }
 
-/** Local catalog of the user's sources: add, import, browse in pages, resolve a stream. */
+/** Local catalog of the user's sources: add, import, browse in pages, resolve a stream, close. */
 export interface CatalogService {
   addSource(input: AddSourceInput): Promise<Result<SourceRow>>;
   addSourceFromLink(input: LinkSourceInput): Promise<Result<SourceRow>>;
-  /** Refused with `storage/import-in-progress` while an import of the source runs. */
+  /** Aborts any queued or in-flight import of `id`, awaits settlement, and removes rows + secrets. */
   removeSource(id: string): Promise<Result<void>>;
   /**
    * Imports run one at a time in call order; a later call waits for its turn. A call for a source whose import runs
@@ -121,10 +117,17 @@ export interface CatalogService {
   episodes(seriesId: number, season: number): Promise<EpisodeRow[]>;
   /** `itemKey` is the `key` of a live channel, movie or episode. */
   resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
+  /** Aborts active/queued imports, awaits queue settlement, clears caches, and closes the underlying SQL driver. */
+  close(): Promise<void>;
 }
 
 interface AbortBindable {
   setAbortSignal?: (signal: AbortSignal | undefined) => void;
+}
+
+interface ActiveImport {
+  abort: () => void;
+  settled: Promise<void>;
 }
 
 const row = (r: SourceRecord): SourceRow => ({
@@ -173,21 +176,35 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     maxBodyBytes: DEVICE_MAX_BODY_BYTES,
   };
   const abortable = db as SqlDriver & AbortBindable;
-  const importing = new Set<string>();
+  const activeImports = new Map<string, ActiveImport>();
+  const removing = new Set<string>();
+  const resolvers = new Map<string, Promise<StreamResolver>>();
   let lastImport: Promise<void> = Promise.resolve();
+  let closed = false;
+  let closePromise: Promise<void> | undefined;
   const { manifest } = deps;
   const syncManifest = () => (manifest === undefined ? undefined : saveManifest(db, manifest));
+
+  const resolverFor = (sourceId: string): Promise<StreamResolver> => {
+    let cached = resolvers.get(sourceId);
+    if (cached === undefined) {
+      cached = createStreamResolver(sourceId, { secrets });
+      resolvers.set(sourceId, cached);
+    }
+    return cached;
+  };
 
   const mapped = async (p: Promise<Result<SourceRecord>>): Promise<Result<SourceRow>> => {
     const r = await p;
     if (!r.ok) return r;
+    resolvers.delete(r.value.id);
     await syncManifest();
     return ok(row(r.value));
   };
 
   async function logoOf(items: ItemRow[], sourceId: string): Promise<ItemRow[]> {
     if (!items.some((i) => i.logo?.includes('{{'))) return items;
-    const resolver = await createStreamResolver(sourceId, { secrets });
+    const resolver = await resolverFor(sourceId);
     return items.map((i) =>
       i.logo === null ? i : { ...i, logo: resolver.resolve(i.logo) ?? null },
     );
@@ -235,35 +252,79 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
         input.kind === 'xtream' ? addXtreamSource(input, addDeps) : addM3uSource(input, addDeps),
       ),
     addSourceFromLink: (input) => mapped(addSourceFromLink(input, addDeps)),
+
     async removeSource(id) {
-      const removed = await removeSource(id, { db, secrets });
-      await syncManifest();
-      return removed;
+      removing.add(id);
+      try {
+        const active = activeImports.get(id);
+        if (active !== undefined) {
+          active.abort();
+          await active.settled;
+        }
+        resolvers.delete(id);
+        const removed = await removeSource(id, { db, secrets });
+        resolvers.delete(id);
+        await syncManifest();
+        return removed;
+      } finally {
+        removing.delete(id);
+      }
     },
 
     async importSource(id, opts = {}) {
-      if (importing.has(id)) return err(elvError('storage', 'import-in-progress'));
-      importing.add(id);
+      if (closed) return err(elvError('network', 'aborted'));
+      if (removing.has(id)) return err(elvError('storage', 'source-not-found'));
+      if (activeImports.has(id)) return err(elvError('storage', 'import-in-progress'));
+
+      const runCtl = new AbortController();
+      const onCallerAbort = () => runCtl.abort();
+      if (opts.signal?.aborted) runCtl.abort();
+      else opts.signal?.addEventListener('abort', onCallerAbort, { once: true });
+
+      let running = false;
       const previous = lastImport;
       let finished!: () => void;
       const mine = new Promise<void>((resolve) => {
         finished = resolve;
       });
       lastImport = previous.then(() => mine);
+
+      let internallyAborted = false;
+      activeImports.set(id, {
+        abort: () => {
+          if (internallyAborted) return;
+          internallyAborted = true;
+          runCtl.abort();
+          if (running) abortable.setAbortSignal?.(runCtl.signal);
+        },
+        settled: mine,
+      });
+
       try {
-        if (!(await turnOrAbort(previous, opts.signal))) return err(elvError('network', 'aborted'));
-        abortable.setAbortSignal?.(opts.signal);
+        if (!(await turnOrAbort(previous, runCtl.signal))) {
+          return err(elvError('network', 'aborted'));
+        }
+        resolvers.delete(id);
+        running = true;
+        abortable.setAbortSignal?.(internallyAborted ? runCtl.signal : opts.signal);
         try {
-          const { maxBodyBytes, ...rest } = opts;
+          const { maxBodyBytes, batchSize, ...rest } = opts;
           const runDeps = maxBodyBytes === undefined ? importDeps : { ...importDeps, maxBodyBytes };
-          return await importCatalog(id, runDeps, rest);
+          return await importCatalog(id, runDeps, {
+            ...rest,
+            batchSize: batchSize ?? DEVICE_BATCH_SIZE,
+            signal: runCtl.signal,
+          });
         } finally {
+          running = false;
+          resolvers.delete(id);
           abortable.setAbortSignal?.(undefined);
         }
       } finally {
-        importing.delete(id);
+        opts.signal?.removeEventListener('abort', onCallerAbort);
+        activeImports.delete(id);
+        if (!closed) await syncManifest();
         finished();
-        await syncManifest();
       }
     },
 
@@ -322,18 +383,51 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
         const url = await xtreamUrl(play.sourceId, play, source.settings.transport);
         return url.ok ? ok({ url: url.value, headers }) : url;
       }
-      const resolver = await createStreamResolver(play.sourceId, { secrets });
+      const resolver = await resolverFor(play.sourceId);
       const url = resolver.resolve(play.urlTemplate);
-      if (url === undefined) return err(elvError('storage', 'secret-missing'));
+      if (url === undefined) {
+        resolvers.delete(play.sourceId);
+        return err(elvError('storage', 'secret-missing'));
+      }
       if (play.headersJson !== null) {
-        const extra = JSON.parse(play.headersJson) as { userAgent?: string; referer?: string };
+        const extra = JSON.parse(play.headersJson) as {
+          userAgent?: string;
+          referer?: string;
+          other?: Record<string, string>;
+        };
+        if (extra.other !== undefined) {
+          for (const [k, v] of Object.entries(extra.other)) {
+            const resolved = resolver.resolve(v);
+            if (resolved === undefined) {
+              resolvers.delete(play.sourceId);
+              return err(elvError('storage', 'secret-missing'));
+            }
+            headers[k.toLowerCase()] = resolved;
+          }
+        }
         if (extra.userAgent !== undefined) headers['user-agent'] = extra.userAgent;
         if (extra.referer !== undefined) {
           const referer = resolver.resolve(extra.referer);
-          if (referer !== undefined) headers.referer = referer;
+          if (referer === undefined) {
+            resolvers.delete(play.sourceId);
+            return err(elvError('storage', 'secret-missing'));
+          }
+          headers.referer = referer;
         }
       }
       return ok({ url, headers });
+    },
+
+    close() {
+      if (closePromise !== undefined) return closePromise;
+      closed = true;
+      closePromise = (async () => {
+        for (const active of activeImports.values()) active.abort();
+        await lastImport;
+        resolvers.clear();
+        await db.close?.();
+      })();
+      return closePromise;
     },
   };
 }

@@ -236,14 +236,13 @@ export async function* scanM3u(
   try {
     for await (const chunk of chunks) {
       scanner.buf.append(chunk);
-      do {
+      for (;;) {
         scanner.run(false);
-        if (scanner.batch.length >= size) {
-          const entries = scanner.batch;
-          scanner.batch = [];
-          yield { entries, done: false };
-        }
-      } while (scanner.batch.length >= size);
+        if (scanner.batch.length < size) break;
+        const entries = scanner.batch;
+        scanner.batch = [];
+        yield { entries, done: false };
+      }
     }
   } catch (e) {
     return err(toElvError(e));
