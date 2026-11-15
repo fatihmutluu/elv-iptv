@@ -15,7 +15,12 @@ const config: KnipConfig = {
       // The catalog barrel is consumed by the menu screens in a later task.
       entry: ['config/*.test.ts', 'src/catalog/index.ts', 'src/storage/index.ts'],
       // The TV plugin is loaded by name from app.config.ts; knip infers optional Expo packages.
-      ignoreDependencies: ['@elv/sources', '@react-native-tvos/config-tv', 'expo-updates'],
+      ignoreDependencies: [
+        '@elv/sources',
+        '@react-native-tvos/config-tv',
+        'babel-jest',
+        'expo-updates',
+      ],
     },
     'apps/desktop': {
       // presenter-probe.ts is the test-only Electron main the presenter spec launches.
@@ -35,13 +40,8 @@ const config: KnipConfig = {
       ignoreDependencies: ['@elv/domain', 'babel-jest', 'babel-preset-expo'],
     },
     'packages/features': {
-      ignoreDependencies: [
-        '@elv/focus-core',
-        '@elv/ui-kit',
-        '@types/react',
-        'react',
-        'react-native',
-      ],
+      entry: ['babel.config.cjs'],
+      ignoreDependencies: ['babel-jest', 'babel-preset-expo'],
     },
     'packages/*': {
       // Skeleton packages declare their spec 5.2 dependencies before any code imports them.
