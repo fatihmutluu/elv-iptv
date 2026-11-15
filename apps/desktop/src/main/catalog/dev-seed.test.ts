@@ -26,14 +26,19 @@ function createMemorySecrets(): SecretStore & { dump(): Record<string, string> }
   };
 }
 
-function createFakeCatalogCoordinator(initialSources: Array<{ id: string; name: string }> = []) {
+function createFakeCatalogCoordinator(
+  initialSources: Array<{ id: string; name: string }> = [],
+  options: { failNetworkOnImport?: boolean } = {},
+) {
   const sources = [...initialSources];
   const importedIds: string[] = [];
+  const removedIds: string[] = [];
   let closedClients = 0;
 
   return {
     sources,
     importedIds,
+    removedIds,
     get closedClients() {
       return closedClients;
     },
@@ -88,16 +93,36 @@ function createFakeCatalogCoordinator(initialSources: Array<{ id: string; name: 
                     },
                   },
                 });
-              } else if (call.method === 'importSource') {
-                importedIds.push(call.id);
+              } else if (call.method === 'removeSource') {
+                removedIds.push(call.id);
+                const idx = sources.findIndex((s) => s.id === call.id);
+                if (idx >= 0) sources.splice(idx, 1);
                 emit({
                   type: 'result',
                   reqId,
-                  value: {
-                    ok: true,
-                    value: { runId: 'run-1', counts: { live: 2, movies: 1, series: 1 } },
-                  },
+                  value: { ok: true, value: undefined },
                 });
+              } else if (call.method === 'importSource') {
+                importedIds.push(call.id);
+                if (options.failNetworkOnImport) {
+                  emit({
+                    type: 'result',
+                    reqId,
+                    value: {
+                      ok: false,
+                      error: { category: 'network', code: 'unreachable' },
+                    },
+                  });
+                } else {
+                  emit({
+                    type: 'result',
+                    reqId,
+                    value: {
+                      ok: true,
+                      value: { runId: 'run-1', counts: { live: 2, movies: 1, series: 1 } },
+                    },
+                  });
+                }
               }
             });
           },
@@ -194,6 +219,50 @@ describe('desktop dev-seed (#10)', () => {
     expect(res).toEqual({ seeded: false });
     expect(secrets.dump()).toEqual({ 'elv.dev.seeded': '1' });
     expect(fake.sources).toEqual([{ id: 'existing-1', name: 'Existing' }]);
+  });
+
+  it('rolls back added source, fires onChanged, and leaves elv.dev.seeded unset when host is unreachable', async () => {
+    const secrets = createMemorySecrets();
+    const offline = createFakeCatalogCoordinator([], { failNetworkOnImport: true });
+    let changedEvents = 0;
+    const seed = parseDevSeedEnv(
+      {
+        DEV_XTREAM_NAME: 'Offline Desktop Sim',
+        DEV_XTREAM_SERVER: 'http://127.0.0.1:7878',
+        DEV_XTREAM_USERNAME: 'demo',
+        DEV_XTREAM_PASSWORD: 'demo',
+      },
+      { isPackaged: false },
+    );
+
+    const first = await runDesktopDevSeedOnce({
+      seed,
+      coordinator: offline.coordinator,
+      secrets,
+      onChanged: () => {
+        changedEvents += 1;
+      },
+    });
+    expect(first).toEqual({ seeded: false });
+    expect(offline.removedIds).toEqual(['src-1']);
+    expect(offline.sources).toEqual([]);
+    expect(secrets.dump()).toEqual({});
+    expect(changedEvents).toBeGreaterThanOrEqual(2);
+
+    // Subsequent launch when simulator is reachable seeds cleanly
+    const online = createFakeCatalogCoordinator();
+    let onlineChanged = 0;
+    const second = await runDesktopDevSeedOnce({
+      seed,
+      coordinator: online.coordinator,
+      secrets,
+      onChanged: () => {
+        onlineChanged += 1;
+      },
+    });
+    expect(second).toEqual({ seeded: true, sourceId: 'src-1' });
+    expect(secrets.dump()).toEqual({ 'elv.dev.seeded': '1' });
+    expect(onlineChanged).toBe(2);
   });
 
   it('eliminates dev-seed code and DEV_* markers from production dist/main/main.js via bundle.mjs', () => {

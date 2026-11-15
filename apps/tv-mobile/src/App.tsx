@@ -1,3 +1,4 @@
+import type { CatalogService } from '@elv/data';
 import { createLazyCatalog, SourcesScreen } from '@elv/features';
 import { createAppI18n, resolveLocale } from '@elv/i18n';
 import { remoteKeys } from '@elv/remote-keys';
@@ -6,6 +7,7 @@ import Constants from 'expo-constants';
 import { getLocales } from 'expo-localization';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useState } from 'react';
+import { Platform } from 'react-native';
 import { createDeviceCatalog } from './catalog';
 import { GateListScreen } from './gate/GateListScreen';
 import { ImportGateScreen } from './gate/import/ImportGateScreen';
@@ -27,17 +29,32 @@ export function App() {
     return createAppI18n(resolveLocale(tags));
   }, []);
 
-  const catalog = useMemo(() => createLazyCatalog(() => createDeviceCatalog()), []);
+  const openSharedCatalog = useMemo(() => {
+    let cached: Promise<CatalogService> | undefined;
+    return () => {
+      cached ??= createDeviceCatalog().catch((err: unknown) => {
+        cached = undefined;
+        throw err;
+      });
+      return cached;
+    };
+  }, []);
+
+  const catalog = useMemo(() => createLazyCatalog(openSharedCatalog), [openSharedCatalog]);
 
   useEffect(() => {
     if (gate !== undefined) return;
     let cancelled = false;
     if (__DEV__) {
-      const { readEmbeddedDevSeed, runDevSeedOnce } =
+      const { normalizeSeedForTarget, readEmbeddedDevSeed, runDevSeedOnce } =
         require('./seed/dev-seeder') as typeof import('./seed/dev-seeder');
-      const seed = readEmbeddedDevSeed(Constants.expoConfig?.extra);
-      if (seed !== undefined) {
-        void createDeviceCatalog()
+      const rawSeed = readEmbeddedDevSeed(Constants.expoConfig?.extra);
+      if (rawSeed !== undefined) {
+        const seed = normalizeSeedForTarget(rawSeed, {
+          os: Platform.OS,
+          isDevice: Constants.isDevice !== false,
+        });
+        void openSharedCatalog()
           .then((opened) =>
             runDevSeedOnce({
               seed,
@@ -54,7 +71,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [gate]);
+  }, [gate, openSharedCatalog]);
 
   if (gate !== undefined) {
     return (

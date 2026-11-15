@@ -1,7 +1,7 @@
 import { createLazyCatalog, SourcesScreen } from '@elv/features';
 import { createAppI18n, resolveLocale } from '@elv/i18n';
 import { FormFactorProvider, I18nProvider } from '@elv/ui-kit';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createDesktopCatalog } from './catalog/index.ts';
 import { GateScreen } from './gate/GateScreen.tsx';
 import { resolveGate } from './gate/params.ts';
@@ -12,6 +12,8 @@ const GATE = resolveGate(window.location.search, window.elv);
 
 /** Root of the desktop renderer: mounts the gate harness on `--elv-gate=` launches and `SourcesScreen` (#71) otherwise. */
 export function App() {
+  const [refreshToken, setRefreshToken] = useState(0);
+
   const i18n = useMemo(() => {
     const languages = typeof navigator === 'undefined' ? [] : navigator.languages;
     return createAppI18n(resolveLocale(languages));
@@ -19,12 +21,21 @@ export function App() {
 
   const catalog = useMemo(() => createLazyCatalog(() => createDesktopCatalog()), []);
 
+  useEffect(() => {
+    if (GATE) return;
+    const bridge = window.elv?.catalog;
+    if (!bridge || typeof bridge.onChanged !== 'function') return;
+    return bridge.onChanged(() => {
+      setRefreshToken((n) => n + 1);
+    });
+  }, []);
+
   if (GATE) return <GateScreen params={GATE} />;
 
   return (
     <FormFactorProvider value="desktop">
       <I18nProvider i18n={i18n}>
-        <SourcesScreen catalog={catalog} />
+        <SourcesScreen catalog={catalog} externalRefreshToken={refreshToken} />
       </I18nProvider>
     </FormFactorProvider>
   );

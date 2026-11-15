@@ -1,6 +1,6 @@
 import type { SourceRow } from '@elv/data';
 import type { AppI18n } from '@elv/i18n';
-import { TvTextInput, type TvTextInputInstance } from '@elv/ui-kit';
+import { TvTextInput, type TvTextInputInstance, useFormFactor } from '@elv/ui-kit';
 import type { ReactElement } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
@@ -8,8 +8,10 @@ import {
   type SourceRuntimeStatus,
   type SourcesController,
 } from './useSourcesController';
+import type { ControlLayoutRecorder } from './useTvSourcesNavigation';
 
 export function ActionButton({
+  focusId,
   testID,
   label,
   onPress,
@@ -17,7 +19,9 @@ export function ActionButton({
   active = false,
   danger = false,
   disabled = false,
+  recordLayout,
 }: {
+  focusId: string;
   testID: string;
   label: string;
   onPress: () => void;
@@ -25,27 +29,36 @@ export function ActionButton({
   active?: boolean;
   danger?: boolean;
   disabled?: boolean;
+  recordLayout?: ControlLayoutRecorder;
 }): ReactElement {
+  const isTv = useFormFactor() === 'tv';
   return (
-    <Pressable
-      testID={testID}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ selected: tvFocused || active, disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      style={[
-        sourcesStyles.button,
-        active ? sourcesStyles.buttonActive : null,
-        danger ? sourcesStyles.buttonDanger : null,
-        tvFocused ? sourcesStyles.tvFocused : null,
-        disabled ? sourcesStyles.buttonDisabled : null,
-      ]}
+    <View
+      ref={(node) => recordLayout?.(focusId, node)}
+      testID={`sources-focus-${focusId}`}
+      onLayout={(e) => recordLayout?.(focusId, null, e)}
     >
-      <Text style={[sourcesStyles.buttonText, active ? sourcesStyles.buttonTextActive : null]}>
-        {label}
-      </Text>
-    </Pressable>
+      <Pressable
+        testID={testID}
+        {...(isTv ? { focusable: false } : {})}
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        accessibilityState={{ selected: tvFocused || active, disabled }}
+        disabled={disabled}
+        onPress={onPress}
+        style={[
+          sourcesStyles.button,
+          active ? sourcesStyles.buttonActive : null,
+          danger ? sourcesStyles.buttonDanger : null,
+          tvFocused ? sourcesStyles.tvFocused : null,
+          disabled ? sourcesStyles.buttonDisabled : null,
+        ]}
+      >
+        <Text style={[sourcesStyles.buttonText, active ? sourcesStyles.buttonTextActive : null]}>
+          {label}
+        </Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -57,8 +70,11 @@ export function FieldInput({
   value,
   onChangeText,
   tvFocused,
+  editingInputId,
+  onEndEditing,
   secureTextEntry = false,
   registerRef,
+  recordLayout,
 }: {
   focusId: string;
   testID: string;
@@ -67,25 +83,35 @@ export function FieldInput({
   value: string;
   onChangeText: (text: string) => void;
   tvFocused: boolean;
+  editingInputId: string | null;
+  onEndEditing: (focusId: string) => void;
   secureTextEntry?: boolean;
   registerRef: (id: string, node: TvTextInputInstance | null) => void;
+  recordLayout?: ControlLayoutRecorder;
 }): ReactElement {
+  const isTv = useFormFactor() === 'tv';
+  const allowNativeEdit = !isTv || editingInputId === focusId;
   return (
     <View style={sourcesStyles.fieldGroup}>
       <Text style={sourcesStyles.fieldLabel}>{label}</Text>
       <View
+        ref={(node) => recordLayout?.(focusId, node)}
         testID={`sources-focus-${focusId}`}
         accessibilityState={{ selected: tvFocused }}
+        onLayout={(e) => recordLayout?.(focusId, null, e)}
         style={[sourcesStyles.inputFrame, tvFocused ? sourcesStyles.tvFocused : null]}
       >
         <TvTextInput
           ref={(node) => registerRef(focusId, node)}
           testID={testID}
           accessibilityLabel={label}
+          editable={allowNativeEdit}
+          focusable={allowNativeEdit}
           placeholder={placeholder}
           placeholderTextColor="#6c6c78"
           value={value}
           onChangeText={onChangeText}
+          onBlur={() => onEndEditing(focusId)}
           secureTextEntry={secureTextEntry}
           autoCapitalize="none"
           autoCorrect={false}
@@ -94,87 +120,6 @@ export function FieldInput({
       </View>
     </View>
   );
-}
-
-type FocusItem =
-  | { readonly id: string; readonly kind: 'action'; readonly run: () => void }
-  | { readonly id: string; readonly kind: 'input' };
-
-export function buildSourcesFocusItems(
-  ctrl: SourcesController,
-  onOpenMenu: (() => void) | undefined,
-): readonly FocusItem[] {
-  const items: FocusItem[] = [];
-  if (onOpenMenu !== undefined) {
-    items.push({ id: 'open-menu', kind: 'action', run: onOpenMenu });
-  }
-  items.push(
-    { id: 'mode-xtream', kind: 'action', run: () => ctrl.setMode('xtream') },
-    { id: 'mode-m3u', kind: 'action', run: () => ctrl.setMode('m3u') },
-    { id: 'input-name', kind: 'input' },
-  );
-  if (ctrl.form.mode === 'xtream') {
-    items.push(
-      { id: 'input-server', kind: 'input' },
-      { id: 'input-username', kind: 'input' },
-      { id: 'input-password', kind: 'input' },
-    );
-  } else {
-    items.push({ id: 'input-playlist-url', kind: 'input' });
-    if (ctrl.detectedXtreamInM3u) {
-      items.push({
-        id: 'toggle-keep-m3u',
-        kind: 'action',
-        run: () => ctrl.updateField('keepAsM3u', !ctrl.form.keepAsM3u),
-      });
-    }
-  }
-  items.push({ id: 'toggle-advanced', kind: 'action', run: ctrl.toggleAdvanced });
-  if (ctrl.showAdvanced) {
-    items.push(
-      { id: 'input-guide-url', kind: 'input' },
-      { id: 'input-user-agent', kind: 'input' },
-      { id: 'input-referer', kind: 'input' },
-    );
-    if (ctrl.form.mode === 'xtream') {
-      items.push(
-        {
-          id: 'format-default',
-          kind: 'action',
-          run: () => ctrl.updateField('xtreamFormat', 'default'),
-        },
-        { id: 'format-ts', kind: 'action', run: () => ctrl.updateField('xtreamFormat', 'ts') },
-        {
-          id: 'format-m3u8',
-          kind: 'action',
-          run: () => ctrl.updateField('xtreamFormat', 'm3u8'),
-        },
-      );
-    }
-  }
-  items.push({ id: 'submit', kind: 'action', run: () => void ctrl.submit() });
-  for (const source of ctrl.sources) {
-    const status = ctrl.statusById[source.id];
-    if (status?.kind === 'importing') {
-      items.push({
-        id: `source-cancel-${source.id}`,
-        kind: 'action',
-        run: () => ctrl.cancelImport(source.id),
-      });
-    } else {
-      items.push({
-        id: `source-sync-${source.id}`,
-        kind: 'action',
-        run: () => void ctrl.runImport(source.id),
-      });
-    }
-    items.push({
-      id: `source-remove-${source.id}`,
-      kind: 'action',
-      run: () => void ctrl.remove(source.id),
-    });
-  }
-  return items;
 }
 
 function renderSourceStatusText(
@@ -214,11 +159,13 @@ export function SavedSourcesPanel({
   i18n,
   twoColumn,
   tvFocusId,
+  recordLayout,
 }: {
   ctrl: SourcesController;
   i18n: AppI18n;
   twoColumn: boolean;
   tvFocusId: string | undefined;
+  recordLayout?: ControlLayoutRecorder;
 }): ReactElement {
   return (
     <View style={[sourcesStyles.panel, twoColumn ? sourcesStyles.panelHalf : null]}>
@@ -266,25 +213,31 @@ export function SavedSourcesPanel({
               <View style={sourcesStyles.row}>
                 {isImporting ? (
                   <ActionButton
+                    focusId={`source-cancel-${source.id}`}
                     testID={`source-cancel-${source.id}`}
                     label={`${i18n.t('sources.action.cancel')} ${source.name}`}
                     tvFocused={tvFocusId === `source-cancel-${source.id}`}
                     onPress={() => ctrl.cancelImport(source.id)}
+                    recordLayout={recordLayout}
                   />
                 ) : (
                   <ActionButton
+                    focusId={`source-sync-${source.id}`}
                     testID={syncTestId}
                     label={`${syncLabel} ${source.name}`}
                     tvFocused={tvFocusId === `source-sync-${source.id}`}
                     onPress={() => void ctrl.runImport(source.id)}
+                    recordLayout={recordLayout}
                   />
                 )}
                 <ActionButton
+                  focusId={`source-remove-${source.id}`}
                   testID={`source-remove-${source.id}`}
                   label={`${i18n.t('sources.action.remove')} ${source.name}`}
                   danger
                   tvFocused={tvFocusId === `source-remove-${source.id}`}
                   onPress={() => void ctrl.remove(source.id)}
+                  recordLayout={recordLayout}
                 />
               </View>
             </View>
@@ -297,6 +250,7 @@ export function SavedSourcesPanel({
 
 export const sourcesStyles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0a0a0c' },
+  tvFocusAnchor: { position: 'absolute', width: 1, height: 1, opacity: 0 },
   scrollContent: { padding: 16 },
   scrollContentTv: { paddingHorizontal: 48, paddingVertical: 32 },
   container: { gap: 16, width: '100%' },

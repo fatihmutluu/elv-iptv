@@ -86,8 +86,9 @@ function parseDevSeedEnv(env: Env): DevSeedPayload | undefined {
 
 /**
  * Returns `true` only when Expo Constants' native asset script (`expo-constants/scripts/getAppConfig.js`)
- * is invoked in debug mode (`argv[5] === 'true'`) by Gradle (`createDebugExpoConfig`) or Xcode
- * (`Bundle Expo Config`). Returns `false` for Metro (`@expo/cli`), `expo prebuild`, and Release builds
+ * is invoked in debug/development mode by Gradle (`createDebugExpoConfig`, `argv[6] === 'development'`)
+ * or Xcode (`Bundle Expo Config`, `argv[6] === 'development'` or legacy `argv[5] === 'true'`).
+ * Returns `false` for Metro (`@expo/cli`), `expo prebuild`, and Release builds (`argv[6] === 'production'`)
  * so `DEV_*` credentials never enter Metro's HTTP manifest or JS bundle over the LAN (#10).
  */
 export function isNativeDebugConfigEmbed(argv: readonly string[]): boolean {
@@ -95,7 +96,9 @@ export function isNativeDebugConfigEmbed(argv: readonly string[]): boolean {
   const isGetAppConfig =
     script === 'expo-constants/scripts/getAppConfig.js' ||
     script.endsWith('/expo-constants/scripts/getAppConfig.js');
-  return isGetAppConfig && argv[5] === 'true';
+  const isDebugConfigMode =
+    argv[6] === 'development' || (argv[6] === undefined && argv[5] === 'true');
+  return isGetAppConfig && isDebugConfigMode;
 }
 
 /** Builds the Expo config from the build environment; `extra.seed` is embedded only in native debug builds. */

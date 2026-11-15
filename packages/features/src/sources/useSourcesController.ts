@@ -84,13 +84,34 @@ export function useSourcesController({
   const [statusById, setStatusById] = useState<Record<string, SourceRuntimeStatus>>({});
 
   const mountedRef = useRef(true);
+  const submittingRef = useRef(false);
+  const refreshSeqRef = useRef(0);
+  const latestAppliedRefreshRef = useRef(0);
   const controllersRef = useRef<Map<string, AbortController>>(new Map());
   const removedIdsRef = useRef<Set<string>>(new Set());
 
   const refreshSources = useCallback(async (): Promise<SourceRow[]> => {
+    const seq = ++refreshSeqRef.current;
     const rows = await catalog.listSources();
-    if (mountedRef.current) {
+    if (mountedRef.current && seq >= latestAppliedRefreshRef.current) {
+      latestAppliedRefreshRef.current = seq;
       setSources(rows);
+      setStatusById((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const row of rows) {
+          const cur = next[row.id];
+          if (
+            !row.needsImport &&
+            cur?.kind === 'error' &&
+            cur.failure.messageId === 'source.error.importInProgress'
+          ) {
+            delete next[row.id];
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
     }
     return rows;
   }, [catalog]);
@@ -190,7 +211,7 @@ export function useSourcesController({
   }, []);
 
   const submit = useCallback(async (): Promise<void> => {
-    if (submitting) return;
+    if (submittingRef.current) return;
     const validated = validateSourceForm(formRef.current);
     if (!validated.ok) {
       setFormError({
@@ -200,31 +221,38 @@ export function useSourcesController({
       return;
     }
 
+    submittingRef.current = true;
     setFormError(null);
     setSubmitting(true);
-    const added =
-      validated.value.kind === 'xtream'
-        ? await catalog.addSource(validated.value.input)
-        : await catalog.addSourceFromLink(validated.value.input);
+    try {
+      const added =
+        validated.value.kind === 'xtream'
+          ? await catalog.addSource(validated.value.input)
+          : await catalog.addSourceFromLink(validated.value.input);
 
-    if (!mountedRef.current) return;
-    setSubmitting(false);
+      if (!mountedRef.current) return;
 
-    if (!added.ok) {
-      setFormError(describeSourceFailure(added.error));
-      return;
+      if (!added.ok) {
+        setFormError(describeSourceFailure(added.error));
+        return;
+      }
+
+      removedIdsRef.current.delete(added.value.id);
+      const resetForm: SourceFormState = {
+        ...createInitialSourceForm(),
+        mode: formRef.current.mode,
+      };
+      formRef.current = resetForm;
+      setForm(resetForm);
+      await refreshSources();
+      void runImport(added.value.id);
+    } finally {
+      submittingRef.current = false;
+      if (mountedRef.current) {
+        setSubmitting(false);
+      }
     }
-
-    removedIdsRef.current.delete(added.value.id);
-    const resetForm: SourceFormState = {
-      ...createInitialSourceForm(),
-      mode: formRef.current.mode,
-    };
-    formRef.current = resetForm;
-    setForm(resetForm);
-    await refreshSources();
-    void runImport(added.value.id);
-  }, [catalog, refreshSources, runImport, submitting]);
+  }, [catalog, refreshSources, runImport]);
 
   const remove = useCallback(
     async (sourceId: string): Promise<void> => {
@@ -235,8 +263,20 @@ export function useSourcesController({
         controllersRef.current.delete(sourceId);
       }
 
-      await playbackGuard.stopIfUsingSource(sourceId);
-      const removed = await catalog.removeSource(sourceId);
+      try {
+        await playbackGuard.stopIfUsingSource(sourceId);
+      } catch {
+        // Best-effort playback stop so source removal still completes cleanly.
+      }
+
+      let removed: Awaited<ReturnType<CatalogService['removeSource']>>;
+      try {
+        removed = await catalog.removeSource(sourceId);
+      } catch {
+        removedIdsRef.current.delete(sourceId);
+        return;
+      }
+
       if (!mountedRef.current) return;
 
       if (!removed.ok) {

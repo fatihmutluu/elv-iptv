@@ -1,30 +1,16 @@
 import type { CatalogService } from '@elv/data';
-import { createFocusStore, type FocusStore, findList } from '@elv/focus-core';
-import {
-  TextEntryBoundary,
-  type TvTextInputInstance,
-  useFormFactor,
-  useI18n,
-  useKeyInterpreter,
-} from '@elv/ui-kit';
-import {
-  type ReactElement,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useSyncExternalStore,
-} from 'react';
+import { TextEntryBoundary, useFormFactor, useI18n } from '@elv/ui-kit';
+import type { ReactElement } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import type { PlaybackGuard } from '../ports/playback-guard';
 import {
   ActionButton,
-  buildSourcesFocusItems,
   FieldInput,
   SavedSourcesPanel,
   sourcesStyles as styles,
 } from './SourcesScreenParts';
 import { useSourcesController } from './useSourcesController';
+import { TvRemoteBridge, useTvSourcesNavigation } from './useTvSourcesNavigation';
 
 /** Props of {@link SourcesScreen}. */
 export interface SourcesScreenProps {
@@ -32,30 +18,7 @@ export interface SourcesScreenProps {
   playbackGuard?: PlaybackGuard;
   externalRefreshToken?: number;
   onOpenMenu?: () => void;
-}
-
-const CONTROLS_LIST_ID = 'sources-controls';
-
-function TvRemoteBridge({
-  store,
-  onSelectIndex,
-}: {
-  store: FocusStore;
-  onSelectIndex: (index: number) => void;
-}): null {
-  const selectRef = useRef(onSelectIndex);
-  selectRef.current = onSelectIndex;
-
-  useKeyInterpreter((event) => {
-    const intents = store.dispatch(event);
-    for (const intent of intents) {
-      if (intent.kind === 'select' && intent.listId === CONTROLS_LIST_ID) {
-        selectRef.current(intent.index);
-      }
-    }
-  });
-
-  return null;
+  onBack?: () => void;
 }
 
 function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
@@ -64,70 +27,46 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
   const isTv = formFactor === 'tv';
   const twoColumn = formFactor !== 'phone';
   const ctrl = useSourcesController(props);
-  const inputRefs = useRef<Map<string, TvTextInputInstance>>(new Map());
-
-  const registerRef = useCallback((id: string, node: TvTextInputInstance | null) => {
-    if (node === null) inputRefs.current.delete(id);
-    else inputRefs.current.set(id, node);
-  }, []);
-
-  const controls = useMemo(
-    () => buildSourcesFocusItems(ctrl, props.onOpenMenu),
-    [ctrl, props.onOpenMenu],
-  );
-
-  const focusStore = useMemo(
-    () =>
-      createFocusStore({
-        id: 'sources-scope',
-        lists: [
-          {
-            id: CONTROLS_LIST_ID,
-            count: 1,
-            index: 0,
-            orientation: 'vertical',
-            pageSize: 5,
-          },
-        ],
-        active: CONTROLS_LIST_ID,
-      }),
-    [],
-  );
-
-  useEffect(() => {
-    focusStore.setCount(CONTROLS_LIST_ID, controls.length);
-  }, [controls.length, focusStore]);
-
-  const focusedIndex = useSyncExternalStore(
-    focusStore.subscribe,
-    () => findList(focusStore.getState().scopes, CONTROLS_LIST_ID)?.list.index ?? 0,
-    () => 0,
-  );
-
-  const tvFocusId = isTv ? controls[focusedIndex]?.id : undefined;
-
-  const handleSelectIndex = useCallback(
-    (index: number) => {
-      const target = controls[index];
-      if (target === undefined) return;
-      if (target.kind === 'action') {
-        target.run();
-      } else {
-        inputRefs.current.get(target.id)?.focus();
-      }
-    },
-    [controls],
-  );
+  const tv = useTvSourcesNavigation({
+    isTv,
+    ctrl,
+    ...(props.onOpenMenu !== undefined ? { onOpenMenu: props.onOpenMenu } : {}),
+    ...(props.onBack !== undefined ? { onBack: props.onBack } : {}),
+  });
 
   return (
     <ScrollView
+      ref={tv.scrollRef}
       testID="sources-screen"
       accessibilityLabel={i18n.t('sources.title')}
       style={styles.root}
       contentContainerStyle={[styles.scrollContent, isTv ? styles.scrollContentTv : null]}
+      onLayout={(e) => {
+        tv.viewportHeightRef.current = e.nativeEvent.layout.height;
+      }}
+      onScroll={(e) => {
+        tv.scrollYRef.current = e.nativeEvent.contentOffset.y;
+      }}
+      scrollEventThrottle={16}
     >
-      {isTv ? <TvRemoteBridge store={focusStore} onSelectIndex={handleSelectIndex} /> : null}
+      {isTv ? (
+        <>
+          <View
+            testID="sources-tv-focus-anchor"
+            focusable
+            hasTVPreferredFocus
+            style={styles.tvFocusAnchor}
+          />
+          <TvRemoteBridge
+            store={tv.focusStore}
+            controls={tv.controls}
+            onSelectIndex={tv.handleSelectIndex}
+            onBackIntent={tv.handleBackIntent}
+          />
+        </>
+      ) : null}
       <View
+        ref={tv.contentRootRef}
         testID={`sources-layout-${formFactor}`}
         style={[styles.container, twoColumn ? styles.containerWide : null]}
       >
@@ -141,10 +80,12 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
           </View>
           {props.onOpenMenu !== undefined ? (
             <ActionButton
+              focusId="open-menu"
               testID="sources-open-menu"
               label={i18n.t('sources.openMenu')}
               onPress={props.onOpenMenu}
-              tvFocused={tvFocusId === 'open-menu'}
+              tvFocused={tv.tvFocusId === 'open-menu'}
+              recordLayout={tv.recordLayout}
             />
           ) : null}
         </View>
@@ -154,18 +95,22 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
             <Text style={styles.sectionTitle}>{i18n.t('sources.section.add')}</Text>
             <View style={styles.row}>
               <ActionButton
+                focusId="mode-xtream"
                 testID="sources-mode-xtream"
                 label={i18n.t('sources.mode.xtream')}
                 active={ctrl.form.mode === 'xtream'}
-                tvFocused={tvFocusId === 'mode-xtream'}
+                tvFocused={tv.tvFocusId === 'mode-xtream'}
                 onPress={() => ctrl.setMode('xtream')}
+                recordLayout={tv.recordLayout}
               />
               <ActionButton
+                focusId="mode-m3u"
                 testID="sources-mode-m3u"
                 label={i18n.t('sources.mode.m3u')}
                 active={ctrl.form.mode === 'm3u'}
-                tvFocused={tvFocusId === 'mode-m3u'}
+                tvFocused={tv.tvFocusId === 'mode-m3u'}
                 onPress={() => ctrl.setMode('m3u')}
+                recordLayout={tv.recordLayout}
               />
             </View>
 
@@ -176,8 +121,11 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
               placeholder={i18n.t('sources.placeholder.name')}
               value={ctrl.form.name}
               onChangeText={(v) => ctrl.updateField('name', v)}
-              tvFocused={tvFocusId === 'input-name'}
-              registerRef={registerRef}
+              tvFocused={tv.tvFocusId === 'input-name'}
+              editingInputId={tv.editingInputId}
+              onEndEditing={tv.handleEndEditing}
+              registerRef={tv.registerRef}
+              recordLayout={tv.recordLayout}
             />
 
             {ctrl.form.mode === 'xtream' ? (
@@ -189,8 +137,11 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                   placeholder={i18n.t('sources.placeholder.server')}
                   value={ctrl.form.server}
                   onChangeText={(v) => ctrl.updateField('server', v)}
-                  tvFocused={tvFocusId === 'input-server'}
-                  registerRef={registerRef}
+                  tvFocused={tv.tvFocusId === 'input-server'}
+                  editingInputId={tv.editingInputId}
+                  onEndEditing={tv.handleEndEditing}
+                  registerRef={tv.registerRef}
+                  recordLayout={tv.recordLayout}
                 />
                 <FieldInput
                   focusId="input-username"
@@ -199,8 +150,11 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                   placeholder={i18n.t('sources.placeholder.username')}
                   value={ctrl.form.username}
                   onChangeText={(v) => ctrl.updateField('username', v)}
-                  tvFocused={tvFocusId === 'input-username'}
-                  registerRef={registerRef}
+                  tvFocused={tv.tvFocusId === 'input-username'}
+                  editingInputId={tv.editingInputId}
+                  onEndEditing={tv.handleEndEditing}
+                  registerRef={tv.registerRef}
+                  recordLayout={tv.recordLayout}
                 />
                 <FieldInput
                   focusId="input-password"
@@ -209,9 +163,12 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                   placeholder={i18n.t('sources.placeholder.password')}
                   value={ctrl.form.password}
                   onChangeText={(v) => ctrl.updateField('password', v)}
-                  tvFocused={tvFocusId === 'input-password'}
+                  tvFocused={tv.tvFocusId === 'input-password'}
+                  editingInputId={tv.editingInputId}
+                  onEndEditing={tv.handleEndEditing}
                   secureTextEntry
-                  registerRef={registerRef}
+                  registerRef={tv.registerRef}
+                  recordLayout={tv.recordLayout}
                 />
               </>
             ) : (
@@ -223,8 +180,11 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                   placeholder={i18n.t('sources.placeholder.playlistUrl')}
                   value={ctrl.form.playlistUrl}
                   onChangeText={(v) => ctrl.updateField('playlistUrl', v)}
-                  tvFocused={tvFocusId === 'input-playlist-url'}
-                  registerRef={registerRef}
+                  tvFocused={tv.tvFocusId === 'input-playlist-url'}
+                  editingInputId={tv.editingInputId}
+                  onEndEditing={tv.handleEndEditing}
+                  registerRef={tv.registerRef}
+                  recordLayout={tv.recordLayout}
                 />
                 {ctrl.detectedXtreamInM3u ? (
                   <View style={styles.noticeBox}>
@@ -232,11 +192,13 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                       {i18n.t('sources.notice.xtreamDetected')}
                     </Text>
                     <ActionButton
+                      focusId="toggle-keep-m3u"
                       testID="sources-toggle-keep-m3u"
                       label={i18n.t('sources.field.keepAsM3u')}
                       active={ctrl.form.keepAsM3u}
-                      tvFocused={tvFocusId === 'toggle-keep-m3u'}
+                      tvFocused={tv.tvFocusId === 'toggle-keep-m3u'}
                       onPress={() => ctrl.updateField('keepAsM3u', !ctrl.form.keepAsM3u)}
+                      recordLayout={tv.recordLayout}
                     />
                   </View>
                 ) : null}
@@ -244,14 +206,16 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
             )}
 
             <ActionButton
+              focusId="toggle-advanced"
               testID="sources-toggle-advanced"
               label={
                 ctrl.showAdvanced
                   ? i18n.t('sources.action.toggleAdvancedHide')
                   : i18n.t('sources.action.toggleAdvancedShow')
               }
-              tvFocused={tvFocusId === 'toggle-advanced'}
+              tvFocused={tv.tvFocusId === 'toggle-advanced'}
               onPress={ctrl.toggleAdvanced}
+              recordLayout={tv.recordLayout}
             />
 
             {ctrl.showAdvanced ? (
@@ -263,8 +227,11 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                   placeholder={i18n.t('sources.placeholder.guideUrl')}
                   value={ctrl.form.guideUrl}
                   onChangeText={(v) => ctrl.updateField('guideUrl', v)}
-                  tvFocused={tvFocusId === 'input-guide-url'}
-                  registerRef={registerRef}
+                  tvFocused={tv.tvFocusId === 'input-guide-url'}
+                  editingInputId={tv.editingInputId}
+                  onEndEditing={tv.handleEndEditing}
+                  registerRef={tv.registerRef}
+                  recordLayout={tv.recordLayout}
                 />
                 <FieldInput
                   focusId="input-user-agent"
@@ -273,8 +240,11 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                   placeholder={i18n.t('sources.placeholder.userAgent')}
                   value={ctrl.form.userAgent}
                   onChangeText={(v) => ctrl.updateField('userAgent', v)}
-                  tvFocused={tvFocusId === 'input-user-agent'}
-                  registerRef={registerRef}
+                  tvFocused={tv.tvFocusId === 'input-user-agent'}
+                  editingInputId={tv.editingInputId}
+                  onEndEditing={tv.handleEndEditing}
+                  registerRef={tv.registerRef}
+                  recordLayout={tv.recordLayout}
                 />
                 <FieldInput
                   focusId="input-referer"
@@ -283,33 +253,42 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                   placeholder={i18n.t('sources.placeholder.referer')}
                   value={ctrl.form.referer}
                   onChangeText={(v) => ctrl.updateField('referer', v)}
-                  tvFocused={tvFocusId === 'input-referer'}
-                  registerRef={registerRef}
+                  tvFocused={tv.tvFocusId === 'input-referer'}
+                  editingInputId={tv.editingInputId}
+                  onEndEditing={tv.handleEndEditing}
+                  registerRef={tv.registerRef}
+                  recordLayout={tv.recordLayout}
                 />
                 {ctrl.form.mode === 'xtream' ? (
                   <View style={styles.fieldGroup}>
                     <Text style={styles.fieldLabel}>{i18n.t('sources.field.xtreamFormat')}</Text>
                     <View style={styles.row}>
                       <ActionButton
+                        focusId="format-default"
                         testID="sources-format-default"
                         label={i18n.t('sources.format.default')}
                         active={ctrl.form.xtreamFormat === 'default'}
-                        tvFocused={tvFocusId === 'format-default'}
+                        tvFocused={tv.tvFocusId === 'format-default'}
                         onPress={() => ctrl.updateField('xtreamFormat', 'default')}
+                        recordLayout={tv.recordLayout}
                       />
                       <ActionButton
+                        focusId="format-ts"
                         testID="sources-format-ts"
                         label={i18n.t('sources.format.ts')}
                         active={ctrl.form.xtreamFormat === 'ts'}
-                        tvFocused={tvFocusId === 'format-ts'}
+                        tvFocused={tv.tvFocusId === 'format-ts'}
                         onPress={() => ctrl.updateField('xtreamFormat', 'ts')}
+                        recordLayout={tv.recordLayout}
                       />
                       <ActionButton
+                        focusId="format-m3u8"
                         testID="sources-format-m3u8"
                         label={i18n.t('sources.format.m3u8')}
                         active={ctrl.form.xtreamFormat === 'm3u8'}
-                        tvFocused={tvFocusId === 'format-m3u8'}
+                        tvFocused={tv.tvFocusId === 'format-m3u8'}
                         onPress={() => ctrl.updateField('xtreamFormat', 'm3u8')}
+                        recordLayout={tv.recordLayout}
                       />
                     </View>
                   </View>
@@ -329,18 +308,26 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
             ) : null}
 
             <ActionButton
+              focusId="submit"
               testID="sources-submit"
               label={
                 ctrl.submitting ? i18n.t('sources.action.adding') : i18n.t('sources.action.add')
               }
               disabled={ctrl.submitting}
               active
-              tvFocused={tvFocusId === 'submit'}
+              tvFocused={tv.tvFocusId === 'submit'}
               onPress={() => void ctrl.submit()}
+              recordLayout={tv.recordLayout}
             />
           </View>
 
-          <SavedSourcesPanel ctrl={ctrl} i18n={i18n} twoColumn={twoColumn} tvFocusId={tvFocusId} />
+          <SavedSourcesPanel
+            ctrl={ctrl}
+            i18n={i18n}
+            twoColumn={twoColumn}
+            tvFocusId={tv.tvFocusId}
+            recordLayout={tv.recordLayout}
+          />
         </View>
       </View>
     </ScrollView>

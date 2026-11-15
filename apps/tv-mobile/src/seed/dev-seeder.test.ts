@@ -1,12 +1,20 @@
 import { createCatalogService, openCatalog } from '@elv/data';
 import { countingScheduler, memorySecrets, testDb } from '@elv/data/testing';
-import { type HttpClient, ok } from '@elv/domain';
+import { elvError, err, type HttpClient, ok } from '@elv/domain';
 import { describe, expect, it } from 'vitest';
-import { type DevSeedPayload, readEmbeddedDevSeed, runDevSeedOnce } from './dev-seeder';
+import {
+  type DevSeedPayload,
+  normalizeSeedForTarget,
+  readEmbeddedDevSeed,
+  runDevSeedOnce,
+} from './dev-seeder';
 
-function createStubSimHttp(): HttpClient {
+function createStubSimHttp(options: { reachable?: boolean } = {}): HttpClient {
   return {
     async get(rawUrl) {
+      if (options.reachable === false) {
+        return err(elvError('network', 'unreachable'));
+      }
       const url = new URL(rawUrl);
       const bodyText =
         url.pathname === '/player_api.php'
@@ -177,6 +185,104 @@ describe('dev-seeder (#10)', () => {
       expect(res.seeded).toBe(true);
     } finally {
       await env.close();
+    }
+  });
+
+  it('rewrites localhost and 127.0.0.1 to 10.0.2.2 strictly on Android emulators', () => {
+    const xtreamLoopback: DevSeedPayload = {
+      kind: 'xtream',
+      name: 'Local Sim',
+      server: 'http://127.0.0.1:7878',
+      username: 'demo',
+      password: 'demo',
+    };
+    const m3uLoopback: DevSeedPayload = {
+      kind: 'm3u',
+      name: 'Local M3U',
+      playlistUrl: 'http://localhost:7878/playlists/demo.m3u8?a=1',
+      guideUrl: 'http://127.0.0.1:7878/xmltv.xml',
+    };
+
+    expect(normalizeSeedForTarget(xtreamLoopback, { os: 'android', isDevice: false })).toEqual({
+      ...xtreamLoopback,
+      server: 'http://10.0.2.2:7878',
+    });
+    expect(normalizeSeedForTarget(m3uLoopback, { os: 'android', isDevice: false })).toEqual({
+      ...m3uLoopback,
+      playlistUrl: 'http://10.0.2.2:7878/playlists/demo.m3u8?a=1',
+      guideUrl: 'http://10.0.2.2:7878/xmltv.xml',
+    });
+
+    // Never rewrite on physical Android, iOS/tvOS Simulator, physical Apple, or LAN addresses
+    expect(normalizeSeedForTarget(xtreamLoopback, { os: 'android', isDevice: true })).toEqual(
+      xtreamLoopback,
+    );
+    expect(normalizeSeedForTarget(xtreamLoopback, { os: 'ios', isDevice: false })).toEqual(
+      xtreamLoopback,
+    );
+    expect(
+      normalizeSeedForTarget(
+        { ...xtreamLoopback, server: 'http://192.168.1.25:7878' },
+        { os: 'android', isDevice: false },
+      ),
+    ).toEqual({ ...xtreamLoopback, server: 'http://192.168.1.25:7878' });
+  });
+
+  it('rolls back the source and leaves elv.dev.seeded unset when the seed host is unreachable', async () => {
+    const handle = testDb();
+    const migrated = await openCatalog(handle.db);
+    if (!migrated.ok) throw new Error('migration failed');
+    const secrets = memorySecrets();
+    let reachable = false;
+    const catalog = createCatalogService({
+      db: handle.db,
+      secrets,
+      scheduler: countingScheduler(),
+      http: {
+        get: (url) => createStubSimHttp({ reachable }).get(url),
+      },
+      clock: () => 1_700_000_000_000,
+    });
+
+    const seed: DevSeedPayload = {
+      kind: 'xtream',
+      name: 'Offline Sim',
+      server: 'http://127.0.0.1:7878',
+      username: 'demo',
+      password: 'demo',
+    };
+    let changedCalls = 0;
+
+    try {
+      // First launch while simulator is offline -> rolled back cleanly, elv.dev.seeded unset
+      const offlineRun = await runDevSeedOnce({
+        seed,
+        catalog,
+        secrets,
+        onChanged: () => {
+          changedCalls += 1;
+        },
+      });
+      expect(offlineRun).toEqual({ seeded: false });
+      expect(await catalog.listSources()).toEqual([]);
+      expect(await secrets.get('elv.dev.seeded')).toBeUndefined();
+      expect(changedCalls).toBeGreaterThanOrEqual(1);
+
+      // Next launch once simulator is running -> seeds and imports cleanly!
+      reachable = true;
+      const onlineRun = await runDevSeedOnce({
+        seed,
+        catalog,
+        secrets,
+      });
+      expect(onlineRun.seeded).toBe(true);
+      expect(await secrets.get('elv.dev.seeded')).toBe('1');
+      const rows = await catalog.listSources();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.needsImport).toBe(false);
+    } finally {
+      await catalog.close();
+      handle.close();
     }
   });
 });

@@ -18,31 +18,99 @@ function pluginOptions(env: Env, name: string): Record<string, unknown> | undefi
 }
 
 describe('isNativeDebugConfigEmbed (#10)', () => {
-  it('returns true only for expo-constants getAppConfig.js with argv[5] === "true"', () => {
+  it('returns true for real Gradle Android debug and Xcode iOS debug getAppConfig.js invocations', () => {
+    // Gradle Android Debug (expo-constants@58.0.16 passes argv[5]="false", argv[6]="development")
     expect(
       isNativeDebugConfigEmbed([
         '/usr/local/bin/node',
         '/repo/node_modules/expo-constants/scripts/getAppConfig.js',
         '/repo/apps/tv-mobile',
         '/repo/apps/tv-mobile/android/app/build/generated/assets/createDebugExpoConfig',
-        'app.config',
-        'true',
+        'android',
+        'false',
+        'development',
       ]),
     ).toBe(true);
 
+    // Windows Gradle Android Debug path separators
     expect(
       isNativeDebugConfigEmbed([
         'C:\\Program Files\\nodejs\\node.exe',
         'C:\\repo\\node_modules\\.pnpm\\expo-constants@58.0.16\\node_modules\\expo-constants\\scripts\\getAppConfig.js',
         'C:\\repo\\apps\\tv-mobile',
-        'C:\\out',
+        'C:\\repo\\apps\\tv-mobile\\android\\app\\build\\generated\\assets\\createDebugExpoConfig',
+        'android',
+        'false',
+        'development',
+      ]),
+    ).toBe(true);
+
+    // Xcode iOS/tvOS Debug (get-app-config-ios.sh passes argv[5]="true", argv[6]="development")
+    expect(
+      isNativeDebugConfigEmbed([
+        '/usr/local/bin/node',
+        '/repo/node_modules/expo-constants/scripts/getAppConfig.js',
+        '/repo/apps/tv-mobile',
+        '/Users/dev/Library/Developer/Xcode/DerivedData/App/EXConstants.bundle',
+        'app.config',
+        'true',
+        'development',
+      ]),
+    ).toBe(true);
+
+    // Legacy 6-arg debug fallback (argv[6] === undefined && argv[5] === 'true')
+    expect(
+      isNativeDebugConfigEmbed([
+        '/usr/local/bin/node',
+        '/repo/node_modules/expo-constants/scripts/getAppConfig.js',
+        '/repo/apps/tv-mobile',
+        '/repo/out',
         'app.config',
         'true',
       ]),
     ).toBe(true);
   });
 
-  it('returns false for Metro, expo prebuild, and Release getAppConfig.js', () => {
+  it('returns false for Gradle Android release, Xcode iOS release, Metro, and expo prebuild', () => {
+    // Gradle Android Release (argv[5]="false", argv[6]="production")
+    expect(
+      isNativeDebugConfigEmbed([
+        'node',
+        '/repo/node_modules/expo-constants/scripts/getAppConfig.js',
+        '/repo/apps/tv-mobile',
+        '/repo/apps/tv-mobile/android/app/build/generated/assets/createReleaseExpoConfig',
+        'android',
+        'false',
+        'production',
+      ]),
+    ).toBe(false);
+
+    // Xcode iOS/tvOS Release (argv[5]="false", argv[6]="production")
+    expect(
+      isNativeDebugConfigEmbed([
+        'node',
+        '/repo/node_modules/expo-constants/scripts/getAppConfig.js',
+        '/repo/apps/tv-mobile',
+        '/Users/dev/Library/Developer/Xcode/DerivedData/App/EXConstants.bundle',
+        'app.config',
+        'false',
+        'production',
+      ]),
+    ).toBe(false);
+
+    // Even if argv[5] were "true", explicit "production" in argv[6] must be rejected
+    expect(
+      isNativeDebugConfigEmbed([
+        'node',
+        '/repo/node_modules/expo-constants/scripts/getAppConfig.js',
+        '/repo/apps/tv-mobile',
+        '/repo/out',
+        'app.config',
+        'true',
+        'production',
+      ]),
+    ).toBe(false);
+
     expect(
       isNativeDebugConfigEmbed(['node', '/repo/node_modules/@expo/cli/build/bin/cli', 'start']),
     ).toBe(false);

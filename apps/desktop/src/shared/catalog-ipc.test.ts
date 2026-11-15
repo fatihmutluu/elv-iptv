@@ -14,6 +14,7 @@ describe('CATALOG_CHANNELS', () => {
       connect: 'catalog:connect',
       port: 'catalog:port',
       disconnected: 'catalog:disconnected',
+      changed: 'catalog:changed',
     });
   });
 });

@@ -16,6 +16,7 @@ import {
   utilityProcess,
   type WebContents,
 } from 'electron';
+import { CATALOG_CHANNELS } from '../shared/catalog-ipc.ts';
 import { APP_ORIGIN, APP_SCHEME } from './app-protocol.ts';
 import { type CatalogCoordinator, createCatalogCoordinator } from './catalog/coordinator.ts';
 import { parseDevSeedEnv, runDesktopDevSeedOnce } from './catalog/dev-seed.ts';
@@ -196,7 +197,18 @@ function startCatalog(): CatalogCoordinator<MessagePortMain> {
   if (__ELV_DEV_SEED__ && !app.isPackaged && gateQuery === null) {
     const seed = parseDevSeedEnv(process.env, { isPackaged: app.isPackaged });
     if (seed !== undefined) {
-      void runDesktopDevSeedOnce({ seed, coordinator, secrets }).catch(() => undefined);
+      void runDesktopDevSeedOnce({
+        seed,
+        coordinator,
+        secrets,
+        onChanged: () => {
+          for (const win of BrowserWindow.getAllWindows()) {
+            if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+              win.webContents.send(CATALOG_CHANNELS.changed);
+            }
+          }
+        },
+      }).catch(() => undefined);
     }
   }
   return coordinator;

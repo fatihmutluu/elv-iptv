@@ -137,6 +137,7 @@ export async function runDesktopDevSeedOnce(deps: {
   seed: DevSeedPayload | undefined;
   coordinator: Pick<CatalogCoordinator<DevSeedPortLike>, 'connectClient' | 'disconnectClient'>;
   secrets: Pick<SecretStore, 'get' | 'set'>;
+  onChanged?: () => void;
 }): Promise<{ seeded: boolean; sourceId?: string }> {
   const seededKey = 'elv.dev.seeded';
   if (deps.seed === undefined) {
@@ -182,8 +183,23 @@ export async function runDesktopDevSeedOnce(deps: {
       return { seeded: false };
     }
 
+    deps.onChanged?.();
+    const imported = await caller.call<Result<ImportSummary>>({
+      method: 'importSource',
+      id: added.value.id,
+    });
+    if (
+      !imported.ok &&
+      imported.error.category === 'network' &&
+      imported.error.code !== 'aborted'
+    ) {
+      await caller.call<Result<void>>({ method: 'removeSource', id: added.value.id });
+      deps.onChanged?.();
+      return { seeded: false };
+    }
+
     await deps.secrets.set(seededKey, '1');
-    await caller.call<Result<ImportSummary>>({ method: 'importSource', id: added.value.id });
+    deps.onChanged?.();
     return { seeded: true, sourceId: added.value.id };
   } finally {
     caller.dispose();
