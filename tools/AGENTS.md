@@ -5,7 +5,7 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
 
 ## Commands (run from anywhere; the repo root is found via `pnpm-workspace.yaml`)
 - `pnpm check` runs every check, prints failures, notes and warnings (also when passing) and `check: N passed, M failed`; in a package folder use `pnpm -w check`.
-- `pnpm check --only <key>` runs one check (keys: biome, typecheck, deps, knip, file-size, stubs, vitest, jest, gitleaks-rules, hooks); `--json` prints JSON.
+- `pnpm check --only <key>` runs one check (keys: biome, typecheck, deps, knip, file-size, stubs, notices, vitest, jest, gitleaks-rules, hooks); `--json` prints JSON.
 - `pnpm bootstrap` checks versions, installs dependencies and git hooks, looks for gitleaks.
 - `pnpm run:app <target> [build] [--production]` launches or builds a target (android, android-tv, fire-tv, ios, tvos, windows, macos, linux).
 - `pnpm gate list [flags]` runs the TV list gate on a running Android TV emulator; flags, baseline and budget rules: `src/gates/AGENTS.md`.
@@ -16,11 +16,12 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
 - `pnpm mpv fetch [--force]` / `pnpm mpv verify [--dir <folder>]` install and rescan the pinned mpv runtime for desktop; builds the Windows `elv-mpv.exe` launcher; macOS gets our CI build (`mpv-runtime/`, workflow `mpv-runtime.yml`) through `gh`; rules: `src/mpv/AGENTS.md`.
 - `pnpm scaffold <pure|rn|module> <name>` creates a workspace package (skill `add-package`).
 - `pnpm ffmpeg-media3 fetch [--force]` and `pnpm ffmpeg-media3 verify [--dir <folder>]` install and verify the LGPL-2.1+ Android FFmpeg + Media3 JNI bundle (`modules/engine-media3/ffmpeg-media3.lock.json`, 16 KB ELF alignment, dynamic `DT_NEEDED`).
+- `pnpm notices:sync` regenerates `packages/features/src/notices/notices-data.ts` from workspace runtime dependencies and native engine lock pins (`pnpm check --only notices` verifies freshness).
 - `pnpm --filter @elv/tools test` runs Vitest (`sources-*`, `import-*` use the sim; `SIM_HUGE=1` adds 500k).
 
 ## Layout
 - `src/` library modules, each unit-tested: `env`, `run-command`, `prebuild-stamp`, `scaffold`, `file-size`, `agents-stubs`,
-  `runner`, `root`, `bootstrap`, `mpv/`, `ffmpeg-media3/`, `gates/` (gate runner), plus `checks` (check definitions) and `exec`.
+  `runner`, `root`, `bootstrap`, `mpv/`, `ffmpeg-media3/`, `notices/`, `gates/` (gate runner), plus `checks` (check definitions) and `exec`.
 - `bin/` thin entry points that call `src/`. `test/` holds the Vitest tests: linked-workspace tests
   (`dependency-links.test.ts`) and fixture cases (`test/fixtures/<case>/`, tiny workspaces) prove the rules in
   `/.dependency-cruiser.cjs`; fixtures are excluded from Biome, tsc, knip and the real `deps` check.
