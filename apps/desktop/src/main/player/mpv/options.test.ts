@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { headerOptions, LAUNCH_OPTIONS, launchArgs, loadfileCommand } from './options.ts';
+import {
+  headerFields,
+  headerOptions,
+  LAUNCH_OPTIONS,
+  launchArgs,
+  loadfileCommand,
+} from './options.ts';
 
 describe('launchArgs', () => {
   it('launch args keep the exact fixed options and never contain a url', () => {
@@ -19,6 +25,7 @@ describe('launchArgs', () => {
       '--keep-open=no',
       '--ytdl=no',
       '--load-scripts=no',
+      '--load-unsafe-playlists=no',
       '--save-position-on-quit=no',
       '--resume-playback=no',
       '--terminal=no',
@@ -45,6 +52,7 @@ describe('launchArgs', () => {
       platform: 'darwin',
     });
     expect(args).not.toContain('--curl-enabled=no');
+    expect(args).toContain('--load-unsafe-playlists=no');
     expect(args).toEqual([
       ...LAUNCH_OPTIONS.filter((o) => o !== '--curl-enabled=no'),
       '--input-conf=/r/mpv-input.conf',
@@ -54,21 +62,33 @@ describe('launchArgs', () => {
   });
 });
 
-describe('headerOptions', () => {
+describe('headerOptions and headerFields', () => {
   it('user-agent uses its own option', () => {
     expect(headerOptions({ 'User-Agent': 'VLC/3' })).toEqual({ 'user-agent': 'VLC/3' });
+    expect(headerFields({ 'User-Agent': 'VLC/3' })).toEqual([]);
   });
   it('referer maps to referrer', () => {
     expect(headerOptions({ Referer: 'http://r/' })).toEqual({ referrer: 'http://r/' });
     expect(headerOptions({ referrer: 'http://r/' })).toEqual({ referrer: 'http://r/' });
+    expect(headerFields({ Referer: 'http://r/', referrer: 'http://r/' })).toEqual([]);
   });
-  it('escapes only commas in http-header-fields and leaves backslashes alone', () => {
-    expect(headerOptions({ 'X-A': 'a,b', 'X-B': 'c\\d' })).toEqual({
-      'http-header-fields': 'X-A: a\\,b,X-B: c\\d',
-    });
+  it('returns custom headers as verbatim list entries without string-list escaping', () => {
+    const headers = {
+      'User-Agent': 'elv',
+      'X-A': 'foo\\',
+      'X-B': 'bar',
+      'X-C': 'v\\,Authorization: Bearer injected',
+    };
+    expect(headerOptions(headers)).toEqual({ 'user-agent': 'elv' });
+    expect(headerFields(headers)).toEqual([
+      'X-A: foo\\',
+      'X-B: bar',
+      'X-C: v\\,Authorization: Bearer injected',
+    ]);
   });
   it('returns nothing for no headers', () => {
     expect(headerOptions({})).toEqual({});
+    expect(headerFields({})).toEqual([]);
   });
 });
 

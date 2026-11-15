@@ -34,8 +34,8 @@ Expo project with `platforms: ["web"]` rendered by react-native-web.
 - Fault signatures (FFmpeg networking): `ffmpeg warn http: HTTP error <status>`; refused port is
   `ffmpeg error tcp: Connection to tcp://... failed` + `end-file error "loading failed"`; `text-notice` logs
   `Mime-type: 'text/plain'` + `end-file error "unrecognized file format"`; live drop is `end-file eof`.
-- `http-header-fields`: only `,` needs `\` (`a\,b\c` -> `a,b\c`); `\\` arrives doubled, `%n%` unsupported; UA/Referer
-  use their own options. Windows pipe DACL is current-user only (`GetAccessControl`); macOS `fd://3` has no path.
+- `http-header-fields`: string-list syntax swallows the next header after a trailing `\` and doubles `\\`, so custom
+  headers pass as a `set_property http-header-fields string[]` array (`[]` cleared on next load/stop); UA/Referer use `loadfile`. Windows pipe DACL is current-user (`GetAccessControl`); macOS `fd://3` has no path.
 
 ## Presentation (`src/main/player/presenter/`)
 - `VideoPresenter` has two implementations; `createPresenter` wires them to Electron, `choosePresenter` picks one.

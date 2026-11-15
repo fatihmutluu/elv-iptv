@@ -481,4 +481,63 @@ describe('registerPlayerIpc', () => {
     expect(t.handlers.size).toBe(0);
     expect(t.listeners.size).toBe(0);
   });
+
+  it('concurrent opens from the same webContents release the superseded engine without starting it and fence its onUi', async () => {
+    const t = setup();
+    const a = fakeContents(1);
+    let resolveFirst!: (e: StubEngine) => void;
+    t.createEngine.mockImplementationOnce(async (_owner, onUi) => {
+      const engine = stubEngine();
+      t.engines.push(engine);
+      t.uiSinks.push(onUi);
+      return await new Promise<StubEngine>((r) => {
+        resolveFirst = r;
+      });
+    });
+
+    const p1 = open(t, a);
+    const p2 = open(t, a);
+    const r2 = await p2;
+    const first = t.engines[0];
+    const second = t.engines[1];
+    if (!first || !second) throw new Error('expected two engine creations');
+    t.uiSinks[0]?.({ type: 'presenter', kind: 'child-window', coversArea: true });
+    resolveFirst(first);
+    await expect(p1).rejects.toThrow(/superseded|closed/);
+
+    expect(first.released).toBe(1);
+    expect(first.started).toBe(0);
+    expect(second.released).toBe(0);
+    expect(second.started).toBe(1);
+    t.uiSinks[0]?.({ type: 'closed' });
+    expect(a.sent).toEqual([]);
+
+    t.uiSinks[1]?.({ type: 'closed' });
+    expect(a.sent).toEqual([
+      { channel: PLAYER_CHANNELS.ui, payload: { engineId: r2.engineId, ui: { type: 'closed' } } },
+    ]);
+  });
+
+  it('navigation, renderer crash, or ipc disposal during createEngine releases the in-flight engine without starting it', async () => {
+    for (const interrupt of ['navigate', 'crash', 'dispose'] as const) {
+      const t = setup();
+      const a = fakeContents(1);
+      t.createEngine.mockImplementationOnce(async (_owner, onUi) => {
+        const engine = stubEngine();
+        t.engines.push(engine);
+        t.uiSinks.push(onUi);
+        a.navigate({ isMainFrame: true, isSameDocument: true });
+        a.navigate({ isMainFrame: false, isSameDocument: false });
+        if (interrupt === 'navigate') a.navigate({ isMainFrame: true, isSameDocument: false });
+        else if (interrupt === 'crash') a.crash();
+        else t.dispose();
+        onUi({ type: 'presenter', kind: 'own-window', coversArea: false });
+        return engine;
+      });
+      await expect(open(t, a)).rejects.toThrow();
+      expect(t.engines[0]?.released).toBe(1);
+      expect(t.engines[0]?.started).toBe(0);
+      expect(a.sent).toEqual([]);
+    }
+  });
 });

@@ -100,15 +100,14 @@ spec on mpv 0.42.0 docs, release assets, licence files and issues (no GPL source
 
 ### 5.3 Engine commands
 - Launch options, fixed and never read from a user config: `no-config`, `idle=yes`, `force-window=immediate`,
-  `keep-open=no`, `ytdl=no`, `load-scripts=no` (the built-in OSC stays), `save-position-on-quit=no`,
+  `keep-open=no`, `ytdl=no`, `load-scripts=no` (the built-in OSC stays), `load-unsafe-playlists=no`, `save-position-on-quit=no`,
   `resume-playback=no`, `terminal=no`, `title=ELV IPTV`, `hwdec=auto-safe`, `network-timeout=10`, `curl-enabled=no`
   (§9), `script-opts=osc-idlescreen=no` (the OSC's idle logo; no runtime switch works), `input-conf` pointing at our bindings, `wid` (Windows) or `geometry` (macOS), and the IPC transport (§5.5).
   Stream URLs and headers never appear in argv.
-- `load`: `loadfile <url> replace -1 <options>`; the options carry the request headers (`user-agent`, `referrer`, the
-  rest in `http-header-fields`), `start` for `startMs` and the per-kind cache limits. mpv resets per-file options when
-  the file ends, so one channel's headers never reach the next. In `http-header-fields` only the comma is escaped (with a
-  backslash); backslashes are left alone because the pinned mpv 0.42.0 keeps a doubled backslash doubled
-  (`docs/learned/README.md`).
+- `load`: `loadfile <url> replace -1 <options>`; the per-file options carry `user-agent`, `referrer`, `start` for
+  `startMs` and the per-kind cache limits, while any other RFC 9110 request headers travel as a typed JSON `string[]`
+  array via `set_property http-header-fields` (cleared back to `[]` when a later load or `stop` has none), avoiding
+  mpv's `m_option_type_string_list` trailing-backslash header swallowing and backslash doubling (`docs/learned/README.md`).
 - `retry`: the same `loadfile` for the current URL and options under the new token (live at the edge; VOD with `start`
   at the last anchored position). On mpv, ladder rungs 1 and 2 send the same command and differ only in token.
 - `play`/`pause`: `set pause no|yes`. `seek`: `seek <s> absolute`. `stop`: `stop`. `recreate`: `quit`, kill after

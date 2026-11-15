@@ -1,5 +1,11 @@
 /** One mpv IPC command: the command name followed by its arguments. */
-export type MpvCommand = readonly (string | number | boolean | Readonly<Record<string, string>>)[];
+export type MpvCommand = readonly (
+  | string
+  | number
+  | boolean
+  | readonly string[]
+  | Readonly<Record<string, string>>
+)[];
 /** The reply to a command carrying a `request_id`. */
 export interface MpvReply {
   request_id: number;

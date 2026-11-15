@@ -124,16 +124,13 @@ const isStreamUrl = (x: unknown): boolean => {
   }
 };
 
+const HEADER_TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
 const isHeaders = (x: unknown): boolean =>
   isRecord(x) &&
   Object.entries(x).every(
     ([name, value]) =>
-      name.length > 0 &&
-      !name.includes(':') &&
-      !name.includes(' ') &&
-      !hasControlChar(name) &&
-      typeof value === 'string' &&
-      !hasControlChar(value),
+      HEADER_TOKEN.test(name) && typeof value === 'string' && !hasControlChar(value),
   );
 
 function isLoadCommand(x: unknown): x is LoadCommand {

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeAppWindow, fakeVideoWindow } from '../testing/fake-windows.ts';
 
 const electron = vi.hoisted(() => ({
-  made: [] as Array<{ options: unknown }>,
+  made: [] as Array<{ options: unknown; openHandler?: () => { action: string } }>,
   screenListeners: new Map<string, Set<() => void>>(),
   dipCalls: [] as unknown[],
 }));
@@ -11,6 +11,13 @@ const electron = vi.hoisted(() => ({
 vi.mock('electron', () => {
   class BrowserWindow {
     readonly video = fakeVideoWindowForMock();
+    openHandler?: () => { action: string };
+    webContents = {
+      setWindowOpenHandler: (h: () => { action: 'deny' }) => {
+        this.openHandler = h;
+      },
+      on: () => undefined,
+    };
     constructor(readonly options: unknown) {
       electron.made.push(this);
       Object.assign(this, this.video.window);

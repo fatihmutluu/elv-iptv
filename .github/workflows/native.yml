@@ -75,6 +75,7 @@ jobs:
               - 'packages/**'
               - 'tools/src/mpv/**'
               - 'tools/bin/mpv.ts'
+              - 'tools/src/root.ts'
               - 'tools/src/prebuild-stamp.ts'
               - 'tools/src/env.ts'
               - 'tools/src/release-hygiene.ts'

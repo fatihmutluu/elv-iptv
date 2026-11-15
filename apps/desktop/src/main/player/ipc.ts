@@ -65,7 +65,15 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
   const { ipcMain, log } = deps;
   const entries = new Map<string, Entry>();
   const watched = new Set<number>();
+  const generations = new Map<number, number>();
   let counter = 0;
+  let disposed = false;
+
+  const bumpGeneration = (ownerId: number): number => {
+    const next = (generations.get(ownerId) ?? 0) + 1;
+    generations.set(ownerId, next);
+    return next;
+  };
 
   const release = (id: string): void => {
     const entry = entries.get(id);
@@ -77,6 +85,11 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
 
   const releaseOwnedBy = (owner: WebContentsLike): void => {
     for (const [id, entry] of [...entries]) if (entry.owner.id === owner.id) release(id);
+  };
+
+  const invalidateOwner = (owner: WebContentsLike): void => {
+    bumpGeneration(owner.id);
+    releaseOwnedBy(owner);
   };
 
   const ownedEntry = (sender: WebContentsLike, engineId: string): Entry | undefined => {
@@ -93,34 +106,47 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     watched.add(owner.id);
     owner.once('destroyed', () => {
       watched.delete(owner.id);
-      releaseOwnedBy(owner);
+      invalidateOwner(owner);
+      generations.delete(owner.id);
     });
     // A reload or navigation keeps the webContents but drops the page that owns the engine.
     owner.on('did-start-navigation', (details) => {
-      if (details.isMainFrame && !details.isSameDocument) releaseOwnedBy(owner);
+      if (details.isMainFrame && !details.isSameDocument) invalidateOwner(owner);
     });
-    owner.on('render-process-gone', () => releaseOwnedBy(owner));
+    owner.on('render-process-gone', () => invalidateOwner(owner));
   };
 
   const onOpen: IpcListener = async ({ sender }): Promise<PlayerOpenReply> => {
+    if (disposed || sender.isDestroyed()) {
+      throw new Error('the window closed while the player was starting');
+    }
     const arrivedAtMs = deps.now();
     watch(sender);
+    const gen = bumpGeneration(sender.id);
     releaseOwnedBy(sender);
     counter += 1;
     const engineId = `engine-${counter}`;
+    let registered = false;
+    const isCurrent = (): boolean =>
+      !disposed &&
+      !sender.isDestroyed() &&
+      generations.get(sender.id) === gen &&
+      (!registered || entries.has(engineId));
     const engine = await deps.createEngine(sender, (ui) => {
+      if (!isCurrent()) return;
       const message: PlayerUiMessage = { engineId, ui };
       sendTo(sender, PLAYER_CHANNELS.ui, message);
     });
-    if (sender.isDestroyed()) {
+    if (!isCurrent()) {
       engine.release();
-      throw new Error('the window closed while the player was starting');
+      throw new Error('the player open was superseded or the window closed while starting');
     }
     const unsubscribe = engine.subscribe((event) => {
       const message: PlayerEventMessage = { engineId, event };
       sendTo(sender, PLAYER_CHANNELS.event, message);
     });
     entries.set(engineId, { owner: sender, engine, unsubscribe });
+    registered = true;
     // Subscribed first, so the surface events that starting mpv emits reach the renderer.
     engine.start();
     // The renderer takes the midpoint of its round trip; the mean of arrival and reply is the closest main-side match.
@@ -212,6 +238,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
   if (deps.gateReport) ipcMain.on(PLAYER_CHANNELS.gateReport, onGate);
 
   return () => {
+    disposed = true;
     ipcMain.removeHandler(PLAYER_CHANNELS.open);
     ipcMain.removeHandler(PLAYER_CHANNELS.close);
     ipcMain.removeListener(PLAYER_CHANNELS.command, onCommand);

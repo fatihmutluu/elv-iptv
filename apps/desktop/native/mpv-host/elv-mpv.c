@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
+#include <wctype.h>
 #include <mpv/client.h>
 
 typedef mpv_handle *(*create_fn)(void);

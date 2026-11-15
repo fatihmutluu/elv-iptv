@@ -61,16 +61,44 @@ function abortError(): Error {
   return Object.assign(new Error('mpv launch aborted'), { name: 'AbortError' });
 }
 
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
 
-function tryConnect(deps: SpawnDeps, path: string): Promise<Duplex> {
+function tryConnect(deps: SpawnDeps, path: string, signal?: AbortSignal): Promise<Duplex> {
   return new Promise((resolve, reject) => {
     const socket = deps.connect(path);
-    socket.once('connect', () => {
-      socket.off('error', reject);
+    const onAbort = (): void => {
+      socket.off('connect', onConnect);
+      socket.off('error', onError);
+      socket.once('error', () => undefined);
+      socket.destroy?.();
+      reject(abortError());
+    };
+    const onConnect = (): void => {
+      signal?.removeEventListener('abort', onAbort);
+      socket.off('error', onError);
       resolve(socket);
-    });
-    socket.once('error', reject);
+    };
+    const onError = (err: Error): void => {
+      signal?.removeEventListener('abort', onAbort);
+      socket.off('connect', onConnect);
+      reject(err);
+    };
+    socket.once('connect', onConnect);
+    socket.once('error', onError);
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
 
@@ -157,6 +185,11 @@ async function spawnDarwinMpv(opts: SpawnMpvOptions, deps: SpawnDeps): Promise<M
       throw new Error('mpv IPC fd 3 did not open');
     }
     const client = createMpvClient(attempt.fd3, { replyTimeoutMs: 3000 });
+    if (opts.signal?.aborted) {
+      client.close();
+      attempt.child.kill('SIGKILL');
+      throw abortError();
+    }
     if (!needsWindowProbe) {
       return wrapProcess(attempt.pid, client, attempt.exited, (sig) => attempt.child.kill(sig));
     }
@@ -180,20 +213,36 @@ async function spawnDarwinMpv(opts: SpawnMpvOptions, deps: SpawnDeps): Promise<M
       }
       const waitMs = Math.max(1, attemptEnd - Date.now());
       let timer: ReturnType<typeof setTimeout> | undefined;
+      let onAbort: (() => void) | undefined;
       const reply = await Promise.race([
         client.command(['get_property', 'osd-width']).catch(() => undefined),
         new Promise<undefined>((resolve) => {
           timer = setTimeout(() => resolve(undefined), waitMs);
         }),
+        new Promise<undefined>((resolve) => {
+          onAbort = () => resolve(undefined);
+          opts.signal?.addEventListener('abort', onAbort, { once: true });
+        }),
       ]);
       clearTimeout(timer);
+      if (onAbort) opts.signal?.removeEventListener('abort', onAbort);
+      if (opts.signal?.aborted) {
+        client.close();
+        attempt.child.kill('SIGKILL');
+        throw abortError();
+      }
       if (reply?.error === 'success' && typeof reply.data === 'number' && reply.data > 0) {
         ready = true;
         break;
       }
-      await sleep(retryMs);
+      await abortableSleep(retryMs, opts.signal);
     }
 
+    if (opts.signal?.aborted) {
+      client.close();
+      attempt.child.kill('SIGKILL');
+      throw abortError();
+    }
     if (ready) {
       return wrapProcess(attempt.pid, client, attempt.exited, (sig) => attempt.child.kill(sig));
     }
@@ -219,15 +268,24 @@ export async function spawnMpv(
 
   const token = randomBytes(8).toString('hex');
   const tempDir = opts.platform === 'win32' ? undefined : mkdtempSync(join(tmpdir(), 'elv-mpv-'));
+  const cleanTemp = (): void => {
+    if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  };
   const endpoint =
     opts.platform === 'win32' ? `elv-mpv-${token}` : join(tempDir ?? '', `${token}.sock`);
   const connectPath = opts.platform === 'win32' ? `\\\\.\\pipe\\${endpoint}` : endpoint;
 
-  const child = deps.spawn(
-    opts.executable,
-    [...opts.args, ...transportArgs(opts.platform, endpoint, opts.parentPid)],
-    { windowsHide: true, stdio: 'ignore' },
-  );
+  let child: ReturnType<typeof deps.spawn>;
+  try {
+    child = deps.spawn(
+      opts.executable,
+      [...opts.args, ...transportArgs(opts.platform, endpoint, opts.parentPid)],
+      { windowsHide: true, stdio: 'ignore' },
+    );
+  } catch (error) {
+    cleanTemp();
+    throw error;
+  }
   const pid = child.pid ?? 0;
   if (opts.pidFile && pid) recordPid(opts.pidFile, pid);
 
@@ -237,12 +295,14 @@ export async function spawnMpv(
     child.once('exit', (code: number | null, signal: string | null) => {
       exitInfo = { code, signal };
       if (opts.pidFile && pid) forgetPid(opts.pidFile, pid);
-      if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+      cleanTemp();
       resolve(exitInfo);
     });
     child.once('error', (error: Error) => {
       spawnError = error;
       exitInfo ??= { code: null, signal: null };
+      if (opts.pidFile && pid) forgetPid(opts.pidFile, pid);
+      cleanTemp();
       child.kill();
       resolve(exitInfo);
     });
@@ -254,6 +314,7 @@ export async function spawnMpv(
   while (!stream) {
     if (opts.signal?.aborted) {
       child.kill();
+      cleanTemp();
       throw abortError();
     }
     if (spawnError) throw new Error(`mpv could not start: ${spawnError.message}`);
@@ -261,13 +322,26 @@ export async function spawnMpv(
       throw new Error(`mpv exited with code ${exitInfo.code ?? 'null'} before its IPC was ready`);
     if (Date.now() > deadline) {
       child.kill();
+      cleanTemp();
       throw new Error('mpv IPC did not open in time');
     }
     try {
-      stream = await tryConnect(deps, connectPath);
+      stream = await tryConnect(deps, connectPath, opts.signal);
     } catch {
-      await sleep(retryMs);
+      if (opts.signal?.aborted) {
+        child.kill();
+        cleanTemp();
+        throw abortError();
+      }
+      await abortableSleep(retryMs, opts.signal);
     }
+  }
+
+  if (opts.signal?.aborted) {
+    stream.destroy();
+    child.kill();
+    cleanTemp();
+    throw abortError();
   }
 
   const client = createMpvClient(stream, { replyTimeoutMs: 3000 });

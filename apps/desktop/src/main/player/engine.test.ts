@@ -178,16 +178,29 @@ const playing = (events: readonly EngineEvent[], attempt: number) =>
   vi.waitFor(() => expect(states(events, attempt)).toContain('playing'), { timeout: 3000 });
 
 describe('MpvEngine review focus', () => {
-  it('a user agent with commas reaches loadfile verbatim', async () => {
+  it('passes custom headers as a typed set_property array and clears them on the next load', async () => {
     const { engine, fake } = await setup();
-    const headers = { 'User-Agent': 'Mozilla/5.0 (KHTML, like Gecko)', 'X-Elv-Test': 'a,b\\c' };
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (KHTML, like Gecko)',
+      'X-Elv-A': 'foo\\',
+      'X-Elv-B': 'a,b\\c',
+    };
     engine.load(live(1, URL_A, headers));
     await vi.waitFor(() => expect(loadfiles(fake)).toHaveLength(1));
     expect(loadfiles(fake)[0]?.[4]).toMatchObject({
       'user-agent': 'Mozilla/5.0 (KHTML, like Gecko)',
-      'http-header-fields': 'X-Elv-Test: a\\,b\\c',
     });
+    expect(loadfiles(fake)[0]?.[4]).not.toHaveProperty('http-header-fields');
+    expect(fake.sent).toContainEqual([
+      'set_property',
+      'http-header-fields',
+      ['X-Elv-A: foo\\', 'X-Elv-B: a,b\\c'],
+    ]);
     expect(fake.spawnArgs.flat().join(' ')).not.toContain('sim.test');
+
+    engine.load(live(2, URL_B, {}));
+    await vi.waitFor(() => expect(loadfiles(fake)).toHaveLength(2));
+    expect(fake.sent).toContainEqual(['set_property', 'http-header-fields', []]);
   });
 
   it('a burst of ten loads sends at most two loadfile commands and plays the newest', async () => {
@@ -732,5 +745,39 @@ describe('MpvEngine deferred start', () => {
     engine.start();
     await playing(events, 1);
     expect(fake.connections).toBe(1);
+  });
+
+  it('does not rebind an entry whose start-file and end-file beat the loadfile reply', async () => {
+    let emitEvent!: (e: Record<string, unknown>) => void;
+    const { engine, events } = await setup({
+      spawn: (fake) => async (args, signal) => {
+        const proc = await fake.spawn(args, signal);
+        const origOnEvent = proc.client.onEvent.bind(proc.client);
+        const origCommand = proc.client.command.bind(proc.client);
+        return {
+          ...proc,
+          client: {
+            ...proc.client,
+            onEvent: (cb) => {
+              emitEvent = cb as (e: Record<string, unknown>) => void;
+              return origOnEvent(cb);
+            },
+            command: async (cmd) => {
+              if (cmd[0] === 'loadfile') {
+                emitEvent({ event: 'start-file', playlist_entry_id: 99 });
+                emitEvent({ event: 'end-file', playlist_entry_id: 99, reason: 'eof' });
+                return { request_id: 1, error: 'success', data: { playlist_entry_id: 99 } };
+              }
+              return origCommand(cmd);
+            },
+          },
+        };
+      },
+    });
+    engine.load({ attempt: 1, url: URL_VOD, headers: {}, kind: 'vod' });
+    await sleep(30);
+    emitEvent({ event: 'start-file', playlist_entry_id: 99 });
+    await sleep(20);
+    expect(states(events, 1)).toEqual(['opening', 'ended']);
   });
 });

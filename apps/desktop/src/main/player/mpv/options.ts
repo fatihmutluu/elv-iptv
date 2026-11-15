@@ -9,6 +9,7 @@ export const LAUNCH_OPTIONS: readonly string[] = [
   '--keep-open=no',
   '--ytdl=no',
   '--load-scripts=no',
+  '--load-unsafe-playlists=no',
   '--save-position-on-quit=no',
   '--resume-playback=no',
   '--terminal=no',
@@ -37,20 +38,30 @@ export function launchArgs(p: {
   return [...base, `--input-conf=${p.inputConf}`, ...p.presenterArgs, ...p.transportArgs];
 }
 
-const escapeField = (value: string): string => value.replace(/,/g, '\\,');
-
-/** Maps request headers to mpv's `user-agent`, `referrer` and `http-header-fields` options. */
+/** Maps `User-Agent` and `Referer`/`Referrer` headers to mpv's per-file `loadfile` options. */
 export function headerOptions(headers: Readonly<Record<string, string>>): Record<string, string> {
   const out: Record<string, string> = {};
-  const rest: string[] = [];
   for (const [name, value] of Object.entries(headers)) {
     const lower = name.toLowerCase();
     if (lower === 'user-agent') out['user-agent'] = value;
     else if (lower === 'referer' || lower === 'referrer') out['referrer'] = value;
-    else rest.push(escapeField(`${name}: ${value}`));
   }
-  if (rest.length > 0) out['http-header-fields'] = rest.join(',');
   return out;
+}
+
+/**
+ * Maps custom request headers (excluding `User-Agent` and `Referer`/`Referrer`) to verbatim `Name: Value` entries
+ * for `['set_property', 'http-header-fields', entries]` (`MPV_FORMAT_NODE_ARRAY`, avoiding mpv string-list escaping).
+ */
+export function headerFields(headers: Readonly<Record<string, string>>): string[] {
+  const rest: string[] = [];
+  for (const [name, value] of Object.entries(headers)) {
+    const lower = name.toLowerCase();
+    if (lower !== 'user-agent' && lower !== 'referer' && lower !== 'referrer') {
+      rest.push(`${name}: ${value}`);
+    }
+  }
+  return rest;
 }
 
 /** Builds the `loadfile` command that replaces the current media; all option values are strings. */

@@ -1,5 +1,14 @@
 import type { BrowserWindow, BrowserWindowConstructorOptions } from 'electron';
 
+/** Minimal webContents surface used to lock down the page-less child video window. */
+export interface VideoWebContentsTarget {
+  setWindowOpenHandler(handler: () => { action: 'deny' }): void;
+  on(
+    event: 'will-navigate' | 'will-redirect' | 'will-frame-navigate',
+    listener: (details: { preventDefault(): void }) => void,
+  ): unknown;
+}
+
 /**
  * Options of the frameless, sandboxed video window mpv draws into with `--wid`; it never loads a page.
  * Transparent because Chromium's DirectComposition output lies above child windows: an opaque background hides
@@ -11,6 +20,7 @@ export function buildVideoWindowOptions(parent: BrowserWindow): BrowserWindowCon
     frame: false,
     show: false,
     skipTaskbar: true,
+    closable: false,
     resizable: false,
     movable: false,
     minimizable: false,
@@ -27,12 +37,25 @@ export function buildVideoWindowOptions(parent: BrowserWindow): BrowserWindowCon
   };
 }
 
-/** Creates the video window with `Window` (Electron's `BrowserWindow` in the app) and loads nothing into it. */
-export function createVideoWindow<W>(
+/** Blocks new windows and every navigation on the page-less video window (including OS file/URL drag-and-drop). */
+function lockDownVideoWebContents(contents: VideoWebContentsTarget): void {
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  const block = (details: { preventDefault(): void }): void => {
+    details.preventDefault();
+  };
+  contents.on('will-navigate', block);
+  contents.on('will-redirect', block);
+  contents.on('will-frame-navigate', block);
+}
+
+/** Creates the video window with `Window` (Electron's `BrowserWindow` in the app), locks down its webContents, and loads nothing into it. */
+export function createVideoWindow<W extends { readonly webContents: VideoWebContentsTarget }>(
   parent: BrowserWindow,
   Window: new (options: BrowserWindowConstructorOptions) => W,
 ): W {
-  return new Window(buildVideoWindowOptions(parent));
+  const window = new Window(buildVideoWindowOptions(parent));
+  lockDownVideoWebContents(window.webContents);
+  return window;
 }
 
 /** The window's HWND as the unsigned 32-bit number mpv's `--wid` takes. */

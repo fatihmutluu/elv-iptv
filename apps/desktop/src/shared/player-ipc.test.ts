@@ -78,12 +78,32 @@ describe('isPlayerCommandMessage', () => {
     }
   });
 
-  it('drops a header name with a control character, a colon, or nothing', () => {
-    for (const name of ['X\nKey', 'X:Key', '', 'X Key\t']) {
+  it('drops a header name that is not an RFC 9110 token', () => {
+    for (const name of [
+      'X\nKey',
+      'X:Key',
+      '',
+      'X Key\t',
+      'X Key',
+      'X,Key',
+      'X\\Key',
+      'X"Key',
+      'X(Key)',
+      'X/Key',
+      'X=Key',
+    ]) {
       expect(
         isPlayerCommandMessage(msg({ name: 'load', cmd: { ...load, headers: { [name]: 'v' } } })),
       ).toBe(false);
     }
+    expect(
+      isPlayerCommandMessage(
+        msg({
+          name: 'load',
+          cmd: { ...load, headers: { "X-Key_1.2!#$%&'*+^`|~": 'v' } },
+        }),
+      ),
+    ).toBe(true);
   });
 
   it('drops an unknown shape', () => {

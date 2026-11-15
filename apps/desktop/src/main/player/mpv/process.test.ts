@@ -383,4 +383,139 @@ describe('spawnMpv start failure', () => {
     setTimeout(() => h.child.emit('error', new Error('ENOENT')), 5);
     await expect(result).rejects.toThrow(/could not start: ENOENT/);
   });
+
+  it('linux spawn cleans its temporary socket directory when spawn emits error without exit', async () => {
+    let seenSockPath = '';
+    const child = new EventEmitter() as EventEmitter & {
+      pid: undefined;
+      killed: boolean;
+      kill(): boolean;
+    };
+    child.pid = undefined;
+    child.killed = false;
+    child.kill = () => {
+      child.killed = true;
+      return true;
+    };
+    const deps: SpawnDeps = {
+      spawn: ((_cmd: string, args: string[]) => {
+        const arg = args.find((a) => a.startsWith('--input-ipc-server=')) ?? '';
+        seenSockPath = arg.slice('--input-ipc-server='.length);
+        setTimeout(() => child.emit('error', new Error('ENOENT')), 5);
+        return child;
+      }) as unknown as SpawnDeps['spawn'],
+      connect: (() => {
+        const s = new EventEmitter() as EventEmitter & Duplex;
+        setImmediate(() => s.emit('error', new Error('ENOENT')));
+        return s;
+      }) as unknown as SpawnDeps['connect'],
+      retryDelayMs: 2,
+    };
+    await expect(
+      spawnMpv({ executable: '/missing/mpv', args: [], platform: 'linux', parentPid: 1 }, deps),
+    ).rejects.toThrow(/could not start: ENOENT/);
+    const tempDir = join(seenSockPath, '..');
+    expect(seenSockPath).toMatch(/\.sock$/);
+    expect(existsSync(tempDir)).toBe(false);
+  });
+
+  it('win32 spawn kills the child and destroys the socket when signal aborts while tryConnect resolves', async () => {
+    const ac = new AbortController();
+    const child = new FakeChild();
+    const socket = fakeSocket();
+    const deps: SpawnDeps = {
+      spawn: (() => child) as unknown as SpawnDeps['spawn'],
+      connect: (() => {
+        const attempt = new EventEmitter() as EventEmitter & Duplex;
+        setImmediate(() => {
+          ac.abort();
+          attempt.emit('connect');
+        });
+        return Object.assign(socket, {
+          once: attempt.once.bind(attempt),
+          on: Duplex.prototype.on.bind(socket),
+          off: attempt.off.bind(attempt),
+        });
+      }) as unknown as SpawnDeps['connect'],
+    };
+    await expect(
+      spawnMpv(
+        {
+          executable: 'elv-mpv.exe',
+          args: ['--idle=yes'],
+          platform: 'win32',
+          parentPid: 1,
+          signal: ac.signal,
+        },
+        deps,
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(child.killed).toBe(true);
+    expect(socket.destroyed).toBe(true);
+  });
+
+  it('darwin spawn aborts promptly during the osd-width probe and if aborted before probe', async () => {
+    const ac1 = new AbortController();
+    const child1 = new FakeChild();
+    const sock1 = fakeSocket();
+    const deps1: SpawnDeps = {
+      spawn: (() => {
+        child1.stdio = [null, null, null, sock1];
+        ac1.abort();
+        return child1;
+      }) as unknown as SpawnDeps['spawn'],
+      connect: (() => {
+        throw new Error('unused');
+      }) as unknown as SpawnDeps['connect'],
+    };
+    await expect(
+      spawnMpv(
+        {
+          executable: '/mpv',
+          args: ['--idle=yes'],
+          platform: 'darwin',
+          parentPid: 1,
+          signal: ac1.signal,
+        },
+        deps1,
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(child1.killed).toBe(true);
+
+    const ac2 = new AbortController();
+    const child2 = new FakeChild();
+    const sock2 = new Duplex({
+      read() {},
+      write(_chunk: Buffer, _e, cb) {
+        // Never answer osd-width (simulating deadlocked cocoa-cb window), abort after 10 ms:
+        setTimeout(() => ac2.abort(), 10);
+        cb();
+      },
+    });
+    const deps2: SpawnDeps = {
+      spawn: (() => {
+        child2.stdio = [null, null, null, sock2];
+        return child2;
+      }) as unknown as SpawnDeps['spawn'],
+      connect: (() => {
+        throw new Error('unused');
+      }) as unknown as SpawnDeps['connect'],
+      darwinWindowTimeoutMs: 2000,
+    };
+    const startedAt = Date.now();
+    await expect(
+      spawnMpv(
+        {
+          executable: '/mpv',
+          args: ['--force-window=immediate'],
+          platform: 'darwin',
+          parentPid: 1,
+          signal: ac2.signal,
+        },
+        deps2,
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    expect(child2.killed).toBe(true);
+  });
 });

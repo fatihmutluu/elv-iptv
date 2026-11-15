@@ -9,7 +9,7 @@ import { MpvWedgedError } from './mpv/client.ts';
 import type { MpvCommand, MpvEvent, MpvReply } from './mpv/codec.ts';
 import { createDeriver, type Deriver } from './mpv/derive.ts';
 import { createEntryTable, type EntryTable } from './mpv/entries.ts';
-import { loadfileCommand } from './mpv/options.ts';
+import { headerFields, loadfileCommand } from './mpv/options.ts';
 import type { MpvProcess } from './mpv/process.ts';
 import type { VideoPresenter } from './presenter/types.ts';
 
@@ -126,6 +126,7 @@ interface Live {
   deriver: Deriver;
   paused: boolean;
   userQuit: boolean;
+  hasCustomHeaders: boolean;
   /** The load whose `loadfile` is sent but not bound yet. */
   inFlight?: Slot;
   /** The last sent load until its stream opened (`file-loaded`) or failed; a newer load waits for it. */
@@ -381,6 +382,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       deriver: createDeriver({ now: deps.now, clockIntervalMs: CLOCK_INTERVAL_MS }),
       paused: false,
       userQuit: false,
+      hasCustomHeaders: false,
       endWaiters: new Set(),
     };
     live = L;
@@ -456,6 +458,12 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     maxHoldMs = Math.max(maxHoldMs, deps.now() - heldAt);
     if (deps.loadMode === 'stop-then-load' && !(await stopCurrent(L))) return;
     if (slot !== media || live !== L) return;
+    const fields = headerFields(slot.request.headers);
+    if (fields.length > 0 || L.hasCustomHeaders) {
+      const propReply = await send(L, ['set_property', 'http-header-fields', fields]);
+      if (!propReply || live !== L || slot !== media) return;
+      L.hasCustomHeaders = fields.length > 0;
+    }
     L.inFlight = slot;
     beginOpening(L, slot);
     const reply = await send(L, loadfileCommand(slot.request));
@@ -474,10 +482,12 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       return;
     }
     const entryId =
-      replyEntryId(reply) ?? entryIdOf((await send(L, ['get_property', 'playlist/0/id']))?.data);
+      slot.entryId ??
+      replyEntryId(reply) ??
+      entryIdOf((await send(L, ['get_property', 'playlist/0/id']))?.data);
     L.inFlight = undefined;
     if (live !== L) return;
-    if (entryId !== undefined) bind(L, slot, entryId);
+    if (entryId !== undefined && slot.entryId === undefined) bind(L, slot, entryId);
     if (L.opening?.slot === slot && !L.opening.started)
       armOpening(L, START_TIMEOUT_MS, () => wedged(L, 'mpv did not start the media'));
     // mpv keeps `pause` across files; a load means play, as on the other engines.
@@ -506,6 +516,10 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       case 'stop': {
         const L = live;
         if (!L) return;
+        if (L.hasCustomHeaders) {
+          await send(L, ['set_property', 'http-header-fields', []]);
+          L.hasCustomHeaders = false;
+        }
         await send(L, ['stop']);
         finishOpening(L);
         return;
