@@ -257,17 +257,60 @@ describe('ElvList', () => {
     expect(container.props.tabIndex).toBe(0);
     expect(row0.props.tabIndex).toBe(-1);
 
-    await fireEvent(container, 'keyDown', { key: 'ArrowDown' });
-    expect(screen.getByTestId('dnav-row-1').props.accessibilityState.selected).toBe(true);
-
-    const enterEvent = {
-      key: 'Enter',
-      preventDefault: jest.fn(),
-      stopPropagation: jest.fn(),
-    };
+    const sharedArrowNativeEvent = {};
+    let arrowDefaultPrevented = false;
     await act(async () => {
-      container.props.onKeyDownCapture?.(enterEvent);
-      container.props.onKeyDown?.(enterEvent);
+      container.props.onKeyDownCapture?.({
+        key: 'ArrowDown',
+        nativeEvent: sharedArrowNativeEvent,
+        get defaultPrevented() {
+          return arrowDefaultPrevented;
+        },
+        preventDefault: () => {
+          arrowDefaultPrevented = true;
+        },
+        stopPropagation: jest.fn(),
+      });
+    });
+    await act(async () => {
+      screen.getByTestId('dnav-desktop-keys').props.onKeyDown?.({
+        key: 'ArrowDown',
+        nativeEvent: sharedArrowNativeEvent,
+        get defaultPrevented() {
+          return arrowDefaultPrevented;
+        },
+        preventDefault: jest.fn(),
+        stopPropagation: jest.fn(),
+      });
+    });
+    expect(screen.getByTestId('dnav-row-1').props.accessibilityState.selected).toBe(true);
+    expect(screen.getByTestId('dnav-row-2').props.accessibilityState.selected).toBe(false);
+
+    const sharedEnterNativeEvent = {};
+    let enterDefaultPrevented = false;
+    await act(async () => {
+      screen.getByTestId('dnav-desktop-keys').props.onKeyDownCapture?.({
+        key: 'Enter',
+        nativeEvent: sharedEnterNativeEvent,
+        get defaultPrevented() {
+          return enterDefaultPrevented;
+        },
+        preventDefault: () => {
+          enterDefaultPrevented = true;
+        },
+        stopPropagation: jest.fn(),
+      });
+    });
+    await act(async () => {
+      screen.getByTestId('dnav-desktop-keys').props.onKeyDown?.({
+        key: 'Enter',
+        nativeEvent: sharedEnterNativeEvent,
+        get defaultPrevented() {
+          return enterDefaultPrevented;
+        },
+        preventDefault: jest.fn(),
+        stopPropagation: jest.fn(),
+      });
       row0.props.onPress?.({ type: 'keyup' });
     });
 

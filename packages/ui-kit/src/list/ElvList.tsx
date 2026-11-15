@@ -47,6 +47,8 @@ interface DesktopKeyboardEventLike {
   ctrlKey?: unknown;
   altKey?: unknown;
   metaKey?: unknown;
+  defaultPrevented?: unknown;
+  nativeEvent?: unknown;
   preventDefault?: () => void;
   stopPropagation?: () => void;
   __elvHandled?: boolean;
@@ -222,10 +224,15 @@ function ElvListPointer<T>({
   const handleDesktopKeyDown = useCallback(
     (event: DesktopKeyboardEventLike) => {
       if (count <= 0 || !event || typeof event.key !== 'string') return;
-      if (event.__elvHandled) return;
+      const raw =
+        typeof event.nativeEvent === 'object' && event.nativeEvent !== null
+          ? (event.nativeEvent as { __elvHandled?: boolean })
+          : event;
+      if (event.defaultPrevented === true || event.__elvHandled || raw.__elvHandled) return;
       if (event.ctrlKey || event.altKey || event.metaKey) return;
       if (event.key === 'Enter') {
         event.__elvHandled = true;
+        raw.__elvHandled = true;
         event.preventDefault?.();
         event.stopPropagation?.();
         containerRef.current?.focus?.();
@@ -239,6 +246,7 @@ function ElvListPointer<T>({
       else if (event.key === 'PageUp') next = clamp(safeSelected - visibleRows, 0, count - 1);
       if (next !== undefined) {
         event.__elvHandled = true;
+        raw.__elvHandled = true;
         event.preventDefault?.();
         containerRef.current?.focus?.();
         onSelectIndex?.(next);
