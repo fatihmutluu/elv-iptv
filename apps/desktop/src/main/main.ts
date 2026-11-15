@@ -1,8 +1,9 @@
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow, net, protocol } from 'electron';
+import { app, BrowserWindow, net, protocol, session } from 'electron';
 import { APP_ORIGIN, APP_SCHEME } from './app-protocol.ts';
+import { lockDownSession, lockDownWebContents } from './security.ts';
 import { type ServeDeps, serveAppRequest } from './serve-app.ts';
 import { buildWindowOptions, WINDOW_TITLE } from './window-options.ts';
 
@@ -25,16 +26,14 @@ function createWindow(): void {
     buildWindowOptions(join(__dirname, '..', 'preload', 'preload.js')),
   );
   window.setMenuBarVisibility(false);
-  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  window.webContents.on('will-navigate', (event, url) => {
-    if (!url.startsWith(`${APP_ORIGIN}/`)) event.preventDefault();
-  });
+  lockDownWebContents(window.webContents);
   window.on('page-title-updated', (event) => event.preventDefault());
   window.setTitle(WINDOW_TITLE);
   void window.loadURL(`${APP_ORIGIN}/`);
 }
 
 void app.whenReady().then(() => {
+  lockDownSession(session.defaultSession);
   serveRenderer();
   createWindow();
   app.on('activate', () => {

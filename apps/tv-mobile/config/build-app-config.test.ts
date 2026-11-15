@@ -27,25 +27,50 @@ describe('buildAppConfig', () => {
     expect(config.ios?.bundleIdentifier).toBe('io.github.fatihmutluu.elviptv.dev');
   });
 
-  it.each(['development', 'production', undefined])(
-    'allows plain HTTP for user-supplied sources on every platform (variant %s)',
-    (variant) => {
-      const env = { APP_VARIANT: variant };
+  it.each([
+    { APP_VARIANT: 'development', STORE: 'direct', EXPO_TV: undefined },
+    { APP_VARIANT: 'production', STORE: 'play', EXPO_TV: undefined },
+    { APP_VARIANT: 'production', STORE: 'amazon', EXPO_TV: '1' },
+    { APP_VARIANT: 'production', STORE: 'appstore', EXPO_TV: '1' },
+    { APP_VARIANT: undefined, STORE: undefined, EXPO_TV: undefined },
+  ])(
+    'allows plain HTTP for user-supplied sources across every variant, target, and store (%o)',
+    (env) => {
       const config = build(env);
-      expect(pluginOptions(env, 'expo-build-properties')).toMatchObject({
+      const buildProps = pluginOptions(env, 'expo-build-properties') as {
+        android?: Record<string, unknown>;
+        ios?: Record<string, unknown>;
+      };
+      expect(buildProps).toMatchObject({
         android: { minSdkVersion: 28, usesCleartextTraffic: true },
         ios: { deploymentTarget: '18.0' },
       });
+      expect(buildProps.android).not.toHaveProperty('networkSecurityConfig');
       expect(config.ios?.infoPlist?.NSAppTransportSecurity).toEqual({
         NSAllowsArbitraryLoads: true,
       });
       expect(config.ios?.infoPlist?.NSAppTransportSecurity).not.toHaveProperty(
         'NSAllowsLocalNetworking',
       );
+      expect(config.ios?.infoPlist?.NSAppTransportSecurity).not.toHaveProperty(
+        'NSExceptionDomains',
+      );
       const custom = (config.plugins ?? []).some(
         (p) => typeof p === 'function' || (Array.isArray(p) && typeof p[0] === 'function'),
       );
       expect(custom).toBe(false);
+    },
+  );
+
+  it.each(['development', 'production', undefined])(
+    'blocks legacy external storage permissions and disables Android predictive back (variant %s)',
+    (variant) => {
+      const config = build({ APP_VARIANT: variant });
+      expect(config.android?.blockedPermissions).toEqual([
+        'android.permission.READ_EXTERNAL_STORAGE',
+        'android.permission.WRITE_EXTERNAL_STORAGE',
+      ]);
+      expect(config.android?.predictiveBackGestureEnabled).toBe(false);
     },
   );
 

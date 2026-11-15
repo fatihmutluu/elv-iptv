@@ -159,6 +159,21 @@ describe('dependency rules over pnpm-style linked workspaces', () => {
     expect(names(root)).toEqual([expect.stringContaining('no-dev-dependencies-in-src: packages')]);
   });
 
+  it('rejects a dev-only dependency imported from a desktop renderer src folder', () => {
+    const root = workspace();
+    pkg(
+      root,
+      'apps/desktop/renderer',
+      '@elv/desktop-renderer',
+      "import t from 'tooling';\nexport const u = t;",
+      { devDependencies: { tooling: '1.0.0' } },
+    );
+    thirdParty(root, 'apps/desktop/renderer', 'tooling');
+    expect(names(root)).toEqual([
+      expect.stringContaining('no-dev-dependencies-in-src: apps/desktop/renderer/src'),
+    ]);
+  });
+
   it('catches a feature importing a native module through its package name', () => {
     const root = workspace();
     pkg(root, 'modules/engine-x', '@elv/engine-x', 'export const e = 1;');

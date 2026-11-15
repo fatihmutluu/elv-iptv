@@ -282,9 +282,9 @@ export function ensureRecipe(
 const children = new Set<ChildProcess>();
 const KILL_GRACE_MS = 2000;
 
-/** Number of live FFmpeg children the simulator is running right now. */
-export function activeChildren(): number {
-  return children.size;
+/** Number of live FFmpeg children currently running (in `pool` when given, else across all simulator instances). */
+export function activeChildren(pool: ReadonlySet<ChildProcess> = children): number {
+  return pool.size;
 }
 
 /** A running real-time FFmpeg copy of a recipe loop. */
@@ -296,7 +296,7 @@ export interface LiveProcess {
 }
 
 /** Starts FFmpeg looping `loopTs` at real time as MPEG-TS on stdout. */
-export function spawnLive(ffmpeg: string, loopTs: string): LiveProcess {
+export function spawnLive(ffmpeg: string, loopTs: string, pool?: Set<ChildProcess>): LiveProcess {
   const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-re', '-stream_loop', '-1'];
   const child = spawn(
     ffmpeg,
@@ -307,18 +307,23 @@ export function spawnLive(ffmpeg: string, loopTs: string): LiveProcess {
     },
   );
   children.add(child);
+  pool?.add(child);
+  const forget = (): void => {
+    children.delete(child);
+    pool?.delete(child);
+  };
   let timer: NodeJS.Timeout | undefined;
   let stopping = false;
   const exited = new Promise<void>((resolve) => {
     child.on('close', () => {
-      children.delete(child);
+      forget();
       clearTimeout(timer);
       resolve();
     });
     child.on('error', () => {
       child.stdout.destroy();
       if (child.pid === undefined) {
-        children.delete(child);
+        forget();
         resolve();
       }
     });

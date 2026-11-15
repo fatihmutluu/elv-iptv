@@ -20,7 +20,7 @@ export interface ImportResult {
 
 /** The simulator the gate talks to: started for the run, or an already running one that is left alone. */
 export interface SimControl {
-  ensure(): Promise<{ reused: boolean; stop(): Promise<void> }>;
+  ensure(): Promise<{ reused: boolean; reset?(): Promise<void>; stop(): Promise<void> }>;
 }
 
 /** Options of {@link runImportGate}. */
@@ -174,6 +174,7 @@ export async function runImportGate(opts: ImportGateOptions): Promise<ImportResu
   const sim = await opts.sim.ensure();
   try {
     if (sim.reused) opts.onNote?.('simulator already running on port 7878: reusing it');
+    await sim.reset?.();
     const device = await openDevice(exec, adb, opts.avd);
     await installApk(exec, adb, device.serial, root);
 

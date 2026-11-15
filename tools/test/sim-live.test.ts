@@ -1,14 +1,19 @@
-import { mkdtempSync } from 'node:fs';
-import { request as httpRequest } from 'node:http';
+import { mkdtempSync, readdirSync } from 'node:fs';
+import { request as httpRequest, ServerResponse } from 'node:http';
+import { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ACCOUNTS, type Account } from '../src/sim/accounts.ts';
+import { createConnections, type SimContext } from '../src/sim/context.ts';
+import { FaultRules } from '../src/sim/fault-rules.ts';
 import { applyStreamFaults, parseFaults } from '../src/sim/faults.ts';
 import { hlsPlaylist } from '../src/sim/hls.ts';
+import { RequestLog } from '../src/sim/log.ts';
 import { activeChildren, ensureRecipe, findFfmpeg, MEDIA_SKIP_MARKER } from '../src/sim/media.ts';
 import { type SimHandle, startSim } from '../src/sim/server.ts';
+import { takeSlot } from '../src/sim/stream-io.ts';
 import { removeCache } from './media-cache.ts';
 import { packetPids, startsWithKeyframe } from './ts-packets.ts';
 
@@ -216,6 +221,48 @@ describe('routes that need no media', () => {
     expect((await fetch(`${sim.url}/live/${demo}/999999.ts`)).status).toBe(404);
     expect((await fetch(`${sim.url}/live/${demo}/1001.ts`)).status).toBe(503);
   });
+
+  it('refuses to take a slot when the response is already destroyed', () => {
+    const ctx: SimContext = {
+      now: () => new Date(),
+      seed: 1,
+      baseUrl: 'http://127.0.0.1:0',
+      log: new RequestLog(),
+      connections: createConnections(),
+      media: null,
+      faultRules: new FaultRules(),
+      liveProcesses: new Set(),
+    };
+    const sock = new Socket();
+    const res = new ServerResponse({ method: 'GET' } as never);
+    res.assignSocket(sock);
+    res.destroy();
+    expect(takeSlot(res, ctx, demoAccount)).toBe(false);
+    expect(ctx.connections.count(demoAccount.username)).toBe(0);
+  });
+
+  it('does not start a cold recipe build when a slow-start live request aborts early', async () => {
+    const freshCache = mkdtempSync(join(tmpdir(), 'sim-abort-cold-'));
+    try {
+      const sim = await startSim({
+        port: 0,
+        mediaSeconds: 4,
+        cacheDir: freshCache,
+        ffmpegPath: ffmpeg ?? 'ffmpeg',
+      });
+      open.push(sim);
+      const ac = new AbortController();
+      const pending = fetch(`${sim.url}/live/${demo}/1001.ts?fault=slow-start=1`, {
+        signal: ac.signal,
+      }).catch(() => null);
+      setTimeout(() => ac.abort(), 80);
+      await pending;
+      await new Promise((r) => setTimeout(r, 1100));
+      expect(readdirSync(freshCache)).toEqual([]);
+    } finally {
+      removeCache(freshCache);
+    }
+  });
 });
 
 withFfmpeg('live streams', () => {
@@ -281,6 +328,10 @@ withFfmpeg('live streams', () => {
     const sim = await start();
     await hold(`${sim.url}/live/${demo}/1001.ts`);
     expect((await fetch(`${sim.url}/live/${demo}/1001.ts`)).status).toBe(509);
+    expect((await fetch(`${sim.url}/live/${demo}/1001.ts`, { method: 'HEAD' })).status).toBe(200);
+    const otherSim = await start();
+    expect((sim as SimHandle & { activeChildren?: () => number }).activeChildren?.()).toBe(1);
+    expect((otherSim as SimHandle & { activeChildren?: () => number }).activeChildren?.()).toBe(0);
     await hold(`${sim.url}/live/${large}/1001.ts`);
     await hold(`${sim.url}/live/${large}/1002.ts`);
     expect((await fetch(`${sim.url}/live/${large}/1003.ts`)).status).toBe(403);

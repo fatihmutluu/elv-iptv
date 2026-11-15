@@ -15,6 +15,10 @@ export interface BuildOptions {
 const APP_ID = 'io.github.fatihmutluu.elviptv';
 const MIN_ANDROID_SDK = 28;
 const MIN_APPLE_OS = '18.0';
+const BLOCKED_ANDROID_PERMISSIONS = [
+  'android.permission.READ_EXTERNAL_STORAGE',
+  'android.permission.WRITE_EXTERNAL_STORAGE',
+];
 
 function parseStore(value: string | undefined): Store {
   if (value === undefined || value === '') return 'direct';
@@ -77,6 +81,8 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
     icon: './assets/icon.png',
     android: {
       package: id,
+      blockedPermissions: [...BLOCKED_ANDROID_PERMISSIONS],
+      predictiveBackGestureEnabled: false,
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#0b0e14',

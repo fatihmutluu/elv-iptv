@@ -1,0 +1,254 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  checkAndroidManifest,
+  checkAppleInfoPlist,
+  checkGradleDependencies,
+  checkReleaseArtifactBuffer,
+  runReleaseHygiene,
+} from '../src/release-hygiene.ts';
+
+const CLEAN_GRADLE_DEPS = `
+> Task :app:dependencies
+
+------------------------------------------------------------
+Project ':app'
+------------------------------------------------------------
+
+releaseRuntimeClasspath - Runtime classpath of compilation 'release' (target  (androidJvm)).
++--- com.facebook.react:react-android:0.84.0
++--- androidx.media3:media3-exoplayer:1.9.3
+\\--- com.squareup.okhttp3:okhttp:5.1.0
+`;
+
+const CLEAN_MANIFEST = `<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.github.fatihmutluu.elviptv">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application
+        android:name=".MainApplication"
+        android:usesCleartextTraffic="true">
+    </application>
+</manifest>`;
+
+const CLEAN_TV_MANIFEST = `<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.github.fatihmutluu.elviptv">
+    <uses-feature android:name="android.software.leanback" android:required="true" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application android:usesCleartextTraffic="true" />
+</manifest>`;
+
+const CLEAN_INFO_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>io.github.fatihmutluu.elviptv</string>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsArbitraryLoads</key>
+    <true/>
+  </dict>
+</dict>
+</plist>`;
+
+const tempDirs: string[] = [];
+
+function makeTempDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'elv-hygiene-test-'));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  while (tempDirs.length > 0) {
+    const dir = tempDirs.pop();
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+describe('checkGradleDependencies (#11)', () => {
+  it('accepts a clean releaseRuntimeClasspath tree', () => {
+    expect(checkGradleDependencies(CLEAN_GRADLE_DEPS)).toEqual([]);
+  });
+
+  it('rejects empty or non-dependency output', () => {
+    expect(checkGradleDependencies('')).not.toEqual([]);
+    expect(checkGradleDependencies('BUILD SUCCESSFUL in 1s')).not.toEqual([]);
+  });
+
+  it('rejects Google Play Services and Firebase artifacts', () => {
+    const withGms = `${CLEAN_GRADLE_DEPS}\n+--- com.google.android.gms:play-services-basement:18.4.0\n`;
+    const withFirebase = `${CLEAN_GRADLE_DEPS}\n\\--- com.google.firebase:firebase-analytics:22.0.0\n`;
+
+    expect(checkGradleDependencies(withGms).join('\n')).toContain('com.google.android.gms');
+    expect(checkGradleDependencies(withFirebase).join('\n')).toContain('com.google.firebase');
+  });
+});
+
+describe('checkAndroidManifest (#11, #12, #19)', () => {
+  it('accepts clean phone and TV release manifests', () => {
+    expect(checkAndroidManifest(CLEAN_MANIFEST)).toEqual([]);
+    expect(checkAndroidManifest(CLEAN_TV_MANIFEST, { tv: true })).toEqual([]);
+  });
+
+  it('ignores XML comments and tools:node="remove" markers', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="io.github.fatihmutluu.elviptv">
+    <!-- android.permission.READ_EXTERNAL_STORAGE -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" />
+    <application android:usesCleartextTraffic="true" />
+</manifest>`;
+    expect(checkAndroidManifest(xml)).toEqual([]);
+  });
+
+  it('rejects READ_EXTERNAL_STORAGE and WRITE_EXTERNAL_STORAGE (#19)', () => {
+    const withRead = CLEAN_MANIFEST.replace(
+      '<application',
+      '<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n<application',
+    );
+    const withWrite = CLEAN_MANIFEST.replace(
+      '<application',
+      '<uses-permission-sdk-23 android:name="android.permission.WRITE_EXTERNAL_STORAGE" />\n<application',
+    );
+    expect(checkAndroidManifest(withRead).join('\n')).toContain('READ_EXTERNAL_STORAGE');
+    expect(checkAndroidManifest(withWrite).join('\n')).toContain('WRITE_EXTERNAL_STORAGE');
+  });
+
+  it('rejects missing or false usesCleartextTraffic (#12)', () => {
+    const missing = CLEAN_MANIFEST.replace('android:usesCleartextTraffic="true"', '');
+    const disabled = CLEAN_MANIFEST.replace(
+      'android:usesCleartextTraffic="true"',
+      'android:usesCleartextTraffic="false"',
+    );
+    expect(checkAndroidManifest(missing).join('\n')).toContain('usesCleartextTraffic');
+    expect(checkAndroidManifest(disabled).join('\n')).toContain('usesCleartextTraffic');
+  });
+
+  it('requires android.software.leanback when tv is true', () => {
+    expect(checkAndroidManifest(CLEAN_MANIFEST, { tv: true }).join('\n')).toContain('leanback');
+  });
+
+  it('rejects .dev package identifiers and GMS/Firebase components', () => {
+    const devPkg = CLEAN_MANIFEST.replace(
+      'io.github.fatihmutluu.elviptv',
+      'io.github.fatihmutluu.elviptv.dev',
+    );
+    const gmsMeta = CLEAN_MANIFEST.replace(
+      '</application>',
+      '<meta-data android:name="com.google.android.gms.version" android:value="12451000" /></application>',
+    );
+    expect(checkAndroidManifest(devPkg).join('\n')).toContain('.dev');
+    expect(checkAndroidManifest(gmsMeta).join('\n')).toContain('com.google.android.gms');
+  });
+});
+
+describe('checkAppleInfoPlist (#12)', () => {
+  it('accepts clean production Info.plist with NSAllowsArbitraryLoads', () => {
+    expect(checkAppleInfoPlist(CLEAN_INFO_PLIST)).toEqual([]);
+  });
+
+  it('rejects NSAllowsLocalNetworking alongside NSAllowsArbitraryLoads (#12)', () => {
+    const broken = CLEAN_INFO_PLIST.replace(
+      '<key>NSAllowsArbitraryLoads</key>\n    <true/>',
+      '<key>NSAllowsArbitraryLoads</key>\n    <true/>\n    <key>NSAllowsLocalNetworking</key>\n    <true/>',
+    );
+    expect(checkAppleInfoPlist(broken).join('\n')).toContain('NSAllowsLocalNetworking');
+  });
+
+  it('rejects missing or disabled NSAllowsArbitraryLoads and .dev bundle IDs', () => {
+    const disabled = CLEAN_INFO_PLIST.replace('<true/>', '<false/>');
+    const devId = CLEAN_INFO_PLIST.replace(
+      'io.github.fatihmutluu.elviptv',
+      'io.github.fatihmutluu.elviptv.dev',
+    );
+    expect(checkAppleInfoPlist(disabled).join('\n')).toContain('NSAllowsArbitraryLoads');
+    expect(checkAppleInfoPlist(devId).join('\n')).toContain('.dev');
+  });
+});
+
+describe('checkReleaseArtifactBuffer & runReleaseHygiene', () => {
+  it('accepts clean JS bundles (__DEV__=false) and production app.config JSON', () => {
+    const bundle = Buffer.from(
+      'var __DEV__=false,name="ELV IPTV",pkg="io.github.fatihmutluu.elviptv";',
+      'utf8',
+    );
+    const appConfig = Buffer.from(
+      JSON.stringify({
+        name: 'ELV IPTV',
+        slug: 'elv-iptv',
+        extra: { store: 'play', build: { commit: 'abc' } },
+      }),
+      'utf8',
+    );
+    expect(checkReleaseArtifactBuffer('index.js', bundle)).toEqual([]);
+    expect(checkReleaseArtifactBuffer('app.config', appConfig)).toEqual([]);
+  });
+
+  it('rejects DEV_* keys, gate:true / gate:!0, and .dev package IDs in ASCII and UTF-16LE', () => {
+    const devKey = Buffer.from('{"dev":{"DEV_XTREAM_PASSWORD":"synthetic-value"}}', 'utf8');
+    const devUtf16 = Buffer.concat([
+      Buffer.from([0xff]),
+      Buffer.from('DEV_XTREAM_SERVER=http://127.0.0.1:7878', 'utf16le'),
+    ]);
+    const gateJson = Buffer.from('{"extra":{"store":"direct","gate":true}}', 'utf8');
+    const gateMinified = Buffer.from('const extra={store:"direct",gate:!0};', 'utf8');
+    const devBundleId = Buffer.from('bundleId="io.github.fatihmutluu.elviptv.dev"', 'utf8');
+
+    expect(checkReleaseArtifactBuffer('app.config', devKey).join('\n')).toContain(
+      'DEV_XTREAM_PASSWORD',
+    );
+    expect(checkReleaseArtifactBuffer('app.asar', devUtf16).join('\n')).toContain(
+      'DEV_XTREAM_SERVER',
+    );
+    expect(checkReleaseArtifactBuffer('app.config', gateJson).join('\n')).toContain('gate');
+    expect(checkReleaseArtifactBuffer('bundle.js', gateMinified).join('\n')).toContain('gate');
+    expect(checkReleaseArtifactBuffer('app.asar', devBundleId).join('\n')).toContain('.dev');
+  });
+
+  it('walks artifact directories and fails on missing paths or hygiene violations via runReleaseHygiene', () => {
+    const dir = makeTempDir();
+    const depsFile = join(dir, 'deps.txt');
+    const manifestFile = join(dir, 'AndroidManifest.xml');
+    const plistFile = join(dir, 'Info.plist');
+    const bundleDir = join(dir, 'bundle');
+    rmSync(bundleDir, { recursive: true, force: true });
+
+    writeFileSync(depsFile, CLEAN_GRADLE_DEPS, 'utf8');
+    writeFileSync(manifestFile, CLEAN_TV_MANIFEST, 'utf8');
+    writeFileSync(plistFile, CLEAN_INFO_PLIST, 'utf8');
+
+    const missingResult = runReleaseHygiene({
+      gradleDeps: [depsFile],
+      androidManifests: [manifestFile],
+      applePlists: [plistFile],
+      artifacts: [join(dir, 'does-not-exist.asar')],
+      tv: true,
+    });
+    expect(missingResult.ok).toBe(false);
+
+    const asarFile = join(dir, 'app.asar');
+    writeFileSync(asarFile, 'HEADER{"files":{"index.js":{"size":24}}}var __DEV__=false;', 'utf8');
+    const cleanResult = runReleaseHygiene({
+      gradleDeps: [depsFile],
+      androidManifests: [manifestFile],
+      applePlists: [plistFile],
+      artifacts: [asarFile],
+      tv: true,
+    });
+    expect(cleanResult).toEqual({ ok: true, errors: [] });
+
+    writeFileSync(asarFile, 'HEADER{"extra":{"gate":true,"DEV_SEED":"1"}}', 'utf8');
+    const dirtyResult = runReleaseHygiene({
+      artifacts: [asarFile],
+    });
+    expect(dirtyResult.ok).toBe(false);
+    expect(dirtyResult.errors.length).toBeGreaterThanOrEqual(2);
+  });
+});

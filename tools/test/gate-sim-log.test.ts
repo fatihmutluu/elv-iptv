@@ -76,6 +76,35 @@ describe('connectionStats', () => {
     expect(connectionStats(list, 'demo').overlapMs).toBe(1000 + 500 + 10 + 10);
   });
 
+  it('does not count an answer forced by a runtime fault rule on entry.fault', () => {
+    const list = [
+      entry({ status: 509, bytes: 0, ms: 2, fault: 'status=509' } as Partial<SimLogEntry>),
+      entry({ status: 429, bytes: 0, ms: 2, fault: 'drop@5s,status=429' } as Partial<SimLogEntry>),
+      entry({ status: 200, bytes: 23, ms: 2, fault: 'text-notice' } as Partial<SimLogEntry>),
+      entry({
+        start: 3000,
+        status: 509,
+        bytes: 0,
+        ms: 2,
+        fault: 'slow-start=3',
+      } as Partial<SimLogEntry>),
+    ];
+    expect(connectionStats(list, 'demo').limitResponses).toBe(1);
+  });
+
+  it('includes extensionless live, short-form and VOD streams in overlapMs while excluding m3u8 playlists', () => {
+    const list = [
+      entry({ start: 0, ms: 1000, path: '/live/demo/***/1001' }),
+      entry({ start: 500, ms: 1000, path: '/demo/***/1002' }),
+      entry({ start: 1200, ms: 1000, path: '/movie/demo/***/200001.mp4' }),
+      entry({ start: 1800, ms: 500, path: '/series/demo/***/300001.mkv' }),
+      entry({ start: 0, ms: 2000, path: '/live/demo/***/1001.m3u8' }),
+      entry({ start: 0, ms: 2000, path: '/movie/demo/***/200001.m3u8' }),
+    ];
+    // Pairs: [0,1000]&[500,1500]=500; [500,1500]&[1200,2200]=300; [1200,2200]&[1800,2300]=400 => 1200
+    expect(connectionStats(list, 'demo').overlapMs).toBe(1200);
+  });
+
   it('ignores HLS segments without an account and other accounts', () => {
     const list = [
       entry({ account: null, streamId: null, path: '/hls/news/3.ts', status: 509 }),

@@ -172,6 +172,14 @@ Used for `name_fold` and guide name matching.
   ≤ 20 s, through the Xtream API and as an M3U playlist; `large` guide (7 days × 5,000 channels) in ≤ 60 s; heap growth
   reported. Device budgets (spec §6.2) are measured
   by the gates on TV emulators.
+- Hermes VM scanner verification (`#37`, `node tools/bin/hermes-sources.ts --require-runtime --benchmark large` in `ci.yml`):
+  compiled with `hermesc -O` and executed under standalone Hermes (`v0.13.0` CLI), `scanM3u` scans the `large` playlist
+  (100,000 entries, 13.68 MiB) in 7.45 s (`1.84 MiB/s`, `13,432 entries/s`) and `scanXmltv` scans the unfiltered `large`
+  guide (5,000 channels, 854,751 programmes, 178.05 MiB) in 97.25 s (`1.83 MiB/s`, `8,789 programmes/s`) — confirming why
+  §5.6's `programmeChannels` set is load-bearing on non-JIT Hermes so unmatched channels skip XML decoding. Hermes supplies
+  `atob`/`btoa` natively (`decodeUtf8` avoids `TextDecoder`), but leaves `Symbol.asyncIterator` `undefined`; the host entry
+  must install `Symbol.asyncIterator ??= Symbol.for('Symbol.asyncIterator')` before Babel's `_AsyncGenerator` helper runs so
+  direct `chunks[Symbol.asyncIterator]()` lookups in `scanXmltv` and `@elv/domain` resolve the generator's iterator.
 - No single synchronous step longer than one batch; `yieldNow` between batches.
 
 ## 6. Testing
