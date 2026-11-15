@@ -289,6 +289,44 @@ describe('PlayerGateScreen', () => {
     expect(onlyMetrics(log).faultOutcome).toBe('limited-backoff');
   });
 
+  it('judges a silent fault run failed-in-time within a 20 s dwell (#81)', async () => {
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const engine = setup({
+      [`${HOST}/1001.ts?fault=stall30s@0s`]: [],
+    });
+    await render(
+      <PlayerGateScreen
+        params={{ ...params, zaps: 1, rate: 0.05, fault: 'silent' }}
+        createEngine={asEngine(engine)}
+      />,
+    );
+    await advance(8500);
+    expect(screen.getByTestId('osd-status')).toHaveTextContent('error: playback/network');
+    await advance(13_000);
+    const m = onlyMetrics(log);
+    expect(m.fault).toBe('silent');
+    expect(m.faultOutcome).toBe('failed-in-time');
+    expect(m.failures).toBe(1);
+    expect(m.recoveries).toEqual({ '1': 0, '2': 1, '3': 1, '4': 0 });
+  });
+
+  it('treats ended status as settled without waiting for the 15 s settle timeout', async () => {
+    const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const vodHost = 'http://10.0.2.2:7878/movie/demo/demo';
+    const engine = setup({
+      [`${vodHost}/200002.mp4`]: [{ afterMs: 200, emit: 'state', state: 'ended' }],
+    });
+    await render(
+      <PlayerGateScreen
+        params={{ ...params, channels: ['200001', '200002'], zaps: 1, rate: 1, stream: 'vod' }}
+        createEngine={asEngine(engine)}
+      />,
+    );
+    await advance(1500);
+    expect(screen.getByTestId('osd-status')).toHaveTextContent('ended');
+    expect(playerLines(log)).toHaveLength(1);
+  });
+
   it('tunes the vod stream form as VOD', async () => {
     jest.spyOn(console, 'log').mockImplementation(() => {});
     const engine = setup();

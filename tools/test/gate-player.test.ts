@@ -340,6 +340,36 @@ describe('judgeFault', () => {
     ]);
     expect(judgeFault('404', run('404', null), [], '1001').failures[0]).toMatch(/outcome null/);
   });
+
+  it('judges a silent fault run bounded to 12 s with ladder retries and zero limit responses (#81)', () => {
+    const stalled = (start: number, ms: number, over: Partial<SimLogEntry> = {}) =>
+      entry(start, ms, { bytes: 0, query: { fault: 'stall30s@0s' }, ...over });
+    const bounded = [
+      stalled(0, 4000),
+      stalled(4005, 2000),
+      stalled(6010, 2000),
+      next(20_000, 1000),
+    ];
+    expect(judgeFault('silent', run('silent', 'failed-in-time'), bounded, '1001')).toEqual({
+      failures: [],
+      warnings: [],
+    });
+
+    const single = [stalled(0, 4000)];
+    expect(
+      judgeFault('silent', run('silent', 'failed-in-time'), single, '1001').failures[0],
+    ).toMatch(/fewer than 2 requests/);
+
+    const old23s = [stalled(0, 8000), stalled(9000, 4000), stalled(15_000, 8000)];
+    expect(
+      judgeFault('silent', run('silent', 'failed-in-time'), old23s, '1001').failures[0],
+    ).toMatch(/limit 12000 ms/);
+
+    const leaked = [stalled(0, 4500), stalled(4000, 5, { status: 509 })];
+    expect(
+      judgeFault('silent', run('silent', 'failed-in-time'), leaked, '1001').failures[0],
+    ).toMatch(/1 limit responses on demo/);
+  });
 });
 
 describe('runPlayerGate', () => {
@@ -387,6 +417,7 @@ describe('runPlayerGate', () => {
         line({ fault: '404', faultOutcome: 'failed-in-time', zaps: 1 }),
         line({ fault: '509', faultOutcome: 'missed', zaps: 1 }),
         line({ fault: 'slowstart', faultOutcome: 'left', zaps: 1 }),
+        line({ fault: 'silent', faultOutcome: 'failed-in-time', zaps: 1 }),
       ],
       entries: [
         [],
@@ -394,6 +425,11 @@ describe('runPlayerGate', () => {
         [entry(0, 10, { status: 404 })],
         [entry(0, 5, forced509), entry(2500, 5, forced509)],
         [slow(0, 800), next(810, 2000)],
+        [
+          entry(0, 4000, { bytes: 0 }),
+          entry(4005, 2000, { bytes: 0 }),
+          entry(6010, 2000, { bytes: 0 }),
+        ],
       ],
     });
     const reports: string[] = [];
@@ -406,15 +442,20 @@ describe('runPlayerGate', () => {
       onFault: (r) => reports.push(r.fault),
     });
     expect(f.urls.slice(1)).toEqual(
-      [...['drop5', '404', '509'].map((x) => `0.1&fault=${x}`), '1.25&fault=slowstart'].map(
+      [
+        ...['drop5', '404', '509'].map((x) => `0.1&fault=${x}`),
+        '1.25&fault=slowstart',
+        '0.05&fault=silent',
+      ].map(
         (x) =>
           `elviptv://gate/player?host=10.0.2.2:7878&account=demo&channels=1001,1002,1003,1004&zaps=1&rate=${x}`,
       ),
     );
-    expect(reports).toEqual(['drop5', '404', '509', 'slowstart']);
-    expect(out.faults.map((x) => x.failures.length)).toEqual([0, 0, 1, 0]);
+    expect(reports).toEqual(['drop5', '404', '509', 'slowstart', 'silent']);
+    expect(out.faults.map((x) => x.failures.length)).toEqual([0, 0, 1, 0, 0]);
     expect(out.faults[2]?.failures[0]).toMatch(/missed/);
     expect(out.faults.map((x) => [x.limitResponses, x.overlapMs])).toEqual([
+      [0, 0],
       [0, 0],
       [0, 0],
       [0, 0],

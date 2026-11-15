@@ -173,4 +173,20 @@ class ErrorMappingTest {
     assertTrue(isNoticeContentType("text/html", hls = true))
     assertTrue(isNoticeContentType("application/json", hls = true))
   }
+
+  @Test
+  fun `decoder error caused by an invalid surface maps to surface-lost instead of decoder (I6)`() {
+    assertEquals(
+      "surface-lost",
+      mapError(null, null, PlaybackException.ERROR_CODE_DECODING_FAILED, surfaceLost = true),
+    )
+    assertEquals(
+      "surface-lost",
+      mapError(null, null, PlaybackException.ERROR_CODE_DECODER_INIT_FAILED, surfaceLost = true),
+    )
+    assertEquals(
+      "decoder",
+      mapError(null, null, PlaybackException.ERROR_CODE_DECODING_FAILED, surfaceLost = false),
+    )
+  }
 }

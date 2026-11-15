@@ -6,6 +6,7 @@ import {
   failed,
   last,
   live,
+  play,
   playing,
   type Rig,
   recovering,
@@ -37,11 +38,12 @@ describe('pause', () => {
     expect(names(r)).toEqual(['load', 'pause']);
     expect(status(r)).toEqual({ kind: 'paused' });
     r.service.play();
-    await tick(7999);
+    expect(status(r)).toEqual({ kind: 'tuning' });
+    await tick(3999);
     expect(names(r)).toEqual(['load', 'pause', 'play']);
     await tick(1);
     expect(status(r)).toEqual(recovering(1, 0));
-    expect(last(r)).toEqual({ name: 'retry', attempt: t + 1 });
+    expect(last(r)).toEqual({ name: 'retry', attempt: t + 3 });
   });
 
   it('play without a pause, or before the pause took effect, arms nothing', async () => {
@@ -64,7 +66,7 @@ describe('pause', () => {
     expect(names(r)).toEqual(['load', 'pause']);
   });
 
-  it('a paused state during a gap cancels the rung; play restarts the ladder at rung 1', async () => {
+  it('a paused state during a gap cancels the rung; play continues at the next rung', async () => {
     const r = rig({ dead: [] });
     const t = await playing(r, live('dead'));
     error(r, 'network');
@@ -74,11 +76,12 @@ describe('pause', () => {
     expect(names(r)).toEqual(['load', 'retry']);
     expect(status(r)).toEqual({ kind: 'paused' });
     r.service.play();
+    expect(status(r)).toEqual(recovering(2, 1000));
+    await tick(1000);
     expect(r.engine.commands.slice(-2)).toEqual([
-      { name: 'play', attempt: t + 1 },
-      { name: 'retry', attempt: t + 2 },
+      { name: 'play', attempt: t + 2 },
+      { name: 'load', attempt: t + 3, url: 'dead' },
     ]);
-    expect(status(r)).toEqual(recovering(1, 0));
   });
 
   it('a user pause during a rung shows paused and sends nothing until play', async () => {
@@ -90,7 +93,9 @@ describe('pause', () => {
     await tick(20000);
     expect(names(r)).toEqual(['load', 'retry', 'pause']);
     r.service.play();
-    expect(last(r)).toEqual({ name: 'retry', attempt: t + 2 });
+    expect(status(r)).toEqual(recovering(2, 1000));
+    await tick(1000);
+    expect(last(r)).toEqual({ name: 'load', attempt: t + 4, url: 'dead' });
   });
 
   it('the restarted ladder keeps the budget it had', async () => {
@@ -101,27 +106,34 @@ describe('pause', () => {
     await tick(5000);
     expect(r.loads).toHaveLength(1);
     r.service.play();
-    expect(status(r)).toEqual(recovering(1, 0));
+    expect(status(r)).toEqual(recovering(2, 1000));
+    await tick(1000);
+    expect(r.loads).toHaveLength(2);
     error(r, 'http-404');
     expect(status(r)).toEqual(failed('http-404'));
   });
 
-  it('errors while paused wait for play; a terminal error still fails at once', async () => {
+  it('recoverable errors while paused wait for play; limit and terminal errors act at once', async () => {
     const r = rig({ dead: [] });
     const t = await playing(r, live('dead'));
     r.service.pause();
     state(r, 'paused');
     error(r, 'network');
-    error(r, 'http-509');
     await tick(10000);
     expect(names(r)).toEqual(['load', 'pause']);
     expect(status(r)).toEqual({ kind: 'paused' });
     r.service.play();
-    expect(last(r)).toEqual({ name: 'retry', attempt: t + 1 });
+    expect(last(r)).toEqual({ name: 'retry', attempt: t + 3 });
+    r.service.pause();
+    error(r, 'http-509');
+    expect(status(r)).toEqual({ kind: 'limited', nextAtMs: Date.now() + 2000 });
+    expect(last(r)).toEqual({ name: 'stop', attempt: t + 4 });
+    await tick(2000);
+    play(r);
     r.service.pause();
     error(r, 'http-401');
     expect(status(r)).toEqual(failed('http-401'));
-    expect(last(r)).toEqual({ name: 'stop', attempt: t + 1 });
+    expect(last(r)?.name).toBe('stop');
   });
 
   it('a pause before the first playing holds the start timeout until play', async () => {
@@ -132,9 +144,9 @@ describe('pause', () => {
     await tick(20000);
     expect(names(r)).toEqual(['load', 'pause']);
     r.service.play();
-    await tick(8000);
-    expect(status(r)).toEqual(recovering(1, 0));
-    expect(last(r)).toEqual({ name: 'retry', attempt: t + 1 });
+    await tick(4000);
+    expect(status(r)).toEqual(recovering(2, 0));
+    expect(last(r)).toEqual({ name: 'load', attempt: t + 3, url: 'dead' });
   });
 
   it('a surface that returns while paused waits for play', async () => {
@@ -146,7 +158,7 @@ describe('pause', () => {
     r.engine.surface('created');
     expect(names(r)).toEqual(['load', 'pause']);
     r.service.play();
-    expect(last(r)).toEqual({ name: 'retry', attempt: t + 1 });
+    expect(last(r)).toEqual({ name: 'retry', attempt: t + 3 });
   });
 
   it('a pause while an alternate resolves drops its load', async () => {

@@ -335,4 +335,19 @@ class ConnectionGateTest {
     zap.join()
     assertEquals(BoundaryWait.SUPERSEDED, result.get())
   }
+
+  @Test
+  fun `dropForced drops parked connections as soon as an async closer finishes forceClose (C2)`() {
+    val queued = LinkedBlockingQueue<Runnable>()
+    val gate = ConnectionGate { queued.put(it) }
+    gate.beginMedia(1)
+    gate.tryOpen(1) {}
+    gate.beginMedia(2)
+    // Player is released on the playback thread BEFORE the background closer thread finishes forceClose!
+    gate.dropForced()
+    assertEquals(1, queued.size)
+    queued.take().run()
+    // Once forceClose finishes, the parked connection must already be dropped without waiting 2,500 ms!
+    assertEquals(BoundaryWait.CLOSED, gate.awaitPreviousClosed(2, 0))
+  }
 }

@@ -37,7 +37,8 @@ describe('parsePlayerGateUrl', () => {
   });
 
   it('clamps zaps and rate', () => {
-    expect(parsePlayerGateUrl(`${BASE}?zaps=0&rate=0.01`)).toMatchObject({ zaps: 1, rate: 0.1 });
+    expect(parsePlayerGateUrl(`${BASE}?zaps=0&rate=0.01`)).toMatchObject({ zaps: 1, rate: 0.05 });
+    expect(parsePlayerGateUrl(`${BASE}?zaps=1&rate=0.05`)).toMatchObject({ zaps: 1, rate: 0.05 });
     expect(parsePlayerGateUrl(`${BASE}?zaps=9999&rate=99`)).toMatchObject({ zaps: 200, rate: 5 });
   });
 
@@ -69,6 +70,7 @@ describe('parsePlayerGateUrl', () => {
     expect(parsePlayerGateUrl(`${BASE}?fault=509`)?.fault).toBe('509');
     expect(parsePlayerGateUrl(`${BASE}?fault=notice`)?.fault).toBe('notice');
     expect(parsePlayerGateUrl(`${BASE}?fault=stall`)?.fault).toBe('stall');
+    expect(parsePlayerGateUrl(`${BASE}?fault=silent`)?.fault).toBe('silent');
     expect(parsePlayerGateUrl(`${BASE}?fault=slowstart`)?.fault).toBe('slowstart');
     expect(parsePlayerGateUrl(`${BASE}?fault=status=500`)?.fault).toBe('');
     expect(parsePlayerGateUrl(`${BASE}?account=a/b`)?.account).toBe('demo');
@@ -98,6 +100,7 @@ describe('streamUrl', () => {
     expect(faultSpec('509')).toBe('status=509');
     expect(faultSpec('notice')).toBe('text-notice');
     expect(faultSpec('stall')).toBe('stall30s@2s');
+    expect(faultSpec('silent')).toBe('stall30s@0s');
     expect(faultSpec('slowstart')).toBe('slow-start=3');
   });
 

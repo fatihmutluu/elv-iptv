@@ -97,4 +97,116 @@ class StreamHttpTest {
     assertEquals(READ_TIMEOUT_MS.toInt(), one.readTimeoutMillis)
     assertTrue(one.followSslRedirects)
   }
+
+  @Test
+  fun `strips Authorization, Cookie and Proxy-Authorization on cross-origin redirects while keeping same-origin (I1)`() {
+    val originHeads = LinkedBlockingQueue<String>()
+    val redirectHeads = LinkedBlockingQueue<String>()
+    ServerSocket(0, 50, InetAddress.getLoopbackAddress()).use { target ->
+      val targetReader = thread(isDaemon = true) {
+        target.accept().use { client ->
+          client.soTimeout = 5_000
+          val head = StringBuilder()
+          val input = client.getInputStream()
+          while (!head.endsWith("\r\n\r\n")) {
+            val next = input.read()
+            if (next < 0) break
+            head.append(next.toChar())
+          }
+          redirectHeads.put(head.toString())
+          client.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".toByteArray())
+        }
+      }
+      ServerSocket(0, 50, InetAddress.getLoopbackAddress()).use { origin ->
+        val originUrl = "http://127.0.0.1:${origin.localPort}/live/demo/demo/1001.ts"
+        val redirectUrl = "http://127.0.0.1:${target.localPort}/cdn/segment.ts"
+        val originReader = thread(isDaemon = true) {
+          origin.accept().use { client ->
+            client.soTimeout = 5_000
+            val head = StringBuilder()
+            val input = client.getInputStream()
+            while (!head.endsWith("\r\n\r\n")) {
+              val next = input.read()
+              if (next < 0) break
+              head.append(next.toChar())
+            }
+            originHeads.put(head.toString())
+            val resp = "HTTP/1.1 302 Found\r\nLocation: $redirectUrl\r\nContent-Length: 0\r\n\r\n"
+            client.getOutputStream().write(resp.toByteArray())
+          }
+        }
+        val headers = mapOf(
+          "Authorization" to "Bearer secret-token",
+          "Cookie" to "sid=secret-cookie",
+          "Proxy-Authorization" to "Basic c2VjcmV0",
+          "User-Agent" to "Provider/1.0",
+        )
+        val (source, _) = streamDataSource(headers, engineHttpClient(), originUrl)
+        try {
+          source.open(DataSpec(Uri.parse(originUrl)))
+        } finally {
+          source.close()
+        }
+        originReader.join(5_000)
+        targetReader.join(5_000)
+      }
+    }
+    val first = originHeads.poll(5, SECONDS)!!
+    val second = redirectHeads.poll(5, SECONDS)!!
+    assertTrue(first.contains("Bearer secret-token"))
+    assertTrue(first.contains("sid=secret-cookie"))
+    assertTrue(first.contains("Basic c2VjcmV0"))
+    assertFalse("Authorization leaked to redirect origin", second.contains("secret-token"))
+    assertFalse("Cookie leaked to redirect origin", second.contains("secret-cookie"))
+    assertFalse("Proxy-Authorization leaked to redirect origin", second.contains("c2VjcmV0"))
+    assertEquals(listOf("Provider/1.0"), agents(second))
+  }
+
+  @Test
+  fun `strips sensitive headers on cross-origin segment requests and https-to-http downgrades (I1)`() {
+    val heads = LinkedBlockingQueue<String>()
+    ServerSocket(0, 50, InetAddress.getLoopbackAddress()).use { cdn ->
+      val reader = thread(isDaemon = true) {
+        repeat(2) {
+          cdn.accept().use { client ->
+            client.soTimeout = 5_000
+            val head = StringBuilder()
+            val input = client.getInputStream()
+            while (!head.endsWith("\r\n\r\n")) {
+              val next = input.read()
+              if (next < 0) break
+              head.append(next.toChar())
+            }
+            heads.put(head.toString())
+            client.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".toByteArray())
+          }
+        }
+      }
+      val headers = mapOf(
+        "authorization" to "Bearer top-secret",
+        "cookie" to "auth=1",
+        "proxy-authorization" to "Basic abc",
+      )
+      // 1) Cross-host HLS segment request against provider manifest origin
+      val (crossHost, _) = streamDataSource(headers, engineHttpClient(), "http://provider.example:8080/live/1.m3u8")
+      try {
+        crossHost.open(DataSpec(Uri.parse("http://127.0.0.1:${cdn.localPort}/seg1.ts")))
+      } finally {
+        crossHost.close()
+      }
+      // 2) Same host & port number, but https -> http scheme downgrade
+      val (downgrade, _) = streamDataSource(headers, engineHttpClient(), "https://127.0.0.1:${cdn.localPort}/live/1.m3u8")
+      try {
+        downgrade.open(DataSpec(Uri.parse("http://127.0.0.1:${cdn.localPort}/seg1.ts")))
+      } finally {
+        downgrade.close()
+      }
+      reader.join(5_000)
+    }
+    repeat(2) {
+      val head = heads.poll(5, SECONDS)!!
+      assertFalse(head.lowercase().contains("authorization:"))
+      assertFalse(head.lowercase().contains("cookie:"))
+    }
+  }
 }

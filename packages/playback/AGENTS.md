@@ -22,25 +22,21 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
 - `@elv/playback/testing`: `createFakePlayerEngine({ scripts, now, schedule, cancel })`, a scriptable engine for tests.
   Scripts are keyed by URL and re-run on `retry` (`recreate` idles until a `load` or `retry`); `emit` injects any
   event (stale tokens too); `openMedias()`, `maxConcurrentMedias()` check the one-media rule. Inject fake timers.
-- `createPlaybackService({ engine, clock, timers, config? })`: `tune` (returns the token; a new tune supersedes the old
-  one at once), `retry`, `stop`, `play`, `pause`, `seek`, `getState`, `subscribe`, `dispose`. The frozen
-  `DEFAULT_PLAYBACK_CONFIG` holds the spec timings; a `resolve` unsettled after 5 s fails with `network`/`timeout`.
-  Older tokens' events are dropped (`staleEventsDropped`). `nextLimitDelay(elapsedMs, attempt, config)`: limit wait.
+- `createPlaybackService({ engine, clock, timers, config? })`: `tune`, `retry` (replays `ended` VOD from 0), `stop`,
+  `play`, `pause`, `seek`, `getState`, `subscribe`, `dispose` (stops open media). `PlaybackStatus` includes `ended`.
+  `pause`/`play` advance `attempt` to fence queued native states; `anchor` freezes on non-playing states and clears on
+  `stop`. `DEFAULT_PLAYBACK_CONFIG` holds spec timings (`liveStartTimeoutMs: 4000`, `startTimeoutMs: 8000`, `rungTimeoutMs: 2000`).
 
 ## Recovery (spec sections 5.4 and 5.5; `recovery.ts`, always wired)
-- Entry: a stall of 4 s while `playing`, no `playing` 8 s after `load`, or a recoverable error. Each rung takes a new
-  token after its gap (0, 1, 2, 4 s) and has 4 s to reach `playing`: 1 `retry`, 2 `load` again, 3 `recreate` + `load`,
-  4 software audio after `decoder` (if the engine has it) or the next alternate; then `failed` (last error) + `stop`.
-  30 s of `playing` restores every budget. Terminal codes fail at once; `http-404` gets one rung 2 only, then fails.
-- Limit path (`http-429`, `http-509`, `connection-limit`; never the ladder): `stop`, `limited { nextAtMs }` (the
-  stopped media's events are ignored), wait 2, 4, 8, then 15 s, `load`; past 60 s `failed(connection-limit)`. A
-  same-account `tune` is held until the wait ends (keeps `limited`, loads with its own token); others load at once.
-- VOD: reloads resume where the failure happened; `network` reconnects with the same backoff for up to 120 s.
-- A seek disarms the stall watchdog until the next `playing`. A pause sends nothing: pending rungs and gaps are dropped;
-  `play` restarts the ladder at rung 1 (budget kept) or gives the media 8 s to play. `surface-lost` while the surface
-  is gone waits for `surface created`, then rung 1. Stop, a tune, a retry, `ended` and `dispose` drop pending steps.
-- Seam (internal `seam.ts`): the service calls `RecoveryHooks` (surface events whatever their token), recovery drives
-  it via `ServiceControl`; tests use `createPlaybackServiceWith`. Timeouts are armed before their command is sent.
+- Entry: a stall of 4 s while `playing`, no `playing` 4 s after live `load` (8 s VOD), or a recoverable error. Fast
+  errors wait gaps 0, 1, 2, 4 s; silent timeouts escalate immediately (live tunes with no first frame skip rung 1) and
+  each rung has 2 s to play (~8-10 s silent bound): 1 `retry`, 2 `load`, 3 `recreate` + `load`, 4 software audio or
+  alternate (`stopMedia` before async resolve); then `failed` + `stop`. 30 s of `playing` restores budgets.
+- Limit path (`http-429`, `http-509`, `connection-limit`, even while `paused`): `stop`, `limited { nextAtMs }`, wait
+  2, 4, 8, then 15 s, `load`; past 60 s `failed(connection-limit)`. Same-account `tune`s are held until wait ends.
+- VOD: reloads resume from last playing/seek position; `network` reconnects with backoff up to 120 s (paused time excluded).
+- Pause drops pending rungs without resetting rung budget; `play` continues recovery. `surface-lost` waits for `surface`.
+- Seam (internal `seam.ts`): `RecoveryHooks` + `ServiceControl`; tests use `createPlaybackServiceWith`.
 
 ## Engine contract (spec section 5.1)
 - Commands are enqueue-and-return; results arrive as events, each echoing an `AttemptToken`.

@@ -22,8 +22,9 @@ import {
 const ACCOUNT = 'demo';
 const CHANNELS = ['1001', '1002', '1003', '1004'];
 const ZAP_RATE = 0.5;
-/** A fault run needs one stay on the faulted channel; the lowest rate the screen accepts makes it 10 s long. */
+/** A fault run needs one stay on the faulted channel; 0.1 gives 10 s, and 0.05 gives 20 s for the silent ladder. */
 const FAULT_RATE = 0.1;
+const SILENT_FAULT_RATE = 0.05;
 /** A slow-start run zaps 800 ms after the first tune, while that request still waits for its 3 s late answer. */
 const SLOW_START_RATE = 1.25;
 const FAULT_ZAPS = 1;
@@ -38,6 +39,7 @@ const SLACK_MS = 50;
 /** Spec 7 fault windows. */
 const DROP_RECOVERY_MS = 10_000;
 const NOT_FOUND_FAIL_MS = 10_000;
+const SILENT_FAIL_MS = 12_000;
 const FIRST_BACKOFF_MS = 2000;
 const CLOCK_ROUNDING_MS = 10;
 
@@ -47,10 +49,11 @@ const FAULT_EXPECTED = {
   '404': 'failed-in-time',
   '509': 'limited-backoff',
   slowstart: 'left',
+  silent: 'failed-in-time',
 } as const;
 type Fault = keyof typeof FAULT_EXPECTED;
 /** Fault names in run order. */
-const FAULTS: Fault[] = ['drop5', '404', '509', 'slowstart'];
+const FAULTS: Fault[] = ['drop5', '404', '509', 'slowstart', 'silent'];
 
 type Nullable = number | null;
 
@@ -326,6 +329,24 @@ export function judgeFault(
     }
   } else if (fault === 'slowstart') {
     judgeSlowStart(line, entries, channel, failures, warnings);
+  } else if (fault === 'silent') {
+    const last = own[own.length - 1];
+    if (own.length < 2) {
+      failures.push('silent: ladder made fewer than 2 requests before giving up');
+    } else if (last !== undefined && last.end - first.start > SILENT_FAIL_MS) {
+      failures.push(
+        `silent: last request closed ${last.end - first.start} ms after the first request, limit ${SILENT_FAIL_MS} ms`,
+      );
+    }
+    const { limitResponses, overlapMs } = connectionStats(entries, ACCOUNT);
+    if (limitResponses > 0) {
+      failures.push(
+        `silent: ${limitResponses} limit responses on ${ACCOUNT}: a silent rung stayed open beside the next request`,
+      );
+    }
+    if (overlapMs > 0) {
+      warnings.push(`silent: two ${ACCOUNT} streams were open together for ${overlapMs} ms`);
+    }
   } else if (fault === '404') {
     const notFound = own.filter((e) => e.status === 404);
     const last = notFound[notFound.length - 1];
@@ -467,7 +488,12 @@ export async function runPlayerGate(opts: PlayerGateOptions): Promise<PlayerGate
 
     const faults: FaultReport[] = [];
     for (const fault of opts.faults === true ? FAULTS : []) {
-      const rate = fault === 'slowstart' ? SLOW_START_RATE : FAULT_RATE;
+      const rate =
+        fault === 'slowstart'
+          ? SLOW_START_RATE
+          : fault === 'silent'
+            ? SILENT_FAULT_RATE
+            : FAULT_RATE;
       const line = await play(link(FAULT_ZAPS, rate, fault), (FAULT_ZAPS / rate) * 1000);
       const entries = await log.entries();
       const verdict = judgeFault(fault, line, entries, CHANNELS[0] as string);

@@ -83,7 +83,7 @@ internal fun requestSources(
   client: Call.Factory,
   gateTimeoutMs: Long = GATE_TIMEOUT_MS,
 ): (RequestKind) -> DataSource = { kind ->
-  val (http, calls) = streamDataSource(request.headers, client)
+  val (http, calls) = streamDataSource(request.headers, client, request.url)
   GatedDataSource(SniffingDataSource(http, kind), gate, generation, calls::cancel, gateTimeoutMs)
 }
 
