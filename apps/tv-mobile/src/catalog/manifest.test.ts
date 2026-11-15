@@ -1,13 +1,13 @@
-import { memorySecrets } from '@elv/data/testing';
-import { describe, expect, it } from 'vitest';
-import { addAccount, env, must, useSim } from './catalog-test-env';
 import {
   decodeManifest,
   encodeManifest,
   type ManifestEntry,
   type ManifestStore,
   reconcileManifest,
-} from './manifest';
+} from '@elv/data';
+import { memorySecrets } from '@elv/data/testing';
+import { describe, expect, it } from 'vitest';
+import { addAccount, env, must, useSim } from './catalog-test-env';
 
 const sim = useSim();
 

@@ -10,6 +10,7 @@ export interface SyncStatement {
 export interface SyncDatabase {
   prepare(sql: string): SyncStatement;
   exec(sql: string): void;
+  close?(): void;
 }
 
 const NESTED =
@@ -56,10 +57,16 @@ export function createSyncSqlDriver(db: SyncDatabase): SqlDriver {
       db.exec('COMMIT');
       return value;
     } catch (error) {
-      db.exec('ROLLBACK');
+      try {
+        db.exec('ROLLBACK');
+      } catch {
+        // SQLite auto-rolls back on errors such as SQLITE_FULL or SQLITE_IOERR.
+      }
       throw error;
     }
   };
+
+  let closed: Promise<void> | undefined;
 
   return {
     exec: (sql) => enqueue(() => plain.exec(sql)),
@@ -67,5 +74,11 @@ export function createSyncSqlDriver(db: SyncDatabase): SqlDriver {
     all: <T>(sql: string, params?: readonly SqlValue[]) => enqueue(() => plain.all<T>(sql, params)),
     batch: (sql, rows) => enqueue(() => inTransaction(() => plain.batch(sql, rows))),
     transaction: (fn) => enqueue(() => inTransaction(() => fn(plain))),
+    close: () => {
+      closed ??= enqueue(async () => {
+        db.close?.();
+      });
+      return closed;
+    },
   };
 }

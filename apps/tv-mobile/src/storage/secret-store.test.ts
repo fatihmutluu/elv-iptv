@@ -129,13 +129,55 @@ describe('createSecureSecretStore', () => {
     }
   });
 
-  it('a failed set leaves no half-written secret behind', async () => {
+  it('a failed set leaves no half-written secret or orphan chunks behind', async () => {
     const store = createSecureSecretStore();
-    await store.set('k', 'old');
-    mocked.failOn = 'k.1';
+    await store.set('k', 'old'.repeat(1500));
+    const baseSet =
+      mocked.setItemAsync.getMockImplementation() ?? (async (_k: string, _v: string) => undefined);
+    mocked.setItemAsync.mockImplementation(async (key: string, value: string) => {
+      if (key === 'k.1') throw new Error('keystore quota exceeded');
+      return baseSet(key, value);
+    });
     await expect(store.set('k', 'y'.repeat(5000))).rejects.toThrow();
-    mocked.failOn = undefined;
+    mocked.setItemAsync.mockImplementation(baseSet);
     expect(await store.get('k')).toBeUndefined();
+    expect([...mocked.data.keys()]).toEqual([]);
+  });
+
+  it('serializes get, set and delete per key so concurrent callers never observe torn chunks', async () => {
+    const store = createSecureSecretStore();
+    const valA = 'A'.repeat(4000);
+    const valB = 'B'.repeat(4000);
+    await store.set('k', valA);
+
+    let releaseChunk0!: () => void;
+    const chunk0Blocked = new Promise<void>((res) => {
+      releaseChunk0 = res;
+    });
+    const baseSet =
+      mocked.setItemAsync.getMockImplementation() ?? (async (_k: string, _v: string) => undefined);
+    mocked.setItemAsync.mockImplementation(async (key: string, value: string) => {
+      if (key === 'k.0' && value.startsWith('B')) await chunk0Blocked;
+      return baseSet(key, value);
+    });
+
+    const writeB = store.set('k', valB);
+    await Promise.resolve();
+    const concurrentRead = store.get('k');
+    const otherKeyWrite = store.set('other', 'fast');
+    await expect(otherKeyWrite).resolves.toBeUndefined();
+
+    releaseChunk0();
+    await writeB;
+    expect(await concurrentRead).toBe(valB);
+  });
+
+  it('deletes orphan chunks even when the .n count key or k.0 is missing', async () => {
+    const store = createSecureSecretStore();
+    mocked.data.set('k.1', 'chunk1');
+    mocked.data.set('k.2', 'chunk2');
+    await store.delete('k');
+    expect([...mocked.data.keys()]).toEqual([]);
   });
 
   it('rejects keys outside [A-Za-z0-9._-]', async () => {

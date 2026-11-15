@@ -144,7 +144,7 @@ export function toSeries(rows: Raw[]): XtreamSeries[] {
   return mergeById(out);
 }
 
-/** Flattens the season-keyed episode map into a sorted list. */
+/** Flattens the season-keyed or array-encoded episode container into a deduplicated sorted list. */
 export function toSeriesInfo(raw: Raw): XtreamSeriesInfo {
   const seasons = new Set<number>();
   for (const s of Array.isArray(raw.seasons) ? raw.seasons : []) {
@@ -152,25 +152,37 @@ export function toSeriesInfo(raw: Raw): XtreamSeriesInfo {
     if (n !== undefined) seasons.add(n);
   }
   const episodes: XtreamEpisode[] = [];
-  const groups: Array<[string | undefined, unknown]> = Array.isArray(raw.episodes)
-    ? raw.episodes.map((g): [string | undefined, unknown] => [undefined, g])
-    : Object.entries(asRaw(raw.episodes));
-  for (const [key, group] of groups) {
-    for (const e of Array.isArray(group) ? group : []) {
-      if (!isRaw(e)) continue;
-      const id = toNumber(e.id);
-      const season = toNumber(key) ?? toNumber(e.season);
-      if (id === undefined || season === undefined) continue;
-      seasons.add(season);
-      const episode: XtreamEpisode = {
-        id,
-        season,
-        episode: toNumber(e.episode_num) ?? 0,
-        title: toText(e.title) ?? '',
-        extension: toText(e.container_extension) ?? 'mp4',
-      };
-      put(episode, 'durationSec', toNumber(asRaw(e.info).duration_secs));
-      episodes.push(episode);
+  const seenIds = new Set<number>();
+  const addEpisode = (e: unknown, fallbackSeason: number | undefined, keySeason?: number): void => {
+    if (!isRaw(e)) return;
+    const id = toNumber(e.id);
+    const season = keySeason ?? toNumber(e.season) ?? fallbackSeason;
+    if (id === undefined || season === undefined || seenIds.has(id)) return;
+    seenIds.add(id);
+    seasons.add(season);
+    const episode: XtreamEpisode = {
+      id,
+      season,
+      episode: toNumber(e.episode_num) ?? 0,
+      title: toText(e.title) ?? '',
+      extension: toText(e.container_extension) ?? 'mp4',
+    };
+    put(episode, 'durationSec', toNumber(asRaw(e.info).duration_secs));
+    episodes.push(episode);
+  };
+  if (Array.isArray(raw.episodes)) {
+    for (let idx = 0; idx < raw.episodes.length; idx++) {
+      const entry = raw.episodes[idx];
+      if (Array.isArray(entry)) {
+        for (const e of entry) addEpisode(e, idx);
+      } else if (isRaw(entry)) {
+        addEpisode(entry, 0);
+      }
+    }
+  } else {
+    for (const [key, group] of Object.entries(asRaw(raw.episodes))) {
+      const keySeason = toNumber(key);
+      for (const e of Array.isArray(group) ? group : []) addEpisode(e, undefined, keySeason);
     }
   }
   episodes.sort((a, b) => a.season - b.season || a.episode - b.episode);

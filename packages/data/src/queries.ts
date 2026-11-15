@@ -102,17 +102,20 @@ export async function queryCategories(
   }));
 }
 
-/** Table and columns per kind; fixed strings, never built from data. */
-const ITEM_SQL: Record<BrowseKind, string> = {
-  live: `t.logo AS logo, NULL AS rating, NULL AS year, t.num AS num FROM placements p
-         JOIN live t ON t.source_id = p.source_id AND t.key = p.item_key`,
-  movie: `t.logo AS logo, t.rating AS rating, t.year AS year, NULL AS num FROM placements p
-          JOIN movies t ON t.source_id = p.source_id AND t.key = p.item_key`,
-  series: `t.cover AS logo, t.rating AS rating, t.year AS year, NULL AS num FROM placements p
-           JOIN series t ON t.source_id = p.source_id AND t.key = p.item_key`,
+/** Columns and target table per kind; fixed strings, never built from data. */
+const ITEM_COLS: Record<BrowseKind, string> = {
+  live: 't.logo AS logo, NULL AS rating, NULL AS year, t.num AS num',
+  movie: 't.logo AS logo, t.rating AS rating, t.year AS year, NULL AS num',
+  series: 't.cover AS logo, t.rating AS rating, t.year AS year, NULL AS num',
 };
 
-/** One page of a category's items in provider order. */
+const ITEM_TABLE: Record<BrowseKind, string> = {
+  live: 'live',
+  movie: 'movies',
+  series: 'series',
+};
+
+/** One page of a category's items in provider order; limits placements via covering index before joining. */
 export async function queryItems(
   db: SqlDriver,
   ref: { sourceId: string; kind: BrowseKind; providerId: string },
@@ -131,9 +134,14 @@ export async function queryItems(
     year: number | null;
     num: number | null;
   }>(
-    `SELECT t.id, t.key, t.provider_id, t.name, ${ITEM_SQL[ref.kind]}
-      WHERE p.source_id = ? AND p.kind = ? AND p.category_id = ?
-      ORDER BY p.position, t.id LIMIT ? OFFSET ?`,
+    `SELECT t.id, t.key, t.provider_id, t.name, ${ITEM_COLS[ref.kind]}
+       FROM (
+         SELECT source_id, item_key, position FROM placements
+          WHERE source_id = ? AND kind = ? AND category_id = ?
+          ORDER BY position, item_key LIMIT ? OFFSET ?
+       ) p
+       JOIN ${ITEM_TABLE[ref.kind]} t ON t.source_id = p.source_id AND t.key = p.item_key
+      ORDER BY p.position, t.id`,
     [ref.sourceId, ref.kind, ref.providerId, page.limit, page.offset],
   );
   return rows.map((r) => ({
@@ -237,10 +245,10 @@ export async function queryPlayable(db: SqlDriver, key: string): Promise<Playabl
     `SELECT source_id, 'live' AS stream_kind, provider_id, NULL AS extension, url_template, headers_json
        FROM live WHERE source_id = ? AND key = ?
      UNION ALL
-     SELECT source_id, 'movie', provider_id, extension, url_template, NULL
+     SELECT source_id, 'movie', provider_id, extension, url_template, headers_json
        FROM movies WHERE source_id = ? AND key = ?
      UNION ALL
-     SELECT source_id, 'series', provider_id, extension, url_template, NULL
+     SELECT source_id, 'series', provider_id, extension, url_template, headers_json
        FROM episodes WHERE source_id = ? AND key = ?
      LIMIT 1`,
     [sourceId, key, sourceId, key, sourceId, key],

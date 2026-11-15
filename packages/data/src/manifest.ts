@@ -1,5 +1,5 @@
-import { SOURCE_ID, type SourceKind } from '@elv/data';
 import type { SqlDriver } from '@elv/domain';
+import { SOURCE_ID, type SourceKind } from './sources';
 
 /**
  * One string in persistent key-value storage that survives a purge of the caches (`NSUserDefaults` on Apple

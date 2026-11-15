@@ -4,6 +4,7 @@ const JOURNAL_SIZE_LIMIT = 67_108_864;
 /** Pragmas applied on every open, before migrations. `journal_mode` reports `memory` for in-memory databases. */
 export const OPEN_PRAGMAS = [
   'PRAGMA journal_mode = WAL',
+  'PRAGMA busy_timeout = 5000',
   'PRAGMA synchronous = NORMAL',
   'PRAGMA foreign_keys = ON',
   'PRAGMA temp_store = MEMORY',
@@ -32,6 +33,7 @@ CREATE TABLE import_runs (
   error_code TEXT,
   counts_json TEXT
 );
+CREATE INDEX idx_import_runs_source ON import_runs (source_id);
 
 CREATE TABLE categories (
   source_id TEXT NOT NULL,
@@ -75,6 +77,7 @@ CREATE TABLE movies (
   extension TEXT,
   added INTEGER,
   url_template TEXT,
+  headers_json TEXT,
   run_id INTEGER NOT NULL,
   UNIQUE (source_id, key)
 );
@@ -107,6 +110,7 @@ CREATE TABLE episodes (
   extension TEXT,
   duration_sec INTEGER,
   url_template TEXT,
+  headers_json TEXT,
   run_id INTEGER NOT NULL,
   UNIQUE (source_id, key)
 );

@@ -113,16 +113,77 @@ describe('m3u settings and secrets commit with the run', () => {
     expect(JSON.stringify(await rows(e, 'SELECT url_template FROM live'))).not.toContain(M3U_TOKEN);
   });
 
-  it('reports secret-write-failed after an otherwise successful run', async () => {
-    const e = await setupM3u(big(M3U_TOKEN, 5));
+  it('fails closed with secret-write-failed before SQLite commit when SecretStore.set throws', async () => {
+    const first = await setupM3u(big(M3U_TOKEN, 5));
+    first.secrets.set = async () => {
+      throw new Error('keychain');
+    };
+    const r1 = await run(first);
+    expect(!r1.ok && r1.error).toMatchObject({ category: 'storage', code: 'secret-write-failed' });
+    expect(await count(first.db, 'live')).toBe(0);
+    expect(await rows(first, 'SELECT status, error_code FROM import_runs')).toEqual([
+      { status: 'failed', error_code: 'secret-write-failed' },
+    ]);
+
+    const { e, snap } = await imported(10);
+    const oddHost = `http://late.example/${rotated}/99.ts`;
+    e.state.body = `${big(rotated, 10)}${extinf('New Host Ch', oddHost, 'group-title="All"')}`;
+    const realSet = e.secrets.set.bind(e.secrets);
     e.secrets.set = async () => {
       throw new Error('keychain');
     };
-    const r = await run(e);
-    expect(!r.ok && r.error).toMatchObject({ category: 'storage', code: 'secret-write-failed' });
-    expect(await count(e.db, 'live')).toBe(5);
-    const runs = await rows(e, 'SELECT status FROM import_runs');
-    expect(runs).toEqual([{ status: 'ok' }]);
+    const r2 = await run(e, { batchSize: 3 });
+    expect(!r2.ok && r2.error).toMatchObject({ category: 'storage', code: 'secret-write-failed' });
+    expect(await snapshot(e)).toEqual(snap);
+    expect(await count(e.db, 'live')).toBe(10);
+    await resolvesOld(e, snap);
+    const runs = await rows(e, 'SELECT status FROM import_runs ORDER BY id');
+    expect(runs).toEqual([{ status: 'ok' }, { status: 'failed' }]);
+    e.secrets.set = realSet;
+  });
+
+  it('stages merged urlvars before cleanup commit and prunes stale keys after commit', async () => {
+    const extra = ['tok', 'Extra11111'].join('');
+    const e = await setupM3u(
+      `${big(M3U_TOKEN, 50)}${extinf('Extra', `http://cdn.example:8080/${extra}/hb/s/999.ts`, 'group-title="All"')}`,
+    );
+    expect((await run(e)).ok).toBe(true);
+    const beforeRefresh = JSON.parse((await e.secrets.get('source.s1.urlvars')) ?? '{}') as UrlVars;
+    expect(beforeRefresh['v0~1']).toBe(extra);
+
+    const writes: UrlVars[] = [];
+    const realSet = e.secrets.set.bind(e.secrets);
+    e.secrets.set = async (k, v) => {
+      if (k === 'source.s1.urlvars') writes.push(JSON.parse(v) as UrlVars);
+      await realSet(k, v);
+    };
+    e.state.body = big(rotated, 50);
+    expect((await run(e)).ok).toBe(true);
+    expect(writes.length).toBeGreaterThanOrEqual(2);
+    expect(writes[0]?.['v0~1']).toBe(extra);
+    expect(writes[0]?.v0).toBe(rotated);
+    expect(writes.at(-1)?.['v0~1']).toBeUndefined();
+    expect(writes.at(-1)?.v0).toBe(rotated);
+  });
+
+  it('fails closed with urlvars-too-large above 64 KiB and preserves prior catalog and urlvars', async () => {
+    const { e, snap } = await imported(20);
+    let huge = '#EXTM3U\n';
+    for (let i = 0; i < 1600; i += 1) {
+      const perStreamToken = `tok_${i.toString().padStart(6, '0')}_${'x'.repeat(28)}`;
+      huge += extinf(`Bad ${i}`, `http://perstream.example/play/${i}.m3u8?token=${perStreamToken}`);
+    }
+    e.state.body = huge;
+    const r = await run(e, { batchSize: 200 });
+    expect(!r.ok && r.error).toMatchObject({
+      category: 'source-format',
+      code: 'urlvars-too-large',
+    });
+    expect(await snapshot(e)).toEqual(snap);
+    expect(await count(e.db, 'live')).toBe(20);
+    await resolvesOld(e, snap);
+    const runs = await rows(e, 'SELECT status, error_code FROM import_runs ORDER BY id');
+    expect(runs.at(-1)).toEqual({ status: 'failed', error_code: 'urlvars-too-large' });
   });
 
   it('puts live and movie entries without a group into the fallback category', async () => {

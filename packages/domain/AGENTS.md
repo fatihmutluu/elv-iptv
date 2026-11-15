@@ -16,9 +16,8 @@ Models, ids, Result/errors, clock, logging and the ports (storage, sql, http, ke
 
 ## Public surface (scanners round)
 - `Result`, `ElvError`, `ok`, `err`, `elvError` in `result.ts`; error details never carry credentials.
-- `HttpClient`, `FetchLike`, `createFetchHttpClient`, `httpStatusError`, `Decompressor` in `http.ts` (port plus a fetch adapter); a non-2xx status is `auth/http-401|403` or `network/http-<status>` everywhere (`httpStatusError`). Callers must iterate or discard every body; a GET that fails before any response with a connection-reset-class error (`ECONNRESET`, `EPIPE`, `UND_ERR_SOCKET`, "other side closed") is retried exactly once (stale keep-alive sockets), sharing the original timeout and never after an abort; a silent body ends with
-  `network`/`timeout` after `idleTimeoutMs` (default 30 s) and an abort with `network`/`aborted`.
-- `SqlDriver`, `SqlValue`, `SecretStore`, `Scheduler` in `sql.ts` (catalog import ports). `SqlDriver` serializes calls:
+- `HttpClient`, `FetchLike`, `createFetchHttpClient`, `httpStatusError`, `Decompressor` in `http.ts` (port plus a fetch adapter); a non-2xx status is `auth/http-401|403` or `network/http-<status>` everywhere (`httpStatusError`). Callers must iterate or discard every body (`.return()` cancels the underlying `ReadableStream` and detaches caller abort listeners even before `.next()`); a GET that fails before any response with a connection-reset-class error (`ECONNRESET`, `EPIPE`, `UND_ERR_SOCKET`, "other side closed") is retried once, sharing the original timeout and never after an abort; a silent body aborts the request and ends with `network`/`timeout` after `idleTimeoutMs` (default 30 s) and an abort with `network`/`aborted`.
+- `SqlDriver`, `SqlValue`, `SecretStore`, `Scheduler` in `sql.ts` (catalog import ports). `SqlDriver` serializes calls and exposes optional `close?()`:
   inside `transaction(fn)` use only the `tx` it receives (awaiting the outer driver there never resolves); `tx.batch`
   joins the open transaction; transactions do not nest. `SecretStore` keys use only letters, digits, `.`, `-`, `_`.
   `Scheduler.yieldNow()` must yield a macrotask (timer, `setImmediate`, frame), never just a resolved promise.

@@ -57,7 +57,7 @@ class XmltvScanner {
     const bytes = this.buf.view;
     const len = bytes.length;
     let pos = 0;
-    while (!this.flush && this.programmes.length < this.size) {
+    while (!this.full) {
       const lt = bytes.indexOf(LT, pos);
       if (lt < 0) {
         pos = len;
@@ -232,8 +232,8 @@ const GZIP_1 = 0x8b;
 /**
  * Streams an XMLTV guide from byte chunks into channels and programmes in bounded memory. Never throws on
  * bad content: a programme or channel that cannot be read is skipped with a warning and scanning resumes at
- * the next `<programme` or `<channel`. A batch is yielded as soon as it holds `batchSize` programmes
- * (default 500); the last has `done: true` and the statistics. Gzip input (magic `1f 8b`) goes through
+ * the next `<programme` or `<channel`. A batch is yielded as soon as it holds `batchSize` items
+ * (channels plus programmes, default 500); the last has `done: true` and the statistics. Gzip input (magic `1f 8b`) goes through
  * `opts.decompressor`; without one the generator yields nothing and returns a `source-format` /
  * `gzip-unsupported` error.
  *

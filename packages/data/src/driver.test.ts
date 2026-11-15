@@ -116,6 +116,65 @@ describe('sync SQL driver', () => {
     await expect(db.run('INSERT INTO missing VALUES (1)')).rejects.toThrow();
     expect(await db.all('SELECT 1 AS one')).toEqual([{ one: 1 }]);
   });
+
+  it('preserves the original error when SQLite already auto-rolled back the transaction', async () => {
+    const { createSyncSqlDriver } = await import('./driver');
+    let inTx = false;
+    const fakeDb = {
+      exec(sql: string) {
+        if (sql === 'BEGIN IMMEDIATE') {
+          inTx = true;
+          return;
+        }
+        if (sql === 'ROLLBACK') {
+          if (!inTx) throw new Error('cannot rollback - no transaction is active');
+          inTx = false;
+        }
+      },
+      prepare() {
+        return {
+          run() {
+            inTx = false;
+            throw new Error('database or disk is full (SQLITE_FULL)');
+          },
+          all() {
+            return [];
+          },
+        };
+      },
+    };
+    const db = createSyncSqlDriver(fakeDb);
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.run('INSERT INTO t VALUES (1)');
+      }),
+    ).rejects.toThrow('database or disk is full (SQLITE_FULL)');
+  });
+
+  it('closes the underlying database after queued work and is idempotent', async () => {
+    const { createSyncSqlDriver } = await import('./driver');
+    const events: string[] = [];
+    const fakeDb = {
+      exec(sql: string) {
+        events.push(`exec:${sql}`);
+      },
+      prepare() {
+        return {
+          run: () => ({ changes: 1 }),
+          all: () => [],
+        };
+      },
+      close() {
+        events.push('close');
+      },
+    };
+    const db = createSyncSqlDriver(fakeDb);
+    const p1 = db.exec('SELECT 1');
+    const p2 = db.close?.();
+    const p3 = db.close?.();
+    await Promise.all([p1, p2, p3]);
+    expect(events).toEqual(['exec:SELECT 1', 'close']);
+  });
 });
 
 describe('test helpers', () => {

@@ -51,11 +51,53 @@ describe('seriesInfo', () => {
       seasons: [],
       episodes: [],
     });
+    expect(value(await client(() => ({ json: [] })).c.seriesInfo(1))).toEqual({
+      seasons: [],
+      episodes: [],
+    });
     expectErr(
       await client(() => ({ json: [1] })).c.seriesInfo(1),
       'source-format',
       'unexpected-shape',
     );
+  });
+
+  it('preserves season 0 in array-encoded episodes, supports flat episode arrays and deduplicates ids', async () => {
+    const { c: byIndex } = client(() => ({
+      json: {
+        episodes: [
+          [{ id: '100', episode_num: 1, title: 'Special' }],
+          [
+            { id: '101', episode_num: 1, title: 'Pilot' },
+            { id: '100', episode_num: 2, title: 'Duplicate special' },
+          ],
+        ],
+      },
+    }));
+    expect(value(await byIndex.seriesInfo(7))).toEqual({
+      seasons: [0, 1],
+      episodes: [
+        { id: 100, season: 0, episode: 1, title: 'Special', extension: 'mp4' },
+        { id: 101, season: 1, episode: 1, title: 'Pilot', extension: 'mp4' },
+      ],
+    });
+
+    const { c: flat } = client(() => ({
+      json: {
+        episodes: [
+          { id: 50, season: 0, episode_num: 1, title: 'Zero' },
+          { id: 51, season: 2, episode_num: 3, title: 'Flat', container_extension: 'mkv' },
+          { id: 51, season: 2, episode_num: 4, title: 'Dup' },
+        ],
+      },
+    }));
+    expect(value(await flat.seriesInfo(8))).toEqual({
+      seasons: [0, 2],
+      episodes: [
+        { id: 50, season: 0, episode: 1, title: 'Zero', extension: 'mp4' },
+        { id: 51, season: 2, episode: 3, title: 'Flat', extension: 'mkv' },
+      ],
+    });
   });
 });
 
@@ -79,6 +121,7 @@ describe('vodInfo', () => {
     const { c } = client(() => ({ json: { info: { year: '1999', releasedate: '2020-01-01' } } }));
     expect(value(await c.vodInfo(1))).toEqual({ year: 1999, extension: 'mp4' });
     expect(value(await client(() => ({ json: {} })).c.vodInfo(1))).toEqual({ extension: 'mp4' });
+    expect(value(await client(() => ({ json: [] })).c.vodInfo(1))).toEqual({ extension: 'mp4' });
   });
 });
 
@@ -109,6 +152,7 @@ describe('shortEpg', () => {
   });
   it('returns an empty list without listings', async () => {
     expect(value(await client(() => ({ json: {} })).c.shortEpg(1))).toEqual([]);
+    expect(value(await client(() => ({ json: [] })).c.shortEpg(1))).toEqual([]);
     expect(value(await client(() => ({ json: { epg_listings: [] } })).c.shortEpg(1))).toEqual([]);
   });
 });
