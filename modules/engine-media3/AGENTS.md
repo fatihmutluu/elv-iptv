@@ -25,8 +25,8 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
 - States: `opening` on prepare, `buffering`, `ready`, `playing`, `paused` (not wanted), `ended`; a live media that
   ends sends `error network`. `stall`: buffering while wanted after it played. `clock` anchors when the effective rate
   (speed while playing, else 0) changes, on seeks and once a second while playing; `durationMs` (VOD), `liveEdgeMs`
-  (live, window end) when known. Extension renderers are `ON` by default (`PREFER` + software audio first when
-  `options.softwareAudio` is set, #69). Buffers: 15-30 s, start 1 s, after rebuffer 2 s, 16 MB low-RAM else 32 MB.
+  (live, window end) when known. `FfmpegAudio` configures LGPL-2.1+ FFmpeg 9.0.2 + `FfmpegAudioRenderer` (`ON` default,
+  `PREFER` + software audio first when `options.softwareAudio`, #69; notices in `assets/licenses/ffmpeg-media3/`).
 
 ## Requests and errors (`ConnectionGate`, `GatedDataSource`, `StreamHttp`, sniffing, `LoadRetry`, `ErrorMapping`)
 - Every prepare, `stop`, `recreate` and `dispose` begins a generation before stopping/releasing ExoPlayer and

@@ -6,12 +6,38 @@ plugins {
 group = 'io.github.fatihmutluu.elv.media3'
 version = '0.0.0'
 
+def ffmpegVendorDir = file('../vendor/ffmpeg-media3')
+
 android {
   namespace 'io.github.fatihmutluu.elv.media3'
   defaultConfig {
     versionCode 1
     versionName '0.0.0'
+    testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    consumerProguardFiles new File(ffmpegVendorDir, 'proguard-rules.txt')
   }
+  sourceSets {
+    main {
+      java.srcDirs += new File(ffmpegVendorDir, 'java')
+      jniLibs.srcDirs += new File(ffmpegVendorDir, 'jniLibs')
+      assets.srcDirs += new File(ffmpegVendorDir, 'assets')
+    }
+  }
+}
+
+def checkFfmpegMedia3 = tasks.register('checkFfmpegMedia3') {
+  doLast {
+    def buildInfo = new File(ffmpegVendorDir, 'BUILDINFO.json')
+    if (!buildInfo.isFile()) {
+      throw new GradleException(
+        "Missing @elv/engine-media3 FFmpeg runtime at ${ffmpegVendorDir}. Run `pnpm ffmpeg-media3 fetch` from the repository root first."
+      )
+    }
+  }
+}
+
+tasks.named('preBuild').configure {
+  dependsOn(checkFfmpegMedia3)
 }
 
 dependencies {
@@ -19,6 +45,8 @@ dependencies {
   implementation "androidx.media3:media3-exoplayer:$media3"
   implementation "androidx.media3:media3-exoplayer-hls:$media3"
   implementation "androidx.media3:media3-datasource:$media3"
+  implementation "androidx.media3:media3-decoder:$media3"
+  compileOnly 'org.checkerframework:checker-qual:3.49.0'
   // OkHttp is React Native's own at run time (4.9.2 in react-native-tvos 0.88): the extension's 4.12.0 is excluded so
   // it does not replace that copy app-wide, and the module compiles against the same version. Every OkHttp member
   // the extension calls exists in 4.9.2.
@@ -30,4 +58,8 @@ dependencies {
   testImplementation okhttp
   testImplementation 'junit:junit:4.13.2'
   testImplementation 'org.robolectric:robolectric:4.17'
+  androidTestImplementation 'junit:junit:4.13.2'
+  androidTestImplementation 'androidx.test:core:1.6.1'
+  androidTestImplementation 'androidx.test:runner:1.6.2'
+  androidTestImplementation 'androidx.test.ext:junit:1.2.1'
 }

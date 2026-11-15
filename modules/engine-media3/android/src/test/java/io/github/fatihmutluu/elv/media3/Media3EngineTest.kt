@@ -33,6 +33,35 @@ class Media3EngineTest {
   }
 
   @Test
+  fun `configures FfmpegLibrary topological shared library order before building renderers (#69)`() {
+    assertEquals(
+      listOf("avutil", "swresample", "avcodec", "ffmpegJNI"),
+      FfmpegAudio.LIBRARIES.toList(),
+    )
+    FfmpegAudio.ensureConfigured()
+    FfmpegAudio.ensureConfigured()
+  }
+
+  @Test
+  fun `builds MediaCodecAudioRenderer then FfmpegAudioRenderer by default and FfmpegAudioRenderer first when softwareAudio is true (#69)`() {
+    val app = RuntimeEnvironment.getApplication()
+    assertEquals(
+      listOf(
+        "androidx.media3.exoplayer.audio.MediaCodecAudioRenderer",
+        "androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer",
+      ),
+      audioRendererClassNamesFor(app, softwareAudio = false),
+    )
+    assertEquals(
+      listOf(
+        "androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer",
+        "androidx.media3.exoplayer.audio.MediaCodecAudioRenderer",
+      ),
+      audioRendererClassNamesFor(app, softwareAudio = true),
+    )
+  }
+
+  @Test
   fun `dispose aborts an open silent socket immediately, clears screenOn and shuts down closer (C2)`() {
     val connected = CountDownLatch(1)
     val socketClosed = CountDownLatch(1)
