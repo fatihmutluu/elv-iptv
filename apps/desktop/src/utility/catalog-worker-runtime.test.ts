@@ -1,3 +1,4 @@
+import { type ChildProcess, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -16,7 +17,6 @@ import type {
 import type { ElvError, FetchLike, Result } from '@elv/domain';
 import Database from 'better-sqlite3';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { startSim } from '../../../../tools/src/sim/server.ts';
 import type { MainToWorkerMessage, WorkerToMainMessage } from '../main/catalog/worker-protocol.ts';
 import type { CatalogClientMessage, CatalogWorkerMessage } from '../shared/catalog-ipc.ts';
 import {
@@ -203,7 +203,8 @@ function createHarness(opts?: {
   return handle;
 }
 
-let sim: Awaited<ReturnType<typeof startSim>> | undefined;
+let simChild: ChildProcess | undefined;
+let simUrl = '';
 let m3uServer: Server | undefined;
 let m3uBaseUrl = '';
 const tempDirs: string[] = [];
@@ -214,8 +215,28 @@ const SYNTH_M3U_VAL = ['m3u', 'Tok', '9f8e7d6c'].join('_');
 const SYNTH_AUTH_VAL = ['Bearer', ['hdr', 'Val', '1a2b3c4d'].join('_')].join(' ');
 const SYNTH_GUIDE_VAL = ['guide', 'Val', '554433'].join('_');
 
+function spawnTestSim(): Promise<{ child: ChildProcess; url: string }> {
+  const simBin = join(__dirname, '..', '..', '..', '..', 'tools', 'bin', 'sim.ts');
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      [simBin, '--port', '0', '--host', '127.0.0.1', '--clock', '2026-06-15T12:00:00Z'],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    let out = '';
+    child.once('error', reject);
+    child.stdout?.on('data', (chunk: Buffer) => {
+      out += chunk.toString('utf8');
+      const m = /sim:\s+(http:\/\/127\.0\.0\.1:\d+)/.exec(out);
+      if (m?.[1]) resolve({ child, url: m[1] });
+    });
+  });
+}
+
 beforeAll(async () => {
-  sim = await startSim({ port: 0, clock: new Date('2026-06-15T12:00:00Z'), ffmpegPath: null });
+  const started = await spawnTestSim();
+  simChild = started.child;
+  simUrl = started.url;
   m3uServer = createServer((req, res) => {
     if (req.url?.startsWith('/playlist.m3u')) {
       const body = [
@@ -244,7 +265,11 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await sim?.close();
+  if (simChild && simChild.exitCode === null) {
+    const done = new Promise<void>((resolve) => simChild?.once('exit', () => resolve()));
+    simChild.kill();
+    await done;
+  }
   await new Promise<void>((resolve) => (m3uServer ? m3uServer.close(() => resolve()) : resolve()));
 });
 
@@ -278,7 +303,7 @@ describe('createCatalogWorkerRuntime', () => {
     expect(ping).toEqual({ ok: true, value: undefined });
 
     // Add Xtream source via link with a distinctive credential check via direct addSource too
-    const xtreamUrl = sim?.url ?? '';
+    const xtreamUrl = simUrl;
     const addedXtream = await client.call<Result<SourceRow>>({
       method: 'addSource',
       input: {
@@ -511,7 +536,7 @@ describe('createCatalogWorkerRuntime', () => {
       input: {
         kind: 'xtream',
         name: 'Cancelable',
-        server: sim?.url ?? '',
+        server: simUrl,
         username: 'large',
         password: 'large',
       },

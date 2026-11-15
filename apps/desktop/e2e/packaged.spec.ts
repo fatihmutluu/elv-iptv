@@ -233,3 +233,50 @@ test('the packaged app opens an engine', async () => {
     rmSync(userDataDir, { recursive: true, force: true });
   }
 });
+
+test('the packaged app opens the catalog utility process and queries SQLite', async () => {
+  const binary = requirePackagedBinary();
+  if (!binary) return;
+
+  const userDataDir = mkdtempSync(join(tmpdir(), 'elv-e2e-packaged-catalog-'));
+  const { child, wsUrl } = await launchWithCdp(binary, userDataDir);
+  let closeBrowser: (() => Promise<void>) | undefined;
+  try {
+    const connected = await firstAppPage(wsUrl);
+    closeBrowser = connected.close;
+    const { page } = connected;
+
+    await expect(page).toHaveTitle('ELV IPTV');
+    const result = await page.evaluate(async () => {
+      const w = window as unknown as {
+        elv: {
+          catalog: {
+            open(): Promise<{ ok: boolean; error?: { category: string; code: string } }>;
+            listSources(): Promise<unknown[]>;
+            categories(sourceId: string, kind: 'live' | 'movie' | 'series'): Promise<unknown[]>;
+            items(categoryId: string, offset: number, limit: number): Promise<unknown[]>;
+            close(): Promise<void>;
+          };
+        };
+      };
+      const opened = await w.elv.catalog.open();
+      const sources = await w.elv.catalog.listSources();
+      const cats = await w.elv.catalog.categories('none', 'live');
+      const items = await w.elv.catalog.items('none', 0, 10);
+      await w.elv.catalog.close();
+      return { opened, sources, cats, items };
+    });
+
+    expect(result).toEqual({
+      opened: { ok: true, value: undefined },
+      sources: [],
+      cats: [],
+      items: [],
+    });
+    expect(existsSync(join(userDataDir, 'catalog.db'))).toBe(true);
+  } finally {
+    await closeBrowser?.().catch(() => {});
+    await stopProcess(child);
+    rmSync(userDataDir, { recursive: true, force: true });
+  }
+});
