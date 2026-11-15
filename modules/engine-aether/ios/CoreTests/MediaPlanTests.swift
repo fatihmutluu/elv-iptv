@@ -26,12 +26,14 @@ struct MediaPlanTests {
     #expect(tsPlan == .liveTs(URL(string: "http://h:7878/live/demo/demo/1001.ts")!))
   }
 
-  @Test("garbage URL returns nil")
+  @Test("garbage or non-HTTP URL returns nil")
   func garbageUrlReturnsNil() {
     #expect(planMedia(LoadRequest(url: "")) == nil)
     #expect(planMedia(LoadRequest(url: "not a url")) == nil)
     #expect(planMedia(LoadRequest(url: "http://")) == nil)
     #expect(planMedia(LoadRequest(url: ":///live/1.ts")) == nil)
+    #expect(planMedia(LoadRequest(url: "file:///etc/passwd")) == nil)
+    #expect(planMedia(LoadRequest(url: "ftp://example.com/1.ts")) == nil)
   }
 
   @Test("VOD options cap concurrent source requests at 1; HLS and liveTs do not; softwareAudio maps to preferSoftwareDecode")

@@ -107,6 +107,7 @@ describe('PlayerGateScreen', () => {
     expect(m.zapMs.max).toBeGreaterThanOrEqual(300);
     expect(m.zapMs.max).toBeLessThan(400);
     expect(m.recoveries).toEqual({ '1': 0, '2': 0, '3': 0, '4': 0 });
+    expect(m.final).toBe('playing');
     expect(m.soak).toBeNull();
     expect(engine.maxConcurrentMedias()).toBe(1);
     expect(screen.getByTestId('osd-channel')).toHaveTextContent('Channel 1001');

@@ -12,9 +12,9 @@ final class EngineMainDriver: EngineSink {
   weak var boundSurface: AetherSurfaceView?
   var activeEpoch = 0
 
-  init(owner: EngineObject) {
+  init(owner: EngineObject, gate: ConnectionGate, httpSession: EngineHttpSession) {
     self.owner = owner
-    self.backend = AetherBackend()
+    self.backend = AetherBackend(gate: gate, httpSession: httpSession)
     self.core = EngineCore(
       backend: backend,
       sink: self,
@@ -103,6 +103,8 @@ final class EngineObject: SharedObject {
   private var isDisposed = false
   private var jsEpoch = 0
   private var jsToken = 0
+  private let gate = ConnectionGate()
+  private let httpSession = EngineHttpSession()
   private let onDisposed: (EngineObject) -> Void
   private var driver: EngineMainDriver?
 
@@ -111,7 +113,7 @@ final class EngineObject: SharedObject {
     super.init()
     enqueueMain { [weak self] in
       guard let self, !self.readDisposed() else { return }
-      self.driver = EngineMainDriver(owner: self)
+      self.driver = EngineMainDriver(owner: self, gate: self.gate, httpSession: self.httpSession)
     }
   }
 
@@ -188,6 +190,7 @@ final class EngineObject: SharedObject {
       return true
     }
     guard shouldDispose else { return }
+    httpSession.dispose()
     onDisposed(self)
     enqueueMain { [weak self] in
       guard let self else { return }
@@ -231,7 +234,7 @@ final class EngineObject: SharedObject {
     if let driver {
       return driver
     }
-    let created = EngineMainDriver(owner: self)
+    let created = EngineMainDriver(owner: self, gate: gate, httpSession: httpSession)
     driver = created
     return created
   }

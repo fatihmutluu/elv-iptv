@@ -20,6 +20,7 @@ public final class EngineCore {
   private var played = false
   private var stalled = false
   private var errorReported = false
+  private var latchedReaderFailure: ReaderFailure?
   private var forceNextClock = false
 
   private var lastClockUptimeMs: Double?
@@ -197,8 +198,11 @@ public final class EngineCore {
         liveEdgeSeconds: liveEdgeSeconds
       )
 
+    case let .readerFault(readerFailure):
+      if latchedReaderFailure == nil { latchedReaderFailure = readerFailure }
+
     case let .failure(failure):
-      reportFailure(failure)
+      reportFailure(latchedReaderFailure.map { .reader($0) } ?? failure)
     }
   }
 
@@ -241,6 +245,7 @@ public final class EngineCore {
     played = false
     stalled = false
     errorReported = false
+    latchedReaderFailure = nil
     forceNextClock = false
     lastClockUptimeMs = nil
     lastClockRate = nil
@@ -291,6 +296,10 @@ public final class EngineCore {
       active = false
       setScreenOn(false)
       if currentRequest?.live ?? true {
+        if let rf = latchedReaderFailure {
+          reportFailure(.reader(rf))
+          return
+        }
         errorReported = true
         let redacted = redactUrl(currentRequest?.url ?? "")
         let detail = redacted.isEmpty ? "liveEnded" : "liveEnded \(redacted)"

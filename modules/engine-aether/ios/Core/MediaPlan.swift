@@ -13,11 +13,7 @@ public func planMedia(_ request: LoadRequest) -> MediaPlan? {
     return nil
   }
 
-  if scheme == "http" || scheme == "https" {
-    guard let host = components.host, !host.isEmpty else {
-      return nil
-    }
-  } else if scheme != "file" {
+  guard scheme == "http" || scheme == "https", let host = components.host, !host.isEmpty else {
     return nil
   }
 
