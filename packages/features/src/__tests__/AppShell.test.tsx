@@ -151,8 +151,9 @@ describe('AppShell', () => {
     const env = await openShellCatalog();
     const { videoHost } = createFakeHost();
 
+    let view: Awaited<ReturnType<typeof render>> | undefined;
     try {
-      const view = await render(
+      view = await render(
         <FormFactorProvider value="desktop">
           <I18nProvider i18n={createAppI18n('en')}>
             <AppShell catalog={env.catalog} videoHost={videoHost} />
@@ -194,9 +195,8 @@ describe('AppShell', () => {
       await waitFor(() => {
         expect(screen.getByText('Synthetic Series One')).toBeTruthy();
       });
-
-      await view.unmount();
     } finally {
+      await view?.unmount();
       await env.cleanup();
     }
   });
@@ -280,6 +280,7 @@ describe('AppShell', () => {
     const env = await openShellCatalog();
     const { engine, videoHost } = createFakeHost();
 
+    let view: Awaited<ReturnType<typeof render>> | undefined;
     try {
       const added = await env.catalog.addSource({
         kind: 'xtream',
@@ -292,7 +293,7 @@ describe('AppShell', () => {
       await env.catalog.importSource(added.value.id);
 
       let capturedGuard: { stopIfUsingSource(id: string): void | Promise<void> } | undefined;
-      const view = await render(
+      view = await render(
         <FormFactorProvider value="tablet">
           <I18nProvider i18n={createAppI18n('en')}>
             <AppShell
@@ -322,9 +323,8 @@ describe('AppShell', () => {
 
       expect(screen.queryByTestId('player-osd')).toBeNull();
       expect(engine.openMedias()).toBe(0);
-
-      await view.unmount();
     } finally {
+      await view?.unmount();
       await env.cleanup();
     }
   });

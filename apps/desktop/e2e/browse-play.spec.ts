@@ -193,7 +193,7 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
       appPath: DESKTOP_ROOT,
       platform: process.platform,
       arch: process.arch,
-    }) !== undefined;
+    }) !== null;
   const canPlayMedia = hasMpv && hasMedia;
 
   const app = await electron.launch({
