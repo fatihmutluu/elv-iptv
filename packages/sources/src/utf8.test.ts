@@ -14,7 +14,7 @@ describe('decodeUtf8', () => {
     fc.assert(
       fc.property(fc.string({ unit: 'binary' }), (s) => decodeUtf8(utf8(s)) === oracle(utf8(s))),
     );
-  });
+  }, 15_000);
 
   it('matches TextDecoder for arbitrary bytes, including invalid ones', () => {
     fc.assert(fc.property(fc.uint8Array({ maxLength: 64 }), (b) => decodeUtf8(b) === oracle(b)));

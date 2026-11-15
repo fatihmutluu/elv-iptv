@@ -208,9 +208,18 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@elv/data':
+        specifier: workspace:*
+        version: link:../../packages/data
+      '@elv/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@elv/playback':
         specifier: workspace:*
         version: link:../../packages/playback
+      better-sqlite3:
+        specifier: 13.0.3
+        version: 13.0.3
     devDependencies:
       '@elv/config':
         specifier: workspace:*
@@ -221,6 +230,9 @@ importers:
       '@playwright/test':
         specifier: 1.65.0
         version: 1.65.0
+      '@types/better-sqlite3':
+        specifier: 7.6.13
+        version: 7.6.13
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2
@@ -242,6 +254,12 @@ importers:
 
   apps/desktop/renderer:
     dependencies:
+      '@elv/data':
+        specifier: workspace:*
+        version: link:../../../packages/data
+      '@elv/domain':
+        specifier: workspace:*
+        version: link:../../../packages/domain
       '@elv/playback':
         specifier: workspace:*
         version: link:../../../packages/playback

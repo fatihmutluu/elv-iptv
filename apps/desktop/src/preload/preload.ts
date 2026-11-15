@@ -1,8 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import { createCatalogBridge } from './catalog-bridge.ts';
 import { isGateMode } from './gate-flag.ts';
 import { createPlayerBridge } from './player-bridge.ts';
 
 contextBridge.exposeInMainWorld(
   'elv',
-  Object.freeze({ player: createPlayerBridge(ipcRenderer), gate: isGateMode(process.argv) }),
+  Object.freeze({
+    player: createPlayerBridge(ipcRenderer),
+    catalog: createCatalogBridge(ipcRenderer),
+    gate: isGateMode(process.argv),
+  }),
 );

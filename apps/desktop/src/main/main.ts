@@ -7,12 +7,23 @@ import {
   BrowserWindow,
   ipcMain,
   Menu,
+  MessageChannelMain,
+  type MessagePortMain,
   net,
   protocol,
+  safeStorage,
   session,
+  utilityProcess,
   type WebContents,
 } from 'electron';
 import { APP_ORIGIN, APP_SCHEME } from './app-protocol.ts';
+import { type CatalogCoordinator, createCatalogCoordinator } from './catalog/coordinator.ts';
+import { registerCatalogIpc, registerCatalogQuitHandler } from './catalog/ipc.ts';
+import {
+  createAesGcmTestCipher,
+  createEncryptedFileSecretStore,
+  createSafeStorageCipher,
+} from './catalog/secret-store.ts';
 import {
   createVideoSampler,
   GATE_PLAYING_LINE,
@@ -153,9 +164,46 @@ async function startPlayer(): Promise<void> {
   });
 }
 
+function startCatalog(): CatalogCoordinator<MessagePortMain> {
+  const userData = app.getPath('userData');
+  const useTestCipher = !app.isPackaged && process.argv.includes('--elv-test-cipher');
+  const cipher = useTestCipher
+    ? createAesGcmTestCipher()
+    : createSafeStorageCipher(safeStorage, process.platform);
+  const secrets = createEncryptedFileSecretStore({
+    filePath: join(userData, 'secrets.json'),
+    cipher,
+  });
+  const log = (line: string): void => {
+    process.stderr.write(`${line}\n`);
+  };
+  const coordinator = createCatalogCoordinator<MessagePortMain>({
+    dbPath: join(userData, 'catalog.db'),
+    workerPath: join(__dirname, '..', 'utility', 'catalog-worker.js'),
+    secrets,
+    fork: (workerPath) => utilityProcess.fork(workerPath, [], { serviceName: 'ELV Catalog' }),
+    createChannel: () => new MessageChannelMain(),
+    log,
+  });
+  registerCatalogIpc({
+    ipcMain,
+    coordinator,
+    log,
+  });
+  return coordinator;
+}
+
 // Without the lock this launch quits before any sweep, window or engine: a second instance would kill the first's mpv.
 const hasLock = startSingleInstance(app, {
   onSecond: () => focusWindow(BrowserWindow.getAllWindows()[0]),
+});
+
+let catalogCoordinator: CatalogCoordinator<MessagePortMain> | undefined;
+
+registerCatalogQuitHandler({
+  app,
+  getCoordinator: () => catalogCoordinator,
+  quit: () => app.quit(),
 });
 
 if (hasLock) {
@@ -164,6 +212,7 @@ if (hasLock) {
     if (app.isPackaged) Menu.setApplicationMenu(null);
     lockDownSession(session.defaultSession);
     serveRenderer();
+    catalogCoordinator = startCatalog();
     await startPlayer();
     createWindow();
     app.on('activate', () => {
