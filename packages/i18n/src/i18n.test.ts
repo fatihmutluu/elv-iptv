@@ -6,6 +6,7 @@ import {
   enMessages,
   ensurePluralRules,
   type MessageId,
+  resolveLanguageLabel,
   resolveLocale,
   SUPPORTED_LOCALES,
   trMessages,
@@ -190,6 +191,63 @@ describe('@elv/i18n', () => {
     expect(tr.t('series.episodeUntitled', { episode: 3 })).toBe('3. Bölüm');
     expect(tr.t('player.status.recovering', { rung: 2 })).toBe('Yeniden bağlanılıyor (adım 2)…');
     expect(tr.t('player.hint.connectionLimit')).toContain('Tekrar dene');
+  });
+
+  it('localizes VOD transport controls, track picker strings, and common track language codes', () => {
+    const en = createAppI18n('en');
+    expect(en.t('player.play')).toBe('Play');
+    expect(en.t('player.pause')).toBe('Pause');
+    expect(en.t('player.seekBack')).toBe('-10s');
+    expect(en.t('player.seekForward')).toBe('+10s');
+    expect(en.t('player.tracks')).toBe('Audio & Subtitles');
+    expect(en.t('player.audioTracks')).toBe('Audio');
+    expect(en.t('player.subtitleTracks')).toBe('Subtitles');
+    expect(en.t('player.subtitlesOff')).toBe('Off');
+    expect(en.t('player.closeTracks')).toBe('Close');
+    expect(en.t('player.trackNumber', { number: 2 })).toBe('Track 2');
+
+    expect(resolveLanguageLabel('tur', en)).toBe('Turkish');
+    expect(resolveLanguageLabel('tr-TR', en)).toBe('Turkish');
+    expect(resolveLanguageLabel('eng', en)).toBe('English');
+    expect(resolveLanguageLabel('en_US', en)).toBe('English');
+    expect(resolveLanguageLabel('deu', en)).toBe('German');
+    expect(resolveLanguageLabel('ger', en)).toBe('German');
+    expect(resolveLanguageLabel('fra', en)).toBe('French');
+    expect(resolveLanguageLabel('spa', en)).toBe('Spanish');
+    expect(resolveLanguageLabel('ita', en)).toBe('Italian');
+    expect(resolveLanguageLabel('rus', en)).toBe('Russian');
+    expect(resolveLanguageLabel('ara', en)).toBe('Arabic');
+    expect(resolveLanguageLabel('por', en)).toBe('Portuguese');
+    expect(resolveLanguageLabel('nld', en)).toBe('Dutch');
+    expect(resolveLanguageLabel('jpn', en)).toBe('Japanese');
+    expect(resolveLanguageLabel('kor', en)).toBe('Korean');
+    expect(resolveLanguageLabel('zho', en)).toBe('Chinese');
+    expect(resolveLanguageLabel('pol', en)).toBe('POL');
+    expect(resolveLanguageLabel('und', en)).toBeUndefined();
+    expect(resolveLanguageLabel('  ', en)).toBeUndefined();
+    expect(resolveLanguageLabel(undefined, en)).toBeUndefined();
+
+    const tr = createAppI18n('tr');
+    expect(tr.t('player.play')).toBe('Oynat');
+    expect(tr.t('player.pause')).toBe('Duraklat');
+    expect(tr.t('player.seekBack')).toBe('-10 sn');
+    expect(tr.t('player.seekForward')).toBe('+10 sn');
+    expect(tr.t('player.tracks')).toBe('Ses ve Altyazı');
+    expect(tr.t('player.audioTracks')).toBe('Ses');
+    expect(tr.t('player.subtitleTracks')).toBe('Altyazı');
+    expect(tr.t('player.subtitlesOff')).toBe('Kapalı');
+    expect(tr.t('player.closeTracks')).toBe('Kapat');
+    expect(tr.t('player.trackNumber', { number: 2 })).toBe('Parça 2');
+
+    expect(resolveLanguageLabel('tur', tr)).toBe('Türkçe');
+    expect(resolveLanguageLabel('tr', tr)).toBe('Türkçe');
+    expect(resolveLanguageLabel('eng', tr)).toBe('İngilizce');
+    expect(resolveLanguageLabel('en', tr)).toBe('İngilizce');
+    expect(resolveLanguageLabel('de', tr)).toBe('Almanca');
+    expect(resolveLanguageLabel('fre', tr)).toBe('Fransızca');
+    expect(resolveLanguageLabel('dut', tr)).toBe('Felemenkçe');
+    expect(resolveLanguageLabel('chi', tr)).toBe('Çince');
+    expect(resolveLanguageLabel('pol', tr)).toBe('POL');
   });
 
   it('installs Intl.PluralRules polyfill only when missing on the target', () => {

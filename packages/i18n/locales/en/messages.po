@@ -411,6 +411,81 @@ msgstr "Prev"
 msgid "player.nextChannel"
 msgstr "Next"
 
+msgid "player.play"
+msgstr "Play"
+
+msgid "player.pause"
+msgstr "Pause"
+
+msgid "player.seekBack"
+msgstr "-10s"
+
+msgid "player.seekForward"
+msgstr "+10s"
+
+msgid "player.tracks"
+msgstr "Audio & Subtitles"
+
+msgid "player.audioTracks"
+msgstr "Audio"
+
+msgid "player.subtitleTracks"
+msgstr "Subtitles"
+
+msgid "player.subtitlesOff"
+msgstr "Off"
+
+msgid "player.closeTracks"
+msgstr "Close"
+
+msgid "player.progressLabel"
+msgstr "Playback progress"
+
+msgid "player.trackNumber"
+msgstr "Track {number}"
+
+msgid "player.trackForced"
+msgstr "Forced"
+
+msgid "player.lang.tr"
+msgstr "Turkish"
+
+msgid "player.lang.en"
+msgstr "English"
+
+msgid "player.lang.de"
+msgstr "German"
+
+msgid "player.lang.fr"
+msgstr "French"
+
+msgid "player.lang.es"
+msgstr "Spanish"
+
+msgid "player.lang.it"
+msgstr "Italian"
+
+msgid "player.lang.ru"
+msgstr "Russian"
+
+msgid "player.lang.ar"
+msgstr "Arabic"
+
+msgid "player.lang.pt"
+msgstr "Portuguese"
+
+msgid "player.lang.nl"
+msgstr "Dutch"
+
+msgid "player.lang.ja"
+msgstr "Japanese"
+
+msgid "player.lang.ko"
+msgstr "Korean"
+
+msgid "player.lang.zh"
+msgstr "Chinese"
+
 msgid "player.unavailable"
 msgstr "Video playback is unavailable on this platform."
 

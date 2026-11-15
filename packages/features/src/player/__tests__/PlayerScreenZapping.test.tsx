@@ -12,6 +12,7 @@ const KEYCODE_DPAD_UP = 19;
 const KEYCODE_DPAD_DOWN = 20;
 const KEYCODE_DPAD_CENTER = 23;
 const KEYCODE_BACK = 4;
+const KEYCODE_MENU = 82;
 const KEYCODE_CHANNEL_UP = 166;
 const KEYCODE_CHANNEL_DOWN = 167;
 
@@ -234,6 +235,96 @@ describe('PlayerScreen zapping and failure handling', () => {
 
     await fireEvent.press(screen.getByTestId('player-back'));
     expect(onExit).toHaveBeenCalledTimes(2);
+
+    await view.unmount();
+  });
+
+  it('opens TrackPickerModal on live TV via Menu without colliding with Up/Down channel zapping', async () => {
+    jest.replaceProperty(Platform, 'OS', 'android');
+    jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
+    const keys = createFakeAndroidKeys();
+    const manual = createManualClock();
+    const engine = createFakePlayerEngine({
+      now: manual.now,
+      schedule: manual.schedule,
+      cancel: manual.cancel,
+    });
+    const onChangeIndex = jest.fn();
+
+    const view = await render(
+      <RemoteKeysProvider android={keys.source}>
+        <FormFactorProvider value="tv">
+          <I18nProvider i18n={createAppI18n('en')}>
+            <PlayerScreen
+              catalog={{
+                resolveStream: async (k) =>
+                  ok({ url: `http://sim.example.test/${k}.ts`, headers: {} }),
+              }}
+              videoHost={{ open: () => ({ engine, renderSurface: () => <View /> }) }}
+              target={{
+                itemKey: 'ch-0',
+                sourceId: 'src-1',
+                title: 'Live Multi-Track',
+                kind: 'live',
+                playlist: {
+                  count: 2,
+                  currentIndex: 0,
+                  onChangeIndex,
+                  getAt: async (i) => ({
+                    itemKey: `ch-${i}`,
+                    sourceId: 'src-1',
+                    title: `Channel ${i}`,
+                    kind: 'live',
+                  }),
+                },
+              }}
+              clock={{ now: manual.now }}
+              timers={{ setTimeout: manual.schedule, clearTimeout: manual.cancel }}
+              onExit={jest.fn()}
+            />
+          </I18nProvider>
+        </FormFactorProvider>
+      </RemoteKeysProvider>,
+    );
+
+    await waitFor(() => {
+      expect(engine.commands.some((c) => c.name === 'load')).toBe(true);
+    });
+    const attempt = engine.commands.find((c) => c.name === 'load')?.attempt ?? 1;
+    await act(async () => {
+      engine.emit({
+        attempt,
+        type: 'tracks',
+        tracks: {
+          audio: [
+            { id: 'a:1', language: 'tur' },
+            { id: 'a:2', language: 'eng' },
+          ],
+          subtitles: [{ id: 's:1', language: 'tur' }],
+          selectedAudioId: 'a:1',
+          selectedSubtitleId: null,
+        },
+      });
+    });
+
+    expect(screen.queryByTestId('player-progress-bar')).toBeNull();
+    expect(screen.queryByTestId('player-play-pause')).toBeNull();
+
+    await act(async () => {
+      keys.tap(KEYCODE_MENU);
+    });
+    expect(screen.getByTestId('player-tracks-panel')).toBeTruthy();
+
+    await act(async () => {
+      keys.tap(KEYCODE_DPAD_DOWN);
+    });
+    await act(async () => {
+      keys.tap(KEYCODE_DPAD_CENTER);
+    });
+    expect(onChangeIndex).not.toHaveBeenCalled();
+    expect(engine.commands.filter((c) => c.name === 'selectAudioTrack').at(-1)?.trackId).toBe(
+      'a:2',
+    );
 
     await view.unmount();
   });

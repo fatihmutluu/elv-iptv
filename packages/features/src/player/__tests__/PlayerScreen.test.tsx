@@ -148,6 +148,24 @@ describe('PlayerScreen lifecycle', () => {
 
     const desktopLayer = screen.getByTestId('player-surface-layer');
     expect(desktopLayer.props.style).toEqual({ flex: 1 });
+    await waitFor(() => {
+      expect(engine.commands.some((c) => c.name === 'load')).toBe(true);
+    });
+    await act(async () => {
+      engine.emit({
+        attempt: 1,
+        type: 'tracks',
+        tracks: {
+          audio: [{ id: 'a:1', language: 'tur' }],
+          subtitles: [{ id: 's:1', language: 'tur' }],
+          selectedAudioId: 'a:1',
+          selectedSubtitleId: null,
+        },
+      });
+    });
+    await fireEvent.press(screen.getByTestId('player-tracks-button'));
+    expect(screen.getByTestId('player-tracks-panel')).toBeTruthy();
+    expect(screen.getByTestId('player-surface-layer').props.style).toEqual({ flex: 1 });
     await desktopView.unmount();
 
     const tvEngine = createFakePlayerEngine({
