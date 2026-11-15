@@ -135,6 +135,13 @@ export async function buildApk(exec: Exec, root: string, adb: string): Promise<v
     },
   };
   const steps = [
+    {
+      command: 'node',
+      args: ['tools/bin/ffmpeg-media3.ts', 'fetch'],
+      cwd: root,
+      env: {},
+      writeStampAfter: false,
+    },
     { ...prebuild, cwd: `${root}/${prebuild.cwd}`, writeStampAfter: true },
     { ...gradle, cwd: `${root}/${gradle.cwd}`, writeStampAfter: false },
   ];

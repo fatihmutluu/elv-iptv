@@ -264,10 +264,11 @@ describe('runListGate', () => {
       return device.exec(command, args);
     };
     await runListGate({ exec, sleep: noSleep, build: true, root: '/repo', adb: 'adb' });
-    expect(builds[0]).toMatch(/expo prebuild --clean --platform android --no-install/);
-    expect(builds[0]).toMatch(/apps\/tv-mobile.* development$/);
-    expect(builds[1]).toMatch(/^\.[\\/]gradlew(\.bat)? assembleRelease --console=plain/);
-    expect(builds[1]).toMatch(/android .*development$/);
+    expect(builds[0]).toMatch(/ffmpeg-media3\.ts fetch/);
+    expect(builds[1]).toMatch(/expo prebuild --clean --platform android --no-install/);
+    expect(builds[1]).toMatch(/apps\/tv-mobile.* development$/);
+    expect(builds[2]).toMatch(/^\.[\\/]gradlew(\.bat)? assembleRelease --console=plain/);
+    expect(builds[2]).toMatch(/android .*development$/);
   });
 });
 
@@ -289,8 +290,8 @@ describe('runListGate build environment', () => {
         return { ok: true, output: '' };
       };
       await runListGate({ exec, sleep: noSleep, build: true, root, adb });
-      expect(envs).toHaveLength(2);
-      expect(envs[1]?.ANDROID_HOME).toBe('/sdk');
+      expect(envs).toHaveLength(3);
+      expect(envs[2]?.ANDROID_HOME).toBe('/sdk');
       for (const env of envs) {
         expect(env.PATH ?? env.Path).toBeDefined();
         expect(env.DEV_SHELL_LEAK).toBeUndefined();

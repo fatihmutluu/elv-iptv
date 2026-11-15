@@ -23,7 +23,8 @@
     "scaffold": "node tools/bin/scaffold.ts",
     "sim": "node tools/bin/sim.ts",
     "gate": "node tools/bin/gate.ts",
-    "mpv": "node tools/bin/mpv.ts"
+    "mpv": "node tools/bin/mpv.ts",
+    "ffmpeg-media3": "node tools/bin/ffmpeg-media3.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.7",
