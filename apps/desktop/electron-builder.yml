@@ -38,6 +38,11 @@ mac:
   category: public.app-category.entertainment
   target:
     - dmg
+  extraResources:
+    - from: resources/mpv/darwin-arm64
+      to: mpv
+    - from: resources/mpv-input.conf
+      to: mpv-input.conf
 dmg:
   title: ELV IPTV
 mas:

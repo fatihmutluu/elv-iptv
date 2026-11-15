@@ -20,13 +20,21 @@ export const LAUNCH_OPTIONS: readonly string[] = [
   '--script-opts=osc-idlescreen=no',
 ];
 
-/** Builds the full argv. Stream URLs and headers never appear here; they travel over IPC. */
+/**
+ * Builds the full argv. Stream URLs and headers never appear here; they travel over IPC.
+ * Our macOS runtime is built without libcurl, so `--curl-enabled` does not exist there.
+ */
 export function launchArgs(p: {
   inputConf: string;
   presenterArgs: readonly string[];
   transportArgs: readonly string[];
+  platform?: string;
 }): string[] {
-  return [...LAUNCH_OPTIONS, `--input-conf=${p.inputConf}`, ...p.presenterArgs, ...p.transportArgs];
+  const base =
+    p.platform === 'darwin'
+      ? LAUNCH_OPTIONS.filter((o) => o !== '--curl-enabled=no')
+      : LAUNCH_OPTIONS;
+  return [...base, `--input-conf=${p.inputConf}`, ...p.presenterArgs, ...p.transportArgs];
 }
 
 const escapeField = (value: string): string => value.replace(/,/g, '\\,');

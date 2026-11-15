@@ -1,38 +1,48 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { mpvRuntimePaths } from '../runtime-path.ts';
 import { SIM_URL, simLiveUrl, simMovieUrl, simulatorAnswers } from '../testing/sim-streams.ts';
 import type { MpvEvent } from './codec.ts';
 import type { MpvProcess } from './process.ts';
 import { spawnMpv } from './process.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const executable = resolve(here, '../../../../resources/mpv/win32-x64/elv-mpv.exe');
-const fixtureDir = resolve(here, 'fixtures');
+const runtime = mpvRuntimePaths({
+  isPackaged: false,
+  resourcesPath: '',
+  appPath: resolve(here, '../../../..'),
+  platform: process.platform,
+  arch: process.arch,
+});
+const fixtureDir =
+  process.platform === 'darwin' ? resolve(here, 'fixtures/darwin') : resolve(here, 'fixtures');
 const record = process.env['ELV_RECORD_MPV_FIXTURES'] === '1';
 // Opt-in: it opens mpv windows and takes about 30 s. Recording implies it.
 const optedIn = process.env['ELV_MPV_SPIKE'] === '1' || record;
-const ready =
-  optedIn && process.platform === 'win32' && existsSync(executable) && (await simulatorAnswers());
+const ready = optedIn && runtime !== null && (await simulatorAnswers());
 
 /** Launcher arguments for a hidden-ish test window; the OSC stays on. */
 const TEST_ARGS = [
+  '--no-config',
   '--idle=yes',
   '--force-window=immediate',
   '--keep-open=no',
+  '--ytdl=no',
+  '--load-scripts=no',
   '--terminal=no',
   '--ao=null',
   '--network-timeout=10',
-  '--curl-enabled=no',
+  ...(process.platform === 'darwin' ? [] : ['--curl-enabled=no']),
   '--geometry=320x180+20+20',
   '--no-input-default-bindings',
 ];
 
 async function launch(): Promise<MpvProcess> {
   return spawnMpv({
-    executable,
+    executable: runtime?.executable ?? '',
     args: TEST_ARGS,
     platform: process.platform,
     parentPid: process.pid,
@@ -112,8 +122,10 @@ const FAULTS: Record<
 };
 
 function fixtureLines(run: Run): string[] {
-  // Video, audio-output and OSD lines name this PC's GPU and displays and are never parsed.
-  const kept = run.logs.filter((e) => !/^(vo|ao|osd)(\/|$)/.test(String(e['prefix'])));
+  // Video, audio-output and OSD lines name this machine's GPU and displays and are never parsed.
+  const kept = run.logs.filter(
+    (e) => !/^(vo|ao|osd|libmpv_render|cocoacb|mac)(\/|$)/.test(String(e['prefix'])),
+  );
   const lines = kept.map((e) =>
     JSON.stringify({
       event: 'log-message',
@@ -154,6 +166,45 @@ describe.skipIf(!ready)('mpv spike against the simulator', { timeout: 120000 }, 
       await mpv.quit();
     }
   });
+
+  it.runIf(process.platform === 'darwin')("quits when the app's end of fd 3 closes", async () => {
+    const mpv = await launch();
+    const ver = await mpv.client.command(['get_property', 'mpv-version']);
+    expect(ver.error).toBe('success');
+    const closedAt = Date.now();
+    mpv.client.close();
+    const exit = await mpv.exited;
+    const elapsedMs = Date.now() - closedAt;
+    process.stdout.write(`fd3 quit ms: ${elapsedMs}\n`);
+    expect(exit.code).toBe(0);
+    expect(elapsedMs).toBeLessThanOrEqual(2000);
+  });
+
+  it.runIf(process.platform === 'darwin')(
+    'plays live video through cocoa-cb without Vulkan',
+    async () => {
+      const mpv = await launch();
+      try {
+        await mpv.client.command(['loadfile', simLiveUrl(1001), 'replace', -1, {}]);
+        const deadline = Date.now() + 8000;
+        let playbackTime = 0;
+        while (Date.now() < deadline && playbackTime < 0.5) {
+          await new Promise((r) => setTimeout(r, 250));
+          const res = await mpv.client.command(['get_property', 'playback-time']);
+          if (res.error === 'success' && typeof res.data === 'number') playbackTime = res.data;
+        }
+        expect(playbackTime).toBeGreaterThanOrEqual(0.5);
+        const vo = await mpv.client.command(['get_property', 'current-vo']);
+        const configured = await mpv.client.command(['get_property', 'vo-configured']);
+        const params = await mpv.client.command(['get_property', 'video-params']);
+        expect(vo.data).toBe('libmpv');
+        expect(configured.data).toBe(true);
+        expect(params.data).toMatchObject({ w: 1280, h: 720 });
+      } finally {
+        await mpv.quit();
+      }
+    },
+  );
 
   for (const [name, spec] of Object.entries(FAULTS)) {
     it(`records log lines for the ${name} fault`, async () => {

@@ -42,6 +42,7 @@ export async function createEngineFor(
       inputConf: deps.runtime.inputConf,
       presenterArgs: [],
       transportArgs: [],
+      platform: deps.platform,
     }),
     loadMode: deps.loadMode,
     now: () => Date.now(),

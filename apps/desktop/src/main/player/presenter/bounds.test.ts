@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { areaToScreen, countBuckets, cropInThumbnail } from './bounds.ts';
+import { areaToScreen, countBuckets, cropInThumbnail, macOwnWindowGeometry } from './bounds.ts';
 
 const area = (x: number, y: number, width: number, height: number) => ({
   x,
@@ -104,5 +104,29 @@ describe('countBuckets', () => {
 
   it('is zero for an empty bitmap', () => {
     expect(countBuckets(new Uint8Array(0))).toBe(0);
+  });
+});
+
+describe('macOwnWindowGeometry', () => {
+  it('maps screen points into backing pixels top-down from display workArea', () => {
+    const workArea = { x: 0, y: 30, width: 2056, height: 1299 };
+    expect(macOwnWindowGeometry({ x: 200, y: 400, width: 800, height: 450 }, workArea, 2)).toEqual({
+      x: 400,
+      y: 740,
+      width: 1600,
+      height: 900,
+    });
+  });
+
+  it('keeps 1x points relative to workArea on a non-Retina or secondary display', () => {
+    const workArea = { x: -1920, y: 25, width: 1920, height: 1055 };
+    expect(
+      macOwnWindowGeometry({ x: -1820, y: 125, width: 640, height: 360 }, workArea, 1),
+    ).toEqual({
+      x: 100,
+      y: 100,
+      width: 640,
+      height: 360,
+    });
   });
 });

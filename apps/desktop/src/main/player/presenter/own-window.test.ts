@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fakeAppWindow, fakeMpvClient } from '../testing/fake-windows.ts';
 import type { Rect } from './bounds.ts';
+import { macOwnWindowGeometry } from './bounds.ts';
 import { createOwnWindowPresenter } from './own-window.ts';
 import type { PresenterEvent } from './types.ts';
 
@@ -36,6 +37,17 @@ describe('createOwnWindowPresenter', () => {
     presenter.setArea(AREA);
     presenter.setArea({ ...AREA, x: 400 });
     expect(await args).toEqual(['--geometry=1200x675+210+135']);
+  });
+
+  it('own-window geometry on darwin maps screen points into work-area backing pixels', async () => {
+    const app = fakeAppWindow({ x: 160, y: 360, width: 1280, height: 720 });
+    const workArea = { x: 0, y: 30, width: 2056, height: 1299 };
+    const presenter = createOwnWindowPresenter({
+      appWindow: app.window,
+      toScreenPixels: (dip) => macOwnWindowGeometry(dip, workArea, 2),
+    });
+    presenter.setArea(AREA);
+    expect(await presenter.prepare()).toEqual(['--geometry=1600x900+400+740']);
   });
 
   it('uses the latest visible area when one is known', async () => {

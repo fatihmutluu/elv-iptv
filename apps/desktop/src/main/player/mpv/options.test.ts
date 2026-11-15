@@ -36,6 +36,22 @@ describe('launchArgs', () => {
     ]);
     expect(args.join(' ')).not.toMatch(/https?:/);
   });
+
+  it('omits curl-enabled on darwin where curl is not built into the runtime', () => {
+    const args = launchArgs({
+      inputConf: '/r/mpv-input.conf',
+      presenterArgs: ['--geometry=1600x900+400+740'],
+      transportArgs: ['--input-ipc-client=fd://3'],
+      platform: 'darwin',
+    });
+    expect(args).not.toContain('--curl-enabled=no');
+    expect(args).toEqual([
+      ...LAUNCH_OPTIONS.filter((o) => o !== '--curl-enabled=no'),
+      '--input-conf=/r/mpv-input.conf',
+      '--geometry=1600x900+400+740',
+      '--input-ipc-client=fd://3',
+    ]);
+  });
 });
 
 describe('headerOptions', () => {
