@@ -10,15 +10,11 @@ import android.view.Surface
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
-import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
-import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
-import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.sharedobjects.SharedObject
 import java.util.concurrent.CountDownLatch
@@ -29,13 +25,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "ElvMedia3"
 private const val EVENT = "onEngineEvent"
-
-/** Software decoders first for audio only; video keeps the platform order. */
-@OptIn(UnstableApi::class)
-private val SOFTWARE_AUDIO_FIRST = MediaCodecSelector { mimeType, secure, tunneling ->
-  val decoders = MediaCodecSelector.DEFAULT.getDecoderInfos(mimeType, secure, tunneling)
-  if (MimeTypes.isAudio(mimeType)) MediaCodecUtil.getDecoderInfosSortedBySoftwareOnly(decoders) else decoders
-}
 
 /** Receives what the surface view shows, on the playback thread; [Media3Engine.bindView] sends the state first. */
 internal interface ViewSink {
@@ -48,14 +37,6 @@ internal interface ViewSink {
   /** Whether playback wants the screen kept on ([keepsScreenOn]). */
   fun onScreenOn(on: Boolean)
 }
-
-@OptIn(UnstableApi::class)
-internal fun extensionRendererModeFor(softwareAudio: Boolean): Int =
-  if (softwareAudio) {
-    DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
-  } else {
-    DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
-  }
 
 /**
  * The `PlayerEngine` of player core spec 5.1 on Media3, one per player screen (an Expo shared object). ExoPlayer
@@ -347,10 +328,7 @@ class Media3Engine : SharedObject {
   }
 
   private fun buildPlayer(softwareAudio: Boolean): ExoPlayer {
-    val renderers = DefaultRenderersFactory(context)
-      .setEnableDecoderFallback(true)
-      .setExtensionRendererMode(extensionRendererModeFor(softwareAudio))
-      .setMediaCodecSelector(if (softwareAudio) SOFTWARE_AUDIO_FIRST else MediaCodecSelector.DEFAULT)
+    val renderers = createRenderersFactory(context, softwareAudio)
     val loadControl = DefaultLoadControl.Builder()
       .setBufferDurationsMs(
         buffers.minBufferMs,

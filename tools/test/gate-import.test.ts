@@ -292,8 +292,9 @@ describe('runImportGate', () => {
       root: '/repo',
       adb: 'adb',
     });
-    expect(builds[0]).toMatch(/expo prebuild --clean --platform android --no-install/);
-    expect(builds[1]).toMatch(/assembleRelease/);
+    expect(builds[0]).toMatch(/ffmpeg-media3\.ts fetch/);
+    expect(builds[1]).toMatch(/expo prebuild --clean --platform android --no-install/);
+    expect(builds[2]).toMatch(/assembleRelease/);
   });
 
   it('rejects an unknown account', async () => {

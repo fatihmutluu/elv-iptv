@@ -2,6 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { loadDevEnv } from '../src/env.ts';
 import { commandLine } from '../src/exec.ts';
+import { fetchFfmpegMedia3 } from '../src/ffmpeg-media3/fetch.ts';
+import { createRealFetchDeps } from '../src/ffmpeg-media3/real-deps.ts';
 import { planPrebuild, readStamp, STAMP_FILE, writeStamp } from '../src/prebuild-stamp.ts';
 import { findRepoRoot } from '../src/root.ts';
 import {
@@ -46,6 +48,10 @@ function spawn(cmd: RunCommand): number {
 
 const native = nativeProject(opts);
 const stampPath = native === null ? null : resolve(root, native.dir, STAMP_FILE);
+
+if (opts.target === 'android' || opts.target === 'android-tv' || opts.target === 'fire-tv') {
+  await fetchFfmpegMedia3({ force: false }, createRealFetchDeps(root));
+}
 
 if (native !== null && stampPath !== null && opts.action === 'run') {
   const plan = planPrebuild(native.stamp, readStamp(stampPath));

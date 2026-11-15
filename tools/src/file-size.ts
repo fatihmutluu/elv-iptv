@@ -24,6 +24,7 @@ const SKIPPED_SEGMENTS = new Set([
   'android',
   'ios',
   'generated',
+  'vendor',
 ]);
 
 /** Vendored, built or generated paths are exempt from the limits. */

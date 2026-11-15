@@ -3,7 +3,15 @@ import { join, relative } from 'node:path';
 
 const MAX_AGENTS_LINES = 50;
 const MAX_ROOT_AGENTS_LINES = 150;
-const IGNORED_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', 'android', 'ios']);
+const IGNORED_DIRS = new Set([
+  'node_modules',
+  'dist',
+  'build',
+  'coverage',
+  'android',
+  'ios',
+  'vendor',
+]);
 
 function* walk(dir: string): Generator<string> {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
