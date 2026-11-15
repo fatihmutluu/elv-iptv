@@ -1,7 +1,6 @@
-import { openCatalog } from '@elv/data';
+import { createCatalogService, openCatalog } from '@elv/data';
 import { useEffect, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
-import { createCatalogService } from '../../catalog/catalog';
 import {
   createDeviceHttpClient,
   createMacrotaskScheduler,
@@ -21,6 +20,7 @@ async function run(params: ImportParams): Promise<ImportResult> {
   );
   const opened = await openCatalog(db);
   if (!opened.ok) {
+    await db.close?.();
     const error = `${opened.error.category}/${opened.error.code}`;
     return {
       account: params.account,
@@ -37,7 +37,11 @@ async function run(params: ImportParams): Promise<ImportResult> {
     http: createDeviceHttpClient(),
     clock: Date.now,
   });
-  return runImport(catalog, params, () => startStallMeter());
+  try {
+    return await runImport(catalog, params, () => startStallMeter());
+  } finally {
+    await catalog.close();
+  }
 }
 
 /**

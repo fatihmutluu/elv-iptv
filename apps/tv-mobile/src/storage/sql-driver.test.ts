@@ -15,7 +15,11 @@ async function setup() {
   const db = await createOpSqliteDriver('catalog.db');
   const [writer, reader] = f.conns;
   if (!writer || !reader) throw new Error('expected two connections');
-  return { f, db, writer, reader };
+  const openWriterLog = [...writer.log];
+  const openReaderLog = [...reader.log];
+  writer.log.length = 0;
+  reader.log.length = 0;
+  return { f, db, writer, reader, openWriterLog, openReaderLog };
 }
 
 describe('splitSqlStatements', () => {
@@ -38,9 +42,16 @@ describe('databaseLocation', () => {
 });
 
 describe('createOpSqliteDriver', () => {
-  it('opens a writer and a reader on the same file', async () => {
-    const { f } = await setup();
+  it('opens a writer and a reader on the same file and applies connection-scoped pragmas to both', async () => {
+    const { f, openWriterLog, openReaderLog } = await setup();
     expect(f.opened).toEqual([{ name: 'catalog.db' }, { name: 'catalog.db' }]);
+    const expectedPragmas = [
+      'execute:PRAGMA busy_timeout = 5000',
+      'execute:PRAGMA temp_store = MEMORY',
+      'execute:PRAGMA foreign_keys = ON',
+    ];
+    expect(openWriterLog).toEqual(expectedPragmas);
+    expect(openReaderLog).toEqual(expectedPragmas);
   });
 
   it('opens both connections in the given location', async () => {
@@ -200,13 +211,39 @@ describe('createOpSqliteDriver', () => {
     expect(writer.log).not.toContain('interrupt');
   });
 
-  it('interrupts an already running statement when the signal fires later', async () => {
+  it('interrupts only the writer when the signal fires, leaving reader queries untouched', async () => {
+    const { db, writer, reader } = await setup();
+    reader.rowsFor = () => [{ n: 7 }];
+    const controller = new AbortController();
+    db.setAbortSignal(controller.signal);
+    const readGate = reader.hold();
+    const pendingRead = db.all('SELECT n FROM t');
+    await Promise.resolve();
+    controller.abort();
+    expect(writer.log).toContain('interrupt');
+    expect(reader.log).not.toContain('interrupt');
+    readGate.release();
+    expect(await pendingRead).toEqual([{ n: 7 }]);
+    expect(await db.all('SELECT n FROM t')).toEqual([{ n: 7 }]);
+    expect(await db.all('FAIL read').catch((e: unknown) => e)).toMatchObject({
+      category: 'storage',
+      code: 'sql-failed',
+    });
+  });
+
+  it('closes both connections after queued work and detaches the abort signal', async () => {
     const { db, writer, reader } = await setup();
     const controller = new AbortController();
     db.setAbortSignal(controller.signal);
+    const writeGate = writer.hold();
+    const pending = db.run('UPDATE t SET a = 1');
+    const closing = db.close?.();
+    const closingAgain = db.close?.();
+    writeGate.release();
+    await Promise.all([pending, closing, closingAgain]);
     controller.abort();
-    expect(writer.log).toContain('interrupt');
-    expect(reader.log).toContain('interrupt');
+    expect(writer.log).toEqual(['execute:UPDATE t SET a = 1', 'close']);
+    expect(reader.log).toEqual(['close']);
   });
 
   it('other SQL errors reject with storage/sql-failed', async () => {

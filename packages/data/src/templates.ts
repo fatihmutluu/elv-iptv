@@ -18,7 +18,14 @@ const ESCAPE_NAME = '(';
 const NUMERIC_ID = /^\d+(?:\.[a-z0-9]+)?$/i;
 const MIN_SEGMENT_LENGTH = 8;
 const MIN_SHARE = 0.99;
-const MIN_URLS = 2;
+
+const STATIC_PATH_WORDS = new Set(
+  'live,movie,movies,series,hls,dash,streams,stream,channels,channel,vod,play,player,media,timeshift,archive,catchup,tv,iptv,video,videos,audio,radio,images,image,img,logos,logo,icons,icon,poster,posters,thumbs,static,assets,public,content,cdn,edge,out'.split(
+    ',',
+  ),
+);
+
+const isStaticWord = (value: string): boolean => STATIC_PATH_WORDS.has(value.toLowerCase());
 
 interface Parts {
   scheme: string;
@@ -45,9 +52,20 @@ function parse(url: string): Parts | undefined {
   };
 }
 
-/** Lower-case host (with port) of a URL; `undefined` when it has no `scheme://`. */
+function normalizedHost(p: Parts): string {
+  const lower = p.host.toLowerCase();
+  const scheme = p.scheme.toLowerCase();
+  if (scheme === 'http://' && lower.length > 3 && lower.endsWith(':80')) return lower.slice(0, -3);
+  if (scheme === 'https://' && lower.length > 4 && lower.endsWith(':443')) {
+    return lower.slice(0, -4);
+  }
+  return lower;
+}
+
+/** Lower-case host of a URL (with non-default port); `undefined` when it has no `scheme://`. */
 export function hostOf(url: string): string | undefined {
-  return parse(url)?.host.toLowerCase();
+  const p = parse(url);
+  return p === undefined ? undefined : normalizedHost(p);
 }
 
 /**
@@ -60,37 +78,95 @@ export function keyTemplate(template: string): string {
   );
 }
 
+function detectHostPositions(urls: readonly string[][]): number[] {
+  if (urls.length === 0) return [];
+  const found = new Set<number>();
+  const bare = urls.filter(
+    (s) => s.length === 3 && s[0] !== '' && s[1] !== '' && NUMERIC_ID.test(s[2] as string),
+  );
+  if (bare.length / urls.length >= MIN_SHARE) {
+    const uVals = new Set(bare.map((s) => s[0] as string));
+    const pVals = new Set(bare.map((s) => s[1] as string));
+    const maxBare = urls.length === 1 ? 1 : Math.max(4, Math.floor(urls.length * 0.1));
+    if (
+      uVals.size <= maxBare &&
+      pVals.size <= maxBare &&
+      ![...uVals].some(isStaticWord) &&
+      ![...pVals].some(isStaticWord)
+    ) {
+      found.add(0);
+      found.add(1);
+    }
+  }
+  if (urls.length === 1) {
+    const segs = urls[0] as string[];
+    for (let position = 0; position < segs.length - 1; position += 1) {
+      const seg = segs[position] as string;
+      if (seg.length >= MIN_SEGMENT_LENGTH && !isStaticWord(seg)) found.add(position);
+    }
+    return [...found].sort((a, b) => a - b);
+  }
+  const width = Math.max(...urls.map((s) => s.length - 1), 0);
+  const maxDistinct = Math.max(4, Math.floor(urls.length * 0.1));
+  for (let position = 0; position < width; position += 1) {
+    if (found.has(position)) continue;
+    const counts = new Map<string, number>();
+    let longCount = 0;
+    for (const segs of urls) {
+      const value = position < segs.length - 1 ? (segs[position] as string) : undefined;
+      if (value !== undefined && value !== '') {
+        counts.set(value, (counts.get(value) ?? 0) + 1);
+        if (value.length >= MIN_SEGMENT_LENGTH) longCount += 1;
+      }
+    }
+    let matched = false;
+    for (const [value, n] of counts) {
+      if (
+        value.length >= MIN_SEGMENT_LENGTH &&
+        !isStaticWord(value) &&
+        n / urls.length >= MIN_SHARE
+      ) {
+        matched = true;
+        break;
+      }
+    }
+    if (
+      !matched &&
+      counts.size > 0 &&
+      counts.size <= maxDistinct &&
+      longCount / urls.length >= MIN_SHARE &&
+      ![...counts.keys()].some(isStaticWord)
+    ) {
+      matched = true;
+    }
+    if (matched) found.add(position);
+  }
+  return [...found].sort((a, b) => a - b);
+}
+
 /**
- * Detects per-source constant path segments: a position whose value is identical for at least 99 % of the
- * sampled URLs of a host and is at least 8 characters long. The last segment is the resource itself and is
- * never a candidate; a host needs at least two sampled URLs. Rules are named `v0`, `v1`, ... in order of
- * first appearance.
+ * Detects per-source secret path segments on each sampled host: constant segments (≥99 %, ≥8 chars), mixed-account
+ * low-cardinality token positions (≥99 % ≥8 chars, distinct count ≤ max(4, 10 %)), bare 3-segment `/<u>/<p>/<numeric>`
+ * credential pairs when low-cardinality, and single-URL backup hosts. Static media path words and the final segment
+ * are never rules. Rules are named `v0`, `v1`, ... in order of first appearance.
  */
 export function detectSegmentRules(sample: readonly string[]): SegmentRule[] {
   const hosts = new Map<string, string[][]>();
   for (const url of sample) {
     const p = parse(url);
     if (p === undefined) continue;
-    const key = p.host.toLowerCase();
-    const list = hosts.get(key) ?? [];
+    const key = normalizedHost(p);
+    let list = hosts.get(key);
+    if (list === undefined) {
+      list = [];
+      hosts.set(key, list);
+    }
     list.push(p.segments);
-    hosts.set(key, list);
   }
   const rules: SegmentRule[] = [];
   for (const [host, urls] of hosts) {
-    if (urls.length < MIN_URLS) continue;
-    const width = Math.max(...urls.map((s) => s.length - 1), 0);
-    for (let position = 0; position < width; position += 1) {
-      const counts = new Map<string, number>();
-      for (const segs of urls) {
-        const value = position < segs.length - 1 ? (segs[position] as string) : undefined;
-        if (value !== undefined) counts.set(value, (counts.get(value) ?? 0) + 1);
-      }
-      for (const [value, n] of counts) {
-        if (value.length >= MIN_SEGMENT_LENGTH && n / urls.length >= MIN_SHARE) {
-          rules.push({ host, position, name: `v${rules.length}` });
-        }
-      }
+    for (const position of detectHostPositions(urls)) {
+      rules.push({ host, position, name: `v${rules.length}` });
     }
   }
   return rules;
@@ -284,7 +360,7 @@ export function toTemplate(
   const segs = p.segments;
   const last = segs.length - 1;
   const names: (string | undefined)[] = new Array(segs.length).fill(undefined);
-  const host = p.host.toLowerCase();
+  const host = normalizedHost(p);
   for (const rule of rules) {
     const seg = segs[rule.position];
     if (rule.host !== host || rule.position >= last || seg === undefined || seg === '') continue;
@@ -293,9 +369,9 @@ export function toTemplate(
     names[rule.position] = rule.name;
   }
   const xt = xtreamCredentialIndexes(segs, known);
-  if (xt !== undefined && names[xt[0]] === undefined && names[xt[1]] === undefined) {
-    names[xt[0]] = assign(vars, 'user', segs[xt[0]] as string);
-    names[xt[1]] = assign(vars, 'pass', segs[xt[1]] as string);
+  if (xt !== undefined) {
+    if (names[xt[0]] === undefined) names[xt[0]] = assign(vars, 'user', segs[xt[0]] as string);
+    if (names[xt[1]] === undefined) names[xt[1]] = assign(vars, 'pass', segs[xt[1]] as string);
   }
   for (let i = 0; i < last; i += 1) {
     const seg = segs[i] as string;

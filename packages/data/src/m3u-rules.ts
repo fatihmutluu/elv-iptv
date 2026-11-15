@@ -2,23 +2,40 @@ import { detectSegmentRules, hostOf, type SegmentRule } from './templates';
 
 /** URLs of one host that settle its rules; a host judged on fewer is judged again when more of its URLs arrive. */
 export const HOST_SAMPLE = 50;
-const MIN_URLS = 2;
 const RULE_NAME = /^v(\d+)$/;
 
+type Buckets = Map<string, string[]>;
+
 const pair = (host: string, position: number): string => `${host}\n${position}`;
+
+function maxBucketSize(buckets: Buckets | undefined): number {
+  if (buckets === undefined) return 0;
+  let max = 0;
+  for (const list of buckets.values()) if (list.length > max) max = list.length;
+  return max;
+}
+
+function addBucketUrl(buckets: Buckets, role: string, url: string, cap?: number): void {
+  let list = buckets.get(role);
+  if (list === undefined) {
+    list = [];
+    buckets.set(role, list);
+  }
+  if (cap === undefined || list.length < cap) list.push(url);
+}
 
 /**
  * Segment rules of one M3U import. Every import judges its hosts again: the first sample judges the hosts it
  * contains at least {@link HOST_SAMPLE} times, and any other host is judged on up to that many of its URLs while
  * the importer holds its entries back ({@link hold}, {@link settle}), so no entry is written before its host was
- * judged. Each host is judged once per run; the judgement replaces its stored rules (a host judged on fewer than
- * two URLs keeps them). A (host, position) pair keeps its stored name; a new pair gets the next free `v<N>`.
+ * judged. Stream, logo and header URLs are bucketed separately per host so static logos on a stream host never
+ * dilute stream token share while dedicated logo/referer hosts still settle their own rules.
  */
 export class RuleBook {
   private readonly byHost = new Map<string, SegmentRule[]>();
   private readonly names = new Map<string, string>();
   private readonly settled = new Set<string>();
-  private readonly open = new Map<string, string[]>();
+  private readonly open = new Map<string, Buckets>();
   private readonly pending = new Set<string>();
   private readonly seen = new Set<string>();
   private next = 0;
@@ -27,7 +44,12 @@ export class RuleBook {
 
   constructor(stored: readonly SegmentRule[] = []) {
     for (const rule of stored) {
-      this.byHost.set(rule.host, [...(this.byHost.get(rule.host) ?? []), rule]);
+      let list = this.byHost.get(rule.host);
+      if (list === undefined) {
+        list = [];
+        this.byHost.set(rule.host, list);
+      }
+      list.push(rule);
       this.names.set(pair(rule.host, rule.position), rule.name);
       const n = RULE_NAME.exec(rule.name);
       if (n !== null) this.next = Math.max(this.next, Number(n[1]) + 1);
@@ -40,31 +62,42 @@ export class RuleBook {
    * judged when their entries, the sample's included, pass through {@link hold}.
    */
   start(sample: readonly string[]): void {
-    const groups = new Map<string, string[]>();
-    for (const url of sample) {
-      const host = hostOf(url);
+    this.startEntries(sample.map((url) => ({ url, role: 'stream' })));
+  }
+
+  /** Multi-role variant of {@link start} for stream, logo and header URLs of sampled entries. */
+  startEntries(sample: readonly { url: string; role: string }[]): void {
+    const groups = new Map<string, Buckets>();
+    for (const item of sample) {
+      const host = hostOf(item.url);
       if (host === undefined) continue;
-      const urls = groups.get(host);
-      if (urls === undefined) groups.set(host, [url]);
-      else urls.push(url);
+      let buckets = groups.get(host);
+      if (buckets === undefined) {
+        buckets = new Map();
+        groups.set(host, buckets);
+      }
+      addBucketUrl(buckets, item.role, item.url);
     }
-    for (const [host, urls] of groups) {
-      if (urls.length < HOST_SAMPLE) continue;
-      this.judge(host, urls);
+    for (const [host, buckets] of groups) {
+      if (maxBucketSize(buckets) < HOST_SAMPLE) continue;
+      this.judgeBuckets(host, buckets);
       this.settled.add(host);
     }
     this.flatten();
   }
 
   /** Notes an entry URL; true when its host still collects URLs, so the entry must wait for {@link settle}. */
-  hold(url: string): boolean {
+  hold(url: string, role = 'stream'): boolean {
     const host = hostOf(url);
     if (host === undefined) return false;
     this.seen.add(host);
     if (this.settled.has(host)) return false;
-    const urls = this.open.get(host) ?? [];
-    if (urls.length < HOST_SAMPLE) urls.push(url);
-    this.open.set(host, urls);
+    let buckets = this.open.get(host);
+    if (buckets === undefined) {
+      buckets = new Map();
+      this.open.set(host, buckets);
+    }
+    addBucketUrl(buckets, role, url, HOST_SAMPLE);
     this.pending.add(host);
     return true;
   }
@@ -72,7 +105,7 @@ export class RuleBook {
   /** True when every host that holds entries back has collected {@link HOST_SAMPLE} URLs. */
   get ready(): boolean {
     for (const host of this.pending) {
-      if ((this.open.get(host)?.length ?? 0) < HOST_SAMPLE) return false;
+      if (maxBucketSize(this.open.get(host)) < HOST_SAMPLE) return false;
     }
     return true;
   }
@@ -80,7 +113,8 @@ export class RuleBook {
   /** Judges the hosts that hold entries back on what they collected and settles them. */
   settle(): void {
     for (const host of this.pending) {
-      this.judge(host, this.open.get(host) ?? []);
+      const buckets = this.open.get(host);
+      if (buckets !== undefined) this.judgeBuckets(host, buckets);
       this.open.delete(host);
       this.settled.add(host);
     }
@@ -93,14 +127,24 @@ export class RuleBook {
     return this.rules.filter((rule) => this.seen.has(rule.host));
   }
 
-  private judge(host: string, urls: readonly string[]): void {
-    if (urls.length < MIN_URLS) return;
-    const found = detectSegmentRules(urls).map((r) => ({
+  private judgeBuckets(host: string, buckets: Buckets): void {
+    const streamLen = buckets.get('stream')?.length ?? 0;
+    const positions = new Set<number>();
+    let totalUrls = 0;
+    for (const [role, urls] of buckets) {
+      totalUrls += urls.length;
+      if (urls.length === 1 && role !== 'stream' && streamLen > 1) continue;
+      for (const r of detectSegmentRules(urls)) positions.add(r.position);
+    }
+    if (totalUrls === 0) return;
+    if (totalUrls === 1) {
+      for (const prev of this.byHost.get(host) ?? []) positions.add(prev.position);
+    }
+    const sorted = [...positions].sort((a, b) => a - b);
+    this.byHost.set(
       host,
-      position: r.position,
-      name: this.nameOf(host, r.position),
-    }));
-    this.byHost.set(host, found);
+      sorted.map((position) => ({ host, position, name: this.nameOf(host, position) })),
+    );
   }
 
   private nameOf(host: string, position: number): string {

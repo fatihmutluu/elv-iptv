@@ -12,6 +12,7 @@ const driver = {
   batch: vi.fn(async () => undefined),
   transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(driver)),
   setAbortSignal: vi.fn(),
+  close: vi.fn(async () => undefined),
 };
 const createOpSqliteDriver = vi.fn(async (_name: string, _location?: string) => driver);
 const manifest = { read: vi.fn((): string | undefined => undefined), write: vi.fn() };
@@ -32,6 +33,7 @@ beforeEach(() => {
   createSettingsStore.mockClear();
   manifest.read.mockClear();
   manifest.write.mockClear();
+  driver.close.mockClear();
   driver.all.mockImplementation(migrated);
 });
 
@@ -78,11 +80,12 @@ describe('createDeviceCatalog', () => {
     }
   });
 
-  it('rejects, and retries later, when the database cannot be opened', async () => {
+  it('closes the failed driver, rejects, and retries later when the database cannot be opened', async () => {
     platform.OS = 'android';
     driver.all.mockRejectedValueOnce(new Error('disk'));
     const { createDeviceCatalog } = await import('./device');
     await expect(createDeviceCatalog()).rejects.toThrow('catalog open failed');
+    expect(driver.close).toHaveBeenCalledTimes(1);
     await expect(createDeviceCatalog()).resolves.toBeDefined();
   });
 });

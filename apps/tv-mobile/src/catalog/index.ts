@@ -1,2 +1,22 @@
-export * from './catalog';
+export {
+  type AddSourceInput,
+  type BrowseKind,
+  type CatalogDeps,
+  type CatalogService,
+  type CategoryRow,
+  createCatalogService,
+  DEVICE_BATCH_SIZE,
+  DEVICE_MAX_BODY_BYTES,
+  type DeviceImportOptions,
+  decodeManifest,
+  type EpisodeRow,
+  encodeManifest,
+  type ItemRow,
+  type ManifestEntry,
+  type ManifestStore,
+  reconcileManifest,
+  type SeasonRow,
+  type SourceRow,
+  type StreamRequest,
+} from '@elv/data';
 export { CatalogOpenError, createDeviceCatalog } from './device';

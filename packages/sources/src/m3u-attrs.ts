@@ -198,8 +198,20 @@ export function parseExtinf(text: string, issues?: { rawQuote: boolean }): M3uEn
 function nameCommaAfterLastValue(text: string): number {
   const open = text.lastIndexOf('="');
   if (open < 0) return -1;
-  const close = text.indexOf('"', open + 2);
-  return close < 0 ? -1 : text.indexOf(',', close + 1);
+  let pos = open + 2;
+  while (pos < text.length) {
+    const close = text.indexOf('"', pos);
+    if (close < 0) return -1;
+    if (!gluedToken(text, close + 1)) return text.indexOf(',', close + 1);
+    if (close === open + 2 || text.charCodeAt(close - 1) <= SPACE) {
+      const innerEnd = text.indexOf('"', close + 1);
+      if (innerEnd < 0) return -1;
+      pos = innerEnd + 1;
+    } else {
+      pos = close + 1;
+    }
+  }
+  return -1;
 }
 
 function readExtinf(
@@ -327,6 +339,7 @@ export function applyVlcOpt(e: M3uEntry, payload: string): void {
   if (eq < 0) return;
   const key = payload.slice(0, eq).trim().toLowerCase();
   const value = payload.slice(eq + 1).trim();
+  if (!value) return;
   if (key === 'http-user-agent') e.headers.userAgent = value;
   else if (key === 'http-referrer' || key === 'http-referer') e.headers.referer = value;
 }
@@ -340,12 +353,14 @@ export function applyExtHttp(e: M3uEntry, payload: string): boolean {
     return false;
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return false;
-  for (const [key, raw] of Object.entries(parsed)) {
-    const value = String(raw);
-    const lower = key.toLowerCase();
-    if (lower === 'user-agent') e.headers.userAgent = value;
-    else if (lower === 'referer' || lower === 'referrer') e.headers.referer = value;
-    else e.headers.other[lower] = value;
+  for (const [rawKey, raw] of Object.entries(parsed)) {
+    if (typeof raw !== 'string' && typeof raw !== 'number' && typeof raw !== 'boolean') continue;
+    const key = rawKey.trim().toLowerCase();
+    const value = String(raw).trim();
+    if (!key || !value) continue;
+    if (key === 'user-agent') e.headers.userAgent = value;
+    else if (key === 'referer' || key === 'referrer') e.headers.referer = value;
+    else e.headers.other[key] = value;
   }
   return true;
 }
