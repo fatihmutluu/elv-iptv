@@ -5,16 +5,17 @@ Expo project with `platforms: ["web"]` rendered by react-native-web.
 
 ## Commands
 - `pnpm run:app windows|macos|linux run|build` calls this package's `dev` and `build` scripts.
-- `prepare:app` runs `pnpm -w mpv fetch` (`mpv-runtime.lock.json`), exports `renderer/`, and bundles main + preload.
+- `prepare:app` runs `pnpm -w mpv fetch` (`mpv-runtime.lock.json`), exports `renderer/`, and bundles main, preload + utility worker.
 - `build` runs `prepare:app`, then `electron-builder --publish never` (`extraResources` bundles `mpv/` + `mpv-input.conf` on win/mac).
-- `test` runs Vitest (`pnpm check`); `test:e2e` runs Playwright (`app`, `packaged` over CDP, `player`, opt-in `presenter`). `pnpm gate desktop` runs the zap/fault/orphan gate (`renderer/src/gate/AGENTS.md`).
+- `test` runs Vitest (`pnpm check`); `test:e2e` runs Playwright (`app`, `catalog`, `packaged` over CDP, `player`, opt-in `presenter`). `pnpm gate desktop` runs the zap/fault/orphan gate (`renderer/src/gate/AGENTS.md`).
 
 ## Rules
 - `package.json` `main` is the bundled main process; the Expo entry lives only in `renderer/`.
 - The renderer loads from `app://elv/` via `protocol.handle`; paths go through `resolveAppFile`,
   which refuses anything outside `dist/renderer`. Keep the CSP header in `app-protocol.ts`.
 - Windows keep `contextIsolation`, `sandbox` and no `nodeIntegration`; the preload is CommonJS.
-- IPC is the player's only: channels and guards in `src/shared/player-ipc.ts`; add each with a contract and a test.
+- IPC channels and runtime guards live in `src/shared/player-ipc.ts` and `src/shared/catalog-ipc.ts`; add each with a contract and test.
+- Catalog SQLite (`better-sqlite3` N-API prebuilds, `npmRebuild: false`, `asarUnpack`) runs inside an Electron `utilityProcess` (`src/utility/`) talking directly to preload over a fenced `MessagePort`; `SecretStore` (`safeStorage` async API -> `userData/secrets.json`) stays in main (`src/main/catalog/`).
 - Put icons and entitlements in `resources/` (`build/` is gitignored). `icon.png` is placeholder art.
 - No signing in Round 0; the `appx` identity and publisher are placeholders the Store assigns later.
 - The Electron binary downloads on first run (Electron 45 has no postinstall).

@@ -6,6 +6,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: [
+        'src/catalog/desktop-catalog.ts',
         'src/player/**/*.ts',
         'src/gate/params.ts',
         'src/gate/metrics.ts',
