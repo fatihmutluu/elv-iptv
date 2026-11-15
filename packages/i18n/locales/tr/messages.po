@@ -1,0 +1,304 @@
+msgid ""
+msgstr ""
+"Language: tr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "sources.title"
+msgstr "Kaynaklar"
+
+msgid "sources.subtitle"
+msgstr "Bir Xtream hesabı veya M3U çalma listesi adresi ekleyin."
+
+msgid "sources.openMenu"
+msgstr "Kataloğa göz at"
+
+msgid "sources.emptyList"
+msgstr "Henüz kaynak eklenmedi."
+
+msgid "sources.section.add"
+msgstr "Kaynak ekle"
+
+msgid "sources.section.saved"
+msgstr "Kayıtlı kaynaklar"
+
+msgid "sources.section.advanced"
+msgstr "Gelişmiş aktarım ayarları (isteğe bağlı)"
+
+msgid "sources.mode.xtream"
+msgstr "Xtream"
+
+msgid "sources.mode.m3u"
+msgstr "M3U Adresi"
+
+msgid "sources.field.name"
+msgstr "Kaynak adı (isteğe bağlı)"
+
+msgid "sources.placeholder.name"
+msgstr "Varsayılan olarak sunucu adresi kullanılır"
+
+msgid "sources.field.server"
+msgstr "Sunucu adresi"
+
+msgid "sources.placeholder.server"
+msgstr "http://example.invalid:8080"
+
+msgid "sources.field.username"
+msgstr "Kullanıcı adı"
+
+msgid "sources.placeholder.username"
+msgstr "Hesap kullanıcı adı"
+
+msgid "sources.field.password"
+msgstr "Parola"
+
+msgid "sources.placeholder.password"
+msgstr "Hesap parolası"
+
+msgid "sources.field.playlistUrl"
+msgstr "Çalma listesi adresi"
+
+msgid "sources.placeholder.playlistUrl"
+msgstr "http://example.invalid/playlist.m3u8"
+
+msgid "sources.field.keepAsM3u"
+msgstr "M3U olarak tut"
+
+msgid "sources.notice.xtreamDetected"
+msgstr "Xtream bağlantısı algılandı — M3U olarak tut seçilmedikçe kategoriler, filmler, diziler ve rehber için Xtream API ile içe aktarılır."
+
+msgid "sources.field.guideUrl"
+msgstr "XMLTV rehber adresi (isteğe bağlı)"
+
+msgid "sources.placeholder.guideUrl"
+msgstr "http://example.invalid/epg.xml.gz"
+
+msgid "sources.field.userAgent"
+msgstr "Özel User-Agent (isteğe bağlı)"
+
+msgid "sources.placeholder.userAgent"
+msgstr "Varsayılan için boş bırakın"
+
+msgid "sources.field.referer"
+msgstr "Referer adresi (isteğe bağlı)"
+
+msgid "sources.placeholder.referer"
+msgstr "http://example.invalid/"
+
+msgid "sources.field.xtreamFormat"
+msgstr "Canlı yayın biçimi"
+
+msgid "sources.format.default"
+msgstr "Varsayılan (MPEG-TS)"
+
+msgid "sources.format.ts"
+msgstr "MPEG-TS"
+
+msgid "sources.format.m3u8"
+msgstr "HLS (M3U8)"
+
+msgid "sources.action.add"
+msgstr "Ekle ve içe aktar"
+
+msgid "sources.action.adding"
+msgstr "Ekleniyor…"
+
+msgid "sources.action.import"
+msgstr "İçe aktar"
+
+msgid "sources.action.refresh"
+msgstr "Yenile"
+
+msgid "sources.action.cancel"
+msgstr "İptal"
+
+msgid "sources.action.remove"
+msgstr "Kaldır"
+
+msgid "sources.action.toggleAdvancedShow"
+msgstr "Gelişmiş seçenekleri göster"
+
+msgid "sources.action.toggleAdvancedHide"
+msgstr "Gelişmiş seçenekleri gizle"
+
+msgid "sources.kind.xtream"
+msgstr "Xtream"
+
+msgid "sources.kind.m3u"
+msgstr "M3U"
+
+msgid "sources.status.needsImport"
+msgstr "İçe aktarma gerekli"
+
+msgid "sources.status.ready"
+msgstr "Hazır"
+
+msgid "sources.status.readyCounts"
+msgstr "{live, plural, one {# canlı kanal} other {# canlı kanal}}, {movies, plural, one {# film} other {# film}}, {series, plural, one {# dizi} other {# dizi}}"
+
+msgid "sources.status.importing"
+msgstr "{phase} içe aktarılıyor ({done})"
+
+msgid "sources.status.importingTotal"
+msgstr "{phase} içe aktarılıyor ({done}/{total})"
+
+msgid "sources.status.cancelled"
+msgstr "İçe aktarma iptal edildi."
+
+msgid "sources.phase.categories"
+msgstr "kategoriler"
+
+msgid "sources.phase.live"
+msgstr "canlı kanallar"
+
+msgid "sources.phase.movies"
+msgstr "filmler"
+
+msgid "sources.phase.series"
+msgstr "diziler"
+
+msgid "sources.phase.episodes"
+msgstr "bölümler"
+
+msgid "sources.phase.guideChannels"
+msgstr "rehber kanalları"
+
+msgid "sources.phase.programmes"
+msgstr "yayın akışı"
+
+msgid "sources.phase.cleanup"
+msgstr "tamamlanıyor"
+
+msgid "source.validation.missingServer"
+msgstr "Xtream sunucu adresini girin."
+
+msgid "source.hint.missingServer"
+msgstr "Sağlayıcınız belirttiyse http:// veya https:// ile bağlantı noktasını ekleyin."
+
+msgid "source.validation.missingCredentials"
+msgstr "Kullanıcı adı ve parolanın ikisini de girin."
+
+msgid "source.hint.missingCredentials"
+msgstr "Sağlayıcınızın verdiği Xtream hesap bilgilerini kontrol edin veya tam get.php bağlantısını yapıştırın."
+
+msgid "source.validation.missingUrl"
+msgstr "M3U çalma listesi adresini girin."
+
+msgid "source.hint.missingUrl"
+msgstr "Tam bir http:// veya https:// çalma listesi bağlantısı yapıştırın."
+
+msgid "source.validation.missingScheme"
+msgstr "Sunucu veya çalma listesi adresi http:// ya da https:// ile başlamalıdır."
+
+msgid "source.hint.missingScheme"
+msgstr "Adresin başına http:// (veya https://) ekleyip tekrar deneyin."
+
+msgid "source.validation.unsupportedScheme"
+msgstr "Yalnızca http:// ve https:// adresleri desteklenir."
+
+msgid "source.hint.unsupportedScheme"
+msgstr "Adres şemasını http:// veya https:// ile değiştirin."
+
+msgid "source.validation.invalidAddress"
+msgstr "Sunucu veya bağlantı adresi geçerli değil."
+
+msgid "source.hint.invalidAddress"
+msgstr "Sunucu adını kontrol edin ve bağlantı noktası numarasının 1 ile 65535 arasında olduğundan emin olun."
+
+msgid "source.validation.invalidGuideUrl"
+msgstr "XMLTV rehber adresi geçerli değil."
+
+msgid "source.hint.invalidGuideUrl"
+msgstr "Varsayılan rehberi kullanmak için boş bırakın veya tam bir http:// ya da https:// adresi girin."
+
+msgid "source.validation.invalidCharacters"
+msgstr "Alanlardan biri desteklenmeyen kontrol karakterleri içeriyor."
+
+msgid "source.hint.invalidCharacters"
+msgstr "Yapıştırılan metindeki satır sonlarını veya gizli karakterleri kaldırıp tekrar deneyin."
+
+msgid "source.validation.m3uInXtream"
+msgstr "Bu adres bir Xtream sunucusu değil, M3U çalma listesi dosyası gibi görünüyor."
+
+msgid "source.hint.m3uInXtream"
+msgstr ".m3u veya .m3u8 listesi eklemek için M3U Adresi kipine geçin ya da yalnızca Xtream sunucu kök adresini girin."
+
+msgid "source.error.invalidCredentials"
+msgstr "Giriş başarısız: kullanıcı adı, parola veya erişim anahtarı geçersiz."
+
+msgid "source.hint.invalidCredentials"
+msgstr "Bilgilerinizi sağlayıcınızla doğrulayın, ardından kaynağı kaldırıp yeniden ekleyin."
+
+msgid "source.error.accountExpired"
+msgstr "Bu sağlayıcı hesabının süresi dolmuş veya hesap etkin değil."
+
+msgid "source.hint.accountExpired"
+msgstr "Sağlayıcınızdan abonelik durumunuzu kontrol edin ve etkinleştiğinde yenileyin."
+
+msgid "source.error.rateLimited"
+msgstr "Sağlayıcı, bağlantı veya istek sınırı nedeniyle isteği reddetti."
+
+msgid "source.hint.rateLimited"
+msgstr "Diğer cihazlardaki yayınları kapatın, biraz bekleyin ve Yenile düğmesine basın."
+
+msgid "source.error.timeout"
+msgstr "Sunucu yanıt vermekte gecikti."
+
+msgid "source.hint.timeout"
+msgstr "Ağ bağlantınızı ve sunucu adresini kontrol edin, ardından Yenile düğmesine basın."
+
+msgid "source.error.notFound"
+msgstr "Çalma listesi veya panel uç noktası sunucuda bulunamadı (HTTP 404)."
+
+msgid "source.hint.notFound"
+msgstr "Adres yolunu ve bağlantı noktasını kontrol edin, ardından kaynağı kaldırıp yeniden ekleyin."
+
+msgid "source.error.unreachable"
+msgstr "Sunucuya ulaşılamadı."
+
+msgid "source.hint.unreachable"
+msgstr "Sunucu adresini, bağlantı noktasını ve ağ bağlantınızı kontrol edip Yenile düğmesine basın."
+
+msgid "source.error.aborted"
+msgstr "İçe aktarma iptal edildi."
+
+msgid "source.hint.aborted"
+msgstr "Tekrar denemek istediğinizde İçe aktar veya Yenile düğmesine basın."
+
+msgid "source.error.emptyPlaylist"
+msgstr "Kaynak yanıt verdi ancak içinde hiç kanal, film veya dizi bulunamadı."
+
+msgid "source.hint.emptyPlaylist"
+msgstr "Çalma listesine veya hesaba etkin kanallar tanımlandığını sağlayıcınızla doğrulayın."
+
+msgid "source.error.tooLarge"
+msgstr "Çalma listesi veya sunucu yanıtı cihaz boyut sınırını aştı."
+
+msgid "source.hint.tooLarge"
+msgstr "Bu bir Xtream sağlayıcısıysa ham M3U dosyası yerine Xtream kipinde ekleyin."
+
+msgid "source.error.invalidFormat"
+msgstr "Sunucu yanıtı geçerli bir M3U çalma listesi veya Xtream kataloğu değil."
+
+msgid "source.hint.invalidFormat"
+msgstr "Adresin bir web sayfasına değil, doğrudan M3U listesine veya Xtream sunucusuna işaret ettiğini kontrol edin."
+
+msgid "source.error.importInProgress"
+msgstr "Bu kaynak için zaten devam eden bir içe aktarma var."
+
+msgid "source.hint.importInProgress"
+msgstr "Mevcut içe aktarmanın bitmesini bekleyin veya önce iptal edin."
+
+msgid "source.error.secretStore"
+msgstr "Bu cihazda güvenli kimlik bilgisi deposu kullanılamıyor."
+
+msgid "source.hint.secretStore"
+msgstr "İşletim sistemi anahtarlığının veya ekran kilidi şifrelemesinin etkin olduğundan emin olup uygulamayı yeniden başlatın."
+
+msgid "source.error.storage"
+msgstr "Katalog verileri yerel depolamaya kaydedilemedi."
+
+msgid "source.hint.storage"
+msgstr "Boş disk alanını kontrol edip kaynağı yenilemeyi deneyin."

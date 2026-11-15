@@ -1,0 +1,125 @@
+/** English (source) message catalog. Every other locale must define the exact same keys. */
+export const enMessages = {
+  'sources.title': 'Sources',
+  'sources.subtitle': 'Add an Xtream account or M3U playlist URL.',
+  'sources.openMenu': 'Browse catalog',
+  'sources.emptyList': 'No sources added yet.',
+  'sources.section.add': 'Add source',
+  'sources.section.saved': 'Saved sources',
+  'sources.section.advanced': 'Advanced transport (optional)',
+  'sources.mode.xtream': 'Xtream',
+  'sources.mode.m3u': 'M3U URL',
+  'sources.field.name': 'Source name (optional)',
+  'sources.placeholder.name': 'Defaults to server host',
+  'sources.field.server': 'Server URL',
+  'sources.placeholder.server': 'http://example.invalid:8080',
+  'sources.field.username': 'Username',
+  'sources.placeholder.username': 'Account username',
+  'sources.field.password': 'Password',
+  'sources.placeholder.password': 'Account password',
+  'sources.field.playlistUrl': 'Playlist URL',
+  'sources.placeholder.playlistUrl': 'http://example.invalid/playlist.m3u8',
+  'sources.field.keepAsM3u': 'Keep as M3U',
+  'sources.notice.xtreamDetected':
+    'Xtream link detected — will import via Xtream API for categories, movies, series, and guide unless Keep as M3U is enabled.',
+  'sources.field.guideUrl': 'XMLTV guide URL (optional)',
+  'sources.placeholder.guideUrl': 'http://example.invalid/epg.xml.gz',
+  'sources.field.userAgent': 'Custom User-Agent (optional)',
+  'sources.placeholder.userAgent': 'Leave blank for default',
+  'sources.field.referer': 'Referer URL (optional)',
+  'sources.placeholder.referer': 'http://example.invalid/',
+  'sources.field.xtreamFormat': 'Live stream format',
+  'sources.format.default': 'Default (MPEG-TS)',
+  'sources.format.ts': 'MPEG-TS',
+  'sources.format.m3u8': 'HLS (M3U8)',
+  'sources.action.add': 'Add and import',
+  'sources.action.adding': 'Adding…',
+  'sources.action.import': 'Import',
+  'sources.action.refresh': 'Refresh',
+  'sources.action.cancel': 'Cancel',
+  'sources.action.remove': 'Remove',
+  'sources.action.toggleAdvancedShow': 'Show advanced options',
+  'sources.action.toggleAdvancedHide': 'Hide advanced options',
+  'sources.kind.xtream': 'Xtream',
+  'sources.kind.m3u': 'M3U',
+  'sources.status.needsImport': 'Needs import',
+  'sources.status.ready': 'Ready',
+  'sources.status.readyCounts':
+    '{live, plural, one {# live channel} other {# live channels}}, {movies, plural, one {# movie} other {# movies}}, {series, plural, one {# series} other {# series}}',
+  'sources.status.importing': 'Importing {phase} ({done})',
+  'sources.status.importingTotal': 'Importing {phase} ({done}/{total})',
+  'sources.status.cancelled': 'Import cancelled.',
+  'sources.phase.categories': 'categories',
+  'sources.phase.live': 'live channels',
+  'sources.phase.movies': 'movies',
+  'sources.phase.series': 'series',
+  'sources.phase.episodes': 'episodes',
+  'sources.phase.guideChannels': 'guide channels',
+  'sources.phase.programmes': 'guide schedule',
+  'sources.phase.cleanup': 'finalizing',
+  'source.validation.missingServer': 'Enter the Xtream server URL.',
+  'source.hint.missingServer':
+    'Include http:// or https:// and the port if your provider gave one.',
+  'source.validation.missingCredentials': 'Enter both username and password.',
+  'source.hint.missingCredentials':
+    'Check the Xtream account details from your provider, or paste a full get.php link.',
+  'source.validation.missingUrl': 'Enter the M3U playlist URL.',
+  'source.hint.missingUrl': 'Paste a full http:// or https:// playlist link.',
+  'source.validation.missingScheme': 'Server or playlist URL must start with http:// or https://.',
+  'source.hint.missingScheme': 'Add http:// (or https://) in front of the address and try again.',
+  'source.validation.unsupportedScheme': 'Only http:// and https:// URLs are supported.',
+  'source.hint.unsupportedScheme': 'Replace the URL scheme with http:// or https://.',
+  'source.validation.invalidAddress': 'The server or URL address is not valid.',
+  'source.hint.invalidAddress':
+    'Check the hostname and ensure any port number is between 1 and 65535.',
+  'source.validation.invalidGuideUrl': 'The XMLTV guide URL is not valid.',
+  'source.hint.invalidGuideUrl':
+    'Leave the guide URL blank to use the default guide, or enter a full http:// or https:// URL.',
+  'source.validation.invalidCharacters':
+    'One of the fields contains unsupported control characters.',
+  'source.hint.invalidCharacters':
+    'Remove line breaks or hidden characters from the pasted text and try again.',
+  'source.validation.m3uInXtream':
+    'That looks like an M3U playlist file URL, not an Xtream server.',
+  'source.hint.m3uInXtream':
+    'Switch to M3U URL mode to add a .m3u or .m3u8 playlist, or enter only the Xtream server base address.',
+  'source.error.invalidCredentials': 'Sign-in failed: invalid username, password, or access token.',
+  'source.hint.invalidCredentials':
+    'Verify your credentials with your provider, then remove and re-add the source.',
+  'source.error.accountExpired': 'This provider account is expired or inactive.',
+  'source.hint.accountExpired':
+    'Check your subscription status with your provider and refresh once active.',
+  'source.error.rateLimited':
+    'The provider rejected the request due to a connection or rate limit.',
+  'source.hint.rateLimited': 'Close streams on other devices, wait a moment, and press Refresh.',
+  'source.error.timeout': 'The server took too long to respond.',
+  'source.hint.timeout': 'Check your network connection and server address, then press Refresh.',
+  'source.error.notFound': 'The playlist or panel endpoint was not found on the server (HTTP 404).',
+  'source.hint.notFound': 'Check the URL path and port, then remove and re-add the source.',
+  'source.error.unreachable': 'Could not reach the server.',
+  'source.hint.unreachable':
+    'Check the server URL, port, and your network connection, then press Refresh.',
+  'source.error.aborted': 'Import was cancelled.',
+  'source.hint.aborted': 'Press Import or Refresh whenever you want to try again.',
+  'source.error.emptyPlaylist':
+    'The source responded, but contained zero channels, movies, or series.',
+  'source.hint.emptyPlaylist':
+    'Verify with your provider that the playlist or account has active channels assigned.',
+  'source.error.tooLarge': 'The playlist or response exceeded the device size limit.',
+  'source.hint.tooLarge':
+    'If this is an Xtream provider, add it in Xtream mode instead of a raw M3U file.',
+  'source.error.invalidFormat':
+    'The server response is not a valid M3U playlist or Xtream catalog.',
+  'source.hint.invalidFormat':
+    'Check that the URL points directly to an M3U playlist or Xtream server, not a web page.',
+  'source.error.importInProgress': 'An import is already running for this source.',
+  'source.hint.importInProgress': 'Wait for the current import to finish or cancel it first.',
+  'source.error.secretStore': 'Secure credential storage is unavailable on this device.',
+  'source.hint.secretStore':
+    'Ensure OS keychain or screen lock encryption is enabled and restart the app.',
+  'source.error.storage': 'Could not save catalog data to local storage.',
+  'source.hint.storage': 'Check available disk space and try refreshing the source.',
+} as const;
+
+/** Valid message identifier across all supported locales. */
+export type MessageId = keyof typeof enMessages;

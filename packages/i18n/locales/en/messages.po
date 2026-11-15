@@ -1,0 +1,304 @@
+msgid ""
+msgstr ""
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "sources.title"
+msgstr "Sources"
+
+msgid "sources.subtitle"
+msgstr "Add an Xtream account or M3U playlist URL."
+
+msgid "sources.openMenu"
+msgstr "Browse catalog"
+
+msgid "sources.emptyList"
+msgstr "No sources added yet."
+
+msgid "sources.section.add"
+msgstr "Add source"
+
+msgid "sources.section.saved"
+msgstr "Saved sources"
+
+msgid "sources.section.advanced"
+msgstr "Advanced transport (optional)"
+
+msgid "sources.mode.xtream"
+msgstr "Xtream"
+
+msgid "sources.mode.m3u"
+msgstr "M3U URL"
+
+msgid "sources.field.name"
+msgstr "Source name (optional)"
+
+msgid "sources.placeholder.name"
+msgstr "Defaults to server host"
+
+msgid "sources.field.server"
+msgstr "Server URL"
+
+msgid "sources.placeholder.server"
+msgstr "http://example.invalid:8080"
+
+msgid "sources.field.username"
+msgstr "Username"
+
+msgid "sources.placeholder.username"
+msgstr "Account username"
+
+msgid "sources.field.password"
+msgstr "Password"
+
+msgid "sources.placeholder.password"
+msgstr "Account password"
+
+msgid "sources.field.playlistUrl"
+msgstr "Playlist URL"
+
+msgid "sources.placeholder.playlistUrl"
+msgstr "http://example.invalid/playlist.m3u8"
+
+msgid "sources.field.keepAsM3u"
+msgstr "Keep as M3U"
+
+msgid "sources.notice.xtreamDetected"
+msgstr "Xtream link detected — will import via Xtream API for categories, movies, series, and guide unless Keep as M3U is enabled."
+
+msgid "sources.field.guideUrl"
+msgstr "XMLTV guide URL (optional)"
+
+msgid "sources.placeholder.guideUrl"
+msgstr "http://example.invalid/epg.xml.gz"
+
+msgid "sources.field.userAgent"
+msgstr "Custom User-Agent (optional)"
+
+msgid "sources.placeholder.userAgent"
+msgstr "Leave blank for default"
+
+msgid "sources.field.referer"
+msgstr "Referer URL (optional)"
+
+msgid "sources.placeholder.referer"
+msgstr "http://example.invalid/"
+
+msgid "sources.field.xtreamFormat"
+msgstr "Live stream format"
+
+msgid "sources.format.default"
+msgstr "Default (MPEG-TS)"
+
+msgid "sources.format.ts"
+msgstr "MPEG-TS"
+
+msgid "sources.format.m3u8"
+msgstr "HLS (M3U8)"
+
+msgid "sources.action.add"
+msgstr "Add and import"
+
+msgid "sources.action.adding"
+msgstr "Adding…"
+
+msgid "sources.action.import"
+msgstr "Import"
+
+msgid "sources.action.refresh"
+msgstr "Refresh"
+
+msgid "sources.action.cancel"
+msgstr "Cancel"
+
+msgid "sources.action.remove"
+msgstr "Remove"
+
+msgid "sources.action.toggleAdvancedShow"
+msgstr "Show advanced options"
+
+msgid "sources.action.toggleAdvancedHide"
+msgstr "Hide advanced options"
+
+msgid "sources.kind.xtream"
+msgstr "Xtream"
+
+msgid "sources.kind.m3u"
+msgstr "M3U"
+
+msgid "sources.status.needsImport"
+msgstr "Needs import"
+
+msgid "sources.status.ready"
+msgstr "Ready"
+
+msgid "sources.status.readyCounts"
+msgstr "{live, plural, one {# live channel} other {# live channels}}, {movies, plural, one {# movie} other {# movies}}, {series, plural, one {# series} other {# series}}"
+
+msgid "sources.status.importing"
+msgstr "Importing {phase} ({done})"
+
+msgid "sources.status.importingTotal"
+msgstr "Importing {phase} ({done}/{total})"
+
+msgid "sources.status.cancelled"
+msgstr "Import cancelled."
+
+msgid "sources.phase.categories"
+msgstr "categories"
+
+msgid "sources.phase.live"
+msgstr "live channels"
+
+msgid "sources.phase.movies"
+msgstr "movies"
+
+msgid "sources.phase.series"
+msgstr "series"
+
+msgid "sources.phase.episodes"
+msgstr "episodes"
+
+msgid "sources.phase.guideChannels"
+msgstr "guide channels"
+
+msgid "sources.phase.programmes"
+msgstr "guide schedule"
+
+msgid "sources.phase.cleanup"
+msgstr "finalizing"
+
+msgid "source.validation.missingServer"
+msgstr "Enter the Xtream server URL."
+
+msgid "source.hint.missingServer"
+msgstr "Include http:// or https:// and the port if your provider gave one."
+
+msgid "source.validation.missingCredentials"
+msgstr "Enter both username and password."
+
+msgid "source.hint.missingCredentials"
+msgstr "Check the Xtream account details from your provider, or paste a full get.php link."
+
+msgid "source.validation.missingUrl"
+msgstr "Enter the M3U playlist URL."
+
+msgid "source.hint.missingUrl"
+msgstr "Paste a full http:// or https:// playlist link."
+
+msgid "source.validation.missingScheme"
+msgstr "Server or playlist URL must start with http:// or https://."
+
+msgid "source.hint.missingScheme"
+msgstr "Add http:// (or https://) in front of the address and try again."
+
+msgid "source.validation.unsupportedScheme"
+msgstr "Only http:// and https:// URLs are supported."
+
+msgid "source.hint.unsupportedScheme"
+msgstr "Replace the URL scheme with http:// or https://."
+
+msgid "source.validation.invalidAddress"
+msgstr "The server or URL address is not valid."
+
+msgid "source.hint.invalidAddress"
+msgstr "Check the hostname and ensure any port number is between 1 and 65535."
+
+msgid "source.validation.invalidGuideUrl"
+msgstr "The XMLTV guide URL is not valid."
+
+msgid "source.hint.invalidGuideUrl"
+msgstr "Leave the guide URL blank to use the default guide, or enter a full http:// or https:// URL."
+
+msgid "source.validation.invalidCharacters"
+msgstr "One of the fields contains unsupported control characters."
+
+msgid "source.hint.invalidCharacters"
+msgstr "Remove line breaks or hidden characters from the pasted text and try again."
+
+msgid "source.validation.m3uInXtream"
+msgstr "That looks like an M3U playlist file URL, not an Xtream server."
+
+msgid "source.hint.m3uInXtream"
+msgstr "Switch to M3U URL mode to add a .m3u or .m3u8 playlist, or enter only the Xtream server base address."
+
+msgid "source.error.invalidCredentials"
+msgstr "Sign-in failed: invalid username, password, or access token."
+
+msgid "source.hint.invalidCredentials"
+msgstr "Verify your credentials with your provider, then remove and re-add the source."
+
+msgid "source.error.accountExpired"
+msgstr "This provider account is expired or inactive."
+
+msgid "source.hint.accountExpired"
+msgstr "Check your subscription status with your provider and refresh once active."
+
+msgid "source.error.rateLimited"
+msgstr "The provider rejected the request due to a connection or rate limit."
+
+msgid "source.hint.rateLimited"
+msgstr "Close streams on other devices, wait a moment, and press Refresh."
+
+msgid "source.error.timeout"
+msgstr "The server took too long to respond."
+
+msgid "source.hint.timeout"
+msgstr "Check your network connection and server address, then press Refresh."
+
+msgid "source.error.notFound"
+msgstr "The playlist or panel endpoint was not found on the server (HTTP 404)."
+
+msgid "source.hint.notFound"
+msgstr "Check the URL path and port, then remove and re-add the source."
+
+msgid "source.error.unreachable"
+msgstr "Could not reach the server."
+
+msgid "source.hint.unreachable"
+msgstr "Check the server URL, port, and your network connection, then press Refresh."
+
+msgid "source.error.aborted"
+msgstr "Import was cancelled."
+
+msgid "source.hint.aborted"
+msgstr "Press Import or Refresh whenever you want to try again."
+
+msgid "source.error.emptyPlaylist"
+msgstr "The source responded, but contained zero channels, movies, or series."
+
+msgid "source.hint.emptyPlaylist"
+msgstr "Verify with your provider that the playlist or account has active channels assigned."
+
+msgid "source.error.tooLarge"
+msgstr "The playlist or response exceeded the device size limit."
+
+msgid "source.hint.tooLarge"
+msgstr "If this is an Xtream provider, add it in Xtream mode instead of a raw M3U file."
+
+msgid "source.error.invalidFormat"
+msgstr "The server response is not a valid M3U playlist or Xtream catalog."
+
+msgid "source.hint.invalidFormat"
+msgstr "Check that the URL points directly to an M3U playlist or Xtream server, not a web page."
+
+msgid "source.error.importInProgress"
+msgstr "An import is already running for this source."
+
+msgid "source.hint.importInProgress"
+msgstr "Wait for the current import to finish or cancel it first."
+
+msgid "source.error.secretStore"
+msgstr "Secure credential storage is unavailable on this device."
+
+msgid "source.hint.secretStore"
+msgstr "Ensure OS keychain or screen lock encryption is enabled and restart the app."
+
+msgid "source.error.storage"
+msgstr "Could not save catalog data to local storage."
+
+msgid "source.hint.storage"
+msgstr "Check available disk space and try refreshing the source."
