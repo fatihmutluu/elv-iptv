@@ -15,7 +15,8 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
 
 ## Public surface
 - `PlayerEngine` port with `LoadCommand` (`options.softwareAudio` for rung 4), `EngineEvent`, `EngineState`,
-  `EngineCapabilities`, `AttemptToken`. `positionAt(anchor, nowMs)`: clock extrapolation, clamped to `[0, durationMs]`.
+  `EngineCapabilities`, `AttemptToken`, and `bridgeNativeEngine(native, { capabilities, uptimeMs, now })`
+  (`NativeEngineHandle`, `NativeLoadCommand`). `positionAt(anchor, nowMs)`: clock extrapolation, clamped to `[0, durationMs]`.
 - `EngineError` and the 14 `EngineErrorCode`s; `toPlaybackError` gives `elvError('playback', code)`;
   `classifyError` gives `terminal | not-found | limit | recoverable`.
 - `@elv/playback/testing`: `createFakePlayerEngine({ scripts, now, schedule, cancel })`, a scriptable engine for tests.
