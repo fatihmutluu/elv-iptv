@@ -1,4 +1,3 @@
-import { createMedia3Engine, Media3Surface } from '@elv/engine-media3';
 import { createKeyInterpreter, type KeyInput } from '@elv/focus-core';
 import {
   createPlaybackService,
@@ -20,6 +19,8 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
+import { PlayerSurface } from '../../playback/PlayerSurface';
+import { createPlatformEngine } from '../../playback/platform-engine';
 import { createZapDriver } from './player-driver';
 import { createPlayerRecorder, playerLine } from './player-metrics';
 import { type PlayerGateParams, streamUrl } from './player-routes';
@@ -30,7 +31,7 @@ const SETTLE_TIMEOUT_MS = 15_000;
 /** Props of {@link PlayerGateScreen}. */
 export interface PlayerGateScreenProps {
   params: PlayerGateParams;
-  /** Creates the engine; the Media3 engine by default, a fake in tests. Returns null where none exists. */
+  /** Creates the engine; the platform engine by default, a fake in tests. Returns null where none exists. */
   createEngine?: () => PlayerEngine | null;
 }
 
@@ -140,7 +141,7 @@ function useSession(params: PlayerGateParams, createEngine: () => PlayerEngine |
  */
 export function PlayerGateScreen({
   params,
-  createEngine = createMedia3Engine,
+  createEngine = createPlatformEngine,
 }: PlayerGateScreenProps): ReactElement {
   const session = useSession(params, createEngine);
   const index = useRef(0);
@@ -253,7 +254,7 @@ export function PlayerGateScreen({
   }
   return (
     <View style={styles.root} focusable hasTVPreferredFocus>
-      <Media3Surface
+      <PlayerSurface
         engine={session.engine}
         style={StyleSheet.absoluteFill}
         testID="player-surface"

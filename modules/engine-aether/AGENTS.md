@@ -7,6 +7,10 @@ Apple-only Expo module (tvOS, iOS, iPadOS): the AetherEngine 7.66.1 `PlayerEngin
 - `pnpm --filter @elv/engine-aether test` runs its Vitest tests.
 - `sh modules/engine-aether/scripts/check-build.sh project|app|archive <path>` verifies the generated Xcode project, `.app` or `.xcarchive`.
 
+## API (`src/index.ts`)
+- `createAetherEngine(): PlayerEngine | null` (`null` without `ElvEngineAether`) wraps a native `Engine` shared object via `bridgeNativeEngine`; `release()` frees it idempotently.
+- `AetherSurface({ engine, style?, resizeMode?, testID? })` renders `AetherSurfaceView` bound to that native object, or `null` when absent, foreign or released. `aetherEngineVersion()` returns the linked AetherEngine version.
+
 ## Rules
 - Layer rule (spec 5.2): imports `expo-modules-core` and `@elv/playback` only (`react`/`react-native` are view peers); only `apps/*` wire modules.
 - Source-first: `exports` points at `src/index.ts` and `./package.json`; there is no TypeScript build step.
