@@ -130,7 +130,6 @@ COMMON_FFMPEG_FLAGS=(
   --disable-avformat
   --disable-avfilter
   --disable-swscale
-  --disable-postproc
   --disable-v4l2-m2m
   --disable-vulkan
   --enable-avutil

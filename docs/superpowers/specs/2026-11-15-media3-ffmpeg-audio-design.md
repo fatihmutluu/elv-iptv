@@ -80,7 +80,7 @@ legal notices into `@elv/engine-media3`.
   (`armv7a-linux-androideabi28-clang`, `-march=armv7-a -mfloat-abi=softfp -mfpu=neon`) and `x86_64`
   (`x86_64-linux-android28-clang`; `--disable-x86asm` avoids NASM relocation hazards while keeping SSE/AVX intrinsics).
 - **Enabled FFmpeg components:** `--disable-everything --disable-programs --disable-doc --disable-network
-  --disable-avdevice --disable-avformat --disable-avfilter --disable-swscale --disable-postproc --disable-autodetect
+  --disable-avdevice --disable-avformat --disable-avfilter --disable-swscale --disable-autodetect
   --enable-avutil --enable-swresample --enable-avcodec` plus the 14 built-in LGPL-2.1+ audio decoders supported by
   Media3's `FfmpegLibrary`:
   `aac`, `ac3`, `alac`, `dca` (DTS / DTS-HD), `eac3` (E-AC-3 / JOC core), `flac`, `mlp`, `mp2`, `mp3`, `opus`,
