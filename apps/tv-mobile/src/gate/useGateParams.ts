@@ -43,21 +43,31 @@ function launchArgumentUrl(): string | null {
 }
 
 /**
- * The gate route from the `-gateUrl` launch argument (iOS, tvOS), else from the URL that opened the app, or from a
- * URL that arrived later; `undefined` when there is none. Always `undefined` (nothing is read and no listener is added)
- * unless the build carries the gate flag.
+ * The gate route from the `-gateUrl` launch argument (iOS, tvOS), else `'pending'` until the initial URL settles, or
+ * from a URL that arrived later; `undefined` when there is none. Always `undefined` synchronously (nothing is read and
+ * no listener is added) unless the build carries the gate flag (`extra.gate`).
  */
-export function useGateRoute(): GateRoute | undefined {
-  const [params, setParams] = useState<GateRoute | undefined>(() =>
-    isGateBuild() ? parseRoute(launchArgumentUrl()) : undefined,
-  );
+export function useGateRoute(): GateRoute | 'pending' | undefined {
+  const [params, setParams] = useState<GateRoute | 'pending' | undefined>(() => {
+    if (!isGateBuild()) return undefined;
+    return parseRoute(launchArgumentUrl()) ?? 'pending';
+  });
   useEffect(() => {
     if (!isGateBuild()) return;
     let alive = true;
-    void Linking.getInitialURL().then((url) => {
-      const parsed = parseRoute(url ?? null);
-      if (alive && parsed !== undefined) setParams((current) => current ?? parsed);
-    });
+    void Linking.getInitialURL().then(
+      (url) => {
+        const parsed = parseRoute(url ?? null);
+        if (alive) {
+          setParams((current) => (current === 'pending' ? parsed : (current ?? parsed)));
+        }
+      },
+      () => {
+        if (alive) {
+          setParams((current) => (current === 'pending' ? undefined : current));
+        }
+      },
+    );
     const subscription = Linking.addEventListener('url', ({ url }) => {
       const parsed = parseRoute(url);
       if (parsed !== undefined) setParams(parsed);

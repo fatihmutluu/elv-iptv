@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { buildAppConfig, type Env } from './build-app-config';
+import {
+  type BuildOptions,
+  buildAppConfig,
+  type Env,
+  isNativeDebugConfigEmbed,
+} from './build-app-config';
 
-const options = { version: '1.2.3', now: new Date('2026-11-13T00:00:00Z') };
-const build = (env: Env) => buildAppConfig(env, options);
+const baseOptions: BuildOptions = { version: '1.2.3', now: new Date('2026-11-13T00:00:00Z') };
+const build = (env: Env, overrides: Partial<BuildOptions> = {}) =>
+  buildAppConfig(env, { ...baseOptions, ...overrides });
 
 function pluginOptions(env: Env, name: string): Record<string, unknown> | undefined {
   for (const plugin of build(env).plugins ?? []) {
@@ -10,6 +16,123 @@ function pluginOptions(env: Env, name: string): Record<string, unknown> | undefi
   }
   return undefined;
 }
+
+describe('isNativeDebugConfigEmbed (#10)', () => {
+  it('returns true for real Gradle Android debug and Xcode iOS debug getAppConfig.js invocations', () => {
+    // Gradle Android Debug (expo-constants@58.0.16 passes argv[5]="false", argv[6]="development")
+    expect(
+      isNativeDebugConfigEmbed([
+        '/usr/local/bin/node',
+        '/repo/node_modules/expo-constants/scripts/getAppConfig.js',
+        '/repo/apps/tv-mobile',
+        '/repo/apps/tv-mobile/android/app/build/generated/assets/createDebugExpoConfig',
+        'android',
+        'false',
+        'development',
+      ]),
+    ).toBe(true);
+
+    // Windows Gradle Android Debug path separators
+    expect(
+      isNativeDebugConfigEmbed([
+        'C:\\Program Files\\nodejs\\node.exe',
+        'C:\\repo\\node_modules\\.pnpm\\expo-constants@58.0.16\\node_modules\\expo-constants\\scripts\\getAppConfig.js',
+        'C:\\repo\\apps\\tv-mobile',
+        'C:\\repo\\apps\\tv-mobile\\android\\app\\build\\generated\\assets\\createDebugExpoConfig',
+        'android',
+        'false',
+        'development',
+      ]),
+    ).toBe(true);
+
+    // Xcode iOS/tvOS Debug (get-app-config-ios.sh passes argv[5]="true", argv[6]="development")
+    expect(
+      isNativeDebugConfigEmbed([
+        '/usr/local/bin/node',
+        '/repo/node_modules/expo-constants/scripts/getAppConfig.js',
+        '/repo/apps/tv-mobile',
+        '/Users/dev/Library/Developer/Xcode/DerivedData/App/EXConstants.bundle',
+        'app.config',
+        'true',
+        'development',
+      ]),
+    ).toBe(true);
+
+    // Legacy 6-arg debug fallback (argv[6] === undefined && argv[5] === 'true')
+    expect(
+      isNativeDebugConfigEmbed([
+        '/usr/local/bin/node',
+        '/repo/node_modules/expo-constants/scripts/getAppConfig.js',
+        '/repo/apps/tv-mobile',
+        '/repo/out',
+        'app.config',
+        'true',
+      ]),
+    ).toBe(true);
+  });
+
+  it('returns false for Gradle Android release, Xcode iOS release, Metro, and expo prebuild', () => {
+    // Gradle Android Release (argv[5]="false", argv[6]="production")
+    expect(
+      isNativeDebugConfigEmbed([
+        'node',
+        '/repo/node_modules/expo-constants/scripts/getAppConfig.js',
+        '/repo/apps/tv-mobile',
+        '/repo/apps/tv-mobile/android/app/build/generated/assets/createReleaseExpoConfig',
+        'android',
+        'false',
+        'production',
+      ]),
+    ).toBe(false);
+
+    // Xcode iOS/tvOS Release (argv[5]="false", argv[6]="production")
+    expect(
+      isNativeDebugConfigEmbed([
+        'node',
+        '/repo/node_modules/expo-constants/scripts/getAppConfig.js',
+        '/repo/apps/tv-mobile',
+        '/Users/dev/Library/Developer/Xcode/DerivedData/App/EXConstants.bundle',
+        'app.config',
+        'false',
+        'production',
+      ]),
+    ).toBe(false);
+
+    // Even if argv[5] were "true", explicit "production" in argv[6] must be rejected
+    expect(
+      isNativeDebugConfigEmbed([
+        'node',
+        '/repo/node_modules/expo-constants/scripts/getAppConfig.js',
+        '/repo/apps/tv-mobile',
+        '/repo/out',
+        'app.config',
+        'true',
+        'production',
+      ]),
+    ).toBe(false);
+
+    expect(
+      isNativeDebugConfigEmbed(['node', '/repo/node_modules/@expo/cli/build/bin/cli', 'start']),
+    ).toBe(false);
+
+    expect(
+      isNativeDebugConfigEmbed(['node', '/repo/node_modules/expo/bin/cli', 'prebuild', '--clean']),
+    ).toBe(false);
+
+    expect(
+      isNativeDebugConfigEmbed([
+        'node',
+        '/repo/node_modules/expo-constants/scripts/getAppConfig.js',
+        '/repo/apps/tv-mobile',
+        '/repo/out',
+        'app.config',
+        'false',
+      ]),
+    ).toBe(false);
+
+    expect(isNativeDebugConfigEmbed([])).toBe(false);
+  });
+});
 
 describe('buildAppConfig', () => {
   it('builds the production identity by default', () => {
@@ -112,17 +235,63 @@ describe('buildAppConfig', () => {
     }
   });
 
-  it('exposes DEV_ values in development only', () => {
-    const env = { DEV_XTREAM_URL: 'http://x', DEV_XTREAM_PASS: 'secret', OTHER: 'no' };
-    expect(build({ ...env, APP_VARIANT: 'development' }).extra?.dev).toEqual({
-      DEV_XTREAM_URL: 'http://x',
-      DEV_XTREAM_PASS: 'secret',
-    });
+  it('omits extra.dev in all variants and embeds extra.seed only for development + embedDevSeed (#10)', () => {
+    const xtreamEnv: Env = {
+      DEV_XTREAM_SERVER: 'http://127.0.0.1:7878',
+      DEV_XTREAM_USERNAME: 'demo',
+      DEV_XTREAM_PASSWORD: 'demo',
+    };
+
+    // Metro / prebuild (embedDevSeed omitted or false) -> zero credentials in extra!
+    const metroDev = build({ ...xtreamEnv, APP_VARIANT: 'development' });
+    expect(metroDev.extra).not.toHaveProperty('dev');
+    expect(metroDev.extra).not.toHaveProperty('seed');
+    expect(JSON.stringify(metroDev)).not.toContain('DEV_');
+    expect(JSON.stringify(metroDev)).not.toContain('127.0.0.1:7878');
+
+    const explicitFalse = build(
+      { ...xtreamEnv, APP_VARIANT: 'development' },
+      { embedDevSeed: false },
+    );
+    expect(explicitFalse.extra).not.toHaveProperty('dev');
+    expect(explicitFalse.extra).not.toHaveProperty('seed');
+
+    // Production never embeds extra.seed even if embedDevSeed were passed
     for (const variant of ['production', undefined]) {
-      const config = build({ ...env, APP_VARIANT: variant });
-      expect(config.extra).not.toHaveProperty('dev');
-      expect(JSON.stringify(config)).not.toContain('DEV_');
-      expect(JSON.stringify(config)).not.toContain('secret');
+      const prodConfig = build({ ...xtreamEnv, APP_VARIANT: variant }, { embedDevSeed: true });
+      expect(prodConfig.extra).not.toHaveProperty('dev');
+      expect(prodConfig.extra).not.toHaveProperty('seed');
+      expect(JSON.stringify(prodConfig)).not.toContain('DEV_');
+      expect(JSON.stringify(prodConfig)).not.toContain('127.0.0.1:7878');
     }
+
+    // Native debug app.config embed (APP_VARIANT=development + embedDevSeed: true)
+    const debugEmbed = build({ ...xtreamEnv, APP_VARIANT: 'development' }, { embedDevSeed: true });
+    expect(debugEmbed.extra).not.toHaveProperty('dev');
+    expect(debugEmbed.extra?.seed).toEqual({
+      kind: 'xtream',
+      name: '127.0.0.1:7878',
+      server: 'http://127.0.0.1:7878',
+      username: 'demo',
+      password: 'demo',
+    });
+    expect(JSON.stringify(debugEmbed)).not.toContain('DEV_');
+
+    // M3U fallback when DEV_XTREAM_* is absent
+    const m3uEmbed = build(
+      {
+        APP_VARIANT: 'development',
+        DEV_M3U_NAME: 'Local Sim M3U',
+        DEV_M3U_URL: 'http://127.0.0.1:7878/playlists/demo.m3u8',
+        DEV_M3U_GUIDE_URL: 'http://127.0.0.1:7878/xmltv.xml',
+      },
+      { embedDevSeed: true },
+    );
+    expect(m3uEmbed.extra?.seed).toEqual({
+      kind: 'm3u',
+      name: 'Local Sim M3U',
+      playlistUrl: 'http://127.0.0.1:7878/playlists/demo.m3u8',
+      guideUrl: 'http://127.0.0.1:7878/xmltv.xml',
+    });
   });
 });

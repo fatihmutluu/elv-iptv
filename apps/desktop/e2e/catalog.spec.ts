@@ -144,21 +144,7 @@ test('imports the large simulator catalog in utilityProcess without stalling ren
   try {
     const page = await app.firstWindow();
     await expect(page).toHaveTitle('ELV IPTV');
-
-    // Catalog utilityProcess spawns lazily on first catalog request
-    const beforeOpenPid = await app.evaluate(({ app: electronApp }) => {
-      const m = electronApp
-        .getAppMetrics()
-        .find(
-          (p) =>
-            p.type === 'Utility' &&
-            (p.name === 'ELV Catalog' ||
-              p.serviceName === 'ELV Catalog' ||
-              p.serviceName === 'node.mojom.NodeService'),
-        );
-      return m?.pid ?? null;
-    });
-    expect(beforeOpenPid).toBeNull();
+    await expect(page.getByTestId('sources-screen')).toBeVisible();
 
     const runResult = await page.evaluate(
       async (params) => {

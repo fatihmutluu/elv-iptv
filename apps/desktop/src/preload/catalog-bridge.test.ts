@@ -71,6 +71,9 @@ function createFakeIpcRenderer() {
     deliverDisconnected(): void {
       emitter.emit(CATALOG_CHANNELS.disconnected, {}, { reason: 'worker-exited' });
     },
+    deliverChanged(): void {
+      emitter.emit(CATALOG_CHANNELS.changed, {});
+    },
   };
 }
 
@@ -192,6 +195,16 @@ describe('createCatalogBridge', () => {
 
     await bridge.close();
     expect(port.closed).toBe(true);
+
+    let changedCount = 0;
+    const offChanged = bridge.onChanged(() => {
+      changedCount += 1;
+    });
+    h.deliverChanged();
+    expect(changedCount).toBe(1);
+    offChanged();
+    h.deliverChanged();
+    expect(changedCount).toBe(1);
   });
 
   it('settles in-flight calls on worker crash or fault and reconnects on the next call', async () => {
