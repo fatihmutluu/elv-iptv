@@ -305,3 +305,153 @@ msgstr "Could not save catalog data to local storage."
 
 msgid "source.hint.storage"
 msgstr "Check available disk space and try refreshing the source."
+
+msgid "nav.live"
+msgstr "Live"
+
+msgid "nav.movies"
+msgstr "Movies"
+
+msgid "nav.series"
+msgstr "Series"
+
+msgid "nav.sources"
+msgstr "Sources"
+
+msgid "browse.categories"
+msgstr "Categories"
+
+msgid "browse.items"
+msgstr "Items"
+
+msgid "browse.categoryCount"
+msgstr "{name} ({count})"
+
+msgid "browse.emptyNoSources"
+msgstr "No sources ready yet. Add or import a source to browse."
+
+msgid "browse.openSources"
+msgstr "Open Sources"
+
+msgid "browse.emptyCategories"
+msgstr "No categories found in this section."
+
+msgid "browse.emptyItems"
+msgstr "No items in this category."
+
+msgid "browse.loading"
+msgstr "Loading…"
+
+msgid "browse.backToCategories"
+msgstr "Back to categories"
+
+msgid "series.seasons"
+msgstr "Seasons"
+
+msgid "series.seasonCount"
+msgstr "Season {season} ({count})"
+
+msgid "series.episodes"
+msgstr "Episodes"
+
+msgid "series.episodeTitled"
+msgstr "E{episode} · {title}"
+
+msgid "series.episodeUntitled"
+msgstr "Episode {episode}"
+
+msgid "series.loadingSeasons"
+msgstr "Loading seasons…"
+
+msgid "series.emptySeasons"
+msgstr "No seasons available for this series."
+
+msgid "series.emptyEpisodes"
+msgstr "No episodes in this season."
+
+msgid "series.retrySeasons"
+msgstr "Retry"
+
+msgid "series.backToSeries"
+msgstr "Back to series"
+
+msgid "series.backToSeasons"
+msgstr "Back to seasons"
+
+msgid "player.status.idle"
+msgstr "Idle"
+
+msgid "player.status.tuning"
+msgstr "Tuning…"
+
+msgid "player.status.playing"
+msgstr "Playing"
+
+msgid "player.status.paused"
+msgstr "Paused"
+
+msgid "player.status.ended"
+msgstr "Ended"
+
+msgid "player.status.recovering"
+msgstr "Reconnecting (step {rung})…"
+
+msgid "player.status.limited"
+msgstr "Waiting for active connection slot…"
+
+msgid "player.back"
+msgstr "Back"
+
+msgid "player.retry"
+msgstr "Retry"
+
+msgid "player.prevChannel"
+msgstr "Prev"
+
+msgid "player.nextChannel"
+msgstr "Next"
+
+msgid "player.unavailable"
+msgstr "Video playback is unavailable on this platform."
+
+msgid "player.error.invalidCredentials"
+msgstr "Sign-in failed for this stream."
+
+msgid "player.hint.invalidCredentials"
+msgstr "Check your account credentials in Sources and refresh the source."
+
+msgid "player.error.accountExpired"
+msgstr "This provider account is expired or inactive."
+
+msgid "player.hint.accountExpired"
+msgstr "Verify your subscription status with your provider."
+
+msgid "player.error.connectionLimit"
+msgstr "Provider connection limit reached."
+
+msgid "player.hint.connectionLimit"
+msgstr "Close streams on other devices, wait a moment, and press Retry."
+
+msgid "player.error.unreachable"
+msgstr "Could not reach the stream server."
+
+msgid "player.hint.unreachable"
+msgstr "Check your network connection or try again in a moment."
+
+msgid "player.error.unsupportedFormat"
+msgstr "This stream format or codec is not supported."
+
+msgid "player.hint.unsupportedFormat"
+msgstr "Try switching live stream format in Sources or pick another stream."
+
+msgid "player.error.itemNotFound"
+msgstr "This stream was not found on the server."
+
+msgid "player.hint.itemNotFound"
+msgstr "Refresh the source in Sources to update the channel list."
+
+msgid "player.error.streamFailed"
+msgstr "Playback stopped due to a stream error."
+
+msgid "player.hint.streamFailed"
+msgstr "Press Retry to reconnect, or choose another item."
