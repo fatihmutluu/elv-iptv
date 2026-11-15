@@ -105,6 +105,24 @@ describe('judgeFault', () => {
         .failures,
     ).toEqual(['stall: the new request came 12100 ms after the first request, limit 10000 ms']);
     expect(
+      judgeFault(
+        'stall',
+        run('stall', 'recovered'),
+        [stalled(12_000), entry(12_100, 10)],
+        '1001',
+        8,
+      ).failures,
+    ).toEqual([]);
+    expect(
+      judgeFault(
+        'stall',
+        run('stall', 'recovered'),
+        [stalled(18_000), entry(18_100, 10)],
+        '1001',
+        8,
+      ).failures,
+    ).toEqual(['stall: the new request came 18100 ms after the first request, limit 18000 ms']);
+    expect(
       judgeFault('stall', run('stall', 'recovered'), [stalled(30_000)], '1001').failures,
     ).toEqual(['stall: no new request after the stall']);
     const leaked = judgeFault(
@@ -205,12 +223,14 @@ describe('fault runs per target', () => {
     expect(faultsFor('ios')).toEqual(faultsFor('tvos'));
   });
 
-  it('stays long enough on the faulted channel for each fault', () => {
+  it('stays long enough on the faulted channel for each fault and burst profile', () => {
     expect(['drop5', '404', '509', 'notice'].map((f) => faultRate(f as 'drop5'))).toEqual([
       0.1, 0.1, 0.1, 0.1,
     ]);
+    expect(faultRate('drop5', 8)).toBe(0.05);
+    expect(faultRate('404', 8)).toBe(0.1);
     expect(faultRate('stall')).toBe(0.05);
     expect(faultRate('silent')).toBe(0.05);
-    expect(faultRate('slowstart')).toBe(1.25);
+    expect(faultRate('slowstart', 8)).toBe(1.25);
   });
 });

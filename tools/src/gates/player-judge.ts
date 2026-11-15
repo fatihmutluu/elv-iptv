@@ -1,4 +1,5 @@
 import type { BudgetMode, CompareOutcome } from './compare.ts';
+import type { GateTarget } from './gate-device.ts';
 import { median } from './import-gate.ts';
 
 /** The simulator account every player gate run uses (one connection allowed). */
@@ -51,6 +52,8 @@ export interface PlayerLine {
 /** Measured numbers of the zap runs: medians of the times, the worst run of the counters. */
 export interface PlayerResult {
   zaps: number;
+  /** Initial live TS burst seconds (`0` for real time). */
+  burstSec: number;
   ttffColdMs: Nullable;
   ttffWarmMs: { p50: Nullable; p95: Nullable };
   zapMs: { p50: Nullable; p95: Nullable; max: Nullable };
@@ -151,10 +154,12 @@ const worst = (values: number[]): number => Math.max(...values);
 export function aggregateRuns(
   lines: readonly PlayerLine[],
   stats: readonly { limitResponses: number; overlapMs: number }[],
+  burstSec = 0,
 ): PlayerResult {
   const pick = <T>(f: (l: PlayerLine) => T): T[] => lines.map(f);
   return {
     zaps: (lines[0] as PlayerLine).zaps,
+    burstSec,
     ttffColdMs: medianOrNull(pick((l) => l.ttffColdMs)),
     ttffWarmMs: {
       p50: medianOrNull(pick((l) => l.ttffWarmMs.p50)),
@@ -181,8 +186,13 @@ export interface PlayerBudgets {
   zapP95Ms: number;
 }
 
-/** Spec 7 budgets. */
 const SPEC_BUDGETS: PlayerBudgets = { coldMs: 2000, warmP50Ms: 1000, zapP95Ms: 2000 };
+const APPLE_REALTIME_BUDGETS: PlayerBudgets = { coldMs: 4000, warmP50Ms: 3000, zapP95Ms: 4000 };
+
+/** Selects the absolute time budgets for a target and live TS burst profile. */
+export function budgetsFor(target: GateTarget, burstSec: number): PlayerBudgets {
+  return target === 'android-tv' || burstSec > 0 ? SPEC_BUDGETS : APPLE_REALTIME_BUDGETS;
+}
 
 const TIMES: readonly [string, (r: PlayerResult) => Nullable][] = [
   ['cold start', (r) => r.ttffColdMs],
@@ -204,12 +214,18 @@ const TIMES: readonly [string, (r: PlayerResult) => Nullable][] = [
 export function comparePlayer(
   result: PlayerResult,
   baseline: PlayerResult | undefined,
-  opts: { budgets?: BudgetMode; runs?: readonly PlayerResult[]; limits?: PlayerBudgets } = {},
+  opts: {
+    budgets?: BudgetMode;
+    runs?: readonly PlayerResult[];
+    limits?: PlayerBudgets;
+    target?: GateTarget;
+  } = {},
 ): CompareOutcome {
   const failures: string[] = [];
   const warnings: string[] = [];
   const soft = opts.budgets === 'warn';
-  const limits = opts.limits ?? SPEC_BUDGETS;
+  const resultBurst = result.burstSec ?? 0;
+  const limits = opts.limits ?? budgetsFor(opts.target ?? 'android-tv', resultBurst);
 
   const time = (
     name: string,
@@ -241,6 +257,9 @@ export function comparePlayer(
     warnings.push('no baseline: only the absolute budgets and the counters were checked');
   } else if (baseline.zaps !== result.zaps) {
     failures.push(`not comparable: ${result.zaps} zaps, baseline has ${baseline.zaps}`);
+    baseline = undefined;
+  } else if ((baseline.burstSec ?? 0) !== resultBurst) {
+    failures.push(`not comparable: burst ${resultBurst}, baseline has ${baseline.burstSec ?? 0}`);
     baseline = undefined;
   }
   time('cold start', result.ttffColdMs, baseline?.ttffColdMs, limits.coldMs, true);

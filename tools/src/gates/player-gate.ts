@@ -94,6 +94,8 @@ export interface PlayerGateOptions {
   channels?: readonly string[];
   stream?: PlayerStreamKind;
   rate?: number;
+  /** Live TS initial burst in seconds (0–30, default 0). */
+  burst?: number;
   /** Soak hold in minutes (1–180): one run, judged by {@link judgeSoak}. */
   soak?: number;
   /** Stress mode: `runs` (default 3) of 200 zaps at 5/s, judged on counters only. */
@@ -125,10 +127,12 @@ function buildLink(opts: {
   fault: string;
   stream: PlayerStreamKind;
   soak?: number;
+  burst?: number;
 }): string {
   const stream = opts.stream === 'ts' ? '' : `&stream=${opts.stream}`;
   const soak = opts.soak === undefined ? '' : `&soak=${opts.soak}`;
-  return `elviptv://gate/player?host=${opts.host}&account=${ACCOUNT}&channels=${opts.channels.join(',')}&zaps=${opts.zaps}&rate=${opts.rate}&fault=${opts.fault}${stream}${soak}`;
+  const burst = (opts.burst ?? 0) > 0 ? `&burst=${opts.burst}` : '';
+  return `elviptv://gate/player?host=${opts.host}&account=${ACCOUNT}&channels=${opts.channels.join(',')}&zaps=${opts.zaps}&rate=${opts.rate}&fault=${opts.fault}${stream}${soak}${burst}`;
 }
 
 /**
@@ -147,6 +151,7 @@ export async function runPlayerGate(opts: PlayerGateOptions): Promise<PlayerGate
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
   const channels = opts.channels ?? DEFAULT_CHANNELS;
   const stream = opts.stream ?? 'ts';
+  const burstSec = opts.burst ?? 0;
   const runs = Math.max(1, opts.runs ?? 3);
   const log = opts.log ?? httpSimLog('http://127.0.0.1:7878');
 
@@ -213,6 +218,7 @@ export async function runPlayerGate(opts: PlayerGateOptions): Promise<PlayerGate
         rate,
         fault,
         stream,
+        burst: burstSec,
         ...(soak === undefined ? {} : { soak }),
       });
 
@@ -221,7 +227,7 @@ export async function runPlayerGate(opts: PlayerGateOptions): Promise<PlayerGate
       const done = await play(link(1, ZAP_RATE, '', minutes), minutes * 60_000, true);
       const stat = connectionStats(await log.entries(), ACCOUNT);
       const verdict = judgeSoak(done.line, { stream, crashes: done.crashes, memory: done.memory });
-      const single = aggregateRuns([done.line], [stat]);
+      const single = aggregateRuns([done.line], [stat], burstSec);
       const info = await active.describe();
       return {
         device: info,
@@ -262,16 +268,16 @@ export async function runPlayerGate(opts: PlayerGateOptions): Promise<PlayerGate
       stats.push(stat);
       crashes.push(...done.crashes);
       stressRuns.push({ line: done.line, ...stat, crashes: done.crashes });
-      opts.onRun?.(aggregateRuns([done.line], [stat]));
+      opts.onRun?.(aggregateRuns([done.line], [stat], burstSec));
     }
 
     const faults: FaultReport[] = [];
     const runFaults = !stress && opts.faults === true ? faultsFor(target) : [];
     for (const fault of runFaults) {
-      const fRate = faultRate(fault);
+      const fRate = faultRate(fault, burstSec);
       const done = await play(link(FAULT_ZAPS, fRate, fault), (FAULT_ZAPS / fRate) * 1000);
       const entries = await log.entries();
-      const verdict = judgeFault(fault, done.line, entries, channels[0] as string);
+      const verdict = judgeFault(fault, done.line, entries, channels[0] as string, burstSec);
       verdict.failures.push(...crashFailures(done.crashes));
       const report: FaultReport = {
         fault,
@@ -285,10 +291,12 @@ export async function runPlayerGate(opts: PlayerGateOptions): Promise<PlayerGate
     }
 
     const info = await active.describe();
-    const perRun = lines.map((l, i) => aggregateRuns([l], [stats[i] as (typeof stats)[number]]));
+    const perRun = lines.map((l, i) =>
+      aggregateRuns([l], [stats[i] as (typeof stats)[number]], burstSec),
+    );
     return {
       device: info,
-      result: aggregateRuns(lines, stats),
+      result: aggregateRuns(lines, stats, burstSec),
       runs: perRun,
       faults,
       crashes,

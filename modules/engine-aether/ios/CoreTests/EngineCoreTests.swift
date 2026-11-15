@@ -26,7 +26,7 @@ struct EngineCoreTests {
         .stopMedia,
         .start(
           .liveTs(URL(string: "http://h:7878/live/demo/demo/1001.ts")!),
-          EngineLoadOptions(isLive: true),
+          EngineLoadOptions(isLive: true, liveStartupGraceSeconds: 0, liveStartupSingleSegmentMinimumSeconds: 1.0),
           1
         ),
       ]

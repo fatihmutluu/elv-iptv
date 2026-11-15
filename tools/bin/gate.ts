@@ -59,6 +59,7 @@ function parseCli() {
       channels: { type: 'string' },
       stream: { type: 'string' },
       rate: { type: 'string' },
+      burst: { type: 'string' },
       soak: { type: 'string' },
       stress: { type: 'boolean' },
     },

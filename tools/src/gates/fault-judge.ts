@@ -2,7 +2,7 @@ import type { GateTarget } from './gate-device.ts';
 import { ACCOUNT, type PlayerLine, type Verdict } from './player-judge.ts';
 import { connectionStats, type SimLogEntry, STREAM_PATH, span } from './sim-log.ts';
 
-/** A fault run needs one stay on the faulted channel; 0.1 gives 10 s, and 0.05 gives 20 s for stall/silent ladders. */
+/** A fault run needs one stay on the faulted channel; 0.1 gives 10 s, and 0.05 gives 20 s for stall/silent or bursty drop5. */
 const FAULT_RATE = 0.1;
 const LONG_FAULT_RATE = 0.05;
 /** A slow-start run zaps 800 ms after the first tune, while that request still waits for its 3 s late answer. */
@@ -48,25 +48,28 @@ export function faultsFor(target: GateTarget): readonly Fault[] {
   return target === 'android-tv' ? ANDROID_FAULTS : APPLE_FAULTS;
 }
 
-/** Zap rate (zaps per second) that gives `fault` its needed stay on `channels[0]`. */
-export function faultRate(fault: Fault): number {
+/** Zap rate (zaps per second) that gives `fault` its needed stay on `channels[0]` (accounting for `burstSec` preroll on `drop5`). */
+export function faultRate(fault: Fault, burstSec = 0): number {
   if (fault === 'slowstart') return SLOW_START_RATE;
   if (fault === 'silent' || fault === 'stall') return LONG_FAULT_RATE;
+  if (fault === 'drop5' && burstSec > 0) return LONG_FAULT_RATE;
   return FAULT_RATE;
 }
 
 /**
  * Judges one fault run against spec 7. The screen's `faultOutcome` must be the expected one (`missed` fails); the
  * windows come from the simulator log of the faulted channel: a dropped stream must be requested again within 10 s of
- * the drop, a stalled stream within 10 s of the first request without a limit answer, a 404 answered for the last time
- * within 10 s, and after a 509 or notice the next request may come only after the 2,000 ms backoff. A slow start (its
- * answer held back 3 s, left by a zap after 800 ms) needs the zap's frame, a request after the zap and no limit answer.
+ * the drop, a stalled stream within `10 s + burstSec` of the first request without a limit answer, a 404 answered for
+ * the last time within 10 s, and after a 509 or notice the next request may come only after the 2,000 ms backoff. A
+ * slow start (its answer held back 3 s, left by a zap after 800 ms) needs the zap's frame, a request after the zap and
+ * no limit answer.
  */
 export function judgeFault(
   fault: Fault,
   line: PlayerLine,
   entries: readonly SimLogEntry[],
   channel: string,
+  burstSec = 0,
 ): Verdict {
   const failures: string[] = [];
   const warnings: string[] = [];
@@ -105,7 +108,7 @@ export function judgeFault(
       );
     }
   } else if (fault === 'stall') {
-    judgeStall(own, entries, failures, warnings);
+    judgeStall(own, entries, burstSec, failures, warnings);
   } else if (fault === 'slowstart') {
     judgeSlowStart(line, entries, channel, failures, warnings);
   } else if (fault === 'silent') {
@@ -159,15 +162,17 @@ function judgeBackoff(
 function judgeStall(
   own: readonly Span[],
   entries: readonly SimLogEntry[],
+  burstSec: number,
   failures: string[],
   warnings: string[],
 ): void {
   const first = own[0] as Span;
   const again = own[1];
+  const limitMs = STALL_RECOVERY_MS + Math.max(0, burstSec) * 1000;
   if (again === undefined) failures.push('stall: no new request after the stall');
-  else if (again.start - first.start > STALL_RECOVERY_MS) {
+  else if (again.start - first.start > limitMs) {
     failures.push(
-      `stall: the new request came ${again.start - first.start} ms after the first request, limit ${STALL_RECOVERY_MS} ms`,
+      `stall: the new request came ${again.start - first.start} ms after the first request, limit ${limitMs} ms`,
     );
   }
   const { limitResponses, overlapMs } = connectionStats(entries, ACCOUNT);

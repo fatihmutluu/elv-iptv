@@ -64,4 +64,27 @@ struct MediaPlanTests {
     #expect(tsOpts.isLive)
     #expect(tsOpts.maxConcurrentSourceRequests == nil)
   }
+
+  @Test("liveTs options carry the tuned startup values")
+  func liveTsTunedStartupValues() throws {
+    let tsReq = LoadRequest(url: "http://h:7878/live/demo/demo/1001.ts", live: true)
+    let tsPlan = try #require(planMedia(tsReq))
+    let tsOpts = loadOptions(for: tsPlan, request: tsReq)
+    #expect(tsOpts.liveStartupGraceSeconds == 0)
+    #expect(tsOpts.liveStartupSingleSegmentMinimumSeconds == 1.0)
+    #expect(tsOpts.probesize == nil)
+    #expect(tsOpts.maxAnalyzeDurationMicros == nil)
+
+    let hlsReq = LoadRequest(url: "http://h:7878/hls/demo/demo/1001.m3u8", live: true)
+    let hlsPlan = try #require(planMedia(hlsReq))
+    let hlsOpts = loadOptions(for: hlsPlan, request: hlsReq)
+    #expect(hlsOpts.liveStartupGraceSeconds == nil)
+    #expect(hlsOpts.liveStartupSingleSegmentMinimumSeconds == nil)
+
+    let vodReq = LoadRequest(url: "http://h:7878/movie/demo/demo/200001.mp4", live: false)
+    let vodPlan = try #require(planMedia(vodReq))
+    let vodOpts = loadOptions(for: vodPlan, request: vodReq)
+    #expect(vodOpts.liveStartupGraceSeconds == nil)
+    #expect(vodOpts.liveStartupSingleSegmentMinimumSeconds == nil)
+  }
 }

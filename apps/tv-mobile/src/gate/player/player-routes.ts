@@ -33,6 +33,8 @@ export interface PlayerGateParams {
    * at the end of the movie if that comes first). Absent for a normal zap run.
    */
   soak?: number;
+  /** Initial live MPEG-TS burst in seconds, 0 to 30 (default 0: real time). */
+  burst?: number;
 }
 
 const GATE_URL = /^elviptv:\/\/gate\/player\/?(?:\?([^#]*))?(?:#.*)?$/;
@@ -43,6 +45,7 @@ const DEFAULT_HOST = '10.0.2.2:7878';
 const DEFAULT_CHANNELS: readonly string[] = ['1001', '1002', '1003', '1004'];
 const MAX_CHANNELS = 20;
 const MAX_SOAK_MINUTES = 180;
+const MAX_BURST_SECONDS = 30;
 const FAULT_SPECS: Readonly<Record<Exclude<PlayerFault, ''>, string>> = {
   drop5: 'drop@5s',
   '404': 'status=404',
@@ -109,6 +112,7 @@ export function parsePlayerGateUrl(url: string | null): PlayerGateParams | undef
     rate: readNumber(query.get('rate'), 0.5, 0.05, 5, false),
     fault: FAULTS.has(fault) ? (fault as PlayerFault) : '',
     stream: STREAMS.has(stream) ? (stream as PlayerStream) : 'ts',
+    burst: readNumber(query.get('burst'), 0, 0, MAX_BURST_SECONDS, false),
     ...(soak !== undefined && /^\d+$/.test(soak)
       ? { soak: readNumber(soak, 1, 1, MAX_SOAK_MINUTES, true) }
       : {}),
@@ -121,8 +125,8 @@ export function faultSpec(fault: PlayerFault): string | undefined {
 }
 
 /**
- * The stream URL of one channel. The fault applies to `channels[0]` only; the simulator's account password equals its
- * name, and the URL is built here at play time, as the catalog's resolver will do.
+ * The stream URL of one channel. The fault applies to `channels[0]` only, while `burst` applies to every live TS URL;
+ * the simulator's account password equals its name, and the URL is built here at play time, as the resolver will do.
  */
 export function streamUrl(params: PlayerGateParams, index: number): string {
   const id = params.channels[index];
@@ -131,6 +135,9 @@ export function streamUrl(params: PlayerGateParams, index: number): string {
     stream === 'vod'
       ? `http://${params.host}/movie/${account}/${account}/${id}.mp4`
       : `http://${params.host}/live/${account}/${account}/${id}.${stream === 'hls' ? 'm3u8' : 'ts'}`;
-  const spec = index === 0 ? faultSpec(params.fault) : undefined;
-  return spec === undefined ? base : `${base}?fault=${spec}`;
+  const parts = [
+    index === 0 ? faultSpec(params.fault) : undefined,
+    stream === 'ts' && (params.burst ?? 0) > 0 ? `burst=${params.burst}` : undefined,
+  ].filter((part): part is string => part !== undefined);
+  return parts.length === 0 ? base : `${base}?fault=${parts.join(',')}`;
 }

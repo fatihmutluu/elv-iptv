@@ -19,12 +19,13 @@ describe('parsePlayerGateUrl', () => {
       rate: 0.5,
       fault: '',
       stream: 'ts',
+      burst: 0,
     });
     expect(parsePlayerGateUrl(`${BASE}/?#x`)?.zaps).toBe(30);
   });
 
   it('reads every parameter', () => {
-    const url = `${BASE}?host=127.0.0.1:9000&account=large&channels=7,8&zaps=5&rate=1.5&fault=drop5&stream=hls`;
+    const url = `${BASE}?host=127.0.0.1:9000&account=large&channels=7,8&zaps=5&rate=1.5&fault=drop5&stream=hls&burst=8`;
     expect(parsePlayerGateUrl(url)).toEqual({
       host: '127.0.0.1:9000',
       account: 'large',
@@ -33,6 +34,7 @@ describe('parsePlayerGateUrl', () => {
       rate: 1.5,
       fault: 'drop5',
       stream: 'hls',
+      burst: 8,
     });
   });
 
@@ -130,6 +132,32 @@ describe('streamUrl', () => {
       'http://10.0.2.2:7878/live/demo/demo/1001.m3u8?fault=text-notice',
     );
     const vod = { ...params, channels: ['200001'], fault: '' as const, stream: 'vod' as const };
+    expect(streamUrl(vod, 0)).toBe('http://10.0.2.2:7878/movie/demo/demo/200001.mp4');
+  });
+
+  it('reaches every live TS URL with burst, joins channels[0] fault, clamps at 30 and leaves HLS and VOD unchanged', () => {
+    const ts = parsePlayerGateUrl(`${BASE}?channels=1001,1002&fault=drop5&burst=8`);
+    if (ts === undefined) throw new Error('route');
+    expect(streamUrl(ts, 0)).toBe(
+      'http://10.0.2.2:7878/live/demo/demo/1001.ts?fault=drop@5s,burst=8',
+    );
+    expect(streamUrl(ts, 1)).toBe('http://10.0.2.2:7878/live/demo/demo/1002.ts?fault=burst=8');
+
+    const clamped = parsePlayerGateUrl(`${BASE}?channels=1001&burst=99`);
+    if (clamped === undefined) throw new Error('route');
+    expect(clamped.burst).toBe(30);
+    expect(streamUrl(clamped, 0)).toBe(
+      'http://10.0.2.2:7878/live/demo/demo/1001.ts?fault=burst=30',
+    );
+    expect(parsePlayerGateUrl(`${BASE}?burst=bad`)?.burst).toBe(0);
+
+    const hls = parsePlayerGateUrl(`${BASE}?channels=1001,1002&fault=notice&stream=hls&burst=8`);
+    const vod = parsePlayerGateUrl(`${BASE}?channels=200001&stream=vod&burst=8`);
+    if (hls === undefined || vod === undefined) throw new Error('route');
+    expect(streamUrl(hls, 0)).toBe(
+      'http://10.0.2.2:7878/live/demo/demo/1001.m3u8?fault=text-notice',
+    );
+    expect(streamUrl(hls, 1)).toBe('http://10.0.2.2:7878/live/demo/demo/1002.m3u8');
     expect(streamUrl(vod, 0)).toBe('http://10.0.2.2:7878/movie/demo/demo/200001.mp4');
   });
 });

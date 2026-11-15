@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   aggregateRuns,
+  budgetsFor,
   comparePlayer,
   crashFailures,
   judgeSoak,
@@ -157,6 +158,34 @@ describe('comparePlayer', () => {
   it('is not comparable with another zap count', () => {
     const out = comparePlayer(result({ zaps: 10 }), result());
     expect(out.failures).toEqual(['not comparable: 10 zaps, baseline has 30']);
+  });
+
+  it('is not comparable across bursts, while an older baseline without burstSec matches burst 0', () => {
+    expect(comparePlayer(result({ burstSec: 8 }), result({ burstSec: 0 })).failures).toEqual([
+      'not comparable: burst 8, baseline has 0',
+    ]);
+    const legacy = { ...result() } as Partial<PlayerResult>;
+    delete legacy.burstSec;
+    expect(comparePlayer(result({ burstSec: 0 }), legacy as PlayerResult).ok).toBe(true);
+  });
+
+  it('selects budgets per target and burst profile', () => {
+    expect(budgetsFor('android-tv', 0)).toEqual({ coldMs: 2000, warmP50Ms: 1000, zapP95Ms: 2000 });
+    expect(budgetsFor('tvos', 8)).toEqual({ coldMs: 2000, warmP50Ms: 1000, zapP95Ms: 2000 });
+    expect(budgetsFor('ios', 8)).toEqual({ coldMs: 2000, warmP50Ms: 1000, zapP95Ms: 2000 });
+    expect(budgetsFor('tvos', 0)).toEqual({ coldMs: 4000, warmP50Ms: 3000, zapP95Ms: 4000 });
+    expect(budgetsFor('ios', 0)).toEqual({ coldMs: 4000, warmP50Ms: 3000, zapP95Ms: 4000 });
+
+    const realtime = result({
+      burstSec: 0,
+      ttffColdMs: 3500,
+      ttffWarmMs: { p50: 2500, p95: 3000 },
+      zapMs: { p50: 2000, p95: 4000, max: 4000 },
+    });
+    expect(comparePlayer(realtime, undefined, { target: 'tvos' }).failures).toEqual([]);
+    expect(
+      comparePlayer({ ...realtime, burstSec: 8 }, undefined, { target: 'tvos' }).failures,
+    ).toHaveLength(3);
   });
 });
 

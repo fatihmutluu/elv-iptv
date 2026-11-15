@@ -192,17 +192,21 @@ describe('runPlayerGate (Android)', () => {
       sleep: noSleep,
       ffmpeg,
       runs: 1,
+      burst: 8,
       faults: true,
       onFault: (r) => reports.push(r.fault),
     });
+    expect(f.urls[0]).toContain('&burst=8');
     expect(f.urls.slice(1)).toEqual(
       [
-        ...['drop5', '404', '509'].map((x) => `0.1&fault=${x}`),
+        '0.05&fault=drop5',
+        '0.1&fault=404',
+        '0.1&fault=509',
         '1.25&fault=slowstart',
         '0.05&fault=silent',
       ].map(
         (x) =>
-          `elviptv://gate/player?host=10.0.2.2:7878&account=demo&channels=1001,1002,1003,1004&zaps=1&rate=${x}`,
+          `elviptv://gate/player?host=10.0.2.2:7878&account=demo&channels=1001,1002,1003,1004&zaps=1&rate=${x}&burst=8`,
       ),
     );
     expect(reports).toEqual(['drop5', '404', '509', 'slowstart', 'silent']);
@@ -284,24 +288,23 @@ describe('runPlayerGate (GateDevice, soak and stress)', () => {
       target: 'tvos',
       channels: ['200001', '200002'],
       stream: 'vod',
+      burst: 8,
       runs: 1,
       zaps: 10,
       ffmpeg: () => null,
       sleep: noSleep,
     });
     expect(f.urls).toEqual([
-      'elviptv://gate/player?host=127.0.0.1:7878&account=demo&channels=200001,200002&zaps=10&rate=0.5&fault=&stream=vod',
+      'elviptv://gate/player?host=127.0.0.1:7878&account=demo&channels=200001,200002&zaps=10&rate=0.5&fault=&stream=vod&burst=8',
     ]);
     expect(out.result.zaps).toBe(10);
+    expect(out.result.burstSec).toBe(8);
     expect(f.events.at(-1)).toBe('sim-stop');
     expect(f.events).toContain('close');
   });
 
   it('fails a run with a crash report', async () => {
-    const f = appleFake({
-      logs: [[logcat(line())]],
-      crashes: [['ELVIPTV-2026-11-15.ips']],
-    });
+    const f = appleFake({ logs: [[logcat(line())]], crashes: [['ELVIPTV-2026-11-15.ips']] });
     const out = await runPlayerGate({
       ...f,
       target: 'tvos',
@@ -382,17 +385,18 @@ describe('playerMain', () => {
     const noFaults = await captureErr(() => playerMain({ 'write-baseline': true }, '.'));
     expect(noFaults.code).toBe(2);
     expect(noFaults.text).toMatch(/baseline needs --faults/);
-
     const noApp = await captureErr(() => playerMain({ target: 'tvos' }, '.'));
     expect(noApp.code).toBe(2);
     expect(noApp.text).toMatch(/--app/);
-
     const badTarget = await captureErr(() => playerMain({ target: 'webos' }, '.'));
     expect(badTarget.code).toBe(2);
     expect(badTarget.text).toMatch(/--target/);
+    const badBurst = await captureErr(() => playerMain({ burst: '31' }, '.'));
+    expect(badBurst.code).toBe(2);
+    expect(badBurst.text).toMatch(/--burst/);
   });
 
   it('names the player gate options in PLAYER_USAGE', () => {
-    expect(PLAYER_USAGE).toMatch(/gate player.*--target.*--soak.*--stress/);
+    expect(PLAYER_USAGE).toMatch(/gate player.*--target.*--burst.*--soak.*--stress/);
   });
 });

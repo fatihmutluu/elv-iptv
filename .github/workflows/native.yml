@@ -537,8 +537,9 @@ jobs:
             exit 1
           fi
           status=0
+          pnpm sim --prepare || status=$?
           pnpm gate contract --target tvos --app "$app" || status=$?
-          pnpm gate player --target tvos --app "$app" --runs 1 --faults --budgets warn \
+          pnpm gate player --target tvos --app "$app" --burst 8 --runs 1 --faults --budgets warn \
             --baseline docs/learned/gates/player-tvos-ci.json \
             --out gate-artifacts/gate-player-tvos.json || status=$?
           exit "$status"

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FaultParseError, mediaType, parseFaults } from '../src/sim/faults.ts';
+import { liveArgs } from '../src/sim/media.ts';
 
 describe('parseFaults', () => {
   it('parses each fault', () => {
@@ -40,5 +41,42 @@ describe('parseFaults', () => {
       expect(() => parseFaults(bad)).toThrow(bad);
     expect(mediaType(parseFaults('drop@1s,type=text/html'), 'video/mp2t')).toBe('text/html');
     expect(mediaType([], 'video/mp2t')).toBe('video/mp2t');
+  });
+
+  it('parses a provider burst of up to 30 s', () => {
+    expect(parseFaults('burst=8')).toEqual([{ kind: 'burst', sec: 8 }]);
+    expect(parseFaults('burst=0.5')).toEqual([{ kind: 'burst', sec: 0.5 }]);
+    expect(parseFaults('burst=30')).toEqual([{ kind: 'burst', sec: 30 }]);
+    expect(parseFaults('drop@5s,burst=8')).toEqual([
+      { kind: 'drop', atSec: 5 },
+      { kind: 'burst', sec: 8 },
+    ]);
+    for (const bad of ['burst=0', 'burst=31', 'burst=30.5', 'burst=x', 'burst=', 'burst=-1'])
+      expect(() => parseFaults(bad)).toThrow(FaultParseError);
+  });
+});
+
+describe('liveArgs', () => {
+  it('reads in real time without a burst', () => {
+    const args = liveArgs('loop.ts');
+    expect(args).toContain('-re');
+    expect(args).not.toContain('-readrate');
+    expect(args).not.toContain('-readrate_initial_burst');
+    expect(args.indexOf('-re')).toBeLessThan(args.indexOf('-i'));
+    expect(args.slice(args.indexOf('-i'), args.indexOf('-i') + 2)).toEqual(['-i', 'loop.ts']);
+    expect(args.at(-1)).toBe('pipe:1');
+  });
+
+  it('replaces -re with an initial burst', () => {
+    const args = liveArgs('loop.ts', 8);
+    expect(args).not.toContain('-re');
+    const at = args.indexOf('-readrate');
+    expect(args.slice(at, at + 4)).toEqual(['-readrate', '1', '-readrate_initial_burst', '8']);
+    expect(at).toBeLessThan(args.indexOf('-i'));
+    expect(args.at(-1)).toBe('pipe:1');
+  });
+
+  it('treats a zero burst as none', () => {
+    expect(liveArgs('loop.ts', 0)).toEqual(liveArgs('loop.ts'));
   });
 });

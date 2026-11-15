@@ -34,16 +34,24 @@ public func planMedia(_ request: LoadRequest) -> MediaPlan? {
 public func loadOptions(for plan: MediaPlan, request: LoadRequest) -> EngineLoadOptions {
   let isLive: Bool
   let maxConcurrent: Int?
+  let liveStartupGraceSeconds: Double?
+  let liveStartupSingleSegmentMinimumSeconds: Double?
   switch plan {
   case let .hls(_, live):
     isLive = live
     maxConcurrent = nil
+    liveStartupGraceSeconds = nil
+    liveStartupSingleSegmentMinimumSeconds = nil
   case .vod:
     isLive = false
     maxConcurrent = 1
+    liveStartupGraceSeconds = nil
+    liveStartupSingleSegmentMinimumSeconds = nil
   case .liveTs:
     isLive = true
     maxConcurrent = nil
+    liveStartupGraceSeconds = 0
+    liveStartupSingleSegmentMinimumSeconds = 1.0
   }
 
   return EngineLoadOptions(
@@ -51,8 +59,8 @@ public func loadOptions(for plan: MediaPlan, request: LoadRequest) -> EngineLoad
     httpHeaders: request.headers,
     maxConcurrentSourceRequests: maxConcurrent,
     preferSoftwareDecode: request.softwareAudio,
-    liveStartupGraceSeconds: nil,
-    liveStartupSingleSegmentMinimumSeconds: nil,
+    liveStartupGraceSeconds: liveStartupGraceSeconds,
+    liveStartupSingleSegmentMinimumSeconds: liveStartupSingleSegmentMinimumSeconds,
     probesize: nil,
     maxAnalyzeDurationMicros: nil
   )

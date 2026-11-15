@@ -17,7 +17,7 @@ import { localSim } from './sim-control.ts';
 
 /** The usage line of `pnpm gate player`. */
 export const PLAYER_USAGE =
-  'usage: pnpm gate player [--target android-tv|tvos|ios] [--avd elv_tv] [--build] [--app <.app>] [--device <name>] [--channels 1001,1002,...] [--stream ts|hls|vod] [--rate 0.5] [--soak <min>] [--stress] [--runs 3] [--zaps 30] [--faults] [--baseline file] [--budgets warn|fail] [--out file] [--write-baseline]';
+  'usage: pnpm gate player [--target android-tv|tvos|ios] [--avd elv_tv] [--build] [--app <.app>] [--device <name>] [--channels 1001,1002,...] [--stream ts|hls|vod] [--rate 0.5] [--burst 0] [--soak <min>] [--stress] [--runs 3] [--zaps 30] [--faults] [--baseline file] [--budgets warn|fail] [--out file] [--write-baseline]';
 
 const DEFAULT_BASELINES: Readonly<Record<GateTarget, string>> = {
   'android-tv': 'docs/learned/gates/player-android-tv.json',
@@ -38,6 +38,7 @@ export interface PlayerCli {
   channels?: string;
   stream?: string;
   rate?: string;
+  burst?: string;
   soak?: string;
   stress?: boolean;
   runs?: string;
@@ -60,7 +61,7 @@ interface Baseline {
 const ms = (value: number | null): string => (value === null ? 'n/a' : `${value} ms`);
 
 const summary = (r: PlayerResult): string =>
-  `gate player: ${r.zaps} zaps, cold ${ms(r.ttffColdMs)}, warm p50 ${ms(r.ttffWarmMs.p50)} p95 ${ms(r.ttffWarmMs.p95)}, zap p50/p95/max ${ms(r.zapMs.p50)}/${ms(r.zapMs.p95)}/${ms(r.zapMs.max)}, surfaces ${r.surfaceCreated}, stale ${r.staleEventsApplied}, limit responses ${r.limitResponses}, overlap ${r.overlapMs} ms`;
+  `gate player: ${r.zaps} zaps${r.burstSec > 0 ? `, burst ${r.burstSec} s` : ''}, cold ${ms(r.ttffColdMs)}, warm p50 ${ms(r.ttffWarmMs.p50)} p95 ${ms(r.ttffWarmMs.p95)}, zap p50/p95/max ${ms(r.zapMs.p50)}/${ms(r.zapMs.p95)}/${ms(r.zapMs.max)}, surfaces ${r.surfaceCreated}, stale ${r.staleEventsApplied}, limit responses ${r.limitResponses}, overlap ${r.overlapMs} ms`;
 
 const soakSummary = (s: SoakReport): string => {
   const b = s.line.soak;
@@ -93,11 +94,15 @@ function parseChannels(text: string | undefined): readonly string[] | undefined 
     : 'bad';
 }
 
-function parseRate(text: string | undefined): number | undefined | 'bad' {
+function parseFloatIn(
+  text: string | undefined,
+  min: number,
+  max: number,
+): number | undefined | 'bad' {
   if (text === undefined) return undefined;
   if (!/^\d+(?:\.\d+)?$/.test(text)) return 'bad';
   const n = Number(text);
-  return Number.isFinite(n) && n >= 0.05 && n <= 5 ? n : 'bad';
+  return Number.isFinite(n) && n >= min && n <= max ? n : 'bad';
 }
 
 /** Runs `pnpm gate player` and returns the process exit code; usage errors are returned as code 2. */
@@ -113,8 +118,10 @@ export async function playerMain(values: PlayerCli, root: string): Promise<numbe
   const channels = parseChannels(values.channels);
   if (channels === 'bad')
     return bad('--channels is 1 to 20 numeric stream ids separated by commas');
-  const rate = parseRate(values.rate);
+  const rate = parseFloatIn(values.rate, 0.05, 5);
   if (rate === 'bad') return bad('--rate is a number between 0.05 and 5');
+  const burst = parseFloatIn(values.burst, 0, 30);
+  if (burst === 'bad') return bad('--burst is a number from 0 to 30 seconds');
   const runs = parseIntIn(values.runs, 1, 100);
   const zaps = parseIntIn(values.zaps, 1, 200);
   if (runs === 'bad' || zaps === 'bad') return bad('--runs and --zaps need a positive integer');
@@ -170,6 +177,7 @@ export async function playerMain(values: PlayerCli, root: string): Promise<numbe
       ...(values.device === undefined ? {} : { deviceName: values.device }),
       ...(channels === undefined ? {} : { channels }),
       ...(rate === undefined ? {} : { rate }),
+      ...(burst === undefined ? {} : { burst }),
       ...(soak === undefined ? {} : { soak }),
       ...(values.stress === true ? { stress: true } : {}),
       ...(values.faults === true ? { faults: true } : {}),
@@ -209,7 +217,7 @@ export async function playerMain(values: PlayerCli, root: string): Promise<numbe
   const faultWarnings = faults.flatMap((f) => f.warnings);
 
   if (values['write-baseline'] === true) {
-    const own = comparePlayer(result, result, { budgets, runs: perRun });
+    const own = comparePlayer(result, result, { budgets, runs: perRun, target });
     const failures = [...own.failures, ...faultFailures];
     if (failures.length > 0) return bad(`refusing to write a baseline: ${failures.join('; ')}`);
     for (const w of [...own.warnings, ...faultWarnings]) process.stdout.write(`warn: ${w}\n`);
@@ -243,7 +251,7 @@ export async function playerMain(values: PlayerCli, root: string): Promise<numbe
   const baseline = found
     ? (JSON.parse(readFileSync(baselinePath, 'utf8')) as Baseline).result
     : undefined;
-  const outcome = comparePlayer(result, baseline, { budgets, runs: perRun });
+  const outcome = comparePlayer(result, baseline, { budgets, runs: perRun, target });
   if (!found && values.baseline === undefined && !customProbe) {
     outcome.failures.unshift(`no baseline at ${baselineName}; run with --write-baseline`);
   }
