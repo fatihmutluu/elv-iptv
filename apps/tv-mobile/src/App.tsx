@@ -52,7 +52,7 @@ export function App() {
       if (rawSeed !== undefined) {
         const seed = normalizeSeedForTarget(rawSeed, {
           os: Platform.OS,
-          isDevice: Constants.isDevice !== false,
+          constants: Platform.constants as unknown as Readonly<Record<string, unknown>>,
         });
         void openSharedCatalog()
           .then((opened) =>

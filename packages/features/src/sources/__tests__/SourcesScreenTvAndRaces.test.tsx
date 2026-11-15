@@ -74,10 +74,17 @@ describe('SourcesScreen native TV focus & controller concurrency (#71)', () => {
         </RemoteKeysProvider>,
       );
 
-      // 1. Focusable TV parking anchor is rendered for tvOS/Android TV focus parking
+      // 1. Focusable TV parking anchor is a sibling OUTSIDE non-focusable ScrollView (so ReactScrollView.executeKeyEvent cannot hijack D-pad)
+      const scrollView = screen.getByTestId('sources-screen');
+      expect(scrollView.props.focusable).toBe(false);
       const anchor = screen.getByTestId('sources-tv-focus-anchor');
       expect(anchor.props.focusable).toBe(true);
       expect(anchor.props.hasTVPreferredFocus).toBe(true);
+      let cursor = anchor.parent;
+      while (cursor !== null) {
+        expect(cursor.props?.testID).not.toBe('sources-screen');
+        cursor = cursor.parent;
+      }
 
       // 2. Action buttons opt out of native focus on TV (preventing native + FocusStore double-press)
       expect(screen.getByTestId('sources-mode-xtream').props.focusable).toBe(false);
@@ -162,6 +169,28 @@ describe('SourcesScreen native TV focus & controller concurrency (#71)', () => {
         remote.tap(KEYCODE_BACK);
       });
       expect(onBack).toHaveBeenCalledTimes(1);
+
+      // 6. Unmounting an active editing input without onBlur (e.g. mode switch) clears stale editingInputId so Back still works
+      // Navigate back up to input-server (7 -> 3) and press select to enter edit mode without firing focus/blur
+      await act(async () => {
+        // Jump to mode-m3u (index 1) after activating input-server: first focus input-server by moving up 4 steps
+        remote.tap(19);
+        remote.tap(19);
+        remote.tap(19);
+        remote.tap(19);
+      });
+      await act(async () => {
+        remote.tap(KEYCODE_DPAD_CENTER);
+      });
+      expect(screen.getByTestId('sources-input-server').props.editable).toBe(true);
+      // Switch mode to M3U (unmounting input-server without firing onBlur)
+      await fireEvent.press(screen.getByTestId('sources-mode-m3u'));
+      expect(screen.queryByTestId('sources-input-server')).toBeNull();
+      // Short Back must NOT be swallowed by stale editingInputId
+      await act(async () => {
+        remote.tap(KEYCODE_BACK);
+      });
+      expect(onBack).toHaveBeenCalledTimes(2);
 
       await view.unmount();
     } finally {

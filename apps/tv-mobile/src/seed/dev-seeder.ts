@@ -32,15 +32,56 @@ function rewriteAndroidEmulatorUrl(rawUrl: string): string {
 }
 
 /**
+ * Detects Android / Android TV / Fire TV emulators from React Native's built-in `Platform.OS`
+ * and `Platform.constants` (`Fingerprint`, `Model`, `Brand`, `Manufacturer`, debug `ServerHost`)
+ * without native add-ons (`Constants.isDevice` was removed from `expo-constants`).
+ */
+export function isAndroidEmulator(
+  os: string,
+  constants?: Readonly<Record<string, unknown>>,
+): boolean {
+  if (os !== 'android' || constants === undefined) {
+    return false;
+  }
+  const str = (key: string): string => {
+    const val = constants[key];
+    return typeof val === 'string' ? val : '';
+  };
+  const serverHost = str('ServerHost');
+  const fingerprint = str('Fingerprint');
+  const model = str('Model');
+  const manufacturer = str('Manufacturer');
+  const brand = str('Brand');
+  return (
+    serverHost.startsWith('10.0.2.2:') ||
+    fingerprint.startsWith('generic') ||
+    fingerprint.startsWith('unknown') ||
+    fingerprint.includes('emulator') ||
+    fingerprint.includes('sdk_gphone') ||
+    fingerprint.includes('sdk_google_atv') ||
+    fingerprint.includes('emu64') ||
+    fingerprint.includes('ranchu') ||
+    fingerprint.includes('vbox') ||
+    model.includes('google_sdk') ||
+    model.includes('Emulator') ||
+    model.includes('Android SDK built for') ||
+    model.includes('sdk_gphone') ||
+    model.includes('sdk_google_atv') ||
+    manufacturer.includes('Genymotion') ||
+    brand.startsWith('generic')
+  );
+}
+
+/**
  * Rewrites `localhost` / `127.0.0.1` URLs to `10.0.2.2` strictly on Android / Android TV / Fire TV
- * emulators (`os === 'android' && isDevice === false`), leaving physical devices, iOS/tvOS Simulators,
- * and LAN addresses untouched (#10).
+ * emulators (`isAndroidEmulator(target.os, target.constants)`), leaving physical devices, iOS/tvOS
+ * Simulators, and LAN addresses untouched (#10).
  */
 export function normalizeSeedForTarget(
   seed: DevSeedPayload,
-  target: { readonly os: string; readonly isDevice: boolean },
+  target: { readonly os: string; readonly constants?: Readonly<Record<string, unknown>> },
 ): DevSeedPayload {
-  if (target.os !== 'android' || target.isDevice !== false) {
+  if (!isAndroidEmulator(target.os, target.constants)) {
     return seed;
   }
   if (seed.kind === 'xtream') {

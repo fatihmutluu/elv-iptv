@@ -4,6 +4,7 @@ import { elvError, err, type HttpClient, ok } from '@elv/domain';
 import { describe, expect, it } from 'vitest';
 import {
   type DevSeedPayload,
+  isAndroidEmulator,
   normalizeSeedForTarget,
   readEmbeddedDevSeed,
   runDevSeedOnce,
@@ -188,7 +189,7 @@ describe('dev-seeder (#10)', () => {
     }
   });
 
-  it('rewrites localhost and 127.0.0.1 to 10.0.2.2 strictly on Android emulators', () => {
+  it('detects Android emulators from Platform.constants and rewrites localhost/127.0.0.1 to 10.0.2.2 strictly on Android emulators', () => {
     const xtreamLoopback: DevSeedPayload = {
       kind: 'xtream',
       name: 'Local Sim',
@@ -203,27 +204,77 @@ describe('dev-seeder (#10)', () => {
       guideUrl: 'http://127.0.0.1:7878/xmltv.xml',
     };
 
-    expect(normalizeSeedForTarget(xtreamLoopback, { os: 'android', isDevice: false })).toEqual({
+    // Android TV AVD (sdk_google_atv / ServerHost 10.0.2.2:8081)
+    const androidTvAvd = {
+      Fingerprint:
+        'google/sdk_google_atv64_amati_x86_64/emu64xa:14/UE1A.230829.050/123:userdebug/dev-keys',
+      Model: 'sdk_google_atv64_x86_64',
+      Brand: 'google',
+      Manufacturer: 'Google',
+      ServerHost: '10.0.2.2:8081',
+    };
+    expect(isAndroidEmulator('android', androidTvAvd)).toBe(true);
+
+    // Android phone AVD (sdk_gphone64 without ServerHost)
+    const androidPhoneAvd = {
+      Fingerprint: 'google/sdk_gphone64_arm64/emu64a:15/AE3A.240806.005/122:user/release-keys',
+      Model: 'sdk_gphone64_arm64',
+      Brand: 'google',
+      Manufacturer: 'Google',
+    };
+    expect(isAndroidEmulator('android', androidPhoneAvd)).toBe(true);
+
+    // Physical Fire TV Stick 4K (adb reverse -> ServerHost localhost:8081)
+    const fireTvDevice = {
+      Fingerprint: 'Amazon/mantis/mantis:6.0/NS6298/4925:user/amz-p,release-keys',
+      Model: 'AFTMM',
+      Brand: 'Amazon',
+      Manufacturer: 'Amazon',
+      ServerHost: 'localhost:8081',
+    };
+    expect(isAndroidEmulator('android', fireTvDevice)).toBe(false);
+
+    // Physical Pixel phone
+    const pixelDevice = {
+      Fingerprint: 'google/husky/husky:15/AP3A.241105.007/124:user/release-keys',
+      Model: 'Pixel 8 Pro',
+      Brand: 'google',
+      Manufacturer: 'Google',
+      ServerHost: '192.168.1.10:8081',
+    };
+    expect(isAndroidEmulator('android', pixelDevice)).toBe(false);
+
+    // iOS/tvOS Simulator (never 10.0.2.2 — Apple Simulators share host loopback)
+    expect(isAndroidEmulator('ios', { ServerHost: 'localhost:8081' })).toBe(false);
+
+    expect(
+      normalizeSeedForTarget(xtreamLoopback, { os: 'android', constants: androidTvAvd }),
+    ).toEqual({
       ...xtreamLoopback,
       server: 'http://10.0.2.2:7878',
     });
-    expect(normalizeSeedForTarget(m3uLoopback, { os: 'android', isDevice: false })).toEqual({
+    expect(
+      normalizeSeedForTarget(m3uLoopback, { os: 'android', constants: androidPhoneAvd }),
+    ).toEqual({
       ...m3uLoopback,
       playlistUrl: 'http://10.0.2.2:7878/playlists/demo.m3u8?a=1',
       guideUrl: 'http://10.0.2.2:7878/xmltv.xml',
     });
 
-    // Never rewrite on physical Android, iOS/tvOS Simulator, physical Apple, or LAN addresses
-    expect(normalizeSeedForTarget(xtreamLoopback, { os: 'android', isDevice: true })).toEqual(
-      xtreamLoopback,
-    );
-    expect(normalizeSeedForTarget(xtreamLoopback, { os: 'ios', isDevice: false })).toEqual(
+    // Never rewrite on physical Fire TV, physical Pixel, iOS/tvOS Simulator, or LAN addresses
+    expect(
+      normalizeSeedForTarget(xtreamLoopback, { os: 'android', constants: fireTvDevice }),
+    ).toEqual(xtreamLoopback);
+    expect(
+      normalizeSeedForTarget(xtreamLoopback, { os: 'android', constants: pixelDevice }),
+    ).toEqual(xtreamLoopback);
+    expect(normalizeSeedForTarget(xtreamLoopback, { os: 'ios', constants: {} })).toEqual(
       xtreamLoopback,
     );
     expect(
       normalizeSeedForTarget(
         { ...xtreamLoopback, server: 'http://192.168.1.25:7878' },
-        { os: 'android', isDevice: false },
+        { os: 'android', constants: androidTvAvd },
       ),
     ).toEqual({ ...xtreamLoopback, server: 'http://192.168.1.25:7878' });
   });

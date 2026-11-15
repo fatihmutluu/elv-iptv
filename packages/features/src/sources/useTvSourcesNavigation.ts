@@ -187,7 +187,6 @@ export function useTvSourcesNavigation({
 
   const [editingInputId, setEditingInputId] = useState<string | null>(null);
   const editingInputIdRef = useRef<string | null>(null);
-  editingInputIdRef.current = editingInputId;
 
   const registerRef = useCallback((id: string, node: TvTextInputInstance | null) => {
     if (node === null) inputRefs.current.delete(id);
@@ -206,6 +205,17 @@ export function useTvSourcesNavigation({
   );
 
   const controls = useMemo(() => buildSourcesFocusItems(ctrl, onOpenMenu), [ctrl, onOpenMenu]);
+  const activeEditingInputId =
+    editingInputId !== null && controls.some((c) => c.kind === 'input' && c.id === editingInputId)
+      ? editingInputId
+      : null;
+  editingInputIdRef.current = activeEditingInputId;
+
+  useLayoutEffect(() => {
+    if (editingInputId !== null && activeEditingInputId === null) {
+      setEditingInputId(null);
+    }
+  }, [activeEditingInputId, editingInputId]);
 
   const focusStore = useMemo(
     () =>
@@ -239,9 +249,9 @@ export function useTvSourcesNavigation({
   const tvFocusId = isTv ? controls[focusedIndex]?.id : undefined;
 
   useLayoutEffect(() => {
-    if (!isTv || editingInputId === null) return;
-    inputRefs.current.get(editingInputId)?.focus();
-  }, [editingInputId, isTv]);
+    if (!isTv || activeEditingInputId === null) return;
+    inputRefs.current.get(activeEditingInputId)?.focus();
+  }, [activeEditingInputId, isTv]);
 
   useLayoutEffect(() => {
     if (!isTv || tvFocusId === undefined) return;
@@ -323,7 +333,7 @@ export function useTvSourcesNavigation({
     focusStore,
     controls,
     tvFocusId,
-    editingInputId,
+    editingInputId: activeEditingInputId,
     registerRef,
     recordLayout,
     handleEndEditing,
