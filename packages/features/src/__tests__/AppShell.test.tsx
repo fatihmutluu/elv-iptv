@@ -362,6 +362,7 @@ describe('AppShell', () => {
         expect(screen.getByTestId('nav-tab-movie')).toHaveTextContent('Filmler');
         expect(screen.getByTestId('nav-tab-series')).toHaveTextContent('Diziler');
         expect(screen.getByTestId('nav-tab-sources')).toHaveTextContent('Kaynaklar');
+        expect(screen.getByTestId('nav-tab-notices')).toHaveTextContent('Lisanslar');
 
         if (formFactor === 'tv') {
           await act(async () => {
