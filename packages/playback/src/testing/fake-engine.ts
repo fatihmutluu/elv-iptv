@@ -25,6 +25,8 @@ export interface FakeEngineOptions {
   now: () => number;
   schedule: (fn: () => void, ms: number) => unknown;
   cancel: (handle: unknown) => void;
+  /** Emits a `clock` anchor (rate 1 / 0) after `play` / `pause`, as real engines do; off by default. */
+  anchorOnPlayPause?: boolean;
 }
 
 /** A command the fake received, recorded for assertions. */
@@ -73,6 +75,7 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
   let open = 0;
   let maxOpen = 0;
   let released = false;
+  let positionMs = 0;
 
   const deliver = (event: EngineEvent): void => {
     for (const listener of [...listeners]) listener(event);
@@ -96,6 +99,7 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
       case 'firstFrame':
         return { attempt, type: 'firstFrame', atMs };
       case 'clock':
+        positionMs = step.positionMs;
         return {
           attempt,
           type: 'clock',
@@ -117,6 +121,21 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
     }
   };
 
+  const anchorNow = (rate: number): void => {
+    if (url === undefined || !opts.anchorOnPlayPause) return;
+    handles.push(
+      opts.schedule(
+        () =>
+          deliver({
+            attempt: token,
+            type: 'clock',
+            anchor: { positionMs, atMs: opts.now(), rate },
+          }),
+        0,
+      ),
+    );
+  };
+
   const closeMedia = (): void => {
     cancelScript();
     if (open > 0) open -= 1;
@@ -135,6 +154,7 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
       if (url !== undefined) closeMedia();
       token = cmd.attempt;
       url = cmd.url;
+      positionMs = cmd.startMs ?? 0;
       open += 1;
       maxOpen = Math.max(maxOpen, open);
       runScript();
@@ -152,10 +172,12 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
     play(attempt) {
       commands.push({ name: 'play', attempt });
       adopt(attempt);
+      anchorNow(1);
     },
     pause(attempt) {
       commands.push({ name: 'pause', attempt });
       adopt(attempt);
+      anchorNow(0);
     },
     seek(attempt, positionMs) {
       commands.push({ name: 'seek', attempt, positionMs });

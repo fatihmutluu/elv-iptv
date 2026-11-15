@@ -22,6 +22,8 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
 - `@elv/playback/testing`: `createFakePlayerEngine({ scripts, now, schedule, cancel })`, a scriptable engine for tests.
   Scripts are keyed by URL and re-run on `retry` (`recreate` idles until a `load` or `retry`); `emit` injects any
   event (stale tokens too); `openMedias()`, `maxConcurrentMedias()` check the one-media rule. Inject fake timers.
+  `anchorOnPlayPause` emits a `clock` anchor (rate 1/0) after `play`/`pause`. `ENGINE_CONTRACT_CASES` is the
+  framework-free suite every engine runs through an `EngineContractHarness` (`contract.ts`; the fake: `contract.test.ts`).
 - `createPlaybackService({ engine, clock, timers, config? })`: `tune`, `retry` (replays `ended` VOD from 0), `stop`,
   `play`, `pause`, `seek`, `getState`, `subscribe`, `dispose` (stops open media). `PlaybackStatus` includes `ended`.
   `pause`/`play` advance `attempt` to fence queued native states; `anchor` freezes on non-playing states and clears on
