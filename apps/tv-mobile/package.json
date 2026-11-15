@@ -13,7 +13,9 @@
   "dependencies": {
     "@elv/data": "workspace:*",
     "@elv/domain": "workspace:*",
+    "@elv/engine-media3": "workspace:*",
     "@elv/focus-core": "workspace:*",
+    "@elv/playback": "workspace:*",
     "@elv/remote-keys": "workspace:*",
     "@elv/sources": "workspace:*",
     "@elv/ui-kit": "workspace:*",

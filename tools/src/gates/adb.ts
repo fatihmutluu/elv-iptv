@@ -195,13 +195,14 @@ export async function startGate(
   device: AdbDevice,
   sleep: (ms: number) => Promise<void>,
   url: string,
-  opts: { resetFrames?: boolean } = {},
+  opts: { resetFrames?: boolean; afterStop?: () => Promise<void> } = {},
 ): Promise<void> {
   const { dev, shell } = device;
   const launch = async () => {
     await shell('am', 'force-stop', APP_PACKAGE);
     await dev('logcat', '-c');
     if (opts.resetFrames === true) await shell('dumpsys', 'gfxinfo', APP_PACKAGE, 'reset');
+    await opts.afterStop?.();
     await shell('am', 'start', '-a', 'android.intent.action.VIEW', '-d', `'${url}'`, APP_PACKAGE);
   };
   const foregroundBlocker = async (): Promise<string | undefined> => {

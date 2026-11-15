@@ -2,18 +2,22 @@ import Constants from 'expo-constants';
 import { useEffect, useState } from 'react';
 import { Linking, Platform, Settings } from 'react-native';
 import { type ImportParams, parseImportUrl } from './import/route';
+import { type PlayerGateParams, parsePlayerGateUrl } from './player/player-routes';
 import { type GateParams, parseGateUrl } from './routes';
 
 /** A gate screen and its parameters. */
 export type GateRoute =
   | { name: 'list'; params: GateParams }
-  | { name: 'import'; params: ImportParams };
+  | { name: 'import'; params: ImportParams }
+  | { name: 'player'; params: PlayerGateParams };
 
 function parseRoute(url: string | null): GateRoute | undefined {
   const list = parseGateUrl(url);
   if (list !== undefined) return { name: 'list', params: list };
   const imported = parseImportUrl(url);
-  return imported === undefined ? undefined : { name: 'import', params: imported };
+  if (imported !== undefined) return { name: 'import', params: imported };
+  const player = parsePlayerGateUrl(url);
+  return player === undefined ? undefined : { name: 'player', params: player };
 }
 
 /** `NSUserDefaults` key of the launch argument `-gateUrl <url>` (`xcrun simctl launch <udid> <bundle id> -gateUrl …`). */

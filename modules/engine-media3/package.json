@@ -1,0 +1,29 @@
+{
+  "name": "@elv/engine-media3",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run --reporter=dot --passWithNoTests",
+    "typecheck": "tsc --noEmit -p . --pretty false"
+  },
+  "dependencies": {
+    "@elv/playback": "workspace:*",
+    "expo-modules-core": "58.1.0"
+  },
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  },
+  "devDependencies": {
+    "@elv/config": "workspace:*",
+    "@types/react": "catalog:",
+    "react": "catalog:",
+    "react-native": "catalog:",
+    "vitest": "5.1.0"
+  }
+}

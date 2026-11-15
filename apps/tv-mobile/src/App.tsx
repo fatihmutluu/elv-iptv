@@ -4,21 +4,24 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, View } from 'react-native';
 import { GateListScreen } from './gate/GateListScreen';
 import { ImportGateScreen } from './gate/import/ImportGateScreen';
+import { PlayerGateScreen } from './gate/player/PlayerGateScreen';
 import { useGateRoute } from './gate/useGateParams';
 
 /**
  * Root component that `index.ts` registers, with the raw Android key source provided to both branches; a placeholder screen until Round 1. Development builds (`extra.gate`)
- * open the list or import gate instead when a `elviptv://gate/list` or `elviptv://gate/import` link started the app.
+ * open the list, import or player gate instead when a `elviptv://gate/list`, `/import` or `/player` link started the app.
  */
 export function App() {
   const gate = useGateRoute();
   if (gate !== undefined) {
     return (
       <RemoteKeysProvider android={remoteKeys}>
-        {gate.name === 'list' ? (
-          <GateListScreen key={JSON.stringify(gate)} params={gate.params} />
-        ) : (
+        {gate.name === 'list' && <GateListScreen key={JSON.stringify(gate)} params={gate.params} />}
+        {gate.name === 'import' && (
           <ImportGateScreen key={JSON.stringify(gate)} params={gate.params} />
+        )}
+        {gate.name === 'player' && (
+          <PlayerGateScreen key={JSON.stringify(gate)} params={gate.params} />
         )}
         <StatusBar style="light" />
       </RemoteKeysProvider>
