@@ -305,13 +305,13 @@ struct LiveTsReaderTests {
     #expect(await reader.open() == .media(formatHint: "mpegts"))
     _ = readChunk(reader, maxBytes: 2_048)
 
-    let parkedRead = Task.detached { () -> Int32 in
+    let parkedRead = await BlockingCall.start(label: "elv.test.reader.parked") { () -> Int32 in
       readChunk(reader, maxBytes: 512).0
     }
     try await Task.sleep(nanoseconds: 30_000_000)
 
     reader.cancel()
-    #expect(await parkedRead.value == -1)
+    #expect(await parkedRead.value() == -1)
     #expect(transport.isCancelled)
 
     reader.close()

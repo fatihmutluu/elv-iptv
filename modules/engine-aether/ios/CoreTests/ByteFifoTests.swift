@@ -24,7 +24,7 @@ struct ByteFifoTests {
     let fifo = ByteFifo()
     let expected = Data("hello-live-ts".utf8)
 
-    let readerTask = Task.detached { () -> Data? in
+    let readerCall = await BlockingCall.start(label: "elv.test.fifo.read") { () -> Data? in
       let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: 1_024)
       defer { buf.deallocate() }
       let n = fifo.read(into: buf, size: 1_024)
@@ -35,7 +35,7 @@ struct ByteFifoTests {
     try await Task.sleep(nanoseconds: 30_000_000)
     fifo.write(expected)
 
-    let got = await readerTask.value
+    let got = await readerCall.value()
     #expect(got == expected)
   }
 
@@ -43,7 +43,7 @@ struct ByteFifoTests {
   func cancelWakesParkedReadWithMinusOne() async throws {
     let fifo = ByteFifo()
 
-    let readerTask = Task.detached { () -> Int32 in
+    let readerCall = await BlockingCall.start(label: "elv.test.fifo.cancel") { () -> Int32 in
       let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: 64)
       defer { buf.deallocate() }
       return fifo.read(into: buf, size: 64)
@@ -52,7 +52,7 @@ struct ByteFifoTests {
     try await Task.sleep(nanoseconds: 30_000_000)
     fifo.cancel()
 
-    let n = await readerTask.value
+    let n = await readerCall.value()
     #expect(n == -1)
 
     let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: 64)

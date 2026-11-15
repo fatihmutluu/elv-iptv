@@ -133,7 +133,10 @@ struct URLSessionTransportTests {
       Thread.sleep(forTimeInterval: 0.02)
     }
 
-    transport.suspend()
+    let suspendCall = await BlockingCall.start(label: "elv.test.transport.suspend") {
+      transport.suspend()
+    }
+    await suspendCall.value()
     for _ in 0..<50 {
       if resumeFinished.withLock({ didFinishResume }) { break }
       try await Task.sleep(nanoseconds: 2_000_000)
