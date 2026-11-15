@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 import { useEffect, useState } from 'react';
 import { Linking, Platform, Settings } from 'react-native';
+import { type ContractGateParams, parseContractGateUrl } from './contract/contract-routes';
 import { type ImportParams, parseImportUrl } from './import/route';
 import { type PlayerGateParams, parsePlayerGateUrl } from './player/player-routes';
 import { type GateParams, parseGateUrl } from './routes';
@@ -9,7 +10,8 @@ import { type GateParams, parseGateUrl } from './routes';
 export type GateRoute =
   | { name: 'list'; params: GateParams }
   | { name: 'import'; params: ImportParams }
-  | { name: 'player'; params: PlayerGateParams };
+  | { name: 'player'; params: PlayerGateParams }
+  | { name: 'contract'; params: ContractGateParams };
 
 function parseRoute(url: string | null): GateRoute | undefined {
   const list = parseGateUrl(url);
@@ -17,7 +19,9 @@ function parseRoute(url: string | null): GateRoute | undefined {
   const imported = parseImportUrl(url);
   if (imported !== undefined) return { name: 'import', params: imported };
   const player = parsePlayerGateUrl(url);
-  return player === undefined ? undefined : { name: 'player', params: player };
+  if (player !== undefined) return { name: 'player', params: player };
+  const contract = parseContractGateUrl(url);
+  return contract === undefined ? undefined : { name: 'contract', params: contract };
 }
 
 /** `NSUserDefaults` key of the launch argument `-gateUrl <url>` (`xcrun simctl launch <udid> <bundle id> -gateUrl …`). */

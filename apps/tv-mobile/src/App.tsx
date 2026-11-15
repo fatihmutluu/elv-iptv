@@ -2,6 +2,7 @@ import { remoteKeys } from '@elv/remote-keys';
 import { RemoteKeysProvider } from '@elv/ui-kit';
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, View } from 'react-native';
+import { ContractGateScreen } from './gate/contract/ContractGateScreen';
 import { GateListScreen } from './gate/GateListScreen';
 import { ImportGateScreen } from './gate/import/ImportGateScreen';
 import { PlayerGateScreen } from './gate/player/PlayerGateScreen';
@@ -9,7 +10,7 @@ import { useGateRoute } from './gate/useGateParams';
 
 /**
  * Root component that `index.ts` registers, with the raw Android key source provided to both branches; a placeholder screen until Round 1. Development builds (`extra.gate`)
- * open the list, import or player gate instead when a `elviptv://gate/list`, `/import` or `/player` link started the app.
+ * open the list, import, player or contract gate instead when a `elviptv://gate/*` link started the app.
  */
 export function App() {
   const gate = useGateRoute();
@@ -22,6 +23,9 @@ export function App() {
         )}
         {gate.name === 'player' && (
           <PlayerGateScreen key={JSON.stringify(gate)} params={gate.params} />
+        )}
+        {gate.name === 'contract' && (
+          <ContractGateScreen key={JSON.stringify(gate)} params={gate.params} />
         )}
         <StatusBar style="light" />
       </RemoteKeysProvider>
