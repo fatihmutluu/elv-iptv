@@ -100,7 +100,8 @@ export interface GateRun {
 const isSettled = (state: PlaybackState): boolean =>
   state.firstFrameAt !== undefined ||
   state.status.kind === 'failed' ||
-  state.status.kind === 'limited';
+  state.status.kind === 'limited' ||
+  state.status.kind === 'ended';
 
 /**
  * Builds a gate run over `engine`: zaps the channels as the driver does, waits for the last tune to settle, then runs

@@ -15,7 +15,9 @@ import {
 import { APP_ORIGIN, APP_SCHEME } from './app-protocol.ts';
 import {
   createVideoSampler,
+  GATE_PLAYING_LINE,
   mergeGateLine,
+  onFirstPlaying,
   parseGateFlag,
   sampleRect,
   type VideoSampler,
@@ -125,6 +127,10 @@ async function startPlayer(): Promise<void> {
         onUi,
       });
       if (gateQuery !== null) {
+        onFirstPlaying(
+          (listener) => engine.subscribe(listener),
+          () => process.stdout.write(`${GATE_PLAYING_LINE}\n`),
+        );
         samplers.set(
           engine,
           createVideoSampler({

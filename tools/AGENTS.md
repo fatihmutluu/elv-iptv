@@ -11,6 +11,7 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
 - `pnpm gate list [flags]` runs the TV list gate on a running Android TV emulator; flags, baseline and budget rules: `src/gates/AGENTS.md`.
 - `pnpm gate import [flags]` runs the on-device catalog import gate on the Android TV emulator; flags, baseline and budget rules: `src/gates/AGENTS.md`.
 - `pnpm gate player [flags]` runs the Android TV player zap and fault gate (needs FFmpeg); flags, baseline and budget rules: `src/gates/AGENTS.md`.
+- `pnpm gate desktop [flags]` runs the desktop mpv player zap, VOD, fault and orphan gate (Windows / macOS); flags, baseline and budget rules: `src/gates/AGENTS.md`.
 - `pnpm mpv fetch [--force]` / `pnpm mpv verify [--dir <folder>]` install and rescan the pinned mpv runtime for desktop; builds the Windows `elv-mpv.exe` launcher; macOS gets our CI build (`mpv-runtime/`, workflow `mpv-runtime.yml`) through `gh`; rules: `src/mpv/AGENTS.md`.
 - `pnpm scaffold <pure|rn|module> <name>` creates a workspace package (skill `add-package`).
 - `pnpm --filter @elv/tools test` runs Vitest (`sources-*`, `import-*` use the sim; `SIM_HUGE=1` adds 500k).

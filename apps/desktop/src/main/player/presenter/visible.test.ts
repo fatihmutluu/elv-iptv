@@ -73,4 +73,13 @@ describe('sampleArea', () => {
     ];
     expect(await sampleArea({ x: 500, y: 100, width: 64, height: 36 })).toEqual({ distinct: 0 });
   });
+
+  it('falls back to a single screen source with an empty display_id', async () => {
+    electron.sources = [
+      { display_id: '', thumbnail: thumbnail({ width: 1920, height: 1080 }, 18) },
+    ];
+    expect(await sampleArea({ x: -1180, y: 100, width: 640, height: 360 })).toEqual({
+      distinct: 18,
+    });
+  });
 });

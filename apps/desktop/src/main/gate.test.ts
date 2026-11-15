@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   centerRect,
   createVideoSampler,
+  GATE_PLAYING_LINE,
   GATE_VIDEO_BUCKETS,
   mergeGateLine,
+  onFirstPlaying,
   parseGateFlag,
   sampleRect,
 } from './gate.ts';
@@ -184,5 +186,24 @@ describe('sampleRect', () => {
     expect(sampleRect(content, undefined, 1)).toEqual(middle);
     expect(sampleRect(content, { ...area, width: 0 }, 1)).toEqual(middle);
     expect(sampleRect(content, { ...area, visible: false }, 1)).toEqual(middle);
+  });
+});
+
+describe('onFirstPlaying', () => {
+  it('calls emit once on the first playing state and unsubscribes', () => {
+    expect(GATE_PLAYING_LINE).toBe('ELV_GATE_PLAYING');
+    const listeners = new Set<(e: EngineEvent) => void>();
+    const emit = vi.fn();
+    onFirstPlaying((l) => {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    }, emit);
+    for (const l of [...listeners]) l({ attempt: 1, type: 'state', state: 'opening' });
+    expect(emit).not.toHaveBeenCalled();
+    for (const l of [...listeners]) l({ attempt: 1, type: 'state', state: 'playing' });
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(listeners.size).toBe(0);
+    for (const l of [...listeners]) l({ attempt: 2, type: 'state', state: 'playing' });
+    expect(emit).toHaveBeenCalledTimes(1);
   });
 });

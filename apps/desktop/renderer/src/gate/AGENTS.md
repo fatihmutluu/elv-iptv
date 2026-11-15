@@ -5,8 +5,8 @@ Read `apps/desktop/AGENTS.md` and `src/main/player/AGENTS.md` first.
 
 ## Launch
 - `pnpm --filter @elv/desktop run prepare:app`, then `electron . "--elv-gate=elv-gate=player&base=http://127.0.0.1:7880&account=demo&channels=1001,1004&zaps=30&rate=0.5&vod=200001&fault="`
-  (`fault`: `drop5`, `404`, `509`, `notice`, `stall` = `stall30s@2s`, `slowstart` = `slow-start=3`; `zaps` 1..200, `rate` 0.1..5 per s, 20 channels at most, `base` a
-  loopback or private `http://` address). `parseGateFlag` (`src/main/gate.ts`) ignores the flag in packaged builds.
+  (`fault`: `drop5`, `404`, `509`, `notice`, `stall` = `stall30s@2s`, `silent` = `stall30s@0s`, `slowstart` = `slow-start=3`; `zaps` 1..200, `rate` 0.05..5 per s, 20 channels at most, `base` a
+  loopback, RFC 1918 or RFC 6598 Tailscale `http://` address). `parseGateFlag` (`src/main/gate.ts`) ignores the flag in packaged builds. Main also prints `ELV_GATE_PLAYING` once on the first `playing` state for the orphan check.
 - A gate launch uses `<temp>/elv-gate` as user-data folder (wiped at start): the single-instance lock lives in the
   user-data folder, so a gate or e2e launch next to an open dev instance would otherwise quit at once. Two gates at the
   same time still collide, on purpose. Main quits after it printed the line.

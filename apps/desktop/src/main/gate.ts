@@ -6,6 +6,9 @@ const FLAG = '--elv-gate=';
 const MAX_QUERY_CHARS = 2048;
 const LINE_PREFIX = 'ELV_GATE_PLAYER ';
 
+/** Line printed once when the gate engine first enters `playing`, so the orphan check knows when to kill main. */
+export const GATE_PLAYING_LINE = 'ELV_GATE_PLAYING';
+
 /** Distinct 5-bit colour buckets in the sampled area from which it counts as video (idle mpv and black stay below). */
 export const GATE_VIDEO_BUCKETS = 16;
 
@@ -125,4 +128,18 @@ export function createVideoSampler(deps: VideoSamplerDeps): VideoSampler {
   return {
     result: () => pending ?? Promise.resolve({ videoVisible: false, distinct: 0 }),
   };
+}
+
+/** Calls `emit` once on the engine's first `playing` state and unsubscribes. */
+export function onFirstPlaying(
+  subscribe: (listener: (event: EngineEvent) => void) => () => void,
+  emit: () => void,
+): void {
+  let done = false;
+  const off = subscribe((event) => {
+    if (done || event.type !== 'state' || event.state !== 'playing') return;
+    done = true;
+    off();
+    emit();
+  });
 }

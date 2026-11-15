@@ -12,7 +12,9 @@ export async function captureArea(rect: Rect): Promise<NativeImage | null> {
     height: Math.round(display.bounds.height * display.scaleFactor),
   };
   const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize });
-  const source = sources.find((s) => s.display_id === String(display.id));
+  const source =
+    sources.find((s) => s.display_id === String(display.id)) ??
+    (sources.length === 1 && sources[0]?.display_id === '' ? sources[0] : undefined);
   if (!source || source.thumbnail.isEmpty()) return null;
   const crop = cropInThumbnail(rect, display.bounds, source.thumbnail.getSize());
   return crop ? source.thumbnail.crop(crop) : null;

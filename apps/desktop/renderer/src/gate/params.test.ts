@@ -38,8 +38,8 @@ describe('parseGateParams', () => {
     });
   });
 
-  it('clamps zaps to 1..200 and rate to 0.1..5', () => {
-    expect(parseGateParams('elv-gate=player&zaps=0&rate=0')).toMatchObject({ zaps: 1, rate: 0.1 });
+  it('clamps zaps to 1..200 and rate to 0.05..5', () => {
+    expect(parseGateParams('elv-gate=player&zaps=0&rate=0')).toMatchObject({ zaps: 1, rate: 0.05 });
     expect(parseGateParams('elv-gate=player&zaps=9999&rate=50')).toMatchObject({
       zaps: 200,
       rate: 5,
@@ -67,6 +67,9 @@ describe('parseGateParams', () => {
     'http://192.168.1.20:7878',
     'http://172.16.0.1:7878',
     'http://172.31.255.1:7878',
+    'http://100.85.192.47:7879',
+    'http://100.64.0.1:7878',
+    'http://100.127.255.254:7878',
     'http://127.0.0.1',
   ])('accepts the base %s', (base) => {
     expect(parseGateParams(`elv-gate=player&base=${base}`)?.base).toBe(base);
@@ -77,6 +80,8 @@ describe('parseGateParams', () => {
     'http://example.com:7878',
     'http://8.8.8.8:80',
     'http://172.32.0.1:7878',
+    'http://100.63.255.255:7878',
+    'http://100.128.0.1:7878',
     'http://127.0.0.1:99999',
     'http://127.0.0.1:7878/live',
     'http://user:pw@127.0.0.1:7878',
@@ -94,7 +99,7 @@ describe('parseGateParams', () => {
   });
 
   it('accepts only the known faults', () => {
-    for (const fault of ['drop5', '404', '509', 'notice', 'stall', 'slowstart']) {
+    for (const fault of ['drop5', '404', '509', 'notice', 'stall', 'silent', 'slowstart']) {
       expect(parseGateParams(`elv-gate=player&fault=${fault}`)?.fault).toBe(fault);
     }
     expect(parseGateParams('elv-gate=player&fault=boom')?.fault).toBe('');
@@ -128,6 +133,7 @@ describe('stream urls', () => {
     expect(faultSpec('509')).toBe('status=509');
     expect(faultSpec('notice')).toBe('text-notice');
     expect(faultSpec('stall')).toBe('stall30s@2s');
+    expect(faultSpec('silent')).toBe('stall30s@0s');
     expect(faultSpec('slowstart')).toBe('slow-start=3');
   });
 });

@@ -1,12 +1,12 @@
 /** The fault a player gate run injects into its first channel. */
-export type GateFault = '' | 'drop5' | '404' | '509' | 'notice' | 'stall' | 'slowstart';
+export type GateFault = '' | 'drop5' | '404' | '509' | 'notice' | 'stall' | 'silent' | 'slowstart';
 
 /**
  * Parameters of the gate query
  * `elv-gate=player&base=http://127.0.0.1:7878&account=demo&channels=1001,1002&zaps=30&rate=0.5&vod=900&fault=`.
  */
 export interface GateParams {
-  /** `http://host[:port]` of the stream simulator; a loopback or private address only. */
+  /** `http://host[:port]` of the stream simulator; a loopback, RFC 1918 or RFC 6598 (Tailscale) address only. */
   base: string;
   /** Simulator account; the password equals the username. */
   account: string;
@@ -14,7 +14,7 @@ export interface GateParams {
   channels: readonly string[];
   /** Automatic zaps after the first tune, 1 to 200. */
   zaps: number;
-  /** Automatic zaps per second, 0.1 to 5. */
+  /** Automatic zaps per second, 0.05 to 5. */
   rate: number;
   /** Simulator movie id for the VOD part, or null to skip it. */
   vod: string | null;
@@ -29,22 +29,16 @@ const ACCOUNT = /^[A-Za-z0-9_-]{1,32}$/;
 const ID = /^\d{1,9}$/;
 const BASE = /^http:\/\/([a-z0-9.]+)(?::(\d{1,5}))?$/;
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
-const FAULTS: ReadonlySet<string> = new Set([
-  'drop5',
-  '404',
-  '509',
-  'notice',
-  'stall',
-  'slowstart',
-]);
 const FAULT_SPECS: Readonly<Record<Exclude<GateFault, ''>, string>> = {
   drop5: 'drop@5s',
   '404': 'status=404',
   '509': 'status=509',
   notice: 'text-notice',
   stall: 'stall30s@2s',
+  silent: 'stall30s@0s',
   slowstart: 'slow-start=3',
 };
+const FAULTS: ReadonlySet<string> = new Set(Object.keys(FAULT_SPECS));
 
 function isPrivateHost(host: string): boolean {
   if (host === 'localhost') return true;
@@ -52,7 +46,13 @@ function isPrivateHost(host: string): boolean {
   if (match === null) return false;
   const [a, b, c, d] = match.slice(1).map(Number) as [number, number, number, number];
   if ([a, b, c, d].some((part) => part > 255)) return false;
-  return a === 127 || a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
+  return (
+    a === 127 ||
+    a === 10 ||
+    (a === 192 && b === 168) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 100 && b >= 64 && b <= 127)
+  );
 }
 
 function readBase(value: string | null): string {
@@ -98,7 +98,7 @@ export function parseGateParams(query: string): GateParams | undefined {
     account: account !== null && ACCOUNT.test(account) ? account : 'demo',
     channels: readChannels(q.get('channels')),
     zaps: readNumber(q.get('zaps'), 30, 1, 200, true),
-    rate: readNumber(q.get('rate'), 0.5, 0.1, 5, false),
+    rate: readNumber(q.get('rate'), 0.5, 0.05, 5, false),
     vod: vod !== null && ID.test(vod) ? vod : null,
     fault: FAULTS.has(fault) ? (fault as GateFault) : '',
   };
