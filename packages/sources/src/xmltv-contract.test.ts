@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { scanXmltv } from './xmltv';
-import { collect, guide, whole } from './xmltv-test-helpers';
+import { guide, whole } from './xmltv-test-helpers';
 
 describe('scanXmltv batches count channels', () => {
   it('yields a batch whenever channels plus programmes reach batchSize', async () => {
@@ -8,10 +8,13 @@ describe('scanXmltv batches count channels', () => {
       { length: 3000 },
       (_, i) => `<channel id="c${i}"><display-name>C${i}</display-name></channel>`,
     ).join('');
-    const out = await collect(whole(guide(channels)), { batchSize: 10 });
-    expect(out.channels).toHaveLength(3000);
-    expect(out.batches.length).toBeGreaterThan(1);
-    expect(out.result).toEqual({ ok: true, value: undefined });
+    const sizes: number[] = [];
+    for await (const batch of scanXmltv(whole(guide(channels)), { batchSize: 10 })) {
+      sizes.push(batch.channels.length + batch.programmes.length);
+    }
+    expect(Math.max(...sizes)).toBe(10);
+    expect(sizes.reduce((a, b) => a + b, 0)).toBe(3000);
+    expect(sizes.filter((n) => n === 10)).toHaveLength(300);
   });
 });
 

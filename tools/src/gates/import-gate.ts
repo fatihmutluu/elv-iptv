@@ -2,7 +2,7 @@ import { buildApk, type Exec, installApk, openDevice, POLL_MS, startGate } from 
 import type { BudgetMode, CompareOutcome } from './compare.ts';
 
 /** Where the app reaches the host's simulator from the Android emulator. */
-const EMULATOR_HOST = '10.0.2.2:7878';
+export const EMULATOR_HOST = '10.0.2.2:7878';
 const STALL_BUDGET_MS = 100;
 const DURATION_TOLERANCE = 1.1;
 const DURATION_SLACK_MS = 2000;
@@ -20,7 +20,7 @@ export interface ImportResult {
 
 /** The simulator the gate talks to: started for the run, or an already running one that is left alone. */
 export interface SimControl {
-  ensure(): Promise<{ reused: boolean; stop(): Promise<void> }>;
+  ensure(): Promise<{ reused: boolean; reset?(): Promise<void>; stop(): Promise<void> }>;
 }
 
 /** Options of {@link runImportGate}. */
@@ -138,7 +138,8 @@ export function compareImport(
   return { ok: failures.length === 0, failures, warnings };
 }
 
-const median = (values: number[]): number => {
+/** Median of a non-empty list, rounded to 0.01. */
+export const median = (values: number[]): number => {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = sorted.length >> 1;
   const value =
@@ -173,6 +174,7 @@ export async function runImportGate(opts: ImportGateOptions): Promise<ImportResu
   const sim = await opts.sim.ensure();
   try {
     if (sim.reused) opts.onNote?.('simulator already running on port 7878: reusing it');
+    await sim.reset?.();
     const device = await openDevice(exec, adb, opts.avd);
     await installApk(exec, adb, device.serial, root);
 

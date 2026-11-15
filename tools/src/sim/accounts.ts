@@ -53,6 +53,15 @@ export const ACCOUNTS: readonly Account[] = [
     limitPolicy: 'status-509',
   },
   {
+    username: 'corpus',
+    password: 'corpus',
+    profile: 'corpus',
+    maxConnections: 1,
+    status: 'Active',
+    quirks: false,
+    limitPolicy: 'status-509',
+  },
+  {
     username: 'expired',
     password: 'expired',
     profile: 'small',

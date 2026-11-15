@@ -1,4 +1,4 @@
-import { type HttpRequestOptions, ok } from '@elv/domain';
+import { type HttpRequestOptions, ok, type SqlValue } from '@elv/domain';
 import { describe, expect, it } from 'vitest';
 import { importGuide } from './import-guide';
 import {
@@ -49,6 +49,27 @@ describe('guide import', () => {
     ]);
     expect(r.value.counts).toMatchObject({ guideChannels: 4, mapped: 2, programmes: 5 });
     expect(await lastGuideRun(e)).toBe('ok');
+  });
+
+  it('runs PRAGMA wal_checkpoint(TRUNCATE) through db.exec (writer) rather than db.all (reader)', async () => {
+    const e = await ready();
+    const execSql: string[] = [];
+    const allSql: string[] = [];
+    const recordingDb = {
+      ...e.db,
+      exec: (sql: string) => {
+        execSql.push(sql);
+        return e.db.exec(sql);
+      },
+      all: <T>(sql: string, params?: readonly SqlValue[]) => {
+        allSql.push(sql);
+        return e.db.all<T>(sql, params);
+      },
+    };
+    const r = await importGuide(e.sourceId, { ...e.deps, db: recordingDb }, { now: NOW });
+    expect(r.ok).toBe(true);
+    expect(execSql.some((s) => s.includes('wal_checkpoint(TRUNCATE)'))).toBe(true);
+    expect(allSql.some((s) => s.includes('wal_checkpoint'))).toBe(false);
   });
 
   it('honours the configured window', async () => {
@@ -384,5 +405,48 @@ describe('xtream guide override', () => {
     };
     expect((await importGuide('s2', deps, { now: NOW })).ok).toBe(true);
     expect(urls).toEqual([override]);
+  });
+
+  it('discards non-2xx @@asyncIterator bodies in catalog and guide imports when Symbol.asyncIterator is undefined', async () => {
+    const e = await ready();
+    const OriginalSymbol = globalThis.Symbol;
+    const FakeSymbol = Object.assign(
+      ((description?: string | number) => OriginalSymbol(description)) as typeof Symbol,
+      {
+        for: OriginalSymbol.for.bind(OriginalSymbol),
+        keyFor: OriginalSymbol.keyFor.bind(OriginalSymbol),
+        asyncIterator: undefined as unknown as typeof Symbol.asyncIterator,
+      },
+    );
+    let discarded = 0;
+    const makeBabelBody = () => {
+      const gen = {
+        '@@asyncIterator'() {
+          return gen;
+        },
+        next: async () => ({ done: true as const, value: undefined }),
+        return: async () => {
+          discarded++;
+          return { done: true as const, value: undefined };
+        },
+      };
+      return gen as unknown as AsyncIterable<Uint8Array>;
+    };
+    const failingDeps = {
+      ...e.deps,
+      http: {
+        async get() {
+          return ok({ status: 502, headers: {}, body: makeBabelBody() });
+        },
+      },
+    };
+    (globalThis as { Symbol: typeof Symbol }).Symbol = FakeSymbol;
+    try {
+      expectErr(await importCatalog(e.sourceId, failingDeps), 'network', 'http-502');
+      expectErr(await importGuide(e.sourceId, failingDeps, { now: NOW }), 'network', 'http-502');
+      expect(discarded).toBe(2);
+    } finally {
+      (globalThis as { Symbol: typeof Symbol }).Symbol = OriginalSymbol;
+    }
   });
 });

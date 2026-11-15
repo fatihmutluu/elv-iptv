@@ -25,6 +25,8 @@ export interface FakeEngineOptions {
   now: () => number;
   schedule: (fn: () => void, ms: number) => unknown;
   cancel: (handle: unknown) => void;
+  /** Emits a `clock` anchor (rate 1 / 0) after `play` / `pause`, as real engines do; off by default. */
+  anchorOnPlayPause?: boolean;
 }
 
 /** A command the fake received, recorded for assertions. */
@@ -120,7 +122,7 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
   };
 
   const anchorNow = (rate: number): void => {
-    if (url === undefined) return;
+    if (url === undefined || !opts.anchorOnPlayPause) return;
     handles.push(
       opts.schedule(
         () =>
@@ -165,7 +167,7 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
     recreate(attempt) {
       commands.push({ name: 'recreate', attempt });
       adopt(attempt);
-      runScript();
+      cancelScript();
     },
     play(attempt) {
       commands.push({ name: 'play', attempt });

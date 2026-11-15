@@ -45,25 +45,61 @@ describe('RuleBook', () => {
     expect(book.final().map((r) => r.host)).toEqual(['a.example', 'b.example']);
   });
 
-  it('keeps stored rules of a host judged on a single URL', () => {
-    const book = new RuleBook([{ host: 'one.example', position: 0, name: 'v0' }]);
+  it('keeps stored rules of a host judged on a single URL and detects new single-URL rules', () => {
+    const book = new RuleBook([
+      { host: 'one.example', position: 0, name: 'v0' },
+      { host: 'one.example', position: 1, name: 'v2' },
+    ]);
     book.start([]);
-    book.hold(`https://one.example/${ACCT}/s1`);
+    book.hold(`https://one.example/${ACCT}/ab/s1`);
     book.settle();
-    expect(book.final()).toEqual([{ host: 'one.example', position: 0, name: 'v0' }]);
+    expect(book.final()).toEqual([
+      { host: 'one.example', position: 0, name: 'v0' },
+      { host: 'one.example', position: 1, name: 'v2' },
+    ]);
+
+    const single = new RuleBook();
+    single.start([]);
+    single.hold(`https://solo.example/${ACCT}/s1`);
+    single.settle();
+    expect(single.final()).toEqual([{ host: 'solo.example', position: 0, name: 'v0' }]);
   });
 
-  it('drops a stored rule that the new judgement no longer confirms', () => {
+  it('confirms mixed accounts on one host and drops stored rules on high-cardinality slugs', () => {
     const book = new RuleBook();
     book.start([]);
     for (const url of urls('h.example', ACCT, 10)) book.hold(url);
     book.settle();
     expect(book.rules).toHaveLength(1);
+
+    const mixed = new RuleBook(book.rules);
+    mixed.start([]);
+    for (const url of urls('h.example', OTHER, 5)) mixed.hold(url);
+    for (const url of urls('h.example', ACCT, 5)) mixed.hold(url);
+    mixed.settle();
+    expect(mixed.rules).toEqual([{ host: 'h.example', position: 0, name: 'v0' }]);
+
     const again = new RuleBook(book.rules);
     again.start([]);
-    for (const url of urls('h.example', OTHER, 5)) again.hold(url);
-    for (const url of urls('h.example', ACCT, 5)) again.hold(url);
+    for (let i = 0; i < 10; i += 1) {
+      again.hold(`https://h.example/stream-slug-${i.toString().padStart(4, '0')}/index.m3u8`);
+    }
     again.settle();
     expect(again.rules).toEqual([]);
+  });
+
+  it('judges auxiliary logo/referer roles without diluting stream token detection on shared hosts', () => {
+    const book = new RuleBook();
+    book.start([]);
+    for (let i = 0; i < 20; i += 1) {
+      book.hold(`https://shared.example/${ACCT}/s${i}.ts`, 'stream');
+      book.hold(`https://shared.example/logos/c${i}.png`, 'logo');
+      book.hold(`https://logos.example/${OTHER}/c${i}.png`, 'logo');
+    }
+    book.settle();
+    expect(book.final()).toEqual([
+      { host: 'shared.example', position: 0, name: 'v0' },
+      { host: 'logos.example', position: 0, name: 'v1' },
+    ]);
   });
 });

@@ -127,15 +127,15 @@ describe('createGateRun', () => {
     expect(h.engine.commands.filter((c) => c.name === 'load')).toHaveLength(5);
   });
 
-  it('ends 15 s after the last zap when that tune never settles', async () => {
+  it('ends when the last tune that never plays fails after the silent ladder, within 15 s', async () => {
     const h = harness('channels=1,2&zaps=1&rate=1', (p) => ({
       [streamUrl(p, 0)]: PLAY,
       [streamUrl(p, 1)]: [{ afterMs: 0, emit: 'state', state: 'opening' }],
     }));
-    await advance(14_000);
+    await advance(4000);
     expect(h.result()).toBeUndefined();
-    await advance(2000);
-    expect(h.result()?.zaps).toBe(1);
+    await advance(11_000);
+    expect(h.result()).toMatchObject({ zaps: 1, failures: 1 });
   });
 
   it('counts engine-wedged errors the engine reported', async () => {

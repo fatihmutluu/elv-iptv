@@ -39,7 +39,7 @@ describe('openCatalog', () => {
     expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 1 }]);
     expect(await names(db, 'table')).toEqual([...TABLES].sort());
     expect(await names(db, 'index')).toEqual(
-      expect.arrayContaining(['idx_placements_browse', 'idx_live_num']),
+      expect.arrayContaining(['idx_placements_browse', 'idx_live_num', 'idx_import_runs_source']),
     );
   });
 
@@ -57,8 +57,10 @@ describe('openCatalog', () => {
   it('applies pragmas, with WAL on file databases', async () => {
     const t = tempFileDb();
     try {
+      await t.db.exec('PRAGMA busy_timeout = 0');
       await openCatalog(t.db);
       expect(await t.db.all('PRAGMA journal_mode')).toEqual([{ journal_mode: 'wal' }]);
+      expect(await t.db.all('PRAGMA busy_timeout')).toEqual([{ timeout: 5000 }]);
       expect(await t.db.all('PRAGMA foreign_keys')).toEqual([{ foreign_keys: 1 }]);
       expect(await t.db.all('PRAGMA synchronous')).toEqual([{ synchronous: 1 }]);
       expect(await t.db.all('PRAGMA temp_store')).toEqual([{ temp_store: 2 }]);
@@ -137,5 +139,11 @@ describe('openCatalog', () => {
     );
     expect(episodes).toContain('idx_episodes_series');
     expect(episodes).not.toMatch(/TEMP B-TREE/);
+    const runs = await plan(
+      db,
+      "SELECT 1 FROM import_runs WHERE source_id = ? AND kind = 'catalog' AND status = 'ok'",
+      ['s'],
+    );
+    expect(runs).toContain('idx_import_runs_source');
   });
 });

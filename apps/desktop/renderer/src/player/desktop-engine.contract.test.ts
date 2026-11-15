@@ -29,6 +29,7 @@ function memoryBridge() {
     now: () => Date.now() + MAIN_SHIFT_MS,
     schedule: (fn, ms) => setTimeout(fn, ms),
     cancel: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
+    anchorOnPlayPause: true,
   });
   const eventListeners = new Set<(m: PlayerEventMessage) => void>();
   const uiListeners = new Set<(m: PlayerUiMessage) => void>();

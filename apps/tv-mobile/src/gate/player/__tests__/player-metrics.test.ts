@@ -2,10 +2,11 @@ import { elvError } from '@elv/domain';
 import type { PlaybackState } from '@elv/playback';
 import { describe, expect, it } from 'vitest';
 import { createPlayerRecorder, playerLine } from '../player-metrics';
+import type { PlayerFault } from '../player-routes';
 
 type Status = PlaybackState['status'];
 
-function make(fault: '' | 'drop5' | '404' | '509' = '') {
+function make(fault: PlayerFault = '') {
   const recorder = createPlayerRecorder({ fault, faultItem: 'a' });
   let attempt = 0;
   let state: PlaybackState = { status: { kind: 'idle' }, attempt: 0, staleEventsDropped: 0 };
@@ -126,6 +127,34 @@ describe('createPlayerRecorder', () => {
     expect(h.recorder.finish(h.state).faultOutcome).toBe('recovered');
   });
 
+  it('judges a drop run recovered when the engine ends its stall while the service plays (rung 0)', () => {
+    const h = make('drop5');
+    h.tune('a', 0);
+    h.frame(300);
+    h.status({ kind: 'playing' });
+    h.recorder.stall('start');
+    h.recorder.stall('end');
+    h.tune('b', 10_000, 10_000);
+    expect(h.recorder.finish(h.state).faultOutcome).toBe('recovered');
+  });
+
+  it('does not count a stall that a rung ended, nor a stall end without a start', () => {
+    const r = make('drop5');
+    r.tune('a', 0);
+    r.frame(300);
+    r.status({ kind: 'playing' });
+    r.recorder.stall('start');
+    r.status({ kind: 'recovering', rung: 1, nextAtMs: 6000 });
+    r.recorder.stall('end');
+    r.tune('b', 10_000, 10_000);
+    expect(r.recorder.finish(r.state).faultOutcome).toBe('missed');
+    const e = make('drop5');
+    e.tune('a', 0);
+    e.status({ kind: 'playing' });
+    e.recorder.stall('end');
+    expect(e.recorder.finish(e.state).faultOutcome).toBe('missed');
+  });
+
   it('judges a 404 run failed-in-time and a 509 run limited-backoff at the end of the run', () => {
     const f = make('404');
     f.tune('a', 0);
@@ -148,6 +177,25 @@ describe('createPlayerRecorder', () => {
     const m = h.recorder.finish(h.state);
     expect(m.faultOutcome).toBe('missed');
     expect(m.failures).toBe(1);
+  });
+
+  it('judges a run that zapped away before the faulted channel played as left', () => {
+    const s = make('slowstart');
+    s.tune('a', 0);
+    s.tune('b', 800, 800);
+    s.frame(1500);
+    s.status({ kind: 'playing' });
+    const m = s.recorder.finish(s.state);
+    expect(m.faultOutcome).toBe('left');
+    expect(m.zapMs.max).toBe(700);
+    const stayed = make('slowstart');
+    stayed.tune('a', 0);
+    expect(stayed.recorder.finish(stayed.state).faultOutcome).toBe('missed');
+    const played = make('slowstart');
+    played.tune('a', 0);
+    played.status({ kind: 'playing' });
+    played.tune('b', 800, 800);
+    expect(played.recorder.finish(played.state).faultOutcome).toBe('missed');
   });
 
   it('reports missed when the faulted channel was never tuned', () => {

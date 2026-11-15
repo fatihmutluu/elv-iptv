@@ -2,6 +2,7 @@ import type { ElvError } from '@elv/domain';
 import type { PlaybackConfig } from './config';
 import type {
   AttemptToken,
+  ClockAnchor,
   EngineError,
   EngineState,
   LoadOptions,
@@ -26,9 +27,13 @@ export interface ServiceControl {
   getState(): PlaybackState;
   /** The current tune, loaded or held. */
   request(): TuneRequest | undefined;
+  /** Start timeout for the current tune (`liveStartTimeoutMs` for live, `startTimeoutMs` for VOD). */
+  startTimeoutMs(): number;
   /** Takes a new token; later events of older tokens are dropped. */
   nextAttempt(): AttemptToken;
   setStatus(status: PlaybackStatus): void;
+  /** Freezes `state.anchor` at `positionAt(anchor, now)` with `rate: 0`. */
+  freezeAnchor(): void;
   /**
    * Ends a hold and sends `load` with the current token and the resolved stream; a tune still
    * resolving loads when its resolve settles.
@@ -50,12 +55,13 @@ export interface RecoveryHooks {
   onTune?(request: TuneRequest): boolean;
   /** Stop, a user retry or a failure: forget every pending step and budget. */
   onReset?(): void;
-  onSeek?(): void;
+  onSeek?(positionMs: number): void;
   /** The user paused; called before `pause` is sent. */
   onPause?(): void;
   /** The user resumed; called after `play` is sent. */
   onPlay?(): void;
   onState?(state: EngineState): void;
+  onClock?(anchor: ClockAnchor): void;
   onError?(error: EngineError): void;
   onStall?(phase: 'start' | 'end'): void;
   onStartTimeout?(): void;

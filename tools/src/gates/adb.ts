@@ -1,5 +1,7 @@
 import { existsSync } from 'node:fs';
-import { buildPrebuildCommand } from '../run-command.ts';
+import { join } from 'node:path';
+import { STAMP_FILE, writeStamp } from '../prebuild-stamp.ts';
+import { buildPrebuildCommand, buildProcessEnv, nativeProject } from '../run-command.ts';
 
 /** Package of the development variant, the only one that contains the gate screen. */
 export const APP_PACKAGE = 'io.github.fatihmutluu.elviptv.dev';
@@ -40,7 +42,12 @@ interface ExecResult {
 export type Exec = (
   command: string,
   args: string[],
-  opts?: { cwd?: string; env?: Record<string, string>; timeoutMs?: number },
+  opts?: {
+    cwd?: string;
+    env?: Record<string, string>;
+    replaceEnv?: boolean;
+    timeoutMs?: number;
+  },
 ) => Promise<ExecResult>;
 
 /** Finds adb in `ANDROID_HOME`, `ANDROID_SDK_ROOT` or the default SDK folder, else relies on PATH. */
@@ -114,38 +121,37 @@ export async function deviceInfo(
 
 export async function buildApk(exec: Exec, root: string, adb: string): Promise<void> {
   const sdk = /^(.*)[\\/]platform-tools[\\/][^\\/]*$/.exec(adb)?.[1];
-  const prebuild = buildPrebuildCommand({
-    target: 'android-tv',
-    variant: 'development',
-    devEnv: {},
-  });
+  const target = { target: 'android-tv' as const, variant: 'development' as const };
+  const prebuild = buildPrebuildCommand({ ...target, devEnv: {} });
+  const project = nativeProject(target);
+  const gradle = {
+    command: process.platform === 'win32' ? '.\\gradlew.bat' : './gradlew',
+    args: ['assembleRelease', '--console=plain'],
+    cwd: `${prebuild.cwd}/android`,
+    env: {
+      APP_VARIANT: 'development',
+      EXPO_TV: '1',
+      ...(sdk === undefined ? {} : { ANDROID_HOME: sdk }),
+    },
+  };
   const steps = [
-    {
-      command: prebuild.command,
-      args: prebuild.args,
-      cwd: `${root}/${prebuild.cwd}`,
-      env: prebuild.env,
-    },
-    {
-      command: process.platform === 'win32' ? '.\\gradlew.bat' : './gradlew',
-      args: ['assembleRelease', '--console=plain'],
-      cwd: `${root}/${prebuild.cwd}/android`,
-      env: {
-        APP_VARIANT: 'development',
-        EXPO_TV: '1',
-        ...(sdk === undefined ? {} : { ANDROID_HOME: sdk }),
-      },
-    },
+    { ...prebuild, cwd: `${root}/${prebuild.cwd}`, writeStampAfter: true },
+    { ...gradle, cwd: `${root}/${gradle.cwd}`, writeStampAfter: false },
   ];
   for (const step of steps) {
     const done = await exec(step.command, step.args, {
       cwd: step.cwd,
-      env: step.env,
+      env: buildProcessEnv(process.env, step, 'development'),
+      replaceEnv: true,
       timeoutMs: BUILD_TIMEOUT_MS,
     });
     if (!done.ok) {
       const tail = done.output.trim().split(/\r?\n/).slice(-5).join('\n');
       throw new Error(`gate: ${step.command} failed\n${tail}`);
+    }
+    if (step.writeStampAfter && project !== null) {
+      const androidDir = join(root, project.dir);
+      if (existsSync(androidDir)) writeStamp(join(androidDir, STAMP_FILE), project.stamp);
     }
   }
 }
@@ -195,13 +201,14 @@ export async function startGate(
   device: AdbDevice,
   sleep: (ms: number) => Promise<void>,
   url: string,
-  opts: { resetFrames?: boolean } = {},
+  opts: { resetFrames?: boolean; afterStop?: () => Promise<void> } = {},
 ): Promise<void> {
   const { dev, shell } = device;
   const launch = async () => {
     await shell('am', 'force-stop', APP_PACKAGE);
     await dev('logcat', '-c');
     if (opts.resetFrames === true) await shell('dumpsys', 'gfxinfo', APP_PACKAGE, 'reset');
+    await opts.afterStop?.();
     await shell('am', 'start', '-a', 'android.intent.action.VIEW', '-d', `'${url}'`, APP_PACKAGE);
   };
   const foregroundBlocker = async (): Promise<string | undefined> => {

@@ -13,6 +13,7 @@ function fakeHarness(): EngineContractHarness {
     now: () => Date.now(),
     schedule: (fn, ms) => setTimeout(fn, ms),
     cancel: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
+    anchorOnPlayPause: true,
   });
   return {
     engine,

@@ -2,7 +2,10 @@ import type { KnipConfig } from 'knip';
 
 const config: KnipConfig = {
   workspaces: {
-    '.': { entry: ['scripts/*.mjs', '.claude/hooks/*.mjs'], ignoreBinaries: ['gitleaks'] },
+    '.': {
+      entry: ['scripts/*.mjs', '.agents/hooks/*.mjs', '.claude/hooks/*.mjs'],
+      ignoreBinaries: ['gitleaks'],
+    },
     tools: {
       entry: ['bin/*.ts'],
       project: ['bin/**/*.ts', 'src/**/*.ts', 'test/*.ts'],
@@ -12,7 +15,7 @@ const config: KnipConfig = {
       // The catalog barrel is consumed by the menu screens in a later task.
       entry: ['config/*.test.ts', 'src/catalog/index.ts', 'src/storage/index.ts'],
       // The TV plugin is loaded by name from app.config.ts; knip infers optional Expo packages.
-      ignoreDependencies: ['@react-native-tvos/config-tv', 'expo-updates'],
+      ignoreDependencies: ['@elv/sources', '@react-native-tvos/config-tv', 'expo-updates'],
     },
     'apps/desktop': {
       // presenter-probe.ts is the test-only Electron main the presenter spec launches.

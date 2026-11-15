@@ -5,7 +5,7 @@ import { checkAgentsStubs } from './agents-stubs.ts';
 import { exec } from './exec.ts';
 import { checkFileSizes } from './file-size.ts';
 import type { Check } from './runner.ts';
-import { MEDIA_SKIP_MARKER } from './sim/media.ts';
+import { ENCODER_SKIP_MARKER, MEDIA_SKIP_MARKER } from './sim/media.ts';
 
 const CODE_ROOTS = ['apps', 'modules', 'packages', 'tools'];
 
@@ -19,11 +19,18 @@ function trackedAndNewFiles(root: string): string[] {
 }
 
 function hookTests(root: string): string[] {
-  const dir = join(root, '.claude', 'hooks');
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir, { recursive: true, encoding: 'utf8' })
-    .filter((f) => /\.test\.[cm]?js$/.test(f))
-    .map((f) => join(dir, f));
+  const found: string[] = [];
+  for (const rel of [
+    ['.claude', 'hooks'],
+    ['.agents', 'hooks'],
+  ]) {
+    const dir = join(root, ...rel);
+    if (!existsSync(dir)) continue;
+    for (const f of readdirSync(dir, { recursive: true, encoding: 'utf8' })) {
+      if (/\.test\.[cm]?js$/.test(f)) found.push(join(dir, f));
+    }
+  }
+  return found;
 }
 
 /** Builds every project check, bound to the repository `root`. */
@@ -77,10 +84,12 @@ export function buildChecks(root: string): Check[] {
       key: 'vitest',
       run: async () => {
         const r = await pnpm('-r', '--if-present', '--reporter=append-only', 'test');
-        const skipped = r.ok && r.output.includes(MEDIA_SKIP_MARKER);
-        return skipped
-          ? { ...r, notes: [`skip vitest: ${MEDIA_SKIP_MARKER} (FFmpeg is not on PATH)`] }
-          : r;
+        const notes: string[] = [];
+        if (r.ok && r.output.includes(MEDIA_SKIP_MARKER))
+          notes.push(`skip vitest: ${MEDIA_SKIP_MARKER} (FFmpeg is not on PATH)`);
+        if (r.ok && r.output.includes(ENCODER_SKIP_MARKER))
+          notes.push(`skip vitest: ${ENCODER_SKIP_MARKER} (see the test output)`);
+        return notes.length > 0 ? { ...r, notes } : r;
       },
     },
     { key: 'jest', run: () => pnpm('-r', '--if-present', '--reporter=append-only', 'test:jest') },

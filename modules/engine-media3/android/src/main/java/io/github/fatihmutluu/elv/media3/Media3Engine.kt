@@ -22,6 +22,8 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.sharedobjects.SharedObject
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -47,22 +49,58 @@ internal interface ViewSink {
   fun onScreenOn(on: Boolean)
 }
 
+@OptIn(UnstableApi::class)
+internal fun extensionRendererModeFor(softwareAudio: Boolean): Int =
+  if (softwareAudio) {
+    DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
+  } else {
+    DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+  }
+
 /**
  * The `PlayerEngine` of player core spec 5.1 on Media3, one per player screen (an Expo shared object). ExoPlayer
  * lives on this engine's own playback thread (its application looper): JavaScript calls post there and return at
  * once, and every event is sent from there, tagged with the current attempt token.
  */
 @OptIn(UnstableApi::class)
-class Media3Engine(
-  private val context: Context,
-  appContext: AppContext,
-  private val onDisposed: (Media3Engine) -> Unit,
-) : SharedObject(appContext) {
+class Media3Engine : SharedObject {
+  private val context: Context
+  private val hasAppContext: Boolean
+  private val onDisposed: (Media3Engine) -> Unit
+
+  constructor(
+    context: Context,
+    appContext: AppContext,
+    onDisposed: (Media3Engine) -> Unit,
+  ) : super(appContext) {
+    this.context = context
+    this.hasAppContext = true
+    this.onDisposed = onDisposed
+    buffers = loadControlFor(lowRam(context))
+    post { player = buildPlayer(softwareAudio = false) }
+  }
+
+  internal constructor(
+    context: Context,
+    onDisposed: (Media3Engine) -> Unit = {},
+  ) : super() {
+    this.context = context
+    this.hasAppContext = false
+    this.onDisposed = onDisposed
+    buffers = loadControlFor(lowRam(context))
+    post { player = buildPlayer(softwareAudio = false) }
+  }
+
   private val thread = HandlerThread("ElvMedia3").apply { start() }
   private val handler = Handler(thread.looper)
   private val disposed = AtomicBoolean(false)
-  private val gate = ConnectionGate()
-  private val buffers = loadControlFor(lowRam(context))
+  /** Force-closes superseded connections off the playback thread; its one thread ends after 10 s idle. */
+  private val closer = ThreadPoolExecutor(0, 1, 10, TimeUnit.SECONDS, LinkedBlockingQueue()) {
+    Thread(it, "ElvMedia3Closer")
+  }
+  internal val gate = ConnectionGate(closer)
+  private val http = engineHttpClient()
+  private val buffers: LoadControlValues
   private val reporter = EventReporter(
     handler,
     { fields -> sendEvent(fields) },
@@ -94,17 +132,12 @@ class Media3Engine(
   /** The engine is passed to the surface view as a prop; let pending view updates apply before it goes. */
   override val releasesAfterPendingViewUpdates: Boolean = true
 
-  init {
-    post { player = buildPlayer(softwareAudio = false) }
-  }
-
   /**
    * Starts a new media: the previous one is stopped, a new connection-gate generation begins and the zap shutter
    * covers the surface until this media's first frame.
    */
   internal fun load(attempt: Int, next: LoadRequest) = post {
     reporter.end()
-    player?.stop()
     token = attempt
     request = next
     media += 1
@@ -153,6 +186,7 @@ class Media3Engine(
   fun recreate(attempt: Int) = post {
     adopt(attempt)
     reporter.end()
+    beginGeneration()
     releasePlayer()
     player = buildPlayer(playerSoftwareAudio)
   }
@@ -202,13 +236,23 @@ class Media3Engine(
     if (view === sink) view = null
   }
 
+  internal fun cueScreen(cue: ScreenCue, played: Boolean) = post {
+    onCue(cue, played)
+  }
+
   /** Releases the player and ends the playback thread; later commands do nothing. Safe to call twice. */
   fun dispose() {
     if (!disposed.compareAndSet(false, true)) return
     onDisposed(this)
     handler.post {
       reporter.end()
+      request = null
+      onCue(ScreenCue.STOP, played = false)
+      beginGeneration()
+      http.dispatcher.cancelAll()
       releasePlayer()
+      http.dispatcher.executorService.shutdown()
+      closer.shutdown()
       thread.quitSafely()
     }
   }
@@ -259,7 +303,7 @@ class Media3Engine(
   }
 
   private fun sendEvent(fields: Map<String, Any?>) {
-    if (disposed.get()) return
+    if (disposed.get() || !hasAppContext) return
     emit(EVENT, fields + ("attempt" to token))
   }
 
@@ -286,16 +330,17 @@ class Media3Engine(
 
   private fun prepare(next: LoadRequest, positionMs: Long?, newGeneration: Boolean = true) {
     reporter.end()
+    if (newGeneration) beginGeneration()
     if (player == null || playerSoftwareAudio != next.softwareAudio) {
       releasePlayer()
       player = buildPlayer(next.softwareAudio)
+    } else {
+      player?.stop()
     }
     val current = player ?: return
-    current.stop()
-    if (newGeneration) beginGeneration()
     val manifestLoaded = AtomicBoolean(false)
     reporter.begin(current, next.live, manifestLoaded)
-    val source = createMediaSource(next, gate, generation, manifestLoaded)
+    val source = createMediaSource(next, gate, generation, manifestLoaded, http)
     if (positionMs == null) current.setMediaSource(source, true) else current.setMediaSource(source, positionMs)
     current.playWhenReady = true
     current.prepare()
@@ -304,13 +349,7 @@ class Media3Engine(
   private fun buildPlayer(softwareAudio: Boolean): ExoPlayer {
     val renderers = DefaultRenderersFactory(context)
       .setEnableDecoderFallback(true)
-      .setExtensionRendererMode(
-        if (softwareAudio) {
-          DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
-        } else {
-          DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
-        },
-      )
+      .setExtensionRendererMode(extensionRendererModeFor(softwareAudio))
       .setMediaCodecSelector(if (softwareAudio) SOFTWARE_AUDIO_FIRST else MediaCodecSelector.DEFAULT)
     val loadControl = DefaultLoadControl.Builder()
       .setBufferDurationsMs(
@@ -340,12 +379,14 @@ class Media3Engine(
       }
   }
 
+  /** The gate outlives the player: a released player's forced connections that never closed are forgotten. */
   private fun releasePlayer() {
     val old = player ?: return
     player = null
     old.removeListener(reporter)
     old.removeListener(pictures)
     old.release()
+    gate.dropForced()
   }
 
   private companion object {

@@ -18,6 +18,7 @@
       "!**/ios",
       "!tools/test/fixtures",
       "!docs",
+      "!.agents/skills/react-native-tv-best-practices",
       "!.claude/skills/react-native-tv-best-practices",
       "!**/*.md"
     ]
@@ -98,6 +99,64 @@
       }
     },
     {
+      "includes": ["packages/i18n/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "react",
+                      "react/**",
+                      "react-dom",
+                      "react-dom/**",
+                      "react-native",
+                      "react-native/**",
+                      "react-native-*",
+                      "react-native-*/**",
+                      "@react-native/**",
+                      "@react-native-*/**",
+                      "expo",
+                      "expo/**",
+                      "expo-*",
+                      "expo-*/**",
+                      "@expo/**",
+                      "electron",
+                      "electron/**",
+                      "node:*",
+                      "node:*/**"
+                    ],
+                    "message": "@elv/i18n stays free of react, react-native, expo, electron and node:*; use a port from @elv/domain."
+                  }
+                ]
+              }
+            },
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "window": "@elv/i18n runs on non-browser runtimes (Hermes, Node); use a port from @elv/domain instead of browser globals.",
+                  "document": "@elv/i18n runs on non-browser runtimes (Hermes, Node); use a port from @elv/domain instead of browser globals.",
+                  "localStorage": "@elv/i18n runs on non-browser runtimes (Hermes, Node); use a port from @elv/domain instead of browser globals.",
+                  "sessionStorage": "@elv/i18n runs on non-browser runtimes (Hermes, Node); use a port from @elv/domain instead of browser globals.",
+                  "navigator": "@elv/i18n runs on non-browser runtimes (Hermes, Node); use a port from @elv/domain instead of browser globals.",
+                  "location": "@elv/i18n runs on non-browser runtimes (Hermes, Node); use a port from @elv/domain instead of browser globals.",
+                  "TextDecoder": "Hermes lacks or limits this global; use a port from @elv/domain or a hand-written helper (allowed in tests only).",
+                  "DecompressionStream": "Hermes lacks or limits this global; use a port from @elv/domain or a hand-written helper (allowed in tests only).",
+                  "CompressionStream": "Hermes lacks or limits this global; use a port from @elv/domain or a hand-written helper (allowed in tests only).",
+                  "Blob": "Hermes lacks or limits this global; use a port from @elv/domain or a hand-written helper (allowed in tests only).",
+                  "structuredClone": "Hermes lacks or limits this global; use a port from @elv/domain or a hand-written helper (allowed in tests only)."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["packages/ui-kit/**", "packages/features/**", "apps/tv-mobile/**"],
       "linter": {
         "rules": {
@@ -124,6 +183,7 @@
         "packages/data/**/*.test.ts",
         "packages/playback/**/*.test.ts",
         "packages/focus-core/**/*.test.ts",
+        "packages/i18n/**/*.test.ts",
         "packages/*/src/**/*-test-helpers.ts",
         "packages/*/src/test-chunks.ts",
         "packages/*/src/test-db.ts"

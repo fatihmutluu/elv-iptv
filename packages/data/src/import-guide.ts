@@ -5,6 +5,7 @@ import {
   type HttpResponse,
   httpStatusError,
   ok,
+  openAsyncIterator,
   type Result,
   transportHeaders,
 } from '@elv/domain';
@@ -27,7 +28,7 @@ const OPEN_END_MS = 30 * 60_000;
 
 async function discard(body: AsyncIterable<Uint8Array>): Promise<void> {
   try {
-    await body[Symbol.asyncIterator]().return?.();
+    await openAsyncIterator(body).return?.();
   } catch {
     // the response is already classified by its status
   }
@@ -238,7 +239,7 @@ async function execute(
  */
 async function checkpoint(deps: ImportDeps): Promise<void> {
   try {
-    await deps.db.all('PRAGMA wal_checkpoint(TRUNCATE)');
+    await deps.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   } catch {
     // the next checkpoint (automatic or after the next swap) catches up
   }

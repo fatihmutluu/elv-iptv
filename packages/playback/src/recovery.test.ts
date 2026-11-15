@@ -55,54 +55,79 @@ describe('live ladder', () => {
     expect(status(r)).toEqual({ kind: 'playing' });
   });
 
-  it('climbs rungs 1 to 4 on a dead stream, then fails with a stop', async () => {
+  it('climbs rungs 1 to 4 on a silent stalled stream within 8 s of ladder time, then fails with a stop', async () => {
     const r = rig({ dead: [], alt: [] });
     const t = await playing(r, live('dead', { alternates: [resolved('alt')] }));
     stall(r, 'start');
     await tick(4000);
     expect(status(r)).toEqual(recovering(1, 0));
     expect(last(r)).toEqual({ name: 'retry', attempt: t + 1 });
-    await tick(4000);
+    await tick(2000);
+    expect(status(r)).toEqual(recovering(2, 0));
+    expect(last(r)).toEqual({ name: 'load', attempt: t + 2, url: 'dead' });
+    await tick(2000);
+    expect(status(r)).toEqual(recovering(3, 0));
+    expect(r.engine.commands.slice(-2)).toEqual([
+      { name: 'recreate', attempt: t + 3 },
+      { name: 'load', attempt: t + 3, url: 'dead' },
+    ]);
+    await tick(2000);
+    expect(status(r)).toEqual(recovering(4, 0));
+    expect(r.engine.commands.slice(-2)).toEqual([
+      { name: 'stop', attempt: t + 4 },
+      { name: 'load', attempt: t + 4, url: 'alt' },
+    ]);
+    await tick(2000);
+    expect(status(r)).toEqual(failed('network'));
+    expect(last(r)).toEqual({ name: 'stop', attempt: t + 4 });
+    expect(r.engine.maxConcurrentMedias()).toBe(1);
+  });
+
+  it('keeps ladder gaps 0, 1, 2 and 4 s on fast-failing errors', async () => {
+    const r = rig({ dead: [], alt: [] });
+    const t = await playing(r, live('dead', { alternates: [resolved('alt')] }));
+    error(r, 'network');
+    expect(status(r)).toEqual(recovering(1, 0));
+    expect(last(r)).toEqual({ name: 'retry', attempt: t + 1 });
+    error(r, 'network');
     expect(status(r)).toEqual(recovering(2, 1000));
     await tick(999);
     expect(last(r)?.name).toBe('retry');
     await tick(1);
     expect(last(r)).toEqual({ name: 'load', attempt: t + 2, url: 'dead' });
-    await tick(4000);
+    error(r, 'network');
     expect(status(r)).toEqual(recovering(3, 2000));
     await tick(2000);
     expect(r.engine.commands.slice(-2)).toEqual([
       { name: 'recreate', attempt: t + 3 },
       { name: 'load', attempt: t + 3, url: 'dead' },
     ]);
-    await tick(4000);
+    error(r, 'network');
     expect(status(r)).toEqual(recovering(4, 4000));
     await tick(4000);
     expect(last(r)).toEqual({ name: 'load', attempt: t + 4, url: 'alt' });
-    await tick(4000);
+    error(r, 'network');
     expect(status(r)).toEqual(failed('network'));
-    expect(last(r)).toEqual({ name: 'stop', attempt: t + 4 });
-    expect(r.engine.maxConcurrentMedias()).toBe(1);
   });
 
-  it('enters the ladder at rung 1 when no first frame comes within 8,000 ms', async () => {
+  it('skips rung 1 and enters rung 2 when a live tune shows no first frame within 5,000 ms', async () => {
     const r = rig({ dead: [] });
     const t = r.service.tune(live('dead'));
-    await tick(7999);
+    await tick(4999);
     expect(status(r)).toEqual({ kind: 'tuning' });
     await tick(1);
-    expect(status(r)).toEqual(recovering(1, 0));
-    expect(last(r)).toEqual({ name: 'retry', attempt: t + 1 });
+    expect(status(r)).toEqual(recovering(2, 0));
+    expect(last(r)).toEqual({ name: 'load', attempt: t + 1, url: 'dead' });
   });
 
-  it('enters the ladder when a first frame is not followed by playing within 8,000 ms', async () => {
+  it('enters rung 1 when a first frame is not followed by playing within 5,000 ms', async () => {
     const r = rig({ dead: [] });
     const t = r.service.tune(live('dead'));
     await tick(300);
     r.engine.emit({ attempt: t, type: 'firstFrame', atMs: Date.now() });
     state(r, 'buffering');
     stall(r, 'start');
-    await tick(7699);
+    await tick(4699);
     expect(r.engine.commands.map((c) => c.name)).toEqual(['load']);
     expect(status(r)).toEqual({ kind: 'tuning' });
     await tick(1);
@@ -129,7 +154,7 @@ describe('live ladder', () => {
   });
 
   it('uses software audio as rung 4 after a decoder error when the engine has it', async () => {
-    const r = rig({ dead: [] }, { softwareAudioFallback: true, recreate: false });
+    const r = rig({ dead: [], next: [] }, { softwareAudioFallback: true, recreate: false });
     const t = await playing(r, live('dead', { alternates: [resolved('alt')] }));
     error(r, 'decoder');
     error(r, 'decoder');
@@ -148,6 +173,9 @@ describe('live ladder', () => {
     error(r, 'network');
     await tick(1000);
     expect(r.loads.at(-1)).toMatchObject({ attempt: t + 6, ...soft });
+    await playing(r, live('next'));
+    expect(r.loads.at(-1)?.url).toBe('next');
+    expect(r.loads.at(-1)).not.toHaveProperty('options');
   });
 
   it('fails when the alternate cannot be resolved', async () => {
@@ -208,7 +236,7 @@ describe('budget', () => {
     await tick(29999);
     stall(r, 'start');
     await tick(4000);
-    expect(status(r)).toEqual(recovering(2, 1000));
+    expect(status(r)).toEqual(recovering(2, 0));
   });
 
   it('a late playing during a gap cancels the pending rung', async () => {
@@ -248,6 +276,18 @@ describe('error classes', () => {
     await tick(50);
     expect(status(r)).toEqual(failed('http-404'));
     expect(last(r)).toEqual({ name: 'stop', attempt: t + 1 });
+  });
+
+  it('http-404 followed by a silent rung 2 fails when the rung times out, without rungs 3 and 4', async () => {
+    const r = rig({ gone: [], alt: [] });
+    const t = r.service.tune(live('gone', { alternates: [resolved('alt')] }));
+    await tick(0);
+    error(r, 'http-404');
+    await tick(1000);
+    expect(r.loads.map((l) => l.attempt)).toEqual([t, t + 1]);
+    await tick(2000);
+    expect(status(r)).toEqual(failed('http-404'));
+    expect(r.engine.commands.map((c) => c.name)).toEqual(['load', 'load', 'stop']);
   });
 
   it('http-404 after the ladder reached rung 2 fails at once', async () => {
@@ -448,7 +488,7 @@ describe('vod', () => {
     error(r, 'network');
     await tick(2000);
     expect(r.loads.at(-1)).toMatchObject({ attempt: t + 1, startMs: 9000 });
-    await tick(4000);
+    await tick(2000);
     expect(status(r)).toEqual(recovering(2, 4000));
   });
 
@@ -484,7 +524,7 @@ describe('surface', () => {
     play(r);
     stall(r, 'start');
     await tick(4000);
-    expect(status(r)).toEqual(recovering(2, 1000));
+    expect(status(r)).toEqual(recovering(2, 0));
   });
 
   it('surface-lost with the surface present retries at once', async () => {
@@ -551,7 +591,7 @@ describe('lifecycle', () => {
     await playing(r, live('dead'));
     error(r, 'network');
     state(r, 'ended');
-    expect(status(r)).toEqual({ kind: 'idle' });
+    expect(status(r)).toEqual({ kind: 'ended' });
     await tick(10000);
     expect(r.engine.commands.map((c) => c.name)).toEqual([
       'load',
@@ -581,7 +621,7 @@ describe('lifecycle', () => {
     error(r, 'network');
     r.service.retry();
     expect(last(r)).toEqual({ name: 'retry', attempt: t + 2 });
-    await tick(8000);
+    await tick(5000);
     expect(status(r)).toEqual(recovering(1, 0));
     expect(last(r)).toEqual({ name: 'retry', attempt: t + 3 });
     expect(r.loads).toHaveLength(1);

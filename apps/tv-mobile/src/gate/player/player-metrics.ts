@@ -1,8 +1,11 @@
 import type { PlaybackState } from '@elv/playback';
 import type { PlayerFault } from './player-routes';
 
-/** How a fault run ended on the faulted channel. */
-type FaultOutcome = 'recovered' | 'failed-in-time' | 'limited-backoff' | 'missed';
+/**
+ * How a fault run ended on the faulted channel; `left`: a zap went away before the faulted channel played (the
+ * expected outcome of a slow start).
+ */
+type FaultOutcome = 'recovered' | 'failed-in-time' | 'limited-backoff' | 'left' | 'missed';
 
 /** What the single `ELV_GATE_PLAYER` line carries. Times are milliseconds rounded to 0.01; `null`: nothing measured. */
 export interface PlayerMetrics {
@@ -37,6 +40,11 @@ export interface PlayerRecorder {
    */
   dispatch(item: string, zapAt?: number): void;
   observe(state: PlaybackState): void;
+  /**
+   * An engine stall of the current attempt. One that ends while the service still shows `playing` is a recovery the
+   * engine made on its own (ladder rung 0, for example its own reconnect after a dropped connection).
+   */
+  stall(phase: 'start' | 'end'): void;
   surface(change: 'created' | 'destroyed'): void;
   /** The line's metrics; `final` is the service state at the end of the run. */
   finish(final: PlaybackState): PlayerMetrics;
@@ -50,8 +58,10 @@ interface Tune {
   failed: boolean;
   isDwell: boolean;
   sawRecovering: boolean;
+  stalled: boolean;
   recovered: boolean;
   sawLimited: boolean;
+  played: boolean;
 }
 
 const round = (value: number): number => Math.round(value * 100) / 100;
@@ -87,17 +97,18 @@ export function createPlayerRecorder(opts: {
   let dwellDone = false;
   let outcome: FaultOutcome | null = null;
 
-  const endDwell = (): void => {
+  const endDwell = (zapped: boolean): void => {
     if (current === undefined || !current.isDwell) return;
     dwellDone = true;
     if (current.sawLimited) outcome = 'limited-backoff';
     else if (current.failed) outcome = 'failed-in-time';
     else if (current.recovered) outcome = 'recovered';
+    else if (zapped && !current.played) outcome = 'left';
     else outcome = 'missed';
   };
 
   const startTune = (state: PlaybackState): void => {
-    endDwell();
+    endDwell(true);
     tunes += 1;
     const item = state.item ?? '';
     current = {
@@ -108,8 +119,10 @@ export function createPlayerRecorder(opts: {
       failed: false,
       isDwell: opts.fault !== '' && !dwellDone && item === opts.faultItem,
       sawRecovering: false,
+      stalled: false,
       recovered: false,
       sawLimited: false,
+      played: false,
     };
     pendingZap = undefined;
     awaiting = false;
@@ -122,8 +135,10 @@ export function createPlayerRecorder(opts: {
       if (previous?.kind !== 'recovering' || previous.rung !== status.rung) {
         recoveries[String(status.rung) as keyof typeof recoveries] += 1;
       }
-    } else if (status.kind === 'playing' && tune.sawRecovering) tune.recovered = true;
-    else if (status.kind === 'limited') tune.sawLimited = true;
+    } else if (status.kind === 'playing') {
+      tune.played = true;
+      if (tune.sawRecovering) tune.recovered = true;
+    } else if (status.kind === 'limited') tune.sawLimited = true;
     else if (status.kind === 'failed' && !tune.failed) {
       tune.failed = true;
       failures += 1;
@@ -156,11 +171,16 @@ export function createPlayerRecorder(opts: {
       trackStatus(current, state.status);
       closeSpan(current, state);
     },
+    stall(phase) {
+      if (current === undefined) return;
+      if (phase === 'start') current.stalled = true;
+      else if (current.stalled && previous?.kind === 'playing') current.recovered = true;
+    },
     surface(change) {
       if (change === 'created') surfaceCreated += 1;
     },
     finish(final) {
-      endDwell();
+      endDwell(false);
       const warmSorted = ascending(warm);
       const zapSorted = ascending(zapSpans);
       return {

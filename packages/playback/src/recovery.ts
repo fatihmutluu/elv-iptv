@@ -11,7 +11,6 @@ type RungAction = (token: AttemptToken) => void;
 const RUNGS: readonly Rung[] = [1, 2, 3, 4];
 const STALLED: EngineError = { code: 'network' };
 
-/** Per-tune trouble counters; 30 s of `playing` restores them. */
 interface Budget {
   rung: number;
   lastError: EngineError | undefined;
@@ -20,7 +19,6 @@ interface Budget {
   vodAttempt: number;
 }
 
-/** Connection-limit backoff, scoped to one account. */
 interface Limit {
   start: number | undefined;
   attempt: number;
@@ -81,6 +79,7 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
   let surfaceGone = false;
   let awaitingSurface = false;
   let paused = false;
+  let pausedAt: number | undefined;
   let deferred = false;
 
   const clear = (handle: unknown): undefined => {
@@ -104,8 +103,10 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
     alternate = 0;
     softwareAudio = false;
     resumeFrom = undefined;
+    resumeMs = undefined;
     seekDisarmed = false;
     paused = false;
+    pausedAt = undefined;
     deferred = false;
   };
 
@@ -121,22 +122,19 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
     ctl.fail(error);
   };
   const giveUp = (): void => failWith(toPlaybackError(budget.lastError ?? STALLED));
-
   const isVod = (): boolean => ctl.request()?.kind === 'vod';
 
-  /** Position at the failure, kept until the media sends a newer anchor. */
   const resumePosition = (): number | undefined => {
-    const { anchor } = ctl.getState();
-    if (anchor === undefined) return ctl.request()?.startMs;
-    if (anchor !== resumeFrom) {
-      resumeFrom = anchor;
-      resumeMs = positionAt(anchor, ctl.now());
+    if (resumeFrom !== undefined) {
+      resumeMs = positionAt(resumeFrom, ctl.now());
+      resumeFrom = undefined;
     }
-    return resumeMs;
+    return resumeMs ?? ctl.request()?.startMs;
   };
 
   const freeze = (): void => {
     if (isVod()) resumePosition();
+    ctl.freezeAnchor();
   };
 
   const reload = (stream?: StreamRequest): void => {
@@ -149,14 +147,13 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
   };
 
   const after = (ms: number, step: () => void): void => {
-    if (ms <= 0) {
-      step();
-      return;
+    if (ms <= 0) step();
+    else {
+      stepTimer = ctl.setTimer(() => {
+        stepTimer = undefined;
+        step();
+      }, ms);
     }
-    stepTimer = ctl.setTimer(() => {
-      stepTimer = undefined;
-      step();
-    }, ms);
   };
 
   const watch = (onTimeout: () => void): void => {
@@ -167,8 +164,11 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
   };
 
   const alternateRung = (): RungAction | undefined => {
-    const decoder = budget.lastError?.code === 'decoder';
-    if (decoder && !softwareAudio && engine.capabilities.softwareAudioFallback) {
+    if (
+      budget.lastError?.code === 'decoder' &&
+      !softwareAudio &&
+      engine.capabilities.softwareAudioFallback
+    ) {
       return () => {
         softwareAudio = true;
         reload();
@@ -177,10 +177,11 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
     const next = ctl.request()?.alternates?.[alternate];
     if (next === undefined) return undefined;
     return () => {
-      alternate += 1;
+      ctl.stopMedia();
       const at = epoch;
       const settle = (result: Result<StreamRequest> | undefined): void => {
         if (at !== epoch) return;
+        alternate += 1;
         if (result?.ok) reload(result.value);
         else giveUp();
       };
@@ -191,45 +192,45 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
   };
 
   const rungAction = (rung: Rung): RungAction | undefined => {
-    switch (rung) {
-      case 1:
-        return (token) => engine.retry(token);
-      case 2:
-        return () => reload();
-      case 3:
-        return (token) => {
-          const at = epoch;
-          if (engine.capabilities.recreate) engine.recreate(token);
-          if (at === epoch) reload();
-        };
-      case 4:
-        return alternateRung();
+    if (rung === 1) return (token) => engine.retry(token);
+    if (rung === 2) return () => reload();
+    if (rung === 3) {
+      return (token) => {
+        const at = epoch;
+        if (engine.capabilities.recreate) engine.recreate(token);
+        if (at === epoch) reload();
+      };
     }
+    return alternateRung();
   };
 
-  const goTo = (rung: Rung): void => {
+  const onSilentTimeout = (): void => {
+    escalate(undefined, true);
+  };
+
+  const goTo = (rung: Rung, onTimeout: () => void = onSilentTimeout, silent = false): void => {
     const action = rungAction(rung);
     if (action === undefined) {
       giveUp();
       return;
     }
-    const gap = config.ladderGapsMs[rung - 1] ?? 0;
+    const gap = silent ? 0 : (config.ladderGapsMs[rung - 1] ?? 0);
     ctl.setStatus({ kind: 'recovering', rung, nextAtMs: ctl.now() + gap });
     after(gap, () => {
       budget.rung = rung;
       const token = ctl.nextAttempt();
-      watch(() => escalate());
+      watch(onTimeout);
       action(token);
     });
   };
 
-  function escalate(error?: EngineError): void {
+  function escalate(error?: EngineError, silent = false): void {
     if (error !== undefined) budget.lastError = error;
     cancelSteps();
     freeze();
     const next = RUNGS[budget.rung];
     if (next === undefined) giveUp();
-    else goTo(next);
+    else goTo(next, onSilentTimeout, silent);
   }
 
   const onNotFound = (error: EngineError): void => {
@@ -241,7 +242,7 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
     budget.notFound = true;
     cancelSteps();
     freeze();
-    goTo(2);
+    goTo(2, giveUp);
   };
 
   const reconnectVod = (error: EngineError): void => {
@@ -260,24 +261,19 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
       failWith(toPlaybackError(error));
       return;
     }
-    budget.vodAttempt += 1;
     ctl.setStatus({ kind: 'recovering', rung: 2, nextAtMs: now + delay });
     after(delay, () => {
+      budget.vodAttempt += 1;
       ctl.nextAttempt();
       watch(() => reconnectVod(error));
       reload();
     });
   };
 
-  const endLimitWait = (): void => {
-    if (!heldFresh) ctl.nextAttempt();
-    heldFresh = false;
-    ctl.setStatus({ kind: 'tuning' });
-    ctl.armStartTimeout(config.startTimeoutMs);
-    reload();
-  };
-
   const enterLimit = (): void => {
+    paused = false;
+    pausedAt = undefined;
+    deferred = false;
     cancelSteps();
     freeze();
     const now = ctl.now();
@@ -293,16 +289,21 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
     ctl.setStatus({ kind: 'limited', nextAtMs: now + delay });
     limitTimer = ctl.setTimer(() => {
       limitTimer = undefined;
-      endLimitWait();
+      if (!heldFresh) ctl.nextAttempt();
+      heldFresh = false;
+      ctl.setStatus({ kind: 'tuning' });
+      ctl.armStartTimeout(ctl.startTimeoutMs());
+      reload();
     }, delay);
   };
 
-  /** No command while paused: a pending rung or gap is dropped and the ladder restarts on `play`. */
   const pause = (): void => {
+    freeze();
     if (stepTimer !== undefined || rungTimer !== undefined) {
       deferred = true;
       ctl.setStatus({ kind: 'paused' });
     }
+    if (!paused) pausedAt = ctl.now();
     paused = true;
     const waitingSurface = awaitingSurface;
     cancelSteps();
@@ -326,20 +327,31 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
       return false;
     },
     onReset: reset,
-    onSeek() {
+    onSeek(positionMs) {
       seekDisarmed = true;
       stallTimer = clear(stallTimer);
+      resumeFrom = undefined;
+      resumeMs = Math.max(0, positionMs);
     },
     onPause: pause,
     onPlay() {
       if (!paused) return;
+      const waited = pausedAt === undefined ? 0 : Math.max(0, ctl.now() - pausedAt);
       paused = false;
+      pausedAt = undefined;
+      if (budget.vodStart !== undefined) budget.vodStart += waited;
       if (deferred) {
         deferred = false;
-        budget.rung = 0;
-        escalate();
+        const err = budget.lastError;
+        if (isVod() && (err?.code === 'network' || budget.vodStart !== undefined)) {
+          reconnectVod(err ?? STALLED);
+        } else if (err !== undefined && classifyError(err.code) === 'not-found') {
+          budget.notFound = true;
+          if (budget.rung < 2) goTo(2, giveUp);
+          else giveUp();
+        } else escalate();
       } else if (ctl.getState().status.kind !== 'playing') {
-        ctl.armStartTimeout(config.startTimeoutMs);
+        ctl.armStartTimeout(ctl.startTimeoutMs());
       }
     },
     onState(state) {
@@ -354,6 +366,7 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
       stableTimer = clear(stableTimer);
       if (state !== 'playing') return;
       paused = false;
+      pausedAt = undefined;
       deferred = false;
       stepTimer = clear(stepTimer);
       rungTimer = clear(rungTimer);
@@ -366,17 +379,24 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
         limit = freshLimit();
       }, config.stableRestoreMs);
     },
+    onClock(anchor) {
+      if (ctl.getState().status.kind === 'playing' || anchor.rate > 0) {
+        resumeFrom = anchor;
+        resumeMs = positionAt(anchor, ctl.now());
+      }
+    },
     onError(error) {
       const kind = classifyError(error.code);
       if (kind === 'terminal') failWith(toPlaybackError(error));
+      else if (kind === 'limit') enterLimit();
       else if (paused) {
         budget.lastError = error;
         deferred = true;
-      } else if (kind === 'limit') enterLimit();
-      else if (stepTimer !== undefined || awaitingSurface) budget.lastError = error;
+      } else if (stepTimer !== undefined || awaitingSurface) budget.lastError = error;
       else if (kind === 'not-found') onNotFound(error);
       else if (error.code === 'surface-lost' && surfaceGone) {
         cancelSteps();
+        freeze();
         budget.lastError = error;
         awaitingSurface = true;
       } else if (error.code === 'network' && isVod()) reconnectVod(error);
@@ -392,10 +412,15 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
       if (!watching || awaitingSurface || stallTimer !== undefined) return;
       stallTimer = ctl.setTimer(() => {
         stallTimer = undefined;
-        escalate();
+        escalate(undefined, true);
       }, config.liveStallWindowMs);
     },
-    onStartTimeout: () => escalate(),
+    onStartTimeout() {
+      if (!isVod() && ctl.getState().firstFrameAt === undefined) {
+        budget.rung = Math.max(budget.rung, 1);
+      }
+      escalate(undefined, true);
+    },
     onSurface(change) {
       surfaceGone = change === 'destroyed';
       if (surfaceGone || !awaitingSurface) return;

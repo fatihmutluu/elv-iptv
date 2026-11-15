@@ -30,6 +30,7 @@ export type PlaybackStatus =
   | { kind: 'tuning' }
   | { kind: 'playing' }
   | { kind: 'paused' }
+  | { kind: 'ended' }
   | { kind: 'recovering'; rung: 1 | 2 | 3 | 4; nextAtMs: number }
   | { kind: 'limited'; nextAtMs: number }
   | { kind: 'failed'; error: ElvError };
@@ -53,18 +54,18 @@ export interface PlaybackService {
    * backoff a tune of the same account keeps the `limited` status and loads when the backoff ends.
    */
   tune(request: TuneRequest): AttemptToken;
-  /** Re-prepares loaded media, or tunes the last request again after a failure. */
+  /** Re-prepares loaded media, replays ended VOD from 0, or tunes the last request again after a failure. */
   retry(): void;
   stop(): void;
-  /** Resumes; recovery cut short by a pause restarts at rung 1 with the budget it had. */
+  /** Resumes with a fresh attempt token; recovery cut short by a pause continues with the budget it had. */
   play(): void;
-  /** Pauses; no recovery command is sent until `play`, and pending rungs are dropped. */
+  /** Pauses with a fresh attempt token; no recovery command is sent until `play`, and pending rungs are dropped. */
   pause(): void;
   /** Seeks; the stall watchdog stays disarmed until the engine reports `playing` again. */
   seek(positionMs: number): void;
   getState(): PlaybackState;
   /** Returns the unsubscribe function. */
   subscribe(listener: (state: PlaybackState) => void): () => void;
-  /** Detaches from the engine and clears every timer; the caller still owns and releases the engine. */
+  /** Stops any open media, detaches from the engine and clears every timer; the caller releases the engine. */
   dispose(): void;
 }

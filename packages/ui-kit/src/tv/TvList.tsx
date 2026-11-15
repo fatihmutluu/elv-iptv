@@ -20,7 +20,7 @@ const STEP_MS = 90;
 /** Index changes closer together than this are treated as a held key: the offset is set without animating. */
 const REPEAT_WINDOW_MS = 150;
 /** Native coordinates are anchored every this many pools of rows, so they stay far below float32 precision limits. */
-const ANCHOR_POOLS = 8;
+const ANCHOR_POOLS = 512;
 
 /** What a committed frame showed: the visible rows `[start, end)` and the rows rendered `[renderedStart, renderedEnd)`. */
 export interface FrameWindow {
@@ -53,8 +53,7 @@ interface RowProps<T> {
   top: number;
   height: number;
   focused: boolean;
-  version: number;
-  source: ListSource<T>;
+  item: T | undefined;
   renderRow: (item: T | undefined, focused: boolean) => ReactElement;
   rowLabel?: (item: T | undefined, index: number) => string;
   testID?: string;
@@ -65,12 +64,11 @@ function RowImpl<T>({
   top,
   height,
   focused,
-  source,
+  item,
   renderRow,
   rowLabel,
   testID,
 }: RowProps<T>) {
-  const item = source.get(index);
   return (
     <View
       accessibilityLabel={rowLabel?.(item, index)}
@@ -94,7 +92,7 @@ function clamp(value: number, min: number, max: number): number {
  * three), whatever the pool size. The viewport slides with a native-driven `Animated.Value`. Mid-list the focused
  * item rests on `focusLine` and the ring sits at `focusLine * rowHeight`; at the ends the window cannot slide, so the
  * ring leaves the line there. Native coordinates are relative to an anchor row that moves every
- * `8 * pool` rows (all rows re-render once then), so they stay bounded at 100,000 rows. Rows never use `onPress`.
+ * `512 * pool` rows (all rows re-render once then), so they stay bounded at 100,000 rows. Rows never use `onPress`.
  * `renderRow` (and `rowLabel`) must be stable callbacks (module-level or `useCallback`): rows are memoized on them, so
  * an inline function re-renders the whole pool on every step.
  */
@@ -111,17 +109,22 @@ export function TvList<T>({
   onFrameCommitted,
 }: TvListProps<T>): ReactElement {
   const subscribe = useCallback((cb: () => void) => store.subscribe(cb), [store]);
-  const getIndex = useCallback(
-    () => findList(store.getState().scopes, listId)?.list.index ?? 0,
-    [store, listId],
-  );
-  const index = useSyncExternalStore(subscribe, getIndex, getIndex);
-  const [version, bump] = useReducer((v: number) => v + 1, 0);
+  const getSnapshot = useCallback(() => {
+    const idx = findList(store.getState().scopes, listId)?.list.index ?? 0;
+    return store.isActive(listId) ? idx : -(idx + 1);
+  }, [store, listId]);
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const isActive = snapshot >= 0;
+  const rawIndex = isActive ? snapshot : -snapshot - 1;
+  const [, bump] = useReducer((v: number) => v + 1, 0);
   useEffect(() => source.onChange(bump), [source]);
 
-  const count = source.count();
+  const count = Math.max(0, source.count());
+  const safeIndex = count > 0 ? clamp(rawIndex, 0, count - 1) : 0;
+  const safeFocusLine = clamp(Math.floor(focusLine), 0, Math.max(0, visibleRows - 1));
+  const showFocus = isActive && count > 0;
   const pool = visibleRows + BUFFER_ROWS;
-  const windowStart = clamp(index - focusLine, 0, count - visibleRows);
+  const windowStart = clamp(safeIndex - safeFocusLine, 0, count - visibleRows);
   const rangeStart = clamp(windowStart - BUFFER_ROWS / 2, 0, count - pool);
   const rangeEnd = Math.min(count, rangeStart + pool);
 
@@ -131,7 +134,7 @@ export function TvList<T>({
 
   const offset = useRef<Animated.Value>(null as unknown as Animated.Value);
   if (offset.current === null) offset.current = new Animated.Value(translate);
-  const synced = useRef({ base, rowHeight, start: windowStart, at: 0 });
+  const synced = useRef({ source, base, rowHeight, start: windowStart, at: 0 });
   const callback = useRef(onFrameCommitted);
   callback.current = onFrameCommitted;
   const mounted = useRef(true);
@@ -144,11 +147,22 @@ export function TvList<T>({
 
   useLayoutEffect(() => {
     const prev = synced.current;
-    if (prev.base === base && prev.rowHeight === rowHeight && prev.start === windowStart) return;
+    if (
+      prev.source === source &&
+      prev.base === base &&
+      prev.rowHeight === rowHeight &&
+      prev.start === windowStart
+    ) {
+      return;
+    }
     const now = performance.now();
-    const step = prev.base === base && prev.rowHeight === rowHeight;
+    const step =
+      prev.source === source &&
+      prev.base === base &&
+      prev.rowHeight === rowHeight &&
+      Math.abs(windowStart - prev.start) === 1;
     const held = now - prev.at < REPEAT_WINDOW_MS;
-    synced.current = { base, rowHeight, start: windowStart, at: now };
+    synced.current = { source, base, rowHeight, start: windowStart, at: now };
     if (step && !held) {
       Animated.timing(offset.current, {
         toValue: translate,
@@ -158,12 +172,12 @@ export function TvList<T>({
     } else {
       offset.current.setValue(translate);
     }
-  }, [base, rowHeight, windowStart, translate]);
+  }, [source, base, rowHeight, windowStart, translate]);
 
-  const shownIndex = useRef(index);
+  const shownIndex = useRef(safeIndex);
   useLayoutEffect(() => {
-    if (shownIndex.current === index) return;
-    shownIndex.current = index;
+    if (shownIndex.current === safeIndex) return;
+    shownIndex.current = safeIndex;
     const shown: FrameWindow = {
       start: windowStart,
       end: windowStart + visibleRows,
@@ -171,12 +185,13 @@ export function TvList<T>({
       renderedEnd: rangeEnd,
     };
     requestAnimationFrame(() => {
-      if (mounted.current) callback.current?.(index, shown);
+      if (mounted.current) callback.current?.(safeIndex, shown);
     });
-  }, [index, windowStart, visibleRows, rangeStart, rangeEnd]);
+  }, [safeIndex, windowStart, visibleRows, rangeStart, rangeEnd]);
 
-  const prefetchStart = Math.max(0, rangeStart - pool);
-  const prefetchEnd = Math.min(count, rangeEnd + pool);
+  const prefetchStep = Math.max(1, pool >> 1);
+  const prefetchStart = Math.max(0, Math.floor((rangeStart - pool) / prefetchStep) * prefetchStep);
+  const prefetchEnd = Math.min(count, Math.ceil((rangeEnd + pool) / prefetchStep) * prefetchStep);
   useEffect(() => {
     source.prefetch(prefetchStart, prefetchEnd);
   }, [source, prefetchStart, prefetchEnd]);
@@ -189,9 +204,8 @@ export function TvList<T>({
         index={i}
         top={(i - base) * rowHeight}
         height={rowHeight}
-        focused={i === index}
-        version={version}
-        source={source}
+        focused={showFocus && i === safeIndex}
+        item={source.get(i)}
         renderRow={renderRow}
         rowLabel={rowLabel}
         testID={testID}
@@ -202,11 +216,13 @@ export function TvList<T>({
   return (
     <View testID={testID} style={{ height: visibleRows * rowHeight, overflow: 'hidden' }}>
       <Animated.View style={{ transform: [{ translateY: offset.current }] }}>{rows}</Animated.View>
-      <FocusRing
-        testID={testID === undefined ? undefined : `${testID}-ring`}
-        top={(index - windowStart) * rowHeight}
-        height={rowHeight}
-      />
+      {showFocus ? (
+        <FocusRing
+          testID={testID === undefined ? undefined : `${testID}-ring`}
+          top={(safeIndex - windowStart) * rowHeight}
+          height={rowHeight}
+        />
+      ) : null}
     </View>
   );
 }

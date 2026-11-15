@@ -109,6 +109,9 @@ Reference-app lessons already recorded in our research notes (prose, no code rea
   (#63 builds the messages).
 
 ### 5.4 Recovery ladder (live)
+The ladder starts on a stall longer than the watchdog window while playing, on a recoverable error, or when the start
+timeout (8 s) passes after `load` without the first `playing`. The start timeout ends at `playing`, not at
+`firstFrame` (amended during the build): a first frame without playback is not a started stream.
 Rungs, each bounded and visible as a status the OSD can show:
 - **L0 wait:** a stall shorter than the watchdog window (live 4 s) is left to the engine.
 - **L1 resume:** `retry` the same media at the live edge (the engine reuses what it can).
@@ -155,17 +158,32 @@ Rungs, each bounded and visible as a status the OSD can show:
 ## 6. Design: native engines and the OSD
 
 ### 6.1 Android, Android TV, Fire OS: `modules/engine-media3` (`@elv/engine-media3`)
-- Expo native module, Android only, Media3 pinned to 1.11.1 (`exoplayer`, `exoplayer-hls`, `datasource`). It imports
-  only `expo-modules-core` and `@elv/playback` types (layer rule).
+- Expo native module, Android only, Media3 pinned to 1.11.1 (`exoplayer`, `exoplayer-hls`, `datasource`,
+  `datasource-okhttp`, Apache-2.0). The OkHttp data source runs on the OkHttp React Native already ships (4.9.2 in
+  react-native-tvos 0.88; the extension's own 4.12.0 is excluded, and every OkHttp member it calls exists in 4.9.2), so
+  the app keeps one copy. It imports only `expo-modules-core` and `@elv/playback` types (layer rule); `react` and
+  `react-native` are peer dependencies of its view component.
 - Shape: an engine object (an Expo shared object, one per player screen) that implements `PlayerEngine` from §5.1, and
   a view `Media3Surface` that hosts a `SurfaceView` bound to an engine. The app creates the engine, passes it to the
   service and to the view. The surface type is fixed at creation and never changed at runtime; nothing between the
   surface and the window paints an opaque background, so the React Native OSD composes above it.
 - Threading: the ExoPlayer instance lives on a dedicated playback thread (its application looper). Commands from JS are
-  posted there and return immediately; events are sent from there. The UI thread never waits for the player.
+  posted there and return immediately; events are sent from there. The UI thread never waits for the player, with one
+  bounded exception: a surface detach (`surfaceDestroyed`, or an engine swap on one view) must not return while the
+  decoder still renders into the old surface, so it runs ahead of queued commands and waits at most 3 s (a release in
+  progress takes about 500 ms, Media3's `clearVideoSurface` up to 2 s, plus margin).
 - Connection discipline: every stream request goes through our `DataSource` wrapper with a per-engine connection gate.
-  `open` of a new request waits until the previous one is closed (bounded wait, then it closes it forcibly). With
-  `load` stopping the old media first, the simulator log must show zero overlap during zaps.
+  `open` of a new request waits until the previous one is closed. A new media (`load`, `retry`, `stop`) force-closes
+  the older connections at once on a per-engine closer thread: the OkHttp call is cancelled, which closes its socket
+  also while it connects or waits for the status line, and an `open` in progress is interrupted. A connection counts
+  until it has really closed; the wait forces again after 1,000 ms as a backstop and drops a connection whose call
+  was cancelled but that never closed 1,500 ms later (the cancel closed its socket, so the provider sees no overlap);
+  releasing a player drops its forced connections at once, since the gate outlives `recreate`. Each engine has its own
+  OkHttp client and dispatcher (64 calls, 16 per host); without a source agent it sends the platform `http.agent`, as
+  the default stack did. Connect timeout 3,500 ms, read timeout 10,000 ms: above the 8 s start timeout, so the
+  service's timers decide a silent stream's recovery (amended in the final review: the default HTTP stack could not
+  abort a connect or a status-line wait, so a "forced" request stayed open beside the next one). With `load` stopping
+  the old media first, the simulator log must show zero overlap during zaps.
 - Error mapping: `HttpDataSource.InvalidResponseCodeException.responseCode` gives the `http-*` codes; a `text/*` or HTML
   body on a stream request is `connection-limit` (providers answer the limit with a notice; the simulator models it);
   Media3 `PlaybackException` error codes map to `network`, `unsupported-format`, `decoder`, `drm`. URLs in `detail` are
@@ -216,13 +234,20 @@ Rungs, each bounded and visible as a status the OSD can show:
   `docs/learned/gates/player-android-tv.json`.
 - Budgets (§6.2): cold < 2.0 s, warm p50 < 1.0 s, zap p95 ≤ 2.0 s, one surface creation per run, no stale event applied,
   and zero 509 or limit responses from the simulator on the one-connection `demo` account during the zaps (the provider's
-  own view of overlap). `overlapMs` (TS stream requests of one account whose lifetimes overlap in the simulator log) is
-  reported and warned above 0; the simulator sees a close slightly after the app sends it, so it is not a hard budget.
-  HLS segment requests carry no account in the simulator log and are excluded.
+  own view of overlap; only the answer a request's own `?fault=` forces is excluded). `overlapMs` (TS stream requests
+  of one account, whatever their answer, whose lifetimes overlap in the simulator log; the worst run) is reported and
+  warned above 0; the simulator sees a close slightly after the app sends it, so it is not a hard budget. HLS segment
+  requests carry no account in the simulator log and are excluded. The runner reads the log after stopping the app,
+  so requests still open at the end are logged too. A time one run did not measure is warned about.
 - Fault runs (URLs built by the gate with `?fault=`): `drop@5` passes when playback is `playing` again within 10 s of the
   first drop without user action (the run ends there; the simulator would drop again); `status=404` passes when the
   service reaches `failed(http-404)` within 10 s; `status=509` passes when the service enters `limited` within 2 s and
-  its next load waits for the backoff (the run ends after the second backoff).
+  its next load waits for the backoff (the run ends after the second backoff). Media3 reconnects a dropped live TS
+  request on its own, so on the device `drop@5` usually recovers at L0 (a short stall, no rung): a stall of the current
+  attempt that ends while the service still shows `playing` counts as recovered, and the simulator log must show the
+  reconnect within 10 s of the drop. `slow-start=3` (added in the final review) holds the first answer back 3 s and
+  zaps away after 800 ms: it passes when the zap shows its frame and `demo` got no limit answer, so the slow request
+  was closed before the next channel's opened (overlap warns).
 - CI: phase 1 runs the player gate locally only (`docs/learned/gates/player-android-tv.json`); a report-only CI job is
   added once the local gate is stable (it needs FFmpeg on the runner and a decision about the emulator's `-noaudio`).
   The tvOS simulator run is phase 2.
@@ -253,3 +278,15 @@ Rungs, each bounded and visible as a status the OSD can show:
   stretched picture or a screensaver during a film is an operational defect for 0.1.
 - ADR 0003 is amended: AetherEngine licence wording, MPVKit's status and the no-co-linking rule, VLCKit as the Apple
   fallback, Media3 preloading not used for live.
+- During the build: the start timeout spans `load` to the first `playing`, not `firstFrame` (§5.4); the surface detach
+  is the one bounded UI-thread wait (§6.1).
+- Apple build spike (2026-11-14, Xcode 26.4.1, Swift 6.3.1): AetherEngine 7.67.0 does not build
+  (`PerFrameBenchmark.swift:261`, "unable to type-check this expression in reasonable time", deterministic on arm64
+  and x86_64, for tvOS and iOS). 7.66.1 builds for the tvOS simulator, a tvOS device and the iOS simulator, so phase 2
+  pins 7.66.1 (step 1 of the §6.2 fallback order) and re-pins only when a newer tag builds with the `tvos` job's
+  Xcode. The Expo integration spike is in progress (private report).
+- Final review (2026-11-14): Media3's default HTTP data source cannot abort a request that is still connecting or
+  waiting for its status line, so the gate's force-close was a no-op there and the next media opened beside it. The
+  engine now uses Media3's OkHttp data source on React Native's OkHttp, cancels superseded calls at once when a new
+  media begins and counts a connection until it has really closed (§6.1); the gate gained a `slow-start` fault run
+  (§7).

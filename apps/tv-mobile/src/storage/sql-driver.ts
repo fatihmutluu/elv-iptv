@@ -22,6 +22,7 @@ interface OpConnection {
     execute(): Promise<OpResult>;
   };
   interrupt(): void;
+  close(): void;
 }
 
 /** A SQL failure: `category` 'storage', `code` 'sql-failed', the SQLite message in `detail`. */
@@ -44,6 +45,12 @@ function abortError(): Error {
 
 const NESTED =
   'Nested transactions are not supported; run the work inside the open transaction instead.';
+
+const CONNECTION_PRAGMAS = [
+  'PRAGMA busy_timeout = 5000',
+  'PRAGMA temp_store = MEMORY',
+  'PRAGMA foreign_keys = ON',
+];
 
 /**
  * Splits a script into statements at semicolons outside single- and double-quoted literals, `--` and
@@ -92,15 +99,15 @@ export function splitSqlStatements(script: string): string[] {
   return out;
 }
 
-/** A {@link SqlDriver} whose statements can be interrupted when a run's signal aborts. */
+/** A {@link SqlDriver} whose writer statements can be interrupted when a run's signal aborts. */
 export interface OpSqliteDriver extends SqlDriver {
   /**
-   * Binds the signal of the current import run: when it aborts, `interrupt()` is called on both connections
-   * (rolling back an open transaction), and a statement failing while it is aborted rejects with an
-   * `AbortError`. There is one slot: binding replaces the previous signal, so bind one run at a time.
-   * Pass `undefined` to detach.
+   * Binds the signal of the current import run: when it aborts, `interrupt()` is called on the writer connection
+   * (rolling back an open transaction), and a writer statement failing while it is aborted rejects with an
+   * `AbortError`. Reader queries are never interrupted. Pass `undefined` to detach.
    */
   setAbortSignal(signal: AbortSignal | undefined): void;
+  close(): Promise<void>;
 }
 
 /**
@@ -114,9 +121,8 @@ export function databaseLocation(os: string): string | undefined {
 
 /**
  * Opens `name` twice (WAL) in `location` (an absolute directory; op-sqlite's default when omitted): a writer for writes
- * and transactions and a reader for plain `all` calls, so list queries are not queued behind an import batch. Each
- * connection has its own promise queue; `transaction` hands out a `tx` that bypasses the queue, rejects nesting, and
- * lets `batch` join it.
+ * and transactions and a reader for plain `all` calls, so list queries are not queued behind an import batch. Both
+ * connections receive connection-scoped pragmas (`busy_timeout`, `temp_store`, `foreign_keys`) on open.
  */
 export async function createOpSqliteDriver(
   name: string,
@@ -125,17 +131,30 @@ export async function createOpSqliteDriver(
   const options = location === undefined ? { name } : { name, location };
   const writer = open(options) as unknown as OpConnection;
   const reader = open(options) as unknown as OpConnection;
+  for (const pragma of CONNECTION_PRAGMAS) {
+    await writer.execute(pragma);
+    await reader.execute(pragma);
+  }
+
   let signal: AbortSignal | undefined;
+  let closePromise: Promise<void> | undefined;
   const onAbort = () => {
     writer.interrupt();
-    reader.interrupt();
   };
 
-  const guard = async <T>(work: () => Promise<T>): Promise<T> => {
+  const writeGuard = async <T>(work: () => Promise<T>): Promise<T> => {
     try {
       return await work();
     } catch (error) {
       throw signal?.aborted ? abortError() : new SqlFailedError(error);
+    }
+  };
+
+  const readGuard = async <T>(work: () => Promise<T>): Promise<T> => {
+    try {
+      return await work();
+    } catch (error) {
+      throw new SqlFailedError(error);
     }
   };
 
@@ -156,12 +175,13 @@ export async function createOpSqliteDriver(
   const changes = (r: OpResult): SqlRunResult => ({ changes: r.rowsAffected });
 
   const inTransaction = (tx: OpTx): SqlDriver => ({
-    exec: (sql) => guard(() => statements((s) => tx.execute(s), sql)),
-    run: (sql, params) => guard(async () => changes(await tx.execute(sql, [...(params ?? [])]))),
+    exec: (sql) => writeGuard(() => statements((s) => tx.execute(s), sql)),
+    run: (sql, params) =>
+      writeGuard(async () => changes(await tx.execute(sql, [...(params ?? [])]))),
     all: <T>(sql: string, params?: readonly SqlValue[]) =>
-      guard(async () => (await tx.execute(sql, [...(params ?? [])])).rows as T[]),
+      writeGuard(async () => (await tx.execute(sql, [...(params ?? [])])).rows as T[]),
     batch: (sql, rows) =>
-      guard(async () => {
+      writeGuard(async () => {
         if (rows.length === 0) return;
         const statement = writer.prepareStatement(sql);
         for (const row of rows) {
@@ -178,18 +198,20 @@ export async function createOpSqliteDriver(
     setAbortSignal(next) {
       signal?.removeEventListener('abort', onAbort);
       signal = next;
-      if (next === undefined) return;
+      if (next === undefined || closePromise !== undefined) return;
       if (next.aborted) onAbort();
       else next.addEventListener('abort', onAbort, { once: true });
     },
-    exec: (sql) => writes(() => guard(() => statements((s) => writer.execute(s), sql))),
+    exec: (sql) => writes(() => writeGuard(() => statements((s) => writer.execute(s), sql))),
     run: (sql, params) =>
-      writes(() => guard(async () => changes(await writer.execute(sql, [...(params ?? [])])))),
+      writes(() => writeGuard(async () => changes(await writer.execute(sql, [...(params ?? [])])))),
     all: <T>(sql: string, params?: readonly SqlValue[]) =>
-      reads(() => guard(async () => (await reader.execute(sql, [...(params ?? [])])).rows as T[])),
+      reads(() =>
+        readGuard(async () => (await reader.execute(sql, [...(params ?? [])])).rows as T[]),
+      ),
     batch: (sql, rows) =>
       writes(() =>
-        guard(async () => {
+        writeGuard(async () => {
           if (rows.length === 0) return;
           await writer.executeBatch(rows.map((row) => [sql, [...row]]));
         }),
@@ -199,7 +221,7 @@ export async function createOpSqliteDriver(
         let value: T | undefined;
         let callbackError: { error: unknown } | undefined;
         try {
-          await guard(() =>
+          await writeGuard(() =>
             writer.transaction(async (tx) => {
               try {
                 value = await fn(inTransaction(tx));
@@ -214,5 +236,19 @@ export async function createOpSqliteDriver(
         }
         return value as T;
       }),
+    close() {
+      if (closePromise !== undefined) return closePromise;
+      signal?.removeEventListener('abort', onAbort);
+      signal = undefined;
+      closePromise = Promise.all([
+        writes(async () => {
+          writer.close();
+        }),
+        reads(async () => {
+          reader.close();
+        }),
+      ]).then(() => undefined);
+      return closePromise;
+    },
   };
 }

@@ -298,21 +298,29 @@ export async function loadSeriesEpisodes(
       key: xtreamKey(sourceId, 'episode', episode.id),
       episode,
     }));
-    const stored = await deps.db.transaction(async (tx) => {
-      if (!(await sourceExists(tx, sourceId))) return false;
+    const stored = await deps.db.transaction<'ok' | 'no-source' | 'no-series'>(async (tx) => {
+      if (!(await sourceExists(tx, sourceId))) return 'no-source';
+      const current = (
+        await tx.all<{ provider_id: string | null; run_id: number }>(
+          'SELECT provider_id, run_id FROM series WHERE source_id = ? AND key = ?',
+          [sourceId, seriesKey],
+        )
+      )[0];
+      if (current?.provider_id == null) return 'no-series';
       const previous = await tx.all<{ key: string }>(
         'SELECT key FROM episodes WHERE source_id = ? AND series_key = ?',
         [sourceId, seriesKey],
       );
-      await writeEpisodes(tx, sourceId, seriesKey, row.run_id, entries);
+      await writeEpisodes(tx, sourceId, seriesKey, current.run_id, entries);
       const keep = new Set(entries.map((e) => e.key));
       await tx.batch(
         'DELETE FROM episodes WHERE source_id = ? AND key = ?',
         previous.filter((p) => !keep.has(p.key)).map((p) => [sourceId, p.key]),
       );
-      return true;
+      return 'ok';
     });
-    if (!stored) return err(elvError('storage', 'source-not-found'));
+    if (stored === 'no-source') return err(elvError('storage', 'source-not-found'));
+    if (stored === 'no-series') return err(elvError('source-format', 'unknown-series'));
     notify(opts, { phase: 'episodes', done: entries.length, total: entries.length });
     await deps.scheduler.yieldNow();
     return ok(entries.length);

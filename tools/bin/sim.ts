@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util';
-import { ALL_RECIPES, ensureRecipe, findFfmpeg } from '../src/sim/media.ts';
+import { ensureRecipe, findFfmpeg, missingEncoders } from '../src/sim/media.ts';
+import { ALL_RECIPES } from '../src/sim/recipes.ts';
 import { defaultCacheDir, startSim } from '../src/sim/server.ts';
 
 const USAGE =
@@ -15,9 +16,20 @@ async function prepare(): Promise<void> {
   if (ffmpeg === null) fail('FFmpeg not found: set FFMPEG_PATH or install FFmpeg');
   const cacheDir = defaultCacheDir();
   const started = Date.now();
-  for (const recipe of ALL_RECIPES) await ensureRecipe(recipe, { ffmpeg, cacheDir, seconds: 600 });
+  let prepared = 0;
+  const skipped: string[] = [];
+  for (const recipe of ALL_RECIPES) {
+    const missing = missingEncoders(ffmpeg, recipe);
+    if (missing.length > 0) {
+      skipped.push(`skipped ${recipe} (no ${missing.join(' ')})`);
+      continue;
+    }
+    await ensureRecipe(recipe, { ffmpeg, cacheDir, seconds: 600 });
+    prepared++;
+  }
   const sec = Math.round((Date.now() - started) / 1000);
-  process.stdout.write(`sim: prepared ${ALL_RECIPES.length} recipes in ${cacheDir} (${sec}s)\n`);
+  const tail = skipped.length > 0 ? `, ${skipped.join(', ')}` : '';
+  process.stdout.write(`sim: prepared ${prepared} recipes in ${cacheDir} (${sec}s)${tail}\n`);
 }
 
 function main(): void {

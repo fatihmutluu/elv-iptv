@@ -5,6 +5,7 @@ import {
   httpStatusError,
   m3uKey,
   ok,
+  openAsyncIterator,
   type Result,
   transportHeaders,
 } from '@elv/domain';
@@ -13,7 +14,14 @@ import { foldText } from './fold';
 import { checkAbort, performRun, type RunCtx, Stop, unwrap } from './import-run';
 import type { ImportDeps, ImportOptions, ImportSummary } from './import-types';
 import { RuleBook } from './m3u-rules';
-import { knownCredentials, placeholderNames, SAMPLE_SIZE, VarBook } from './m3u-templating';
+import {
+  knownCredentials,
+  MAX_URLVARS_BYTES,
+  placeholderNames,
+  SAMPLE_SIZE,
+  utf8ByteLength,
+  VarBook,
+} from './m3u-templating';
 import {
   getSource,
   guideSecret,
@@ -23,11 +31,12 @@ import {
   updateSourceSettings,
 } from './sources';
 import { readUrlVars } from './stream-resolver';
-import { keyTemplate, type SegmentRule, toTemplate, type UrlVars } from './templates';
+import { hostOf, keyTemplate, type SegmentRule, toTemplate, type UrlVars } from './templates';
 import { writeCategories, writePlacements } from './writers';
 import {
   type M3uLiveRow,
   type M3uRow,
+  rollbackUnresolvedM3uRows,
   writeM3uEpisodes,
   writeM3uLive,
   writeM3uMovies,
@@ -38,6 +47,13 @@ type Kind = 'live' | 'movie' | 'series';
 
 const REQUEST_TIMEOUT_MS = 60_000;
 const UNGROUPED = 'Ungrouped';
+const SECRET_HEADERS = new Set([
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+  'x-api-key',
+  'x-auth-token',
+]);
 
 interface State {
   settings: SourceSettings;
@@ -47,12 +63,12 @@ interface State {
   categories: Record<Kind, Map<string, number>>;
   positions: Map<string, number>;
   placedSeries: Set<string>;
-  seen: Record<'live' | 'movies' | 'episodes' | 'series', Set<string>>;
+  written: Record<'live' | 'movies' | 'episodes' | 'series', number>;
 }
 
 async function discard(body: HttpResponse['body']): Promise<void> {
   try {
-    await body[Symbol.asyncIterator]().return?.();
+    await openAsyncIterator(body).return?.();
   } catch {
     // the response is already classified by its status
   }
@@ -80,9 +96,34 @@ async function openPlaylist(
   throw new Stop(httpStatusError(status));
 }
 
+function collectSampleUrls(sample: readonly M3uEntry[]): { url: string; role: string }[] {
+  const out: { url: string; role: string }[] = [];
+  for (const e of sample) {
+    out.push({ url: e.url, role: 'stream' });
+    if (e.tvgLogo !== undefined) out.push({ url: e.tvgLogo, role: 'logo' });
+    if (e.headers.referer !== undefined) out.push({ url: e.headers.referer, role: 'referer' });
+    for (const v of Object.values(e.headers.other)) {
+      if (hostOf(v) !== undefined) out.push({ url: v, role: 'other' });
+    }
+  }
+  return out;
+}
+
+function holdEntry(rules: RuleBook, entry: M3uEntry): boolean {
+  let wait = rules.hold(entry.url, 'stream');
+  if (entry.tvgLogo !== undefined && rules.hold(entry.tvgLogo, 'logo')) wait = true;
+  if (entry.headers.referer !== undefined && rules.hold(entry.headers.referer, 'referer')) {
+    wait = true;
+  }
+  for (const v of Object.values(entry.headers.other)) {
+    if (hostOf(v) !== undefined && rules.hold(v, 'other')) wait = true;
+  }
+  return wait;
+}
+
 function start(source: SourceRecord, playlistUrl: string, sample: readonly M3uEntry[]): State {
   const rules = new RuleBook(source.settings.segmentRules);
-  rules.start(sample.map((e) => e.url));
+  rules.startEntries(collectSampleUrls(sample));
   return {
     settings: { ...source.settings },
     rules,
@@ -91,7 +132,7 @@ function start(source: SourceRecord, playlistUrl: string, sample: readonly M3uEn
     categories: { live: new Map(), movie: new Map(), series: new Map() },
     positions: new Map(),
     placedSeries: new Set(),
-    seen: { live: new Set(), movies: new Set(), episodes: new Set(), series: new Set() },
+    written: { live: 0, movies: 0, episodes: 0, series: 0 },
   };
 }
 
@@ -99,10 +140,26 @@ function templated(st: State, url: string): string {
   return st.book.absorb(toTemplate(url, st.rules.rules, st.known));
 }
 
-function liveHeaders(st: State, entry: M3uEntry): string | null {
-  const headers: { userAgent?: string; referer?: string } = {};
+function entryHeaders(st: State, entry: M3uEntry): string | null {
+  const headers: { userAgent?: string; referer?: string; other?: Record<string, string> } = {};
   if (entry.headers.userAgent !== undefined) headers.userAgent = entry.headers.userAgent;
   if (entry.headers.referer !== undefined) headers.referer = templated(st, entry.headers.referer);
+  const otherKeys = Object.keys(entry.headers.other);
+  if (otherKeys.length > 0) {
+    const other: Record<string, string> = {};
+    for (const key of otherKeys) {
+      const val = entry.headers.other[key] as string;
+      if (SECRET_HEADERS.has(key)) {
+        const name = `h:${key}`;
+        other[key] = st.book.absorb({ template: `{{${name}}}`, vars: { [name]: val } });
+      } else if (hostOf(val) !== undefined) {
+        other[key] = templated(st, val);
+      } else {
+        other[key] = val.replace(/\{\{/g, '{{(}}');
+      }
+    }
+    headers.other = other;
+  }
   return Object.keys(headers).length === 0 ? null : JSON.stringify(headers);
 }
 
@@ -121,7 +178,12 @@ function place(
   for (const group of groups) {
     if (!known.has(group)) {
       known.set(group, known.size);
-      fresh.set(kind, [...(fresh.get(kind) ?? []), group]);
+      let list = fresh.get(kind);
+      if (list === undefined) {
+        list = [];
+        fresh.set(kind, list);
+      }
+      list.push(group);
     }
     const slot = `${kind}\n${group}`;
     const position = st.positions.get(slot) ?? 0;
@@ -145,40 +207,37 @@ async function processBatch(c: RunCtx, st: State, entries: readonly M3uEntry[]):
       name: entry.name,
       logo: entry.tvgLogo === undefined ? null : templated(st, entry.tvgLogo),
       template,
+      headersJson: entryHeaders(st, entry),
     };
+    if (st.book.byteLength > MAX_URLVARS_BYTES) {
+      throw new Stop(elvError('source-format', 'urlvars-too-large'));
+    }
     if (vod || entry.kindHint === 'movie') {
       movies.push(row);
-      st.seen.movies.add(row.key);
+      st.written.movies += 1;
       place(st, 'movie', row.key, groupsOf(entry), fresh, links);
     } else if (entry.kindHint === 'episode') {
       const group = entry.groups[0] ?? UNGROUPED;
       const folded = foldText(group);
       const seriesKey = `m:${c.sourceId}:series:${folded === '' ? 'ungrouped' : folded}`;
       episodes.push({ ...row, seriesKey });
-      st.seen.episodes.add(row.key);
-      if (!st.seen.series.has(seriesKey)) {
-        st.seen.series.add(seriesKey);
-        series.set(seriesKey, group);
-      }
+      st.written.episodes += 1;
+      if (!series.has(seriesKey)) series.set(seriesKey, group);
       const groups = groupsOf(entry);
-      place(
-        st,
-        'series',
-        seriesKey,
-        groups.filter((g) => !st.placedSeries.has(`${seriesKey}\n${g}`)),
-        fresh,
-        links,
-      );
-      for (const g of groups) st.placedSeries.add(`${seriesKey}\n${g}`);
+      const freshGroups = groups.filter((g) => !st.placedSeries.has(`${seriesKey}\n${g}`));
+      if (freshGroups.length > 0) {
+        st.written.series += 1;
+        place(st, 'series', seriesKey, freshGroups, fresh, links);
+        for (const g of freshGroups) st.placedSeries.add(`${seriesKey}\n${g}`);
+      }
     } else {
       live.push({
         ...row,
         num: entry.chno ?? null,
         guideId: entry.tvgId ?? null,
-        catchupDays: entry.catchup?.days ?? null,
-        headersJson: liveHeaders(st, entry),
+        catchupDays: entry.catchup?.days ?? entry.timeshiftDays ?? null,
       });
-      st.seen.live.add(row.key);
+      st.written.live += 1;
       place(st, 'live', row.key, groupsOf(entry), fresh, links);
     }
   }
@@ -206,13 +265,9 @@ async function processBatch(c: RunCtx, st: State, entries: readonly M3uEntry[]):
   for (const kind of ['live', 'movie', 'series'] as const) {
     await writePlacements(c.db, c.sourceId, kind, c.runId, links[kind]);
   }
-  const phases = [
-    ['live', st.seen.live],
-    ['movies', st.seen.movies],
-    ['series', st.seen.series],
-    ['episodes', st.seen.episodes],
-  ] as const;
-  for (const [phase, set] of phases) if (set.size > 0) c.progress({ phase, done: set.size });
+  for (const phase of ['live', 'movies', 'series', 'episodes'] as const) {
+    if (st.written[phase] > 0) c.progress({ phase, done: st.written[phase] });
+  }
   await c.deps.scheduler.yieldNow();
 }
 
@@ -240,10 +295,13 @@ function finish(c: RunCtx, st: State, oldVars: UrlVars, guideUrls: readonly stri
       return g.template;
     });
   }
-  c.counts.live = st.seen.live.size;
-  c.counts.movies = st.seen.movies.size;
-  c.counts.series = st.seen.series.size;
-  c.counts.episodes = st.seen.episodes.size;
+  if (utf8ByteLength(JSON.stringify(vars)) > MAX_URLVARS_BYTES) {
+    throw new Stop(elvError('source-format', 'urlvars-too-large'));
+  }
+  c.counts.live = st.written.live;
+  c.counts.movies = st.written.movies;
+  c.counts.series = st.written.series;
+  c.counts.episodes = st.written.episodes;
   c.counts.categories =
     st.categories.live.size + st.categories.movie.size + st.categories.series.size;
   return { rules: st.rules.final(), discovered, vars };
@@ -265,7 +323,7 @@ class Gate {
   admit(entries: readonly M3uEntry[]): M3uEntry[] {
     const out: M3uEntry[] = [];
     for (const entry of entries) {
-      const wait = this.st.rules.hold(entry.url);
+      const wait = holdEntry(this.st.rules, entry);
       if (this.held.length === 0 && !wait) {
         out.push(entry);
         continue;
@@ -357,14 +415,38 @@ export async function importM3u(
     .get(secretKey(source.id, 'playlist'))
     .catch(() => undefined);
   if (playlistUrl === undefined) return err(elvError('storage', 'secret-missing'));
+  const urlvarsKey = secretKey(source.id, 'urlvars');
   const oldVars = await readUrlVars(deps, source.id);
   let staged: Staged | undefined;
+  let secretsStaged = false;
   return performRun(source, deps, opts, {
     execute: async (c) => {
       staged = await execute(c, source, playlistUrl, oldVars);
     },
-    beforeCleanup: async (tx) => {
+    beforeCommit: async () => {
       if (staged === undefined) return;
+      const merged: UrlVars = { ...oldVars, ...staged.vars };
+      try {
+        await deps.secrets.set(urlvarsKey, JSON.stringify(merged));
+        secretsStaged = true;
+      } catch {
+        throw new Stop(elvError('storage', 'secret-write-failed'));
+      }
+    },
+    beforeCleanup: async (tx, c) => {
+      if (staged === undefined) return;
+      for (const [key, table] of [
+        ['live', 'live'],
+        ['movies', 'movies'],
+        ['series', 'series'],
+        ['episodes', 'episodes'],
+      ] as const) {
+        const r = await tx.all<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM ${table} WHERE source_id = ? AND run_id = ?`,
+          [c.sourceId, c.runId],
+        );
+        c.counts[key] = r[0]?.n ?? 0;
+      }
       const current = (await getSource(tx, source.id))?.settings ?? source.settings;
       const settings: SourceSettings = { ...current };
       if (staged.rules.length > 0) settings.segmentRules = staged.rules;
@@ -375,7 +457,22 @@ export async function importM3u(
     },
     afterCommit: async () => {
       if (staged === undefined) return;
-      await deps.secrets.set(secretKey(source.id, 'urlvars'), JSON.stringify(staged.vars));
+      const vars = staged.vars;
+      if (Object.keys(oldVars).some((k) => !Object.hasOwn(vars, k))) {
+        await deps.secrets.set(urlvarsKey, JSON.stringify(vars)).catch(() => undefined);
+      }
+    },
+    onAbortOrFail: async (c, outcome, error) => {
+      if (outcome === 'source-removed') {
+        if (secretsStaged) await deps.secrets.delete(urlvarsKey).catch(() => undefined);
+        return;
+      }
+      if (secretsStaged) {
+        await deps.secrets.set(urlvarsKey, JSON.stringify(oldVars)).catch(() => undefined);
+      }
+      if (error.code === 'urlvars-too-large' || error.code === 'secret-write-failed') {
+        await rollbackUnresolvedM3uRows(deps.db, source.id, c.runId, oldVars);
+      }
     },
   });
 }

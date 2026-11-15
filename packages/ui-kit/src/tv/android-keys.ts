@@ -26,8 +26,10 @@ const KEY_CODES = new Map<number, Key>([
   [111, 'back'],
   [82, 'menu'],
   [85, 'playPause'],
-  [126, 'playPause'],
-  [127, 'playPause'],
+  [126, 'play'],
+  [127, 'pause'],
+  [89, 'rewind'],
+  [90, 'fastForward'],
   [166, 'channelUp'],
   [92, 'channelUp'],
   [167, 'channelDown'],
@@ -56,29 +58,47 @@ export function mapAndroidKeyCode(keyCode: number): Key | undefined {
   return KEY_CODES.get(keyCode);
 }
 
+interface HeldKeyState {
+  codes: Set<number>;
+  rawDownAt: number;
+  reportedDownAt: number;
+}
+
 /**
  * Creates a stateful adapter from raw Android key events to focus-core inputs.
- * `now` is the caller's clock (`performance.now()`); a down or up is back-dated by the event's age, capped at 100 ms.
- * Held state is tracked per mapped key, so a repeated down (also from a second code of the same key) and an up
- * without a seen down give nothing. A canceled up becomes `cancel`; `blur` cancels every held key.
+ * `now` is the caller's clock (`performance.now()`); a down is back-dated by the event's age, capped at 100 ms, while
+ * its release preserves the un-capped raw hold duration (`reportedDownAt + rawHold`) so JS stalls never turn a short
+ * tap into `long` or crush a real hold into `press`. Held state tracks active `keyCode`s per mapped `Key`, ignoring
+ * orphan releases of unheld codes and keeping a `Key` held until its last held `keyCode` lifts. A canceled final
+ * release becomes `cancel`; `blur` cancels every held key.
  */
 export function createAndroidKeyAdapter(): (event: AndroidKeyEvent, now: number) => KeyInput[] {
-  const held = new Set<Key>();
+  const held = new Map<Key, HeldKeyState>();
   return (event, now) => {
     if (event.action === 'blur') {
-      const out = [...held].map((key): KeyInput => ({ key, action: 'cancel', time: now }));
+      const out = [...held.keys()].map((key): KeyInput => ({ key, action: 'cancel', time: now }));
       held.clear();
       return out;
     }
     const key = mapAndroidKeyCode(event.keyCode);
     if (key === undefined) return [];
-    const time = now - Math.min(Math.max(0, event.ageMs), MAX_BACKDATE_MS);
+    const safeAge = Math.max(0, event.ageMs);
+    const rawAt = now - safeAge;
     if (event.action === 'down') {
-      if (held.has(key)) return [];
-      held.add(key);
-      return [{ key, action: 'down', time }];
+      const existing = held.get(key);
+      if (existing !== undefined) {
+        existing.codes.add(event.keyCode);
+        return [];
+      }
+      const reportedDownAt = now - Math.min(safeAge, MAX_BACKDATE_MS);
+      held.set(key, { codes: new Set([event.keyCode]), rawDownAt: rawAt, reportedDownAt });
+      return [{ key, action: 'down', time: reportedDownAt }];
     }
-    if (!held.delete(key)) return [];
+    const existing = held.get(key);
+    if (existing === undefined || !existing.codes.delete(event.keyCode)) return [];
+    if (existing.codes.size > 0) return [];
+    held.delete(key);
+    const time = existing.reportedDownAt + Math.max(0, rawAt - existing.rawDownAt);
     return [{ key, action: event.canceled ? 'cancel' : 'up', time }];
   };
 }

@@ -11,7 +11,8 @@ private val NAMED_STATUSES = setOf(401, 403, 404, 429, 509)
  * notice or a text or HTML body on a successful stream response is the connection limit. Malformed media (a garbage
  * segment, a truncated playlist refresh) is `network` for [live] media and for VOD that [played] since its last
  * prepare, so the ladder retries it; malformed VOD that never played and unsupported containers or manifests stay
- * `unsupported-format`.
+ * `unsupported-format`. A platform policy block (cleartext not permitted, no permission) is `unsupported-format`
+ * too: this device cannot open the stream, and no retry changes that.
  */
 fun mapError(
   responseCode: Int?,
@@ -20,17 +21,22 @@ fun mapError(
   notice: Boolean = false,
   live: Boolean = false,
   played: Boolean = false,
+  surfaceLost: Boolean = false,
 ): String {
   if (responseCode != null && responseCode !in 200..299) {
     return if (responseCode in NAMED_STATUSES) "http-$responseCode" else "http-other"
   }
   if (notice) return "connection-limit"
   if (contentType != null && isNoticeContentType(contentType, hls = false)) return "connection-limit"
+  if (surfaceLost) return "surface-lost"
   return when (playbackErrorCode) {
     PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE -> "connection-limit"
     PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "http-other"
     PlaybackException.ERROR_CODE_TIMEOUT -> "engine-wedged"
     PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW -> "network"
+    PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED,
+    PlaybackException.ERROR_CODE_IO_NO_PERMISSION,
+    -> "unsupported-format"
     PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
     PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
     -> if (live || played) "network" else "unsupported-format"

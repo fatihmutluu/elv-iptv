@@ -159,7 +159,8 @@ describe('scanXmltv batching', () => {
       }
       batches.push(r.value);
     }
-    expect(batches.map((b) => b.programmes.length)).toEqual([10, 10, 5]);
+    expect(batches.map((b) => b.programmes.length)).toEqual([9, 10, 6]);
+    expect(batches.map((b) => b.channels.length + b.programmes.length)).toEqual([10, 10, 6]);
     expect(batches.map((b) => b.done)).toEqual([false, false, true]);
     expect(batches[0]?.channels).toHaveLength(1);
     expect(batches.slice(0, 2).every((b) => b.stats === undefined)).toBe(true);
@@ -183,7 +184,7 @@ describe('scanXmltv batching', () => {
   it('gives the same result for random splits and any batch size', async () => {
     const text = many(40);
     const base = await collect(whole(text), { batchSize: 1 });
-    expect(base.batches.slice(0, 40).every((n) => n === 1)).toBe(true);
+    expect(base.batches.slice(1, 41).every((n) => n === 1)).toBe(true);
     for (const seed of [1, 2, 3]) {
       const r = await collect(randomSplits(utf8(text), seed, 64), { batchSize: 7 });
       expect(r.programmes).toEqual(base.programmes);
@@ -302,5 +303,56 @@ describe('scanXmltv programmeChannels', () => {
     });
     expect(r.channels.map((c) => c.id)).toEqual(['a', 'b']);
     expect(r.programmes.map((p) => p.title)).toEqual(['A1']);
+  });
+
+  it('scans @@asyncIterator inputs and gzip decompressors when Symbol.asyncIterator is undefined', async () => {
+    const OriginalSymbol = globalThis.Symbol;
+    const FakeSymbol = Object.assign(
+      ((description?: string | number) => OriginalSymbol(description)) as typeof Symbol,
+      {
+        for: OriginalSymbol.for.bind(OriginalSymbol),
+        keyFor: OriginalSymbol.keyFor.bind(OriginalSymbol),
+        asyncIterator: undefined as unknown as typeof Symbol.asyncIterator,
+      },
+    );
+    const babelChunks = (items: Uint8Array[]): AsyncIterable<Uint8Array> => {
+      let i = 0;
+      const gen = {
+        '@@asyncIterator'() {
+          return gen;
+        },
+        next: async () =>
+          i < items.length
+            ? { done: false as const, value: items[i++] as Uint8Array }
+            : { done: true as const, value: undefined },
+      };
+      return gen as unknown as AsyncIterable<Uint8Array>;
+    };
+
+    const xmlBytes = utf8(guide(channel('a') + prog('a', 'Hermes Guide')));
+    const asyncGenProto = Object.getPrototypeOf(
+      Object.getPrototypeOf((async function* () {})()),
+    ) as Record<string, unknown>;
+    asyncGenProto['@@asyncIterator'] = function (this: unknown) {
+      return this;
+    };
+    (globalThis as { Symbol: typeof Symbol }).Symbol = FakeSymbol;
+    try {
+      const plainGen = scanXmltv(babelChunks([xmlBytes]));
+      const plainStep = await plainGen.next();
+      expect(!plainStep.done && plainStep.value.programmes[0]?.title).toBe('Hermes Guide');
+
+      const gzHeader = new Uint8Array([0x1f, 0x8b, 0x08]);
+      const gzGen = scanXmltv(babelChunks([gzHeader]), {
+        decompressor: {
+          gunzip: () => babelChunks([xmlBytes]),
+        },
+      });
+      const gzStep = await gzGen.next();
+      expect(!gzStep.done && gzStep.value.programmes[0]?.title).toBe('Hermes Guide');
+    } finally {
+      (globalThis as { Symbol: typeof Symbol }).Symbol = OriginalSymbol;
+      delete asyncGenProto['@@asyncIterator'];
+    }
   });
 });

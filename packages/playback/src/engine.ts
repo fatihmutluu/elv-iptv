@@ -100,6 +100,10 @@ export interface PlayerEngine {
   pause(attempt: AttemptToken): void;
   seek(attempt: AttemptToken, positionMs: number): void;
   stop(attempt: AttemptToken): void;
+  /**
+   * Releases and rebuilds the native player instance, keeping the view and the surface. The new
+   * instance is idle: nothing plays until the caller sends a `load` (recovery rung 3 sends one).
+   */
   recreate(attempt: AttemptToken): void;
   release(): void;
   /** Returns the unsubscribe function. */

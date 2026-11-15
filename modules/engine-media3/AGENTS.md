@@ -13,38 +13,38 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
 ## Threading and view
 - ExoPlayer runs on the engine's `HandlerThread` (application looper), built at creation; JS calls post there and
   return; events run there (`emit` hops to JS). `OnDestroy` (JS reload) and `sharedObjectDidRelease` dispose engines.
-- `Media3SurfaceView` (details in `VIEW.md`): a `SurfaceView` fixed at creation (never on top) under a black zap
-  shutter (from each `load` until that media's first frame; `firstFrame` once per prepare, behind a fence), sized at
-  the video's display aspect ratio (`resizeMode` `fit` or `fill`) with black bars beside it, never over it. The engine
-  posts shutter, picture size and screen-on reports (on while playing) to the view; a surface detach is the only
-  UI-thread wait (capped at 3 s).
+- `Media3SurfaceView` (details in `VIEW.md`): a fixed `SurfaceView` (never on top) under a black zap shutter (each
+  `load` until that media's first frame, behind a fence), at the display aspect ratio (`fit`/`fill`) with bars beside
+  it; the engine posts shutter, size and screen-on reports. A surface detach is the only UI-thread wait (3 s cap).
 
 ## Playback
 - Every prepare (`load`, `retry`) builds a new media source, `playWhenReady = true`; `retry`: live at the default
   position, VOD at the current one. `stop` clears the media; `recreate` rebuilds ExoPlayer (same surface), left idle.
-- Source by URL (`SourceType.kt`): `.m3u8`/`.m3u` HLS; `.ts` and extensionless live use the TS extractor only (flags
-  `ALLOW_NON_IDR_KEYFRAMES`, `DETECT_ACCESS_UNITS`); anything else sniffs containers. A progressive guess answered with
-  a playlist is prepared once as HLS from the same URL, in the same gate generation (no error event).
+- Source (`SourceType.kt`): `.m3u8`/`.m3u` HLS; `.ts` and extensionless live: TS extractor only (non-IDR keyframes,
+  access units); else sniffed. A playlist answer is prepared once as HLS (same URL, same generation).
 - States: `opening` on prepare, `buffering`, `ready`, `playing`, `paused` (not wanted), `ended`; a live media that
   ends sends `error network`. `stall`: buffering while wanted after it played. `clock` anchors when the effective rate
   (speed while playing, else 0) changes, on seeks and once a second while playing; `durationMs` (VOD), `liveEdgeMs`
-  (live, window end) when known. `options.softwareAudio`: software audio decoders first, extension renderers (#69).
-  Buffers: 15-30 s, start 1 s, after rebuffer 2 s, target 16 MB when low-RAM (`isLowRamDevice`, < 1.5 GB) else 32 MB.
+  (live, window end) when known. Extension renderers are `ON` by default (`PREFER` + software audio first when
+  `options.softwareAudio` is set, #69). Buffers: 15-30 s, start 1 s, after rebuffer 2 s, 16 MB low-RAM else 32 MB.
 
-## Requests and errors (`ConnectionGate`, `GatedDataSource`, `SniffingDataSource`, `LoadRetry`, `ErrorMapping`)
-- Every prepare and `stop` begins a generation; an `open` waits until older generations closed, force-closes them after
-  1,000 ms (`Log.w`), and `tryOpen` refuses or counts it in one locked step once superseded or current.
-- HTTP: default data source, `LoadCommand.headers`, cross-protocol redirects. Every response is read ahead 1 KB and
-  judged by request kind, not label (`classifyResponse`): progressive `#EXTM3U` is HLS, playlists need `#EXTM3U`,
-  readable text that is no MPEG-TS (sync search) nor, for segments, WebVTT is the notice; keys are never read.
+## Requests and errors (`ConnectionGate`, `GatedDataSource`, `StreamHttp`, sniffing, `LoadRetry`, `ErrorMapping`)
+- Every prepare, `stop`, `recreate` and `dispose` begins a generation before stopping/releasing ExoPlayer and
+  force-closes older connections on the closer thread (cancelling OkHttp and interrupting `open`). Connections stay
+  counted until closed, forcing again at 1 s and dropping cancelled ones 1.5 s later; `releasePlayer` drops superseded
+  connections once force-close finishes (`dispose` shuts the closer down and clears keep-screen-on).
+- HTTP: `media3-datasource-okhttp`, one client per engine (dispatcher: 64 calls, 16/host; shared pool), connect 3.5 s,
+  read 10 s, redirects, `LoadCommand.headers` (`Authorization`/`Cookie`/`Proxy-Authorization` stripped off-origin or on
+  `https->http`), else `http.agent` (OkHttp 4.9.2 `compileOnly`). Responses read ahead 1 KB (`classifyResponse`; keys
+  and `Content-Range` slices at `position > 0` skipped; RFC 3629 UTF-8; WebVTT/TTML/XML/SRT segments allowed).
 - `failsAtOnce`: an HTTP status skips Media3's retries on progressive media and before the first HLS manifest; then
   HLS segments and refreshes retry except 401/403/429/509. Notices and refused requests always fail at once.
-- `mapError`: 401/403/404/429/509 keep `http-<code>`, other statuses `http-other`, a notice `connection-limit`, 2xxx and
-  behind-live-window `network`, malformed 3001/3002 `network` when live or played since prepare, other 3xxx
-  `unsupported-format`, 4xxx/5xxx/7xxx `decoder`, 6xxx `drm`, timeout `engine-wedged`, else `unknown`. `detail`: error
-  name plus `redactUrl(uri)` (no query, fragment or user-info; credential path segments `***`), no exception messages.
+- `mapError`: 401/403/404/429/509 keep `http-<code>`, other statuses `http-other`, a notice `connection-limit`, invalid
+  decoder surface `surface-lost`; 3xxx and 2006/2007 `unsupported-format`, malformed 3001/3002 when live or played
+  `network`; other 2xxx, behind-live-window `network`, 4/5/7xxx `decoder`, 6xxx `drm`, timeout `engine-wedged`.
+  `detail`: error name and `redactUrl(uri)` (credentials `***`), no exception text; `LoadRequest` text: no URL/header.
 
 ## Tests and rules
-- Vitest: `pnpm --filter @elv/engine-media3 test`. JVM (JUnit 4), after `pnpm run:app android-tv build`, in
-  `apps/tv-mobile/android`: `APP_VARIANT=development EXPO_TV=1 ./gradlew.bat :elv-engine-media3:testDebugUnitTest`
-  (needs `ANDROID_HOME`). Imports `expo-modules-core`, `@elv/playback` types and the `react`/`react-native` peers only.
+- Vitest: `pnpm --filter @elv/engine-media3 test`. JVM (JUnit 4, Robolectric; `ANDROID_HOME`), after the app build,
+  in `apps/tv-mobile/android`: `APP_VARIANT=development EXPO_TV=1 ./gradlew.bat :elv-engine-media3:testDebugUnitTest`.
+  Imports `expo-modules-core`, `@elv/playback` types and the `react`/`react-native` peers only.

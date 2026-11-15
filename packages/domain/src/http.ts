@@ -1,3 +1,4 @@
+import { isAsyncIterable, openAsyncIterator } from './async-iterable';
 import { type ElvError, elvError, err, ok, type Result } from './result';
 
 /** A response whose body streams in chunks. */
@@ -62,9 +63,15 @@ interface ChunkSource {
   release(): void;
 }
 
+function asyncIteratorKey(): typeof Symbol.asyncIterator {
+  return typeof Symbol.asyncIterator === 'symbol'
+    ? Symbol.asyncIterator
+    : ('@@asyncIterator' as unknown as typeof Symbol.asyncIterator);
+}
+
 function openSource(body: NonNullable<FetchBody>): ChunkSource {
-  if (Symbol.asyncIterator in body) {
-    const it = body[Symbol.asyncIterator]();
+  if (isAsyncIterable(body)) {
+    const it = openAsyncIterator(body);
     return {
       next: async () => {
         const r = await it.next();
@@ -111,61 +118,105 @@ function bodyError(code: 'aborted' | 'timeout'): Error {
 }
 
 /**
- * Streams chunks until the body ends. Stopping early (break, return, throw) cancels the underlying
- * stream; an abort of `signal` mid-body cancels it and throws an error with `code` 'aborted'; silence longer than `idleMs` throws `code` 'timeout'.
+ * Streams chunks until the body ends. Stopping early (`break`, `return()`, `throw`, including `return()` before
+ * `next()`) cancels the underlying stream and detaches listeners; an abort of `controller.signal` mid-body cancels
+ * it and throws `code` `'aborted'`; silence longer than `idleMs` aborts `controller` and throws `code` `'timeout'`.
  */
-async function* streamBody(
+function streamBody(
   body: FetchBody,
-  signal: AbortSignal,
+  controller: AbortController,
   idleMs: number | undefined,
   dispose: () => void,
-): AsyncGenerator<Uint8Array> {
+): AsyncIterable<Uint8Array> {
   if (body === null || body === undefined) {
     dispose();
-    return;
+    return {
+      [asyncIteratorKey()]: () => ({
+        next: async () => ({ done: true, value: undefined }),
+        return: async () => ({ done: true, value: undefined }),
+      }),
+    };
   }
-  const source = openSource(body);
+  const signal = controller.signal;
+  let source: ChunkSource | undefined;
+  let closed = false;
+  let idleTimedOut = false;
+  let rejectAbort: ((e: Error) => void) | undefined;
+  const onAbort = () => {
+    if (!idleTimedOut) rejectAbort?.(bodyError('aborted'));
+  };
   const aborted = new Promise<never>((_, reject) => {
-    const fire = () => reject(bodyError('aborted'));
-    if (signal.aborted) fire();
-    else signal.addEventListener('abort', fire, { once: true });
+    rejectAbort = reject;
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, { once: true });
   });
   aborted.catch(() => {});
-  let finished = false;
-  try {
-    for (;;) {
-      if (signal.aborted) throw bodyError('aborted');
-      let idleTimer: ReturnType<typeof setTimeout> | undefined;
-      const racers: Promise<{ done: boolean; value?: Uint8Array }>[] = [source.next(), aborted];
-      if (idleMs !== undefined) {
-        racers.push(
-          new Promise<never>((_, reject) => {
-            idleTimer = setTimeout(() => reject(bodyError('timeout')), idleMs);
-          }),
-        );
-      }
-      let step: { done: boolean; value?: Uint8Array };
-      try {
-        step = await Promise.race(racers);
-      } finally {
-        if (idleTimer !== undefined) clearTimeout(idleTimer);
-      }
-      const { done, value } = step;
-      if (done) {
-        finished = true;
-        return;
-      }
-      if (value !== undefined) yield value;
-    }
-  } finally {
-    if (!finished) await cancelQuietly(source);
+
+  const ensureSource = (): ChunkSource => {
+    source ??= openSource(body);
+    return source;
+  };
+
+  const cleanup = async (cancel: boolean): Promise<void> => {
+    if (closed) return;
+    closed = true;
+    signal.removeEventListener('abort', onAbort);
+    const s = ensureSource();
+    if (cancel) await cancelQuietly(s);
     try {
-      source.release();
+      s.release();
     } catch {
       // Releasing after cancel may throw on some runtimes.
     }
     dispose();
-  }
+  };
+
+  const iterator: AsyncIterableIterator<Uint8Array> = {
+    [asyncIteratorKey()]() {
+      return iterator;
+    },
+    async next(): Promise<IteratorResult<Uint8Array>> {
+      if (closed) return { done: true, value: undefined };
+      try {
+        for (;;) {
+          if (signal.aborted) throw bodyError(idleTimedOut ? 'timeout' : 'aborted');
+          const s = ensureSource();
+          let idleTimer: ReturnType<typeof setTimeout> | undefined;
+          const racers: Promise<{ done: boolean; value?: Uint8Array }>[] = [s.next(), aborted];
+          if (idleMs !== undefined) {
+            racers.push(
+              new Promise<never>((_, reject) => {
+                idleTimer = setTimeout(() => {
+                  idleTimedOut = true;
+                  reject(bodyError('timeout'));
+                  controller.abort();
+                }, idleMs);
+              }),
+            );
+          }
+          let step: { done: boolean; value?: Uint8Array };
+          try {
+            step = await Promise.race(racers);
+          } finally {
+            if (idleTimer !== undefined) clearTimeout(idleTimer);
+          }
+          if (step.done) {
+            await cleanup(false);
+            return { done: true, value: undefined };
+          }
+          if (step.value !== undefined) return { done: false, value: step.value };
+        }
+      } catch (e) {
+        await cleanup(true);
+        throw e;
+      }
+    },
+    async return(): Promise<IteratorResult<Uint8Array>> {
+      await cleanup(true);
+      return { done: true, value: undefined };
+    },
+  };
+  return iterator;
 }
 
 const RESET_CODES = new Set(['ECONNRESET', 'EPIPE', 'UND_ERR_SOCKET']);
@@ -243,7 +294,7 @@ export function createFetchHttpClient(
         return ok({
           status: res.status,
           headers,
-          body: streamBody(res.body, controller.signal, idleMs, dispose),
+          body: streamBody(res.body, controller, idleMs, dispose),
         });
       } catch {
         if (timedOut) return err(elvError('network', 'timeout'));

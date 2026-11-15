@@ -67,14 +67,25 @@ describe('config', () => {
   it('has the spec defaults', () => {
     expect(DEFAULT_PLAYBACK_CONFIG).toEqual({
       liveStallWindowMs: 4000,
+      liveStartTimeoutMs: 5000,
       startTimeoutMs: 8000,
-      rungTimeoutMs: 4000,
+      rungTimeoutMs: 2000,
       ladderGapsMs: [0, 1000, 2000, 4000],
       stableRestoreMs: 30000,
       limitBackoffMs: [2000, 4000, 8000, 15000],
       limitTotalMs: 60000,
       vodReconnectWindowMs: 120000,
+      resolveTimeoutMs: 5000,
     });
+  });
+
+  it('cannot be changed at run time', () => {
+    expect(Object.isFrozen(DEFAULT_PLAYBACK_CONFIG)).toBe(true);
+    expect(Object.isFrozen(DEFAULT_PLAYBACK_CONFIG.ladderGapsMs)).toBe(true);
+    expect(Object.isFrozen(DEFAULT_PLAYBACK_CONFIG.limitBackoffMs)).toBe(true);
+    expect(() => {
+      (DEFAULT_PLAYBACK_CONFIG as { startTimeoutMs: number }).startTimeoutMs = 1;
+    }).toThrow(TypeError);
   });
 });
 
@@ -164,6 +175,36 @@ describe('tune', () => {
     expect(loads(engine)).toHaveLength(0);
   });
 
+  it('fails with network/timeout when resolve does not settle within 5,000 ms', async () => {
+    const { engine, service } = setup();
+    const late = deferred();
+    service.tune(tuneReq('A', { resolve: () => late.promise }));
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(service.getState().status).toEqual({ kind: 'tuning' });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(service.getState().status).toEqual({
+      kind: 'failed',
+      error: { category: 'network', code: 'timeout' },
+    });
+    late.settle(ok(req('A')));
+    await flush();
+    expect(loads(engine)).toHaveLength(0);
+  });
+
+  it('times only the newest resolve and none after it settled or the tune stopped', async () => {
+    const { engine, service } = setup();
+    service.tune(tuneReq('A', { resolve: () => new Promise(() => {}) }));
+    await vi.advanceTimersByTimeAsync(3000);
+    service.tune(tuneReq('B'));
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(service.getState().status).toEqual({ kind: 'playing' });
+    service.tune(tuneReq('C', { resolve: () => new Promise(() => {}) }));
+    service.stop();
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(service.getState().status).toEqual({ kind: 'idle' });
+    expect(loads(engine).map((c) => c.url)).toEqual(['B']);
+  });
+
   it('fails the tune when resolve rejects', async () => {
     const { engine, service } = setup();
     service.tune(tuneReq('A', { resolve: () => Promise.reject(new Error('boom')) }));
@@ -206,7 +247,7 @@ describe('engine events', () => {
     engine.emit({ attempt: t, type: 'state', state: 'playing' });
     expect(service.getState().status).toEqual({ kind: 'playing' });
     engine.emit({ attempt: t, type: 'state', state: 'ended' });
-    expect(service.getState().status).toEqual({ kind: 'idle' });
+    expect(service.getState().status).toEqual({ kind: 'ended' });
   });
 
   it('stores the latest clock anchor as sent', async () => {
@@ -325,7 +366,7 @@ describe('commands', () => {
     expect(engine.commands).toHaveLength(0);
   });
 
-  it('pause, play and seek forward with the current token', async () => {
+  it('pause and play advance the attempt token and seek uses the current one', async () => {
     const { engine, service } = setup();
     const t = service.tune(tuneReq('A'));
     await flush();
@@ -333,9 +374,9 @@ describe('commands', () => {
     service.play();
     service.seek(4200);
     expect(engine.commands.slice(-3)).toEqual([
-      { name: 'pause', attempt: t },
-      { name: 'play', attempt: t },
-      { name: 'seek', attempt: t, positionMs: 4200 },
+      { name: 'pause', attempt: t + 1 },
+      { name: 'play', attempt: t + 2 },
+      { name: 'seek', attempt: t + 2, positionMs: 4200 },
     ]);
   });
 
@@ -512,10 +553,11 @@ describe('recovery hooks', () => {
         return false;
       },
       onReset: () => calls.push('reset'),
-      onSeek: () => calls.push('seek'),
+      onSeek: (ms) => calls.push(`seek:${ms}`),
       onPause: () => calls.push('pause'),
       onPlay: () => calls.push('play'),
       onState: (s) => calls.push(`state:${s}`),
+      onClock: () => calls.push('clock'),
       onError: (e) => calls.push(`error:${e.code}`),
       onStall: (p) => calls.push(`stall:${p}`),
       onStartTimeout: () => calls.push('start-timeout'),
@@ -528,6 +570,7 @@ describe('recovery hooks', () => {
     e.emit({ attempt: t, type: 'error', error: { code: 'network' } });
     e.emit({ attempt: t, type: 'stall', phase: 'start', atMs: 0 });
     e.emit({ attempt: t, type: 'state', state: 'buffering' });
+    e.emit({ attempt: t, type: 'clock', anchor: { positionMs: 1, atMs: 1000, rate: 1 } });
     e.surface('created');
     s.seek(5);
     s.pause();
@@ -541,8 +584,9 @@ describe('recovery hooks', () => {
       'error:network',
       'stall:start',
       'state:buffering',
+      'clock',
       'surface:created',
-      'seek',
+      'seek:5',
       'pause',
       'play',
       'reset',

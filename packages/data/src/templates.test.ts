@@ -1,6 +1,7 @@
 import { m3uKey } from '@elv/domain';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
+import { knownCredentials, VarBook } from './m3u-templating';
 import { detectSegmentRules, hostOf, keyTemplate, resolveTemplate, toTemplate } from './templates';
 
 const ALNUM = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -39,17 +40,40 @@ describe('detectSegmentRules', () => {
     ]);
   });
 
-  it('ignores short constant segments, anything below 99 percent, and the empty sample', () => {
+  it('ignores static path words, high-cardinality slugs, and the empty sample', () => {
     const live = Array.from({ length: 200 }, (_, i) => `https://h.example/live/${token(16, i)}`);
     expect(detectSegmentRules(live)).toEqual([]);
-    const acct = token(24, 5);
-    const noisy = Array.from({ length: 100 }, (_, i) =>
-      i < 2
-        ? `https://h.example/${token(24, i + 50)}/${token(12, i)}`
-        : `https://h.example/${acct}/${token(12, i)}`,
+    const highCard = Array.from(
+      { length: 100 },
+      (_, i) => `https://h.example/${token(24, i + 50)}/${token(12, i)}`,
     );
-    expect(detectSegmentRules(noisy)).toEqual([]);
+    expect(detectSegmentRules(highCard)).toEqual([]);
     expect(detectSegmentRules([])).toEqual([]);
+  });
+
+  it('detects mixed accounts on one host when distinct long tokens stay low-cardinality', () => {
+    const accts = [token(16, 10), token(16, 20), token(16, 30)];
+    const mixed = Array.from(
+      { length: 60 },
+      (_, i) => `https://h.example/${accts[i % 3]}/s${i}.ts`,
+    );
+    expect(detectSegmentRules(mixed)).toEqual([{ host: 'h.example', position: 0, name: 'v0' }]);
+  });
+
+  it('detects bare /<user>/<pass>/<numeric> on a host even when credentials are shorter than 8 chars', () => {
+    const bare = Array.from(
+      { length: 20 },
+      (_, i) => `http://panel.example/bob/pw12/${100 + i}.ts`,
+    );
+    expect(detectSegmentRules(bare)).toEqual([
+      { host: 'panel.example', position: 0, name: 'v0' },
+      { host: 'panel.example', position: 1, name: 'v1' },
+    ]);
+    const staticPrefix = Array.from(
+      { length: 20 },
+      (_, i) => `http://tv.example/hls/ch${i}/1.m3u8`,
+    );
+    expect(detectSegmentRules(staticPrefix)).toEqual([]);
   });
 
   it('never treats the last segment or an unparsable value as a rule', () => {
@@ -57,8 +81,16 @@ describe('detectSegmentRules', () => {
     expect(detectSegmentRules([...sample, 'not a url'])).toEqual([]);
   });
 
-  it('needs more than one URL on a host', () => {
-    expect(detectSegmentRules([`https://h.example/${token(24, 1)}/x`])).toEqual([]);
+  it('templates token segments and bare numeric paths on a single-URL host while ignoring static words', () => {
+    expect(detectSegmentRules([`https://h.example/${token(24, 1)}/x`])).toEqual([
+      { host: 'h.example', position: 0, name: 'v0' },
+    ]);
+    expect(detectSegmentRules(['http://backup.example/u1/p2/42.ts'])).toEqual([
+      { host: 'backup.example', position: 0, name: 'v0' },
+      { host: 'backup.example', position: 1, name: 'v1' },
+    ]);
+    expect(detectSegmentRules(['https://h.example/live/stream.m3u8'])).toEqual([]);
+    expect(detectSegmentRules(['https://h.example/hls/news/index.m3u8'])).toEqual([]);
   });
 
   it('accepts exactly 99 percent', () => {
@@ -151,6 +183,19 @@ describe('toTemplate', () => {
     const { template, vars } = toTemplate('https://h.example/tok123456/p1/99', rules, NONE);
     expect(template).toBe('https://h.example/{{v0}}/p1/99');
     expect(resolveTemplate(template, vars)).toBe('https://h.example/tok123456/p1/99');
+  });
+
+  it('templates the remaining short Xtream credential when the other matched a segment rule', () => {
+    const longUserRule = [{ host: 'h.example', position: 1, name: 'v0' }];
+    const a = toTemplate('https://h.example/live/longusername12/pw/99.ts', longUserRule, NONE);
+    expect(a.template).toBe('https://h.example/live/{{v0}}/{{pass}}/99.ts');
+    expect(a.vars).toEqual({ v0: 'longusername12', pass: 'pw' });
+
+    const longPassRule = [{ host: 'h.example', position: 2, name: 'v0' }];
+    const longPw = ['long', 'pass', '1234'].join('');
+    const b = toTemplate(`https://h.example/movie/bob/${longPw}/55.mkv`, longPassRule, NONE);
+    expect(b.template).toBe('https://h.example/movie/{{user}}/{{v0}}/55.mkv');
+    expect(b.vars).toEqual({ user: 'bob', v0: longPw });
   });
 
   it('templates userinfo, keeps fragments and passes unparsable values through', () => {
@@ -340,9 +385,48 @@ describe('keyTemplate', () => {
 });
 
 describe('hostOf', () => {
-  it('reads the lower-case host with port and ignores userinfo', () => {
+  it('reads the lower-case host, strips default ports and ignores userinfo', () => {
     expect(hostOf('HTTP://u:p@CDN.example:8080/a')).toBe('cdn.example:8080');
+    expect(hostOf('http://CDN.example:80/a')).toBe('cdn.example');
+    expect(hostOf('https://CDN.example:443/a')).toBe('cdn.example');
+    expect(hostOf('http://CDN.example:443/a')).toBe('cdn.example:443');
+    expect(hostOf('https://CDN.example:80/a')).toBe('cdn.example:80');
     expect(hostOf('nope')).toBeUndefined();
+
+    const rules = [{ host: 'cdn.example', position: 0, name: 'v0' }];
+    const t = toTemplate('https://cdn.example:443/tok12345678/1.ts', rules, NONE);
+    expect(t.template).toBe('https://cdn.example:443/{{v0}}/1.ts');
+    expect(resolveTemplate(t.template, t.vars)).toBe('https://cdn.example:443/tok12345678/1.ts');
+  });
+});
+
+describe('VarBook and knownCredentials', () => {
+  it('tracks UTF-8 serialized byteLength accurately and resolves collisions in O(1)', () => {
+    const enc = new TextEncoder();
+    const book = new VarBook({ seed: ' initial ' });
+    expect(book.byteLength).toBe(enc.encode(JSON.stringify(book.vars)).byteLength);
+    for (let i = 0; i < 200; i += 1) {
+      book.absorb({ template: '{{q:token}}', vars: { 'q:token': `val-${i}-é` } });
+    }
+    expect(book.absorb({ template: '{{q:token}}', vars: { 'q:token': 'val-42-é' } })).toBe(
+      '{{q:token~42}}',
+    );
+    expect(book.byteLength).toBe(enc.encode(JSON.stringify(book.vars)).byteLength);
+  });
+
+  it('extracts credentials from userinfo and non-get.php query aliases', () => {
+    expect(knownCredentials('https://alice:s3cr%20et@panel.example/list.m3u')).toEqual({
+      username: 'alice',
+      password: 's3cr et',
+    });
+    expect(knownCredentials('https://panel.example/m3u/download?user=bob&pwd=pw+99')).toEqual({
+      username: 'bob',
+      password: 'pw 99',
+    });
+    expect(
+      knownCredentials('https://panel.example/playlist.m3u8?u=x&username=ann&pass=p1'),
+    ).toEqual({ username: 'ann', password: 'p1' });
+    expect(knownCredentials('http://lists.example/free.m3u')).toEqual({});
   });
 });
 

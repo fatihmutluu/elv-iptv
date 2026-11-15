@@ -58,6 +58,17 @@ class ErrorMappingTest {
   }
 
   @Test
+  fun `a platform policy block is terminal, so the ladder never retries it`() {
+    for (code in listOf(
+      PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED,
+      PlaybackException.ERROR_CODE_IO_NO_PERMISSION,
+    )) {
+      assertEquals("code $code", "unsupported-format", mapError(null, null, code))
+      assertEquals("code $code", "unsupported-format", mapError(null, null, code, live = true, played = true))
+    }
+  }
+
+  @Test
   fun `Media3 parsing codes are unsupported-format`() {
     for (code in listOf(
       PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
@@ -161,5 +172,21 @@ class ErrorMappingTest {
     assertFalse(isNoticeContentType("audio/x-mpegurl", hls = true))
     assertTrue(isNoticeContentType("text/html", hls = true))
     assertTrue(isNoticeContentType("application/json", hls = true))
+  }
+
+  @Test
+  fun `decoder error caused by an invalid surface maps to surface-lost instead of decoder (I6)`() {
+    assertEquals(
+      "surface-lost",
+      mapError(null, null, PlaybackException.ERROR_CODE_DECODING_FAILED, surfaceLost = true),
+    )
+    assertEquals(
+      "surface-lost",
+      mapError(null, null, PlaybackException.ERROR_CODE_DECODER_INIT_FAILED, surfaceLost = true),
+    )
+    assertEquals(
+      "decoder",
+      mapError(null, null, PlaybackException.ERROR_CODE_DECODING_FAILED, surfaceLost = false),
+    )
   }
 }

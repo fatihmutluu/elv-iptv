@@ -1,8 +1,8 @@
+import { type CatalogDeps, type CatalogService, createCatalogService } from '@elv/data';
 import { countingScheduler, memorySecrets, testDb } from '@elv/data/testing';
 import { createFetchHttpClient, type FetchLike, type SqlDriver } from '@elv/domain';
 import { afterAll, afterEach, beforeAll, vi } from 'vitest';
 import { startSim } from '../../../../tools/src/sim/server.ts';
-import { type CatalogDeps, type CatalogService, createCatalogService } from './catalog';
 
 /** The domain fetch client over Node's fetch. Test helper. */
 export const http = createFetchHttpClient(fetch as unknown as FetchLike);

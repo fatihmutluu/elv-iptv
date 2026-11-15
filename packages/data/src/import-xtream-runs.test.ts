@@ -131,6 +131,38 @@ describe('import run safety', () => {
     expect(await count(e.db, 'episodes')).toBe(0);
   });
 
+  it('writes no episodes when the series row was deleted concurrently while seriesInfo was in flight', async () => {
+    const e = await setup(sampleCatalog());
+    expect((await run(e)).ok).toBe(true);
+    e.panel.state.onRequest = async (action) => {
+      if (action === 'get_series_info') {
+        await e.db.run('DELETE FROM series WHERE source_id = ? AND key = ?', [
+          e.sourceId,
+          'x:s1:series:300',
+        ]);
+      }
+    };
+    const r = await loadSeriesEpisodes(e.sourceId, 'x:s1:series:300', e.deps);
+    expectErr(r, 'source-format', 'unknown-series');
+    expect(await count(e.db, 'episodes')).toBe(0);
+  });
+
+  it('uses the current series run_id when a catalog re-import finishes while seriesInfo is in flight', async () => {
+    const e = await setup(sampleCatalog());
+    expect((await run(e)).ok).toBe(true);
+    e.panel.state.onRequest = async (action) => {
+      if (action === 'get_series_info') {
+        e.panel.state.onRequest = undefined;
+        expect((await run(e)).ok).toBe(true);
+      }
+    };
+    const r = await loadSeriesEpisodes(e.sourceId, 'x:s1:series:300', e.deps);
+    expect(r).toEqual({ ok: true, value: 2 });
+    const seriesRun = await rows(e, "SELECT run_id FROM series WHERE key = 'x:s1:series:300'");
+    const episodeRuns = await rows(e, 'SELECT DISTINCT run_id FROM episodes');
+    expect(episodeRuns).toEqual(seriesRun);
+  });
+
   it('ignores a throwing progress callback', async () => {
     const e = await setup(sampleCatalog());
     const r = await run(e, {

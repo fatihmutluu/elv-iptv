@@ -2,7 +2,16 @@ import { rmSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow, ipcMain, Menu, net, protocol, type WebContents } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  Menu,
+  net,
+  protocol,
+  session,
+  type WebContents,
+} from 'electron';
 import { APP_ORIGIN, APP_SCHEME } from './app-protocol.ts';
 import {
   createVideoSampler,
@@ -17,6 +26,7 @@ import { registerPlayerIpc } from './player/ipc.ts';
 import { sweepLeftovers, systemSweepDeps } from './player/mpv/process.ts';
 import { sampleArea } from './player/presenter/visible.ts';
 import { mpvRuntimePaths } from './player/runtime-path.ts';
+import { lockDownSession, lockDownWebContents } from './security.ts';
 import { type ServeDeps, serveAppRequest } from './serve-app.ts';
 import { focusWindow, startSingleInstance } from './single-instance.ts';
 import { buildWindowOptions, WINDOW_TITLE } from './window-options.ts';
@@ -80,10 +90,7 @@ function createWindow(): void {
     }),
   );
   window.setMenuBarVisibility(false);
-  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  window.webContents.on('will-navigate', (event, url) => {
-    if (!url.startsWith(`${APP_ORIGIN}/`)) event.preventDefault();
-  });
+  lockDownWebContents(window.webContents);
   window.on('page-title-updated', (event) => event.preventDefault());
   window.setTitle(WINDOW_TITLE);
   void window.loadURL(gateQuery === null ? `${APP_ORIGIN}/` : `${APP_ORIGIN}/?${gateQuery}`);
@@ -149,6 +156,7 @@ if (hasLock) {
   void app.whenReady().then(async () => {
     // The default menu reloads the page on Ctrl+R / Cmd+R; development keeps it for the developer tools.
     if (app.isPackaged) Menu.setApplicationMenu(null);
+    lockDownSession(session.defaultSession);
     serveRenderer();
     await startPlayer();
     createWindow();

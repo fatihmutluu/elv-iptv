@@ -3,10 +3,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { type Account, findAccount } from './accounts.ts';
-import type { RecipeName } from './catalog.ts';
 import type { RequestMeta, SimContext } from './context.ts';
 import { applyStreamFaults, type Fault, parseFaults } from './faults.ts';
 import { ensureRecipe, type RecipeFiles } from './media.ts';
+import type { RecipeName } from './recipes.ts';
 import { requestFaults } from './request-faults.ts';
 import { sendText } from './routes-data.ts';
 
@@ -52,6 +52,7 @@ export function authorize(
  * the account policy and returns false. The slot is released when the response finishes or closes.
  */
 export function takeSlot(res: ServerResponse, ctx: SimContext, account: Account): boolean {
+  if (res.closed || res.destroyed) return false;
   if (ctx.connections.open(account.username) > account.maxConnections) {
     ctx.connections.close(account.username);
     if (account.limitPolicy === 'status-509') sendText(res, 509, 'text/plain');
@@ -72,24 +73,35 @@ export function takeSlot(res: ServerResponse, ctx: SimContext, account: Account)
 
 /**
  * Resolves the faults of a media request. A `?fault=` query was already applied by the server;
- * otherwise the catalog fault applies like one. Returns the stream-level faults, or null when a
- * request-level fault answered.
+ * otherwise, with `useRules`, the newest matching runtime rule applies (and is consumed), then the
+ * catalog fault. Returns the stream-level faults, or null when a request-level fault answered.
  */
 export async function resolveFaults(
   req: IncomingMessage,
   res: ServerResponse,
+  ctx: SimContext,
   meta: RequestMeta,
   catalogFault: string | null,
+  useRules: boolean,
 ): Promise<Fault[] | null> {
   const query = new URL(req.url ?? '/', 'http://sim').searchParams.get('fault');
-  const spec = query ?? catalogFault;
+  let spec = query ?? catalogFault;
+  if (query === null && useRules && meta.account !== null && meta.streamId !== null) {
+    const rule = ctx.faultRules.take(meta.account, meta.streamId);
+    if (rule) {
+      spec = rule.spec;
+      meta.faultRule = rule.id;
+    }
+  }
   if (spec === null) return [];
   const faults = parseFaults(spec);
   if (query === null) {
     meta.fault = spec;
     if (await requestFaults(req, res, faults)) return null;
   }
-  return faults.filter((f) => f.kind === 'drop' || f.kind === 'stall' || f.kind === 'rate');
+  return faults.filter(
+    (f) => f.kind === 'drop' || f.kind === 'stall' || f.kind === 'rate' || f.kind === 'type',
+  );
 }
 
 /** Generated recipe files; answers 503 and returns null without FFmpeg or when generation fails. */
@@ -98,6 +110,7 @@ export async function loadRecipe(
   ctx: SimContext,
   recipe: RecipeName,
 ): Promise<RecipeFiles | null> {
+  if (res.closed || res.destroyed) return null;
   const media = ctx.media;
   if (media === null || media.ffmpeg === null) {
     sendText(res, 503, 'text/plain', 'FFmpeg not found: set FFMPEG_PATH or install FFmpeg');
@@ -109,7 +122,7 @@ export async function loadRecipe(
       cacheDir: media.cacheDir,
       seconds: media.seconds,
     });
-    return res.destroyed ? null : files;
+    return res.closed || res.destroyed ? null : files;
   } catch (error) {
     sendText(res, 503, 'text/plain', `FFmpeg failed: ${(error as Error).message}`);
     return null;

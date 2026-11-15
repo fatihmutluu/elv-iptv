@@ -61,6 +61,28 @@ describe('scanM3u batching and chunking', () => {
     expect(read).toBeLessThan(total);
   });
 
+  it('drains every full batch from a large chunk before pulling the next chunk', async () => {
+    const firstChunk = utf8(generate(25));
+    const secondChunk = utf8('#EXTINF:-1,Tail\r\nhttp://h.example/live/999.ts\r\n');
+    let pulled = 0;
+    async function* source(): AsyncGenerator<Uint8Array> {
+      pulled++;
+      yield firstChunk;
+      pulled++;
+      yield secondChunk;
+    }
+    const gen = scanM3u(source(), { batchSize: 10 });
+    const b1 = await gen.next();
+    const b2 = await gen.next();
+    expect((b1.value as M3uBatch).entries).toHaveLength(10);
+    expect((b2.value as M3uBatch).entries).toHaveLength(10);
+    expect(pulled).toBe(1);
+    const b3 = await gen.next();
+    expect((b3.value as M3uBatch).entries).toHaveLength(6);
+    expect((b3.value as M3uBatch).done).toBe(true);
+    expect(pulled).toBe(2);
+  });
+
   it('gives identical output for random chunkings of a 5,000-entry playlist', async () => {
     const bytes = utf8(generate(5000));
     const whole = await collect(chunksOf(bytes, [bytes.length]));

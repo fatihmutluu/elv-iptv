@@ -147,4 +147,46 @@ class ResponseSniffingTest {
     val buffer = bytes("Max connections") + ByteArray(64)
     assertEquals(ResponseKind.NOTICE, classifyResponse(RequestKind.PROGRESSIVE, "text/plain", buffer, 15))
   }
+
+  @Test
+  fun `invalid UTF-8 binary streams with high bytes 0x80 to 0xFF are classified as media, not text notices (I4)`() {
+    // ADTS AAC header 0xFF 0xF1 + printable payload bytes >= 0x20
+    val adts = ByteArray(256) { 'A'.code.toByte() }.also {
+      it[0] = 0xFF.toByte()
+      it[1] = 0xF1.toByte()
+    }
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.PROGRESSIVE, "audio/aac", adts))
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.SEGMENT, "audio/aac", adts))
+
+    // Bare continuation byte 0x80 and overlong 0xC0 0x80
+    val bareCont = byteArrayOf(0x80.toByte(), 'x'.code.toByte(), 'y'.code.toByte())
+    val overlong = byteArrayOf(0xC0.toByte(), 0x80.toByte(), 'z'.code.toByte())
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.PROGRESSIVE, null, bareCont))
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.PROGRESSIVE, null, overlong))
+
+    // Valid UTF-8 notice whose multi-byte character is cut right at SNIFF_BYTES (1024) still counts as text
+    val padded = ByteArray(SNIFF_BYTES) { 'a'.code.toByte() }.also {
+      // 'ğ' in UTF-8 is 0xC4 0x9F; place 0xC4 at index 1023 so it's truncated by SNIFF_BYTES
+      it[SNIFF_BYTES - 1] = 0xC4.toByte()
+    }
+    assertEquals(ResponseKind.NOTICE, classifyResponse(RequestKind.PROGRESSIVE, "text/plain", padded, SNIFF_BYTES))
+  }
+
+  @Test
+  fun `XML TTML and SRT subtitle segments are classified as media while XHTML and notices stay notices (I4)`() {
+    val ttmlXml = bytes("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<tt xmlns=\"http://www.w3.org/ns/ttml\"></tt>")
+    val ttmlBare = bom + bytes("  <tt xml:lang=\"en\"><body></body></tt>")
+    val srtNumbered = bytes("1\r\n00:00:01,000 --> 00:00:04,500\r\nHello world\r\n\r\n")
+    val srtBare = bytes("00:01:02.250 --> 00:01:05.000\nLine\n")
+
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.SEGMENT, "application/ttml+xml", ttmlXml))
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.SEGMENT, "text/xml", ttmlBare))
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.SEGMENT, "application/x-subrip", srtNumbered))
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.SEGMENT, "text/plain", srtBare))
+
+    // XHTML error page starting with <?xml must still be caught as a notice!
+    val xhtmlNotice = bytes("<?xml version=\"1.0\"?>\n<!DOCTYPE html>\n<html><body>Limit</body></html>")
+    assertEquals(ResponseKind.NOTICE, classify(RequestKind.SEGMENT, "application/xhtml+xml", xhtmlNotice))
+    assertEquals(ResponseKind.NOTICE, classify(RequestKind.SEGMENT, "text/plain", bytes("{\"error\":\"limit\"}")))
+  }
 }

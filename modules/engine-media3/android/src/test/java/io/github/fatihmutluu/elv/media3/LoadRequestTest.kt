@@ -24,6 +24,19 @@ class LoadRequestTest {
   }
 
   @Test
+  fun `its text carries no URL and no header value`() {
+    val secret = guess.copy(
+      url = "http://user:pass@h/live/user/pass/1001.ts?token=tk9",
+      headers = mapOf("Authorization" to "Bearer s3cret", "Referer" to "http://r/user/pass"),
+    )
+    val text = secret.toString()
+    for (leak in listOf("user", "pass", "tk9", "s3cret", "Bearer", "http", "/live", "Referer")) {
+      assertFalse(text, text.contains(leak))
+    }
+    assertEquals("LoadRequest(live=true, startMs=null, softwareAudio=false, playlistDetected=false, headers=2)", text)
+  }
+
+  @Test
   fun `the source type follows the detection`() {
     assertFalse(guess.playlistDetected)
     assertEquals(SourceType.TS, guess.sourceType())
