@@ -103,7 +103,7 @@ final class EngineObject: SharedObject {
   private var isDisposed = false
   private var jsEpoch = 0
   private var jsToken = 0
-  private let gate = ConnectionGate()
+  private let gate = ConnectionGate(forceCloseAfterMs: 1_000, settleAfterCloseMs: 25)
   private let httpSession = EngineHttpSession()
   private let onDisposed: (EngineObject) -> Void
   private var driver: EngineMainDriver?

@@ -117,6 +117,9 @@ final class URLSessionTransport: ByteTransport, @unchecked Sendable {
     for (key, value) in headers {
       request.setValue(value, forHTTPHeaderField: key)
     }
+    if request.value(forHTTPHeaderField: "Connection") == nil {
+      request.setValue("close", forHTTPHeaderField: "Connection")
+    }
 
     let dataTask = session.urlSession.dataTask(with: request)
     let taskId = dataTask.taskIdentifier

@@ -15,7 +15,7 @@ Apple-only Expo module (tvOS, iOS, iPadOS): the AetherEngine 7.66.1 `PlayerEngin
 
 ## Requests, Live TS Reader & Errors (`LiveTsReader`, `URLSessionTransport`, `ErrorMapping`)
 - `.liveTs` opens through `LiveTsReader` (`IOReader`, forward-only `seek == -1`, `discImageProbeEnabled = false`) over one ephemeral `URLSession` per `EngineObject` (`httpMaximumConnectionsPerHost = 1`, no cache, 10 s request timeout, origin-scoped redirect header stripping via `sanitizeRedirectRequest`).
-- `ConnectionGate` waits up to 1,000 ms for older generations' requests to close before opening a newer media (force-closing stragglers after 1,000 ms) so 1-connection providers see zero overlap across zaps and stops during startup.
+- `ConnectionGate` waits up to 1,000 ms for older generations' requests to close plus a 25 ms CFNetwork socket-teardown settle window before opening a newer media (force-closing stragglers after 1,000 ms) so 1-connection providers see zero overlap across zaps and stops during startup.
 - `LiveTsReader.open()` sniffs status + up to 1,024 bytes (`classifyProgressive`): non-2xx -> `http-<s>`; HTML/JSON/`text/*` or printable UTF-8 without TS sync -> `connection-limit` (`notice`); mpegurl or `#EXTM3U` -> closes the GET and reloads the same URL as HLS in the same serial; TS sync -> `.custom(reader, formatHint: "mpegts")` with sniffed bytes delivered first via partial-read `ByteFifo` (suspends > 8 MiB, resumes < 4 MiB; avoids `AVIOReader`'s blocking 256 KiB first read). A mid-stream drop after >= 1 byte reconnects once after completion; a reader failure wins over the engine kind.
 - `ELV_AETHER route=<videoRoute> open=<ms> audio=<audioDelivery>` logs once per load without any URL; `MappedError.detail` always uses `redactUrl`.
 

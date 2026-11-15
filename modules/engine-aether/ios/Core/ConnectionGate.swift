@@ -21,12 +21,21 @@ public final class ConnectionGate: @unchecked Sendable {
 
   private let lock = NSLock()
   private let forceCloseAfterMs: Int
+  private let settleAfterCloseMs: Int
+  private let uptimeMs: @Sendable () -> Double
   private var currentGeneration = 0
+  private var lastClosedDeadlineMs: Double = 0
   private var openSlots: [Int: OpenSlot] = [:]
   private var waiters: [UUID: Waiter] = [:]
 
-  public init(forceCloseAfterMs: Int = 1_000) {
+  public init(
+    forceCloseAfterMs: Int = 1_000,
+    settleAfterCloseMs: Int = 0,
+    uptimeMs: @escaping @Sendable () -> Double = { ProcessInfo.processInfo.systemUptime * 1_000.0 }
+  ) {
     self.forceCloseAfterMs = max(1, forceCloseAfterMs)
+    self.settleAfterCloseMs = max(0, settleAfterCloseMs)
+    self.uptimeMs = uptimeMs
   }
 
   /// Advances the gate generation (for `stop`, `recreate`, or `dispose`) so older waiting opens abort immediately.
@@ -92,7 +101,7 @@ public final class ConnectionGate: @unchecked Sendable {
 
     switch outcome {
     case .acquired:
-      return true
+      break
     case .superseded:
       return false
     case let .forced(closures):
@@ -100,20 +109,40 @@ public final class ConnectionGate: @unchecked Sendable {
       for closure in closures {
         closure()
       }
+      if settleAfterCloseMs > 0 {
+        lock.withLock {
+          lastClosedDeadlineMs = max(lastClosedDeadlineMs, uptimeMs() + Double(settleAfterCloseMs))
+        }
+      }
+    }
+
+    let remainingMs: Double = lock.withLock {
+      settleAfterCloseMs > 0 ? max(0.0, lastClosedDeadlineMs - uptimeMs()) : 0.0
+    }
+    guard remainingMs > 0 else { return true }
+
+    try? await Task.sleep(nanoseconds: UInt64((remainingMs * 1_000_000.0).rounded(.up)))
+
+    var readyToWake: [(CheckedContinuation<WaitOutcome, Never>, WaitOutcome)] = []
+    let stillValid: Bool = lock.withLock {
+      if Task.isCancelled || generation < currentGeneration {
+        releaseSlotLocked(generation: generation)
+        readyToWake = wakeEligibleWaitersLocked()
+        return false
+      }
       return true
     }
+    for (continuation, nextOutcome) in readyToWake {
+      continuation.resume(returning: nextOutcome)
+    }
+    return stillValid
   }
 
   /// Reports one connection of `generation` closed and unblocks any waiting newer generation.
   public func closed(generation: Int) {
     let ready: [(CheckedContinuation<WaitOutcome, Never>, WaitOutcome)] = lock.withLock {
-      if var slot = openSlots[generation] {
-        if slot.count <= 1 {
-          openSlots.removeValue(forKey: generation)
-        } else {
-          slot.count -= 1
-          openSlots[generation] = slot
-        }
+      if releaseSlotLocked(generation: generation), settleAfterCloseMs > 0 {
+        lastClosedDeadlineMs = max(lastClosedDeadlineMs, uptimeMs() + Double(settleAfterCloseMs))
       }
       return wakeEligibleWaitersLocked()
     }
@@ -171,6 +200,18 @@ public final class ConnectionGate: @unchecked Sendable {
     } else {
       openSlots[generation] = OpenSlot(count: 1, forceCloses: [forceClose])
     }
+  }
+
+  @discardableResult
+  private func releaseSlotLocked(generation: Int) -> Bool {
+    guard var slot = openSlots[generation] else { return false }
+    if slot.count <= 1 {
+      openSlots.removeValue(forKey: generation)
+    } else {
+      slot.count -= 1
+      openSlots[generation] = slot
+    }
+    return true
   }
 
   private func drainSupersededWaitersLocked() -> [CheckedContinuation<WaitOutcome, Never>] {

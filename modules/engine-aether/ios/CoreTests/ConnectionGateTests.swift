@@ -90,4 +90,46 @@ struct ConnectionGateTests {
     #expect(thirdOpened)
     gate.closed(generation: 3)
   }
+
+  @Test("waits for settleAfterCloseMs after an older connection closes before opening the next")
+  func waitsForSettleWindowAfterOlderConnectionCloses() async {
+    let gate = ConnectionGate(forceCloseAfterMs: 1_000, settleAfterCloseMs: 40)
+
+    let coldStart = ProcessInfo.processInfo.systemUptime
+    let firstOpened = await gate.open(generation: 1, forceClose: {})
+    let coldElapsedMs = (ProcessInfo.processInfo.systemUptime - coldStart) * 1_000.0
+    #expect(firstOpened)
+    #expect(coldElapsedMs < 20)
+
+    let closeStart = ProcessInfo.processInfo.systemUptime
+    gate.closed(generation: 1)
+    let secondOpened = await gate.open(generation: 2, forceClose: {})
+    let settleElapsedMs = (ProcessInfo.processInfo.systemUptime - closeStart) * 1_000.0
+
+    #expect(secondOpened)
+    #expect(settleElapsedMs >= 30)
+    gate.closed(generation: 2)
+  }
+
+  @Test("a generation superseded during the close-settle window returns false and releases its slot")
+  func generationSupersededDuringSettleReturnsFalse() async throws {
+    let gate = ConnectionGate(forceCloseAfterMs: 1_000, settleAfterCloseMs: 80)
+    let firstOpened = await gate.open(generation: 1, forceClose: {})
+    #expect(firstOpened)
+    gate.closed(generation: 1)
+
+    let secondTask = Task {
+      await gate.open(generation: 2, forceClose: {})
+    }
+    try await Task.sleep(nanoseconds: 15_000_000)
+    gate.advance(to: 3)
+    secondTask.cancel()
+
+    let secondOpened = await secondTask.value
+    #expect(!secondOpened)
+
+    let thirdOpened = await gate.open(generation: 3, forceClose: {})
+    #expect(thirdOpened)
+    gate.closed(generation: 3)
+  }
 }
