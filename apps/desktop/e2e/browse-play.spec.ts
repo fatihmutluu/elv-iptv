@@ -220,10 +220,29 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
     expect(ch0Label.length).toBeGreaterThan(0);
     expect(ch1Label.length).toBeGreaterThan(0);
 
-    await window.getByTestId('browse-items-list-row-0').click();
+    await window.getByTestId('browse-items-list-row-0').focus();
+    await window.keyboard.press('ArrowDown');
+    await window.keyboard.press('Enter');
     await expect(window.getByTestId('player-osd')).toBeVisible();
-    await expect(window.getByTestId('osd-title')).toHaveText(ch0Label.trim());
+    await expect(window.getByTestId('osd-title')).toHaveText(ch1Label.trim());
 
+    await expect(window.getByTestId('player-area')).toBeVisible();
+    await expect(window.getByTestId('player-status')).toHaveCount(0);
+    const areaBox = await window.getByTestId('player-area').boundingBox();
+    const osdBox = await window.getByTestId('player-osd').boundingBox();
+    expect(areaBox).not.toBeNull();
+    expect(osdBox).not.toBeNull();
+    expect((areaBox?.height ?? 0) > 50).toBe(true);
+    expect((areaBox?.y ?? 0) + (areaBox?.height ?? 0)).toBeLessThanOrEqual((osdBox?.y ?? 0) + 1);
+
+    if (canPlayMedia) {
+      await expect(window.getByTestId('osd-status')).toHaveText(/^(Playing|Oynatılıyor)$/, {
+        timeout: 15_000,
+      });
+    }
+
+    await window.getByTestId('player-prev').click();
+    await expect(window.getByTestId('osd-title')).toHaveText(ch0Label.trim());
     if (canPlayMedia) {
       await expect(window.getByTestId('osd-status')).toHaveText(/^(Playing|Oynatılıyor)$/, {
         timeout: 15_000,

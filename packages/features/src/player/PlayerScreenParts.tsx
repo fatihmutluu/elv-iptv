@@ -192,6 +192,7 @@ export const playerStyles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000000', justifyContent: 'flex-end' },
   tvFocusAnchor: { position: 'absolute', width: 1, height: 1, opacity: 0 },
   surfaceLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
+  surfaceLayerDesktop: { flex: 1 },
   osd: {
     backgroundColor: 'rgba(10, 10, 14, 0.86)',
     borderTopColor: '#2a2a34',

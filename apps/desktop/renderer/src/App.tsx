@@ -30,9 +30,7 @@ function AppRoot() {
         const engine = await createDesktopEngine(playerBridge, () => performance.now());
         return {
           engine,
-          renderSurface: ({ statusText, failed }) => (
-            <PlayerView engine={engine} status={statusText} failed={failed} />
-          ),
+          renderSurface: ({ failed }) => <PlayerView engine={engine} status="" failed={failed} />,
           onHostKey: (listener) =>
             engine.onUi((event) => {
               if (event.type === 'closed') {

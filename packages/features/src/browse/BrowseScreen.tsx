@@ -1,18 +1,17 @@
-import type { BrowseKind, CatalogService, CategoryRow, ItemRow, SourceRow } from '@elv/data';
+import type { BrowseKind, CatalogService, ItemRow, SourceRow } from '@elv/data';
 import type { FocusStore, KeyEvent } from '@elv/focus-core';
 import { useFormFactor } from '@elv/ui-kit';
-import {
-  type ReactElement,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { type ReactElement, useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { View } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
-import { BrowseEmptyBox, buildLivePlayTarget, createTwoPaneFocusStore } from './BrowseHelpers';
+import {
+  BrowseEmptyBox,
+  buildLivePlayTarget,
+  createTwoPaneFocusStore,
+  syncTwoPaneScopeActive,
+  useBrowseCategories,
+  useTaggedItemsSource,
+} from './BrowseHelpers';
 import {
   BROWSE_ROW_HEIGHT_POINTER,
   BROWSE_ROW_HEIGHT_TV,
@@ -24,13 +23,10 @@ import {
   ITEMS_LIST_ID,
 } from './BrowseParts';
 import {
-  buildDisplayCategories,
-  type DisplayCategory,
   formatItemTitle,
   resolveSelectedCategoryIndex,
   type TabBrowseMemory,
 } from './browse-model';
-import { createPagedListSource, type PagedListSource } from './paged-list-source';
 import { SeriesDetailPane } from './SeriesDetailPane';
 
 /** Props of {@link BrowseScreen}. */
@@ -71,8 +67,12 @@ export function BrowseScreen({
   const rowHeight = isTv ? BROWSE_ROW_HEIGHT_TV : BROWSE_ROW_HEIGHT_POINTER;
 
   const readySources = useMemo(() => sources.filter((s) => !s.needsImport), [sources]);
-  const [categories, setCategories] = useState<readonly DisplayCategory[]>([]);
-  const [categoriesLoading, setCategoriesLoading] = useState(() => sources.length > 0);
+  const { categories, loading: categoriesLoading } = useBrowseCategories(
+    catalog,
+    kind,
+    sources,
+    refreshToken,
+  );
 
   const selectedCatIdx = resolveSelectedCategoryIndex(categories, memory);
   const activeCategory = categories[selectedCatIdx];
@@ -84,7 +84,19 @@ export function BrowseScreen({
       : 0;
   const activePane = memory.activePane ?? 'categories';
 
-  const [itemsSource, setItemsSource] = useState<PagedListSource<ItemRow> | null>(null);
+  const taggedItems = useTaggedItemsSource(
+    catalog,
+    activeCategoryId,
+    activeItemCount,
+    refreshToken,
+  );
+  const itemsSource =
+    activeCategoryId !== undefined &&
+    activeItemCount > 0 &&
+    taggedItems?.categoryId === activeCategoryId &&
+    taggedItems.refreshToken === refreshToken
+      ? taggedItems.source
+      : null;
 
   const storeRef = useRef<FocusStore | null>(null);
   if (storeRef.current === null) {
@@ -105,70 +117,31 @@ export function BrowseScreen({
   onOpenSourcesRef.current = onOpenSources;
   const onFocusTopNavRef = useRef(onFocusTopNav);
   onFocusTopNavRef.current = onFocusTopNav;
-  const itemsSourceRef = useRef(itemsSource);
-  itemsSourceRef.current = itemsSource;
+  const taggedItemsRef = useRef(taggedItems);
+  taggedItemsRef.current = taggedItems;
+  const refreshTokenRef = useRef(refreshToken);
+  refreshTokenRef.current = refreshToken;
   const categoriesRef = useRef(categories);
   categoriesRef.current = categories;
   const readyCountRef = useRef(readySources.length);
   readyCountRef.current = readySources.length;
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken intentionally re-reads SQLite categories
-  useEffect(() => {
-    if (sources.length === 0) {
-      setCategories([]);
-      setCategoriesLoading(false);
-      return undefined;
-    }
-    let cancelled = false;
-    setCategoriesLoading(true);
-    Promise.all(
-      sources.map(
-        async (source) => [source.id, await catalog.categories(source.id, kind)] as const,
-      ),
-    ).then(
-      (entries) => {
-        if (cancelled) return;
-        setCategories(
-          buildDisplayCategories(sources, new Map<string, readonly CategoryRow[]>(entries)),
-        );
-        setCategoriesLoading(false);
-      },
-      () => {
-        if (!cancelled) {
-          setCategories([]);
-          setCategoriesLoading(false);
-        }
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [catalog, kind, refreshToken, sources]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken invalidates cached SQLite item pages
-  useEffect(() => {
-    if (activeCategoryId === undefined || activeItemCount <= 0) {
-      setItemsSource(null);
-      return undefined;
-    }
-    const next = createPagedListSource<ItemRow>({
-      count: activeItemCount,
-      pageSize: 200,
-      maxPages: 16,
-      loadPage: (offset, limit) => catalog.items(activeCategoryId, offset, limit),
-    });
-    setItemsSource(next);
-    return () => {
-      next.dispose();
-    };
-  }, [activeCategoryId, activeItemCount, catalog, refreshToken]);
+  const commitMemory = useCallback((next: TabBrowseMemory) => {
+    memoryRef.current = next;
+    onMemoryChangeRef.current(next);
+  }, []);
 
   useLayoutEffect(() => {
     if (!isTv || memory.seriesDetail !== undefined) return;
+    if (itemsSource === null || activeItemCount <= 0) {
+      store.setCount(ITEMS_LIST_ID, 0);
+    }
     const desired =
-      activePane === 'items' && activeItemCount > 0 ? ITEMS_LIST_ID : CATEGORIES_LIST_ID;
-    if (!store.isActive(desired)) store.activate(desired);
-  }, [activeItemCount, activePane, isTv, memory.seriesDetail, store]);
+      activePane === 'items' && activeItemCount > 0 && itemsSource !== null
+        ? ITEMS_LIST_ID
+        : CATEGORIES_LIST_ID;
+    syncTwoPaneScopeActive(store, isActiveScope, desired);
+  }, [activeItemCount, activePane, isActiveScope, isTv, itemsSource, memory.seriesDetail, store]);
 
   const categoriesSource = useMemo(() => createArrayListSource(categories), [categories]);
 
@@ -178,14 +151,21 @@ export function BrowseScreen({
         categoriesRef.current[
           resolveSelectedCategoryIndex(categoriesRef.current, memoryRef.current)
         ];
-      const src = itemsSourceRef.current;
-      if (cat === undefined || src === null) return;
+      const tagged = taggedItemsRef.current;
+      if (
+        cat === undefined ||
+        tagged === null ||
+        tagged.categoryId !== cat.row.id ||
+        tagged.refreshToken !== refreshTokenRef.current
+      ) {
+        return;
+      }
       const catIdx = categoriesRef.current.indexOf(cat);
 
       const handleItem = (item: ItemRow | undefined) => {
         if (item === undefined) return;
         if (kind === 'series') {
-          onMemoryChangeRef.current({
+          commitMemory({
             categoryId: cat.row.id,
             categoryIndex: catIdx,
             itemIndex: index,
@@ -200,7 +180,7 @@ export function BrowseScreen({
           return;
         }
 
-        onMemoryChangeRef.current({
+        commitMemory({
           categoryId: cat.row.id,
           categoryIndex: catIdx,
           itemIndex: index,
@@ -210,7 +190,7 @@ export function BrowseScreen({
         if (kind === 'live') {
           onPlay(
             buildLivePlayTarget(catalog, cat.row, item, index, (nextIndex) => {
-              onMemoryChangeRef.current({
+              commitMemory({
                 ...memoryRef.current,
                 categoryId: cat.row.id,
                 categoryIndex: catIdx,
@@ -230,11 +210,11 @@ export function BrowseScreen({
         });
       };
 
-      const cached = src.get(index);
+      const cached = tagged.source.get(index);
       if (cached !== undefined) handleItem(cached);
-      else void src.loadItem(index).then(handleItem);
+      else void tagged.source.loadItem(index).then(handleItem);
     },
-    [catalog, kind, onPlay],
+    [catalog, commitMemory, kind, onPlay],
   );
 
   const handleTvKey = useCallback(
@@ -249,10 +229,10 @@ export function BrowseScreen({
         return;
       }
 
-      const curCat = cats[resolveSelectedCategoryIndex(cats, memoryRef.current)];
-      const curItemCount = curCat?.row.itemCount ?? 0;
-
       for (const intent of store.dispatch(event)) {
+        const curCat = cats[resolveSelectedCategoryIndex(cats, memoryRef.current)];
+        const curItemCount = curCat?.row.itemCount ?? 0;
+
         if (
           intent.kind === 'edge' &&
           intent.side === 'start' &&
@@ -262,14 +242,14 @@ export function BrowseScreen({
         } else if (intent.kind === 'select') {
           if (intent.listId === CATEGORIES_LIST_ID && curItemCount > 0) {
             store.activate(ITEMS_LIST_ID);
-            onMemoryChangeRef.current({ ...memoryRef.current, activePane: 'items' });
+            commitMemory({ ...memoryRef.current, activePane: 'items' });
           } else if (intent.listId === ITEMS_LIST_ID) {
             activateItemAt(intent.index);
           }
         } else if (intent.kind === 'back') {
-          if (store.isActive(ITEMS_LIST_ID)) {
+          if (store.isActive(ITEMS_LIST_ID) || memoryRef.current.activePane === 'items') {
             store.activate(CATEGORIES_LIST_ID);
-            onMemoryChangeRef.current({ ...memoryRef.current, activePane: 'categories' });
+            commitMemory({ ...memoryRef.current, activePane: 'categories' });
           } else {
             onFocusTopNavRef.current?.();
           }
@@ -280,15 +260,72 @@ export function BrowseScreen({
             curItemCount > 0
           ) {
             store.activate(ITEMS_LIST_ID);
-            onMemoryChangeRef.current({ ...memoryRef.current, activePane: 'items' });
+            commitMemory({ ...memoryRef.current, activePane: 'items' });
           } else if (intent.event.key === 'left' && store.isActive(ITEMS_LIST_ID)) {
             store.activate(CATEGORIES_LIST_ID);
-            onMemoryChangeRef.current({ ...memoryRef.current, activePane: 'categories' });
+            commitMemory({ ...memoryRef.current, activePane: 'categories' });
           }
         }
       }
     },
-    [activateItemAt, store],
+    [activateItemAt, commitMemory, store],
+  );
+
+  const handleSelectCategory = useCallback(
+    (idx: number) => {
+      const nextCat = categoriesRef.current[idx];
+      if (nextCat === undefined) return;
+      if (nextCat.row.id !== memoryRef.current.categoryId) {
+        store.setCount(ITEMS_LIST_ID, 0);
+      }
+      commitMemory({
+        categoryId: nextCat.row.id,
+        categoryIndex: idx,
+        itemIndex: 0,
+        activePane: 'categories',
+      });
+    },
+    [commitMemory, store],
+  );
+
+  const handleActivateCategory = useCallback(
+    (idx: number) => {
+      const nextCat = categoriesRef.current[idx];
+      if (nextCat === undefined) return;
+      const curIdx = resolveSelectedCategoryIndex(categoriesRef.current, memoryRef.current);
+      const curItemCount = categoriesRef.current[curIdx]?.row.itemCount ?? 0;
+      const curSafeItem =
+        curItemCount > 0
+          ? Math.min(Math.max(0, Math.floor(memoryRef.current.itemIndex)), curItemCount - 1)
+          : 0;
+      commitMemory({
+        categoryId: nextCat.row.id,
+        categoryIndex: idx,
+        itemIndex: idx === curIdx ? curSafeItem : 0,
+        activePane: isPhone ? 'items' : 'categories',
+      });
+    },
+    [commitMemory, isPhone],
+  );
+
+  const handleBackToCategories = useCallback(() => {
+    commitMemory({ ...memoryRef.current, activePane: 'categories' });
+  }, [commitMemory]);
+
+  const handleSelectItem = useCallback(
+    (idx: number) => {
+      const catIdx = resolveSelectedCategoryIndex(categoriesRef.current, memoryRef.current);
+      const curCat = categoriesRef.current[catIdx];
+      if (curCat === undefined) return;
+      commitMemory({
+        ...memoryRef.current,
+        categoryId: curCat.row.id,
+        categoryIndex: catIdx,
+        itemIndex: idx,
+        activePane: 'items',
+      });
+    },
+    [commitMemory],
   );
 
   if (kind === 'series' && memory.seriesDetail !== undefined) {
@@ -298,11 +335,11 @@ export function BrowseScreen({
         refreshToken={refreshToken}
         detail={memory.seriesDetail}
         onDetailChange={(nextDetail) =>
-          onMemoryChange({ ...memory, seriesDetail: nextDetail, activePane: 'items' })
+          commitMemory({ ...memoryRef.current, seriesDetail: nextDetail, activePane: 'items' })
         }
         onBackToSeries={() => {
-          const { seriesDetail: _removed, ...rest } = memory;
-          onMemoryChange({ ...rest, activePane: 'items' });
+          const { seriesDetail: _removed, ...rest } = memoryRef.current;
+          commitMemory({ ...rest, activePane: 'items' });
         }}
         onPlay={onPlay}
         {...(onFocusTopNav !== undefined ? { onFocusTopNav } : {})}
@@ -320,6 +357,7 @@ export function BrowseScreen({
       {categoriesLoading || categories.length === 0 ? (
         <BrowseEmptyBox
           isTv={isTv}
+          isActiveScope={isActiveScope}
           loading={categoriesLoading}
           noReadySources={readySources.length === 0}
           onOpenSources={onOpenSources}
@@ -337,40 +375,10 @@ export function BrowseScreen({
           selectedCatIdx={selectedCatIdx}
           safeItemIdx={safeItemIdx}
           activePane={activePane}
-          onSelectCategory={(idx) => {
-            const nextCat = categories[idx];
-            if (nextCat !== undefined) {
-              onMemoryChange({
-                categoryId: nextCat.row.id,
-                categoryIndex: idx,
-                itemIndex: 0,
-                activePane: 'categories',
-              });
-            }
-          }}
-          onActivateCategory={(idx) => {
-            const nextCat = categories[idx];
-            if (nextCat !== undefined) {
-              onMemoryChange({
-                categoryId: nextCat.row.id,
-                categoryIndex: idx,
-                itemIndex: idx === selectedCatIdx ? safeItemIdx : 0,
-                activePane: isPhone ? 'items' : 'categories',
-              });
-            }
-          }}
-          onBackToCategories={() => onMemoryChange({ ...memory, activePane: 'categories' })}
-          onSelectItem={(idx) => {
-            if (activeCategory !== undefined) {
-              onMemoryChange({
-                ...memory,
-                categoryId: activeCategory.row.id,
-                categoryIndex: selectedCatIdx,
-                itemIndex: idx,
-                activePane: 'items',
-              });
-            }
-          }}
+          onSelectCategory={handleSelectCategory}
+          onActivateCategory={handleActivateCategory}
+          onBackToCategories={handleBackToCategories}
+          onSelectItem={handleSelectItem}
           onActivateItem={activateItemAt}
         />
       )}

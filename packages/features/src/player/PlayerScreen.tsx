@@ -355,7 +355,12 @@ export function PlayerScreen({
       ) : null}
 
       {sessionState.kind === 'ready' ? (
-        <View style={playerStyles.surfaceLayer}>
+        <View
+          testID="player-surface-layer"
+          style={
+            formFactor === 'desktop' ? playerStyles.surfaceLayerDesktop : playerStyles.surfaceLayer
+          }
+        >
           {sessionState.opened.renderSurface({
             statusText: `${activeTarget.title} — ${statusLine}`,
             failed: status.kind === 'failed',

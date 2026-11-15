@@ -1,6 +1,6 @@
 import type { CatalogService, EpisodeRow, SeasonRow } from '@elv/data';
 import type { FocusStore, KeyEvent } from '@elv/focus-core';
-import { ElvList, useFormFactor, useI18n } from '@elv/ui-kit';
+import { useFormFactor, useI18n } from '@elv/ui-kit';
 import {
   type ReactElement,
   useCallback,
@@ -10,29 +10,23 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Text, View } from 'react-native';
+import { View } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
-import { createTwoPaneFocusStore, SeriesStatusBox } from './BrowseHelpers';
+import { createTwoPaneFocusStore, SeriesStatusBox, syncTwoPaneScopeActive } from './BrowseHelpers';
 import {
   BROWSE_ROW_HEIGHT_POINTER,
   BROWSE_ROW_HEIGHT_TV,
-  BROWSE_VISIBLE_ROWS,
   BrowseTvKeyBridge,
   browseStyles,
   createArrayListSource,
-  PlainBrowseButton,
-  PlainListRow,
 } from './BrowseParts';
 import {
   type DescribedBrowseFailure,
   describeCatalogReadFailure,
   formatEpisodeLabel,
-  formatItemTitle,
   type SeriesDetailState,
 } from './browse-model';
-
-const SEASONS_LIST_ID = 'series-seasons';
-const EPISODES_LIST_ID = 'series-episodes';
+import { EPISODES_LIST_ID, SEASONS_LIST_ID, SeriesSeasonsAndEpisodes } from './SeriesParts';
 
 export interface SeriesDetailPaneProps {
   catalog: CatalogService;
@@ -49,6 +43,12 @@ type SeasonsState =
   | { readonly kind: 'loading' }
   | { readonly kind: 'error'; readonly failure: DescribedBrowseFailure }
   | { readonly kind: 'ready'; readonly rows: readonly SeasonRow[] };
+
+interface EpisodesState {
+  readonly season: number | null;
+  readonly loading: boolean;
+  readonly rows: readonly EpisodeRow[];
+}
 
 export function SeriesDetailPane({
   catalog,
@@ -67,8 +67,11 @@ export function SeriesDetailPane({
   const rowHeight = isTv ? BROWSE_ROW_HEIGHT_TV : BROWSE_ROW_HEIGHT_POINTER;
 
   const [seasonsState, setSeasonsState] = useState<SeasonsState>({ kind: 'loading' });
-  const [episodes, setEpisodes] = useState<readonly EpisodeRow[]>([]);
-  const [episodesLoading, setEpisodesLoading] = useState(false);
+  const [episodesState, setEpisodesState] = useState<EpisodesState>({
+    season: null,
+    loading: false,
+    rows: [],
+  });
   const [retryNonce, setRetryNonce] = useState(0);
 
   const activePane = detail.activePane ?? 'seasons';
@@ -78,6 +81,16 @@ export function SeriesDetailPane({
       ? Math.min(Math.max(0, Math.floor(detail.selectedSeasonIndex)), seasons.length - 1)
       : 0;
   const activeSeason = seasons[safeSeasonIdx];
+  const episodesLoading =
+    seasonsState.kind === 'ready' &&
+    activeSeason !== undefined &&
+    (episodesState.loading || episodesState.season !== activeSeason.season);
+  const episodes =
+    activeSeason !== undefined &&
+    episodesState.season === activeSeason.season &&
+    !episodesState.loading
+      ? episodesState.rows
+      : [];
   const safeEpisodeIdx =
     episodes.length > 0
       ? Math.min(Math.max(0, Math.floor(detail.selectedEpisodeIndex)), episodes.length - 1)
@@ -104,14 +117,23 @@ export function SeriesDetailPane({
   onFocusTopNavRef.current = onFocusTopNav;
   const episodesRef = useRef(episodes);
   episodesRef.current = episodes;
+  const episodesStateRef = useRef(episodesState);
+  episodesStateRef.current = episodesState;
   const seasonsStateRef = useRef(seasonsState);
   seasonsStateRef.current = seasonsState;
+  const safeSeasonIdxRef = useRef(safeSeasonIdx);
+  safeSeasonIdxRef.current = safeSeasonIdx;
+
+  const commitDetail = useCallback((next: SeriesDetailState) => {
+    detailRef.current = next;
+    onDetailChangeRef.current(next);
+  }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: retryNonce and refreshToken intentionally re-trigger season fetch
   useEffect(() => {
     let cancelled = false;
     setSeasonsState({ kind: 'loading' });
-    setEpisodes([]);
+    setEpisodesState({ season: null, loading: false, rows: [] });
     catalog.seasons(detail.series.id).then(
       (res) => {
         if (cancelled) return;
@@ -140,22 +162,20 @@ export function SeriesDetailPane({
 
   useEffect(() => {
     if (seasonsState.kind !== 'ready' || activeSeason === undefined) {
-      setEpisodes([]);
-      setEpisodesLoading(false);
+      setEpisodesState({ season: null, loading: false, rows: [] });
       return undefined;
     }
     let cancelled = false;
-    setEpisodesLoading(true);
-    catalog.episodes(detail.series.id, activeSeason.season).then(
+    const seasonNum = activeSeason.season;
+    setEpisodesState({ season: seasonNum, loading: true, rows: [] });
+    catalog.episodes(detail.series.id, seasonNum).then(
       (rows) => {
         if (cancelled) return;
-        setEpisodes(rows);
-        setEpisodesLoading(false);
+        setEpisodesState({ season: seasonNum, loading: false, rows });
       },
       () => {
         if (!cancelled) {
-          setEpisodes([]);
-          setEpisodesLoading(false);
+          setEpisodesState({ season: seasonNum, loading: false, rows: [] });
         }
       },
     );
@@ -166,12 +186,13 @@ export function SeriesDetailPane({
 
   useLayoutEffect(() => {
     if (!isTv) return;
+    if (episodes.length === 0) {
+      store.setCount(EPISODES_LIST_ID, 0);
+    }
     const targetList =
       activePane === 'episodes' && episodes.length > 0 ? EPISODES_LIST_ID : SEASONS_LIST_ID;
-    if (!store.isActive(targetList)) {
-      store.activate(targetList);
-    }
-  }, [activePane, episodes.length, isTv, store]);
+    syncTwoPaneScopeActive(store, isActiveScope, targetList);
+  }, [activePane, episodes.length, isActiveScope, isTv, store]);
 
   const seasonsSource = useMemo(() => createArrayListSource(seasons), [seasons]);
   const episodesSource = useMemo(() => createArrayListSource(episodes), [episodes]);
@@ -181,24 +202,25 @@ export function SeriesDetailPane({
       const ep = episodesRef.current[epIndex];
       if (ep === undefined) return;
       const cur = detailRef.current;
-      onDetailChangeRef.current({
+      commitDetail({
         ...cur,
-        selectedSeasonIndex: safeSeasonIdx,
+        selectedSeasonIndex: safeSeasonIdxRef.current,
         selectedEpisodeIndex: epIndex,
         activePane: 'episodes',
       });
       const { playTitle } = formatEpisodeLabel(ep, epIndex, cur.series.name, i18n.t);
       onPlay({ itemKey: ep.key, sourceId: cur.series.sourceId, title: playTitle, kind: 'vod' });
     },
-    [i18n.t, onPlay, safeSeasonIdx],
+    [commitDetail, i18n.t, onPlay],
   );
 
   const handleTvKey = useCallback(
     (event: KeyEvent) => {
       const curState = seasonsStateRef.current;
       if (curState.kind !== 'ready' || curState.rows.length === 0) {
-        if (event.kind === 'press' && event.key === 'select' && curState.kind === 'error') {
-          setRetryNonce((n) => n + 1);
+        if (event.kind === 'press' && event.key === 'select') {
+          if (curState.kind === 'error') setRetryNonce((n) => n + 1);
+          else if (curState.kind === 'ready') onBackRef.current();
         } else if (event.kind === 'press' && event.key === 'back') {
           onBackRef.current();
         } else if (event.kind === 'press' && event.key === 'up') {
@@ -215,9 +237,9 @@ export function SeriesDetailPane({
         ) {
           onFocusTopNavRef.current?.();
         } else if (intent.kind === 'select') {
-          if (intent.listId === SEASONS_LIST_ID) {
-            if (episodesRef.current.length > 0) store.activate(EPISODES_LIST_ID);
-            onDetailChangeRef.current({
+          if (intent.listId === SEASONS_LIST_ID && episodesRef.current.length > 0) {
+            store.activate(EPISODES_LIST_ID);
+            commitDetail({
               ...detailRef.current,
               selectedSeasonIndex: intent.index,
               activePane: 'episodes',
@@ -228,7 +250,7 @@ export function SeriesDetailPane({
         } else if (intent.kind === 'back') {
           if (store.isActive(EPISODES_LIST_ID) || detailRef.current.activePane === 'episodes') {
             store.activate(SEASONS_LIST_ID);
-            onDetailChangeRef.current({ ...detailRef.current, activePane: 'seasons' });
+            commitDetail({ ...detailRef.current, activePane: 'seasons' });
           } else {
             onBackRef.current();
           }
@@ -239,118 +261,58 @@ export function SeriesDetailPane({
             episodesRef.current.length > 0
           ) {
             store.activate(EPISODES_LIST_ID);
-            onDetailChangeRef.current({ ...detailRef.current, activePane: 'episodes' });
+            commitDetail({ ...detailRef.current, activePane: 'episodes' });
           } else if (intent.event.key === 'left' && store.isActive(EPISODES_LIST_ID)) {
             store.activate(SEASONS_LIST_ID);
-            onDetailChangeRef.current({ ...detailRef.current, activePane: 'seasons' });
+            commitDetail({ ...detailRef.current, activePane: 'seasons' });
           }
         }
       }
     },
-    [activateEpisode, store],
+    [activateEpisode, commitDetail, store],
   );
 
-  const formatSeason = (season: SeasonRow | undefined) =>
-    season === undefined
-      ? i18n.t('browse.loading')
-      : i18n.t('series.seasonCount', { season: season.season, count: season.episodeCount });
-
-  const formatEp = (ep: EpisodeRow | undefined, idx: number) =>
-    ep === undefined
-      ? i18n.t('browse.loading')
-      : formatEpisodeLabel(ep, idx, detail.series.name, i18n.t).rowText;
-
-  const seasonsPane = (
-    <View style={isPhone ? browseStyles.singlePane : browseStyles.leftColumn}>
-      <View style={browseStyles.paneHeader}>
-        <Text style={[browseStyles.paneTitle, isTv ? browseStyles.paneTitleTv : null]}>
-          {`${formatItemTitle(detail.series)} — ${i18n.t('series.seasons')}`}
-        </Text>
-        <PlainBrowseButton
-          testID="series-back-series"
-          label={i18n.t('series.backToSeries')}
-          isTv={isTv}
-          onPress={onBackToSeries}
-        />
-      </View>
-      <ElvList
-        listId={SEASONS_LIST_ID}
-        store={store}
-        source={seasonsSource}
-        rowHeight={rowHeight}
-        visibleRows={BROWSE_VISIBLE_ROWS}
-        selectedIndex={safeSeasonIdx}
-        onSelectIndex={(idx) =>
-          onDetailChange({
-            ...detail,
-            selectedSeasonIndex: idx,
-            selectedEpisodeIndex: 0,
-            activePane: 'seasons',
-          })
-        }
-        onActivateIndex={(idx) =>
-          onDetailChange({
-            ...detail,
-            selectedSeasonIndex: idx,
-            selectedEpisodeIndex: 0,
-            activePane: isPhone ? 'episodes' : (detail.activePane ?? 'seasons'),
-          })
-        }
-        renderRow={(s, active) => (
-          <PlainListRow text={formatSeason(s)} active={active} isTv={isTv} />
-        )}
-        rowLabel={(s) => formatSeason(s)}
-        testID="series-seasons-list"
-      />
-    </View>
+  const handleSelectSeason = useCallback(
+    (idx: number) => {
+      const curSeasons =
+        seasonsStateRef.current.kind === 'ready' ? seasonsStateRef.current.rows : [];
+      const nextSeason = curSeasons[idx]?.season ?? null;
+      if (nextSeason !== episodesStateRef.current.season) {
+        episodesRef.current = [];
+        store.setCount(EPISODES_LIST_ID, 0);
+      }
+      commitDetail({
+        ...detailRef.current,
+        selectedSeasonIndex: idx,
+        selectedEpisodeIndex: 0,
+        activePane: 'seasons',
+      });
+    },
+    [commitDetail, store],
   );
 
-  const episodesPane = (
-    <View style={isPhone ? browseStyles.singlePane : browseStyles.rightColumn}>
-      <View style={browseStyles.paneHeader}>
-        <Text style={[browseStyles.paneTitle, isTv ? browseStyles.paneTitleTv : null]}>
-          {i18n.t('series.episodes')}
-        </Text>
-        {isPhone ? (
-          <PlainBrowseButton
-            testID="series-back-seasons"
-            label={i18n.t('series.backToSeasons')}
-            isTv={isTv}
-            onPress={() => onDetailChange({ ...detail, activePane: 'seasons' })}
-          />
-        ) : null}
-      </View>
-      {episodesLoading || episodes.length === 0 ? (
-        <View style={browseStyles.emptyBox}>
-          <Text style={[browseStyles.messageText, isTv ? browseStyles.messageTextTv : null]}>
-            {episodesLoading ? i18n.t('browse.loading') : i18n.t('series.emptyEpisodes')}
-          </Text>
-        </View>
-      ) : (
-        <ElvList
-          listId={EPISODES_LIST_ID}
-          store={store}
-          source={episodesSource}
-          rowHeight={rowHeight}
-          visibleRows={BROWSE_VISIBLE_ROWS}
-          selectedIndex={safeEpisodeIdx}
-          onSelectIndex={(idx) =>
-            onDetailChange({
-              ...detail,
-              selectedSeasonIndex: safeSeasonIdx,
-              selectedEpisodeIndex: idx,
-              activePane: 'episodes',
-            })
-          }
-          onActivateIndex={activateEpisode}
-          renderRow={(ep, active, idx) => (
-            <PlainListRow text={formatEp(ep, idx)} active={active} isTv={isTv} />
-          )}
-          rowLabel={formatEp}
-          testID="series-episodes-list"
-        />
-      )}
-    </View>
+  const handleActivateSeason = useCallback(
+    (idx: number) => {
+      commitDetail({
+        ...detailRef.current,
+        selectedSeasonIndex: idx,
+        selectedEpisodeIndex: 0,
+        activePane: isPhone ? 'episodes' : (detailRef.current.activePane ?? 'seasons'),
+      });
+    },
+    [commitDetail, isPhone],
+  );
+
+  const handleSelectEpisode = useCallback(
+    (idx: number) => {
+      commitDetail({
+        ...detailRef.current,
+        selectedSeasonIndex: safeSeasonIdxRef.current,
+        selectedEpisodeIndex: idx,
+        activePane: 'episodes',
+      });
+    },
+    [commitDetail],
   );
 
   return (
@@ -359,21 +321,32 @@ export function SeriesDetailPane({
       {seasonsState.kind !== 'ready' || seasons.length === 0 ? (
         <SeriesStatusBox
           isTv={isTv}
+          isActiveScope={isActiveScope}
           state={seasonsState.kind === 'ready' ? { kind: 'empty' } : seasonsState}
           onBackToSeries={onBackToSeries}
           onRetry={() => setRetryNonce((n) => n + 1)}
         />
-      ) : isPhone ? (
-        activePane === 'episodes' ? (
-          episodesPane
-        ) : (
-          seasonsPane
-        )
       ) : (
-        <View style={browseStyles.splitRow}>
-          {seasonsPane}
-          {episodesPane}
-        </View>
+        <SeriesSeasonsAndEpisodes
+          isTv={isTv}
+          isPhone={isPhone}
+          rowHeight={rowHeight}
+          store={store}
+          detail={detail}
+          activePane={activePane}
+          seasonsSource={seasonsSource}
+          episodesSource={episodesSource}
+          safeSeasonIdx={safeSeasonIdx}
+          safeEpisodeIdx={safeEpisodeIdx}
+          episodesLoading={episodesLoading}
+          episodesCount={episodes.length}
+          onBackToSeries={onBackToSeries}
+          onBackToSeasons={() => commitDetail({ ...detailRef.current, activePane: 'seasons' })}
+          onSelectSeason={handleSelectSeason}
+          onActivateSeason={handleActivateSeason}
+          onSelectEpisode={handleSelectEpisode}
+          onActivateEpisode={activateEpisode}
+        />
       )}
     </View>
   );

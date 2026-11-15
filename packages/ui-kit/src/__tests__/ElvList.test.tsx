@@ -1,6 +1,6 @@
 import { createFocusStore } from '@elv/focus-core';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
-import type { ReactElement } from 'react';
+import { type ReactElement, useState } from 'react';
 import { Text } from 'react-native';
 import { type FormFactor, FormFactorProvider } from '../form-factor';
 import { ElvList } from '../list/ElvList';
@@ -45,6 +45,31 @@ function createSpySource(count: number, loaded = true) {
       for (const fn of listeners) fn();
     },
   };
+}
+
+function StatefulDesktopList({
+  source,
+  onActivateIndex,
+}: {
+  source: ListSource<string>;
+  onActivateIndex: (index: number) => void;
+}): ReactElement {
+  const [selected, setSelected] = useState(0);
+  return (
+    <FormFactorProvider value="desktop">
+      <ElvList
+        listId="desktop-nav"
+        source={source}
+        rowHeight={ROW_HEIGHT}
+        visibleRows={VISIBLE_ROWS}
+        selectedIndex={selected}
+        onSelectIndex={setSelected}
+        onActivateIndex={onActivateIndex}
+        renderRow={(item, active) => <Text>{`${item}${active ? '*' : ''}`}</Text>}
+        testID="dnav"
+      />
+    </FormFactorProvider>
+  );
 }
 
 describe('ElvList', () => {
@@ -215,6 +240,39 @@ describe('ElvList', () => {
 
     await fireEvent(screen.getByTestId('live-desktop-keys'), 'keyDown', { key: 'Enter' });
     expect(onActivateIndex).toHaveBeenCalledWith(4_200);
+
+    await view.unmount();
+  });
+
+  it('keeps desktop rows out of Tab order and activates safeSelected once on ArrowDown + Enter even if row-0 had focus', async () => {
+    const spy = createSpySource(10);
+    const onActivateIndex = jest.fn();
+
+    const view = await render(
+      <StatefulDesktopList source={spy.source} onActivateIndex={onActivateIndex} />,
+    );
+
+    const container = screen.getByTestId('dnav-desktop-keys');
+    const row0 = screen.getByTestId('dnav-row-0');
+    expect(container.props.tabIndex).toBe(0);
+    expect(row0.props.tabIndex).toBe(-1);
+
+    await fireEvent(container, 'keyDown', { key: 'ArrowDown' });
+    expect(screen.getByTestId('dnav-row-1').props.accessibilityState.selected).toBe(true);
+
+    const enterEvent = {
+      key: 'Enter',
+      preventDefault: jest.fn(),
+      stopPropagation: jest.fn(),
+    };
+    await act(async () => {
+      container.props.onKeyDownCapture?.(enterEvent);
+      container.props.onKeyDown?.(enterEvent);
+      row0.props.onPress?.({ type: 'keyup' });
+    });
+
+    expect(onActivateIndex).toHaveBeenCalledTimes(1);
+    expect(onActivateIndex).toHaveBeenCalledWith(1);
 
     await view.unmount();
   });

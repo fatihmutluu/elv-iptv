@@ -1,7 +1,7 @@
 import type { ItemRow } from '@elv/data';
 import type { FocusStore, KeyEvent } from '@elv/focus-core';
 import { ElvList, type ListSource, useI18n, useKeyInterpreter } from '@elv/ui-kit';
-import type { ReactElement } from 'react';
+import { type ReactElement, useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { type DisplayCategory, formatItemTitle } from './browse-model';
 
@@ -138,6 +138,32 @@ export function BrowseCategoriesAndItems({
 }): ReactElement {
   const i18n = useI18n();
 
+  const categoryRowLabel = useCallback(
+    (cat: DisplayCategory | undefined) =>
+      cat === undefined
+        ? i18n.t('browse.loading')
+        : i18n.t('browse.categoryCount', { name: cat.label, count: cat.row.itemCount }),
+    [i18n],
+  );
+  const renderCategoryRow = useCallback(
+    (cat: DisplayCategory | undefined, active: boolean) => (
+      <PlainListRow text={categoryRowLabel(cat)} active={active} isTv={isTv} />
+    ),
+    [categoryRowLabel, isTv],
+  );
+
+  const itemRowLabel = useCallback(
+    (item: ItemRow | undefined) =>
+      item === undefined ? i18n.t('browse.loading') : formatItemTitle(item),
+    [i18n],
+  );
+  const renderItemRow = useCallback(
+    (item: ItemRow | undefined, active: boolean) => (
+      <PlainListRow text={itemRowLabel(item)} active={active} isTv={isTv} />
+    ),
+    [isTv, itemRowLabel],
+  );
+
   const categoriesPane = (
     <View style={isPhone ? browseStyles.singlePane : browseStyles.leftColumn}>
       <View style={browseStyles.paneHeader}>
@@ -154,22 +180,8 @@ export function BrowseCategoriesAndItems({
         selectedIndex={selectedCatIdx}
         onSelectIndex={onSelectCategory}
         onActivateIndex={onActivateCategory}
-        renderRow={(cat, active) => (
-          <PlainListRow
-            text={
-              cat === undefined
-                ? i18n.t('browse.loading')
-                : i18n.t('browse.categoryCount', { name: cat.label, count: cat.row.itemCount })
-            }
-            active={active}
-            isTv={isTv}
-          />
-        )}
-        rowLabel={(cat) =>
-          cat === undefined
-            ? i18n.t('browse.loading')
-            : i18n.t('browse.categoryCount', { name: cat.label, count: cat.row.itemCount })
-        }
+        renderRow={renderCategoryRow}
+        rowLabel={categoryRowLabel}
         testID="browse-categories-list"
       />
     </View>
@@ -206,16 +218,8 @@ export function BrowseCategoriesAndItems({
           selectedIndex={safeItemIdx}
           onSelectIndex={onSelectItem}
           onActivateIndex={onActivateItem}
-          renderRow={(item, active) => (
-            <PlainListRow
-              text={item === undefined ? i18n.t('browse.loading') : formatItemTitle(item)}
-              active={active}
-              isTv={isTv}
-            />
-          )}
-          rowLabel={(item) =>
-            item === undefined ? i18n.t('browse.loading') : formatItemTitle(item)
-          }
+          renderRow={renderItemRow}
+          rowLabel={itemRowLabel}
           testID="browse-items-list"
         />
       )}

@@ -106,6 +106,86 @@ describe('PlayerScreen lifecycle', () => {
     expect(engine.openMedias()).toBe(0);
   });
 
+  it('places surfaceLayer in flex flow above PlayerOsd on desktop and uses absolute overlay on tv', async () => {
+    const manual = createManualClock();
+    const engine = createFakePlayerEngine({
+      now: manual.now,
+      schedule: manual.schedule,
+      cancel: manual.cancel,
+    });
+    const videoHost: VideoHost = {
+      open: () => ({
+        engine,
+        renderSurface: ({ testID }) => <View testID={testID ?? 'surface'} />,
+      }),
+    };
+    const catalog = {
+      resolveStream: jest.fn(async (key: string) =>
+        ok({ url: `http://sim.example.test/${key}.ts`, headers: {} }),
+      ),
+    };
+    const target: PlayTarget = {
+      itemKey: 'x:src-1:live:101',
+      sourceId: 'src-1',
+      title: '1. Channel Alpha',
+      kind: 'live',
+    };
+
+    const desktopView = await render(
+      <FormFactorProvider value="desktop">
+        <I18nProvider i18n={createAppI18n('en')}>
+          <PlayerScreen
+            catalog={catalog}
+            videoHost={videoHost}
+            target={target}
+            clock={{ now: manual.now }}
+            timers={{ setTimeout: manual.schedule, clearTimeout: manual.cancel }}
+            onExit={() => undefined}
+          />
+        </I18nProvider>
+      </FormFactorProvider>,
+    );
+
+    const desktopLayer = screen.getByTestId('player-surface-layer');
+    expect(desktopLayer.props.style).toEqual({ flex: 1 });
+    await desktopView.unmount();
+
+    const tvEngine = createFakePlayerEngine({
+      now: manual.now,
+      schedule: manual.schedule,
+      cancel: manual.cancel,
+    });
+    const tvView = await render(
+      <FormFactorProvider value="tv">
+        <I18nProvider i18n={createAppI18n('en')}>
+          <PlayerScreen
+            catalog={catalog}
+            videoHost={{
+              open: () => ({
+                engine: tvEngine,
+                renderSurface: ({ testID }) => <View testID={testID ?? 'surface'} />,
+              }),
+            }}
+            target={target}
+            clock={{ now: manual.now }}
+            timers={{ setTimeout: manual.schedule, clearTimeout: manual.cancel }}
+            onExit={() => undefined}
+          />
+        </I18nProvider>
+      </FormFactorProvider>,
+    );
+
+    const tvLayer = screen.getByTestId('player-surface-layer');
+    expect(tvLayer.props.style).toMatchObject({
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+    });
+    await tvView.unmount();
+  });
+
   it('releases an async videoHost.open() engine immediately if unmounted before open() resolves', async () => {
     const manual = createManualClock();
     const engine = createFakePlayerEngine({

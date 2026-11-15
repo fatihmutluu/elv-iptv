@@ -48,6 +48,8 @@ interface DesktopKeyboardEventLike {
   altKey?: unknown;
   metaKey?: unknown;
   preventDefault?: () => void;
+  stopPropagation?: () => void;
+  __elvHandled?: boolean;
 }
 
 interface ScrollOffsetTarget {
@@ -119,14 +121,12 @@ function ElvListTv<T>({
         const target = clamp(Math.floor(pendingRestoreRef.current), 0, count - 1);
         pendingRestoreRef.current = null;
         lastReportedRef.current = target;
-        const current = findList(activeStore.getState().scopes, listId)?.list.index ?? 0;
-        if (current !== target) {
-          const scopes = activeStore.getState().scopes;
-          const prevActive = scopes[scopes.length - 1]?.active;
-          const wasActive = activeStore.isActive(listId);
+        const found = findList(activeStore.getState().scopes, listId);
+        if (found && found.list.index !== target) {
+          const prevScopeActive = activeStore.getState().scopes[found.scope]?.active;
           activeStore.focus(listId, target);
-          if (!wasActive && prevActive !== undefined && prevActive !== listId) {
-            activeStore.activate(prevActive);
+          if (prevScopeActive !== undefined && prevScopeActive !== listId) {
+            activeStore.activate(prevScopeActive);
           }
         }
       }
@@ -173,6 +173,7 @@ function ElvListPointer<T>({
   testID,
   formFactor,
 }: ElvListProps<T> & { formFactor: Exclude<FormFactor, 'tv'> }): ReactElement {
+  const containerRef = useRef<{ focus?: () => void } | null>(null);
   const listRef = useRef<ScrollOffsetTarget | null>(null);
   const [version, bump] = useReducer((v: number) => v + 1, 0);
   useEffect(() => source.onChange(bump), [source]);
@@ -221,9 +222,13 @@ function ElvListPointer<T>({
   const handleDesktopKeyDown = useCallback(
     (event: DesktopKeyboardEventLike) => {
       if (count <= 0 || !event || typeof event.key !== 'string') return;
+      if (event.__elvHandled) return;
       if (event.ctrlKey || event.altKey || event.metaKey) return;
       if (event.key === 'Enter') {
+        event.__elvHandled = true;
         event.preventDefault?.();
+        event.stopPropagation?.();
+        containerRef.current?.focus?.();
         onActivateIndex(safeSelected);
         return;
       }
@@ -233,7 +238,9 @@ function ElvListPointer<T>({
       else if (event.key === 'PageDown') next = clamp(safeSelected + visibleRows, 0, count - 1);
       else if (event.key === 'PageUp') next = clamp(safeSelected - visibleRows, 0, count - 1);
       if (next !== undefined) {
+        event.__elvHandled = true;
         event.preventDefault?.();
+        containerRef.current?.focus?.();
         onSelectIndex?.(next);
         scrollRowIntoView(next);
       }
@@ -241,6 +248,9 @@ function ElvListPointer<T>({
     [count, onActivateIndex, onSelectIndex, safeSelected, scrollRowIntoView, visibleRows],
   );
 
+  const bindContainerRef = useCallback((node: unknown) => {
+    containerRef.current = node as { focus?: () => void } | null;
+  }, []);
   const bindListRef = useCallback((node: unknown) => {
     listRef.current = node as ScrollOffsetTarget | null;
   }, []);
@@ -260,13 +270,20 @@ function ElvListPointer<T>({
     ({ item, index }: { item: unknown; index: number }) => {
       const typedItem = item as T | undefined;
       const active = count > 0 && index === safeSelected;
+      const desktopRowProps: Record<string, unknown> =
+        formFactor === 'desktop' ? { tabIndex: -1 } : {};
       return (
         <Pressable
           testID={testID === undefined ? undefined : `${testID}-row-${index}`}
           accessibilityRole="button"
           accessibilityLabel={rowLabel?.(typedItem, index)}
           accessibilityState={{ selected: active }}
-          onPress={() => {
+          {...desktopRowProps}
+          onPress={(event: unknown) => {
+            if (formFactor === 'desktop') {
+              if ((event as { type?: unknown } | null)?.type === 'keyup') return;
+              containerRef.current?.focus?.();
+            }
             onSelectIndex?.(index);
             onActivateIndex(index);
           }}
@@ -276,15 +293,32 @@ function ElvListPointer<T>({
         </Pressable>
       );
     },
-    [count, onActivateIndex, onSelectIndex, renderRow, rowHeight, rowLabel, safeSelected, testID],
+    [
+      count,
+      formFactor,
+      onActivateIndex,
+      onSelectIndex,
+      renderRow,
+      rowHeight,
+      rowLabel,
+      safeSelected,
+      testID,
+    ],
   );
 
   const viewportHeight = visibleRows * rowHeight;
   const desktopKeyProps: Record<string, unknown> =
-    formFactor === 'desktop' ? { tabIndex: 0, onKeyDown: handleDesktopKeyDown } : {};
+    formFactor === 'desktop'
+      ? {
+          tabIndex: 0,
+          onKeyDownCapture: handleDesktopKeyDown,
+          onKeyDown: handleDesktopKeyDown,
+        }
+      : {};
 
   return (
     <View
+      ref={bindContainerRef}
       testID={
         formFactor === 'desktop' && testID !== undefined ? `${testID}-desktop-keys` : undefined
       }
