@@ -41,6 +41,9 @@ appx:
 
 mac:
   category: public.app-category.entertainment
+  # Ad-hoc sign (`-`) without hardened runtime so Apple Silicon accepts the fused bundle + extraResources before #77.
+  identity: "-"
+  hardenedRuntime: false
   extraResources:
     - from: resources/mpv/darwin-arm64
       to: mpv
