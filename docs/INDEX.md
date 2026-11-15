@@ -11,6 +11,7 @@
 - [Focus core and list gate spec](superpowers/specs/2026-11-13-focus-list-gate-design.md) the remote key model, focus store, windowed TV list and the 100k list gate (`pnpm gate list`).
 - [Android remote keys spec](superpowers/specs/2026-11-14-android-remote-keys-design.md) the `@elv/remote-keys` module that forwards raw Android key events, so a press moves at the `down` and a hold repeats.
 - [Desktop player spec](superpowers/specs/2026-11-14-desktop-player-design.md) the 0.1 desktop engine: an LGPL mpv process over JSON IPC behind `PlayerEngine`, its runtimes and `pnpm gate desktop`.
+- [Desktop catalog spec](superpowers/specs/2026-11-15-desktop-catalog-design.md) the 0.1 desktop catalog: `better-sqlite3` and `CatalogService` in an Electron `utilityProcess` over `MessagePort`, with `safeStorage` secrets (`#75`).
 - [Device catalog spec](superpowers/specs/2026-11-14-device-catalog-design.md) the on-device catalog: storage adapters, the catalog service, bounded Xtream bodies and the import gate (`pnpm gate import`).
 - [Simulator corpus spec](superpowers/specs/2026-11-14-sim-corpus-design.md) runtime fault rules, delivery quirks, the format recipes, subtitles and the `corpus` account of the simulator.
 - [Player core spec](superpowers/specs/2026-11-14-player-core-design.md) the `PlayerEngine` port, the playback service with its recovery ladder and connection-limit path, the Media3 engine and the player gate (`pnpm gate player`, baseline `learned/gates/player-android-tv.json`).
