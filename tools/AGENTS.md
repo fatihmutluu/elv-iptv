@@ -14,6 +14,7 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
   every run to `--out` (`gate-list.json`, with `--ci` under `gate-artifacts/`), warns when the worst run breaks a budget the median meets, exits 1 on a failure; `--budgets warn` (CI) only warns about absolute budgets, and with it `--write-baseline` refuses the local baseline and needs another `--baseline` file.
 - `pnpm gate import [--avd elv_tv] [--build] [--account large|huge] [--batch 5000] [--max-body 4096] [--runs 3 (default)] [--baseline file] [--budgets warn|fail] [--out file] [--write-baseline]`
   starts the simulator on 127.0.0.1:7878 (or reuses a running one), opens `elviptv://gate/import` on the emulator (host `10.0.2.2:7878`) `--runs` times, compares the median with `docs/learned/gates/import-android-tv.json`: rows equal, duration +10 % (+2 s), stall under 100 ms (`large` only; `huge` is report-only, #76). Only `large` becomes a baseline.
+- `pnpm gate player [--avd elv_tv] [--build] [--runs 3 (default)] [--zaps 30] [--faults] [--baseline file] [--budgets warn|fail] [--out file] [--write-baseline]` needs FFmpeg; zap runs (median of times, worst run of counters and overlap, a warning for a time one run missed; budgets per spec 7) and `--faults` runs (drop5, 404, 509 at rate 0.1, slowstart zapped after 0.8 s; windows and limits from the simulator log, cleared after a force-stop and read after another one) against `docs/learned/gates/player-android-tv.json`; `--write-baseline` needs `--faults`.
 - `pnpm scaffold <pure|rn|module> <name>` creates a workspace package (skill `add-package`).
 - `pnpm --filter @elv/tools test` runs Vitest (`sources-*`, `import-*` use the sim; `SIM_HUGE=1` adds 500k).
 
@@ -27,8 +28,7 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
 
 ## Rules
 - Dev credentials: `.env.local` is read by `run:app` only; `DEV_*` keys reach development builds via env, never argv or production; tests use temp files.
-- A new architecture rule needs a fixture case in `test/dependency-rules.test.ts`; a new check goes into `src/checks.ts` and the key list.
-- Keep check output quiet: no progress lines, no passing-check output.
+- A new architecture rule needs a fixture case in `test/dependency-rules.test.ts`; a new check goes into `src/checks.ts` and the key list. Keep check output quiet: no progress or passing-check lines.
 
 ## Stream simulator (`pnpm sim`; `src/sim/`, built-ins only; plays an IPTV provider for the apps)
 - `pnpm sim [--port 7878] [--host 127.0.0.1|0.0.0.0] [--seed 1] [--clock <ISO>] [--log <file>] [--prepare]`

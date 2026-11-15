@@ -8,7 +8,7 @@ Users bring their own M3U or Xtream Codes source; the project ships no content. 
 - `apps/tv-mobile/` Expo app (composition root for phone, tablet, TV). `apps/desktop/` Electron shell and web renderer.
 - `apps/vega/`, `apps/tizen/`, `apps/webos/` planned placeholders (README only).
 - `packages/` source-first TypeScript packages: `domain`, `sources`, `data`, `playback`, `focus-core`, `i18n`,
-  `ui-kit`, `features`, `config`. `modules/` holds Expo native modules, one workspace package each (`remote-keys`, `engine-*`).
+  `ui-kit`, `features`, `config`. `modules/`: Expo native modules, one package each (`remote-keys`, `engine-media3`).
 - `tools/` TypeScript scripts (checks, bootstrap, app launcher, gates, simulator). `docs/` specs, ADRs, lessons.
 - Dependency rules (spec section 5.2) are enforced by dependency-cruiser; read them before adding imports.
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createFetchHttpClient, type FetchLike, type HttpResponse, httpStatusError } from './http';
 import type { Result } from './result';
 
@@ -194,22 +194,33 @@ describe('createFetchHttpClient', () => {
   });
 
   it('shares one timeout budget between the attempt and its retry', async () => {
-    let calls = 0;
-    const started = Date.now();
-    const client = createFetchHttpClient(
-      (_url, init) => {
-        calls += 1;
-        if (calls === 1) return Promise.reject(reset());
-        return new Promise((_resolve, reject) => {
-          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
-        });
-      },
-      { timeoutMs: 80 },
-    );
-    const r = await client.get('http://h/x');
-    expect(r).toEqual({ ok: false, error: { category: 'network', code: 'timeout' } });
-    expect(calls).toBe(2);
-    expect(Date.now() - started).toBeLessThan(160);
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const client = createFetchHttpClient(
+        (_url, init) => {
+          calls += 1;
+          if (calls === 1) {
+            return new Promise((_resolve, reject) => setTimeout(() => reject(reset()), 50));
+          }
+          return new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+          });
+        },
+        { timeoutMs: 80 },
+      );
+      let result: Result<HttpResponse> | undefined;
+      void client.get('http://h/x').then((r) => {
+        result = r;
+      });
+      await vi.advanceTimersByTimeAsync(79);
+      expect(calls).toBe(2);
+      expect(result).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(result).toEqual({ ok: false, error: { category: 'network', code: 'timeout' } });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('maps a thrown TypeError to fetch-failed without leaking credentials', async () => {

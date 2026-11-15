@@ -19,6 +19,7 @@ import {
   resolveAdb,
   runListGate,
 } from '../src/gates/list-gate.ts';
+import { PLAYER_USAGE, playerMain } from '../src/gates/player-cli.ts';
 import { findRepoRoot } from '../src/root.ts';
 
 const USAGE =
@@ -48,6 +49,8 @@ function parseCli() {
       'write-baseline': { type: 'boolean' },
       account: { type: 'string' },
       batch: { type: 'string' },
+      zaps: { type: 'string' },
+      faults: { type: 'boolean' },
       'max-body': { type: 'string' },
     },
   });
@@ -58,11 +61,17 @@ try {
   fail(`gate: ${(error as Error).message.split('. ')[0]}. ${USAGE}`, 2);
 }
 const { values, positionals } = parsed;
-if (positionals.length !== 1 || (positionals[0] !== 'list' && positionals[0] !== 'import')) {
-  fail(`${USAGE}\n${IMPORT_USAGE}`, 2);
+if (
+  positionals.length !== 1 ||
+  (positionals[0] !== 'list' && positionals[0] !== 'import' && positionals[0] !== 'player')
+) {
+  fail(`${USAGE}\n${IMPORT_USAGE}\n${PLAYER_USAGE}`, 2);
 }
 if (positionals[0] === 'import') {
   process.exit(await importMain(values, findRepoRoot(process.cwd())));
+}
+if (positionals[0] === 'player') {
+  process.exit(await playerMain(values, findRepoRoot(process.cwd())));
 }
 
 const count = (name: string, text: string | undefined): number | undefined => {
