@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import type { CheckOutcome } from './runner.ts';
 
 const KILL_TIMEOUT_MS = 2000;
+const KILL_POLL_MS = 15;
 
 function quote(arg: string, platform: string): string {
   if (platform === 'win32') {
@@ -90,6 +91,36 @@ export function createGroupForwarder(host: SignalHost): GroupForwarder {
 
 const liveGroups = createGroupForwarder(process);
 
+/**
+ * Sends `SIGKILL` to POSIX process group `-pid` and waits (bounded by `timeoutMs`) until
+ * `kill(-pid, 0)` throws (`ESRCH`), ensuring all children and grandchildren have terminated and been reaped.
+ */
+export async function killPosixGroup(
+  pid: number,
+  host: { kill(pid: number, signal: NodeJS.Signals | 0): unknown } = process,
+  timeoutMs: number = KILL_TIMEOUT_MS,
+  pollMs: number = KILL_POLL_MS,
+): Promise<void> {
+  try {
+    host.kill(-pid, 'SIGKILL');
+  } catch {
+    return;
+  }
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      host.kill(-pid, 0);
+    } catch {
+      return;
+    }
+    if (Date.now() >= deadline) return;
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(resolve, pollMs);
+      t.unref();
+    });
+  }
+}
+
 /** Kills a child and everything it started: `taskkill /T` on Windows (bounded by 2 s), its process group elsewhere. */
 function killTree(pid: number | undefined): Promise<void> {
   if (pid === undefined) return Promise.resolve();
@@ -112,12 +143,7 @@ function killTree(pid: number | undefined): Promise<void> {
       killer.on('close', finish);
     });
   }
-  try {
-    process.kill(-pid, 'SIGKILL');
-  } catch {
-    // already gone
-  }
-  return Promise.resolve();
+  return killPosixGroup(pid);
 }
 
 /**

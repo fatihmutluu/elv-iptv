@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { commandLine, exec } from '../src/exec.ts';
 
 describe('commandLine and shell safety', () => {
-  it('quotes a command path containing spaces', () => {
+  it('quotes a command path containing spaces on Windows and POSIX', () => {
     expect(
-      commandLine('C:\\Program Files\\Android\\Sdk\\platform-tools\\adb.exe', ['devices']),
+      commandLine('C:\\Program Files\\Android\\Sdk\\platform-tools\\adb.exe', ['devices'], 'win32'),
     ).toBe('"C:\\Program Files\\Android\\Sdk\\platform-tools\\adb.exe" devices');
+    expect(commandLine('/opt/android sdk/adb', ['devices'], 'linux')).toBe(
+      '"/opt/android sdk/adb" devices',
+    );
   });
 
   it('executes a command path with spaces and does not expand %VAR% on Windows', async () => {
