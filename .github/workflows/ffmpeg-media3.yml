@@ -1,0 +1,97 @@
+name: FFmpeg Media3 Android runtime
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "tools/ffmpeg-media3/**"
+      - ".github/workflows/ffmpeg-media3.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - name: Ensure CMake, Ninja and Android NDK 28.2.13676358
+        run: |
+          set -euo pipefail
+          if ! command -v cmake >/dev/null || ! command -v ninja >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends cmake ninja-build
+          fi
+          ndk_ver="$(node -e 'console.log(require("./tools/ffmpeg-media3/versions.json").androidNdk)')"
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          ndk_dir="${sdk_root}/ndk/${ndk_ver}"
+          if [[ ! -d "$ndk_dir" ]]; then
+            yes | "${sdk_root}/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk_root" --install "ndk;${ndk_ver}" >/dev/null
+          fi
+          echo "ANDROID_NDK_HOME=${ndk_dir}" >> "$GITHUB_ENV"
+
+      - name: Build LGPL-2.1+ FFmpeg 9.0.2 and Media3 1.11.1 JNI across 3 ABIs
+        run: bash tools/ffmpeg-media3/build-android.sh "$RUNNER_TEMP/ffmpeg-media3-bundle"
+
+      - name: Gate bundle on LGPL licence, dynamic DT_NEEDED and 16 KB ELF alignment
+        run: node tools/bin/ffmpeg-media3.ts verify --dir "$RUNNER_TEMP/ffmpeg-media3-bundle"
+
+      - name: Package deterministic USTAR tarball and record lock entry
+        env:
+          REPO_NAME: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/artifact"
+          archive="$RUNNER_TEMP/artifact/ffmpeg-media3-android.tar.gz"
+          LC_ALL=C tar \
+            --format=ustar \
+            --sort=name \
+            --mtime='UTC 2026-01-01' \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -czf "$archive" \
+            -C "$RUNNER_TEMP/ffmpeg-media3-bundle" .
+          sha="$(sha256sum "$archive" | awk '{print $1}')"
+          echo "Archive SHA-256: $sha"
+          SHA256="$sha" node -e '
+            const fs = require("node:fs");
+            const v = require("./tools/ffmpeg-media3/versions.json");
+            const lock = {
+              repository: process.env.REPO_NAME,
+              workflow: "ffmpeg-media3.yml",
+              artifactName: "ffmpeg-media3-android",
+              ffmpegVersion: v.ffmpeg.version,
+              media3Version: v.media3.version,
+              runId: process.env.RUN_ID,
+              sha256: process.env.SHA256,
+            };
+            const md = [
+              "### `modules/engine-media3/ffmpeg-media3.lock.json`",
+              "```json",
+              JSON.stringify(lock, null, 2),
+              "```",
+              "",
+            ].join("\n");
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
+          '
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ffmpeg-media3-android
+          path: ${{ runner.temp }}/artifact/ffmpeg-media3-android.tar.gz
+          if-no-files-found: error
+          retention-days: 90

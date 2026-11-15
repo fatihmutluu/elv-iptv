@@ -60,7 +60,7 @@ const EXPECTED_ARCH: Record<FfmpegMedia3Abi, { elfClass: 32 | 64; machine: numbe
 const REQUIRED_NEEDED: Record<FfmpegMedia3Library, readonly string[]> = {
   'libavutil.so': [],
   'libswresample.so': ['libavutil.so'],
-  'libavcodec.so': ['libswresample.so', 'libavutil.so'],
+  'libavcodec.so': ['libavutil.so'],
   'libffmpegJNI.so': ['libavcodec.so', 'libswresample.so', 'libavutil.so'],
 };
 
