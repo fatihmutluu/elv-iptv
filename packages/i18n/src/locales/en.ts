@@ -1,5 +1,6 @@
 /** English (source) message catalog. Every other locale must define the exact same keys. */
 export const enMessages = {
+  'app.title': 'ELV IPTV',
   'sources.title': 'Sources',
   'sources.subtitle': 'Add an Xtream account or M3U playlist URL.',
   'sources.openMenu': 'Browse catalog',

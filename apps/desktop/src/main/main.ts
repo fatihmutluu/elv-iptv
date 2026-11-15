@@ -18,6 +18,7 @@ import {
 } from 'electron';
 import { APP_ORIGIN, APP_SCHEME } from './app-protocol.ts';
 import { type CatalogCoordinator, createCatalogCoordinator } from './catalog/coordinator.ts';
+import { parseDevSeedEnv, runDesktopDevSeedOnce } from './catalog/dev-seed.ts';
 import { registerCatalogIpc, registerCatalogQuitHandler } from './catalog/ipc.ts';
 import {
   createAesGcmTestCipher,
@@ -43,6 +44,8 @@ import { lockDownSession, lockDownWebContents } from './security.ts';
 import { type ServeDeps, serveAppRequest } from './serve-app.ts';
 import { focusWindow, startSingleInstance } from './single-instance.ts';
 import { buildWindowOptions, WINDOW_TITLE } from './window-options.ts';
+
+declare const __ELV_DEV_SEED__: boolean;
 
 const rendererDir = join(__dirname, '..', 'renderer');
 
@@ -190,6 +193,12 @@ function startCatalog(): CatalogCoordinator<MessagePortMain> {
     coordinator,
     log,
   });
+  if (__ELV_DEV_SEED__ && !app.isPackaged && gateQuery === null) {
+    const seed = parseDevSeedEnv(process.env, { isPackaged: app.isPackaged });
+    if (seed !== undefined) {
+      void runDesktopDevSeedOnce({ seed, coordinator, secrets }).catch(() => undefined);
+    }
+  }
   return coordinator;
 }
 

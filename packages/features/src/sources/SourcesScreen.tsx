@@ -133,6 +133,7 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
       >
         <View style={styles.headerRow}>
           <View style={styles.headerTitles}>
+            <Text style={styles.brand}>{i18n.t('app.title')}</Text>
             <Text style={[styles.title, isTv ? styles.titleTv : null]}>
               {i18n.t('sources.title')}
             </Text>

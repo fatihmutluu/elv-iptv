@@ -3,6 +3,7 @@ export {
   describeSourceFailure,
   isEmptyImport,
 } from './errors';
+export { createLazyCatalog } from './lazy-catalog';
 export { SourcesScreen, type SourcesScreenProps } from './SourcesScreen';
 export {
   phaseMessageId,

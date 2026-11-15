@@ -308,6 +308,7 @@ export const sourcesStyles = StyleSheet.create({
     gap: 12,
   },
   headerTitles: { flex: 1, gap: 4 },
+  brand: { color: '#8c8c9a', fontSize: 13, fontWeight: '600', letterSpacing: 0.5 },
   title: { color: '#f4f4f6', fontSize: 22, fontWeight: '700' },
   titleTv: { fontSize: 28 },
   subtitle: { color: '#a0a0ab', fontSize: 15 },

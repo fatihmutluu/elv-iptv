@@ -17,6 +17,15 @@ jest.mock('@elv/engine-media3', () => ({
   Media3Surface: () => null,
 }));
 jest.mock('@op-engineering/op-sqlite', () => ({ open: jest.fn() }));
+jest.mock('expo-localization', () => ({
+  getLocales: () => [{ languageTag: 'en-US', languageCode: 'en' }],
+}));
+jest.mock('expo-secure-store', () => ({
+  getItemAsync: jest.fn(async () => null),
+  setItemAsync: jest.fn(async () => undefined),
+  deleteItemAsync: jest.fn(async () => undefined),
+  WHEN_UNLOCKED_THIS_DEVICE_ONLY: 1,
+}));
 jest.mock('expo-constants', () => ({
   __esModule: true,
   default: {
@@ -58,24 +67,27 @@ afterEach(() => {
 });
 
 describe('App', () => {
-  it('shows the product name', async () => {
+  it('mounts SourcesScreen with the product name when no gate URL is active', async () => {
     openedWith(null);
     await render(<App />);
     expect(screen.getByText('ELV IPTV')).toBeOnTheScreen();
+    expect(screen.getByTestId('sources-screen')).toBeOnTheScreen();
   });
 
   it('ignores a gate URL when the build has no gate flag', async () => {
     openedWith(GATE_URL);
     await render(<App />);
     expect(screen.getByText('ELV IPTV')).toBeOnTheScreen();
+    expect(screen.getByTestId('sources-screen')).toBeOnTheScreen();
     expect(screen.queryByTestId('gate-list')).toBeNull();
   });
 
-  it('keeps the placeholder in a gate build until a gate URL opens it', async () => {
+  it('mounts SourcesScreen in a gate build until a gate URL opens it', async () => {
     mockGate = true;
     openedWith(null);
     await render(<App />);
     expect(screen.getByText('ELV IPTV')).toBeOnTheScreen();
+    expect(screen.getByTestId('sources-screen')).toBeOnTheScreen();
     expect(screen.queryByTestId('gate-list')).toBeNull();
   });
 
@@ -84,7 +96,7 @@ describe('App', () => {
     openedWith(GATE_URL);
     await render(<App />);
     expect(await screen.findByTestId('gate-list')).toBeOnTheScreen();
-    expect(screen.queryByText('ELV IPTV')).toBeNull();
+    expect(screen.queryByTestId('sources-screen')).toBeNull();
   });
 
   it('opens the player gate from its URL in a gate build', async () => {
@@ -116,7 +128,7 @@ describe('App', () => {
     openedWith(null);
     const read = launchedWith(GATE_URL);
     await render(<App />);
-    expect(screen.getByText('ELV IPTV')).toBeOnTheScreen();
+    expect(screen.getByTestId('sources-screen')).toBeOnTheScreen();
     expect(read).not.toHaveBeenCalled();
   });
 
@@ -125,7 +137,7 @@ describe('App', () => {
     openedWith(null);
     launchedWith(42);
     await render(<App />);
-    expect(screen.getByText('ELV IPTV')).toBeOnTheScreen();
+    expect(screen.getByTestId('sources-screen')).toBeOnTheScreen();
   });
 
   it('opens the gate list from a URL event and unsubscribes on unmount', async () => {

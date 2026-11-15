@@ -19,7 +19,7 @@ Expo project with `platforms: ["web"]` rendered by react-native-web.
 - Put icons and entitlements in `resources/` (`build/` is gitignored). `icon.png` is placeholder art.
 - No signing in Round 0; the `appx` identity and publisher are placeholders the Store assigns later.
 - The Electron binary downloads on first run (Electron 45 has no postinstall).
-- Never read `DEV_*` or `.env.local` here; nothing is mapped into the renderer.
+- Never read `.env.local` directly here (`pnpm run:app` supplies `DEV_*` to main in development only; `scripts/bundle.mjs` defines `__ELV_DEV_SEED__` so `dev-seed.ts` runs once when `!app.isPackaged` and is stripped in production, with nothing mapped to `renderer/`, `#10`). `renderer/src/App.tsx` mounts `SourcesScreen` (`#71`) outside `--elv-gate=`.
 
 ## mpv IPC (`src/main/player/mpv/`; the engine on top: `src/main/player/AGENTS.md`)
 - `codec.ts` (JSON lines), `client.ts` (request ids, 3 s `MpvWedgedError`, events), `process.ts` (Windows: hidden

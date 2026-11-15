@@ -2,6 +2,7 @@ import type { MessageId } from './en';
 
 /** Turkish (`tr`) message catalog. */
 export const trMessages: Readonly<Record<MessageId, string>> = {
+  'app.title': 'ELV IPTV',
   'sources.title': 'Kaynaklar',
   'sources.subtitle': 'Bir Xtream hesabı veya M3U çalma listesi adresi ekleyin.',
   'sources.openMenu': 'Kataloğa göz at',

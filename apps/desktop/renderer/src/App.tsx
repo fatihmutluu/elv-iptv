@@ -1,4 +1,8 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { createLazyCatalog, SourcesScreen } from '@elv/features';
+import { createAppI18n, resolveLocale } from '@elv/i18n';
+import { FormFactorProvider, I18nProvider } from '@elv/ui-kit';
+import { useMemo } from 'react';
+import { createDesktopCatalog } from './catalog/index.ts';
 import { GateScreen } from './gate/GateScreen.tsx';
 import { resolveGate } from './gate/params.ts';
 
@@ -6,17 +10,22 @@ import { resolveGate } from './gate/params.ts';
 // for an unpackaged `--elv-gate=` launch, and the preload flags gate mode; a page with just the query gets no gate.
 const GATE = resolveGate(window.location.search, window.elv);
 
-/** Placeholder root of the desktop renderer; the shared feature screens replace it later. */
+/** Root of the desktop renderer: mounts the gate harness on `--elv-gate=` launches and `SourcesScreen` (#71) otherwise. */
 export function App() {
+  const i18n = useMemo(() => {
+    const languages = typeof navigator === 'undefined' ? [] : navigator.languages;
+    return createAppI18n(resolveLocale(languages));
+  }, []);
+
+  const catalog = useMemo(() => createLazyCatalog(() => createDesktopCatalog()), []);
+
   if (GATE) return <GateScreen params={GATE} />;
+
   return (
-    <View style={styles.root}>
-      <Text style={styles.title}>ELV IPTV</Text>
-    </View>
+    <FormFactorProvider value="desktop">
+      <I18nProvider i18n={i18n}>
+        <SourcesScreen catalog={catalog} />
+      </I18nProvider>
+    </FormFactorProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  root: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#101114' },
-  title: { color: '#ffffff', fontSize: 32, fontWeight: '600' },
-});

@@ -6,10 +6,27 @@ export type Env = Readonly<Record<string, string | undefined>>;
 const STORES = ['play', 'amazon', 'appstore', 'direct'] as const;
 type Store = (typeof STORES)[number];
 
-/** Inputs that do not come from the environment: the package version and the build time. */
+/** Normalized development source seed embedded into native debug `app.config` assets only (#10). */
+export type DevSeedPayload =
+  | {
+      readonly kind: 'xtream';
+      readonly name: string;
+      readonly server: string;
+      readonly username: string;
+      readonly password: string;
+    }
+  | {
+      readonly kind: 'm3u';
+      readonly name: string;
+      readonly playlistUrl: string;
+      readonly guideUrl?: string;
+    };
+
+/** Inputs that do not come from the environment: the package version, build time, and native debug embed flag. */
 export interface BuildOptions {
   version: string;
   now: Date;
+  embedDevSeed?: boolean;
 }
 
 const APP_ID = 'io.github.fatihmutluu.elviptv';
@@ -29,19 +46,64 @@ function parseStore(value: string | undefined): Store {
   return store;
 }
 
-function devValues(env: Env): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(env)) {
-    if (key.startsWith('DEV_') && value !== undefined) out[key] = value;
+function defaultHostName(rawUrl: string, fallback: string): string {
+  try {
+    return new URL(rawUrl).host || fallback;
+  } catch {
+    return fallback;
   }
-  return out;
 }
 
-/** Builds the Expo config from the build environment; `DEV_*` values appear only in development. */
+function parseDevSeedEnv(env: Env): DevSeedPayload | undefined {
+  const server = (env.DEV_XTREAM_SERVER ?? env.DEV_XTREAM_URL ?? '').trim();
+  const username = (env.DEV_XTREAM_USERNAME ?? '').trim();
+  const password = (env.DEV_XTREAM_PASSWORD ?? '').trim();
+  if (server !== '' && username !== '' && password !== '') {
+    const customName = (env.DEV_XTREAM_NAME ?? env.DEV_SOURCE_NAME ?? '').trim();
+    return {
+      kind: 'xtream',
+      name: customName !== '' ? customName : defaultHostName(server, 'Dev Xtream'),
+      server,
+      username,
+      password,
+    };
+  }
+
+  const playlistUrl = (env.DEV_M3U_URL ?? '').trim();
+  if (playlistUrl !== '') {
+    const customName = (env.DEV_M3U_NAME ?? env.DEV_SOURCE_NAME ?? '').trim();
+    const guideUrl = (env.DEV_M3U_GUIDE_URL ?? env.DEV_GUIDE_URL ?? '').trim();
+    return {
+      kind: 'm3u',
+      name: customName !== '' ? customName : defaultHostName(playlistUrl, 'Dev M3U'),
+      playlistUrl,
+      ...(guideUrl !== '' ? { guideUrl } : {}),
+    };
+  }
+
+  return undefined;
+}
+
+/**
+ * Returns `true` only when Expo Constants' native asset script (`expo-constants/scripts/getAppConfig.js`)
+ * is invoked in debug mode (`argv[5] === 'true'`) by Gradle (`createDebugExpoConfig`) or Xcode
+ * (`Bundle Expo Config`). Returns `false` for Metro (`@expo/cli`), `expo prebuild`, and Release builds
+ * so `DEV_*` credentials never enter Metro's HTTP manifest or JS bundle over the LAN (#10).
+ */
+export function isNativeDebugConfigEmbed(argv: readonly string[]): boolean {
+  const script = (argv[1] ?? '').replace(/\\/g, '/');
+  const isGetAppConfig =
+    script === 'expo-constants/scripts/getAppConfig.js' ||
+    script.endsWith('/expo-constants/scripts/getAppConfig.js');
+  return isGetAppConfig && argv[5] === 'true';
+}
+
+/** Builds the Expo config from the build environment; `extra.seed` is embedded only in native debug builds. */
 export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
   const development = env.APP_VARIANT === 'development';
   const tv = env.EXPO_TV === '1' || env.EXPO_TV === 'true';
   const id = development ? `${APP_ID}.dev` : APP_ID;
+  const seed = development && options.embedDevSeed === true ? parseDevSeedEnv(env) : undefined;
 
   const plugins: NonNullable<ExpoConfig['plugins']> = [
     [
@@ -107,7 +169,8 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
         run: env.GITHUB_RUN_NUMBER ?? 'local',
         builtAt: options.now.toISOString(),
       },
-      ...(development ? { dev: devValues(env), gate: true } : {}),
+      ...(development ? { gate: true } : {}),
+      ...(seed !== undefined ? { seed } : {}),
     },
   };
 }

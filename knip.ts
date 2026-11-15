@@ -24,7 +24,14 @@ const config: KnipConfig = {
     },
     'apps/desktop': {
       // presenter-probe.ts is the test-only Electron main the presenter spec launches.
-      entry: ['e2e/*.spec.ts', 'e2e/presenter-probe.ts'],
+      entry: [
+        'e2e/*.spec.ts',
+        'e2e/presenter-probe.ts',
+        'scripts/*.mjs',
+        'src/main/main.ts',
+        'src/preload/preload.ts',
+        'src/utility/catalog-worker.ts',
+      ],
       // Needed by the packaging script and by the workspace link to the renderer export.
       ignoreDependencies: ['@elv/desktop-renderer'],
       // Windows system tool used to check that a recorded pid is still the launcher.
