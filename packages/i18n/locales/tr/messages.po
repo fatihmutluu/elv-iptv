@@ -305,3 +305,153 @@ msgstr "Katalog verileri yerel depolamaya kaydedilemedi."
 
 msgid "source.hint.storage"
 msgstr "Boş disk alanını kontrol edip kaynağı yenilemeyi deneyin."
+
+msgid "nav.live"
+msgstr "Canlı"
+
+msgid "nav.movies"
+msgstr "Filmler"
+
+msgid "nav.series"
+msgstr "Diziler"
+
+msgid "nav.sources"
+msgstr "Kaynaklar"
+
+msgid "browse.categories"
+msgstr "Kategoriler"
+
+msgid "browse.items"
+msgstr "İçerikler"
+
+msgid "browse.categoryCount"
+msgstr "{name} ({count})"
+
+msgid "browse.emptyNoSources"
+msgstr "Henüz hazır kaynak yok. Göz atmak için bir kaynak ekleyin veya içe aktarın."
+
+msgid "browse.openSources"
+msgstr "Kaynakları aç"
+
+msgid "browse.emptyCategories"
+msgstr "Bu bölümde kategori bulunamadı."
+
+msgid "browse.emptyItems"
+msgstr "Bu kategoride içerik yok."
+
+msgid "browse.loading"
+msgstr "Yükleniyor…"
+
+msgid "browse.backToCategories"
+msgstr "Kategorilere dön"
+
+msgid "series.seasons"
+msgstr "Sezonlar"
+
+msgid "series.seasonCount"
+msgstr "{season}. Sezon ({count})"
+
+msgid "series.episodes"
+msgstr "Bölümler"
+
+msgid "series.episodeTitled"
+msgstr "B{episode} · {title}"
+
+msgid "series.episodeUntitled"
+msgstr "{episode}. Bölüm"
+
+msgid "series.loadingSeasons"
+msgstr "Sezonlar yükleniyor…"
+
+msgid "series.emptySeasons"
+msgstr "Bu dizi için sezon bulunamadı."
+
+msgid "series.emptyEpisodes"
+msgstr "Bu sezonda bölüm yok."
+
+msgid "series.retrySeasons"
+msgstr "Tekrar dene"
+
+msgid "series.backToSeries"
+msgstr "Dizilere dön"
+
+msgid "series.backToSeasons"
+msgstr "Sezonlara dön"
+
+msgid "player.status.idle"
+msgstr "Boşta"
+
+msgid "player.status.tuning"
+msgstr "Bağlanıyor…"
+
+msgid "player.status.playing"
+msgstr "Oynatılıyor"
+
+msgid "player.status.paused"
+msgstr "Duraklatıldı"
+
+msgid "player.status.ended"
+msgstr "Bitti"
+
+msgid "player.status.recovering"
+msgstr "Yeniden bağlanılıyor (adım {rung})…"
+
+msgid "player.status.limited"
+msgstr "Etkin bağlantı sırası bekleniyor…"
+
+msgid "player.back"
+msgstr "Geri"
+
+msgid "player.retry"
+msgstr "Tekrar dene"
+
+msgid "player.prevChannel"
+msgstr "Önceki"
+
+msgid "player.nextChannel"
+msgstr "Sonraki"
+
+msgid "player.unavailable"
+msgstr "Bu platformda video oynatma kullanılamıyor."
+
+msgid "player.error.invalidCredentials"
+msgstr "Bu yayın için kimlik doğrulama başarısız oldu."
+
+msgid "player.hint.invalidCredentials"
+msgstr "Kaynaklar ekranından hesap bilgilerinizi kontrol edip kaynağı yenileyin."
+
+msgid "player.error.accountExpired"
+msgstr "Bu sağlayıcı hesabının süresi dolmuş veya hesap etkin değil."
+
+msgid "player.hint.accountExpired"
+msgstr "Sağlayıcınızla abonelik durumunuzu doğrulayın."
+
+msgid "player.error.connectionLimit"
+msgstr "Sağlayıcı bağlantı sınırına ulaşıldı."
+
+msgid "player.hint.connectionLimit"
+msgstr "Diğer cihazlardaki yayınları kapatın, biraz bekleyin ve Tekrar dene düğmesine basın."
+
+msgid "player.error.unreachable"
+msgstr "Yayın sunucusuna ulaşılamadı."
+
+msgid "player.hint.unreachable"
+msgstr "Ağ bağlantınızı kontrol edin veya biraz sonra tekrar deneyin."
+
+msgid "player.error.unsupportedFormat"
+msgstr "Bu yayın biçimi veya çözücüsü desteklenmiyor."
+
+msgid "player.hint.unsupportedFormat"
+msgstr "Kaynaklar ekranından canlı yayın biçimini değiştirmeyi veya başka bir yayın seçmeyi deneyin."
+
+msgid "player.error.itemNotFound"
+msgstr "Bu yayın sunucuda bulunamadı."
+
+msgid "player.hint.itemNotFound"
+msgstr "Kanal listesini güncellemek için Kaynaklar ekranından kaynağı yenileyin."
+
+msgid "player.error.streamFailed"
+msgstr "Yayın hatası nedeniyle oynatma durdu."
+
+msgid "player.hint.streamFailed"
+msgstr "Yeniden bağlanmak için Tekrar dene düğmesine basın veya başka bir içerik seçin."

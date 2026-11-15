@@ -166,6 +166,32 @@ describe('@elv/i18n', () => {
     }
   });
 
+  it('formats navigation, browse, series, and player strings in English and Turkish', () => {
+    const en = createAppI18n('en');
+    expect(en.t('nav.live')).toBe('Live');
+    expect(en.t('nav.movies')).toBe('Movies');
+    expect(en.t('nav.series')).toBe('Series');
+    expect(en.t('nav.sources')).toBe('Sources');
+    expect(en.t('browse.categoryCount', { name: 'General', count: 25000 })).toBe('General (25000)');
+    expect(en.t('series.seasonCount', { season: 2, count: 8 })).toBe('Season 2 (8)');
+    expect(en.t('series.episodeTitled', { episode: 1, title: 'Pilot' })).toBe('E1 · Pilot');
+    expect(en.t('series.episodeUntitled', { episode: 3 })).toBe('Episode 3');
+    expect(en.t('player.status.recovering', { rung: 2 })).toBe('Reconnecting (step 2)…');
+    expect(en.t('player.hint.connectionLimit')).toContain('Retry');
+
+    const tr = createAppI18n('tr');
+    expect(tr.t('nav.live')).toBe('Canlı');
+    expect(tr.t('nav.movies')).toBe('Filmler');
+    expect(tr.t('nav.series')).toBe('Diziler');
+    expect(tr.t('nav.sources')).toBe('Kaynaklar');
+    expect(tr.t('browse.categoryCount', { name: 'Genel', count: 42 })).toBe('Genel (42)');
+    expect(tr.t('series.seasonCount', { season: 2, count: 8 })).toBe('2. Sezon (8)');
+    expect(tr.t('series.episodeTitled', { episode: 1, title: 'Başlangıç' })).toBe('B1 · Başlangıç');
+    expect(tr.t('series.episodeUntitled', { episode: 3 })).toBe('3. Bölüm');
+    expect(tr.t('player.status.recovering', { rung: 2 })).toBe('Yeniden bağlanılıyor (adım 2)…');
+    expect(tr.t('player.hint.connectionLimit')).toContain('Tekrar dene');
+  });
+
   it('installs Intl.PluralRules polyfill only when missing on the target', () => {
     const missingTarget: { PluralRules?: unknown } = {};
     expect(ensurePluralRules(missingTarget)).toBe(true);
