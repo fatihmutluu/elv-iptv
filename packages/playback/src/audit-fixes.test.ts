@@ -311,10 +311,10 @@ describe('I3 & S2: ClockAnchor freezing, VOD resumePosition, and firstFrameAt', 
 });
 
 describe('I5 (#81): silent live ladder bounded to ~10 s', () => {
-  it('fails a completely silent live tune in 8,000 ms without alternates', async () => {
+  it('fails a completely silent live tune in 9,000 ms without alternates', async () => {
     const r = rig({ silent: [] });
     r.service.tune(live('silent'));
-    await tick(7999);
+    await tick(8999);
     expect(status(r).kind).not.toBe('failed');
     await tick(1);
     expect(status(r)).toEqual(failed('network'));
@@ -328,7 +328,7 @@ describe('I5 (#81): silent live ladder bounded to ~10 s', () => {
     expect(r.engine.openMedias()).toBe(0);
   });
 
-  it('fails a completely silent live tune in 10,000 ms with alternates and stops rung 3 before awaiting alternate', async () => {
+  it('fails a completely silent live tune in 11,000 ms with alternates and stops rung 3 before awaiting alternate', async () => {
     const r = rig({ silent: [], alt: [] });
     let settleAlt!: (res: Result<StreamRequest>) => void;
     const asyncAlt = () =>
@@ -336,7 +336,7 @@ describe('I5 (#81): silent live ladder bounded to ~10 s', () => {
         settleAlt = res;
       });
     r.service.tune(live('silent', { alternates: [asyncAlt] }));
-    await tick(8000);
+    await tick(9000);
     expect(status(r)).toEqual(recovering(4, 0));
     // Rung 3 socket must already be closed while asyncAlt is pending!
     expect(r.engine.openMedias()).toBe(0);

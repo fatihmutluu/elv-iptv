@@ -110,24 +110,24 @@ describe('live ladder', () => {
     expect(status(r)).toEqual(failed('network'));
   });
 
-  it('skips rung 1 and enters rung 2 when a live tune shows no first frame within 4,000 ms', async () => {
+  it('skips rung 1 and enters rung 2 when a live tune shows no first frame within 5,000 ms', async () => {
     const r = rig({ dead: [] });
     const t = r.service.tune(live('dead'));
-    await tick(3999);
+    await tick(4999);
     expect(status(r)).toEqual({ kind: 'tuning' });
     await tick(1);
     expect(status(r)).toEqual(recovering(2, 0));
     expect(last(r)).toEqual({ name: 'load', attempt: t + 1, url: 'dead' });
   });
 
-  it('enters rung 1 when a first frame is not followed by playing within 4,000 ms', async () => {
+  it('enters rung 1 when a first frame is not followed by playing within 5,000 ms', async () => {
     const r = rig({ dead: [] });
     const t = r.service.tune(live('dead'));
     await tick(300);
     r.engine.emit({ attempt: t, type: 'firstFrame', atMs: Date.now() });
     state(r, 'buffering');
     stall(r, 'start');
-    await tick(3699);
+    await tick(4699);
     expect(r.engine.commands.map((c) => c.name)).toEqual(['load']);
     expect(status(r)).toEqual({ kind: 'tuning' });
     await tick(1);
@@ -621,7 +621,7 @@ describe('lifecycle', () => {
     error(r, 'network');
     r.service.retry();
     expect(last(r)).toEqual({ name: 'retry', attempt: t + 2 });
-    await tick(4000);
+    await tick(5000);
     expect(status(r)).toEqual(recovering(1, 0));
     expect(last(r)).toEqual({ name: 'retry', attempt: t + 3 });
     expect(r.loads).toHaveLength(1);

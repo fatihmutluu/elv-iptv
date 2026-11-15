@@ -345,9 +345,9 @@ describe('judgeFault', () => {
     const stalled = (start: number, ms: number, over: Partial<SimLogEntry> = {}) =>
       entry(start, ms, { bytes: 0, query: { fault: 'stall30s@0s' }, ...over });
     const bounded = [
-      stalled(0, 4000),
-      stalled(4005, 2000),
-      stalled(6010, 2000),
+      stalled(0, 5000),
+      stalled(5005, 2000),
+      stalled(7010, 2000),
       next(20_000, 1000),
     ];
     expect(judgeFault('silent', run('silent', 'failed-in-time'), bounded, '1001')).toEqual({
@@ -355,7 +355,7 @@ describe('judgeFault', () => {
       warnings: [],
     });
 
-    const single = [stalled(0, 4000)];
+    const single = [stalled(0, 5000)];
     expect(
       judgeFault('silent', run('silent', 'failed-in-time'), single, '1001').failures[0],
     ).toMatch(/fewer than 2 requests/);
@@ -426,9 +426,9 @@ describe('runPlayerGate', () => {
         [entry(0, 5, forced509), entry(2500, 5, forced509)],
         [slow(0, 800), next(810, 2000)],
         [
-          entry(0, 4000, { bytes: 0 }),
-          entry(4005, 2000, { bytes: 0 }),
-          entry(6010, 2000, { bytes: 0 }),
+          entry(0, 5000, { bytes: 0 }),
+          entry(5005, 2000, { bytes: 0 }),
+          entry(7010, 2000, { bytes: 0 }),
         ],
       ],
     });

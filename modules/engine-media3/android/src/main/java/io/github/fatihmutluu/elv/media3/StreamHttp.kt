@@ -13,16 +13,16 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /**
- * Connect timeout of a stream request, per address. Well under the 8,000 ms start timeout, so a connect that hangs
+ * Connect timeout of a stream request, per address. Well under the 5,000 ms start timeout, so a connect that hangs
  * (an unreachable provider) fails while the service still waits for the first frame and a retry fits that window.
  */
 internal const val CONNECT_TIMEOUT_MS = 3_500L
 
 /**
- * Longest silence while reading a response, its status line included. Above the 8,000 ms start timeout, so the
- * service's own timers (4 s stall window, 8 s start timeout, 4 s per rung) decide a silent stream's recovery and a
- * socket timeout never races them, as Media3's 8,000 ms default did. It only ends a dead socket that no newer media
- * superseded: a newer media cancels the old calls at once.
+ * Longest silence while reading a response, its status line included. Above the 5,000 ms live / 8,000 ms VOD start
+ * timeout, so the service's own timers (4 s stall window, 5,000 ms start timeout, 2 s per rung) decide a silent
+ * stream's recovery and a socket timeout never races them, as Media3's 8,000 ms default did. It only ends a dead
+ * socket that no newer media superseded: a newer media cancels the old calls at once.
  */
 internal const val READ_TIMEOUT_MS = 10_000L
 

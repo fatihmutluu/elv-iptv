@@ -25,12 +25,12 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
 - `createPlaybackService({ engine, clock, timers, config? })`: `tune`, `retry` (replays `ended` VOD from 0), `stop`,
   `play`, `pause`, `seek`, `getState`, `subscribe`, `dispose` (stops open media). `PlaybackStatus` includes `ended`.
   `pause`/`play` advance `attempt` to fence queued native states; `anchor` freezes on non-playing states and clears on
-  `stop`. `DEFAULT_PLAYBACK_CONFIG` holds spec timings (`liveStartTimeoutMs: 4000`, `startTimeoutMs: 8000`, `rungTimeoutMs: 2000`).
+  `stop`. `DEFAULT_PLAYBACK_CONFIG` holds spec timings (`liveStartTimeoutMs: 5000`, `startTimeoutMs: 8000`, `rungTimeoutMs: 2000`).
 
 ## Recovery (spec sections 5.4 and 5.5; `recovery.ts`, always wired)
-- Entry: a stall of 4 s while `playing`, no `playing` 4 s after live `load` (8 s VOD), or a recoverable error. Fast
+- Entry: a stall of 4 s while `playing`, no `playing` 5 s after live `load` (8 s VOD), or a recoverable error. Fast
   errors wait gaps 0, 1, 2, 4 s; silent timeouts escalate immediately (live tunes with no first frame skip rung 1) and
-  each rung has 2 s to play (~8-10 s silent bound): 1 `retry`, 2 `load`, 3 `recreate` + `load`, 4 software audio or
+  each rung has 2 s to play (~9-11 s silent bound): 1 `retry`, 2 `load`, 3 `recreate` + `load`, 4 software audio or
   alternate (`stopMedia` before async resolve); then `failed` + `stop`. 30 s of `playing` restores budgets.
 - Limit path (`http-429`, `http-509`, `connection-limit`, even while `paused`): `stop`, `limited { nextAtMs }`, wait
   2, 4, 8, then 15 s, `load`; past 60 s `failed(connection-limit)`. Same-account `tune`s are held until wait ends.

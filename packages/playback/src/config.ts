@@ -28,7 +28,7 @@ export interface PlaybackConfig {
 /** Spec defaults, frozen so no caller can change them for every service. */
 export const DEFAULT_PLAYBACK_CONFIG: Readonly<PlaybackConfig> = Object.freeze({
   liveStallWindowMs: 4000,
-  liveStartTimeoutMs: 4000,
+  liveStartTimeoutMs: 5000,
   startTimeoutMs: 8000,
   rungTimeoutMs: 2000,
   ladderGapsMs: Object.freeze([0, 1000, 2000, 4000] as const),

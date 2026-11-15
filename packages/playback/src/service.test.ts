@@ -67,7 +67,7 @@ describe('config', () => {
   it('has the spec defaults', () => {
     expect(DEFAULT_PLAYBACK_CONFIG).toEqual({
       liveStallWindowMs: 4000,
-      liveStartTimeoutMs: 4000,
+      liveStartTimeoutMs: 5000,
       startTimeoutMs: 8000,
       rungTimeoutMs: 2000,
       ladderGapsMs: [0, 1000, 2000, 4000],

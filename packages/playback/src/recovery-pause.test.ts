@@ -39,7 +39,7 @@ describe('pause', () => {
     expect(status(r)).toEqual({ kind: 'paused' });
     r.service.play();
     expect(status(r)).toEqual({ kind: 'tuning' });
-    await tick(3999);
+    await tick(4999);
     expect(names(r)).toEqual(['load', 'pause', 'play']);
     await tick(1);
     expect(status(r)).toEqual(recovering(1, 0));
@@ -144,7 +144,7 @@ describe('pause', () => {
     await tick(20000);
     expect(names(r)).toEqual(['load', 'pause']);
     r.service.play();
-    await tick(4000);
+    await tick(5000);
     expect(status(r)).toEqual(recovering(2, 0));
     expect(last(r)).toEqual({ name: 'load', attempt: t + 3, url: 'dead' });
   });
