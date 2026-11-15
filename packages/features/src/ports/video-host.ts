@@ -12,8 +12,8 @@ export interface VideoSurfaceProps {
 export interface OpenVideoEngine {
   readonly engine: PlayerEngine;
   renderSurface(props: VideoSurfaceProps): ReactElement | null;
-  /** Optional channel-key stream emitted by an out-of-DOM video window (such as desktop mpv). */
-  onHostKey?: (listener: (key: 'channel-up' | 'channel-down') => void) => () => void;
+  /** Optional key stream emitted by an out-of-DOM video window (such as desktop mpv). */
+  onHostKey?: (listener: (key: 'channel-up' | 'channel-down' | 'back') => void) => () => void;
 }
 
 /** Port supplied by the app composition root to open a `PlayerEngine` and render its surface. */

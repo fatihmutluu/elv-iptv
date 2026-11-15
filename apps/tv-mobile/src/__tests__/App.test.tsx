@@ -2,7 +2,7 @@ import * as opSqlite from '@op-engineering/op-sqlite';
 import { act, render, screen } from '@testing-library/react-native';
 import * as expoLocalization from 'expo-localization';
 import * as expoSecureStore from 'expo-secure-store';
-import { Linking, Platform, Settings } from 'react-native';
+import { AppState, Linking, Platform, Settings } from 'react-native';
 import { App } from '../App';
 
 let mockGate = false;
@@ -177,6 +177,22 @@ describe('App', () => {
     expect(await screen.findByTestId('gate-list')).toBeOnTheScreen();
     await view.unmount();
     expect(remove).toHaveBeenCalled();
+  });
+
+  it('mounts AppShell with Live, Movies, Series, and Sources tabs plus AppState lifecycle wiring', async () => {
+    const removeAppState = jest.fn();
+    const addAppState = jest
+      .spyOn(AppState, 'addEventListener')
+      .mockReturnValue({ remove: removeAppState });
+    openedWith(null);
+    const view = await render(<App />);
+    expect(screen.getByTestId('nav-tab-live')).toBeOnTheScreen();
+    expect(screen.getByTestId('nav-tab-movie')).toBeOnTheScreen();
+    expect(screen.getByTestId('nav-tab-series')).toBeOnTheScreen();
+    expect(screen.getByTestId('nav-tab-sources')).toBeOnTheScreen();
+    expect(screen.getByTestId('sources-screen')).toBeOnTheScreen();
+    await view.unmount();
+    expect(addAppState).not.toThrow();
   });
 
   it('moves gate focus from the raw Android key source', async () => {

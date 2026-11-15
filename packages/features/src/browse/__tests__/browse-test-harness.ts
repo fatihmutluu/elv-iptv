@@ -25,7 +25,7 @@ export interface BrowseCatalogOptions {
   failSeriesInfoAttempts?: number;
 }
 
-export function createBrowseHttpClient(opts: BrowseCatalogOptions = {}): HttpClient {
+function createBrowseHttpClient(opts: BrowseCatalogOptions = {}): HttpClient {
   const liveCount = opts.liveCount ?? 3;
   let remainingSeriesFailures = opts.failSeriesInfoAttempts ?? 0;
 

@@ -126,11 +126,13 @@ export function TvRemoteBridge({
   controls,
   onSelectIndex,
   onBackIntent,
+  onFocusTopNav,
 }: {
   store: FocusStore;
   controls: readonly FocusItem[];
   onSelectIndex: (index: number) => void;
   onBackIntent: () => void;
+  onFocusTopNav?: () => void;
 }): null {
   const controlsRef = useRef(controls);
   controlsRef.current = controls;
@@ -138,13 +140,21 @@ export function TvRemoteBridge({
   selectRef.current = onSelectIndex;
   const backRef = useRef(onBackIntent);
   backRef.current = onBackIntent;
+  const topNavRef = useRef(onFocusTopNav);
+  topNavRef.current = onFocusTopNav;
 
   useKeyInterpreter((event) => {
     const items = controlsRef.current;
     store.setCount(CONTROLS_LIST_ID, items.length);
     const intents = store.dispatch(event);
     for (const intent of intents) {
-      if (intent.kind === 'select' && intent.listId === CONTROLS_LIST_ID) {
+      if (
+        intent.kind === 'edge' &&
+        intent.side === 'start' &&
+        (event.key === 'up' || event.key === 'channelUp')
+      ) {
+        topNavRef.current?.();
+      } else if (intent.kind === 'select' && intent.listId === CONTROLS_LIST_ID) {
         selectRef.current(intent.index);
       } else if (intent.kind === 'back') {
         backRef.current();
@@ -171,11 +181,13 @@ export function useTvSourcesNavigation({
   ctrl,
   onOpenMenu,
   onBack,
+  onFocusTopNav,
 }: {
   isTv: boolean;
   ctrl: SourcesController;
   onOpenMenu?: () => void;
   onBack?: () => void;
+  onFocusTopNav?: () => void;
 }) {
   const inputRefs = useRef<Map<string, TvTextInputInstance>>(new Map());
   const scrollRef = useRef<ScrollViewHandle | null>(null);
@@ -339,5 +351,6 @@ export function useTvSourcesNavigation({
     handleEndEditing,
     handleSelectIndex,
     handleBackIntent,
+    onFocusTopNav,
   };
 }

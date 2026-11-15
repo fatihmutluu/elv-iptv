@@ -204,7 +204,8 @@ export function PlayerScreen({
         timers: timersRef.current,
       });
       const offHostKey = opened.onHostKey?.((key) => {
-        zapByRef.current(key === 'channel-up' ? 1 : -1);
+        if (key === 'back') onExitRef.current();
+        else zapByRef.current(key === 'channel-up' ? 1 : -1);
       });
       activeSession = {
         opened,
