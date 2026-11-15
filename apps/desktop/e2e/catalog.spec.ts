@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
+import { createServer, type Server, type ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { _electron as electron, expect, test } from '@playwright/test';
@@ -20,6 +20,8 @@ let ownedSim: ChildProcess | undefined;
 let simBaseUrl = '';
 let m3uServer: Server | undefined;
 let m3uBaseUrl = '';
+let hangRequested = false;
+const hangingResponses = new Set<ServerResponse>();
 
 async function urlAnswers(url: string): Promise<boolean> {
   try {
@@ -103,6 +105,14 @@ test.beforeAll(async () => {
       res.end(body);
       return;
     }
+    if (req.url?.startsWith('/hang.m3u')) {
+      hangRequested = true;
+      hangingResponses.add(res);
+      res.once('close', () => hangingResponses.delete(res));
+      res.writeHead(200, { 'content-type': 'audio/x-mpegurl; charset=utf-8' });
+      res.write('#EXTM3U\n');
+      return;
+    }
     res.writeHead(404);
     res.end();
   });
@@ -119,6 +129,8 @@ test.afterAll(async () => {
     ownedSim.kill();
     await Promise.race([exited, new Promise<void>((r) => setTimeout(r, 3_000))]);
   }
+  for (const res of hangingResponses) res.destroy();
+  hangingResponses.clear();
   await new Promise<void>((resolve) => (m3uServer ? m3uServer.close(() => resolve()) : resolve()));
 });
 
@@ -362,6 +374,7 @@ test('imports the large simulator catalog in utilityProcess without stalling ren
 });
 
 test('recovers transparently when the catalog utilityProcess crashes', async () => {
+  hangRequested = false;
   const userDataDir = mkdtempSync(join(tmpdir(), 'elv-e2e-catalog-crash-'));
   const app = await electron.launch({
     args: [DESKTOP_ROOT, `--user-data-dir=${userDataDir}`, ...cipherLaunchArgs()],
@@ -371,7 +384,7 @@ test('recovers transparently when the catalog utilityProcess crashes', async () 
     const page = await app.firstWindow();
     await expect(page).toHaveTitle('ELV IPTV');
 
-    await page.evaluate(async (m3uUrl) => {
+    const hangingId = await page.evaluate(async (m3uUrl) => {
       const catalog = (globalThis as unknown as { elv?: { catalog: CatalogBridge } }).elv?.catalog;
       if (!catalog) throw new Error('missing catalog bridge');
       const opened = await catalog.open();
@@ -382,6 +395,13 @@ test('recovers transparently when the catalog utilityProcess crashes', async () 
         playlistUrl: `${m3uUrl}/playlist.m3u`,
       });
       if (!added.ok) throw new Error('addSource failed');
+      const hanging = await catalog.addSource({
+        kind: 'm3u',
+        name: 'In-Flight During Crash',
+        playlistUrl: `${m3uUrl}/hang.m3u`,
+      });
+      if (!hanging.ok) throw new Error('addSource hanging failed');
+      return hanging.value.id;
     }, m3uBaseUrl);
 
     const firstPid = await app.evaluate(
@@ -398,25 +418,23 @@ test('recovers transparently when the catalog utilityProcess crashes', async () 
     );
     expect(typeof firstPid).toBe('number');
 
+    // Start an in-flight import so we prove crash settlement (`storage/worker-exited`) before reconnecting
+    const inFlightImport = page.evaluate((id) => {
+      const catalog = (globalThis as unknown as { elv?: { catalog: CatalogBridge } }).elv?.catalog;
+      if (!catalog) throw new Error('missing catalog bridge');
+      return catalog.startImport(id).result;
+    }, hangingId);
+
+    await expect.poll(() => hangRequested).toBe(true);
+
     // Kill the catalog utility process abruptly
     process.kill(firstPid as number);
 
-    await expect
-      .poll(async () =>
-        app.evaluate(
-          ({ app: electronApp }) =>
-            electronApp
-              .getAppMetrics()
-              .find(
-                (m) =>
-                  m.type === 'Utility' &&
-                  (m.name === 'ELV Catalog' ||
-                    m.serviceName === 'ELV Catalog' ||
-                    m.serviceName === 'node.mojom.NodeService'),
-              )?.pid ?? null,
-        ),
-      )
-      .toBeNull();
+    // Awaiting inFlightImport guarantees `catalog:disconnected` has arrived and dropped the stale port in preload
+    expect(await inFlightImport).toEqual({
+      ok: false,
+      error: { category: 'storage', code: 'worker-exited' },
+    });
 
     // Next renderer call transparently respawns a new utilityProcess and reads persisted SQLite state
     const names = await page.evaluate(async () => {
@@ -424,7 +442,7 @@ test('recovers transparently when the catalog utilityProcess crashes', async () 
       const sources = await catalog?.listSources();
       return sources?.map((s) => s.name) ?? [];
     });
-    expect(names).toEqual(['Crash Survivor']);
+    expect(names).toEqual(['Crash Survivor', 'In-Flight During Crash']);
 
     const respawnedPid = await app.evaluate(
       ({ app: electronApp }) =>
@@ -454,7 +472,7 @@ test('fails closed on headless Linux when safeStorage falls back to basic_text',
 
   const userDataDir = mkdtempSync(join(tmpdir(), 'elv-e2e-catalog-linux-lock-'));
   const app = await electron.launch({
-    args: [DESKTOP_ROOT, `--user-data-dir=${userDataDir}`],
+    args: [DESKTOP_ROOT, '--password-store=basic', `--user-data-dir=${userDataDir}`],
   });
 
   try {

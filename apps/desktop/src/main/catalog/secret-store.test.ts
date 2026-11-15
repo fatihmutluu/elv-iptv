@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -212,5 +220,21 @@ describe('createEncryptedFileSecretStore', () => {
       }),
     );
     expect(await store.get('source.s1.xtream')).toBeUndefined();
+  });
+
+  it('rethrows non-ENOENT readFile errors instead of treating unreadable secrets.json as empty', async () => {
+    const dir = makeTempDir();
+    const filePath = join(dir, 'secrets.json');
+    mkdirSync(filePath);
+
+    const store = createEncryptedFileSecretStore({
+      filePath,
+      cipher: createAesGcmTestCipher(),
+    });
+
+    await expect(store.get('source.s1.xtream')).rejects.toThrow();
+    await expect(store.set('source.s1.xtream', 'value')).rejects.toThrow();
+    await expect(store.delete('source.s1.xtream')).rejects.toThrow();
+    expect(readdirSync(dir)).toEqual(['secrets.json']);
   });
 });

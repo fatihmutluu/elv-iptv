@@ -152,3 +152,38 @@ export function registerCatalogIpc<TPort = unknown>(deps: CatalogIpcDeps<TPort>)
     owners.clear();
   };
 }
+
+/** Subset of Electron's `app` lifecycle needed to flush SQLite cleanly before process exit. */
+export interface QuitAppLike {
+  on(event: 'before-quit', listener: (event: { preventDefault(): void }) => void): unknown;
+}
+
+/**
+ * Registers an idempotent `before-quit` hook that blocks re-entrant `app.quit()` calls while the
+ * catalog `utilityProcess` flushes in-flight rollbacks and closes SQLite, then triggers the final quit.
+ */
+export function registerCatalogQuitHandler(deps: {
+  app: QuitAppLike;
+  getCoordinator: () => CatalogCoordinator<unknown> | undefined;
+  quit: () => void;
+}): void {
+  const { app, getCoordinator, quit } = deps;
+  let shuttingDown = false;
+  let shutDownComplete = false;
+
+  app.on('before-quit', (event) => {
+    if (shutDownComplete) return;
+    const coordinator = getCoordinator();
+    if (!shuttingDown && !coordinator?.isRunning) {
+      shutDownComplete = true;
+      return;
+    }
+    event.preventDefault();
+    if (shuttingDown) return;
+    shuttingDown = true;
+    void (coordinator?.shutdown() ?? Promise.resolve()).finally(() => {
+      shutDownComplete = true;
+      quit();
+    });
+  });
+}

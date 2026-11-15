@@ -7,6 +7,7 @@ import {
   type CatalogClientMessage,
   type CatalogImportHandle,
   type CatalogRpcMethodCall,
+  isCatalogClientMessage,
   isCatalogPortMessage,
   isCatalogWorkerMessage,
 } from '../shared/catalog-ipc.ts';
@@ -148,6 +149,10 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
 
   const callResult = <T>(call: CatalogRpcMethodCall): Promise<Result<T>> => {
     const reqId = ++nextReqId;
+    const message: CatalogClientMessage = { type: 'call', reqId, call };
+    if (!isCatalogClientMessage(message)) {
+      return Promise.resolve(err(elvError('source-format', 'invalid-request')));
+    }
     return new Promise<Result<T>>((resolve, reject) => {
       pendingCalls.set(reqId, {
         mode: 'result',
@@ -157,7 +162,7 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
       void ensurePort().then(
         (port) => {
           if (!pendingCalls.has(reqId)) return;
-          port.postMessage({ type: 'call', reqId, call });
+          port.postMessage(message);
         },
         () => {
           if (pendingCalls.delete(reqId)) {
@@ -170,6 +175,10 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
 
   const callValue = <T>(call: CatalogRpcMethodCall): Promise<T> => {
     const reqId = ++nextReqId;
+    const message: CatalogClientMessage = { type: 'call', reqId, call };
+    if (!isCatalogClientMessage(message)) {
+      return Promise.reject(makeRpcError(elvError('source-format', 'invalid-request')));
+    }
     return new Promise<T>((resolve, reject) => {
       pendingCalls.set(reqId, {
         mode: 'throw',
@@ -179,7 +188,7 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
       void ensurePort().then(
         (port) => {
           if (!pendingCalls.has(reqId)) return;
-          port.postMessage({ type: 'call', reqId, call });
+          port.postMessage(message);
         },
         (reason: unknown) => {
           if (pendingCalls.delete(reqId)) {
@@ -199,6 +208,23 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
     removeSource: (id) => callResult({ method: 'removeSource', id }),
     startImport(id: string, opts?: CatalogBridgeImportOptions): CatalogImportHandle {
       const reqId = ++nextReqId;
+      const message: CatalogClientMessage = {
+        type: 'call',
+        reqId,
+        call: {
+          method: 'importSource',
+          id,
+          ...(opts?.batchSize === undefined ? {} : { batchSize: opts.batchSize }),
+          ...(opts?.maxBodyBytes === undefined ? {} : { maxBodyBytes: opts.maxBodyBytes }),
+          ...(opts?.onProgress === undefined ? {} : { progress: true }),
+        },
+      };
+      if (!isCatalogClientMessage(message)) {
+        return Object.freeze({
+          reqId,
+          result: Promise.resolve(err(elvError('source-format', 'invalid-request'))),
+        });
+      }
       const result = new Promise<Result<ImportSummary>>((resolve, reject) => {
         pendingCalls.set(reqId, {
           mode: 'result',
@@ -209,17 +235,7 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         void ensurePort().then(
           (port) => {
             if (cancelledBeforeSend.delete(reqId) || !pendingCalls.has(reqId)) return;
-            port.postMessage({
-              type: 'call',
-              reqId,
-              call: {
-                method: 'importSource',
-                id,
-                ...(opts?.batchSize === undefined ? {} : { batchSize: opts.batchSize }),
-                ...(opts?.maxBodyBytes === undefined ? {} : { maxBodyBytes: opts.maxBodyBytes }),
-                ...(opts?.onProgress === undefined ? {} : { progress: true }),
-              },
-            });
+            port.postMessage(message);
           },
           () => {
             cancelledBeforeSend.delete(reqId);

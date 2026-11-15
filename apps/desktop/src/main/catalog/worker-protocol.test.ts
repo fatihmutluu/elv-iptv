@@ -48,6 +48,13 @@ describe('isWorkerToMainMessage', () => {
         key: 'source.src_1.playlist',
         value: 'http://x',
       },
+      {
+        type: 'secret-request',
+        reqId: 4,
+        op: 'set',
+        key: 'source.src_1.urlvars',
+        value: 'a'.repeat(131_072),
+      },
       { type: 'shutdown-complete' },
     ];
     for (const msg of valid) {
@@ -55,12 +62,19 @@ describe('isWorkerToMainMessage', () => {
     }
   });
 
-  it('rejects invalid keys or malformed worker-to-main payloads', () => {
+  it('rejects invalid keys, oversized secret values, or malformed worker-to-main payloads', () => {
     const invalid: unknown[] = [
       null,
       { type: 'secret-request', reqId: 0, op: 'get', key: 'source.src_1.xtream' },
       { type: 'secret-request', reqId: 1, op: 'get', key: 'bad/key' },
       { type: 'secret-request', reqId: 1, op: 'set', key: 'source.src_1.xtream' },
+      {
+        type: 'secret-request',
+        reqId: 1,
+        op: 'set',
+        key: 'source.src_1.urlvars',
+        value: 'a'.repeat(131_073),
+      },
       { type: 'secret-request', reqId: 1, op: 'list', key: 'source.src_1.xtream' },
       { type: 'other' },
     ];

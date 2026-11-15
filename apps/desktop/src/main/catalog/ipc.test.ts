@@ -2,7 +2,12 @@ import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { CATALOG_CHANNELS } from '../../shared/catalog-ipc.ts';
 import type { CatalogCoordinator } from './coordinator.ts';
-import { type CatalogIpcMainLike, type CatalogWebContentsLike, registerCatalogIpc } from './ipc.ts';
+import {
+  type CatalogIpcMainLike,
+  type CatalogWebContentsLike,
+  registerCatalogIpc,
+  registerCatalogQuitHandler,
+} from './ipc.ts';
 
 class FakeWebContents implements CatalogWebContentsLike<FakePort> {
   readonly id: number;
@@ -222,5 +227,83 @@ describe('registerCatalogIpc', () => {
         { channel: CATALOG_CHANNELS.disconnected, args: [{ reason: 'worker-exited' }] },
       ]);
     });
+  });
+
+  it('blocks re-entrant before-quit calls until SQLite shutdown finishes, then lets final quit pass', async () => {
+    const appEmitter = new EventEmitter();
+    let running = true;
+    let shutdownCalls = 0;
+    let resolveShutdown: (() => void) | undefined;
+
+    const coordinator: CatalogCoordinator<FakePort> = {
+      get isRunning() {
+        return running;
+      },
+      async connectClient() {
+        return { clientId: 1, rendererPort: makePort(1) };
+      },
+      disconnectClient() {},
+      onUnexpectedExit: () => () => undefined,
+      shutdown() {
+        shutdownCalls += 1;
+        running = false; // coordinator.shutdown marks closing immediately
+        return new Promise<void>((resolve) => {
+          resolveShutdown = resolve;
+        });
+      },
+    };
+
+    const prevented: boolean[] = [];
+    const fireBeforeQuit = (): void => {
+      let defaultPrevented = false;
+      appEmitter.emit('before-quit', {
+        preventDefault() {
+          defaultPrevented = true;
+        },
+      });
+      prevented.push(defaultPrevented);
+    };
+
+    let quitCalls = 0;
+    registerCatalogQuitHandler({
+      app: { on: appEmitter.on.bind(appEmitter) },
+      getCoordinator: () => coordinator,
+      quit: () => {
+        quitCalls += 1;
+        fireBeforeQuit();
+      },
+    });
+
+    // First before-quit prevents default and starts coordinator.shutdown()
+    fireBeforeQuit();
+    // Second before-quit while shutdown is still awaiting SQLite close MUST ALSO prevent default!
+    fireBeforeQuit();
+
+    expect(prevented).toEqual([true, true]);
+    expect(shutdownCalls).toBe(1);
+    expect(quitCalls).toBe(0);
+
+    // Finish shutdown -> triggers quit(), whose before-quit passes through without preventDefault
+    resolveShutdown?.();
+    await vi.waitFor(() => {
+      expect(quitCalls).toBe(1);
+    });
+    expect(prevented).toEqual([true, true, false]);
+  });
+
+  it('does not prevent before-quit when catalog worker was never spawned', () => {
+    const appEmitter = new EventEmitter();
+    registerCatalogQuitHandler({
+      app: { on: appEmitter.on.bind(appEmitter) },
+      getCoordinator: () => undefined,
+      quit: () => undefined,
+    });
+    let defaultPrevented = false;
+    appEmitter.emit('before-quit', {
+      preventDefault() {
+        defaultPrevented = true;
+      },
+    });
+    expect(defaultPrevented).toBe(false);
   });
 });

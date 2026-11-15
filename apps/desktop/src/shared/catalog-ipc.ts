@@ -96,8 +96,8 @@ export interface CatalogBridge {
   close(): Promise<void>;
 }
 
-const SOURCE_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
 const MAX_STRING_CHARS = 8_192;
+const MAX_ID_CHARS = 256;
 const ERROR_CATEGORIES = new Set<ErrorCategory>([
   'network',
   'auth',
@@ -122,7 +122,6 @@ const isSafeInt = (x: unknown): x is number => Number.isSafeInteger(x);
 const isFiniteNumber = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 const isBoundedString = (x: unknown, min = 0, max = MAX_STRING_CHARS): x is string =>
   typeof x === 'string' && x.length >= min && x.length <= max;
-const isSourceId = (x: unknown): x is string => typeof x === 'string' && SOURCE_ID_RE.test(x);
 
 const hasControlChar = (text: string): boolean => {
   for (let i = 0; i < text.length; i += 1) {
@@ -132,8 +131,16 @@ const hasControlChar = (text: string): boolean => {
   return false;
 };
 
+function isTrimmedCleanString(x: unknown): x is string {
+  return isBoundedString(x) && !hasControlChar(x.trim());
+}
+
 function isOptionalCleanString(x: unknown): boolean {
   return x === undefined || (isBoundedString(x) && !hasControlChar(x));
+}
+
+function isOptionalTrimmedCleanString(x: unknown): boolean {
+  return x === undefined || isTrimmedCleanString(x);
 }
 
 function isTransportSettings(x: unknown): x is TransportSettings {
@@ -146,19 +153,17 @@ function isTransportSettings(x: unknown): x is TransportSettings {
 function isAddSourceInput(x: unknown): x is AddSourceInput {
   if (!isRecord(x) || !isBoundedString(x['name'])) return false;
   if (x['transport'] !== undefined && !isTransportSettings(x['transport'])) return false;
-  if (!isOptionalCleanString(x['guideUrl'])) return false;
+  if (!isOptionalTrimmedCleanString(x['guideUrl'])) return false;
   if (x['kind'] === 'xtream') {
     return (
-      isBoundedString(x['server']) &&
-      !hasControlChar(x['server']) &&
+      isTrimmedCleanString(x['server']) &&
       isBoundedString(x['username']) &&
       isBoundedString(x['password'])
     );
   }
   if (x['kind'] === 'm3u') {
     return (
-      isBoundedString(x['playlistUrl']) &&
-      !hasControlChar(x['playlistUrl']) &&
+      isTrimmedCleanString(x['playlistUrl']) &&
       (x['vodPlaylist'] === undefined || typeof x['vodPlaylist'] === 'boolean')
     );
   }
@@ -167,11 +172,11 @@ function isAddSourceInput(x: unknown): x is AddSourceInput {
 
 function isLinkSourceInput(x: unknown): x is LinkSourceInput {
   if (!isRecord(x)) return false;
-  if (!isBoundedString(x['name']) || !isBoundedString(x['url']) || hasControlChar(x['url'])) {
+  if (!isBoundedString(x['name']) || !isTrimmedCleanString(x['url'])) {
     return false;
   }
   if (x['keepAsM3u'] !== undefined && typeof x['keepAsM3u'] !== 'boolean') return false;
-  if (!isOptionalCleanString(x['guideUrl'])) return false;
+  if (!isOptionalTrimmedCleanString(x['guideUrl'])) return false;
   if (x['vodPlaylist'] !== undefined && typeof x['vodPlaylist'] !== 'boolean') return false;
   return x['transport'] === undefined || isTransportSettings(x['transport']);
 }
@@ -187,31 +192,31 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
     case 'addSourceFromLink':
       return isLinkSourceInput(x['input']);
     case 'removeSource':
-      return isSourceId(x['id']);
+      return isBoundedString(x['id'], 0, MAX_ID_CHARS);
     case 'importSource':
       return (
-        isSourceId(x['id']) &&
+        isBoundedString(x['id'], 0, MAX_ID_CHARS) &&
         (x['batchSize'] === undefined || isPositiveId(x['batchSize'])) &&
         (x['maxBodyBytes'] === undefined || isPositiveId(x['maxBodyBytes'])) &&
         (x['progress'] === undefined || typeof x['progress'] === 'boolean')
       );
     case 'categories':
       return (
-        isSourceId(x['sourceId']) &&
+        isBoundedString(x['sourceId'], 0, MAX_ID_CHARS) &&
         (x['kind'] === 'live' || x['kind'] === 'movie' || x['kind'] === 'series')
       );
     case 'items':
       return (
-        isBoundedString(x['categoryId'], 1, 512) &&
+        isBoundedString(x['categoryId'], 0, 512) &&
         isFiniteNumber(x['offset']) &&
         isFiniteNumber(x['limit'])
       );
     case 'seasons':
-      return isPositiveId(x['seriesId']);
+      return isSafeInt(x['seriesId']);
     case 'episodes':
-      return isPositiveId(x['seriesId']) && isSafeInt(x['season']);
+      return isSafeInt(x['seriesId']) && isSafeInt(x['season']);
     case 'resolveStream':
-      return isBoundedString(x['itemKey'], 1, 1024);
+      return isBoundedString(x['itemKey'], 0, 1024);
     default:
       return false;
   }

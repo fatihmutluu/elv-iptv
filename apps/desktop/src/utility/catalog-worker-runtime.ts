@@ -1,7 +1,9 @@
 import {
+  type AddSourceInput,
   type CatalogService,
   createCatalogService,
   createSyncSqlDriver,
+  type LinkSourceInput,
   openCatalog,
   type SyncDatabase,
 } from '@elv/data';
@@ -18,6 +20,8 @@ import {
 } from '@elv/domain';
 import {
   isMainToWorkerMessage,
+  MAX_SECRET_VALUE_CHARS,
+  SECRET_KEY_RE,
   type WorkerToMainMessage,
 } from '../main/catalog/worker-protocol.ts';
 import {
@@ -25,6 +29,9 @@ import {
   type CatalogWorkerMessage,
   isCatalogClientMessage,
 } from '../shared/catalog-ipc.ts';
+
+const SAFE_SOURCE_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
+const NON_HOST_SCHEME_RE = /^[A-Za-z][A-Za-z0-9+.-]*:(?!\/\/)(?!\d+(?:[/?#]|$))/;
 
 /** Subset of Electron's `MessagePortMain` used inside the catalog utility process. */
 export interface WorkerClientPortLike {
@@ -71,6 +78,115 @@ interface ClientSession {
   closed: boolean;
 }
 
+function hasControlChar(text: string): boolean {
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
+function isHttpUrl(raw: string): boolean {
+  if (raw === '' || hasControlChar(raw)) return false;
+  try {
+    const parsed = new URL(raw);
+    return (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname.length > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isValidXtreamServer(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (trimmed === '' || hasControlChar(trimmed)) return false;
+  if (!trimmed.startsWith('[') && NON_HOST_SCHEME_RE.test(trimmed)) return false;
+  const normalized = (trimmed.includes('://') ? trimmed : `http://${trimmed}`)
+    .replace(/[?#].*$/s, '')
+    .replace(/\/+$/, '')
+    .replace(/\/(?:player_api|get|xmltv)\.php$/i, '')
+    .replace(/\/+$/, '');
+  return isHttpUrl(normalized);
+}
+
+function sanitizeGuideUrl(guideUrl: string | undefined): Result<string | undefined> {
+  if (guideUrl === undefined) return ok(undefined);
+  const trimmed = guideUrl.trim();
+  if (trimmed === '') return ok(undefined);
+  if (!isHttpUrl(trimmed)) return err(elvError('source-format', 'invalid-source'));
+  return ok(trimmed);
+}
+
+function sanitizeAddSourceInput(input: AddSourceInput): Result<AddSourceInput> {
+  const guide = sanitizeGuideUrl(input.guideUrl);
+  if (!guide.ok) return guide;
+  if (input.kind === 'm3u') {
+    const playlistUrl = input.playlistUrl.trim();
+    if (!isHttpUrl(playlistUrl)) return err(elvError('source-format', 'invalid-source'));
+    const { guideUrl: _prevGuide, ...rest } = input;
+    return ok({
+      ...rest,
+      playlistUrl,
+      ...(guide.value === undefined ? {} : { guideUrl: guide.value }),
+    });
+  }
+  const server = input.server.trim();
+  if (!isValidXtreamServer(server)) return err(elvError('source-format', 'invalid-source'));
+  const { guideUrl: _prevGuide, ...rest } = input;
+  return ok({
+    ...rest,
+    server,
+    ...(guide.value === undefined ? {} : { guideUrl: guide.value }),
+  });
+}
+
+function sanitizeLinkSourceInput(input: LinkSourceInput): Result<LinkSourceInput> {
+  const url = input.url.trim();
+  if (!isHttpUrl(url)) return err(elvError('source-format', 'invalid-source'));
+  const guide = sanitizeGuideUrl(input.guideUrl);
+  if (!guide.ok) return guide;
+  const { guideUrl: _prevGuide, ...rest } = input;
+  return ok({
+    ...rest,
+    url,
+    ...(guide.value === undefined ? {} : { guideUrl: guide.value }),
+  });
+}
+
+async function cancelFetchBody(body: Awaited<ReturnType<FetchLike>>['body']): Promise<void> {
+  if (body == null) return;
+  const cancellable = body as {
+    cancel?: () => Promise<void>;
+    getReader?: () => { cancel?: () => Promise<void> };
+  };
+  if (typeof cancellable.cancel === 'function') {
+    await cancellable.cancel().catch(() => undefined);
+    return;
+  }
+  if (typeof cancellable.getReader === 'function') {
+    await cancellable
+      .getReader()
+      .cancel?.()
+      .catch(() => undefined);
+  }
+}
+
+function createHttpOnlyFetch(fetchImpl: FetchLike): FetchLike {
+  return async (url, init) => {
+    if (!isHttpUrl(url)) {
+      throw new TypeError('unsupported URL protocol');
+    }
+    const res = await fetchImpl(url, init);
+    const finalUrl = (res as { readonly url?: unknown }).url;
+    if (typeof finalUrl === 'string' && finalUrl !== '' && !isHttpUrl(finalUrl)) {
+      await cancelFetchBody(res.body);
+      throw new TypeError('unsupported redirect URL protocol');
+    }
+    return res;
+  };
+}
+
 /**
  * Wires `better-sqlite3` and `@elv/data`'s `CatalogService` inside an Electron `utilityProcess`.
  * Secrets cross only `parentPort`; client `MessagePort`s carry validated catalog calls, progress and cancellations.
@@ -80,10 +196,12 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
   const clock = deps.clock ?? Date.now;
   const yieldNow = deps.yieldNow ?? (() => new Promise<void>((resolve) => setImmediate(resolve)));
   const log = deps.log ?? ((line: string) => process.stderr.write(`${line}\n`));
+  const safeFetch = createHttpOnlyFetch(fetchImpl);
 
   let configuredDbPath: string | undefined;
   let openState: Promise<Result<OpenedCatalog>> | undefined;
-  let shuttingDown = false;
+  let acceptingCalls = true;
+  let secretsClosed = false;
   let nextSecretReqId = 0;
 
   const pendingSecrets = new Map<
@@ -91,11 +209,18 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
     { resolve: (value: string | undefined) => void; reject: (reason: Error) => void }
   >();
   const clients = new Map<number, ClientSession>();
+  const inFlightCalls = new Set<Promise<void>>();
 
   const requestSecret = (
     msg: { op: 'get' | 'delete'; key: string } | { op: 'set'; key: string; value: string },
   ): Promise<string | undefined> => {
-    if (shuttingDown) return Promise.reject(new Error('catalog worker shutting down'));
+    if (secretsClosed) return Promise.reject(new Error('catalog worker secrets closed'));
+    if (!SECRET_KEY_RE.test(msg.key)) {
+      return Promise.reject(new Error('invalid secret key'));
+    }
+    if (msg.op === 'set' && msg.value.length > MAX_SECRET_VALUE_CHARS) {
+      return Promise.reject(new Error('secret value exceeds maximum length'));
+    }
     const reqId = ++nextSecretReqId;
     return new Promise((resolve, reject) => {
       pendingSecrets.set(reqId, { resolve, reject });
@@ -139,7 +264,7 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
         db,
         secrets,
         scheduler: { yieldNow },
-        http: createFetchHttpClient(fetchImpl),
+        http: createFetchHttpClient(safeFetch),
         clock,
       });
       return ok({ db, service });
@@ -197,11 +322,18 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
     switch (call.method) {
       case 'ping':
         return ok(undefined);
-      case 'addSource':
-        return service.addSource(call.input);
-      case 'addSourceFromLink':
-        return service.addSourceFromLink(call.input);
+      case 'addSource': {
+        const sanitized = sanitizeAddSourceInput(call.input);
+        if (!sanitized.ok) return sanitized;
+        return service.addSource(sanitized.value);
+      }
+      case 'addSourceFromLink': {
+        const sanitized = sanitizeLinkSourceInput(call.input);
+        if (!sanitized.ok) return sanitized;
+        return service.addSourceFromLink(sanitized.value);
+      }
       case 'removeSource': {
+        if (!SAFE_SOURCE_ID_RE.test(call.id)) return ok(undefined);
         const res = await service.removeSource(call.id);
         await checkpointWal(db);
         return res;
@@ -236,6 +368,10 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
   };
 
   const attachClient = (clientId: number, port: WorkerClientPortLike): void => {
+    if (!acceptingCalls) {
+      port.close();
+      return;
+    }
     disconnectClient(clientId);
     const session: ClientSession = { port, controllers: new Map(), closed: false };
     clients.set(clientId, session);
@@ -244,17 +380,39 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
       const raw = ev.data;
       if (!isCatalogClientMessage(raw)) {
         log('catalog worker: dropped an invalid client message');
+        if (
+          typeof raw === 'object' &&
+          raw !== null &&
+          (raw as Record<string, unknown>)['type'] === 'call'
+        ) {
+          const reqId = (raw as Record<string, unknown>)['reqId'];
+          if (Number.isSafeInteger(reqId) && (reqId as number) > 0) {
+            safePost(session, {
+              type: 'fault',
+              reqId: reqId as number,
+              error: elvError('source-format', 'invalid-request'),
+            });
+          }
+        }
         return;
       }
       if (raw.type === 'cancel') {
         session.controllers.get(raw.reqId)?.abort();
         return;
       }
+      if (!acceptingCalls) {
+        safePost(session, {
+          type: 'fault',
+          reqId: raw.reqId,
+          error: elvError('storage', 'closed'),
+        });
+        return;
+      }
       const { reqId, call } = raw;
       const ctl = call.method === 'importSource' ? new AbortController() : undefined;
       if (ctl !== undefined) session.controllers.set(reqId, ctl);
 
-      void (async () => {
+      const task = (async () => {
         try {
           const opened = await ensureService();
           if (!opened.ok) {
@@ -270,20 +428,28 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
           if (ctl !== undefined) session.controllers.delete(reqId);
         }
       })();
+      inFlightCalls.add(task);
+      void task.finally(() => {
+        inFlightCalls.delete(task);
+      });
     });
     port.start();
   };
 
   const shutdown = async (): Promise<void> => {
-    if (shuttingDown) return;
-    shuttingDown = true;
+    if (!acceptingCalls) return;
+    acceptingCalls = false;
     for (const id of [...clients.keys()]) disconnectClient(id);
+    if (inFlightCalls.size > 0) {
+      await Promise.allSettled([...inFlightCalls]);
+    }
     const current = openState;
     openState = undefined;
     if (current !== undefined) {
       const res = await current;
       if (res.ok) await res.value.service.close().catch(() => undefined);
     }
+    secretsClosed = true;
     for (const pending of pendingSecrets.values()) {
       pending.reject(new Error('catalog worker shut down'));
     }

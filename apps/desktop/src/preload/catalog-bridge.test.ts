@@ -256,4 +256,22 @@ describe('createCatalogBridge', () => {
     port2.deliver({ type: 'result', reqId: port2.sent[0]?.reqId, value: ok(undefined) });
     expect(await reopen).toEqual({ ok: true, value: undefined });
   });
+
+  it('rejects or settles invalid outbound RPC arguments immediately without opening a port or hanging', async () => {
+    const h = createFakeIpcRenderer();
+    const bridge = createCatalogBridge(h.ipc);
+
+    expect(await bridge.seasons(1.5)).toEqual({
+      ok: false,
+      error: { category: 'source-format', code: 'invalid-request' },
+    });
+    expect(await bridge.startImport('s1', { batchSize: 0 }).result).toEqual({
+      ok: false,
+      error: { category: 'source-format', code: 'invalid-request' },
+    });
+    await expect(bridge.items('cat', Number.NaN, 10)).rejects.toThrow(
+      /source-format\/invalid-request/,
+    );
+    expect(h.outgoing).toHaveLength(0);
+  });
 });

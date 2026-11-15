@@ -18,7 +18,7 @@ import {
 } from 'electron';
 import { APP_ORIGIN, APP_SCHEME } from './app-protocol.ts';
 import { type CatalogCoordinator, createCatalogCoordinator } from './catalog/coordinator.ts';
-import { registerCatalogIpc } from './catalog/ipc.ts';
+import { registerCatalogIpc, registerCatalogQuitHandler } from './catalog/ipc.ts';
 import {
   createAesGcmTestCipher,
   createEncryptedFileSecretStore,
@@ -199,15 +199,11 @@ const hasLock = startSingleInstance(app, {
 });
 
 let catalogCoordinator: CatalogCoordinator<MessagePortMain> | undefined;
-let catalogShutDown = false;
 
-app.on('before-quit', (event) => {
-  if (catalogShutDown || !catalogCoordinator?.isRunning) return;
-  event.preventDefault();
-  catalogShutDown = true;
-  void catalogCoordinator.shutdown().finally(() => {
-    app.quit();
-  });
+registerCatalogQuitHandler({
+  app,
+  getCoordinator: () => catalogCoordinator,
+  quit: () => app.quit(),
 });
 
 if (hasLock) {

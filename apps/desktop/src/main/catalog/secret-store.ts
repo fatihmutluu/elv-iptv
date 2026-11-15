@@ -101,8 +101,9 @@ async function readEntries(filePath: string): Promise<Record<string, string>> {
   let raw: string;
   try {
     raw = await readFile(filePath, 'utf8');
-  } catch {
-    return {};
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return {};
+    throw error;
   }
   try {
     const parsed: unknown = JSON.parse(raw);

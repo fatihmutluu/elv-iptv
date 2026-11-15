@@ -103,8 +103,24 @@ describe('isCatalogClientMessage', () => {
         call: { method: 'items', categoryId: 'src_1|live|10', offset: 0, limit: 100 },
       },
       { type: 'call', reqId: 10, call: { method: 'seasons', seriesId: 12 } },
+      { type: 'call', reqId: 10, call: { method: 'seasons', seriesId: 0 } },
       { type: 'call', reqId: 11, call: { method: 'episodes', seriesId: 12, season: 1 } },
+      { type: 'call', reqId: 11, call: { method: 'episodes', seriesId: 0, season: 1 } },
       { type: 'call', reqId: 12, call: { method: 'resolveStream', itemKey: 'x:src_1:live:1001' } },
+      { type: 'call', reqId: 12, call: { method: 'resolveStream', itemKey: '' } },
+      { type: 'call', reqId: 13, call: { method: 'categories', sourceId: '', kind: 'live' } },
+      { type: 'call', reqId: 14, call: { method: 'items', categoryId: '', offset: 0, limit: 25 } },
+      { type: 'call', reqId: 15, call: { method: 'removeSource', id: '' } },
+      { type: 'call', reqId: 16, call: { method: 'removeSource', id: '../bad' } },
+      { type: 'call', reqId: 17, call: { method: 'importSource', id: '' } },
+      {
+        type: 'call',
+        reqId: 18,
+        call: {
+          method: 'addSourceFromLink',
+          input: { name: 'Pasted', url: '  http://127.0.0.1:7879/list.m3u\r\n' },
+        },
+      },
       { type: 'cancel', reqId: 6 },
     ];
     for (const msg of valid) {
@@ -112,7 +128,7 @@ describe('isCatalogClientMessage', () => {
     }
   });
 
-  it('rejects malformed envelopes, unsafe source ids, control characters in headers, and bad args', () => {
+  it('rejects malformed envelopes, control characters in headers or mid-URL, and bad args', () => {
     const invalid: unknown[] = [
       null,
       42,
@@ -121,21 +137,26 @@ describe('isCatalogClientMessage', () => {
       { type: 'call', reqId: -1, call: { method: 'ping' } },
       { type: 'call', reqId: 1, call: null },
       { type: 'call', reqId: 1, call: { method: 'dropTable' } },
-      { type: 'call', reqId: 1, call: { method: 'removeSource', id: '../bad' } },
-      { type: 'call', reqId: 1, call: { method: 'removeSource', id: '' } },
+      { type: 'call', reqId: 1, call: { method: 'removeSource', id: 'x'.repeat(300) } },
       { type: 'call', reqId: 1, call: { method: 'importSource', id: 'src_1', batchSize: 0 } },
       { type: 'call', reqId: 1, call: { method: 'importSource', id: 'src_1', maxBodyBytes: -5 } },
       { type: 'call', reqId: 1, call: { method: 'importSource', id: 'src_1', progress: 'yes' } },
       { type: 'call', reqId: 1, call: { method: 'categories', sourceId: 'src_1', kind: 'vod' } },
-      { type: 'call', reqId: 1, call: { method: 'items', categoryId: '', offset: 0, limit: 10 } },
       {
         type: 'call',
         reqId: 1,
         call: { method: 'items', categoryId: 'a|live|1', offset: Number.NaN, limit: 10 },
       },
-      { type: 'call', reqId: 1, call: { method: 'seasons', seriesId: 0 } },
+      { type: 'call', reqId: 1, call: { method: 'seasons', seriesId: 1.5 } },
       { type: 'call', reqId: 1, call: { method: 'episodes', seriesId: 1, season: 1.2 } },
-      { type: 'call', reqId: 1, call: { method: 'resolveStream', itemKey: '' } },
+      {
+        type: 'call',
+        reqId: 1,
+        call: {
+          method: 'addSourceFromLink',
+          input: { name: 'Injected', url: 'http://127.0.0.1:7879/a\r\nb.m3u' },
+        },
+      },
       {
         type: 'call',
         reqId: 1,
