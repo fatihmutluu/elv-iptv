@@ -119,6 +119,17 @@ describe('scaffoldFiles module', () => {
   });
 });
 
+describe('scaffoldFiles license', () => {
+  it.each([
+    ['pure', 'packages/widgets/package.json'],
+    ['rn', 'packages/widgets/package.json'],
+    ['module', 'modules/widgets/package.json'],
+  ] as const)('declares the project license in a %s manifest', (kind, path) => {
+    const files = scaffoldFiles({ kind, name: 'widgets' });
+    expect(json(files, path).license).toBe('GPL-3.0-only');
+  });
+});
+
 describe('name validation', () => {
   it.each(['Widgets', 'a b', 'a/b', '..', 'a\b', '', '-a', 'a-', 'a--b', '1abc', 'a_b'])(
     'rejects %j',

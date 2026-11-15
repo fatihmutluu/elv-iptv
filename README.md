@@ -1,58 +1,64 @@
 # ELV IPTV
 
-Fast, stable IPTV player for every screen — Android TV, Fire TV, Apple TV, Android, iPhone, iPad, macOS, Windows and Linux. Bring your own M3U or Xtream Codes playlist; no content included.
+Free, open-source IPTV player for every screen — Android TV, Fire TV, Apple TV, Android, iPhone, iPad, macOS, Windows and Linux. Bring your own M3U or Xtream Codes playlist; no content included.
 
-## Status
+## Mission
 
-Round 0 — bootstrap. The repository holds the toolchain, empty apps and project rules. The player is not usable yet.
+Most IPTV viewers today face an unpleasant choice: pay \$30–\$40 per platform for closed apps, put up with dated or half-finished interfaces, or juggle completely different players across their TV, phone and computer.
 
-The plan for the next rounds is on the public [roadmap](https://github.com/users/fatihmutluu/projects/1).
-
-## What it is
-
-A cross-platform player for live TV, movies and series from sources you bring: M3U/M3U8 playlists (URL or file) and Xtream Codes accounts. It is fully usable without an account; an account will only add cross-device sync.
+ELV IPTV is built openly with the community so everyone has a fast, rock-solid, complete IPTV player on every screen — free and open source. You bring your own M3U/M3U8 playlist (URL or file) or Xtream Codes source; the app works out of the box with no account required (an optional account later will only add end-to-end encrypted cross-device sync).
 
 ## What it is not
 
-- It ships no content, playlists, provider links or provider directories, and it has no "find a provider" feature.
+- It ships no content, playlists, channels, provider links or provider directories, and it has no "find a provider" feature.
 - It does not circumvent DRM.
-- It is not a service: you need your own playlist or subscription.
+- It is not a streaming service: you need your own legal playlist or subscription.
+
+## Status and roadmap
+
+Development follows focused version milestones tracked on the public [roadmap](https://github.com/users/fatihmutluu/projects/1) and [issues](https://github.com/fatihmutluu/elv-iptv/issues):
+
+- **Version `0.1` (in progress):** A deliberately plain, ultra-fast, zero-leak live TV, movie and series player across Android TV, Fire OS, Android, Apple TV, iPhone/iPad, Windows and macOS — M3U and Xtream import into on-device SQLite, instant 100k+ item navigation, sub-second warm channel switching, strict single-connection safety on 1-connection providers, stream fault recovery, multi-audio and subtitle track selection, and English + Turkish localization. Visual styling waits until every playback and performance budget is proven.
+- **Version `0.2`:** Shared UI/UX design language across TV remote, touch and desktop, XMLTV electronic program guide (EPG) grid, home screen and favorites, watch progress and resume, Turkish-aware FTS5 search, essential settings, and direct-download builds on GitHub Releases.
+- **Version `0.3` and beyond (`…`):** Optional end-to-end encrypted cross-device sync (hosted or self-hosted), local profiles, catch-up, live time-shift, Stalker portals, parental controls, external subtitles and styling, remote key remapping, picture-in-picture and multi-view, official app-store launches, and Vega / Tizen / webOS targets.
 
 ## Platforms
 
 | Platform | Runtime | Status |
 |---|---|---|
-| Android phone and tablet | Expo app | Scaffolded |
-| Android TV / Google TV | Expo app (TV build) | Scaffolded |
-| Fire TV (Fire OS 7+) | Expo app (TV build) | Scaffolded |
-| iPhone and iPad (18+) | Expo app | Scaffolded |
-| Apple TV (tvOS 18+) | Expo app (TV build) | Scaffolded |
-| Windows 10/11 | Electron + react-native-web | Scaffolded |
-| macOS | Electron + react-native-web | Scaffolded |
-| Linux | Electron + react-native-web | Scaffolded, best effort |
+| Android phone and tablet | Expo app + Media3 | `0.1` in progress |
+| Android TV / Google TV | Expo app (TV build) + Media3 | `0.1` in progress |
+| Fire TV (Fire OS 7+) | Expo app (TV build) + Media3 | `0.1` in progress |
+| iPhone and iPad (18+) | Expo app + AetherEngine | `0.1` in progress |
+| Apple TV (tvOS 18+) | Expo app (TV build) + AetherEngine | `0.1` in progress |
+| Windows 10/11 | Electron + react-native-web + LGPL mpv | `0.1` in progress |
+| macOS | Electron + react-native-web + LGPL mpv | `0.1` in progress |
+| Linux | Electron + react-native-web + LGPL mpv | Scaffolded, best effort |
 | Fire TV (Vega OS) | Separate app sharing packages | Planned |
 | Samsung Tizen | Web-TV app from the react-native-web bundle | Planned |
 | LG webOS | Web-TV app from the same bundle | Planned |
 
-Hardware that the project does not own is tested on emulators and simulators and marked "not verified on hardware".
+Hardware that the project does not own is tested on emulators and simulators and marked "not verified on hardware". Once releases begin, GitHub Releases on [`fatihmutluu/elv-iptv`](https://github.com/fatihmutluu/elv-iptv/releases) and the official store listings named here will be the only authentic download sources.
 
 ## Pillars
 
 In priority order:
 
-1. **Stable and fast.** No crashes, no CPU or RAM leaks, fast playback start and channel switching, instant UI with 100k+ items on 1 GB TV sticks.
-2. **Plays everything.** Every common container, codec and subtitle format, live and on demand.
-3. **Premium streaming-app UX.** One polished experience on TV remote, touch, mouse and keyboard.
-4. **Built to be extended.** Clear module boundaries, tests for every feature, lean docs that humans and AI agents can navigate.
+1. **Stable and fast.** No crashes, no CPU or memory leaks, fast playback start and channel switching, instant UI with 100k+ items even on 1 GB TV sticks.
+2. **Plays everything.** Every common container, codec and text subtitle format, live and on demand, with automatic recovery from provider hiccups.
+3. **Premium streaming-app UX.** One coherent experience across TV remote, touch, mouse and keyboard.
+4. **Built to be extended.** Clean pure-TypeScript architecture, strict layer boundaries, tests first for every change, and concise docs that both humans and AI coding agents can follow.
 
-## Pledge
+## How to help
 
-ELV IPTV will stay free forever if the community supports its development. If that support doesn't come, it will have to be published as a paid app.
+Every kind of contribution moves the project forward:
 
-## Contributing
+- **Share ideas and missing workflows:** You do not need to write code to help. Opening a [feature request](https://github.com/fatihmutluu/elv-iptv/issues/new?template=feature_request.yml) about a workflow, shortcut or detail you loved in another player — or always wished existed — helps hugely (please describe the behavior itself without naming third-party apps or pasting real playlist URLs).
+- **Test and report bugs:** Try builds on real TV boxes, sticks, phones and desktops and file [bug reports](https://github.com/fatihmutluu/elv-iptv/issues/new?template=bug_report.yml) (always strip playlist URLs and credentials).
+- **Build features and fixes:** Browse open [issues](https://github.com/fatihmutluu/elv-iptv/issues) by version milestone (`0.1`, `0.2`, `0.3`) or `help wanted` / `good first issue`, and read [CONTRIBUTING.md](CONTRIBUTING.md). The repository ships shared agent rules and skills (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/`, `.claude/`) so contributors using AI coding tools automatically follow the project's test-first workflow.
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Contributions require signing the [CLA](CLA.md) on your first pull request. Please follow the [Code of Conduct](CODE_OF_CONDUCT.md) and report vulnerabilities as described in [SECURITY.md](SECURITY.md). A map of the documentation is in [docs/INDEX.md](docs/INDEX.md).
+Contributions require signing the [CLA](CLA.md) on your first pull request. Please follow the [Code of Conduct](CODE_OF_CONDUCT.md) and report security vulnerabilities privately as described in [SECURITY.md](SECURITY.md). Full documentation is indexed in [docs/INDEX.md](docs/INDEX.md).
 
 ## License
 
-ELV IPTV is source-available under the [PolyForm Shield License 1.0.0](LICENSE). Third-party components keep their own licenses.
+ELV IPTV is open source under the [GNU General Public License v3.0](LICENSE) (`GPL-3.0-only`). Contributions come under the [CLA](CLA.md), which allows the owner to relicense the project, including a commercial or store-specific release; every version released under GPL-3.0 stays available under GPL-3.0 forever. Third-party components keep their own licenses, and shipped builds dynamically link LGPL media libraries only.

@@ -2,6 +2,7 @@
   "name": "@elv/desktop-renderer",
   "private": true,
   "version": "0.0.0",
+  "license": "GPL-3.0-only",
   "main": "index.ts",
   "scripts": {
     "export": "expo export -p web --output-dir ../dist/renderer",
