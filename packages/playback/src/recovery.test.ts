@@ -506,6 +506,111 @@ describe('vod', () => {
     expect(status(r)).toEqual(recovering(1, 0));
     expect(last(r)).toEqual({ name: 'retry', attempt: t + 1 });
   });
+
+  it('seek during reconnectVod backoff cancels backoff, resets budget, updates anchor and loads at target', async () => {
+    const r = rig({ movie: [] });
+    const t = await playing(r, vod('movie'));
+    r.engine.emit({
+      attempt: t,
+      type: 'clock',
+      anchor: { positionMs: 40_000, atMs: Date.now(), rate: 1, durationMs: 300_000 },
+    });
+    error(r, 'network');
+    expect(status(r)).toEqual(recovering(2, 2000));
+    await tick(2000);
+    error(r, 'network');
+    expect(status(r)).toEqual(recovering(2, 4000));
+
+    await tick(1000);
+    r.service.seek(120_000);
+    expect(r.service.getState().anchor).toMatchObject({ positionMs: 120_000, rate: 0 });
+    expect(status(r)).toEqual({ kind: 'tuning' });
+    expect(last(r)).toEqual({ name: 'load', attempt: t + 2, url: 'movie' });
+    expect(r.loads.at(-1)).toMatchObject({ attempt: t + 2, startMs: 120_000 });
+
+    // Old 4s backoff timer was cancelled; a fresh network error starts backoff from 2,000 ms again
+    await tick(3500);
+    expect(r.loads).toHaveLength(3);
+    error(r, 'network');
+    expect(status(r)).toEqual(recovering(2, 2000));
+  });
+
+  it('preserves track preferences across rung 2/3/4, reconnectVod, limited, and post-recreate retry()', async () => {
+    const r = rig({ movie: [], alt: [] }, { softwareAudioFallback: true, recreate: true });
+    await playing(r, vod('movie', { alternates: [resolved('alt')] }));
+    r.service.selectAudioTrack('a:1');
+    r.service.selectSubtitleTrack(null);
+    r.engine.emit({
+      attempt: r.service.getState().attempt,
+      type: 'clock',
+      anchor: { positionMs: 95_000, atMs: Date.now(), rate: 1 },
+    });
+
+    // decoder errors climb rungs 1 -> 2 -> 3 (recreate+load) -> 4 (softwareAudio+load)
+    error(r, 'decoder');
+    error(r, 'decoder');
+    await tick(1000);
+    expect(r.loads.at(-1)?.options).toEqual({ audioTrackId: 'a:1', subtitleTrackId: null });
+    error(r, 'decoder');
+    await tick(2000);
+    expect(r.loads.at(-1)).toMatchObject({
+      startMs: 95_000,
+      options: { audioTrackId: 'a:1', subtitleTrackId: null },
+    });
+    error(r, 'decoder');
+    await tick(4000);
+    expect(r.loads.at(-1)).toMatchObject({
+      startMs: 95_000,
+      options: { softwareAudio: true, audioTrackId: 'a:1', subtitleTrackId: null },
+    });
+    error(r, 'decoder');
+    expect(status(r)).toEqual(failed('decoder'));
+
+    // retry() after recreate+failed resumes at 95_000 with track preferences intact
+    r.service.retry();
+    await tick(0);
+    expect(r.loads.at(-1)).toMatchObject({
+      startMs: 95_000,
+      options: { audioTrackId: 'a:1', subtitleTrackId: null },
+    });
+
+    // connection-limit and reconnectVod also preserve track preferences
+    play(r);
+    error(r, 'http-509');
+    await tick(2000);
+    expect(r.loads.at(-1)?.options).toEqual({ audioTrackId: 'a:1', subtitleTrackId: null });
+    play(r);
+    error(r, 'network');
+    await tick(2000);
+    expect(r.loads.at(-1)?.options).toEqual({ audioTrackId: 'a:1', subtitleTrackId: null });
+
+    // ended VOD retry() replays from 0 while preserving track preferences
+    play(r);
+    state(r, 'ended');
+    r.service.retry();
+    await tick(0);
+    expect(r.loads.at(-1)).toMatchObject({
+      startMs: 0,
+      options: { audioTrackId: 'a:1', subtitleTrackId: null },
+    });
+
+    // post-reload tracks event re-applies string subtitleTrackId when present, and skips missing IDs
+    r.service.selectAudioTrack('a:missing');
+    r.service.selectSubtitleTrack('s:1');
+    r.service.retry();
+    const retryTok = r.service.getState().attempt;
+    r.engine.emit({
+      attempt: retryTok,
+      type: 'tracks',
+      tracks: {
+        audio: [{ id: 'a:0' }],
+        subtitles: [{ id: 's:0' }, { id: 's:1' }],
+        selectedAudioId: 'a:0',
+        selectedSubtitleId: 's:0',
+      },
+    });
+    expect(last(r)).toEqual({ name: 'selectSubtitleTrack', attempt: retryTok, trackId: 's:1' });
+  });
 });
 
 describe('surface', () => {

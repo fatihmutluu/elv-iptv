@@ -1,7 +1,14 @@
 import { type ElvError, elvError, type Result } from '@elv/domain';
 import { positionAt } from './clock';
 import { DEFAULT_PLAYBACK_CONFIG, type PlaybackConfig } from './config';
-import type { AttemptToken, EngineEvent, PlayerEngine, StreamRequest } from './engine';
+import {
+  type AttemptToken,
+  EMPTY_TRACKS,
+  type EngineEvent,
+  type LoadOptions,
+  type PlayerEngine,
+  type StreamRequest,
+} from './engine';
 import { createRecovery } from './recovery';
 import type { LoadOverrides, RecoveryHooks, ServiceControl } from './seam';
 import type {
@@ -45,9 +52,19 @@ export function createPlaybackServiceWith(
     ...deps.config,
   };
   const listeners = new Set<(state: PlaybackState) => void>();
-  let state: PlaybackState = { status: { kind: 'idle' }, attempt: 0, staleEventsDropped: 0 };
+  let state: PlaybackState = {
+    status: { kind: 'idle' },
+    attempt: 0,
+    tracks: EMPTY_TRACKS,
+    staleEventsDropped: 0,
+  };
   let current: TuneRequest | undefined;
   let stream: StreamRequest | undefined;
+  let preferredAudioId: string | undefined;
+  let preferredSubtitleId: string | null | undefined;
+  let audioReapplied = false;
+  let subtitleReapplied = false;
+  let lastVodPositionMs: number | undefined;
   let loaded = false;
   let mediaOpen = false;
   let held = false;
@@ -68,7 +85,9 @@ export function createPlaybackServiceWith(
     const { anchor } = state;
     if (anchor === undefined || anchor.rate === 0) return;
     const now = clock.now();
-    update({ anchor: { ...anchor, positionMs: positionAt(anchor, now), atMs: now, rate: 0 } });
+    const pos = positionAt(anchor, now);
+    if (current?.kind === 'vod') lastVodPositionMs = pos;
+    update({ anchor: { ...anchor, positionMs: pos, atMs: now, rate: 0 } });
   };
 
   const startTimeoutMs = (): number =>
@@ -102,6 +121,15 @@ export function createPlaybackServiceWith(
     if (overrides.stream !== undefined) stream = overrides.stream;
     if (current === undefined || stream === undefined) return;
     const startMs = overrides.startMs ?? current.startMs;
+    if (current.kind === 'vod' && startMs !== undefined) lastVodPositionMs = startMs;
+    audioReapplied = false;
+    subtitleReapplied = false;
+    const mergedOptions: LoadOptions = {
+      ...overrides.options,
+      ...(preferredAudioId === undefined ? {} : { audioTrackId: preferredAudioId }),
+      ...(preferredSubtitleId === undefined ? {} : { subtitleTrackId: preferredSubtitleId }),
+    };
+    const hasOptions = Object.keys(mergedOptions).length > 0;
     loaded = true;
     mediaOpen = true;
     engine.load({
@@ -110,7 +138,7 @@ export function createPlaybackServiceWith(
       headers: stream.headers,
       kind: current.kind,
       ...(startMs === undefined ? {} : { startMs }),
-      ...(overrides.options === undefined ? {} : { options: overrides.options }),
+      ...(hasOptions ? { options: mergedOptions } : {}),
     });
   };
 
@@ -125,7 +153,13 @@ export function createPlaybackServiceWith(
       update({ attempt: state.attempt + 1 });
       return state.attempt;
     },
-    setStatus: (status) => update({ status }),
+    setStatus: (status) => {
+      if (status.kind === 'recovering') {
+        audioReapplied = false;
+        subtitleReapplied = false;
+      }
+      update({ status });
+    },
     freezeAnchor,
     load: (overrides) => {
       held = false;
@@ -167,8 +201,37 @@ export function createPlaybackServiceWith(
         return;
       }
       case 'clock':
+        if (
+          current?.kind === 'vod' &&
+          (state.status.kind === 'playing' || event.anchor.rate > 0 || event.anchor.positionMs > 0)
+        ) {
+          lastVodPositionMs = positionAt(event.anchor, clock.now());
+        }
         update({ anchor: event.anchor });
         hooks.onClock?.(event.anchor);
+        return;
+      case 'tracks':
+        update({ tracks: event.tracks });
+        if (
+          !audioReapplied &&
+          preferredAudioId !== undefined &&
+          event.tracks.selectedAudioId !== preferredAudioId &&
+          event.tracks.audio.some((t) => t.id === preferredAudioId)
+        ) {
+          audioReapplied = true;
+          engine.selectAudioTrack?.(state.attempt, preferredAudioId);
+        }
+        if (!subtitleReapplied && preferredSubtitleId !== undefined) {
+          const canApply =
+            preferredSubtitleId === null
+              ? event.tracks.selectedSubtitleId !== null
+              : event.tracks.selectedSubtitleId !== preferredSubtitleId &&
+                event.tracks.subtitles.some((t) => t.id === preferredSubtitleId);
+          if (canApply) {
+            subtitleReapplied = true;
+            engine.selectSubtitleTrack?.(state.attempt, preferredSubtitleId);
+          }
+        }
         return;
       case 'stall':
         hooks.onStall?.(event.phase);
@@ -208,6 +271,7 @@ export function createPlaybackServiceWith(
       ...kept,
       status: held ? state.status : { kind: 'tuning' },
       attempt: token,
+      tracks: EMPTY_TRACKS,
       item: request.item,
       accountKey: request.accountKey,
       tuneAt: clock.now(),
@@ -242,19 +306,29 @@ export function createPlaybackServiceWith(
   return {
     tune(request) {
       if (disposed) return state.attempt;
+      preferredAudioId = undefined;
+      preferredSubtitleId = undefined;
+      audioReapplied = false;
+      subtitleReapplied = false;
+      lastVodPositionMs = request.kind === 'vod' ? request.startMs : undefined;
       return startTune(request);
     },
     retry() {
       if (disposed || current === undefined || state.status.kind === 'idle') return;
       if (state.status.kind === 'ended') {
+        if (current.kind === 'vod') lastVodPositionMs = 0;
         startTune(current.kind === 'vod' ? { ...current, startMs: 0 } : current);
         return;
       }
       if (!loaded) {
-        startTune(current);
+        const resumeStartMs =
+          current.kind === 'vod' ? (lastVodPositionMs ?? current.startMs) : current.startMs;
+        startTune(resumeStartMs === undefined ? current : { ...current, startMs: resumeStartMs });
         return;
       }
       hooks.onReset?.();
+      audioReapplied = false;
+      subtitleReapplied = false;
       const token = control.nextAttempt();
       update({ status: { kind: 'tuning' } });
       control.armStartTimeout(startTimeoutMs());
@@ -265,8 +339,13 @@ export function createPlaybackServiceWith(
       hooks.onReset?.();
       clearResolveTimeout();
       stopEngine();
+      preferredAudioId = undefined;
+      preferredSubtitleId = undefined;
+      audioReapplied = false;
+      subtitleReapplied = false;
+      lastVodPositionMs = undefined;
       const { anchor: _anchor, ...rest } = state;
-      state = { ...rest, status: { kind: 'idle' } };
+      state = { ...rest, status: { kind: 'idle' }, tracks: EMPTY_TRACKS };
       notify();
     },
     play() {
@@ -286,9 +365,47 @@ export function createPlaybackServiceWith(
       engine.pause(token);
     },
     seek(positionMs) {
-      if (disposed || !loaded) return;
-      hooks.onSeek?.(positionMs);
-      engine.seek(state.attempt, positionMs);
+      const recoveringVod = current?.kind === 'vod' && state.status.kind === 'recovering';
+      if (disposed || !Number.isFinite(positionMs) || (!loaded && !recoveringVod)) return;
+      const durationMs = state.anchor?.durationMs;
+      const clamped = Math.max(
+        0,
+        durationMs === undefined ? positionMs : Math.min(positionMs, durationMs),
+      );
+      const now = clock.now();
+      update({
+        anchor: {
+          positionMs: clamped,
+          atMs: now,
+          rate: state.status.kind === 'playing' ? 1 : 0,
+          ...(durationMs === undefined ? {} : { durationMs }),
+          ...(state.anchor?.liveEdgeMs === undefined
+            ? {}
+            : { liveEdgeMs: state.anchor.liveEdgeMs }),
+        },
+      });
+      if (current?.kind === 'vod') lastVodPositionMs = clamped;
+      const attemptBefore = state.attempt;
+      hooks.onSeek?.(clamped);
+      if (state.attempt === attemptBefore && loaded) {
+        engine.seek(state.attempt, clamped);
+      }
+    },
+    selectAudioTrack(id) {
+      if (disposed || current === undefined || state.status.kind === 'idle') return;
+      preferredAudioId = id;
+      if (loaded) {
+        audioReapplied = true;
+        engine.selectAudioTrack?.(state.attempt, id);
+      }
+    },
+    selectSubtitleTrack(id) {
+      if (disposed || current === undefined || state.status.kind === 'idle') return;
+      preferredSubtitleId = id;
+      if (loaded) {
+        subtitleReapplied = true;
+        engine.selectSubtitleTrack?.(state.attempt, id);
+      }
     },
     getState: () => state,
     subscribe(listener) {

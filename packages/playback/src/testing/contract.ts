@@ -174,8 +174,10 @@ export const ENGINE_CONTRACT_CASES: readonly EngineContractCase[] = [
       h.engine.play(4);
       h.engine.pause(5);
       h.engine.seek(6, 1000);
-      h.engine.recreate(7);
-      h.engine.stop(8);
+      h.engine.selectAudioTrack?.(7, 'a:0');
+      h.engine.selectSubtitleTrack?.(8, null);
+      h.engine.recreate(9);
+      h.engine.stop(10);
       h.engine.release();
       await h.settle();
     } catch (error) {

@@ -1,7 +1,7 @@
 import { elvError, err, ok, type Result } from '@elv/domain';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PLAYBACK_CONFIG } from './config';
-import type { StreamRequest } from './engine';
+import { EMPTY_TRACKS, type MediaTracks, type StreamRequest } from './engine';
 import type { RecoveryHooks, ServiceControl } from './seam';
 import { createPlaybackService, createPlaybackServiceWith } from './service';
 import { createFakePlayerEngine, type FakePlayerEngine, type FakeStep } from './testing';
@@ -687,5 +687,86 @@ describe('recovery hooks', () => {
     expect(ctl.getState().attempt).toBe(t2);
     const h = ctl.setTimer(() => {}, 10);
     ctl.clearTimer(h);
+  });
+});
+
+const SAMPLE_TRACKS: MediaTracks = {
+  audio: [
+    { id: 'a:0', language: 'tur', label: 'Turkish' },
+    { id: 'a:1', language: 'eng', label: 'English' },
+  ],
+  subtitles: [{ id: 's:0', language: 'tur', label: 'Turkish' }],
+  selectedAudioId: 'a:0',
+  selectedSubtitleId: 's:0',
+};
+
+describe('tracks and seek', () => {
+  it('exposes frozen EMPTY_TRACKS initially, updates on tracks events, and resets on tune and stop', async () => {
+    expect(Object.isFrozen(EMPTY_TRACKS)).toBe(true);
+    expect(Object.isFrozen(EMPTY_TRACKS.audio)).toBe(true);
+    expect(Object.isFrozen(EMPTY_TRACKS.subtitles)).toBe(true);
+    const { engine, service } = setup();
+    expect(service.getState().tracks).toBe(EMPTY_TRACKS);
+    const t1 = service.tune(tuneReq('A'));
+    await flush();
+    engine.emit({ attempt: t1, type: 'tracks', tracks: SAMPLE_TRACKS });
+    expect(service.getState().tracks).toEqual(SAMPLE_TRACKS);
+    const t2 = service.tune(tuneReq('B'));
+    expect(service.getState().tracks).toBe(EMPTY_TRACKS);
+    await flush();
+    engine.emit({ attempt: t1, type: 'tracks', tracks: SAMPLE_TRACKS });
+    expect(service.getState().tracks).toBe(EMPTY_TRACKS);
+    expect(service.getState().staleEventsDropped).toBe(1);
+    engine.emit({ attempt: t2, type: 'tracks', tracks: SAMPLE_TRACKS });
+    expect(service.getState().tracks).toEqual(SAMPLE_TRACKS);
+    service.stop();
+    expect(service.getState().tracks).toBe(EMPTY_TRACKS);
+  });
+
+  it('forwards track selections with state.attempt and re-applies once after reload if needed', async () => {
+    const { engine, service } = setup();
+    service.selectAudioTrack('a:1');
+    service.selectSubtitleTrack(null);
+    expect(engine.commands).toHaveLength(0);
+    const t = service.tune(tuneReq('A'));
+    await flush();
+    engine.emit({ attempt: t, type: 'tracks', tracks: SAMPLE_TRACKS });
+    service.selectAudioTrack('a:1');
+    service.selectSubtitleTrack(null);
+    expect(engine.commands.slice(-2)).toEqual([
+      { name: 'selectAudioTrack', attempt: t, trackId: 'a:1' },
+      { name: 'selectSubtitleTrack', attempt: t, trackId: null },
+    ]);
+    service.retry();
+    const retryToken = service.getState().attempt;
+    engine.emit({ attempt: retryToken, type: 'tracks', tracks: SAMPLE_TRACKS });
+    engine.emit({ attempt: retryToken, type: 'tracks', tracks: SAMPLE_TRACKS });
+    expect(engine.commands.slice(-2)).toEqual([
+      { name: 'selectAudioTrack', attempt: retryToken, trackId: 'a:1' },
+      { name: 'selectSubtitleTrack', attempt: retryToken, trackId: null },
+    ]);
+  });
+
+  it('clamps seek to [0, durationMs] and updates state.anchor immediately', async () => {
+    const { engine, service } = setup();
+    const t = service.tune(tuneReq('movie', { kind: 'vod' }));
+    await vi.advanceTimersByTimeAsync(300);
+    engine.emit({
+      attempt: t,
+      type: 'clock',
+      anchor: { positionMs: 10_000, atMs: Date.now(), rate: 1, durationMs: 100_000 },
+    });
+    service.seek(150_000);
+    expect(service.getState().anchor).toEqual({
+      positionMs: 100_000,
+      atMs: Date.now(),
+      rate: 1,
+      durationMs: 100_000,
+    });
+    expect(engine.commands.at(-1)).toEqual({ name: 'seek', attempt: t, positionMs: 100_000 });
+    service.seek(-500);
+    expect(service.getState().anchor?.positionMs).toBe(0);
+    service.seek(Number.NaN);
+    expect(engine.commands.at(-1)).toEqual({ name: 'seek', attempt: t, positionMs: 0 });
   });
 });

@@ -114,6 +114,7 @@ export function createGateRun(deps: GateRunDeps): GateRun {
     fault: params.fault,
     faultItem: params.channels[0] ?? '',
   });
+  let seekClockPos: number | undefined;
   const tapped: PlayerEngine = {
     ...engine,
     subscribe: (listener) =>
@@ -122,6 +123,8 @@ export function createGateRun(deps: GateRunDeps): GateRun {
         else if (event.type === 'error') recorder.engineError(event.error.code);
         else if (event.type === 'stall' && event.attempt === service.getState().attempt)
           recorder.stall(event.phase);
+        else if (event.type === 'clock' && event.attempt === service.getState().attempt)
+          seekClockPos = event.anchor.positionMs;
         listener(event);
       }),
   };
@@ -204,11 +207,10 @@ export function createGateRun(deps: GateRunDeps): GateRun {
     service.pause();
     await sleep(VOD_PAUSE_MS);
     service.play();
+    seekClockPos = undefined;
     service.seek(VOD_SEEK_MS);
     const seeked = await waitFor(
-      (s) =>
-        s.status.kind === 'playing' &&
-        (s.anchor?.positionMs ?? 0) >= VOD_SEEK_MS - SEEK_TOLERANCE_MS,
+      (s) => s.status.kind === 'playing' && (seekClockPos ?? 0) >= VOD_SEEK_MS - SEEK_TOLERANCE_MS,
       VOD_STEP_TIMEOUT_MS,
     );
     return { playing: true, seeked };

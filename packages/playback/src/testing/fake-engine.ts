@@ -5,6 +5,7 @@ import type {
   EngineEvent,
   EngineState,
   LoadCommand,
+  MediaTracks,
   PlayerEngine,
 } from '../engine';
 
@@ -13,6 +14,7 @@ export type FakeStep = { afterMs: number } & (
   | { emit: 'state'; state: EngineState }
   | { emit: 'firstFrame' }
   | { emit: 'clock'; positionMs: number; rate?: number }
+  | { emit: 'tracks'; tracks: MediaTracks }
   | { emit: 'stall'; phase: 'start' | 'end' }
   | { emit: 'error'; error: EngineError }
 );
@@ -35,6 +37,7 @@ export interface FakeCommand {
   attempt?: AttemptToken;
   url?: string;
   positionMs?: number;
+  trackId?: string | null;
 }
 
 /** Scriptable engine for service and screen tests. */
@@ -105,6 +108,8 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
           type: 'clock',
           anchor: { positionMs: step.positionMs, atMs, rate: step.rate ?? 1 },
         };
+      case 'tracks':
+        return { attempt, type: 'tracks', tracks: step.tracks };
       case 'stall':
         return { attempt, type: 'stall', phase: step.phase, atMs };
       case 'error':
@@ -179,8 +184,17 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
       adopt(attempt);
       anchorNow(0);
     },
-    seek(attempt, positionMs) {
-      commands.push({ name: 'seek', attempt, positionMs });
+    seek(attempt, nextPos) {
+      commands.push({ name: 'seek', attempt, positionMs: nextPos });
+      adopt(attempt);
+      positionMs = nextPos;
+    },
+    selectAudioTrack(attempt, id) {
+      commands.push({ name: 'selectAudioTrack', attempt, trackId: id });
+      adopt(attempt);
+    },
+    selectSubtitleTrack(attempt, id) {
+      commands.push({ name: 'selectSubtitleTrack', attempt, trackId: id });
       adopt(attempt);
     },
     stop(attempt) {

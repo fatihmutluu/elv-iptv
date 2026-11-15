@@ -1,18 +1,21 @@
 export { positionAt } from './clock';
 export { DEFAULT_PLAYBACK_CONFIG, type PlaybackConfig } from './config';
-export type {
-  AttemptToken,
-  ClockAnchor,
-  EngineCapabilities,
-  EngineError,
-  EngineErrorCode,
-  EngineEvent,
-  EngineState,
-  LoadCommand,
-  LoadOptions,
-  MediaKind,
-  PlayerEngine,
-  StreamRequest,
+export {
+  type AttemptToken,
+  type ClockAnchor,
+  EMPTY_TRACKS,
+  type EngineCapabilities,
+  type EngineError,
+  type EngineErrorCode,
+  type EngineEvent,
+  type EngineState,
+  type LoadCommand,
+  type LoadOptions,
+  type MediaKind,
+  type MediaTracks,
+  type PlayerEngine,
+  type StreamRequest,
+  type TrackInfo,
 } from './engine';
 export { classifyError, type ErrorClass, toPlaybackError } from './errors';
 export { nextLimitDelay } from './recovery';

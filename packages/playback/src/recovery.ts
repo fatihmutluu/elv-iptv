@@ -129,7 +129,12 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
       resumeMs = positionAt(resumeFrom, ctl.now());
       resumeFrom = undefined;
     }
-    return resumeMs ?? ctl.request()?.startMs;
+    if (resumeMs !== undefined) return resumeMs;
+    const anchored = ctl.getState().anchor;
+    if (anchored !== undefined && anchored.positionMs > 0) {
+      return positionAt(anchored, ctl.now());
+    }
+    return ctl.request()?.startMs;
   };
 
   const freeze = (): void => {
@@ -328,10 +333,27 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
     },
     onReset: reset,
     onSeek(positionMs) {
+      const clamped = Math.max(0, positionMs);
       seekDisarmed = true;
       stallTimer = clear(stallTimer);
       resumeFrom = undefined;
-      resumeMs = Math.max(0, positionMs);
+      resumeMs = clamped;
+      if (!isVod()) return;
+      if (
+        !paused &&
+        (ctl.getState().status.kind === 'recovering' ||
+          (budget.vodStart !== undefined && ctl.getState().status.kind !== 'playing'))
+      ) {
+        cancelSteps();
+        budget = freshBudget();
+        ctl.nextAttempt();
+        ctl.setStatus({ kind: 'tuning' });
+        ctl.armStartTimeout(ctl.startTimeoutMs());
+        reload();
+        return;
+      }
+      budget.vodStart = undefined;
+      budget.vodAttempt = 0;
     },
     onPause: pause,
     onPlay() {

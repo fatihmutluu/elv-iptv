@@ -16,6 +16,7 @@
 - [Simulator corpus spec](superpowers/specs/2026-11-14-sim-corpus-design.md) runtime fault rules, delivery quirks, the format recipes, subtitles and the `corpus` account of the simulator.
 - [Player core spec](superpowers/specs/2026-11-14-player-core-design.md) the `PlayerEngine` port, the playback service with its recovery ladder and connection-limit path, the Media3 engine and the player gate (`pnpm gate player`, baseline `learned/gates/player-android-tv.json`).
 - [Media3 FFmpeg audio spec](superpowers/specs/2026-11-15-media3-ffmpeg-audio-design.md) the reproducible LGPL-2.1+ FFmpeg Android build, the licence and 16 KB ELF gate (`pnpm ffmpeg-media3`), and `FfmpegAudioRenderer` in `@elv/engine-media3`.
+- [VOD playback controls spec](superpowers/specs/2026-11-15-vod-playback-controls-design.md) VOD pause/seek, multi-platform audio and embedded subtitle track selection (`@elv/playback`, Media3, AetherEngine, desktop `mpv`), and `PlayerScreen` controls (`#73`).
 - `superpowers/plans/` implementation plans; they are deleted after the work is merged.
 - [ADRs](adr/README.md) accepted architecture decisions (MADR), including [0003 playback engines](adr/0003-playback-engines.md) (amended for the player core), [0011 content keys](adr/0011-content-keys.md) and [0012 the GPL-3.0 license](adr/0012-gpl-3-and-cla.md).
 - [Lessons learned](learned/README.md) short dated problem-to-rule entries.
