@@ -129,13 +129,24 @@ describe('back and scopes', () => {
     expect(fn).toHaveBeenCalledTimes(2);
   });
 
-  it('does not notify on push or pop when shared indices match', () => {
+  it('notifies on push and pop even when list ids are disjoint or shared indices match', () => {
     const s = mk();
     const fn = vi.fn();
     s.subscribe(fn);
-    s.pushScope('dlg', [l('main')], 'main');
+    s.pushScope('dlg', [l('d')], 'd');
+    expect(fn).toHaveBeenLastCalledWith({ listId: 'd', index: 0 });
+    expect(s.isActive('main')).toBe(false);
+    expect(s.isActive('d')).toBe(true);
     s.popScope();
-    expect(fn).not.toHaveBeenCalled();
+    expect(fn).toHaveBeenLastCalledWith({ listId: 'main', index: 0 });
+    expect(s.isActive('main')).toBe(true);
+    expect(s.isActive('d')).toBe(false);
+    expect(fn).toHaveBeenCalledTimes(2);
+
+    fn.mockClear();
+    s.pushScope('same', [l('main')], 'main');
+    s.popScope();
+    expect(fn).toHaveBeenCalledTimes(2);
   });
 
   it('rejects an unknown active list on push', () => {
@@ -143,8 +154,8 @@ describe('back and scopes', () => {
   });
 });
 
-describe('setCount and focus', () => {
-  it('clamps on setCount and notifies only on change', () => {
+describe('setCount, focus, activate and re-entrancy', () => {
+  it('clamps on setCount and notifies on index or emptiness change', () => {
     const s = mk();
     s.focus('main', 15);
     const fn = vi.fn();
@@ -155,12 +166,30 @@ describe('setCount and focus', () => {
     expect(fn).toHaveBeenCalledWith({ listId: 'main', index: 4 });
     s.setCount('main', 0);
     expect(fn).toHaveBeenLastCalledWith({ listId: 'main', index: 0 });
+    fn.mockClear();
+    s.setCount('main', 0);
+    expect(fn).not.toHaveBeenCalled();
+    s.setCount('main', 3);
+    expect(fn).toHaveBeenCalledWith({ listId: 'main', index: 0 });
+    fn.mockClear();
+    s.setCount('main', 1);
+    expect(fn).not.toHaveBeenCalled();
+    s.setCount('main', 0);
+    expect(fn).toHaveBeenCalledWith({ listId: 'main', index: 0 });
   });
 
-  it('focus clamps, activates the list and ignores unknown ids', () => {
+  it('focus clamps, activates the list, notifies on active switch with unchanged index, and ignores unknown ids', () => {
     const s = mk();
     const fn = vi.fn();
     const off = s.subscribe(fn);
+    expect(s.isActive('main')).toBe(true);
+    expect(s.isActive('side')).toBe(false);
+    s.focus('side', 0);
+    expect(s.isActive('side')).toBe(true);
+    expect(s.isActive('main')).toBe(false);
+    expect(fn).toHaveBeenCalledWith({ listId: 'side', index: 0 });
+
+    fn.mockClear();
     s.focus('side', 99);
     expect(active(s)).toMatchObject({ id: 'side', index: 19 });
     expect(fn).toHaveBeenCalledWith({ listId: 'side', index: 19 });
@@ -171,6 +200,56 @@ describe('setCount and focus', () => {
     off();
     s.focus('side', 0);
     expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('activate switches active list preserving focus memory and focus(id) acts identically', () => {
+    const s = mk();
+    s.focus('side', 8);
+    s.focus('main', 3);
+    const fn = vi.fn();
+    s.subscribe(fn);
+    expect(s.activate('side')).toBe(true);
+    expect(s.isActive('side')).toBe(true);
+    expect(active(s)).toMatchObject({ id: 'side', index: 8 });
+    expect(fn).toHaveBeenCalledWith({ listId: 'side', index: 8 });
+
+    fn.mockClear();
+    expect(s.activate('side')).toBe(true);
+    expect(fn).not.toHaveBeenCalled();
+
+    expect(s.activate('unknown')).toBe(false);
+    expect(fn).not.toHaveBeenCalled();
+
+    s.focus('main');
+    expect(s.isActive('main')).toBe(true);
+    expect(active(s)).toMatchObject({ id: 'main', index: 3 });
+    expect(fn).toHaveBeenCalledWith({ listId: 'main', index: 3 });
+  });
+
+  it('queues notifications FIFO when a subscriber re-entrantly mutates the store', () => {
+    const s = mk();
+    const order: string[] = [];
+    s.subscribe((change) => {
+      order.push(`A:${change.listId}:${change.index}`);
+      if (change.listId === 'main' && change.index === 1) {
+        s.focus('side', 4);
+      }
+    });
+    s.subscribe((change) => {
+      order.push(`B:${change.listId}:${change.index}:${s.getState().scopes[0]?.lists.main?.index}`);
+    });
+    s.dispatch(ev('down'));
+    expect(order).toEqual(['A:main:1', 'B:main:1:1', 'A:side:4', 'B:side:4:1']);
+  });
+
+  it('skips a listener unsubscribed by an earlier listener in the same notification', () => {
+    const s = mk();
+    const second = vi.fn();
+    let offSecond = () => {};
+    s.subscribe(() => offSecond());
+    offSecond = s.subscribe(second);
+    s.dispatch(ev('down'));
+    expect(second).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid root', () => {

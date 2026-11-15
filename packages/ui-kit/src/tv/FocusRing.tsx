@@ -19,5 +19,13 @@ const ring = {
 
 /** The focus highlight of a TV list: one absolutely positioned frame, moved by the list, never part of a row. */
 export function FocusRing({ top, height, testID }: FocusRingProps): ReactElement {
-  return <View testID={testID} style={{ ...ring, top, height }} />;
+  return (
+    <View
+      testID={testID}
+      pointerEvents="none"
+      accessible={false}
+      importantForAccessibility="no"
+      style={{ ...ring, top, height }}
+    />
+  );
 }

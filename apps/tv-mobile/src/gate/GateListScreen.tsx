@@ -1,12 +1,11 @@
+import { createFocusStore, type FocusStore, findList, type KeyEvent } from '@elv/focus-core';
 import {
-  createFocusStore,
-  createKeyInterpreter,
-  type FocusStore,
-  findList,
-  type Key,
-  type KeyEvent,
-} from '@elv/focus-core';
-import { createSyntheticSource, type FrameWindow, TvList, useTvKeySource } from '@elv/ui-kit';
+  createSyntheticSource,
+  type FrameWindow,
+  TvList,
+  useKeyInterpreter,
+  useTvKeySource,
+} from '@elv/ui-kit';
 import {
   type ReactElement,
   useCallback,
@@ -29,7 +28,6 @@ const WARMUP_MS = 500;
 const SETTLE_POLL_MS = 25;
 const SETTLE_TIMEOUT_MS = 2000;
 const IDLE_FLUSH_MS = 2000;
-const TICK_MS = 16;
 const STALL_OFFSET_MS = 7;
 
 interface Channel {
@@ -101,14 +99,10 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
   );
   const source = useMemo(() => createSyntheticSource(items, makeChannel), [items]);
   const recorder = useMemo(() => createRecorder({ items }), [items]);
-  const interpreter = useMemo(() => createKeyInterpreter(), []);
   const active = useRef(!auto);
-  const lastRepeat = useRef<Key | undefined>(undefined);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastCommitted = useRef(0);
   const frameCheck = useRef(false);
-  const held = useRef(new Set<Key>());
-  const ticker = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   const emit = useCallback(() => {
     const line = gateLine(recorder.finish());
@@ -143,7 +137,6 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
 
   const deliver = useCallback(
     (event: KeyEvent) => {
-      if (event.kind === 'repeat') lastRepeat.current = event.key;
       apply(event, event.time);
       if (!auto) {
         clearTimeout(idleTimer.current);
@@ -152,36 +145,14 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
     },
     [apply, auto, emit],
   );
-
-  const stopTicker = useCallback(() => {
-    clearInterval(ticker.current);
-    ticker.current = undefined;
-  }, []);
-
-  const onInput = useCallback(
-    (k: Parameters<typeof interpreter.input>[0]) => {
-      if (k.action === 'down') {
-        held.current.add(k.key);
-        ticker.current ??= setInterval(() => {
-          for (const e of interpreter.tick(performance.now())) deliver(e);
-        }, TICK_MS);
-      } else if (k.action === 'up' || k.action === 'cancel') {
-        held.current.delete(k.key);
-        if (held.current.size === 0) stopTicker();
-      }
-      for (const e of interpreter.input(k)) deliver(e);
-    },
-    [interpreter, deliver, stopTicker],
-  );
-  useTvKeySource(onInput);
+  useKeyInterpreter(deliver, { keySource: useTvKeySource });
 
   const onFrameCommitted = useCallback(
     (index: number, window: FrameWindow) => {
       lastCommitted.current = index;
       recorder.commit(performance.now(), index, currentIndex(store), window);
-      if (lastRepeat.current !== undefined) interpreter.acknowledge(lastRepeat.current);
     },
-    [recorder, store, interpreter],
+    [recorder, store],
   );
 
   const onCommit = useCallback(() => recorder.workEnd(performance.now()), [recorder]);
@@ -251,7 +222,6 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
   useEffect(
     () => () => {
       clearTimeout(idleTimer.current);
-      clearInterval(ticker.current);
     },
     [],
   );

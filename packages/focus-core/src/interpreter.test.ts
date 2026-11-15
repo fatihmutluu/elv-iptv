@@ -152,13 +152,27 @@ describe('step keys (arrows and channel keys)', () => {
     expect(k.input(up('left', 900))).toEqual([{ key: 'left', kind: 'long', time: 500 }]);
   });
 
-  it('keeps select, back, menu, playPause and digits pressing on up', () => {
+  it('keeps select, back, menu, playPause, play, pause and digits pressing on up', () => {
     const k = createKeyInterpreter();
-    for (const key of ['select', 'back', 'menu', 'playPause', 'digit7'] as const) {
+    for (const key of ['select', 'back', 'menu', 'playPause', 'play', 'pause', 'digit7'] as const) {
       expect(k.input(down(key, 0))).toEqual([]);
       expect(k.input(up(key, 100))).toEqual([{ key, kind: 'press', time: 100 }]);
     }
   });
+
+  it.each<Key>(['rewind', 'fastForward'])(
+    'steps %s on down and repeats while held without firing long',
+    (key) => {
+      const k = createKeyInterpreter();
+      expect(k.input(down(key, 0))).toEqual([{ key, kind: 'press', time: 0 }]);
+      const events = run(k, key, 0, 760);
+      expect(events.map((e) => [e.kind, e.time])).toEqual([
+        ['repeat', 625],
+        ['repeat', 750],
+      ]);
+      expect(k.input(up(key, 760))).toEqual([]);
+    },
+  );
 });
 
 describe('repeat', () => {
