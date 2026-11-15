@@ -318,6 +318,33 @@ msgstr "Series"
 msgid "nav.sources"
 msgstr "Sources"
 
+msgid "nav.notices"
+msgstr "Notices"
+
+msgid "notices.title"
+msgstr "Third-party software notices"
+
+msgid "notices.lgplSummary"
+msgstr "ELV IPTV dynamically links LGPL media libraries (AetherEngine, FFmpeg, libmpv) so you remain free to inspect, relink, or replace them. Exact version tags, build recipes, and upstream source links are listed offline below."
+
+msgid "notices.version"
+msgstr "Version"
+
+msgid "notices.license"
+msgstr "License"
+
+msgid "notices.platforms"
+msgstr "Platforms"
+
+msgid "notices.source"
+msgstr "Source"
+
+msgid "notices.unmodified"
+msgstr "Unmodified upstream release"
+
+msgid "notices.backToList"
+msgstr "Back to notices"
+
 msgid "browse.categories"
 msgstr "Categories"
 

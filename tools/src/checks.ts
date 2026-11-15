@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { checkAgentsStubs } from './agents-stubs.ts';
 import { exec } from './exec.ts';
 import { checkFileSizes } from './file-size.ts';
+import { verifyNoticesFile } from './notices/generate.ts';
 import type { Check } from './runner.ts';
 import { ENCODER_SKIP_MARKER, MEDIA_SKIP_MARKER } from './sim/media.ts';
 
@@ -78,6 +79,13 @@ export function buildChecks(root: string): Check[] {
       run: async () => {
         const problems = checkAgentsStubs(root);
         return { ok: problems.length === 0, output: problems.join('\n') };
+      },
+    },
+    {
+      key: 'notices',
+      run: async () => {
+        const res = verifyNoticesFile(root);
+        return { ok: res.ok, output: res.errors.join('\n') };
       },
     },
     {

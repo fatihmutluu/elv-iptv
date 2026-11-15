@@ -5,6 +5,7 @@ import { useFormFactor, useI18n, useKeyInterpreter } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { BrowseScreen, EMPTY_TAB_MEMORY, type TabBrowseMemory } from './browse';
+import { ThirdPartyNoticesScreen } from './notices';
 import { PlayerScreen } from './player';
 import type { AppLifecyclePort } from './ports/app-lifecycle';
 import type { PlayTarget } from './ports/play-target';
@@ -13,15 +14,16 @@ import type { VideoHost } from './ports/video-host';
 import { SourcesScreen } from './sources';
 
 /** Top-level shell tab identifier. */
-export type AppTab = 'live' | 'movie' | 'series' | 'sources';
+export type AppTab = 'live' | 'movie' | 'series' | 'sources' | 'notices';
 
-const APP_TABS: readonly AppTab[] = ['live', 'movie', 'series', 'sources'];
+const APP_TABS: readonly AppTab[] = ['live', 'movie', 'series', 'sources', 'notices'];
 
 const TAB_LABEL_IDS: Readonly<Record<AppTab, MessageId>> = {
   live: 'nav.live',
   movie: 'nav.movies',
   series: 'nav.series',
   sources: 'nav.sources',
+  notices: 'nav.notices',
 };
 
 /** Props of {@link AppShell}. */
@@ -65,9 +67,10 @@ function TopNavTvBridge({ onEvent }: { onEvent: (event: KeyEvent) => void }): Re
 }
 
 /**
- * Top-level browse-and-play application shell (`Live`, `Movies`, `Series`, `Sources`, and full-screen
- * `PlayerScreen`). Defaults to `Sources` when no source is configured yet, reconciles startup
- * `needsImport` sources in the background, wires `PlaybackGuard`, and preserves per-tab focus memory.
+ * Top-level browse-and-play application shell (`Live`, `Movies`, `Series`, `Sources`, `Notices`,
+ * and full-screen `PlayerScreen`). Defaults to `Sources` when no source is configured yet,
+ * reconciles startup `needsImport` sources in the background, wires `PlaybackGuard`, and preserves
+ * per-tab focus memory.
  */
 export function AppShell({
   catalog,
@@ -290,6 +293,12 @@ export function AppShell({
             playbackGuard={playbackGuard}
             externalRefreshToken={externalRefreshToken + refreshToken}
             {...(readySourcesCount > 0 ? { onOpenMenu: () => selectTab('live') } : {})}
+            onBack={() => setTopNavFocused(true)}
+            onFocusTopNav={() => setTopNavFocused(true)}
+            isActiveScope={!topNavFocused}
+          />
+        ) : activeTab === 'notices' ? (
+          <ThirdPartyNoticesScreen
             onBack={() => setTopNavFocused(true)}
             onFocusTopNav={() => setTopNavFocused(true)}
             isActiveScope={!topNavFocused}
