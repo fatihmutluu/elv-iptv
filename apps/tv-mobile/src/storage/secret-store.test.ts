@@ -129,16 +129,40 @@ describe('createSecureSecretStore', () => {
     }
   });
 
-  it('a failed set leaves no half-written secret or orphan chunks behind', async () => {
+  it('restores the previous valid secret when overwriting fails on a later chunk', async () => {
     const store = createSecureSecretStore();
-    await store.set('k', 'old'.repeat(1500));
+    await store.set('k', 'v1');
+    const baseSet =
+      mocked.setItemAsync.getMockImplementation() ?? (async (_k: string, _v: string) => undefined);
+    mocked.setItemAsync.mockImplementation(async (key: string, value: string) => {
+      if (key === 'k.2') throw new Error('keystore quota exceeded');
+      return baseSet(key, value);
+    });
+    await expect(store.set('k', 'y'.repeat(5000))).rejects.toThrow('keystore quota exceeded');
+    mocked.setItemAsync.mockImplementation(baseSet);
+    expect(await store.get('k')).toBe('v1');
+    expect([...mocked.data.keys()].sort()).toEqual(['k.0', 'k.n']);
+  });
+
+  it('leaves no half-written secret or orphan chunks when a new set or unrecoverable restore fails', async () => {
+    const store = createSecureSecretStore();
     const baseSet =
       mocked.setItemAsync.getMockImplementation() ?? (async (_k: string, _v: string) => undefined);
     mocked.setItemAsync.mockImplementation(async (key: string, value: string) => {
       if (key === 'k.1') throw new Error('keystore quota exceeded');
       return baseSet(key, value);
     });
-    await expect(store.set('k', 'y'.repeat(5000))).rejects.toThrow();
+    await expect(store.set('k', 'y'.repeat(5000))).rejects.toThrow('keystore quota exceeded');
+    mocked.setItemAsync.mockImplementation(baseSet);
+    expect(await store.get('k')).toBeUndefined();
+    expect([...mocked.data.keys()]).toEqual([]);
+
+    await store.set('k', 'v1');
+    mocked.setItemAsync.mockImplementation(async (key: string, value: string) => {
+      if (key === 'k.0') throw new Error('keystore write locked');
+      return baseSet(key, value);
+    });
+    await expect(store.set('k', 'y'.repeat(5000))).rejects.toThrow('keystore write locked');
     mocked.setItemAsync.mockImplementation(baseSet);
     expect(await store.get('k')).toBeUndefined();
     expect([...mocked.data.keys()]).toEqual([]);

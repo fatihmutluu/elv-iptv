@@ -9,5 +9,5 @@ Device implementations of the `@elv/domain` ports used by `@elv/data`. Only thes
 - `exec` splits scripts with `splitSqlStatements` (quotes and comments aware; trigger bodies unsupported). Other SQL failures reject with `SqlFailedError` (`storage/sql-failed`).
 - `createMacrotaskScheduler()` yields a `setTimeout(0)`; `createDeviceHttpClient()` wraps `expo/fetch`.
 - `createSettingsStore(key)` keeps one string in React Native `Settings` (`NSUserDefaults`; Apple only); failures read as `undefined`.
-- `createSecureSecretStore()` wraps `expo-secure-store` (async API, chunks `<= 1,800` UTF-8 bytes under `<key>.<i>` + `<key>.n` last), serializing `get`/`set`/`delete` per key, purging written/previous chunks on `set` failure, and probing orphan chunks in `delete` even when `<key>.n` is missing.
+- `createSecureSecretStore()` wraps `expo-secure-store` (async API, chunks `<= 1,800` UTF-8 bytes under `<key>.<i>` + `<key>.n` last), serializing `get`/`set`/`delete` per key, restoring any valid prior secret on `set` failure (or scrubbing chunks when none existed / restore fails), and probing orphan chunks in `delete` even when `<key>.n` is missing.
 - Simulator builds need ad-hoc signing (`CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=YES CODE_SIGNING_ALLOWED=YES`) for Keychain access.

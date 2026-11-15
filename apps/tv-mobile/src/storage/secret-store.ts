@@ -40,6 +40,29 @@ async function readCount(key: string): Promise<number | undefined> {
   return raw !== null && COUNT_PATTERN.test(raw) ? Number(raw) : undefined;
 }
 
+async function readPrior(
+  key: string,
+): Promise<{ count: number; validChunks: string[] | undefined }> {
+  let count: number | undefined;
+  try {
+    count = await readCount(key);
+  } catch {
+    return { count: 0, validChunks: undefined };
+  }
+  if (count === undefined) return { count: 0, validChunks: undefined };
+  try {
+    const chunks: string[] = [];
+    for (let i = 0; i < count; i += 1) {
+      const chunk = await SecureStore.getItemAsync(`${key}.${i}`);
+      if (chunk === null) return { count, validChunks: undefined };
+      chunks.push(chunk);
+    }
+    return { count, validChunks: chunks };
+  } catch {
+    return { count, validChunks: undefined };
+  }
+}
+
 async function deleteChunks(key: string, from: number, to: number): Promise<void> {
   for (let i = from; i < to; i += 1) await SecureStore.deleteItemAsync(`${key}.${i}`);
 }
@@ -94,18 +117,32 @@ export function createSecureSecretStore(): SecretStore {
     async set(key, value) {
       assertKey(key);
       return serialize(queues, key, async () => {
-        const previous = (await readCount(key).catch(() => undefined)) ?? 0;
+        const prior = await readPrior(key);
+        const previous = prior.count;
         const chunks = chunkValue(value);
         try {
-          // The index goes first and last so a failure midway leaves no secret rather than a mixed one.
+          // The index goes first and last so a crash midway never leaves a mixed secret.
           await SecureStore.deleteItemAsync(`${key}.n`);
           for (const [i, chunk] of chunks.entries())
             await SecureStore.setItemAsync(`${key}.${i}`, chunk);
-          await SecureStore.setItemAsync(`${key}.n`, String(chunks.length));
           await deleteChunks(key, chunks.length, previous);
+          await SecureStore.setItemAsync(`${key}.n`, String(chunks.length));
         } catch (error) {
-          await SecureStore.deleteItemAsync(`${key}.n`).catch(() => undefined);
           const bound = Math.max(chunks.length, previous);
+          if (prior.validChunks !== undefined) {
+            try {
+              await SecureStore.deleteItemAsync(`${key}.n`);
+              for (const [i, chunk] of prior.validChunks.entries()) {
+                await SecureStore.setItemAsync(`${key}.${i}`, chunk);
+              }
+              await deleteChunks(key, prior.validChunks.length, bound);
+              await SecureStore.setItemAsync(`${key}.n`, String(prior.validChunks.length));
+              throw error;
+            } catch (restoreErr) {
+              if (restoreErr === error) throw error;
+            }
+          }
+          await SecureStore.deleteItemAsync(`${key}.n`).catch(() => undefined);
           for (let i = 0; i < bound; i += 1) {
             await SecureStore.deleteItemAsync(`${key}.${i}`).catch(() => undefined);
           }
