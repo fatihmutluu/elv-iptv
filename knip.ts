@@ -15,7 +15,15 @@ const config: KnipConfig = {
       // The catalog barrel is consumed by the menu screens in a later task.
       entry: ['config/*.test.ts', 'src/catalog/index.ts', 'src/storage/index.ts'],
       // The TV plugin is loaded by name from app.config.ts; knip infers optional Expo packages.
-      ignoreDependencies: ['@elv/sources', '@react-native-tvos/config-tv', 'expo-updates'],
+      ignoreDependencies: [
+        '@elv/engine-aether',
+        '@elv/sources',
+        '@react-native-tvos/config-tv',
+        'expo-updates',
+      ],
+    },
+    'modules/engine-aether': {
+      ignoreDependencies: ['@elv/playback', '@types/react', 'react', 'react-native'],
     },
     'apps/desktop': {
       entry: ['e2e/*.spec.ts'],

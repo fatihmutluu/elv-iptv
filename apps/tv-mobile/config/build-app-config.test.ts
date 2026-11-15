@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildAppConfig, type Env } from './build-app-config';
+import { withAetherFrameworks } from './with-aether-frameworks.ts';
 
 const options = { version: '1.2.3', now: new Date('2026-11-13T00:00:00Z') };
 const build = (env: Env) => buildAppConfig(env, options);
@@ -56,7 +57,9 @@ describe('buildAppConfig', () => {
         'NSExceptionDomains',
       );
       const custom = (config.plugins ?? []).some(
-        (p) => typeof p === 'function' || (Array.isArray(p) && typeof p[0] === 'function'),
+        (p) =>
+          (typeof p === 'function' && p !== withAetherFrameworks) ||
+          (Array.isArray(p) && typeof p[0] === 'function'),
       );
       expect(custom).toBe(false);
     },
@@ -73,6 +76,15 @@ describe('buildAppConfig', () => {
       expect(config.android?.predictiveBackGestureEnabled).toBe(false);
     },
   );
+
+  it.each([
+    { APP_VARIANT: 'development', EXPO_TV: '1' },
+    { APP_VARIANT: 'development', EXPO_TV: undefined },
+    { APP_VARIANT: 'production', EXPO_TV: '1' },
+    { APP_VARIANT: 'production', EXPO_TV: undefined },
+  ])('wires the AetherEngine frameworks plugin in every variant (%o)', (env) => {
+    expect(build(env).plugins).toContain(withAetherFrameworks);
+  });
 
   it('adds the TV plugin only when EXPO_TV is set', () => {
     expect(pluginOptions({}, '@react-native-tvos/config-tv')).toBeUndefined();
