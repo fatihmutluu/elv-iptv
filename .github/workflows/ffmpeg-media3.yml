@@ -3,9 +3,7 @@ name: FFmpeg Media3 Android runtime
 on:
   workflow_dispatch:
   push:
-    paths:
-      - "tools/ffmpeg-media3/**"
-      - ".github/workflows/ffmpeg-media3.yml"
+    paths: ["tools/ffmpeg-media3/**"]
 
 permissions:
   contents: read
@@ -59,13 +57,13 @@ jobs:
           LC_ALL=C tar \
             --format=ustar \
             --sort=name \
-            --mtime='UTC 2026-01-01' \
+            --mtime="UTC 2026-01-01" \
             --owner=0 \
             --group=0 \
             --numeric-owner \
             -czf "$archive" \
             -C "$RUNNER_TEMP/ffmpeg-media3-bundle" .
-          sha="$(sha256sum "$archive" | awk '{print $1}')"
+          sha="$(sha256sum "$archive" | cut -d ' ' -f 1)"
           echo "Archive SHA-256: $sha"
           SHA256="$sha" node -e '
             const fs = require("node:fs");
@@ -80,10 +78,10 @@ jobs:
               sha256: process.env.SHA256,
             };
             const md = [
-              "### `modules/engine-media3/ffmpeg-media3.lock.json`",
-              "```json",
+              "### modules/engine-media3/ffmpeg-media3.lock.json",
+              "~~~json",
               JSON.stringify(lock, null, 2),
-              "```",
+              "~~~",
               "",
             ].join("\n");
             fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
