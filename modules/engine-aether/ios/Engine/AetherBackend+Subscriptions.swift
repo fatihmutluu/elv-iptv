@@ -17,6 +17,7 @@ extension AetherBackend {
           }
           if progress.checkpoint == .ready {
             self.onObservation?(.ready, serial)
+            self.emitCurrentTracksSnapshot(from: target, serial: serial)
             self.maybeLogRouteDiagnostics(from: target, serial: serial)
           }
         }
@@ -67,6 +68,14 @@ extension AetherBackend {
           case .playing:
             self.maybeLogRouteDiagnostics(from: target, serial: serial)
             self.onObservation?(.phase(.playing), serial)
+            if target.currentTime > 0 {
+              self.emitClockSnapshot(
+                from: target,
+                positionSeconds: target.currentTime,
+                durationOverride: nil,
+                serial: serial
+              )
+            }
           case .paused: self.onObservation?(.phase(.paused), serial)
           case .seeking: self.onObservation?(.phase(.seeking), serial)
           case .rebuffering: self.onObservation?(.phase(.rebuffering), serial)
@@ -122,7 +131,9 @@ extension AetherBackend {
     target.clock.$currentTime
       .sink { [weak self, weak target] currentTime in
         MainActor.assumeIsolated {
-          guard let self, let target, self.engineLoadSerial > 0 else { return }
+          guard let self, let target, self.engineLoadSerial > 0, target.videoRoute != .none else { return }
+          let phase = target.playbackPhase
+          guard phase != .idle, phase != .loading, target.state != .idle, target.state != .loading else { return }
           self.emitClockSnapshot(
             from: target,
             positionSeconds: currentTime,
@@ -136,7 +147,11 @@ extension AetherBackend {
     target.$duration
       .sink { [weak self, weak target] newDuration in
         MainActor.assumeIsolated {
-          guard let self, let target, self.engineLoadSerial > 0, newDuration > 0, !target.isLive else { return }
+          guard let self, let target, self.engineLoadSerial > 0, target.videoRoute != .none, newDuration > 0, !target.isLive else {
+            return
+          }
+          let phase = target.playbackPhase
+          guard phase != .idle, phase != .loading, target.state != .idle, target.state != .loading else { return }
           self.emitClockSnapshot(
             from: target,
             positionSeconds: target.currentTime,
@@ -146,6 +161,8 @@ extension AetherBackend {
         }
       }
       .store(in: &cancellables)
+
+    subscribeTracksAndSubtitles(to: target)
   }
 
   func maybeLogRouteDiagnostics(from target: AetherEngine, serial: Int) {

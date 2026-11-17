@@ -1,5 +1,5 @@
 import type { ElvError, Result } from '@elv/domain';
-import type { AttemptToken, ClockAnchor, MediaKind, StreamRequest } from './engine';
+import type { AttemptToken, ClockAnchor, MediaKind, MediaTracks, StreamRequest } from './engine';
 
 /** Time source, injected so tests control it. */
 export interface PlaybackClock {
@@ -39,6 +39,7 @@ export type PlaybackStatus =
 export interface PlaybackState {
   status: PlaybackStatus;
   attempt: AttemptToken;
+  tracks: MediaTracks;
   item?: string;
   accountKey?: string;
   anchor?: ClockAnchor;
@@ -61,8 +62,12 @@ export interface PlaybackService {
   play(): void;
   /** Pauses with a fresh attempt token; no recovery command is sent until `play`, and pending rungs are dropped. */
   pause(): void;
-  /** Seeks; the stall watchdog stays disarmed until the engine reports `playing` again. */
+  /** Seeks; disarms the stall watchdog and any active VOD reconnect backoff, and updates `anchor` immediately. */
   seek(positionMs: number): void;
+  /** Selects an audio track in place and remembers the choice across recovery reloads of the current item. */
+  selectAudioTrack(id: string): void;
+  /** Selects a subtitle track in place (`null` turns subtitles off) and remembers the choice across reloads. */
+  selectSubtitleTrack(id: string | null): void;
   getState(): PlaybackState;
   /** Returns the unsubscribe function. */
   subscribe(listener: (state: PlaybackState) => void): () => void;

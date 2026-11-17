@@ -11,6 +11,10 @@ import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
+import androidx.annotation.OptIn
+import androidx.media3.common.text.Cue
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.ui.SubtitleView
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.views.ExpoView
 
@@ -26,15 +30,18 @@ private fun exactly(size: Int) = View.MeasureSpec.makeMeasureSpec(size.coerceAtL
 
 /**
  * The `Media3Surface` view (player core spec 6.1): a `SurfaceView`, created once and never re-typed or put on top,
- * under a black zap shutter. The surface is sized and centred at the video's display aspect ratio ([SurfaceFit]);
- * the view paints black bars beside it, never over it, so React Native views drawn above compose over the video.
- * Surface callbacks attach and detach the surface on the bound engine's playback thread; the engine drives the
- * shutter, the picture shape and the screen-on flag, posted straight to this view (no JavaScript round trip).
+ * plus a `SubtitleView` over the fitted video rectangle, both under a black zap shutter. The surface and subtitle
+ * layer are sized and centred at the video's display aspect ratio ([SurfaceFit]); the view paints black bars beside
+ * the video, never over it, so React Native views drawn above compose over video and subtitles. Surface callbacks
+ * attach and detach the surface on the bound engine's playback thread; the engine drives the shutter, picture shape,
+ * subtitle cues and screen-on flag, posted straight to this view (no JavaScript round trip).
  */
+@OptIn(UnstableApi::class)
 class Media3SurfaceView(context: Context, appContext: AppContext) :
   ExpoView(context, appContext),
   SurfaceHolder.Callback {
   private val surfaceView = SurfaceView(context)
+  internal val subtitleView = SubtitleView(context)
   private val shutterView = View(context)
   private val main = Handler(Looper.getMainLooper())
   private val shutter = ZapShutter()
@@ -48,17 +55,20 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
 
   init {
     surfaceView.isFocusable = false
+    subtitleView.isFocusable = false
     shutterView.isFocusable = false
     shutterView.setBackgroundColor(Color.BLACK)
     surfaceView.holder.addCallback(this)
     addView(surfaceView)
+    addView(subtitleView)
     addView(shutterView)
     showShutter(shutter.covers)
   }
 
   /**
    * Binds the view to [next] (null unbinds): the surface moves from the previous engine, which must let go of it
-   * first; the shutter covers, the surface fills the view and the screen may sleep until [next] reports its state.
+   * first; subtitle cues clear, the shutter covers, the surface fills the view and the screen may sleep until [next]
+   * reports its state.
    */
   fun bind(next: Media3Engine?) {
     if (next === engine) return
@@ -67,6 +77,7 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
       surface?.let { detach(old, it) }
     }
     engine = next
+    subtitleView.setCues(emptyList())
     shutter.reset()
     showShutter(shutter.covers)
     fit.reset()
@@ -98,7 +109,7 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
     engine?.let { detach(it, destroyed) }
   }
 
-  /** React Native lays out this view only: the shutter fills it, the surface takes its fitted rectangle. */
+  /** React Native lays out this view only: the shutter fills it, the surface and subtitles take its fitted rectangle. */
   override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
     val width = MeasureSpec.getSize(widthMeasureSpec)
     val height = MeasureSpec.getSize(heightMeasureSpec)
@@ -106,6 +117,7 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
     shutterView.measure(exactly(width), exactly(height))
     val rect = fit.rect(width, height)
     surfaceView.measure(exactly(rect.width), exactly(rect.height))
+    subtitleView.measure(exactly(rect.width), exactly(rect.height))
   }
 
   override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
@@ -136,15 +148,19 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
   }
 
   /**
-   * Sizes and centres the surface in a [width] x [height] view; called from layout and when the shape or the mode
-   * changes, which needs no layout pass (React Native would not run one for this view).
+   * Sizes and centres the surface and subtitle layer in a [width] x [height] view; called from layout and when the
+   * shape or the mode changes, which needs no layout pass (React Native would not run one for this view).
    */
   private fun placeSurface(width: Int = this.width, height: Int = this.height) {
     val rect = fit.rect(width, height)
     if (surfaceView.measuredWidth != rect.width || surfaceView.measuredHeight != rect.height) {
       surfaceView.measure(exactly(rect.width), exactly(rect.height))
     }
+    if (subtitleView.measuredWidth != rect.width || subtitleView.measuredHeight != rect.height) {
+      subtitleView.measure(exactly(rect.width), exactly(rect.height))
+    }
     surfaceView.layout(rect.left, rect.top, rect.right, rect.bottom)
+    subtitleView.layout(rect.left, rect.top, rect.right, rect.bottom)
     if (rect == placed) return
     placed = rect
     invalidate()
@@ -173,6 +189,8 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
       onMain { if (fit.video(width, height, pixelRatio)) placeSurface() }
 
     override fun onScreenOn(on: Boolean) = onMain { keepScreen(on) }
+
+    override fun onCues(cues: List<Cue>) = onMain { subtitleView.setCues(cues) }
 
     private fun onMain(apply: () -> Unit) {
       main.post { if (binding === this) apply() }

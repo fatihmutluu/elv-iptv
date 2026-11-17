@@ -6,16 +6,10 @@ import {
   positionAt,
 } from '@elv/playback';
 import { type ReactElement, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { type DescribedPlaybackFailure, describePlaybackFailure } from './errors';
-
-function formatPosition(ms: number): string {
-  const clamped = Math.max(0, Math.floor(ms / 1000));
-  const seconds = String(clamped % 60).padStart(2, '0');
-  const minutes = Math.floor(clamped / 60);
-  if (minutes < 60) return `${minutes}:${seconds}`;
-  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}:${seconds}`;
-}
+import type { TvOsdAction } from './usePlayerControls';
+import { formatPlaybackPosition, VodProgressBar } from './VodProgressBar';
 
 /** Formats localized OSD status text from `PlaybackStatus`. */
 export function formatStatusLine(status: PlaybackStatus, i18n: AppI18n): string {
@@ -49,19 +43,30 @@ function OsdClock({
   const [text, setText] = useState('--:--');
 
   useEffect(() => {
-    if (service === null) {
-      setText('--:--');
-      return;
-    }
+    const sync = (): void => {
+      if (service === null) {
+        setText('--:--');
+        return;
+      }
+      const { anchor } = service.getState();
+      const next =
+        anchor === undefined ? '--:--' : formatPlaybackPosition(positionAt(anchor, clock.now()));
+      setText((prev) => (prev === next ? prev : next));
+    };
+    sync();
+    if (service === null) return;
+
+    const unsubscribe = service.subscribe(() => sync());
     let frame = 0;
     const tick = (): void => {
-      const { anchor } = service.getState();
-      const next = anchor === undefined ? '--:--' : formatPosition(positionAt(anchor, clock.now()));
-      setText((prev) => (prev === next ? prev : next));
+      sync();
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
+    return () => {
+      unsubscribe();
+      cancelAnimationFrame(frame);
+    };
   }, [clock, service]);
 
   return (
@@ -91,7 +96,12 @@ function OsdButton({
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ selected: tvFocused }}
-      onPress={onPress}
+      onPress={(event) => {
+        if ((Platform.OS as string) === 'web') {
+          (event.currentTarget as unknown as { blur?: () => void })?.blur?.();
+        }
+        onPress();
+      }}
       style={[playerStyles.button, tvFocused ? playerStyles.buttonTvFocused : null]}
     >
       <Text style={playerStyles.buttonText}>{label}</Text>
@@ -104,13 +114,23 @@ export function PlayerOsd({
   title,
   statusLine,
   failure,
+  isVod,
+  isPausedOrEnded,
   canZap,
+  hasTracks,
   showRetry,
   isTv,
+  tvOsdFocused,
+  tvOsdAction,
   i18n,
   service,
   clock,
   onExit,
+  onTogglePlayPause,
+  onSeekBack,
+  onSeekForward,
+  onSeekRatio,
+  onOpenTracks,
   onPrev,
   onNext,
   onRetry,
@@ -118,17 +138,30 @@ export function PlayerOsd({
   title: string;
   statusLine: string;
   failure: DescribedPlaybackFailure | null;
+  isVod: boolean;
+  isPausedOrEnded: boolean;
   canZap: boolean;
+  hasTracks: boolean;
   showRetry: boolean;
   isTv: boolean;
+  tvOsdFocused: boolean;
+  tvOsdAction: TvOsdAction;
   i18n: AppI18n;
   service: PlaybackService | null;
   clock: PlaybackClock;
   onExit: () => void;
+  onTogglePlayPause: () => void;
+  onSeekBack: () => void;
+  onSeekForward: () => void;
+  onSeekRatio: (ratio: number) => void;
+  onOpenTracks: () => void;
   onPrev: () => void;
   onNext: () => void;
   onRetry: () => void;
 }): ReactElement {
+  const isFocusedAction = (action: TvOsdAction): boolean =>
+    isTv && tvOsdFocused && tvOsdAction === action;
+
   return (
     <View testID="player-osd" style={[playerStyles.osd, isTv ? playerStyles.osdTv : null]}>
       <View style={playerStyles.osdTopRow}>
@@ -142,6 +175,16 @@ export function PlayerOsd({
         </View>
         <OsdClock service={service} clock={clock} />
       </View>
+
+      {isVod ? (
+        <VodProgressBar
+          service={service}
+          clock={clock}
+          isTv={isTv}
+          label={i18n.t('player.progressLabel')}
+          onSeekRatio={onSeekRatio}
+        />
+      ) : null}
 
       {failure !== null ? (
         <View style={playerStyles.errorBox}>
@@ -157,7 +200,33 @@ export function PlayerOsd({
           label={i18n.t('player.back')}
           onPress={onExit}
           isTv={isTv}
+          tvFocused={isFocusedAction('back')}
         />
+        {isVod && service !== null ? (
+          <>
+            <OsdButton
+              testID="player-play-pause"
+              label={isPausedOrEnded ? i18n.t('player.play') : i18n.t('player.pause')}
+              onPress={onTogglePlayPause}
+              isTv={isTv}
+              tvFocused={isFocusedAction('playPause')}
+            />
+            <OsdButton
+              testID="player-seek-back"
+              label={i18n.t('player.seekBack')}
+              onPress={onSeekBack}
+              isTv={isTv}
+              tvFocused={isFocusedAction('seekBack')}
+            />
+            <OsdButton
+              testID="player-seek-forward"
+              label={i18n.t('player.seekForward')}
+              onPress={onSeekForward}
+              isTv={isTv}
+              tvFocused={isFocusedAction('seekForward')}
+            />
+          </>
+        ) : null}
         {canZap ? (
           <>
             <OsdButton
@@ -174,13 +243,22 @@ export function PlayerOsd({
             />
           </>
         ) : null}
+        {hasTracks && service !== null ? (
+          <OsdButton
+            testID="player-tracks-button"
+            label={i18n.t('player.tracks')}
+            onPress={onOpenTracks}
+            isTv={isTv}
+            tvFocused={isFocusedAction('tracks')}
+          />
+        ) : null}
         {showRetry ? (
           <OsdButton
             testID="player-retry"
             label={i18n.t('player.retry')}
             onPress={onRetry}
             isTv={isTv}
-            tvFocused={isTv}
+            tvFocused={tvOsdFocused ? isFocusedAction('retry') : isTv}
           />
         ) : null}
       </View>

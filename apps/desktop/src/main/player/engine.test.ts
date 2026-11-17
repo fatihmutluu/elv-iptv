@@ -35,6 +35,9 @@ const OBSERVED = [
   'demuxer-cache-state',
   'video-params',
   'vid',
+  'track-list',
+  'aid',
+  'sid',
 ];
 
 const VOD: FakeMpvScript = [
@@ -607,8 +610,8 @@ describe('MpvEngine', () => {
       liveSeek: false,
       softwareAudioFallback: false,
       recreate: true,
-      audioTrackSelection: false,
-      subtitleTrackSelection: false,
+      audioTrackSelection: true,
+      subtitleTrackSelection: true,
     });
     expect(engine.presenterKind).toBe('child-window');
   });

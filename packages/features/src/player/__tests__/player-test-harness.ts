@@ -51,6 +51,12 @@ export function createFakeAndroidKeys() {
   };
   return {
     source,
+    down(keyCode: number, ageMs = 0) {
+      listener?.({ action: 'down', keyCode, canceled: false, ageMs });
+    },
+    up(keyCode: number, ageMs = 0) {
+      listener?.({ action: 'up', keyCode, canceled: false, ageMs });
+    },
     tap(keyCode: number) {
       listener?.({ action: 'down', keyCode, canceled: false, ageMs: 0 });
       listener?.({ action: 'up', keyCode, canceled: false, ageMs: 10 });

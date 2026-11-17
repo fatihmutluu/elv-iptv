@@ -10,16 +10,32 @@ struct LoadArgs: Record {
   @Field var kind: String = "live"
   @Field var startMs: Double? = nil
   @Field var softwareAudio: Bool = false
+  @Field var audioTrackId: String? = nil
+  @Field var subtitleTrackId: ValueOrUndefined<String?> = .undefined
 
   init() {}
 
   func toLoadRequest() -> LoadRequest {
-    LoadRequest(
+    let trimmedAudio = audioTrackId?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let subtitlePref: SubtitlePreference
+    switch subtitleTrackId {
+    case .undefined:
+      subtitlePref = .default
+    case let .value(unwrapped):
+      if let raw = unwrapped?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
+        subtitlePref = .selected(raw)
+      } else {
+        subtitlePref = .off
+      }
+    }
+    return LoadRequest(
       url: url,
       headers: headers,
       live: kind != "vod",
       startMs: startMs,
-      softwareAudio: softwareAudio
+      softwareAudio: softwareAudio,
+      audioTrackId: (trimmedAudio?.isEmpty == false) ? trimmedAudio : nil,
+      subtitlePreference: subtitlePref
     )
   }
 }
@@ -80,6 +96,14 @@ public final class ElvEngineAetherModule: Module {
 
       Function("seek") { (engine: EngineObject, attempt: Int, positionMs: Double) in
         engine.seek(attempt, positionMs: positionMs)
+      }
+
+      Function("selectAudioTrack") { (engine: EngineObject, attempt: Int, id: String) in
+        engine.selectAudioTrack(attempt, id: id)
+      }
+
+      Function("selectSubtitleTrack") { (engine: EngineObject, attempt: Int, id: String?) in
+        engine.selectSubtitleTrack(attempt, id: id)
       }
 
       Function("stop") { (engine: EngineObject, attempt: Int) in

@@ -15,6 +15,8 @@ over the JSON IPC client (`mpv/`) and a `VideoPresenter` (`presenter/`). Read `a
 - A newer token on any other command tags the media's later events, also before its `start-file`.
 - mpv keeps `pause` across files: after a `load`'s loadfile the engine sends `set pause no` when mpv is paused, and a
   file that starts while mpv is paused is derived as paused.
+- `mpv/tracks.ts` observes `track-list`, `aid` and `sid` (`id: "a:<id>"` / `"s:<id>"`), deduplicates `tracks` events,
+  switches via `set_property` (`sid: "no"` for `null` Off), and reconciles saved choices (ID then language/label) on reload.
 - Log lines are requested at `v`: mpv logs a provider notice's `Mime-type: 'text/plain'` only there (at `warn` the
   notice classifies as `unsupported-format`, measured). Only `fatal`, `error`, `warn`, `info` and `Mime-type:` lines
   reach the deriver, so its 50-line window per media keeps the classifier's signals.

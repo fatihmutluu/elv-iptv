@@ -25,6 +25,7 @@ private final class ShutterOverlayView: UIView {
 /// Native `ExpoView` hosting an `AetherPlayerView` under a native black zap shutter (player core spec 6.2).
 final class AetherSurfaceView: ExpoView {
   let playerView = AetherPlayerView(frame: .zero)
+  private let subtitleOverlayView = AetherSubtitleOverlayView(frame: .zero)
   private let shutterView = ShutterOverlayView(frame: .zero)
 
   private weak var boundEngine: EngineObject?
@@ -71,6 +72,7 @@ final class AetherSurfaceView: ExpoView {
   override func layoutSubviews() {
     super.layoutSubviews()
     playerView.frame = bounds
+    subtitleOverlayView.frame = bounds
     shutterView.frame = bounds
   }
 
@@ -96,6 +98,7 @@ final class AetherSurfaceView: ExpoView {
     }
     if let previous = boundEngine {
       wantsScreenOn = false
+      subtitleOverlayView.clear()
       previous.withDriver { driver in
         driver.unbindSurface(self)
       }
@@ -108,6 +111,7 @@ final class AetherSurfaceView: ExpoView {
         driver.bindSurface(self)
       }
     } else {
+      subtitleOverlayView.clear()
       shutterView.isHidden = false
       wantsScreenOn = false
       refreshIdleTimer()
@@ -119,6 +123,7 @@ final class AetherSurfaceView: ExpoView {
     let gravity: AVLayerVideoGravity = (mode == "fill") ? .resizeAspectFill : .resizeAspect
     guard gravity != currentVideoGravity else { return }
     currentVideoGravity = gravity
+    subtitleOverlayView.updateGravity(gravity)
     boundEngine?.withDriver { driver in
       driver.updateGravity(gravity, from: self)
     }
@@ -128,6 +133,12 @@ final class AetherSurfaceView: ExpoView {
   func applyShutter(covered: Bool, from engine: EngineObject?) {
     guard let engine, boundEngine === engine else { return }
     shutterView.isHidden = !covered
+  }
+
+  @MainActor
+  func applySubtitles(_ presentation: SubtitlePresentation, from engine: EngineObject?) {
+    guard let engine, boundEngine === engine else { return }
+    subtitleOverlayView.apply(presentation)
   }
 
   @MainActor
@@ -142,6 +153,7 @@ final class AetherSurfaceView: ExpoView {
     guard engine == nil || boundEngine === engine else { return }
     boundEngine = nil
     wantsScreenOn = false
+    subtitleOverlayView.clear()
     shutterView.isHidden = false
     if let prevId = boundOwnerId {
       boundOwnerId = nil
@@ -158,6 +170,9 @@ final class AetherSurfaceView: ExpoView {
     playerView.isAccessibilityElement = false
     playerView.frame = bounds
     addSubview(playerView)
+
+    subtitleOverlayView.frame = bounds
+    addSubview(subtitleOverlayView)
 
     shutterView.frame = bounds
     addSubview(shutterView)

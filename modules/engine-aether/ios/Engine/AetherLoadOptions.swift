@@ -7,6 +7,9 @@ func aetherOptions(_ options: EngineLoadOptions) -> LoadOptions {
   out.isLive = options.isLive
   out.httpHeaders = options.httpHeaders
   out.maxConcurrentSourceRequests = options.maxConcurrentSourceRequests
+  out.preferredAudioLanguages = options.preferredAudioLanguages
+  out.initialSubtitleTrackID = options.subtitlesDisabled ? nil : options.initialSubtitleTrackId
+  out.preferredSubtitleLanguages = options.subtitlesDisabled ? [] : options.preferredSubtitleLanguages
   if options.preferSoftwareDecode {
     out.preferredDecodePath = .software
   }

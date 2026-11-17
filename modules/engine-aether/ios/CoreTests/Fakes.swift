@@ -11,6 +11,8 @@ final class FakeBackend: PlayerBackend {
     case play
     case pause
     case seek(Double)
+    case selectAudioTrack(Int)
+    case selectSubtitleTrack(Int?)
     case rebuild
     case dispose
   }
@@ -38,6 +40,14 @@ final class FakeBackend: PlayerBackend {
     calls.append(.seek(toSeconds))
   }
 
+  func selectAudioTrack(_ streamId: Int) {
+    calls.append(.selectAudioTrack(streamId))
+  }
+
+  func selectSubtitleTrack(_ streamId: Int?) {
+    calls.append(.selectSubtitleTrack(streamId))
+  }
+
   func rebuild() throws {
     calls.append(.rebuild)
     if shouldFailRebuild {
@@ -57,6 +67,7 @@ final class RecordingSink: EngineSink {
   var screenOnHistory: [Bool] = []
   var shutterCovered = true
   var screenOn = false
+  var clearSubtitlesCount = 0
 
   func send(_ event: EngineEventOut) {
     events.append(event)
@@ -70,6 +81,10 @@ final class RecordingSink: EngineSink {
   func setKeepScreenOn(_ on: Bool) {
     screenOn = on
     screenOnHistory.append(on)
+  }
+
+  func clearSubtitles() {
+    clearSubtitlesCount += 1
   }
 }
 

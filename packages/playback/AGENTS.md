@@ -14,9 +14,10 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
 - Allowed workspace dependencies: domain. Tests live beside the code as `*.test.ts`.
 
 ## Public surface
-- `PlayerEngine` port with `LoadCommand` (`options.softwareAudio` for rung 4), `EngineEvent`, `EngineState`,
-  `EngineCapabilities`, `AttemptToken`, and `bridgeNativeEngine(native, { capabilities, uptimeMs, now })`
-  (`NativeEngineHandle`, `NativeLoadCommand`). `positionAt(anchor, nowMs)`: clock extrapolation, clamped to `[0, durationMs]`.
+- `PlayerEngine` port with `LoadCommand` (`options`: `softwareAudio`, `audioTrackId`, `subtitleTrackId`),
+  `selectAudioTrack?`, `selectSubtitleTrack?` (`null` = Off), `MediaTracks`, `TrackInfo`, `EMPTY_TRACKS`, `EngineEvent`
+  (`tracks`), `EngineState`, `EngineCapabilities`, `AttemptToken`, and `bridgeNativeEngine(native, { capabilities,
+  uptimeMs, now })` (`NativeEngineHandle`, `NativeLoadCommand`). `positionAt(anchor, nowMs)` clamps to `[0, durationMs]`.
 - `EngineError` and the 14 `EngineErrorCode`s; `toPlaybackError` gives `elvError('playback', code)`;
   `classifyError` gives `terminal | not-found | limit | recoverable`.
 - `@elv/playback/testing`: `createFakePlayerEngine({ scripts, now, schedule, cancel })`, a scriptable engine for tests.
@@ -24,10 +25,11 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
   event (stale tokens too); `openMedias()`, `maxConcurrentMedias()` check the one-media rule. Inject fake timers.
   `anchorOnPlayPause` emits an extrapolated `clock` anchor (rate 1/0) after `play`/`pause`. `ENGINE_CONTRACT_CASES` is
   the framework-free suite every engine runs through an `EngineContractHarness` (`contract.ts`; the fake: `contract.test.ts`).
-- `createPlaybackService({ engine, clock, timers, config? })`: `tune`, `retry` (replays `ended` VOD from 0), `stop`,
-  `play`, `pause`, `seek`, `getState`, `subscribe`, `dispose` (stops open media). `PlaybackStatus` includes `ended`.
-  `pause`/`play` advance `attempt` to fence queued native states; `anchor` freezes on non-playing states and clears on
-  `stop`. `DEFAULT_PLAYBACK_CONFIG` holds spec timings (`liveStartTimeoutMs: 5000`, `startTimeoutMs: 8000`, `rungTimeoutMs: 2000`).
+- `createPlaybackService({ engine, clock, timers, config? })`: `tune`, `retry` (replays `ended` VOD from 0, resumes
+  `failed`/post-`recreate` VOD from `lastVodPositionMs`), `stop`, `play`, `pause`, `seek` (updates `anchor`, disarms
+  stall + VOD reconnect, and reloads `ended`/`recovering` VOD at clamped target), `selectAudioTrack`, `selectSubtitleTrack`
+  (reconciled across reloads by exact id + `(language, label)` in `track-preferences.ts`), `getState`, `subscribe`, `dispose`.
+  `pause`/`play` advance `attempt`; `anchor` freezes on non-playing states. `DEFAULT_PLAYBACK_CONFIG` holds spec timings.
 
 ## Recovery (spec sections 5.4 and 5.5; `recovery.ts`, always wired)
 - Entry: a stall of 4 s while `playing`, no `playing` 5 s after live `load` (8 s VOD), or a recoverable error. Fast

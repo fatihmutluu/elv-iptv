@@ -3,15 +3,16 @@ import Foundation
 /// Pure state machine enforcing attempt-token adoption, media serial fencing, zap shutter, and screen-on rules.
 @MainActor
 public final class EngineCore {
-  private let backend: PlayerBackend
-  private weak var sink: EngineSink?
+  let backend: PlayerBackend
+  weak var sink: EngineSink?
   private let uptimeMs: () -> Double
 
-  private var token = 0
+  var token = 0
   private var serial = 0
-  private var released = false
+  var released = false
   private var currentRequest: LoadRequest?
-  private var active = false
+  var active = false
+  var trackState = TrackSelectionState()
 
   private var openedReported = false
   private var framed = false
@@ -47,6 +48,8 @@ public final class EngineCore {
     backend.stopMedia()
 
     resetSerialState(startMs: request.startMs)
+    trackState.onLoad(request)
+    sink?.clearSubtitles()
     currentRequest = request
     setShutter(covered: true)
 
@@ -63,7 +66,7 @@ public final class EngineCore {
 
     active = true
     emit(.state(attempt: token, state: .opening))
-    backend.start(plan, options: loadOptions(for: plan, request: request), serial: serial)
+    backend.start(plan, options: configuredLoadOptions(for: plan, request: request), serial: serial)
   }
 
   public func retry(_ attempt: Int) {
@@ -84,9 +87,11 @@ public final class EngineCore {
     serial += 1
     backend.stopMedia()
     resetSerialState(startMs: resumeMs)
+    trackState.onPrepareReuse()
+    sink?.clearSubtitles()
     active = true
     emit(.state(attempt: token, state: .opening))
-    backend.start(plan, options: loadOptions(for: plan, request: request), serial: serial)
+    backend.start(plan, options: configuredLoadOptions(for: plan, request: request), serial: serial)
   }
 
   public func play(_ attempt: Int) {
@@ -120,6 +125,8 @@ public final class EngineCore {
     serial += 1
     active = false
     currentRequest = nil
+    trackState.onStop()
+    sink?.clearSubtitles()
     backend.stopMedia()
     setScreenOn(false)
   }
@@ -129,6 +136,8 @@ public final class EngineCore {
     adopt(attempt)
     serial += 1
     active = false
+    trackState.onPrepareReuse()
+    sink?.clearSubtitles()
     backend.stopMedia()
     do {
       try backend.rebuild()
@@ -146,6 +155,8 @@ public final class EngineCore {
     serial += 1
     active = false
     currentRequest = nil
+    trackState.onStop()
+    sink?.clearSubtitles()
     backend.stopMedia()
     backend.dispose()
     setScreenOn(false)
@@ -196,6 +207,9 @@ public final class EngineCore {
         liveEdgeSeconds: liveEdgeSeconds
       )
 
+    case let .tracks(observedTracks):
+      handleTracksObservation(observedTracks)
+
     case let .readerFault(readerFailure):
       if latchedReaderFailure == nil { latchedReaderFailure = readerFailure }
 
@@ -210,6 +224,7 @@ public final class EngineCore {
     if available {
       emit(.surface(attempt: token, change: .created))
     } else {
+      sink?.clearSubtitles()
       emit(.surface(attempt: token, change: .destroyed))
       if active && !errorReported {
         serial += 1
@@ -229,11 +244,9 @@ public final class EngineCore {
     (shutterCovered, screenOn)
   }
 
-  private func emit(_ event: EngineEventOut) {
-    sink?.send(event)
-  }
+  func emit(_ event: EngineEventOut) { sink?.send(event) }
 
-  private func adopt(_ attempt: Int) {
+  func adopt(_ attempt: Int) {
     if attempt > token { token = attempt }
   }
 
@@ -330,44 +343,30 @@ public final class EngineCore {
     durationSeconds: Double?,
     liveEdgeSeconds: Double?
   ) {
-    if positionSeconds.isFinite {
-      lastPositionSeconds = max(0, positionSeconds)
-    }
-    if let durationSeconds, durationSeconds.isFinite, durationSeconds > 0 {
-      lastDurationSeconds = durationSeconds
-    }
-    if let liveEdgeSeconds, liveEdgeSeconds.isFinite, liveEdgeSeconds >= 0 {
-      lastLiveEdgeSeconds = liveEdgeSeconds
-    }
-
+    if positionSeconds.isFinite { lastPositionSeconds = max(0, positionSeconds) }
+    if let d = durationSeconds, d.isFinite, d > 0 { lastDurationSeconds = d }
+    if let e = liveEdgeSeconds, e.isFinite, e >= 0 { lastLiveEdgeSeconds = e }
     guard played, !stalled else { return }
     let now = uptimeMs()
-    let rateChanged = lastClockRate != rate
     let elapsed = lastClockUptimeMs.map { now - $0 >= 1_000 } ?? true
-    guard forceNextClock || rateChanged || elapsed else { return }
+    guard forceNextClock || lastClockRate != rate || elapsed else { return }
     forceNextClock = false
     emitAnchor(rate: rate, atMs: now)
   }
 
   private func emitAnchor(rate: Double, atMs: Double) {
     let positionMs = lastPositionSeconds * 1_000.0
-    let durationMs = lastDurationSeconds.map { $0 * 1_000.0 }
-    let liveEdgeMs = lastLiveEdgeSeconds.map { $0 * 1_000.0 }
     lastAnchoredPositionMs = positionMs
     lastClockRate = rate
     lastClockUptimeMs = atMs
-    emit(
-      .clock(
-        attempt: token,
-        anchor: ClockAnchorOut(
-          positionMs: positionMs,
-          atMs: atMs,
-          rate: rate,
-          durationMs: durationMs,
-          liveEdgeMs: liveEdgeMs
-        )
-      )
+    let anchor = ClockAnchorOut(
+      positionMs: positionMs,
+      atMs: atMs,
+      rate: rate,
+      durationMs: lastDurationSeconds.map { $0 * 1_000.0 },
+      liveEdgeMs: lastLiveEdgeSeconds.map { $0 * 1_000.0 }
     )
+    emit(.clock(attempt: token, anchor: anchor))
   }
 
   private func reportFailure(_ failure: BackendFailure) {
@@ -376,13 +375,8 @@ public final class EngineCore {
     pendingPlaying = false
     stalled = false
     setScreenOn(false)
-    let mapped = mapFailure(
-      failure,
-      url: currentRequest?.url ?? "",
-      live: currentRequest?.live ?? true,
-      played: played
-    )
-    emit(.error(attempt: token, error: mapped))
+    let live = currentRequest?.live ?? true
+    emit(.error(attempt: token, error: mapFailure(failure, url: currentRequest?.url ?? "", live: live, played: played)))
   }
 
   private func setShutter(covered: Bool) {

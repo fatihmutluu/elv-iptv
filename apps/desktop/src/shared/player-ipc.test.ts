@@ -41,7 +41,16 @@ describe('isPlayerCommandMessage', () => {
       { name: 'load', cmd: load },
       {
         name: 'load',
-        cmd: { ...load, kind: 'vod', startMs: 1500, options: { softwareAudio: true } },
+        cmd: {
+          ...load,
+          kind: 'vod',
+          startMs: 1500,
+          options: { softwareAudio: true, audioTrackId: 'a:2', subtitleTrackId: null },
+        },
+      },
+      {
+        name: 'load',
+        cmd: { ...load, options: { subtitleTrackId: 's:1' } },
       },
       { name: 'retry', attempt: 4 },
       { name: 'play', attempt: 4 },
@@ -49,6 +58,9 @@ describe('isPlayerCommandMessage', () => {
       { name: 'stop', attempt: 4 },
       { name: 'recreate', attempt: 4 },
       { name: 'seek', attempt: 4, positionMs: 12000 },
+      { name: 'selectAudioTrack', attempt: 4, id: 'a:2' },
+      { name: 'selectSubtitleTrack', attempt: 4, id: 's:1' },
+      { name: 'selectSubtitleTrack', attempt: 4, id: null },
       { name: 'release' },
       { name: 'fullscreen' },
     ];
@@ -133,6 +145,13 @@ describe('isPlayerCommandMessage', () => {
       msg({ name: 'load', cmd: { ...load, startMs: -1 } }),
       msg({ name: 'load', cmd: { ...load, startMs: 'x' } }),
       msg({ name: 'load', cmd: { ...load, options: { softwareAudio: 'yes' } } }),
+      msg({ name: 'load', cmd: { ...load, options: { audioTrackId: '' } } }),
+      msg({ name: 'load', cmd: { ...load, options: { audioTrackId: 'a:1\n' } } }),
+      msg({ name: 'load', cmd: { ...load, options: { subtitleTrackId: 2 } } }),
+      msg({ name: 'selectAudioTrack', attempt: 1, id: null }),
+      msg({ name: 'selectAudioTrack', attempt: 1, id: '' }),
+      msg({ name: 'selectSubtitleTrack', attempt: 1, id: '' }),
+      msg({ name: 'selectSubtitleTrack', attempt: 1, id: 's:1\r' }),
       msg({ name: 'load', cmd: { ...load, options: null } }),
     ];
     for (const m of bad) expect(isPlayerCommandMessage(m)).toBe(false);

@@ -14,7 +14,38 @@ export interface StreamRequest {
 export interface LoadOptions {
   /** Decode audio in software; recovery rung 4 asks for it after a `decoder` error when the engine can. */
   softwareAudio?: boolean;
+  /** Preferred audio track ID to select once media tracks are available. */
+  audioTrackId?: string;
+  /** Preferred subtitle track ID to select, or `null` to disable subtitles explicitly. */
+  subtitleTrackId?: string | null;
 }
+
+/** One selectable audio or embedded subtitle track reported by the engine. */
+export interface TrackInfo {
+  id: string;
+  language?: string;
+  label?: string;
+  codec?: string;
+  channels?: number;
+  forced?: boolean;
+  isDefault?: boolean;
+}
+
+/** Available audio and subtitle tracks for the open media, plus active selections (`null` = none / Off). */
+export interface MediaTracks {
+  readonly audio: readonly TrackInfo[];
+  readonly subtitles: readonly TrackInfo[];
+  readonly selectedAudioId: string | null;
+  readonly selectedSubtitleId: string | null;
+}
+
+/** Canonical empty track snapshot before tracks arrive or after `tune`/`stop`. */
+export const EMPTY_TRACKS: MediaTracks = Object.freeze({
+  audio: Object.freeze([] as readonly TrackInfo[]),
+  subtitles: Object.freeze([] as readonly TrackInfo[]),
+  selectedAudioId: null,
+  selectedSubtitleId: null,
+});
 
 /** Starts a new media, replacing the current one. */
 export interface LoadCommand extends StreamRequest {
@@ -65,6 +96,7 @@ export type EngineEvent = { attempt: AttemptToken } & (
   | { type: 'state'; state: EngineState }
   | { type: 'firstFrame'; atMs: number }
   | { type: 'clock'; anchor: ClockAnchor }
+  | { type: 'tracks'; tracks: MediaTracks }
   | { type: 'stall'; phase: 'start' | 'end'; atMs: number }
   | { type: 'error'; error: EngineError }
   | { type: 'surface'; change: 'created' | 'destroyed' }
@@ -99,6 +131,8 @@ export interface PlayerEngine {
   play(attempt: AttemptToken): void;
   pause(attempt: AttemptToken): void;
   seek(attempt: AttemptToken, positionMs: number): void;
+  selectAudioTrack?(attempt: AttemptToken, id: string): void;
+  selectSubtitleTrack?(attempt: AttemptToken, id: string | null): void;
   stop(attempt: AttemptToken): void;
   /**
    * Releases and rebuilds the native player instance, keeping the view and the surface. The new

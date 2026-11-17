@@ -25,6 +25,10 @@ final class EngineMainDriver: EngineSink {
     self.backend.onObservation = { [weak self] observation, serial in
       self?.core.observe(observation, serial: serial)
     }
+    self.backend.onSubtitlePresentation = { [weak self] presentation in
+      guard let self else { return }
+      self.boundSurface?.applySubtitles(presentation, from: self.owner)
+    }
   }
 
   func send(_ event: EngineEventOut) {
@@ -33,6 +37,10 @@ final class EngineMainDriver: EngineSink {
 
   func setShutter(covered: Bool) {
     boundSurface?.applyShutter(covered: covered, from: owner)
+  }
+
+  func clearSubtitles() {
+    boundSurface?.applySubtitles(.empty, from: owner)
   }
 
   func setKeepScreenOn(_ on: Bool) {
@@ -54,12 +62,14 @@ final class EngineMainDriver: EngineSink {
     backend.bindPlayerView(view.playerView)
     let snapshot = core.viewSnapshot
     view.applyShutter(covered: snapshot.shutterCovered, from: owner)
+    view.applySubtitles(backend.lastSubtitlePresentation, from: owner)
     view.applyScreenOn(snapshot.screenOn, from: owner)
     core.surfaceChanged(available: view.isSurfaceAvailable)
   }
 
   func unbindSurface(_ view: AetherSurfaceView) {
     guard boundSurface === view else { return }
+    view.applySubtitles(.empty, from: owner)
     core.surfaceChanged(available: false)
     boundSurface = nil
     backend.bindPlayerView(nil)
@@ -161,6 +171,22 @@ final class EngineObject: SharedObject {
     }
   }
 
+  func selectAudioTrack(_ attempt: Int, id: String) {
+    guard let epoch = adoptTokenInCurrentEpoch(attempt) else { return }
+    enqueueMain { [weak self] in
+      guard let self, let driver = self.ensureDriver(), self.currentEpoch() == epoch else { return }
+      driver.core.selectAudioTrack(attempt, id: id)
+    }
+  }
+
+  func selectSubtitleTrack(_ attempt: Int, id: String?) {
+    guard let epoch = adoptTokenInCurrentEpoch(attempt) else { return }
+    enqueueMain { [weak self] in
+      guard let self, let driver = self.ensureDriver(), self.currentEpoch() == epoch else { return }
+      driver.core.selectSubtitleTrack(attempt, id: id)
+    }
+  }
+
   func stop(_ attempt: Int) {
     guard let epoch = advanceMediaEpoch(adoptingToken: attempt) else { return }
     enqueueMain { [weak self] in
@@ -218,6 +244,7 @@ final class EngineObject: SharedObject {
       let .firstFrame(attempt, _),
       let .clock(attempt, _),
       let .stall(attempt, _, _),
+      let .tracks(attempt, _),
       let .error(attempt, _):
       guard driverEpoch == snapshot.epoch, attempt == snapshot.token else { return }
       emit(event: "onEngineEvent", payload: event.payload)

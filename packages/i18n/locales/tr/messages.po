@@ -438,6 +438,81 @@ msgstr "Önceki"
 msgid "player.nextChannel"
 msgstr "Sonraki"
 
+msgid "player.play"
+msgstr "Oynat"
+
+msgid "player.pause"
+msgstr "Duraklat"
+
+msgid "player.seekBack"
+msgstr "-10 sn"
+
+msgid "player.seekForward"
+msgstr "+10 sn"
+
+msgid "player.tracks"
+msgstr "Ses ve Altyazı"
+
+msgid "player.audioTracks"
+msgstr "Ses"
+
+msgid "player.subtitleTracks"
+msgstr "Altyazı"
+
+msgid "player.subtitlesOff"
+msgstr "Kapalı"
+
+msgid "player.closeTracks"
+msgstr "Kapat"
+
+msgid "player.progressLabel"
+msgstr "Oynatma ilerlemesi"
+
+msgid "player.trackNumber"
+msgstr "Parça {number}"
+
+msgid "player.trackForced"
+msgstr "Zorunlu"
+
+msgid "player.lang.tr"
+msgstr "Türkçe"
+
+msgid "player.lang.en"
+msgstr "İngilizce"
+
+msgid "player.lang.de"
+msgstr "Almanca"
+
+msgid "player.lang.fr"
+msgstr "Fransızca"
+
+msgid "player.lang.es"
+msgstr "İspanyolca"
+
+msgid "player.lang.it"
+msgstr "İtalyanca"
+
+msgid "player.lang.ru"
+msgstr "Rusça"
+
+msgid "player.lang.ar"
+msgstr "Arapça"
+
+msgid "player.lang.pt"
+msgstr "Portekizce"
+
+msgid "player.lang.nl"
+msgstr "Felemenkçe"
+
+msgid "player.lang.ja"
+msgstr "Japonca"
+
+msgid "player.lang.ko"
+msgstr "Korece"
+
+msgid "player.lang.zh"
+msgstr "Çince"
+
 msgid "player.unavailable"
 msgstr "Bu platformda video oynatma kullanılamıyor."
 

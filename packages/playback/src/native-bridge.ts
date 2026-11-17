@@ -16,6 +16,8 @@ export interface NativeLoadCommand {
   kind: MediaKind;
   startMs?: number;
   softwareAudio?: boolean;
+  audioTrackId?: string;
+  subtitleTrackId?: string | null;
 }
 
 /** Handle to a native engine shared object (`ElvEngineMedia3.Engine` or `ElvEngineAether.Engine`). */
@@ -25,6 +27,8 @@ export interface NativeEngineHandle {
   play(attempt: AttemptToken): void;
   pause(attempt: AttemptToken): void;
   seek(attempt: AttemptToken, positionMs: number): void;
+  selectAudioTrack?(attempt: AttemptToken, id: string): void;
+  selectSubtitleTrack?(attempt: AttemptToken, id: string | null): void;
   stop(attempt: AttemptToken): void;
   recreate(attempt: AttemptToken): void;
   release(): void;
@@ -43,6 +47,8 @@ function toNativeLoad(cmd: LoadCommand): NativeLoadCommand {
     kind,
     ...(startMs === undefined ? {} : { startMs }),
     ...(options?.softwareAudio === undefined ? {} : { softwareAudio: options.softwareAudio }),
+    ...(options?.audioTrackId === undefined ? {} : { audioTrackId: options.audioTrackId }),
+    ...(options?.subtitleTrackId === undefined ? {} : { subtitleTrackId: options.subtitleTrackId }),
   };
 }
 
@@ -87,6 +93,20 @@ export function bridgeNativeEngine(
     play: command((attempt: AttemptToken) => native.play(attempt)),
     pause: command((attempt: AttemptToken) => native.pause(attempt)),
     seek: command((attempt: AttemptToken, positionMs: number) => native.seek(attempt, positionMs)),
+    ...(native.selectAudioTrack === undefined
+      ? {}
+      : {
+          selectAudioTrack: command((attempt: AttemptToken, id: string) =>
+            native.selectAudioTrack?.(attempt, id),
+          ),
+        }),
+    ...(native.selectSubtitleTrack === undefined
+      ? {}
+      : {
+          selectSubtitleTrack: command((attempt: AttemptToken, id: string | null) =>
+            native.selectSubtitleTrack?.(attempt, id),
+          ),
+        }),
     stop: command((attempt: AttemptToken) => native.stop(attempt)),
     recreate: command((attempt: AttemptToken) => native.recreate(attempt)),
     release() {

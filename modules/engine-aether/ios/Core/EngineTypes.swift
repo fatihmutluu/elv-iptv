@@ -7,19 +7,25 @@ public struct LoadRequest: Equatable, Sendable {
   public var live: Bool
   public var startMs: Double?
   public var softwareAudio: Bool
+  public var audioTrackId: String?
+  public var subtitlePreference: SubtitlePreference
 
   public init(
     url: String,
     headers: [String: String] = [:],
     live: Bool = true,
     startMs: Double? = nil,
-    softwareAudio: Bool = false
+    softwareAudio: Bool = false,
+    audioTrackId: String? = nil,
+    subtitlePreference: SubtitlePreference = .default
   ) {
     self.url = url
     self.headers = headers
     self.live = live
     self.startMs = startMs
     self.softwareAudio = softwareAudio
+    self.audioTrackId = audioTrackId
+    self.subtitlePreference = subtitlePreference
   }
 }
 
@@ -40,6 +46,11 @@ public struct EngineLoadOptions: Equatable, Sendable {
   public var liveStartupSingleSegmentMinimumSeconds: Double?
   public var probesize: Int?
   public var maxAnalyzeDurationMicros: Int?
+  public var audioStreamIndex: Int32?
+  public var preferredAudioLanguages: [String]
+  public var initialSubtitleTrackId: Int?
+  public var preferredSubtitleLanguages: [String]
+  public var subtitlesDisabled: Bool
 
   public init(
     isLive: Bool,
@@ -49,7 +60,12 @@ public struct EngineLoadOptions: Equatable, Sendable {
     liveStartupGraceSeconds: Double? = nil,
     liveStartupSingleSegmentMinimumSeconds: Double? = nil,
     probesize: Int? = nil,
-    maxAnalyzeDurationMicros: Int? = nil
+    maxAnalyzeDurationMicros: Int? = nil,
+    audioStreamIndex: Int32? = nil,
+    preferredAudioLanguages: [String] = [],
+    initialSubtitleTrackId: Int? = nil,
+    preferredSubtitleLanguages: [String] = [],
+    subtitlesDisabled: Bool = false
   ) {
     self.isLive = isLive
     self.httpHeaders = httpHeaders
@@ -59,6 +75,11 @@ public struct EngineLoadOptions: Equatable, Sendable {
     self.liveStartupSingleSegmentMinimumSeconds = liveStartupSingleSegmentMinimumSeconds
     self.probesize = probesize
     self.maxAnalyzeDurationMicros = maxAnalyzeDurationMicros
+    self.audioStreamIndex = audioStreamIndex
+    self.preferredAudioLanguages = preferredAudioLanguages
+    self.initialSubtitleTrackId = initialSubtitleTrackId
+    self.preferredSubtitleLanguages = preferredSubtitleLanguages
+    self.subtitlesDisabled = subtitlesDisabled
   }
 }
 
@@ -117,6 +138,7 @@ public enum BackendObservation: Equatable, Sendable {
   case firstFrame
   case audioOnly
   case clock(positionSeconds: Double, rate: Double, durationSeconds: Double?, liveEdgeSeconds: Double?)
+  case tracks(MediaTracksOut)
   case readerFault(ReaderFailure)
   case failure(BackendFailure)
 }
@@ -172,6 +194,7 @@ public enum EngineEventOut: Equatable, Sendable {
   case firstFrame(attempt: Int, atMs: Double)
   case clock(attempt: Int, anchor: ClockAnchorOut)
   case stall(attempt: Int, phase: StallPhaseOut, atMs: Double)
+  case tracks(attempt: Int, tracks: MediaTracksOut)
   case error(attempt: Int, error: MappedError)
   case surface(attempt: Int, change: SurfaceChangeOut)
 
@@ -197,6 +220,8 @@ public enum EngineEventOut: Equatable, Sendable {
       return ["attempt": attempt, "type": "clock", "anchor": anchorDict]
     case let .stall(attempt, phase, atMs):
       return ["attempt": attempt, "type": "stall", "phase": phase.rawValue, "atMs": atMs]
+    case let .tracks(attempt, tracks):
+      return ["attempt": attempt, "type": "tracks", "tracks": tracks.toDictionary()]
     case let .error(attempt, error):
       var errorDict: [String: Any] = [
         "code": error.code,
@@ -220,14 +245,17 @@ public protocol PlayerBackend: AnyObject {
   func play()
   func pause()
   func seek(toSeconds: Double)
+  func selectAudioTrack(_ streamId: Int)
+  func selectSubtitleTrack(_ streamId: Int?)
   func rebuild() throws
   func dispose()
 }
 
-/// Output seam receiving events, zap-shutter updates, and idle-timer requests from `EngineCore`.
+/// Output seam receiving events, zap-shutter updates, subtitle clears, and idle-timer requests from `EngineCore`.
 @MainActor
 public protocol EngineSink: AnyObject {
   func send(_ event: EngineEventOut)
   func setShutter(covered: Bool)
   func setKeepScreenOn(_ on: Bool)
+  func clearSubtitles()
 }
