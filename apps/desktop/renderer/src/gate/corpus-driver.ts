@@ -6,6 +6,7 @@ import {
   type PlaybackService,
   type PlaybackState,
   type PlayerEngine,
+  type TrackInfo,
 } from '@elv/playback';
 
 const DEFAULT_ITEM_TIMEOUT_MS = 15_000;
@@ -57,23 +58,6 @@ export interface CorpusRun {
   readonly service: PlaybackService;
   start(): Promise<DesktopCorpusReport>;
   dispose(): void;
-}
-
-interface TrackEntry {
-  readonly id: string;
-  readonly language?: string;
-}
-
-interface TrackAwareState extends PlaybackState {
-  readonly tracks?: {
-    readonly audio: readonly TrackEntry[];
-    readonly subtitles: readonly TrackEntry[];
-  };
-}
-
-interface TrackAwareService extends PlaybackService {
-  selectAudioTrack?(id: string): void;
-  selectSubtitleTrack?(id: string | null): void;
 }
 
 const LIVE_ENTRIES: readonly (readonly [number, string, string | null, boolean])[] = [
@@ -190,7 +174,7 @@ export function corpusLine(report: DesktopCorpusReport): string {
   return `ELV_GATE_CORPUS ${JSON.stringify(report)}`;
 }
 
-function pickTrack(tracks: readonly TrackEntry[], lang: string): TrackEntry | undefined {
+function pickTrack(tracks: readonly TrackInfo[], lang: string): TrackInfo | undefined {
   const target = lang.toLowerCase();
   return tracks.find((t) => t.language?.toLowerCase().startsWith(target)) ?? tracks[0];
 }
@@ -248,7 +232,7 @@ export function createCorpusRun(deps: CorpusRunDeps): CorpusRun {
       limitBackoffMs: [],
       limitTotalMs: 0,
     },
-  }) as TrackAwareService;
+  });
 
   const offStale = service.subscribe((s) => {
     if (s.attempt < highestAttempt) staleEventsApplied += 1;
@@ -284,14 +268,14 @@ export function createCorpusRun(deps: CorpusRunDeps): CorpusRun {
     });
 
   const applyItemChecks = async (item: DesktopCorpusItem): Promise<string | undefined> => {
-    const state = service.getState() as TrackAwareState;
+    const state = service.getState();
     if (item.selectAudioLang !== undefined && engine.capabilities.audioTrackSelection) {
-      const picked = pickTrack(state.tracks?.audio ?? [], item.selectAudioLang);
-      if (picked !== undefined) service.selectAudioTrack?.(picked.id);
+      const picked = pickTrack(state.tracks.audio, item.selectAudioLang);
+      if (picked !== undefined) service.selectAudioTrack(picked.id);
     }
     if (item.selectSubtitleLang !== undefined && engine.capabilities.subtitleTrackSelection) {
-      const picked = pickTrack(state.tracks?.subtitles ?? [], item.selectSubtitleLang);
-      if (picked !== undefined) service.selectSubtitleTrack?.(picked.id);
+      const picked = pickTrack(state.tracks.subtitles, item.selectSubtitleLang);
+      if (picked !== undefined) service.selectSubtitleTrack(picked.id);
     }
     if (item.seekMs !== undefined) {
       const targetMs = item.seekMs;

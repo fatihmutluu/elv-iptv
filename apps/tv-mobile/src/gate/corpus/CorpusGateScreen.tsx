@@ -5,6 +5,7 @@ import {
   type PlaybackService,
   type PlaybackState,
   type PlayerEngine,
+  type TrackInfo,
 } from '@elv/playback';
 import { type ReactElement, useEffect, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
@@ -21,23 +22,6 @@ import {
 const DEFAULT_ITEM_TIMEOUT_MS = 15_000;
 const DEFAULT_HOLD_MS = 150;
 const SEEK_TOLERANCE_MS = 5_000;
-
-interface TrackEntry {
-  readonly id: string;
-  readonly language?: string;
-}
-
-interface TrackAwareState extends PlaybackState {
-  readonly tracks?: {
-    readonly audio: readonly TrackEntry[];
-    readonly subtitles: readonly TrackEntry[];
-  };
-}
-
-interface TrackAwareService extends PlaybackService {
-  selectAudioTrack?(id: string): void;
-  selectSubtitleTrack?(id: string | null): void;
-}
 
 /** Props of {@link CorpusGateScreen}. */
 export interface CorpusGateScreenProps {
@@ -56,7 +40,7 @@ function printCorpus(line: string): void {
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-function pickTrack(tracks: readonly TrackEntry[], lang: string): TrackEntry | undefined {
+function pickTrack(tracks: readonly TrackInfo[], lang: string): TrackInfo | undefined {
   const target = lang.toLowerCase();
   return tracks.find((t) => t.language?.toLowerCase().startsWith(target)) ?? tracks[0];
 }
@@ -84,7 +68,7 @@ export function CorpusGateScreen({
   useEffect(() => {
     let cancelled = false;
     let rawEngine: PlayerEngine | null = null;
-    let service: TrackAwareService | undefined;
+    let service: PlaybackService | undefined;
 
     const runSweep = async (): Promise<void> => {
       rawEngine = createEngine();
@@ -138,7 +122,7 @@ export function CorpusGateScreen({
           limitBackoffMs: [],
           limitTotalMs: 0,
         },
-      }) as TrackAwareService;
+      });
 
       const offStale = service.subscribe((s) => {
         if (s.attempt < highestAttempt) staleEventsApplied += 1;
@@ -169,14 +153,14 @@ export function CorpusGateScreen({
 
       const applyItemChecks = async (item: CorpusItem): Promise<string | undefined> => {
         if (service === undefined) return 'disposed';
-        const state = service.getState() as TrackAwareState;
+        const state = service.getState();
         if (item.selectAudioLang !== undefined && engine.capabilities.audioTrackSelection) {
-          const picked = pickTrack(state.tracks?.audio ?? [], item.selectAudioLang);
-          if (picked !== undefined) service.selectAudioTrack?.(picked.id);
+          const picked = pickTrack(state.tracks.audio, item.selectAudioLang);
+          if (picked !== undefined) service.selectAudioTrack(picked.id);
         }
         if (item.selectSubtitleLang !== undefined && engine.capabilities.subtitleTrackSelection) {
-          const picked = pickTrack(state.tracks?.subtitles ?? [], item.selectSubtitleLang);
-          if (picked !== undefined) service.selectSubtitleTrack?.(picked.id);
+          const picked = pickTrack(state.tracks.subtitles, item.selectSubtitleLang);
+          if (picked !== undefined) service.selectSubtitleTrack(picked.id);
         }
         if (item.seekMs !== undefined) {
           const targetMs = item.seekMs;
