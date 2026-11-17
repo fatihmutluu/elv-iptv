@@ -23,7 +23,7 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
 - Source (`SourceType.kt`): `.m3u8`/`.m3u` HLS; `.ts` and extensionless live: TS extractor only (non-IDR keyframes,
   access units); else sniffed. A playlist answer is prepared once as HLS (same URL, same generation).
 - States: `opening` on prepare, `buffering`, `ready`, `playing`, `paused` (not wanted), `ended`; a live media that
-  ends sends `error network`. `stall`: buffering while wanted after it played. `clock` anchors when the effective rate
+  ends or a VOD that ends before it played sends `error network`. `stall`: buffering while wanted after it played. `clock` anchors when the effective rate
   (speed while playing, else 0) changes, on seeks and once a second while playing; `durationMs` (VOD), `liveEdgeMs`
   (live, window end) when known. `FfmpegAudio` configures LGPL-2.1+ FFmpeg 9.0.2 + `FfmpegAudioRenderer` (`ON` default,
   `PREFER` + software audio first when `options.softwareAudio`, #69; notices in `assets/licenses/ffmpeg-media3/`).
@@ -36,7 +36,8 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
 - HTTP: `media3-datasource-okhttp`, one client per engine (dispatcher: 64 calls, 16/host; shared pool), connect 3.5 s,
   read 10 s, redirects, `LoadCommand.headers` (`Authorization`/`Cookie`/`Proxy-Authorization` stripped off-origin or on
   `https->http`), else `http.agent` (OkHttp 4.9.2 `compileOnly`). Responses read ahead 1 KB (`classifyResponse`; keys
-  and `Content-Range` slices at `position > 0` skipped; RFC 3629 UTF-8; WebVTT/TTML/XML/SRT segments allowed).
+  and `Content-Range` slices at `position > 0` skipped; RFC 3629 UTF-8; 3 TS sync bytes; empty first progressive or
+  manifest responses fail at once; WebVTT/TTML/XML/SRT segments allowed).
 - `failsAtOnce`: an HTTP status skips Media3's retries on progressive media and before the first HLS manifest; then
   HLS segments and refreshes retry except 401/403/429/509. Notices and refused requests always fail at once.
 - `mapError`: 401/403/404/429/509 keep `http-<code>`, other statuses `http-other`, a notice `connection-limit`, invalid

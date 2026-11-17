@@ -59,8 +59,7 @@ private class ServiceOwnedRetryPolicy(
 ) : DefaultLoadErrorHandlingPolicy() {
   override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
     val error = loadErrorInfo.exception
-    val refused = error is ProviderNoticeException || error is HlsDetectedException ||
-      error is SupersededMediaException || error is HttpDataSource.InvalidContentTypeException
+    val refused = isRefusedLoad(error)
     val status = (error as? HttpDataSource.InvalidResponseCodeException)?.responseCode
     return if (failsAtOnce(status, refused, hls, manifestLoaded.get())) {
       C.TIME_UNSET

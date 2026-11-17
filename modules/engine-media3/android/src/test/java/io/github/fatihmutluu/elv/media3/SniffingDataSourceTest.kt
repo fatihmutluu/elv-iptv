@@ -7,10 +7,12 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
+import java.io.EOFException
 import java.io.IOException
 import kotlin.math.min
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -119,5 +121,74 @@ class SniffingDataSourceTest {
     } catch (_: IOException) {
     }
     assertTrue("upstream must be closed when readAhead throws", failingUpstream.closed)
+  }
+
+  private fun tsBody(packets: Int): ByteArray =
+    ByteArray(188 * packets).also { body ->
+      for (packet in 0 until packets) {
+        body[packet * 188] = 0x47
+        body[packet * 188 + 1] = 0x40
+      }
+    }
+
+  private fun readAll(source: DataSource, size: Int): ByteArray {
+    val out = ByteArray(size)
+    var total = 0
+    while (total < size) {
+      val n = source.read(out, total, size - total)
+      if (n == C.RESULT_END_OF_INPUT) break
+      total += n
+    }
+    assertEquals(C.RESULT_END_OF_INPUT, source.read(ByteArray(1), 0, 1))
+    return out.copyOf(total)
+  }
+
+  @Test
+  fun `MPEG-TS labelled as a playlist is sniffed and served whole`() {
+    val body = tsBody(20)
+    for (label in listOf("application/vnd.apple.mpegurl", "application/x-mpegurl")) {
+      val upstream = FakeUpstream(body, mapOf("Content-Type" to listOf(label)))
+      val sniffing = SniffingDataSource(upstream, RequestKind.PROGRESSIVE)
+      assertEquals(body.size.toLong(), sniffing.open(DataSpec(Uri.parse("http://127.0.0.1:7878/live/demo/demo/1014.ts"))))
+      assertArrayEquals(body, readAll(sniffing, body.size))
+      sniffing.close()
+    }
+  }
+
+  @Test
+  fun `an empty initial response fails as a notice or as empty media`() {
+    val spec = DataSpec(Uri.parse("http://127.0.0.1:7878/movie/demo/demo/1.mp4"))
+    for (kind in listOf(RequestKind.PROGRESSIVE, RequestKind.MANIFEST)) {
+      val notice = FakeUpstream(ByteArray(0), mapOf("Content-Type" to listOf("text/plain")))
+      try {
+        SniffingDataSource(notice, kind).open(spec)
+        fail("expected ProviderNoticeException for $kind")
+      } catch (_: ProviderNoticeException) {
+      }
+      assertTrue(notice.closed)
+      for (label in listOf("video/mp4", null)) {
+        val headers = if (label == null) emptyMap() else mapOf("Content-Type" to listOf(label))
+        val empty = FakeUpstream(ByteArray(0), headers)
+        try {
+          SniffingDataSource(empty, kind).open(spec)
+          fail("expected EmptyMediaException for $kind $label")
+        } catch (error: EmptyMediaException) {
+          assertTrue(error is EOFException)
+          assertEquals("empty media response", error.message)
+          assertTrue(isRefusedLoad(error))
+        }
+        assertTrue(empty.closed)
+      }
+    }
+  }
+
+  @Test
+  fun `an empty byte-range slice and an empty segment are passed on`() {
+    val slice = FakeUpstream(ByteArray(0), mapOf("Content-Range" to listOf("bytes */2000000")))
+    val spec = DataSpec.Builder().setUri(Uri.parse("http://127.0.0.1:7878/movie/demo/demo/1.mp4")).setPosition(2_000_000L).build()
+    assertEquals(0L, SniffingDataSource(slice, RequestKind.PROGRESSIVE).open(spec))
+    val segment = FakeUpstream(ByteArray(0), mapOf("Content-Type" to listOf("video/mp2t")))
+    assertEquals(0L, SniffingDataSource(segment, RequestKind.SEGMENT).open(DataSpec(Uri.parse("http://127.0.0.1:7878/hls/1.ts"))))
+    assertFalse(isRefusedLoad(IOException("reset")))
   }
 }

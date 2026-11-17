@@ -6,7 +6,9 @@ import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.TransferListener
+import java.io.EOFException
 import java.io.IOException
 import kotlin.math.min
 
@@ -16,11 +18,23 @@ internal class ProviderNoticeException(val contentType: String?) : IOException("
 /** A progressive guess was answered with an HLS playlist; the engine prepares the request again as HLS. */
 internal class HlsDetectedException : IOException("HLS playlist on a progressive guess")
 
+/** A first response of a stream or playlist had an empty body: nothing will ever play from it. */
+internal class EmptyMediaException : EOFException("empty media response")
+
+/** True for load failures that must reach the playback service at once instead of Media3's retries. */
+internal fun isRefusedLoad(error: Throwable): Boolean =
+  error is ProviderNoticeException ||
+    error is EmptyMediaException ||
+    error is HlsDetectedException ||
+    error is SupersededMediaException ||
+    error is HttpDataSource.InvalidContentTypeException
+
 /**
  * Judges every response of [kind] with [classifyResponse] before the player sees it, whatever its label: it reads up
  * to [SNIFF_BYTES] ahead and serves them first, so the player gets the full body. [RequestKind.OTHER] requests (keys)
  * are passed through unread. A notice throws [ProviderNoticeException]; a playlist on a progressive guess throws
- * [HlsDetectedException].
+ * [HlsDetectedException]; an empty first progressive or manifest response throws [ProviderNoticeException] or
+ * [EmptyMediaException].
  */
 @OptIn(UnstableApi::class)
 internal class SniffingDataSource(private val upstream: DataSource, private val kind: RequestKind) : DataSource {
@@ -40,8 +54,11 @@ internal class SniffingDataSource(private val upstream: DataSource, private val 
       if (kind == RequestKind.OTHER) return length
       if (dataSpec.position > 0L && hasContentRange(upstream.responseHeaders)) return length
       val contentType = contentTypeOf(upstream.responseHeaders)
-      val labelledPlaylist = kind == RequestKind.PROGRESSIVE && isHlsContentType(contentType)
-      val filled = if (labelledPlaylist) 0 else readAhead(length)
+      val filled = readAhead(length)
+      if (filled == 0 && (kind == RequestKind.PROGRESSIVE || kind == RequestKind.MANIFEST)) {
+        if (isNoticeContentType(contentType, hls = false)) throw ProviderNoticeException(contentType)
+        throw EmptyMediaException()
+      }
       when (classifyResponse(kind, contentType, prefix, filled)) {
         ResponseKind.HLS -> if (kind == RequestKind.PROGRESSIVE) throw HlsDetectedException()
         ResponseKind.NOTICE -> throw ProviderNoticeException(contentType)
