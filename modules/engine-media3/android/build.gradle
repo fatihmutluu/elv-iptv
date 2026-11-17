@@ -8,6 +8,12 @@ version = '0.0.0'
 
 def ffmpegVendorDir = file('../vendor/ffmpeg-media3')
 
+configurations {
+  robolectricSdk {
+    transitive = false
+  }
+}
+
 android {
   namespace 'io.github.fatihmutluu.elv.media3'
   defaultConfig {
@@ -15,6 +21,21 @@ android {
     versionName '0.0.0'
     testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     consumerProguardFiles 'consumer-rules.pro', new File(ffmpegVendorDir, 'proguard-rules.txt')
+  }
+  testOptions {
+    unitTests.all { testTask ->
+      testTask.doFirst {
+        testTask.systemProperty 'robolectric.offline', 'true'
+        testTask.systemProperty 'robolectric.dependency.dir', configurations.robolectricSdk.singleFile.parentFile.absolutePath
+      }
+      testTask.testLogging {
+        events 'failed'
+        exceptionFormat 'full'
+        showExceptions = true
+        showCauses = true
+        showStackTraces = true
+      }
+    }
   }
   sourceSets {
     main {
@@ -59,6 +80,7 @@ dependencies {
   testImplementation okhttp
   testImplementation 'junit:junit:4.13.2'
   testImplementation 'org.robolectric:robolectric:4.17'
+  robolectricSdk 'org.robolectric:android-all-instrumented:6.0.1_r3-robolectric-r1-i7'
   androidTestImplementation 'junit:junit:4.13.2'
   androidTestImplementation 'androidx.test:core:1.6.1'
   androidTestImplementation 'androidx.test:runner:1.6.2'
