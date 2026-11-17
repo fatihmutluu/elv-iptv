@@ -294,14 +294,16 @@ public final class EngineCore {
       stalled = false
       active = false
       setScreenOn(false)
-      if currentRequest?.live ?? true {
+      let isLive = currentRequest?.live ?? true
+      if isLive || (!played && !framed) {
         if let rf = latchedReaderFailure {
           reportFailure(.reader(rf))
           return
         }
         errorReported = true
+        let kind = isLive ? "liveEnded" : "vodEndedBeforePlay"
         let redacted = redactUrl(currentRequest?.url ?? "")
-        let detail = redacted.isEmpty ? "liveEnded" : "liveEnded \(redacted)"
+        let detail = redacted.isEmpty ? kind : "\(kind) \(redacted)"
         emit(.error(attempt: token, error: MappedError(code: "network", detail: detail)))
       } else {
         emit(.state(attempt: token, state: .ended))
@@ -330,9 +332,7 @@ public final class EngineCore {
     durationSeconds: Double?,
     liveEdgeSeconds: Double?
   ) {
-    if positionSeconds.isFinite {
-      lastPositionSeconds = max(0, positionSeconds)
-    }
+    if positionSeconds.isFinite { lastPositionSeconds = max(0, positionSeconds) }
     if let durationSeconds, durationSeconds.isFinite, durationSeconds > 0 {
       lastDurationSeconds = durationSeconds
     }

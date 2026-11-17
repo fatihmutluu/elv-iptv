@@ -243,6 +243,23 @@ describe('deriver', () => {
     expect(states(s.d.fileEvent({ event: 'end-file', reason: 'eof' }))).toEqual(['ended']);
   });
 
+  it('vod eof before playback restarted is an error, never ended', () => {
+    const s = setup('vod');
+    s.d.fileEvent({ event: 'file-loaded' });
+    expect(s.d.fileEvent({ event: 'end-file', reason: 'eof' })).toEqual([
+      { attempt: 7, type: 'error', error: { code: 'network', detail: 'empty-vod-eof' } },
+    ]);
+    const t = setup('vod');
+    t.d.log({ prefix: 'ffmpeg', level: 'v', text: "Mime-type: 'text/plain'" });
+    expect(t.d.fileEvent({ event: 'end-file', reason: 'eof' })).toEqual([
+      {
+        attempt: 7,
+        type: 'error',
+        error: { code: 'connection-limit', detail: "Mime-type: 'text/plain'" },
+      },
+    ]);
+  });
+
   it('a stopped media emits nothing more', () => {
     const s = setup();
     play(s);

@@ -60,6 +60,22 @@ describe('classifyEnd rules', () => {
 
   it('eof on vod is ended', () => {
     expect(classifyEnd({ reason: 'eof', logs: [], mediaKind: 'vod' })).toEqual({ kind: 'ended' });
+    expect(classifyEnd({ reason: 'eof', logs: [], mediaKind: 'vod', played: true })).toEqual({
+      kind: 'ended',
+    });
+  });
+  it('eof on a vod that never played is an error', () => {
+    expect(err(classifyEnd({ reason: 'eof', logs: [], mediaKind: 'vod', played: false }))).toEqual({
+      code: 'network',
+      detail: 'empty-vod-eof',
+    });
+    const notice = line("Mime-type: 'text/plain'");
+    expect(
+      err(classifyEnd({ reason: 'eof', logs: [notice], mediaKind: 'vod', played: false })),
+    ).toEqual({ code: 'connection-limit', detail: "Mime-type: 'text/plain'" });
+    expect(
+      err(classifyEnd({ reason: 'eof', logs: [], mediaKind: 'live', played: false }))?.detail,
+    ).toBe('live-eof');
   });
   it.each(['stop', 'quit', 'redirect'])('%s is stopped', (reason) => {
     expect(classifyEnd({ reason, logs: [], mediaKind: 'live' })).toEqual({ kind: 'stopped' });

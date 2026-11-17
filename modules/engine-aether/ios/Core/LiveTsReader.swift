@@ -164,7 +164,7 @@ public final class LiveTsReader: @unchecked Sendable {
           phase = .finished
           transportToCancel = activeTransport
           openResult = popOpenLocked(.failed(err))
-        } else if isHlsContentType(contentType) || hasExtM3uSignature(sniffBuffer) {
+        } else if hasExtM3uSignature(sniffBuffer) {
           phase = .finished
           transportToCancel = activeTransport
           sniffBuffer.removeAll(keepingCapacity: false)
@@ -180,12 +180,6 @@ public final class LiveTsReader: @unchecked Sendable {
           phase = .finished
           transportToCancel = activeTransport
           failStream = err
-        } else if isProgressiveNoticeContentType(contentType) {
-          storedFailure = .notice
-          reconnectRejected = true
-          phase = .finished
-          transportToCancel = activeTransport
-          failStream = .notice
         }
       case .idle, .waitingGate, .finished:
         break
@@ -375,10 +369,13 @@ public final class LiveTsReader: @unchecked Sendable {
       sniffBuffer.removeAll(keepingCapacity: false)
       return popOpenLocked(.failed(.notice))
     case let .media(hint):
-      if sniffBuffer.isEmpty, let completedError {
-        storedFailure = completedError
+      if sniffBuffer.isEmpty {
+        let failure: ReaderFailure = isProgressiveNoticeContentType(sniffContentType)
+          ? .notice
+          : (completedError ?? .transport(domain: NSURLErrorDomain, code: NSURLErrorZeroByteResource))
+        storedFailure = failure
         phase = .finished
-        return popOpenLocked(.failed(completedError))
+        return popOpenLocked(.failed(failure))
       }
       phase = .streaming
       return popOpenLocked(.media(formatHint: hint))
