@@ -222,7 +222,8 @@ export function CorpusGateScreen({
 
         const settled = await waitFor(
           (s) =>
-            (s.status.kind === 'playing' && s.firstFrameAt !== undefined) ||
+            (s.status.kind === 'playing' &&
+              (item.audioOnly === true || s.firstFrameAt !== undefined)) ||
             s.status.kind === 'failed' ||
             s.status.kind === 'limited' ||
             s.status.kind === 'ended',
@@ -232,7 +233,7 @@ export function CorpusGateScreen({
         if (
           !settled ||
           stateAfterTune.status.kind !== 'playing' ||
-          stateAfterTune.firstFrameAt === undefined
+          (item.audioOnly !== true && stateAfterTune.firstFrameAt === undefined)
         ) {
           failed.push({
             id: item.id,

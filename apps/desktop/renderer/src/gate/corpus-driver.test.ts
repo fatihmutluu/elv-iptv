@@ -35,8 +35,15 @@ describe('createCorpusRun', () => {
   it('runs the 29-item sweep, fails if empty-200 ends instead of failing, and formats ELV_GATE_CORPUS', async () => {
     const seeks: number[] = [];
     const makeEngine = (emptyEnds: boolean): PlayerEngine => {
+      const noVideoFrame = [
+        { afterMs: 0, emit: 'state' as const, state: 'opening' as const },
+        { afterMs: 1, emit: 'state' as const, state: 'playing' as const },
+        { afterMs: 1, emit: 'clock' as const, positionMs: 100 },
+      ];
       const base = createFakePlayerEngine({
         scripts: {
+          'http://127.0.0.1:7878/live/demo/demo/1006.ts': noVideoFrame,
+          'http://127.0.0.1:7878/movie/demo/demo/200006.mp4': noVideoFrame,
           'http://127.0.0.1:7878/movie/demo/demo/200001.mp4?fault=empty': emptyEnds
             ? [{ afterMs: 2, emit: 'state', state: 'ended' }]
             : [{ afterMs: 2, emit: 'error', error: { code: 'network', detail: 'empty-vod-eof' } }],

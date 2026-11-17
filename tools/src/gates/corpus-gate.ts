@@ -2,12 +2,19 @@ import { release as osRelease } from 'node:os';
 import { corpusCatalog } from '../sim/corpus.ts';
 import { findFfmpeg } from '../sim/media.ts';
 import { androidGateDevice, buildApk, type Exec, POLL_MS } from './adb.ts';
+import {
+  type CorpusLine,
+  type CorpusVerdict,
+  judgeCorpus,
+  parseCorpusLine,
+} from './corpus-judge.ts';
 import { type DesktopGateDeps, systemDesktopDeps } from './desktop-gate.ts';
 import type { GateDevice } from './gate-device.ts';
 import type { SimControl } from './import-gate.ts';
-import { crashFailures } from './player-judge.ts';
 import { connectionStats, httpSimLog, type SimLog } from './sim-log.ts';
 import { appleSimDevice } from './simctl.ts';
+
+export { type CorpusLine, judgeCorpus, parseCorpusLine };
 
 const CORPUS_ACCOUNT = 'corpus';
 const CORPUS_TIMEOUT_MS = 420_000;
@@ -35,28 +42,6 @@ export interface GateCorpusItem {
   selectAudioLang?: string;
   selectSubtitleLang?: string;
   seekMs?: number;
-}
-
-/** One item that failed its expected corpus outcome. */
-interface CorpusFailure {
-  id: string;
-  label: string;
-  reason: string;
-}
-
-/** Parsed payload of `ELV_GATE_CORPUS {json}`. */
-export interface CorpusLine {
-  total: number;
-  passed: number;
-  failed: CorpusFailure[];
-  surfaceCreated: number;
-  staleEventsApplied: number;
-}
-
-/** Verdict of a corpus gate run. */
-export interface CorpusVerdict {
-  ok: boolean;
-  failures: string[];
 }
 
 /** Options of {@link runCorpusGate}. */
@@ -151,114 +136,34 @@ export function buildGateCorpusItems(opts: {
     });
   }
 
-  items.push({
-    id: 'vod-200010-hls',
-    label: 'Two audio tracks and subtitles (VOD HLS WebVTT)',
-    kind: 'vod',
-    url: `${base}/movie/${pair}/200010.m3u8`,
-    expect: 'playing',
-    selectSubtitleLang: 'tur',
-    seekMs: 30_000,
-  });
-
-  items.push({
-    id: 'vod-200001-empty',
-    label: 'Empty 200 VOD response',
-    kind: 'vod',
-    url: `${base}/movie/${pair}/200001.mp4?fault=empty`,
-    expect: 'failed',
-  });
-
+  items.push(
+    {
+      id: 'vod-200010-hls',
+      label: 'Two audio tracks and subtitles (VOD HLS WebVTT)',
+      kind: 'vod',
+      url: `${base}/movie/${pair}/200010.m3u8`,
+      expect: 'playing',
+      selectSubtitleLang: 'tur',
+      seekMs: 30_000,
+    },
+    {
+      id: 'vod-200001-empty',
+      label: 'Empty 200 VOD response',
+      kind: 'vod',
+      url: `${base}/movie/${pair}/200001.mp4?fault=empty`,
+      expect: 'failed',
+    },
+  );
   return items;
-}
-
-function readCorpus(value: unknown): CorpusLine | undefined {
-  if (typeof value !== 'object' || value === null) return undefined;
-  const v = value as Record<string, unknown>;
-  if (typeof v.total !== 'number' || !Number.isInteger(v.total) || v.total < 0) return undefined;
-  if (typeof v.passed !== 'number' || !Number.isInteger(v.passed) || v.passed < 0) return undefined;
-  if (typeof v.surfaceCreated !== 'number' || typeof v.staleEventsApplied !== 'number') {
-    return undefined;
-  }
-  if (!Array.isArray(v.failed)) return undefined;
-  const failed: CorpusFailure[] = [];
-  for (const item of v.failed) {
-    if (typeof item !== 'object' || item === null) return undefined;
-    const entry = item as Record<string, unknown>;
-    if (
-      typeof entry.id !== 'string' ||
-      typeof entry.label !== 'string' ||
-      typeof entry.reason !== 'string'
-    ) {
-      return undefined;
-    }
-    failed.push({ id: entry.id, label: entry.label, reason: entry.reason });
-  }
-  return {
-    total: v.total,
-    passed: v.passed,
-    failed,
-    surfaceCreated: v.surfaceCreated,
-    staleEventsApplied: v.staleEventsApplied,
-  };
-}
-
-/** The last well-formed `ELV_GATE_CORPUS {json}` line in a log dump, or undefined when there is none. */
-export function parseCorpusLine(log: string): CorpusLine | undefined {
-  let found: CorpusLine | undefined;
-  const tag = 'ELV_GATE_CORPUS {';
-  for (const line of log.split(/\r?\n/)) {
-    const at = line.indexOf(tag);
-    const end = line.lastIndexOf('}');
-    if (at < 0 || end < at) continue;
-    try {
-      const parsed: unknown = JSON.parse(line.slice(at + tag.length - 1, end + 1));
-      found = readCorpus(parsed) ?? found;
-    } catch {
-      // a truncated or foreign line: keep the previous one
-    }
-  }
-  return found;
-}
-
-/** Judges the corpus report line, simulator connection stats, and crash reports. */
-export function judgeCorpus(
-  line: CorpusLine,
-  connections: { limitResponses: number; overlapMs: number },
-  crashes: readonly string[] = [],
-): CorpusVerdict {
-  const failures = line.failed.map((f) => `${f.id} (${f.label}): ${f.reason}`);
-  if (line.total === 0) failures.push('corpus: 0 items ran');
-  if (line.passed + line.failed.length !== line.total) {
-    failures.push(
-      `corpus: passed (${line.passed}) + failed (${line.failed.length}) != total (${line.total})`,
-    );
-  }
-  if (line.staleEventsApplied > 0) {
-    failures.push(`staleEventsApplied: ${line.staleEventsApplied} (expected 0)`);
-  }
-  if (connections.limitResponses > 0) {
-    failures.push(`limitResponses: ${connections.limitResponses} (expected 0)`);
-  }
-  failures.push(...crashFailures(crashes));
-  return { ok: failures.length === 0, failures };
 }
 
 const NO_FFMPEG =
   'gate: FFmpeg not found: set FFMPEG_PATH or install FFmpeg; the simulator needs it for live streams';
 
-function isDesktopTarget(target: CorpusTarget): boolean {
-  return target === 'desktop' || target === 'windows' || target === 'macos';
-}
-
-function isAndroidTarget(target: CorpusTarget): boolean {
-  return (
-    target === 'android-tv' ||
-    target === 'fire-os' ||
-    target === 'android' ||
-    target === 'android-phone'
-  );
-}
+const isDesktopTarget = (t: CorpusTarget): boolean =>
+  t === 'desktop' || t === 'windows' || t === 'macos';
+const isAndroidTarget = (t: CorpusTarget): boolean =>
+  t === 'android-tv' || t === 'fire-os' || t === 'android' || t === 'android-phone';
 
 async function runDesktopCorpus(
   opts: CorpusGateOptions,
@@ -266,30 +171,29 @@ async function runDesktopCorpus(
   timeoutMs: number,
   sleep: (ms: number) => Promise<void>,
 ): Promise<CorpusGateOutput> {
-  const root = opts.root ?? '.';
-  const deps = opts.desktopDeps ?? systemDesktopDeps(root, opts.exec);
+  const deps = opts.desktopDeps ?? systemDesktopDeps(opts.root ?? '.', opts.exec);
   if (opts.build === true && deps.buildApp) await deps.buildApp();
-  const externalSim = opts.simUrl !== undefined;
-  const sim = externalSim
-    ? (() => {
-        const url = (opts.simUrl as string).replace(/\/+$/, '');
-        const log = httpSimLog(url);
-        return {
-          url,
-          requests: () => log.entries(),
-          clearRequests: () => log.clear(),
-          close: async () => {},
-        };
-      })()
-    : await deps.startSim();
+  const sim =
+    opts.simUrl !== undefined
+      ? (() => {
+          const url = opts.simUrl.replace(/\/+$/, '');
+          const log = httpSimLog(url);
+          return {
+            url,
+            requests: () => log.entries(),
+            clearRequests: () => log.clear(),
+            close: async () => {},
+          };
+        })()
+      : await deps.startSim();
 
   try {
     await sim.clearRequests();
     const burst = opts.burst ?? 0;
     const query = `elv-gate=corpus&base=${sim.url}&account=${CORPUS_ACCOUNT}${burst > 0 ? `&burst=${burst}` : ''}`;
     const app = deps.spawnApp([`--elv-gate=${query}`]);
-    let found: CorpusLine | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let found: CorpusLine;
     try {
       found = await Promise.race([
         (async () => {
@@ -297,9 +201,7 @@ async function runDesktopCorpus(
             const parsed = parseCorpusLine(raw);
             if (parsed !== undefined) return parsed;
           }
-          throw new Error(
-            `gate: desktop process exited before emitting ELV_GATE_CORPUS (timeout ${Math.round(timeoutMs / 1000)} s)`,
-          );
+          throw new Error('gate: desktop process exited before emitting ELV_GATE_CORPUS');
         })(),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
@@ -318,16 +220,14 @@ async function runDesktopCorpus(
       app.kill();
     }
     await sleep(100);
-    const entries = await sim.requests();
-    const connections = connectionStats(entries, CORPUS_ACCOUNT);
-    const outcome = judgeCorpus(found, connections, []);
+    const connections = connectionStats(await sim.requests(), CORPUS_ACCOUNT);
     return {
       target,
       device: { platform: process.platform, arch: process.arch, release: osRelease() },
       line: found,
       connections,
       crashes: [],
-      outcome,
+      outcome: judgeCorpus(found, connections, []),
     };
   } finally {
     await sim.close();
@@ -345,14 +245,12 @@ export async function runCorpusGate(opts: CorpusGateOptions): Promise<CorpusGate
     if (opts.simUrl === undefined && lookup() === null) throw new Error(NO_FFMPEG);
     return runDesktopCorpus(opts, target, timeoutMs, sleep);
   }
-
   if (lookup() === null && opts.sim.running !== undefined && !(await opts.sim.running())) {
     throw new Error(NO_FFMPEG);
   }
   const adb = opts.adb ?? 'adb';
   const root = opts.root ?? '.';
   const now = opts.now ?? Date.now;
-
   if (opts.build === true && isAndroidTarget(target)) await buildApk(opts.exec, root, adb);
   const sim = await opts.sim.ensure();
   if (!sim.reused && lookup() === null) {
@@ -373,9 +271,8 @@ export async function runCorpusGate(opts: CorpusGateOptions): Promise<CorpusGate
             ...(opts.avd === undefined ? {} : { avd: opts.avd }),
           })
         : await (() => {
-            if (opts.app === undefined || opts.app === '') {
+            if (!opts.app)
               throw new Error(`gate: --target ${target} requires --app <path/to/App.app>`);
-            }
             return appleSimDevice(opts.exec, {
               platform: target === 'tvos' ? 'tvos' : 'ios',
               app: opts.app,
@@ -387,20 +284,19 @@ export async function runCorpusGate(opts: CorpusGateOptions): Promise<CorpusGate
     await log.clear().catch(() => undefined);
     const startedAt = now();
     const burst = opts.burst ?? 0;
-    const url = `elviptv://gate/corpus?host=${device.simHost}&account=${CORPUS_ACCOUNT}${burst > 0 ? `&burst=${burst}` : ''}`;
-    await device.start(url);
+    await device.start(
+      `elviptv://gate/corpus?host=${device.simHost}&account=${CORPUS_ACCOUNT}${burst > 0 ? `&burst=${burst}` : ''}`,
+    );
     for (let waited = 0; waited <= timeoutMs; waited += POLL_MS) {
       const line = parseCorpusLine(await device.readLog());
       if (line !== undefined) {
         await device.stop();
         await sleep(POLL_MS);
-        const entries = await log.entries().catch(() => []);
-        const connections = connectionStats(entries, CORPUS_ACCOUNT);
+        const connections = connectionStats(await log.entries().catch(() => []), CORPUS_ACCOUNT);
         const crashes = await device.crashesSince(startedAt);
-        const info = await device.describe();
         return {
           target,
-          device: info,
+          device: await device.describe(),
           line,
           connections,
           crashes,

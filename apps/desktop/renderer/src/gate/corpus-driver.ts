@@ -10,7 +10,7 @@ import {
 } from '@elv/playback';
 
 const DEFAULT_ITEM_TIMEOUT_MS = 15_000;
-const DEFAULT_HOLD_MS = 150;
+const DEFAULT_HOLD_MS = 250;
 const SEEK_TOLERANCE_MS = 5_000;
 
 /** One item in the 29-item desktop format corpus sweep. */
@@ -20,6 +20,7 @@ export interface DesktopCorpusItem {
   kind: MediaKind;
   url: string;
   expect: 'playing' | 'failed';
+  audioOnly?: boolean;
   selectAudioLang?: string;
   selectSubtitleLang?: string;
   seekMs?: number;
@@ -124,6 +125,7 @@ export function buildDesktopCorpusItems(opts: {
       kind: 'live',
       url: `${base}/live/${pair}/${id}.ts${suffix}`,
       expect: 'playing',
+      ...(id === 1006 ? { audioOnly: true } : {}),
       ...(tracks ? { selectAudioLang: 'eng', selectSubtitleLang: 'tur' } : {}),
     });
   }
@@ -144,6 +146,7 @@ export function buildDesktopCorpusItems(opts: {
       kind: 'vod',
       url: `${base}/movie/${pair}/${id}.${ext}`,
       expect: 'playing',
+      ...(id === 200006 ? { audioOnly: true } : {}),
       ...(tracks ? { selectAudioLang: 'eng', selectSubtitleLang: 'tur' } : {}),
     });
   }
@@ -268,6 +271,9 @@ export function createCorpusRun(deps: CorpusRunDeps): CorpusRun {
     });
 
   const applyItemChecks = async (item: DesktopCorpusItem): Promise<string | undefined> => {
+    if (item.selectAudioLang !== undefined || item.selectSubtitleLang !== undefined) {
+      await sleep(holdMs);
+    }
     const state = service.getState();
     if (item.selectAudioLang !== undefined && engine.capabilities.audioTrackSelection) {
       const picked = pickTrack(state.tracks.audio, item.selectAudioLang);
@@ -339,7 +345,8 @@ export function createCorpusRun(deps: CorpusRunDeps): CorpusRun {
 
         const settled = await waitFor(
           (s) =>
-            (s.status.kind === 'playing' && s.firstFrameAt !== undefined) ||
+            (s.status.kind === 'playing' &&
+              (item.audioOnly === true || s.firstFrameAt !== undefined)) ||
             s.status.kind === 'failed' ||
             s.status.kind === 'limited' ||
             s.status.kind === 'ended',
@@ -349,7 +356,7 @@ export function createCorpusRun(deps: CorpusRunDeps): CorpusRun {
         if (
           !settled ||
           stateAfterTune.status.kind !== 'playing' ||
-          stateAfterTune.firstFrameAt === undefined
+          (item.audioOnly !== true && stateAfterTune.firstFrameAt === undefined)
         ) {
           failed.push({
             id: item.id,

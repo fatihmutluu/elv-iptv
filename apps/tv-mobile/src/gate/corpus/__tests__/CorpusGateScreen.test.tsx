@@ -73,8 +73,15 @@ describe('CorpusGateScreen', () => {
     const seeks: number[] = [];
     const loads: string[] = [];
     const createEngine = (): PlayerEngine => {
+      const noVideoFrame = [
+        { afterMs: 0, emit: 'state' as const, state: 'opening' as const },
+        { afterMs: 2, emit: 'state' as const, state: 'playing' as const },
+        { afterMs: 2, emit: 'clock' as const, positionMs: 100 },
+      ];
       const base = createFakePlayerEngine({
         scripts: {
+          'http://127.0.0.1:7878/live/demo/demo/1006.ts': noVideoFrame,
+          'http://127.0.0.1:7878/movie/demo/demo/200006.mp4': noVideoFrame,
           'http://127.0.0.1:7878/movie/demo/demo/200001.mp4?fault=empty': [
             { afterMs: 2, emit: 'error', error: { code: 'network', detail: 'empty media' } },
           ],

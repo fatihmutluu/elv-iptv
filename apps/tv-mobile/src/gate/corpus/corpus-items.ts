@@ -17,6 +17,7 @@ export interface CorpusItem {
   kind: MediaKind;
   url: string;
   expect: 'playing' | 'failed';
+  audioOnly?: boolean;
   selectAudioLang?: string;
   selectSubtitleLang?: string;
   seekMs?: number;
@@ -143,6 +144,7 @@ export function buildCorpusItems(opts: {
       kind: 'live',
       url: `${base}/live/${pair}/${id}.ts${suffix}`,
       expect: 'playing',
+      ...(id === 1006 ? { audioOnly: true } : {}),
       ...(tracks ? { selectAudioLang: 'eng', selectSubtitleLang: 'tur' } : {}),
     });
   }
@@ -163,6 +165,7 @@ export function buildCorpusItems(opts: {
       kind: 'vod',
       url: `${base}/movie/${pair}/${id}.${ext}`,
       expect: 'playing',
+      ...(id === 200006 ? { audioOnly: true } : {}),
       ...(tracks ? { selectAudioLang: 'eng', selectSubtitleLang: 'tur' } : {}),
     });
   }
