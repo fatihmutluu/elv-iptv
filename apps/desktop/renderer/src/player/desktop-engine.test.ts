@@ -108,6 +108,9 @@ describe('createDesktopEngine', () => {
     engine.play(2);
     engine.pause(2);
     engine.seek(3, 900);
+    engine.selectAudioTrack?.(3, 'a:2');
+    engine.selectSubtitleTrack?.(3, 's:1');
+    engine.selectSubtitleTrack?.(3, null);
     engine.stop(4);
     engine.recreate(5);
     engine.toggleFullscreen();
@@ -117,6 +120,9 @@ describe('createDesktopEngine', () => {
       { engineId: 'e1', command: { name: 'play', attempt: 2 } },
       { engineId: 'e1', command: { name: 'pause', attempt: 2 } },
       { engineId: 'e1', command: { name: 'seek', attempt: 3, positionMs: 900 } },
+      { engineId: 'e1', command: { name: 'selectAudioTrack', attempt: 3, id: 'a:2' } },
+      { engineId: 'e1', command: { name: 'selectSubtitleTrack', attempt: 3, id: 's:1' } },
+      { engineId: 'e1', command: { name: 'selectSubtitleTrack', attempt: 3, id: null } },
       { engineId: 'e1', command: { name: 'stop', attempt: 4 } },
       { engineId: 'e1', command: { name: 'recreate', attempt: 5 } },
       { engineId: 'e1', command: { name: 'fullscreen' } },

@@ -1,6 +1,6 @@
 # i18n (`@elv/i18n`)
 
-Pure TypeScript localization over `@lingui/core`: English (`en`) and Turkish (`tr`) `.po` catalogs, typed `AppI18n`, `resolveLocale`, and conditional `Intl.PluralRules` polyfill (`ensurePluralRules`). Keep it free of React (`I18nProvider` / `useI18n` live in `@elv/ui-kit`).
+Pure TypeScript localization over `@lingui/core`: English (`en`) and Turkish (`tr`) `.po` catalogs, typed `AppI18n`, `resolveLocale`, `resolveLanguageLabel`, and conditional `Intl.PluralRules` polyfill (`ensurePluralRules`). Keep it free of React (`I18nProvider` / `useI18n` live in `@elv/ui-kit`).
 
 ## Commands
 - `pnpm --filter @elv/i18n typecheck` type-checks this package.

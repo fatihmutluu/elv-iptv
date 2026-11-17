@@ -22,6 +22,8 @@ function fakeHandle() {
     play: vi.fn(),
     pause: vi.fn(),
     seek: vi.fn(),
+    selectAudioTrack: vi.fn(),
+    selectSubtitleTrack: vi.fn(),
     stop: vi.fn(),
     recreate: vi.fn(),
     release: vi.fn(),
@@ -58,12 +60,15 @@ describe('bridgeNativeEngine', () => {
       headers: { 'User-Agent': 'ua' },
       kind: 'live',
       startMs: 5_000,
-      options: { softwareAudio: true },
+      options: { softwareAudio: true, audioTrackId: '1:0', subtitleTrackId: null },
     });
     engine.retry(4);
     engine.play(4);
     engine.pause(4);
     engine.seek(5, 12_000);
+    engine.selectAudioTrack?.(5, '1:1');
+    engine.selectSubtitleTrack?.(5, '2:0');
+    engine.selectSubtitleTrack?.(6, null);
     engine.stop(6);
     engine.recreate(7);
     expect(handle.load).toHaveBeenCalledWith({
@@ -73,13 +78,29 @@ describe('bridgeNativeEngine', () => {
       kind: 'live',
       startMs: 5_000,
       softwareAudio: true,
+      audioTrackId: '1:0',
+      subtitleTrackId: null,
     });
     expect(handle.retry).toHaveBeenCalledWith(4);
     expect(handle.play).toHaveBeenCalledWith(4);
     expect(handle.pause).toHaveBeenCalledWith(4);
     expect(handle.seek).toHaveBeenCalledWith(5, 12_000);
+    expect(handle.selectAudioTrack).toHaveBeenCalledWith(5, '1:1');
+    expect(handle.selectSubtitleTrack).toHaveBeenNthCalledWith(1, 5, '2:0');
+    expect(handle.selectSubtitleTrack).toHaveBeenNthCalledWith(2, 6, null);
     expect(handle.stop).toHaveBeenCalledWith(6);
     expect(handle.recreate).toHaveBeenCalledWith(7);
+  });
+
+  it('omits track selection methods when absent on the native handle', () => {
+    const { selectAudioTrack: _a, selectSubtitleTrack: _s, ...minimal } = fakeHandle().handle;
+    const engine = bridgeNativeEngine(minimal, {
+      capabilities: CAPABILITIES,
+      uptimeMs: () => 0,
+      now: () => 0,
+    });
+    expect(engine.selectAudioTrack).toBeUndefined();
+    expect(engine.selectSubtitleTrack).toBeUndefined();
   });
 
   it('sends no optional load fields the command does not have', () => {

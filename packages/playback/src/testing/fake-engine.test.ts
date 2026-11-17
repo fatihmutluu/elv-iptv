@@ -222,4 +222,23 @@ describe('FakePlayerEngine', () => {
     expect(engine.capabilities.hls).toBe(false);
     expect(engine.capabilities.recreate).toBe(true);
   });
+
+  it('emits scripted tracks steps and records track selection commands with token adoption', () => {
+    const tracks = {
+      audio: [{ id: 'a:0', language: 'tur' }],
+      subtitles: [{ id: 's:0', language: 'eng' }],
+      selectedAudioId: 'a:0',
+      selectedSubtitleId: null,
+    };
+    const { engine, events } = setup({ u: [{ afterMs: 5, emit: 'tracks', tracks }] });
+    engine.load(load('u', 1));
+    engine.selectAudioTrack?.(3, 'a:0');
+    engine.selectSubtitleTrack?.(4, 's:0');
+    vi.advanceTimersByTime(5);
+    expect(events).toEqual([{ attempt: 4, type: 'tracks', tracks }]);
+    expect(engine.commands.slice(-2)).toEqual([
+      { name: 'selectAudioTrack', attempt: 3, trackId: 'a:0' },
+      { name: 'selectSubtitleTrack', attempt: 4, trackId: 's:0' },
+    ]);
+  });
 });

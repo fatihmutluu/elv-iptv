@@ -4,33 +4,7 @@ import android.os.SystemClock
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
-import expo.modules.kotlin.records.Field
-import expo.modules.kotlin.records.Record
 import java.util.Collections
-
-/** The JavaScript `load` argument: a flattened `LoadCommand`. */
-class LoadArgs : Record {
-  @Field val attempt: Int = 0
-
-  @Field val url: String = ""
-
-  @Field val headers: Map<String, String> = emptyMap()
-
-  @Field val kind: String = "live"
-
-  @Field val startMs: Double? = null
-
-  @Field val softwareAudio: Boolean = false
-
-  internal fun toRequest() =
-    LoadRequest(
-      url = url,
-      headers = headers,
-      live = kind != "vod",
-      startMs = startMs?.toLong(),
-      softwareAudio = softwareAudio,
-    )
-}
 
 /**
  * Exposes the Media3 engine as the shared object class `Engine` with the player core spec 5.1 commands and the
@@ -61,8 +35,9 @@ class ElvEngineMedia3Module : Module() {
 
       Events("onEngineEvent")
 
-      Function("load") { engine: Media3Engine, args: LoadArgs ->
-        engine.load(args.attempt, args.toRequest())
+      Function("load") { engine: Media3Engine, args: Map<String, Any?> ->
+        val (attempt, request) = parseLoadArgs(args)
+        engine.load(attempt, request)
       }
 
       Function("retry") { engine: Media3Engine, attempt: Int -> engine.retry(attempt) }
@@ -73,6 +48,14 @@ class ElvEngineMedia3Module : Module() {
 
       Function("seek") { engine: Media3Engine, attempt: Int, positionMs: Double ->
         engine.seek(attempt, positionMs.toLong())
+      }
+
+      Function("selectAudioTrack") { engine: Media3Engine, attempt: Int, id: String ->
+        engine.selectAudioTrack(attempt, id)
+      }
+
+      Function("selectSubtitleTrack") { engine: Media3Engine, attempt: Int, id: String? ->
+        engine.selectSubtitleTrack(attempt, id)
       }
 
       Function("stop") { engine: Media3Engine, attempt: Int -> engine.stop(attempt) }

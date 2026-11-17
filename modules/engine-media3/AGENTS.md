@@ -6,27 +6,26 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
 - `createMedia3Engine(): PlayerEngine | null` (`src/index.ts`; `null` without the native module `ElvEngineMedia3`)
   creates a native `Engine` shared object; `release()` frees it (later calls are no-ops). `Media3Surface({ engine,
   style?, resizeMode?, testID? })` renders `Media3SurfaceView` bound to that object (one view per engine), else `null`.
-- Native: `load(flattened LoadCommand)`, `retry`, `play`, `pause`, `seek`, `stop`, `recreate`, event `onEngineEvent`
-  (`atMs` uptime, mapped via `@elv/playback`'s `bridgeNativeEngine`), sync `uptimeMs()`. `load` takes its
-  token, others adopt a newer one; events carry the current token. Capabilities: all but live seek and track choice.
+- Native: `load(flattened LoadCommand)`, `retry`, `play`, `pause`, `seek`, `selectAudioTrack`, `selectSubtitleTrack`,
+  `stop`, `recreate`, event `onEngineEvent` (`atMs` uptime, mapped via `@elv/playback`'s `bridgeNativeEngine`), sync
+  `uptimeMs()`. `load` takes its token, others adopt a newer one. Capabilities: all true except `liveSeek: false`.
 
 ## Threading and view
 - ExoPlayer runs on the engine's `HandlerThread` (application looper), built at creation; JS calls post there and
   return; events run there (`emit` hops to JS). `OnDestroy` (JS reload) and `sharedObjectDidRelease` dispose engines.
-- `Media3SurfaceView` (details in `VIEW.md`): a fixed `SurfaceView` (never on top) under a black zap shutter (each
-  `load` until that media's first frame, behind a fence), at the display aspect ratio (`fit`/`fill`) with bars beside
-  it; the engine posts shutter, size and screen-on reports. A surface detach is the only UI-thread wait (3 s cap).
+- `Media3SurfaceView` (details in `VIEW.md`): a fixed `SurfaceView` and `SubtitleView` (`media3-ui`) over the fitted
+  video rectangle under a black zap shutter (each `load` until first frame, behind a fence), with bars beside it; the
+  engine posts shutter, size, subtitle cues and screen-on reports. Surface detach is the only UI-thread wait (3 s cap).
 
-## Playback
+## Playback and tracks
 - Every prepare (`load`, `retry`) builds a new media source, `playWhenReady = true`; `retry`: live at the default
-  position, VOD at the current one. `stop` clears the media; `recreate` rebuilds ExoPlayer (same surface), left idle.
-- Source (`SourceType.kt`): `.m3u8`/`.m3u` HLS; `.ts` and extensionless live: TS extractor only (non-IDR keyframes,
-  access units); else sniffed. A playlist answer is prepared once as HLS (same URL, same generation).
-- States: `opening` on prepare, `buffering`, `ready`, `playing`, `paused` (not wanted), `ended`; a live media that
-  ends or a VOD that ends before it played sends `error network`. `stall`: buffering while wanted after it played. `clock` anchors when the effective rate
-  (speed while playing, else 0) changes, on seeks and once a second while playing; `durationMs` (VOD), `liveEdgeMs`
-  (live, window end) when known. `FfmpegAudio` configures LGPL-2.1+ FFmpeg 9.0.2 + `FfmpegAudioRenderer` (`ON` default,
-  `PREFER` + software audio first when `options.softwareAudio`, #69; notices in `assets/licenses/ffmpeg-media3/`).
+  position, VOD at `lastVodPositionMs` (kept across `recreate`). `stop` clears media; `recreate` rebuilds ExoPlayer.
+- `TrackSelectorBridge` enumerates `C.TRACK_TYPE_AUDIO` and `C.TRACK_TYPE_TEXT` (`id = "$groupIndex:$trackIndex"`),
+  emits deduplicated `tracks` events, applies `TrackSelectionOverride` (matching ID first, `(language, label)` across
+  reloads), and disables `C.TRACK_TYPE_TEXT` + clears cues immediately when `subtitleTrackId` is `null` (`Off`).
+- Source (`SourceType.kt`): `.m3u8`/`.m3u` HLS; `.ts` and extensionless live: TS extractor only; else sniffed. States:
+  `opening`, `buffering`, `ready`, `playing`, `paused`, `ended` (live or unplayed VOD end -> `error network`), `stall`, `clock` anchors.
+  `FfmpegAudio` configures LGPL-2.1+ FFmpeg 9.0.2 + `FfmpegAudioRenderer` (`ON` default, `PREFER` on `softwareAudio`).
 
 ## Requests and errors (`ConnectionGate`, `GatedDataSource`, `StreamHttp`, sniffing, `LoadRetry`, `ErrorMapping`)
 - Every prepare, `stop`, `recreate` and `dispose` begins a generation before stopping/releasing ExoPlayer and

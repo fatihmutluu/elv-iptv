@@ -28,6 +28,8 @@ function fakeNative() {
     play: vi.fn(),
     pause: vi.fn(),
     seek: vi.fn(),
+    selectAudioTrack: vi.fn(),
+    selectSubtitleTrack: vi.fn(),
     stop: vi.fn(),
     recreate: vi.fn(),
     release: vi.fn(),
@@ -76,14 +78,43 @@ describe('createMedia3Engine', () => {
       liveSeek: false,
       softwareAudioFallback: true,
       recreate: true,
-      audioTrackSelection: false,
-      subtitleTrackSelection: false,
+      audioTrackSelection: true,
+      subtitleTrackSelection: true,
     });
     const events: EngineEvent[] = [];
     engine?.subscribe((event) => events.push(event));
     native.clock.uptime = 9_000;
     native.emit({ attempt: 2, type: 'firstFrame', atMs: 8_960 });
     expect(events).toEqual([{ attempt: 2, type: 'firstFrame', atMs: 49_960 }]);
+  });
+
+  it('forwards track options and track selection commands through bridgeNativeEngine', async () => {
+    const native = fakeNative();
+    const engine = await create();
+    engine?.load({
+      attempt: 3,
+      url: 'http://sim/live/demo/demo/1001.ts',
+      headers: { 'User-Agent': 'ua' },
+      kind: 'live',
+      startMs: 5_000,
+      options: { softwareAudio: true, audioTrackId: '1:0', subtitleTrackId: null },
+    });
+    engine?.selectAudioTrack?.(5, '1:1');
+    engine?.selectSubtitleTrack?.(5, '2:0');
+    engine?.selectSubtitleTrack?.(6, null);
+    expect(native.engine.load).toHaveBeenCalledWith({
+      attempt: 3,
+      url: 'http://sim/live/demo/demo/1001.ts',
+      headers: { 'User-Agent': 'ua' },
+      kind: 'live',
+      startMs: 5_000,
+      softwareAudio: true,
+      audioTrackId: '1:0',
+      subtitleTrackId: null,
+    });
+    expect(native.engine.selectAudioTrack).toHaveBeenCalledWith(5, '1:1');
+    expect(native.engine.selectSubtitleTrack).toHaveBeenNthCalledWith(1, 5, '2:0');
+    expect(native.engine.selectSubtitleTrack).toHaveBeenNthCalledWith(2, 6, null);
   });
 });
 

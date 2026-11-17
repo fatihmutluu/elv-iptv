@@ -3,9 +3,12 @@
 How `Media3SurfaceView` (`android/.../Media3SurfaceView.kt`) shows an engine's video (player core spec 6.1). The
 module's contract and rules are in `AGENTS.md`.
 
-## Surface
+## Surface and subtitles
 - One `SurfaceView`, created with the view and never re-typed, replaced or put on top (`setZOrderOnTop` and
-  `setZOrderMediaOverlay` are never called), under a black shutter `View`. Neither child is focusable.
+  `setZOrderMediaOverlay` are never called), plus a `SubtitleView` (`androidx.media3:media3-ui`) laid out over the same
+  fitted `VideoRect` (`placed`) for native text (`SRT`, `ASS`, `WebVTT`) and bitmap (`DVB`, `PGS`) cues, both under a
+  black shutter `View`. None of the children is focusable; cues clear immediately on `load`, `stop`, `recreate`, `bind`
+  and `selectSubtitleTrack(..., null)`.
 - The view paints black bars beside the surface only, never over it, so React Native views drawn above compose over
   the video. `dispatchDraw` clips to the view, which keeps a `fill` crop inside it.
 - Surface callbacks attach (posted to the playback thread) and detach the surface; the engine sends `surface`

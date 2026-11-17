@@ -7,27 +7,32 @@ import Foundation
 @MainActor
 final class AetherBackend: PlayerBackend {
   var onObservation: ((BackendObservation, Int) -> Void)?
+  var onSubtitlePresentation: ((SubtitlePresentation) -> Void)?
 
-  private let gate: ConnectionGate
-  private let httpSession: EngineHttpSession
+  let gate: ConnectionGate
+  let httpSession: EngineHttpSession
 
-  private var engine: AetherEngine?
+  var engine: AetherEngine?
   var cancellables = Set<AnyCancellable>()
   private weak var boundPlayerView: AetherPlayerView?
-  private var gravity: AVLayerVideoGravity = .resizeAspect
+  var gravity: AVLayerVideoGravity = .resizeAspect
+  var lastSubtitlePresentation: SubtitlePresentation = .empty
 
   var activeLoadSerial = 0
   var engineLoadSerial = 0
   var errorReportedSerial = 0
   var loggedRouteSerial = 0
-  private var gateGeneration = 0
+  var gateGeneration = 0
 
   var loadStartUptimeMs: Double = 0
   var openedMsForSerial: Double?
 
-  private var currentReader: LiveTsReader?
-  private var loadTask: Task<Void, Never>?
-  private var seekTask: Task<Void, Never>?
+  var currentPlan: MediaPlan?
+  var currentLoadOptions: EngineLoadOptions?
+  var currentReader: LiveTsReader?
+  var loadTask: Task<Void, Never>?
+  var seekTask: Task<Void, Never>?
+  var audioSwitchTask: Task<Void, Never>?
 
   init(gate: ConnectionGate, httpSession: EngineHttpSession) {
     self.gate = gate
@@ -57,12 +62,14 @@ final class AetherBackend: PlayerBackend {
     guard gravity != newGravity else { return }
     gravity = newGravity
     engine?.videoGravity = newGravity
+    refreshSubtitleGravity()
   }
 
   func start(_ plan: MediaPlan, options: EngineLoadOptions, serial: Int) {
     activeLoadSerial = 0
     engineLoadSerial = 0
     cancelTasksAndReader()
+    publishSubtitlePresentation(.empty)
 
     let currentEngine: AetherEngine
     do {
@@ -82,11 +89,14 @@ final class AetherBackend: PlayerBackend {
     loggedRouteSerial = 0
     loadStartUptimeMs = ProcessInfo.processInfo.systemUptime * 1_000.0
     openedMsForSerial = nil
+    currentPlan = plan
+    currentLoadOptions = options
 
     gateGeneration += 1
     let generation = gateGeneration
     gate.advance(to: generation)
     let loadOpts = aetherOptions(options)
+    let audioStream = options.audioStreamIndex
 
     loadTask = Task { @MainActor [weak self] in
       guard let self, self.activeLoadSerial == serial, !Task.isCancelled else { return }
@@ -98,7 +108,7 @@ final class AetherBackend: PlayerBackend {
                 !Task.isCancelled
           else { return }
           self.engineLoadSerial = serial
-          _ = try await currentEngine.load(url: url, options: loadOpts)
+          _ = try await currentEngine.load(url: url, options: loadOpts, audioSourceStreamIndex: audioStream)
 
         case let .vod(url, startSeconds):
           guard await self.gate.waitForClosed(before: generation),
@@ -106,7 +116,12 @@ final class AetherBackend: PlayerBackend {
                 !Task.isCancelled
           else { return }
           self.engineLoadSerial = serial
-          _ = try await currentEngine.load(url: url, startPosition: startSeconds, options: loadOpts)
+          _ = try await currentEngine.load(
+            url: url,
+            startPosition: startSeconds,
+            options: loadOpts,
+            audioSourceStreamIndex: audioStream
+          )
 
         case let .liveTs(url):
           let session = self.httpSession
@@ -127,7 +142,11 @@ final class AetherBackend: PlayerBackend {
           switch verdict {
           case let .media(hint):
             self.engineLoadSerial = serial
-            _ = try await currentEngine.load(source: .custom(reader, formatHint: hint), options: loadOpts)
+            _ = try await currentEngine.load(
+              source: .custom(reader, formatHint: hint),
+              options: loadOpts,
+              audioSourceStreamIndex: audioStream
+            )
 
           case .playlist:
             reader.close()
@@ -141,8 +160,13 @@ final class AetherBackend: PlayerBackend {
             else { return }
             var hlsOpts = options
             hlsOpts.isLive = true
+            self.currentPlan = .hls(url, live: true)
             self.engineLoadSerial = serial
-            _ = try await currentEngine.load(url: url, options: aetherOptions(hlsOpts))
+            _ = try await currentEngine.load(
+              url: url,
+              options: aetherOptions(hlsOpts),
+              audioSourceStreamIndex: audioStream
+            )
 
           case let .failed(rf):
             reader.close()
@@ -174,9 +198,12 @@ final class AetherBackend: PlayerBackend {
   func stopMedia() {
     activeLoadSerial = 0
     engineLoadSerial = 0
+    currentPlan = nil
+    currentLoadOptions = nil
     gateGeneration += 1
     gate.advance(to: gateGeneration)
     cancelTasksAndReader()
+    publishSubtitlePresentation(.empty)
     engine?.stop(resetDisplayCriteria: false, finalTeardown: false)
   }
 
@@ -188,18 +215,22 @@ final class AetherBackend: PlayerBackend {
     let serial = engineLoadSerial
     guard serial > 0 else { return }
     seekTask?.cancel()
-    seekTask = Task { @MainActor [weak self] in
+    let task = Task { @MainActor [weak self] in
       guard let self, self.engineLoadSerial == serial else { return }
       await engine.seek(to: toSeconds)
     }
+    seekTask = task
   }
 
   func rebuild() throws {
     activeLoadSerial = 0
     engineLoadSerial = 0
+    currentPlan = nil
+    currentLoadOptions = nil
     gateGeneration += 1
     gate.advance(to: gateGeneration)
     cancelTasksAndReader()
+    publishSubtitlePresentation(.empty)
     cancellables.removeAll()
 
     if let previous = engine {
@@ -215,9 +246,12 @@ final class AetherBackend: PlayerBackend {
   func dispose() {
     activeLoadSerial = 0
     engineLoadSerial = 0
+    currentPlan = nil
+    currentLoadOptions = nil
     gateGeneration += 1
     gate.advance(to: gateGeneration)
     cancelTasksAndReader()
+    publishSubtitlePresentation(.empty)
     cancellables.removeAll()
 
     if let previous = engine {
@@ -231,11 +265,13 @@ final class AetherBackend: PlayerBackend {
     httpSession.dispose()
   }
 
-  private func cancelTasksAndReader() {
+  func cancelTasksAndReader() {
     loadTask?.cancel()
     loadTask = nil
     seekTask?.cancel()
     seekTask = nil
+    audioSwitchTask?.cancel()
+    audioSwitchTask = nil
     currentReader?.close()
     currentReader = nil
   }

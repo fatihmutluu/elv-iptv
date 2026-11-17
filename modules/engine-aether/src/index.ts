@@ -23,8 +23,8 @@ const CAPABILITIES: EngineCapabilities = Object.freeze({
   liveSeek: false,
   softwareAudioFallback: true,
   recreate: true,
-  audioTrackSelection: false,
-  subtitleTrackSelection: false,
+  audioTrackSelection: true,
+  subtitleTrackSelection: true,
 });
 
 /** The native shared object behind each live engine this module created; `AetherSurface` binds its view to it. */

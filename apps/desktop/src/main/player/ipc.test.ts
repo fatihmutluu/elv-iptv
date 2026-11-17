@@ -96,6 +96,9 @@ function stubEngine(): StubEngine {
     play: (a: number) => e.calls.push(['play', a]),
     pause: (a: number) => e.calls.push(['pause', a]),
     seek: (a: number, ms: number) => e.calls.push(['seek', a, ms]),
+    selectAudioTrack: (a: number, id: string) => e.calls.push(['selectAudioTrack', a, id]),
+    selectSubtitleTrack: (a: number, id: string | null) =>
+      e.calls.push(['selectSubtitleTrack', a, id]),
     stop: (a: number) => e.calls.push(['stop', a]),
     recreate: (a: number) => e.calls.push(['recreate', a]),
     release: () => {
@@ -300,6 +303,14 @@ describe('registerPlayerIpc', () => {
     });
     t.emit(PLAYER_CHANNELS.command, a, {
       engineId: ra.engineId,
+      command: { name: 'selectAudioTrack', attempt: 2, id: 'a:2' },
+    });
+    t.emit(PLAYER_CHANNELS.command, a, {
+      engineId: ra.engineId,
+      command: { name: 'selectSubtitleTrack', attempt: 2, id: null },
+    });
+    t.emit(PLAYER_CHANNELS.command, a, {
+      engineId: ra.engineId,
       command: { name: 'stop', attempt: 3 },
     });
     t.emit(PLAYER_CHANNELS.command, a, {
@@ -313,6 +324,8 @@ describe('registerPlayerIpc', () => {
       ['play', 2],
       ['pause', 2],
       ['seek', 2, 900],
+      ['selectAudioTrack', 2, 'a:2'],
+      ['selectSubtitleTrack', 2, null],
       ['stop', 3],
       ['recreate', 3],
       ['fullscreen'],
@@ -323,7 +336,7 @@ describe('registerPlayerIpc', () => {
       engineId: ra.engineId,
       command: { name: 'stop', attempt: 9 },
     });
-    expect(t.engines[0]?.calls).toHaveLength(8);
+    expect(t.engines[0]?.calls).toHaveLength(10);
     expect(t.logs.length).toBeGreaterThan(0);
   });
 

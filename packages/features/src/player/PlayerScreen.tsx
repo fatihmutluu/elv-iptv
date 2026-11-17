@@ -1,12 +1,13 @@
 import type { CatalogService } from '@elv/data';
 import {
   createPlaybackService,
+  EMPTY_TRACKS,
   type PlaybackClock,
   type PlaybackService,
   type PlaybackState,
   type PlaybackTimers,
 } from '@elv/playback';
-import { useFormFactor, useI18n, useKeyInterpreter } from '@elv/ui-kit';
+import { useFormFactor, useI18n } from '@elv/ui-kit';
 import {
   type ReactElement,
   useCallback,
@@ -15,12 +16,14 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import { Platform, View } from 'react-native';
+import { View } from 'react-native';
 import { type AppLifecyclePort, noopAppLifecycle } from '../ports/app-lifecycle';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
 import type { OpenVideoEngine, VideoHost } from '../ports/video-host';
 import { describePlaybackFailure } from './errors';
 import { formatStatusLine, PlayerOsd, playerStyles } from './PlayerScreenParts';
+import { TrackPickerModal } from './TrackPickerModal';
+import { usePlayerControls } from './usePlayerControls';
 
 const DEFAULT_CLOCK: PlaybackClock = { now: () => performance.now() };
 const DEFAULT_TIMERS: PlaybackTimers = {
@@ -31,6 +34,7 @@ const DEFAULT_TIMERS: PlaybackTimers = {
 const OPENING_PLAYBACK_STATE: PlaybackState = {
   status: { kind: 'tuning' },
   attempt: 0,
+  tracks: EMPTY_TRACKS,
   staleEventsDropped: 0,
 };
 
@@ -67,7 +71,8 @@ function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
 /**
  * Cross-platform playback screen over injected {@link VideoHost} and {@link AppLifecyclePort} ports.
  * Owns `PlayerEngine` + `PlaybackService` strictly inside `useEffect`, stops playback on
- * `'background'` and re-tunes on `'active'`, and supports live channel Up/Down zapping.
+ * `'background'` and re-tunes on `'active'`, supports live channel Up/Down zapping, VOD pause/seek,
+ * and plain localized audio/subtitle track selection.
  */
 export function PlayerScreen({
   catalog,
@@ -157,6 +162,7 @@ export function PlayerScreen({
 
   const zapByRef = useRef(zapBy);
   zapByRef.current = zapBy;
+  const hostBackRef = useRef<() => void>(() => onExitRef.current());
 
   useEffect(() => {
     mountedRef.current = true;
@@ -204,7 +210,7 @@ export function PlayerScreen({
         timers: timersRef.current,
       });
       const offHostKey = opened.onHostKey?.((key) => {
-        if (key === 'back') onExitRef.current();
+        if (key === 'back') hostBackRef.current();
         else zapByRef.current(key === 'channel-up' ? 1 : -1);
       });
       activeSession = {
@@ -277,22 +283,6 @@ export function PlayerScreen({
     });
   }, [appLifecycle, tuneEntry]);
 
-  useKeyInterpreter((event) => {
-    if (event.kind === 'press' && event.key === 'back') {
-      onExitRef.current();
-      return;
-    }
-    if (event.kind === 'press' && event.key === 'select') {
-      const svc = serviceRef.current;
-      if (svc?.getState().status.kind === 'failed') svc.retry();
-      return;
-    }
-    if (event.kind === 'press' || event.kind === 'repeat') {
-      if (event.key === 'channelUp' || event.key === 'up') zapByRef.current(1);
-      else if (event.key === 'channelDown' || event.key === 'down') zapByRef.current(-1);
-    }
-  });
-
   const activeService = sessionState.kind === 'ready' ? sessionState.service : null;
   const subscribePlayback = useCallback(
     (cb: () => void) => (activeService === null ? () => undefined : activeService.subscribe(cb)),
@@ -309,6 +299,9 @@ export function PlayerScreen({
   );
 
   const status = playbackState.status;
+  const tracks = playbackState.tracks;
+  const hasTracks = tracks.audio.length > 0 || tracks.subtitles.length > 0;
+  const showRetry = status.kind === 'failed' && activeService !== null;
   const statusLine =
     sessionState.kind === 'unavailable'
       ? i18n.t('player.unavailable')
@@ -319,32 +312,22 @@ export function PlayerScreen({
     activeTarget.playlist !== undefined &&
     activeTarget.playlist.count > 1;
 
-  const desktopFallbackKeyProps: Record<string, unknown> =
-    formFactor === 'desktop' && (Platform.OS as string) !== 'web'
-      ? {
-          onKeyDown: (e: { key?: unknown; preventDefault?: () => void }) => {
-            if (e.key === 'Escape') {
-              e.preventDefault?.();
-              onExitRef.current();
-            } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
-              e.preventDefault?.();
-              zapByRef.current(1);
-            } else if (e.key === 'ArrowDown' || e.key === 'PageDown') {
-              e.preventDefault?.();
-              zapByRef.current(-1);
-            } else if (
-              e.key === 'Enter' &&
-              serviceRef.current?.getState().status.kind === 'failed'
-            ) {
-              e.preventDefault?.();
-              serviceRef.current.retry();
-            }
-          },
-        }
-      : {};
+  const controls = usePlayerControls({
+    formFactor,
+    activeTarget,
+    status,
+    tracks,
+    hasTracks,
+    showRetry,
+    serviceRef,
+    clockRef,
+    onExitRef,
+    zapByRef,
+  });
+  hostBackRef.current = controls.handleBack;
 
   return (
-    <View testID="player-screen" style={playerStyles.root} {...desktopFallbackKeyProps}>
+    <View testID="player-screen" style={playerStyles.root} {...controls.desktopFallbackKeyProps}>
       {isTv ? (
         <View
           testID="player-tv-focus-anchor"
@@ -369,17 +352,40 @@ export function PlayerScreen({
         </View>
       ) : null}
 
+      {controls.tracksOpen && activeService !== null ? (
+        <TrackPickerModal
+          tracks={tracks}
+          cursor={controls.pickerCursor}
+          isTv={isTv}
+          formFactor={formFactor}
+          i18n={i18n}
+          onSelectAudio={controls.selectAudio}
+          onSelectSubtitle={controls.selectSubtitle}
+          onClose={controls.closeTracks}
+        />
+      ) : null}
+
       <PlayerOsd
         title={activeTarget.title}
         statusLine={statusLine}
         failure={failure}
+        isVod={activeTarget.kind === 'vod'}
+        isPausedOrEnded={controls.isPausedOrEnded}
         canZap={canZap}
-        showRetry={status.kind === 'failed' && activeService !== null}
+        hasTracks={hasTracks}
+        showRetry={showRetry}
         isTv={isTv}
+        tvOsdFocused={controls.tvOsdFocused}
+        tvOsdAction={controls.tvOsdAction}
         i18n={i18n}
         service={activeService}
         clock={clock}
         onExit={onExit}
+        onTogglePlayPause={controls.togglePlayPause}
+        onSeekBack={controls.seekStepBack}
+        onSeekForward={controls.seekStepForward}
+        onSeekRatio={controls.seekToRatio}
+        onOpenTracks={controls.openTracks}
         onPrev={() => zapBy(-1)}
         onNext={() => zapBy(1)}
         onRetry={() => activeService?.retry()}

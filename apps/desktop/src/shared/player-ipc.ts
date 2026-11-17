@@ -14,7 +14,7 @@ export type PresenterKind = 'child-window' | 'own-window';
 
 /**
  * What the desktop mpv engine can do in 0.1: no live seek, no software-audio rung (FFmpeg already decodes audio in
- * software), no track selection yet (mpv's OSC handles tracks until the port has track commands).
+ * software), with full audio and embedded subtitle track selection over JSON IPC.
  */
 export const DESKTOP_CAPABILITIES: EngineCapabilities = Object.freeze({
   mpegTsOverHttp: true,
@@ -22,8 +22,8 @@ export const DESKTOP_CAPABILITIES: EngineCapabilities = Object.freeze({
   liveSeek: false,
   softwareAudioFallback: false,
   recreate: true,
-  audioTrackSelection: false,
-  subtitleTrackSelection: false,
+  audioTrackSelection: true,
+  subtitleTrackSelection: true,
 });
 
 /** Presentation events outside the port, main to renderer (`player:ui`). */
@@ -48,6 +48,8 @@ export type BridgeCommand =
   | { name: 'load'; cmd: LoadCommand }
   | { name: 'retry' | 'play' | 'pause' | 'stop' | 'recreate'; attempt: AttemptToken }
   | { name: 'seek'; attempt: AttemptToken; positionMs: number }
+  | { name: 'selectAudioTrack'; attempt: AttemptToken; id: string }
+  | { name: 'selectSubtitleTrack'; attempt: AttemptToken; id: string | null }
   | { name: 'release' }
   | { name: 'fullscreen' };
 
@@ -133,6 +135,9 @@ const isHeaders = (x: unknown): boolean =>
       HEADER_TOKEN.test(name) && typeof value === 'string' && !hasControlChar(value),
   );
 
+const isTrackId = (x: unknown): x is string =>
+  typeof x === 'string' && x.length > 0 && x.length <= 64 && !hasControlChar(x);
+
 function isLoadCommand(x: unknown): x is LoadCommand {
   if (!isRecord(x)) return false;
   if (!isAttempt(x['attempt']) || !isStreamUrl(x['url']) || !isHeaders(x['headers'])) return false;
@@ -142,7 +147,11 @@ function isLoadCommand(x: unknown): x is LoadCommand {
   if (options === undefined) return true;
   return (
     isRecord(options) &&
-    (options['softwareAudio'] === undefined || typeof options['softwareAudio'] === 'boolean')
+    (options['softwareAudio'] === undefined || typeof options['softwareAudio'] === 'boolean') &&
+    (options['audioTrackId'] === undefined || isTrackId(options['audioTrackId'])) &&
+    (options['subtitleTrackId'] === undefined ||
+      options['subtitleTrackId'] === null ||
+      isTrackId(options['subtitleTrackId']))
   );
 }
 
@@ -159,6 +168,10 @@ function isBridgeCommand(x: unknown): x is BridgeCommand {
       return isAttempt(x['attempt']);
     case 'seek':
       return isAttempt(x['attempt']) && isMs(x['positionMs']);
+    case 'selectAudioTrack':
+      return isAttempt(x['attempt']) && isTrackId(x['id']);
+    case 'selectSubtitleTrack':
+      return isAttempt(x['attempt']) && (x['id'] === null || isTrackId(x['id']));
     case 'release':
     case 'fullscreen':
       return true;

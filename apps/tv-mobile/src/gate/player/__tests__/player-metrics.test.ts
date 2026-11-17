@@ -1,5 +1,5 @@
 import { elvError } from '@elv/domain';
-import type { PlaybackState } from '@elv/playback';
+import { EMPTY_TRACKS, type PlaybackState } from '@elv/playback';
 import { describe, expect, it } from 'vitest';
 import { createPlayerRecorder, playerLine } from '../player-metrics';
 import type { PlayerFault } from '../player-routes';
@@ -10,7 +10,12 @@ function make(fault: PlayerFault = '', soak?: number) {
   let now = 0;
   const recorder = createPlayerRecorder({ fault, faultItem: 'a', soak, now: () => now });
   let attempt = 0;
-  let state: PlaybackState = { status: { kind: 'idle' }, attempt: 0, staleEventsDropped: 0 };
+  let state: PlaybackState = {
+    status: { kind: 'idle' },
+    attempt: 0,
+    tracks: EMPTY_TRACKS,
+    staleEventsDropped: 0,
+  };
   const show = (patch: Partial<PlaybackState>) => {
     state = { ...state, ...patch };
     recorder.observe(state);

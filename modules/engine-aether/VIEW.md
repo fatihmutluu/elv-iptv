@@ -2,8 +2,9 @@
 
 How `AetherSurfaceView` (`ios/Engine/AetherSurfaceView.swift`) presents an engine's video on tvOS, iOS and iPadOS (player core spec 6.2). The module's contract and rules are in `AGENTS.md`.
 
-## Surface
-- One `AetherPlayerView`, created with the `ExpoView` and never replaced, sits beneath an unfocusable black `ShutterOverlayView`. Both subviews set `isUserInteractionEnabled = false` and `isAccessibilityElement = false`; neither `AetherSurfaceView` nor its children can take focus (`canBecomeFocused == false`), so tvOS D-pad focus and React Native overlays drawn above the surface compose cleanly over the picture.
+## Surface & Subtitles
+- One `AetherPlayerView`, created with the `ExpoView` and never replaced, sits beneath an unfocusable `AetherSubtitleOverlayView` (`ios/Engine/AetherSubtitleOverlayView.swift`) and black `ShutterOverlayView`. All subviews set `isUserInteractionEnabled = false`, `isAccessibilityElement = false` and `canBecomeFocused == false`, so tvOS D-pad focus and React Native overlays drawn above the surface compose cleanly over the picture.
+- On `.loopback` and `.software` routes, `AetherSubtitleOverlayView` renders active `.text`, `.richText` and bitmap `.image` `SubtitleCue`s (`cue.startTime <= clock.sourceTime < cue.endTime`) inside the aspect-fit / aspect-fill video rect (`AVMakeRect` / `resizeAspectFill`); on `.remoteBypass` (HLS WebVTT), `AVPlayer` renders legible renditions natively and `subtitleCues` stays empty. Cues clear immediately on `load`, `retry`, `stop`, `recreate`, `release`, unbind, surface loss and `selectSubtitleTrack(null)`.
 - `ExpoFabricView.shouldBeRecycled()` is `false` across Expo views on iOS/tvOS, so Fabric never recycles a surface view across engines; unmount clears window availability in `didMoveToWindow` and detaches the `AetherPlayerView` on deallocation.
 - `clipsToBounds = true` clips `fill` (`resizeAspectFill`) crops strictly inside the view's bounds.
 - Surface availability is `window != nil && !appInBackground && boundEngine != nil`. `didMoveToWindow` and `UIApplication` background/foreground notifications (`didEnterBackgroundNotification`, `willEnterForegroundNotification`, `didBecomeActiveNotification`, observed synchronously on the main thread) call `core.surfaceChanged(available:)`, emitting `surface` `created` on each rise and `surface` `destroyed` on each fall.
