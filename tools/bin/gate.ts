@@ -12,6 +12,7 @@ import {
   worstRunWarnings,
 } from '../src/gates/compare.ts';
 import { CONTRACT_USAGE, contractMain } from '../src/gates/contract-cli.ts';
+import { CORPUS_USAGE, corpusMain } from '../src/gates/corpus-cli.ts';
 import { DESKTOP_USAGE, desktopMain } from '../src/gates/desktop-cli.ts';
 import { IMPORT_USAGE, importMain } from '../src/gates/import-cli.ts';
 import {
@@ -64,6 +65,7 @@ function parseCli() {
       burst: { type: 'string' },
       soak: { type: 'string' },
       stress: { type: 'boolean' },
+      corpus: { type: 'boolean' },
     },
   });
 }
@@ -79,20 +81,33 @@ if (
     positionals[0] !== 'import' &&
     positionals[0] !== 'player' &&
     positionals[0] !== 'contract' &&
+    positionals[0] !== 'corpus' &&
     positionals[0] !== 'desktop')
 ) {
-  fail(`${USAGE}\n${IMPORT_USAGE}\n${PLAYER_USAGE}\n${CONTRACT_USAGE}\n${DESKTOP_USAGE}`, 2);
+  fail(
+    `${USAGE}\n${IMPORT_USAGE}\n${PLAYER_USAGE}\n${CONTRACT_USAGE}\n${CORPUS_USAGE}\n${DESKTOP_USAGE}`,
+    2,
+  );
 }
 if (positionals[0] === 'import') {
   process.exit(await importMain(values, findRepoRoot(process.cwd())));
 }
+if (positionals[0] === 'corpus') {
+  process.exit(await corpusMain(values, findRepoRoot(process.cwd())));
+}
 if (positionals[0] === 'player') {
+  if (values.corpus === true) {
+    process.exit(await corpusMain(values, findRepoRoot(process.cwd())));
+  }
   process.exit(await playerMain(values, findRepoRoot(process.cwd())));
 }
 if (positionals[0] === 'contract') {
   process.exit(await contractMain(values, findRepoRoot(process.cwd())));
 }
 if (positionals[0] === 'desktop') {
+  if (values.corpus === true) {
+    process.exit(await corpusMain({ ...values, target: 'desktop' }, findRepoRoot(process.cwd())));
+  }
   process.exit(await desktopMain(values, findRepoRoot(process.cwd())));
 }
 

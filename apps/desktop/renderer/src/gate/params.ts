@@ -20,6 +20,10 @@ export interface GateParams {
   vod: string | null;
   /** Fault injected into the first channel; empty for none. */
   fault: GateFault;
+  /** True when running the 29-item format corpus sweep (`elv-gate=corpus` or `corpus=1`). */
+  corpus?: boolean;
+  /** Initial live MPEG-TS burst in seconds for corpus runs, 0 to 30. */
+  burst?: number;
 }
 
 const DEFAULT_BASE = 'http://127.0.0.1:7878';
@@ -89,18 +93,22 @@ function readChannels(value: string | null): readonly string[] {
  */
 export function parseGateParams(query: string): GateParams | undefined {
   const q = new URLSearchParams(query);
-  if (q.get('elv-gate') !== 'player') return undefined;
+  const mode = q.get('elv-gate');
+  if (mode !== 'player' && mode !== 'corpus') return undefined;
+  const corpus = mode === 'corpus' || q.get('corpus') === '1';
   const account = q.get('account');
   const vod = q.get('vod');
   const fault = q.get('fault') ?? '';
+  const fallbackAccount = corpus ? 'corpus' : 'demo';
   return {
     base: readBase(q.get('base')),
-    account: account !== null && ACCOUNT.test(account) ? account : 'demo',
+    account: account !== null && ACCOUNT.test(account) ? account : fallbackAccount,
     channels: readChannels(q.get('channels')),
     zaps: readNumber(q.get('zaps'), 30, 1, 200, true),
     rate: readNumber(q.get('rate'), 0.5, 0.05, 5, false),
     vod: vod !== null && ID.test(vod) ? vod : null,
     fault: FAULTS.has(fault) ? (fault as GateFault) : '',
+    ...(corpus ? { corpus: true, burst: readNumber(q.get('burst'), 0, 0, 30, false) } : {}),
   };
 }
 

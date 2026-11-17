@@ -5,6 +5,7 @@ import { areaToScreen, type Rect } from './player/presenter/bounds.ts';
 const FLAG = '--elv-gate=';
 const MAX_QUERY_CHARS = 2048;
 const LINE_PREFIX = 'ELV_GATE_PLAYER ';
+const CORPUS_LINE_PREFIX = 'ELV_GATE_CORPUS ';
 
 /** Line printed once when the gate engine first enters `playing`, so the orphan check knows when to kill main. */
 export const GATE_PLAYING_LINE = 'ELV_GATE_PLAYING';
@@ -31,7 +32,8 @@ export function parseGateFlag(argv: readonly string[], isPackaged: boolean): str
   if (arg === undefined) return null;
   const query = arg.slice(FLAG.length);
   if (query.length > MAX_QUERY_CHARS || hasControlChar(query)) return null;
-  return query.split('&').includes('elv-gate=player') ? query : null;
+  const parts = query.split('&');
+  return parts.includes('elv-gate=player') || parts.includes('elv-gate=corpus') ? query : null;
 }
 
 /** What main measures and adds to the renderer's line. */
@@ -54,15 +56,20 @@ export interface GateExtras {
  * stream URLs or headers.
  */
 export function mergeGateLine(line: string, extras: GateExtras): string | null {
-  if (!line.startsWith(LINE_PREFIX) || /https?:\/\//i.test(line)) return null;
+  const prefix = line.startsWith(LINE_PREFIX)
+    ? LINE_PREFIX
+    : line.startsWith(CORPUS_LINE_PREFIX)
+      ? CORPUS_LINE_PREFIX
+      : null;
+  if (prefix === null || /https?:\/\//i.test(line)) return null;
   let body: unknown;
   try {
-    body = JSON.parse(line.slice(LINE_PREFIX.length));
+    body = JSON.parse(line.slice(prefix.length));
   } catch {
     return null;
   }
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return null;
-  return `${LINE_PREFIX}${JSON.stringify({ ...body, ...extras })}`;
+  return `${prefix}${JSON.stringify({ ...body, ...extras })}`;
 }
 
 /** The middle half of a window's content bounds: the fallback when no player area is known. */
