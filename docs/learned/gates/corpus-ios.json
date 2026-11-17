@@ -1,0 +1,27 @@
+{
+  "commit": "f22b4d96",
+  "date": "2026-11-17",
+  "target": "ios",
+  "device": {
+    "platform": "ios",
+    "name": "iPhone 17 Pro",
+    "runtime": "iOS-26-4",
+    "udid": "75A8857E-F62D-467B-B204-841DAA2A5E60"
+  },
+  "line": {
+    "total": 29,
+    "passed": 29,
+    "failed": [],
+    "surfaceCreated": 1,
+    "staleEventsApplied": 0
+  },
+  "connections": {
+    "limitResponses": 0,
+    "overlapMs": 0
+  },
+  "crashes": [],
+  "outcome": {
+    "ok": true,
+    "failures": []
+  }
+}

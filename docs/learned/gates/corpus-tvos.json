@@ -1,0 +1,27 @@
+{
+  "commit": "f22b4d96",
+  "date": "2026-11-17",
+  "target": "tvos",
+  "device": {
+    "platform": "tvos",
+    "name": "Apple TV 4K (3rd generation)",
+    "runtime": "tvOS-26-4",
+    "udid": "87D813FF-FECC-4B8C-9DE0-43FD7655330B"
+  },
+  "line": {
+    "total": 29,
+    "passed": 29,
+    "failed": [],
+    "surfaceCreated": 1,
+    "staleEventsApplied": 0
+  },
+  "connections": {
+    "limitResponses": 0,
+    "overlapMs": 0
+  },
+  "crashes": [],
+  "outcome": {
+    "ok": true,
+    "failures": []
+  }
+}

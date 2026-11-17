@@ -1,0 +1,26 @@
+{
+  "commit": "62bb72c",
+  "date": "2026-11-17",
+  "target": "windows",
+  "device": {
+    "platform": "win32",
+    "arch": "x64",
+    "release": "10.0.19045"
+  },
+  "line": {
+    "total": 29,
+    "passed": 29,
+    "failed": [],
+    "surfaceCreated": 1,
+    "staleEventsApplied": 0
+  },
+  "connections": {
+    "limitResponses": 0,
+    "overlapMs": 0
+  },
+  "crashes": [],
+  "outcome": {
+    "ok": true,
+    "failures": []
+  }
+}
