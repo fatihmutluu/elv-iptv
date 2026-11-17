@@ -18,7 +18,7 @@ ELV IPTV is built openly with the community so everyone has a fast, rock-solid, 
 
 Development follows focused version milestones tracked on the public [roadmap](https://github.com/users/fatihmutluu/projects/1) and [issues](https://github.com/fatihmutluu/elv-iptv/issues):
 
-- **Version `0.1` (in progress):** A deliberately plain, ultra-fast, zero-leak live TV, movie and series player across Android TV, Fire OS, Android, Apple TV, iPhone/iPad, Windows and macOS — M3U and Xtream import into on-device SQLite, instant 100k+ item navigation, sub-second warm channel switching, strict single-connection safety on 1-connection providers, stream fault recovery, multi-audio and subtitle track selection, and English + Turkish localization. Visual styling waits until every playback and performance budget is proven.
+- **Version `0.1` (ready for testing):** A deliberately plain, ultra-fast, zero-leak live TV, movie and series player across Android TV, Fire OS, Android, Apple TV, iPhone/iPad, Windows and macOS — M3U and Xtream import into on-device SQLite, instant 100k+ item navigation, sub-second warm channel switching, strict single-connection safety on 1-connection providers, stream fault recovery, multi-audio and subtitle track selection, and English + Turkish localization. Visual styling waits for `0.2`.
 - **Version `0.2`:** Shared UI/UX design language across TV remote, touch and desktop, XMLTV electronic program guide (EPG) grid, home screen and favorites, watch progress and resume, Turkish-aware FTS5 search, essential settings, and direct-download builds on GitHub Releases.
 - **Version `0.3` and beyond (`…`):** Optional end-to-end encrypted cross-device sync (hosted or self-hosted), local profiles, catch-up, live time-shift, Stalker portals, parental controls, external subtitles and styling, remote key remapping, picture-in-picture and multi-view, official app-store launches, and Vega / Tizen / webOS targets.
 
@@ -26,13 +26,13 @@ Development follows focused version milestones tracked on the public [roadmap](h
 
 | Platform | Runtime | Status |
 |---|---|---|
-| Android phone and tablet | Expo app + Media3 | `0.1` in progress |
-| Android TV / Google TV | Expo app (TV build) + Media3 | `0.1` in progress |
-| Fire TV (Fire OS 7+) | Expo app (TV build) + Media3 | `0.1` in progress |
-| iPhone and iPad (18+) | Expo app + AetherEngine | `0.1` in progress |
-| Apple TV (tvOS 18+) | Expo app (TV build) + AetherEngine | `0.1` in progress |
-| Windows 10/11 | Electron + react-native-web + LGPL mpv | `0.1` in progress |
-| macOS | Electron + react-native-web + LGPL mpv | `0.1` in progress |
+| Android phone and tablet | Expo app + Media3 | `0.1` test builds ready (verified on emulator) |
+| Android TV / Google TV | Expo app (TV build) + Media3 | `0.1` test builds ready (verified on emulator) |
+| Fire TV (Fire OS 7+) | Expo app (TV build) + Media3 | `0.1` test builds ready (verified on emulator) |
+| iPhone and iPad (18+) | Expo app + AetherEngine | `0.1` ready (verified on simulator; device compile checked) |
+| Apple TV (tvOS 18+) | Expo app (TV build) + AetherEngine | `0.1` ready (verified on simulator; device compile checked) |
+| Windows 10/11 | Electron + react-native-web + LGPL mpv | `0.1` test build ready |
+| macOS | Electron + react-native-web + LGPL mpv | `0.1` test build ready |
 | Linux | Electron + react-native-web + LGPL mpv | Scaffolded, best effort |
 | Fire TV (Vega OS) | Separate app sharing packages | Planned |
 | Samsung Tizen | Web-TV app from the react-native-web bundle | Planned |
