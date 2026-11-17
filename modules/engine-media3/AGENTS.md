@@ -24,7 +24,7 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
   emits deduplicated `tracks` events, applies `TrackSelectionOverride` (matching ID first, `(language, label)` across
   reloads), and disables `C.TRACK_TYPE_TEXT` + clears cues immediately when `subtitleTrackId` is `null` (`Off`).
 - Source (`SourceType.kt`): `.m3u8`/`.m3u` HLS; `.ts` and extensionless live: TS extractor only; else sniffed. States:
-  `opening`, `buffering`, `ready`, `playing`, `paused`, `ended` (live end -> `error network`), `stall`, `clock` anchors.
+  `opening`, `buffering`, `ready`, `playing`, `paused`, `ended` (live or unplayed VOD end -> `error network`), `stall`, `clock` anchors.
   `FfmpegAudio` configures LGPL-2.1+ FFmpeg 9.0.2 + `FfmpegAudioRenderer` (`ON` default, `PREFER` on `softwareAudio`).
 
 ## Requests and errors (`ConnectionGate`, `GatedDataSource`, `StreamHttp`, sniffing, `LoadRetry`, `ErrorMapping`)
@@ -35,7 +35,7 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
 - HTTP: `media3-datasource-okhttp`, one client per engine (dispatcher: 64 calls, 16/host; shared pool), connect 3.5 s,
   read 10 s, redirects, `LoadCommand.headers` (`Authorization`/`Cookie`/`Proxy-Authorization` stripped off-origin or on
   `https->http`), else `http.agent` (OkHttp 4.9.2 `compileOnly`). Responses read ahead 1 KB (`classifyResponse`; keys
-  and `Content-Range` slices at `position > 0` skipped; RFC 3629 UTF-8; WebVTT/TTML/XML/SRT segments allowed).
+  and `Content-Range` slices at `position > 0` skipped; RFC 3629 UTF-8; 3 TS syncs; empty first responses fail at once; WebVTT/TTML/XML/SRT segments allowed).
 - `failsAtOnce`: an HTTP status skips Media3's retries on progressive media and before the first HLS manifest; then
   HLS segments and refreshes retry except 401/403/429/509. Notices and refused requests always fail at once.
 - `mapError`: 401/403/404/429/509 keep `http-<code>`, other statuses `http-other`, a notice `connection-limit`, invalid

@@ -1,0 +1,34 @@
+{
+  "commit": "f22b4d9",
+  "date": "2026-11-17",
+  "target": "android-tv",
+  "device": {
+    "model": "sdk_google_atv64_x86_64",
+    "release": "16",
+    "sdk": "36"
+  },
+  "line": {
+    "total": 29,
+    "passed": 28,
+    "failed": [
+      {
+        "id": "vod-200003",
+        "label": "HEVC 1080p25 10-bit (MP4)",
+        "reason": "playback/decoder"
+      }
+    ],
+    "surfaceCreated": 1,
+    "staleEventsApplied": 0
+  },
+  "connections": {
+    "limitResponses": 0,
+    "overlapMs": 0
+  },
+  "crashes": [],
+  "outcome": {
+    "ok": false,
+    "failures": [
+      "vod-200003 (HEVC 1080p25 10-bit (MP4)): playback/decoder"
+    ]
+  }
+}

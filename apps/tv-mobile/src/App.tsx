@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AppState, Platform, StyleSheet, View } from 'react-native';
 import { createDeviceCatalog } from './catalog';
 import { ContractGateScreen } from './gate/contract/ContractGateScreen';
+import { CorpusGateScreen } from './gate/corpus/CorpusGateScreen';
 import { GateListScreen } from './gate/GateListScreen';
 import { ImportGateScreen } from './gate/import/ImportGateScreen';
 import { PlayerGateScreen } from './gate/player/PlayerGateScreen';
@@ -150,6 +151,9 @@ export function App() {
         )}
         {gate.name === 'contract' && (
           <ContractGateScreen key={JSON.stringify(gate)} params={gate.params} />
+        )}
+        {gate.name === 'corpus' && (
+          <CorpusGateScreen key={JSON.stringify(gate)} params={gate.params} />
         )}
         <StatusBar style="light" />
       </RemoteKeysProvider>

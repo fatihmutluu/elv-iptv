@@ -49,19 +49,25 @@ const findLine = (logs: readonly MpvLogLine[], pattern: RegExp): MpvLogLine | un
  * Maps an mpv `end-file` event and the media's recent log lines to an engine outcome.
  * A provider's plain-text notice (`Mime-type: 'text/*'` then an unrecognized format) is the
  * connection-limit signal, since providers answer over-limit requests with a text page.
+ * `played: false` (playback never restarted) turns a VOD eof into an error: an empty or
+ * text answer ends at once and must not read as a finished movie. Omitted means played.
  */
 export function classifyEnd(p: {
   reason: string;
   fileError?: string;
   logs: readonly MpvLogLine[];
   mediaKind: MediaKind;
+  played?: boolean;
 }): EndOutcome {
   if (p.reason === 'stop' || p.reason === 'quit' || p.reason === 'redirect')
     return { kind: 'stopped' };
   if (p.reason === 'eof') {
-    return p.mediaKind === 'vod'
-      ? { kind: 'ended' }
-      : error({ code: 'network', detail: 'live-eof' });
+    if (p.mediaKind !== 'vod') return error({ code: 'network', detail: 'live-eof' });
+    if (p.played !== false) return { kind: 'ended' };
+    const notice = findLine(p.logs, /Mime-type: 'text\//);
+    return notice
+      ? withDetail('connection-limit', notice.text)
+      : error({ code: 'network', detail: 'empty-vod-eof' });
   }
   const http = lastHttpLine(p.logs);
   if (http) {

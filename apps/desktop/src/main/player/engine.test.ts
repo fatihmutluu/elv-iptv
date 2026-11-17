@@ -768,6 +768,7 @@ describe('MpvEngine deferred start', () => {
             command: async (cmd) => {
               if (cmd[0] === 'loadfile') {
                 emitEvent({ event: 'start-file', playlist_entry_id: 99 });
+                emitEvent({ event: 'playback-restart' });
                 emitEvent({ event: 'end-file', playlist_entry_id: 99, reason: 'eof' });
                 return { request_id: 1, error: 'success', data: { playlist_entry_id: 99 } };
               }

@@ -200,13 +200,14 @@ export function isPlayerAreaMessage(x: unknown): x is PlayerAreaMessage {
 }
 
 const GATE_PREFIX = 'ELV_GATE_PLAYER {';
+const CORPUS_GATE_PREFIX = 'ELV_GATE_CORPUS {';
 const GATE_MAX_CHARS = 64 * 1024;
 
 /** Main-side check of a `gate:report` line: the gate prefix, at most 64 KiB, one line without control characters. */
 export function isGateReport(x: unknown): x is string {
   return (
     typeof x === 'string' &&
-    x.startsWith(GATE_PREFIX) &&
+    (x.startsWith(GATE_PREFIX) || x.startsWith(CORPUS_GATE_PREFIX)) &&
     x.length <= GATE_MAX_CHARS &&
     !hasControlChar(x)
   );

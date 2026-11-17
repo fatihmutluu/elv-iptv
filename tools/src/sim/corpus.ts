@@ -22,6 +22,7 @@ const CHANNELS: readonly (readonly [string, RecipeName, number, string | null])[
   ['Resolution switch 720p and 1080p', 'h264-aac-res-switch', 4, null],
   ['Stream labelled as a web page', 'h264-aac-720p25', 4, 'type=text/html'],
   ['Redirect to HLS', 'h264-aac-720p25', 4, 'redirect=hls'],
+  ['Stream labelled as a playlist', 'h264-aac-720p25', 4, 'type=application/vnd.apple.mpegurl'],
 ];
 const MKV_MOVIES: readonly RecipeName[] = [
   'hevc-main-1080p25',
@@ -38,7 +39,7 @@ const SUBTITLE_GROUP = 3;
 const liveCategory = (group: number): string => String(group + 1);
 const vodCategory = (group: number): string => String(10001 + group);
 
-/** The `corpus` profile: one live channel and one movie per media recipe, two delivery-quirk channels and a short series. */
+/** The `corpus` profile: one live channel and one movie per media recipe, three delivery-quirk channels and a short series. */
 export function corpusCatalog(seed: number): Catalog {
   const categories: Category[] = [
     ...GROUPS.map((name, i): Category => ({ id: liveCategory(i), name, kind: 'live' })),

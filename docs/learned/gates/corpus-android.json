@@ -1,0 +1,46 @@
+{
+  "commit": "62bb72c",
+  "date": "2026-11-17",
+  "target": "android",
+  "device": {
+    "model": "sdk_gphone64_x86_64",
+    "release": "16",
+    "sdk": "36"
+  },
+  "line": {
+    "total": 29,
+    "passed": 26,
+    "failed": [
+      {
+        "id": "live-1004",
+        "label": "MPEG-2 576i25 AC-3",
+        "reason": "timeout waiting for playing"
+      },
+      {
+        "id": "vod-200003",
+        "label": "HEVC 1080p25 10-bit (MP4)",
+        "reason": "playback/decoder"
+      },
+      {
+        "id": "vod-200004",
+        "label": "MPEG-2 576i25 AC-3 (MKV)",
+        "reason": "timeout waiting for playing"
+      }
+    ],
+    "surfaceCreated": 1,
+    "staleEventsApplied": 0
+  },
+  "connections": {
+    "limitResponses": 0,
+    "overlapMs": 0
+  },
+  "crashes": [],
+  "outcome": {
+    "ok": false,
+    "failures": [
+      "live-1004 (MPEG-2 576i25 AC-3): timeout waiting for playing",
+      "vod-200003 (HEVC 1080p25 10-bit (MP4)): playback/decoder",
+      "vod-200004 (MPEG-2 576i25 AC-3 (MKV)): timeout waiting for playing"
+    ]
+  }
+}

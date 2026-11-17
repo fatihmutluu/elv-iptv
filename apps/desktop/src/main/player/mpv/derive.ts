@@ -130,6 +130,7 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
       ...(fileError === undefined ? {} : { fileError }),
       logs: media.logs,
       mediaKind: media.kind,
+      played: media.restarted,
     });
     m = undefined;
     if (outcome.kind === 'stopped') return [];

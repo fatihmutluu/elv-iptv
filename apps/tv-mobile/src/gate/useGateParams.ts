@@ -2,6 +2,7 @@ import Constants from 'expo-constants';
 import { useEffect, useState } from 'react';
 import { Linking, Platform, Settings } from 'react-native';
 import { type ContractGateParams, parseContractGateUrl } from './contract/contract-routes';
+import { type CorpusGateParams, parseCorpusGateUrl } from './corpus/corpus-items';
 import { type ImportParams, parseImportUrl } from './import/route';
 import { type PlayerGateParams, parsePlayerGateUrl } from './player/player-routes';
 import { type GateParams, parseGateUrl } from './routes';
@@ -11,7 +12,8 @@ export type GateRoute =
   | { name: 'list'; params: GateParams }
   | { name: 'import'; params: ImportParams }
   | { name: 'player'; params: PlayerGateParams }
-  | { name: 'contract'; params: ContractGateParams };
+  | { name: 'contract'; params: ContractGateParams }
+  | { name: 'corpus'; params: CorpusGateParams };
 
 function parseRoute(url: string | null): GateRoute | undefined {
   const list = parseGateUrl(url);
@@ -21,7 +23,9 @@ function parseRoute(url: string | null): GateRoute | undefined {
   const player = parsePlayerGateUrl(url);
   if (player !== undefined) return { name: 'player', params: player };
   const contract = parseContractGateUrl(url);
-  return contract === undefined ? undefined : { name: 'contract', params: contract };
+  if (contract !== undefined) return { name: 'contract', params: contract };
+  const corpus = parseCorpusGateUrl(url);
+  return corpus === undefined ? undefined : { name: 'corpus', params: corpus };
 }
 
 /** `NSUserDefaults` key of the launch argument `-gateUrl <url>` (`xcrun simctl launch <udid> <bundle id> -gateUrl …`). */

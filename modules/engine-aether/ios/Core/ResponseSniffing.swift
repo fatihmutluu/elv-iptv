@@ -53,14 +53,12 @@ public func hasExtM3uSignature(_ prefix: Data) -> Bool {
   return startsWithAfterBomAndBlanks(bytes, marker: extM3uMarker)
 }
 
-/// Classifies a progressive stream response from its `Content-Type` header and initial `prefix` bytes.
+/// Classifies a progressive stream response from its initial `prefix` bytes (`Content-Type` labels are not trusted).
 public func classifyProgressive(contentType: String?, prefix: Data) -> ProgressiveVerdict {
+  _ = contentType
   let bytes = [UInt8](prefix.prefix(sniffBytes))
-  if isHlsContentType(contentType) || startsWithAfterBomAndBlanks(bytes, marker: extM3uMarker) {
+  if startsWithAfterBomAndBlanks(bytes, marker: extM3uMarker) {
     return .playlist
-  }
-  if isProgressiveNoticeContentType(contentType) {
-    return .notice
   }
   let tsSync = hasTsSync(bytes)
   if !bytes.isEmpty && isValidPrintableUtf8(bytes) && !tsSync {
@@ -93,7 +91,7 @@ private func startsWithAfterBomAndBlanks(_ bytes: [UInt8], marker: [UInt8]) -> B
 }
 
 private func hasTsSync(_ bytes: [UInt8]) -> Bool {
-  let limit = max(0, min(tsPacketSize, bytes.count - tsPacketSize))
+  let limit = max(0, min(tsPacketSize, bytes.count - tsPacketSize * 2))
   guard limit > 0 else { return false }
   for start in 0..<limit {
     var count = 0
@@ -107,7 +105,7 @@ private func hasTsSync(_ bytes: [UInt8]) -> Bool {
       count += 1
       pos += tsPacketSize
     }
-    if allSync && count >= 2 {
+    if allSync && count >= 3 {
       return true
     }
   }

@@ -76,11 +76,17 @@ class ResponseSniffingTest {
   }
 
   @Test
-  fun `a progressive playlist is HLS by label or by body`() {
-    assertEquals(ResponseKind.HLS, classify(RequestKind.PROGRESSIVE, "application/vnd.apple.mpegurl", ByteArray(0)))
-    assertEquals(ResponseKind.HLS, classify(RequestKind.PROGRESSIVE, "audio/x-mpegurl", notice))
+  fun `a progressive playlist is HLS only by its body`() {
     assertEquals(ResponseKind.HLS, classify(RequestKind.PROGRESSIVE, "application/octet-stream", bytes("#EXTM3U\n")))
     assertEquals(ResponseKind.HLS, classify(RequestKind.PROGRESSIVE, "text/html", bom + bytes("\r\n  #EXTM3U\r\n")))
+    assertEquals(ResponseKind.NOTICE, classify(RequestKind.PROGRESSIVE, "audio/x-mpegurl", notice))
+  }
+
+  @Test
+  fun `MPEG-TS labelled as a playlist is media`() {
+    for (label in listOf("application/vnd.apple.mpegurl", "application/x-mpegURL", "audio/mpegurl")) {
+      assertEquals("label $label", ResponseKind.MEDIA, classify(RequestKind.PROGRESSIVE, label, tsPackets()))
+    }
   }
 
   @Test
@@ -106,6 +112,35 @@ class ResponseSniffingTest {
       it[188] = 'G'.code.toByte()
     }
     assertEquals(ResponseKind.NOTICE, classify(RequestKind.PROGRESSIVE, "text/html", text))
+  }
+
+  @Test
+  fun `a short notice with two G characters 188 bytes apart is a notice, three sync bytes are media`() {
+    val text = ByteArray(250) { 'a'.code.toByte() }.also {
+      it[0] = 'G'.code.toByte()
+      it[188] = 'G'.code.toByte()
+    }
+    assertEquals(ResponseKind.NOTICE, classify(RequestKind.PROGRESSIVE, "text/plain", text))
+    assertEquals(ResponseKind.NOTICE, classify(RequestKind.SEGMENT, "text/plain", text))
+    val synced = ByteArray(400) { 'a'.code.toByte() }.also {
+      it[5] = 'G'.code.toByte()
+      it[193] = 'G'.code.toByte()
+      it[381] = 'G'.code.toByte()
+    }
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.PROGRESSIVE, "text/plain", synced))
+  }
+
+  @Test
+  fun `WebVTT segments without a header are media`() {
+    val midFile = bytes("01:02.000 --> 01:05.000\nHello\n")
+    val noted = bytes("NOTE comment\n\n00:01.000 --> 00:03.000\nHi\n")
+    val identified = bytes("cue-7\n00:00:01.000 --> 00:00:03.000 align:start\nHi\n")
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.SEGMENT, "text/plain", midFile))
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.SEGMENT, null, noted))
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.SEGMENT, "application/octet-stream", identified))
+    assertEquals(ResponseKind.MEDIA, classify(RequestKind.SEGMENT, "text/vtt; charset=utf-8", bytes("Hello\nthere\n")))
+    assertEquals(ResponseKind.NOTICE, classify(RequestKind.SEGMENT, "text/html", bytes("<html>Limit</html>")))
+    assertEquals(ResponseKind.NOTICE, classify(RequestKind.SEGMENT, "text/vtt", bytes("<html><body>Limit</body></html>")))
   }
 
   @Test

@@ -61,12 +61,7 @@ struct EngineCoreTests {
     core.observe(.opened, serial: 1)
     core.observe(.ready, serial: 1)
     core.observe(.phase(.playing), serial: 1)
-    #expect(
-      sink.events == [
-        .state(attempt: 1, state: .buffering),
-        .state(attempt: 1, state: .ready),
-      ]
-    )
+    #expect(sink.events == [.state(attempt: 1, state: .buffering), .state(attempt: 1, state: .ready)])
     #expect(sink.shutterCovered)
 
     clock.nowMs = 1_500
@@ -94,12 +89,7 @@ struct EngineCoreTests {
     core.observe(.audioOnly, serial: 1)
     core.observe(.phase(.playing), serial: 1)
 
-    #expect(
-      sink.events == [
-        .firstFrame(attempt: 3, atMs: 2_000),
-        .state(attempt: 3, state: .playing),
-      ]
-    )
+    #expect(sink.events == [.firstFrame(attempt: 3, atMs: 2_000), .state(attempt: 3, state: .playing)])
     #expect(sink.shutterCovered)
     #expect(sink.screenOn)
   }
@@ -217,7 +207,7 @@ struct EngineCoreTests {
     )
   }
 
-  @Test("a live media that ends is a network error; a VOD media ends")
+  @Test("a live media or an unplayed VOD that ends is a network error; a played VOD media ends")
   func endedBehaviorLiveVsVod() {
     let (core, _, sink, _) = makeHarness()
     core.load(LoadRequest(url: "http://h:7878/live/demo/demo/1001.ts", live: true), attempt: 1)
@@ -226,10 +216,8 @@ struct EngineCoreTests {
     sink.events.removeAll()
 
     core.observe(.phase(.ended), serial: 1)
-    #expect(sink.events.count == 1)
-    if case let .error(attempt, error) = sink.events.first {
-      #expect(attempt == 1)
-      #expect(error.code == "network")
+    if case let .error(attempt, error) = sink.events.first, sink.events.count == 1 {
+      #expect(attempt == 1 && error.code == "network" && error.detail.hasPrefix("liveEnded"))
     } else {
       Issue.record("expected network error on live ended")
     }
@@ -242,6 +230,17 @@ struct EngineCoreTests {
 
     core.observe(.phase(.ended), serial: 2)
     #expect(sink.events == [.state(attempt: 2, state: .ended)])
+    #expect(!sink.screenOn)
+
+    core.load(LoadRequest(url: "http://h:7878/movie/demo/demo/200001.mp4", live: false), attempt: 3)
+    sink.events.removeAll()
+
+    core.observe(.phase(.ended), serial: 3)
+    if case let .error(attempt, error) = sink.events.first, sink.events.count == 1 {
+      #expect(attempt == 3 && error.code == "network" && error.detail.hasPrefix("vodEndedBeforePlay"))
+    } else {
+      Issue.record("expected network error when VOD ends before play")
+    }
     #expect(!sink.screenOn)
   }
 

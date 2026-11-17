@@ -170,6 +170,7 @@ struct LiveTsReaderLifecycleTests {
     transport1.completeOnCancel = false
     transport1.onStart = { t in
       t.sendStatus(200, contentType: "application/vnd.apple.mpegurl")
+      t.sendData(Data("#EXTM3U\n".utf8))
     }
 
     weak var weakReader: LiveTsReader?

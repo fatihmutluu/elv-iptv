@@ -147,8 +147,10 @@ internal class EventReporter(
 
   private fun update(player: Player) {
     val state = stateOf(player)
-    if (state == "ended" && live) {
-      if (lastState != state) sendError("network", null, "live stream ended")
+    if (state == "ended" && (live || !played)) {
+      if (lastState != state) {
+        sendError("network", null, if (live) "live stream ended" else "empty media ended before playback")
+      }
       lastState = state
     } else if (state != null && state != lastState) {
       lastState = state

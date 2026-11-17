@@ -62,23 +62,25 @@ struct ResponseSniffingTests {
     #expect(classifyProgressive(contentType: nil, prefix: Data("Bağlantı sınırı aşıldı\r\n".utf8)) == .notice)
   }
 
-  @Test("HTML content type is a notice whatever the body")
-  func htmlContentTypeIsNoticeWhateverTheBody() {
-    #expect(classifyProgressive(contentType: "text/html", prefix: Data()) == .notice)
-    #expect(classifyProgressive(contentType: "text/html; charset=UTF-8", prefix: tsPackets()) == .notice)
+  @Test("progressive media is judged by body bytes under any label")
+  func progressiveMediaUnderAnyLabel() {
+    #expect(classifyProgressive(contentType: "text/html", prefix: Data()) == .media(formatHint: nil))
+    #expect(classifyProgressive(contentType: "text/html; charset=UTF-8", prefix: tsPackets()) == .media(formatHint: "mpegts"))
     let mp4 = Data([0, 0, 0, 0x18]) + Data("ftypmp42".utf8) + Data(count: 16)
-    #expect(classifyProgressive(contentType: "text/html", prefix: mp4) == .notice)
-    #expect(classifyProgressive(contentType: "application/xhtml+xml", prefix: tsPackets()) == .notice)
-    #expect(classifyProgressive(contentType: "application/json", prefix: tsPackets()) == .notice)
-    #expect(classifyProgressive(contentType: "text/plain", prefix: mp4) == .notice)
+    #expect(classifyProgressive(contentType: "text/html", prefix: mp4) == .media(formatHint: nil))
+    #expect(classifyProgressive(contentType: "application/xhtml+xml", prefix: tsPackets()) == .media(formatHint: "mpegts"))
+    #expect(classifyProgressive(contentType: "application/json", prefix: tsPackets()) == .media(formatHint: "mpegts"))
+    #expect(classifyProgressive(contentType: "text/plain", prefix: mp4) == .media(formatHint: nil))
   }
 
-  @Test("a progressive playlist is HLS by label or by body")
-  func progressivePlaylistByLabelOrBody() {
-    #expect(classifyProgressive(contentType: "application/vnd.apple.mpegurl", prefix: Data()) == .playlist)
-    #expect(classifyProgressive(contentType: "audio/x-mpegurl", prefix: notice) == .playlist)
+  @Test("a progressive playlist is HLS only by an #EXTM3U body")
+  func progressivePlaylistOnlyByBody() {
     #expect(classifyProgressive(contentType: "application/octet-stream", prefix: Data("#EXTM3U\n".utf8)) == .playlist)
     #expect(classifyProgressive(contentType: "text/html", prefix: bom + Data("\r\n  #EXTM3U\r\n".utf8)) == .playlist)
+    #expect(classifyProgressive(contentType: "application/vnd.apple.mpegurl", prefix: tsPackets()) == .media(formatHint: "mpegts"))
+    #expect(classifyProgressive(contentType: "application/x-mpegURL", prefix: tsPackets()) == .media(formatHint: "mpegts"))
+    #expect(classifyProgressive(contentType: "audio/x-mpegurl", prefix: notice) == .notice)
+    #expect(classifyProgressive(contentType: "application/vnd.apple.mpegurl", prefix: Data()) == .media(formatHint: nil))
   }
 
   @Test("progressive media is mpegts on TS sync and nil hint on other binary or empty")
@@ -86,7 +88,9 @@ struct ResponseSniffingTests {
     #expect(classifyProgressive(contentType: "video/mp2t", prefix: tsPackets()) == .media(formatHint: "mpegts"))
     #expect(classifyProgressive(contentType: nil, prefix: tsPackets()) == .media(formatHint: "mpegts"))
     let twoPackets = Data(tsPackets().prefix(188 * 2))
-    #expect(classifyProgressive(contentType: nil, prefix: twoPackets) == .media(formatHint: "mpegts"))
+    #expect(classifyProgressive(contentType: nil, prefix: twoPackets) == .media(formatHint: nil))
+    let threeSyncs = Data(tsPackets().prefix(188 * 2 + 1))
+    #expect(classifyProgressive(contentType: nil, prefix: threeSyncs) == .media(formatHint: "mpegts"))
     let mp4 = Data([0, 0, 0, 0x18]) + Data("ftypmp42".utf8) + Data(count: 16)
     #expect(classifyProgressive(contentType: "application/octet-stream", prefix: mp4) == .media(formatHint: nil))
     #expect(classifyProgressive(contentType: nil, prefix: Data()) == .media(formatHint: nil))
@@ -105,6 +109,15 @@ struct ResponseSniffingTests {
     bytes[0] = UInt8(ascii: "G")
     bytes[188] = UInt8(ascii: "G")
     #expect(classifyProgressive(contentType: "video/mp2t", prefix: Data(bytes)) == .notice)
+  }
+
+  @Test("a short notice with G at 0 and 188 needs a third sync byte to be MPEG-TS")
+  func shortNoticeWithTwoGsIsNotice() {
+    var bytes = [UInt8](repeating: UInt8(ascii: "a"), count: 250)
+    bytes[0] = UInt8(ascii: "G")
+    bytes[188] = UInt8(ascii: "G")
+    #expect(classifyProgressive(contentType: "video/mp2t", prefix: Data(bytes)) == .notice)
+    #expect(classifyProgressive(contentType: nil, prefix: Data(bytes)) == .notice)
   }
 
   @Test("invalid UTF-8 binary streams with high bytes 0x80 to 0xFF are classified as media, not text notices")

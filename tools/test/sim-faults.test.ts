@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { FaultParseError, mediaType, parseFaults } from '../src/sim/faults.ts';
 import { liveArgs } from '../src/sim/media.ts';
+import { type SimHandle, startSim } from '../src/sim/server.ts';
 
 describe('parseFaults', () => {
   it('parses each fault', () => {
@@ -43,6 +44,15 @@ describe('parseFaults', () => {
     expect(mediaType([], 'video/mp2t')).toBe('video/mp2t');
   });
 
+  it('parses an empty 200 response', () => {
+    expect(parseFaults('empty')).toEqual([{ kind: 'empty' }]);
+    expect(parseFaults('type=video/mp4,empty')).toEqual([
+      { kind: 'type', mime: 'video/mp4' },
+      { kind: 'empty' },
+    ]);
+    expect(() => parseFaults('empty=1')).toThrow(FaultParseError);
+  });
+
   it('parses a provider burst of up to 30 s', () => {
     expect(parseFaults('burst=8')).toEqual([{ kind: 'burst', sec: 8 }]);
     expect(parseFaults('burst=0.5')).toEqual([{ kind: 'burst', sec: 0.5 }]);
@@ -53,6 +63,37 @@ describe('parseFaults', () => {
     ]);
     for (const bad of ['burst=0', 'burst=31', 'burst=30.5', 'burst=x', 'burst=', 'burst=-1'])
       expect(() => parseFaults(bad)).toThrow(FaultParseError);
+  });
+});
+
+describe('empty request fault', () => {
+  const open: SimHandle[] = [];
+  afterEach(async () => {
+    await Promise.all(open.splice(0).map((h) => h.close()));
+  });
+
+  async function sim(): Promise<SimHandle> {
+    const handle = await startSim({ port: 0, ffmpegPath: null });
+    open.push(handle);
+    return handle;
+  }
+
+  it('answers 200 with an empty body', async () => {
+    const { url } = await sim();
+    const res = await fetch(`${url}/movie/demo/demo/1.mp4?fault=empty`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-length')).toBe('0');
+    expect(res.headers.get('content-type')).toBe('text/plain');
+    expect((await res.arrayBuffer()).byteLength).toBe(0);
+  });
+
+  it('keeps the content type a type fault asks for', async () => {
+    const { url } = await sim();
+    const res = await fetch(`${url}/movie/demo/demo/1.mp4?fault=type=video/mp4,empty`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('video/mp4');
+    expect(res.headers.get('content-length')).toBe('0');
+    expect((await res.arrayBuffer()).byteLength).toBe(0);
   });
 });
 

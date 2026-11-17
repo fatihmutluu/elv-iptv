@@ -12,6 +12,7 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
 - `pnpm gate import [flags]` runs the on-device catalog import gate on the Android TV emulator; flags, baseline and budget rules: `src/gates/AGENTS.md`.
 - `pnpm gate player [flags]` runs the player zap, fault, soak and stress gate on Android TV, tvOS and iOS simulators; flags, baselines and budget rules: `src/gates/AGENTS.md`.
 - `pnpm gate contract [flags]` runs the shared `PlayerEngine` contract gate on Android TV, tvOS and iOS simulators; flags: `src/gates/AGENTS.md`.
+- `pnpm gate corpus [flags]` runs the 29-item format corpus verification gate on Android, Apple simulators and desktop; flags: `src/gates/AGENTS.md`.
 - `pnpm gate desktop [flags]` runs the desktop mpv player zap, VOD, fault and orphan gate (Windows / macOS); flags, baseline and budget rules: `src/gates/AGENTS.md`.
 - `pnpm mpv fetch [--force]` / `pnpm mpv verify [--dir <folder>]` install and rescan the pinned mpv runtime for desktop; builds the Windows `elv-mpv.exe` launcher; macOS gets our CI build (`mpv-runtime/`, workflow `mpv-runtime.yml`) through `gh`; rules: `src/mpv/AGENTS.md`.
 - `pnpm scaffold <pure|rn|module> <name>` creates a workspace package (skill `add-package`).

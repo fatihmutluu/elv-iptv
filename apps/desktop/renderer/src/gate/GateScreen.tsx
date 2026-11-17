@@ -3,6 +3,7 @@ import { type ReactElement, useEffect, useState, useSyncExternalStore } from 're
 import { StyleSheet, Text, View } from 'react-native';
 import { createDesktopEngine, type DesktopEngine } from '../player/desktop-engine.ts';
 import { PlayerView } from '../player/PlayerView.tsx';
+import { type CorpusRun, corpusLine, createCorpusRun } from './corpus-driver.ts';
 import { createGateRun, type GateRun } from './driver.ts';
 import { playerLine } from './metrics.ts';
 import type { GateParams } from './params.ts';
@@ -21,7 +22,7 @@ function statusCode(status: PlaybackState['status']): string {
 
 interface Session {
   engine: DesktopEngine;
-  run: GateRun;
+  run: GateRun | CorpusRun;
 }
 
 function Player({ session }: { session: Session }): ReactElement {
@@ -60,14 +61,31 @@ export function GateScreen({ params }: { params: GateParams }): ReactElement {
           engine.release();
           return;
         }
+        const later = (fn: () => void, ms: number) => {
+          const id = setTimeout(fn, ms);
+          return () => clearTimeout(id);
+        };
+        if (params.corpus === true) {
+          const corpus = createCorpusRun({
+            engine,
+            base: params.base,
+            account: params.account,
+            burst: params.burst ?? 0,
+            now: () => performance.now(),
+            later,
+          });
+          current = { engine, run: corpus };
+          setSession(current);
+          void corpus.start().then((report) => {
+            if (!cancelled) bridge.reportGate(corpusLine(report));
+          });
+          return;
+        }
         const run = createGateRun({
           engine,
           params,
           now: () => performance.now(),
-          later: (fn, ms) => {
-            const id = setTimeout(fn, ms);
-            return () => clearTimeout(id);
-          },
+          later,
         });
         current = { engine, run };
         engine.onUi((event) => {

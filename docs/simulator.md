@@ -39,7 +39,7 @@ Specs: [stream simulator](superpowers/specs/2026-11-13-stream-simulator-design.m
 ## Accounts
 - Accounts (password = username): `demo` (small, 1 connection), `large` (2), `compat` (1), `expired`, `quirks`
   (real-panel shapes: CRLF playlist, +0100 guide), `huge` (500k entries, 2 connections; opt-in, not in `pnpm check`),
-  `corpus` (profile `corpus`: one live channel and one movie per recipe, delivery-quirk channels 1012 and 1013, the
+  `corpus` (profile `corpus`: one live channel and one movie per recipe, delivery-quirk channels 1012 to 1014, the
   MKV `Subtitle Series`; 1 connection, 509).
 
 ## Data routes
@@ -48,10 +48,10 @@ Specs: [stream simulator](superpowers/specs/2026-11-13-stream-simulator-design.m
   `/_sim/events` (GET, POST JSONL <= 1 MB). Log: passwords `***`.
 
 ## Faults
-- Faults: `?fault=<spec>`, parts joined by `,`: `status=<200-599>`, `slow-start=<s>`, `redirect`, `text-notice` (before
-  any route), `drop@<s>`, `stall<n>s@<s>`, `rate=<kbps>`, `type=<mime>`, `redirect=hls`, `burst=<s>`. Drop, stall
+- Faults: `?fault=<spec>`, parts joined by `,`: `status=<200-599>`, `slow-start=<s>`, `redirect`, `text-notice`, `empty` (200 with a
+  0-byte body; keeps a `type=<mime>` label; before any route), `drop@<s>`, `stall<n>s@<s>`, `rate=<kbps>`, `type=<mime>`, `redirect=hls`, `burst=<s>`. Drop, stall
   and rate apply to TS and VOD files only (not playlists, `/hls/` responses or data routes). Unknown: 400. Catalog
-  faults (`small` 1013 and 1014, `corpus` 1012 and 1013) apply when no query or rule does.
+  faults (`small` 1013 and 1014, `corpus` 1012 to 1014) apply when no query or rule does.
 - `type=<mime>` relabels the `Content-Type` of live TS, the live and VOD `.m3u8` at the account URL and movie/episode
   files (also ranged ones); the body is unchanged. Not catch-up, `/hls/` responses or data routes. The first `type`
   part wins.

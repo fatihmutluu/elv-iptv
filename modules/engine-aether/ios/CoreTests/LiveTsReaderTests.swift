@@ -23,6 +23,15 @@ private func readChunk(_ reader: LiveTsReader, maxBytes: Int) -> (Int32, Data) {
 struct LiveTsReaderTests {
   private let streamUrl = URL(string: "http://127.0.0.1:7878/live/demo/demo/1001.ts")!
 
+  private func makeReader(
+    headers: [String: String] = [:],
+    generation: Int = 1,
+    gate: ConnectionGate,
+    makeTransport: @escaping @Sendable () -> ByteTransport
+  ) -> LiveTsReader {
+    LiveTsReader(url: streamUrl, headers: headers, generation: generation, gate: gate, makeTransport: makeTransport)
+  }
+
   @Test("a 404 answer fails the open with status 404 and hands nothing to the engine")
   func status404FailsOpenAndClosesGate() async {
     let gate = ConnectionGate()
@@ -33,13 +42,7 @@ struct LiveTsReaderTests {
       t.complete(error: nil)
     }
 
-    let reader = LiveTsReader(
-      url: streamUrl,
-      headers: ["User-Agent": "ELVTest"],
-      generation: 1,
-      gate: gate,
-      makeTransport: { transport }
-    )
+    let reader = makeReader(headers: ["User-Agent": "ELVTest"], gate: gate, makeTransport: { transport })
 
     let verdict = await reader.open()
     #expect(verdict == .failed(.status(404)))
@@ -67,13 +70,7 @@ struct LiveTsReaderTests {
       t.complete(error: nil)
     }
 
-    let reader = LiveTsReader(
-      url: streamUrl,
-      headers: [:],
-      generation: 1,
-      gate: gate,
-      makeTransport: { transport }
-    )
+    let reader = makeReader(gate: gate, makeTransport: { transport })
 
     let verdict = await reader.open()
     #expect(verdict == .failed(.notice))
@@ -93,13 +90,7 @@ struct LiveTsReaderTests {
       t.sendData(Data("#EXTM3U\n#EXT-X-VERSION:3\n".utf8))
     }
 
-    let reader = LiveTsReader(
-      url: streamUrl,
-      headers: [:],
-      generation: 1,
-      gate: gate,
-      makeTransport: { transport }
-    )
+    let reader = makeReader(gate: gate, makeTransport: { transport })
 
     let verdict = await reader.open()
     #expect(verdict == .playlist)
@@ -126,13 +117,7 @@ struct LiveTsReaderTests {
       t.sendData(followUp)
     }
 
-    let reader = LiveTsReader(
-      url: streamUrl,
-      headers: ["X-Test": "1"],
-      generation: 1,
-      gate: gate,
-      makeTransport: { transport }
-    )
+    let reader = makeReader(headers: ["X-Test": "1"], gate: gate, makeTransport: { transport })
 
     let verdict = await reader.open()
     #expect(verdict == .media(formatHint: "mpegts"))
@@ -154,13 +139,7 @@ struct LiveTsReaderTests {
   func loadDuringOpenSupersededAndClosesOldReader() async throws {
     let gate = ConnectionGate()
     let transport1 = FakeTransport()
-    let reader1 = LiveTsReader(
-      url: streamUrl,
-      headers: [:],
-      generation: 1,
-      gate: gate,
-      makeTransport: { transport1 }
-    )
+    let reader1 = makeReader(gate: gate, makeTransport: { transport1 })
 
     let open1 = Task { await reader1.open() }
     try await Task.sleep(nanoseconds: 30_000_000)
@@ -178,13 +157,7 @@ struct LiveTsReaderTests {
       t.sendStatus(200, contentType: "video/mp2t")
       t.sendData(makeTsPackets(count: 6, seed: 0x33))
     }
-    let reader2 = LiveTsReader(
-      url: streamUrl,
-      headers: [:],
-      generation: 2,
-      gate: gate,
-      makeTransport: { transport2 }
-    )
+    let reader2 = makeReader(generation: 2, gate: gate, makeTransport: { transport2 })
     let verdict2 = await reader2.open()
     #expect(verdict2 == .media(formatHint: "mpegts"))
     reader2.close()
@@ -209,13 +182,7 @@ struct LiveTsReaderTests {
       t.sendData(part2)
     }
 
-    let reader = LiveTsReader(
-      url: streamUrl,
-      headers: [:],
-      generation: 1,
-      gate: gate,
-      makeTransport: { box.next() }
-    )
+    let reader = makeReader(gate: gate, makeTransport: { box.next() })
 
     let verdict = await reader.open()
     #expect(verdict == .media(formatHint: "mpegts"))
@@ -258,13 +225,7 @@ struct LiveTsReaderTests {
       t.sendData(part2)
     }
 
-    let reader = LiveTsReader(
-      url: streamUrl,
-      headers: [:],
-      generation: 1,
-      gate: gate,
-      makeTransport: { box.next() }
-    )
+    let reader = makeReader(gate: gate, makeTransport: { box.next() })
 
     #expect(await reader.open() == .media(formatHint: "mpegts"))
     _ = readChunk(reader, maxBytes: part1.count)
@@ -294,13 +255,7 @@ struct LiveTsReaderTests {
       t.sendData(makeTsPackets(count: 6, seed: 0x77))
     }
 
-    let reader = LiveTsReader(
-      url: streamUrl,
-      headers: [:],
-      generation: 1,
-      gate: gate,
-      makeTransport: { transport }
-    )
+    let reader = makeReader(gate: gate, makeTransport: { transport })
 
     #expect(await reader.open() == .media(formatHint: "mpegts"))
     _ = readChunk(reader, maxBytes: 2_048)
@@ -349,6 +304,75 @@ struct LiveTsReaderTests {
     } else {
       Issue.record("expected reader status 509 to win over engine customSourceProbeFailed")
     }
+  }
+
+  @Test("MPEG-TS bytes labelled as mpegurl open as mpegts after sniffing 1,024 bytes")
+  func tsBytesWithMpegurlContentTypeOpenAsMpegts() async {
+    let gate = ConnectionGate()
+    let packets = makeTsPackets(count: 6, seed: 0x31)
+    let transport = FakeTransport()
+    transport.onStart = { t in
+      t.sendStatus(200, contentType: "application/vnd.apple.mpegurl")
+      t.sendData(packets)
+    }
+    let reader = makeReader(gate: gate, makeTransport: { transport })
+    #expect(await reader.open() == .media(formatHint: "mpegts"))
+    #expect(!transport.isCancelled)
+    let (n, chunk) = readChunk(reader, maxBytes: packets.count)
+    #expect(Int(n) == packets.count && chunk == packets)
+    reader.close()
+  }
+
+  @Test("MPEG-TS bytes labelled as text/html open as mpegts and survive a single-drop reconnect")
+  func tsBytesWithHtmlContentTypeOpenAndReconnect() async {
+    let gate = ConnectionGate()
+    let part1 = makeTsPackets(count: 6, seed: 0x41)
+    let part2 = makeTsPackets(count: 4, seed: 0x52)
+    let transport1 = FakeTransport()
+    let transport2 = FakeTransport()
+    let box = TransportSequence([transport1, transport2])
+    transport1.onStart = { t in
+      t.sendStatus(200, contentType: "text/html; charset=utf-8")
+      t.sendData(part1)
+    }
+    transport2.onStart = { t in
+      t.sendStatus(200, contentType: "text/html")
+      t.sendData(part2)
+    }
+
+    let reader = makeReader(gate: gate, makeTransport: { box.next() })
+    #expect(await reader.open() == .media(formatHint: "mpegts"))
+    let (n1, data1) = readChunk(reader, maxBytes: part1.count)
+    #expect(Int(n1) == part1.count && data1 == part1)
+
+    transport1.complete(error: .transport(domain: NSURLErrorDomain, code: NSURLErrorNetworkConnectionLost))
+    let (n2, data2) = readChunk(reader, maxBytes: part2.count)
+    #expect(Int(n2) == part2.count && data2 == part2)
+    #expect(reader.lastFailure == nil)
+    reader.close()
+  }
+
+  @Test("an empty 200 answer fails with notice on a notice label and transport EOF otherwise")
+  func empty200FailsWithNoticeOrTransportEof() async {
+    let gate = ConnectionGate()
+    let htmlTransport = FakeTransport()
+    htmlTransport.onStart = { t in
+      t.sendStatus(200, contentType: "text/html")
+      t.complete(error: nil)
+    }
+    let htmlReader = makeReader(generation: 1, gate: gate, makeTransport: { htmlTransport })
+    #expect(await htmlReader.open() == .failed(.notice))
+    #expect(htmlReader.lastFailure == .notice)
+
+    let tsTransport = FakeTransport()
+    tsTransport.onStart = { t in
+      t.sendStatus(200, contentType: "video/mp2t")
+      t.complete(error: nil)
+    }
+    let tsReader = makeReader(generation: 2, gate: gate, makeTransport: { tsTransport })
+    let expectedEof = ReaderFailure.transport(domain: NSURLErrorDomain, code: NSURLErrorZeroByteResource)
+    #expect(await tsReader.open() == .failed(expectedEof))
+    #expect(tsReader.lastFailure == expectedEof)
   }
 }
 
