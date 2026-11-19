@@ -1,3 +1,5 @@
+import { sanitizeHeaderValue } from './headers';
+
 /** Kinds of playlist source a user can add. */
 export type SourceKind = 'm3u' | 'xtream';
 
@@ -14,7 +16,13 @@ export interface TransportSettings {
 /** Request headers (lower-case names) for a source's transport settings. */
 export function transportHeaders(t: TransportSettings | undefined): Record<string, string> {
   const headers: Record<string, string> = {};
-  if (t?.userAgent !== undefined) headers['user-agent'] = t.userAgent;
-  if (t?.referer !== undefined) headers.referer = t.referer;
+  if (t?.userAgent !== undefined) {
+    const ua = sanitizeHeaderValue(t.userAgent);
+    if (ua.length > 0) headers['user-agent'] = ua;
+  }
+  if (t?.referer !== undefined) {
+    const ref = sanitizeHeaderValue(t.referer);
+    if (ref.length > 0) headers.referer = ref;
+  }
   return headers;
 }

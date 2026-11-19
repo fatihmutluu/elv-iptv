@@ -242,8 +242,12 @@ describe('@elv/i18n', () => {
     expect(resolveLanguageLabel('zho', en)).toBe('Chinese');
     expect(resolveLanguageLabel('pol', en)).toBe('POL');
     expect(resolveLanguageLabel('und', en)).toBeUndefined();
+    expect(resolveLanguageLabel('unknown', en)).toBeUndefined();
     expect(resolveLanguageLabel('  ', en)).toBeUndefined();
     expect(resolveLanguageLabel(undefined, en)).toBeUndefined();
+    expect(resolveLanguageLabel('constructor', en)).toBe('CONSTRUCTOR');
+    expect(resolveLanguageLabel('toString', en)).toBe('TOSTRING');
+    expect(resolveLanguageLabel('__proto__', en)).toBeUndefined();
 
     const tr = createAppI18n('tr');
     expect(tr.t('player.play')).toBe('Oynat');

@@ -1,3 +1,4 @@
+export { detectAndDecodeText } from './encoding';
 export { decodeEntities } from './entities';
 export {
   type KindHint,
@@ -19,5 +20,5 @@ export {
   type XmltvProgramme,
 } from './xmltv';
 export { createXtreamClient, normalizeXtreamServer } from './xtream';
-export { mergeById, toNumber, toText } from './xtream-normalize';
+export { mergeById, toNumber, toStrictInt, toText } from './xtream-normalize';
 export type * from './xtream-types';

@@ -11,6 +11,17 @@ import type {
 } from './engine';
 import type { PlaybackState, PlaybackStatus, TuneRequest } from './types';
 
+/** @internal Live stream container format eligible for pre-playback fallback. */
+export type LiveContainerFormat = 'ts' | 'm3u8';
+
+/** @internal Per-session working live container cache keyed by `accountKey`. */
+export interface WorkingFormatCache {
+  get(accountKey: string): LiveContainerFormat | undefined;
+  set(accountKey: string, format: LiveContainerFormat): void;
+  evict(accountKey: string): void;
+  apply(accountKey: string, stream: StreamRequest): StreamRequest;
+}
+
 /** @internal How a recovery load differs from the tune's own stream and start position. */
 export interface LoadOverrides {
   /** Replaces the tune's stream from now on (rung 4 switching to an alternate). */
@@ -23,10 +34,17 @@ export interface LoadOverrides {
 export interface ServiceControl {
   readonly engine: PlayerEngine;
   readonly config: PlaybackConfig;
+  readonly formatCache?: WorkingFormatCache;
   now(): number;
   getState(): PlaybackState;
   /** The current tune, loaded or held. */
   request(): TuneRequest | undefined;
+  /** Latest resolved stream for the current tune, if already resolved. */
+  stream?(): StreamRequest | undefined;
+  /** Whether an open media is currently loaded on the engine. */
+  isLoaded?(): boolean;
+  /** Batches multiple synchronous state mutations into a single subscriber notification. */
+  batch?<T>(fn: () => T): T;
   /** Start timeout for the current tune (`liveStartTimeoutMs` for live, `startTimeoutMs` for VOD). */
   startTimeoutMs(): number;
   /** Takes a new token; later events of older tokens are dropped. */
@@ -35,10 +53,10 @@ export interface ServiceControl {
   /** Freezes `state.anchor` at `positionAt(anchor, now)` with `rate: 0`. */
   freezeAnchor(): void;
   /**
-   * Ends a hold and sends `load` with the current token and the resolved stream; a tune still
-   * resolving loads when its resolve settles.
+   * Ends a hold and sends `load` with the current token and the resolved stream; returns `true`
+   * when `engine.load` was dispatched immediately (`stream !== undefined`).
    */
-  load(overrides?: LoadOverrides): void;
+  load(overrides?: LoadOverrides): boolean;
   /** Sends `stop` for the open media and marks it unloaded. */
   stopMedia(): void;
   /** Sets `failed` and stops the engine. */
@@ -58,7 +76,7 @@ export interface RecoveryHooks {
   onSeek?(positionMs: number): void;
   /** The user paused; called before `pause` is sent. */
   onPause?(): void;
-  /** The user resumed; called after `play` is sent. */
+  /** The user resumed; called before `play` is sent so stale-pause or deferred reloads run first. */
   onPlay?(): void;
   onState?(state: EngineState): void;
   onClock?(anchor: ClockAnchor): void;

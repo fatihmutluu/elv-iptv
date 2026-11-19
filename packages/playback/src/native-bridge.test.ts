@@ -199,4 +199,15 @@ describe('bridgeNativeEngine', () => {
     expect(handle.load).not.toHaveBeenCalled();
     expect(events).toEqual([]);
   });
+
+  it('isolates subscriber exceptions so throwing listeners never block peers (#224)', () => {
+    const { emit, engine } = fakeHandle();
+    const received: EngineEvent[] = [];
+    engine.subscribe(() => {
+      throw new Error('listener boom');
+    });
+    engine.subscribe((event) => received.push(event));
+    expect(() => emit({ attempt: 1, type: 'state', state: 'playing' })).not.toThrow();
+    expect(received).toEqual([{ attempt: 1, type: 'state', state: 'playing' }]);
+  });
 });

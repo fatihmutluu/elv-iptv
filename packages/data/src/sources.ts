@@ -23,6 +23,8 @@ export interface SourceSettings {
   guideWindow?: { daysBack: number; daysForward: number };
   /** Guide URLs found in the playlist header, as placeholders `{{g:d<n>}}` whose URLs live in `source.<id>.urlvars`. */
   discoveredGuideUrls?: string[];
+  /** Allowed live output formats advertised by an Xtream panel's `user_info` (`ts`, `m3u8`). */
+  outputFormats?: string[];
 }
 
 /** A row of the `sources` table. */

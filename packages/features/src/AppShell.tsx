@@ -9,7 +9,7 @@ import { ThirdPartyNoticesScreen } from './notices';
 import { PlayerScreen } from './player';
 import type { AppLifecyclePort } from './ports/app-lifecycle';
 import type { PlayTarget } from './ports/play-target';
-import type { PlaybackGuard } from './ports/playback-guard';
+import { createPlaybackGuard, type PlaybackGuard } from './ports/playback-guard';
 import type { VideoHost } from './ports/video-host';
 import { SourcesScreen } from './sources';
 
@@ -125,11 +125,7 @@ export function AppShell({
   }, []);
 
   const playbackGuard = useMemo<PlaybackGuard>(
-    () => ({
-      stopIfUsingSource(sourceId: string) {
-        stopForSource(sourceId);
-      },
-    }),
+    () => createPlaybackGuard(stopForSource),
     [stopForSource],
   );
 
@@ -150,7 +146,7 @@ export function AppShell({
         return res;
       },
       removeSource: async (id) => {
-        stopForSource(id);
+        await playbackGuard.stopIfUsingSource(id);
         const res = await catalog.removeSource(id);
         if (res.ok) await syncSourcesAndBump();
         return res;
@@ -168,7 +164,7 @@ export function AppShell({
       resolveStream: (itemKey) => catalog.resolveStream(itemKey),
       close: () => catalog.close(),
     }),
-    [catalog, stopForSource, syncSourcesAndBump],
+    [catalog, playbackGuard, syncSourcesAndBump],
   );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: externalRefreshToken re-triggers source reconciliation
@@ -230,6 +226,7 @@ export function AppShell({
         catalog={observedCatalog}
         videoHost={videoHost}
         target={playTarget}
+        playbackGuard={playbackGuard}
         {...(appLifecycle !== undefined ? { appLifecycle } : {})}
         onTargetChange={(next) => {
           playTargetRef.current = next;

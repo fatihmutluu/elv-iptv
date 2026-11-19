@@ -68,4 +68,54 @@ describe('createTrackPreferences', () => {
     prefs.reset();
     expect(prefs.loadOptions()).toEqual({});
   });
+
+  it('normalizes ISO 639-1/639-2(T+B)/BCP-47 codes and checks label compatibility on swapped IDs (#253)', () => {
+    const prefs = createTrackPreferences();
+    prefs.selectAudio(
+      'a:2',
+      {
+        audio: [
+          { id: 'a:1', language: 'ger', label: 'Commentary' },
+          { id: 'a:2', language: 'ger', label: 'Main' },
+        ],
+        subtitles: [
+          { id: 's:1', language: 'und', label: 'Forced' },
+          { id: 's:2', language: 'und', label: 'Full' },
+        ],
+        selectedAudioId: 'a:1',
+        selectedSubtitleId: null,
+      },
+      true,
+    );
+    prefs.selectSubtitle(
+      's:2',
+      {
+        audio: [],
+        subtitles: [
+          { id: 's:1', language: 'und', label: 'Forced' },
+          { id: 's:2', language: 'und', label: 'Full' },
+        ],
+        selectedAudioId: null,
+        selectedSubtitleId: null,
+      },
+      true,
+    );
+
+    // Reload swaps track IDs AND changes ISO 639-2B 'ger' -> BCP-47 'de-DE'
+    prefs.beginReload();
+    expect(
+      prefs.reconcile({
+        audio: [
+          { id: 'a:1', language: 'de-DE', label: 'Main' },
+          { id: 'a:2', language: 'de-DE', label: 'Commentary' },
+        ],
+        subtitles: [
+          { id: 's:1', language: 'und', label: 'Full' },
+          { id: 's:2', language: 'und', label: 'Forced' },
+        ],
+        selectedAudioId: 'a:2',
+        selectedSubtitleId: 's:2',
+      }),
+    ).toEqual({ audioTrackId: 'a:1', subtitleTrackId: 's:1' });
+  });
 });

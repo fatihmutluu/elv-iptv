@@ -4,11 +4,13 @@ import {
   err,
   httpStatusError,
   ok,
+  openAsyncIterator,
   type Result,
   transportHeaders,
 } from '@elv/domain';
+import { detectAndDecodeText } from './encoding';
 import { toElvError } from './scan-error';
-import { decodeUtf8 } from './utf8';
+import { acquireXtreamToken, parseXtreamJson } from './xtream-json';
 import {
   isRaw,
   type Raw,
@@ -28,22 +30,55 @@ export type * from './xtream-types';
 const TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_BODY = 128 * 1024 * 1024;
 const FIRST_BUFFER = 64 * 1024;
+const NUMERIC_KEY_RE = /^\d+$/;
 const shape = () => elvError('source-format', 'unexpected-shape');
 
 async function discard(body: AsyncIterable<Uint8Array>): Promise<void> {
   try {
-    for await (const _ of body) break;
+    await openAsyncIterator(body).return?.();
   } catch {
-    // the response is already classified by its status
+    // Response is already classified by its status or early HTML sniff.
   }
+}
+
+function startsWithHtmlMarkup(chunk: Uint8Array): boolean {
+  let i = 0;
+  if (chunk.length >= 3 && chunk[0] === 0xef && chunk[1] === 0xbb && chunk[2] === 0xbf) i = 3;
+  while (i < chunk.length && (chunk[i] as number) <= 0x20) i++;
+  return i < chunk.length && chunk[i] === 0x3c; // '<'
 }
 
 async function readAll(body: AsyncIterable<Uint8Array>, max: number): Promise<Result<Uint8Array>> {
   let buffer = new Uint8Array(Math.min(FIRST_BUFFER, max));
   let total = 0;
+  let checkedPrefix = false;
+  const it = openAsyncIterator(body);
   try {
-    for await (const chunk of body) {
-      if (total + chunk.length > max) return err(elvError('source-format', 'too-large'));
+    for (;;) {
+      const step = await it.next();
+      if (step.done) break;
+      const chunk = step.value;
+      if (!checkedPrefix && chunk.length > 0) {
+        let nonWs = false;
+        for (let k = 0; k < chunk.length; k++) {
+          const b = chunk[k] as number;
+          if (b > 0x20 && !(k < 3 && (b === 0xef || b === 0xbb || b === 0xbf))) {
+            nonWs = true;
+            break;
+          }
+        }
+        if (nonWs) {
+          checkedPrefix = true;
+          if (startsWithHtmlMarkup(chunk)) {
+            await it.return?.();
+            return err(elvError('source-format', 'invalid-json'));
+          }
+        }
+      }
+      if (total + chunk.length > max) {
+        await it.return?.();
+        return err(elvError('source-format', 'too-large'));
+      }
       if (total + chunk.length > buffer.length) {
         const grown = new Uint8Array(
           Math.min(max, Math.max(buffer.length * 2, total + chunk.length)),
@@ -55,6 +90,11 @@ async function readAll(body: AsyncIterable<Uint8Array>, max: number): Promise<Re
       total += chunk.length;
     }
   } catch (e) {
+    try {
+      await it.return?.();
+    } catch {
+      // Ignore secondary return failure.
+    }
     return err(toElvError(e));
   }
   return ok(buffer.subarray(0, total));
@@ -89,6 +129,8 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
   const headers = transportHeaders(transport);
 
   async function getJson(query: string, call?: XtreamCallOptions): Promise<Result<unknown>> {
+    const token = await acquireXtreamToken(http, base, options.rateLimit, call?.signal);
+    if (!token.ok) return token;
     let response: Awaited<ReturnType<typeof http.get>>;
     try {
       response = await http.get(`${base}/player_api.php?${credentials}${query}`, {
@@ -108,11 +150,7 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     }
     const bytes = await readAll(body, maxBody);
     if (!bytes.ok) return bytes;
-    try {
-      return ok(JSON.parse(decodeUtf8(bytes.value)));
-    } catch {
-      return err(elvError('source-format', 'invalid-json'));
-    }
+    return parseXtreamJson(detectAndDecodeText(bytes.value));
   }
 
   async function object(query: string, call?: XtreamCallOptions): Promise<Result<Raw>> {
@@ -130,9 +168,23 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     const r = await getJson(query, call);
     if (!r.ok) return r;
     if (r.value === null || r.value === false) return ok([]);
-    if (isRaw(r.value) && Object.keys(r.value).length === 0) return ok([]);
-    if (!Array.isArray(r.value)) return err(shape());
-    return ok(map(r.value.filter(isRaw)));
+    if (Array.isArray(r.value)) return ok(map(r.value.filter(isRaw)));
+    if (isRaw(r.value)) {
+      const keys = Object.keys(r.value);
+      if (keys.length === 0) return ok([]);
+      if (isRaw(r.value.user_info)) {
+        const failure = accountFailure(r.value.user_info);
+        if (failure) return err(failure);
+      }
+      if (keys.every((k) => NUMERIC_KEY_RE.test(k))) {
+        const ordered = [...keys]
+          .sort((a, b) => Number(a) - Number(b))
+          .map((k) => (r.value as Raw)[k])
+          .filter(isRaw);
+        if (ordered.length === keys.length) return ok(map(ordered));
+      }
+    }
+    return err(shape());
   }
 
   const withCategory = (categoryId?: string) =>

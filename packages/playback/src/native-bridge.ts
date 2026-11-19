@@ -78,7 +78,13 @@ export function bridgeNativeEngine(
   const subscription = native.addListener('onEngineEvent', (event) => {
     if (listeners.size === 0) return;
     const mapped = mapEventClock(event, opts.uptimeMs, opts.now);
-    for (const listener of [...listeners]) listener(mapped);
+    for (const listener of [...listeners]) {
+      try {
+        listener(mapped);
+      } catch {
+        // Subscriber errors must never block peer listeners or crash the native event callback.
+      }
+    }
   });
   const command =
     <A extends unknown[]>(send: (...args: A) => void) =>

@@ -92,6 +92,14 @@ export interface XtreamCallOptions {
   signal?: AbortSignal;
 }
 
+/** Per-host token-bucket pacing options for {@link createXtreamClient}. */
+export interface XtreamRateLimitOptions {
+  burst?: number;
+  ratePerSec?: number;
+  now?: () => number;
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+}
+
 /** Options for {@link createXtreamClient}. */
 export interface XtreamClientOptions {
   http: HttpClient;
@@ -102,6 +110,8 @@ export interface XtreamClientOptions {
   username: string;
   password: string;
   transport?: TransportSettings;
+  /** Monotonic-clock per-host token bucket options (`false` disables pacing). */
+  rateLimit?: XtreamRateLimitOptions | false;
 }
 
 /** Typed access to an Xtream-style panel. Credentials stay inside the client. */

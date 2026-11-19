@@ -1,19 +1,18 @@
-import { err, ok, type Result } from '@elv/domain';
+import { elvError, err, ok, type Result } from '@elv/domain';
+import { detectAndDecodeText, normalizeBomChunks } from './encoding';
+import { dict, newEntry, parseAttrs, parseExtinf } from './m3u-attrs';
+import type { M3uBatch, M3uEntry, M3uHeader } from './m3u-types';
 import {
   applyExtHttp,
   applyKodiProp,
   applyVlcOpt,
-  dict,
   finishEntry,
   looksLikeUrl,
-  newEntry,
-  parseAttrs,
-  parseExtinf,
-} from './m3u-attrs';
-import type { M3uBatch, M3uEntry, M3uHeader } from './m3u-types';
+  splitGuideUrls,
+} from './m3u-url';
 import { toElvError } from './scan-error';
 import { createStats, type ScanStats, warn } from './stats';
-import { ByteBuffer, decodeUtf8 } from './utf8';
+import { ByteBuffer } from './utf8';
 
 export type { KindHint, M3uBatch, M3uCatchup, M3uEntry, M3uHeader } from './m3u-types';
 
@@ -29,27 +28,49 @@ const DIRECTIVES = [
   '#EXTM3U',
   '#EXTGRP:',
   '#EXTVLCOPT:',
+  '#EXTVLCOPT--',
   '#EXTHTTP:',
   '#KODIPROP:',
 ] as const;
 
-/** Index of the directive in DIRECTIVES that the line starts with (case-insensitive), or -1. */
+const HLS_MANIFEST_TAGS = [
+  '#EXT-X-TARGETDURATION',
+  '#EXT-X-MEDIA-SEQUENCE',
+  '#EXT-X-STREAM-INF',
+] as const;
+
+const CAPTIVE_HTML_RE = /^(?:<!doctype\s+html|<html\b|<head\b|<script\b|<body\b)/i;
+
+function startsWithAsciiCaseInsensitive(
+  bytes: Uint8Array,
+  start: number,
+  end: number,
+  prefix: string,
+): boolean {
+  if (end - start < prefix.length) return false;
+  for (let k = 0; k < prefix.length; k++) {
+    let b = bytes[start + k] as number;
+    if (b >= 97 && b <= 122) b -= 32;
+    if (b !== prefix.charCodeAt(k)) return false;
+  }
+  return true;
+}
+
 function directiveAt(bytes: Uint8Array, start: number, end: number): number {
   for (let d = 0; d < DIRECTIVES.length; d++) {
-    const name = DIRECTIVES[d] as string;
-    if (end - start < name.length) continue;
-    let ok = true;
-    for (let k = 1; k < name.length; k++) {
-      let b = bytes[start + k] as number;
-      if (b >= 97 && b <= 122) b -= 32;
-      if (b !== name.charCodeAt(k)) {
-        ok = false;
-        break;
-      }
-    }
-    if (ok) return d;
+    if (startsWithAsciiCaseInsensitive(bytes, start, end, DIRECTIVES[d] as string)) return d;
   }
   return -1;
+}
+
+function isHlsManifestTag(bytes: Uint8Array, start: number, end: number): boolean {
+  for (const tag of HLS_MANIFEST_TAGS) {
+    if (startsWithAsciiCaseInsensitive(bytes, start, end, tag)) {
+      const next = start + tag.length < end ? (bytes[start + tag.length] as number) : 58;
+      if (next === 58 || next <= SPACE) return true;
+    }
+  }
+  return false;
 }
 
 class M3uScanner {
@@ -57,12 +78,15 @@ class M3uScanner {
   readonly buf = new ByteBuffer();
   batch: M3uEntry[] = [];
   header: M3uHeader | undefined;
+  hlsDetected = false;
   private pending: M3uEntry | undefined;
   private pendingLine = 0;
   private scanned = 0;
   private skipLf = false;
   private discarding = false;
   private first = true;
+  private sawFirstNonEmpty = false;
+  private captiveHtml = false;
 
   private readonly batchSize: number;
   private readonly baseUrl: string | undefined;
@@ -72,12 +96,11 @@ class M3uScanner {
     this.baseUrl = baseUrl;
   }
 
-  /** Processes complete lines (all remaining ones when `final`) until the batch is full or input runs out. */
   run(final: boolean): void {
     const bytes = this.buf.view;
     const len = bytes.length;
     let pos = 0;
-    while (this.batch.length < this.batchSize) {
+    while (this.batch.length < this.batchSize && !this.hlsDetected) {
       if (this.skipLf && pos < len) {
         if (bytes[pos] === LF) pos++;
         this.skipLf = false;
@@ -153,8 +176,24 @@ class M3uScanner {
     while (start < end && ((bytes[start] as number) === SPACE || bytes[start] === TAB)) start++;
     while (end > start && ((bytes[end - 1] as number) === SPACE || bytes[end - 1] === TAB)) end--;
     if (start >= end) return;
+
+    if (this.captiveHtml) {
+      this.stats.skipped++;
+      warn(this.stats, 'not-a-url', this.stats.lines);
+      return;
+    }
+
     if (bytes[start] !== 0x23) {
-      const raw = decodeUtf8(bytes, start, end);
+      const raw = detectAndDecodeText(bytes, start, end);
+      if (!this.sawFirstNonEmpty) {
+        this.sawFirstNonEmpty = true;
+        if (CAPTIVE_HTML_RE.test(raw)) {
+          this.captiveHtml = true;
+          this.stats.skipped++;
+          warn(this.stats, 'not-a-url', this.stats.lines);
+          return;
+        }
+      }
       if (looksLikeUrl(raw, this.baseUrl)) this.url(raw);
       else {
         this.stats.skipped++;
@@ -162,9 +201,15 @@ class M3uScanner {
       }
       return;
     }
+
+    this.sawFirstNonEmpty = true;
+    if (isHlsManifestTag(bytes, start, end)) {
+      this.hlsDetected = true;
+      return;
+    }
     const d = directiveAt(bytes, start, end);
     if (d < 0) return;
-    const text = decodeUtf8(bytes, start, end);
+    const text = detectAndDecodeText(bytes, start, end);
     const payload = text.slice((DIRECTIVES[d] as string).length);
     if (d === 0) {
       if (this.pending) {
@@ -185,20 +230,20 @@ class M3uScanner {
   private directive(e: M3uEntry, d: number, payload: string): void {
     if (d === 2) {
       if (e.groups.length === 0 && payload.trim()) e.groups.push(payload.trim());
-    } else if (d === 3) applyVlcOpt(e, payload);
-    else if (d === 4) {
+    } else if (d === 3 || d === 4) {
+      applyVlcOpt(e, payload);
+    } else if (d === 5) {
       if (!applyExtHttp(e, payload)) warn(this.stats, 'exthttp-malformed', this.stats.lines);
-    } else applyKodiProp(e, payload);
+    } else {
+      applyKodiProp(e, payload);
+    }
   }
 
   private parseHeader(payload: string): M3uHeader {
     const header: M3uHeader = { present: true, guideUrls: [], attrs: dict() };
     parseAttrs(payload, 0, (key, value) => {
       if (key === 'url-tvg' || key === 'x-tvg-url') {
-        for (const u of value.split(',')) {
-          const t = u.trim();
-          if (t) header.guideUrls.push(t);
-        }
+        header.guideUrls.push(...splitGuideUrls(value));
       } else header.attrs[key] = value;
     });
     return header;
@@ -209,23 +254,16 @@ class M3uScanner {
     if (!this.pending) e.name = raw;
     this.pending = undefined;
     finishEntry(e, raw, this.baseUrl);
+    if (e.name === raw) e.name = e.url;
     this.stats.entries++;
     this.batch.push(e);
   }
 }
 
 /**
- * Streams an M3U/M3U8 playlist from byte chunks into typed entries in bounded memory. Never throws: bad
- * content becomes warnings in the final batch's statistics, and a line that is not a URL (no scheme, or with
- * `baseUrl` set containing whitespace, `<`, `{` or `"`) is skipped with a `not-a-url` warning, so an HTML or
- * JSON body answered with status 200 yields no entries. A batch is yielded as soon as it holds `batchSize`
- * entries (default 500); the last batch has `done: true`, the header (`present: false` when the playlist
- * has no `#EXTM3U` line) and the statistics. Relative URLs are resolved against `baseUrl` when given.
- *
- * The generator returns `ok`, or `err` when the input iterable throws: the error keeps its `category`
- * and `code` when it has that shape (an abort is `network` / `aborted`) and is otherwise `network` /
- * `stream-failed`. On `err` no `done: true` batch is yielded and the run is a failure; batches already
- * yielded stay yielded.
+ * Streams an M3U/M3U8 playlist from byte chunks into typed entries in bounded memory.
+ * Rejects HLS media/master manifests (`#EXT-X-TARGETDURATION`, `#EXT-X-MEDIA-SEQUENCE`,
+ * `#EXT-X-STREAM-INF`) with `source-format` / `hls-manifest`.
  */
 export async function* scanM3u(
   chunks: AsyncIterable<Uint8Array>,
@@ -234,10 +272,11 @@ export async function* scanM3u(
   const size = Math.max(1, opts?.batchSize ?? DEFAULT_BATCH);
   const scanner = new M3uScanner(size, opts?.baseUrl);
   try {
-    for await (const chunk of chunks) {
+    for await (const chunk of normalizeBomChunks(chunks)) {
       scanner.buf.append(chunk);
       for (;;) {
         scanner.run(false);
+        if (scanner.hlsDetected) return err(elvError('source-format', 'hls-manifest'));
         if (scanner.batch.length < size) break;
         const entries = scanner.batch;
         scanner.batch = [];
@@ -249,6 +288,7 @@ export async function* scanM3u(
   }
   for (;;) {
     scanner.run(true);
+    if (scanner.hlsDetected) return err(elvError('source-format', 'hls-manifest'));
     if (scanner.batch.length < size) break;
     const entries = scanner.batch;
     scanner.batch = [];
