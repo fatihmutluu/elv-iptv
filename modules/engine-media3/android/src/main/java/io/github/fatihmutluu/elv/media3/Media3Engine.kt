@@ -69,6 +69,7 @@ class Media3Engine : SharedObject {
   private val reporter = EventReporter(
     handler = handler,
     fence = fence,
+    hasInvalidAttachedSurface = surfaces::hasInvalidAttachedSurface,
     send = ::sendEvent,
     onHlsDetected = ::playAsHls,
     onBehindLiveWindow = ::recoverBehindLiveWindow,
@@ -78,6 +79,7 @@ class Media3Engine : SharedObject {
     onCue = surfaces::onCue,
   )
   private val tracksBridge = TrackSelectorBridge(
+    isActivePlayer = { candidate -> candidate === player && fence.acceptsPlayer(candidate) },
     onTracks = { snapshot -> if (request != null) sendEvent(mapOf("type" to "tracks", "tracks" to snapshot)) },
     onClearCues = surfaces::clearCues,
   )
@@ -325,7 +327,7 @@ class Media3Engine : SharedObject {
     return playerFactory.build(softwareAudio).also { built ->
       built.addListener(reporter)
       built.addListener(pictures)
-      surfaces.attachToNewPlayer(built)
+      surfaces.attachToNewPlayer(built) { sendEvent(mapOf("type" to "surface", "change" to it)) }
     }
   }
 

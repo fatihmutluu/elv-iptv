@@ -14,7 +14,8 @@ present an engine's video and subtitles (player core spec 6.1). The module's con
 - The view paints black bars beside the surface only, never over it, so React Native views drawn above compose over
   video and subtitles. `dispatchDraw` clips to the view, keeping a `fill` crop inside it.
 - Surface callbacks attach (posted to the playback thread) and detach the surface; the engine sends `surface`
-  `created` once per attach and `destroyed` for an attached surface. A detach (`surfaceDestroyed`, an engine swap on
+  `created` once per attach and `destroyed` once when an attached surface detaches or is found invalid on player
+  rebuild. A detach (`surfaceDestroyed`, an engine swap on
   one view) is the only UI-thread wait: it runs ahead of queued commands (inline on the playback thread) and is capped
   at 3 s (Media3's 500 ms release timeout plus its 2 s detach timeout, with margin).
 

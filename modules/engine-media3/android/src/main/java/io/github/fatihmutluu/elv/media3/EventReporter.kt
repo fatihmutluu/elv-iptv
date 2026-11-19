@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.media3.common.C
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
@@ -11,6 +12,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
+import androidx.media3.exoplayer.mediacodec.MediaCodecRenderer
 import androidx.media3.exoplayer.video.MediaCodecVideoDecoderException
 
 private const val TICK_MS = 1_000L
@@ -25,6 +27,7 @@ private const val MAX_BEHIND_LIVE_RECOVERIES = 2
 internal class EventReporter(
   private val handler: Handler,
   private val fence: PrepareFence,
+  private val hasInvalidAttachedSurface: () -> Boolean = { false },
   private val send: (Map<String, Any?>) -> Unit,
   private val onHlsDetected: () -> Unit,
   private val onBehindLiveWindow: () -> Unit,
@@ -121,8 +124,14 @@ internal class EventReporter(
       return
     }
     val videoDecoderError = causeOf<MediaCodecVideoDecoderException>(error)
-    val surfaceLost = videoDecoderError?.let { !it.isSurfaceValid } == true
-    val failedCodec = videoDecoderError?.codecInfo
+    val videoInitError =
+      causeOf<MediaCodecRenderer.DecoderInitializationException>(error)?.takeIf {
+        it.mimeType != null && MimeTypes.isVideo(it.mimeType)
+      }
+    val surfaceLost =
+      (videoDecoderError?.let { !it.isSurfaceValid } == true) ||
+        (videoInitError != null && hasInvalidAttachedSurface())
+    val failedCodec = videoDecoderError?.codecInfo ?: videoInitError?.codecInfo
     if (!surfaceLost && failedCodec != null) {
       onVideoCodecFailed(failedCodec)
     }

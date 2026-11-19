@@ -36,6 +36,27 @@ class SurfaceControllerTest {
     assertFalse(controller.attachPendingSurface(deadSurface, player = null) { events += it })
     assertTrue(events.isEmpty())
 
+    // Valid surface attaches ("created"), then invalidates before attachToNewPlayer -> emits "destroyed" once!
+    val liveTex = SurfaceTexture(1)
+    val liveSurface = Surface(liveTex)
+    controller.offerSurface(liveSurface)
+    assertTrue(controller.attachPendingSurface(liveSurface, player = null) { events += it })
+    assertEquals(listOf("created"), events)
+    assertFalse(controller.hasInvalidAttachedSurface())
+
+    liveSurface.release()
+    liveTex.release()
+    assertTrue(controller.hasInvalidAttachedSurface())
+    val dummyPlayer = androidx.media3.exoplayer.ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build()
+    try {
+      controller.attachToNewPlayer(dummyPlayer) { events += it }
+      assertEquals(listOf("created", "destroyed"), events)
+      controller.detachNow(liveSurface, dummyPlayer) { events += it }
+      assertEquals("detachNow after attachToNewPlayer drop must not double-emit destroyed", listOf("created", "destroyed"), events)
+    } finally {
+      dummyPlayer.release()
+    }
+
     // Media 1 decodes 1280x720
     controller.onLoad()
     controller.onVideoSizeChanged(VideoSize(1280, 720, 1f))

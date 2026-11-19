@@ -88,15 +88,7 @@ class TrackSelectorBridgeTest {
     assertEquals("2:0", snapshot.selectedSubtitleId)
     assertEquals(2, snapshot.audio.size)
     assertEquals(
-      TrackInfoSnapshot(
-        id = "1:0",
-        language = "tr",
-        label = "Turkish",
-        codec = "mp4a.40.2",
-        channels = 2,
-        forced = false,
-        isDefault = true,
-      ),
+      TrackInfoSnapshot("1:0", "tr", "Turkish", "mp4a.40.2", 2, forced = false, isDefault = true),
       snapshot.audio[0],
     )
     assertEquals("1:1", snapshot.audio[1].id)
@@ -211,6 +203,36 @@ class TrackSelectorBridgeTest {
       bridge.applyInitialParameters(player)
       assertTrue(player.trackSelectionParameters.usePreferredTextLanguagesAndRoleFlagsFromCaptioningManager)
       assertFalse(player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT))
+
+      // Stale PlayerMessage (emitConfirmedFromPlayer) from prior epoch or inactive player is dropped
+      emitted.clear()
+      var activePlayerAllowed = true
+      val trackedPlayer = object : ExoPlayer by player {
+        override fun getCurrentTracks(): Tracks = initialTracks
+      }
+      val fencedBridge = TrackSelectorBridge(
+        isActivePlayer = { activePlayerAllowed },
+        onTracks = { emitted += it },
+        onClearCues = {},
+      )
+      val epochBeforeZap = fencedBridge.currentPrepareEpoch
+      fencedBridge.onLoad(defaultReq)
+      fencedBridge.emitConfirmedFromPlayer(trackedPlayer, epochBeforeZap)
+      assertTrue("stale prepareEpoch must drop emitConfirmedFromPlayer", emitted.isEmpty())
+      val epochBeforeReuse = fencedBridge.currentPrepareEpoch
+      fencedBridge.onPrepareReuse()
+      fencedBridge.emitConfirmedFromPlayer(trackedPlayer, epochBeforeReuse)
+      assertTrue("onPrepareReuse must advance prepareEpoch", emitted.isEmpty())
+      val epochBeforeStop = fencedBridge.currentPrepareEpoch
+      fencedBridge.onStop()
+      fencedBridge.emitConfirmedFromPlayer(trackedPlayer, epochBeforeStop)
+      assertTrue("onStop must advance prepareEpoch", emitted.isEmpty())
+      activePlayerAllowed = false
+      fencedBridge.emitConfirmedFromPlayer(trackedPlayer, fencedBridge.currentPrepareEpoch)
+      assertTrue("inactive/released player must drop emitConfirmedFromPlayer", emitted.isEmpty())
+      activePlayerAllowed = true
+      fencedBridge.emitConfirmedFromPlayer(trackedPlayer, fencedBridge.currentPrepareEpoch)
+      assertEquals(1, emitted.size)
     } finally {
       player.release()
     }
@@ -265,13 +287,7 @@ class TrackSelectorBridgeTest {
     assertNull(defaultReq.audioTrackId)
 
     val (_, offReq) = parseLoadArgs(
-      mapOf(
-        "attempt" to 2,
-        "url" to "http://h/1.mkv",
-        "kind" to "vod",
-        "audioTrackId" to "1:1",
-        "subtitleTrackId" to null,
-      )
+      mapOf("attempt" to 2, "url" to "http://h/1.mkv", "kind" to "vod", "audioTrackId" to "1:1", "subtitleTrackId" to null)
     )
     assertEquals(SubtitlePreference.Off, offReq.subtitlePreference)
     assertEquals("1:1", offReq.audioTrackId)
@@ -295,16 +311,8 @@ class TrackSelectorBridgeTest {
           cuesHistory += cues
         }
       })
-      engine.load(
-        1,
-        LoadRequest(
-          url = "http://127.0.0.1:9/movie/demo/demo/1.mp4",
-          headers = emptyMap(),
-          live = false,
-          startMs = 95_000L,
-          softwareAudio = false,
-        ),
-      )
+      val req = LoadRequest("http://127.0.0.1:9/movie/demo/demo/1.mp4", emptyMap(), false, 95_000L, false)
+      engine.load(1, req)
       engine.recreate(2)
       engine.retry(3)
       engine.selectSubtitleTrack(4, null)

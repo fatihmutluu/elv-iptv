@@ -16,6 +16,7 @@ import androidx.media3.exoplayer.ExoPlayer
  */
 @OptIn(UnstableApi::class)
 internal class TrackSelectorBridge(
+  private val isActivePlayer: (ExoPlayer) -> Boolean = { true },
   private val onTracks: (Map<String, Any?>) -> Unit,
   private val onClearCues: () -> Unit,
 ) {
@@ -29,6 +30,10 @@ internal class TrackSelectorBridge(
   private var subtitleChoice: SubChoice = SubChoice.Default
   private var latestTracks: Tracks = Tracks.EMPTY
   private var lastEmitted: MediaTracksSnapshot? = null
+  private var prepareEpoch = 0L
+
+  internal val currentPrepareEpoch: Long
+    get() = prepareEpoch
 
   /** Whether `C.TRACK_TYPE_TEXT` is currently disabled by user choice (`subtitleTrackId === null`). */
   val isTextDisabled: Boolean
@@ -36,6 +41,7 @@ internal class TrackSelectorBridge(
 
   /** Updates desired track preferences from a new [LoadRequest], preserving cached language/label when reloading. */
   fun onLoad(request: LoadRequest) {
+    prepareEpoch += 1
     latestTracks = Tracks.EMPTY
     lastEmitted = null
     audioChoice = request.audioTrackId?.let { wantedId ->
@@ -55,12 +61,14 @@ internal class TrackSelectorBridge(
 
   /** Resets per-prepare track cache while preserving active track choices across `retry`, `recreate` or HLS re-prepare. */
   fun onPrepareReuse() {
+    prepareEpoch += 1
     latestTracks = Tracks.EMPTY
     lastEmitted = null
   }
 
   /** Clears all track choices and cached tracks on `stop` or `dispose`. */
   fun onStop() {
+    prepareEpoch += 1
     audioChoice = null
     subtitleChoice = SubChoice.Default
     latestTracks = Tracks.EMPTY
@@ -208,7 +216,8 @@ internal class TrackSelectorBridge(
     if (changedParams) {
       player.trackSelectionParameters = builder.build()
       if (player.mediaItemCount > 0 && player.playbackState != Player.STATE_IDLE) {
-        player.createMessage { _, _ -> emitConfirmedFromPlayer(player) }
+        val epoch = prepareEpoch
+        player.createMessage { _, _ -> emitConfirmedFromPlayer(player, epoch) }
           .setLooper(player.applicationLooper)
           .send()
         return
@@ -228,7 +237,8 @@ internal class TrackSelectorBridge(
     emitIfChanged(snapshot)
   }
 
-  private fun emitConfirmedFromPlayer(player: ExoPlayer) {
+  internal fun emitConfirmedFromPlayer(player: ExoPlayer, epoch: Long) {
+    if (epoch != prepareEpoch || !isActivePlayer(player)) return
     val current = player.currentTracks
     if (current.isEmpty) return
     latestTracks = current

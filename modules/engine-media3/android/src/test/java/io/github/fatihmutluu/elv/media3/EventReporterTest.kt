@@ -16,6 +16,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
+import androidx.media3.exoplayer.mediacodec.MediaCodecRenderer
 import androidx.media3.exoplayer.video.MediaCodecVideoDecoderException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -53,11 +54,13 @@ class EventReporterTest {
   fun `maps released surface to surface-lost, records failed video codec on valid surface, and ignores SupersededMediaException (#109)`() {
     val events = mutableListOf<Map<String, Any?>>()
     val failedCodecs = mutableListOf<String>()
+    var invalidAttachedSurface = false
     val real = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).setLooper(Looper.getMainLooper()).build()
     try {
       val reporter = EventReporter(
         handler = Handler(Looper.getMainLooper()),
         fence = PrepareFence(),
+        hasInvalidAttachedSurface = { invalidAttachedSurface },
         send = { events += it },
         onHlsDetected = {},
         onBehindLiveWindow = {},
@@ -108,6 +111,27 @@ class EventReporterTest {
         PlaybackException.ERROR_CODE_DECODING_FAILED,
       )
       reporter.onPlayerError(validErr)
+      assertEquals("decoder", (events.last()["error"] as Map<*, *>)["code"])
+      assertEquals(listOf("c2.goldfish.hevc.decoder"), failedCodecs)
+
+      // DecoderInitializationException (4001) on video also checks attached surface validity and records failed codec
+      failedCodecs.clear()
+      val hevcFmt = Format.Builder().setSampleMimeType(MimeTypes.VIDEO_H265).setWidth(3840).setHeight(2160).build()
+      val initCause = MediaCodecRenderer.DecoderInitializationException(
+        hevcFmt,
+        IllegalArgumentException("configure failed"),
+        false,
+        hwInfo,
+      )
+      val initErr = PlaybackException("decoder init failed", initCause, PlaybackException.ERROR_CODE_DECODER_INIT_FAILED)
+
+      invalidAttachedSurface = true
+      reporter.onPlayerError(initErr)
+      assertEquals("surface-lost", (events.last()["error"] as Map<*, *>)["code"])
+      assertTrue("init failure on invalid surface must not blame hardware codec", failedCodecs.isEmpty())
+
+      invalidAttachedSurface = false
+      reporter.onPlayerError(initErr)
       assertEquals("decoder", (events.last()["error"] as Map<*, *>)["code"])
       assertEquals(listOf("c2.goldfish.hevc.decoder"), failedCodecs)
     } finally {
