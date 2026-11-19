@@ -9,7 +9,7 @@ Antigravity and Gemini CLI automatically load [AGENTS.md](AGENTS.md) at the repo
   - `elv-stop-check` (`Stop`): runs Biome and `tsc --noEmit` directly via Node on dirty workspace files/packages before ending a turn (without passing file names through a shell).
 
 ## Workflow
-1. Read the relevant `AGENTS.md` files, Foundation Spec (`docs/superpowers/specs/2026-11-13-foundation-design.md`), and ADRs (`docs/adr/`).
+1. Read the relevant `AGENTS.md` files, Foundation Spec (`docs/superpowers/specs/2026-11-13-foundation-design.md`), UI/UX Philosophy (`docs/design/UI_UX_PHILOSOPHY.md`, mandatory before any UI or user-facing feature change), and ADRs (`docs/adr/`).
 2. Use the Superpowers workflow: write design specs in `docs/superpowers/specs/YYYY-MM-DD-<slug>-design.md`, keep execution plans untracked (or delete them before merge), and practice strict TDD (`RED -> Verify RED -> GREEN -> Verify GREEN -> REFACTOR`).
 3. Run `pnpm check` (or `pnpm.cmd check` in restricted Windows PowerShell policies) until `check: 10 passed, 0 failed` before opening a PR.
 

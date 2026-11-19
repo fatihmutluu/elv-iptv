@@ -8,6 +8,7 @@ React components for react-native and react-native-web, design tokens and TV foc
 - `pnpm -w check` runs every repository check.
 
 ## Rules
+- **UI/UX Contract (mandatory):** Read `docs/design/UI_UX_PHILOSOPHY.md` before creating or modifying any token, theme preset, surface, focus style, button, card, or layout primitive. All colors, scrims, and focus states must read dynamically from the theme token provider (including WCAG AAA High Contrast).
 - May import `react` and `react-native`; never `expo-*`, navigation libraries or `electron`.
 - Allowed workspace dependencies: `@elv/domain`, `@elv/focus-core`, `@elv/i18n`.
 - Never imports `features`, `modules/*` or `apps/*`. Source-first (`exports` points at `src/index.ts`).
