@@ -49,10 +49,20 @@ export function createMpvClient(stream: Duplex, opts: { replyTimeoutMs: number }
     if (closed) return;
     closed = true;
     failAll(new Error('mpv connection closed'));
-    for (const l of [...closeListeners]) l();
+    const listeners = [...closeListeners];
+    eventListeners.clear();
+    closeListeners.clear();
+    for (const l of listeners) {
+      try {
+        l();
+      } catch {
+        // one failing close listener must not block the others
+      }
+    }
   };
 
   stream.on('data', (chunk: Buffer) => {
+    if (closed) return;
     for (const message of decoder.push(chunk)) {
       if ('request_id' in message && typeof message.request_id === 'number') {
         const entry = pending.get(message.request_id);
@@ -84,7 +94,13 @@ export function createMpvClient(stream: Duplex, opts: { replyTimeoutMs: number }
         reject(new MpvWedgedError());
       }, opts.replyTimeoutMs);
       pending.set(requestId, { resolve, reject, timer });
-      stream.write(encodeCommand(cmd, requestId));
+      try {
+        stream.write(encodeCommand(cmd, requestId));
+      } catch (error) {
+        clearTimeout(timer);
+        pending.delete(requestId);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   };
 
@@ -96,11 +112,11 @@ export function createMpvClient(stream: Duplex, opts: { replyTimeoutMs: number }
       return id;
     },
     onEvent(listener) {
-      eventListeners.add(listener);
+      if (!closed) eventListeners.add(listener);
       return () => eventListeners.delete(listener);
     },
     onClose(listener) {
-      closeListeners.add(listener);
+      if (!closed) closeListeners.add(listener);
       return () => closeListeners.delete(listener);
     },
     close() {

@@ -83,7 +83,7 @@ describe('cropInThumbnail', () => {
     ).toEqual({ x: 100, y: 100, width: 192, height: 108 });
   });
 
-  it('clips to the display and returns null without overlap', () => {
+  it('clips to the display, clamps crop >= 1x1 on sub-pixel edge overlap and returns null without overlap', () => {
     expect(cropInThumbnail({ x: 2500, y: 1400, width: 200, height: 200 }, display, thumb)).toEqual({
       x: 3750,
       y: 2100,
@@ -91,6 +91,16 @@ describe('cropInThumbnail', () => {
       height: 60,
     });
     expect(cropInThumbnail({ x: 3000, y: 0, width: 10, height: 10 }, display, thumb)).toBeNull();
+    expect(
+      cropInThumbnail({ x: 10, y: 10, width: 100, height: 100 }, display, { width: 0, height: 0 }),
+    ).toBeNull();
+    // Sub-pixel overlap at far right/bottom edge previously rounded crop.x === thumb.width -> width 0
+    const sliver = cropInThumbnail({ x: 2559.9, y: 1439.9, width: 10, height: 10 }, display, thumb);
+    expect(sliver).not.toBeNull();
+    expect(sliver?.width).toBeGreaterThanOrEqual(1);
+    expect(sliver?.height).toBeGreaterThanOrEqual(1);
+    expect((sliver?.x ?? 0) + (sliver?.width ?? 0)).toBeLessThanOrEqual(thumb.width);
+    expect((sliver?.y ?? 0) + (sliver?.height ?? 0)).toBeLessThanOrEqual(thumb.height);
   });
 });
 

@@ -19,9 +19,24 @@ const HTTP_CODES: Readonly<Record<number, EngineError['code']>> = {
   401: 'http-401',
   403: 'http-403',
   404: 'http-404',
+  407: 'http-401',
+  410: 'http-404',
   429: 'http-429',
+  451: 'http-404',
+  458: 'connection-limit',
+  460: 'connection-limit',
+  461: 'connection-limit',
+  462: 'connection-limit',
+  463: 'connection-limit',
+  469: 'connection-limit',
   509: 'http-509',
 };
+
+const NETWORK_PATTERN =
+  /Connection (refused|reset)|failed: Error number|timed out|Connection to .* failed|\b(tls|ssl)\b.*(error|fail|alert|verify|certificate|handshake)|certificate (verif|expired|revoked|invalid|untrusted)|self[- ]signed certificate|handshake failed|schannel:.*failed|SEC_E_/i;
+
+const DECODER_PATTERN =
+  /no audio or video data played|Could not open codec|Failed to initialize a decoder|Error initializing|decoder init failed|VO: .*(failed|error)/i;
 
 function error(e: EngineError): EndOutcome {
   return {
@@ -45,12 +60,21 @@ function lastHttpLine(logs: readonly MpvLogLine[]): { status: number; text: stri
 const findLine = (logs: readonly MpvLogLine[], pattern: RegExp): MpvLogLine | undefined =>
   logs.find((l) => pattern.test(l.text));
 
+function classifyHttp(http: { status: number; text: string }): EndOutcome | undefined {
+  const code = HTTP_CODES[http.status];
+  if (code) return withDetail(code, http.text, http.status);
+  if (http.status >= 400 && http.status < 600) {
+    return withDetail('http-other', http.text, http.status);
+  }
+  return undefined;
+}
+
 /**
  * Maps an mpv `end-file` event and the media's recent log lines to an engine outcome.
  * A provider's plain-text notice (`Mime-type: 'text/*'` then an unrecognized format) is the
  * connection-limit signal, since providers answer over-limit requests with a text page.
- * `played: false` (playback never restarted) turns a VOD eof into an error: an empty or
- * text answer ends at once and must not read as a finished movie. Omitted means played.
+ * `played: false` (playback never restarted) inspects HTTP, notice, network/TLS and decoder logs
+ * before falling back to `empty-vod-eof` or `live-eof`. Omitted means played.
  */
 export function classifyEnd(p: {
   reason: string;
@@ -59,23 +83,32 @@ export function classifyEnd(p: {
   mediaKind: MediaKind;
   played?: boolean;
 }): EndOutcome {
-  if (p.reason === 'stop' || p.reason === 'quit' || p.reason === 'redirect')
+  if (p.reason === 'stop' || p.reason === 'quit' || p.reason === 'redirect') {
     return { kind: 'stopped' };
+  }
   if (p.reason === 'eof') {
-    if (p.mediaKind !== 'vod') return error({ code: 'network', detail: 'live-eof' });
-    if (p.played !== false) return { kind: 'ended' };
+    if (p.played !== false) {
+      return p.mediaKind === 'vod'
+        ? { kind: 'ended' }
+        : error({ code: 'network', detail: 'live-eof' });
+    }
+    const http = lastHttpLine(p.logs);
+    const httpOutcome = http ? classifyHttp(http) : undefined;
+    if (httpOutcome) return httpOutcome;
     const notice = findLine(p.logs, /Mime-type: 'text\//);
-    return notice
-      ? withDetail('connection-limit', notice.text)
-      : error({ code: 'network', detail: 'empty-vod-eof' });
+    if (notice) return withDetail('connection-limit', notice.text);
+    const network = findLine(p.logs, NETWORK_PATTERN);
+    if (network) return withDetail('network', network.text);
+    const decoder = findLine(p.logs, DECODER_PATTERN);
+    if (decoder) return withDetail('decoder', decoder.text);
+    return error({
+      code: 'network',
+      detail: p.mediaKind === 'vod' ? 'empty-vod-eof' : 'live-eof',
+    });
   }
   const http = lastHttpLine(p.logs);
-  if (http) {
-    const code = HTTP_CODES[http.status];
-    if (code) return withDetail(code, http.text, http.status);
-    if (http.status >= 400 && http.status < 600)
-      return withDetail('http-other', http.text, http.status);
-  }
+  const httpOutcome = http ? classifyHttp(http) : undefined;
+  if (httpOutcome) return httpOutcome;
   const unrecognized =
     p.fileError === 'unrecognized file format' || findLine(p.logs, /unrecognized file format/i);
   if (unrecognized) {
@@ -84,15 +117,9 @@ export function classifyEnd(p: {
       ? withDetail('connection-limit', notice.text)
       : withDetail('unsupported-format', 'unrecognized file format');
   }
-  const network = findLine(
-    p.logs,
-    /Connection (refused|reset)|failed: Error number|timed out|Connection to .* failed/i,
-  );
+  const network = findLine(p.logs, NETWORK_PATTERN);
   if (network) return withDetail('network', network.text);
-  const decoder = findLine(
-    p.logs,
-    /no audio or video data played|Could not open codec|Failed to initialize a decoder|Error initializing|decoder init failed|VO: .*(failed|error)/i,
-  );
+  const decoder = findLine(p.logs, DECODER_PATTERN);
   if (decoder) return withDetail('decoder', decoder.text);
   return withDetail('unknown', p.fileError ?? 'unknown');
 }

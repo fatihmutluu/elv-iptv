@@ -6,6 +6,8 @@ const electron = vi.hoisted(() => ({
   made: [] as Array<{ options: unknown; openHandler?: () => { action: string } }>,
   screenListeners: new Map<string, Set<() => void>>(),
   dipCalls: [] as unknown[],
+  displays: [{ id: 1, workArea: { x: 0, y: 30, width: 2056, height: 1299 }, scaleFactor: 2 }],
+  matchingId: 1,
 }));
 
 vi.mock('electron', () => {
@@ -41,10 +43,9 @@ vi.mock('electron', () => {
         electron.dipCalls.push(rect);
         return { x: rect.x * 2, y: rect.y * 2, width: rect.width * 2, height: rect.height * 2 };
       },
-      getDisplayMatching: () => ({
-        workArea: { x: 0, y: 30, width: 2056, height: 1299 },
-        scaleFactor: 2,
-      }),
+      getDisplayMatching: () =>
+        electron.displays.find((d) => d.id === electron.matchingId) ?? electron.displays[0],
+      getAllDisplays: () => electron.displays,
     },
   };
 });
@@ -63,6 +64,10 @@ beforeEach(() => {
   electron.made = [];
   electron.screenListeners.clear();
   electron.dipCalls = [];
+  electron.displays = [
+    { id: 1, workArea: { x: 0, y: 30, width: 2056, height: 1299 }, scaleFactor: 2 },
+  ];
+  electron.matchingId = 1;
 });
 
 describe('createPresenter', () => {
@@ -70,7 +75,7 @@ describe('createPresenter', () => {
     const app = fakeAppWindow();
     const appWindow = app.window as unknown as BrowserWindow;
     const presenter = createPresenter('child-window', appWindow, 'win32');
-    expect(await presenter.prepare()).toEqual(['--wid=2748']);
+    expect(await presenter.prepare()).toEqual(['--wid=2748', '--auto-window-resize=no']);
     expect(electron.made).toHaveLength(1);
     expect(electron.made[0]?.options).toMatchObject({
       parent: appWindow,
@@ -96,5 +101,19 @@ describe('createPresenter', () => {
     mac.setArea(AREA);
     expect(await mac.prepare()).toEqual(['--geometry=1280x720+20+40']);
     expect(electron.dipCalls).toHaveLength(1);
+
+    electron.displays = [
+      { id: 1, workArea: { x: 0, y: 30, width: 2056, height: 1299 }, scaleFactor: 2 },
+      { id: 2, workArea: { x: -1920, y: 25, width: 1920, height: 1055 }, scaleFactor: 1 },
+    ];
+    electron.matchingId = 2;
+    const multiApp = fakeAppWindow({ x: -1820, y: 125, width: 1280, height: 720 });
+    const macMulti = createPresenter(
+      'own-window',
+      multiApp.window as unknown as BrowserWindow,
+      'darwin',
+    );
+    macMulti.setArea(AREA);
+    expect(await macMulti.prepare()).toEqual(['--geometry=640x360+100+100', '--screen=1']);
   });
 });

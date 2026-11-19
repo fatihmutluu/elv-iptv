@@ -1,118 +1,60 @@
 import { randomBytes } from 'node:crypto';
 import { rmSync } from 'node:fs';
-import { connect, createServer, type Server, type Socket } from 'node:net';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createMpvClient } from './client.ts';
 import type { MpvCommand } from './codec.ts';
 import { LineDecoder } from './codec.ts';
+import {
+  connectFakeProcess,
+  FAKE_PLAYING,
+  type FakeExit,
+  type FakeMedia,
+  type FakeMpvScript,
+  type FakeMpvStep,
+  type FakeProc,
+  fakeHttpError,
+  parseResetOnNextFile,
+  syncTrackSelection,
+} from './fake-mpv-proc.ts';
 import type { MpvProcess } from './process.ts';
 
-/** One timed step of a fake media, `afterMs` after its `loadfile` ran; entry ids are added by the fake. */
-type FakeMpvStep = { afterMs: number } & (
-  | { event: 'start-file' | 'file-loaded' | 'playback-restart' }
-  | { event: 'end-file'; reason: string; fileError?: string }
-  | { property: string; value: unknown }
-  | { log: { prefix: string; level: string; text: string } }
-);
-
-/** What one URL plays in the fake. */
-export type FakeMpvScript = readonly FakeMpvStep[];
+export { FAKE_PLAYING, type FakeMpvScript, fakeHttpError };
 
 /** A scripted mpv that speaks JSON IPC on a real `net.Server` (a named pipe on win32, a Unix socket elsewhere). */
 export interface FakeMpv {
-  /** Matches `MpvEngineDeps.spawn`: waits `spawnDelayMs` (abortable), then serves one connection. */
   spawn(args: readonly string[], signal: AbortSignal): Promise<MpvProcess>;
-  /** Every command received, in order, across processes. */
   readonly sent: readonly MpvCommand[];
-  /** Received commands and emitted file events in wire order (`> loadfile <url>`, `< end-file stop 1`). */
   readonly trace: readonly string[];
   readonly spawnArgs: readonly (readonly string[])[];
   readonly connections: number;
-  /** Processes killed: by `kill()`, or by an abort while starting. */
   readonly killed: number;
-  /** High-water mark of entries between `start-file` and `end-file`. */
   maxOpenEntries(): number;
-  /** The process dies at once (an external kill). */
   crash(): void;
-  /** The user quits mpv: `end-file reason=quit`, then a clean exit. */
   userQuit(): void;
-  /** mpv stops answering and sending. */
   hang(): void;
-  /** Sends a `client-message` event (what `script-message` in the bindings produces). */
   clientMessage(...args: string[]): void;
   spawnDelayMs: number;
-  /** Delay before a command runs and is answered. */
   replyDelayMs: number;
-  /** Delay between a stop or replace and the old entry's `end-file`. */
   endDelayMs: number;
-  /** mpv 0.42.0 answers `loadfile` with `{ playlist_entry_id }`; false leaves it out. */
   entryIdInReply: boolean;
   dispose(): Promise<void>;
 }
 
-/** A video media that plays: opening, buffering, video, first restart, then a few positions. */
-export const FAKE_PLAYING: FakeMpvScript = [
-  { afterMs: 0, event: 'start-file' },
-  { afterMs: 3, event: 'file-loaded' },
-  { afterMs: 3, property: 'vid', value: 1 },
-  { afterMs: 5, property: 'video-params', value: { w: 1280, h: 720 } },
-  { afterMs: 8, property: 'time-pos', value: 0 },
-  { afterMs: 8, event: 'playback-restart' },
-  { afterMs: 8, property: 'core-idle', value: false },
-  { afterMs: 15, property: 'time-pos', value: 0.04 },
-];
-
-/** A stream the server answers with an HTTP error, logged as the pinned runtime logs it. */
-export function fakeHttpError(status: number, reason: string): FakeMpvScript {
-  return [
-    { afterMs: 0, event: 'start-file' },
-    {
-      afterMs: 4,
-      log: { prefix: 'ffmpeg', level: 'warn', text: `http: HTTP error ${status} ${reason}` },
-    },
-    { afterMs: 5, log: { prefix: 'stream', level: 'error', text: 'Failed to open the stream.' } },
-    { afterMs: 6, event: 'end-file', reason: 'error', fileError: 'loading failed' },
-  ];
-}
-
 const LEVELS = ['fatal', 'error', 'warn', 'info', 'status', 'v', 'debug', 'trace'];
-/** Per-file properties mpv resets when the next file starts. */
-const PER_FILE: ReadonlyArray<[string, unknown]> = [
-  ['vid', 'auto'],
-  ['aid', 'auto'],
-  ['sid', 'auto'],
+const STREAM_INTRINSIC_PROPS: ReadonlyArray<[string, unknown]> = [
   ['track-list', undefined],
   ['video-params', undefined],
   ['time-pos', undefined],
+  ['playback-time', undefined],
   ['duration', undefined],
 ];
-/** Same reply timeout as `spawnMpv`. */
+const RESETTABLE_TRACK_PROPS: ReadonlyArray<[string, unknown]> = [
+  ['vid', 'auto'],
+  ['aid', 'auto'],
+  ['sid', 'auto'],
+];
 const REPLY_TIMEOUT_MS = 3000;
-
-type Exit = { code: number | null; signal: string | null };
-
-interface Media {
-  id: number;
-  started: boolean;
-  timers: ReturnType<typeof setTimeout>[];
-}
-
-interface Proc {
-  server: Server;
-  path: string;
-  socket?: Socket;
-  observers: Array<{ id: number; name: string }>;
-  props: Map<string, unknown>;
-  logLevel?: string;
-  nextEntryId: number;
-  playlist: number[];
-  media?: Media;
-  hung: boolean;
-  gone: boolean;
-  exited: Promise<Exit>;
-  finish(info: Exit): void;
-}
 
 const abortError = (): Error =>
   Object.assign(new Error('mpv launch aborted'), { name: 'AbortError' });
@@ -130,16 +72,16 @@ export function createFakeMpv(opts: {
   const sent: MpvCommand[] = [];
   const trace: string[] = [];
   const spawnArgs: string[][] = [];
-  const procs: Proc[] = [];
+  const procs: FakeProc[] = [];
   let connections = 0;
   let killed = 0;
   let open = 0;
   let maxOpen = 0;
   let nextPid = 7000;
 
-  const latest = (): Proc | undefined => procs.at(-1);
+  const latest = (): FakeProc | undefined => procs.at(-1);
 
-  const write = (p: Proc, message: Record<string, unknown>): void => {
+  const write = (p: FakeProc, message: Record<string, unknown>): void => {
     if (p.gone || p.hung || !p.socket || p.socket.destroyed) return;
     const event = message['event'];
     if (typeof event === 'string' && event !== 'property-change' && event !== 'log-message') {
@@ -149,27 +91,27 @@ export function createFakeMpv(opts: {
     p.socket.write(`${JSON.stringify(message)}\n`);
   };
 
-  const later = (p: Proc, fn: () => void, ms: number): void => {
+  const later = (p: FakeProc, fn: () => void, ms: number): void => {
     if (ms <= 0) fn();
     else setTimeout(() => !p.gone && fn(), ms);
   };
 
-  const setProp = (p: Proc, name: string, value: unknown): void => {
-    if (JSON.stringify(p.props.get(name)) === JSON.stringify(value)) return;
-    p.props.set(name, value);
+  const setProp = (p: FakeProc, name: string, value: unknown): void => {
+    const resolved = name === 'track-list' ? syncTrackSelection(p, value) : value;
+    if (JSON.stringify(p.props.get(name)) === JSON.stringify(resolved)) return;
+    p.props.set(name, resolved);
     for (const o of p.observers) {
       if (o.name !== name) continue;
       write(p, {
         event: 'property-change',
         id: o.id,
         name,
-        ...(value === undefined ? {} : { data: value }),
+        ...(resolved === undefined ? {} : { data: resolved }),
       });
     }
   };
 
-  /** Ends the current media now (`end-file` only if it had started) and cancels its script. */
-  const endMedia = (p: Proc, reason: string, fileError?: string): void => {
+  const endMedia = (p: FakeProc, reason: string, fileError?: string): void => {
     const media = p.media;
     if (!media) return;
     for (const t of media.timers) clearTimeout(t);
@@ -184,8 +126,7 @@ export function createFakeMpv(opts: {
     });
   };
 
-  /** Cancels the current media's script and sends its `end-file` after `endDelayMs`. */
-  const endLater = (p: Proc, then: () => void): void => {
+  const endLater = (p: FakeProc, then: () => void): void => {
     const media = p.media;
     if (media) for (const t of media.timers) clearTimeout(t);
     p.media = undefined;
@@ -202,7 +143,7 @@ export function createFakeMpv(opts: {
     );
   };
 
-  const runStep = (p: Proc, media: Media, step: FakeMpvStep): void => {
+  const runStep = (p: FakeProc, media: FakeMedia, step: FakeMpvStep): void => {
     if (p.media !== media || p.gone || p.hung) return;
     if ('property' in step) setProp(p, step.property, step.value);
     else if ('log' in step) {
@@ -213,14 +154,19 @@ export function createFakeMpv(opts: {
       open += 1;
       maxOpen = Math.max(maxOpen, open);
       write(p, { event: 'start-file', playlist_entry_id: media.id });
-      for (const [name, value] of PER_FILE) setProp(p, name, value);
+      for (const [name, value] of STREAM_INTRINSIC_PROPS) setProp(p, name, value);
+      for (const [name, value] of RESETTABLE_TRACK_PROPS) {
+        if (p.resetOnNextFile.has('all') || p.resetOnNextFile.has(name)) {
+          setProp(p, name, value);
+        }
+      }
     } else if (step.event === 'end-file') {
       endMedia(p, step.reason, step.fileError);
       p.playlist = [];
     } else write(p, { event: step.event });
   };
 
-  const exit = (p: Proc, info: Exit, graceful: boolean): void => {
+  const exit = (p: FakeProc, info: FakeExit, graceful: boolean): void => {
     if (p.gone) return;
     if (p.media) for (const t of p.media.timers) clearTimeout(t);
     if (p.media?.started) open -= 1;
@@ -233,12 +179,7 @@ export function createFakeMpv(opts: {
     p.finish(info);
   };
 
-  const quit = (p: Proc): void => {
-    endMedia(p, 'quit');
-    exit(p, { code: 0, signal: null }, true);
-  };
-
-  const execute = (p: Proc, command: MpvCommand, requestId: number): void => {
+  const execute = (p: FakeProc, command: MpvCommand, requestId: number): void => {
     const reply = (extra: Record<string, unknown> = {}): void =>
       write(p, { request_id: requestId, error: 'success', data: null, ...extra });
     const fail = (error: string): void => write(p, { request_id: requestId, error });
@@ -267,7 +208,7 @@ export function createFakeMpv(opts: {
         reply(fake.entryIdInReply ? { data: { playlist_entry_id: id } } : {});
         const steps = opts.scripts[String(args[0])] ?? FAKE_PLAYING;
         endLater(p, () => {
-          const media: Media = { id, started: false, timers: [] };
+          const media: FakeMedia = { id, started: false, timers: [] };
           p.media = media;
           for (const step of steps)
             media.timers.push(setTimeout(() => runStep(p, media, step), step.afterMs));
@@ -313,20 +254,21 @@ export function createFakeMpv(opts: {
         return;
       case 'quit':
         reply();
-        quit(p);
+        endMedia(p, 'quit');
+        exit(p, { code: 0, signal: null }, true);
         return;
       default:
         reply();
     }
   };
 
-  const listen = async (): Promise<Proc> => {
+  const listen = async (resetOnNextFile: ReadonlySet<string>): Promise<FakeProc> => {
     const server = createServer();
-    let finish: (info: Exit) => void = () => undefined;
-    const exited = new Promise<Exit>((resolve) => {
+    let finish: (info: FakeExit) => void = () => undefined;
+    const exited = new Promise<FakeExit>((resolve) => {
       finish = resolve;
     });
-    const p: Proc = {
+    const p: FakeProc = {
       server,
       path: endpoint(),
       observers: [],
@@ -338,6 +280,7 @@ export function createFakeMpv(opts: {
         ['aid', 'auto'],
         ['sid', 'auto'],
       ]),
+      resetOnNextFile,
       nextEntryId: 0,
       playlist: [],
       hung: false,
@@ -367,39 +310,6 @@ export function createFakeMpv(opts: {
     return p;
   };
 
-  const toProcess = async (p: Proc): Promise<MpvProcess> => {
-    const socket = connect(p.path);
-    await new Promise<void>((resolve, reject) => {
-      socket.once('connect', resolve);
-      socket.once('error', reject);
-    });
-    const client = createMpvClient(socket, { replyTimeoutMs: REPLY_TIMEOUT_MS });
-    const kill = (): void => {
-      if (!p.gone) killed += 1;
-      exit(p, { code: null, signal: 'SIGKILL' }, false);
-      client.close();
-    };
-    return {
-      pid: nextPid++,
-      client,
-      exited: p.exited,
-      async quit(graceMs = 1000) {
-        client.command(['quit']).catch(() => undefined);
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        const late = await Promise.race([
-          p.exited.then(() => false),
-          new Promise<boolean>((resolve) => {
-            timer = setTimeout(() => resolve(true), graceMs);
-          }),
-        ]);
-        clearTimeout(timer);
-        if (late) kill();
-        client.close();
-      },
-      kill,
-    };
-  };
-
   const fake: FakeMpv = {
     async spawn(args, signal) {
       spawnArgs.push([...args]);
@@ -421,9 +331,12 @@ export function createFakeMpv(opts: {
           signal.addEventListener('abort', onAbort, { once: true });
         });
       }
-      const p = await listen();
+      const p = await listen(parseResetOnNextFile(args));
       procs.push(p);
-      return toProcess(p);
+      return connectFakeProcess(p, nextPid++, REPLY_TIMEOUT_MS, () => {
+        if (!p.gone) killed += 1;
+        exit(p, { code: null, signal: 'SIGKILL' }, false);
+      });
     },
     sent,
     trace,
@@ -441,7 +354,10 @@ export function createFakeMpv(opts: {
     },
     userQuit() {
       const p = latest();
-      if (p && !p.gone) quit(p);
+      if (p && !p.gone) {
+        endMedia(p, 'quit');
+        exit(p, { code: 0, signal: null }, true);
+      }
     },
     hang() {
       const p = latest();

@@ -10,6 +10,7 @@ import {
   MessageChannelMain,
   type MessagePortMain,
   net,
+  powerSaveBlocker,
   protocol,
   safeStorage,
   session,
@@ -38,21 +39,19 @@ import {
 import type { MpvEngine } from './player/engine.ts';
 import { createEngineFor } from './player/factory.ts';
 import { registerPlayerIpc } from './player/ipc.ts';
-import { sweepLeftovers, systemSweepDeps } from './player/mpv/process.ts';
+import { sweepLeftovers, systemSweepDeps } from './player/mpv/pid-sweep.ts';
+import { createPowerBlocker } from './player/power-blocker.ts';
 import { sampleArea } from './player/presenter/visible.ts';
 import { mpvRuntimePaths } from './player/runtime-path.ts';
 import { lockDownSession, lockDownWebContents } from './security.ts';
 import { type ServeDeps, serveAppRequest } from './serve-app.ts';
 import { focusWindow, startSingleInstance } from './single-instance.ts';
-import { buildWindowOptions, WINDOW_TITLE } from './window-options.ts';
+import { attachRendererCrashRecovery, buildWindowOptions, WINDOW_TITLE } from './window-options.ts';
 
 declare const __ELV_DEV_SEED__: boolean;
 
 const rendererDir = join(__dirname, '..', 'renderer');
 
-// A gate launch (unpackaged `--elv-gate=<query>`) gets its own user-data folder, wiped at start: the single-instance lock
-// lives there, so a dev instance that is open would otherwise make the gate quit at once. A second gate launch at the
-// same time still quits (its wipe fails and the lock is taken).
 const gateQuery = parseGateFlag(process.argv, app.isPackaged);
 if (gateQuery !== null) {
   const gateDir = join(app.getPath('temp'), 'elv-gate');
@@ -64,6 +63,7 @@ if (gateQuery !== null) {
   app.setPath('userData', gateDir);
 }
 const samplers = new WeakMap<MpvEngine, VideoSampler>();
+const powerBlocker = createPowerBlocker(powerSaveBlocker);
 
 /** Prints the gate line with main's measurements and quits: a gate run is one line long. */
 async function printGateLine(line: string, engine: MpvEngine | undefined): Promise<void> {
@@ -101,16 +101,23 @@ function serveRenderer(): void {
 }
 
 function createWindow(): void {
+  const isGate = gateQuery !== null;
+  const targetUrl = isGate ? `${APP_ORIGIN}/?${gateQuery}` : `${APP_ORIGIN}/`;
   const window = new BrowserWindow(
     buildWindowOptions(join(__dirname, '..', 'preload', 'preload.js'), {
-      gate: gateQuery !== null,
+      gate: isGate,
     }),
   );
   window.setMenuBarVisibility(false);
   lockDownWebContents(window.webContents);
+  attachRendererCrashRecovery(window, {
+    gate: isGate,
+    reloadUrl: `${APP_ORIGIN}/`,
+    log: (line) => process.stderr.write(`${line}\n`),
+  });
   window.on('page-title-updated', (event) => event.preventDefault());
   window.setTitle(WINDOW_TITLE);
-  void window.loadURL(gateQuery === null ? `${APP_ORIGIN}/` : `${APP_ORIGIN}/?${gateQuery}`);
+  void window.loadURL(targetUrl);
 }
 
 /** Kills mpv launchers a crashed run left behind, then serves the player IPC. */
@@ -119,9 +126,9 @@ async function startPlayer(): Promise<void> {
   await sweepLeftovers(pidFile, systemSweepDeps).catch(() => 0);
   registerPlayerIpc({
     ipcMain,
-    now: () => Date.now(),
+    now: () => performance.now(),
     log: (line) => process.stderr.write(`${line}\n`),
-    // The gate driver prints its report through main; a packaged app has no such channel.
+    powerBlocker,
     gateReport: app.isPackaged ? undefined : (line, engine) => void printGateLine(line, engine),
     createEngine: async (owner, onUi) => {
       const window = BrowserWindow.fromWebContents(owner as WebContents);
@@ -151,13 +158,15 @@ async function startPlayer(): Promise<void> {
           createVideoSampler({
             subscribe: (listener) => engine.subscribe(listener),
             sample: () =>
-              sampleArea(
-                sampleRect(
-                  window.getContentBounds(),
-                  engine.lastArea,
-                  window.webContents.getZoomFactor(),
-                ),
-              ),
+              window.isDestroyed() || window.webContents.isDestroyed()
+                ? Promise.resolve({ distinct: 0 })
+                : sampleArea(
+                    sampleRect(
+                      window.getContentBounds(),
+                      engine.lastArea,
+                      window.webContents.getZoomFactor(),
+                    ),
+                  ),
             setTimeout: (fn, ms) => setTimeout(fn, ms),
             delayMs: 1000,
           }),
@@ -214,7 +223,6 @@ function startCatalog(): CatalogCoordinator<MessagePortMain> {
   return coordinator;
 }
 
-// Without the lock this launch quits before any sweep, window or engine: a second instance would kill the first's mpv.
 const hasLock = startSingleInstance(app, {
   onSecond: () => focusWindow(BrowserWindow.getAllWindows()[0]),
 });
@@ -229,7 +237,6 @@ registerCatalogQuitHandler({
 
 if (hasLock) {
   void app.whenReady().then(async () => {
-    // The default menu reloads the page on Ctrl+R / Cmd+R; development keeps it for the developer tools.
     if (app.isPackaged) Menu.setApplicationMenu(null);
     lockDownSession(session.defaultSession);
     serveRenderer();
@@ -242,6 +249,11 @@ if (hasLock) {
   });
 }
 
+app.on('will-quit', () => {
+  powerBlocker.releaseAll();
+});
+
 app.on('window-all-closed', () => {
+  powerBlocker.releaseAll();
   if (process.platform !== 'darwin') app.quit();
 });

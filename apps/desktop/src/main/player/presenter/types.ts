@@ -41,6 +41,10 @@ export interface AppWindowLike {
   getContentBounds(): Rect;
   readonly webContents: { getZoomFactor(): number };
   isMinimized(): boolean;
+  isMaximized?(): boolean;
+  maximize?(): void;
+  isAlwaysOnTop?(): boolean;
+  setAlwaysOnTop?(flag: boolean): void;
   isVisible(): boolean;
   isFullScreen(): boolean;
   setFullScreen(flag: boolean): void;

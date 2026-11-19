@@ -150,9 +150,34 @@ describe('isPlayerCommandMessage', () => {
       msg({ name: 'load', cmd: { ...load, options: { subtitleTrackId: 2 } } }),
       msg({ name: 'selectAudioTrack', attempt: 1, id: null }),
       msg({ name: 'selectAudioTrack', attempt: 1, id: '' }),
+      msg({ name: 'selectAudioTrack', attempt: 1, id: 's:1' }),
+      msg({ name: 'selectAudioTrack', attempt: 1, id: 'a:0' }),
+      msg({ name: 'selectAudioTrack', attempt: 1, id: 'a:1234567' }),
       msg({ name: 'selectSubtitleTrack', attempt: 1, id: '' }),
+      msg({ name: 'selectSubtitleTrack', attempt: 1, id: 'a:1' }),
+      msg({ name: 'selectSubtitleTrack', attempt: 1, id: 's:0' }),
+      msg({ name: 'selectSubtitleTrack', attempt: 1, id: 's:1234567' }),
       msg({ name: 'selectSubtitleTrack', attempt: 1, id: 's:1\r' }),
       msg({ name: 'load', cmd: { ...load, options: null } }),
+      msg({ name: 'load', cmd: { ...load, options: { audioTrackId: 's:1' } } }),
+      msg({ name: 'load', cmd: { ...load, options: { subtitleTrackId: 'a:1' } } }),
+      msg({ name: 'play', attempt: Number.MAX_SAFE_INTEGER + 1 }),
+      msg({ name: 'seek', attempt: 1, positionMs: 86_400_000_001 }),
+      msg({ name: 'load', cmd: { ...load, startMs: 86_400_000_001 } }),
+      msg({ name: 'load', cmd: { ...load, url: `http://sim.test/${'a'.repeat(9000)}` } }),
+      msg({ name: 'load', cmd: { ...load, headers: [] } }),
+      msg({
+        name: 'load',
+        cmd: {
+          ...load,
+          headers: Object.fromEntries(Array.from({ length: 65 }, (_, i) => [`X-H-${i}`, '1'])),
+        },
+      }),
+      msg({
+        name: 'load',
+        cmd: { ...load, headers: { 'X-Too-Long': 'v'.repeat(9000) } },
+      }),
+      [],
     ];
     for (const m of bad) expect(isPlayerCommandMessage(m)).toBe(false);
   });

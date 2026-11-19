@@ -39,5 +39,16 @@ export function createPresenter(
       }
       return rect;
     },
+    ...(platform === 'darwin'
+      ? {
+          screenIndexOf: (rect) => {
+            const displays = screen.getAllDisplays();
+            if (displays.length <= 1) return undefined;
+            const target = screen.getDisplayMatching(rect);
+            const idx = displays.findIndex((d) => d.id === target.id);
+            return idx >= 0 ? idx : undefined;
+          },
+        }
+      : {}),
   });
 }

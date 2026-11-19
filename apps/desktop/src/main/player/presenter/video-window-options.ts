@@ -58,7 +58,11 @@ export function createVideoWindow<W extends { readonly webContents: VideoWebCont
   return window;
 }
 
-/** The window's HWND as the unsigned 32-bit number mpv's `--wid` takes. */
+/** The window's HWND as the unsigned 32-bit number mpv's `--wid` takes; throws if missing or zero. */
 export function nativeHwnd(window: { getNativeWindowHandle(): Buffer }): number {
-  return window.getNativeWindowHandle().readUInt32LE(0);
+  const buf = window.getNativeWindowHandle();
+  if (buf.length < 4) throw new Error('invalid native window handle buffer');
+  const handle = buf.readUInt32LE(0);
+  if (handle === 0) throw new Error('native window handle is 0');
+  return handle;
 }

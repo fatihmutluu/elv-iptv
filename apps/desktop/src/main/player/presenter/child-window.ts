@@ -28,6 +28,11 @@ const FOLLOWED: readonly AppWindowEvent[] = [
   'hide',
 ];
 
+interface SavedWindowState {
+  maximized: boolean;
+  alwaysOnTop: boolean;
+}
+
 /**
  * Windows presenter: mpv draws (`--wid`) into a frameless video window owned by the app window and kept on the player
  * area. The window is created once per presenter; respawns reuse its HWND. Fullscreen belongs to the app window.
@@ -41,11 +46,27 @@ export function createChildWindowPresenter(deps: ChildWindowDeps): VideoPresente
   let disposed = false;
   let stopDisplay: (() => void) | undefined;
   let detachClient: (() => void) | undefined;
+  let savedWindowState: SavedWindowState | undefined;
 
   const usable = (): VideoWindowLike | undefined =>
     !disposed && video && !video.isDestroyed() && !appWindow.isDestroyed() ? video : undefined;
 
+  const restorePostFullscreen = (): void => {
+    const saved = savedWindowState;
+    if (!saved || appWindow.isDestroyed() || appWindow.isFullScreen()) return;
+    savedWindowState = undefined;
+    if (saved.maximized && appWindow.isMaximized?.() === false) {
+      appWindow.maximize?.();
+    }
+    if (saved.alwaysOnTop !== (appWindow.isAlwaysOnTop?.() === true)) {
+      appWindow.setAlwaysOnTop?.(saved.alwaysOnTop);
+    }
+  };
+
   const layout = (): void => {
+    if (!disposed && !appWindow.isDestroyed() && !appWindow.isFullScreen()) {
+      restorePostFullscreen();
+    }
     const target = usable();
     if (!target) return;
     const show = area?.visible === true && appWindow.isVisible() && !appWindow.isMinimized();
@@ -65,7 +86,6 @@ export function createChildWindowPresenter(deps: ChildWindowDeps): VideoPresente
     stopDisplay = undefined;
   };
 
-  /** The window and its HWND are kept only when both exist, so a failure never leaves `--wid=0` behind. */
   const ensureWindow = (): VideoWindowLike => {
     if (video) return video;
     const created = deps.createWindow();
@@ -91,7 +111,16 @@ export function createChildWindowPresenter(deps: ChildWindowDeps): VideoPresente
 
   const toggleAppFullscreen = (): void => {
     if (disposed || appWindow.isDestroyed()) return;
-    appWindow.setFullScreen(!appWindow.isFullScreen());
+    if (!appWindow.isFullScreen()) {
+      savedWindowState = {
+        maximized: appWindow.isMaximized?.() === true,
+        alwaysOnTop: appWindow.isAlwaysOnTop?.() === true,
+      };
+      appWindow.setFullScreen(true);
+      return;
+    }
+    appWindow.setFullScreen(false);
+    restorePostFullscreen();
   };
 
   return {
@@ -101,12 +130,11 @@ export function createChildWindowPresenter(deps: ChildWindowDeps): VideoPresente
       if (disposed) throw new Error('presenter disposed');
       const window = ensureWindow();
       if (window.isDestroyed()) throw new Error('video window is gone');
-      return [`--wid=${hwnd}`];
+      return [`--wid=${hwnd}`, '--auto-window-resize=no'];
     },
     attach(client: MpvClient) {
       if (disposed) return;
       detachClient?.();
-      // mpv's own fullscreen (OSC button, default bindings) is turned back and given to the app window.
       const id = client.observe('fullscreen');
       const off = client.onEvent((e) => {
         if (e.event !== 'property-change' || e['id'] !== id || e['data'] !== true) return;
@@ -127,6 +155,7 @@ export function createChildWindowPresenter(deps: ChildWindowDeps): VideoPresente
       unfollow();
       detachClient?.();
       detachClient = undefined;
+      savedWindowState = undefined;
       if (video && !video.isDestroyed()) video.destroy();
       surface.gone();
       disposed = true;

@@ -97,13 +97,26 @@ export interface PlayerBridge {
   reportGate(line: string): void;
 }
 
-const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null;
-const isAttempt = (x: unknown): x is number => Number.isInteger(x) && (x as number) >= 0;
-const isNumber = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 const MAX_AREA_VALUE = 1_000_000;
+const MAX_DURATION_MS = 86_400_000_000;
+const MAX_STREAM_URL_CHARS = 8 * 1024;
+const MAX_HEADER_COUNT = 64;
+const MAX_HEADER_NAME_CHARS = 256;
+const MAX_HEADER_VALUE_CHARS = 8 * 1024;
+const MAX_HEADERS_TOTAL_CHARS = 32 * 1024;
+const MAX_MPV_TRACK_ID = 0x7fffffff;
+
+const AUDIO_TRACK_ID = /^a:([1-9]\d{0,5})$/;
+const SUBTITLE_TRACK_ID = /^s:([1-9]\d{0,5})$/;
+const HEADER_TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+const isRecord = (x: unknown): x is Record<string, unknown> =>
+  typeof x === 'object' && x !== null && !Array.isArray(x);
+const isAttempt = (x: unknown): x is number => Number.isSafeInteger(x) && (x as number) >= 0;
+const isNumber = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 const isCoordinate = (x: unknown): x is number => isNumber(x) && Math.abs(x) <= MAX_AREA_VALUE;
 const isExtent = (x: unknown): x is number => isCoordinate(x) && x >= 0;
-const isMs = (x: unknown): x is number => isNumber(x) && x >= 0;
+const isMs = (x: unknown): x is number => isNumber(x) && x >= 0 && x <= MAX_DURATION_MS;
 const isEngineId = (x: unknown): x is string =>
   typeof x === 'string' && x.length > 0 && x.length <= 64;
 
@@ -116,8 +129,14 @@ const hasControlChar = (text: string): boolean => {
 };
 
 const isStreamUrl = (x: unknown): boolean => {
-  // `new URL` accepts `http:x/a.ts`, which mpv would open as a path
-  if (typeof x !== 'string' || !/^https?:[/][/]/i.test(x) || hasControlChar(x)) return false;
+  if (
+    typeof x !== 'string' ||
+    x.length > MAX_STREAM_URL_CHARS ||
+    !/^https?:[/][/]/i.test(x) ||
+    hasControlChar(x)
+  ) {
+    return false;
+  }
   try {
     const { protocol } = new URL(x);
     return protocol === 'http:' || protocol === 'https:';
@@ -126,17 +145,39 @@ const isStreamUrl = (x: unknown): boolean => {
   }
 };
 
-const HEADER_TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+const isHeaders = (x: unknown): boolean => {
+  if (!isRecord(x)) return false;
+  const entries = Object.entries(x);
+  if (entries.length > MAX_HEADER_COUNT) return false;
+  let totalChars = 0;
+  for (const [name, value] of entries) {
+    if (
+      name.length === 0 ||
+      name.length > MAX_HEADER_NAME_CHARS ||
+      !HEADER_TOKEN.test(name) ||
+      typeof value !== 'string' ||
+      value.length > MAX_HEADER_VALUE_CHARS ||
+      hasControlChar(value)
+    ) {
+      return false;
+    }
+    totalChars += name.length + value.length;
+    if (totalChars > MAX_HEADERS_TOTAL_CHARS) return false;
+  }
+  return true;
+};
 
-const isHeaders = (x: unknown): boolean =>
-  isRecord(x) &&
-  Object.entries(x).every(
-    ([name, value]) =>
-      HEADER_TOKEN.test(name) && typeof value === 'string' && !hasControlChar(value),
-  );
+const isAudioTrackId = (x: unknown): x is string => {
+  if (typeof x !== 'string') return false;
+  const match = AUDIO_TRACK_ID.exec(x);
+  return match !== null && Number(match[1]) <= MAX_MPV_TRACK_ID;
+};
 
-const isTrackId = (x: unknown): x is string =>
-  typeof x === 'string' && x.length > 0 && x.length <= 64 && !hasControlChar(x);
+const isSubtitleTrackId = (x: unknown): x is string => {
+  if (typeof x !== 'string') return false;
+  const match = SUBTITLE_TRACK_ID.exec(x);
+  return match !== null && Number(match[1]) <= MAX_MPV_TRACK_ID;
+};
 
 function isLoadCommand(x: unknown): x is LoadCommand {
   if (!isRecord(x)) return false;
@@ -148,10 +189,10 @@ function isLoadCommand(x: unknown): x is LoadCommand {
   return (
     isRecord(options) &&
     (options['softwareAudio'] === undefined || typeof options['softwareAudio'] === 'boolean') &&
-    (options['audioTrackId'] === undefined || isTrackId(options['audioTrackId'])) &&
+    (options['audioTrackId'] === undefined || isAudioTrackId(options['audioTrackId'])) &&
     (options['subtitleTrackId'] === undefined ||
       options['subtitleTrackId'] === null ||
-      isTrackId(options['subtitleTrackId']))
+      isSubtitleTrackId(options['subtitleTrackId']))
   );
 }
 
@@ -169,9 +210,9 @@ function isBridgeCommand(x: unknown): x is BridgeCommand {
     case 'seek':
       return isAttempt(x['attempt']) && isMs(x['positionMs']);
     case 'selectAudioTrack':
-      return isAttempt(x['attempt']) && isTrackId(x['id']);
+      return isAttempt(x['attempt']) && isAudioTrackId(x['id']);
     case 'selectSubtitleTrack':
-      return isAttempt(x['attempt']) && (x['id'] === null || isTrackId(x['id']));
+      return isAttempt(x['attempt']) && (x['id'] === null || isSubtitleTrackId(x['id']));
     case 'release':
     case 'fullscreen':
       return true;

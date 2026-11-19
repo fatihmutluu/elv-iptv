@@ -72,9 +72,11 @@ describe('buildVideoWindowOptions', () => {
 });
 
 describe('nativeHwnd', () => {
-  it('reads the handle as an unsigned 32-bit little-endian number', () => {
+  it('reads the handle as an unsigned 32-bit little-endian number and rejects 0 or short buffers', () => {
     const handle = Buffer.alloc(8);
     handle.writeUInt32LE(0xf0000001, 0);
     expect(nativeHwnd({ getNativeWindowHandle: () => handle })).toBe(4026531841);
+    expect(() => nativeHwnd({ getNativeWindowHandle: () => Buffer.alloc(8) })).toThrow(/0/);
+    expect(() => nativeHwnd({ getNativeWindowHandle: () => Buffer.alloc(2) })).toThrow(/buffer/);
   });
 });

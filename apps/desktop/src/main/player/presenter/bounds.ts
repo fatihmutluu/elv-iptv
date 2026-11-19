@@ -44,6 +44,9 @@ export function cropInThumbnail(
   display: Rect,
   thumbnail: { width: number; height: number },
 ): Rect | null {
+  if (thumbnail.width < 1 || thumbnail.height < 1 || display.width <= 0 || display.height <= 0) {
+    return null;
+  }
   const left = Math.max(rect.x, display.x);
   const top = Math.max(rect.y, display.y);
   const right = Math.min(rect.x + rect.width, display.x + display.width);
@@ -57,8 +60,10 @@ export function cropInThumbnail(
     (right - display.x) * sx,
     (bottom - display.y) * sy,
   );
-  crop.width = Math.min(crop.width, thumbnail.width - crop.x);
-  crop.height = Math.min(crop.height, thumbnail.height - crop.y);
+  crop.x = Math.min(Math.max(0, crop.x), thumbnail.width - 1);
+  crop.y = Math.min(Math.max(0, crop.y), thumbnail.height - 1);
+  crop.width = Math.max(1, Math.min(crop.width, thumbnail.width - crop.x));
+  crop.height = Math.max(1, Math.min(crop.height, thumbnail.height - crop.y));
   return crop;
 }
 

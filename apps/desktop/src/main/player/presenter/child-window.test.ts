@@ -34,11 +34,11 @@ function setup() {
 }
 
 describe('createChildWindowPresenter', () => {
-  it('covers the area and passes the HWND as --wid', async () => {
+  it('covers the area and passes the HWND as --wid with --auto-window-resize=no (#155)', async () => {
     const { presenter } = setup();
     expect(presenter.kind).toBe('child-window');
     expect(presenter.coversArea).toBe(true);
-    expect(await presenter.prepare()).toEqual(['--wid=305441741']);
+    expect(await presenter.prepare()).toEqual(['--wid=305441741', '--auto-window-resize=no']);
   });
 
   it('creates the video window once across many setArea calls', async () => {
@@ -202,16 +202,22 @@ describe('createChildWindowPresenter', () => {
     expect(videos[0]?.state.destroyed).toBe(true);
     expect(events).toEqual([]);
     expect(app.listenerCount()).toBe(0);
-    expect(await presenter.prepare()).toEqual(['--wid=305441741']);
+    expect(await presenter.prepare()).toEqual(['--wid=305441741', '--auto-window-resize=no']);
     expect(videos).toHaveLength(2);
     expect(events).toEqual([{ type: 'surface', change: 'created' }]);
   });
 
-  it('toggleFullscreen toggles the app window', async () => {
+  it('toggleFullscreen toggles the app window and restores maximized + alwaysOnTop (#257)', async () => {
     const { app, presenter } = setup();
     await presenter.prepare();
+    app.state.maximized = true;
+    app.state.alwaysOnTop = true;
     presenter.toggleFullscreen();
+    expect(app.state.fullscreen).toBe(true);
     presenter.toggleFullscreen();
+    expect(app.state.fullscreen).toBe(false);
+    expect(app.state.maximized).toBe(true);
+    expect(app.state.alwaysOnTop).toBe(true);
     expect(app.state.fullscreenCalls).toEqual([true, false]);
   });
 

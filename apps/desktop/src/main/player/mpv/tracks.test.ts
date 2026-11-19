@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  createTrackTracker,
   inspectMpvTracks,
   parseAudioTrackCommand,
   parseSubtitleTrackCommand,
-} from './tracks.ts';
+  sameLanguage,
+} from './track-snapshot.ts';
+import { createTrackTracker } from './tracks.ts';
 
 const SAMPLE_TRACK_LIST = [
   { id: 1, type: 'video', codec: 'h264', selected: true },
@@ -93,22 +94,39 @@ describe('inspectMpvTracks', () => {
     expect(inspectMpvTracks(SAMPLE_TRACK_LIST, 2, 'no').selectedSubtitleId).toBeNull();
   });
 
-  it('omits undetermined ("und") or blank languages', () => {
+  it('omits undetermined ("und", "zxx", "mul", "mis") or blank languages', () => {
     const tracks = inspectMpvTracks(
-      [{ id: 1, type: 'audio', lang: 'und', title: '   ', selected: true }],
+      [
+        { id: 1, type: 'audio', lang: 'und', title: '   ', selected: true },
+        { id: 2, type: 'audio', lang: 'zxx', selected: false },
+      ],
       'auto',
       false,
     );
-    expect(tracks.audio).toEqual([{ id: 'a:1' }]);
+    expect(tracks.audio).toEqual([{ id: 'a:1' }, { id: 'a:2' }]);
     expect(tracks.selectedAudioId).toBe('a:1');
   });
 });
 
-describe('parseAudioTrackCommand & parseSubtitleTrackCommand', () => {
-  it('formats set_property commands for aid and sid including "no" for null Off', () => {
+describe('sameLanguage & parseTrackCommand', () => {
+  it('normalizes ISO 639-1, ISO 639-2(T+B) and BCP-47 tags safely (#253)', () => {
+    expect(sameLanguage('en', 'eng')).toBe(true);
+    expect(sameLanguage('en-US', 'eng')).toBe(true);
+    expect(sameLanguage('tr', 'tur')).toBe(true);
+    expect(sameLanguage('de', 'deu')).toBe(true);
+    expect(sameLanguage('deu', 'ger')).toBe(true);
+    expect(sameLanguage('fr', 'fra')).toBe(true);
+    expect(sameLanguage('fra', 'fre')).toBe(true);
+    expect(sameLanguage('zh-Hant', 'chi')).toBe(true);
+    expect(sameLanguage('und', 'und')).toBe(false);
+    expect(sameLanguage('constructor', '__proto__')).toBe(false);
+  });
+
+  it('formats set_property commands for aid and sid and rejects out-of-range ids', () => {
     expect(parseAudioTrackCommand('a:2')).toEqual(['set_property', 'aid', 2]);
     expect(parseAudioTrackCommand('s:2')).toBeUndefined();
     expect(parseAudioTrackCommand('a:0')).toBeUndefined();
+    expect(parseAudioTrackCommand('a:999999999999')).toBeUndefined();
 
     expect(parseSubtitleTrackCommand('s:1')).toEqual(['set_property', 'sid', 1]);
     expect(parseSubtitleTrackCommand(null)).toEqual(['set_property', 'sid', 'no']);
@@ -117,7 +135,7 @@ describe('parseAudioTrackCommand & parseSubtitleTrackCommand', () => {
 });
 
 describe('createTrackTracker', () => {
-  it('deduplicates identical MediaTracks snapshots and resolves language+label across reloads', () => {
+  it('deduplicates identical MediaTracks snapshots and resolves ISO 639-1/639-2 across reloads', () => {
     const tracker = createTrackTracker();
     tracker.onLoad();
     tracker.beginMedia(1);
@@ -129,14 +147,14 @@ describe('createTrackTracker', () => {
     expect(tracker.selectAudio('a:2')).toEqual(['set_property', 'aid', 2]);
     expect(tracker.selectSubtitle(null)).toEqual(['set_property', 'sid', 'no']);
 
-    // Simulate recovery reload where English audio moved from id=2 to id=3
+    // Reload where HLS rendition switched from 'eng' to 'en-US' and moved to id=3
     tracker.onLoad({ audioTrackId: 'a:2', subtitleTrackId: null });
     tracker.beginMedia(2);
     tracker.property('track-list', [
-      { id: 1, type: 'audio', lang: 'tur', title: 'Turkish', selected: true },
-      { id: 2, type: 'audio', lang: 'fra', title: 'French', selected: false },
-      { id: 3, type: 'audio', lang: 'eng', title: 'English', selected: false },
-      { id: 1, type: 'sub', lang: 'tur', title: 'Turkish SRT', selected: true },
+      { id: 1, type: 'audio', lang: 'tr', title: 'Turkish', selected: true },
+      { id: 2, type: 'audio', lang: 'fr', title: 'French', selected: false },
+      { id: 3, type: 'audio', lang: 'en-US', title: 'English', selected: false },
+      { id: 1, type: 'sub', lang: 'tr', title: 'Turkish SRT', selected: true },
     ]);
     tracker.property('aid', 1);
     tracker.property('sid', 1);
@@ -147,6 +165,34 @@ describe('createTrackTracker', () => {
     ]);
   });
 
+  it('does not prematurely latch subPref="off" on transient sid === false when tracks appear', () => {
+    const tracker = createTrackTracker();
+    tracker.onLoad({ subtitleTrackId: null });
+    tracker.beginMedia(1);
+    tracker.property('sid', false);
+    tracker.property('track-list', []);
+    expect(tracker.reconcileCommands()).toEqual([]);
+
+    // Tracks arrive while mpv's observed sid is still transient false (sid=auto before default sub selection)
+    tracker.property('track-list', SAMPLE_TRACK_LIST);
+    expect(tracker.reconcileCommands()).toEqual([['set_property', 'sid', 'no']]);
+    // Never sends duplicate sid='no' for the same media
+    expect(tracker.reconcileCommands()).toEqual([]);
+  });
+
+  it('sends sid="no" once on file-loaded when subPref="off" even if no subtitle tracks exist yet', () => {
+    const tracker = createTrackTracker();
+    tracker.onLoad({ subtitleTrackId: null });
+    tracker.beginMedia(1);
+    tracker.property('sid', false);
+    tracker.property('track-list', []);
+    expect(tracker.reconcileCommands()).toEqual([]);
+
+    tracker.onFileLoaded();
+    expect(tracker.reconcileCommands()).toEqual([['set_property', 'sid', 'no']]);
+    expect(tracker.reconcileCommands()).toEqual([]);
+  });
+
   it('does not latch reconciled on empty or audio-only initial track-list updates', () => {
     const tracker = createTrackTracker();
     tracker.onLoad();
@@ -155,7 +201,6 @@ describe('createTrackTracker', () => {
     expect(tracker.selectAudio('a:2')).toEqual(['set_property', 'aid', 2]);
     expect(tracker.selectSubtitle('s:2')).toEqual(['set_property', 'sid', 2]);
 
-    // Reload: mpv first emits an empty track-list before file-loaded / HLS renditions populate
     tracker.onLoad({ audioTrackId: 'a:2', subtitleTrackId: 's:2' });
     tracker.beginMedia(2);
     tracker.property('track-list', []);
@@ -163,7 +208,6 @@ describe('createTrackTracker', () => {
     tracker.property('sid', false);
     expect(tracker.reconcileCommands()).toEqual([]);
 
-    // Next update: audio tracks arrive first (English shifted to id=3), subtitles still absent
     tracker.property('track-list', [
       { id: 1, type: 'audio', lang: 'tur', title: 'Turkish', selected: true },
       { id: 3, type: 'audio', lang: 'eng', title: 'English', selected: false },
@@ -171,7 +215,6 @@ describe('createTrackTracker', () => {
     tracker.property('aid', 1);
     expect(tracker.reconcileCommands()).toEqual([['set_property', 'aid', 3]]);
 
-    // Third update: subtitle tracks arrive (English shifted to id=4) while audio is already reconciled
     tracker.property('track-list', [
       { id: 1, type: 'audio', lang: 'tur', title: 'Turkish', selected: false },
       { id: 3, type: 'audio', lang: 'eng', title: 'English', selected: true },
@@ -182,23 +225,5 @@ describe('createTrackTracker', () => {
     tracker.property('sid', 1);
     expect(tracker.reconcileCommands()).toEqual([['set_property', 'sid', 4]]);
     expect(tracker.reconcileCommands()).toEqual([]);
-  });
-
-  it('keeps subtitle Off pending across empty initial track-list and respects explicit selection on new media', () => {
-    const tracker = createTrackTracker();
-    tracker.onLoad({ audioTrackId: 'a:2', subtitleTrackId: null });
-    tracker.beginMedia(1);
-    tracker.property('track-list', []);
-    tracker.property('aid', false);
-    tracker.property('sid', false);
-    expect(tracker.reconcileCommands()).toEqual([]);
-
-    // User explicitly switches audio on the active media before populated track-list arrives
-    expect(tracker.selectAudio('a:1')).toEqual(['set_property', 'aid', 1]);
-
-    tracker.property('track-list', SAMPLE_TRACK_LIST);
-    tracker.property('aid', 1);
-    tracker.property('sid', 1);
-    expect(tracker.reconcileCommands()).toEqual([['set_property', 'sid', 'no']]);
   });
 });
