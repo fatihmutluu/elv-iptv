@@ -28,11 +28,12 @@ struct LoadArgs: Record {
         subtitlePref = .off
       }
     }
+    let cleanStartMs = startMs.flatMap { $0.isFinite ? $0 : nil }
     return LoadRequest(
       url: url,
       headers: headers,
       live: kind != "vod",
-      startMs: startMs,
+      startMs: cleanStartMs,
       softwareAudio: softwareAudio,
       audioTrackId: (trimmedAudio?.isEmpty == false) ? trimmedAudio : nil,
       subtitlePreference: subtitlePref
@@ -40,11 +41,14 @@ struct LoadArgs: Record {
   }
 }
 
+private struct WeakEngineRef {
+  weak var value: EngineObject?
+}
+
 /// Expo native module exposing `AetherEngine` behind the `PlayerEngine` port on tvOS, iOS and iPadOS.
-public final class ElvEngineAetherModule: Module {
+public final class ElvEngineAetherModule: Module, @unchecked Sendable {
   private let enginesLock = NSLock()
-  private var liveEngines = Set<ObjectIdentifier>()
-  private var engineTable: [ObjectIdentifier: EngineObject] = [:]
+  private var engineTable: [ObjectIdentifier: WeakEngineRef] = [:]
 
   public func definition() -> ModuleDefinition {
     Name("ElvEngineAether")
@@ -59,9 +63,8 @@ public final class ElvEngineAetherModule: Module {
 
     OnDestroy {
       let remaining: [EngineObject] = self.enginesLock.withLock {
-        let list = Array(self.engineTable.values)
+        let list = self.engineTable.values.compactMap(\.value)
         self.engineTable.removeAll()
-        self.liveEngines.removeAll()
         return list
       }
       for engine in remaining {
@@ -129,16 +132,14 @@ public final class ElvEngineAetherModule: Module {
   private func register(_ engine: EngineObject) {
     let key = ObjectIdentifier(engine)
     enginesLock.withLock {
-      liveEngines.insert(key)
-      engineTable[key] = engine
+      engineTable[key] = WeakEngineRef(value: engine)
     }
   }
 
   private func unregister(_ engine: EngineObject) {
     let key = ObjectIdentifier(engine)
-    enginesLock.withLock {
-      _ = liveEngines.remove(key)
-      _ = engineTable.removeValue(forKey: key)
+    _ = enginesLock.withLock {
+      engineTable.removeValue(forKey: key)
     }
   }
 }

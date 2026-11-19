@@ -15,11 +15,14 @@ struct MediaPlanTests {
     #expect(vodHlsPlan == .hls(URL(string: "https://cdn.example/vod/master.m3u")!, live: false))
   }
 
-  @Test("non-HLS VOD converts startMs to seconds and non-HLS live routes to liveTs")
+  @Test("non-HLS VOD converts finite startMs to seconds and non-HLS live routes to liveTs")
   func vodAndLiveTsRouting() throws {
     let vodReq = LoadRequest(url: "http://h:7878/movie/demo/demo/200001.mp4", live: false, startMs: 12_500)
     let vodPlan = try #require(planMedia(vodReq))
     #expect(vodPlan == .vod(URL(string: "http://h:7878/movie/demo/demo/200001.mp4")!, startSeconds: 12.5))
+
+    let nanVod = LoadRequest(url: "http://h:7878/movie/demo/demo/200001.mp4", live: false, startMs: .nan)
+    #expect(try #require(planMedia(nanVod)) == .vod(URL(string: "http://h:7878/movie/demo/demo/200001.mp4")!, startSeconds: nil))
 
     let tsReq = LoadRequest(url: "http://h:7878/live/demo/demo/1001.ts", live: true)
     let tsPlan = try #require(planMedia(tsReq))
@@ -36,55 +39,72 @@ struct MediaPlanTests {
     #expect(planMedia(LoadRequest(url: "ftp://example.com/1.ts")) == nil)
   }
 
-  @Test("VOD options cap concurrent source requests at 1; HLS and liveTs do not; softwareAudio maps to preferSoftwareDecode")
+  @Test("VOD and HLS cap concurrent requests at 1, keep hardware video on softwareAudio, and configure #228/#231 defaults")
   func optionsConstruction() throws {
     let vodReq = LoadRequest(
       url: "http://h:7878/movie/demo/demo/200001.mp4",
-      headers: ["User-Agent": "ELV/0.1"],
+      headers: ["User-Agent": "ELV/0.1\r\nInjected: 1", "Bad Header": "drop"],
       live: false,
       softwareAudio: true
     )
     let vodPlan = try #require(planMedia(vodReq))
     let vodOpts = loadOptions(for: vodPlan, request: vodReq)
     #expect(!vodOpts.isLive)
-    #expect(vodOpts.httpHeaders == ["User-Agent": "ELV/0.1"])
+    #expect(vodOpts.httpHeaders == ["User-Agent": "ELV/0.1Injected: 1"])
     #expect(vodOpts.maxConcurrentSourceRequests == 1)
-    #expect(vodOpts.preferSoftwareDecode)
+    #expect(!vodOpts.preferSoftwareDecode)
+    #expect(vodOpts.displayCriteriaOwner == .host)
+    #expect(!vodOpts.generatesBackgroundScrubPreviews)
+    #expect(vodOpts.skipsContainerAttachments)
+    #expect(!vodOpts.hostRetriesExhaustedLiveReplay)
 
-    let hlsReq = LoadRequest(url: "http://h:7878/hls/demo/demo/1001.m3u8", live: true)
-    let hlsPlan = try #require(planMedia(hlsReq))
-    let hlsOpts = loadOptions(for: hlsPlan, request: hlsReq)
-    #expect(hlsOpts.isLive)
-    #expect(hlsOpts.maxConcurrentSourceRequests == nil)
-    #expect(!hlsOpts.preferSoftwareDecode)
+    let liveHlsReq = LoadRequest(
+      url: "http://h:7878/hls/demo/demo/1001.m3u8",
+      live: true,
+      liveEdgeCushionSeconds: 6.0
+    )
+    let liveHlsPlan = try #require(planMedia(liveHlsReq))
+    let liveHlsOpts = loadOptions(for: liveHlsPlan, request: liveHlsReq)
+    #expect(liveHlsOpts.isLive)
+    #expect(liveHlsOpts.maxConcurrentSourceRequests == 1)
+    #expect(liveHlsOpts.hostRetriesExhaustedLiveReplay)
+    #expect(liveHlsOpts.liveEdgeCushionSeconds == 6.0)
 
-    let tsReq = LoadRequest(url: "http://h:7878/live/demo/demo/1001.ts", live: true)
-    let tsPlan = try #require(planMedia(tsReq))
-    let tsOpts = loadOptions(for: tsPlan, request: tsReq)
-    #expect(tsOpts.isLive)
-    #expect(tsOpts.maxConcurrentSourceRequests == nil)
+    let vodHlsReq = LoadRequest(url: "http://h:7878/hls/demo/demo/2001.m3u8", live: false)
+    let vodHlsOpts = loadOptions(for: try #require(planMedia(vodHlsReq)), request: vodHlsReq)
+    #expect(vodHlsOpts.maxConcurrentSourceRequests == 1)
+    #expect(!vodHlsOpts.hostRetriesExhaustedLiveReplay)
   }
 
-  @Test("liveTs options carry the tuned startup values")
-  func liveTsTunedStartupValues() throws {
-    let tsReq = LoadRequest(url: "http://h:7878/live/demo/demo/1001.ts", live: true)
+  @Test("liveTs carries Candidate C startup values and hlsHandoffOptions resets them cleanly")
+  func liveTsAndHlsHandoffOptions() throws {
+    let tsReq = LoadRequest(
+      url: "http://h:7878/live/demo/demo/1001.ts",
+      headers: ["Referer": "http://panel.example/"],
+      live: true
+    )
     let tsPlan = try #require(planMedia(tsReq))
-    let tsOpts = loadOptions(for: tsPlan, request: tsReq)
+    var tsOpts = loadOptions(for: tsPlan, request: tsReq)
     #expect(tsOpts.liveStartupGraceSeconds == 0)
     #expect(tsOpts.liveStartupSingleSegmentMinimumSeconds == 1.0)
-    #expect(tsOpts.probesize == nil)
-    #expect(tsOpts.maxAnalyzeDurationMicros == nil)
+    #expect(tsOpts.maxConcurrentSourceRequests == nil)
+    #expect(!tsOpts.hostRetriesExhaustedLiveReplay)
 
-    let hlsReq = LoadRequest(url: "http://h:7878/hls/demo/demo/1001.m3u8", live: true)
-    let hlsPlan = try #require(planMedia(hlsReq))
-    let hlsOpts = loadOptions(for: hlsPlan, request: hlsReq)
-    #expect(hlsOpts.liveStartupGraceSeconds == nil)
-    #expect(hlsOpts.liveStartupSingleSegmentMinimumSeconds == nil)
+    tsOpts.audioStreamIndex = 2
+    tsOpts.preferredAudioLanguages = ["tur"]
+    tsOpts.subtitlesDisabled = true
 
-    let vodReq = LoadRequest(url: "http://h:7878/movie/demo/demo/200001.mp4", live: false)
-    let vodPlan = try #require(planMedia(vodReq))
-    let vodOpts = loadOptions(for: vodPlan, request: vodReq)
-    #expect(vodOpts.liveStartupGraceSeconds == nil)
-    #expect(vodOpts.liveStartupSingleSegmentMinimumSeconds == nil)
+    let handoff = hlsHandoffOptions(from: tsOpts)
+    #expect(handoff.isLive)
+    #expect(handoff.maxConcurrentSourceRequests == 1)
+    #expect(handoff.hostRetriesExhaustedLiveReplay)
+    #expect(handoff.liveStartupGraceSeconds == nil)
+    #expect(handoff.liveStartupSingleSegmentMinimumSeconds == nil)
+    #expect(handoff.probesize == nil)
+    #expect(handoff.maxAnalyzeDurationMicros == nil)
+    #expect(handoff.audioStreamIndex == 2)
+    #expect(handoff.preferredAudioLanguages == ["tur"])
+    #expect(handoff.subtitlesDisabled)
+    #expect(handoff.httpHeaders == ["Referer": "http://panel.example/"])
   }
 }

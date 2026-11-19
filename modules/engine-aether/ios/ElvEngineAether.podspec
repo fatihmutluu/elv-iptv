@@ -19,6 +19,7 @@ Pod::Spec.new do |s|
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     'EXCLUDED_ARCHS[sdk=appletvsimulator*]' => 'x86_64',
+    'SWIFT_STRICT_CONCURRENCY' => 'targeted',
   }
 
   s.source_files = 'Core/**/*.swift', 'Engine/**/*.swift'

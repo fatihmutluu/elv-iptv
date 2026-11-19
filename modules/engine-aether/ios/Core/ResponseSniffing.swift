@@ -53,6 +53,11 @@ public func hasExtM3uSignature(_ prefix: Data) -> Bool {
   return startsWithAfterBomAndBlanks(bytes, marker: extM3uMarker)
 }
 
+/// Returns true when `prefix` contains at least three MPEG-TS `0x47` sync bytes spaced by 188 bytes.
+public func hasMpegTsSync(_ prefix: Data) -> Bool {
+  hasTsSync([UInt8](prefix.prefix(sniffBytes)))
+}
+
 /// Classifies a progressive stream response from its initial `prefix` bytes (`Content-Type` labels are not trusted).
 public func classifyProgressive(contentType: String?, prefix: Data) -> ProgressiveVerdict {
   _ = contentType
@@ -77,7 +82,7 @@ private func startsWithAfterBomAndBlanks(_ bytes: [UInt8], marker: [UInt8]) -> B
   }
   while start < bytes.count {
     let b = bytes[start]
-    if b == 0x20 || b == 0x09 || b == 0x0D || b == 0x0A {
+    if b == 0x20 || b == 0x09 || b == 0x0B || b == 0x0C || b == 0x0D || b == 0x0A {
       start += 1
     } else {
       break
@@ -118,7 +123,7 @@ private func isValidPrintableUtf8(_ bytes: [UInt8]) -> Bool {
   while i < length {
     let b0 = bytes[i]
     switch b0 {
-    case 0x09, 0x0A, 0x0D, 0x20...0x7E:
+    case 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x20...0x7E:
       i += 1
     case 0xC2...0xDF:
       if !checkContinuations(bytes, start: i + 1, count: 1, firstRange: 0x80...0xBF) { return false }

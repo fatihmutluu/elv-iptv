@@ -77,6 +77,13 @@ private final class NoopTransportDelegate: ByteTransportDelegate, @unchecked Sen
   func transportDidComplete(error: ReaderFailure?) {}
 }
 
+private final class LockedResumeFlag: @unchecked Sendable {
+  private let lock = NSLock()
+  private var value = false
+  func markDone() { lock.withLock { value = true } }
+  func isDone() -> Bool { lock.withLock { value } }
+}
+
 @Suite("URLSessionTransport")
 struct URLSessionTransportTests {
   private let streamUrl = URL(string: "http://127.0.0.1:7878/live/demo/demo/1001.ts")!
@@ -115,8 +122,7 @@ struct URLSessionTransportTests {
     let task = session.tasks[0]
     #expect(task.currentSuspendBalance == 0)
 
-    let resumeFinished = NSLock()
-    var didFinishResume = false
+    let resumeFlag = LockedResumeFlag()
 
     // When suspend() enters MockHttpTask.suspend(), spawn a racing thread calling transport.resume().
     // If suspend() released URLSessionTransport's lock before calling task.suspend(), resume() runs first
@@ -127,7 +133,7 @@ struct URLSessionTransportTests {
       DispatchQueue.global().async {
         waiter.signal()
         transport.resume()
-        resumeFinished.withLock { didFinishResume = true }
+        resumeFlag.markDone()
       }
       waiter.wait()
       Thread.sleep(forTimeInterval: 0.02)
@@ -138,11 +144,11 @@ struct URLSessionTransportTests {
     }
     await suspendCall.value()
     for _ in 0..<50 {
-      if resumeFinished.withLock({ didFinishResume }) { break }
+      if resumeFlag.isDone() { break }
       try await Task.sleep(nanoseconds: 2_000_000)
     }
 
-    #expect(resumeFinished.withLock { didFinishResume })
+    #expect(resumeFlag.isDone())
     #expect(task.minObservedBalance >= 0)
     #expect(task.maxObservedBalance <= 1)
     #expect(task.currentSuspendBalance == 0)

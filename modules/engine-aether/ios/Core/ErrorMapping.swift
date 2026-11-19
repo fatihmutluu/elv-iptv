@@ -1,6 +1,15 @@
 import Foundation
 
 private let namedHttpStatuses: Set<Int> = [401, 403, 404, 429, 509]
+private let notFoundStatuses: Set<Int> = [410, 451]
+private let connectionLimitStatuses: Set<Int> = [458, 460, 461, 462, 463, 469]
+
+private let networkErrorDomains: Set<String> = [
+  NSURLErrorDomain,
+  NSPOSIXErrorDomain,
+  "kCFErrorDomainCFNetwork",
+  "NWErrorDomain",
+]
 
 private let networkOnlyKinds: Set<String> = [
   "sourceCertificateRejected",
@@ -22,6 +31,7 @@ private let unsupportedFormatKinds: Set<String> = [
   "demuxedAudioLiveUnsupported",
   "noPlayableTrackWithinBudget",
   "dolbyVisionRequiresHardware",
+  "dolbyVisionUnplayableOnSoftwarePath",
   "sourceFabricatesRanges",
 ]
 
@@ -86,7 +96,7 @@ public func mapFailure(
     }
 
     if openOrProbeKinds.contains(kind) {
-      let isNetwork = underlyingDomain == NSURLErrorDomain || live || played
+      let isNetwork = isNetworkDomain(underlyingDomain) || live || played
       return MappedError(
         code: isNetwork ? "network" : "unsupported-format",
         httpStatus: nil,
@@ -100,7 +110,7 @@ public func mapFailure(
 
     if kind == "nativeItemFailed" {
       return MappedError(
-        code: underlyingDomain == NSURLErrorDomain ? "network" : "decoder",
+        code: isNetworkDomain(underlyingDomain) ? "network" : "decoder",
         httpStatus: nil,
         detail: detail
       )
@@ -118,9 +128,23 @@ public func mapFailure(
   }
 }
 
+private func isNetworkDomain(_ domain: String?) -> Bool {
+  guard let domain, !domain.isEmpty else { return false }
+  return networkErrorDomains.contains(domain)
+}
+
 private func mapHttpStatus(_ status: Int) -> (code: String, httpStatus: Int) {
   if namedHttpStatuses.contains(status) {
     return ("http-\(status)", status)
+  }
+  if status == 407 {
+    return ("http-401", status)
+  }
+  if notFoundStatuses.contains(status) {
+    return ("http-404", status)
+  }
+  if connectionLimitStatuses.contains(status) {
+    return ("connection-limit", status)
   }
   return ("http-other", status)
 }

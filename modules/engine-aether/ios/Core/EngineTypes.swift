@@ -1,5 +1,12 @@
 import Foundation
 
+/// Who controls `AVDisplayManager.preferredDisplayCriteria` on tvOS.
+public enum DisplayCriteriaOwnerOption: String, Equatable, Sendable {
+  case engine
+  case avKit
+  case host
+}
+
 /// Stream open parameters passed from JavaScript to the Apple playback engine.
 public struct LoadRequest: Equatable, Sendable {
   public var url: String
@@ -9,6 +16,7 @@ public struct LoadRequest: Equatable, Sendable {
   public var softwareAudio: Bool
   public var audioTrackId: String?
   public var subtitlePreference: SubtitlePreference
+  public var liveEdgeCushionSeconds: Double?
 
   public init(
     url: String,
@@ -17,7 +25,8 @@ public struct LoadRequest: Equatable, Sendable {
     startMs: Double? = nil,
     softwareAudio: Bool = false,
     audioTrackId: String? = nil,
-    subtitlePreference: SubtitlePreference = .default
+    subtitlePreference: SubtitlePreference = .default,
+    liveEdgeCushionSeconds: Double? = nil
   ) {
     self.url = url
     self.headers = headers
@@ -26,6 +35,7 @@ public struct LoadRequest: Equatable, Sendable {
     self.softwareAudio = softwareAudio
     self.audioTrackId = audioTrackId
     self.subtitlePreference = subtitlePreference
+    self.liveEdgeCushionSeconds = liveEdgeCushionSeconds
   }
 }
 
@@ -34,6 +44,11 @@ public enum MediaPlan: Equatable, Sendable {
   case hls(URL, live: Bool)
   case vod(URL, startSeconds: Double?)
   case liveTs(URL)
+
+  public var isLiveTs: Bool {
+    if case .liveTs = self { return true }
+    return false
+  }
 }
 
 /// Engine-neutral load options mapped onto `AetherEngine.LoadOptions`.
@@ -42,10 +57,15 @@ public struct EngineLoadOptions: Equatable, Sendable {
   public var httpHeaders: [String: String]
   public var maxConcurrentSourceRequests: Int?
   public var preferSoftwareDecode: Bool
+  public var displayCriteriaOwner: DisplayCriteriaOwnerOption
   public var liveStartupGraceSeconds: Double?
   public var liveStartupSingleSegmentMinimumSeconds: Double?
+  public var liveEdgeCushionSeconds: Double?
   public var probesize: Int?
   public var maxAnalyzeDurationMicros: Int?
+  public var generatesBackgroundScrubPreviews: Bool
+  public var skipsContainerAttachments: Bool
+  public var hostRetriesExhaustedLiveReplay: Bool
   public var audioStreamIndex: Int32?
   public var preferredAudioLanguages: [String]
   public var initialSubtitleTrackId: Int?
@@ -57,10 +77,15 @@ public struct EngineLoadOptions: Equatable, Sendable {
     httpHeaders: [String: String] = [:],
     maxConcurrentSourceRequests: Int? = nil,
     preferSoftwareDecode: Bool = false,
+    displayCriteriaOwner: DisplayCriteriaOwnerOption = .host,
     liveStartupGraceSeconds: Double? = nil,
     liveStartupSingleSegmentMinimumSeconds: Double? = nil,
+    liveEdgeCushionSeconds: Double? = nil,
     probesize: Int? = nil,
     maxAnalyzeDurationMicros: Int? = nil,
+    generatesBackgroundScrubPreviews: Bool = false,
+    skipsContainerAttachments: Bool = true,
+    hostRetriesExhaustedLiveReplay: Bool = false,
     audioStreamIndex: Int32? = nil,
     preferredAudioLanguages: [String] = [],
     initialSubtitleTrackId: Int? = nil,
@@ -71,10 +96,15 @@ public struct EngineLoadOptions: Equatable, Sendable {
     self.httpHeaders = httpHeaders
     self.maxConcurrentSourceRequests = maxConcurrentSourceRequests
     self.preferSoftwareDecode = preferSoftwareDecode
+    self.displayCriteriaOwner = displayCriteriaOwner
     self.liveStartupGraceSeconds = liveStartupGraceSeconds
     self.liveStartupSingleSegmentMinimumSeconds = liveStartupSingleSegmentMinimumSeconds
+    self.liveEdgeCushionSeconds = liveEdgeCushionSeconds
     self.probesize = probesize
     self.maxAnalyzeDurationMicros = maxAnalyzeDurationMicros
+    self.generatesBackgroundScrubPreviews = generatesBackgroundScrubPreviews
+    self.skipsContainerAttachments = skipsContainerAttachments
+    self.hostRetriesExhaustedLiveReplay = hostRetriesExhaustedLiveReplay
     self.audioStreamIndex = audioStreamIndex
     self.preferredAudioLanguages = preferredAudioLanguages
     self.initialSubtitleTrackId = initialSubtitleTrackId
@@ -124,6 +154,7 @@ public enum BackendPhase: Equatable, Sendable {
   case loading
   case playing
   case paused
+  case systemPaused
   case seeking
   case rebuffering
   case stalled

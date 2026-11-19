@@ -68,6 +68,7 @@ public final class ByteFifo: @unchecked Sendable {
   public func finish(_ failure: ReaderFailure?) {
     condition.lock()
     if !isCancelled && !eof && terminalFailure == nil {
+      attachedTransport = nil
       if let failure {
         terminalFailure = failure
       } else {
@@ -135,9 +136,11 @@ public final class ByteFifo: @unchecked Sendable {
     return failed ? -1 : 0
   }
 
-  /// Permanently cancels the queue and wakes any parked `read` with `-1`.
+  /// Permanently cancels the queue, releases any attached transport, and wakes parked `read`s with `-1`.
   public func cancel() {
     condition.lock()
+    attachedTransport = nil
+    isBackpressured = false
     if !isCancelled {
       isCancelled = true
       chunks.removeAll(keepingCapacity: false)

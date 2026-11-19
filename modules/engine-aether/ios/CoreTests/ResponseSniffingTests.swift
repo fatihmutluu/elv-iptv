@@ -60,6 +60,7 @@ struct ResponseSniffingTests {
     #expect(classifyProgressive(contentType: nil, prefix: Data("<html><body>Limit</body></html>".utf8)) == .notice)
     #expect(classifyProgressive(contentType: nil, prefix: Data("{\"error\":\"limit\"}".utf8)) == .notice)
     #expect(classifyProgressive(contentType: nil, prefix: Data("Bağlantı sınırı aşıldı\r\n".utf8)) == .notice)
+    #expect(classifyProgressive(contentType: nil, prefix: Data("Limit\u{000B}reached\u{000C}now\n".utf8)) == .notice)
   }
 
   @Test("progressive media is judged by body bytes under any label")
