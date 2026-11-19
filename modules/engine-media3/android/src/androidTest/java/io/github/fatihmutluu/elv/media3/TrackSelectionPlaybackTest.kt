@@ -107,7 +107,7 @@ class TrackSelectionPlaybackTest {
 
       // Turn subtitles Off (null): selectedSubtitleId becomes null and cues clear immediately
       engine.selectSubtitleTrack(4, null)
-      val subOff = awaitTracks(events) { it["selectedSubtitleId"] == null && events.any { ev -> ev["attempt"] == 4 } }
+      val subOff = awaitTracks(events, minAttempt = 4) { it["selectedSubtitleId"] == null }
       assertNotNull("expected selectedSubtitleId=null after Off", subOff)
       assertNull(subOff!!["selectedSubtitleId"])
       assertTrue("expected cues cleared after Off", latestCues.get().isEmpty())
@@ -198,6 +198,7 @@ class TrackSelectionPlaybackTest {
   @Suppress("UNCHECKED_CAST")
   private fun awaitTracks(
     events: List<Map<String, Any?>>,
+    minAttempt: Int = 1,
     predicate: (Map<String, Any?>) -> Boolean,
   ): Map<String, Any?>? {
     val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(25)
@@ -206,7 +207,11 @@ class TrackSelectionPlaybackTest {
       if (error != null) throw AssertionError("unexpected playback error: $error")
       val match = events
         .asReversed()
-        .firstOrNull { it["type"] == "tracks" && predicate(it["tracks"] as Map<String, Any?>) }
+        .firstOrNull {
+          it["type"] == "tracks" &&
+            (it["attempt"] as? Int ?: 0) >= minAttempt &&
+            predicate(it["tracks"] as Map<String, Any?>)
+        }
       if (match != null) return match["tracks"] as Map<String, Any?>
       Thread.sleep(100)
     }

@@ -10,19 +10,25 @@ class ErrorMappingTest {
   private val badStatus = PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS
 
   @Test
-  fun `named HTTP statuses keep their own code`() {
+  fun `named, refusal and panel limit HTTP statuses map to canonical engine codes (#286, #314)`() {
     assertEquals("http-401", mapError(401, "text/plain", badStatus))
+    assertEquals("http-401", mapError(407, "text/plain", badStatus))
     assertEquals("http-403", mapError(403, "text/plain", badStatus))
     assertEquals("http-404", mapError(404, null, badStatus))
+    assertEquals("http-404", mapError(410, null, badStatus))
+    assertEquals("http-404", mapError(451, "text/html", badStatus))
     assertEquals("http-429", mapError(429, "text/html", badStatus))
     assertEquals("http-509", mapError(509, "text/plain", badStatus))
+    for (limitCode in listOf(458, 460, 461, 462, 463, 469)) {
+      assertEquals("status $limitCode", "connection-limit", mapError(limitCode, "text/plain", badStatus))
+    }
   }
 
   @Test
   fun `other HTTP error statuses are http-other`() {
     assertEquals("http-other", mapError(500, null, badStatus))
     assertEquals("http-other", mapError(503, "text/html", badStatus))
-    assertEquals("http-other", mapError(410, null, badStatus))
+    assertEquals("http-other", mapError(418, null, badStatus))
     assertEquals("http-other", mapError(null, null, badStatus))
   }
 

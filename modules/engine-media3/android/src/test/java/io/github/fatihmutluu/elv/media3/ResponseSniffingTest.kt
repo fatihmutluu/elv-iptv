@@ -44,14 +44,9 @@ class ResponseSniffingTest {
   }
 
   @Test
-  fun `mpegurl content types are HLS`() {
-    assertTrue(isHlsContentType("application/vnd.apple.mpegurl"))
-    assertTrue(isHlsContentType("application/x-mpegURL; charset=utf-8"))
-    assertTrue(isHlsContentType("audio/mpegurl"))
-    assertTrue(isHlsContentType("AUDIO/X-MPEGURL"))
-    assertFalse(isHlsContentType("video/mp2t"))
-    assertFalse(isHlsContentType("text/plain"))
-    assertFalse(isHlsContentType(null))
+  fun `vertical tab and form feed control whitespace still classify HTML and text notices as NOTICE`() {
+    assertEquals(ResponseKind.NOTICE, classify(RequestKind.PROGRESSIVE, "video/mp2t", bytes("<html>\u000CLimit\u000B</html>")))
+    assertEquals(ResponseKind.HLS, classify(RequestKind.MANIFEST, "text/plain", bytes("\u000C\u000B#EXTM3U\n")))
   }
 
   @Test

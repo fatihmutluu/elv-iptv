@@ -47,7 +47,7 @@ class ElvEngineMedia3Module : Module() {
       Function("pause") { engine: Media3Engine, attempt: Int -> engine.pause(attempt) }
 
       Function("seek") { engine: Media3Engine, attempt: Int, positionMs: Double ->
-        engine.seek(attempt, positionMs.toLong())
+        if (positionMs.isFinite()) engine.seek(attempt, positionMs.toLong())
       }
 
       Function("selectAudioTrack") { engine: Media3Engine, attempt: Int, id: String ->

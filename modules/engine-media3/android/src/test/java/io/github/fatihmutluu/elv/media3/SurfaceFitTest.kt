@@ -101,4 +101,15 @@ class SurfaceFitTest {
     assertEquals(ResizeMode.FILL, fit.mode)
     assertEquals(VideoRect(0, 0, 1920, 1080), fit.rect(1920, 1080))
   }
+
+  @Test
+  fun `SurfaceFit sanitizes NaN, non-positive and infinite pixelRatio to 1f without layout thrash`() {
+    val fit = SurfaceFit()
+    assertTrue(fit.video(640, 480, Float.NaN))
+    assertEquals(VideoRect(240, 0, 1680, 1080), fit.rect(1920, 1080))
+    assertFalse("repeated NaN pixelRatio must deduplicate cleanly", fit.video(640, 480, Float.NaN))
+    assertFalse(fit.video(640, 480, 0f))
+    assertFalse(fit.video(640, 480, -2f))
+    assertFalse(fit.video(640, 480, Float.POSITIVE_INFINITY))
+  }
 }

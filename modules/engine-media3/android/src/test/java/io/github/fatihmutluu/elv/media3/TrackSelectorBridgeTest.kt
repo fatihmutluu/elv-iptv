@@ -108,6 +108,112 @@ class TrackSelectorBridgeTest {
 
     val disabledSnapshot = inspectMediaTracks(tracks, textDisabled = true)
     assertNull(disabledSnapshot.selectedSubtitleId)
+
+    // Actively selected FORMAT_EXCEEDS_CAPABILITIES audio must be included, while unselected unsupported stays hidden
+    val exceedsAudioGroup = group(
+      "a-exceeds",
+      listOf(
+        Format.Builder().setSampleMimeType(MimeTypes.AUDIO_E_AC3).setLanguage("eng").setChannelCount(8).build(),
+        Format.Builder().setSampleMimeType(MimeTypes.AUDIO_DTS).setLanguage("deu").build(),
+      ),
+      selectedIndex = 0,
+      supported = intArrayOf(C.FORMAT_EXCEEDS_CAPABILITIES, C.FORMAT_EXCEEDS_CAPABILITIES),
+    )
+    val exceedsSnapshot = inspectMediaTracks(Tracks(listOf(videoGroup, exceedsAudioGroup)), textDisabled = false)
+    assertEquals(listOf("1:0"), exceedsSnapshot.audio.map { it.id })
+    assertEquals("1:0", exceedsSnapshot.selectedAudioId)
+  }
+
+  @Test
+  fun `ignores Tracks EMPTY, preserves active subtitle cues on re-select, guards unmatched IDs and reconciles swapped labels`() {
+    val emitted = mutableListOf<Map<String, Any?>>()
+    var clearedCues = 0
+    val bridge = TrackSelectorBridge(
+      onTracks = { emitted += it },
+      onClearCues = { clearedCues += 1 },
+    )
+    val player = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build()
+    try {
+      // Transient Tracks.EMPTY on setMediaSource must be ignored
+      bridge.onTracksChanged(player, Tracks.EMPTY)
+      assertTrue("Tracks.EMPTY must never emit", emitted.isEmpty())
+
+      val initialTracks = Tracks(listOf(videoGroup, audioGroup, textGroup))
+      bridge.onTracksChanged(player, initialTracks)
+      assertEquals(1, emitted.size)
+
+      // Re-selecting the ALREADY active subtitle ("2:0") must NOT clear active cues!
+      bridge.selectSubtitleTrack(player, "2:0")
+      assertEquals("re-selecting active subtitle must keep visible cues", 0, clearedCues)
+
+      // Switching to a DIFFERENT subtitle ("2:1") DOES clear stale cues
+      bridge.selectSubtitleTrack(player, "2:1")
+      assertEquals(1, clearedCues)
+
+      // Unmatched audio/subtitle IDs must be ignored without wiping overrides or clearing cues
+      bridge.selectAudioTrack(player, "1:1")
+      val savedAudioOverride = player.trackSelectionParameters.overrides[audioGroup.mediaTrackGroup]?.trackIndices
+      assertEquals(listOf(1), savedAudioOverride)
+
+      bridge.selectAudioTrack(player, "99:99")
+      assertEquals(
+        "unmatched audio ID must not clear active override",
+        listOf(1),
+        player.trackSelectionParameters.overrides[audioGroup.mediaTrackGroup]?.trackIndices,
+      )
+
+      bridge.selectSubtitleTrack(player, null)
+      assertEquals(2, clearedCues)
+      assertTrue(player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT))
+
+      bridge.selectSubtitleTrack(player, "99:99")
+      assertTrue(
+        "unmatched subtitle ID must not re-enable disabled subtitles",
+        player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT),
+      )
+      assertEquals("unmatched subtitle ID must not clear cues", 2, clearedCues)
+
+      // Same-language tracks swapping order must follow label, and BCP-47 region tags match ISO 639-2
+      val dualEnglish = group(
+        "a-dual",
+        listOf(
+          Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AAC).setLanguage("en-US").setLabel("Commentary").build(),
+          Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AAC).setLanguage("en-US").setLabel("Main").build(),
+        ),
+        selectedIndex = 0,
+      )
+      bridge.onTracksChanged(player, Tracks(listOf(videoGroup, dualEnglish)))
+      bridge.selectAudioTrack(player, "1:1") // Pick "Main"
+
+      bridge.onPrepareReuse()
+      val swappedDualEnglish = group(
+        "a-dual-swapped",
+        listOf(
+          Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AAC).setLanguage("eng").setLabel("Main").build(),
+          Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AAC).setLanguage("eng").setLabel("Commentary").build(),
+        ),
+        selectedIndex = 1,
+      )
+      bridge.onTracksChanged(player, Tracks(listOf(videoGroup, swappedDualEnglish)))
+      assertEquals(
+        "must pick swapped index 0 ('Main') instead of keeping stale index 1 ('Commentary')",
+        listOf(0),
+        player.trackSelectionParameters.overrides[swappedDualEnglish.mediaTrackGroup]?.trackIndices,
+      )
+      assertTrue(sameLanguage("tr", "tur"))
+      assertTrue(sameLanguage("deu", "ger"))
+      assertTrue(sameLanguage("en-US", "eng"))
+      assertFalse(sameLanguage("und", "und"))
+
+      // Reloading a new media with Default subtitle preference restores CaptioningManager accessibility defaults
+      val (_, defaultReq) = parseLoadArgs(mapOf("attempt" to 9, "url" to "http://h/2.mkv", "kind" to "vod"))
+      bridge.onLoad(defaultReq)
+      bridge.applyInitialParameters(player)
+      assertTrue(player.trackSelectionParameters.usePreferredTextLanguagesAndRoleFlagsFromCaptioningManager)
+      assertFalse(player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT))
+    } finally {
+      player.release()
+    }
   }
 
   @Test

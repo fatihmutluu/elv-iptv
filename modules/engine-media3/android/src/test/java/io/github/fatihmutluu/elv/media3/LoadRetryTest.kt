@@ -36,11 +36,11 @@ class LoadRetryTest {
   }
 
   @Test
-  fun `HLS segments and refreshes fail at once only on auth and limit statuses`() {
-    for (status in listOf(401, 403, 429, 509)) {
+  fun `HLS segments and refreshes fail at once on auth, terminal gone and limit statuses (#286, #314)`() {
+    for (status in listOf(401, 403, 407, 410, 429, 451, 458, 460, 461, 462, 463, 469, 509)) {
       assertTrue("status $status", failsAtOnce(status, refused = false, hls = true, manifestLoaded = true))
     }
-    for (status in listOf(404, 410, 500, 502, 503)) {
+    for (status in listOf(404, 500, 502, 503)) {
       assertFalse("status $status", failsAtOnce(status, refused = false, hls = true, manifestLoaded = true))
     }
   }

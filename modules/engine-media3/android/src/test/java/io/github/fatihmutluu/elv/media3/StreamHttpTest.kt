@@ -79,10 +79,22 @@ class StreamHttpTest {
   }
 
   @Test
-  fun `a source's own User-Agent, in any case, is sent once instead`() {
-    val head = requestHead(mapOf("user-agent" to "Provider/1.0"))
-    assertEquals(listOf("Provider/1.0"), agents(head))
+  fun `a source's own User-Agent, in any case or duplicated, is sent once and sanitized`() {
+    val head = requestHead(
+      mapOf(
+        "user-agent" to "Provider/1.0\r\nInjected: 1",
+        "User-Agent" to "Duplicate/2.0",
+        "X-Custom" to "ok\u0000value\nline2",
+        "X-Turkish" to "Kanal\u0131",
+        "Bad Header Name" to "dropped",
+      )
+    )
+    assertEquals(listOf("Provider/1.0Injected: 1"), agents(head))
     assertFalse(head.contains("okhttp"))
+    assertFalse(head.contains("Duplicate/2.0"))
+    assertTrue(head.contains("X-Custom: okvalueline2"))
+    assertTrue(head.contains("X-Turkish: Kanal"))
+    assertFalse(head.contains("Bad Header Name"))
   }
 
   @Test
@@ -139,6 +151,8 @@ class StreamHttpTest {
           "Authorization" to "Bearer secret-token",
           "Cookie" to "sid=secret-cookie",
           "Proxy-Authorization" to "Basic c2VjcmV0",
+          "X-Api-Key" to "secret-api-key",
+          "x-auth-token" to "secret-auth-token",
           "User-Agent" to "Provider/1.0",
         )
         val (source, _) = streamDataSource(headers, engineHttpClient(), originUrl)
@@ -156,9 +170,13 @@ class StreamHttpTest {
     assertTrue(first.contains("Bearer secret-token"))
     assertTrue(first.contains("sid=secret-cookie"))
     assertTrue(first.contains("Basic c2VjcmV0"))
+    assertTrue(first.contains("secret-api-key"))
+    assertTrue(first.contains("secret-auth-token"))
     assertFalse("Authorization leaked to redirect origin", second.contains("secret-token"))
     assertFalse("Cookie leaked to redirect origin", second.contains("secret-cookie"))
     assertFalse("Proxy-Authorization leaked to redirect origin", second.contains("c2VjcmV0"))
+    assertFalse("X-Api-Key leaked to redirect origin", second.contains("secret-api-key"))
+    assertFalse("X-Auth-Token leaked to redirect origin", second.contains("secret-auth-token"))
     assertEquals(listOf("Provider/1.0"), agents(second))
   }
 

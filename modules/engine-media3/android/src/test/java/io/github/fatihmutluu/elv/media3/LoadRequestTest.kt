@@ -37,9 +37,22 @@ class LoadRequestTest {
   }
 
   @Test
-  fun `the source type follows the detection`() {
+  fun `the source type follows the detection and parseLoadArgs rejects non-finite startMs`() {
     assertFalse(guess.playlistDetected)
     assertEquals(SourceType.TS, guess.sourceType())
     assertEquals(SourceType.HLS, guess.asDetectedPlaylist().sourceType())
+
+    val (_, infReq) = parseLoadArgs(
+      mapOf("attempt" to 1, "url" to "http://h/1.mp4", "kind" to "vod", "startMs" to Double.POSITIVE_INFINITY)
+    )
+    val (_, nanReq) = parseLoadArgs(
+      mapOf("attempt" to 1, "url" to "http://h/1.mp4", "kind" to "vod", "startMs" to Double.NaN)
+    )
+    val (_, validReq) = parseLoadArgs(
+      mapOf("attempt" to 1, "url" to "http://h/1.mp4", "kind" to "vod", "startMs" to 42_500.0)
+    )
+    org.junit.Assert.assertNull(infReq.startMs)
+    org.junit.Assert.assertNull(nanReq.startMs)
+    assertEquals(42_500L, validReq.startMs)
   }
 }

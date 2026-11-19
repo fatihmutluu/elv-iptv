@@ -21,13 +21,17 @@ internal class HlsDetectedException : IOException("HLS playlist on a progressive
 /** A first response of a stream or playlist had an empty body: nothing will ever play from it. */
 internal class EmptyMediaException : EOFException("empty media response")
 
-/** True for load failures that must reach the playback service at once instead of Media3's retries. */
-internal fun isRefusedLoad(error: Throwable): Boolean =
-  error is ProviderNoticeException ||
-    error is EmptyMediaException ||
-    error is HlsDetectedException ||
-    error is SupersededMediaException ||
-    error is HttpDataSource.InvalidContentTypeException
+/**
+ * True for load failures that must reach the playback service at once instead of Media3's retries. An
+ * [EmptyMediaException] fails at once on progressive media and on the initial HLS manifest, while post-manifest empty
+ * HLS refreshes stay retryable so a single empty CDN edge refresh does not abort live playback.
+ */
+internal fun isRefusedLoad(error: Throwable, hls: Boolean = false, manifestLoaded: Boolean = false): Boolean =
+  causeOf<ProviderNoticeException>(error) != null ||
+    (causeOf<EmptyMediaException>(error) != null && (!hls || !manifestLoaded)) ||
+    causeOf<HlsDetectedException>(error) != null ||
+    causeOf<SupersededMediaException>(error) != null ||
+    causeOf<HttpDataSource.InvalidContentTypeException>(error) != null
 
 /**
  * Judges every response of [kind] with [classifyResponse] before the player sees it, whatever its label: it reads up
@@ -37,10 +41,15 @@ internal fun isRefusedLoad(error: Throwable): Boolean =
  * [EmptyMediaException].
  */
 @OptIn(UnstableApi::class)
-internal class SniffingDataSource(private val upstream: DataSource, private val kind: RequestKind) : DataSource {
+internal class SniffingDataSource(
+  private val upstream: DataSource,
+  private val kind: RequestKind,
+  private val onManifestLoaded: () -> Unit = {},
+) : DataSource {
   private val prefix = ByteArray(if (kind == RequestKind.OTHER) 0 else SNIFF_BYTES)
   private var prefixLength = 0
   private var prefixRead = 0
+  private var upstreamEof = false
 
   override fun addTransferListener(transferListener: TransferListener) {
     upstream.addTransferListener(transferListener)
@@ -49,6 +58,7 @@ internal class SniffingDataSource(private val upstream: DataSource, private val 
   override fun open(dataSpec: DataSpec): Long {
     prefixLength = 0
     prefixRead = 0
+    upstreamEof = false
     val length = upstream.open(dataSpec)
     try {
       if (kind == RequestKind.OTHER) return length
@@ -56,11 +66,16 @@ internal class SniffingDataSource(private val upstream: DataSource, private val 
       val contentType = contentTypeOf(upstream.responseHeaders)
       val filled = readAhead(length)
       if (filled == 0 && (kind == RequestKind.PROGRESSIVE || kind == RequestKind.MANIFEST)) {
-        if (isNoticeContentType(contentType, hls = false)) throw ProviderNoticeException(contentType)
+        if (isNoticeContentType(contentType, hls = kind == RequestKind.MANIFEST)) {
+          throw ProviderNoticeException(contentType)
+        }
         throw EmptyMediaException()
       }
       when (classifyResponse(kind, contentType, prefix, filled)) {
-        ResponseKind.HLS -> if (kind == RequestKind.PROGRESSIVE) throw HlsDetectedException()
+        ResponseKind.HLS -> {
+          if (kind == RequestKind.PROGRESSIVE) throw HlsDetectedException()
+          if (kind == RequestKind.MANIFEST) onManifestLoaded()
+        }
         ResponseKind.NOTICE -> throw ProviderNoticeException(contentType)
         ResponseKind.MEDIA -> Unit
       }
@@ -80,7 +95,10 @@ internal class SniffingDataSource(private val upstream: DataSource, private val 
       prefixRead += count
       return count
     }
-    return upstream.read(buffer, offset, length)
+    if (upstreamEof) return C.RESULT_END_OF_INPUT
+    return upstream.read(buffer, offset, length).also {
+      if (it == C.RESULT_END_OF_INPUT) upstreamEof = true
+    }
   }
 
   override fun getUri(): Uri? = upstream.uri
@@ -90,6 +108,7 @@ internal class SniffingDataSource(private val upstream: DataSource, private val 
   override fun close() {
     prefixLength = 0
     prefixRead = 0
+    upstreamEof = false
     upstream.close()
   }
 
@@ -98,7 +117,10 @@ internal class SniffingDataSource(private val upstream: DataSource, private val 
     var filled = 0
     while (filled < limit) {
       val read = upstream.read(prefix, filled, limit - filled)
-      if (read == C.RESULT_END_OF_INPUT) break
+      if (read == C.RESULT_END_OF_INPUT) {
+        upstreamEof = true
+        break
+      }
       filled += read
     }
     return filled

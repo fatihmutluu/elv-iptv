@@ -87,8 +87,8 @@ const NativeSurfaceView: ComponentType<NativeSurfaceProps> | null =
     : requireNativeViewManager<NativeSurfaceProps>('ElvEngineMedia3', 'Media3SurfaceView');
 
 /**
- * The video surface of a Media3 engine (player core spec 6.1): a `SurfaceView` fixed at creation and a `SubtitleView`
- * above it, both under a black zap shutter that the engine shows from every `load` until that media's first frame,
+ * The video surface of a Media3 engine (player core spec 6.1): a `SurfaceView` fixed at creation under a black zap
+ * shutter (shown from every `load` until that video media's first frame), with a `SubtitleView` above it,
  * natively. The picture keeps its display aspect ratio (`resizeMode`), and the screen stays on while the engine plays.
  * The engine sends `surface` `created` and `destroyed` events as the view's surface comes and goes. Renders nothing
  * where the native module is absent, or for an engine this module did not create or that was released.

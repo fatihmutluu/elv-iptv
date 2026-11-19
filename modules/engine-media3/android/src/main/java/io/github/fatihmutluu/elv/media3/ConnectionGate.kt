@@ -13,6 +13,9 @@ import kotlin.concurrent.withLock
  */
 internal const val DROP_AFTER_MS = 1_500L
 
+/** Drop cycles past [ConnectionGate.awaitPreviousClosed]'s initial timeout before force-dropping a stalled closer. */
+private const val STALLED_CLOSER_DROP_CYCLES = 2
+
 /** How [ConnectionGate.awaitPreviousClosed] ended. */
 enum class BoundaryWait {
   /** Nothing older was open, or it closed before the backstop. */
@@ -54,7 +57,7 @@ class ConnectionGate(private val closer: Executor) {
   /** Registered connections currently queued or running on [closer]. */
   private val forcing = HashSet<ForceClosable>()
 
-  /** Registered connections whose force-close finished: their call is cancelled. */
+  /** Registered connections whose force-close finished (or whose closer rejected): eligible for backstop drop. */
   private val cancelled = HashSet<ForceClosable>()
 
   private enum class Older { CLOSED, SUPERSEDED, OPEN }
@@ -114,9 +117,9 @@ class ConnectionGate(private val closer: Executor) {
   /**
    * Blocks until no generation older than [generation] has an open connection, or until [generation] itself is
    * superseded. After [timeoutMs] (a backstop: the new media already forced them) it force-closes the older
-   * connections still open again and keeps waiting for their close, which a forced connection reports once its open or
-   * read has ended; every [DROP_AFTER_MS] after that it drops the older connections whose force-close finished. Throws
-   * [InterruptedException] when the waiting thread is interrupted.
+   * connections still open again and keeps waiting for their close; every [DROP_AFTER_MS] after that it drops older
+   * connections whose force-close finished (and after [STALLED_CLOSER_DROP_CYCLES] cycles also drops registered
+   * connections stuck in a blocked closer so a stalled closer cannot hang the boundary forever).
    */
   fun awaitPreviousClosed(generation: Long, timeoutMs: Long): BoundaryWait {
     when (waitForOlder(generation, timeoutMs)) {
@@ -126,11 +129,16 @@ class ConnectionGate(private val closer: Executor) {
     }
     forceClose(lock.withLock { connectionsOlderThan(generation).also { forcing.addAll(it) } })
     var dropped = false
+    var cycles = 0
     while (true) {
       when (waitForOlder(generation, DROP_AFTER_MS)) {
         Older.CLOSED -> return if (dropped) BoundaryWait.DROPPED else BoundaryWait.CLOSED_AFTER_FORCE
         Older.SUPERSEDED -> return if (dropped) BoundaryWait.DROPPED else BoundaryWait.SUPERSEDED
-        Older.OPEN -> if (lock.withLock { drop(generation) } > 0) dropped = true
+        Older.OPEN -> {
+          cycles += 1
+          val includeStalled = cycles >= STALLED_CLOSER_DROP_CYCLES
+          if (lock.withLock { drop(generation, includeStalled = includeStalled) } > 0) dropped = true
+        }
       }
     }
   }
@@ -158,12 +166,14 @@ class ConnectionGate(private val closer: Executor) {
   private fun connectionsOlderThan(generation: Long): List<ForceClosable> =
     connections.filterKeys { it < generation }.values.flatten()
 
-  /** Under [lock]: forgets the cancelled connections of generations older than [generation]; returns how many. */
-  private fun drop(generation: Long): Int {
+  /** Under [lock]: forgets eligible connections of generations older than [generation]; returns how many. */
+  private fun drop(generation: Long, includeStalled: Boolean = false): Int {
     var dropped = 0
     for ((owner, open) in connections.filterKeys { it < generation }) {
-      for (connection in open.filter { it in cancelled }) {
+      val eligible = open.filter { it in cancelled || (includeStalled && it in forcing) }
+      for (connection in eligible) {
         open.remove(connection)
+        forcing.remove(connection)
         cancelled.remove(connection)
         uncount(owner)
         dropped += 1
@@ -203,7 +213,15 @@ class ConnectionGate(private val closer: Executor) {
         }
       }
     } catch (_: RejectedExecutionException) {
-      lock.withLock { forcing.removeAll(overstaying.toSet()) }
+      lock.withLock {
+        for (connection in overstaying) {
+          forcing.remove(connection)
+          if (connections.values.any { connection in it }) {
+            cancelled.add(connection)
+          }
+        }
+        if (releasedBefore > 0L) drop(releasedBefore)
+      }
     }
   }
 }
