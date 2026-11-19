@@ -117,11 +117,20 @@ describe('deriver', () => {
     }
   });
 
-  it('vid false after the restart fires firstFrame then', () => {
+  it('vid false after file-loaded and restart fires firstFrame then', () => {
     const s = setup('vod');
+    s.d.fileEvent({ event: 'file-loaded' });
     restart(s.d);
     expect(frames(s.d.property('vid', false))).toHaveLength(1);
     expect(s.d.property('vid', false)).toEqual([]);
+  });
+
+  it('ignores vid false before file-loaded so video streams do not fire premature firstFrame (#155)', () => {
+    const s = setup('live');
+    expect(s.d.property('vid', false)).toEqual([]);
+    s.d.fileEvent({ event: 'file-loaded' });
+    expect(frames(restart(s.d))).toEqual([]);
+    expect(frames(s.d.property('video-params', { w: 1920, h: 1080 }))).toHaveLength(1);
   });
 
   it('a vid track id does not count as audio-only', () => {
@@ -204,12 +213,20 @@ describe('deriver', () => {
     expect(clocks(done).at(-1)).toMatchObject({ positionMs: 30000, atMs: 1200, rate: 1 });
   });
 
-  it('carries duration for vod and the live edge for live', () => {
+  it('carries duration for vod and the live edge for live, and emits clock when duration arrives late', () => {
     const vod = setup('vod');
     vod.d.property('duration', 90.5);
     play(vod);
     expect(clocks(vod.d.property('speed', 1))).toEqual([]);
     expect(clocks(vod.d.property('pause', true))[0]).toMatchObject({ durationMs: 90500 });
+
+    const lateVod = setup('vod');
+    play(lateVod);
+    lateVod.d.property('pause', true);
+    lateVod.clock.t = 1250;
+    const updated = clocks(lateVod.d.property('duration', 120));
+    expect(updated).toEqual([{ positionMs: 0, atMs: 1250, rate: 0, durationMs: 120_000 }]);
+    expect(lateVod.d.property('duration', 120)).toEqual([]);
 
     const live = setup('live');
     live.d.property('duration', 90);
@@ -218,6 +235,21 @@ describe('deriver', () => {
     const a = clocks(live.d.property('pause', true))[0];
     expect(a?.liveEdgeMs).toBe(12250);
     expect(a?.durationMs).toBeUndefined();
+  });
+
+  it('prefers playback-time over time-pos and clamps negative positions to 0', () => {
+    const s = setup('vod');
+    s.d.fileEvent({ event: 'file-loaded' });
+    s.d.property('video-params', { w: 1280 });
+    s.d.property('playback-time', -0.25);
+    const first = clocks(restart(s.d));
+    expect(first[0]?.positionMs).toBe(0);
+
+    s.clock.t = 2100;
+    // time-pos is ignored once playback-time has been observed on this media
+    expect(s.d.property('time-pos', 99)).toEqual([]);
+    const next = clocks(s.d.property('playback-time', 4.5));
+    expect(next[0]?.positionMs).toBe(4500);
   });
 
   it('ignores unusable property values', () => {

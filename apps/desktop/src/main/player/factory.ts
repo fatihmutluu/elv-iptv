@@ -45,7 +45,7 @@ export async function createEngineFor(
       platform: deps.platform,
     }),
     loadMode: deps.loadMode,
-    now: () => Date.now(),
+    now: () => performance.now(),
     timers: {
       setTimeout: (fn, ms) => setTimeout(fn, ms),
       clearTimeout: (h) => clearTimeout(h as NodeJS.Timeout),

@@ -107,11 +107,34 @@ describe('createMpvClient', () => {
     await expect(c.command(['quit'])).rejects.toThrow(/closed/);
   });
 
-  it('close destroys the stream', () => {
+  it('close destroys the stream and clears event and close listeners', () => {
     const p = fakePipe();
     const c = createMpvClient(p.stream, { replyTimeoutMs: 3000 });
-    c.close();
+    const onEv = vi.fn();
+    const onCl1 = vi.fn(() => {
+      throw new Error('close listener boom');
+    });
+    const onCl2 = vi.fn();
+    c.onEvent(onEv);
+    c.onClose(onCl1);
+    c.onClose(onCl2);
+    expect(() => c.close()).not.toThrow();
     expect(p.stream.destroyed).toBe(true);
+    expect(onCl1).toHaveBeenCalledTimes(1);
+    expect(onCl2).toHaveBeenCalledTimes(1);
+    p.stream.emit('data', Buffer.from('{"event":"late"}\n'));
+    expect(onEv).not.toHaveBeenCalled();
+  });
+
+  it('cleans up pending entry and reply timeout if stream.write throws synchronously', async () => {
+    vi.useFakeTimers();
+    const p = fakePipe();
+    p.stream.write = (() => {
+      throw new Error('EPIPE');
+    }) as typeof p.stream.write;
+    const c = createMpvClient(p.stream, { replyTimeoutMs: 3000 });
+    await expect(c.command(['get_property', 'pause'])).rejects.toThrow('EPIPE');
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

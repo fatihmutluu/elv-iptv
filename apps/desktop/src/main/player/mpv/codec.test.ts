@@ -34,8 +34,29 @@ describe('LineDecoder', () => {
     expect(d.push(bytes.subarray(cut))).toEqual([{ event: 'x', t: 'Türkçe €' }]);
   });
 
-  it('ignores blank lines, CRLF and lines that are not JSON', () => {
+  it('ignores blank lines, CRLF, JSON arrays and lines that are not JSON', () => {
     const d = new LineDecoder();
-    expect(d.push(Buffer.from('\n\r\nnot json\n{"event":"a"}\r\n'))).toEqual([{ event: 'a' }]);
+    expect(
+      d.push(Buffer.from('\n\r\nnot json\n[1,2,3]\n"str"\n42\nnull\n{"event":"a"}\r\n')),
+    ).toEqual([{ event: 'a' }]);
+  });
+
+  it('sanitizes stray ASCII control characters (0x00-0x1F) inside JSON lines before parsing', () => {
+    const d = new LineDecoder();
+    const raw = Buffer.from('{"event":"log-message","text":"bad\u0000char\u001b[31m\twarn"}\n');
+    expect(d.push(raw)).toEqual([{ event: 'log-message', text: 'badchar[31m warn' }]);
+  });
+
+  it('caps pending buffer to prevent OOM and recovers after the oversized line ends', () => {
+    const d = new LineDecoder(64);
+    expect(d.push(Buffer.from('{"event":"oversized","pad":"' + 'x'.repeat(100)))).toEqual([]);
+    expect(d.push(Buffer.from('y'.repeat(100)))).toEqual([]);
+    expect(d.push(Buffer.from('"}\n{"event":"recovered"}\n'))).toEqual([{ event: 'recovered' }]);
+  });
+
+  it('drops an oversized line whose newline arrives in the second chunk within a multi-line push', () => {
+    const d = new LineDecoder(64);
+    expect(d.push(Buffer.from('{"event":"oversized","pad":"' + 'x'.repeat(30)))).toEqual([]);
+    expect(d.push(Buffer.from('y'.repeat(40) + '"}\n{"event":"ok"}\n'))).toEqual([{ event: 'ok' }]);
   });
 });

@@ -13,6 +13,8 @@ export interface OwnWindowDeps {
    * work-area backing pixels on macOS (`macOwnWindowGeometry`).
    */
   toScreenPixels(rect: Rect): Rect;
+  /** Optional macOS `NSScreen` index for multi-monitor setups (`--screen=<idx>`). */
+  screenIndexOf?(rect: Rect): number | undefined;
   /** How long `prepare` waits for a first visible area before it uses the content bounds (default 1,000 ms). */
   firstAreaTimeoutMs?: number;
 }
@@ -40,10 +42,16 @@ export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
     );
     const px = deps.toScreenPixels(dip);
     const [x, y, w, h] = [px.x, px.y, px.width, px.height].map((n) => Math.round(n) + 0);
-    return [`--geometry=${w}x${h}+${x}+${y}`];
+    const screenIdx = deps.screenIndexOf?.(dip);
+    const args = [`--geometry=${w}x${h}+${x}+${y}`];
+    if (screenIdx !== undefined && Number.isInteger(screenIdx) && screenIdx >= 0) {
+      args.push(`--screen=${screenIdx}`);
+    }
+    return args;
   };
 
-  const contentArea = (): PlayerArea => {
+  const contentArea = (): PlayerArea | undefined => {
+    if (appWindow.isDestroyed()) return undefined;
     const content = appWindow.getContentBounds();
     const zoom = appWindow.webContents.getZoomFactor();
     return {
@@ -66,6 +74,7 @@ export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
     coversArea: false,
     prepare() {
       if (disposed) return Promise.reject(new Error('presenter disposed'));
+      if (appWindow.isDestroyed()) return Promise.reject(new Error('app window is gone'));
       if (visibleArea) return Promise.resolve(geometry(visibleArea));
       return new Promise<string[]>((resolve, reject) => {
         const waiter = {
@@ -80,10 +89,18 @@ export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
             reject(error);
           },
         };
-        const timer = setTimeout(
-          () => waiter.resolve(geometry(contentArea())),
-          deps.firstAreaTimeoutMs ?? DEFAULT_FIRST_AREA_TIMEOUT_MS,
-        );
+        const timer = setTimeout(() => {
+          if (disposed) {
+            waiter.reject(new Error('presenter disposed'));
+            return;
+          }
+          const fallback = contentArea();
+          if (!fallback) {
+            waiter.reject(new Error('app window is gone'));
+            return;
+          }
+          waiter.resolve(geometry(fallback));
+        }, deps.firstAreaTimeoutMs ?? DEFAULT_FIRST_AREA_TIMEOUT_MS);
         waiters.add(waiter);
       });
     },
@@ -101,7 +118,7 @@ export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
       surface.created();
     },
     setArea(area) {
-      if (disposed || !area.visible) return;
+      if (disposed || !area.visible || appWindow.isDestroyed()) return;
       visibleArea = { ...area };
       for (const waiter of [...waiters]) waiter.resolve(geometry(visibleArea));
     },

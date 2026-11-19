@@ -9,6 +9,7 @@ import {
   type PlayerUiMessage,
 } from '../../shared/player-ipc.ts';
 import type { MpvEngine } from './engine.ts';
+import type { PowerBlocker } from './power-blocker.ts';
 
 /** The part of Electron's `WebContents` the player IPC uses. */
 export interface WebContentsLike {
@@ -38,10 +39,12 @@ export interface PlayerIpcDeps {
   ipcMain: IpcMainLike;
   /** Builds the engine for a renderer; `onUi` carries its presentation events to that renderer. */
   createEngine(owner: WebContentsLike, onUi: (event: PlayerUiEvent) => void): Promise<MpvEngine>;
-  /** The main clock the engine stamps its events with; sent as `mainNowMs` for the renderer's clock offset. */
+  /** The main monotonic clock the engine stamps its events with; sent as `mainNowMs` for the renderer's offset. */
   now(): number;
   /** Receives drop notices; never a payload (payloads carry stream URLs). */
   log(line: string): void;
+  /** Optional display-sleep guard acquired only while an engine is actively `'playing'`. */
+  powerBlocker?: PowerBlocker;
   /**
    * Dev gate only: receives each valid `gate:report` line and the sender's engine (`undefined` when it has none). The
    * channel is not registered without it.
@@ -62,7 +65,7 @@ interface Entry {
  * invalid one is dropped with a log line that names the channel but never the payload. Returns the disposer.
  */
 export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
-  const { ipcMain, log } = deps;
+  const { ipcMain, log, powerBlocker } = deps;
   const entries = new Map<string, Entry>();
   const watched = new Set<number>();
   const generations = new Map<number, number>();
@@ -76,6 +79,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
   };
 
   const release = (id: string): void => {
+    powerBlocker?.release(id);
     const entry = entries.get(id);
     if (!entry) return;
     entries.delete(id);
@@ -109,7 +113,6 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       invalidateOwner(owner);
       generations.delete(owner.id);
     });
-    // A reload or navigation keeps the webContents but drops the page that owns the engine.
     owner.on('did-start-navigation', (details) => {
       if (details.isMainFrame && !details.isSameDocument) invalidateOwner(owner);
     });
@@ -142,18 +145,23 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       throw new Error('the player open was superseded or the window closed while starting');
     }
     const unsubscribe = engine.subscribe((event) => {
+      if (event.type === 'state') {
+        if (event.state === 'playing') powerBlocker?.acquire(engineId);
+        else if (event.state === 'paused' || event.state === 'ended' || event.state === 'opening') {
+          powerBlocker?.release(engineId);
+        }
+      } else if (event.type === 'error') {
+        powerBlocker?.release(engineId);
+      }
       const message: PlayerEventMessage = { engineId, event };
       sendTo(sender, PLAYER_CHANNELS.event, message);
     });
     entries.set(engineId, { owner: sender, engine, unsubscribe });
     registered = true;
-    // Subscribed first, so the surface events that starting mpv emits reach the renderer.
     engine.start();
-    // The renderer takes the midpoint of its round trip; the mean of arrival and reply is the closest main-side match.
     return { engineId, mainNowMs: (arrivedAtMs + deps.now()) / 2 };
   };
 
-  /** Runs a handler body; a throw is logged by channel only (messages and errors can carry stream URLs). */
   const guarded = (channel: string, body: () => void): void => {
     try {
       body();
@@ -185,13 +193,17 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     const { engine } = entry;
     switch (command.name) {
       case 'load':
+        powerBlocker?.release(engineId);
         engine.load(command.cmd);
         break;
-      case 'retry':
-      case 'play':
       case 'pause':
       case 'stop':
       case 'recreate':
+        powerBlocker?.release(engineId);
+        engine[command.name](command.attempt);
+        break;
+      case 'retry':
+      case 'play':
         engine[command.name](command.attempt);
         break;
       case 'seek':
@@ -251,5 +263,6 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     ipcMain.removeListener(PLAYER_CHANNELS.area, onArea);
     ipcMain.removeListener(PLAYER_CHANNELS.gateReport, onGate);
     for (const id of [...entries.keys()]) release(id);
+    powerBlocker?.releaseAll();
   };
 }

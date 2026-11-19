@@ -50,6 +50,12 @@ export function PlayerView({ engine, status, failed = false }: PlayerViewProps):
   }, [sender, failed]);
 
   useEffect(() => {
+    return () => {
+      sender.update(undefined, true);
+    };
+  }, [sender]);
+
+  useEffect(() => {
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
   }, [measure]);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildWindowOptions } from './window-options.ts';
+import { attachRendererCrashRecovery, buildWindowOptions } from './window-options.ts';
 
 describe('buildWindowOptions', () => {
   const options = buildWindowOptions('/app/dist/preload/preload.js');
@@ -44,5 +44,78 @@ describe('buildWindowOptions gate mode', () => {
     expect(buildWindowOptions('/p.js', { gate: true }).webPreferences?.additionalArguments).toEqual(
       ['--elv-gate-mode'],
     );
+  });
+});
+
+describe('attachRendererCrashRecovery (#257)', () => {
+  function fakeRecoverableWindow() {
+    let listener: ((event: unknown, details: { reason: string }) => void) | undefined;
+    let destroyed = false;
+    const reloads: string[] = [];
+    const logs: string[] = [];
+    return {
+      target: {
+        isDestroyed: () => destroyed,
+        loadURL: (url: string) => {
+          reloads.push(url);
+          return Promise.resolve();
+        },
+        webContents: {
+          isDestroyed: () => destroyed,
+          on: (_ev: 'render-process-gone', l: (e: unknown, d: { reason: string }) => void) => {
+            listener = l;
+          },
+        },
+      },
+      crash: (reason = 'crashed') => listener?.({}, { reason }),
+      destroy: () => {
+        destroyed = true;
+      },
+      reloads,
+      logs,
+    };
+  }
+
+  it('reloads non-clean renderer crashes up to maxReloads and stops on crash loops', () => {
+    const f = fakeRecoverableWindow();
+    let clock = 1000;
+    attachRendererCrashRecovery(f.target, {
+      gate: false,
+      reloadUrl: 'app://elv/',
+      now: () => clock,
+      log: (line) => f.logs.push(line),
+    });
+
+    f.crash('clean-exit');
+    expect(f.reloads).toEqual([]);
+
+    f.crash('crashed');
+    clock += 1000;
+    f.crash('oom');
+    clock += 1000;
+    f.crash('killed');
+    clock += 1000;
+    f.crash('crashed');
+    expect(f.reloads).toEqual(['app://elv/', 'app://elv/', 'app://elv/']);
+    expect(f.logs).toHaveLength(1);
+
+    // After the 60s window expires, recovery budget resets:
+    clock += 61_000;
+    f.crash('crashed');
+    expect(f.reloads).toHaveLength(4);
+
+    f.destroy();
+    f.crash('crashed');
+    expect(f.reloads).toHaveLength(4);
+  });
+
+  it('does not attach recovery reload in gate mode', () => {
+    const f = fakeRecoverableWindow();
+    attachRendererCrashRecovery(f.target, {
+      gate: true,
+      reloadUrl: 'app://elv/?elv-gate=player',
+    });
+    f.crash('crashed');
+    expect(f.reloads).toEqual([]);
   });
 });

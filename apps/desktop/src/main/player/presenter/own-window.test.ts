@@ -128,4 +128,27 @@ describe('createOwnWindowPresenter', () => {
     expect(mpv.commands).toEqual([]);
     expect(events).toEqual([]);
   });
+
+  it('passes --screen=<idx> when screenIndexOf returns a multi-monitor index', async () => {
+    const app = fakeAppWindow({ x: -1800, y: 100, width: 1280, height: 720 });
+    const presenter = createOwnWindowPresenter({
+      appWindow: app.window,
+      toScreenPixels: scale(1),
+      screenIndexOf: () => 1,
+    });
+    presenter.setArea(AREA);
+    expect(await presenter.prepare()).toEqual(['--geometry=800x450+-1760+140', '--screen=1']);
+  });
+
+  it('guards appWindow.isDestroyed() in prepare, setArea and firstAreaTimeoutMs fallback', async () => {
+    vi.useFakeTimers();
+    const { app, presenter } = setup();
+    const waiting = presenter.prepare();
+    const assertion = expect(waiting).rejects.toThrow(/gone|destroyed/);
+    app.state.destroyed = true;
+    expect(() => presenter.setArea(AREA)).not.toThrow();
+    await vi.advanceTimersByTimeAsync(1000);
+    await assertion;
+    await expect(presenter.prepare()).rejects.toThrow(/gone|destroyed/);
+  });
 });

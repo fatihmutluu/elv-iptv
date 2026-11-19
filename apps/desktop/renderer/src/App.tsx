@@ -6,11 +6,19 @@ import { createDesktopCatalog } from './catalog/index.ts';
 import { GateScreen } from './gate/GateScreen.tsx';
 import { resolveGate } from './gate/params.ts';
 import { createDesktopEngine } from './player/desktop-engine.ts';
+import { dispatchDesktopClose, routeDesktopUiEvent } from './player/host-keys.ts';
 import { PlayerView } from './player/PlayerView.tsx';
 
 // Computed once: a re-render must never hand the gate new params, which would restart the run. Main loads the query only
 // for an unpackaged `--elv-gate=` launch, and the preload flags gate mode; a page with just the query gets no gate.
 const GATE = resolveGate(window.location.search, window.elv);
+
+function isTrackPickerModalOpen(): boolean {
+  return (
+    typeof document !== 'undefined' &&
+    document.querySelector('[data-testid="player-tracks-panel"]') !== null
+  );
+}
 
 function AppRoot() {
   const [refreshToken, setRefreshToken] = useState(0);
@@ -32,19 +40,13 @@ function AppRoot() {
           engine,
           renderSurface: ({ failed }) => <PlayerView engine={engine} status="" failed={failed} />,
           onHostKey: (listener) =>
-            engine.onUi((event) => {
-              if (event.type === 'closed') {
-                listener('back');
-              } else if (event.type === 'key') {
-                if (event.key === 'fullscreen') {
-                  engine.toggleFullscreen();
-                } else if (event.key === 'back' || event.key === 'close') {
-                  listener('back');
-                } else if (event.key === 'channel-up' || event.key === 'channel-down') {
-                  listener(event.key);
-                }
-              }
-            }),
+            engine.onUi((event) =>
+              routeDesktopUiEvent(event, {
+                toggleFullscreen: () => engine.toggleFullscreen(),
+                onHostKey: listener,
+                onClose: () => dispatchDesktopClose(listener, isTrackPickerModalOpen()),
+              }),
+            ),
         };
       },
     }),

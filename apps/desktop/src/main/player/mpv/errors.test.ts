@@ -64,7 +64,7 @@ describe('classifyEnd rules', () => {
       kind: 'ended',
     });
   });
-  it('eof on a vod that never played is an error', () => {
+  it('eof on a vod or live stream that never played checks HTTP, TLS and decoder logs before empty-eof', () => {
     expect(err(classifyEnd({ reason: 'eof', logs: [], mediaKind: 'vod', played: false }))).toEqual({
       code: 'network',
       detail: 'empty-vod-eof',
@@ -74,17 +74,70 @@ describe('classifyEnd rules', () => {
       err(classifyEnd({ reason: 'eof', logs: [notice], mediaKind: 'vod', played: false })),
     ).toEqual({ code: 'connection-limit', detail: "Mime-type: 'text/plain'" });
     expect(
+      err(
+        classifyEnd({
+          reason: 'eof',
+          logs: [line('HTTP error 403 Forbidden')],
+          mediaKind: 'vod',
+          played: false,
+        }),
+      ),
+    ).toMatchObject({ code: 'http-403', httpStatus: 403 });
+    expect(
+      err(
+        classifyEnd({
+          reason: 'eof',
+          logs: [line('Failed to initialize a decoder')],
+          mediaKind: 'vod',
+          played: false,
+        }),
+      ),
+    ).toMatchObject({ code: 'decoder' });
+    expect(
+      err(
+        classifyEnd({
+          reason: 'eof',
+          logs: [line('HTTP error 458 Over Limit')],
+          mediaKind: 'live',
+          played: false,
+        }),
+      ),
+    ).toMatchObject({ code: 'connection-limit', httpStatus: 458 });
+    expect(
       err(classifyEnd({ reason: 'eof', logs: [], mediaKind: 'live', played: false }))?.detail,
     ).toBe('live-eof');
   });
   it.each(['stop', 'quit', 'redirect'])('%s is stopped', (reason) => {
     expect(classifyEnd({ reason, logs: [], mediaKind: 'live' })).toEqual({ kind: 'stopped' });
   });
-  it('uses the last HTTP error line', () => {
+  it('uses the last HTTP error line and maps refusal/terminal codes (#286, #314)', () => {
     expect(run([line('HTTP error 404 Not Found'), line('HTTP error 401 Unauthorized')])?.code).toBe(
       'http-401',
     );
     expect(run([line('HTTP error 429 Too Many')])?.code).toBe('http-429');
+    expect(run([line('HTTP error 407 Proxy Authentication Required')])).toMatchObject({
+      code: 'http-401',
+      httpStatus: 407,
+    });
+    for (const status of [410, 451]) {
+      expect(run([line(`HTTP error ${status} Gone`)])).toMatchObject({
+        code: 'http-404',
+        httpStatus: status,
+      });
+    }
+    for (const status of [458, 460, 461, 462, 463, 469]) {
+      expect(run([line(`HTTP error ${status} Provider Refused`)])).toMatchObject({
+        code: 'connection-limit',
+        httpStatus: status,
+      });
+    }
+  });
+  it('classifies TLS/SSL handshake and certificate errors as network (#245)', () => {
+    expect(run([line('tls: Peer certificate failed verification')])?.code).toBe('network');
+    expect(run([line('tls: SSL handshake failed')])?.code).toBe('network');
+    expect(
+      run([line('schannel: InitializeSecurityContext failed: SEC_E_CERT_EXPIRED')])?.code,
+    ).toBe('network');
   });
   it('other 4xx and 5xx are http-other with the status', () => {
     expect(run([line('HTTP error 503 Service Unavailable')])).toMatchObject({
@@ -116,10 +169,10 @@ describe('classifyEnd rules', () => {
       'unknown',
     );
   });
-  it('detail never contains the password segment, queries or user-info', () => {
+  it('detail never contains path segments, queries or user-info (#82)', () => {
     const e = run([line('HTTP error 404 for http://u:p@h/live/demo/password/1.ts?token=abc')]);
-    expect(e?.detail).not.toMatch(/password|token|u:p/);
-    expect(e?.detail).toContain('/live/***/***/1.ts');
+    expect(e?.detail).not.toMatch(/demo|password|token|u:p|\/1\.ts/);
+    expect(e?.detail).toContain('http://h/***/***/***/***.ts');
   });
   it('detail is at most 200 characters', () => {
     expect(run([line(`HTTP error 404 ${'x'.repeat(500)}`)])?.detail).toHaveLength(200);

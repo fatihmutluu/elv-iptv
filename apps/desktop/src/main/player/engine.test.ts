@@ -29,6 +29,7 @@ const OBSERVED = [
   'paused-for-cache',
   'core-idle',
   'seeking',
+  'playback-time',
   'time-pos',
   'duration',
   'speed',
@@ -38,6 +39,7 @@ const OBSERVED = [
   'track-list',
   'aid',
   'sid',
+  'audio-device-list',
 ];
 
 const VOD: FakeMpvScript = [

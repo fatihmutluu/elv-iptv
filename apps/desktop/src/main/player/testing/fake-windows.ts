@@ -12,6 +12,8 @@ export function fakeAppWindow(content: Rect = { x: 100, y: 50, width: 1280, heig
     content,
     zoom: 1,
     minimized: false,
+    maximized: false,
+    alwaysOnTop: false,
     visible: true,
     fullscreen: false,
     destroyed: false,
@@ -21,11 +23,24 @@ export function fakeAppWindow(content: Rect = { x: 100, y: 50, width: 1280, heig
     getContentBounds: () => ({ ...state.content }),
     webContents: { getZoomFactor: () => state.zoom },
     isMinimized: () => state.minimized,
+    isMaximized: () => state.maximized,
+    maximize: () => {
+      state.maximized = true;
+    },
+    isAlwaysOnTop: () => state.alwaysOnTop,
+    setAlwaysOnTop: (flag) => {
+      state.alwaysOnTop = flag;
+    },
     isVisible: () => state.visible,
     isFullScreen: () => state.fullscreen,
     setFullScreen: (flag) => {
       state.fullscreenCalls.push(flag);
       state.fullscreen = flag;
+      // Simulate Windows/Electron unmaximizing or resetting topmost on fullscreen transition:
+      if (flag) {
+        state.maximized = false;
+        state.alwaysOnTop = false;
+      }
     },
     isDestroyed: () => state.destroyed,
     on: (event, listener) => {

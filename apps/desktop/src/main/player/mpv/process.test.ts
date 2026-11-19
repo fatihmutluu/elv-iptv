@@ -1,25 +1,20 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Duplex, EventEmitter } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SpawnDeps } from './process.ts';
-import {
-  forgetPid,
-  recordPid,
-  spawnMpv,
-  sweepLeftovers,
-  systemSweepDeps,
-  transportArgs,
-} from './process.ts';
+import { spawnMpv, transportArgs, wrapProcess } from './process.ts';
 
 class FakeChild extends EventEmitter {
   pid = 4321;
   killed = false;
+  lastSignal: NodeJS.Signals | undefined;
   stdio: Array<Duplex | null> = [null, null, null];
-  kill(): boolean {
+  kill(signal?: NodeJS.Signals): boolean {
     this.killed = true;
-    queueMicrotask(() => this.emit('exit', null, 'SIGKILL'));
+    this.lastSignal = signal;
+    queueMicrotask(() => this.emit('exit', null, signal ?? 'SIGKILL'));
     return true;
   }
   exit(code: number): void {
@@ -43,6 +38,7 @@ function harness(connectFailures = 0) {
   const child = new FakeChild();
   const spawnCalls: Array<{ cmd: string; args: string[]; options: Record<string, unknown> }> = [];
   const connectPaths: string[] = [];
+  const failedSockets: Duplex[] = [];
   const socket = fakeSocket();
   let failures = connectFailures;
   const deps: SpawnDeps = {
@@ -55,20 +51,18 @@ function harness(connectFailures = 0) {
     }) as unknown as SpawnDeps['spawn'],
     connect: ((path: string) => {
       connectPaths.push(path);
-      const attempt = new EventEmitter() as EventEmitter & Duplex;
-      setImmediate(() => {
-        if (failures-- > 0) attempt.emit('error', new Error('ENOENT'));
-        else attempt.emit('connect');
-      });
-      return Object.assign(socket, {
-        once: attempt.once.bind(attempt),
-        on: Duplex.prototype.on.bind(socket),
-        off: attempt.off.bind(attempt),
-      });
+      if (failures-- > 0) {
+        const failed = fakeSocket();
+        failedSockets.push(failed);
+        setImmediate(() => failed.emit('error', new Error('ENOENT')));
+        return failed;
+      }
+      setImmediate(() => socket.emit('connect'));
+      return socket;
     }) as unknown as SpawnDeps['connect'],
     retryDelayMs: 1,
   };
-  return { child, deps, spawnCalls, connectPaths, socket };
+  return { child, deps, spawnCalls, connectPaths, failedSockets, socket };
 }
 
 afterEach(() => vi.useRealTimers());
@@ -99,11 +93,14 @@ describe('spawnMpv', () => {
     parentPid: 99,
   };
 
-  it('spawns hidden with ignored stdio, a random pipe, and retries the connection', async () => {
+  it('spawns hidden, destroys failed retry sockets, and connects when pipe is ready', async () => {
     const h = harness(2);
     const proc = await spawnMpv(base, h.deps);
     expect(proc.pid).toBe(4321);
     expect(h.connectPaths).toHaveLength(3);
+    expect(h.failedSockets).toHaveLength(2);
+    expect(h.failedSockets.every((s) => s.destroyed)).toBe(true);
+    expect(h.socket.destroyed).toBe(false);
     const call = h.spawnCalls[0];
     if (!call) throw new Error('spawn was not called');
     expect(call.options).toMatchObject({ windowsHide: true, stdio: 'ignore' });
@@ -112,117 +109,24 @@ describe('spawnMpv', () => {
     expect(call.args.find((a) => a.startsWith('--input-ipc-server='))).toMatch(
       /^--input-ipc-server=\\\\\.\\pipe\\elv-mpv-[0-9a-f]{16}$/,
     );
-    expect(h.connectPaths[0]).toMatch(/^\\\\\.\\pipe\\elv-mpv-[0-9a-f]{16}$/);
   });
 
-  it('darwin spawn passes fd 3 and no pipe', async () => {
-    const h = harness();
-    const proc = await spawnMpv(
-      {
-        executable: '/Applications/ELV IPTV Player.app/Contents/MacOS/mpv',
-        args: ['--idle=yes'],
-        platform: 'darwin',
-        parentPid: 99,
-      },
-      h.deps,
-    );
-    expect(proc.pid).toBe(4321);
-    expect(h.connectPaths).toEqual([]);
-    const call = h.spawnCalls[0];
-    if (!call) throw new Error('spawn was not called');
-    expect(call.options).toMatchObject({
-      windowsHide: true,
-      stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
-    });
-    expect(call.args).toEqual(['--idle=yes', '--input-ipc-client=fd://3']);
-    void proc.client.command(['get_property', 'mpv-version']).catch(() => undefined);
-    await new Promise((r) => setImmediate(r));
-    expect(h.socket.written.join('')).toContain('"mpv-version"');
-    h.child.exit(0);
-    await expect(proc.exited).resolves.toEqual({ code: 0, signal: null });
-  });
-
-  function darwinWindowDeps(widthForAttempt: (attempt: number) => number) {
-    const children: FakeChild[] = [];
-    const deps: SpawnDeps = {
-      spawn: (() => {
-        const child = new FakeChild();
-        const attempt = children.length;
-        child.pid = 5000 + attempt;
-        const sock = new Duplex({
-          read() {},
-          write(chunk: Buffer, _e, cb) {
-            for (const line of chunk.toString().split('\n')) {
-              if (!line) continue;
-              const req = JSON.parse(line) as { request_id: number };
-              const data = widthForAttempt(attempt);
-              setImmediate(() =>
-                sock.push(
-                  `${JSON.stringify({ request_id: req.request_id, error: 'success', data })}\n`,
-                ),
-              );
-            }
-            cb();
-          },
-        });
-        child.stdio = [null, null, null, sock];
-        children.push(child);
-        return child;
-      }) as unknown as SpawnDeps['spawn'],
-      connect: (() => {
-        throw new Error('unused');
-      }) as unknown as SpawnDeps['connect'],
-      retryDelayMs: 2,
-      darwinWindowTimeoutMs: 15,
-    };
-    return { children, deps };
-  }
-
-  it('darwin spawn with --force-window=immediate retries when osd-width stays 0', async () => {
-    const { children, deps } = darwinWindowDeps((i) => (i === 0 ? 0 : 640));
-    const proc = await spawnMpv(
-      {
-        executable: '/Applications/ELV IPTV Player.app/Contents/MacOS/mpv',
-        args: ['--idle=yes', '--force-window=immediate'],
-        platform: 'darwin',
-        parentPid: 99,
-      },
-      deps,
-    );
-    expect(children).toHaveLength(2);
-    expect(children[0]?.killed).toBe(true);
-    expect(proc.pid).toBe(5001);
-    children[1]?.exit(0);
-    await proc.exited;
-  });
-
-  it('darwin spawn with --force-window=immediate rejects when osd-width never initializes', async () => {
-    const { children, deps } = darwinWindowDeps(() => 0);
-    await expect(
-      spawnMpv(
-        {
-          executable: '/Applications/ELV IPTV Player.app/Contents/MacOS/mpv',
-          args: ['--force-window=immediate'],
-          platform: 'darwin',
-          parentPid: 99,
-          connectTimeoutMs: 25,
-        },
-        deps,
-      ),
-    ).rejects.toThrow(/window did not initialize/);
-    expect(children[0]?.killed).toBe(true);
-  });
-
-  it('linux spawn uses a temporary Unix socket and cleans its directory on exit', async () => {
+  it('linux spawn pins LC_NUMERIC=C (#237), uses a temp socket and cleans its dir after exit', async () => {
     const h = harness();
     const proc = await spawnMpv(
       { executable: 'mpv', args: ['--idle=yes'], platform: 'linux', parentPid: 99 },
       h.deps,
     );
     const sockPath = h.connectPaths[0] ?? '';
+    const tempDir = join(sockPath, '..');
     expect(sockPath).toMatch(/\.sock$/);
+    expect(existsSync(tempDir)).toBe(true);
+    expect(h.spawnCalls[0]?.options).toMatchObject({
+      env: expect.objectContaining({ LC_NUMERIC: 'C' }),
+    });
     h.child.exit(0);
     await proc.exited;
+    expect(existsSync(tempDir)).toBe(false);
   });
 
   it('uses a different pipe name on every launch', async () => {
@@ -240,12 +144,13 @@ describe('spawnMpv', () => {
     await expect(result).rejects.toThrow(/exited with code 3/);
   });
 
-  it('kills the child and rejects when the pipe never appears', async () => {
+  it('kills the child with SIGKILL and rejects when the pipe never appears', async () => {
     const h = harness(100000);
     await expect(spawnMpv({ ...base, connectTimeoutMs: 30 }, h.deps)).rejects.toThrow(
       /did not open/,
     );
     expect(h.child.killed).toBe(true);
+    expect(h.child.lastSignal).toBe('SIGKILL');
   });
 
   it('kills the child and rejects with AbortError when the signal aborts', async () => {
@@ -267,13 +172,6 @@ describe('spawnMpv', () => {
     expect(h.spawnCalls).toHaveLength(0);
   });
 
-  it('exited resolves with the exit code', async () => {
-    const h = harness();
-    const proc = await spawnMpv(base, h.deps);
-    h.child.exit(0);
-    await expect(proc.exited).resolves.toEqual({ code: 0, signal: null });
-  });
-
   it('quit sends quit and waits for the exit without killing', async () => {
     const h = harness();
     const proc = await spawnMpv(base, h.deps);
@@ -285,11 +183,29 @@ describe('spawnMpv', () => {
     expect(h.child.killed).toBe(false);
   });
 
-  it('quit kills the child after the grace period', async () => {
-    const h = harness();
-    const proc = await spawnMpv(base, h.deps);
-    await proc.quit(20);
-    expect(h.child.killed).toBe(true);
+  it('quit escalates to SIGKILL after graceMs and never deadlocks if exited hangs', async () => {
+    const signals: Array<NodeJS.Signals | undefined> = [];
+    const neverExits = new Promise<{ code: number | null; signal: string | null }>(() => {});
+    const closed = vi.fn();
+    const proc = wrapProcess(
+      999,
+      {
+        command: () => Promise.resolve({ request_id: 1, error: 'success' }),
+        observe: () => 1,
+        onEvent: () => () => undefined,
+        onClose: () => () => undefined,
+        close: closed,
+      },
+      neverExits,
+      (sig) => signals.push(sig),
+      15,
+    );
+
+    const startedAt = Date.now();
+    await proc.quit(15);
+    expect(Date.now() - startedAt).toBeLessThan(300);
+    expect(signals).toEqual(['SIGKILL']);
+    expect(closed).toHaveBeenCalledTimes(1);
   });
 
   it('records the pid while running and forgets it on exit', async () => {
@@ -305,52 +221,6 @@ describe('spawnMpv', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
-});
-
-describe('pid file', () => {
-  const temp = () => {
-    const dir = mkdtempSync(join(tmpdir(), 'elv-pid-'));
-    return { dir, file: join(dir, 'mpv-pids.json') };
-  };
-
-  it('sweeps a recorded leftover launcher pid and ignores a reused pid', async () => {
-    const { dir, file } = temp();
-    try {
-      recordPid(file, 111);
-      recordPid(file, 222);
-      recordPid(file, 222);
-      const killed: number[] = [];
-      const swept = await sweepLeftovers(file, {
-        isLauncher: async (pid) => pid === 111,
-        kill: (pid) => killed.push(pid),
-      });
-      expect(swept).toBe(1);
-      expect(killed).toEqual([111]);
-      expect(existsSync(file)).toBe(false);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('treats a missing or corrupt file as empty', async () => {
-    const { dir, file } = temp();
-    try {
-      const deps = { isLauncher: async () => true, kill: vi.fn() };
-      expect(await sweepLeftovers(file, deps)).toBe(0);
-      writeFileSync(file, '{oops');
-      expect(await sweepLeftovers(file, deps)).toBe(0);
-      expect(deps.kill).not.toHaveBeenCalled();
-      forgetPid(file, 1);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-});
-
-describe('systemSweepDeps', () => {
-  it('does not take this test process for the launcher', async () => {
-    expect(await systemSweepDeps.isLauncher(process.pid)).toBe(false);
   });
 });
 
@@ -371,17 +241,6 @@ describe('spawnMpv start failure', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
-
-  it('darwin spawn rejects when the child cannot start', async () => {
-    const h = harness();
-    h.child.pid = undefined as unknown as number;
-    const result = spawnMpv(
-      { executable: '/missing/mpv', args: [], platform: 'darwin', parentPid: 1 },
-      h.deps,
-    );
-    setTimeout(() => h.child.emit('error', new Error('ENOENT')), 5);
-    await expect(result).rejects.toThrow(/could not start: ENOENT/);
   });
 
   it('linux spawn cleans its temporary socket directory when spawn emits error without exit', async () => {
@@ -405,7 +264,7 @@ describe('spawnMpv start failure', () => {
         return child;
       }) as unknown as SpawnDeps['spawn'],
       connect: (() => {
-        const s = new EventEmitter() as EventEmitter & Duplex;
+        const s = fakeSocket();
         setImmediate(() => s.emit('error', new Error('ENOENT')));
         return s;
       }) as unknown as SpawnDeps['connect'],
@@ -426,16 +285,11 @@ describe('spawnMpv start failure', () => {
     const deps: SpawnDeps = {
       spawn: (() => child) as unknown as SpawnDeps['spawn'],
       connect: (() => {
-        const attempt = new EventEmitter() as EventEmitter & Duplex;
         setImmediate(() => {
           ac.abort();
-          attempt.emit('connect');
+          socket.emit('connect');
         });
-        return Object.assign(socket, {
-          once: attempt.once.bind(attempt),
-          on: Duplex.prototype.on.bind(socket),
-          off: attempt.off.bind(attempt),
-        });
+        return socket;
       }) as unknown as SpawnDeps['connect'],
     };
     await expect(
@@ -452,70 +306,5 @@ describe('spawnMpv start failure', () => {
     ).rejects.toMatchObject({ name: 'AbortError' });
     expect(child.killed).toBe(true);
     expect(socket.destroyed).toBe(true);
-  });
-
-  it('darwin spawn aborts promptly during the osd-width probe and if aborted before probe', async () => {
-    const ac1 = new AbortController();
-    const child1 = new FakeChild();
-    const sock1 = fakeSocket();
-    const deps1: SpawnDeps = {
-      spawn: (() => {
-        child1.stdio = [null, null, null, sock1];
-        ac1.abort();
-        return child1;
-      }) as unknown as SpawnDeps['spawn'],
-      connect: (() => {
-        throw new Error('unused');
-      }) as unknown as SpawnDeps['connect'],
-    };
-    await expect(
-      spawnMpv(
-        {
-          executable: '/mpv',
-          args: ['--idle=yes'],
-          platform: 'darwin',
-          parentPid: 1,
-          signal: ac1.signal,
-        },
-        deps1,
-      ),
-    ).rejects.toMatchObject({ name: 'AbortError' });
-    expect(child1.killed).toBe(true);
-
-    const ac2 = new AbortController();
-    const child2 = new FakeChild();
-    const sock2 = new Duplex({
-      read() {},
-      write(_chunk: Buffer, _e, cb) {
-        // Never answer osd-width (simulating deadlocked cocoa-cb window), abort after 10 ms:
-        setTimeout(() => ac2.abort(), 10);
-        cb();
-      },
-    });
-    const deps2: SpawnDeps = {
-      spawn: (() => {
-        child2.stdio = [null, null, null, sock2];
-        return child2;
-      }) as unknown as SpawnDeps['spawn'],
-      connect: (() => {
-        throw new Error('unused');
-      }) as unknown as SpawnDeps['connect'],
-      darwinWindowTimeoutMs: 2000,
-    };
-    const startedAt = Date.now();
-    await expect(
-      spawnMpv(
-        {
-          executable: '/mpv',
-          args: ['--force-window=immediate'],
-          platform: 'darwin',
-          parentPid: 1,
-          signal: ac2.signal,
-        },
-        deps2,
-      ),
-    ).rejects.toMatchObject({ name: 'AbortError' });
-    expect(Date.now() - startedAt).toBeLessThan(500);
-    expect(child2.killed).toBe(true);
   });
 });

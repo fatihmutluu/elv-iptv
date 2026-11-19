@@ -264,4 +264,21 @@ describe('createDesktopEngine', () => {
     expect(f.eventListeners.size).toBe(0);
     expect(f.uiListeners.size).toBe(0);
   });
+
+  it('caps earlyEvents and earlyUi to 100 entries while preserving presenter ui event', async () => {
+    const f = fakeBridge(undefined, () => {
+      for (let i = 0; i < 150; i += 1) {
+        f.event('e1', { attempt: i, type: 'state', state: 'opening' });
+        f.ui('e1', { type: 'key', key: 'back' });
+      }
+      f.ui('e1', { type: 'presenter', kind: 'child-window', coversArea: true });
+    });
+    const engine = await createDesktopEngine(f.bridge, () => 0);
+    const seenEvents: EngineEvent[] = [];
+    const seenUi: PlayerUiEvent[] = [];
+    engine.subscribe((e) => seenEvents.push(e));
+    engine.onUi((e) => seenUi.push(e));
+    expect(seenEvents).toHaveLength(100);
+    expect(seenUi).toEqual([{ type: 'presenter', kind: 'child-window', coversArea: true }]);
+  });
 });

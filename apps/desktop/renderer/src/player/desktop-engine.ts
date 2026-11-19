@@ -100,12 +100,19 @@ export async function createDesktopEngine(
   };
 
   const offEvent = bridge.onEvent((message) => {
-    if (engineId === undefined) earlyEvents.push(message);
-    else if (message.engineId === engineId) deliverEvent(message.event);
+    if (engineId === undefined) {
+      if (earlyEvents.length < MAX_HELD_EVENTS) earlyEvents.push(message);
+    } else if (message.engineId === engineId) {
+      deliverEvent(message.event);
+    }
   });
   const offUi = bridge.onUi((message) => {
-    if (engineId === undefined) earlyUi.push(message);
-    else if (message.engineId === engineId) deliverUi(message.ui);
+    if (engineId === undefined) {
+      if (earlyUi.length < MAX_HELD_EVENTS) earlyUi.push(message);
+      else if (message.ui.type === 'presenter') earlyUi[earlyUi.length - 1] = message;
+    } else if (message.engineId === engineId) {
+      deliverUi(message.ui);
+    }
   });
 
   const t0 = now();

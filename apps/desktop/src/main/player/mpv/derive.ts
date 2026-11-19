@@ -25,10 +25,12 @@ interface Media {
   kind: MediaKind;
   logs: MpvLogLine[];
   state: EngineState;
+  loaded: boolean;
   restarted: boolean;
   firstFrameSent: boolean;
-  /** `video-params` is set, or `vid` says there is no video track. */
+  /** `video-params` is set, or `vid` confirmed no video track after `file-loaded`. */
   frameReady: boolean;
+  hasPlaybackTime: boolean;
   stalled: boolean;
   paused: boolean;
   cache: boolean;
@@ -64,14 +66,16 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
     const atMs = opts.now();
     media.lastAnchorAt = atMs;
     const a: ClockAnchor = {
-      positionMs: Math.round(media.timePos * 1000),
+      positionMs: Math.max(0, Math.round(media.timePos * 1000)) + 0,
       atMs,
       rate: rate(media),
     };
-    if (media.kind === 'vod' && media.duration !== undefined)
-      a.durationMs = Math.round(media.duration * 1000);
-    if (media.kind === 'live' && media.cacheEnd !== undefined)
-      a.liveEdgeMs = Math.round(media.cacheEnd * 1000);
+    if (media.kind === 'vod' && media.duration !== undefined) {
+      a.durationMs = Math.max(0, Math.round(media.duration * 1000)) + 0;
+    }
+    if (media.kind === 'live' && media.cacheEnd !== undefined) {
+      a.liveEdgeMs = Math.max(0, Math.round(media.cacheEnd * 1000)) + 0;
+    }
     return [ev(media, { type: 'clock', anchor: a })];
   };
 
@@ -138,6 +142,14 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
     return [ev(media, { type: 'error', error: outcome.error })];
   };
 
+  const updateTime = (media: Media, value: unknown): EngineEvent[] => {
+    const next = num(value);
+    if (next === undefined) return [];
+    media.timePos = Math.max(0, next);
+    const due = opts.now() - media.lastAnchorAt >= opts.clockIntervalMs;
+    return media.restarted && due ? anchor(media) : [];
+  };
+
   const setProperty = (media: Media, name: string, value: unknown): EngineEvent[] => {
     switch (name) {
       case 'pause': {
@@ -169,24 +181,29 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
           media.speed = next;
           return true;
         });
-      case 'time-pos': {
+      case 'playback-time': {
         const next = num(value);
         if (next === undefined) return [];
-        media.timePos = next;
-        const due = opts.now() - media.lastAnchorAt >= opts.clockIntervalMs;
-        return media.restarted && due ? anchor(media) : [];
+        media.hasPlaybackTime = true;
+        return updateTime(media, next);
       }
+      case 'time-pos':
+        return media.hasPlaybackTime ? [] : updateTime(media, value);
       case 'video-params':
         if (typeof value !== 'object' || value === null) return [];
         media.frameReady = true;
         return frameThenSettle(media);
       case 'vid':
-        if (value !== false && value !== 'no') return [];
+        if (!media.loaded || (value !== false && value !== 'no')) return [];
         media.frameReady = true;
         return frameThenSettle(media);
-      case 'duration':
-        media.duration = num(value);
-        return [];
+      case 'duration': {
+        const raw = num(value);
+        const clean = raw !== undefined && raw > 0 ? raw : undefined;
+        if (media.duration === clean) return [];
+        media.duration = clean;
+        return media.kind === 'vod' && media.restarted ? anchor(media) : [];
+      }
       case 'demuxer-cache-state':
         media.cacheEnd =
           typeof value === 'object' && value !== null
@@ -205,9 +222,11 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
         kind,
         logs: [],
         state: 'opening',
+        loaded: false,
         restarted: false,
         firstFrameSent: false,
         frameReady: false,
+        hasPlaybackTime: false,
         stalled: false,
         paused: false,
         cache: false,
@@ -229,6 +248,7 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
       if (!m) return [];
       switch (e.event) {
         case 'file-loaded':
+          m.loaded = true;
           return m.restarted ? [] : setState(m, 'buffering');
         case 'playback-restart':
           return restart(m);
