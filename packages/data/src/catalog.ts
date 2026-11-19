@@ -7,9 +7,7 @@ import {
   type Scheduler,
   type SecretStore,
   type SqlDriver,
-  transportHeaders,
 } from '@elv/domain';
-import { createXtreamClient } from '@elv/sources';
 import type { ImportDeps, ImportOptions, ImportSummary } from './import-types';
 import { importCatalog, loadSeriesEpisodes } from './import-xtream';
 import { type ManifestStore, saveManifest } from './manifest';
@@ -22,7 +20,6 @@ import {
   queryCategories,
   queryEpisodes,
   queryItems,
-  queryPlayable,
   querySeasons,
   querySeries,
   type SeasonRow,
@@ -36,15 +33,13 @@ import {
   removeSource,
   type SourceKind,
   type SourceRecord,
-  secretKey,
   type XtreamSourceInput,
 } from './sources';
-import { createStreamResolver, type StreamResolver } from './stream-resolver';
+import { createPlaytimeResolverCache, type StreamRequest } from './stream-resolver';
 
-/**
- * Default largest Xtream response body (4 MiB): bigger lists load per category, which bounds memory and the longest
- * JS task of an import on small devices.
- */
+export type { StreamRequest };
+
+/** Default largest Xtream response body (4 MiB): bigger lists load per category. */
 export const DEVICE_MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 /** Default batch size (5,000 rows per transaction) for `CatalogService.importSource`. */
@@ -69,6 +64,8 @@ export interface CatalogDeps {
   newId?: () => string;
   /** Apple platforms: rewritten after every add, remove and import (see `reconcileManifest`). */
   manifest?: ManifestStore;
+  /** Invoked synchronously at the start of `removeSource(id)` before deleting rows or secrets (`#67`). */
+  beforeRemoveSource?: (sourceId: string) => void | Promise<void>;
 }
 
 /** A source as the menu shows it. */
@@ -77,10 +74,6 @@ export interface SourceRow {
   kind: SourceKind;
   name: string;
   createdAt: number;
-  /**
-   * No catalog import of the source has succeeded yet: a new source, or one restored from the manifest after the OS
-   * purged the caches. The menu imports it.
-   */
   needsImport: boolean;
 }
 
@@ -89,35 +82,19 @@ export type AddSourceInput =
   | ({ kind: 'xtream' } & XtreamSourceInput)
   | ({ kind: 'm3u' } & M3uSourceInput);
 
-/** What a player needs to open an item. Never log or store it. */
-export interface StreamRequest {
-  url: string;
-  /** Lower-case header names. */
-  headers: Record<string, string>;
-}
-
 /** Local catalog of the user's sources: add, import, browse in pages, resolve a stream, close. */
 export interface CatalogService {
   addSource(input: AddSourceInput): Promise<Result<SourceRow>>;
   addSourceFromLink(input: LinkSourceInput): Promise<Result<SourceRow>>;
-  /** Aborts any queued or in-flight import of `id`, awaits settlement, and removes rows + secrets. */
+  /** Stops active playback via `beforeRemoveSource`, aborts imports of `id`, and removes rows + secrets. */
   removeSource(id: string): Promise<Result<void>>;
-  /**
-   * Imports run one at a time in call order; a later call waits for its turn. A call for a source whose import runs
-   * or waits is refused with `storage/import-in-progress` at once. Cancelling through `signal` keeps the previous
-   * catalog; a call cancelled while it waits ends with `network/aborted` without starting a run.
-   */
   importSource(id: string, opts?: DeviceImportOptions): Promise<Result<ImportSummary>>;
   listSources(): Promise<SourceRow[]>;
   categories(sourceId: string, kind: BrowseKind): Promise<CategoryRow[]>;
-  /** A page in provider order; `limit` is capped at 500; an unknown category is an empty page. */
   items(categoryId: string, offset: number, limit: number): Promise<ItemRow[]>;
-  /** Xtream episodes are fetched on first use. `seriesId` is {@link ItemRow.id} of a series. */
   seasons(seriesId: number): Promise<Result<SeasonRow[]>>;
   episodes(seriesId: number, season: number): Promise<EpisodeRow[]>;
-  /** `itemKey` is the `key` of a live channel, movie or episode. */
   resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
-  /** Aborts active/queued imports, awaits queue settlement, clears caches, and closes the underlying SQL driver. */
   close(): Promise<void>;
 }
 
@@ -144,7 +121,6 @@ const LIST_SOURCES = `SELECT s.id, s.kind, s.name, s.created_at,
 
 const notFound = () => err(elvError('storage', 'item-not-found'));
 
-/** Resolves `true` once `previous` settled, or `false` as soon as `signal` aborts (also before). */
 function turnOrAbort(previous: Promise<void>, signal: AbortSignal | undefined): Promise<boolean> {
   if (signal === undefined) return previous.then(() => true);
   if (signal.aborted) return Promise.resolve(false);
@@ -178,73 +154,20 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
   const abortable = db as SqlDriver & AbortBindable;
   const activeImports = new Map<string, ActiveImport>();
   const removing = new Set<string>();
-  const resolvers = new Map<string, Promise<StreamResolver>>();
+  const playtime = createPlaytimeResolverCache({ db, secrets, http: deps.http });
   let lastImport: Promise<void> = Promise.resolve();
   let closed = false;
   let closePromise: Promise<void> | undefined;
   const { manifest } = deps;
   const syncManifest = () => (manifest === undefined ? undefined : saveManifest(db, manifest));
 
-  const resolverFor = (sourceId: string): Promise<StreamResolver> => {
-    let cached = resolvers.get(sourceId);
-    if (cached === undefined) {
-      cached = createStreamResolver(sourceId, { secrets });
-      resolvers.set(sourceId, cached);
-    }
-    return cached;
-  };
-
   const mapped = async (p: Promise<Result<SourceRecord>>): Promise<Result<SourceRow>> => {
     const r = await p;
     if (!r.ok) return r;
-    resolvers.delete(r.value.id);
+    playtime.evict(r.value.id);
     await syncManifest();
     return ok(row(r.value));
   };
-
-  async function logoOf(items: ItemRow[], sourceId: string): Promise<ItemRow[]> {
-    if (!items.some((i) => i.logo?.includes('{{'))) return items;
-    const resolver = await resolverFor(sourceId);
-    return items.map((i) =>
-      i.logo === null ? i : { ...i, logo: resolver.resolve(i.logo) ?? null },
-    );
-  }
-
-  async function xtreamUrl(
-    sourceId: string,
-    p: {
-      streamKind: 'live' | 'movie' | 'series';
-      providerId: string | null;
-      extension: string | null;
-    },
-    transport: SourceRecord['settings']['transport'],
-  ): Promise<Result<string>> {
-    const raw = await secrets.get(secretKey(sourceId, 'xtream')).catch(() => undefined);
-    let parsed: { server?: unknown; username?: unknown; password?: unknown } = {};
-    try {
-      parsed = raw === undefined ? {} : (JSON.parse(raw) as typeof parsed);
-    } catch {
-      parsed = {};
-    }
-    const { server, username, password } = parsed;
-    const id = Number(p.providerId);
-    if (
-      typeof server !== 'string' ||
-      typeof username !== 'string' ||
-      typeof password !== 'string'
-    ) {
-      return err(elvError('storage', 'secret-missing'));
-    }
-    if (p.providerId === null || !Number.isFinite(id)) return notFound();
-    const client = createXtreamClient({
-      http: deps.http,
-      server,
-      username,
-      password,
-      ...(transport === undefined ? {} : { transport }),
-    });
-    return ok(client.streamUrl(p.streamKind, id, p.extension ?? undefined));
-  }
 
   return {
     addSource: (input) =>
@@ -256,14 +179,19 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     async removeSource(id) {
       removing.add(id);
       try {
+        try {
+          await deps.beforeRemoveSource?.(id);
+        } catch {
+          // Best-effort playback stop so source removal still proceeds cleanly.
+        }
         const active = activeImports.get(id);
         if (active !== undefined) {
           active.abort();
           await active.settled;
         }
-        resolvers.delete(id);
+        playtime.evict(id);
         const removed = await removeSource(id, { db, secrets });
-        resolvers.delete(id);
+        playtime.evict(id);
         await syncManifest();
         return removed;
       } finally {
@@ -304,7 +232,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
         if (!(await turnOrAbort(previous, runCtl.signal))) {
           return err(elvError('network', 'aborted'));
         }
-        resolvers.delete(id);
+        playtime.evict(id);
         running = true;
         abortable.setAbortSignal?.(internallyAborted ? runCtl.signal : opts.signal);
         try {
@@ -317,7 +245,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
           });
         } finally {
           running = false;
-          resolvers.delete(id);
+          playtime.evict(id);
           abortable.setAbortSignal?.(undefined);
         }
       } finally {
@@ -350,7 +278,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     async items(categoryId, offset, limit) {
       const ref = parseCategoryId(categoryId);
       if (ref === undefined) return [];
-      return logoOf(await queryItems(db, ref, offset, limit), ref.sourceId);
+      return playtime.resolveLogos(await queryItems(db, ref, offset, limit), ref.sourceId);
     },
 
     async seasons(seriesId) {
@@ -373,50 +301,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       return series === undefined ? [] : queryEpisodes(db, series, season);
     },
 
-    async resolveStream(itemKey) {
-      const play = await queryPlayable(db, itemKey);
-      if (play === undefined) return notFound();
-      const source = await getSource(db, play.sourceId);
-      if (source === undefined) return notFound();
-      const headers = transportHeaders(source.settings.transport);
-      if (play.urlTemplate === null) {
-        const url = await xtreamUrl(play.sourceId, play, source.settings.transport);
-        return url.ok ? ok({ url: url.value, headers }) : url;
-      }
-      const resolver = await resolverFor(play.sourceId);
-      const url = resolver.resolve(play.urlTemplate);
-      if (url === undefined) {
-        resolvers.delete(play.sourceId);
-        return err(elvError('storage', 'secret-missing'));
-      }
-      if (play.headersJson !== null) {
-        const extra = JSON.parse(play.headersJson) as {
-          userAgent?: string;
-          referer?: string;
-          other?: Record<string, string>;
-        };
-        if (extra.other !== undefined) {
-          for (const [k, v] of Object.entries(extra.other)) {
-            const resolved = resolver.resolve(v);
-            if (resolved === undefined) {
-              resolvers.delete(play.sourceId);
-              return err(elvError('storage', 'secret-missing'));
-            }
-            headers[k.toLowerCase()] = resolved;
-          }
-        }
-        if (extra.userAgent !== undefined) headers['user-agent'] = extra.userAgent;
-        if (extra.referer !== undefined) {
-          const referer = resolver.resolve(extra.referer);
-          if (referer === undefined) {
-            resolvers.delete(play.sourceId);
-            return err(elvError('storage', 'secret-missing'));
-          }
-          headers.referer = referer;
-        }
-      }
-      return ok({ url, headers });
-    },
+    resolveStream: (itemKey) => playtime.resolveStream(itemKey),
 
     close() {
       if (closePromise !== undefined) return closePromise;
@@ -424,7 +309,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       closePromise = (async () => {
         for (const active of activeImports.values()) active.abort();
         await lastImport;
-        resolvers.clear();
+        playtime.clear();
         await db.close?.();
       })();
       return closePromise;

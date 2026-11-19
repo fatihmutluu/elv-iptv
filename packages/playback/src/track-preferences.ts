@@ -1,3 +1,4 @@
+import { normalizeLanguageCode, sameLanguageCode } from '@elv/domain';
 import type { LoadOptions, MediaTracks, TrackInfo } from './engine';
 
 interface TrackChoice {
@@ -25,12 +26,9 @@ interface TrackPreferences {
   reconcile(tracks: MediaTracks): ReconciledTracks;
 }
 
-function sameLanguage(a: string | undefined, b: string | undefined): boolean {
-  return a !== undefined && b !== undefined && a.trim().toLowerCase() === b.trim().toLowerCase();
-}
-
 function toChoice(id: string, matched: TrackInfo | undefined, previous?: TrackChoice): TrackChoice {
-  const language = matched?.language ?? (previous?.id === id ? previous.language : undefined);
+  const rawLang = matched?.language ?? (previous?.id === id ? previous.language : undefined);
+  const language = normalizeLanguageCode(rawLang);
   const label = matched?.label ?? (previous?.id === id ? previous.label : undefined);
   return {
     id,
@@ -44,17 +42,21 @@ function resolveChoice(
   wanted: TrackChoice,
 ): TrackInfo | undefined {
   const exact = candidates.find((t) => t.id === wanted.id);
-  if (exact && (wanted.language === undefined || sameLanguage(exact.language, wanted.language))) {
+  const exactLangOk =
+    wanted.language === undefined || sameLanguageCode(exact?.language, wanted.language);
+  const exactLabelOk =
+    wanted.label === undefined || exact?.label === undefined || exact.label === wanted.label;
+  if (exact && exactLangOk && exactLabelOk) {
     return exact;
   }
   if (wanted.language !== undefined && wanted.label !== undefined) {
     const both = candidates.find(
-      (t) => sameLanguage(t.language, wanted.language) && t.label === wanted.label,
+      (t) => sameLanguageCode(t.language, wanted.language) && t.label === wanted.label,
     );
     if (both) return both;
   }
   if (wanted.language !== undefined) {
-    const byLang = candidates.find((t) => sameLanguage(t.language, wanted.language));
+    const byLang = candidates.find((t) => sameLanguageCode(t.language, wanted.language));
     if (byLang) return byLang;
   }
   if (wanted.label !== undefined) {
@@ -66,7 +68,7 @@ function resolveChoice(
 
 /**
  * @internal Tracks active user audio/subtitle choices across reloads, reconciling shifted stream IDs
- * by `(language, label)` with the same priority order as the native engines.
+ * by canonical `(language, label)` with the same priority order as the native engines.
  */
 export function createTrackPreferences(): TrackPreferences {
   let audio: TrackChoice | undefined;

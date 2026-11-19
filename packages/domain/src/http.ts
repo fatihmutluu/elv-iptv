@@ -276,7 +276,25 @@ export function createFetchHttpClient(
           signal: controller.signal,
         };
         if (options?.headers) init.headers = { ...options.headers };
-        const attempt = () => Promise.race([fetchImpl(url, init), aborted]);
+        const attempt = () => {
+          let settledBeforeAbort = false;
+          const inflight = fetchImpl(url, init);
+          return Promise.race([
+            inflight.then((r) => {
+              settledBeforeAbort = true;
+              return r;
+            }),
+            aborted,
+          ]).catch((e: unknown) => {
+            if (!settledBeforeAbort) {
+              inflight.then(
+                (r) => discardBody(r.body),
+                () => undefined,
+              );
+            }
+            throw e;
+          });
+        };
         const res = await attempt().catch((e: unknown) => {
           if (timedOut || controller.signal.aborted || !isConnectionReset(e)) throw e;
           return attempt();

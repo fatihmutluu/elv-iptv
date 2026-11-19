@@ -176,7 +176,7 @@ describe('pause', () => {
     r.service.pause();
     settle(ok(req('alt')));
     await tick(10000);
-    expect(names(r).at(-1)).toBe('pause');
+    expect(names(r).at(-1)).toBe('stop');
     expect(r.loads.map((l) => l.url)).not.toContain('alt');
   });
 });

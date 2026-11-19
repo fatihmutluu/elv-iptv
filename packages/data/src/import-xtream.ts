@@ -9,7 +9,13 @@ import { importM3u } from './import-m3u';
 import { checkAbort, notify, performRun, type RunCtx, Stop, unwrap } from './import-run';
 import type { ImportDeps, ImportOptions, ImportProgress, ImportSummary } from './import-types';
 import { sourceExists } from './runs';
-import { getSource, type SourceRecord, secretKey } from './sources';
+import {
+  getSource,
+  type SourceRecord,
+  type SourceSettings,
+  secretKey,
+  updateSourceSettings,
+} from './sources';
 import {
   type ItemWriter,
   type Listed,
@@ -190,9 +196,9 @@ async function importList<T extends Listed>(
   c.counts.placements = (c.counts.placements ?? 0) + placements;
 }
 
-async function execute(c: Ctx): Promise<void> {
+async function execute(c: Ctx): Promise<string[]> {
   const call = c.signal === undefined ? undefined : { signal: c.signal };
-  unwrap(await c.client.account(call));
+  const account = unwrap(await c.client.account(call));
   const cats = await importCategories(c);
   await importList(
     c,
@@ -227,6 +233,7 @@ async function execute(c: Ctx): Promise<void> {
     },
     cats.series,
   );
+  return account.outputFormats;
 }
 
 const KEEP_EPISODES =
@@ -239,10 +246,18 @@ async function importXtream(
 ): Promise<Result<ImportSummary>> {
   const opened = await openClients(source, deps);
   if (!opened.ok) return opened;
+  let outputFormats: string[] = [];
   return performRun(source, deps, opts, {
-    execute: (base) => execute({ ...base, ...opened.value }),
+    execute: async (base) => {
+      outputFormats = await execute({ ...base, ...opened.value });
+    },
     beforeCleanup: async (tx, c) => {
       await tx.run(KEEP_EPISODES, [c.runId, c.sourceId, c.sourceId, c.runId]);
+      const current = (await getSource(tx, source.id))?.settings ?? source.settings;
+      const settings: SourceSettings = { ...current };
+      if (outputFormats.length > 0) settings.outputFormats = outputFormats;
+      else delete settings.outputFormats;
+      await updateSourceSettings(tx, source.id, settings);
     },
   });
 }

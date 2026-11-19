@@ -174,4 +174,37 @@ describe('createFetchHttpClient body failures', () => {
     await expect(collect(res.body)).rejects.toMatchObject({ category: 'network', code: 'timeout' });
     expect(fetchSignal?.aborted).toBe(true);
   });
+
+  it('discards a late-resolving fetch response body when abort wins Promise.race (#180)', async () => {
+    let cancelled = 0;
+    let released = 0;
+    let resolveLate: (() => void) | undefined;
+    const body = {
+      getReader: () => ({
+        read: async () => ({ done: false, value: enc('late') }),
+        cancel: async () => {
+          cancelled++;
+        },
+        releaseLock: () => {
+          released++;
+        },
+      }),
+    };
+    const ctl = new AbortController();
+    const client = createFetchHttpClient(
+      (_url, _init) =>
+        new Promise((resolve) => {
+          resolveLate = () => resolve({ status: 200, headers: headers({}), body });
+        }),
+    );
+    const pendingGet = client.get('http://h/late', { signal: ctl.signal });
+    ctl.abort();
+    const result = await pendingGet;
+    expect(result).toEqual({ ok: false, error: { category: 'network', code: 'aborted' } });
+    expect(cancelled).toBe(0);
+    resolveLate?.();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(cancelled).toBe(1);
+    expect(released).toBe(1);
+  });
 });

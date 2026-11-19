@@ -201,6 +201,11 @@ export async function performRun(
   } catch {
     return err(elvError('storage', 'secret-write-failed'));
   }
+  try {
+    await deps.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  } catch {
+    // Advisory: a busy reader only delays WAL truncation until the next import.
+  }
   c.progress({ phase: 'cleanup', done: removed });
   return ok({
     runId,

@@ -23,6 +23,12 @@ export interface PlaybackConfig {
    * `tuning`. Resolving is local work (a stored template and a secret-store read), so the bound only catches a hang.
    */
   resolveTimeoutMs: number;
+  /** Coalescing window for rapid `service.seek()` calls after an immediate leading dispatch. */
+  seekCoalesceMs: number;
+  /** Maximum settle window after a seek before a still-stalled stream escalates into recovery. */
+  seekSettleTimeoutMs: number;
+  /** Pausing a playing live stream at least this long triggers a clean live-edge reload on `play()`. */
+  liveStalePauseMs: number;
 }
 
 /** Spec defaults, frozen so no caller can change them for every service. */
@@ -37,4 +43,7 @@ export const DEFAULT_PLAYBACK_CONFIG: Readonly<PlaybackConfig> = Object.freeze({
   limitTotalMs: 60000,
   vodReconnectWindowMs: 120000,
   resolveTimeoutMs: 5000,
+  seekCoalesceMs: 80,
+  seekSettleTimeoutMs: 12000,
+  liveStalePauseMs: 20000,
 });

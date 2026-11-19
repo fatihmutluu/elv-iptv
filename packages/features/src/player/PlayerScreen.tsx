@@ -2,9 +2,10 @@ import type { CatalogService } from '@elv/data';
 import {
   createPlaybackService,
   EMPTY_TRACKS,
+  type MediaTracks,
   type PlaybackClock,
   type PlaybackService,
-  type PlaybackState,
+  type PlaybackStatus,
   type PlaybackTimers,
 } from '@elv/playback';
 import { useFormFactor, useI18n } from '@elv/ui-kit';
@@ -19,6 +20,7 @@ import {
 import { View } from 'react-native';
 import { type AppLifecyclePort, noopAppLifecycle } from '../ports/app-lifecycle';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
+import type { PlaybackGuard } from '../ports/playback-guard';
 import type { OpenVideoEngine, VideoHost } from '../ports/video-host';
 import { describePlaybackFailure } from './errors';
 import { formatStatusLine, PlayerOsd, playerStyles } from './PlayerScreenParts';
@@ -31,18 +33,20 @@ const DEFAULT_TIMERS: PlaybackTimers = {
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
 
-const OPENING_PLAYBACK_STATE: PlaybackState = {
-  status: { kind: 'tuning' },
-  attempt: 0,
-  tracks: EMPTY_TRACKS,
-  staleEventsDropped: 0,
-};
+interface PlaybackUiSlice {
+  readonly status: PlaybackStatus;
+  readonly tracks: MediaTracks;
+}
+
+const OPENING_STATUS: PlaybackStatus = { kind: 'tuning' };
+const OPENING_PLAYBACK_SLICE: PlaybackUiSlice = { status: OPENING_STATUS, tracks: EMPTY_TRACKS };
 
 /** Props of {@link PlayerScreen}. */
 export interface PlayerScreenProps {
   catalog: Pick<CatalogService, 'resolveStream'>;
   videoHost: VideoHost;
   target: PlayTarget;
+  playbackGuard?: PlaybackGuard;
   appLifecycle?: AppLifecyclePort;
   clock?: PlaybackClock;
   timers?: PlaybackTimers;
@@ -53,11 +57,7 @@ export interface PlayerScreenProps {
 type SessionState =
   | { readonly kind: 'opening' }
   | { readonly kind: 'unavailable' }
-  | {
-      readonly kind: 'ready';
-      readonly opened: OpenVideoEngine;
-      readonly service: PlaybackService;
-    };
+  | { readonly kind: 'ready'; readonly opened: OpenVideoEngine; readonly service: PlaybackService };
 
 function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
   return (
@@ -68,16 +68,12 @@ function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
   );
 }
 
-/**
- * Cross-platform playback screen over injected {@link VideoHost} and {@link AppLifecyclePort} ports.
- * Owns `PlayerEngine` + `PlaybackService` strictly inside `useEffect`, stops playback on
- * `'background'` and re-tunes on `'active'`, supports live channel Up/Down zapping, VOD pause/seek,
- * and plain localized audio/subtitle track selection.
- */
+/** Cross-platform playback screen over injected {@link VideoHost} and {@link AppLifecyclePort} ports. */
 export function PlayerScreen({
   catalog,
   videoHost,
   target,
+  playbackGuard,
   appLifecycle = noopAppLifecycle,
   clock = DEFAULT_CLOCK,
   timers = DEFAULT_TIMERS,
@@ -124,9 +120,7 @@ export function PlayerScreen({
     (delta: 1 | -1): void => {
       const current = activeTargetRef.current;
       const playlist = current.playlist;
-      if (current.kind !== 'live' || playlist === undefined || playlist.count <= 0) {
-        return;
-      }
+      if (current.kind !== 'live' || playlist === undefined || playlist.count <= 0) return;
       const nextIndex =
         (((playlistIndexRef.current + delta) % playlist.count) + playlist.count) % playlist.count;
       playlistIndexRef.current = nextIndex;
@@ -134,9 +128,7 @@ export function PlayerScreen({
 
       void playlist.getAt(nextIndex).then(
         (entry) => {
-          if (!mountedRef.current || seq !== zapSeqRef.current || entry === undefined) {
-            return;
-          }
+          if (!mountedRef.current || seq !== zapSeqRef.current || entry === undefined) return;
           const nextTarget: PlayTarget = {
             ...entry,
             playlist: { ...playlist, currentIndex: nextIndex },
@@ -148,11 +140,8 @@ export function PlayerScreen({
           onTargetChangeRef.current?.(nextTarget);
 
           const svc = serviceRef.current;
-          if (backgroundedRef.current) {
-            resumeOnActiveRef.current = true;
-          } else if (svc !== null) {
-            tuneEntry(svc, nextTarget);
-          }
+          if (backgroundedRef.current) resumeOnActiveRef.current = true;
+          else if (svc !== null) tuneEntry(svc, nextTarget);
         },
         () => undefined,
       );
@@ -166,10 +155,20 @@ export function PlayerScreen({
 
   useEffect(() => {
     mountedRef.current = true;
+    const unregGuard = playbackGuard?.registerSession?.({
+      getSourceId: () =>
+        serviceRef.current?.getState().accountKey ?? activeTargetRef.current.sourceId,
+      stop: () => {
+        zapSeqRef.current += 1;
+        resumeOnActiveRef.current = false;
+        serviceRef.current?.stop();
+      },
+    });
     return () => {
       mountedRef.current = false;
+      unregGuard?.();
     };
-  }, []);
+  }, [playbackGuard]);
 
   useEffect(() => {
     if (prevPropKeyRef.current === target.itemKey) return;
@@ -179,11 +178,8 @@ export function PlayerScreen({
     activeTargetRef.current = target;
     setActiveTarget(target);
     const svc = serviceRef.current;
-    if (backgroundedRef.current) {
-      resumeOnActiveRef.current = true;
-    } else if (svc !== null) {
-      tuneEntry(svc, target);
-    }
+    if (backgroundedRef.current) resumeOnActiveRef.current = true;
+    else if (svc !== null) tuneEntry(svc, target);
   }, [target, tuneEntry]);
 
   useEffect(() => {
@@ -194,14 +190,19 @@ export function PlayerScreen({
       offHostKey?: () => void;
     } | null = null;
 
+    const markUnavailable = (): void => {
+      if (cancelled) return;
+      serviceRef.current = null;
+      setSessionState({ kind: 'unavailable' });
+    };
+
     const attachOpened = (opened: OpenVideoEngine | null): void => {
       if (cancelled) {
         opened?.engine.release();
         return;
       }
       if (opened === null) {
-        serviceRef.current = null;
-        setSessionState({ kind: 'unavailable' });
+        markUnavailable();
         return;
       }
       const service = createPlaybackService({
@@ -213,38 +214,20 @@ export function PlayerScreen({
         if (key === 'back') hostBackRef.current();
         else zapByRef.current(key === 'channel-up' ? 1 : -1);
       });
-      activeSession = {
-        opened,
-        service,
-        ...(offHostKey !== undefined ? { offHostKey } : {}),
-      };
+      activeSession = { opened, service, ...(offHostKey !== undefined ? { offHostKey } : {}) };
       serviceRef.current = service;
       setSessionState({ kind: 'ready', opened, service });
-      if (backgroundedRef.current) {
-        resumeOnActiveRef.current = true;
-      } else {
-        tuneEntry(service, activeTargetRef.current);
-      }
+      if (backgroundedRef.current) resumeOnActiveRef.current = true;
+      else tuneEntry(service, activeTargetRef.current);
     };
 
     setSessionState({ kind: 'opening' });
     try {
       const openedOrPromise = videoHost.open();
-      if (isPromiseLike(openedOrPromise)) {
-        openedOrPromise.then(attachOpened, () => {
-          if (!cancelled) {
-            serviceRef.current = null;
-            setSessionState({ kind: 'unavailable' });
-          }
-        });
-      } else {
-        attachOpened(openedOrPromise);
-      }
+      if (isPromiseLike(openedOrPromise)) openedOrPromise.then(attachOpened, markUnavailable);
+      else attachOpened(openedOrPromise);
     } catch {
-      if (!cancelled) {
-        serviceRef.current = null;
-        setSessionState({ kind: 'unavailable' });
-      }
+      markUnavailable();
     }
 
     return () => {
@@ -264,11 +247,8 @@ export function PlayerScreen({
       if (lifecycleState === 'background') {
         backgroundedRef.current = true;
         const svc = serviceRef.current;
-        if (svc === null) {
-          resumeOnActiveRef.current = true;
-          return;
-        }
-        if (svc.getState().status.kind !== 'idle') {
+        if (svc === null) resumeOnActiveRef.current = true;
+        else if (svc.getState().status.kind !== 'idle') {
           resumeOnActiveRef.current = true;
           svc.stop();
         }
@@ -284,22 +264,24 @@ export function PlayerScreen({
   }, [appLifecycle, tuneEntry]);
 
   const activeService = sessionState.kind === 'ready' ? sessionState.service : null;
+  const sliceRef = useRef<PlaybackUiSlice>(OPENING_PLAYBACK_SLICE);
   const subscribePlayback = useCallback(
     (cb: () => void) => (activeService === null ? () => undefined : activeService.subscribe(cb)),
     [activeService],
   );
-  const getPlaybackSnapshot = useCallback(
-    () => (activeService === null ? OPENING_PLAYBACK_STATE : activeService.getState()),
-    [activeService],
-  );
-  const playbackState = useSyncExternalStore(
+  const getPlaybackSnapshot = useCallback((): PlaybackUiSlice => {
+    if (activeService === null) return OPENING_PLAYBACK_SLICE;
+    const { status: st, tracks: tr } = activeService.getState();
+    const prev = sliceRef.current;
+    if (prev.status === st && prev.tracks === tr) return prev;
+    sliceRef.current = { status: st, tracks: tr };
+    return sliceRef.current;
+  }, [activeService]);
+  const { status, tracks } = useSyncExternalStore(
     subscribePlayback,
     getPlaybackSnapshot,
     getPlaybackSnapshot,
   );
-
-  const status = playbackState.status;
-  const tracks = playbackState.tracks;
   const hasTracks = tracks.audio.length > 0 || tracks.subtitles.length > 0;
   const showRetry = status.kind === 'failed' && activeService !== null;
   const statusLine =

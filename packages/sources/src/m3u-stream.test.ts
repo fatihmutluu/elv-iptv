@@ -106,14 +106,19 @@ describe('scanM3u batching and chunking', () => {
 describe('scanM3u property', () => {
   const chars = [...'abcXYZ019 ,;"\'=:/.-_éüß日本😀'];
   const text = fc.string({ unit: fc.constantFrom(...chars), minLength: 1, maxLength: 12 });
-  const value = text.filter((s) => !s.includes('"') && s === s.trim());
+  const value = text.filter(
+    (s) =>
+      !s.includes('"') &&
+      s === s.trim() &&
+      !['(no tvg-id)', 'no tvg-id', 'null', 'none', 'n/a', 'undefined'].includes(s.toLowerCase()),
+  );
   const token = fc.string({ unit: fc.constantFrom(...'abc09-_é日'), minLength: 1, maxLength: 8 });
-  const name = text.filter((s) => s === s.trim());
+  const name = text.filter((s) => s === s.trim() && !/^\d{1,5}\.\s+\S/.test(s));
   const entry = fc.record({
     name,
     tvgId: fc.option(value, { nil: undefined }),
     tvgName: fc.option(value, { nil: undefined }),
-    chno: fc.option(fc.integer({ min: 0, max: 9999 }), { nil: undefined }),
+    chno: fc.option(fc.integer({ min: 1, max: 9999 }), { nil: undefined }),
     groups: fc.array(token, { maxLength: 3 }),
     extra: fc.option(value, { nil: undefined }),
     path: token,

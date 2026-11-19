@@ -1,5 +1,5 @@
 import { decodeUtf8 } from './utf8';
-import { mergeById, toNumber, toText } from './xtream-normalize';
+import { mergeById, toNumber, toStrictInt, toText } from './xtream-normalize';
 import type {
   XtreamAccount,
   XtreamCategory,
@@ -28,7 +28,7 @@ const ms = (seconds: unknown): number | undefined => {
 
 function yearOf(...candidates: unknown[]): number | undefined {
   for (const c of candidates) {
-    const direct = typeof c === 'number' ? c : undefined;
+    const direct = typeof c === 'number' && Number.isFinite(c) ? c : undefined;
     if (direct !== undefined) return direct;
     const m = typeof c === 'string' ? /^\s*(\d{4})/.exec(c) : null;
     if (m?.[1] !== undefined) return Number(m[1]);
@@ -88,7 +88,7 @@ export function toCategories(rows: Raw[]): XtreamCategory[] {
 export function toLive(rows: Raw[]): XtreamLive[] {
   const out: XtreamLive[] = [];
   for (const r of rows) {
-    const id = toNumber(r.stream_id);
+    const id = toStrictInt(r.stream_id);
     if (id === undefined) continue;
     const archive = toNumber(r.tv_archive) === 1;
     const live: XtreamLive = {
@@ -97,7 +97,8 @@ export function toLive(rows: Raw[]): XtreamLive[] {
       categoryIds: categoryIds(r),
       catchupDays: archive ? (toNumber(r.tv_archive_duration) ?? 0) : 0,
     };
-    put(live, 'num', toNumber(r.num));
+    const num = toStrictInt(r.num);
+    if (num !== undefined && num > 0) live.num = num;
     put(live, 'icon', toText(r.stream_icon));
     put(live, 'epgId', toText(r.epg_channel_id));
     put(live, 'added', ms(r.added));
@@ -110,7 +111,7 @@ export function toLive(rows: Raw[]): XtreamLive[] {
 export function toMovies(rows: Raw[]): XtreamMovie[] {
   const out: XtreamMovie[] = [];
   for (const r of rows) {
-    const id = toNumber(r.stream_id);
+    const id = toStrictInt(r.stream_id);
     if (id === undefined) continue;
     const movie: XtreamMovie = {
       id,
@@ -120,7 +121,7 @@ export function toMovies(rows: Raw[]): XtreamMovie[] {
     };
     put(movie, 'icon', toText(r.stream_icon));
     put(movie, 'rating', toNumber(r.rating));
-    put(movie, 'year', toNumber(r.year));
+    put(movie, 'year', yearOf(r.year));
     put(movie, 'added', ms(r.added));
     out.push(movie);
   }
@@ -131,7 +132,7 @@ export function toMovies(rows: Raw[]): XtreamMovie[] {
 export function toSeries(rows: Raw[]): XtreamSeries[] {
   const out: XtreamSeries[] = [];
   for (const r of rows) {
-    const id = toNumber(r.series_id);
+    const id = toStrictInt(r.series_id);
     if (id === undefined) continue;
     const series: XtreamSeries = { id, name: toText(r.name) ?? '', categoryIds: categoryIds(r) };
     put(series, 'cover', toText(r.cover));
@@ -148,22 +149,31 @@ export function toSeries(rows: Raw[]): XtreamSeries[] {
 export function toSeriesInfo(raw: Raw): XtreamSeriesInfo {
   const seasons = new Set<number>();
   for (const s of Array.isArray(raw.seasons) ? raw.seasons : []) {
-    const n = toNumber(isRaw(s) ? s.season_number : s);
+    const n = toStrictInt(isRaw(s) ? s.season_number : s);
     if (n !== undefined) seasons.add(n);
   }
   const episodes: XtreamEpisode[] = [];
   const seenIds = new Set<number>();
-  const addEpisode = (e: unknown, fallbackSeason: number | undefined, keySeason?: number): void => {
+  const nextPerSeason = new Map<number, number>();
+  const addEpisode = (
+    e: unknown,
+    fallbackSeason: number | undefined,
+    keySeason?: number,
+    indexHint?: number,
+  ): void => {
     if (!isRaw(e)) return;
-    const id = toNumber(e.id);
-    const season = keySeason ?? toNumber(e.season) ?? fallbackSeason;
+    const id = toStrictInt(e.id);
+    const season = keySeason ?? toStrictInt(e.season) ?? fallbackSeason;
     if (id === undefined || season === undefined || seenIds.has(id)) return;
     seenIds.add(id);
     seasons.add(season);
+    const fallbackEp = indexHint ?? (nextPerSeason.get(season) ?? 0) + 1;
+    nextPerSeason.set(season, fallbackEp);
+    const explicitEp = toStrictInt(e.episode_num);
     const episode: XtreamEpisode = {
       id,
       season,
-      episode: toNumber(e.episode_num) ?? 0,
+      episode: explicitEp !== undefined && explicitEp > 0 ? explicitEp : fallbackEp,
       title: toText(e.title) ?? '',
       extension: toText(e.container_extension) ?? 'mp4',
     };
@@ -174,15 +184,20 @@ export function toSeriesInfo(raw: Raw): XtreamSeriesInfo {
     for (let idx = 0; idx < raw.episodes.length; idx++) {
       const entry = raw.episodes[idx];
       if (Array.isArray(entry)) {
-        for (const e of entry) addEpisode(e, idx);
+        for (let epIdx = 0; epIdx < entry.length; epIdx++) {
+          addEpisode(entry[epIdx], idx, undefined, epIdx + 1);
+        }
       } else if (isRaw(entry)) {
         addEpisode(entry, 0);
       }
     }
   } else {
     for (const [key, group] of Object.entries(asRaw(raw.episodes))) {
-      const keySeason = toNumber(key);
-      for (const e of Array.isArray(group) ? group : []) addEpisode(e, undefined, keySeason);
+      const keySeason = toStrictInt(key);
+      const list = Array.isArray(group) ? group : [];
+      for (let epIdx = 0; epIdx < list.length; epIdx++) {
+        addEpisode(list[epIdx], undefined, keySeason, epIdx + 1);
+      }
     }
   }
   episodes.sort((a, b) => a.season - b.season || a.episode - b.episode);
@@ -212,7 +227,7 @@ function fromBase64(value: unknown): string | undefined {
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     const decoded = decodeUtf8(bytes);
-    return decoded.includes('�') || CONTROL.test(decoded) ? text : toText(decoded);
+    return decoded.includes('\ufffd') || CONTROL.test(decoded) ? text : toText(decoded);
   } catch {
     return text;
   }

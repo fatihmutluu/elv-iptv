@@ -24,8 +24,8 @@ M3U and XMLTV scanners and the Xtream client.
   `exthttp-malformed`, `line-too-long`, `attr-quote`); lines over 1 MiB are skipped. Non-`#` lines need `xx://` or, with
   `baseUrl`, no whitespace/`<`/`{`/`"`. `extra`, `kodiProps`, `headers.other` (empty/null header values ignored) and `header.attrs`
   have no prototype. Raw quotes inside an attribute drop that attribute and recover the title after the last attribute comma (`attr-quote`).
-  Files: `m3u.ts`, `m3u-attrs.ts`, `m3u-types.ts`.
-- Utilities: `toElvError`, `decodeUtf8`, `ByteBuffer`, `decodeEntities`, `createStats`/`warn`; test helpers in `test-chunks.ts`.
+  Files: `m3u.ts`, `m3u-attrs.ts`, `m3u-url.ts`, `m3u-types.ts`. Rejects HLS media/master manifests with `source-format`/`hls-manifest`.
+- Utilities: `detectAndDecodeText` (`encoding.ts`, UTF-8/UTF-16/UTF-32 BOM + Turkish `Windows-1254` / `CP1252`), `toElvError`, `decodeUtf8`, `ByteBuffer`, `decodeEntities`, `createStats`/`warn`; test helpers in `test-chunks.ts`.
 - `scanXmltv(chunks, { batchSize?, channels?, programmeChannels?, from?, to?, decompressor? })` streams XMLTV into `XmltvBatch`es
   (`channels`, `programmes` with epoch-ms times; `batchSize` bounds `channels + programmes`) in bounded memory; returns
   `err` `source-format`/`gzip-unsupported` without `Decompressor`, `gzip-corrupt` on bad gzip, else `ok`. `channels` filters both;
@@ -37,4 +37,4 @@ M3U and XMLTV scanners and the Xtream client.
   `guideUrl` and `streamUrl` (play time only). Empty `{}` list replies become `[]`; empty PHP `[]` object replies become `{}`;
   array-encoded `episodes` (`[[...], [...]]`) preserve Season `0` index, flat `episodes` arrays work, and duplicate episode ids
   deduplicate. Errors: `auth/*`, `network/*`, `source-format/*` (`invalid-json`, `unexpected-shape`, `too-large`). Credentials appear
-  only in the three URL builders; error `detail` never holds a URL. Files: `xtream.ts`, `xtream-records.ts`, `xtream-normalize.ts`.
+  only in the three URL builders; error `detail` never holds a URL. Files: `xtream.ts`, `xtream-json.ts`, `xtream-records.ts`, `xtream-normalize.ts`.

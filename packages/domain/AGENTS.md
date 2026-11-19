@@ -23,5 +23,8 @@ Models, ids, Result/errors, clock, logging and the ports (storage, sql, http, ke
   `Scheduler.yieldNow()` must yield a macrotask (timer, `setImmediate`, frame), never just a resolved promise.
 - `isAsyncIterable`, `openAsyncIterator` in `async-iterable.ts`: resolve `[Symbol.asyncIterator]` first and fall back to Babel's `'@@asyncIterator'` method (with receiver preserved) when `Symbol.asyncIterator` is `undefined` in Hermes.
 - `SourceKind`, `ContentKind`, `TransportSettings`, `transportHeaders` in `source.ts`.
+- `sanitizeHeaderName`, `sanitizeHeaderValue`, `sanitizeHeaders` in `headers.ts`: RFC 7230 token validation and control-character stripping (`0x00–0x1F`, `0x7F`).
+- `normalizeLanguageCode`, `sameLanguageCode` in `languages.ts`: canonical ISO 639-1 / ISO 639-2(T/B) / BCP-47 primary-subtag normalization.
+- `PlaybackGuard`, `GuardedPlaybackSession`, `noopPlaybackGuard`, `createPlaybackGuard` in `playback-guard.ts`: synchronous playback teardown port on source removal.
 - `normalizeStreamUrl`, `xtreamKey`, `m3uKey` in `content-key.ts`: credential-free catalog identity that keeps distinct streams apart (ADR 0011).
 - The tsconfig adds the `DOM` lib for `AbortController`, timers and `Response` types only; no runtime DOM use.

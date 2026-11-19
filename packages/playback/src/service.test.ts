@@ -76,6 +76,9 @@ describe('config', () => {
       limitTotalMs: 60000,
       vodReconnectWindowMs: 120000,
       resolveTimeoutMs: 5000,
+      seekCoalesceMs: 80,
+      seekSettleTimeoutMs: 12000,
+      liveStalePauseMs: 20000,
     });
   });
 
@@ -716,6 +719,7 @@ describe('tracks and seek', () => {
     service.seek(-500);
     expect(service.getState().anchor?.positionMs).toBe(0);
     service.seek(Number.NaN);
+    await vi.advanceTimersByTimeAsync(100);
     expect(engine.commands.at(-1)).toEqual({ name: 'seek', attempt: t, positionMs: 0 });
   });
 });

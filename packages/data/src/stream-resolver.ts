@@ -1,7 +1,39 @@
-import type { SecretStore } from '@elv/domain';
+import {
+  elvError,
+  err,
+  type HttpClient,
+  ok,
+  type Result,
+  type SecretStore,
+  type SqlDriver,
+  sanitizeHeaderName,
+  sanitizeHeaderValue,
+  type TransportSettings,
+  transportHeaders,
+} from '@elv/domain';
+import { createXtreamClient } from '@elv/sources';
 import { placeholderNames } from './m3u-templating';
-import { secretKey } from './sources';
+import { type ItemRow, queryPlayable } from './queries';
+import { getSource, type SourceRecord, secretKey } from './sources';
 import { resolveTemplate, type UrlVars } from './templates';
+
+/** What a player needs to open an item. Never log or store it. */
+export interface StreamRequest {
+  url: string;
+  /** Lower-case header names. */
+  headers: Record<string, string>;
+}
+
+/** Rebuilds the stored templates of one source in memory. */
+export interface StreamResolver {
+  resolve(template: string): string | undefined;
+}
+
+interface XtreamSecret {
+  readonly server: string;
+  readonly username: string;
+  readonly password: string;
+}
 
 /** Reads the `urlvars` secret of a source; a missing or unreadable value yields an empty object. */
 export async function readUrlVars(
@@ -15,15 +47,6 @@ export async function readUrlVars(
   } catch {
     return {};
   }
-}
-
-/** Rebuilds the stored templates of one source in memory. */
-export interface StreamResolver {
-  /**
-   * The URL behind a stored template (an M3U entry URL, logo or referer, a guide placeholder); `undefined` when a
-   * placeholder has no value, so a half-resolved URL never reaches a player. Never log or store the result.
-   */
-  resolve(template: string): string | undefined;
 }
 
 /**
@@ -41,6 +64,182 @@ export async function createStreamResolver(
         (name) => name !== '(' && !Object.hasOwn(vars, name),
       );
       return missing ? undefined : resolveTemplate(template, vars);
+    },
+  };
+}
+
+function effectiveXtreamTransport(source: SourceRecord): TransportSettings | undefined {
+  const transport = source.settings.transport;
+  if (transport?.xtreamFormat !== undefined) return transport;
+  const formats = source.settings.outputFormats?.map((f) => f.toLowerCase()) ?? [];
+  if (formats.includes('m3u8') && !formats.includes('ts')) {
+    return { ...transport, xtreamFormat: 'm3u8' };
+  }
+  return transport;
+}
+
+async function loadXtreamSecret(
+  secrets: SecretStore,
+  sourceId: string,
+): Promise<XtreamSecret | undefined> {
+  const raw = await secrets.get(secretKey(sourceId, 'xtream')).catch(() => undefined);
+  if (raw === undefined) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as { server?: unknown; username?: unknown; password?: unknown };
+    if (
+      typeof parsed.server === 'string' &&
+      typeof parsed.username === 'string' &&
+      typeof parsed.password === 'string'
+    ) {
+      return { server: parsed.server, username: parsed.username, password: parsed.password };
+    }
+  } catch {
+    // Malformed secret JSON falls through to undefined
+  }
+  return undefined;
+}
+
+/** @internal Session cache for M3U `urlvars` resolvers and Xtream secrets, evicted on source mutations. */
+export interface PlaytimeResolverCache {
+  evict(sourceId: string): void;
+  clear(): void;
+  resolveLogos(items: ItemRow[], sourceId: string): Promise<ItemRow[]>;
+  resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
+}
+
+const notFound = () => err(elvError('storage', 'item-not-found'));
+
+export function createPlaytimeResolverCache(deps: {
+  db: SqlDriver;
+  secrets: SecretStore;
+  http: HttpClient;
+}): PlaytimeResolverCache {
+  const resolvers = new Map<string, Promise<StreamResolver>>();
+  const xtreamSecrets = new Map<string, Promise<XtreamSecret | undefined>>();
+
+  const resolverFor = (sourceId: string): Promise<StreamResolver> => {
+    let cached = resolvers.get(sourceId);
+    if (cached === undefined) {
+      cached = createStreamResolver(sourceId, { secrets: deps.secrets });
+      resolvers.set(sourceId, cached);
+    }
+    return cached;
+  };
+
+  const xtreamSecretFor = (sourceId: string): Promise<XtreamSecret | undefined> => {
+    let cached = xtreamSecrets.get(sourceId);
+    if (cached === undefined) {
+      cached = loadXtreamSecret(deps.secrets, sourceId).then((res) => {
+        if (res === undefined) xtreamSecrets.delete(sourceId);
+        return res;
+      });
+      xtreamSecrets.set(sourceId, cached);
+    }
+    return cached;
+  };
+
+  return {
+    evict(sourceId) {
+      resolvers.delete(sourceId);
+      xtreamSecrets.delete(sourceId);
+    },
+
+    clear() {
+      resolvers.clear();
+      xtreamSecrets.clear();
+    },
+
+    async resolveLogos(items, sourceId) {
+      if (!items.some((i) => i.logo?.includes('{{'))) return items;
+      const resolver = await resolverFor(sourceId);
+      return items.map((i) =>
+        i.logo === null ? i : { ...i, logo: resolver.resolve(i.logo) ?? null },
+      );
+    },
+
+    async resolveStream(itemKey) {
+      const play = await queryPlayable(deps.db, itemKey);
+      if (play === undefined) return notFound();
+      const source = await getSource(deps.db, play.sourceId);
+      if (source === undefined) return notFound();
+      const headers = transportHeaders(source.settings.transport);
+
+      if (play.urlTemplate === null) {
+        const creds = await xtreamSecretFor(play.sourceId);
+        if (creds === undefined) return err(elvError('storage', 'secret-missing'));
+        const id = Number(play.providerId);
+        if (play.providerId === null || !Number.isFinite(id)) return notFound();
+        const transport = effectiveXtreamTransport(source);
+        const client = createXtreamClient({
+          http: deps.http,
+          server: creds.server,
+          username: creds.username,
+          password: creds.password,
+          ...(transport === undefined ? {} : { transport }),
+        });
+        return ok({
+          url: client.streamUrl(play.streamKind, id, play.extension ?? undefined),
+          headers,
+        });
+      }
+
+      const resolver = await resolverFor(play.sourceId);
+      const url = resolver.resolve(play.urlTemplate);
+      if (url === undefined) {
+        resolvers.delete(play.sourceId);
+        return err(elvError('storage', 'secret-missing'));
+      }
+      if (play.headersJson !== null) {
+        interface StoredHeadersJson {
+          userAgent?: unknown;
+          referer?: unknown;
+          other?: unknown;
+        }
+        let extra: StoredHeadersJson | null = null;
+        try {
+          const parsed: unknown = JSON.parse(play.headersJson);
+          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+            extra = parsed as StoredHeadersJson;
+          }
+        } catch {
+          extra = null;
+        }
+        if (extra !== null) {
+          if (
+            typeof extra.other === 'object' &&
+            extra.other !== null &&
+            !Array.isArray(extra.other)
+          ) {
+            for (const [k, v] of Object.entries(extra.other as Record<string, unknown>)) {
+              if (typeof v !== 'string') continue;
+              const resolved = resolver.resolve(v);
+              if (resolved === undefined) {
+                resolvers.delete(play.sourceId);
+                return err(elvError('storage', 'secret-missing'));
+              }
+              const cleanName = sanitizeHeaderName(k.toLowerCase());
+              const cleanValue = sanitizeHeaderValue(resolved);
+              if (cleanName !== undefined && cleanValue.length > 0) {
+                headers[cleanName] = cleanValue;
+              }
+            }
+          }
+          if (typeof extra.userAgent === 'string') {
+            const ua = sanitizeHeaderValue(extra.userAgent);
+            if (ua.length > 0) headers['user-agent'] = ua;
+          }
+          if (typeof extra.referer === 'string') {
+            const referer = resolver.resolve(extra.referer);
+            if (referer === undefined) {
+              resolvers.delete(play.sourceId);
+              return err(elvError('storage', 'secret-missing'));
+            }
+            const cleanRef = sanitizeHeaderValue(referer);
+            if (cleanRef.length > 0) headers.referer = cleanRef;
+          }
+        }
+      }
+      return ok({ url, headers });
     },
   };
 }

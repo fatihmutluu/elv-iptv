@@ -13,25 +13,25 @@ import { type M3uEntry, scanM3u } from '@elv/sources';
 import { foldText } from './fold';
 import { checkAbort, performRun, type RunCtx, Stop, unwrap } from './import-run';
 import type { ImportDeps, ImportOptions, ImportSummary } from './import-types';
-import { RuleBook } from './m3u-rules';
 import {
-  knownCredentials,
-  MAX_URLVARS_BYTES,
-  placeholderNames,
-  SAMPLE_SIZE,
-  utf8ByteLength,
-  VarBook,
-} from './m3u-templating';
+  createM3uImportState,
+  finishM3uRun,
+  type M3uBrowseKind,
+  M3uEntryGate,
+  type M3uImportState,
+  type StagedM3u,
+} from './m3u-gate';
+import { entryHeaders, templated } from './m3u-headers';
+import { MAX_URLVARS_BYTES, SAMPLE_SIZE } from './m3u-templating';
 import {
   getSource,
-  guideSecret,
   type SourceRecord,
   type SourceSettings,
   secretKey,
   updateSourceSettings,
 } from './sources';
 import { readUrlVars } from './stream-resolver';
-import { hostOf, keyTemplate, type SegmentRule, toTemplate, type UrlVars } from './templates';
+import { keyTemplate, type UrlVars } from './templates';
 import { writeCategories, writePlacements } from './writers';
 import {
   type M3uLiveRow,
@@ -43,28 +43,8 @@ import {
   writeM3uSeries,
 } from './writers-m3u';
 
-type Kind = 'live' | 'movie' | 'series';
-
 const REQUEST_TIMEOUT_MS = 60_000;
 const UNGROUPED = 'Ungrouped';
-const SECRET_HEADERS = new Set([
-  'authorization',
-  'proxy-authorization',
-  'cookie',
-  'x-api-key',
-  'x-auth-token',
-]);
-
-interface State {
-  settings: SourceSettings;
-  rules: RuleBook;
-  known: { username?: string; password?: string };
-  book: VarBook;
-  categories: Record<Kind, Map<string, number>>;
-  positions: Map<string, number>;
-  placedSeries: Set<string>;
-  written: Record<'live' | 'movies' | 'episodes' | 'series', number>;
-}
 
 async function discard(body: HttpResponse['body']): Promise<void> {
   try {
@@ -96,83 +76,16 @@ async function openPlaylist(
   throw new Stop(httpStatusError(status));
 }
 
-function collectSampleUrls(sample: readonly M3uEntry[]): { url: string; role: string }[] {
-  const out: { url: string; role: string }[] = [];
-  for (const e of sample) {
-    out.push({ url: e.url, role: 'stream' });
-    if (e.tvgLogo !== undefined) out.push({ url: e.tvgLogo, role: 'logo' });
-    if (e.headers.referer !== undefined) out.push({ url: e.headers.referer, role: 'referer' });
-    for (const v of Object.values(e.headers.other)) {
-      if (hostOf(v) !== undefined) out.push({ url: v, role: 'other' });
-    }
-  }
-  return out;
-}
-
-function holdEntry(rules: RuleBook, entry: M3uEntry): boolean {
-  let wait = rules.hold(entry.url, 'stream');
-  if (entry.tvgLogo !== undefined && rules.hold(entry.tvgLogo, 'logo')) wait = true;
-  if (entry.headers.referer !== undefined && rules.hold(entry.headers.referer, 'referer')) {
-    wait = true;
-  }
-  for (const v of Object.values(entry.headers.other)) {
-    if (hostOf(v) !== undefined && rules.hold(v, 'other')) wait = true;
-  }
-  return wait;
-}
-
-function start(source: SourceRecord, playlistUrl: string, sample: readonly M3uEntry[]): State {
-  const rules = new RuleBook(source.settings.segmentRules);
-  rules.startEntries(collectSampleUrls(sample));
-  return {
-    settings: { ...source.settings },
-    rules,
-    known: knownCredentials(playlistUrl),
-    book: new VarBook(),
-    categories: { live: new Map(), movie: new Map(), series: new Map() },
-    positions: new Map(),
-    placedSeries: new Set(),
-    written: { live: 0, movies: 0, episodes: 0, series: 0 },
-  };
-}
-
-function templated(st: State, url: string): string {
-  return st.book.absorb(toTemplate(url, st.rules.rules, st.known));
-}
-
-function entryHeaders(st: State, entry: M3uEntry): string | null {
-  const headers: { userAgent?: string; referer?: string; other?: Record<string, string> } = {};
-  if (entry.headers.userAgent !== undefined) headers.userAgent = entry.headers.userAgent;
-  if (entry.headers.referer !== undefined) headers.referer = templated(st, entry.headers.referer);
-  const otherKeys = Object.keys(entry.headers.other);
-  if (otherKeys.length > 0) {
-    const other: Record<string, string> = {};
-    for (const key of otherKeys) {
-      const val = entry.headers.other[key] as string;
-      if (SECRET_HEADERS.has(key)) {
-        const name = `h:${key}`;
-        other[key] = st.book.absorb({ template: `{{${name}}}`, vars: { [name]: val } });
-      } else if (hostOf(val) !== undefined) {
-        other[key] = templated(st, val);
-      } else {
-        other[key] = val.replace(/\{\{/g, '{{(}}');
-      }
-    }
-    headers.other = other;
-  }
-  return Object.keys(headers).length === 0 ? null : JSON.stringify(headers);
-}
-
 const groupsOf = (entry: M3uEntry): readonly string[] =>
   entry.groups.length === 0 ? [UNGROUPED] : entry.groups;
 
 function place(
-  st: State,
-  kind: Kind,
+  st: M3uImportState,
+  kind: M3uBrowseKind,
   key: string,
   groups: readonly string[],
-  fresh: Map<Kind, string[]>,
-  links: Record<Kind, [string, string, number][]>,
+  fresh: Map<M3uBrowseKind, string[]>,
+  links: Record<M3uBrowseKind, [string, string, number][]>,
 ): void {
   const known = st.categories[kind];
   for (const group of groups) {
@@ -192,14 +105,22 @@ function place(
   }
 }
 
-async function processBatch(c: RunCtx, st: State, entries: readonly M3uEntry[]): Promise<void> {
+async function processBatch(
+  c: RunCtx,
+  st: M3uImportState,
+  entries: readonly M3uEntry[],
+): Promise<void> {
   const vod = st.settings.vodPlaylist === true;
   const live: M3uLiveRow[] = [];
   const movies: M3uRow[] = [];
   const episodes: (M3uRow & { seriesKey: string })[] = [];
   const series = new Map<string, string>();
-  const fresh = new Map<Kind, string[]>();
-  const links: Record<Kind, [string, string, number][]> = { live: [], movie: [], series: [] };
+  const fresh = new Map<M3uBrowseKind, string[]>();
+  const links: Record<M3uBrowseKind, [string, string, number][]> = {
+    live: [],
+    movie: [],
+    series: [],
+  };
   for (const entry of entries) {
     const template = templated(st, entry.url);
     const row: M3uRow = {
@@ -271,77 +192,7 @@ async function processBatch(c: RunCtx, st: State, entries: readonly M3uEntry[]):
   await c.deps.scheduler.yieldNow();
 }
 
-/** Settings and secret values a successful run commits together with its `ok` transition. */
-interface Staged {
-  rules: SegmentRule[];
-  discovered: string[] | undefined;
-  vars: UrlVars;
-}
-
-function finish(c: RunCtx, st: State, oldVars: UrlVars, guideUrls: readonly string[]): Staged {
-  const own = st.settings.guideUrl;
-  const vars: UrlVars = {};
-  for (const [name, value] of Object.entries(st.book.vars)) {
-    if (!name.startsWith('g:')) vars[name] = value;
-  }
-  for (const name of own === undefined ? [] : placeholderNames(own)) {
-    if (Object.hasOwn(oldVars, name)) vars[name] = oldVars[name] as string;
-  }
-  let discovered: string[] | undefined;
-  if (own === undefined && guideUrls.length > 0) {
-    discovered = guideUrls.map((url, i) => {
-      const g = guideSecret(url, `d${i}`);
-      Object.assign(vars, g.vars);
-      return g.template;
-    });
-  }
-  if (utf8ByteLength(JSON.stringify(vars)) > MAX_URLVARS_BYTES) {
-    throw new Stop(elvError('source-format', 'urlvars-too-large'));
-  }
-  c.counts.live = st.written.live;
-  c.counts.movies = st.written.movies;
-  c.counts.series = st.written.series;
-  c.counts.episodes = st.written.episodes;
-  c.counts.categories =
-    st.categories.live.size + st.categories.movie.size + st.categories.series.size;
-  return { rules: st.rules.final(), discovered, vars };
-}
-
-/**
- * Feeds every entry through the rule book: an entry whose host still collects URLs is held back together with
- * every later entry (order is kept), until those hosts are judged or {@link SAMPLE_SIZE} entries wait.
- */
-class Gate {
-  private readonly held: M3uEntry[] = [];
-  private readonly st: State;
-
-  constructor(st: State) {
-    this.st = st;
-  }
-
-  /** Entries that may be written now, in playlist order. */
-  admit(entries: readonly M3uEntry[]): M3uEntry[] {
-    const out: M3uEntry[] = [];
-    for (const entry of entries) {
-      const wait = holdEntry(this.st.rules, entry);
-      if (this.held.length === 0 && !wait) {
-        out.push(entry);
-        continue;
-      }
-      this.held.push(entry);
-      if (this.st.rules.ready || this.held.length >= SAMPLE_SIZE) out.push(...this.release());
-    }
-    return out;
-  }
-
-  /** Judges the waiting hosts and returns every held entry. */
-  release(): M3uEntry[] {
-    this.st.rules.settle();
-    return this.held.splice(0);
-  }
-}
-
-async function write(c: RunCtx, st: State, entries: readonly M3uEntry[]): Promise<void> {
+async function write(c: RunCtx, st: M3uImportState, entries: readonly M3uEntry[]): Promise<void> {
   for (let i = 0; i < entries.length; i += c.batchSize) {
     checkAbort(c);
     await processBatch(c, st, entries.slice(i, i + c.batchSize));
@@ -353,12 +204,12 @@ async function execute(
   source: SourceRecord,
   playlistUrl: string,
   oldVars: UrlVars,
-): Promise<Staged> {
+): Promise<StagedM3u> {
   const body = await openPlaylist(source, playlistUrl, c.deps, c.signal);
   const scan = scanM3u(body, { batchSize: c.batchSize, baseUrl: playlistUrl });
   const buffered: M3uEntry[] = [];
-  let st: State | undefined;
-  let gate: Gate | undefined;
+  let st: M3uImportState | undefined;
+  let gate: M3uEntryGate | undefined;
   let total = 0;
   let guideUrls: string[] = [];
   let present = false;
@@ -383,8 +234,8 @@ async function execute(
         if (batch.done && total === 0 && !present) {
           throw new Stop(elvError('source-format', 'not-a-playlist'));
         }
-        st = start(source, playlistUrl, buffered.slice(0, SAMPLE_SIZE));
-        gate = new Gate(st);
+        st = createM3uImportState(source, playlistUrl, buffered.slice(0, SAMPLE_SIZE));
+        gate = new M3uEntryGate(st);
         await write(c, st, gate.admit(buffered));
         buffered.length = 0;
       } else {
@@ -396,15 +247,11 @@ async function execute(
   }
   if (st === undefined || gate === undefined) throw new Stop(elvError('network', 'stream-failed'));
   await write(c, st, gate.release());
-  return finish(c, st, oldVars, guideUrls);
+  return finishM3uRun(c, st, oldVars, guideUrls);
 }
 
 /**
- * Imports an M3U source: the playlist streams through the scanner into the catalog tables. Every entry URL is
- * stored as a credential-free template (segment rules, credential query parameters, the `get.php` credentials);
- * the values go to `source.<id>.urlvars`. Entries become live channels, movies or episodes by `kindHint`
- * (all movies for a `vodPlaylist`); episodes hang under a synthetic series per `group-title`. A body with no
- * `#EXTM3U` and no entries yields `source-format/not-a-playlist`.
+ * Imports an M3U source: streams entries into catalog tables with credential-free templates and `urlvars` secrets.
  */
 export async function importM3u(
   source: SourceRecord,
@@ -417,7 +264,7 @@ export async function importM3u(
   if (playlistUrl === undefined) return err(elvError('storage', 'secret-missing'));
   const urlvarsKey = secretKey(source.id, 'urlvars');
   const oldVars = await readUrlVars(deps, source.id);
-  let staged: Staged | undefined;
+  let staged: StagedM3u | undefined;
   let secretsStaged = false;
   return performRun(source, deps, opts, {
     execute: async (c) => {
