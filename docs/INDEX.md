@@ -4,6 +4,7 @@
 - [CONTRIBUTING](../CONTRIBUTING.md) setup, TDD + AI agent workflow, CLA, safety rules for outside contributions.
 - [AGENTS.md](../AGENTS.md) rules for every agent and contributor (paired with [CLAUDE.md](../CLAUDE.md) and [GEMINI.md](../GEMINI.md)).
 - [Foundation spec](superpowers/specs/2026-11-13-foundation-design.md) binding product, stack and architecture decisions.
+- [UI/UX design philosophy](design/UI_UX_PHILOSOPHY.md) binding visual language ("Cinema Quietude"), feature placement matrix, Portrait/Landscape rules, dynamic theme tokens, motion grammar, and pre-merge UI checklist.
 - [Stream simulator spec](superpowers/specs/2026-11-13-stream-simulator-design.md) the local IPTV provider simulator (`pnpm sim`).
 - [Simulator reference](simulator.md) routes, accounts, faults, runtime fault rules and recipes of `pnpm sim`.
 - [Source scanners spec](superpowers/specs/2026-11-13-source-scanners-design.md) M3U and XMLTV scanners, the Xtream client and content keys.

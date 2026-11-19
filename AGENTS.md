@@ -51,6 +51,7 @@ Users bring their own M3U or Xtream Codes source; the project ships no content. 
 
 ## Pointers
 - `docs/INDEX.md` maps all documentation. Spec: `docs/superpowers/specs/2026-11-13-foundation-design.md`.
+- **UI/UX Design Philosophy (mandatory for every UI or feature change):** `docs/design/UI_UX_PHILOSOPHY.md` — read before adding or styling any screen, component, navigation entry, or player control so every feature ships aligned with our design language and placement rules.
 - Decisions: `docs/adr/`. Lessons: `docs/learned/README.md`.
 - Each package and app has its own `AGENTS.md`; read it before changing that folder.
 - Contribution rules: `CONTRIBUTING.md`. Governance: `LICENSE`, `CLA.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`.
