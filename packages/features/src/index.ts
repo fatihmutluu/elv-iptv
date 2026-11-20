@@ -10,5 +10,6 @@ export {
 export type { LiveChannelPlaylist, PlayableEntry, PlayTarget } from './ports/play-target';
 export { noopPlaybackGuard, type PlaybackGuard } from './ports/playback-guard';
 export type { OpenVideoEngine, VideoHost, VideoSurfaceProps } from './ports/video-host';
+export * from './settings';
 export * from './shell';
 export * from './sources';

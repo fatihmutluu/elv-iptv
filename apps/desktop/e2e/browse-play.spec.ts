@@ -132,7 +132,21 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
     await window.getByTestId('player-back').click();
     await expect(window.getByTestId('series-episodes-list-row-0')).toBeVisible();
 
-    await window.getByTestId('nav-tab-sources').click();
+    await window.getByTestId('nav-tab-settings').click();
+    await expect(window.getByTestId('settings-screen')).toBeVisible();
+    await window.getByTestId('settings-tab-appearance').click();
+    await window.getByTestId('settings-lang-tr').click();
+    await expect(window.getByTestId('settings-tab-appearance')).toHaveText('Görünüm');
+    await expect(window.getByTestId('nav-tab-live')).toHaveText('Canlı');
+    await window.getByTestId('settings-lang-en').click();
+    await expect(window.getByTestId('settings-tab-appearance')).toHaveText('Appearance');
+    await window.getByTestId('settings-theme-highContrast').click();
+    await expect(window.getByTestId('settings-theme-highContrast')).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+
+    await window.getByTestId('settings-tab-sources').click();
     await expect(window.getByTestId('sources-screen')).toBeVisible();
     await window.locator('[data-testid^="source-remove-"]').first().click();
     await expect(window.getByTestId('sources-empty')).toBeVisible({ timeout: 10_000 });

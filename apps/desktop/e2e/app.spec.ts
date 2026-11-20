@@ -20,7 +20,7 @@ test('opens a window titled ELV IPTV that mounts SourcesScreen on desktop', asyn
     );
     expect(hasNodeRequire).toBe(false);
 
-    await window.getByTestId('nav-tab-notices').click();
+    await window.getByTestId('settings-tab-licenses').click();
     await expect(window.getByTestId('notices-screen')).toBeVisible();
     await expect(window.getByTestId('notices-item-desktop-libmpv')).toBeVisible();
     await expect(window.getByTestId('notices-detail-name')).toContainText('AetherEngine');

@@ -211,6 +211,102 @@ describe('@elv/i18n', () => {
     expect(tr.t('player.hint.connectionLimit')).toContain('Tekrar dene');
   });
 
+  it('localizes settings, appearance, theme presets, and about strings in English and Turkish', () => {
+    const en = createAppI18n('en');
+    const tr = createAppI18n('tr');
+    const cases: ReadonlyArray<readonly [MessageId, string, string]> = [
+      ['nav.settings', 'Settings', 'Ayarlar'],
+      ['settings.title', 'Settings', 'Ayarlar'],
+      [
+        'settings.subtitle',
+        'Customize appearance, manage sources, and view open-source licenses.',
+        'Görünümü özelleştirin, kaynakları yönetin ve açık kaynak lisanslarını inceleyin.',
+      ],
+      ['settings.section.appearance', 'Appearance', 'Görünüm'],
+      ['settings.section.sources', 'Sources', 'Kaynaklar'],
+      ['settings.section.licenses', 'About & Licenses', 'Hakkında ve Lisanslar'],
+      ['settings.language.label', 'Language', 'Dil'],
+      [
+        'settings.language.description',
+        'Applies immediately across all screens without restarting.',
+        'Yeniden başlatmadan tüm ekranlarda anında uygulanır.',
+      ],
+      ['settings.language.system', 'System', 'Sistem'],
+      ['settings.language.tr', 'Türkçe', 'Türkçe'],
+      ['settings.language.en', 'English', 'English'],
+      ['settings.theme.label', 'Theme', 'Tema'],
+      [
+        'settings.theme.description',
+        'Dynamic Cinema Quietude palettes including WCAG AAA High Contrast.',
+        'WCAG AAA Yüksek Kontrast dahil dinamik Cinema Quietude paletleri.',
+      ],
+      ['settings.theme.obsidianCrimson.label', 'Obsidian Crimson', 'Obsidyen Kızıl'],
+      [
+        'settings.theme.obsidianCrimson.desc',
+        'Pure cinema black with crimson accents',
+        'Saf sinema siyahı ve kızıl vurgular',
+      ],
+      ['settings.theme.abyssalSapphire.label', 'Abyssal Sapphire', 'Derin Safir'],
+      [
+        'settings.theme.abyssalSapphire.desc',
+        'Midnight theater canvas with crisp sapphire',
+        'Gece yarısı tonları ve net safir vurgu',
+      ],
+      ['settings.theme.theaterAmber.label', 'Theater Amber', 'Sinema Kehribar'],
+      [
+        'settings.theme.theaterAmber.desc',
+        'Warm tungsten dark with amber highlight',
+        'Sıcak tungsten koyu ve kehribar vurgu',
+      ],
+      ['settings.theme.velvetViolet.label', 'Velvet Violet', 'Kadife Mor'],
+      [
+        'settings.theme.velvetViolet.desc',
+        'Low-key slate plum with orchid signal',
+        'Koyu mürdüm ve zarif orkide vurgusu',
+      ],
+      ['settings.theme.pitchEmerald.label', 'Pitch Emerald', 'Zümrüt Yeşil'],
+      [
+        'settings.theme.pitchEmerald.desc',
+        'Carbon pitch dark with broadcast emerald',
+        'Karbon koyusu ve yayın zümrüt vurgusu',
+      ],
+      ['settings.theme.highContrast.label', 'High Contrast (AAA)', 'Yüksek Kontrast (AAA)'],
+      [
+        'settings.theme.highContrast.desc',
+        'Pure black with WCAG AAA text and focus contrast',
+        'Saf siyah ve WCAG AAA metin/odak kontrastı',
+      ],
+      ['settings.fontScale.label', 'Text size', 'Yazı boyutu'],
+      [
+        'settings.fontScale.description',
+        'Scales interface typography comfortably from 90% to 120%.',
+        'Arayüz yazı boyutunu %90 ile %120 arasında ölçekler.',
+      ],
+      ['settings.reduceMotion.label', 'Reduce motion', 'Hareketi azalt'],
+      [
+        'settings.reduceMotion.description',
+        'Disables focus zoom and interface transitions.',
+        'Odak yakınlaştırmasını ve arayüz geçişlerini kapatır.',
+      ],
+      ['settings.reset', 'Reset appearance to defaults', 'Görünümü varsayılana sıfırla'],
+      ['settings.about.title', 'About ELV IPTV', 'ELV IPTV Hakkında'],
+      [
+        'settings.about.licenseBadge',
+        'GPL-3.0-only · LGPL media engines',
+        'GPL-3.0-only · LGPL medya motorları',
+      ],
+      [
+        'settings.about.statement',
+        'ELV IPTV is an open-source player and ships no media content. Native playback engines dynamically link LGPL libraries. Provider credentials remain encrypted on-device and never enter the catalog database.',
+        'ELV IPTV açık kaynaklı bir oynatıcıdır ve içerik sunmaz. Yerel oynatma motorları LGPL kütüphanelerini dinamik olarak bağlar. Sağlayıcı bilgileri cihazda şifreli saklanır ve katalog veritabanına yazılmaz.',
+      ],
+    ];
+    for (const [id, expectedEn, expectedTr] of cases) {
+      expect(en.t(id)).toBe(expectedEn);
+      expect(tr.t(id)).toBe(expectedTr);
+    }
+  });
+
   it('localizes VOD transport controls, track picker strings, and common track language codes', () => {
     const en = createAppI18n('en');
     expect(en.t('player.play')).toBe('Play');

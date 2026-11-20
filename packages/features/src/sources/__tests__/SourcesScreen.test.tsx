@@ -2,13 +2,16 @@ import { createAppI18n } from '@elv/i18n';
 import {
   type AndroidKeyEvent,
   type AndroidKeySource,
+  buildTheme,
   type FormFactor,
   FormFactorProvider,
   I18nProvider,
   RemoteKeysProvider,
+  ThemeProvider,
+  ViewportProvider,
 } from '@elv/ui-kit';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { BackHandler, Platform } from 'react-native';
+import { BackHandler, Platform, StyleSheet } from 'react-native';
 import type { PlaybackGuard } from '../../ports/playback-guard';
 import { SourcesScreen } from '../SourcesScreen';
 import { openTestCatalog } from './sources-test-harness';
@@ -307,6 +310,12 @@ describe('SourcesScreen (#71)', () => {
       expect(screen.getByTestId('sources-mode-xtream').props.accessibilityState?.selected).toBe(
         true,
       );
+      // Offset outer focus ring renders on tvFocused active mode button (visible over ctaBg)
+      const modeRingStyle = StyleSheet.flatten(
+        screen.getByTestId('sources-mode-xtream-focus-ring').props.style,
+      );
+      expect(modeRingStyle.top).toBe(-4);
+      expect(modeRingStyle.borderColor).toBe(buildTheme().colors.focusRingColor);
 
       // Move down to sources-mode-m3u (1) -> sources-input-name (2) -> sources-input-server (3)
       await act(async () => {
@@ -363,6 +372,56 @@ describe('SourcesScreen (#71)', () => {
         screen.getByTestId('sources-focus-input-username').props.accessibilityState?.selected,
       ).toBe(true);
       await view.unmount();
+    } finally {
+      await env.cleanup();
+    }
+  });
+
+  it('supports embedded mode (transparent canvas, no duplicate brand label, compact padding) and dynamic highContrast theme tokens', async () => {
+    const env = await openTestCatalog();
+    const hcTheme = buildTheme({ preset: 'highContrast' });
+    try {
+      const standalone = await render(
+        <ThemeProvider preset="highContrast">
+          <ViewportProvider value={{ formFactor: 'phone', inputModality: 'touch' }}>
+            <I18nProvider i18n={createAppI18n('en')}>
+              <SourcesScreen catalog={env.catalog} />
+            </I18nProvider>
+          </ViewportProvider>
+        </ThemeProvider>,
+      );
+
+      expect(screen.getByText('ELV IPTV')).toBeTruthy();
+      const standaloneStyle = StyleSheet.flatten(screen.getByTestId('sources-screen').props.style);
+      expect(standaloneStyle.backgroundColor).toBe(hcTheme.colors.bgCanvas);
+
+      const submitStyle = StyleSheet.flatten(
+        typeof screen.getByTestId('sources-submit').props.style === 'function'
+          ? screen.getByTestId('sources-submit').props.style({ pressed: false })
+          : screen.getByTestId('sources-submit').props.style,
+      );
+      expect(submitStyle.backgroundColor).toBe(hcTheme.colors.ctaBg);
+      expect(submitStyle.minHeight).toBeGreaterThanOrEqual(40);
+      await standalone.unmount();
+
+      const embedded = await render(
+        <ThemeProvider preset="highContrast">
+          <ViewportProvider value={{ formFactor: 'desktop', inputModality: 'pointer' }}>
+            <I18nProvider i18n={createAppI18n('en')}>
+              <SourcesScreen catalog={env.catalog} embedded />
+            </I18nProvider>
+          </ViewportProvider>
+        </ThemeProvider>,
+      );
+
+      expect(screen.queryByText('ELV IPTV')).toBeNull();
+      const embeddedStyle = StyleSheet.flatten(screen.getByTestId('sources-screen').props.style);
+      expect(embeddedStyle.backgroundColor).toBe('transparent');
+      const embeddedContent = StyleSheet.flatten(
+        screen.getByTestId('sources-screen').props.contentContainerStyle,
+      );
+      expect(embeddedContent.padding).toBe(0);
+      await embedded.unmount();
     } finally {
       await env.cleanup();
     }

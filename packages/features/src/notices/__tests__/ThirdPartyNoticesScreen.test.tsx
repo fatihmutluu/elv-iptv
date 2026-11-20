@@ -2,12 +2,15 @@ import { createAppI18n } from '@elv/i18n';
 import {
   type AndroidKeyEvent,
   type AndroidKeySource,
+  buildTheme,
   FormFactorProvider,
   I18nProvider,
   RemoteKeysProvider,
+  ThemeProvider,
+  ViewportProvider,
 } from '@elv/ui-kit';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
-import { Platform } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 import { THIRD_PARTY_NOTICES } from '../notices-data';
 import { ThirdPartyNoticesScreen } from '../ThirdPartyNoticesScreen';
 
@@ -300,5 +303,66 @@ describe('ThirdPartyNoticesScreen', () => {
     expect(screen.getByTestId('notices-detail')).toBeTruthy();
     expect(screen.getByTestId('notices-detail-modification')).toHaveTextContent(/Değiştirilmemiş/);
     await tabletView.unmount();
+  });
+
+  it('supports embedded mode, dynamic highContrast theme tokens, TvFocusAnchor, and >=40dp touch targets', async () => {
+    const hcTheme = buildTheme({ preset: 'highContrast' });
+    const standalone = await render(
+      <ThemeProvider preset="highContrast">
+        <ViewportProvider value={{ formFactor: 'phone', inputModality: 'touch' }}>
+          <I18nProvider i18n={createAppI18n('en')}>
+            <ThirdPartyNoticesScreen />
+          </I18nProvider>
+        </ViewportProvider>
+      </ThemeProvider>,
+    );
+
+    const rootStyle = StyleSheet.flatten(screen.getByTestId('notices-screen').props.style);
+    expect(rootStyle.backgroundColor).toBe(hcTheme.colors.bgCanvas);
+
+    await fireEvent.press(screen.getByTestId('notices-list-row-0'));
+    const backBtn = screen.getByTestId('notices-back-to-list');
+    const backStyle = StyleSheet.flatten(
+      typeof backBtn.props.style === 'function'
+        ? backBtn.props.style({ pressed: false })
+        : backBtn.props.style,
+    );
+    expect(backStyle.minHeight).toBeGreaterThanOrEqual(40);
+    expect(backStyle.minWidth).toBeGreaterThanOrEqual(40);
+    await standalone.unmount();
+
+    const embedded = await render(
+      <ThemeProvider preset="highContrast">
+        <ViewportProvider value={{ formFactor: 'tv', inputModality: 'tv' }}>
+          <I18nProvider i18n={createAppI18n('en')}>
+            <ThirdPartyNoticesScreen embedded isActiveScope />
+          </I18nProvider>
+        </ViewportProvider>
+      </ThemeProvider>,
+    );
+
+    const embeddedStyle = StyleSheet.flatten(screen.getByTestId('notices-screen').props.style);
+    expect(embeddedStyle.backgroundColor).toBe('transparent');
+    expect(embeddedStyle.padding).toBe(0);
+    expect(screen.queryByTestId('notices-lgpl-summary')).toBeNull();
+    const listPaneStyle = StyleSheet.flatten(screen.getByTestId('notices-list-pane').props.style);
+    expect(listPaneStyle.width).toBe(270);
+    const anchor = screen.getByTestId('notices-tv-focus-anchor', { includeHiddenElements: true });
+    expect(anchor.props.focusable).toBe(true);
+    expect(anchor.props.accessibilityElementsHidden).toBe(true);
+    await embedded.unmount();
+
+    const embeddedWide = await render(
+      <ThemeProvider preset="highContrast">
+        <ViewportProvider value={{ formFactor: 'desktop', inputModality: 'pointer' }}>
+          <I18nProvider i18n={createAppI18n('en')}>
+            <ThirdPartyNoticesScreen embedded />
+          </I18nProvider>
+        </ViewportProvider>
+      </ThemeProvider>,
+    );
+    const wideListStyle = StyleSheet.flatten(screen.getByTestId('notices-list-pane').props.style);
+    expect(wideListStyle.width).toBe(240);
+    await embeddedWide.unmount();
   });
 });

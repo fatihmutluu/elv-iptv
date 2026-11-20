@@ -1,5 +1,16 @@
 import { createFocusStore, type FocusStore, type KeyEvent } from '@elv/focus-core';
-import { ElvList, type ListSource, useFormFactor, useI18n, useKeyInterpreter } from '@elv/ui-kit';
+import {
+  ElvList,
+  TABULAR_NUMS_STYLE,
+  TvFocusAnchor,
+  useFormFactor,
+  useI18n,
+  useKeyInterpreter,
+  useTheme,
+  useViewport,
+  webCursorPointer,
+  webTransition,
+} from '@elv/ui-kit';
 import { type ReactElement, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   type LayoutChangeEvent,
@@ -10,11 +21,9 @@ import {
 } from 'react-native';
 import { NoticesDetailPane } from './NoticesDetailPane';
 import { THIRD_PARTY_NOTICES, type ThirdPartyNotice } from './notices-data';
+import { createNoticesListSource, NOTICES_LIST_ID, syncNoticesScopeActive } from './notices-scope';
 import { noticesStyles as styles } from './notices-styles';
 
-const NOTICES_LIST_ID = 'notices-list';
-const PARKED_SCOPE_ID = '__notices_parked__';
-const PARKED_LIST_ID = '__notices_parked_list__';
 const VISIBLE_ROWS_DEFAULT = 10;
 const VISIBLE_ROWS_PHONE = 6;
 const ROW_HEIGHT_TV = 60;
@@ -37,44 +46,13 @@ export interface ThirdPartyNoticesScreenProps {
   isActiveScope?: boolean;
   /** Optional observer notified with the clamped Y offset when TV D-pad step-scrolls the detail pane. */
   onDetailStepScroll?: (offsetY: number) => void;
-}
-
-function createNoticesListSource(items: readonly ThirdPartyNotice[]): ListSource<ThirdPartyNotice> {
-  return {
-    count: () => items.length,
-    get: (index) => (index >= 0 && index < items.length ? items[index] : undefined),
-    prefetch: () => undefined,
-    onChange: () => () => undefined,
-  };
-}
-
-function syncNoticesScopeActive(store: FocusStore, isActiveScope: boolean): void {
-  const scopes = store.getState().scopes;
-  const isParked = scopes[scopes.length - 1]?.id === PARKED_SCOPE_ID;
-  if (!isActiveScope) {
-    if (!isParked) {
-      store.pushScope(
-        PARKED_SCOPE_ID,
-        [{ id: PARKED_LIST_ID, count: 0, index: 0, orientation: 'vertical', pageSize: 1 }],
-        PARKED_LIST_ID,
-      );
-    }
-    return;
-  }
-  if (isParked) store.popScope();
-  if (!store.isActive(NOTICES_LIST_ID)) store.activate(NOTICES_LIST_ID);
+  /** When true, omits outer canvas background and padding for embedding inside SettingsScreen. */
+  embedded?: boolean;
 }
 
 function NoticesTvKeyBridge({ onEvent }: { onEvent: (event: KeyEvent) => void }): ReactElement {
   useKeyInterpreter(onEvent);
-  return (
-    <View
-      testID="notices-tv-focus-anchor"
-      focusable
-      hasTVPreferredFocus
-      style={styles.tvFocusAnchor}
-    />
-  );
+  return <TvFocusAnchor testID="notices-tv-focus-anchor" />;
 }
 
 /**
@@ -88,9 +66,12 @@ export function ThirdPartyNoticesScreen({
   onFocusTopNav,
   isActiveScope = true,
   onDetailStepScroll,
+  embedded = false,
 }: ThirdPartyNoticesScreenProps): ReactElement {
   const formFactor = useFormFactor();
   const i18n = useI18n();
+  const theme = useTheme();
+  const viewport = useViewport();
   const isTv = formFactor === 'tv';
   const isPhone = formFactor === 'phone';
   const rowHeight = isTv ? ROW_HEIGHT_TV : ROW_HEIGHT_POINTER;
@@ -263,18 +244,30 @@ export function ThirdPartyNoticesScreen({
     [],
   );
 
+  const rowTransition = webTransition(theme, 'background-color');
+  const rowCursor = webCursorPointer();
+
   const renderRow = useCallback(
     (item: ThirdPartyNotice | undefined, active: boolean) => (
       <View
         testID={item !== undefined ? `notices-item-${item.id}` : undefined}
-        style={[styles.row, active ? styles.rowActive : null]}
+        style={[
+          styles.row,
+          {
+            backgroundColor: active ? theme.colors.accentTint : 'transparent',
+            borderLeftWidth: active ? 3 : 0,
+            borderLeftColor: active ? theme.colors.accent : 'transparent',
+          },
+          rowTransition,
+          rowCursor,
+        ]}
       >
         <Text
           numberOfLines={1}
           style={[
-            styles.rowTitle,
+            theme.typography.title,
+            { color: active ? theme.colors.textPrimary : theme.colors.textSecondary },
             isTv ? styles.rowTitleTv : null,
-            active ? styles.rowTitleActive : null,
           ]}
         >
           {item?.name ?? ''}
@@ -282,38 +275,66 @@ export function ThirdPartyNoticesScreen({
         <Text
           numberOfLines={1}
           style={[
-            styles.rowMeta,
+            theme.typography.caption,
+            TABULAR_NUMS_STYLE,
+            { color: active ? theme.colors.textSecondary : theme.colors.textMuted },
             isTv ? styles.rowMetaTv : null,
-            active ? styles.rowMetaActive : null,
           ]}
         >
           {item !== undefined ? `${item.version} · ${item.license}` : ''}
         </Text>
       </View>
     ),
-    [isTv],
+    [isTv, theme, rowTransition, rowCursor],
   );
 
   const showListPane = !isPhone || phonePane === 'list';
   const showDetailPane = !isPhone || phonePane === 'detail';
+  const basePadX = isTv ? 48 : 16;
+  const basePadY = isTv ? 20 : 16;
+  const standalonePadding = {
+    paddingTop: Math.max(basePadY, viewport.overscan.y, viewport.safeArea.top),
+    paddingBottom: Math.max(basePadY, viewport.overscan.y, viewport.safeArea.bottom),
+    paddingLeft: Math.max(basePadX, viewport.overscan.x, viewport.safeArea.left),
+    paddingRight: Math.max(basePadX, viewport.overscan.x, viewport.safeArea.right),
+  };
 
   return (
     <View
       testID="notices-screen"
       accessibilityLabel={i18n.t('notices.title')}
-      style={[styles.root, isTv ? styles.rootTv : null]}
+      style={[
+        styles.root,
+        isTv ? styles.rootTvGap : null,
+        embedded ? styles.rootEmbedded : standalonePadding,
+        { backgroundColor: embedded ? 'transparent' : theme.colors.bgCanvas },
+      ]}
     >
       {isTv && isActiveScope ? <NoticesTvKeyBridge onEvent={handleTvKey} /> : null}
 
-      <View style={styles.header}>
-        <Text style={[styles.title, isTv ? styles.titleTv : null]}>{i18n.t('notices.title')}</Text>
-        <Text
-          testID="notices-lgpl-summary"
-          style={[styles.summary, isTv ? styles.summaryTv : null]}
-        >
-          {i18n.t('notices.lgplSummary')}
-        </Text>
-      </View>
+      {!embedded ? (
+        <View style={styles.header}>
+          <Text
+            style={[
+              theme.typography.h2,
+              { color: theme.colors.textPrimary },
+              isTv ? styles.titleTv : null,
+            ]}
+          >
+            {i18n.t('notices.title')}
+          </Text>
+          <Text
+            testID="notices-lgpl-summary"
+            style={[
+              theme.typography.body,
+              { color: theme.colors.textSecondary },
+              isTv ? styles.summaryTv : null,
+            ]}
+          >
+            {i18n.t('notices.lgplSummary')}
+          </Text>
+        </View>
+      ) : null}
 
       <View style={[styles.panes, isPhone ? styles.panesPhone : styles.panesSplit]}>
         {showListPane ? (
@@ -322,7 +343,20 @@ export function ThirdPartyNoticesScreen({
             onLayout={handleListPaneLayout}
             style={[
               styles.listPane,
-              isPhone ? styles.listPanePhone : isTv ? styles.listPaneTv : styles.listPaneWide,
+              {
+                backgroundColor: theme.colors.bgSurface,
+                borderColor: theme.colors.surfaceBorder,
+                borderRadius: theme.radius.card,
+              },
+              isPhone
+                ? styles.listPanePhone
+                : isTv
+                  ? embedded
+                    ? styles.listPaneTvEmbedded
+                    : styles.listPaneTv
+                  : embedded
+                    ? styles.listPaneWideEmbedded
+                    : styles.listPaneWide,
             ]}
           >
             <ElvList
