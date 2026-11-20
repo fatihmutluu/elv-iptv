@@ -103,7 +103,12 @@ struct EngineCoreTests {
     core.play(6)
     #expect(backend.calls.last == .play)
     core.observe(.phase(.playing), serial: 1)
-    #expect(sink.events == [.state(attempt: 6, state: .playing)])
+    #expect(
+      sink.events == [
+        .state(attempt: 6, state: .playing),
+        .clock(attempt: 6, anchor: ClockAnchorOut(positionMs: 0, atMs: 1_000, rate: 1.0)),
+      ]
+    )
   }
 
   @Test("pause anchors the clock at rate 0")

@@ -38,6 +38,8 @@ final class AetherBackend: PlayerBackend {
   var readySerial = 0
   var tracksEmittedSerial = 0
   var pendingTracksSerial = 0
+  var tracksDeferredForReload = false
+  var inReloadFromState = false
   var errorReportedSerial = 0
   var loggedRouteSerial = 0
   var gateGeneration = 0
@@ -72,6 +74,7 @@ final class AetherBackend: PlayerBackend {
       let nowMs = ProcessInfo.processInfo.systemUptime * 1_000.0
       self.systemPauseUntilUptimeMs = max(self.systemPauseUntilUptimeMs, nowMs + holdWindowMs)
     }
+    _ = try? installFreshEngine()
   }
 
   func bindPlayerView(_ view: AetherPlayerView?) {
@@ -80,10 +83,15 @@ final class AetherBackend: PlayerBackend {
       engine?.unbind(view: previous)
     }
     boundPlayerView = view
-    if let view, let engine {
-      engine.videoGravity = gravity
-      engine.bind(view: view)
-      refreshSubtitleGeometry(from: engine)
+    if let view {
+      if let engine {
+        engine.videoGravity = gravity
+        engine.bind(view: view)
+        refreshSubtitleGeometry(from: engine)
+      } else {
+        // Pre-warm AetherEngine when a surface mounts so cold-start load() does not pay init cost.
+        _ = try? installFreshEngine()
+      }
     }
   }
 
@@ -237,6 +245,8 @@ final class AetherBackend: PlayerBackend {
     readySerial = 0
     tracksEmittedSerial = 0
     pendingTracksSerial = 0
+    tracksDeferredForReload = false
+    inReloadFromState = false
     errorReportedSerial = 0
     loggedRouteSerial = 0
     openedMsForSerial = nil

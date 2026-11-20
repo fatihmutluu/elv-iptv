@@ -21,6 +21,7 @@ public final class EngineCore {
   var played = false
   var stalled = false
   var seeking = false
+  var reloading = false
   var userPaused = false
   var errorReported = false
   var latchedReaderFailure: ReaderFailure?
@@ -220,6 +221,9 @@ public final class EngineCore {
         liveEdgeSeconds: liveEdgeSeconds
       )
 
+    case let .duration(durationSeconds):
+      handleDuration(durationSeconds)
+
     case let .tracks(observedTracks):
       handleTracksObservation(observedTracks)
 
@@ -282,6 +286,7 @@ public final class EngineCore {
     played = false
     stalled = false
     seeking = false
+    reloading = false
     userPaused = false
     errorReported = false
     latchedReaderFailure = nil

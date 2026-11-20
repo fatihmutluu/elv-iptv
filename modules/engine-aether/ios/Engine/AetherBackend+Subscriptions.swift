@@ -95,9 +95,11 @@ extension AetherBackend {
             self.onObservation?(.phase(.loading), serial)
           case .playing:
             self.readySerial = serial
+            self.inReloadFromState = false
             self.maybeLogRouteDiagnostics(from: target, serial: serial, phaseOverride: .playing)
             self.onObservation?(.phase(.playing), serial)
-            if self.tracksEmittedSerial != serial {
+            if self.tracksEmittedSerial != serial || self.tracksDeferredForReload {
+              self.tracksDeferredForReload = false
               self.scheduleTracksSnapshot(from: target, serial: serial)
             }
             self.refreshSubtitleGeometry(from: target)
@@ -111,9 +113,15 @@ extension AetherBackend {
               )
             }
           case .paused:
-            let nowMs = ProcessInfo.processInfo.systemUptime * 1_000.0
-            let bySystem = self.audioInterrupted || nowMs <= self.systemPauseUntilUptimeMs
-            self.onObservation?(.phase(bySystem ? .systemPaused : .paused), serial)
+            if target.state == .loading {
+              self.inReloadFromState = true
+              self.onObservation?(.phase(.loading), serial)
+            } else {
+              self.inReloadFromState = false
+              let nowMs = ProcessInfo.processInfo.systemUptime * 1_000.0
+              let bySystem = self.audioInterrupted || nowMs <= self.systemPauseUntilUptimeMs
+              self.onObservation?(.phase(bySystem ? .systemPaused : .paused), serial)
+            }
           case .seeking:
             self.onObservation?(.phase(.seeking), serial)
           case .rebuffering:
@@ -153,6 +161,31 @@ extension AetherBackend {
                   serial
                 )
               }
+            }
+          case .loading:
+            if self.readySerial == serial {
+              self.inReloadFromState = true
+              self.onObservation?(.phase(.loading), serial)
+            }
+          case .playing:
+            if self.inReloadFromState && target.playbackPhase == .playing {
+              self.inReloadFromState = false
+              self.onObservation?(.phase(.playing), serial)
+            }
+            if self.tracksDeferredForReload {
+              self.tracksDeferredForReload = false
+              self.scheduleTracksSnapshot(from: target, serial: serial)
+            }
+          case .paused:
+            if self.inReloadFromState {
+              self.inReloadFromState = false
+              let nowMs = ProcessInfo.processInfo.systemUptime * 1_000.0
+              let bySystem = self.audioInterrupted || nowMs <= self.systemPauseUntilUptimeMs
+              self.onObservation?(.phase(bySystem ? .systemPaused : .paused), serial)
+            }
+            if self.tracksDeferredForReload {
+              self.tracksDeferredForReload = false
+              self.scheduleTracksSnapshot(from: target, serial: serial)
             }
           case .ended:
             self.forwardVodDurationBeforeEnd(from: target, serial: serial)
@@ -209,13 +242,7 @@ extension AetherBackend {
           guard let self, let target, self.engineLoadSerial > 0, newDuration.isFinite, newDuration > 0, !target.isLive else {
             return
           }
-          self.emitClockSnapshot(
-            from: target,
-            positionSeconds: target.currentTime,
-            rateOverride: nil,
-            durationOverride: newDuration,
-            serial: self.engineLoadSerial
-          )
+          self.onObservation?(.duration(newDuration), self.engineLoadSerial)
         }
       }
       .store(in: &cancellables)
@@ -225,13 +252,7 @@ extension AetherBackend {
 
   private func forwardVodDurationBeforeEnd(from target: AetherEngine, serial: Int) {
     guard !target.isLive, target.duration.isFinite, target.duration > 0 else { return }
-    emitClockSnapshot(
-      from: target,
-      positionSeconds: target.currentTime,
-      rateOverride: 0.0,
-      durationOverride: target.duration,
-      serial: serial
-    )
+    onObservation?(.duration(target.duration), serial)
   }
 
   func maybeLogRouteDiagnostics(

@@ -12,6 +12,10 @@ final class EngineObject: SharedObject, @unchecked Sendable {
   init(onDisposed: @escaping @Sendable (EngineObject) -> Void = { _ in }) {
     self.onDisposed = onDisposed
     super.init()
+    enqueueMain { [weak self] in
+      guard let self, !self.fence.isDisposedNow else { return }
+      _ = self.ensureDriver()
+    }
   }
 
   override func sharedObjectDidRelease() {
