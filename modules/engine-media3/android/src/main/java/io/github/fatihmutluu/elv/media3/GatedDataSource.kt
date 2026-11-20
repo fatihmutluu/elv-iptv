@@ -56,7 +56,8 @@ internal class GatedDataSource(
           Log.w(TAG, "an older media's connections closed only after a second force-close at $gateTimeoutMs ms")
         BoundaryWait.DROPPED ->
           Log.w(TAG, "dropped older connections still open $DROP_AFTER_MS ms after their cancel, without a close")
-        BoundaryWait.CLOSED, BoundaryWait.SUPERSEDED -> Unit
+        BoundaryWait.SUPERSEDED -> throw SupersededMediaException()
+        BoundaryWait.CLOSED -> Unit
       }
     } catch (_: InterruptedException) {
       Thread.currentThread().interrupt()

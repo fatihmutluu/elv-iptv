@@ -17,8 +17,6 @@ const val SNIFF_BYTES = 1024
 private const val TS_PACKET = 188
 private const val TS_SYNC: Byte = 0x47
 
-private val HLS_TYPES =
-  setOf("application/vnd.apple.mpegurl", "application/x-mpegurl", "audio/mpegurl", "audio/x-mpegurl")
 private val EXTM3U = "#EXTM3U".toByteArray(Charsets.US_ASCII)
 private val WEBVTT = "WEBVTT".toByteArray(Charsets.US_ASCII)
 private val XML_DECL = "<?xml".toByteArray(Charsets.US_ASCII)
@@ -34,12 +32,6 @@ fun contentTypeOf(headers: Map<out String?, List<String>>): String? =
 /** True when response [headers] carry a `Content-Range` header (an HTTP 206 byte-range slice). */
 internal fun hasContentRange(headers: Map<out String?, List<String>>): Boolean =
   headers.entries.any { it.key?.equals("Content-Range", ignoreCase = true) == true && it.value.isNotEmpty() }
-
-/** True for the HLS playlist media types. */
-fun isHlsContentType(contentType: String?): Boolean {
-  val type = contentType?.substringBefore(';')?.trim()?.lowercase() ?: return false
-  return type in HLS_TYPES
-}
 
 /** The kind of an HLS request from its Media3 data type; keys (DRM) and the rest are [RequestKind.OTHER]. */
 fun requestKindFor(dataType: Int): RequestKind =
@@ -95,7 +87,7 @@ private fun isSubtitleSegment(contentType: String?, prefix: ByteArray, length: I
 
 private fun textStart(prefix: ByteArray, length: Int): Int {
   var start = if (length >= UTF8_BOM.size && UTF8_BOM.indices.all { prefix[it] == UTF8_BOM[it] }) UTF8_BOM.size else 0
-  while (start < length && prefix[start].toInt().toChar() in " \t\r\n") start += 1
+  while (start < length && prefix[start].toInt().toChar() in " \t\r\n\u000B\u000C") start += 1
   return start
 }
 
@@ -109,22 +101,30 @@ private fun startsWith(prefix: ByteArray, length: Int, marker: ByteArray): Boole
 /**
  * MPEG-TS from any start offset: three sync bytes repeating every 188 bytes, starting within the first packet.
  */
-private fun hasTsSync(prefix: ByteArray, length: Int): Boolean =
-  (0 until minOf(TS_PACKET, length - TS_PACKET * 2).coerceAtLeast(0)).any { start ->
-    val positions = generateSequence(start) { it + TS_PACKET }.takeWhile { it < length }.take(3).toList()
-    positions.size >= 3 && positions.all { prefix[it] == TS_SYNC }
+private fun hasTsSync(prefix: ByteArray, length: Int): Boolean {
+  val limit = minOf(TS_PACKET, length - TS_PACKET * 2)
+  for (start in 0 until limit) {
+    if (
+      prefix[start] == TS_SYNC &&
+      prefix[start + TS_PACKET] == TS_SYNC &&
+      prefix[start + TS_PACKET * 2] == TS_SYNC
+    ) {
+      return true
+    }
   }
+  return false
+}
 
 /**
- * Valid UTF-8 printable text (RFC 3629): printable ASCII, tab, CR, LF, or well-formed multi-byte UTF-8 sequences. A
- * multi-byte sequence truncated right at [SNIFF_BYTES] is accepted when its present bytes are valid.
+ * Valid UTF-8 printable text (RFC 3629): printable ASCII, ASCII whitespace (`0x09..0x0D`), or well-formed multi-byte
+ * UTF-8 sequences. A multi-byte sequence truncated right at [SNIFF_BYTES] is accepted when its present bytes are valid.
  */
 private fun isText(prefix: ByteArray, length: Int): Boolean {
   var i = 0
   while (i < length) {
     val b0 = prefix[i].toInt() and 0xFF
     when {
-      b0 == 0x09 || b0 == 0x0A || b0 == 0x0D || b0 in 0x20..0x7E -> i += 1
+      b0 in 0x09..0x0D || b0 in 0x20..0x7E -> i += 1
       b0 in 0xC2..0xDF -> {
         if (!checkContinuations(prefix, length, i + 1, 1, 0x80..0xBF)) return false
         i += 2

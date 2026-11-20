@@ -46,7 +46,7 @@ internal fun parseLoadArgs(args: Map<String, Any?>): Pair<Int, LoadRequest> {
       ?.toMap()
       ?: emptyMap()
   val kind = args["kind"] as? String ?: "live"
-  val startMs = (args["startMs"] as? Number)?.toLong()
+  val startMs = finiteLongOrNull(args["startMs"])
   val softwareAudio = args["softwareAudio"] as? Boolean ?: false
   val audioTrackId = (args["audioTrackId"] as? String)?.takeIf { it.isNotEmpty() }
   val subtitlePreference =
@@ -79,3 +79,11 @@ internal fun LoadRequest.asDetectedPlaylist(): LoadRequest = copy(playlistDetect
 
 /** How this request is played: see [sourceTypeFor]. */
 internal fun LoadRequest.sourceType(): SourceType = sourceTypeFor(url, live, playlistDetected)
+
+private fun finiteLongOrNull(raw: Any?): Long? =
+  when (raw) {
+    is Double -> if (raw.isFinite()) raw.toLong() else null
+    is Float -> if (raw.isFinite()) raw.toLong() else null
+    is Number -> raw.toLong()
+    else -> null
+  }

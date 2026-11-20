@@ -30,11 +30,9 @@ private fun exactly(size: Int) = View.MeasureSpec.makeMeasureSpec(size.coerceAtL
 
 /**
  * The `Media3Surface` view (player core spec 6.1): a `SurfaceView`, created once and never re-typed or put on top,
- * plus a `SubtitleView` over the fitted video rectangle, both under a black zap shutter. The surface and subtitle
- * layer are sized and centred at the video's display aspect ratio ([SurfaceFit]); the view paints black bars beside
- * the video, never over it, so React Native views drawn above compose over video and subtitles. Surface callbacks
- * attach and detach the surface on the bound engine's playback thread; the engine drives the shutter, picture shape,
- * subtitle cues and screen-on flag, posted straight to this view (no JavaScript round trip).
+ * covered by a black zap shutter `View`, with `SubtitleView` above the shutter over the fitted video rectangle so
+ * subtitles stay visible on audio-only streams while stale cues are cleared on every prepare/stop/off. The view paints
+ * black bars beside the video, never over it, so React Native views drawn above compose over video and subtitles.
  */
 @OptIn(UnstableApi::class)
 class Media3SurfaceView(context: Context, appContext: AppContext) :
@@ -55,13 +53,13 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
 
   init {
     surfaceView.isFocusable = false
-    subtitleView.isFocusable = false
     shutterView.isFocusable = false
+    subtitleView.isFocusable = false
     shutterView.setBackgroundColor(Color.BLACK)
     surfaceView.holder.addCallback(this)
     addView(surfaceView)
-    addView(subtitleView)
     addView(shutterView)
+    addView(subtitleView)
     showShutter(shutter.covers)
   }
 
@@ -81,10 +79,16 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
     shutter.reset()
     showShutter(shutter.covers)
     fit.reset()
+    placed = VideoRect(0, 0, 0, 0)
     placeSurface()
     keepScreen(false)
     binding = next?.let { bound -> Binding().also { bound.bindView(it) } }
-    surface?.let { next?.attachSurface(it) }
+    val validSurface = surface?.takeIf { it.isValid }
+    if (validSurface == null) {
+      surface = null
+    } else {
+      next?.attachSurface(validSurface)
+    }
   }
 
   /** The `resizeMode` prop: `fit` (default) or `fill`. */
@@ -97,6 +101,7 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
 
   override fun surfaceCreated(holder: SurfaceHolder) {
     val created = holder.surface
+    if (created == null || !created.isValid) return
     surface = created
     engine?.attachSurface(created)
   }

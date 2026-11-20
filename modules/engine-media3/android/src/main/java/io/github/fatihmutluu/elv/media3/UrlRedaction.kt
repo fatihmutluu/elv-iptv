@@ -1,17 +1,48 @@
 package io.github.fatihmutluu.elv.media3
 
-private val CREDENTIAL_MARKERS = setOf("live", "movie", "series", "timeshift")
-private const val TOKEN_MARKER = "play"
-private val BARE_ID = Regex("""\d+(\.[A-Za-z0-9]+)?""")
 private const val MASK = "***"
 
+private val SAFE_EXTENSIONS = setOf(
+  "ts",
+  "m2ts",
+  "mts",
+  "m3u8",
+  "m3u",
+  "mp4",
+  "m4s",
+  "m4v",
+  "m4a",
+  "mkv",
+  "webm",
+  "avi",
+  "mov",
+  "flv",
+  "mpd",
+  "aac",
+  "mp3",
+  "ac3",
+  "eac3",
+  "ogg",
+  "opus",
+  "wav",
+  "flac",
+  "srt",
+  "vtt",
+  "ass",
+  "ssa",
+  "sub",
+  "xml",
+  "gz",
+  "php",
+)
+
 /**
- * Returns [url] safe for diagnostics: no query, fragment or user-info; the user and password segments after `/live/`,
- * `/movie/`, `/series/` and `/timeshift/` and the token after `/play/` replaced by `***`. Without such a marker, the
- * Xtream form `/<user>/<pass>/<id>` (the two segments before a numeric last segment, also behind a path prefix) is
- * masked the same way.
+ * Returns [url] safe for diagnostics via strict allowlist redaction: keeps only scheme, host(:port) and a known
+ * media/playlist extension on the final non-empty path segment, masking all path segments, matrix params, user-info,
+ * queries and fragments.
  */
 fun redactUrl(url: String): String {
+  if (url.isEmpty()) return ""
   val withoutTail = url.substringBefore('#').substringBefore('?')
   val schemeEnd = withoutTail.indexOf("://")
   val (origin, path) = if (schemeEnd < 0) {
@@ -26,28 +57,21 @@ fun redactUrl(url: String): String {
 }
 
 private fun redactPath(path: String): String {
-  val segments = path.split('/').toMutableList()
-  var marked = false
-  var index = 0
-  while (index < segments.size) {
-    val masked = when (segments[index].lowercase()) {
-      in CREDENTIAL_MARKERS -> 2
-      TOKEN_MARKER -> 1
-      else -> 0
+  if (path.isEmpty() || path == "/") return path
+  val leadingSlash = path.startsWith("/")
+  val rawSegments = (if (leadingSlash) path.substring(1) else path).split('/')
+  val lastNonEmpty = rawSegments.indexOfLast { it.isNotEmpty() }
+  val masked = rawSegments.mapIndexed { index, segment ->
+    if (segment.isEmpty()) {
+      ""
+    } else if (index != lastNonEmpty) {
+      MASK
+    } else {
+      val clean = segment.substringBefore(';')
+      val dot = clean.lastIndexOf('.')
+      val ext = if (dot > 0) clean.substring(dot + 1).lowercase() else ""
+      if (ext in SAFE_EXTENSIONS) "$MASK.$ext" else MASK
     }
-    if (masked > 0) marked = true
-    for (offset in 1..masked) {
-      if (index + offset < segments.size && segments[index + offset].isNotEmpty()) segments[index + offset] = MASK
-    }
-    index += 1 + masked
   }
-  if (!marked) maskBareXtream(segments)
-  return segments.joinToString("/")
-}
-
-private fun maskBareXtream(segments: MutableList<String>) {
-  val named = segments.indices.filter { segments[it].isNotEmpty() }
-  if (named.size < 3 || !BARE_ID.matches(segments[named.last()])) return
-  segments[named[named.size - 2]] = MASK
-  segments[named[named.size - 3]] = MASK
+  return (if (leadingSlash) "/" else "") + masked.joinToString("/")
 }

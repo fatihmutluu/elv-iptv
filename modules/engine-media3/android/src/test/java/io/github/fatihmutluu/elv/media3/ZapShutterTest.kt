@@ -53,36 +53,58 @@ class ZapShutterTest {
 
   @Test
   fun `a first frame counts only after the fence of the current prepare and only once`() {
-    val fence = FirstFrameFence()
-    assertFalse(fence.accept())
+    val fence = PrepareFence()
+    assertFalse(fence.acceptFirstFrame())
     fence.begin(1)
-    assertFalse(fence.accept())
+    assertFalse(fence.acceptFirstFrame())
     fence.passed(1)
-    assertTrue(fence.accept())
-    assertFalse(fence.accept())
+    assertTrue(fence.acceptFirstFrame())
+    assertFalse(fence.acceptFirstFrame())
   }
 
   @Test
   fun `a frame of the previous prepare that arrives after a new one began is stale`() {
-    val fence = FirstFrameFence()
+    val fence = PrepareFence()
     fence.begin(1)
     fence.passed(1)
     fence.begin(2)
-    assertFalse(fence.accept())
+    assertFalse(fence.acceptFirstFrame())
     fence.passed(1)
-    assertFalse(fence.accept())
+    assertFalse(fence.acceptFirstFrame())
     fence.passed(2)
-    assertTrue(fence.accept())
+    assertTrue(fence.acceptFirstFrame())
   }
 
   @Test
   fun `each prepare reports its own first frame`() {
-    val fence = FirstFrameFence()
+    val fence = PrepareFence()
     fence.begin(1)
     fence.passed(1)
-    assertTrue(fence.accept())
+    assertTrue(fence.acceptFirstFrame())
     fence.begin(2)
     fence.passed(2)
-    assertTrue(fence.accept())
+    assertTrue(fence.acceptFirstFrame())
+  }
+
+  @Test
+  fun `PrepareFence gates renderer and reused-player callbacks and deduplicates audio-only firstFrame`() {
+    val fence = PrepareFence()
+    fence.begin(prepare = 5L, reused = true)
+    assertFalse(fence.isRendererOpen)
+    assertFalse(fence.acceptsMediaId("5"))
+    assertFalse(fence.acceptAudioFirstFrame())
+
+    fence.passed(5L)
+    assertTrue(fence.isRendererOpen)
+    assertTrue(fence.acceptsMediaId("5"))
+    assertFalse("stale mediaId from prior prepare must be rejected", fence.acceptsMediaId("4"))
+    assertTrue(fence.acceptAudioFirstFrame())
+    assertFalse(fence.acceptAudioFirstFrame())
+    assertFalse("video firstFrame must not double-fire after audio firstFrame", fence.acceptFirstFrame())
+
+    fence.begin(prepare = 6L, reused = false)
+    assertFalse(fence.isRendererOpen)
+    assertTrue("fresh player accepts current mediaId immediately", fence.acceptsMediaId("6"))
+    assertFalse(fence.acceptsMediaId("5"))
   }
 }

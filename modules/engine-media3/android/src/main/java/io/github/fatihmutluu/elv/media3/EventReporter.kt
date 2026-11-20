@@ -4,41 +4,35 @@ import android.os.Handler
 import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.media3.common.C
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.common.Timeline
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
+import androidx.media3.exoplayer.mediacodec.MediaCodecRenderer
 import androidx.media3.exoplayer.video.MediaCodecVideoDecoderException
-import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TICK_MS = 1_000L
-
-/** Finds the first cause of type [T] in the chain of [error]. */
-private inline fun <reified T : Throwable> causeOf(error: Throwable): T? {
-  var cause: Throwable? = error
-  while (cause != null) {
-    if (cause is T) return cause
-    cause = cause.cause
-  }
-  return null
-}
+private const val MAX_BEHIND_LIVE_RECOVERIES = 2
 
 /**
  * Turns the player's callbacks into `onEngineEvent` payloads (without the token, which [send] adds) on the playback
- * thread: coarse states, `firstFrame`, `stall` start and end, `error` and `clock` anchors. Anchors follow the
- * effective rate (speed while playing, 0 otherwise), so start, pause, stall start and stall end each send one; seeks
- * send one too, and while playing a tick sends one at most once a second. `firstFrame` is sent once per prepare and
- * never for a frame of the media before it ([FirstFrameFence]); [onFirstFrame] then lifts the zap shutter. A playlist
- * found behind a progressive guess is no error: [onHlsDetected] lets the engine prepare the request again as HLS.
- * Every state and error sent is also handed to [onCue], with whether this prepare played, for the screen-on rule.
+ * thread: coarse states, `firstFrame`, `stall` start and end, `error` and `clock` anchors. Callbacks are gated behind
+ * [fence] so stale messages from a stopped prepare are dropped.
  */
 @OptIn(UnstableApi::class)
 internal class EventReporter(
   private val handler: Handler,
+  private val fence: PrepareFence,
+  private val hasInvalidAttachedSurface: () -> Boolean = { false },
   private val send: (Map<String, Any?>) -> Unit,
   private val onHlsDetected: () -> Unit,
+  private val onBehindLiveWindow: () -> Unit,
+  private val onAudioFocusDenied: () -> Boolean,
+  private val onVideoCodecFailed: (MediaCodecInfo) -> Unit,
   private val onFirstFrame: () -> Unit,
   private val onCue: (ScreenCue, Boolean) -> Unit,
 ) : Player.Listener {
@@ -48,57 +42,51 @@ internal class EventReporter(
   private var lastState: String? = null
   private var played = false
   private var stalled = false
+  private var behindLiveRecoveries = 0
   private var anchoredRate: Float? = null
-  private var manifestLoaded: AtomicBoolean? = null
-  private val frames = FirstFrameFence()
-  private var prepares = 0L
   private val tick = Runnable { player?.let { anchor(it) } }
 
   /**
-   * Starts reporting a new prepare of [player], called after its `stop`: forgets the previous one, sends the
-   * first-frame fence and reports `opening`. [manifestLoaded] is set once the media's timeline is known.
+   * Starts reporting a new prepare [prepareSerial] of [player], sends the post-`stop` fence message through Media3's
+   * playback thread and reports `opening`.
    */
-  fun begin(player: ExoPlayer, live: Boolean, manifestLoaded: AtomicBoolean) {
+  fun begin(player: ExoPlayer, live: Boolean, prepareSerial: Long, reused: Boolean) {
     end()
     this.player = player
     this.live = live
-    this.manifestLoaded = manifestLoaded
-    val prepare = ++prepares
-    frames.begin(prepare)
-    player.createMessage { _, _ -> frames.passed(prepare) }.setLooper(handler.looper).send()
+    fence.begin(prepareSerial, reused = reused)
+    player.createMessage { _, _ -> fence.passed(prepareSerial) }.setLooper(handler.looper).send()
     active = true
     sendState("opening")
   }
 
-  /** Stops reporting (load, retry, stop, recreate, release): an open stall ends, the clock tick stops. */
+  /** Stops reporting (load, retry, stop, recreate, release): an open stall ends, the clock tick stops, fence closes. */
   fun end() {
     if (active && stalled) sendStall("end")
     active = false
+    fence.reset()
     lastState = null
     played = false
     stalled = false
+    behindLiveRecoveries = 0
     anchoredRate = null
     handler.removeCallbacks(tick)
   }
 
   override fun onEvents(player: Player, events: Player.Events) {
-    if (!active || player !== this.player) return
+    if (!active || player !== this.player || !fence.acceptsPlayer(player)) return
     if (events.containsAny(
         Player.EVENT_PLAYBACK_STATE_CHANGED,
         Player.EVENT_PLAY_WHEN_READY_CHANGED,
+        Player.EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED,
         Player.EVENT_IS_PLAYING_CHANGED,
         Player.EVENT_PLAYBACK_PARAMETERS_CHANGED,
+        Player.EVENT_TRACKS_CHANGED,
         Player.EVENT_PLAYER_ERROR,
       )
     ) {
       update(player)
     }
-  }
-
-  /** `setMediaSource` publishes a placeholder window at once; the source's own window arrives with its manifest. */
-  override fun onTimelineChanged(timeline: Timeline, reason: Int) {
-    if (!active || reason != Player.TIMELINE_CHANGE_REASON_SOURCE_UPDATE || timeline.isEmpty) return
-    if (!timeline.getWindow(0, Timeline.Window()).isPlaceholder) manifestLoaded?.set(true)
   }
 
   override fun onPositionDiscontinuity(
@@ -108,20 +96,44 @@ internal class EventReporter(
   ) {
     val seek = reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT
     val current = player
-    if (active && seek && current != null) anchor(current)
+    if (active && seek && current != null && fence.acceptsPlayer(current)) anchor(current)
   }
 
   override fun onRenderedFirstFrame() {
-    if (!active || !frames.accept()) return
+    if (!active || !fence.acceptFirstFrame()) return
     send(mapOf("type" to "firstFrame", "atMs" to SystemClock.uptimeMillis().toDouble()))
     onFirstFrame()
   }
 
   override fun onPlayerError(error: PlaybackException) {
-    if (!active) return
+    val current = player
+    if (!active || (current != null && !fence.acceptsPlayer(current))) return
+    if (causeOf<SupersededMediaException>(error) != null) return
     if (causeOf<HlsDetectedException>(error) != null) {
       onHlsDetected()
       return
+    }
+    if (causeOf<SecurityException>(error) != null && onAudioFocusDenied()) return
+    if (
+      live &&
+      error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW &&
+      behindLiveRecoveries < MAX_BEHIND_LIVE_RECOVERIES
+    ) {
+      behindLiveRecoveries += 1
+      onBehindLiveWindow()
+      return
+    }
+    val videoDecoderError = causeOf<MediaCodecVideoDecoderException>(error)
+    val videoInitError =
+      causeOf<MediaCodecRenderer.DecoderInitializationException>(error)?.takeIf {
+        it.mimeType != null && MimeTypes.isVideo(it.mimeType)
+      }
+    val surfaceLost =
+      (videoDecoderError?.let { !it.isSurfaceValid } == true) ||
+        (videoInitError != null && hasInvalidAttachedSurface())
+    val failedCodec = videoDecoderError?.codecInfo ?: videoInitError?.codecInfo
+    if (!surfaceLost && failedCodec != null) {
+      onVideoCodecFailed(failedCodec)
     }
     val status = causeOf<HttpDataSource.InvalidResponseCodeException>(error)?.responseCode
     val contentType = causeOf<HttpDataSource.InvalidContentTypeException>(error)?.contentType
@@ -132,7 +144,6 @@ internal class EventReporter(
       uri != null -> "${error.errorCodeName} ${redactUrl(uri.toString())}"
       else -> error.errorCodeName
     }
-    val surfaceLost = causeOf<MediaCodecVideoDecoderException>(error)?.let { !it.isSurfaceValid } == true
     val code = mapError(
       status,
       contentType,
@@ -147,7 +158,9 @@ internal class EventReporter(
 
   private fun update(player: Player) {
     val state = stateOf(player)
-    if (state == "ended" && (live || !played)) {
+    val validVodEof =
+      !live && player.duration != C.TIME_UNSET && player.duration > 0L && player.currentPosition > 0L
+    if (state == "ended" && (live || (!played && !validVodEof))) {
       if (lastState != state) {
         sendError("network", null, if (live) "live stream ended" else "empty media ended before playback")
       }
@@ -156,8 +169,16 @@ internal class EventReporter(
       lastState = state
       sendState(state)
     }
-    if (player.isPlaying) played = true
-    val nowStalled = played && player.playWhenReady && player.playbackState == Player.STATE_BUFFERING
+    if (player.isPlaying) {
+      played = true
+      behindLiveRecoveries = 0
+      if (isAudioOnlyTracks(player.currentTracks) && fence.acceptAudioFirstFrame()) {
+        send(mapOf("type" to "firstFrame", "atMs" to SystemClock.uptimeMillis().toDouble()))
+      }
+    }
+    val suppressed = player.playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_NONE
+    val nowStalled =
+      played && player.playWhenReady && !suppressed && player.playbackState == Player.STATE_BUFFERING
     if (nowStalled != stalled) {
       stalled = nowStalled
       sendStall(if (nowStalled) "start" else "end")
@@ -199,13 +220,23 @@ internal class EventReporter(
   private companion object {
     fun effectiveRate(player: Player): Float = if (player.isPlaying) player.playbackParameters.speed else 0f
 
-    /** `paused` only when playback is not wanted; buffering and playing only while it is. */
+    fun isAudioOnlyTracks(tracks: Tracks): Boolean {
+      var hasAudio = false
+      for (group in tracks.groups) {
+        if (group.type == C.TRACK_TYPE_VIDEO && (group.isSelected || group.isSupported)) return false
+        if (group.type == C.TRACK_TYPE_AUDIO && (group.isSelected || group.isSupported)) hasAudio = true
+      }
+      return hasAudio
+    }
+
+    /** `paused` when playback is not wanted or transiently suppressed (e.g. phone call audio-focus loss). */
     fun stateOf(player: Player): String? =
       when (player.playbackState) {
         Player.STATE_IDLE -> null
         Player.STATE_ENDED -> "ended"
         else -> when {
-          !player.playWhenReady -> "paused"
+          !player.playWhenReady ||
+            player.playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_NONE -> "paused"
           player.playbackState == Player.STATE_BUFFERING -> "buffering"
           player.isPlaying -> "playing"
           else -> "ready"

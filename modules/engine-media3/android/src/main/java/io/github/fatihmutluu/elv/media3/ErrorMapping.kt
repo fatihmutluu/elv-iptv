@@ -3,6 +3,19 @@ package io.github.fatihmutluu.elv.media3
 import androidx.media3.common.PlaybackException
 
 private val NAMED_STATUSES = setOf(401, 403, 404, 429, 509)
+private val AUTH_REFUSAL_STATUSES = setOf(407)
+private val NOT_FOUND_STATUSES = setOf(410, 451)
+internal val PANEL_LIMIT_STATUSES = setOf(458, 460, 461, 462, 463, 469)
+
+/** Finds the first cause of type [T] in the chain of [error]. */
+internal inline fun <reified T : Throwable> causeOf(error: Throwable): T? {
+  var cause: Throwable? = error
+  while (cause != null) {
+    if (cause is T) return cause
+    cause = cause.cause
+  }
+  return null
+}
 
 /**
  * Maps a failure to one of the engine error codes of player core spec 5.3. [responseCode] is the HTTP status of an
@@ -24,7 +37,13 @@ fun mapError(
   surfaceLost: Boolean = false,
 ): String {
   if (responseCode != null && responseCode !in 200..299) {
-    return if (responseCode in NAMED_STATUSES) "http-$responseCode" else "http-other"
+    return when (responseCode) {
+      in NAMED_STATUSES -> "http-$responseCode"
+      in AUTH_REFUSAL_STATUSES -> "http-401"
+      in NOT_FOUND_STATUSES -> "http-404"
+      in PANEL_LIMIT_STATUSES -> "connection-limit"
+      else -> "http-other"
+    }
   }
   if (notice) return "connection-limit"
   if (contentType != null && isNoticeContentType(contentType, hls = false)) return "connection-limit"

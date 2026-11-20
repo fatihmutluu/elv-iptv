@@ -88,15 +88,7 @@ class TrackSelectorBridgeTest {
     assertEquals("2:0", snapshot.selectedSubtitleId)
     assertEquals(2, snapshot.audio.size)
     assertEquals(
-      TrackInfoSnapshot(
-        id = "1:0",
-        language = "tr",
-        label = "Turkish",
-        codec = "mp4a.40.2",
-        channels = 2,
-        forced = false,
-        isDefault = true,
-      ),
+      TrackInfoSnapshot("1:0", "tr", "Turkish", "mp4a.40.2", 2, forced = false, isDefault = true),
       snapshot.audio[0],
     )
     assertEquals("1:1", snapshot.audio[1].id)
@@ -108,6 +100,142 @@ class TrackSelectorBridgeTest {
 
     val disabledSnapshot = inspectMediaTracks(tracks, textDisabled = true)
     assertNull(disabledSnapshot.selectedSubtitleId)
+
+    // Actively selected FORMAT_EXCEEDS_CAPABILITIES audio must be included, while unselected unsupported stays hidden
+    val exceedsAudioGroup = group(
+      "a-exceeds",
+      listOf(
+        Format.Builder().setSampleMimeType(MimeTypes.AUDIO_E_AC3).setLanguage("eng").setChannelCount(8).build(),
+        Format.Builder().setSampleMimeType(MimeTypes.AUDIO_DTS).setLanguage("deu").build(),
+      ),
+      selectedIndex = 0,
+      supported = intArrayOf(C.FORMAT_EXCEEDS_CAPABILITIES, C.FORMAT_EXCEEDS_CAPABILITIES),
+    )
+    val exceedsSnapshot = inspectMediaTracks(Tracks(listOf(videoGroup, exceedsAudioGroup)), textDisabled = false)
+    assertEquals(listOf("1:0"), exceedsSnapshot.audio.map { it.id })
+    assertEquals("1:0", exceedsSnapshot.selectedAudioId)
+  }
+
+  @Test
+  fun `ignores Tracks EMPTY, preserves active subtitle cues on re-select, guards unmatched IDs and reconciles swapped labels`() {
+    val emitted = mutableListOf<Map<String, Any?>>()
+    var clearedCues = 0
+    val bridge = TrackSelectorBridge(
+      onTracks = { emitted += it },
+      onClearCues = { clearedCues += 1 },
+    )
+    val player = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build()
+    try {
+      // Transient Tracks.EMPTY on setMediaSource must be ignored
+      bridge.onTracksChanged(player, Tracks.EMPTY)
+      assertTrue("Tracks.EMPTY must never emit", emitted.isEmpty())
+
+      val initialTracks = Tracks(listOf(videoGroup, audioGroup, textGroup))
+      bridge.onTracksChanged(player, initialTracks)
+      assertEquals(1, emitted.size)
+
+      // Re-selecting the ALREADY active subtitle ("2:0") must NOT clear active cues!
+      bridge.selectSubtitleTrack(player, "2:0")
+      assertEquals("re-selecting active subtitle must keep visible cues", 0, clearedCues)
+
+      // Switching to a DIFFERENT subtitle ("2:1") DOES clear stale cues
+      bridge.selectSubtitleTrack(player, "2:1")
+      assertEquals(1, clearedCues)
+
+      // Unmatched audio/subtitle IDs must be ignored without wiping overrides or clearing cues
+      bridge.selectAudioTrack(player, "1:1")
+      val savedAudioOverride = player.trackSelectionParameters.overrides[audioGroup.mediaTrackGroup]?.trackIndices
+      assertEquals(listOf(1), savedAudioOverride)
+
+      bridge.selectAudioTrack(player, "99:99")
+      assertEquals(
+        "unmatched audio ID must not clear active override",
+        listOf(1),
+        player.trackSelectionParameters.overrides[audioGroup.mediaTrackGroup]?.trackIndices,
+      )
+
+      bridge.selectSubtitleTrack(player, null)
+      assertEquals(2, clearedCues)
+      assertTrue(player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT))
+
+      bridge.selectSubtitleTrack(player, "99:99")
+      assertTrue(
+        "unmatched subtitle ID must not re-enable disabled subtitles",
+        player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT),
+      )
+      assertEquals("unmatched subtitle ID must not clear cues", 2, clearedCues)
+
+      // Same-language tracks swapping order must follow label, and BCP-47 region tags match ISO 639-2
+      val dualEnglish = group(
+        "a-dual",
+        listOf(
+          Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AAC).setLanguage("en-US").setLabel("Commentary").build(),
+          Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AAC).setLanguage("en-US").setLabel("Main").build(),
+        ),
+        selectedIndex = 0,
+      )
+      bridge.onTracksChanged(player, Tracks(listOf(videoGroup, dualEnglish)))
+      bridge.selectAudioTrack(player, "1:1") // Pick "Main"
+
+      bridge.onPrepareReuse()
+      val swappedDualEnglish = group(
+        "a-dual-swapped",
+        listOf(
+          Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AAC).setLanguage("eng").setLabel("Main").build(),
+          Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AAC).setLanguage("eng").setLabel("Commentary").build(),
+        ),
+        selectedIndex = 1,
+      )
+      bridge.onTracksChanged(player, Tracks(listOf(videoGroup, swappedDualEnglish)))
+      assertEquals(
+        "must pick swapped index 0 ('Main') instead of keeping stale index 1 ('Commentary')",
+        listOf(0),
+        player.trackSelectionParameters.overrides[swappedDualEnglish.mediaTrackGroup]?.trackIndices,
+      )
+      assertTrue(sameLanguage("tr", "tur"))
+      assertTrue(sameLanguage("deu", "ger"))
+      assertTrue(sameLanguage("en-US", "eng"))
+      assertFalse(sameLanguage("und", "und"))
+
+      // Reloading a new media with Default subtitle preference restores CaptioningManager accessibility defaults
+      val (_, defaultReq) = parseLoadArgs(mapOf("attempt" to 9, "url" to "http://h/2.mkv", "kind" to "vod"))
+      bridge.onLoad(defaultReq)
+      bridge.applyInitialParameters(player)
+      assertTrue(player.trackSelectionParameters.usePreferredTextLanguagesAndRoleFlagsFromCaptioningManager)
+      assertFalse(player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT))
+
+      // Stale PlayerMessage (emitConfirmedFromPlayer) from prior epoch or inactive player is dropped
+      emitted.clear()
+      var activePlayerAllowed = true
+      val trackedPlayer = object : ExoPlayer by player {
+        override fun getCurrentTracks(): Tracks = initialTracks
+      }
+      val fencedBridge = TrackSelectorBridge(
+        isActivePlayer = { activePlayerAllowed },
+        onTracks = { emitted += it },
+        onClearCues = {},
+      )
+      val epochBeforeZap = fencedBridge.currentPrepareEpoch
+      fencedBridge.onLoad(defaultReq)
+      fencedBridge.emitConfirmedFromPlayer(trackedPlayer, epochBeforeZap)
+      assertTrue("stale prepareEpoch must drop emitConfirmedFromPlayer", emitted.isEmpty())
+      val epochBeforeReuse = fencedBridge.currentPrepareEpoch
+      fencedBridge.onPrepareReuse()
+      fencedBridge.emitConfirmedFromPlayer(trackedPlayer, epochBeforeReuse)
+      assertTrue("onPrepareReuse must advance prepareEpoch", emitted.isEmpty())
+      val epochBeforeStop = fencedBridge.currentPrepareEpoch
+      fencedBridge.onStop()
+      fencedBridge.emitConfirmedFromPlayer(trackedPlayer, epochBeforeStop)
+      assertTrue("onStop must advance prepareEpoch", emitted.isEmpty())
+      activePlayerAllowed = false
+      fencedBridge.emitConfirmedFromPlayer(trackedPlayer, fencedBridge.currentPrepareEpoch)
+      assertTrue("inactive/released player must drop emitConfirmedFromPlayer", emitted.isEmpty())
+      activePlayerAllowed = true
+      fencedBridge.emitConfirmedFromPlayer(trackedPlayer, fencedBridge.currentPrepareEpoch)
+      assertEquals(1, emitted.size)
+    } finally {
+      player.release()
+    }
   }
 
   @Test
@@ -159,13 +287,7 @@ class TrackSelectorBridgeTest {
     assertNull(defaultReq.audioTrackId)
 
     val (_, offReq) = parseLoadArgs(
-      mapOf(
-        "attempt" to 2,
-        "url" to "http://h/1.mkv",
-        "kind" to "vod",
-        "audioTrackId" to "1:1",
-        "subtitleTrackId" to null,
-      )
+      mapOf("attempt" to 2, "url" to "http://h/1.mkv", "kind" to "vod", "audioTrackId" to "1:1", "subtitleTrackId" to null)
     )
     assertEquals(SubtitlePreference.Off, offReq.subtitlePreference)
     assertEquals("1:1", offReq.audioTrackId)
@@ -189,16 +311,8 @@ class TrackSelectorBridgeTest {
           cuesHistory += cues
         }
       })
-      engine.load(
-        1,
-        LoadRequest(
-          url = "http://127.0.0.1:9/movie/demo/demo/1.mp4",
-          headers = emptyMap(),
-          live = false,
-          startMs = 95_000L,
-          softwareAudio = false,
-        ),
-      )
+      val req = LoadRequest("http://127.0.0.1:9/movie/demo/demo/1.mp4", emptyMap(), false, 95_000L, false)
+      engine.load(1, req)
       engine.recreate(2)
       engine.retry(3)
       engine.selectSubtitleTrack(4, null)

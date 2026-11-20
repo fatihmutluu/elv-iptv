@@ -29,7 +29,28 @@ internal const val READ_TIMEOUT_MS = 10_000L
 /** Calls one engine's client runs at once, in all and per host: the gate, not OkHttp, bounds the real connections. */
 private const val MAX_REQUESTS = 64
 private const val MAX_REQUESTS_PER_HOST = 16
-private val SENSITIVE_HEADERS = listOf("Authorization", "Cookie", "Proxy-Authorization")
+private val SENSITIVE_HEADERS =
+  listOf("Authorization", "Cookie", "Proxy-Authorization", "X-Api-Key", "X-Auth-Token")
+
+private fun isValidHeaderName(name: String): Boolean {
+  if (name.isEmpty()) return false
+  for (c in name) {
+    val valid =
+      c in 'A'..'Z' ||
+        c in 'a'..'z' ||
+        c in '0'..'9' ||
+        c in "!#$%&'*+-.^_`|~"
+    if (!valid) return false
+  }
+  return true
+}
+
+private fun sanitizeHeaderValue(raw: String): String =
+  buildString(raw.length) {
+    for (c in raw) {
+      if (c == '\t' || c in '\u0020'..'\u007e') append(c)
+    }
+  }.trim()
 
 /** Origin `(scheme, host, effectivePort)` that sensitive stream headers are scoped to. */
 internal data class StreamOrigin(val scheme: String, val host: String, val port: Int) {
@@ -100,9 +121,9 @@ internal class CancellableCalls(
 }
 
 /**
- * An OkHttp data source for one request over [client] that sends [headers] and the canceller of its calls. A
- * `User-Agent` entry, in any case, becomes the agent; without one it sends the platform's (`http.agent`), as Media3's
- * default data source did, since some providers refuse a library's agent. Sensitive headers are scoped to [originUrl].
+ * An OkHttp data source for one request over [client] that sends sanitized [headers] and the canceller of its calls. A
+ * `User-Agent` entry, in any case, becomes the agent; without one it sends the platform's (`http.agent`), since some
+ * providers refuse a library's agent. Sensitive headers are scoped to [originUrl].
  */
 @OptIn(UnstableApi::class)
 internal fun streamDataSource(
@@ -110,11 +131,23 @@ internal fun streamDataSource(
   client: Call.Factory,
   originUrl: String? = null,
 ): Pair<DataSource, CancellableCalls> {
-  val userAgentKey = headers.keys.firstOrNull { it.equals("User-Agent", ignoreCase = true) }
+  val customAgent =
+    headers.entries
+      .firstOrNull { it.key.equals("User-Agent", ignoreCase = true) }
+      ?.value
+      ?.let(::sanitizeHeaderValue)
+      ?.takeIf { it.isNotEmpty() }
+  val fallbackAgent = System.getProperty("http.agent")?.let(::sanitizeHeaderValue)?.takeIf { it.isNotEmpty() }
+  val cleanHeaders = LinkedHashMap<String, String>()
+  for ((rawName, rawValue) in headers) {
+    val name = rawName.trim()
+    if (name.equals("User-Agent", ignoreCase = true) || !isValidHeaderName(name)) continue
+    cleanHeaders[name] = sanitizeHeaderValue(rawValue)
+  }
   val calls = CancellableCalls(client, originUrl?.toHttpUrlOrNull()?.let(::StreamOrigin))
   val source = OkHttpDataSource.Factory(calls)
-    .setUserAgent(userAgentKey?.let { headers[it] } ?: System.getProperty("http.agent"))
-    .setDefaultRequestProperties(headers.filterKeys { it != userAgentKey })
+    .setUserAgent(customAgent ?: fallbackAgent)
+    .setDefaultRequestProperties(cleanHeaders)
     .createDataSource()
   return source to calls
 }

@@ -71,13 +71,14 @@ internal class SurfaceFit {
   private var height = 0
   private var pixelRatio = 1f
 
-  /** Applies a decoded picture size; returns true when the shape changed. */
+  /** Applies a decoded picture size; returns true when the shape changed. Invalid [pixelRatio] defaults to `1f`. */
   fun video(width: Int, height: Int, pixelRatio: Float): Boolean {
     if (width <= 0 || height <= 0) return false
-    if (width == this.width && height == this.height && pixelRatio == this.pixelRatio) return false
+    val cleanRatio = if (pixelRatio.isFinite() && pixelRatio > 0f) pixelRatio else 1f
+    if (width == this.width && height == this.height && cleanRatio == this.pixelRatio) return false
     this.width = width
     this.height = height
-    this.pixelRatio = pixelRatio
+    this.pixelRatio = cleanRatio
     return true
   }
 

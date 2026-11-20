@@ -2,145 +2,38 @@ package io.github.fatihmutluu.elv.media3
 
 import androidx.annotation.OptIn
 import androidx.media3.common.C
-import androidx.media3.common.Format
+import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.common.util.Util
 import androidx.media3.exoplayer.ExoPlayer
-
-/** Snapshot of one selectable audio or subtitle track in [Tracks]. */
-internal data class TrackInfoSnapshot(
-  val id: String,
-  val language: String? = null,
-  val label: String? = null,
-  val codec: String? = null,
-  val channels: Int? = null,
-  val forced: Boolean = false,
-  val isDefault: Boolean = false,
-) {
-  fun toMap(): Map<String, Any> = buildMap {
-    put("id", id)
-    if (language != null) put("language", language)
-    if (label != null) put("label", label)
-    if (codec != null) put("codec", codec)
-    if (channels != null) put("channels", channels)
-    if (forced) put("forced", true)
-    if (isDefault) put("isDefault", true)
-  }
-}
-
-/** Snapshot of all supported audio and text tracks and active selections. */
-internal data class MediaTracksSnapshot(
-  val audio: List<TrackInfoSnapshot>,
-  val subtitles: List<TrackInfoSnapshot>,
-  val selectedAudioId: String?,
-  val selectedSubtitleId: String?,
-) {
-  fun toMap(): Map<String, Any?> = mapOf(
-    "audio" to audio.map { it.toMap() },
-    "subtitles" to subtitles.map { it.toMap() },
-    "selectedAudioId" to selectedAudioId,
-    "selectedSubtitleId" to selectedSubtitleId,
-  )
-}
-
-@OptIn(UnstableApi::class)
-private fun normalizeLang(raw: String?): String? {
-  val trimmed = raw?.trim()?.takeIf { it.isNotEmpty() && !it.equals("und", ignoreCase = true) } ?: return null
-  return Util.normalizeLanguageCode(trimmed)?.takeIf { it.isNotEmpty() && !it.equals("und", ignoreCase = true) }
-}
-
-/**
- * Inspects [tracks] and maps supported `C.TRACK_TYPE_AUDIO` and `C.TRACK_TYPE_TEXT` entries to stable
- * `"$groupIndex:$trackIndex"` IDs. When [textDisabled] is true, `selectedSubtitleId` is always `null`.
- */
-@OptIn(UnstableApi::class)
-internal fun inspectMediaTracks(tracks: Tracks, textDisabled: Boolean): MediaTracksSnapshot {
-  val audio = mutableListOf<TrackInfoSnapshot>()
-  val subtitles = mutableListOf<TrackInfoSnapshot>()
-  var selectedAudioId: String? = null
-  var selectedSubtitleId: String? = null
-
-  tracks.groups.forEachIndexed { groupIndex, group ->
-    if (group.type != C.TRACK_TYPE_AUDIO && group.type != C.TRACK_TYPE_TEXT) return@forEachIndexed
-    for (trackIndex in 0 until group.length) {
-      if (!group.isTrackSupported(trackIndex)) continue
-      val id = "$groupIndex:$trackIndex"
-      val format = group.getTrackFormat(trackIndex)
-      val language = normalizeLang(format.language)
-      val label = format.label?.trim()?.takeIf { it.isNotEmpty() }
-      val codec =
-        format.codecs?.trim()?.takeIf { it.isNotEmpty() }
-          ?: format.sampleMimeType?.trim()?.takeIf { it.isNotEmpty() }
-      val channels =
-        if (group.type == C.TRACK_TYPE_AUDIO && format.channelCount != Format.NO_VALUE && format.channelCount > 0) {
-          format.channelCount
-        } else {
-          null
-        }
-      val info = TrackInfoSnapshot(
-        id = id,
-        language = language,
-        label = label,
-        codec = codec,
-        channels = channels,
-        forced = (format.selectionFlags and C.SELECTION_FLAG_FORCED) != 0,
-        isDefault = (format.selectionFlags and C.SELECTION_FLAG_DEFAULT) != 0,
-      )
-      if (group.type == C.TRACK_TYPE_AUDIO) {
-        audio += info
-        if (selectedAudioId == null && group.isTrackSelected(trackIndex)) selectedAudioId = id
-      } else {
-        subtitles += info
-        if (!textDisabled && selectedSubtitleId == null && group.isTrackSelected(trackIndex)) {
-          selectedSubtitleId = id
-        }
-      }
-    }
-  }
-
-  return MediaTracksSnapshot(
-    audio = audio,
-    subtitles = subtitles,
-    selectedAudioId = selectedAudioId,
-    selectedSubtitleId = if (textDisabled) null else selectedSubtitleId,
-  )
-}
 
 /**
  * Playback-thread bridge between `Player.Listener.onTracksChanged` / `TrackSelectionParameters` and the `@elv/playback`
- * track selection contract. Remembers user choices across recovery reloads (`load` with `LoadOptions`, `retry`,
- * `recreate`, HLS re-prepare), matching exact `"$groupIndex:$trackIndex"` IDs first and `(language, label)` /
- * `language` fallback when reloaded groups shift order.
+ * track selection contract. Ignores transient `Tracks.EMPTY`, preserves Android `CaptioningManager` defaults on
+ * `Default`, guards unmatched IDs, preserves active cues when re-selecting the already-active subtitle track, and
+ * emits confirmed selections (#111).
  */
 @OptIn(UnstableApi::class)
 internal class TrackSelectorBridge(
+  private val isActivePlayer: (ExoPlayer) -> Boolean = { true },
   private val onTracks: (Map<String, Any?>) -> Unit,
   private val onClearCues: () -> Unit,
 ) {
-  private data class TrackChoice(
-    val id: String,
-    val language: String?,
-    val label: String?,
-  )
-
   private sealed interface SubChoice {
     data object Default : SubChoice
     data object Off : SubChoice
     data class Selected(val choice: TrackChoice) : SubChoice
   }
 
-  private data class Candidate(
-    val group: Tracks.Group,
-    val trackIndex: Int,
-    val info: TrackInfoSnapshot,
-  )
-
   private var audioChoice: TrackChoice? = null
   private var subtitleChoice: SubChoice = SubChoice.Default
   private var latestTracks: Tracks = Tracks.EMPTY
   private var lastEmitted: MediaTracksSnapshot? = null
+  private var prepareEpoch = 0L
+
+  internal val currentPrepareEpoch: Long
+    get() = prepareEpoch
 
   /** Whether `C.TRACK_TYPE_TEXT` is currently disabled by user choice (`subtitleTrackId === null`). */
   val isTextDisabled: Boolean
@@ -148,6 +41,7 @@ internal class TrackSelectorBridge(
 
   /** Updates desired track preferences from a new [LoadRequest], preserving cached language/label when reloading. */
   fun onLoad(request: LoadRequest) {
+    prepareEpoch += 1
     latestTracks = Tracks.EMPTY
     lastEmitted = null
     audioChoice = request.audioTrackId?.let { wantedId ->
@@ -167,12 +61,14 @@ internal class TrackSelectorBridge(
 
   /** Resets per-prepare track cache while preserving active track choices across `retry`, `recreate` or HLS re-prepare. */
   fun onPrepareReuse() {
+    prepareEpoch += 1
     latestTracks = Tracks.EMPTY
     lastEmitted = null
   }
 
   /** Clears all track choices and cached tracks on `stop` or `dispose`. */
   fun onStop() {
+    prepareEpoch += 1
     audioChoice = null
     subtitleChoice = SubChoice.Default
     latestTracks = Tracks.EMPTY
@@ -187,35 +83,44 @@ internal class TrackSelectorBridge(
       .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
       .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, subtitleChoice is SubChoice.Off)
       .setPreferredAudioLanguage(audioChoice?.language)
-      .setPreferredTextLanguage((subtitleChoice as? SubChoice.Selected)?.choice?.language)
+    when (val sub = subtitleChoice) {
+      SubChoice.Default -> builder.setPreferredTextLanguageAndRoleFlagsToCaptioningManagerSettings()
+      SubChoice.Off -> builder.setPreferredTextLanguage(null)
+      is SubChoice.Selected ->
+        if (sub.choice.language != null) {
+          builder.setPreferredTextLanguage(sub.choice.language)
+        } else {
+          builder.setPreferredTextLanguageAndRoleFlagsToCaptioningManagerSettings()
+        }
+    }
     player.trackSelectionParameters = builder.build()
   }
 
-  /** Selects audio track [id] in place without restarting playback. */
+  /** Selects audio track [id] in place without restarting playback; ignores unmatched IDs once tracks are loaded. */
   fun selectAudioTrack(player: ExoPlayer?, id: String) {
     val tracks = activeTracks(player)
-    val matched = findById(tracks, C.TRACK_TYPE_AUDIO, id)
+    val matched = findCandidateById(tracks, C.TRACK_TYPE_AUDIO, id)
+    if (!tracks.isEmpty && matched == null) return
+    val prev = audioChoice?.takeIf { it.id == id }
     audioChoice = TrackChoice(
       id = id,
-      language = matched?.info?.language,
-      label = matched?.info?.label,
+      language = matched?.info?.language ?: prev?.language,
+      label = matched?.info?.label ?: prev?.label,
     )
-    if (player != null) {
+    if (player != null && matched != null) {
       val builder = player.trackSelectionParameters.buildUpon()
         .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
         .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
-      if (matched != null) {
-        builder.addOverride(TrackSelectionOverride(matched.group.mediaTrackGroup, listOf(matched.trackIndex)))
-        if (matched.info.language != null) builder.setPreferredAudioLanguage(matched.info.language)
-      }
+        .addOverride(TrackSelectionOverride(matched.group.mediaTrackGroup, listOf(matched.trackIndex)))
+      if (matched.info.language != null) builder.setPreferredAudioLanguage(matched.info.language)
       player.trackSelectionParameters = builder.build()
     }
   }
 
   /** Selects subtitle track [id] in place, or disables `C.TRACK_TYPE_TEXT` and clears cues when [id] is `null`. */
   fun selectSubtitleTrack(player: ExoPlayer?, id: String?) {
-    onClearCues()
     if (id == null) {
+      onClearCues()
       subtitleChoice = SubChoice.Off
       if (player != null) {
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
@@ -231,40 +136,47 @@ internal class TrackSelectorBridge(
     }
 
     val tracks = activeTracks(player)
-    val matched = findById(tracks, C.TRACK_TYPE_TEXT, id)
+    val matched = findCandidateById(tracks, C.TRACK_TYPE_TEXT, id)
+    if (!tracks.isEmpty && matched == null) return
+
+    val currentlyDisabled =
+      isTextDisabled || (player?.trackSelectionParameters?.disabledTrackTypes?.contains(C.TRACK_TYPE_TEXT) == true)
+    val alreadyActive = !currentlyDisabled && matched != null && matched.group.isTrackSelected(matched.trackIndex)
+    if (!alreadyActive) onClearCues()
+
+    val prev = (subtitleChoice as? SubChoice.Selected)?.choice?.takeIf { it.id == id }
     subtitleChoice = SubChoice.Selected(
       TrackChoice(
         id = id,
-        language = matched?.info?.language,
-        label = matched?.info?.label,
+        language = matched?.info?.language ?: prev?.language,
+        label = matched?.info?.label ?: prev?.label,
       )
     )
-    if (player != null) {
+    if (player != null && matched != null) {
       val builder = player.trackSelectionParameters.buildUpon()
         .clearOverridesOfType(C.TRACK_TYPE_TEXT)
         .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-      if (matched != null) {
-        builder.addOverride(TrackSelectionOverride(matched.group.mediaTrackGroup, listOf(matched.trackIndex)))
-        if (matched.info.language != null) builder.setPreferredTextLanguage(matched.info.language)
-      }
+        .addOverride(TrackSelectionOverride(matched.group.mediaTrackGroup, listOf(matched.trackIndex)))
+      if (matched.info.language != null) builder.setPreferredTextLanguage(matched.info.language)
       player.trackSelectionParameters = builder.build()
     }
   }
 
-  /** Handles Media3 `onTracksChanged`: reconciles saved track choices and emits deduplicated `MediaTracks`. */
+  /** Handles Media3 `onTracksChanged`: ignores `Tracks.EMPTY`, reconciles saved choices and emits confirmed tracks. */
   fun onTracksChanged(player: ExoPlayer, tracks: Tracks) {
+    if (tracks.isEmpty) return
     latestTracks = tracks
     val params = player.trackSelectionParameters
     val builder = params.buildUpon()
     var changedParams = false
-    var overriddenAudioId: String? = null
-    var overriddenSubtitleId: String? = null
+    var targetAudioId: String? = null
+    var targetSubtitleId: String? = null
 
     audioChoice?.let { wanted ->
       val target = resolveCandidate(tracks, C.TRACK_TYPE_AUDIO, wanted)
       if (target != null) {
         audioChoice = TrackChoice(target.info.id, target.info.language, target.info.label)
-        overriddenAudioId = target.info.id
+        targetAudioId = target.info.id
         val currentOverride = params.overrides[target.group.mediaTrackGroup]?.trackIndices
         if (currentOverride != listOf(target.trackIndex) || params.disabledTrackTypes.contains(C.TRACK_TYPE_AUDIO)) {
           builder.clearOverridesOfType(C.TRACK_TYPE_AUDIO)
@@ -288,7 +200,7 @@ internal class TrackSelectorBridge(
         val target = resolveCandidate(tracks, C.TRACK_TYPE_TEXT, wantedSub.choice)
         if (target != null) {
           subtitleChoice = SubChoice.Selected(TrackChoice(target.info.id, target.info.language, target.info.label))
-          overriddenSubtitleId = target.info.id
+          targetSubtitleId = target.info.id
           val currentOverride = params.overrides[target.group.mediaTrackGroup]?.trackIndices
           if (currentOverride != listOf(target.trackIndex) || params.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) {
             builder.clearOverridesOfType(C.TRACK_TYPE_TEXT)
@@ -303,18 +215,39 @@ internal class TrackSelectorBridge(
 
     if (changedParams) {
       player.trackSelectionParameters = builder.build()
+      if (player.mediaItemCount > 0 && player.playbackState != Player.STATE_IDLE) {
+        val epoch = prepareEpoch
+        player.createMessage { _, _ -> emitConfirmedFromPlayer(player, epoch) }
+          .setLooper(player.applicationLooper)
+          .send()
+        return
+      }
     }
 
-    val textDisabled =
-      subtitleChoice is SubChoice.Off ||
-        player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)
+    val textDisabled = isTextEffectivelyDisabled(player)
     val inspected = inspectMediaTracks(tracks, textDisabled = textDisabled)
-    val effective = inspected.copy(
-      selectedAudioId = overriddenAudioId ?: inspected.selectedAudioId,
-      selectedSubtitleId = if (textDisabled) null else (overriddenSubtitleId ?: inspected.selectedSubtitleId),
-    )
-    emitIfChanged(effective)
+    val snapshot = if (changedParams) {
+      inspected.copy(
+        selectedAudioId = targetAudioId ?: inspected.selectedAudioId,
+        selectedSubtitleId = if (textDisabled) null else (targetSubtitleId ?: inspected.selectedSubtitleId),
+      )
+    } else {
+      inspected
+    }
+    emitIfChanged(snapshot)
   }
+
+  internal fun emitConfirmedFromPlayer(player: ExoPlayer, epoch: Long) {
+    if (epoch != prepareEpoch || !isActivePlayer(player)) return
+    val current = player.currentTracks
+    if (current.isEmpty) return
+    latestTracks = current
+    emitIfChanged(inspectMediaTracks(current, textDisabled = isTextEffectivelyDisabled(player)))
+  }
+
+  private fun isTextEffectivelyDisabled(player: ExoPlayer): Boolean =
+    subtitleChoice is SubChoice.Off ||
+      player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)
 
   private fun emitIfChanged(snapshot: MediaTracksSnapshot) {
     if (snapshot == lastEmitted) return
@@ -324,43 +257,4 @@ internal class TrackSelectorBridge(
 
   private fun activeTracks(player: ExoPlayer?): Tracks =
     if (!latestTracks.isEmpty) latestTracks else (player?.currentTracks ?: Tracks.EMPTY)
-
-  private fun candidatesOf(tracks: Tracks, trackType: Int): List<Candidate> {
-    val result = mutableListOf<Candidate>()
-    tracks.groups.forEachIndexed { groupIndex, group ->
-      if (group.type != trackType) return@forEachIndexed
-      for (trackIndex in 0 until group.length) {
-        if (!group.isTrackSupported(trackIndex)) continue
-        val format = group.getTrackFormat(trackIndex)
-        val info = TrackInfoSnapshot(
-          id = "$groupIndex:$trackIndex",
-          language = normalizeLang(format.language),
-          label = format.label?.trim()?.takeIf { it.isNotEmpty() },
-        )
-        result += Candidate(group = group, trackIndex = trackIndex, info = info)
-      }
-    }
-    return result
-  }
-
-  private fun findById(tracks: Tracks, trackType: Int, id: String): Candidate? =
-    candidatesOf(tracks, trackType).firstOrNull { it.info.id == id }
-
-  private fun resolveCandidate(tracks: Tracks, trackType: Int, wanted: TrackChoice): Candidate? {
-    val candidates = candidatesOf(tracks, trackType)
-    val exact = candidates.firstOrNull { it.info.id == wanted.id }
-    if (exact != null && (wanted.language == null || exact.info.language == wanted.language)) {
-      return exact
-    }
-    if (wanted.language != null && wanted.label != null) {
-      candidates.firstOrNull { it.info.language == wanted.language && it.info.label == wanted.label }?.let { return it }
-    }
-    if (wanted.language != null) {
-      candidates.firstOrNull { it.info.language == wanted.language }?.let { return it }
-    }
-    if (wanted.label != null) {
-      candidates.firstOrNull { it.info.label == wanted.label }?.let { return it }
-    }
-    return exact
-  }
 }

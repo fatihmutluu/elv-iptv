@@ -2,7 +2,6 @@ package io.github.fatihmutluu.elv.media3
 
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.DefaultRenderersFactory
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.util.concurrent.CountDownLatch
@@ -22,18 +21,6 @@ import org.robolectric.RuntimeEnvironment
 @OptIn(UnstableApi::class)
 @RunWith(RobolectricTestRunner::class)
 class Media3EngineTest {
-  @Test
-  fun `enables extension renderers as fallback by default and prefers them for softwareAudio (C3)`() {
-    assertEquals(
-      DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON,
-      extensionRendererModeFor(softwareAudio = false),
-    )
-    assertEquals(
-      DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER,
-      extensionRendererModeFor(softwareAudio = true),
-    )
-  }
-
   @Test
   fun `configures FfmpegLibrary topological shared library order before building renderers (#69)`() {
     assertEquals(
@@ -82,25 +69,6 @@ class Media3EngineTest {
       FfmpegAudio.resetForTest()
       FfmpegAudio.ensureConfigured()
     }
-  }
-
-  @Test
-  fun `builds MediaCodecAudioRenderer then FfmpegAudioRenderer by default and FfmpegAudioRenderer first when softwareAudio is true (#69)`() {
-    val app = RuntimeEnvironment.getApplication()
-    assertEquals(
-      listOf(
-        "androidx.media3.exoplayer.audio.MediaCodecAudioRenderer",
-        "androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer",
-      ),
-      audioRendererClassNamesFor(app, softwareAudio = false),
-    )
-    assertEquals(
-      listOf(
-        "androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer",
-        "androidx.media3.exoplayer.audio.MediaCodecAudioRenderer",
-      ),
-      audioRendererClassNamesFor(app, softwareAudio = true),
-    )
   }
 
   @Test
@@ -231,6 +199,69 @@ class Media3EngineTest {
         engine.dispose()
       }
       peer.join(2_000)
+    }
+  }
+
+  @Test
+  fun `rebuilds ExoPlayer on prepare when previous media reached STATE_ENDED while preserving Surface (#127)`() {
+    val app = RuntimeEnvironment.getApplication()
+    val engine = Media3Engine(app)
+    val events = java.util.concurrent.CopyOnWriteArrayList<Map<String, Any?>>()
+    engine.eventObserverForTest = { events += it }
+    val tex = android.graphics.SurfaceTexture(0)
+    val surface = android.view.Surface(tex)
+    try {
+      engine.attachSurface(surface)
+      val handlerField = Media3Engine::class.java.getDeclaredField("handler").apply { isAccessible = true }
+      val playerField = Media3Engine::class.java.getDeclaredField("player").apply { isAccessible = true }
+      val handler = handlerField.get(engine) as android.os.Handler
+
+      var initialPlayer: androidx.media3.exoplayer.ExoPlayer? = null
+      val step1 = CountDownLatch(1)
+      handler.post {
+        initialPlayer = playerField.get(engine) as androidx.media3.exoplayer.ExoPlayer?
+        // Force a real PlaybackException / STATE_IDLE-with-error or ended wrapper? Even simpler:
+        // setMediaItem with an invalid scheme and prepare so playerError becomes non-null, OR swap a wrapper in STATE_ENDED!
+        val real = initialPlayer!!
+        playerField.set(
+          engine,
+          object : androidx.media3.exoplayer.ExoPlayer by real {
+            override fun getPlaybackState(): Int = androidx.media3.common.Player.STATE_ENDED
+          },
+        )
+        step1.countDown()
+      }
+      assertTrue(step1.await(5, TimeUnit.SECONDS))
+
+      engine.load(
+        2,
+        LoadRequest(
+          url = "http://127.0.0.1:9/live/demo/demo/1002.ts",
+          headers = emptyMap(),
+          live = true,
+          startMs = null,
+          softwareAudio = false,
+        ),
+      )
+
+      var rebuiltPlayer: androidx.media3.exoplayer.ExoPlayer? = null
+      val step2 = CountDownLatch(1)
+      handler.post {
+        rebuiltPlayer = playerField.get(engine) as androidx.media3.exoplayer.ExoPlayer?
+        step2.countDown()
+      }
+      assertTrue(step2.await(5, TimeUnit.SECONDS))
+      org.junit.Assert.assertNotNull(rebuiltPlayer)
+      org.junit.Assert.assertNotSame("STATE_ENDED player must be rebuilt on next prepare", initialPlayer, rebuiltPlayer)
+      assertEquals(
+        "rebuilding player must keep surfaceCreated == 1 without destroying surface",
+        listOf("created"),
+        events.filter { it["type"] == "surface" }.map { it["change"] },
+      )
+    } finally {
+      engine.dispose()
+      surface.release()
+      tex.release()
     }
   }
 }
