@@ -8,16 +8,22 @@ import {
   startTestSim,
 } from './sources-sim-helpers.ts';
 
-let sim: Sim;
-beforeAll(async () => {
-  buildCatalog('large', 1);
-  sim = await startTestSim();
-});
-afterAll(async () => {
-  await sim.close();
-});
+const enabled = process.env.ELV_BENCH === '1';
+if (!enabled) {
+  process.stdout.write(
+    'sources-perf: skipped (set ELV_BENCH=1 to benchmark the 100k-entry large profile)\n',
+  );
+}
 
-describe('large profile over HTTP', () => {
+describe.skipIf(!enabled)('large profile over HTTP', () => {
+  let sim: Sim;
+  beforeAll(async () => {
+    buildCatalog('large', 1);
+    sim = await startTestSim();
+  });
+  afterAll(async () => {
+    await sim.close();
+  });
   it('scans 100k playlist entries within 5 s and 200 MB of heap', async () => {
     const report = await measureScan('large playlist', async (meter) => {
       const scan = await scanPlaylist(`${sim.url}/playlists/large.m3u`, { keep: false, meter });

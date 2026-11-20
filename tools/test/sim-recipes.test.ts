@@ -99,13 +99,14 @@ withFfmpeg('new recipes', () => {
       const files = await ensureRecipe(r, opts());
       const want = EXPECT[name];
       const loop = streamLines(ffmpeg as string, files.loopTs);
-      for (const [file, patterns] of [
-        [files.loopTs, want?.loop],
-        [files.vodMp4, want?.mp4],
-        [files.vodMkv, want?.mkv],
+      for (const [file, patterns, precomputed] of [
+        [files.loopTs, want?.loop, loop],
+        [files.vodMp4, want?.mp4, undefined],
+        [files.vodMkv, want?.mkv, undefined],
       ] as const) {
-        const lines = streamLines(ffmpeg as string, file);
-        for (const re of patterns ?? [])
+        if (!patterns?.length) continue;
+        const lines = precomputed ?? streamLines(ffmpeg as string, file);
+        for (const re of patterns)
           expect(
             lines.some((l) => re.test(l)),
             `${name} ${file} ${re}`,

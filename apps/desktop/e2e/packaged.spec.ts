@@ -165,33 +165,6 @@ function removeUserDataDir(userDataDir: string): void {
   rmSync(userDataDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
 }
 
-test('packaged desktop binary boots from app.asar with production fuses enabled', async () => {
-  const binary = requirePackagedBinary();
-  if (!binary) return;
-
-  const userDataDir = mkdtempSync(join(tmpdir(), 'elv-e2e-packaged-'));
-  const { child, wsUrl } = await launchWithCdp(binary, userDataDir);
-  let closeBrowser: (() => Promise<void>) | undefined;
-  try {
-    const connected = await firstAppPage(wsUrl);
-    closeBrowser = connected.close;
-    const { page } = connected;
-
-    await expect(page).toHaveTitle('ELV IPTV');
-    await expect(page.getByText('ELV IPTV')).toBeVisible();
-    expect(page.url().toLowerCase()).toBe('app://elv/');
-
-    const hasNodeRequire = await page.evaluate(
-      () => typeof (globalThis as { require?: unknown }).require !== 'undefined',
-    );
-    expect(hasNodeRequire).toBe(false);
-  } finally {
-    await closeBrowser?.().catch(() => {});
-    await stopProcess(child);
-    removeUserDataDir(userDataDir);
-  }
-});
-
 test('the packaged app ships the runtime', () => {
   if (process.platform === 'linux') {
     test.skip(true, 'Linux mpv runtime is not bundled in 0.1');
@@ -214,15 +187,11 @@ test('the packaged app ships the runtime', () => {
   }
 });
 
-test('the packaged app opens an engine', async () => {
-  if (process.platform === 'linux') {
-    test.skip(true, 'Linux mpv runtime is not bundled in 0.1');
-    return;
-  }
+test('packaged desktop binary boots from app.asar, opens engine and catalog utility process', async () => {
   const binary = requirePackagedBinary();
   if (!binary) return;
 
-  const userDataDir = mkdtempSync(join(tmpdir(), 'elv-e2e-engine-'));
+  const userDataDir = mkdtempSync(join(tmpdir(), 'elv-e2e-packaged-'));
   const { child, wsUrl } = await launchWithCdp(binary, userDataDir);
   let closeBrowser: (() => Promise<void>) | undefined;
   try {
@@ -230,71 +199,68 @@ test('the packaged app opens an engine', async () => {
     closeBrowser = connected.close;
     const { page } = connected;
 
-    await expect(page).toHaveTitle('ELV IPTV');
-    const opened = await page.evaluate(async () => {
-      const w = window as unknown as {
-        elv: {
-          player: {
-            open(): Promise<{ engineId: string; mainNowMs: number }>;
-            close(engineId: string): Promise<void>;
+    await test.step('boots from app.asar with production fuses enabled', async () => {
+      await expect(page).toHaveTitle('ELV IPTV');
+      await expect(page.getByText('ELV IPTV')).toBeVisible();
+      expect(page.url().toLowerCase()).toBe('app://elv/');
+
+      const hasNodeRequire = await page.evaluate(
+        () => typeof (globalThis as { require?: unknown }).require !== 'undefined',
+      );
+      expect(hasNodeRequire).toBe(false);
+    });
+
+    if (process.platform !== 'linux') {
+      await test.step('opens an engine', async () => {
+        const opened = await page.evaluate(async () => {
+          const w = window as unknown as {
+            elv: {
+              player: {
+                open(): Promise<{ engineId: string; mainNowMs: number }>;
+                close(engineId: string): Promise<void>;
+              };
+            };
+          };
+          const reply = await w.elv.player.open();
+          await w.elv.player.close(reply.engineId);
+          return reply;
+        });
+
+        expect(typeof opened.engineId).toBe('string');
+        expect(opened.engineId.length).toBeGreaterThan(0);
+        expect(Number.isFinite(opened.mainNowMs)).toBe(true);
+      });
+    }
+
+    await test.step('opens the catalog utility process and queries SQLite', async () => {
+      const result = await page.evaluate(async () => {
+        const w = window as unknown as {
+          elv: {
+            catalog: {
+              open(): Promise<{ ok: boolean; error?: { category: string; code: string } }>;
+              listSources(): Promise<unknown[]>;
+              categories(sourceId: string, kind: 'live' | 'movie' | 'series'): Promise<unknown[]>;
+              items(categoryId: string, offset: number, limit: number): Promise<unknown[]>;
+              close(): Promise<void>;
+            };
           };
         };
-      };
-      const reply = await w.elv.player.open();
-      await w.elv.player.close(reply.engineId);
-      return reply;
+        const opened = await w.elv.catalog.open();
+        const sources = await w.elv.catalog.listSources();
+        const cats = await w.elv.catalog.categories('none', 'live');
+        const items = await w.elv.catalog.items('none', 0, 10);
+        await w.elv.catalog.close();
+        return { opened, sources, cats, items };
+      });
+
+      expect(result).toEqual({
+        opened: { ok: true, value: undefined },
+        sources: [],
+        cats: [],
+        items: [],
+      });
+      expect(existsSync(join(userDataDir, 'catalog.db'))).toBe(true);
     });
-
-    expect(typeof opened.engineId).toBe('string');
-    expect(opened.engineId.length).toBeGreaterThan(0);
-    expect(Number.isFinite(opened.mainNowMs)).toBe(true);
-  } finally {
-    await closeBrowser?.().catch(() => {});
-    await stopProcess(child);
-    removeUserDataDir(userDataDir);
-  }
-});
-
-test('the packaged app opens the catalog utility process and queries SQLite', async () => {
-  const binary = requirePackagedBinary();
-  if (!binary) return;
-
-  const userDataDir = mkdtempSync(join(tmpdir(), 'elv-e2e-packaged-catalog-'));
-  const { child, wsUrl } = await launchWithCdp(binary, userDataDir);
-  let closeBrowser: (() => Promise<void>) | undefined;
-  try {
-    const connected = await firstAppPage(wsUrl);
-    closeBrowser = connected.close;
-    const { page } = connected;
-
-    await expect(page).toHaveTitle('ELV IPTV');
-    const result = await page.evaluate(async () => {
-      const w = window as unknown as {
-        elv: {
-          catalog: {
-            open(): Promise<{ ok: boolean; error?: { category: string; code: string } }>;
-            listSources(): Promise<unknown[]>;
-            categories(sourceId: string, kind: 'live' | 'movie' | 'series'): Promise<unknown[]>;
-            items(categoryId: string, offset: number, limit: number): Promise<unknown[]>;
-            close(): Promise<void>;
-          };
-        };
-      };
-      const opened = await w.elv.catalog.open();
-      const sources = await w.elv.catalog.listSources();
-      const cats = await w.elv.catalog.categories('none', 'live');
-      const items = await w.elv.catalog.items('none', 0, 10);
-      await w.elv.catalog.close();
-      return { opened, sources, cats, items };
-    });
-
-    expect(result).toEqual({
-      opened: { ok: true, value: undefined },
-      sources: [],
-      cats: [],
-      items: [],
-    });
-    expect(existsSync(join(userDataDir, 'catalog.db'))).toBe(true);
   } finally {
     await closeBrowser?.().catch(() => {});
     await stopProcess(child);

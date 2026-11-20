@@ -25,8 +25,8 @@ export interface CheckReport {
 }
 
 /**
- * Runs the checks concurrently. `only` selects a single key; an unknown key is reported
- * as a failure. A check that throws counts as failed.
+ * Runs the checks concurrently. `only` accepts one check key or a comma-separated list of keys;
+ * any unknown key is reported as a failure. A check that throws counts as failed.
  */
 export async function runChecks(
   checks: Check[],
@@ -34,14 +34,22 @@ export async function runChecks(
 ): Promise<CheckReport> {
   let selected = checks;
   if (opts.only !== undefined) {
-    selected = checks.filter((c) => c.key === opts.only);
-    if (selected.length === 0) {
+    const requested = opts.only
+      .split(',')
+      .map((k) => k.trim())
+      .filter((k) => k !== '');
+    const knownSet = new Set(checks.map((c) => c.key));
+    const unknown = requested.filter((k) => !knownSet.has(k));
+    if (requested.length === 0 || unknown.length > 0) {
       const known = checks.map((c) => c.key).join(', ');
+      const bad = unknown.length > 0 ? unknown.join(', ') : opts.only;
       const results = [
-        { key: opts.only, ok: false, output: `unknown check "${opts.only}"; known: ${known}` },
+        { key: opts.only, ok: false, output: `unknown check "${bad}"; known: ${known}` },
       ];
       return { results, passed: 0, failed: 1 };
     }
+    const want = new Set(requested);
+    selected = checks.filter((c) => want.has(c.key));
   }
   const results = await Promise.all(
     selected.map(async (c): Promise<CheckResult> => {

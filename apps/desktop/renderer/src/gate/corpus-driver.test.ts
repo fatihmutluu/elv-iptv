@@ -1,6 +1,6 @@
 import type { EngineEvent, LoadCommand, MediaTracks, PlayerEngine } from '@elv/playback';
 import { createFakePlayerEngine, type FakeStep } from '@elv/playback/testing';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { corpusLine, createCorpusRun, type DesktopCorpusReport } from './corpus-driver.ts';
 
 const BASE = 'http://127.0.0.1:7878';
@@ -206,6 +206,24 @@ function realTimers(): Timers {
   };
 }
 
+async function settleWithFakeTimers<T>(promise: Promise<T>): Promise<T> {
+  let done = false;
+  const wrapped = promise.finally(() => {
+    done = true;
+  });
+  while (!done) {
+    if (vi.getTimerCount() === 0) {
+      await Promise.resolve();
+      if (done) break;
+      if (vi.getTimerCount() === 0) {
+        throw new Error('settleWithFakeTimers: promise did not settle with no pending timers');
+      }
+    }
+    await vi.advanceTimersToNextTimerAsync();
+  }
+  return wrapped;
+}
+
 async function sweep(opts: EngineOpts = {}, itemTimeoutMs = 200): Promise<DesktopCorpusReport> {
   const { engine } = makeEngine(opts);
   const run = createCorpusRun({
@@ -217,7 +235,7 @@ async function sweep(opts: EngineOpts = {}, itemTimeoutMs = 200): Promise<Deskto
     holdMs: 3,
     itemTimeoutMs,
   });
-  const report = await run.start();
+  const report = await settleWithFakeTimers(run.start());
   run.dispose();
   return report;
 }
@@ -226,6 +244,14 @@ const reasons = (report: DesktopCorpusReport): Record<string, string> =>
   Object.fromEntries(report.failed.map((f) => [f.id, f.reason]));
 
 describe('createCorpusRun', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('passes all 29 items, switches the tracks it asks for and seeks the VOD HLS item', async () => {
     const { engine, seeks, selections } = makeEngine();
     const run = createCorpusRun({
@@ -237,7 +263,7 @@ describe('createCorpusRun', () => {
       holdMs: 3,
       itemTimeoutMs: 200,
     });
-    const report = await run.start();
+    const report = await settleWithFakeTimers(run.start());
     run.dispose();
     expect(report).toEqual({
       total: 29,
@@ -328,7 +354,7 @@ describe('createCorpusRun', () => {
       holdMs: 25,
       itemTimeoutMs: 300,
     });
-    const report = await run.start();
+    const report = await settleWithFakeTimers(run.start());
     run.dispose();
     expect(report.passed).toBe(29);
     expect(selectionDelaysMs.length).toBeGreaterThan(0);
@@ -372,7 +398,7 @@ describe('createCorpusRun', () => {
       itemTimeoutMs: 60_000,
     });
     const started = run.start();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.advanceTimersByTimeAsync(20);
     run.dispose();
     const report = await started;
     expect(report.passed).toBe(0);
@@ -392,7 +418,7 @@ describe('createCorpusRun', () => {
       itemTimeoutMs: 200,
     });
     const started = run.start();
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await vi.advanceTimersByTimeAsync(30);
     run.dispose();
     await started;
     expect(timers.active()).toBe(0);

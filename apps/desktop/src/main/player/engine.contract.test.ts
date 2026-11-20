@@ -96,7 +96,7 @@ async function fakeHarness(): Promise<EngineContractHarness> {
     argsPresenter('child-window', ['--wid=1']),
     ['--no-config'],
   );
-  const settle = quietSettle(engine, { minMs: 200, quietMs: 100, maxMs: 3000 });
+  const settle = quietSettle(engine, { minMs: 80, quietMs: 50, maxMs: 2000 });
   await vi.waitFor(() => expect(fake.connections).toBe(1));
   await settle();
   return {

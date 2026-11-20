@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
+import { createServer, type Server, type ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type {
@@ -207,6 +207,7 @@ let simChild: ChildProcess | undefined;
 let simUrl = '';
 let m3uServer: Server | undefined;
 let m3uBaseUrl = '';
+const hangingResponses = new Set<ServerResponse>();
 const tempDirs: string[] = [];
 const activeHarnesses: Array<{ shutdown: () => Promise<void> }> = [];
 
@@ -254,6 +255,13 @@ beforeAll(async () => {
       res.end(body);
       return;
     }
+    if (req.url?.startsWith('/hang.m3u')) {
+      hangingResponses.add(res);
+      res.once('close', () => hangingResponses.delete(res));
+      res.writeHead(200, { 'content-type': 'audio/x-mpegurl; charset=utf-8' });
+      res.write('#EXTM3U\n');
+      return;
+    }
     res.writeHead(404);
     res.end();
   });
@@ -270,6 +278,8 @@ afterAll(async () => {
     simChild.kill();
     await done;
   }
+  for (const res of hangingResponses) res.destroy();
+  hangingResponses.clear();
   await new Promise<void>((resolve) => (m3uServer ? m3uServer.close(() => resolve()) : resolve()));
 });
 
@@ -361,6 +371,8 @@ describe('createCatalogWorkerRuntime', () => {
       },
     }).promise;
     expect(addedSecretXtream.ok).toBe(true);
+    if (!addedSecretXtream.ok) return;
+    const secretXtreamId = addedSecretXtream.value.id;
 
     const importedM3u = await client.call<Result<ImportSummary>>({
       method: 'importSource',
@@ -370,9 +382,14 @@ describe('createCatalogWorkerRuntime', () => {
 
     // Verify full CatalogService browse + resolveStream parity
     const sources = await client.call<SourceRow[]>({ method: 'listSources' }).promise;
-    expect(sources.map((s) => s.name)).toEqual(['Sim Demo', 'Tokenized M3U', 'Secret Check']);
-    expect(sources[0]?.needsImport).toBe(false);
-    expect(sources[2]?.needsImport).toBe(true);
+    expect(sources).toHaveLength(3);
+    expect(new Set(sources.map((s) => s.name))).toEqual(
+      new Set(['Sim Demo', 'Tokenized M3U', 'Secret Check']),
+    );
+    const byId = new Map(sources.map((s) => [s.id, s]));
+    expect(byId.get(xtreamId)?.needsImport).toBe(false);
+    expect(byId.get(m3uId)?.needsImport).toBe(false);
+    expect(byId.get(secretXtreamId)?.needsImport).toBe(true);
 
     const liveCats = await client.call<CategoryRow[]>({
       method: 'categories',
@@ -534,11 +551,9 @@ describe('createCatalogWorkerRuntime', () => {
     const added = await client.call<Result<SourceRow>>({
       method: 'addSource',
       input: {
-        kind: 'xtream',
+        kind: 'm3u',
         name: 'Cancelable',
-        server: simUrl,
-        username: 'large',
-        password: 'large',
+        playlistUrl: `${m3uBaseUrl}/hang.m3u`,
       },
     }).promise;
     expect(added.ok).toBe(true);

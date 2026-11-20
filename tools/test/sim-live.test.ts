@@ -257,7 +257,8 @@ describe('routes that need no media', () => {
       }).catch(() => null);
       setTimeout(() => ac.abort(), 80);
       await pending;
-      await new Promise((r) => setTimeout(r, 1100));
+      await waitFor(() => sim.requests().some((r) => r.status === 499));
+      await new Promise((r) => setTimeout(r, 100));
       expect(readdirSync(freshCache)).toEqual([]);
     } finally {
       removeCache(freshCache);

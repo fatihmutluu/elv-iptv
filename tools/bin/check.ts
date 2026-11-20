@@ -10,7 +10,7 @@ try {
   }));
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`${message}\nusage: pnpm check [--only <key>] [--json]\n`);
+  process.stderr.write(`${message}\nusage: pnpm check [--only <key[,key...]>] [--json]\n`);
   process.exit(2);
 }
 

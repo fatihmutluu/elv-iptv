@@ -2,6 +2,7 @@ name: Native builds
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
   workflow_dispatch:
@@ -13,9 +14,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# No workflow-level "paths:" filter: the build jobs below are required checks. A job skipped by
-# "needs" + "if" reports as skipped, which satisfies a required check; a workflow skipped by
-# "paths:" never reports at all and blocks the merge.
+# No workflow-level "paths:" filter: the aggregate `native` job is a required check. A job skipped by
+# "needs" + "if" reports as skipped, which satisfies `native`; a workflow skipped by "paths:" never
+# reports at all and blocks the merge.
 jobs:
   changes:
     runs-on: ubuntu-24.04
@@ -24,19 +25,33 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      mobile: ${{ github.event_name != 'pull_request' || steps.filter.outputs.mobile == 'true' }}
-      desktop: ${{ github.event_name != 'pull_request' || steps.filter.outputs.desktop == 'true' }}
-      gate: ${{ github.event_name != 'pull_request' || steps.filter.outputs.gate == 'true' }}
+      bundle: ${{ github.event_name == 'pull_request' && steps.filter.outputs.bundle == 'true' }}
+      mobile: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft != true && steps.filter.outputs.mobile == 'true') }}
+      desktop: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft != true && steps.filter.outputs.desktop == 'true') }}
+      desktop_matrix: ${{ (github.event_name != 'pull_request' || steps.filter.outputs.desktop_macos == 'true') && '["windows-2025","macos-26","ubuntu-24.04"]' || '["windows-2025","ubuntu-24.04"]' }}
+      gate: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft != true && steps.filter.outputs.gate == 'true') }}
     steps:
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         if: github.event_name == 'pull_request'
         with:
           filters: |
-            mobile:
-              - 'apps/tv-mobile/**'
-              - 'modules/**'
+            bundle:
               - 'packages/**'
+              - 'apps/tv-mobile/src/**'
+              - 'apps/tv-mobile/app.config.ts'
+              - 'apps/tv-mobile/babel.config.js'
+              - 'apps/tv-mobile/index.ts'
+              - 'apps/desktop/renderer/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - '.github/workflows/native.yml'
+            mobile:
+              - 'modules/**'
+              - 'apps/tv-mobile/config/**'
+              - 'apps/tv-mobile/app.config.ts'
+              - 'apps/tv-mobile/package.json'
+              - 'apps/tv-mobile/assets/**'
               - 'tools/src/root.ts'
               - 'tools/src/prebuild-stamp.ts'
               - 'tools/src/env.ts'
@@ -44,7 +59,6 @@ jobs:
               - 'tools/bin/release-hygiene.ts'
               - 'tools/src/ffmpeg-media3/**'
               - 'tools/bin/ffmpeg-media3.ts'
-              - 'package.json'
               - '.npmrc'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
@@ -52,32 +66,21 @@ jobs:
               - '.github/actions/**'
               - '.github/workflows/native.yml'
             gate:
-              - 'packages/**'
-              - 'modules/**'
-              - 'apps/tv-mobile/**'
+              - 'packages/focus-core/**'
+              - 'packages/ui-kit/src/tv/**'
+              - 'modules/remote-keys/**'
+              - 'apps/tv-mobile/src/gate/**'
               - 'tools/src/gates/**'
-              - 'tools/src/sim/**'
               - 'tools/bin/gate.ts'
-              - 'tools/bin/sim.ts'
-              - 'tools/src/exec.ts'
-              - 'tools/src/env.ts'
-              - 'tools/src/prebuild-stamp.ts'
-              - 'tools/src/run-command.ts'
-              - 'tools/src/root.ts'
-              - 'tools/src/ffmpeg-media3/**'
-              - 'tools/bin/ffmpeg-media3.ts'
               - 'docs/learned/gates/**'
-              - 'package.json'
-              - '.npmrc'
               - 'pnpm-lock.yaml'
-              - 'pnpm-workspace.yaml'
-              - '.node-version'
-              - '.github/actions/**'
               - '.github/workflows/native.yml'
             desktop:
               - 'apps/desktop/**'
-              - 'modules/**'
-              - 'packages/**'
+              - 'packages/data/**'
+              - 'packages/playback/**'
+              - 'packages/sources/**'
+              - 'packages/domain/**'
               - 'tools/src/mpv/**'
               - 'tools/bin/mpv.ts'
               - 'tools/src/root.ts'
@@ -85,13 +88,55 @@ jobs:
               - 'tools/src/env.ts'
               - 'tools/src/release-hygiene.ts'
               - 'tools/bin/release-hygiene.ts'
-              - 'package.json'
               - '.npmrc'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - '.node-version'
               - '.github/actions/**'
               - '.github/workflows/native.yml'
+            desktop_macos:
+              - 'apps/desktop/src/main/main.ts'
+              - 'apps/desktop/src/main/catalog/secret-store.ts'
+              - 'apps/desktop/src/main/player/runtime-path.ts'
+              - 'apps/desktop/src/main/player/mpv/**'
+              - 'apps/desktop/src/main/player/presenter/**'
+              - 'apps/desktop/e2e/packaged.spec.ts'
+              - 'apps/desktop/mpv-runtime.lock.json'
+              - 'apps/desktop/electron-builder.*'
+              - 'apps/desktop/package.json'
+              - 'apps/desktop/resources/**'
+              - 'apps/desktop/scripts/**'
+              - 'tools/src/mpv/**'
+              - 'tools/bin/mpv.ts'
+              - 'pnpm-lock.yaml'
+              - '.node-version'
+              - '.github/actions/**'
+              - '.github/workflows/native.yml'
+
+  # Fast PR bundle + release-hygiene check for JS/TS changes (~75s instead of 14m Xcode/Gradle).
+  # Full native compiles still run on native-touching PRs and on every push to `main`.
+  bundle-hygiene:
+    needs: changes
+    if: needs.changes.outputs.bundle == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Export production Android, iOS, and desktop web bundles and verify release hygiene
+        env:
+          APP_VARIANT: production
+        run: |
+          set -euo pipefail
+          pnpm --filter tv-mobile exec expo export --platform android --output-dir "$RUNNER_TEMP/bundle-android"
+          pnpm --filter tv-mobile exec expo export --platform ios --output-dir "$RUNNER_TEMP/bundle-ios"
+          pnpm --filter @elv/desktop-renderer exec expo export -p web --output-dir "$RUNNER_TEMP/bundle-web"
+          node tools/bin/release-hygiene.ts \
+            --artifact "$RUNNER_TEMP/bundle-android" \
+            --artifact "$RUNNER_TEMP/bundle-ios" \
+            --artifact "$RUNNER_TEMP/bundle-web"
 
   android-mobile:
     needs: changes
@@ -129,7 +174,7 @@ jobs:
         run: pnpm --filter tv-mobile exec expo prebuild --platform android --no-install
       - name: Build the debug APK
         working-directory: apps/tv-mobile/android
-        run: ./gradlew assembleDebug --quiet --no-daemon
+        run: ./gradlew assembleDebug --build-cache --quiet --no-daemon
       - name: Verify Android mobile release hygiene (#11, #12, #19)
         env:
           APP_VARIANT: production
@@ -190,7 +235,7 @@ jobs:
         run: pnpm --filter tv-mobile exec expo prebuild --platform android --no-install
       - name: Build the debug APK and run the native modules' JVM unit tests
         working-directory: apps/tv-mobile/android
-        run: ./gradlew assembleDebug :elv-remote-keys:testDebugUnitTest :elv-engine-media3:testDebugUnitTest --quiet --no-daemon
+        run: ./gradlew assembleDebug :elv-remote-keys:testDebugUnitTest :elv-engine-media3:testDebugUnitTest --build-cache --quiet --no-daemon
       - name: Verify Android TV and Fire OS release hygiene (#11, #12, #19)
         env:
           APP_VARIANT: production
@@ -371,9 +416,7 @@ jobs:
           key: ${{ steps.spm-cache.outputs.cache-primary-key }}
 
   # Report-only until five green runs on main; then drop continue-on-error and add the job to the "native" needs
-  # (spec 2026-11-13-focus-list-gate, sections 5.6 and 9). The CI emulator (software GPU) is not comparable with the
-  # local baseline, so it uses its own file and reports the absolute budgets as warnings (--budgets warn); regressions
-  # against that file and focus losses fail. While the file is absent only focus losses fail.
+  # (spec 2026-11-13-focus-list-gate, sections 5.6 and 9).
   gate-list:
     needs: changes
     if: needs.changes.outputs.gate == 'true'
@@ -413,7 +456,7 @@ jobs:
         run: pnpm --filter tv-mobile exec expo prebuild --clean --platform android --no-install
       - name: Build the release APK (JS bundled, debug-signed)
         working-directory: apps/tv-mobile/android
-        run: ./gradlew assembleRelease --quiet --no-daemon -PreactNativeArchitectures=x86_64
+        run: ./gradlew assembleRelease --build-cache --quiet --no-daemon -PreactNativeArchitectures=x86_64
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -618,7 +661,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2025, macos-26, ubuntu-24.04]
+        os: ${{ fromJson(needs.changes.outputs.desktop_matrix) }}
     env:
       # Unsigned builds: electron-builder must not look for a signing identity,
       # while macOS still needs its ad-hoc (`-`) signature applied after fuse flipping on PRs.
@@ -690,7 +733,7 @@ jobs:
   # Branch protection requires this job (`native`), not the individual build jobs above.
   native:
     if: always()
-    needs: [changes, android-mobile, android-tv, ios, tvos, desktop]
+    needs: [changes, bundle-hygiene, android-mobile, android-tv, ios, tvos, desktop]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}

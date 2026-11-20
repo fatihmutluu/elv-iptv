@@ -68,6 +68,7 @@ function stubPresenter(): VideoPresenter {
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
+  vi.useRealTimers();
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 
@@ -293,8 +294,21 @@ describe('MpvEngine audio and subtitle track selection', () => {
       { afterMs: 20, property: 'audio-device-list', value: [{ name: 'auto' }, { name: 'hdmi' }] },
     ];
     const { fake, engine } = await setup({ [URL_MULTI]: hotplugScript });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     engine.load({ attempt: 1, url: URL_MULTI, headers: {}, kind: 'vod' });
 
-    await vi.waitFor(() => expect(fake.sent).toContainEqual(['ao-reload']), { timeout: 2000 });
+    const until = async (check: () => boolean): Promise<void> => {
+      for (let i = 0; i < 20000 && !check(); i += 1) {
+        await new Promise((r) => setImmediate(r));
+      }
+      expect(check()).toBe(true);
+    };
+
+    await until(() => fake.sent.some((c) => c[0] === 'loadfile'));
+    await vi.advanceTimersByTimeAsync(25);
+    await until(() => vi.getTimerCount() > 0);
+    await vi.advanceTimersByTimeAsync(500);
+    await until(() => fake.sent.some((c) => c[0] === 'ao-reload'));
+    expect(fake.sent).toContainEqual(['ao-reload']);
   });
 });

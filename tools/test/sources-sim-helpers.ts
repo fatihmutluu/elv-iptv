@@ -28,7 +28,10 @@ export const SIM_CLOCK = new Date('2026-06-15T12:00:00Z');
 export const startTestSim = (): Promise<Sim> =>
   startSim({ port: 0, clock: SIM_CLOCK, ffmpegPath: null });
 
-export const http: HttpClient = createFetchHttpClient(fetch as unknown as FetchLike);
+export const createTestHttpClient = (): HttpClient =>
+  createFetchHttpClient(fetch as unknown as FetchLike);
+
+export const http: HttpClient = createTestHttpClient();
 
 /** Node decompressor built on the global `DecompressionStream`. */
 export const gunzipAdapter: Decompressor = {
@@ -61,7 +64,7 @@ export function clientFor(
   sim: Sim,
   user: string,
   transport?: TransportSettings,
-  client: HttpClient = http,
+  client: HttpClient = createTestHttpClient(),
 ): XtreamClient {
   const password = user;
   return createXtreamClient({

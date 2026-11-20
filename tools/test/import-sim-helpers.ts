@@ -20,7 +20,7 @@ import {
 import Database from 'better-sqlite3';
 import type { Catalog } from '../src/sim/catalog.ts';
 import { programmesFor } from '../src/sim/xmltv.ts';
-import { gunzipAdapter, http, type Sim } from './sources-sim-helpers.ts';
+import { createTestHttpClient, gunzipAdapter, type Sim } from './sources-sim-helpers.ts';
 
 /** In-memory secret store that can dump its content. */
 function memorySecrets(): SecretStore & { dump(): Record<string, string> } {
@@ -78,7 +78,7 @@ export async function openEnv(options: { file?: boolean; client?: HttpClient } =
     forbidden: [],
     deps: {
       db,
-      http: options.client ?? http,
+      http: options.client ?? createTestHttpClient(),
       secrets,
       scheduler: countingScheduler(),
       clock: () => Date.now(),

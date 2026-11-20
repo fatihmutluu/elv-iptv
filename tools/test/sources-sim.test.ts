@@ -23,8 +23,13 @@ afterAll(async () => {
 
 const PROFILE = { demo: 'small', large: 'large', compat: 'compat', quirks: 'small' } as const;
 
+const USERS =
+  process.env.ELV_BENCH === '1'
+    ? (['demo', 'large', 'compat', 'quirks'] as const)
+    : (['demo', 'compat', 'quirks'] as const);
+
 describe('xtream round trip', () => {
-  for (const user of ['demo', 'large', 'compat', 'quirks'] as const) {
+  for (const user of USERS) {
     it(`reads the ${user} account catalog`, async () => {
       const catalog = buildCatalog(PROFILE[user], 1);
       const client = clientFor(sim, user);
