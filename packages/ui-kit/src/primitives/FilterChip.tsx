@@ -1,6 +1,6 @@
 import { type ReactElement, useCallback, useState } from 'react';
 import { Pressable, type StyleProp, StyleSheet, Text, View, type ViewStyle } from 'react-native';
-import { useTheme } from '../theme';
+import { useTheme, webCursorPointer, webShadow, webTransition } from '../theme';
 import { useViewport } from '../viewport';
 
 /** Props of {@link FilterChip}. */
@@ -14,10 +14,18 @@ export interface FilterChipProps {
   style?: StyleProp<ViewStyle>;
 }
 
+const TV_FOCUS_NATIVE_SHADOW: ViewStyle = {
+  shadowColor: 'rgba(0, 0, 0, 1)',
+  shadowOffset: { width: 0, height: 6 },
+  shadowOpacity: 0.5,
+  shadowRadius: 12,
+  elevation: 8,
+};
+
 /**
  * Pill-shaped genre, category, or search-scope filter chip.
- * Active selection uses neutral high-contrast `ctaBg`/`ctaFg`, while touch viewports expand to a
- * `40px` minimum target height.
+ * Active selection uses neutral high-contrast `ctaBg`/`ctaFg` with bold `'700'` weight, while
+ * touch viewports expand to a `40px` minimum target height.
  */
 export function FilterChip({
   label,
@@ -38,7 +46,12 @@ export function FilterChip({
   const handleHoverIn = useCallback(() => setHovered(true), []);
   const handleHoverOut = useCallback(() => setHovered(false), []);
 
-  const minHeight = viewport.inputModality === 'touch' ? 40 : 36;
+  const minHeight = viewport.inputModality === 'touch' ? 40 : 32;
+  const transition = webTransition(
+    theme,
+    'transform, background-color, border-color, opacity, box-shadow',
+  );
+  const cursor = !disabled ? webCursorPointer() : undefined;
 
   return (
     <Pressable
@@ -63,10 +76,10 @@ export function FilterChip({
           : showTvFocus
             ? theme.colors.focusFill
             : hovered && !disabled
-              ? theme.colors.bgElevated
-              : theme.colors.bgSurface;
+              ? theme.colors.chipHoverBg
+              : theme.colors.chipBg;
 
-        const borderColor = selected ? theme.colors.ctaBg : theme.colors.surfaceBorder;
+        const borderColor = selected ? theme.colors.ctaBg : theme.colors.chipBorder;
         const pressScale = theme.reduceMotion ? 1 : 0.98;
         const scale = disabled
           ? 1
@@ -84,10 +97,14 @@ export function FilterChip({
             backgroundColor,
             borderColor,
             borderWidth: 1,
-            paddingHorizontal: theme.spacing.md,
+            paddingHorizontal: 14,
             opacity: disabled ? 0.45 : state.pressed ? 0.88 : 1,
             transform: [{ scale }],
           },
+          transition,
+          cursor,
+          showTvFocus ? TV_FOCUS_NATIVE_SHADOW : undefined,
+          showTvFocus ? webShadow('0 10px 24px rgba(0, 0, 0, 0.6)') : undefined,
           style,
         ];
       }}
@@ -98,12 +115,18 @@ export function FilterChip({
           !disabled && (focused === true || (viewport.inputModality === 'tv' && activeFocus));
         const textColor = selected
           ? theme.colors.ctaFg
-          : showTvFocus
+          : showTvFocus || (hovered && !disabled)
             ? theme.colors.textPrimary
             : theme.colors.textSecondary;
         return (
           <>
-            <Text numberOfLines={1} style={[theme.typography.caption, { color: textColor }]}>
+            <Text
+              numberOfLines={1}
+              style={[
+                theme.typography.caption,
+                { color: textColor, fontWeight: selected ? '700' : '600' },
+              ]}
+            >
               {label}
             </Text>
             {showTvFocus ? (

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { resolveGate } from '../gate/params.ts';
-import { getWorkbenchDevice, shouldMountWorkbench, WORKBENCH_DEVICES } from './presets.ts';
+import {
+  computeFittedFrame,
+  deviceFamilyOf,
+  getWorkbenchDevice,
+  shouldMountWorkbench,
+  toggleDeviceOrientation,
+  WORKBENCH_DEVICES,
+} from './presets.ts';
 
 describe('workbench presets & dev gating', () => {
   it('never mounts Workbench in production builds or active --elv-gate= runs', () => {
@@ -53,5 +60,50 @@ describe('workbench presets & dev gating', () => {
     expect(getWorkbenchDevice('phone-portrait').viewport.orientation).toBe('portrait');
     expect(getWorkbenchDevice('phone-landscape').viewport.orientation).toBe('landscape');
     expect(getWorkbenchDevice('desktop').frameWidth).toBe('fluid');
+  });
+
+  it('fits device frames inside the available stage without exceeding 100% scale or breaking aspect ratio', () => {
+    const tvTight = computeFittedFrame({
+      frameWidth: 1280,
+      frameHeight: 720,
+      stageWidth: 960,
+      stageHeight: 600,
+      paddingX: 48,
+      paddingY: 72,
+    });
+    expect(tvTight.width).toBeLessThanOrEqual(960 - 48);
+    expect(tvTight.height).toBeLessThanOrEqual(600 - 72);
+    expect(tvTight.scale).toBeLessThan(1);
+    expect(tvTight.fitPercent).toBe(Math.round(tvTight.scale * 100));
+    expect(Math.abs(tvTight.width / tvTight.height - 16 / 9)).toBeLessThan(0.02);
+
+    const phoneRoomy = computeFittedFrame({
+      frameWidth: 390,
+      frameHeight: 844,
+      stageWidth: 1400,
+      stageHeight: 1100,
+    });
+    expect(phoneRoomy.scale).toBe(1);
+    expect(phoneRoomy.fitPercent).toBe(100);
+    expect(phoneRoomy.width).toBe(390);
+    expect(phoneRoomy.height).toBe(844);
+  });
+
+  it('toggles orientation only for phone and tablet device presets', () => {
+    expect(toggleDeviceOrientation('phone-portrait')).toBe('phone-landscape');
+    expect(toggleDeviceOrientation('phone-landscape')).toBe('phone-portrait');
+    expect(toggleDeviceOrientation('tablet-portrait')).toBe('tablet-landscape');
+    expect(toggleDeviceOrientation('tablet-landscape')).toBe('tablet-portrait');
+    expect(toggleDeviceOrientation('tv')).toBe('tv');
+    expect(toggleDeviceOrientation('desktop')).toBe('desktop');
+  });
+
+  it('maps every device preset id to its 4-way family bucket', () => {
+    expect(deviceFamilyOf('tv')).toBe('tv');
+    expect(deviceFamilyOf('desktop')).toBe('desktop');
+    expect(deviceFamilyOf('tablet-portrait')).toBe('tablet');
+    expect(deviceFamilyOf('tablet-landscape')).toBe('tablet');
+    expect(deviceFamilyOf('phone-portrait')).toBe('phone');
+    expect(deviceFamilyOf('phone-landscape')).toBe('phone');
   });
 });

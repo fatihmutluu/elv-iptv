@@ -1,7 +1,7 @@
 import { type ReactElement, useCallback, useState } from 'react';
 import { Pressable, type StyleProp, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { Icon, type IconName } from '../icons';
-import { useTheme } from '../theme';
+import { useTheme, webBackdropBlur, webCursorPointer, webShadow, webTransition } from '../theme';
 import { useViewport } from '../viewport';
 
 /** Visual hierarchy tier of {@link CtaButton}. */
@@ -21,10 +21,18 @@ export interface CtaButtonProps {
   style?: StyleProp<ViewStyle>;
 }
 
+const TV_FOCUS_NATIVE_SHADOW: ViewStyle = {
+  shadowColor: 'rgba(0, 0, 0, 1)',
+  shadowOffset: { width: 0, height: 8 },
+  shadowOpacity: 0.55,
+  shadowRadius: 16,
+  elevation: 10,
+};
+
 /**
  * Sharp `4px` Cinema Quietude call-to-action button (`Play`, `Resume`, `Add & Sync`).
  * Primary buttons remain high-contrast neutral (`ctaBg`/`ctaFg`) with surface-aware hover on
- * desktop (never neon hover outlines) and crisp `focusRingColor` + scale on 10-foot TV focus.
+ * desktop (never neon hover outlines) and crisp `focusRingColor` + elevation on 10-foot TV focus.
  */
 export function CtaButton({
   label,
@@ -49,6 +57,12 @@ export function CtaButton({
   const handleHoverOut = useCallback(() => setHovered(false), []);
 
   const foreground = variant === 'primary' ? theme.colors.ctaFg : theme.colors.textPrimary;
+  const secondaryBlur = variant === 'secondary' ? webBackdropBlur(12) : undefined;
+  const transition = webTransition(
+    theme,
+    'transform, background-color, border-color, opacity, box-shadow',
+  );
+  const cursor = !disabled ? webCursorPointer() : undefined;
 
   return (
     <Pressable
@@ -73,11 +87,9 @@ export function CtaButton({
           variant === 'primary'
             ? theme.colors.ctaBg
             : variant === 'secondary'
-              ? showTvFocus
-                ? theme.colors.focusFill
-                : hovered && !disabled
-                  ? theme.colors.glassBg
-                  : theme.colors.actionGlassBg
+              ? showTvFocus || (hovered && !disabled)
+                ? theme.colors.actionGlassHoverBg
+                : theme.colors.actionGlassBg
               : showTvFocus
                 ? theme.colors.focusFill
                 : (hovered || state.pressed) && !disabled
@@ -112,12 +124,17 @@ export function CtaButton({
             borderRadius: theme.radius.button,
             borderWidth,
             borderColor,
-            paddingHorizontal: theme.spacing.md,
-            paddingVertical: theme.spacing.xs,
-            gap: theme.spacing.xs,
+            paddingHorizontal: 20,
+            paddingVertical: 10,
+            gap: 8,
             opacity,
             transform: [{ scale }],
           },
+          secondaryBlur,
+          transition,
+          cursor,
+          showTvFocus ? TV_FOCUS_NATIVE_SHADOW : undefined,
+          showTvFocus ? webShadow('0 12px 28px rgba(0, 0, 0, 0.65)') : undefined,
           style,
         ];
       }}
@@ -136,7 +153,10 @@ export function CtaButton({
                 testID={testID ? `${testID}-icon` : undefined}
               />
             ) : null}
-            <Text numberOfLines={1} style={[theme.typography.title, { color: foreground }]}>
+            <Text
+              numberOfLines={1}
+              style={[theme.typography.title, styles.label, { color: foreground }]}
+            >
               {label}
             </Text>
             {showTvFocus ? (
@@ -168,6 +188,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     alignSelf: 'flex-start',
+  },
+  label: {
+    fontWeight: '700',
   },
   focusRing: {
     position: 'absolute',

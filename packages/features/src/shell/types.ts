@@ -32,6 +32,8 @@ export interface AdaptiveNavShellProps<TId extends string = string> {
   readonly navFocused?: boolean;
   readonly onExitNavFocus?: () => void;
   readonly frosted?: boolean;
+  /** When true, positions the top bar absolutely over full-bleed hero content (`zIndex: 35`). */
+  readonly overlay?: boolean;
   readonly testID?: string;
   readonly children: ReactNode;
 }

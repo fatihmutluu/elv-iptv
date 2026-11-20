@@ -31,7 +31,7 @@ export function buildWindowOptions(
     title: WINDOW_TITLE,
     width: 1280,
     height: 720,
-    backgroundColor: '#101114',
+    backgroundColor: '#090A0E',
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,

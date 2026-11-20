@@ -7,7 +7,7 @@ import {
   ViewportProvider,
 } from '@elv/ui-kit';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
-import { Platform, StyleSheet, Text, type ViewStyle } from 'react-native';
+import { Platform, StyleSheet, Text, type TextStyle, type ViewStyle } from 'react-native';
 import { AdaptiveNavShell } from '../AdaptiveNavShell';
 import type { NavDestination, NavUtility } from '../types';
 
@@ -240,7 +240,7 @@ describe('AdaptiveNavShell', () => {
     const topNavStyle = flattenStyle(screen.getByTestId('app-top-nav').props.style);
     expect(topNavStyle.paddingHorizontal).toBe(96);
     expect(topNavStyle.paddingTop).toBe(54);
-    expect(topNavStyle.minHeight).toBe(118);
+    expect(topNavStyle.minHeight).toBe(112);
   });
 
   it('cycles across destinations and utilities with TV D-pad Left/Right and exits on Down/Select', async () => {
@@ -414,5 +414,116 @@ describe('AdaptiveNavShell', () => {
       </ThemeProvider>,
     );
     expect(screen.getByText('HD')).toBeTruthy();
+  });
+
+  it('styles multi-word brandTitle with leading accent mark inside one outer Text and positions top bar absolutely when overlay is true', async () => {
+    const view = await render(
+      <ViewportProvider
+        value={{ formFactor: 'desktop', orientation: 'landscape', width: 1280, height: 720 }}
+      >
+        <ThemeProvider preset="obsidianCrimson">
+          <AdaptiveNavShell
+            brandTitle="ELV IPTV"
+            destinations={FOUR_DESTINATIONS}
+            activeId="home"
+            overlay
+            frosted={false}
+            onSelectDestination={jest.fn()}
+          >
+            <Text>Hero Content</Text>
+          </AdaptiveNavShell>
+        </ThemeProvider>
+      </ViewportProvider>,
+    );
+
+    expect(screen.getByText('ELV IPTV')).toBeTruthy();
+    const accentNode = screen.getByTestId('app-brand-accent');
+    expect(accentNode).toHaveTextContent('ELV');
+    const accentStyle = (StyleSheet.flatten(accentNode.props.style as TextStyle) ??
+      {}) as TextStyle;
+    expect(accentStyle.color).toBe(THEME_PRESETS.obsidianCrimson.accent);
+
+    const overlayStyle = flattenStyle(screen.getByTestId('app-top-nav').props.style);
+    expect(overlayStyle.position).toBe('absolute');
+    expect(overlayStyle.top).toBe(0);
+    expect(overlayStyle.left).toBe(0);
+    expect(overlayStyle.right).toBe(0);
+    expect(overlayStyle.zIndex).toBe(35);
+
+    await view.rerender(
+      <ViewportProvider
+        value={{ formFactor: 'desktop', orientation: 'landscape', width: 1280, height: 720 }}
+      >
+        <ThemeProvider preset="obsidianCrimson">
+          <AdaptiveNavShell
+            brandTitle="ELV IPTV"
+            destinations={FOUR_DESTINATIONS}
+            activeId="home"
+            overlay={false}
+            onSelectDestination={jest.fn()}
+          >
+            <Text>Flow Content</Text>
+          </AdaptiveNavShell>
+        </ThemeProvider>
+      </ViewportProvider>,
+    );
+
+    const flowStyle = flattenStyle(screen.getByTestId('app-top-nav').props.style);
+    expect(flowStyle.position).not.toBe('absolute');
+  });
+
+  it('enforces >=40x40 touch targets on landscape touch viewports for links and utilities', async () => {
+    await render(
+      <ViewportProvider
+        value={{
+          formFactor: 'phone',
+          orientation: 'landscape',
+          inputModality: 'touch',
+          width: 844,
+          height: 390,
+        }}
+      >
+        <ThemeProvider preset="obsidianCrimson">
+          <AdaptiveNavShell
+            brandTitle="ELV IPTV"
+            destinations={FOUR_DESTINATIONS}
+            utilities={[
+              {
+                id: 'search',
+                label: 'Search',
+                icon: 'search',
+                showLabel: false,
+                testID: 'nav-util-search',
+                onPress: jest.fn(),
+              },
+              {
+                id: 'sources',
+                label: 'Sources',
+                icon: 'sources',
+                showLabel: true,
+                testID: 'nav-util-sources',
+                onPress: jest.fn(),
+              },
+            ]}
+            activeId="home"
+            onSelectDestination={jest.fn()}
+          >
+            <Text>Landscape Touch</Text>
+          </AdaptiveNavShell>
+        </ThemeProvider>
+      </ViewportProvider>,
+    );
+
+    const linkStyle = flattenStyle(screen.getByTestId('nav-tab-home').props.style);
+    expect(Number(linkStyle.minHeight)).toBeGreaterThanOrEqual(40);
+    expect(Number(linkStyle.minWidth)).toBeGreaterThanOrEqual(40);
+
+    const iconUtilStyle = flattenStyle(screen.getByTestId('nav-util-search').props.style);
+    expect(Number(iconUtilStyle.minHeight)).toBeGreaterThanOrEqual(40);
+    expect(Number(iconUtilStyle.minWidth)).toBeGreaterThanOrEqual(40);
+
+    const labeledUtilStyle = flattenStyle(screen.getByTestId('nav-util-sources').props.style);
+    expect(Number(labeledUtilStyle.minHeight)).toBeGreaterThanOrEqual(40);
+    expect(Number(labeledUtilStyle.minWidth)).toBeGreaterThanOrEqual(40);
   });
 });

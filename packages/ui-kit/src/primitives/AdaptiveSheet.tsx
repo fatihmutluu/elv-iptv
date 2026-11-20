@@ -9,7 +9,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { useI18n } from '../i18n';
-import { useTheme } from '../theme';
+import { useTheme, webBackdropBlur, webShadow, webTransition } from '../theme';
 import { useViewport } from '../viewport';
 
 /** Props of {@link AdaptiveSheet}. */
@@ -25,6 +25,14 @@ export interface AdaptiveSheetProps {
   testID?: string;
   children?: ReactNode;
 }
+
+const FLOATING_NATIVE_SHADOW: ViewStyle = {
+  shadowColor: 'rgba(0, 0, 0, 1)',
+  shadowOffset: { width: 0, height: 18 },
+  shadowOpacity: 0.65,
+  shadowRadius: 32,
+  elevation: 20,
+};
 
 /**
  * TV-safe non-`Modal` adaptive overlay (`UI_UX_PHILOSOPHY.md` §3).
@@ -52,13 +60,6 @@ export function AdaptiveSheet({
   const webBackdropProps =
     Platform.OS === 'web' ? ({ tabIndex: -1 } as Record<string, unknown>) : {};
   const isPortrait = viewport.orientation === 'portrait';
-  const webGlass =
-    Platform.OS === 'web'
-      ? ({
-          backdropFilter: 'blur(24px)',
-          WebkitBackdropFilter: 'blur(24px)',
-        } as unknown as ViewStyle)
-      : undefined;
 
   const panelStyle: ViewStyle = isPortrait
     ? {
@@ -93,12 +94,15 @@ export function AdaptiveSheet({
         style={[
           styles.panel,
           panelStyle,
+          FLOATING_NATIVE_SHADOW,
           {
             backgroundColor: theme.colors.glassBg,
             borderColor: theme.colors.glassBorder,
             padding: theme.spacing.md,
           },
-          webGlass,
+          webBackdropBlur(24),
+          webShadow('0 24px 64px rgba(0, 0, 0, 0.85)'),
+          webTransition(theme, 'transform, opacity', theme.motion.sheetMs),
           style,
         ]}
       >
@@ -109,16 +113,24 @@ export function AdaptiveSheet({
           />
         ) : null}
         {title !== undefined ? (
-          <Text
-            numberOfLines={1}
+          <View
+            testID={testID ? `${testID}-header` : undefined}
             style={[
-              theme.typography.title,
-              styles.title,
-              { color: theme.colors.textPrimary, marginBottom: theme.spacing.sm },
+              styles.header,
+              {
+                borderBottomColor: theme.colors.surfaceBorder,
+                paddingBottom: theme.spacing.sm,
+                marginBottom: theme.spacing.sm,
+              },
             ]}
           >
-            {title}
-          </Text>
+            <Text
+              numberOfLines={1}
+              style={[theme.typography.title, styles.title, { color: theme.colors.textPrimary }]}
+            >
+              {title}
+            </Text>
+          </View>
         ) : null}
         {children}
       </View>
@@ -142,7 +154,11 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     opacity: 0.55,
   },
+  header: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
   title: {
+    fontWeight: '700',
     includeFontPadding: false,
   },
 });

@@ -1,6 +1,6 @@
-import { GlassBar, Icon, useTheme } from '@elv/ui-kit';
-import type { ReactElement } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { GlassBar, Icon, useTheme, webCursorPointer, webTransition } from '@elv/ui-kit';
+import { type ReactElement, useState } from 'react';
+import { Pressable, StyleSheet, Text, type TextStyle, View } from 'react-native';
 import type { NavDestination, NavUtility } from './types';
 
 /** Props of {@link UtilitiesRow}. */
@@ -8,6 +8,7 @@ export interface UtilitiesRowProps {
   readonly utilities: readonly NavUtility[];
   readonly activeId: string;
   readonly isTv: boolean;
+  readonly isTouch?: boolean;
   readonly focusedItemId?: string;
   readonly compactPortrait: boolean;
   readonly onExitNavFocus?: () => void;
@@ -18,12 +19,21 @@ export function UtilitiesRow({
   utilities,
   activeId,
   isTv,
+  isTouch = false,
   focusedItemId,
   compactPortrait,
   onExitNavFocus,
 }: UtilitiesRowProps): ReactElement | null {
   const theme = useTheme();
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
   if (utilities.length === 0) return null;
+
+  const labelFontSize = Math.round((isTv ? 15 : 13.5) * theme.fontScale);
+  const bodyFontFamily = theme.typography.body.fontFamily;
+  const itemWebTransition = webTransition(theme, 'color, background-color, border-color');
+  const itemWebCursor = webCursorPointer();
+  const labelWebTransition = webTransition(theme, 'color') as TextStyle | undefined;
+  const needsTouchTarget = compactPortrait || isTouch;
 
   return (
     <View
@@ -37,8 +47,15 @@ export function UtilitiesRow({
         const utilTestId = util.testID ?? `nav-utility-${util.id}`;
         const selected = Boolean(util.active) || util.id === activeId;
         const tvFocused = focusedItemId === util.id;
+        const hovered = hoveredId === util.id;
         const showLabel = compactPortrait ? util.showLabel === true : util.showLabel !== false;
-        const fgColor = selected ? theme.colors.textPrimary : theme.colors.textSecondary;
+        const iconOnly = !showLabel;
+        const fgColor = selected || hovered ? theme.colors.textPrimary : theme.colors.textSecondary;
+        const bgColor = tvFocused
+          ? theme.colors.focusFill
+          : iconOnly && (hovered || selected)
+            ? theme.colors.subtleHighlight
+            : 'transparent';
 
         return (
           <Pressable
@@ -48,18 +65,22 @@ export function UtilitiesRow({
             accessibilityLabel={util.label}
             accessibilityState={{ selected }}
             {...(isTv ? { focusable: false } : {})}
+            onHoverIn={() => setHoveredId(util.id)}
+            onHoverOut={() => setHoveredId((prev) => (prev === util.id ? null : prev))}
             onPress={() => {
               util.onPress();
               onExitNavFocus?.();
             }}
             style={[
-              styles.utilityItem,
-              compactPortrait ? styles.touchTarget : null,
+              iconOnly ? styles.iconOnlyItem : styles.utilityItem,
+              needsTouchTarget ? styles.touchTarget : null,
+              itemWebTransition,
+              itemWebCursor,
               {
-                borderRadius: theme.radius.button,
+                borderRadius: iconOnly ? 999 : theme.radius.button,
                 borderWidth: isTv ? theme.focus.ringWidth : 0,
                 borderColor: tvFocused ? theme.colors.focusRingColor : 'transparent',
-                backgroundColor: tvFocused ? theme.colors.focusFill : 'transparent',
+                backgroundColor: bgColor,
               },
             ]}
           >
@@ -69,22 +90,29 @@ export function UtilitiesRow({
                 <Text
                   numberOfLines={1}
                   style={[
-                    isTv ? theme.typography.h2 : theme.typography.body,
-                    styles.navLabel,
-                    { color: fgColor },
+                    labelWebTransition,
+                    {
+                      ...(bodyFontFamily ? { fontFamily: bodyFontFamily } : {}),
+                      fontSize: labelFontSize,
+                      lineHeight: Math.round(labelFontSize * 1.3),
+                      fontWeight: selected ? '700' : '500',
+                      color: fgColor,
+                    },
                   ]}
                 >
                   {util.label}
                 </Text>
               ) : null}
             </View>
-            <View
-              testID={`${utilTestId}-underline`}
-              style={[
-                styles.activeUnderline,
-                { backgroundColor: selected ? theme.colors.accent : 'transparent' },
-              ]}
-            />
+            {showLabel ? (
+              <View
+                testID={`${utilTestId}-underline`}
+                style={[
+                  styles.activeUnderline,
+                  { backgroundColor: selected ? theme.colors.accent : 'transparent' },
+                ]}
+              />
+            ) : null}
           </Pressable>
         );
       })}
@@ -197,9 +225,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   utilityItem: {
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    minHeight: 40,
+    position: 'relative',
+    paddingHorizontal: 6,
+    paddingVertical: 8,
+    minHeight: 38,
+    justifyContent: 'center',
+  },
+  iconOnlyItem: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
     justifyContent: 'center',
   },
   touchTarget: {
@@ -212,14 +247,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
-  navLabel: {
-    fontWeight: '600',
-  },
   activeUnderline: {
+    position: 'absolute',
+    left: 4,
+    right: 4,
+    bottom: 2,
     height: 2,
-    width: '100%',
-    marginTop: 4,
-    borderRadius: 1,
+    borderRadius: 2,
   },
   bottomNavContent: {
     justifyContent: 'space-around',

@@ -1,6 +1,6 @@
 import { type ReactElement, useCallback, useState } from 'react';
 import { Pressable, type StyleProp, StyleSheet, Text, View, type ViewStyle } from 'react-native';
-import { TABULAR_NUMS_STYLE, useTheme } from '../theme';
+import { TABULAR_NUMS_STYLE, useTheme, webCursorPointer, webShadow, webTransition } from '../theme';
 import { useViewport } from '../viewport';
 import { ArtworkImage } from './ArtworkImage';
 import type { DeadHostRegistry } from './dead-host-registry';
@@ -23,9 +23,37 @@ export interface PosterCardProps {
   style?: StyleProp<ViewStyle>;
 }
 
+const NATIVE_SHADOW_REST: ViewStyle = {
+  shadowColor: 'rgba(0, 0, 0, 1)',
+  shadowOffset: { width: 0, height: 6 },
+  shadowOpacity: 0.36,
+  shadowRadius: 12,
+  elevation: 6,
+};
+
+const NATIVE_SHADOW_HOVER: ViewStyle = {
+  shadowColor: 'rgba(0, 0, 0, 1)',
+  shadowOffset: { width: 0, height: 10 },
+  shadowOpacity: 0.48,
+  shadowRadius: 18,
+  elevation: 10,
+};
+
+const NATIVE_SHADOW_FOCUS: ViewStyle = {
+  shadowColor: 'rgba(0, 0, 0, 1)',
+  shadowOffset: { width: 0, height: 14 },
+  shadowOpacity: 0.56,
+  shadowRadius: 22,
+  elevation: 14,
+};
+
 function clampProgress(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
+}
+
+function scaleFont(size: number, fontScale: number): number {
+  return Math.round(size * fontScale * 2) / 2;
 }
 
 /**
@@ -63,6 +91,13 @@ export function PosterCard({
 
   const trimmedBadge = badge?.trim() ?? '';
   const clamped = progress !== undefined ? clampProgress(progress) : undefined;
+  const cardTransition = webTransition(theme, 'transform, opacity');
+  const shadowTransition = webTransition(theme, 'box-shadow');
+  const cursor = webCursorPointer();
+  const fontFamilyStyle =
+    theme.typography.title.fontFamily !== undefined
+      ? { fontFamily: theme.typography.title.fontFamily }
+      : undefined;
 
   return (
     <Pressable
@@ -78,13 +113,8 @@ export function PosterCard({
       style={(state) => {
         const activeFocus = focused ?? (nativeFocused || Boolean(state.focused));
         const showTvFocus = focused === true || (viewport.inputModality === 'tv' && activeFocus);
-        const showPointerHover = !showTvFocus && viewport.inputModality === 'pointer' && hovered;
         const pressScale = theme.reduceMotion ? 1 : 0.98;
-        const scale = state.pressed
-          ? pressScale
-          : showTvFocus || showPointerHover
-            ? theme.focus.cardScale
-            : 1;
+        const scale = state.pressed ? pressScale : showTvFocus ? theme.focus.cardScale : 1;
 
         return [
           {
@@ -92,6 +122,8 @@ export function PosterCard({
             opacity: state.pressed ? 0.92 : 1,
             transform: [{ scale }],
           },
+          cardTransition,
+          cursor,
           style,
         ];
       }}
@@ -101,85 +133,134 @@ export function PosterCard({
         const showTvFocus = focused === true || (viewport.inputModality === 'tv' && activeFocus);
         const showPointerHover = !showTvFocus && viewport.inputModality === 'pointer' && hovered;
 
+        const frameShadow = showTvFocus
+          ? [NATIVE_SHADOW_FOCUS, webShadow('0 18px 36px rgba(0, 0, 0, 0.72)')]
+          : showPointerHover
+            ? [NATIVE_SHADOW_HOVER, webShadow('0 14px 32px rgba(0, 0, 0, 0.65)')]
+            : [NATIVE_SHADOW_REST, webShadow('0 8px 22px rgba(0, 0, 0, 0.44)')];
+
         return (
           <>
             <View
               testID={testID ? `${testID}-artwork-frame` : undefined}
-              style={[styles.artworkFrame, { borderRadius: theme.radius.card }]}
+              style={[
+                styles.artworkShadow,
+                {
+                  borderRadius: theme.radius.card,
+                  backgroundColor: theme.colors.bgCard,
+                },
+                frameShadow,
+                shadowTransition,
+              ]}
             >
-              <ArtworkImage
-                uri={imageUri}
-                label={title}
-                aspectRatio={aspectRatio}
-                borderRadius={theme.radius.card}
-                {...(deadHosts !== undefined ? { deadHosts } : {})}
-                testID={testID ? `${testID}-image` : undefined}
-              />
-              {trimmedBadge.length > 0 ? (
-                <View
-                  pointerEvents="none"
-                  style={[styles.badgeSlot, { top: theme.spacing.xs, left: theme.spacing.xs }]}
-                >
-                  <MicroPill label={trimmedBadge} testID={testID ? `${testID}-badge` : undefined} />
-                </View>
-              ) : null}
-              {clamped !== undefined ? (
-                <View
-                  pointerEvents="none"
-                  testID={testID ? `${testID}-progress` : undefined}
-                  style={[styles.progressTrack, { backgroundColor: theme.colors.scrimStrong }]}
-                >
+              <View style={[styles.artworkClip, { borderRadius: theme.radius.card }]}>
+                <ArtworkImage
+                  uri={imageUri}
+                  label={title}
+                  aspectRatio={aspectRatio}
+                  borderRadius={theme.radius.card}
+                  zoomed={showPointerHover}
+                  {...(deadHosts !== undefined ? { deadHosts } : {})}
+                  testID={testID ? `${testID}-image` : undefined}
+                />
+                {trimmedBadge.length > 0 ? (
                   <View
-                    testID={testID ? `${testID}-progress-fill` : undefined}
+                    pointerEvents="none"
+                    style={[styles.badgeSlot, { top: theme.spacing.xs, left: theme.spacing.xs }]}
+                  >
+                    <MicroPill
+                      label={trimmedBadge}
+                      testID={testID ? `${testID}-badge` : undefined}
+                    />
+                  </View>
+                ) : null}
+                {clamped !== undefined ? (
+                  <View
+                    pointerEvents="none"
+                    testID={testID ? `${testID}-progress` : undefined}
                     style={[
-                      styles.progressFill,
-                      {
-                        width: `${Math.round(clamped * 1000) / 10}%`,
-                        backgroundColor: theme.colors.accent,
-                      },
+                      styles.progressTrack,
+                      { backgroundColor: theme.colors.actionGlassHoverBg },
                     ]}
-                  />
-                </View>
-              ) : null}
+                  >
+                    <View
+                      testID={testID ? `${testID}-progress-fill` : undefined}
+                      style={[
+                        styles.progressFill,
+                        {
+                          width: `${Math.round(clamped * 1000) / 10}%`,
+                          backgroundColor: theme.colors.accent,
+                        },
+                      ]}
+                    />
+                  </View>
+                ) : null}
+              </View>
               {showTvFocus || showPointerHover ? (
                 <View
                   pointerEvents="none"
                   testID={testID ? `${testID}-focus-ring` : undefined}
                   style={[
-                    StyleSheet.absoluteFill,
-                    {
-                      borderRadius: theme.radius.card,
-                      borderWidth: showTvFocus ? theme.focus.ringWidth : 1.5,
-                      borderColor: showTvFocus
-                        ? theme.colors.focusRingColor
-                        : theme.colors.glassBorder,
-                    },
+                    styles.outerRing,
+                    showTvFocus
+                      ? {
+                          top: -3,
+                          bottom: -3,
+                          left: -3,
+                          right: -3,
+                          borderRadius: theme.radius.card + 3,
+                          borderWidth: theme.focus.ringWidth,
+                          borderColor: theme.colors.focusRingColor,
+                        }
+                      : {
+                          top: -1.5,
+                          bottom: -1.5,
+                          left: -1.5,
+                          right: -1.5,
+                          borderRadius: theme.radius.card + 1.5,
+                          borderWidth: 1.5,
+                          borderColor: theme.colors.hoverRingBorder,
+                        },
                   ]}
                 />
               ) : null}
             </View>
-            <Text
-              numberOfLines={1}
-              style={[
-                theme.typography.title,
-                { color: theme.colors.textPrimary, marginTop: theme.spacing.xs },
-              ]}
-            >
-              {title}
-            </Text>
-            {meta ? (
+            <View style={styles.info}>
               <Text
                 numberOfLines={1}
-                testID={testID ? `${testID}-meta` : undefined}
                 style={[
-                  theme.typography.caption,
-                  TABULAR_NUMS_STYLE,
-                  { color: theme.colors.textSecondary, marginTop: 2 },
+                  fontFamilyStyle,
+                  {
+                    fontSize: scaleFont(12.5, theme.fontScale),
+                    lineHeight: Math.round(17 * theme.fontScale),
+                    fontWeight: '600',
+                    letterSpacing: -0.1,
+                    color: theme.colors.textPrimary,
+                  },
                 ]}
               >
-                {meta}
+                {title}
               </Text>
-            ) : null}
+              {meta ? (
+                <Text
+                  numberOfLines={1}
+                  testID={testID ? `${testID}-meta` : undefined}
+                  style={[
+                    fontFamilyStyle,
+                    TABULAR_NUMS_STYLE,
+                    {
+                      fontSize: scaleFont(11, theme.fontScale),
+                      lineHeight: Math.round(15 * theme.fontScale),
+                      fontWeight: '500',
+                      color: theme.colors.textMuted,
+                      marginTop: 2,
+                    },
+                  ]}
+                >
+                  {meta}
+                </Text>
+              ) : null}
+            </View>
           </>
         );
       }}
@@ -188,9 +269,15 @@ export function PosterCard({
 }
 
 const styles = StyleSheet.create({
-  artworkFrame: {
+  artworkShadow: {
+    position: 'relative',
+  },
+  artworkClip: {
     overflow: 'hidden',
     position: 'relative',
+  },
+  outerRing: {
+    position: 'absolute',
   },
   badgeSlot: {
     position: 'absolute',
@@ -204,5 +291,9 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: '100%',
+  },
+  info: {
+    paddingTop: 7,
+    paddingHorizontal: 2,
   },
 });

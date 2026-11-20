@@ -32,6 +32,9 @@ describe('CtaButton & IconButton', () => {
     expect(pStyle.backgroundColor).toBe(defaultTheme.colors.ctaBg);
     expect(pStyle.borderRadius).toBe(defaultTheme.radius.button);
     expect(pStyle.minHeight).toBe(40);
+    expect(pStyle.paddingHorizontal).toBe(20);
+    expect(pStyle.paddingVertical).toBe(10);
+    expect(flat(screen.getByText('Play').props.style).fontWeight).toBe('700');
     expect(screen.getByTestId('primary-icon')).toBeTruthy();
     await fireEvent(primary, 'hoverIn');
     expect(flat(screen.getByTestId('primary').props.style).borderWidth ?? 0).toBe(0);
@@ -42,6 +45,29 @@ describe('CtaButton & IconButton', () => {
     expect(sStyle.transform).toEqual([{ scale: defaultTheme.focus.buttonScale }]);
     expect(flat(screen.getByTestId('secondary-focus-ring').props.style).borderColor).toBe(
       defaultTheme.colors.focusRingColor,
+    );
+  });
+
+  it('transitions secondary CtaButton and IconButton smoothly to actionGlassHoverBg on desktop hover', async () => {
+    await render(
+      <ThemeProvider>
+        <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
+          <CtaButton label="More info" variant="secondary" testID="sec-hover" />
+          <IconButton icon="plus" accessibilityLabel="Add" testID="icon-hover" />
+        </ViewportProvider>
+      </ThemeProvider>,
+    );
+    const sec = screen.getByTestId('sec-hover');
+    const icon = screen.getByTestId('icon-hover');
+    expect(flat(sec.props.style).backgroundColor).toBe(defaultTheme.colors.actionGlassBg);
+    expect(flat(icon.props.style).backgroundColor).toBe(defaultTheme.colors.actionGlassBg);
+    await fireEvent(sec, 'hoverIn');
+    await fireEvent(icon, 'hoverIn');
+    expect(flat(screen.getByTestId('sec-hover').props.style).backgroundColor).toBe(
+      defaultTheme.colors.actionGlassHoverBg,
+    );
+    expect(flat(screen.getByTestId('icon-hover').props.style).backgroundColor).toBe(
+      defaultTheme.colors.actionGlassHoverBg,
     );
   });
 
@@ -100,16 +126,19 @@ describe('MicroPill & FilterChip', () => {
       </ThemeProvider>,
     );
 
-    expect(flat(screen.getByTestId('neutral').props.style).borderRadius).toBe(
-      defaultTheme.radius.button,
-    );
+    const neutralStyle = flat(screen.getByTestId('neutral').props.style);
+    expect(neutralStyle.borderRadius).toBe(defaultTheme.radius.button);
+    expect(neutralStyle.backgroundColor).toBe(defaultTheme.colors.glassBg);
+    expect(neutralStyle.borderColor).toBe(defaultTheme.colors.glassBorder);
     expect(screen.queryByTestId('neutral-dot')).toBeNull();
-    expect(flat(screen.getByTestId('live').props.style).borderRadius).toBe(
-      defaultTheme.radius.pill,
-    );
+    const livePillStyle = flat(screen.getByTestId('live').props.style);
+    expect(livePillStyle.borderRadius).toBe(defaultTheme.radius.pill);
+    expect(livePillStyle.backgroundColor).toBe(defaultTheme.colors.scrimStrong);
+    expect(livePillStyle.borderColor).toBe(defaultTheme.colors.liveColor);
     expect(flat(screen.getByTestId('live-dot').props.style).backgroundColor).toBe(
       defaultTheme.colors.liveColor,
     );
+    expect(flat(screen.getByText('LIVE').props.style).color).toBe(defaultTheme.colors.textPrimary);
     expect(flat(screen.getByTestId('dot-pill-dot').props.style).backgroundColor).toBe(
       defaultTheme.colors.successColor,
     );
@@ -118,6 +147,25 @@ describe('MicroPill & FilterChip', () => {
     );
     expect(flat(screen.getByText('98%').props.style).fontVariant).toEqual(
       TABULAR_NUMS_STYLE.fontVariant,
+    );
+  });
+
+  it('maintains AAA scrimStrong fill and liveColor border/dot on live MicroPill in highContrast mode', async () => {
+    await render(
+      <ThemeProvider preset="highContrast">
+        <MicroPill label="LIVE" tone="live" testID="hc-live" />
+        <MicroPill label="4K HDR" testID="hc-neutral" />
+      </ThemeProvider>,
+    );
+    const liveStyle = flat(screen.getByTestId('hc-live').props.style);
+    expect(liveStyle.backgroundColor).toBe(hcTheme.colors.scrimStrong);
+    expect(liveStyle.borderColor).toBe(hcTheme.colors.liveColor);
+    expect(flat(screen.getByTestId('hc-live-dot').props.style).backgroundColor).toBe(
+      hcTheme.colors.liveColor,
+    );
+    expect(flat(screen.getByText('LIVE').props.style).color).toBe(hcTheme.colors.textPrimary);
+    expect(flat(screen.getByTestId('hc-neutral').props.style).backgroundColor).toBe(
+      hcTheme.colors.glassBg,
     );
   });
 
@@ -134,26 +182,33 @@ describe('MicroPill & FilterChip', () => {
 
     const selStyle = flat(screen.getByTestId('chip-sel').props.style);
     expect(selStyle.minHeight).toBe(40);
+    expect(selStyle.paddingHorizontal).toBe(14);
     expect(selStyle.borderRadius).toBe(defaultTheme.radius.pill);
     expect(selStyle.backgroundColor).toBe(defaultTheme.colors.ctaBg);
+    expect(flat(screen.getByText('Drama').props.style).fontWeight).toBe('700');
     await fireEvent.press(screen.getByTestId('chip-sel'));
     expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(flat(screen.getByTestId('chip-unsel').props.style).backgroundColor).toBe(
-      defaultTheme.colors.bgSurface,
-    );
+    const unselStyle = flat(screen.getByTestId('chip-unsel').props.style);
+    expect(unselStyle.backgroundColor).toBe(defaultTheme.colors.chipBg);
+    expect(unselStyle.borderColor).toBe(defaultTheme.colors.chipBorder);
     await touchView.unmount();
 
     await render(
       <ThemeProvider>
         <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
           <FilterChip label="All" focused testID="chip-desk" />
+          <FilterChip label="Action" testID="chip-hover" />
         </ViewportProvider>
       </ThemeProvider>,
     );
     const deskStyle = flat(screen.getByTestId('chip-desk').props.style);
-    expect(deskStyle.minHeight).toBe(36);
+    expect(deskStyle.minHeight).toBe(32);
     expect(flat(screen.getByTestId('chip-desk-focus-ring').props.style).borderColor).toBe(
       defaultTheme.colors.focusRingColor,
+    );
+    await fireEvent(screen.getByTestId('chip-hover'), 'hoverIn');
+    expect(flat(screen.getByTestId('chip-hover').props.style).backgroundColor).toBe(
+      defaultTheme.colors.chipHoverBg,
     );
   });
 });
@@ -183,20 +238,54 @@ describe('PosterCard & WideCard (Cinema Quietude compliance)', () => {
     expect(flat(card.props.style).backgroundColor).toBeUndefined();
     expect(flat(card.props.style).borderWidth).toBeUndefined();
     expect(screen.getAllByText('Silent Horizon')).toHaveLength(1);
+    const titleStyle = flat(screen.getByText('Silent Horizon').props.style);
+    expect(titleStyle.fontSize).toBe(12.5);
+    expect(titleStyle.fontWeight).toBe('600');
+    const metaStyle = flat(screen.getByTestId('poster-meta').props.style);
+    expect(metaStyle.fontSize).toBe(11);
+    expect(metaStyle.color).toBe(defaultTheme.colors.textMuted);
+    const artworkFrameStyle = flat(screen.getByTestId('poster-artwork-frame').props.style);
+    expect(artworkFrameStyle.backgroundColor).toBe(defaultTheme.colors.bgCard);
     expect(flat(screen.getByTestId('poster-progress-fill').props.style).width).toBe('100%');
     await fireEvent(card, 'focus');
     expect(onFocus).toHaveBeenCalledTimes(1);
     expect(flat(screen.getByTestId('poster').props.style).transform).toEqual([
       { scale: defaultTheme.focus.cardScale },
     ]);
-    expect(flat(screen.getByTestId('poster-focus-ring').props.style).borderColor).toBe(
-      defaultTheme.colors.focusRingColor,
-    );
+    const focusRingStyle = flat(screen.getByTestId('poster-focus-ring').props.style);
+    expect(focusRingStyle.borderColor).toBe(defaultTheme.colors.focusRingColor);
+    expect(focusRingStyle.bottom).toBe(-3);
+    expect(focusRingStyle.borderRadius).toBe(defaultTheme.radius.card + 3);
     await fireEvent.press(card);
     expect(onPress).toHaveBeenCalledTimes(1);
   });
 
-  it('renders 16:9 WideCard with LIVE pill, clamped negative/fractional progress, and reduceMotion', async () => {
+  it('zooms inner artwork with quiet outer hoverRingBorder on desktop pointer hover without scaling outer card', async () => {
+    await render(
+      <ThemeProvider>
+        <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
+          <PosterCard
+            title="Orbit"
+            imageUri="https://e.co/orbit.jpg"
+            deadHosts={createDeadHostRegistry()}
+            testID="desk-poster"
+          />
+        </ViewportProvider>
+      </ThemeProvider>,
+    );
+
+    const card = screen.getByTestId('desk-poster');
+    await fireEvent(card, 'hoverIn');
+    expect(flat(screen.getByTestId('desk-poster').props.style).transform).toEqual([{ scale: 1 }]);
+    expect(flat(screen.getByTestId('desk-poster-image-zoom').props.style).transform).toEqual([
+      { scale: 1.05 },
+    ]);
+    const hoverRingStyle = flat(screen.getByTestId('desk-poster-focus-ring').props.style);
+    expect(hoverRingStyle.borderColor).toBe(defaultTheme.colors.hoverRingBorder);
+    expect(hoverRingStyle.bottom).toBe(-1.5);
+  });
+
+  it('renders 16:9 WideCard with LIVE pill, scrim, optional circular play badge, and reduceMotion', async () => {
     await render(
       <ThemeProvider preset="highContrast" reduceMotion>
         <ViewportProvider value={{ formFactor: 'tv', width: 1920, height: 1080 }}>
@@ -213,10 +302,23 @@ describe('PosterCard & WideCard (Cinema Quietude compliance)', () => {
             testID="wide"
           />
           <WideCard title="Ep 4" imageUri="https://e.co/s.jpg" progress={0.45} testID="vod" />
+          <WideCard
+            title="Ep 5"
+            imageUri="https://e.co/s2.jpg"
+            progress={0.2}
+            showPlayBadge={false}
+            testID="vod-nobadge"
+          />
         </ViewportProvider>
       </ThemeProvider>,
     );
     expect(screen.getAllByText('Evening Broadcast')).toHaveLength(1);
+    const wideTitleStyle = flat(screen.getByText('Evening Broadcast').props.style);
+    expect(wideTitleStyle.fontSize).toBe(13);
+    expect(wideTitleStyle.fontWeight).toBe('600');
+    const wideSubStyle = flat(screen.getByTestId('wide-subtitle').props.style);
+    expect(wideSubStyle.fontSize).toBe(11);
+    expect(wideSubStyle.color).toBe(hcTheme.colors.textSecondary);
     expect(screen.getByText('ON AIR')).toBeTruthy();
     expect(screen.getByText('HD')).toBeTruthy();
     const wideStyle = flat(screen.getByTestId('wide').props.style);
@@ -224,6 +326,20 @@ describe('PosterCard & WideCard (Cinema Quietude compliance)', () => {
     expect(wideStyle.width).toBe(320);
     expect(wideStyle.transform).toEqual([{ scale: 1 }]);
     expect(flat(screen.getByTestId('wide-progress-fill').props.style).width).toBe('0%');
+    expect(flat(screen.getByTestId('wide-artwork-frame').props.style).backgroundColor).toBe(
+      hcTheme.colors.bgCard,
+    );
+    const wideFocusRing = flat(screen.getByTestId('wide-focus-ring').props.style);
+    expect(wideFocusRing.bottom).toBe(-3);
+    expect(wideFocusRing.borderRadius).toBe(hcTheme.radius.card + 3);
+    expect(screen.getByTestId('wide-scrim')).toBeTruthy();
+    expect(screen.queryByTestId('wide-play-badge')).toBeNull();
     expect(flat(screen.getByTestId('vod-progress-fill').props.style).width).toBe('45%');
+    expect(screen.getByTestId('vod-scrim')).toBeTruthy();
+    const playBadgeStyle = flat(screen.getByTestId('vod-play-badge').props.style);
+    expect(playBadgeStyle.width).toBe(28);
+    expect(playBadgeStyle.height).toBe(28);
+    expect(playBadgeStyle.backgroundColor).toBe(hcTheme.colors.ctaBg);
+    expect(screen.queryByTestId('vod-nobadge-play-badge')).toBeNull();
   });
 });

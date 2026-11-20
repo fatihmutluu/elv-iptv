@@ -1,4 +1,4 @@
-import type { TextStyle } from 'react-native';
+import { Platform, type TextStyle } from 'react-native';
 import { hexToRgba } from './color-utils';
 import {
   DEFAULT_THEME_PRESET,
@@ -10,6 +10,15 @@ import {
 /** Minimum and maximum supported user font scale multipliers (`UI_UX_PHILOSOPHY.md` §4). */
 export const MIN_FONT_SCALE = 0.9;
 export const MAX_FONT_SCALE = 1.2;
+
+const WEB_FONT_FAMILY_SANS =
+  "'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+
+/** Platform-aware Cinema Quietude sans-serif font stack (`undefined` on native to use system sans). */
+export const FONT_FAMILY_SANS: string | undefined = Platform.select({
+  web: WEB_FONT_FAMILY_SANS,
+  default: undefined,
+});
 
 /** Reusable tabular-numerals style for timestamps, durations, channel numbers, and ratings. */
 export const TABULAR_NUMS_STYLE: Readonly<Pick<TextStyle, 'fontVariant'>> = {
@@ -27,7 +36,14 @@ export interface DerivedSurfaceColors {
   readonly surfaceBorder: string;
   readonly overlayBackdrop: string;
   readonly actionGlassBg: string;
+  readonly actionGlassHoverBg: string;
   readonly actionGlassBorder: string;
+  readonly chipBg: string;
+  readonly chipHoverBg: string;
+  readonly chipBorder: string;
+  readonly topBarScrimStart: string;
+  readonly topBarScrimMid: string;
+  readonly hoverRingBorder: string;
   readonly focusFill: string;
   readonly accentTint: string;
   readonly subtleHighlight: string;
@@ -42,6 +58,7 @@ export interface TypeScaleStep {
   readonly lineHeight: number;
   readonly fontWeight: TextStyle['fontWeight'];
   readonly letterSpacing?: number;
+  readonly fontFamily?: string;
 }
 
 /** Resolved design tokens for one active Cinema Quietude theme configuration. */
@@ -102,6 +119,10 @@ export function clampFontScale(value: number | undefined): number {
   return Math.round(Math.min(MAX_FONT_SCALE, Math.max(MIN_FONT_SCALE, value)) * 100) / 100;
 }
 
+function resolveSansFontFamily(): string | undefined {
+  return Platform.OS === 'web' ? WEB_FONT_FAMILY_SANS : FONT_FAMILY_SANS;
+}
+
 function scaleStep(
   fontSize: number,
   lineHeight: number,
@@ -109,11 +130,13 @@ function scaleStep(
   scale: number,
   letterSpacing?: number,
 ): TypeScaleStep {
+  const fontFamily = resolveSansFontFamily();
   return {
-    fontSize: Math.round(fontSize * scale),
+    fontSize: Math.round(fontSize * scale * 2) / 2,
     lineHeight: Math.round(lineHeight * scale),
     fontWeight,
     ...(letterSpacing !== undefined ? { letterSpacing } : {}),
+    ...(fontFamily !== undefined ? { fontFamily } : {}),
   };
 }
 
@@ -131,12 +154,19 @@ export function buildTheme(options: ThemeOptions = {}): Theme {
     scrimMedium: hexToRgba(palette.bgCanvas, 0.68),
     scrimSoft: hexToRgba(palette.bgCanvas, 0.32),
     scrimTransparent: hexToRgba(palette.bgCanvas, 0),
-    glassBg: hexToRgba(palette.bgElevated, highContrast ? 0.96 : 0.82),
+    glassBg: hexToRgba(palette.bgCanvas, highContrast ? 0.96 : 0.82),
     glassBorder: hexToRgba(palette.textPrimary, highContrast ? 0.45 : 0.12),
     surfaceBorder: hexToRgba(palette.textPrimary, highContrast ? 0.35 : 0.08),
     overlayBackdrop: hexToRgba(palette.bgCanvas, highContrast ? 0.86 : 0.64),
-    actionGlassBg: hexToRgba(palette.bgElevated, highContrast ? 0.92 : 0.72),
-    actionGlassBorder: hexToRgba(palette.textPrimary, highContrast ? 0.5 : 0.16),
+    actionGlassBg: hexToRgba(palette.textPrimary, highContrast ? 0.22 : 0.13),
+    actionGlassHoverBg: hexToRgba(palette.textPrimary, highContrast ? 0.34 : 0.22),
+    actionGlassBorder: hexToRgba(palette.textPrimary, highContrast ? 0.55 : 0.15),
+    chipBg: hexToRgba(palette.textPrimary, highContrast ? 0.14 : 0.06),
+    chipHoverBg: hexToRgba(palette.textPrimary, highContrast ? 0.24 : 0.13),
+    chipBorder: hexToRgba(palette.textPrimary, highContrast ? 0.45 : 0.12),
+    topBarScrimStart: hexToRgba(palette.bgCanvas, 0.9),
+    topBarScrimMid: hexToRgba(palette.bgCanvas, 0.42),
+    hoverRingBorder: hexToRgba(palette.textPrimary, highContrast ? 0.72 : 0.38),
     focusFill: hexToRgba(palette.focusRingColor, highContrast ? 0.22 : 0.12),
     accentTint: hexToRgba(palette.accent, highContrast ? 0.24 : 0.16),
     subtleHighlight: hexToRgba(palette.textPrimary, highContrast ? 0.18 : 0.07),
@@ -175,13 +205,13 @@ export function buildTheme(options: ThemeOptions = {}): Theme {
       easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
     },
     typography: {
-      display: scaleStep(34, 40, '800', fontScale, -0.5),
-      h1: scaleStep(24, 30, '700', fontScale, -0.3),
-      h2: scaleStep(18, 24, '700', fontScale, -0.1),
-      title: scaleStep(15, 20, '600', fontScale),
-      body: scaleStep(14, 20, '400', fontScale),
+      display: scaleStep(34, 38, '800', fontScale, -0.9),
+      h1: scaleStep(24, 29, '800', fontScale, -0.5),
+      h2: scaleStep(17, 23, '700', fontScale, -0.25),
+      title: scaleStep(14, 19, '600', fontScale, -0.1),
+      body: scaleStep(13.5, 20, '400', fontScale),
       caption: scaleStep(12, 16, '500', fontScale),
-      micro: scaleStep(11, 14, '600', fontScale, 0.2),
+      micro: scaleStep(10.5, 14, '700', fontScale, 0.25),
     },
   };
 }

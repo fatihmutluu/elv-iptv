@@ -1,9 +1,10 @@
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
-import { AccessibilityInfo, Pressable, Text } from 'react-native';
+import { AccessibilityInfo, Platform, Pressable, Text } from 'react-native';
 import {
   buildTheme,
   clampFontScale,
   contrastRatio,
+  FONT_FAMILY_SANS,
   hexToRgba,
   isThemePresetId,
   THEME_PRESET_IDS,
@@ -11,7 +12,21 @@ import {
   ThemeProvider,
   useTheme,
   useThemeController,
+  webBackdropBlur,
+  webCursorPointer,
+  webShadow,
+  webTransition,
 } from '../index';
+
+function withPlatformOs<T>(os: typeof Platform.OS, run: () => T): T {
+  const original = Platform.OS;
+  Object.defineProperty(Platform, 'OS', { value: os, configurable: true });
+  try {
+    return run();
+  } finally {
+    Object.defineProperty(Platform, 'OS', { value: original, configurable: true });
+  }
+}
 
 describe('theme color utilities & WCAG contrast invariants (#325)', () => {
   it('converts #RGB and #RRGGBB hex strings to rgba and clamps opacity', () => {
@@ -42,14 +57,83 @@ describe('theme color utilities & WCAG contrast invariants (#325)', () => {
     expect(isThemePresetId('toString')).toBe(false);
   });
 
-  it('derives scrims and glass dynamically from bgCanvas / bgElevated with zero hardcoded dark-blue', () => {
+  it('derives scrims, glass, chips, and hover borders dynamically from the active palette', () => {
     const amber = buildTheme({ preset: 'theaterAmber' });
     const hc = buildTheme({ preset: 'highContrast' });
     expect(amber.colors.scrimStrong).toBe('rgba(10, 9, 8, 0.94)');
     expect(amber.colors.scrimTransparent).toBe('rgba(10, 9, 8, 0)');
+    expect(amber.colors.glassBg).toBe(hexToRgba(amber.colors.bgCanvas, 0.82));
+    expect(amber.colors.actionGlassBg).toBe(hexToRgba(amber.colors.textPrimary, 0.13));
+    expect(amber.colors.actionGlassHoverBg).toBe(hexToRgba(amber.colors.textPrimary, 0.22));
+    expect(amber.colors.actionGlassBorder).toBe(hexToRgba(amber.colors.textPrimary, 0.15));
+    expect(amber.colors.chipBg).toBe(hexToRgba(amber.colors.textPrimary, 0.06));
+    expect(amber.colors.chipHoverBg).toBe(hexToRgba(amber.colors.textPrimary, 0.13));
+    expect(amber.colors.chipBorder).toBe(hexToRgba(amber.colors.textPrimary, 0.12));
+    expect(amber.colors.topBarScrimStart).toBe(hexToRgba(amber.colors.bgCanvas, 0.9));
+    expect(amber.colors.topBarScrimMid).toBe(hexToRgba(amber.colors.bgCanvas, 0.42));
+    expect(amber.colors.hoverRingBorder).toBe(hexToRgba(amber.colors.textPrimary, 0.38));
+
     expect(hc.colors.scrimStrong).toBe('rgba(0, 0, 0, 0.94)');
+    expect(hc.colors.glassBg).toBe('rgba(0, 0, 0, 0.96)');
+    expect(hc.colors.actionGlassBg).toBe('rgba(255, 255, 255, 0.22)');
+    expect(hc.colors.actionGlassHoverBg).toBe('rgba(255, 255, 255, 0.34)');
+    expect(hc.colors.actionGlassBorder).toBe('rgba(255, 255, 255, 0.55)');
+    expect(hc.colors.chipBg).toBe('rgba(255, 255, 255, 0.14)');
+    expect(hc.colors.chipHoverBg).toBe('rgba(255, 255, 255, 0.24)');
+    expect(hc.colors.chipBorder).toBe('rgba(255, 255, 255, 0.45)');
+    expect(hc.colors.hoverRingBorder).toBe('rgba(255, 255, 255, 0.72)');
     expect(hc.highContrast).toBe(true);
     expect(hc.focus.ringWidth).toBeGreaterThan(amber.focus.ringWidth);
+  });
+
+  it('provides Cinema Quietude typography scale with web-only fontFamily and tight display tracking', () => {
+    const nativeTheme = buildTheme();
+    expect(FONT_FAMILY_SANS).toBeUndefined();
+    expect(nativeTheme.typography.display).toEqual({
+      fontSize: 34,
+      lineHeight: 38,
+      fontWeight: '800',
+      letterSpacing: -0.9,
+    });
+    expect(nativeTheme.typography.h1).toEqual({
+      fontSize: 24,
+      lineHeight: 29,
+      fontWeight: '800',
+      letterSpacing: -0.5,
+    });
+    expect(nativeTheme.typography.h2).toEqual({
+      fontSize: 17,
+      lineHeight: 23,
+      fontWeight: '700',
+      letterSpacing: -0.25,
+    });
+    expect(nativeTheme.typography.title).toEqual({
+      fontSize: 14,
+      lineHeight: 19,
+      fontWeight: '600',
+      letterSpacing: -0.1,
+    });
+    expect(nativeTheme.typography.body).toEqual({
+      fontSize: 13.5,
+      lineHeight: 20,
+      fontWeight: '400',
+    });
+    expect(nativeTheme.typography.caption).toEqual({
+      fontSize: 12,
+      lineHeight: 16,
+      fontWeight: '500',
+    });
+    expect(nativeTheme.typography.micro).toEqual({
+      fontSize: 10.5,
+      lineHeight: 14,
+      fontWeight: '700',
+      letterSpacing: 0.25,
+    });
+    expect(nativeTheme.typography.display.fontFamily).toBeUndefined();
+
+    const webTheme = withPlatformOs('web', () => buildTheme());
+    expect(webTheme.typography.display.fontFamily).toContain('Plus Jakarta Sans');
+    expect(webTheme.typography.body.fontFamily).toContain('Plus Jakarta Sans');
   });
 
   it('clamps fontScale to [0.9, 1.2] and collapses motion & focus scaling under reduceMotion', () => {
@@ -59,12 +143,46 @@ describe('theme color utilities & WCAG contrast invariants (#325)', () => {
 
     const reduced = buildTheme({ fontScale: 1.2, reduceMotion: true });
     expect(reduced.fontScale).toBe(1.2);
-    expect(reduced.typography.body.fontSize).toBe(Math.round(14 * 1.2));
+    expect(reduced.typography.body.fontSize).toBe(16);
     expect(reduced.motion.fastMs).toBe(0);
     expect(reduced.motion.normalMs).toBe(0);
     expect(reduced.motion.sheetMs).toBe(0);
     expect(reduced.focus.cardScale).toBe(1);
     expect(reduced.focus.buttonScale).toBe(1);
+  });
+
+  it('returns web-only CSS helpers on web and undefined on native while honoring reduceMotion', () => {
+    const theme = buildTheme();
+    const reduced = buildTheme({ reduceMotion: true });
+
+    expect(webTransition(theme, 'transform')).toBeUndefined();
+    expect(webBackdropBlur(12)).toBeUndefined();
+    expect(webShadow('0 8px 22px rgba(0,0,0,0.44)')).toBeUndefined();
+    expect(webCursorPointer()).toBeUndefined();
+
+    withPlatformOs('web', () => {
+      expect(webTransition(theme, 'transform, opacity')).toEqual({
+        transitionProperty: 'transform, opacity',
+        transitionDuration: '150ms',
+        transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      });
+      expect(webTransition(theme, 'transform', 350)).toEqual({
+        transitionProperty: 'transform',
+        transitionDuration: '350ms',
+        transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      });
+      expect(webTransition(reduced, 'transform')).toEqual({
+        transitionProperty: 'none',
+      });
+      expect(webBackdropBlur(20)).toEqual({
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+      });
+      expect(webShadow('0 8px 22px rgba(0, 0, 0, 0.44)')).toEqual({
+        boxShadow: '0 8px 22px rgba(0, 0, 0, 0.44)',
+      });
+      expect(webCursorPointer()).toEqual({ cursor: 'pointer' });
+    });
   });
 });
 
@@ -141,5 +259,64 @@ describe('ThemeProvider & useThemeController', () => {
 
     isEnabledSpy.mockRestore();
     addSpy.mockRestore();
+  });
+
+  it('injects an idempotent web base stylesheet and syncs dynamic scrollbar CSS vars on web', async () => {
+    const appended: Array<{ id: string; textContent: string | null }> = [];
+    const cssVars = new Map<string, string>();
+    const fakeDoc = {
+      getElementById: jest.fn((id: string) => appended.find((node) => node.id === id) ?? null),
+      createElement: jest.fn(() => ({ id: '', textContent: null as string | null })),
+      head: {
+        appendChild: jest.fn((node: { id: string; textContent: string | null }) => {
+          appended.push(node);
+        }),
+      },
+      documentElement: {
+        style: {
+          setProperty: jest.fn((name: string, value: string) => {
+            cssVars.set(name, value);
+          }),
+        },
+      },
+    };
+    const defaultTheme = buildTheme();
+    const hcTheme = buildTheme({ preset: 'highContrast' });
+    const originalDoc = (globalThis as { document?: unknown }).document;
+    const originalOs = Platform.OS;
+    Object.defineProperty(globalThis, 'document', { value: fakeDoc, configurable: true });
+    Object.defineProperty(Platform, 'OS', { value: 'web', configurable: true });
+    try {
+      const first = await render(
+        <ThemeProvider>
+          <ThemeControlProbe />
+        </ThemeProvider>,
+      );
+      expect(appended).toHaveLength(1);
+      expect(appended[0]?.id).toBe('elv-ui-kit-web-base');
+      expect(appended[0]?.textContent).toContain('-webkit-font-smoothing: antialiased');
+      expect(appended[0]?.textContent).toContain('Plus Jakarta Sans');
+      expect(appended[0]?.textContent).toContain('var(--elv-scroll-thumb');
+      expect(appended[0]?.textContent).toContain('var(--elv-scroll-thumb-hover');
+      expect(cssVars.get('--elv-scroll-thumb')).toBe(defaultTheme.colors.glassBorder);
+      expect(cssVars.get('--elv-scroll-thumb-hover')).toBe(defaultTheme.colors.hoverRingBorder);
+
+      await fireEvent.press(screen.getByTestId('to-hc'));
+      expect(cssVars.get('--elv-scroll-thumb')).toBe(hcTheme.colors.glassBorder);
+      expect(cssVars.get('--elv-scroll-thumb-hover')).toBe(hcTheme.colors.hoverRingBorder);
+
+      const second = await render(
+        <ThemeProvider>
+          <ReduceMotionProbe />
+        </ThemeProvider>,
+      );
+      expect(appended).toHaveLength(1);
+
+      await second.unmount();
+      await first.unmount();
+    } finally {
+      Object.defineProperty(Platform, 'OS', { value: originalOs, configurable: true });
+      Object.defineProperty(globalThis, 'document', { value: originalDoc, configurable: true });
+    }
   });
 });

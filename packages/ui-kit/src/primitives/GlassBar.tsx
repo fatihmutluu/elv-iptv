@@ -1,8 +1,7 @@
 import type { ReactElement, ReactNode } from 'react';
 import { Platform, type StyleProp, StyleSheet, View, type ViewStyle } from 'react-native';
 import { useUiAdapters } from '../adapters';
-import { useTheme } from '../theme';
-import { Scrim } from './Scrim';
+import { useTheme, webBackdropBlur, webTransition } from '../theme';
 
 /** Props of {@link GlassBar}. */
 export interface GlassBarProps {
@@ -19,7 +18,8 @@ export interface GlassBarProps {
 
 /**
  * Transparent-to-frosted navigation/toolbar surface (`UI_UX_PHILOSOPHY.md` §1 & §3).
- * Derives its frosted fill and border dynamically from `theme.colors`.
+ * Renders a top-down gradient scrim at scroll `0` (zero border) and transitions smoothly into
+ * frosted glass derived dynamically from `theme.colors` when scrolled.
  */
 export function GlassBar({
   scrolled = false,
@@ -42,10 +42,51 @@ export function GlassBar({
             borderBottomColor: theme.colors.glassBorder,
           };
 
+  const transitionStyle = webTransition(
+    theme,
+    'background-color, border-color, backdrop-filter',
+    theme.motion.normalMs,
+  );
+
   if (!scrolled) {
+    const gradientStops = [
+      theme.colors.topBarScrimStart,
+      theme.colors.topBarScrimMid,
+      theme.colors.scrimTransparent,
+    ];
+
+    const scrimLayer = adapters.renderGradient ? (
+      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+        {adapters.renderGradient({
+          colors: gradientStops,
+          locations: [0, 0.68, 1],
+          start: { x: 0.5, y: 0 },
+          end: { x: 0.5, y: 1 },
+          style: StyleSheet.absoluteFill,
+          pointerEvents: 'none',
+        })}
+      </View>
+    ) : Platform.OS === 'web' ? (
+      <View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFill,
+          {
+            backgroundImage: `linear-gradient(180deg, ${gradientStops[0]} 0%, ${gradientStops[1]} 68%, ${gradientStops[2]} 100%)`,
+          } as unknown as ViewStyle,
+        ]}
+      />
+    ) : (
+      <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.nativeScrim]}>
+        <View style={{ flex: 68, backgroundColor: gradientStops[0] }} />
+        <View style={{ flex: 22, backgroundColor: gradientStops[1] }} />
+        <View style={{ flex: 10, backgroundColor: gradientStops[2] }} />
+      </View>
+    );
+
     return (
-      <View testID={testID} style={[styles.container, style]}>
-        <Scrim direction="top" />
+      <View testID={testID} style={[styles.container, transitionStyle, style]}>
+        {scrimLayer}
         <View style={[styles.content, contentStyle]}>{children}</View>
       </View>
     );
@@ -64,16 +105,6 @@ export function GlassBar({
     );
   }
 
-  const webGlass =
-    Platform.OS === 'web'
-      ? ({
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          transitionProperty: theme.reduceMotion ? 'none' : 'background-color, border-color',
-          transitionDuration: `${theme.motion.normalMs}ms`,
-        } as unknown as ViewStyle)
-      : undefined;
-
   return (
     <View
       testID={testID}
@@ -81,7 +112,8 @@ export function GlassBar({
         styles.container,
         { backgroundColor: theme.colors.glassBg },
         hairlineStyle,
-        webGlass,
+        webBackdropBlur(20),
+        transitionStyle,
         style,
       ]}
     >
@@ -94,6 +126,9 @@ const styles = StyleSheet.create({
   container: {
     position: 'relative',
     overflow: 'hidden',
+  },
+  nativeScrim: {
+    flexDirection: 'column',
   },
   content: {
     flex: 1,

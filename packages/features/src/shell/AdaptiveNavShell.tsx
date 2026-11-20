@@ -1,7 +1,15 @@
 import type { KeyEvent } from '@elv/focus-core';
-import { GlassBar, TvFocusAnchor, useKeyInterpreter, useTheme, useViewport } from '@elv/ui-kit';
+import {
+  GlassBar,
+  TvFocusAnchor,
+  useKeyInterpreter,
+  useTheme,
+  useViewport,
+  webCursorPointer,
+  webTransition,
+} from '@elv/ui-kit';
 import { type ReactElement, useCallback, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, type TextStyle, View } from 'react-native';
 import { PortraitBottomBar, UtilitiesRow } from './NavBars';
 import type { AdaptiveNavShellProps } from './types';
 
@@ -36,13 +44,16 @@ export function AdaptiveNavShell<TId extends string = string>({
   navFocused = false,
   onExitNavFocus,
   frosted = true,
+  overlay = false,
   testID = 'app-shell',
   children,
 }: AdaptiveNavShellProps<TId>): ReactElement {
   const theme = useTheme();
   const viewport = useViewport();
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
 
   const isTv = viewport.formFactor === 'tv';
+  const isTouch = viewport.inputModality === 'touch';
   const isLandscape =
     viewport.orientation === 'landscape' ||
     viewport.formFactor === 'tv' ||
@@ -109,7 +120,25 @@ export function AdaptiveNavShell<TId extends string = string>({
   const topHorizontalPadding = isTv
     ? Math.max(theme.spacing.xl, viewport.overscan.x)
     : theme.spacing.md;
-  const topBarMinHeight = (isLandscape ? (isTv ? 64 : 56) : 50) + topInset;
+  const topBarMinHeight = (isLandscape ? (isTv ? 58 : 56) : 50) + topInset;
+  const brandSpaceIdx = brandTitle.indexOf(' ');
+  const brandFontSize = Math.round((isTv ? 18 : 16) * theme.fontScale);
+  const navFontSize = Math.round((isTv ? 15 : 13.5) * theme.fontScale);
+  const bodyFontFamily = theme.typography.body.fontFamily;
+  const linkWebTransition = webTransition(theme, 'color, background-color, border-color');
+  const linkWebCursor = webCursorPointer();
+  const brandFontStyle: TextStyle = {
+    ...(bodyFontFamily ? { fontFamily: bodyFontFamily } : {}),
+    fontSize: brandFontSize,
+    lineHeight: Math.round(brandFontSize * 1.25),
+    color: theme.colors.textPrimary,
+  };
+  const navFontBase: TextStyle = {
+    ...(bodyFontFamily ? { fontFamily: bodyFontFamily } : {}),
+    fontSize: navFontSize,
+    lineHeight: Math.round(navFontSize * 1.3),
+  };
+  const labelWebTransition = webTransition(theme, 'color') as TextStyle | undefined;
 
   return (
     <View testID={testID} style={[styles.root, { backgroundColor: theme.colors.bgCanvas }]}>
@@ -119,37 +148,41 @@ export function AdaptiveNavShell<TId extends string = string>({
         testID="app-top-nav"
         scrolled={frosted}
         hairlineEdge="bottom"
-        style={{
-          minHeight: topBarMinHeight,
-          paddingTop: topInset,
-          paddingHorizontal: topHorizontalPadding,
-        }}
+        style={[
+          overlay ? styles.topNavOverlay : null,
+          {
+            minHeight: topBarMinHeight,
+            paddingTop: topInset,
+            paddingHorizontal: topHorizontalPadding,
+          },
+        ]}
         contentStyle={styles.topNavContent}
       >
         <View style={[styles.leftCluster, { gap: isTv ? theme.spacing.xl : theme.spacing.lg }]}>
           {showBrand ? (
-            <Text
-              numberOfLines={1}
-              style={[
-                isTv ? theme.typography.h2 : theme.typography.title,
-                styles.brandTitle,
-                { color: theme.colors.textPrimary },
-              ]}
-            >
-              {brandTitle}
+            <Text numberOfLines={1} style={[styles.brandTitle, brandFontStyle]}>
+              {brandSpaceIdx > 0 ? (
+                <>
+                  <Text testID="app-brand-accent" style={{ color: theme.colors.accent }}>
+                    {brandTitle.slice(0, brandSpaceIdx)}
+                  </Text>
+                  {brandTitle.slice(brandSpaceIdx)}
+                </>
+              ) : (
+                brandTitle
+              )}
             </Text>
           ) : null}
 
           {isLandscape ? (
-            <View
-              accessibilityRole="tablist"
-              style={[styles.destinationsRow, { gap: isTv ? theme.spacing.lg : theme.spacing.md }]}
-            >
+            <View accessibilityRole="tablist" style={styles.destinationsRow}>
               {destinations.map((dest) => {
                 const tabTestId = dest.testID ?? `nav-tab-${dest.id}`;
                 const selected = dest.id === activeId;
                 const tvFocused = focusedItemId === dest.id;
-                const fgColor = selected ? theme.colors.textPrimary : theme.colors.textSecondary;
+                const hovered = hoveredId === dest.id;
+                const fgColor =
+                  selected || hovered ? theme.colors.textPrimary : theme.colors.textSecondary;
 
                 return (
                   <Pressable
@@ -159,12 +192,17 @@ export function AdaptiveNavShell<TId extends string = string>({
                     accessibilityLabel={dest.label}
                     accessibilityState={{ selected }}
                     {...(isTv ? { focusable: false } : {})}
+                    onHoverIn={() => setHoveredId(dest.id)}
+                    onHoverOut={() => setHoveredId((prev) => (prev === dest.id ? null : prev))}
                     onPress={() => {
                       onSelectDestination(dest.id);
                       onExitNavFocus?.();
                     }}
                     style={[
                       styles.landscapeLink,
+                      isTouch ? styles.touchTarget : null,
+                      linkWebTransition,
+                      linkWebCursor,
                       {
                         borderRadius: theme.radius.button,
                         borderWidth: isTv ? theme.focus.ringWidth : 0,
@@ -177,9 +215,12 @@ export function AdaptiveNavShell<TId extends string = string>({
                       <Text
                         numberOfLines={1}
                         style={[
-                          isTv ? theme.typography.h2 : theme.typography.body,
-                          styles.navLabel,
-                          { color: fgColor },
+                          navFontBase,
+                          labelWebTransition,
+                          {
+                            fontWeight: selected ? '700' : '500',
+                            color: fgColor,
+                          },
                         ]}
                       >
                         {dest.label}
@@ -221,6 +262,7 @@ export function AdaptiveNavShell<TId extends string = string>({
           utilities={utilities}
           activeId={activeId}
           isTv={isTv}
+          isTouch={isTouch}
           {...(focusedItemId !== undefined ? { focusedItemId } : {})}
           compactPortrait={!isLandscape}
           {...(onExitNavFocus !== undefined ? { onExitNavFocus } : {})}
@@ -245,6 +287,14 @@ export function AdaptiveNavShell<TId extends string = string>({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
+    position: 'relative',
+  },
+  topNavOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 35,
   },
   topNavContent: {
     justifyContent: 'space-between',
@@ -256,37 +306,43 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   brandTitle: {
-    fontWeight: '700',
-    letterSpacing: -0.2,
+    fontWeight: '800',
+    letterSpacing: -0.4,
   },
   destinationsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
+    gap: 18,
   },
   landscapeLink: {
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    minHeight: 40,
+    position: 'relative',
+    paddingHorizontal: 6,
+    paddingVertical: 8,
+    minHeight: 38,
     justifyContent: 'center',
+  },
+  touchTarget: {
+    minWidth: 40,
+    minHeight: 40,
+    alignItems: 'center',
   },
   linkLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
-  navLabel: {
-    fontWeight: '600',
-  },
   badge: {
     paddingHorizontal: 6,
     paddingVertical: 1,
   },
   activeUnderline: {
+    position: 'absolute',
+    left: 4,
+    right: 4,
+    bottom: 2,
     height: 2,
-    width: '100%',
-    marginTop: 4,
-    borderRadius: 1,
+    borderRadius: 2,
   },
   body: {
     flex: 1,

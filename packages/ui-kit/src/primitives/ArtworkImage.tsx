@@ -2,6 +2,7 @@ import { type ReactElement, useCallback, useState } from 'react';
 import {
   Image,
   type ImageResizeMode,
+  Platform,
   type StyleProp,
   StyleSheet,
   Text,
@@ -9,7 +10,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { useUiAdapters } from '../adapters';
-import { useTheme } from '../theme';
+import { useTheme, webTransition } from '../theme';
 import { type DeadHostRegistry, defaultDeadHostRegistry } from './dead-host-registry';
 
 /** Default maximum decode dimension on low-RAM TV targets (`#311`). */
@@ -28,6 +29,8 @@ export interface ArtworkImageProps {
   borderRadius?: number;
   /** Subtle neutral plate improving readability of dark transparent channel logos (`#126`). */
   logoBackdrop?: boolean;
+  /** Smoothly zooms artwork (`scale(1.05)`) on pointer hover; disabled when `theme.reduceMotion` is true. */
+  zoomed?: boolean;
   /** Injectable dead-host circuit breaker (defaults to {@link defaultDeadHostRegistry}, `#202`). */
   deadHosts?: DeadHostRegistry;
   style?: StyleProp<ViewStyle>;
@@ -51,8 +54,8 @@ function monogramOf(label: string): string {
 /**
  * Memory-safe poster, backdrop, and channel-logo image primitive (`#126`, `#202`, `#311`).
  * Short-circuits confirmed dead hosts synchronously (safe under pooled `TvList` slot recycling),
- * supports native decode-capped renderers through `UiAdaptersProvider`, and renders a quiet tonal
- * monogram fallback with zero broken-image chrome.
+ * supports native decode-capped renderers through `UiAdaptersProvider`, renders an atmospheric
+ * tonal fallback tile with zero broken-image chrome, and supports smooth hover zoom.
  */
 export function ArtworkImage({
   uri,
@@ -62,6 +65,7 @@ export function ArtworkImage({
   maxDecodePx = DEFAULT_MAX_DECODE_PX,
   borderRadius,
   logoBackdrop = false,
+  zoomed = false,
   deadHosts = defaultDeadHostRegistry,
   style,
   testID,
@@ -86,6 +90,19 @@ export function ArtworkImage({
 
   const radius = borderRadius ?? theme.radius.card;
   const containerBg = logoBackdrop ? theme.colors.subtleHighlight : theme.colors.bgCard;
+  const shouldZoom = zoomed && !theme.reduceMotion;
+  const zoomStyle: StyleProp<ViewStyle> = [
+    styles.image,
+    shouldZoom ? { transform: [{ scale: 1.05 }] } : undefined,
+    webTransition(theme, 'transform', 350),
+  ];
+
+  const fallbackSheen: ViewStyle | undefined =
+    Platform.OS === 'web'
+      ? ({
+          backgroundImage: `linear-gradient(145deg, ${theme.colors.bgElevated} 0%, ${theme.colors.bgCard} 68%, ${theme.colors.bgSurface} 100%)`,
+        } as unknown as ViewStyle)
+      : undefined;
 
   return (
     <View
@@ -105,7 +122,7 @@ export function ArtworkImage({
           testID={testID ? `${testID}-fallback` : undefined}
           accessible
           accessibilityLabel={label}
-          style={[styles.fallback, { backgroundColor: theme.colors.bgCard }]}
+          style={[styles.fallback, { backgroundColor: theme.colors.bgCard }, fallbackSheen]}
         >
           <Text
             numberOfLines={1}
@@ -114,26 +131,30 @@ export function ArtworkImage({
             {monogramOf(label)}
           </Text>
         </View>
-      ) : adapters.renderImage ? (
-        adapters.renderImage({
-          uri: trimmedUri,
-          resizeMode,
-          maxDecodePx,
-          style: styles.image,
-          accessibilityLabel: label,
-          onLoad: handleLoad,
-          onError: handleError,
-        })
       ) : (
-        <Image
-          testID={testID ? `${testID}-img` : undefined}
-          source={{ uri: trimmedUri }}
-          resizeMode={resizeMode}
-          accessibilityLabel={label}
-          onLoad={handleLoad}
-          onError={handleError}
-          style={styles.image}
-        />
+        <View testID={testID ? `${testID}-zoom` : undefined} style={zoomStyle}>
+          {adapters.renderImage ? (
+            adapters.renderImage({
+              uri: trimmedUri,
+              resizeMode,
+              maxDecodePx,
+              style: styles.image,
+              accessibilityLabel: label,
+              onLoad: handleLoad,
+              onError: handleError,
+            })
+          ) : (
+            <Image
+              testID={testID ? `${testID}-img` : undefined}
+              source={{ uri: trimmedUri }}
+              resizeMode={resizeMode}
+              accessibilityLabel={label}
+              onLoad={handleLoad}
+              onError={handleError}
+              style={styles.image}
+            />
+          )}
+        </View>
       )}
     </View>
   );
