@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react-native';
 import { Text } from 'react-native';
-import { useFormFactor } from '../../form-factor';
+import { FormFactorProvider, useFormFactor } from '../../form-factor';
 import { resolveViewport, useViewport, ViewportProvider } from '../index';
 
 describe('resolveViewport', () => {
@@ -53,6 +53,7 @@ function ViewportProbe() {
   return (
     <>
       <Text testID="ff">{ff}</Text>
+      <Text testID="vp-ff">{vp.formFactor}</Text>
       <Text testID="orient">{vp.orientation}</Text>
       <Text testID="modality">{vp.inputModality}</Text>
       <Text testID="wide">{String(vp.columns.wideRail)}</Text>
@@ -74,5 +75,19 @@ describe('ViewportProvider', () => {
     expect(screen.getByTestId('orient').props.children).toBe('portrait');
     expect(screen.getByTestId('modality').props.children).toBe('touch');
     expect(screen.getByTestId('wide').props.children).toBe('1.2');
+  });
+
+  it('bridges legacy FormFactorProvider overrides into useViewport() when outside ViewportProvider', async () => {
+    await render(
+      <FormFactorProvider value="tv">
+        <ViewportProbe />
+      </FormFactorProvider>,
+    );
+
+    expect(screen.getByTestId('ff').props.children).toBe('tv');
+    expect(screen.getByTestId('vp-ff').props.children).toBe('tv');
+    expect(screen.getByTestId('orient').props.children).toBe('landscape');
+    expect(screen.getByTestId('modality').props.children).toBe('tv');
+    expect(screen.getByTestId('wide').props.children).toBe('3.3');
   });
 });

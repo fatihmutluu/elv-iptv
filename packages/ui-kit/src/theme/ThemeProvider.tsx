@@ -32,8 +32,8 @@ export interface ThemeProviderProps {
   palette?: ThemePalette;
   /** Controlled or initial font scale multiplier (`0.9..1.2`). */
   fontScale?: number;
-  /** Explicit reduce-motion override; when omitted, follows OS `AccessibilityInfo.isReduceMotionEnabled()`. */
-  reduceMotion?: boolean;
+  /** Explicit reduce-motion override (`true`/`false`), `'system'` (controlled follow-OS), or omitted (uncontrolled). */
+  reduceMotion?: boolean | 'system';
   /** Notified when preset, font scale, or reduce-motion changes through {@link useThemeController}. */
   onChange?: (next: {
     preset: ThemePresetId;
@@ -69,7 +69,7 @@ export function ThemeProvider({
   );
   const [internalFontScale, setInternalFontScale] = useState<number>(clampFontScale(fontScale));
   const [internalReduceMotion, setInternalReduceMotion] = useState<boolean | undefined>(
-    reduceMotion,
+    typeof reduceMotion === 'boolean' ? reduceMotion : undefined,
   );
   const [systemReduceMotion, setSystemReduceMotion] = useState(false);
 
@@ -97,7 +97,11 @@ export function ThemeProvider({
   const activePreset = preset ?? internalPreset;
   const activeFontScale = fontScale !== undefined ? clampFontScale(fontScale) : internalFontScale;
   const activeReduceMotionOverride =
-    reduceMotion !== undefined ? reduceMotion : internalReduceMotion;
+    reduceMotion === 'system'
+      ? undefined
+      : reduceMotion !== undefined
+        ? reduceMotion
+        : internalReduceMotion;
   const activeReduceMotion = activeReduceMotionOverride ?? systemReduceMotion;
 
   const onChangeRef = useRef(onChange);

@@ -1,8 +1,14 @@
 import type { CatalogService } from '@elv/data';
-import { type AppLifecyclePort, AppShell, createLazyCatalog, type VideoHost } from '@elv/features';
-import { createAppI18n, resolveLocale } from '@elv/i18n';
+import {
+  type AppLifecyclePort,
+  AppProviders,
+  AppShell,
+  createLazyCatalog,
+  type VideoHost,
+} from '@elv/features';
+import { resolveLocale } from '@elv/i18n';
 import { remoteKeys } from '@elv/remote-keys';
-import { FormFactorProvider, I18nProvider, RemoteKeysProvider } from '@elv/ui-kit';
+import { RemoteKeysProvider } from '@elv/ui-kit';
 import Constants from 'expo-constants';
 import { getLocales } from 'expo-localization';
 import { StatusBar } from 'expo-status-bar';
@@ -17,15 +23,17 @@ import { PlayerGateScreen } from './gate/player/PlayerGateScreen';
 import { useGateRoute } from './gate/useGateParams';
 import { PlayerSurface } from './playback/PlayerSurface';
 import { createPlatformEngine } from './playback/platform-engine';
-import { createSecureSecretStore } from './storage';
+import { createDevicePreferencesStore, createSecureSecretStore } from './storage';
 
 function AppRoot() {
   const [refreshToken, setRefreshToken] = useState(0);
 
-  const i18n = useMemo(() => {
-    const tags = getLocales().map((locale) => locale.languageTag);
-    return createAppI18n(resolveLocale(tags));
-  }, []);
+  const systemLocale = useMemo(
+    () => resolveLocale(getLocales().map((locale) => locale.languageTag)),
+    [],
+  );
+
+  const preferencesStore = useMemo(() => createDevicePreferencesStore(), []);
 
   const openSharedCatalog = useMemo(() => {
     let cached: Promise<CatalogService> | undefined;
@@ -106,17 +114,15 @@ function AppRoot() {
   }, [openSharedCatalog]);
 
   return (
-    <FormFactorProvider>
-      <I18nProvider i18n={i18n}>
-        <AppShell
-          catalog={catalog}
-          videoHost={videoHost}
-          appLifecycle={appLifecycle}
-          externalRefreshToken={refreshToken}
-        />
-        <StatusBar style="light" />
-      </I18nProvider>
-    </FormFactorProvider>
+    <AppProviders preferencesStore={preferencesStore} systemLocale={systemLocale}>
+      <AppShell
+        catalog={catalog}
+        videoHost={videoHost}
+        appLifecycle={appLifecycle}
+        externalRefreshToken={refreshToken}
+      />
+      <StatusBar style="light" />
+    </AppProviders>
   );
 }
 

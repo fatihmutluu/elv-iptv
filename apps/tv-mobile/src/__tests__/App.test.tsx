@@ -184,7 +184,7 @@ describe('App', () => {
     const read = launchedWith(GATE_URL);
     await render(<App />);
     expect(screen.getByTestId('sources-screen')).toBeOnTheScreen();
-    expect(read).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalledWith('gateUrl');
   });
 
   it('ignores a launch argument that is not a gate URL', async () => {
@@ -339,5 +339,29 @@ describe('App', () => {
 
     await view.unmount();
     expect(released).toBe(true);
+  });
+
+  it('mounts AppShell inside AppProviders and hydrates persisted device preferences', async () => {
+    jest.replaceProperty(Platform, 'OS', 'ios');
+    const settingsRead = jest.spyOn(Settings, 'get').mockImplementation((key) =>
+      key === 'elv.preferences.v1'
+        ? JSON.stringify({
+            version: 1,
+            themePreset: 'highContrast',
+            locale: 'tr',
+            fontScale: 1.1,
+            reduceMotion: true,
+          })
+        : undefined,
+    );
+    openedWith(null);
+
+    const view = await render(<App />);
+    expect(screen.getByTestId('sources-screen')).toBeOnTheScreen();
+    expect(settingsRead).toHaveBeenCalledWith('elv.preferences.v1');
+    expect(screen.getByTestId('nav-tab-live')).toBeOnTheScreen();
+    expect(screen.getByTestId('nav-tab-sources')).toBeOnTheScreen();
+
+    await view.unmount();
   });
 });

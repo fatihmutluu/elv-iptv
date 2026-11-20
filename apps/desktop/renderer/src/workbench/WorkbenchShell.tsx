@@ -7,6 +7,7 @@ import {
   THEME_PRESETS,
   type ThemePresetId,
   ThemeProvider,
+  TvRemoteProvider,
   ViewportProvider,
 } from '@elv/ui-kit';
 import { type ReactElement, useMemo, useState } from 'react';
@@ -88,13 +89,15 @@ export function WorkbenchShell(): ReactElement {
     <I18nProvider i18n={i18n}>
       <ThemeProvider preset={preset} fontScale={fontScale} reduceMotion={reduceMotion}>
         <ViewportProvider value={device.viewport}>
-          <ErrorBoundary>
-            {mode === 'gallery' ? (
-              <DesignGallery />
-            ) : (
-              <AppShell catalog={catalog} videoHost={videoHost} />
-            )}
-          </ErrorBoundary>
+          <TvRemoteProvider>
+            <ErrorBoundary>
+              {mode === 'gallery' ? (
+                <DesignGallery />
+              ) : (
+                <AppShell catalog={catalog} videoHost={videoHost} />
+              )}
+            </ErrorBoundary>
+          </TvRemoteProvider>
         </ViewportProvider>
       </ThemeProvider>
     </I18nProvider>

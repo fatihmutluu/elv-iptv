@@ -150,7 +150,9 @@ describe('AppShell Notices tab', () => {
       // Start on Sources -> Back focuses Top Nav -> Right moves to Notices -> Down enters Notices list
       expect(screen.getByTestId('sources-screen')).toBeTruthy();
       await pressKey(KEYCODE_BACK);
-      expect(screen.getByTestId('nav-tv-focus-anchor')).toBeTruthy();
+      expect(
+        screen.getByTestId('nav-tv-focus-anchor', { includeHiddenElements: true }),
+      ).toBeTruthy();
 
       await pressKey(KEYCODE_DPAD_RIGHT);
       expect(screen.getByTestId('nav-tab-notices').props.accessibilityState.selected).toBe(true);
@@ -158,7 +160,9 @@ describe('AppShell Notices tab', () => {
       expect(screen.queryByTestId('notices-list-ring')).toBeNull();
 
       await pressKey(KEYCODE_DPAD_DOWN);
-      expect(screen.queryByTestId('nav-tv-focus-anchor')).toBeNull();
+      expect(
+        screen.queryByTestId('nav-tv-focus-anchor', { includeHiddenElements: true }),
+      ).toBeNull();
       expect(screen.getByTestId('notices-list-ring')).toBeTruthy();
 
       await pressKey(KEYCODE_DPAD_DOWN);
@@ -167,7 +171,9 @@ describe('AppShell Notices tab', () => {
 
       // Back returns focus cleanly to Top Nav on the Notices tab (parking the list ring)
       await pressKey(KEYCODE_BACK);
-      expect(screen.getByTestId('nav-tv-focus-anchor')).toBeTruthy();
+      expect(
+        screen.getByTestId('nav-tv-focus-anchor', { includeHiddenElements: true }),
+      ).toBeTruthy();
       expect(screen.queryByTestId('notices-list-ring')).toBeNull();
       expect(screen.getByTestId('nav-tab-notices').props.accessibilityState.selected).toBe(true);
 
