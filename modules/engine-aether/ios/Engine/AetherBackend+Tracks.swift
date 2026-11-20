@@ -21,6 +21,10 @@ extension AetherBackend {
         guard let self, let target, self.engineLoadSerial > 0 else { return }
         let serial = self.engineLoadSerial
         guard self.readySerial == serial || target.playbackPhase == .playing else { return }
+        if self.tracksEmittedSerial == serial && (target.state == .loading || target.playbackPhase == .loading) {
+          self.tracksDeferredForReload = true
+          return
+        }
         self.scheduleTracksSnapshot(from: target, serial: serial)
       }
     }
@@ -70,10 +74,15 @@ extension AetherBackend {
       MainActor.assumeIsolated {
         guard let self, let target, self.engineLoadSerial == serial else { return }
         self.pendingTracksSerial = 0
+        if self.tracksEmittedSerial == serial && (target.state == .loading || target.playbackPhase == .loading) {
+          self.tracksDeferredForReload = true
+          return
+        }
         let isReady = self.readySerial == serial
           || target.startupProgress?.checkpoint == .ready
           || target.playbackPhase == .playing
         guard isReady else { return }
+        self.tracksDeferredForReload = false
         self.tracksEmittedSerial = serial
         self.emitTracksObservation(
           audioTracks: target.audioTracks,
@@ -241,6 +250,7 @@ extension AetherBackend {
     readySerial = 0
     tracksEmittedSerial = 0
     pendingTracksSerial = 0
+    tracksDeferredForReload = false
     cancelTasksAndReader()
     publishSubtitlePresentation(.empty)
     currentEngine.stop(resetDisplayCriteria: false, finalTeardown: false)

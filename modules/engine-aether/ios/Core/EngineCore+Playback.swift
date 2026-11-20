@@ -4,14 +4,25 @@ extension EngineCore {
   func handlePhase(_ phase: BackendPhase) {
     switch phase {
     case .loading:
-      break
+      if played && !stalled && !reloading {
+        reloading = true
+        let now = uptimeMs()
+        setScreenOn(true)
+        emit(.state(attempt: token, state: .buffering))
+        emitAnchor(rate: 0, atMs: now)
+      }
 
     case .seeking:
       seeking = true
 
     case .playing:
+      let wasInterrupted = seeking || reloading
       seeking = false
+      reloading = false
       userPaused = false
+      if wasInterrupted {
+        forceNextClock = true
+      }
       if !framed {
         if audioOnly {
           framed = true
@@ -26,11 +37,13 @@ extension EngineCore {
 
     case .systemPaused:
       seeking = false
+      reloading = false
       userPaused = true
       applyGenuinePause()
 
     case .paused:
       seeking = false
+      reloading = false
       let isLive = currentRequest?.live ?? true
       if isLive && !userPaused {
         handleUnrequestedLivePause()
@@ -40,10 +53,12 @@ extension EngineCore {
 
     case .rebuffering, .stalled:
       seeking = false
+      reloading = false
       beginStallIfPlayed()
 
     case .ended:
       seeking = false
+      reloading = false
       pendingPlaying = false
       stalled = false
       active = false
@@ -82,6 +97,9 @@ extension EngineCore {
       emitAnchor(rate: 1.0, atMs: now)
     } else {
       emit(.state(attempt: token, state: .playing))
+      if lastClockRate == 0 {
+        emitAnchor(rate: 1.0, atMs: uptimeMs())
+      }
     }
   }
 
@@ -93,7 +111,7 @@ extension EngineCore {
   ) {
     if let d = durationSeconds, d.isFinite, d > 0 { lastDurationSeconds = d }
     if let e = liveEdgeSeconds, e.isFinite, e >= 0 { lastLiveEdgeSeconds = e }
-    guard framed, !seeking else { return }
+    guard framed, !seeking, !reloading else { return }
     if positionSeconds.isFinite { lastPositionSeconds = max(0, positionSeconds) }
     guard played, !stalled else { return }
     let now = uptimeMs()
@@ -101,6 +119,14 @@ extension EngineCore {
     guard forceNextClock || lastClockRate != rate || elapsed else { return }
     forceNextClock = false
     emitAnchor(rate: rate, atMs: now)
+  }
+
+  func handleDuration(_ durationSeconds: Double) {
+    guard durationSeconds.isFinite, durationSeconds > 0 else { return }
+    let changed = lastDurationSeconds != durationSeconds
+    lastDurationSeconds = durationSeconds
+    guard changed, framed, !seeking, !reloading, played, !stalled, let rate = lastClockRate else { return }
+    emitAnchor(rate: rate, atMs: uptimeMs())
   }
 
   func emitAnchor(rate: Double, atMs: Double) {
@@ -124,6 +150,7 @@ extension EngineCore {
     pendingPlaying = false
     stalled = false
     seeking = false
+    reloading = false
     setScreenOn(false)
     sink?.clearSubtitles()
     let live = currentRequest?.live ?? true

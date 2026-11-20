@@ -167,4 +167,83 @@ struct EngineCoreHardeningTests {
     #expect(backend.calls.isEmpty)
     #expect(sink.events.first == .state(attempt: 3, state: .paused))
   }
+
+  @Test("duration observation updates metadata without clobbering playing clock rate or position")
+  func durationObservationPreservesPlayingClockAndSupportsVodEof() {
+    let (core, _, sink, clock) = makeHarness()
+    core.load(
+      LoadRequest(url: "http://h:7878/movie/demo/demo/200010.mp4", live: false, startMs: 120_000),
+      attempt: 1
+    )
+    sink.events.removeAll()
+
+    // Early duration before firstFrame satisfies resumed VOD EOF without emitting premature clock.
+    core.observe(.duration(120.0), serial: 1)
+    #expect(sink.events.isEmpty)
+    core.observe(.phase(.ended), serial: 1)
+    #expect(sink.events == [.state(attempt: 1, state: .ended)])
+
+    // Once playing, duplicate duration does not emit and changed duration keeps rate 1.0 and position.
+    core.load(LoadRequest(url: "http://h:7878/movie/demo/demo/200010.mp4", live: false), attempt: 2)
+    core.observe(.firstFrame, serial: 2)
+    core.observe(.phase(.playing), serial: 2)
+    clock.nowMs = 1_500
+    core.observe(.clock(positionSeconds: 5.0, rate: 1.0, durationSeconds: 600.0, liveEdgeSeconds: nil), serial: 2)
+    sink.events.removeAll()
+
+    clock.nowMs = 1_600
+    core.observe(.duration(600.0), serial: 2)
+    #expect(sink.events.isEmpty)
+
+    clock.nowMs = 1_700
+    core.observe(.duration(605.0), serial: 2)
+    #expect(
+      sink.events == [
+        .clock(attempt: 2, anchor: ClockAnchorOut(positionMs: 5_000, atMs: 1_700, rate: 1.0, durationMs: 605_000)),
+      ]
+    )
+  }
+
+  @Test("mid-playback loading freezes clock without stall and resumes playing at rate 1.0")
+  func midPlaybackLoadingFreezesClockAndResumesAtRateOne() {
+    let (core, _, sink, clock) = makeHarness()
+    core.load(LoadRequest(url: "http://h:7878/movie/demo/demo/200010.mp4", live: false), attempt: 1)
+    core.observe(.firstFrame, serial: 1)
+    core.observe(.phase(.playing), serial: 1)
+    clock.nowMs = 1_200
+    core.observe(.clock(positionSeconds: 0.5, rate: 1.0, durationSeconds: 600.0, liveEdgeSeconds: nil), serial: 1)
+    sink.events.removeAll()
+
+    // Mid-playback audio-switch rebuild enters .loading: emits buffering + rate 0, no stall, ignores mid-reload ticks.
+    clock.nowMs = 1_300
+    core.observe(.phase(.loading), serial: 1)
+    core.observe(.duration(600.0), serial: 1)
+    core.observe(.clock(positionSeconds: 0.0, rate: 0.0, durationSeconds: 600.0, liveEdgeSeconds: nil), serial: 1)
+    #expect(
+      sink.events == [
+        .state(attempt: 1, state: .buffering),
+        .clock(attempt: 1, anchor: ClockAnchorOut(positionMs: 500, atMs: 1_300, rate: 0, durationMs: 600_000)),
+      ]
+    )
+    sink.events.removeAll()
+
+    // Returning to .playing immediately restores rate 1.0 and forces the next real clock tick through.
+    clock.nowMs = 1_600
+    core.observe(.phase(.playing), serial: 1)
+    #expect(
+      sink.events == [
+        .state(attempt: 1, state: .playing),
+        .clock(attempt: 1, anchor: ClockAnchorOut(positionMs: 500, atMs: 1_600, rate: 1.0, durationMs: 600_000)),
+      ]
+    )
+    sink.events.removeAll()
+
+    clock.nowMs = 1_650
+    core.observe(.clock(positionSeconds: 0.6, rate: 1.0, durationSeconds: 600.0, liveEdgeSeconds: nil), serial: 1)
+    #expect(
+      sink.events == [
+        .clock(attempt: 1, anchor: ClockAnchorOut(positionMs: 600, atMs: 1_650, rate: 1.0, durationMs: 600_000)),
+      ]
+    )
+  }
 }

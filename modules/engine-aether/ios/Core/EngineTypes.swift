@@ -169,6 +169,7 @@ public enum BackendObservation: Equatable, Sendable {
   case firstFrame
   case audioOnly
   case clock(positionSeconds: Double, rate: Double, durationSeconds: Double?, liveEdgeSeconds: Double?)
+  case duration(Double)
   case tracks(MediaTracksOut)
   case readerFault(ReaderFailure)
   case failure(BackendFailure)
