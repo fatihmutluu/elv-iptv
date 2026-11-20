@@ -12,9 +12,16 @@ React components for react-native and react-native-web, design tokens and TV foc
 - May import `react` and `react-native`; never `expo-*`, navigation libraries or `electron`.
 - Allowed workspace dependencies: `@elv/domain`, `@elv/focus-core`, `@elv/i18n`.
 - Never imports `features`, `modules/*` or `apps/*`. Source-first (`exports` points at `src/index.ts`).
-- Layout forks happen in container components via `useFormFactor()` (`FormFactorProvider` / `detectFormFactor`: `'tv' | 'phone' | 'tablet' | 'desktop'`), never by file-name suffix.
+- Layout forks happen in container components via `useViewport()` (which also keeps legacy `useFormFactor()` in sync via `ViewportProvider` / `FormFactorProvider`: `'tv' | 'phone' | 'tablet' | 'desktop'`), never by file-name suffix.
 - Localization hooks (`I18nProvider`, `useI18n`) subscribe to `@elv/i18n`'s pure `AppI18n` via `useSyncExternalStore`.
-- TV code never uses `Modal` (Biome enforces it); overlays are focus-core scopes in the main window.
+- TV code never uses `Modal` (Biome enforces it); overlays (`AdaptiveSheet`) are focus-scoped views in the main window.
+
+## Design System Core (`src/theme/`, `src/viewport/`, `src/adapters/`, `src/icons/`, `src/primitives/`)
+- **Theme tokens (`src/theme/`):** `ThemeProvider`, `useTheme`, `useThemeController`, `buildTheme`, `THEME_PRESETS` (6 presets: `obsidianCrimson`, `abyssalSapphire`, `theaterAmber`, `velvetViolet`, `pitchEmerald`, and WCAG AAA `highContrast` #325), `contrastRatio`, `hexToRgba`, `clampFontScale` (`[0.9, 1.2]`), and `TABULAR_NUMS_STYLE`. Scrims, glass, focus fills, and surfaces derive dynamically from `bgCanvas`/`bgElevated` — zero hardcoded dark-blue hexes. `reduceMotion` collapses transition durations to `0` and focus scaling to `1.0`.
+- **Viewport (`src/viewport/`):** `ViewportProvider`, `useViewport`, `resolveViewport` return `{ formFactor, orientation, inputModality, width, height, safeArea, overscan, columns, tvScale }` — normalizing Android TV (`960×540`) vs Apple TV (`1920×1080`) metrics (#281) and propagating `formFactor` overrides into `FormFactorProvider` automatically.
+- **Native adapters (`src/adapters/`):** `UiAdaptersProvider` / `useUiAdapters` let composition roots inject optional native `renderGradient`, `renderBlur`, `renderImage`, and `renderSvg` renderers without pulling `expo-*` into `@elv/ui-kit`.
+- **Icons (`src/icons/`):** `Icon` renders typed `IconName` paths from `ICON_PATHS` (`paths.ts`, 36 single-weight stroke/filled specs) via `UiAdapters.renderSvg` on native or inline `<svg>` on web.
+- **Primitives (`src/primitives/`):** `Surface`, `Scrim`, `GlassBar`, `ArtworkImage` + `DeadHostRegistry` (#126, #202, #311), `AdaptiveSheet`, `ErrorBoundary` (#159), `CtaButton`, `IconButton`, `MicroPill`, `FilterChip`, `PosterCard` (`2:3` pure artwork), `WideCard` (`16:9` Live / Continue Watching). Zero outer boxes around media cards, zero duplicate titles, zero neon desktop hover rings.
 
 ## TV list, key source and text-entry suspension (`src/tv/`)
 - `useTvKeySource(onInput)` owns `TVEventHandler`, refcounted `TVEventControl`, `BackHandler`, Android raw

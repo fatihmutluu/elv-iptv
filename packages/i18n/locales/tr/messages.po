@@ -557,3 +557,18 @@ msgstr "Yayın hatası nedeniyle oynatma durdu."
 
 msgid "player.hint.streamFailed"
 msgstr "Yeniden bağlanmak için Tekrar dene düğmesine basın veya başka bir içerik seçin."
+
+msgid "ui.dismiss"
+msgstr "Kapat"
+
+msgid "ui.liveBadge"
+msgstr "CANLI"
+
+msgid "ui.error.title"
+msgstr "Bir sorun oluştu"
+
+msgid "ui.error.description"
+msgstr "Bu görünüm beklenmeyen bir hatayla karşılaştı. Yeniden yüklemeyi deneyin."
+
+msgid "ui.error.retry"
+msgstr "Tekrar dene"

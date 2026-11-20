@@ -557,3 +557,18 @@ msgstr "Playback stopped due to a stream error."
 
 msgid "player.hint.streamFailed"
 msgstr "Press Retry to reconnect, or choose another item."
+
+msgid "ui.dismiss"
+msgstr "Dismiss"
+
+msgid "ui.liveBadge"
+msgstr "LIVE"
+
+msgid "ui.error.title"
+msgstr "Something went wrong"
+
+msgid "ui.error.description"
+msgstr "This view ran into an unexpected problem. Try loading it again."
+
+msgid "ui.error.retry"
+msgstr "Try again"
