@@ -257,6 +257,205 @@ describe('setCount, focus, activate and re-entrancy', () => {
   });
 });
 
+describe('empty-panel focus recovery', () => {
+  it('activates direct fallback and preserves its focus memory when active list empties', () => {
+    const s = createFocusStore({
+      id: 'root',
+      lists: [l('main', { count: 5, index: 2, fallbackId: 'side' }), l('side', { index: 7 })],
+      active: 'main',
+    });
+    const changes: Array<{ listId: string; index: number }> = [];
+    s.subscribe((c) => changes.push(c));
+
+    s.setCount('main', 0);
+
+    expect(s.isActive('side')).toBe(true);
+    expect(s.isActive('main')).toBe(false);
+    expect(active(s)).toMatchObject({ id: 'side', index: 7 });
+    expect(changes).toEqual([
+      { listId: 'main', index: 0 },
+      { listId: 'side', index: 7 },
+    ]);
+  });
+
+  it('follows a multi-hop fallback chain to the first non-empty sibling', () => {
+    const s = createFocusStore({
+      id: 'root',
+      lists: [
+        l('items', { count: 3, index: 1, fallbackId: 'subgroups' }),
+        l('subgroups', { count: 0, fallbackId: 'groups' }),
+        l('groups', { count: 10, index: 4 }),
+      ],
+      active: 'items',
+    });
+    const fn = vi.fn();
+    s.subscribe(fn);
+
+    s.setCount('items', 0);
+
+    expect(s.isActive('groups')).toBe(true);
+    expect(active(s)).toMatchObject({ id: 'groups', index: 4 });
+    expect(fn).toHaveBeenLastCalledWith({ listId: 'groups', index: 4 });
+  });
+
+  it('activates the immediate valid fallback sibling when every fallback is also empty', () => {
+    const s = createFocusStore({
+      id: 'root',
+      lists: [
+        l('a', { count: 2, fallbackId: 'b' }),
+        l('b', { count: 0, fallbackId: 'c' }),
+        l('c', { count: 0 }),
+      ],
+      active: 'a',
+    });
+    const fn = vi.fn();
+    s.subscribe(fn);
+
+    s.setCount('a', 0);
+
+    expect(s.isActive('b')).toBe(true);
+    expect(fn).toHaveBeenLastCalledWith({ listId: 'b', index: 0 });
+  });
+
+  it('protects against self-referential and cyclic fallback chains', () => {
+    const selfStore = createFocusStore({
+      id: 'root',
+      lists: [l('a', { count: 3, index: 1, fallbackId: 'a' })],
+      active: 'a',
+    });
+    const selfFn = vi.fn();
+    selfStore.subscribe(selfFn);
+    selfStore.setCount('a', 0);
+    expect(selfStore.isActive('a')).toBe(true);
+    expect(selfFn).toHaveBeenCalledTimes(1);
+    expect(selfFn).toHaveBeenCalledWith({ listId: 'a', index: 0 });
+
+    const cycleStore = createFocusStore({
+      id: 'root',
+      lists: [l('a', { count: 2, fallbackId: 'b' }), l('b', { count: 0, fallbackId: 'a' })],
+      active: 'a',
+    });
+    cycleStore.setCount('a', 0);
+    expect(cycleStore.isActive('b')).toBe(true);
+  });
+
+  it('does not steal focus when setCount empties a non-active list', () => {
+    const s = createFocusStore({
+      id: 'root',
+      lists: [
+        l('main', { count: 10, index: 3 }),
+        l('side', { count: 5, index: 2, fallbackId: 'other' }),
+        l('other', { count: 8, index: 1 }),
+      ],
+      active: 'main',
+    });
+    const changes: Array<{ listId: string; index: number }> = [];
+    s.subscribe((c) => changes.push(c));
+
+    s.setCount('side', 0);
+
+    expect(s.isActive('main')).toBe(true);
+    expect(active(s)).toMatchObject({ id: 'main', index: 3 });
+    expect(changes).toEqual([{ listId: 'side', index: 0 }]);
+  });
+
+  it('treats an unknown fallbackId as a graceful no-op', () => {
+    const s = createFocusStore({
+      id: 'root',
+      lists: [l('main', { count: 4, index: 2, fallbackId: 'missing' }), l('side', { count: 5 })],
+      active: 'main',
+    });
+    const changes: Array<{ listId: string; index: number }> = [];
+    s.subscribe((c) => changes.push(c));
+
+    s.setCount('main', 0);
+
+    expect(s.isActive('main')).toBe(true);
+    expect(active(s)).toMatchObject({ id: 'main', count: 0, index: 0 });
+    expect(changes).toEqual([{ listId: 'main', index: 0 }]);
+  });
+
+  it('recovers focus on popScope when the restored active list is empty', () => {
+    const s = createFocusStore({
+      id: 'root',
+      lists: [l('main', { count: 0, fallbackId: 'side' }), l('side', { count: 8, index: 3 })],
+      active: 'main',
+    });
+    s.pushScope('dlg', [l('d', { count: 4 })], 'd');
+    const changes: Array<{ listId: string; index: number }> = [];
+    s.subscribe((c) => changes.push(c));
+
+    s.popScope();
+
+    expect(s.isActive('side')).toBe(true);
+    expect(active(s)).toMatchObject({ id: 'side', index: 3 });
+    expect(changes).toEqual([{ listId: 'side', index: 3 }]);
+  });
+
+  it('recovers focus cleanly when an underlying scope active list empties before popScope', () => {
+    const s = createFocusStore({
+      id: 'root',
+      lists: [
+        l('main', { count: 5, index: 2, fallbackId: 'side' }),
+        l('side', { count: 8, index: 4 }),
+      ],
+      active: 'main',
+    });
+    s.pushScope('dlg', [l('d', { count: 3 })], 'd');
+
+    s.setCount('main', 0);
+    expect(s.isActive('d')).toBe(true);
+
+    const changes: Array<{ listId: string; index: number }> = [];
+    s.subscribe((c) => changes.push(c));
+    s.popScope();
+
+    expect(s.isActive('side')).toBe(true);
+    expect(active(s)).toMatchObject({ id: 'side', index: 4 });
+    expect(changes).toEqual([{ listId: 'side', index: 4 }]);
+  });
+
+  it('keeps popScope as a graceful no-op when restored empty active list has no valid fallback', () => {
+    const s = createFocusStore({
+      id: 'root',
+      lists: [l('main', { count: 0, fallbackId: 'missing' }), l('side', { count: 5 })],
+      active: 'main',
+    });
+    s.pushScope('dlg', [l('d', { count: 2 })], 'd');
+    const changes: Array<{ listId: string; index: number }> = [];
+    s.subscribe((c) => changes.push(c));
+
+    s.popScope();
+
+    expect(s.isActive('main')).toBe(true);
+    expect(changes).toEqual([{ listId: 'main', index: 0 }]);
+  });
+
+  it('defers fallback recovery for hidden scopes until popScope and avoids shadowed FocusChange leakage', () => {
+    const s = createFocusStore({
+      id: 'root',
+      lists: [
+        l('main', { count: 5, index: 2, fallbackId: 'rail' }),
+        l('rail', { count: 4, index: 3 }),
+      ],
+      active: 'main',
+    });
+    s.pushScope('overlay', [l('rail', { count: 10, index: 1 })], 'rail');
+    const changes: Array<{ listId: string; index: number }> = [];
+    s.subscribe((c) => changes.push(c));
+
+    // Emptying hidden scope's active list must not switch its active list eagerly or emit hidden rail index 3.
+    s.setCount('main', 0);
+    expect(changes).toEqual([{ listId: 'main', index: 0 }]);
+    expect(s.getState().scopes[0]?.active).toBe('main');
+
+    // Repopulating before popScope preserves focus on 'main'.
+    s.setCount('main', 2);
+    s.popScope();
+    expect(s.isActive('main')).toBe(true);
+  });
+});
+
 describe('invariants', () => {
   it('keeps every index in range for any key sequence', () => {
     const keys: Key[] = [

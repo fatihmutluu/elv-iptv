@@ -2,6 +2,7 @@ import { createFocusStore, type FocusStore } from '@elv/focus-core';
 import { act, render, screen } from '@testing-library/react-native';
 import { cloneElement, type ReactElement, StrictMode } from 'react';
 import { Animated, Text } from 'react-native';
+import { ThemeProvider } from '../../theme';
 import { createSyntheticSource } from '../list-source';
 import { TvList } from '../TvList';
 
@@ -394,6 +395,139 @@ describe('TvList', () => {
       });
       expect(rendered).toHaveLength(1);
       expect(screen.getByText('Row 2')).toBeTruthy();
+    });
+  });
+
+  describe('scroll sync on scope pop / activate and reduceMotion (#152)', () => {
+    it('stops any in-flight animation before snapping translate when popScope() or activate() jumps to an out-of-window index', async () => {
+      let now = 1000;
+      jest.spyOn(performance, 'now').mockImplementation(() => now);
+      const order: string[] = [];
+      let latest = 0;
+      const stopSpy = jest
+        .spyOn(Animated.Value.prototype, 'stopAnimation')
+        .mockImplementation(() => {
+          order.push('stop');
+        });
+      const setValueSpy = jest
+        .spyOn(Animated.Value.prototype, 'setValue')
+        .mockImplementation((v: number) => {
+          latest = v;
+          order.push(`set:${v}`);
+        });
+      const timingSpy = jest.spyOn(Animated, 'timing').mockImplementation(((
+        _: unknown,
+        cfg: { toValue: number },
+      ) => {
+        latest = cfg.toValue;
+        order.push(`timing:${cfg.toValue}`);
+        return { start: () => {} };
+      }) as never);
+
+      const store = createFocusStore({
+        id: 'root',
+        lists: [
+          { id: 'l', count: 1000, index: 500, orientation: 'vertical', pageSize: 10 },
+          { id: 'side', count: 10, index: 0, orientation: 'vertical', pageSize: 5 },
+        ],
+        active: 'l',
+      });
+      const source = createSyntheticSource(1000, (i) => `Item ${i}`);
+      const renderItem = (item: string | undefined) => <Text>{item}</Text>;
+
+      // Push an overlay scope that shadows list 'l' at index 10, start a 1-step timing animation, then popScope() back to index 500
+      store.pushScope(
+        'overlay',
+        [{ id: 'l', count: 1000, index: 10, orientation: 'vertical', pageSize: 10 }],
+        'l',
+      );
+      await render(
+        <TvList
+          listId="l"
+          store={store}
+          source={source}
+          rowHeight={ROW_HEIGHT}
+          visibleRows={8}
+          renderRow={renderItem}
+          testID="list"
+        />,
+      );
+
+      now += 500;
+      order.length = 0;
+      stopSpy.mockClear();
+      setValueSpy.mockClear();
+      timingSpy.mockClear();
+      await act(async () => move(store, 'down', 1));
+      expect(timingSpy).toHaveBeenCalledTimes(1);
+
+      now += 500;
+      order.length = 0;
+      stopSpy.mockClear();
+      setValueSpy.mockClear();
+      timingSpy.mockClear();
+      await act(async () => void store.popScope());
+
+      expect(timingSpy).not.toHaveBeenCalled();
+      expect(stopSpy).toHaveBeenCalledTimes(1);
+      expect(setValueSpy).toHaveBeenCalledTimes(1);
+      expect(order).toEqual(['stop', `set:${-498 * ROW_HEIGHT}`]);
+      expect(screen.getByTestId('list-row-500').props.style.top + latest).toBe(
+        screen.getByTestId('list-ring').props.style.top,
+      );
+
+      // Now jump via activate() back to an out-of-window index after another 1-step animation
+      now += 500;
+      await act(async () => move(store, 'down', 1));
+      now += 500;
+      order.length = 0;
+      stopSpy.mockClear();
+      setValueSpy.mockClear();
+      timingSpy.mockClear();
+      await act(async () => {
+        store.activate('side');
+        store.focus('l', 50);
+        store.activate('l');
+      });
+
+      expect(timingSpy).not.toHaveBeenCalled();
+      expect(stopSpy).toHaveBeenCalledTimes(1);
+      expect(setValueSpy).toHaveBeenCalledTimes(1);
+      expect(order).toEqual(['stop', `set:${-48 * ROW_HEIGHT}`]);
+      expect(screen.getByTestId('list-row-50').props.style.top + latest).toBe(
+        screen.getByTestId('list-ring').props.style.top,
+      );
+    });
+
+    it('skips Animated.timing even on single-step moves when ThemeProvider reduceMotion is true', async () => {
+      let now = 1000;
+      jest.spyOn(performance, 'now').mockImplementation(() => now);
+      const stopSpy = jest
+        .spyOn(Animated.Value.prototype, 'stopAnimation')
+        .mockImplementation(() => {});
+      const setValueSpy = jest
+        .spyOn(Animated.Value.prototype, 'setValue')
+        .mockImplementation(() => {});
+      const timingSpy = jest
+        .spyOn(Animated, 'timing')
+        .mockImplementation((() => ({ start: () => {} })) as never);
+
+      const { store, ui } = setup(8);
+      await render(<ThemeProvider reduceMotion>{ui}</ThemeProvider>);
+      await act(async () => store.focus('l', 10));
+
+      now += 500;
+      stopSpy.mockClear();
+      setValueSpy.mockClear();
+      timingSpy.mockClear();
+      await act(async () => move(store, 'down', 1));
+
+      expect(timingSpy).not.toHaveBeenCalled();
+      expect(stopSpy).toHaveBeenCalledTimes(1);
+      expect(setValueSpy).toHaveBeenCalledTimes(1);
+      expect(stopSpy.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY).toBeLessThan(
+        setValueSpy.mock.invocationCallOrder[0] ?? Number.NEGATIVE_INFINITY,
+      );
     });
   });
 });

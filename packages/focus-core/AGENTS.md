@@ -8,42 +8,21 @@ Focus graph, key model and EPG cursor model.
 - `pnpm -w check` runs every repository check.
 
 ## Rules
-- Pure TypeScript: no `react`, `react-native`, `expo*`, `electron` or `node:*` imports.
-  Platform access goes through ports defined in `@elv/domain`.
-- Source-first: `exports` points at `src/index.ts`; there is no build step.
-- Allowed workspace dependencies: domain.
-- Tests live beside the code as `*.test.ts`.
+- Pure TypeScript: no `react`, `react-native`, `expo*`, `electron` or `node:*` imports. Platform access goes through ports in `@elv/domain`.
+- Source-first (`exports` points at `src/index.ts`, no build step). Allowed workspace dependencies: `domain`. Tests live beside code as `*.test.ts`.
 
 ## Key model (`keys.ts`, `interpreter.ts`)
-- `createKeyInterpreter()` turns `KeyInput` (`down`/`up`/`press`, caller-supplied `time`) into `KeyEvent`s
-  (`press`/`long`/`repeat`). It never reads a clock; call `tick(now)` from the host loop.
-- Arrows, `channelUp`/`channelDown`, and `rewind`/`fastForward` step on the earliest input: a `down` gives the `press`
-  (its time) and the following `up` nothing; an `up` without a `down` is one `press` at its time. The Android
-  `TVEventHandler` fallback (no raw key source) delivers a tap only as its release, so there the step starts at the
-  release; the raw path delivers the `down`. Other keys (`select`, `back`, `menu`, `playPause`, `play`, `pause`, digits)
-  press on an `up` before the threshold, so `long` stays distinguishable; an `up` without a `down` is a `press` too.
-- Thresholds are constants in `keys.ts`: `LONG_PRESS_MS` 500, `REPEAT_START_HZ` 8, `REPEAT_FAST_HZ` 24,
-  `REPEAT_RAMP_MS` 1500. Repeats start one slow interval after the long threshold and switch to the fast interval
-  for repeats due at or after `LONG_PRESS_MS + REPEAT_RAMP_MS` of holding.
-- Repeats are coalesced: after a `repeat` for a key, the host must call `acknowledge(key)`; due repeats in between
-  are dropped, not queued. `reset()` clears all held keys. Digits never produce `long` or `repeat`.
-- A key released after the threshold emits no `press`; a `long` the host never ticked is emitted on release.
-  An `up` of a key whose `long` a `tick` already fired emits nothing, whatever its (back-dated) time.
-- `KeyInput.action` `cancel` drops a held key and emits nothing (canceled release, lost focus); repeats stop.
-- `KeyInput.action` may be `long` for runtimes that only report a native long press: it becomes exactly one `long`
-  event at the input's `time` (a digit becomes a `press`).
-- `tick(now)` ignores a non-finite `now`. If several repeats are overdue (app suspended while a key is held) it emits at
-  most one and moves the next slot to the first future one arithmetically.
+- `createKeyInterpreter()` turns `KeyInput` (`down`/`up`/`press`/`cancel`/`long`, caller-supplied `time`) into `KeyEvent`s (`press`/`long`/`repeat`); never reads a clock — call `tick(now)` from the host loop (non-finite `now` ignored; overdue repeats emit at most one and advance arithmetically).
+- Arrows, `channelUp`/`channelDown`, and `rewind`/`fastForward` step on the earliest input (`down` emits `press`, subsequent `up` emits nothing; orphan `up` emits one `press`). Other keys (`select`, `back`, `menu`, `playPause`, `play`, `pause`, digits) press on `up` before `LONG_PRESS_MS` so `long` stays distinguishable; digits never produce `long`/`repeat`.
+- Thresholds (`keys.ts`): `LONG_PRESS_MS` 500, `REPEAT_START_HZ` 8, `REPEAT_FAST_HZ` 24, `REPEAT_RAMP_MS` 1500. Repeats coalesce until the host calls `acknowledge(key)`; `cancel` or `reset()` drops held keys silently; an `up` after a ticked `long` emits nothing.
 
 ## Focus model (`list.ts`, `scope.ts`, `store.ts`)
-- Lists are index-based: a `ListState` is `count`, `index`, `orientation`, `pageSize`; a 100,000-item list allocates
-  nothing per item and `getState()` is O(scopes + lists).
-- `moveList`: arrows along the orientation move one step on `press`/`repeat`, one page on `long`; `channelUp` (towards
-  0) and `channelDown` always page. Moves clamp; a move that cannot change the index is `edge` with the side; a page
-  that partly fits moves to the end. Empty lists and the other axis are `ignored`.
-- `createFocusStore` keeps a scope stack. `dispatch` returns intents: `select`/`long` (not for empty lists), `back`
-  (root only; a pushed scope is popped instead), `backLong` (never pops), `edge`, and `key` for unconsumed keys.
-- The index of every list is its focus memory: `popScope` restores the opener as it was, clamped if `setCount`
-  shrank it meanwhile. `setCount`, `focus(id, index?)` and `activate(id)` address the topmost list with that id;
-  `isActive(id)` is true iff `id` is the top scope's `active` list.
-- `subscribe` listeners run FIFO on index, active-list, emptiness, and `pushScope`/`popScope` transitions.
+- Lists are index-based (`ListState`: `count`, `index`, `orientation`, `pageSize`, optional `fallbackId`); 100k-item lists allocate nothing per item and `getState()` is O(scopes + lists).
+- `moveList`: orientation-axis arrows step 1 on `press`/`repeat` and `pageSize` on `long`; `channelUp`/`channelDown` always page; clamps at ends and reports `edge` when unchanged; empty lists / off-axis keys are `ignored`.
+- `createFocusStore` manages a scope stack. `dispatch` returns `select`/`long` (never on empty lists), `back` (root only; pushed scopes pop instead), `backLong` (never pops), `edge`, and `key`.
+- List `index` is focus memory (`popScope` restores the opener clamped to current counts). `setCount`, `focus(id, index?)`, and `activate(id)` target the topmost list with `id`; `isActive(id)` checks top scope's `active`.
+- Empty-panel focus recovery: `resolveFallbackId(scope, fromId)` walks same-scope `fallbackId` links with cycle protection, preferring the first reachable sibling with `count > 0` (else the immediate valid non-self sibling). When `setCount(id, 0)` empties a scope's `active` list or `popScope()` restores an emptied active list, focus recovers to the fallback sibling and enqueues a `FocusChange`; non-active list updates never steal focus.
+- `subscribe` listeners run FIFO on index, active-list, emptiness, and scope transitions.
+
+## Select debounce (`select-guard.ts`)
+- `createSelectDebounceGuard({ windowMs = 220 })` returns `{ allow(nowMs, key = ''), reset() }` suppressing duplicate Select bursts within `windowMs` per key (caller passes `nowMs`; non-monotonic `nowMs < lastAt` resets and allows; `windowMs <= 0` or non-finite disables debouncing).

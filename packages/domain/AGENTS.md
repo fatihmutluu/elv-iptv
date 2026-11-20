@@ -26,5 +26,6 @@ Models, ids, Result/errors, clock, logging and the ports (storage, sql, http, ke
 - `sanitizeHeaderName`, `sanitizeHeaderValue`, `sanitizeHeaders` in `headers.ts`: RFC 7230 token validation and control-character stripping (`0x00–0x1F`, `0x7F`).
 - `normalizeLanguageCode`, `sameLanguageCode` in `languages.ts`: canonical ISO 639-1 / ISO 639-2(T/B) / BCP-47 primary-subtag normalization.
 - `PlaybackGuard`, `GuardedPlaybackSession`, `noopPlaybackGuard`, `createPlaybackGuard` in `playback-guard.ts`: synchronous playback teardown port on source removal.
+- `PreferencesSnapshot`, `PreferencesPatch`, `PreferencesKvBackend`, `PreferencesStore`, `DEFAULT_PREFERENCES`, `PREFERENCES_SCHEMA_VERSION`, `MAX_PREFERENCES_BYTES` (4096 B, tvOS-500KB-safe), `MIN_PREF_FONT_SCALE` (0.9), `MAX_PREF_FONT_SCALE` (1.2), `parsePreferences`, `serializePreferences`, `createMemoryPreferencesStore`, `createKvPreferencesStore` in `preferences.ts`: resilient preferences codec and promise-queue-serialized KV/memory stores with subscriber isolation.
 - `normalizeStreamUrl`, `xtreamKey`, `m3uKey` in `content-key.ts`: credential-free catalog identity that keeps distinct streams apart (ADR 0011).
 - The tsconfig adds the `DOM` lib for `AbortController`, timers and `Response` types only; no runtime DOM use.

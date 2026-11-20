@@ -61,19 +61,27 @@ async function reconcile(db: SqlDriver, manifest: ManifestStore): Promise<void> 
 
 async function open(): Promise<CatalogService> {
   const db = await createOpSqliteDriver(DATABASE_NAME, databaseLocation(Platform.OS));
-  const opened = await openCatalog(db);
-  if (!opened.ok) {
-    await db.close?.();
-    throw new CatalogOpenError(opened.error);
+  try {
+    const opened = await openCatalog(db);
+    if (!opened.ok) {
+      throw new CatalogOpenError(opened.error);
+    }
+    const manifest = Platform.OS === 'ios' ? createSettingsStore(MANIFEST_KEY) : undefined;
+    if (manifest !== undefined) await reconcile(db, manifest);
+    return createCatalogService({
+      db,
+      secrets: createSecureSecretStore(),
+      scheduler: createMacrotaskScheduler(),
+      http: createDeviceHttpClient(),
+      clock: Date.now,
+      ...(manifest === undefined ? {} : { manifest }),
+    });
+  } catch (error) {
+    try {
+      await db.close?.();
+    } catch {
+      // Preserve the original open error even if closing the partial handle throws synchronously or rejects.
+    }
+    throw error;
   }
-  const manifest = Platform.OS === 'ios' ? createSettingsStore(MANIFEST_KEY) : undefined;
-  if (manifest !== undefined) await reconcile(db, manifest);
-  return createCatalogService({
-    db,
-    secrets: createSecureSecretStore(),
-    scheduler: createMacrotaskScheduler(),
-    http: createDeviceHttpClient(),
-    clock: Date.now,
-    ...(manifest === undefined ? {} : { manifest }),
-  });
 }

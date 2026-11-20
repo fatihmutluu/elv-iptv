@@ -8,6 +8,8 @@ export interface ListState {
   orientation: 'vertical' | 'horizontal';
   /** Items moved by a page move; values below 1 act as 1. */
   pageSize: number;
+  /** Sibling list id in the same scope to activate automatically when this active list becomes empty. */
+  fallbackId?: string;
 }
 
 /** Result of feeding a key event to a list. */

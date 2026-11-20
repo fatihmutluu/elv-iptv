@@ -4,6 +4,7 @@ export * from './headers';
 export * from './http';
 export * from './languages';
 export * from './playback-guard';
+export * from './preferences';
 export * from './result';
 export * from './source';
 export * from './sql';

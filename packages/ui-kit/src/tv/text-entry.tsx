@@ -12,6 +12,7 @@ import {
   useRef,
 } from 'react';
 import { TextInput } from 'react-native';
+import { TvRemoteContext } from './remote-context';
 
 /** Coordinates active text-entry sessions with `useTvKeySource` and `useKeyInterpreter`. */
 export interface TextEntryController {
@@ -63,6 +64,8 @@ export const TextEntryContext = createContext<TextEntryController>(createTextEnt
 /** Isolates TV text-entry key suspension within a component subtree. */
 export function TextEntryBoundary({ children }: { children: ReactNode }): ReactElement {
   const controller = useMemo(() => createTextEntryController(), []);
+  const dispatcher = useContext(TvRemoteContext);
+  useEffect(() => dispatcher?.registerTextEntry(controller), [dispatcher, controller]);
   return <TextEntryContext.Provider value={controller}>{children}</TextEntryContext.Provider>;
 }
 

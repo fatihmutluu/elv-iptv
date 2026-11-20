@@ -324,6 +324,48 @@ describe('guide yields', () => {
     expect(e.scheduler.count - before).toBeGreaterThanOrEqual(4);
     expect(await titles(e)).toHaveLength(450);
   });
+
+  it('chunks guide_channels inside the cleanup transaction without yielding while a write transaction is open', async () => {
+    const parts = Array.from({ length: 25 }, (_, i) => channelXml(`ch-${i}`, `Channel ${i}`));
+    parts.push(channelXml('haber1.tr', 'Haber Bir'));
+    parts.push(programmeXml('haber1.tr', HOUR, 1, 'Show'));
+    const e = await ready(tv(...parts));
+    let inTx = false;
+    let yieldedInTx = 0;
+    let batches = 0;
+    const wrappedDb = {
+      ...e.db,
+      transaction: <T>(fn: (tx: typeof e.db) => Promise<T>) =>
+        e.db.transaction(async (tx) => {
+          inTx = true;
+          try {
+            return await fn({
+              ...tx,
+              batch: async (sql, batchRows) => {
+                if (sql.includes('INSERT INTO guide_channels')) batches++;
+                return tx.batch(sql, batchRows);
+              },
+            });
+          } finally {
+            inTx = false;
+          }
+        }),
+    };
+    const scheduler = {
+      yieldNow: async () => {
+        if (inTx) yieldedInTx++;
+      },
+    };
+    const r = await importGuide(
+      e.sourceId,
+      { ...e.deps, db: wrappedDb, scheduler },
+      { now: NOW, batchSize: 10 },
+    );
+    expect(r.ok).toBe(true);
+    expect(batches).toBe(3);
+    expect(yieldedInTx).toBe(0);
+    expect(await rows(e, 'SELECT COUNT(*) AS n FROM guide_channels')).toEqual([{ n: 26 }]);
+  });
 });
 
 describe('xtream guide', () => {

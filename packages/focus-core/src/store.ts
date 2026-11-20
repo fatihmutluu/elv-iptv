@@ -4,6 +4,7 @@ import {
   createScope,
   type FocusState,
   findList,
+  resolveFallbackId,
   type ScopeState,
   setListIndex,
   withCount,
@@ -60,8 +61,9 @@ export function createFocusStore(root: {
   const queue: FocusChange[] = [];
   let flushing = false;
 
-  function enqueue(change: FocusChange): void {
-    queue.push(change);
+  function enqueue(...changes: FocusChange[]): void {
+    if (changes.length === 0) return;
+    queue.push(...changes);
     if (flushing) return;
     flushing = true;
     try {
@@ -124,18 +126,29 @@ export function createFocusStore(root: {
     if (scopes.length <= 1) return;
     const popped = scopes[scopes.length - 1] as ScopeState;
     scopes = scopes.slice(0, -1);
-    const restored = scopes[scopes.length - 1] as ScopeState;
+    let restored = scopes[scopes.length - 1] as ScopeState;
+    const activeList = restored.lists[restored.active] as ListState;
+    if (activeList.count === 0) {
+      const fallbackId = resolveFallbackId(restored, restored.active);
+      if (fallbackId !== undefined) {
+        const target = restored.lists[fallbackId] as ListState;
+        scopes = setListIndex(scopes, scopes.length - 1, fallbackId, target.index, true);
+        restored = scopes[scopes.length - 1] as ScopeState;
+      }
+    }
+    const changes: FocusChange[] = [];
     for (const listId of Object.keys(popped.lists)) {
       if (listId === restored.active) continue;
       const next = visibleIndex(scopes, listId);
       if (next !== undefined && next !== (popped.lists[listId] as ListState).index) {
-        enqueue({ listId, index: next });
+        changes.push({ listId, index: next });
       }
     }
-    enqueue({
+    changes.push({
       listId: restored.active,
       index: (restored.lists[restored.active] as ListState).index,
     });
+    enqueue(...changes);
   }
 
   function focusList(listId: string, index?: number): boolean {
@@ -167,9 +180,21 @@ export function createFocusStore(root: {
       if (nextCount === found.list.count) return;
       const nextIndex = clampIndex(found.list.index, nextCount);
       scopes = withCount(scopes, found.scope, listId, nextCount);
+      const changes: FocusChange[] = [];
       if (nextIndex !== found.list.index || found.list.count > 0 !== nextCount > 0) {
-        enqueue({ listId, index: nextIndex });
+        changes.push({ listId, index: nextIndex });
       }
+      const scope = scopes[found.scope] as ScopeState;
+      const isTopScope = found.scope === scopes.length - 1;
+      if (isTopScope && nextCount === 0 && scope.active === listId) {
+        const fallbackId = resolveFallbackId(scope, listId);
+        if (fallbackId !== undefined) {
+          const target = scope.lists[fallbackId] as ListState;
+          scopes = setListIndex(scopes, found.scope, fallbackId, target.index, true);
+          changes.push({ listId: fallbackId, index: target.index });
+        }
+      }
+      enqueue(...changes);
     },
     focus(listId, index) {
       focusList(listId, index);

@@ -10,6 +10,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { Animated, View } from 'react-native';
+import { useTheme } from '../theme';
 import { FocusRing } from './FocusRing';
 import type { ListSource } from './list-source';
 
@@ -108,6 +109,7 @@ export function TvList<T>({
   testID,
   onFrameCommitted,
 }: TvListProps<T>): ReactElement {
+  const { reduceMotion } = useTheme();
   const subscribe = useCallback((cb: () => void) => store.subscribe(cb), [store]);
   const getSnapshot = useCallback(() => {
     const idx = findList(store.getState().scopes, listId)?.list.index ?? 0;
@@ -163,16 +165,17 @@ export function TvList<T>({
       Math.abs(windowStart - prev.start) === 1;
     const held = now - prev.at < REPEAT_WINDOW_MS;
     synced.current = { source, base, rowHeight, start: windowStart, at: now };
-    if (step && !held) {
+    if (step && !held && !reduceMotion) {
       Animated.timing(offset.current, {
         toValue: translate,
         duration: STEP_MS,
         useNativeDriver: true,
       }).start();
     } else {
+      offset.current.stopAnimation();
       offset.current.setValue(translate);
     }
-  }, [source, base, rowHeight, windowStart, translate]);
+  }, [source, base, rowHeight, windowStart, translate, reduceMotion]);
 
   const shownIndex = useRef(safeIndex);
   useLayoutEffect(() => {
