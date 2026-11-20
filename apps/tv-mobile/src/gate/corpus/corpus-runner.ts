@@ -182,7 +182,11 @@ export function createCorpusSweep(deps: CorpusSweepDeps): CorpusSweep {
     service.seek(targetMs);
     const landed = (): boolean => {
       const clock = readClock();
-      return clock !== undefined && Math.abs(clock.positionMs - targetMs) <= SEEK_TOLERANCE_MS;
+      return (
+        clock !== undefined &&
+        clock.rate > 0 &&
+        Math.abs(clock.positionMs - targetMs) <= SEEK_TOLERANCE_MS
+      );
     };
     await waitFor((s) => (s.status.kind === 'playing' && landed()) || isTerminal(s), itemTimeoutMs);
     if (disposed) return undefined;
@@ -192,7 +196,7 @@ export function createCorpusSweep(deps: CorpusSweepDeps): CorpusSweep {
     }
     if (!landed()) {
       const clock = readClock();
-      const at = clock === undefined ? 'none' : `${clock.positionMs} ms`;
+      const at = clock === undefined ? 'none' : `${clock.positionMs} ms, rate ${clock.rate}`;
       return `seek to ${targetMs} ms not confirmed (clock at ${at})`;
     }
     return undefined;

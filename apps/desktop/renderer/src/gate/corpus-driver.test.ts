@@ -22,6 +22,8 @@ interface EngineOpts {
   tracks?: 'full' | 'none' | 'other-languages' | 'unswitched';
   clock?: 'running' | 'none' | 'frozen';
   seekLandsAt?: (target: number) => number;
+  seekResumeDelayMs?: number;
+  seekStuckZeroRate?: boolean;
   seekEnds?: boolean;
   neverPlays?: boolean;
 }
@@ -73,11 +75,15 @@ function makeEngine(opts: EngineOpts = {}): {
   engine: PlayerEngine;
   seeks: number[];
   selections: string[];
+  selectionDelaysMs: number[];
 } {
   const seeks: number[] = [];
   const selections: string[] = [];
+  const selectionDelaysMs: number[] = [];
+  let itemClockAt = 0;
   const listeners = new Set<(event: EngineEvent) => void>();
   const send = (event: EngineEvent): void => {
+    if (event.type === 'clock' && event.anchor.positionMs === 100) itemClockAt = performance.now();
     for (const listener of [...listeners]) listener(event);
   };
   const scripts: Record<string, FakeStep[]> = {};
@@ -108,6 +114,23 @@ function makeEngine(opts: EngineOpts = {}): {
           return;
         }
         const landed = opts.seekLandsAt?.(positionMs) ?? positionMs;
+        if (opts.seekResumeDelayMs !== undefined || opts.seekStuckZeroRate === true) {
+          send({
+            attempt,
+            type: 'clock',
+            anchor: { positionMs: landed, atMs: performance.now(), rate: 0 },
+          });
+          if (opts.seekResumeDelayMs !== undefined) {
+            setTimeout(() => {
+              send({
+                attempt,
+                type: 'clock',
+                anchor: { positionMs: landed, atMs: performance.now(), rate: 1 },
+              });
+            }, opts.seekResumeDelayMs);
+          }
+          return;
+        }
         const rate = opts.clock === 'frozen' ? 0 : 1;
         send({
           attempt,
@@ -117,6 +140,7 @@ function makeEngine(opts: EngineOpts = {}): {
       });
     },
     selectAudioTrack(attempt, id) {
+      selectionDelaysMs.push(performance.now() - itemClockAt);
       selections.push(`audio:${id}`);
       if (opts.tracks === 'unswitched') return;
       tracks = { ...tracks, selectedAudioId: id };
@@ -124,6 +148,7 @@ function makeEngine(opts: EngineOpts = {}): {
       later(() => send({ attempt, type: 'tracks', tracks: next }));
     },
     selectSubtitleTrack(attempt, id) {
+      selectionDelaysMs.push(performance.now() - itemClockAt);
       selections.push(`subtitle:${id ?? 'off'}`);
       if (opts.tracks === 'unswitched') return;
       tracks = { ...tracks, selectedSubtitleId: id };
@@ -138,7 +163,7 @@ function makeEngine(opts: EngineOpts = {}): {
       };
     },
   };
-  return { engine, seeks, selections };
+  return { engine, seeks, selections, selectionDelaysMs };
 }
 
 interface Timers {
@@ -261,10 +286,38 @@ describe('createCorpusRun', () => {
     expect(reasons(report)['vod-200001']).toBe('clock not advancing');
   });
 
+  it('drains holdMs before firing track selection to avoid loopback HTTP overlap', async () => {
+    const { engine, selectionDelaysMs } = makeEngine();
+    const run = createCorpusRun({
+      engine,
+      base: BASE,
+      account: 'demo',
+      now: () => performance.now(),
+      later: realTimers().later,
+      holdMs: 25,
+      itemTimeoutMs: 300,
+    });
+    const report = await run.start();
+    run.dispose();
+    expect(report.passed).toBe(29);
+    expect(selectionDelaysMs.length).toBeGreaterThan(0);
+    for (const delay of selectionDelaysMs) expect(delay).toBeGreaterThanOrEqual(18);
+  });
+
+  it('waits past a rate-0 seek discontinuity anchor for rate > 0, and fails if rate stays 0', async () => {
+    const resumed = await sweep({ seekResumeDelayMs: 35 }, 300);
+    expect(resumed.passed).toBe(29);
+
+    const stuck = await sweep({ seekStuckZeroRate: true }, 100);
+    expect(reasons(stuck)).toEqual({
+      'vod-200010-hls': 'seek to 30000 ms not confirmed (clock at 30000 ms, rate 0)',
+    });
+  });
+
   it('fails a seek that lands far past the target', async () => {
     const report = await sweep({ seekLandsAt: (target) => target + 60_000 });
     expect(reasons(report)).toEqual({
-      'vod-200010-hls': 'seek to 30000 ms not confirmed (clock at 90000 ms)',
+      'vod-200010-hls': 'seek to 30000 ms not confirmed (clock at 90000 ms, rate 1)',
     });
   });
 

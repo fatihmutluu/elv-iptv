@@ -190,6 +190,7 @@ export function createCorpusRun(deps: CorpusRunDeps): CorpusRun {
       (s) => pickTrack(listOf(s, kind), lang) !== undefined || isTerminal(s),
       itemTimeoutMs,
     );
+    if (disposed) return undefined;
     const state = service.getState();
     if (isTerminal(state)) return failureReason(state);
     if (listOf(state, kind).length === 0) return `no ${kind} tracks`;
@@ -198,6 +199,7 @@ export function createCorpusRun(deps: CorpusRunDeps): CorpusRun {
     if (kind === 'audio') service.selectAudioTrack(picked.id);
     else service.selectSubtitleTrack(picked.id);
     await waitFor((s) => selectedOf(s, kind) === picked.id || isTerminal(s), itemTimeoutMs);
+    if (disposed) return undefined;
     const after = service.getState();
     if (isTerminal(after)) return failureReason(after);
     return selectedOf(after, kind) === picked.id
@@ -212,16 +214,21 @@ export function createCorpusRun(deps: CorpusRunDeps): CorpusRun {
     service.seek(targetMs);
     const landed = (): boolean => {
       const clock = readClock();
-      return clock !== undefined && Math.abs(clock.positionMs - targetMs) <= SEEK_TOLERANCE_MS;
+      return (
+        clock !== undefined &&
+        clock.rate > 0 &&
+        Math.abs(clock.positionMs - targetMs) <= SEEK_TOLERANCE_MS
+      );
     };
     await waitFor((s) => (s.status.kind === 'playing' && landed()) || isTerminal(s), itemTimeoutMs);
+    if (disposed) return undefined;
     const state = service.getState();
     if (state.status.kind !== 'playing') {
       return `seek to ${targetMs} ms failed (${failureReason(state)})`;
     }
     if (!landed()) {
       const clock = readClock();
-      const at = clock === undefined ? 'none' : `${clock.positionMs} ms`;
+      const at = clock === undefined ? 'none' : `${clock.positionMs} ms, rate ${clock.rate}`;
       return `seek to ${targetMs} ms not confirmed (clock at ${at})`;
     }
     return undefined;
@@ -229,22 +236,28 @@ export function createCorpusRun(deps: CorpusRunDeps): CorpusRun {
 
   const applyItemChecks = async (item: DesktopCorpusItem): Promise<string | undefined> => {
     await waitFor((s) => latestClock !== undefined || isTerminal(s), itemTimeoutMs);
+    if (disposed) return undefined;
     if (isTerminal(service.getState())) return failureReason(service.getState());
     if (latestClock === undefined) return 'no clock anchor';
+    if (item.selectAudioLang !== undefined || item.selectSubtitleLang !== undefined) {
+      await sleep(holdMs);
+      if (disposed) return undefined;
+    }
     if (item.selectAudioLang !== undefined) {
       const error = await selectTrack('audio', item.selectAudioLang);
-      if (error !== undefined) return error;
+      if (error !== undefined || disposed) return error;
     }
     if (item.selectSubtitleLang !== undefined) {
       const error = await selectTrack('subtitle', item.selectSubtitleLang);
-      if (error !== undefined) return error;
+      if (error !== undefined || disposed) return error;
     }
     if (item.seekMs !== undefined) {
       const error = await seekTo(item.seekMs);
-      if (error !== undefined) return error;
+      if (error !== undefined || disposed) return error;
     }
     const before = latestClock === undefined ? undefined : positionAt(latestClock, now());
     await sleep(holdMs);
+    if (disposed) return undefined;
     const state = service.getState();
     if (state.status.kind !== 'playing') return failureReason(state);
     const advanced =
@@ -269,6 +282,7 @@ export function createCorpusRun(deps: CorpusRunDeps): CorpusRun {
         (s) => isTerminal(s) || (s.status.kind === 'playing' && s.firstFrameAt !== undefined),
         itemTimeoutMs,
       );
+      if (disposed) return undefined;
       const state = service.getState();
       if (state.status.kind !== 'failed') return `expected failed, settled on ${state.status.kind}`;
       const reason = failureReason(state);
@@ -285,6 +299,7 @@ export function createCorpusRun(deps: CorpusRunDeps): CorpusRun {
         isTerminal(s),
       itemTimeoutMs,
     );
+    if (disposed) return undefined;
     const state = service.getState();
     if (
       !settled ||

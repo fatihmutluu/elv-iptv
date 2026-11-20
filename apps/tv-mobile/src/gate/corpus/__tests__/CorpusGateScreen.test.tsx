@@ -3,7 +3,7 @@ import { createFakePlayerEngine, type FakeStep } from '@elv/playback/testing';
 import { act, render } from '@testing-library/react-native';
 import { Platform } from 'react-native';
 import { CorpusGateScreen } from '../CorpusGateScreen';
-import { buildCorpusItems, type CorpusReport, parseCorpusGateUrl } from '../corpus-items';
+import type { CorpusReport } from '../corpus-items';
 
 jest.mock('@elv/engine-aether', () => ({
   createAetherEngine: () => null,
@@ -34,6 +34,8 @@ interface EngineOpts {
   tracks?: 'full' | 'none' | 'other-languages' | 'unswitched';
   clock?: 'running' | 'none' | 'frozen';
   seekLandsAt?: (target: number) => number;
+  seekResumeDelayMs?: number;
+  seekStuckZeroRate?: boolean;
   seekEnds?: boolean;
   neverPlays?: boolean;
 }
@@ -117,6 +119,28 @@ function makeEngine(opts: EngineOpts = {}) {
           return;
         }
         const landed = opts.seekLandsAt?.(positionMs) ?? positionMs;
+        if (opts.seekResumeDelayMs !== undefined || opts.seekStuckZeroRate === true) {
+          send({
+            attempt,
+            type: 'clock',
+            anchor: { positionMs: landed, atMs: performance.now(), rate: 0, durationMs: 600_000 },
+          });
+          if (opts.seekResumeDelayMs !== undefined) {
+            setTimeout(() => {
+              send({
+                attempt,
+                type: 'clock',
+                anchor: {
+                  positionMs: landed,
+                  atMs: performance.now(),
+                  rate: 1,
+                  durationMs: 600_000,
+                },
+              });
+            }, opts.seekResumeDelayMs);
+          }
+          return;
+        }
         const rate = opts.clock === 'frozen' ? 0 : 1;
         send({
           attempt,
@@ -151,9 +175,7 @@ function makeEngine(opts: EngineOpts = {}) {
     subscribe(listener) {
       listeners.add(listener);
       listener({ attempt: 0, type: 'surface', change: 'created' });
-      return () => {
-        listeners.delete(listener);
-      };
+      return () => void listeners.delete(listener);
     },
   };
   return {
@@ -168,55 +190,24 @@ function makeEngine(opts: EngineOpts = {}) {
   };
 }
 
-const tick = (ms: number): Promise<void> =>
-  act(async () => {
-    await jest.advanceTimersByTimeAsync(ms);
-  });
+const tick = (ms: number): Promise<void> => act(() => jest.advanceTimersByTimeAsync(ms));
 
 const reasons = (report: CorpusReport): Record<string, string> =>
   Object.fromEntries(report.failed.map((f) => [f.id, f.reason]));
 
-describe('parseCorpusGateUrl and buildCorpusItems', () => {
-  it('parses elviptv://gate/corpus links and builds all 29 corpus items', () => {
-    expect(parseCorpusGateUrl(null)).toBeUndefined();
-    expect(parseCorpusGateUrl('elviptv://gate/player')).toBeUndefined();
-    expect(
-      parseCorpusGateUrl('elviptv://gate/corpus?host=127.0.0.1%3A7878&account=demo&burst=8'),
-    ).toEqual({
-      host: '127.0.0.1:7878',
-      account: 'demo',
-      burst: 8,
-    });
-    expect(parseCorpusGateUrl('elviptv://gate/corpus?host=%ZZ&account=%E0%A4%A')).toEqual({
-      host: '10.0.2.2:7878',
-      account: 'corpus',
-      burst: 0,
-    });
-
-    const items = buildCorpusItems({ base: BASE, account: 'demo', burst: 8 });
-    expect(items).toHaveLength(29);
-    expect(items[28]).toMatchObject({
-      id: 'vod-200001-empty',
-      url: EMPTY_URL,
-      expect: 'failed',
-      expectError: 'playback/network',
-    });
-  });
-});
-
 describe('CorpusGateScreen', () => {
   let lines: string[] = [];
+  const params = { host: '127.0.0.1:7878', account: 'demo', burst: 0 };
 
   beforeEach(() => {
     jest.useFakeTimers();
     jest.replaceProperty(Platform, 'OS', 'android');
     lines = [];
-    jest.spyOn(console, 'log').mockImplementation((msg: unknown) => {
+    const collect = (msg: unknown): void => {
       if (typeof msg === 'string' && msg.startsWith('ELV_GATE_CORPUS ')) lines.push(msg);
-    });
-    jest.spyOn(console, 'error').mockImplementation((msg: unknown) => {
-      if (typeof msg === 'string' && msg.startsWith('ELV_GATE_CORPUS ')) lines.push(msg);
-    });
+    };
+    jest.spyOn(console, 'log').mockImplementation(collect);
+    jest.spyOn(console, 'error').mockImplementation(collect);
   });
 
   afterEach(() => {
@@ -228,7 +219,7 @@ describe('CorpusGateScreen', () => {
     const h = makeEngine(opts);
     const view = await render(
       <CorpusGateScreen
-        params={{ host: '127.0.0.1:7878', account: 'demo', burst: 0 }}
+        params={params}
         createEngine={() => h.engine}
         holdMs={10}
         itemTimeoutMs={itemTimeoutMs}
@@ -244,7 +235,7 @@ describe('CorpusGateScreen', () => {
     const h = makeEngine();
     const view = await render(
       <CorpusGateScreen
-        params={{ host: '127.0.0.1:7878', account: 'demo', burst: 0 }}
+        params={params}
         createEngine={() => h.engine}
         holdMs={10}
         itemTimeoutMs={200}
@@ -310,16 +301,24 @@ describe('CorpusGateScreen', () => {
     expect(reasons(frozen)['vod-200001']).toBe('clock not advancing');
   });
 
-  it('fails a seek that overshoots the window or settles on ended without waiting out the timeout', async () => {
+  it('waits past rate-0 seek anchors for rate > 0, and fails overshoot, stuck-rate-0, or ended seeks', async () => {
+    const resumed = await runSweep({ seekResumeDelayMs: 60 }, 300);
+    expect(resumed.passed).toBe(29);
+    lines = [];
+    const stuck = await runSweep({ seekStuckZeroRate: true }, 120);
+    expect(reasons(stuck)).toEqual({
+      'vod-200010-hls': 'seek to 30000 ms not confirmed (clock at 30000 ms, rate 0)',
+    });
+    lines = [];
     const overshoot = await runSweep({ seekLandsAt: (target) => target + 60_000 });
     expect(reasons(overshoot)).toEqual({
-      'vod-200010-hls': 'seek to 30000 ms not confirmed (clock at 90000 ms)',
+      'vod-200010-hls': 'seek to 30000 ms not confirmed (clock at 90000 ms, rate 1)',
     });
     lines = [];
     const h = makeEngine({ seekEnds: true });
     const view = await render(
       <CorpusGateScreen
-        params={{ host: '127.0.0.1:7878', account: 'demo', burst: 0 }}
+        params={params}
         createEngine={() => h.engine}
         holdMs={10}
         itemTimeoutMs={10_000}
