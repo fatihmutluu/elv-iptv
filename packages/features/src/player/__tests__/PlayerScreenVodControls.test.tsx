@@ -124,11 +124,12 @@ describe('PlayerScreen VOD controls, hold-seek, and track picker', () => {
     expect(engine.commands.filter((c) => c.name === 'seek').at(-1)?.positionMs).toBe(10_000);
     expect(screen.getByTestId('player-progress-time')).toHaveTextContent('0:10 / 1:40');
 
-    // Hold Right past LONG_PRESS_MS + SLOW_INTERVAL_MS: initial press (+10s -> 20s) + held repeat (+30s -> 50s)
+    // Hold Right: key-down only previews (+10s -> 0:20) without seeking; release commits one seek (+30s repeat -> 50s)
     await act(async () => {
       keys.down(KEYCODE_DPAD_RIGHT);
     });
-    expect(engine.commands.filter((c) => c.name === 'seek').at(-1)?.positionMs).toBe(20_000);
+    expect(engine.commands.filter((c) => c.name === 'seek').at(-1)?.positionMs).toBe(10_000);
+    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('0:20 / 1:40');
 
     await act(async () => {
       jest.advanceTimersByTime(650);

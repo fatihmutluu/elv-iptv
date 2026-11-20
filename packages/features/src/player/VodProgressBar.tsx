@@ -4,8 +4,9 @@ import {
   type PlaybackService,
   positionAt,
 } from '@elv/playback';
-import { type ReactElement, useEffect, useRef, useState } from 'react';
+import { type ReactElement, useRef } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { usePlaybackTicker } from './usePlaybackTicker';
 
 /** Formats a millisecond playback timestamp as `m:ss` or `h:mm:ss`. */
 export function formatPlaybackPosition(ms: number): string {
@@ -21,6 +22,7 @@ interface ProgressSnapshot {
   readonly fillPercent: number;
   readonly positionSec: number;
   readonly durationSec: number;
+  readonly durationMs: number | undefined;
   readonly hasDuration: boolean;
 }
 
@@ -31,6 +33,7 @@ function readSnapshot(anchor: ClockAnchor | undefined, nowMs: number): ProgressS
       fillPercent: 0,
       positionSec: 0,
       durationSec: 0,
+      durationMs: undefined,
       hasDuration: false,
     };
   }
@@ -48,6 +51,7 @@ function readSnapshot(anchor: ClockAnchor | undefined, nowMs: number): ProgressS
     fillPercent,
     positionSec: Math.floor(clampedPos / 1000),
     durationSec: hasDuration ? Math.floor(durationMs / 1000) : 0,
+    durationMs: hasDuration ? durationMs : undefined,
     hasDuration,
   };
 }
@@ -56,48 +60,73 @@ function sameSnapshot(a: ProgressSnapshot, b: ProgressSnapshot): boolean {
   return a.timeText === b.timeText && a.fillPercent === b.fillPercent;
 }
 
+function previewSnapshot(live: ProgressSnapshot, previewPositionMs: number): ProgressSnapshot {
+  return readSnapshot(
+    {
+      positionMs: previewPositionMs,
+      atMs: 0,
+      rate: 0,
+      ...(live.durationMs === undefined ? {} : { durationMs: live.durationMs }),
+    },
+    0,
+  );
+}
+
+interface PressGeometry {
+  readonly nativeEvent: { locationX?: number; offsetX?: number; clientX?: number };
+  readonly currentTarget: {
+    blur?: () => void;
+    clientWidth?: number;
+    getBoundingClientRect?: () => { left: number; width: number };
+  } | null;
+}
+
+function pressRatio(event: PressGeometry, layoutWidth: number): number | undefined {
+  const target = event.currentTarget;
+  if ((Platform.OS as string) === 'web') {
+    target?.blur?.();
+    const rect = target?.getBoundingClientRect?.();
+    const clientX = event.nativeEvent.clientX;
+    if (rect !== undefined && typeof clientX === 'number' && rect.width > 0) {
+      return (clientX - rect.left) / rect.width;
+    }
+  }
+  const x = event.nativeEvent.locationX ?? event.nativeEvent.offsetX;
+  const width = layoutWidth > 0 ? layoutWidth : (target?.clientWidth ?? 0);
+  if (typeof x !== 'number' || width <= 0) return undefined;
+  return x / width;
+}
+
 /**
- * Leaf VOD progress bar that extrapolates elapsed time and fill ratio directly from `ClockAnchor`
- * without frame-ticking `PlayerScreen`, and supports touch/mouse seek presses when laid out.
+ * Leaf VOD progress bar that extrapolates elapsed time and fill ratio from `ClockAnchor` on a gated
+ * ticker (no frames while paused or before an anchor), shows a pending scrub preview when given,
+ * and supports touch/mouse seek presses.
  */
 export function VodProgressBar({
   service,
   clock,
   isTv,
   label,
+  previewPositionMs,
   onSeekRatio,
 }: {
   service: PlaybackService | null;
   clock: PlaybackClock;
   isTv: boolean;
   label: string;
+  previewPositionMs?: number | undefined;
   onSeekRatio: (ratio: number) => void;
 }): ReactElement {
-  const [snapshot, setSnapshot] = useState<ProgressSnapshot>(() =>
-    readSnapshot(service?.getState().anchor, clock.now()),
-  );
+  const live = usePlaybackTicker({
+    service,
+    clock,
+    mode: 'frame',
+    derive: readSnapshot,
+    isEqual: sameSnapshot,
+  });
+  const snapshot =
+    previewPositionMs === undefined ? live : previewSnapshot(live, previewPositionMs);
   const widthRef = useRef(0);
-
-  useEffect(() => {
-    const sync = (): void => {
-      const next = readSnapshot(service?.getState().anchor, clock.now());
-      setSnapshot((prev) => (sameSnapshot(prev, next) ? prev : next));
-    };
-    sync();
-    if (service === null) return;
-
-    const unsubscribe = service.subscribe(() => sync());
-    let frame = 0;
-    const tick = (): void => {
-      sync();
-      frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => {
-      unsubscribe();
-      cancelAnimationFrame(frame);
-    };
-  }, [clock, service]);
 
   return (
     <View style={styles.row}>
@@ -116,25 +145,13 @@ export function VodProgressBar({
           widthRef.current = event.nativeEvent.layout.width;
         }}
         onPress={(event) => {
-          if ((Platform.OS as string) === 'web') {
-            (event.currentTarget as unknown as { blur?: () => void })?.blur?.();
-          }
-          if (!snapshot.hasDuration) return;
-          const native = event.nativeEvent as {
-            locationX?: number;
-            offsetX?: number;
-          };
-          const x = native.locationX ?? native.offsetX;
-          const width =
-            widthRef.current > 0
-              ? widthRef.current
-              : ((event.currentTarget as unknown as { clientWidth?: number })?.clientWidth ?? 0);
-          if (typeof x !== 'number' || !Number.isFinite(x) || width <= 0) return;
-          onSeekRatio(Math.max(0, Math.min(1, x / width)));
+          const ratio = pressRatio(event as unknown as PressGeometry, widthRef.current);
+          if (!live.hasDuration || ratio === undefined || !Number.isFinite(ratio)) return;
+          onSeekRatio(Math.max(0, Math.min(1, ratio)));
         }}
         style={styles.trackHitBox}
       >
-        <View style={styles.trackRail}>
+        <View testID="player-progress-rail" pointerEvents="none" style={styles.trackRail}>
           <View
             testID="player-progress-fill"
             style={[styles.trackFill, { width: `${snapshot.fillPercent}%` }]}

@@ -32,8 +32,6 @@ function printContract(line: string): void {
   else console.log(line);
 }
 
-const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
 /**
  * Runs every shared `ENGINE_CONTRACT_CASES` case against a fresh `PlayerEngine` rendered through
  * `PlayerSurface` against the stream simulator, then prints one `ELV_GATE_CONTRACT {json}` line.
@@ -50,6 +48,34 @@ export function ContractGateScreen({
 
   useEffect(() => {
     let cancelled = false;
+    let currentCleanup: (() => void) | undefined;
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+    const stopListeners = new Set<() => void>();
+
+    const schedule = (fn: () => void, ms: number): (() => void) => {
+      const id = setTimeout(() => {
+        timers.delete(id);
+        fn();
+      }, ms);
+      timers.add(id);
+      return () => {
+        timers.delete(id);
+        clearTimeout(id);
+      };
+    };
+
+    const sleep = (ms: number): Promise<void> =>
+      new Promise((resolve) => {
+        if (cancelled) return resolve();
+        let cancel: (() => void) | undefined;
+        const finish = (): void => {
+          stopListeners.delete(finish);
+          cancel?.();
+          resolve();
+        };
+        stopListeners.add(finish);
+        cancel = schedule(finish, ms);
+      });
 
     const runAll = async (): Promise<void> => {
       let passed = 0;
@@ -65,6 +91,7 @@ export function ContractGateScreen({
       for (const contractCase of ENGINE_CONTRACT_CASES) {
         if (cancelled) return;
         await fetchImpl(simRequestsUrl, { method: 'DELETE' }).catch(() => undefined);
+        if (cancelled) return;
 
         const rawEngine = createEngine();
         if (rawEngine === null) {
@@ -72,11 +99,8 @@ export function ContractGateScreen({
           continue;
         }
 
-        let surfaceReadyResolve: (() => void) | undefined;
-        const surfaceReady = new Promise<void>((resolve) => {
-          surfaceReadyResolve = resolve;
-        });
-
+        let surfaceCreated = false;
+        let wakeSurface: (() => void) | undefined;
         let latestState: EngineState | undefined;
         let terminated = true;
         let mediaOpen = false;
@@ -85,7 +109,8 @@ export function ContractGateScreen({
 
         const offInternal = rawEngine.subscribe((event: EngineEvent) => {
           if (event.type === 'surface' && event.change === 'created') {
-            surfaceReadyResolve?.();
+            surfaceCreated = true;
+            wakeSurface?.();
             return;
           }
           if (event.type === 'state') {
@@ -100,9 +125,6 @@ export function ContractGateScreen({
             mediaOpen = false;
           }
         });
-
-        setActiveEngine(rawEngine);
-        await Promise.race([surfaceReady, delay(Math.min(50, quietMs))]);
 
         const wrappedEngine: PlayerEngine = {
           capabilities: rawEngine.capabilities,
@@ -135,6 +157,36 @@ export function ContractGateScreen({
           subscribe: (listener) => rawEngine.subscribe(listener),
         };
 
+        let released = false;
+        const releaseCurrent = (): void => {
+          if (released) return;
+          released = true;
+          currentCleanup = undefined;
+          offInternal();
+          wrappedEngine.stop(999_999);
+          wrappedEngine.release();
+        };
+        currentCleanup = releaseCurrent;
+
+        setActiveEngine(rawEngine);
+        await new Promise<void>((resolve) => {
+          if (cancelled || surfaceCreated) return resolve();
+          let cancel: (() => void) | undefined;
+          const finish = (): void => {
+            wakeSurface = undefined;
+            stopListeners.delete(finish);
+            cancel?.();
+            resolve();
+          };
+          wakeSurface = finish;
+          stopListeners.add(finish);
+          cancel = schedule(finish, Math.min(50, quietMs));
+        });
+        if (cancelled) {
+          releaseCurrent();
+          return;
+        }
+
         const sampleSimPeak = async (): Promise<void> => {
           try {
             const res = await fetchImpl(simRequestsUrl);
@@ -152,22 +204,25 @@ export function ContractGateScreen({
           engine: wrappedEngine,
           urls,
           async settle() {
+            if (cancelled) return;
             await new Promise<void>((resolve) => {
               let done = false;
-              let quietTimer: ReturnType<typeof setTimeout> | undefined;
+              let cancelQuiet: (() => void) | undefined;
+              let cancelCeiling: (() => void) | undefined;
               const finish = (): void => {
                 if (done) return;
                 done = true;
-                if (quietTimer !== undefined) clearTimeout(quietTimer);
-                clearTimeout(ceilingTimer);
+                cancelQuiet?.();
+                cancelCeiling?.();
+                stopListeners.delete(finish);
                 offSettle();
                 resolve();
               };
               const canSettle = (): boolean =>
                 terminated || latestState === undefined || !TRANSITIONAL_STATES.has(latestState);
               const armQuiet = (): void => {
-                if (quietTimer !== undefined) clearTimeout(quietTimer);
-                quietTimer = setTimeout(() => {
+                cancelQuiet?.();
+                cancelQuiet = schedule(() => {
                   if (canSettle()) finish();
                 }, quietMs);
               };
@@ -178,26 +233,29 @@ export function ContractGateScreen({
                 }
                 armQuiet();
               });
-              const ceilingTimer = setTimeout(finish, maxSettleMs);
+              stopListeners.add(finish);
+              cancelCeiling = schedule(finish, maxSettleMs);
               armQuiet();
             });
-            await sampleSimPeak();
+            if (!cancelled) await sampleSimPeak();
           },
           maxConcurrentMedias: () => peakConcurrent,
           async dispose() {
-            offInternal();
-            wrappedEngine.stop(999_999);
-            wrappedEngine.release();
-            setActiveEngine(null);
-            await delay(Math.min(100, quietMs));
+            releaseCurrent();
+            if (!cancelled) {
+              setActiveEngine(null);
+              await sleep(Math.min(100, quietMs));
+            }
           },
         };
 
         try {
-          setStatus(contractCase.name);
+          if (!cancelled) setStatus(contractCase.name);
           await contractCase.run(harness);
+          if (cancelled) return;
           passed += 1;
         } catch (error) {
+          if (cancelled) return;
           failed.push({
             name: contractCase.name,
             message: error instanceof Error ? error.message : String(error),
@@ -215,6 +273,11 @@ export function ContractGateScreen({
     void runAll();
     return () => {
       cancelled = true;
+      for (const stop of [...stopListeners]) stop();
+      stopListeners.clear();
+      currentCleanup?.();
+      for (const id of timers) clearTimeout(id);
+      timers.clear();
     };
   }, [params, createEngine, fetchImpl, quietMs, maxSettleMs]);
 

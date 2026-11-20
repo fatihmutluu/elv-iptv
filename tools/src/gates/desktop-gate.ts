@@ -6,6 +6,7 @@ import { buildCatalog } from '../sim/catalog.ts';
 import { findFfmpeg } from '../sim/media.ts';
 import { startSim } from '../sim/server.ts';
 import type { Exec } from './adb.ts';
+import { type AppHandle, readUntil, waitExit } from './app-lines.ts';
 import {
   aggregateDesktopRuns,
   DESKTOP_FAULTS,
@@ -19,6 +20,7 @@ import {
 } from './desktop-compare.ts';
 import { connectionStats, httpSimLog, type SimLogEntry, STREAM_PATH } from './sim-log.ts';
 
+export type { AppHandle } from './app-lines.ts';
 export { connectionStats } from './sim-log.ts';
 
 const ACCOUNT = 'demo';
@@ -31,14 +33,6 @@ const ORPHAN_PLAYING_TIMEOUT_MS = 20_000;
 const ORPHAN_LIMIT_MS = 2000;
 const ORPHAN_POLL_TIMEOUT_MS = 5000;
 const ORPHAN_POLL_MS = 50;
-
-/** Handle to a spawned desktop Electron process. */
-export interface AppHandle {
-  readonly pid: number;
-  readonly lines: AsyncIterable<string>;
-  readonly exited: Promise<number | null>;
-  kill(): void;
-}
 
 interface DesktopSimHandle {
   readonly url: string;
@@ -120,42 +114,6 @@ function gateQuery(p: {
   if (p.vod !== null) parts.push(`vod=${p.vod}`);
   parts.push(`fault=${p.fault}`);
   return parts.join('&');
-}
-
-async function readUntil<T>(
-  lines: AsyncIterable<string>,
-  pick: (line: string) => T | undefined,
-  timeoutMs: number,
-  onTimeout: () => Error,
-): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(onTimeout()), timeoutMs);
-  });
-  const scan = (async (): Promise<T> => {
-    for await (const line of lines) {
-      const hit = pick(line);
-      if (hit !== undefined) return hit;
-    }
-    throw onTimeout();
-  })();
-  try {
-    return await Promise.race([scan, timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function waitExit(app: AppHandle, graceMs: number): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = await Promise.race([
-    app.exited.then(() => false),
-    new Promise<boolean>((r) => {
-      timer = setTimeout(() => r(true), graceMs);
-    }),
-  ]);
-  clearTimeout(timer);
-  if (timedOut) app.kill();
 }
 
 /** Runs the desktop player zap, fault and orphan gate. */

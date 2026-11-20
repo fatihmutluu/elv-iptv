@@ -6,6 +6,21 @@ import { sendText } from './routes-data.ts';
 
 const LIVE_FORM = /^\/live\/([^/]+\/[^/]+\/\d+)(?:\.ts)?$/;
 const SHORT_FORM = /^\/([^/]+)\/([^/]+\/\d+)$/;
+const MEDIA_TYPES: Readonly<Record<string, string>> = {
+  mp4: 'video/mp4',
+  mkv: 'video/x-matroska',
+  ts: 'video/mp2t',
+  vtt: 'text/vtt',
+};
+const HLS_STREAM_PATH = /^\/(?:live|movie|series|hls)\/.*\.m3u8$/i;
+
+/** The content type an empty answer keeps for a media path, else `text/plain`. */
+function emptyMediaType(path: string): string {
+  if (HLS_STREAM_PATH.test(path)) return 'application/vnd.apple.mpegurl';
+  const ext = /\.([a-z0-9]+)$/i.exec(path)?.[1]?.toLowerCase();
+  if (ext !== undefined && MEDIA_TYPES[ext] !== undefined) return MEDIA_TYPES[ext];
+  return hlsRedirectPath(path) !== null ? 'video/mp2t' : 'text/plain';
+}
 
 /** The `.m3u8` path a live stream URL redirects to, or null for paths that are not live TS forms. */
 export function hlsRedirectPath(path: string): string | null {
@@ -43,7 +58,8 @@ export async function requestFaults(
     if (f.kind === 'status') sendText(res, f.code, 'text/plain');
     else if (f.kind === 'text-notice') sendText(res, 200, 'text/plain', 'Max connections reached');
     else if (f.kind === 'empty') {
-      res.writeHead(200, { 'content-type': mediaType(faults, 'text/plain'), 'content-length': 0 });
+      const fallback = emptyMediaType(new URL(req.url ?? '/', 'http://sim').pathname);
+      res.writeHead(200, { 'content-type': mediaType(faults, fallback), 'content-length': 0 });
       res.end();
     } else if (f.kind === 'redirect' || f.kind === 'redirect-hls') {
       const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'sim'}`);

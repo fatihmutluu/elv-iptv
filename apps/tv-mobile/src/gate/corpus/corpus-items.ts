@@ -17,6 +17,8 @@ export interface CorpusItem {
   kind: MediaKind;
   url: string;
   expect: 'playing' | 'failed';
+  /** `category/code` the item must fail with when `expect` is `'failed'`. */
+  expectError?: string;
   audioOnly?: boolean;
   selectAudioLang?: string;
   selectSubtitleLang?: string;
@@ -91,6 +93,14 @@ function readBurst(value: string | undefined): number {
   return Math.min(Math.max(Number(value), 0), MAX_BURST_SECONDS);
 }
 
+function decodeQueryPart(raw: string): string | undefined {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Parses a corpus gate deep link. Returns `undefined` for anything other than `elviptv://gate/corpus`;
  * invalid hosts, accounts or burst values fall back to `10.0.2.2:7878`, `corpus` and `0`.
@@ -102,7 +112,10 @@ export function parseCorpusGateUrl(url: string | null): CorpusGateParams | undef
   const query = new Map<string, string>();
   for (const pair of (match[1] ?? '').split('&')) {
     const eq = pair.indexOf('=');
-    if (eq > 0) query.set(pair.slice(0, eq), pair.slice(eq + 1));
+    if (eq <= 0) continue;
+    const key = decodeQueryPart(pair.slice(0, eq));
+    const value = decodeQueryPart(pair.slice(eq + 1));
+    if (key !== undefined && value !== undefined) query.set(key, value);
   }
   const account = query.get('account');
   return {
@@ -186,6 +199,7 @@ export function buildCorpusItems(opts: {
     kind: 'vod',
     url: `${base}/movie/${pair}/200001.mp4?fault=empty`,
     expect: 'failed',
+    expectError: 'playback/network',
   });
 
   return items;

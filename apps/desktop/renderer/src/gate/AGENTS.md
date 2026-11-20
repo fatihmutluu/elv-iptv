@@ -25,7 +25,7 @@ Read `apps/desktop/AGENTS.md` and `src/main/player/AGENTS.md` first.
   shows as `engineWedged` 0 and a small `coalesceMaxMs`.
 - Outcomes: `recovered`, `failed-in-time`, `limited-backoff`, `left` (zapped away before the faulted channel played, the
   expected result of `slowstart`), `missed`. `stall` events of the current attempt feed rung-0 recovery.
-- Pure and at 90 % lines: `params.ts`, `metrics.ts`, `driver.ts`, `corpus-driver.ts` (no `electron`, no `node:*`). `--elv-gate=elv-gate=corpus&...` (or `corpus=1`) runs the 29-item format corpus sweep and prints `ELV_GATE_CORPUS {json}`.
+- Pure and at 90 % lines: `params.ts`, `metrics.ts`, `driver.ts`, `corpus-items.ts`, `corpus-driver.ts` (no `electron`, no `node:*`). `--elv-gate=elv-gate=corpus&...` (or `corpus=1`) runs the 29-item format corpus sweep and prints `ELV_GATE_CORPUS {json}`.
 
 ## Differences from the Android gate (`apps/tv-mobile/src/gate/player/`)
 - `metrics.ts` is a copy of `player-metrics.ts` on purpose, because another branch is changing the Android file. The

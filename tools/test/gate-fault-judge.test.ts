@@ -4,7 +4,7 @@ import type { SimLogEntry } from '../src/gates/sim-log.ts';
 import { entry, line, next, slow } from './gate-player-fixtures.ts';
 
 const run = (fault: string, outcome: string | null) =>
-  line({ fault, faultOutcome: outcome, zaps: 1 });
+  line({ fault, faultOutcome: outcome, zaps: 1, limitedAfterMs: 120 });
 
 describe('judgeFault', () => {
   it('accepts a dropped stream that is requested again in time', () => {
@@ -91,6 +91,81 @@ describe('judgeFault', () => {
     ).toEqual([
       'notice: outcome failed-in-time, expected limited-backoff',
       'notice: the simulator answered no notice',
+    ]);
+  });
+
+  it('checks every limit backoff interval against the 2, 4, 8, then 15 s ladder (#83)', () => {
+    const limited = (start: number) => entry(start, 5, { status: 509 });
+    const ladder = [limited(0), limited(2005), limited(6010), limited(14_015), limited(29_020)];
+    expect(judgeFault('509', run('509', 'limited-backoff'), ladder, '1001')).toEqual({
+      failures: [],
+      warnings: [],
+    });
+    const eagerSecond = [limited(0), limited(2100), limited(3105)];
+    expect(judgeFault('509', run('509', 'limited-backoff'), eagerSecond, '1001').failures).toEqual([
+      '509: next request came 1000 ms after 509 2, before the 4000 ms backoff',
+    ]);
+    const eagerThird = [limited(0), limited(2005), limited(6010), limited(10_015)];
+    expect(judgeFault('509', run('509', 'limited-backoff'), eagerThird, '1001').failures).toEqual([
+      '509: next request came 4000 ms after 509 3, before the 8000 ms backoff',
+    ]);
+    const eagerFourth = [...ladder.slice(0, 4), limited(22_020)];
+    expect(judgeFault('509', run('509', 'limited-backoff'), eagerFourth, '1001').failures).toEqual([
+      '509: next request came 8000 ms after 509 4, before the 15000 ms backoff',
+    ]);
+    const eagerFifth = [...ladder, limited(37_025)];
+    expect(judgeFault('509', run('509', 'limited-backoff'), eagerFifth, '1001').failures).toEqual([
+      '509: next request came 8000 ms after 509 5, before the 15000 ms backoff',
+    ]);
+  });
+
+  it('checks the next request after every notice, not only the first (#83)', () => {
+    const notice = (start: number) =>
+      entry(start, 3, { bytes: 23, query: { fault: 'text-notice' } });
+    expect(
+      judgeFault(
+        'notice',
+        run('notice', 'limited-backoff'),
+        [notice(0), notice(2003), notice(6006)],
+        '1001',
+      ),
+    ).toEqual({ failures: [], warnings: [] });
+    expect(
+      judgeFault(
+        'notice',
+        run('notice', 'limited-backoff'),
+        [notice(0), notice(2200), notice(4000)],
+        '1001',
+      ).failures,
+    ).toEqual(['notice: next request came 1797 ms after notice 2, before the 4000 ms backoff']);
+  });
+
+  it('restarts the ladder after a request that was not limited', () => {
+    const limited = (start: number) => entry(start, 5, { status: 509 });
+    const entries = [limited(0), limited(2005), entry(6010, 1000), limited(8000), limited(10_005)];
+    expect(judgeFault('509', run('509', 'limited-backoff'), entries, '1001').failures).toEqual([]);
+    const eagerAfterReset = [
+      limited(0),
+      limited(2005),
+      entry(6010, 1000),
+      limited(8000),
+      limited(8500),
+    ];
+    expect(
+      judgeFault('509', run('509', 'limited-backoff'), eagerAfterReset, '1001').failures,
+    ).toEqual(['509: next request came 495 ms after 509 3, before the 2000 ms backoff']);
+  });
+
+  it('requires the screen to report limited within 2 s of the tune on limit faults', () => {
+    const entries = [entry(0, 5, { status: 509 }), entry(2005, 5, { status: 509 })];
+    const at = (ms: number | null) =>
+      line({ fault: '509', faultOutcome: 'limited-backoff', zaps: 1, limitedAfterMs: ms });
+    expect(judgeFault('509', at(140), entries, '1001')).toEqual({ failures: [], warnings: [] });
+    expect(judgeFault('509', at(2400), entries, '1001').failures).toEqual([
+      '509: the screen entered limited 2400 ms after the tune, limit 2000 ms',
+    ]);
+    expect(judgeFault('509', at(null), entries, '1001').warnings).toEqual([
+      '509: the screen reported no limitedAfterMs (an app build that predates it)',
     ]);
   });
 

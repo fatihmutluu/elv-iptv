@@ -254,4 +254,26 @@ describe('createGateRun', () => {
     expect(h.engine.commands.filter((c) => c.name === 'load').length).toBeLessThanOrEqual(3);
     expect(h.result()).toBeDefined();
   });
+
+  it('stop as the vod pauses skips the pause sleep, play and seek and leaves no timer', async () => {
+    const h = harness('channels=1&zaps=1&rate=5&vod=900', (p) => ({
+      [streamUrl(p, 0)]: PLAY,
+      [vodUrl(p)]: PLAY,
+    }));
+    let playingAttempt: number | undefined;
+    h.run.service.subscribe((state) => {
+      if (state.item !== '900') return;
+      if (playingAttempt === undefined && state.status.kind === 'playing')
+        playingAttempt = state.attempt;
+      else if (playingAttempt !== undefined && state.attempt > playingAttempt) h.run.stop();
+    });
+    for (let i = 0; i < 100 && h.result() === undefined; i += 1) await advance(100);
+    expect(h.result()?.vod).toEqual({ playing: true, seeked: false });
+    const names = h.engine.commands.map((c) => c.name);
+    expect(names).toContain('pause');
+    expect(names).not.toContain('play');
+    expect(names).not.toContain('seek');
+    h.run.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

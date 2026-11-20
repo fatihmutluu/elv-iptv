@@ -176,6 +176,34 @@ describe('createPlayerRecorder', () => {
     expect(l.recorder.finish(l.state).faultOutcome).toBe('limited-backoff');
   });
 
+  it('reports limitedAfterMs from the faulted tune to its first limited state', () => {
+    const l = make('509');
+    l.tune('a', 100);
+    l.at(240);
+    l.status({ kind: 'limited', nextAtMs: 2240 });
+    l.at(2300);
+    l.status({ kind: 'tuning' });
+    l.at(2310);
+    l.status({ kind: 'limited', nextAtMs: 6310 });
+    expect(l.recorder.finish(l.state).limitedAfterMs).toBe(140);
+  });
+
+  it('reports limitedAfterMs null without a fault, without limited, or off the faulted channel', () => {
+    const none = make();
+    none.tune('a', 0);
+    none.status({ kind: 'limited', nextAtMs: 2000 });
+    expect(none.recorder.finish(none.state).limitedAfterMs).toBeNull();
+    const failed = make('404');
+    failed.tune('a', 0);
+    failed.status({ kind: 'failed', error: elvError('playback', 'http-404') });
+    expect(failed.recorder.finish(failed.state).limitedAfterMs).toBeNull();
+    const other = make('509');
+    other.tune('b', 0);
+    other.at(50);
+    other.status({ kind: 'limited', nextAtMs: 2050 });
+    expect(other.recorder.finish(other.state).limitedAfterMs).toBeNull();
+  });
+
   it('judges a fault the service never reacted to as missed, and only the first dwell counts', () => {
     const h = make('404');
     h.tune('a', 0);

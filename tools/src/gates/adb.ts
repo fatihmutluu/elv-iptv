@@ -121,18 +121,32 @@ export async function deviceInfo(
   };
 }
 
-export async function buildApk(exec: Exec, root: string, adb: string): Promise<void> {
+/** Android targets the gates can build a development APK for. */
+export type ApkTarget = 'android' | 'android-tv' | 'fire-tv';
+
+/**
+ * Fetches the FFmpeg Media3 extension, prebuilds `target` (TV flag and store follow `pnpm run:app`) and assembles the
+ * development release APK.
+ */
+export async function buildApk(
+  exec: Exec,
+  root: string,
+  adb: string,
+  apkTarget: ApkTarget = 'android-tv',
+): Promise<void> {
   const sdk = /^(.*)[\\/]platform-tools[\\/][^\\/]*$/.exec(adb)?.[1];
-  const target = { target: 'android-tv' as const, variant: 'development' as const };
+  const target = { target: apkTarget, variant: 'development' as const };
   const prebuild = buildPrebuildCommand({ ...target, devEnv: {} });
   const project = nativeProject(target);
+  const appEnv = Object.fromEntries(
+    Object.entries(prebuild.env).filter(([key]) => key !== 'EXPO_NO_GIT_STATUS'),
+  );
   const gradle = {
     command: process.platform === 'win32' ? '.\\gradlew.bat' : './gradlew',
     args: ['assembleRelease', '--console=plain'],
     cwd: `${prebuild.cwd}/android`,
     env: {
-      APP_VARIANT: 'development',
-      EXPO_TV: '1',
+      ...appEnv,
       ...(sdk === undefined ? {} : { ANDROID_HOME: sdk }),
     },
   };

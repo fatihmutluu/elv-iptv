@@ -47,7 +47,7 @@ Extend `tools/src/sim/corpus.ts` and `tools/src/sim/faults.ts`:
 
 Add corpus verification mode to both gate runners so every `0.1` platform runs an automated, repeatable proof against `corpus` (`maxConnections = 1`):
 
-1. **Corpus Test Matrix (28 items per platform):**
+1. **Corpus Test Matrix (29 items per platform):**
    - **14 Live Streams:**
      - `1001`..`1011` as `.ts` (all 11 recipes: H.264 720p25 AAC, HEVC 1080p25 8-bit, HEVC 1080p25 10-bit, MPEG-2 576i25 AC-3, H.264 576p25 MP2, AAC radio, H.264 1080i25, H.264 720p50 E-AC-3 5.1, H.264 720p29.97 MP3, 2-audio + DVB subs, resolution switch 720p/1080p).
      - `1012` as `.ts` (`Stream labelled as a web page`, `Content-Type: text/html`).
@@ -65,4 +65,4 @@ Add corpus verification mode to both gate runners so every `0.1` platform runs a
    - Every playable item reaches `playing` (`firstFrameAt !== undefined`, clock anchor advancing) within budget; audio-only `aac-radio` (`1006`, `200006`) reaches `playing` without video tracks; `1010` / `200010` expose `>= 2` audio tracks and `>= 2` text tracks (where track API from `#73` is active).
    - Empty-200 VOD (`200001.mp4?fault=empty`) reaches `failed` (never `ended`, never hangs).
    - Simulator log for account `corpus` (`maxConnections: 1`) records **`0` `509` limit responses** across the entire sequential sweep!
-   - JSON report written to `docs/learned/gates/corpus-<target>.json` (`android-tv`, `fire-os`, `android-phone`, `tvos`, `ios`, `desktop-windows`, `desktop-macos`) and summarized in `docs/learned/README.md`.
+   - JSON report written to `docs/learned/gates/corpus-<target>.json` (`android-tv`, `fire-os`, `android`, `tvos`, `ios`, `windows`, `macos`; for example `corpus-android.json` and `corpus-windows.json`) and summarized in `docs/learned/README.md`.

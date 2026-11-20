@@ -18,6 +18,30 @@ describe('formatTrackLabel', () => {
     expect(formatTrackLabel(tracks[1] as TrackInfo, 1, tracks, tr)).toBe('İngilizce');
   });
 
+  it('treats Turkish dotted and dotless I casing variants of the language name as redundant', () => {
+    const en = createAppI18n('en');
+    const tr = createAppI18n('tr');
+    const variants: readonly TrackInfo[] = [
+      { id: 'a:1', language: 'eng', label: 'İNGİLİZCE' },
+      { id: 'a:2', language: 'eng', label: 'ingilizce' },
+      { id: 'a:3', language: 'eng', label: 'INGILIZCE' },
+      { id: 'a:4', language: 'tur', label: 'TÜRKÇE' },
+    ];
+
+    expect(formatTrackLabel(variants[0] as TrackInfo, 0, [variants[0] as TrackInfo], tr)).toBe(
+      'İngilizce',
+    );
+    expect(formatTrackLabel(variants[1] as TrackInfo, 0, [variants[1] as TrackInfo], tr)).toBe(
+      'İngilizce',
+    );
+    expect(formatTrackLabel(variants[2] as TrackInfo, 0, [variants[2] as TrackInfo], en)).toBe(
+      'English',
+    );
+    expect(formatTrackLabel(variants[3] as TrackInfo, 0, [variants[3] as TrackInfo], en)).toBe(
+      'Turkish',
+    );
+  });
+
   it('preserves distinct track titles and forced markers', () => {
     const en = createAppI18n('en');
     const tr = createAppI18n('tr');

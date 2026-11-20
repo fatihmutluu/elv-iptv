@@ -32,6 +32,28 @@ const TARGETS: ReadonlySet<string> = new Set([
   'windows',
   'macos',
 ]);
+const DESKTOP_TARGETS: ReadonlySet<string> = new Set(['desktop', 'windows', 'macos']);
+const SIM_BASE = /^http:\/\/([a-z0-9.]+)(?::(\d{1,5}))?$/;
+const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+
+function isSimUrl(raw: string): boolean {
+  const match = SIM_BASE.exec(raw.replace(/\/+$/, ''));
+  if (match === null) return false;
+  const [, host = '', port] = match;
+  if (port !== undefined && Number(port) > 65_535) return false;
+  if (host === 'localhost') return true;
+  const ip = IPV4.exec(host);
+  if (ip === null) return false;
+  const [a, b, c, d] = ip.slice(1).map(Number) as [number, number, number, number];
+  if ([a, b, c, d].some((part) => part > 255)) return false;
+  return (
+    a === 127 ||
+    a === 10 ||
+    (a === 192 && b === 168) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 100 && b >= 64 && b <= 127)
+  );
+}
 
 /** Runs `pnpm gate corpus` and returns the process exit code; usage errors return code 2. */
 export async function corpusMain(values: CorpusCli, root: string): Promise<number> {
@@ -50,6 +72,14 @@ export async function corpusMain(values: CorpusCli, root: string): Promise<numbe
     return bad(
       '--build is not supported on Apple simulators; pass the built .app bundle via --app',
     );
+  }
+  if (values.sim !== undefined) {
+    if (!DESKTOP_TARGETS.has(target)) return bad('--sim is supported only with --target desktop');
+    if (!isSimUrl(values.sim)) {
+      return bad(
+        '--sim must be http://<host>[:port] on loopback, LAN or Tailscale (e.g. http://127.0.0.1:7878)',
+      );
+    }
   }
   let burst = 0;
   if (values.burst !== undefined) {

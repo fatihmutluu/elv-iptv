@@ -18,6 +18,7 @@ export const line = (over: Partial<PlayerLine> = {}): PlayerLine => ({
   zaps: 30,
   soak: null,
   final: 'playing',
+  limitedAfterMs: null,
   ...over,
 });
 

@@ -4,14 +4,9 @@ import type { FormFactor } from '@elv/ui-kit';
 import { type ComponentRef, type ReactElement, useEffect, useRef } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { formatTrackLabel } from './track-labels';
+import type { TrackPickerCursor } from './track-picker-nav';
 
-type TrackPickerColumn = 'audio' | 'subtitles';
-
-/** Logical D-pad / keyboard cursor inside {@link TrackPickerModal}. */
-export interface TrackPickerCursor {
-  readonly column: TrackPickerColumn;
-  readonly index: number;
-}
+export type { TrackPickerCursor } from './track-picker-nav';
 
 const APPROX_ROW_PITCH = 42;
 
@@ -87,17 +82,18 @@ export function TrackPickerModal({
   const offSelected = tracks.selectedSubtitleId === null;
   const closeLabel = i18n.t('player.closeTracks');
   const isPhone = formFactor === 'phone';
+  const showCursor = isTv || formFactor === 'desktop';
   const audioScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const subtitleScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
 
   useEffect(() => {
-    if (!isTv) return;
+    if (!showCursor) return;
     const targetRef = cursor.column === 'audio' ? audioScrollRef : subtitleScrollRef;
     targetRef.current?.scrollTo?.({
       y: Math.max(0, (cursor.index - 1) * APPROX_ROW_PITCH),
       animated: false,
     });
-  }, [cursor.column, cursor.index, isTv]);
+  }, [cursor.column, cursor.index, showCursor]);
 
   const listStyle = [styles.list, isPhone ? styles.listPhone : null];
 
@@ -139,7 +135,7 @@ export function TrackPickerModal({
                     testID={`player-audio-track-${track.id}`}
                     label={label}
                     selected={tracks.selectedAudioId === track.id}
-                    tvFocused={isTv && cursor.column === 'audio' && cursor.index === idx}
+                    tvFocused={showCursor && cursor.column === 'audio' && cursor.index === idx}
                     isTv={isTv}
                     onPress={() => onSelectAudio(track.id)}
                   />
@@ -160,7 +156,7 @@ export function TrackPickerModal({
               testID="player-subtitle-off"
               label={offLabel}
               selected={offSelected}
-              tvFocused={isTv && cursor.column === 'subtitles' && cursor.index === 0}
+              tvFocused={showCursor && cursor.column === 'subtitles' && cursor.index === 0}
               isTv={isTv}
               onPress={() => onSelectSubtitle(null)}
             />
@@ -172,7 +168,9 @@ export function TrackPickerModal({
                   testID={`player-subtitle-track-${track.id}`}
                   label={label}
                   selected={tracks.selectedSubtitleId === track.id}
-                  tvFocused={isTv && cursor.column === 'subtitles' && cursor.index === idx + 1}
+                  tvFocused={
+                    showCursor && cursor.column === 'subtitles' && cursor.index === idx + 1
+                  }
                   isTv={isTv}
                   onPress={() => onSelectSubtitle(track.id)}
                 />
