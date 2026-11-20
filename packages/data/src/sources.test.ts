@@ -185,6 +185,10 @@ describe('removeSource', () => {
       guide_channels: "(source_id, guide_id, name, name_fold, run_id) VALUES (?, 'g', 'n', 'n', 1)",
       channel_guide: "(source_id, channel_key, guide_id) VALUES (?, 'k', 'g')",
       programmes: "(source_id, guide_id, start, stop, title, run_id) VALUES (?, 'g', 1, 2, 't', 1)",
+      watch_progress:
+        "(profile_id, source_id, item_key, kind, title, position_ms, duration_ms, watched, updated_at) VALUES ('default', ?, ?, 'movie', 't', 20000, 60000, 0, 1)",
+      favorites:
+        "(profile_id, source_id, item_key, kind, title, added_at) VALUES ('default', ?, ?, 'movie', 't', 1)",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -192,6 +196,8 @@ describe('removeSource', () => {
         if (table === 'import_runs') {
           await s.db.run(`INSERT INTO import_runs ${rest}`, [runId, id]);
           runId += 1;
+        } else if (table === 'watch_progress' || table === 'favorites') {
+          await s.db.run(`INSERT INTO ${table} ${rest}`, [id, `k:${id}`]);
         } else {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [id]);
         }
@@ -231,6 +237,10 @@ describe('removeSource', () => {
       programmes: "(source_id, guide_id, start, stop, title, run_id) VALUES (?, 'g', 1, 2, 't', 1)",
       programmes_next:
         "(source_id, guide_id, start, stop, title, run_id) VALUES (?, 'g', 1, 2, 't', 1)",
+      watch_progress:
+        "(profile_id, source_id, item_key, kind, title, position_ms, duration_ms, watched, updated_at) VALUES ('default', ?, ?, 'movie', 't', 20000, 60000, 0, 1)",
+      favorites:
+        "(profile_id, source_id, item_key, kind, title, added_at) VALUES ('default', ?, ?, 'movie', 't', 1)",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -238,6 +248,8 @@ describe('removeSource', () => {
         if (table === 'import_runs') {
           await s.db.run(`INSERT INTO import_runs ${rest}`, [runId, id]);
           runId += 1;
+        } else if (table === 'watch_progress' || table === 'favorites') {
+          await s.db.run(`INSERT INTO ${table} ${rest}`, [id, `k:${id}`]);
         } else {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [id]);
         }

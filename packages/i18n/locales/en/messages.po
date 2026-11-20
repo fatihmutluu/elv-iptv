@@ -306,6 +306,9 @@ msgstr "Could not save catalog data to local storage."
 msgid "source.hint.storage"
 msgstr "Check available disk space and try refreshing the source."
 
+msgid "nav.home"
+msgstr "Home"
+
 msgid "nav.live"
 msgstr "Live"
 
@@ -671,3 +674,78 @@ msgstr "GPL-3.0-only · LGPL media engines"
 
 msgid "settings.about.statement"
 msgstr "ELV IPTV is an open-source player and ships no media content. Native playback engines dynamically link LGPL libraries. Provider credentials remain encrypted on-device and never enter the catalog database."
+
+msgid "home.title"
+msgstr "Home"
+
+msgid "home.continueWatching"
+msgstr "Continue watching"
+
+msgid "home.onAirNow"
+msgstr "On air now"
+
+msgid "home.myList"
+msgstr "My list"
+
+msgid "home.featuredMovies"
+msgstr "Featured movies"
+
+msgid "home.featuredSeries"
+msgstr "Featured series"
+
+msgid "home.seeAll"
+msgstr "See all"
+
+msgid "home.channels"
+msgstr "Channels"
+
+msgid "home.resume"
+msgstr "Resume"
+
+msgid "home.watchNow"
+msgstr "Play"
+
+msgid "home.addToList"
+msgstr "Add to My list"
+
+msgid "home.inMyList"
+msgstr "In My list"
+
+msgid "home.markWatched"
+msgstr "Mark watched"
+
+msgid "home.markUnwatched"
+msgstr "Mark unwatched"
+
+msgid "home.watchedBadge"
+msgstr "Watched"
+
+msgid "home.remainingMin"
+msgstr "{minutes}m left"
+
+msgid "home.featuredTag"
+msgstr "Featured"
+
+msgid "home.emptyTitle"
+msgstr "Your screening room is ready"
+
+msgid "home.emptyDescription"
+msgstr "Add an Xtream or M3U source to populate Live TV, Movies, and Series."
+
+msgid "home.addSource"
+msgstr "Manage sources"
+
+msgid "home.heroSlideLabel"
+msgstr "Spotlight {index} of {total}"
+
+msgid "home.kind.live"
+msgstr "Live TV"
+
+msgid "home.kind.movie"
+msgstr "Movie"
+
+msgid "home.kind.series"
+msgstr "Series"
+
+msgid "home.kind.episode"
+msgstr "Episode"

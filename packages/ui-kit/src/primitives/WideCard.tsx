@@ -1,4 +1,4 @@
-import { type ReactElement, useCallback, useState } from 'react';
+import { memo, type ReactElement, useCallback, useState } from 'react';
 import { Pressable, type StyleProp, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { useI18n } from '../i18n';
 import { Icon } from '../icons';
@@ -23,8 +23,11 @@ export interface WideCardProps {
   showPlayBadge?: boolean;
   onPress?: () => void;
   onFocus?: () => void;
+  focusable?: boolean;
   focused?: boolean;
   width?: number;
+  /** Caps decoded backdrop dimensions on native targets via `ArtworkImage` (defaults to `480`). */
+  maxDecodePx?: number;
   deadHosts?: DeadHostRegistry;
   testID?: string;
   style?: StyleProp<ViewStyle>;
@@ -62,12 +65,7 @@ function scaleFont(size: number, fontScale: number): number {
   return Math.round(size * fontScale * 2) / 2;
 }
 
-/**
- * Pure-artwork `16:9` card reserved exclusively for Continue Watching and Live Broadcast rails
- * (`UI_UX_PHILOSOPHY.md` §1). Supports an optional top-left `LIVE`/metadata pill, bottom gradient
- * scrim, circular resume play pill, clamped `3px` bottom accent progress bar, and zero boxed chrome.
- */
-export function WideCard({
+function WideCardInner({
   title,
   subtitle,
   imageUri,
@@ -79,8 +77,10 @@ export function WideCard({
   showPlayBadge,
   onPress,
   onFocus,
+  focusable = true,
   focused,
   width,
+  maxDecodePx = 480,
   deadHosts,
   testID,
   style,
@@ -118,7 +118,7 @@ export function WideCard({
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={subtitle ? `${title}, ${subtitle}` : title}
-      focusable
+      focusable={focusable}
       onPress={onPress}
       onFocus={handleFocus}
       onBlur={handleBlur}
@@ -177,6 +177,7 @@ export function WideCard({
                   uri={imageUri}
                   label={title}
                   aspectRatio={16 / 9}
+                  maxDecodePx={maxDecodePx}
                   borderRadius={theme.radius.card}
                   logoBackdrop={logoBackdrop}
                   zoomed={showPointerHover}
@@ -322,6 +323,14 @@ export function WideCard({
     </Pressable>
   );
 }
+
+/**
+ * Pure-artwork `16:9` card reserved exclusively for Continue Watching and Live Broadcast rails
+ * (`UI_UX_PHILOSOPHY.md` §1). Supports an optional top-left `LIVE`/metadata pill, bottom gradient
+ * scrim, circular resume play pill, clamped `3px` bottom accent progress bar, and zero boxed chrome.
+ */
+export const WideCard = memo(WideCardInner);
+WideCard.displayName = 'WideCard';
 
 const styles = StyleSheet.create({
   artworkShadow: { position: 'relative' },

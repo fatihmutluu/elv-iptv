@@ -307,6 +307,50 @@ describe('@elv/i18n', () => {
     }
   });
 
+  it('localizes home, navigation, watch progress, and My List strings in English and Turkish', () => {
+    const en = createAppI18n('en');
+    const tr = createAppI18n('tr');
+    const cases: ReadonlyArray<readonly [MessageId, string, string]> = [
+      ['nav.home', 'Home', 'Ana Sayfa'],
+      ['home.title', 'Home', 'Ana Sayfa'],
+      ['home.continueWatching', 'Continue watching', 'İzlemeye devam et'],
+      ['home.onAirNow', 'On air now', 'Şu an yayında'],
+      ['home.myList', 'My list', 'Listem'],
+      ['home.featuredMovies', 'Featured movies', 'Öne çıkan filmler'],
+      ['home.featuredSeries', 'Featured series', 'Öne çıkan diziler'],
+      ['home.seeAll', 'See all', 'Tümü'],
+      ['home.channels', 'Channels', 'Kanallar'],
+      ['home.resume', 'Resume', 'Devam et'],
+      ['home.watchNow', 'Play', 'Oynat'],
+      ['home.addToList', 'Add to My list', 'Listeme ekle'],
+      ['home.inMyList', 'In My list', 'Listemde'],
+      ['home.markWatched', 'Mark watched', 'İzlendi işaretle'],
+      ['home.markUnwatched', 'Mark unwatched', 'İzlenmedi işaretle'],
+      ['home.watchedBadge', 'Watched', 'İzlendi'],
+      ['home.featuredTag', 'Featured', 'Öne çıkan'],
+      ['home.emptyTitle', 'Your screening room is ready', 'İzleme odanız hazır'],
+      [
+        'home.emptyDescription',
+        'Add an Xtream or M3U source to populate Live TV, Movies, and Series.',
+        'Canlı TV, Film ve Dizileri görmek için bir Xtream veya M3U kaynağı ekleyin.',
+      ],
+      ['home.addSource', 'Manage sources', 'Kaynakları yönet'],
+      ['home.kind.live', 'Live TV', 'Canlı TV'],
+      ['home.kind.movie', 'Movie', 'Film'],
+      ['home.kind.series', 'Series', 'Dizi'],
+      ['home.kind.episode', 'Episode', 'Bölüm'],
+    ];
+    for (const [id, expectedEn, expectedTr] of cases) {
+      expect(en.t(id)).toBe(expectedEn);
+      expect(tr.t(id)).toBe(expectedTr);
+    }
+
+    expect(en.t('home.remainingMin', { minutes: 42 })).toBe('42m left');
+    expect(tr.t('home.remainingMin', { minutes: 42 })).toBe('42 dk kaldı');
+    expect(en.t('home.heroSlideLabel', { index: 2, total: 5 })).toBe('Spotlight 2 of 5');
+    expect(tr.t('home.heroSlideLabel', { index: 2, total: 5 })).toBe('Öne çıkan 2 / 5');
+  });
+
   it('localizes VOD transport controls, track picker strings, and common track language codes', () => {
     const en = createAppI18n('en');
     expect(en.t('player.play')).toBe('Play');

@@ -156,6 +156,33 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'icon', alterDefinition: 'TEXT' },
     { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
   ],
+  watch_progress: [
+    { name: 'profile_id', alterDefinition: "TEXT NOT NULL DEFAULT 'default'" },
+    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'item_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'kind', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'subtitle', alterDefinition: 'TEXT' },
+    { name: 'logo', alterDefinition: 'TEXT' },
+    { name: 'series_key', alterDefinition: 'TEXT' },
+    { name: 'season', alterDefinition: 'INTEGER' },
+    { name: 'episode', alterDefinition: 'INTEGER' },
+    { name: 'position_ms', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'duration_ms', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'watched', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'updated_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+  ],
+  favorites: [
+    { name: 'profile_id', alterDefinition: "TEXT NOT NULL DEFAULT 'default'" },
+    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'item_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'kind', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'logo', alterDefinition: 'TEXT' },
+    { name: 'year', alterDefinition: 'INTEGER' },
+    { name: 'rating', alterDefinition: 'REAL' },
+    { name: 'added_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+  ],
 };
 
 /** Ordered migrations; entry `i` upgrades a database from `user_version` `i` to `i + 1`. */
@@ -320,5 +347,41 @@ CREATE TABLE programmes_next (
   run_id INTEGER NOT NULL,
   PRIMARY KEY (source_id, guide_id, start)
 ) WITHOUT ROWID;
+`,
+  `
+CREATE TABLE watch_progress (
+  profile_id TEXT NOT NULL DEFAULT 'default',
+  source_id TEXT NOT NULL,
+  item_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  subtitle TEXT,
+  logo TEXT,
+  series_key TEXT,
+  season INTEGER,
+  episode INTEGER,
+  position_ms INTEGER NOT NULL DEFAULT 0,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  watched INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (profile_id, item_key)
+) WITHOUT ROWID;
+CREATE INDEX idx_watch_progress_recent ON watch_progress (profile_id, watched, updated_at DESC);
+CREATE INDEX idx_watch_progress_source ON watch_progress (source_id);
+
+CREATE TABLE favorites (
+  profile_id TEXT NOT NULL DEFAULT 'default',
+  source_id TEXT NOT NULL,
+  item_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  logo TEXT,
+  year INTEGER,
+  rating REAL,
+  added_at INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (profile_id, item_key)
+) WITHOUT ROWID;
+CREATE INDEX idx_favorites_recent ON favorites (profile_id, added_at DESC);
+CREATE INDEX idx_favorites_source ON favorites (source_id);
 `,
 ];

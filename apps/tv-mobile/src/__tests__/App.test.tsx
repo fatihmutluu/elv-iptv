@@ -214,6 +214,7 @@ describe('App', () => {
       .mockReturnValue({ remove: removeAppState });
     openedWith(null);
     const view = await render(<App />);
+    expect(screen.getByTestId('nav-tab-home')).toBeOnTheScreen();
     expect(screen.getByTestId('nav-tab-live')).toBeOnTheScreen();
     expect(screen.getByTestId('nav-tab-movie')).toBeOnTheScreen();
     expect(screen.getByTestId('nav-tab-series')).toBeOnTheScreen();
@@ -331,8 +332,8 @@ describe('App', () => {
     openedWith(null);
 
     const view = await render(<App />);
-    const row = await screen.findByTestId('browse-items-list-row-0');
-    await fireEvent.press(row);
+    const liveCard = await screen.findByTestId('home-live-item-0');
+    await fireEvent.press(liveCard);
 
     const surface = await screen.findByTestId('player-surface');
     expect(surface.props.accessibilityLabel).toBe('aether-surface');
@@ -360,6 +361,7 @@ describe('App', () => {
     const view = await render(<App />);
     expect(screen.getByTestId('sources-screen')).toBeOnTheScreen();
     expect(settingsRead).toHaveBeenCalledWith('elv.preferences.v1');
+    expect(screen.getByTestId('nav-tab-home')).toBeOnTheScreen();
     expect(screen.getByTestId('nav-tab-live')).toBeOnTheScreen();
     expect(screen.getByTestId('nav-tab-settings')).toBeOnTheScreen();
     expect(screen.getByTestId('settings-tab-sources')).toBeOnTheScreen();

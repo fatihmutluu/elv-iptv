@@ -171,6 +171,27 @@ describe('createCatalogBridge', () => {
     });
     const linkP = bridge.addSourceFromLink({ name: 'L', url: 'http://list.example/b.m3u' });
     const rmP = bridge.removeSource('s1');
+    const saveProgP = bridge.saveProgress({
+      sourceId: 's1',
+      itemKey: 'm:s1:1',
+      kind: 'movie',
+      title: 'Silent Horizon',
+      positionMs: 25_000,
+      durationMs: 100_000,
+    });
+    const setWatP = bridge.setWatched('m:s1:1', true);
+    const getProgP = bridge.getProgress('m:s1:1');
+    const cwP = bridge.listContinueWatching(12);
+    const byKeysP = bridge.listProgressByKeys(['m:s1:1']);
+    const clearProgP = bridge.clearProgress('m:s1:1');
+    const togFavP = bridge.toggleFavorite({
+      sourceId: 's1',
+      itemKey: 'm:s1:1',
+      kind: 'movie',
+      title: 'Silent Horizon',
+    });
+    const favsP = bridge.listFavorites(20);
+    const favKeysP = bridge.listFavoriteKeys();
     await Promise.resolve();
 
     for (const msg of port.sent.slice(4)) {
@@ -178,9 +199,15 @@ describe('createCatalogBridge', () => {
         const val =
           msg.call.method === 'categories' ||
           msg.call.method === 'items' ||
-          msg.call.method === 'episodes'
+          msg.call.method === 'episodes' ||
+          msg.call.method === 'listContinueWatching' ||
+          msg.call.method === 'listProgressByKeys' ||
+          msg.call.method === 'listFavorites' ||
+          msg.call.method === 'listFavoriteKeys'
             ? []
-            : ok(undefined);
+            : msg.call.method === 'getProgress'
+              ? null
+              : ok(undefined);
         port.deliver({ type: 'result', reqId: msg.reqId, value: val });
       }
     }
@@ -192,6 +219,15 @@ describe('createCatalogBridge', () => {
     expect((await addP).ok).toBe(true);
     expect((await linkP).ok).toBe(true);
     expect((await rmP).ok).toBe(true);
+    expect((await saveProgP).ok).toBe(true);
+    expect((await setWatP).ok).toBe(true);
+    expect(await getProgP).toBeNull();
+    expect(await cwP).toEqual([]);
+    expect(await byKeysP).toEqual([]);
+    expect((await clearProgP).ok).toBe(true);
+    expect((await togFavP).ok).toBe(true);
+    expect(await favsP).toEqual([]);
+    expect(await favKeysP).toEqual([]);
 
     await bridge.close();
     expect(port.closed).toBe(true);
@@ -285,6 +321,22 @@ describe('createCatalogBridge', () => {
     await expect(bridge.items('cat', Number.NaN, 10)).rejects.toThrow(
       /source-format\/invalid-request/,
     );
+    await expect(bridge.listContinueWatching(101)).rejects.toThrow(
+      /source-format\/invalid-request/,
+    );
+    expect(
+      await bridge.saveProgress({
+        sourceId: 's1',
+        itemKey: 'k1',
+        kind: 'movie',
+        title: 'Bad',
+        positionMs: -10,
+        durationMs: 100,
+      }),
+    ).toEqual({
+      ok: false,
+      error: { category: 'source-format', code: 'invalid-request' },
+    });
     expect(h.outgoing).toHaveLength(0);
   });
 });

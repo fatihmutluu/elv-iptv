@@ -17,6 +17,7 @@ import { formatStatusLine, PlayerOsd, playerStyles } from './PlayerScreenParts';
 import { TrackPickerModal } from './TrackPickerModal';
 import { usePlayerControls } from './usePlayerControls';
 import { usePlayerSession } from './usePlayerSession';
+import { resolveVodStartPositionMs, useWatchProgressSync } from './useWatchProgressSync';
 import { createZapController, type ZapController } from './zap-controller';
 
 const DEFAULT_CLOCK: PlaybackClock = { now: () => performance.now() };
@@ -25,9 +26,31 @@ const DEFAULT_TIMERS: PlaybackTimers = {
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
 
+function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { then?: unknown }).then === 'function'
+  );
+}
+
+function hasTargetMetaChanged(prev: PlayTarget, next: PlayTarget): boolean {
+  return (
+    prev.playlist !== next.playlist ||
+    prev.title !== next.title ||
+    prev.sourceId !== next.sourceId ||
+    prev.logo !== next.logo ||
+    prev.subtitle !== next.subtitle ||
+    prev.seriesKey !== next.seriesKey ||
+    prev.season !== next.season ||
+    prev.episode !== next.episode ||
+    prev.itemKind !== next.itemKind
+  );
+}
+
 /** Props of {@link PlayerScreen}. */
 export interface PlayerScreenProps {
-  catalog: Pick<CatalogService, 'resolveStream'>;
+  catalog: Pick<CatalogService, 'resolveStream' | 'getProgress' | 'saveProgress'>;
   videoHost: VideoHost;
   target: PlayTarget;
   playbackGuard?: PlaybackGuard;
@@ -63,6 +86,9 @@ export function PlayerScreen({
   const backgroundedRef = useRef(false);
   const resumeOnActiveRef = useRef(false);
   const vodResumeMsRef = useRef<number | undefined>(undefined);
+  const tuneGenRef = useRef(0);
+  const pendingResumeRef = useRef(false);
+  const flushProgressRef = useRef<(overridePosMs?: number) => void>(() => undefined);
 
   const catalogRef = useRef(catalog);
   catalogRef.current = catalog;
@@ -75,6 +101,11 @@ export function PlayerScreen({
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
 
+  const cancelPendingResume = useCallback((): void => {
+    tuneGenRef.current += 1;
+    pendingResumeRef.current = false;
+  }, []);
+
   const tuneEntry = useCallback(
     (service: PlaybackService, entry: PlayableEntry, startMs?: number): void => {
       service.tune({
@@ -86,6 +117,37 @@ export function PlayerScreen({
       });
     },
     [],
+  );
+
+  const tuneWithResume = useCallback(
+    (service: PlaybackService, entry: PlayableEntry, explicitStartMs?: number): void => {
+      const gen = ++tuneGenRef.current;
+      pendingResumeRef.current = false;
+      if (explicitStartMs !== undefined) {
+        tuneEntry(service, entry, explicitStartMs);
+        return;
+      }
+      const startOrPromise = resolveVodStartPositionMs(entry, catalogRef.current);
+      if (!isPromiseLike(startOrPromise)) {
+        tuneEntry(service, entry, startOrPromise);
+        return;
+      }
+      pendingResumeRef.current = true;
+      void startOrPromise.then((startMs) => {
+        if (
+          !mountedRef.current ||
+          gen !== tuneGenRef.current ||
+          backgroundedRef.current ||
+          serviceRef.current !== service ||
+          activeTargetRef.current.itemKey !== entry.itemKey
+        ) {
+          return;
+        }
+        pendingResumeRef.current = false;
+        tuneEntry(service, entry, startMs);
+      });
+    },
+    [tuneEntry],
   );
 
   const zapControllerRef = useRef<ZapController | null>(null);
@@ -103,6 +165,7 @@ export function PlayerScreen({
       },
       tune: (nextTarget) => {
         if (!mountedRef.current) return;
+        cancelPendingResume();
         const svc = serviceRef.current;
         if (backgroundedRef.current) resumeOnActiveRef.current = true;
         else if (svc !== null) tuneEntry(svc, nextTarget);
@@ -122,6 +185,13 @@ export function PlayerScreen({
   zapByRef.current = zapBy;
   const hostBackRef = useRef<() => void>(() => onExitRef.current());
 
+  useEffect(() => {
+    return () => {
+      cancelPendingResume();
+      flushProgressRef.current();
+    };
+  }, [cancelPendingResume]);
+
   const { sessionState, activeService, status, tracks } = usePlayerSession({
     videoHost,
     serviceRef,
@@ -134,10 +204,20 @@ export function PlayerScreen({
       if (backgroundedRef.current) resumeOnActiveRef.current = true;
       else {
         const startMs = activeTargetRef.current.kind === 'vod' ? vodResumeMsRef.current : undefined;
-        tuneEntry(service, activeTargetRef.current, startMs);
+        tuneWithResume(service, activeTargetRef.current, startMs);
       }
     },
   });
+
+  const { flushProgress } = useWatchProgressSync({
+    activeTarget,
+    status,
+    serviceRef,
+    catalogRef,
+    clockRef,
+    timersRef,
+  });
+  flushProgressRef.current = flushProgress;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -145,6 +225,7 @@ export function PlayerScreen({
       getSourceId: () =>
         serviceRef.current?.getState().accountKey ?? activeTargetRef.current.sourceId,
       stop: () => {
+        cancelPendingResume();
         vodResumeMsRef.current = undefined;
         zapController.reset(activeTargetRef.current.playlist?.currentIndex ?? 0);
         resumeOnActiveRef.current = false;
@@ -156,22 +237,19 @@ export function PlayerScreen({
       zapController.reset(activeTargetRef.current.playlist?.currentIndex ?? 0);
       unregGuard?.();
     };
-  }, [playbackGuard, zapController]);
+  }, [cancelPendingResume, playbackGuard, zapController]);
 
   useEffect(() => {
     if (prevPropKeyRef.current === target.itemKey) {
-      const prev = activeTargetRef.current;
-      if (
-        prev.playlist !== target.playlist ||
-        prev.title !== target.title ||
-        prev.sourceId !== target.sourceId
-      ) {
+      if (hasTargetMetaChanged(activeTargetRef.current, target)) {
         zapController.sync(target.playlist?.currentIndex ?? 0);
         activeTargetRef.current = target;
         setActiveTarget(target);
       }
       return;
     }
+    flushProgressRef.current();
+    cancelPendingResume();
     prevPropKeyRef.current = target.itemKey;
     vodResumeMsRef.current = undefined;
     zapController.reset(target.playlist?.currentIndex ?? 0);
@@ -179,19 +257,22 @@ export function PlayerScreen({
     setActiveTarget(target);
     const svc = serviceRef.current;
     if (backgroundedRef.current) resumeOnActiveRef.current = true;
-    else if (svc !== null) tuneEntry(svc, target);
-  }, [target, tuneEntry, zapController]);
+    else if (svc !== null) tuneWithResume(svc, target);
+  }, [cancelPendingResume, target, tuneWithResume, zapController]);
 
   useEffect(() => {
     return appLifecycle.subscribe((lifecycleState) => {
       if (lifecycleState === 'background') {
         backgroundedRef.current = true;
         const hadPendingZap = zapController.takePendingTune();
+        const hadPendingResume = pendingResumeRef.current;
+        cancelPendingResume();
         const svc = serviceRef.current;
         if (svc === null) {
           resumeOnActiveRef.current = true;
           return;
         }
+        flushProgressRef.current();
         const { anchor, status: st } = svc.getState();
         if (activeTargetRef.current.kind === 'vod') {
           if (st.kind === 'ended') vodResumeMsRef.current = undefined;
@@ -202,7 +283,7 @@ export function PlayerScreen({
         if (st.kind !== 'idle') {
           resumeOnActiveRef.current = true;
           svc.stop();
-        } else if (hadPendingZap) {
+        } else if (hadPendingZap || hadPendingResume) {
           resumeOnActiveRef.current = true;
         }
         return;
@@ -212,10 +293,10 @@ export function PlayerScreen({
       if (resumeOnActiveRef.current && svc !== null) {
         resumeOnActiveRef.current = false;
         const startMs = activeTargetRef.current.kind === 'vod' ? vodResumeMsRef.current : undefined;
-        tuneEntry(svc, activeTargetRef.current, startMs);
+        tuneWithResume(svc, activeTargetRef.current, startMs);
       }
     });
-  }, [appLifecycle, tuneEntry, zapController]);
+  }, [appLifecycle, cancelPendingResume, tuneWithResume, zapController]);
 
   const hasTracks = tracks.audio.length > 0 || tracks.subtitles.length > 0;
   const showRetry = status.kind === 'failed' && activeService !== null;
@@ -242,6 +323,7 @@ export function PlayerScreen({
     timersRef,
     onExitRef,
     zapByRef,
+    onSeekCommit: flushProgress,
   });
   hostBackRef.current = controls.handleBack;
 

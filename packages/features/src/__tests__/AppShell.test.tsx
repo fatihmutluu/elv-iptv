@@ -21,7 +21,7 @@ import {
   useTheme,
 } from '@elv/ui-kit';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { Platform, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { AppProviders, AppShell } from '../index';
 import type { VideoHost } from '../ports/video-host';
 
@@ -204,6 +204,12 @@ describe('AppShell', () => {
         expect(screen.getByTestId('sources-open-menu')).toBeTruthy();
       });
 
+      await fireEvent.press(screen.getByTestId('nav-tab-home'));
+      await waitFor(() => {
+        expect(screen.getByTestId('home-hero')).toBeTruthy();
+        expect(screen.getByTestId('home-live-item-0')).toBeTruthy();
+      });
+
       await fireEvent.press(screen.getByTestId('nav-tab-live'));
       await waitFor(() => {
         expect(screen.getByText('1. Channel 1')).toBeTruthy();
@@ -250,6 +256,12 @@ describe('AppShell', () => {
 
       await waitFor(() => {
         expect(importSpy).toHaveBeenCalledTimes(1);
+        expect(screen.getByTestId('nav-tab-home').props.accessibilityState.selected).toBe(true);
+        expect(screen.getByTestId('home-live-item-1')).toBeTruthy();
+      });
+
+      await fireEvent.press(screen.getByTestId('nav-tab-live'));
+      await waitFor(() => {
         expect(screen.getByText('2. Channel 2')).toBeTruthy();
       });
 
@@ -330,12 +342,14 @@ describe('AppShell', () => {
 
       await fireEvent.press(screen.getByTestId('settings-lang-tr'));
       await waitFor(() => {
+        expect(screen.getByTestId('nav-tab-home')).toHaveTextContent('Ana Sayfa');
         expect(screen.getByTestId('nav-tab-live')).toHaveTextContent('Canlı');
         expect(screen.getByTestId('nav-tab-settings').props.accessibilityLabel).toBe('Ayarlar');
       });
 
       await fireEvent.press(screen.getByTestId('settings-lang-en'));
       await waitFor(() => {
+        expect(screen.getByTestId('nav-tab-home')).toHaveTextContent('Home');
         expect(screen.getByTestId('nav-tab-live')).toHaveTextContent('Live');
       });
 
@@ -401,10 +415,21 @@ describe('AppShell', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('1. Channel 1')).toBeTruthy();
+        expect(screen.getByTestId('home-live-item-0')).toBeTruthy();
       });
 
-      await fireEvent.press(screen.getByTestId('browse-items-list-row-0'));
+      // Scroll Home to frost top bar, then open Player and stop -> returning to Home at y=0 restores transparent top bar
+      expect(
+        StyleSheet.flatten(screen.getByTestId('app-top-nav').props.style).borderBottomWidth,
+      ).toBeUndefined();
+      await fireEvent.scroll(screen.getByTestId('home-scroll'), {
+        nativeEvent: { contentOffset: { x: 0, y: 80 } },
+      });
+      expect(
+        StyleSheet.flatten(screen.getByTestId('app-top-nav').props.style).borderBottomWidth,
+      ).toBe(StyleSheet.hairlineWidth);
+
+      await fireEvent.press(screen.getByTestId('home-live-item-0'));
       await waitFor(() => {
         expect(engine.openMedias()).toBe(1);
         expect(screen.getByTestId('player-osd')).toBeTruthy();
@@ -416,6 +441,9 @@ describe('AppShell', () => {
 
       expect(screen.queryByTestId('player-osd')).toBeNull();
       expect(engine.openMedias()).toBe(0);
+      expect(
+        StyleSheet.flatten(screen.getByTestId('app-top-nav').props.style).borderBottomWidth,
+      ).toBeUndefined();
     } finally {
       await view?.unmount();
       await env.cleanup();
@@ -451,13 +479,14 @@ describe('AppShell', () => {
           </RemoteKeysProvider>,
         );
 
+        expect(screen.getByTestId('nav-tab-home')).toHaveTextContent('Ana Sayfa');
         expect(screen.getByTestId('nav-tab-live')).toHaveTextContent('Canlı');
         expect(screen.getByTestId('nav-tab-movie')).toHaveTextContent('Filmler');
         expect(screen.getByTestId('nav-tab-series')).toHaveTextContent('Diziler');
         expect(screen.getByTestId('nav-tab-settings').props.accessibilityLabel).toBe('Ayarlar');
 
         if (formFactor === 'tv') {
-          // Empty catalog opens Settings -> Sources content pane; Back -> sidebar -> Back -> Top Nav -> Left -> Series
+          // Empty catalog opens Settings -> Sources content pane; Back -> sidebar -> Back -> Top Nav -> Right wraps to Home
           await act(async () => {
             keyListener?.({ action: 'down', keyCode: 4, canceled: false, ageMs: 0 });
             keyListener?.({ action: 'up', keyCode: 4, canceled: false, ageMs: 10 });
@@ -475,6 +504,13 @@ describe('AppShell', () => {
             keyListener?.({ action: 'up', keyCode: 21, canceled: false, ageMs: 50 });
           });
           expect(screen.getByTestId('nav-tab-series').props.accessibilityState.selected).toBe(true);
+          await act(async () => {
+            keyListener?.({ action: 'down', keyCode: 22, canceled: false, ageMs: 60 });
+            keyListener?.({ action: 'up', keyCode: 22, canceled: false, ageMs: 70 });
+            keyListener?.({ action: 'down', keyCode: 22, canceled: false, ageMs: 80 });
+            keyListener?.({ action: 'up', keyCode: 22, canceled: false, ageMs: 90 });
+          });
+          expect(screen.getByTestId('nav-tab-home').props.accessibilityState.selected).toBe(true);
         }
 
         await view.unmount();

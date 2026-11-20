@@ -1,7 +1,8 @@
-import type { BrowseKind, CatalogService, SourceRow } from '@elv/data';
+import type { BrowseKind, CatalogService, ItemRow, SourceRow } from '@elv/data';
 import { useI18n } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BrowseScreen, EMPTY_TAB_MEMORY, type TabBrowseMemory } from './browse';
+import { HomeScreen } from './home';
 import { ThirdPartyNoticesScreen } from './notices';
 import { PlayerScreen } from './player';
 import type { AppLifecyclePort } from './ports/app-lifecycle';
@@ -13,7 +14,9 @@ import { AdaptiveNavShell, type NavDestination, type NavUtility, usePreferences 
 import { SourcesScreen } from './sources';
 
 /** Top-level shell tab identifier. */
-export type AppTab = 'live' | 'movie' | 'series' | 'settings';
+export type AppTab = 'home' | 'live' | 'movie' | 'series' | 'settings';
+
+type PrimaryNavTab = 'home' | BrowseKind;
 
 /** Props of {@link AppShell}. */
 export interface AppShellProps {
@@ -49,11 +52,11 @@ function clearSourceFromMemory(map: BrowseMemoryMap, sourceId: string): BrowseMe
 }
 
 /**
- * Top-level Cinema Quietude application shell (`Live`, `Movies`, `Series`, consolidated `Settings`
- * utility hosting Appearance, Sources, and About & Licenses, plus full-screen `PlayerScreen`).
- * Defaults to `Settings -> Sources` when no source is configured yet, reconciles startup
- * `needsImport` sources in the background, wires `PlaybackGuard`, and preserves per-tab focus
- * memory.
+ * Top-level Cinema Quietude application shell (`Home`, `Live`, `Movies`, `Series`, consolidated
+ * `Settings` utility hosting Appearance, Sources, and About & Licenses, plus full-screen
+ * `PlayerScreen`). Defaults to `Home` when sources are configured or `Settings -> Sources` when
+ * empty, reconciles startup `needsImport` sources in the background, wires `PlaybackGuard`, and
+ * preserves per-tab focus memory.
  */
 export function AppShell({
   catalog,
@@ -68,8 +71,10 @@ export function AppShell({
   const [activeTab, setActiveTab] = useState<AppTab>('settings');
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('sources');
   const [topNavFocused, setTopNavFocused] = useState(false);
+  const [homeScrolled, setHomeScrolled] = useState(false);
   const [sources, setSources] = useState<readonly SourceRow[]>([]);
   const [refreshToken, setRefreshToken] = useState(0);
+  const [userStateVersion, setUserStateVersion] = useState(0);
   const [memoryByTab, setMemoryByTab] = useState<BrowseMemoryMap>(INITIAL_MEMORY_MAP);
   const [playTarget, setPlayTarget] = useState<PlayTarget | null>(null);
 
@@ -117,39 +122,54 @@ export function AppShell({
     onPlaybackGuardReady?.(playbackGuard);
   }, [onPlaybackGuardReady, playbackGuard]);
 
-  const observedCatalog = useMemo<CatalogService>(
-    () => ({
+  const handlePlay = useCallback((target: PlayTarget) => {
+    setHomeScrolled(false);
+    playTargetRef.current = target;
+    setPlayTarget(target);
+  }, []);
+
+  const observedCatalog = useMemo<CatalogService>(() => {
+    const c = catalog;
+    return {
       addSource: async (input) => {
-        const res = await catalog.addSource(input);
+        const res = await c.addSource(input);
         if (res.ok) await syncSourcesAndBump();
         return res;
       },
       addSourceFromLink: async (input) => {
-        const res = await catalog.addSourceFromLink(input);
+        const res = await c.addSourceFromLink(input);
         if (res.ok) await syncSourcesAndBump();
         return res;
       },
       removeSource: async (id) => {
         await playbackGuard.stopIfUsingSource(id);
-        const res = await catalog.removeSource(id);
+        const res = await c.removeSource(id);
         if (res.ok) await syncSourcesAndBump();
         return res;
       },
       importSource: async (id, opts) => {
-        const res = await catalog.importSource(id, opts);
+        const res = await c.importSource(id, opts);
         await syncSourcesAndBump();
         return res;
       },
-      listSources: () => catalog.listSources(),
-      categories: (sourceId, kind) => catalog.categories(sourceId, kind),
-      items: (categoryId, offset, limit) => catalog.items(categoryId, offset, limit),
-      seasons: (seriesId) => catalog.seasons(seriesId),
-      episodes: (seriesId, season) => catalog.episodes(seriesId, season),
-      resolveStream: (itemKey) => catalog.resolveStream(itemKey),
-      close: () => catalog.close(),
-    }),
-    [catalog, playbackGuard, syncSourcesAndBump],
-  );
+      listSources: () => c.listSources(),
+      categories: (sourceId, kind) => c.categories(sourceId, kind),
+      items: (categoryId, offset, limit) => c.items(categoryId, offset, limit),
+      seasons: (seriesId) => c.seasons(seriesId),
+      episodes: (seriesId, season) => c.episodes(seriesId, season),
+      resolveStream: (itemKey) => c.resolveStream(itemKey),
+      ...(c.saveProgress ? { saveProgress: c.saveProgress.bind(c) } : {}),
+      ...(c.setWatched ? { setWatched: c.setWatched.bind(c) } : {}),
+      ...(c.getProgress ? { getProgress: c.getProgress.bind(c) } : {}),
+      ...(c.listContinueWatching ? { listContinueWatching: c.listContinueWatching.bind(c) } : {}),
+      ...(c.listProgressByKeys ? { listProgressByKeys: c.listProgressByKeys.bind(c) } : {}),
+      ...(c.clearProgress ? { clearProgress: c.clearProgress.bind(c) } : {}),
+      ...(c.toggleFavorite ? { toggleFavorite: c.toggleFavorite.bind(c) } : {}),
+      ...(c.listFavorites ? { listFavorites: c.listFavorites.bind(c) } : {}),
+      ...(c.listFavoriteKeys ? { listFavoriteKeys: c.listFavoriteKeys.bind(c) } : {}),
+      close: () => c.close(),
+    };
+  }, [catalog, playbackGuard, syncSourcesAndBump]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: externalRefreshToken re-triggers source reconciliation
   useEffect(() => {
@@ -161,7 +181,7 @@ export function AppShell({
         setSources(initial);
         setRefreshToken((n) => n + 1);
         if (initial.length > 0 && !userPickedTabRef.current) {
-          setActiveTab('live');
+          setActiveTab('home');
           if (!userPickedSettingsSectionRef.current) {
             setSettingsSection('appearance');
           }
@@ -191,6 +211,7 @@ export function AppShell({
   const selectTab = useCallback((tab: AppTab, focusContent = true) => {
     userPickedTabRef.current = true;
     setActiveTab(tab);
+    if (tab !== 'home') setHomeScrolled(false);
     if (focusContent) setTopNavFocused(false);
   }, []);
 
@@ -212,18 +233,34 @@ export function AppShell({
     selectTab('settings', true);
   }, [selectTab]);
 
+  const openSeriesFromHome = useCallback(
+    (item: ItemRow) => {
+      setMemoryByTab((prev) => ({
+        ...prev,
+        series: {
+          ...prev.series,
+          seriesDetail: { series: item, selectedSeasonIndex: 0, selectedEpisodeIndex: 0 },
+        },
+      }));
+      selectTab('series', true);
+    },
+    [selectTab],
+  );
+
+  const homeLabel = i18n.t('nav.home');
   const liveLabel = i18n.t('nav.live');
   const moviesLabel = i18n.t('nav.movies');
   const seriesLabel = i18n.t('nav.series');
   const settingsLabel = i18n.t('nav.settings');
 
-  const destinations = useMemo<readonly NavDestination<BrowseKind>[]>(
+  const destinations = useMemo<readonly NavDestination<PrimaryNavTab>[]>(
     () => [
+      { id: 'home', label: homeLabel, icon: 'home', testID: 'nav-tab-home' },
       { id: 'live', label: liveLabel, icon: 'tv', testID: 'nav-tab-live' },
       { id: 'movie', label: moviesLabel, icon: 'film', testID: 'nav-tab-movie' },
       { id: 'series', label: seriesLabel, icon: 'series', testID: 'nav-tab-series' },
     ],
-    [liveLabel, moviesLabel, seriesLabel],
+    [homeLabel, liveLabel, moviesLabel, seriesLabel],
   );
 
   const utilities = useMemo<readonly NavUtility<'settings'>[]>(
@@ -242,7 +279,7 @@ export function AppShell({
   );
 
   const handleSelectDestination = useCallback(
-    (tab: BrowseKind) => {
+    (tab: PrimaryNavTab) => {
       selectTab(tab, false);
     },
     [selectTab],
@@ -267,6 +304,8 @@ export function AppShell({
         onExit={() => {
           playTargetRef.current = null;
           setPlayTarget(null);
+          setHomeScrolled(false);
+          setUserStateVersion((v) => v + 1);
         }}
       />
     );
@@ -284,7 +323,8 @@ export function AppShell({
       onSelectDestination={handleSelectDestination}
       navFocused={topNavFocused}
       onExitNavFocus={handleExitNavFocus}
-      frosted
+      overlay={activeTab === 'home'}
+      frosted={activeTab === 'home' ? homeScrolled : true}
       testID="app-shell"
     >
       {activeTab === 'settings' ? (
@@ -300,7 +340,7 @@ export function AppShell({
               embedded
               playbackGuard={playbackGuard}
               externalRefreshToken={externalRefreshToken + refreshToken}
-              {...(readySourcesCount > 0 ? { onOpenMenu: () => selectTab('live') } : {})}
+              {...(readySourcesCount > 0 ? { onOpenMenu: () => selectTab('home') } : {})}
               onBack={slot.onBack}
               {...(slot.onFocusTopNav !== undefined ? { onFocusTopNav: slot.onFocusTopNav } : {})}
               isActiveScope={slot.isActiveScope}
@@ -314,6 +354,20 @@ export function AppShell({
               isActiveScope={slot.isActiveScope}
             />
           )}
+        />
+      ) : activeTab === 'home' ? (
+        <HomeScreen
+          catalog={observedCatalog}
+          sources={sources}
+          refreshToken={refreshToken}
+          userStateVersion={userStateVersion}
+          onPlay={handlePlay}
+          onOpenTab={(tab) => selectTab(tab)}
+          onOpenSeries={openSeriesFromHome}
+          onOpenSources={openSources}
+          onScrollTopChange={setHomeScrolled}
+          onFocusTopNav={() => setTopNavFocused(true)}
+          isActiveScope={!topNavFocused}
         />
       ) : (
         <BrowseScreen
@@ -329,10 +383,7 @@ export function AppShell({
               [activeTab]: next,
             }))
           }
-          onPlay={(target) => {
-            playTargetRef.current = target;
-            setPlayTarget(target);
-          }}
+          onPlay={handlePlay}
           onOpenSources={openSources}
           onFocusTopNav={() => setTopNavFocused(true)}
           isActiveScope={!topNavFocused}

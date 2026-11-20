@@ -12,6 +12,7 @@ export interface IconButtonProps {
   size?: number;
   onPress?: () => void;
   disabled?: boolean;
+  focusable?: boolean;
   focused?: boolean;
   testID?: string;
   style?: StyleProp<ViewStyle>;
@@ -37,6 +38,7 @@ export function IconButton({
   size = 40,
   onPress,
   disabled = false,
+  focusable,
   focused,
   testID,
   style,
@@ -67,7 +69,7 @@ export function IconButton({
       accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled, selected: active }}
       disabled={disabled}
-      focusable={!disabled}
+      focusable={focusable ?? !disabled}
       onPress={onPress}
       onFocus={handleFocus}
       onBlur={handleBlur}

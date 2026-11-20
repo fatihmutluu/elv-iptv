@@ -55,6 +55,11 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
 
     await expect(window.getByTestId('sources-open-menu')).toBeVisible({ timeout: 20_000 });
 
+    await window.getByTestId('nav-tab-home').click();
+    await expect(window.getByTestId('home-hero')).toBeVisible();
+    await window.getByTestId('home-hero-mylist').click();
+    await expect(window.getByTestId('home-rail-mylist')).toBeVisible();
+
     await window.getByTestId('nav-tab-live').click();
     await expect(window.getByTestId('browse-categories-list')).toBeVisible();
     const row0 = window.getByTestId('browse-items-list-row-0');

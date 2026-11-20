@@ -13,3 +13,4 @@ export * from './source-link';
 export * from './sources';
 export * from './stream-resolver';
 export * from './templates';
+export * from './user-state';

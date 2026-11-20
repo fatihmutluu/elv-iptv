@@ -1,7 +1,7 @@
 import type { SqlDriver } from '@elv/domain';
 import { describe, expect, it } from 'vitest';
 import { openCatalog, SCHEMA_VERSION } from './migrate';
-import { EXPECTED_TABLE_COLUMNS } from './schema';
+import { EXPECTED_TABLE_COLUMNS, MIGRATIONS } from './schema';
 import { tempFileDb, testDb } from './test-db';
 
 const TABLES = [
@@ -17,6 +17,8 @@ const TABLES = [
   'channel_guide',
   'programmes',
   'programmes_next',
+  'watch_progress',
+  'favorites',
 ];
 
 async function names(db: SqlDriver, type: 'table' | 'index') {
@@ -33,15 +35,43 @@ async function plan(db: SqlDriver, sql: string, params: (string | number)[]) {
 }
 
 describe('openCatalog', () => {
-  it('creates schema v1 on a fresh database', async () => {
+  it('creates schema v2 on a fresh database', async () => {
     const { db } = testDb();
-    expect(SCHEMA_VERSION).toBe(1);
+    expect(SCHEMA_VERSION).toBe(2);
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 1 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 2 }]);
     expect(await names(db, 'table')).toEqual([...TABLES].sort());
     expect(await names(db, 'index')).toEqual(
-      expect.arrayContaining(['idx_placements_browse', 'idx_live_num', 'idx_import_runs_source']),
+      expect.arrayContaining([
+        'idx_placements_browse',
+        'idx_live_num',
+        'idx_import_runs_source',
+        'idx_watch_progress_recent',
+        'idx_watch_progress_source',
+        'idx_favorites_recent',
+        'idx_favorites_source',
+      ]),
     );
+  });
+
+  it('upgrades a v1 database to v2 while preserving existing catalog rows', async () => {
+    const { db } = testDb();
+    await db.exec(MIGRATIONS[0] ?? '');
+    await db.exec('PRAGMA user_version = 1');
+    await db.run(
+      "INSERT INTO sources (id, kind, name, created_at, settings_json) VALUES ('s1','m3u','Main',100,'{}')",
+    );
+    await db.run(
+      "INSERT INTO movies (source_id, key, name, name_fold, run_id) VALUES ('s1', 'm:s1:1', 'Silent Horizon', 'silent horizon', 1)",
+    );
+
+    expect((await openCatalog(db)).ok).toBe(true);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 2 }]);
+    expect(await db.all('SELECT id, name FROM sources')).toEqual([{ id: 's1', name: 'Main' }]);
+    expect(await db.all('SELECT key, name FROM movies')).toEqual([
+      { key: 'm:s1:1', name: 'Silent Horizon' },
+    ]);
+    expect(await names(db, 'table')).toEqual([...TABLES].sort());
   });
 
   it('is a no-op the second time', async () => {
@@ -52,7 +82,7 @@ describe('openCatalog', () => {
     );
     expect((await openCatalog(db)).ok).toBe(true);
     expect(await db.all('SELECT count(*) AS n FROM sources')).toEqual([{ n: 1 }]);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 1 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 2 }]);
   });
 
   it('applies pragmas, with WAL on file databases', async () => {
@@ -96,7 +126,7 @@ describe('openCatalog', () => {
 
   it('refuses a database written by a newer version', async () => {
     const { db } = testDb();
-    await db.exec('PRAGMA user_version = 2');
+    await db.exec('PRAGMA user_version = 3');
     const r = await openCatalog(db);
     expect(r).toMatchObject({ ok: false, error: { category: 'storage', code: 'schema-too-new' } });
     expect(await names(db, 'table')).toEqual([]);
@@ -146,6 +176,30 @@ describe('openCatalog', () => {
       ['s'],
     );
     expect(runs).toContain('idx_import_runs_source');
+    const recentProgress = await plan(
+      db,
+      'SELECT item_key FROM watch_progress WHERE profile_id = ? AND watched = 0 AND position_ms >= ? ORDER BY updated_at DESC LIMIT ?',
+      ['default', 10_000, 20],
+    );
+    expect(recentProgress).toContain('idx_watch_progress_recent');
+    expect(recentProgress).not.toMatch(/TEMP B-TREE/);
+    const progressBySource = await plan(
+      db,
+      'SELECT item_key FROM watch_progress WHERE source_id = ?',
+      ['s'],
+    );
+    expect(progressBySource).toContain('idx_watch_progress_source');
+    const recentFavorites = await plan(
+      db,
+      'SELECT item_key FROM favorites WHERE profile_id = ? ORDER BY added_at DESC LIMIT ?',
+      ['default', 20],
+    );
+    expect(recentFavorites).toContain('idx_favorites_recent');
+    expect(recentFavorites).not.toMatch(/TEMP B-TREE/);
+    const favoritesBySource = await plan(db, 'SELECT item_key FROM favorites WHERE source_id = ?', [
+      's',
+    ]);
+    expect(favoritesBySource).toContain('idx_favorites_source');
   });
 
   it('keeps EXPECTED_TABLE_COLUMNS aligned with every table and column in MIGRATIONS', async () => {

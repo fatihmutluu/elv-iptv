@@ -92,6 +92,7 @@ describe('AppShell Settings -> About & Licenses', () => {
           </FormFactorProvider>,
         );
 
+        expect(screen.getByTestId('nav-tab-home')).toBeTruthy();
         expect(screen.getByTestId('nav-tab-settings').props.accessibilityLabel).toBe('Settings');
         expect(screen.getByTestId('nav-tab-settings').props.accessibilityState.selected).toBe(true);
 

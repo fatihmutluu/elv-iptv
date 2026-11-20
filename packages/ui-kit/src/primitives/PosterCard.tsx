@@ -1,4 +1,4 @@
-import { type ReactElement, useCallback, useState } from 'react';
+import { memo, type ReactElement, useCallback, useState } from 'react';
 import { Pressable, type StyleProp, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { TABULAR_NUMS_STYLE, useTheme, webCursorPointer, webShadow, webTransition } from '../theme';
 import { useViewport } from '../viewport';
@@ -16,8 +16,11 @@ export interface PosterCardProps {
   badge?: string;
   onPress?: () => void;
   onFocus?: () => void;
+  focusable?: boolean;
   focused?: boolean;
   width?: number;
+  /** Caps decoded poster dimensions on native targets via `ArtworkImage` (defaults to `320`). */
+  maxDecodePx?: number;
   deadHosts?: DeadHostRegistry;
   testID?: string;
   style?: StyleProp<ViewStyle>;
@@ -56,12 +59,7 @@ function scaleFont(size: number, fontScale: number): number {
   return Math.round(size * fontScale * 2) / 2;
 }
 
-/**
- * Pure-artwork vertical catalog card (`2:3` default) for Movies, Series, My List, and More Like
- * This rails (`UI_UX_PHILOSOPHY.md` §1). Never wraps poster + title in a boxed container and never
- * duplicates title copy over the artwork.
- */
-export function PosterCard({
+function PosterCardInner({
   title,
   meta,
   imageUri,
@@ -70,8 +68,10 @@ export function PosterCard({
   badge,
   onPress,
   onFocus,
+  focusable = true,
   focused,
   width,
+  maxDecodePx = 320,
   deadHosts,
   testID,
   style,
@@ -104,7 +104,7 @@ export function PosterCard({
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={meta ? `${title}, ${meta}` : title}
-      focusable
+      focusable={focusable}
       onPress={onPress}
       onFocus={handleFocus}
       onBlur={handleBlur}
@@ -158,6 +158,7 @@ export function PosterCard({
                   uri={imageUri}
                   label={title}
                   aspectRatio={aspectRatio}
+                  maxDecodePx={maxDecodePx}
                   borderRadius={theme.radius.card}
                   zoomed={showPointerHover}
                   {...(deadHosts !== undefined ? { deadHosts } : {})}
@@ -267,6 +268,14 @@ export function PosterCard({
     </Pressable>
   );
 }
+
+/**
+ * Pure-artwork vertical catalog card (`2:3` default) for Movies, Series, My List, and More Like
+ * This rails (`UI_UX_PHILOSOPHY.md` §1). Never wraps poster + title in a boxed container and never
+ * duplicates title copy over the artwork.
+ */
+export const PosterCard = memo(PosterCardInner);
+PosterCard.displayName = 'PosterCard';
 
 const styles = StyleSheet.create({
   artworkShadow: {

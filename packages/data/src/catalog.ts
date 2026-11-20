@@ -36,6 +36,21 @@ import {
   type XtreamSourceInput,
 } from './sources';
 import { createPlaytimeResolverCache, type StreamRequest } from './stream-resolver';
+import {
+  clearWatchProgress,
+  type FavoriteRow,
+  getWatchProgress,
+  listContinueWatching,
+  listFavoriteKeys,
+  listFavorites,
+  listProgressByKeys,
+  type SaveProgressInput,
+  saveWatchProgress,
+  setItemWatched,
+  type ToggleFavoriteInput,
+  toggleFavorite,
+  type WatchProgressRow,
+} from './user-state';
 
 export type { StreamRequest };
 
@@ -95,6 +110,15 @@ export interface CatalogService {
   seasons(seriesId: number): Promise<Result<SeasonRow[]>>;
   episodes(seriesId: number, season: number): Promise<EpisodeRow[]>;
   resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
+  saveProgress?(input: SaveProgressInput): Promise<Result<WatchProgressRow>>;
+  setWatched?(itemKey: string, watched: boolean, profileId?: string): Promise<Result<void>>;
+  getProgress?(itemKey: string, profileId?: string): Promise<WatchProgressRow | null>;
+  listContinueWatching?(limit?: number, profileId?: string): Promise<WatchProgressRow[]>;
+  listProgressByKeys?(itemKeys: readonly string[], profileId?: string): Promise<WatchProgressRow[]>;
+  clearProgress?(itemKey: string, profileId?: string): Promise<Result<void>>;
+  toggleFavorite?(input: ToggleFavoriteInput): Promise<Result<boolean>>;
+  listFavorites?(limit?: number, profileId?: string): Promise<FavoriteRow[]>;
+  listFavoriteKeys?(profileId?: string): Promise<string[]>;
   close(): Promise<void>;
 }
 
@@ -302,6 +326,38 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     },
 
     resolveStream: (itemKey) => playtime.resolveStream(itemKey),
+
+    async saveProgress(input) {
+      const saved = await saveWatchProgress(db, input, clock);
+      if (!saved.ok) return saved;
+      const [resolved] = await playtime.resolveRowLogos([saved.value]);
+      return ok(resolved ?? saved.value);
+    },
+
+    setWatched: (itemKey, watched, profileId) =>
+      setItemWatched(db, itemKey, watched, clock, profileId),
+
+    async getProgress(itemKey, profileId) {
+      const found = await getWatchProgress(db, itemKey, profileId);
+      if (found === null) return null;
+      const [resolved] = await playtime.resolveRowLogos([found]);
+      return resolved ?? found;
+    },
+
+    listContinueWatching: async (limit, profileId) =>
+      playtime.resolveRowLogos(await listContinueWatching(db, limit, profileId)),
+
+    listProgressByKeys: async (itemKeys, profileId) =>
+      playtime.resolveRowLogos(await listProgressByKeys(db, itemKeys, profileId)),
+
+    clearProgress: (itemKey, profileId) => clearWatchProgress(db, itemKey, profileId),
+
+    toggleFavorite: (input) => toggleFavorite(db, input, clock),
+
+    listFavorites: async (limit, profileId) =>
+      playtime.resolveRowLogos(await listFavorites(db, limit, profileId)),
+
+    listFavoriteKeys: (profileId) => listFavoriteKeys(db, profileId),
 
     close() {
       if (closePromise !== undefined) return closePromise;

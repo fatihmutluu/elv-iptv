@@ -3,13 +3,18 @@ import type {
   BrowseKind,
   CategoryRow,
   EpisodeRow,
+  FavoriteRow,
   ImportProgress,
   ImportSummary,
   ItemRow,
   LinkSourceInput,
+  SaveProgressInput,
   SeasonRow,
   SourceRow,
   StreamRequest,
+  ToggleFavoriteInput,
+  UserItemKind,
+  WatchProgressRow,
 } from '@elv/data';
 import type { ElvError, ErrorCategory, Result, TransportSettings } from '@elv/domain';
 
@@ -54,7 +59,16 @@ export type CatalogRpcMethodCall =
   | { method: 'items'; categoryId: string; offset: number; limit: number }
   | { method: 'seasons'; seriesId: number }
   | { method: 'episodes'; seriesId: number; season: number }
-  | { method: 'resolveStream'; itemKey: string };
+  | { method: 'resolveStream'; itemKey: string }
+  | { method: 'saveProgress'; input: SaveProgressInput }
+  | { method: 'setWatched'; itemKey: string; watched: boolean; profileId?: string }
+  | { method: 'getProgress'; itemKey: string; profileId?: string }
+  | { method: 'listContinueWatching'; limit?: number; profileId?: string }
+  | { method: 'listProgressByKeys'; itemKeys: readonly string[]; profileId?: string }
+  | { method: 'clearProgress'; itemKey: string; profileId?: string }
+  | { method: 'toggleFavorite'; input: ToggleFavoriteInput }
+  | { method: 'listFavorites'; limit?: number; profileId?: string }
+  | { method: 'listFavoriteKeys'; profileId?: string };
 
 /** Preload to utility process over `MessagePort`. */
 export type CatalogClientMessage =
@@ -94,12 +108,27 @@ export interface CatalogBridge {
   seasons(seriesId: number): Promise<Result<SeasonRow[]>>;
   episodes(seriesId: number, season: number): Promise<EpisodeRow[]>;
   resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
+  saveProgress(input: SaveProgressInput): Promise<Result<WatchProgressRow>>;
+  setWatched(itemKey: string, watched: boolean, profileId?: string): Promise<Result<void>>;
+  getProgress(itemKey: string, profileId?: string): Promise<WatchProgressRow | null>;
+  listContinueWatching(limit?: number, profileId?: string): Promise<WatchProgressRow[]>;
+  listProgressByKeys(itemKeys: readonly string[], profileId?: string): Promise<WatchProgressRow[]>;
+  clearProgress(itemKey: string, profileId?: string): Promise<Result<void>>;
+  toggleFavorite(input: ToggleFavoriteInput): Promise<Result<boolean>>;
+  listFavorites(limit?: number, profileId?: string): Promise<FavoriteRow[]>;
+  listFavoriteKeys(profileId?: string): Promise<string[]>;
   onChanged(listener: () => void): () => void;
   close(): Promise<void>;
 }
 
 const MAX_STRING_CHARS = 8_192;
 const MAX_ID_CHARS = 256;
+const MAX_ITEM_KEY_CHARS = 1_024;
+const MAX_TITLE_CHARS = 512;
+const MAX_PROFILE_ID_CHARS = 128;
+const MAX_USER_LIST_LIMIT = 100;
+const MAX_PROGRESS_KEYS = 200;
+const USER_ITEM_KINDS = new Set<UserItemKind>(['live', 'movie', 'series', 'episode']);
 const ERROR_CATEGORIES = new Set<ErrorCategory>([
   'network',
   'auth',
@@ -118,10 +147,17 @@ const IMPORT_PHASES = new Set<ImportProgress['phase']>([
   'cleanup',
 ]);
 
-const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null;
+const isRecord = (x: unknown): x is Record<string, unknown> =>
+  typeof x === 'object' &&
+  x !== null &&
+  !Array.isArray(x) &&
+  !Object.hasOwn(x, '__proto__') &&
+  !Object.hasOwn(x, 'constructor') &&
+  !Object.hasOwn(x, 'prototype');
 const isPositiveId = (x: unknown): x is number => Number.isSafeInteger(x) && (x as number) > 0;
 const isSafeInt = (x: unknown): x is number => Number.isSafeInteger(x);
 const isFiniteNumber = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
+const isNonNegativeFinite = (x: unknown): x is number => isFiniteNumber(x) && x >= 0;
 const isBoundedString = (x: unknown, min = 0, max = MAX_STRING_CHARS): x is string =>
   typeof x === 'string' && x.length >= min && x.length <= max;
 
@@ -143,6 +179,66 @@ function isOptionalCleanString(x: unknown): boolean {
 
 function isOptionalTrimmedCleanString(x: unknown): boolean {
   return x === undefined || isTrimmedCleanString(x);
+}
+
+const isCleanKey = (x: unknown, max = MAX_ITEM_KEY_CHARS): x is string =>
+  isBoundedString(x, 1, max) && !hasControlChar(x);
+const isOptionalProfileId = (x: unknown): boolean =>
+  x === undefined || isCleanKey(x, MAX_PROFILE_ID_CHARS);
+const isOptionalUserLimit = (x: unknown): boolean =>
+  x === undefined || (isSafeInt(x) && x >= 0 && x <= MAX_USER_LIST_LIMIT);
+const isOptionalNullableBoundedString = (x: unknown, max: number): boolean =>
+  x === undefined || x === null || isBoundedString(x, 0, max);
+const isOptionalNullableCleanString = (x: unknown, max: number): boolean =>
+  isOptionalNullableBoundedString(x, max) && (typeof x !== 'string' || !hasControlChar(x));
+const isOptionalNullableSafeInt = (x: unknown): boolean =>
+  x === undefined || x === null || isSafeInt(x);
+const isOptionalNullableNonNegInt = (x: unknown): boolean =>
+  x === undefined || x === null || (isSafeInt(x) && x >= 0);
+const isOptionalNullableFinite = (x: unknown): boolean =>
+  x === undefined || x === null || isFiniteNumber(x);
+const isUserItemKind = (x: unknown): x is UserItemKind =>
+  typeof x === 'string' && USER_ITEM_KINDS.has(x as UserItemKind);
+
+function isSaveProgressInput(x: unknown): x is SaveProgressInput {
+  return (
+    isRecord(x) &&
+    isOptionalProfileId(x['profileId']) &&
+    isCleanKey(x['sourceId'], MAX_ID_CHARS) &&
+    isCleanKey(x['itemKey']) &&
+    isUserItemKind(x['kind']) &&
+    isBoundedString(x['title'], 1, MAX_TITLE_CHARS) &&
+    isOptionalNullableBoundedString(x['subtitle'], MAX_TITLE_CHARS) &&
+    isOptionalNullableCleanString(x['logo'], MAX_STRING_CHARS) &&
+    isOptionalNullableCleanString(x['seriesKey'], MAX_ITEM_KEY_CHARS) &&
+    isOptionalNullableNonNegInt(x['season']) &&
+    isOptionalNullableNonNegInt(x['episode']) &&
+    isNonNegativeFinite(x['positionMs']) &&
+    isNonNegativeFinite(x['durationMs']) &&
+    (x['watched'] === undefined || typeof x['watched'] === 'boolean')
+  );
+}
+
+function isToggleFavoriteInput(x: unknown): x is ToggleFavoriteInput {
+  return (
+    isRecord(x) &&
+    isOptionalProfileId(x['profileId']) &&
+    isCleanKey(x['sourceId'], MAX_ID_CHARS) &&
+    isCleanKey(x['itemKey']) &&
+    isUserItemKind(x['kind']) &&
+    isBoundedString(x['title'], 1, MAX_TITLE_CHARS) &&
+    isOptionalNullableCleanString(x['logo'], MAX_STRING_CHARS) &&
+    isOptionalNullableSafeInt(x['year']) &&
+    isOptionalNullableFinite(x['rating'])
+  );
+}
+
+function isItemKeyList(x: unknown): x is readonly string[] {
+  return (
+    Array.isArray(x) &&
+    x.length <= MAX_PROGRESS_KEYS &&
+    x.every((k) => isCleanKey(k, MAX_ITEM_KEY_CHARS))
+  );
 }
 
 function isTransportSettings(x: unknown): x is TransportSettings {
@@ -218,7 +314,27 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
     case 'episodes':
       return isSafeInt(x['seriesId']) && isSafeInt(x['season']);
     case 'resolveStream':
-      return isBoundedString(x['itemKey'], 0, 1024);
+      return isBoundedString(x['itemKey'], 0, MAX_ITEM_KEY_CHARS);
+    case 'saveProgress':
+      return isSaveProgressInput(x['input']);
+    case 'setWatched':
+      return (
+        isCleanKey(x['itemKey']) &&
+        typeof x['watched'] === 'boolean' &&
+        isOptionalProfileId(x['profileId'])
+      );
+    case 'getProgress':
+    case 'clearProgress':
+      return isCleanKey(x['itemKey']) && isOptionalProfileId(x['profileId']);
+    case 'listContinueWatching':
+    case 'listFavorites':
+      return isOptionalUserLimit(x['limit']) && isOptionalProfileId(x['profileId']);
+    case 'listProgressByKeys':
+      return isItemKeyList(x['itemKeys']) && isOptionalProfileId(x['profileId']);
+    case 'toggleFavorite':
+      return isToggleFavoriteInput(x['input']);
+    case 'listFavoriteKeys':
+      return isOptionalProfileId(x['profileId']);
     default:
       return false;
   }

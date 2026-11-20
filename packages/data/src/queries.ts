@@ -264,3 +264,66 @@ export async function queryPlayable(db: SqlDriver, key: string): Promise<Playabl
     headersJson: r.headers_json,
   };
 }
+
+/**
+ * Looks up the raw stored `logo` / `cover` template for an item in the catalog tables
+ * (`live`, `movies`, `series`, or parent `series.cover` for `episode`), so user-state writes
+ * never persist secret-resolved M3U logo URLs into SQLite.
+ */
+async function queryItemLogoTemplate(
+  db: SqlDriver,
+  ref: {
+    sourceId: string;
+    kind: BrowseKind | 'episode';
+    itemKey: string;
+    seriesKey?: string | null;
+  },
+): Promise<{ found: true; logo: string | null } | { found: false }> {
+  if (ref.kind === 'episode') {
+    const ep = await db.all<{ logo: string | null }>(
+      `SELECT s.cover AS logo
+         FROM episodes e
+         LEFT JOIN series s ON s.source_id = e.source_id AND s.key = e.series_key
+        WHERE e.source_id = ? AND e.key = ? LIMIT 1`,
+      [ref.sourceId, ref.itemKey],
+    );
+    if (ep[0] !== undefined) return { found: true, logo: ep[0].logo };
+    if (ref.seriesKey) {
+      const ser = await db.all<{ logo: string | null }>(
+        'SELECT cover AS logo FROM series WHERE source_id = ? AND key = ? LIMIT 1',
+        [ref.sourceId, ref.seriesKey],
+      );
+      if (ser[0] !== undefined) return { found: true, logo: ser[0].logo };
+    }
+    return { found: false };
+  }
+  const col = ref.kind === 'series' ? 'cover' : 'logo';
+  const rows = await db.all<{ logo: string | null }>(
+    `SELECT ${col} AS logo FROM ${ITEM_TABLE[ref.kind]} WHERE source_id = ? AND key = ? LIMIT 1`,
+    [ref.sourceId, ref.itemKey],
+  );
+  return rows[0] === undefined ? { found: false } : { found: true, logo: rows[0].logo };
+}
+
+/**
+ * Resolves the safe `logo` value to persist into `watch_progress` or `favorites`: prefers the raw
+ * catalog template when present and refuses caller-supplied logos for M3U sources so resolved
+ * credentials never enter SQLite.
+ */
+export async function resolveSafeStorageLogo(
+  db: SqlDriver,
+  input: {
+    sourceId: string;
+    itemKey: string;
+    kind: BrowseKind | 'episode';
+    seriesKey?: string | null;
+    logo?: string | null;
+  },
+): Promise<string | null> {
+  const fromCatalog = await queryItemLogoTemplate(db, input);
+  if (fromCatalog.found) return fromCatalog.logo;
+  const src = await db.all<{ kind: string }>('SELECT kind FROM sources WHERE id = ? LIMIT 1', [
+    input.sourceId,
+  ]);
+  return src[0]?.kind === 'm3u' ? null : (input.logo ?? null);
+}
