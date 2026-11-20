@@ -1,17 +1,34 @@
 import { AppShell, createLazyCatalog, type VideoHost } from '@elv/features';
 import { createAppI18n, resolveLocale } from '@elv/i18n';
 import { FormFactorProvider, I18nProvider } from '@elv/ui-kit';
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { createDesktopCatalog } from './catalog/index.ts';
 import { GateScreen } from './gate/GateScreen.tsx';
 import { resolveGate } from './gate/params.ts';
 import { createDesktopEngine } from './player/desktop-engine.ts';
 import { dispatchDesktopClose, routeDesktopUiEvent } from './player/host-keys.ts';
 import { PlayerView } from './player/PlayerView.tsx';
+import { shouldMountWorkbench } from './workbench/presets.ts';
+
+declare const __DEV__: boolean;
 
 // Computed once: a re-render must never hand the gate new params, which would restart the run. Main loads the query only
 // for an unpackaged `--elv-gate=` launch, and the preload flags gate mode; a page with just the query gets no gate.
 const GATE = resolveGate(window.location.search, window.elv);
+const IS_DEV = typeof __DEV__ !== 'undefined' && __DEV__;
+const MOUNT_WORKBENCH =
+  IS_DEV &&
+  shouldMountWorkbench({
+    isDev: IS_DEV,
+    hasGate: GATE !== undefined,
+    hasElectronBridge: window.elv !== undefined,
+    search: window.location.search,
+  });
+const WorkbenchShell = IS_DEV
+  ? lazy(() =>
+      import('./workbench/WorkbenchShell.tsx').then((m) => ({ default: m.WorkbenchShell })),
+    )
+  : null;
 
 function isTrackPickerModalOpen(): boolean {
   return (
@@ -70,8 +87,15 @@ function AppRoot() {
   );
 }
 
-/** Root of the desktop renderer: mounts the gate harness on `--elv-gate=` launches and `AppShell` (#13) otherwise. */
+/** Root of the desktop renderer: mounts the gate harness on `--elv-gate=`, the dev-only UI Workbench in plain browser dev mode, and `AppShell` (#13) otherwise. */
 export function App() {
   if (GATE) return <GateScreen params={GATE} />;
+  if (MOUNT_WORKBENCH && WorkbenchShell !== null) {
+    return (
+      <Suspense fallback={null}>
+        <WorkbenchShell />
+      </Suspense>
+    );
+  }
   return <AppRoot />;
 }

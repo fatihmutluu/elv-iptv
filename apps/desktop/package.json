@@ -16,6 +16,7 @@
     "bundle:e2e": "esbuild e2e/presenter-probe.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/e2e/presenter-probe.js --log-level=warning",
     "prepare:app": "pnpm -w mpv fetch && pnpm --filter @elv/desktop-renderer --silent run export && pnpm run bundle",
     "dev": "pnpm run prepare:app && electron .",
+    "dev:hot": "node scripts/dev-hot.mjs",
     "build": "pnpm run prepare:app && electron-builder --publish never",
     "test": "vitest run --coverage --reporter=dot",
     "test:e2e": "pnpm run prepare:app && pnpm run bundle:e2e && playwright test --reporter=line",

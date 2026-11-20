@@ -5,6 +5,7 @@
   "license": "GPL-3.0-only",
   "main": "index.ts",
   "scripts": {
+    "dev:ui": "expo start --web --port 8081",
     "export": "expo export -p web --output-dir ../dist/renderer",
     "test": "vitest run --coverage --reporter=dot",
     "typecheck": "tsc --noEmit -p . --pretty false"

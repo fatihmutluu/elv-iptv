@@ -27,6 +27,7 @@ import {
   createEncryptedFileSecretStore,
   createSafeStorageCipher,
 } from './catalog/secret-store.ts';
+import { parseDevServerUrl } from './dev-server.ts';
 import {
   createVideoSampler,
   GATE_PLAYING_LINE,
@@ -53,6 +54,10 @@ declare const __ELV_DEV_SEED__: boolean;
 const rendererDir = join(__dirname, '..', 'renderer');
 
 const gateQuery = parseGateFlag(process.argv, app.isPackaged);
+const devServerOrigin =
+  gateQuery !== null
+    ? null
+    : parseDevServerUrl(process.env.ELV_DEV_SERVER_URL, { isPackaged: app.isPackaged });
 if (gateQuery !== null) {
   const gateDir = join(app.getPath('temp'), 'elv-gate');
   try {
@@ -102,17 +107,21 @@ function serveRenderer(): void {
 
 function createWindow(): void {
   const isGate = gateQuery !== null;
-  const targetUrl = isGate ? `${APP_ORIGIN}/?${gateQuery}` : `${APP_ORIGIN}/`;
+  const appEntryUrl = devServerOrigin !== null ? `${devServerOrigin}/` : `${APP_ORIGIN}/`;
+  const targetUrl = isGate ? `${APP_ORIGIN}/?${gateQuery}` : appEntryUrl;
   const window = new BrowserWindow(
     buildWindowOptions(join(__dirname, '..', 'preload', 'preload.js'), {
       gate: isGate,
     }),
   );
   window.setMenuBarVisibility(false);
-  lockDownWebContents(window.webContents);
+  lockDownWebContents(
+    window.webContents,
+    devServerOrigin !== null ? { devOrigin: devServerOrigin } : undefined,
+  );
   attachRendererCrashRecovery(window, {
     gate: isGate,
-    reloadUrl: `${APP_ORIGIN}/`,
+    reloadUrl: appEntryUrl,
     log: (line) => process.stderr.write(`${line}\n`),
   });
   window.on('page-title-updated', (event) => event.preventDefault());

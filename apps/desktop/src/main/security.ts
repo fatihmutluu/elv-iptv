@@ -1,4 +1,5 @@
 import { APP_SCHEME } from './app-protocol.ts';
+import { isAllowedDevNavigation } from './dev-server.ts';
 
 const CANONICAL_NAVIGATION = /^app:\/\/elv(?:[/?#]|$)/i;
 
@@ -51,12 +52,22 @@ export function isAllowedAppNavigation(requestUrl: string): boolean {
   );
 }
 
-/** Blocks new windows and any top-level, redirect, or subframe navigation away from `app://elv`. */
-export function lockDownWebContents(contents: WebContentsGuardTarget): void {
+/**
+ * Blocks new windows and any top-level, redirect, or subframe navigation away from `app://elv`
+ * (or `opts.devOrigin` when unpackaged Metro Fast Refresh is active).
+ */
+export function lockDownWebContents(
+  contents: WebContentsGuardTarget,
+  opts?: { devOrigin?: string | null },
+): void {
+  const devOrigin = opts?.devOrigin ?? null;
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
   const guard = (details: NavigationEventLike, legacyUrl?: string) => {
     const target = details.url ?? legacyUrl ?? '';
-    if (!isAllowedAppNavigation(target)) details.preventDefault();
+    const allowed =
+      isAllowedAppNavigation(target) ||
+      (devOrigin !== null && devOrigin !== '' && isAllowedDevNavigation(target, devOrigin));
+    if (!allowed) details.preventDefault();
   };
   contents.on('will-navigate', guard);
   contents.on('will-redirect', guard);
