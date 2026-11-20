@@ -19,7 +19,8 @@ export function detectFormFactor(input: {
   return 'phone';
 }
 
-const FormFactorContext = createContext<FormFactor | undefined>(undefined);
+/** Internal React context carrying the active {@link FormFactor} override. */
+export const FormFactorContext = createContext<FormFactor | undefined>(undefined);
 
 /** Supplies the active {@link FormFactor} (or an explicit test/container override) to descendants. */
 export function FormFactorProvider({

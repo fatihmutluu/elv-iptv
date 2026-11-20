@@ -14,7 +14,8 @@ Screens and view models, one folder per feature, with ports for platform service
 - Never imports `modules/*`, `apps/*`, `expo-*`, navigation libraries or another feature's folder (`no-feature-to-feature`).
 - Platform services (`PlaybackGuard`, `VideoHost`, `AppLifecyclePort`, `PlayTarget`) live under `src/ports/`.
 - Source-first: `exports` points at `src/index.ts`; every focusable control carries a deterministic `testID` and `accessibilityLabel`.
-- `src/AppShell.tsx` composes `Live`, `Movies`, `Series`, `Sources`, `Notices`, and `PlayerScreen` (`#13`, `#98`).
+- `src/AppShell.tsx` composes `Live`, `Movies`, `Series`, `Sources`, `Notices`, and `PlayerScreen` via `AdaptiveNavShell` (`#13`, `#98`).
+- `src/shell/` owns config-driven `AdaptiveNavShell` (`NavDestination`, `NavUtility`, Portrait bottom tabs / Landscape frosted top bar / TV D-pad traversal) and root `AppProviders` + `usePreferences` (preferences hydration, live i18n locale switching without remount `#16`, theme sync, `TvRemoteProvider`, `ErrorBoundary`).
 - `src/browse/` owns `BrowseScreen`, `SeriesDetailPane`, `createPagedListSource` (LRU-paged `ListSource`), and browse models (`#13`).
 - `src/notices/` owns `ThirdPartyNoticesScreen` and generated `THIRD_PARTY_NOTICES` (`#98`).
 - `src/player/` owns `PlayerScreen` (`useEffect` engine lifecycle, background stop, live channel zapping, VOD pause/step/hold-seek controls), `VodProgressBar` (`ClockAnchor` leaf extrapolation), `TrackPickerModal` + `formatTrackLabel` (`#73`), and `describePlaybackFailure` (`#13`).

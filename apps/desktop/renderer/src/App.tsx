@@ -1,6 +1,5 @@
-import { AppShell, createLazyCatalog, type VideoHost } from '@elv/features';
-import { createAppI18n, resolveLocale } from '@elv/i18n';
-import { FormFactorProvider, I18nProvider } from '@elv/ui-kit';
+import { AppProviders, AppShell, createLazyCatalog, type VideoHost } from '@elv/features';
+import { resolveLocale } from '@elv/i18n';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { createDesktopCatalog } from './catalog/index.ts';
 import { GateScreen } from './gate/GateScreen.tsx';
@@ -8,6 +7,7 @@ import { resolveGate } from './gate/params.ts';
 import { createDesktopEngine } from './player/desktop-engine.ts';
 import { dispatchDesktopClose, routeDesktopUiEvent } from './player/host-keys.ts';
 import { PlayerView } from './player/PlayerView.tsx';
+import { createDesktopPreferencesStore } from './storage/preferences.ts';
 import { shouldMountWorkbench } from './workbench/presets.ts';
 
 declare const __DEV__: boolean;
@@ -40,10 +40,12 @@ function isTrackPickerModalOpen(): boolean {
 function AppRoot() {
   const [refreshToken, setRefreshToken] = useState(0);
 
-  const i18n = useMemo(() => {
+  const systemLocale = useMemo(() => {
     const languages = typeof navigator === 'undefined' ? [] : navigator.languages;
-    return createAppI18n(resolveLocale(languages));
+    return resolveLocale(languages);
   }, []);
+
+  const preferencesStore = useMemo(() => createDesktopPreferencesStore(), []);
 
   const catalog = useMemo(() => createLazyCatalog(() => createDesktopCatalog()), []);
 
@@ -79,11 +81,13 @@ function AppRoot() {
   }, []);
 
   return (
-    <FormFactorProvider value="desktop">
-      <I18nProvider i18n={i18n}>
-        <AppShell catalog={catalog} videoHost={videoHost} externalRefreshToken={refreshToken} />
-      </I18nProvider>
-    </FormFactorProvider>
+    <AppProviders
+      preferencesStore={preferencesStore}
+      systemLocale={systemLocale}
+      viewport={{ formFactor: 'desktop' }}
+    >
+      <AppShell catalog={catalog} videoHost={videoHost} externalRefreshToken={refreshToken} />
+    </AppProviders>
   );
 }
 

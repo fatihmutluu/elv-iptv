@@ -1,6 +1,6 @@
 import { createContext, type ReactElement, type ReactNode, useContext, useMemo } from 'react';
 import { Platform, useWindowDimensions } from 'react-native';
-import { FormFactorProvider } from '../form-factor';
+import { FormFactorContext, FormFactorProvider } from '../form-factor';
 import { resolveViewport, type ViewportInfo, type ViewportOverride } from './resolve-viewport';
 
 const ViewportContext = createContext<ViewportInfo | undefined>(undefined);
@@ -83,6 +83,7 @@ export function ViewportProvider({ value, children }: ViewportProviderProps): Re
 /** Reads the active {@link ViewportInfo}, deriving from live window metrics when outside a provider. */
 export function useViewport(): ViewportInfo {
   const provided = useContext(ViewportContext);
+  const legacyFormFactor = useContext(FormFactorContext);
   const { width, height } = useWindowDimensions();
   if (provided !== undefined) return provided;
   return resolveViewport({
@@ -90,5 +91,6 @@ export function useViewport(): ViewportInfo {
     os: Platform.OS,
     width,
     height,
+    ...(legacyFormFactor !== undefined ? { override: { formFactor: legacyFormFactor } } : {}),
   });
 }
