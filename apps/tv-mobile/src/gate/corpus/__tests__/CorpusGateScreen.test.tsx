@@ -30,8 +30,8 @@ const AUDIO_ONLY_URLS = new Set([`${LIVE}/1006.ts`, `${MOVIE}/200006.mp4`]);
 const TRACK_ITEMS = ['live-1010', 'live-1010-hls', 'vod-200010', 'vod-200011', 'vod-200010-hls'];
 
 interface EngineOpts {
-  empty?: 'network' | 'ended' | 'connection-limit';
-  tracks?: 'full' | 'none' | 'other-languages' | 'unswitched';
+  empty?: 'network' | 'unsupported' | 'ended' | 'connection-limit';
+  tracks?: 'full' | 'bcp47' | 'none' | 'other-languages' | 'unswitched';
   clock?: 'running' | 'none' | 'frozen';
   seekLandsAt?: (target: number) => number;
   seekResumeDelayMs?: number;
@@ -40,21 +40,30 @@ interface EngineOpts {
   neverPlays?: boolean;
 }
 
-function trackSet(kind: EngineOpts['tracks']): MediaTracks {
+function trackSet(kind: EngineOpts['tracks'], url?: string): MediaTracks {
   if (kind === 'none') {
     return { audio: [], subtitles: [], selectedAudioId: null, selectedSubtitleId: null };
   }
-  const [a, b] = kind === 'other-languages' ? ['fre', 'spa'] : ['deu', 'eng'];
-  const [c, d] = kind === 'other-languages' ? ['ita', 'pol'] : ['eng', 'tur'];
+  const [a, b] =
+    kind === 'other-languages'
+      ? ['fre', 'spa']
+      : kind === 'bcp47'
+        ? ['tr', 'en-US']
+        : ['deu', 'eng'];
+  const [c, d] =
+    kind === 'other-languages' ? ['ita', 'pol'] : kind === 'bcp47' ? ['en', 'tr'] : ['eng', 'tur'];
+  const hasSubs = url !== `${LIVE}/1010.ts`;
   return {
     audio: [
       { id: 'a:0', language: a },
       { id: 'a:1', language: b },
     ],
-    subtitles: [
-      { id: 's:0', language: c },
-      { id: 's:1', language: d },
-    ],
+    subtitles: hasSubs
+      ? [
+          { id: 's:0', language: c },
+          { id: 's:1', language: d },
+        ]
+      : [],
     selectedAudioId: 'a:0',
     selectedSubtitleId: null,
   };
@@ -63,7 +72,12 @@ function trackSet(kind: EngineOpts['tracks']): MediaTracks {
 function script(url: string, opts: EngineOpts): FakeStep[] {
   if (url === EMPTY_URL) {
     if (opts.empty === 'ended') return [{ afterMs: 2, emit: 'state', state: 'ended' }];
-    const code = opts.empty === 'connection-limit' ? 'connection-limit' : 'network';
+    const code =
+      opts.empty === 'unsupported'
+        ? 'unsupported-format'
+        : opts.empty === 'connection-limit'
+          ? 'connection-limit'
+          : 'network';
     return [{ afterMs: 2, emit: 'error', error: { code, detail: 'empty-vod-eof' } }];
   }
   if (opts.neverPlays === true) return [{ afterMs: 0, emit: 'state', state: 'opening' }];
@@ -79,7 +93,7 @@ function script(url: string, opts: EngineOpts): FakeStep[] {
     });
   }
   if (TRACK_URLS.has(url))
-    steps.push({ afterMs: 2, emit: 'tracks', tracks: trackSet(opts.tracks) });
+    steps.push({ afterMs: 2, emit: 'tracks', tracks: trackSet(opts.tracks, url) });
   return steps;
 }
 
@@ -107,7 +121,7 @@ function makeEngine(opts: EngineOpts = {}) {
     load(cmd: LoadCommand) {
       loads.push(cmd.url);
       scripts[cmd.url] = script(cmd.url, opts);
-      tracks = trackSet(opts.tracks);
+      tracks = trackSet(opts.tracks, cmd.url);
       base.load(cmd);
     },
     seek(attempt, positionMs) {
@@ -254,17 +268,27 @@ describe('CorpusGateScreen', () => {
     expect(h.loads).toHaveLength(29);
     expect(h.seeks).toEqual([30_000]);
     expect(h.selections.filter((s) => s === 'audio:a:1')).toHaveLength(3);
-    expect(h.selections.filter((s) => s === 'subtitle:s:1')).toHaveLength(5);
+    expect(h.selections.filter((s) => s === 'subtitle:s:1')).toHaveLength(4);
     await view.unmount();
   });
 
-  it('fails the empty VOD item when it ends or fails as connection-limit', async () => {
+  it('matches BCP-47 / ISO 639-1 track languages (tr, en-US) against ISO 639-2 targets', async () => {
+    const report = await runSweep({ tracks: 'bcp47' });
+    expect(report.passed).toBe(29);
+    expect(report.failed).toEqual([]);
+  });
+
+  it('accepts playback/network or playback/unsupported-format on empty VOD and rejects ended or connection-limit', async () => {
+    const unsupported = await runSweep({ empty: 'unsupported' });
+    expect(unsupported.passed).toBe(29);
+    lines = [];
     const ended = await runSweep({ empty: 'ended' });
     expect(reasons(ended)).toEqual({ 'vod-200001-empty': 'expected failed, settled on ended' });
     lines = [];
     const limit = await runSweep({ empty: 'connection-limit' });
     expect(reasons(limit)).toEqual({
-      'vod-200001-empty': 'expected playback/network, got playback/connection-limit',
+      'vod-200001-empty':
+        'expected playback/network or playback/unsupported-format, got playback/connection-limit',
     });
   });
 

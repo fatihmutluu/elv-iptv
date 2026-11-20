@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { buildCatalog } from '../sim/catalog.ts';
 import { findFfmpeg } from '../sim/media.ts';
+import { prepareAllRecipes } from '../sim/prepare.ts';
 import { startSim } from '../sim/server.ts';
 import type { Exec } from './adb.ts';
 import { type AppHandle, readUntil, waitExit } from './app-lines.ts';
@@ -46,6 +47,7 @@ export interface DesktopGateDeps {
   startSim: () => Promise<DesktopSimHandle>;
   spawnApp: (args: readonly string[]) => AppHandle;
   buildApp?: () => Promise<void>;
+  prepareMedia?: () => Promise<void>;
   ffmpeg?: () => string | null;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
@@ -314,6 +316,10 @@ export function systemDesktopDeps(root: string, exec: Exec): DesktopGateDeps {
     buildApp: async () => {
       const res = await exec(pnpmCmd, ['--filter', '@elv/desktop', 'run', 'prepare:app']);
       if (!res.ok) throw new Error(`gate: desktop prepare:app failed:\n${res.output}`);
+    },
+    prepareMedia: async () => {
+      const ffmpeg = findFfmpeg();
+      if (ffmpeg !== null) await prepareAllRecipes(ffmpeg);
     },
     startSim: async () => {
       const handle = await startSim({ port: 0, host: '127.0.0.1', seed: 1 });

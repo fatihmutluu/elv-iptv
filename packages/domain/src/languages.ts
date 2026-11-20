@@ -53,6 +53,8 @@ const ISO639_CANONICAL = new Map<string, string>([
   ['aze', 'az'],
   ['bg', 'bg'],
   ['bul', 'bg'],
+  ['bs', 'bs'],
+  ['bos', 'bs'],
   ['da', 'da'],
   ['dan', 'da'],
   ['fi', 'fi'],

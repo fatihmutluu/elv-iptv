@@ -1,3 +1,4 @@
+import { normalizeLanguageCode, sameLanguageCode } from '@elv/domain';
 import type { MediaTracks, TrackInfo } from '@elv/playback';
 import type { MpvCommand } from './codec.ts';
 
@@ -9,69 +10,6 @@ export interface TrackPreference {
 }
 
 const MAX_MPV_TRACK_ID = 0x7fffffff;
-
-const UNDETERMINED_CODES: ReadonlySet<string> = new Set(['und', 'zxx', 'mul', 'mis', 'unknown']);
-
-const ISO639_TO_1: ReadonlyMap<string, string> = new Map([
-  ['eng', 'en'],
-  ['tur', 'tr'],
-  ['deu', 'de'],
-  ['ger', 'de'],
-  ['fra', 'fr'],
-  ['fre', 'fr'],
-  ['spa', 'es'],
-  ['ita', 'it'],
-  ['rus', 'ru'],
-  ['ara', 'ar'],
-  ['por', 'pt'],
-  ['nld', 'nl'],
-  ['dut', 'nl'],
-  ['pol', 'pl'],
-  ['zho', 'zh'],
-  ['chi', 'zh'],
-  ['jpn', 'ja'],
-  ['kor', 'ko'],
-  ['fas', 'fa'],
-  ['per', 'fa'],
-  ['ell', 'el'],
-  ['gre', 'el'],
-  ['ces', 'cs'],
-  ['cze', 'cs'],
-  ['ron', 'ro'],
-  ['rum', 'ro'],
-  ['swe', 'sv'],
-  ['ukr', 'uk'],
-  ['kur', 'ku'],
-  ['aze', 'az'],
-  ['hin', 'hi'],
-  ['heb', 'he'],
-  ['hun', 'hu'],
-  ['fin', 'fi'],
-  ['dan', 'da'],
-  ['nor', 'no'],
-  ['nob', 'nb'],
-  ['nno', 'nn'],
-  ['bul', 'bg'],
-  ['hrv', 'hr'],
-  ['srp', 'sr'],
-  ['slk', 'sk'],
-  ['slo', 'sk'],
-  ['slv', 'sl'],
-  ['sqi', 'sq'],
-  ['alb', 'sq'],
-  ['mkd', 'mk'],
-  ['mac', 'mk'],
-  ['bos', 'bs'],
-  ['kat', 'ka'],
-  ['geo', 'ka'],
-  ['hye', 'hy'],
-  ['arm', 'hy'],
-  ['ind', 'id'],
-  ['msa', 'ms'],
-  ['may', 'ms'],
-  ['vie', 'vi'],
-  ['tha', 'th'],
-]);
 
 const isRecord = (x: unknown): x is Record<string, unknown> =>
   typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -85,25 +23,12 @@ const cleanString = (x: unknown): string | undefined => {
   return trimmed.length > 0 ? trimmed : undefined;
 };
 
-function normalizeLanguageTag(raw: string | undefined): string | undefined {
-  if (typeof raw !== 'string') return undefined;
-  const trimmed = raw.trim();
-  if (trimmed.length === 0) return undefined;
-  const primary = trimmed.split(/[-_]/)[0]?.toLowerCase() ?? '';
-  if (primary.length === 0 || UNDETERMINED_CODES.has(primary)) return undefined;
-  return ISO639_TO_1.get(primary) ?? primary;
-}
-
 /** True when both language tags normalize to the same determined ISO 639 code. */
-export function sameLanguage(a: string | undefined, b: string | undefined): boolean {
-  const normA = normalizeLanguageTag(a);
-  const normB = normalizeLanguageTag(b);
-  return normA !== undefined && normA === normB;
-}
+export const sameLanguage = sameLanguageCode;
 
 const cleanLanguage = (x: unknown): string | undefined => {
   const lang = cleanString(x);
-  return lang !== undefined && normalizeLanguageTag(lang) !== undefined ? lang : undefined;
+  return lang !== undefined && normalizeLanguageCode(lang) !== undefined ? lang : undefined;
 };
 
 /** Maps mpv's `track-list`, `aid` and `sid` properties into a `MediaTracks` snapshot. */
