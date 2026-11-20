@@ -85,12 +85,20 @@ export function useViewport(): ViewportInfo {
   const provided = useContext(ViewportContext);
   const legacyFormFactor = useContext(FormFactorContext);
   const { width, height } = useWindowDimensions();
-  if (provided !== undefined) return provided;
-  return resolveViewport({
-    isTV: Boolean(Platform.isTV),
-    os: Platform.OS,
-    width,
-    height,
-    ...(legacyFormFactor !== undefined ? { override: { formFactor: legacyFormFactor } } : {}),
-  });
+  const fallback = useMemo(
+    () =>
+      provided !== undefined
+        ? provided
+        : resolveViewport({
+            isTV: Boolean(Platform.isTV),
+            os: Platform.OS,
+            width,
+            height,
+            ...(legacyFormFactor !== undefined
+              ? { override: { formFactor: legacyFormFactor } }
+              : {}),
+          }),
+    [provided, width, height, legacyFormFactor],
+  );
+  return fallback;
 }

@@ -73,7 +73,14 @@ export function AppProviders({
   onError,
   children,
 }: AppProvidersProps): ReactElement {
-  const effectiveSystemLocale: AppLocale = systemLocale ?? i18n?.locale ?? 'en';
+  const initialI18nRef = useRef<{ i18n: AppI18n | undefined; locale: AppLocale }>({
+    i18n,
+    locale: i18n?.locale ?? 'en',
+  });
+  if (initialI18nRef.current.i18n !== i18n) {
+    initialI18nRef.current = { i18n, locale: i18n?.locale ?? 'en' };
+  }
+  const effectiveSystemLocale: AppLocale = systemLocale ?? initialI18nRef.current.locale;
 
   const fallbackStore = useMemo(() => createMemoryPreferencesStore(), []);
   const store = preferencesStore ?? fallbackStore;
@@ -90,10 +97,12 @@ export function AppProviders({
 
   useEffect(() => {
     let cancelled = false;
+    let settledBySubscription = false;
     setReady(false);
 
     const unsubscribe = store.subscribe((snapshot) => {
       if (!cancelled) {
+        settledBySubscription = true;
         setPreferences(snapshot);
         setReady(true);
       }
@@ -103,7 +112,7 @@ export function AppProviders({
       .load()
       .then((snapshot) => {
         if (!cancelled) {
-          setPreferences(snapshot);
+          if (!settledBySubscription) setPreferences(snapshot);
           setReady(true);
         }
       })
@@ -174,7 +183,7 @@ export function AppProviders({
           <ThemeProvider
             preset={themePreset}
             fontScale={preferences.fontScale}
-            reduceMotion={preferences.reduceMotion}
+            reduceMotion={preferences.reduceMotion ? true : 'system'}
             onChange={handleThemeChange}
           >
             <PreferencesContext.Provider value={contextValue}>

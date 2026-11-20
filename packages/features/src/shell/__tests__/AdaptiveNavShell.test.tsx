@@ -239,6 +239,8 @@ describe('AdaptiveNavShell', () => {
 
     const topNavStyle = flattenStyle(screen.getByTestId('app-top-nav').props.style);
     expect(topNavStyle.paddingHorizontal).toBe(96);
+    expect(topNavStyle.paddingTop).toBe(54);
+    expect(topNavStyle.minHeight).toBe(118);
   });
 
   it('cycles across destinations and utilities with TV D-pad Left/Right and exits on Down/Select', async () => {
@@ -351,5 +353,66 @@ describe('AdaptiveNavShell', () => {
     // Select also exits nav focus
     await pressKey(23);
     expect(onExit).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a visible TV focus ring when activeId matches no item, omits empty PortraitBottomBar, and shows Portrait badges', async () => {
+    const view = await render(
+      <ThemeProvider preset="highContrast">
+        <ViewportProvider
+          value={{ formFactor: 'tv', orientation: 'landscape', width: 1920, height: 1080 }}
+        >
+          <AdaptiveNavShell
+            brandTitle="ELV IPTV"
+            destinations={[
+              { id: 'live', label: 'Live', icon: 'tv' },
+              { id: 'movies', label: 'Movies', icon: 'film' },
+            ]}
+            activeId="detail-view"
+            navFocused
+            onSelectDestination={jest.fn()}
+          >
+            <Text>Detail</Text>
+          </AdaptiveNavShell>
+        </ViewportProvider>
+      </ThemeProvider>,
+    );
+    const firstStyle = flattenStyle(screen.getByTestId('nav-tab-live').props.style);
+    expect(firstStyle.borderColor).toBe(THEME_PRESETS.highContrast.focusRingColor);
+
+    await view.rerender(
+      <ThemeProvider>
+        <ViewportProvider
+          value={{ formFactor: 'phone', orientation: 'portrait', width: 390, height: 844 }}
+        >
+          <AdaptiveNavShell
+            brandTitle="ELV IPTV"
+            destinations={[]}
+            activeId=""
+            onSelectDestination={jest.fn()}
+          >
+            <Text>Empty</Text>
+          </AdaptiveNavShell>
+        </ViewportProvider>
+      </ThemeProvider>,
+    );
+    expect(screen.queryByTestId('app-bottom-nav')).toBeNull();
+
+    await view.rerender(
+      <ThemeProvider>
+        <ViewportProvider
+          value={{ formFactor: 'phone', orientation: 'portrait', width: 390, height: 844 }}
+        >
+          <AdaptiveNavShell
+            brandTitle="ELV IPTV"
+            destinations={[{ id: 'live', label: 'Live', icon: 'tv', badge: 'HD' }]}
+            activeId="live"
+            onSelectDestination={jest.fn()}
+          >
+            <Text>Portrait</Text>
+          </AdaptiveNavShell>
+        </ViewportProvider>
+      </ThemeProvider>,
+    );
+    expect(screen.getByText('HD')).toBeTruthy();
   });
 });

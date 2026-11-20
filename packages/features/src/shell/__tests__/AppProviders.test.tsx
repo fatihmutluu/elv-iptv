@@ -1,4 +1,10 @@
-import { createMemoryPreferencesStore, DEFAULT_PREFERENCES } from '@elv/domain';
+import {
+  createMemoryPreferencesStore,
+  DEFAULT_PREFERENCES,
+  type PreferencesSnapshot,
+  type PreferencesStore,
+} from '@elv/domain';
+import { createAppI18n } from '@elv/i18n';
 import {
   type AndroidKeyEvent,
   type AndroidKeySource,
@@ -11,7 +17,7 @@ import {
 } from '@elv/ui-kit';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { useEffect, useState } from 'react';
-import { Platform, Pressable, Text, View } from 'react-native';
+import { AccessibilityInfo, Platform, Pressable, Text, View } from 'react-native';
 import { AppProviders, usePreferences } from '../AppProviders';
 
 function PreferencesProbe({ onMount }: { onMount?: () => void }) {
@@ -215,5 +221,68 @@ describe('AppProviders', () => {
     });
     expect(screen.getByTestId('key-consumer-b')).toBeTruthy();
     expect(addListener).toHaveBeenCalledTimes(1);
+  });
+
+  it('respects OS reduceMotion by default, preserves custom i18n system fallback, and prevents stale load clobber', async () => {
+    const reduceSpy = jest
+      .spyOn(AccessibilityInfo, 'isReduceMotionEnabled')
+      .mockResolvedValue(true);
+
+    let resolveLoad: ((snap: PreferencesSnapshot) => void) | undefined;
+    const listeners = new Set<(snap: PreferencesSnapshot) => void>();
+    const customStore: PreferencesStore = {
+      load: () =>
+        new Promise<PreferencesSnapshot>((resolve) => {
+          resolveLoad = resolve;
+        }),
+      update: async (patch) => {
+        const next: PreferencesSnapshot = {
+          version: 1,
+          themePreset: patch.themePreset ?? 'obsidianCrimson',
+          locale: patch.locale ?? 'system',
+          fontScale: patch.fontScale ?? 1,
+          reduceMotion: patch.reduceMotion ?? false,
+        };
+        for (const l of listeners) l(next);
+        return { ok: true, value: next };
+      },
+      reset: async () => ({
+        ok: true,
+        value: DEFAULT_PREFERENCES,
+      }),
+      subscribe: (l) => {
+        listeners.add(l);
+        return () => listeners.delete(l);
+      },
+    };
+
+    const customI18n = createAppI18n('en');
+    await render(
+      <AppProviders i18n={customI18n} preferencesStore={customStore}>
+        <PreferencesProbe />
+      </AppProviders>,
+    );
+
+    // Subscription update arrives BEFORE initial load() resolves; stale load() must not overwrite it.
+    await act(async () => {
+      await customStore.update({ locale: 'tr', themePreset: 'abyssalSapphire' });
+      resolveLoad?.({
+        version: 1,
+        themePreset: 'obsidianCrimson',
+        locale: 'en',
+        fontScale: 1,
+        reduceMotion: false,
+      });
+    });
+    expect(screen.getByTestId('theme-preset')).toHaveTextContent('abyssalSapphire');
+    expect(screen.getByTestId('i18n-live')).toHaveTextContent('Canlı');
+    expect(screen.getByTestId('theme-reduce-motion')).toHaveTextContent('true');
+
+    // Switching back to 'system' restores customI18n's initial 'en', not the mutated 'tr'.
+    await act(async () => {
+      await customStore.update({ locale: 'system', themePreset: 'abyssalSapphire' });
+    });
+    expect(screen.getByTestId('i18n-live')).toHaveTextContent('Live');
+    reduceSpy.mockRestore();
   });
 });

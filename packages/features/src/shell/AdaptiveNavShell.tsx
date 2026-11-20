@@ -1,6 +1,6 @@
 import type { KeyEvent } from '@elv/focus-core';
 import { GlassBar, TvFocusAnchor, useKeyInterpreter, useTheme, useViewport } from '@elv/ui-kit';
-import { type ReactElement, useCallback, useMemo, useRef } from 'react';
+import { type ReactElement, useCallback, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { PortraitBottomBar, UtilitiesRow } from './NavBars';
 import type { AdaptiveNavShellProps } from './types';
@@ -64,33 +64,52 @@ export function AdaptiveNavShell<TId extends string = string>({
     [destinations, utilities, activeId, onSelectDestination],
   );
 
+  const [fallbackFocusedIndex, setFallbackFocusedIndex] = useState(0);
+  const activeUnifiedIndex = unifiedItems.findIndex((item) => item.active);
+  const resolvedTvFocusedIndex =
+    activeUnifiedIndex >= 0
+      ? activeUnifiedIndex
+      : unifiedItems.length > 0
+        ? Math.min(fallbackFocusedIndex, unifiedItems.length - 1)
+        : -1;
+  const focusedItemId =
+    isTv && navFocused && resolvedTvFocusedIndex >= 0
+      ? unifiedItems[resolvedTvFocusedIndex]?.id
+      : undefined;
+
   const unifiedItemsRef = useRef(unifiedItems);
   unifiedItemsRef.current = unifiedItems;
   const onExitNavFocusRef = useRef(onExitNavFocus);
   onExitNavFocusRef.current = onExitNavFocus;
-  const focusedIndexRef = useRef(0);
+  const pendingNavIndexRef = useRef(resolvedTvFocusedIndex);
+  pendingNavIndexRef.current = resolvedTvFocusedIndex;
 
   const handleTvNavKey = useCallback((event: KeyEvent) => {
     if (event.kind !== 'press' && event.kind !== 'repeat') return;
     if (event.key === 'left' || event.key === 'right') {
       const items = unifiedItemsRef.current;
       if (items.length === 0) return;
-      const activeIdx = items.findIndex((item) => item.active);
-      const currentIdx =
-        activeIdx >= 0 ? activeIdx : Math.min(focusedIndexRef.current, items.length - 1);
+      const baseIdx =
+        pendingNavIndexRef.current >= 0 && pendingNavIndexRef.current < items.length
+          ? pendingNavIndexRef.current
+          : 0;
       const delta = event.key === 'right' ? 1 : -1;
-      const nextIdx = (currentIdx + delta + items.length) % items.length;
-      focusedIndexRef.current = nextIdx;
+      const nextIdx = (baseIdx + delta + items.length) % items.length;
+      pendingNavIndexRef.current = nextIdx;
+      setFallbackFocusedIndex(nextIdx);
       items[nextIdx]?.activate();
-    } else if (event.key === 'down' || event.key === 'select') {
+    } else if (event.kind === 'press' && (event.key === 'down' || event.key === 'select')) {
       onExitNavFocusRef.current?.();
     }
   }, []);
 
+  const topInset = isTv
+    ? Math.max(viewport.safeArea.top, viewport.overscan.y)
+    : viewport.safeArea.top;
   const topHorizontalPadding = isTv
     ? Math.max(theme.spacing.xl, viewport.overscan.x)
     : theme.spacing.md;
-  const topBarMinHeight = (isLandscape ? (isTv ? 64 : 56) : 50) + viewport.safeArea.top;
+  const topBarMinHeight = (isLandscape ? (isTv ? 64 : 56) : 50) + topInset;
 
   return (
     <View testID={testID} style={[styles.root, { backgroundColor: theme.colors.bgCanvas }]}>
@@ -102,7 +121,7 @@ export function AdaptiveNavShell<TId extends string = string>({
         hairlineEdge="bottom"
         style={{
           minHeight: topBarMinHeight,
-          paddingTop: viewport.safeArea.top,
+          paddingTop: topInset,
           paddingHorizontal: topHorizontalPadding,
         }}
         contentStyle={styles.topNavContent}
@@ -123,12 +142,13 @@ export function AdaptiveNavShell<TId extends string = string>({
 
           {isLandscape ? (
             <View
+              accessibilityRole="tablist"
               style={[styles.destinationsRow, { gap: isTv ? theme.spacing.lg : theme.spacing.md }]}
             >
               {destinations.map((dest) => {
                 const tabTestId = dest.testID ?? `nav-tab-${dest.id}`;
                 const selected = dest.id === activeId;
-                const tvFocused = isTv && navFocused && selected;
+                const tvFocused = focusedItemId === dest.id;
                 const fgColor = selected ? theme.colors.textPrimary : theme.colors.textSecondary;
 
                 return (
@@ -201,7 +221,7 @@ export function AdaptiveNavShell<TId extends string = string>({
           utilities={utilities}
           activeId={activeId}
           isTv={isTv}
-          navFocused={navFocused}
+          {...(focusedItemId !== undefined ? { focusedItemId } : {})}
           compactPortrait={!isLandscape}
           {...(onExitNavFocus !== undefined ? { onExitNavFocus } : {})}
         />

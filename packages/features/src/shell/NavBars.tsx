@@ -8,7 +8,7 @@ export interface UtilitiesRowProps {
   readonly utilities: readonly NavUtility[];
   readonly activeId: string;
   readonly isTv: boolean;
-  readonly navFocused: boolean;
+  readonly focusedItemId?: string;
   readonly compactPortrait: boolean;
   readonly onExitNavFocus?: () => void;
 }
@@ -18,7 +18,7 @@ export function UtilitiesRow({
   utilities,
   activeId,
   isTv,
-  navFocused,
+  focusedItemId,
   compactPortrait,
   onExitNavFocus,
 }: UtilitiesRowProps): ReactElement | null {
@@ -27,6 +27,7 @@ export function UtilitiesRow({
 
   return (
     <View
+      accessibilityRole="tablist"
       style={[
         styles.utilitiesRow,
         { gap: isTv ? theme.spacing.md : compactPortrait ? theme.spacing.xs : theme.spacing.sm },
@@ -35,7 +36,7 @@ export function UtilitiesRow({
       {utilities.map((util) => {
         const utilTestId = util.testID ?? `nav-utility-${util.id}`;
         const selected = Boolean(util.active) || util.id === activeId;
-        const tvFocused = isTv && navFocused && selected;
+        const tvFocused = focusedItemId === util.id;
         const showLabel = compactPortrait ? util.showLabel === true : util.showLabel !== false;
         const fgColor = selected ? theme.colors.textPrimary : theme.colors.textSecondary;
 
@@ -107,8 +108,9 @@ export function PortraitBottomBar<TId extends string = string>({
   safeBottom,
   onSelectDestination,
   onExitNavFocus,
-}: PortraitBottomBarProps<TId>): ReactElement {
+}: PortraitBottomBarProps<TId>): ReactElement | null {
   const theme = useTheme();
+  if (destinations.length === 0) return null;
 
   return (
     <GlassBar
@@ -122,47 +124,69 @@ export function PortraitBottomBar<TId extends string = string>({
       }}
       contentStyle={styles.bottomNavContent}
     >
-      {destinations.map((dest) => {
-        const tabTestId = dest.testID ?? `nav-tab-${dest.id}`;
-        const selected = dest.id === activeId;
-        return (
-          <Pressable
-            key={dest.id}
-            testID={tabTestId}
-            accessibilityRole="tab"
-            accessibilityLabel={dest.label}
-            accessibilityState={{ selected }}
-            onPress={() => {
-              onSelectDestination(dest.id);
-              onExitNavFocus?.();
-            }}
-            style={styles.bottomTab}
-          >
-            <View
-              testID={`${tabTestId}-underline`}
-              style={[
-                styles.bottomActiveBar,
-                { backgroundColor: selected ? theme.colors.accent : 'transparent' },
-              ]}
-            />
-            <Icon
-              name={dest.icon}
-              size={20}
-              color={selected ? theme.colors.accent : theme.colors.textSecondary}
-            />
-            <Text
-              numberOfLines={1}
-              style={[
-                theme.typography.micro,
-                styles.bottomTabLabel,
-                { color: selected ? theme.colors.textPrimary : theme.colors.textSecondary },
-              ]}
+      <View accessibilityRole="tablist" style={styles.bottomTabList}>
+        {destinations.map((dest) => {
+          const tabTestId = dest.testID ?? `nav-tab-${dest.id}`;
+          const selected = dest.id === activeId;
+          return (
+            <Pressable
+              key={dest.id}
+              testID={tabTestId}
+              accessibilityRole="tab"
+              accessibilityLabel={dest.label}
+              accessibilityState={{ selected }}
+              onPress={() => {
+                onSelectDestination(dest.id);
+                onExitNavFocus?.();
+              }}
+              style={styles.bottomTab}
             >
-              {dest.label}
-            </Text>
-          </Pressable>
-        );
-      })}
+              <View
+                testID={`${tabTestId}-underline`}
+                style={[
+                  styles.bottomActiveBar,
+                  { backgroundColor: selected ? theme.colors.accent : 'transparent' },
+                ]}
+              />
+              <View style={styles.bottomIconWrap}>
+                <Icon
+                  name={dest.icon}
+                  size={20}
+                  color={selected ? theme.colors.accent : theme.colors.textSecondary}
+                />
+                {dest.badge !== undefined ? (
+                  <View
+                    style={[
+                      styles.portraitBadge,
+                      {
+                        backgroundColor: theme.colors.accent,
+                        borderRadius: theme.radius.pill,
+                      },
+                    ]}
+                  >
+                    <Text
+                      numberOfLines={1}
+                      style={[theme.typography.micro, { color: theme.colors.accentContrast }]}
+                    >
+                      {dest.badge}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+              <Text
+                numberOfLines={1}
+                style={[
+                  theme.typography.micro,
+                  styles.bottomTabLabel,
+                  { color: selected ? theme.colors.textPrimary : theme.colors.textSecondary },
+                ]}
+              >
+                {dest.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
     </GlassBar>
   );
 }
@@ -200,6 +224,21 @@ const styles = StyleSheet.create({
   bottomNavContent: {
     justifyContent: 'space-around',
     alignItems: 'stretch',
+  },
+  bottomTabList: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    justifyContent: 'space-around',
+  },
+  bottomIconWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  portraitBadge: {
+    paddingHorizontal: 5,
+    paddingVertical: 1,
   },
   bottomTab: {
     flex: 1,
