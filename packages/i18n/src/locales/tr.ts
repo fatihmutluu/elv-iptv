@@ -217,4 +217,10 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'player.error.streamFailed': 'Yayın hatası nedeniyle oynatma durdu.',
   'player.hint.streamFailed':
     'Yeniden bağlanmak için Tekrar dene düğmesine basın veya başka bir içerik seçin.',
+  'ui.dismiss': 'Kapat',
+  'ui.liveBadge': 'CANLI',
+  'ui.error.title': 'Bir sorun oluştu',
+  'ui.error.description':
+    'Bu görünüm beklenmeyen bir hatayla karşılaştı. Yeniden yüklemeyi deneyin.',
+  'ui.error.retry': 'Tekrar dene',
 };

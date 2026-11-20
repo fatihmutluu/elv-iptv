@@ -207,6 +207,11 @@ export const enMessages = {
   'player.hint.itemNotFound': 'Refresh the source in Sources to update the channel list.',
   'player.error.streamFailed': 'Playback stopped due to a stream error.',
   'player.hint.streamFailed': 'Press Retry to reconnect, or choose another item.',
+  'ui.dismiss': 'Dismiss',
+  'ui.liveBadge': 'LIVE',
+  'ui.error.title': 'Something went wrong',
+  'ui.error.description': 'This view ran into an unexpected problem. Try loading it again.',
+  'ui.error.retry': 'Try again',
 } as const;
 
 /** Valid message identifier across all supported locales. */

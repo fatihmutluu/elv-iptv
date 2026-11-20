@@ -29,8 +29,10 @@ An IPTV player is **not** a SaaS admin dashboard, a glowing gadget, or a clutter
 
 ## 2. Information Architecture — "Where Does a New Feature Go?"
 
-### 2.1 Permanent Top-Level Cap: 4 + 2
-Top-level navigation is **permanently capped** at **4 primary destinations** + **2 utility endpoints**. Never add a 5th primary destination tab (`EPG`, `Favorites`, `Settings`, `Sources`, or `Downloads` NEVER receive top-level tabs):
+### 2.1 Default Top-Level Architecture: 4 + 2 (Config-Driven & Extensible)
+Our **recommended default** top-level navigation is **4 primary destinations** + **2 utility endpoints** (`EPG`, `Favorites`, `Settings`, and `Sources` stay tucked inside their natural homes by default to preserve Cinema Quietude).
+
+> **Modularity Rule:** Navigation components (`AdaptiveNavShell`, top bar, bottom tab bar) MUST be **100% data-driven** (`destinations: readonly NavDestination[]`, `utilities: readonly NavUtility[]`) — never hardcode a fixed 4-slot layout or magic tab indices in code. Adding, removing, or reordering a destination must be a clean configuration change, and intentional IA evolutions should update this living document alongside the change.
 
 | Slot | Destination | Owns |
 | :--- | :--- | :--- |
@@ -111,7 +113,7 @@ All colors, surfaces, scrims, and focus rings in `@elv/ui-kit` MUST be driven by
 ## 6. Agent Pre-Merge UI Checklist
 
 Before marking any UI PR ready, confirm all 10 items:
-1. Primary navigation remains strictly 4 destinations (`Home`, `Live TV`, `Movies`, `Series`) + `Search` & `Profile`.
+1. Primary navigation follows the active IA in §2.1 (default 4 destinations + 2 utilities) via config-driven `NavDestination[]` / `NavUtility[]` — never hardcoded slot counts.
 2. Works cleanly in both **Portrait** (bottom tabs, bottom sheet, compact player top bar) and **Landscape** (top bar, right popover, 2-column detail).
 3. Every focusable element is reachable via 10-ft TV D-pad with a crisp visible focus ring and zero clipping inside horizontal strips.
 4. Zero hardcoded hex colors or dark-blue scrims — verified under both default and `High Contrast (AAA)` themes.
