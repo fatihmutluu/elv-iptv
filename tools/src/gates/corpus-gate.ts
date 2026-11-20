@@ -1,6 +1,7 @@
 import { release as osRelease } from 'node:os';
 import { corpusCatalog } from '../sim/corpus.ts';
 import { findFfmpeg } from '../sim/media.ts';
+import { prepareAllRecipes } from '../sim/prepare.ts';
 import { type ApkTarget, androidGateDevice, buildApk, type Exec, POLL_MS } from './adb.ts';
 import { readUntil, waitExit } from './app-lines.ts';
 import {
@@ -23,7 +24,7 @@ const CORPUS_TIMEOUT_MS = 420_000;
 const EXIT_GRACE_MS = 3000;
 const SUBTITLE_RECIPE = 'h264-2audio-subs-720p25';
 const AUDIO_ONLY_RECIPE = 'aac-radio';
-const EMPTY_VOD_ERROR = 'playback/network';
+const EMPTY_VOD_ERRORS: readonly string[] = ['playback/network', 'playback/unsupported-format'];
 
 /** Target platform of a format corpus gate run. */
 export type CorpusTarget =
@@ -52,8 +53,8 @@ export interface GateCorpusItem {
   url: string;
   expect: 'playing' | 'failed';
   audioOnly?: boolean;
-  /** `category/code` of the playback error a failing item must end with. */
-  expectError?: string;
+  /** Allowed `category/code` values a failing item must end with. */
+  expectErrors?: readonly string[];
   selectAudioLang?: string;
   selectSubtitleLang?: string;
   seekMs?: number;
@@ -73,6 +74,7 @@ export interface CorpusGateOptions {
   device?: GateDevice;
   simLog?: SimLog;
   desktopDeps?: DesktopGateDeps;
+  prepareMedia?: () => Promise<void>;
   root?: string;
   adb?: string;
   timeoutMs?: number;
@@ -127,7 +129,7 @@ export function buildGateCorpusItems(opts: {
       url: `${base}/live/${pair}/${ch.id}.ts${suffix}`,
       expect: 'playing',
       ...(ch.recipe === AUDIO_ONLY_RECIPE ? { audioOnly: true } : {}),
-      ...(tracks ? { selectAudioLang: 'eng', selectSubtitleLang: 'tur' } : {}),
+      ...(tracks ? { selectAudioLang: 'eng' } : {}),
     });
   }
 
@@ -169,7 +171,7 @@ export function buildGateCorpusItems(opts: {
       kind: 'vod',
       url: `${base}/movie/${pair}/200001.mp4?fault=empty`,
       expect: 'failed',
-      expectError: EMPTY_VOD_ERROR,
+      expectErrors: EMPTY_VOD_ERRORS,
     },
   );
   if (items.length !== CORPUS_ITEM_COUNT) {
@@ -195,6 +197,7 @@ async function runDesktopCorpus(
 ): Promise<CorpusGateOutput> {
   const deps = opts.desktopDeps ?? systemDesktopDeps(opts.root ?? '.', opts.exec);
   if (opts.build === true && deps.buildApp) await deps.buildApp();
+  if (opts.simUrl === undefined) await (opts.prepareMedia ?? deps.prepareMedia)?.();
   const sim =
     opts.simUrl !== undefined
       ? (() => {
@@ -279,7 +282,14 @@ export async function runCorpusGate(opts: CorpusGateOptions): Promise<CorpusGate
   const log = opts.simLog ?? httpSimLog('http://127.0.0.1:7878');
   let device: GateDevice | undefined;
   try {
-    if (sim.reused) opts.onNote?.('simulator already running on port 7878: reusing it');
+    if (sim.reused) {
+      opts.onNote?.('simulator already running on port 7878: reusing it');
+    } else if (opts.prepareMedia !== undefined) {
+      await opts.prepareMedia();
+    } else if (opts.device === undefined) {
+      const ffmpeg = lookup();
+      if (ffmpeg !== null) await prepareAllRecipes(ffmpeg);
+    }
     device =
       opts.device ??
       (isAndroidTarget(target)

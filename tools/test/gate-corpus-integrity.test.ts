@@ -212,6 +212,7 @@ function fakeApp(lines: string[], exitOnEnd: boolean): AppHandle & { kills: numb
 
 function desktopDeps(app: AppHandle, events: string[]): DesktopGateDeps {
   return {
+    prepareMedia: async () => void events.push('prepare'),
     startSim: async () => ({
       url: 'http://127.0.0.1:7878',
       requests: async () => [],
@@ -223,7 +224,7 @@ function desktopDeps(app: AppHandle, events: string[]): DesktopGateDeps {
 }
 
 describe('runCorpusGate desktop path', () => {
-  it('lets the app exit on its own after the corpus line instead of killing it', async () => {
+  it('prepares recipes, lets the app exit on its own after the corpus line instead of killing it', async () => {
     const events: string[] = [];
     const app = fakeApp([tag({ ...OK_LINE, mpvSpawns: 1, videoVisible: true })], true);
     const out = await runCorpusGate({
@@ -236,7 +237,7 @@ describe('runCorpusGate desktop path', () => {
     });
     expect(out.outcome).toEqual({ ok: true, failures: [] });
     expect(app.kills).toBe(0);
-    expect(events).toEqual(['clear', 'sim-close']);
+    expect(events).toEqual(['prepare', 'clear', 'sim-close']);
   });
 
   it('wires --sim on desktop without starting a local simulator', async () => {

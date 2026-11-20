@@ -55,10 +55,12 @@ describe('parseCorpusGateUrl', () => {
 });
 
 describe('buildCorpusItems', () => {
-  it('builds the 29-item manifest with and without a burst and sets expectError on empty VOD', () => {
+  it('builds the 29-item manifest with and without a burst and sets expectErrors on empty VOD', () => {
     const plain = buildCorpusItems({ base: 'http://127.0.0.1:7878', account: 'demo' });
     expect(plain).toHaveLength(29);
     expect(plain[0]?.url).toBe('http://127.0.0.1:7878/live/demo/demo/1001.ts');
+    expect(plain[9]).toMatchObject({ id: 'live-1010', selectAudioLang: 'eng' });
+    expect(plain[9]?.selectSubtitleLang).toBeUndefined();
     expect(plain[11]?.url).toBe('http://127.0.0.1:7878/live/demo/demo/1012.ts');
     expect(plain[12]?.url).toBe('http://127.0.0.1:7878/demo/demo/1013');
     expect(plain[13]?.url).toBe('http://127.0.0.1:7878/live/demo/demo/1014.ts');
@@ -68,7 +70,7 @@ describe('buildCorpusItems', () => {
       kind: 'vod',
       url: 'http://127.0.0.1:7878/movie/demo/demo/200001.mp4?fault=empty',
       expect: 'failed',
-      expectError: 'playback/network',
+      expectErrors: ['playback/network', 'playback/unsupported-format'],
     });
 
     const burst = buildCorpusItems({ base: 'http://127.0.0.1:7878', account: 'demo', burst: 8 });

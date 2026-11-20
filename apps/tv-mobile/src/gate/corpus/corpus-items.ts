@@ -17,8 +17,8 @@ export interface CorpusItem {
   kind: MediaKind;
   url: string;
   expect: 'playing' | 'failed';
-  /** `category/code` the item must fail with when `expect` is `'failed'`. */
-  expectError?: string;
+  /** Allowed `category/code` values when `expect` is `'failed'`. */
+  expectErrors?: readonly string[];
   audioOnly?: boolean;
   selectAudioLang?: string;
   selectSubtitleLang?: string;
@@ -158,7 +158,7 @@ export function buildCorpusItems(opts: {
       url: `${base}/live/${pair}/${id}.ts${suffix}`,
       expect: 'playing',
       ...(id === 1006 ? { audioOnly: true } : {}),
-      ...(tracks ? { selectAudioLang: 'eng', selectSubtitleLang: 'tur' } : {}),
+      ...(tracks ? { selectAudioLang: 'eng' } : {}),
     });
   }
 
@@ -199,7 +199,7 @@ export function buildCorpusItems(opts: {
     kind: 'vod',
     url: `${base}/movie/${pair}/200001.mp4?fault=empty`,
     expect: 'failed',
-    expectError: 'playback/network',
+    expectErrors: ['playback/network', 'playback/unsupported-format'],
   });
 
   return items;

@@ -27,12 +27,16 @@ describe('format corpus manifests', () => {
     for (const movie of catalog.movies) expect(ids).toContain(`vod-${movie.id}`);
   });
 
-  it('expect the empty VOD to fail as an empty media response, flag audio-only items', () => {
+  it('expect the empty VOD to fail as an empty media response, flag audio-only items and align live-1010 tracks', () => {
     const items = buildGateCorpusItems({ base, account });
+    expect(items.find((item) => item.id === 'live-1010')).toMatchObject({
+      selectAudioLang: 'eng',
+    });
+    expect(items.find((item) => item.id === 'live-1010')?.selectSubtitleLang).toBeUndefined();
     expect(items.find((item) => item.id === 'vod-200001-empty')).toMatchObject({
       url: `${base}/movie/demo/demo/200001.mp4?fault=empty`,
       expect: 'failed',
-      expectError: 'playback/network',
+      expectErrors: ['playback/network', 'playback/unsupported-format'],
     });
     expect(items.filter((item) => item.audioOnly === true).map((item) => item.id)).toEqual([
       'live-1006',

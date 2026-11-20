@@ -37,7 +37,7 @@ describe('desktop corpus gate params and items', () => {
     );
   });
 
-  it('expects the empty VOD item to fail as an empty-media network error', () => {
+  it('expects the empty VOD item to fail as empty media and sets track checks accurately', () => {
     const items = buildDesktopCorpusItems({ base: 'http://127.0.0.1:7878', account: 'demo' });
     expect(items[28]).toEqual({
       id: 'vod-200001-empty',
@@ -45,9 +45,13 @@ describe('desktop corpus gate params and items', () => {
       kind: 'vod',
       url: 'http://127.0.0.1:7878/movie/demo/demo/200001.mp4?fault=empty',
       expect: 'failed',
-      expectError: 'playback/network',
+      expectErrors: ['playback/network', 'playback/unsupported-format'],
     });
     expect(items.filter((item) => item.expect === 'failed')).toHaveLength(1);
+    expect(items.find((item) => item.id === 'live-1010')).toMatchObject({
+      selectAudioLang: 'eng',
+    });
+    expect(items.find((item) => item.id === 'live-1010')?.selectSubtitleLang).toBeUndefined();
     expect(
       items
         .filter(

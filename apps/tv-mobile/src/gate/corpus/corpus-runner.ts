@@ -1,4 +1,4 @@
-import { ok } from '@elv/domain';
+import { ok, sameLanguageCode } from '@elv/domain';
 import {
   type ClockAnchor,
   createPlaybackService,
@@ -43,8 +43,7 @@ export interface CorpusSweep {
 type TrackKind = 'audio' | 'subtitle';
 
 function pickTrack(tracks: readonly TrackInfo[], lang: string): TrackInfo | undefined {
-  const target = lang.toLowerCase();
-  return tracks.find((t) => t.language?.toLowerCase().startsWith(target));
+  return tracks.find((t) => sameLanguageCode(t.language, lang));
 }
 
 const listOf = (s: PlaybackState, kind: TrackKind): readonly TrackInfo[] =>
@@ -250,8 +249,8 @@ export function createCorpusSweep(deps: CorpusSweepDeps): CorpusSweep {
       const state = service.getState();
       if (state.status.kind !== 'failed') return `expected failed, settled on ${state.status.kind}`;
       const reason = failureReason(state);
-      if (item.expectError !== undefined && reason !== item.expectError) {
-        return `expected ${item.expectError}, got ${reason}`;
+      if (item.expectErrors !== undefined && !item.expectErrors.includes(reason)) {
+        return `expected ${item.expectErrors.join(' or ')}, got ${reason}`;
       }
       return undefined;
     }

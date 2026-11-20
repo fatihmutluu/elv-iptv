@@ -93,6 +93,7 @@ describe('normalizeLanguageCode', () => {
     expect(sameLanguageCode('en-US', 'eng')).toBe(true);
     expect(sameLanguageCode('ger', 'deu')).toBe(true);
     expect(sameLanguageCode('tur', 'TR')).toBe(true);
+    expect(sameLanguageCode('bos', 'bs')).toBe(true);
     expect(sameLanguageCode('und', 'und')).toBe(false);
     expect(sameLanguageCode(undefined, 'en')).toBe(false);
   });
