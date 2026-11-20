@@ -430,6 +430,30 @@ describe('empty-panel focus recovery', () => {
     expect(s.isActive('main')).toBe(true);
     expect(changes).toEqual([{ listId: 'main', index: 0 }]);
   });
+
+  it('defers fallback recovery for hidden scopes until popScope and avoids shadowed FocusChange leakage', () => {
+    const s = createFocusStore({
+      id: 'root',
+      lists: [
+        l('main', { count: 5, index: 2, fallbackId: 'rail' }),
+        l('rail', { count: 4, index: 3 }),
+      ],
+      active: 'main',
+    });
+    s.pushScope('overlay', [l('rail', { count: 10, index: 1 })], 'rail');
+    const changes: Array<{ listId: string; index: number }> = [];
+    s.subscribe((c) => changes.push(c));
+
+    // Emptying hidden scope's active list must not switch its active list eagerly or emit hidden rail index 3.
+    s.setCount('main', 0);
+    expect(changes).toEqual([{ listId: 'main', index: 0 }]);
+    expect(s.getState().scopes[0]?.active).toBe('main');
+
+    // Repopulating before popScope preserves focus on 'main'.
+    s.setCount('main', 2);
+    s.popScope();
+    expect(s.isActive('main')).toBe(true);
+  });
 });
 
 describe('invariants', () => {

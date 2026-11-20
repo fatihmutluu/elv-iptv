@@ -342,16 +342,15 @@ export async function loadSeriesEpisodes(
           current.run_id,
           entries.slice(i, i + batchSize),
         );
-        if (i + batchSize < entries.length) await deps.scheduler.yieldNow();
       }
       const keep = new Set(entries.map((e) => e.key));
       const stale = previous.filter((p) => !keep.has(p.key)).map((p) => [sourceId, p.key]);
       for (let i = 0; i < stale.length; i += batchSize) {
+        checkAbort({ signal: opts.signal });
         await tx.batch(
           'DELETE FROM episodes WHERE source_id = ? AND key = ?',
           stale.slice(i, i + batchSize),
         );
-        if (i + batchSize < stale.length) await deps.scheduler.yieldNow();
       }
       return 'ok';
     });

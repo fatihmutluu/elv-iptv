@@ -2,11 +2,12 @@ import { type Key, type KeyInput, LONG_PRESS_MS } from '@elv/focus-core';
 import { useContext, useEffect, useRef } from 'react';
 import { RemoteKeysContext } from './RemoteKeysProvider';
 import {
-  attachPlatformKeySource,
-  type TvPlatform,
+  isEventTextEntryConsumed,
+  markEventTextEntryConsumed,
   TvRemoteContext,
-  toKeyInput,
-} from './remote-dispatcher';
+  type TvRemoteEvent,
+} from './remote-context';
+import { attachPlatformKeySource, type TvPlatform, toKeyInput } from './remote-dispatcher';
 import { TextEntryContext } from './text-entry';
 
 export { type TvPlatform, toKeyInput };
@@ -29,7 +30,11 @@ export function useTvKeySource(onInput: (k: KeyInput) => void): void {
     const suppressedDowns = new Set<Key>();
     let textEntryBackDownAt: number | undefined;
 
-    const forward = (input: KeyInput, requirePriorDown: boolean): void => {
+    const forward = (
+      input: KeyInput,
+      requirePriorDown: boolean,
+      remoteEvent?: TvRemoteEvent,
+    ): void => {
       if (input.key !== 'back') {
         if (textEntry.isActive()) {
           if (input.action === 'down') suppressedDowns.add(input.key);
@@ -62,7 +67,9 @@ export function useTvKeySource(onInput: (k: KeyInput) => void): void {
       }
 
       if (input.action === 'press') {
+        if (remoteEvent !== undefined && isEventTextEntryConsumed(remoteEvent)) return;
         if (textEntry.isActive()) {
+          if (remoteEvent !== undefined) markEventTextEntryConsumed(remoteEvent);
           textEntry.exit();
           return;
         }
@@ -84,8 +91,13 @@ export function useTvKeySource(onInput: (k: KeyInput) => void): void {
         deliveredHeld.delete('back');
         const downAt = textEntryBackDownAt;
         textEntryBackDownAt = undefined;
+        if (remoteEvent !== undefined && isEventTextEntryConsumed(remoteEvent)) {
+          handler.current({ key: 'back', action: 'cancel', time: input.time });
+          return;
+        }
         if (downAt !== undefined) {
           if (input.time - downAt < LONG_PRESS_MS) {
+            if (remoteEvent !== undefined) markEventTextEntryConsumed(remoteEvent);
             if (textEntry.isActive()) textEntry.exit();
             handler.current({ key: 'back', action: 'cancel', time: input.time });
             return;
@@ -94,6 +106,7 @@ export function useTvKeySource(onInput: (k: KeyInput) => void): void {
           return;
         }
         if (textEntry.isActive()) {
+          if (remoteEvent !== undefined) markEventTextEntryConsumed(remoteEvent);
           textEntry.exit();
           handler.current({ key: 'back', action: 'cancel', time: input.time });
           return;
@@ -126,7 +139,7 @@ export function useTvKeySource(onInput: (k: KeyInput) => void): void {
     if (dispatcher !== null) {
       const unregisterTextEntry = dispatcher.registerTextEntry(textEntry);
       const unsubscribe = dispatcher.subscribe((event) =>
-        forward(event.input, event.requirePriorDown),
+        forward(event.input, event.requirePriorDown, event),
       );
       return () => {
         offEnter();

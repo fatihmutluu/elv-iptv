@@ -385,14 +385,37 @@ describe('createKvPreferencesStore', () => {
     expect(seen).toEqual([{ ...DEFAULT_PREFERENCES, reduceMotion: true }]);
   });
 
-  it('enforces > 4 KB guard before touching backend.set', async () => {
+  it('enforces > 4 KB guard before touching backend.set and preserves valid values on 65..4000-byte patches', async () => {
     const { backend } = makeKv();
     const store = createKvPreferencesStore(backend);
+    await store.update({ themePreset: 'abyssalSapphire', locale: 'tr' });
+
+    const tooLong = await store.update({ themePreset: 'x'.repeat(100), locale: 'y'.repeat(100) });
+    expect(tooLong).toEqual({
+      ok: true,
+      value: { ...DEFAULT_PREFERENCES, themePreset: 'abyssalSapphire', locale: 'tr' },
+    });
+
+    vi.mocked(backend.set).mockClear();
     const res = await store.update({ themePreset: 'a'.repeat(5000) });
     expect(res).toEqual({
       ok: false,
       error: { category: 'storage', code: 'preferences-too-large' },
     });
     expect(backend.set).not.toHaveBeenCalled();
+  });
+
+  it('rejects blank keys and skips listeners unsubscribed during notification', async () => {
+    const { backend } = makeKv();
+    expect(() => createKvPreferencesStore(backend, '   ')).toThrow('Preferences key');
+    const store = createKvPreferencesStore(backend);
+    const second = vi.fn();
+    let unsubSecond: (() => void) | undefined;
+    store.subscribe(() => {
+      unsubSecond?.();
+    });
+    unsubSecond = store.subscribe(second);
+    await store.update({ reduceMotion: true });
+    expect(second).not.toHaveBeenCalled();
   });
 });

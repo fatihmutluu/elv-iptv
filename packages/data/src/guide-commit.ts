@@ -61,11 +61,9 @@ export async function commitGuide(tx: SqlDriver, c: RunCtx, g: GuideResult): Pro
       'INSERT OR IGNORE INTO channel_guide (source_id, channel_key, guide_id) VALUES (?, ?, ?)',
       mappings.slice(i, i + c.batchSize).map(([key, guideId]) => [c.sourceId, key, guideId]),
     );
-    if (i + c.batchSize < mappings.length) await c.deps.scheduler.yieldNow();
   }
   for (let i = 0; i < g.channelRows.length; i += c.batchSize) {
     await tx.batch(GUIDE_CHANNEL_SQL, g.channelRows.slice(i, i + c.batchSize));
-    if (i + c.batchSize < g.channelRows.length) await c.deps.scheduler.yieldNow();
   }
   await tx.run('DELETE FROM programmes WHERE source_id = ?', [c.sourceId]);
   const swapped = await tx.run(SWAP_PROGRAMMES, [c.sourceId, c.runId, c.sourceId]);

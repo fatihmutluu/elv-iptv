@@ -136,5 +136,8 @@ describe('resolveFallbackId', () => {
     expect(resolveFallbackId(scope, 'badFallback')).toBeUndefined();
     expect(resolveFallbackId(scope, 'unknownSource')).toBeUndefined();
     expect(resolveFallbackId(scope, 'partial')).toBe('emptyLeaf');
+    const protoScope = createScope('p', [l('a', { count: 0, fallbackId: 'toString' })], 'a');
+    expect(resolveFallbackId(protoScope, 'a')).toBeUndefined();
+    expect(resolveFallbackId(protoScope, 'constructor')).toBeUndefined();
   });
 });

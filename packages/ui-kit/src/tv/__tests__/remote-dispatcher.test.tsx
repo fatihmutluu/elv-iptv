@@ -384,4 +384,73 @@ describe('TvRemoteProvider (#277)', () => {
       (globalThis as { window?: unknown }).window = prevWindow;
     }
   });
+
+  it('consumes Back press and orphan Back up across sibling consumers when exiting TextEntryBoundary', async () => {
+    const apis = mockTvApis('ios', true);
+    const first = jest.fn<void, [KeyInput]>();
+    const second = jest.fn<void, [KeyInput]>();
+    const outer = jest.fn<void, [KeyInput]>();
+
+    const view = await render(
+      <TvRemoteProvider>
+        <Consumer onInput={outer} />
+        <TextEntryBoundary>
+          <Consumer onInput={first} />
+          <Consumer onInput={second} />
+          <TvTextInput testID="multi-consumer-input" />
+        </TextEntryBoundary>
+      </TvRemoteProvider>,
+    );
+
+    await act(async () => {
+      fireEvent(screen.getByTestId('multi-consumer-input'), 'focus');
+    });
+    apis.emitRemote({ eventType: 'menu' });
+    expect(first).not.toHaveBeenCalled();
+    expect(second).not.toHaveBeenCalled();
+    expect(outer).not.toHaveBeenCalled();
+
+    // Next Menu press after text entry exited reaches consumers normally.
+    apis.emitRemote({ eventType: 'menu' });
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(outer).toHaveBeenCalledTimes(1);
+
+    // Orphan Android TVEventHandler back:up while active cancels without leaking back:up to siblings.
+    first.mockClear();
+    second.mockClear();
+    outer.mockClear();
+    await act(async () => {
+      fireEvent(screen.getByTestId('multi-consumer-input'), 'focus');
+    });
+    apis.emitRemote({ eventType: 'menu', eventKeyAction: 1 });
+    expect(first.mock.calls.map(([k]) => `${k.key}:${k.action}`)).toEqual(['back:cancel']);
+    expect(second.mock.calls.map(([k]) => `${k.key}:${k.action}`)).toEqual(['back:cancel']);
+    expect(outer.mock.calls.map(([k]) => `${k.key}:${k.action}`)).toEqual(['back:cancel']);
+
+    await view.unmount();
+  });
+
+  it('registers TextEntryBoundary without inner key consumers and deduplicates nested shared dispatcher providers', async () => {
+    const apis = mockTvApis('ios', true);
+    const shared = createTvRemoteDispatcher();
+
+    const view = await render(
+      <TvRemoteProvider dispatcher={shared}>
+        <TvRemoteProvider dispatcher={shared}>
+          <TextEntryBoundary>
+            <TvTextInput testID="solo-input" />
+          </TextEntryBoundary>
+        </TvRemoteProvider>
+      </TvRemoteProvider>,
+    );
+
+    expect(apis.addRemote).toHaveBeenCalledTimes(1);
+    expect(shared.isTextEntryActive()).toBe(false);
+    await act(async () => {
+      fireEvent(screen.getByTestId('solo-input'), 'focus');
+    });
+    expect(shared.isTextEntryActive()).toBe(true);
+    await view.unmount();
+  });
 });

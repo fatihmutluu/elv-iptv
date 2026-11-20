@@ -170,13 +170,13 @@ export function subscribeWebKeys(
 
   const onKeyUp = (event: WebKeyEventLike): void => {
     if (!event || typeof event.key !== 'string') return;
-    if (isImeComposingEvent(event)) return;
     if (event.key === 'Escape' && blurredInputOnEscape) {
       blurredInputOnEscape = false;
       return;
     }
     const key = WEB_KEYS[event.key];
-    if (!key || !held.delete(key)) return;
+    if (!key) return;
+    if (!held.delete(key)) return;
     emit({ key, action: 'up', time: now() });
   };
 

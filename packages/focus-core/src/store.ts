@@ -185,7 +185,8 @@ export function createFocusStore(root: {
         changes.push({ listId, index: nextIndex });
       }
       const scope = scopes[found.scope] as ScopeState;
-      if (nextCount === 0 && scope.active === listId) {
+      const isTopScope = found.scope === scopes.length - 1;
+      if (isTopScope && nextCount === 0 && scope.active === listId) {
         const fallbackId = resolveFallbackId(scope, listId);
         if (fallbackId !== undefined) {
           const target = scope.lists[fallbackId] as ListState;

@@ -147,24 +147,42 @@ export function serializePreferences(snapshot: PreferencesSnapshot): Result<stri
 }
 
 function mergeCandidate(base: PreferencesSnapshot, patch: PreferencesPatch): PreferencesSnapshot {
-  const themePreset =
-    typeof patch.themePreset === 'string' && patch.themePreset.trim().length > 0
-      ? patch.themePreset
-      : base.themePreset;
-  const locale =
-    typeof patch.locale === 'string' && patch.locale.trim().length > 0 ? patch.locale : base.locale;
+  const themePreset = isValidShortString(patch.themePreset) ? patch.themePreset : base.themePreset;
+  const locale = isValidShortString(patch.locale) ? patch.locale : base.locale;
   const fontScale =
     typeof patch.fontScale === 'number' && Number.isFinite(patch.fontScale)
       ? clampFontScale(patch.fontScale)
       : base.fontScale;
   const reduceMotion =
     typeof patch.reduceMotion === 'boolean' ? patch.reduceMotion : base.reduceMotion;
-  return {
+  return Object.freeze({
     version: PREFERENCES_SCHEMA_VERSION,
     themePreset,
     locale,
     fontScale,
     reduceMotion,
+  });
+}
+
+function mergeRawCandidate(
+  base: PreferencesSnapshot,
+  patch: PreferencesPatch,
+): PreferencesSnapshot {
+  return {
+    version: PREFERENCES_SCHEMA_VERSION,
+    themePreset:
+      typeof patch.themePreset === 'string' && patch.themePreset.trim().length > 0
+        ? patch.themePreset
+        : base.themePreset,
+    locale:
+      typeof patch.locale === 'string' && patch.locale.trim().length > 0
+        ? patch.locale
+        : base.locale,
+    fontScale:
+      typeof patch.fontScale === 'number' && Number.isFinite(patch.fontScale)
+        ? clampFontScale(patch.fontScale)
+        : base.fontScale,
+    reduceMotion: typeof patch.reduceMotion === 'boolean' ? patch.reduceMotion : base.reduceMotion,
   };
 }
 
@@ -177,6 +195,9 @@ export function createKvPreferencesStore(
   backend: PreferencesKvBackend,
   key = DEFAULT_PREFERENCES_KEY,
 ): PreferencesStore {
+  if (typeof key !== 'string' || key.trim().length === 0) {
+    throw new Error('Preferences key must be a non-empty string');
+  }
   let current: PreferencesSnapshot = DEFAULT_PREFERENCES;
   let hydrated = false;
   let tail: Promise<unknown> = Promise.resolve();
@@ -190,6 +211,7 @@ export function createKvPreferencesStore(
 
   const notify = (snapshot: PreferencesSnapshot): void => {
     for (const listener of [...listeners]) {
+      if (!listeners.has(listener)) continue;
       try {
         listener(snapshot);
       } catch {
@@ -219,11 +241,10 @@ export function createKvPreferencesStore(
         if (!hydrated) {
           await readFromBackend();
         }
-        const candidate = mergeCandidate(current, patch);
-        const rawEncoded = serializePreferences(candidate);
+        const rawEncoded = serializePreferences(mergeRawCandidate(current, patch));
         if (!rawEncoded.ok) return rawEncoded;
 
-        const next = parsePreferences(rawEncoded.value);
+        const next = mergeCandidate(current, patch);
         const encoded = serializePreferences(next);
         if (!encoded.ok) return encoded;
 

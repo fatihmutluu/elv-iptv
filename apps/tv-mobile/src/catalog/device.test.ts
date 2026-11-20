@@ -122,6 +122,14 @@ describe('createDeviceCatalog', () => {
     const { createDeviceCatalog } = await import('./device');
     await expect(createDeviceCatalog()).rejects.toThrow('settings init failed');
     expect(driver.close).toHaveBeenCalledTimes(1);
+
+    createSettingsStore.mockImplementationOnce(() => {
+      throw new Error('settings sync fail');
+    });
+    driver.close.mockImplementationOnce(() => {
+      throw new Error('sync close boom');
+    });
+    await expect(createDeviceCatalog()).rejects.toThrow('settings sync fail');
     await expect(createDeviceCatalog()).resolves.toBeDefined();
   });
 });

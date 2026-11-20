@@ -136,4 +136,23 @@ describe('subscribeWebKeys IME and ARIA editable guards (#136, #139)', () => {
 
     unsubscribe();
   });
+
+  it('releases a key held before IME activation even if keyup reports isComposing', () => {
+    const { win, emit } = createFakeWindow();
+    const inputs: KeyInput[] = [];
+    const unsubscribe = subscribeWebKeys(
+      win,
+      { isActive: () => false },
+      () => 10,
+      (k) => inputs.push(k),
+    );
+
+    emit('keydown', { key: 'ArrowRight' });
+    emit('keyup', { key: 'ArrowRight', isComposing: true });
+    expect(inputs).toEqual([
+      { key: 'right', action: 'down', time: 10 },
+      { key: 'right', action: 'up', time: 10 },
+    ]);
+    unsubscribe();
+  });
 });

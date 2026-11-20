@@ -95,7 +95,7 @@ export function withCount(
  * non-self sibling when every reachable fallback is empty.
  */
 export function resolveFallbackId(scope: ScopeState, fromId: string): string | undefined {
-  const start = scope.lists[fromId];
+  const start = Object.hasOwn(scope.lists, fromId) ? scope.lists[fromId] : undefined;
   if (!start) return undefined;
   let current: ListState = start;
   const visited = new Set<string>([fromId]);
@@ -103,7 +103,7 @@ export function resolveFallbackId(scope: ScopeState, fromId: string): string | u
   while (current.fallbackId !== undefined) {
     const nextId: string = current.fallbackId;
     if (visited.has(nextId)) break;
-    const next = scope.lists[nextId];
+    const next = Object.hasOwn(scope.lists, nextId) ? scope.lists[nextId] : undefined;
     if (!next) break;
     visited.add(nextId);
     if (firstValid === undefined) firstValid = nextId;

@@ -77,7 +77,11 @@ async function open(): Promise<CatalogService> {
       ...(manifest === undefined ? {} : { manifest }),
     });
   } catch (error) {
-    await db.close?.().catch(() => undefined);
+    try {
+      await db.close?.();
+    } catch {
+      // Preserve the original open error even if closing the partial handle throws synchronously or rejects.
+    }
     throw error;
   }
 }

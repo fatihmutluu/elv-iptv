@@ -32,6 +32,7 @@ export function TvFocusAnchor({
       focusable
       hasTVPreferredFocus={hasTVPreferredFocus}
       accessible={false}
+      accessibilityElementsHidden
       importantForAccessibility="no"
       pointerEvents="none"
       style={anchorStyle}

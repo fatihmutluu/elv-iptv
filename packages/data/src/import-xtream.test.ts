@@ -358,7 +358,7 @@ describe('loadSeriesEpisodes', () => {
     );
   });
 
-  it('chunks and yields between episode batches when a series exceeds batchSize', async () => {
+  it('chunks episode batches atomically without yielding inside the write transaction, then yields after commit', async () => {
     const data = sampleCatalog();
     data.seriesInfo['300'] = {
       seasons: [{ season_number: 1 }],
@@ -378,15 +378,20 @@ describe('loadSeriesEpisodes', () => {
     const wrappedDb = {
       ...e.db,
       transaction: <T>(fn: (tx: typeof e.db) => Promise<T>) =>
-        e.db.transaction((tx) =>
-          fn({
-            ...tx,
-            batch: async (sql, batchRows) => {
-              if (sql.includes('INSERT INTO episodes')) events.push('batch');
-              return tx.batch(sql, batchRows);
-            },
-          }),
-        ),
+        e.db.transaction(async (tx) => {
+          events.push('tx-start');
+          try {
+            return await fn({
+              ...tx,
+              batch: async (sql, batchRows) => {
+                if (sql.includes('INSERT INTO episodes')) events.push('batch');
+                return tx.batch(sql, batchRows);
+              },
+            });
+          } finally {
+            events.push('tx-end');
+          }
+        }),
     };
     const scheduler = {
       yieldNow: async () => {
@@ -400,7 +405,7 @@ describe('loadSeriesEpisodes', () => {
       { batchSize: 10 },
     );
     expect(r).toEqual({ ok: true, value: 25 });
-    expect(events).toEqual(['batch', 'yield', 'batch', 'yield', 'batch', 'yield']);
+    expect(events).toEqual(['tx-start', 'batch', 'batch', 'batch', 'tx-end', 'yield']);
     expect(await count(e.db, 'episodes')).toBe(25);
   });
 });
