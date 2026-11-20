@@ -95,6 +95,7 @@ extension AetherBackend {
             self.onObservation?(.phase(.loading), serial)
           case .playing:
             self.readySerial = serial
+            self.inReloadFromState = false
             self.maybeLogRouteDiagnostics(from: target, serial: serial, phaseOverride: .playing)
             self.onObservation?(.phase(.playing), serial)
             if self.tracksEmittedSerial != serial || self.tracksDeferredForReload {
@@ -113,8 +114,10 @@ extension AetherBackend {
             }
           case .paused:
             if target.state == .loading {
+              self.inReloadFromState = true
               self.onObservation?(.phase(.loading), serial)
             } else {
+              self.inReloadFromState = false
               let nowMs = ProcessInfo.processInfo.systemUptime * 1_000.0
               let bySystem = self.audioInterrupted || nowMs <= self.systemPauseUntilUptimeMs
               self.onObservation?(.phase(bySystem ? .systemPaused : .paused), serial)
@@ -161,9 +164,25 @@ extension AetherBackend {
             }
           case .loading:
             if self.readySerial == serial {
+              self.inReloadFromState = true
               self.onObservation?(.phase(.loading), serial)
             }
-          case .playing, .paused:
+          case .playing:
+            if self.inReloadFromState && target.playbackPhase == .playing {
+              self.inReloadFromState = false
+              self.onObservation?(.phase(.playing), serial)
+            }
+            if self.tracksDeferredForReload {
+              self.tracksDeferredForReload = false
+              self.scheduleTracksSnapshot(from: target, serial: serial)
+            }
+          case .paused:
+            if self.inReloadFromState {
+              self.inReloadFromState = false
+              let nowMs = ProcessInfo.processInfo.systemUptime * 1_000.0
+              let bySystem = self.audioInterrupted || nowMs <= self.systemPauseUntilUptimeMs
+              self.onObservation?(.phase(bySystem ? .systemPaused : .paused), serial)
+            }
             if self.tracksDeferredForReload {
               self.tracksDeferredForReload = false
               self.scheduleTracksSnapshot(from: target, serial: serial)

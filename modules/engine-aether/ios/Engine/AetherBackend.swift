@@ -39,6 +39,7 @@ final class AetherBackend: PlayerBackend {
   var tracksEmittedSerial = 0
   var pendingTracksSerial = 0
   var tracksDeferredForReload = false
+  var inReloadFromState = false
   var errorReportedSerial = 0
   var loggedRouteSerial = 0
   var gateGeneration = 0
@@ -245,6 +246,7 @@ final class AetherBackend: PlayerBackend {
     tracksEmittedSerial = 0
     pendingTracksSerial = 0
     tracksDeferredForReload = false
+    inReloadFromState = false
     errorReportedSerial = 0
     loggedRouteSerial = 0
     openedMsForSerial = nil

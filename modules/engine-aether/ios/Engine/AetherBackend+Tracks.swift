@@ -251,6 +251,7 @@ extension AetherBackend {
     tracksEmittedSerial = 0
     pendingTracksSerial = 0
     tracksDeferredForReload = false
+    inReloadFromState = false
     cancelTasksAndReader()
     publishSubtitlePresentation(.empty)
     currentEngine.stop(resetDisplayCriteria: false, finalTeardown: false)
