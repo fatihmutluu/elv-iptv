@@ -135,3 +135,31 @@ export async function connectFakeProcess(
     kill,
   };
 }
+
+/** Runs script steps strictly in ascending `afterMs` order via chained timers (immune to Node TimersList bucketing). */
+export function scheduleFakeScript(
+  p: FakeProc,
+  media: FakeMedia,
+  steps: FakeMpvScript,
+  runStep: (p: FakeProc, media: FakeMedia, step: FakeMpvStep) => void,
+): void {
+  const ordered = [...steps].sort((a, b) => a.afterMs - b.afterMs);
+  const scheduleFrom = (index: number, elapsedMs: number): void => {
+    const first = ordered[index];
+    if (!first || p.media !== media || p.gone || p.hung) return;
+    const delay = Math.max(0, first.afterMs - elapsedMs);
+    media.timers.push(
+      setTimeout(() => {
+        if (p.media !== media || p.gone || p.hung) return;
+        let cursor = index;
+        while (cursor < ordered.length && ordered[cursor]?.afterMs === first.afterMs) {
+          runStep(p, media, ordered[cursor] as FakeMpvStep);
+          cursor += 1;
+          if (p.media !== media || p.gone || p.hung) return;
+        }
+        scheduleFrom(cursor, first.afterMs);
+      }, delay),
+    );
+  };
+  scheduleFrom(0, 0);
+}

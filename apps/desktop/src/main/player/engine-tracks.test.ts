@@ -2,6 +2,7 @@ import type { EngineEvent, MediaTracks, PlayerEngine } from '@elv/playback';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DESKTOP_CAPABILITIES } from '../../shared/player-ipc.ts';
 import { createMpvEngine, type MpvEngineDeps } from './engine.ts';
+import type { MpvClient } from './mpv/client.ts';
 import { createFakeMpv, type FakeMpv, type FakeMpvScript } from './mpv/fake-mpv.ts';
 import { LAUNCH_OPTIONS } from './mpv/options.ts';
 import type { VideoPresenter } from './presenter/types.ts';
@@ -53,12 +54,12 @@ const timers: MpvEngineDeps['timers'] = {
   clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
 };
 
-function stubPresenter(): VideoPresenter {
+function stubPresenter(onAttach: (client: MpvClient) => void): VideoPresenter {
   return {
     kind: 'child-window',
     coversArea: true,
     prepare: async () => ['--wid=4660'],
-    attach: () => undefined,
+    attach: onAttach,
     setArea: () => undefined,
     toggleFullscreen: () => undefined,
     onEvent: () => () => undefined,
@@ -77,9 +78,12 @@ async function setup(
   baseArgs: readonly string[] = LAUNCH_OPTIONS,
 ) {
   const fake: FakeMpv = createFakeMpv({ scripts, transport: 'socket' });
+  let client: MpvClient | undefined;
   const engine: PlayerEngine = createMpvEngine({
     spawn: (args, signal) => fake.spawn(args, signal),
-    presenter: stubPresenter(),
+    presenter: stubPresenter((c) => {
+      client = c;
+    }),
     baseArgs,
     loadMode: 'replace',
     now: () => Date.now(),
@@ -92,7 +96,11 @@ async function setup(
     engine.release();
     await fake.dispose();
   });
-  await vi.waitFor(() => expect(fake.sent).toContainEqual(['request_log_messages', 'v']));
+  await vi.waitFor(() => {
+    expect(fake.sent).toContainEqual(['request_log_messages', 'v']);
+    expect(client).toBeDefined();
+  });
+  await client?.command(['get_property', 'pause']);
   return { fake, engine, events };
 }
 

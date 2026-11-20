@@ -57,10 +57,15 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
 
     await window.getByTestId('nav-tab-live').click();
     await expect(window.getByTestId('browse-categories-list')).toBeVisible();
-    await expect(window.getByTestId('browse-items-list-row-0')).toBeVisible();
+    const row0 = window.getByTestId('browse-items-list-row-0');
+    const row1 = window.getByTestId('browse-items-list-row-1');
+    await expect(row0).toBeVisible();
+    await expect(row1).toBeVisible();
+    await expect(row0).not.toHaveText(/^(Loading…|Yükleniyor…)?$/);
+    await expect(row1).not.toHaveText(/^(Loading…|Yükleniyor…)?$/);
 
-    const ch0Label = (await window.getByTestId('browse-items-list-row-0').textContent()) ?? '';
-    const ch1Label = (await window.getByTestId('browse-items-list-row-1').textContent()) ?? '';
+    const ch0Label = (await row0.textContent()) ?? '';
+    const ch1Label = (await row1.textContent()) ?? '';
     expect(ch0Label.length).toBeGreaterThan(0);
     expect(ch1Label.length).toBeGreaterThan(0);
 
@@ -109,8 +114,10 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
     await expect(window.getByTestId('browse-items-list-row-1')).toBeVisible();
 
     await window.getByTestId('nav-tab-series').click();
-    await expect(window.getByTestId('browse-items-list-row-0')).toBeVisible();
-    await window.getByTestId('browse-items-list-row-0').click();
+    const seriesRow0 = window.getByTestId('browse-items-list-row-0');
+    await expect(seriesRow0).toBeVisible();
+    await expect(seriesRow0).not.toHaveText(/^(Loading…|Yükleniyor…)?$/);
+    await seriesRow0.click();
 
     await expect(window.getByTestId('series-seasons-list-row-0')).toBeVisible({ timeout: 15_000 });
     await expect(window.getByTestId('series-episodes-list-row-0')).toBeVisible({ timeout: 15_000 });

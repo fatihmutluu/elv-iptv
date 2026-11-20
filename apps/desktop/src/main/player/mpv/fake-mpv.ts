@@ -15,6 +15,7 @@ import {
   type FakeProc,
   fakeHttpError,
   parseResetOnNextFile,
+  scheduleFakeScript,
   syncTrackSelection,
 } from './fake-mpv-proc.ts';
 import type { MpvProcess } from './process.ts';
@@ -210,8 +211,7 @@ export function createFakeMpv(opts: {
         endLater(p, () => {
           const media: FakeMedia = { id, started: false, timers: [] };
           p.media = media;
-          for (const step of steps)
-            media.timers.push(setTimeout(() => runStep(p, media, step), step.afterMs));
+          scheduleFakeScript(p, media, steps, runStep);
         });
         return;
       }

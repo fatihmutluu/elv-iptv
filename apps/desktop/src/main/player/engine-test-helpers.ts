@@ -173,9 +173,14 @@ export async function setupEngineTest(cleanups: Array<() => Promise<void>>, o: S
     await fake.dispose();
   });
   if (o.ready !== false) {
-    await vi.waitFor(() => expect(fake.sent).toContainEqual(['request_log_messages', 'v']), {
-      interval: 5,
-    });
+    await vi.waitFor(
+      () => {
+        expect(fake.sent).toContainEqual(['request_log_messages', 'v']);
+        expect(presenter.attached).toHaveLength(1);
+      },
+      { interval: 5 },
+    );
+    await presenter.attached[0]?.command(['get_property', 'pause']);
   }
   return { fake, presenter, engine, events, ui };
 }
@@ -187,6 +192,6 @@ export const states = (events: readonly EngineEvent[], attempt: number): EngineS
 export const errors = (events: readonly EngineEvent[]) => events.filter((e) => e.type === 'error');
 export const playing = (events: readonly EngineEvent[], attempt: number) =>
   vi.waitFor(() => expect(states(events, attempt)).toContain('playing'), {
-    timeout: 3000,
+    timeout: 10_000,
     interval: 5,
   });
