@@ -76,11 +76,12 @@ describe('PlayerGateScreen soak runs', () => {
       ],
     });
     await render(<PlayerGateScreen params={params} createEngine={() => engine} />);
-    await advance(59_000, 500);
+    await advance(55_000, 5_000);
+    await advance(4_000, 4_000);
     expect(playerLines(log)).toHaveLength(0);
-    await advance(1000, 500);
+    await advance(1_000, 1_000);
     expect(playerLines(log)).toHaveLength(1);
-    await advance(30_000, 1000);
+    await advance(30_000, 10_000);
     const m = onlyMetrics(log);
     expect(loads(engine)).toEqual([`${LIVE}/1001.ts`]);
     expect(m.zaps).toBe(0);
@@ -107,11 +108,11 @@ describe('PlayerGateScreen soak runs', () => {
         createEngine={() => engine}
       />,
     );
-    await advance(5000, 100);
+    await advance(5_000, 1_000);
     expect(playerLines(log)).toHaveLength(0);
-    await advance(500, 100);
+    await advance(500, 500);
     expect(playerLines(log)).toHaveLength(1);
-    await advance(150_000, 1000);
+    await advance(150_000, 10_000);
     const m = onlyMetrics(log);
     expect(loads(engine)).toEqual([`${VOD}/200001.mp4`]);
     expect(m.zaps).toBe(0);
@@ -128,9 +129,10 @@ describe('PlayerGateScreen soak runs', () => {
         createEngine={() => setup()}
       />,
     );
-    await advance(59_000, 500);
+    await advance(55_000, 5_000);
+    await advance(4_000, 4_000);
     expect(playerLines(log)).toHaveLength(0);
-    await advance(1000, 500);
+    await advance(1_000, 1_000);
     expect(onlyMetrics(log).soak).toMatchObject({ minutes: 1, ended: false });
   });
 
@@ -144,7 +146,7 @@ describe('PlayerGateScreen soak runs', () => {
     await render(
       <PlayerGateScreen params={{ ...params, fault: '404' }} createEngine={() => engine} />,
     );
-    await advance(10_000, 100);
+    await advance(10_000, 5_000);
     const m = onlyMetrics(log);
     expect(m.final).toBe('failed');
     expect(m.zaps).toBe(0);

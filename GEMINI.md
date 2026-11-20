@@ -14,10 +14,12 @@ Antigravity and Gemini CLI automatically load [AGENTS.md](AGENTS.md) at the repo
 3. Run `pnpm check` (or `pnpm.cmd check` in restricted Windows PowerShell policies) until `check: 10 passed, 0 failed` before opening a PR.
 
 ## Subagent & Swarm model routing
-- **Frontier reasoning (`Gemini 4 Carbon (High)`):** architecture, specs, plans, native/concurrency tasks (Media3, AetherEngine, libmpv IPC, SQLite concurrency) and final whole-branch reviews.
-- **Standard implementation (`Gemini 4 Carbon (Medium)` or `Carbon (High)`):** well-specified multi-file TypeScript/React Native tasks and per-task reviews.
-- **Mechanical tasks (`Gemini 4 Hydrogen (XHigh)`):** low-risk manifests, configs and boilerplate.
-- **Read-only triage (`Gemini 3.8 Flash`):** read-only log/doc summarization only; never use for production code or code reviews.
+- **Architecture, specs, plans, tricky native/concurrency/security (`libmpv`, `AetherEngine`, `Media3`, SQLite WAL, Electron security):** `Gemini 4 Neon (XHigh)` / `Gemini 4 Neon (High)`.
+- **Independent whole-branch PR reviews & performance/security audits:** `Gemini 4 Neon (High)` (`Neon (XHigh)` for high-risk native/security PRs).
+- **Well-specified multi-file UI screens, features, data logic & per-task reviews:** `Gemini 4 Neon (Medium)` (escalate to `Neon (High)` for tricky focus/concurrency).
+- **Scoped tests, small fixes, CI/YAML & helper scripts:** `Gemini 4 Neon (Low)` or `Gemini 4 Hydrogen (XHigh)`.
+- **Mechanical tasks (icon paths, `.po` entries, manifests, boilerplate):** `Gemini 4 Hydrogen (XHigh)`.
+- **Read-only triage & doc/log summarization:** `Gemini 3.8 Flash` (never for production code or code reviews).
 
 ## External PR safety
 - Inspect outside PRs via `gh pr view` and `gh pr diff` before checkout.

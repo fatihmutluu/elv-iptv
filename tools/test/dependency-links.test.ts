@@ -58,11 +58,11 @@ function workspace(): string {
   return root;
 }
 
-const names = (root: string) =>
-  cruise(root).map((v) => `${v.rule.name}: ${v.from.split('\\').join('/')}`);
+const names = async (root: string) =>
+  (await cruise(root)).map((v) => `${v.rule.name}: ${v.from.split('\\').join('/')}`);
 
 describe('dependency rules over pnpm-style linked workspaces', () => {
-  it('resolves @elv/* imports through links to real folders without violations', () => {
+  it('resolves @elv/* imports through links to real folders without violations', async () => {
     const root = workspace();
     pkg(root, 'packages/domain', '@elv/domain', 'export const id = 1;');
     pkg(
@@ -72,10 +72,10 @@ describe('dependency rules over pnpm-style linked workspaces', () => {
       "import { id } from '@elv/domain';\nexport const s = id;",
     );
     link(root, 'packages/sources', '@elv/domain', 'packages/domain');
-    expect(cruise(root)).toEqual([]);
+    expect(await cruise(root)).toEqual([]);
   });
 
-  it('catches a pure package importing react-native from the pnpm store', () => {
+  it('catches a pure package importing react-native from the pnpm store', async () => {
     const root = workspace();
     pkg(root, 'packages/domain', '@elv/domain', 'export const id = 1;');
     pkg(
@@ -86,10 +86,12 @@ describe('dependency rules over pnpm-style linked workspaces', () => {
     );
     link(root, 'packages/sources', '@elv/domain', 'packages/domain');
     thirdParty(root, 'packages/sources', 'react-native');
-    expect(names(root)).toEqual([expect.stringContaining('pure-packages-no-platform: packages')]);
+    expect(await names(root)).toEqual([
+      expect.stringContaining('pure-packages-no-platform: packages'),
+    ]);
   });
 
-  it('catches a declared react-native that resolves to the react-native-tvos alias', () => {
+  it('catches a declared react-native that resolves to the react-native-tvos alias', async () => {
     const root = workspace();
     pkg(
       root,
@@ -99,7 +101,9 @@ describe('dependency rules over pnpm-style linked workspaces', () => {
       { dependencies: { 'react-native': 'npm:react-native-tvos@1.0.0' } },
     );
     thirdParty(root, 'packages/sources', 'react-native', 'react-native-tvos');
-    expect(names(root)).toEqual([expect.stringContaining('pure-packages-no-platform: packages')]);
+    expect(await names(root)).toEqual([
+      expect.stringContaining('pure-packages-no-platform: packages'),
+    ]);
   });
 
   it.each([
@@ -111,16 +115,18 @@ describe('dependency rules over pnpm-style linked workspaces', () => {
     'expo-sqlite',
     '@expo/vector-icons',
     'electron',
-  ])('catches a pure package importing a declared %s', (lib) => {
+  ])('catches a pure package importing a declared %s', async (lib) => {
     const root = workspace();
     pkg(root, 'packages/data', '@elv/data', `import x from '${lib}';\nexport const d = x;`, {
       dependencies: { [lib]: '1.0.0' },
     });
     thirdParty(root, 'packages/data', lib);
-    expect(names(root)).toEqual([expect.stringContaining('pure-packages-no-platform: packages')]);
+    expect(await names(root)).toEqual([
+      expect.stringContaining('pure-packages-no-platform: packages'),
+    ]);
   });
 
-  it('catches a feature importing a scoped expo package', () => {
+  it('catches a feature importing a scoped expo package', async () => {
     const root = workspace();
     pkg(
       root,
@@ -130,10 +136,12 @@ describe('dependency rules over pnpm-style linked workspaces', () => {
       { dependencies: { '@expo/vector-icons': '1.0.0' } },
     );
     thirdParty(root, 'packages/features', '@expo/vector-icons');
-    expect(names(root)).toEqual([expect.stringContaining('features-no-modules-or-apps: packages')]);
+    expect(await names(root)).toEqual([
+      expect.stringContaining('features-no-modules-or-apps: packages'),
+    ]);
   });
 
-  it('accepts react and react-native declared as peer and dev dependencies of a UI package', () => {
+  it('accepts react and react-native declared as peer and dev dependencies of a UI package', async () => {
     const root = workspace();
     pkg(
       root,
@@ -147,19 +155,21 @@ describe('dependency rules over pnpm-style linked workspaces', () => {
     );
     thirdParty(root, 'packages/ui-kit', 'react');
     thirdParty(root, 'packages/ui-kit', 'react-native', 'react-native-tvos');
-    expect(names(root)).toEqual([]);
+    expect(await names(root)).toEqual([]);
   });
 
-  it('still rejects a dev-only dependency imported from shipped sources', () => {
+  it('still rejects a dev-only dependency imported from shipped sources', async () => {
     const root = workspace();
     pkg(root, 'packages/ui-kit', '@elv/ui-kit', "import t from 'tooling';\nexport const u = t;", {
       devDependencies: { tooling: '1.0.0' },
     });
     thirdParty(root, 'packages/ui-kit', 'tooling');
-    expect(names(root)).toEqual([expect.stringContaining('no-dev-dependencies-in-src: packages')]);
+    expect(await names(root)).toEqual([
+      expect.stringContaining('no-dev-dependencies-in-src: packages'),
+    ]);
   });
 
-  it('rejects a dev-only dependency imported from a desktop renderer src folder', () => {
+  it('rejects a dev-only dependency imported from a desktop renderer src folder', async () => {
     const root = workspace();
     pkg(
       root,
@@ -169,12 +179,12 @@ describe('dependency rules over pnpm-style linked workspaces', () => {
       { devDependencies: { tooling: '1.0.0' } },
     );
     thirdParty(root, 'apps/desktop/renderer', 'tooling');
-    expect(names(root)).toEqual([
+    expect(await names(root)).toEqual([
       expect.stringContaining('no-dev-dependencies-in-src: apps/desktop/renderer/src'),
     ]);
   });
 
-  it('catches a feature importing a native module through its package name', () => {
+  it('catches a feature importing a native module through its package name', async () => {
     const root = workspace();
     pkg(root, 'modules/engine-x', '@elv/engine-x', 'export const e = 1;');
     pkg(
@@ -184,6 +194,8 @@ describe('dependency rules over pnpm-style linked workspaces', () => {
       "import { e } from '@elv/engine-x';\nexport const f = e;",
     );
     link(root, 'packages/features', '@elv/engine-x', 'modules/engine-x');
-    expect(names(root)).toEqual([expect.stringContaining('features-no-modules-or-apps: packages')]);
+    expect(await names(root)).toEqual([
+      expect.stringContaining('features-no-modules-or-apps: packages'),
+    ]);
   });
 });

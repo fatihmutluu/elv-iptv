@@ -2,6 +2,7 @@ import type { EngineEvent, MediaTracks, PlayerEngine } from '@elv/playback';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DESKTOP_CAPABILITIES } from '../../shared/player-ipc.ts';
 import { createMpvEngine, type MpvEngineDeps } from './engine.ts';
+import type { MpvClient } from './mpv/client.ts';
 import { createFakeMpv, type FakeMpv, type FakeMpvScript } from './mpv/fake-mpv.ts';
 import { LAUNCH_OPTIONS } from './mpv/options.ts';
 import type { VideoPresenter } from './presenter/types.ts';
@@ -53,12 +54,12 @@ const timers: MpvEngineDeps['timers'] = {
   clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
 };
 
-function stubPresenter(): VideoPresenter {
+function stubPresenter(onAttach: (client: MpvClient) => void): VideoPresenter {
   return {
     kind: 'child-window',
     coversArea: true,
     prepare: async () => ['--wid=4660'],
-    attach: () => undefined,
+    attach: onAttach,
     setArea: () => undefined,
     toggleFullscreen: () => undefined,
     onEvent: () => () => undefined,
@@ -68,6 +69,7 @@ function stubPresenter(): VideoPresenter {
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
+  vi.useRealTimers();
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 
@@ -76,9 +78,12 @@ async function setup(
   baseArgs: readonly string[] = LAUNCH_OPTIONS,
 ) {
   const fake: FakeMpv = createFakeMpv({ scripts, transport: 'socket' });
+  let client: MpvClient | undefined;
   const engine: PlayerEngine = createMpvEngine({
     spawn: (args, signal) => fake.spawn(args, signal),
-    presenter: stubPresenter(),
+    presenter: stubPresenter((c) => {
+      client = c;
+    }),
     baseArgs,
     loadMode: 'replace',
     now: () => Date.now(),
@@ -91,7 +96,11 @@ async function setup(
     engine.release();
     await fake.dispose();
   });
-  await vi.waitFor(() => expect(fake.sent).toContainEqual(['request_log_messages', 'v']));
+  await vi.waitFor(() => {
+    expect(fake.sent).toContainEqual(['request_log_messages', 'v']);
+    expect(client).toBeDefined();
+  });
+  await client?.command(['get_property', 'pause']);
   return { fake, engine, events };
 }
 
@@ -293,8 +302,21 @@ describe('MpvEngine audio and subtitle track selection', () => {
       { afterMs: 20, property: 'audio-device-list', value: [{ name: 'auto' }, { name: 'hdmi' }] },
     ];
     const { fake, engine } = await setup({ [URL_MULTI]: hotplugScript });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     engine.load({ attempt: 1, url: URL_MULTI, headers: {}, kind: 'vod' });
 
-    await vi.waitFor(() => expect(fake.sent).toContainEqual(['ao-reload']), { timeout: 2000 });
+    const until = async (check: () => boolean): Promise<void> => {
+      for (let i = 0; i < 20000 && !check(); i += 1) {
+        await new Promise((r) => setImmediate(r));
+      }
+      expect(check()).toBe(true);
+    };
+
+    await until(() => fake.sent.some((c) => c[0] === 'loadfile'));
+    await vi.advanceTimersByTimeAsync(25);
+    await until(() => vi.getTimerCount() > 0);
+    await vi.advanceTimersByTimeAsync(500);
+    await until(() => fake.sent.some((c) => c[0] === 'ao-reload'));
+    expect(fake.sent).toContainEqual(['ao-reload']);
   });
 });

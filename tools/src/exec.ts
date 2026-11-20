@@ -115,8 +115,7 @@ export async function killPosixGroup(
     }
     if (Date.now() >= deadline) return;
     await new Promise<void>((resolve) => {
-      const t = setTimeout(resolve, pollMs);
-      t.unref();
+      setTimeout(resolve, pollMs);
     });
   }
 }

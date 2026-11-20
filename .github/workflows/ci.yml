@@ -14,54 +14,193 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  checks:
+  changes:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      hermes: ${{ github.event_name != 'pull_request' || steps.filter.outputs.hermes == 'true' }}
     steps:
-      # Full history: the gitleaks scan below walks every commit.
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        if: github.event_name == 'pull_request'
+        with:
+          filters: |
+            hermes:
+              - 'packages/sources/**'
+              - 'packages/domain/**'
+              - 'packages/data/**'
+              - 'tools/bin/hermes/**'
+              - 'tools/bin/hermes-sources.ts'
+              - 'tools/src/sim/**'
+              - 'pnpm-lock.yaml'
+              - '.github/workflows/ci.yml'
+
+  static:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
           persist-credentials: false
-      # The gitleaks CLI, not gitleaks-action: the action fails on a repository's root commit.
-      - name: Install gitleaks 8.30.1
-        env:
-          GITLEAKS_VERSION: 8.30.1
-          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
-        run: |
-          curl -fsSL -o "$RUNNER_TEMP/gitleaks.tar.gz" \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum --check --quiet
-          mkdir -p "$HOME/.local/bin"
-          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$HOME/.local/bin" gitleaks
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - uses: ./.github/actions/setup
         id: setup
-      - name: Install Hermes CLI v0.13.0
-        env:
-          HERMES_VERSION: v0.13.0
-          HERMES_SHA256: aead6eb0b8f563bb022354352eae32dad96c933330b6c1941b6db17674ca68ae
-        run: |
-          curl -fsSL -o "$RUNNER_TEMP/hermes-cli.tar.gz" \
-            "https://github.com/facebook/hermes/releases/download/${HERMES_VERSION}/hermes-cli-linux.tar.gz"
-          echo "${HERMES_SHA256}  $RUNNER_TEMP/hermes-cli.tar.gz" | sha256sum --check --quiet
-          mkdir -p "$HOME/.local/hermes-${HERMES_VERSION}"
-          tar -xzf "$RUNNER_TEMP/hermes-cli.tar.gz" -C "$HOME/.local/hermes-${HERMES_VERSION}"
-          echo "$HOME/.local/hermes-${HERMES_VERSION}" >> "$GITHUB_PATH"
-      - name: Install FFmpeg
-        run: command -v ffmpeg || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg)
-      - name: pnpm check
-        run: pnpm check
-      - name: Run source scanners under Hermes (#37)
-        run: node tools/bin/hermes-sources.ts --require-runtime --benchmark large
-      - name: Scan full history for secrets
-        run: gitleaks git --config .gitleaks.toml --redact --no-banner
+      - name: Restore TypeScript incremental build cache
+        id: ts-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.cache
+          key: tsbuildinfo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', '**/tsconfig*.json') }}-${{ github.sha }}
+          restore-keys: |
+            tsbuildinfo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', '**/tsconfig*.json') }}-
+            tsbuildinfo-${{ runner.os }}-
+      - name: Run static checks (biome, typecheck, deps, knip, sizes, stubs, notices, hooks)
+        run: pnpm check --only biome,typecheck,deps,knip,file-size,stubs,notices,hooks
       - name: Save the pnpm store
         if: github.ref == 'refs/heads/main' && steps.setup.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.setup.outputs.store-path }}
           key: ${{ steps.setup.outputs.cache-key }}
+      - name: Save TypeScript incremental build cache
+        if: github.ref == 'refs/heads/main' && steps.ts-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.cache
+          key: ${{ steps.ts-cache.outputs.cache-primary-key }}
+
+  unit-jest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Run Jest component suites
+        run: pnpm check --only jest
+
+  unit-vitest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Install FFmpeg
+        run: |
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+              sudo apt-get update -qq \
+                -o Dir::Etc::sourcelist="sources.list.d/ubuntu.sources" \
+                -o Dir::Etc::sourceparts="-" \
+                -o APT::Get::List-Cleanup="0"
+            else
+              sudo apt-get update -qq
+            fi
+            sudo apt-get install -y -qq --no-install-recommends ffmpeg
+          fi
+      - name: Run Vitest unit & simulator suites
+        env:
+          ELV_BENCH: ${{ github.event_name == 'push' && '1' || '' }}
+        run: pnpm check --only vitest
+
+  secrets-and-hermes:
+    needs: changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # Full history: gitleaks walks every commit. Kept isolated from the other parallel jobs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Restore gitleaks cache
+        id: gitleaks-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/gitleaks-8.30.1
+          key: gitleaks-linux-8.30.1
+      # The gitleaks CLI, not gitleaks-action: the action fails on a repository's root commit.
+      - name: Install gitleaks 8.30.1
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          install_dir="$HOME/.local/gitleaks-${GITLEAKS_VERSION}"
+          if [ ! -x "$install_dir/gitleaks" ]; then
+            curl -fsSL -o "$RUNNER_TEMP/gitleaks.tar.gz" \
+              "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+            echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum --check --quiet
+            mkdir -p "$install_dir"
+            tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$install_dir" gitleaks
+          fi
+          echo "$install_dir" >> "$GITHUB_PATH"
+      - name: Save gitleaks cache
+        if: github.ref == 'refs/heads/main' && steps.gitleaks-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/gitleaks-8.30.1
+          key: ${{ steps.gitleaks-cache.outputs.cache-primary-key }}
+      - name: Verify gitleaks rules and scan full history
+        run: |
+          node scripts/test-gitleaks-rules.mjs
+          gitleaks git --config .gitleaks.toml --redact --no-banner
+      - name: Setup workspace for Hermes scanner benchmark
+        if: needs.changes.outputs.hermes == 'true'
+        uses: ./.github/actions/setup
+      - name: Restore Hermes CLI cache
+        if: needs.changes.outputs.hermes == 'true'
+        id: hermes-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/hermes-v0.13.0
+          key: hermes-cli-linux-v0.13.0
+      - name: Install Hermes CLI v0.13.0
+        if: needs.changes.outputs.hermes == 'true'
+        env:
+          HERMES_VERSION: v0.13.0
+          HERMES_SHA256: aead6eb0b8f563bb022354352eae32dad96c933330b6c1941b6db17674ca68ae
+        run: |
+          install_dir="$HOME/.local/hermes-${HERMES_VERSION}"
+          if [ ! -x "$install_dir/hermes" ]; then
+            curl -fsSL -o "$RUNNER_TEMP/hermes-cli.tar.gz" \
+              "https://github.com/facebook/hermes/releases/download/${HERMES_VERSION}/hermes-cli-linux.tar.gz"
+            echo "${HERMES_SHA256}  $RUNNER_TEMP/hermes-cli.tar.gz" | sha256sum --check --quiet
+            mkdir -p "$install_dir"
+            tar -xzf "$RUNNER_TEMP/hermes-cli.tar.gz" -C "$install_dir"
+          fi
+          echo "$install_dir" >> "$GITHUB_PATH"
+      - name: Save Hermes CLI cache
+        if: github.ref == 'refs/heads/main' && needs.changes.outputs.hermes == 'true' && steps.hermes-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/hermes-v0.13.0
+          key: ${{ steps.hermes-cache.outputs.cache-primary-key }}
+      - name: Run source scanners under Hermes (#37)
+        if: needs.changes.outputs.hermes == 'true'
+        run: node tools/bin/hermes-sources.ts --require-runtime --benchmark large
+
+  # Branch protection requires this aggregate job (`checks`).
+  checks:
+    if: always()
+    needs: [changes, static, unit-jest, unit-vitest, secrets-and-hermes]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Fail when any check job failed or was cancelled
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+          CHANGES: ${{ needs.changes.result }}
+        run: |
+          if [ "$CHANGES" != success ]; then echo "changes: $CHANGES"; exit 1; fi
+          for r in $RESULTS; do
+            case "$r" in success|skipped) ;; *) echo "check job result: $r"; exit 1 ;; esac
+          done
 
   pr-title:
     if: github.event_name == 'pull_request'

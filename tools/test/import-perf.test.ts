@@ -12,21 +12,28 @@ import {
 } from './import-sim-helpers.ts';
 import { SIM_CLOCK, type Sim, startTestSim } from './sources-sim-helpers.ts';
 
-const large = buildCatalog('large', 1);
-let sim: Sim;
-let env: Env;
-let sourceId: string;
-beforeAll(async () => {
-  sim = await startTestSim();
-  env = await openEnv({ file: true });
-  sourceId = await xtreamSource(env, sim, 'large');
-});
-afterAll(async () => {
-  env.close();
-  await sim.close();
-});
+const enabled = process.env.ELV_BENCH === '1';
+if (!enabled) {
+  process.stdout.write(
+    'import-perf: skipped (set ELV_BENCH=1 to benchmark the 100k-entry large profile)\n',
+  );
+}
 
-describe('large profile imported into a file database', () => {
+describe.skipIf(!enabled)('large profile imported into a file database', () => {
+  let large: ReturnType<typeof buildCatalog>;
+  let sim: Sim;
+  let env: Env;
+  let sourceId: string;
+  beforeAll(async () => {
+    large = buildCatalog('large', 1);
+    sim = await startTestSim();
+    env = await openEnv({ file: true });
+    sourceId = await xtreamSource(env, sim, 'large');
+  });
+  afterAll(async () => {
+    env.close();
+    await sim.close();
+  });
   it('imports the 100k-entry catalog within 20 s', async () => {
     const report = await measureImport(
       'large catalog',

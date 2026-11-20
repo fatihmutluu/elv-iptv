@@ -31,8 +31,15 @@ describe('runChecks', () => {
     expect(report.failed).toBe(0);
   });
 
+  it('runs a comma-separated subset of checks with only', async () => {
+    const report = await runChecks([pass('a'), fail('b', 'x'), pass('c')], { only: 'a, c' });
+    expect(report.results.map((r) => r.key)).toEqual(['a', 'c']);
+    expect(report.passed).toBe(2);
+    expect(report.failed).toBe(0);
+  });
+
   it('fails on an unknown only key', async () => {
-    const report = await runChecks([pass('a')], { only: 'zzz' });
+    const report = await runChecks([pass('a')], { only: 'a,zzz' });
     expect(report.failed).toBe(1);
     expect(report.results[0]?.output).toContain('zzz');
   });

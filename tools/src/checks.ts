@@ -91,7 +91,14 @@ export function buildChecks(root: string): Check[] {
     {
       key: 'vitest',
       run: async () => {
-        const r = await pnpm('-r', '--if-present', '--reporter=append-only', 'test');
+        const concurrency = process.env.CI === 'true' ? ['--workspace-concurrency=2'] : [];
+        const r = await pnpm(
+          '-r',
+          '--if-present',
+          ...concurrency,
+          '--reporter=append-only',
+          'test',
+        );
         const notes: string[] = [];
         if (r.ok && r.output.includes(MEDIA_SKIP_MARKER))
           notes.push(`skip vitest: ${MEDIA_SKIP_MARKER} (FFmpeg is not on PATH)`);

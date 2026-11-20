@@ -136,9 +136,17 @@ function vodRows(
   categoryId: string | null,
   quirks: boolean,
 ): Row[] {
-  const vodCats = catalog.categories.filter((c) => c.kind === 'vod').map((c) => c.id);
+  const vodCats = quirks ? catalog.categories.filter((c) => c.kind === 'vod').map((c) => c.id) : [];
   const rows: Row[] = [];
   catalog.movies.forEach((m, index) => {
+    const other =
+      quirks && index < MULTI_CATEGORY_MOVIES
+        ? vodCats[(vodCats.indexOf(m.categoryId) + 1) % vodCats.length]
+        : undefined;
+    const multi = other !== undefined && other !== m.categoryId;
+    const matchPrimary = categoryId === null || m.categoryId === categoryId;
+    const matchOther = multi && (categoryId === null || other === categoryId);
+    if (!matchPrimary && !matchOther) return;
     const row: Row = {
       num: index + 1,
       name: m.name,
@@ -148,21 +156,15 @@ function vodRows(
       rating: rating(m.id),
       added: String(m.added),
       category_id: m.categoryId,
-      category_ids: [Number(m.categoryId)],
+      category_ids: multi ? [Number(m.categoryId), Number(other)] : [Number(m.categoryId)],
       container_extension: m.ext,
     };
     if (quirks) {
       row.thumbnail = '';
       row.custom_sid = '';
     }
-    const other =
-      quirks && index < MULTI_CATEGORY_MOVIES
-        ? vodCats[(vodCats.indexOf(m.categoryId) + 1) % vodCats.length]
-        : undefined;
-    const multi = other !== undefined && other !== m.categoryId;
-    if (multi) row.category_ids = [Number(m.categoryId), Number(other)];
-    if (categoryId === null || m.categoryId === categoryId) rows.push(row);
-    if (multi && (categoryId === null || other === categoryId)) {
+    if (matchPrimary) rows.push(row);
+    if (matchOther) {
       rows.push({
         ...row,
         category_id: other,

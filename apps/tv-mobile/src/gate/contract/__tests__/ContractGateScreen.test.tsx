@@ -1,6 +1,6 @@
 import type { PlayerEngine } from '@elv/playback';
 import { createFakePlayerEngine } from '@elv/playback/testing';
-import { act, render, waitFor } from '@testing-library/react-native';
+import { act, render } from '@testing-library/react-native';
 import { ContractGateScreen } from '../ContractGateScreen';
 
 jest.mock('@elv/engine-aether', () => ({
@@ -75,7 +75,8 @@ describe('ContractGateScreen', () => {
       });
 
     try {
-      render(
+      jest.useFakeTimers();
+      await render(
         <ContractGateScreen
           params={{ host: '127.0.0.1:7878', account: 'demo' }}
           createEngine={createEngine}
@@ -85,12 +86,11 @@ describe('ContractGateScreen', () => {
         />,
       );
 
-      await waitFor(
-        () => {
-          expect(lines.some((line) => line.startsWith('ELV_GATE_CONTRACT '))).toBe(true);
-        },
-        { timeout: 15_000 },
-      );
+      for (let i = 0; i < 40 && !lines.some((line) => line.startsWith('ELV_GATE_CONTRACT ')); i++) {
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(250);
+        });
+      }
 
       const contractLines = lines.filter((line) => line.startsWith('ELV_GATE_CONTRACT '));
       expect(contractLines).toHaveLength(1);
@@ -106,6 +106,7 @@ describe('ContractGateScreen', () => {
     } finally {
       logSpy.mockRestore();
       errorSpy.mockRestore();
+      jest.useRealTimers();
     }
   });
 

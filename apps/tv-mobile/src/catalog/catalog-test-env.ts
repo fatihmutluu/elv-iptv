@@ -4,8 +4,8 @@ import { createFetchHttpClient, type FetchLike, type SqlDriver } from '@elv/doma
 import { afterAll, afterEach, beforeAll, vi } from 'vitest';
 import { startSim } from '../../../../tools/src/sim/server.ts';
 
-/** The domain fetch client over Node's fetch. Test helper. */
-export const http = createFetchHttpClient(fetch as unknown as FetchLike);
+/** Creates a fresh domain fetch client over Node's fetch so each test gets its own rate-limit bucket. Test helper. */
+export const createTestHttp = () => createFetchHttpClient(fetch as unknown as FetchLike);
 
 /** Starts the in-process simulator for the tests of one file; `url()` is its base URL. Test helper. */
 export function useSim(): { url(): string } {
@@ -54,7 +54,7 @@ export async function env(
     db,
     secrets: memorySecrets(),
     scheduler: countingScheduler(),
-    http,
+    http: createTestHttp(),
     clock: () => 1_000,
     newId: () => `src${++n}`,
     ...overrides,

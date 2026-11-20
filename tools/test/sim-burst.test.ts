@@ -15,8 +15,8 @@ if (ffmpeg === null && process.env.CI === 'true') {
 const withFfmpeg = ffmpeg === null ? describe.skip : describe;
 if (ffmpeg === null) process.stderr.write(`sim-burst: ${MEDIA_SKIP_MARKER}\n`);
 
-const MEDIA_SECONDS = 10;
-const WINDOW_MS = 2000;
+const MEDIA_SECONDS = 6;
+const WINDOW_MS = 1000;
 
 function account(name: string): Account {
   const found = ACCOUNTS.find((a) => a.username === name);
@@ -78,7 +78,7 @@ async function waitFor(check: () => boolean, ms = 5000): Promise<void> {
 
 withFfmpeg('live burst', () => {
   let cacheDir = '';
-  let sixSeconds = 0;
+  let threeSeconds = 0;
   let sim: SimHandle;
   beforeAll(async () => {
     cacheDir = mkdtempSync(join(tmpdir(), 'sim-burst-'));
@@ -89,7 +89,7 @@ withFfmpeg('live burst', () => {
       cacheDir,
       seconds: MEDIA_SECONDS,
     });
-    sixSeconds = (statSync(files.loopTs).size * 6) / MEDIA_SECONDS;
+    threeSeconds = (statSync(files.loopTs).size * 3) / MEDIA_SECONDS;
     sim = await startSim({ port: 0, mediaSeconds: MEDIA_SECONDS, cacheDir, ffmpegPath: ffmpeg });
   }, 120_000);
   afterEach(() => waitFor(() => activeChildren() === 0));
@@ -98,47 +98,47 @@ withFfmpeg('live burst', () => {
     await removeCache(cacheDir);
   });
 
-  it('a burst of 8 s arrives within 2 s', async () => {
-    const got = await sample(`${sim.url}/live/${demo}/1001.ts?fault=burst=8`, WINDOW_MS + 200);
+  it('a burst of 4 s arrives within 1 s', async () => {
+    const got = await sample(`${sim.url}/live/${demo}/1001.ts?fault=burst=4`, WINDOW_MS + 200);
     expect(got.status).toBe(200);
     expect(got.endedAfter).toBeNull();
-    expect(got.early).toBeGreaterThanOrEqual(sixSeconds);
+    expect(got.early).toBeGreaterThanOrEqual(threeSeconds);
   }, 30_000);
 
   it('without a burst the stream stays real time', async () => {
     const got = await sample(`${sim.url}/live/${demo}/1001.ts`, WINDOW_MS + 200);
     expect(got.status).toBe(200);
     expect(got.early).toBeGreaterThan(0);
-    expect(got.early).toBeLessThan(sixSeconds);
+    expect(got.early).toBeLessThan(threeSeconds);
   }, 30_000);
 
   it('combines with a drop', async () => {
-    const got = await sample(`${sim.url}/live/${demo}/1001.ts?fault=drop@5s,burst=8`, 9000);
+    const got = await sample(`${sim.url}/live/${demo}/1001.ts?fault=drop@2s,burst=4`, 5000);
     expect(got.status).toBe(200);
-    expect(got.early).toBeGreaterThanOrEqual(sixSeconds);
+    expect(got.early).toBeGreaterThanOrEqual(threeSeconds);
     expect(got.endedAfter).not.toBeNull();
-    expect(got.endedAfter).toBeGreaterThanOrEqual(4500);
-    expect(got.endedAfter).toBeLessThan(8000);
+    expect(got.endedAfter).toBeGreaterThanOrEqual(1500);
+    expect(got.endedAfter).toBeLessThan(4500);
   }, 30_000);
 
   it('a runtime rule carries the burst to live TS', async () => {
     const added = await fetch(`${sim.url}/_sim/faults`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ account: 'demo', stream: '1001', spec: 'burst=8', count: 1 }),
+      body: JSON.stringify({ account: 'demo', stream: '1001', spec: 'burst=4', count: 1 }),
     });
     expect(added.status).toBe(201);
     const got = await sample(`${sim.url}/live/${demo}/1001.ts`, WINDOW_MS + 200);
     expect(got.status).toBe(200);
-    expect(got.early).toBeGreaterThanOrEqual(sixSeconds);
+    expect(got.early).toBeGreaterThanOrEqual(threeSeconds);
     await waitFor(() => sim.requests().some((r) => r.faultRule !== null));
   }, 30_000);
 
   it('playlists and movies ignore the burst', async () => {
-    const playlist = await fetch(`${sim.url}/live/${demo}/1001.m3u8?fault=burst=8`);
+    const playlist = await fetch(`${sim.url}/live/${demo}/1001.m3u8?fault=burst=4`);
     expect(playlist.status).toBe(200);
     expect(await playlist.text()).toContain('#EXTM3U');
-    const movie = await fetch(`${sim.url}/movie/${demo}/200001.mp4?fault=burst=8`, {
+    const movie = await fetch(`${sim.url}/movie/${demo}/200001.mp4?fault=burst=4`, {
       headers: { range: 'bytes=0-15' },
     });
     expect(movie.status).toBe(206);

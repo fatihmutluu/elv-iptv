@@ -1,8 +1,8 @@
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { findRepoRoot } from '../src/root.ts';
 import { scaffoldFiles, writeScaffold } from '../src/scaffold.ts';
 
@@ -174,11 +174,25 @@ describe('scaffold output passes the repository tooling', () => {
   const repoRoot = findRepoRoot(import.meta.dirname);
   const nodeModules = join(repoRoot, 'node_modules');
   const runNode = (cwd: string, script: string, args: string[]) =>
-    spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8' });
+    new Promise<{ status: number | null; output: string }>((resolve, reject) => {
+      const child = spawn(process.execPath, [script, ...args], { cwd, windowsHide: true });
+      let output = '';
+      child.stdout.on('data', (chunk) => {
+        output += String(chunk);
+      });
+      child.stderr.on('data', (chunk) => {
+        output += String(chunk);
+      });
+      child.on('error', reject);
+      child.on('close', (status) => resolve({ status, output }));
+    });
 
-  function workspaceWith(kind: 'pure' | 'rn' | 'module', name: string): string {
-    const root = tempRoot();
-    writeScaffold(root, { kind, name });
+  let root = '';
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), 'elv_scaffold_all_'));
+    writeScaffold(root, { kind: 'pure', name: 'sample-pure' });
+    writeScaffold(root, { kind: 'rn', name: 'sample-rn' });
+    writeScaffold(root, { kind: 'module', name: 'sample-module' });
     writeFileSync(
       join(root, 'biome.json'),
       formatJson({
@@ -192,27 +206,26 @@ describe('scaffold output passes the repository tooling', () => {
       join(root, 'node_modules', '@elv', 'config'),
       'junction',
     );
-    return root;
-  }
-
-  it.each([
-    ['pure', 'sample-pure'],
-    ['rn', 'sample-rn'],
-    ['module', 'sample-module'],
-  ] as const)('%s output is clean under Biome', (kind, name) => {
-    const root = workspaceWith(kind, name);
-    const biome = join(nodeModules, '@biomejs', 'biome', 'bin', 'biome');
-    const result = runNode(root, biome, ['check', '--colors=off', '.']);
-    expect(result.status, result.stdout + result.stderr).toBe(0);
+  });
+  afterAll(() => {
+    if (root) rmSync(root, { recursive: true, force: true });
   });
 
-  it.each([
-    ['pure', 'sample-pure'],
-    ['rn', 'sample-rn'],
-  ] as const)('%s output type-checks', (kind, name) => {
-    const root = workspaceWith(kind, name);
+  it('pure, rn and module outputs are clean under Biome', async () => {
+    const biome = join(nodeModules, '@biomejs', 'biome', 'bin', 'biome');
+    const result = await runNode(root, biome, ['check', '--colors=off', '.']);
+    expect(result.status, result.output).toBe(0);
+  });
+
+  it('pure and rn outputs type-check', async () => {
     const tsc = join(nodeModules, 'typescript', 'lib', 'tsc.js');
-    const result = runNode(root, tsc, ['--noEmit', '-p', `packages/${name}`, '--pretty', 'false']);
-    expect(result.status, result.stdout + result.stderr).toBe(0);
+    const results = await Promise.all(
+      ['sample-pure', 'sample-rn'].map((name) =>
+        runNode(root, tsc, ['--noEmit', '-p', `packages/${name}`, '--pretty', 'false']),
+      ),
+    );
+    for (const result of results) {
+      expect(result.status, result.output).toBe(0);
+    }
   });
 });
