@@ -82,10 +82,41 @@ describe('lockDownWebContents', () => {
     for (const event of ['will-navigate', 'will-redirect', 'will-frame-navigate'] as const) {
       expect(fake.emitNavigation(event, `${APP_ORIGIN}/`)).toBe(false);
       expect(fake.emitNavigation(event, `${APP_ORIGIN}/player`)).toBe(false);
+      expect(fake.emitNavigation(event, 'http://127.0.0.1:8081/')).toBe(true);
       expect(fake.emitNavigation(event, 'https://attacker.example/')).toBe(true);
       expect(fake.emitNavigation(event, 'file:///C:/Windows/win.ini')).toBe(true);
       expect(fake.emitNavigation(event, 'app://user@elv/index.html')).toBe(true);
       expect(fake.emitNavigation(event, 'app://elv:80/index.html')).toBe(true);
+    }
+  });
+
+  it('allows same-origin dev navigation when devOrigin is set while denying other origins and window.open', () => {
+    const fake = createFakeWebContents();
+    lockDownWebContents(fake.contents, { devOrigin: 'http://127.0.0.1:8081' });
+
+    expect(fake.openWindow()).toEqual({ action: 'deny' });
+
+    for (const event of ['will-navigate', 'will-redirect', 'will-frame-navigate'] as const) {
+      expect(fake.emitNavigation(event, `${APP_ORIGIN}/`)).toBe(false);
+      expect(fake.emitNavigation(event, 'http://127.0.0.1:8081/')).toBe(false);
+      expect(fake.emitNavigation(event, 'http://127.0.0.1:8081/workbench?tab=rail#top')).toBe(
+        false,
+      );
+      expect(fake.emitNavigation(event, 'http://127.0.0.1:8082/')).toBe(true);
+      expect(fake.emitNavigation(event, 'http://localhost:8081/')).toBe(true);
+      expect(fake.emitNavigation(event, 'https://127.0.0.1:8081/')).toBe(true);
+      expect(fake.emitNavigation(event, 'https://attacker.example/')).toBe(true);
+      expect(fake.emitNavigation(event, 'file:///C:/Windows/win.ini')).toBe(true);
+      expect(fake.emitNavigation(event, 'http://user:pass@127.0.0.1:8081/')).toBe(true);
+    }
+  });
+
+  it('treats null or empty devOrigin identically to no devOrigin', () => {
+    for (const devOrigin of [null, ''] as const) {
+      const fake = createFakeWebContents();
+      lockDownWebContents(fake.contents, { devOrigin });
+      expect(fake.emitNavigation('will-navigate', `${APP_ORIGIN}/`)).toBe(false);
+      expect(fake.emitNavigation('will-navigate', 'http://127.0.0.1:8081/')).toBe(true);
     }
   });
 });

@@ -4,6 +4,7 @@ Electron shell for Windows, macOS and Linux. The UI is `renderer/` (`@elv/deskto
 Expo project with `platforms: ["web"]` rendered by react-native-web.
 
 ## Commands
+- `pnpm dev:ui` runs the dev-only browser UI Workbench (`http://localhost:8081`); `pnpm dev:desktop` (`scripts/dev-hot.mjs`) runs Metro + unpackaged Electron (`ELV_DEV_SERVER_URL`).
 - `pnpm run:app windows|macos|linux run|build` calls this package's `dev` and `build` scripts.
 - `prepare:app` runs `pnpm -w mpv fetch` (`mpv-runtime.lock.json`), exports `renderer/`, and bundles main, preload + utility worker.
 - `build` runs `prepare:app`, then `electron-builder --publish never` (`extraResources` bundles `mpv/` + `mpv-input.conf` on win/mac).

@@ -19,6 +19,8 @@
   "scripts": {
     "check": "node tools/bin/check.ts",
     "bootstrap": "node tools/bin/bootstrap.ts",
+    "dev:ui": "pnpm --filter @elv/desktop-renderer run dev:ui",
+    "dev:desktop": "pnpm --filter @elv/desktop run dev:hot",
     "run:app": "node tools/bin/run-app.ts",
     "scaffold": "node tools/bin/scaffold.ts",
     "sim": "node tools/bin/sim.ts",
