@@ -1,45 +1,29 @@
 import type { CatalogService } from '@elv/data';
 import {
-  createPlaybackService,
-  EMPTY_TRACKS,
-  type MediaTracks,
   type PlaybackClock,
   type PlaybackService,
-  type PlaybackStatus,
   type PlaybackTimers,
+  positionAt,
 } from '@elv/playback';
 import { useFormFactor, useI18n } from '@elv/ui-kit';
-import {
-  type ReactElement,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from 'react';
+import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { type AppLifecyclePort, noopAppLifecycle } from '../ports/app-lifecycle';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
-import type { OpenVideoEngine, VideoHost } from '../ports/video-host';
+import type { VideoHost } from '../ports/video-host';
 import { describePlaybackFailure } from './errors';
 import { formatStatusLine, PlayerOsd, playerStyles } from './PlayerScreenParts';
 import { TrackPickerModal } from './TrackPickerModal';
 import { usePlayerControls } from './usePlayerControls';
+import { usePlayerSession } from './usePlayerSession';
+import { createZapController, type ZapController } from './zap-controller';
 
 const DEFAULT_CLOCK: PlaybackClock = { now: () => performance.now() };
 const DEFAULT_TIMERS: PlaybackTimers = {
   setTimeout: (fn, ms) => setTimeout(fn, ms),
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
-
-interface PlaybackUiSlice {
-  readonly status: PlaybackStatus;
-  readonly tracks: MediaTracks;
-}
-
-const OPENING_STATUS: PlaybackStatus = { kind: 'tuning' };
-const OPENING_PLAYBACK_SLICE: PlaybackUiSlice = { status: OPENING_STATUS, tracks: EMPTY_TRACKS };
 
 /** Props of {@link PlayerScreen}. */
 export interface PlayerScreenProps {
@@ -52,20 +36,6 @@ export interface PlayerScreenProps {
   timers?: PlaybackTimers;
   onTargetChange?: (next: PlayTarget) => void;
   onExit: () => void;
-}
-
-type SessionState =
-  | { readonly kind: 'opening' }
-  | { readonly kind: 'unavailable' }
-  | { readonly kind: 'ready'; readonly opened: OpenVideoEngine; readonly service: PlaybackService };
-
-function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'then' in value &&
-    typeof (value as { then?: unknown }).then === 'function'
-  );
 }
 
 /** Cross-platform playback screen over injected {@link VideoHost} and {@link AppLifecyclePort} ports. */
@@ -84,17 +54,15 @@ export function PlayerScreen({
   const i18n = useI18n();
   const isTv = formFactor === 'tv';
 
-  const [sessionState, setSessionState] = useState<SessionState>({ kind: 'opening' });
   const [activeTarget, setActiveTarget] = useState<PlayTarget>(target);
 
   const mountedRef = useRef(true);
   const serviceRef = useRef<PlaybackService | null>(null);
   const activeTargetRef = useRef<PlayTarget>(target);
   const prevPropKeyRef = useRef(target.itemKey);
-  const playlistIndexRef = useRef(target.playlist?.currentIndex ?? 0);
-  const zapSeqRef = useRef(0);
   const backgroundedRef = useRef(false);
   const resumeOnActiveRef = useRef(false);
+  const vodResumeMsRef = useRef<number | undefined>(undefined);
 
   const catalogRef = useRef(catalog);
   catalogRef.current = catalog;
@@ -107,51 +75,69 @@ export function PlayerScreen({
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
 
-  const tuneEntry = useCallback((service: PlaybackService, entry: PlayableEntry): void => {
-    service.tune({
-      item: entry.itemKey,
-      accountKey: entry.sourceId,
-      kind: entry.kind,
-      resolve: () => catalogRef.current.resolveStream(entry.itemKey),
-    });
-  }, []);
-
-  const zapBy = useCallback(
-    (delta: 1 | -1): void => {
-      const current = activeTargetRef.current;
-      const playlist = current.playlist;
-      if (current.kind !== 'live' || playlist === undefined || playlist.count <= 0) return;
-      const nextIndex =
-        (((playlistIndexRef.current + delta) % playlist.count) + playlist.count) % playlist.count;
-      playlistIndexRef.current = nextIndex;
-      const seq = ++zapSeqRef.current;
-
-      void playlist.getAt(nextIndex).then(
-        (entry) => {
-          if (!mountedRef.current || seq !== zapSeqRef.current || entry === undefined) return;
-          const nextTarget: PlayTarget = {
-            ...entry,
-            playlist: { ...playlist, currentIndex: nextIndex },
-          };
-          prevPropKeyRef.current = nextTarget.itemKey;
-          activeTargetRef.current = nextTarget;
-          setActiveTarget(nextTarget);
-          playlist.onChangeIndex(nextIndex);
-          onTargetChangeRef.current?.(nextTarget);
-
-          const svc = serviceRef.current;
-          if (backgroundedRef.current) resumeOnActiveRef.current = true;
-          else if (svc !== null) tuneEntry(svc, nextTarget);
-        },
-        () => undefined,
-      );
+  const tuneEntry = useCallback(
+    (service: PlaybackService, entry: PlayableEntry, startMs?: number): void => {
+      service.tune({
+        item: entry.itemKey,
+        accountKey: entry.sourceId,
+        kind: entry.kind,
+        resolve: () => catalogRef.current.resolveStream(entry.itemKey),
+        ...(startMs !== undefined ? { startMs } : {}),
+      });
     },
-    [tuneEntry],
+    [],
   );
 
-  const zapByRef = useRef(zapBy);
+  const zapControllerRef = useRef<ZapController | null>(null);
+  if (zapControllerRef.current === null) {
+    zapControllerRef.current = createZapController({
+      timers: () => timersRef.current,
+      current: () => activeTargetRef.current,
+      show: (nextTarget) => {
+        if (!mountedRef.current) return;
+        vodResumeMsRef.current = undefined;
+        prevPropKeyRef.current = nextTarget.itemKey;
+        activeTargetRef.current = nextTarget;
+        setActiveTarget(nextTarget);
+        onTargetChangeRef.current?.(nextTarget);
+      },
+      tune: (nextTarget) => {
+        if (!mountedRef.current) return;
+        const svc = serviceRef.current;
+        if (backgroundedRef.current) resumeOnActiveRef.current = true;
+        else if (svc !== null) tuneEntry(svc, nextTarget);
+      },
+    });
+  }
+  const zapController = zapControllerRef.current;
+
+  const zapBy = useCallback(
+    (delta: 1 | -1, repeat = false): void => {
+      zapController.zap(delta, repeat);
+    },
+    [zapController],
+  );
+
+  const zapByRef = useRef<(delta: 1 | -1, repeat?: boolean) => void>(zapBy);
   zapByRef.current = zapBy;
   const hostBackRef = useRef<() => void>(() => onExitRef.current());
+
+  const { sessionState, activeService, status, tracks } = usePlayerSession({
+    videoHost,
+    serviceRef,
+    clockRef,
+    timersRef,
+    hostBackRef,
+    onExitRef,
+    zapByRef,
+    onServiceReady: (service) => {
+      if (backgroundedRef.current) resumeOnActiveRef.current = true;
+      else {
+        const startMs = activeTargetRef.current.kind === 'vod' ? vodResumeMsRef.current : undefined;
+        tuneEntry(service, activeTargetRef.current, startMs);
+      }
+    },
+  });
 
   useEffect(() => {
     mountedRef.current = true;
@@ -159,98 +145,65 @@ export function PlayerScreen({
       getSourceId: () =>
         serviceRef.current?.getState().accountKey ?? activeTargetRef.current.sourceId,
       stop: () => {
-        zapSeqRef.current += 1;
+        vodResumeMsRef.current = undefined;
+        zapController.reset(activeTargetRef.current.playlist?.currentIndex ?? 0);
         resumeOnActiveRef.current = false;
         serviceRef.current?.stop();
       },
     });
     return () => {
       mountedRef.current = false;
+      zapController.reset(activeTargetRef.current.playlist?.currentIndex ?? 0);
       unregGuard?.();
     };
-  }, [playbackGuard]);
+  }, [playbackGuard, zapController]);
 
   useEffect(() => {
-    if (prevPropKeyRef.current === target.itemKey) return;
+    if (prevPropKeyRef.current === target.itemKey) {
+      const prev = activeTargetRef.current;
+      if (
+        prev.playlist !== target.playlist ||
+        prev.title !== target.title ||
+        prev.sourceId !== target.sourceId
+      ) {
+        zapController.sync(target.playlist?.currentIndex ?? 0);
+        activeTargetRef.current = target;
+        setActiveTarget(target);
+      }
+      return;
+    }
     prevPropKeyRef.current = target.itemKey;
-    zapSeqRef.current += 1;
-    playlistIndexRef.current = target.playlist?.currentIndex ?? 0;
+    vodResumeMsRef.current = undefined;
+    zapController.reset(target.playlist?.currentIndex ?? 0);
     activeTargetRef.current = target;
     setActiveTarget(target);
     const svc = serviceRef.current;
     if (backgroundedRef.current) resumeOnActiveRef.current = true;
     else if (svc !== null) tuneEntry(svc, target);
-  }, [target, tuneEntry]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let activeSession: {
-      opened: OpenVideoEngine;
-      service: PlaybackService;
-      offHostKey?: () => void;
-    } | null = null;
-
-    const markUnavailable = (): void => {
-      if (cancelled) return;
-      serviceRef.current = null;
-      setSessionState({ kind: 'unavailable' });
-    };
-
-    const attachOpened = (opened: OpenVideoEngine | null): void => {
-      if (cancelled) {
-        opened?.engine.release();
-        return;
-      }
-      if (opened === null) {
-        markUnavailable();
-        return;
-      }
-      const service = createPlaybackService({
-        engine: opened.engine,
-        clock: clockRef.current,
-        timers: timersRef.current,
-      });
-      const offHostKey = opened.onHostKey?.((key) => {
-        if (key === 'back') hostBackRef.current();
-        else zapByRef.current(key === 'channel-up' ? 1 : -1);
-      });
-      activeSession = { opened, service, ...(offHostKey !== undefined ? { offHostKey } : {}) };
-      serviceRef.current = service;
-      setSessionState({ kind: 'ready', opened, service });
-      if (backgroundedRef.current) resumeOnActiveRef.current = true;
-      else tuneEntry(service, activeTargetRef.current);
-    };
-
-    setSessionState({ kind: 'opening' });
-    try {
-      const openedOrPromise = videoHost.open();
-      if (isPromiseLike(openedOrPromise)) openedOrPromise.then(attachOpened, markUnavailable);
-      else attachOpened(openedOrPromise);
-    } catch {
-      markUnavailable();
-    }
-
-    return () => {
-      cancelled = true;
-      serviceRef.current = null;
-      if (activeSession !== null) {
-        activeSession.offHostKey?.();
-        activeSession.service.dispose();
-        activeSession.opened.engine.release();
-        activeSession = null;
-      }
-    };
-  }, [tuneEntry, videoHost]);
+  }, [target, tuneEntry, zapController]);
 
   useEffect(() => {
     return appLifecycle.subscribe((lifecycleState) => {
       if (lifecycleState === 'background') {
         backgroundedRef.current = true;
+        const hadPendingZap = zapController.takePendingTune();
         const svc = serviceRef.current;
-        if (svc === null) resumeOnActiveRef.current = true;
-        else if (svc.getState().status.kind !== 'idle') {
+        if (svc === null) {
+          resumeOnActiveRef.current = true;
+          return;
+        }
+        const { anchor, status: st } = svc.getState();
+        if (activeTargetRef.current.kind === 'vod') {
+          if (st.kind === 'ended') vodResumeMsRef.current = undefined;
+          else if (anchor !== undefined) {
+            vodResumeMsRef.current = Math.round(positionAt(anchor, clockRef.current.now()));
+          }
+        }
+        if (st.kind !== 'idle') {
           resumeOnActiveRef.current = true;
           svc.stop();
+        } else if (hadPendingZap) {
+          resumeOnActiveRef.current = true;
         }
         return;
       }
@@ -258,30 +211,12 @@ export function PlayerScreen({
       const svc = serviceRef.current;
       if (resumeOnActiveRef.current && svc !== null) {
         resumeOnActiveRef.current = false;
-        tuneEntry(svc, activeTargetRef.current);
+        const startMs = activeTargetRef.current.kind === 'vod' ? vodResumeMsRef.current : undefined;
+        tuneEntry(svc, activeTargetRef.current, startMs);
       }
     });
-  }, [appLifecycle, tuneEntry]);
+  }, [appLifecycle, tuneEntry, zapController]);
 
-  const activeService = sessionState.kind === 'ready' ? sessionState.service : null;
-  const sliceRef = useRef<PlaybackUiSlice>(OPENING_PLAYBACK_SLICE);
-  const subscribePlayback = useCallback(
-    (cb: () => void) => (activeService === null ? () => undefined : activeService.subscribe(cb)),
-    [activeService],
-  );
-  const getPlaybackSnapshot = useCallback((): PlaybackUiSlice => {
-    if (activeService === null) return OPENING_PLAYBACK_SLICE;
-    const { status: st, tracks: tr } = activeService.getState();
-    const prev = sliceRef.current;
-    if (prev.status === st && prev.tracks === tr) return prev;
-    sliceRef.current = { status: st, tracks: tr };
-    return sliceRef.current;
-  }, [activeService]);
-  const { status, tracks } = useSyncExternalStore(
-    subscribePlayback,
-    getPlaybackSnapshot,
-    getPlaybackSnapshot,
-  );
   const hasTracks = tracks.audio.length > 0 || tracks.subtitles.length > 0;
   const showRetry = status.kind === 'failed' && activeService !== null;
   const statusLine =
@@ -301,8 +236,10 @@ export function PlayerScreen({
     tracks,
     hasTracks,
     showRetry,
+    hasService: activeService !== null,
     serviceRef,
     clockRef,
+    timersRef,
     onExitRef,
     zapByRef,
   });
@@ -359,6 +296,8 @@ export function PlayerScreen({
         isTv={isTv}
         tvOsdFocused={controls.tvOsdFocused}
         tvOsdAction={controls.tvOsdAction}
+        tracksOpen={controls.tracksOpen}
+        previewPositionMs={controls.previewPositionMs}
         i18n={i18n}
         service={activeService}
         clock={clock}
@@ -370,7 +309,7 @@ export function PlayerScreen({
         onOpenTracks={controls.openTracks}
         onPrev={() => zapBy(-1)}
         onNext={() => zapBy(1)}
-        onRetry={() => activeService?.retry()}
+        onRetry={controls.retry}
       />
     </View>
   );

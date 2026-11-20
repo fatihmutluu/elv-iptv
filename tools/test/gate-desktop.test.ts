@@ -245,6 +245,47 @@ describe('judgeDesktopFault', () => {
     ).toEqual([]);
   });
 
+  it('checks every 509 and notice backoff interval against the 2, 4, 8, then 15 s ladder (#83)', () => {
+    const limited = (start: number) =>
+      makeEntry(start, 5, { status: 509, bytes: 0, query: { fault: 'status=509' } });
+    const notice = (start: number) =>
+      makeEntry(start, 5, { status: 200, bytes: 23, query: { fault: 'text-notice' } });
+    const judge = (fault: '509' | 'notice', entries: SimLogEntry[]) =>
+      judgeDesktopFault(
+        fault,
+        makeLine({ fault, faultOutcome: 'limited-backoff', zaps: 1 }),
+        entries,
+        '1001',
+      );
+    expect(judge('509', [limited(0), limited(2005), limited(6010), limited(14_015)])).toEqual({
+      failures: [],
+      warnings: [],
+    });
+    expect(judge('509', [limited(0), limited(2005), limited(3010)]).failures).toEqual([
+      '509: next request came 1000 ms after 509 2, before the 4000 ms backoff',
+    ]);
+    expect(
+      judge('509', [limited(0), limited(2005), limited(6010), limited(10_015)]).failures,
+    ).toEqual(['509: next request came 4000 ms after 509 3, before the 8000 ms backoff']);
+    expect(judge('notice', [notice(0), notice(2005), notice(4010)]).failures).toEqual([
+      'notice: next request came 2000 ms after notice 2, before the 4000 ms backoff',
+    ]);
+    expect(judge('notice', [notice(0), notice(500)]).failures).toEqual([
+      'notice: next request came 495 ms after the notice, before the 2000 ms backoff',
+    ]);
+    expect(judge('509', [makeEntry(0, 2500, { status: 509, bytes: 0 })]).failures).toEqual([
+      '509: first limit answer took 2500 ms, limit 2000 ms',
+    ]);
+    expect(
+      judgeDesktopFault(
+        '509',
+        makeLine({ fault: '509', faultOutcome: 'limited-backoff', zaps: 1, limitedAfterMs: 2400 }),
+        [limited(0), limited(2005)],
+        '1001',
+      ).failures,
+    ).toEqual(['509: the screen entered limited 2400 ms after the tune, limit 2000 ms']);
+  });
+
   it('rejects missed outcomes and wedged engines', () => {
     const bad = judgeDesktopFault(
       'stall',

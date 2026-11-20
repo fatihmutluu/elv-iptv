@@ -7,6 +7,7 @@ const FAULT_RATE = 0.1;
 const LONG_FAULT_RATE = 0.05;
 /** A slow-start run zaps 800 ms after the first tune, while that request still waits for its 3 s late answer. */
 const SLOW_START_RATE = 1.25;
+/** Zaps requested on every fault run. */
 export const FAULT_ZAPS = 1;
 
 /** Spec 7 fault windows. */
@@ -14,7 +15,8 @@ const DROP_RECOVERY_MS = 10_000;
 const STALL_RECOVERY_MS = 10_000;
 const NOT_FOUND_FAIL_MS = 10_000;
 const SILENT_FAIL_MS = 12_000;
-const FIRST_BACKOFF_MS = 2000;
+const LIMITED_WITHIN_MS = 2000;
+const LIMIT_BACKOFF_MS: readonly number[] = [2000, 4000, 8000, 15_000];
 const CLOCK_ROUNDING_MS = 10;
 const NOTICE_BYTES = 'Max connections reached'.length;
 
@@ -31,6 +33,14 @@ const FAULT_EXPECTED = {
 
 /** Name of an injected player-gate fault. */
 export type Fault = keyof typeof FAULT_EXPECTED;
+
+/** Request span from the simulator log with HTTP status and response byte count. */
+export interface FaultSpan {
+  status: number;
+  bytes: number;
+  start: number;
+  end: number;
+}
 
 const ANDROID_FAULTS: readonly Fault[] = ['drop5', '404', '509', 'slowstart', 'silent'];
 const APPLE_FAULTS: readonly Fault[] = [
@@ -57,12 +67,66 @@ export function faultRate(fault: Fault, burstSec = 0): number {
 }
 
 /**
+ * Verifies every connection-limit (`509` or `notice`) backoff interval on `own` against the 2 s, 4 s, 8 s, then 15 s
+ * ladder, resetting the step counter after any request that was not limited. When `firstLimitWindowMs` is set, also
+ * requires the first limit answer to complete within that window from `own[0].start`.
+ */
+export function judgeLimitBackoff(
+  fault: '509' | 'notice',
+  own: readonly FaultSpan[],
+  failures: string[],
+  warnings: string[],
+  firstLimitWindowMs?: number,
+): void {
+  const isLimit =
+    fault === '509'
+      ? (e: FaultSpan) => e.status === 509
+      : (e: FaultSpan) => e.status === 200 && e.bytes === NOTICE_BYTES;
+  let seen = 0;
+  let attempt = 0;
+  let verified = 0;
+  for (let i = 0; i < own.length; i += 1) {
+    const current = own[i] as FaultSpan;
+    if (!isLimit(current)) {
+      attempt = 0;
+      continue;
+    }
+    seen += 1;
+    if (seen === 1 && firstLimitWindowMs !== undefined) {
+      const first = own[0] as FaultSpan;
+      if (current.end - first.start > firstLimitWindowMs) {
+        failures.push(
+          `${fault}: first limit answer took ${current.end - first.start} ms, limit ${firstLimitWindowMs} ms`,
+        );
+      }
+    }
+    const stepMs = LIMIT_BACKOFF_MS[Math.min(attempt, LIMIT_BACKOFF_MS.length - 1)] as number;
+    attempt += 1;
+    const nextReq = own[i + 1];
+    if (nextReq === undefined) break;
+    verified += 1;
+    const gap = nextReq.start - current.end;
+    if (gap < stepMs - CLOCK_ROUNDING_MS) {
+      const label = seen === 1 ? `the ${fault}` : `${fault} ${seen}`;
+      failures.push(
+        `${fault}: next request came ${gap} ms after ${label}, before the ${stepMs} ms backoff`,
+      );
+    }
+  }
+  if (seen === 0) {
+    failures.push(`${fault}: the simulator answered no ${fault}`);
+  } else if (verified === 0) {
+    warnings.push(`${fault}: no second request within the stay; the backoff was not verified`);
+  }
+}
+
+/**
  * Judges one fault run against spec 7. The screen's `faultOutcome` must be the expected one (`missed` fails); the
  * windows come from the simulator log of the faulted channel: a dropped stream must be requested again within 10 s of
  * the drop, a stalled stream within `10 s + burstSec` of the first request without a limit answer, a 404 answered for
- * the last time within 10 s, and after a 509 or notice the next request may come only after the 2,000 ms backoff. A
- * slow start (its answer held back 3 s, left by a zap after 800 ms) needs the zap's frame, a request after the zap and
- * no limit answer.
+ * the last time within 10 s, and after every 509 or notice the screen must enter `limited` within 2,000 ms and wait
+ * out the 2 s, 4 s, 8 s, then 15 s backoff ladder. A slow start (its answer held back 3 s, left by a zap after
+ * 800 ms) needs the zap's frame, a request after the zap and no limit answer.
  */
 export function judgeFault(
   fault: Fault,
@@ -88,7 +152,7 @@ export function judgeFault(
     failures.push(`${fault}: outcome ${line.faultOutcome ?? 'null'}, expected ${expected}`);
   }
 
-  const own = entries
+  const own: FaultSpan[] = entries
     .filter(
       (e) => e.account === ACCOUNT && String(e.streamId) === channel && STREAM_PATH.test(e.path),
     )
@@ -122,51 +186,29 @@ export function judgeFault(
         `404: last 404 answered ${last.end - first.start} ms after the first request, limit ${NOT_FOUND_FAIL_MS} ms`,
       );
     }
-  } else if (fault === 'notice') {
-    const notices = own.filter((e) => e.status === 200 && e.bytes === NOTICE_BYTES);
-    judgeBackoff('notice', 'notice', notices[0], own, failures, warnings);
   } else {
-    const limited = own.filter((e) => e.status === 509);
-    judgeBackoff('509', '509', limited[0], limited, failures, warnings);
+    if (line.limitedAfterMs !== null && line.limitedAfterMs > LIMITED_WITHIN_MS) {
+      failures.push(
+        `${fault}: the screen entered limited ${line.limitedAfterMs} ms after the tune, limit ${LIMITED_WITHIN_MS} ms`,
+      );
+    } else if (line.limitedAfterMs === null && line.faultOutcome === 'limited-backoff') {
+      warnings.push(
+        `${fault}: the screen reported no limitedAfterMs (an app build that predates it)`,
+      );
+    }
+    judgeLimitBackoff(fault, own, failures, warnings);
   }
   return { failures, warnings };
 }
 
-interface Span {
-  start: number;
-  end: number;
-}
-
-function judgeBackoff(
-  fault: string,
-  noun: string,
-  first: Span | undefined,
-  candidates: readonly Span[],
-  failures: string[],
-  warnings: string[],
-): void {
-  if (first === undefined) {
-    failures.push(`${fault}: the simulator answered no ${noun}`);
-    return;
-  }
-  const second = candidates[candidates.indexOf(first) + 1];
-  if (second === undefined) {
-    warnings.push(`${fault}: no second request within the stay; the backoff was not verified`);
-  } else if (second.start - first.end < FIRST_BACKOFF_MS - CLOCK_ROUNDING_MS) {
-    failures.push(
-      `${fault}: next request came ${second.start - first.end} ms after the ${noun}, before the ${FIRST_BACKOFF_MS} ms backoff`,
-    );
-  }
-}
-
 function judgeStall(
-  own: readonly Span[],
+  own: readonly FaultSpan[],
   entries: readonly SimLogEntry[],
   burstSec: number,
   failures: string[],
   warnings: string[],
 ): void {
-  const first = own[0] as Span;
+  const first = own[0] as FaultSpan;
   const again = own[1];
   const limitMs = STALL_RECOVERY_MS + Math.max(0, burstSec) * 1000;
   if (again === undefined) failures.push('stall: no new request after the stall');
@@ -187,12 +229,12 @@ function judgeStall(
 }
 
 function judgeSilent(
-  own: readonly Span[],
+  own: readonly FaultSpan[],
   entries: readonly SimLogEntry[],
   failures: string[],
   warnings: string[],
 ): void {
-  const first = own[0] as Span;
+  const first = own[0] as FaultSpan;
   const last = own[own.length - 1];
   if (own.length < 2) {
     failures.push('silent: ladder made fewer than 2 requests before giving up');

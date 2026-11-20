@@ -4,24 +4,31 @@ import type { TrackInfo } from '@elv/playback';
 const EN_LOOKUP: Pick<AppI18n, 't'> = { t: (id) => enMessages[id] };
 const TR_LOOKUP: Pick<AppI18n, 't'> = { t: (id) => trMessages[id] };
 
+/** Case- and diacritic-insensitive key that folds Turkish dotted `İ` and dotless `ı` onto `i`. */
+function foldLabel(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ı/g, 'i')
+    .toLowerCase();
+}
+
 function isRedundantLabel(
   rawLabel: string,
   rawLanguage: string | undefined,
   localizedLang: string | undefined,
 ): boolean {
-  const lower = rawLabel.toLowerCase();
-  if (localizedLang !== undefined && lower === localizedLang.toLowerCase()) return true;
-  const trimmedCode = rawLanguage?.trim().toLowerCase();
-  if (trimmedCode !== undefined && trimmedCode.length > 0) {
-    if (lower === trimmedCode) return true;
-    const primary = trimmedCode.split(/[-_]/)[0];
-    if (primary !== undefined && lower === primary) return true;
-  }
-  const enLang = resolveLanguageLabel(rawLanguage, EN_LOOKUP);
-  if (enLang !== undefined && lower === enLang.toLowerCase()) return true;
-  const trLang = resolveLanguageLabel(rawLanguage, TR_LOOKUP);
-  if (trLang !== undefined && lower === trLang.toLowerCase()) return true;
-  return false;
+  const folded = foldLabel(rawLabel);
+  const matches = (candidate: string | undefined): boolean =>
+    candidate !== undefined && candidate.length > 0 && folded === foldLabel(candidate);
+  const trimmedCode = rawLanguage?.trim();
+  return (
+    matches(localizedLang) ||
+    matches(trimmedCode) ||
+    matches(trimmedCode?.split(/[-_]/)[0]) ||
+    matches(resolveLanguageLabel(rawLanguage, EN_LOOKUP)) ||
+    matches(resolveLanguageLabel(rawLanguage, TR_LOOKUP))
+  );
 }
 
 function primaryTrackName(track: TrackInfo, index: number, i18n: AppI18n): string {

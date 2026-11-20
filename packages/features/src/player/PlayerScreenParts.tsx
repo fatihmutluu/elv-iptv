@@ -1,13 +1,15 @@
 import type { AppI18n } from '@elv/i18n';
 import {
+  type ClockAnchor,
   type PlaybackClock,
   type PlaybackService,
   type PlaybackStatus,
   positionAt,
 } from '@elv/playback';
-import { type ReactElement, useEffect, useState } from 'react';
+import type { ReactElement } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { type DescribedPlaybackFailure, describePlaybackFailure } from './errors';
+import { usePlaybackTicker } from './usePlaybackTicker';
 import type { TvOsdAction } from './usePlayerControls';
 import { formatPlaybackPosition, VodProgressBar } from './VodProgressBar';
 
@@ -33,45 +35,34 @@ export function formatStatusLine(status: PlaybackStatus, i18n: AppI18n): string 
   }
 }
 
+function readClockText(anchor: ClockAnchor | undefined, nowMs: number): string {
+  return anchor === undefined ? '--:--' : formatPlaybackPosition(positionAt(anchor, nowMs));
+}
+
+function sameText(a: string, b: string): boolean {
+  return a === b;
+}
+
 function OsdClock({
   service,
   clock,
+  previewPositionMs,
 }: {
   service: PlaybackService | null;
   clock: PlaybackClock;
+  previewPositionMs: number | undefined;
 }): ReactElement {
-  const [text, setText] = useState('--:--');
-
-  useEffect(() => {
-    const sync = (): void => {
-      if (service === null) {
-        setText('--:--');
-        return;
-      }
-      const { anchor } = service.getState();
-      const next =
-        anchor === undefined ? '--:--' : formatPlaybackPosition(positionAt(anchor, clock.now()));
-      setText((prev) => (prev === next ? prev : next));
-    };
-    sync();
-    if (service === null) return;
-
-    const unsubscribe = service.subscribe(() => sync());
-    let frame = 0;
-    const tick = (): void => {
-      sync();
-      frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => {
-      unsubscribe();
-      cancelAnimationFrame(frame);
-    };
-  }, [clock, service]);
+  const text = usePlaybackTicker({
+    service,
+    clock,
+    mode: 'second',
+    derive: readClockText,
+    isEqual: sameText,
+  });
 
   return (
     <Text testID="osd-clock" style={playerStyles.clock}>
-      {text}
+      {previewPositionMs === undefined ? text : formatPlaybackPosition(previewPositionMs)}
     </Text>
   );
 }
@@ -122,6 +113,8 @@ export function PlayerOsd({
   isTv,
   tvOsdFocused,
   tvOsdAction,
+  tracksOpen,
+  previewPositionMs,
   i18n,
   service,
   clock,
@@ -146,6 +139,8 @@ export function PlayerOsd({
   isTv: boolean;
   tvOsdFocused: boolean;
   tvOsdAction: TvOsdAction;
+  tracksOpen: boolean;
+  previewPositionMs?: number | undefined;
   i18n: AppI18n;
   service: PlaybackService | null;
   clock: PlaybackClock;
@@ -173,7 +168,7 @@ export function PlayerOsd({
             {statusLine}
           </Text>
         </View>
-        <OsdClock service={service} clock={clock} />
+        <OsdClock service={service} clock={clock} previewPositionMs={previewPositionMs} />
       </View>
 
       {isVod ? (
@@ -182,6 +177,7 @@ export function PlayerOsd({
           clock={clock}
           isTv={isTv}
           label={i18n.t('player.progressLabel')}
+          previewPositionMs={previewPositionMs}
           onSeekRatio={onSeekRatio}
         />
       ) : null}
@@ -258,7 +254,7 @@ export function PlayerOsd({
             label={i18n.t('player.retry')}
             onPress={onRetry}
             isTv={isTv}
-            tvFocused={tvOsdFocused ? isFocusedAction('retry') : isTv}
+            tvFocused={tvOsdFocused ? isFocusedAction('retry') : isTv && !tracksOpen}
           />
         ) : null}
       </View>

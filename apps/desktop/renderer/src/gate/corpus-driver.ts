@@ -1,30 +1,20 @@
 import { ok } from '@elv/domain';
 import {
+  type ClockAnchor,
   createPlaybackService,
   type EngineEvent,
-  type MediaKind,
   type PlaybackService,
   type PlaybackState,
   type PlayerEngine,
+  positionAt,
   type TrackInfo,
 } from '@elv/playback';
+import { buildDesktopCorpusItems, type DesktopCorpusItem } from './corpus-items.ts';
 
 const DEFAULT_ITEM_TIMEOUT_MS = 15_000;
 const DEFAULT_HOLD_MS = 250;
+/** A seek lands when a clock anchor of the attempt sits within this much of the target, either side. */
 const SEEK_TOLERANCE_MS = 5_000;
-
-/** One item in the 29-item desktop format corpus sweep. */
-export interface DesktopCorpusItem {
-  id: string;
-  label: string;
-  kind: MediaKind;
-  url: string;
-  expect: 'playing' | 'failed';
-  audioOnly?: boolean;
-  selectAudioLang?: string;
-  selectSubtitleLang?: string;
-  seekMs?: number;
-}
 
 /** One item that failed its expected corpus outcome. */
 interface DesktopCorpusFailure {
@@ -58,119 +48,11 @@ export interface CorpusRunDeps {
 export interface CorpusRun {
   readonly service: PlaybackService;
   start(): Promise<DesktopCorpusReport>;
+  /** Resolves every pending wait and sleep, unsubscribes and disposes the service; the engine is the caller's. */
   dispose(): void;
 }
 
-const LIVE_ENTRIES: readonly (readonly [number, string, string | null, boolean])[] = [
-  [1001, 'H.264 720p25 AAC', null, false],
-  [1002, 'HEVC 1080p25 8-bit', null, false],
-  [1003, 'HEVC 1080p25 10-bit', null, false],
-  [1004, 'MPEG-2 576i25 AC-3', null, false],
-  [1005, 'H.264 576p25 MP2', null, false],
-  [1006, 'AAC radio', null, false],
-  [1007, 'H.264 1080i25', null, false],
-  [1008, 'H.264 720p50 E-AC-3 5.1', null, false],
-  [1009, 'H.264 720p29.97 MP3', null, false],
-  [1010, 'Two audio tracks and subtitles', null, true],
-  [1011, 'Resolution switch 720p and 1080p', null, false],
-  [1012, 'Stream labelled as a web page', 'type=text/html', false],
-  [1013, 'Redirect to HLS', 'redirect=hls', false],
-  [1014, 'Stream labelled as a playlist', 'type=application/vnd.apple.mpegurl', false],
-];
-
-const VOD_ENTRIES: readonly (readonly [number, string, 'mp4' | 'mkv', boolean])[] = [
-  [200001, 'H.264 720p25 AAC (MP4)', 'mp4', false],
-  [200002, 'HEVC 1080p25 8-bit (MKV)', 'mkv', false],
-  [200003, 'HEVC 1080p25 10-bit (MP4)', 'mp4', false],
-  [200004, 'MPEG-2 576i25 AC-3 (MKV)', 'mkv', false],
-  [200005, 'H.264 576p25 MP2 (MKV)', 'mkv', false],
-  [200006, 'AAC radio (MP4)', 'mp4', false],
-  [200007, 'H.264 1080i25 (MKV)', 'mkv', false],
-  [200008, 'H.264 720p50 E-AC-3 5.1 (MP4)', 'mp4', false],
-  [200009, 'H.264 720p29.97 MP3 (MP4)', 'mp4', false],
-  [200010, 'Two audio tracks and subtitles (MP4)', 'mp4', true],
-  [200011, 'Two audio tracks and subtitles (MKV)', 'mkv', true],
-  [200012, 'Resolution switch 720p and 1080p (MKV)', 'mkv', false],
-];
-
-/** Builds the 29-item format corpus manifest for the desktop gate driver. */
-export function buildDesktopCorpusItems(opts: {
-  base: string;
-  account: string;
-  burst?: number;
-}): DesktopCorpusItem[] {
-  const { base, account, burst = 0 } = opts;
-  const pair = `${account}/${account}`;
-  const items: DesktopCorpusItem[] = [];
-
-  for (const [id, label, fault, tracks] of LIVE_ENTRIES) {
-    if (fault === 'redirect=hls') {
-      items.push({
-        id: `live-${id}`,
-        label,
-        kind: 'live',
-        url: `${base}/${pair}/${id}`,
-        expect: 'playing',
-      });
-      continue;
-    }
-    const queryParts = [
-      fault !== null && burst > 0 ? fault : undefined,
-      burst > 0 ? `burst=${burst}` : undefined,
-    ].filter((part): part is string => part !== undefined);
-    const suffix = queryParts.length === 0 ? '' : `?fault=${queryParts.join(',')}`;
-    items.push({
-      id: `live-${id}`,
-      label,
-      kind: 'live',
-      url: `${base}/live/${pair}/${id}.ts${suffix}`,
-      expect: 'playing',
-      ...(id === 1006 ? { audioOnly: true } : {}),
-      ...(tracks ? { selectAudioLang: 'eng', selectSubtitleLang: 'tur' } : {}),
-    });
-  }
-
-  items.push({
-    id: 'live-1010-hls',
-    label: 'Two audio tracks and subtitles (Live HLS WebVTT)',
-    kind: 'live',
-    url: `${base}/live/${pair}/1010.m3u8`,
-    expect: 'playing',
-    selectSubtitleLang: 'tur',
-  });
-
-  for (const [id, label, ext, tracks] of VOD_ENTRIES) {
-    items.push({
-      id: `vod-${id}`,
-      label,
-      kind: 'vod',
-      url: `${base}/movie/${pair}/${id}.${ext}`,
-      expect: 'playing',
-      ...(id === 200006 ? { audioOnly: true } : {}),
-      ...(tracks ? { selectAudioLang: 'eng', selectSubtitleLang: 'tur' } : {}),
-    });
-  }
-
-  items.push({
-    id: 'vod-200010-hls',
-    label: 'Two audio tracks and subtitles (VOD HLS WebVTT)',
-    kind: 'vod',
-    url: `${base}/movie/${pair}/200010.m3u8`,
-    expect: 'playing',
-    selectSubtitleLang: 'tur',
-    seekMs: 30_000,
-  });
-
-  items.push({
-    id: 'vod-200001-empty',
-    label: 'Empty 200 VOD response',
-    kind: 'vod',
-    url: `${base}/movie/${pair}/200001.mp4?fault=empty`,
-    expect: 'failed',
-  });
-
-  return items;
-}
+type TrackKind = 'audio' | 'subtitle';
 
 /** Formats the corpus report line that main prints and the gate CLI parses. */
 export function corpusLine(report: DesktopCorpusReport): string {
@@ -179,8 +61,17 @@ export function corpusLine(report: DesktopCorpusReport): string {
 
 function pickTrack(tracks: readonly TrackInfo[], lang: string): TrackInfo | undefined {
   const target = lang.toLowerCase();
-  return tracks.find((t) => t.language?.toLowerCase().startsWith(target)) ?? tracks[0];
+  return tracks.find((t) => t.language?.toLowerCase().startsWith(target));
 }
+
+const listOf = (s: PlaybackState, kind: TrackKind): readonly TrackInfo[] =>
+  kind === 'audio' ? s.tracks.audio : s.tracks.subtitles;
+
+const selectedOf = (s: PlaybackState, kind: TrackKind): string | null =>
+  kind === 'audio' ? s.tracks.selectedAudioId : s.tracks.selectedSubtitleId;
+
+const isTerminal = (s: PlaybackState): boolean =>
+  s.status.kind === 'failed' || s.status.kind === 'limited' || s.status.kind === 'ended';
 
 function failureReason(state: PlaybackState): string {
   if (state.status.kind === 'failed') {
@@ -189,7 +80,12 @@ function failureReason(state: PlaybackState): string {
   return `settled on ${state.status.kind}`;
 }
 
-/** Creates a desktop corpus gate run over `engine`. */
+/**
+ * Creates a desktop corpus gate run over `engine`. A playable item passes when it plays (with a first frame unless
+ * audio-only), delivers a clock anchor, switches to the requested audio and subtitle languages, lands a seek within
+ * {@link SEEK_TOLERANCE_MS} and keeps playing with an advancing clock. A failing item passes when it fails with
+ * `expectError`.
+ */
 export function createCorpusRun(deps: CorpusRunDeps): CorpusRun {
   const {
     engine,
@@ -204,9 +100,10 @@ export function createCorpusRun(deps: CorpusRunDeps): CorpusRun {
   let surfaceCreated = 0;
   let staleEventsApplied = 0;
   let highestAttempt = 0;
-  let latestClockPos: number | undefined;
+  let latestClock: ClockAnchor | undefined;
   let disposed = false;
-  const cancels = new Set<() => void>();
+  const stopListeners = new Set<() => void>();
+  const wakers = new Set<() => void>();
 
   const tapped: PlayerEngine = {
     ...engine,
@@ -215,9 +112,10 @@ export function createCorpusRun(deps: CorpusRunDeps): CorpusRun {
         if (event.type === 'surface' && event.change === 'created') {
           surfaceCreated += 1;
         } else if (event.type === 'clock' && event.attempt === service.getState().attempt) {
-          latestClockPos = event.anchor.positionMs;
+          latestClock = event.anchor;
         }
         listener(event);
+        for (const wake of [...wakers]) wake();
       }),
   };
 
@@ -245,63 +143,157 @@ export function createCorpusRun(deps: CorpusRunDeps): CorpusRun {
   const sleep = (ms: number): Promise<void> =>
     new Promise((resolve) => {
       if (disposed) return resolve();
-      const cancel = later(() => {
-        cancels.delete(cancel);
+      let cancel: (() => void) | undefined;
+      const finish = (): void => {
+        stopListeners.delete(finish);
+        cancel?.();
         resolve();
-      }, ms);
-      cancels.add(cancel);
+      };
+      stopListeners.add(finish);
+      cancel = later(finish, ms);
     });
 
+  /** Resolves `true` once `accept` holds after a state change or engine event, `false` on timeout or dispose. */
   const waitFor = (accept: (s: PlaybackState) => boolean, timeoutMs: number): Promise<boolean> =>
     new Promise((resolve) => {
       if (disposed) return resolve(false);
       if (accept(service.getState())) return resolve(true);
-      let off = (): void => undefined;
+      let done = false;
+      let off: (() => void) | undefined;
+      let cancelTimer: (() => void) | undefined;
       const finish = (matched: boolean): void => {
-        off();
-        cancelTimer();
-        cancels.delete(cancelTimer);
+        if (done) return;
+        done = true;
+        off?.();
+        wakers.delete(check);
+        stopListeners.delete(onStop);
+        cancelTimer?.();
         resolve(matched);
       };
-      const cancelTimer = later(() => finish(false), timeoutMs);
-      cancels.add(cancelTimer);
-      off = service.subscribe((s) => {
-        if (accept(s)) finish(true);
-      });
+      const check = (): void => {
+        if (accept(service.getState())) finish(true);
+      };
+      const onStop = (): void => finish(false);
+      stopListeners.add(onStop);
+      wakers.add(check);
+      off = service.subscribe(check);
+      cancelTimer = later(() => finish(false), timeoutMs);
     });
 
-  const applyItemChecks = async (item: DesktopCorpusItem): Promise<string | undefined> => {
-    if (item.selectAudioLang !== undefined || item.selectSubtitleLang !== undefined) {
-      await sleep(holdMs);
-    }
+  const selectTrack = async (kind: TrackKind, lang: string): Promise<string | undefined> => {
+    const capable =
+      kind === 'audio'
+        ? engine.capabilities.audioTrackSelection
+        : engine.capabilities.subtitleTrackSelection;
+    if (!capable) return `${kind} track selection unsupported`;
+    await waitFor(
+      (s) => pickTrack(listOf(s, kind), lang) !== undefined || isTerminal(s),
+      itemTimeoutMs,
+    );
     const state = service.getState();
-    if (item.selectAudioLang !== undefined && engine.capabilities.audioTrackSelection) {
-      const picked = pickTrack(state.tracks.audio, item.selectAudioLang);
-      if (picked !== undefined) service.selectAudioTrack(picked.id);
+    if (isTerminal(state)) return failureReason(state);
+    if (listOf(state, kind).length === 0) return `no ${kind} tracks`;
+    const picked = pickTrack(listOf(state, kind), lang);
+    if (picked === undefined) return `no ${kind} track for ${lang}`;
+    if (kind === 'audio') service.selectAudioTrack(picked.id);
+    else service.selectSubtitleTrack(picked.id);
+    await waitFor((s) => selectedOf(s, kind) === picked.id || isTerminal(s), itemTimeoutMs);
+    const after = service.getState();
+    if (isTerminal(after)) return failureReason(after);
+    return selectedOf(after, kind) === picked.id
+      ? undefined
+      : `${kind} track ${picked.id} not selected`;
+  };
+
+  const readClock = (): ClockAnchor | undefined => latestClock;
+
+  const seekTo = async (targetMs: number): Promise<string | undefined> => {
+    latestClock = undefined;
+    service.seek(targetMs);
+    const landed = (): boolean => {
+      const clock = readClock();
+      return clock !== undefined && Math.abs(clock.positionMs - targetMs) <= SEEK_TOLERANCE_MS;
+    };
+    await waitFor((s) => (s.status.kind === 'playing' && landed()) || isTerminal(s), itemTimeoutMs);
+    const state = service.getState();
+    if (state.status.kind !== 'playing') {
+      return `seek to ${targetMs} ms failed (${failureReason(state)})`;
     }
-    if (item.selectSubtitleLang !== undefined && engine.capabilities.subtitleTrackSelection) {
-      const picked = pickTrack(state.tracks.subtitles, item.selectSubtitleLang);
-      if (picked !== undefined) service.selectSubtitleTrack(picked.id);
+    if (!landed()) {
+      const clock = readClock();
+      const at = clock === undefined ? 'none' : `${clock.positionMs} ms`;
+      return `seek to ${targetMs} ms not confirmed (clock at ${at})`;
+    }
+    return undefined;
+  };
+
+  const applyItemChecks = async (item: DesktopCorpusItem): Promise<string | undefined> => {
+    await waitFor((s) => latestClock !== undefined || isTerminal(s), itemTimeoutMs);
+    if (isTerminal(service.getState())) return failureReason(service.getState());
+    if (latestClock === undefined) return 'no clock anchor';
+    if (item.selectAudioLang !== undefined) {
+      const error = await selectTrack('audio', item.selectAudioLang);
+      if (error !== undefined) return error;
+    }
+    if (item.selectSubtitleLang !== undefined) {
+      const error = await selectTrack('subtitle', item.selectSubtitleLang);
+      if (error !== undefined) return error;
     }
     if (item.seekMs !== undefined) {
-      const targetMs = item.seekMs;
-      latestClockPos = undefined;
-      service.seek(targetMs);
-      const seeked = await waitFor(
-        (s) =>
-          (s.status.kind === 'playing' && (latestClockPos ?? 0) >= targetMs - SEEK_TOLERANCE_MS) ||
-          s.status.kind === 'failed' ||
-          s.status.kind === 'limited',
+      const error = await seekTo(item.seekMs);
+      if (error !== undefined) return error;
+    }
+    const before = latestClock === undefined ? undefined : positionAt(latestClock, now());
+    await sleep(holdMs);
+    const state = service.getState();
+    if (state.status.kind !== 'playing') return failureReason(state);
+    const advanced =
+      before !== undefined &&
+      latestClock !== undefined &&
+      latestClock.rate > 0 &&
+      positionAt(latestClock, now()) > before;
+    return advanced ? undefined : 'clock not advancing';
+  };
+
+  const runItem = async (item: DesktopCorpusItem): Promise<string | undefined> => {
+    latestClock = undefined;
+    service.tune({
+      item: item.id,
+      accountKey: account,
+      kind: item.kind,
+      resolve: async () => ok({ url: item.url, headers: {} }),
+    });
+
+    if (item.expect === 'failed') {
+      await waitFor(
+        (s) => isTerminal(s) || (s.status.kind === 'playing' && s.firstFrameAt !== undefined),
         itemTimeoutMs,
       );
-      if (!seeked || service.getState().status.kind !== 'playing') {
-        return `seek to ${targetMs} ms failed (${failureReason(service.getState())})`;
+      const state = service.getState();
+      if (state.status.kind !== 'failed') return `expected failed, settled on ${state.status.kind}`;
+      const reason = failureReason(state);
+      if (item.expectError !== undefined && reason !== item.expectError) {
+        return `expected ${item.expectError}, got ${reason}`;
       }
+      return undefined;
     }
-    await sleep(holdMs);
-    return service.getState().status.kind === 'playing'
-      ? undefined
-      : failureReason(service.getState());
+
+    const settled = await waitFor(
+      (s) =>
+        (s.status.kind === 'playing' &&
+          (item.audioOnly === true || s.firstFrameAt !== undefined)) ||
+        isTerminal(s),
+      itemTimeoutMs,
+    );
+    const state = service.getState();
+    if (
+      !settled ||
+      state.status.kind !== 'playing' ||
+      (item.audioOnly !== true && state.firstFrameAt === undefined)
+    ) {
+      return settled ? failureReason(state) : 'timeout waiting for playing';
+    }
+    return applyItemChecks(item);
   };
 
   return {
@@ -313,65 +305,10 @@ export function createCorpusRun(deps: CorpusRunDeps): CorpusRun {
 
       for (const item of items) {
         if (disposed) break;
-        latestClockPos = undefined;
-        service.tune({
-          item: item.id,
-          accountKey: account,
-          kind: item.kind,
-          resolve: async () => ok({ url: item.url, headers: {} }),
-        });
-
-        if (item.expect === 'failed') {
-          await waitFor(
-            (s) =>
-              s.status.kind === 'failed' ||
-              s.status.kind === 'ended' ||
-              s.status.kind === 'limited' ||
-              (s.status.kind === 'playing' && s.firstFrameAt !== undefined),
-            itemTimeoutMs,
-          );
-          const finalKind = service.getState().status.kind;
-          if (finalKind === 'failed') {
-            passed += 1;
-          } else {
-            failed.push({
-              id: item.id,
-              label: item.label,
-              reason: `expected failed, settled on ${finalKind}`,
-            });
-          }
-          continue;
-        }
-
-        const settled = await waitFor(
-          (s) =>
-            (s.status.kind === 'playing' &&
-              (item.audioOnly === true || s.firstFrameAt !== undefined)) ||
-            s.status.kind === 'failed' ||
-            s.status.kind === 'limited' ||
-            s.status.kind === 'ended',
-          itemTimeoutMs,
-        );
-        const stateAfterTune = service.getState();
-        if (
-          !settled ||
-          stateAfterTune.status.kind !== 'playing' ||
-          (item.audioOnly !== true && stateAfterTune.firstFrameAt === undefined)
-        ) {
-          failed.push({
-            id: item.id,
-            label: item.label,
-            reason: settled ? failureReason(stateAfterTune) : 'timeout waiting for playing',
-          });
-          continue;
-        }
-
-        const postError = await applyItemChecks(item);
-        if (postError !== undefined) {
-          failed.push({ id: item.id, label: item.label, reason: postError });
-        } else {
-          passed += 1;
-        }
+        const reason = await runItem(item);
+        if (disposed) break;
+        if (reason === undefined) passed += 1;
+        else failed.push({ id: item.id, label: item.label, reason });
       }
 
       if (!disposed) {
@@ -387,10 +324,12 @@ export function createCorpusRun(deps: CorpusRunDeps): CorpusRun {
       };
     },
     dispose() {
+      if (disposed) return;
       disposed = true;
       offStale();
-      for (const cancel of [...cancels]) cancel();
-      cancels.clear();
+      for (const stop of [...stopListeners]) stop();
+      stopListeners.clear();
+      wakers.clear();
       service.dispose();
     },
   };

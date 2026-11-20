@@ -78,13 +78,40 @@ describe('empty request fault', () => {
     return handle;
   }
 
-  it('answers 200 with an empty body', async () => {
+  it('answers 200 with an empty body and keeps the media content type of the path', async () => {
     const { url } = await sim();
     const res = await fetch(`${url}/movie/demo/demo/1.mp4?fault=empty`);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-length')).toBe('0');
+    expect(res.headers.get('content-type')).toBe('video/mp4');
+    expect((await res.arrayBuffer()).byteLength).toBe(0);
+    const mkv = await fetch(`${url}/movie/demo/demo/2.mkv?fault=empty`);
+    expect(mkv.headers.get('content-type')).toBe('video/x-matroska');
+    await mkv.arrayBuffer();
+    const ts = await fetch(`${url}/live/demo/demo/1001.ts?fault=empty`);
+    expect(ts.headers.get('content-type')).toBe('video/mp2t');
+    await ts.arrayBuffer();
+    const shortTs = await fetch(`${url}/demo/demo/1001?fault=empty`);
+    expect(shortTs.headers.get('content-type')).toBe('video/mp2t');
+    await shortTs.arrayBuffer();
+    const hls = await fetch(`${url}/live/demo/demo/1010.m3u8?fault=empty`);
+    expect(hls.headers.get('content-type')).toBe('application/vnd.apple.mpegurl');
+    await hls.arrayBuffer();
+  });
+
+  it('answers text/plain on non-media paths', async () => {
+    const { url } = await sim();
+    const res = await fetch(`${url}/player_api.php?fault=empty`);
+    expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('text/plain');
     expect((await res.arrayBuffer()).byteLength).toBe(0);
+  });
+
+  it('lets a type fault override the media content type', async () => {
+    const { url } = await sim();
+    const res = await fetch(`${url}/movie/demo/demo/1.mp4?fault=type=text/html,empty`);
+    expect(res.headers.get('content-type')).toBe('text/html');
+    await res.arrayBuffer();
   });
 
   it('keeps the content type a type fault asks for', async () => {

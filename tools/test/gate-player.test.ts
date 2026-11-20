@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Exec } from '../src/gates/adb.ts';
 import type { GateDevice } from '../src/gates/gate-device.ts';
-import { PLAYER_USAGE, playerMain } from '../src/gates/player-cli.ts';
 import {
   aggregateRuns,
   comparePlayer,
@@ -363,40 +362,5 @@ describe('runPlayerGate (GateDevice, soak and stress)', () => {
     expect(f.urls).toHaveLength(3);
     expect(f.urls[0]).toContain('zaps=200&rate=5&fault=');
     expect(out.stress?.verdict).toEqual({ failures: [], warnings: [] });
-  });
-});
-
-describe('playerMain', () => {
-  const captureErr = async (fn: () => Promise<number>) => {
-    const written: string[] = [];
-    const real = process.stderr.write.bind(process.stderr);
-    process.stderr.write = ((t: string) => {
-      written.push(t);
-      return true;
-    }) as typeof process.stderr.write;
-    try {
-      return { code: await fn(), text: written.join('') };
-    } finally {
-      process.stderr.write = real;
-    }
-  };
-
-  it('refuses --write-baseline without --faults and requires --app on Apple targets', async () => {
-    const noFaults = await captureErr(() => playerMain({ 'write-baseline': true }, '.'));
-    expect(noFaults.code).toBe(2);
-    expect(noFaults.text).toMatch(/baseline needs --faults/);
-    const noApp = await captureErr(() => playerMain({ target: 'tvos' }, '.'));
-    expect(noApp.code).toBe(2);
-    expect(noApp.text).toMatch(/--app/);
-    const badTarget = await captureErr(() => playerMain({ target: 'webos' }, '.'));
-    expect(badTarget.code).toBe(2);
-    expect(badTarget.text).toMatch(/--target/);
-    const badBurst = await captureErr(() => playerMain({ burst: '31' }, '.'));
-    expect(badBurst.code).toBe(2);
-    expect(badBurst.text).toMatch(/--burst/);
-  });
-
-  it('names the player gate options in PLAYER_USAGE', () => {
-    expect(PLAYER_USAGE).toMatch(/gate player.*--target.*--burst.*--soak.*--stress/);
   });
 });

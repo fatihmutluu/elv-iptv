@@ -1,8 +1,10 @@
 import { release as osRelease } from 'node:os';
 import { corpusCatalog } from '../sim/corpus.ts';
 import { findFfmpeg } from '../sim/media.ts';
-import { androidGateDevice, buildApk, type Exec, POLL_MS } from './adb.ts';
+import { type ApkTarget, androidGateDevice, buildApk, type Exec, POLL_MS } from './adb.ts';
+import { readUntil, waitExit } from './app-lines.ts';
 import {
+  CORPUS_ITEM_COUNT,
   type CorpusLine,
   type CorpusVerdict,
   judgeCorpus,
@@ -18,7 +20,10 @@ export { type CorpusLine, judgeCorpus, parseCorpusLine };
 
 const CORPUS_ACCOUNT = 'corpus';
 const CORPUS_TIMEOUT_MS = 420_000;
+const EXIT_GRACE_MS = 3000;
 const SUBTITLE_RECIPE = 'h264-2audio-subs-720p25';
+const AUDIO_ONLY_RECIPE = 'aac-radio';
+const EMPTY_VOD_ERROR = 'playback/network';
 
 /** Target platform of a format corpus gate run. */
 export type CorpusTarget =
@@ -32,6 +37,13 @@ export type CorpusTarget =
   | 'windows'
   | 'macos';
 
+const APK_TARGETS: Partial<Record<CorpusTarget, ApkTarget>> = {
+  'android-tv': 'android-tv',
+  'fire-os': 'fire-tv',
+  android: 'android',
+  'android-phone': 'android',
+};
+
 /** One item in the 29-item format corpus manifest built from `corpusCatalog(1)`. */
 export interface GateCorpusItem {
   id: string;
@@ -39,6 +51,9 @@ export interface GateCorpusItem {
   kind: 'live' | 'vod';
   url: string;
   expect: 'playing' | 'failed';
+  audioOnly?: boolean;
+  /** `category/code` of the playback error a failing item must end with. */
+  expectError?: string;
   selectAudioLang?: string;
   selectSubtitleLang?: string;
   seekMs?: number;
@@ -111,6 +126,7 @@ export function buildGateCorpusItems(opts: {
       kind: 'live',
       url: `${base}/live/${pair}/${ch.id}.ts${suffix}`,
       expect: 'playing',
+      ...(ch.recipe === AUDIO_ONLY_RECIPE ? { audioOnly: true } : {}),
       ...(tracks ? { selectAudioLang: 'eng', selectSubtitleLang: 'tur' } : {}),
     });
   }
@@ -132,6 +148,7 @@ export function buildGateCorpusItems(opts: {
       kind: 'vod',
       url: `${base}/movie/${pair}/${movie.id}.${movie.ext}`,
       expect: 'playing',
+      ...(movie.recipe === AUDIO_ONLY_RECIPE ? { audioOnly: true } : {}),
       ...(tracks ? { selectAudioLang: 'eng', selectSubtitleLang: 'tur' } : {}),
     });
   }
@@ -152,8 +169,14 @@ export function buildGateCorpusItems(opts: {
       kind: 'vod',
       url: `${base}/movie/${pair}/200001.mp4?fault=empty`,
       expect: 'failed',
+      expectError: EMPTY_VOD_ERROR,
     },
   );
+  if (items.length !== CORPUS_ITEM_COUNT) {
+    throw new Error(
+      `gate: corpus manifest has ${items.length} items, expected ${CORPUS_ITEM_COUNT}`,
+    );
+  }
   return items;
 }
 
@@ -162,8 +185,7 @@ const NO_FFMPEG =
 
 const isDesktopTarget = (t: CorpusTarget): boolean =>
   t === 'desktop' || t === 'windows' || t === 'macos';
-const isAndroidTarget = (t: CorpusTarget): boolean =>
-  t === 'android-tv' || t === 'fire-os' || t === 'android' || t === 'android-phone';
+const isAndroidTarget = (t: CorpusTarget): boolean => APK_TARGETS[t] !== undefined;
 
 async function runDesktopCorpus(
   opts: CorpusGateOptions,
@@ -177,7 +199,7 @@ async function runDesktopCorpus(
     opts.simUrl !== undefined
       ? (() => {
           const url = opts.simUrl.replace(/\/+$/, '');
-          const log = httpSimLog(url);
+          const log = opts.simLog ?? httpSimLog(url);
           return {
             url,
             requests: () => log.entries(),
@@ -188,37 +210,28 @@ async function runDesktopCorpus(
       : await deps.startSim();
 
   try {
+    if (opts.simUrl !== undefined) opts.onNote?.(`using external simulator at ${sim.url}`);
     await sim.clearRequests();
     const burst = opts.burst ?? 0;
     const query = `elv-gate=corpus&base=${sim.url}&account=${CORPUS_ACCOUNT}${burst > 0 ? `&burst=${burst}` : ''}`;
     const app = deps.spawnApp([`--elv-gate=${query}`]);
-    let timer: ReturnType<typeof setTimeout> | undefined;
     let found: CorpusLine;
     try {
-      found = await Promise.race([
-        (async () => {
-          for await (const raw of app.lines) {
-            const parsed = parseCorpusLine(raw);
-            if (parsed !== undefined) return parsed;
-          }
-          throw new Error('gate: desktop process exited before emitting ELV_GATE_CORPUS');
-        })(),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () =>
-              reject(
-                new Error(
-                  `gate: no ELV_GATE_CORPUS line within ${Math.round(timeoutMs / 1000)} s; the desktop corpus run did not finish`,
-                ),
-              ),
-            timeoutMs,
-          );
-        }),
-      ]);
-    } finally {
-      clearTimeout(timer);
+      found = await readUntil(
+        app.lines,
+        parseCorpusLine,
+        timeoutMs,
+        () =>
+          new Error(
+            `gate: no ELV_GATE_CORPUS line within ${Math.round(timeoutMs / 1000)} s; the desktop corpus run did not finish`,
+          ),
+        () => new Error('gate: desktop process exited before emitting ELV_GATE_CORPUS'),
+      );
+    } catch (error) {
       app.kill();
+      throw error;
     }
+    await waitExit(app, EXIT_GRACE_MS);
     await sleep(100);
     const connections = connectionStats(await sim.requests(), CORPUS_ACCOUNT);
     return {
@@ -245,13 +258,19 @@ export async function runCorpusGate(opts: CorpusGateOptions): Promise<CorpusGate
     if (opts.simUrl === undefined && lookup() === null) throw new Error(NO_FFMPEG);
     return runDesktopCorpus(opts, target, timeoutMs, sleep);
   }
+  if (opts.simUrl !== undefined) {
+    throw new Error(`gate: --sim is supported only with --target desktop, not ${target}`);
+  }
   if (lookup() === null && opts.sim.running !== undefined && !(await opts.sim.running())) {
     throw new Error(NO_FFMPEG);
   }
   const adb = opts.adb ?? 'adb';
   const root = opts.root ?? '.';
   const now = opts.now ?? Date.now;
-  if (opts.build === true && isAndroidTarget(target)) await buildApk(opts.exec, root, adb);
+  const apkTarget = APK_TARGETS[target];
+  if (opts.build === true && apkTarget !== undefined) {
+    await buildApk(opts.exec, root, adb, apkTarget);
+  }
   const sim = await opts.sim.ensure();
   if (!sim.reused && lookup() === null) {
     await sim.stop();
@@ -281,18 +300,18 @@ export async function runCorpusGate(opts: CorpusGateOptions): Promise<CorpusGate
           })());
     await device.install();
     await sim.reset?.();
-    await log.clear().catch(() => undefined);
     const startedAt = now();
     const burst = opts.burst ?? 0;
     await device.start(
       `elviptv://gate/corpus?host=${device.simHost}&account=${CORPUS_ACCOUNT}${burst > 0 ? `&burst=${burst}` : ''}`,
+      { afterStop: () => log.clear() },
     );
     for (let waited = 0; waited <= timeoutMs; waited += POLL_MS) {
       const line = parseCorpusLine(await device.readLog());
       if (line !== undefined) {
         await device.stop();
         await sleep(POLL_MS);
-        const connections = connectionStats(await log.entries().catch(() => []), CORPUS_ACCOUNT);
+        const connections = connectionStats(await log.entries(), CORPUS_ACCOUNT);
         const crashes = await device.crashesSince(startedAt);
         return {
           target,

@@ -1,5 +1,6 @@
 import { createKeyInterpreter, type KeyInput } from '@elv/focus-core';
 import {
+  type ClockAnchor,
   createPlaybackService,
   type PlaybackService,
   type PlaybackState,
@@ -61,21 +62,28 @@ function formatPosition(ms: number): string {
   return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}:${seconds}`;
 }
 
-/** Reads `positionAt` of the service's anchor in its own animation frame and re-renders only when the text changes. */
-function OsdClock({ service }: { service: PlaybackService }): ReactElement {
+/** Reads `positionAt` of `anchor` in an animation frame only while `anchor.rate > 0`, re-rendering when the text changes. */
+function OsdClock({ anchor }: { anchor: ClockAnchor | undefined }): ReactElement {
+  const anchorRef = useRef(anchor);
+  anchorRef.current = anchor;
+  const running = anchor !== undefined && anchor.rate > 0;
   const [text, setText] = useState('--:--');
   useEffect(() => {
+    setText(anchor === undefined ? '--:--' : formatPosition(positionAt(anchor, performance.now())));
+  }, [anchor]);
+  useEffect(() => {
+    if (!running) return;
     let frame = 0;
     const tick = (): void => {
-      const { anchor } = service.getState();
-      setText(
-        anchor === undefined ? '--:--' : formatPosition(positionAt(anchor, performance.now())),
-      );
+      const current = anchorRef.current;
+      if (current !== undefined) {
+        setText(formatPosition(positionAt(current, performance.now())));
+      }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [service]);
+  }, [running]);
   return (
     <Text style={styles.clock} testID="osd-clock">
       {text}
@@ -97,7 +105,7 @@ const Osd = memo(function Osd({ service }: { service: PlaybackService }): ReactE
       <Text style={styles.status} testID="osd-status">
         {statusText(state.status)}
       </Text>
-      <OsdClock service={service} />
+      <OsdClock anchor={state.anchor} />
     </View>
   );
 });

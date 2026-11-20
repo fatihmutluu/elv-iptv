@@ -55,6 +55,15 @@ describe('parsePlayerLine', () => {
     expect(parsePlayerLine(logcat({ ...line(), soak: { minutes: 1 } }))).toBeUndefined();
     expect(parsePlayerLine(logcat({ ...line(), final: 'done' }))).toBeUndefined();
   });
+
+  it('reads limitedAfterMs, defaults it to null for older builds and rejects a bad value', () => {
+    const limited = line({ fault: '509', faultOutcome: 'limited-backoff', limitedAfterMs: 140 });
+    expect(parsePlayerLine(logcat(limited))?.limitedAfterMs).toBe(140);
+    const { limitedAfterMs: _l, ...old } = line();
+    expect(parsePlayerLine(logcat(old))?.limitedAfterMs).toBeNull();
+    expect(parsePlayerLine(logcat({ ...line(), limitedAfterMs: 'soon' }))).toBeUndefined();
+    expect(parsePlayerLine(logcat({ ...line(), limitedAfterMs: -1 }))).toBeUndefined();
+  });
 });
 
 describe('aggregateRuns', () => {

@@ -7,6 +7,8 @@ import type { GateTarget } from './gate-device.ts';
 import {
   comparePlayer,
   type FaultReport,
+  type PlayerGateOptions,
+  type PlayerGateOutput,
   type PlayerResult,
   type PlayerStreamKind,
   runPlayerGate,
@@ -48,6 +50,14 @@ export interface PlayerCli {
   budgets?: string;
   out?: string;
   'write-baseline'?: boolean;
+}
+
+/** Injectable I/O and gate runner for unit-testing {@link playerMain}. */
+export interface PlayerCliIo {
+  stdout?: (line: string) => void;
+  stderr?: (line: string) => void;
+  exec?: Exec;
+  runGate?: (opts: PlayerGateOptions) => Promise<PlayerGateOutput>;
 }
 
 interface Baseline {
@@ -106,9 +116,15 @@ function parseFloatIn(
 }
 
 /** Runs `pnpm gate player` and returns the process exit code; usage errors are returned as code 2. */
-export async function playerMain(values: PlayerCli, root: string): Promise<number> {
+export async function playerMain(
+  values: PlayerCli,
+  root: string,
+  io: PlayerCliIo = {},
+): Promise<number> {
+  const stdout = io.stdout ?? ((s: string) => process.stdout.write(s));
+  const stderr = io.stderr ?? ((s: string) => process.stderr.write(s));
   const bad = (message: string): number => {
-    process.stderr.write(`gate: ${message}. ${PLAYER_USAGE}\n`);
+    stderr(`gate: ${message}. ${PLAYER_USAGE}\n`);
     return 2;
   };
   const target = (values.target ?? 'android-tv') as GateTarget;
@@ -161,10 +177,12 @@ export async function playerMain(values: PlayerCli, root: string): Promise<numbe
   }
 
   const adb = resolveAdb(process.env, process.platform);
-  const exec: Exec = (command, args, opts) => run(command, args, { cwd: root, ...opts });
-  let output: Awaited<ReturnType<typeof runPlayerGate>>;
+  const exec: Exec =
+    io.exec ?? ((command, args, opts) => run(command, args, { cwd: root, ...opts }));
+  const runner = io.runGate ?? runPlayerGate;
+  let output: PlayerGateOutput;
   try {
-    output = await runPlayerGate({
+    output = await runner({
       exec,
       sim: localSim,
       target,
@@ -183,12 +201,12 @@ export async function playerMain(values: PlayerCli, root: string): Promise<numbe
       ...(values.faults === true ? { faults: true } : {}),
       ...(runs === undefined ? {} : { runs }),
       ...(zaps === undefined ? {} : { zaps }),
-      onRun: (r) => process.stdout.write(`run: ${summary(r)}\n`),
-      onFault: (f) => process.stdout.write(`${faultSummary(f)}\n`),
-      onNote: (n) => process.stdout.write(`gate player: ${n}\n`),
+      onRun: (r) => stdout(`run: ${summary(r)}\n`),
+      onFault: (f) => stdout(`${faultSummary(f)}\n`),
+      onNote: (n) => stdout(`gate player: ${n}\n`),
     });
   } catch (error) {
-    process.stderr.write(`${(error as Error).message}\n`);
+    stderr(`${(error as Error).message}\n`);
     return 1;
   }
 
@@ -209,7 +227,7 @@ export async function playerMain(values: PlayerCli, root: string): Promise<numbe
       ...outcome.warnings.map((w) => `warn: ${w}`),
       `gate player: ${outcome.ok ? 'passed' : 'FAILED'} (details in ${outPath})`,
     ];
-    process.stdout.write(`${lines.join('\n')}\n`);
+    stdout(`${lines.join('\n')}\n`);
     return outcome.ok ? 0 : 1;
   }
 
@@ -220,7 +238,7 @@ export async function playerMain(values: PlayerCli, root: string): Promise<numbe
     const own = comparePlayer(result, result, { budgets, runs: perRun, target });
     const failures = [...own.failures, ...faultFailures];
     if (failures.length > 0) return bad(`refusing to write a baseline: ${failures.join('; ')}`);
-    for (const w of [...own.warnings, ...faultWarnings]) process.stdout.write(`warn: ${w}\n`);
+    for (const w of [...own.warnings, ...faultWarnings]) stdout(`warn: ${w}\n`);
     const dirty = (
       await exec('git', ['status', '--porcelain', '--', 'apps', 'packages', 'modules'])
     ).output.trim();
@@ -242,7 +260,7 @@ export async function playerMain(values: PlayerCli, root: string): Promise<numbe
     };
     mkdirSync(dirname(baselinePath), { recursive: true });
     writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`);
-    process.stdout.write(`gate: baseline written to ${baselineName}\n${summary(result)}\n`);
+    stdout(`gate: baseline written to ${baselineName}\n${summary(result)}\n`);
     return 0;
   }
 
@@ -271,6 +289,6 @@ export async function playerMain(values: PlayerCli, root: string): Promise<numbe
     ...outcome.warnings.map((w) => `warn: ${w}`),
     `gate player: ${outcome.ok ? 'passed' : 'FAILED'} (details in ${outPath})`,
   ];
-  process.stdout.write(`${lines.join('\n')}\n`);
+  stdout(`${lines.join('\n')}\n`);
   return outcome.ok ? 0 : 1;
 }

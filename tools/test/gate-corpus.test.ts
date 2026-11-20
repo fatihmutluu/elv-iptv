@@ -122,6 +122,7 @@ describe('parseCorpusLine and judgeCorpus', () => {
         'live-1014 (Stream labelled as a playlist): timeout',
         'staleEventsApplied: 1 (expected 0)',
         'limitResponses: 2 (expected 0)',
+        'overlapMs: 120 (expected 0)',
         'crash reports newer than the run: ELVIPTV-1.ips',
       ],
     });

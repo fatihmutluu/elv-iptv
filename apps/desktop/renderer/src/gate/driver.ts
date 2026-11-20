@@ -174,11 +174,15 @@ export function createGateRun(deps: GateRunDeps): GateRun {
 
   const sleep = (ms: number): Promise<void> =>
     new Promise((resolve) => {
-      const cancel = later(resolve, ms);
-      stopListeners.add(() => {
-        cancel();
+      if (stopped) return resolve();
+      let cancel: (() => void) | undefined;
+      const finish = (): void => {
+        stopListeners.delete(finish);
+        cancel?.();
         resolve();
-      });
+      };
+      stopListeners.add(finish);
+      cancel = later(finish, ms);
     });
 
   const tuneTo = (next: number, zapAt?: number): void => {
@@ -206,6 +210,7 @@ export function createGateRun(deps: GateRunDeps): GateRun {
     if (!playing) return { playing: false, seeked: false };
     service.pause();
     await sleep(VOD_PAUSE_MS);
+    if (stopped) return { playing: true, seeked: false };
     service.play();
     seekClockPos = undefined;
     service.seek(VOD_SEEK_MS);

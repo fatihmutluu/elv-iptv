@@ -47,6 +47,8 @@ export interface PlayerMetrics {
   fault: PlayerFault;
   /** The first dwell on the faulted channel; `null` for a run without a fault. */
   faultOutcome: FaultOutcome | null;
+  /** Tune start to the first `limited` status on the faulted channel's first dwell; `null` otherwise. */
+  limitedAfterMs: number | null;
   /** Zaps dispatched. */
   zaps: number;
   /** The service status kind when the line is printed. */
@@ -76,6 +78,7 @@ export interface PlayerRecorder {
 interface Tune {
   item: string;
   index: number;
+  tuneAt: number;
   zapAt: number | undefined;
   closed: boolean;
   failed: boolean;
@@ -189,6 +192,7 @@ export function createPlayerRecorder(opts: {
   let previous: PlaybackState['status'] | undefined;
   let dwellDone = false;
   let outcome: FaultOutcome | null = null;
+  let limitedAfterMs: number | null = null;
 
   const endDwell = (zapped: boolean): void => {
     if (current === undefined || !current.isDwell) return;
@@ -207,6 +211,7 @@ export function createPlayerRecorder(opts: {
     current = {
       item,
       index: tunes,
+      tuneAt: state.tuneAt ?? opts.now(),
       zapAt: pendingZap,
       closed: false,
       failed: false,
@@ -231,8 +236,10 @@ export function createPlayerRecorder(opts: {
     } else if (status.kind === 'playing') {
       tune.played = true;
       if (tune.sawRecovering) tune.recovered = true;
-    } else if (status.kind === 'limited') tune.sawLimited = true;
-    else if (status.kind === 'failed' && !tune.failed) {
+    } else if (status.kind === 'limited') {
+      tune.sawLimited = true;
+      if (tune.isDwell) limitedAfterMs ??= round(Math.max(0, opts.now() - tune.tuneAt));
+    } else if (status.kind === 'failed' && !tune.failed) {
       tune.failed = true;
       failures += 1;
     }
@@ -293,6 +300,7 @@ export function createPlayerRecorder(opts: {
         recoveries: { ...recoveries },
         fault: opts.fault,
         faultOutcome: opts.fault === '' ? null : (outcome ?? 'missed'),
+        limitedAfterMs: opts.fault === '' ? null : limitedAfterMs,
         zaps,
         final: finalKind(final.status),
         soak: opts.soak === undefined ? null : soak.finish(final, opts.soak),
