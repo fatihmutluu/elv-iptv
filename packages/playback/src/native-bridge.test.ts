@@ -210,4 +210,37 @@ describe('bridgeNativeEngine', () => {
     expect(() => emit({ attempt: 1, type: 'state', state: 'playing' })).not.toThrow();
     expect(received).toEqual([{ attempt: 1, type: 'state', state: 'playing' }]);
   });
+
+  it('drops stale in-flight native media events after a newer load, pause, or stop while preserving surface events', () => {
+    const { emit, engine } = fakeHandle();
+    const received: EngineEvent[] = [];
+    engine.subscribe((event) => received.push(event));
+
+    engine.load({ attempt: 1, url: 'http://sim/live/a/a/1.ts', headers: {}, kind: 'live' });
+    engine.load({ attempt: 2, url: 'http://sim/live/a/a/2.ts', headers: {}, kind: 'live' });
+    emit({ attempt: 1, type: 'state', state: 'opening' });
+    emit({ attempt: 1, type: 'surface', change: 'created' });
+    emit({ attempt: 2, type: 'state', state: 'opening' });
+
+    engine.pause(3);
+    emit({ attempt: 2, type: 'clock', anchor: { positionMs: 100, atMs: 10, rate: 1 } });
+    emit({ attempt: 3, type: 'state', state: 'paused' });
+
+    engine.stop(4);
+    emit({ attempt: 3, type: 'clock', anchor: { positionMs: 200, atMs: 20, rate: 0 } });
+    emit({ attempt: 4, type: 'state', state: 'paused' });
+    emit({ attempt: 4, type: 'surface', change: 'destroyed' });
+
+    engine.load({ attempt: 5, url: 'http://sim/live/a/a/3.ts', headers: {}, kind: 'live' });
+    emit({ attempt: 4, type: 'state', state: 'opening' });
+    emit({ attempt: 5, type: 'state', state: 'opening' });
+
+    expect(received).toEqual([
+      { attempt: 1, type: 'surface', change: 'created' },
+      { attempt: 2, type: 'state', state: 'opening' },
+      { attempt: 3, type: 'state', state: 'paused' },
+      { attempt: 4, type: 'surface', change: 'destroyed' },
+      { attempt: 5, type: 'state', state: 'opening' },
+    ]);
+  });
 });
