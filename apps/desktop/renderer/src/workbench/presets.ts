@@ -119,6 +119,64 @@ export function getWorkbenchDevice(id: WorkbenchDeviceId): WorkbenchDevicePreset
   return WORKBENCH_DEVICES.find((d) => d.id === id) ?? DESKTOP_PRESET;
 }
 
+/** Top-level device family shown in the 4-way Workbench switcher (`TV | PC | Tablet | Phone`). */
+export type WorkbenchDeviceFamily = 'tv' | 'desktop' | 'tablet' | 'phone';
+
+/** Maps a concrete {@link WorkbenchDeviceId} to its 4-way family switcher bucket. */
+export function deviceFamilyOf(id: WorkbenchDeviceId): WorkbenchDeviceFamily {
+  if (id === 'tv') return 'tv';
+  if (id === 'desktop') return 'desktop';
+  if (id === 'tablet-portrait' || id === 'tablet-landscape') return 'tablet';
+  return 'phone';
+}
+
+/** Toggles Portrait <-> Landscape for phone and tablet presets; leaves TV and Desktop unchanged. */
+export function toggleDeviceOrientation(id: WorkbenchDeviceId): WorkbenchDeviceId {
+  switch (id) {
+    case 'phone-portrait':
+      return 'phone-landscape';
+    case 'phone-landscape':
+      return 'phone-portrait';
+    case 'tablet-portrait':
+      return 'tablet-landscape';
+    case 'tablet-landscape':
+      return 'tablet-portrait';
+    default:
+      return id;
+  }
+}
+
+/** Resolved display dimensions for a device frame scaled to fit the Workbench stage. */
+export interface FittedFrame {
+  readonly width: number;
+  readonly height: number;
+  readonly scale: number;
+  readonly fitPercent: number;
+}
+
+/**
+ * Fits a target device frame (`frameWidth × frameHeight`) inside the available stage box
+ * (`stageWidth × stageHeight`) while preserving aspect ratio and never scaling above `1.0`.
+ */
+export function computeFittedFrame(opts: {
+  frameWidth: number;
+  frameHeight: number;
+  stageWidth: number;
+  stageHeight: number;
+  paddingX?: number;
+  paddingY?: number;
+}): FittedFrame {
+  const availW = Math.max(160, opts.stageWidth - (opts.paddingX ?? 48));
+  const availH = Math.max(160, opts.stageHeight - (opts.paddingY ?? 72));
+  const scale = Math.min(1, availW / opts.frameWidth, availH / opts.frameHeight);
+  return {
+    width: Math.round(opts.frameWidth * scale),
+    height: Math.round(opts.frameHeight * scale),
+    scale,
+    fitPercent: Math.round(scale * 100),
+  };
+}
+
 /**
  * Decides whether the desktop renderer boots the dev-only UI Workbench or the regular desktop app.
  * Production builds (`isDev === false`) and `--elv-gate=` launches (`hasGate === true`) ALWAYS

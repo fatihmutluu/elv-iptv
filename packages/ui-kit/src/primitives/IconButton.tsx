@@ -1,7 +1,7 @@
 import { type ReactElement, useCallback, useState } from 'react';
 import { Pressable, type StyleProp, StyleSheet, View, type ViewStyle } from 'react-native';
 import { Icon, type IconName } from '../icons';
-import { useTheme } from '../theme';
+import { useTheme, webBackdropBlur, webCursorPointer, webShadow, webTransition } from '../theme';
 import { useViewport } from '../viewport';
 
 /** Props of {@link IconButton}. */
@@ -16,6 +16,14 @@ export interface IconButtonProps {
   testID?: string;
   style?: StyleProp<ViewStyle>;
 }
+
+const TV_FOCUS_NATIVE_SHADOW: ViewStyle = {
+  shadowColor: 'rgba(0, 0, 0, 1)',
+  shadowOffset: { width: 0, height: 8 },
+  shadowOpacity: 0.55,
+  shadowRadius: 16,
+  elevation: 10,
+};
 
 /**
  * Circular frosted-glass secondary action button (`+`, `like`, `info`, player top-right controls).
@@ -45,6 +53,12 @@ export function IconButton({
 
   const resolvedSize = Math.max(40, size);
   const iconSize = Math.round(resolvedSize * 0.45);
+  const glassBlur = webBackdropBlur(12);
+  const transition = webTransition(
+    theme,
+    'transform, background-color, border-color, opacity, box-shadow',
+  );
+  const cursor = !disabled ? webCursorPointer() : undefined;
 
   return (
     <Pressable
@@ -69,10 +83,15 @@ export function IconButton({
           : showTvFocus
             ? theme.colors.focusFill
             : hovered && !disabled
-              ? theme.colors.glassBg
+              ? theme.colors.actionGlassHoverBg
               : theme.colors.actionGlassBg;
 
-        const borderColor = active ? theme.colors.accent : theme.colors.actionGlassBorder;
+        const borderColor = active
+          ? theme.colors.accent
+          : hovered && !disabled && !showTvFocus
+            ? theme.colors.hoverRingBorder
+            : theme.colors.actionGlassBorder;
+
         const pressScale = theme.reduceMotion ? 1 : 0.98;
         const scale = disabled
           ? 1
@@ -94,6 +113,11 @@ export function IconButton({
             opacity: disabled ? 0.45 : state.pressed ? 0.88 : 1,
             transform: [{ scale }],
           },
+          glassBlur,
+          transition,
+          cursor,
+          showTvFocus ? TV_FOCUS_NATIVE_SHADOW : undefined,
+          showTvFocus ? webShadow('0 12px 28px rgba(0, 0, 0, 0.65)') : undefined,
           style,
         ];
       }}

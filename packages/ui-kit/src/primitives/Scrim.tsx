@@ -15,6 +15,8 @@ export interface ScrimProps {
   testID?: string;
 }
 
+const SCRIM_LOCATIONS: readonly number[] = [0, 0.34, 0.72, 1];
+
 const VECTORS: Readonly<
   Record<
     ScrimDirection,
@@ -87,7 +89,7 @@ export function Scrim({
       <View pointerEvents="none" testID={testID} style={[StyleSheet.absoluteFill, style]}>
         {adapters.renderGradient({
           colors: stops,
-          locations: [0, 0.35, 0.72, 1],
+          locations: SCRIM_LOCATIONS,
           start: vec.start,
           end: vec.end,
           style: StyleSheet.absoluteFill,
@@ -98,7 +100,7 @@ export function Scrim({
   }
 
   if (Platform.OS === 'web') {
-    const gradient = `linear-gradient(${vec.cssDir}, ${stops[0]} 0%, ${stops[1]} 35%, ${stops[2]} 72%, ${stops[3]} 100%)`;
+    const gradient = `linear-gradient(${vec.cssDir}, ${stops[0]} 0%, ${stops[1]} 34%, ${stops[2]} 72%, ${stops[3]} 100%)`;
     const webStyle = { backgroundImage: gradient } as unknown as ViewStyle;
     return (
       <View
@@ -115,10 +117,10 @@ export function Scrim({
       testID={testID}
       style={[StyleSheet.absoluteFill, { flexDirection: vec.flexDir }, style]}
     >
-      <View style={{ flex: 3, backgroundColor: stops[0] }} />
-      <View style={{ flex: 3, backgroundColor: stops[1] }} />
-      <View style={{ flex: 2, backgroundColor: stops[2] }} />
-      <View style={{ flex: 2, backgroundColor: stops[3] }} />
+      <View style={{ flex: 34, backgroundColor: stops[0] }} />
+      <View style={{ flex: 38, backgroundColor: stops[1] }} />
+      <View style={{ flex: 18, backgroundColor: stops[2] }} />
+      <View style={{ flex: 10, backgroundColor: stops[3] }} />
     </View>
   );
 }

@@ -1,10 +1,10 @@
 import { createAppI18n } from '@elv/i18n';
 import { fireEvent, render, screen } from '@testing-library/react-native';
-import { Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { UiAdaptersProvider } from '../../adapters';
 import { I18nProvider } from '../../i18n';
 import { Icon } from '../../icons';
-import { ThemeProvider } from '../../theme';
+import { buildTheme, ThemeProvider } from '../../theme';
 import { ViewportProvider } from '../../viewport';
 import { AdaptiveSheet } from '../AdaptiveSheet';
 import { ArtworkImage } from '../ArtworkImage';
@@ -101,6 +101,40 @@ describe('DeadHostRegistry & ArtworkImage (#126, #202, #311)', () => {
     expect(screen.getByTestId('b-fallback')).toBeTruthy();
     expect(registry.isDead('https://broken.example/other.jpg')).toBe(true);
   });
+
+  it('supports optional zoomed scaling and disables zoom when reduceMotion is active', async () => {
+    const registry = createDeadHostRegistry();
+    const zoomedView = await render(
+      <ThemeProvider>
+        <ArtworkImage
+          uri="https://img.example/zoom.jpg"
+          label="Zoom Poster"
+          zoomed
+          deadHosts={registry}
+          testID="zoom-art"
+        />
+      </ThemeProvider>,
+    );
+    expect(StyleSheet.flatten(screen.getByTestId('zoom-art-zoom').props.style).transform).toEqual([
+      { scale: 1.05 },
+    ]);
+    await zoomedView.unmount();
+
+    await render(
+      <ThemeProvider reduceMotion>
+        <ArtworkImage
+          uri="https://img.example/zoom.jpg"
+          label="Zoom Poster"
+          zoomed
+          deadHosts={registry}
+          testID="reduced-art"
+        />
+      </ThemeProvider>,
+    );
+    expect(
+      StyleSheet.flatten(screen.getByTestId('reduced-art-zoom').props.style).transform,
+    ).toBeUndefined();
+  });
 });
 
 describe('Surface, Scrim, GlassBar & Icon adapters + native fallbacks', () => {
@@ -108,12 +142,14 @@ describe('Surface, Scrim, GlassBar & Icon adapters + native fallbacks', () => {
     const renderGradient = jest.fn(() => <View testID="adapter-grad" />);
     const renderBlur = jest.fn(({ children }) => <View testID="adapter-blur">{children}</View>);
     const renderSvg = jest.fn(() => <View testID="adapter-svg" />);
+    const hc = buildTheme({ preset: 'highContrast' });
 
     const adapted = await render(
       <ThemeProvider preset="highContrast">
         <UiAdaptersProvider adapters={{ renderGradient, renderBlur, renderSvg }}>
           <Surface tone="elevated" bordered rounded="card" testID="surface">
             <Scrim direction="bottom" intensity="strong" testID="scrim" />
+            <GlassBar scrolled={false} testID="glass-top" />
             <GlassBar scrolled testID="glass">
               <Icon name="play" size={18} testID="icon" />
             </GlassBar>
@@ -123,12 +159,19 @@ describe('Surface, Scrim, GlassBar & Icon adapters + native fallbacks', () => {
     );
 
     expect(screen.getByTestId('surface')).toBeTruthy();
-    expect(screen.getByTestId('adapter-grad')).toBeTruthy();
+    expect(screen.getAllByTestId('adapter-grad')).toHaveLength(2);
     expect(screen.getByTestId('adapter-blur')).toBeTruthy();
     expect(screen.getByTestId('adapter-svg')).toBeTruthy();
     expect(renderGradient).toHaveBeenCalledWith(
       expect.objectContaining({
         colors: expect.arrayContaining(['#000000']),
+        locations: [0, 0.34, 0.72, 1],
+      }),
+    );
+    expect(renderGradient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        colors: [hc.colors.topBarScrimStart, hc.colors.topBarScrimMid, hc.colors.scrimTransparent],
+        locations: [0, 0.68, 1],
       }),
     );
     await adapted.unmount();
@@ -145,6 +188,9 @@ describe('Surface, Scrim, GlassBar & Icon adapters + native fallbacks', () => {
     );
     expect(screen.getByTestId('glass-unscrolled')).toBeTruthy();
     expect(screen.getByTestId('glass-scrolled')).toBeTruthy();
+    expect(
+      StyleSheet.flatten(screen.getByTestId('glass-scrolled').props.style).backgroundColor,
+    ).toBe(buildTheme().colors.glassBg);
     expect(screen.getByTestId('icon-fallback')).toBeTruthy();
     expect(screen.getByTestId('scrim-fallback')).toBeTruthy();
   });
@@ -168,7 +214,11 @@ describe('AdaptiveSheet', () => {
         </ThemeProvider>
       </I18nProvider>,
     );
-    expect(screen.getByTestId('sheet-panel')).toBeTruthy();
+    const panel = screen.getByTestId('sheet-panel');
+    expect(panel).toBeTruthy();
+    expect(StyleSheet.flatten(panel.props.style).elevation).toBeGreaterThan(0);
+    const header = screen.getByTestId('sheet-header');
+    expect(StyleSheet.flatten(header.props.style).borderBottomWidth).toBe(StyleSheet.hairlineWidth);
     expect(screen.queryByTestId('sheet-handle')).toBeNull();
     const backdrop = screen.getByTestId('sheet-backdrop');
     expect(backdrop.props.focusable).toBe(false);

@@ -24,6 +24,7 @@ export {
   buildTheme,
   clampFontScale,
   type DerivedSurfaceColors,
+  FONT_FAMILY_SANS,
   MAX_FONT_SCALE,
   MIN_FONT_SCALE,
   TABULAR_NUMS_STYLE,
@@ -32,3 +33,4 @@ export {
   type ThemeOptions,
   type TypeScaleStep,
 } from './tokens';
+export { webBackdropBlur, webCursorPointer, webShadow, webTransition } from './web-styles';

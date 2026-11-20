@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 import { type StyleProp, StyleSheet, Text, View, type ViewStyle } from 'react-native';
-import { TABULAR_NUMS_STYLE, useTheme } from '../theme';
+import { TABULAR_NUMS_STYLE, useTheme, webBackdropBlur } from '../theme';
 
 /** Semantic color treatment of {@link MicroPill}. */
 export type MicroPillTone = 'neutral' | 'live' | 'accent' | 'success';
@@ -15,9 +15,9 @@ export interface MicroPillProps {
 }
 
 /**
- * Compact outlined micro-badge (`4K HDR`, `16+`, `LIVE`, match/rating percentages).
- * Replaces tracked uppercase eyebrow clutter with quiet tabular-numeral metadata and a semantic
- * broadcast-red `liveColor` indicator dot when `tone === 'live'` or `dot` is enabled.
+ * Compact micro-badge (`4K HDR`, `16+`, `LIVE`, match/rating percentages).
+ * Uses dark high-contrast `scrimStrong` / `glassBg` surfaces with semantic broadcast-red
+ * `liveColor` dot/border so `10.5px` micro-labels remain >= 7:1 WCAG AAA across every preset.
  */
 export function MicroPill({
   label,
@@ -46,6 +46,7 @@ export function MicroPill({
           : theme.colors.glassBorder;
 
   const textColor = tone === 'success' ? theme.colors.successColor : theme.colors.textPrimary;
+
   const dotColor =
     tone === 'live'
       ? theme.colors.liveColor
@@ -54,6 +55,7 @@ export function MicroPill({
         : tone === 'accent'
           ? theme.colors.accent
           : theme.colors.textPrimary;
+
   const borderRadius = tone === 'live' ? theme.radius.pill : theme.radius.button;
 
   return (
@@ -65,9 +67,8 @@ export function MicroPill({
           backgroundColor,
           borderColor,
           borderRadius,
-          paddingHorizontal: theme.spacing.xs,
-          gap: theme.spacing.xxs,
         },
+        tone === 'neutral' || tone === 'live' ? webBackdropBlur(6) : undefined,
         style,
       ]}
     >
@@ -85,7 +86,12 @@ export function MicroPill({
       ) : null}
       <Text
         numberOfLines={1}
-        style={[theme.typography.micro, TABULAR_NUMS_STYLE, { color: textColor }]}
+        style={[
+          theme.typography.micro,
+          TABULAR_NUMS_STYLE,
+          { color: textColor },
+          tone === 'live' ? styles.liveLabel : undefined,
+        ]}
       >
         {label}
       </Text>
@@ -98,11 +104,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
+    paddingHorizontal: 6,
     paddingVertical: 2,
+    gap: 4,
     borderWidth: 1,
   },
   dot: {
-    width: 6,
-    height: 6,
+    width: 5,
+    height: 5,
+  },
+  liveLabel: {
+    fontWeight: '800',
   },
 });
