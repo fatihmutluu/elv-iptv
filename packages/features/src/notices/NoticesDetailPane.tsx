@@ -1,5 +1,11 @@
-import { useI18n } from '@elv/ui-kit';
-import type { ReactElement } from 'react';
+import {
+  TABULAR_NUMS_STYLE,
+  useI18n,
+  useTheme,
+  webCursorPointer,
+  webTransition,
+} from '@elv/ui-kit';
+import { type ReactElement, useCallback, useState } from 'react';
 import {
   type LayoutChangeEvent,
   type NativeScrollEvent,
@@ -37,6 +43,14 @@ export function NoticesDetailPane({
   onBackToList,
 }: NoticesDetailPaneProps): ReactElement {
   const i18n = useI18n();
+  const theme = useTheme();
+  const [backHovered, setBackHovered] = useState(false);
+  const handleBackHoverIn = useCallback(() => setBackHovered(true), []);
+  const handleBackHoverOut = useCallback(() => setBackHovered(false), []);
+
+  const transition = webTransition(theme, 'background-color, border-color, opacity');
+  const cursor = webCursorPointer();
+
   const detailMetaRows =
     selected === undefined
       ? []
@@ -53,18 +67,45 @@ export function NoticesDetailPane({
     <View
       testID="notices-detail"
       accessibilityState={{ selected: isTv && detailFocused }}
-      style={[styles.detailPane, isTv && detailFocused ? styles.detailPaneFocused : null]}
+      style={[
+        styles.detailPane,
+        {
+          backgroundColor: theme.colors.bgSurface,
+          borderColor:
+            isTv && detailFocused ? theme.colors.focusRingColor : theme.colors.surfaceBorder,
+          borderWidth: isTv && detailFocused ? theme.focus.ringWidth : 1,
+          borderRadius: theme.radius.card,
+        },
+        transition,
+      ]}
     >
       {isPhone ? (
-        <View style={styles.detailToolbar}>
+        <View style={[styles.detailToolbar, { borderBottomColor: theme.colors.surfaceBorder }]}>
           <Pressable
             testID="notices-back-to-list"
             accessibilityRole="button"
             accessibilityLabel={backLabel}
             onPress={onBackToList}
-            style={styles.backButton}
+            onHoverIn={handleBackHoverIn}
+            onHoverOut={handleBackHoverOut}
+            style={({ pressed }) => [
+              styles.backButton,
+              {
+                backgroundColor:
+                  backHovered || pressed
+                    ? theme.colors.actionGlassHoverBg
+                    : theme.colors.actionGlassBg,
+                borderColor: theme.colors.actionGlassBorder,
+                borderRadius: theme.radius.button,
+              },
+              pressed ? styles.backButtonPressed : null,
+              transition,
+              cursor,
+            ]}
           >
-            <Text style={styles.backButtonText}>{backLabel}</Text>
+            <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
+              {backLabel}
+            </Text>
           </Pressable>
         </View>
       ) : null}
@@ -83,7 +124,12 @@ export function NoticesDetailPane({
           <>
             <Text
               testID="notices-detail-name"
-              style={[styles.detailName, isTv ? styles.detailNameTv : null]}
+              style={[
+                theme.typography.h2,
+                styles.detailName,
+                { color: theme.colors.textPrimary },
+                isTv ? styles.detailNameTv : null,
+              ]}
             >
               {selected.name}
             </Text>
@@ -91,20 +137,41 @@ export function NoticesDetailPane({
               <Text
                 key={key}
                 testID={`notices-detail-${key}`}
-                style={[styles.detailMeta, isTv ? styles.detailMetaTv : null]}
+                style={[
+                  theme.typography.caption,
+                  TABULAR_NUMS_STYLE,
+                  { color: theme.colors.textSecondary },
+                  isTv ? styles.detailMetaTv : null,
+                ]}
               >
                 {text}
               </Text>
             ))}
             <Text
               testID="notices-detail-modification"
-              style={[styles.detailSection, isTv ? styles.detailSectionTv : null]}
+              style={[
+                theme.typography.body,
+                styles.detailSection,
+                {
+                  color: theme.colors.textSecondary,
+                  borderTopColor: theme.colors.surfaceBorder,
+                },
+                isTv ? styles.detailSectionTv : null,
+              ]}
             >
               {selected.modificationNote ?? i18n.t('notices.unmodified')}
             </Text>
             <Text
               testID="notices-detail-text"
-              style={[styles.detailText, isTv ? styles.detailSectionTv : null]}
+              style={[
+                theme.typography.caption,
+                styles.detailText,
+                {
+                  color: theme.colors.textPrimary,
+                  borderTopColor: theme.colors.surfaceBorder,
+                },
+                isTv ? styles.detailSectionTv : null,
+              ]}
             >
               {selected.noticeText}
             </Text>

@@ -8,11 +8,12 @@ import type { AppLifecyclePort } from './ports/app-lifecycle';
 import type { PlayTarget } from './ports/play-target';
 import { createPlaybackGuard, type PlaybackGuard } from './ports/playback-guard';
 import type { VideoHost } from './ports/video-host';
-import { AdaptiveNavShell, type NavDestination, type NavUtility } from './shell';
+import { SettingsScreen, type SettingsSection } from './settings';
+import { AdaptiveNavShell, type NavDestination, type NavUtility, usePreferences } from './shell';
 import { SourcesScreen } from './sources';
 
 /** Top-level shell tab identifier. */
-export type AppTab = 'live' | 'movie' | 'series' | 'sources' | 'notices';
+export type AppTab = 'live' | 'movie' | 'series' | 'settings';
 
 /** Props of {@link AppShell}. */
 export interface AppShellProps {
@@ -48,10 +49,11 @@ function clearSourceFromMemory(map: BrowseMemoryMap, sourceId: string): BrowseMe
 }
 
 /**
- * Top-level browse-and-play application shell (`Live`, `Movies`, `Series`, `Sources`, `Notices`,
- * and full-screen `PlayerScreen`). Defaults to `Sources` when no source is configured yet,
- * reconciles startup `needsImport` sources in the background, wires `PlaybackGuard`, and preserves
- * per-tab focus memory.
+ * Top-level Cinema Quietude application shell (`Live`, `Movies`, `Series`, consolidated `Settings`
+ * utility hosting Appearance, Sources, and About & Licenses, plus full-screen `PlayerScreen`).
+ * Defaults to `Settings -> Sources` when no source is configured yet, reconciles startup
+ * `needsImport` sources in the background, wires `PlaybackGuard`, and preserves per-tab focus
+ * memory.
  */
 export function AppShell({
   catalog,
@@ -61,8 +63,10 @@ export function AppShell({
   onPlaybackGuardReady,
 }: AppShellProps): ReactElement {
   const i18n = useI18n();
+  const preferences = usePreferences();
 
-  const [activeTab, setActiveTab] = useState<AppTab>('sources');
+  const [activeTab, setActiveTab] = useState<AppTab>('settings');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('sources');
   const [topNavFocused, setTopNavFocused] = useState(false);
   const [sources, setSources] = useState<readonly SourceRow[]>([]);
   const [refreshToken, setRefreshToken] = useState(0);
@@ -71,6 +75,9 @@ export function AppShell({
 
   const mountedRef = useRef(true);
   const userPickedTabRef = useRef(false);
+  const userPickedSettingsSectionRef = useRef(false);
+  const sourcesCountRef = useRef(0);
+  sourcesCountRef.current = sources.length;
   const autoImportedIdsRef = useRef(new Set<string>());
   const playTargetRef = useRef<PlayTarget | null>(playTarget);
   playTargetRef.current = playTarget;
@@ -155,6 +162,9 @@ export function AppShell({
         setRefreshToken((n) => n + 1);
         if (initial.length > 0 && !userPickedTabRef.current) {
           setActiveTab('live');
+          if (!userPickedSettingsSectionRef.current) {
+            setSettingsSection('appearance');
+          }
         }
         for (const source of initial) {
           if (source.needsImport && !autoImportedIdsRef.current.has(source.id)) {
@@ -184,11 +194,28 @@ export function AppShell({
     if (focusContent) setTopNavFocused(false);
   }, []);
 
+  const handleSettingsSectionChange = useCallback((next: SettingsSection) => {
+    userPickedSettingsSectionRef.current = true;
+    setSettingsSection(next);
+  }, []);
+
+  const openSettings = useCallback(() => {
+    if (sourcesCountRef.current > 0 && !userPickedSettingsSectionRef.current) {
+      setSettingsSection('appearance');
+    }
+    selectTab('settings', false);
+  }, [selectTab]);
+
+  const openSources = useCallback(() => {
+    userPickedSettingsSectionRef.current = true;
+    setSettingsSection('sources');
+    selectTab('settings', true);
+  }, [selectTab]);
+
   const liveLabel = i18n.t('nav.live');
   const moviesLabel = i18n.t('nav.movies');
   const seriesLabel = i18n.t('nav.series');
-  const sourcesLabel = i18n.t('nav.sources');
-  const noticesLabel = i18n.t('nav.notices');
+  const settingsLabel = i18n.t('nav.settings');
 
   const destinations = useMemo<readonly NavDestination<BrowseKind>[]>(
     () => [
@@ -199,28 +226,19 @@ export function AppShell({
     [liveLabel, moviesLabel, seriesLabel],
   );
 
-  const utilities = useMemo<readonly NavUtility<'sources' | 'notices'>[]>(
+  const utilities = useMemo<readonly NavUtility<'settings'>[]>(
     () => [
       {
-        id: 'sources',
-        label: sourcesLabel,
-        icon: 'sources',
-        active: activeTab === 'sources',
-        showLabel: true,
-        testID: 'nav-tab-sources',
-        onPress: () => selectTab('sources', false),
-      },
-      {
-        id: 'notices',
-        label: noticesLabel,
-        icon: 'info',
-        active: activeTab === 'notices',
-        showLabel: true,
-        testID: 'nav-tab-notices',
-        onPress: () => selectTab('notices', false),
+        id: 'settings',
+        label: settingsLabel,
+        icon: 'settings',
+        active: activeTab === 'settings',
+        showLabel: false,
+        testID: 'nav-tab-settings',
+        onPress: openSettings,
       },
     ],
-    [sourcesLabel, noticesLabel, activeTab, selectTab],
+    [settingsLabel, activeTab, openSettings],
   );
 
   const handleSelectDestination = useCallback(
@@ -259,7 +277,7 @@ export function AppShell({
   return (
     <AdaptiveNavShell
       brandTitle={i18n.t('app.title')}
-      showBrand={activeTab !== 'sources'}
+      showBrand
       destinations={destinations}
       utilities={utilities}
       activeId={activeTab}
@@ -269,21 +287,33 @@ export function AppShell({
       frosted
       testID="app-shell"
     >
-      {activeTab === 'sources' ? (
-        <SourcesScreen
-          catalog={observedCatalog}
-          playbackGuard={playbackGuard}
-          externalRefreshToken={externalRefreshToken + refreshToken}
-          {...(readySourcesCount > 0 ? { onOpenMenu: () => selectTab('live') } : {})}
-          onBack={() => setTopNavFocused(true)}
+      {activeTab === 'settings' ? (
+        <SettingsScreen
+          section={settingsSection}
+          onSectionChange={handleSettingsSectionChange}
+          preferences={preferences}
           onFocusTopNav={() => setTopNavFocused(true)}
           isActiveScope={!topNavFocused}
-        />
-      ) : activeTab === 'notices' ? (
-        <ThirdPartyNoticesScreen
-          onBack={() => setTopNavFocused(true)}
-          onFocusTopNav={() => setTopNavFocused(true)}
-          isActiveScope={!topNavFocused}
+          renderSources={(slot) => (
+            <SourcesScreen
+              catalog={observedCatalog}
+              embedded
+              playbackGuard={playbackGuard}
+              externalRefreshToken={externalRefreshToken + refreshToken}
+              {...(readySourcesCount > 0 ? { onOpenMenu: () => selectTab('live') } : {})}
+              onBack={slot.onBack}
+              {...(slot.onFocusTopNav !== undefined ? { onFocusTopNav: slot.onFocusTopNav } : {})}
+              isActiveScope={slot.isActiveScope}
+            />
+          )}
+          renderLicenses={(slot) => (
+            <ThirdPartyNoticesScreen
+              embedded
+              onBack={slot.onBack}
+              {...(slot.onFocusTopNav !== undefined ? { onFocusTopNav: slot.onFocusTopNav } : {})}
+              isActiveScope={slot.isActiveScope}
+            />
+          )}
         />
       ) : (
         <BrowseScreen
@@ -303,7 +333,7 @@ export function AppShell({
             playTargetRef.current = target;
             setPlayTarget(target);
           }}
-          onOpenSources={() => selectTab('sources')}
+          onOpenSources={openSources}
           onFocusTopNav={() => setTopNavFocused(true)}
           isActiveScope={!topNavFocused}
         />

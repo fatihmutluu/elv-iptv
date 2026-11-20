@@ -77,7 +77,9 @@ describe('SourcesScreen native TV focus & controller concurrency (#71)', () => {
       // 1. Focusable TV parking anchor is a sibling OUTSIDE non-focusable ScrollView (so ReactScrollView.executeKeyEvent cannot hijack D-pad)
       const scrollView = screen.getByTestId('sources-screen');
       expect(scrollView.props.focusable).toBe(false);
-      const anchor = screen.getByTestId('sources-tv-focus-anchor');
+      const anchor = screen.getByTestId('sources-tv-focus-anchor', {
+        includeHiddenElements: true,
+      });
       expect(anchor.props.focusable).toBe(true);
       expect(anchor.props.hasTVPreferredFocus).toBe(true);
       let cursor = anchor.parent;
@@ -162,6 +164,7 @@ describe('SourcesScreen native TV focus & controller concurrency (#71)', () => {
         remote.tap(KEYCODE_DPAD_DOWN);
       });
       expect(screen.getByTestId('sources-submit').props.accessibilityState?.selected).toBe(true);
+      expect(screen.getByTestId('sources-submit-focus-ring')).toBeTruthy();
       expect(scrollToSpy).toHaveBeenCalled();
 
       // Second short Back (outside text entry) triggers screen onBack

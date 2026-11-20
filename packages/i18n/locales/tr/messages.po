@@ -321,6 +321,9 @@ msgstr "Kaynaklar"
 msgid "nav.notices"
 msgstr "Lisanslar"
 
+msgid "nav.settings"
+msgstr "Ayarlar"
+
 msgid "notices.title"
 msgstr "Üçüncü taraf yazılım bildirimleri"
 
@@ -572,3 +575,99 @@ msgstr "Bu görünüm beklenmeyen bir hatayla karşılaştı. Yeniden yüklemeyi
 
 msgid "ui.error.retry"
 msgstr "Tekrar dene"
+
+msgid "settings.title"
+msgstr "Ayarlar"
+
+msgid "settings.subtitle"
+msgstr "Görünümü özelleştirin, kaynakları yönetin ve açık kaynak lisanslarını inceleyin."
+
+msgid "settings.section.appearance"
+msgstr "Görünüm"
+
+msgid "settings.section.sources"
+msgstr "Kaynaklar"
+
+msgid "settings.section.licenses"
+msgstr "Hakkında ve Lisanslar"
+
+msgid "settings.language.label"
+msgstr "Dil"
+
+msgid "settings.language.description"
+msgstr "Yeniden başlatmadan tüm ekranlarda anında uygulanır."
+
+msgid "settings.language.system"
+msgstr "Sistem"
+
+msgid "settings.language.tr"
+msgstr "Türkçe"
+
+msgid "settings.language.en"
+msgstr "English"
+
+msgid "settings.theme.label"
+msgstr "Tema"
+
+msgid "settings.theme.description"
+msgstr "WCAG AAA Yüksek Kontrast dahil dinamik Cinema Quietude paletleri."
+
+msgid "settings.theme.obsidianCrimson.label"
+msgstr "Obsidyen Kızıl"
+
+msgid "settings.theme.obsidianCrimson.desc"
+msgstr "Saf sinema siyahı ve kızıl vurgular"
+
+msgid "settings.theme.abyssalSapphire.label"
+msgstr "Derin Safir"
+
+msgid "settings.theme.abyssalSapphire.desc"
+msgstr "Gece yarısı tonları ve net safir vurgu"
+
+msgid "settings.theme.theaterAmber.label"
+msgstr "Sinema Kehribar"
+
+msgid "settings.theme.theaterAmber.desc"
+msgstr "Sıcak tungsten koyu ve kehribar vurgu"
+
+msgid "settings.theme.velvetViolet.label"
+msgstr "Kadife Mor"
+
+msgid "settings.theme.velvetViolet.desc"
+msgstr "Koyu mürdüm ve zarif orkide vurgusu"
+
+msgid "settings.theme.pitchEmerald.label"
+msgstr "Zümrüt Yeşil"
+
+msgid "settings.theme.pitchEmerald.desc"
+msgstr "Karbon koyusu ve yayın zümrüt vurgusu"
+
+msgid "settings.theme.highContrast.label"
+msgstr "Yüksek Kontrast (AAA)"
+
+msgid "settings.theme.highContrast.desc"
+msgstr "Saf siyah ve WCAG AAA metin/odak kontrastı"
+
+msgid "settings.fontScale.label"
+msgstr "Yazı boyutu"
+
+msgid "settings.fontScale.description"
+msgstr "Arayüz yazı boyutunu %90 ile %120 arasında ölçekler."
+
+msgid "settings.reduceMotion.label"
+msgstr "Hareketi azalt"
+
+msgid "settings.reduceMotion.description"
+msgstr "Odak yakınlaştırmasını ve arayüz geçişlerini kapatır."
+
+msgid "settings.reset"
+msgstr "Görünümü varsayılana sıfırla"
+
+msgid "settings.about.title"
+msgstr "ELV IPTV Hakkında"
+
+msgid "settings.about.licenseBadge"
+msgstr "GPL-3.0-only · LGPL medya motorları"
+
+msgid "settings.about.statement"
+msgstr "ELV IPTV açık kaynaklı bir oynatıcıdır ve içerik sunmaz. Yerel oynatma motorları LGPL kütüphanelerini dinamik olarak bağlar. Sağlayıcı bilgileri cihazda şifreli saklanır ve katalog veritabanına yazılmaz."

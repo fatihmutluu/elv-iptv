@@ -65,7 +65,7 @@ async function openOfflineShell() {
   };
 }
 
-describe('AppShell Notices tab', () => {
+describe('AppShell Settings -> About & Licenses', () => {
   beforeEach(() => {
     jest.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => {
       cb(0);
@@ -79,7 +79,7 @@ describe('AppShell Notices tab', () => {
   });
 
   it.each<FormFactor>(['phone', 'desktop'])(
-    'opens ThirdPartyNoticesScreen offline from the Notices tab on %s',
+    'opens ThirdPartyNoticesScreen offline from Settings -> About & Licenses on %s',
     async (formFactor) => {
       const env = await openOfflineShell();
       let view: Awaited<ReturnType<typeof render>> | undefined;
@@ -92,10 +92,12 @@ describe('AppShell Notices tab', () => {
           </FormFactorProvider>,
         );
 
-        expect(screen.getByTestId('nav-tab-notices')).toHaveTextContent('Notices');
-        await fireEvent.press(screen.getByTestId('nav-tab-notices'));
+        expect(screen.getByTestId('nav-tab-settings').props.accessibilityLabel).toBe('Settings');
+        expect(screen.getByTestId('nav-tab-settings').props.accessibilityState.selected).toBe(true);
 
-        expect(screen.getByTestId('nav-tab-notices').props.accessibilityState.selected).toBe(true);
+        await fireEvent.press(screen.getByTestId('settings-tab-licenses'));
+
+        expect(screen.getByTestId('settings-about-card')).toBeTruthy();
         expect(screen.getByTestId('notices-screen')).toBeTruthy();
         expect(screen.getByText('ELV IPTV')).toBeTruthy();
         if (formFactor === 'phone') {
@@ -112,7 +114,7 @@ describe('AppShell Notices tab', () => {
     },
   );
 
-  it('navigates into Notices on TV via Top Nav, scrolls with D-pad, and returns focus cleanly to the Notices tab on Back', async () => {
+  it('navigates Top Nav -> Settings -> About & Licenses on TV, scrolls with D-pad, and returns cleanly to sidebar then Top Nav on Back', async () => {
     jest.replaceProperty(Platform, 'OS', 'android');
     jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
 
@@ -130,7 +132,7 @@ describe('AppShell Notices tab', () => {
     const pressKey = async (keyCode: number) => {
       await act(async () => {
         keyListener?.({ action: 'down', keyCode, canceled: false, ageMs: 0 });
-        keyListener?.({ action: 'up', keyCode, canceled: false, ageMs: 0 });
+        keyListener?.({ action: 'up', keyCode, canceled: false, ageMs: 10 });
       });
     };
 
@@ -147,21 +149,46 @@ describe('AppShell Notices tab', () => {
         </RemoteKeysProvider>,
       );
 
-      // Start on Sources -> Back focuses Top Nav -> Right moves to Notices -> Down enters Notices list
+      // Start on empty catalog (Settings -> Sources content pane)
       expect(screen.getByTestId('sources-screen')).toBeTruthy();
+
+      // Back -> Settings sidebar -> Back -> Top Nav -> Left -> Series -> Right -> Settings
+      await pressKey(KEYCODE_BACK);
+      expect(
+        screen.getByTestId('settings-tv-focus-anchor', { includeHiddenElements: true }),
+      ).toBeTruthy();
+
       await pressKey(KEYCODE_BACK);
       expect(
         screen.getByTestId('nav-tv-focus-anchor', { includeHiddenElements: true }),
       ).toBeTruthy();
 
-      await pressKey(KEYCODE_DPAD_RIGHT);
-      expect(screen.getByTestId('nav-tab-notices').props.accessibilityState.selected).toBe(true);
-      expect(screen.getByTestId('notices-screen')).toBeTruthy();
-      expect(screen.queryByTestId('notices-list-ring')).toBeNull();
+      await pressKey(KEYCODE_DPAD_LEFT);
+      expect(screen.getByTestId('nav-tab-series').props.accessibilityState.selected).toBe(true);
 
+      await pressKey(KEYCODE_DPAD_RIGHT);
+      expect(screen.getByTestId('nav-tab-settings').props.accessibilityState.selected).toBe(true);
+
+      // Down enters Settings sidebar -> Down moves from Sources to About & Licenses
       await pressKey(KEYCODE_DPAD_DOWN);
       expect(
         screen.queryByTestId('nav-tv-focus-anchor', { includeHiddenElements: true }),
+      ).toBeNull();
+      expect(
+        screen.getByTestId('settings-tv-focus-anchor', { includeHiddenElements: true }),
+      ).toBeTruthy();
+
+      await pressKey(KEYCODE_DPAD_DOWN);
+      expect(screen.getByTestId('settings-tab-licenses').props.accessibilityState.selected).toBe(
+        true,
+      );
+      expect(screen.getByTestId('notices-screen')).toBeTruthy();
+      expect(screen.queryByTestId('notices-list-ring')).toBeNull();
+
+      // Right enters embedded Notices list -> Down x2 scrolls to libdovi
+      await pressKey(KEYCODE_DPAD_RIGHT);
+      expect(
+        screen.queryByTestId('settings-tv-focus-anchor', { includeHiddenElements: true }),
       ).toBeNull();
       expect(screen.getByTestId('notices-list-ring')).toBeTruthy();
 
@@ -169,17 +196,19 @@ describe('AppShell Notices tab', () => {
       await pressKey(KEYCODE_DPAD_DOWN);
       expect(screen.getByTestId('notices-detail-name')).toHaveTextContent(/libdovi/);
 
-      // Back returns focus cleanly to Top Nav on the Notices tab (parking the list ring)
+      // Back returns cleanly to Settings sidebar (parking notices list ring)
+      await pressKey(KEYCODE_BACK);
+      expect(
+        screen.getByTestId('settings-tv-focus-anchor', { includeHiddenElements: true }),
+      ).toBeTruthy();
+      expect(screen.queryByTestId('notices-list-ring')).toBeNull();
+
+      // Back again returns cleanly to Top Nav on Settings tab
       await pressKey(KEYCODE_BACK);
       expect(
         screen.getByTestId('nav-tv-focus-anchor', { includeHiddenElements: true }),
       ).toBeTruthy();
-      expect(screen.queryByTestId('notices-list-ring')).toBeNull();
-      expect(screen.getByTestId('nav-tab-notices').props.accessibilityState.selected).toBe(true);
-
-      // Left moves Top Nav back to Sources
-      await pressKey(KEYCODE_DPAD_LEFT);
-      expect(screen.getByTestId('nav-tab-sources').props.accessibilityState.selected).toBe(true);
+      expect(screen.getByTestId('nav-tab-settings').props.accessibilityState.selected).toBe(true);
     } finally {
       await view?.unmount();
       await env.cleanup();

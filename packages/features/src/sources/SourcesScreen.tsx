@@ -1,14 +1,20 @@
 import type { CatalogService } from '@elv/data';
-import { TextEntryBoundary, useFormFactor, useI18n } from '@elv/ui-kit';
+import {
+  hexToRgba,
+  Surface,
+  TextEntryBoundary,
+  TvFocusAnchor,
+  useFormFactor,
+  useI18n,
+  useTheme,
+  useViewport,
+} from '@elv/ui-kit';
 import type { ReactElement } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import type { PlaybackGuard } from '../ports/playback-guard';
-import {
-  ActionButton,
-  FieldInput,
-  SavedSourcesPanel,
-  sourcesStyles as styles,
-} from './SourcesScreenParts';
+import { SavedSourcesPanel } from './SavedSourcesPanel';
+import { ActionButton, FieldInput } from './SourcesScreenParts';
+import { sourcesStyles as styles } from './sources-styles';
 import { useSourcesController } from './useSourcesController';
 import { TvRemoteBridge, useTvSourcesNavigation } from './useTvSourcesNavigation';
 
@@ -21,13 +27,18 @@ export interface SourcesScreenProps {
   onBack?: () => void;
   onFocusTopNav?: () => void;
   isActiveScope?: boolean;
+  /** When true, omits outer canvas background, duplicate brand header, and outer scroll padding for Settings embedding. */
+  embedded?: boolean;
 }
 
 function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
   const formFactor = useFormFactor();
   const i18n = useI18n();
+  const theme = useTheme();
+  const viewport = useViewport();
   const isTv = formFactor === 'tv';
   const isActiveScope = props.isActiveScope ?? true;
+  const embedded = props.embedded ?? false;
   const twoColumn = formFactor !== 'phone';
   const ctrl = useSourcesController(props);
   const tv = useTvSourcesNavigation({
@@ -38,16 +49,37 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
     ...(props.onFocusTopNav !== undefined ? { onFocusTopNav: props.onFocusTopNav } : {}),
   });
 
+  const rootBackground = embedded ? 'transparent' : theme.colors.bgCanvas;
+  const padX = Math.max(isTv ? 48 : 16, viewport.overscan.x);
+  const padY = Math.max(isTv ? 32 : 16, viewport.overscan.y);
+  const standaloneScrollPadding = {
+    paddingTop: Math.max(padY, viewport.safeArea.top),
+    paddingBottom: Math.max(padY, viewport.safeArea.bottom),
+    paddingLeft: Math.max(padX, viewport.safeArea.left),
+    paddingRight: Math.max(padX, viewport.safeArea.right),
+  };
+
+  const fieldShared = {
+    editingInputId: tv.editingInputId,
+    onEndEditing: tv.handleEndEditing,
+    registerRef: tv.registerRef,
+    recordLayout: tv.recordLayout,
+  };
+
+  const errorBannerStyle = [
+    styles.errorBox,
+    {
+      backgroundColor: hexToRgba(theme.colors.liveColor, 0.14),
+      borderColor: theme.colors.liveColor,
+      borderRadius: theme.radius.card,
+    },
+  ];
+
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, { backgroundColor: rootBackground }]}>
       {isTv && isActiveScope ? (
         <>
-          <View
-            testID="sources-tv-focus-anchor"
-            focusable
-            hasTVPreferredFocus
-            style={styles.tvFocusAnchor}
-          />
+          <TvFocusAnchor testID="sources-tv-focus-anchor" />
           <TvRemoteBridge
             store={tv.focusStore}
             controls={tv.controls}
@@ -62,8 +94,8 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
         testID="sources-screen"
         {...(isTv ? { focusable: false } : {})}
         accessibilityLabel={i18n.t('sources.title')}
-        style={styles.root}
-        contentContainerStyle={[styles.scrollContent, isTv ? styles.scrollContentTv : null]}
+        style={[styles.root, { backgroundColor: rootBackground }]}
+        contentContainerStyle={embedded ? styles.scrollContentEmbedded : standaloneScrollPadding}
         onLayout={(e) => {
           tv.viewportHeightRef.current = e.nativeEvent.layout.height;
         }}
@@ -75,15 +107,26 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
         <View
           ref={tv.contentRootRef}
           testID={`sources-layout-${formFactor}`}
-          style={[styles.container, twoColumn ? styles.containerWide : null]}
+          style={[styles.container, twoColumn && !embedded ? styles.containerWide : null]}
         >
           <View style={styles.headerRow}>
             <View style={styles.headerTitles}>
-              <Text style={styles.brand}>{i18n.t('app.title')}</Text>
-              <Text style={[styles.title, isTv ? styles.titleTv : null]}>
+              {!embedded ? (
+                <Text style={[theme.typography.caption, { color: theme.colors.textMuted }]}>
+                  {i18n.t('app.title')}
+                </Text>
+              ) : null}
+              <Text
+                style={[
+                  isTv ? theme.typography.display : theme.typography.h1,
+                  { color: theme.colors.textPrimary },
+                ]}
+              >
                 {i18n.t('sources.title')}
               </Text>
-              <Text style={styles.subtitle}>{i18n.t('sources.subtitle')}</Text>
+              <Text style={[theme.typography.body, { color: theme.colors.textSecondary }]}>
+                {i18n.t('sources.subtitle')}
+              </Text>
             </View>
             {props.onOpenMenu !== undefined ? (
               <ActionButton
@@ -98,30 +141,50 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
           </View>
 
           <View style={twoColumn ? styles.columnsRow : styles.columnsStack}>
-            <View style={[styles.panel, twoColumn ? styles.panelHalf : null]}>
-              <Text style={styles.sectionTitle}>{i18n.t('sources.section.add')}</Text>
-              <View style={styles.row}>
-                <ActionButton
-                  focusId="mode-xtream"
-                  testID="sources-mode-xtream"
-                  label={i18n.t('sources.mode.xtream')}
-                  active={ctrl.form.mode === 'xtream'}
-                  tvFocused={tv.tvFocusId === 'mode-xtream'}
-                  onPress={() => ctrl.setMode('xtream')}
-                  recordLayout={tv.recordLayout}
-                />
-                <ActionButton
-                  focusId="mode-m3u"
-                  testID="sources-mode-m3u"
-                  label={i18n.t('sources.mode.m3u')}
-                  active={ctrl.form.mode === 'm3u'}
-                  tvFocused={tv.tvFocusId === 'mode-m3u'}
-                  onPress={() => ctrl.setMode('m3u')}
-                  recordLayout={tv.recordLayout}
-                />
+            <Surface
+              tone="surface"
+              bordered
+              rounded="modal"
+              style={[styles.panel, twoColumn ? styles.panelHalf : null]}
+            >
+              <View style={styles.panelHeader}>
+                <Text style={[theme.typography.h2, { color: theme.colors.textPrimary }]}>
+                  {i18n.t('sources.section.add')}
+                </Text>
+                <View
+                  style={[
+                    styles.segmentedWrap,
+                    {
+                      backgroundColor: theme.colors.bgCard,
+                      borderColor: theme.colors.surfaceBorder,
+                    },
+                  ]}
+                >
+                  <ActionButton
+                    focusId="mode-xtream"
+                    testID="sources-mode-xtream"
+                    label={i18n.t('sources.mode.xtream')}
+                    segment
+                    active={ctrl.form.mode === 'xtream'}
+                    tvFocused={tv.tvFocusId === 'mode-xtream'}
+                    onPress={() => ctrl.setMode('xtream')}
+                    recordLayout={tv.recordLayout}
+                  />
+                  <ActionButton
+                    focusId="mode-m3u"
+                    testID="sources-mode-m3u"
+                    label={i18n.t('sources.mode.m3u')}
+                    segment
+                    active={ctrl.form.mode === 'm3u'}
+                    tvFocused={tv.tvFocusId === 'mode-m3u'}
+                    onPress={() => ctrl.setMode('m3u')}
+                    recordLayout={tv.recordLayout}
+                  />
+                </View>
               </View>
 
               <FieldInput
+                {...fieldShared}
                 focusId="input-name"
                 testID="sources-input-name"
                 label={i18n.t('sources.field.name')}
@@ -129,15 +192,12 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                 value={ctrl.form.name}
                 onChangeText={(v) => ctrl.updateField('name', v)}
                 tvFocused={tv.tvFocusId === 'input-name'}
-                editingInputId={tv.editingInputId}
-                onEndEditing={tv.handleEndEditing}
-                registerRef={tv.registerRef}
-                recordLayout={tv.recordLayout}
               />
 
               {ctrl.form.mode === 'xtream' ? (
                 <>
                   <FieldInput
+                    {...fieldShared}
                     focusId="input-server"
                     testID="sources-input-server"
                     label={i18n.t('sources.field.server')}
@@ -145,12 +205,9 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                     value={ctrl.form.server}
                     onChangeText={(v) => ctrl.updateField('server', v)}
                     tvFocused={tv.tvFocusId === 'input-server'}
-                    editingInputId={tv.editingInputId}
-                    onEndEditing={tv.handleEndEditing}
-                    registerRef={tv.registerRef}
-                    recordLayout={tv.recordLayout}
                   />
                   <FieldInput
+                    {...fieldShared}
                     focusId="input-username"
                     testID="sources-input-username"
                     label={i18n.t('sources.field.username')}
@@ -158,12 +215,9 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                     value={ctrl.form.username}
                     onChangeText={(v) => ctrl.updateField('username', v)}
                     tvFocused={tv.tvFocusId === 'input-username'}
-                    editingInputId={tv.editingInputId}
-                    onEndEditing={tv.handleEndEditing}
-                    registerRef={tv.registerRef}
-                    recordLayout={tv.recordLayout}
                   />
                   <FieldInput
+                    {...fieldShared}
                     focusId="input-password"
                     testID="sources-input-password"
                     label={i18n.t('sources.field.password')}
@@ -171,16 +225,13 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                     value={ctrl.form.password}
                     onChangeText={(v) => ctrl.updateField('password', v)}
                     tvFocused={tv.tvFocusId === 'input-password'}
-                    editingInputId={tv.editingInputId}
-                    onEndEditing={tv.handleEndEditing}
                     secureTextEntry
-                    registerRef={tv.registerRef}
-                    recordLayout={tv.recordLayout}
                   />
                 </>
               ) : (
                 <>
                   <FieldInput
+                    {...fieldShared}
                     focusId="input-playlist-url"
                     testID="sources-input-playlist-url"
                     label={i18n.t('sources.field.playlistUrl')}
@@ -188,14 +239,22 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                     value={ctrl.form.playlistUrl}
                     onChangeText={(v) => ctrl.updateField('playlistUrl', v)}
                     tvFocused={tv.tvFocusId === 'input-playlist-url'}
-                    editingInputId={tv.editingInputId}
-                    onEndEditing={tv.handleEndEditing}
-                    registerRef={tv.registerRef}
-                    recordLayout={tv.recordLayout}
                   />
                   {ctrl.detectedXtreamInM3u ? (
-                    <View style={styles.noticeBox}>
-                      <Text testID="sources-xtream-detected-notice" style={styles.noticeText}>
+                    <View
+                      style={[
+                        styles.noticeBox,
+                        {
+                          backgroundColor: theme.colors.accentTint,
+                          borderColor: theme.colors.accent,
+                          borderRadius: theme.radius.card,
+                        },
+                      ]}
+                    >
+                      <Text
+                        testID="sources-xtream-detected-notice"
+                        style={[theme.typography.body, { color: theme.colors.textPrimary }]}
+                      >
                         {i18n.t('sources.notice.xtreamDetected')}
                       </Text>
                       <ActionButton
@@ -227,76 +286,45 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
 
               {ctrl.showAdvanced ? (
                 <View style={styles.advancedSection}>
-                  <FieldInput
-                    focusId="input-guide-url"
-                    testID="sources-input-guide-url"
-                    label={i18n.t('sources.field.guideUrl')}
-                    placeholder={i18n.t('sources.placeholder.guideUrl')}
-                    value={ctrl.form.guideUrl}
-                    onChangeText={(v) => ctrl.updateField('guideUrl', v)}
-                    tvFocused={tv.tvFocusId === 'input-guide-url'}
-                    editingInputId={tv.editingInputId}
-                    onEndEditing={tv.handleEndEditing}
-                    registerRef={tv.registerRef}
-                    recordLayout={tv.recordLayout}
-                  />
-                  <FieldInput
-                    focusId="input-user-agent"
-                    testID="sources-input-user-agent"
-                    label={i18n.t('sources.field.userAgent')}
-                    placeholder={i18n.t('sources.placeholder.userAgent')}
-                    value={ctrl.form.userAgent}
-                    onChangeText={(v) => ctrl.updateField('userAgent', v)}
-                    tvFocused={tv.tvFocusId === 'input-user-agent'}
-                    editingInputId={tv.editingInputId}
-                    onEndEditing={tv.handleEndEditing}
-                    registerRef={tv.registerRef}
-                    recordLayout={tv.recordLayout}
-                  />
-                  <FieldInput
-                    focusId="input-referer"
-                    testID="sources-input-referer"
-                    label={i18n.t('sources.field.referer')}
-                    placeholder={i18n.t('sources.placeholder.referer')}
-                    value={ctrl.form.referer}
-                    onChangeText={(v) => ctrl.updateField('referer', v)}
-                    tvFocused={tv.tvFocusId === 'input-referer'}
-                    editingInputId={tv.editingInputId}
-                    onEndEditing={tv.handleEndEditing}
-                    registerRef={tv.registerRef}
-                    recordLayout={tv.recordLayout}
-                  />
+                  {(
+                    [
+                      ['guideUrl', 'guide-url', 'guideUrl'],
+                      ['userAgent', 'user-agent', 'userAgent'],
+                      ['referer', 'referer', 'referer'],
+                    ] as const
+                  ).map(([field, slug, key]) => (
+                    <FieldInput
+                      key={field}
+                      {...fieldShared}
+                      focusId={`input-${slug}`}
+                      testID={`sources-input-${slug}`}
+                      label={i18n.t(`sources.field.${key}`)}
+                      placeholder={i18n.t(`sources.placeholder.${key}`)}
+                      value={ctrl.form[field]}
+                      onChangeText={(v) => ctrl.updateField(field, v)}
+                      tvFocused={tv.tvFocusId === `input-${slug}`}
+                    />
+                  ))}
                   {ctrl.form.mode === 'xtream' ? (
                     <View style={styles.fieldGroup}>
-                      <Text style={styles.fieldLabel}>{i18n.t('sources.field.xtreamFormat')}</Text>
+                      <Text
+                        style={[theme.typography.caption, { color: theme.colors.textSecondary }]}
+                      >
+                        {i18n.t('sources.field.xtreamFormat')}
+                      </Text>
                       <View style={styles.row}>
-                        <ActionButton
-                          focusId="format-default"
-                          testID="sources-format-default"
-                          label={i18n.t('sources.format.default')}
-                          active={ctrl.form.xtreamFormat === 'default'}
-                          tvFocused={tv.tvFocusId === 'format-default'}
-                          onPress={() => ctrl.updateField('xtreamFormat', 'default')}
-                          recordLayout={tv.recordLayout}
-                        />
-                        <ActionButton
-                          focusId="format-ts"
-                          testID="sources-format-ts"
-                          label={i18n.t('sources.format.ts')}
-                          active={ctrl.form.xtreamFormat === 'ts'}
-                          tvFocused={tv.tvFocusId === 'format-ts'}
-                          onPress={() => ctrl.updateField('xtreamFormat', 'ts')}
-                          recordLayout={tv.recordLayout}
-                        />
-                        <ActionButton
-                          focusId="format-m3u8"
-                          testID="sources-format-m3u8"
-                          label={i18n.t('sources.format.m3u8')}
-                          active={ctrl.form.xtreamFormat === 'm3u8'}
-                          tvFocused={tv.tvFocusId === 'format-m3u8'}
-                          onPress={() => ctrl.updateField('xtreamFormat', 'm3u8')}
-                          recordLayout={tv.recordLayout}
-                        />
+                        {(['default', 'ts', 'm3u8'] as const).map((fmt) => (
+                          <ActionButton
+                            key={fmt}
+                            focusId={`format-${fmt}`}
+                            testID={`sources-format-${fmt}`}
+                            label={i18n.t(`sources.format.${fmt}`)}
+                            active={ctrl.form.xtreamFormat === fmt}
+                            tvFocused={tv.tvFocusId === `format-${fmt}`}
+                            onPress={() => ctrl.updateField('xtreamFormat', fmt)}
+                            recordLayout={tv.recordLayout}
+                          />
+                        ))}
                       </View>
                     </View>
                   ) : null}
@@ -304,11 +332,21 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
               ) : null}
 
               {ctrl.formError !== null ? (
-                <View style={styles.errorBox}>
-                  <Text testID="sources-form-error" style={styles.errorText}>
+                <View style={errorBannerStyle}>
+                  <Text
+                    testID="sources-form-error"
+                    style={[
+                      theme.typography.caption,
+                      styles.errorText,
+                      { color: theme.colors.textPrimary },
+                    ]}
+                  >
                     {i18n.t(ctrl.formError.messageId)}
                   </Text>
-                  <Text testID="sources-form-hint" style={styles.hintText}>
+                  <Text
+                    testID="sources-form-hint"
+                    style={[theme.typography.caption, { color: theme.colors.textSecondary }]}
+                  >
                     {i18n.t(ctrl.formError.hintId)}
                   </Text>
                 </View>
@@ -321,12 +359,12 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                   ctrl.submitting ? i18n.t('sources.action.adding') : i18n.t('sources.action.add')
                 }
                 disabled={ctrl.submitting}
-                active
+                primary
                 tvFocused={tv.tvFocusId === 'submit'}
                 onPress={() => void ctrl.submit()}
                 recordLayout={tv.recordLayout}
               />
-            </View>
+            </Surface>
 
             <SavedSourcesPanel
               ctrl={ctrl}
@@ -342,7 +380,7 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
   );
 }
 
-/** Plain, zero-chrome cross-platform source management screen (#71). */
+/** Cinema Quietude cross-platform source management screen (#71). */
 export function SourcesScreen(props: SourcesScreenProps): ReactElement {
   return (
     <TextEntryBoundary>

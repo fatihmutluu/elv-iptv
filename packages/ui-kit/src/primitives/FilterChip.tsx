@@ -9,6 +9,7 @@ export interface FilterChipProps {
   selected?: boolean;
   onPress?: () => void;
   disabled?: boolean;
+  focusable?: boolean;
   focused?: boolean;
   testID?: string;
   style?: StyleProp<ViewStyle>;
@@ -32,6 +33,7 @@ export function FilterChip({
   selected = false,
   onPress,
   disabled = false,
+  focusable,
   focused,
   testID,
   style,
@@ -60,7 +62,7 @@ export function FilterChip({
       accessibilityLabel={label}
       accessibilityState={{ selected, disabled }}
       disabled={disabled}
-      focusable={!disabled}
+      focusable={focusable ?? !disabled}
       onPress={onPress}
       onFocus={handleFocus}
       onBlur={handleBlur}

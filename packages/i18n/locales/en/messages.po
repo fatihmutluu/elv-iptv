@@ -321,6 +321,9 @@ msgstr "Sources"
 msgid "nav.notices"
 msgstr "Notices"
 
+msgid "nav.settings"
+msgstr "Settings"
+
 msgid "notices.title"
 msgstr "Third-party software notices"
 
@@ -572,3 +575,99 @@ msgstr "This view ran into an unexpected problem. Try loading it again."
 
 msgid "ui.error.retry"
 msgstr "Try again"
+
+msgid "settings.title"
+msgstr "Settings"
+
+msgid "settings.subtitle"
+msgstr "Customize appearance, manage sources, and view open-source licenses."
+
+msgid "settings.section.appearance"
+msgstr "Appearance"
+
+msgid "settings.section.sources"
+msgstr "Sources"
+
+msgid "settings.section.licenses"
+msgstr "About & Licenses"
+
+msgid "settings.language.label"
+msgstr "Language"
+
+msgid "settings.language.description"
+msgstr "Applies immediately across all screens without restarting."
+
+msgid "settings.language.system"
+msgstr "System"
+
+msgid "settings.language.tr"
+msgstr "Türkçe"
+
+msgid "settings.language.en"
+msgstr "English"
+
+msgid "settings.theme.label"
+msgstr "Theme"
+
+msgid "settings.theme.description"
+msgstr "Dynamic Cinema Quietude palettes including WCAG AAA High Contrast."
+
+msgid "settings.theme.obsidianCrimson.label"
+msgstr "Obsidian Crimson"
+
+msgid "settings.theme.obsidianCrimson.desc"
+msgstr "Pure cinema black with crimson accents"
+
+msgid "settings.theme.abyssalSapphire.label"
+msgstr "Abyssal Sapphire"
+
+msgid "settings.theme.abyssalSapphire.desc"
+msgstr "Midnight theater canvas with crisp sapphire"
+
+msgid "settings.theme.theaterAmber.label"
+msgstr "Theater Amber"
+
+msgid "settings.theme.theaterAmber.desc"
+msgstr "Warm tungsten dark with amber highlight"
+
+msgid "settings.theme.velvetViolet.label"
+msgstr "Velvet Violet"
+
+msgid "settings.theme.velvetViolet.desc"
+msgstr "Low-key slate plum with orchid signal"
+
+msgid "settings.theme.pitchEmerald.label"
+msgstr "Pitch Emerald"
+
+msgid "settings.theme.pitchEmerald.desc"
+msgstr "Carbon pitch dark with broadcast emerald"
+
+msgid "settings.theme.highContrast.label"
+msgstr "High Contrast (AAA)"
+
+msgid "settings.theme.highContrast.desc"
+msgstr "Pure black with WCAG AAA text and focus contrast"
+
+msgid "settings.fontScale.label"
+msgstr "Text size"
+
+msgid "settings.fontScale.description"
+msgstr "Scales interface typography comfortably from 90% to 120%."
+
+msgid "settings.reduceMotion.label"
+msgstr "Reduce motion"
+
+msgid "settings.reduceMotion.description"
+msgstr "Disables focus zoom and interface transitions."
+
+msgid "settings.reset"
+msgstr "Reset appearance to defaults"
+
+msgid "settings.about.title"
+msgstr "About ELV IPTV"
+
+msgid "settings.about.licenseBadge"
+msgstr "GPL-3.0-only · LGPL media engines"
+
+msgid "settings.about.statement"
+msgstr "ELV IPTV is an open-source player and ships no media content. Native playback engines dynamically link LGPL libraries. Provider credentials remain encrypted on-device and never enter the catalog database."

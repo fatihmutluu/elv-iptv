@@ -14,6 +14,7 @@ export interface CtaButtonProps {
   icon?: IconName;
   onPress?: () => void;
   disabled?: boolean;
+  focusable?: boolean;
   focused?: boolean;
   hasTVPreferredFocus?: boolean;
   testID?: string;
@@ -40,6 +41,7 @@ export function CtaButton({
   icon,
   onPress,
   disabled = false,
+  focusable,
   focused,
   hasTVPreferredFocus,
   testID,
@@ -71,7 +73,7 @@ export function CtaButton({
       accessibilityLabel={accessibilityLabel ?? label}
       accessibilityState={{ disabled }}
       disabled={disabled}
-      focusable={!disabled}
+      focusable={focusable ?? !disabled}
       hasTVPreferredFocus={hasTVPreferredFocus}
       onPress={onPress}
       onFocus={handleFocus}

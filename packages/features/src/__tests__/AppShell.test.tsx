@@ -1,6 +1,13 @@
 import { createCatalogService, openCatalog } from '@elv/data';
 import { countingScheduler, memorySecrets, testDb } from '@elv/data/testing';
-import { elvError, err, type HttpClient, type HttpResponse, ok } from '@elv/domain';
+import {
+  createMemoryPreferencesStore,
+  elvError,
+  err,
+  type HttpClient,
+  type HttpResponse,
+  ok,
+} from '@elv/domain';
 import { createAppI18n } from '@elv/i18n';
 import { createFakePlayerEngine } from '@elv/playback/testing';
 import {
@@ -10,10 +17,12 @@ import {
   FormFactorProvider,
   I18nProvider,
   RemoteKeysProvider,
+  THEME_PRESETS,
+  useTheme,
 } from '@elv/ui-kit';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { Platform, View } from 'react-native';
-import { AppShell } from '../AppShell';
+import { Platform, Text, View } from 'react-native';
+import { AppProviders, AppShell } from '../index';
 import type { VideoHost } from '../ports/video-host';
 
 function jsonResponse(payload: unknown): HttpResponse {
@@ -137,6 +146,18 @@ function createFakeHost() {
   return { engine, videoHost };
 }
 
+function LiveThemeProbe() {
+  const theme = useTheme();
+  return (
+    <View>
+      <Text testID="shell-theme-preset">{theme.preset}</Text>
+      <Text testID="shell-theme-canvas">{theme.colors.bgCanvas}</Text>
+      <Text testID="shell-theme-font-scale">{String(theme.fontScale)}</Text>
+      <Text testID="shell-theme-reduce-motion">{String(theme.reduceMotion)}</Text>
+    </View>
+  );
+}
+
 describe('AppShell', () => {
   beforeEach(() => {
     jest.spyOn(globalThis, 'requestAnimationFrame').mockImplementation(() => 1);
@@ -147,7 +168,7 @@ describe('AppShell', () => {
     jest.restoreAllMocks();
   });
 
-  it('opens Sources on empty catalog, imports a source via UI, and browses Live, Movies, and Series', async () => {
+  it('opens Settings -> Sources on empty catalog, imports a source via UI, and browses Live, Movies, and Series', async () => {
     const env = await openShellCatalog();
     const { videoHost } = createFakeHost();
 
@@ -161,9 +182,12 @@ describe('AppShell', () => {
         </FormFactorProvider>,
       );
 
+      expect(screen.getByTestId('settings-screen')).toBeTruthy();
       expect(screen.getByTestId('sources-screen')).toBeTruthy();
       expect(screen.getByText('ELV IPTV')).toBeTruthy();
-      expect(screen.getByTestId('nav-tab-sources').props.accessibilityState.selected).toBe(true);
+      expect(screen.getByTestId('nav-tab-settings').props.accessibilityState.selected).toBe(true);
+      expect(screen.queryByTestId('nav-tab-sources')).toBeNull();
+      expect(screen.queryByTestId('nav-tab-notices')).toBeNull();
 
       await fireEvent.changeText(
         screen.getByTestId('sources-input-server'),
@@ -250,17 +274,18 @@ describe('AppShell', () => {
         ).toBe(true);
       });
 
-      // Re-open playback and verify removing the active source immediately stops playback & unmounts PlayerScreen.
       await fireEvent.press(screen.getByTestId('browse-items-list-row-3'));
       await waitFor(() => {
         expect(engine.openMedias()).toBe(1);
       });
 
       await act(async () => {
-        // Trigger removal via AppShell's observed catalog / PlaybackGuard path:
         await fireEvent.press(screen.getByTestId('player-back'));
       });
-      await fireEvent.press(screen.getByTestId('nav-tab-sources'));
+
+      await fireEvent.press(screen.getByTestId('nav-tab-settings'));
+      expect(screen.getByTestId('settings-panel-appearance')).toBeTruthy();
+      await fireEvent.press(screen.getByTestId('settings-tab-sources'));
       await waitFor(() => {
         expect(screen.getByTestId(`source-remove-${added.value.id}`)).toBeTruthy();
       });
@@ -272,6 +297,74 @@ describe('AppShell', () => {
 
       await view.unmount();
     } finally {
+      await env.cleanup();
+    }
+  });
+
+  it('switches Language, Theme (High Contrast AAA), Font Scale, and Reduce Motion live inside Settings -> Appearance via AppProviders', async () => {
+    const env = await openShellCatalog();
+    const { videoHost } = createFakeHost();
+    const store = createMemoryPreferencesStore();
+
+    let view: Awaited<ReturnType<typeof render>> | undefined;
+    try {
+      view = await render(
+        <AppProviders
+          preferencesStore={store}
+          systemLocale="en"
+          viewport={{
+            formFactor: 'desktop',
+            orientation: 'landscape',
+            inputModality: 'pointer',
+            width: 1280,
+            height: 800,
+          }}
+        >
+          <LiveThemeProbe />
+          <AppShell catalog={env.catalog} videoHost={videoHost} />
+        </AppProviders>,
+      );
+
+      await fireEvent.press(screen.getByTestId('settings-tab-appearance'));
+      expect(screen.getByTestId('settings-panel-appearance')).toBeTruthy();
+
+      await fireEvent.press(screen.getByTestId('settings-lang-tr'));
+      await waitFor(() => {
+        expect(screen.getByTestId('nav-tab-live')).toHaveTextContent('Canlı');
+        expect(screen.getByTestId('nav-tab-settings').props.accessibilityLabel).toBe('Ayarlar');
+      });
+
+      await fireEvent.press(screen.getByTestId('settings-lang-en'));
+      await waitFor(() => {
+        expect(screen.getByTestId('nav-tab-live')).toHaveTextContent('Live');
+      });
+
+      await fireEvent.press(screen.getByTestId('settings-theme-highContrast'));
+      await waitFor(() => {
+        expect(screen.getByTestId('shell-theme-preset')).toHaveTextContent('highContrast');
+        expect(screen.getByTestId('shell-theme-canvas')).toHaveTextContent(
+          THEME_PRESETS.highContrast.bgCanvas,
+        );
+      });
+
+      await fireEvent.press(screen.getByTestId('settings-font-110'));
+      await waitFor(() => {
+        expect(screen.getByTestId('shell-theme-font-scale')).toHaveTextContent('1.1');
+      });
+
+      await fireEvent.press(screen.getByTestId('settings-toggle-reduce-motion'));
+      await waitFor(() => {
+        expect(screen.getByTestId('shell-theme-reduce-motion')).toHaveTextContent('true');
+      });
+
+      await fireEvent.press(screen.getByTestId('settings-reset-preferences'));
+      await waitFor(() => {
+        expect(screen.getByTestId('shell-theme-preset')).toHaveTextContent('obsidianCrimson');
+        expect(screen.getByTestId('shell-theme-font-scale')).toHaveTextContent('1');
+        expect(screen.getByTestId('shell-theme-reduce-motion')).toHaveTextContent('false');
+      });
+    } finally {
+      await view?.unmount();
       await env.cleanup();
     }
   });
@@ -361,17 +454,25 @@ describe('AppShell', () => {
         expect(screen.getByTestId('nav-tab-live')).toHaveTextContent('Canlı');
         expect(screen.getByTestId('nav-tab-movie')).toHaveTextContent('Filmler');
         expect(screen.getByTestId('nav-tab-series')).toHaveTextContent('Diziler');
-        expect(screen.getByTestId('nav-tab-sources')).toHaveTextContent('Kaynaklar');
-        expect(screen.getByTestId('nav-tab-notices')).toHaveTextContent('Lisanslar');
+        expect(screen.getByTestId('nav-tab-settings').props.accessibilityLabel).toBe('Ayarlar');
 
         if (formFactor === 'tv') {
+          // Empty catalog opens Settings -> Sources content pane; Back -> sidebar -> Back -> Top Nav -> Left -> Series
           await act(async () => {
             keyListener?.({ action: 'down', keyCode: 4, canceled: false, ageMs: 0 });
             keyListener?.({ action: 'up', keyCode: 4, canceled: false, ageMs: 10 });
           });
+          expect(
+            screen.getByTestId('settings-tv-focus-anchor', { includeHiddenElements: true }),
+          ).toBeTruthy();
+
           await act(async () => {
-            keyListener?.({ action: 'down', keyCode: 21, canceled: false, ageMs: 20 });
-            keyListener?.({ action: 'up', keyCode: 21, canceled: false, ageMs: 30 });
+            keyListener?.({ action: 'down', keyCode: 4, canceled: false, ageMs: 20 });
+            keyListener?.({ action: 'up', keyCode: 4, canceled: false, ageMs: 30 });
+          });
+          await act(async () => {
+            keyListener?.({ action: 'down', keyCode: 21, canceled: false, ageMs: 40 });
+            keyListener?.({ action: 'up', keyCode: 21, canceled: false, ageMs: 50 });
           });
           expect(screen.getByTestId('nav-tab-series').props.accessibilityState.selected).toBe(true);
         }
