@@ -22,7 +22,7 @@ case "${PLATFORM_NAME:-}" in
   appletvos) dsym_slice="tvos-arm64" ;;
   iphoneos) dsym_slice="ios-arm64" ;;
 esac
-spm_root="${BUILD_DIR%%/Build/*}/SourcePackages/checkouts/FFmpegBuild/Sources"
+spm_root="${BUILD_DIR%/Build/*}/SourcePackages/checkouts/FFmpegBuild/Sources"
 
 seen=" "
 for dir in "${BUILT_PRODUCTS_DIR}" "${BUILT_PRODUCTS_DIR}/PackageFrameworks"; do

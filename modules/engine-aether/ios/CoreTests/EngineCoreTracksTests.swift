@@ -26,45 +26,33 @@ struct EngineCoreTracksTests {
     selectedSubtitleId: nil
   )
 
-  @Test("parseLoadRequest distinguishes omitted, null Off, and selected subtitleTrackId")
-  func parseLoadRequestDistinguishesSubtitlePreference() {
-    let omitted = parseLoadRequest([
-      "attempt": 1,
-      "url": "http://127.0.0.1:7878/movie/demo/demo/200011.mkv",
-      "kind": "vod",
-    ])
-    #expect(omitted.attempt == 1)
-    #expect(omitted.request.audioTrackId == nil)
-    #expect(omitted.request.subtitlePreference == .default)
+  @Test("track stream ID parsers accept non-negative prefixed IDs and reject malformed, negative, or cross-prefixed IDs")
+  func strictTrackIdParsing() {
+    #expect(parseAudioTrackStreamId("a:0") == 0)
+    #expect(parseAudioTrackStreamId(" a:12 ") == 12)
+    #expect(parseAudioTrackStreamId("a:-1") == nil)
+    #expect(parseAudioTrackStreamId("a:+2") == nil)
+    #expect(parseAudioTrackStreamId("s:2") == nil)
+    #expect(parseAudioTrackStreamId("2") == nil)
+    #expect(parseAudioTrackStreamId("a:99999999999") == nil)
 
-    let explicitNull = parseLoadRequest([
-      "attempt": 2,
-      "url": "http://127.0.0.1:7878/movie/demo/demo/200011.mkv",
-      "kind": "vod",
-      "audioTrackId": "a:2",
-      "subtitleTrackId": nil,
-    ])
-    #expect(explicitNull.attempt == 2)
-    #expect(explicitNull.request.audioTrackId == "a:2")
-    #expect(explicitNull.request.subtitlePreference == .off)
+    #expect(parseSubtitleTrackStreamId("s:0") == 0)
+    #expect(parseSubtitleTrackStreamId(" s:7 ") == 7)
+    #expect(parseSubtitleTrackStreamId("s:-4") == nil)
+    #expect(parseSubtitleTrackStreamId("a:7") == nil)
+    #expect(parseSubtitleTrackStreamId("7") == nil)
+  }
 
-    let nsNull = parseLoadRequest([
-      "attempt": 3,
-      "url": "http://127.0.0.1:7878/movie/demo/demo/200011.mkv",
-      "kind": "vod",
-      "subtitleTrackId": NSNull(),
-    ])
-    #expect(nsNull.request.subtitlePreference == .off)
-
-    let selected = parseLoadRequest([
-      "attempt": 4,
-      "url": "http://127.0.0.1:7878/movie/demo/demo/200011.mkv",
-      "kind": "vod",
-      "audioTrackId": "a:2",
-      "subtitleTrackId": "s:3",
-    ])
-    #expect(selected.request.audioTrackId == "a:2")
-    #expect(selected.request.subtitlePreference == .selected("s:3"))
+  @Test("ISO 639-1, ISO 639-2(T/B), and BCP-47 language codes match while undetermined tags never match")
+  func iso639Equivalence() {
+    #expect(sameTrackLanguage("tr", "tur"))
+    #expect(sameTrackLanguage("tr-TR", "tur"))
+    #expect(sameTrackLanguage("de", "ger"))
+    #expect(sameTrackLanguage("deu", "ger"))
+    #expect(sameTrackLanguage("en-US", "eng"))
+    #expect(!sameTrackLanguage("und", "und"))
+    #expect(!sameTrackLanguage("zxx", "zxx"))
+    #expect(!sameTrackLanguage(nil, "eng"))
   }
 
   @Test("tracks observations are serial-fenced, deduplicated, and formatted for JS payload")
@@ -90,7 +78,7 @@ struct EngineCoreTracksTests {
     #expect((tracksDict?["subtitles"] as? [[String: Any]])?.count == 2)
   }
 
-  @Test("selectAudioTrack and selectSubtitleTrack adopt tokens, drive backend, and clear cues on Off")
+  @Test("selectAudioTrack and selectSubtitleTrack adopt tokens, ignore malformed IDs, and clear cues on Off")
   func selectTracksAdoptsTokensAndClearsOnOff() {
     let (core, backend, sink, _) = makeHarness()
     core.load(LoadRequest(url: "http://h:7878/movie/demo/demo/200011.mkv", live: false), attempt: 1)
@@ -100,6 +88,9 @@ struct EngineCoreTracksTests {
     backend.calls.removeAll()
     sink.events.removeAll()
     sink.clearSubtitlesCount = 0
+
+    core.selectAudioTrack(4, id: "a:-1")
+    #expect(backend.calls.isEmpty)
 
     core.selectAudioTrack(5, id: "a:2")
     #expect(backend.calls == [.selectAudioTrack(2)])
@@ -124,7 +115,7 @@ struct EngineCoreTracksTests {
     #expect(sink.events == [.tracks(attempt: 7, tracks: expectedOff)])
   }
 
-  @Test("track preferences persist across retry and recreate+load with language fallback when IDs shift")
+  @Test("track preferences persist across retry and recreate+load with ISO-639 and label tie-breaking")
   func trackPreferencesPersistAcrossRetryAndRecreate() {
     let (core, backend, sink, _) = makeHarness()
     core.load(LoadRequest(url: "http://h:7878/movie/demo/demo/200011.mkv", live: false), attempt: 1)
@@ -157,7 +148,6 @@ struct EngineCoreTracksTests {
       ]
     )
 
-    // Simulate recreate + reload where stream indices shifted (a:2 -> a:5, s:3 -> s:7)
     core.recreate(5)
     backend.calls.removeAll()
     sink.events.removeAll()
@@ -175,20 +165,22 @@ struct EngineCoreTracksTests {
     sink.events.removeAll()
     backend.calls.removeAll()
 
+    // Simulate reload where ISO-639-1 ("en"/"tr") replaced ISO-639-2 ("eng"/"tur") AND stream IDs swapped!
     let shiftedObserved = MediaTracksOut(
       audio: [
-        TrackInfoOut(id: "a:4", language: "tur", label: "Turkish", codec: "aac", channels: 2, isDefault: true),
-        TrackInfoOut(id: "a:5", language: "eng", label: "English", codec: "aac", channels: 2),
+        TrackInfoOut(id: "a:2", language: "en", label: "Commentary", codec: "aac", channels: 2),
+        TrackInfoOut(id: "a:5", language: "en", label: "English", codec: "aac", channels: 2),
       ],
       subtitles: [
-        TrackInfoOut(id: "s:7", language: "tur", label: "Turkish", codec: "subrip"),
-        TrackInfoOut(id: "s:8", language: "eng", label: "English", codec: "subrip"),
+        TrackInfoOut(id: "s:7", language: "tr", label: "Turkish", codec: "subrip"),
+        TrackInfoOut(id: "s:8", language: "en", label: "English", codec: "subrip"),
       ],
-      selectedAudioId: "a:4",
+      selectedAudioId: "a:2",
       selectedSubtitleId: nil
     )
     core.observe(.tracks(shiftedObserved), serial: 4)
 
+    // Label tie-breaker chooses a:5 ("English") over exact-ID a:2 ("Commentary"), and ISO-639 matches "tr" == "tur" -> s:7.
     #expect(backend.calls == [.selectAudioTrack(5), .selectSubtitleTrack(7)])
     var reconciled = shiftedObserved
     reconciled.selectedAudioId = "a:5"
@@ -196,7 +188,32 @@ struct EngineCoreTracksTests {
     #expect(sink.events == [.tracks(attempt: 6, tracks: reconciled)])
   }
 
-  @Test("explicit subtitle Off clears auto-selected backend subtitle track on observation")
+  @Test("reconcile applies audio/subtitle overrides at most once per load so liveTs fallback never loops")
+  func reconcileAppliesOncePerLoadWithoutInfiniteReloadLoop() {
+    let (core, backend, sink, _) = makeHarness()
+    core.load(
+      LoadRequest(
+        url: "http://h:7878/live/demo/demo/1001.ts",
+        live: true,
+        audioTrackId: "a:2",
+        subtitlePreference: .selected("s:4")
+      ),
+      attempt: 1
+    )
+    backend.calls.removeAll()
+    sink.events.removeAll()
+
+    // First observation reports backend fell back to a:1 / nil -> reconcile issues selectAudioTrack(2) & selectSubtitleTrack(4) ONCE.
+    core.observe(.tracks(sampleTracks), serial: 1)
+    #expect(backend.calls == [.selectAudioTrack(2), .selectSubtitleTrack(4)])
+
+    backend.calls.removeAll()
+    // Repeated observations in the same load where backend still reports a:1 / nil MUST NOT trigger another reload!
+    core.observe(.tracks(sampleTracks), serial: 1)
+    #expect(backend.calls.isEmpty)
+  }
+
+  @Test("explicit subtitle Off clears auto-selected backend subtitle track once per auto-selection")
   func explicitOffClearsAutoSelectedSubtitle() {
     let (core, backend, sink, _) = makeHarness()
     core.load(

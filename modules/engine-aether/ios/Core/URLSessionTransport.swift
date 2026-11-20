@@ -172,7 +172,7 @@ public final class URLSessionTransport: ByteTransport, @unchecked Sendable {
       cachePolicy: .reloadIgnoringLocalCacheData,
       timeoutInterval: 10
     )
-    for (key, value) in headers {
+    for (key, value) in sanitizeRequestHeaders(headers) {
       request.setValue(value, forHTTPHeaderField: key)
     }
     if request.value(forHTTPHeaderField: "Connection") == nil {

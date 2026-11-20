@@ -1,31 +1,41 @@
 import Foundation
 
-private let credentialMarkers: Set<String> = ["live", "movie", "series", "timeshift"]
-private let tokenMarker = "play"
 private let mask = "***"
 
-/// Returns `url` safe for diagnostics: strips query, fragment, and user-info, masks the user and
-/// password segments after `/live/`, `/movie/`, `/series/`, and `/timeshift/`, masks the token
-/// after `/play/`, and masks the bare Xtream form `/<user>/<pass>/<id>` when no marker appeared.
+private let safeExtensions: Set<String> = [
+  ".ts", ".m2ts", ".mts", ".m3u8", ".m3u", ".mp4", ".m4s", ".m4v", ".m4a",
+  ".mkv", ".webm", ".avi", ".mov", ".flv", ".mpd", ".aac", ".mp3", ".ac3",
+  ".eac3", ".ogg", ".opus", ".wav", ".flac", ".srt", ".vtt", ".ass", ".ssa",
+  ".sub", ".xml", ".gz", ".php",
+]
+
+/// Strict allowlist URL redaction: preserves only `scheme://host(:port)` and a safe media/playlist
+/// extension on the final non-empty segment, masking all path segments, user-info, matrix parameters
+/// (`;...`), query strings (`?...`), and fragments (`#...`).
 public func redactUrl(_ url: String) -> String {
-  let noFragment = substringBefore(url, delimiter: "#")
+  let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+  guard !trimmed.isEmpty else { return "" }
+
+  let noFragment = substringBefore(trimmed, delimiter: "#")
   let withoutTail = substringBefore(noFragment, delimiter: "?")
+  guard !withoutTail.isEmpty else { return "" }
 
   let origin: String
   let path: String
   if let schemeRange = withoutTail.range(of: "://") {
     let authorityStart = schemeRange.upperBound
     let remainder = withoutTail[authorityStart...]
-    let pathStart = remainder.firstIndex(of: "/") ?? withoutTail.endIndex
-    let rawAuthority = String(withoutTail[authorityStart..<pathStart])
-    let authority: String
+    let authorityEnd = remainder.firstIndex(of: "/") ?? withoutTail.endIndex
+    let rawAuthority = String(withoutTail[authorityStart..<authorityEnd])
+    let hostPart: String
     if let atIndex = rawAuthority.lastIndex(of: "@") {
-      authority = String(rawAuthority[rawAuthority.index(after: atIndex)...])
+      hostPart = String(rawAuthority[rawAuthority.index(after: atIndex)...])
     } else {
-      authority = rawAuthority
+      hostPart = rawAuthority
     }
-    origin = String(withoutTail[..<authorityStart]) + authority
-    path = String(withoutTail[pathStart...])
+    let cleanAuthority = substringBefore(hostPart, delimiter: ";")
+    origin = String(withoutTail[..<authorityStart]) + cleanAuthority
+    path = String(withoutTail[authorityEnd...])
   } else {
     origin = ""
     path = withoutTail
@@ -40,59 +50,36 @@ private func substringBefore(_ text: String, delimiter: Character) -> String {
 }
 
 private func redactPath(_ path: String) -> String {
-  var segments = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
-  var marked = false
-  var index = 0
-
-  while index < segments.count {
-    let lower = segments[index].lowercased()
-    let masked: Int
-    if credentialMarkers.contains(lower) {
-      masked = 2
-    } else if lower == tokenMarker {
-      masked = 1
-    } else {
-      masked = 0
-    }
-
-    if masked > 0 {
-      marked = true
-      for offset in 1...masked {
-        let target = index + offset
-        if target < segments.count && !segments[target].isEmpty {
-          segments[target] = mask
-        }
-      }
-    }
-    index += 1 + masked
+  guard !path.isEmpty else { return "" }
+  if path == "/" { return "/" }
+  if path.hasPrefix(";") {
+    return ""
+  }
+  if !path.hasPrefix("/") {
+    return maskSegment(path, isLastNonEmpty: true)
   }
 
-  if !marked {
-    maskBareXtream(&segments)
+  let rawSegments = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+  var lastNonEmpty = -1
+  for index in rawSegments.indices.reversed() where !rawSegments[index].isEmpty {
+    lastNonEmpty = index
+    break
   }
-  return segments.joined(separator: "/")
+  guard lastNonEmpty >= 0 else { return path }
+
+  let masked = rawSegments.enumerated().map { index, segment in
+    maskSegment(segment, isLastNonEmpty: index == lastNonEmpty)
+  }
+  return masked.joined(separator: "/")
 }
 
-private func maskBareXtream(_ segments: inout [String]) {
-  let named = segments.indices.filter { !segments[$0].isEmpty }
-  guard named.count >= 3, let lastIndex = named.last, isBareXtreamId(segments[lastIndex]) else {
-    return
+private func maskSegment(_ segment: String, isLastNonEmpty: Bool) -> String {
+  guard !segment.isEmpty else { return "" }
+  guard isLastNonEmpty else { return mask }
+  let base = substringBefore(segment, delimiter: ";")
+  guard !base.isEmpty, let dot = base.lastIndex(of: "."), dot > base.startIndex else {
+    return mask
   }
-  segments[named[named.count - 2]] = mask
-  segments[named[named.count - 3]] = mask
-}
-
-private func isBareXtreamId(_ segment: String) -> Bool {
-  guard !segment.isEmpty else { return false }
-  let parts = segment.split(separator: ".", omittingEmptySubsequences: false)
-  guard parts.count == 1 || parts.count == 2 else { return false }
-  let digits = parts[0]
-  guard !digits.isEmpty && digits.allSatisfy({ $0.isASCII && $0.isNumber }) else { return false }
-  if parts.count == 2 {
-    let ext = parts[1]
-    guard !ext.isEmpty && ext.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) else {
-      return false
-    }
-  }
-  return true
+  let ext = String(base[dot...])
+  return safeExtensions.contains(ext.lowercased()) ? "\(mask)\(ext)" : mask
 }

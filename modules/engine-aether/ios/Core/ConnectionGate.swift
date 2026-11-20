@@ -18,6 +18,7 @@ public final class ConnectionGate: @unchecked Sendable {
     let acquiresSlot: Bool
     let forceClose: @Sendable () -> Void
     let continuation: CheckedContinuation<WaitOutcome, Never>
+    let timeoutTask: Task<Void, Never>
   }
 
   private let lock = NSLock()
@@ -90,11 +91,21 @@ public final class ConnectionGate: @unchecked Sendable {
             immediate = .acquired
             return
           }
+          let timeoutTask = Task.detached { [weak self] in
+            do {
+              try await Task.sleep(nanoseconds: timeoutNs)
+            } catch {
+              return
+            }
+            guard !Task.isCancelled else { return }
+            self?.handleTimeout(waiterId: id)
+          }
           waiters[id] = Waiter(
             generation: generation,
             acquiresSlot: acquiresSlot,
             forceClose: forceClose,
-            continuation: continuation
+            continuation: continuation,
+            timeoutTask: timeoutTask
           )
         }
 
@@ -104,12 +115,6 @@ public final class ConnectionGate: @unchecked Sendable {
 
         if let immediate {
           continuation.resume(returning: immediate)
-          return
-        }
-
-        Task.detached { [weak self] in
-          try? await Task.sleep(nanoseconds: timeoutNs)
-          self?.handleTimeout(waiterId: id)
         }
       }
     } onCancel: {
@@ -176,6 +181,7 @@ public final class ConnectionGate: @unchecked Sendable {
 
     lock.withLock {
       guard let waiter = waiters.removeValue(forKey: waiterId) else { return }
+      waiter.timeoutTask.cancel()
       if waiter.generation < currentGeneration {
         resumed = (waiter.continuation, .superseded)
         return
@@ -203,10 +209,11 @@ public final class ConnectionGate: @unchecked Sendable {
   }
 
   private func cancelWaiter(waiterId: UUID) {
-    let continuation: CheckedContinuation<WaitOutcome, Never>? = lock.withLock {
-      waiters.removeValue(forKey: waiterId)?.continuation
+    let removed: Waiter? = lock.withLock {
+      waiters.removeValue(forKey: waiterId)
     }
-    continuation?.resume(returning: .superseded)
+    removed?.timeoutTask.cancel()
+    removed?.continuation.resume(returning: .superseded)
   }
 
   private func hasOpenOlderThanLocked(_ generation: Int) -> Bool {
@@ -239,7 +246,11 @@ public final class ConnectionGate: @unchecked Sendable {
     let staleIds = waiters.compactMap { id, waiter in
       waiter.generation < currentGeneration ? id : nil
     }
-    return staleIds.compactMap { waiters.removeValue(forKey: $0)?.continuation }
+    return staleIds.compactMap { id in
+      guard let waiter = waiters.removeValue(forKey: id) else { return nil }
+      waiter.timeoutTask.cancel()
+      return waiter.continuation
+    }
   }
 
   private func wakeEligibleWaitersLocked() -> [(CheckedContinuation<WaitOutcome, Never>, WaitOutcome)] {
@@ -249,9 +260,11 @@ public final class ConnectionGate: @unchecked Sendable {
       guard let waiter = waiters[id] else { continue }
       if waiter.generation < currentGeneration {
         waiters.removeValue(forKey: id)
+        waiter.timeoutTask.cancel()
         results.append((waiter.continuation, .superseded))
       } else if !hasOpenOlderThanLocked(waiter.generation) {
         waiters.removeValue(forKey: id)
+        waiter.timeoutTask.cancel()
         if waiter.acquiresSlot {
           recordOpenLocked(generation: waiter.generation, forceClose: waiter.forceClose)
         }

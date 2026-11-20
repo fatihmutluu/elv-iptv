@@ -15,13 +15,13 @@ let package = Package(
     .target(
       name: "ElvAetherCore",
       path: "Core",
-      swiftSettings: [.swiftLanguageMode(.v5)]
+      swiftSettings: [.swiftLanguageMode(.v6)]
     ),
     .testTarget(
       name: "ElvAetherCoreTests",
       dependencies: ["ElvAetherCore"],
       path: "CoreTests",
-      swiftSettings: [.swiftLanguageMode(.v5)]
+      swiftSettings: [.swiftLanguageMode(.v6)]
     ),
   ]
 )

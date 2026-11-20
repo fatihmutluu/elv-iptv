@@ -13,13 +13,14 @@ struct StreamHttpTests {
       "Authorization": "Bearer secret-token",
       "Cookie": "sid=secret-cookie",
       "Proxy-Authorization": "Basic c2VjcmV0",
+      "X-Api-Key": "secret-key",
       "User-Agent": "Provider/1.0",
     ]
     let sanitized = sanitizeHeaders(headers, for: sameDefaultPort, origin: origin)
     #expect(sanitized == headers)
   }
 
-  @Test("strips Authorization, Cookie and Proxy-Authorization on cross-host or port redirects")
+  @Test("strips sensitive headers on cross-host or port redirects")
   func stripsCrossHostAndPort() throws {
     let originUrl = try #require(URL(string: "http://127.0.0.1:8080/live/demo/demo/1001.ts"))
     let origin = try #require(StreamOrigin(url: originUrl))
@@ -27,6 +28,7 @@ struct StreamHttpTests {
       "authorization": "Bearer secret-token",
       "Cookie": "sid=secret-cookie",
       "Proxy-Authorization": "Basic c2VjcmV0",
+      "X-Auth-Token": "tok-123",
       "User-Agent": "Provider/1.0",
       "Referer": "http://panel.example/",
     ]
@@ -50,12 +52,34 @@ struct StreamHttpTests {
     redirect.setValue("Bearer secret", forHTTPHeaderField: "Authorization")
     redirect.setValue("sid=1", forHTTPHeaderField: "Cookie")
     redirect.setValue("Basic xyz", forHTTPHeaderField: "Proxy-Authorization")
+    redirect.setValue("secret", forHTTPHeaderField: "X-Api-Key")
     redirect.setValue("Provider/1.0", forHTTPHeaderField: "User-Agent")
 
     let cleaned = sanitizeRedirectRequest(redirect, origin: origin)
     #expect(cleaned.value(forHTTPHeaderField: "Authorization") == nil)
     #expect(cleaned.value(forHTTPHeaderField: "Cookie") == nil)
     #expect(cleaned.value(forHTTPHeaderField: "Proxy-Authorization") == nil)
+    #expect(cleaned.value(forHTTPHeaderField: "X-Api-Key") == nil)
     #expect(cleaned.value(forHTTPHeaderField: "User-Agent") == "Provider/1.0")
+  }
+
+  @Test("sanitizeRequestHeaders strips CRLF/NUL control chars and drops invalid or empty header names")
+  func stripsControlCharsAndInvalidHeaderNames() {
+    let raw: [String: String] = [
+      "User-Agent": "Player/1.0\r\nX-Injected: evil\0",
+      "  Referer  ": "  http://panel.example/live\n  ",
+      "": "ignored",
+      "Bad Name": "ignored",
+      "Bad:Name": "ignored",
+      "Header\r\nInject": "ignored",
+      "Empty-After-Clean": "\r\n\0   ",
+    ]
+    let cleaned = sanitizeRequestHeaders(raw)
+    #expect(
+      cleaned == [
+        "User-Agent": "Player/1.0X-Injected: evil",
+        "Referer": "http://panel.example/live",
+      ]
+    )
   }
 }

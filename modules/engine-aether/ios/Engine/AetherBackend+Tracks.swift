@@ -16,20 +16,12 @@ extension AetherBackend {
       target.$subtitleTracks,
       trackSelectionPub
     )
-    .sink { [weak self, weak target] audioTracks, subtitleTracks, selection in
-      MainActor.assumeIsolated {
+    .sink { [weak self, weak target] _, _, _ in
+      Self.onMainActor {
         guard let self, let target, self.engineLoadSerial > 0 else { return }
-        let (activeAudioIndex, isSubActive, activeSubIndex) = selection
-        let isReady = target.startupProgress?.checkpoint == .ready || target.playbackPhase == .playing
-        guard !audioTracks.isEmpty || !subtitleTracks.isEmpty || isReady else { return }
-        self.emitTracksObservation(
-          audioTracks: audioTracks,
-          subtitleTracks: subtitleTracks,
-          activeAudioIndex: activeAudioIndex,
-          isSubtitleActive: isSubActive,
-          activeSubtitleIndex: activeSubIndex,
-          serial: self.engineLoadSerial
-        )
+        let serial = self.engineLoadSerial
+        guard self.readySerial == serial || target.playbackPhase == .playing else { return }
+        self.scheduleTracksSnapshot(from: target, serial: serial)
       }
     }
     .store(in: &cancellables)
@@ -46,7 +38,7 @@ extension AetherBackend {
       subRenderStatePub
     )
     .sink { [weak self, weak target] cues, sourceTime, state in
-      MainActor.assumeIsolated {
+      Self.onMainActor {
         guard let self, let target else { return }
         let (followsPicture, isSubActive, softwareSize) = state
         guard self.engineLoadSerial > 0, isSubActive, followsPicture, !cues.isEmpty else {
@@ -69,40 +61,64 @@ extension AetherBackend {
     .store(in: &cancellables)
   }
 
-  func emitCurrentTracksSnapshot(from target: AetherEngine, serial: Int) {
-    emitTracksObservation(
-      audioTracks: target.audioTracks,
-      subtitleTracks: target.subtitleTracks,
-      activeAudioIndex: target.activeAudioTrackIndex,
-      isSubtitleActive: target.isSubtitleActive,
-      activeSubtitleIndex: target.activeSubtitleTrackIndex,
-      serial: serial
-    )
+  /// Coalesces `@Published` `willSet` track signals onto the next `@MainActor` turn so `target`'s properties
+  /// are settled before reading snapshots or issuing non-re-entrant track switch commands.
+  func scheduleTracksSnapshot(from target: AetherEngine, serial: Int) {
+    guard pendingTracksSerial != serial else { return }
+    pendingTracksSerial = serial
+    DispatchQueue.main.async { [weak self, weak target] in
+      MainActor.assumeIsolated {
+        guard let self, let target, self.engineLoadSerial == serial else { return }
+        self.pendingTracksSerial = 0
+        let isReady = self.readySerial == serial
+          || target.startupProgress?.checkpoint == .ready
+          || target.playbackPhase == .playing
+        guard isReady else { return }
+        self.tracksEmittedSerial = serial
+        self.emitTracksObservation(
+          audioTracks: target.audioTracks,
+          subtitleTracks: target.subtitleTracks,
+          activeAudioIndex: target.activeAudioTrackIndex,
+          isSubtitleActive: target.isSubtitleActive,
+          activeSubtitleIndex: target.activeSubtitleTrackIndex,
+          serial: serial
+        )
+      }
+    }
   }
 
   func selectAudioTrack(_ streamId: Int) {
     currentLoadOptions?.audioStreamIndex = Int32(exactly: streamId)
+    let previousDesired = desiredAudioStreamId
+    desiredAudioStreamId = streamId
     guard let engine, activeLoadSerial > 0 else { return }
-    if engine.activeAudioTrackIndex == streamId, audioSwitchTask == nil {
+
+    if engine.activeAudioTrackIndex == streamId,
+       (previousDesired == nil || previousDesired == streamId),
+       audioSwitchTask == nil,
+       currentPlan?.isLiveTs != true
+    {
       return
     }
+
     if case let .liveTs(url) = currentPlan, let opts = currentLoadOptions {
-      reloadLiveTsWithAudioOverride(url: url, options: opts, streamId: streamId, serial: activeLoadSerial)
+      reloadLiveTsWithAudioOverride(url: url, options: opts, serial: activeLoadSerial)
       return
     }
+
     let serial = engineLoadSerial
     guard serial > 0 else { return }
     audioSwitchTask?.cancel()
     if let pendingSeek = seekTask {
       audioSwitchTask = Task { @MainActor [weak self] in
         await pendingSeek.value
-        guard let self, !Task.isCancelled, self.engineLoadSerial == serial, let currentEngine = self.engine else {
+        guard let self, !Task.isCancelled, self.engineLoadSerial == serial,
+              let currentEngine = self.engine, let targetStream = self.desiredAudioStreamId
+        else {
           return
         }
         self.audioSwitchTask = nil
-        if currentEngine.activeAudioTrackIndex != streamId {
-          currentEngine.selectAudioTrack(index: streamId)
-        }
+        currentEngine.selectAudioTrack(index: targetStream)
       }
     } else {
       audioSwitchTask = nil
@@ -111,6 +127,8 @@ extension AetherBackend {
   }
 
   func selectSubtitleTrack(_ streamId: Int?) {
+    let previousDesired = desiredSubtitleStreamId
+    desiredSubtitleStreamId = streamId
     currentLoadOptions?.initialSubtitleTrackId = streamId
     currentLoadOptions?.subtitlesDisabled = (streamId == nil)
     guard let streamId else {
@@ -119,9 +137,13 @@ extension AetherBackend {
       return
     }
     guard let engine, engineLoadSerial > 0 else { return }
-    if engine.isSubtitleActive && engine.activeSubtitleTrackIndex == streamId {
+    if engine.isSubtitleActive,
+       engine.activeSubtitleTrackIndex == streamId,
+       (previousDesired == nil || previousDesired == streamId)
+    {
       return
     }
+    publishSubtitlePresentation(.empty)
     engine.selectSubtitleTrack(index: streamId)
   }
 
@@ -135,6 +157,15 @@ extension AetherBackend {
     guard !lastSubtitlePresentation.cues.isEmpty else { return }
     var updated = lastSubtitlePresentation
     updated.gravity = gravity
+    publishSubtitlePresentation(updated)
+  }
+
+  func refreshSubtitleGeometry(from target: AetherEngine?) {
+    guard let target, !lastSubtitlePresentation.cues.isEmpty else { return }
+    let resolved = Self.resolveVideoSize(from: target, softwareSize: target.softwareDisplaySize)
+    guard resolved != .zero, resolved != lastSubtitlePresentation.videoSize else { return }
+    var updated = lastSubtitlePresentation
+    updated.videoSize = resolved
     publishSubtitlePresentation(updated)
   }
 
@@ -167,9 +198,16 @@ extension AetherBackend {
     if let softwareSize, softwareSize.width > 0, softwareSize.height > 0 {
       return softwareSize
     }
+    if let itemSize = target.currentAVPlayerItem?.presentationSize,
+       itemSize.width > 0,
+       itemSize.height > 0
+    {
+      return itemSize
+    }
     if let itemSize = target.nativePlayerLayer?.player?.currentItem?.presentationSize,
        itemSize.width > 0,
-       itemSize.height > 0 {
+       itemSize.height > 0
+    {
       return itemSize
     }
     if let rect = target.nativePlayerLayer?.videoRect, rect.width > 0, rect.height > 0 {
@@ -196,86 +234,16 @@ extension AetherBackend {
   private func reloadLiveTsWithAudioOverride(
     url: URL,
     options: EngineLoadOptions,
-    streamId: Int,
     serial: Int
   ) {
     guard let currentEngine = engine else { return }
     engineLoadSerial = 0
+    readySerial = 0
+    tracksEmittedSerial = 0
+    pendingTracksSerial = 0
     cancelTasksAndReader()
+    publishSubtitlePresentation(.empty)
     currentEngine.stop(resetDisplayCriteria: false, finalTeardown: false)
-    gateGeneration += 1
-    let generation = gateGeneration
-    gate.advance(to: generation)
-    let loadOpts = aetherOptions(options)
-    let audioStream = Int32(exactly: streamId)
-
-    loadTask = Task { @MainActor [weak self] in
-      guard let self, self.activeLoadSerial == serial, !Task.isCancelled else { return }
-      let session = self.httpSession
-      let reader = LiveTsReader(
-        url: url,
-        headers: options.httpHeaders,
-        generation: generation,
-        gate: self.gate,
-        makeTransport: { URLSessionTransport(session: session) }
-      )
-      self.currentReader = reader
-      let verdict = await reader.open()
-      guard self.activeLoadSerial == serial, !Task.isCancelled else {
-        reader.close()
-        if self.currentReader === reader { self.currentReader = nil }
-        return
-      }
-      do {
-        switch verdict {
-        case let .media(hint):
-          self.engineLoadSerial = serial
-          _ = try await currentEngine.load(
-            source: .custom(reader, formatHint: hint),
-            options: loadOpts,
-            audioSourceStreamIndex: audioStream
-          )
-        case .playlist:
-          reader.close()
-          if self.currentReader === reader { self.currentReader = nil }
-          self.gateGeneration += 1
-          let playlistGen = self.gateGeneration
-          self.gate.advance(to: playlistGen)
-          guard await self.gate.waitForClosed(before: playlistGen),
-                self.activeLoadSerial == serial,
-                !Task.isCancelled
-          else { return }
-          var hlsOpts = options
-          hlsOpts.isLive = true
-          self.currentPlan = .hls(url, live: true)
-          self.engineLoadSerial = serial
-          _ = try await currentEngine.load(
-            url: url,
-            options: aetherOptions(hlsOpts),
-            audioSourceStreamIndex: audioStream
-          )
-        case let .failed(rf):
-          reader.close()
-          if self.currentReader === reader { self.currentReader = nil }
-          guard self.errorReportedSerial != serial else { return }
-          self.errorReportedSerial = serial
-          self.onObservation?(.failure(.reader(rf)), serial)
-        case .superseded:
-          reader.close()
-          if self.currentReader === reader { self.currentReader = nil }
-        }
-      } catch is CancellationError {
-        return
-      } catch {
-        guard self.activeLoadSerial == serial, self.errorReportedSerial != serial else { return }
-        self.errorReportedSerial = serial
-        self.forwardReaderFaultIfPresent(serial: serial)
-        let nsError = error as NSError
-        self.onObservation?(
-          .failure(.engine(kind: "sourceOpenFailed", underlyingDomain: nsError.domain, underlyingCode: nsError.code)),
-          serial
-        )
-      }
-    }
+    runMediaLoad(plan: .liveTs(url), fallbackOptions: options, serial: serial, currentEngine: currentEngine)
   }
 }

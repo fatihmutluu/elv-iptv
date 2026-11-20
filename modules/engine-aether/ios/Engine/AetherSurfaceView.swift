@@ -3,6 +3,43 @@ import AVFoundation
 import ExpoModulesCore
 import UIKit
 
+/// Thread-safe cleanup state enabling synchronous `@MainActor` `deinit` teardown without capturing `UIView` across actors.
+private final class SurfaceCleanupState: @unchecked Sendable {
+  private let lock = NSLock()
+  private var tokens: [NSObjectProtocol] = []
+  private weak var engine: EngineObject?
+  private var ownerId: ObjectIdentifier?
+  private var playerViewId: ObjectIdentifier?
+
+  func setTokens(_ next: [NSObjectProtocol]) {
+    lock.withLock { tokens = next }
+  }
+
+  func updateBinding(engine: EngineObject?, ownerId: ObjectIdentifier?, playerViewId: ObjectIdentifier) {
+    lock.withLock {
+      self.engine = engine
+      self.ownerId = ownerId
+      self.playerViewId = (engine == nil) ? nil : playerViewId
+    }
+  }
+
+  func takeForDeinit() -> (
+    tokens: [NSObjectProtocol],
+    engine: EngineObject?,
+    ownerId: ObjectIdentifier?,
+    playerViewId: ObjectIdentifier?
+  ) {
+    lock.withLock {
+      let snapshot = (tokens, engine, ownerId, playerViewId)
+      tokens = []
+      engine = nil
+      ownerId = nil
+      playerViewId = nil
+      return snapshot
+    }
+  }
+}
+
 /// Unfocusable, non-interactive `UIView` painting the black zap shutter above `AetherPlayerView`.
 private final class ShutterOverlayView: UIView {
   override init(frame: CGRect) {
@@ -27,13 +64,13 @@ final class AetherSurfaceView: ExpoView {
   let playerView = AetherPlayerView(frame: .zero)
   private let subtitleOverlayView = AetherSubtitleOverlayView(frame: .zero)
   private let shutterView = ShutterOverlayView(frame: .zero)
+  private let cleanupState = SurfaceCleanupState()
 
   private weak var boundEngine: EngineObject?
   private var boundOwnerId: ObjectIdentifier?
   private var appInBackground = false
   private var wantsScreenOn = false
   private(set) var currentVideoGravity: AVLayerVideoGravity = .resizeAspect
-  private var notificationTokens: [NSObjectProtocol] = []
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -44,23 +81,20 @@ final class AetherSurfaceView: ExpoView {
   }
 
   deinit {
-    let tokens = notificationTokens
-    for token in tokens {
+    let snapshot = cleanupState.takeForDeinit()
+    for token in snapshot.tokens {
       NotificationCenter.default.removeObserver(token)
     }
-    let engine = boundEngine
-    let ownerId = boundOwnerId
-    let view = playerView
-    if engine != nil || ownerId != nil {
-      DispatchQueue.main.async {
-        MainActor.assumeIsolated {
-          if let ownerId {
-            IdleTimer.setHeld(false, ownerId: ownerId)
-          }
-          engine?.withDriver { driver in
-            driver.detachDestroyedPlayerView(view)
-          }
-        }
+    guard snapshot.engine != nil || snapshot.ownerId != nil else { return }
+    let ownerId = snapshot.ownerId
+    let viewId = snapshot.playerViewId
+    let engine = snapshot.engine
+    AetherBackend.onMainActor { [weak engine] in
+      if let ownerId {
+        IdleTimer.setHeld(false, ownerId: ownerId)
+      }
+      if let viewId {
+        engine?.detachDestroyedPlayerViewIfLoaded(viewId: viewId)
       }
     }
   }
@@ -81,6 +115,14 @@ final class AetherSurfaceView: ExpoView {
     MainActor.assumeIsolated {
       refreshIdleTimer()
       notifySurfaceAvailability()
+    }
+  }
+
+  override func prepareForRecycle() {
+    super.prepareForRecycle()
+    MainActor.assumeIsolated {
+      bind(nil)
+      setResizeMode("fit")
     }
   }
 
@@ -106,6 +148,11 @@ final class AetherSurfaceView: ExpoView {
     }
     boundEngine = engine
     boundOwnerId = engine.map(ObjectIdentifier.init)
+    cleanupState.updateBinding(
+      engine: engine,
+      ownerId: boundOwnerId,
+      playerViewId: ObjectIdentifier(playerView)
+    )
     if let engine {
       engine.withDriver { driver in
         driver.bindSurface(self)
@@ -159,6 +206,7 @@ final class AetherSurfaceView: ExpoView {
       boundOwnerId = nil
       IdleTimer.setHeld(false, ownerId: prevId)
     }
+    cleanupState.updateBinding(engine: nil, ownerId: nil, playerViewId: ObjectIdentifier(playerView))
   }
 
   @MainActor
@@ -188,7 +236,7 @@ final class AetherSurfaceView: ExpoView {
       object: nil,
       queue: nil
     ) { [weak self] _ in
-      MainActor.assumeIsolated {
+      AetherBackend.onMainActor {
         guard let self else { return }
         self.appInBackground = true
         self.refreshIdleTimer()
@@ -201,7 +249,7 @@ final class AetherSurfaceView: ExpoView {
       object: nil,
       queue: nil
     ) { [weak self] _ in
-      MainActor.assumeIsolated {
+      AetherBackend.onMainActor {
         guard let self else { return }
         self.appInBackground = false
         self.refreshIdleTimer()
@@ -214,7 +262,7 @@ final class AetherSurfaceView: ExpoView {
       object: nil,
       queue: nil
     ) { [weak self] _ in
-      MainActor.assumeIsolated {
+      AetherBackend.onMainActor {
         guard let self, self.appInBackground else { return }
         self.appInBackground = false
         self.refreshIdleTimer()
@@ -222,7 +270,7 @@ final class AetherSurfaceView: ExpoView {
       }
     }
 
-    notificationTokens = [backgroundToken, foregroundToken, activeToken]
+    cleanupState.setTokens([backgroundToken, foregroundToken, activeToken])
   }
 
   @MainActor

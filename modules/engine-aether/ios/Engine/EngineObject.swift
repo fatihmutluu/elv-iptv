@@ -1,127 +1,17 @@
-import AetherEngine
-import AVFoundation
 import ExpoModulesCore
 import Foundation
 
-/// Main-actor coordinator connecting `EngineCore`, `AetherBackend`, and the bound `AetherSurfaceView`.
-@MainActor
-final class EngineMainDriver: EngineSink {
-  private weak var owner: EngineObject?
-  private let ownerId: ObjectIdentifier
-  let backend: AetherBackend
-  private(set) var core: EngineCore!
-  weak var boundSurface: AetherSurfaceView?
-  var activeEpoch = 0
-
-  init(owner: EngineObject, gate: ConnectionGate, httpSession: EngineHttpSession) {
-    self.owner = owner
-    self.ownerId = ObjectIdentifier(owner)
-    self.backend = AetherBackend(gate: gate, httpSession: httpSession)
-    self.core = EngineCore(
-      backend: backend,
-      sink: self,
-      uptimeMs: { ProcessInfo.processInfo.systemUptime * 1_000.0 }
-    )
-    self.backend.onObservation = { [weak self] observation, serial in
-      self?.core.observe(observation, serial: serial)
-    }
-    self.backend.onSubtitlePresentation = { [weak self] presentation in
-      guard let self else { return }
-      self.boundSurface?.applySubtitles(presentation, from: self.owner)
-    }
-  }
-
-  func send(_ event: EngineEventOut) {
-    owner?.deliverToJavaScript(event, driverEpoch: activeEpoch)
-  }
-
-  func setShutter(covered: Bool) {
-    boundSurface?.applyShutter(covered: covered, from: owner)
-  }
-
-  func clearSubtitles() {
-    boundSurface?.applySubtitles(.empty, from: owner)
-  }
-
-  func setKeepScreenOn(_ on: Bool) {
-    if let surface = boundSurface {
-      surface.applyScreenOn(on, from: owner)
-    }
-    if !on {
-      IdleTimer.setHeld(false, ownerId: ownerId)
-    }
-  }
-
-  func bindSurface(_ view: AetherSurfaceView) {
-    if let previous = boundSurface, previous !== view {
-      core.surfaceChanged(available: false)
-      previous.detachEngineReference(owner)
-    }
-    boundSurface = view
-    backend.setVideoGravity(view.currentVideoGravity)
-    backend.bindPlayerView(view.playerView)
-    let snapshot = core.viewSnapshot
-    view.applyShutter(covered: snapshot.shutterCovered, from: owner)
-    view.applySubtitles(backend.lastSubtitlePresentation, from: owner)
-    view.applyScreenOn(snapshot.screenOn, from: owner)
-    core.surfaceChanged(available: view.isSurfaceAvailable)
-  }
-
-  func unbindSurface(_ view: AetherSurfaceView) {
-    guard boundSurface === view else { return }
-    view.applySubtitles(.empty, from: owner)
-    core.surfaceChanged(available: false)
-    boundSurface = nil
-    backend.bindPlayerView(nil)
-    IdleTimer.setHeld(false, ownerId: ownerId)
-  }
-
-  func detachDestroyedPlayerView(_ view: AetherPlayerView) {
-    if boundSurface == nil {
-      core.surfaceChanged(available: false)
-      backend.unbindIfMatching(view)
-      IdleTimer.setHeld(false, ownerId: ownerId)
-    }
-  }
-
-  func surfaceAvailabilityDidChange(_ available: Bool, from view: AetherSurfaceView) {
-    guard boundSurface === view else { return }
-    core.surfaceChanged(available: available)
-  }
-
-  func updateGravity(_ gravity: AVLayerVideoGravity, from view: AetherSurfaceView) {
-    guard boundSurface === view else { return }
-    backend.setVideoGravity(gravity)
-  }
-
-  func dispose() {
-    if let previous = boundSurface {
-      previous.detachEngineReference(owner)
-      boundSurface = nil
-    }
-    core.release()
-    IdleTimer.setHeld(false, ownerId: ownerId)
-  }
-}
-
 /// Expo `SharedObject` backing one `PlayerEngine` instance (player core spec 6.2).
-final class EngineObject: SharedObject {
-  private let stateLock = NSLock()
-  private var isDisposed = false
-  private var jsEpoch = 0
-  private var jsToken = 0
+final class EngineObject: SharedObject, @unchecked Sendable {
+  private let fence = CommandFence()
   private let gate = ConnectionGate(forceCloseAfterMs: 1_000, settleAfterCloseMs: 25)
   private let httpSession = EngineHttpSession()
-  private let onDisposed: (EngineObject) -> Void
-  private var driver: EngineMainDriver?
+  private let onDisposed: @Sendable (EngineObject) -> Void
+  @MainActor private var driver: EngineMainDriver?
 
-  init(onDisposed: @escaping (EngineObject) -> Void = { _ in }) {
+  init(onDisposed: @escaping @Sendable (EngineObject) -> Void = { _ in }) {
     self.onDisposed = onDisposed
     super.init()
-    enqueueMain { [weak self] in
-      guard let self, !self.readDisposed() else { return }
-      self.driver = EngineMainDriver(owner: self, gate: self.gate, httpSession: self.httpSession)
-    }
   }
 
   override func sharedObjectDidRelease() {
@@ -130,89 +20,98 @@ final class EngineObject: SharedObject {
   }
 
   func load(_ request: LoadRequest, attempt: Int) {
-    guard let epoch = advanceMediaEpoch(settingToken: attempt) else { return }
+    guard let epoch = fence.recordLoad(attempt: attempt) else { return }
     enqueueMain { [weak self] in
-      guard let self, let driver = self.ensureDriver(), self.currentEpoch() == epoch else { return }
-      driver.activeEpoch = epoch
+      guard let self,
+            case let .run(activeEpoch, rebuildFirst) = self.fence.beginMedia(epoch: epoch),
+            let driver = self.ensureDriver()
+      else { return }
+      driver.activeEpoch = activeEpoch
+      if rebuildFirst, !driver.core.recreate(attempt) {
+        return
+      }
       driver.core.load(request, attempt: attempt)
     }
   }
 
   func retry(_ attempt: Int) {
-    guard let epoch = advanceMediaEpoch(adoptingToken: attempt) else { return }
+    guard let epoch = fence.recordRetry(attempt: attempt) else { return }
     enqueueMain { [weak self] in
-      guard let self, let driver = self.ensureDriver(), self.currentEpoch() == epoch else { return }
-      driver.activeEpoch = epoch
+      guard let self,
+            case let .run(activeEpoch, rebuildFirst) = self.fence.beginMedia(epoch: epoch),
+            let driver = self.driver
+      else { return }
+      driver.activeEpoch = activeEpoch
+      if rebuildFirst, !driver.core.recreate(attempt) {
+        return
+      }
       driver.core.retry(attempt)
     }
   }
 
   func play(_ attempt: Int) {
-    guard let epoch = adoptTokenInCurrentEpoch(attempt) else { return }
+    guard let epoch = fence.recordInEpochCommand(attempt: attempt) else { return }
     enqueueMain { [weak self] in
-      guard let self, let driver = self.ensureDriver(), self.currentEpoch() == epoch else { return }
+      guard let self, self.fence.beginInEpoch(epoch: epoch), let driver = self.driver else { return }
       driver.core.play(attempt)
     }
   }
 
   func pause(_ attempt: Int) {
-    guard let epoch = adoptTokenInCurrentEpoch(attempt) else { return }
+    guard let epoch = fence.recordInEpochCommand(attempt: attempt) else { return }
     enqueueMain { [weak self] in
-      guard let self, let driver = self.ensureDriver(), self.currentEpoch() == epoch else { return }
+      guard let self, self.fence.beginInEpoch(epoch: epoch), let driver = self.driver else { return }
       driver.core.pause(attempt)
     }
   }
 
   func seek(_ attempt: Int, positionMs: Double) {
-    guard let epoch = adoptTokenInCurrentEpoch(attempt) else { return }
+    guard let epoch = fence.recordInEpochCommand(attempt: attempt) else { return }
     enqueueMain { [weak self] in
-      guard let self, let driver = self.ensureDriver(), self.currentEpoch() == epoch else { return }
+      guard let self, self.fence.beginInEpoch(epoch: epoch), let driver = self.driver else { return }
       driver.core.seek(attempt, positionMs: positionMs)
     }
   }
 
   func selectAudioTrack(_ attempt: Int, id: String) {
-    guard let epoch = adoptTokenInCurrentEpoch(attempt) else { return }
+    guard let epoch = fence.recordInEpochCommand(attempt: attempt) else { return }
     enqueueMain { [weak self] in
-      guard let self, let driver = self.ensureDriver(), self.currentEpoch() == epoch else { return }
+      guard let self, self.fence.beginInEpoch(epoch: epoch), let driver = self.ensureDriver() else { return }
       driver.core.selectAudioTrack(attempt, id: id)
     }
   }
 
   func selectSubtitleTrack(_ attempt: Int, id: String?) {
-    guard let epoch = adoptTokenInCurrentEpoch(attempt) else { return }
+    guard let epoch = fence.recordInEpochCommand(attempt: attempt) else { return }
     enqueueMain { [weak self] in
-      guard let self, let driver = self.ensureDriver(), self.currentEpoch() == epoch else { return }
+      guard let self, self.fence.beginInEpoch(epoch: epoch), let driver = self.ensureDriver() else { return }
       driver.core.selectSubtitleTrack(attempt, id: id)
     }
   }
 
   func stop(_ attempt: Int) {
-    guard let epoch = advanceMediaEpoch(adoptingToken: attempt) else { return }
+    guard let epoch = fence.recordStop(attempt: attempt) else { return }
     enqueueMain { [weak self] in
-      guard let self, !self.readDisposed(), let driver = self.ensureDriver() else { return }
+      guard let self, self.fence.canRunStop(), let driver = self.driver else { return }
       driver.activeEpoch = max(driver.activeEpoch, epoch)
       driver.core.stop(attempt)
     }
   }
 
   func recreate(_ attempt: Int) {
-    guard let epoch = advanceMediaEpoch(adoptingToken: attempt) else { return }
+    guard let epoch = fence.recordRecreate(attempt: attempt) else { return }
     enqueueMain { [weak self] in
-      guard let self, let driver = self.ensureDriver(), self.currentEpoch() == epoch else { return }
-      driver.activeEpoch = epoch
-      driver.core.recreate(attempt)
+      guard let self,
+            case let .run(activeEpoch) = self.fence.beginRecreate(epoch: epoch),
+            let driver = self.ensureDriver()
+      else { return }
+      driver.activeEpoch = activeEpoch
+      _ = driver.core.recreate(attempt)
     }
   }
 
   func dispose() {
-    let shouldDispose: Bool = stateLock.withLock {
-      if isDisposed { return false }
-      isDisposed = true
-      jsEpoch += 1
-      return true
-    }
-    guard shouldDispose else { return }
+    guard fence.markDisposed() else { return }
     httpSession.dispose()
     onDisposed(self)
     enqueueMain {
@@ -223,37 +122,25 @@ final class EngineObject: SharedObject {
 
   @MainActor
   func withDriver(_ body: (EngineMainDriver) -> Void) {
-    guard !readDisposed(), let driver = ensureDriver() else { return }
+    guard !fence.isDisposedNow, let driver = ensureDriver() else { return }
     body(driver)
   }
 
   @MainActor
-  fileprivate func deliverToJavaScript(_ event: EngineEventOut, driverEpoch: Int) {
-    let snapshot: (disposed: Bool, epoch: Int, token: Int) = stateLock.withLock {
-      (isDisposed, jsEpoch, jsToken)
-    }
-    guard !snapshot.disposed else { return }
+  func detachDestroyedPlayerViewIfLoaded(viewId: ObjectIdentifier) {
+    guard !fence.isDisposedNow, let driver else { return }
+    driver.detachDestroyedPlayerView(viewId: viewId)
+  }
 
-    switch event {
-    case let .surface(_, change):
-      emit(
-        event: "onEngineEvent",
-        payload: EngineEventOut.surface(attempt: snapshot.token, change: change).payload
-      )
-    case let .state(attempt, _),
-      let .firstFrame(attempt, _),
-      let .clock(attempt, _),
-      let .stall(attempt, _, _),
-      let .tracks(attempt, _),
-      let .error(attempt, _):
-      guard driverEpoch == snapshot.epoch, attempt == snapshot.token else { return }
-      emit(event: "onEngineEvent", payload: event.payload)
-    }
+  @MainActor
+  func deliverToJavaScript(_ event: EngineEventOut, driverEpoch: Int) {
+    guard let filtered = fence.filterOutbound(event, driverEpoch: driverEpoch) else { return }
+    emit(event: "onEngineEvent", payload: filtered.payload)
   }
 
   @MainActor
   private func ensureDriver() -> EngineMainDriver? {
-    guard !readDisposed() else { return nil }
+    guard !fence.isDisposedNow else { return nil }
     if let driver {
       return driver
     }
@@ -262,41 +149,7 @@ final class EngineObject: SharedObject {
     return created
   }
 
-  private func advanceMediaEpoch(settingToken token: Int) -> Int? {
-    stateLock.withLock {
-      guard !isDisposed else { return nil }
-      jsEpoch += 1
-      jsToken = token
-      return jsEpoch
-    }
-  }
-
-  private func advanceMediaEpoch(adoptingToken token: Int) -> Int? {
-    stateLock.withLock {
-      guard !isDisposed else { return nil }
-      jsEpoch += 1
-      if token > jsToken { jsToken = token }
-      return jsEpoch
-    }
-  }
-
-  private func adoptTokenInCurrentEpoch(_ token: Int) -> Int? {
-    stateLock.withLock {
-      guard !isDisposed else { return nil }
-      if token > jsToken { jsToken = token }
-      return jsEpoch
-    }
-  }
-
-  private func currentEpoch() -> Int {
-    stateLock.withLock { jsEpoch }
-  }
-
-  private func readDisposed() -> Bool {
-    stateLock.withLock { isDisposed }
-  }
-
-  private func enqueueMain(_ block: @escaping @MainActor () -> Void) {
+  private func enqueueMain(_ block: @escaping @MainActor @Sendable () -> Void) {
     DispatchQueue.main.async {
       MainActor.assumeIsolated {
         block()

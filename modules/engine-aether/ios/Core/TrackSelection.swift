@@ -49,24 +49,14 @@ public struct TrackInfoOut: Equatable, Sendable {
 
 /// Available audio and subtitle tracks and active selection IDs emitted on `onEngineEvent`.
 public struct MediaTracksOut: Equatable, Sendable {
-  public static let empty = MediaTracksOut(
-    audio: [],
-    subtitles: [],
-    selectedAudioId: nil,
-    selectedSubtitleId: nil
-  )
+  public static let empty = MediaTracksOut(audio: [], subtitles: [], selectedAudioId: nil, selectedSubtitleId: nil)
 
   public var audio: [TrackInfoOut]
   public var subtitles: [TrackInfoOut]
   public var selectedAudioId: String?
   public var selectedSubtitleId: String?
 
-  public init(
-    audio: [TrackInfoOut],
-    subtitles: [TrackInfoOut],
-    selectedAudioId: String?,
-    selectedSubtitleId: String?
-  ) {
+  public init(audio: [TrackInfoOut], subtitles: [TrackInfoOut], selectedAudioId: String?, selectedSubtitleId: String?) {
     self.audio = audio
     self.subtitles = subtitles
     self.selectedAudioId = selectedAudioId
@@ -83,82 +73,7 @@ public struct MediaTracksOut: Equatable, Sendable {
   }
 }
 
-/// Formats an `AetherEngine` audio track `id` into a stable `"a:<id>"` identifier.
-public func formatAudioTrackId(_ streamId: Int) -> String {
-  "a:\(streamId)"
-}
-
-/// Formats an `AetherEngine` subtitle track `id` into a stable `"s:<id>"` identifier.
-public func formatSubtitleTrackId(_ streamId: Int) -> String {
-  "s:\(streamId)"
-}
-
-/// Parses an `"a:<id>"` (or numeric) audio track identifier back to its integer stream ID.
-public func parseAudioTrackStreamId(_ id: String) -> Int? {
-  let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
-  if trimmed.hasPrefix("a:") {
-    return Int(trimmed.dropFirst(2))
-  }
-  return Int(trimmed)
-}
-
-/// Parses an `"s:<id>"` (or numeric) subtitle track identifier back to its integer stream ID.
-public func parseSubtitleTrackStreamId(_ id: String) -> Int? {
-  let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
-  if trimmed.hasPrefix("s:") {
-    return Int(trimmed.dropFirst(2))
-  }
-  return Int(trimmed)
-}
-
-/// Normalizes a container or HLS language code, dropping empty or `"und"` values.
-public func normalizeTrackLanguage(_ raw: String?) -> String? {
-  guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-        !trimmed.isEmpty,
-        trimmed != "und"
-  else {
-    return nil
-  }
-  return trimmed
-}
-
-/// Parses a flattened JS `LoadCommand` dictionary, distinguishing omitted `subtitleTrackId` from `null` Off.
-public func parseLoadRequest(_ raw: [String: Any?]) -> (attempt: Int, request: LoadRequest) {
-  let attempt = (raw["attempt"] as? Int) ?? (raw["attempt"] as? Double).map(Int.init) ?? 0
-  let url = (raw["url"] as? String) ?? ""
-  let headers = (raw["headers"] as? [String: String]) ?? [:]
-  let kind = (raw["kind"] as? String) ?? "live"
-  let startMs = (raw["startMs"] as? Double) ?? (raw["startMs"] as? Int).map(Double.init)
-  let softwareAudio = (raw["softwareAudio"] as? Bool) ?? false
-  let audioTrackId = (raw["audioTrackId"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-    .nonEmpty
-
-  let subtitlePreference: SubtitlePreference
-  if let entry = raw["subtitleTrackId"] {
-    if let unwrapped = entry, !(unwrapped is NSNull), let str = unwrapped as? String {
-      subtitlePreference = str.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty.map { .selected($0) } ?? .off
-    } else {
-      subtitlePreference = .off
-    }
-  } else {
-    subtitlePreference = .default
-  }
-
-  return (
-    attempt: attempt,
-    request: LoadRequest(
-      url: url,
-      headers: headers,
-      live: kind != "vod",
-      startMs: startMs,
-      softwareAudio: softwareAudio,
-      audioTrackId: audioTrackId,
-      subtitlePreference: subtitlePreference
-    )
-  )
-}
-
-/// Pure track-preference state machine reconciling IDs and `(language, label)` fallbacks across reloads.
+/// Pure track-preference state machine reconciling IDs and `(language, label)` fallbacks at most once per load.
 public struct TrackSelectionState: Equatable, Sendable {
   public struct Choice: Equatable, Sendable {
     public var id: String
@@ -176,13 +91,21 @@ public struct TrackSelectionState: Equatable, Sendable {
   public private(set) var subtitleChoice: SubChoice = .default
   public private(set) var latestTracks: MediaTracksOut?
   public private(set) var lastEmitted: MediaTracksOut?
+  private var audioReapplied = false
+  private var subtitleReapplied = false
+  private var subtitleOffApplied = false
 
   public init() {}
 
   public mutating func onLoad(_ request: LoadRequest) {
     latestTracks = nil
     lastEmitted = nil
-    if let wantedAudio = request.audioTrackId {
+    audioReapplied = false
+    subtitleReapplied = false
+    subtitleOffApplied = false
+
+    if let rawAudio = request.audioTrackId, let streamId = parseAudioTrackStreamId(rawAudio) {
+      let wantedAudio = formatAudioTrackId(streamId)
       if let current = audioChoice, current.id == wantedAudio {
         audioChoice = current
       } else {
@@ -197,11 +120,16 @@ public struct TrackSelectionState: Equatable, Sendable {
       subtitleChoice = .default
     case .off:
       subtitleChoice = .off
-    case let .selected(wantedSub):
-      if case let .selected(current) = subtitleChoice, current.id == wantedSub {
-        subtitleChoice = .selected(current)
+    case let .selected(rawSub):
+      if let streamId = parseSubtitleTrackStreamId(rawSub) {
+        let wantedSub = formatSubtitleTrackId(streamId)
+        if case let .selected(current) = subtitleChoice, current.id == wantedSub {
+          subtitleChoice = .selected(current)
+        } else {
+          subtitleChoice = .selected(Choice(id: wantedSub, language: nil, label: nil))
+        }
       } else {
-        subtitleChoice = .selected(Choice(id: wantedSub, language: nil, label: nil))
+        subtitleChoice = .default
       }
     }
   }
@@ -209,6 +137,9 @@ public struct TrackSelectionState: Equatable, Sendable {
   public mutating func onPrepareReuse() {
     latestTracks = nil
     lastEmitted = nil
+    audioReapplied = false
+    subtitleReapplied = false
+    subtitleOffApplied = false
   }
 
   public mutating func onStop() {
@@ -216,6 +147,9 @@ public struct TrackSelectionState: Equatable, Sendable {
     subtitleChoice = .default
     latestTracks = nil
     lastEmitted = nil
+    audioReapplied = false
+    subtitleReapplied = false
+    subtitleOffApplied = false
   }
 
   public func apply(to options: inout EngineLoadOptions) {
@@ -240,14 +174,19 @@ public struct TrackSelectionState: Equatable, Sendable {
   }
 
   public mutating func selectAudio(_ id: String) -> Int? {
-    let matched = latestTracks?.audio.first { $0.id == id }
-    audioChoice = Choice(id: id, language: matched?.language, label: matched?.label)
-    return parseAudioTrackStreamId(id)
+    guard let streamId = parseAudioTrackStreamId(id) else { return nil }
+    let canonicalId = formatAudioTrackId(streamId)
+    let matched = latestTracks?.audio.first { $0.id == canonicalId }
+    audioChoice = Choice(id: canonicalId, language: matched?.language, label: matched?.label)
+    audioReapplied = true
+    return streamId
   }
 
   public mutating func selectSubtitle(_ id: String?) -> (streamId: Int?, clear: Bool, immediateTracks: MediaTracksOut?) {
     guard let id else {
       subtitleChoice = .off
+      subtitleReapplied = false
+      subtitleOffApplied = true
       guard var updated = latestTracks else {
         return (nil, true, nil)
       }
@@ -260,9 +199,15 @@ public struct TrackSelectionState: Equatable, Sendable {
       return (nil, true, nil)
     }
 
-    let matched = latestTracks?.subtitles.first { $0.id == id }
-    subtitleChoice = .selected(Choice(id: id, language: matched?.language, label: matched?.label))
-    return (parseSubtitleTrackStreamId(id), false, nil)
+    guard let streamId = parseSubtitleTrackStreamId(id) else {
+      return (nil, false, nil)
+    }
+    let canonicalId = formatSubtitleTrackId(streamId)
+    let matched = latestTracks?.subtitles.first { $0.id == canonicalId }
+    subtitleChoice = .selected(Choice(id: canonicalId, language: matched?.language, label: matched?.label))
+    subtitleReapplied = true
+    subtitleOffApplied = false
+    return (streamId, false, nil)
   }
 
   public mutating func reconcile(
@@ -275,10 +220,13 @@ public struct TrackSelectionState: Equatable, Sendable {
 
     if let wantedAudio = audioChoice, let resolved = Self.resolve(in: observed.audio, wanted: wantedAudio) {
       audioChoice = Choice(id: resolved.id, language: resolved.language, label: resolved.label)
-      if observed.selectedAudioId != resolved.id {
+      if observed.selectedAudioId == resolved.id {
+        effective.selectedAudioId = resolved.id
+      } else if !audioReapplied {
+        audioReapplied = true
         selectAudioStreamId = parseAudioTrackStreamId(resolved.id)
+        effective.selectedAudioId = resolved.id
       }
-      effective.selectedAudioId = resolved.id
     }
 
     switch subtitleChoice {
@@ -286,16 +234,24 @@ public struct TrackSelectionState: Equatable, Sendable {
       break
     case .off:
       if observed.selectedSubtitleId != nil {
-        clearSubtitle = true
+        if !subtitleOffApplied {
+          subtitleOffApplied = true
+          clearSubtitle = true
+        }
+      } else {
+        subtitleOffApplied = false
       }
       effective.selectedSubtitleId = nil
     case let .selected(wantedSub):
       if let resolved = Self.resolve(in: observed.subtitles, wanted: wantedSub) {
         subtitleChoice = .selected(Choice(id: resolved.id, language: resolved.language, label: resolved.label))
-        if observed.selectedSubtitleId != resolved.id {
+        if observed.selectedSubtitleId == resolved.id {
+          effective.selectedSubtitleId = resolved.id
+        } else if !subtitleReapplied {
+          subtitleReapplied = true
           selectSubtitleStreamId = parseSubtitleTrackStreamId(resolved.id)
+          effective.selectedSubtitleId = resolved.id
         }
-        effective.selectedSubtitleId = resolved.id
       }
     }
 
@@ -309,15 +265,17 @@ public struct TrackSelectionState: Equatable, Sendable {
 
   private static func resolve(in candidates: [TrackInfoOut], wanted: Choice) -> TrackInfoOut? {
     let exact = candidates.first { $0.id == wanted.id }
-    if let exact, wanted.language == nil || exact.language == wanted.language {
+    if let exact, isLanguageCompatible(exact, wanted: wanted), isLabelCompatible(exact, wanted: wanted) {
       return exact
     }
     if let lang = wanted.language, let label = wanted.label,
-       let both = candidates.first(where: { $0.language == lang && $0.label == label })
+       let both = candidates.first(where: { sameTrackLanguage($0.language, lang) && $0.label == label })
     {
       return both
     }
-    if let lang = wanted.language, let byLang = candidates.first(where: { $0.language == lang }) {
+    if let lang = wanted.language,
+       let byLang = candidates.first(where: { sameTrackLanguage($0.language, lang) })
+    {
       return byLang
     }
     if let label = wanted.label, let byLabel = candidates.first(where: { $0.label == label }) {
@@ -325,10 +283,14 @@ public struct TrackSelectionState: Equatable, Sendable {
     }
     return exact
   }
-}
 
-private extension String {
-  var nonEmpty: String? {
-    isEmpty ? nil : self
+  private static func isLanguageCompatible(_ candidate: TrackInfoOut, wanted: Choice) -> Bool {
+    guard let wantedLang = wanted.language else { return true }
+    return sameTrackLanguage(candidate.language, wantedLang)
+  }
+
+  private static func isLabelCompatible(_ candidate: TrackInfoOut, wanted: Choice) -> Bool {
+    guard let wantedLabel = wanted.label, let candLabel = candidate.label else { return true }
+    return candLabel == wantedLabel
   }
 }

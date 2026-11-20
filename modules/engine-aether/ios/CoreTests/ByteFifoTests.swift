@@ -112,4 +112,18 @@ struct ByteFifoTests {
     #expect(!transport.isSuspended)
     #expect(transport.resumeCount == 1)
   }
+
+  @Test("cancel releases its reference to the attached transport")
+  func cancelReleasesAttachedTransport() {
+    weak var weakTransport: FakeTransport?
+    let fifo = ByteFifo()
+    do {
+      let transport = FakeTransport()
+      weakTransport = transport
+      fifo.attachTransport(transport)
+      #expect(weakTransport != nil)
+      fifo.cancel()
+    }
+    #expect(weakTransport == nil)
+  }
 }

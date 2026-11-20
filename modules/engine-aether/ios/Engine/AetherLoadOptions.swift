@@ -7,6 +7,10 @@ func aetherOptions(_ options: EngineLoadOptions) -> LoadOptions {
   out.isLive = options.isLive
   out.httpHeaders = options.httpHeaders
   out.maxConcurrentSourceRequests = options.maxConcurrentSourceRequests
+  out.generatesBackgroundScrubPreviews = options.generatesBackgroundScrubPreviews
+  out.skipsContainerAttachments = options.skipsContainerAttachments
+  out.hostRetriesExhaustedLiveReplay = options.hostRetriesExhaustedLiveReplay
+  out.displayCriteriaOwner = mapDisplayCriteriaOwner(options.displayCriteriaOwner)
   out.preferredAudioLanguages = options.preferredAudioLanguages
   out.initialSubtitleTrackID = options.subtitlesDisabled ? nil : options.initialSubtitleTrackId
   out.preferredSubtitleLanguages = options.subtitlesDisabled ? [] : options.preferredSubtitleLanguages
@@ -19,6 +23,9 @@ func aetherOptions(_ options: EngineLoadOptions) -> LoadOptions {
   if let minSegment = options.liveStartupSingleSegmentMinimumSeconds {
     out.liveStartupSingleSegmentMinimumSeconds = minSegment
   }
+  if let cushion = options.liveEdgeCushionSeconds {
+    out.liveEdgeCushionSeconds = cushion
+  }
   if let probesize = options.probesize {
     out.probesize = Int64(probesize)
   }
@@ -26,4 +33,12 @@ func aetherOptions(_ options: EngineLoadOptions) -> LoadOptions {
     out.maxAnalyzeDuration = Int64(maxAnalyze)
   }
   return out
+}
+
+private func mapDisplayCriteriaOwner(_ owner: DisplayCriteriaOwnerOption) -> DisplayCriteriaOwner {
+  switch owner {
+  case .engine: return .engine
+  case .avKit: return .avKit
+  case .host: return .host
+  }
 }

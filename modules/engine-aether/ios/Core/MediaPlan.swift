@@ -23,7 +23,7 @@ public func planMedia(_ request: LoadRequest) -> MediaPlan? {
   }
 
   if !request.live {
-    let startSeconds = request.startMs.map { max(0, $0) / 1_000.0 }
+    let startSeconds = request.startMs.flatMap { $0.isFinite ? max(0, $0) / 1_000.0 : nil }
     return .vod(url, startSeconds: startSeconds)
   }
 
@@ -36,32 +36,56 @@ public func loadOptions(for plan: MediaPlan, request: LoadRequest) -> EngineLoad
   let maxConcurrent: Int?
   let liveStartupGraceSeconds: Double?
   let liveStartupSingleSegmentMinimumSeconds: Double?
+  let hostRetriesLiveReplay: Bool
   switch plan {
   case let .hls(_, live):
     isLive = live
-    maxConcurrent = nil
+    maxConcurrent = 1
     liveStartupGraceSeconds = nil
     liveStartupSingleSegmentMinimumSeconds = nil
+    hostRetriesLiveReplay = live
   case .vod:
     isLive = false
     maxConcurrent = 1
     liveStartupGraceSeconds = nil
     liveStartupSingleSegmentMinimumSeconds = nil
+    hostRetriesLiveReplay = false
   case .liveTs:
     isLive = true
     maxConcurrent = nil
     liveStartupGraceSeconds = 0
     liveStartupSingleSegmentMinimumSeconds = 1.0
+    hostRetriesLiveReplay = false
   }
+
+  let cushion = request.liveEdgeCushionSeconds.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
 
   return EngineLoadOptions(
     isLive: isLive,
-    httpHeaders: request.headers,
+    httpHeaders: sanitizeRequestHeaders(request.headers),
     maxConcurrentSourceRequests: maxConcurrent,
-    preferSoftwareDecode: request.softwareAudio,
+    preferSoftwareDecode: false,
+    displayCriteriaOwner: .host,
     liveStartupGraceSeconds: liveStartupGraceSeconds,
     liveStartupSingleSegmentMinimumSeconds: liveStartupSingleSegmentMinimumSeconds,
+    liveEdgeCushionSeconds: cushion,
     probesize: nil,
-    maxAnalyzeDurationMicros: nil
+    maxAnalyzeDurationMicros: nil,
+    generatesBackgroundScrubPreviews: false,
+    skipsContainerAttachments: true,
+    hostRetriesExhaustedLiveReplay: hostRetriesLiveReplay
   )
+}
+
+/// Resets `.liveTs`-specific startup overrides when a live progressive URL hands off to an `#EXTM3U` HLS playlist.
+public func hlsHandoffOptions(from options: EngineLoadOptions) -> EngineLoadOptions {
+  var hls = options
+  hls.isLive = true
+  hls.maxConcurrentSourceRequests = 1
+  hls.hostRetriesExhaustedLiveReplay = true
+  hls.liveStartupGraceSeconds = nil
+  hls.liveStartupSingleSegmentMinimumSeconds = nil
+  hls.probesize = nil
+  hls.maxAnalyzeDurationMicros = nil
+  return hls
 }
