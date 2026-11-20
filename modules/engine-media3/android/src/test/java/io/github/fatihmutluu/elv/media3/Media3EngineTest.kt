@@ -264,4 +264,89 @@ class Media3EngineTest {
       tex.release()
     }
   }
+
+  @Test
+  fun `back-to-back loads coalesce via CommandFence without emitting stale events or opening the replaced URL`() {
+    val firstHit = AtomicBoolean(false)
+    val secondHit = CountDownLatch(1)
+    ServerSocket(0, 50, InetAddress.getLoopbackAddress()).use { server1 ->
+      ServerSocket(0, 50, InetAddress.getLoopbackAddress()).use { server2 ->
+        server1.soTimeout = 1_500
+        val peer1 = thread(isDaemon = true) {
+          runCatching {
+            server1.accept().use {
+              firstHit.set(true)
+            }
+          }
+        }
+        val peer2 = thread(isDaemon = true) {
+          runCatching {
+            server2.accept().use { client ->
+              secondHit.countDown()
+              client.getOutputStream().write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".toByteArray())
+              client.getOutputStream().flush()
+            }
+          }
+        }
+
+        val engine = Media3Engine(RuntimeEnvironment.getApplication())
+        val events = java.util.concurrent.CopyOnWriteArrayList<Map<String, Any?>>()
+        engine.eventObserverForTest = { events += it }
+        try {
+          val handlerField = Media3Engine::class.java.getDeclaredField("handler").apply { isAccessible = true }
+          val handler = handlerField.get(engine) as android.os.Handler
+          val hold = CountDownLatch(1)
+          val entered = CountDownLatch(1)
+          handler.post {
+            entered.countDown()
+            hold.await(5, TimeUnit.SECONDS)
+          }
+          assertTrue(entered.await(5, TimeUnit.SECONDS))
+
+          engine.load(
+            1,
+            LoadRequest(
+              url = "http://127.0.0.1:${server1.localPort}/live/demo/demo/1001.ts",
+              headers = emptyMap(),
+              live = true,
+              startMs = null,
+              softwareAudio = false,
+            ),
+          )
+          engine.load(
+            2,
+            LoadRequest(
+              url = "http://127.0.0.1:${server2.localPort}/live/demo/demo/1002.ts",
+              headers = emptyMap(),
+              live = true,
+              startMs = null,
+              softwareAudio = false,
+            ),
+          )
+          hold.countDown()
+
+          assertTrue("second load must connect to server2", secondHit.await(5, TimeUnit.SECONDS))
+          val done = CountDownLatch(1)
+          handler.post { done.countDown() }
+          assertTrue(done.await(5, TimeUnit.SECONDS))
+
+          assertFalse("superseded first load must not open a socket", firstHit.get())
+          assertTrue(
+            "no event for replaced attempt 1 may be emitted: $events",
+            events.none { it["attempt"] == 1 },
+          )
+          assertTrue(
+            "newer attempt 2 must emit opening",
+            events.any { it["attempt"] == 2 && it["type"] == "state" && it["state"] == "opening" },
+          )
+        } finally {
+          engine.dispose()
+          server1.close()
+          server2.close()
+          peer1.join(2_000)
+          peer2.join(2_000)
+        }
+      }
+    }
+  }
 }

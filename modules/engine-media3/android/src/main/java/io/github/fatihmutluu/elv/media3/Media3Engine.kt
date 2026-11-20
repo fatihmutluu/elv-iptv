@@ -20,7 +20,6 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "ElvMedia3"
 private const val EVENT = "onEngineEvent"
@@ -57,7 +56,7 @@ class Media3Engine : SharedObject {
 
   private val thread = HandlerThread("ElvMedia3").apply { start() }
   private val handler = Handler(thread.looper)
-  private val disposed = AtomicBoolean(false)
+  private val commandFence = CommandFence()
   private val closer = ThreadPoolExecutor(0, 1, 10, TimeUnit.SECONDS, LinkedBlockingQueue()) {
     Thread(it, "ElvMedia3Closer")
   }
@@ -105,6 +104,7 @@ class Media3Engine : SharedObject {
 
   private var player: ExoPlayer? = null
   private var playerSoftwareAudio = false
+  private var activeEpoch = 0
   private var token = 0
   private var generation = 0L
   private var prepares = 0L
@@ -113,65 +113,87 @@ class Media3Engine : SharedObject {
 
   override val releasesAfterPendingViewUpdates: Boolean = true
 
-  internal fun load(attempt: Int, next: LoadRequest) = post {
-    reporter.end()
-    token = attempt
-    request = next
-    lastVodPositionMs = if (next.live) null else next.startMs?.coerceAtLeast(0L)
-    tracksBridge.onLoad(next)
-    surfaces.onLoad()
-    prepare(next, next.startMs)
+  internal fun load(attempt: Int, next: LoadRequest) {
+    val epoch = commandFence.recordLoad(attempt, next) ?: return
+    post {
+      val action = commandFence.beginMedia(epoch)
+      if (action !is CommandFence.MediaAction.Run) return@post
+      activeEpoch = action.epoch
+      reporter.end()
+      token = attempt
+      request = next
+      lastVodPositionMs = if (next.live) null else next.startMs?.coerceAtLeast(0L)
+      tracksBridge.onLoad(next)
+      surfaces.onLoad()
+      prepare(next, next.startMs, forceRebuild = action.rebuildFirst)
+    }
   }
 
-  fun retry(attempt: Int) = post {
-    adopt(attempt)
-    val current = request ?: return@post
-    snapshotVodPosition()
-    prepare(current, currentVodPositionOrStart(current))
+  fun retry(attempt: Int) {
+    val epoch = commandFence.recordRetry(attempt) ?: return
+    post {
+      val action = commandFence.beginMedia(epoch)
+      if (action !is CommandFence.MediaAction.Run) return@post
+      activeEpoch = action.epoch
+      adopt(attempt)
+      val current = request ?: action.request ?: return@post
+      request = current
+      snapshotVodPosition()
+      prepare(current, currentVodPositionOrStart(current), forceRebuild = action.rebuildFirst)
+    }
   }
 
-  fun play(attempt: Int) = post { adopt(attempt); player?.play() }
+  fun play(attempt: Int) = postInEpoch(attempt) { player?.play() }
 
-  fun pause(attempt: Int) = post { adopt(attempt); player?.pause() }
+  fun pause(attempt: Int) = postInEpoch(attempt) { player?.pause() }
 
-  fun seek(attempt: Int, positionMs: Long) = post {
-    adopt(attempt)
+  fun seek(attempt: Int, positionMs: Long) = postInEpoch(attempt) {
     val clamped = positionMs.coerceAtLeast(0L)
     if (request?.live == false) lastVodPositionMs = clamped
-    val current = player ?: return@post
-    if (!current.isCurrentMediaItemSeekable) return@post
+    val current = player ?: return@postInEpoch
+    if (!current.isCurrentMediaItemSeekable) return@postInEpoch
     if (request?.live == false) current.setSeekParameters(vodSeekParametersFor(clamped, current.currentPosition))
     current.seekTo(clamped)
   }
 
-  fun selectAudioTrack(attempt: Int, id: String) = post { adopt(attempt); tracksBridge.selectAudioTrack(player, id) }
+  fun selectAudioTrack(attempt: Int, id: String) = postInEpoch(attempt) { tracksBridge.selectAudioTrack(player, id) }
 
-  fun selectSubtitleTrack(attempt: Int, id: String?) = post {
-    adopt(attempt)
+  fun selectSubtitleTrack(attempt: Int, id: String?) = postInEpoch(attempt) {
     tracksBridge.selectSubtitleTrack(player, id)
   }
 
-  fun stop(attempt: Int) = post {
-    adopt(attempt)
-    reporter.end()
-    request = null
-    lastVodPositionMs = null
-    tracksBridge.onStop()
-    beginGeneration()
-    player?.stop()
-    player?.clearMediaItems()
-    surfaces.onStop()
+  fun stop(attempt: Int) {
+    val epoch = commandFence.recordStop(attempt) ?: return
+    post {
+      if (!commandFence.canRunStop()) return@post
+      if (epoch > activeEpoch) activeEpoch = epoch
+      adopt(attempt)
+      reporter.end()
+      request = null
+      lastVodPositionMs = null
+      tracksBridge.onStop()
+      beginGeneration()
+      player?.stop()
+      player?.clearMediaItems()
+      surfaces.onStop()
+    }
   }
 
-  fun recreate(attempt: Int) = post {
-    adopt(attempt)
-    snapshotVodPosition()
-    tracksBridge.onPrepareReuse()
-    surfaces.clearCues()
-    reporter.end()
-    beginGeneration()
-    releasePlayer()
-    player = buildPlayer(playerSoftwareAudio)
+  fun recreate(attempt: Int) {
+    val epoch = commandFence.recordRecreate(attempt) ?: return
+    post {
+      val action = commandFence.beginRecreate(epoch)
+      if (action !is CommandFence.RecreateAction.Run) return@post
+      activeEpoch = action.epoch
+      adopt(attempt)
+      snapshotVodPosition()
+      tracksBridge.onPrepareReuse()
+      surfaces.clearCues()
+      reporter.end()
+      beginGeneration()
+      releasePlayer()
+      player = buildPlayer(playerSoftwareAudio)
+    }
   }
 
   fun attachSurface(next: Surface) {
@@ -205,7 +227,7 @@ class Media3Engine : SharedObject {
   internal fun cueScreen(cue: ScreenCue, played: Boolean) = post { surfaces.onCue(cue, played) }
 
   fun dispose() {
-    if (!disposed.compareAndSet(false, true)) return
+    if (!commandFence.markDisposed()) return
     onDisposed(this)
     http.dispatcher.cancelAll()
     handler.post {
@@ -225,9 +247,18 @@ class Media3Engine : SharedObject {
 
   override fun sharedObjectDidRelease() = dispose()
 
+  private fun postInEpoch(attempt: Int, action: () -> Unit) {
+    val epoch = commandFence.recordInEpochCommand(attempt) ?: return
+    post {
+      if (!commandFence.beginInEpoch(epoch)) return@post
+      adopt(attempt)
+      action()
+    }
+  }
+
   private fun post(command: () -> Unit) {
     handler.post {
-      if (disposed.get()) return@post
+      if (commandFence.isDisposedNow) return@post
       try {
         command()
       } catch (e: Exception) {
@@ -256,8 +287,12 @@ class Media3Engine : SharedObject {
   }
 
   private fun sendEvent(fields: Map<String, Any?>) {
-    if (disposed.get()) return
-    val payload = fields + ("attempt" to token)
+    val stamped = commandFence.filterOutboundToken(
+      eventType = fields["type"] as? String,
+      driverEpoch = activeEpoch,
+      driverToken = token,
+    ) ?: return
+    val payload = fields + ("attempt" to stamped)
     eventObserverForTest?.invoke(payload)
     if (hasAppContext) emit(EVENT, payload)
   }
@@ -297,14 +332,19 @@ class Media3Engine : SharedObject {
     return true
   }
 
-  private fun prepare(next: LoadRequest, positionMs: Long?, newGeneration: Boolean = true) {
+  private fun prepare(
+    next: LoadRequest,
+    positionMs: Long?,
+    newGeneration: Boolean = true,
+    forceRebuild: Boolean = false,
+  ) {
     reporter.end()
     tracksBridge.onPrepareReuse()
     surfaces.clearCues()
     if (newGeneration) beginGeneration()
     val existing = player
     val terminal = existing != null && (existing.playbackState == Player.STATE_ENDED || existing.playerError != null)
-    val rebuild = existing == null || terminal || playerSoftwareAudio != next.softwareAudio
+    val rebuild = forceRebuild || existing == null || terminal || playerSoftwareAudio != next.softwareAudio
     if (rebuild) {
       releasePlayer()
       player = buildPlayer(next.softwareAudio)

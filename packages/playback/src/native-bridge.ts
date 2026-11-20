@@ -75,8 +75,15 @@ export function bridgeNativeEngine(
 ): PlayerEngine {
   const listeners = new Set<(event: EngineEvent) => void>();
   let released = false;
+  let hasCommand = false;
+  let activeAttempt: AttemptToken = 0;
+  let silenced = false;
   const subscription = native.addListener('onEngineEvent', (event) => {
     if (listeners.size === 0) return;
+    if (event.type !== 'surface') {
+      if (silenced) return;
+      if (hasCommand && event.attempt !== activeAttempt) return;
+    }
     const mapped = mapEventClock(event, opts.uptimeMs, opts.now);
     for (const listener of [...listeners]) {
       try {
@@ -91,30 +98,62 @@ export function bridgeNativeEngine(
     (...args: A): void => {
       if (!released) send(...args);
     };
+  const adoptAttempt = (attempt: AttemptToken): void => {
+    hasCommand = true;
+    if (attempt > activeAttempt) activeAttempt = attempt;
+  };
 
   return {
     capabilities: opts.capabilities,
-    load: command((cmd: LoadCommand) => native.load(toNativeLoad(cmd))),
-    retry: command((attempt: AttemptToken) => native.retry(attempt)),
-    play: command((attempt: AttemptToken) => native.play(attempt)),
-    pause: command((attempt: AttemptToken) => native.pause(attempt)),
-    seek: command((attempt: AttemptToken, positionMs: number) => native.seek(attempt, positionMs)),
+    load: command((cmd: LoadCommand) => {
+      hasCommand = true;
+      activeAttempt = cmd.attempt;
+      silenced = false;
+      native.load(toNativeLoad(cmd));
+    }),
+    retry: command((attempt: AttemptToken) => {
+      adoptAttempt(attempt);
+      silenced = false;
+      native.retry(attempt);
+    }),
+    play: command((attempt: AttemptToken) => {
+      adoptAttempt(attempt);
+      native.play(attempt);
+    }),
+    pause: command((attempt: AttemptToken) => {
+      adoptAttempt(attempt);
+      native.pause(attempt);
+    }),
+    seek: command((attempt: AttemptToken, positionMs: number) => {
+      adoptAttempt(attempt);
+      native.seek(attempt, positionMs);
+    }),
     ...(native.selectAudioTrack === undefined
       ? {}
       : {
-          selectAudioTrack: command((attempt: AttemptToken, id: string) =>
-            native.selectAudioTrack?.(attempt, id),
-          ),
+          selectAudioTrack: command((attempt: AttemptToken, id: string) => {
+            adoptAttempt(attempt);
+            native.selectAudioTrack?.(attempt, id);
+          }),
         }),
     ...(native.selectSubtitleTrack === undefined
       ? {}
       : {
-          selectSubtitleTrack: command((attempt: AttemptToken, id: string | null) =>
-            native.selectSubtitleTrack?.(attempt, id),
-          ),
+          selectSubtitleTrack: command((attempt: AttemptToken, id: string | null) => {
+            adoptAttempt(attempt);
+            native.selectSubtitleTrack?.(attempt, id);
+          }),
         }),
-    stop: command((attempt: AttemptToken) => native.stop(attempt)),
-    recreate: command((attempt: AttemptToken) => native.recreate(attempt)),
+    stop: command((attempt: AttemptToken) => {
+      adoptAttempt(attempt);
+      silenced = true;
+      native.stop(attempt);
+    }),
+    recreate: command((attempt: AttemptToken) => {
+      adoptAttempt(attempt);
+      silenced = false;
+      native.recreate(attempt);
+    }),
     release() {
       if (released) return;
       released = true;

@@ -11,9 +11,11 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
   `startMs`/`seek` values are ignored. `load` takes its token, others adopt a newer one; `liveSeek: false`.
 
 ## Threading, player factory, codecs and view
-- `Media3Engine` runs `ExoPlayer` on its `HandlerThread` (application looper); `OnDestroy` and `sharedObjectDidRelease`
-  cancel OkHttp calls immediately and tear down player and threads. Terminal `STATE_ENDED`/`playerError` prepares
-  rebuild `ExoPlayer` while keeping the attached `Surface`.
+- `Media3Engine` + `CommandFence`: runs `ExoPlayer` on its `HandlerThread` (application looper); synchronous caller-side
+  `CommandFence` coalesces superseded `load`/`retry`/`recreate` before ExoPlayer starts and filters stale outbound
+  events by `(mediaEpoch, token)`; `OnDestroy` and `sharedObjectDidRelease` cancel OkHttp calls immediately and tear
+  down player and threads. Terminal `STATE_ENDED`/`playerError` prepares rebuild `ExoPlayer` while keeping the attached
+  `Surface`.
 - `PlayerFactory` + `LoadControlConfig`: `15–30 s` window, `1/2 s` start, `16/32/48 MiB` RAM-tiered byte target with
   `prioritizeTimeOverSizeThresholds = true`, `5/12 s` keyframe back-buffer, `DefaultTrackSelector` (mixed-audio
   adaptiveness, capability invalidation, `CaptioningManager` defaults), `C.WAKE_MODE_NETWORK`, `500 ms` release / `2 s`
