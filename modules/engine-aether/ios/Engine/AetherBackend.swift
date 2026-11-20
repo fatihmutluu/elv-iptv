@@ -73,6 +73,7 @@ final class AetherBackend: PlayerBackend {
       let nowMs = ProcessInfo.processInfo.systemUptime * 1_000.0
       self.systemPauseUntilUptimeMs = max(self.systemPauseUntilUptimeMs, nowMs + holdWindowMs)
     }
+    _ = try? installFreshEngine()
   }
 
   func bindPlayerView(_ view: AetherPlayerView?) {
