@@ -60,6 +60,31 @@ function makeFakeBridge(overrides?: Partial<CatalogBridge>): {
     episodes: async () => [],
     resolveStream: async () =>
       ok({ url: 'http://127.0.0.1:7879/live/demo/demo/1.ts', headers: {} }),
+    saveProgress: async (input) =>
+      ok({
+        profileId: input.profileId ?? 'default',
+        sourceId: input.sourceId,
+        itemKey: input.itemKey,
+        kind: input.kind,
+        title: input.title,
+        subtitle: input.subtitle ?? null,
+        logo: input.logo ?? null,
+        seriesKey: input.seriesKey ?? null,
+        season: input.season ?? null,
+        episode: input.episode ?? null,
+        positionMs: input.positionMs,
+        durationMs: input.durationMs,
+        watched: input.watched ?? false,
+        updatedAt: 100,
+      }),
+    setWatched: async () => ok(undefined),
+    getProgress: async () => null,
+    listContinueWatching: async () => [],
+    listProgressByKeys: async () => [],
+    clearProgress: async () => ok(undefined),
+    toggleFavorite: async () => ok(true),
+    listFavorites: async () => [],
+    listFavoriteKeys: async () => [],
     onChanged: () => () => undefined,
     close: async () => undefined,
   };
@@ -104,6 +129,33 @@ describe('desktop CatalogService', () => {
     expect((await c1.seasons(1)).ok).toBe(true);
     expect(await c1.episodes(1, 1)).toEqual([]);
     expect((await c1.resolveStream('x:s1:live:1')).ok).toBe(true);
+    expect(
+      (
+        await c1.saveProgress?.({
+          sourceId: 's1',
+          itemKey: 'x:s1:movie:1',
+          kind: 'movie',
+          title: 'Film',
+          positionMs: 30_000,
+          durationMs: 100_000,
+        })
+      )?.ok,
+    ).toBe(true);
+    expect((await c1.setWatched?.('x:s1:movie:1', true))?.ok).toBe(true);
+    expect(await c1.getProgress?.('x:s1:movie:1')).toBeNull();
+    expect(await c1.listContinueWatching?.(10)).toEqual([]);
+    expect(await c1.listProgressByKeys?.(['x:s1:movie:1'])).toEqual([]);
+    expect((await c1.clearProgress?.('x:s1:movie:1'))?.ok).toBe(true);
+    expect(
+      await c1.toggleFavorite?.({
+        sourceId: 's1',
+        itemKey: 'x:s1:movie:1',
+        kind: 'movie',
+        title: 'Film',
+      }),
+    ).toEqual({ ok: true, value: true });
+    expect(await c1.listFavorites?.(10)).toEqual([]);
+    expect(await c1.listFavoriteKeys?.()).toEqual([]);
 
     await c1.close();
   });
@@ -155,5 +207,55 @@ describe('desktop CatalogService', () => {
     expect(cancelledIds).toEqual([77]);
     finishImport(err(elvError('network', 'aborted')));
     expect(await running).toEqual({ ok: false, error: { category: 'network', code: 'aborted' } });
+  });
+
+  it('sanitizes control characters out of title and subtitle before sending user-state RPCs', async () => {
+    const savedInputs: unknown[] = [];
+    const favInputs: unknown[] = [];
+    const { bridge } = makeFakeBridge({
+      saveProgress: async (input) => {
+        savedInputs.push(input);
+        return ok({
+          profileId: 'default',
+          sourceId: input.sourceId,
+          itemKey: input.itemKey,
+          kind: input.kind,
+          title: input.title,
+          subtitle: input.subtitle ?? null,
+          logo: input.logo ?? null,
+          seriesKey: input.seriesKey ?? null,
+          season: input.season ?? null,
+          episode: input.episode ?? null,
+          positionMs: input.positionMs,
+          durationMs: input.durationMs,
+          watched: false,
+          updatedAt: 1,
+        });
+      },
+      toggleFavorite: async (input) => {
+        favInputs.push(input);
+        return ok(true);
+      },
+    });
+    const service = createDesktopCatalogFromBridge(bridge);
+
+    await service.saveProgress?.({
+      sourceId: 's1',
+      itemKey: 'k1',
+      kind: 'episode',
+      title: 'Dirty\tShow\r\nName',
+      subtitle: 'S1\tE2\r',
+      positionMs: 20_000,
+      durationMs: 60_000,
+    });
+    await service.toggleFavorite?.({
+      sourceId: 's1',
+      itemKey: 'k1',
+      kind: 'movie',
+      title: 'Tab\tFilm\u0007',
+    });
+
+    expect(savedInputs[0]).toMatchObject({ title: 'Dirty Show Name', subtitle: 'S1 E2' });
+    expect(favInputs[0]).toMatchObject({ title: 'Tab Film' });
   });
 });

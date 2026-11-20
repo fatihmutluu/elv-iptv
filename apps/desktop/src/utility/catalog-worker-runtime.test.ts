@@ -7,12 +7,14 @@ import { dirname, join } from 'node:path';
 import type {
   CategoryRow,
   EpisodeRow,
+  FavoriteRow,
   ImportProgress,
   ImportSummary,
   ItemRow,
   SeasonRow,
   SourceRow,
   StreamRequest,
+  WatchProgressRow,
 } from '@elv/data';
 import type { ElvError, FetchLike, Result } from '@elv/domain';
 import Database from 'better-sqlite3';
@@ -618,5 +620,109 @@ describe('createCatalogWorkerRuntime', () => {
     const spy = vi.fn();
     h.dispose();
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('round-trips watch progress, watched toggles, favorites, and removeSource cascade over RPC', async () => {
+    const dir = makeTempDir();
+    const h = createHarness();
+    await h.init(join(dir, 'catalog.db'));
+    const client = h.connectClient(1);
+
+    const added = await client.call<Result<SourceRow>>({
+      method: 'addSource',
+      input: {
+        kind: 'm3u',
+        name: 'UserState Demo',
+        playlistUrl: `${m3uBaseUrl}/playlist.m3u`,
+      },
+    }).promise;
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    const sourceId = added.value.id;
+
+    const saved = await client.call<Result<WatchProgressRow>>({
+      method: 'saveProgress',
+      input: {
+        sourceId,
+        itemKey: `m:${sourceId}:movie:1`,
+        kind: 'movie',
+        title: 'Silent\tHorizon\r\n',
+        subtitle: 'Part\tOne\r',
+        positionMs: 42_000,
+        durationMs: 100_000,
+      },
+    }).promise;
+    expect(saved.ok && saved.value.positionMs).toBe(42_000);
+    expect(saved.ok && saved.value.title).toBe('Silent Horizon');
+    expect(saved.ok && saved.value.subtitle).toBe('Part One');
+
+    const cw = await client.call<WatchProgressRow[]>({
+      method: 'listContinueWatching',
+      limit: 10,
+    }).promise;
+    expect(cw.map((r) => r.itemKey)).toEqual([`m:${sourceId}:movie:1`]);
+
+    const byKeys = await client.call<WatchProgressRow[]>({
+      method: 'listProgressByKeys',
+      itemKeys: [`m:${sourceId}:movie:1`],
+    }).promise;
+    expect(byKeys).toHaveLength(1);
+
+    const marked = await client.call<Result<void>>({
+      method: 'setWatched',
+      itemKey: `m:${sourceId}:movie:1`,
+      watched: true,
+    }).promise;
+    expect(marked.ok).toBe(true);
+    expect(
+      await client.call<WatchProgressRow[]>({ method: 'listContinueWatching', limit: 10 }).promise,
+    ).toEqual([]);
+
+    const fetched = await client.call<WatchProgressRow | null>({
+      method: 'getProgress',
+      itemKey: `m:${sourceId}:movie:1`,
+    }).promise;
+    expect(fetched?.watched).toBe(true);
+
+    const favOn = await client.call<Result<boolean>>({
+      method: 'toggleFavorite',
+      input: {
+        sourceId,
+        itemKey: `m:${sourceId}:movie:1`,
+        kind: 'movie',
+        title: 'Silent Horizon',
+        year: 2026,
+        rating: 8.6,
+      },
+    }).promise;
+    expect(favOn).toEqual({ ok: true, value: true });
+
+    const favs = await client.call<FavoriteRow[]>({ method: 'listFavorites', limit: 10 }).promise;
+    expect(favs.map((f) => f.itemKey)).toEqual([`m:${sourceId}:movie:1`]);
+    expect(await client.call<string[]>({ method: 'listFavoriteKeys' }).promise).toEqual([
+      `m:${sourceId}:movie:1`,
+    ]);
+
+    // removeSource cascades deletion to both watch_progress and favorites
+    const removed = await client.call<Result<void>>({ method: 'removeSource', id: sourceId })
+      .promise;
+    expect(removed.ok).toBe(true);
+    expect(
+      await client.call<WatchProgressRow | null>({
+        method: 'getProgress',
+        itemKey: `m:${sourceId}:movie:1`,
+      }).promise,
+    ).toBeNull();
+    expect(
+      await client.call<FavoriteRow[]>({ method: 'listFavorites', limit: 10 }).promise,
+    ).toEqual([]);
+
+    const cleared = await client.call<Result<void>>({
+      method: 'clearProgress',
+      itemKey: `m:${sourceId}:movie:1`,
+    }).promise;
+    expect(cleared.ok).toBe(true);
+
+    await h.shutdown();
   });
 });

@@ -14,7 +14,8 @@ Screens and view models, one folder per feature, with ports for platform service
 - Never imports `modules/*`, `apps/*`, `expo-*`, navigation libraries or another feature's folder (`no-feature-to-feature`).
 - Platform services (`PlaybackGuard`, `VideoHost`, `AppLifecyclePort`, `PlayTarget`) live under `src/ports/`.
 - Source-first: `exports` points at `src/index.ts`; every focusable control carries a deterministic `testID` and `accessibilityLabel`.
-- `src/AppShell.tsx` composes `Live`, `Movies`, `Series`, consolidated `Settings` utility (`Appearance`, `Sources`, `About & Licenses`), and `PlayerScreen` via `AdaptiveNavShell` (`#13`, `#98`, `#325`).
+- `src/AppShell.tsx` composes canonical 4-destination nav (`Home`, `Live`, `Movies`, `Series`) + `Settings` utility (`Appearance`, `Sources`, `About & Licenses`) and `PlayerScreen` via `AdaptiveNavShell` (`#13`, `#14`, `#98`, `#325`).
+- `src/home/` owns flagship Cinema Quietude `HomeScreen`, `HomeHero`, `HomeRail`, `HomeSkeleton`, `home-model`, bounded `useHomeData` (Continue Watching, On Air Now, My List, Featured Movies/Series), and `useTvHomeNavigation` (`#14`).
 - `src/settings/` owns `SettingsScreen`, `AppearancePanel` (live Language `#16`, 6 Theme Presets including WCAG AAA High Contrast `#325`, Text Scale `#62`, Reduce Motion `#325`, Reset), `AboutLicensesPanel`, and `useTvSettingsNavigation` (10-ft TV D-pad sidebar/content focus handoff).
 - `src/shell/` owns config-driven `AdaptiveNavShell` (`NavDestination`, `NavUtility`, Portrait bottom tabs / Landscape frosted top bar / TV D-pad traversal) and root `AppProviders` + `usePreferences` (preferences hydration, live i18n locale switching without remount `#16`, theme sync, `TvRemoteProvider`, `ErrorBoundary`).
 - `src/browse/` owns `BrowseScreen`, `SeriesDetailPane`, `createPagedListSource` (LRU-paged `ListSource`), and browse models (`#13`).

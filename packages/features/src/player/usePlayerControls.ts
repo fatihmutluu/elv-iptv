@@ -60,6 +60,7 @@ export interface PlayerControlsParams {
   timersRef: MutableRefObject<PlaybackTimers>;
   onExitRef: MutableRefObject<() => void>;
   zapByRef: MutableRefObject<(delta: 1 | -1, repeat?: boolean) => void>;
+  onSeekCommit?: (positionMs: number) => void;
 }
 
 /**
@@ -69,6 +70,8 @@ export interface PlayerControlsParams {
 export function usePlayerControls(params: PlayerControlsParams) {
   const { formFactor, activeTarget, status, tracks, hasTracks, showRetry, hasService } = params;
   const { serviceRef, clockRef, timersRef, onExitRef, zapByRef } = params;
+  const onSeekCommitRef = useRef(params.onSeekCommit);
+  onSeekCommitRef.current = params.onSeekCommit;
   const isTv = formFactor === 'tv';
 
   const [rawTracksOpen, setTracksOpen] = useState(false);
@@ -121,7 +124,10 @@ export function usePlayerControls(params: PlayerControlsParams) {
             };
       },
       seek: (ms) => {
-        if (liveRef.current.activeTarget.kind === 'vod') serviceRef.current?.seek(ms);
+        if (liveRef.current.activeTarget.kind === 'vod') {
+          serviceRef.current?.seek(ms);
+          onSeekCommitRef.current?.(ms);
+        }
       },
       onPreviewChange: setPreviewPositionMs,
     });
@@ -171,9 +177,12 @@ export function usePlayerControls(params: PlayerControlsParams) {
     const anchor = liveRef.current.activeTarget.kind === 'vod' ? svc?.getState().anchor : undefined;
     scrub.cancel();
     if (svc === null || anchor === undefined) return;
-    svc.seek(
-      clampSeekPosition(positionAt(anchor, clockRef.current.now()) + deltaMs, anchor.durationMs),
+    const targetMs = clampSeekPosition(
+      positionAt(anchor, clockRef.current.now()) + deltaMs,
+      anchor.durationMs,
     );
+    svc.seek(targetMs);
+    onSeekCommitRef.current?.(targetMs);
   };
 
   const seekToRatio = (ratio: number): void => {
@@ -182,7 +191,11 @@ export function usePlayerControls(params: PlayerControlsParams) {
       return;
     scrub.cancel();
     const dur = svc.getState().anchor?.durationMs;
-    if (dur !== undefined && dur > 0) svc.seek(Math.round(Math.max(0, Math.min(1, ratio)) * dur));
+    if (dur !== undefined && dur > 0) {
+      const targetMs = Math.round(Math.max(0, Math.min(1, ratio)) * dur);
+      svc.seek(targetMs);
+      onSeekCommitRef.current?.(targetMs);
+    }
   };
 
   const openTracks = (): void => {

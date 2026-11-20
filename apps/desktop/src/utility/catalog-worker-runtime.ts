@@ -86,6 +86,25 @@ function hasControlChar(text: string): boolean {
   return false;
 }
 
+function sanitizeDisplayText(text: string): string {
+  if (!hasControlChar(text)) return text;
+  let out = '';
+  let lastSpace = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) {
+      if (!lastSpace) {
+        out += ' ';
+        lastSpace = true;
+      }
+    } else {
+      out += text[i];
+      lastSpace = code === 0x20;
+    }
+  }
+  return out.trim();
+}
+
 function isHttpUrl(raw: string): boolean {
   if (raw === '' || hasControlChar(raw)) return false;
   try {
@@ -364,6 +383,45 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
         return service.episodes(call.seriesId, call.season);
       case 'resolveStream':
         return service.resolveStream(call.itemKey);
+      case 'saveProgress':
+        return service.saveProgress
+          ? service.saveProgress({
+              ...call.input,
+              title: sanitizeDisplayText(call.input.title),
+              ...(typeof call.input.subtitle === 'string'
+                ? { subtitle: sanitizeDisplayText(call.input.subtitle) }
+                : {}),
+            })
+          : err(elvError('storage', 'unsupported'));
+      case 'setWatched':
+        return service.setWatched
+          ? service.setWatched(call.itemKey, call.watched, call.profileId)
+          : err(elvError('storage', 'unsupported'));
+      case 'getProgress':
+        return service.getProgress ? service.getProgress(call.itemKey, call.profileId) : null;
+      case 'listContinueWatching':
+        return service.listContinueWatching
+          ? service.listContinueWatching(call.limit, call.profileId)
+          : [];
+      case 'listProgressByKeys':
+        return service.listProgressByKeys
+          ? service.listProgressByKeys(call.itemKeys, call.profileId)
+          : [];
+      case 'clearProgress':
+        return service.clearProgress
+          ? service.clearProgress(call.itemKey, call.profileId)
+          : err(elvError('storage', 'unsupported'));
+      case 'toggleFavorite':
+        return service.toggleFavorite
+          ? service.toggleFavorite({
+              ...call.input,
+              title: sanitizeDisplayText(call.input.title),
+            })
+          : err(elvError('storage', 'unsupported'));
+      case 'listFavorites':
+        return service.listFavorites ? service.listFavorites(call.limit, call.profileId) : [];
+      case 'listFavoriteKeys':
+        return service.listFavoriteKeys ? service.listFavoriteKeys(call.profileId) : [];
     }
   };
 

@@ -42,6 +42,41 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
     seasons: (seriesId) => wrapResult(async () => (await load()).seasons(seriesId)),
     episodes: async (seriesId, season) => (await load()).episodes(seriesId, season),
     resolveStream: (itemKey) => wrapResult(async () => (await load()).resolveStream(itemKey)),
+    saveProgress: (input) =>
+      wrapResult(async () => {
+        const cat = await load();
+        return cat.saveProgress ? cat.saveProgress(input) : err(elvError('storage', 'unsupported'));
+      }),
+    setWatched: (itemKey, watched, profileId) =>
+      wrapResult(async () => {
+        const cat = await load();
+        return cat.setWatched
+          ? cat.setWatched(itemKey, watched, profileId)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    getProgress: async (itemKey, profileId) =>
+      (await load()).getProgress?.(itemKey, profileId) ?? null,
+    listContinueWatching: async (limit, profileId) =>
+      (await load()).listContinueWatching?.(limit, profileId) ?? [],
+    listProgressByKeys: async (itemKeys, profileId) =>
+      (await load()).listProgressByKeys?.(itemKeys, profileId) ?? [],
+    clearProgress: (itemKey, profileId) =>
+      wrapResult(async () => {
+        const cat = await load();
+        return cat.clearProgress
+          ? cat.clearProgress(itemKey, profileId)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    toggleFavorite: (input) =>
+      wrapResult(async () => {
+        const cat = await load();
+        return cat.toggleFavorite
+          ? cat.toggleFavorite(input)
+          : err(elvError('storage', 'unsupported'));
+      }),
+    listFavorites: async (limit, profileId) =>
+      (await load()).listFavorites?.(limit, profileId) ?? [],
+    listFavoriteKeys: async (profileId) => (await load()).listFavoriteKeys?.(profileId) ?? [],
     close: async () => {
       const cat = await load().catch(() => undefined);
       await cat?.close();

@@ -276,6 +276,50 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
     seasons: (seriesId) => callResult({ method: 'seasons', seriesId }),
     episodes: (seriesId, season) => callValue({ method: 'episodes', seriesId, season }),
     resolveStream: (itemKey) => callResult({ method: 'resolveStream', itemKey }),
+    saveProgress: (input) => callResult({ method: 'saveProgress', input }),
+    setWatched: (itemKey, watched, profileId) =>
+      callResult({
+        method: 'setWatched',
+        itemKey,
+        watched,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    getProgress: (itemKey, profileId) =>
+      callValue({
+        method: 'getProgress',
+        itemKey,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    listContinueWatching: (limit, profileId) =>
+      callValue({
+        method: 'listContinueWatching',
+        ...(limit === undefined ? {} : { limit }),
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    listProgressByKeys: (itemKeys, profileId) =>
+      callValue({
+        method: 'listProgressByKeys',
+        itemKeys,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    clearProgress: (itemKey, profileId) =>
+      callResult({
+        method: 'clearProgress',
+        itemKey,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    toggleFavorite: (input) => callResult({ method: 'toggleFavorite', input }),
+    listFavorites: (limit, profileId) =>
+      callValue({
+        method: 'listFavorites',
+        ...(limit === undefined ? {} : { limit }),
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    listFavoriteKeys: (profileId) =>
+      callValue({
+        method: 'listFavoriteKeys',
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
     onChanged(listener: () => void): () => void {
       changedListeners.add(listener);
       return () => {

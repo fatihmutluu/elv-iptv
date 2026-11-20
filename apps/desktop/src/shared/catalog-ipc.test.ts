@@ -122,6 +122,109 @@ describe('isCatalogClientMessage', () => {
           input: { name: 'Pasted', url: '  http://127.0.0.1:7879/list.m3u\r\n' },
         },
       },
+      {
+        type: 'call',
+        reqId: 19,
+        call: {
+          method: 'saveProgress',
+          input: {
+            sourceId: 'src_1',
+            itemKey: 'm:src_1:10',
+            kind: 'episode',
+            title: 'Northern Signal',
+            subtitle: 'S1 E2',
+            logo: 'https://img.example/poster.jpg',
+            seriesKey: 's:src_1:1',
+            season: 1,
+            episode: 2,
+            positionMs: 42_000,
+            durationMs: 120_000,
+            watched: false,
+          },
+        },
+      },
+      {
+        type: 'call',
+        reqId: 20,
+        call: { method: 'setWatched', itemKey: 'm:src_1:10', watched: true, profileId: 'kids' },
+      },
+      {
+        type: 'call',
+        reqId: 21,
+        call: { method: 'getProgress', itemKey: 'm:src_1:10' },
+      },
+      {
+        type: 'call',
+        reqId: 22,
+        call: { method: 'listContinueWatching', limit: 24, profileId: 'default' },
+      },
+      {
+        type: 'call',
+        reqId: 23,
+        call: { method: 'listProgressByKeys', itemKeys: ['m:src_1:10', 'm:src_1:11'] },
+      },
+      {
+        type: 'call',
+        reqId: 24,
+        call: { method: 'clearProgress', itemKey: 'm:src_1:10' },
+      },
+      {
+        type: 'call',
+        reqId: 25,
+        call: {
+          method: 'toggleFavorite',
+          input: {
+            sourceId: 'src_1',
+            itemKey: 'm:src_1:10',
+            kind: 'movie',
+            title: 'Orbital Nine',
+            logo: null,
+            year: 2025,
+            rating: 8.2,
+          },
+        },
+      },
+      {
+        type: 'call',
+        reqId: 26,
+        call: { method: 'listFavorites', limit: 50 },
+      },
+      {
+        type: 'call',
+        reqId: 27,
+        call: { method: 'listFavoriteKeys', profileId: 'default' },
+      },
+      {
+        type: 'call',
+        reqId: 28,
+        call: {
+          method: 'saveProgress',
+          input: {
+            sourceId: 'src_1',
+            itemKey: 'm:src_1:12',
+            kind: 'episode',
+            title: 'Dirty\tProvider\r\nTitle',
+            subtitle: 'S0\tE0',
+            season: 0,
+            episode: 0,
+            positionMs: 0,
+            durationMs: 1000,
+          },
+        },
+      },
+      {
+        type: 'call',
+        reqId: 29,
+        call: {
+          method: 'toggleFavorite',
+          input: {
+            sourceId: 'src_1',
+            itemKey: 'm:src_1:12',
+            kind: 'movie',
+            title: 'Tab\tTitle\r',
+          },
+        },
+      },
       { type: 'cancel', reqId: 6 },
     ];
     for (const msg of valid) {
@@ -202,6 +305,134 @@ describe('isCatalogClientMessage', () => {
         call: {
           method: 'addSourceFromLink',
           input: { name: 'x', url: 123 },
+        },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: {
+          method: 'saveProgress',
+          input: {
+            sourceId: 'src_1',
+            itemKey: 'k1',
+            kind: 'vod',
+            title: 'Bad Kind',
+            positionMs: 1000,
+            durationMs: 2000,
+          },
+        },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: {
+          method: 'saveProgress',
+          input: {
+            sourceId: 'src_1',
+            itemKey: 'k1',
+            kind: 'movie',
+            title: 'Negative Pos',
+            positionMs: -1,
+            durationMs: 2000,
+          },
+        },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: {
+          method: 'saveProgress',
+          input: JSON.parse(
+            '{"__proto__":{"polluted":true},"sourceId":"s1","itemKey":"k1","kind":"movie","title":"T","positionMs":0,"durationMs":0}',
+          ),
+        },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'setWatched', itemKey: 'k1', watched: 'yes' },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'getProgress', itemKey: '' },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'listContinueWatching', limit: 101 },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'listContinueWatching', limit: -1 },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: {
+          method: 'listProgressByKeys',
+          itemKeys: Array.from({ length: 201 }, (_, i) => `k${i}`),
+        },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'listProgressByKeys', itemKeys: ['ok', ''] },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'clearProgress', itemKey: 'bad\nkey' },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: {
+          method: 'toggleFavorite',
+          input: { sourceId: 's1', itemKey: 'k1', kind: 'movie', title: 'T', rating: Number.NaN },
+        },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'listFavorites', limit: 1.5 },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'listFavoriteKeys', profileId: '' },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: {
+          method: 'saveProgress',
+          input: {
+            sourceId: 'src_1',
+            itemKey: 'k1',
+            kind: 'episode',
+            title: 'Neg Season',
+            season: -1,
+            positionMs: 1000,
+            durationMs: 2000,
+          },
+        },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: {
+          method: 'saveProgress',
+          input: {
+            sourceId: 'src_1',
+            itemKey: 'k1',
+            kind: 'episode',
+            title: 'Neg Episode',
+            episode: -2,
+            positionMs: 1000,
+            durationMs: 2000,
+          },
         },
       },
     ];

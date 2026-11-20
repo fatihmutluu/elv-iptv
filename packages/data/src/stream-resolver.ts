@@ -104,6 +104,7 @@ export interface PlaytimeResolverCache {
   evict(sourceId: string): void;
   clear(): void;
   resolveLogos(items: ItemRow[], sourceId: string): Promise<ItemRow[]>;
+  resolveRowLogos<T extends { sourceId: string; logo: string | null }>(rows: T[]): Promise<T[]>;
   resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
 }
 
@@ -155,6 +156,23 @@ export function createPlaytimeResolverCache(deps: {
       return items.map((i) =>
         i.logo === null ? i : { ...i, logo: resolver.resolve(i.logo) ?? null },
       );
+    },
+
+    async resolveRowLogos(rows) {
+      if (!rows.some((r) => r.logo?.includes('{{'))) return rows;
+      const sourceIds = new Set<string>();
+      for (const row of rows) {
+        if (row.logo?.includes('{{')) sourceIds.add(row.sourceId);
+      }
+      const loaded = new Map<string, StreamResolver>();
+      for (const sid of sourceIds) {
+        loaded.set(sid, await resolverFor(sid));
+      }
+      return rows.map((row) => {
+        if (row.logo === null || !row.logo.includes('{{')) return row;
+        const resolver = loaded.get(row.sourceId);
+        return { ...row, logo: resolver?.resolve(row.logo) ?? null };
+      });
     },
 
     async resolveStream(itemKey) {

@@ -11,6 +11,24 @@ export class CatalogOpenError extends Error {
 
 let instance: Promise<CatalogService> | undefined;
 
+function sanitizeDisplayText(text: string): string {
+  let out = '';
+  let lastSpace = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) {
+      if (!lastSpace) {
+        out += ' ';
+        lastSpace = true;
+      }
+    } else {
+      out += text[i];
+      lastSpace = code === 0x20;
+    }
+  }
+  return out.trim();
+}
+
 /**
  * Adapts the preload's {@link CatalogBridge} into `@elv/data`'s {@link CatalogService}, mapping
  * `AbortSignal` cancellations onto `cancelImport(reqId)` and isolating progress callback throws.
@@ -61,6 +79,23 @@ export function createDesktopCatalogFromBridge(
     seasons: (seriesId) => bridge.seasons(seriesId),
     episodes: (seriesId, season) => bridge.episodes(seriesId, season),
     resolveStream: (itemKey) => bridge.resolveStream(itemKey),
+    saveProgress: (input) =>
+      bridge.saveProgress({
+        ...input,
+        title: sanitizeDisplayText(input.title),
+        ...(typeof input.subtitle === 'string'
+          ? { subtitle: sanitizeDisplayText(input.subtitle) }
+          : {}),
+      }),
+    setWatched: (itemKey, watched, profileId) => bridge.setWatched(itemKey, watched, profileId),
+    getProgress: (itemKey, profileId) => bridge.getProgress(itemKey, profileId),
+    listContinueWatching: (limit, profileId) => bridge.listContinueWatching(limit, profileId),
+    listProgressByKeys: (itemKeys, profileId) => bridge.listProgressByKeys(itemKeys, profileId),
+    clearProgress: (itemKey, profileId) => bridge.clearProgress(itemKey, profileId),
+    toggleFavorite: (input) =>
+      bridge.toggleFavorite({ ...input, title: sanitizeDisplayText(input.title) }),
+    listFavorites: (limit, profileId) => bridge.listFavorites(limit, profileId),
+    listFavoriteKeys: (profileId) => bridge.listFavoriteKeys(profileId),
     async close() {
       onClose?.();
       await bridge.close();

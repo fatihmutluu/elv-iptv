@@ -306,6 +306,9 @@ msgstr "Katalog verileri yerel depolamaya kaydedilemedi."
 msgid "source.hint.storage"
 msgstr "Boş disk alanını kontrol edip kaynağı yenilemeyi deneyin."
 
+msgid "nav.home"
+msgstr "Ana Sayfa"
+
 msgid "nav.live"
 msgstr "Canlı"
 
@@ -671,3 +674,78 @@ msgstr "GPL-3.0-only · LGPL medya motorları"
 
 msgid "settings.about.statement"
 msgstr "ELV IPTV açık kaynaklı bir oynatıcıdır ve içerik sunmaz. Yerel oynatma motorları LGPL kütüphanelerini dinamik olarak bağlar. Sağlayıcı bilgileri cihazda şifreli saklanır ve katalog veritabanına yazılmaz."
+
+msgid "home.title"
+msgstr "Ana Sayfa"
+
+msgid "home.continueWatching"
+msgstr "İzlemeye devam et"
+
+msgid "home.onAirNow"
+msgstr "Şu an yayında"
+
+msgid "home.myList"
+msgstr "Listem"
+
+msgid "home.featuredMovies"
+msgstr "Öne çıkan filmler"
+
+msgid "home.featuredSeries"
+msgstr "Öne çıkan diziler"
+
+msgid "home.seeAll"
+msgstr "Tümü"
+
+msgid "home.channels"
+msgstr "Kanallar"
+
+msgid "home.resume"
+msgstr "Devam et"
+
+msgid "home.watchNow"
+msgstr "Oynat"
+
+msgid "home.addToList"
+msgstr "Listeme ekle"
+
+msgid "home.inMyList"
+msgstr "Listemde"
+
+msgid "home.markWatched"
+msgstr "İzlendi işaretle"
+
+msgid "home.markUnwatched"
+msgstr "İzlenmedi işaretle"
+
+msgid "home.watchedBadge"
+msgstr "İzlendi"
+
+msgid "home.remainingMin"
+msgstr "{minutes} dk kaldı"
+
+msgid "home.featuredTag"
+msgstr "Öne çıkan"
+
+msgid "home.emptyTitle"
+msgstr "İzleme odanız hazır"
+
+msgid "home.emptyDescription"
+msgstr "Canlı TV, Film ve Dizileri görmek için bir Xtream veya M3U kaynağı ekleyin."
+
+msgid "home.addSource"
+msgstr "Kaynakları yönet"
+
+msgid "home.heroSlideLabel"
+msgstr "Öne çıkan {index} / {total}"
+
+msgid "home.kind.live"
+msgstr "Canlı TV"
+
+msgid "home.kind.movie"
+msgstr "Film"
+
+msgid "home.kind.series"
+msgstr "Dizi"
+
+msgid "home.kind.episode"
+msgstr "Bölüm"
