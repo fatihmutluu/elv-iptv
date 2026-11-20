@@ -1,10 +1,18 @@
+import { EXPECTED_TABLE_COLUMNS } from '@elv/data';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const platform = vi.hoisted(() => ({ OS: 'android' }));
 vi.mock('react-native', () => ({ Platform: platform }));
 
-const migrated = async (sql: string): Promise<unknown[]> =>
-  sql.includes('user_version') ? [{ user_version: 1 }] : [];
+const migrated = async (sql: string): Promise<unknown[]> => {
+  if (sql.includes('user_version')) return [{ user_version: 1 }];
+  const match = /PRAGMA table_info\(([^)]+)\)/.exec(sql);
+  if (match !== null) {
+    const table = match[1] as string;
+    return (EXPECTED_TABLE_COLUMNS[table] ?? []).map((c) => ({ name: c.name }));
+  }
+  return [];
+};
 const driver = {
   exec: vi.fn(async () => undefined),
   run: vi.fn(async () => ({ changes: 0 })),
@@ -17,6 +25,7 @@ const driver = {
 const createOpSqliteDriver = vi.fn(async (_name: string, _location?: string) => driver);
 const manifest = { read: vi.fn((): string | undefined => undefined), write: vi.fn() };
 const createSettingsStore = vi.fn((_key: string) => manifest);
+const createSecureSecretStore = vi.fn(() => ({ get: vi.fn(), set: vi.fn(), delete: vi.fn() }));
 
 vi.mock('../storage', () => ({
   createOpSqliteDriver,
@@ -24,13 +33,14 @@ vi.mock('../storage', () => ({
   createSettingsStore,
   createMacrotaskScheduler: () => ({ yieldNow: async () => undefined }),
   createDeviceHttpClient: () => ({ get: vi.fn() }),
-  createSecureSecretStore: () => ({ get: vi.fn(), set: vi.fn(), delete: vi.fn() }),
+  createSecureSecretStore,
 }));
 
 beforeEach(() => {
   vi.resetModules();
   createOpSqliteDriver.mockClear();
   createSettingsStore.mockClear();
+  createSecureSecretStore.mockClear();
   manifest.read.mockClear();
   manifest.write.mockClear();
   driver.close.mockClear();
@@ -85,6 +95,32 @@ describe('createDeviceCatalog', () => {
     driver.all.mockRejectedValueOnce(new Error('disk'));
     const { createDeviceCatalog } = await import('./device');
     await expect(createDeviceCatalog()).rejects.toThrow('catalog open failed');
+    expect(driver.close).toHaveBeenCalledTimes(1);
+    await expect(createDeviceCatalog()).resolves.toBeDefined();
+  });
+
+  it('closes the partial SQLite handle when setup throws after openCatalog and allows clean retry', async () => {
+    platform.OS = 'android';
+    createSecureSecretStore.mockImplementationOnce(() => {
+      throw new Error('keystore unavailable');
+    });
+    const { createDeviceCatalog } = await import('./device');
+    await expect(createDeviceCatalog()).rejects.toThrow('keystore unavailable');
+    expect(driver.close).toHaveBeenCalledTimes(1);
+
+    const recovered = await createDeviceCatalog();
+    expect(recovered).toBeDefined();
+    expect(createOpSqliteDriver).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves the original open error even if closing the partial handle also rejects', async () => {
+    platform.OS = 'ios';
+    createSettingsStore.mockImplementationOnce(() => {
+      throw new Error('settings init failed');
+    });
+    driver.close.mockRejectedValueOnce(new Error('close failed'));
+    const { createDeviceCatalog } = await import('./device');
+    await expect(createDeviceCatalog()).rejects.toThrow('settings init failed');
     expect(driver.close).toHaveBeenCalledTimes(1);
     await expect(createDeviceCatalog()).resolves.toBeDefined();
   });

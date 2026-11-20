@@ -208,6 +208,72 @@ describe('removeSource', () => {
     expect(keys.filter((k) => k.startsWith('source.src2.')).length).toBeGreaterThan(0);
     expect(await getSource(s.db, 'src2')).toBeDefined();
   });
+
+  it('rolls back all catalog tables atomically and leaves secrets intact when SQLite delete fails mid-flight', async () => {
+    const s = await setup();
+    await addXtreamSource(
+      { name: 'A', server: 'https://p.example', username: USER, password: PW },
+      s.deps,
+    );
+    await addM3uSource({ name: 'B', playlistUrl: 'https://h.example/a.m3u' }, s.deps);
+    const tables: Record<string, string> = {
+      import_runs: "(id, source_id, kind, started_at, status) VALUES (?, ?, 'catalog', 1, 'ok')",
+      categories:
+        "(source_id, kind, provider_id, name, name_fold, position, run_id) VALUES (?, 'live', 'c', 'n', 'n', 0, 1)",
+      live: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
+      movies: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
+      series: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
+      episodes: "(source_id, key, series_key, run_id) VALUES (?, 'k', 's', 1)",
+      placements:
+        "(source_id, kind, item_key, category_id, position, run_id) VALUES (?, 'live', 'k', 'c', 0, 1)",
+      guide_channels: "(source_id, guide_id, name, name_fold, run_id) VALUES (?, 'g', 'n', 'n', 1)",
+      channel_guide: "(source_id, channel_key, guide_id) VALUES (?, 'k', 'g')",
+      programmes: "(source_id, guide_id, start, stop, title, run_id) VALUES (?, 'g', 1, 2, 't', 1)",
+      programmes_next:
+        "(source_id, guide_id, start, stop, title, run_id) VALUES (?, 'g', 1, 2, 't', 1)",
+    };
+    let runId = 1;
+    for (const id of ['src1', 'src2']) {
+      for (const [table, rest] of Object.entries(tables)) {
+        if (table === 'import_runs') {
+          await s.db.run(`INSERT INTO import_runs ${rest}`, [runId, id]);
+          runId += 1;
+        } else {
+          await s.db.run(`INSERT INTO ${table} ${rest}`, [id]);
+        }
+      }
+    }
+    const secretsBefore = { ...s.secrets.dump() };
+    const failingDb = {
+      ...s.db,
+      transaction: <T>(fn: (tx: typeof s.db) => Promise<T>) =>
+        s.db.transaction((tx) =>
+          fn({
+            ...tx,
+            run: async (sql, params) => {
+              if (sql.includes('DELETE FROM placements')) {
+                throw new Error('SQLITE_IOERR: disk I/O error');
+              }
+              return tx.run(sql, params);
+            },
+          }),
+        ),
+    };
+
+    await expect(removeSource('src1', { db: failingDb, secrets: s.secrets })).rejects.toThrow(
+      'SQLITE_IOERR',
+    );
+
+    expect(await getSource(s.db, 'src1')).toBeDefined();
+    expect(await getSource(s.db, 'src2')).toBeDefined();
+    for (const table of TABLES_BY_SOURCE) {
+      const rows = await s.db.all<{ source_id: string }>(
+        `SELECT source_id FROM ${table} ORDER BY source_id`,
+      );
+      expect(rows.map((r) => r.source_id)).toEqual(['src1', 'src2']);
+    }
+    expect(s.secrets.dump()).toEqual(secretsBefore);
+  });
 });
 
 describe('guide URLs', () => {

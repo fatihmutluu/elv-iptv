@@ -24,9 +24,20 @@ React components for react-native and react-native-web, design tokens and TV foc
 - **Primitives (`src/primitives/`):** `Surface`, `Scrim`, `GlassBar`, `ArtworkImage` + `DeadHostRegistry` (#126, #202, #311), `AdaptiveSheet`, `ErrorBoundary` (#159), `CtaButton`, `IconButton`, `MicroPill`, `FilterChip`, `PosterCard` (`2:3` pure artwork), `WideCard` (`16:9` Live / Continue Watching). Zero outer boxes around media cards, zero duplicate titles, zero neon desktop hover rings.
 
 ## TV list, key source and text-entry suspension (`src/tv/`)
-- `useTvKeySource(onInput)` owns `TVEventHandler`, refcounted `TVEventControl`, `BackHandler`, Android raw
-  `RemoteKeysProvider`, and `Platform.OS === 'web'` DOM `keydown`/`keyup`/`blur` (dropping `event.repeat` and letting
-  HTML `<input>`/`<textarea>` edit text; `Escape` blurs).
+- `TvRemoteProvider` / `createTvRemoteDispatcher` / `TvRemoteContext` (#277) attach one root platform key listener
+  (`TVEventHandler` + refcounted `TVEventControl` + `BackHandler`, Android raw `RemoteKeysProvider`, or web DOM
+  `keydown`/`keyup`/`blur`) and fan out `{ input, requirePriorDown }` to active subscribers with throwing-subscriber
+  isolation and support for `TextEntryBoundary` mounted above or below the provider. `useTvKeySource(onInput)` subscribes
+  to the shared dispatcher when inside `TvRemoteProvider` and falls back to a direct platform listener outside it.
+- Web keyboard guards (#136, #139): `subscribeWebKeys` drops IME composition events (`isComposing`, `Process`,
+  `keyCode === 229`), auto-repeats, and modifier shortcuts, while letting editable targets edit text (`Escape` blurs).
+  `isEditableWebTarget(target)` detects `<input>`/`<textarea>`/`<select>`, `contentEditable` (`true`/`plaintext-only`),
+  and ARIA `textbox`/`searchbox`/`combobox` roles for reuse by desktop/feature hotkeys.
+- `createTouchHoverGuard(windowMs = 600)` (#139) suppresses synthetic post-touch hover events on hybrid devices,
+  handling non-monotonic timestamps and `windowMs <= 0`.
+- `TvFocusAnchor` (#186) renders a 1×1 transparent focusable `View` (`hasTVPreferredFocus` default `true`,
+  `accessible={false}`, `pointerEvents="none"`) so empty/loading TV screens retain focus and Menu/Back never fall
+  through to tvOS home.
 - `createAndroidKeyAdapter` tracks active `keyCode`s per `Key` and `{ rawDownAt, reportedDownAt }` so JS stalls never
   turn a short tap into `long` or crush a real hold into `press`. Standalone `BackHandler` events without a preceding
   raw `KEYCODE_BACK` cycle synthesize `{ key: 'back', action: 'press' }`.
@@ -39,8 +50,9 @@ React components for react-native and react-native-web, design tokens and TV foc
   to memoized `<Row>` and quantizing `source.prefetch` by `max(1, pool >> 1)`). It subscribes to both `index` and
   `store.isActive(listId)`, suppressing `<FocusRing />` (`pointerEvents="none"`, `accessible={false}`) and row
   `selected` state when inactive or empty (`count <= 0`), and clamping `safeIndex` and `safeFocusLine`.
-- Coordinates anchor every `512 * pool` rows; only single-row steps (`|delta| === 1` on the same `source`) animate with
-  `Animated.timing`, while page jumps and source swaps snap via `setValue`.
+- Coordinates anchor every `512 * pool` rows; only single-row steps (`|delta| === 1` on the same `source`, when not
+  held and `useTheme().reduceMotion` is `false`) animate with `Animated.timing`, while jumps, holds, source swaps, and
+  `reduceMotion` call `stopAnimation()` before snapping via `setValue` (#152).
 - `onFrameCommitted(index, window)` fires on the first animation frame after a focused-index commit.
 - `createSyntheticSource(count, make, cacheSize)` computes items on demand with a small LRU.
 - `ElvList` (`src/list/ElvList.tsx`) wraps `ListSource<T>` across form factors: delegates to `TvList` on `'tv'`

@@ -357,4 +357,50 @@ describe('loadSeriesEpisodes', () => {
       'secret-missing',
     );
   });
+
+  it('chunks and yields between episode batches when a series exceeds batchSize', async () => {
+    const data = sampleCatalog();
+    data.seriesInfo['300'] = {
+      seasons: [{ season_number: 1 }],
+      episodes: {
+        '1': Array.from({ length: 25 }, (_, i) => ({
+          id: String(9000 + i),
+          episode_num: i + 1,
+          title: `Ep ${i + 1}`,
+          container_extension: 'mp4',
+        })),
+      },
+    };
+    const e = await setup(data);
+    await run(e);
+
+    const events: string[] = [];
+    const wrappedDb = {
+      ...e.db,
+      transaction: <T>(fn: (tx: typeof e.db) => Promise<T>) =>
+        e.db.transaction((tx) =>
+          fn({
+            ...tx,
+            batch: async (sql, batchRows) => {
+              if (sql.includes('INSERT INTO episodes')) events.push('batch');
+              return tx.batch(sql, batchRows);
+            },
+          }),
+        ),
+    };
+    const scheduler = {
+      yieldNow: async () => {
+        events.push('yield');
+      },
+    };
+    const r = await loadSeriesEpisodes(
+      e.sourceId,
+      'x:s1:series:300',
+      { ...e.deps, db: wrappedDb, scheduler },
+      { batchSize: 10 },
+    );
+    expect(r).toEqual({ ok: true, value: 25 });
+    expect(events).toEqual(['batch', 'yield', 'batch', 'yield', 'batch', 'yield']);
+    expect(await count(e.db, 'episodes')).toBe(25);
+  });
 });

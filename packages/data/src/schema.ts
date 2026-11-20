@@ -11,6 +11,153 @@ export const OPEN_PRAGMAS = [
   `PRAGMA journal_size_limit = ${JOURNAL_SIZE_LIMIT}`,
 ];
 
+/** Declarative column specification used by {@link openCatalog} to verify and self-heal drifted schemas. */
+export interface ExpectedColumn {
+  readonly name: string;
+  readonly alterDefinition: string;
+}
+
+/**
+ * Expected catalog tables and columns matching {@link MIGRATIONS}, with SQLite-valid
+ * `ALTER TABLE ADD COLUMN` definitions (including safe defaults for `NOT NULL` columns).
+ */
+export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedColumn[]>> = {
+  sources: [
+    { name: 'id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'kind', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'name', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'created_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'settings_json', alterDefinition: "TEXT NOT NULL DEFAULT '{}'" },
+  ],
+  import_runs: [
+    { name: 'id', alterDefinition: 'INTEGER' },
+    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'kind', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'started_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'finished_at', alterDefinition: 'INTEGER' },
+    { name: 'status', alterDefinition: "TEXT NOT NULL DEFAULT 'failed'" },
+    { name: 'error_category', alterDefinition: 'TEXT' },
+    { name: 'error_code', alterDefinition: 'TEXT' },
+    { name: 'counts_json', alterDefinition: 'TEXT' },
+  ],
+  categories: [
+    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'kind', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'provider_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'name', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'name_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'position', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+  ],
+  live: [
+    { name: 'id', alterDefinition: 'INTEGER' },
+    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'provider_id', alterDefinition: 'TEXT' },
+    { name: 'num', alterDefinition: 'INTEGER' },
+    { name: 'name', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'name_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'logo', alterDefinition: 'TEXT' },
+    { name: 'guide_id', alterDefinition: 'TEXT' },
+    { name: 'catchup_days', alterDefinition: 'INTEGER' },
+    { name: 'url_template', alterDefinition: 'TEXT' },
+    { name: 'headers_json', alterDefinition: 'TEXT' },
+    { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+  ],
+  movies: [
+    { name: 'id', alterDefinition: 'INTEGER' },
+    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'provider_id', alterDefinition: 'TEXT' },
+    { name: 'name', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'name_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'logo', alterDefinition: 'TEXT' },
+    { name: 'rating', alterDefinition: 'REAL' },
+    { name: 'year', alterDefinition: 'INTEGER' },
+    { name: 'extension', alterDefinition: 'TEXT' },
+    { name: 'added', alterDefinition: 'INTEGER' },
+    { name: 'url_template', alterDefinition: 'TEXT' },
+    { name: 'headers_json', alterDefinition: 'TEXT' },
+    { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+  ],
+  series: [
+    { name: 'id', alterDefinition: 'INTEGER' },
+    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'provider_id', alterDefinition: 'TEXT' },
+    { name: 'name', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'name_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'cover', alterDefinition: 'TEXT' },
+    { name: 'plot', alterDefinition: 'TEXT' },
+    { name: 'rating', alterDefinition: 'REAL' },
+    { name: 'year', alterDefinition: 'INTEGER' },
+    { name: 'last_modified', alterDefinition: 'INTEGER' },
+    { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+  ],
+  episodes: [
+    { name: 'id', alterDefinition: 'INTEGER' },
+    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'provider_id', alterDefinition: 'TEXT' },
+    { name: 'series_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'season', alterDefinition: 'INTEGER' },
+    { name: 'episode', alterDefinition: 'INTEGER' },
+    { name: 'title', alterDefinition: 'TEXT' },
+    { name: 'extension', alterDefinition: 'TEXT' },
+    { name: 'duration_sec', alterDefinition: 'INTEGER' },
+    { name: 'url_template', alterDefinition: 'TEXT' },
+    { name: 'headers_json', alterDefinition: 'TEXT' },
+    { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+  ],
+  placements: [
+    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'kind', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'item_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'category_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'position', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+  ],
+  guide_channels: [
+    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'guide_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'name', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'name_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'icon', alterDefinition: 'TEXT' },
+    { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+  ],
+  channel_guide: [
+    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'channel_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'guide_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+  ],
+  programmes: [
+    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'guide_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'start', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'stop', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'sub_title', alterDefinition: 'TEXT' },
+    { name: 'description', alterDefinition: 'TEXT' },
+    { name: 'categories_json', alterDefinition: 'TEXT' },
+    { name: 'episode_num', alterDefinition: 'TEXT' },
+    { name: 'icon', alterDefinition: 'TEXT' },
+    { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+  ],
+  programmes_next: [
+    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'guide_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'start', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'stop', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'sub_title', alterDefinition: 'TEXT' },
+    { name: 'description', alterDefinition: 'TEXT' },
+    { name: 'categories_json', alterDefinition: 'TEXT' },
+    { name: 'episode_num', alterDefinition: 'TEXT' },
+    { name: 'icon', alterDefinition: 'TEXT' },
+    { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+  ],
+};
+
 /** Ordered migrations; entry `i` upgrades a database from `user_version` `i` to `i + 1`. */
 export const MIGRATIONS: readonly string[] = [
   `

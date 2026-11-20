@@ -7,7 +7,13 @@ import {
 } from '@elv/sources';
 import { importM3u } from './import-m3u';
 import { checkAbort, notify, performRun, type RunCtx, Stop, unwrap } from './import-run';
-import type { ImportDeps, ImportOptions, ImportProgress, ImportSummary } from './import-types';
+import {
+  DEFAULT_BATCH_SIZE,
+  type ImportDeps,
+  type ImportOptions,
+  type ImportProgress,
+  type ImportSummary,
+} from './import-types';
 import { sourceExists } from './runs';
 import {
   getSource,
@@ -326,12 +332,27 @@ export async function loadSeriesEpisodes(
         'SELECT key FROM episodes WHERE source_id = ? AND series_key = ?',
         [sourceId, seriesKey],
       );
-      await writeEpisodes(tx, sourceId, seriesKey, current.run_id, entries);
+      const batchSize = Math.max(1, opts.batchSize ?? DEFAULT_BATCH_SIZE);
+      for (let i = 0; i < entries.length; i += batchSize) {
+        checkAbort({ signal: opts.signal });
+        await writeEpisodes(
+          tx,
+          sourceId,
+          seriesKey,
+          current.run_id,
+          entries.slice(i, i + batchSize),
+        );
+        if (i + batchSize < entries.length) await deps.scheduler.yieldNow();
+      }
       const keep = new Set(entries.map((e) => e.key));
-      await tx.batch(
-        'DELETE FROM episodes WHERE source_id = ? AND key = ?',
-        previous.filter((p) => !keep.has(p.key)).map((p) => [sourceId, p.key]),
-      );
+      const stale = previous.filter((p) => !keep.has(p.key)).map((p) => [sourceId, p.key]);
+      for (let i = 0; i < stale.length; i += batchSize) {
+        await tx.batch(
+          'DELETE FROM episodes WHERE source_id = ? AND key = ?',
+          stale.slice(i, i + batchSize),
+        );
+        if (i + batchSize < stale.length) await deps.scheduler.yieldNow();
+      }
       return 'ok';
     });
     if (stored === 'no-source') return err(elvError('storage', 'source-not-found'));

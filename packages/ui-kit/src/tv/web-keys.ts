@@ -2,9 +2,11 @@ import type { Key, KeyInput } from '@elv/focus-core';
 import type { TextEntryController } from './text-entry';
 
 /** Minimal DOM `KeyboardEvent` shape used on `Platform.OS === 'web'` (no DOM lib required in `tsconfig.ui.json`). */
-interface WebKeyEventLike {
+export interface WebKeyEventLike {
   key: string;
   repeat?: boolean;
+  isComposing?: boolean;
+  keyCode?: number;
   ctrlKey?: boolean;
   altKey?: boolean;
   metaKey?: boolean;
@@ -24,6 +26,9 @@ export interface WebKeyWindowLike {
 interface EditableElementLike {
   tagName?: unknown;
   isContentEditable?: unknown;
+  contentEditable?: unknown;
+  role?: unknown;
+  getAttribute?: (name: string) => unknown;
   blur?: () => void;
 }
 
@@ -74,26 +79,53 @@ const SCROLL_KEYS = new Set([
   'PageDown',
 ]);
 
+const EDITABLE_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
+const EDITABLE_ROLES = new Set(['textbox', 'searchbox', 'combobox']);
+const IME_KEY_CODE = 229;
+
+function isImeComposingEvent(event: WebKeyEventLike): boolean {
+  return event.isComposing === true || event.key === 'Process' || event.keyCode === IME_KEY_CODE;
+}
+
+function isEditableRoleValue(value: unknown): boolean {
+  return typeof value === 'string' && EDITABLE_ROLES.has(value.trim().toLowerCase());
+}
+
+/**
+ * Reports whether a DOM event target or focused element is an editable text control (`<input>`, `<textarea>`,
+ * `<select>`, `contentEditable`, or an ARIA `textbox`/`searchbox`/`combobox`), so global keyboard shortcuts and remote
+ * key mappers avoid hijacking text entry (#136, #139).
+ */
+export function isEditableWebTarget(target: unknown): boolean {
+  if (typeof target !== 'object' || target === null) return false;
+  const el = target as EditableElementLike;
+  if (el.isContentEditable === true) return true;
+  if (typeof el.contentEditable === 'string') {
+    const mode = el.contentEditable.trim().toLowerCase();
+    if (mode === 'true' || mode === 'plaintext-only') return true;
+  }
+  if (typeof el.tagName === 'string' && EDITABLE_TAGS.has(el.tagName.toUpperCase())) return true;
+  if (isEditableRoleValue(el.role)) return true;
+  if (typeof el.getAttribute === 'function' && isEditableRoleValue(el.getAttribute('role'))) {
+    return true;
+  }
+  return false;
+}
+
 function findEditable(event: WebKeyEventLike, win: WebKeyWindowLike): EditableElementLike | null {
   for (const candidate of [event.target, win.document?.activeElement]) {
-    if (typeof candidate !== 'object' || candidate === null) continue;
-    const el = candidate as EditableElementLike;
-    if (el.isContentEditable === true) return el;
-    if (typeof el.tagName === 'string') {
-      const tag = el.tagName.toUpperCase();
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return el;
-    }
+    if (isEditableWebTarget(candidate)) return candidate as EditableElementLike;
   }
   return null;
 }
 
 /**
- * Subscribes to DOM `keydown`/`keyup`/`blur` on `win`, dropping auto-repeats (`event.repeat`) and modifier shortcuts,
- * preserving native editing inside `<input>`/`<textarea>`, and canceling held keys on blur or cleanup.
+ * Subscribes to DOM `keydown`/`keyup`/`blur` on `win`, dropping IME composition events, auto-repeats (`event.repeat`),
+ * and modifier shortcuts, preserving native editing inside editable targets, and canceling held keys on blur or cleanup.
  */
 export function subscribeWebKeys(
   win: WebKeyWindowLike,
-  textEntry: TextEntryController,
+  textEntry: Pick<TextEntryController, 'isActive'>,
   now: () => number,
   emit: (input: KeyInput) => void,
 ): () => void {
@@ -109,6 +141,7 @@ export function subscribeWebKeys(
 
   const onKeyDown = (event: WebKeyEventLike): void => {
     if (!event || typeof event.key !== 'string') return;
+    if (isImeComposingEvent(event)) return;
     if (event.ctrlKey || event.altKey || event.metaKey) return;
     const editable = findEditable(event, win);
     if (editable !== null && !textEntry.isActive()) {
@@ -137,6 +170,7 @@ export function subscribeWebKeys(
 
   const onKeyUp = (event: WebKeyEventLike): void => {
     if (!event || typeof event.key !== 'string') return;
+    if (isImeComposingEvent(event)) return;
     if (event.key === 'Escape' && blurredInputOnEscape) {
       blurredInputOnEscape = false;
       return;

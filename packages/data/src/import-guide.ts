@@ -158,6 +158,7 @@ function flushOpen(c: RunCtx, st: GuideState): Row[] {
 
 async function writeProgrammes(c: RunCtx, st: GuideState, rows: Row[]): Promise<void> {
   for (let i = 0; i < rows.length; i += c.batchSize) {
+    checkAbort(c);
     await c.db.batch(STAGE_PROGRAMME_SQL, rows.slice(i, i + c.batchSize));
     await c.deps.scheduler.yieldNow();
   }

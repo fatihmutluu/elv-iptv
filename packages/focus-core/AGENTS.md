@@ -36,8 +36,8 @@ Focus graph, key model and EPG cursor model.
   most one and moves the next slot to the first future one arithmetically.
 
 ## Focus model (`list.ts`, `scope.ts`, `store.ts`)
-- Lists are index-based: a `ListState` is `count`, `index`, `orientation`, `pageSize`; a 100,000-item list allocates
-  nothing per item and `getState()` is O(scopes + lists).
+- Lists are index-based: a `ListState` is `count`, `index`, `orientation`, `pageSize`, plus optional `fallbackId`; a
+  100,000-item list allocates nothing per item and `getState()` is O(scopes + lists).
 - `moveList`: arrows along the orientation move one step on `press`/`repeat`, one page on `long`; `channelUp` (towards
   0) and `channelDown` always page. Moves clamp; a move that cannot change the index is `edge` with the side; a page
   that partly fits moves to the end. Empty lists and the other axis are `ignored`.
@@ -46,4 +46,15 @@ Focus graph, key model and EPG cursor model.
 - The index of every list is its focus memory: `popScope` restores the opener as it was, clamped if `setCount`
   shrank it meanwhile. `setCount`, `focus(id, index?)` and `activate(id)` address the topmost list with that id;
   `isActive(id)` is true iff `id` is the top scope's `active` list.
+- Empty-panel focus recovery: `resolveFallbackId(scope, fromId)` follows `fallbackId` links within the same scope with
+  cycle protection, preferring the first reachable sibling with `count > 0` (or the immediate valid non-self sibling
+  if all fallbacks are empty). When `setCount(id, 0)` empties a scope's `active` list or `popScope()` restores a scope
+  whose active list has `count === 0`, focus automatically recovers to the resolved fallback sibling (preserving its
+  focus memory) and enqueues a `FocusChange` for it; emptying a non-active list never steals focus.
 - `subscribe` listeners run FIFO on index, active-list, emptiness, and `pushScope`/`popScope` transitions.
+
+## Select debounce (`select-guard.ts`)
+- `createSelectDebounceGuard({ windowMs = 220 })` returns `{ allow(nowMs, key = ''), reset() }` to suppress duplicate
+  Select bursts arriving within `windowMs` for the same key. It never reads a wall clock; callers pass `nowMs`.
+- Allows immediately when `nowMs - lastAt >= windowMs`, when `key` changes, after `reset()`, or on non-monotonic
+  timestamps (`nowMs < lastAt`, which reset state). `windowMs <= 0` (or non-finite) disables debouncing.

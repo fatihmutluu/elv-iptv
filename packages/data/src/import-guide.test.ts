@@ -324,6 +324,45 @@ describe('guide yields', () => {
     expect(e.scheduler.count - before).toBeGreaterThanOrEqual(4);
     expect(await titles(e)).toHaveLength(450);
   });
+
+  it('yields between guide_channels commit chunks when channels exceed batchSize', async () => {
+    const parts = Array.from({ length: 25 }, (_, i) => channelXml(`ch-${i}`, `Channel ${i}`));
+    parts.push(channelXml('haber1.tr', 'Haber Bir'));
+    parts.push(programmeXml('haber1.tr', HOUR, 1, 'Show'));
+    const e = await ready(tv(...parts));
+    const events: string[] = [];
+    const wrappedDb = {
+      ...e.db,
+      transaction: <T>(fn: (tx: typeof e.db) => Promise<T>) =>
+        e.db.transaction((tx) =>
+          fn({
+            ...tx,
+            batch: async (sql, batchRows) => {
+              if (sql.includes('INSERT INTO guide_channels')) events.push('batch');
+              return tx.batch(sql, batchRows);
+            },
+          }),
+        ),
+    };
+    const scheduler = {
+      yieldNow: async () => {
+        events.push('yield');
+      },
+    };
+    const r = await importGuide(
+      e.sourceId,
+      { ...e.deps, db: wrappedDb, scheduler },
+      { now: NOW, batchSize: 10 },
+    );
+    expect(r.ok).toBe(true);
+    const firstBatch = events.indexOf('batch');
+    const lastBatch = events.lastIndexOf('batch');
+    expect(firstBatch).toBeGreaterThanOrEqual(0);
+    expect(lastBatch).toBeGreaterThan(firstBatch);
+    const commitSlice = events.slice(firstBatch, lastBatch + 1);
+    expect(commitSlice).toEqual(['batch', 'yield', 'batch', 'yield', 'batch']);
+    expect(await rows(e, 'SELECT COUNT(*) AS n FROM guide_channels')).toEqual([{ n: 26 }]);
+  });
 });
 
 describe('xtream guide', () => {

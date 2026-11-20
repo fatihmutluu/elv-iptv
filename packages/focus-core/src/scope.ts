@@ -88,3 +88,27 @@ export function withCount(
     false,
   );
 }
+
+/**
+ * Follows `fallbackId` links from `fromId` within `scope` while guarding against cycles.
+ * Prefers the first reachable sibling with `count > 0`, falling back to the immediate valid
+ * non-self sibling when every reachable fallback is empty.
+ */
+export function resolveFallbackId(scope: ScopeState, fromId: string): string | undefined {
+  const start = scope.lists[fromId];
+  if (!start) return undefined;
+  let current: ListState = start;
+  const visited = new Set<string>([fromId]);
+  let firstValid: string | undefined;
+  while (current.fallbackId !== undefined) {
+    const nextId: string = current.fallbackId;
+    if (visited.has(nextId)) break;
+    const next = scope.lists[nextId];
+    if (!next) break;
+    visited.add(nextId);
+    if (firstValid === undefined) firstValid = nextId;
+    if (next.count > 0) return nextId;
+    current = next;
+  }
+  return firstValid;
+}
