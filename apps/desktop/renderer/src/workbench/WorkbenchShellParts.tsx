@@ -6,8 +6,50 @@ import {
   StyleSheet,
   Text,
   type TextStyle,
+  View,
   type ViewStyle,
 } from 'react-native';
+import type { WorkbenchDeviceFamily, WorkbenchDeviceId } from './presets.ts';
+
+/** Active Workbench catalog backing mode (`demo` in-memory vs `live` local HTTP bridge). */
+export type WorkbenchDataMode = 'demo' | 'live';
+
+/** Connection status for the dev-only local Workbench live-data HTTP bridge. */
+export type WorkbenchBridgeStatus = 'checking' | 'ready' | 'offline';
+
+const DATA_MODE_STORAGE_KEY = 'elv.workbench.dataMode';
+
+/** Ordered 4-way device family switcher targets for the Workbench top bar. */
+export const WORKBENCH_FAMILY_TARGETS: ReadonlyArray<{
+  readonly family: WorkbenchDeviceFamily;
+  readonly label: string;
+  readonly defaultId: WorkbenchDeviceId;
+}> = [
+  { family: 'tv', label: 'TV', defaultId: 'tv' },
+  { family: 'desktop', label: 'PC', defaultId: 'desktop' },
+  { family: 'tablet', label: 'Tablet', defaultId: 'tablet-landscape' },
+  { family: 'phone', label: 'Phone', defaultId: 'phone-portrait' },
+];
+
+/** Reads the persisted Workbench data mode, defaulting safely to `'demo'` if unavailable or unconfigured. */
+export function readInitialDataMode(hasBridgeConfig: boolean): WorkbenchDataMode {
+  if (!hasBridgeConfig || typeof localStorage === 'undefined') return 'demo';
+  try {
+    return localStorage.getItem(DATA_MODE_STORAGE_KEY) === 'live' ? 'live' : 'demo';
+  } catch {
+    return 'demo';
+  }
+}
+
+/** Persists the active Workbench data mode to `localStorage` without throwing in restricted contexts. */
+export function persistDataMode(mode: WorkbenchDataMode): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(DATA_MODE_STORAGE_KEY, mode);
+  } catch {
+    // Ignore storage quota or private-mode access errors.
+  }
+}
 
 /** Height of the Workbench top control strip. */
 export const TOPBAR_HEIGHT = 52;
@@ -65,6 +107,43 @@ export function WorkbenchBarButton(props: {
         {props.label}
       </Text>
     </Pressable>
+  );
+}
+
+/** Centered status or offline notice displayed inside the device frame while Live Data connects. */
+export function WorkbenchBridgeNotice(
+  props:
+    | { readonly status: 'checking' }
+    | {
+        readonly status: 'offline';
+        readonly onRetry: () => void;
+        readonly onSwitchToDemo: () => void;
+      },
+): ReactElement {
+  if (props.status === 'checking') {
+    return (
+      <View style={workbenchShellStyles.bridgeNoticeWrap}>
+        <View style={workbenchShellStyles.bridgeNoticeCard}>
+          <Text style={workbenchShellStyles.bridgeNoticeTitle}>
+            Connecting to local live data bridge…
+          </Text>
+        </View>
+      </View>
+    );
+  }
+  return (
+    <View style={workbenchShellStyles.bridgeNoticeWrap}>
+      <View style={workbenchShellStyles.bridgeNoticeCard}>
+        <Text style={workbenchShellStyles.bridgeNoticeTitle}>Live data bridge unavailable</Text>
+        <Text style={workbenchShellStyles.bridgeNoticeBody}>
+          Live Data requires launching Workbench via pnpm dev:ui (not standalone expo start).
+        </Text>
+        <View style={workbenchShellStyles.bridgeNoticeActions}>
+          <WorkbenchBarButton variant="tool" label="Retry" onPress={props.onRetry} />
+          <WorkbenchBarButton label="Switch to Demo" active onPress={props.onSwitchToDemo} />
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -162,5 +241,46 @@ export const workbenchShellStyles = StyleSheet.create({
     borderWidth: 1.5,
     borderStyle: 'dashed',
     borderColor: 'rgba(250, 204, 21, 0.55)',
+  },
+  bridgeNoticeWrap: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#07090F',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  bridgeNoticeCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#0F131D',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    padding: 20,
+    alignItems: 'center',
+    gap: 10,
+  },
+  bridgeNoticeTitle: {
+    ...SANS_FONT,
+    color: '#F7F8FA',
+    fontSize: 14.5,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  bridgeNoticeBody: {
+    ...SANS_FONT,
+    color: '#94A3B8',
+    fontSize: 12.5,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  bridgeNoticeActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 6,
   },
 });
