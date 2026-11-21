@@ -79,6 +79,7 @@ describe('config', () => {
       seekCoalesceMs: 80,
       seekSettleTimeoutMs: 12000,
       liveStalePauseMs: 20000,
+      liveEdgeToleranceMs: 5000,
     });
   });
 
@@ -243,7 +244,7 @@ describe('engine events', () => {
 
   it('follows paused and ended states', async () => {
     const { engine, service } = setup();
-    const t = service.tune(tuneReq('A'));
+    const t = service.tune(tuneReq('A', { kind: 'vod' }));
     await flush();
     engine.emit({ attempt: t, type: 'state', state: 'paused' });
     expect(service.getState().status).toEqual({ kind: 'paused' });

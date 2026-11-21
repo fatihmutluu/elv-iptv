@@ -24,7 +24,7 @@ export interface ImportOptions {
   signal?: AbortSignal;
   /** Advisory; exceptions it throws are ignored and never change the outcome of a run. */
   onProgress?: (p: ImportProgress) => void;
-  /** Rows per write batch (default 500); the scheduler yields after every batch. */
+  /** Rows per write batch (default 200); the scheduler yields after every batch. */
   batchSize?: number;
 }
 
@@ -56,4 +56,4 @@ export interface ImportSummary {
 }
 
 /** Default rows per write batch. */
-export const DEFAULT_BATCH_SIZE = 500;
+export const DEFAULT_BATCH_SIZE = 200;

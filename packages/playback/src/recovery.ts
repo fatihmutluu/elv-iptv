@@ -7,9 +7,10 @@ import { createStallWatchdog } from './stall-watchdog';
 export { nextLimitDelay };
 
 /**
- * @internal Builds the recovery ladder (spec section 5.4), bounded stall watchdog (`#108`),
- * live stale-pause reload (`#190`), pre-playback `.ts <-> .m3u8` fallback (`#200`),
- * paused `surface-lost` parking (`#280`), and provider connection-limit backoff (section 5.5).
+ * @internal Builds the recovery ladder (spec section 5.4), bounded stall & frame-silence watchdog
+ * (`#108`, `#148`), single-attempt live clean-end reconnect (`#148`), live stale-pause reload
+ * (`#190`), pre-playback `.ts <-> .m3u8` fallback (`#200`), paused `surface-lost` parking (`#280`),
+ * and provider connection-limit backoff (section 5.5).
  */
 export function createRecovery(ctl: ServiceControl): RecoveryHooks {
   const { config } = ctl;
@@ -20,15 +21,44 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
   let pausedAt: number | undefined;
   let deferred = false;
   let errorWhilePaused = false;
+  let liveCleanEndRetried = false;
+  let liveFrozenResetTried = false;
 
   const inBatch = <T>(fn: () => T): T => (ctl.batch !== undefined ? ctl.batch(fn) : fn());
   const isVod = (): boolean => ctl.request()?.kind === 'vod';
+  const hasStream = (): boolean => ctl.stream === undefined || ctl.stream() !== undefined;
+  const canWatchStall = (): boolean =>
+    ctl.getState().status.kind === 'playing' && !paused && !awaitingSurface;
   const positions = createPositionTracker(ctl);
+
+  const reloadLiveEdge = (): boolean =>
+    inBatch(() => {
+      const prevStatus = ctl.getState().status;
+      ctl.nextAttempt();
+      ctl.setStatus({ kind: 'tuning' });
+      if (!ladder.reload()) {
+        ctl.setStatus(prevStatus);
+        return false;
+      }
+      if (ctl.getState().status.kind === 'tuning') ctl.armStartTimeout(ctl.startTimeoutMs());
+      return true;
+    });
 
   const watchdog = createStallWatchdog(
     ctl,
     () => ladder.escalate(undefined, true),
     () => ladder.resetBudgetAndLimit(),
+    () => {
+      if (ctl.request()?.kind === 'live' && !liveFrozenResetTried && hasStream()) {
+        cancelSteps();
+        positions.freeze(false);
+        if (reloadLiveEdge()) {
+          liveFrozenResetTried = true;
+          return;
+        }
+      }
+      ladder.escalate(undefined, true);
+    },
   );
 
   const clearRecoveryTimers = (): void => {
@@ -51,6 +81,8 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
     pausedAt = undefined;
     deferred = false;
     errorWhilePaused = false;
+    liveCleanEndRetried = false;
+    liveFrozenResetTried = false;
   };
 
   const reset = (): void => {
@@ -185,8 +217,28 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
       ladder.commitPendingFormat();
       watchdog.onPlaying(isBudgetUsed(ladder.getBudget(), ladder.getLimit()));
     },
+    onLiveEnded() {
+      const statusKind = ctl.getState().status.kind;
+      if (
+        ctl.request()?.kind !== 'live' ||
+        liveCleanEndRetried ||
+        paused ||
+        awaitingSurface ||
+        statusKind === 'idle' ||
+        statusKind === 'ended' ||
+        statusKind === 'failed' ||
+        statusKind === 'limited' ||
+        !hasStream()
+      ) {
+        return false;
+      }
+      cancelSteps();
+      if (!reloadLiveEdge()) return false;
+      liveCleanEndRetried = true;
+      return true;
+    },
     onClock(anchor) {
-      watchdog.onClock(anchor);
+      watchdog.onClock(anchor, canWatchStall());
       positions.onClock(anchor);
     },
     onError(error) {
@@ -221,8 +273,7 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
       }
     },
     onStall(phase) {
-      const canWatch = ctl.getState().status.kind === 'playing' && !paused && !awaitingSurface;
-      watchdog.onStall(phase, canWatch);
+      watchdog.onStall(phase, canWatchStall());
     },
     onStartTimeout() {
       const budget = ladder.getBudget();

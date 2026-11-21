@@ -1,26 +1,27 @@
 import type { ClockAnchor } from './engine';
 import type { ServiceControl } from './seam';
 
-/** @internal Bounded seek-settle and playback stall watchdog (`#108`). */
+/** @internal Bounded seek-settle, frame-silence, and playback stall watchdog (`#108`, `#148`). */
 export interface StallWatchdog {
   cancel(): void;
   reset(): void;
   onSeek(): void;
-  onClock(anchor: ClockAnchor): void;
+  onClock(anchor: ClockAnchor, canWatch: boolean): void;
   onPlaying(budgetUsed: boolean): void;
   onNonPlayingState(): void;
   onStall(phase: 'start' | 'end', canWatch: boolean): void;
 }
 
 /**
- * @internal Manages the 4 s mid-stream stall timer, the 30 s stable-playback budget restore timer,
- * and the bounded seek-settle deadline so seeks neither falsely trigger stalls nor permanently
- * blind stall detection.
+ * @internal Manages the 4 s mid-stream stall timer, live frozen-clock frame-silence detection,
+ * the 30 s stable-playback budget restore timer, and the bounded seek-settle deadline so seeks
+ * neither falsely trigger stalls nor permanently blind stall detection.
  */
 export function createStallWatchdog(
   ctl: ServiceControl,
   onStallEscalate: () => void,
   onStableRestore: () => void,
+  onFrozenClock: () => void,
 ): StallWatchdog {
   const { config } = ctl;
   let stallTimer: unknown;
@@ -28,10 +29,17 @@ export function createStallWatchdog(
   let seekSettleTimer: unknown;
   let seekSettling = false;
   let stalledDuringSeek = false;
+  let lastClockPosMs: number | undefined;
+  let frozenSinceMs: number | undefined;
 
   const clear = (handle: unknown): undefined => {
     if (handle !== undefined) ctl.clearTimer(handle);
     return undefined;
+  };
+
+  const clearFrozenClock = (): void => {
+    lastClockPosMs = undefined;
+    frozenSinceMs = undefined;
   };
 
   const clearSeekSettle = (): void => {
@@ -45,6 +53,7 @@ export function createStallWatchdog(
     stableTimer = clear(stableTimer);
     seekSettleTimer = clear(seekSettleTimer);
     stalledDuringSeek = false;
+    clearFrozenClock();
   };
 
   return {
@@ -58,6 +67,7 @@ export function createStallWatchdog(
     onSeek() {
       stallTimer = clear(stallTimer);
       seekSettleTimer = clear(seekSettleTimer);
+      clearFrozenClock();
       seekSettling = true;
       stalledDuringSeek = false;
       seekSettleTimer = ctl.setTimer(() => {
@@ -69,9 +79,45 @@ export function createStallWatchdog(
       }, config.seekSettleTimeoutMs);
     },
 
-    onClock(anchor) {
-      if (seekSettling && !stalledDuringSeek && anchor.rate > 0) {
-        clearSeekSettle();
+    onClock(anchor, canWatch) {
+      if (seekSettling) {
+        if (!stalledDuringSeek && anchor.rate > 0) {
+          clearSeekSettle();
+        } else {
+          clearFrozenClock();
+          return;
+        }
+      }
+      if (
+        !canWatch ||
+        ctl.request()?.kind !== 'live' ||
+        ctl.getState().firstFrameAt === undefined ||
+        !(anchor.rate > 0) ||
+        !Number.isFinite(anchor.rate) ||
+        !Number.isFinite(anchor.positionMs) ||
+        !Number.isFinite(anchor.atMs)
+      ) {
+        clearFrozenClock();
+        return;
+      }
+      if (
+        lastClockPosMs === undefined ||
+        frozenSinceMs === undefined ||
+        anchor.positionMs !== lastClockPosMs
+      ) {
+        lastClockPosMs = anchor.positionMs;
+        frozenSinceMs = anchor.atMs;
+        return;
+      }
+      if (anchor.atMs < frozenSinceMs) {
+        frozenSinceMs = anchor.atMs;
+        return;
+      }
+      if (anchor.atMs - frozenSinceMs >= config.liveStallWindowMs) {
+        clearFrozenClock();
+        stallTimer = clear(stallTimer);
+        stableTimer = clear(stableTimer);
+        onFrozenClock();
       }
     },
 
@@ -79,6 +125,7 @@ export function createStallWatchdog(
       stallTimer = clear(stallTimer);
       stableTimer = clear(stableTimer);
       clearSeekSettle();
+      clearFrozenClock();
       if (!budgetUsed) return;
       stableTimer = ctl.setTimer(() => {
         stableTimer = undefined;
@@ -88,6 +135,7 @@ export function createStallWatchdog(
 
     onNonPlayingState() {
       stableTimer = clear(stableTimer);
+      clearFrozenClock();
     },
 
     onStall(phase, canWatch) {

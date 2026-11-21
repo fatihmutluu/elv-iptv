@@ -1,6 +1,6 @@
 import { type ElvError, elvError, type Result } from '@elv/domain';
 import { createWorkingFormatCache } from './backoff';
-import { positionAt } from './clock';
+import { isAtLiveEdge, positionAt } from './clock';
 import type { PlaybackConfig } from './config';
 import { type AttemptToken, EMPTY_TRACKS, type PlayerEngine, type StreamRequest } from './engine';
 import { createRecovery } from './recovery';
@@ -77,7 +77,13 @@ export function createPlaybackServiceWith(
     const now = clock.now();
     const pos = positionAt(anchor, now);
     if (current?.kind === 'vod') lastVodPositionMs = pos;
-    store.update({ anchor: { ...anchor, positionMs: pos, atMs: now, rate: 0 } });
+    const frozen = { ...anchor, positionMs: pos, atMs: now, rate: 0 };
+    store.update({
+      anchor: frozen,
+      ...(current?.kind === 'live'
+        ? { atLiveEdge: isAtLiveEdge(frozen, now, config.liveEdgeToleranceMs) }
+        : {}),
+    });
   };
 
   const stopEngine = (): void => {
@@ -170,6 +176,7 @@ export function createPlaybackServiceWith(
       store,
       seekCoalescer,
       hooks,
+      liveEdgeToleranceMs: config.liveEdgeToleranceMs,
       reconcileTracks: (t) => trackPrefs.reconcile(t),
       currentRequest: () => current,
       setLastVodPosition: (ms) => {
@@ -260,7 +267,7 @@ export function createPlaybackServiceWith(
       stopEngine();
       trackPrefs.reset();
       lastVodPositionMs = undefined;
-      const { anchor: _a, ...rest } = state();
+      const { anchor: _a, atLiveEdge: _l, ...rest } = state();
       store.replace({ ...rest, status: { kind: 'idle' }, tracks: EMPTY_TRACKS });
     },
     play() {
@@ -309,8 +316,13 @@ export function createPlaybackServiceWith(
       );
       if (clamped === undefined) return;
       store.batch(() => {
+        const now = clock.now();
+        const optimistic = buildOptimisticSeekAnchor(clamped, now, statusKind, state().anchor);
         store.update({
-          anchor: buildOptimisticSeekAnchor(clamped, clock.now(), statusKind, state().anchor),
+          anchor: optimistic,
+          ...(current?.kind === 'live'
+            ? { atLiveEdge: isAtLiveEdge(optimistic, now, config.liveEdgeToleranceMs) }
+            : {}),
         });
         if (current?.kind === 'vod') lastVodPositionMs = clamped;
         const attemptBefore = state().attempt;

@@ -43,6 +43,8 @@ export interface PlaybackState {
   item?: string;
   accountKey?: string;
   anchor?: ClockAnchor;
+  /** Whether a live stream is currently within the live-edge grace window (`#284`). */
+  atLiveEdge?: boolean;
   tuneAt?: number;
   firstFrameAt?: number;
   staleEventsDropped: number;

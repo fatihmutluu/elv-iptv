@@ -1,5 +1,5 @@
 import { elvError, err, ok, type Result, type SqlDriver } from '@elv/domain';
-import { recoverRuns } from './runs';
+import { reapOrphanedRuns } from './runs';
 import { EXPECTED_FTS_TABLES, EXPECTED_TABLE_COLUMNS, MIGRATIONS, OPEN_PRAGMAS } from './schema';
 
 /** Schema version this build writes and understands (`PRAGMA user_version`). */
@@ -41,8 +41,8 @@ async function verifyAndHealSchema(db: SqlDriver): Promise<Result<void>> {
  * expected table columns via `PRAGMA table_info` and self-heals any missing columns in a single transaction.
  * Returns `storage/schema-too-new` for a database written by a newer build, `storage/schema-corrupt` if a required
  * table is missing at `SCHEMA_VERSION`, and `storage/migration-failed` (rolled back, `user_version` unchanged) when
- * a migration throws. Runs left `running` by a crashed process are marked `failed` / `interrupted` (no import can
- * be running while the catalog is being opened).
+ * a migration throws. Runs left `running` by a crashed process are marked `failed` / `interrupted` and leftover
+ * staged rows in `programmes_next` are purged in one transaction (no import can be running while the catalog opens).
  */
 export async function openCatalog(
   db: SqlDriver,
@@ -65,7 +65,7 @@ export async function openCatalog(
     }
     const verified = await verifyAndHealSchema(db);
     if (!verified.ok) return verified;
-    await recoverRuns(db, clock());
+    await reapOrphanedRuns(db, clock());
     return ok(undefined);
   } catch (error) {
     return err(

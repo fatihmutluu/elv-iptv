@@ -189,18 +189,25 @@ describe('openCatalog', () => {
     expect(await db.all('PRAGMA foreign_keys')).toEqual([{ foreign_keys: 1 }]);
   });
 
-  it('recovers interrupted runs after a migration too', async () => {
+  it('reaps interrupted runs and purges programmes_next in one transaction after a migration too', async () => {
     const { db } = testDb();
     const statements: string[] = [];
     const recording: SqlDriver = {
       ...db,
-      run: (sql, params) => {
-        statements.push(sql);
-        return db.run(sql, params);
-      },
+      transaction: (fn) =>
+        db.transaction((tx) =>
+          fn({
+            ...tx,
+            run: (sql, params) => {
+              statements.push(sql);
+              return tx.run(sql, params);
+            },
+          }),
+        ),
     };
     expect((await openCatalog(recording)).ok).toBe(true);
     expect(statements.some((s) => s.includes("error_code = 'interrupted'"))).toBe(true);
+    expect(statements.some((s) => s.includes('DELETE FROM programmes_next'))).toBe(true);
   });
 
   it('refuses a database written by a newer version', async () => {
@@ -319,8 +326,8 @@ describe('openCatalog', () => {
     const spy: SqlDriver = {
       ...db,
       transaction: async (fn) => {
-        repairTxCount += 1;
-        return db.transaction((tx) =>
+        const before = txAlters.length;
+        const result = await db.transaction((tx) =>
           fn({
             ...tx,
             exec: async (sql) => {
@@ -329,6 +336,8 @@ describe('openCatalog', () => {
             },
           }),
         );
+        if (txAlters.length > before) repairTxCount += 1;
+        return result;
       },
     };
 
@@ -404,7 +413,8 @@ describe('openCatalog', () => {
     };
 
     expect((await openCatalog(spy)).ok).toBe(true);
-    expect(txCalls).toBe(0);
+    // Only the startup reapOrphanedRuns transaction runs on a healthy database; zero ALTER TABLE statements.
+    expect(txCalls).toBe(1);
     expect(execCalls.filter((sql) => sql.toUpperCase().includes('ALTER TABLE'))).toEqual([]);
   });
 });
