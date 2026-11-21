@@ -44,8 +44,10 @@ import {
   getSource,
   type M3uSourceInput,
   removeSource,
+  type SourceAccountMeta,
   type SourceKind,
   type SourceRecord,
+  type SourceSettings,
   type XtreamSourceInput,
 } from './sources';
 import { createPlaytimeResolverCache, type StreamRequest } from './stream-resolver';
@@ -105,6 +107,7 @@ export interface SourceRow {
   name: string;
   createdAt: number;
   needsImport: boolean;
+  accountMeta?: SourceAccountMeta;
 }
 
 /** Input of {@link CatalogService.addSource}. */
@@ -147,15 +150,31 @@ export interface CatalogService {
   close(): Promise<void>;
 }
 
+function parseAccountMeta(settingsJson: string): SourceAccountMeta | undefined {
+  try {
+    const meta = (JSON.parse(settingsJson) as Partial<SourceSettings> | null)?.accountMeta;
+    if (meta === null || typeof meta !== 'object') return undefined;
+    const out: SourceAccountMeta = {};
+    if (typeof meta.isTrial === 'boolean') out.isTrial = meta.isTrial;
+    if (typeof meta.expiresAt === 'number' && Number.isFinite(meta.expiresAt)) {
+      out.expiresAt = meta.expiresAt;
+    }
+    return out.isTrial !== undefined || out.expiresAt !== undefined ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const row = (r: SourceRecord): SourceRow => ({
   id: r.id,
   kind: r.kind,
   name: r.name,
   createdAt: r.createdAt,
   needsImport: true,
+  ...(r.settings.accountMeta === undefined ? {} : { accountMeta: r.settings.accountMeta }),
 });
 
-const LIST_SOURCES = `SELECT s.id, s.kind, s.name, s.created_at,
+const LIST_SOURCES = `SELECT s.id, s.kind, s.name, s.created_at, s.settings_json,
   EXISTS (SELECT 1 FROM import_runs r WHERE r.source_id = s.id AND r.kind = 'catalog' AND r.status = 'ok') AS imported
   FROM sources s ORDER BY s.created_at, s.id`;
 
@@ -257,15 +276,20 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
         kind: SourceKind;
         name: string;
         created_at: number;
+        settings_json: string;
         imported: number;
       }>(LIST_SOURCES);
-      return rows.map((r) => ({
-        id: r.id,
-        kind: r.kind,
-        name: r.name,
-        createdAt: r.created_at,
-        needsImport: r.imported === 0,
-      }));
+      return rows.map((r) => {
+        const accountMeta = parseAccountMeta(r.settings_json);
+        return {
+          id: r.id,
+          kind: r.kind,
+          name: r.name,
+          createdAt: r.created_at,
+          needsImport: r.imported === 0,
+          ...(accountMeta === undefined ? {} : { accountMeta }),
+        };
+      });
     },
 
     categories: (sourceId, kind) => queryCategories(db, sourceId, kind),

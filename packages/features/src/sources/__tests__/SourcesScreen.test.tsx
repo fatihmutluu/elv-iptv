@@ -1,3 +1,4 @@
+import { updateSourceSettings } from '@elv/data';
 import { createAppI18n } from '@elv/i18n';
 import {
   type AndroidKeyEvent,
@@ -466,6 +467,89 @@ describe('SourcesScreen (#71)', () => {
           '2 live channels, 1 movie, 1 series',
         );
       });
+      await view.unmount();
+    } finally {
+      await env.cleanup();
+    }
+  });
+
+  it('renders localized Cinema Quietude warning badges for expired, expiring-soon, and trial sources, and omits badges for healthy accounts (#170)', async () => {
+    const DAY_MS = 86_400_000;
+    const NOW = 1_700_000_000_000;
+    const env = await openTestCatalog();
+    const i18n = createAppI18n('en');
+    const hcTheme = buildTheme({ preset: 'highContrast' });
+    try {
+      const add = async (name: string) => {
+        const res = await env.catalog.addSource({
+          kind: 'xtream',
+          name,
+          server: 'http://sim.example.test:7878',
+          username: 'demo',
+          password: 'demo',
+        });
+        if (!res.ok) throw new Error(res.error.code);
+        return res.value.id;
+      };
+
+      const expiredId = await add('Expired Account');
+      const expiringId = await add('Expiring Soon Account');
+      const trialId = await add('Trial Account');
+      const healthyId = await add('Healthy Account');
+
+      await updateSourceSettings(env.db, expiredId, {
+        accountMeta: { isTrial: true, expiresAt: NOW - DAY_MS },
+      });
+      await updateSourceSettings(env.db, expiringId, {
+        accountMeta: { isTrial: false, expiresAt: NOW + 3 * DAY_MS },
+      });
+      await updateSourceSettings(env.db, trialId, {
+        accountMeta: { isTrial: true, expiresAt: NOW + 30 * DAY_MS },
+      });
+      await updateSourceSettings(env.db, healthyId, {
+        accountMeta: { isTrial: false, expiresAt: NOW + 30 * DAY_MS },
+      });
+
+      const view = await render(
+        <ThemeProvider preset="highContrast">
+          <FormFactorProvider value="desktop">
+            <I18nProvider i18n={i18n}>
+              <SourcesScreen catalog={env.catalog} now={() => NOW} />
+            </I18nProvider>
+          </FormFactorProvider>
+        </ThemeProvider>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId(`source-row-${healthyId}`)).toBeTruthy();
+      });
+
+      const expiredPill = screen.getByTestId(`source-account-warning-${expiredId}`);
+      const expiringPill = screen.getByTestId(`source-account-warning-${expiringId}`);
+      const trialPill = screen.getByTestId(`source-account-warning-${trialId}`);
+
+      expect(expiredPill).toHaveTextContent('Expired');
+      expect(expiringPill).toHaveTextContent('Expires in 3d');
+      expect(trialPill).toHaveTextContent('Trial');
+      expect(screen.queryByTestId(`source-account-warning-${healthyId}`)).toBeNull();
+
+      expect(StyleSheet.flatten(expiredPill.props.style).borderColor).toBe(
+        hcTheme.colors.liveColor,
+      );
+      expect(StyleSheet.flatten(expiringPill.props.style).borderColor).toBe(hcTheme.colors.accent);
+      expect(StyleSheet.flatten(trialPill.props.style).borderColor).toBe(hcTheme.colors.accent);
+
+      await act(async () => {
+        i18n.setLocale('tr');
+      });
+      expect(screen.getByTestId(`source-account-warning-${expiredId}`)).toHaveTextContent(
+        'Süresi doldu',
+      );
+      expect(screen.getByTestId(`source-account-warning-${expiringId}`)).toHaveTextContent(
+        '3 gün içinde doluyor',
+      );
+      expect(screen.getByTestId(`source-account-warning-${trialId}`)).toHaveTextContent('Deneme');
+
       await view.unmount();
     } finally {
       await env.cleanup();

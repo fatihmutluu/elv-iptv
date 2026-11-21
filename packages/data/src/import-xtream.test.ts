@@ -287,6 +287,44 @@ describe('xtream import', () => {
     const runs = await rows(e, 'SELECT status, error_code FROM import_runs ORDER BY id');
     expect(runs.at(-1)).toEqual({ status: 'failed', error_code: 'empty-source' });
   });
+
+  it('persists non-secret accountMeta (isTrial and expiresAt) without storing credentials (#170)', async () => {
+    const data = sampleCatalog();
+    const expSec = 1_900_000_000;
+    data.user = {
+      auth: 1,
+      status: 'Active',
+      is_trial: '1',
+      exp_date: String(expSec),
+      allowed_output_formats: ['ts', 'm3u8'],
+    };
+    const e = await setup(data);
+    const r = await run(e);
+    expect(r.ok).toBe(true);
+
+    const srcRows = await rows(e, 'SELECT settings_json FROM sources WHERE id = ?', [e.sourceId]);
+    const parsed = JSON.parse(String(srcRows[0]?.settings_json ?? '{}')) as {
+      outputFormats?: string[];
+      accountMeta?: { isTrial?: boolean; expiresAt?: number };
+    };
+    expect(parsed.outputFormats).toEqual(['ts', 'm3u8']);
+    expect(parsed.accountMeta).toEqual({ isTrial: true, expiresAt: expSec * 1_000 });
+    const rawSettings = String(srcRows[0]?.settings_json ?? '');
+    expect(rawSettings).not.toContain('demo-user');
+    expect(rawSettings).not.toContain(['pw', 'Xyz', '19'].join(''));
+
+    // Re-importing with non-trial and no expiry clears expiresAt cleanly
+    e.panel.state.data.user = { auth: 1, status: 'Active', is_trial: '0', exp_date: null };
+    expect((await run(e)).ok).toBe(true);
+    const updatedRows = await rows(e, 'SELECT settings_json FROM sources WHERE id = ?', [
+      e.sourceId,
+    ]);
+    const updated = JSON.parse(String(updatedRows[0]?.settings_json ?? '{}')) as {
+      accountMeta?: { isTrial?: boolean; expiresAt?: number };
+    };
+    expect(updated.accountMeta).toEqual({ isTrial: false });
+    expect('expiresAt' in (updated.accountMeta ?? {})).toBe(false);
+  });
 });
 
 describe('loadSeriesEpisodes', () => {

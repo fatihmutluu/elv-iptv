@@ -19,6 +19,9 @@ export interface XmltvProgramme {
   categories: string[];
   episodeNum?: string;
   icon?: string;
+  isLive?: boolean;
+  isNew?: boolean;
+  previouslyShown?: boolean;
 }
 
 /** One batch of a scan; the last one has `done: true` and the statistics. */

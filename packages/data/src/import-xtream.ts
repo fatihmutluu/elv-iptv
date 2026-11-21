@@ -1,6 +1,7 @@
 import { elvError, err, ok, type Result, xtreamKey } from '@elv/domain';
 import {
   createXtreamClient,
+  type XtreamAccount,
   type XtreamCategory,
   type XtreamClient,
   type XtreamClientOptions,
@@ -220,7 +221,7 @@ async function importList<T extends Listed>(
   }
 }
 
-async function execute(c: Ctx, includePlaceholders: boolean): Promise<string[]> {
+async function execute(c: Ctx, includePlaceholders: boolean): Promise<XtreamAccount> {
   const call = c.signal === undefined ? undefined : { signal: c.signal };
   const account = unwrap(await c.client.account(call));
   const cats = await importCategories(c);
@@ -260,7 +261,7 @@ async function execute(c: Ctx, includePlaceholders: boolean): Promise<string[]> 
     },
     cats.series,
   );
-  return account.outputFormats;
+  return account;
 }
 
 const KEEP_EPISODES =
@@ -273,10 +274,10 @@ async function importXtream(
 ): Promise<Result<ImportSummary>> {
   const opened = await openClients(source, deps);
   if (!opened.ok) return opened;
-  let outputFormats: string[] = [];
+  let account: XtreamAccount | undefined;
   return performRun(source, deps, opts, {
     execute: async (base) => {
-      outputFormats = await execute(
+      account = await execute(
         { ...base, ...opened.value },
         source.settings.includePlaceholderChannels === true,
       );
@@ -285,8 +286,14 @@ async function importXtream(
       await tx.run(KEEP_EPISODES, [c.runId, c.sourceId, c.sourceId, c.runId]);
       const current = (await getSource(tx, source.id))?.settings ?? source.settings;
       const settings: SourceSettings = { ...current };
-      if (outputFormats.length > 0) settings.outputFormats = outputFormats;
-      else delete settings.outputFormats;
+      if (account !== undefined) {
+        if (account.outputFormats.length > 0) settings.outputFormats = account.outputFormats;
+        else delete settings.outputFormats;
+        settings.accountMeta = {
+          isTrial: account.isTrial,
+          ...(account.expiresAt !== undefined ? { expiresAt: account.expiresAt } : {}),
+        };
+      }
       await updateSourceSettings(tx, source.id, settings);
     },
   });

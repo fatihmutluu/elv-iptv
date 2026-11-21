@@ -109,7 +109,14 @@ describe('reconcileManifest', () => {
     const after = await env({ manifest, secrets });
     expect(await reconcileManifest(after.db, manifest)).toEqual([id]);
     expect(await after.service.listSources()).toEqual([
-      { id, kind: 'xtream', name: 'Main', createdAt: 1_000, needsImport: true },
+      {
+        id,
+        kind: 'xtream',
+        name: 'Main',
+        createdAt: 1_000,
+        needsImport: true,
+        accountMeta: { isTrial: false, expiresAt: expect.any(Number) },
+      },
     ]);
     must(await after.service.importSource(id));
     expect(after.raw.prepare('SELECT key FROM live ORDER BY key').all()).toEqual(keys);

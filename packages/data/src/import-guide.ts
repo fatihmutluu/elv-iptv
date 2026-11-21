@@ -14,6 +14,13 @@ import { foldText } from './fold';
 import { commitGuide, dropStaging, type GuideResult, STAGE_PROGRAMME_SQL } from './guide-commit';
 import { buildChannelIndex, type ChannelIndex, matchGuideChannel } from './guide-match';
 import {
+  type ClampedBatch,
+  closeOpenProgrammes,
+  closeOpenProgrammesBatch,
+  flushOpenProgrammes,
+  type ProgrammeStageRow,
+} from './guide-programmes';
+import {
   conditionalHeaders,
   extractValidators,
   hasStoredProgrammes,
@@ -24,7 +31,7 @@ import {
   sanitizeValidator,
   withGuideValidator,
 } from './http-cache';
-import { checkAbort, performRun, type RunCtx, Stop, warn } from './import-run';
+import { checkAbort, performRun, type RunCtx, Stop } from './import-run';
 import type { ImportDeps, ImportOptions, ImportSummary } from './import-types';
 import { openClient } from './import-xtream';
 import {
@@ -36,11 +43,11 @@ import {
 import { readUrlVars } from './stream-resolver';
 import { resolveTemplate } from './templates';
 
+export { closeOpenProgrammes };
+
 const REQUEST_TIMEOUT_MS = 180_000;
 const DAY_MS = 86_400_000;
 const DEFAULT_WINDOW = { daysBack: 1, daysForward: 7 };
-/** Length given to a programme with no `stop` when no later programme of its channel closes it. */
-const OPEN_END_MS = 30 * 60_000;
 
 interface GuideCandidate {
   slot: string;
@@ -148,26 +155,17 @@ async function openGuide(
   throw new Stop(first ?? elvError('source-format', 'no-guide-url'));
 }
 
-const programmeRow = (sourceId: string, runId: number, p: XmltvProgramme, stop: number): Row => [
-  sourceId,
-  p.channel,
-  p.start,
-  stop,
-  p.title,
-  p.subTitle ?? null,
-  p.desc ?? null,
-  p.categories.length === 0 ? null : JSON.stringify(p.categories),
-  p.episodeNum ?? null,
-  p.icon ?? null,
-  runId,
-];
-
 interface GuideState extends GuideResult {
   index: ChannelIndex;
   /** Guide ids of matched channels; the scanner consults it per programme, so it grows as channels arrive. */
   mapped: Set<string>;
   /** Programmes without `stop`, waiting for the next programme of their channel. */
   open: Map<string, XmltvProgramme>;
+  /** Latest emitted row per channel across batches for overlap/duplicate clamping. */
+  lastByChannel: Map<string, ProgrammeStageRow>;
+  /** `@feedId` base-id fallback pairs, appended after exact `byId` so exact IDs always win regardless of order. */
+  byBaseId: [string, string][];
+  byNormalizedName: [string, string][];
   channels: number;
   programmes: number;
   seenProgrammes: number;
@@ -178,7 +176,16 @@ function writeChannels(c: RunCtx, st: GuideState, channels: readonly XmltvChanne
     const match = matchGuideChannel(st.index, ch);
     if (match.keys.length > 0) st.mapped.add(ch.id);
     else st.mapped.delete(ch.id);
-    const bucket = match.tier === 'id' ? st.byId : match.tier === 'name' ? st.byName : st.byNum;
+    const bucket =
+      match.tier === 'id'
+        ? st.index.byGuideId.has(ch.id)
+          ? st.byId
+          : st.byBaseId
+        : match.tier === 'name'
+          ? st.byName
+          : match.tier === 'normalized-name'
+            ? st.byNormalizedName
+            : st.byNum;
     for (const key of match.keys) bucket.push([key, ch.id]);
     const name = ch.names[0] ?? ch.id;
     st.channelRows.push([c.sourceId, ch.id, name, foldText(name), ch.icon ?? null, c.runId]);
@@ -186,58 +193,8 @@ function writeChannels(c: RunCtx, st: GuideState, channels: readonly XmltvChanne
   st.channels += channels.length;
 }
 
-type Row = (string | number | null)[];
-
-/**
- * Turns a batch into rows while guaranteeing `stop > start` for every row. A programme without `stop` ends where
- * the next strictly later programme of its channel starts; malformed rows with `stop <= start` are skipped with
- * warning `programme-bad-time`.
- */
-export function closeOpenProgrammes(
-  c: Pick<RunCtx, 'sourceId' | 'runId' | 'warnings' | 'warningCodes'>,
-  open: Map<string, XmltvProgramme>,
-  programmes: readonly XmltvProgramme[],
-): Row[] {
-  const rows: Row[] = [];
-  for (const p of programmes) {
-    if (
-      !Number.isFinite(p.start) ||
-      (p.stop !== undefined && (!Number.isFinite(p.stop) || p.stop <= p.start))
-    ) {
-      warn(c, 'programme-bad-time');
-      continue;
-    }
-    const prev = open.get(p.channel);
-    if (prev !== undefined) {
-      if (p.start > prev.start) {
-        open.delete(p.channel);
-        rows.push(programmeRow(c.sourceId, c.runId, prev, p.start));
-      } else if (p.start === prev.start) {
-        open.delete(p.channel);
-      } else if (p.stop === undefined) {
-        rows.push(programmeRow(c.sourceId, c.runId, p, prev.start));
-        continue;
-      } else {
-        rows.push(programmeRow(c.sourceId, c.runId, p, p.stop));
-        continue;
-      }
-    }
-    if (p.stop === undefined) open.set(p.channel, p);
-    else rows.push(programmeRow(c.sourceId, c.runId, p, p.stop));
-  }
-  return rows;
-}
-
-/** At the end of the scan the programmes still open get a fixed length. */
-function flushOpen(c: RunCtx, st: GuideState): Row[] {
-  const rows = [...st.open.values()].map((p) =>
-    programmeRow(c.sourceId, c.runId, p, p.start + OPEN_END_MS),
-  );
-  st.open.clear();
-  return rows;
-}
-
-async function writeProgrammes(c: RunCtx, st: GuideState, rows: Row[]): Promise<void> {
+async function writeProgrammes(c: RunCtx, st: GuideState, batch: ClampedBatch): Promise<void> {
+  const { rows, reupserts } = batch;
   for (let i = 0; i < rows.length; i += c.batchSize) {
     checkAbort(c);
     await c.db.batch(STAGE_PROGRAMME_SQL, rows.slice(i, i + c.batchSize));
@@ -247,7 +204,7 @@ async function writeProgrammes(c: RunCtx, st: GuideState, rows: Row[]): Promise<
     const guideId = row[1] as string;
     st.staged.set(guideId, (st.staged.get(guideId) ?? 0) + 1);
   }
-  st.programmes += rows.length;
+  st.programmes += Math.max(0, rows.length - reupserts);
 }
 
 async function execute(
@@ -272,16 +229,20 @@ async function execute(
   const live = await c.db.all<{
     key: string;
     guide_id: string | null;
+    name: string;
     name_fold: string;
     num: number | null;
-  }>('SELECT key, guide_id, name_fold, num FROM live WHERE source_id = ?', [c.sourceId]);
+  }>('SELECT key, guide_id, name, name_fold, num FROM live WHERE source_id = ?', [c.sourceId]);
   const st: GuideState = {
     index: buildChannelIndex(live),
     mapped: new Set(),
     channelRows: [],
     open: new Map(),
+    lastByChannel: new Map(),
     byId: [],
+    byBaseId: [],
     byName: [],
+    byNormalizedName: [],
     byNum: [],
     staged: new Map(),
     channels: 0,
@@ -309,7 +270,11 @@ async function execute(
       const batch = step.value;
       writeChannels(c, st, batch.channels);
       st.seenProgrammes += batch.programmes.length;
-      await writeProgrammes(c, st, closeOpenProgrammes(c, st.open, batch.programmes));
+      await writeProgrammes(
+        c,
+        st,
+        closeOpenProgrammesBatch(c, st.open, batch.programmes, st.lastByChannel),
+      );
       c.progress({ phase: 'guide-channels', done: st.channels });
       c.progress({ phase: 'programmes', done: st.programmes });
       await c.deps.scheduler.yieldNow();
@@ -317,7 +282,8 @@ async function execute(
   } finally {
     await scan.return(ok(undefined));
   }
-  await writeProgrammes(c, st, flushOpen(c, st));
+  await writeProgrammes(c, st, flushOpenProgrammes(c, st.open, st.lastByChannel));
+  if (st.byBaseId.length > 0) st.byId.push(...st.byBaseId);
   if (st.channels === 0 && st.seenProgrammes === 0) {
     throw new Stop(elvError('source-format', 'not-a-guide'));
   }

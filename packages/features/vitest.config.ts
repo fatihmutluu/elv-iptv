@@ -21,6 +21,7 @@ export default defineConfig({
         'src/sources/validate.ts',
         'src/sources/errors.ts',
         'src/sources/lazy-catalog.ts',
+        'src/sources/account-warning.ts',
       ],
       exclude: ['src/**/*.test.ts'],
       reporter: ['text-summary'],

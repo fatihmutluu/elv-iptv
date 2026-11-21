@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { extinf, M3U_PASS, M3U_TOKEN, M3U_USER, setupM3u } from './import-test-helpers';
 import { importCatalog } from './import-xtream';
 import { secretKey } from './sources';
-import { createStreamResolver, readUrlVars } from './stream-resolver';
+import {
+  createPlaytimeResolverCache,
+  createStreamResolver,
+  normalizeMulticastUrl,
+  readUrlVars,
+} from './stream-resolver';
 import { memorySecrets } from './test-db';
 
 const entry = (id: number) =>
@@ -55,5 +60,60 @@ describe('readUrlVars', () => {
     expect(await readUrlVars({ secrets }, 's1')).toEqual({});
     const failing = { ...secrets, get: () => Promise.reject(new Error('locked')) };
     expect(await readUrlVars({ secrets: failing }, 's1')).toEqual({});
+  });
+});
+
+describe('normalizeMulticastUrl (#267)', () => {
+  it('rewrites udp://@ and rtp://@ case-insensitively and leaves other URLs untouched', () => {
+    expect(normalizeMulticastUrl('udp://@239.0.0.1:1234')).toBe('udp://239.0.0.1:1234');
+    expect(normalizeMulticastUrl('rtp://@239.0.0.2:5004/live?x=1')).toBe(
+      'rtp://239.0.0.2:5004/live?x=1',
+    );
+    expect(normalizeMulticastUrl('UDP://@239.0.0.3:2000')).toBe('UDP://239.0.0.3:2000');
+    expect(normalizeMulticastUrl('RtP://@239.0.0.4:3000')).toBe('RtP://239.0.0.4:3000');
+    expect(normalizeMulticastUrl('udp://239.0.0.1:1234')).toBe('udp://239.0.0.1:1234');
+    expect(normalizeMulticastUrl('udp://@')).toBe('udp://@');
+    expect(normalizeMulticastUrl('rtp://@/path')).toBe('rtp://@/path');
+    expect(normalizeMulticastUrl('http://user@cdn.example/live/1.ts')).toBe(
+      'http://user@cdn.example/live/1.ts',
+    );
+    expect(normalizeMulticastUrl('rtsp://@10.0.0.1:554/stream')).toBe(
+      'rtsp://@10.0.0.1:554/stream',
+    );
+  });
+
+  it('normalizes resolved multicast URLs in createStreamResolver and resolveStream', async () => {
+    const playlist =
+      '#EXTM3U\n' +
+      extinf('Multicast UDP', 'udp://@239.10.0.1:1234', 'group-title="LAN"') +
+      extinf('Multicast RTP', 'RTP://@239.10.0.2:5004/feed', 'group-title="LAN"');
+    const e = await setupM3u(playlist);
+    expect((await importCatalog(e.sourceId, e.deps)).ok).toBe(true);
+
+    const rows = await e.db.all<{ key: string; url_template: string }>(
+      'SELECT key, url_template FROM live ORDER BY id',
+    );
+    // Simulate legacy pre-normalized templates persisted in SQLite
+    await e.db.run('UPDATE live SET url_template = ? WHERE key = ?', [
+      'udp://@239.10.0.1:1234',
+      rows[0]?.key ?? '',
+    ]);
+    await e.db.run('UPDATE live SET url_template = ? WHERE key = ?', [
+      'RTP://@239.10.0.2:5004/feed',
+      rows[1]?.key ?? '',
+    ]);
+    const resolver = await createStreamResolver(e.sourceId, { secrets: e.secrets });
+    expect(resolver.resolve('udp://@239.10.0.1:1234')).toBe('udp://239.10.0.1:1234');
+    expect(resolver.resolve('RTP://@239.10.0.2:5004/feed')).toBe('RTP://239.10.0.2:5004/feed');
+
+    const cache = createPlaytimeResolverCache({
+      db: e.db,
+      secrets: e.secrets,
+      http: e.deps.http,
+    });
+    const r0 = await cache.resolveStream(rows[0]?.key ?? '');
+    const r1 = await cache.resolveStream(rows[1]?.key ?? '');
+    expect(r0.ok && r0.value.url).toBe('udp://239.10.0.1:1234');
+    expect(r1.ok && r1.value.url).toBe('RTP://239.10.0.2:5004/feed');
   });
 });

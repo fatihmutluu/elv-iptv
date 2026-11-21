@@ -23,24 +23,25 @@ M3U and XMLTV scanners and the Xtream client.
   ElvError-shaped, `AbortError` -> `network`/`aborted`, else `network`/`stream-failed`) with no `done` batch. Never throws on
   bad content (warnings: `not-a-url`, `extinf-without-url`, `exthttp-malformed`, `line-too-long`, `attr-quote`,
   `inline-logo-stripped`); oversized inline `data:` logos (> 4 KiB) are stream-stripped in O(1) memory (`m3u-logo-filter.ts`),
-  other lines over 1 MiB are skipped. Splits `#http`/`#rtmp`/`#rtsp` inline backups into `backupUrls` (preserving `#fragment`)
-  and `.xml/http`/`.gz/http`/`;` `url-tvg` lists. Non-`#` lines need `xx://` or, with `baseUrl`, no whitespace/`<`/`{`/`"`.
-  `extra`, `kodiProps`, `headers.other` and `header.attrs` have no prototype. Files: `m3u.ts`, `m3u-logo-filter.ts`,
-  `m3u-attrs.ts`, `m3u-url.ts`, `m3u-types.ts`. Rejects HLS media/master manifests with `source-format`/`hls-manifest`.
+  other lines over 1 MiB are skipped. Splits `#http`/`#rtmp`/`#rtsp`/`#udp`/`#rtp` inline backups into `backupUrls` (preserving
+  `#fragment`), normalizes `udp://@`/`rtp://@` multicast URLs, and splits `.xml/http`/`.gz/http`/`;` `url-tvg` lists. Non-`#`
+  lines need `xx://` or, with `baseUrl`, no whitespace/`<`/`{`/`"`. `extra`, `kodiProps`, `headers.other` and `header.attrs` have
+  no prototype. Files: `m3u.ts`, `m3u-logo-filter.ts`, `m3u-attrs.ts`, `m3u-url.ts`, `m3u-types.ts`. Rejects HLS manifests.
 - Utilities: `decodeMaybeGzip` (`gzip-stream.ts` + O(1)-memory RFC 1952/1951 member framer `gzip-member-splitter.ts`,
   multi-member `.gz` + `DEFAULT_MAX_DECOMPRESSED_BYTES` 256 MiB ceiling),
   `decodeLegacyCodepage` (`codepages.ts`, `windows-1256`/`iso-8859-6`/`windows-1254`/`windows-1252`), `detectAndDecodeText`
   (`encoding.ts`), `toElvError`, `decodeUtf8`, `ByteBuffer`, `decodeEntities`, `createStats`/`warn`; test helpers in `test-chunks.ts`.
 - `scanXmltv(chunks, { batchSize?, channels?, programmeChannels?, from?, to?, decompressor?, maxDecompressedBytes? })` streams
-  XMLTV via `decodeMaybeGzip` into `XmltvBatch`es (`channels`, `programmes` with epoch-ms times; `batchSize` bounds total) in
-  bounded memory; returns `err` `source-format`/`gzip-unsupported` without `Decompressor`, `gzip-corrupt`, or `too-large`, else
-  `ok`. `channels` filters both; `programmeChannels` filters per open tag. Salvages stray `<` and bare `&`; malformed or > 1 MiB
-  elements skip with warnings (`programme-*`, `channel-*`, `element-too-long`). Files: `xmltv.ts`, `xml-tokens.ts`,
-  `xmltv-children.ts`, `xmltv-time.ts`, `xmltv-types.ts`.
+  XMLTV via `decodeMaybeGzip` into `XmltvBatch`es (`channels`, `programmes` with epoch-ms times, `isLive`/`isNew`/`previouslyShown`
+  flags; `batchSize` bounds total) in bounded memory; returns `err` `source-format`/`gzip-unsupported` without `Decompressor`,
+  `gzip-corrupt`, or `too-large`, else `ok`. Decodes Latin-1/Windows-1252 prologs, strips inline HTML & Unicode superscripts
+  (promoting `LIVE`/`NEW`), ranks `<episode-num>` (`xmltv_ns` validated > `onscreen` > `dd_progid` > other, `<desc>` `S##E##`
+  fallback). Salvages stray `<` and bare `&`; skips malformed or > 1 MiB elements. Files: `xmltv.ts`, `xml-tokens.ts`,
+  `xmltv-children.ts`, `xmltv-meta.ts`, `xmltv-time.ts`, `xmltv-types.ts`.
 - `createXtreamClient({ http, server, username, password, transport?, maxBodyBytes?, backupServers?, primaryCooldownMs?, cooldown429Ms?, serverTimezone? })`
-  wraps `player_api.php`: `account`, `categories`, `liveStreams`/`vodStreams`/`series`, `seriesInfo`, `vodInfo`, `shortEpg`
-  (with `start`/`end` IANA timezone fallback + legacy codepage base64 decoding), plus `playlistUrl`, `guideUrl`, `streamUrl`.
+  wraps `player_api.php` (`account`, `categories`, `liveStreams`/`vodStreams`/`series`, `seriesInfo`, `vodInfo`, `shortEpg`),
+  `playlistUrl`, `guideUrl`, `streamUrl`; `probeXtreamLiveFormat` (`xtream-probe.ts`) auto-detects `ts` vs `m3u8` in <= 512 B.
   Tracks per-`HttpClient` account-scoped `429` cooldowns (`Retry-After`, never fails over on `429`) and ordered mirror failover
   with primary promotion (`xtream-mirrors.ts`). Empty `{}` -> `[]`, `[]` -> `{}`; array `episodes` preserve Season `0` and
-  deduplicate. Credentials appear only in URL builders; errors never hold URLs. Files: `xtream.ts`, `xtream-json.ts`,
-  `xtream-mirrors.ts`, `xtream-records.ts`, `xtream-normalize.ts`, `xtream-types.ts`.
+  deduplicate. Credentials appear only in URL builders; errors never hold URLs. Files: `xtream.ts`, `xtream-probe.ts`,
+  `xtream-json.ts`, `xtream-mirrors.ts`, `xtream-records.ts`, `xtream-normalize.ts`, `xtream-types.ts`.

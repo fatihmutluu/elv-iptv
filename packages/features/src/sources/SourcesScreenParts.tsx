@@ -1,5 +1,8 @@
+import type { AppI18n } from '@elv/i18n';
 import {
   hexToRgba,
+  MicroPill,
+  type MicroPillTone,
   TvTextInput,
   type TvTextInputInstance,
   useFormFactor,
@@ -11,6 +14,7 @@ import {
 import { type ReactElement, useCallback, useRef, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { createImeSubmitGuard } from '../shared/ime-guard';
+import type { SourceAccountWarning } from './account-warning';
 import { sourcesStyles } from './sources-styles';
 import type { ControlLayoutRecorder } from './useTvSourcesNavigation';
 
@@ -242,5 +246,33 @@ export function FieldInput({
         />
       </View>
     </View>
+  );
+}
+
+/** Subtle Cinema Quietude warning badge for trial, expiring-soon, or expired source accounts (`#170`). */
+export function SourceAccountWarningPill({
+  sourceId,
+  warning,
+  i18n,
+}: {
+  sourceId: string;
+  warning: SourceAccountWarning | null;
+  i18n: AppI18n;
+}): ReactElement | null {
+  if (warning === null) return null;
+  const label =
+    warning.kind === 'expired'
+      ? i18n.t('sources.badge.expired')
+      : warning.kind === 'expiring-soon'
+        ? i18n.t('sources.badge.expiringSoon', { days: warning.days })
+        : i18n.t('sources.badge.trial');
+  const tone: MicroPillTone = warning.kind === 'expired' ? 'live' : 'accent';
+  return (
+    <MicroPill
+      testID={`source-account-warning-${sourceId}`}
+      label={label}
+      tone={tone}
+      dot={false}
+    />
   );
 }

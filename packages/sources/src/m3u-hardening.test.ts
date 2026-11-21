@@ -516,3 +516,40 @@ describe('M3U gzip decompression & bomb ceiling (#169)', () => {
     }
   });
 });
+
+describe('M3U multicast udp://@ and rtp://@ normalization (#267)', () => {
+  it('strips leading @ from udp://@ and rtp://@ primary and backup URLs', async () => {
+    const udp = await one('#EXTINF:-1,Multicast 1\nudp://@239.0.0.1:1234\n');
+    expect(udp.url).toBe('udp://239.0.0.1:1234');
+    expect(udp.nonHttp).toBe(true);
+    expect(udp.kindHint).toBe('live');
+
+    const rtp = await one('#EXTINF:-1,Multicast 2\nRTP://@239.0.0.2:5004/live?iface=eth0\n');
+    expect(rtp.url).toBe('RTP://239.0.0.2:5004/live?iface=eth0');
+    expect(rtp.nonHttp).toBe(true);
+    expect(rtp.kindHint).toBe('live');
+
+    const ipv6 = await one('#EXTINF:-1,IPv6\nUDP://@[ff02::1]:1234\n');
+    expect(ipv6.url).toBe('UDP://[ff02::1]:1234');
+
+    const withBackups = await one(
+      '#EXTINF:-1,With Backups\nudp://@239.1.1.1:1234#rtp://@239.1.1.2:5004#http://fallback.example/1.ts\n',
+    );
+    expect(withBackups.url).toBe('udp://239.1.1.1:1234');
+    expect(withBackups.backupUrls).toEqual([
+      'rtp://239.1.1.2:5004',
+      'http://fallback.example/1.ts',
+    ]);
+  });
+
+  it('preserves already-normalized multicast, userinfo, and HTTP URLs untouched', async () => {
+    const plain = await one('#EXTINF:-1,Plain\nudp://239.0.0.1:1234\n');
+    expect(plain.url).toBe('udp://239.0.0.1:1234');
+
+    const userInfo = await one('#EXTINF:-1,User\nudp://user@239.0.0.1:1234\n');
+    expect(userInfo.url).toBe('udp://user@239.0.0.1:1234');
+
+    const httpAt = await one('#EXTINF:-1,Http\nhttp://@host.example/live.ts\n');
+    expect(httpAt.url).toBe('http://@host.example/live.ts');
+  });
+});

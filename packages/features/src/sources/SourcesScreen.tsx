@@ -29,6 +29,8 @@ export interface SourcesScreenProps {
   isActiveScope?: boolean;
   /** When true, omits outer canvas background, duplicate brand header, and outer scroll padding for Settings embedding. */
   embedded?: boolean;
+  /** Clock returning epoch milliseconds for deterministic expiry badges (defaults to `Date.now`). */
+  now?: () => number;
 }
 
 function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
@@ -375,6 +377,7 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
               twoColumn={twoColumn}
               tvFocusId={tv.tvFocusId}
               recordLayout={tv.recordLayout}
+              nowMs={(props.now ?? Date.now)()}
             />
           </View>
         </View>

@@ -21,4 +21,9 @@ export {
 } from './xmltv';
 export { createXtreamClient, normalizeXtreamServer } from './xtream';
 export { mergeById, toNumber, toStrictInt, toText } from './xtream-normalize';
+export {
+  probeXtreamLiveFormat,
+  type XtreamLiveFormat,
+  type XtreamLiveFormatProbeOptions,
+} from './xtream-probe';
 export type * from './xtream-types';

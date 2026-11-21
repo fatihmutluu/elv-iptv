@@ -1,6 +1,6 @@
 import { type HttpRequestOptions, ok, type SqlValue } from '@elv/domain';
 import { describe, expect, it } from 'vitest';
-import { importGuide } from './import-guide';
+import { closeOpenProgrammes, importGuide } from './import-guide';
 import {
   channelXml,
   defaultGuide,
@@ -629,5 +629,118 @@ describe('guide hardening (#169)', () => {
     const r = await importGuide(e.sourceId, { ...e.deps, decompressor: webGunzip }, { now: NOW });
     expect(r.ok).toBe(true);
     expect(await titles(e)).toEqual(['Concat Show 1', 'Concat Show 2']);
+  });
+});
+
+describe('guide precision: @feedId, call-signs & overlap clamping (#181, #267)', () => {
+  it('matches @feedId sub-feeds (with exact id beating base fallback regardless of order) and preserves call signs', async () => {
+    const playlist =
+      '#EXTM3U\n' +
+      extinf('Channel East', stream(1), 'tvg-id="Channel.uk@East"') +
+      extinf('Channel Base', stream(2), 'tvg-id="Channel.uk"') +
+      extinf('Metro One [HD] (XELV) East', stream(3), '') +
+      extinf('Metro One [HD] (ZTVA) West', stream(4), '') +
+      extinf('Harbor News', stream(5), '');
+    const e = await setupGuide(playlist);
+    expect((await importCatalog(e.sourceId, e.deps)).ok).toBe(true);
+    e.server.body = tv(
+      // Base fallback appears BEFORE exact @East in XMLTV; exact @East must still win for Channel East
+      channelXml('Channel.uk@West', 'Channel West'),
+      channelXml('Channel.uk@East', 'Channel East'),
+      channelXml('metro.xelv', 'Metro One (XELV) 1080p'),
+      channelXml('metro.ztva', 'Metro One (ZTVA) [FHD]'),
+      // Normalized fallback appears BEFORE exact folded name; exact fold must win cleanly
+      channelXml('harbor.hd', 'Harbor News [HD]'),
+      channelXml('harbor.exact', 'Harbor News'),
+      programmeXml('Channel.uk@West', HOUR, 1, 'West Feed Show'),
+      programmeXml('Channel.uk@East', HOUR, 1, 'East Feed Show'),
+      programmeXml('metro.xelv', HOUR, 1, 'XELV Evening'),
+      programmeXml('metro.ztva', HOUR, 1, 'ZTVA Evening'),
+      programmeXml('harbor.hd', HOUR, 1, 'Harbor HD Show'),
+      programmeXml('harbor.exact', HOUR, 1, 'Harbor Exact Show'),
+    );
+    const r = await run(e);
+    if (!r.ok) throw new Error(JSON.stringify(r.error));
+
+    const mappings = await rows(
+      e,
+      'SELECT l.name, g.guide_id FROM channel_guide g JOIN live l ON l.key = g.channel_key ORDER BY l.name',
+    );
+    expect(mappings).toEqual([
+      { name: 'Channel Base', guide_id: 'Channel.uk@West' },
+      { name: 'Channel East', guide_id: 'Channel.uk@East' },
+      { name: 'Harbor News', guide_id: 'harbor.exact' },
+      { name: 'Metro One [HD] (XELV) East', guide_id: 'metro.xelv' },
+      { name: 'Metro One [HD] (ZTVA) West', guide_id: 'metro.ztva' },
+    ]);
+  });
+
+  it('deterministically clamps overlapping and duplicate (channel, start) blocks in closeOpenProgrammes and across batches', async () => {
+    const c = { sourceId: 's1', runId: 1, warnings: 0, warningCodes: [] as string[] };
+    const open = new Map();
+    const out = closeOpenProgrammes(c, open, [
+      { channel: 'ch1', start: 1000, stop: 3000, title: 'First', categories: [] },
+      { channel: 'ch1', start: 1000, stop: 3500, title: 'DupStart', categories: [] },
+      { channel: 'ch1', start: 2000, stop: 4000, title: 'OverlapNext', categories: [] },
+      { channel: 'ch1', start: 4000, stop: 5000, title: 'Adjacent', categories: [] },
+    ]);
+    expect(out.map((r) => [r[4], r[2], r[3]])).toEqual([
+      ['DupStart', 1000, 2000],
+      ['OverlapNext', 2000, 4000],
+      ['Adjacent', 4000, 5000],
+    ]);
+
+    // Out-of-order earlier programme overlapping a later closed or open block is also clamped
+    const open2 = new Map();
+    const out2 = closeOpenProgrammes(c, open2, [
+      { channel: 'ch2', start: 3000, stop: 5000, title: 'Later', categories: [] },
+      { channel: 'ch2', start: 2000, stop: 4000, title: 'EarlyOverlap', categories: [] },
+      { channel: 'ch3', start: 3000, title: 'OpenLater', categories: [] },
+      { channel: 'ch3', start: 1000, stop: 4000, title: 'EarlyClosed', categories: [] },
+      { channel: 'ch3', start: 2000, title: 'EarlyOpen', categories: [] },
+    ]);
+    expect(out2.map((r) => [r[1], r[4], r[2], r[3]])).toEqual([
+      ['ch2', 'Later', 3000, 5000],
+      ['ch2', 'EarlyOverlap', 2000, 3000],
+      ['ch3', 'EarlyClosed', 1000, 2000],
+      ['ch3', 'EarlyOpen', 2000, 3000],
+    ]);
+
+    // Cross-batch test with batchSize: 1 including overlap, duplicate start, and trailing open block
+    const e = await ready(
+      tv(
+        channelXml('haber1.tr', 'Haber Bir'),
+        programmeXml('haber1.tr', 1 * HOUR, 2, 'Block A'),
+        programmeXml('haber1.tr', 1 * HOUR, 3, 'Block A Replace'),
+        programmeXml('haber1.tr', 2 * HOUR, 2, 'Block B'),
+        `<programme start="${xt(3 * HOUR)}" channel="haber1.tr"><title>Open C</title></programme>`,
+      ),
+    );
+    const progDone: number[] = [];
+    const res = await run(e, {
+      batchSize: 1,
+      onProgress: (p: ImportProgress) => {
+        if (p.phase === 'programmes') progDone.push(p.done);
+      },
+    });
+    if (!res.ok) throw new Error(JSON.stringify(res.error));
+    const stored = await rows(
+      e,
+      'SELECT title, start, stop FROM programmes WHERE guide_id = ? ORDER BY start',
+      ['haber1.tr'],
+    );
+    expect(stored.map((p) => p.title)).toEqual(['Block A Replace', 'Block B', 'Open C']);
+    expect(progDone.at(-1)).toBe(2); // 2 non-open rows committed before EOF flush (zero double-count on cross-batch re-upsert)
+    expect(res.value.counts.programmes).toBe(3);
+    expect(stored[0]?.stop).toBe(stored[1]?.start);
+    expect(stored[1]?.stop).toBe(stored[2]?.start);
+    for (let i = 0; i < stored.length; i += 1) {
+      const curr = stored[i] as { start: number; stop: number };
+      expect(curr.stop).toBeGreaterThan(curr.start);
+      if (i > 0) {
+        const prev = stored[i - 1] as { start: number; stop: number };
+        expect(prev.stop).toBeLessThanOrEqual(curr.start);
+      }
+    }
   });
 });
