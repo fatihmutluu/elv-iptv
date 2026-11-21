@@ -1,7 +1,7 @@
 import type { PlayerUiEvent } from '../../../src/shared/player-ipc.ts';
 
 /** Host keys accepted by `OpenVideoEngine.onHostKey`. */
-export type DesktopHostKey = 'channel-up' | 'channel-down' | 'back';
+export type DesktopHostKey = 'channel-up' | 'channel-down' | 'back' | 'fullscreen';
 
 /** Handlers for desktop out-of-DOM mpv UI events (`player:ui`). */
 export interface DesktopUiHandlers {

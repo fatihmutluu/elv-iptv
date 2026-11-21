@@ -1,3 +1,10 @@
+export {
+  RouteActiveProvider,
+  type RouteActiveProviderProps,
+  useActiveEffect,
+  useDocumentVisible,
+  useRouteActive,
+} from '../shared';
 export { AdaptiveNavShell } from './AdaptiveNavShell';
 export {
   AppProviders,

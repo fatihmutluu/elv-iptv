@@ -13,3 +13,10 @@ export {
   createPagedListSource,
   type PagedListSource,
 } from './paged-list-source';
+export {
+  RouteActiveProvider,
+  type RouteActiveProviderProps,
+  useActiveEffect,
+  useDocumentVisible,
+  useRouteActive,
+} from './useRouteActive';

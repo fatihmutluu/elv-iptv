@@ -49,6 +49,8 @@ export interface SourceSettings {
   includePlaceholderChannels?: boolean;
   /** Non-secret Xtream account trial/expiry metadata persisted for Sources UI warnings (`#170`). */
   accountMeta?: SourceAccountMeta;
+  /** Non-reversible SHA-256 credential fingerprint (`fp:<64-hex>`) for cross-source pooling (`#265`). */
+  credentialFingerprint?: string;
 }
 
 /** A row of the `sources` table. */

@@ -26,6 +26,7 @@ function hasTargetMetaChanged(prev: PlayTarget, next: PlayTarget): boolean {
     prev.playlist !== next.playlist ||
     prev.title !== next.title ||
     prev.sourceId !== next.sourceId ||
+    prev.accountKey !== next.accountKey ||
     prev.logo !== next.logo ||
     prev.subtitle !== next.subtitle ||
     prev.seriesKey !== next.seriesKey ||
@@ -42,6 +43,7 @@ function toFlatPlayableEntry(target: PlayTarget): PlayableEntry {
   return {
     itemKey: target.itemKey,
     sourceId: target.sourceId,
+    ...(target.accountKey !== undefined ? { accountKey: target.accountKey } : {}),
     title: target.title,
     kind: target.kind,
     ...(target.startPositionMs !== undefined ? { startPositionMs: target.startPositionMs } : {}),
@@ -112,7 +114,7 @@ export function usePlayerTargetHandoff({
     (service: PlaybackService, entry: PlayableEntry, startMs?: number): void => {
       service.tune({
         item: entry.itemKey,
-        accountKey: entry.sourceId,
+        accountKey: entry.accountKey ?? entry.sourceId,
         kind: entry.kind,
         resolve: () => catalogRef.current.resolveStream(entry.itemKey),
         ...(startMs !== undefined ? { startMs } : {}),
@@ -290,8 +292,7 @@ export function usePlayerTargetHandoff({
   useEffect(() => {
     mountedRef.current = true;
     const unregGuard = playbackGuard?.registerSession?.({
-      getSourceId: () =>
-        serviceRef.current?.getState().accountKey ?? activeTargetRef.current.sourceId,
+      getSourceId: () => activeTargetRef.current.sourceId,
       stop: () => {
         cancelPendingResume();
         vodResumeMsRef.current = undefined;

@@ -8,6 +8,7 @@ import {
   clearSourceFromCatalogMemory,
   clearSourceFromLiveMemory,
   createObservedCatalog,
+  enrichPlayTargetAccountKey,
   INITIAL_CATALOG_MEMORY,
   type PrimaryNavTab,
   pushDetailStack,
@@ -25,7 +26,13 @@ import type { VideoHost } from './ports/video-host';
 import { SearchScreen } from './search';
 import { SettingsScreen, type SettingsSection } from './settings';
 import type { DetailTarget } from './shared';
-import { AdaptiveNavShell, CrashRecoveryBoundary, usePreferences } from './shell';
+import {
+  AdaptiveNavShell,
+  CrashRecoveryBoundary,
+  RouteActiveProvider,
+  useDocumentVisible,
+  usePreferences,
+} from './shell';
 import { SourcesScreen } from './sources';
 
 /** Top-level shell tab identifier. */
@@ -41,17 +48,10 @@ export interface AppShellProps {
   onPlaybackGuardReady?: (guard: PlaybackGuard) => void;
 }
 
-/**
- * Top-level Cinema Quietude shell (`Home`, `Live`, `Movies`, `Series` + `Search`, `Settings`
- * utilities, overlay `DetailScreen`, and full-screen `PlayerScreen`).
- */
-export function AppShell({
-  catalog,
-  videoHost,
-  appLifecycle,
-  externalRefreshToken = 0,
-  onPlaybackGuardReady,
-}: AppShellProps): ReactElement {
+/** Top-level Cinema Quietude shell (`Home`, `Live`, `Movies`, `Series` + `Search`, `Settings`, `DetailScreen`, `PlayerScreen`). */
+export function AppShell(props: AppShellProps): ReactElement {
+  const { catalog, videoHost, appLifecycle, onPlaybackGuardReady } = props;
+  const externalRefreshToken = props.externalRefreshToken ?? 0;
   const i18n = useI18n();
   const preferences = usePreferences();
 
@@ -75,11 +75,12 @@ export function AppShell({
   const mountedRef = useRef(true);
   const userPickedTabRef = useRef(false);
   const userPickedSettingsSectionRef = useRef(false);
-  const sourcesCountRef = useRef(0);
-  sourcesCountRef.current = sources.length;
+  const sourcesRef = useRef<readonly SourceRow[]>(sources);
+  sourcesRef.current = sources;
   const autoImportedIdsRef = useRef(new Set<string>());
   const playTargetRef = useRef<PlayTarget | null>(playTarget);
   playTargetRef.current = playTarget;
+  const documentVisible = useDocumentVisible();
 
   useEffect(() => {
     mountedRef.current = true;
@@ -117,13 +118,12 @@ export function AppShell({
   }, []);
 
   const playbackGuard = useMemo(() => createPlaybackGuard(stopForSource), [stopForSource]);
-  useEffect(() => {
-    onPlaybackGuardReady?.(playbackGuard);
-  }, [onPlaybackGuardReady, playbackGuard]);
+  useEffect(() => onPlaybackGuardReady?.(playbackGuard), [onPlaybackGuardReady, playbackGuard]);
   const handlePlay = useCallback((target: PlayTarget) => {
+    const enriched = enrichPlayTargetAccountKey(target, sourcesRef.current);
     setHeroScrolled(false);
-    playTargetRef.current = target;
-    setPlayTarget(target);
+    playTargetRef.current = enriched;
+    setPlayTarget(enriched);
   }, []);
   const observedCatalog = useMemo(
     () => createObservedCatalog(catalog, playbackGuard, syncSourcesAndBump),
@@ -177,7 +177,7 @@ export function AppShell({
   }, []);
   const openSearch = useCallback(() => selectTab('search', false), [selectTab]);
   const openSettings = useCallback(() => {
-    if (sourcesCountRef.current > 0 && !userPickedSettingsSectionRef.current) {
+    if (sourcesRef.current.length > 0 && !userPickedSettingsSectionRef.current) {
       setSettingsSection('appearance');
     }
     selectTab('settings', false);
@@ -199,12 +199,14 @@ export function AppShell({
   }, []);
 
   const activeDetail = detailStack[detailStack.length - 1] ?? null;
-  const home = i18n.t('nav.home');
-  const live = i18n.t('nav.live');
-  const movies = i18n.t('nav.movies');
-  const series = i18n.t('nav.series');
-  const searchLabel = i18n.t('nav.search');
-  const settingsLabel = i18n.t('nav.settings');
+  const [home, live, movies, series, searchLabel, settingsLabel] = [
+    i18n.t('nav.home'),
+    i18n.t('nav.live'),
+    i18n.t('nav.movies'),
+    i18n.t('nav.series'),
+    i18n.t('nav.search'),
+    i18n.t('nav.settings'),
+  ];
   const destinations = useMemo(
     () => buildShellDestinations({ home, live, movies, series }),
     [home, live, movies, series],
@@ -229,11 +231,11 @@ export function AppShell({
   const handleExitNavFocus = useCallback(() => setTopNavFocused(false), []);
   const handleFocusTopNav = useCallback(() => setTopNavFocused(true), []);
   const handleMovieMemoryChange = useCallback(
-    (next: CatalogTabMemory) => setCatalogMemoryByTab((p) => ({ ...p, movie: next })),
+    (n: CatalogTabMemory) => setCatalogMemoryByTab((p) => ({ ...p, movie: n })),
     [],
   );
   const handleSeriesMemoryChange = useCallback(
-    (next: CatalogTabMemory) => setCatalogMemoryByTab((p) => ({ ...p, series: next })),
+    (n: CatalogTabMemory) => setCatalogMemoryByTab((p) => ({ ...p, series: n })),
     [],
   );
   const crashProps = useMemo(
@@ -258,33 +260,6 @@ export function AppShell({
     [stageKey, clearSearchSession, openSources],
   );
 
-  if (playTarget !== null) {
-    return (
-      <CrashRecoveryBoundary resetKey={playTarget.itemKey} {...crashProps}>
-        <PlayerScreen
-          catalog={observedCatalog}
-          videoHost={videoHost}
-          target={playTarget}
-          playbackGuard={playbackGuard}
-          {...(appLifecycle !== undefined ? { appLifecycle } : {})}
-          onTargetChange={(next) => {
-            playTargetRef.current = next;
-            setPlayTarget(next);
-            if (next.kind === 'live') {
-              setLiveMemory((prev) => ({ ...prev, ...recordChannelTune(prev, next.itemKey) }));
-            }
-          }}
-          onExit={() => {
-            playTargetRef.current = null;
-            setPlayTarget(null);
-            setHeroScrolled(false);
-            setUserStateVersion((v) => v + 1);
-          }}
-        />
-      </CrashRecoveryBoundary>
-    );
-  }
-
   const readySourcesCount = sources.filter((s) => !s.needsImport).length;
   const hasHeroOverlay = activeDetail !== null || activeTab === 'home';
   const stageProps = {
@@ -295,102 +270,130 @@ export function AppShell({
   };
 
   return (
-    <AdaptiveNavShell
-      brandTitle={i18n.t('app.title')}
-      showBrand
-      destinations={destinations}
-      utilities={utilities}
-      activeId={activeTab}
-      onSelectDestination={handleSelectDestination}
-      navFocused={topNavFocused}
-      onExitNavFocus={handleExitNavFocus}
-      overlay={hasHeroOverlay}
-      frosted={hasHeroOverlay ? heroScrolled : true}
-      testID="app-shell"
-    >
-      <CrashRecoveryBoundary
-        resetKey={`${activeTab}:${activeDetail?.itemKey ?? ''}`}
-        {...crashProps}
-      >
-        {activeDetail !== null ? (
-          <DetailScreen
-            key={activeDetail.itemKey}
-            target={activeDetail}
-            userStateVersion={userStateVersion}
-            onBack={popDetail}
-            onPlay={handlePlay}
-            onOpenDetail={openDetail}
-            onScrollTopChange={setHeroScrolled}
-            {...stageProps}
+    <RouteActiveProvider active={documentVisible}>
+      {playTarget !== null ? (
+        <CrashRecoveryBoundary resetKey={playTarget.itemKey} {...crashProps}>
+          <PlayerScreen
+            catalog={observedCatalog}
+            videoHost={videoHost}
+            target={playTarget}
+            playbackGuard={playbackGuard}
+            {...(appLifecycle !== undefined ? { appLifecycle } : {})}
+            onTargetChange={(next) => {
+              const enriched = enrichPlayTargetAccountKey(next, sourcesRef.current);
+              playTargetRef.current = enriched;
+              setPlayTarget(enriched);
+              if (enriched.kind === 'live') {
+                setLiveMemory((p) => ({ ...p, ...recordChannelTune(p, enriched.itemKey) }));
+              }
+            }}
+            onExit={() => {
+              playTargetRef.current = null;
+              setPlayTarget(null);
+              setHeroScrolled(false);
+              setUserStateVersion((v) => v + 1);
+            }}
           />
-        ) : activeTab === 'settings' ? (
-          <SettingsScreen
-            section={settingsSection}
-            onSectionChange={handleSettingsSectionChange}
-            preferences={preferences}
-            onFocusTopNav={handleFocusTopNav}
-            isActiveScope={!topNavFocused}
-            renderSources={(slot) => (
-              <SourcesScreen
-                catalog={observedCatalog}
-                embedded
-                playbackGuard={playbackGuard}
-                externalRefreshToken={externalRefreshToken + refreshToken}
-                {...(readySourcesCount > 0 ? { onOpenMenu: () => selectTab('home') } : {})}
-                {...slot}
+        </CrashRecoveryBoundary>
+      ) : (
+        <AdaptiveNavShell
+          brandTitle={i18n.t('app.title')}
+          showBrand
+          destinations={destinations}
+          utilities={utilities}
+          activeId={activeTab}
+          onSelectDestination={handleSelectDestination}
+          navFocused={topNavFocused}
+          onExitNavFocus={handleExitNavFocus}
+          overlay={hasHeroOverlay}
+          frosted={hasHeroOverlay ? heroScrolled : true}
+          testID="app-shell"
+        >
+          <CrashRecoveryBoundary
+            resetKey={`${activeTab}:${activeDetail?.itemKey ?? ''}`}
+            {...crashProps}
+          >
+            {activeDetail !== null ? (
+              <DetailScreen
+                key={activeDetail.itemKey}
+                target={activeDetail}
+                userStateVersion={userStateVersion}
+                onBack={popDetail}
+                onPlay={handlePlay}
+                onOpenDetail={openDetail}
+                onScrollTopChange={setHeroScrolled}
+                {...stageProps}
+              />
+            ) : activeTab === 'settings' ? (
+              <SettingsScreen
+                section={settingsSection}
+                onSectionChange={handleSettingsSectionChange}
+                preferences={preferences}
+                onFocusTopNav={handleFocusTopNav}
+                isActiveScope={!topNavFocused}
+                renderSources={(slot) => (
+                  <SourcesScreen
+                    catalog={observedCatalog}
+                    embedded
+                    playbackGuard={playbackGuard}
+                    externalRefreshToken={externalRefreshToken + refreshToken}
+                    {...(readySourcesCount > 0 ? { onOpenMenu: () => selectTab('home') } : {})}
+                    {...slot}
+                  />
+                )}
+                renderLicenses={(slot) => <ThirdPartyNoticesScreen embedded {...slot} />}
+              />
+            ) : activeTab === 'search' ? (
+              <SearchScreen
+                userStateVersion={userStateVersion}
+                initialQuery={searchQuery}
+                onQueryChange={setSearchQuery}
+                initialScope={searchScope}
+                onScopeChange={setSearchScope}
+                recentSearches={recentSearches}
+                onRecentSearchesChange={setRecentSearches}
+                onPlay={handlePlay}
+                onOpenDetail={openDetail}
+                {...stageProps}
+              />
+            ) : activeTab === 'home' ? (
+              <HomeScreen
+                sources={sources}
+                userStateVersion={userStateVersion}
+                onPlay={handlePlay}
+                onOpenTab={selectTab}
+                onOpenDetail={openDetail}
+                onOpenSources={openSources}
+                onScrollTopChange={setHeroScrolled}
+                {...stageProps}
+              />
+            ) : activeTab === 'movie' || activeTab === 'series' ? (
+              <CatalogDiscoveryScreen
+                key={activeTab}
+                kind={activeTab}
+                sources={sources}
+                userStateVersion={userStateVersion}
+                memory={catalogMemoryByTab[activeTab]}
+                onMemoryChange={
+                  activeTab === 'movie' ? handleMovieMemoryChange : handleSeriesMemoryChange
+                }
+                onOpenDetail={openDetail}
+                onOpenSources={openSources}
+                {...stageProps}
+              />
+            ) : (
+              <LiveScreen
+                sources={sources}
+                memory={liveMemory}
+                onMemoryChange={setLiveMemory}
+                onPlay={handlePlay}
+                onOpenSources={openSources}
+                {...stageProps}
               />
             )}
-            renderLicenses={(slot) => <ThirdPartyNoticesScreen embedded {...slot} />}
-          />
-        ) : activeTab === 'search' ? (
-          <SearchScreen
-            userStateVersion={userStateVersion}
-            initialQuery={searchQuery}
-            onQueryChange={setSearchQuery}
-            initialScope={searchScope}
-            onScopeChange={setSearchScope}
-            recentSearches={recentSearches}
-            onRecentSearchesChange={setRecentSearches}
-            onPlay={handlePlay}
-            onOpenDetail={openDetail}
-            {...stageProps}
-          />
-        ) : activeTab === 'home' ? (
-          <HomeScreen
-            sources={sources}
-            userStateVersion={userStateVersion}
-            onPlay={handlePlay}
-            onOpenTab={selectTab}
-            onOpenDetail={openDetail}
-            onOpenSources={openSources}
-            onScrollTopChange={setHeroScrolled}
-            {...stageProps}
-          />
-        ) : activeTab === 'movie' || activeTab === 'series' ? (
-          <CatalogDiscoveryScreen
-            key={activeTab}
-            kind={activeTab}
-            sources={sources}
-            userStateVersion={userStateVersion}
-            memory={catalogMemoryByTab[activeTab]}
-            onMemoryChange={
-              activeTab === 'movie' ? handleMovieMemoryChange : handleSeriesMemoryChange
-            }
-            onOpenDetail={openDetail}
-            onOpenSources={openSources}
-            {...stageProps}
-          />
-        ) : (
-          <LiveScreen
-            sources={sources}
-            memory={liveMemory}
-            onMemoryChange={setLiveMemory}
-            onPlay={handlePlay}
-            onOpenSources={openSources}
-            {...stageProps}
-          />
-        )}
-      </CrashRecoveryBoundary>
-    </AdaptiveNavShell>
+          </CrashRecoveryBoundary>
+        </AdaptiveNavShell>
+      )}
+    </RouteActiveProvider>
   );
 }

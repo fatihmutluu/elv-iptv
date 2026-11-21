@@ -48,6 +48,7 @@ export interface MpvEngine extends PlayerEngine {
   setArea(area: PlayerArea): void;
   readonly lastArea: PlayerArea | undefined;
   toggleFullscreen(): void;
+  toggleMute(): void;
 }
 
 const QUIT_GRACE_MS = 500;
@@ -107,9 +108,8 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   };
 
   const reportWedged = (detail: string): void => {
-    if (media) {
+    if (media)
       emit([{ attempt: media.token, type: 'error', error: { code: 'engine-wedged', detail } }]);
-    }
   };
 
   const detach = (L: LiveSession): void => {
@@ -300,9 +300,8 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       lastArea = area;
       presenter.setArea(area);
     },
-    toggleFullscreen: () => {
-      if (!released) presenter.toggleFullscreen();
-    },
+    toggleFullscreen: () => !released && presenter.toggleFullscreen(),
+    toggleMute: () => !released && queue.enqueueCommand(['cycle', 'mute']),
     get spawns() {
       return spawns;
     },

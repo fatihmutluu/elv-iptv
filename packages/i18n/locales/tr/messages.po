@@ -468,6 +468,9 @@ msgstr "-10 sn"
 msgid "player.seekForward"
 msgstr "+10 sn"
 
+msgid "player.mute"
+msgstr "Sesi kapat"
+
 msgid "player.tracks"
 msgstr "Ses ve Altyazı"
 

@@ -18,6 +18,12 @@ import {
 export interface DesktopShortcutGuard {
   readonly canJumpPreviousChannel: () => boolean;
   readonly onJumpPreviousChannel: () => void;
+  readonly canToggleTracks: () => boolean;
+  readonly onToggleTracks: () => void;
+  readonly canToggleMute: () => boolean;
+  readonly onToggleMute: () => void;
+  readonly canToggleFullscreen: () => boolean;
+  readonly onToggleFullscreen: () => void;
   readonly isVod: () => boolean;
   readonly canUseShortcuts: () => boolean;
   readonly onSeekBy: (deltaMs: number) => void;
@@ -36,19 +42,6 @@ export function isWebButtonActive(): boolean {
   const role = active?.getAttribute?.('role');
   return role === 'button' || role === 'radio' || role === 'adjustable' || role === 'switch';
 }
-
-/** No-op initial guard value for {@link useDesktopPlayerShortcuts}. */
-export const NOOP_DESKTOP_SHORTCUT_GUARD: DesktopShortcutGuard = {
-  canJumpPreviousChannel: () => false,
-  onJumpPreviousChannel: () => undefined,
-  isVod: () => false,
-  canUseShortcuts: () => false,
-  onSeekBy: () => undefined,
-  onSeekToRatio: () => undefined,
-  onSeekToEnd: () => undefined,
-  onTogglePlayPause: () => undefined,
-  onKeyEvent: () => undefined,
-};
 
 interface WebKeyEventLike {
   key?: unknown;
@@ -70,6 +63,15 @@ function isPreviousChannelShortcut(e: WebKeyEventLike): boolean {
   return (e.key === 'p' || e.key === 'P') && e.repeat !== true && !hasControlModifier(e);
 }
 
+function isPlainLetter(e: WebKeyEventLike, lower: string, upper: string): boolean {
+  return (
+    (e.key === lower || e.key === upper) &&
+    e.repeat !== true &&
+    e.shiftKey !== true &&
+    !hasControlModifier(e)
+  );
+}
+
 function dispatchVodShortcut(
   e: WebKeyEventLike,
   guard: DesktopShortcutGuard,
@@ -77,6 +79,21 @@ function dispatchVodShortcut(
 ): boolean {
   if (typeof e.key !== 'string' || hasControlModifier(e)) return false;
 
+  if (isPlainLetter(e, 'f', 'F') && guard.canToggleFullscreen()) {
+    e.preventDefault?.();
+    guard.onToggleFullscreen();
+    return true;
+  }
+  if (isPlainLetter(e, 'c', 'C') && guard.canToggleTracks()) {
+    e.preventDefault?.();
+    guard.onToggleTracks();
+    return true;
+  }
+  if (isPlainLetter(e, 'm', 'M') && guard.canToggleMute()) {
+    e.preventDefault?.();
+    guard.onToggleMute();
+    return true;
+  }
   if (isPreviousChannelShortcut(e) && guard.canJumpPreviousChannel()) {
     e.preventDefault?.();
     guard.onJumpPreviousChannel();
@@ -136,17 +153,19 @@ function dispatchVodShortcut(
 }
 
 /**
- * Attaches desktop keyboard shortcuts (`0–9`, `Home`, `End`, `Shift+Arrow`, `J/K/L`, `P`) on web
- * (`window`) with held-key repeat throttling and returns non-web desktop fallback handlers.
+ * Attaches desktop keyboard shortcuts (`0–9`, `Home`, `End`, `Shift+Arrow`, `J/K/L`, `C`, `F`, `M`, `P`)
+ * on web (`window`) with held-key repeat throttling and returns non-web desktop fallback handlers.
  */
 export function useDesktopPlayerShortcuts(params: {
   formFactor: FormFactor;
   clockRef: MutableRefObject<PlaybackClock>;
   scrub: ScrubController;
-  guardRef: MutableRefObject<DesktopShortcutGuard>;
+  guard: DesktopShortcutGuard;
 }): Record<string, unknown> {
-  const { formFactor, clockRef, scrub, guardRef } = params;
+  const { formFactor, clockRef, scrub, guard } = params;
   const isWebDesktop = formFactor === 'desktop' && (Platform.OS as string) === 'web';
+  const guardRef = useRef<DesktopShortcutGuard>(guard);
+  guardRef.current = guard;
 
   const throttleRef = useRef<KeyRepeatThrottle | null>(null);
   if (throttleRef.current === null) {
@@ -186,7 +205,7 @@ export function useDesktopPlayerShortcuts(params: {
       win.removeEventListener?.('keyup', onKeyUp);
       win.removeEventListener?.('blur', onBlur);
     };
-  }, [guardRef, isWebDesktop, throttle]);
+  }, [isWebDesktop, throttle]);
 
   if (formFactor !== 'desktop' || (Platform.OS as string) === 'web') return {};
 

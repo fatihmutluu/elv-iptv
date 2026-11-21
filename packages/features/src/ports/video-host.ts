@@ -13,7 +13,13 @@ export interface OpenVideoEngine {
   readonly engine: PlayerEngine;
   renderSurface(props: VideoSurfaceProps): ReactElement | null;
   /** Optional key stream emitted by an out-of-DOM video window (such as desktop mpv). */
-  onHostKey?: (listener: (key: 'channel-up' | 'channel-down' | 'back') => void) => () => void;
+  onHostKey?: (
+    listener: (key: 'channel-up' | 'channel-down' | 'back' | 'fullscreen') => void,
+  ) => () => void;
+  /** Optional host fullscreen toggle (e.g. desktop presenter window fullscreen). */
+  toggleFullscreen?: () => void;
+  /** Optional host audio mute toggle. */
+  toggleMute?: () => void;
 }
 
 /** Port supplied by the app composition root to open a `PlayerEngine` and render its surface. */

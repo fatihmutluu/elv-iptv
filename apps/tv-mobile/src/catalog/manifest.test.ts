@@ -116,6 +116,7 @@ describe('reconcileManifest', () => {
         createdAt: 1_000,
         needsImport: true,
         accountMeta: { isTrial: false, expiresAt: expect.any(Number) },
+        credentialFingerprint: expect.stringMatching(/^fp:[0-9a-f]{64}$/),
       },
     ]);
     must(await after.service.importSource(id));

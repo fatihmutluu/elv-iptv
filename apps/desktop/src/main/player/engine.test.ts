@@ -739,4 +739,21 @@ describe('MpvEngine setSpeed coalescing (#302)', () => {
     await sleep(80);
     expect(speedCmds(fake.sent)).toEqual([]);
   });
+
+  it('cycles mpv mute on toggleMute and ignores it after release', async () => {
+    const { engine, fake, events } = await setup();
+    engine.load(live(1, URL_A));
+    await playing(events, 1);
+
+    engine.toggleMute();
+    await vi.waitFor(() => expect(fake.sent).toContainEqual(['cycle', 'mute']));
+    const countBeforeRelease = fake.sent.filter((c) => c[0] === 'cycle' && c[1] === 'mute').length;
+
+    engine.release();
+    engine.toggleMute();
+    await sleep(30);
+    expect(fake.sent.filter((c) => c[0] === 'cycle' && c[1] === 'mute')).toHaveLength(
+      countBeforeRelease,
+    );
+  });
 });

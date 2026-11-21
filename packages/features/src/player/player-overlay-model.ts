@@ -56,6 +56,7 @@ function toPlayableEntry(target: PlayTarget): PlayableEntry {
   return {
     itemKey: target.itemKey,
     sourceId: target.sourceId,
+    ...(target.accountKey !== undefined ? { accountKey: target.accountKey } : {}),
     title: target.title,
     kind: target.kind,
     ...(target.startPositionMs !== undefined ? { startPositionMs: target.startPositionMs } : {}),

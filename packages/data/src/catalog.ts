@@ -9,6 +9,7 @@ import {
   type SecretStore,
   type SqlDriver,
 } from '@elv/domain';
+import { isCredentialFingerprint } from './credential-fingerprint';
 import {
   type NowNextEntry,
   type ProgrammeRow,
@@ -108,6 +109,7 @@ export interface SourceRow {
   createdAt: number;
   needsImport: boolean;
   accountMeta?: SourceAccountMeta;
+  credentialFingerprint?: string;
 }
 
 /** Input of {@link CatalogService.addSource}. */
@@ -150,18 +152,30 @@ export interface CatalogService {
   close(): Promise<void>;
 }
 
-function parseAccountMeta(settingsJson: string): SourceAccountMeta | undefined {
+function parseSourceMeta(
+  settingsJson: string,
+): Pick<SourceRow, 'accountMeta' | 'credentialFingerprint'> {
   try {
-    const meta = (JSON.parse(settingsJson) as Partial<SourceSettings> | null)?.accountMeta;
-    if (meta === null || typeof meta !== 'object') return undefined;
-    const out: SourceAccountMeta = {};
-    if (typeof meta.isTrial === 'boolean') out.isTrial = meta.isTrial;
-    if (typeof meta.expiresAt === 'number' && Number.isFinite(meta.expiresAt)) {
-      out.expiresAt = meta.expiresAt;
+    const parsed = JSON.parse(settingsJson) as Partial<SourceSettings> | null;
+    if (parsed === null || typeof parsed !== 'object') return {};
+    const out: Pick<SourceRow, 'accountMeta' | 'credentialFingerprint'> = {};
+    if (isCredentialFingerprint(parsed.credentialFingerprint)) {
+      out.credentialFingerprint = parsed.credentialFingerprint;
     }
-    return out.isTrial !== undefined || out.expiresAt !== undefined ? out : undefined;
+    const meta = parsed.accountMeta;
+    if (meta !== null && typeof meta === 'object') {
+      const accountMeta: SourceAccountMeta = {};
+      if (typeof meta.isTrial === 'boolean') accountMeta.isTrial = meta.isTrial;
+      if (typeof meta.expiresAt === 'number' && Number.isFinite(meta.expiresAt)) {
+        accountMeta.expiresAt = meta.expiresAt;
+      }
+      if (accountMeta.isTrial !== undefined || accountMeta.expiresAt !== undefined) {
+        out.accountMeta = accountMeta;
+      }
+    }
+    return out;
   } catch {
-    return undefined;
+    return {};
   }
 }
 
@@ -172,6 +186,9 @@ const row = (r: SourceRecord): SourceRow => ({
   createdAt: r.createdAt,
   needsImport: true,
   ...(r.settings.accountMeta === undefined ? {} : { accountMeta: r.settings.accountMeta }),
+  ...(isCredentialFingerprint(r.settings.credentialFingerprint)
+    ? { credentialFingerprint: r.settings.credentialFingerprint }
+    : {}),
 });
 
 const LIST_SOURCES = `SELECT s.id, s.kind, s.name, s.created_at, s.settings_json,
@@ -279,17 +296,14 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
         settings_json: string;
         imported: number;
       }>(LIST_SOURCES);
-      return rows.map((r) => {
-        const accountMeta = parseAccountMeta(r.settings_json);
-        return {
-          id: r.id,
-          kind: r.kind,
-          name: r.name,
-          createdAt: r.created_at,
-          needsImport: r.imported === 0,
-          ...(accountMeta === undefined ? {} : { accountMeta }),
-        };
-      });
+      return rows.map((r) => ({
+        id: r.id,
+        kind: r.kind,
+        name: r.name,
+        createdAt: r.created_at,
+        needsImport: r.imported === 0,
+        ...parseSourceMeta(r.settings_json),
+      }));
     },
 
     categories: (sourceId, kind) => queryCategories(db, sourceId, kind),
@@ -318,9 +332,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     },
 
     nowNext: (channelKeys, nowMs) => queryNowNext(db, channelKeys, nowMs),
-
     epgWindow: (channelKeys, fromMs, toMs) => queryEpgWindow(db, channelKeys, fromMs, toMs),
-
     async channelByNumber(num, sourceId) {
       const found = await queryChannelByNumber(db, num, sourceId);
       if (found === undefined) return null;
@@ -347,7 +359,6 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       const series = await querySeries(db, seriesId);
       return series === undefined ? [] : queryEpisodes(db, series, season);
     },
-
     resolveStream: (itemKey) => playtime.resolveStream(itemKey),
 
     async saveProgress(input) {
@@ -356,30 +367,22 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       const [resolved] = await playtime.resolveRowLogos([saved.value]);
       return ok(resolved ?? saved.value);
     },
-
     setWatched: (itemKey, watched, profileId) =>
       setItemWatched(db, itemKey, watched, clock, profileId),
-
     async getProgress(itemKey, profileId) {
       const found = await getWatchProgress(db, itemKey, profileId);
       if (found === null) return null;
       const [resolved] = await playtime.resolveRowLogos([found]);
       return resolved ?? found;
     },
-
     listContinueWatching: async (limit, profileId) =>
       playtime.resolveRowLogos(await listContinueWatching(db, limit, profileId)),
-
     listProgressByKeys: async (itemKeys, profileId) =>
       playtime.resolveRowLogos(await listProgressByKeys(db, itemKeys, profileId)),
-
     clearProgress: (itemKey, profileId) => clearWatchProgress(db, itemKey, profileId),
-
     toggleFavorite: (input) => toggleFavorite(db, input, clock),
-
     listFavorites: async (limit, profileId) =>
       playtime.resolveRowLogos(await listFavorites(db, limit, profileId)),
-
     listFavoriteKeys: (profileId) => listFavoriteKeys(db, profileId),
 
     close() {

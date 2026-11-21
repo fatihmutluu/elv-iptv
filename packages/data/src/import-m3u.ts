@@ -10,6 +10,7 @@ import {
   transportHeaders,
 } from '@elv/domain';
 import { type M3uEntry, scanM3u } from '@elv/sources';
+import { fingerprintM3uCredentials } from './credential-fingerprint';
 import { foldText } from './fold';
 import {
   clearDiscoveredGuideValidators,
@@ -64,7 +65,12 @@ type PlaylistOpen =
   | { kind: 'not-modified'; validator: HttpCacheValidator | undefined };
 
 type M3uOutcome =
-  | { kind: 'imported'; staged: StagedM3u; validator: HttpCacheValidator | undefined }
+  | {
+      kind: 'imported';
+      staged: StagedM3u;
+      validator: HttpCacheValidator | undefined;
+      credentialFingerprint: string | undefined;
+    }
   | { kind: 'not-modified'; validator: HttpCacheValidator | undefined };
 
 async function discard(body: HttpResponse['body']): Promise<void> {
@@ -121,11 +127,8 @@ function place(
   for (const group of groups) {
     if (!known.has(group)) {
       known.set(group, known.size);
-      let list = fresh.get(kind);
-      if (list === undefined) {
-        list = [];
-        fresh.set(kind, list);
-      }
+      const list = fresh.get(kind) ?? [];
+      if (!fresh.has(kind)) fresh.set(kind, list);
       list.push(group);
     }
     const slot = `${kind}\n${group}`;
@@ -200,14 +203,13 @@ async function processBatch(
   }
   for (const kind of ['live', 'movie', 'series'] as const) {
     const names = fresh.get(kind) ?? [];
-    const first = st.categories[kind].size - names.length;
     await writeCategories(
       c.db,
       c.sourceId,
       kind,
       c.runId,
       names.map((name) => ({ id: name, name })),
-      first,
+      st.categories[kind].size - names.length,
     );
   }
   await writeM3uLive(c.db, c.sourceId, c.runId, live);
@@ -259,6 +261,7 @@ async function execute(
   let total = 0;
   let guideUrls: string[] = [];
   let present = false;
+  let credentialFingerprint: string | undefined;
   try {
     for (;;) {
       checkAbort(c);
@@ -280,7 +283,12 @@ async function execute(
         if (batch.done && total === 0 && !present) {
           throw new Stop(elvError('source-format', 'not-a-playlist'));
         }
-        st = createM3uImportState(source, playlistUrl, buffered.slice(0, SAMPLE_SIZE));
+        const sample = buffered.slice(0, SAMPLE_SIZE);
+        credentialFingerprint = fingerprintM3uCredentials(
+          playlistUrl,
+          sample.map((entry) => entry.url),
+        );
+        st = createM3uImportState(source, playlistUrl, sample);
         gate = new M3uEntryGate(st);
         await write(c, st, gate.admit(buffered));
         buffered.length = 0;
@@ -293,11 +301,8 @@ async function execute(
   }
   if (st === undefined || gate === undefined) throw new Stop(elvError('network', 'stream-failed'));
   await write(c, st, gate.release());
-  return {
-    kind: 'imported',
-    staged: finishM3uRun(c, st, oldVars, guideUrls),
-    validator: opened.validator,
-  };
+  const staged = finishM3uRun(c, st, oldVars, guideUrls);
+  return { kind: 'imported', staged, validator: opened.validator, credentialFingerprint };
 }
 
 /**
@@ -343,23 +348,21 @@ export async function importM3u(
         return;
       }
       const { staged } = outcome;
-      for (const [key, table] of [
-        ['live', 'live'],
-        ['movies', 'movies'],
-        ['series', 'series'],
-        ['episodes', 'episodes'],
-      ] as const) {
+      for (const table of ['live', 'movies', 'series', 'episodes'] as const) {
         const r = await tx.all<{ n: number }>(
           `SELECT COUNT(*) AS n FROM ${table} WHERE source_id = ? AND run_id = ?`,
           [c.sourceId, c.runId],
         );
-        c.counts[key] = r[0]?.n ?? 0;
+        c.counts[table] = r[0]?.n ?? 0;
       }
       let settings: SourceSettings = { ...current };
       if (staged.rules.length > 0) settings.segmentRules = staged.rules;
       else delete settings.segmentRules;
       if (staged.discovered === undefined) delete settings.discoveredGuideUrls;
       else settings.discoveredGuideUrls = staged.discovered;
+      if (outcome.credentialFingerprint !== undefined)
+        settings.credentialFingerprint = outcome.credentialFingerprint;
+      else delete settings.credentialFingerprint;
       if (
         discoveredGuidesChanged(
           current.discoveredGuideUrls,

@@ -5,9 +5,15 @@ import { attachMouseBackGuard } from './browser-back.ts';
 import { createDesktopCatalog } from './catalog/index.ts';
 import { GateScreen } from './gate/GateScreen.tsx';
 import { resolveGate } from './gate/params.ts';
+import { bindDesktopMediaSession, createDesktopMediaSession } from './media-session.ts';
 import { createDesktopEngine } from './player/desktop-engine.ts';
-import { dispatchDesktopClose, routeDesktopUiEvent } from './player/host-keys.ts';
+import {
+  type DesktopHostKey,
+  dispatchDesktopClose,
+  routeDesktopUiEvent,
+} from './player/host-keys.ts';
 import { PlayerView } from './player/PlayerView.tsx';
+import { attachScrollBlurGuard } from './scroll-blur-guard.ts';
 import { createDesktopPreferencesStore } from './storage/preferences.ts';
 import { shouldMountWorkbench } from './workbench/presets.ts';
 
@@ -38,6 +44,11 @@ function isTrackPickerModalOpen(): boolean {
   );
 }
 
+function readActiveOsdTitle(): string {
+  if (typeof document === 'undefined') return '';
+  return document.querySelector('[data-testid="osd-title"]')?.textContent?.trim() ?? '';
+}
+
 function AppRoot() {
   const [refreshToken, setRefreshToken] = useState(0);
 
@@ -55,18 +66,33 @@ function AppRoot() {
       async open() {
         const playerBridge = window.elv?.player;
         if (!playerBridge) return null;
-        const engine = await createDesktopEngine(playerBridge, () => performance.now());
+        const rawEngine = await createDesktopEngine(playerBridge, () => performance.now());
+        const mediaSession = createDesktopMediaSession();
+        let activeHostKeyListener: ((key: DesktopHostKey) => void) | null = null;
+        const engine = bindDesktopMediaSession(rawEngine, mediaSession, {
+          getTitle: readActiveOsdTitle,
+          onTrackStep: (dir) =>
+            activeHostKeyListener?.(dir === 'next' ? 'channel-up' : 'channel-down'),
+        });
         return {
           engine,
           renderSurface: ({ failed }) => <PlayerView engine={engine} status="" failed={failed} />,
-          onHostKey: (listener) =>
-            engine.onUi((event) =>
+          toggleFullscreen: () => rawEngine.toggleFullscreen(),
+          toggleMute: () => rawEngine.toggleMute(),
+          onHostKey: (listener) => {
+            activeHostKeyListener = listener;
+            const offUi = rawEngine.onUi((event) =>
               routeDesktopUiEvent(event, {
-                toggleFullscreen: () => engine.toggleFullscreen(),
+                toggleFullscreen: () => listener('fullscreen'),
                 onHostKey: listener,
                 onClose: () => dispatchDesktopClose(listener, isTrackPickerModalOpen()),
               }),
-            ),
+            );
+            return () => {
+              if (activeHostKeyListener === listener) activeHostKeyListener = null;
+              offUi();
+            };
+          },
         };
       },
     }),
@@ -84,6 +110,11 @@ function AppRoot() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     return attachMouseBackGuard(window);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    return attachScrollBlurGuard(window);
   }, []);
 
   return (

@@ -175,6 +175,7 @@ export const enMessages = {
   'player.pause': 'Pause',
   'player.seekBack': '-10s',
   'player.seekForward': '+10s',
+  'player.mute': 'Mute',
   'player.tracks': 'Audio & Subtitles',
   'player.audioTracks': 'Audio',
   'player.subtitleTracks': 'Subtitles',

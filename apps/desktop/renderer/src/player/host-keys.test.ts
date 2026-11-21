@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { dispatchDesktopClose, routeDesktopUiEvent } from './host-keys.ts';
+import { type DesktopHostKey, dispatchDesktopClose, routeDesktopUiEvent } from './host-keys.ts';
 
 describe('routeDesktopUiEvent & dispatchDesktopClose', () => {
   it('separates close/closed from back and routes fullscreen and channel zaps cleanly', () => {
-    const toggleFullscreen = vi.fn();
-    const onHostKey = vi.fn();
+    const onHostKey = vi.fn<(key: DesktopHostKey) => void>();
+    const toggleFullscreen = vi.fn(() => onHostKey('fullscreen'));
     const onClose = vi.fn();
     const handlers = { toggleFullscreen, onHostKey, onClose };
 
@@ -19,13 +19,18 @@ describe('routeDesktopUiEvent & dispatchDesktopClose', () => {
     routeDesktopUiEvent({ type: 'key', key: 'channel-up' }, handlers);
     routeDesktopUiEvent({ type: 'key', key: 'channel-down' }, handlers);
     routeDesktopUiEvent({ type: 'key', key: 'back' }, handlers);
-    expect(onHostKey.mock.calls).toEqual([['channel-up'], ['channel-down'], ['back']]);
+    expect(onHostKey.mock.calls).toEqual([
+      ['fullscreen'],
+      ['channel-up'],
+      ['channel-down'],
+      ['back'],
+    ]);
     expect(onClose).not.toHaveBeenCalled();
 
     routeDesktopUiEvent({ type: 'key', key: 'close' }, handlers);
     routeDesktopUiEvent({ type: 'closed' }, handlers);
     expect(onClose).toHaveBeenCalledTimes(2);
-    expect(onHostKey).toHaveBeenCalledTimes(3);
+    expect(onHostKey).toHaveBeenCalledTimes(4);
   });
 
   it('dispatchDesktopClose sends back once normally, or twice when track picker modal is open', () => {

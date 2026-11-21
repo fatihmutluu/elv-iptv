@@ -1,5 +1,10 @@
 import { ok } from '@elv/domain';
 import { describe, expect, it } from 'vitest';
+import {
+  fingerprintM3uCredentials,
+  fingerprintXtreamCredentials,
+  isCredentialFingerprint,
+} from './credential-fingerprint';
 import { fakeGunzip, gzipped } from './import-guide-test-helpers';
 import {
   count,
@@ -460,5 +465,38 @@ describe('m3u import', () => {
     if (!withDecomp.ok) throw new Error(JSON.stringify(withDecomp.error));
     expect(withDecomp.value.counts).toMatchObject({ live: 2, movies: 1, episodes: 3, series: 2 });
     expect(await count(e.db, 'live')).toBe(2);
+  });
+
+  it('persists credentialFingerprint from playlistUrl or falls back to sample stream URLs (#265)', async () => {
+    const e1 = await setupM3u(playlist());
+    expect((await run(e1)).ok).toBe(true);
+    const s1 = await getSource(e1.db, e1.sourceId);
+    const expectedFromPlaylist = fingerprintM3uCredentials(playlistUrlFor());
+    expect(isCredentialFingerprint(s1?.settings.credentialFingerprint)).toBe(true);
+    expect(s1?.settings.credentialFingerprint).toBe(expectedFromPlaylist);
+
+    const opaquePlaylistUrl = 'http://cdn.example/opaque/list.m3u';
+    const e2 = await setupM3u(
+      `#EXTM3U\n${extinf('Plain', 'http://cdn.example/hls/ch1/index.m3u8')}${extinf(
+        'Film A',
+        panel('movie', 201),
+      )}`,
+      { playlistUrl: opaquePlaylistUrl },
+    );
+    expect((await run(e2)).ok).toBe(true);
+    const s2 = await getSource(e2.db, e2.sourceId);
+    expect(s2?.settings.credentialFingerprint).toBe(
+      fingerprintXtreamCredentials('http://panel.example:8080', M3U_USER, M3U_PASS),
+    );
+
+    const e3 = await setupM3u(
+      `#EXTM3U\n${extinf('Plain', 'http://cdn.example/hls/ch1/index.m3u8')}`,
+      {
+        playlistUrl: opaquePlaylistUrl,
+      },
+    );
+    expect((await run(e3)).ok).toBe(true);
+    const s3 = await getSource(e3.db, e3.sourceId);
+    expect(s3?.settings.credentialFingerprint).toBeUndefined();
   });
 });

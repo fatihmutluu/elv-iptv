@@ -114,6 +114,7 @@ describe('createDesktopEngine', () => {
     engine.stop(4);
     engine.recreate(5);
     engine.toggleFullscreen();
+    engine.toggleMute();
     expect(f.sent).toEqual([
       { engineId: 'e1', command: { name: 'load', cmd } },
       { engineId: 'e1', command: { name: 'retry', attempt: 2 } },
@@ -126,6 +127,7 @@ describe('createDesktopEngine', () => {
       { engineId: 'e1', command: { name: 'stop', attempt: 4 } },
       { engineId: 'e1', command: { name: 'recreate', attempt: 5 } },
       { engineId: 'e1', command: { name: 'fullscreen' } },
+      { engineId: 'e1', command: { name: 'mute' } },
     ]);
   });
 

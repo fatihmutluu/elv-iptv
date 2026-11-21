@@ -49,11 +49,21 @@ export function usePlayerSession(params: {
   clockRef: MutableRefObject<PlaybackClock>;
   timersRef: MutableRefObject<PlaybackTimers>;
   hostBackRef: MutableRefObject<() => void>;
+  hostFullscreenRef?: MutableRefObject<() => void>;
   onExitRef: MutableRefObject<() => void>;
   zapByRef: MutableRefObject<(delta: 1 | -1, repeat?: boolean) => void>;
   onServiceReady: (service: PlaybackService) => void;
 }) {
-  const { videoHost, serviceRef, clockRef, timersRef, hostBackRef, onExitRef, zapByRef } = params;
+  const {
+    videoHost,
+    serviceRef,
+    clockRef,
+    timersRef,
+    hostBackRef,
+    hostFullscreenRef,
+    onExitRef,
+    zapByRef,
+  } = params;
   const onReadyRef = useRef(params.onServiceReady);
   onReadyRef.current = params.onServiceReady;
 
@@ -90,6 +100,7 @@ export function usePlayerSession(params: {
       const offHostKey = opened.onHostKey?.((key) => {
         if ((key as string) === 'close') onExitRef.current();
         else if (key === 'back') hostBackRef.current();
+        else if (key === 'fullscreen') hostFullscreenRef?.current();
         else if (key === 'channel-up') zapByRef.current(1);
         else if (key === 'channel-down') zapByRef.current(-1);
       });
@@ -118,7 +129,16 @@ export function usePlayerSession(params: {
         activeSession = null;
       }
     };
-  }, [clockRef, hostBackRef, onExitRef, serviceRef, timersRef, videoHost, zapByRef]);
+  }, [
+    clockRef,
+    hostBackRef,
+    hostFullscreenRef,
+    onExitRef,
+    serviceRef,
+    timersRef,
+    videoHost,
+    zapByRef,
+  ]);
 
   const activeService = sessionState.kind === 'ready' ? sessionState.service : null;
   const sliceRef = useRef<PlaybackUiSlice>(OPENING_PLAYBACK_SLICE);

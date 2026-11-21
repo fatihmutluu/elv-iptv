@@ -1,6 +1,12 @@
-import type { BrowseKind, CatalogService } from '@elv/data';
+import {
+  type BrowseKind,
+  type CatalogService,
+  resolveAccountPoolKey,
+  type SourceRow,
+} from '@elv/data';
 import { type CatalogTabMemory, EMPTY_CATALOG_MEMORY } from './catalog';
 import { EMPTY_LIVE_MEMORY, type LiveTabMemory } from './live';
+import type { LiveChannelPlaylist, PlayableEntry, PlayTarget } from './ports/play-target';
 import type { PlaybackGuard } from './ports/playback-guard';
 import type { DetailTarget } from './shared';
 import type { NavDestination, NavUtility } from './shell';
@@ -101,6 +107,65 @@ export function pushDetailStack(
 ): readonly DetailTarget[] {
   const next = [...stack, target];
   return next.length > MAX_DETAIL_STACK ? next.slice(next.length - MAX_DETAIL_STACK) : next;
+}
+
+const rawPlaylistOf = new WeakMap<LiveChannelPlaylist, LiveChannelPlaylist>();
+
+function enrichPlayableEntryAccountKey<T extends PlayableEntry>(
+  entry: T,
+  byId: ReadonlyMap<string, SourceRow>,
+): T {
+  if (entry.accountKey !== undefined) return entry;
+  const source = byId.get(entry.sourceId);
+  if (source === undefined) return entry;
+  return { ...entry, accountKey: resolveAccountPoolKey(source) };
+}
+
+/**
+ * Enriches a {@link PlayTarget} (including `previousChannel`, `nextEpisodes`, and lazy
+ * `playlist.getAt` results) with each source's credential-fingerprint pool key (#265) while
+ * preserving any explicit `accountKey` already set.
+ */
+export function enrichPlayTargetAccountKey(
+  target: PlayTarget,
+  sources: readonly SourceRow[],
+): PlayTarget {
+  if (sources.length === 0) return target;
+  const byId = new Map<string, SourceRow>();
+  for (const s of sources) byId.set(s.id, s);
+
+  const enrichedBase = enrichPlayableEntryAccountKey(target, byId);
+  const enrichedPrev =
+    target.previousChannel !== undefined
+      ? enrichPlayableEntryAccountKey(target.previousChannel, byId)
+      : undefined;
+  const enrichedNext =
+    target.nextEpisodes !== undefined
+      ? target.nextEpisodes.map((ep) => enrichPlayableEntryAccountKey(ep, byId))
+      : undefined;
+
+  let enrichedPlaylist: LiveChannelPlaylist | undefined;
+  if (target.playlist !== undefined) {
+    const basePlaylist = rawPlaylistOf.get(target.playlist) ?? target.playlist;
+    const currentIndex = target.playlist.currentIndex;
+    enrichedPlaylist = {
+      count: basePlaylist.count,
+      currentIndex,
+      onChangeIndex: (index) => basePlaylist.onChangeIndex(index),
+      getAt: async (index) => {
+        const entry = await basePlaylist.getAt(index);
+        return entry === undefined ? undefined : enrichPlayableEntryAccountKey(entry, byId);
+      },
+    };
+    rawPlaylistOf.set(enrichedPlaylist, basePlaylist);
+  }
+
+  return {
+    ...enrichedBase,
+    ...(enrichedPlaylist !== undefined ? { playlist: enrichedPlaylist } : {}),
+    ...(enrichedNext !== undefined ? { nextEpisodes: enrichedNext } : {}),
+    ...(enrichedPrev !== undefined ? { previousChannel: enrichedPrev } : {}),
+  };
 }
 
 /** Wraps `catalog` so source mutations stop playback and trigger shell source reconciliation. */

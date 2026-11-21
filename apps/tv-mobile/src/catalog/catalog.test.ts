@@ -24,6 +24,7 @@ describe('sources', () => {
         createdAt: 1_000,
         needsImport: false,
         accountMeta: { isTrial: false, expiresAt: expect.any(Number) },
+        credentialFingerprint: expect.stringMatching(/^fp:[0-9a-f]{64}$/),
       },
     ]);
     const live = await e.service.categories(id, 'live');

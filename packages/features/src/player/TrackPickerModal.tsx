@@ -9,6 +9,7 @@ import {
 } from '@elv/ui-kit';
 import { type ComponentRef, type ReactElement, useEffect, useRef } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useDesktopDialogTrap } from './desktop-dialog-trap';
 import { formatTrackLabel } from './track-labels';
 import type { TrackPickerCursor } from './track-picker-nav';
 
@@ -128,9 +129,13 @@ export function TrackPickerModal({
   const closeLabel = i18n.t('player.closeTracks');
   const isPhone = formFactor === 'phone';
   const isTouch = formFactor === 'phone' || formFactor === 'tablet';
+  const isWebDesktop = formFactor === 'desktop' && (Platform.OS as string) === 'web';
   const showCursor = isTv || formFactor === 'desktop';
+  const panelRef = useRef<ComponentRef<typeof View> | null>(null);
   const audioScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const subtitleScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
+
+  useDesktopDialogTrap(panelRef, isWebDesktop, onClose);
 
   useEffect(() => {
     if (!showCursor) return;
@@ -142,10 +147,19 @@ export function TrackPickerModal({
   }, [cursor.column, cursor.index, showCursor]);
 
   const listStyle = [styles.list, isPhone ? styles.listPhone : null];
+  const dialogA11yProps = isWebDesktop
+    ? ({
+        role: 'dialog',
+        'aria-modal': true,
+        'aria-label': i18n.t('player.tracks'),
+      } as Record<string, unknown>)
+    : undefined;
 
   return (
     <View
+      ref={panelRef}
       testID="player-tracks-panel"
+      {...dialogA11yProps}
       style={[
         styles.panel,
         isTv ? styles.panelTv : null,
