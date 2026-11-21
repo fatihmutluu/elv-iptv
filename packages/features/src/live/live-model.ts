@@ -1,0 +1,300 @@
+import type { ItemRow, NowNextEntry, ProgrammeRow } from '@elv/data';
+import type { PlayableEntry, PlayTarget } from '../ports/play-target';
+import { createPagedListSource } from '../shared/paged-list-source';
+
+/** Active sub-mode inside the unified Cinema Quietude Live TV hub (`UI_UX_PHILOSOPHY.md` §2.1). */
+export type LiveMode = 'watch' | 'channels' | 'epg';
+
+/** Persisted per-session Live TV hub memory preserved across tab switches and Player visits. */
+export interface LiveTabMemory {
+  readonly mode: LiveMode;
+  readonly categoryId: string | null;
+  readonly activeChannelKey: string | null;
+  readonly previousChannelKey: string | null;
+  readonly zapDrawerOpen: boolean;
+}
+
+/** Default initial Live TV hub memory (`Channels` grid ready immediately, switchable to `Watch` / `TV Guide`). */
+export const EMPTY_LIVE_MEMORY: LiveTabMemory = {
+  mode: 'channels',
+  categoryId: null,
+  activeChannelKey: null,
+  previousChannelKey: null,
+  zapDrawerOpen: true,
+};
+
+/** 30-minute time ruler tick size in milliseconds. */
+export const EPG_SLOT_MS = 30 * 60_000;
+/** Default visible horizontal EPG window span (3 hours = 6 × 30m ticks). */
+export const EPG_VISIBLE_SPAN_MS = 3 * 3_600_000;
+/** Extra lookahead buffer fetched beyond the visible EPG window (1 hour). */
+export const EPG_FETCH_BUFFER_MS = 60 * 60_000;
+/** Horizontal pan increment when stepping Earlier / Later or past the visible edge (2 hours). */
+export const EPG_PAN_STEP_MS = 2 * 3_600_000;
+/** Maximum channel number digit buffer length (`#54`). */
+export const MAX_NUMBER_BUFFER_DIGITS = 5;
+/** Auto-tune delay (ms) after the last digit entry on the 0–9 channel number keypad (`#54`). */
+export const NUMBER_JUMP_TIMEOUT_MS = 1_800;
+/** O(1) LRU channel page size for Live channels & 1,000-channel EPG matrices. */
+export const LIVE_PAGE_SIZE = 120;
+/** Max cached channel pages (`120 × 8 = 960` items in RAM even for 100k-channel providers). */
+export const LIVE_MAX_PAGES = 8;
+/** Default TTL (ms) for bounded in-memory Now/Next & EPG window caches (`#250`). */
+export const EPG_CACHE_TTL_MS = 90_000;
+/** Maximum channel entries kept in the in-memory EPG cache (`#250`). */
+export const EPG_CACHE_MAX_ENTRIES = 240;
+
+/** Floors an epoch timestamp onto the nearest 30-minute boundary for crisp EPG time rulers. */
+export function floorToEpgSlot(ms: number): number {
+  if (!Number.isFinite(ms)) return 0;
+  return Math.floor(ms / EPG_SLOT_MS) * EPG_SLOT_MS;
+}
+
+/** Generates ordered 30-minute ruler tick timestamps across `[windowStartMs, windowStartMs + spanMs)`. */
+export function buildEpgRulerTicks(
+  windowStartMs: number,
+  spanMs: number = EPG_VISIBLE_SPAN_MS,
+): number[] {
+  const start = floorToEpgSlot(windowStartMs);
+  const count = Math.max(1, Math.ceil(Math.max(EPG_SLOT_MS, spanMs) / EPG_SLOT_MS));
+  const ticks: number[] = [];
+  for (let i = 0; i < count; i++) {
+    ticks.push(start + i * EPG_SLOT_MS);
+  }
+  return ticks;
+}
+
+/** Formats an epoch timestamp as `HH:MM` (24-hour, zero-padded, tabular-nums friendly). */
+export function formatClockTime(ms: number): string {
+  if (!Number.isFinite(ms)) return '--:--';
+  const d = new Date(ms);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+/** Computes live programme progress ratio clamped to `[0, 1]`. */
+export function computeProgramProgress(startMs: number, stopMs: number, nowMs: number): number {
+  if (!Number.isFinite(startMs) || !Number.isFinite(stopMs) || !Number.isFinite(nowMs)) return 0;
+  const span = stopMs - startMs;
+  if (span <= 0 || nowMs <= startMs) return 0;
+  if (nowMs >= stopMs) return 1;
+  return (nowMs - startMs) / span;
+}
+
+/** Positioned programme block clipped cleanly to the visible EPG horizontal window. */
+export interface EpgPositionedSlot {
+  readonly programme: ProgrammeRow;
+  readonly leftRatio: number;
+  readonly widthRatio: number;
+  readonly isLive: boolean;
+  readonly clippedStart: boolean;
+  readonly clippedEnd: boolean;
+}
+
+/**
+ * Clips and maps a channel's programmes onto normalized `[0, 1]` horizontal coordinates within
+ * `[windowStartMs, windowStartMs + spanMs]` so rendering scales smoothly to any viewport width.
+ */
+export function layoutEpgSlots(
+  programmes: readonly ProgrammeRow[],
+  windowStartMs: number,
+  spanMs: number,
+  nowMs: number,
+): EpgPositionedSlot[] {
+  if (spanMs <= 0 || programmes.length === 0) return [];
+  const windowEndMs = windowStartMs + spanMs;
+  const out: EpgPositionedSlot[] = [];
+  for (const programme of programmes) {
+    if (programme.stop <= windowStartMs || programme.start >= windowEndMs) continue;
+    const visStart = Math.max(windowStartMs, programme.start);
+    const visEnd = Math.min(windowEndMs, programme.stop);
+    if (visEnd <= visStart) continue;
+    out.push({
+      programme,
+      leftRatio: (visStart - windowStartMs) / spanMs,
+      widthRatio: (visEnd - visStart) / spanMs,
+      isLive: programme.start <= nowMs && programme.stop > nowMs,
+      clippedStart: programme.start < windowStartMs,
+      clippedEnd: programme.stop > windowEndMs,
+    });
+  }
+  return out;
+}
+
+/**
+ * Computes normalized `[0, 1]` horizontal position of the vertical `Now` line, or `null` when
+ * `nowMs` lies outside `[windowStartMs, windowStartMs + spanMs]`.
+ */
+export function computeNowLineRatio(
+  windowStartMs: number,
+  spanMs: number,
+  nowMs: number,
+): number | null {
+  if (spanMs <= 0 || nowMs < windowStartMs || nowMs > windowStartMs + spanMs) return null;
+  return (nowMs - windowStartMs) / spanMs;
+}
+
+/**
+ * Finds the programme index spanning `anchorTimeMs` so D-pad Up/Down navigation across virtualized
+ * channels keeps focus cleanly aligned under the user's time cursor (`#6`). Falls back to the
+ * nearest programme when a schedule gap exists, or `-1` if the channel has no programmes.
+ */
+export function findProgramIndexAtTime(
+  programmes: readonly ProgrammeRow[],
+  anchorTimeMs: number,
+): number {
+  if (programmes.length === 0) return -1;
+  for (let i = 0; i < programmes.length; i++) {
+    const p = programmes[i];
+    if (p !== undefined && p.start <= anchorTimeMs && p.stop > anchorTimeMs) return i;
+  }
+  let bestIdx = 0;
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < programmes.length; i++) {
+    const p = programmes[i];
+    if (p === undefined) continue;
+    const dist =
+      anchorTimeMs < p.start ? p.start - anchorTimeMs : Math.max(0, anchorTimeMs - p.stop);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+
+/** Appends a single digit (`'0'..'9'`) to a channel number jump buffer, capping length cleanly. */
+export function appendNumberDigit(buffer: string, digit: string): string {
+  if (!/^[0-9]$/.test(digit)) return buffer;
+  const next = `${buffer}${digit}`.replace(/^0+(?=\d)/, '');
+  return next.slice(0, MAX_NUMBER_BUFFER_DIGITS);
+}
+
+/** Parses a non-empty digit buffer into a channel number, or `null` when invalid. */
+export function parseNumberBuffer(buffer: string): number | null {
+  const trimmed = buffer.trim();
+  if (!/^\d{1,5}$/.test(trimmed)) return null;
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+/** Formats a live channel title with its optional channel number prefix. */
+export function formatLiveTitle(item: Pick<ItemRow, 'num' | 'name'>): string {
+  return item.num !== null && item.num !== undefined ? `${item.num}. ${item.name}` : item.name;
+}
+
+/**
+ * Updates `(activeChannelKey, previousChannelKey)` history when tuning to a new channel so
+ * `Previous channel` (`P`) always toggles back cleanly without losing state.
+ */
+export function recordChannelTune(
+  state: { readonly activeChannelKey: string | null; readonly previousChannelKey: string | null },
+  nextChannelKey: string,
+): { readonly activeChannelKey: string; readonly previousChannelKey: string | null } {
+  if (state.activeChannelKey === nextChannelKey) {
+    return {
+      activeChannelKey: nextChannelKey,
+      previousChannelKey: state.previousChannelKey,
+    };
+  }
+  return {
+    activeChannelKey: nextChannelKey,
+    previousChannelKey: state.activeChannelKey,
+  };
+}
+
+/** Builds a Live TV `PlayTarget` backed by an O(1) LRU-paged `LiveChannelPlaylist`. */
+export function buildLiveHubPlayTarget(opts: {
+  readonly item: ItemRow;
+  readonly categoryId: string;
+  readonly categoryCount: number;
+  readonly currentIndex: number;
+  readonly loadPage: (offset: number, limit: number) => Promise<readonly ItemRow[]>;
+  readonly onChangeIndex?: (nextIndex: number) => void;
+}): PlayTarget {
+  const count = Math.max(opts.categoryCount, opts.currentIndex + 1);
+  const loader = createPagedListSource<ItemRow>({
+    count,
+    pageSize: LIVE_PAGE_SIZE,
+    maxPages: 4,
+    loadPage: opts.loadPage,
+  });
+  return {
+    itemKey: opts.item.key,
+    sourceId: opts.item.sourceId,
+    title: formatLiveTitle(opts.item),
+    kind: 'live',
+    logo: opts.item.logo,
+    itemKind: 'live',
+    playlist: {
+      count,
+      currentIndex: opts.currentIndex,
+      onChangeIndex: opts.onChangeIndex ?? (() => undefined),
+      async getAt(index: number): Promise<PlayableEntry | undefined> {
+        const row = await loader.loadItem(index);
+        if (row === undefined) return undefined;
+        return {
+          itemKey: row.key,
+          sourceId: row.sourceId,
+          title: formatLiveTitle(row),
+          kind: 'live',
+          logo: row.logo,
+          itemKind: 'live',
+        };
+      },
+    },
+  };
+}
+
+/** Bounded insertion-ordered LRU cache with TTL for Now/Next and EPG window slices (`#250`). */
+export interface BoundedTtlCache<T> {
+  get(key: string, nowMs: number): T | undefined;
+  set(key: string, value: T, nowMs: number): void;
+  clear(): void;
+  size(): number;
+}
+
+/** Creates an O(1) bounded LRU TTL cache keeping EPG/Now-Next memory strictly capped (`#250`). */
+export function createBoundedTtlCache<T>(
+  maxEntries: number = EPG_CACHE_MAX_ENTRIES,
+  ttlMs: number = EPG_CACHE_TTL_MS,
+): BoundedTtlCache<T> {
+  const cap = Math.max(1, Math.floor(maxEntries));
+  const ttl = Math.max(1, Math.floor(ttlMs));
+  const map = new Map<string, { value: T; storedAt: number }>();
+
+  return {
+    get(key, nowMs) {
+      const hit = map.get(key);
+      if (hit === undefined) return undefined;
+      if (nowMs - hit.storedAt > ttl) {
+        map.delete(key);
+        return undefined;
+      }
+      map.delete(key);
+      map.set(key, hit);
+      return hit.value;
+    },
+    set(key, value, nowMs) {
+      if (map.has(key)) map.delete(key);
+      map.set(key, { value, storedAt: nowMs });
+      while (map.size > cap) {
+        const oldest = map.keys().next().value;
+        if (oldest === undefined) break;
+        map.delete(oldest);
+      }
+    },
+    clear() {
+      map.clear();
+    },
+    size: () => map.size,
+  };
+}
+
+/** Maps an array of {@link NowNextEntry} rows into a `Map` keyed by `channelKey`. */
+export function indexNowNext(entries: readonly NowNextEntry[]): Map<string, NowNextEntry> {
+  const out = new Map<string, NowNextEntry>();
+  for (const entry of entries) out.set(entry.channelKey, entry);
+  return out;
+}

@@ -1,6 +1,6 @@
 import type { BrowseKind, CatalogService } from '@elv/data';
-import { EMPTY_TAB_MEMORY, type TabBrowseMemory } from './browse';
 import { type CatalogTabMemory, EMPTY_CATALOG_MEMORY } from './catalog';
+import { EMPTY_LIVE_MEMORY, type LiveTabMemory } from './live';
 import type { PlaybackGuard } from './ports/playback-guard';
 import type { DetailTarget } from './shared';
 import type { NavDestination, NavUtility } from './shell';
@@ -64,9 +64,23 @@ export const INITIAL_CATALOG_MEMORY: CatalogMemoryMap = {
   series: EMPTY_CATALOG_MEMORY,
 };
 
-/** Clears Live browse memory when its active category belongs to `sourceId`. */
-export function clearSourceFromLiveMemory(mem: TabBrowseMemory, sourceId: string): TabBrowseMemory {
-  return mem.categoryId?.startsWith(`${sourceId}|`) ? EMPTY_TAB_MEMORY : mem;
+function channelKeyMatchesSource(key: string | null, sourceId: string): boolean {
+  if (key === null) return false;
+  return key.split(':')[1] === sourceId;
+}
+
+/** Clears Live hub memory when its active category or active channel belongs to `sourceId`. */
+export function clearSourceFromLiveMemory(mem: LiveTabMemory, sourceId: string): LiveTabMemory {
+  if (
+    mem.categoryId?.startsWith(`${sourceId}|`) ||
+    channelKeyMatchesSource(mem.activeChannelKey, sourceId)
+  ) {
+    return EMPTY_LIVE_MEMORY;
+  }
+  if (channelKeyMatchesSource(mem.previousChannelKey, sourceId)) {
+    return { ...mem, previousChannelKey: null };
+  }
+  return mem;
 }
 
 /** Clears Movies/Series discovery memory when the selected category belongs to `sourceId`. */
@@ -135,6 +149,10 @@ export function createObservedCatalog(
     ...(c.listFavorites ? { listFavorites: c.listFavorites.bind(c) } : {}),
     ...(c.listFavoriteKeys ? { listFavoriteKeys: c.listFavoriteKeys.bind(c) } : {}),
     ...(c.search ? { search: c.search.bind(c) } : {}),
+    ...(c.importGuide ? { importGuide: c.importGuide.bind(c) } : {}),
+    ...(c.nowNext ? { nowNext: c.nowNext.bind(c) } : {}),
+    ...(c.epgWindow ? { epgWindow: c.epgWindow.bind(c) } : {}),
+    ...(c.channelByNumber ? { channelByNumber: c.channelByNumber.bind(c) } : {}),
     close: () => c.close(),
   };
 }

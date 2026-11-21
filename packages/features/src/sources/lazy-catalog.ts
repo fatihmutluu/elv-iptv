@@ -36,6 +36,13 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
     addSourceFromLink: (input) => wrapResult(async () => (await load()).addSourceFromLink(input)),
     removeSource: (id) => wrapResult(async () => (await load()).removeSource(id)),
     importSource: (id, opts) => wrapResult(async () => (await load()).importSource(id, opts)),
+    importGuide: (id, opts) =>
+      wrapResult(async () => {
+        const cat = await load();
+        return cat.importGuide
+          ? cat.importGuide(id, opts)
+          : err(elvError('storage', 'unsupported'));
+      }),
     listSources: async () => (await load()).listSources(),
     categories: async (sourceId, kind) => (await load()).categories(sourceId, kind),
     items: async (categoryId, offset, limit) => (await load()).items(categoryId, offset, limit),
@@ -45,6 +52,11 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
     },
     search: async (query, opts) =>
       (await load()).search?.(query, opts) ?? { live: [], movies: [], series: [] },
+    nowNext: async (channelKeys, nowMs) => (await load()).nowNext?.(channelKeys, nowMs) ?? [],
+    epgWindow: async (channelKeys, fromMs, toMs) =>
+      (await load()).epgWindow?.(channelKeys, fromMs, toMs) ?? {},
+    channelByNumber: async (num, sourceId) =>
+      (await load()).channelByNumber?.(num, sourceId) ?? null,
     seasons: (seriesId) => wrapResult(async () => (await load()).seasons(seriesId)),
     episodes: async (seriesId, season) => (await load()).episodes(seriesId, season),
     resolveStream: (itemKey) => wrapResult(async () => (await load()).resolveStream(itemKey)),

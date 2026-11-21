@@ -87,6 +87,17 @@ function makeFakeBridge(overrides?: Partial<CatalogBridge>): {
     toggleFavorite: async () => ok(true),
     listFavorites: async () => [],
     listFavoriteKeys: async () => [],
+    importGuide: async () =>
+      ok({
+        runId: 2,
+        counts: { guideChannels: 2, programmes: 20 },
+        warnings: 0,
+        warningCodes: [],
+        durationMs: 5,
+      }),
+    nowNext: async () => [],
+    epgWindow: async () => ({}),
+    channelByNumber: async () => null,
     onChanged: () => () => undefined,
     close: async () => undefined,
   };
@@ -164,6 +175,10 @@ describe('desktop CatalogService', () => {
     ).toEqual({ ok: true, value: true });
     expect(await c1.listFavorites?.(10)).toEqual([]);
     expect(await c1.listFavoriteKeys?.()).toEqual([]);
+    expect((await c1.importGuide?.('s1'))?.ok).toBe(true);
+    expect(await c1.nowNext?.(['x:s1:live:1'], 1_700_000_000_000)).toEqual([]);
+    expect(await c1.epgWindow?.(['x:s1:live:1'], 1_700_000_000_000, 1_700_010_800_000)).toEqual({});
+    expect(await c1.channelByNumber?.(101, 's1')).toBeNull();
 
     await c1.close();
   });

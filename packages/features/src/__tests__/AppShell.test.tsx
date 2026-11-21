@@ -212,7 +212,10 @@ describe('AppShell', () => {
 
       await fireEvent.press(screen.getByTestId('nav-tab-live'));
       await waitFor(() => {
-        expect(screen.getByText('1. Channel 1')).toBeTruthy();
+        expect(screen.getByTestId('live-screen')).toBeTruthy();
+        expect(screen.getByTestId('live-channels-grid')).toBeTruthy();
+        expect(screen.getByTestId('live-channel-card-0')).toBeTruthy();
+        expect(screen.getByText('Channel 1')).toBeTruthy();
       });
       expect(screen.getByText('ELV IPTV')).toBeTruthy();
 
@@ -264,10 +267,27 @@ describe('AppShell', () => {
 
       await fireEvent.press(screen.getByTestId('nav-tab-live'));
       await waitFor(() => {
-        expect(screen.getByText('2. Channel 2')).toBeTruthy();
+        expect(screen.getByTestId('live-screen')).toBeTruthy();
+        expect(screen.getByTestId('live-channels-grid')).toBeTruthy();
+        expect(screen.getByTestId('live-channel-card-1')).toBeTruthy();
       });
 
-      await fireEvent.press(screen.getByTestId('browse-items-list-row-1'));
+      await fireEvent.press(screen.getByTestId('live-mode-epg'));
+      await waitFor(() => {
+        expect(screen.getByTestId('live-epg-view')).toBeTruthy();
+        expect(screen.getByTestId('epg-preview-header')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('live-mode-watch'));
+      await waitFor(() => {
+        expect(screen.getByTestId('live-watch-stage')).toBeTruthy();
+        expect(screen.getByTestId('live-zap-drawer')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('live-mode-channels'));
+      await waitFor(() => {
+        expect(screen.getByTestId('live-channel-card-1')).toBeTruthy();
+      });
+
+      await fireEvent.press(screen.getByTestId('live-channel-card-1'));
       await waitFor(() => {
         expect(screen.getByTestId('osd-title')).toHaveTextContent('2. Channel 2');
       });
@@ -283,12 +303,13 @@ describe('AppShell', () => {
 
       await fireEvent.press(screen.getByTestId('player-back'));
       await waitFor(() => {
-        expect(
-          screen.getByTestId('browse-items-list-row-3').props.accessibilityState.selected,
-        ).toBe(true);
+        expect(screen.getByTestId('live-screen')).toBeTruthy();
+        expect(screen.getByTestId('live-channel-card-3').props.accessibilityState.selected).toBe(
+          true,
+        );
       });
 
-      await fireEvent.press(screen.getByTestId('browse-items-list-row-3'));
+      await fireEvent.press(screen.getByTestId('live-channel-card-3'));
       await waitFor(() => {
         expect(engine.openMedias()).toBe(1);
       });

@@ -231,7 +231,7 @@ export interface PlayableRow {
 }
 
 /** The source id inside a content key (`x:<source>:...` or `m:<source>:...`), so lookups use the unique index. */
-function sourceOfKey(key: string): string | undefined {
+export function sourceOfKey(key: string): string | undefined {
   const parts = key.split(':');
   return (parts[0] === 'x' || parts[0] === 'm') && parts[1] ? parts[1] : undefined;
 }

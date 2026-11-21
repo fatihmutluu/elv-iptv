@@ -8,6 +8,15 @@ import {
   type SecretStore,
   type SqlDriver,
 } from '@elv/domain';
+import {
+  type NowNextEntry,
+  type ProgrammeRow,
+  queryChannelByNumber,
+  queryEpgWindow,
+  queryNowNext,
+} from './guide-queries';
+import { importGuide } from './import-guide';
+import { createSerializedImportQueue } from './import-queue';
 import type { ImportDeps, ImportOptions, ImportSummary } from './import-types';
 import { importCatalog, loadSeriesEpisodes } from './import-xtream';
 import { type ManifestStore, saveManifest } from './manifest';
@@ -107,11 +116,19 @@ export interface CatalogService {
   /** Stops active playback via `beforeRemoveSource`, aborts imports of `id`, and removes rows + secrets. */
   removeSource(id: string): Promise<Result<void>>;
   importSource(id: string, opts?: DeviceImportOptions): Promise<Result<ImportSummary>>;
+  importGuide?(sourceId: string, opts?: ImportOptions): Promise<Result<ImportSummary>>;
   listSources(): Promise<SourceRow[]>;
   categories(sourceId: string, kind: BrowseKind): Promise<CategoryRow[]>;
   items(categoryId: string, offset: number, limit: number): Promise<ItemRow[]>;
   itemDetail?(itemKey: string): Promise<ItemDetailRow | null>;
   search?(query: string, opts?: SearchOptions): Promise<SearchResults>;
+  nowNext?(channelKeys: readonly string[], nowMs: number): Promise<NowNextEntry[]>;
+  epgWindow?(
+    channelKeys: readonly string[],
+    fromMs: number,
+    toMs: number,
+  ): Promise<Record<string, ProgrammeRow[]>>;
+  channelByNumber?(num: number, sourceId?: string): Promise<ItemRow | null>;
   seasons(seriesId: number): Promise<Result<SeasonRow[]>>;
   episodes(seriesId: number, season: number): Promise<EpisodeRow[]>;
   resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
@@ -127,15 +144,6 @@ export interface CatalogService {
   close(): Promise<void>;
 }
 
-interface AbortBindable {
-  setAbortSignal?: (signal: AbortSignal | undefined) => void;
-}
-
-interface ActiveImport {
-  abort: () => void;
-  settled: Promise<void>;
-}
-
 const row = (r: SourceRecord): SourceRow => ({
   id: r.id,
   kind: r.kind,
@@ -149,19 +157,6 @@ const LIST_SOURCES = `SELECT s.id, s.kind, s.name, s.created_at,
   FROM sources s ORDER BY s.created_at, s.id`;
 
 const notFound = () => err(elvError('storage', 'item-not-found'));
-
-function turnOrAbort(previous: Promise<void>, signal: AbortSignal | undefined): Promise<boolean> {
-  if (signal === undefined) return previous.then(() => true);
-  if (signal.aborted) return Promise.resolve(false);
-  return new Promise((resolve) => {
-    const onAbort = () => resolve(false);
-    signal.addEventListener('abort', onAbort, { once: true });
-    void previous.then(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve(!signal.aborted);
-    });
-  });
-}
 
 function defaultNewId(clock: () => number): () => string {
   return () => `s${clock().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
@@ -180,12 +175,8 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     clock,
     maxBodyBytes: DEVICE_MAX_BODY_BYTES,
   };
-  const abortable = db as SqlDriver & AbortBindable;
-  const activeImports = new Map<string, ActiveImport>();
-  const removing = new Set<string>();
+  const queue = createSerializedImportQueue(db);
   const playtime = createPlaytimeResolverCache({ db, secrets, http: deps.http });
-  let lastImport: Promise<void> = Promise.resolve();
-  let closed = false;
   let closePromise: Promise<void> | undefined;
   const { manifest } = deps;
   const syncManifest = () => (manifest === undefined ? undefined : saveManifest(db, manifest));
@@ -206,83 +197,54 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     addSourceFromLink: (input) => mapped(addSourceFromLink(input, addDeps)),
 
     async removeSource(id) {
-      removing.add(id);
+      queue.markRemoving(id);
       try {
         try {
           await deps.beforeRemoveSource?.(id);
         } catch {
           // Best-effort playback stop so source removal still proceeds cleanly.
         }
-        const active = activeImports.get(id);
-        if (active !== undefined) {
-          active.abort();
-          await active.settled;
-        }
+        await queue.abortForSource(id);
         playtime.evict(id);
         const removed = await removeSource(id, { db, secrets });
         playtime.evict(id);
         await syncManifest();
         return removed;
       } finally {
-        removing.delete(id);
+        queue.unmarkRemoving(id);
       }
     },
 
-    async importSource(id, opts = {}) {
-      if (closed) return err(elvError('network', 'aborted'));
-      if (removing.has(id)) return err(elvError('storage', 'source-not-found'));
-      if (activeImports.has(id)) return err(elvError('storage', 'import-in-progress'));
-
-      const runCtl = new AbortController();
-      const onCallerAbort = () => runCtl.abort();
-      if (opts.signal?.aborted) runCtl.abort();
-      else opts.signal?.addEventListener('abort', onCallerAbort, { once: true });
-
-      let running = false;
-      const previous = lastImport;
-      let finished!: () => void;
-      const mine = new Promise<void>((resolve) => {
-        finished = resolve;
-      });
-      lastImport = previous.then(() => mine);
-
-      let internallyAborted = false;
-      activeImports.set(id, {
-        abort: () => {
-          if (internallyAborted) return;
-          internallyAborted = true;
-          runCtl.abort();
-          if (running) abortable.setAbortSignal?.(runCtl.signal);
-        },
-        settled: mine,
-      });
-
-      try {
-        if (!(await turnOrAbort(previous, runCtl.signal))) {
-          return err(elvError('network', 'aborted'));
-        }
-        playtime.evict(id);
-        running = true;
-        abortable.setAbortSignal?.(internallyAborted ? runCtl.signal : opts.signal);
-        try {
+    importSource(id, opts = {}) {
+      return queue.run(
+        id,
+        'catalog',
+        opts.signal,
+        (runSignal) => {
           const { maxBodyBytes, batchSize, ...rest } = opts;
           const runDeps = maxBodyBytes === undefined ? importDeps : { ...importDeps, maxBodyBytes };
-          return await importCatalog(id, runDeps, {
+          return importCatalog(id, runDeps, {
             ...rest,
             batchSize: batchSize ?? DEVICE_BATCH_SIZE,
-            signal: runCtl.signal,
+            signal: runSignal,
           });
-        } finally {
-          running = false;
-          playtime.evict(id);
-          abortable.setAbortSignal?.(undefined);
-        }
-      } finally {
-        opts.signal?.removeEventListener('abort', onCallerAbort);
-        activeImports.delete(id);
-        if (!closed) await syncManifest();
-        finished();
-      }
+        },
+        {
+          onStart: () => playtime.evict(id),
+          onFinally: () => playtime.evict(id),
+          onSettled: syncManifest,
+        },
+      );
+    },
+
+    importGuide(sourceId, opts = {}) {
+      return queue.run(sourceId, 'guide', opts.signal, (runSignal) =>
+        importGuide(sourceId, importDeps, {
+          ...opts,
+          batchSize: opts.batchSize ?? DEVICE_BATCH_SIZE,
+          signal: runSignal,
+        }),
+      );
     },
 
     async listSources() {
@@ -325,6 +287,17 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
         playtime.resolveRowLogos(res.series),
       ]);
       return { live, movies, series };
+    },
+
+    nowNext: (channelKeys, nowMs) => queryNowNext(db, channelKeys, nowMs),
+
+    epgWindow: (channelKeys, fromMs, toMs) => queryEpgWindow(db, channelKeys, fromMs, toMs),
+
+    async channelByNumber(num, sourceId) {
+      const found = await queryChannelByNumber(db, num, sourceId);
+      if (found === undefined) return null;
+      const [resolved] = await playtime.resolveLogos([found], found.sourceId);
+      return resolved ?? null;
     },
 
     async seasons(seriesId) {
@@ -383,10 +356,8 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
 
     close() {
       if (closePromise !== undefined) return closePromise;
-      closed = true;
       closePromise = (async () => {
-        for (const active of activeImports.values()) active.abort();
-        await lastImport;
+        await queue.close();
         playtime.clear();
         await db.close?.();
       })();

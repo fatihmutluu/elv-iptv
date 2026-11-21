@@ -242,6 +242,29 @@ describe('isCatalogClientMessage', () => {
           },
         },
       },
+      { type: 'call', reqId: 30, call: { method: 'importGuide', id: 'src_1' } },
+      {
+        type: 'call',
+        reqId: 31,
+        call: {
+          method: 'nowNext',
+          channelKeys: ['x:src_1:live:1', 'x:src_1:live:2'],
+          nowMs: 1_700_000_000_000,
+        },
+      },
+      { type: 'call', reqId: 32, call: { method: 'nowNext', channelKeys: [], nowMs: 0 } },
+      {
+        type: 'call',
+        reqId: 33,
+        call: {
+          method: 'epgWindow',
+          channelKeys: ['x:src_1:live:1'],
+          fromMs: 1_700_000_000_000,
+          toMs: 1_700_010_800_000,
+        },
+      },
+      { type: 'call', reqId: 34, call: { method: 'channelByNumber', num: 0 } },
+      { type: 'call', reqId: 35, call: { method: 'channelByNumber', num: 101, sourceId: 'src_1' } },
       { type: 'cancel', reqId: 6 },
     ];
     for (const msg of valid) {
@@ -489,6 +512,71 @@ describe('isCatalogClientMessage', () => {
             durationMs: 2000,
           },
         },
+      },
+      { type: 'call', reqId: 1, call: { method: 'importGuide', id: '' } },
+      { type: 'call', reqId: 1, call: { method: 'importGuide', id: 'bad\nsrc' } },
+      { type: 'call', reqId: 1, call: { method: 'importGuide', id: 's'.repeat(257) } },
+      {
+        type: 'call',
+        reqId: 1,
+        call: {
+          method: 'nowNext',
+          channelKeys: Array.from({ length: 61 }, (_, i) => `x:s1:live:${i}`),
+          nowMs: 1000,
+        },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'nowNext', channelKeys: ['bad\nkey'], nowMs: 1000 },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'nowNext', channelKeys: ['x:s1:live:1'], nowMs: -1 },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'nowNext', channelKeys: ['x:s1:live:1'], nowMs: Number.NaN },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: {
+          method: 'epgWindow',
+          channelKeys: Array.from({ length: 41 }, (_, i) => `x:s1:live:${i}`),
+          fromMs: 1000,
+          toMs: 2000,
+        },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'epgWindow', channelKeys: [''], fromMs: 1000, toMs: 2000 },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'epgWindow', channelKeys: ['x:s1:live:1'], fromMs: -1, toMs: 2000 },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: {
+          method: 'epgWindow',
+          channelKeys: ['x:s1:live:1'],
+          fromMs: 1000,
+          toMs: Number.POSITIVE_INFINITY,
+        },
+      },
+      { type: 'call', reqId: 1, call: { method: 'channelByNumber', num: -1 } },
+      { type: 'call', reqId: 1, call: { method: 'channelByNumber', num: 1.5 } },
+      { type: 'call', reqId: 1, call: { method: 'channelByNumber', num: 101, sourceId: '' } },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'channelByNumber', num: 101, sourceId: 'bad\nsrc' },
       },
     ];
     for (const msg of invalid) {

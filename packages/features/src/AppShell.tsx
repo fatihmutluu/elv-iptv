@@ -12,10 +12,10 @@ import {
   type PrimaryNavTab,
   pushDetailStack,
 } from './app-shell-state';
-import { BrowseScreen, EMPTY_TAB_MEMORY, type TabBrowseMemory } from './browse';
 import { CatalogDiscoveryScreen, type CatalogTabMemory } from './catalog';
 import { DetailScreen } from './detail';
 import { HomeScreen } from './home';
+import { EMPTY_LIVE_MEMORY, LiveScreen, type LiveTabMemory, recordChannelTune } from './live';
 import { ThirdPartyNoticesScreen } from './notices';
 import { PlayerScreen } from './player';
 import type { AppLifecyclePort } from './ports/app-lifecycle';
@@ -62,7 +62,7 @@ export function AppShell({
   const [sources, setSources] = useState<readonly SourceRow[]>([]);
   const [refreshToken, setRefreshToken] = useState(0);
   const [userStateVersion, setUserStateVersion] = useState(0);
-  const [liveMemory, setLiveMemory] = useState<TabBrowseMemory>(EMPTY_TAB_MEMORY);
+  const [liveMemory, setLiveMemory] = useState<LiveTabMemory>(EMPTY_LIVE_MEMORY);
   const [catalogMemoryByTab, setCatalogMemoryByTab] =
     useState<CatalogMemoryMap>(INITIAL_CATALOG_MEMORY);
   const [detailStack, setDetailStack] = useState<readonly DetailTarget[]>([]);
@@ -252,6 +252,9 @@ export function AppShell({
         onTargetChange={(next) => {
           playTargetRef.current = next;
           setPlayTarget(next);
+          if (next.kind === 'live') {
+            setLiveMemory((prev) => ({ ...prev, ...recordChannelTune(prev, next.itemKey) }));
+          }
         }}
         onExit={() => {
           playTargetRef.current = null;
@@ -370,9 +373,7 @@ export function AppShell({
           isActiveScope={!topNavFocused}
         />
       ) : (
-        <BrowseScreen
-          key="live"
-          kind="live"
+        <LiveScreen
           catalog={observedCatalog}
           sources={sources}
           refreshToken={refreshToken}

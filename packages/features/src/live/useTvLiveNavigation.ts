@@ -1,0 +1,357 @@
+import type { KeyEvent } from '@elv/focus-core';
+import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { EMPTY_LIVE_MEMORY, type LiveMode, type LiveTabMemory } from './live-model';
+
+/** Controlled-or-uncontrolled Live tab memory helper preserving mode, category, and channel history. */
+export function useLiveTabMemory(
+  memory: LiveTabMemory | undefined,
+  onMemoryChange: ((next: LiveTabMemory) => void) | undefined,
+): {
+  readonly memory: LiveTabMemory;
+  readonly memoryRef: MutableRefObject<LiveTabMemory>;
+  readonly updateMemory: (patch: Partial<LiveTabMemory>) => void;
+} {
+  const [localMemory, setLocalMemory] = useState<LiveTabMemory>(() => memory ?? EMPTY_LIVE_MEMORY);
+  const activeMemory = onMemoryChange && memory !== undefined ? memory : localMemory;
+  const memoryRef = useRef(activeMemory);
+  memoryRef.current = activeMemory;
+
+  const updateMemory = useCallback(
+    (patch: Partial<LiveTabMemory>) => {
+      const next: LiveTabMemory = { ...memoryRef.current, ...patch };
+      memoryRef.current = next;
+      setLocalMemory(next);
+      onMemoryChange?.(next);
+    },
+    [onMemoryChange],
+  );
+
+  return useMemo(
+    () => ({ memory: activeMemory, memoryRef, updateMemory }),
+    [activeMemory, updateMemory],
+  );
+}
+
+/** High-level 10-ft TV focus zone inside `LiveScreen`. */
+export type LiveTvZone = 'header' | 'body';
+/** Header sub-row when `LiveScreen` owns TV focus. */
+export type LiveTvHeaderRow = 'modes' | 'categories';
+/** Focusable action controls inside `LiveWatchStage`. */
+export type LiveWatchControl = 'miniguide' | 'prev' | 'numpad' | 'watch';
+
+const MODE_ORDER: readonly LiveMode[] = ['watch', 'channels', 'epg'];
+const WATCH_CONTROLS: readonly LiveWatchControl[] = ['miniguide', 'prev', 'numpad', 'watch'];
+const NUMPAD_GRID: readonly (readonly string[])[] = [
+  ['1', '2', '3'],
+  ['4', '5', '6'],
+  ['7', '8', '9'],
+  ['C', '0', '↵'],
+];
+
+function modeToIndex(mode: LiveMode): number {
+  const idx = MODE_ORDER.indexOf(mode);
+  return idx >= 0 ? idx : 1;
+}
+
+/** Options accepted by {@link useTvLiveNavigation}. */
+export interface UseTvLiveNavigationOptions {
+  readonly isTv: boolean;
+  readonly isActiveScope: boolean;
+  readonly isEmpty: boolean;
+  readonly hasOpenSourcesCta: boolean;
+  readonly mode: LiveMode;
+  readonly categoryCount: number;
+  readonly channelCount: number;
+  readonly hasBody: boolean;
+  readonly zapDrawerOpen: boolean;
+  readonly numpadOpen: boolean;
+  readonly hasPreviousChannel: boolean;
+  readonly onSelectMode: (mode: LiveMode) => void;
+  readonly onSelectCategoryIndex: (index: number) => void;
+  readonly onToggleNumpad: () => void;
+  readonly onCloseNumpad: () => void;
+  readonly onPressNumpadKey: (key: string) => void;
+  readonly onActivateWatchControl: (control: LiveWatchControl) => void;
+  readonly onSelectZapIndex: (index: number) => void;
+  readonly onOpenSources: () => void;
+  readonly onFocusTopNav?: () => void;
+}
+
+/** Focus coordinates and D-pad handlers returned by {@link useTvLiveNavigation}. */
+export interface TvLiveNavigationState {
+  readonly tvZone: LiveTvZone;
+  readonly focusedModeIndex: number | null;
+  readonly focusedNumpadToggle: boolean;
+  readonly focusedCategoryIndex: number | null;
+  readonly focusedEmptyCta: boolean;
+  readonly focusedWatchControl: LiveWatchControl | null;
+  readonly focusedZapIndex: number | null;
+  readonly focusedNumpadKey: string | null;
+  readonly handleTvKey: (event: KeyEvent) => void;
+  readonly handleChildEdgeTop: () => void;
+}
+
+interface NavSnapshot {
+  readonly zone: LiveTvZone;
+  readonly headerRow: LiveTvHeaderRow;
+  readonly modeCol: number;
+  readonly catCol: number;
+  readonly watchZone: 'controls' | 'zap';
+  readonly watchControlIdx: number;
+  readonly zapIdx: number;
+  readonly numpadRow: number;
+  readonly numpadCol: number;
+}
+
+/**
+ * 10-ft TV D-pad focus orchestrator for {@link LiveScreen}.
+ * Coordinates `Top Nav <-> Mode Switcher <-> Category Bar <-> Body` and traps D-pad input inside
+ * the 4×3 `LiveNumberPad` overlay whenever open, with zero duplicate key listeners.
+ */
+export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNavigationState {
+  const { isTv, isActiveScope, isEmpty, hasOpenSourcesCta, mode, categoryCount } = opts;
+  const { channelCount, hasBody, zapDrawerOpen, numpadOpen, hasPreviousChannel } = opts;
+  const hasCategoryBar = (mode === 'channels' || mode === 'epg') && categoryCount > 0;
+
+  const [nav, setNav] = useState<NavSnapshot>(() => ({
+    zone: 'header',
+    headerRow: 'modes',
+    modeCol: modeToIndex(mode),
+    catCol: 0,
+    watchZone: 'controls',
+    watchControlIdx: 0,
+    zapIdx: 0,
+    numpadRow: 0,
+    numpadCol: 0,
+  }));
+
+  const navRef = useRef(nav);
+  navRef.current = nav;
+  const optsRef = useRef(opts);
+  optsRef.current = opts;
+
+  useEffect(() => {
+    if (numpadOpen) {
+      setNav((prev) =>
+        prev.numpadRow === 0 && prev.numpadCol === 0
+          ? prev
+          : { ...prev, numpadRow: 0, numpadCol: 0 },
+      );
+    }
+  }, [numpadOpen]);
+
+  useEffect(() => {
+    setNav((prev) => {
+      const maxModeCol = mode === 'channels' ? 3 : 2;
+      const nextModeCol = Math.min(prev.modeCol, maxModeCol);
+      const nextCatCol = categoryCount > 0 ? Math.min(prev.catCol, categoryCount - 1) : 0;
+      const nextHeaderRow =
+        !hasCategoryBar && prev.headerRow === 'categories' ? 'modes' : prev.headerRow;
+      const nextZapIdx = channelCount > 0 ? Math.min(prev.zapIdx, channelCount - 1) : 0;
+      const nextWatchZone = !zapDrawerOpen || channelCount === 0 ? 'controls' : prev.watchZone;
+      const nextZone = !hasBody && prev.zone === 'body' ? 'header' : prev.zone;
+      if (
+        nextModeCol === prev.modeCol &&
+        nextCatCol === prev.catCol &&
+        nextHeaderRow === prev.headerRow &&
+        nextZapIdx === prev.zapIdx &&
+        nextWatchZone === prev.watchZone &&
+        nextZone === prev.zone
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        zone: nextZone,
+        headerRow: nextHeaderRow,
+        modeCol: nextModeCol,
+        catCol: nextCatCol,
+        watchZone: nextWatchZone,
+        zapIdx: nextZapIdx,
+      };
+    });
+  }, [categoryCount, channelCount, hasBody, hasCategoryBar, mode, zapDrawerOpen]);
+
+  const handleChildEdgeTop = useCallback(() => {
+    const showCats =
+      (optsRef.current.mode === 'channels' || optsRef.current.mode === 'epg') &&
+      optsRef.current.categoryCount > 0;
+    setNav((prev) => ({
+      ...prev,
+      zone: 'header',
+      headerRow: showCats ? 'categories' : 'modes',
+    }));
+  }, []);
+
+  const handleTvKey = useCallback((event: KeyEvent) => {
+    const o = optsRef.current;
+    const cur = navRef.current;
+
+    if (o.numpadOpen) {
+      if (event.kind === 'press' && event.key === 'back') {
+        o.onCloseNumpad();
+        return;
+      }
+      if (event.kind !== 'press' && event.kind !== 'repeat') return;
+      if (event.key === 'up') {
+        setNav((p) => ({ ...p, numpadRow: Math.max(0, p.numpadRow - 1) }));
+      } else if (event.key === 'down') {
+        setNav((p) => ({ ...p, numpadRow: Math.min(NUMPAD_GRID.length - 1, p.numpadRow + 1) }));
+      } else if (event.key === 'left') {
+        setNav((p) => ({ ...p, numpadCol: Math.max(0, p.numpadCol - 1) }));
+      } else if (event.key === 'right') {
+        setNav((p) => ({ ...p, numpadCol: Math.min(2, p.numpadCol + 1) }));
+      } else if (event.key === 'select' && event.kind === 'press') {
+        const keyVal = NUMPAD_GRID[cur.numpadRow]?.[cur.numpadCol];
+        if (keyVal) o.onPressNumpadKey(keyVal);
+      }
+      return;
+    }
+
+    if (event.kind === 'press' && event.key === 'back') {
+      if (cur.zone === 'body' && o.mode === 'watch') {
+        if (cur.watchZone === 'zap') {
+          setNav((p) => ({ ...p, watchZone: 'controls' }));
+        } else {
+          setNav((p) => ({ ...p, zone: 'header', headerRow: 'modes' }));
+        }
+        return;
+      }
+      o.onFocusTopNav?.();
+      return;
+    }
+
+    if (event.kind !== 'press' && event.kind !== 'repeat') return;
+
+    if (o.isEmpty) {
+      if (event.key === 'up') o.onFocusTopNav?.();
+      else if (event.key === 'select' && event.kind === 'press' && o.hasOpenSourcesCta) {
+        o.onOpenSources();
+      }
+      return;
+    }
+
+    const showCats = (o.mode === 'channels' || o.mode === 'epg') && o.categoryCount > 0;
+
+    if (cur.zone === 'header') {
+      if (cur.headerRow === 'modes') {
+        const maxCol = o.mode === 'channels' ? 3 : 2;
+        if (event.key === 'up') o.onFocusTopNav?.();
+        else if (event.key === 'left') {
+          setNav((p) => ({ ...p, modeCol: Math.max(0, p.modeCol - 1) }));
+        } else if (event.key === 'right') {
+          setNav((p) => ({ ...p, modeCol: Math.min(maxCol, p.modeCol + 1) }));
+        } else if (event.key === 'down') {
+          if (showCats) setNav((p) => ({ ...p, headerRow: 'categories' }));
+          else if (o.hasBody) setNav((p) => ({ ...p, zone: 'body', watchZone: 'controls' }));
+        } else if (event.key === 'select' && event.kind === 'press') {
+          if (cur.modeCol === 3 && o.mode === 'channels') {
+            o.onToggleNumpad();
+          } else {
+            const target = MODE_ORDER[cur.modeCol];
+            if (target) o.onSelectMode(target);
+          }
+        }
+        return;
+      }
+
+      if (event.key === 'up') {
+        setNav((p) => ({ ...p, headerRow: 'modes' }));
+      } else if (event.key === 'left') {
+        setNav((p) => ({ ...p, catCol: Math.max(0, p.catCol - 1) }));
+      } else if (event.key === 'right') {
+        setNav((p) => ({
+          ...p,
+          catCol: Math.min(Math.max(0, o.categoryCount - 1), p.catCol + 1),
+        }));
+      } else if (event.key === 'down') {
+        if (o.hasBody) setNav((p) => ({ ...p, zone: 'body' }));
+      } else if (event.key === 'select' && event.kind === 'press') {
+        o.onSelectCategoryIndex(cur.catCol);
+      }
+      return;
+    }
+
+    if (o.mode !== 'watch') return;
+
+    if (cur.watchZone === 'controls') {
+      if (event.key === 'up') {
+        setNav((p) => ({ ...p, zone: 'header', headerRow: 'modes' }));
+      } else if (event.key === 'left' || event.key === 'right') {
+        const delta = event.key === 'left' ? -1 : 1;
+        setNav((p) => {
+          let next = Math.max(0, Math.min(WATCH_CONTROLS.length - 1, p.watchControlIdx + delta));
+          if (WATCH_CONTROLS[next] === 'prev' && !o.hasPreviousChannel) {
+            next = Math.max(0, Math.min(WATCH_CONTROLS.length - 1, next + delta));
+          }
+          return { ...p, watchControlIdx: next };
+        });
+      } else if (event.key === 'down') {
+        if (o.zapDrawerOpen && o.channelCount > 0) {
+          setNav((p) => ({ ...p, watchZone: 'zap' }));
+        }
+      } else if (event.key === 'select' && event.kind === 'press') {
+        const ctrl = WATCH_CONTROLS[cur.watchControlIdx];
+        if (ctrl) o.onActivateWatchControl(ctrl);
+      }
+      return;
+    }
+
+    if (event.key === 'up') {
+      if (cur.zapIdx <= 0) setNav((p) => ({ ...p, watchZone: 'controls' }));
+      else setNav((p) => ({ ...p, zapIdx: p.zapIdx - 1 }));
+    } else if (event.key === 'down') {
+      setNav((p) => ({ ...p, zapIdx: Math.min(Math.max(0, o.channelCount - 1), p.zapIdx + 1) }));
+    } else if (event.key === 'right') {
+      setNav((p) => ({ ...p, watchZone: 'controls' }));
+    } else if (event.key === 'select' && event.kind === 'press') {
+      o.onSelectZapIndex(cur.zapIdx);
+    }
+  }, []);
+
+  const activeTv = isTv && isActiveScope;
+  const numpadFocused = activeTv && numpadOpen;
+  const inHeader = activeTv && !numpadOpen && !isEmpty && nav.zone === 'header';
+  const inWatchBody =
+    activeTv && !numpadOpen && !isEmpty && nav.zone === 'body' && mode === 'watch';
+  const watchCtrl = WATCH_CONTROLS[nav.watchControlIdx] ?? null;
+  const effectiveWatchCtrl = watchCtrl === 'prev' && !hasPreviousChannel ? 'miniguide' : watchCtrl;
+
+  return useMemo<TvLiveNavigationState>(
+    () => ({
+      tvZone: nav.zone,
+      focusedModeIndex:
+        inHeader && nav.headerRow === 'modes' && nav.modeCol < 3 ? nav.modeCol : null,
+      focusedNumpadToggle:
+        inHeader && nav.headerRow === 'modes' && mode === 'channels' && nav.modeCol === 3,
+      focusedCategoryIndex: inHeader && nav.headerRow === 'categories' ? nav.catCol : null,
+      focusedEmptyCta: activeTv && !numpadOpen && isEmpty && hasOpenSourcesCta,
+      focusedWatchControl: inWatchBody && nav.watchZone === 'controls' ? effectiveWatchCtrl : null,
+      focusedZapIndex: inWatchBody && nav.watchZone === 'zap' ? nav.zapIdx : null,
+      focusedNumpadKey: numpadFocused ? (NUMPAD_GRID[nav.numpadRow]?.[nav.numpadCol] ?? '1') : null,
+      handleTvKey,
+      handleChildEdgeTop,
+    }),
+    [
+      activeTv,
+      effectiveWatchCtrl,
+      handleChildEdgeTop,
+      handleTvKey,
+      hasOpenSourcesCta,
+      inHeader,
+      inWatchBody,
+      isEmpty,
+      mode,
+      nav.catCol,
+      nav.headerRow,
+      nav.modeCol,
+      nav.numpadCol,
+      nav.numpadRow,
+      nav.watchZone,
+      nav.zapIdx,
+      nav.zone,
+      numpadFocused,
+      numpadOpen,
+    ],
+  );
+}

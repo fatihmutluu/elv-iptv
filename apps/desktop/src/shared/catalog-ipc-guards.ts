@@ -17,6 +17,8 @@ const MAX_TITLE_CHARS = 512;
 const MAX_PROFILE_ID_CHARS = 128;
 const MAX_USER_LIST_LIMIT = 100;
 const MAX_PROGRESS_KEYS = 200;
+const MAX_NOW_NEXT_KEYS = 60;
+const MAX_EPG_WINDOW_KEYS = 40;
 const MAX_SEARCH_QUERY_CHARS = 256;
 const MAX_SEARCH_LIMIT = 60;
 
@@ -51,9 +53,10 @@ export const isRecord = (x: unknown): x is Record<string, unknown> =>
 export const isPositiveId = (x: unknown): x is number =>
   Number.isSafeInteger(x) && (x as number) > 0;
 export const isSafeInt = (x: unknown): x is number => Number.isSafeInteger(x);
+export const isNonNegativeSafeInt = (x: unknown): x is number => isSafeInt(x) && x >= 0;
 export const isFiniteNumber = (x: unknown): x is number =>
   typeof x === 'number' && Number.isFinite(x);
-const isNonNegativeFinite = (x: unknown): x is number => isFiniteNumber(x) && x >= 0;
+export const isNonNegativeFinite = (x: unknown): x is number => isFiniteNumber(x) && x >= 0;
 export const isBoundedString = (x: unknown, min = 0, max = MAX_STRING_CHARS): x is string =>
   typeof x === 'string' && x.length >= min && x.length <= max;
 
@@ -76,6 +79,8 @@ export const isCleanKey = (x: unknown, max = MAX_ITEM_KEY_CHARS): x is string =>
   isBoundedString(x, 1, max) && !hasControlChar(x);
 export const isOptionalProfileId = (x: unknown): boolean =>
   x === undefined || isCleanKey(x, MAX_PROFILE_ID_CHARS);
+export const isOptionalSourceId = (x: unknown): boolean =>
+  x === undefined || isCleanKey(x, MAX_ID_CHARS);
 export const isOptionalUserLimit = (x: unknown): boolean =>
   x === undefined || (isSafeInt(x) && x >= 0 && x <= MAX_USER_LIST_LIMIT);
 const isOptionalNullableBoundedString = (x: unknown, max: number): boolean =>
@@ -145,13 +150,16 @@ export function isToggleFavoriteInput(x: unknown): x is ToggleFavoriteInput {
   );
 }
 
-export function isItemKeyList(x: unknown): x is readonly string[] {
-  return (
-    Array.isArray(x) &&
-    x.length <= MAX_PROGRESS_KEYS &&
-    x.every((k) => isCleanKey(k, MAX_ITEM_KEY_CHARS))
-  );
+function isBoundedKeyList(x: unknown, max: number): x is readonly string[] {
+  return Array.isArray(x) && x.length <= max && x.every((k) => isCleanKey(k, MAX_ITEM_KEY_CHARS));
 }
+
+export const isItemKeyList = (x: unknown): x is readonly string[] =>
+  isBoundedKeyList(x, MAX_PROGRESS_KEYS);
+export const isNowNextKeyList = (x: unknown): x is readonly string[] =>
+  isBoundedKeyList(x, MAX_NOW_NEXT_KEYS);
+export const isEpgWindowKeyList = (x: unknown): x is readonly string[] =>
+  isBoundedKeyList(x, MAX_EPG_WINDOW_KEYS);
 
 function isTransportSettings(x: unknown): x is TransportSettings {
   if (!isRecord(x)) return false;

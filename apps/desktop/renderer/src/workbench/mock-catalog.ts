@@ -30,6 +30,11 @@ import {
   WORKBENCH_SEED_FAVORITES,
   WORKBENCH_SEED_PROGRESS,
 } from './mock-catalog-data.ts';
+import {
+  buildWorkbenchEpgWindow,
+  buildWorkbenchNowNext,
+  findWorkbenchChannelByNumber,
+} from './mock-catalog-epg.ts';
 
 const MAX_LIST_LIMIT = 100;
 const MAX_PROGRESS_KEYS = 200;
@@ -131,6 +136,17 @@ export function createWorkbenchCatalog(): CatalogService {
         durationMs: 12,
       });
     },
+    async importGuide(sourceId: string) {
+      const src = sources.find((s) => s.id === sourceId);
+      if (!src) return err(elvError('storage', 'source-not-found', `Unknown source ${sourceId}`));
+      return ok({
+        runId: nextId++,
+        counts: { guideChannels: 10, programmes: 240 },
+        warnings: 0,
+        warningCodes: [],
+        durationMs: 8,
+      });
+    },
     listSources: async () => sources.map((s) => ({ ...s })),
     async categories(sourceId: string, kind: BrowseKind) {
       if (!sources.some((s) => s.id === sourceId && !s.needsImport)) return [];
@@ -172,6 +188,23 @@ export function createWorkbenchCatalog(): CatalogService {
         return out;
       };
       return { live: collect('live'), movies: collect('movie'), series: collect('series') };
+    },
+    async nowNext(channelKeys: readonly string[], nowMs: number) {
+      const activeSource = sources.find((s) => !s.needsImport);
+      if (!activeSource) return [];
+      return buildWorkbenchNowNext(channelKeys, nowMs, activeSource.id);
+    },
+    async epgWindow(channelKeys: readonly string[], fromMs: number, toMs: number) {
+      const activeSource = sources.find((s) => !s.needsImport);
+      if (!activeSource) return {};
+      return buildWorkbenchEpgWindow(channelKeys, fromMs, toMs, activeSource.id);
+    },
+    async channelByNumber(num: number, sourceId?: string) {
+      const activeSource = sources.find(
+        (s) => !s.needsImport && (sourceId === undefined || s.id === sourceId),
+      );
+      if (!activeSource) return null;
+      return findWorkbenchChannelByNumber(num, activeSource.id);
     },
     seasons: async (seriesId: number) =>
       ok(

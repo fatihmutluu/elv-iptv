@@ -74,10 +74,17 @@ export function createDesktopCatalogFromBridge(
       }
     },
     listSources: () => bridge.listSources(),
+    importGuide: (id, opts) =>
+      opts?.signal?.aborted
+        ? Promise.resolve(err(elvError('network', 'aborted')))
+        : bridge.importGuide(id),
     categories: (sourceId, kind) => bridge.categories(sourceId, kind),
     items: (categoryId, offset, limit) => bridge.items(categoryId, offset, limit),
     itemDetail: (itemKey) => bridge.itemDetail(itemKey),
     search: (query, opts) => bridge.search(sanitizeDisplayText(query).slice(0, 256), opts),
+    nowNext: (channelKeys, nowMs) => bridge.nowNext(channelKeys, nowMs),
+    epgWindow: (channelKeys, fromMs, toMs) => bridge.epgWindow(channelKeys, fromMs, toMs),
+    channelByNumber: (num, sourceId) => bridge.channelByNumber(num, sourceId),
     seasons: (seriesId) => bridge.seasons(seriesId),
     episodes: (seriesId, season) => bridge.episodes(seriesId, season),
     resolveStream: (itemKey) => bridge.resolveStream(itemKey),

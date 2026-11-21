@@ -9,6 +9,7 @@ export default defineConfig({
         'src/ports/**/*.ts',
         'src/shared/**/*.ts',
         'src/home/home-model.ts',
+        'src/live/live-model.ts',
         'src/catalog/catalog-model.ts',
         'src/detail/detail-model.ts',
         'src/search/search-model.ts',
