@@ -9,7 +9,7 @@ Thanks for helping build ELV IPTV. This guide covers every way to contribute —
 
 ## Picking an issue to implement
 
-- Browse open [issues](https://github.com/fatihmutluu/elv-iptv/issues) filtered by milestone (`0.1`, `0.2`, `0.3`) or labels (`good first issue`, `help wanted`).
+- Browse open [issues](https://github.com/fatihmutluu/elv-iptv/issues) filtered by milestone (`0.2`, `0.3`, `Future`), workstream cluster (`cluster:*`), or labels (`good first issue`, `help wanted`).
 - Comment on the issue before starting substantial work so two people do not build the same thing in parallel.
 - Read [docs/INDEX.md](docs/INDEX.md), [AGENTS.md](AGENTS.md), and the `AGENTS.md` inside each package or app you plan to touch.
 

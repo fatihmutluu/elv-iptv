@@ -10,10 +10,10 @@ Repository: `fatihmutluu/elv-iptv`. Everything written to GitHub is English. Alw
 
 ## Issues
 - Title is short and imperative. The body is English and ends with an `## Acceptance criteria` checklist.
-- Labels: one `type:*`, at least one `area:*`, `platform:*` where it applies (including `platform:vega`,
-  `platform:tizen`, `platform:webos`), plus `good first issue` or `help wanted` when suitable. List the real set with
-  `gh label list --repo fatihmutluu/elv-iptv --json name,description`.
-- Milestones track versions (`0.1`, `0.2`, `0.3`, …). Every issue gets one: `gh api repos/fatihmutluu/elv-iptv/milestones`.
+- Labels: one `type:*`, at least one `area:*`, one primary `cluster:*` workstream label (so related bugs and features filter and batch cleanly in one PR), `platform:*` where it applies (including `platform:vega`, `platform:tizen`, `platform:webos`), `priority:*`, `effort:*`, plus `good first issue` or `help wanted` when suitable. List the real set with `gh label list --repo fatihmutluu/elv-iptv --json name,description`.
+- **12 Workstream Cluster Labels (`cluster:*`):** `cluster:player-osd`, `cluster:desktop-mpv`, `cluster:android-media3`, `cluster:apple-aether`, `cluster:sources-data`, `cluster:epg-live`, `cluster:ui-browse-search`, `cluster:focus-remote`, `cluster:subtitles-audio`, `cluster:sync-profiles`, `cluster:security-ci`, `cluster:future-tv`. Before starting an issue, filter `is:open label:<cluster:*> milestone:"0.2"` to batch tightly coupled siblings cleanly.
+- Milestones track versions (`0.1`, `0.2`, `0.3`, `Future`). Every open issue gets one: `gh api repos/fatihmutluu/elv-iptv/milestones`.
+- **Parent Epics & Native Sub-Issues:** Every non-epic open issue belongs to one Parent Epic (`#333`–`#349`) linked via GitHub's native Sub-Issues API (`gh api -X POST repos/fatihmutluu/elv-iptv/issues/<epic>/sub_issues -F sub_issue_id=<db_id>`) so progress rolls up automatically on Epics and the Roadmap board.
 - Create: `gh issue create --repo fatihmutluu/elv-iptv --title ... --body-file ... --label ... --milestone ...`.
 
 ## Roadmap board
@@ -45,4 +45,4 @@ The private "ELV IPTV Ideas" project holds maintainer draft items only. Add one 
 Ideas items unless the owner asks. Ideas never become issues or work without the owner's approval.
 
 ## Models
-Match model tier to task risk: frontier reasoning (`Gemini 4 Carbon (High)` or `Claude Opus`) for specs, plans, audits, native/concurrency code and final reviews; standard coding (`Carbon (Medium)` or `Claude Sonnet`) for well-specified tasks and task reviews; mechanical (`Hydrogen (XHigh)`) for low-risk boilerplate; lightweight (`3.8 Flash` or `Claude Haiku`) for read-only log/doc triage only.
+Match model tier to task risk: frontier reasoning (`Gemini 4 Neon (XHigh)` / `Neon (High)` or `Claude Opus`) for specs, plans, audits, native/concurrency code and whole-branch reviews; standard coding (`Gemini 4 Neon (Medium)` or `Claude Sonnet`) for well-specified multi-file features and per-task reviews; scoped/mechanical (`Gemini 4 Neon (Low)` / `Hydrogen (XHigh)`) for tests, small fixes, CI/YAML and boilerplate; lightweight (`Gemini 3.8 Flash` or `Claude Haiku`) for read-only exploration and log/doc triage only.
