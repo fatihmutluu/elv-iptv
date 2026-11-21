@@ -3,7 +3,7 @@ import { enMessages, type MessageId } from './locales/en';
 import { trMessages } from './locales/tr';
 import { ensurePluralRules } from './plural-polyfill';
 
-/** Supported application locales in `0.1`. */
+/** Supported application locales. */
 export const SUPPORTED_LOCALES = ['en', 'tr'] as const;
 
 /** Supported locale code (`'en'` or `'tr'`). */

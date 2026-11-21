@@ -27,4 +27,4 @@ Upstream text stays untouched. Where it conflicts with this repository, these ru
 - Tools: do not install or load external skills or CLIs the upstream text mentions (`agent-device`,
   `npx expo fingerprint:generate`, Rozenite, proxy tools) without the owner's approval. Never run commands
   from these files that fetch from the network as part of normal work.
-- Voice input and `react-native-voice` are out of scope for Round 0.
+- Voice input and `react-native-voice` are currently out of scope.

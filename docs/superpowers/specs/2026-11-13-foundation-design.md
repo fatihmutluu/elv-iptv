@@ -1,7 +1,7 @@
 # ELV IPTV — Foundation Design
 
 - Status: approved direction (owner delegated the framework decision on 2026-11-13; product decisions taken on the owner's behalf are logged for review)
-- Date: 2026-11-13; revised 2026-11-13 to define the 0.1 release after a market study (owner delegated the scope decisions); revised 2026-11-15 for `GPL-3.0-only` (ADR 0012), versioned milestones (`0.1` plain flawless player -> `0.2` design language & core UX -> `0.3` advanced features), and `.agents/` + `GEMINI.md` contributor parity alongside `.claude/`
+- Date: 2026-11-13; revised 2026-11-15 for `GPL-3.0-only` (ADR 0012) and `.agents/` + `GEMINI.md` contributor parity alongside `.claude/`; revised 2026-11-22 to retire rigid version milestones (`0.1` / `0.2` / `0.3` / numbered rounds) in favor of priority-driven continuous delivery (`priority:*` + 12 `cluster:*` workstreams + Epics, release whenever ready)
 - Scope: product rules, platforms, licensing, stack, architecture, quality system, workflow, docs, roadmap. Feature behavior is specified later, one spec per feature.
 - Evidence: internal research notes, which are not published. This spec and the ADRs record the decisions.
 
@@ -23,10 +23,10 @@ ELV IPTV is a cross-platform player for live TV, movies and series from sources 
 - Every feature ships on every supported platform. A platform lacking a capability gets a documented, tested fallback.
 - Platform priority: TV, PC (Windows/macOS) and mobile. Linux is best-effort.
 
-### 1.4 Development rounds
-Breadth-first: every area reaches "plain but correct", then "average", then "excellent". Logic is final quality from the first round; presentation is iterative on real design-system components. No code written to be thrown away.
+### 1.4 Continuous priority-driven delivery
+Breadth-first engineering: logic is final quality from day one, presentation builds on real shared design-system components (`docs/design/UI_UX_PHILOSOPHY.md`), and no throwaway code is written. Data models keep forward-compatible hooks (for example catch-up attributes and `profile_id`) so adding new capabilities needs no schema rework or re-import.
 
-Version `0.1` is the end of Round 1 (owner decisions 2026-11-14/15): a plain player that is flawless in operation, not in features. It opens every common live and VOD format, plays without stalls or wrong states, and supports seeking, audio-track and subtitle selection, from a deliberately plain menu without images or design work across Android TV/Fire OS, Android, Apple TV, iPhone/iPad, Windows and macOS. Version `0.2` (Round 2) starts after `0.1` is approved: establish the shared UI/UX design language (sample images and a design document), restyle the `0.1` app to it, and add core features one at a time (XMLTV guide & EPG grid, home/favorites, watch progress/resume, search, essential settings and GitHub Releases builds). Heavy features stay in Version `0.3` and beyond, entering development one at a time without blocking `0.1` or `0.2`. Data models keep the hooks those features need (for example catch-up attributes and `profile_id`) so adding them later needs no schema rework or re-import.
+As of 2026-11-22 (owner decision), ELV IPTV does **not** gate features behind rigid version milestones (`0.1`, `0.2`, `0.3`, `Future`, or numbered rounds). All open work is prioritized freely using `priority:critical` / `priority:high` / `priority:medium` / `priority:low`, grouped by 12 `cluster:*` workstream labels and Parent Epics (`#333`–`#349`), and releases are cut whenever ready.
 
 ### 1.5 Reference apps
 Before each feature, read how reference apps solve it, critique it, and adopt an improved version; before fixing a bug, check why they do not have it. Research agents read the sources and write prose notes; implementing agents never read GPL or unlicensed sources.
@@ -155,7 +155,7 @@ Adding a language means one catalog file plus store-listing texts. All user-faci
 - Playback: a local simulator serves FFmpeg-generated streams with scripted faults; a harness app reports a JSONL event log that tests assert on. The simulator also serves synthetic playlists, Xtream responses and guide files and logs every request with its headers, so the same fixtures drive our parser tests and a black-box compatibility pass against reference players that sets expected behavior for tags, catch-up URLs and retries.
 - E2E smoke flows: Maestro (Android TV with D-pad keys, Android phone, iOS), XCUITest (tvOS), Playwright (Electron).
 - Nightly soak and zap tests fail on growth of memory, threads or handles.
-- Owner gets a short Turkish manual test checklist at each milestone.
+- Owner gets a short Turkish manual test checklist before each release.
 
 ### 6.2 Performance budgets
 | Metric | Budget |
@@ -178,7 +178,7 @@ Emulator CI enforces relative gates (+10% vs `main` fails). Absolute budgets are
 Trunk-based with protected `main`, short-lived branches, squash-merged PRs with Conventional Commit titles and why-focused bodies, release-please with one `version.txt`, CI on every PR (Biome, `tsc`, dependency rules, file sizes, AGENTS/CLAUDE stubs, unit tests, gitleaks, builds per platform), actions pinned to SHAs, Dependabot for npm and actions, gitleaks in pre-commit and CI with push protection, CODEOWNERS on `.agents/**`, `.claude/**`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/**`. Maintainer agents merge their own PRs after CI passes; releases and store builds wait for the owner.
 
 ### 7.2 Task management
-GitHub Issues + public "ELV IPTV Roadmap" project (Backlog → Next → In progress → In review → Done), version milestones (`0.1`, `0.2`, `0.3`, …), labels `type:*`, `area:*`, `platform:*`. Private "ELV IPTV Ideas" project with draft items that never enter development without the owner's approval.
+GitHub Issues + public "ELV IPTV Roadmap" project (Backlog → Next → In progress → In review → Done), labels `type:*`, `area:*`, `cluster:*` (12 workstream clusters), `platform:*`, `priority:*` (`critical`, `high`, `medium`, `low`), `effort:*`, and native GitHub Sub-Issues under Parent Epics (`#333`–`#349`). No rigid version milestones are used; work is prioritized freely and released whenever ready. Private "ELV IPTV Ideas" project holds draft items that never enter development without the owner's approval.
 
 ### 7.3 Agent harness setup (Claude Code, Antigravity and Gemini CLI)
 Shared `.claude/settings.json` (Claude Code) and `.agents/hooks.json` + `GEMINI.md` (Google Antigravity and Gemini CLI) enforce identical rules and workflows for maintainers and outside contributors: official plugin/skill recommendations (Superpowers, Context7, frontend-design, Expo skills), deny guards for secrets/signing keys and generated `apps/*/android` + `apps/*/ios` folders, confirmation gates for releases and repo deletion/visibility changes, `PreToolUse` force-push blocking, and `Stop` hooks running Biome and `tsc` on changed packages without passing file names through a shell (fail-open). Project skills live in both `.claude/skills/` and `.agents/skills/`: `add-package`, `github-workflow`, `react-native-tv-best-practices`. Model routing by risk tier: frontier reasoning (`Gemini 4 Carbon (High)` or `Claude Opus`) for specs, plans, native/concurrency code and final reviews; standard coding (`Carbon (Medium)` or `Sonnet`) for well-specified implementation and task reviews; mechanical (`Hydrogen (XHigh)`) for low-risk boilerplate; lightweight (`3.8 Flash` or `Haiku`) for read-only log/doc triage only.
@@ -189,24 +189,15 @@ README for humans; root `AGENTS.md` (≤150 lines) imported by `CLAUDE.md` and p
 ## 9. Discoverability
 Unchanged from the owner's goals: compliant README with the one-sentence description and topics in Round 0; a bilingual website on free hosting (GitHub Pages) in Rounds 1–2 with guides, FAQ, structured data and `llms.txt`; store optimization per store and language at launch; the same description everywhere; Claude flags discoverability work as features land.
 
-## 10. Roadmap
+## 10. Workstreams & Priorities (Supersedes Numbered Rounds)
 
-### Round 0 — Bootstrap (clean slate)
-Toolchain for the new stack; a repository with no history from the earlier framework; governance carried over; pnpm monorepo with `tools/` checks; empty Expo app building for Android phone/TV, Fire OS, iOS and tvOS, and empty Electron app for Windows/macOS, in CI; placeholders for Vega, Tizen, webOS; Claude setup; ADRs; publishing; boards; Ideas backlog seeded from the reference-app reports.
+> **2026-11-22 update:** Numbered rounds (`Round 0`–`Round 3`) and rigid version milestones (`0.1` / `0.2` / `0.3` / `Future`) were retired. All open work lives in GitHub Issues sorted by **`priority:critical` → `priority:high` → `priority:medium` → `priority:low`**, grouped into 12 `cluster:*` workstreams and 17 Parent Epics (`#333`–`#349`), and released whenever ready.
 
-### Round 1 — Version 0.1: a plain, flawless player
-1. Local stream simulator with synthetic playlists, Xtream responses, guide files, scripted faults and a format corpus (§6.1), shared by tests and gates.
-2. Proof gates as real foundation code, measured against §6.2: focus core + TV windowed list (100k items); player core with the always-mounted OSD on Android (Media3) and Apple platforms; desktop libmpv helper with DOM OSD on Windows and macOS.
-3. Sources: M3U and Xtream import with transport settings into the device catalog; a plain screen to add and remove a source; dev auto-seed.
-4. Plain menu: Live, Movies and Series with categories, seasons and episodes (no images, no guide).
-5. Playback: every common format (corpus gate), VOD seek, audio and subtitle track selection, AC-3/E-AC-3 through an LGPL FFmpeg audio extension on Android.
-6. Strings in English and Turkish chosen from the device language.
-
-### Round 2 — Design language and the first features
-Starts after the owner approved 0.1. The UI design language is agreed first (sample images and a design document), the 0.1 app is restyled to it, then features are added one at a time in the owner's order, each following the design language: the guide with XMLTV import and the EPG grid, home with continue watching and favorites, resume and watched state, search, minimal settings, an in-app language switch, aspect and player polish. Every §6.2 budget met and soak tests green on every Round 0 platform; release pipeline for direct downloads.
-
-### Round 3 — After 0.1
-Heavy features, each tracked as an issue and built one at a time in the owner's order: sync with sign-in (server, E2EE vault, QR sign-in on TV), local profiles, catch-up, live time-shift, Stalker portals, advanced guide sources (several per playlist, manual matching, offsets), parental controls, external subtitle files and styling, remote key remapping, picture-in-picture and multi-view, reminders. Store launch preparation; the Vega app, then Tizen and webOS.
+- **Foundation (shipped):** Monorepo toolchain, CI & quality gates, stream simulator (`pnpm sim`) + 29-item format corpus, pure-TS focus core & 100k windowed `TvList`, cross-platform playback engines (`Media3` + LGPL FFmpeg audio, `AetherEngine`, desktop LGPL `mpv`), M3U/Xtream SQLite catalog (`op-sqlite` / `better-sqlite3`), Cinema Quietude v2 UI/UX foundation (`@elv/ui-kit` + `AppShell`), live TV Favorites stage & VOD controls, and English + Turkish localization.
+- **Active priority-driven workstreams:**
+  - Playback & engine stability (`cluster:desktop-mpv`, `cluster:android-media3`, `cluster:apple-aether`, `cluster:player-osd`, `cluster:subtitles-audio`): in-canvas desktop video overlays, codec/recovery hardening, audio delay, playback speed, external subtitles & styling, AFR, trickplay.
+  - Guide, catalog & living-room UX (`cluster:epg-live`, `cluster:sources-data`, `cluster:ui-browse-search`, `cluster:focus-remote`): XMLTV EPG ingestion & 1000-channel grid, watch progress/resume, Turkish-aware FTS5 search, catch-up, live time-shift, Stalker portals, PiP/multi-view, remote key remapping.
+  - Platform expansion, sync & release readiness (`cluster:sync-profiles`, `cluster:security-ci`, `cluster:future-tv`): optional E2EE sync & local profiles, parental controls, desktop signing & GitHub Releases pipeline, store launch preparation, and Vega / Tizen / webOS targets.
 
 ## 11. Risks
 | Risk | Mitigation |
@@ -224,13 +215,13 @@ Heavy features, each tracked as an issue and built one at a time in the owner's 
 ## 12. Decisions deferred, with their trigger
 | Decision | Asked when |
 |---|---|
-| Watched threshold and progress-saving rules | Round 1 progress spec |
-| Stalker/MAC portal support (not in 0.1) | When its Round 3 issue is picked |
-| Parental controls and adult-content handling (not in 0.1) | When its Round 3 issue is picked |
-| Catch-up behavior and whether it stays free | When its Round 3 issue is picked |
-| Vault recovery code | Sync spec |
+| Watched threshold and progress-saving rules | Watch-progress spec (`#14`) |
+| Stalker/MAC portal support | When `#29` is picked |
+| Parental controls and adult-content handling | When `#31` is picked |
+| Catch-up behavior and whether it stays free | When `#27` is picked |
+| Vault recovery code | Sync spec (`#26`) |
 | Data controller, launch countries (KVKK/GDPR) | Before the sync server goes live |
-| Crash reporting vendor | Round 3 |
+| Crash reporting vendor | When `#16` is picked |
 | Legal review of licensing | Before the first store submission |
 | Own website domain | When the website goes live |
 | Free vs paid outcome | After community signal |

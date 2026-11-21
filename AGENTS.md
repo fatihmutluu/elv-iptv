@@ -2,7 +2,7 @@
 
 Cross-platform IPTV player (open source, `GPL-3.0-only` + `CLA.md`): Expo + react-native-tvos for phone, tablet,
 Android TV, Fire OS, iOS, iPadOS and tvOS; Electron + react-native-web for Windows, macOS and Linux.
-Users bring their own M3U or Xtream Codes source; the project ships no content. Version `0.1` is in progress.
+Users bring their own M3U or Xtream Codes source; the project ships no content. Active continuous development; releases are cut whenever ready.
 
 ## Layout
 - `apps/tv-mobile/` Expo app (composition root for phone, tablet, TV). `apps/desktop/` Electron shell and web renderer.
