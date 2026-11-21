@@ -7,6 +7,7 @@ const ALL_DETAIL_ROW_IDS: readonly DetailNavRowId[] = [
   'hero-actions',
   'hero-play',
   'seasons',
+  'episode-chunks',
   'episodes',
   'retry',
   'related',
@@ -32,6 +33,7 @@ export interface UseTvDetailNavigationOptions {
   readonly isActiveScope: boolean;
   readonly targetKey: string;
   readonly rows: readonly DetailNavRowDescriptor[];
+  readonly selectedChunkIndex?: number;
   readonly onActivate: (rowId: DetailNavRowId, colIndex: number) => void;
   readonly onBack: () => void;
   readonly onFocusRow?: (rowId: DetailNavRowId, colIndex: number) => void;
@@ -56,6 +58,7 @@ export function useTvDetailNavigation({
   isActiveScope,
   targetKey,
   rows,
+  selectedChunkIndex,
   onActivate,
   onBack,
   onFocusRow,
@@ -112,6 +115,16 @@ export function useTvDetailNavigation({
     setActiveRowId(nextId);
     setActiveCol(found?.index ?? 0);
   }, [rowSignature, store]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: align inactive episode-chunks focus memory with auto-selected chunk after row counts sync
+  useEffect(() => {
+    if (selectedChunkIndex === undefined || activeRowIdRef.current === 'episode-chunks') return;
+    const chunkList = findList(store.getState().scopes, 'episode-chunks')?.list;
+    if (!chunkList || chunkList.count <= 0) return;
+    const currentActive = activeRowIdRef.current;
+    store.focus('episode-chunks', selectedChunkIndex);
+    store.activate(currentActive);
+  }, [rowSignature, selectedChunkIndex, store]);
 
   const moveToRow = useCallback(
     (nextRow: DetailNavRowDescriptor) => {

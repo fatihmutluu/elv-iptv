@@ -134,9 +134,18 @@ export function TvList<T>({
   const base = Math.floor(rangeStart / anchor) * anchor;
   const translate = -(windowStart - base) * rowHeight;
 
+  const isEmpty = count === 0;
   const offset = useRef<Animated.Value>(null as unknown as Animated.Value);
   if (offset.current === null) offset.current = new Animated.Value(translate);
-  const synced = useRef({ source, base, rowHeight, start: windowStart, at: 0 });
+  const synced = useRef({
+    source,
+    base,
+    rowHeight,
+    start: windowStart,
+    active: isActive,
+    empty: isEmpty,
+    at: 0,
+  });
   const callback = useRef(onFrameCommitted);
   callback.current = onFrameCommitted;
   const mounted = useRef(true);
@@ -149,22 +158,38 @@ export function TvList<T>({
 
   useLayoutEffect(() => {
     const prev = synced.current;
-    if (
+    const activated = isActive && !prev.active;
+    const hydrated = !isEmpty && prev.empty;
+    const samePosition =
       prev.source === source &&
       prev.base === base &&
       prev.rowHeight === rowHeight &&
-      prev.start === windowStart
-    ) {
+      prev.start === windowStart;
+    if (!activated && !hydrated && samePosition) {
+      if (prev.active !== isActive || prev.empty !== isEmpty) {
+        synced.current = { ...prev, active: isActive, empty: isEmpty };
+      }
       return;
     }
     const now = performance.now();
     const step =
+      isActive &&
+      prev.active &&
+      !hydrated &&
       prev.source === source &&
       prev.base === base &&
       prev.rowHeight === rowHeight &&
       Math.abs(windowStart - prev.start) === 1;
     const held = now - prev.at < REPEAT_WINDOW_MS;
-    synced.current = { source, base, rowHeight, start: windowStart, at: now };
+    synced.current = {
+      source,
+      base,
+      rowHeight,
+      start: windowStart,
+      active: isActive,
+      empty: isEmpty,
+      at: now,
+    };
     if (step && !held && !reduceMotion) {
       Animated.timing(offset.current, {
         toValue: translate,
@@ -175,7 +200,7 @@ export function TvList<T>({
       offset.current.stopAnimation();
       offset.current.setValue(translate);
     }
-  }, [source, base, rowHeight, windowStart, translate, reduceMotion]);
+  }, [source, base, rowHeight, windowStart, translate, reduceMotion, isActive, isEmpty]);
 
   const shownIndex = useRef(safeIndex);
   useLayoutEffect(() => {

@@ -14,6 +14,7 @@ import {
   type ImportProgress,
   type ImportSummary,
 } from './import-types';
+import { isPlaceholderLiveChannel } from './placeholder-filter';
 import { sourceExists } from './runs';
 import {
   getSource,
@@ -130,6 +131,7 @@ interface ListSpec<T extends Listed> {
   countKey: string;
   writer: ItemWriter<T>;
   fetch(client: XtreamClient, categoryId?: string): Promise<Result<T[]>>;
+  skip?: ((item: T) => boolean) | undefined;
 }
 
 async function importList<T extends Listed>(
@@ -141,6 +143,7 @@ async function importList<T extends Listed>(
   const positions = new Map<string, number>();
   let done = 0;
   let placements = 0;
+  let skippedPlaceholders = 0;
   let uncategorized = false;
 
   async function categoriesOf(item: T, only: string | undefined): Promise<readonly string[]> {
@@ -156,9 +159,19 @@ async function importList<T extends Listed>(
   }
 
   async function write(items: readonly T[], only: string | undefined, total?: number) {
-    for (let i = 0; i < items.length; i += c.batchSize) {
+    let filtered = items;
+    if (spec.skip !== undefined) {
+      const kept: T[] = [];
+      for (const item of items) {
+        if (spec.skip(item)) skippedPlaceholders += 1;
+        else kept.push(item);
+      }
+      filtered = kept;
+    }
+    const effectiveTotal = total === undefined ? undefined : filtered.length;
+    for (let i = 0; i < filtered.length; i += c.batchSize) {
       checkAbort(c);
-      const slice = items.slice(i, i + c.batchSize);
+      const slice = filtered.slice(i, i + c.batchSize);
       const entries = slice.map((item) => ({
         key: xtreamKey(c.sourceId, spec.kind, item.id),
         item,
@@ -177,7 +190,9 @@ async function importList<T extends Listed>(
       placements += links.length;
       done += slice.length;
       c.progress(
-        total === undefined ? { phase: spec.phase, done } : { phase: spec.phase, done, total },
+        effectiveTotal === undefined
+          ? { phase: spec.phase, done }
+          : { phase: spec.phase, done, total: effectiveTotal },
       );
       await c.deps.scheduler.yieldNow();
     }
@@ -200,9 +215,12 @@ async function importList<T extends Listed>(
   }
   c.counts[spec.countKey] = seen.size;
   c.counts.placements = (c.counts.placements ?? 0) + placements;
+  if (skippedPlaceholders > 0) {
+    c.counts.skippedPlaceholders = (c.counts.skippedPlaceholders ?? 0) + skippedPlaceholders;
+  }
 }
 
-async function execute(c: Ctx): Promise<string[]> {
+async function execute(c: Ctx, includePlaceholders: boolean): Promise<string[]> {
   const call = c.signal === undefined ? undefined : { signal: c.signal };
   const account = unwrap(await c.client.account(call));
   const cats = await importCategories(c);
@@ -214,6 +232,9 @@ async function execute(c: Ctx): Promise<string[]> {
       countKey: 'live',
       writer: liveWriter,
       fetch: (client, id) => client.liveStreams(id, call),
+      skip: includePlaceholders
+        ? undefined
+        : (item) => isPlaceholderLiveChannel({ name: item.name, streamId: item.id }),
     },
     cats.live,
   );
@@ -255,7 +276,10 @@ async function importXtream(
   let outputFormats: string[] = [];
   return performRun(source, deps, opts, {
     execute: async (base) => {
-      outputFormats = await execute({ ...base, ...opened.value });
+      outputFormats = await execute(
+        { ...base, ...opened.value },
+        source.settings.includePlaceholderChannels === true,
+      );
     },
     beforeCleanup: async (tx, c) => {
       await tx.run(KEEP_EPISODES, [c.runId, c.sourceId, c.sourceId, c.runId]);

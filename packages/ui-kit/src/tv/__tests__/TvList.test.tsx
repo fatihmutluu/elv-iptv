@@ -529,5 +529,216 @@ describe('TvList', () => {
         setValueSpy.mock.invocationCallOrder[0] ?? Number.NEGATIVE_INFINITY,
       );
     });
+
+    function spyAnimations() {
+      const order: string[] = [];
+      let latest = 0;
+      const stopSpy = jest
+        .spyOn(Animated.Value.prototype, 'stopAnimation')
+        .mockImplementation(() => {
+          order.push('stop');
+        });
+      const setValueSpy = jest
+        .spyOn(Animated.Value.prototype, 'setValue')
+        .mockImplementation((v: number) => {
+          latest = v;
+          order.push(`set:${v}`);
+        });
+      const timingSpy = jest.spyOn(Animated, 'timing').mockImplementation(((
+        _: unknown,
+        cfg: { toValue: number },
+      ) => {
+        latest = cfg.toValue;
+        order.push(`timing:${cfg.toValue}`);
+        return { start: () => {} };
+      }) as never);
+      const reset = () => {
+        order.length = 0;
+        stopSpy.mockClear();
+        setValueSpy.mockClear();
+        timingSpy.mockClear();
+      };
+      return { order, latest: () => latest, stopSpy, setValueSpy, timingSpy, reset };
+    }
+
+    it('synchronously snaps translate, renders focused row, aligns FocusRing, and prefetches on modal popScope() to an out-of-window index', async () => {
+      let now = 1000;
+      jest.spyOn(performance, 'now').mockImplementation(() => now);
+      const anim = spyAnimations();
+      const { store, ui, onFrameCommitted, prefetchSpy } = setup(8, 2000);
+      await render(ui);
+      expect(screen.getByTestId('list-row-0').props.accessibilityState).toEqual({ selected: true });
+
+      await act(async () =>
+        store.pushScope(
+          'modal',
+          [{ id: 'm', count: 3, index: 0, orientation: 'vertical', pageSize: 3 }],
+          'm',
+        ),
+      );
+      expect(screen.queryByTestId('list-ring')).toBeNull();
+
+      // Mutate root list to row 450 while inactive under modal, then popScope() to restore focus
+      await act(async () => store.focus('l', 450));
+      expect(screen.queryByTestId('list-ring')).toBeNull();
+      expect(screen.getByTestId('list-row-450').props.accessibilityState).toEqual({
+        selected: false,
+      });
+
+      now += 500;
+      anim.reset();
+      await act(async () => void store.popScope());
+
+      expect(anim.timingSpy).not.toHaveBeenCalled();
+      expect(anim.stopSpy).toHaveBeenCalledTimes(1);
+      expect(anim.setValueSpy).toHaveBeenCalledTimes(1);
+      expect(anim.order).toEqual(['stop', `set:${-448 * ROW_HEIGHT}`]);
+      const row450 = screen.getByTestId('list-row-450');
+      const ring = screen.getByTestId('list-ring');
+      expect(row450.props.accessibilityState).toEqual({ selected: true });
+      expect(ring.props.style.top).toBe(2 * ROW_HEIGHT);
+      expect(ring.props.style.top).toBeGreaterThanOrEqual(0);
+      expect(ring.props.style.top).toBeLessThan(8 * ROW_HEIGHT);
+      expect(row450.props.style.top + anim.latest()).toBe(ring.props.style.top);
+      expect(onFrameCommitted).toHaveBeenLastCalledWith(
+        450,
+        expect.objectContaining({ start: 448, end: 456 }),
+      );
+      const lastPrefetch = prefetchSpy.mock.calls.at(-1);
+      expect(lastPrefetch).toBeDefined();
+      expect(lastPrefetch?.[0]).toBeLessThanOrEqual(450);
+      expect(lastPrefetch?.[1]).toBeGreaterThan(450);
+    });
+
+    it('snaps immediately via stopAnimation + setValue on store.activate() when index shifted by 1 while inactive or mid-animation', async () => {
+      let now = 1000;
+      jest.spyOn(performance, 'now').mockImplementation(() => now);
+      const anim = spyAnimations();
+      const store = createFocusStore({
+        id: 'root',
+        lists: [
+          { id: 'side', count: 5, index: 0, orientation: 'vertical', pageSize: 5 },
+          { id: 'l', count: 21, index: 20, orientation: 'vertical', pageSize: 10 },
+        ],
+        active: 'side',
+      });
+      const source = createSyntheticSource(100, (i) => `Item ${i}`);
+      const renderItem = (item: string | undefined) => <Text>{item}</Text>;
+      await render(
+        <TvList
+          listId="l"
+          store={store}
+          source={source}
+          rowHeight={ROW_HEIGHT}
+          visibleRows={8}
+          renderRow={renderItem}
+          testID="list"
+        />,
+      );
+
+      // Shift inactive list index by 1 (20 -> 19, windowStart 18 -> 17) and activate in same turn
+      now += 500;
+      anim.reset();
+      await act(async () => {
+        store.setCount('l', 20);
+        store.activate('l');
+      });
+
+      expect(anim.timingSpy).not.toHaveBeenCalled();
+      expect(anim.stopSpy).toHaveBeenCalledTimes(1);
+      expect(anim.setValueSpy).toHaveBeenCalledTimes(1);
+      expect(anim.order).toEqual(['stop', `set:${-17 * ROW_HEIGHT}`]);
+      expect(screen.getByTestId('list-row-19').props.accessibilityState).toEqual({
+        selected: true,
+      });
+
+      // Start a 1-step timing animation while active, deactivate mid-flight, then re-activate at same windowStart
+      now += 500;
+      anim.reset();
+      await act(async () => move(store, 'up', 1));
+      expect(anim.timingSpy).toHaveBeenCalledTimes(1);
+
+      await act(async () => void store.activate('side'));
+      now += 500;
+      anim.reset();
+      await act(async () => void store.activate('l'));
+
+      expect(anim.timingSpy).not.toHaveBeenCalled();
+      expect(anim.stopSpy).toHaveBeenCalledTimes(1);
+      expect(anim.setValueSpy).toHaveBeenCalledTimes(1);
+      expect(anim.order).toEqual(['stop', `set:${-16 * ROW_HEIGHT}`]);
+    });
+
+    it('snaps to restored index and renders it focused when source.count() loads asynchronously after popScope()', async () => {
+      let now = 1000;
+      jest.spyOn(performance, 'now').mockImplementation(() => now);
+      const anim = spyAnimations();
+      let loadedCount = 0;
+      const listeners = new Set<() => void>();
+      const source = {
+        count: () => loadedCount,
+        get: (i: number) => (i < loadedCount ? `Item ${i}` : undefined),
+        prefetch: jest.fn(),
+        onChange: (fn: () => void) => {
+          listeners.add(fn);
+          return () => listeners.delete(fn);
+        },
+      };
+      const store = createFocusStore({
+        id: 'root',
+        lists: [{ id: 'l', count: 1000, index: 250, orientation: 'vertical', pageSize: 10 }],
+        active: 'l',
+      });
+      store.pushScope(
+        'modal',
+        [{ id: 'm', count: 3, index: 0, orientation: 'vertical', pageSize: 3 }],
+        'm',
+      );
+      const onFrameCommitted = jest.fn();
+      const renderItem = (item: string | undefined) => <Text>{item ?? ''}</Text>;
+      await render(
+        <TvList
+          listId="l"
+          store={store}
+          source={source}
+          rowHeight={ROW_HEIGHT}
+          visibleRows={8}
+          renderRow={renderItem}
+          testID="list"
+          onFrameCommitted={onFrameCommitted}
+        />,
+      );
+
+      // Restore scope while source is still empty (count === 0)
+      await act(async () => void store.popScope());
+      expect(screen.queryByTestId('list-ring')).toBeNull();
+      expect(rowCount()).toBe(0);
+
+      // Source asynchronously hydrates with 1,000 items
+      now += 500;
+      anim.reset();
+      await act(async () => {
+        loadedCount = 1000;
+        for (const fn of listeners) fn();
+      });
+
+      expect(anim.timingSpy).not.toHaveBeenCalled();
+      expect(anim.stopSpy).toHaveBeenCalledTimes(1);
+      expect(anim.setValueSpy).toHaveBeenCalledTimes(1);
+      expect(anim.order).toEqual(['stop', `set:${-248 * ROW_HEIGHT}`]);
+      const row250 = screen.getByTestId('list-row-250');
+      const ring = screen.getByTestId('list-ring');
+      expect(row250.props.accessibilityState).toEqual({ selected: true });
+      expect(ring.props.style.top).toBe(2 * ROW_HEIGHT);
+      expect(row250.props.style.top + anim.latest()).toBe(ring.props.style.top);
+      expect(onFrameCommitted).toHaveBeenLastCalledWith(
+        250,
+        expect.objectContaining({ start: 248, end: 256 }),
+      );
+      const lastPrefetch = source.prefetch.mock.calls.at(-1);
+      expect(lastPrefetch).toBeDefined();
+      expect(lastPrefetch?.[0]).toBeLessThanOrEqual(250);
+      expect(lastPrefetch?.[1]).toBeGreaterThan(250);
+    });
   });
 });

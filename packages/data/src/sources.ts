@@ -39,6 +39,8 @@ export interface SourceSettings {
   outputFormats?: string[];
   /** Non-secret HTTP cache validators keyed strictly by opaque slot names. */
   httpCache?: SourceHttpCache;
+  /** When true, keep provider offline/separator placeholder live channels during catalog import. */
+  includePlaceholderChannels?: boolean;
 }
 
 /** A row of the `sources` table. */

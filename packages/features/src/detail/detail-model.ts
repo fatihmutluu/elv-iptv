@@ -52,6 +52,7 @@ export type DetailNavRowId =
   | 'hero-actions'
   | 'hero-play'
   | 'seasons'
+  | 'episode-chunks'
   | 'episodes'
   | 'retry'
   | 'related';
@@ -95,6 +96,7 @@ export interface BuildPrimaryPlayActionInput {
 export interface BuildDetailNavRowsInput {
   readonly heroActionCount: number;
   readonly seasonsCount: number;
+  readonly episodeChunksCount?: number;
   readonly episodesCount: number;
   readonly hasSeasonsError: boolean;
   readonly relatedCount: number;
@@ -373,6 +375,10 @@ export function buildDetailNavRows(input: BuildDetailNavRowsInput): DetailNavRow
   rows.push({ id: 'hero-play', count: 1, orientation: 'horizontal' });
   if (input.seasonsCount > 0) {
     rows.push({ id: 'seasons', count: input.seasonsCount, orientation: 'horizontal' });
+  }
+  const chunksCount = input.episodeChunksCount ?? 0;
+  if (chunksCount > 0 && !input.hasSeasonsError) {
+    rows.push({ id: 'episode-chunks', count: chunksCount, orientation: 'horizontal' });
   }
   if (input.hasSeasonsError) {
     rows.push({ id: 'retry', count: 1, orientation: 'horizontal' });

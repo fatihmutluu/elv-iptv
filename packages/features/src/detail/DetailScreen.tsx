@@ -29,6 +29,7 @@ import {
   type DetailNavRowId,
 } from './detail-model';
 import { useDetailData } from './useDetailData';
+import { useEpisodeChunks } from './useEpisodeChunks';
 import { useTvDetailNavigation } from './useTvDetailNavigation';
 
 /** Props of {@link DetailScreen}. */
@@ -155,23 +156,40 @@ export function DetailScreen({
   const seasons = data.seasonsState.kind === 'ready' ? data.seasonsState.seasons : [];
   const heroActionCount = target.kind === 'movie' ? 2 : 1;
 
+  const {
+    chunks: episodeChunks,
+    selectedChunkIndex,
+    visibleEpisodes,
+    episodeIndexOffset,
+    selectChunk: handleSelectChunk,
+  } = useEpisodeChunks({
+    itemKey: target.itemKey,
+    selectedSeason: data.selectedSeason,
+    episodes: data.episodes,
+    episodeProgressByKey: data.episodeProgressByKey,
+  });
+
   const navRows = useMemo(
     () =>
       buildDetailNavRows({
         heroActionCount,
         seasonsCount: target.kind === 'series' ? seasons.length : 0,
-        episodesCount: target.kind === 'series' && !data.episodesLoading ? data.episodes.length : 0,
+        episodeChunksCount:
+          target.kind === 'series' && !data.episodesLoading ? episodeChunks.length : 0,
+        episodesCount:
+          target.kind === 'series' && !data.episodesLoading ? visibleEpisodes.length : 0,
         hasSeasonsError: target.kind === 'series' && data.seasonsState.kind === 'error',
         relatedCount: data.related.length,
       }),
     [
-      data.episodes.length,
       data.episodesLoading,
       data.related.length,
       data.seasonsState.kind,
+      episodeChunks.length,
       heroActionCount,
       seasons.length,
       target.kind,
+      visibleEpisodes.length,
     ],
   );
 
@@ -189,10 +207,14 @@ export function DetailScreen({
         if (picked) data.selectSeason(picked.season);
         return;
       }
+      if (rowId === 'episode-chunks') {
+        if (episodeChunks[colIndex]) handleSelectChunk(colIndex);
+        return;
+      }
       if (rowId === 'retry') return data.retrySeasons();
       if (rowId === 'episodes') {
-        const ep = data.episodes[colIndex];
-        if (ep) handlePressEpisode(ep, colIndex);
+        const ep = visibleEpisodes[colIndex];
+        if (ep) handlePressEpisode(ep, episodeIndexOffset + colIndex);
         return;
       }
       if (rowId === 'related') {
@@ -201,18 +223,21 @@ export function DetailScreen({
       }
     },
     [
-      data.episodes,
       data.related,
       data.retrySeasons,
       data.selectSeason,
       data.toggleMyList,
       data.toggleWatched,
+      episodeChunks,
+      episodeIndexOffset,
       handlePlayPrimary,
       handlePressEpisode,
       handlePressRelated,
+      handleSelectChunk,
       onBack,
       seasons,
       target.kind,
+      visibleEpisodes,
     ],
   );
 
@@ -223,7 +248,12 @@ export function DetailScreen({
         reportScrolled(false);
         return;
       }
-      if (rowId === 'seasons' || rowId === 'retry' || rowId === 'episodes') {
+      if (
+        rowId === 'seasons' ||
+        rowId === 'episode-chunks' ||
+        rowId === 'retry' ||
+        rowId === 'episodes'
+      ) {
         const baseY = episodesYRef.current;
         if (baseY !== null) {
           const epOffset = rowId === 'episodes' ? colIndex * EPISODE_ROW_ESTIMATE_HEIGHT : 0;
@@ -247,6 +277,7 @@ export function DetailScreen({
     isActiveScope,
     targetKey: target.itemKey,
     rows: navRows,
+    selectedChunkIndex,
     onActivate: handleTvActivate,
     onBack,
     onFocusRow: handleTvFocusRow,
@@ -286,6 +317,7 @@ export function DetailScreen({
       <ScrollView
         ref={scrollViewRef}
         testID="detail-scroll"
+        {...(isTv ? { focusable: false } : {})}
         onScroll={handleScroll}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
@@ -324,13 +356,18 @@ export function DetailScreen({
           <DetailEpisodes
             seasonsState={data.seasonsState}
             selectedSeason={data.selectedSeason}
-            episodes={data.episodes}
+            episodes={visibleEpisodes}
             episodesLoading={data.episodesLoading}
             episodeProgressByKey={data.episodeProgressByKey}
             seriesBackdropUri={data.backdropUri}
             onSelectSeason={data.selectSeason}
             onRetrySeasons={data.retrySeasons}
             onPressEpisode={handlePressEpisode}
+            chunks={episodeChunks}
+            selectedChunkIndex={selectedChunkIndex}
+            focusedChunkIndex={tvNav.focusedRowId === 'episode-chunks' ? tvNav.focusedCol : null}
+            episodeIndexOffset={episodeIndexOffset}
+            onSelectChunk={handleSelectChunk}
             isTv={isTv}
             isPortrait={isPortrait}
             padX={padX}
