@@ -7,6 +7,7 @@ export interface WebKeyEventLike {
   repeat?: boolean;
   isComposing?: boolean;
   keyCode?: number;
+  shiftKey?: boolean;
   ctrlKey?: boolean;
   altKey?: boolean;
   metaKey?: boolean;
@@ -143,6 +144,7 @@ export function subscribeWebKeys(
     if (!event || typeof event.key !== 'string') return;
     if (isImeComposingEvent(event)) return;
     if (event.ctrlKey || event.altKey || event.metaKey) return;
+    if (event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) return;
     const editable = findEditable(event, win);
     if (editable !== null && !textEntry.isActive()) {
       if (event.key === 'Escape' && !event.repeat) {

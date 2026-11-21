@@ -11,6 +11,7 @@ export default defineConfig({
         'src/main/player/mpv/process.ts',
         'src/main/player/mpv/options.ts',
         'src/main/player/mpv/errors.ts',
+        'src/main/player/mpv/input-repeat-gate.ts',
         'src/main/player/mpv/redact.ts',
         'src/main/player/presenter/*.ts',
         'src/main/player/engine.ts',

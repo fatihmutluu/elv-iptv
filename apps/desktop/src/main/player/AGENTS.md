@@ -21,6 +21,7 @@ over the JSON IPC client (`mpv/`) and a `VideoPresenter` (`presenter/`). Zero `e
   leftover launcher sweep.
 - `mpv/opening-gate.ts`: zap-coalescing state machine (`START_TIMEOUT_MS = 3000`, `OPEN_WAIT_MS = 1000`, `maxHoldMs`).
 - `mpv/audio-hotplug.ts`: 500 ms debounced `audio-device-list` watcher queueing `ao-reload` on active media.
+- `mpv/input-repeat-gate.ts`: per-key hold and auto-repeat limiter (`LONG_HOLD_MS = 350`, `AUTOREPEAT_MS = 160`, 600 ms idle reset) gating repeatable `elv-key` `client-message` events before `onUi`.
 - `mpv/options.ts`: hardened `LAUNCH_OPTIONS` (`--reset-on-next-file=...`, `--tls-verify=yes`, `--audio-fallback-to-null=yes`,
   `--stream-lavf-o=icy=0`, diskless cache), case-insensitive deduplicated & control-char-stripped headers, and `loadfile`.
 - `mpv/derive.ts`, `mpv/entries.ts`, `mpv/tracks.ts`, `mpv/track-snapshot.ts`, `mpv/errors.ts`, `mpv/redact.ts`:
@@ -43,7 +44,7 @@ over the JSON IPC client (`mpv/`) and a `VideoPresenter` (`presenter/`). Zero `e
   handshake offset in `renderer/src/player/desktop-engine.ts`.
 
 ## Tests
-- `engine.test.ts`, `engine-tracks.test.ts` and `engine-headers.test.ts` drive `createMpvEngine` against `mpv/fake-mpv.ts`
+- `engine.test.ts`, `engine-tracks.test.ts`, `engine-headers.test.ts` and `engine-input-throttle.test.ts` drive `createMpvEngine` against `mpv/fake-mpv.ts`
   (which honors `--reset-on-next-file` rather than resetting `aid`/`sid` unconditionally).
 - `engine.contract.test.ts` runs `ENGINE_CONTRACT_CASES` over `FakeMpv` and, with `ELV_MPV_SPIKE=1` and `ELV_SIM_URL`,
   over the real runtime and simulator. Keep line coverage >= 90 %.

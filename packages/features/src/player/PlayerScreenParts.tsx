@@ -96,6 +96,7 @@ export interface PlayerOsdProps {
   isTv: boolean;
   isDesktop?: boolean;
   tvOsdFocused: boolean;
+  tvScrubberFocused?: boolean;
   tvOsdAction: TvOsdAction;
   tracksOpen: boolean;
   settingsOpen?: boolean;
@@ -253,6 +254,7 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
           service={service}
           clock={p.clock}
           isTv={isTv}
+          tvFocused={isTv && p.tvScrubberFocused === true}
           label={i18n.t('player.progressLabel')}
           previewPositionMs={p.previewPositionMs}
           dimmed={isPortrait && (p.tracksOpen || settingsOpen)}
@@ -350,7 +352,9 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
               onPress={p.onRetry}
               isTv={isTv}
               tvFocused={
-                p.tvOsdFocused ? isFocused('retry') : isTv && !p.tracksOpen && !settingsOpen
+                p.tvOsdFocused
+                  ? isFocused('retry')
+                  : isTv && !p.tracksOpen && !settingsOpen && p.tvScrubberFocused !== true
               }
             />
           ) : null}

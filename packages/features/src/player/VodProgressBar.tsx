@@ -23,6 +23,7 @@ export interface VodProgressBarProps {
   readonly service: PlaybackService | null;
   readonly clock: PlaybackClock;
   readonly isTv: boolean;
+  readonly tvFocused?: boolean;
   readonly label: string;
   readonly previewPositionMs?: number | undefined;
   readonly dimmed?: boolean;
@@ -118,6 +119,7 @@ export function VodProgressBar({
   service,
   clock,
   isTv,
+  tvFocused = false,
   label,
   previewPositionMs,
   dimmed = false,
@@ -149,6 +151,7 @@ export function VodProgressBar({
         focusable={!isTv}
         accessibilityRole="adjustable"
         accessibilityLabel={label}
+        accessibilityState={{ selected: tvFocused }}
         accessibilityValue={{
           min: 0,
           max: snapshot.durationSec,
@@ -165,6 +168,20 @@ export function VodProgressBar({
         }}
         style={[styles.trackHitBox, !isTv ? webCursorPointer() : undefined]}
       >
+        {tvFocused ? (
+          <View
+            testID="player-progress-focus-ring"
+            pointerEvents="none"
+            style={[
+              styles.focusRing,
+              {
+                borderColor: theme.colors.focusRingColor,
+                borderWidth: theme.focus.ringWidth,
+                borderRadius: theme.radius.pill,
+              },
+            ]}
+          />
+        ) : null}
         <View
           testID="player-progress-rail"
           pointerEvents="none"
@@ -192,6 +209,7 @@ export function VodProgressBar({
           pointerEvents="none"
           style={[
             styles.trackThumb,
+            tvFocused ? styles.trackThumbFocused : null,
             {
               left: `${snapshot.fillPercent}%`,
               backgroundColor: theme.colors.textPrimary,
@@ -229,6 +247,13 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     justifyContent: 'center',
   },
+  focusRing: {
+    position: 'absolute',
+    left: -4,
+    right: -4,
+    top: 3,
+    bottom: 3,
+  },
   trackRail: {
     height: 5,
     borderRadius: 999,
@@ -245,6 +270,13 @@ const styles = StyleSheet.create({
     marginLeft: -6,
     borderRadius: 6,
     borderWidth: 1.5,
+  },
+  trackThumbFocused: {
+    width: 18,
+    height: 18,
+    marginLeft: -9,
+    borderRadius: 9,
+    borderWidth: 2,
   },
   timeText: {
     fontWeight: '600',

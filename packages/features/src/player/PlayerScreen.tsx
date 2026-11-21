@@ -38,6 +38,8 @@ export interface PlayerScreenProps {
   appLifecycle?: AppLifecyclePort;
   clock?: PlaybackClock;
   timers?: PlaybackTimers;
+  initialOsdHidden?: boolean;
+  autoHideOsdMs?: number;
   onTargetChange?: (next: PlayTarget) => void;
   onExit: () => void;
 }
@@ -51,6 +53,8 @@ export function PlayerScreen({
   appLifecycle = noopAppLifecycle,
   clock = DEFAULT_CLOCK,
   timers = DEFAULT_TIMERS,
+  initialOsdHidden,
+  autoHideOsdMs,
   onTargetChange,
   onExit,
 }: PlayerScreenProps): ReactElement {
@@ -150,6 +154,8 @@ export function PlayerScreen({
     hasSettings: activeService !== null,
     hasNextEpisode: nextEpisodeVisible,
     hasPreviousChannel,
+    initialOsdHidden,
+    autoHideOsdMs,
     serviceRef,
     clockRef,
     timersRef,
@@ -225,6 +231,7 @@ export function PlayerScreen({
       isTv={isTv}
       isDesktop={isDesktop}
       tvOsdFocused={controls.tvOsdFocused}
+      tvScrubberFocused={controls.tvScrubberFocused}
       tvOsdAction={controls.tvOsdAction}
       tracksOpen={controls.tracksOpen}
       settingsOpen={controls.settingsOpen}
@@ -309,7 +316,7 @@ export function PlayerScreen({
             {nextEpisodeNode}
           </View>
           {trackPickerNode}
-          {osdNode}
+          {isTv && controls.osdHidden ? null : osdNode}
           {settingsSheetNode}
         </>
       )}
