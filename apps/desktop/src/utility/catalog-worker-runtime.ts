@@ -377,6 +377,8 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
         return service.categories(call.sourceId, call.kind);
       case 'items':
         return service.items(call.categoryId, call.offset, call.limit);
+      case 'itemDetail':
+        return service.itemDetail ? service.itemDetail(call.itemKey) : null;
       case 'seasons':
         return service.seasons(call.seriesId);
       case 'episodes':

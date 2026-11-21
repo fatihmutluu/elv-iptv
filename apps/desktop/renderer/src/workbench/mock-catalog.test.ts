@@ -35,6 +35,43 @@ describe('createWorkbenchCatalog', () => {
     expect(resolved.ok).toBe(true);
   });
 
+  it('returns ItemDetailRow with synthetic English synopses for all workbench movies and series, null plot for live, and null for unknown keys', async () => {
+    const catalog = createWorkbenchCatalog();
+    const sources = await catalog.listSources();
+    const srcId = sources[0]?.id ?? '';
+
+    const movieCats = await catalog.categories(srcId, 'movie');
+    const allMovies = (await Promise.all(movieCats.map((c) => catalog.items(c.id, 0, 50)))).flat();
+    expect(allMovies.length).toBe(7);
+    for (const movie of allMovies) {
+      const detail = await catalog.itemDetail?.(movie.key);
+      expect(detail).toMatchObject({ ...movie });
+      expect(typeof detail?.plot).toBe('string');
+      expect((detail?.plot ?? '').trim().length).toBeGreaterThan(40);
+    }
+
+    const seriesCats = await catalog.categories(srcId, 'series');
+    const allSeries = (await Promise.all(seriesCats.map((c) => catalog.items(c.id, 0, 50)))).flat();
+    expect(allSeries.length).toBe(3);
+    for (const show of allSeries) {
+      const detail = await catalog.itemDetail?.(show.key);
+      expect(detail).toMatchObject({ ...show });
+      expect(typeof detail?.plot).toBe('string');
+      expect((detail?.plot ?? '').trim().length).toBeGreaterThan(40);
+    }
+
+    const liveCats = await catalog.categories(srcId, 'live');
+    const firstLive = (await catalog.items(liveCats[0]?.id ?? '', 0, 10))[0];
+    expect(firstLive).toBeDefined();
+    expect(await catalog.itemDetail?.(firstLive?.key ?? '')).toEqual({
+      ...firstLive,
+      plot: null,
+    });
+
+    expect(await catalog.itemDetail?.('wb:movie:9999')).toBeNull();
+    expect(await catalog.itemDetail?.('unknown')).toBeNull();
+  });
+
   it('pre-seeds Continue Watching and My List and supports stateful user-state mutations', async () => {
     const catalog = createWorkbenchCatalog();
 

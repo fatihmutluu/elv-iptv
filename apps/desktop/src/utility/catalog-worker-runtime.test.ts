@@ -10,6 +10,7 @@ import type {
   FavoriteRow,
   ImportProgress,
   ImportSummary,
+  ItemDetailRow,
   ItemRow,
   SeasonRow,
   SourceRow,
@@ -430,6 +431,23 @@ describe('createCatalogWorkerRuntime', () => {
       limit: 5,
     }).promise;
     const firstSeriesId = seriesItems[0]?.id ?? 0;
+    const seriesDetail = await client.call<ItemDetailRow | null>({
+      method: 'itemDetail',
+      itemKey: seriesItems[0]?.key ?? '',
+    }).promise;
+    expect(seriesDetail).toMatchObject({
+      id: firstSeriesId,
+      key: seriesItems[0]?.key,
+      kind: 'series',
+      sourceId: xtreamId,
+    });
+    expect(seriesDetail !== null && 'plot' in seriesDetail).toBe(true);
+    expect(
+      await client.call<ItemDetailRow | null>({
+        method: 'itemDetail',
+        itemKey: `x:${xtreamId}:series:999999`,
+      }).promise,
+    ).toBeNull();
     const seasons = await client.call<Result<SeasonRow[]>>({
       method: 'seasons',
       seriesId: firstSeriesId,
@@ -457,6 +475,17 @@ describe('createCatalogWorkerRuntime', () => {
       limit: 10,
     }).promise;
     expect(m3uItems[0]?.logo).toContain(SYNTH_M3U_VAL);
+    const m3uDetail = await client.call<ItemDetailRow | null>({
+      method: 'itemDetail',
+      itemKey: m3uItems[0]?.key ?? '',
+    }).promise;
+    expect(m3uDetail).toMatchObject({
+      key: m3uItems[0]?.key,
+      kind: 'live',
+      sourceId: m3uId,
+      plot: null,
+    });
+    expect(m3uDetail?.logo).toContain(SYNTH_M3U_VAL);
     const m3uStream = await client.call<Result<StreamRequest>>({
       method: 'resolveStream',
       itemKey: m3uItems[0]?.key ?? '',

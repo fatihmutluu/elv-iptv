@@ -103,6 +103,7 @@ describe('isCatalogClientMessage', () => {
         reqId: 9,
         call: { method: 'items', categoryId: 'src_1|live|10', offset: 0, limit: 100 },
       },
+      { type: 'call', reqId: 9, call: { method: 'itemDetail', itemKey: 'x:src_1:series:42' } },
       { type: 'call', reqId: 10, call: { method: 'seasons', seriesId: 12 } },
       { type: 'call', reqId: 10, call: { method: 'seasons', seriesId: 0 } },
       { type: 'call', reqId: 11, call: { method: 'episodes', seriesId: 12, season: 1 } },
@@ -252,6 +253,10 @@ describe('isCatalogClientMessage', () => {
         call: { method: 'items', categoryId: 'a|live|1', offset: Number.NaN, limit: 10 },
       },
       { type: 'call', reqId: 1, call: { method: 'seasons', seriesId: 1.5 } },
+      { type: 'call', reqId: 1, call: { method: 'itemDetail', itemKey: '' } },
+      { type: 'call', reqId: 1, call: { method: 'itemDetail', itemKey: 'bad\nkey' } },
+      { type: 'call', reqId: 1, call: { method: 'itemDetail', itemKey: 123 } },
+      { type: 'call', reqId: 1, call: { method: 'itemDetail', itemKey: 'k'.repeat(1025) } },
       { type: 'call', reqId: 1, call: { method: 'episodes', seriesId: 1, season: 1.2 } },
       {
         type: 'call',

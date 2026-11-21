@@ -103,7 +103,7 @@ async function loadXtreamSecret(
 export interface PlaytimeResolverCache {
   evict(sourceId: string): void;
   clear(): void;
-  resolveLogos(items: ItemRow[], sourceId: string): Promise<ItemRow[]>;
+  resolveLogos<T extends ItemRow>(items: T[], sourceId: string): Promise<T[]>;
   resolveRowLogos<T extends { sourceId: string; logo: string | null }>(rows: T[]): Promise<T[]>;
   resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
 }

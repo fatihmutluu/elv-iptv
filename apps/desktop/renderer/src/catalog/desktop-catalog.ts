@@ -76,6 +76,7 @@ export function createDesktopCatalogFromBridge(
     listSources: () => bridge.listSources(),
     categories: (sourceId, kind) => bridge.categories(sourceId, kind),
     items: (categoryId, offset, limit) => bridge.items(categoryId, offset, limit),
+    itemDetail: (itemKey) => bridge.itemDetail(itemKey),
     seasons: (seriesId) => bridge.seasons(seriesId),
     episodes: (seriesId, season) => bridge.episodes(seriesId, season),
     resolveStream: (itemKey) => bridge.resolveStream(itemKey),

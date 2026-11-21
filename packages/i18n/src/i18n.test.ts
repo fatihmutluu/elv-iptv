@@ -351,6 +351,68 @@ describe('@elv/i18n', () => {
     expect(tr.t('home.heroSlideLabel', { index: 2, total: 5 })).toBe('Öne çıkan 2 / 5');
   });
 
+  it('localizes catalog discovery, category grid, and detail screen strings in English and Turkish', () => {
+    const en = createAppI18n('en');
+    const tr = createAppI18n('tr');
+    const cases: ReadonlyArray<readonly [MessageId, string, string]> = [
+      ['catalog.moviesTitle', 'Movies', 'Filmler'],
+      ['catalog.seriesTitle', 'Series', 'Diziler'],
+      ['catalog.allCategories', 'All', 'Tümü'],
+      ['catalog.filter.all', 'All', 'Tümü'],
+      ['catalog.filter.unwatched', 'Unwatched', 'İzlenmemiş'],
+      ['catalog.filter.inProgress', 'In progress', 'Devam eden'],
+      ['catalog.filter.watched', 'Watched', 'İzlendi'],
+      ['catalog.seeAll', 'See all', 'Tümünü gör'],
+      ['catalog.loadMoreCategories', 'Load more categories', 'Daha fazla kategori yükle'],
+      ['catalog.backToMovies', 'Back to Movies', 'Filmlere dön'],
+      ['catalog.backToSeries', 'Back to Series', 'Dizilere dön'],
+      ['catalog.emptyFilter', 'No titles match this filter.', 'Bu filtreyle eşleşen yapım yok.'],
+      ['catalog.clearFilter', 'Show all', 'Tümünü göster'],
+      ['detail.back', 'Back', 'Geri'],
+      ['detail.playMovie', 'Play', 'Oynat'],
+      ['detail.resumeMovie', 'Resume', 'Devam et'],
+      ['detail.episodes', 'Episodes', 'Bölümler'],
+      ['detail.moreLikeThis', 'More like this', 'Benzer yapımlar'],
+      [
+        'detail.noSynopsis',
+        'No synopsis available from this source.',
+        'Bu kaynak için özet bilgisi bulunmuyor.',
+      ],
+      ['detail.loadingEpisodes', 'Loading episodes…', 'Bölümler yükleniyor…'],
+      ['detail.cast', 'Cast', 'Oyuncular'],
+    ];
+    for (const [id, expectedEn, expectedTr] of cases) {
+      expect(en.t(id)).toBe(expectedEn);
+      expect(tr.t(id)).toBe(expectedTr);
+    }
+
+    expect(en.t('catalog.itemsCount', { count: 0 })).toBe('0 titles');
+    expect(en.t('catalog.itemsCount', { count: 1 })).toBe('1 title');
+    expect(en.t('catalog.itemsCount', { count: 24 })).toBe('24 titles');
+    expect(tr.t('catalog.itemsCount', { count: 0 })).toBe('0 yapım');
+    expect(tr.t('catalog.itemsCount', { count: 1 })).toBe('1 yapım');
+    expect(tr.t('catalog.itemsCount', { count: 24 })).toBe('24 yapım');
+
+    expect(en.t('detail.playEpisode', { season: 1, episode: 3 })).toBe('Play S1 E3');
+    expect(tr.t('detail.playEpisode', { season: 1, episode: 3 })).toBe('Oynat S1 B3');
+    expect(en.t('detail.resumeEpisode', { season: 2, episode: 7 })).toBe('Resume S2 E7');
+    expect(tr.t('detail.resumeEpisode', { season: 2, episode: 7 })).toBe('Devam et S2 B7');
+
+    expect(en.t('detail.seasonsCount', { count: 1 })).toBe('1 season');
+    expect(en.t('detail.seasonsCount', { count: 5 })).toBe('5 seasons');
+    expect(tr.t('detail.seasonsCount', { count: 1 })).toBe('1 sezon');
+    expect(tr.t('detail.seasonsCount', { count: 5 })).toBe('5 sezon');
+
+    expect(en.t('detail.seasonOption', { season: 4 })).toBe('Season 4');
+    expect(tr.t('detail.seasonOption', { season: 4 })).toBe('4. Sezon');
+    expect(en.t('detail.episodeNumbered', { episode: 12, title: 'Finale' })).toBe('12. Finale');
+    expect(tr.t('detail.episodeNumbered', { episode: 12, title: 'Finale' })).toBe('12. Finale');
+    expect(en.t('detail.durationMin', { minutes: 48 })).toBe('48m');
+    expect(tr.t('detail.durationMin', { minutes: 48 })).toBe('48 dk');
+    expect(en.t('detail.durationHoursMin', { hours: 2, minutes: 14 })).toBe('2h 14m');
+    expect(tr.t('detail.durationHoursMin', { hours: 2, minutes: 14 })).toBe('2 sa 14 dk');
+  });
+
   it('localizes VOD transport controls, track picker strings, and common track language codes', () => {
     const en = createAppI18n('en');
     expect(en.t('player.play')).toBe('Play');

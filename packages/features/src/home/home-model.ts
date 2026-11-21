@@ -9,6 +9,7 @@ import {
   type WatchProgressRow,
 } from '@elv/data';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
+import type { DetailTarget } from '../shared';
 
 /**
  * `PlayTarget` enriched with optional Watch Progress resume position and metadata fields consumed
@@ -256,18 +257,14 @@ export function buildHomeLivePlayTarget(
     }
     const row = page[index - pageIndex * LIVE_PLAYLIST_PAGE_SIZE];
     if (row === undefined) return undefined;
-    const entry: PlayableEntry & {
-      readonly logo?: string | null;
-      readonly itemKind?: UserItemKind;
-    } = {
+    return {
       itemKey: row.key,
       sourceId: row.sourceId,
       title: formatLiveChannelName(row),
       kind: 'live',
       logo: row.logo,
       itemKind: 'live',
-    };
-    return entry;
+    } as PlayableEntry & { readonly logo?: string | null; readonly itemKind?: UserItemKind };
   };
 
   return {
@@ -378,5 +375,25 @@ export function buildHomeRailSets(input: BuildHomeRailSetsInput): HomeRailSets {
     }),
     movies: mapCatalog(input.movies, 'movie'),
     series: mapCatalog(input.series, 'series'),
+  };
+}
+
+/** Converts a movie or series Home hero slide or rail entry into a {@link DetailTarget}. */
+export function buildHomeDetailTarget(
+  item: HomeHeroSlide | HomeRailEntry,
+): DetailTarget | undefined {
+  if (item.kind !== 'movie' && item.kind !== 'series') return undefined;
+  const { itemKey, sourceId, kind, title, posterUri, backdropUri, year, rating, catalogItem } =
+    item;
+  return {
+    itemKey,
+    sourceId,
+    kind,
+    title,
+    posterUri,
+    backdropUri,
+    year,
+    rating,
+    ...(catalogItem ? { catalogId: catalogItem.id } : {}),
   };
 }

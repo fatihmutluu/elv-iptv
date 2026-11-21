@@ -218,11 +218,13 @@ describe('AppShell', () => {
 
       await fireEvent.press(screen.getByTestId('nav-tab-movie'));
       await waitFor(() => {
+        expect(screen.getByTestId('catalog-screen-movie')).toBeTruthy();
         expect(screen.getByText('Synthetic Movie One')).toBeTruthy();
       });
 
       await fireEvent.press(screen.getByTestId('nav-tab-series'));
       await waitFor(() => {
+        expect(screen.getByTestId('catalog-screen-series')).toBeTruthy();
         expect(screen.getByText('Synthetic Series One')).toBeTruthy();
       });
     } finally {
@@ -519,4 +521,89 @@ describe('AppShell', () => {
       }
     },
   );
+
+  it('wires CatalogDiscoveryScreen and DetailScreen overlay stack from Home, Movies, and Series tabs', async () => {
+    const env = await openShellCatalog();
+    const { videoHost } = createFakeHost();
+
+    let view: Awaited<ReturnType<typeof render>> | undefined;
+    try {
+      const added = await env.catalog.addSource({
+        kind: 'xtream',
+        name: 'CatalogDemo',
+        server: 'http://sim.example.test:8080',
+        username: 'demo',
+        password: ['de', 'mo'].join(''),
+      });
+      if (!added.ok) throw new Error('addSource failed');
+      await env.catalog.importSource(added.value.id);
+
+      view = await render(
+        <FormFactorProvider value="desktop">
+          <I18nProvider i18n={createAppI18n('en')}>
+            <AppShell catalog={env.catalog} videoHost={videoHost} />
+          </I18nProvider>
+        </FormFactorProvider>,
+      );
+
+      // Home poster opens DetailScreen overlay and Back pops to Home
+      await waitFor(() => {
+        expect(screen.getByTestId('home-movies-item-0')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('home-movies-item-0'));
+      await waitFor(() => {
+        expect(screen.getByTestId('detail-screen')).toBeTruthy();
+        expect(screen.getByTestId('detail-title')).toHaveTextContent('Synthetic Movie One');
+      });
+      await fireEvent.press(screen.getByTestId('detail-back'));
+      await waitFor(() => {
+        expect(screen.getByTestId('home-screen')).toBeTruthy();
+      });
+
+      // Movies tab renders CatalogDiscoveryScreen; clicking poster opens DetailScreen; Back pops to Movies
+      await fireEvent.press(screen.getByTestId('nav-tab-movie'));
+      await waitFor(() => {
+        expect(screen.getByTestId('catalog-screen-movie')).toBeTruthy();
+        expect(screen.getByTestId('catalog-rail-0-item-0')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('catalog-rail-0-item-0'));
+      await waitFor(() => {
+        expect(screen.getByTestId('detail-screen')).toBeTruthy();
+        expect(screen.getByTestId('detail-title')).toHaveTextContent('Synthetic Movie One');
+      });
+      await fireEvent.press(screen.getByTestId('detail-back'));
+      await waitFor(() => {
+        expect(screen.getByTestId('catalog-screen-movie')).toBeTruthy();
+      });
+
+      // Series tab -> DetailScreen -> Season 1 / Episode 0 -> Player -> Back to DetailScreen -> Tab switch clears stack
+      await fireEvent.press(screen.getByTestId('nav-tab-series'));
+      await waitFor(() => {
+        expect(screen.getByTestId('catalog-screen-series')).toBeTruthy();
+        expect(screen.getByTestId('catalog-rail-0-item-0')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('catalog-rail-0-item-0'));
+      await waitFor(() => {
+        expect(screen.getByTestId('detail-screen')).toBeTruthy();
+        expect(screen.getByTestId('detail-season-1')).toBeTruthy();
+        expect(screen.getByTestId('detail-episode-0')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('detail-episode-0'));
+      await waitFor(() => {
+        expect(screen.getByTestId('player-osd')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('player-back'));
+      await waitFor(() => {
+        expect(screen.getByTestId('detail-screen')).toBeTruthy();
+        expect(screen.getByTestId('detail-episode-0')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('nav-tab-home'));
+      await waitFor(() => {
+        expect(screen.getByTestId('home-screen')).toBeTruthy();
+      });
+    } finally {
+      await view?.unmount();
+      await env.cleanup();
+    }
+  });
 });

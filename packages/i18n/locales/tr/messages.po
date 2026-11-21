@@ -749,3 +749,90 @@ msgstr "Dizi"
 
 msgid "home.kind.episode"
 msgstr "Bölüm"
+
+msgid "catalog.moviesTitle"
+msgstr "Filmler"
+
+msgid "catalog.seriesTitle"
+msgstr "Diziler"
+
+msgid "catalog.allCategories"
+msgstr "Tümü"
+
+msgid "catalog.filter.all"
+msgstr "Tümü"
+
+msgid "catalog.filter.unwatched"
+msgstr "İzlenmemiş"
+
+msgid "catalog.filter.inProgress"
+msgstr "Devam eden"
+
+msgid "catalog.filter.watched"
+msgstr "İzlendi"
+
+msgid "catalog.seeAll"
+msgstr "Tümünü gör"
+
+msgid "catalog.loadMoreCategories"
+msgstr "Daha fazla kategori yükle"
+
+msgid "catalog.itemsCount"
+msgstr "{count} yapım"
+
+msgid "catalog.backToMovies"
+msgstr "Filmlere dön"
+
+msgid "catalog.backToSeries"
+msgstr "Dizilere dön"
+
+msgid "catalog.emptyFilter"
+msgstr "Bu filtreyle eşleşen yapım yok."
+
+msgid "catalog.clearFilter"
+msgstr "Tümünü göster"
+
+msgid "detail.back"
+msgstr "Geri"
+
+msgid "detail.playMovie"
+msgstr "Oynat"
+
+msgid "detail.resumeMovie"
+msgstr "Devam et"
+
+msgid "detail.playEpisode"
+msgstr "Oynat S{season} B{episode}"
+
+msgid "detail.resumeEpisode"
+msgstr "Devam et S{season} B{episode}"
+
+msgid "detail.seasonsCount"
+msgstr "{count} sezon"
+
+msgid "detail.seasonOption"
+msgstr "{season}. Sezon"
+
+msgid "detail.episodes"
+msgstr "Bölümler"
+
+msgid "detail.episodeNumbered"
+msgstr "{episode}. {title}"
+
+msgid "detail.durationMin"
+msgstr "{minutes} dk"
+
+msgid "detail.durationHoursMin"
+msgstr "{hours} sa {minutes} dk"
+
+msgid "detail.moreLikeThis"
+msgstr "Benzer yapımlar"
+
+msgid "detail.noSynopsis"
+msgstr "Bu kaynak için özet bilgisi bulunmuyor."
+
+msgid "detail.loadingEpisodes"
+msgstr "Bölümler yükleniyor…"
+
+msgid "detail.cast"
+msgstr "Oyuncular"

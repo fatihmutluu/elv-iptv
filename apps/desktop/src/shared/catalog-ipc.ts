@@ -6,6 +6,7 @@ import type {
   FavoriteRow,
   ImportProgress,
   ImportSummary,
+  ItemDetailRow,
   ItemRow,
   LinkSourceInput,
   SaveProgressInput,
@@ -57,6 +58,7 @@ export type CatalogRpcMethodCall =
   | { method: 'listSources' }
   | { method: 'categories'; sourceId: string; kind: BrowseKind }
   | { method: 'items'; categoryId: string; offset: number; limit: number }
+  | { method: 'itemDetail'; itemKey: string }
   | { method: 'seasons'; seriesId: number }
   | { method: 'episodes'; seriesId: number; season: number }
   | { method: 'resolveStream'; itemKey: string }
@@ -105,6 +107,7 @@ export interface CatalogBridge {
   listSources(): Promise<SourceRow[]>;
   categories(sourceId: string, kind: BrowseKind): Promise<CategoryRow[]>;
   items(categoryId: string, offset: number, limit: number): Promise<ItemRow[]>;
+  itemDetail(itemKey: string): Promise<ItemDetailRow | null>;
   seasons(seriesId: number): Promise<Result<SeasonRow[]>>;
   episodes(seriesId: number, season: number): Promise<EpisodeRow[]>;
   resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
@@ -169,17 +172,12 @@ const hasControlChar = (text: string): boolean => {
   return false;
 };
 
-function isTrimmedCleanString(x: unknown): x is string {
-  return isBoundedString(x) && !hasControlChar(x.trim());
-}
-
-function isOptionalCleanString(x: unknown): boolean {
-  return x === undefined || (isBoundedString(x) && !hasControlChar(x));
-}
-
-function isOptionalTrimmedCleanString(x: unknown): boolean {
-  return x === undefined || isTrimmedCleanString(x);
-}
+const isTrimmedCleanString = (x: unknown): x is string =>
+  isBoundedString(x) && !hasControlChar(x.trim());
+const isOptionalCleanString = (x: unknown): boolean =>
+  x === undefined || (isBoundedString(x) && !hasControlChar(x));
+const isOptionalTrimmedCleanString = (x: unknown): boolean =>
+  x === undefined || isTrimmedCleanString(x);
 
 const isCleanKey = (x: unknown, max = MAX_ITEM_KEY_CHARS): x is string =>
   isBoundedString(x, 1, max) && !hasControlChar(x);
@@ -309,6 +307,8 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
         isFiniteNumber(x['offset']) &&
         isFiniteNumber(x['limit'])
       );
+    case 'itemDetail':
+      return isCleanKey(x['itemKey']);
     case 'seasons':
       return isSafeInt(x['seriesId']);
     case 'episodes':

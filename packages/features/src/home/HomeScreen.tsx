@@ -18,11 +18,13 @@ import {
   View,
 } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
+import type { DetailTarget } from '../shared';
 import { buildHeroActionIds, HomeHero, type HomeHeroActionId } from './HomeHero';
 import { buildHomeRailSpecs, HomeRail } from './HomeRail';
 import { computeHomeLayout, HomeEmptyState, HomeSkeleton } from './HomeSkeleton';
 import {
   buildHeroSlides,
+  buildHomeDetailTarget,
   buildHomeLivePlayTarget,
   buildHomeRailSets,
   buildVodPlayTarget,
@@ -41,6 +43,7 @@ export interface HomeScreenProps {
   readonly userStateVersion?: number;
   readonly onPlay: (target: PlayTarget) => void;
   readonly onOpenTab: (tab: BrowseKind) => void;
+  readonly onOpenDetail?: (target: DetailTarget) => void;
   readonly onOpenSeries?: (item: ItemRow) => void;
   readonly onOpenSources: () => void;
   readonly onScrollTopChange?: (scrolled: boolean) => void;
@@ -69,6 +72,7 @@ export function HomeScreen({
   userStateVersion = 0,
   onPlay,
   onOpenTab,
+  onOpenDetail,
   onOpenSeries,
   onOpenSources,
   onScrollTopChange,
@@ -79,17 +83,8 @@ export function HomeScreen({
   const viewport = useViewport();
   const i18n = useI18n();
 
-  const {
-    isTv,
-    isTouch,
-    isPortrait,
-    padX,
-    railGap,
-    heroTopClearance,
-    heroHeight,
-    wideCardWidth,
-    posterCardWidth,
-  } = computeHomeLayout(viewport, theme);
+  const layout = computeHomeLayout(viewport, theme);
+  const { isTv, isTouch, isPortrait, padX, railGap, heroTopClearance } = layout;
 
   const data = useHomeData({ catalog, sources, refreshToken, userStateVersion });
   const [heroIndex, setHeroIndex] = useState(0);
@@ -165,7 +160,9 @@ export function HomeScreen({
   const openVodOrSeries = useCallback(
     (item: HomeHeroSlide | HomeRailEntry) => {
       if (item.kind === 'series') {
-        if (item.catalogItem && onOpenSeries) onOpenSeries(item.catalogItem);
+        const detail = buildHomeDetailTarget(item);
+        if (detail && onOpenDetail) onOpenDetail(detail);
+        else if (item.catalogItem && onOpenSeries) onOpenSeries(item.catalogItem);
         else onOpenTab('series');
         return;
       }
@@ -182,7 +179,7 @@ export function HomeScreen({
         }),
       );
     },
-    [onOpenSeries, onOpenTab, onPlay],
+    [onOpenDetail, onOpenSeries, onOpenTab, onPlay],
   );
 
   const activateEntry = useCallback(
@@ -205,21 +202,24 @@ export function HomeScreen({
     [catalog, data.liveCategory, onPlay, openVodOrSeries],
   );
 
-  const { toggleMyList, toggleWatched } = data;
-  const handleToggleMyList = useCallback(
-    (slide: HomeHeroSlide) => {
-      void toggleMyList({
-        ...slide,
-        logo: slide.posterUri ?? slide.backdropUri,
-      });
+  const activatePosterEntry = useCallback(
+    (entry: HomeRailEntry, index: number) => {
+      const detail = buildHomeDetailTarget(entry);
+      if (detail && onOpenDetail) onOpenDetail(detail);
+      else activateEntry(entry, index);
     },
-    [toggleMyList],
+    [activateEntry, onOpenDetail],
   );
 
+  const { toggleMyList, toggleWatched } = data;
+  const handleToggleMyList = useCallback(
+    (slide: HomeHeroSlide) =>
+      void toggleMyList({ ...slide, logo: slide.posterUri ?? slide.backdropUri }),
+    [toggleMyList],
+  );
   const handleToggleWatched = useCallback(
-    (slide: HomeHeroSlide) => {
-      void toggleWatched({ ...slide, logo: slide.posterUri ?? slide.backdropUri }, !slide.watched);
-    },
+    (slide: HomeHeroSlide) =>
+      void toggleWatched({ ...slide, logo: slide.posterUri ?? slide.backdropUri }, !slide.watched),
     [toggleWatched],
   );
 
@@ -240,11 +240,18 @@ export function HomeScreen({
         }
         return;
       }
-      const entry = railSets[rowId as HomeRailKind]?.[colIndex];
-      if (entry) activateEntry(entry, colIndex);
+      const railId = rowId as HomeRailKind;
+      const entry = railSets[railId]?.[colIndex];
+      if (!entry) return;
+      if (railId === 'mylist' || railId === 'movies' || railId === 'series') {
+        activatePosterEntry(entry, colIndex);
+      } else {
+        activateEntry(entry, colIndex);
+      }
     },
     [
       activateEntry,
+      activatePosterEntry,
       activeSlide,
       handleToggleMyList,
       handleToggleWatched,
@@ -293,12 +300,10 @@ export function HomeScreen({
   });
 
   const handleScroll = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      reportScrolled(event.nativeEvent.contentOffset.y > SCROLL_FROST_THRESHOLD);
-    },
+    (e: NativeSyntheticEvent<NativeScrollEvent>) =>
+      reportScrolled(e.nativeEvent.contentOffset.y > SCROLL_FROST_THRESHOLD),
     [reportScrolled],
   );
-
   const focusedHeroAction: HomeHeroActionId | null =
     tvNav.focusedRowId === 'hero' && tvNav.focusedCol !== null
       ? (heroActionIds[tvNav.focusedCol] ?? null)
@@ -312,7 +317,6 @@ export function HomeScreen({
   const recordRailY = useCallback((id: HomeRailKind, y: number) => {
     railYRef.current.set(id, y);
   }, []);
-
   const railSpecs = useMemo(() => buildHomeRailSpecs(i18n.t), [i18n]);
 
   return (
@@ -321,10 +325,10 @@ export function HomeScreen({
 
       {isLoadingInitial ? (
         <HomeSkeleton
-          heroHeight={heroHeight}
+          heroHeight={layout.heroHeight}
           padX={padX}
-          wideCardWidth={wideCardWidth}
-          posterCardWidth={posterCardWidth}
+          wideCardWidth={layout.wideCardWidth}
+          posterCardWidth={layout.posterCardWidth}
           gap={railGap}
         />
       ) : !hasContent ? (
@@ -359,7 +363,7 @@ export function HomeScreen({
             isTouch={isTouch}
             isPortrait={isPortrait}
             topClearance={heroTopClearance}
-            minHeight={heroHeight}
+            minHeight={layout.heroHeight}
             padX={padX}
             focusedAction={focusedHeroAction}
           />
@@ -374,13 +378,13 @@ export function HomeScreen({
               {...(spec.tab !== undefined ? { actionTab: spec.tab, onPressAction: onOpenTab } : {})}
               variant={spec.variant}
               items={railSets[spec.id]}
-              cardWidth={spec.variant === 'wide' ? wideCardWidth : posterCardWidth}
+              cardWidth={spec.variant === 'wide' ? layout.wideCardWidth : layout.posterCardWidth}
               gap={railGap}
               padX={padX}
               isTv={isTv}
               isTouch={isTouch}
               focusedIndex={tvNav.focusedRowId === spec.id ? tvNav.focusedCol : null}
-              onPressItem={activateEntry}
+              onPressItem={spec.variant === 'poster' ? activatePosterEntry : activateEntry}
               onLayoutY={recordRailY}
             />
           ))}
@@ -390,6 +394,4 @@ export function HomeScreen({
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1 },
-});
+const styles = StyleSheet.create({ root: { flex: 1 } });

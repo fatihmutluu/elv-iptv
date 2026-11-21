@@ -35,6 +35,12 @@ export interface ItemRow {
   num: number | null;
 }
 
+/** Detail lookup row for a live channel, movie or series, including series synopsis when present. */
+export interface ItemDetailRow extends ItemRow {
+  /** Series synopsis (`series.plot`); `null` for live channels and movies. */
+  plot: string | null;
+}
+
 /** One season of a series with the episodes stored for it. */
 export interface SeasonRow {
   season: number;
@@ -228,6 +234,54 @@ export interface PlayableRow {
 function sourceOfKey(key: string): string | undefined {
   const parts = key.split(':');
   return (parts[0] === 'x' || parts[0] === 'm') && parts[1] ? parts[1] : undefined;
+}
+
+/** Finds a live channel, movie or series detail row by content key via the `UNIQUE (source_id, key)` index. */
+export async function queryItemDetail(
+  db: SqlDriver,
+  itemKey: string,
+): Promise<ItemDetailRow | undefined> {
+  const sourceId = sourceOfKey(itemKey);
+  if (sourceId === undefined) return undefined;
+  const rows = await db.all<{
+    id: number;
+    key: string;
+    kind: BrowseKind;
+    source_id: string;
+    provider_id: string | null;
+    name: string;
+    logo: string | null;
+    rating: number | null;
+    year: number | null;
+    num: number | null;
+    plot: string | null;
+  }>(
+    `SELECT id, key, 'live' AS kind, source_id, provider_id, name, logo, NULL AS rating, NULL AS year, num, NULL AS plot
+       FROM live WHERE source_id = ? AND key = ?
+     UNION ALL
+     SELECT id, key, 'movie', source_id, provider_id, name, logo, rating, year, NULL, NULL
+       FROM movies WHERE source_id = ? AND key = ?
+     UNION ALL
+     SELECT id, key, 'series', source_id, provider_id, name, cover, rating, year, NULL, plot
+       FROM series WHERE source_id = ? AND key = ?
+     LIMIT 1`,
+    [sourceId, itemKey, sourceId, itemKey, sourceId, itemKey],
+  );
+  const r = rows[0];
+  if (r === undefined) return undefined;
+  return {
+    id: r.id,
+    key: r.key,
+    kind: r.kind,
+    sourceId: r.source_id,
+    providerId: r.provider_id,
+    name: r.name,
+    logo: r.logo,
+    rating: r.rating,
+    year: r.year,
+    num: r.num,
+    plot: r.plot,
+  };
 }
 
 /** Finds a live channel, movie or episode by content key. */

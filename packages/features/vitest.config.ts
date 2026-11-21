@@ -7,7 +7,10 @@ export default defineConfig({
       provider: 'v8',
       include: [
         'src/ports/**/*.ts',
-        'src/browse/paged-list-source.ts',
+        'src/shared/**/*.ts',
+        'src/home/home-model.ts',
+        'src/catalog/catalog-model.ts',
+        'src/detail/detail-model.ts',
         'src/browse/browse-model.ts',
         'src/player/errors.ts',
         'src/sources/validate.ts',
