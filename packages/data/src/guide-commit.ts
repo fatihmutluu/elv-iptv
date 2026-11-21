@@ -27,8 +27,10 @@ export interface GuideResult {
   channelRows: SqlValue[][];
   /** `[channelKey, guideId]` pairs matched by guide id. */
   byId: [string, string][];
-  /** `[channelKey, guideId]` pairs matched by a folded name; id matches win over them. */
+  /** `[channelKey, guideId]` pairs matched by exact folded name; id matches win over them. */
   byName: [string, string][];
+  /** `[channelKey, guideId]` pairs matched by normalized name; exact folded names win over them. */
+  byNormalizedName?: [string, string][];
   /** `[channelKey, guideId]` pairs matched by unique channel number; id and name matches win over them. */
   byNum: [string, string][];
   /** Programmes staged per guide id. */
@@ -37,13 +39,13 @@ export interface GuideResult {
 
 /**
  * Replaces the guide of a source inside the cleanup transaction: the mappings (id matches first, then unambiguous
- * name matches, then unambiguous channel-number matches), the guide channels, and the staged programmes of mapped
- * guide ids only. Sets `counts.mapped` and `counts.programmes` to what was stored. A guide that would store no
- * programme while the previous one has some is dropped instead: the previous guide stays (also its channels, via
- * `keepTables`) and the run gets the warning `guide/empty`.
+ * exact/normalized name matches, then unambiguous channel-number matches), the guide channels, and the staged
+ * programmes of mapped guide ids only. Sets `counts.mapped` and `counts.programmes` to what was stored. A guide
+ * that would store no programme while the previous one has some is dropped instead: the previous guide stays
+ * (also its channels, via `keepTables`) and the run gets the warning `guide/empty`.
  */
 export async function commitGuide(tx: SqlDriver, c: RunCtx, g: GuideResult): Promise<void> {
-  const mappings = resolveMappings(g.byId, g.byName, g.byNum);
+  const mappings = resolveMappings(g.byId, g.byName, g.byNum, g.byNormalizedName);
   const mapped = new Set(mappings.map(([, guideId]) => guideId));
   const empty = ![...mapped].some((guideId) => (g.staged.get(guideId) ?? 0) > 0);
   if (empty && (await hasProgrammes(tx, c.sourceId))) {

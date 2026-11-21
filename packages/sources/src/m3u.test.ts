@@ -288,7 +288,7 @@ describe('scanM3u urls', () => {
   it('flags non-HTTP schemes', async () => {
     expect(await hint('udp://@239.0.0.1:1234')).toMatchObject({
       nonHttp: true,
-      url: 'udp://@239.0.0.1:1234',
+      url: 'udp://239.0.0.1:1234',
     });
     expect((await hint('rtmp://h.example/a')).nonHttp).toBe(true);
     expect((await hint('HTTPS://h.example/a')).nonHttp).toBe(false);

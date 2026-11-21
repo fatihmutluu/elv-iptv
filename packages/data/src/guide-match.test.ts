@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildChannelIndex, matchGuideChannel, resolveMappings } from './guide-match';
+import {
+  buildChannelIndex,
+  matchGuideChannel,
+  normalizeGuideName,
+  resolveMappings,
+  stripFeedId,
+} from './guide-match';
 
 const rows = [
   { key: 'a', guide_id: 'haber1.tr', name_fold: 'haber bir', num: 1 },
@@ -221,5 +227,179 @@ describe('resolveMappings', () => {
         [],
       ),
     ).toEqual([['k', 'first']]);
+  });
+});
+
+describe('@feedId sub-feed matching (#181)', () => {
+  it('strips @feedId suffixes without mangling ids lacking a base prefix', () => {
+    expect(stripFeedId('Channel.uk@East')).toBe('Channel.uk');
+    expect(stripFeedId('Channel.uk@East@HD')).toBe('Channel.uk');
+    expect(stripFeedId('Channel.uk')).toBe('Channel.uk');
+    expect(stripFeedId('@East')).toBe('@East');
+    expect(stripFeedId('')).toBe('');
+  });
+
+  it('prefers exact guide_id over @feedId base fallback and falls back strictly above name/num', () => {
+    const feedIndex = buildChannelIndex([
+      { key: 'exact-east', guide_id: 'Channel.uk@East', name_fold: 'channel east', num: 10 },
+      { key: 'base-only', guide_id: 'Channel.uk', name_fold: 'channel base', num: 11 },
+      { key: 'west-live', guide_id: 'Metro.us@West', name_fold: 'metro west', num: 12 },
+      { key: 'named-target', guide_id: null, name_fold: 'metro feed', num: 13 },
+    ]);
+
+    // Exact match wins strictly and does not pull in base-only
+    expect(matchGuideChannel(feedIndex, { id: 'Channel.uk@East', names: ['Metro Feed'] })).toEqual({
+      keys: ['exact-east'],
+      byId: true,
+      tier: 'id',
+    });
+
+    // Exact base match wins strictly and does not pull in exact-east
+    expect(matchGuideChannel(feedIndex, { id: 'Channel.uk', names: [] })).toEqual({
+      keys: ['base-only'],
+      byId: true,
+      tier: 'id',
+    });
+
+    // Missing exact @feedId falls back to base guide id (matches all sharing base)
+    const fallback = matchGuideChannel(feedIndex, {
+      id: 'Channel.uk@West',
+      names: ['Metro Feed', '13'],
+    });
+    expect(fallback.byId).toBe(true);
+    expect(fallback.tier).toBe('id');
+    expect(fallback.keys.sort()).toEqual(['base-only', 'exact-east']);
+
+    // Bare guide id in XMLTV matches live channel whose guide_id carries @feedId
+    expect(matchGuideChannel(feedIndex, { id: 'Metro.us', names: ['Metro Feed', '13'] })).toEqual({
+      keys: ['west-live'],
+      byId: true,
+      tier: 'id',
+    });
+  });
+});
+
+describe('call-sign preserving normalized name matching (#267)', () => {
+  it('preserves 3-5 uppercase ASCII call signs while stripping bracket tags, non-callsign parens, and broadcast noise', () => {
+    expect(normalizeGuideName('Metro One [HD] (XELV) East')).toBe('metro one xelv');
+    expect(normalizeGuideName('Metro One [US] [Backup] (ZTVA) 1080p 24/7')).toBe('metro one ztva');
+    expect(normalizeGuideName('Harbor News (ZELVX) (Backup) West 720p UHD FHD HD SD 480p')).toBe(
+      'harbor news zelvx',
+    );
+    expect(normalizeGuideName('Metro One (East) (HD) (US) (xelv) (AB) (ABCDEF) (Q123)')).toBe(
+      'metro one',
+    );
+    expect(normalizeGuideName('Metro One (EAST) (UHD) (FHD)')).toBe('metro one');
+    expect(normalizeGuideName('[HD] East West 24/7 1080p')).toBe('');
+    expect(normalizeGuideName('Çağrı TV [FHD]')).toBe('cagri tv');
+  });
+
+  it('checks exact byFold first, then unambiguous normalized name before num fallback', () => {
+    const callIndex = buildChannelIndex([
+      {
+        key: 'xelv',
+        guide_id: null,
+        name: 'Metro One [HD] (XELV) East',
+        name_fold: 'metro one hd xelv east',
+        num: 4,
+      },
+      {
+        key: 'ztva',
+        guide_id: null,
+        name: 'Metro One [HD] (ZTVA) West',
+        name_fold: 'metro one hd ztva west',
+        num: 5,
+      },
+      {
+        key: 'exact-hd',
+        guide_id: null,
+        name: 'Harbor News HD',
+        name_fold: 'harbor news hd',
+        num: 6,
+      },
+      {
+        key: 'exact-sd',
+        guide_id: null,
+        name: 'Harbor News',
+        name_fold: 'harbor news',
+        num: 7,
+      },
+      {
+        key: 'num-only',
+        guide_id: null,
+        name: 'Number Fallback',
+        name_fold: 'number fallback',
+        num: 99,
+      },
+    ]);
+
+    // Call sign preserved: distinguishes XELV vs ZTVA and beats num fallback
+    expect(matchGuideChannel(callIndex, { id: 'x1', names: ['Metro One (XELV)', '99'] })).toEqual({
+      keys: ['xelv'],
+      byId: false,
+      tier: 'normalized-name',
+    });
+    expect(
+      matchGuideChannel(callIndex, { id: 'x2', names: ['Metro One (ZTVA) [FHD] 1080p'] }),
+    ).toEqual({
+      keys: ['ztva'],
+      byId: false,
+      tier: 'normalized-name',
+    });
+
+    // Exact byFold still wins cleanly even when two live channels share a normalized name
+    expect(matchGuideChannel(callIndex, { id: 'x3', names: ['Harbor News HD'] })).toEqual({
+      keys: ['exact-hd'],
+      byId: false,
+      tier: 'name',
+    });
+    expect(matchGuideChannel(callIndex, { id: 'x4', names: ['Harbor News'] })).toEqual({
+      keys: ['exact-sd'],
+      byId: false,
+      tier: 'name',
+    });
+
+    // Ambiguous normalized name (matches both exact-hd and exact-sd) does not guess
+    expect(matchGuideChannel(callIndex, { id: 'x5', names: ['Harbor News [FHD]'] })).toEqual({
+      keys: [],
+      byId: false,
+      tier: 'none',
+    });
+
+    // Conflicting normalized names pointing at different live channels do not fall back to num
+    expect(
+      matchGuideChannel(callIndex, {
+        id: 'x6',
+        names: ['Metro One (XELV)', 'Metro One (ZTVA)', '99'],
+      }),
+    ).toEqual({
+      keys: [],
+      byId: false,
+      tier: 'none',
+    });
+  });
+
+  it('orders resolveMappings strictly as byId > byName > byNormalizedName > byNum', () => {
+    expect(
+      resolveMappings(
+        [['k1', 'id-winner']],
+        [['k2', 'exact-name-winner']],
+        [
+          ['k2', 'num-loser'],
+          ['k3', 'num-loser'],
+          ['k4', 'num-winner'],
+        ],
+        [
+          ['k1', 'norm-loser-id'],
+          ['k2', 'norm-loser-exact'],
+          ['k3', 'norm-winner'],
+        ],
+      ),
+    ).toEqual([
+      ['k1', 'id-winner'],
+      ['k2', 'exact-name-winner'],
+      ['k3', 'norm-winner'],
+      ['k4', 'num-winner'],
+    ]);
   });
 });

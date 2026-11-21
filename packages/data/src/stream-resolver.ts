@@ -35,6 +35,17 @@ interface XtreamSecret {
   readonly password: string;
 }
 
+const MULTICAST_AT_RE = /^(udp|rtp):\/\/@(?=[^:/?#\s])/i;
+
+/**
+ * Normalizes multicast URLs using leading `@` syntax (`udp://@host:port`, `rtp://@host:port`) to
+ * standard `udp://host:port` / `rtp://host:port` form (case-insensitive scheme), leaving all other
+ * URLs untouched.
+ */
+export function normalizeMulticastUrl(url: string): string {
+  return url.replace(MULTICAST_AT_RE, '$1://');
+}
+
 /** Reads the `urlvars` secret of a source; a missing or unreadable value yields an empty object. */
 export async function readUrlVars(
   deps: { secrets: SecretStore },
@@ -63,7 +74,7 @@ export async function createStreamResolver(
       const missing = placeholderNames(template).some(
         (name) => name !== '(' && !Object.hasOwn(vars, name),
       );
-      return missing ? undefined : resolveTemplate(template, vars);
+      return missing ? undefined : normalizeMulticastUrl(resolveTemplate(template, vars));
     },
   };
 }
@@ -196,7 +207,9 @@ export function createPlaytimeResolverCache(deps: {
           ...(transport === undefined ? {} : { transport }),
         });
         return ok({
-          url: client.streamUrl(play.streamKind, id, play.extension ?? undefined),
+          url: normalizeMulticastUrl(
+            client.streamUrl(play.streamKind, id, play.extension ?? undefined),
+          ),
           headers,
         });
       }
@@ -257,7 +270,7 @@ export function createPlaytimeResolverCache(deps: {
           }
         }
       }
-      return ok({ url, headers });
+      return ok({ url: normalizeMulticastUrl(url), headers });
     },
   };
 }

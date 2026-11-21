@@ -45,6 +45,9 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'sources.action.toggleAdvancedHide': 'Gelişmiş seçenekleri gizle',
   'sources.kind.xtream': 'Xtream',
   'sources.kind.m3u': 'M3U',
+  'sources.badge.trial': 'Deneme',
+  'sources.badge.expiringSoon': '{days} gün içinde doluyor',
+  'sources.badge.expired': 'Süresi doldu',
   'sources.status.needsImport': 'İçe aktarma gerekli',
   'sources.status.ready': 'Hazır',
   'sources.status.readyCounts':

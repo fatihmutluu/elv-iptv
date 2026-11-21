@@ -582,4 +582,46 @@ describe('CatalogService in @elv/data', () => {
     expect((await service2.importGuide?.('s1'))?.ok).toBe(true);
     await service2.close();
   });
+
+  it('surfaces non-secret accountMeta on SourceRow from listSources() after Xtream import (#170)', async () => {
+    const data = sampleCatalog();
+    const expSec = 1_900_000_000;
+    data.user = { auth: 1, status: 'Active', is_trial: '1', exp_date: String(expSec) };
+    const panel = await setupPanel(data);
+    const service = createCatalogService({
+      db: panel.db,
+      secrets: panel.secrets,
+      scheduler: panel.scheduler,
+      http: panel.panel.http,
+      clock: () => 2_000,
+      newId: () => 'x-meta',
+    });
+
+    const added = await service.addSource({
+      kind: 'xtream',
+      name: 'Trial Panel',
+      server: 'http://panel.example:8080',
+      username: 'demo-user',
+      password: ['pw', 'Xyz', '19'].join(''),
+    });
+    expect(added.ok).toBe(true);
+    expect((await service.importSource('x-meta')).ok).toBe(true);
+
+    const listed = await service.listSources();
+    const found = listed.find((s) => s.id === 'x-meta');
+    expect(found).toMatchObject({
+      id: 'x-meta',
+      kind: 'xtream',
+      name: 'Trial Panel',
+      needsImport: false,
+      accountMeta: { isTrial: true, expiresAt: expSec * 1_000 },
+    });
+
+    // Guard corrupt settings_json without throwing
+    await panel.db.run('UPDATE sources SET settings_json = ? WHERE id = ?', ['{bad', 'x-meta']);
+    const afterCorrupt = (await service.listSources()).find((s) => s.id === 'x-meta');
+    expect(afterCorrupt?.accountMeta).toBeUndefined();
+
+    await service.close();
+  });
 });

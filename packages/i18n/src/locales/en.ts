@@ -43,6 +43,9 @@ export const enMessages = {
   'sources.action.toggleAdvancedHide': 'Hide advanced options',
   'sources.kind.xtream': 'Xtream',
   'sources.kind.m3u': 'M3U',
+  'sources.badge.trial': 'Trial',
+  'sources.badge.expiringSoon': 'Expires in {days}d',
+  'sources.badge.expired': 'Expired',
   'sources.status.needsImport': 'Needs import',
   'sources.status.ready': 'Ready',
   'sources.status.readyCounts':

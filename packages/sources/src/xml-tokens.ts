@@ -1,5 +1,5 @@
 import { decodeEntities } from './entities';
-import { decodeUtf8 } from './utf8';
+import { decodeXmlBytes } from './xmltv-meta';
 
 export const LT = 0x3c;
 export const GT = 0x3e;
@@ -183,6 +183,7 @@ export function readAttrs(
   to: number,
   names: readonly string[],
   values: (string | undefined)[],
+  latin1 = false,
 ): void {
   values.fill(undefined);
   let i = from;
@@ -218,7 +219,7 @@ export function readAttrs(
         nameStop - nameStart === want.length &&
         startsWith(bytes, nameStart, want)
       ) {
-        values[n] = decodeEntities(decodeUtf8(bytes, vs, ve));
+        values[n] = decodeEntities(decodeXmlBytes(bytes, vs, ve, latin1));
         break;
       }
     }
@@ -237,19 +238,29 @@ export function countLf(bytes: Uint8Array, end: number): number {
   return n;
 }
 
+function isNestedBrTag(bytes: Uint8Array, lt: number): boolean {
+  const b1 = bytes[lt + 1];
+  const b2 = bytes[lt + 2];
+  const b3 = bytes[lt + 3];
+  if (b1 === undefined || b2 === undefined || b3 === undefined) return false;
+  if ((b1 | 32) !== 0x62 || (b2 | 32) !== 0x72) return false;
+  return b3 === GT || b3 === SLASH || isSpace(b3);
+}
+
 /** Decodes element text: entities resolved, CDATA kept literal, nested tags and comments dropped, trimmed. */
-export function readText(bytes: Uint8Array, start: number, end: number): string {
+export function readText(bytes: Uint8Array, start: number, end: number, latin1 = false): string {
   const view = bytes.subarray(start, end);
-  if (view.indexOf(LT) < 0) return decodeEntities(decodeUtf8(view)).trim();
+  if (view.indexOf(LT) < 0)
+    return decodeEntities(decodeXmlBytes(view, 0, view.length, latin1)).trim();
   let out = '';
   let i = 0;
   while (i < view.length) {
     const lt = view.indexOf(LT, i);
     if (lt < 0) {
-      out += decodeEntities(decodeUtf8(view, i));
+      out += decodeEntities(decodeXmlBytes(view, i, view.length, latin1));
       break;
     }
-    out += decodeEntities(decodeUtf8(view, i, lt));
+    out += decodeEntities(decodeXmlBytes(view, i, lt, latin1));
     if (!isMarkupStart(view[lt + 1])) {
       out += '<';
       i = lt + 1;
@@ -258,10 +269,10 @@ export function readText(bytes: Uint8Array, start: number, end: number): string 
     if (startsWith(view, lt, '<![CDATA[')) {
       const e = indexOfSeq(view, lt + 9, ']]>');
       if (e < 0) {
-        out += decodeUtf8(view, lt + 9);
+        out += decodeXmlBytes(view, lt + 9, view.length, latin1);
         break;
       }
-      out += decodeUtf8(view, lt + 9, e);
+      out += decodeXmlBytes(view, lt + 9, e, latin1);
       i = e + 3;
     } else {
       const m = skipMarkup(view, lt);
@@ -269,6 +280,15 @@ export function readText(bytes: Uint8Array, start: number, end: number): string 
       else {
         const gt = view.indexOf(GT, lt);
         if (gt < 0) break;
+        if (
+          isNestedBrTag(view, lt) &&
+          out.length > 0 &&
+          !out.endsWith(' ') &&
+          gt + 1 < view.length &&
+          !isSpace(view[gt + 1] as number)
+        ) {
+          out += ' ';
+        }
         i = gt + 1;
       }
     }

@@ -1,6 +1,8 @@
 import type { SqlDriver, SqlValue } from '@elv/domain';
 import { describe, expect, it } from 'vitest';
 import {
+  bucketProgrammesByLocalDay,
+  localDayKey,
   MAX_EPG_WINDOW_KEYS,
   MAX_EPG_WINDOW_SPAN_MS,
   MAX_NOW_NEXT_KEYS,
@@ -461,6 +463,95 @@ describe('guide-queries', () => {
       expect(jumpMs).toBeLessThan(15);
 
       h.close();
+    });
+  });
+
+  describe('falsy "0" IDs and local-timezone day bucketing (#175)', () => {
+    it('preserves source_id="0" and guide_id="0" with strict source_id isolation', async () => {
+      const h = testDb();
+      await openCatalog(h.db);
+      await seedSource(h.db, '0', 100);
+      await seedSource(h.db, '1', 200);
+      await seedLive(h.db, [
+        ['0', 'x:0:live:0', '0', 0, 'Zero Source Ch', null],
+        ['1', 'x:1:live:0', '0', 0, 'One Source Ch', null],
+      ]);
+      await seedGuideMap(h.db, [
+        ['0', 'x:0:live:0', '0'],
+        ['1', 'x:1:live:0', '0'],
+      ]);
+      await seedProgrammes(h.db, [
+        ['0', '0', BASE, BASE + HOUR, 'Zero Now'],
+        ['0', '0', BASE + HOUR, BASE + 2 * HOUR, 'Zero Next'],
+        ['1', '0', BASE, BASE + HOUR, 'One Now'],
+      ]);
+
+      const nn = await queryNowNext(h.db, ['x:0:live:0'], BASE + 1000);
+      expect(nn).toHaveLength(1);
+      expect(nn[0]?.now).toMatchObject({ sourceId: '0', guideId: '0', title: 'Zero Now' });
+      expect(nn[0]?.next).toMatchObject({ sourceId: '0', guideId: '0', title: 'Zero Next' });
+
+      const win = await queryEpgWindow(h.db, ['x:0:live:0'], BASE, BASE + 2 * HOUR);
+      expect(win['x:0:live:0']?.map((p) => `${p.sourceId}:${p.guideId}:${p.title}`)).toEqual([
+        '0:0:Zero Now',
+        '0:0:Zero Next',
+      ]);
+
+      const ch = await queryChannelByNumber(h.db, 0, '0');
+      expect(ch).toMatchObject({ key: 'x:0:live:0', sourceId: '0', num: 0 });
+
+      h.close();
+    });
+
+    it('buckets programmes by local calendar day across UTC, America/New_York, and Europe/Istanbul midnight boundaries', () => {
+      // 2026-11-13 22:30 UTC -> Nov 13 UTC, Nov 13 NY (17:30 EST), Nov 14 Istanbul (01:30 TRT)
+      const lateUtc = Date.UTC(2026, 10, 13, 22, 30, 0);
+      // 2026-11-14 02:30 UTC -> Nov 14 UTC, Nov 13 NY (21:30 EST), Nov 14 Istanbul (05:30 TRT)
+      const earlyUtc = Date.UTC(2026, 10, 14, 2, 30, 0);
+      // 2026-11-14 15:00 UTC -> Nov 14 everywhere
+      const midDay = Date.UTC(2026, 10, 14, 15, 0, 0);
+
+      expect(localDayKey(lateUtc, 'UTC')).toBe('2026-11-13');
+      expect(localDayKey(lateUtc, 'America/New_York')).toBe('2026-11-13');
+      expect(localDayKey(lateUtc, 'Europe/Istanbul')).toBe('2026-11-14');
+
+      expect(localDayKey(earlyUtc, 'UTC')).toBe('2026-11-14');
+      expect(localDayKey(earlyUtc, 'America/New_York')).toBe('2026-11-13');
+      expect(localDayKey(earlyUtc, 'Europe/Istanbul')).toBe('2026-11-14');
+
+      expect(localDayKey(Number.NaN, 'UTC')).toBe('');
+      expect(localDayKey(1e20, 'UTC')).toBe('');
+      expect(localDayKey(-1e20, 'America/New_York')).toBe('');
+      expect(localDayKey(1e20)).toBe('');
+      // Invalid timezone and omitted timezone safely fall back without throwing
+      expect(localDayKey(midDay, 'Invalid/Timezone_Name')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(localDayKey(midDay)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+      const items = [
+        { title: 'LateUTC', start: lateUtc },
+        { title: 'EarlyUTC', start: earlyUtc },
+        { title: 'MidDay', start: midDay },
+        { title: 'BadTime', start: Number.NaN },
+        { title: 'OverflowTime', start: 1e20 },
+      ];
+
+      const utcBuckets = bucketProgrammesByLocalDay(items, 'UTC');
+      expect([...utcBuckets.keys()]).toEqual(['2026-11-13', '2026-11-14']);
+      expect(utcBuckets.get('2026-11-13')?.map((p) => p.title)).toEqual(['LateUTC']);
+      expect(utcBuckets.get('2026-11-14')?.map((p) => p.title)).toEqual(['EarlyUTC', 'MidDay']);
+
+      const nyBuckets = bucketProgrammesByLocalDay(items, 'America/New_York');
+      expect([...nyBuckets.keys()]).toEqual(['2026-11-13', '2026-11-14']);
+      expect(nyBuckets.get('2026-11-13')?.map((p) => p.title)).toEqual(['LateUTC', 'EarlyUTC']);
+      expect(nyBuckets.get('2026-11-14')?.map((p) => p.title)).toEqual(['MidDay']);
+
+      const istBuckets = bucketProgrammesByLocalDay(items, 'Europe/Istanbul');
+      expect([...istBuckets.keys()]).toEqual(['2026-11-14']);
+      expect(istBuckets.get('2026-11-14')?.map((p) => p.title)).toEqual([
+        'LateUTC',
+        'EarlyUTC',
+        'MidDay',
+      ]);
     });
   });
 });

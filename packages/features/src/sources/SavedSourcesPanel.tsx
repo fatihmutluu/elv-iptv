@@ -10,7 +10,8 @@ import {
 } from '@elv/ui-kit';
 import type { ReactElement } from 'react';
 import { Text, View } from 'react-native';
-import { ActionButton } from './SourcesScreenParts';
+import { resolveSourceAccountWarning } from './account-warning';
+import { ActionButton, SourceAccountWarningPill } from './SourcesScreenParts';
 import { sourcesStyles } from './sources-styles';
 import {
   phaseMessageId,
@@ -85,12 +86,14 @@ export function SavedSourcesPanel({
   twoColumn,
   tvFocusId,
   recordLayout,
+  nowMs,
 }: {
   ctrl: SourcesController;
   i18n: AppI18n;
   twoColumn: boolean;
   tvFocusId: string | undefined;
   recordLayout?: ControlLayoutRecorder;
+  nowMs: number;
 }): ReactElement {
   const theme = useTheme();
   return (
@@ -130,6 +133,7 @@ export function SavedSourcesPanel({
           const kindLabel =
             source.kind === 'xtream' ? i18n.t('sources.kind.xtream') : i18n.t('sources.kind.m3u');
           const statusPill = resolveStatusPill(source, runtime, i18n);
+          const accountWarning = resolveSourceAccountWarning(source.accountMeta, nowMs);
           const progressPct = importProgressPercent(runtime);
 
           return (
@@ -156,6 +160,11 @@ export function SavedSourcesPanel({
               </View>
               <View style={sourcesStyles.statusRow}>
                 <MicroPill label={statusPill.label} tone={statusPill.tone} dot={statusPill.dot} />
+                <SourceAccountWarningPill
+                  sourceId={source.id}
+                  warning={accountWarning}
+                  i18n={i18n}
+                />
                 <Text
                   testID={`source-status-${source.id}`}
                   style={[

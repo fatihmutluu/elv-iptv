@@ -25,6 +25,12 @@ export interface SourceHttpCache {
   guide?: Record<string, HttpCacheValidator>;
 }
 
+/** Non-secret Xtream account lifecycle metadata persisted for expiry/trial indicators (`#170`). */
+export interface SourceAccountMeta {
+  isTrial?: boolean;
+  expiresAt?: number;
+}
+
 /** Non-secret, per-source settings stored as JSON in the `sources` table. */
 export interface SourceSettings {
   transport?: TransportSettings;
@@ -41,6 +47,8 @@ export interface SourceSettings {
   httpCache?: SourceHttpCache;
   /** When true, keep provider offline/separator placeholder live channels during catalog import. */
   includePlaceholderChannels?: boolean;
+  /** Non-secret Xtream account trial/expiry metadata persisted for Sources UI warnings (`#170`). */
+  accountMeta?: SourceAccountMeta;
 }
 
 /** A row of the `sources` table. */

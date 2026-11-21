@@ -17,7 +17,14 @@ describe('sources', () => {
     const e = await env();
     const id = await demo(e);
     expect(await e.service.listSources()).toEqual([
-      { id, kind: 'xtream', name: 'Main', createdAt: 1_000, needsImport: false },
+      {
+        id,
+        kind: 'xtream',
+        name: 'Main',
+        createdAt: 1_000,
+        needsImport: false,
+        accountMeta: { isTrial: false, expiresAt: expect.any(Number) },
+      },
     ]);
     const live = await e.service.categories(id, 'live');
     expect(live.length).toBeGreaterThan(0);

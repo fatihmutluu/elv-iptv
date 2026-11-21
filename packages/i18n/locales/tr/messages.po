@@ -132,6 +132,15 @@ msgstr "Xtream"
 msgid "sources.kind.m3u"
 msgstr "M3U"
 
+msgid "sources.badge.trial"
+msgstr "Deneme"
+
+msgid "sources.badge.expiringSoon"
+msgstr "{days} gün içinde doluyor"
+
+msgid "sources.badge.expired"
+msgstr "Süresi doldu"
+
 msgid "sources.status.needsImport"
 msgstr "İçe aktarma gerekli"
 

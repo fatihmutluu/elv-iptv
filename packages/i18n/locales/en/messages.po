@@ -132,6 +132,15 @@ msgstr "Xtream"
 msgid "sources.kind.m3u"
 msgstr "M3U"
 
+msgid "sources.badge.trial"
+msgstr "Trial"
+
+msgid "sources.badge.expiringSoon"
+msgstr "Expires in {days}d"
+
+msgid "sources.badge.expired"
+msgstr "Expired"
+
 msgid "sources.status.needsImport"
 msgstr "Needs import"
 

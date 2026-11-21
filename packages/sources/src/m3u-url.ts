@@ -15,7 +15,8 @@ const VOD_EXTENSIONS = new Set([
 ]);
 const LIVE_EXTENSIONS = new Set(['ts', 'm3u8']);
 const LAUNCHER_PREFIX_RE = /^(?:ffmpeg|ffrt\d*|auto|solution)\s+/i;
-const BACKUP_URL_SPLIT_RE = /#(?=(?:https?|rtmps?|rtsps?):\/\/)/i;
+const BACKUP_URL_SPLIT_RE = /#(?=(?:https?|rtmps?|rtsps?|udp|rtp):\/\/)/i;
+const MULTICAST_AT_RE = /^(udp|rtp):\/\/@(?=[^:/?#\s])/i;
 const EPISODIC_RE = /\b(?:s\d{1,2}\s*e\d{1,3}|\d{1,2}x\d{2})\b/i;
 const STREAM_HEADERS_PROPS = new Set([
   'inputstream.adaptive.stream_headers',
@@ -48,6 +49,10 @@ function splitPipeUrl(raw: string): { url: string; pipeHeaders?: string } {
   };
 }
 
+function normalizeMulticastUrl(url: string): string {
+  return url.replace(MULTICAST_AT_RE, '$1://');
+}
+
 function splitBackupUrls(raw: string): { primary: string; backups: string[] } {
   const parts = raw.split(BACKUP_URL_SPLIT_RE);
   const primary = (parts[0] ?? raw).trimEnd();
@@ -55,7 +60,7 @@ function splitBackupUrls(raw: string): { primary: string; backups: string[] } {
   const backups: string[] = [];
   for (let i = 1; i < parts.length; i++) {
     const segment = stripUrlLauncherPrefix((parts[i] ?? '').trim());
-    const cleaned = splitPipeUrl(segment).url.trim();
+    const cleaned = normalizeMulticastUrl(splitPipeUrl(segment).url.trim());
     if (cleaned.length > 0) backups.push(cleaned);
   }
   return { primary, backups };
@@ -178,7 +183,7 @@ export function finishEntry(e: M3uEntry, rawUrl: string, baseUrl: string | undef
   const { url: cleanRaw, pipeHeaders } = splitPipeUrl(stripped);
   if (pipeHeaders !== undefined) applyStreamHeaderPairs(e, pipeHeaders);
 
-  let url = cleanRaw;
+  let url = normalizeMulticastUrl(cleanRaw);
   let end = schemeEnd(url);
   if (end < 0 && baseUrl) {
     url = resolve(url, baseUrl);

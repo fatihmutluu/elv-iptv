@@ -19,8 +19,10 @@ import {
   readAttrs,
   SLASH,
   skipMarkup,
+  startsWith,
 } from './xml-tokens';
 import { parseChildren } from './xmltv-children';
+import { isLatin1PrologEncoding } from './xmltv-meta';
 import { parseXmltvTime } from './xmltv-time';
 import type { XmltvBatch, XmltvChannel, XmltvOptions, XmltvProgramme } from './xmltv-types';
 
@@ -32,6 +34,7 @@ const DEFAULT_BATCH = 500;
 const NEED = -1;
 const PROGRAMME_ATTRS = ['channel', 'start', 'stop'] as const;
 const CHANNEL_ATTRS = ['id'] as const;
+const ENCODING_ATTR = ['encoding'] as const;
 
 class XmltvScanner {
   readonly stats: ScanStats = createStats();
@@ -41,9 +44,11 @@ class XmltvScanner {
   private hint = 0;
   /** Set when a programme waits behind unreported channels, so the caller can grow `programmeChannels` first. */
   private flush = false;
+  private latin1 = false;
   private kind = '';
   private readonly res: Resume = { at: 0 };
   private readonly attrs: (string | undefined)[] = [undefined, undefined, undefined];
+  private readonly encodingAttr: (string | undefined)[] = [undefined];
 
   private readonly size: number;
   private readonly opts: XmltvOptions;
@@ -99,7 +104,9 @@ class XmltvScanner {
     }
     if (b1 === BANG || b1 === QUESTION) {
       const e = skipMarkup(bytes, lt);
-      return e === INCOMPLETE ? NEED : e > 0 ? e : lt + 1;
+      if (e === INCOMPLETE) return NEED;
+      if (b1 === QUESTION && e > 0) this.checkProlog(bytes, lt, e);
+      return e > 0 ? e : lt + 1;
     }
     const p = matchName(bytes, lt + 1, 'programme');
     if (p < 0) return NEED;
@@ -155,10 +162,20 @@ class XmltvScanner {
       return end;
     }
     const names = kind === 'programme' ? PROGRAMME_ATTRS : CHANNEL_ATTRS;
-    readAttrs(bytes, nameEnd(bytes, lt + 1), tagEnd - 1, names, this.attrs);
+    readAttrs(bytes, nameEnd(bytes, lt + 1), tagEnd - 1, names, this.attrs, this.latin1);
     if (kind === 'programme') this.programme(bytes, lt, tagEnd, bodyEnd);
     else this.channel(bytes, lt, tagEnd, bodyEnd);
     return end;
+  }
+
+  private checkProlog(bytes: Uint8Array, lt: number, end: number): void {
+    if (!startsWith(bytes, lt, '<?xml') || lt + 5 >= end - 2) return;
+    const after = bytes[lt + 5] as number;
+    if (after !== 32 && after !== 9 && after !== 10 && after !== 13) return;
+    readAttrs(bytes, lt + 5, end - 2, ENCODING_ATTR, this.encodingAttr);
+    if (this.encodingAttr[0] !== undefined) {
+      this.latin1 = isLatin1PrologEncoding(this.encodingAttr[0]);
+    }
   }
 
   private channel(bytes: Uint8Array, lt: number, bodyStart: number, bodyEnd: number): void {
@@ -169,7 +186,7 @@ class XmltvScanner {
     }
     if (this.opts.channels && !this.opts.channels.has(id)) return;
     const channel: XmltvChannel = { id, names: [] };
-    if (!parseChildren(bytes.subarray(bodyStart, bodyEnd), channel, false)) {
+    if (!parseChildren(bytes.subarray(bodyStart, bodyEnd), channel, false, this.latin1)) {
       this.fail(bytes, lt, 'channel-malformed');
       return;
     }
@@ -204,7 +221,7 @@ class XmltvScanner {
     if (from !== undefined && (stop === undefined ? start < from : stop <= from)) return;
     const programme: XmltvProgramme = { channel, start, title: '', categories: [] };
     if (stop !== undefined) programme.stop = stop;
-    if (!parseChildren(bytes.subarray(bodyStart, bodyEnd), programme, true)) {
+    if (!parseChildren(bytes.subarray(bodyStart, bodyEnd), programme, true, this.latin1)) {
       this.fail(bytes, lt, 'programme-malformed');
       return;
     }

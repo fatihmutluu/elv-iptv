@@ -671,4 +671,18 @@ describe('@elv/i18n', () => {
     expect(en.t('crash.code', { code: 'TypeError' })).toBe('Reference: TypeError');
     expect(tr.t('crash.code', { code: 'TypeError' })).toBe('Referans: TypeError');
   });
+
+  it('localizes source account warning badges (#170) in English and Turkish', () => {
+    const en = createAppI18n('en');
+    const tr = createAppI18n('tr');
+
+    expect(en.t('sources.badge.trial')).toBe('Trial');
+    expect(tr.t('sources.badge.trial')).toBe('Deneme');
+    expect(en.t('sources.badge.expired')).toBe('Expired');
+    expect(tr.t('sources.badge.expired')).toBe('Süresi doldu');
+    expect(en.t('sources.badge.expiringSoon', { days: 1 })).toBe('Expires in 1d');
+    expect(tr.t('sources.badge.expiringSoon', { days: 1 })).toBe('1 gün içinde doluyor');
+    expect(en.t('sources.badge.expiringSoon', { days: 5 })).toBe('Expires in 5d');
+    expect(tr.t('sources.badge.expiringSoon', { days: 5 })).toBe('5 gün içinde doluyor');
+  });
 });
