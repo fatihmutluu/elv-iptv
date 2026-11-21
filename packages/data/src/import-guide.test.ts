@@ -534,3 +534,100 @@ describe('xtream guide override', () => {
     }
   });
 });
+
+describe('guide hardening (#169)', () => {
+  it('passes a 180_000 ms response-header timeout to http.get', async () => {
+    const e = await ready();
+    const timeouts: (number | undefined)[] = [];
+    const baseHttp = e.deps.http;
+    const r = await importGuide(
+      e.sourceId,
+      {
+        ...e.deps,
+        http: {
+          async get(url, options) {
+            timeouts.push(options?.timeoutMs);
+            return baseHttp.get(url, options);
+          },
+        },
+      },
+      { now: NOW },
+    );
+    expect(r.ok).toBe(true);
+    expect(timeouts).toEqual([180_000]);
+  });
+
+  it('rejects a gzip bomb exceeding the decompressed ceiling with source-format/too-large and preserves previous programmes', async () => {
+    const e = await ready();
+    expect((await run(e)).ok).toBe(true);
+    const before = await titles(e);
+    e.server.body = new Uint8Array([0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    const oneMiB = new Uint8Array(1024 * 1024);
+    oneMiB.fill(0x20);
+    let closed = false;
+    const bomb = {
+      async *gunzip() {
+        try {
+          for (let i = 0; i < 300; i++) yield oneMiB;
+        } finally {
+          closed = true;
+        }
+      },
+    };
+    const r = await importGuide(e.sourceId, { ...e.deps, decompressor: bomb }, { now: NOW });
+    expectErr(r, 'source-format', 'too-large');
+    expect(closed).toBe(true);
+    expect(await titles(e)).toEqual(before);
+    expect(await lastGuideRun(e)).toBe('failed');
+  });
+
+  it('imports all programmes from a concatenated multi-member gzip guide with DecompressionStream', async () => {
+    const gz = async (text: string): Promise<Uint8Array> => {
+      const stream = new Blob([new TextEncoder().encode(text) as BlobPart])
+        .stream()
+        .pipeThrough(new CompressionStream('gzip'));
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    };
+    const part1 =
+      `<?xml version="1.0" encoding="UTF-8"?>\n<tv>` +
+      channelXml('haber1.tr', 'Haber Bir') +
+      programmeXml('haber1.tr', HOUR, 1, 'Concat Show 1');
+    const part2 =
+      channelXml('cagri', 'ÇAĞRI TV') +
+      programmeXml('cagri', 2 * HOUR, 1, 'Concat Show 2') +
+      `</tv>\n`;
+    const m1 = await gz(part1);
+    const m2 = await gz(part2);
+    const combined = new Uint8Array(m1.length + m2.length);
+    combined.set(m1, 0);
+    combined.set(m2, m1.length);
+
+    const webGunzip = {
+      async *gunzip(chunks: AsyncIterable<Uint8Array>) {
+        const parts: Uint8Array[] = [];
+        for await (const c of chunks) parts.push(c);
+        const all = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+        let at = 0;
+        for (const p of parts) {
+          all.set(p, at);
+          at += p.length;
+        }
+        const reader = new Blob([all as BlobPart])
+          .stream()
+          .pipeThrough(new DecompressionStream('gzip'))
+          .getReader();
+        for (;;) {
+          const step = await reader.read();
+          if (step.done) return;
+          yield step.value;
+        }
+      },
+    };
+
+    const e = await ready();
+    e.server.body = combined;
+    const r = await importGuide(e.sourceId, { ...e.deps, decompressor: webGunzip }, { now: NOW });
+    expect(r.ok).toBe(true);
+    expect(await titles(e)).toEqual(['Concat Show 1', 'Concat Show 2']);
+  });
+});

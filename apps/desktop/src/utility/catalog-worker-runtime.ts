@@ -9,6 +9,7 @@ import {
 } from '@elv/data';
 import {
   createFetchHttpClient,
+  type Decompressor,
   type ElvError,
   elvError,
   err,
@@ -61,6 +62,7 @@ export interface CatalogWorkerRuntimeDeps {
   parentPort: WorkerParentPortLike;
   openDatabase: (filePath: string) => SyncDatabase;
   fetchImpl: FetchLike;
+  decompressor?: Decompressor;
   clock?: () => number;
   yieldNow?: () => Promise<void>;
   log?: (line: string) => void;
@@ -285,6 +287,7 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
         scheduler: { yieldNow },
         http: createFetchHttpClient(safeFetch),
         clock,
+        ...(deps.decompressor === undefined ? {} : { decompressor: deps.decompressor }),
       });
       return ok({ db, service });
     } catch (error) {

@@ -6,8 +6,23 @@ const SQUOTE = 39;
 const COMMA = 44;
 const EQUALS = 61;
 
+/** Maximum byte/char length kept for inline `data:` `tvg-logo` / `logo` attributes (`#169`). */
+export const MAX_INLINE_LOGO_BYTES = 4096;
+
+/** Non-fatal issues encountered while parsing an `#EXTINF:` attribute list. */
+export interface ExtinfIssues {
+  rawQuote: boolean;
+  inlineLogoStripped?: boolean;
+  recover?: boolean;
+}
+
 const SENTINEL_TVG_IDS = new Set(['(no tvg-id)', 'no tvg-id', 'null', 'none', 'n/a', 'undefined']);
 const SATIP_CHNO_PREFIX_RE = /^(\d{1,5})\.\s+(\S.*)$/;
+const INLINE_DATA_URI_RE = /^data:/i;
+
+function isOversizedInlineDataLogo(value: string): boolean {
+  return value.length > MAX_INLINE_LOGO_BYTES && INLINE_DATA_URI_RE.test(value);
+}
 
 /**
  * Walks `key=value` pairs from `from`, calling `onAttr(lowerCaseKey, value)`. Values may be double-quoted,
@@ -116,7 +131,13 @@ interface CatchupDraft {
   days?: number | undefined;
 }
 
-function applyAttr(e: M3uEntry, key: string, value: string, c: CatchupDraft): void {
+function applyAttr(
+  e: M3uEntry,
+  key: string,
+  value: string,
+  c: CatchupDraft,
+  issues?: ExtinfIssues,
+): void {
   switch (key) {
     case 'tvg-id': {
       const id = cleanTvgId(value);
@@ -134,9 +155,17 @@ function applyAttr(e: M3uEntry, key: string, value: string, c: CatchupDraft): vo
       if (value) e.tvgName = value;
       return;
     case 'tvg-logo':
+      if (isOversizedInlineDataLogo(value)) {
+        if (issues) issues.inlineLogoStripped = true;
+        return;
+      }
       if (value) e.tvgLogo = value;
       return;
     case 'logo':
+      if (isOversizedInlineDataLogo(value)) {
+        if (issues) issues.inlineLogoStripped = true;
+        return;
+      }
       if (e.tvgLogo === undefined && value) e.tvgLogo = value;
       return;
     case 'tvg-chno':
@@ -207,13 +236,19 @@ export function newEntry(): M3uEntry {
 /**
  * Parses the text after `#EXTINF:` (duration, attributes, name) into a URL-less entry.
  */
-export function parseExtinf(text: string, issues?: { rawQuote: boolean }): M3uEntry {
-  const seen = issues ?? { rawQuote: false };
+export function parseExtinf(text: string, issues?: ExtinfIssues): M3uEntry {
+  const seen: ExtinfIssues = issues ?? { rawQuote: false };
   const first = readExtinf(text, seen, true);
   if (!seen.rawQuote) return applySatIpPrefix(first);
   const comma = nameCommaAfterLastValue(text);
   if (comma < 0) return applySatIpPrefix(first);
-  const second = readExtinf(text.slice(0, comma), { rawQuote: false, recover: true }, false);
+  const recoveryIssues: ExtinfIssues = {
+    rawQuote: false,
+    inlineLogoStripped: seen.inlineLogoStripped === true,
+    recover: true,
+  };
+  const second = readExtinf(text.slice(0, comma), recoveryIssues, false);
+  if (recoveryIssues.inlineLogoStripped) seen.inlineLogoStripped = true;
   second.name = text.slice(comma + 1).trim() || second.tvgName || '';
   return applySatIpPrefix(second);
 }
@@ -249,11 +284,7 @@ function nameCommaAfterLastValue(text: string): number {
   return -1;
 }
 
-function readExtinf(
-  text: string,
-  issues: { rawQuote: boolean; recover?: boolean },
-  keepUnclean: boolean,
-): M3uEntry {
+function readExtinf(text: string, issues: ExtinfIssues, keepUnclean: boolean): M3uEntry {
   const e = newEntry();
   const n = text.length;
   let i = 0;
@@ -274,7 +305,7 @@ function readExtinf(
     text,
     i,
     (key, value, clean) => {
-      if (clean || keepUnclean) applyAttr(e, key, value, draft);
+      if (clean || keepUnclean) applyAttr(e, key, value, draft, issues);
     },
     issues,
   );

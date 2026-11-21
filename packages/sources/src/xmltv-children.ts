@@ -5,6 +5,7 @@ import {
   findTagEnd,
   GT,
   INCOMPLETE,
+  isMarkupStart,
   LT,
   nameEnd,
   QUESTION,
@@ -46,6 +47,10 @@ export function parseChildren(
     const lt = body.indexOf(LT, i);
     const b1 = lt < 0 ? undefined : body[lt + 1];
     if (b1 === undefined) return true;
+    if (!isMarkupStart(b1)) {
+      i = lt + 1;
+      continue;
+    }
     if (b1 === SLASH) {
       closeUnknown(body, lt + 2, open);
       i = lt + 2;

@@ -1,3 +1,4 @@
+import { decodeLegacyCodepage } from './codepages';
 import { decodeUtf8 } from './utf8';
 import { mergeById, toNumber, toStrictInt, toText } from './xtream-normalize';
 import type {
@@ -218,31 +219,156 @@ export function toVodInfo(raw: Raw): XtreamVodInfo {
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: detects binary garbage
 const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/;
+const BASE64_COMPACT_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+const EPG_DATETIME_RE =
+  /^(\d{4})-(\d{2})-(\d{2})[ Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(Z|z|[+-]\d{2}:?\d{2})?$/;
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const;
+const MAX_TZ_CACHE = 64;
+const TZ_FORMATTERS = new Map<string, Intl.DateTimeFormat | null>();
 
-function fromBase64(value: unknown): string | undefined {
+function daysInMonth(year: number, month: number): number {
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  return month === 2 && leap ? 29 : (DAYS_IN_MONTH[month - 1] as number);
+}
+
+function tzFormatter(timeZone: string): Intl.DateTimeFormat | null {
+  if (typeof Intl === 'undefined' || typeof Intl.DateTimeFormat !== 'function') return null;
+  const cached = TZ_FORMATTERS.get(timeZone);
+  if (cached !== undefined) return cached;
+  let fmt: Intl.DateTimeFormat | null = null;
+  try {
+    fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    });
+  } catch {
+    fmt = null;
+  }
+  if (TZ_FORMATTERS.size >= MAX_TZ_CACHE) TZ_FORMATTERS.clear();
+  TZ_FORMATTERS.set(timeZone, fmt);
+  return fmt;
+}
+
+function tzWallAsUtcMs(fmt: Intl.DateTimeFormat, epochMs: number): number {
+  let y = 0;
+  let mo = 1;
+  let d = 1;
+  let h = 0;
+  let mi = 0;
+  let s = 0;
+  for (const part of fmt.formatToParts(new Date(epochMs))) {
+    if (part.type === 'year') y = Number(part.value);
+    else if (part.type === 'month') mo = Number(part.value);
+    else if (part.type === 'day') d = Number(part.value);
+    else if (part.type === 'hour') h = Number(part.value) % 24;
+    else if (part.type === 'minute') mi = Number(part.value);
+    else if (part.type === 'second') s = Number(part.value);
+  }
+  return Date.UTC(y, mo - 1, d, h, mi, s);
+}
+
+function parseEpgDatetime(value: unknown, serverTimezone?: string): number | undefined {
+  if (typeof value !== 'string') return undefined;
+  const m = EPG_DATETIME_RE.exec(value.trim());
+  if (!m) return undefined;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const hour = Number(m[4]);
+  const minute = Number(m[5]);
+  const second = Number(m[6]);
+  if (year < 1000 || month < 1 || month > 12) return undefined;
+  if (day < 1 || day > daysInMonth(year, month) || hour > 23 || minute > 59 || second > 59) {
+    return undefined;
+  }
+  const wallMs = Date.UTC(year, month - 1, day, hour, minute, second);
+  const tzPart = m[7];
+  if (tzPart !== undefined) {
+    if (tzPart === 'Z' || tzPart === 'z') return wallMs;
+    const sign = tzPart[0] === '-' ? -1 : 1;
+    const digits = tzPart.slice(1).replace(':', '');
+    const offH = Number(digits.slice(0, 2));
+    const offM = Number(digits.slice(2, 4));
+    if (offH > 23 || offM > 59) return undefined;
+    return wallMs - sign * (offH * 60 + offM) * 60_000;
+  }
+  const zone = serverTimezone?.trim();
+  if (!zone) return wallMs;
+  const fmt = tzFormatter(zone);
+  if (fmt === null) return wallMs;
+  const offset1 = tzWallAsUtcMs(fmt, wallMs) - wallMs;
+  const candidate1 = wallMs - offset1;
+  const offset2 = tzWallAsUtcMs(fmt, candidate1) - candidate1;
+  return wallMs - offset2;
+}
+
+function hasControlByte(bytes: Uint8Array): boolean {
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i] as number;
+    if (b < 0x20 && b !== 0x09 && b !== 0x0a && b !== 0x0d) return true;
+  }
+  return false;
+}
+
+function fromBase64(value: unknown, serverTimezone?: string): string | undefined {
   const text = toText(value);
   if (text === undefined) return undefined;
+  const compact = text.replace(/[\r\n]/g, '');
+  if (compact.length < 4 || compact.length % 4 === 1 || !BASE64_COMPACT_RE.test(compact)) {
+    return text;
+  }
   try {
-    const bin = atob(text);
+    const bin = atob(compact);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    if (hasControlByte(bytes)) return text;
     const decoded = decodeUtf8(bytes);
-    return decoded.includes('\ufffd') || CONTROL.test(decoded) ? text : toText(decoded);
+    if (!decoded.includes('\ufffd') && !CONTROL.test(decoded)) {
+      return toText(decoded);
+    }
+    const legacy = decodeLegacyCodepage(bytes, serverTimezone);
+    if (legacy !== undefined && !legacy.includes('\ufffd') && !CONTROL.test(legacy)) {
+      return toText(legacy);
+    }
+    return text;
   } catch {
     return text;
   }
 }
 
-/** Maps `get_short_epg` listings: base64 text, second timestamps to milliseconds. */
-export function toEpg(raw: Raw): XtreamEpgEntry[] {
+/**
+ * Maps `get_short_epg` listings: decodes base64 text (UTF-8 with single-byte codepage fallback)
+ * and converts numeric second timestamps or `start`/`end`/`stop` datetime strings to epoch ms.
+ */
+export function toEpg(raw: Raw, serverTimezone?: string): XtreamEpgEntry[] {
   const out: XtreamEpgEntry[] = [];
   for (const e of Array.isArray(raw.epg_listings) ? raw.epg_listings : []) {
     if (!isRaw(e)) continue;
-    const start = ms(e.start_timestamp);
-    const stop = ms(e.stop_timestamp);
-    if (start === undefined || stop === undefined) continue;
-    const entry: XtreamEpgEntry = { start, stop, title: fromBase64(e.title) ?? '' };
-    put(entry, 'desc', fromBase64(e.description));
+    const rawStartTs = ms(e.start_timestamp);
+    const rawStopTs = ms(e.stop_timestamp);
+    const start =
+      (rawStartTs !== undefined && (rawStartTs > 0 || e.start === undefined)
+        ? rawStartTs
+        : undefined) ?? parseEpgDatetime(e.start, serverTimezone);
+    const stop =
+      (rawStopTs !== undefined && (rawStopTs > 0 || (e.end === undefined && e.stop === undefined))
+        ? rawStopTs
+        : undefined) ??
+      parseEpgDatetime(e.end, serverTimezone) ??
+      parseEpgDatetime(e.stop, serverTimezone);
+    if (start === undefined || stop === undefined || stop <= start) continue;
+    const entry: XtreamEpgEntry = {
+      start,
+      stop,
+      title: fromBase64(e.title, serverTimezone) ?? '',
+    };
+    put(entry, 'desc', fromBase64(e.description, serverTimezone));
     out.push(entry);
   }
   return out;

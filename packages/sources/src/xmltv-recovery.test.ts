@@ -268,3 +268,99 @@ describe('scanXmltv hostile bodies and error attribution', () => {
     expect(r.stats).toBeUndefined();
   });
 });
+
+function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
+}
+
+describe('scanXmltv structural salvage and hardened gzip (#169, #174)', () => {
+  it('preserves bare ampersands and stray unescaped < in text, attributes, and element bodies', async () => {
+    const text = guide(
+      `<channel id="news&sport"><display-name>News & Sport < 24/7</display-name><icon src="http://img.example/i.png?w=100&h=200"/> 1 < 2</channel>` +
+        `<programme start="20260101000000" channel="news&sport">` +
+        `1 < 2 <title>Age < 18</title>` +
+        `<desc>Score 1 < 2 & 3 > 0</desc>` +
+        `<sub-title>Part 1<2 & final <</sub-title>` +
+        `3 < 4</programme>` +
+        `<programme start="20260101010000" channel="news&sport"><title>Keep <i>nested</i> & <= 10</title></programme>`,
+    );
+    const r = await expectSameEverywhere(text);
+    expect(r.channels).toEqual([
+      {
+        id: 'news&sport',
+        names: ['News & Sport < 24/7'],
+        icon: 'http://img.example/i.png?w=100&h=200',
+      },
+    ]);
+    expect(
+      r.programmes.map((p) => ({ title: p.title, desc: p.desc, subTitle: p.subTitle })),
+    ).toEqual([
+      {
+        title: 'Age < 18',
+        desc: 'Score 1 < 2 & 3 > 0',
+        subTitle: 'Part 1<2 & final <',
+      },
+      {
+        title: 'Keep nested & <= 10',
+        desc: undefined,
+        subTitle: undefined,
+      },
+    ]);
+    expect(r.stats?.warnings).toEqual([]);
+  });
+
+  it('salvages complete channels and programmes around malformed outer <tv> markup and truncated tails', async () => {
+    const text =
+      `<tv broken="attr 1 < 2 <channel id="c1"><display-name>Chan & 1</display-name></channel>\n` +
+      `stray < 9 text <programme start="20260101000000" channel="c1"><title>First < 10</title></programme>\n` +
+      `<programme start="20260101010000" channel="c1"><title>Second</title></programme>\n` +
+      `<programme start="20260101020000" channel="c1"><title>Truncated`;
+    const r = await expectSameEverywhere(text);
+    expect(r.channels.map((c) => c.id)).toEqual(['c1']);
+    expect(r.programmes.map((p) => p.title)).toEqual(['First < 10', 'Second']);
+    expect(r.stats?.warnings.map((w) => w.code)).toEqual(['programme-truncated']);
+  });
+
+  it('decodes concatenated multi-member .gz XMLTV feeds with DecompressionStream across chunkings', async () => {
+    const part1 =
+      `<?xml version="1.0" encoding="UTF-8"?>\n<tv>` +
+      `<channel id="m1"><display-name>Member 1</display-name></channel>` +
+      `<programme start="20260101000000" channel="m1"><title>Show 1</title></programme>`;
+    const part2 =
+      `<channel id="m2"><display-name>Member 2</display-name></channel>` +
+      `<programme start="20260101010000" channel="m2"><title>Show 2</title></programme></tv>\n`;
+    const combined = concatBytes([await gzip(utf8(part1)), await gzip(utf8(part2))]);
+    for (const sizes of [[combined.length], [1, 1, 1], [2, 5, 7]]) {
+      const r = await collect(chunksOf(combined, sizes), { decompressor: gunzipper });
+      expect(r.result).toEqual({ ok: true, value: undefined });
+      expect(r.channels.map((c) => c.id)).toEqual(['m1', 'm2']);
+      expect(r.programmes.map((p) => p.title)).toEqual(['Show 1', 'Show 2']);
+    }
+  });
+
+  it('rejects gzip bombs exceeding maxDecompressedBytes with source-format/too-large', async () => {
+    const big = guide(
+      Array.from(
+        { length: 40 },
+        (_, i) =>
+          `<programme start="20260101000000" channel="c"><title>Prog ${i}</title></programme>`,
+      ).join('\n'),
+    );
+    const zipped = await gzip(utf8(big));
+    const r = await collect(chunksOf(zipped, [64]), {
+      decompressor: gunzipper,
+      maxDecompressedBytes: 512,
+    });
+    expect(r.result).toEqual({
+      ok: false,
+      error: { category: 'source-format', code: 'too-large' },
+    });
+    expect(r.stats).toBeUndefined();
+  });
+});

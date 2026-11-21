@@ -1,6 +1,8 @@
-import { elvError, err, ok, type Result } from '@elv/domain';
+import { type Decompressor, elvError, err, ok, type Result } from '@elv/domain';
 import { detectAndDecodeText, normalizeBomChunks } from './encoding';
+import { decodeMaybeGzip } from './gzip-stream';
 import { dict, newEntry, parseAttrs, parseExtinf } from './m3u-attrs';
+import { M3uLineAccumulator } from './m3u-logo-filter';
 import type { M3uBatch, M3uEntry, M3uHeader } from './m3u-types';
 import {
   applyExtHttp,
@@ -12,15 +14,11 @@ import {
 } from './m3u-url';
 import { toElvError } from './scan-error';
 import { createStats, type ScanStats, warn } from './stats';
-import { ByteBuffer } from './utf8';
 
 export type { KindHint, M3uBatch, M3uCatchup, M3uEntry, M3uHeader } from './m3u-types';
 
-const LF = 10;
-const CR = 13;
 const SPACE = 32;
 const TAB = 9;
-const MAX_LINE = 1 << 20;
 const DEFAULT_BATCH = 500;
 
 const DIRECTIVES = [
@@ -75,15 +73,12 @@ function isHlsManifestTag(bytes: Uint8Array, start: number, end: number): boolea
 
 class M3uScanner {
   readonly stats: ScanStats = createStats();
-  readonly buf = new ByteBuffer();
   batch: M3uEntry[] = [];
   header: M3uHeader | undefined;
   hlsDetected = false;
+  private readonly lines = new M3uLineAccumulator();
   private pending: M3uEntry | undefined;
   private pendingLine = 0;
-  private scanned = 0;
-  private skipLf = false;
-  private discarding = false;
   private first = true;
   private sawFirstNonEmpty = false;
   private captiveHtml = false;
@@ -91,56 +86,33 @@ class M3uScanner {
   private readonly batchSize: number;
   private readonly baseUrl: string | undefined;
 
+  private readonly onLine = (
+    bytes: Uint8Array,
+    start: number,
+    end: number,
+    inlineLogoStripped: boolean,
+  ): void => {
+    this.line(bytes, start, end, inlineLogoStripped);
+  };
+
+  private readonly onTooLong = (): void => {
+    this.tooLong();
+  };
+
+  private readonly canContinue = (): boolean =>
+    this.batch.length < this.batchSize && !this.hlsDetected;
+
   constructor(batchSize: number, baseUrl: string | undefined) {
     this.batchSize = batchSize;
     this.baseUrl = baseUrl;
   }
 
-  run(final: boolean): void {
-    const bytes = this.buf.view;
-    const len = bytes.length;
-    let pos = 0;
-    while (this.batch.length < this.batchSize && !this.hlsDetected) {
-      if (this.skipLf && pos < len) {
-        if (bytes[pos] === LF) pos++;
-        this.skipLf = false;
-      }
-      let i = pos + this.scanned;
-      while (i < len) {
-        const b = bytes[i] as number;
-        if (b === LF || b === CR) break;
-        i++;
-      }
-      if (i >= len) {
-        if (this.discarding) {
-          pos = len;
-          this.scanned = 0;
-        } else if (len - pos > MAX_LINE) {
-          this.tooLong();
-          this.discarding = true;
-          pos = len;
-          this.scanned = 0;
-        } else if (final && pos < len) {
-          this.line(bytes, pos, len);
-          pos = len;
-          this.scanned = 0;
-        } else {
-          this.scanned = len - pos;
-        }
-        break;
-      }
-      if (this.discarding) this.discarding = false;
-      else if (i - pos > MAX_LINE) this.tooLong();
-      else this.line(bytes, pos, i);
-      this.scanned = 0;
-      pos = i + 1;
-      if (bytes[i] === CR) {
-        if (pos < len) {
-          if (bytes[pos] === LF) pos++;
-        } else this.skipLf = true;
-      }
-    }
-    this.buf.consume(pos);
+  feed(chunk: Uint8Array, offset: number): number {
+    return this.lines.feed(chunk, offset, this.onLine, this.onTooLong, this.canContinue);
+  }
+
+  flush(): void {
+    this.lines.flush(this.onLine, this.onTooLong);
   }
 
   private tooLong(): void {
@@ -158,7 +130,12 @@ class M3uScanner {
     }
   }
 
-  private line(bytes: Uint8Array, rawStart: number, rawEnd: number): void {
+  private line(
+    bytes: Uint8Array,
+    rawStart: number,
+    rawEnd: number,
+    inlineLogoStripped: boolean,
+  ): void {
     let start = rawStart;
     let end = rawEnd;
     if (this.first) {
@@ -216,10 +193,13 @@ class M3uScanner {
         this.stats.skipped++;
         warn(this.stats, 'extinf-without-url', this.pendingLine);
       }
-      const issues = { rawQuote: false };
+      const issues = { rawQuote: false, inlineLogoStripped: false };
       this.pending = parseExtinf(payload, issues);
       this.pendingLine = this.stats.lines;
       if (issues.rawQuote) warn(this.stats, 'attr-quote', this.pendingLine);
+      if (inlineLogoStripped || issues.inlineLogoStripped) {
+        warn(this.stats, 'inline-logo-stripped', this.pendingLine);
+      }
     } else if (d === 1) {
       this.header ??= this.parseHeader(payload);
     } else if (this.pending) {
@@ -262,22 +242,51 @@ class M3uScanner {
 
 /**
  * Streams an M3U/M3U8 playlist from byte chunks into typed entries in bounded memory.
- * Rejects HLS media/master manifests (`#EXT-X-TARGETDURATION`, `#EXT-X-MEDIA-SEQUENCE`,
- * `#EXT-X-STREAM-INF`) with `source-format` / `hls-manifest`.
+ * Transparently decompresses gzip streams (`1f 8b`, including multi-member `.gz`) when `decompressor`
+ * is provided and rejects HLS media/master manifests with `source-format` / `hls-manifest`.
  */
 export async function* scanM3u(
   chunks: AsyncIterable<Uint8Array>,
-  opts?: { batchSize?: number; baseUrl?: string | undefined },
+  opts?: {
+    batchSize?: number;
+    baseUrl?: string | undefined;
+    decompressor?: Decompressor;
+    maxDecompressedBytes?: number;
+  },
 ): AsyncGenerator<M3uBatch, Result<void>> {
   const size = Math.max(1, opts?.batchSize ?? DEFAULT_BATCH);
   const scanner = new M3uScanner(size, opts?.baseUrl);
-  try {
-    for await (const chunk of normalizeBomChunks(chunks)) {
-      scanner.buf.append(chunk);
+  const decoded = decodeMaybeGzip(chunks, {
+    ...(opts?.decompressor === undefined ? {} : { decompressor: opts.decompressor }),
+    ...(opts?.maxDecompressedBytes === undefined
+      ? {}
+      : { maxDecompressedBytes: opts.maxDecompressedBytes }),
+  });
+  let decodeResult: Result<void> = ok(undefined);
+  let decodedExhausted = false;
+  async function* decodedChunks(): AsyncGenerator<Uint8Array> {
+    try {
       for (;;) {
-        scanner.run(false);
+        const step = await decoded.next();
+        if (step.done) {
+          decodedExhausted = true;
+          decodeResult = step.value;
+          return;
+        }
+        yield step.value;
+      }
+    } finally {
+      if (!decodedExhausted) await decoded.return(ok(undefined));
+    }
+  }
+  try {
+    for await (const chunk of normalizeBomChunks(decodedChunks())) {
+      if (!decodeResult.ok) return decodeResult;
+      let offset = 0;
+      while (offset < chunk.length) {
+        offset = scanner.feed(chunk, offset);
         if (scanner.hlsDetected) return err(elvError('source-format', 'hls-manifest'));
-        if (scanner.batch.length < size) break;
+        if (scanner.batch.length < size) continue;
         const entries = scanner.batch;
         scanner.batch = [];
         yield { entries, done: false };
@@ -286,10 +295,10 @@ export async function* scanM3u(
   } catch (e) {
     return err(toElvError(e));
   }
-  for (;;) {
-    scanner.run(true);
-    if (scanner.hlsDetected) return err(elvError('source-format', 'hls-manifest'));
-    if (scanner.batch.length < size) break;
+  if (!decodeResult.ok) return decodeResult;
+  scanner.flush();
+  if (scanner.hlsDetected) return err(elvError('source-format', 'hls-manifest'));
+  if (scanner.batch.length >= size) {
     const entries = scanner.batch;
     scanner.batch = [];
     yield { entries, done: false };

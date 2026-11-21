@@ -26,6 +26,20 @@ export interface Resume {
 
 const isSpace = (b: number): boolean => b === 32 || b === 9 || b === 10 || b === 13;
 
+/** True when `b` can start an XML tag name (`[A-Za-z_:]`), closing tag (`/`), declaration/comment (`!`), or PI (`?`). */
+export function isMarkupStart(b: number | undefined): boolean {
+  if (b === undefined) return false;
+  return (
+    (b >= 0x41 && b <= 0x5a) ||
+    (b >= 0x61 && b <= 0x7a) ||
+    b === 0x5f ||
+    b === 0x3a ||
+    b === SLASH ||
+    b === BANG ||
+    b === QUESTION
+  );
+}
+
 /** True when `text` (ASCII) occurs at `at`. */
 export function startsWith(bytes: Uint8Array, at: number, text: string): boolean {
   if (at + text.length > bytes.length) return false;
@@ -236,6 +250,11 @@ export function readText(bytes: Uint8Array, start: number, end: number): string 
       break;
     }
     out += decodeEntities(decodeUtf8(view, i, lt));
+    if (!isMarkupStart(view[lt + 1])) {
+      out += '<';
+      i = lt + 1;
+      continue;
+    }
     if (startsWith(view, lt, '<![CDATA[')) {
       const e = indexOfSeq(view, lt + 9, ']]>');
       if (e < 0) {

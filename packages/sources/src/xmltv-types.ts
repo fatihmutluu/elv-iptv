@@ -47,4 +47,6 @@ export interface XmltvOptions {
   to?: number;
   /** Required for gzip input. */
   decompressor?: Decompressor;
+  /** Maximum decompressed byte count allowed for gzip input (default 256 MiB). */
+  maxDecompressedBytes?: number;
 }

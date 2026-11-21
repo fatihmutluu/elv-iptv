@@ -202,6 +202,11 @@ function defaultNow(): number {
   return monotonicFloor;
 }
 
+/** Resolves the monotonic clock function from optional `rateLimit` settings. */
+export function resolveNowFn(options: XtreamRateLimitOptions | false | undefined): () => number {
+  return options !== false && options?.now !== undefined ? options.now : defaultNow;
+}
+
 function hostKeyOf(baseUrl: string): string {
   const m = /^https?:\/\/([^/?#]+)/i.exec(baseUrl);
   return (m?.[1] ?? baseUrl).toLowerCase();

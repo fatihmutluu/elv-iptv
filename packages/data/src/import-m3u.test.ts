@@ -1,5 +1,6 @@
 import { ok } from '@elv/domain';
 import { describe, expect, it } from 'vitest';
+import { fakeGunzip, gzipped } from './import-guide-test-helpers';
 import {
   count,
   extinf,
@@ -414,5 +415,50 @@ describe('m3u import', () => {
     if (!r.ok) throw new Error(JSON.stringify(r.error));
     expect(r.value.counts.live).toBe(1);
     expect(await count(e.db, 'live')).toBe(1);
+  });
+
+  it('uses a 180s response-header timeout for full M3U playlist imports (#169)', async () => {
+    const e = await setupM3u(playlist());
+    const timeouts: (number | undefined)[] = [];
+    const origGet = e.deps.http.get.bind(e.deps.http);
+    const r = await importCatalog(e.sourceId, {
+      ...e.deps,
+      http: {
+        get: (url, opts) => {
+          timeouts.push(opts?.timeoutMs);
+          return origGet(url, opts);
+        },
+      },
+    });
+    expect(r.ok).toBe(true);
+    expect(timeouts).toEqual([180_000]);
+  });
+
+  it('decompresses gzipped M3U playlists via deps.decompressor without Content-Encoding (#169)', async () => {
+    const e = await setupM3u();
+    const rawGz = gzipped(playlist());
+    const gzHttp = {
+      get: async () =>
+        ok({
+          status: 200,
+          headers: {},
+          body: (async function* () {
+            yield rawGz.subarray(0, 1);
+            yield rawGz.subarray(1);
+          })(),
+        }),
+    };
+
+    const noDecomp = await importCatalog(e.sourceId, { ...e.deps, http: gzHttp });
+    expectErr(noDecomp, 'source-format', 'gzip-unsupported');
+
+    const withDecomp = await importCatalog(e.sourceId, {
+      ...e.deps,
+      http: gzHttp,
+      decompressor: fakeGunzip,
+    });
+    if (!withDecomp.ok) throw new Error(JSON.stringify(withDecomp.error));
+    expect(withDecomp.value.counts).toMatchObject({ live: 2, movies: 1, episodes: 3, series: 2 });
+    expect(await count(e.db, 'live')).toBe(2);
   });
 });

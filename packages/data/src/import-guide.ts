@@ -36,7 +36,7 @@ import {
 import { readUrlVars } from './stream-resolver';
 import { resolveTemplate } from './templates';
 
-const REQUEST_TIMEOUT_MS = 60_000;
+const REQUEST_TIMEOUT_MS = 180_000;
 const DAY_MS = 86_400_000;
 const DEFAULT_WINDOW = { daysBack: 1, daysForward: 7 };
 /** Length given to a programme with no `stop` when no later programme of its channel closes it. */
