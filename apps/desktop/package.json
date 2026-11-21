@@ -27,16 +27,16 @@
     "@elv/data": "workspace:*",
     "@elv/domain": "workspace:*",
     "@elv/playback": "workspace:*",
-    "better-sqlite3": "13.0.3"
+    "better-sqlite3": "13.2.0"
   },
   "devDependencies": {
     "@elv/config": "workspace:*",
     "@elv/desktop-renderer": "workspace:*",
-    "@playwright/test": "1.65.0",
+    "@playwright/test": "1.65.1",
     "@types/better-sqlite3": "7.6.13",
     "@types/node": "^24.19.2",
     "@vitest/coverage-v8": "catalog:",
-    "electron": "45.3.1",
+    "electron": "45.3.2",
     "electron-builder": "26.18.0",
     "esbuild": "^0.28.2",
     "vitest": "5.1.0"
