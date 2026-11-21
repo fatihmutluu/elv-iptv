@@ -11,6 +11,7 @@ import {
 import { ScrollView, StyleSheet, View } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
 import { computeCatalogLayout, type DetailTarget, detailTargetFromItem } from '../shared';
+import { createImeSubmitGuard } from '../shared/ime-guard';
 import {
   SearchEmptyPanel,
   SearchHeaderBar,
@@ -227,14 +228,23 @@ function SearchScreenBody({
   const { endInputEdit } = tv;
   const { commitRecent } = search;
 
+  const imeGuardRef = useRef(createImeSubmitGuard());
   const handleInputFocus = useCallback(() => setInputFocused(true), []);
   const handleInputBlur = useCallback(() => {
+    imeGuardRef.current.reset();
     setInputFocused(false);
     endInputEdit();
   }, [endInputEdit]);
-  const handleInputSubmit = useCallback(() => {
-    if (sanitizedQuery.length > 0) commitRecent(sanitizedQuery);
-  }, [commitRecent, sanitizedQuery]);
+  const handleInputKeyPress = useCallback((event: unknown) => {
+    imeGuardRef.current.onKeyPress(event);
+  }, []);
+  const handleInputSubmit = useCallback(
+    (event?: unknown) => {
+      if (!imeGuardRef.current.shouldAllowSubmit(event)) return;
+      if (sanitizedQuery.length > 0) commitRecent(sanitizedQuery);
+    },
+    [commitRecent, sanitizedQuery],
+  );
 
   const scopeLabels: Readonly<Record<SearchScope, string>> = useMemo(
     () => ({
@@ -299,6 +309,7 @@ function SearchScreenBody({
           onChangeQuery={search.setQuery}
           onInputFocus={handleInputFocus}
           onInputBlur={handleInputBlur}
+          onInputKeyPress={handleInputKeyPress}
           onInputSubmit={handleInputSubmit}
           onClearSearch={search.clearSearch}
           onSelectScope={search.setScope}

@@ -743,4 +743,33 @@ describe('SearchScreen', () => {
       Object.defineProperty(Platform, 'OS', { value: originalOs, configurable: true });
     }
   });
+
+  it('ignores IME-composing Enter events (isComposing / keyCode 229) and submits normal Enter cleanly', async () => {
+    const { catalog } = createMockSearchCatalog({
+      searchImpl: async () => ({ live: [], movies: [], series: [] }),
+    });
+    const onRecentChange = jest.fn<void, [readonly string[]]>();
+    const view = await renderSearch({
+      catalog,
+      initialQuery: '東京',
+      onRecentSearchesChange: onRecentChange,
+    });
+    const input = screen.getByTestId('search-input');
+
+    // Composing submitEditing shapes must all be ignored
+    await fireEvent(input, 'submitEditing', { nativeEvent: { isComposing: true, key: 'Enter' } });
+    await fireEvent(input, 'submitEditing', { isComposing: true, key: 'Enter' });
+    await fireEvent(input, 'submitEditing', { nativeEvent: { keyCode: 229, key: 'Enter' } });
+    await fireEvent(input, 'keyPress', { nativeEvent: { key: 'Enter', isComposing: true } });
+    await fireEvent(input, 'submitEditing', { nativeEvent: { text: '東京' } });
+    expect(onRecentChange).not.toHaveBeenCalled();
+
+    // Non-composing Enter submits cleanly and commits recent search
+    await fireEvent(input, 'keyPress', { nativeEvent: { key: 'Enter', isComposing: false } });
+    await fireEvent(input, 'submitEditing', { nativeEvent: { isComposing: false, text: '東京' } });
+    expect(onRecentChange).toHaveBeenCalledTimes(1);
+    expect(onRecentChange).toHaveBeenCalledWith(['東京']);
+
+    await view.unmount();
+  });
 });

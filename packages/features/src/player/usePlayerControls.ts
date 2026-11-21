@@ -130,6 +130,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     initialOsdHidden: params.initialOsdHidden,
     autoHideOsdMs: params.autoHideOsdMs,
     isScrubbing: previewPositionMs !== undefined,
+    clockRef,
     timersRef,
     cancelScrub,
   });

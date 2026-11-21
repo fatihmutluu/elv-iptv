@@ -8,6 +8,7 @@ const SEEK_TOLERANCE_MS = 5000;
 export interface SeekCoalescer {
   request(positionMs: number, dispatch: (targetMs: number) => void): void;
   shouldAcceptClock(anchor: ClockAnchor): boolean;
+  isPending(): boolean;
   reset(): void;
 }
 
@@ -15,6 +16,7 @@ export function createSeekCoalescer(
   clock: PlaybackClock,
   timers: PlaybackTimers,
   coalesceMs: number,
+  onIdle?: () => void,
 ): SeekCoalescer {
   let timer: unknown;
   let queuedMs: number | undefined;
@@ -40,7 +42,11 @@ export function createSeekCoalescer(
     if (coalesceMs <= 0) return;
     timer = timers.setTimeout(() => {
       timer = undefined;
-      if (queuedMs === undefined) return;
+      if (queuedMs === undefined) {
+        if (targetMs !== undefined && clock.now() > guardUntilMs) targetMs = undefined;
+        if (targetMs === undefined) onIdle?.();
+        return;
+      }
       const next = queuedMs;
       queuedMs = undefined;
       const now = clock.now();
@@ -85,6 +91,16 @@ export function createSeekCoalescer(
         return true;
       }
       return false;
+    },
+
+    isPending() {
+      if (queuedMs !== undefined || timer !== undefined) return true;
+      if (targetMs === undefined) return false;
+      if (clock.now() > guardUntilMs) {
+        targetMs = undefined;
+        return false;
+      }
+      return true;
     },
 
     reset() {

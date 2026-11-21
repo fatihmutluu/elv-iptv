@@ -1007,3 +1007,36 @@ msgstr "Bu zaman aralığı için rehber verisi yok."
 
 msgid "epg.onAirBadge"
 msgstr "YAYINDA"
+
+msgid "crash.title"
+msgstr "Bir sorun oluştu"
+
+msgid "crash.subtitle"
+msgstr "Ekran beklenmeyen bir hatayla karşılaştı. Nasıl devam edeceğinizi seçin."
+
+msgid "crash.reload"
+msgstr "Yeniden Yükle"
+
+msgid "crash.clearCache"
+msgstr "Arayüz Önbelleğini Temizle"
+
+msgid "crash.switchSource"
+msgstr "Kaynak Değiştir"
+
+msgid "crash.code"
+msgstr "Referans: {code}"
+
+msgid "player.diag.offline"
+msgstr "Çevrimdışı görünüyorsunuz. Ağ bağlantınızı kontrol edin."
+
+msgid "player.diag.accountExpired"
+msgstr "Sağlayıcı hesabınızın süresi dolmuş."
+
+msgid "player.diag.accountDisabled"
+msgstr "Sağlayıcı hesabınız şu anda devre dışı."
+
+msgid "player.diag.serverSilent"
+msgstr "Sunucu yayın verisi göndermedi."
+
+msgid "player.diag.codecUnsupported"
+msgstr "Bu yayın biçimi veya çözücü bu cihazda desteklenmiyor."

@@ -19,6 +19,7 @@ import {
 } from 'electron';
 import { CATALOG_CHANNELS } from '../shared/catalog-ipc.ts';
 import { APP_ORIGIN, APP_SCHEME } from './app-protocol.ts';
+import { attachBrowserBackGuard } from './browser-back.ts';
 import { type CatalogCoordinator, createCatalogCoordinator } from './catalog/coordinator.ts';
 import { parseDevSeedEnv, runDesktopDevSeedOnce } from './catalog/dev-seed.ts';
 import { registerCatalogIpc, registerCatalogQuitHandler } from './catalog/ipc.ts';
@@ -119,6 +120,7 @@ function createWindow(): void {
     window.webContents,
     devServerOrigin !== null ? { devOrigin: devServerOrigin } : undefined,
   );
+  attachBrowserBackGuard(window);
   attachRendererCrashRecovery(window, {
     gate: isGate,
     reloadUrl: appEntryUrl,

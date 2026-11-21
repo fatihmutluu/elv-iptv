@@ -8,8 +8,9 @@ import {
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { type ReactElement, useCallback, useState } from 'react';
+import { type ReactElement, useCallback, useRef, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { createImeSubmitGuard } from '../shared/ime-guard';
 import { sourcesStyles } from './sources-styles';
 import type { ControlLayoutRecorder } from './useTvSourcesNavigation';
 
@@ -153,6 +154,7 @@ export function FieldInput({
   tvFocused,
   editingInputId,
   onEndEditing,
+  onSubmit,
   secureTextEntry = false,
   registerRef,
   recordLayout,
@@ -166,6 +168,7 @@ export function FieldInput({
   tvFocused: boolean;
   editingInputId: string | null;
   onEndEditing: (focusId: string) => void;
+  onSubmit?: () => void;
   secureTextEntry?: boolean;
   registerRef: (id: string, node: TvTextInputInstance | null) => void;
   recordLayout?: ControlLayoutRecorder;
@@ -173,8 +176,21 @@ export function FieldInput({
   const isTv = useFormFactor() === 'tv';
   const theme = useTheme();
   const [inputFocused, setInputFocused] = useState(false);
+  const imeGuardRef = useRef(createImeSubmitGuard());
   const allowNativeEdit = !isTv || editingInputId === focusId;
   const transition = webTransition(theme, 'border-color, background-color');
+
+  const handleKeyPress = useCallback((event: unknown) => {
+    imeGuardRef.current.onKeyPress(event);
+  }, []);
+
+  const handleSubmitEditing = useCallback(
+    (event?: unknown) => {
+      if (!imeGuardRef.current.shouldAllowSubmit(event)) return;
+      onSubmit?.();
+    },
+    [onSubmit],
+  );
 
   const borderColor = tvFocused
     ? theme.colors.focusRingColor
@@ -213,9 +229,12 @@ export function FieldInput({
           onChangeText={onChangeText}
           onFocus={() => setInputFocused(true)}
           onBlur={() => {
+            imeGuardRef.current.reset();
             setInputFocused(false);
             onEndEditing(focusId);
           }}
+          onKeyPress={handleKeyPress}
+          onSubmitEditing={handleSubmitEditing}
           secureTextEntry={secureTextEntry}
           autoCapitalize="none"
           autoCorrect={false}

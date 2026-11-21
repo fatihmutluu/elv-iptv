@@ -11,7 +11,7 @@ import {
   ThemeProvider,
   TvRemoteProvider,
 } from '@elv/ui-kit';
-import { act, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { Platform, StyleSheet, View } from 'react-native';
 import type { PlayableEntry, PlayTarget } from '../../ports/play-target';
 import { PlayerScreen } from '../PlayerScreen';
@@ -691,5 +691,78 @@ describe('Player ergonomics (#296, #297, #212)', () => {
     });
 
     await tv.view.unmount();
+  });
+
+  it('#139: suppresses synthetic post-tap mouse/pointer hover on mobile/tablet so OSD auto-hide completes cleanly', async () => {
+    const manual = createManualClock();
+    const engine = createFakePlayerEngine({
+      now: manual.now,
+      schedule: manual.schedule,
+      cancel: manual.cancel,
+    });
+
+    const view = await render(
+      <ThemeProvider preset="obsidianCrimson">
+        <FormFactorProvider value="tablet">
+          <I18nProvider i18n={createAppI18n('en')}>
+            <PlayerScreen
+              catalog={{
+                resolveStream: async () =>
+                  ok({ url: 'http://sim.example.test/vod.mkv', headers: {} }),
+              }}
+              videoHost={{ open: () => ({ engine, renderSurface: () => <View /> }) }}
+              target={VOD_TARGET}
+              clock={{ now: manual.now }}
+              timers={{ setTimeout: manual.schedule, clearTimeout: manual.cancel }}
+              autoHideOsdMs={2_000}
+              onExit={jest.fn()}
+            />
+          </I18nProvider>
+        </FormFactorProvider>
+      </ThemeProvider>,
+    );
+
+    await waitFor(() => {
+      expect(engine.commands.some((c) => c.name === 'load')).toBe(true);
+    });
+    await act(async () => {
+      manual.advance(350);
+    });
+    expect(screen.getByTestId('player-osd')).toBeTruthy();
+
+    // Tap at +1500ms, then synthetic mouseMove + pointerMove(touch) within 500ms must NOT reset auto-hide
+    await act(async () => {
+      manual.advance(1_500);
+    });
+    const root = screen.getByTestId('player-screen');
+    await fireEvent(root, 'touchStart');
+    await act(async () => {
+      manual.advance(100);
+    });
+    await fireEvent(root, 'mouseMove');
+    await fireEvent(root, 'pointerMove', { nativeEvent: { pointerType: 'touch' } });
+
+    // Remaining 400ms elapses -> OSD auto-hides right on schedule!
+    await act(async () => {
+      manual.advance(400);
+    });
+    expect(screen.queryByTestId('player-osd')).toBeNull();
+
+    // Another synthetic mouseMove within 500ms of touch does NOT wake hidden OSD
+    await fireEvent(root, 'touchStart');
+    await act(async () => {
+      manual.advance(499);
+    });
+    await fireEvent(root, 'mouseMove');
+    expect(screen.queryByTestId('player-osd')).toBeNull();
+
+    // Genuine mouse hover after 500ms DOES wake OSD
+    await act(async () => {
+      manual.advance(1);
+    });
+    await fireEvent(root, 'pointerMove', { nativeEvent: { pointerType: 'mouse' } });
+    expect(screen.getByTestId('player-osd')).toBeTruthy();
+
+    await view.unmount();
   });
 });

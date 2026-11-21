@@ -1007,3 +1007,36 @@ msgstr "No guide schedule loaded for this window."
 
 msgid "epg.onAirBadge"
 msgstr "ON AIR"
+
+msgid "crash.title"
+msgstr "Something went wrong"
+
+msgid "crash.subtitle"
+msgstr "The screen ran into an unexpected error. Choose how to recover."
+
+msgid "crash.reload"
+msgstr "Reload"
+
+msgid "crash.clearCache"
+msgstr "Clear UI Cache"
+
+msgid "crash.switchSource"
+msgstr "Switch Source"
+
+msgid "crash.code"
+msgstr "Reference: {code}"
+
+msgid "player.diag.offline"
+msgstr "You appear to be offline. Check your network connection."
+
+msgid "player.diag.accountExpired"
+msgstr "Your provider account has expired."
+
+msgid "player.diag.accountDisabled"
+msgstr "Your provider account is currently disabled."
+
+msgid "player.diag.serverSilent"
+msgstr "The server responded with no stream data."
+
+msgid "player.diag.codecUnsupported"
+msgstr "This stream format or codec is not supported on this device."

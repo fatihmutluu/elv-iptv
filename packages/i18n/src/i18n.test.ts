@@ -623,4 +623,52 @@ describe('@elv/i18n', () => {
       'Sonraki: S1 B4 · Final',
     );
   });
+
+  it('localizes crash recovery (#159) and playback diagnosis (#316) strings in English and Turkish', () => {
+    const en = createAppI18n('en');
+    const tr = createAppI18n('tr');
+    const staticCases: ReadonlyArray<readonly [MessageId, string, string]> = [
+      ['crash.title', 'Something went wrong', 'Bir sorun oluştu'],
+      [
+        'crash.subtitle',
+        'The screen ran into an unexpected error. Choose how to recover.',
+        'Ekran beklenmeyen bir hatayla karşılaştı. Nasıl devam edeceğinizi seçin.',
+      ],
+      ['crash.reload', 'Reload', 'Yeniden Yükle'],
+      ['crash.clearCache', 'Clear UI Cache', 'Arayüz Önbelleğini Temizle'],
+      ['crash.switchSource', 'Switch Source', 'Kaynak Değiştir'],
+      [
+        'player.diag.offline',
+        'You appear to be offline. Check your network connection.',
+        'Çevrimdışı görünüyorsunuz. Ağ bağlantınızı kontrol edin.',
+      ],
+      [
+        'player.diag.accountExpired',
+        'Your provider account has expired.',
+        'Sağlayıcı hesabınızın süresi dolmuş.',
+      ],
+      [
+        'player.diag.accountDisabled',
+        'Your provider account is currently disabled.',
+        'Sağlayıcı hesabınız şu anda devre dışı.',
+      ],
+      [
+        'player.diag.serverSilent',
+        'The server responded with no stream data.',
+        'Sunucu yayın verisi göndermedi.',
+      ],
+      [
+        'player.diag.codecUnsupported',
+        'This stream format or codec is not supported on this device.',
+        'Bu yayın biçimi veya çözücü bu cihazda desteklenmiyor.',
+      ],
+    ];
+    for (const [id, expectedEn, expectedTr] of staticCases) {
+      expect(en.t(id)).toBe(expectedEn);
+      expect(tr.t(id)).toBe(expectedTr);
+    }
+
+    expect(en.t('crash.code', { code: 'TypeError' })).toBe('Reference: TypeError');
+    expect(tr.t('crash.code', { code: 'TypeError' })).toBe('Referans: TypeError');
+  });
 });

@@ -1,6 +1,14 @@
 export * from './async-iterable';
 export * from './content-key';
-export * from './headers';
+export {
+  hasCredentialHeaders,
+  originOf,
+  sameOrigin,
+  sanitizeHeaderName,
+  sanitizeHeaders,
+  sanitizeHeaderValue,
+  scopeCredentialHeaders,
+} from './headers';
 export * from './http';
 export * from './languages';
 export * from './playback-guard';

@@ -1,4 +1,10 @@
 import { isAsyncIterable, openAsyncIterator } from './async-iterable';
+import {
+  hasCredentialHeaders,
+  resolveRedirectUrl,
+  sanitizeHeaders,
+  scopeCredentialHeaders,
+} from './headers';
 import { type ElvError, elvError, err, ok, type Result } from './result';
 
 /** A response whose body streams in chunks. */
@@ -31,7 +37,11 @@ export interface HttpClient {
 /** The subset of WHATWG `fetch` this port needs. */
 export type FetchLike = (
   url: string,
-  init: { headers?: Record<string, string>; signal?: AbortSignal },
+  init: {
+    headers?: Record<string, string>;
+    signal?: AbortSignal;
+    redirect?: 'follow' | 'manual' | 'error';
+  },
 ) => Promise<{
   status: number;
   headers: { forEach(cb: (value: string, key: string) => void): void };
@@ -220,6 +230,18 @@ function streamBody(
 }
 
 const RESET_CODES = new Set(['ECONNRESET', 'EPIPE', 'UND_ERR_SOCKET']);
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECT_HOPS = 10;
+
+function collectHeaders(raw: {
+  forEach(cb: (value: string, key: string) => void): void;
+}): Record<string, string> {
+  const out: Record<string, string> = {};
+  raw.forEach((value, key) => {
+    out[key.toLowerCase()] = value;
+  });
+  return out;
+}
 
 /**
  * Whether a pre-response failure looks like a pooled keep-alive socket the server had already closed
@@ -272,41 +294,60 @@ export function createFetchHttpClient(
       aborted.catch(() => {});
       let handedOff = false;
       try {
-        const init: { headers?: Record<string, string>; signal: AbortSignal } = {
-          signal: controller.signal,
-        };
-        if (options?.headers) init.headers = { ...options.headers };
-        const attempt = () => {
-          let settledBeforeAbort = false;
-          const inflight = fetchImpl(url, init);
-          return Promise.race([
-            inflight.then((r) => {
-              settledBeforeAbort = true;
-              return r;
-            }),
-            aborted,
-          ]).catch((e: unknown) => {
-            if (!settledBeforeAbort) {
-              inflight.then(
-                (r) => discardBody(r.body),
-                () => undefined,
-              );
-            }
-            throw e;
+        const sanitizedHeaders =
+          options?.headers !== undefined ? sanitizeHeaders(options.headers) : undefined;
+        const manualRedirects = hasCredentialHeaders(sanitizedHeaders);
+        const fetchOnce = (targetUrl: string, reqHeaders: Record<string, string> | undefined) => {
+          const init: Parameters<FetchLike>[1] = { signal: controller.signal };
+          if (reqHeaders !== undefined) init.headers = { ...reqHeaders };
+          if (manualRedirects) init.redirect = 'manual';
+          const attempt = () => {
+            let settledBeforeAbort = false;
+            const inflight = fetchImpl(targetUrl, init);
+            return Promise.race([
+              inflight.then((r) => {
+                settledBeforeAbort = true;
+                return r;
+              }),
+              aborted,
+            ]).catch((e: unknown) => {
+              if (!settledBeforeAbort) {
+                inflight.then(
+                  (r) => discardBody(r.body),
+                  () => undefined,
+                );
+              }
+              throw e;
+            });
+          };
+          return attempt().catch((e: unknown) => {
+            if (timedOut || controller.signal.aborted || !isConnectionReset(e)) throw e;
+            return attempt();
           });
         };
-        const res = await attempt().catch((e: unknown) => {
-          if (timedOut || controller.signal.aborted || !isConnectionReset(e)) throw e;
-          return attempt();
-        });
+
+        let currentUrl = url;
+        let activeHeaders = sanitizedHeaders;
+        let hops = 0;
+        let res = await fetchOnce(currentUrl, activeHeaders);
+        let headers = collectHeaders(res.headers);
+        while (manualRedirects && REDIRECT_STATUSES.has(res.status)) {
+          const location = headers.location;
+          if (location === undefined) break;
+          await discardBody(res.body);
+          if (hops >= MAX_REDIRECT_HOPS) return err(elvError('network', 'too-many-redirects'));
+          const nextUrl = resolveRedirectUrl(currentUrl, location);
+          if (nextUrl === undefined) return err(httpStatusError(res.status));
+          activeHeaders = scopeCredentialHeaders(activeHeaders, url, nextUrl);
+          currentUrl = nextUrl;
+          hops += 1;
+          res = await fetchOnce(currentUrl, activeHeaders);
+          headers = collectHeaders(res.headers);
+        }
         if ((res.status < 200 || res.status >= 300) && res.status !== 304) {
           await discardBody(res.body);
           return err(httpStatusError(res.status));
         }
-        const headers: Record<string, string> = {};
-        res.headers.forEach((value, key) => {
-          headers[key.toLowerCase()] = value;
-        });
         handedOff = true;
         const dispose = () => caller?.removeEventListener('abort', onCallerAbort);
         return ok({

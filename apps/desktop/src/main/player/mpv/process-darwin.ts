@@ -97,7 +97,7 @@ export async function spawnDarwinMpv(
 ): Promise<DarwinProcess> {
   const { transportArgs, wrapProcess, abortError, abortableSleep, boundedWait } = helpers;
   const needsWindowProbe = opts.args.includes('--force-window=immediate');
-  const deadline = Date.now() + (opts.connectTimeoutMs ?? 5000);
+  const deadline = performance.now() + (opts.connectTimeoutMs ?? 5000);
   const windowBudgetMs = deps.darwinWindowTimeoutMs ?? 450;
   const retryMs = deps.retryDelayMs ?? 15;
 
@@ -124,9 +124,9 @@ export async function spawnDarwinMpv(
       );
     }
 
-    const attemptEnd = Math.min(deadline, Date.now() + windowBudgetMs);
+    const attemptEnd = Math.min(deadline, performance.now() + windowBudgetMs);
     let ready = false;
-    while (Date.now() < attemptEnd) {
+    while (performance.now() < attemptEnd) {
       if (opts.signal?.aborted) {
         client.close();
         attempt.child.kill('SIGKILL');
@@ -139,7 +139,7 @@ export async function spawnDarwinMpv(
           `mpv exited with code ${earlyExit.code ?? 'null'} before its IPC was ready`,
         );
       }
-      const waitMs = Math.max(1, attemptEnd - Date.now());
+      const waitMs = Math.max(1, attemptEnd - performance.now());
       let timer: ReturnType<typeof setTimeout> | undefined;
       let onAbort: (() => void) | undefined;
       const reply = await Promise.race([
@@ -179,7 +179,7 @@ export async function spawnDarwinMpv(
     client.close();
     attempt.child.kill('SIGKILL');
     await boundedWait(attempt.exited, POST_KILL_WAIT_MS);
-    if (Date.now() >= deadline) {
+    if (performance.now() >= deadline) {
       throw new Error('mpv window did not initialize in time');
     }
   }

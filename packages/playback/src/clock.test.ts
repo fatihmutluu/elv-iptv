@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { isAtLiveEdge, LIVE_EDGE_TOLERANCE_MS, positionAt } from './clock';
+import { describe, expect, it, vi } from 'vitest';
+import { createMonotonicClock, isAtLiveEdge, LIVE_EDGE_TOLERANCE_MS, positionAt } from './clock';
 
 describe('positionAt', () => {
   it('advances by elapsed time times rate', () => {
@@ -77,5 +77,61 @@ describe('isAtLiveEdge', () => {
         1000,
       ),
     ).toBe(false);
+  });
+});
+
+describe('createMonotonicClock', () => {
+  it('never decreases when the underlying clock jumps backwards', () => {
+    const samples = [1000, 1250, 900, 1100, 1250, 1400, 500, 1401];
+    let idx = 0;
+    const clock = createMonotonicClock(() => samples[idx++] ?? 1401);
+
+    expect(clock.now()).toBe(1000);
+    expect(clock.now()).toBe(1250);
+    expect(clock.now()).toBe(1250);
+    expect(clock.now()).toBe(1250);
+    expect(clock.now()).toBe(1250);
+    expect(clock.now()).toBe(1400);
+    expect(clock.now()).toBe(1400);
+    expect(clock.now()).toBe(1401);
+  });
+
+  it('ignores non-finite readings and holds the last valid monotonic floor', () => {
+    const samples = [Number.NaN, 50, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 75];
+    let idx = 0;
+    const clock = createMonotonicClock(() => samples[idx++] ?? 75);
+
+    expect(clock.now()).toBe(0);
+    expect(clock.now()).toBe(50);
+    expect(clock.now()).toBe(50);
+    expect(clock.now()).toBe(50);
+    expect(clock.now()).toBe(75);
+  });
+
+  it('defaults to performance.now() and falls back to Date.now() when performance is absent', () => {
+    const perfSpy = vi.spyOn(globalThis.performance, 'now').mockReturnValueOnce(42.5);
+    const defaultClock = createMonotonicClock();
+    expect(defaultClock.now()).toBe(42.5);
+    perfSpy.mockRestore();
+
+    const origPerf = globalThis.performance;
+    const dateSpy = vi.spyOn(Date, 'now').mockReturnValueOnce(5000).mockReturnValueOnce(4000);
+    try {
+      Object.defineProperty(globalThis, 'performance', {
+        value: undefined,
+        configurable: true,
+        writable: true,
+      });
+      const fallbackClock = createMonotonicClock();
+      expect(fallbackClock.now()).toBe(5000);
+      expect(fallbackClock.now()).toBe(5000);
+    } finally {
+      Object.defineProperty(globalThis, 'performance', {
+        value: origPerf,
+        configurable: true,
+        writable: true,
+      });
+      dateSpy.mockRestore();
+    }
   });
 });

@@ -426,4 +426,49 @@ describe('SourcesScreen (#71)', () => {
       await env.cleanup();
     }
   });
+
+  it('ignores IME-composing Enter events on text inputs and submits cleanly on normal Enter', async () => {
+    const env = await openTestCatalog();
+    try {
+      const view = await render(
+        <FormFactorProvider value="desktop">
+          <I18nProvider i18n={createAppI18n('en')}>
+            <SourcesScreen catalog={env.catalog} />
+          </I18nProvider>
+        </FormFactorProvider>,
+      );
+
+      const serverInput = screen.getByTestId('sources-input-server');
+      const userInput = screen.getByTestId('sources-input-username');
+      const passInput = screen.getByTestId('sources-input-password');
+
+      await fireEvent.changeText(serverInput, 'http://sim.example.test:7878');
+      await fireEvent.changeText(userInput, 'demo');
+      await fireEvent.changeText(passInput, 'demo');
+
+      // IME-composing Enter events must never trigger form submission
+      await fireEvent(passInput, 'submitEditing', { nativeEvent: { isComposing: true } });
+      await fireEvent(passInput, 'submitEditing', { isComposing: true });
+      await fireEvent(passInput, 'submitEditing', { nativeEvent: { keyCode: 229 } });
+      await fireEvent(passInput, 'keyPress', { nativeEvent: { key: 'Enter', isComposing: true } });
+      await fireEvent(passInput, 'submitEditing', { nativeEvent: { text: 'demo' } });
+
+      expect(await env.catalog.listSources()).toEqual([]);
+
+      // Normal non-composing Enter submits cleanly
+      await fireEvent(passInput, 'keyPress', { nativeEvent: { key: 'Enter', isComposing: false } });
+      await fireEvent(passInput, 'submitEditing', {
+        nativeEvent: { isComposing: false, text: 'demo' },
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('source-status-src-1')).toHaveTextContent(
+          '2 live channels, 1 movie, 1 series',
+        );
+      });
+      await view.unmount();
+    } finally {
+      await env.cleanup();
+    }
+  });
 });

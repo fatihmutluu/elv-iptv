@@ -723,4 +723,61 @@ describe('tracks and seek', () => {
     await vi.advanceTimersByTimeAsync(100);
     expect(engine.commands.at(-1)).toEqual({ name: 'seek', attempt: t, positionMs: 0 });
   });
+
+  it('coalesces setSpeed across active seeks, clamps [0.25, 4.0], and resets on tune/stop/dispose', async () => {
+    const { engine, service } = setup();
+    const speeds: Array<{ attempt: number; rate: number }> = [];
+    engine.setSpeed = (attempt, rate) => speeds.push({ attempt, rate });
+
+    service.setSpeed(1.5);
+    expect(speeds).toEqual([]);
+
+    const t = service.tune(tuneReq('movie', { kind: 'vod' }));
+    await vi.advanceTimersByTimeAsync(300);
+
+    service.seek(30_000);
+    service.setSpeed(1.25);
+    service.setSpeed(1.5);
+    service.setSpeed(9);
+    service.setSpeed(Number.NaN);
+    expect(speeds).toEqual([]);
+
+    // Seek window clears after 80ms; clock confirms seek at 30_000 -> flushes latest clamped rate (4.0)
+    await vi.advanceTimersByTimeAsync(80);
+    expect(speeds).toEqual([]);
+    engine.emit({
+      attempt: t,
+      type: 'clock',
+      anchor: { positionMs: 30_000, atMs: Date.now(), rate: 1 },
+    });
+    expect(speeds).toEqual([{ attempt: t, rate: 4.0 }]);
+
+    // Pending speed during seek is cancelled cleanly on stop(), tune(), and dispose()
+    await vi.advanceTimersByTimeAsync(100);
+    service.seek(45_000);
+    service.setSpeed(0.1);
+    service.stop();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(speeds).toEqual([{ attempt: t, rate: 4.0 }]);
+
+    const t2 = service.tune(tuneReq('movie2', { kind: 'vod' }));
+    await vi.advanceTimersByTimeAsync(300);
+    service.setSpeed(0.1);
+    expect(speeds).toEqual([
+      { attempt: t, rate: 4.0 },
+      { attempt: t2, rate: 0.25 },
+    ]);
+
+    service.seek(10_000);
+    service.setSpeed(2.0);
+    service.tune(tuneReq('movie3', { kind: 'vod' }));
+    await vi.advanceTimersByTimeAsync(500);
+    expect(speeds).toHaveLength(2);
+
+    service.seek(5_000);
+    service.setSpeed(1.75);
+    service.dispose();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(speeds).toHaveLength(2);
+  });
 });
