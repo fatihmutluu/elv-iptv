@@ -1,4 +1,10 @@
-import type { ItemRow, SearchResults, SearchScope, WatchProgressRow } from '@elv/data';
+import {
+  foldText,
+  type ItemRow,
+  type SearchResults,
+  type SearchScope,
+  type WatchProgressRow,
+} from '@elv/data';
 import type { PlayTarget } from '../ports/play-target';
 
 /** Debounce interval (ms) before firing a catalog FTS5 search after typing. */
@@ -83,14 +89,17 @@ export function sanitizeSearchQuery(raw: string): string {
 
 /**
  * Normalizes and records `rawQuery` at the front of `recent` history: trims whitespace, ignores
- * blank queries, deduplicates case-insensitively via `toLocaleLowerCase()`, and caps at
- * {@link MAX_RECENT_SEARCHES}.
+ * blank queries, deduplicates locale-independently via `foldText` (handling Turkish `İ`/`ı` and
+ * diacritics cleanly), and caps at {@link MAX_RECENT_SEARCHES}.
  */
 export function addRecentSearch(recent: readonly string[], rawQuery: string): string[] {
   const trimmed = rawQuery.trim();
   if (trimmed === '') return recent.slice(0, MAX_RECENT_SEARCHES);
-  const key = trimmed.toLocaleLowerCase();
-  const deduped = recent.filter((entry) => entry.trim().toLocaleLowerCase() !== key);
+  const key = foldText(trimmed) || trimmed.toLowerCase();
+  const deduped = recent.filter((entry) => {
+    const entryKey = foldText(entry) || entry.trim().toLowerCase();
+    return entryKey !== key;
+  });
   return [trimmed, ...deduped].slice(0, MAX_RECENT_SEARCHES);
 }
 

@@ -78,9 +78,10 @@ describe('search-model', () => {
       expect(addRecentSearch(['News'], '  Şampiyonlar  ')).toEqual(['Şampiyonlar', 'News']);
     });
 
-    it('deduplicates case-insensitively and moves existing term to the front', () => {
-      const next = addRecentSearch(['BeIN', 'İstanbul', 'Cinema'], '  istanbul ');
-      expect(next).toEqual(['istanbul', 'BeIN', 'Cinema']);
+    it('deduplicates locale-independently (including Turkish İ/ı) and moves existing term to the front', () => {
+      const next = addRecentSearch(['Pitch', 'İstanbul', 'Cinema'], '  istanbul ');
+      expect(next).toEqual(['istanbul', 'Pitch', 'Cinema']);
+      expect(addRecentSearch(['Işık', 'Drama'], 'ISIK')).toEqual(['ISIK', 'Drama']);
     });
 
     it('caps history at MAX_RECENT_SEARCHES (8)', () => {
