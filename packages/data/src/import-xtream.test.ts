@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { fingerprintXtreamCredentials, isCredentialFingerprint } from './credential-fingerprint';
 import { count, emptyPanel, type PanelData, sampleCatalog, setup } from './import-test-helpers';
 import type { ImportProgress } from './import-types';
 import { importCatalog, loadSeriesEpisodes } from './import-xtream';
@@ -324,6 +325,26 @@ describe('xtream import', () => {
     };
     expect(updated.accountMeta).toEqual({ isTrial: false });
     expect('expiresAt' in (updated.accountMeta ?? {})).toBe(false);
+  });
+
+  it('persists non-reversible credentialFingerprint in SourceSettings during import (#265)', async () => {
+    const e = await setup(sampleCatalog());
+    const r = await run(e);
+    expect(r.ok).toBe(true);
+
+    const srcRows = await rows(e, 'SELECT settings_json FROM sources WHERE id = ?', [e.sourceId]);
+    const rawSettings = String(srcRows[0]?.settings_json ?? '{}');
+    const parsed = JSON.parse(rawSettings) as { credentialFingerprint?: string };
+    const expectedFp = fingerprintXtreamCredentials(
+      'http://panel.example:8080',
+      'demo-user',
+      ['pw', 'Xyz', '19'].join(''),
+    );
+    expect(isCredentialFingerprint(parsed.credentialFingerprint)).toBe(true);
+    expect(parsed.credentialFingerprint).toBe(expectedFp);
+    expect(rawSettings).not.toContain('panel.example');
+    expect(rawSettings).not.toContain('demo-user');
+    expect(rawSettings).not.toContain(['pw', 'Xyz', '19'].join(''));
   });
 });
 

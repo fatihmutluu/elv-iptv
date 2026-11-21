@@ -106,6 +106,7 @@ function stubEngine(): StubEngine {
     },
     setArea: (area: unknown) => e.calls.push(['setArea', area]),
     toggleFullscreen: () => e.calls.push(['fullscreen']),
+    toggleMute: () => e.calls.push(['mute']),
     subscribe(l: (ev: EngineEvent) => void) {
       listeners.add(l);
       return () => listeners.delete(l);
@@ -318,6 +319,7 @@ describe('registerPlayerIpc', () => {
       command: { name: 'recreate', attempt: 3 },
     });
     t.emit(PLAYER_CHANNELS.command, a, { engineId: ra.engineId, command: { name: 'fullscreen' } });
+    t.emit(PLAYER_CHANNELS.command, a, { engineId: ra.engineId, command: { name: 'mute' } });
     expect(t.engines[0]?.calls).toEqual([
       ['load', LOAD],
       ['retry', 2],
@@ -329,6 +331,7 @@ describe('registerPlayerIpc', () => {
       ['stop', 3],
       ['recreate', 3],
       ['fullscreen'],
+      ['mute'],
     ]);
     expect(t.engines[1]?.calls).toEqual([]);
     // b names a's engine: not its own, so it is dropped
@@ -336,7 +339,7 @@ describe('registerPlayerIpc', () => {
       engineId: ra.engineId,
       command: { name: 'stop', attempt: 9 },
     });
-    expect(t.engines[0]?.calls).toHaveLength(10);
+    expect(t.engines[0]?.calls).toHaveLength(11);
     expect(t.logs.length).toBeGreaterThan(0);
   });
 

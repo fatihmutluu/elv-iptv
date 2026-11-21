@@ -14,6 +14,7 @@ import {
 } from '@elv/ui-kit';
 import { type ComponentRef, type ReactElement, useEffect, useRef } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useDesktopDialogTrap } from './desktop-dialog-trap';
 import type { SettingsMenuState, SettingsMenuView } from './settings-menu-nav';
 import { formatTrackLabel } from './track-labels';
 
@@ -83,8 +84,16 @@ function rowStyle(theme: Theme, focused: boolean, selected: boolean, isTv: boole
 export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactElement | null {
   const { visible, menuState, tracks, statsVisible, isTv, formFactor, i18n } = props;
   const theme = useTheme();
+  const isWebDesktop = formFactor === 'desktop' && (Platform.OS as string) === 'web';
   const showCursor = isTv || formFactor === 'desktop';
+  const desktopPanelRef = useRef<ComponentRef<typeof View> | null>(null);
   const listScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
+
+  useDesktopDialogTrap(
+    desktopPanelRef,
+    visible && isWebDesktop,
+    menuState.view === 'root' ? props.onClose : () => props.onOpenView('root'),
+  );
 
   useEffect(() => {
     if (!visible || !showCursor || menuState.view === 'root') return;
@@ -319,8 +328,14 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
   );
 
   if (formFactor === 'desktop') {
+    const dialogA11yProps = isWebDesktop
+      ? ({ role: 'dialog', 'aria-modal': true, 'aria-label': title } as Record<string, unknown>)
+      : undefined;
     return (
       <View
+        ref={desktopPanelRef}
+        testID="player-settings-desktop-dialog"
+        {...dialogA11yProps}
         style={[
           styles.desktopPanel,
           { backgroundColor: theme.colors.glassBg, borderTopColor: theme.colors.glassBorder },

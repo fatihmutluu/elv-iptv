@@ -6,6 +6,7 @@ import {
   type XtreamClient,
   type XtreamClientOptions,
 } from '@elv/sources';
+import { fingerprintXtreamCredentials } from './credential-fingerprint';
 import { importM3u } from './import-m3u';
 import { checkAbort, notify, performRun, type RunCtx, Stop, unwrap } from './import-run';
 import {
@@ -48,6 +49,7 @@ const UNCATEGORIZED = 'Uncategorized';
 interface Clients {
   client: XtreamClient;
   retries: readonly XtreamClient[];
+  credentialFingerprint: string | undefined;
 }
 
 type Ctx = RunCtx & Clients;
@@ -92,14 +94,13 @@ async function openClients(source: SourceRecord, deps: ImportDeps): Promise<Resu
   if (typeof server !== 'string' || typeof username !== 'string' || typeof password !== 'string') {
     return err(elvError('storage', 'secret-missing'));
   }
+  const credentialFingerprint = fingerprintXtreamCredentials(server, username, password);
   const options: XtreamClientOptions = { http: deps.http, server, username, password };
   if (source.settings.transport !== undefined) options.transport = source.settings.transport;
-  if (deps.maxBodyBytes === undefined)
-    return ok({ client: createXtreamClient(options), retries: [] });
-  return ok({
-    client: createXtreamClient({ ...options, maxBodyBytes: deps.maxBodyBytes }),
-    retries: [createXtreamClient(options)],
-  });
+  const capped =
+    deps.maxBodyBytes === undefined ? options : { ...options, maxBodyBytes: deps.maxBodyBytes };
+  const retries = deps.maxBodyBytes === undefined ? [] : [createXtreamClient(options)];
+  return ok({ client: createXtreamClient(capped), retries, credentialFingerprint });
 }
 
 async function importCategories(c: Ctx): Promise<Record<ItemKind, XtreamCategory[]>> {
@@ -294,6 +295,9 @@ async function importXtream(
           ...(account.expiresAt !== undefined ? { expiresAt: account.expiresAt } : {}),
         };
       }
+      if (opened.value.credentialFingerprint !== undefined)
+        settings.credentialFingerprint = opened.value.credentialFingerprint;
+      else delete settings.credentialFingerprint;
       await updateSourceSettings(tx, source.id, settings);
     },
   });

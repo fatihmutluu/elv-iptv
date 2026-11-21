@@ -1,27 +1,12 @@
 import type { AppI18n } from '@elv/i18n';
-import {
-  type ClockAnchor,
-  type PlaybackClock,
-  type PlaybackService,
-  type PlaybackStatus,
-  positionAt,
-} from '@elv/playback';
-import {
-  Icon,
-  MicroPill,
-  Scrim,
-  TABULAR_NUMS_STYLE,
-  useTheme,
-  useViewport,
-  webBackdropBlur,
-} from '@elv/ui-kit';
+import type { PlaybackClock, PlaybackService, PlaybackStatus } from '@elv/playback';
+import { Icon, MicroPill, Scrim, useTheme, useViewport, webBackdropBlur } from '@elv/ui-kit';
 import type { ReactElement } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { type DescribedPlaybackFailure, describePlaybackFailure } from './errors';
-import { OsdButton, PlayerLockedOverlay } from './PlayerOsdButton';
-import { usePlaybackTicker } from './usePlaybackTicker';
+import { OsdButton, OsdClock, PLAYER_KEY_SHORTCUTS, PlayerLockedOverlay } from './PlayerOsdButton';
 import type { TvOsdAction } from './usePlayerControls';
-import { formatPlaybackPosition, VodProgressBar } from './VodProgressBar';
+import { VodProgressBar } from './VodProgressBar';
 
 export { PlayerLockedOverlay };
 
@@ -45,39 +30,6 @@ export function formatStatusLine(status: PlaybackStatus, i18n: AppI18n): string 
     case 'failed':
       return i18n.t(describePlaybackFailure(status.error).messageId);
   }
-}
-
-const readClockText = (anchor: ClockAnchor | undefined, nowMs: number): string =>
-  anchor === undefined ? '--:--' : formatPlaybackPosition(positionAt(anchor, nowMs));
-
-const sameText = (a: string, b: string): boolean => a === b;
-
-function OsdClock(p: {
-  service: PlaybackService | null;
-  clock: PlaybackClock;
-  previewPositionMs: number | undefined;
-}): ReactElement {
-  const theme = useTheme();
-  const text = usePlaybackTicker({
-    service: p.service,
-    clock: p.clock,
-    mode: 'second',
-    derive: readClockText,
-    isEqual: sameText,
-  });
-  return (
-    <Text
-      testID="osd-clock"
-      style={[
-        theme.typography.title,
-        TABULAR_NUMS_STYLE,
-        playerStyles.clock,
-        { color: theme.colors.textPrimary },
-      ]}
-    >
-      {p.previewPositionMs === undefined ? text : formatPlaybackPosition(p.previewPositionMs)}
-    </Text>
-  );
 }
 
 /** Props of {@link PlayerOsd}. */
@@ -111,6 +63,8 @@ export interface PlayerOsdProps {
   onSeekRatio: (ratio: number) => void;
   onOpenTracks: () => void;
   onOpenSettings?: () => void;
+  onToggleMute?: () => void;
+  onToggleFullscreen?: () => void;
   onLock?: () => void;
   onJumpPreviousChannel?: () => void;
   onPrev: () => void;
@@ -125,6 +79,8 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
   const { i18n, isTv, isVod, service, settingsOpen = false } = p;
   const resolvedDesktop = p.isDesktop ?? viewport.formFactor === 'desktop';
   const isPortrait = !resolvedDesktop && !isTv && viewport.orientation === 'portrait';
+  const shortcut = (key: keyof typeof PLAYER_KEY_SHORTCUTS) =>
+    resolvedDesktop ? { keyShortcuts: PLAYER_KEY_SHORTCUTS[key] } : {};
   const isFocused = (action: TvOsdAction): boolean =>
     isTv && p.tvOsdFocused && p.tvOsdAction === action;
   const trimmedSubtitle = p.subtitle?.trim();
@@ -165,6 +121,7 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
           variant={isPortrait ? 'icon' : 'default'}
           {...(isPortrait ? {} : { label: i18n.t('player.back') })}
           accessibilityLabel={i18n.t('player.back')}
+          {...shortcut('back')}
           onPress={p.onExit}
           isTv={isTv}
           tvFocused={isFocused('back')}
@@ -218,10 +175,33 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
               variant={isPortrait ? 'icon' : 'default'}
               {...(isPortrait ? {} : { label: i18n.t('player.tracks') })}
               accessibilityLabel={i18n.t('player.tracks')}
+              {...shortcut('tracks')}
               active={p.tracksOpen}
               onPress={p.onOpenTracks}
               isTv={isTv}
               tvFocused={isFocused('tracks')}
+            />
+          ) : null}
+          {resolvedDesktop && service !== null && p.onToggleMute !== undefined ? (
+            <OsdButton
+              testID="player-mute-button"
+              icon="audio"
+              variant="icon"
+              accessibilityLabel={i18n.t('player.mute')}
+              {...shortcut('mute')}
+              onPress={p.onToggleMute}
+              isTv={isTv}
+            />
+          ) : null}
+          {resolvedDesktop && service !== null && p.onToggleFullscreen !== undefined ? (
+            <OsdButton
+              testID="player-fullscreen-button"
+              icon="aspect"
+              variant="icon"
+              accessibilityLabel={i18n.t('live.watchFullscreen')}
+              {...shortcut('fullscreen')}
+              onPress={p.onToggleFullscreen}
+              isTv={isTv}
             />
           ) : null}
           {p.canLock === true && p.onLock !== undefined ? (
@@ -302,6 +282,7 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
                 testID="player-seek-back"
                 icon="skipBack"
                 label={i18n.t('player.seekBack')}
+                {...shortcut('seekBack')}
                 onPress={p.onSeekBack}
                 isTv={isTv}
                 tvFocused={isFocused('seekBack')}
@@ -311,6 +292,7 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
                 variant="primary"
                 icon={p.isPausedOrEnded ? 'play' : 'pause'}
                 label={p.isPausedOrEnded ? i18n.t('player.play') : i18n.t('player.pause')}
+                {...shortcut('playPause')}
                 onPress={p.onTogglePlayPause}
                 isTv={isTv}
                 tvFocused={isFocused('playPause')}
@@ -319,6 +301,7 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
                 testID="player-seek-forward"
                 icon="skipForward"
                 label={i18n.t('player.seekForward')}
+                {...shortcut('seekForward')}
                 onPress={p.onSeekForward}
                 isTv={isTv}
                 tvFocused={isFocused('seekForward')}
@@ -383,7 +366,6 @@ export const playerStyles = StyleSheet.create({
   osdTitles: { flex: 1, minWidth: 0, gap: 2 },
   statusRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   utilityCluster: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },
-  clock: { fontWeight: '600' },
   errorBox: {
     flexDirection: 'row',
     alignItems: 'center',

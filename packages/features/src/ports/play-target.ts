@@ -4,6 +4,8 @@ import type { UserItemKind } from '@elv/data';
 export interface PlayableEntry {
   readonly itemKey: string;
   readonly sourceId: string;
+  /** Cross-source credential pool key (`fp:...`) when available; falls back to `sourceId` (#265). */
+  readonly accountKey?: string;
   readonly title: string;
   readonly kind: 'live' | 'vod';
   readonly startPositionMs?: number;

@@ -468,6 +468,9 @@ msgstr "-10s"
 msgid "player.seekForward"
 msgstr "+10s"
 
+msgid "player.mute"
+msgstr "Mute"
+
 msgid "player.tracks"
 msgstr "Audio & Subtitles"
 

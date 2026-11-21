@@ -12,6 +12,7 @@ import {
   transportHeaders,
 } from '@elv/domain';
 import { createXtreamClient } from '@elv/sources';
+import { isCredentialFingerprint, resolveAccountPoolKey } from './credential-fingerprint';
 import { placeholderNames } from './m3u-templating';
 import { type ItemRow, queryPlayable } from './queries';
 import { getSource, type SourceRecord, secretKey } from './sources';
@@ -22,6 +23,8 @@ export interface StreamRequest {
   url: string;
   /** Lower-case header names. */
   headers: Record<string, string>;
+  /** Opaque account pool key (`credentialFingerprint` when known, else `sourceId`) for connection pooling (`#265`). */
+  accountKey?: string;
 }
 
 /** Rebuilds the stored templates of one source in memory. */
@@ -192,6 +195,11 @@ export function createPlaytimeResolverCache(deps: {
       const source = await getSource(deps.db, play.sourceId);
       if (source === undefined) return notFound();
       const headers = transportHeaders(source.settings.transport);
+      const fp = source.settings.credentialFingerprint;
+      const accountKey = resolveAccountPoolKey({
+        id: source.id,
+        ...(isCredentialFingerprint(fp) ? { credentialFingerprint: fp } : {}),
+      });
 
       if (play.urlTemplate === null) {
         const creds = await xtreamSecretFor(play.sourceId);
@@ -211,6 +219,7 @@ export function createPlaytimeResolverCache(deps: {
             client.streamUrl(play.streamKind, id, play.extension ?? undefined),
           ),
           headers,
+          accountKey,
         });
       }
 
@@ -270,7 +279,7 @@ export function createPlaytimeResolverCache(deps: {
           }
         }
       }
-      return ok({ url: normalizeMulticastUrl(url), headers });
+      return ok({ url: normalizeMulticastUrl(url), headers, accountKey });
     },
   };
 }

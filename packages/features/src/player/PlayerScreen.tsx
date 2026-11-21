@@ -96,6 +96,7 @@ export function PlayerScreen({
   const zapByRef = useRef<(delta: 1 | -1, repeat?: boolean) => void>(zapBy);
   zapByRef.current = zapBy;
   const hostBackRef = useRef<() => void>(() => onExitRef.current());
+  const hostFullscreenRef = useRef<() => void>(() => undefined);
 
   const { sessionState, activeService, status, tracks } = usePlayerSession({
     videoHost,
@@ -103,6 +104,7 @@ export function PlayerScreen({
     clockRef,
     timersRef,
     hostBackRef,
+    hostFullscreenRef,
     onExitRef,
     zapByRef,
     onServiceReady,
@@ -143,6 +145,9 @@ export function PlayerScreen({
     activeTarget.previousChannel !== undefined &&
     activeTarget.previousChannel.itemKey !== activeTarget.itemKey;
   const nextEpisode = activeTarget.kind === 'vod' ? activeTarget.nextEpisodes?.[0] : undefined;
+  const hostToggleFullscreen =
+    sessionState.kind === 'ready' ? sessionState.opened.toggleFullscreen : undefined;
+  const hostToggleMute = sessionState.kind === 'ready' ? sessionState.opened.toggleMute : undefined;
 
   const controls = usePlayerControls({
     formFactor,
@@ -165,8 +170,11 @@ export function PlayerScreen({
     onSeekCommit: flushProgress,
     onPlayNextEpisode: handlePlayNextEpisode,
     onJumpPreviousChannel: handleJumpPreviousChannel,
+    onToggleFullscreen: hostToggleFullscreen,
+    onToggleMute: hostToggleMute,
   });
   hostBackRef.current = controls.handleBack;
+  hostFullscreenRef.current = controls.toggleFullscreen;
   cancelScrubRef.current = controls.cancelScrub;
 
   const nextEpisodeNode = (
@@ -249,6 +257,10 @@ export function PlayerScreen({
       onOpenSettings={() =>
         controls.settingsOpen ? controls.closeSettings() : controls.openSettings()
       }
+      {...(hostToggleMute !== undefined ? { onToggleMute: controls.toggleMute } : {})}
+      {...(hostToggleFullscreen !== undefined
+        ? { onToggleFullscreen: controls.toggleFullscreen }
+        : {})}
       onLock={controls.lockControls}
       onJumpPreviousChannel={handleJumpPreviousChannel}
       onPrev={() => zapBy(-1)}

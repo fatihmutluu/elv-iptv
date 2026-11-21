@@ -9,6 +9,7 @@ import {
   useRef,
 } from 'react';
 import {
+  type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   StyleSheet,
@@ -25,6 +26,10 @@ import type {
 import { GridHeaderBar, GridRowView } from './CategoryGridRow';
 import { chunkRowItems, computeRowCount, type GridFocusPosition } from './catalog-model';
 import { useCategoryGridData } from './useCategoryGridData';
+import {
+  computeVirtualGridRowFromOffset,
+  computeVirtualGridScrollOffset,
+} from './virtual-grid-math';
 
 const SCROLL_QUANTUM = 3;
 
@@ -61,6 +66,10 @@ export interface CategoryGridViewProps {
   readonly onOpenDetail: (target: DetailTarget) => void;
   readonly onGridMetaChange?: (meta: CategoryGridMeta) => void;
   readonly gridAccessRef?: MutableRefObject<CategoryGridAccess>;
+  /** Optional top padding applied to the virtualized list content container. */
+  readonly contentPaddingTop?: number;
+  /** Optional top border width on the virtualized list container for scroll math alignment. */
+  readonly borderTopWidth?: number;
 }
 
 /**
@@ -68,23 +77,11 @@ export interface CategoryGridViewProps {
  * Uses `createPagedListSource` (`pageSize = 180`, `maxPages = 8`) with deterministic `VirtualizedList`
  * row layouts on pointer/touch and a strict bounded `[windowStart, windowEnd]` TV viewport.
  */
-export function CategoryGridView({
-  kind,
-  category,
-  catalog,
-  watchFilter,
-  refreshToken,
-  userStateVersion,
-  layout,
-  backFocused,
-  filterResetFocused,
-  focusedGridPos,
-  onBack,
-  onResetFilter,
-  onOpenDetail,
-  onGridMetaChange,
-  gridAccessRef,
-}: CategoryGridViewProps): ReactElement {
+export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
+  const { kind, category, catalog, watchFilter, refreshToken, userStateVersion, layout } = props;
+  const { focusedGridPos, onOpenDetail, onGridMetaChange, gridAccessRef } = props;
+  const contentPaddingTop = props.contentPaddingTop ?? 0;
+  const borderTopWidth = props.borderTopWidth ?? 0;
   const theme = useTheme();
   const i18n = useI18n();
   const cols = layout.gridColumns;
@@ -99,14 +96,42 @@ export function CategoryGridView({
     visibleGridRows: layout.visibleGridRows,
   });
 
+  const listRef = useRef<InstanceType<typeof VirtualizedList>>(null);
+  const scrollOffsetRef = useRef(0);
+  const viewportHeightRef = useRef(0);
   const lastScrollBucketRef = useRef(-1);
   const visibleWindowRef = useRef({ startRow: 0, endRow: layout.visibleGridRows + 2 });
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset scroll quantum when source changes
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset scroll offset only when source/filter changes
+  useEffect(() => {
+    scrollOffsetRef.current = 0;
+  }, [category.row.id, watchFilter]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: invalidate scroll bucket on source, filter, or grid resize
   useEffect(() => {
     lastScrollBucketRef.current = -1;
     visibleWindowRef.current = { startRow: 0, endRow: layout.visibleGridRows + 2 };
-  }, [category.row.id, layout.visibleGridRows, watchFilter]);
+  }, [category.row.id, cols, layout.visibleGridRows, watchFilter]);
+
+  const handleListLayout = useCallback((event: LayoutChangeEvent) => {
+    if (event.nativeEvent.layout.height > 0) {
+      viewportHeightRef.current = event.nativeEvent.layout.height;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (layout.isTv || focusedGridPos === null) return;
+    const offset = computeVirtualGridScrollOffset({
+      rowIndex: focusedGridPos.row,
+      rowStride: layout.gridRowHeight,
+      paddingTop: contentPaddingTop,
+      borderTopWidth,
+      viewportHeight: viewportHeightRef.current,
+      currentOffset: scrollOffsetRef.current,
+      align: 'nearest',
+    });
+    listRef.current?.scrollToOffset?.({ offset, animated: false });
+  }, [borderTopWidth, contentPaddingTop, focusedGridPos, layout.gridRowHeight, layout.isTv]);
 
   const rowCount = computeRowCount(gridData.itemCount, cols);
   const maxMountedRows = layout.visibleGridRows + 2;
@@ -156,9 +181,19 @@ export function CategoryGridView({
 
   const handleScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (!gridData.isAllFilter || !gridData.pagedSource) return;
       const y = Math.max(0, event.nativeEvent.contentOffset.y);
-      const topRow = Math.floor(y / layout.gridRowHeight);
+      scrollOffsetRef.current = y;
+      const measuredHeight = event.nativeEvent.layoutMeasurement?.height;
+      if (typeof measuredHeight === 'number' && measuredHeight > 0) {
+        viewportHeightRef.current = measuredHeight;
+      }
+      if (!gridData.isAllFilter || !gridData.pagedSource) return;
+      const topRow = computeVirtualGridRowFromOffset({
+        scrollOffset: y,
+        rowStride: layout.gridRowHeight,
+        paddingTop: contentPaddingTop,
+        borderTopWidth,
+      });
       const bucket = Math.floor(topRow / SCROLL_QUANTUM);
       if (bucket === lastScrollBucketRef.current) return;
       lastScrollBucketRef.current = bucket;
@@ -168,7 +203,9 @@ export function CategoryGridView({
       gridData.hydrateProgressRange(topRow, endRow);
     },
     [
+      borderTopWidth,
       cols,
+      contentPaddingTop,
       gridData.hydrateProgressRange,
       gridData.isAllFilter,
       gridData.pagedSource,
@@ -199,10 +236,27 @@ export function CategoryGridView({
   const getItemLayout = useCallback(
     (_data: unknown, index: number) => ({
       length: layout.gridRowHeight,
-      offset: layout.gridRowHeight * index,
+      offset: computeVirtualGridScrollOffset({
+        rowIndex: index,
+        rowStride: layout.gridRowHeight,
+        paddingTop: contentPaddingTop,
+        borderTopWidth,
+      }),
       index,
     }),
-    [layout.gridRowHeight],
+    [borderTopWidth, contentPaddingTop, layout.gridRowHeight],
+  );
+
+  const rowCommonProps = useMemo(
+    () => ({
+      columns: cols,
+      categoryId: category.row.id,
+      progressByKey: gridData.progressByKey,
+      watchedLabel,
+      layout,
+      onOpenDetail,
+    }),
+    [category.row.id, cols, gridData.progressByKey, layout, onOpenDetail, watchedLabel],
   );
 
   const renderRow = useCallback(
@@ -212,26 +266,22 @@ export function CategoryGridView({
         <GridRowView
           rowIndex={row.rowIndex}
           items={row.items}
-          columns={cols}
-          categoryId={category.row.id}
-          progressByKey={gridData.progressByKey}
-          watchedLabel={watchedLabel}
-          layout={layout}
           focusedCol={null}
-          onOpenDetail={onOpenDetail}
+          {...rowCommonProps}
         />
       );
     },
-    [category.row.id, cols, gridData.progressByKey, layout, onOpenDetail, watchedLabel],
+    [rowCommonProps],
   );
 
   const extraData = useMemo(
     () => ({
+      cols,
       pageVersion: gridData.pageVersion,
       progressByKey: gridData.progressByKey,
       filteredItems: gridData.filteredItems,
     }),
-    [gridData.filteredItems, gridData.pageVersion, gridData.progressByKey],
+    [cols, gridData.filteredItems, gridData.pageVersion, gridData.progressByKey],
   );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: pageVersion refreshes memoized TV row slices when LRU pages arrive
@@ -254,8 +304,8 @@ export function CategoryGridView({
         categoryLabel={category.label}
         countLabel={countLabel}
         layout={layout}
-        backFocused={backFocused}
-        onBack={onBack}
+        backFocused={props.backFocused}
+        onBack={props.onBack}
       />
 
       {gridData.loadingFiltered ? (
@@ -265,13 +315,8 @@ export function CategoryGridView({
               key={rowIdx}
               rowIndex={rowIdx}
               items={Array.from({ length: cols }, () => undefined)}
-              columns={cols}
-              categoryId={category.row.id}
-              progressByKey={gridData.progressByKey}
-              watchedLabel={watchedLabel}
-              layout={layout}
               focusedCol={null}
-              onOpenDetail={onOpenDetail}
+              {...rowCommonProps}
             />
           ))}
         </View>
@@ -293,8 +338,8 @@ export function CategoryGridView({
               testID="catalog-filter-reset"
               label={i18n.t('catalog.clearFilter')}
               focusable={!layout.isTv}
-              focused={filterResetFocused}
-              onPress={onResetFilter}
+              focused={props.filterResetFocused}
+              onPress={props.onResetFilter}
             />
           </View>
         </View>
@@ -305,18 +350,14 @@ export function CategoryGridView({
               key={row.rowIndex}
               rowIndex={row.rowIndex}
               items={row.items}
-              columns={cols}
-              categoryId={category.row.id}
-              progressByKey={gridData.progressByKey}
-              watchedLabel={watchedLabel}
-              layout={layout}
               focusedCol={focusedGridPos?.row === row.rowIndex ? focusedGridPos.col : null}
-              onOpenDetail={onOpenDetail}
+              {...rowCommonProps}
             />
           ))}
         </View>
       ) : (
         <VirtualizedList
+          ref={listRef}
           testID="catalog-grid-list"
           style={styles.listFlex}
           data={activeSource}
@@ -329,10 +370,15 @@ export function CategoryGridView({
           windowSize={5}
           initialNumToRender={layout.visibleGridRows + 2}
           maxToRenderPerBatch={4}
+          onLayout={handleListLayout}
           onScroll={handleScroll}
           scrollEventThrottle={32}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: theme.spacing.xl }}
+          contentContainerStyle={{
+            paddingTop: contentPaddingTop,
+            paddingBottom: theme.spacing.xl,
+            ...(borderTopWidth > 0 ? { borderTopWidth } : {}),
+          }}
         />
       )}
     </View>

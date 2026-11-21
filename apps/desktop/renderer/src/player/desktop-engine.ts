@@ -35,6 +35,8 @@ export interface DesktopEngine extends PlayerEngine {
   setArea(area: PlayerArea): void;
   /** Toggles the presenter's fullscreen (not a port command). */
   toggleFullscreen(): void;
+  /** Toggles mpv audio mute (`cycle mute`). */
+  toggleMute(): void;
   /** Presentation events outside the port; the latest `presenter` event is replayed to a new listener. */
   onUi(listener: (event: PlayerUiEvent) => void): () => void;
 }
@@ -149,6 +151,7 @@ export async function createDesktopEngine(
     stop: (attempt) => send({ name: 'stop', attempt }),
     recreate: (attempt) => send({ name: 'recreate', attempt }),
     toggleFullscreen: () => send({ name: 'fullscreen' }),
+    toggleMute: () => send({ name: 'mute' }),
     setArea(area) {
       if (!released) bridge.setArea({ engineId: id, area });
     },

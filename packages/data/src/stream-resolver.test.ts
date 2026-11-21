@@ -116,4 +116,38 @@ describe('normalizeMulticastUrl (#267)', () => {
     expect(r0.ok && r0.value.url).toBe('udp://239.10.0.1:1234');
     expect(r1.ok && r1.value.url).toBe('RTP://239.10.0.2:5004/feed');
   });
+
+  it('returns credentialFingerprint as accountKey when valid and falls back to sourceId otherwise (#265)', async () => {
+    const e = await setupM3u(
+      `#EXTM3U\n${extinf('Live 1', 'http://cdn.example/hls/ch1/index.m3u8')}`,
+      {
+        playlistUrl: 'http://cdn.example/plain.m3u',
+      },
+    );
+    expect((await importCatalog(e.sourceId, e.deps)).ok).toBe(true);
+    const row = (await e.db.all<{ key: string }>('SELECT key FROM live LIMIT 1'))[0];
+    const cache = createPlaytimeResolverCache({
+      db: e.db,
+      secrets: e.secrets,
+      http: e.deps.http,
+    });
+
+    const withoutFp = await cache.resolveStream(row?.key ?? '');
+    expect(withoutFp.ok && withoutFp.value.accountKey).toBe(e.sourceId);
+
+    const validFp = `fp:${'b'.repeat(64)}`;
+    await e.db.run('UPDATE sources SET settings_json = ? WHERE id = ?', [
+      JSON.stringify({ credentialFingerprint: validFp }),
+      e.sourceId,
+    ]);
+    const withFp = await cache.resolveStream(row?.key ?? '');
+    expect(withFp.ok && withFp.value.accountKey).toBe(validFp);
+
+    await e.db.run('UPDATE sources SET settings_json = ? WHERE id = ?', [
+      JSON.stringify({ credentialFingerprint: 'fp:invalid' }),
+      e.sourceId,
+    ]);
+    const withBadFp = await cache.resolveStream(row?.key ?? '');
+    expect(withBadFp.ok && withBadFp.value.accountKey).toBe(e.sourceId);
+  });
 });

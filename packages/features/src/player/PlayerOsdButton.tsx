@@ -1,7 +1,14 @@
 import type { AppI18n } from '@elv/i18n';
 import {
+  type ClockAnchor,
+  type PlaybackClock,
+  type PlaybackService,
+  positionAt,
+} from '@elv/playback';
+import {
   Icon,
   type IconName,
+  TABULAR_NUMS_STYLE,
   useTheme,
   useViewport,
   webBackdropBlur,
@@ -10,6 +17,53 @@ import {
 } from '@elv/ui-kit';
 import type { ReactElement } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { usePlaybackTicker } from './usePlaybackTicker';
+import { formatPlaybackPosition } from './VodProgressBar';
+
+/** Synchronized ARIA `aria-keyshortcuts` descriptors for desktop web player controls (#283). */
+export const PLAYER_KEY_SHORTCUTS = {
+  playPause: 'Space k',
+  seekBack: 'ArrowLeft j',
+  seekForward: 'ArrowRight l',
+  mute: 'm',
+  fullscreen: 'f',
+  tracks: 'c',
+  back: 'Escape',
+} as const;
+
+const readClockText = (anchor: ClockAnchor | undefined, nowMs: number): string =>
+  anchor === undefined ? '--:--' : formatPlaybackPosition(positionAt(anchor, nowMs));
+
+const sameText = (a: string, b: string): boolean => a === b;
+
+/** Live-ticking tabular playback clock displayed in the player OSD. */
+export function OsdClock(p: {
+  service: PlaybackService | null;
+  clock: PlaybackClock;
+  previewPositionMs: number | undefined;
+}): ReactElement {
+  const theme = useTheme();
+  const text = usePlaybackTicker({
+    service: p.service,
+    clock: p.clock,
+    mode: 'second',
+    derive: readClockText,
+    isEqual: sameText,
+  });
+  return (
+    <Text
+      testID="osd-clock"
+      style={[
+        theme.typography.title,
+        TABULAR_NUMS_STYLE,
+        styles.clock,
+        { color: theme.colors.textPrimary },
+      ]}
+    >
+      {p.previewPositionMs === undefined ? text : formatPlaybackPosition(p.previewPositionMs)}
+    </Text>
+  );
+}
 
 function blurWebTarget(target: unknown): void {
   if ((Platform.OS as string) === 'web') {
@@ -22,6 +76,7 @@ export interface OsdButtonProps {
   testID: string;
   label?: string;
   accessibilityLabel?: string;
+  keyShortcuts?: string;
   icon?: IconName;
   variant?: 'default' | 'primary' | 'icon';
   active?: boolean;
@@ -55,10 +110,16 @@ export function OsdButton(p: OsdButtonProps): ReactElement {
   const foreground = isPrimary ? theme.colors.ctaFg : theme.colors.textPrimary;
   const scale = isPrimary && focused && !theme.reduceMotion ? theme.focus.buttonScale : 1;
 
+  const webShortcutProps =
+    (Platform.OS as string) === 'web' && p.keyShortcuts !== undefined
+      ? ({ 'aria-keyshortcuts': p.keyShortcuts } as Record<string, unknown>)
+      : undefined;
+
   return (
     <Pressable
       testID={p.testID}
       {...(p.isTv ? { focusable: false } : {})}
+      {...webShortcutProps}
       accessibilityRole="button"
       accessibilityLabel={p.accessibilityLabel ?? p.label ?? p.testID}
       accessibilityState={{ selected: focused }}
@@ -159,6 +220,7 @@ export function PlayerLockedOverlay({
 }
 
 const styles = StyleSheet.create({
+  clock: { fontWeight: '600' },
   button: {
     position: 'relative',
     flexDirection: 'row',

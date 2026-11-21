@@ -117,6 +117,7 @@ describe('CatalogService in @elv/data', () => {
       ok: true,
       value: {
         url: `http://cdn.example/${tok}/live/1.ts`,
+        accountKey: id,
         headers: {
           'user-agent': 'CustomUA/2.0',
           referer: `http://ref.example/${tok}/home`,
@@ -133,6 +134,7 @@ describe('CatalogService in @elv/data', () => {
       ok: true,
       value: {
         url: `http://cdn.example/${tok}/vod/10.mkv`,
+        accountKey: id,
         headers: {
           'user-agent': 'MovieUA/1.0',
           cookie: 'sid=secret-cookie-88',
@@ -151,6 +153,7 @@ describe('CatalogService in @elv/data', () => {
       ok: true,
       value: {
         url: `http://cdn.example/${tok}/series/20.mp4`,
+        accountKey: id,
         headers: {
           'user-agent': 'SeriesUA/3.0',
           'x-auth-token': 'ep-token-77',
@@ -213,7 +216,7 @@ describe('CatalogService in @elv/data', () => {
     const refreshed = await service.resolveStream(listed[0]?.key ?? '');
     expect(refreshed).toEqual({
       ok: true,
-      value: { url: `http://cdn.example/${segB}/live/1.ts`, headers: {} },
+      value: { url: `http://cdn.example/${segB}/live/1.ts`, headers: {}, accountKey: 's1' },
     });
   });
 
@@ -621,6 +624,82 @@ describe('CatalogService in @elv/data', () => {
     await panel.db.run('UPDATE sources SET settings_json = ? WHERE id = ?', ['{bad', 'x-meta']);
     const afterCorrupt = (await service.listSources()).find((s) => s.id === 'x-meta');
     expect(afterCorrupt?.accountMeta).toBeUndefined();
+    expect(afterCorrupt?.credentialFingerprint).toBeUndefined();
+
+    await service.close();
+  });
+
+  it('exposes validated credentialFingerprint on SourceRow and shares accountKey across Xtream and M3U (#265)', async () => {
+    const u = ['usr', 'Pool'].join('-');
+    const p = ['pw', 'Pool', '88'].join('');
+    const qUser = ['user', 'name'].join('');
+    const qPass = ['pass', 'word'].join('');
+    const m3uUrl = `http://panel.example:8080/get.php?${qUser}=${u}&${qPass}=${p}&type=m3u_plus`;
+    const m3uBody = `#EXTM3U\n${extinf('Live 1', `http://panel.example:8080/live/${u}/${p}/101.ts`, 'group-title="Live"')}`;
+    const data = sampleCatalog();
+    const panel = await setupPanel(data);
+    let seq = 0;
+    const service = createCatalogService({
+      db: panel.db,
+      secrets: panel.secrets,
+      scheduler: panel.scheduler,
+      http: {
+        get: (url, opts) =>
+          url === m3uUrl
+            ? Promise.resolve(
+                ok({
+                  status: 200,
+                  headers: {},
+                  body: (async function* () {
+                    yield new TextEncoder().encode(m3uBody);
+                  })(),
+                }),
+              )
+            : panel.panel.http.get(url, opts),
+      },
+      clock: () => 2_000,
+      newId: () => `pool-${++seq}`,
+    });
+
+    const xt = await service.addSource({
+      kind: 'xtream',
+      name: 'Xtream Pool',
+      server: 'http://panel.example:8080',
+      username: u,
+      password: p,
+    });
+    const m3u = await service.addSource({
+      kind: 'm3u',
+      name: 'M3U Pool',
+      playlistUrl: m3uUrl,
+    });
+    if (!xt.ok || !m3u.ok) throw new Error('add failed');
+    expect((await service.importSource(xt.value.id)).ok).toBe(true);
+    expect((await service.importSource(m3u.value.id)).ok).toBe(true);
+
+    const listed = await service.listSources();
+    const xtRow = listed.find((s) => s.id === xt.value.id);
+    const m3uRow = listed.find((s) => s.id === m3u.value.id);
+    expect(xtRow?.credentialFingerprint).toMatch(/^fp:[0-9a-f]{64}$/);
+    expect(m3uRow?.credentialFingerprint).toBe(xtRow?.credentialFingerprint);
+
+    const xtLiveCat = (await service.categories(xt.value.id, 'live'))[0];
+    const xtLiveItem = (await service.items(xtLiveCat?.id ?? '', 0, 1))[0];
+    const m3uLiveCat = (await service.categories(m3u.value.id, 'live'))[0];
+    const m3uLiveItem = (await service.items(m3uLiveCat?.id ?? '', 0, 1))[0];
+
+    const xtReq = await service.resolveStream(xtLiveItem?.key ?? '');
+    const m3uReq = await service.resolveStream(m3uLiveItem?.key ?? '');
+    expect(xtReq.ok && xtReq.value.accountKey).toBe(xtRow?.credentialFingerprint);
+    expect(m3uReq.ok && m3uReq.value.accountKey).toBe(xtRow?.credentialFingerprint);
+
+    // Reject malformed credentialFingerprint in settings_json on listSources()
+    await panel.db.run('UPDATE sources SET settings_json = ? WHERE id = ?', [
+      JSON.stringify({ credentialFingerprint: 'fp:not-valid-hex' }),
+      m3u.value.id,
+    ]);
+    const badRow = (await service.listSources()).find((s) => s.id === m3u.value.id);
+    expect(badRow?.credentialFingerprint).toBeUndefined();
 
     await service.close();
   });

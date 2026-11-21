@@ -9,7 +9,7 @@ import {
   View,
   VirtualizedList,
 } from 'react-native';
-import type { DisplayCategory, PagedListSource } from '../shared';
+import { type DisplayCategory, type PagedListSource, useActiveEffect } from '../shared';
 import { EpgChannelRow } from './EpgChannelRow';
 import { EpgPreviewHeader, EpgTimeRuler } from './EpgPreviewHeader';
 import { buildEpgRulerTicks, computeNowLineRatio, EPG_VISIBLE_SPAN_MS } from './live-model';
@@ -73,8 +73,9 @@ export function EpgGridView({
   const maxMountedRows = visibleRows + 2;
 
   const [clockMs, setClockMs] = useState(() => nowMs ?? Date.now());
-  useEffect(() => {
+  useActiveEffect(() => {
     if (nowMs !== undefined) return;
+    setClockMs(Date.now());
     const timer = setInterval(() => setClockMs(Date.now()), LIVE_CLOCK_TICK_MS);
     return () => clearInterval(timer);
   }, [nowMs]);

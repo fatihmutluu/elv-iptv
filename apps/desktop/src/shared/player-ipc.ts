@@ -51,7 +51,8 @@ export type BridgeCommand =
   | { name: 'selectAudioTrack'; attempt: AttemptToken; id: string }
   | { name: 'selectSubtitleTrack'; attempt: AttemptToken; id: string | null }
   | { name: 'release' }
-  | { name: 'fullscreen' };
+  | { name: 'fullscreen' }
+  | { name: 'mute' };
 
 /** Renderer to main (`player:command`). */
 export interface PlayerCommandMessage {
@@ -215,6 +216,7 @@ function isBridgeCommand(x: unknown): x is BridgeCommand {
       return isAttempt(x['attempt']) && (x['id'] === null || isSubtitleTrackId(x['id']));
     case 'release':
     case 'fullscreen':
+    case 'mute':
       return true;
     default:
       return false;

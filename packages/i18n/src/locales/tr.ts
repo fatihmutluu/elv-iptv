@@ -182,6 +182,7 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'player.pause': 'Duraklat',
   'player.seekBack': '-10 sn',
   'player.seekForward': '+10 sn',
+  'player.mute': 'Sesi kapat',
   'player.tracks': 'Ses ve Altyazı',
   'player.audioTracks': 'Ses',
   'player.subtitleTracks': 'Altyazı',

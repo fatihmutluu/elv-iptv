@@ -218,6 +218,9 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       case 'fullscreen':
         engine.toggleFullscreen();
         break;
+      case 'mute':
+        engine.toggleMute();
+        break;
       case 'release':
         release(engineId);
         break;
