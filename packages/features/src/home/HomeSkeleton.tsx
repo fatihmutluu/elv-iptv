@@ -31,6 +31,8 @@ export function computeHomeLayout(viewport: ViewportInfo, theme: Theme): HomeLay
     viewport.orientation === 'portrait' &&
     viewport.formFactor !== 'tv' &&
     viewport.formFactor !== 'desktop';
+  const safeHeight =
+    Number.isFinite(viewport.height) && viewport.height > 0 ? viewport.height : 720;
   const padX = isTv
     ? Math.max(theme.spacing.xl, viewport.overscan.x)
     : isPortrait
@@ -40,6 +42,11 @@ export function computeHomeLayout(viewport: ViewportInfo, theme: Theme): HomeLay
   const topInset = isTv
     ? Math.max(viewport.safeArea.top, viewport.overscan.y)
     : viewport.safeArea.top;
+  const posterMaxW = isTv ? 184 : isPortrait ? (viewport.formFactor === 'tablet' ? 164 : 124) : 184;
+  const wideMaxW = isTv ? 290 : isPortrait ? (viewport.formFactor === 'tablet' ? 285 : 270) : 296;
+  const heroHeight = isPortrait
+    ? Math.min(410, Math.max(320, Math.round(safeHeight * 0.52)))
+    : Math.min(480, Math.max(300, Math.round(safeHeight * 0.55)));
   return {
     isTv,
     isTouch,
@@ -47,13 +54,20 @@ export function computeHomeLayout(viewport: ViewportInfo, theme: Theme): HomeLay
     padX,
     railGap,
     heroTopClearance: (!isPortrait ? (isTv ? 58 : 56) : 50) + topInset + 24,
-    heroHeight: isPortrait ? 300 : isTv ? 440 : 380,
-    wideCardWidth: computePeekCardWidth(viewport.width, padX, viewport.columns.wideRail, railGap),
+    heroHeight,
+    wideCardWidth: computePeekCardWidth(
+      viewport.width,
+      padX,
+      viewport.columns.wideRail,
+      railGap,
+      wideMaxW,
+    ),
     posterCardWidth: computePeekCardWidth(
       viewport.width,
       padX,
       viewport.columns.posterRail,
       railGap,
+      posterMaxW,
     ),
   };
 }

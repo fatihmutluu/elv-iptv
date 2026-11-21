@@ -493,6 +493,9 @@ describe('DetailScreen', () => {
       expect(screen.getByTestId('detail-seasons-count')).toHaveTextContent('2 seasons');
       expect(screen.queryByTestId('detail-watched')).toBeNull();
       expect(screen.getByTestId('detail-cast')).toBeTruthy();
+      expect(screen.getByTestId('detail-cast-strip-scroll')).toBeTruthy();
+      expect(screen.getByTestId('detail-seasons-bar-rail-scroll')).toBeTruthy();
+      expect(screen.getByTestId('detail-related-rail-strip-scroll')).toBeTruthy();
 
       // Exact §3 order: Hero -> Cast -> Episodes -> More Like This
       const serialized = JSON.stringify(view.toJSON());

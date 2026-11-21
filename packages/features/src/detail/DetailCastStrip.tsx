@@ -1,15 +1,20 @@
-import { ArtworkImage, useI18n, useTheme } from '@elv/ui-kit';
+import { ArtworkImage, HorizontalRailScroll, useI18n, useTheme } from '@elv/ui-kit';
 import { memo, type ReactElement } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import type { DetailCastMember } from '../shared';
 
 /** Props of {@link DetailCastStrip}. */
 export interface DetailCastStripProps {
   readonly cast: readonly DetailCastMember[];
   readonly padX: number;
+  readonly isTv?: boolean;
 }
 
-function DetailCastStripInner({ cast, padX }: DetailCastStripProps): ReactElement | null {
+function DetailCastStripInner({
+  cast,
+  padX,
+  isTv = false,
+}: DetailCastStripProps): ReactElement | null {
   const theme = useTheme();
   const i18n = useI18n();
   if (cast.length === 0) return null;
@@ -29,9 +34,10 @@ function DetailCastStripInner({ cast, padX }: DetailCastStripProps): ReactElemen
       >
         {i18n.t('detail.cast')}
       </Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
+      <HorizontalRailScroll
+        testID="detail-cast-strip"
+        isTv={isTv}
+        showArrows={!isTv}
         contentContainerStyle={[styles.strip, { paddingHorizontal: padX, gap: theme.spacing.md }]}
       >
         {cast.map((member) => (
@@ -66,7 +72,7 @@ function DetailCastStripInner({ cast, padX }: DetailCastStripProps): ReactElemen
             ) : null}
           </View>
         ))}
-      </ScrollView>
+      </HorizontalRailScroll>
     </View>
   );
 }

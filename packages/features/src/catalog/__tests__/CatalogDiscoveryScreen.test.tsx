@@ -52,6 +52,9 @@ describe('CatalogDiscoveryScreen', () => {
 
     expect(screen.getByTestId('catalog-screen-movie')).toBeTruthy();
     expect(screen.getByTestId('catalog-skeleton')).toBeTruthy();
+    // Non-overlay CatalogSkeleton must use tight top padding (not heroTopClearance >= 80)
+    const skelStyle = StyleSheet.flatten(screen.getByTestId('catalog-skeleton').props.style);
+    expect(skelStyle.paddingTop).toBeLessThanOrEqual(16);
 
     await act(async () => {
       resolveCats([cat0]);
@@ -140,80 +143,56 @@ describe('CatalogDiscoveryScreen', () => {
     await view.unmount();
   });
 
-  it('filters by watch status in Discovery and Grid modes and resets empty filters with Show all', async () => {
-    const cat0 = makeCategory(0, { name: 'Thrillers', itemCount: 3 });
-    const item0 = makeItem(0, 0);
-    const item1 = makeItem(0, 1);
-    const item2 = makeItem(0, 2);
-    const items = [item0, item1, item2];
-    const progress = new Map<string, WatchProgressRow>([
-      [item1.key, makeProgress(item1.key, { positionMs: 600_000, durationMs: 3_600_000 })],
-      [
-        item2.key,
-        makeProgress(item2.key, {
-          positionMs: 3_600_000,
-          durationMs: 3_600_000,
-          watched: true,
-        }),
-      ],
-    ]);
+  it('renders top 16:9 Continue watching rail filtered by kind, uses EditorialCategoryBar, and omits watch-status pill chips', async () => {
+    const categories = Array.from({ length: 8 }, (_, i) => makeCategory(i, { itemCount: 2 }));
+    const itemsByCategory = new Map<string, ItemRow[]>(
+      categories.map((c, i) => [c.id, [makeItem(i, 0), makeItem(i, 1)]]),
+    );
+    const continueWatching: WatchProgressRow[] = [
+      makeProgress('movie:resume-1', {
+        kind: 'movie',
+        title: 'Resumed Film',
+        positionMs: 1_200_000,
+        durationMs: 3_600_000,
+      }),
+      makeProgress('ep:resume-1', {
+        kind: 'episode',
+        seriesKey: 'series:resume-1',
+        title: 'Resumed Show',
+        subtitle: 'S1 E2',
+        positionMs: 900_000,
+        durationMs: 2_700_000,
+      }),
+    ];
 
-    const { catalog } = createMockCatalog({
-      categories: [cat0],
-      itemsByCategory: new Map([[cat0.id, items]]),
-      progressByKey: progress,
-    });
+    const { catalog } = createMockCatalog({ categories, itemsByCategory, continueWatching });
+    const onOpenDetail = jest.fn<void, [DetailTarget]>();
+    const view = await renderCatalog({ catalog, sources: [makeSource()], onOpenDetail });
 
-    const view = await renderCatalog({ catalog, sources: [makeSource()] });
     await waitFor(() => {
-      expect(screen.getByTestId('catalog-rail-0-item-2')).toBeTruthy();
+      expect(screen.getByTestId('catalog-continue-rail')).toBeTruthy();
+      expect(screen.getByTestId('catalog-continue-item-0')).toBeTruthy();
     });
 
-    // Switch to Watched in Discovery Mode -> only 1 item remains
-    await fireEvent.press(screen.getByTestId('catalog-status-watched'));
-    await waitFor(() => {
-      expect(screen.getByTestId('catalog-rail-0-item-0')).toBeTruthy();
-      expect(screen.queryByTestId('catalog-rail-0-item-1')).toBeNull();
-    });
+    // Only the movie continue-watching item appears on Movies tab; zero watch-status pill chips
+    expect(screen.queryByTestId('catalog-continue-item-1')).toBeNull();
+    expect(screen.queryByTestId('catalog-status-all')).toBeNull();
+    expect(screen.queryByTestId('catalog-status-watched')).toBeNull();
 
-    // Open Grid Mode while Watched filter is active, then switch to In progress and verify
-    await fireEvent.press(screen.getByTestId('catalog-cat-chip-0'));
-    await waitFor(() => {
-      expect(screen.getByTestId('catalog-grid-item-0')).toBeTruthy();
-      expect(screen.queryByTestId('catalog-grid-item-1')).toBeNull();
-    });
+    // EditorialCategoryBar renders with Categories dropdown trigger when > 6 categories
+    expect(screen.getByTestId('catalog-category-chips')).toBeTruthy();
+    expect(screen.getByTestId('catalog-category-chips-picker-trigger')).toBeTruthy();
 
-    // Empty filter state: cat1 has only unwatched items -> Watched shows empty state + Show all reset
-    const catEmpty = makeCategory(1, { name: 'Fresh Releases', itemCount: 1 });
-    const unwatchedItem = makeItem(1, 0);
-    const mock2 = createMockCatalog({
-      categories: [catEmpty],
-      itemsByCategory: new Map([[catEmpty.id, [unwatchedItem]]]),
-    });
+    await fireEvent.press(screen.getByTestId('catalog-continue-item-0'));
+    expect(onOpenDetail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        itemKey: 'movie:resume-1',
+        kind: 'movie',
+        title: 'Resumed Film',
+      }),
+    );
 
     await view.unmount();
-
-    const view2 = await renderCatalog({ catalog: mock2.catalog, sources: [makeSource()] });
-    await waitFor(() => {
-      expect(screen.getByTestId('catalog-cat-chip-0')).toBeTruthy();
-    });
-    await fireEvent.press(screen.getByTestId('catalog-cat-chip-0'));
-    await waitFor(() => {
-      expect(screen.getByTestId('catalog-grid-item-0')).toBeTruthy();
-    });
-
-    await fireEvent.press(screen.getByTestId('catalog-status-watched'));
-    await waitFor(() => {
-      expect(screen.getByTestId('catalog-filter-empty')).toBeTruthy();
-      expect(screen.getByTestId('catalog-filter-reset')).toBeTruthy();
-    });
-
-    await fireEvent.press(screen.getByTestId('catalog-filter-reset'));
-    await waitFor(() => {
-      expect(screen.getByTestId('catalog-grid-item-0')).toBeTruthy();
-    });
-
-    await view2.unmount();
   });
 
   it('progressively loads only the first 8 categories and expands on Load more categories', async () => {
@@ -305,7 +284,7 @@ describe('CatalogDiscoveryScreen', () => {
       expect(screen.getByTestId('catalog-rail-0-item-0').props.focusable).toBe(false);
 
       const stripStyle = StyleSheet.flatten(
-        screen.getByTestId('catalog-rail-0-strip').props.contentContainerStyle,
+        screen.getByTestId('catalog-rail-0-strip-scroll').props.contentContainerStyle,
       );
       expect(stripStyle.paddingTop).toBeGreaterThanOrEqual(18);
       expect(stripStyle.paddingBottom).toBeGreaterThanOrEqual(20);
@@ -314,8 +293,7 @@ describe('CatalogDiscoveryScreen', () => {
       await sendKey(KEYCODE_DPAD_UP);
       expect(onFocusTopNav).toHaveBeenCalledTimes(1);
 
-      // Navigate down -> statusChips -> down -> rail-0 -> right -> item 1 -> select
-      await sendKey(KEYCODE_DPAD_DOWN);
+      // Navigate down -> rail-0 -> right -> item 1 -> select
       await sendKey(KEYCODE_DPAD_DOWN);
       await sendKey(KEYCODE_DPAD_RIGHT);
       await sendKey(KEYCODE_DPAD_CENTER);
@@ -325,7 +303,6 @@ describe('CatalogDiscoveryScreen', () => {
       );
 
       // Navigate back up to catChips, move right to Action chip, select -> enters O(1) TV Grid
-      await sendKey(KEYCODE_DPAD_UP);
       await sendKey(KEYCODE_DPAD_UP);
       await sendKey(KEYCODE_DPAD_RIGHT);
       await sendKey(KEYCODE_DPAD_CENTER);
@@ -338,7 +315,7 @@ describe('CatalogDiscoveryScreen', () => {
       // O(1) TV viewport must mount only a small bounded window (never row 100!)
       expect(screen.queryByTestId('catalog-grid-item-500')).toBeNull();
 
-      // 2D TV Grid navigation: right -> right -> left -> (0,1), down -> (1,1) = index 6 in 5-column landscape, select!
+      // 2D TV Grid navigation: right -> right -> left -> (0,1), down -> (1,1) = index 10 in 9-column 1920px TV grid, select!
       onOpenDetail.mockClear();
       await sendKey(KEYCODE_DPAD_RIGHT);
       await sendKey(KEYCODE_DPAD_RIGHT);
@@ -347,7 +324,7 @@ describe('CatalogDiscoveryScreen', () => {
       await sendKey(KEYCODE_DPAD_CENTER);
 
       expect(onOpenDetail).toHaveBeenCalledWith(
-        expect.objectContaining({ itemKey: 'movie:c0:i6', categoryId: bigCat.id }),
+        expect.objectContaining({ itemKey: 'movie:c0:i10', categoryId: bigCat.id }),
       );
 
       // Back in Grid returns cleanly to Discovery Mode (without calling onFocusTopNav)

@@ -1,7 +1,7 @@
 import type { ItemRow, WatchProgressRow } from '@elv/data';
-import { PosterCard, useI18n, useTheme } from '@elv/ui-kit';
+import { HorizontalRailScroll, PosterCard, useI18n, useTheme } from '@elv/ui-kit';
 import { type ComponentRef, memo, type ReactElement, useCallback, useEffect, useRef } from 'react';
-import { type LayoutChangeEvent, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { type LayoutChangeEvent, type ScrollView, StyleSheet, Text, View } from 'react-native';
 import { formatVodMeta } from '../shared';
 import { detailProgressRatio } from './detail-model';
 
@@ -115,11 +115,11 @@ function DetailRelatedRailInner({
         {i18n.t('detail.moreLikeThis')}
       </Text>
 
-      <ScrollView
-        ref={scrollRef}
+      <HorizontalRailScroll
+        scrollRef={scrollRef}
         testID="detail-related-rail-strip"
-        horizontal
-        showsHorizontalScrollIndicator={false}
+        isTv={isTv}
+        showArrows={!isTv}
         contentContainerStyle={[
           styles.stripContent,
           {
@@ -143,7 +143,7 @@ function DetailRelatedRailInner({
             onPressItem={onPressItem}
           />
         ))}
-      </ScrollView>
+      </HorizontalRailScroll>
     </View>
   );
 }

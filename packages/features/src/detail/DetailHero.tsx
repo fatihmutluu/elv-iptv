@@ -99,10 +99,10 @@ function DetailHeroInner({
       style={[
         styles.container,
         {
-          minHeight: isPortrait ? 400 : 440,
+          minHeight: isPortrait ? 360 : 400,
           paddingTop: topClearance,
           paddingHorizontal: padX,
-          paddingBottom: isPortrait ? theme.spacing.lg : theme.spacing.xl,
+          paddingBottom: theme.spacing.lg,
           backgroundColor: theme.colors.bgSurface,
         },
       ]}
@@ -366,7 +366,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   backFocusRing: { position: 'absolute', top: -4, bottom: -4, left: -4, right: -4 },
-  spacer: { minHeight: 72, flexGrow: 1 },
+  spacer: { minHeight: 52, flexGrow: 1 },
   heroBottom: { width: '100%' },
   actionsCol: { flexShrink: 0 },
   iconRow: { flexDirection: 'row', alignItems: 'center' },

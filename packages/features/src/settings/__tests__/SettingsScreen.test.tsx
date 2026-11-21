@@ -207,6 +207,7 @@ describe('SettingsScreen', () => {
     );
 
     expect(screen.getByTestId('settings-portrait-tabs')).toBeTruthy();
+    expect(screen.getByTestId('settings-portrait-tabs-rail-scroll')).toBeTruthy();
     expect(screen.queryByTestId('settings-sidebar')).toBeNull();
     expect(screen.getByTestId('settings-tab-appearance').props.accessibilityState.selected).toBe(
       true,

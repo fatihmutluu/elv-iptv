@@ -8,15 +8,14 @@ import {
   clampGridFocus,
   computeProgressRatio,
   computeRowCount,
+  detailTargetFromProgress,
   EMPTY_CATALOG_MEMORY,
-  FILTERED_GRID_LIMIT,
-  filterCatalogItems,
+  filterContinueWatchingForCatalog,
   GRID_MAX_PAGES,
   GRID_PAGE_SIZE,
   INITIAL_VISIBLE_CATEGORIES,
   MAX_CONCURRENT_RAIL_QUERIES,
   RAIL_ITEM_LIMIT,
-  WATCH_STATUS_FILTERS,
 } from './catalog-model';
 
 function makeItem(index: number, kind: 'movie' | 'series' = 'movie'): ItemRow {
@@ -65,11 +64,8 @@ describe('catalog-model constants and defaults', () => {
     expect(MAX_CONCURRENT_RAIL_QUERIES).toBe(4);
     expect(GRID_PAGE_SIZE).toBe(180);
     expect(GRID_MAX_PAGES).toBe(8);
-    expect(FILTERED_GRID_LIMIT).toBe(240);
-    expect(WATCH_STATUS_FILTERS).toEqual(['all', 'unwatched', 'inProgress', 'watched']);
     expect(EMPTY_CATALOG_MEMORY).toEqual({
       selectedCategoryId: null,
-      watchFilter: 'all',
       visibleCategoryCount: 8,
     });
   });
@@ -142,29 +138,66 @@ describe('chunkRowItems', () => {
   });
 });
 
-describe('filterCatalogItems', () => {
-  it('filters items accurately by all, unwatched, inProgress, and watched status', () => {
-    const items = [makeItem(0), makeItem(1), makeItem(2), makeItem(3)];
-    const progress = new Map<string, WatchProgressRow>([
-      ['movie:1', makeProgress('movie:1', { positionMs: 5_000, watched: false })],
-      ['movie:2', makeProgress('movie:2', { positionMs: 120_000, watched: false })],
-      ['movie:3', makeProgress('movie:3', { positionMs: 3_500_000, watched: true })],
-    ]);
+describe('filterContinueWatchingForCatalog & detailTargetFromProgress', () => {
+  it('filters continue-watching rows by movie vs series/episode tab and excludes watched/short rows', () => {
+    const rows = [
+      makeProgress('movie:1', { kind: 'movie', positionMs: 120_000, watched: false }),
+      makeProgress('movie:2', { kind: 'movie', positionMs: 5_000, watched: false }),
+      makeProgress('movie:3', { kind: 'movie', positionMs: 3_500_000, watched: true }),
+      makeProgress('series:1', { kind: 'series', positionMs: 180_000, watched: false }),
+      makeProgress('ep:1', {
+        kind: 'episode',
+        seriesKey: 'series:2',
+        title: 'Dark Sky',
+        subtitle: 'S1 E2',
+        positionMs: 240_000,
+        watched: false,
+      }),
+      makeProgress('live:1', { kind: 'live', positionMs: 300_000, watched: false }),
+    ];
 
-    expect(filterCatalogItems(items, progress, 'all').map((i) => i.key)).toEqual([
-      'movie:0',
-      'movie:1',
-      'movie:2',
-      'movie:3',
-    ]);
-    expect(filterCatalogItems(items, progress, 'unwatched').map((i) => i.key)).toEqual([
-      'movie:0',
+    expect(filterContinueWatchingForCatalog(rows, 'movie').map((r) => r.itemKey)).toEqual([
       'movie:1',
     ]);
-    expect(filterCatalogItems(items, progress, 'inProgress').map((i) => i.key)).toEqual([
-      'movie:2',
+    expect(filterContinueWatchingForCatalog(rows, 'series').map((r) => r.itemKey)).toEqual([
+      'series:1',
+      'ep:1',
     ]);
-    expect(filterCatalogItems(items, progress, 'watched').map((i) => i.key)).toEqual(['movie:3']);
+  });
+
+  it('builds DetailTarget from movie or episode progress rows', () => {
+    const movieRow = makeProgress('x:s1:movie:1', {
+      kind: 'movie',
+      title: 'Solaris',
+      logo: 'https://img.test/m.jpg',
+    });
+    expect(detailTargetFromProgress(movieRow, 'movie')).toEqual({
+      itemKey: 'x:s1:movie:1',
+      sourceId: 'src-1',
+      kind: 'movie',
+      title: 'Solaris',
+      posterUri: 'https://img.test/m.jpg',
+      backdropUri: 'https://img.test/m.jpg',
+      year: null,
+      rating: null,
+    });
+
+    const epRow = makeProgress('x:s1:episode:5', {
+      kind: 'episode',
+      seriesKey: 'x:s1:series:2',
+      title: 'Dark Sky',
+      logo: 'https://img.test/s.jpg',
+    });
+    expect(detailTargetFromProgress(epRow, 'series')).toEqual({
+      itemKey: 'x:s1:series:2',
+      sourceId: 'src-1',
+      kind: 'series',
+      title: 'Dark Sky',
+      posterUri: 'https://img.test/s.jpg',
+      backdropUri: 'https://img.test/s.jpg',
+      year: null,
+      rating: null,
+    });
   });
 });
 
@@ -198,14 +231,13 @@ describe('clampGridFocus', () => {
 });
 
 describe('buildCatalogNavRows', () => {
-  it('returns empty while loading, empty CTA when no sources, and chip/rail rows in Discovery mode', () => {
+  it('returns empty while loading, empty CTA when no sources, and editorial bar + continue + rail rows in Discovery mode', () => {
     expect(
       buildCatalogNavRows({
         isLoading: true,
         hasSources: true,
         hasCategories: false,
         categoryChipCount: 0,
-        statusChipCount: 4,
       }),
     ).toEqual([]);
 
@@ -215,7 +247,6 @@ describe('buildCatalogNavRows', () => {
         hasSources: false,
         hasCategories: false,
         categoryChipCount: 0,
-        statusChipCount: 4,
       }),
     ).toEqual([{ id: 'empty', count: 1 }]);
 
@@ -225,7 +256,7 @@ describe('buildCatalogNavRows', () => {
         hasSources: true,
         hasCategories: true,
         categoryChipCount: 4,
-        statusChipCount: 4,
+        continueCount: 3,
         railEntries: [
           { catIndex: 0, count: 6 },
           { catIndex: 1, count: 0 },
@@ -235,29 +266,26 @@ describe('buildCatalogNavRows', () => {
       }),
     ).toEqual([
       { id: 'catChips', count: 4 },
-      { id: 'statusChips', count: 4 },
+      { id: 'continue', count: 3 },
       { id: 'rail-0', count: 6 },
       { id: 'rail-2', count: 3 },
       { id: 'loadMore', count: 1 },
     ]);
   });
 
-  it('builds Grid mode header rows and filter-empty reset row', () => {
+  it('builds Grid mode header rows without continue rail', () => {
     expect(
       buildCatalogNavRows({
         isLoading: false,
         hasSources: true,
         hasCategories: true,
         categoryChipCount: 4,
-        statusChipCount: 4,
+        continueCount: 3,
         isGridMode: true,
-        isFilterEmpty: true,
       }),
     ).toEqual([
       { id: 'catChips', count: 4 },
-      { id: 'statusChips', count: 4 },
       { id: 'gridBack', count: 1 },
-      { id: 'filterReset', count: 1 },
     ]);
   });
 });

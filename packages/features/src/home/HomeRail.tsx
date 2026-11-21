@@ -1,6 +1,7 @@
 import type { BrowseKind } from '@elv/data';
 import type { AppI18n } from '@elv/i18n';
 import {
+  HorizontalRailScroll,
   Icon,
   PosterCard,
   useI18n,
@@ -13,7 +14,7 @@ import { type ComponentRef, memo, type ReactElement, useCallback, useEffect, use
 import {
   type LayoutChangeEvent,
   Pressable,
-  ScrollView,
+  type ScrollView,
   StyleSheet,
   Text,
   View,
@@ -266,11 +267,10 @@ function HomeRailInner({
         ) : null}
       </View>
 
-      <ScrollView
-        ref={scrollRef}
+      <HorizontalRailScroll
+        scrollRef={scrollRef}
         testID={`${testID}-strip`}
-        horizontal
-        showsHorizontalScrollIndicator={false}
+        isTv={isTv}
         contentContainerStyle={[
           styles.stripContent,
           {
@@ -297,7 +297,7 @@ function HomeRailInner({
             onPressItem={onPressItem}
           />
         ))}
-      </ScrollView>
+      </HorizontalRailScroll>
     </View>
   );
 }

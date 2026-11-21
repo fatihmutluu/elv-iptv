@@ -349,7 +349,7 @@ export function DetailScreen({
         />
 
         {target.cast && target.cast.length > 0 ? (
-          <DetailCastStrip cast={target.cast} padX={padX} />
+          <DetailCastStrip cast={target.cast} padX={padX} isTv={isTv} />
         ) : null}
 
         {target.kind === 'series' ? (

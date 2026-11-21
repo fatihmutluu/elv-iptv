@@ -1,7 +1,13 @@
 import type { EpisodeRow, WatchProgressRow } from '@elv/data';
-import { CtaButton, FilterChip, useI18n, useTheme } from '@elv/ui-kit';
-import { type ComponentRef, memo, type ReactElement, useCallback, useEffect, useRef } from 'react';
-import { type LayoutChangeEvent, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  CtaButton,
+  EditorialCategoryBar,
+  type EditorialCategoryItem,
+  useI18n,
+  useTheme,
+} from '@elv/ui-kit';
+import { memo, type ReactElement, useCallback, useMemo } from 'react';
+import { type LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import { DetailEpisodeRow, EpisodeSkeletonRows } from './DetailEpisodeRow';
 import { describeDetailSeasonsError } from './detail-model';
 import type { EpisodeChunk } from './episode-chunks';
@@ -32,72 +38,6 @@ export interface DetailEpisodesProps {
   readonly onLayoutY?: (y: number) => void;
 }
 
-interface SeasonChipItemProps {
-  readonly season: number;
-  readonly label: string;
-  readonly selected: boolean;
-  readonly isTv: boolean;
-  readonly focused: boolean;
-  readonly onSelectSeason: (season: number) => void;
-}
-
-const SeasonChipItem = memo(function SeasonChipItemInner({
-  season,
-  label,
-  selected,
-  isTv,
-  focused,
-  onSelectSeason,
-}: SeasonChipItemProps): ReactElement {
-  const handlePress = useCallback(() => {
-    onSelectSeason(season);
-  }, [onSelectSeason, season]);
-
-  return (
-    <FilterChip
-      testID={`detail-season-${season}`}
-      label={label}
-      selected={selected}
-      focusable={!isTv}
-      focused={focused}
-      onPress={handlePress}
-    />
-  );
-});
-
-interface ChunkChipItemProps {
-  readonly chunkIndex: number;
-  readonly label: string;
-  readonly selected: boolean;
-  readonly isTv: boolean;
-  readonly focused: boolean;
-  readonly onSelectChunk: (chunkIndex: number) => void;
-}
-
-const ChunkChipItem = memo(function ChunkChipItemInner({
-  chunkIndex,
-  label,
-  selected,
-  isTv,
-  focused,
-  onSelectChunk,
-}: ChunkChipItemProps): ReactElement {
-  const handlePress = useCallback(() => {
-    onSelectChunk(chunkIndex);
-  }, [chunkIndex, onSelectChunk]);
-
-  return (
-    <FilterChip
-      testID={`detail-episode-chunk-${chunkIndex}`}
-      label={label}
-      selected={selected}
-      focusable={!isTv}
-      focused={focused}
-      onPress={handlePress}
-    />
-  );
-});
-
 function DetailEpisodesInner({
   seasonsState,
   selectedSeason,
@@ -123,30 +63,50 @@ function DetailEpisodesInner({
 }: DetailEpisodesProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
-  const seasonsScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
-  const chunksScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
-
-  useEffect(() => {
-    if (!isTv || focusedSeasonIndex === null || focusedSeasonIndex < 0) return;
-    seasonsScrollRef.current?.scrollTo({
-      x: Math.max(0, focusedSeasonIndex * 116 - padX),
-      animated: !theme.reduceMotion,
-    });
-  }, [focusedSeasonIndex, isTv, padX, theme.reduceMotion]);
-
-  useEffect(() => {
-    if (!isTv || focusedChunkIndex === null || focusedChunkIndex < 0) return;
-    chunksScrollRef.current?.scrollTo({
-      x: Math.max(0, focusedChunkIndex * 96 - padX),
-      animated: !theme.reduceMotion,
-    });
-  }, [focusedChunkIndex, isTv, padX, theme.reduceMotion]);
 
   const handleLayout = useCallback(
     (e: LayoutChangeEvent) => {
       onLayoutY?.(e.nativeEvent.layout.y);
     },
     [onLayoutY],
+  );
+
+  const seasonItems = useMemo<readonly EditorialCategoryItem[]>(
+    () =>
+      seasonsState.kind === 'ready'
+        ? seasonsState.seasons.map((s) => ({
+            id: String(s.season),
+            label: i18n.t('detail.seasonOption', { season: s.season }),
+            testID: `detail-season-${s.season}`,
+          }))
+        : [],
+    [i18n, seasonsState],
+  );
+
+  const chunkItems = useMemo<readonly EditorialCategoryItem[]>(
+    () =>
+      chunks
+        ? chunks.map((chunk) => ({
+            id: String(chunk.index),
+            label: chunk.label,
+            testID: `detail-episode-chunk-${chunk.index}`,
+          }))
+        : [],
+    [chunks],
+  );
+
+  const handleSelectSeasonId = useCallback(
+    (id: string) => {
+      onSelectSeason(Number(id));
+    },
+    [onSelectSeason],
+  );
+
+  const handleSelectChunkId = useCallback(
+    (id: string) => {
+      onSelectChunk?.(Number(id));
+    },
+    [onSelectChunk],
   );
 
   const watchedLabel = i18n.t('home.watchedBadge');
@@ -226,65 +186,28 @@ function DetailEpisodesInner({
         </Text>
       ) : (
         <>
-          <ScrollView
-            ref={seasonsScrollRef}
+          <EditorialCategoryBar
             testID="detail-seasons-bar"
-            {...(isTv ? { focusable: false } : {})}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={[
-              styles.seasonsBar,
-              {
-                paddingHorizontal: padX,
-                paddingTop: isTv ? 12 : 6,
-                paddingBottom: isTv ? 14 : 10,
-                gap: theme.spacing.xs,
-              },
-            ]}
-          >
-            {seasonsState.seasons.map((s, idx) => (
-              <SeasonChipItem
-                key={s.season}
-                season={s.season}
-                label={i18n.t('detail.seasonOption', { season: s.season })}
-                selected={s.season === selectedSeason}
-                isTv={isTv}
-                focused={isTv && focusedSeasonIndex === idx}
-                onSelectSeason={onSelectSeason}
-              />
-            ))}
-          </ScrollView>
+            items={seasonItems}
+            activeId={selectedSeason !== null ? String(selectedSeason) : null}
+            onSelect={handleSelectSeasonId}
+            isTv={isTv}
+            focusedIndex={focusedSeasonIndex}
+            padX={padX}
+          />
 
-          {!episodesLoading && chunks && chunks.length > 0 && onSelectChunk ? (
-            <ScrollView
-              ref={chunksScrollRef}
-              testID="detail-episode-chunks-bar"
-              accessibilityLabel={i18n.t('detail.episodes')}
-              {...(isTv ? { focusable: false } : {})}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={[
-                styles.seasonsBar,
-                {
-                  paddingHorizontal: padX,
-                  paddingTop: isTv ? 6 : 2,
-                  paddingBottom: isTv ? 12 : 8,
-                  gap: theme.spacing.xs,
-                },
-              ]}
-            >
-              {chunks.map((chunk) => (
-                <ChunkChipItem
-                  key={chunk.index}
-                  chunkIndex={chunk.index}
-                  label={chunk.label}
-                  selected={selectedChunkIndex === chunk.index}
-                  isTv={isTv}
-                  focused={isTv && focusedChunkIndex === chunk.index}
-                  onSelectChunk={onSelectChunk}
-                />
-              ))}
-            </ScrollView>
+          {!episodesLoading && chunkItems.length > 0 && onSelectChunk ? (
+            <View style={{ marginTop: theme.spacing.xxs }}>
+              <EditorialCategoryBar
+                testID="detail-episode-chunks-bar"
+                items={chunkItems}
+                activeId={String(selectedChunkIndex)}
+                onSelect={handleSelectChunkId}
+                isTv={isTv}
+                focusedIndex={focusedChunkIndex}
+                padX={padX}
+              />
+            </View>
           ) : null}
 
           {episodesLoading ? (
@@ -349,7 +272,6 @@ DetailEpisodes.displayName = 'DetailEpisodes';
 
 const styles = StyleSheet.create({
   section: { width: '100%' },
-  seasonsBar: { alignItems: 'center' },
   episodeList: { width: '100%' },
   errorBox: { borderWidth: 1 },
 });

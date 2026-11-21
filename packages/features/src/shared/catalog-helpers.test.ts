@@ -7,7 +7,6 @@ import {
   computeCatalogLayout,
   detailTargetFromItem,
   formatVodMeta,
-  matchesWatchStatus,
 } from './index';
 
 const MOCK_THEME = {
@@ -128,32 +127,54 @@ describe('shared catalog helpers', () => {
     expect(formatVodMeta(null, null)).toBeUndefined();
   });
 
-  it('classifies watch status filters accurately', () => {
-    const unwatched = undefined;
-    const tinyPos = makeProgress({ positionMs: 2_000, watched: false });
-    const inProgress = makeProgress({ positionMs: 120_000, watched: false });
-    const watched = makeProgress({ positionMs: 5_900_000, watched: true });
-
-    expect(matchesWatchStatus(unwatched, 'all')).toBe(true);
-    expect(matchesWatchStatus(unwatched, 'unwatched')).toBe(true);
-    expect(matchesWatchStatus(tinyPos, 'unwatched')).toBe(true);
-    expect(matchesWatchStatus(inProgress, 'unwatched')).toBe(false);
-    expect(matchesWatchStatus(watched, 'unwatched')).toBe(false);
-
-    expect(matchesWatchStatus(unwatched, 'inProgress')).toBe(false);
-    expect(matchesWatchStatus(tinyPos, 'inProgress')).toBe(false);
-    expect(matchesWatchStatus(inProgress, 'inProgress')).toBe(true);
-    expect(matchesWatchStatus(watched, 'inProgress')).toBe(false);
-
-    expect(matchesWatchStatus(watched, 'watched')).toBe(true);
-    expect(matchesWatchStatus(inProgress, 'watched')).toBe(false);
-  });
-
-  it('computes responsive 5-col landscape and 3-col portrait grid metrics', () => {
+  it('clamps poster and wide card widths by form factor and expands grid columns on wide monitors', () => {
     const desktop = computeCatalogLayout(makeViewport(), MOCK_THEME);
-    expect(desktop.gridColumns).toBe(5);
-    expect(desktop.gridCardWidth).toBeGreaterThan(180);
+    expect(desktop.posterRailWidth).toBeLessThanOrEqual(184);
+    expect(desktop.wideRailWidth).toBeLessThanOrEqual(296);
+    expect(desktop.gridCardWidth).toBeLessThanOrEqual(184);
+    expect(desktop.gridCardWidth).toBeGreaterThanOrEqual(88);
+    expect(desktop.gridColumns).toBe(7);
     expect(desktop.gridRowHeight).toBeGreaterThan(desktop.gridCardWidth * 1.5);
+
+    const ultrawide = computeCatalogLayout(makeViewport({ width: 2560, height: 1440 }), MOCK_THEME);
+    expect(ultrawide.posterRailWidth).toBeLessThanOrEqual(184);
+    expect(ultrawide.wideRailWidth).toBeLessThanOrEqual(296);
+    expect(ultrawide.gridCardWidth).toBeLessThanOrEqual(184);
+    expect(ultrawide.gridColumns).toBe(13);
+    const ultrawideRowUsed =
+      ultrawide.gridColumns * ultrawide.gridCardWidth +
+      (ultrawide.gridColumns - 1) * ultrawide.gridGap;
+    expect(2560 - ultrawide.padX * 2 - ultrawideRowUsed).toBeLessThan(ultrawide.gridColumns);
+
+    const tv = computeCatalogLayout(
+      makeViewport({
+        formFactor: 'tv',
+        inputModality: 'tv',
+        width: 1920,
+        height: 1080,
+        overscan: { x: 48, y: 27 },
+      }),
+      MOCK_THEME,
+    );
+    expect(tv.posterRailWidth).toBeLessThanOrEqual(184);
+    expect(tv.wideRailWidth).toBeLessThanOrEqual(290);
+    expect(tv.gridCardWidth).toBeLessThanOrEqual(184);
+
+    const tabletPortrait = computeCatalogLayout(
+      makeViewport({
+        formFactor: 'tablet',
+        orientation: 'portrait',
+        inputModality: 'touch',
+        width: 820,
+        height: 1180,
+        columns: { posterRail: 4.5, wideRail: 2.3, categoryGrid: 4 },
+      }),
+      MOCK_THEME,
+    );
+    expect(tabletPortrait.isPortrait).toBe(true);
+    expect(tabletPortrait.posterRailWidth).toBeLessThanOrEqual(164);
+    expect(tabletPortrait.wideRailWidth).toBeLessThanOrEqual(285);
+    expect(tabletPortrait.gridCardWidth).toBeLessThanOrEqual(164);
 
     const phone = computeCatalogLayout(
       makeViewport({
@@ -168,6 +189,9 @@ describe('shared catalog helpers', () => {
     );
     expect(phone.isPortrait).toBe(true);
     expect(phone.gridColumns).toBe(3);
+    expect(phone.posterRailWidth).toBeLessThanOrEqual(124);
+    expect(phone.wideRailWidth).toBeLessThanOrEqual(270);
+    expect(phone.gridCardWidth).toBeLessThanOrEqual(124);
     expect(phone.gridCardWidth).toBeGreaterThanOrEqual(88);
   });
 

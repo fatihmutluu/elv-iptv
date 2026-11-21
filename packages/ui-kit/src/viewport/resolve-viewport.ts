@@ -83,13 +83,41 @@ function resolveColumns(
   width: number,
 ): ViewportColumns {
   if (orientation === 'portrait') {
-    const wideRail = formFactor === 'tablet' ? 2.3 : 1.2;
-    return { posterRail: 3.5, wideRail, categoryGrid: 3 };
+    if (formFactor === 'tablet') {
+      return { posterRail: 5.3, wideRail: 2.6, categoryGrid: 5 };
+    }
+    return { posterRail: 3.25, wideRail: 1.35, categoryGrid: 3 };
   }
-  if (formFactor === 'desktop' && width > 0 && width < 760) {
+  if (formFactor === 'phone') {
+    return { posterRail: 5.5, wideRail: 3.2, categoryGrid: 5 };
+  }
+  if (formFactor === 'tablet') {
+    return { posterRail: 6.5, wideRail: 4.2, categoryGrid: 6 };
+  }
+  if (formFactor === 'tv') {
+    if (width >= 1600) {
+      return { posterRail: 7.4, wideRail: 5.3, categoryGrid: 7 };
+    }
+    return { posterRail: 6.4, wideRail: 4.3, categoryGrid: 6 };
+  }
+  if (width > 0 && width < 760) {
     return { posterRail: 3.5, wideRail: 2.2, categoryGrid: 3 };
   }
-  return { posterRail: 5.5, wideRail: 3.3, categoryGrid: 5 };
+  if (width < 1024) {
+    return { posterRail: 5.3, wideRail: 3.3, categoryGrid: 5 };
+  }
+  if (width < 1280) {
+    return { posterRail: 6.4, wideRail: 4.2, categoryGrid: 6 };
+  }
+  if (width < 1440) {
+    return { posterRail: 7.4, wideRail: 4.5, categoryGrid: 7 };
+  }
+  if (width < 1680) {
+    return { posterRail: 8.4, wideRail: 5.3, categoryGrid: 8 };
+  }
+  const gridCols = Math.min(11, Math.max(9, Math.floor((width - 48) / 176)));
+  const wideCols = Math.min(7, Math.max(5, Math.floor((width - 48) / 280))) + 0.3;
+  return { posterRail: gridCols + 0.4, wideRail: wideCols, categoryGrid: gridCols };
 }
 
 /** Resolves a complete {@link ViewportInfo} snapshot from raw platform metrics and optional overrides. */

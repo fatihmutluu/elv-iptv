@@ -6,16 +6,18 @@ import {
   type DisplayCategory,
 } from '../shared';
 import {
+  CATALOG_CONTINUE_LIMIT,
   CATEGORY_LOAD_BATCH,
   type CatalogTabMemory,
   EMPTY_CATALOG_MEMORY,
+  filterContinueWatchingForCatalog,
   MAX_CONCURRENT_RAIL_QUERIES,
   RAIL_ITEM_LIMIT,
 } from './catalog-model';
 
 /**
- * Controlled-or-uncontrolled tab memory state helper preserving category selection, watch filter,
- * and progressive batch count across tab switches.
+ * Controlled-or-uncontrolled tab memory state helper preserving category selection and progressive
+ * batch count across tab switches.
  */
 export function useCatalogTabMemory(
   memory: CatalogTabMemory | undefined,
@@ -61,6 +63,7 @@ export interface UseCatalogDiscoveryOptions {
 export interface CatalogDiscoveryState {
   readonly categories: readonly DisplayCategory[];
   readonly visibleCategories: readonly DisplayCategory[];
+  readonly continueItems: readonly WatchProgressRow[];
   readonly railItemsByCategoryId: ReadonlyMap<string, readonly ItemRow[]>;
   readonly loadingRailIds: ReadonlySet<string>;
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
@@ -91,6 +94,7 @@ export function useCatalogDiscovery({
   onClearStaleCategory,
 }: UseCatalogDiscoveryOptions): CatalogDiscoveryState {
   const [categories, setCategories] = useState<readonly DisplayCategory[]>([]);
+  const [continueItems, setContinueItems] = useState<readonly WatchProgressRow[]>([]);
   const [loadingCategories, setLoadingCategories] = useState(() => sources.length > 0);
   const [hasLoadedCategories, setHasLoadedCategories] = useState(false);
   const [railItemsByCategoryId, setRailItemsByCategoryId] =
@@ -100,9 +104,32 @@ export function useCatalogDiscovery({
     useState<ReadonlyMap<string, WatchProgressRow>>(EMPTY_PROGRESS_MAP);
 
   const catGenRef = useRef(0);
+  const continueGenRef = useRef(0);
   const railGenRef = useRef(0);
   const railItemsRef = useRef<Map<string, readonly ItemRow[]>>(new Map());
   const loadedRailIdsRef = useRef<Set<string>>(new Set());
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken and userStateVersion trigger fresh continue-watching reads
+  useEffect(() => {
+    continueGenRef.current += 1;
+    const gen = continueGenRef.current;
+    if (sources.length === 0 || !catalog.listContinueWatching) {
+      setContinueItems([]);
+      return undefined;
+    }
+    void catalog
+      .listContinueWatching(CATALOG_CONTINUE_LIMIT)
+      .then((rows) => {
+        if (continueGenRef.current !== gen) return;
+        setContinueItems(filterContinueWatchingForCatalog(rows, kind));
+      })
+      .catch(() => {
+        if (continueGenRef.current === gen) setContinueItems([]);
+      });
+    return () => {
+      continueGenRef.current += 1;
+    };
+  }, [catalog, kind, refreshToken, sources.length, userStateVersion]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken intentionally triggers fresh category reads
   useEffect(() => {
@@ -255,6 +282,7 @@ export function useCatalogDiscovery({
     () => ({
       categories,
       visibleCategories,
+      continueItems,
       railItemsByCategoryId,
       loadingRailIds,
       progressByKey,
@@ -265,6 +293,7 @@ export function useCatalogDiscovery({
     }),
     [
       categories,
+      continueItems,
       hasLoadedCategories,
       hasMoreCategories,
       loadMoreCategories,

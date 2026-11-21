@@ -1,5 +1,6 @@
 import type { ItemRow, WatchProgressRow } from '@elv/data';
 import {
+  HorizontalRailScroll,
   Icon,
   PosterCard,
   SkeletonBox,
@@ -13,7 +14,7 @@ import { type ComponentRef, memo, type ReactElement, useCallback, useEffect, use
 import {
   type LayoutChangeEvent,
   Pressable,
-  ScrollView,
+  type ScrollView,
   StyleSheet,
   Text,
   View,
@@ -205,11 +206,10 @@ function CatalogCategoryRailInner({
         </Pressable>
       </View>
 
-      <ScrollView
-        ref={scrollRef}
+      <HorizontalRailScroll
+        scrollRef={scrollRef}
         testID={`catalog-rail-${catIndex}-strip`}
-        horizontal
-        showsHorizontalScrollIndicator={false}
+        isTv={isTv}
         contentContainerStyle={[
           styles.stripContent,
           {
@@ -250,7 +250,7 @@ function CatalogCategoryRailInner({
                 onOpenDetail={onOpenDetail}
               />
             ))}
-      </ScrollView>
+      </HorizontalRailScroll>
     </View>
   );
 }

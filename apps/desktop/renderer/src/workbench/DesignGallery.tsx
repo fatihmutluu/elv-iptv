@@ -2,7 +2,9 @@ import { AdaptiveNavShell, type NavDestination, type NavUtility } from '@elv/fea
 import {
   ArtworkImage,
   CtaButton,
-  FilterChip,
+  EditorialCategoryBar,
+  type EditorialCategoryItem,
+  HorizontalRailScroll,
   IconButton,
   MicroPill,
   PosterCard,
@@ -79,6 +81,10 @@ export function DesignGallery(): ReactElement {
         ? POSTER_CATALOG
         : POSTER_CATALOG.filter((item) => item.genre === selectedGenre),
     [selectedGenre],
+  );
+  const genreItems = useMemo<readonly EditorialCategoryItem[]>(
+    () => GENRES.map((genre) => ({ id: genre, label: genre })),
+    [],
   );
 
   const destinations = useMemo<readonly NavDestination<'home' | 'live' | 'movies' | 'series'>[]>(
@@ -274,9 +280,10 @@ export function DesignGallery(): ReactElement {
                 actionLabel={copy.seeAll}
                 onAction={() => setActiveDest('live')}
               />
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
+              <HorizontalRailScroll
+                testID="gallery-wide-rail"
+                isTv={tvMode}
+                showArrows={!tvMode}
                 contentContainerStyle={styles.railContent}
               >
                 {WIDE_RAIL_ITEMS.map((item) => (
@@ -294,7 +301,7 @@ export function DesignGallery(): ReactElement {
                     onPress={() => setTvFocusId(item.id)}
                   />
                 ))}
-              </ScrollView>
+              </HorizontalRailScroll>
             </View>
 
             <View style={{ gap: theme.spacing.sm }}>
@@ -303,23 +310,18 @@ export function DesignGallery(): ReactElement {
                 actionLabel={copy.seeAll}
                 onAction={() => setActiveDest('movies')}
               />
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.chipRow}
-              >
-                {GENRES.map((genre) => (
-                  <FilterChip
-                    key={genre}
-                    label={genre}
-                    selected={selectedGenre === genre}
-                    onPress={() => setSelectedGenre(genre)}
-                  />
-                ))}
-              </ScrollView>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
+              <EditorialCategoryBar
+                testID="gallery-genre-bar"
+                items={genreItems}
+                activeId={selectedGenre}
+                onSelect={(id) => setSelectedGenre(id as (typeof GENRES)[number])}
+                isTv={tvMode}
+                padX={0}
+              />
+              <HorizontalRailScroll
+                testID="gallery-poster-rail"
+                isTv={tvMode}
+                showArrows={!tvMode}
                 contentContainerStyle={styles.railContent}
               >
                 {filteredPosters.map((item) => (
@@ -336,7 +338,7 @@ export function DesignGallery(): ReactElement {
                     onPress={() => setTvFocusId(item.id)}
                   />
                 ))}
-              </ScrollView>
+              </HorizontalRailScroll>
             </View>
 
             <GalleryComponentLab />
@@ -382,7 +384,6 @@ const styles = StyleSheet.create({
   heroDots: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6 },
   heroDot: { height: 7, borderRadius: 999 },
   body: { paddingTop: 18 },
-  chipRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 2 },
   railContent: {
     flexDirection: 'row',
     alignItems: 'flex-start',
