@@ -155,4 +155,38 @@ describe('subscribeWebKeys IME and ARIA editable guards (#136, #139)', () => {
     ]);
     unsubscribe();
   });
+
+  it('ignores Shift+ArrowLeft and Shift+ArrowRight chords while keeping bare ArrowLeft/ArrowRight active (#212)', () => {
+    const { win, emit } = createFakeWindow();
+    const inputs: KeyInput[] = [];
+    const unsubscribe = subscribeWebKeys(
+      win,
+      { isActive: () => false },
+      () => 100,
+      (k) => inputs.push(k),
+    );
+
+    const preventShiftLeft = jest.fn();
+    const preventShiftRight = jest.fn();
+    emit('keydown', { key: 'ArrowLeft', shiftKey: true, preventDefault: preventShiftLeft });
+    emit('keyup', { key: 'ArrowLeft', shiftKey: false });
+    emit('keydown', { key: 'ArrowRight', shiftKey: true, preventDefault: preventShiftRight });
+    emit('keyup', { key: 'ArrowRight', shiftKey: false });
+    expect(inputs).toEqual([]);
+    expect(preventShiftLeft).not.toHaveBeenCalled();
+    expect(preventShiftRight).not.toHaveBeenCalled();
+
+    emit('keydown', { key: 'ArrowLeft' });
+    emit('keyup', { key: 'ArrowLeft' });
+    emit('keydown', { key: 'ArrowRight' });
+    emit('keyup', { key: 'ArrowRight' });
+    expect(inputs.map((k) => `${k.key}:${k.action}`)).toEqual([
+      'left:down',
+      'left:up',
+      'right:down',
+      'right:up',
+    ]);
+
+    unsubscribe();
+  });
 });

@@ -5,6 +5,7 @@ import {
   initialTvOsdAction,
   moveTvOsdAction,
   routeTvOsdKey,
+  routeTvScrubberKey,
   type TvOsdAvailability,
 } from './tv-osd-nav';
 
@@ -164,5 +165,44 @@ describe('routeTvOsdKey', () => {
       action: 'playPause',
     });
     expect(routeTvOsdKey({ key: 'down', kind: 'press', time: 0 }, 'tracks', actions)).toBeNull();
+  });
+});
+
+describe('routeTvScrubberKey', () => {
+  it('traps horizontal scrub keys, handles select/playPause/down/up, and ignores others', () => {
+    expect(routeTvScrubberKey({ key: 'left', kind: 'press', time: 0 })).toEqual({
+      kind: 'step',
+      direction: -1,
+      stepKind: 'press',
+    });
+    expect(routeTvScrubberKey({ key: 'right', kind: 'repeat', time: 0 })).toEqual({
+      kind: 'step',
+      direction: 1,
+      stepKind: 'repeat',
+    });
+    expect(routeTvScrubberKey({ key: 'rewind', kind: 'press', time: 0 })).toEqual({
+      kind: 'step',
+      direction: -1,
+      stepKind: 'press',
+    });
+    expect(routeTvScrubberKey({ key: 'fastForward', kind: 'repeat', time: 0 })).toEqual({
+      kind: 'step',
+      direction: 1,
+      stepKind: 'repeat',
+    });
+    expect(routeTvScrubberKey({ key: 'select', kind: 'press', time: 0 })).toEqual({
+      kind: 'commitOrToggle',
+    });
+    expect(routeTvScrubberKey({ key: 'playPause', kind: 'press', time: 0 })).toEqual({
+      kind: 'togglePlayPause',
+    });
+    expect(routeTvScrubberKey({ key: 'down', kind: 'press', time: 0 })).toEqual({
+      kind: 'toOsd',
+    });
+    expect(routeTvScrubberKey({ key: 'up', kind: 'press', time: 0 })).toEqual({
+      kind: 'blur',
+    });
+    expect(routeTvScrubberKey({ key: 'select', kind: 'repeat', time: 0 })).toBeNull();
+    expect(routeTvScrubberKey({ key: 'digit5', kind: 'press', time: 0 })).toBeNull();
   });
 });

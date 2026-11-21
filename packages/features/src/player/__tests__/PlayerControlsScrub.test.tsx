@@ -1,5 +1,5 @@
 import { act } from '@testing-library/react-native';
-import { SCRUB_SETTLE_MS } from '../scrub-controller';
+import { LONG_HOLD_MS, SCRUB_SETTLE_MS } from '../scrub-controller';
 import {
   createFakeService,
   KEY,
@@ -54,16 +54,19 @@ describe('usePlayerControls VOD scrub and transport keys', () => {
 
   it('commits on the settle timer when the runtime reports no release', async () => {
     const svc = createFakeService({ kind: 'paused' }, pausedAnchor(40_000, 600_000));
-    const { hook } = await renderControls(svc, {
+    const { refs, hook } = await renderControls(svc, {
       status: { kind: 'paused' },
       formFactor: 'desktop',
     });
+    let now = 1_000;
+    refs.clockRef.current = { now: () => now };
     const onKeyDown = hook.result.current.desktopFallbackKeyProps.onKeyDown as (e: {
       key: string;
       repeat?: boolean;
     }) => void;
 
     await act(async () => onKeyDown({ key: 'ArrowLeft' }));
+    now += LONG_HOLD_MS;
     await act(async () => onKeyDown({ key: 'ArrowLeft', repeat: true }));
     expect(hook.result.current.previewPositionMs).toBe(0);
     await act(async () => onKeyDown({ key: 'ArrowRight' }));

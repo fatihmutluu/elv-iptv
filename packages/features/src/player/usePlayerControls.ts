@@ -15,27 +15,29 @@ import {
   canPauseStatus,
   clampSeekPosition,
   createScrubController,
+  digitKeyToRatio,
   isScrubKey,
   type ScrubController,
   STEP_SEEK_MS,
   shouldCancelScrubOnStatus,
 } from './scrub-controller';
-import { routeSettingsMenuKey, type SettingsMenuState } from './settings-menu-nav';
+import { routeSettingsMenuKey } from './settings-menu-nav';
 import { routePickerKey } from './track-picker-nav';
-import { initialTvOsdAction, routeTvOsdKey } from './tv-osd-nav';
-import { type DesktopShortcutGuard, useDesktopPlayerShortcuts } from './useDesktopPlayerShortcuts';
+import {
+  clampTvOsdAction,
+  initialTvOsdAction,
+  routeTvOsdKey,
+  routeTvScrubberKey,
+} from './tv-osd-nav';
+import {
+  type DesktopShortcutGuard,
+  isWebButtonActive,
+  NOOP_DESKTOP_SHORTCUT_GUARD,
+  useDesktopPlayerShortcuts,
+} from './useDesktopPlayerShortcuts';
 import { usePlayerOverlayState } from './usePlayerOverlayState';
 
 export type { TvOsdAction } from './tv-osd-nav';
-
-function isWebButtonActive(): boolean {
-  if ((Platform.OS as string) !== 'web') return false;
-  const active = (
-    globalThis as { document?: { activeElement?: { getAttribute?: (n: string) => string | null } } }
-  ).document?.activeElement;
-  const role = active?.getAttribute?.('role');
-  return role === 'button' || role === 'radio' || role === 'adjustable' || role === 'switch';
-}
 
 /** Parameters of {@link usePlayerControls}. */
 export interface PlayerControlsParams {
@@ -49,6 +51,8 @@ export interface PlayerControlsParams {
   hasSettings?: boolean;
   hasNextEpisode?: boolean;
   hasPreviousChannel?: boolean;
+  initialOsdHidden?: boolean | undefined;
+  autoHideOsdMs?: number | undefined;
   serviceRef: MutableRefObject<PlaybackService | null>;
   clockRef: MutableRefObject<PlaybackClock>;
   timersRef: MutableRefObject<PlaybackTimers>;
@@ -67,18 +71,18 @@ export function usePlayerControls(params: PlayerControlsParams) {
   const { formFactor, activeTarget, status, tracks, hasTracks, showRetry, hasService } = params;
   const { serviceRef, clockRef, timersRef, onExitRef, zapByRef } = params;
   const isTv = formFactor === 'tv';
+  const isWebDesktop = formFactor === 'desktop' && (Platform.OS as string) === 'web';
   const hasPreviousChannel = params.hasPreviousChannel ?? false;
 
-  const targetRef = useRef(activeTarget);
-  targetRef.current = activeTarget;
-  const hasPrevChannelRef = useRef(hasPreviousChannel);
-  hasPrevChannelRef.current = hasPreviousChannel;
-  const onSeekCommitRef = useRef(params.onSeekCommit);
-  onSeekCommitRef.current = params.onSeekCommit;
-  const onPlayNextEpisodeRef = useRef(params.onPlayNextEpisode);
-  onPlayNextEpisodeRef.current = params.onPlayNextEpisode;
-  const onJumpPreviousChannelRef = useRef(params.onJumpPreviousChannel);
-  onJumpPreviousChannelRef.current = params.onJumpPreviousChannel;
+  const cb = {
+    target: activeTarget,
+    hasPreviousChannel,
+    onSeekCommit: params.onSeekCommit,
+    onPlayNextEpisode: params.onPlayNextEpisode,
+    onJumpPreviousChannel: params.onJumpPreviousChannel,
+  };
+  const cbRef = useRef(cb);
+  cbRef.current = cb;
 
   const [previewPositionMs, setPreviewPositionMs] = useState<number | undefined>(undefined);
 
@@ -90,8 +94,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
         clearTimeout: (handle) => timersRef.current.clearTimeout(handle),
       },
       readPosition: () => {
-        const svc = serviceRef.current;
-        const anchor = targetRef.current.kind === 'vod' ? svc?.getState().anchor : undefined;
+        const anchor =
+          cbRef.current.target.kind === 'vod' ? serviceRef.current?.getState().anchor : undefined;
         return anchor === undefined
           ? undefined
           : {
@@ -100,9 +104,9 @@ export function usePlayerControls(params: PlayerControlsParams) {
             };
       },
       seek: (ms) => {
-        if (targetRef.current.kind === 'vod') {
+        if (cbRef.current.target.kind === 'vod') {
           serviceRef.current?.seek(ms);
-          onSeekCommitRef.current?.(ms);
+          cbRef.current.onSeekCommit?.(ms);
         }
       },
       onPreviewChange: setPreviewPositionMs,
@@ -115,6 +119,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     formFactor,
     itemKey: activeTarget.itemKey,
     isVod: activeTarget.kind === 'vod',
+    statusKind: status.kind,
     tracks,
     hasTracks,
     hasService,
@@ -122,6 +127,10 @@ export function usePlayerControls(params: PlayerControlsParams) {
     hasSettings: params.hasSettings ?? false,
     hasNextEpisode: params.hasNextEpisode ?? false,
     hasPreviousChannel,
+    initialOsdHidden: params.initialOsdHidden,
+    autoHideOsdMs: params.autoHideOsdMs,
+    isScrubbing: previewPositionMs !== undefined,
+    timersRef,
     cancelScrub,
   });
 
@@ -134,42 +143,49 @@ export function usePlayerControls(params: PlayerControlsParams) {
   const retry = (): void => {
     scrub.cancel();
     overlay.blurTvOsd();
+    overlay.blurTvScrubber();
     serviceRef.current?.retry();
   };
 
   const togglePlayPause = (): void => {
     const svc = serviceRef.current;
-    if (svc === null || targetRef.current.kind !== 'vod') return;
+    if (svc === null || cbRef.current.target.kind !== 'vod') return;
     scrub.cancel();
     const kind = svc.getState().status.kind;
     if (kind === 'paused' || kind === 'ended') svc.play();
     else if (canPauseStatus(kind)) svc.pause();
   };
 
+  const commitVodSeek = (targetMs: number): void => {
+    serviceRef.current?.seek(targetMs);
+    cbRef.current.onSeekCommit?.(targetMs);
+  };
+
   const seekBy = (deltaMs: number): void => {
     const svc = serviceRef.current;
-    const anchor = targetRef.current.kind === 'vod' ? svc?.getState().anchor : undefined;
+    const anchor = cbRef.current.target.kind === 'vod' ? svc?.getState().anchor : undefined;
     scrub.cancel();
     if (svc === null || anchor === undefined) return;
-    const targetMs = clampSeekPosition(
-      positionAt(anchor, clockRef.current.now()) + deltaMs,
-      anchor.durationMs,
+    commitVodSeek(
+      clampSeekPosition(positionAt(anchor, clockRef.current.now()) + deltaMs, anchor.durationMs),
     );
-    svc.seek(targetMs);
-    onSeekCommitRef.current?.(targetMs);
+  };
+
+  const seekWithDuration = (compute: (dur: number) => number): void => {
+    const svc = serviceRef.current;
+    if (svc === null || cbRef.current.target.kind !== 'vod') return;
+    scrub.cancel();
+    const dur = svc.getState().anchor?.durationMs;
+    if (dur !== undefined && dur > 0) commitVodSeek(compute(dur));
   };
 
   const seekToRatio = (ratio: number): void => {
-    const svc = serviceRef.current;
-    if (svc === null || targetRef.current.kind !== 'vod' || !Number.isFinite(ratio)) return;
-    scrub.cancel();
-    const dur = svc.getState().anchor?.durationMs;
-    if (dur !== undefined && dur > 0) {
-      const targetMs = Math.round(Math.max(0, Math.min(1, ratio)) * dur);
-      svc.seek(targetMs);
-      onSeekCommitRef.current?.(targetMs);
-    }
+    if (!Number.isFinite(ratio)) return;
+    seekWithDuration((dur) => Math.round(Math.max(0, Math.min(1, ratio)) * dur));
   };
+
+  const seekToEnd = (): void =>
+    seekWithDuration((dur) => (dur > STEP_SEEK_MS ? dur - STEP_SEEK_MS : dur));
 
   const handleBack = (): void => {
     scrub.cancel();
@@ -177,21 +193,51 @@ export function usePlayerControls(params: PlayerControlsParams) {
     if (s.locked) overlay.unlockControls();
     else if (s.settingsOpen) {
       if (s.settingsMenu.view !== 'root') {
-        const next: SettingsMenuState = {
+        overlay.updateSettingsMenu({
           view: 'root',
           index: s.settingsMenu.view === 'subtitles' ? 0 : 1,
-        };
-        overlay.updateSettingsMenu(next);
+        });
       } else overlay.closeSettings();
     } else if (s.tracksOpen) overlay.closeTracks();
+    else if (isTv && s.tvScrubberFocused) overlay.blurTvScrubber();
     else if (isTv && s.tvOsdFocused) overlay.blurTvOsd();
     else onExitRef.current();
+  };
+
+  const activateTvOsd = (act: ReturnType<typeof clampTvOsdAction>): void => {
+    if (act === 'back') onExitRef.current();
+    else if (act === 'playPause') togglePlayPause();
+    else if (act === 'seekBack') seekBy(-STEP_SEEK_MS);
+    else if (act === 'seekForward') seekBy(STEP_SEEK_MS);
+    else if (act === 'tracks') overlay.openTracks();
+    else if (act === 'settings') overlay.openSettings();
+    else if (act === 'retry') retry();
+    else if (act === 'prevChannel') {
+      overlay.blurTvOsd();
+      cbRef.current.onJumpPreviousChannel?.();
+    } else if (act === 'nextEpisode') {
+      overlay.blurTvOsd();
+      cbRef.current.onPlayNextEpisode?.();
+    }
   };
 
   const handleKeyEvent = (event: KeyEvent): void => {
     const s = overlay.liveRef.current;
     if (event.kind === 'press' && event.key === 'back') return void handleBack();
     if (s.locked) return;
+    if (isTv && s.osdHidden) {
+      if (
+        cbRef.current.target.kind === 'live' &&
+        (event.kind === 'press' || event.kind === 'repeat') &&
+        (event.key === 'channelUp' || event.key === 'channelDown')
+      ) {
+        zapByRef.current(event.key === 'channelUp' ? 1 : -1, event.kind === 'repeat');
+        return;
+      }
+      overlay.showOsd();
+      return;
+    }
+    if (isTv) overlay.notifyOsdActivity();
     if (event.kind === 'press' && event.key === 'select' && isWebButtonActive()) return;
     if (event.kind === 'press' && event.key === 'menu') {
       if (s.settingsOpen) return void overlay.closeSettings();
@@ -216,26 +262,30 @@ export function usePlayerControls(params: PlayerControlsParams) {
       return;
     }
 
+    if (isTv && s.tvScrubberFocused) {
+      const intent = routeTvScrubberKey(event);
+      if (intent?.kind === 'step') scrub.step(intent.direction, intent.stepKind);
+      else if (intent?.kind === 'commitOrToggle') {
+        if (scrub.previewPositionMs !== undefined) scrub.commit();
+        else togglePlayPause();
+      } else if (intent?.kind === 'togglePlayPause') togglePlayPause();
+      else if (intent?.kind === 'toOsd') {
+        scrub.cancel();
+        overlay.focusTvOsd(clampTvOsdAction(s.tvOsdAction, s.availableOsd));
+      } else if (intent?.kind === 'blur') {
+        scrub.cancel();
+        overlay.blurTvScrubber();
+      }
+      return;
+    }
+
     if (isTv && s.tvOsdFocused) {
       const intent = routeTvOsdKey(event, s.tvOsdAction, s.availableOsd);
-      if (intent?.kind === 'blur') overlay.blurTvOsd();
-      else if (intent?.kind === 'focus') overlay.focusTvOsd(intent.action);
-      else if (intent?.kind === 'activate') {
-        const act = intent.action;
-        if (act === 'back') onExitRef.current();
-        else if (act === 'playPause') togglePlayPause();
-        else if (act === 'seekBack') seekBy(-STEP_SEEK_MS);
-        else if (act === 'seekForward') seekBy(STEP_SEEK_MS);
-        else if (act === 'prevChannel') {
-          overlay.blurTvOsd();
-          onJumpPreviousChannelRef.current?.();
-        } else if (act === 'tracks') overlay.openTracks();
-        else if (act === 'settings') overlay.openSettings();
-        else if (act === 'nextEpisode') {
-          overlay.blurTvOsd();
-          onPlayNextEpisodeRef.current?.();
-        } else if (act === 'retry') retry();
-      }
+      if (intent?.kind === 'blur') {
+        if (cbRef.current.target.kind === 'vod') overlay.focusTvScrubber();
+        else overlay.blurTvOsd();
+      } else if (intent?.kind === 'focus') overlay.focusTvOsd(intent.action);
+      else if (intent?.kind === 'activate') activateTvOsd(intent.action);
       return;
     }
 
@@ -246,8 +296,12 @@ export function usePlayerControls(params: PlayerControlsParams) {
       return;
     }
 
-    if (targetRef.current.kind === 'vod') {
-      if (event.kind === 'press' && (event.key === 'select' || event.key === 'playPause')) {
+    if (cbRef.current.target.kind === 'vod') {
+      const digitRatio =
+        !isWebDesktop && event.kind === 'press' ? digitKeyToRatio(event.key) : undefined;
+      if (digitRatio !== undefined) {
+        seekToRatio(digitRatio);
+      } else if (event.kind === 'press' && (event.key === 'select' || event.key === 'playPause')) {
         if (event.key === 'select' && scrub.previewPositionMs !== undefined) scrub.commit();
         else togglePlayPause();
       } else if (event.kind === 'press' && event.key === 'play') {
@@ -260,6 +314,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
         if (canPauseStatus(statusKind)) svc?.pause();
       } else if ((event.kind === 'press' || event.kind === 'repeat') && isScrubKey(event.key)) {
         scrub.step(event.key === 'left' || event.key === 'rewind' ? -1 : 1, event.kind);
+      } else if (isTv && event.kind === 'press' && event.key === 'up') {
+        overlay.hideOsd();
       } else if (isTv && event.kind === 'press' && event.key === 'down') {
         overlay.focusTvOsd(initialTvOsdAction(s.availableOsd));
       }
@@ -290,23 +346,23 @@ export function usePlayerControls(params: PlayerControlsParams) {
     },
   });
 
-  const desktopGuardRef = useRef<DesktopShortcutGuard>({
-    canJumpPreviousChannel: () => false,
-    onJumpPreviousChannel: () => undefined,
-    onKeyEvent: () => undefined,
-  });
+  const canUseDesktopShortcuts = (): boolean => {
+    const s = overlay.liveRef.current;
+    return !s.locked && !s.tracksOpen && !s.settingsOpen;
+  };
+  const desktopGuardRef = useRef<DesktopShortcutGuard>(NOOP_DESKTOP_SHORTCUT_GUARD);
   desktopGuardRef.current = {
-    canJumpPreviousChannel: () => {
-      const s = overlay.liveRef.current;
-      return (
-        targetRef.current.kind === 'live' &&
-        hasPrevChannelRef.current &&
-        !s.tracksOpen &&
-        !s.settingsOpen &&
-        !s.locked
-      );
-    },
-    onJumpPreviousChannel: () => onJumpPreviousChannelRef.current?.(),
+    canJumpPreviousChannel: () =>
+      cbRef.current.target.kind === 'live' &&
+      cbRef.current.hasPreviousChannel &&
+      canUseDesktopShortcuts(),
+    onJumpPreviousChannel: () => cbRef.current.onJumpPreviousChannel?.(),
+    isVod: () => cbRef.current.target.kind === 'vod',
+    canUseShortcuts: canUseDesktopShortcuts,
+    onSeekBy: seekBy,
+    onSeekToRatio: seekToRatio,
+    onSeekToEnd: seekToEnd,
+    onTogglePlayPause: togglePlayPause,
     onKeyEvent: handleKeyEvent,
   };
   const desktopFallbackKeyProps = useDesktopPlayerShortcuts({
@@ -317,15 +373,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
   });
 
   return {
-    tracksOpen: overlay.tracksOpen,
-    pickerCursor: overlay.pickerCursor,
-    settingsOpen: overlay.settingsOpen,
-    settingsMenu: overlay.settingsMenu,
-    statsVisible: overlay.statsVisible,
-    canLock: overlay.canLock,
-    locked: overlay.locked,
-    tvOsdFocused: overlay.tvOsdFocused,
-    tvOsdAction: overlay.tvOsdAction,
+    ...overlay.publicState,
     previewPositionMs,
     isPausedOrEnded: status.kind === 'paused' || status.kind === 'ended',
     retry,
@@ -333,14 +381,6 @@ export function usePlayerControls(params: PlayerControlsParams) {
     seekStepBack: () => seekBy(-STEP_SEEK_MS),
     seekStepForward: () => seekBy(STEP_SEEK_MS),
     seekToRatio,
-    openTracks: overlay.openTracks,
-    closeTracks: overlay.closeTracks,
-    openSettings: overlay.openSettings,
-    closeSettings: overlay.closeSettings,
-    openSettingsView: overlay.openSettingsView,
-    toggleStats: overlay.toggleStats,
-    lockControls: overlay.lockControls,
-    unlockControls: overlay.unlockControls,
     selectAudio: (id: string) => serviceRef.current?.selectAudioTrack(id),
     selectSubtitle: (id: string | null) => serviceRef.current?.selectSubtitleTrack(id),
     cancelScrub,

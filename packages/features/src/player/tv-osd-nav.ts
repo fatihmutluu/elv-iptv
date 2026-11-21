@@ -1,4 +1,5 @@
 import type { KeyEvent } from '@elv/focus-core';
+import { isScrubKey } from './scrub-controller';
 
 /** Logical OSD button identifiers navigable on TV when the OSD bar is focused. */
 export type TvOsdAction =
@@ -111,5 +112,30 @@ export function routeTvOsdKey(
   if (event.kind === 'press' && event.key === 'select') {
     return { kind: 'activate', action: clampTvOsdAction(action, available) };
   }
+  return null;
+}
+
+/** Result of routing a {@link KeyEvent} while the TV VOD progress scrubber holds focus. */
+export type TvScrubberKeyIntent =
+  | { readonly kind: 'step'; readonly direction: 1 | -1; readonly stepKind: 'press' | 'repeat' }
+  | { readonly kind: 'commitOrToggle' }
+  | { readonly kind: 'togglePlayPause' }
+  | { readonly kind: 'toOsd' }
+  | { readonly kind: 'blur' };
+
+/** Routes a focused-scrubber key event with horizontal seek-trapping (`#297`). */
+export function routeTvScrubberKey(event: KeyEvent): TvScrubberKeyIntent | null {
+  if ((event.kind === 'press' || event.kind === 'repeat') && isScrubKey(event.key)) {
+    return {
+      kind: 'step',
+      direction: event.key === 'left' || event.key === 'rewind' ? -1 : 1,
+      stepKind: event.kind,
+    };
+  }
+  if (event.kind !== 'press') return null;
+  if (event.key === 'select') return { kind: 'commitOrToggle' };
+  if (event.key === 'playPause') return { kind: 'togglePlayPause' };
+  if (event.key === 'down') return { kind: 'toOsd' };
+  if (event.key === 'up') return { kind: 'blur' };
   return null;
 }

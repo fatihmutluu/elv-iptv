@@ -6,6 +6,7 @@ import { MpvWedgedError } from './client.ts';
 import type { MpvCommand, MpvEvent, MpvReply } from './codec.ts';
 import { createDeriver, type Deriver } from './derive.ts';
 import { createEntryTable, type EntryTable } from './entries.ts';
+import { createInputRepeatGate, type InputRepeatGate } from './input-repeat-gate.ts';
 import type { OpeningGate } from './opening-gate.ts';
 import { headerFields, loadfileCommand } from './options.ts';
 import type { MpvProcess } from './process.ts';
@@ -33,6 +34,7 @@ export interface LiveSession {
   readonly entries: EntryTable;
   readonly deriver: Deriver;
   readonly hotplug: AudioHotplug;
+  readonly repeatGate: InputRepeatGate;
   paused: boolean;
   userQuit: boolean;
   hasCustomHeaders: boolean;
@@ -222,8 +224,12 @@ export function createSessionController(hooks: LiveSessionHooks) {
       case 'client-message': {
         const args = e['args'];
         if (!Array.isArray(args) || args[0] !== 'elv-key') return;
-        if (args[1] === 'fullscreen') presenter.toggleFullscreen();
-        else if (isUiKey(args[1])) hooks.ui({ type: 'key', key: args[1] });
+        if (args[1] === 'fullscreen') {
+          L.repeatGate.allow('fullscreen');
+          presenter.toggleFullscreen();
+        } else if (isUiKey(args[1]) && L.repeatGate.allow(args[1])) {
+          hooks.ui({ type: 'key', key: args[1] });
+        }
       }
     }
   };
@@ -244,6 +250,7 @@ export function createSessionController(hooks: LiveSessionHooks) {
     if (hooks.getLive() !== L) return;
     const noCurrentFile = L.entries.current() === undefined;
     const tokenAtClose = hooks.getMedia()?.token;
+    L.repeatGate.reset();
     hooks.detach(L);
     if (presenter.kind === 'own-window' && L.userQuit) {
       L.proc.kill();
@@ -303,6 +310,7 @@ export function createSessionController(hooks: LiveSessionHooks) {
             }
           },
         }),
+        repeatGate: createInputRepeatGate({ now: hooks.now }),
         paused: false,
         userQuit: false,
         hasCustomHeaders: false,

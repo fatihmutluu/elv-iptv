@@ -1,9 +1,15 @@
+import { DIGIT_KEYS } from '@elv/focus-core';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  AUTOREPEAT_MS,
+  COARSE_SEEK_MS,
   canPauseStatus,
   clampSeekPosition,
+  createKeyRepeatThrottle,
   createScrubController,
+  digitKeyToRatio,
   isScrubKey,
+  LONG_HOLD_MS,
   mapDesktopFallbackKey,
   SCRUB_SETTLE_MS,
   type ScrubPosition,
@@ -225,5 +231,75 @@ describe('createScrubController', () => {
     scrub.step(-1, 'press');
     scrub.commit();
     expect(seek.mock.calls).toEqual([[60_000], [190_000]]);
+  });
+});
+
+describe('digitKeyToRatio and desktop digit fallback', () => {
+  it('maps digit0..digit9 to exact 0.0..0.9 ratios and returns undefined for non-digits', () => {
+    expect(COARSE_SEEK_MS).toBe(30_000);
+    expect(LONG_HOLD_MS).toBe(350);
+    expect(AUTOREPEAT_MS).toBe(160);
+
+    DIGIT_KEYS.forEach((key, n) => {
+      expect(digitKeyToRatio(key)).toBe(n / 10);
+      expect(mapDesktopFallbackKey(String(n))).toBe(key);
+    });
+
+    expect(digitKeyToRatio('left')).toBeUndefined();
+    expect(digitKeyToRatio('select')).toBeUndefined();
+    expect(digitKeyToRatio('back')).toBeUndefined();
+    expect(digitKeyToRatio('channelUp')).toBeUndefined();
+  });
+});
+
+describe('createKeyRepeatThrottle', () => {
+  it('allows non-repeat presses and gates repeats by longHoldMs and repeatIntervalMs', () => {
+    let now = 1_000;
+    const throttle = createKeyRepeatThrottle({ now: () => now });
+
+    expect(throttle.allow('ArrowRight', false)).toBe(true);
+
+    now += LONG_HOLD_MS - 1;
+    expect(throttle.allow('ArrowRight', true)).toBe(false);
+
+    now += 1;
+    expect(throttle.allow('ArrowRight', true)).toBe(true);
+
+    now += AUTOREPEAT_MS - 1;
+    expect(throttle.allow('ArrowRight', true)).toBe(false);
+
+    now += 1;
+    expect(throttle.allow('ArrowRight', true)).toBe(true);
+
+    now += 20;
+    expect(throttle.allow('ArrowRight', false)).toBe(true);
+    now += AUTOREPEAT_MS;
+    expect(throttle.allow('ArrowRight', true)).toBe(false);
+  });
+
+  it('treats a different key or post-reset repeat as a fresh press and honors custom windows', () => {
+    let now = 5_000;
+    const throttle = createKeyRepeatThrottle({
+      now: () => now,
+      longHoldMs: 100,
+      repeatIntervalMs: 250,
+    });
+
+    expect(throttle.allow('j', false)).toBe(true);
+    now += 150;
+    // Past longHoldMs (100) but still within repeatIntervalMs (250)
+    expect(throttle.allow('j', true)).toBe(false);
+    now += 100;
+    expect(throttle.allow('j', true)).toBe(true);
+
+    // Switching key while repeat=true resets as fresh press
+    now += 10;
+    expect(throttle.allow('l', true)).toBe(true);
+    now += 50;
+    expect(throttle.allow('l', true)).toBe(false);
+
+    // reset() clears lastKey so next repeat is allowed immediately
+    throttle.reset();
+    expect(throttle.allow('l', true)).toBe(true);
   });
 });

@@ -103,6 +103,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     live = undefined;
     if (media) media.entryId = undefined;
     L.hotplug.reset();
+    L.repeatGate.reset();
     opening.finish();
     for (const waiter of [...L.endWaiters]) waiter.done(false);
   };
@@ -308,6 +309,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       if (released) return;
       adopt(attempt);
       tracks.onStop();
+      live?.repeatGate.reset();
       media = undefined;
       queue.enqueueStop();
       opening.wake();

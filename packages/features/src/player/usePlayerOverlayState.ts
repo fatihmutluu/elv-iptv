@@ -1,6 +1,6 @@
-import type { MediaTracks } from '@elv/playback';
+import type { MediaTracks, PlaybackStatus, PlaybackTimers } from '@elv/playback';
 import type { FormFactor } from '@elv/ui-kit';
-import { useEffect, useRef, useState } from 'react';
+import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
 import {
   clampSettingsMenu,
   initialSettingsMenu,
@@ -17,7 +17,9 @@ export interface PlayerOverlayLive {
   settingsOpen: boolean;
   settingsMenu: SettingsMenuState;
   locked: boolean;
+  osdHidden: boolean;
   tvOsdFocused: boolean;
+  tvScrubberFocused: boolean;
   tvOsdAction: TvOsdAction;
   availableOsd: TvOsdAction[];
   tracks: MediaTracks;
@@ -26,13 +28,14 @@ export interface PlayerOverlayLive {
 }
 
 /**
- * Owns track picker, 2-level Settings menu, Stats HUD toggle, mobile Touch Lock, and TV OSD
- * focus state for {@link usePlayerControls}, resetting overlays and lock on item changes.
+ * Owns track picker, 2-level Settings menu, Stats HUD toggle, mobile Touch Lock, TV OSD
+ * visibility/auto-hide, and TV OSD/scrubber focus state for {@link usePlayerControls}.
  */
 export function usePlayerOverlayState(params: {
   formFactor: FormFactor;
   itemKey: string;
   isVod: boolean;
+  statusKind: PlaybackStatus['kind'];
   tracks: MediaTracks;
   hasTracks: boolean;
   hasService: boolean;
@@ -40,10 +43,18 @@ export function usePlayerOverlayState(params: {
   hasSettings: boolean;
   hasNextEpisode: boolean;
   hasPreviousChannel: boolean;
+  initialOsdHidden?: boolean | undefined;
+  autoHideOsdMs?: number | undefined;
+  isScrubbing: boolean;
+  timersRef: MutableRefObject<PlaybackTimers>;
   cancelScrub: () => void;
 }) {
-  const { formFactor, itemKey, isVod, tracks, hasTracks, hasService, showRetry } = params;
-  const { hasSettings, hasNextEpisode, hasPreviousChannel, cancelScrub } = params;
+  const { formFactor, itemKey, isVod, statusKind, tracks, hasTracks, hasService, showRetry } =
+    params;
+  const { hasSettings, hasNextEpisode, hasPreviousChannel, initialOsdHidden, autoHideOsdMs } =
+    params;
+  const { isScrubbing, timersRef, cancelScrub } = params;
+  const isTv = formFactor === 'tv';
   const canLock = formFactor === 'phone' || formFactor === 'tablet';
 
   const [rawTracksOpen, setTracksOpen] = useState(false);
@@ -57,12 +68,18 @@ export function usePlayerOverlayState(params: {
   );
   const [statsVisible, setStatsVisible] = useState(false);
   const [rawLocked, setLocked] = useState(false);
+  const [rawOsdHidden, setOsdHidden] = useState(initialOsdHidden === true);
   const [tvOsdFocused, setTvOsdFocused] = useState(false);
+  const [rawTvScrubberFocused, setTvScrubberFocused] = useState(false);
   const [rawTvOsdAction, setTvOsdAction] = useState<TvOsdAction>('playPause');
+  const [osdActivitySeq, setOsdActivitySeq] = useState(0);
 
   const tracksOpen = rawTracksOpen && hasTracks;
   const settingsOpen = rawSettingsOpen && hasService;
   const locked = canLock && rawLocked;
+  const osdHidden = isTv && rawOsdHidden && !locked && !tracksOpen && !settingsOpen;
+  const tvScrubberFocused =
+    isTv && isVod && rawTvScrubberFocused && !locked && !tracksOpen && !settingsOpen && !osdHidden;
   const pickerCursor = clampPickerCursor(rawPickerCursor, tracks);
   const settingsMenu = clampSettingsMenu(rawSettingsMenu, tracks);
   const availableOsd = availableTvOsdActions({
@@ -76,67 +93,153 @@ export function usePlayerOverlayState(params: {
   });
   const tvOsdAction = clampTvOsdAction(rawTvOsdAction, availableOsd);
 
-  const liveRef = useRef<PlayerOverlayLive>({
+  const liveSnapshot: PlayerOverlayLive = {
     tracksOpen,
     pickerCursor,
     settingsOpen,
     settingsMenu,
     locked,
+    osdHidden,
     tvOsdFocused,
-    tvOsdAction,
-    availableOsd,
-    tracks,
-    hasTracks,
-    hasService,
-  });
-  liveRef.current = {
-    tracksOpen,
-    pickerCursor,
-    settingsOpen,
-    settingsMenu,
-    locked,
-    tvOsdFocused,
+    tvScrubberFocused,
     tvOsdAction,
     availableOsd,
     tracks,
     hasTracks,
     hasService,
   };
+  const liveRef = useRef<PlayerOverlayLive>(liveSnapshot);
+  liveRef.current = liveSnapshot;
+
+  const prevItemKeyRef = useRef(itemKey);
+  const autoHideHandleRef = useRef<unknown>(undefined);
+  const clearAutoHide = useCallback(() => {
+    if (autoHideHandleRef.current !== undefined) {
+      timersRef.current.clearTimeout(autoHideHandleRef.current);
+      autoHideHandleRef.current = undefined;
+    }
+  }, [timersRef]);
 
   useEffect(() => {
     if (rawTracksOpen && !hasTracks) setTracksOpen(false);
     else if (tracksOpen && pickerCursor !== rawPickerCursor) setPickerCursor(pickerCursor);
     if (rawSettingsOpen && !hasService) setSettingsOpen(false);
     else if (settingsOpen && settingsMenu !== rawSettingsMenu) setSettingsMenu(settingsMenu);
+    if (rawTvScrubberFocused && (!isTv || !isVod)) setTvScrubberFocused(false);
     if (tvOsdAction !== rawTvOsdAction) setTvOsdAction(tvOsdAction);
   }, [
     hasService,
     hasTracks,
+    isTv,
+    isVod,
     pickerCursor,
     rawPickerCursor,
     rawSettingsMenu,
     rawSettingsOpen,
     rawTracksOpen,
     rawTvOsdAction,
+    rawTvScrubberFocused,
     settingsMenu,
     settingsOpen,
     tracksOpen,
     tvOsdAction,
   ]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset overlays, lock & scrub on item change/unmount
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset overlays, lock, focus & scrub on item change/unmount
   useEffect(() => {
     cancelScrub();
     liveRef.current.tracksOpen = false;
     liveRef.current.settingsOpen = false;
     liveRef.current.locked = false;
     liveRef.current.tvOsdFocused = false;
+    liveRef.current.tvScrubberFocused = false;
     setTracksOpen(false);
     setSettingsOpen(false);
     setLocked(false);
     setTvOsdFocused(false);
+    setTvScrubberFocused(false);
+    if (prevItemKeyRef.current !== itemKey) {
+      prevItemKeyRef.current = itemKey;
+      liveRef.current.osdHidden = false;
+      setOsdHidden(false);
+    }
     return () => cancelScrub();
   }, [itemKey, cancelScrub]);
+
+  useEffect(() => {
+    if (statusKind === 'failed' || statusKind === 'paused' || statusKind === 'ended') {
+      liveRef.current.osdHidden = false;
+      setOsdHidden(false);
+    }
+  }, [statusKind]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: osdActivitySeq and itemKey intentionally re-arm the auto-hide timer
+  useEffect(() => {
+    clearAutoHide();
+    if (
+      !isTv ||
+      autoHideOsdMs === undefined ||
+      autoHideOsdMs <= 0 ||
+      statusKind !== 'playing' ||
+      osdHidden ||
+      isScrubbing ||
+      tracksOpen ||
+      settingsOpen ||
+      locked ||
+      tvOsdFocused ||
+      tvScrubberFocused
+    ) {
+      return clearAutoHide;
+    }
+    autoHideHandleRef.current = timersRef.current.setTimeout(() => {
+      autoHideHandleRef.current = undefined;
+      liveRef.current.osdHidden = true;
+      liveRef.current.tvOsdFocused = false;
+      liveRef.current.tvScrubberFocused = false;
+      setTvOsdFocused(false);
+      setTvScrubberFocused(false);
+      setOsdHidden(true);
+    }, autoHideOsdMs);
+    return clearAutoHide;
+  }, [
+    isTv,
+    autoHideOsdMs,
+    statusKind,
+    osdHidden,
+    isScrubbing,
+    tracksOpen,
+    settingsOpen,
+    locked,
+    tvOsdFocused,
+    tvScrubberFocused,
+    itemKey,
+    osdActivitySeq,
+    timersRef,
+    clearAutoHide,
+  ]);
+
+  const notifyOsdActivity = (): void => {
+    const wasArmed = autoHideHandleRef.current !== undefined;
+    clearAutoHide();
+    if (wasArmed) setOsdActivitySeq((n) => n + 1);
+  };
+
+  const hideOsd = (): void => {
+    cancelScrub();
+    clearAutoHide();
+    liveRef.current.osdHidden = true;
+    liveRef.current.tvOsdFocused = false;
+    liveRef.current.tvScrubberFocused = false;
+    setTvOsdFocused(false);
+    setTvScrubberFocused(false);
+    setOsdHidden(true);
+  };
+
+  const showOsd = (): void => {
+    clearAutoHide();
+    liveRef.current.osdHidden = false;
+    setOsdHidden(false);
+  };
 
   const blurTvOsd = (): void => {
     liveRef.current.tvOsdFocused = false;
@@ -144,10 +247,24 @@ export function usePlayerOverlayState(params: {
   };
 
   const focusTvOsd = (action: TvOsdAction): void => {
+    liveRef.current.tvScrubberFocused = false;
     liveRef.current.tvOsdAction = action;
     liveRef.current.tvOsdFocused = true;
+    setTvScrubberFocused(false);
     setTvOsdAction(action);
     setTvOsdFocused(true);
+  };
+
+  const focusTvScrubber = (): void => {
+    liveRef.current.tvOsdFocused = false;
+    liveRef.current.tvScrubberFocused = true;
+    setTvOsdFocused(false);
+    setTvScrubberFocused(true);
+  };
+
+  const blurTvScrubber = (): void => {
+    liveRef.current.tvScrubberFocused = false;
+    setTvScrubberFocused(false);
   };
 
   const updatePickerCursor = (cursor: TrackPickerCursor): void => {
@@ -167,10 +284,14 @@ export function usePlayerOverlayState(params: {
     liveRef.current.pickerCursor = initial;
     liveRef.current.tracksOpen = true;
     liveRef.current.settingsOpen = false;
+    liveRef.current.osdHidden = false;
     liveRef.current.tvOsdFocused = false;
+    liveRef.current.tvScrubberFocused = false;
     setPickerCursor(initial);
     setSettingsOpen(false);
+    setOsdHidden(false);
     setTvOsdFocused(false);
+    setTvScrubberFocused(false);
     setTracksOpen(true);
   };
 
@@ -186,10 +307,14 @@ export function usePlayerOverlayState(params: {
     liveRef.current.settingsMenu = initial;
     liveRef.current.settingsOpen = true;
     liveRef.current.tracksOpen = false;
+    liveRef.current.osdHidden = false;
     liveRef.current.tvOsdFocused = false;
+    liveRef.current.tvScrubberFocused = false;
     setSettingsMenu(initial);
     setTracksOpen(false);
+    setOsdHidden(false);
     setTvOsdFocused(false);
+    setTvScrubberFocused(false);
     setSettingsOpen(true);
   };
 
@@ -212,10 +337,12 @@ export function usePlayerOverlayState(params: {
     liveRef.current.tracksOpen = false;
     liveRef.current.settingsOpen = false;
     liveRef.current.tvOsdFocused = false;
+    liveRef.current.tvScrubberFocused = false;
     liveRef.current.locked = true;
     setTracksOpen(false);
     setSettingsOpen(false);
     setTvOsdFocused(false);
+    setTvScrubberFocused(false);
     setLocked(true);
   };
 
@@ -226,26 +353,41 @@ export function usePlayerOverlayState(params: {
 
   return {
     liveRef,
-    tracksOpen,
-    pickerCursor,
-    settingsOpen,
-    settingsMenu,
-    statsVisible,
-    canLock,
-    locked,
-    tvOsdFocused,
-    tvOsdAction,
+    hideOsd,
+    showOsd,
+    notifyOsdActivity,
     blurTvOsd,
     focusTvOsd,
+    focusTvScrubber,
+    blurTvScrubber,
     updatePickerCursor,
     updateSettingsMenu,
     openTracks,
     closeTracks,
     openSettings,
     closeSettings,
-    openSettingsView,
     toggleStats,
-    lockControls,
     unlockControls,
+    publicState: {
+      tracksOpen,
+      pickerCursor,
+      settingsOpen,
+      settingsMenu,
+      statsVisible,
+      canLock,
+      locked,
+      osdHidden,
+      tvOsdFocused,
+      tvScrubberFocused,
+      tvOsdAction,
+      openTracks,
+      closeTracks,
+      openSettings,
+      closeSettings,
+      openSettingsView,
+      toggleStats,
+      lockControls,
+      unlockControls,
+    },
   };
 }

@@ -146,6 +146,7 @@ export interface SetupOptions {
   loadMode?: LoadMode;
   spawnDelayMs?: number;
   spawn?: (fake: FakeMpv) => MpvEngineDeps['spawn'];
+  now?: () => number;
   timers?: MpvEngineDeps['timers'];
   ready?: boolean;
   deferStart?: boolean;
@@ -161,7 +162,7 @@ export async function setupEngineTest(cleanups: Array<() => Promise<void>>, o: S
     presenter,
     baseArgs: BASE,
     loadMode: o.loadMode ?? 'replace',
-    now: () => Date.now(),
+    now: o.now ?? (() => Date.now()),
     timers: o.timers ?? timers,
     onUi: (event) => ui.push(event),
     ...(o.deferStart ? { deferStart: true } : {}),

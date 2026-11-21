@@ -7,10 +7,31 @@ export const SCRUB_SETTLE_MS = 750;
 /** Step size in ms for a single seek tap or on-screen `-10s` / `+10s` button. */
 export const STEP_SEEK_MS = 10_000;
 
+/** Coarse seek step in ms for Desktop `Shift + ArrowLeft/ArrowRight`. */
+export const COARSE_SEEK_MS = 30_000;
+
+/** Initial hold delay in ms before held desktop key repeats start firing. */
+export const LONG_HOLD_MS = 350;
+
+/** Minimum cadence in ms between repeated desktop key dispatches after long-hold. */
+export const AUTOREPEAT_MS = 160;
+
 const HOLD_STEP_MS = 30_000;
 const SUSTAINED_STEP_MS = 60_000;
 const SUSTAINED_AFTER_REPEATS = 8;
 const SCRUB_KEY_SET: ReadonlySet<Key> = new Set(['left', 'right', 'rewind', 'fastForward']);
+const DIGIT_KEY_RATIOS: Readonly<Partial<Record<Key, number>>> = {
+  digit0: 0,
+  digit1: 0.1,
+  digit2: 0.2,
+  digit3: 0.3,
+  digit4: 0.4,
+  digit5: 0.5,
+  digit6: 0.6,
+  digit7: 0.7,
+  digit8: 0.8,
+  digit9: 0.9,
+};
 const PAUSABLE_STATUSES: ReadonlySet<PlaybackStatus['kind']> = new Set([
   'playing',
   'recovering',
@@ -36,6 +57,16 @@ const DESKTOP_FALLBACK_KEYS: Readonly<Record<string, Key>> = {
   ArrowDown: 'down',
   PageUp: 'channelUp',
   PageDown: 'channelDown',
+  '0': 'digit0',
+  '1': 'digit1',
+  '2': 'digit2',
+  '3': 'digit3',
+  '4': 'digit4',
+  '5': 'digit5',
+  '6': 'digit6',
+  '7': 'digit7',
+  '8': 'digit8',
+  '9': 'digit9',
 };
 
 /** Playback position the scrub starts from; `durationMs` clamps the preview when known. */
@@ -68,6 +99,52 @@ export interface ScrubController {
 /** Whether `key` is a horizontal VOD scrub key (`left`, `right`, `rewind`, `fastForward`). */
 export function isScrubKey(key: Key): boolean {
   return SCRUB_KEY_SET.has(key);
+}
+
+/** Maps a remote digit key (`digit0`–`digit9`) to a VOD timeline ratio (`0.0`–`0.9`). */
+export function digitKeyToRatio(key: Key): number | undefined {
+  return DIGIT_KEY_RATIOS[key];
+}
+
+/** Rate-limiter gating held key repeats by initial hold delay and repeat cadence. */
+export interface KeyRepeatThrottle {
+  allow(key: string, repeat: boolean): boolean;
+  reset(): void;
+}
+
+/** Creates a pure key-repeat throttle using the caller-provided clock. */
+export function createKeyRepeatThrottle(opts: {
+  readonly now: () => number;
+  readonly longHoldMs?: number;
+  readonly repeatIntervalMs?: number;
+}): KeyRepeatThrottle {
+  const longHoldMs = opts.longHoldMs ?? LONG_HOLD_MS;
+  const repeatIntervalMs = opts.repeatIntervalMs ?? AUTOREPEAT_MS;
+  let lastKey: string | undefined;
+  let holdStart = 0;
+  let lastEmit = 0;
+
+  return {
+    allow(key, repeat) {
+      const now = opts.now();
+      if (!repeat || key !== lastKey) {
+        lastKey = key;
+        holdStart = now;
+        lastEmit = now;
+        return true;
+      }
+      if (now - holdStart < longHoldMs || now - lastEmit < repeatIntervalMs) {
+        return false;
+      }
+      lastEmit = now;
+      return true;
+    },
+    reset() {
+      lastKey = undefined;
+      holdStart = 0;
+      lastEmit = 0;
+    },
+  };
 }
 
 /** Maps a non-web desktop `onKeyDown` / `onKeyUp` key string to a logical {@link Key}. */
