@@ -31,6 +31,7 @@ const config: KnipConfig = {
         'src/main/main.ts',
         'src/preload/preload.ts',
         'src/utility/catalog-worker.ts',
+        'src/dev/workbench-bridge-cli.ts',
       ],
       // Needed by the packaging script and by the workspace link to the renderer export.
       ignoreDependencies: ['@elv/desktop-renderer'],

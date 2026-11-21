@@ -1,5 +1,5 @@
 import { createMemoryPreferencesStore } from '@elv/domain';
-import { AppProviders, AppShell, createLazyCatalog } from '@elv/features';
+import { AppProviders, AppShell } from '@elv/features';
 import { type AppLocale, createAppI18n, resolveLocale } from '@elv/i18n';
 import {
   ErrorBoundary,
@@ -21,41 +21,55 @@ import {
   deviceFamilyOf,
   getWorkbenchDevice,
   toggleDeviceOrientation,
-  type WorkbenchDeviceFamily,
   type WorkbenchDeviceId,
   type WorkbenchMode,
 } from './presets.ts';
+import {
+  createWorkbenchRemoteCatalog,
+  probeWorkbenchBridge,
+  readWorkbenchBridgeConfig,
+} from './remote-catalog.ts';
 import { WorkbenchInspector } from './WorkbenchInspector.tsx';
 import {
   DRAWER_WIDTH,
+  persistDataMode,
+  readInitialDataMode,
   workbenchShellStyles as styles,
   TOPBAR_HEIGHT,
   WEB_FRAME_SHADOW,
   WEB_STAGE_BG,
+  WORKBENCH_FAMILY_TARGETS,
   WorkbenchBarButton,
+  WorkbenchBridgeNotice,
+  type WorkbenchBridgeStatus,
+  type WorkbenchDataMode,
 } from './WorkbenchShellParts.tsx';
-
-const FAMILY_TARGETS: ReadonlyArray<{
-  readonly family: WorkbenchDeviceFamily;
-  readonly label: string;
-  readonly defaultId: WorkbenchDeviceId;
-}> = [
-  { family: 'tv', label: 'TV', defaultId: 'tv' },
-  { family: 'desktop', label: 'PC', defaultId: 'desktop' },
-  { family: 'tablet', label: 'Tablet', defaultId: 'tablet-landscape' },
-  { family: 'phone', label: 'Phone', defaultId: 'phone-portrait' },
-];
 
 /**
  * Dev-only multi-device hot-reload Workbench (`pnpm dev:ui`).
  * Never bundled in production (`__DEV__ === false`). Lets developers inspect real `@elv/ui-kit`
  * and `@elv/features` code across TV, Phone, Tablet, and Desktop frames, all 6 themes, TR/EN,
- * font scaling, reduce-motion, and TV 5% overscan safe-guides with Metro Fast Refresh.
+ * font scaling, reduce-motion, TV 5% overscan safe-guides, and Demo/Live catalog data.
  */
 export function WorkbenchShell(): ReactElement {
   const { width: winWidth, height: winHeight } = useWindowDimensions();
+  const bridgeConfig = useMemo(() => readWorkbenchBridgeConfig(), []);
+  const demoCatalog = useMemo(() => createWorkbenchCatalog(), []);
+  const liveCatalog = useMemo(
+    () => (bridgeConfig ? createWorkbenchRemoteCatalog(bridgeConfig) : null),
+    [bridgeConfig],
+  );
+  const videoHost = useMemo(() => createWorkbenchVideoHost(), []);
+
   const [deviceId, setDeviceId] = useState<WorkbenchDeviceId>('tv');
   const [mode, setMode] = useState<WorkbenchMode>('gallery');
+  const [dataMode, setDataMode] = useState<WorkbenchDataMode>(() =>
+    readInitialDataMode(bridgeConfig !== null),
+  );
+  const [bridgeStatus, setBridgeStatus] = useState<WorkbenchBridgeStatus>(() =>
+    bridgeConfig !== null ? 'checking' : 'offline',
+  );
+  const [retryProbe, setRetryProbe] = useState<number>(0);
   const [prefs, setPrefs] = useState<{
     preset: ThemePresetId;
     locale: AppLocale;
@@ -80,11 +94,31 @@ export function WorkbenchShell(): ReactElement {
       }),
     [],
   );
-  const catalog = useMemo(
-    () => createLazyCatalog(() => Promise.resolve(createWorkbenchCatalog())),
-    [],
-  );
-  const videoHost = useMemo(() => createWorkbenchVideoHost(), []);
+
+  const selectDataMode = (next: WorkbenchDataMode): void => {
+    if (next === dataMode) return;
+    setBridgeStatus(next === 'live' && bridgeConfig !== null ? 'checking' : 'offline');
+    setDataMode(next);
+    persistDataMode(next);
+  };
+
+  useEffect(() => {
+    if (dataMode !== 'live') return;
+    if (bridgeConfig === null) {
+      setBridgeStatus('offline');
+      return;
+    }
+    let cancelled = false;
+    setBridgeStatus('checking');
+    void probeWorkbenchBridge(bridgeConfig).then((healthy) => {
+      if (!cancelled) {
+        setBridgeStatus(healthy ? 'ready' : 'offline');
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [dataMode, bridgeConfig, retryProbe]);
 
   useEffect(
     () =>
@@ -130,6 +164,41 @@ export function WorkbenchShell(): ReactElement {
   const bezelWidth = family === 'tv' ? 6 : family === 'tablet' ? 10 : 9;
   const bezelRadius = family === 'tv' ? 12 : family === 'tablet' ? 22 : 32;
 
+  const renderAppStage = (): ReactElement => {
+    if (dataMode === 'demo') {
+      return (
+        <AppProviders
+          preferencesStore={preferencesStore}
+          systemLocale="en"
+          viewport={device.viewport}
+        >
+          <AppShell key="demo" catalog={demoCatalog} videoHost={videoHost} />
+        </AppProviders>
+      );
+    }
+    if (bridgeStatus === 'ready' && liveCatalog !== null) {
+      return (
+        <AppProviders
+          preferencesStore={preferencesStore}
+          systemLocale="en"
+          viewport={device.viewport}
+        >
+          <AppShell key="live" catalog={liveCatalog} videoHost={videoHost} />
+        </AppProviders>
+      );
+    }
+    if (bridgeStatus === 'checking') {
+      return <WorkbenchBridgeNotice status="checking" />;
+    }
+    return (
+      <WorkbenchBridgeNotice
+        status="offline"
+        onRetry={() => setRetryProbe((n) => n + 1)}
+        onSwitchToDemo={() => selectDataMode('demo')}
+      />
+    );
+  };
+
   const stageContent =
     mode === 'gallery' ? (
       <I18nProvider i18n={i18n}>
@@ -148,13 +217,7 @@ export function WorkbenchShell(): ReactElement {
         </ThemeProvider>
       </I18nProvider>
     ) : (
-      <AppProviders
-        preferencesStore={preferencesStore}
-        systemLocale="en"
-        viewport={device.viewport}
-      >
-        <AppShell catalog={catalog} videoHost={videoHost} />
-      </AppProviders>
+      renderAppStage()
     );
 
   const scaledInnerStyle: ViewStyle | undefined =
@@ -170,6 +233,9 @@ export function WorkbenchShell(): ReactElement {
             : {}),
         } as unknown as ViewStyle)
       : undefined;
+
+  const tvInputHint =
+    family === 'tv' && mode === 'app' ? ' · TV remote keys (use PC frame to type URLs)' : '';
 
   return (
     <View style={styles.root}>
@@ -199,7 +265,23 @@ export function WorkbenchShell(): ReactElement {
           </View>
 
           <View style={styles.segmented}>
-            {FAMILY_TARGETS.map((item) => (
+            <WorkbenchBarButton
+              label="Demo"
+              active={dataMode === 'demo'}
+              onPress={() => selectDataMode('demo')}
+            />
+            <WorkbenchBarButton
+              label="Live"
+              active={dataMode === 'live'}
+              onPress={() => {
+                selectDataMode('live');
+                setMode('app');
+              }}
+            />
+          </View>
+
+          <View style={styles.segmented}>
+            {WORKBENCH_FAMILY_TARGETS.map((item) => (
               <WorkbenchBarButton
                 key={item.family}
                 label={item.label}
@@ -262,7 +344,7 @@ export function WorkbenchShell(): ReactElement {
             <View style={styles.frameColumn}>
               <View style={styles.frameMetaPill}>
                 <Text style={styles.frameMetaText}>
-                  {`${device.label} · ${device.frameWidth}×${device.frameHeight} · Fit ${fitted.fitPercent}%`}
+                  {`${device.label} · ${device.frameWidth}×${device.frameHeight} · Fit ${fitted.fitPercent}%${tvInputHint}`}
                 </Text>
               </View>
               <View

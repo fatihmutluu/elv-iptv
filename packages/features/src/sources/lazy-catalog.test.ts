@@ -133,4 +133,152 @@ describe('createLazyCatalog', () => {
     await lazy.close();
     handle.close();
   });
+
+  it('memoizes load across sequential and concurrent calls so mutations persist', async () => {
+    let loadCount = 0;
+    const handles: Array<ReturnType<typeof testDb>> = [];
+    const lazy = createLazyCatalog(async () => {
+      loadCount += 1;
+      const handle = testDb();
+      handles.push(handle);
+      await openCatalog(handle.db);
+      return createCatalogService({
+        db: handle.db,
+        secrets: memorySecrets(),
+        scheduler: countingScheduler(),
+        http: {
+          async get() {
+            return ok({
+              status: 200,
+              headers: {},
+              body: { async *[Symbol.asyncIterator]() {} },
+            });
+          },
+        },
+        clock: () => 100,
+      });
+    });
+
+    const [a, b, c] = await Promise.all([
+      lazy.listSources(),
+      lazy.listSources(),
+      lazy.addSourceFromLink({ name: 'Persisted', url: 'http://127.0.0.1/live.m3u8' }),
+    ]);
+    expect(a).toEqual([]);
+    expect(b).toEqual([]);
+    expect(c.ok).toBe(true);
+    expect(loadCount).toBe(1);
+
+    const sources = await lazy.listSources();
+    expect(sources.map((s) => s.name)).toEqual(['Persisted']);
+    expect(loadCount).toBe(1);
+
+    await lazy.close();
+    for (const h of handles) h.close();
+  });
+
+  it('clears the cached promise when load rejects so a subsequent retry succeeds', async () => {
+    let attempts = 0;
+    const handle = testDb();
+    await openCatalog(handle.db);
+    const underlying = createCatalogService({
+      db: handle.db,
+      secrets: memorySecrets(),
+      scheduler: countingScheduler(),
+      http: {
+        async get() {
+          return ok({
+            status: 200,
+            headers: {},
+            body: { async *[Symbol.asyncIterator]() {} },
+          });
+        },
+      },
+      clock: () => 100,
+    });
+
+    const lazy = createLazyCatalog(async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw Object.assign(new Error('transient open failure'), {
+          error: elvError('storage', 'bridge-unavailable'),
+        });
+      }
+      return underlying;
+    });
+
+    const first = await lazy.addSourceFromLink({
+      name: 'Retry Me',
+      url: 'http://127.0.0.1/retry.m3u8',
+    });
+    expect(first).toEqual({
+      ok: false,
+      error: { category: 'storage', code: 'bridge-unavailable' },
+    });
+    expect(attempts).toBe(1);
+
+    const second = await lazy.addSourceFromLink({
+      name: 'Retry Me',
+      url: 'http://127.0.0.1/retry.m3u8',
+    });
+    expect(second.ok).toBe(true);
+    expect(attempts).toBe(2);
+    expect((await lazy.listSources()).map((s) => s.name)).toEqual(['Retry Me']);
+    expect(attempts).toBe(2);
+
+    await lazy.close();
+    handle.close();
+  });
+
+  it('clears the cache on close and avoids opening when never used', async () => {
+    let loadCount = 0;
+    let closeCount = 0;
+    const handles: Array<ReturnType<typeof testDb>> = [];
+
+    const lazy = createLazyCatalog(async () => {
+      loadCount += 1;
+      const handle = testDb();
+      handles.push(handle);
+      await openCatalog(handle.db);
+      const svc = createCatalogService({
+        db: handle.db,
+        secrets: memorySecrets(),
+        scheduler: countingScheduler(),
+        http: {
+          async get() {
+            return ok({
+              status: 200,
+              headers: {},
+              body: { async *[Symbol.asyncIterator]() {} },
+            });
+          },
+        },
+        clock: () => 100,
+      });
+      return {
+        ...svc,
+        async close() {
+          closeCount += 1;
+          await svc.close();
+        },
+      };
+    });
+
+    await lazy.close();
+    expect(loadCount).toBe(0);
+    expect(closeCount).toBe(0);
+
+    await lazy.listSources();
+    expect(loadCount).toBe(1);
+
+    await lazy.close();
+    expect(closeCount).toBe(1);
+
+    await lazy.listSources();
+    expect(loadCount).toBe(2);
+
+    await lazy.close();
+    expect(closeCount).toBe(2);
+    for (const h of handles) h.close();
+  });
 });

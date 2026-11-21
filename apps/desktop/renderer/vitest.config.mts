@@ -11,6 +11,7 @@ export default defineConfig({
         'src/gate/params.ts',
         'src/gate/metrics.ts',
         'src/gate/driver.ts',
+        'src/workbench/remote-catalog.ts',
       ],
       exclude: ['src/**/*.test.ts'],
       reporter: ['text-summary'],
