@@ -418,4 +418,106 @@ describe('createKvPreferencesStore', () => {
     await store.update({ reduceMotion: true });
     expect(second).not.toHaveBeenCalled();
   });
+
+  it('coalesces rapid updates into a single backend.set while notifying subscribers optimistically, and supports flush()', async () => {
+    const { backend } = makeKv();
+    let nextId = 1;
+    const timers = new Map<number, () => void>();
+    const store = createKvPreferencesStore(backend, undefined, {
+      coalesceMs: 500,
+      setTimeoutFn: (fn) => {
+        const id = nextId++;
+        timers.set(id, fn);
+        return id as unknown as ReturnType<typeof setTimeout>;
+      },
+      clearTimeoutFn: (handle) => {
+        timers.delete(handle as unknown as number);
+      },
+    });
+
+    const seen: PreferencesSnapshot[] = [];
+    store.subscribe((s) => seen.push(s));
+
+    const p1 = store.update({ themePreset: 'midnightCobalt' });
+    const p2 = store.update({ locale: 'tr' });
+    const p3 = store.update({ fontScale: 1.15, reduceMotion: true });
+
+    // Drain microtask queue for queued validation/notification steps (no timers fired)
+    for (let i = 0; i < 10; i += 1) {
+      await Promise.resolve();
+    }
+
+    // Optimistic notifications fired immediately, but backend.set has NOT been called yet
+    expect(seen).toHaveLength(3);
+    expect(seen[2]).toEqual({
+      version: 1,
+      themePreset: 'midnightCobalt',
+      locale: 'tr',
+      fontScale: 1.15,
+      reduceMotion: true,
+    });
+    expect(backend.set).not.toHaveBeenCalled();
+    expect(timers.size).toBe(1);
+
+    // Flush commits immediately in one backend.set call and resolves all callers
+    await store.flush?.();
+    const results = await Promise.all([p1, p2, p3]);
+    expect(backend.set).toHaveBeenCalledTimes(1);
+    for (const r of results) {
+      expect(r).toEqual({
+        ok: true,
+        value: {
+          version: 1,
+          themePreset: 'midnightCobalt',
+          locale: 'tr',
+          fontScale: 1.15,
+          reduceMotion: true,
+        },
+      });
+    }
+  });
+
+  it('cancels pending coalesced write on reset() and propagates backend.set failures to all waiters', async () => {
+    const { backend } = makeKv();
+    let nextId = 1;
+    const timers = new Map<number, () => void>();
+    const store = createKvPreferencesStore(backend, undefined, {
+      coalesceMs: 500,
+      setTimeoutFn: (fn) => {
+        const id = nextId++;
+        timers.set(id, fn);
+        return id as unknown as ReturnType<typeof setTimeout>;
+      },
+      clearTimeoutFn: (handle) => {
+        timers.delete(handle as unknown as number);
+      },
+    });
+
+    const pendingUpdate = store.update({ locale: 'tr' });
+    const resetRes = await store.reset();
+    expect(resetRes).toEqual({ ok: true, value: DEFAULT_PREFERENCES });
+    expect(await pendingUpdate).toEqual({ ok: true, value: DEFAULT_PREFERENCES });
+    expect(backend.set).not.toHaveBeenCalled();
+    expect(timers.size).toBe(0);
+
+    // Error propagation to all coalesced waiters + rollback to last committed snapshot
+    const notifications: PreferencesSnapshot[] = [];
+    store.subscribe((s) => notifications.push(s));
+    vi.mocked(backend.set).mockImplementationOnce(() => {
+      throw new Error('disk full');
+    });
+    const w1 = store.update({ locale: 'de' });
+    const w2 = store.update({ reduceMotion: true });
+    await store.flush?.();
+    expect(await w1).toEqual({
+      ok: false,
+      error: { category: 'storage', code: 'preferences-write-failed' },
+    });
+    expect(await w2).toEqual({
+      ok: false,
+      error: { category: 'storage', code: 'preferences-write-failed' },
+    });
+    // UI state rolled back to last committed snapshot (DEFAULT_PREFERENCES) and notified subscribers
+    expect(notifications[notifications.length - 1]).toEqual(DEFAULT_PREFERENCES);
+  });
 });

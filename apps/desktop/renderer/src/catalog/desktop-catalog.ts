@@ -103,6 +103,8 @@ export function createDesktopCatalogFromBridge(
     clearProgress: (itemKey, profileId) => bridge.clearProgress(itemKey, profileId),
     toggleFavorite: (input) =>
       bridge.toggleFavorite({ ...input, title: sanitizeDisplayText(input.title) }),
+    setFavorite: (input, active) =>
+      bridge.setFavorite({ ...input, title: sanitizeDisplayText(input.title) }, active),
     listFavorites: (limit, profileId) => bridge.listFavorites(limit, profileId),
     listFavoriteKeys: (profileId) => bridge.listFavoriteKeys(profileId),
     async close() {

@@ -9,10 +9,11 @@ import {
   useRef,
   useSyncExternalStore,
 } from 'react';
-import { Animated, View } from 'react-native';
+import { Animated, Platform, View } from 'react-native';
 import { useTheme } from '../theme';
 import { FocusRing } from './FocusRing';
 import type { ListSource } from './list-source';
+import { TvScrollEdgeFade } from './TvScrollEdgeFade';
 
 /** Extra rows rendered beyond the visible ones, two above and two below. */
 const BUFFER_ROWS = 4;
@@ -45,6 +46,8 @@ export interface TvListProps<T> {
   /** Accessibility label of a row, so a screen reader can read the focused one. Stable, like `renderRow`. */
   rowLabel?: (item: T | undefined, index: number) => string;
   testID?: string;
+  /** Optional override for top/bottom scroll-edge fade masks (defaults to tvOS auto-enable, `#230`). */
+  edgeFade?: boolean;
   /** Called once per focused-index change, on the first animation frame after the new row and ring committed, with the window that frame showed. Not called when the index returns to its previous value before a frame. */
   onFrameCommitted?: (index: number, window: FrameWindow) => void;
 }
@@ -107,6 +110,7 @@ export function TvList<T>({
   renderRow,
   rowLabel,
   testID,
+  edgeFade,
   onFrameCommitted,
 }: TvListProps<T>): ReactElement {
   const { reduceMotion } = useTheme();
@@ -241,9 +245,23 @@ export function TvList<T>({
     );
   }
 
+  const edgeFadeActive =
+    edgeFade ?? (Platform.OS === 'ios' && Boolean((Platform as { isTV?: boolean }).isTV));
+
   return (
     <View testID={testID} style={{ height: visibleRows * rowHeight, overflow: 'hidden' }}>
       <Animated.View style={{ transform: [{ translateY: offset.current }] }}>{rows}</Animated.View>
+      {edgeFadeActive ? (
+        <TvScrollEdgeFade
+          showTop={windowStart > 0 && (!showFocus || safeIndex > windowStart)}
+          showBottom={
+            windowStart + visibleRows < count &&
+            (!showFocus || safeIndex < windowStart + visibleRows - 1)
+          }
+          enabled
+          testID={testID === undefined ? undefined : `${testID}-edge-fade`}
+        />
+      ) : null}
       {showFocus ? (
         <FocusRing
           testID={testID === undefined ? undefined : `${testID}-ring`}

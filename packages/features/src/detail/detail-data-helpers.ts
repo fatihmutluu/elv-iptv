@@ -2,37 +2,24 @@ import {
   type CatalogService,
   type CategoryRow,
   DEFAULT_PROFILE_ID,
-  type EpisodeRow,
-  type ItemDetailRow,
   type ItemRow,
   type SeasonRow,
   type WatchProgressRow,
 } from '@elv/data';
-import type { ElvError } from '@elv/domain';
-import { batchLoadProgressByKeys, type DetailTarget } from '../shared';
+import {
+  batchLoadProgressByKeys,
+  type CachedDetailSeasonsState,
+  type CachedDetailSnapshot,
+  type DetailTarget,
+} from '../shared';
 
 const RELATED_LIMIT = 12;
 
 /** Loading / error / ready state for a series's season list. */
-export type DetailSeasonsState =
-  | { readonly kind: 'loading' }
-  | { readonly kind: 'error'; readonly error: ElvError }
-  | { readonly kind: 'ready'; readonly seasons: readonly SeasonRow[] };
+export type DetailSeasonsState = CachedDetailSeasonsState;
 
 /** Atomic hydrated state snapshot held inside `useDetailData`. */
-export interface DetailSnapshot {
-  readonly detailRow: ItemDetailRow | null;
-  readonly inMyList: boolean;
-  readonly movieProgress: WatchProgressRow | null;
-  readonly seasonsState: DetailSeasonsState;
-  readonly selectedSeason: number | null;
-  readonly episodes: readonly EpisodeRow[];
-  readonly episodesLoading: boolean;
-  readonly episodeProgressByKey: ReadonlyMap<string, WatchProgressRow>;
-  readonly related: readonly ItemRow[];
-  readonly relatedCategoryId: string | undefined;
-  readonly relatedProgressByKey: ReadonlyMap<string, WatchProgressRow>;
-}
+export type DetailSnapshot = CachedDetailSnapshot;
 
 /** Creates an empty {@link DetailSnapshot} for a newly opened movie or series target. */
 export function emptyDetailSnapshot(kind: 'movie' | 'series', categoryId?: string): DetailSnapshot {
@@ -44,11 +31,53 @@ export function emptyDetailSnapshot(kind: 'movie' | 'series', categoryId?: strin
     selectedSeason: null,
     episodes: [],
     episodesLoading: kind === 'series',
+    episodesRefreshing: false,
     episodeProgressByKey: new Map(),
     related: [],
     relatedCategoryId: categoryId,
     relatedProgressByKey: new Map(),
   };
+}
+
+/**
+ * Picks up to `limit` uncached seasons to prewarm around `activeSeason` (next season first,
+ * then previous, then remaining seasons in list order).
+ */
+export function pickAdjacentSeasonsToPrewarm(
+  seasons: readonly SeasonRow[],
+  activeSeason: number,
+  cachedSeasons: ReadonlySet<number>,
+  limit = 4,
+): number[] {
+  if (seasons.length <= 1 || limit <= 0) return [];
+  const available = new Set(seasons.map((s) => s.season));
+  const ordered: number[] = [];
+  const pushIfValid = (s: number) => {
+    if (
+      ordered.length < limit &&
+      s !== activeSeason &&
+      available.has(s) &&
+      !cachedSeasons.has(s) &&
+      !ordered.includes(s)
+    ) {
+      ordered.push(s);
+    }
+  };
+  pushIfValid(activeSeason + 1);
+  pushIfValid(activeSeason - 1);
+  for (const row of seasons) pushIfValid(row.season);
+  return ordered;
+}
+
+/** Merges newly loaded episode watch-progress rows into an existing progress map. */
+export function mergeEpisodeProgress(
+  base: ReadonlyMap<string, WatchProgressRow>,
+  incoming: ReadonlyMap<string, WatchProgressRow>,
+): ReadonlyMap<string, WatchProgressRow> {
+  if (incoming.size === 0) return base;
+  const next = new Map(base);
+  for (const [k, v] of incoming) next.set(k, v);
+  return next;
 }
 
 /** Fetches up to 12 bounded *More Like This* items excluding the active title plus their progress. */

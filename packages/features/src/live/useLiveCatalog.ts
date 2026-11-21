@@ -6,15 +6,16 @@ import {
   createPagedListSource,
   type DisplayCategory,
   type PagedListSource,
+  useCatalogUiCache,
 } from '../shared';
 import {
   buildLiveHubPlayTarget,
   LIVE_MAX_PAGES,
   LIVE_PAGE_SIZE,
   type LiveMode,
-  recordChannelTune,
   toLiveEntry,
 } from './live-model';
+import { useLiveChannelHistory } from './useLiveChannelHistory';
 import { useLiveFavorites } from './useLiveFavorites';
 import { useLiveNowNext } from './useLiveNowNext';
 import { type LiveNumberFeedback, useLiveNumberJump } from './useLiveNumberJump';
@@ -73,91 +74,113 @@ export interface LiveCatalogState {
   ) => PlayTarget;
 }
 
-interface ChannelHistory {
-  readonly active: ItemRow | null;
-  readonly activeIndex: number;
-  readonly previous: ItemRow | null;
-  readonly previousIndex: number;
-}
-
-const EMPTY_HISTORY: ChannelHistory = {
-  active: null,
-  activeIndex: 0,
-  previous: null,
-  previousIndex: 0,
-};
 const defaultNow = (): number => Date.now();
 
-function findChannelByKey(
-  source: PagedListSource<ItemRow>,
-  key: string,
-): { item: ItemRow; index: number } | null {
-  const limit = Math.min(source.count(), LIVE_PAGE_SIZE);
-  for (let i = 0; i < limit; i++) {
-    const candidate = source.get(i);
-    if (candidate?.key === key) return { item: candidate, index: i };
-  }
-  return null;
-}
-
-function findInitialChannel(
-  source: PagedListSource<ItemRow>,
-  preferredKey: string | null,
-): { item: ItemRow; index: number } | null {
-  if (preferredKey !== null) {
-    const matched = findChannelByKey(source, preferredKey);
-    if (matched) return matched;
-  }
-  const first = source.get(0);
-  return first ? { item: first, index: 0 } : null;
+function pickActiveCategory(
+  categories: readonly DisplayCategory[],
+  selectedCategoryId: string | null,
+): DisplayCategory | null {
+  return (
+    (selectedCategoryId !== null
+      ? categories.find((c) => c.row.id === selectedCategoryId)
+      : undefined) ??
+    categories[0] ??
+    null
+  );
 }
 
 /**
  * Manages Cinema Quietude Live TV Hub state: multi-source live categories, O(1) LRU-paged
- * `PagedListSource<ItemRow>`, bounded Now/Next TTL cache (`#250`), active/previous channel history
- * (`#43`), and `0–9` channel number jump with auto-tune timeout (`#44`/`#54`).
+ * `PagedListSource<ItemRow>` hydrated synchronously from `CatalogUiCache` (`#445`), bounded
+ * Now/Next TTL cache (`#250`), active/previous channel history (`#43`), and `0–9` channel number
+ * jump (`#44`/`#54`).
  */
 export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState {
   const { catalog, sources, refreshToken = 0, userStateVersion = 0, mode = 'channels' } = options;
   const { selectedCategoryId, activeChannelKey, previousChannelKey, now = defaultNow } = options;
 
-  const [categories, setCategories] = useState<readonly DisplayCategory[]>([]);
-  const [loadingCategories, setLoadingCategories] = useState(true);
-  const [channelSource, setChannelSource] = useState<PagedListSource<ItemRow> | null>(null);
+  const uiCache = useCatalogUiCache();
+  const uiCacheRef = useRef(uiCache);
+  uiCacheRef.current = uiCache;
+  const initialLive = sources.length > 0 ? (uiCache?.getLive() ?? null) : null;
+  const initialCats = initialLive?.hasLoadedCategories ? initialLive.categories : [];
+  const initialActiveCat = pickActiveCategory(initialCats, selectedCategoryId);
+  const initialSlice = initialActiveCat
+    ? uiCache?.getLiveFirstChannels(initialActiveCat.row.id)
+    : undefined;
+
+  const buildChannelSource = useCallback(
+    (catId: string, count: number, seeded?: readonly ItemRow[]) =>
+      createPagedListSource<ItemRow>({
+        count,
+        pageSize: LIVE_PAGE_SIZE,
+        maxPages: LIVE_MAX_PAGES,
+        ...(seeded !== undefined ? { initialPage0: seeded } : {}),
+        loadPage: async (offset, limit) => {
+          const rows = await catalog.items(catId, offset, limit);
+          if (offset === 0 && rows.length > 0)
+            uiCacheRef.current?.setLiveFirstChannels(catId, rows);
+          return rows;
+        },
+      }),
+    [catalog],
+  );
+
+  const initialSourceMetaRef = useRef<{
+    source: PagedListSource<ItemRow> | null;
+    catId: string | null;
+    count: number;
+    refreshToken: number;
+    catalog: CatalogService;
+  } | null>(null);
+  if (initialSourceMetaRef.current === null) {
+    const src =
+      initialActiveCat && initialActiveCat.row.itemCount > 0 && initialSlice !== undefined
+        ? buildChannelSource(initialActiveCat.row.id, initialActiveCat.row.itemCount, initialSlice)
+        : null;
+    initialSourceMetaRef.current = {
+      source: src,
+      catId: initialActiveCat?.row.id ?? null,
+      count: initialActiveCat?.row.itemCount ?? 0,
+      refreshToken,
+      catalog,
+    };
+  }
+
+  const [categories, setCategories] = useState<readonly DisplayCategory[]>(() => initialCats);
+  const [loadingCategories, setLoadingCategories] = useState(
+    () => sources.length > 0 && !(initialLive?.hasLoadedCategories ?? false),
+  );
+  const [channelSource, setChannelSource] = useState<PagedListSource<ItemRow> | null>(
+    () => initialSourceMetaRef.current?.source ?? null,
+  );
   const [sourceVersion, setSourceVersion] = useState(0);
-  const [history, setHistory] = useState<ChannelHistory>(EMPTY_HISTORY);
 
   const activeCategory = useMemo(
-    () =>
-      (selectedCategoryId !== null
-        ? categories.find((c) => c.row.id === selectedCategoryId)
-        : undefined) ??
-      categories[0] ??
-      null,
+    () => pickActiveCategory(categories, selectedCategoryId),
     [categories, selectedCategoryId],
   );
 
   const nowRef = useRef(now);
   nowRef.current = now;
-  const activeSourceIdRef = useRef<string | undefined>(undefined);
-  activeSourceIdRef.current =
-    activeCategory?.row.sourceId ?? history.active?.sourceId ?? sources[0]?.id;
+  const onSelectCatRef = useRef(options.onSelectCategoryId);
+  onSelectCatRef.current = options.onSelectCategoryId;
 
-  const latest = {
-    onSelectCategoryId: options.onSelectCategoryId,
-    onChannelHistoryChange: options.onChannelHistoryChange,
-    history,
-  };
-  const latestRef = useRef(latest);
-  latestRef.current = latest;
-
-  const aliveRef = useRef(true);
-  const prevHydrateGenRef = useRef(0);
+  const hasCatsRef = useRef(initialLive?.hasLoadedCategories ?? false);
+  const activeSourceRef = useRef<PagedListSource<ItemRow> | null>(
+    initialSourceMetaRef.current?.source ?? null,
+  );
+  const activeSourceKeyRef = useRef({
+    catId: initialSourceMetaRef.current?.catId ?? null,
+    count: initialSourceMetaRef.current?.count ?? 0,
+    refreshToken,
+    catalog,
+  });
 
   useEffect(() => {
-    aliveRef.current = true;
     return () => {
-      aliveRef.current = false;
+      activeSourceRef.current?.dispose();
+      activeSourceRef.current = null;
     };
   }, []);
 
@@ -165,6 +188,22 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
   const { hydrateNowNext } = nowNext;
   const favorites = useLiveFavorites({ catalog, sources, refreshToken, userStateVersion });
   const { favoriteChannels } = favorites;
+  const chHistory = useLiveChannelHistory({
+    catalog,
+    channelSource,
+    sourceVersion,
+    activeChannelKey,
+    previousChannelKey,
+    hydrateNowNext,
+    ...(options.onChannelHistoryChange !== undefined
+      ? { onChannelHistoryChange: options.onChannelHistoryChange }
+      : {}),
+  });
+  const { history, historyRef, resetHistory, tuneChannel, tunePreviousChannel } = chHistory;
+
+  const activeSourceIdRef = useRef<string | undefined>(undefined);
+  activeSourceIdRef.current =
+    activeCategory?.row.sourceId ?? history.active?.sourceId ?? sources[0]?.id;
 
   useEffect(() => {
     if (mode !== 'favorites' || favoriteChannels.length === 0) return;
@@ -175,14 +214,13 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
   useEffect(() => {
     let alive = true;
     if (sources.length === 0) {
-      prevHydrateGenRef.current += 1;
-      latestRef.current.history = EMPTY_HISTORY;
-      setHistory(EMPTY_HISTORY);
+      hasCatsRef.current = false;
+      resetHistory();
       setCategories([]);
       setLoadingCategories(false);
       return undefined;
     }
-    setLoadingCategories(true);
+    if (!hasCatsRef.current) setLoadingCategories(true);
     void Promise.all(
       sources.map(
         async (s) =>
@@ -190,7 +228,11 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
       ),
     )
       .then((entries) => {
-        if (alive) setCategories(buildSharedDisplayCategories(sources, new Map(entries)));
+        if (!alive) return;
+        const nextCats = buildSharedDisplayCategories(sources, new Map(entries));
+        hasCatsRef.current = true;
+        uiCacheRef.current?.setLiveCategories(nextCats);
+        setCategories(nextCats);
       })
       .finally(() => {
         if (alive) setLoadingCategories(false);
@@ -198,7 +240,7 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
     return () => {
       alive = false;
     };
-  }, [catalog, refreshToken, sources]);
+  }, [catalog, refreshToken, resetHistory, sources]);
 
   useEffect(() => {
     if (
@@ -207,120 +249,75 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
       activeCategory &&
       activeCategory.row.id !== selectedCategoryId
     ) {
-      latestRef.current.onSelectCategoryId?.(activeCategory.row.id);
+      onSelectCatRef.current?.(activeCategory.row.id);
     }
   }, [activeCategory, loadingCategories, selectedCategoryId]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken recreates O(1) paged channel source
   useEffect(() => {
     if (!activeCategory || activeCategory.row.itemCount <= 0) {
+      activeSourceRef.current?.dispose();
+      activeSourceRef.current = null;
+      activeSourceKeyRef.current = { catId: null, count: 0, refreshToken, catalog };
       setChannelSource(null);
       return undefined;
     }
     let alive = true;
     const { id: categoryId, itemCount: count } = activeCategory.row;
-    const source = createPagedListSource<ItemRow>({
-      count,
-      pageSize: LIVE_PAGE_SIZE,
-      maxPages: LIVE_MAX_PAGES,
-      loadPage: (offset, limit) => catalog.items(categoryId, offset, limit),
-    });
-    const unsub = source.onChange(() => {
-      if (alive) setSourceVersion((v) => v + 1);
-    });
-    setChannelSource(source);
-    source.prefetch(0, Math.min(count, LIVE_PAGE_SIZE));
+    const prevKey = activeSourceKeyRef.current;
+    const reuseExisting =
+      activeSourceRef.current !== null &&
+      prevKey.catId === categoryId &&
+      prevKey.count === count &&
+      prevKey.refreshToken === refreshToken &&
+      prevKey.catalog === catalog;
+
+    let unsub: (() => void) | undefined;
+    const tokenBumped = prevKey.refreshToken !== refreshToken;
+    const activateSource = (next: PagedListSource<ItemRow>, bumpVersion: boolean) => {
+      if (activeSourceRef.current !== next) activeSourceRef.current?.dispose();
+      activeSourceRef.current = next;
+      activeSourceKeyRef.current = { catId: categoryId, count, refreshToken, catalog };
+      unsub = next.onChange(() => {
+        if (alive) setSourceVersion((v) => v + 1);
+      });
+      setChannelSource(next);
+      if (bumpVersion) setSourceVersion((v) => v + 1);
+      next.prefetch(0, Math.min(count, LIVE_PAGE_SIZE));
+    };
+
+    if (reuseExisting && activeSourceRef.current) {
+      activateSource(activeSourceRef.current, false);
+    } else if (tokenBumped && activeSourceRef.current !== null) {
+      // On refreshToken bump, do NOT seed stale uiCache page 0; keep previous source visible until fresh page 0 lands.
+      void catalog
+        .items(categoryId, 0, Math.min(LIVE_PAGE_SIZE, count))
+        .then((rows) => {
+          if (!alive) return;
+          if (rows.length > 0) uiCacheRef.current?.setLiveFirstChannels(categoryId, rows);
+          activateSource(buildChannelSource(categoryId, count, rows), true);
+        })
+        .catch(() => {
+          if (alive) activateSource(buildChannelSource(categoryId, count, undefined), false);
+        });
+    } else {
+      const seeded = tokenBumped ? undefined : uiCacheRef.current?.getLiveFirstChannels(categoryId);
+      activateSource(buildChannelSource(categoryId, count, seeded), false);
+    }
+
     return () => {
       alive = false;
-      unsub();
-      source.dispose();
+      unsub?.();
     };
-  }, [activeCategory?.row.id, activeCategory?.row.itemCount, catalog, refreshToken]);
-
-  // Hydrate active and previous channels from session memory when page 0 loads.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: sourceVersion notifies when page 0 arrives
-  useEffect(() => {
-    if (!channelSource) return;
-    const cur = latestRef.current.history;
-    if (cur.active === null) {
-      const hit = findInitialChannel(channelSource, activeChannelKey);
-      if (hit) {
-        const nextHistory: ChannelHistory = { ...cur, active: hit.item, activeIndex: hit.index };
-        latestRef.current.history = nextHistory;
-        setHistory(nextHistory);
-        hydrateNowNext([hit.item.key]);
-        latestRef.current.onChannelHistoryChange?.({
-          activeChannelKey: hit.item.key,
-          previousChannelKey,
-        });
-      }
-    }
-    const afterActive = latestRef.current.history;
-    if (!previousChannelKey || afterActive.previous?.key === previousChannelKey) return;
-    const prevHit = findChannelByKey(channelSource, previousChannelKey);
-    if (prevHit) {
-      const nextHistory: ChannelHistory = {
-        ...afterActive,
-        previous: prevHit.item,
-        previousIndex: prevHit.index,
-      };
-      latestRef.current.history = nextHistory;
-      setHistory(nextHistory);
-      return;
-    }
-    if (!catalog.itemDetail) return;
-    const gen = ++prevHydrateGenRef.current;
-    void catalog
-      .itemDetail(previousChannelKey)
-      .then((detail) => {
-        if (!aliveRef.current || prevHydrateGenRef.current !== gen || !detail) return;
-        const latestHist = latestRef.current.history;
-        if (latestHist.previous?.key === detail.key) return;
-        const nextHistory: ChannelHistory = { ...latestHist, previous: detail, previousIndex: 0 };
-        latestRef.current.history = nextHistory;
-        setHistory(nextHistory);
-      })
-      .catch(() => undefined);
-  }, [activeChannelKey, catalog, channelSource, hydrateNowNext, previousChannelKey, sourceVersion]);
-
-  const tuneChannel = useCallback(
-    (channel: ItemRow, index?: number) => {
-      prevHydrateGenRef.current += 1;
-      const cur = latestRef.current.history;
-      const keyHistory = recordChannelTune(
-        {
-          activeChannelKey: cur.active?.key ?? null,
-          previousChannelKey: cur.previous?.key ?? null,
-        },
-        channel.key,
-      );
-      const changed = cur.active !== null && cur.active.key !== channel.key;
-      const nextHistory: ChannelHistory = {
-        active: channel,
-        activeIndex: index ?? cur.activeIndex,
-        previous: changed ? cur.active : cur.previous,
-        previousIndex: changed ? cur.activeIndex : cur.previousIndex,
-      };
-      latestRef.current.history = nextHistory;
-      setHistory(nextHistory);
-      hydrateNowNext([channel.key]);
-      latestRef.current.onChannelHistoryChange?.(keyHistory);
-    },
-    [hydrateNowNext],
-  );
-
-  const tunePreviousChannel = useCallback((): ItemRow | null => {
-    const cur = latestRef.current.history;
-    if (!cur.previous) return null;
-    tuneChannel(cur.previous, cur.previousIndex);
-    return cur.previous;
-  }, [tuneChannel]);
-
-  const numJump = useLiveNumberJump({
+  }, [
+    activeCategory?.row.id,
+    activeCategory?.row.itemCount,
+    buildChannelSource,
     catalog,
-    activeSourceIdRef,
-    onResolved: tuneChannel,
-  });
+    refreshToken,
+  ]);
+
+  const numJump = useLiveNumberJump({ catalog, activeSourceIdRef, onResolved: tuneChannel });
 
   const buildPlayTarget = useCallback(
     (
@@ -338,21 +335,21 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
         categoryCount: useFavorites
           ? favoriteChannels.length
           : Math.max(1, activeCategory?.row.itemCount ?? 1),
-        currentIndex: index ?? latestRef.current.history.activeIndex,
+        currentIndex: index ?? historyRef.current.activeIndex,
         loadPage: useFavorites
           ? async (offset, limit) => favoriteChannels.slice(offset, offset + limit)
           : (offset, limit) => catalog.items(categoryId, offset, limit),
       });
-      const prev = latestRef.current.history.previous;
+      const prev = historyRef.current.previous;
       return prev !== null && prev.key !== channel.key
         ? {
             ...base,
             previousChannel: toLiveEntry(prev),
-            previousChannelIndex: latestRef.current.history.previousIndex,
+            previousChannelIndex: historyRef.current.previousIndex,
           }
         : base;
     },
-    [activeCategory?.row.id, activeCategory?.row.itemCount, catalog, favoriteChannels],
+    [activeCategory?.row.id, activeCategory?.row.itemCount, catalog, favoriteChannels, historyRef],
   );
 
   const channelCount = activeCategory?.row.itemCount ?? 0;

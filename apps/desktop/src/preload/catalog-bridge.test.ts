@@ -192,6 +192,15 @@ describe('createCatalogBridge', () => {
       kind: 'movie',
       title: 'Silent Horizon',
     });
+    const setFavP = bridge.setFavorite(
+      {
+        sourceId: 's1',
+        itemKey: 'm:s1:1',
+        kind: 'movie',
+        title: 'Silent Horizon',
+      },
+      true,
+    );
     const favsP = bridge.listFavorites(20);
     const favKeysP = bridge.listFavoriteKeys();
     const guideP = bridge.importGuide('s1');
@@ -241,6 +250,7 @@ describe('createCatalogBridge', () => {
     expect(await byKeysP).toEqual([]);
     expect((await clearProgP).ok).toBe(true);
     expect((await togFavP).ok).toBe(true);
+    expect((await setFavP).ok).toBe(true);
     expect(await favsP).toEqual([]);
     expect(await favKeysP).toEqual([]);
     expect((await guideP).ok).toBe(true);

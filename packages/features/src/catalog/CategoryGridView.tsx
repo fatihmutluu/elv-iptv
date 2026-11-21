@@ -1,5 +1,5 @@
 import type { CatalogService, ItemRow } from '@elv/data';
-import { useI18n, useTheme } from '@elv/ui-kit';
+import { TvScrollEdgeFade, useI18n, useTheme } from '@elv/ui-kit';
 import {
   type MutableRefObject,
   type ReactElement,
@@ -77,6 +77,7 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
   const cols = layout.gridColumns;
 
   const gridData = useCategoryGridData({
+    kind,
     category,
     catalog,
     refreshToken,
@@ -302,15 +303,26 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
 
       {layout.isTv ? (
         <View testID="catalog-grid-tv-viewport" style={styles.tvViewport}>
-          {tvWindowRows.map((row) => (
-            <GridRowView
-              key={row.rowIndex}
-              rowIndex={row.rowIndex}
-              items={row.items}
-              focusedCol={focusedGridPos?.row === row.rowIndex ? focusedGridPos.col : null}
-              {...rowCommonProps}
+          {tvWindowRows.map((row) => {
+            const isFocusedRow = focusedGridPos?.row === row.rowIndex;
+            return (
+              <View key={row.rowIndex} style={isFocusedRow ? styles.focusedRowLayer : undefined}>
+                <GridRowView
+                  rowIndex={row.rowIndex}
+                  items={row.items}
+                  focusedCol={isFocusedRow ? focusedGridPos.col : null}
+                  {...rowCommonProps}
+                />
+              </View>
+            );
+          })}
+          <View pointerEvents="none" style={styles.edgeFadeLayer}>
+            <TvScrollEdgeFade
+              testID="catalog-grid-edge-fade"
+              showTop={tvWindowStart > 0}
+              showBottom={tvWindowEnd < rowCount - 1}
             />
-          ))}
+          </View>
         </View>
       ) : (
         <VirtualizedList
@@ -345,5 +357,7 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   listFlex: { flex: 1 },
-  tvViewport: { flex: 1, overflow: 'hidden' },
+  tvViewport: { flex: 1, overflow: 'hidden', position: 'relative' },
+  edgeFadeLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 1 },
+  focusedRowLayer: { zIndex: 2 },
 });

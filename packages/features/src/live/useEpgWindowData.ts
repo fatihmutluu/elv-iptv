@@ -1,6 +1,8 @@
 import { type CatalogService, MAX_EPG_WINDOW_KEYS, type ProgrammeRow } from '@elv/data';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type CachedEpgProgramEntry, useCatalogUiCache } from '../shared';
 import {
+  type BoundedTtlCache,
   createBoundedTtlCache,
   EPG_CACHE_MAX_ENTRIES,
   EPG_CACHE_TTL_MS,
@@ -13,10 +15,7 @@ import {
 /** Shared empty programme slice avoiding fresh `[]` allocations on unloaded rows. */
 export const EMPTY_PROGRAMMES: readonly ProgrammeRow[] = [];
 
-interface CachedProgrammeEntry {
-  readonly rows: readonly ProgrammeRow[];
-  readonly storedAt: number;
-}
+type CachedProgrammeEntry = CachedEpgProgramEntry;
 
 /** Options for {@link useEpgWindowData}. */
 export interface UseEpgWindowDataOptions {
@@ -58,11 +57,20 @@ export function useEpgWindowData({
   const [refreshingGuide, setRefreshingGuide] = useState(false);
   const [version, setVersion] = useState(0);
 
+  const uiCache = useCatalogUiCache();
   // Use MAX_SAFE_INTEGER TTL inside BoundedTtlCache so render reads never destructively evict;
   // freshness against EPG_CACHE_TTL_MS is checked in hydrateChannels (stale-while-revalidate).
-  const cacheRef = useRef(
-    createBoundedTtlCache<CachedProgrammeEntry>(EPG_CACHE_MAX_ENTRIES, Number.MAX_SAFE_INTEGER),
-  );
+  const localCacheRef = useRef<BoundedTtlCache<CachedProgrammeEntry> | null>(null);
+  if (!uiCache && localCacheRef.current === null) {
+    localCacheRef.current = createBoundedTtlCache<CachedProgrammeEntry>(
+      EPG_CACHE_MAX_ENTRIES,
+      Number.MAX_SAFE_INTEGER,
+    );
+  }
+  const activeCache =
+    uiCache?.epgWindow ?? (localCacheRef.current as BoundedTtlCache<CachedProgrammeEntry>);
+  const cacheRef = useRef<BoundedTtlCache<CachedProgrammeEntry>>(activeCache);
+  cacheRef.current = activeCache;
   const inFlightRef = useRef(new Set<string>());
   const genRef = useRef(0);
   const mountedRef = useRef(true);

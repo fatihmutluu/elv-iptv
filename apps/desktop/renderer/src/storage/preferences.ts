@@ -51,5 +51,7 @@ export function createDesktopPreferencesStore(storage?: WebStorageLike): Prefere
   if (resolved === undefined) {
     return createMemoryPreferencesStore();
   }
-  return createKvPreferencesStore(createWebStorageBackend(resolved));
+  return createKvPreferencesStore(createWebStorageBackend(resolved), undefined, {
+    coalesceMs: 500,
+  });
 }

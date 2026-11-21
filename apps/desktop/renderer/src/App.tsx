@@ -1,5 +1,7 @@
+import { createCoalescedCatalog } from '@elv/data';
 import { AppProviders, AppShell, createLazyCatalog, type VideoHost } from '@elv/features';
 import { resolveLocale } from '@elv/i18n';
+import { UiAdaptersProvider } from '@elv/ui-kit';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { attachMouseBackGuard } from './browser-back.ts';
 import { createDesktopCatalog } from './catalog/index.ts';
@@ -15,6 +17,7 @@ import {
 import { PlayerView } from './player/PlayerView.tsx';
 import { attachScrollBlurGuard } from './scroll-blur-guard.ts';
 import { createDesktopPreferencesStore } from './storage/preferences.ts';
+import { attachDeadHostOnlineReset, createDesktopUiAdapters } from './ui/desktop-adapters.tsx';
 import { shouldMountWorkbench } from './workbench/presets.ts';
 
 declare const __DEV__: boolean;
@@ -58,8 +61,16 @@ function AppRoot() {
   }, []);
 
   const preferencesStore = useMemo(() => createDesktopPreferencesStore(), []);
+  const uiAdapters = useMemo(() => createDesktopUiAdapters(), []);
 
-  const catalog = useMemo(() => createLazyCatalog(() => createDesktopCatalog()), []);
+  const catalog = useMemo(
+    () =>
+      createCoalescedCatalog(
+        createLazyCatalog(() => createDesktopCatalog()),
+        { windowMs: 500 },
+      ),
+    [],
+  );
 
   const videoHost = useMemo<VideoHost>(
     () => ({
@@ -117,14 +128,21 @@ function AppRoot() {
     return attachScrollBlurGuard(window);
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    return attachDeadHostOnlineReset(window);
+  }, []);
+
   return (
-    <AppProviders
-      preferencesStore={preferencesStore}
-      systemLocale={systemLocale}
-      viewport={{ formFactor: 'desktop' }}
-    >
-      <AppShell catalog={catalog} videoHost={videoHost} externalRefreshToken={refreshToken} />
-    </AppProviders>
+    <UiAdaptersProvider adapters={uiAdapters}>
+      <AppProviders
+        preferencesStore={preferencesStore}
+        systemLocale={systemLocale}
+        viewport={{ formFactor: 'desktop' }}
+      >
+        <AppShell catalog={catalog} videoHost={videoHost} externalRefreshToken={refreshToken} />
+      </AppProviders>
+    </UiAdaptersProvider>
   );
 }
 

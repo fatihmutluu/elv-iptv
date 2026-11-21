@@ -43,11 +43,25 @@ export interface PreferencesKvBackend {
   delete?(key: string): Promise<void> | void;
 }
 
-/** Port for reading, updating, resetting, and observing user preferences. */
+/** Options for {@link createKvPreferencesStore}. */
+export interface PreferencesStoreOptions {
+  /**
+   * Debounce window (ms) for coalescing rapid `update()` writes into a single `backend.set()` call.
+   * Defaults to `0` (immediate writes).
+   */
+  coalesceMs?: number;
+  /** Injectable timer scheduler for deterministic tests (defaults to `globalThis.setTimeout`). */
+  setTimeoutFn?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  /** Injectable timer canceller for deterministic tests (defaults to `globalThis.clearTimeout`). */
+  clearTimeoutFn?: (handle: ReturnType<typeof setTimeout>) => void;
+}
+
+/** Port for reading, updating, resetting, flushing, and observing user preferences. */
 export interface PreferencesStore {
   load(): Promise<PreferencesSnapshot>;
   update(patch: PreferencesPatch): Promise<Result<PreferencesSnapshot>>;
   reset(): Promise<Result<PreferencesSnapshot>>;
+  flush?(): Promise<void>;
   subscribe(listener: (snapshot: PreferencesSnapshot) => void): () => void;
 }
 
@@ -190,18 +204,42 @@ function mergeRawCandidate(
  * Creates a {@link PreferencesStore} backed by a {@link PreferencesKvBackend}.
  * Concurrent `load`, `update`, and `reset` calls are serialized via an internal promise queue so rapid
  * toggles never race or clobber one another; subscriber exceptions are isolated.
+ * When `opts.coalesceMs > 0`, rapid `update()` calls update in-memory state and notify subscribers
+ * immediately while coalescing `backend.set()` writes into a single debounced commit.
  */
 export function createKvPreferencesStore(
   backend: PreferencesKvBackend,
   key = DEFAULT_PREFERENCES_KEY,
+  opts?: PreferencesStoreOptions,
 ): PreferencesStore {
   if (typeof key !== 'string' || key.trim().length === 0) {
     throw new Error('Preferences key must be a non-empty string');
   }
+  const coalesceMs =
+    opts?.coalesceMs !== undefined && Number.isFinite(opts.coalesceMs)
+      ? Math.max(0, opts.coalesceMs)
+      : 0;
+  const setTimer =
+    opts?.setTimeoutFn ?? ((fn: () => void, ms: number) => globalThis.setTimeout(fn, ms));
+  const clearTimer =
+    opts?.clearTimeoutFn ??
+    ((handle: ReturnType<typeof setTimeout>) => {
+      globalThis.clearTimeout(handle);
+    });
+
   let current: PreferencesSnapshot = DEFAULT_PREFERENCES;
+  let committed: PreferencesSnapshot = DEFAULT_PREFERENCES;
   let hydrated = false;
   let tail: Promise<unknown> = Promise.resolve();
   const listeners = new Set<(snapshot: PreferencesSnapshot) => void>();
+
+  interface PendingWrite {
+    timer: ReturnType<typeof setTimeout> | undefined;
+    encoded: string;
+    snapshot: PreferencesSnapshot;
+    waiters: Array<(res: Result<PreferencesSnapshot>) => void>;
+  }
+  let pendingWrite: PendingWrite | undefined;
 
   const enqueue = <T>(job: () => Promise<T>): Promise<T> => {
     const result = tail.then(job);
@@ -224,6 +262,7 @@ export function createKvPreferencesStore(
     try {
       const raw = await backend.get(key);
       current = parsePreferences(raw);
+      committed = current;
       hydrated = true;
       return current;
     } catch {
@@ -231,53 +270,155 @@ export function createKvPreferencesStore(
     }
   };
 
+  const commitPendingEntry = async (entry: PendingWrite): Promise<void> => {
+    try {
+      await backend.set(key, entry.encoded);
+      committed = entry.snapshot;
+      for (const resolve of entry.waiters) resolve(ok(entry.snapshot));
+    } catch {
+      if (pendingWrite === undefined) {
+        current = committed;
+        notify(current);
+      }
+      const failure = err(elvError('storage', 'preferences-write-failed'));
+      for (const resolve of entry.waiters) resolve(failure);
+    }
+  };
+
+  const takePending = (): PendingWrite | undefined => {
+    const entry = pendingWrite;
+    if (entry === undefined) return undefined;
+    pendingWrite = undefined;
+    if (entry.timer !== undefined) {
+      clearTimer(entry.timer);
+      entry.timer = undefined;
+    }
+    return entry;
+  };
+
+  const triggerPendingCommit = (): Promise<void> => {
+    const entry = takePending();
+    if (entry === undefined) return Promise.resolve();
+    return enqueue(() => commitPendingEntry(entry));
+  };
+
   return {
     load(): Promise<PreferencesSnapshot> {
-      return enqueue(() => readFromBackend());
+      return enqueue(async () => {
+        const entry = takePending();
+        if (entry !== undefined) {
+          await commitPendingEntry(entry);
+        }
+        return readFromBackend();
+      });
     },
 
     update(patch: PreferencesPatch): Promise<Result<PreferencesSnapshot>> {
-      return enqueue(async () => {
+      if (coalesceMs <= 0) {
+        return enqueue(async () => {
+          if (!hydrated) {
+            await readFromBackend();
+          }
+          const rawEncoded = serializePreferences(mergeRawCandidate(current, patch));
+          if (!rawEncoded.ok) return rawEncoded;
+
+          const next = mergeCandidate(current, patch);
+          const encoded = serializePreferences(next);
+          if (!encoded.ok) return encoded;
+
+          try {
+            await backend.set(key, encoded.value);
+          } catch {
+            return err(elvError('storage', 'preferences-write-failed'));
+          }
+          current = next;
+          committed = next;
+          hydrated = true;
+          notify(current);
+          return ok(current);
+        });
+      }
+
+      return enqueue(async (): Promise<{ commit: Promise<Result<PreferencesSnapshot>> }> => {
         if (!hydrated) {
           await readFromBackend();
         }
         const rawEncoded = serializePreferences(mergeRawCandidate(current, patch));
-        if (!rawEncoded.ok) return rawEncoded;
+        if (!rawEncoded.ok) return { commit: Promise.resolve(rawEncoded) };
 
         const next = mergeCandidate(current, patch);
         const encoded = serializePreferences(next);
-        if (!encoded.ok) return encoded;
+        if (!encoded.ok) return { commit: Promise.resolve(encoded) };
 
-        try {
-          await backend.set(key, encoded.value);
-        } catch {
-          return err(elvError('storage', 'preferences-write-failed'));
-        }
         current = next;
         hydrated = true;
         notify(current);
-        return ok(current);
-      });
+
+        const commit = new Promise<Result<PreferencesSnapshot>>((resolve) => {
+          if (pendingWrite !== undefined) {
+            if (pendingWrite.timer !== undefined) {
+              clearTimer(pendingWrite.timer);
+            }
+            pendingWrite.encoded = encoded.value;
+            pendingWrite.snapshot = next;
+            pendingWrite.waiters.push(resolve);
+          } else {
+            pendingWrite = {
+              timer: undefined,
+              encoded: encoded.value,
+              snapshot: next,
+              waiters: [resolve],
+            };
+          }
+          pendingWrite.timer = setTimer(() => {
+            void triggerPendingCommit();
+          }, coalesceMs);
+        });
+        return { commit };
+      }).then(({ commit }) => commit);
     },
 
     reset(): Promise<Result<PreferencesSnapshot>> {
       return enqueue(async () => {
+        const superseded = takePending();
         try {
           if (backend.delete !== undefined) {
             await backend.delete(key);
           } else {
             const encoded = serializePreferences(DEFAULT_PREFERENCES);
-            if (!encoded.ok) return encoded;
+            if (!encoded.ok) {
+              if (superseded !== undefined) {
+                for (const resolve of superseded.waiters) resolve(encoded);
+              }
+              return encoded;
+            }
             await backend.set(key, encoded.value);
           }
         } catch {
-          return err(elvError('storage', 'preferences-write-failed'));
+          const failure = err(elvError('storage', 'preferences-write-failed'));
+          if (superseded !== undefined) {
+            for (const resolve of superseded.waiters) resolve(failure);
+          }
+          return failure;
         }
         current = DEFAULT_PREFERENCES;
+        committed = DEFAULT_PREFERENCES;
         hydrated = true;
         notify(current);
-        return ok(current);
+        const result = ok(current);
+        if (superseded !== undefined) {
+          for (const resolve of superseded.waiters) resolve(result);
+        }
+        return result;
       });
+    },
+
+    async flush(): Promise<void> {
+      await tail;
+      while (pendingWrite !== undefined) {
+        await triggerPendingCommit();
+        await tail;
+      }
     },
 
     subscribe(listener: (snapshot: PreferencesSnapshot) => void): () => void {

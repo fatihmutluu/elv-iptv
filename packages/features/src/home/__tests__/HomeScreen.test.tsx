@@ -583,19 +583,22 @@ describe('HomeScreen', () => {
     let resolveSecondFav!: (v: Result<boolean>) => void;
     let favCalls = 0;
 
+    const flakyFav = jest.fn(async () => {
+      favCalls += 1;
+      if (favCalls === 1) {
+        return new Promise<Result<boolean>>((resolve) => {
+          rejectFirstFav = resolve;
+        });
+      }
+      return new Promise<Result<boolean>>((resolve) => {
+        resolveSecondFav = resolve;
+      });
+    });
+
     const flakyCatalog: CatalogService = {
       ...env.catalog,
-      toggleFavorite: jest.fn(async () => {
-        favCalls += 1;
-        if (favCalls === 1) {
-          return new Promise((resolve) => {
-            rejectFirstFav = resolve;
-          });
-        }
-        return new Promise((resolve) => {
-          resolveSecondFav = resolve;
-        });
-      }),
+      setFavorite: flakyFav,
+      toggleFavorite: flakyFav,
       saveProgress: undefined,
       setWatched: jest.fn(async () => err(elvError('storage', 'disk-full'))),
     };

@@ -281,4 +281,59 @@ describe('createLazyCatalog', () => {
     expect(closeCount).toBe(2);
     for (const h of handles) h.close();
   });
+
+  it('forwards setFavorite and flushPendingWrites without opening an unused catalog on flush', async () => {
+    let loadCount = 0;
+    let flushCount = 0;
+    const handle = testDb();
+    await openCatalog(handle.db);
+    const underlying = createCatalogService({
+      db: handle.db,
+      secrets: memorySecrets(),
+      scheduler: countingScheduler(),
+      http: {
+        async get() {
+          return ok({
+            status: 200,
+            headers: {},
+            body: { async *[Symbol.asyncIterator]() {} },
+          });
+        },
+      },
+      clock: () => 100,
+    });
+
+    const lazy = createLazyCatalog(async () => {
+      loadCount += 1;
+      return {
+        ...underlying,
+        async flushPendingWrites() {
+          flushCount += 1;
+        },
+      };
+    });
+
+    // Flushing before open must NOT open the catalog
+    await lazy.flushPendingWrites?.();
+    expect(loadCount).toBe(0);
+    expect(flushCount).toBe(0);
+
+    const setRes = await lazy.setFavorite?.(
+      {
+        sourceId: 's1',
+        itemKey: 'x:s1:movie:1',
+        kind: 'movie',
+        title: 'Test Movie',
+      },
+      true,
+    );
+    expect(setRes).toEqual(ok(true));
+    expect(loadCount).toBe(1);
+
+    await lazy.flushPendingWrites?.();
+    expect(flushCount).toBe(1);
+
+    await lazy.close();
+    handle.close();
+  });
 });

@@ -1,4 +1,4 @@
-import type { CatalogService } from '@elv/data';
+import { type CatalogService, createCoalescedCatalog } from '@elv/data';
 import {
   type AppLifecyclePort,
   AppProviders,
@@ -8,7 +8,7 @@ import {
 } from '@elv/features';
 import { resolveLocale } from '@elv/i18n';
 import { remoteKeys } from '@elv/remote-keys';
-import { RemoteKeysProvider } from '@elv/ui-kit';
+import { RemoteKeysProvider, UiAdaptersProvider } from '@elv/ui-kit';
 import Constants from 'expo-constants';
 import { getLocales } from 'expo-localization';
 import { StatusBar } from 'expo-status-bar';
@@ -24,6 +24,7 @@ import { useGateRoute } from './gate/useGateParams';
 import { PlayerSurface } from './playback/PlayerSurface';
 import { createPlatformEngine } from './playback/platform-engine';
 import { createDevicePreferencesStore, createSecureSecretStore } from './storage';
+import { attachAppStateDeadHostReset, createMobileTvUiAdapters } from './ui/platform-adapters';
 
 function AppRoot() {
   const [refreshToken, setRefreshToken] = useState(0);
@@ -34,6 +35,7 @@ function AppRoot() {
   );
 
   const preferencesStore = useMemo(() => createDevicePreferencesStore(), []);
+  const uiAdapters = useMemo(() => createMobileTvUiAdapters(), []);
 
   const openSharedCatalog = useMemo(() => {
     let cached: Promise<CatalogService> | undefined;
@@ -46,7 +48,10 @@ function AppRoot() {
     };
   }, []);
 
-  const catalog = useMemo(() => createLazyCatalog(openSharedCatalog), [openSharedCatalog]);
+  const catalog = useMemo(
+    () => createCoalescedCatalog(createLazyCatalog(openSharedCatalog), { windowMs: 500 }),
+    [openSharedCatalog],
+  );
 
   const videoHost = useMemo<VideoHost>(
     () => ({
@@ -113,16 +118,20 @@ function AppRoot() {
     };
   }, [openSharedCatalog]);
 
+  useEffect(() => attachAppStateDeadHostReset(AppState), []);
+
   return (
-    <AppProviders preferencesStore={preferencesStore} systemLocale={systemLocale}>
-      <AppShell
-        catalog={catalog}
-        videoHost={videoHost}
-        appLifecycle={appLifecycle}
-        externalRefreshToken={refreshToken}
-      />
-      <StatusBar style="light" />
-    </AppProviders>
+    <UiAdaptersProvider adapters={uiAdapters}>
+      <AppProviders preferencesStore={preferencesStore} systemLocale={systemLocale}>
+        <AppShell
+          catalog={catalog}
+          videoHost={videoHost}
+          appLifecycle={appLifecycle}
+          externalRefreshToken={refreshToken}
+        />
+        <StatusBar style="light" />
+      </AppProviders>
+    </UiAdaptersProvider>
   );
 }
 

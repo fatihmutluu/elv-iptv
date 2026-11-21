@@ -1,28 +1,15 @@
 import type { ItemRow, NowNextEntry } from '@elv/data';
-import {
-  ArtworkImage,
-  SkeletonBox,
-  TABULAR_NUMS_STYLE,
-  type Theme,
-  useI18n,
-  useTheme,
-  webBackdropBlur,
-  webCursorPointer,
-  webTransition,
-} from '@elv/ui-kit';
+import { TvScrollEdgeFade, useI18n, useTheme, webBackdropBlur } from '@elv/ui-kit';
 import { memo, type ReactElement, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
-  Pressable,
   StyleSheet,
-  Text,
   View,
-  type ViewStyle,
   VirtualizedList,
 } from 'react-native';
 import type { CatalogLayoutMetrics, PagedListSource } from '../shared';
-import { formatLiveTitle } from './live-model';
+import { ZapChannelRow } from './LiveZapRow';
 
 /** Width of the left-anchored Mini-Guide Zap Drawer on Landscape viewports (`UI_UX_PHILOSOPHY.md` §3). */
 export const ZAP_DRAWER_WIDTH = 306;
@@ -51,123 +38,6 @@ function syncZapWindow(
   }
   if (keys.length > 0) hydrateNowNext(keys);
 }
-
-function zapRowStyle(
-  theme: Theme,
-  rowHeight: number,
-  isTouch: boolean,
-  isActive: boolean,
-  focused: boolean,
-  pressed: boolean,
-): ViewStyle {
-  return {
-    height: rowHeight,
-    minHeight: isTouch ? 44 : 40,
-    backgroundColor: isActive
-      ? theme.colors.accentTint
-      : focused
-        ? theme.colors.focusFill
-        : 'transparent',
-    borderLeftWidth: isActive ? 3 : 0,
-    borderLeftColor: isActive ? theme.colors.accent : 'transparent',
-    borderWidth: focused ? theme.focus.ringWidth : 0,
-    borderColor: focused ? theme.colors.focusRingColor : 'transparent',
-    opacity: pressed ? 0.84 : 1,
-  };
-}
-
-const ZapChannelRow = memo(function ZapChannelRowInner(p: {
-  readonly index: number;
-  readonly item: ItemRow | undefined;
-  readonly nowTitle: string | null;
-  readonly noProgramLabel: string;
-  readonly rowHeight: number;
-  readonly isActive: boolean;
-  readonly isTv: boolean;
-  readonly isTouch: boolean;
-  readonly focused: boolean;
-  readonly onSelectChannel: (channel: ItemRow, index: number) => void;
-}): ReactElement {
-  const theme = useTheme();
-  const cursor = webCursorPointer();
-  const transition = webTransition(theme, 'background-color, border-color, opacity');
-  const handlePress = useCallback(() => {
-    if (p.item) p.onSelectChannel(p.item, p.index);
-  }, [p.index, p.item, p.onSelectChannel]);
-
-  if (!p.item) {
-    return (
-      <View style={[styles.zapRow, { height: p.rowHeight }]}>
-        <SkeletonBox width={34} height={34} borderRadius={theme.radius.button} />
-        <View style={styles.zapRowText}>
-          <SkeletonBox width="70%" height={12} borderRadius={theme.radius.button} />
-          <SkeletonBox width="50%" height={10} borderRadius={theme.radius.button} />
-        </View>
-      </View>
-    );
-  }
-
-  return (
-    <Pressable
-      testID={`live-zap-row-${p.index}`}
-      accessibilityRole="button"
-      accessibilityLabel={formatLiveTitle(p.item)}
-      accessibilityState={{ selected: p.isActive }}
-      focusable={!p.isTv}
-      onPress={handlePress}
-      style={({ pressed }) => [
-        styles.zapRow,
-        zapRowStyle(theme, p.rowHeight, p.isTouch, p.isActive, p.focused, pressed),
-        cursor,
-        transition,
-      ]}
-    >
-      <ArtworkImage
-        uri={p.item.logo}
-        label={p.item.name}
-        maxDecodePx={96}
-        resizeMode="contain"
-        logoBackdrop
-        borderRadius={theme.radius.button}
-        style={styles.zapLogo}
-      />
-      <View style={styles.zapRowText}>
-        <View style={styles.zapTitleRow}>
-          {p.item.num !== null && p.item.num !== undefined ? (
-            <Text
-              numberOfLines={1}
-              style={[
-                theme.typography.caption,
-                TABULAR_NUMS_STYLE,
-                {
-                  color: p.isActive ? theme.colors.textPrimary : theme.colors.textMuted,
-                  fontWeight: '700',
-                },
-              ]}
-            >
-              {p.item.num}
-            </Text>
-          ) : null}
-          <Text
-            numberOfLines={1}
-            style={[theme.typography.title, styles.flex1, { color: theme.colors.textPrimary }]}
-          >
-            {p.item.name}
-          </Text>
-        </View>
-        <Text
-          numberOfLines={1}
-          style={[
-            theme.typography.caption,
-            { color: p.nowTitle ? theme.colors.textSecondary : theme.colors.textMuted },
-          ]}
-        >
-          {p.nowTitle ?? p.noProgramLabel}
-        </Text>
-      </View>
-    </Pressable>
-  );
-});
 
 /** Props of {@link LiveZapDrawer}. */
 export interface LiveZapDrawerProps {
@@ -270,20 +140,22 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
   const renderSlot = useCallback(
     (slot: ZapListSlot) => {
       const row = slot.item;
+      const isFocused = layout.isTv && focusedZapIndex === slot.index;
       return (
-        <ZapChannelRow
-          key={slot.index}
-          index={slot.index}
-          item={row}
-          nowTitle={row ? (nowNextByKey.get(row.key)?.now?.title ?? null) : null}
-          noProgramLabel={noProgramLabel}
-          rowHeight={zapRowHeight}
-          isActive={row !== undefined && row.key === activeChannelKey}
-          isTv={layout.isTv}
-          isTouch={layout.isTouch}
-          focused={layout.isTv && focusedZapIndex === slot.index}
-          onSelectChannel={onSelectChannel}
-        />
+        <View key={slot.index} style={isFocused ? styles.focusedRowLayer : undefined}>
+          <ZapChannelRow
+            index={slot.index}
+            item={row}
+            nowTitle={row ? (nowNextByKey.get(row.key)?.now?.title ?? null) : null}
+            noProgramLabel={noProgramLabel}
+            rowHeight={zapRowHeight}
+            isActive={row !== undefined && row.key === activeChannelKey}
+            isTv={layout.isTv}
+            isTouch={layout.isTouch}
+            focused={isFocused}
+            onSelectChannel={onSelectChannel}
+          />
+        </View>
       );
     },
     [
@@ -345,6 +217,14 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
       {layout.isTv ? (
         <View testID="live-zap-tv-viewport" style={styles.tvViewport}>
           {tvSlots.map(renderSlot)}
+          <View pointerEvents="none" style={styles.edgeFadeLayer}>
+            <TvScrollEdgeFade
+              testID="live-zap-edge-fade"
+              showTop={tvWindowStart > 0}
+              showBottom={tvWindowEnd < itemCount - 1}
+              surfaceColor={theme.colors.bgElevated}
+            />
+          </View>
         </View>
       ) : (
         <VirtualizedList
@@ -371,7 +251,9 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
 
 const styles = StyleSheet.create({
   flex1: { flex: 1 },
-  tvViewport: { flex: 1, overflow: 'hidden' },
+  tvViewport: { flex: 1, overflow: 'hidden', position: 'relative' },
+  edgeFadeLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 1 },
+  focusedRowLayer: { zIndex: 2 },
   drawerDocked: { width: ZAP_DRAWER_WIDTH, borderRightWidth: 1, overflow: 'hidden' },
   drawerLandscape: {
     position: 'absolute',
@@ -392,8 +274,4 @@ const styles = StyleSheet.create({
   },
   grabWrap: { alignItems: 'center', paddingVertical: 6 },
   grabHandle: { width: 36, height: 4, borderRadius: 999 },
-  zapRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, gap: 10 },
-  zapLogo: { width: 34, height: 34, flexShrink: 0 },
-  zapRowText: { flex: 1, gap: 2 },
-  zapTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
 });

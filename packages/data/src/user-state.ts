@@ -329,6 +329,47 @@ export async function clearWatchProgress(
   return ok(undefined);
 }
 
+const UPSERT_FAVORITE = `INSERT INTO favorites (
+  profile_id, source_id, item_key, kind, title, logo, year, rating, added_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(profile_id, item_key) DO UPDATE SET
+  source_id = excluded.source_id, kind = excluded.kind, title = excluded.title,
+  logo = excluded.logo, year = excluded.year, rating = excluded.rating, added_at = excluded.added_at`;
+
+/**
+ * Idempotently sets My List favorite state for `(profileId, itemKey)`:
+ * upserts when `active` is `true`, deletes when `active` is `false`.
+ */
+export async function setFavorite(
+  db: SqlDriver,
+  input: ToggleFavoriteInput,
+  active: boolean,
+  clock: () => number = Date.now,
+): Promise<Result<boolean>> {
+  const profileId = normalizeProfileId(input.profileId);
+  if (!active) {
+    await db.run('DELETE FROM favorites WHERE profile_id = ? AND item_key = ?', [
+      profileId,
+      input.itemKey,
+    ]);
+    return ok(false);
+  }
+  if (!hasValidMeta(input)) return err(elvError('source-format', 'invalid-favorite'));
+  const safeLogo = await resolveSafeStorageLogo(db, input);
+  await db.run(UPSERT_FAVORITE, [
+    profileId,
+    input.sourceId,
+    input.itemKey,
+    input.kind,
+    input.title,
+    safeLogo,
+    optInt(input.year),
+    optFloat(input.rating),
+    Math.round(clock()),
+  ]);
+  return ok(true);
+}
+
 /** Atomically adds or removes a My List favorite; returns `true` if added and `false` if removed. */
 export async function toggleFavorite(
   db: SqlDriver,
@@ -351,20 +392,17 @@ export async function toggleFavorite(
       ]);
       return false;
     }
-    await tx.run(
-      'INSERT INTO favorites (profile_id, source_id, item_key, kind, title, logo, year, rating, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [
-        profileId,
-        input.sourceId,
-        input.itemKey,
-        input.kind,
-        input.title,
-        safeLogo,
-        optInt(input.year),
-        optFloat(input.rating),
-        addedAt,
-      ],
-    );
+    await tx.run(UPSERT_FAVORITE, [
+      profileId,
+      input.sourceId,
+      input.itemKey,
+      input.kind,
+      input.title,
+      safeLogo,
+      optInt(input.year),
+      optFloat(input.rating),
+      addedAt,
+    ]);
     return true;
   });
   return ok(added);

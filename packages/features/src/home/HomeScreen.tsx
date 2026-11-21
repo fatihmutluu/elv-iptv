@@ -18,7 +18,7 @@ import {
   View,
 } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
-import type { DetailTarget } from '../shared';
+import { type DetailTarget, useCatalogUiCache } from '../shared';
 import { buildHeroActionIds, HomeHero, type HomeHeroActionId } from './HomeHero';
 import { buildHomeRailSpecs, HomeRail } from './HomeRail';
 import { computeHomeLayout, HomeEmptyState, HomeSkeleton } from './HomeSkeleton';
@@ -86,8 +86,16 @@ export function HomeScreen({
   const layout = computeHomeLayout(viewport, theme);
   const { isTv, isTouch, isPortrait, padX, railGap, heroTopClearance } = layout;
 
+  const uiCache = useCatalogUiCache();
   const data = useHomeData({ catalog, sources, refreshToken, userStateVersion });
-  const [heroIndex, setHeroIndex] = useState(0);
+  const [heroIndex, setHeroIndexState] = useState(() => uiCache?.getHome()?.heroIndex ?? 0);
+  const setHeroIndex = useCallback(
+    (idx: number) => {
+      setHeroIndexState(idx);
+      uiCache?.setHomeHeroIndex(idx);
+    },
+    [uiCache],
+  );
   const scrolledRef = useRef(false);
   const scrollViewRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const railYRef = useRef(new Map<HomeNavRowId, number>());
@@ -105,7 +113,7 @@ export function HomeScreen({
 
   useEffect(() => {
     if (heroIndex >= heroSlides.length && heroSlides.length > 0) setHeroIndex(0);
-  }, [heroIndex, heroSlides.length]);
+  }, [heroIndex, heroSlides.length, setHeroIndex]);
 
   const railSets = useMemo(
     () =>
@@ -118,15 +126,7 @@ export function HomeScreen({
         series: data.series,
         progressByKey: data.progressByKey,
       }),
-    [
-      data.continueWatching,
-      data.favorites,
-      data.liveCategory?.name,
-      data.liveItems,
-      data.movies,
-      data.progressByKey,
-      data.series,
-    ],
+    [data],
   );
 
   const activeSlide = heroSlides[Math.min(heroIndex, Math.max(0, heroSlides.length - 1))];
@@ -213,13 +213,12 @@ export function HomeScreen({
 
   const { toggleMyList, toggleWatched } = data;
   const handleToggleMyList = useCallback(
-    (slide: HomeHeroSlide) =>
-      void toggleMyList({ ...slide, logo: slide.posterUri ?? slide.backdropUri }),
+    (s: HomeHeroSlide) => void toggleMyList({ ...s, logo: s.posterUri ?? s.backdropUri }),
     [toggleMyList],
   );
   const handleToggleWatched = useCallback(
-    (slide: HomeHeroSlide) =>
-      void toggleWatched({ ...slide, logo: slide.posterUri ?? slide.backdropUri }, !slide.watched),
+    (s: HomeHeroSlide) =>
+      void toggleWatched({ ...s, logo: s.posterUri ?? s.backdropUri }, !s.watched),
     [toggleWatched],
   );
 
@@ -260,6 +259,7 @@ export function HomeScreen({
       onOpenSources,
       openVodOrSeries,
       railSets,
+      setHeroIndex,
     ],
   );
 

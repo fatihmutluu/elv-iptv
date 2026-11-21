@@ -9,6 +9,8 @@ export interface PagedListSourceOptions<T> {
   count: number;
   pageSize?: number;
   maxPages?: number;
+  /** Optional synchronous seed for page 0 (e.g. from `CatalogUiCache`) enabling frame-0 rendering. */
+  initialPage0?: readonly T[];
   loadPage: (offset: number, limit: number) => Promise<readonly T[]>;
 }
 
@@ -32,6 +34,10 @@ export function createPagedListSource<T>(opts: PagedListSourceOptions<T>): Paged
   const maxPages = Math.max(1, Math.floor(opts.maxPages ?? DEFAULT_MAX_PAGES));
 
   const pages = new Map<number, readonly T[]>();
+  const expectedPage0 = Math.min(pageSize, totalCount);
+  if (opts.initialPage0 && totalCount > 0 && opts.initialPage0.length >= expectedPage0) {
+    pages.set(0, opts.initialPage0);
+  }
   const inFlight = new Map<number, Promise<readonly T[]>>();
   const listeners = new Set<() => void>();
   let disposed = false;

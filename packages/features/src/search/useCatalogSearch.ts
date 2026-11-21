@@ -1,6 +1,6 @@
 import type { CatalogService, SearchResults, SearchScope, WatchProgressRow } from '@elv/data';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { batchLoadProgressByKeys } from '../shared';
+import { batchLoadProgressByKeys, useCatalogUiCache } from '../shared';
 import {
   addRecentSearch,
   countScopeResults,
@@ -44,7 +44,8 @@ export interface CatalogSearchState {
 
 /**
  * Debounced (`150ms`) catalog search hook with monotonic generation cancellation, single-query
- * instant scope filtering, isolated VOD watch-progress hydration, and recent-search history.
+ * instant scope filtering, `CatalogUiCache` synchronous warm return hydration (`#445`), isolated
+ * VOD watch-progress hydration, and recent-search history.
  */
 export function useCatalogSearch({
   catalog,
@@ -57,13 +58,24 @@ export function useCatalogSearch({
   initialRecent,
   onRecentChange,
 }: UseCatalogSearchOptions): CatalogSearchState {
+  const uiCache = useCatalogUiCache();
+  const uiCacheRef = useRef(uiCache);
+  uiCacheRef.current = uiCache;
+
+  const initialSanitized = sanitizeSearchQuery(initialQuery);
+  const initialCached =
+    initialSanitized !== '' ? (uiCache?.getSearch(initialSanitized, initialScope) ?? null) : null;
+
   const [query, setQueryState] = useState(initialQuery);
   const [scope, setScopeState] = useState<SearchScope>(initialScope);
-  const [results, setResults] = useState<SearchResults>(EMPTY_SEARCH_RESULTS);
-  const [progressByKey, setProgressByKey] =
-    useState<ReadonlyMap<string, WatchProgressRow>>(EMPTY_PROGRESS_MAP);
+  const [results, setResults] = useState<SearchResults>(
+    () => initialCached?.results ?? EMPTY_SEARCH_RESULTS,
+  );
+  const [progressByKey, setProgressByKey] = useState<ReadonlyMap<string, WatchProgressRow>>(
+    () => initialCached?.progressByKey ?? EMPTY_PROGRESS_MAP,
+  );
   const [searching, setSearching] = useState(false);
-  const [hasSearched, setHasSearched] = useState(false);
+  const [hasSearched, setHasSearched] = useState(() => initialCached !== null);
 
   const [localRecent, setLocalRecent] = useState<readonly string[]>(() => initialRecent ?? []);
   const recentSearches =
@@ -77,6 +89,10 @@ export function useCatalogSearch({
   onScopeChangeRef.current = onScopeChange;
   const onRecentChangeRef = useRef(onRecentChange);
   onRecentChangeRef.current = onRecentChange;
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
+  const progressRef = useRef(progressByKey);
+  progressRef.current = progressByKey;
 
   const prevInitialQueryRef = useRef(initialQuery);
   useEffect(() => {
@@ -99,7 +115,34 @@ export function useCatalogSearch({
   const searchingRef = useRef(false);
   const resultsRef = useRef<SearchResults>(results);
   resultsRef.current = results;
+  const hasSearchedRef = useRef(hasSearched);
+  hasSearchedRef.current = hasSearched;
   const prevUserStateVersionRef = useRef(userStateVersion);
+  const lastRefreshTokenRef = useRef(refreshToken);
+
+  const sanitizedQuery = sanitizeSearchQuery(query);
+  const sanitizedQueryRef = useRef(sanitizedQuery);
+  sanitizedQueryRef.current = sanitizedQuery;
+
+  const persistSearchCache = useCallback(
+    (
+      q: string,
+      nextScope: SearchScope,
+      nextResults: SearchResults,
+      nextProgress: ReadonlyMap<string, WatchProgressRow>,
+    ) => {
+      const cache = uiCacheRef.current;
+      if (!cache || q === '') return;
+      cache.setSearch({
+        query: q,
+        scope: nextScope,
+        catalogRevision: cache.getRevision(),
+        results: nextResults,
+        progressByKey: nextProgress,
+      });
+    },
+    [],
+  );
 
   const setQuery = useCallback((next: string) => {
     prevInitialQueryRef.current = next;
@@ -107,11 +150,23 @@ export function useCatalogSearch({
     onQueryChangeRef.current?.(next);
   }, []);
 
-  const setScope = useCallback((next: SearchScope) => {
-    prevInitialScopeRef.current = next;
-    setScopeState(next);
-    onScopeChangeRef.current?.(next);
-  }, []);
+  const setScope = useCallback(
+    (next: SearchScope) => {
+      prevInitialScopeRef.current = next;
+      scopeRef.current = next;
+      setScopeState(next);
+      onScopeChangeRef.current?.(next);
+      if (hasSearchedRef.current && sanitizedQueryRef.current !== '') {
+        persistSearchCache(
+          sanitizedQueryRef.current,
+          next,
+          resultsRef.current,
+          progressRef.current,
+        );
+      }
+    },
+    [persistSearchCache],
+  );
 
   const commitRecent = useCallback((rawQuery: string) => {
     const clean = sanitizeSearchQuery(rawQuery);
@@ -139,6 +194,7 @@ export function useCatalogSearch({
     setProgressByKey(EMPTY_PROGRESS_MAP);
     setSearching(false);
     setHasSearched(false);
+    uiCacheRef.current?.clearSearch();
   }, []);
 
   const selectRecent = useCallback(
@@ -148,9 +204,6 @@ export function useCatalogSearch({
     [setQuery],
   );
 
-  const sanitizedQuery = sanitizeSearchQuery(query);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken intentionally re-runs active search after catalog import
   useEffect(() => {
     const gen = ++generationRef.current;
     progressGenRef.current += 1;
@@ -161,6 +214,35 @@ export function useCatalogSearch({
       setProgressByKey(EMPTY_PROGRESS_MAP);
       setSearching(false);
       setHasSearched(false);
+      uiCacheRef.current?.clearSearch();
+      return;
+    }
+
+    const tokenChanged = lastRefreshTokenRef.current !== refreshToken;
+    lastRefreshTokenRef.current = refreshToken;
+
+    const cachedHit = !tokenChanged
+      ? (uiCacheRef.current?.getSearch(sanitizedQuery, scopeRef.current) ?? null)
+      : null;
+    if (cachedHit !== null) {
+      searchingRef.current = false;
+      setResults(cachedHit.results);
+      setProgressByKey(cachedHit.progressByKey);
+      setHasSearched(true);
+      setSearching(false);
+      const vodKeys = [...cachedHit.results.movies, ...cachedHit.results.series].map(
+        (item) => item.key,
+      );
+      if (vodKeys.length > 0) {
+        const pGen = ++progressGenRef.current;
+        void batchLoadProgressByKeys(catalog, vodKeys)
+          .then((progressMap) => {
+            if (gen !== generationRef.current || pGen !== progressGenRef.current) return;
+            setProgressByKey(progressMap);
+            persistSearchCache(sanitizedQuery, scopeRef.current, cachedHit.results, progressMap);
+          })
+          .catch(() => undefined);
+      }
       return;
     }
 
@@ -179,6 +261,7 @@ export function useCatalogSearch({
           setResults(fetched);
           setHasSearched(true);
           setSearching(false);
+          persistSearchCache(sanitizedQuery, scopeRef.current, fetched, EMPTY_PROGRESS_MAP);
 
           if (countScopeResults(fetched, 'all') > 0) {
             commitRecent(sanitizedQuery);
@@ -193,6 +276,7 @@ export function useCatalogSearch({
           const progressMap = await batchLoadProgressByKeys(catalog, vodKeys);
           if (gen !== generationRef.current || pGen !== progressGenRef.current) return;
           setProgressByKey(progressMap);
+          persistSearchCache(sanitizedQuery, scopeRef.current, fetched, progressMap);
         } catch {
           if (gen !== generationRef.current) return;
           searchingRef.current = false;
@@ -210,7 +294,7 @@ export function useCatalogSearch({
       progressGenRef.current += 1;
       searchingRef.current = false;
     };
-  }, [catalog, commitRecent, refreshToken, sanitizedQuery]);
+  }, [catalog, commitRecent, persistSearchCache, refreshToken, sanitizedQuery]);
 
   // Refresh VOD watch progress with its own monotonic generation when user state changes.
   useEffect(() => {
@@ -229,11 +313,12 @@ export function useCatalogSearch({
         const progressMap = await batchLoadProgressByKeys(catalog, vodKeys);
         if (sGen !== generationRef.current || pGen !== progressGenRef.current) return;
         setProgressByKey(progressMap);
+        persistSearchCache(sanitizedQueryRef.current, scopeRef.current, current, progressMap);
       } catch {
         // Keep existing progress snapshot on transient read errors.
       }
     })();
-  }, [catalog, userStateVersion]);
+  }, [catalog, persistSearchCache, userStateVersion]);
 
   return useMemo(
     () => ({

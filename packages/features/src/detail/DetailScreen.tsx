@@ -358,6 +358,7 @@ export function DetailScreen({
             selectedSeason={data.selectedSeason}
             episodes={visibleEpisodes}
             episodesLoading={data.episodesLoading}
+            episodesRefreshing={data.episodesRefreshing}
             episodeProgressByKey={data.episodeProgressByKey}
             seriesBackdropUri={data.backdropUri}
             onSelectSeason={data.selectSeason}

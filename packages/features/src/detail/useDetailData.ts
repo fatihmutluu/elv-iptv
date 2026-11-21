@@ -1,14 +1,15 @@
 import type { CatalogService, EpisodeRow, WatchProgressRow } from '@elv/data';
 import { elvError } from '@elv/domain';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { batchLoadProgressByKeys, type DetailTarget } from '../shared';
+import { type DetailTarget, useCatalogUiCache } from '../shared';
 import {
-  buildOptimisticWatchedRow,
   type DetailSeasonsState,
   type DetailSnapshot,
   emptyDetailSnapshot,
   fetchRelatedDetailItems,
 } from './detail-data-helpers';
+import { useDetailMutations } from './useDetailMutations';
+import { useDetailSeasonLoader } from './useDetailSeasonLoader';
 
 export type { DetailSeasonsState };
 
@@ -36,7 +37,8 @@ export interface DetailDataState extends Omit<DetailSnapshot, 'detailRow'> {
 
 /**
  * Hydrates Detail metadata, watch progress, My List state, series seasons/episodes, and bounded
- * *More Like This* items (`<= 12`) in parallel with generation guards and optimistic mutations.
+ * *More Like This* items (`<= 12`) with `CatalogUiCache` frame-0 hydration, zero-blink season
+ * switching + adjacent-season prewarm, player-return preservation, and rapid-toggle safety (`#445`, `#230`).
  */
 export function useDetailData({
   target,
@@ -44,72 +46,87 @@ export function useDetailData({
   refreshToken,
   userStateVersion = 0,
 }: UseDetailDataOptions): DetailDataState {
+  const uiCache = useCatalogUiCache();
+  const uiCacheRef = useRef(uiCache);
+  uiCacheRef.current = uiCache;
+  const initialCached = uiCache?.getDetail(target.itemKey) ?? null;
+
   const [snap, setSnap] = useState<DetailSnapshot>(() =>
-    emptyDetailSnapshot(target.kind, target.categoryId),
+    initialCached
+      ? { ...initialCached.snap, episodesLoading: false, episodesRefreshing: false }
+      : emptyDetailSnapshot(target.kind, target.categoryId),
   );
   const [seasonsRetryToken, setSeasonsRetryToken] = useState(0);
 
   const mountedRef = useRef(true);
   const snapRef = useRef(snap);
   const activeItemKeyRef = useRef(target.itemKey);
+  const activeSourceIdRef = useRef(target.sourceId);
+  activeSourceIdRef.current = target.sourceId;
   const prevItemKeyRef = useRef(target.itemKey);
-  const seriesIdRef = useRef<number | undefined>(target.catalogId);
-  const myListPendingRef = useRef<string | null>(null);
-  const watchedPendingRef = useRef<string | null>(null);
+  const seriesIdRef = useRef<number | undefined>(
+    target.catalogId ?? initialCached?.snap.detailRow?.id,
+  );
+  const episodesBySeasonRef = useRef<Map<number, readonly EpisodeRow[]>>(
+    new Map(initialCached?.episodesBySeason ?? []),
+  );
+  const myListGenRef = useRef(0);
+  const myListInFlightRef = useRef(0);
+  const committedMyListRef = useRef<boolean | undefined>(initialCached?.snap.inMyList);
+  const watchedGenRef = useRef(0);
+  const watchedInFlightRef = useRef(0);
+  const committedMovieProgressRef = useRef<WatchProgressRow | null | undefined>(
+    initialCached?.snap.movieProgress,
+  );
   const hydrationGenRef = useRef(0);
-  const episodesGenRef = useRef(0);
 
-  const updateSnap = useCallback((updater: (prev: DetailSnapshot) => DetailSnapshot) => {
-    const next = updater(snapRef.current);
-    snapRef.current = next;
-    setSnap((prev) => {
-      const resolved = updater(prev);
-      snapRef.current = resolved;
-      return resolved;
-    });
-  }, []);
+  const persistToCache = useCallback(
+    (itemKey: string, sourceId: string, nextSnap: DetailSnapshot) => {
+      uiCacheRef.current?.setDetail(itemKey, {
+        sourceId,
+        snap: nextSnap,
+        episodesBySeason: new Map(episodesBySeasonRef.current),
+        episodeProgressByKey: nextSnap.episodeProgressByKey,
+      });
+    },
+    [],
+  );
+
+  const updateSnap = useCallback(
+    (updater: (prev: DetailSnapshot) => DetailSnapshot, persist = true) => {
+      const next = updater(snapRef.current);
+      snapRef.current = next;
+      if (persist) persistToCache(activeItemKeyRef.current, activeSourceIdRef.current, next);
+      setSnap((prev) => {
+        const resolved = updater(prev);
+        snapRef.current = resolved;
+        if (persist) persistToCache(activeItemKeyRef.current, activeSourceIdRef.current, resolved);
+        return resolved;
+      });
+    },
+    [persistToCache],
+  );
+
+  const { loadSeasonEpisodes, cancelPrewarm } = useDetailSeasonLoader({
+    catalog,
+    mountedRef,
+    snapRef,
+    activeItemKeyRef,
+    activeSourceIdRef,
+    episodesBySeasonRef,
+    persistToCache,
+    updateSnap,
+  });
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      cancelPrewarm();
     };
-  }, []);
+  }, [cancelPrewarm]);
 
-  const loadSeasonEpisodes = useCallback(
-    async (seriesId: number, season: number, itemKey: string) => {
-      const epGen = ++episodesGenRef.current;
-      updateSnap((prev) => ({ ...prev, selectedSeason: season, episodesLoading: true }));
-      try {
-        const rows = await catalog.episodes(seriesId, season).catch(() => [] as EpisodeRow[]);
-        if (!mountedRef.current || epGen !== episodesGenRef.current) return;
-        if (activeItemKeyRef.current !== itemKey) return;
-        const progressMap = await batchLoadProgressByKeys(
-          catalog,
-          rows.map((e) => e.key),
-        ).catch(() => new Map<string, WatchProgressRow>());
-        if (!mountedRef.current || epGen !== episodesGenRef.current) return;
-        if (activeItemKeyRef.current !== itemKey) return;
-        updateSnap((prev) => ({
-          ...prev,
-          episodes: rows,
-          episodeProgressByKey: progressMap,
-          episodesLoading: false,
-        }));
-      } catch {
-        if (
-          mountedRef.current &&
-          epGen === episodesGenRef.current &&
-          activeItemKeyRef.current === itemKey
-        ) {
-          updateSnap((prev) => ({ ...prev, episodesLoading: false }));
-        }
-      }
-    },
-    [catalog, updateSnap],
-  );
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken, userStateVersion, and seasonsRetryToken intentionally trigger fresh bounded reads
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken, userStateVersion, and seasonsRetryToken trigger fresh bounded reads
   useEffect(() => {
     const gen = ++hydrationGenRef.current;
     const itemChanged = prevItemKeyRef.current !== target.itemKey;
@@ -117,12 +134,28 @@ export function useDetailData({
     activeItemKeyRef.current = target.itemKey;
 
     if (itemChanged) {
-      myListPendingRef.current = null;
-      watchedPendingRef.current = null;
-      seriesIdRef.current = target.catalogId;
-      updateSnap(() => emptyDetailSnapshot(target.kind, target.categoryId));
-    } else if (target.kind === 'series') {
-      updateSnap((prev) => ({ ...prev, seasonsState: { kind: 'loading' }, episodesLoading: true }));
+      myListGenRef.current += 1;
+      myListInFlightRef.current = 0;
+      watchedGenRef.current += 1;
+      watchedInFlightRef.current = 0;
+      cancelPrewarm();
+      const cached = uiCacheRef.current?.getDetail(target.itemKey) ?? null;
+      if (cached) {
+        committedMyListRef.current = cached.snap.inMyList;
+        committedMovieProgressRef.current = cached.snap.movieProgress;
+        seriesIdRef.current = target.catalogId ?? cached.snap.detailRow?.id;
+        episodesBySeasonRef.current = new Map(cached.episodesBySeason);
+        updateSnap(
+          () => ({ ...cached.snap, episodesLoading: false, episodesRefreshing: false }),
+          false,
+        );
+      } else {
+        committedMyListRef.current = undefined;
+        committedMovieProgressRef.current = undefined;
+        seriesIdRef.current = target.catalogId;
+        episodesBySeasonRef.current = new Map();
+        updateSnap(() => emptyDetailSnapshot(target.kind, target.categoryId), false);
+      }
     }
 
     let cancelled = false;
@@ -133,7 +166,6 @@ export function useDetailData({
         target.kind === 'series' && target.catalogId !== undefined
           ? catalog.seasons(target.catalogId).catch(() => null)
           : null;
-
       const [hydratedDetail, favKeys, fetchedMovieProg, relatedResult] = await Promise.all([
         catalog.itemDetail ? catalog.itemDetail(target.itemKey).catch(() => null) : null,
         catalog.listFavoriteKeys ? catalog.listFavoriteKeys().catch(() => [] as string[]) : [],
@@ -145,22 +177,25 @@ export function useDetailData({
       if (isStale()) return;
 
       const isFav = new Set(favKeys).has(target.itemKey);
+      if (myListInFlightRef.current === 0) committedMyListRef.current = isFav;
+      if (target.kind === 'movie' && watchedInFlightRef.current === 0) {
+        committedMovieProgressRef.current = fetchedMovieProg;
+      }
       updateSnap((prev) => ({
         ...prev,
-        detailRow: hydratedDetail,
-        inMyList: myListPendingRef.current === target.itemKey ? prev.inMyList : isFav,
+        detailRow: hydratedDetail ?? prev.detailRow,
+        inMyList: myListInFlightRef.current > 0 ? prev.inMyList : isFav,
         movieProgress:
-          target.kind === 'movie' && watchedPendingRef.current !== target.itemKey
+          target.kind === 'movie' && watchedInFlightRef.current === 0
             ? fetchedMovieProg
             : prev.movieProgress,
         relatedCategoryId: relatedResult.categoryId,
         related: relatedResult.items,
         relatedProgressByKey: relatedResult.progress,
       }));
-
       if (target.kind !== 'series') return;
 
-      const resolvedSeriesId = target.catalogId ?? hydratedDetail?.id;
+      const resolvedSeriesId = target.catalogId ?? hydratedDetail?.id ?? seriesIdRef.current;
       seriesIdRef.current = resolvedSeriesId;
       if (resolvedSeriesId === undefined) {
         updateSnap((prev) => ({
@@ -168,6 +203,7 @@ export function useDetailData({
           seasonsState: { kind: 'ready', seasons: [] },
           episodes: [],
           episodesLoading: false,
+          episodesRefreshing: false,
         }));
         return;
       }
@@ -179,6 +215,13 @@ export function useDetailData({
       if (isStale()) return;
 
       if (seasonsRes === null || !seasonsRes.ok) {
+        if (
+          !itemChanged &&
+          snapRef.current.seasonsState.kind === 'ready' &&
+          snapRef.current.seasonsState.seasons.length > 0
+        ) {
+          return;
+        }
         const error =
           seasonsRes === null ? elvError('storage', 'seasons-failed') : seasonsRes.error;
         updateSnap((prev) => ({
@@ -186,6 +229,7 @@ export function useDetailData({
           seasonsState: { kind: 'error', error },
           episodes: [],
           episodesLoading: false,
+          episodesRefreshing: false,
         }));
         return;
       }
@@ -199,13 +243,14 @@ export function useDetailData({
           episodes: [],
           episodeProgressByKey: new Map(),
           episodesLoading: false,
+          episodesRefreshing: false,
         }));
         return;
       }
 
       const curSelected = snapRef.current.selectedSeason;
       const nextSeason =
-        !itemChanged && curSelected !== null && seasons.some((s) => s.season === curSelected)
+        curSelected !== null && seasons.some((s) => s.season === curSelected)
           ? curSelected
           : (seasons[0]?.season ?? null);
 
@@ -215,9 +260,16 @@ export function useDetailData({
         selectedSeason: nextSeason,
       }));
       if (nextSeason !== null) {
-        await loadSeasonEpisodes(resolvedSeriesId, nextSeason, target.itemKey);
+        const alreadyVisible =
+          !itemChanged &&
+          snapRef.current.episodes.length > 0 &&
+          snapRef.current.selectedSeason === nextSeason;
+        await loadSeasonEpisodes(resolvedSeriesId, nextSeason, target.itemKey, {
+          backgroundRefresh: alreadyVisible,
+          seasons,
+        });
       } else {
-        updateSnap((prev) => ({ ...prev, episodesLoading: false }));
+        updateSnap((prev) => ({ ...prev, episodesLoading: false, episodesRefreshing: false }));
       }
     };
 
@@ -226,6 +278,7 @@ export function useDetailData({
       cancelled = true;
     };
   }, [
+    cancelPrewarm,
     catalog,
     loadSeasonEpisodes,
     refreshToken,
@@ -244,14 +297,28 @@ export function useDetailData({
       if (snapRef.current.selectedSeason === season) return;
       const seriesId = seriesIdRef.current;
       if (seriesId !== undefined) {
-        void loadSeasonEpisodes(seriesId, season, activeItemKeyRef.current);
+        const seasons =
+          snapRef.current.seasonsState.kind === 'ready'
+            ? snapRef.current.seasonsState.seasons
+            : undefined;
+        void loadSeasonEpisodes(seriesId, season, activeItemKeyRef.current, {
+          ...(seasons !== undefined ? { seasons } : {}),
+        });
       }
     },
     [loadSeasonEpisodes],
   );
 
   const retrySeasons = useCallback(() => {
-    updateSnap((prev) => ({ ...prev, seasonsState: { kind: 'loading' }, episodesLoading: true }));
+    updateSnap(
+      (prev) => ({
+        ...prev,
+        seasonsState: { kind: 'loading' },
+        episodesLoading: true,
+        episodesRefreshing: false,
+      }),
+      false,
+    );
     setSeasonsRetryToken((n) => n + 1);
   }, [updateSnap]);
 
@@ -262,102 +329,31 @@ export function useDetailData({
   const rating = target.rating ?? snap.detailRow?.rating ?? null;
   const plot = snap.detailRow?.plot ?? target.overview ?? null;
 
-  const toggleMyList = useCallback(async (): Promise<void> => {
-    const reqKey = target.itemKey;
-    if (myListPendingRef.current === reqKey) return;
-    const prevVal = snapRef.current.inMyList;
-    myListPendingRef.current = reqKey;
-    updateSnap((prev) => ({ ...prev, inMyList: !prevVal }));
-    if (!catalog.toggleFavorite) {
-      myListPendingRef.current = null;
-      return;
-    }
-    try {
-      const res = await catalog.toggleFavorite({
-        sourceId: target.sourceId,
-        itemKey: reqKey,
-        kind: target.kind,
-        title,
-        logo: posterUri ?? backdropUri,
-        year,
-        rating,
-      });
-      if (mountedRef.current && activeItemKeyRef.current === reqKey && !res.ok) {
-        updateSnap((prev) => ({ ...prev, inMyList: prevVal }));
-      }
-    } catch {
-      if (mountedRef.current && activeItemKeyRef.current === reqKey) {
-        updateSnap((prev) => ({ ...prev, inMyList: prevVal }));
-      }
-    } finally {
-      if (myListPendingRef.current === reqKey) myListPendingRef.current = null;
-    }
-  }, [
-    backdropUri,
+  const mutationRefs = useMemo(
+    () => ({
+      mountedRef,
+      snapRef,
+      activeItemKeyRef,
+      myListGenRef,
+      myListInFlightRef,
+      committedMyListRef,
+      watchedGenRef,
+      watchedInFlightRef,
+      committedMovieProgressRef,
+    }),
+    [],
+  );
+  const { toggleMyList, toggleWatched } = useDetailMutations({
     catalog,
-    posterUri,
-    rating,
-    target.itemKey,
-    target.kind,
-    target.sourceId,
+    target,
     title,
-    updateSnap,
+    posterUri,
+    backdropUri,
     year,
-  ]);
-
-  const toggleWatched = useCallback(async (): Promise<void> => {
-    if (target.kind !== 'movie') return;
-    const reqKey = target.itemKey;
-    if (watchedPendingRef.current === reqKey) return;
-    const prevRow = snapRef.current.movieProgress;
-    const nextWatched = !(prevRow?.watched ?? false);
-    const optimistic = buildOptimisticWatchedRow(prevRow, nextWatched, {
-      sourceId: target.sourceId,
-      itemKey: reqKey,
-      title,
-      logo: posterUri ?? backdropUri,
-    });
-    watchedPendingRef.current = reqKey;
-    updateSnap((prev) => ({ ...prev, movieProgress: optimistic }));
-
-    const useSave = prevRow === null && nextWatched && catalog.saveProgress !== undefined;
-    if (!useSave && !catalog.setWatched) {
-      watchedPendingRef.current = null;
-      return;
-    }
-    try {
-      const res = useSave
-        ? await catalog.saveProgress?.({
-            sourceId: target.sourceId,
-            itemKey: reqKey,
-            kind: 'movie',
-            title,
-            logo: posterUri ?? backdropUri,
-            positionMs: optimistic.durationMs,
-            durationMs: optimistic.durationMs,
-            watched: true,
-          })
-        : await catalog.setWatched?.(reqKey, nextWatched);
-      if (mountedRef.current && activeItemKeyRef.current === reqKey && res && !res.ok) {
-        updateSnap((prev) => ({ ...prev, movieProgress: prevRow }));
-      }
-    } catch {
-      if (mountedRef.current && activeItemKeyRef.current === reqKey) {
-        updateSnap((prev) => ({ ...prev, movieProgress: prevRow }));
-      }
-    } finally {
-      if (watchedPendingRef.current === reqKey) watchedPendingRef.current = null;
-    }
-  }, [
-    backdropUri,
-    catalog,
-    posterUri,
-    target.itemKey,
-    target.kind,
-    target.sourceId,
-    title,
+    rating,
+    refs: mutationRefs,
     updateSnap,
-  ]);
+  });
 
   return useMemo<DetailDataState>(() => {
     const { detailRow: _ignored, ...rest } = snap;

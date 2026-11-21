@@ -2,11 +2,15 @@ export { AdaptiveSheet, type AdaptiveSheetProps } from './AdaptiveSheet';
 export { ArtworkImage, type ArtworkImageProps, DEFAULT_MAX_DECODE_PX } from './ArtworkImage';
 export { CtaButton, type CtaButtonProps, type CtaButtonVariant } from './CtaButton';
 export {
+  classifyImageError,
   createDeadHostRegistry,
   type DeadHostRegistry,
   type DeadHostRegistryOptions,
   defaultDeadHostRegistry,
   extractArtworkHost,
+  extractNativeImageError,
+  type ImageErrorInfo,
+  type ImageErrorKind,
 } from './dead-host-registry';
 export {
   EditorialCategoryBar,

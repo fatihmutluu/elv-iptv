@@ -322,6 +322,7 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         ...(profileId === undefined ? {} : { profileId }),
       }),
     toggleFavorite: (input) => callResult({ method: 'toggleFavorite', input }),
+    setFavorite: (input, active) => callResult({ method: 'setFavorite', input, active }),
     listFavorites: (limit, profileId) =>
       callValue({
         method: 'listFavorites',
