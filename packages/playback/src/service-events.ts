@@ -1,4 +1,4 @@
-import { positionAt } from './clock';
+import { isAtLiveEdge, positionAt } from './clock';
 import { DEFAULT_PLAYBACK_CONFIG, type PlaybackConfig } from './config';
 import {
   type AttemptToken,
@@ -21,6 +21,7 @@ export interface EventRouterDeps {
   readonly store: PlaybackStateStore;
   readonly seekCoalescer: SeekCoalescer;
   readonly hooks: RecoveryHooks;
+  readonly liveEdgeToleranceMs: number;
   readonly reconcileTracks: (tracks: MediaTracks) => {
     readonly audioTrackId?: string;
     readonly subtitleTrackId?: string | null;
@@ -33,7 +34,12 @@ export interface EventRouterDeps {
 
 /** @internal Routes engine events into batched state transitions and recovery hooks (`#224`). */
 export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEvent) => void {
-  const { engine, clock, store, seekCoalescer, hooks } = deps;
+  const { engine, clock, store, seekCoalescer, hooks, liveEdgeToleranceMs } = deps;
+
+  const liveEdgePatch = (anchor: ClockAnchor, nowMs: number): Partial<PlaybackState> =>
+    deps.currentRequest()?.kind === 'live'
+      ? { atLiveEdge: isAtLiveEdge(anchor, nowMs, liveEdgeToleranceMs) }
+      : {};
 
   return (event: EngineEvent): void => {
     if (event.type === 'surface') {
@@ -56,6 +62,7 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
         return;
       }
       case 'clock': {
+        const now = clock.now();
         if (!seekCoalescer.shouldAcceptClock(event.anchor)) {
           const prevAnchor = store.getState().anchor;
           if (
@@ -63,17 +70,16 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
             (event.anchor.durationMs !== prevAnchor.durationMs ||
               event.anchor.liveEdgeMs !== prevAnchor.liveEdgeMs)
           ) {
-            store.update({
-              anchor: {
-                ...prevAnchor,
-                ...(event.anchor.durationMs === undefined
-                  ? {}
-                  : { durationMs: event.anchor.durationMs }),
-                ...(event.anchor.liveEdgeMs === undefined
-                  ? {}
-                  : { liveEdgeMs: event.anchor.liveEdgeMs }),
-              },
-            });
+            const mergedAnchor: ClockAnchor = {
+              ...prevAnchor,
+              ...(event.anchor.durationMs === undefined
+                ? {}
+                : { durationMs: event.anchor.durationMs }),
+              ...(event.anchor.liveEdgeMs === undefined
+                ? {}
+                : { liveEdgeMs: event.anchor.liveEdgeMs }),
+            };
+            store.update({ anchor: mergedAnchor, ...liveEdgePatch(mergedAnchor, now) });
           }
           return;
         }
@@ -83,10 +89,10 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
             deps.currentRequest()?.kind === 'vod' &&
             (st.status.kind === 'playing' || event.anchor.rate > 0 || event.anchor.positionMs > 0)
           ) {
-            deps.setLastVodPosition(positionAt(event.anchor, clock.now()));
+            deps.setLastVodPosition(positionAt(event.anchor, now));
           }
+          store.update({ anchor: event.anchor, ...liveEdgePatch(event.anchor, now) });
           hooks.onClock?.(event.anchor);
-          store.update({ anchor: event.anchor });
         });
         return;
       }
@@ -119,6 +125,9 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
           } else if (event.state === 'ended') {
             deps.clearStartTimeout();
             deps.freezeAnchor();
+            if (deps.currentRequest()?.kind === 'live' && hooks.onLiveEnded?.() === true) {
+              return;
+            }
             store.update({ status: { kind: 'ended' } });
           } else {
             const k = store.getState().status.kind;
@@ -186,7 +195,7 @@ export function nextTuneState(
   held: boolean,
   now: number,
 ): PlaybackState {
-  const { anchor: _a, firstFrameAt: _f, ...kept } = prev;
+  const { anchor: _a, atLiveEdge: _l, firstFrameAt: _f, ...kept } = prev;
   return {
     ...kept,
     status: held ? prev.status : { kind: 'tuning' },

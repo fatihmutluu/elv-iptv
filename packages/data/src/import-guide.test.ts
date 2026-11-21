@@ -19,11 +19,12 @@ import {
   SECOND_URL,
   settings,
   setupGuide,
+  stream,
   titles,
   tv,
   xt,
 } from './import-guide-test-helpers';
-import { emptyPanel, M3U_PASS, M3U_USER, setup } from './import-test-helpers';
+import { emptyPanel, extinf, M3U_PASS, M3U_USER, setup } from './import-test-helpers';
 import type { ImportProgress } from './import-types';
 import { importCatalog } from './import-xtream';
 import { addSourceFromLink } from './source-link';
@@ -156,6 +157,47 @@ describe('guide import', () => {
     expect(span('Closed')).toBe(1);
     expect(span('Last')).toBe(0.5);
     expect(span('Other')).toBe(0.5);
+  });
+
+  it('matches an unmapped channel by unique num fallback while preventing ambiguous num collisions', async () => {
+    const playlist =
+      '#EXTM3U\n' +
+      extinf('Unrelated Twenty Four', stream(6), 'tvg-chno="24"') +
+      extinf('Mystery Feed', stream(1), 'tvg-chno="42"') +
+      extinf('Named Winner', stream(2), 'tvg-chno="55"') +
+      extinf('Dup Num A', stream(3), 'tvg-chno="77"') +
+      extinf('Dup Num B', stream(4), 'tvg-chno="77"') +
+      extinf('Dual Claimed', stream(5), 'tvg-chno="88"');
+    const e = await setupGuide(playlist);
+    expect((await importCatalog(e.sourceId, e.deps)).ok).toBe(true);
+    e.server.body = tv(
+      channelXml('epg.24news', '24 News'),
+      channelXml('epg.42', '42', '42 - Cinema'),
+      channelXml('epg.55.name', 'Named Winner'),
+      channelXml('epg.55.num', '55 - Other'),
+      channelXml('epg.77', '77 - Twin'),
+      channelXml('epg.88.a', '#88 First'),
+      channelXml('epg.88.b', '88: Second'),
+      programmeXml('epg.24news', HOUR, 1, 'Brand Should Not Match'),
+      programmeXml('epg.42', HOUR, 1, 'Number Matched Film'),
+      programmeXml('epg.55.name', HOUR, 1, 'Name Precedence Show'),
+      programmeXml('epg.55.num', HOUR, 1, 'Should Lose To Name'),
+      programmeXml('epg.77', HOUR, 1, 'Ambiguous Live Num'),
+      programmeXml('epg.88.a', HOUR, 1, 'Ambiguous Xmltv A'),
+      programmeXml('epg.88.b', HOUR, 1, 'Ambiguous Xmltv B'),
+    );
+    const r = await run(e);
+    if (!r.ok) throw new Error(JSON.stringify(r.error));
+
+    const mappings = await rows(
+      e,
+      'SELECT l.name, g.guide_id FROM channel_guide g JOIN live l ON l.key = g.channel_key ORDER BY l.num',
+    );
+    expect(mappings).toEqual([
+      { name: 'Mystery Feed', guide_id: 'epg.42' },
+      { name: 'Named Winner', guide_id: 'epg.55.name' },
+    ]);
+    expect(await titles(e)).toEqual(['Number Matched Film', 'Name Precedence Show']);
   });
 });
 

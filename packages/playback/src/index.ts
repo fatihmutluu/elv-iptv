@@ -1,4 +1,4 @@
-export { positionAt } from './clock';
+export { isAtLiveEdge, LIVE_EDGE_TOLERANCE_MS, positionAt } from './clock';
 export { DEFAULT_PLAYBACK_CONFIG, type PlaybackConfig } from './config';
 export {
   type AttemptToken,

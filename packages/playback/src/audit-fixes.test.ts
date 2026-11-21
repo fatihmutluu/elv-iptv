@@ -85,9 +85,11 @@ describe('C1: ended status lifecycle', () => {
     const r = rig({ chan: [] });
     await playing(r, live('chan'));
     state(r, 'ended');
+    state(r, 'ended');
+    expect(status(r)).toEqual({ kind: 'ended' });
     r.service.retry();
     await tick(0);
-    expect(r.loads).toHaveLength(2);
+    expect(r.loads).toHaveLength(3);
     expect(r.loads.at(-1)).toMatchObject({ url: 'chan', kind: 'live' });
   });
 });
@@ -109,6 +111,8 @@ describe('C2.3: dispose stops open engine media', () => {
       async (r: ReturnType<typeof rig>) => {
         play(r);
         state(r, 'ended');
+        state(r, 'ended');
+        expect(status(r)).toEqual({ kind: 'ended' });
       },
     ],
     [

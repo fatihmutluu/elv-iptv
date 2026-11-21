@@ -502,4 +502,84 @@ describe('CatalogService in @elv/data', () => {
     // Queue must not be deadlocked: close() resolves immediately
     await queue.close();
   });
+
+  it('reaps orphaned running runs and programmes_next on openCatalog so imports succeed after a crash', async () => {
+    const playlistUrl = 'http://panel.example:8080/list.m3u';
+    const guideUrl = 'http://panel.example:8080/guide.xml';
+    const nowMs = Date.UTC(2026, 10, 21, 12, 30, 0);
+    const playlist = `#EXTM3U\n${extinf('News 1', `http://cdn.example/${M3U_TOKEN}/live/1.ts`, 'tvg-id="news.1" group-title="News"')}`;
+    const xmltv = [
+      '<tv>',
+      '  <channel id="news.1"><display-name>News 1</display-name></channel>',
+      '  <programme start="20261121120000 +0000" stop="20261121130000 +0000" channel="news.1"><title>Midday News</title></programme>',
+      '</tv>',
+    ].join('\n');
+
+    const t = testDb();
+    await openCatalog(t.db, () => 1_000);
+    const secrets = memorySecrets();
+    const http = m3uHttp({ [playlistUrl]: playlist, [guideUrl]: xmltv });
+    const service1 = createCatalogService({
+      db: t.db,
+      secrets,
+      scheduler: countingScheduler(),
+      http,
+      clock: () => nowMs,
+      newId: () => 's1',
+    });
+    const added = await service1.addSource({
+      kind: 'm3u',
+      name: 'Crash Test',
+      playlistUrl,
+      guideUrl,
+    });
+    if (!added.ok) throw new Error('add failed');
+
+    // Simulate a hard crash leaving both catalog and guide runs stuck in 'running' + staged programmes_next.
+    await t.db.batch(
+      "INSERT INTO import_runs (source_id, kind, started_at, status) VALUES (?, ?, ?, 'running')",
+      [
+        ['s1', 'catalog', 500],
+        ['s1', 'guide', 600],
+      ],
+    );
+    await t.db.run(
+      "INSERT INTO programmes_next (source_id, guide_id, start, stop, title, run_id) VALUES ('s1', 'news.1', 10, 20, 'Orphan', 2)",
+    );
+
+    // Reopening the database reaps the crashed runs and purges staged rows.
+    expect((await openCatalog(t.db, () => 9_999)).ok).toBe(true);
+    const reapedRuns = await t.db.all<Record<string, unknown>>(
+      'SELECT kind, status, error_category, error_code, finished_at FROM import_runs ORDER BY id',
+    );
+    expect(reapedRuns).toEqual([
+      {
+        kind: 'catalog',
+        status: 'failed',
+        error_category: 'storage',
+        error_code: 'interrupted',
+        finished_at: 9_999,
+      },
+      {
+        kind: 'guide',
+        status: 'failed',
+        error_category: 'storage',
+        error_code: 'interrupted',
+        finished_at: 9_999,
+      },
+    ]);
+    expect(await t.db.all('SELECT * FROM programmes_next')).toEqual([]);
+
+    const service2 = createCatalogService({
+      db: t.db,
+      secrets,
+      scheduler: countingScheduler(),
+      http,
+      clock: () => nowMs,
+      newId: () => 's2',
+    });
+    expect((await service2.importSource('s1')).ok).toBe(true);
+    expect((await service2.importGuide?.('s1'))?.ok).toBe(true);
+    await service2.close();
+  });
 });

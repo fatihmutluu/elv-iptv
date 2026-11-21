@@ -79,6 +79,8 @@ export interface RecoveryHooks {
   /** The user resumed; called before `play` is sent so stale-pause or deferred reloads run first. */
   onPlay?(): void;
   onState?(state: EngineState): void;
+  /** Intercepts an unexpected live `ended` event; returns `true` when recovery initiated a reconnect. */
+  onLiveEnded?(): boolean;
   onClock?(anchor: ClockAnchor): void;
   onError?(error: EngineError): void;
   onStall?(phase: 'start' | 'end'): void;

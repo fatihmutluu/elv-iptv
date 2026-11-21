@@ -9,6 +9,7 @@ export { importCatalog, loadSeriesEpisodes } from './import-xtream';
 export * from './manifest';
 export * from './migrate';
 export * from './queries';
+export { type ReapOrphanedRunsResult, reapOrphanedRuns } from './runs';
 export {
   EXPECTED_FTS_TABLES,
   EXPECTED_TABLE_COLUMNS,

@@ -1,3 +1,5 @@
+import { LIVE_EDGE_TOLERANCE_MS } from './clock';
+
 /** Tunable timing of the playback service; defaults follow the player core spec sections 5.4 to 5.6. */
 export interface PlaybackConfig {
   /** Live buffering longer than this starts the recovery ladder. */
@@ -29,6 +31,8 @@ export interface PlaybackConfig {
   seekSettleTimeoutMs: number;
   /** Pausing a playing live stream at least this long triggers a clean live-edge reload on `play()`. */
   liveStalePauseMs: number;
+  /** Grace window behind `liveEdgeMs` that still reports `atLiveEdge: true` (`#284`). */
+  liveEdgeToleranceMs: number;
 }
 
 /** Spec defaults, frozen so no caller can change them for every service. */
@@ -46,4 +50,5 @@ export const DEFAULT_PLAYBACK_CONFIG: Readonly<PlaybackConfig> = Object.freeze({
   seekCoalesceMs: 80,
   seekSettleTimeoutMs: 12000,
   liveStalePauseMs: 20000,
+  liveEdgeToleranceMs: LIVE_EDGE_TOLERANCE_MS,
 });

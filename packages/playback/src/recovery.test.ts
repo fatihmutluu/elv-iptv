@@ -693,8 +693,8 @@ describe('lifecycle', () => {
     r.service.stop();
     await tick(10000);
     expect(r.engine.commands.map((c) => c.name)).toEqual(['load', 'retry', 'stop']);
-    await playing(r, live('dead'));
-    error(r, 'network');
+    await playing(r, vod('dead'));
+    error(r, 'decoder');
     state(r, 'ended');
     expect(status(r)).toEqual({ kind: 'ended' });
     await tick(10000);

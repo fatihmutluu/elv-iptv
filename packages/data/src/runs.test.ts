@@ -1,7 +1,8 @@
 import type { Result } from '@elv/domain';
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_BATCH_SIZE } from './import-types';
 import { openCatalog } from './migrate';
-import { finishRun, removeStale, startRun } from './runs';
+import { finishRun, reapOrphanedRuns, removeStale, startRun } from './runs';
 import { testDb } from './test-db';
 
 async function id(r: Promise<Result<number>>): Promise<number> {
@@ -101,11 +102,14 @@ describe('runs', () => {
     expect(await db.all('SELECT id FROM import_runs')).toHaveLength(4);
   });
 
-  it('marks leftover running runs failed/interrupted when the catalog is opened', async () => {
+  it('marks leftover running runs failed/interrupted and purges programmes_next when the catalog is opened', async () => {
     const { db } = await fresh();
     const a = await id(startRun(db, 's1', 'catalog', 1));
     const b = await id(startRun(db, 's1', 'guide', 1));
     await finishRun(db, b, { status: 'ok' }, 2);
+    await db.run(
+      "INSERT INTO programmes_next (source_id, guide_id, start, stop, title, run_id) VALUES ('s1', 'g1', 10, 20, 'Stale', 1)",
+    );
     expect((await openCatalog(db, () => 50)).ok).toBe(true);
     const rows = await db.all<Record<string, unknown>>('SELECT * FROM import_runs ORDER BY id');
     expect(rows[0]).toMatchObject({
@@ -116,7 +120,82 @@ describe('runs', () => {
       finished_at: 50,
     });
     expect(rows[1]).toMatchObject({ status: 'ok', finished_at: 2 });
+    expect(await db.all('SELECT * FROM programmes_next')).toEqual([]);
     await id(startRun(db, 's1', 'catalog', 60));
+  });
+
+  it('reapOrphanedRuns reaps running catalog and guide runs, leaves finished runs alone, and purges programmes_next', async () => {
+    const { db } = await fresh();
+    const runningCat = await id(startRun(db, 's1', 'catalog', 10));
+    const runningGuide = await id(startRun(db, 's1', 'guide', 11));
+    const okRun = await id(startRun(db, 's2', 'catalog', 12));
+    await finishRun(db, okRun, { status: 'ok', counts: { live: 2 } }, 15);
+    const failedRun = await id(startRun(db, 's2', 'catalog', 16));
+    await finishRun(
+      db,
+      failedRun,
+      { status: 'failed', error: { category: 'network', code: 'http-503' } },
+      18,
+    );
+    const cancelledRun = await id(startRun(db, 's2', 'guide', 19));
+    await finishRun(
+      db,
+      cancelledRun,
+      { status: 'cancelled', error: { category: 'network', code: 'aborted' } },
+      20,
+    );
+    await db.batch(
+      'INSERT INTO programmes_next (source_id, guide_id, start, stop, title, run_id) VALUES (?, ?, ?, ?, ?, ?)',
+      [
+        ['s1', 'g1', 100, 200, 'Show A', runningGuide],
+        ['s1', 'g2', 200, 300, 'Show B', runningGuide],
+      ],
+    );
+
+    const reaped = await reapOrphanedRuns(db, 999);
+    expect(reaped).toEqual({ reapedRuns: 2, purgedProgrammes: 2 });
+
+    const rows = await db.all<Record<string, unknown>>('SELECT * FROM import_runs ORDER BY id');
+    expect(rows.find((r) => r.id === runningCat)).toMatchObject({
+      status: 'failed',
+      error_category: 'storage',
+      error_code: 'interrupted',
+      finished_at: 999,
+    });
+    expect(rows.find((r) => r.id === runningGuide)).toMatchObject({
+      status: 'failed',
+      error_category: 'storage',
+      error_code: 'interrupted',
+      finished_at: 999,
+    });
+    expect(rows.find((r) => r.id === okRun)).toMatchObject({
+      status: 'ok',
+      error_category: null,
+      error_code: null,
+      finished_at: 15,
+    });
+    expect(rows.find((r) => r.id === failedRun)).toMatchObject({
+      status: 'failed',
+      error_category: 'network',
+      error_code: 'http-503',
+      finished_at: 18,
+    });
+    expect(rows.find((r) => r.id === cancelledRun)).toMatchObject({
+      status: 'cancelled',
+      error_category: 'network',
+      error_code: 'aborted',
+      finished_at: 20,
+    });
+    expect(await db.all('SELECT * FROM programmes_next')).toEqual([]);
+
+    // Reaping again is a clean no-op, and new runs start immediately.
+    expect(await reapOrphanedRuns(db, 1000)).toEqual({ reapedRuns: 0, purgedProgrammes: 0 });
+    await id(startRun(db, 's1', 'catalog', 1001));
+    await id(startRun(db, 's1', 'guide', 1002));
+  });
+
+  it('uses a modest 200-row DEFAULT_BATCH_SIZE for WAL write transactions', () => {
+    expect(DEFAULT_BATCH_SIZE).toBe(200);
   });
 
   it('refuses to start a run for a source that is gone', async () => {

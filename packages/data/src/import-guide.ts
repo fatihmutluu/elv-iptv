@@ -178,7 +178,8 @@ function writeChannels(c: RunCtx, st: GuideState, channels: readonly XmltvChanne
     const match = matchGuideChannel(st.index, ch);
     if (match.keys.length > 0) st.mapped.add(ch.id);
     else st.mapped.delete(ch.id);
-    for (const key of match.keys) (match.byId ? st.byId : st.byName).push([key, ch.id]);
+    const bucket = match.tier === 'id' ? st.byId : match.tier === 'name' ? st.byName : st.byNum;
+    for (const key of match.keys) bucket.push([key, ch.id]);
     const name = ch.names[0] ?? ch.id;
     st.channelRows.push([c.sourceId, ch.id, name, foldText(name), ch.icon ?? null, c.runId]);
   }
@@ -268,10 +269,12 @@ async function execute(
   }
   c.counts.guideUrlFallbacks = opened.failed.length;
   await c.db.run('DELETE FROM programmes_next WHERE source_id = ?', [c.sourceId]);
-  const live = await c.db.all<{ key: string; guide_id: string | null; name_fold: string }>(
-    'SELECT key, guide_id, name_fold FROM live WHERE source_id = ?',
-    [c.sourceId],
-  );
+  const live = await c.db.all<{
+    key: string;
+    guide_id: string | null;
+    name_fold: string;
+    num: number | null;
+  }>('SELECT key, guide_id, name_fold, num FROM live WHERE source_id = ?', [c.sourceId]);
   const st: GuideState = {
     index: buildChannelIndex(live),
     mapped: new Set(),
@@ -279,6 +282,7 @@ async function execute(
     open: new Map(),
     byId: [],
     byName: [],
+    byNum: [],
     staged: new Map(),
     channels: 0,
     programmes: 0,
@@ -323,14 +327,14 @@ async function execute(
 }
 
 /**
- * Imports the XMLTV guide of a source: streams it, matches guide channels to live channels (a guide id always wins; a
- * folded name maps a channel without an id match only when it is unique both ways), stores the programmes of mapped
- * guide channels inside the time window (default one day back, seven
- * forward, relative to `opts.now`) and replaces the previous guide in one cleanup transaction. The first guide URL
- * that answers 2xx (or conditional 304 when programmes are already stored) wins: the user override, then the Xtream
- * guide or the playlist's discovered URLs. URLs are resolved in memory only; cache validators are keyed by opaque
- * slot names. A document without channels and programmes fails with `source-format/not-a-guide`; failure and cancel
- * keep the previous guide. After a successful swap the write-ahead log is checkpointed and truncated.
+ * Imports the XMLTV guide of a source: streams it, matches guide channels to live channels in strict precedence
+ * (exact guide id, then unambiguous folded display name, then unambiguous channel number fallback), stores the
+ * programmes of mapped guide channels inside the time window (default one day back, seven forward, relative to
+ * `opts.now`) and replaces the previous guide in one cleanup transaction. The first guide URL that answers 2xx
+ * (or conditional 304 when programmes are already stored) wins: the user override, then the Xtream guide or the
+ * playlist's discovered URLs. URLs are resolved in memory only; cache validators are keyed by opaque slot names.
+ * A document without channels and programmes fails with `source-format/not-a-guide`; failure and cancel keep the
+ * previous guide. After a successful swap the write-ahead log is checkpointed and truncated.
  */
 export async function importGuide(
   sourceId: string,

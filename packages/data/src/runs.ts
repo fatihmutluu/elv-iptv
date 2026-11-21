@@ -163,11 +163,26 @@ export async function removeStaleCatalog(
   return removed;
 }
 
-/** Marks every `running` run as `failed` / `interrupted`; call it when the catalog is opened. */
-export async function recoverRuns(db: SqlDriver, now: number): Promise<number> {
-  const r = await db.run(
-    "UPDATE import_runs SET status = 'failed', error_category = 'storage', error_code = 'interrupted', finished_at = ? WHERE status = 'running'",
-    [now],
-  );
-  return r.changes;
+/** Counts reported by {@link reapOrphanedRuns}. */
+export interface ReapOrphanedRunsResult {
+  reapedRuns: number;
+  purgedProgrammes: number;
+}
+
+/**
+ * Marks every `running` run as `failed` (`storage/interrupted`) and purges any leftover staged rows in
+ * `programmes_next` inside a single transaction. Call once when the catalog is opened.
+ */
+export async function reapOrphanedRuns(
+  db: SqlDriver,
+  now: number,
+): Promise<ReapOrphanedRunsResult> {
+  return db.transaction(async (tx) => {
+    const runsRes = await tx.run(
+      "UPDATE import_runs SET finished_at = ?, status = 'failed', error_category = 'storage', error_code = 'interrupted' WHERE status = 'running'",
+      [now],
+    );
+    const progRes = await tx.run('DELETE FROM programmes_next');
+    return { reapedRuns: runsRes.changes, purgedProgrammes: progRes.changes };
+  });
 }

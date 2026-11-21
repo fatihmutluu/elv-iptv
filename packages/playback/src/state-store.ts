@@ -46,6 +46,7 @@ function samePlaybackState(a: PlaybackState, b: PlaybackState): boolean {
     a.accountKey === b.accountKey &&
     a.tuneAt === b.tuneAt &&
     a.firstFrameAt === b.firstFrameAt &&
+    a.atLiveEdge === b.atLiveEdge &&
     sameStatus(a.status, b.status) &&
     sameAnchor(a.anchor, b.anchor)
   );
