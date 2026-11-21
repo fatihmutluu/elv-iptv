@@ -2,6 +2,7 @@ import type { CatalogService, CategoryRow, ItemRow, WatchProgressRow } from '@el
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildHeroSlides,
+  buildHomeDetailTarget,
   buildHomeLivePlayTarget,
   buildVodPlayTarget,
   computePeekCardWidth,
@@ -201,5 +202,55 @@ describe('home-model', () => {
     expect(ch3?.title).toBe('3. Channel 3');
     // Both indices live in the same page so only 1 bounded page query was issued.
     expect(itemsSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('builds a DetailTarget for movie/series entries and returns undefined for live/episode', () => {
+    const movieTarget = buildHomeDetailTarget({
+      itemKey: 'x:s1:movie:1',
+      sourceId: 's1',
+      kind: 'movie',
+      title: 'Neon Horizon',
+      subtitle: null,
+      backdropUri: 'https://img.test/b.jpg',
+      posterUri: 'https://img.test/p.jpg',
+      year: 2025,
+      rating: 8.4,
+      durationMs: 0,
+      positionMs: 0,
+      watched: false,
+      catalogItem: {
+        id: 42,
+        key: 'x:s1:movie:1',
+        kind: 'movie',
+        sourceId: 's1',
+        providerId: '1',
+        name: 'Neon Horizon',
+        logo: null,
+        rating: 8.4,
+        year: 2025,
+        num: null,
+      },
+    });
+    expect(movieTarget).toMatchObject({
+      itemKey: 'x:s1:movie:1',
+      kind: 'movie',
+      catalogId: 42,
+    });
+    expect(
+      buildHomeDetailTarget({
+        itemKey: 'x:s1:live:1',
+        sourceId: 's1',
+        kind: 'live',
+        title: 'Channel 1',
+        subtitle: null,
+        backdropUri: null,
+        posterUri: null,
+        year: null,
+        rating: null,
+        durationMs: 0,
+        positionMs: 0,
+        watched: false,
+      }),
+    ).toBeUndefined();
   });
 });

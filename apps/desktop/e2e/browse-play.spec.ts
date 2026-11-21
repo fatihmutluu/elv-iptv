@@ -119,14 +119,15 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
     await expect(window.getByTestId('browse-items-list-row-1')).toBeVisible();
 
     await window.getByTestId('nav-tab-series').click();
-    const seriesRow0 = window.getByTestId('browse-items-list-row-0');
-    await expect(seriesRow0).toBeVisible();
-    await expect(seriesRow0).not.toHaveText(/^(Loading…|Yükleniyor…)?$/);
-    await seriesRow0.click();
+    await expect(window.getByTestId('catalog-screen-series')).toBeVisible();
+    const seriesItem0 = window.getByTestId('catalog-rail-0-item-0');
+    await expect(seriesItem0).toBeVisible({ timeout: 15_000 });
+    await seriesItem0.click();
 
-    await expect(window.getByTestId('series-seasons-list-row-0')).toBeVisible({ timeout: 15_000 });
-    await expect(window.getByTestId('series-episodes-list-row-0')).toBeVisible({ timeout: 15_000 });
-    await window.getByTestId('series-episodes-list-row-0').click();
+    await expect(window.getByTestId('detail-screen')).toBeVisible();
+    await expect(window.getByTestId('detail-season-1')).toBeVisible({ timeout: 15_000 });
+    await expect(window.getByTestId('detail-episode-0')).toBeVisible({ timeout: 15_000 });
+    await window.getByTestId('detail-episode-0').click();
 
     await expect(window.getByTestId('player-osd')).toBeVisible();
     if (canPlayMedia) {
@@ -135,7 +136,8 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
       });
     }
     await window.getByTestId('player-back').click();
-    await expect(window.getByTestId('series-episodes-list-row-0')).toBeVisible();
+    await expect(window.getByTestId('detail-screen')).toBeVisible();
+    await expect(window.getByTestId('detail-episode-0')).toBeVisible();
 
     await window.getByTestId('nav-tab-settings').click();
     await expect(window.getByTestId('settings-screen')).toBeVisible();
@@ -191,15 +193,18 @@ test('plays corpus Two audio tracks and subtitles (MKV) movie, pauses, seeks +10
     await expect(window.getByTestId('sources-open-menu')).toBeVisible({ timeout: 20_000 });
 
     await window.getByTestId('nav-tab-movie').click();
-    await expect(window.getByTestId('browse-categories-list')).toBeVisible();
+    await expect(window.getByTestId('catalog-screen-movie')).toBeVisible();
     await window
-      .getByTestId('browse-categories-list')
-      .getByText('Tracks and subtitles', { exact: false })
+      .locator('[data-testid^="catalog-cat-chip-"]', { hasText: 'Tracks and subtitles' })
       .click();
+    await expect(window.getByTestId('catalog-grid')).toBeVisible();
     await window
-      .getByTestId('browse-items-list')
+      .getByTestId('catalog-grid')
       .getByText('Two audio tracks and subtitles (MKV)', { exact: false })
       .click();
+
+    await expect(window.getByTestId('detail-screen')).toBeVisible();
+    await window.getByTestId('detail-play').click();
 
     await expect(window.getByTestId('player-osd')).toBeVisible();
     await expect(window.getByTestId('osd-status')).toHaveText(/^(Playing|Oynatılıyor)$/, {

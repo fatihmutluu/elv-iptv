@@ -46,6 +46,9 @@ describe('createLazyCatalog', () => {
     expect(cats.length).toBe(1);
     const items = await lazy.items(cats[0]?.id ?? '', 0, 10);
     expect(items.length).toBe(1);
+    const detail = await lazy.itemDetail?.(items[0]?.key ?? '');
+    expect(detail).toMatchObject({ key: items[0]?.key, kind: 'live', name: 'Ch', plot: null });
+    expect(await lazy.itemDetail?.('unknown-key')).toBeNull();
     const stream = await lazy.resolveStream(items[0]?.key ?? '');
     expect(stream.ok).toBe(true);
     expect((await lazy.seasons(999)).ok).toBe(false);
@@ -82,5 +85,30 @@ describe('createLazyCatalog', () => {
       ok: false,
       error: { category: 'storage', code: 'open-failed' },
     });
+  });
+
+  it('returns null from itemDetail when the underlying CatalogService omits itemDetail', async () => {
+    const handle = testDb();
+    await openCatalog(handle.db);
+    const underlying = createCatalogService({
+      db: handle.db,
+      secrets: memorySecrets(),
+      scheduler: countingScheduler(),
+      http: {
+        async get() {
+          return ok({
+            status: 200,
+            headers: {},
+            body: { async *[Symbol.asyncIterator]() {} },
+          });
+        },
+      },
+      clock: () => 100,
+    });
+    const { itemDetail: _omitted, ...withoutDetail } = underlying;
+    const lazy = createLazyCatalog(async () => withoutDetail);
+    expect(await lazy.itemDetail?.('x:s1:movie:1')).toBeNull();
+    await lazy.close();
+    handle.close();
   });
 });

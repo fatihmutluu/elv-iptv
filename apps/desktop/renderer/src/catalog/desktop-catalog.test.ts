@@ -56,6 +56,7 @@ function makeFakeBridge(overrides?: Partial<CatalogBridge>): {
     listSources: async () => [],
     categories: async () => [],
     items: async () => [],
+    itemDetail: async () => null,
     seasons: async () => ok([]),
     episodes: async () => [],
     resolveStream: async () =>
@@ -126,6 +127,7 @@ describe('desktop CatalogService', () => {
     expect(await c1.listSources()).toEqual([]);
     expect(await c1.categories('s1', 'live')).toEqual([]);
     expect(await c1.items('cat1', 0, 25)).toEqual([]);
+    expect(await c1.itemDetail?.('x:s1:series:1')).toBeNull();
     expect((await c1.seasons(1)).ok).toBe(true);
     expect(await c1.episodes(1, 1)).toEqual([]);
     expect((await c1.resolveStream('x:s1:live:1')).ok).toBe(true);

@@ -15,10 +15,12 @@ import {
   type BrowseKind,
   type CategoryRow,
   type EpisodeRow,
+  type ItemDetailRow,
   type ItemRow,
   parseCategoryId,
   queryCategories,
   queryEpisodes,
+  queryItemDetail,
   queryItems,
   querySeasons,
   querySeries,
@@ -107,6 +109,7 @@ export interface CatalogService {
   listSources(): Promise<SourceRow[]>;
   categories(sourceId: string, kind: BrowseKind): Promise<CategoryRow[]>;
   items(categoryId: string, offset: number, limit: number): Promise<ItemRow[]>;
+  itemDetail?(itemKey: string): Promise<ItemDetailRow | null>;
   seasons(seriesId: number): Promise<Result<SeasonRow[]>>;
   episodes(seriesId: number, season: number): Promise<EpisodeRow[]>;
   resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
@@ -303,6 +306,13 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       const ref = parseCategoryId(categoryId);
       if (ref === undefined) return [];
       return playtime.resolveLogos(await queryItems(db, ref, offset, limit), ref.sourceId);
+    },
+
+    async itemDetail(itemKey) {
+      const found = await queryItemDetail(db, itemKey);
+      if (found === undefined) return null;
+      const [resolved] = await playtime.resolveLogos([found], found.sourceId);
+      return resolved ?? null;
     },
 
     async seasons(seriesId) {

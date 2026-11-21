@@ -749,3 +749,90 @@ msgstr "Series"
 
 msgid "home.kind.episode"
 msgstr "Episode"
+
+msgid "catalog.moviesTitle"
+msgstr "Movies"
+
+msgid "catalog.seriesTitle"
+msgstr "Series"
+
+msgid "catalog.allCategories"
+msgstr "All"
+
+msgid "catalog.filter.all"
+msgstr "All"
+
+msgid "catalog.filter.unwatched"
+msgstr "Unwatched"
+
+msgid "catalog.filter.inProgress"
+msgstr "In progress"
+
+msgid "catalog.filter.watched"
+msgstr "Watched"
+
+msgid "catalog.seeAll"
+msgstr "See all"
+
+msgid "catalog.loadMoreCategories"
+msgstr "Load more categories"
+
+msgid "catalog.itemsCount"
+msgstr "{count, plural, one {# title} other {# titles}}"
+
+msgid "catalog.backToMovies"
+msgstr "Back to Movies"
+
+msgid "catalog.backToSeries"
+msgstr "Back to Series"
+
+msgid "catalog.emptyFilter"
+msgstr "No titles match this filter."
+
+msgid "catalog.clearFilter"
+msgstr "Show all"
+
+msgid "detail.back"
+msgstr "Back"
+
+msgid "detail.playMovie"
+msgstr "Play"
+
+msgid "detail.resumeMovie"
+msgstr "Resume"
+
+msgid "detail.playEpisode"
+msgstr "Play S{season} E{episode}"
+
+msgid "detail.resumeEpisode"
+msgstr "Resume S{season} E{episode}"
+
+msgid "detail.seasonsCount"
+msgstr "{count, plural, one {# season} other {# seasons}}"
+
+msgid "detail.seasonOption"
+msgstr "Season {season}"
+
+msgid "detail.episodes"
+msgstr "Episodes"
+
+msgid "detail.episodeNumbered"
+msgstr "{episode}. {title}"
+
+msgid "detail.durationMin"
+msgstr "{minutes}m"
+
+msgid "detail.durationHoursMin"
+msgstr "{hours}h {minutes}m"
+
+msgid "detail.moreLikeThis"
+msgstr "More like this"
+
+msgid "detail.noSynopsis"
+msgstr "No synopsis available from this source."
+
+msgid "detail.loadingEpisodes"
+msgstr "Loading episodes…"
+
+msgid "detail.cast"
+msgstr "Cast"

@@ -14,6 +14,7 @@ import {
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { Platform } from 'react-native';
 import type { PlayTarget } from '../../ports/play-target';
+import type { DetailTarget } from '../../shared';
 import { HomeScreen } from '../HomeScreen';
 import type { HomePlayTarget } from '../home-model';
 import * as homeModel from '../home-model';
@@ -147,6 +148,7 @@ function renderHome(
     sources: readonly SourceRow[];
     onPlay?: (target: PlayTarget) => void;
     onOpenTab?: (tab: 'live' | 'movie' | 'series') => void;
+    onOpenDetail?: (target: DetailTarget) => void;
     onOpenSeries?: (item: unknown) => void;
     onOpenSources?: () => void;
     onScrollTopChange?: (scrolled: boolean) => void;
@@ -179,6 +181,7 @@ function renderHome(
             refreshToken={1}
             onPlay={props.onPlay ?? jest.fn()}
             onOpenTab={props.onOpenTab ?? jest.fn()}
+            {...(props.onOpenDetail ? { onOpenDetail: props.onOpenDetail } : {})}
             onOpenSeries={props.onOpenSeries ?? jest.fn()}
             onOpenSources={props.onOpenSources ?? jest.fn()}
             {...(props.onScrollTopChange ? { onScrollTopChange: props.onScrollTopChange } : {})}
@@ -627,6 +630,105 @@ describe('HomeScreen', () => {
       await waitFor(() => {
         expect(screen.queryByTestId('home-hero-watched-badge')).toBeNull();
       });
+
+      await view.unmount();
+    } finally {
+      await env.cleanup();
+    }
+  });
+
+  it('opens DetailScreen from Movie, Series, and My List poster cards while Continue Watching plays directly', async () => {
+    const env = await openPopulatedHomeCatalog();
+    const onPlay = jest.fn();
+    const onOpenDetail = jest.fn();
+
+    try {
+      await env.catalog.saveProgress?.({
+        sourceId: env.sourceId,
+        itemKey: `x:${env.sourceId}:movie:201`,
+        kind: 'movie',
+        title: 'Neon Horizon',
+        positionMs: 95_000,
+        durationMs: 600_000,
+      });
+      await env.catalog.toggleFavorite?.({
+        sourceId: env.sourceId,
+        itemKey: `x:${env.sourceId}:movie:201`,
+        kind: 'movie',
+        title: 'Neon Horizon',
+        logo: null,
+      });
+
+      const view = await renderHome({
+        catalog: env.catalog,
+        sources: env.sources,
+        onPlay,
+        onOpenDetail,
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('home-continue-item-0')).toBeTruthy();
+        expect(screen.getByTestId('home-mylist-item-0')).toBeTruthy();
+        expect(screen.getByTestId('home-movies-item-0')).toBeTruthy();
+        expect(screen.getByTestId('home-series-item-0')).toBeTruthy();
+      });
+
+      // Continue Watching 16:9 card plays directly (instant 1-click resume)
+      await fireEvent.press(screen.getByTestId('home-continue-item-0'));
+      expect(onPlay).toHaveBeenCalledTimes(1);
+      expect(onOpenDetail).not.toHaveBeenCalled();
+
+      // Featured Movies poster opens DetailScreen
+      onPlay.mockClear();
+      await fireEvent.press(screen.getByTestId('home-movies-item-0'));
+      expect(onPlay).not.toHaveBeenCalled();
+      expect(onOpenDetail).toHaveBeenCalledTimes(1);
+      expect(onOpenDetail).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          itemKey: `x:${env.sourceId}:movie:201`,
+          sourceId: env.sourceId,
+          kind: 'movie',
+          title: 'Neon Horizon',
+          catalogId: expect.any(Number),
+        }),
+      );
+
+      // Featured Series poster opens DetailScreen
+      await fireEvent.press(screen.getByTestId('home-series-item-0'));
+      expect(onOpenDetail).toHaveBeenCalledTimes(2);
+      expect(onOpenDetail).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          itemKey: `x:${env.sourceId}:series:301`,
+          sourceId: env.sourceId,
+          kind: 'series',
+          title: 'Starlight Harbor',
+          catalogId: expect.any(Number),
+        }),
+      );
+
+      // My List poster opens DetailScreen
+      await fireEvent.press(screen.getByTestId('home-mylist-item-0'));
+      expect(onOpenDetail).toHaveBeenCalledTimes(3);
+      expect(onOpenDetail).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          itemKey: `x:${env.sourceId}:movie:201`,
+          kind: 'movie',
+        }),
+      );
+
+      // Series Hero slide primary CTA opens DetailScreen instead of direct play
+      await fireEvent.press(screen.getByTestId('home-hero-dot-2'));
+      expect(screen.getByTestId('home-hero-title')).toHaveTextContent('Starlight Harbor');
+      await fireEvent.press(screen.getByTestId('home-hero-play'));
+      expect(onPlay).not.toHaveBeenCalled();
+      expect(onOpenDetail).toHaveBeenCalledTimes(4);
+      expect(onOpenDetail).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          itemKey: `x:${env.sourceId}:series:301`,
+          kind: 'series',
+          title: 'Starlight Harbor',
+        }),
+      );
 
       await view.unmount();
     } finally {
