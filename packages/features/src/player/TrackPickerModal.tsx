@@ -1,6 +1,12 @@
 import type { AppI18n } from '@elv/i18n';
 import type { MediaTracks } from '@elv/playback';
-import type { FormFactor } from '@elv/ui-kit';
+import {
+  type FormFactor,
+  useTheme,
+  webBackdropBlur,
+  webCursorPointer,
+  webTransition,
+} from '@elv/ui-kit';
 import { type ComponentRef, type ReactElement, useEffect, useRef } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { formatTrackLabel } from './track-labels';
@@ -22,6 +28,7 @@ function TrackRow({
   selected,
   tvFocused,
   isTv,
+  isTouch,
   onPress,
 }: {
   testID: string;
@@ -29,12 +36,21 @@ function TrackRow({
   selected: boolean;
   tvFocused: boolean;
   isTv: boolean;
+  isTouch: boolean;
   onPress: () => void;
 }): ReactElement {
+  const theme = useTheme();
+  const borderColor = tvFocused
+    ? theme.colors.focusRingColor
+    : selected
+      ? theme.colors.accent
+      : theme.colors.surfaceBorder;
+  const borderWidth = tvFocused ? theme.focus.ringWidth : 1.5;
+
   return (
     <Pressable
       testID={testID}
-      {...(isTv ? { focusable: false } : {})}
+      focusable={!isTv}
       accessibilityRole="radio"
       accessibilityLabel={label}
       accessibilityState={{ selected, checked: selected }}
@@ -45,18 +61,46 @@ function TrackRow({
       }}
       style={[
         styles.optionRow,
-        selected ? styles.optionRowSelected : null,
-        tvFocused ? styles.optionRowTvFocused : null,
+        {
+          minHeight: isTouch ? 44 : 40,
+          borderRadius: theme.radius.card,
+          backgroundColor: selected ? theme.colors.accentTint : theme.colors.bgSurface,
+          borderColor,
+          borderWidth,
+        },
+        webTransition(theme, 'border-color, background-color'),
+        !isTv ? webCursorPointer() : undefined,
       ]}
     >
-      <View style={[styles.radioDot, selected ? styles.radioDotSelected : null]} />
-      <Text style={[styles.optionText, selected ? styles.optionTextSelected : null]}>{label}</Text>
+      <View
+        style={[
+          styles.radioDot,
+          {
+            borderRadius: theme.radius.pill,
+            borderColor: selected ? theme.colors.accent : theme.colors.textMuted,
+            backgroundColor: selected ? theme.colors.accent : 'transparent',
+          },
+        ]}
+      />
+      <Text
+        numberOfLines={1}
+        style={[
+          theme.typography.title,
+          styles.optionText,
+          {
+            color: selected ? theme.colors.textPrimary : theme.colors.textSecondary,
+            fontWeight: selected ? '700' : '500',
+          },
+        ]}
+      >
+        {label}
+      </Text>
     </Pressable>
   );
 }
 
 /**
- * In-window plain audio & subtitle track selector placed above `PlayerOsd` (in normal flex flow on
+ * In-window audio & subtitle track selector placed above `PlayerOsd` (in normal flex flow on
  * desktop so the native `mpv` child window shrinks above it without overlapping).
  */
 export function TrackPickerModal({
@@ -78,10 +122,12 @@ export function TrackPickerModal({
   onSelectSubtitle: (id: string | null) => void;
   onClose: () => void;
 }): ReactElement {
+  const theme = useTheme();
   const offLabel = i18n.t('player.subtitlesOff');
   const offSelected = tracks.selectedSubtitleId === null;
   const closeLabel = i18n.t('player.closeTracks');
   const isPhone = formFactor === 'phone';
+  const isTouch = formFactor === 'phone' || formFactor === 'tablet';
   const showCursor = isTv || formFactor === 'desktop';
   const audioScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const subtitleScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
@@ -98,35 +144,61 @@ export function TrackPickerModal({
   const listStyle = [styles.list, isPhone ? styles.listPhone : null];
 
   return (
-    <View testID="player-tracks-panel" style={[styles.panel, isTv ? styles.panelTv : null]}>
+    <View
+      testID="player-tracks-panel"
+      style={[
+        styles.panel,
+        isTv ? styles.panelTv : null,
+        {
+          backgroundColor: theme.colors.glassBg,
+          borderTopColor: theme.colors.glassBorder,
+        },
+        webBackdropBlur(20),
+      ]}
+    >
       <View style={styles.headerRow}>
-        <Text testID="player-tracks-title" style={[styles.heading, isTv ? styles.headingTv : null]}>
+        <Text
+          testID="player-tracks-title"
+          style={[
+            theme.typography.h2,
+            isTv ? styles.headingTv : null,
+            { color: theme.colors.textPrimary },
+          ]}
+        >
           {i18n.t('player.tracks')}
         </Text>
         <Pressable
           testID="player-tracks-close"
-          {...(isTv ? { focusable: false } : {})}
+          focusable={!isTv}
           accessibilityRole="button"
           accessibilityLabel={closeLabel}
           onPress={(event) => {
             blurWebTarget(event.currentTarget);
             onClose();
           }}
-          style={styles.closeButton}
+          style={[
+            styles.closeButton,
+            {
+              backgroundColor: theme.colors.actionGlassBg,
+              borderColor: theme.colors.actionGlassBorder,
+              borderRadius: theme.radius.button,
+            },
+            !isTv ? webCursorPointer() : undefined,
+          ]}
         >
-          <Text style={styles.closeText}>{closeLabel}</Text>
+          <Text style={[theme.typography.caption, { color: theme.colors.textPrimary }]}>
+            {closeLabel}
+          </Text>
         </Pressable>
       </View>
 
       <View style={[styles.columns, isPhone ? styles.columnsStacked : styles.columnsRow]}>
         {tracks.audio.length > 0 ? (
           <View testID="player-audio-column" style={styles.column}>
-            <Text style={styles.columnTitle}>{i18n.t('player.audioTracks')}</Text>
-            <ScrollView
-              ref={audioScrollRef}
-              {...(isTv ? { focusable: false } : {})}
-              style={listStyle}
-            >
+            <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
+              {i18n.t('player.audioTracks')}
+            </Text>
+            <ScrollView ref={audioScrollRef} focusable={!isTv} style={listStyle}>
               {tracks.audio.map((track, idx) => {
                 const label = formatTrackLabel(track, idx, tracks.audio, i18n);
                 return (
@@ -137,6 +209,7 @@ export function TrackPickerModal({
                     selected={tracks.selectedAudioId === track.id}
                     tvFocused={showCursor && cursor.column === 'audio' && cursor.index === idx}
                     isTv={isTv}
+                    isTouch={isTouch}
                     onPress={() => onSelectAudio(track.id)}
                   />
                 );
@@ -146,18 +219,17 @@ export function TrackPickerModal({
         ) : null}
 
         <View testID="player-subtitle-column" style={styles.column}>
-          <Text style={styles.columnTitle}>{i18n.t('player.subtitleTracks')}</Text>
-          <ScrollView
-            ref={subtitleScrollRef}
-            {...(isTv ? { focusable: false } : {})}
-            style={listStyle}
-          >
+          <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
+            {i18n.t('player.subtitleTracks')}
+          </Text>
+          <ScrollView ref={subtitleScrollRef} focusable={!isTv} style={listStyle}>
             <TrackRow
               testID="player-subtitle-off"
               label={offLabel}
               selected={offSelected}
               tvFocused={showCursor && cursor.column === 'subtitles' && cursor.index === 0}
               isTv={isTv}
+              isTouch={isTouch}
               onPress={() => onSelectSubtitle(null)}
             />
             {tracks.subtitles.map((track, idx) => {
@@ -172,6 +244,7 @@ export function TrackPickerModal({
                     showCursor && cursor.column === 'subtitles' && cursor.index === idx + 1
                   }
                   isTv={isTv}
+                  isTouch={isTouch}
                   onPress={() => onSelectSubtitle(track.id)}
                 />
               );
@@ -185,12 +258,10 @@ export function TrackPickerModal({
 
 const styles = StyleSheet.create({
   panel: {
-    backgroundColor: 'rgba(14, 14, 20, 0.96)',
-    borderTopColor: '#343442',
     borderTopWidth: 1,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    gap: 8,
+    gap: 10,
   },
   panelTv: {
     paddingHorizontal: 48,
@@ -202,26 +273,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
-  heading: {
-    color: '#f4f4f6',
-    fontSize: 16,
-    fontWeight: '700',
-  },
   headingTv: {
     fontSize: 20,
   },
   closeButton: {
-    backgroundColor: '#1e1e26',
-    borderColor: '#3a3a46',
     borderWidth: 1,
-    borderRadius: 6,
     paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  closeText: {
-    color: '#f4f4f6',
-    fontSize: 13,
-    fontWeight: '600',
+    paddingVertical: 8,
+    minWidth: 40,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   columns: {
     gap: 12,
@@ -236,54 +298,26 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 6,
   },
-  columnTitle: {
-    color: '#b4b8c4',
-    fontSize: 13,
-    fontWeight: '600',
-  },
   list: {
-    maxHeight: 140,
+    maxHeight: 152,
   },
   listPhone: {
-    maxHeight: 88,
+    maxHeight: 96,
   },
   optionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#191922',
-    borderColor: '#2e2e3a',
-    borderWidth: 2,
-    borderRadius: 6,
+    gap: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
     marginBottom: 6,
   },
-  optionRowSelected: {
-    backgroundColor: '#252533',
-    borderColor: '#8d92a6',
-  },
-  optionRowTvFocused: {
-    borderColor: '#ffffff',
-  },
   radioDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: '#6b7084',
-  },
-  radioDotSelected: {
-    backgroundColor: '#ffffff',
-    borderColor: '#ffffff',
+    width: 10,
+    height: 10,
+    borderWidth: 1.5,
   },
   optionText: {
-    color: '#d4d7e0',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  optionTextSelected: {
-    color: '#ffffff',
-    fontWeight: '700',
+    flex: 1,
   },
 });

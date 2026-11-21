@@ -259,6 +259,91 @@ describe('detail-model', () => {
       expect(playTarget.subtitle).toBe('S1 E3');
       expect(playTarget.logo).toBe('https://img.invalid/series-poster.jpg');
       expect(playTarget.startPositionMs).toBe(0);
+      expect(playTarget.nextEpisodes).toBeUndefined();
+    });
+
+    it('attaches mapped nextEpisodes with startPositionMs 0 and omits when empty', () => {
+      const ep1 = makeEpisode({ id: 1, key: 'x:s1:ep:1', season: 1, episode: 1, title: 'Pilot' });
+      const ep2 = makeEpisode({ id: 2, key: 'x:s1:ep:2', season: 1, episode: 2, title: 'Drift' });
+      const ep3 = makeEpisode({ id: 3, key: 'x:s1:ep:3', season: 1, episode: null, title: null });
+
+      const withNext = buildEpisodePlayTarget({
+        target: SERIES_TARGET,
+        episode: ep1,
+        index: 0,
+        progress: undefined,
+        seriesTitle: 'Starlight Harbor',
+        t: i18n.t,
+        nextEpisodes: [ep2, ep3],
+      });
+
+      expect(withNext.nextEpisodes).toEqual([
+        {
+          itemKey: 'x:s1:ep:2',
+          sourceId: 's1',
+          title: 'Starlight Harbor — E2 · Drift',
+          kind: 'vod',
+          itemKind: 'episode',
+          seriesKey: 'x:s1:series:301',
+          season: 1,
+          episode: 2,
+          logo: 'https://img.invalid/series-backdrop.jpg',
+          subtitle: 'S1 E2 · Drift',
+          startPositionMs: 0,
+        },
+        {
+          itemKey: 'x:s1:ep:3',
+          sourceId: 's1',
+          title: 'Starlight Harbor — Episode 3',
+          kind: 'vod',
+          itemKind: 'episode',
+          seriesKey: 'x:s1:series:301',
+          season: 1,
+          episode: 3,
+          logo: 'https://img.invalid/series-backdrop.jpg',
+          subtitle: 'S1 E3',
+          startPositionMs: 0,
+        },
+      ]);
+
+      const finale = buildEpisodePlayTarget({
+        target: SERIES_TARGET,
+        episode: ep3,
+        index: 2,
+        progress: undefined,
+        seriesTitle: 'Starlight Harbor',
+        t: i18n.t,
+        nextEpisodes: [],
+      });
+      expect(finale.nextEpisodes).toBeUndefined();
+      expect('nextEpisodes' in finale).toBe(false);
+    });
+
+    it('caps attached nextEpisodes at 50 entries', () => {
+      const ep1 = makeEpisode({ id: 1, key: 'x:s1:ep:1', season: 1, episode: 1, title: 'Ep 1' });
+      const remaining = Array.from({ length: 65 }, (_, i) =>
+        makeEpisode({
+          id: i + 2,
+          key: `x:s1:ep:${i + 2}`,
+          season: 1,
+          episode: i + 2,
+          title: `Ep ${i + 2}`,
+        }),
+      );
+
+      const playTarget = buildEpisodePlayTarget({
+        target: SERIES_TARGET,
+        episode: ep1,
+        index: 0,
+        progress: undefined,
+        seriesTitle: 'Starlight Harbor',
+        t: i18n.t,
+        nextEpisodes: remaining,
+      });
+
+      expect(playTarget.nextEpisodes).toHaveLength(50);
+      expect(playTarget.nextEpisodes?.[0]?.itemKey).toBe('x:s1:ep:2');
+      expect(playTarget.nextEpisodes?.[49]?.itemKey).toBe('x:s1:ep:51');
     });
   });
 
@@ -328,6 +413,22 @@ describe('detail-model', () => {
         expect(action.season).toBe(1);
         expect(action.episodeNumber).toBe(2);
         expect(action.target.startPositionMs).toBe(180_000);
+        expect(action.target.nextEpisodes).toBeUndefined();
+      }
+
+      const ep3 = makeEpisode({ key: 'x:s1:ep:3', season: 1, episode: 3, title: 'Harbor' });
+      const ep4 = makeEpisode({ key: 'x:s1:ep:4', season: 1, episode: 4, title: 'Beacon' });
+      const multi = buildPrimaryPlayAction({
+        target: SERIES_TARGET,
+        resolvedTitle: 'Starlight Harbor',
+        movieProgress: null,
+        episodes: [ep, ep3, ep4],
+        episodeProgressByKey: new Map([[ep.key, prog]]),
+        t: i18n.t,
+      });
+      expect(multi.kind).toBe('episode');
+      if (multi.kind === 'episode') {
+        expect(multi.target.nextEpisodes?.map((e) => e.itemKey)).toEqual([ep3.key, ep4.key]);
       }
     });
   });

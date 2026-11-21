@@ -483,6 +483,45 @@ msgstr "Parça {number}"
 msgid "player.trackForced"
 msgstr "Zorunlu"
 
+msgid "player.settings"
+msgstr "Oynatıcı ayarları"
+
+msgid "player.settingsBack"
+msgstr "Ayarlara dön"
+
+msgid "player.statsHud"
+msgstr "Oynatma istatistikleri"
+
+msgid "player.stats.on"
+msgstr "Açık"
+
+msgid "player.stats.off"
+msgstr "Kapalı"
+
+msgid "player.stats.audioNone"
+msgstr "Ses parçası yok"
+
+msgid "player.stats.latencyMs"
+msgstr "İlk kare {ms} ms"
+
+msgid "player.lockControls"
+msgstr "Kontrolleri kilitle"
+
+msgid "player.unlockControls"
+msgstr "Kilidi aç"
+
+msgid "player.nextEpisode"
+msgstr "Sonraki bölüm"
+
+msgid "player.nextEpisodeWithLabel"
+msgstr "Sonraki: {label}"
+
+msgid "player.dismissNextEpisode"
+msgstr "Sonraki bölümü kapat"
+
+msgid "player.jumpPreviousChannel"
+msgstr "Önceki kanal"
+
 msgid "player.lang.tr"
 msgstr "Türkçe"
 

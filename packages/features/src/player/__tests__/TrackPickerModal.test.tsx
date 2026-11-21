@@ -1,5 +1,6 @@
 import { createAppI18n } from '@elv/i18n';
 import type { MediaTracks } from '@elv/playback';
+import { buildTheme, THEME_PRESETS, ThemeProvider } from '@elv/ui-kit';
 import { render, screen } from '@testing-library/react-native';
 import { ScrollView, StyleSheet } from 'react-native';
 import { TrackPickerModal } from '../TrackPickerModal';
@@ -20,16 +21,19 @@ const LONG_TRACKS: MediaTracks = {
   selectedSubtitleId: null,
 };
 
-function borderColorOf(testID: string): unknown {
-  return StyleSheet.flatten(screen.getByTestId(testID).props.style)?.borderColor;
+const DEFAULT_THEME = buildTheme({ preset: 'obsidianCrimson' });
+const HIGH_CONTRAST_THEME = buildTheme({ preset: 'highContrast' });
+
+function flatStyleOf(testID: string) {
+  return StyleSheet.flatten(screen.getByTestId(testID).props.style);
 }
 
-describe('TrackPickerModal cursor highlight and auto-scroll', () => {
+describe('TrackPickerModal cursor highlight, auto-scroll, and live theming', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
 
-  it('highlights the active cursor row and auto-scrolls on desktop as well as TV', async () => {
+  it('highlights the active cursor row with live theme tokens and auto-scrolls on desktop as well as TV', async () => {
     const scrollSpy = jest
       .spyOn(ScrollView.prototype as unknown as { scrollTo: () => void }, 'scrollTo')
       .mockImplementation(() => undefined);
@@ -49,9 +53,17 @@ describe('TrackPickerModal cursor highlight and auto-scroll', () => {
       />,
     );
 
-    expect(borderColorOf('player-audio-track-a:3')).toBe('#ffffff');
-    expect(borderColorOf('player-audio-track-a:1')).toBe('#8d92a6');
-    expect(borderColorOf('player-audio-track-a:2')).toBe('#2e2e3a');
+    expect(flatStyleOf('player-tracks-panel')?.backgroundColor).toBe(DEFAULT_THEME.colors.glassBg);
+    expect(flatStyleOf('player-audio-track-a:3')?.borderColor).toBe(
+      THEME_PRESETS.obsidianCrimson.focusRingColor,
+    );
+    expect(flatStyleOf('player-audio-track-a:3')?.borderWidth).toBe(DEFAULT_THEME.focus.ringWidth);
+    expect(flatStyleOf('player-audio-track-a:1')?.borderColor).toBe(
+      THEME_PRESETS.obsidianCrimson.accent,
+    );
+    expect(flatStyleOf('player-audio-track-a:2')?.borderColor).toBe(
+      DEFAULT_THEME.colors.surfaceBorder,
+    );
     expect(scrollSpy).toHaveBeenCalledWith({ y: 42, animated: false });
 
     scrollSpy.mockClear();
@@ -68,13 +80,17 @@ describe('TrackPickerModal cursor highlight and auto-scroll', () => {
       />,
     );
 
-    expect(borderColorOf('player-subtitle-track-s:3')).toBe('#ffffff');
-    expect(borderColorOf('player-subtitle-off')).toBe('#8d92a6');
+    expect(flatStyleOf('player-subtitle-track-s:3')?.borderColor).toBe(
+      THEME_PRESETS.obsidianCrimson.focusRingColor,
+    );
+    expect(flatStyleOf('player-subtitle-off')?.borderColor).toBe(
+      THEME_PRESETS.obsidianCrimson.accent,
+    );
     expect(scrollSpy).toHaveBeenCalledWith({ y: 84, animated: false });
     await view.unmount();
   });
 
-  it('omits the keyboard cursor ring and auto-scroll on touch form factors', async () => {
+  it('omits the keyboard cursor ring and auto-scroll on touch form factors and enforces >= 40px rows', async () => {
     const scrollSpy = jest
       .spyOn(ScrollView.prototype as unknown as { scrollTo: () => void }, 'scrollTo')
       .mockImplementation(() => undefined);
@@ -94,8 +110,37 @@ describe('TrackPickerModal cursor highlight and auto-scroll', () => {
       />,
     );
 
-    expect(borderColorOf('player-audio-track-a:3')).toBe('#2e2e3a');
+    const rowStyle = flatStyleOf('player-audio-track-a:3');
+    expect(rowStyle?.borderColor).toBe(DEFAULT_THEME.colors.surfaceBorder);
+    expect(Number(rowStyle?.minHeight ?? 0)).toBeGreaterThanOrEqual(40);
     expect(scrollSpy).not.toHaveBeenCalled();
+    await view.unmount();
+  });
+
+  it('renders WCAG AAA High Contrast tokens (#000000 canvas glass & #FACC15 focus ring)', async () => {
+    const i18n = createAppI18n('en');
+
+    const view = await render(
+      <ThemeProvider preset="highContrast">
+        <TrackPickerModal
+          tracks={LONG_TRACKS}
+          cursor={{ column: 'audio', index: 2 }}
+          isTv
+          formFactor="tv"
+          i18n={i18n}
+          onSelectAudio={jest.fn()}
+          onSelectSubtitle={jest.fn()}
+          onClose={jest.fn()}
+        />
+      </ThemeProvider>,
+    );
+
+    expect(THEME_PRESETS.highContrast.bgCanvas).toBe('#000000');
+    expect(flatStyleOf('player-tracks-panel')?.backgroundColor).toBe(
+      HIGH_CONTRAST_THEME.colors.glassBg,
+    );
+    expect(flatStyleOf('player-audio-track-a:3')?.borderColor).toBe('#FACC15');
+    expect(flatStyleOf('player-audio-track-a:1')?.borderColor).toBe('#FACC15');
     await view.unmount();
   });
 });

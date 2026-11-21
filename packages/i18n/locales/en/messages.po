@@ -483,6 +483,45 @@ msgstr "Track {number}"
 msgid "player.trackForced"
 msgstr "Forced"
 
+msgid "player.settings"
+msgstr "Player settings"
+
+msgid "player.settingsBack"
+msgstr "Back to settings"
+
+msgid "player.statsHud"
+msgstr "Playback stats"
+
+msgid "player.stats.on"
+msgstr "On"
+
+msgid "player.stats.off"
+msgstr "Off"
+
+msgid "player.stats.audioNone"
+msgstr "No audio track"
+
+msgid "player.stats.latencyMs"
+msgstr "First frame {ms} ms"
+
+msgid "player.lockControls"
+msgstr "Lock controls"
+
+msgid "player.unlockControls"
+msgstr "Unlock controls"
+
+msgid "player.nextEpisode"
+msgstr "Next episode"
+
+msgid "player.nextEpisodeWithLabel"
+msgstr "Next: {label}"
+
+msgid "player.dismissNextEpisode"
+msgstr "Dismiss next episode"
+
+msgid "player.jumpPreviousChannel"
+msgstr "Previous channel"
+
 msgid "player.lang.tr"
 msgstr "Turkish"
 

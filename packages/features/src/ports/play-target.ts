@@ -26,4 +26,7 @@ export interface LiveChannelPlaylist {
 /** Active item handed to `PlayerScreen`. */
 export interface PlayTarget extends PlayableEntry {
   readonly playlist?: LiveChannelPlaylist;
+  readonly nextEpisodes?: readonly PlayableEntry[];
+  readonly previousChannel?: PlayableEntry;
+  readonly previousChannelIndex?: number;
 }

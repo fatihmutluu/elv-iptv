@@ -12,6 +12,7 @@ import {
   LIVE_MAX_PAGES,
   LIVE_PAGE_SIZE,
   recordChannelTune,
+  toLiveEntry,
 } from './live-model';
 import { useLiveNowNext } from './useLiveNowNext';
 import { type LiveNumberFeedback, useLiveNumberJump } from './useLiveNumberJump';
@@ -304,13 +305,21 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
   const buildPlayTarget = useCallback(
     (channel: ItemRow, index?: number): PlayTarget => {
       const categoryId = activeCategory?.row.id ?? `${channel.sourceId}|live|all`;
-      return buildLiveHubPlayTarget({
+      const base = buildLiveHubPlayTarget({
         item: channel,
         categoryId,
         categoryCount: Math.max(1, activeCategory?.row.itemCount ?? 1),
         currentIndex: index ?? latestRef.current.history.activeIndex,
         loadPage: (offset, limit) => catalog.items(categoryId, offset, limit),
       });
+      const prev = latestRef.current.history.previous;
+      return prev !== null && prev.key !== channel.key
+        ? {
+            ...base,
+            previousChannel: toLiveEntry(prev),
+            previousChannelIndex: latestRef.current.history.previousIndex,
+          }
+        : base;
     },
     [activeCategory?.row.id, activeCategory?.row.itemCount, catalog],
   );

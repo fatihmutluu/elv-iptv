@@ -15,6 +15,8 @@ export default defineConfig({
         'src/search/search-model.ts',
         'src/browse/browse-model.ts',
         'src/player/errors.ts',
+        'src/player/player-overlay-model.ts',
+        'src/player/settings-menu-nav.ts',
         'src/sources/validate.ts',
         'src/sources/errors.ts',
         'src/sources/lazy-catalog.ts',
