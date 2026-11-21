@@ -233,7 +233,7 @@ function isConnectionReset(e: unknown): boolean {
 }
 
 /**
- * The error for a response outside 2xx, as {@link createFetchHttpClient} reports it: `auth/http-401` and
+ * The error for a non-success response, as {@link createFetchHttpClient} reports it: `auth/http-401` and
  * `auth/http-403`, else `network/http-<status>`. Code that sees a raw status uses it so every path reports alike.
  */
 export function httpStatusError(status: number): ElvError {
@@ -299,7 +299,7 @@ export function createFetchHttpClient(
           if (timedOut || controller.signal.aborted || !isConnectionReset(e)) throw e;
           return attempt();
         });
-        if (res.status < 200 || res.status >= 300) {
+        if ((res.status < 200 || res.status >= 300) && res.status !== 304) {
           await discardBody(res.body);
           return err(httpStatusError(res.status));
         }

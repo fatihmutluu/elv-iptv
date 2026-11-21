@@ -9,7 +9,7 @@ export const DEFAULT_SEARCH_LIMIT = 40;
 export const MAX_SEARCH_LIMIT = 60;
 
 /** Maximum whitespace-separated folded tokens compiled into one FTS5 query. */
-export const MAX_SEARCH_TOKENS = 12;
+export const MAX_SEARCH_TOKENS = 8;
 
 /** Filter scope accepted by {@link querySearch} and `CatalogService.search`. */
 export type SearchScope = 'all' | 'live' | 'movie' | 'series';
@@ -89,19 +89,28 @@ async function searchKind(
   db: SqlDriver,
   kind: BrowseKind,
   ftsQuery: string,
+  foldedQuery: string,
   limit: number,
   sourceId: string | undefined,
 ): Promise<ItemRow[]> {
   const { table, fts, cols } = SEARCH_SPEC[kind];
   const sourceClause = sourceId === undefined ? '' : ' AND t.source_id = ?';
   const params: SqlValue[] =
-    sourceId === undefined ? [ftsQuery, limit] : [ftsQuery, sourceId, limit];
+    sourceId === undefined
+      ? [ftsQuery, foldedQuery, foldedQuery, foldedQuery, limit]
+      : [ftsQuery, sourceId, foldedQuery, foldedQuery, foldedQuery, limit];
   const rows = await db.all<RawSearchRow>(
     `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, ${cols}
        FROM ${fts}
        JOIN ${table} t ON t.id = ${fts}.rowid
       WHERE ${fts} MATCH ?${sourceClause}
-      ORDER BY bm25(${fts}), t.name
+      ORDER BY CASE
+                 WHEN t.name_fold = ? THEN 0
+                 WHEN substr(t.name_fold, 1, length(?)) = ? THEN 1
+                 ELSE 2
+               END,
+               bm25(${fts}),
+               t.name
       LIMIT ?`,
     params,
   );
@@ -121,8 +130,8 @@ async function searchKind(
 
 /**
  * Runs a Turkish-folded FTS5 prefix search across the requested catalog kinds (`all` by default),
- * ranked by BM25 with alphabetical tie-breaking. Returns empty lists with zero queries when the
- * folded query is empty or `limit` clamps to `0`.
+ * prioritizing exact folded matches, then prefix matches, then BM25 with alphabetical tie-breaking.
+ * Returns empty lists with zero queries when the folded query is empty or `limit` clamps to `0`.
  */
 export async function querySearch(
   db: SqlDriver,
@@ -134,14 +143,19 @@ export async function querySearch(
   if (ftsQuery === null || limit === 0) {
     return { live: [...EMPTY_RESULTS.live], movies: [], series: [] };
   }
+  const foldedQuery = foldText(rawQuery);
   const scope: SearchScope = opts?.scope ?? 'all';
   const sourceId = opts?.sourceId;
 
   const [live, movies, series] = await Promise.all([
-    scope === 'all' || scope === 'live' ? searchKind(db, 'live', ftsQuery, limit, sourceId) : [],
-    scope === 'all' || scope === 'movie' ? searchKind(db, 'movie', ftsQuery, limit, sourceId) : [],
+    scope === 'all' || scope === 'live'
+      ? searchKind(db, 'live', ftsQuery, foldedQuery, limit, sourceId)
+      : [],
+    scope === 'all' || scope === 'movie'
+      ? searchKind(db, 'movie', ftsQuery, foldedQuery, limit, sourceId)
+      : [],
     scope === 'all' || scope === 'series'
-      ? searchKind(db, 'series', ftsQuery, limit, sourceId)
+      ? searchKind(db, 'series', ftsQuery, foldedQuery, limit, sourceId)
       : [],
   ]);
 

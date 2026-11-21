@@ -45,11 +45,11 @@ async function plan(db: SqlDriver, sql: string, params: (string | number)[]) {
 }
 
 describe('openCatalog', () => {
-  it('creates schema v3 with FTS5 tables on a fresh database', async () => {
+  it('creates schema v4 with FTS5 tables and cross-channel EPG index on a fresh database', async () => {
     const { db } = testDb();
-    expect(SCHEMA_VERSION).toBe(3);
+    expect(SCHEMA_VERSION).toBe(4);
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 3 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 4 }]);
     expect(await regularTableNames(db)).toEqual([...TABLES].sort());
     expect(await names(db, 'table')).toEqual(expect.arrayContaining([...EXPECTED_FTS_TABLES]));
     expect(await names(db, 'index')).toEqual(
@@ -61,11 +61,12 @@ describe('openCatalog', () => {
         'idx_watch_progress_source',
         'idx_favorites_recent',
         'idx_favorites_source',
+        'idx_programmes_source_start_stop',
       ]),
     );
   });
 
-  it('upgrades a v1 database to v3 while preserving existing catalog rows and rebuilding FTS5', async () => {
+  it('upgrades a v1 database to v4 while preserving existing catalog rows and rebuilding FTS5', async () => {
     const { db } = testDb();
     await db.exec(MIGRATIONS[0] ?? '');
     await db.exec('PRAGMA user_version = 1');
@@ -77,12 +78,13 @@ describe('openCatalog', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 3 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 4 }]);
     expect(await db.all('SELECT id, name FROM sources')).toEqual([{ id: 's1', name: 'Main' }]);
     expect(await db.all('SELECT key, name FROM movies')).toEqual([
       { key: 'm:s1:1', name: 'Silent Horizon' },
     ]);
     expect(await regularTableNames(db)).toEqual([...TABLES].sort());
+    expect(await names(db, 'index')).toContain('idx_programmes_source_start_stop');
     expect(
       await db.all<{ key: string }>(
         `SELECT t.key FROM movies_fts JOIN movies t ON t.id = movies_fts.rowid WHERE movies_fts MATCH '"silent"*'`,
@@ -90,7 +92,7 @@ describe('openCatalog', () => {
     ).toEqual([{ key: 'm:s1:1' }]);
   });
 
-  it('upgrades a v2 database to v3 and makes pre-existing live, movie, and series rows immediately searchable', async () => {
+  it('upgrades a v2 database to v4 and makes pre-existing live, movie, and series rows immediately searchable', async () => {
     const { db } = testDb();
     await db.exec(MIGRATIONS[0] ?? '');
     await db.exec(MIGRATIONS[1] ?? '');
@@ -109,7 +111,8 @@ describe('openCatalog', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 3 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 4 }]);
+    expect(await names(db, 'index')).toContain('idx_programmes_source_start_stop');
     expect(
       await db.all<{ key: string }>(
         `SELECT t.key FROM live_fts JOIN live t ON t.id = live_fts.rowid WHERE live_fts MATCH '"istanbul"*'`,
@@ -127,6 +130,29 @@ describe('openCatalog', () => {
     ).toEqual([{ key: 'x:s1:series:1' }]);
   });
 
+  it('upgrades a v3 database to v4, creates idx_programmes_source_start_stop, and preserves programmes', async () => {
+    const { db } = testDb();
+    await db.exec(MIGRATIONS[0] ?? '');
+    await db.exec(MIGRATIONS[1] ?? '');
+    await db.exec(MIGRATIONS[2] ?? '');
+    await db.exec('PRAGMA user_version = 3');
+    await db.run(
+      "INSERT INTO sources (id, kind, name, created_at, settings_json) VALUES ('s1','xtream','Main',100,'{}')",
+    );
+    await db.run(
+      `INSERT INTO programmes (source_id, guide_id, start, stop, title, run_id)
+       VALUES ('s1', 'g1', 1000, 4600, 'Morning Brief', 1)`,
+    );
+    expect(await names(db, 'index')).not.toContain('idx_programmes_source_start_stop');
+
+    expect((await openCatalog(db)).ok).toBe(true);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 4 }]);
+    expect(await names(db, 'index')).toContain('idx_programmes_source_start_stop');
+    expect(await db.all('SELECT guide_id, title FROM programmes')).toEqual([
+      { guide_id: 'g1', title: 'Morning Brief' },
+    ]);
+  });
+
   it('is a no-op the second time', async () => {
     const { db } = testDb();
     await openCatalog(db);
@@ -135,7 +161,7 @@ describe('openCatalog', () => {
     );
     expect((await openCatalog(db)).ok).toBe(true);
     expect(await db.all('SELECT count(*) AS n FROM sources')).toEqual([{ n: 1 }]);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 3 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 4 }]);
   });
 
   it('applies pragmas, with WAL on file databases', async () => {
@@ -216,6 +242,13 @@ describe('openCatalog', () => {
     );
     expect(epg).toMatch(/SEARCH programmes USING PRIMARY KEY/);
     expect(epg).not.toMatch(/TEMP B-TREE/);
+    const crossChannelEpg = await plan(
+      db,
+      'SELECT guide_id, title FROM programmes WHERE source_id = ? AND start < ? AND stop > ?',
+      ['s', 5000, 1000],
+    );
+    expect(crossChannelEpg).toContain('idx_programmes_source_start_stop');
+    expect(crossChannelEpg).not.toMatch(/\bSCAN programmes\b/);
     const episodes = await plan(
       db,
       'SELECT provider_id, extension FROM episodes WHERE source_id = ? AND series_key = ? ORDER BY season, episode',

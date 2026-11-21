@@ -13,10 +13,26 @@ import { scanXmltv, type XmltvChannel, type XmltvProgramme } from '@elv/sources'
 import { foldText } from './fold';
 import { commitGuide, dropStaging, type GuideResult, STAGE_PROGRAMME_SQL } from './guide-commit';
 import { buildChannelIndex, type ChannelIndex, matchGuideChannel } from './guide-match';
-import { checkAbort, performRun, type RunCtx, Stop } from './import-run';
+import {
+  conditionalHeaders,
+  extractValidators,
+  hasStoredProgrammes,
+  merge304Validator,
+  replaceGuideValidator,
+  sameGuideCache,
+  sameValidator,
+  sanitizeValidator,
+  withGuideValidator,
+} from './http-cache';
+import { checkAbort, performRun, type RunCtx, Stop, warn } from './import-run';
 import type { ImportDeps, ImportOptions, ImportSummary } from './import-types';
 import { openClient } from './import-xtream';
-import { getSource, type SourceRecord } from './sources';
+import {
+  getSource,
+  type HttpCacheValidator,
+  type SourceRecord,
+  updateSourceSettings,
+} from './sources';
 import { readUrlVars } from './stream-resolver';
 import { resolveTemplate } from './templates';
 
@@ -26,6 +42,30 @@ const DEFAULT_WINDOW = { daysBack: 1, daysForward: 7 };
 /** Length given to a programme with no `stop` when no later programme of its channel closes it. */
 const OPEN_END_MS = 30 * 60_000;
 
+interface GuideCandidate {
+  slot: string;
+  url: string;
+}
+
+type GuideOpen =
+  | {
+      kind: 'body';
+      slot: string;
+      body: AsyncIterable<Uint8Array>;
+      validator: HttpCacheValidator | undefined;
+      failed: ElvError[];
+    }
+  | {
+      kind: 'not-modified';
+      slot: string;
+      validator: HttpCacheValidator | undefined;
+      failed: ElvError[];
+    };
+
+type GuideOutcome =
+  | { kind: 'imported'; slot: string; state: GuideState; validator: HttpCacheValidator | undefined }
+  | { kind: 'not-modified'; slot: string; validator: HttpCacheValidator | undefined };
+
 async function discard(body: AsyncIterable<Uint8Array>): Promise<void> {
   try {
     await openAsyncIterator(body).return?.();
@@ -34,45 +74,56 @@ async function discard(body: AsyncIterable<Uint8Array>): Promise<void> {
   }
 }
 
-/** Guide URLs to try, in order, resolved in memory only; candidates with unresolved placeholders are dropped. */
-async function candidateUrls(source: SourceRecord, deps: ImportDeps): Promise<Result<string[]>> {
-  const urls: string[] = [];
+/** Guide candidates to try, in order, resolved in memory only; unresolved placeholders are dropped. */
+async function candidateUrls(
+  source: SourceRecord,
+  deps: ImportDeps,
+): Promise<Result<GuideCandidate[]>> {
+  const candidates: GuideCandidate[] = [];
   const vars = await readUrlVars(deps, source.id);
   if (source.kind === 'xtream') {
     const own = source.settings.guideUrl;
-    if (own !== undefined && own !== '') urls.push(resolveTemplate(own, vars));
+    if (own !== undefined && own !== '') {
+      candidates.push({ slot: 'override', url: resolveTemplate(own, vars) });
+    }
     const client = await openClient(source, deps);
     if (!client.ok) return client;
-    urls.push(client.value.guideUrl());
+    candidates.push({ slot: 'xtream', url: client.value.guideUrl() });
   } else {
-    const templates = [
-      ...(source.settings.guideUrl === undefined ? [] : [source.settings.guideUrl]),
-      ...(source.settings.discoveredGuideUrls ?? []),
-    ];
-    for (const t of templates) urls.push(resolveTemplate(t, vars));
+    if (source.settings.guideUrl !== undefined && source.settings.guideUrl !== '') {
+      candidates.push({ slot: 'override', url: resolveTemplate(source.settings.guideUrl, vars) });
+    }
+    for (const [i, t] of (source.settings.discoveredGuideUrls ?? []).entries()) {
+      candidates.push({ slot: `discovered:${i}`, url: resolveTemplate(t, vars) });
+    }
   }
-  return ok(urls.filter((u) => u !== '' && !u.includes('{{')));
+  return ok(candidates.filter((c) => c.url !== '' && !c.url.includes('{{')));
 }
 
-/** The body of the first URL that answers 2xx, plus the errors of the URLs tried before it (codes only). */
+/** Opens the first candidate URL that answers 2xx or conditional 304, plus code-only errors tried before it. */
 async function openGuide(
-  urls: readonly string[],
+  candidates: readonly GuideCandidate[],
   source: SourceRecord,
   deps: ImportDeps,
   signal: AbortSignal | undefined,
-): Promise<{ body: AsyncIterable<Uint8Array>; failed: ElvError[] }> {
+  allowConditional: boolean,
+): Promise<GuideOpen> {
   let first: ElvError | undefined;
   const failed: ElvError[] = [];
   const miss = (e: ElvError) => {
     failed.push(elvError(e.category, e.code));
     first ??= failed[0];
   };
-  for (const url of urls) {
+  const baseHeaders = transportHeaders(source.settings.transport);
+  for (const { slot, url } of candidates) {
     checkAbort({ signal });
+    const sent = allowConditional
+      ? sanitizeValidator(source.settings.httpCache?.guide?.[slot])
+      : undefined;
     let response: Result<HttpResponse>;
     try {
       response = await deps.http.get(url, {
-        headers: transportHeaders(source.settings.transport),
+        headers: conditionalHeaders(baseHeaders, sent),
         timeoutMs: REQUEST_TIMEOUT_MS,
         ...(signal === undefined ? {} : { signal }),
       });
@@ -84,8 +135,13 @@ async function openGuide(
       miss(response.error);
       continue;
     }
-    const { status, body } = response.value;
-    if (status >= 200 && status < 300) return { body, failed };
+    const { status, body, headers } = response.value;
+    const validator = extractValidators(headers);
+    if (status === 304 && sent !== undefined) {
+      await discard(body);
+      return { kind: 'not-modified', slot, validator, failed };
+    }
+    if (status >= 200 && status < 300) return { kind: 'body', slot, body, validator, failed };
     await discard(body);
     miss(httpStatusError(status));
   }
@@ -131,17 +187,41 @@ function writeChannels(c: RunCtx, st: GuideState, channels: readonly XmltvChanne
 
 type Row = (string | number | null)[];
 
-/** Turns a batch into rows; a programme without `stop` ends where the next one of its channel starts. */
-function closeOpen(c: RunCtx, st: GuideState, programmes: readonly XmltvProgramme[]): Row[] {
+/**
+ * Turns a batch into rows while guaranteeing `stop > start` for every row. A programme without `stop` ends where
+ * the next strictly later programme of its channel starts; malformed rows with `stop <= start` are skipped with
+ * warning `programme-bad-time`.
+ */
+export function closeOpenProgrammes(
+  c: Pick<RunCtx, 'sourceId' | 'runId' | 'warnings' | 'warningCodes'>,
+  open: Map<string, XmltvProgramme>,
+  programmes: readonly XmltvProgramme[],
+): Row[] {
   const rows: Row[] = [];
   for (const p of programmes) {
-    const prev = st.open.get(p.channel);
-    if (prev !== undefined) {
-      st.open.delete(p.channel);
-      const stop = p.start > prev.start ? p.start : prev.start + OPEN_END_MS;
-      rows.push(programmeRow(c.sourceId, c.runId, prev, stop));
+    if (
+      !Number.isFinite(p.start) ||
+      (p.stop !== undefined && (!Number.isFinite(p.stop) || p.stop <= p.start))
+    ) {
+      warn(c, 'programme-bad-time');
+      continue;
     }
-    if (p.stop === undefined) st.open.set(p.channel, p);
+    const prev = open.get(p.channel);
+    if (prev !== undefined) {
+      if (p.start > prev.start) {
+        open.delete(p.channel);
+        rows.push(programmeRow(c.sourceId, c.runId, prev, p.start));
+      } else if (p.start === prev.start) {
+        open.delete(p.channel);
+      } else if (p.stop === undefined) {
+        rows.push(programmeRow(c.sourceId, c.runId, p, prev.start));
+        continue;
+      } else {
+        rows.push(programmeRow(c.sourceId, c.runId, p, p.stop));
+        continue;
+      }
+    }
+    if (p.stop === undefined) open.set(p.channel, p);
     else rows.push(programmeRow(c.sourceId, c.runId, p, p.stop));
   }
   return rows;
@@ -172,9 +252,21 @@ async function writeProgrammes(c: RunCtx, st: GuideState, rows: Row[]): Promise<
 async function execute(
   c: RunCtx,
   source: SourceRecord,
-  urls: readonly string[],
+  candidates: readonly GuideCandidate[],
   now: number,
-): Promise<GuideState> {
+): Promise<GuideOutcome> {
+  const allowConditional = await hasStoredProgrammes(c.db, c.sourceId);
+  const opened = await openGuide(candidates, source, c.deps, c.signal, allowConditional);
+  for (const f of opened.failed) c.warningCodes.push(`${f.category}/${f.code}`);
+  c.warnings += opened.failed.length;
+  if (opened.kind === 'not-modified') {
+    c.unchanged = true;
+    c.keepTables.add('guide_channels');
+    c.counts.unchanged = 1;
+    if (opened.failed.length > 0) c.counts.guideUrlFallbacks = opened.failed.length;
+    return { kind: 'not-modified', slot: opened.slot, validator: opened.validator };
+  }
+  c.counts.guideUrlFallbacks = opened.failed.length;
   await c.db.run('DELETE FROM programmes_next WHERE source_id = ?', [c.sourceId]);
   const live = await c.db.all<{ key: string; guide_id: string | null; name_fold: string }>(
     'SELECT key, guide_id, name_fold FROM live WHERE source_id = ?',
@@ -193,11 +285,7 @@ async function execute(
     seenProgrammes: 0,
   };
   const window = source.settings.guideWindow ?? DEFAULT_WINDOW;
-  const { body, failed } = await openGuide(urls, source, c.deps, c.signal);
-  for (const f of failed) c.warningCodes.push(`${f.category}/${f.code}`);
-  c.warnings += failed.length;
-  c.counts.guideUrlFallbacks = failed.length;
-  const scan = scanXmltv(body, {
+  const scan = scanXmltv(opened.body, {
     batchSize: c.batchSize,
     programmeChannels: st.mapped,
     from: now - window.daysBack * DAY_MS,
@@ -217,7 +305,7 @@ async function execute(
       const batch = step.value;
       writeChannels(c, st, batch.channels);
       st.seenProgrammes += batch.programmes.length;
-      await writeProgrammes(c, st, closeOpen(c, st, batch.programmes));
+      await writeProgrammes(c, st, closeOpenProgrammes(c, st.open, batch.programmes));
       c.progress({ phase: 'guide-channels', done: st.channels });
       c.progress({ phase: 'programmes', done: st.programmes });
       await c.deps.scheduler.yieldNow();
@@ -231,7 +319,7 @@ async function execute(
   }
   c.counts.guideChannels = st.channels;
   c.counts.programmes = st.programmes;
-  return st;
+  return { kind: 'imported', slot: opened.slot, state: st, validator: opened.validator };
 }
 
 /**
@@ -239,9 +327,10 @@ async function execute(
  * folded name maps a channel without an id match only when it is unique both ways), stores the programmes of mapped
  * guide channels inside the time window (default one day back, seven
  * forward, relative to `opts.now`) and replaces the previous guide in one cleanup transaction. The first guide URL
- * that answers 2xx wins: the user override, then the Xtream guide or the playlist's discovered URLs. URLs are resolved
- * in memory only. A document without channels and programmes fails with `source-format/not-a-guide`; failure and
- * cancel keep the previous guide. After a successful swap the write-ahead log is checkpointed and truncated.
+ * that answers 2xx (or conditional 304 when programmes are already stored) wins: the user override, then the Xtream
+ * guide or the playlist's discovered URLs. URLs are resolved in memory only; cache validators are keyed by opaque
+ * slot names. A document without channels and programmes fails with `source-format/not-a-guide`; failure and cancel
+ * keep the previous guide. After a successful swap the write-ahead log is checkpointed and truncated.
  */
 export async function importGuide(
   sourceId: string,
@@ -253,11 +342,11 @@ export async function importGuide(
   if (source.kind !== 'xtream' && source.kind !== 'm3u') {
     return err(elvError('source-format', 'unsupported-source'));
   }
-  const urls = await candidateUrls(source, deps);
-  if (!urls.ok) return urls;
-  if (urls.value.length === 0) return err(elvError('source-format', 'no-guide-url'));
+  const candidates = await candidateUrls(source, deps);
+  if (!candidates.ok) return candidates;
+  if (candidates.value.length === 0) return err(elvError('source-format', 'no-guide-url'));
   const now = opts.now ?? deps.clock();
-  let state: GuideState | undefined;
+  let outcome: GuideOutcome | undefined;
   let runId: number | undefined;
   const result = await performRun(source, deps, opts, {
     kind: 'guide',
@@ -265,10 +354,30 @@ export async function importGuide(
     requireItems: false,
     execute: async (c) => {
       runId = c.runId;
-      state = await execute(c, source, urls.value, now);
+      outcome = await execute(c, source, candidates.value, now);
     },
     beforeCleanup: async (tx, c) => {
-      if (state !== undefined) await commitGuide(tx, c, state);
+      if (outcome === undefined) return;
+      if (outcome.kind === 'not-modified') {
+        const current = (await getSource(tx, source.id))?.settings ?? source.settings;
+        const prev = current.httpCache?.guide?.[outcome.slot];
+        const merged = merge304Validator(prev, outcome.validator);
+        if (!sameValidator(prev, merged)) {
+          await updateSourceSettings(
+            tx,
+            source.id,
+            withGuideValidator(current, outcome.slot, merged),
+          );
+        }
+        return;
+      }
+      await commitGuide(tx, c, outcome.state);
+      if (c.warningCodes.includes('guide/empty')) return;
+      const current = (await getSource(tx, source.id))?.settings ?? source.settings;
+      const next = replaceGuideValidator(current, outcome.slot, outcome.validator);
+      if (!sameGuideCache(current.httpCache?.guide, next.httpCache?.guide)) {
+        await updateSourceSettings(tx, source.id, next);
+      }
     },
   });
   if (!result.ok && runId !== undefined) await dropStaging(deps.db, source.id, runId);

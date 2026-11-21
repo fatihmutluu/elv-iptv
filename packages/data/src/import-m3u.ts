@@ -11,6 +11,17 @@ import {
 } from '@elv/domain';
 import { type M3uEntry, scanM3u } from '@elv/sources';
 import { foldText } from './fold';
+import {
+  clearDiscoveredGuideValidators,
+  conditionalHeaders,
+  discoveredGuidesChanged,
+  extractValidators,
+  hasStoredCatalog,
+  merge304Validator,
+  sameValidator,
+  sanitizeValidator,
+  withPlaylistValidator,
+} from './http-cache';
 import { checkAbort, performRun, type RunCtx, Stop, unwrap } from './import-run';
 import type { ImportDeps, ImportOptions, ImportSummary } from './import-types';
 import {
@@ -25,6 +36,7 @@ import { entryHeaders, templated } from './m3u-headers';
 import { MAX_URLVARS_BYTES, SAMPLE_SIZE } from './m3u-templating';
 import {
   getSource,
+  type HttpCacheValidator,
   type SourceRecord,
   type SourceSettings,
   secretKey,
@@ -46,6 +58,21 @@ import {
 const REQUEST_TIMEOUT_MS = 60_000;
 const UNGROUPED = 'Ungrouped';
 
+type PlaylistOpen =
+  | {
+      kind: 'body';
+      body: AsyncIterable<Uint8Array>;
+      validator: HttpCacheValidator | undefined;
+    }
+  | {
+      kind: 'not-modified';
+      validator: HttpCacheValidator | undefined;
+    };
+
+type M3uOutcome =
+  | { kind: 'imported'; staged: StagedM3u; validator: HttpCacheValidator | undefined }
+  | { kind: 'not-modified'; validator: HttpCacheValidator | undefined };
+
 async function discard(body: HttpResponse['body']): Promise<void> {
   try {
     await openAsyncIterator(body).return?.();
@@ -59,19 +86,28 @@ async function openPlaylist(
   url: string,
   deps: ImportDeps,
   signal: AbortSignal | undefined,
-): Promise<AsyncIterable<Uint8Array>> {
+  allowConditional: boolean,
+): Promise<PlaylistOpen> {
+  const sent = allowConditional
+    ? sanitizeValidator(source.settings.httpCache?.playlist)
+    : undefined;
   let response: Awaited<ReturnType<ImportDeps['http']['get']>>;
   try {
     response = await deps.http.get(url, {
-      headers: transportHeaders(source.settings.transport),
+      headers: conditionalHeaders(transportHeaders(source.settings.transport), sent),
       timeoutMs: REQUEST_TIMEOUT_MS,
       ...(signal === undefined ? {} : { signal }),
     });
   } catch {
     throw new Stop(elvError('network', signal?.aborted ? 'aborted' : 'request-failed'));
   }
-  const { status, body } = unwrap(response);
-  if (status >= 200 && status < 300) return body;
+  const { status, body, headers } = unwrap(response);
+  const validator = extractValidators(headers);
+  if (status === 304 && sent !== undefined) {
+    await discard(body);
+    return { kind: 'not-modified', validator };
+  }
+  if (status >= 200 && status < 300) return { kind: 'body', body, validator };
   await discard(body);
   throw new Stop(httpStatusError(status));
 }
@@ -204,9 +240,15 @@ async function execute(
   source: SourceRecord,
   playlistUrl: string,
   oldVars: UrlVars,
-): Promise<StagedM3u> {
-  const body = await openPlaylist(source, playlistUrl, c.deps, c.signal);
-  const scan = scanM3u(body, { batchSize: c.batchSize, baseUrl: playlistUrl });
+): Promise<M3uOutcome> {
+  const allowConditional = await hasStoredCatalog(c.db, c.sourceId);
+  const opened = await openPlaylist(source, playlistUrl, c.deps, c.signal, allowConditional);
+  if (opened.kind === 'not-modified') {
+    c.unchanged = true;
+    c.counts.unchanged = 1;
+    return { kind: 'not-modified', validator: opened.validator };
+  }
+  const scan = scanM3u(opened.body, { batchSize: c.batchSize, baseUrl: playlistUrl });
   const buffered: M3uEntry[] = [];
   let st: M3uImportState | undefined;
   let gate: M3uEntryGate | undefined;
@@ -247,11 +289,16 @@ async function execute(
   }
   if (st === undefined || gate === undefined) throw new Stop(elvError('network', 'stream-failed'));
   await write(c, st, gate.release());
-  return finishM3uRun(c, st, oldVars, guideUrls);
+  return {
+    kind: 'imported',
+    staged: finishM3uRun(c, st, oldVars, guideUrls),
+    validator: opened.validator,
+  };
 }
 
 /**
- * Imports an M3U source: streams entries into catalog tables with credential-free templates and `urlvars` secrets.
+ * Imports an M3U source: streams entries into catalog tables with credential-free templates and `urlvars` secrets,
+ * or keeps the stored catalog untouched on conditional HTTP 304 Not Modified.
  */
 export async function importM3u(
   source: SourceRecord,
@@ -264,15 +311,15 @@ export async function importM3u(
   if (playlistUrl === undefined) return err(elvError('storage', 'secret-missing'));
   const urlvarsKey = secretKey(source.id, 'urlvars');
   const oldVars = await readUrlVars(deps, source.id);
-  let staged: StagedM3u | undefined;
+  let outcome: M3uOutcome | undefined;
   let secretsStaged = false;
   return performRun(source, deps, opts, {
     execute: async (c) => {
-      staged = await execute(c, source, playlistUrl, oldVars);
+      outcome = await execute(c, source, playlistUrl, oldVars);
     },
     beforeCommit: async () => {
-      if (staged === undefined) return;
-      const merged: UrlVars = { ...oldVars, ...staged.vars };
+      if (outcome?.kind !== 'imported') return;
+      const merged: UrlVars = { ...oldVars, ...outcome.staged.vars };
       try {
         await deps.secrets.set(urlvarsKey, JSON.stringify(merged));
         secretsStaged = true;
@@ -281,7 +328,17 @@ export async function importM3u(
       }
     },
     beforeCleanup: async (tx, c) => {
-      if (staged === undefined) return;
+      if (outcome === undefined) return;
+      const current = (await getSource(tx, source.id))?.settings ?? source.settings;
+      if (outcome.kind === 'not-modified') {
+        const prev = current.httpCache?.playlist;
+        const merged = merge304Validator(prev, outcome.validator);
+        if (!sameValidator(prev, merged)) {
+          await updateSourceSettings(tx, source.id, withPlaylistValidator(current, merged));
+        }
+        return;
+      }
+      const { staged } = outcome;
       for (const [key, table] of [
         ['live', 'live'],
         ['movies', 'movies'],
@@ -294,23 +351,32 @@ export async function importM3u(
         );
         c.counts[key] = r[0]?.n ?? 0;
       }
-      const current = (await getSource(tx, source.id))?.settings ?? source.settings;
-      const settings: SourceSettings = { ...current };
+      let settings: SourceSettings = { ...current };
       if (staged.rules.length > 0) settings.segmentRules = staged.rules;
       else delete settings.segmentRules;
       if (staged.discovered === undefined) delete settings.discoveredGuideUrls;
       else settings.discoveredGuideUrls = staged.discovered;
-      await updateSourceSettings(tx, source.id, settings);
+      if (
+        discoveredGuidesChanged(
+          current.discoveredGuideUrls,
+          staged.discovered,
+          oldVars,
+          staged.vars,
+        )
+      ) {
+        settings = clearDiscoveredGuideValidators(settings);
+      }
+      await updateSourceSettings(tx, source.id, withPlaylistValidator(settings, outcome.validator));
     },
     afterCommit: async () => {
-      if (staged === undefined) return;
-      const vars = staged.vars;
+      if (outcome?.kind !== 'imported') return;
+      const vars = outcome.staged.vars;
       if (Object.keys(oldVars).some((k) => !Object.hasOwn(vars, k))) {
         await deps.secrets.set(urlvarsKey, JSON.stringify(vars)).catch(() => undefined);
       }
     },
-    onAbortOrFail: async (c, outcome, error) => {
-      if (outcome === 'source-removed') {
+    onAbortOrFail: async (c, outcomeKind, error) => {
+      if (outcomeKind === 'source-removed') {
         if (secretsStaged) await deps.secrets.delete(urlvarsKey).catch(() => undefined);
         return;
       }

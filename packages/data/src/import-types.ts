@@ -51,6 +51,8 @@ export interface ImportSummary {
   /** One `category/code` per warning that is not a plain count; never a URL or a credential. */
   warningCodes: string[];
   durationMs: number;
+  /** True when HTTP 304 Not Modified kept all previously stored rows without downloading or rewriting. */
+  unchanged?: boolean;
 }
 
 /** Default rows per write batch. */

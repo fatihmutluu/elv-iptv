@@ -13,6 +13,18 @@ import type { SegmentRule, UrlVars } from './templates';
 /** Kind of source a user can add. */
 export type SourceKind = 'xtream' | 'm3u';
 
+/** Non-secret HTTP cache validators stored per opaque slot for conditional GET requests. */
+export interface HttpCacheValidator {
+  etag?: string;
+  lastModified?: string;
+}
+
+/** Non-secret HTTP cache validators keyed strictly by opaque slot names (never URLs or credentials). */
+export interface SourceHttpCache {
+  playlist?: HttpCacheValidator;
+  guide?: Record<string, HttpCacheValidator>;
+}
+
 /** Non-secret, per-source settings stored as JSON in the `sources` table. */
 export interface SourceSettings {
   transport?: TransportSettings;
@@ -25,6 +37,8 @@ export interface SourceSettings {
   discoveredGuideUrls?: string[];
   /** Allowed live output formats advertised by an Xtream panel's `user_info` (`ts`, `m3u8`). */
   outputFormats?: string[];
+  /** Non-secret HTTP cache validators keyed strictly by opaque slot names. */
+  httpCache?: SourceHttpCache;
 }
 
 /** A row of the `sources` table. */

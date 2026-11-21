@@ -1,7 +1,13 @@
 import { type HttpRequestOptions, ok, type SqlDriver, type SqlValue } from '@elv/domain';
 import { describe, expect, it, vi } from 'vitest';
 import { M3U_TOKEN, sampleCatalog, setup as setupPanel } from './import-test-helpers';
-import { createCatalogService, type ItemDetailRow, openCatalog, queryItemDetail } from './index';
+import {
+  createCatalogService,
+  type ItemDetailRow,
+  openCatalog,
+  queryCategories,
+  queryItemDetail,
+} from './index';
 import { countingScheduler, memorySecrets, testDb } from './test-db';
 
 describe('queryItemDetail & CatalogService.itemDetail', () => {
@@ -195,5 +201,92 @@ describe('queryItemDetail & CatalogService.itemDetail', () => {
 
     // Malformed key returns null cleanly
     expect(await service.itemDetail?.('not-a-key')).toBeNull();
+  });
+});
+
+describe('queryCategories grouped counts & scale', () => {
+  it('uses a grouped LEFT JOIN (no correlated scalar subquery), preserves empty categories, and counts 50,000 placements in < 25ms', async () => {
+    const { db, close } = testDb();
+    try {
+      await openCatalog(db);
+      await db.run(
+        "INSERT INTO sources (id, kind, name, created_at, settings_json) VALUES ('s1', 'xtream', 'Scale', 100, '{}'), ('s2', 'xtream', 'Other', 100, '{}')",
+      );
+
+      const categoryCount = 100;
+      const populatedCategories = 95;
+      const totalPlacements = 50_000;
+      await db.transaction(async (tx) => {
+        const catRows: [string, string, string, string, string, number, number][] = [];
+        for (let c = 0; c < categoryCount; c += 1) {
+          catRows.push(['s1', 'movie', `cat-${c}`, `Category ${c}`, `category ${c}`, c, 1]);
+        }
+        // Noise categories in another kind and another source
+        catRows.push(['s1', 'live', 'cat-0', 'Live Noise', 'live noise', 0, 1]);
+        catRows.push(['s2', 'movie', 'cat-0', 'Other Source', 'other source', 0, 1]);
+        await tx.batch(
+          'INSERT INTO categories (source_id, kind, provider_id, name, name_fold, position, run_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          catRows,
+        );
+
+        const chunk: [string, string, string, string, number, number][] = [];
+        for (let i = 0; i < totalPlacements; i += 1) {
+          const catIdx = i % populatedCategories;
+          chunk.push(['s1', 'movie', `x:s1:movie:${i}`, `cat-${catIdx}`, i, 1]);
+          if (chunk.length === 5_000) {
+            await tx.batch(
+              'INSERT INTO placements (source_id, kind, item_key, category_id, position, run_id) VALUES (?, ?, ?, ?, ?, ?)',
+              chunk,
+            );
+            chunk.length = 0;
+          }
+        }
+        // Noise placements in another kind and source that must NOT affect s1/movie counts
+        await tx.batch(
+          'INSERT INTO placements (source_id, kind, item_key, category_id, position, run_id) VALUES (?, ?, ?, ?, ?, ?)',
+          [
+            ['s1', 'live', 'x:s1:live:1', 'cat-0', 0, 1],
+            ['s2', 'movie', 'x:s2:movie:1', 'cat-0', 0, 1],
+          ],
+        );
+      });
+
+      const capturedSql: { sql: string; params: readonly SqlValue[] | undefined }[] = [];
+      const captureDb: SqlDriver = {
+        ...db,
+        all: <T>(sql: string, params?: readonly SqlValue[]) => {
+          capturedSql.push({ sql, params });
+          return db.all<T>(sql, params);
+        },
+      };
+
+      const start = performance.now();
+      const categories = await queryCategories(captureDb, 's1', 'movie');
+      const elapsedMs = performance.now() - start;
+
+      expect(categories).toHaveLength(categoryCount);
+      expect(categories.reduce((sum, c) => sum + c.itemCount, 0)).toBe(totalPlacements);
+      // Empty trailing categories (95..99) must still appear with itemCount: 0
+      for (let c = populatedCategories; c < categoryCount; c += 1) {
+        expect(categories[c]).toMatchObject({
+          id: `s1|movie|cat-${c}`,
+          position: c,
+          itemCount: 0,
+        });
+      }
+      // First category receives ceil(50_000 / 95) = 527 placements (unaffected by noise)
+      expect(categories[0]?.itemCount).toBe(Math.ceil(totalPlacements / populatedCategories));
+
+      expect(capturedSql).toHaveLength(1);
+      const plan = await db.all<{ detail: string }>(
+        `EXPLAIN QUERY PLAN ${capturedSql[0]?.sql ?? ''}`,
+        capturedSql[0]?.params,
+      );
+      const planText = plan.map((r) => r.detail).join('\n');
+      expect(planText).not.toMatch(/CORRELATED SCALAR SUBQUERY/i);
+      expect(elapsedMs).toBeLessThan(25);
+    } finally {
+      close();
+    }
   });
 });
