@@ -27,7 +27,8 @@ M3U and XMLTV scanners and the Xtream client.
   and `.xml/http`/`.gz/http`/`;` `url-tvg` lists. Non-`#` lines need `xx://` or, with `baseUrl`, no whitespace/`<`/`{`/`"`.
   `extra`, `kodiProps`, `headers.other` and `header.attrs` have no prototype. Files: `m3u.ts`, `m3u-logo-filter.ts`,
   `m3u-attrs.ts`, `m3u-url.ts`, `m3u-types.ts`. Rejects HLS media/master manifests with `source-format`/`hls-manifest`.
-- Utilities: `decodeMaybeGzip` (`gzip-stream.ts`, multi-member `.gz` + `DEFAULT_MAX_DECOMPRESSED_BYTES` 256 MiB ceiling),
+- Utilities: `decodeMaybeGzip` (`gzip-stream.ts` + O(1)-memory RFC 1952/1951 member framer `gzip-member-splitter.ts`,
+  multi-member `.gz` + `DEFAULT_MAX_DECOMPRESSED_BYTES` 256 MiB ceiling),
   `decodeLegacyCodepage` (`codepages.ts`, `windows-1256`/`iso-8859-6`/`windows-1254`/`windows-1252`), `detectAndDecodeText`
   (`encoding.ts`), `toElvError`, `decodeUtf8`, `ByteBuffer`, `decodeEntities`, `createStats`/`warn`; test helpers in `test-chunks.ts`.
 - `scanXmltv(chunks, { batchSize?, channels?, programmeChannels?, from?, to?, decompressor?, maxDecompressedBytes? })` streams

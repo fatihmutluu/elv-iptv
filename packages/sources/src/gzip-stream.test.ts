@@ -18,13 +18,18 @@ function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
   return out;
 }
 
-async function collectDecoded(chunks: AsyncIterable<Uint8Array>, opts?: GzipStreamOptions) {
+async function collectDecoded(
+  chunks: AsyncIterable<Uint8Array>,
+  opts?: GzipStreamOptions,
+  delayMs = 0,
+) {
   const out: Uint8Array[] = [];
   const gen = decodeMaybeGzip(chunks, opts);
   for (;;) {
     const step = await gen.next();
     if (step.done) return { chunks: out, bytes: concatBytes(out), result: step.value };
     out.push(step.value);
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 }
 
@@ -212,6 +217,83 @@ describe('decodeMaybeGzip', () => {
     expect(rand.bytes).toEqual(expected);
   });
 
+  it('decodes concatenated stored (BTYPE=0), fixed (BTYPE=1), and dynamic (BTYPE=2) members with all RFC 1952 header flags across 1-byte chunks', async () => {
+    const crcTable = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let k = 0; k < 8; k++) c = (c & 1) !== 0 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      crcTable[i] = c >>> 0;
+    }
+    const crc32 = (data: Uint8Array): number => {
+      let c = 0xffffffff;
+      for (let i = 0; i < data.length; i++) {
+        c = (crcTable[(c ^ (data[i] as number)) & 0xff] as number) ^ (c >>> 8);
+      }
+      return (c ^ 0xffffffff) >>> 0;
+    };
+    const trailerOf = (plain: Uint8Array): Uint8Array => {
+      const c = crc32(plain);
+      const sz = plain.length >>> 0;
+      return new Uint8Array([
+        c & 0xff,
+        (c >>> 8) & 0xff,
+        (c >>> 16) & 0xff,
+        (c >>> 24) & 0xff,
+        sz & 0xff,
+        (sz >>> 8) & 0xff,
+        (sz >>> 16) & 0xff,
+        (sz >>> 24) & 0xff,
+      ]);
+    };
+
+    // Member 1: Stored block (BTYPE=0) with FEXTRA + FNAME + FCOMMENT + FHCRC
+    const p1 = utf8('STORED_MEMBER_ONE');
+    const hdrBase = concatBytes([
+      new Uint8Array([0x1f, 0x8b, 0x08, 0x1e, 0, 0, 0, 0, 0, 0xff]),
+      new Uint8Array([0x04, 0x00, 0x45, 0x58, 0x54, 0x31]), // FEXTRA (4 bytes)
+      utf8('guide.xml'),
+      new Uint8Array([0]), // FNAME
+      utf8('member 1'),
+      new Uint8Array([0]), // FCOMMENT
+    ]);
+    const hcrc = crc32(hdrBase) & 0xffff;
+    const len1 = p1.length;
+    const nlen1 = len1 ^ 0xffff;
+    const m1 = concatBytes([
+      hdrBase,
+      new Uint8Array([hcrc & 0xff, (hcrc >>> 8) & 0xff]), // FHCRC
+      new Uint8Array([0x01, len1 & 0xff, len1 >>> 8, nlen1 & 0xff, nlen1 >>> 8]),
+      p1,
+      trailerOf(p1),
+    ]);
+
+    // Member 2: Fixed Huffman block (BTYPE=1) — small payload compressed by CompressionStream
+    const p2 = utf8('FIXED_TWO');
+    const m2 = await gzip(p2);
+    expect(((m2[10] as number) >>> 1) & 3).toBe(1);
+
+    // Member 3: Dynamic Huffman block (BTYPE=2) — varied XML payload compressed by CompressionStream
+    const p3 = utf8(
+      Array.from(
+        { length: 200 },
+        (_, i) =>
+          `<programme start="20260101000000" channel="ch${i % 9}"><title>Dyn ${i}</title></programme>\n`,
+      ).join(''),
+    );
+    const m3 = await gzip(p3);
+    expect(((m3[10] as number) >>> 1) & 3).toBe(2);
+
+    const combined = concatBytes([m1, m2, m3]);
+    const expected = concatBytes([p1, p2, p3]);
+    for (const sizes of [[combined.length], [1, 1, 1], [7, 13]]) {
+      const r = await collectDecoded(chunksOf(combined, sizes), {
+        decompressor: streamingWebGunzipper,
+      });
+      expect(r.result).toEqual({ ok: true, value: undefined });
+      expect(r.bytes).toEqual(expected);
+    }
+  });
+
   it('decodes identical repeated members and empty concatenated members without dropping any member', async () => {
     const dup = utf8('REPEAT-MEMBER-PAYLOAD');
     const tail = utf8('FINAL-MEMBER');
@@ -273,6 +355,15 @@ describe('decodeMaybeGzip', () => {
     });
     expect(rBin.result).toEqual({ ok: true, value: undefined });
     expect(rBin.bytes).toEqual(concatBytes([r1, r2]));
+
+    // Same 2x120KB incompressible stream with 5ms downstream backpressure between every output chunk
+    const rBackpressure = await collectDecoded(
+      chunksOf(combinedBin, [combinedBin.length]),
+      { decompressor: streamingWebGunzipper },
+      5,
+    );
+    expect(rBackpressure.result).toEqual({ ok: true, value: undefined });
+    expect(rBackpressure.bytes).toEqual(concatBytes([r1, r2]));
   });
 
   it('decodes multi-member gzip when a single-member decompressor stops cleanly at member 1 EOF', async () => {
@@ -337,10 +428,28 @@ describe('decodeMaybeGzip', () => {
       ).result,
     ).toEqual({ ok: false, error: { category: 'source-format', code: 'gzip-corrupt' } });
 
+    const singleByteJunk = concatBytes([m1, new Uint8Array([0x00])]);
+    expect(
+      (
+        await collectDecoded(chunksOf(singleByteJunk, [1]), {
+          decompressor: streamingWebGunzipper,
+        })
+      ).result,
+    ).toEqual({ ok: false, error: { category: 'source-format', code: 'gzip-corrupt' } });
+
     const badSecond = concatBytes([m1, m2.subarray(0, m2.length - 8)]);
     expect(
       (await collectDecoded(chunksOf(badSecond, [badSecond.length]), { decompressor: gunzipper }))
         .result,
+    ).toEqual({ ok: false, error: { category: 'source-format', code: 'gzip-corrupt' } });
+
+    const badSecondCm = concatBytes([m1, new Uint8Array([0x1f, 0x8b, 0x09, 0x00])]);
+    expect(
+      (
+        await collectDecoded(chunksOf(badSecondCm, [1]), {
+          decompressor: streamingWebGunzipper,
+        })
+      ).result,
     ).toEqual({ ok: false, error: { category: 'source-format', code: 'gzip-corrupt' } });
 
     let upstreamClosed = false;
@@ -376,6 +485,15 @@ describe('decodeMaybeGzip', () => {
     }
     const r = await collectDecoded(failingGzip(), { decompressor: gunzipper });
     expect(r.result).toEqual({ ok: false, error: netErr });
+
+    async function* failingBetweenMembers(): AsyncGenerator<Uint8Array> {
+      yield gz;
+      throw netErr;
+    }
+    const rBetween = await collectDecoded(failingBetweenMembers(), {
+      decompressor: streamingWebGunzipper,
+    });
+    expect(rBetween.result).toEqual({ ok: false, error: netErr });
 
     let upstreamClosed = false;
     let decompressorClosed = false;
