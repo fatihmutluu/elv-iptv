@@ -341,8 +341,8 @@ describe('App', () => {
 
     await fireEvent.press(screen.getByTestId('live-mode-epg'));
     expect(await screen.findByTestId('live-epg-view')).toBeOnTheScreen();
-    await fireEvent.press(screen.getByTestId('live-mode-watch'));
-    expect(await screen.findByTestId('live-watch-stage')).toBeOnTheScreen();
+    await fireEvent.press(screen.getByTestId('live-mode-favorites'));
+    expect(await screen.findByTestId('live-favorites-empty')).toBeOnTheScreen();
     await fireEvent.press(screen.getByTestId('live-mode-channels'));
     const reloadedCard = await screen.findByTestId('live-channel-card-0');
     await fireEvent.press(reloadedCard);

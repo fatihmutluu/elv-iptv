@@ -178,12 +178,14 @@ export interface LiveZapDrawerProps {
   readonly activeChannelKey: string | null;
   readonly focusedZapIndex: number | null;
   readonly layout: CatalogLayoutMetrics;
+  /** When `true`, renders in flex flow on the left (HWND-safe on desktop) instead of `position: 'absolute'`. */
+  readonly docked?: boolean;
   readonly hydrateNowNext: (channelKeys: readonly string[]) => void;
   readonly onSelectChannel: (channel: ItemRow, index: number) => void;
 }
 
 /**
- * Virtualized Mini-Guide Zap Drawer (`#48`): left-anchored frosted drawer on Landscape (`306px`)
+ * Virtualized Mini-Guide Zap Drawer (`#48`): left-anchored drawer on Landscape (`306px`)
  * and inset slide-up sheet on Portrait.
  */
 export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerProps): ReactElement {
@@ -195,6 +197,7 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
     activeChannelKey,
     focusedZapIndex,
     layout,
+    docked = false,
     hydrateNowNext,
     onSelectChannel,
   } = p;
@@ -221,16 +224,9 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
   // biome-ignore lint/correctness/useExhaustiveDependencies: sourceVersion notifies when pages finish loading
   useEffect(() => {
     if (!channelSource || itemCount === 0) return;
-    if (layout.isTv) {
-      syncZapWindow(channelSource, tvWindowStart, tvWindowEnd, hydrateNowNext);
-    } else {
-      syncZapWindow(
-        channelSource,
-        zapVisibleRef.current.start,
-        zapVisibleRef.current.end,
-        hydrateNowNext,
-      );
-    }
+    const start = layout.isTv ? tvWindowStart : zapVisibleRef.current.start;
+    const end = layout.isTv ? tvWindowEnd : zapVisibleRef.current.end;
+    syncZapWindow(channelSource, start, end, hydrateNowNext);
   }, [
     channelSource,
     hydrateNowNext,
@@ -266,11 +262,7 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
     [],
   );
   const zapItemLayout = useCallback(
-    (_d: unknown, index: number) => ({
-      length: zapRowHeight,
-      offset: zapRowHeight * index,
-      index,
-    }),
+    (_d: unknown, index: number) => ({ length: zapRowHeight, offset: zapRowHeight * index, index }),
     [zapRowHeight],
   );
 
@@ -325,21 +317,27 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
     [activeChannelKey, focusedZapIndex, nowNextVersion, sourceVersion],
   );
 
+  const useDocked = docked;
+
   return (
     <View
       testID="live-zap-drawer"
       style={[
-        layout.isPortrait ? styles.drawerPortrait : styles.drawerLandscape,
-        !layout.isPortrait ? { left: layout.padX } : null,
+        useDocked
+          ? styles.drawerDocked
+          : layout.isPortrait
+            ? styles.drawerPortrait
+            : styles.drawerLandscape,
+        !useDocked && !layout.isPortrait ? { left: layout.padX } : null,
         {
           backgroundColor: theme.colors.bgElevated,
           borderColor: theme.colors.glassBorder,
-          borderRadius: theme.radius.modal,
+          borderRadius: useDocked ? 0 : theme.radius.modal,
         },
-        webBackdropBlur(16),
+        useDocked ? undefined : webBackdropBlur(16),
       ]}
     >
-      {layout.isPortrait ? (
+      {!useDocked && layout.isPortrait ? (
         <View style={styles.grabWrap}>
           <View style={[styles.grabHandle, { backgroundColor: theme.colors.glassBorder }]} />
         </View>
@@ -374,6 +372,7 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
 const styles = StyleSheet.create({
   flex1: { flex: 1 },
   tvViewport: { flex: 1, overflow: 'hidden' },
+  drawerDocked: { width: ZAP_DRAWER_WIDTH, borderRightWidth: 1, overflow: 'hidden' },
   drawerLandscape: {
     position: 'absolute',
     top: 64,

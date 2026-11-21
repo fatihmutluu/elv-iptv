@@ -126,11 +126,13 @@ describe('usePlayerControls track picker and TV OSD navigation', () => {
     await act(async () => keys.tap(KEY.select));
     expect(svc.fake.seek).toHaveBeenLastCalledWith(40_000);
     await act(async () => keys.tap(KEY.left));
-    await act(async () => keys.tap(KEY.select));
-    expect(svc.fake.seek).toHaveBeenLastCalledWith(30_000);
-    await act(async () => keys.tap(KEY.left));
+    expect(hook.result.current.tvOsdAction).toBe('playPause');
     await act(async () => keys.tap(KEY.select));
     expect(svc.fake.pause).toHaveBeenCalledTimes(1);
+    await act(async () => keys.tap(KEY.left));
+    expect(hook.result.current.tvOsdAction).toBe('seekBack');
+    await act(async () => keys.tap(KEY.select));
+    expect(svc.fake.seek).toHaveBeenLastCalledWith(30_000);
 
     await act(async () => keys.tap(KEY.right));
     await act(async () => keys.tap(KEY.right));

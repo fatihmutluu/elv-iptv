@@ -36,11 +36,11 @@ export function useLiveTabMemory(
 export type LiveTvZone = 'header' | 'body';
 /** Header sub-row when `LiveScreen` owns TV focus. */
 export type LiveTvHeaderRow = 'modes' | 'categories';
-/** Focusable action controls inside `LiveWatchStage`. */
-export type LiveWatchControl = 'miniguide' | 'prev' | 'numpad' | 'watch';
+/** Focusable action controls inside `LiveWatchStage` (`Favorites` stage). */
+export type LiveWatchControl = 'miniguide' | 'favorite' | 'watch' | 'browse';
 
-const MODE_ORDER: readonly LiveMode[] = ['watch', 'channels', 'epg'];
-const WATCH_CONTROLS: readonly LiveWatchControl[] = ['miniguide', 'prev', 'numpad', 'watch'];
+const MODE_ORDER: readonly LiveMode[] = ['favorites', 'channels', 'epg'];
+const WATCH_CONTROLS: readonly LiveWatchControl[] = ['miniguide', 'favorite', 'watch'];
 const NUMPAD_GRID: readonly (readonly string[])[] = [
   ['1', '2', '3'],
   ['4', '5', '6'],
@@ -65,7 +65,6 @@ export interface UseTvLiveNavigationOptions {
   readonly hasBody: boolean;
   readonly zapDrawerOpen: boolean;
   readonly numpadOpen: boolean;
-  readonly hasPreviousChannel: boolean;
   readonly onSelectMode: (mode: LiveMode) => void;
   readonly onSelectCategoryIndex: (index: number) => void;
   readonly onToggleNumpad: () => void;
@@ -106,11 +105,11 @@ interface NavSnapshot {
 /**
  * 10-ft TV D-pad focus orchestrator for {@link LiveScreen}.
  * Coordinates `Top Nav <-> Mode Switcher <-> Category Bar <-> Body` and traps D-pad input inside
- * the 4×3 `LiveNumberPad` overlay whenever open, with zero duplicate key listeners.
+ * the 4×3 `LiveNumberPad` overlay in `Channels` mode, with zero duplicate key listeners.
  */
 export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNavigationState {
   const { isTv, isActiveScope, isEmpty, hasOpenSourcesCta, mode, categoryCount } = opts;
-  const { channelCount, hasBody, zapDrawerOpen, numpadOpen, hasPreviousChannel } = opts;
+  const { channelCount, hasBody, zapDrawerOpen, numpadOpen } = opts;
   const hasCategoryBar = (mode === 'channels' || mode === 'epg') && categoryCount > 0;
 
   const [nav, setNav] = useState<NavSnapshot>(() => ({
@@ -209,7 +208,7 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
     }
 
     if (event.kind === 'press' && event.key === 'back') {
-      if (cur.zone === 'body' && o.mode === 'watch') {
+      if (cur.zone === 'body' && o.mode === 'favorites') {
         if (cur.watchZone === 'zap') {
           setNav((p) => ({ ...p, watchZone: 'controls' }));
         } else {
@@ -272,20 +271,26 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
       return;
     }
 
-    if (o.mode !== 'watch') return;
+    if (o.mode !== 'favorites') return;
+
+    if (o.channelCount === 0) {
+      if (event.key === 'up') setNav((p) => ({ ...p, zone: 'header', headerRow: 'modes' }));
+      else if (event.key === 'select' && event.kind === 'press') o.onActivateWatchControl('browse');
+      return;
+    }
 
     if (cur.watchZone === 'controls') {
       if (event.key === 'up') {
         setNav((p) => ({ ...p, zone: 'header', headerRow: 'modes' }));
       } else if (event.key === 'left' || event.key === 'right') {
         const delta = event.key === 'left' ? -1 : 1;
-        setNav((p) => {
-          let next = Math.max(0, Math.min(WATCH_CONTROLS.length - 1, p.watchControlIdx + delta));
-          if (WATCH_CONTROLS[next] === 'prev' && !o.hasPreviousChannel) {
-            next = Math.max(0, Math.min(WATCH_CONTROLS.length - 1, next + delta));
-          }
-          return { ...p, watchControlIdx: next };
-        });
+        setNav((p) => ({
+          ...p,
+          watchControlIdx: Math.max(
+            0,
+            Math.min(WATCH_CONTROLS.length - 1, p.watchControlIdx + delta),
+          ),
+        }));
       } else if (event.key === 'down') {
         if (o.zapDrawerOpen && o.channelCount > 0) {
           setNav((p) => ({ ...p, watchZone: 'zap' }));
@@ -312,10 +317,10 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
   const activeTv = isTv && isActiveScope;
   const numpadFocused = activeTv && numpadOpen;
   const inHeader = activeTv && !numpadOpen && !isEmpty && nav.zone === 'header';
-  const inWatchBody =
-    activeTv && !numpadOpen && !isEmpty && nav.zone === 'body' && mode === 'watch';
-  const watchCtrl = WATCH_CONTROLS[nav.watchControlIdx] ?? null;
-  const effectiveWatchCtrl = watchCtrl === 'prev' && !hasPreviousChannel ? 'miniguide' : watchCtrl;
+  const inFavBody =
+    activeTv && !numpadOpen && !isEmpty && nav.zone === 'body' && mode === 'favorites';
+  const watchCtrl: LiveWatchControl | null =
+    channelCount === 0 ? 'browse' : (WATCH_CONTROLS[nav.watchControlIdx] ?? null);
 
   return useMemo<TvLiveNavigationState>(
     () => ({
@@ -326,20 +331,20 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
         inHeader && nav.headerRow === 'modes' && mode === 'channels' && nav.modeCol === 3,
       focusedCategoryIndex: inHeader && nav.headerRow === 'categories' ? nav.catCol : null,
       focusedEmptyCta: activeTv && !numpadOpen && isEmpty && hasOpenSourcesCta,
-      focusedWatchControl: inWatchBody && nav.watchZone === 'controls' ? effectiveWatchCtrl : null,
-      focusedZapIndex: inWatchBody && nav.watchZone === 'zap' ? nav.zapIdx : null,
+      focusedWatchControl: inFavBody && nav.watchZone === 'controls' ? watchCtrl : null,
+      focusedZapIndex: inFavBody && channelCount > 0 && nav.watchZone === 'zap' ? nav.zapIdx : null,
       focusedNumpadKey: numpadFocused ? (NUMPAD_GRID[nav.numpadRow]?.[nav.numpadCol] ?? '1') : null,
       handleTvKey,
       handleChildEdgeTop,
     }),
     [
       activeTv,
-      effectiveWatchCtrl,
+      channelCount,
       handleChildEdgeTop,
       handleTvKey,
       hasOpenSourcesCta,
+      inFavBody,
       inHeader,
-      inWatchBody,
       isEmpty,
       mode,
       nav.catCol,
@@ -352,6 +357,7 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
       nav.zone,
       numpadFocused,
       numpadOpen,
+      watchCtrl,
     ],
   );
 }

@@ -3,6 +3,8 @@ import { IconButton, useI18n, useTheme, useViewport } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
+import type { PlaybackGuard } from '../ports/playback-guard';
+import type { VideoHost } from '../ports/video-host';
 import { computeCatalogLayout } from '../shared';
 import { EpgGridView } from './EpgGridView';
 import { LiveChannelsGrid } from './LiveChannelsGrid';
@@ -18,6 +20,8 @@ import {
 import { LiveWatchStage } from './LiveWatchStage';
 import type { LiveMode, LiveTabMemory } from './live-model';
 import { useLiveCatalog } from './useLiveCatalog';
+import { useLiveEmbeddedPreview } from './useLiveEmbeddedPreview';
+import { useLiveNumpadOverlay } from './useLiveNumberJump';
 import {
   type LiveWatchControl,
   useLiveTabMemory,
@@ -29,78 +33,65 @@ export interface LiveScreenProps {
   readonly catalog: CatalogService;
   readonly sources: readonly SourceRow[];
   readonly refreshToken: number;
+  readonly userStateVersion?: number;
   readonly memory?: LiveTabMemory;
   readonly onMemoryChange?: (next: LiveTabMemory) => void;
   readonly onPlay: (target: PlayTarget) => void;
   readonly onOpenSources: () => void;
   readonly onFocusTopNav?: () => void;
   readonly isActiveScope?: boolean;
+  readonly videoHost?: VideoHost;
+  readonly playbackGuard?: PlaybackGuard;
   /** Optional fixed epoch timestamp in milliseconds for deterministic EPG/progress rendering. */
   readonly nowMs?: number;
 }
 
 /**
- * Unified Cinema Quietude Live TV Hub (`UI_UX_PHILOSOPHY.md` §2.1 & §3): composes the top
- * `Watch` | `Channels` | `TV Guide` mode switcher, horizontal category filter bar, `0–9` channel
- * number pad, virtualized `LiveChannelsGrid`, 1,000-channel × 7-day `EpgGridView`, and
- * playback-first `LiveWatchStage` with 10-ft TV D-pad scope handoff.
+ * Unified Cinema Quietude Live TV Hub (`UI_UX_PHILOSOPHY.md` §2.1 & §3): `Favorites` | `Channels` |
+ * `TV Guide`, editorial category bar, `0–9` channel number pad (`Channels`), virtualized channels
+ * grid, 1,000-channel × 7-day EPG grid, and real embedded-preview Favorites stage.
  */
-export function LiveScreen({
-  catalog,
-  sources,
-  refreshToken,
-  memory,
-  onMemoryChange,
-  onPlay,
-  onOpenSources,
-  onFocusTopNav,
-  isActiveScope = true,
-  nowMs,
-}: LiveScreenProps): ReactElement {
+export function LiveScreen(props: LiveScreenProps): ReactElement {
+  const { catalog, sources, refreshToken, userStateVersion = 0, memory, onMemoryChange } = props;
+  const { onPlay, onOpenSources, onFocusTopNav, isActiveScope = true, videoHost } = props;
+  const { playbackGuard, nowMs } = props;
   const theme = useTheme();
   const viewport = useViewport();
   const i18n = useI18n();
   const layout = useMemo(() => computeCatalogLayout(viewport, theme), [theme, viewport]);
-
-  const {
-    memory: activeMemory,
-    memoryRef: activeMemoryRef,
-    updateMemory,
-  } = useLiveTabMemory(memory, onMemoryChange);
-
-  const [numpadOpen, setNumpadOpen] = useState(false);
+  const tabMem = useLiveTabMemory(memory, onMemoryChange);
+  const { memory: activeMemory, memoryRef, updateMemory } = tabMem;
   const [guideRefreshTick, setGuideRefreshTick] = useState(0);
-  const numpadPendingJumpRef = useRef(false);
-
+  const numpadResolvedRef = useRef<() => void>(() => undefined);
+  const mountedRef = useRef(true);
+  const handoffInFlightRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const readySources = useMemo(() => sources.filter((s) => !s.needsImport), [sources]);
   const clockFn = useMemo(() => (nowMs !== undefined ? () => nowMs : undefined), [nowMs]);
-
+  const mode = activeMemory.mode;
   const handleSelectCategory = useCallback(
     (categoryId: string | null) => updateMemory({ categoryId }),
     [updateMemory],
   );
   const handleChannelHistoryChange = useCallback(
-    (next: {
-      readonly activeChannelKey: string | null;
-      readonly previousChannelKey: string | null;
-    }) => {
-      if (numpadPendingJumpRef.current) {
-        numpadPendingJumpRef.current = false;
-        setNumpadOpen(false);
-        if (activeMemoryRef.current.mode === 'channels') {
-          updateMemory({ ...next, mode: 'watch' });
-          return;
-        }
-      }
+    (next: Pick<LiveTabMemory, 'activeChannelKey' | 'previousChannelKey'>) => {
+      numpadResolvedRef.current();
       updateMemory(next);
     },
-    [activeMemoryRef, updateMemory],
+    [updateMemory],
   );
 
   const live = useLiveCatalog({
     catalog,
     sources: readySources,
     refreshToken: refreshToken + guideRefreshTick,
+    userStateVersion,
+    mode,
     selectedCategoryId: activeMemory.categoryId,
     activeChannelKey: activeMemory.activeChannelKey,
     previousChannelKey: activeMemory.previousChannelKey,
@@ -108,72 +99,66 @@ export function LiveScreen({
     onChannelHistoryChange: handleChannelHistoryChange,
     ...(clockFn !== undefined ? { now: clockFn } : {}),
   });
-  useEffect(() => {
-    if (live.numberFeedback !== null) numpadPendingJumpRef.current = false;
-  }, [live.numberFeedback]);
+
+  const numpad = useLiveNumpadOverlay(live);
+  numpadResolvedRef.current = numpad.notifyChannelResolved;
+
+  const activeFavoriteIdx = useMemo(() => {
+    if (live.favoriteChannels.length === 0) return -1;
+    const key = live.activeChannel?.key ?? activeMemory.activeChannelKey;
+    const found = key ? live.favoriteChannels.findIndex((c) => c.key === key) : -1;
+    return Math.max(found, 0);
+  }, [activeMemory.activeChannelKey, live.activeChannel?.key, live.favoriteChannels]);
+  const activeFavoriteChannel =
+    activeFavoriteIdx >= 0 ? (live.favoriteChannels[activeFavoriteIdx] ?? null) : null;
+
+  const preview = useLiveEmbeddedPreview({
+    enabled: mode === 'favorites' && activeFavoriteChannel !== null,
+    activeChannel: activeFavoriteChannel,
+    sources: readySources,
+    catalog,
+    ...(videoHost !== undefined ? { videoHost } : {}),
+    ...(playbackGuard !== undefined ? { playbackGuard } : {}),
+  });
 
   const handleSelectMode = useCallback(
-    (mode: LiveMode) => {
-      numpadPendingJumpRef.current = false;
-      setNumpadOpen(false);
-      updateMemory({ mode });
+    (nextMode: LiveMode) => {
+      numpad.close();
+      updateMemory({ mode: nextMode });
     },
-    [updateMemory],
+    [numpad.close, updateMemory],
   );
+  const handleBrowseChannels = useCallback(() => handleSelectMode('channels'), [handleSelectMode]);
   const handleToggleZapDrawer = useCallback(
-    () => updateMemory({ zapDrawerOpen: !activeMemoryRef.current.zapDrawerOpen }),
-    [activeMemoryRef, updateMemory],
-  );
-  const handlePressDigit = useCallback(
-    (digit: string) => {
-      numpadPendingJumpRef.current = true;
-      live.pressDigit(digit);
-    },
-    [live.pressDigit],
-  );
-  const handleClearNumber = useCallback(() => {
-    numpadPendingJumpRef.current = false;
-    live.clearNumber();
-  }, [live.clearNumber]);
-  const handleCloseNumpad = useCallback(() => {
-    handleClearNumber();
-    setNumpadOpen(false);
-  }, [handleClearNumber]);
-  const handleToggleNumpad = useCallback(() => {
-    setNumpadOpen((open) => {
-      if (open) handleClearNumber();
-      return !open;
-    });
-  }, [handleClearNumber]);
-  const handleSubmitNumber = useCallback(() => {
-    void live.submitNumberJump();
-  }, [live.submitNumberJump]);
-  const handlePressNumpadKey = useCallback(
-    (key: string) => {
-      if (key === 'C') handleClearNumber();
-      else if (key === '↵') handleSubmitNumber();
-      else handlePressDigit(key);
-    },
-    [handleClearNumber, handlePressDigit, handleSubmitNumber],
+    () => updateMemory({ zapDrawerOpen: !memoryRef.current.zapDrawerOpen }),
+    [memoryRef, updateMemory],
   );
   const handleWatchAndPlay = useCallback(
-    (channel: ItemRow, index: number) => {
-      live.tuneChannel(channel, index);
-      onPlay(live.buildPlayTarget(channel, index));
+    (ch: ItemRow, idx: number) => {
+      live.tuneChannel(ch, idx);
+      onPlay(live.buildPlayTarget(ch, idx, 'category'));
     },
     [live.buildPlayTarget, live.tuneChannel, onPlay],
   );
+  const handleWatchFromFavorites = useCallback(
+    (ch: ItemRow, idx: number) => {
+      if (handoffInFlightRef.current) return;
+      live.tuneChannel(ch, idx);
+      const target = live.buildPlayTarget(ch, idx, 'favorites');
+      if (videoHost === undefined) return onPlay(target);
+      handoffInFlightRef.current = true;
+      void preview.stopAndRelease().then(() => {
+        handoffInFlightRef.current = false;
+        if (mountedRef.current && memoryRef.current.mode === 'favorites') onPlay(target);
+      });
+    },
+    [live.buildPlayTarget, live.tuneChannel, memoryRef, onPlay, preview.stopAndRelease, videoHost],
+  );
+  const handleToggleFavorite = useCallback(
+    (ch: ItemRow) => void live.toggleFavorite(ch),
+    [live.toggleFavorite],
+  );
   const handleGuideRefreshed = useCallback(() => setGuideRefreshTick((n) => n + 1), []);
-
-  const hasReadySources = readySources.length > 0;
-  const isInitialLoading =
-    hasReadySources && live.loadingCategories && live.categories.length === 0;
-  const hasCategories = live.categories.length > 0;
-  const isEmpty = !isInitialLoading && (!hasReadySources || !hasCategories);
-  const mode = activeMemory.mode;
-  const hasBody =
-    mode === 'watch' ? hasCategories : live.channelSource !== null && live.activeCategory !== null;
-
   const handleSelectCategoryIndex = useCallback(
     (idx: number) => {
       const cat = live.categories[idx];
@@ -183,23 +168,40 @@ export function LiveScreen({
   );
   const handleActivateWatchControl = useCallback(
     (ctrl: LiveWatchControl) => {
-      if (ctrl === 'miniguide') handleToggleZapDrawer();
-      else if (ctrl === 'prev') live.tunePreviousChannel();
-      else if (ctrl === 'numpad') handleToggleNumpad();
-      else if (ctrl === 'watch' && live.activeChannel) {
-        onPlay(live.buildPlayTarget(live.activeChannel, live.activeChannelIndex));
+      if (ctrl === 'browse') return handleBrowseChannels();
+      if (ctrl === 'miniguide') return handleToggleZapDrawer();
+      if (!activeFavoriteChannel) return;
+      if (ctrl === 'favorite') handleToggleFavorite(activeFavoriteChannel);
+      else if (ctrl === 'watch') {
+        handleWatchFromFavorites(activeFavoriteChannel, Math.max(0, activeFavoriteIdx));
       }
     },
-    [handleToggleNumpad, handleToggleZapDrawer, live, onPlay],
+    [
+      activeFavoriteChannel,
+      activeFavoriteIdx,
+      handleBrowseChannels,
+      handleToggleFavorite,
+      handleToggleZapDrawer,
+      handleWatchFromFavorites,
+    ],
   );
   const handleSelectZapIndex = useCallback(
     (idx: number) => {
-      const ch = live.channelSource?.get(idx);
+      const ch = live.favoriteSource.get(idx);
       if (ch) live.tuneChannel(ch, idx);
-      else void live.channelSource?.loadItem(idx).then((row) => row && live.tuneChannel(row, idx));
     },
-    [live.channelSource, live.tuneChannel],
+    [live.favoriteSource, live.tuneChannel],
   );
+
+  const hasReadySources = readySources.length > 0;
+  const isInitialLoading =
+    hasReadySources && live.loadingCategories && live.categories.length === 0;
+  const hasCategories = live.categories.length > 0;
+  const isEmpty = !isInitialLoading && (!hasReadySources || !hasCategories);
+  const hasBody =
+    mode === 'favorites'
+      ? hasCategories
+      : live.channelSource !== null && live.activeCategory !== null;
 
   const tvNav = useTvLiveNavigation({
     isTv: layout.isTv,
@@ -208,16 +210,15 @@ export function LiveScreen({
     hasOpenSourcesCta: !hasReadySources,
     mode,
     categoryCount: live.categories.length,
-    channelCount: live.channelCount,
+    channelCount: mode === 'favorites' ? live.favoriteChannels.length : live.channelCount,
     hasBody,
     zapDrawerOpen: activeMemory.zapDrawerOpen,
-    numpadOpen,
-    hasPreviousChannel: live.previousChannel !== null,
+    numpadOpen: numpad.open,
     onSelectMode: handleSelectMode,
     onSelectCategoryIndex: handleSelectCategoryIndex,
-    onToggleNumpad: handleToggleNumpad,
-    onCloseNumpad: handleCloseNumpad,
-    onPressNumpadKey: handlePressNumpadKey,
+    onToggleNumpad: numpad.toggle,
+    onCloseNumpad: numpad.close,
+    onPressNumpadKey: numpad.pressKey,
     onActivateWatchControl: handleActivateWatchControl,
     onSelectZapIndex: handleSelectZapIndex,
     onOpenSources,
@@ -225,15 +226,20 @@ export function LiveScreen({
   });
 
   const childOwnsTvKeys =
-    !numpadOpen &&
+    !numpad.open &&
     !isEmpty &&
     !isInitialLoading &&
     tvNav.tvZone === 'body' &&
-    (mode === 'channels' || mode === 'epg') &&
+    mode !== 'favorites' &&
     hasBody;
-
-  const bodyActiveScope = isActiveScope && tvNav.tvZone === 'body' && !numpadOpen;
-  const hasPendingItems = (live.activeCategory?.row.itemCount ?? 0) > 0;
+  const bodyActiveScope = isActiveScope && tvNav.tvZone === 'body' && !numpad.open;
+  const fallback = (
+    <LiveCategoryFallback
+      layout={layout}
+      hasPendingItems={(live.activeCategory?.row.itemCount ?? 0) > 0}
+      onOpenSources={onOpenSources}
+    />
+  );
 
   return (
     <View testID="live-screen" style={[styles.root, { backgroundColor: theme.colors.bgCanvas }]}>
@@ -270,10 +276,10 @@ export function LiveScreen({
                 testID="live-channels-numpad-toggle"
                 icon="keypad"
                 accessibilityLabel={i18n.t('live.numberPad')}
-                active={numpadOpen}
+                active={numpad.open}
                 focusable={!layout.isTv}
                 focused={tvNav.focusedNumpadToggle}
-                onPress={handleToggleNumpad}
+                onPress={numpad.toggle}
               />
             ) : null}
           </View>
@@ -290,7 +296,7 @@ export function LiveScreen({
           ) : null}
 
           <View style={styles.body}>
-            {mode === 'channels' && numpadOpen ? (
+            {mode === 'channels' && numpad.open ? (
               <View style={[styles.numpadAnchor, { right: layout.padX }]}>
                 <LiveNumberPad
                   visible
@@ -299,10 +305,10 @@ export function LiveScreen({
                   isTv={layout.isTv}
                   isTouch={layout.isTouch}
                   focusedKey={tvNav.focusedNumpadKey}
-                  onDigit={handlePressDigit}
-                  onClear={handleClearNumber}
-                  onSubmit={handleSubmitNumber}
-                  onClose={handleCloseNumpad}
+                  onDigit={numpad.pressDigit}
+                  onClear={numpad.clear}
+                  onSubmit={numpad.submit}
+                  onClose={numpad.close}
                 />
               </View>
             ) : null}
@@ -315,19 +321,17 @@ export function LiveScreen({
                   nowNextByKey={live.nowNextByKey}
                   nowNextVersion={live.nowNextVersion}
                   activeChannelKey={live.activeChannel?.key ?? activeMemory.activeChannelKey}
+                  favoriteKeys={live.favoriteKeys}
                   layout={layout}
                   hydrateNowNext={live.hydrateNowNext}
                   onWatchChannel={handleWatchAndPlay}
+                  onToggleFavorite={handleToggleFavorite}
                   onEdgeTop={tvNav.handleChildEdgeTop}
                   isActiveScope={bodyActiveScope}
                   {...(clockFn !== undefined ? { now: clockFn } : {})}
                 />
               ) : (
-                <LiveCategoryFallback
-                  layout={layout}
-                  hasPendingItems={hasPendingItems}
-                  onOpenSources={onOpenSources}
-                />
+                fallback
               )
             ) : mode === 'epg' ? (
               live.activeCategory && live.channelSource ? (
@@ -337,45 +341,40 @@ export function LiveScreen({
                   channelSource={live.channelSource}
                   sourceVersion={live.sourceVersion}
                   refreshToken={refreshToken + guideRefreshTick}
+                  favoriteKeys={live.favoriteKeys}
                   {...(nowMs !== undefined ? { nowMs } : {})}
                   onWatchChannel={handleWatchAndPlay}
+                  onToggleFavorite={handleToggleFavorite}
                   onGuideRefreshed={handleGuideRefreshed}
                   onEdgeTop={tvNav.handleChildEdgeTop}
                   isActiveScope={bodyActiveScope}
                 />
               ) : (
-                <LiveCategoryFallback
-                  layout={layout}
-                  hasPendingItems={hasPendingItems}
-                  onOpenSources={onOpenSources}
-                />
+                fallback
               )
             ) : (
               <LiveWatchStage
-                activeChannel={live.activeChannel}
-                activeChannelIndex={live.activeChannelIndex}
-                previousChannel={live.previousChannel}
-                channelSource={live.channelSource}
-                sourceVersion={live.sourceVersion}
+                activeChannel={activeFavoriteChannel}
+                activeChannelIndex={Math.max(0, activeFavoriteIdx)}
+                channelSource={live.favoriteSource}
+                sourceVersion={live.favoritesVersion}
                 nowNextByKey={live.nowNextByKey}
                 nowNextVersion={live.nowNextVersion}
                 zapDrawerOpen={activeMemory.zapDrawerOpen}
-                numpadOpen={numpadOpen}
-                numberBuffer={live.numberBuffer}
-                numberFeedback={live.numberFeedback}
+                isFavorite={
+                  activeFavoriteChannel !== null && live.favoriteKeys.has(activeFavoriteChannel.key)
+                }
+                isDesktop={viewport.formFactor === 'desktop'}
+                preview={preview}
                 layout={layout}
                 hydrateNowNext={live.hydrateNowNext}
                 onToggleZapDrawer={handleToggleZapDrawer}
-                onPreviousChannel={live.tunePreviousChannel}
-                onToggleNumpad={handleToggleNumpad}
-                onPressDigit={handlePressDigit}
-                onClearNumber={handleClearNumber}
-                onSubmitNumber={handleSubmitNumber}
+                onToggleFavorite={handleToggleFavorite}
+                onBrowseChannels={handleBrowseChannels}
                 onSelectChannel={live.tuneChannel}
-                onWatchFullscreen={handleWatchAndPlay}
+                onWatchFullscreen={handleWatchFromFavorites}
                 focusedControl={tvNav.focusedWatchControl}
                 focusedZapIndex={tvNav.focusedZapIndex}
-                focusedNumpadKey={tvNav.focusedNumpadKey}
                 {...(clockFn !== undefined ? { now: clockFn } : {})}
               />
             )}

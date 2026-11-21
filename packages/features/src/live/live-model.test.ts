@@ -7,6 +7,8 @@ import {
   computeNowLineRatio,
   computeProgramProgress,
   createBoundedTtlCache,
+  createStaticPagedListSource,
+  EMPTY_LIVE_MEMORY,
   EPG_SLOT_MS,
   EPG_VISIBLE_SPAN_MS,
   findProgramIndexAtTime,
@@ -170,5 +172,24 @@ describe('live-model pure helpers', () => {
       { channelKey: 'x:s1:live:1', now: makeProg(0, 60, 'Now'), next: null },
     ]);
     expect(map.get('x:s1:live:1')?.now?.title).toBe('Now');
+  });
+
+  it('creates a synchronous static PagedListSource and defaults EMPTY_LIVE_MEMORY cleanly', async () => {
+    expect(EMPTY_LIVE_MEMORY.mode).toBe('channels');
+    const source = createStaticPagedListSource(['a', 'b']);
+    expect(source.count()).toBe(2);
+    expect(source.get(0)).toBe('a');
+    expect(source.get(1)).toBe('b');
+    expect(source.get(-1)).toBeUndefined();
+    expect(source.get(2)).toBeUndefined();
+    expect(await source.loadItem(1)).toBe('b');
+    expect(await source.loadItem(9)).toBeUndefined();
+    source.prefetch(0, 2);
+    const unsub = source.onChange(() => undefined);
+    unsub();
+    source.dispose();
+    expect(source.count()).toBe(0);
+    expect(source.get(0)).toBeUndefined();
+    expect(await source.loadItem(0)).toBeUndefined();
   });
 });

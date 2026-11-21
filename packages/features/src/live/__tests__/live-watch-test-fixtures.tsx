@@ -4,8 +4,10 @@ import {
   type AndroidKeyEvent,
   type AndroidKeySource,
   I18nProvider,
+  IconButton,
   RemoteKeysProvider,
   ThemeProvider,
+  useI18n,
   useTheme,
   useViewport,
   type ViewportOverride,
@@ -16,7 +18,7 @@ import { useState } from 'react';
 import { View } from 'react-native';
 import { computeCatalogLayout } from '../../shared';
 import { LiveChannelsGrid } from '../LiveChannelsGrid';
-import { LiveCategoryBar, LiveModeSwitcher } from '../LiveChrome';
+import { LiveCategoryBar, LiveModeSwitcher, LiveNumberPad } from '../LiveChrome';
 import { LiveWatchStage } from '../LiveWatchStage';
 import type { LiveMode } from '../live-model';
 import { useLiveCatalog } from '../useLiveCatalog';
@@ -178,6 +180,7 @@ export function LiveHubHarness({
 }: HarnessProps) {
   const theme = useTheme();
   const viewport = useViewport();
+  const i18n = useI18n();
   const layout = computeCatalogLayout(viewport, theme);
   const [mode, setMode] = useState<LiveMode>(initialMode);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
@@ -187,6 +190,7 @@ export function LiveHubHarness({
   const live = useLiveCatalog({
     catalog,
     sources,
+    mode,
     selectedCategoryId,
     activeChannelKey,
     previousChannelKey,
@@ -196,12 +200,24 @@ export function LiveHubHarness({
 
   return (
     <View style={{ flex: 1 }}>
-      <LiveModeSwitcher
-        mode={mode}
-        onSelectMode={setMode}
-        isTv={layout.isTv}
-        isTouch={layout.isTouch}
-      />
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+        <LiveModeSwitcher
+          mode={mode}
+          onSelectMode={setMode}
+          isTv={layout.isTv}
+          isTouch={layout.isTouch}
+        />
+        {mode === 'channels' ? (
+          <IconButton
+            testID="live-channels-numpad-toggle"
+            icon="keypad"
+            accessibilityLabel={i18n.t('live.numberPad')}
+            active={numpadOpen}
+            focusable={!layout.isTv}
+            onPress={() => setNumpadOpen((v) => !v)}
+          />
+        ) : null}
+      </View>
       <LiveCategoryBar
         categories={live.categories}
         activeCategoryId={live.activeCategory?.row.id ?? null}
@@ -209,6 +225,21 @@ export function LiveHubHarness({
         layout={layout}
         onSelectCategory={setSelectedCategoryId}
       />
+      {mode === 'channels' && numpadOpen ? (
+        <LiveNumberPad
+          visible
+          buffer={live.numberBuffer}
+          feedback={live.numberFeedback}
+          isTv={layout.isTv}
+          isTouch={layout.isTouch}
+          onDigit={live.pressDigit}
+          onClear={live.clearNumber}
+          onSubmit={() => {
+            void live.submitNumberJump();
+          }}
+          onClose={() => setNumpadOpen(false)}
+        />
+      ) : null}
       {mode === 'channels' ? (
         <LiveChannelsGrid
           channelSource={live.channelSource}
@@ -216,9 +247,13 @@ export function LiveHubHarness({
           nowNextByKey={live.nowNextByKey}
           nowNextVersion={live.nowNextVersion}
           activeChannelKey={live.activeChannel?.key ?? null}
+          favoriteKeys={live.favoriteKeys}
           layout={layout}
           hydrateNowNext={live.hydrateNowNext}
           onWatchChannel={onWatchChannel}
+          onToggleFavorite={(ch) => {
+            void live.toggleFavorite(ch);
+          }}
           onEdgeTop={onEdgeTop}
           isActiveScope
           now={() => NOW_MS}
@@ -227,27 +262,15 @@ export function LiveHubHarness({
         <LiveWatchStage
           activeChannel={live.activeChannel}
           activeChannelIndex={live.activeChannelIndex}
-          previousChannel={live.previousChannel}
           channelSource={live.channelSource}
           sourceVersion={live.sourceVersion}
           nowNextByKey={live.nowNextByKey}
           nowNextVersion={live.nowNextVersion}
           zapDrawerOpen={zapDrawerOpen}
-          numpadOpen={numpadOpen}
-          numberBuffer={live.numberBuffer}
-          numberFeedback={live.numberFeedback}
           layout={layout}
           hydrateNowNext={live.hydrateNowNext}
           onToggleZapDrawer={() => setZapDrawerOpen((v) => !v)}
-          onPreviousChannel={() => {
-            live.tunePreviousChannel();
-          }}
-          onToggleNumpad={() => setNumpadOpen((v) => !v)}
-          onPressDigit={live.pressDigit}
-          onClearNumber={live.clearNumber}
-          onSubmitNumber={() => {
-            void live.submitNumberJump();
-          }}
+          onBrowseChannels={() => setMode('channels')}
           onSelectChannel={(ch, idx) => {
             live.tuneChannel(ch, idx);
           }}

@@ -24,10 +24,18 @@ interface EpgWindowCursorPort {
 type EpgFocusArea = 'toolbar' | 'grid';
 
 /** Ordered TV-focusable toolbar actions rendered above the EPG matrix. */
-type EpgToolbarAction = 'watch' | 'refresh' | 'earlier' | 'jump' | 'later';
+type EpgToolbarAction = 'watch' | 'favorite' | 'refresh' | 'earlier' | 'jump' | 'later';
 
-const EPG_TOOLBAR_ACTIONS: readonly EpgToolbarAction[] = [
+const BASE_TOOLBAR_ACTIONS: readonly EpgToolbarAction[] = [
   'watch',
+  'refresh',
+  'earlier',
+  'jump',
+  'later',
+];
+const FAV_TOOLBAR_ACTIONS: readonly EpgToolbarAction[] = [
+  'watch',
+  'favorite',
   'refresh',
   'earlier',
   'jump',
@@ -53,6 +61,7 @@ export interface UseEpgTimeCursorOptions {
   readonly activeNowMs: number;
   readonly epgData: EpgWindowCursorPort;
   readonly onWatchChannel: (channel: ItemRow, index: number) => void;
+  readonly onToggleFavorite?: (channel: ItemRow) => void;
   readonly onRefreshGuide?: () => void;
   readonly onEdgeTop?: () => void;
 }
@@ -91,10 +100,12 @@ export function useEpgTimeCursor({
   activeNowMs,
   epgData,
   onWatchChannel,
+  onToggleFavorite,
   onRefreshGuide,
   onEdgeTop,
 }: UseEpgTimeCursorOptions): EpgTimeCursorState {
   const { windowStartMs, panEarlier, panLater, jumpToLive, getProgrammes } = epgData;
+  const toolbarActions = onToggleFavorite ? FAV_TOOLBAR_ACTIONS : BASE_TOOLBAR_ACTIONS;
 
   const [focusedArea, setFocusedArea] = useState<EpgFocusArea>('grid');
   const [focusedToolbarIndex, setFocusedToolbarIndex] = useState(0);
@@ -113,8 +124,8 @@ export function useEpgTimeCursor({
   cursorRef.current.row = focusedRow;
   cursorRef.current.slot = focusedSlotIndex;
 
-  const callbacksRef = useRef({ onWatchChannel, onRefreshGuide, onEdgeTop });
-  callbacksRef.current = { onWatchChannel, onRefreshGuide, onEdgeTop };
+  const callbacksRef = useRef({ onWatchChannel, onToggleFavorite, onRefreshGuide, onEdgeTop });
+  callbacksRef.current = { onWatchChannel, onToggleFavorite, onRefreshGuide, onEdgeTop };
 
   const commitSlot = useCallback((slotIdx: number) => {
     cursorRef.current.slot = slotIdx;
@@ -222,10 +233,13 @@ export function useEpgTimeCursor({
 
   const activateToolbarAction = useCallback(
     (idx: number) => {
-      const action = EPG_TOOLBAR_ACTIONS[idx];
+      const action = toolbarActions[idx];
       if (action === 'watch') {
         const ch = channelSource.get(cursorRef.current.row);
         if (ch) callbacksRef.current.onWatchChannel(ch, cursorRef.current.row);
+      } else if (action === 'favorite') {
+        const ch = channelSource.get(cursorRef.current.row);
+        if (ch) callbacksRef.current.onToggleFavorite?.(ch);
       } else if (action === 'refresh') {
         callbacksRef.current.onRefreshGuide?.();
       } else if (action === 'earlier') {
@@ -236,7 +250,7 @@ export function useEpgTimeCursor({
         handlePanLater();
       }
     },
-    [channelSource, handleJumpToLive, handlePanEarlier, handlePanLater],
+    [channelSource, handleJumpToLive, handlePanEarlier, handlePanLater, toolbarActions],
   );
 
   const handleTvKey = useCallback(
@@ -259,7 +273,7 @@ export function useEpgTimeCursor({
           cursorRef.current.toolbarIdx = next;
           setFocusedToolbarIndex(next);
         } else if (event.key === 'right') {
-          const next = Math.min(EPG_TOOLBAR_ACTIONS.length - 1, cursorRef.current.toolbarIdx + 1);
+          const next = Math.min(toolbarActions.length - 1, cursorRef.current.toolbarIdx + 1);
           cursorRef.current.toolbarIdx = next;
           setFocusedToolbarIndex(next);
         }
@@ -287,11 +301,11 @@ export function useEpgTimeCursor({
         stepHorizontal(1);
       }
     },
-    [activateToolbarAction, channelCount, channelSource, moveRow, stepHorizontal],
+    [activateToolbarAction, channelCount, channelSource, moveRow, stepHorizontal, toolbarActions],
   );
 
   const focusedToolbarAction =
-    focusedArea === 'toolbar' ? (EPG_TOOLBAR_ACTIONS[focusedToolbarIndex] ?? null) : null;
+    focusedArea === 'toolbar' ? (toolbarActions[focusedToolbarIndex] ?? null) : null;
   const focusedProgramme = focusedSlots[focusedSlotIndex]?.programme ?? null;
 
   return useMemo<EpgTimeCursorState>(

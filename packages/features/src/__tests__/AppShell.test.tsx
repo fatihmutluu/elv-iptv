@@ -272,15 +272,17 @@ describe('AppShell', () => {
         expect(screen.getByTestId('live-channel-card-1')).toBeTruthy();
       });
 
+      await fireEvent.press(screen.getByTestId('live-channel-fav-1'));
       await fireEvent.press(screen.getByTestId('live-mode-epg'));
       await waitFor(() => {
         expect(screen.getByTestId('live-epg-view')).toBeTruthy();
         expect(screen.getByTestId('epg-preview-header')).toBeTruthy();
       });
-      await fireEvent.press(screen.getByTestId('live-mode-watch'));
+      await fireEvent.press(screen.getByTestId('live-mode-favorites'));
       await waitFor(() => {
         expect(screen.getByTestId('live-watch-stage')).toBeTruthy();
         expect(screen.getByTestId('live-zap-drawer')).toBeTruthy();
+        expect(screen.getByTestId('live-preview-surface')).toBeTruthy();
       });
       await fireEvent.press(screen.getByTestId('live-mode-channels'));
       await waitFor(() => {
@@ -684,6 +686,71 @@ describe('AppShell', () => {
           true,
         );
         expect(screen.getByTestId('search-movie-item-0')).toBeTruthy();
+      });
+    } finally {
+      await view?.unmount();
+      await env.cleanup();
+    }
+  });
+
+  it('stops and resumes embedded Live Favorites preview on appLifecycle background/active transitions', async () => {
+    const env = await openShellCatalog();
+    const { engine, videoHost } = createFakeHost();
+    let lifecycleListener: ((state: 'active' | 'background') => void) | null = null;
+    const appLifecycle = {
+      subscribe(listener: (state: 'active' | 'background') => void) {
+        lifecycleListener = listener;
+        return () => {
+          lifecycleListener = null;
+        };
+      },
+    };
+    let view: Awaited<ReturnType<typeof render>> | undefined;
+    try {
+      const added = await env.catalog.addSource({
+        kind: 'xtream',
+        name: 'Lifecycle IPTV',
+        server: 'http://sim.example.test',
+        username: 'demo',
+        password: ['de', 'mo'].join(''),
+      });
+      if (!added.ok) throw new Error('addSource failed');
+      await env.catalog.importSource(added.value.id);
+
+      view = await render(
+        <FormFactorProvider value="tv">
+          <I18nProvider i18n={createAppI18n('en')}>
+            <AppShell catalog={env.catalog} videoHost={videoHost} appLifecycle={appLifecycle} />
+          </I18nProvider>
+        </FormFactorProvider>,
+      );
+
+      await waitFor(() => expect(screen.getByTestId('home-screen')).toBeTruthy());
+      await fireEvent.press(screen.getByTestId('nav-tab-live'));
+      await waitFor(() => expect(screen.getByTestId('live-channel-fav-0')).toBeTruthy());
+      await fireEvent.press(screen.getByTestId('live-channel-fav-0'));
+      await fireEvent.press(screen.getByTestId('live-mode-favorites'));
+      await waitFor(() => {
+        expect(screen.getByTestId('live-preview-surface')).toBeTruthy();
+        expect(engine.openMedias()).toBe(1);
+      });
+
+      // Backgrounding mobile/TV releases embedded Live Favorites preview immediately
+      await act(async () => {
+        lifecycleListener?.('background');
+      });
+      await waitFor(() => {
+        expect(engine.openMedias()).toBe(0);
+        expect(screen.queryByTestId('live-preview-surface')).toBeNull();
+      });
+
+      // Returning foreground resumes the embedded preview cleanly
+      await act(async () => {
+        lifecycleListener?.('active');
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId('live-preview-surface')).toBeTruthy();
+        expect(engine.openMedias()).toBe(1);
       });
     } finally {
       await view?.unmount();

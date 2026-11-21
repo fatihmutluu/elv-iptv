@@ -193,7 +193,7 @@ describe('LiveChannelsGrid & LiveWatchStage', () => {
     await view.unmount();
   });
 
-  it('toggles Mini-Guide Zap Drawer, jumps via 0-9 Number Pad to #102, and jumps back via Previous Channel', async () => {
+  it('toggles Mini-Guide Zap Drawer in Favorites stage, omits prev/numpad clutter, and jumps via 0-9 Number Pad in Channels mode', async () => {
     const cat0 = makeLiveCategory(0, { itemCount: 10 });
     const cat1 = makeLiveCategory(1, { itemCount: 5 });
     const { catalog, channelByNumberCalls } = createLiveMockCatalog({
@@ -205,7 +205,7 @@ describe('LiveChannelsGrid & LiveWatchStage', () => {
     const view = await renderHarness({
       catalog,
       sources: [makeSource()],
-      initialMode: 'watch',
+      initialMode: 'favorites',
       onWatchChannel,
     });
 
@@ -215,9 +215,10 @@ describe('LiveChannelsGrid & LiveWatchStage', () => {
       expect(screen.getByTestId('live-stage-channel-title')).toBeTruthy();
     });
 
-    // Initial active channel is #101; previous channel button is disabled
+    // Initial active channel is #101; zero prev-channel or numpad clutter in Favorites stage
     expect(screen.getByTestId('live-stage-channel-title').props.children).toContain('101');
-    expect(screen.getByTestId('live-prev-channel').props.accessibilityState.disabled).toBe(true);
+    expect(screen.queryByTestId('live-prev-channel')).toBeNull();
+    expect(screen.queryByTestId('live-toggle-numpad')).toBeNull();
 
     // Toggle Mini-Guide off and back on
     await fireEvent.press(screen.getByTestId('live-toggle-miniguide'));
@@ -225,8 +226,16 @@ describe('LiveChannelsGrid & LiveWatchStage', () => {
     await fireEvent.press(screen.getByTestId('live-toggle-miniguide'));
     expect(screen.getByTestId('live-zap-drawer')).toBeTruthy();
 
-    // Open Number Pad, enter 1-0-2 and submit ↵
-    await fireEvent.press(screen.getByTestId('live-toggle-numpad'));
+    // Watch live CTA launches fullscreen playback for active channel #101
+    await fireEvent.press(screen.getByTestId('live-watch-fullscreen'));
+    expect(onWatchChannel).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'live:src-1:ch-0', num: 101 }),
+      0,
+    );
+
+    // Switch to Channels mode -> open Number Pad, enter 1-0-2 and submit ↵
+    await fireEvent.press(screen.getByTestId('live-mode-channels'));
+    await fireEvent.press(screen.getByTestId('live-channels-numpad-toggle'));
     expect(screen.getByTestId('live-numpad')).toBeTruthy();
 
     await fireEvent.press(screen.getByTestId('live-numpad-key-1'));
@@ -235,17 +244,11 @@ describe('LiveChannelsGrid & LiveWatchStage', () => {
     expect(screen.getByTestId('live-numpad-display').props.children).toBe('102');
 
     await fireEvent.press(screen.getByTestId('live-numpad-key-↵'));
-
     await waitFor(() => {
       expect(channelByNumberCalls).toContainEqual({ num: 102, sourceId: 'src-1' });
-      expect(screen.getByTestId('live-stage-channel-title').props.children).toContain('102');
-    });
-
-    // Previous channel button is now enabled and jumps back to #101
-    expect(screen.getByTestId('live-prev-channel').props.accessibilityState.disabled).toBe(false);
-    await fireEvent.press(screen.getByTestId('live-prev-channel'));
-    await waitFor(() => {
-      expect(screen.getByTestId('live-stage-channel-title').props.children).toContain('101');
+      expect(screen.getByTestId('live-channel-card-1').props.accessibilityState.selected).toBe(
+        true,
+      );
     });
 
     // Not-found channel number shows feedback
@@ -257,13 +260,6 @@ describe('LiveChannelsGrid & LiveWatchStage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('live-numpad-feedback').props.children).toBe('No channel #999');
     });
-
-    // Watch live CTA launches fullscreen playback for active channel #101
-    await fireEvent.press(screen.getByTestId('live-watch-fullscreen'));
-    expect(onWatchChannel).toHaveBeenCalledWith(
-      expect.objectContaining({ key: 'live:src-1:ch-0', num: 101 }),
-      0,
-    );
 
     await view.unmount();
   });
@@ -279,15 +275,15 @@ describe('LiveChannelsGrid & LiveWatchStage', () => {
     const view = await renderHarness({
       catalog,
       sources: [makeSource()],
-      initialMode: 'watch',
+      initialMode: 'channels',
       onWatchChannel: jest.fn(),
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId('live-stage-channel-title')).toBeTruthy();
+      expect(screen.getByTestId('live-channels-numpad-toggle')).toBeTruthy();
     });
 
-    await fireEvent.press(screen.getByTestId('live-toggle-numpad'));
+    await fireEvent.press(screen.getByTestId('live-channels-numpad-toggle'));
     await fireEvent.press(screen.getByTestId('live-numpad-key-1'));
     await fireEvent.press(screen.getByTestId('live-numpad-key-0'));
     await fireEvent.press(screen.getByTestId('live-numpad-key-3'));
@@ -300,7 +296,9 @@ describe('LiveChannelsGrid & LiveWatchStage', () => {
 
     await waitFor(() => {
       expect(channelByNumberCalls).toContainEqual({ num: 103, sourceId: 'src-1' });
-      expect(screen.getByTestId('live-stage-channel-title').props.children).toContain('103');
+      expect(screen.getByTestId('live-channel-card-2').props.accessibilityState.selected).toBe(
+        true,
+      );
     });
 
     // Enter another digit and unmount before timer fires — must NOT call channelByNumber again
@@ -325,7 +323,7 @@ describe('LiveChannelsGrid & LiveWatchStage', () => {
       {
         catalog,
         sources: [makeSource()],
-        initialMode: 'watch',
+        initialMode: 'favorites',
         onWatchChannel: jest.fn(),
       },
       {
@@ -342,7 +340,7 @@ describe('LiveChannelsGrid & LiveWatchStage', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('live-watch-stage')).toBeTruthy();
-      expect(screen.getByTestId('live-mode-watch')).toBeTruthy();
+      expect(screen.getByTestId('live-mode-favorites')).toBeTruthy();
     });
 
     // High Contrast AAA canvas (#000000)
@@ -350,9 +348,9 @@ describe('LiveChannelsGrid & LiveWatchStage', () => {
     expect(stageStyle.backgroundColor).toBe('#000000');
 
     // Mode switcher touch targets >= 40x40
-    const modeWatchStyle = StyleSheet.flatten(screen.getByTestId('live-mode-watch').props.style);
-    expect(modeWatchStyle.minHeight).toBeGreaterThanOrEqual(40);
-    expect(modeWatchStyle.minWidth).toBeGreaterThanOrEqual(40);
+    const modeFavStyle = StyleSheet.flatten(screen.getByTestId('live-mode-favorites').props.style);
+    expect(modeFavStyle.minHeight).toBeGreaterThanOrEqual(40);
+    expect(modeFavStyle.minWidth).toBeGreaterThanOrEqual(40);
 
     // Top overlay action buttons >= 40x40
     const miniGuideStyle = StyleSheet.flatten(
@@ -361,18 +359,16 @@ describe('LiveChannelsGrid & LiveWatchStage', () => {
     expect(miniGuideStyle.minHeight).toBeGreaterThanOrEqual(40);
     expect(miniGuideStyle.minWidth).toBeGreaterThanOrEqual(40);
 
-    // Open Number Pad and check key touch target size >= 40x40
-    await fireEvent.press(screen.getByTestId('live-toggle-numpad'));
-    const keyStyle = StyleSheet.flatten(screen.getByTestId('live-numpad-key-5').props.style);
-    expect(keyStyle.minHeight).toBeGreaterThanOrEqual(40);
-    expect(keyStyle.minWidth).toBeGreaterThanOrEqual(40);
-
-    // Switch to Channels mode via LiveModeSwitcher and verify single-column grid renders
+    // Switch to Channels mode via LiveModeSwitcher and verify single-column grid + numpad >= 40x40
     await fireEvent.press(screen.getByTestId('live-mode-channels'));
     await waitFor(() => {
       expect(screen.getByTestId('live-channels-grid')).toBeTruthy();
       expect(screen.getByTestId('live-channel-card-0')).toBeTruthy();
     });
+    await fireEvent.press(screen.getByTestId('live-channels-numpad-toggle'));
+    const keyStyle = StyleSheet.flatten(screen.getByTestId('live-numpad-key-5').props.style);
+    expect(keyStyle.minHeight).toBeGreaterThanOrEqual(40);
+    expect(keyStyle.minWidth).toBeGreaterThanOrEqual(40);
 
     await view.unmount();
   });
@@ -401,7 +397,7 @@ describe('LiveChannelsGrid & LiveWatchStage', () => {
             <LiveHubHarness
               catalog={catalog}
               sources={stableSources}
-              initialMode="watch"
+              initialMode="favorites"
               focusedZapIndex={focusedZapIndex}
               onWatchChannel={onWatch}
             />
@@ -481,7 +477,7 @@ describe('LiveChannelsGrid & LiveWatchStage', () => {
     await view.unmount();
   });
 
-  it('hydrates previousChannel from previousChannelKey on mount (via itemDetail) and resets channel history when sources become empty', async () => {
+  it('hydrates active channel on mount and shows empty favorites fallback when sources become empty', async () => {
     const cat = makeLiveCategory(0, { itemCount: 500 });
     const { catalog } = createLiveMockCatalog({ categories: [cat], totalChannels: 500 });
     const stableI18n = createAppI18n('en');
@@ -501,7 +497,7 @@ describe('LiveChannelsGrid & LiveWatchStage', () => {
             <LiveHubHarness
               catalog={catalog}
               sources={sources}
-              initialMode="watch"
+              initialMode="favorites"
               activeChannelKey="live:src-1:ch-1"
               previousChannelKey="live:src-1:ch-400"
               onWatchChannel={onWatch}
@@ -515,20 +511,13 @@ describe('LiveChannelsGrid & LiveWatchStage', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('live-stage-channel-title').props.children).toContain('102');
-      expect(screen.getByTestId('live-prev-channel').props.accessibilityState.disabled).toBe(false);
+      expect(catalog.itemDetail).toHaveBeenCalledWith('live:src-1:ch-400');
     });
 
-    // Pressing Previous Channel jumps cleanly to #501 (live:src-1:ch-400)
-    await fireEvent.press(screen.getByTestId('live-prev-channel'));
-    await waitFor(() => {
-      expect(screen.getByTestId('live-stage-channel-title').props.children).toContain('501');
-    });
-
-    // Emptying sources resets active/previous channel history cleanly
+    // Emptying sources resets active channel and shows empty favorites stage cleanly
     await view.rerender(buildTree([]));
     await waitFor(() => {
-      expect(screen.getByTestId('live-prev-channel').props.accessibilityState.disabled).toBe(true);
-      expect(screen.getByTestId('live-stage-channel-title').props.children).toBe('Live');
+      expect(screen.getByTestId('live-favorites-empty')).toBeTruthy();
     });
 
     await view.unmount();

@@ -17,6 +17,86 @@ export interface LiveNumberJumpState {
   readonly submitNumberJump: () => Promise<ItemRow | null>;
 }
 
+/** Visibility and keypad dispatch controller returned by {@link useLiveNumpadOverlay}. */
+export interface LiveNumpadOverlayState {
+  readonly open: boolean;
+  readonly pressDigit: (digit: string) => void;
+  readonly clear: () => void;
+  readonly close: () => void;
+  readonly toggle: () => void;
+  readonly submit: () => void;
+  readonly pressKey: (key: string) => void;
+  readonly notifyChannelResolved: () => void;
+}
+
+/**
+ * Manages `LiveNumberPad` popover visibility, auto-close upon channel resolution, and keypad
+ * dispatch (`C` / `↵` / `0–9`) cleanly outside `LiveScreen`.
+ */
+export function useLiveNumpadOverlay(
+  jump: Pick<
+    LiveNumberJumpState,
+    'numberFeedback' | 'pressDigit' | 'clearNumber' | 'submitNumberJump'
+  >,
+): LiveNumpadOverlayState {
+  const [open, setOpen] = useState(false);
+  const pendingRef = useRef(false);
+
+  useEffect(() => {
+    if (jump.numberFeedback !== null) pendingRef.current = false;
+  }, [jump.numberFeedback]);
+
+  const clear = useCallback(() => {
+    pendingRef.current = false;
+    jump.clearNumber();
+  }, [jump.clearNumber]);
+
+  const close = useCallback(() => {
+    clear();
+    setOpen(false);
+  }, [clear]);
+
+  const toggle = useCallback(() => {
+    setOpen((prev) => {
+      if (prev) clear();
+      return !prev;
+    });
+  }, [clear]);
+
+  const pressDigit = useCallback(
+    (digit: string) => {
+      pendingRef.current = true;
+      jump.pressDigit(digit);
+    },
+    [jump.pressDigit],
+  );
+
+  const submit = useCallback(() => {
+    void jump.submitNumberJump();
+  }, [jump.submitNumberJump]);
+
+  const pressKey = useCallback(
+    (key: string) => {
+      if (key === 'C') clear();
+      else if (key === '↵') submit();
+      else pressDigit(key);
+    },
+    [clear, pressDigit, submit],
+  );
+
+  const notifyChannelResolved = useCallback(() => {
+    if (pendingRef.current) {
+      pendingRef.current = false;
+      setOpen(false);
+    }
+  }, []);
+
+  return useMemo<LiveNumpadOverlayState>(
+    () => ({ open, pressDigit, clear, close, toggle, submit, pressKey, notifyChannelResolved }),
+    [clear, close, notifyChannelResolved, open, pressDigit, pressKey, submit, toggle],
+  );
+}
+
 /**
  * Manages `0–9` channel number entry, debounced auto-tune (`NUMBER_JUMP_TIMEOUT_MS`), explicit
  * submit via `catalog.channelByNumber`, stale-request cancellation, and unmount timer cleanup.

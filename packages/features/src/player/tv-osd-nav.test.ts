@@ -20,8 +20,8 @@ describe('availableTvOsdActions', () => {
   it('lists every mounted VOD button in OSD order', () => {
     expect(availableTvOsdActions(FULL)).toEqual([
       'back',
-      'playPause',
       'seekBack',
+      'playPause',
       'seekForward',
       'tracks',
       'retry',
@@ -44,8 +44,8 @@ describe('availableTvOsdActions', () => {
   it('hides tracks and retry when unavailable', () => {
     expect(availableTvOsdActions({ ...FULL, hasTracks: false, showRetry: false })).toEqual([
       'back',
-      'playPause',
       'seekBack',
+      'playPause',
       'seekForward',
     ]);
   });
@@ -60,8 +60,8 @@ describe('availableTvOsdActions', () => {
       }),
     ).toEqual([
       'back',
-      'playPause',
       'seekBack',
+      'playPause',
       'seekForward',
       'tracks',
       'settings',
@@ -127,8 +127,9 @@ describe('moveTvOsdAction', () => {
   const actions = availableTvOsdActions(FULL);
 
   it('moves left and right and stops at both ends', () => {
-    expect(moveTvOsdAction('playPause', actions, 1)).toBe('seekBack');
-    expect(moveTvOsdAction('playPause', actions, -1)).toBe('back');
+    expect(moveTvOsdAction('playPause', actions, 1)).toBe('seekForward');
+    expect(moveTvOsdAction('playPause', actions, -1)).toBe('seekBack');
+    expect(moveTvOsdAction('seekBack', actions, -1)).toBe('back');
     expect(moveTvOsdAction('back', actions, -1)).toBe('back');
     expect(moveTvOsdAction('retry', actions, 1)).toBe('retry');
   });

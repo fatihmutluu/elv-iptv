@@ -2,10 +2,13 @@ import type { MediaTracks } from '@elv/playback';
 import { describe, expect, it } from 'vitest';
 import {
   clampSettingsMenu,
+  formatPlaybackSpeed,
   initialSettingsMenu,
+  PLAYBACK_SPEED_OPTIONS,
   routeSettingsMenuKey,
   SETTINGS_ROOT_ITEMS,
   type SettingsMenuState,
+  settingsRootItems,
   settingsRowCount,
 } from './settings-menu-nav';
 
@@ -212,5 +215,68 @@ describe('settings-menu-nav', () => {
         TRACKS,
       ),
     ).toBeNull();
+  });
+
+  it('supports VOD playback speed submenu (0.5x-2x) with D-pad navigation and clamping', () => {
+    expect(PLAYBACK_SPEED_OPTIONS).toEqual([0.5, 0.75, 1, 1.25, 1.5, 2]);
+    expect(initialSettingsMenu('speed', { playbackSpeed: 1.5 })).toEqual({
+      view: 'speed',
+      index: 4,
+    });
+    expect(formatPlaybackSpeed(1)).toBe('1×');
+    expect(formatPlaybackSpeed(1.25)).toBe('1.25×');
+    expect(settingsRootItems(false)).toEqual(['subtitles', 'audio', 'stats']);
+    expect(settingsRootItems(true)).toEqual(['subtitles', 'audio', 'speed', 'stats']);
+    expect(settingsRowCount('root', TRACKS, { isVod: true })).toBe(4);
+    expect(settingsRowCount('speed', TRACKS, { isVod: true })).toBe(6);
+
+    // Clamping speed view on non-VOD returns to root
+    expect(clampSettingsMenu({ view: 'speed', index: 2 }, TRACKS, { isVod: false })).toEqual({
+      view: 'root',
+      index: 0,
+    });
+
+    // Enter speed from root index 2 on VOD -> lands on current playbackSpeed (1.5 -> index 4)
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 2 },
+        TRACKS,
+        { isVod: true, playbackSpeed: 1.5 },
+      ),
+    ).toEqual({
+      kind: 'state',
+      state: { view: 'speed', index: 4 },
+    });
+
+    // Select speed option emits speed intent
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'speed', index: 5 },
+        TRACKS,
+        { isVod: true, playbackSpeed: 1 },
+      ),
+    ).toEqual({ kind: 'speed', rate: 2 });
+
+    // Left / Back from speed returns to root index 2
+    expect(
+      routeSettingsMenuKey(
+        { key: 'left', kind: 'press', time: 0 },
+        { view: 'speed', index: 2 },
+        TRACKS,
+        { isVod: true },
+      ),
+    ).toEqual({ kind: 'state', state: { view: 'root', index: 2 } });
+
+    // Stats on VOD is index 3
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 3 },
+        TRACKS,
+        { isVod: true },
+      ),
+    ).toEqual({ kind: 'toggleStats' });
   });
 });

@@ -2,6 +2,7 @@ import type { AppI18n } from '@elv/i18n';
 import type { MediaTracks } from '@elv/playback';
 import {
   type FormFactor,
+  Icon,
   useTheme,
   webBackdropBlur,
   webCursorPointer,
@@ -73,16 +74,6 @@ function TrackRow({
         !isTv ? webCursorPointer() : undefined,
       ]}
     >
-      <View
-        style={[
-          styles.radioDot,
-          {
-            borderRadius: theme.radius.pill,
-            borderColor: selected ? theme.colors.accent : theme.colors.textMuted,
-            backgroundColor: selected ? theme.colors.accent : 'transparent',
-          },
-        ]}
-      />
       <Text
         numberOfLines={1}
         style={[
@@ -96,6 +87,7 @@ function TrackRow({
       >
         {label}
       </Text>
+      {selected ? <Icon name="check" size={16} color={theme.colors.accent} /> : null}
     </Pressable>
   );
 }
@@ -170,7 +162,7 @@ export function TrackPickerModal({
         webBackdropBlur(20),
       ]}
     >
-      <View style={styles.headerRow}>
+      <View style={[styles.headerRow, { borderBottomColor: theme.colors.surfaceBorder }]}>
         <Text
           testID="player-tracks-title"
           style={[
@@ -286,6 +278,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 12,
+    paddingBottom: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   headingTv: {
     fontSize: 20,
@@ -325,11 +319,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     marginBottom: 6,
-  },
-  radioDot: {
-    width: 10,
-    height: 10,
-    borderWidth: 1.5,
   },
   optionText: {
     flex: 1,

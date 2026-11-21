@@ -21,7 +21,11 @@ export {
   type LiveNumberPadProps,
 } from './LiveChrome';
 export { LiveScreen, type LiveScreenProps } from './LiveScreen';
-export { LiveWatchStage, type LiveWatchStageProps } from './LiveWatchStage';
+export {
+  type LiveStagePreview,
+  LiveWatchStage,
+  type LiveWatchStageProps,
+} from './LiveWatchStage';
 export { LiveZapDrawer, type LiveZapDrawerProps, ZAP_DRAWER_WIDTH } from './LiveZapDrawer';
 export {
   appendNumberDigit,
@@ -31,6 +35,7 @@ export {
   computeNowLineRatio,
   computeProgramProgress,
   createBoundedTtlCache,
+  createStaticPagedListSource,
   EMPTY_LIVE_MEMORY,
   EPG_CACHE_MAX_ENTRIES,
   EPG_CACHE_TTL_MS,

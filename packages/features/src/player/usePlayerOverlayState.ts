@@ -26,6 +26,8 @@ export interface PlayerOverlayLive {
   tracks: MediaTracks;
   hasTracks: boolean;
   hasService: boolean;
+  isVod: boolean;
+  playbackSpeed: number;
 }
 
 /**
@@ -36,6 +38,7 @@ export function usePlayerOverlayState(params: {
   formFactor: FormFactor;
   itemKey: string;
   isVod: boolean;
+  playbackSpeed?: number;
   statusKind: PlaybackStatus['kind'];
   tracks: MediaTracks;
   hasTracks: boolean;
@@ -83,7 +86,7 @@ export function usePlayerOverlayState(params: {
   const tvScrubberFocused =
     isTv && isVod && rawTvScrubberFocused && !locked && !tracksOpen && !settingsOpen && !osdHidden;
   const pickerCursor = clampPickerCursor(rawPickerCursor, tracks);
-  const settingsMenu = clampSettingsMenu(rawSettingsMenu, tracks);
+  const settingsMenu = clampSettingsMenu(rawSettingsMenu, tracks, { isVod });
   const availableOsd = availableTvOsdActions({
     isVod,
     hasService,
@@ -109,15 +112,14 @@ export function usePlayerOverlayState(params: {
     tracks,
     hasTracks,
     hasService,
+    isVod,
+    playbackSpeed: params.playbackSpeed ?? 1,
   };
   const liveRef = useRef<PlayerOverlayLive>(liveSnapshot);
   liveRef.current = liveSnapshot;
-
   const prevItemKeyRef = useRef(itemKey);
   const hoverGuardRef = useRef<TouchHoverGuard | null>(null);
-  if (hoverGuardRef.current === null) {
-    hoverGuardRef.current = createTouchHoverGuard({ now: () => clockRef.current.now() });
-  }
+  hoverGuardRef.current ??= createTouchHoverGuard({ now: () => clockRef.current.now() });
   const clearTvFocus = useCallback((): void => {
     liveRef.current.tvOsdFocused = false;
     liveRef.current.tvScrubberFocused = false;
@@ -242,9 +244,7 @@ export function usePlayerOverlayState(params: {
     setOsdHidden(false);
   };
 
-  const handleTouchActivity = (): void => {
-    hoverGuardRef.current?.markTouch();
-  };
+  const handleTouchActivity = (): void => hoverGuardRef.current?.markTouch();
 
   const handlePointerHover = (pointerType?: string): void => {
     if (!hoverGuardRef.current?.shouldAllowHover(pointerType)) return;
@@ -306,7 +306,12 @@ export function usePlayerOverlayState(params: {
   const openSettings = (view: SettingsMenuView = 'root'): void => {
     if (!liveRef.current.hasService) return;
     cancelScrub();
-    const initial = clampSettingsMenu(initialSettingsMenu(view), liveRef.current.tracks);
+    const opts = { isVod: liveRef.current.isVod, playbackSpeed: liveRef.current.playbackSpeed };
+    const initial = clampSettingsMenu(
+      initialSettingsMenu(view, opts),
+      liveRef.current.tracks,
+      opts,
+    );
     liveRef.current.settingsMenu = initial;
     liveRef.current.settingsOpen = true;
     liveRef.current.tracksOpen = false;
@@ -338,8 +343,12 @@ export function usePlayerOverlayState(params: {
     liveRef.current.settingsOpen = false;
     setSettingsOpen(false);
   };
-  const openSettingsView = (view: SettingsMenuView): void =>
-    updateSettingsMenu(clampSettingsMenu(initialSettingsMenu(view), liveRef.current.tracks));
+  const openSettingsView = (view: SettingsMenuView): void => {
+    const opts = { isVod: liveRef.current.isVod, playbackSpeed: liveRef.current.playbackSpeed };
+    updateSettingsMenu(
+      clampSettingsMenu(initialSettingsMenu(view, opts), liveRef.current.tracks, opts),
+    );
+  };
   const toggleStats = (): void => setStatsVisible((prev) => !prev);
   const unlockControls = (): void => {
     liveRef.current.locked = false;

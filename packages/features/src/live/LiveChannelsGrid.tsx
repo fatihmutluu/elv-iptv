@@ -83,9 +83,11 @@ export interface LiveChannelsGridProps {
   readonly nowNextByKey: ReadonlyMap<string, NowNextEntry>;
   readonly nowNextVersion: number;
   readonly activeChannelKey: string | null;
+  readonly favoriteKeys?: ReadonlySet<string>;
   readonly layout: CatalogLayoutMetrics;
   readonly hydrateNowNext: (channelKeys: readonly string[]) => void;
   readonly onWatchChannel: (channel: ItemRow, index: number) => void;
+  readonly onToggleFavorite?: (channel: ItemRow) => void;
   readonly onEdgeTop?: () => void;
   readonly isActiveScope?: boolean;
   /** Injectable epoch clock in milliseconds for live progress bars (defaults to `() => Date.now()`). */
@@ -99,7 +101,8 @@ export interface LiveChannelsGridProps {
 export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
   const { channelSource, sourceVersion, nowNextByKey, nowNextVersion, activeChannelKey, layout } =
     p;
-  const { hydrateNowNext, onWatchChannel, onEdgeTop, isActiveScope = false, now } = p;
+  const { favoriteKeys, hydrateNowNext, onWatchChannel, onToggleFavorite, onEdgeTop } = p;
+  const { isActiveScope = false, now } = p;
   const theme = useTheme();
   const i18n = useI18n();
   const viewport = useViewport();
@@ -123,6 +126,8 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
       liveBadge: i18n.t('ui.liveBadge'),
       upNext: i18n.t('live.upNext'),
       noProgram: i18n.t('live.noProgramInfo'),
+      favoriteAdd: i18n.t('live.favoriteAdd'),
+      favoriteRemove: i18n.t('live.favoriteRemove'),
     }),
     [cardHeight, cols, i18n, layout.gridGap, layout.isTouch, layout.isTv, layout.padX, rowHeight],
   );
@@ -242,16 +247,18 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
           nowNextByKey={nowNextByKey}
           nowMs={nowMs}
           activeChannelKey={activeChannelKey}
+          {...(favoriteKeys !== undefined ? { favoriteKeys } : {})}
           focusedCol={null}
           onWatchChannel={onWatchChannel}
+          {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
         />
       );
     },
-    [activeChannelKey, nowMs, nowNextByKey, onWatchChannel, shared],
+    [activeChannelKey, favoriteKeys, nowMs, nowNextByKey, onToggleFavorite, onWatchChannel, shared],
   );
   const extraData = useMemo(
-    () => ({ sourceVersion, nowNextVersion, activeChannelKey }),
-    [activeChannelKey, nowNextVersion, sourceVersion],
+    () => ({ sourceVersion, nowNextVersion, activeChannelKey, favoriteKeys }),
+    [activeChannelKey, favoriteKeys, nowNextVersion, sourceVersion],
   );
 
   // Memoized TV row slices independent of `focusPos.col` so Left/Right preserves React.memo on sibling rows.
@@ -279,8 +286,10 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
               nowNextByKey={nowNextByKey}
               nowMs={nowMs}
               activeChannelKey={activeChannelKey}
+              {...(favoriteKeys !== undefined ? { favoriteKeys } : {})}
               focusedCol={isActiveScope && focusPos.row === row.rowIndex ? focusPos.col : null}
               onWatchChannel={onWatchChannel}
+              {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
             />
           ))}
         </View>

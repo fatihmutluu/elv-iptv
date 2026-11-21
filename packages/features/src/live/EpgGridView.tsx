@@ -35,7 +35,9 @@ export interface EpgGridViewProps {
   readonly sourceVersion: number;
   readonly refreshToken: number;
   readonly nowMs?: number;
+  readonly favoriteKeys?: ReadonlySet<string>;
   readonly onWatchChannel: (channel: ItemRow, index: number) => void;
+  readonly onToggleFavorite?: (channel: ItemRow) => void;
   readonly onGuideRefreshed?: () => void;
   readonly onEdgeTop?: () => void;
   readonly isActiveScope?: boolean;
@@ -54,7 +56,9 @@ export function EpgGridView({
   sourceVersion,
   refreshToken,
   nowMs,
+  favoriteKeys,
   onWatchChannel,
+  onToggleFavorite,
   onGuideRefreshed,
   onEdgeTop,
   isActiveScope = true,
@@ -107,6 +111,7 @@ export function EpgGridView({
     activeNowMs,
     epgData,
     onWatchChannel,
+    ...(onToggleFavorite !== undefined ? { onToggleFavorite } : {}),
     onRefreshGuide: handleRefreshGuide,
     onEdgeTop,
   });
@@ -261,7 +266,9 @@ export function EpgGridView({
 
   const tvToolbarAction = isTv && isActiveScope ? cursor.focusedToolbarAction : null;
   const previewFocusedAction =
-    tvToolbarAction === 'watch' || tvToolbarAction === 'refresh' ? tvToolbarAction : null;
+    tvToolbarAction === 'watch' || tvToolbarAction === 'favorite' || tvToolbarAction === 'refresh'
+      ? tvToolbarAction
+      : null;
   const rulerFocusedButton =
     tvToolbarAction === 'earlier' || tvToolbarAction === 'jump' || tvToolbarAction === 'later'
       ? tvToolbarAction
@@ -280,8 +287,13 @@ export function EpgGridView({
         refreshingGuide={epgData.refreshingGuide}
         isTv={isTv}
         isPortrait={isPortrait}
+        isFavorite={
+          cursor.focusedChannel !== undefined &&
+          (favoriteKeys?.has(cursor.focusedChannel.key) ?? false)
+        }
         focusedAction={previewFocusedAction}
         onWatchChannel={onWatchChannel}
+        {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
         onRefreshGuide={handleRefreshGuide}
       />
 

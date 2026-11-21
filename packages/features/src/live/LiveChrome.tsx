@@ -2,7 +2,8 @@ import type { KeyEvent } from '@elv/focus-core';
 import type { MessageId } from '@elv/i18n';
 import {
   CtaButton,
-  FilterChip,
+  EditorialCategoryBar,
+  type EditorialCategoryItem,
   Icon,
   type IconName,
   SkeletonBox,
@@ -15,15 +16,8 @@ import {
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { type ComponentRef, memo, type ReactElement, useCallback, useEffect, useRef } from 'react';
-import {
-  type LayoutChangeEvent,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { memo, type ReactElement, useCallback, useMemo } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { CatalogLayoutMetrics, DisplayCategory } from '../shared';
 import type { LiveMode } from './live-model';
 
@@ -37,7 +31,12 @@ interface ModeOption {
 }
 
 const LIVE_MODES: readonly ModeOption[] = [
-  { mode: 'watch', testID: 'live-mode-watch', labelKey: 'live.mode.watch', icon: 'play' },
+  {
+    mode: 'favorites',
+    testID: 'live-mode-favorites',
+    labelKey: 'live.mode.favorites',
+    icon: 'star',
+  },
   {
     mode: 'channels',
     testID: 'live-mode-channels',
@@ -47,7 +46,7 @@ const LIVE_MODES: readonly ModeOption[] = [
   { mode: 'epg', testID: 'live-mode-epg', labelKey: 'live.mode.guide', icon: 'list' },
 ];
 
-const ModePillButton = memo(function ModePillButtonInner(p: {
+const ModeSegmentButton = memo(function ModeSegmentButtonInner(p: {
   readonly option: ModeOption;
   readonly label: string;
   readonly selected: boolean;
@@ -72,11 +71,11 @@ const ModePillButton = memo(function ModePillButtonInner(p: {
       focusable={!p.isTv}
       onPress={handlePress}
       style={({ pressed }) => [
-        styles.modePill,
+        styles.modeBtn,
         {
           minHeight: p.isTouch ? 40 : 34,
           ...(p.isTouch ? { minWidth: 40 } : {}),
-          borderRadius: theme.radius.pill,
+          borderRadius: theme.radius.button,
           backgroundColor: bg,
           borderWidth: p.focused ? theme.focus.ringWidth : 0,
           borderColor: p.focused ? theme.colors.focusRingColor : 'transparent',
@@ -108,7 +107,7 @@ export interface LiveModeSwitcherProps {
 }
 
 /**
- * Unified Cinema Quietude segmented pill switcher (`Watch` | `Channels` | `TV Guide`) keeping all
+ * Unified Cinema Quietude segmented bar (`Favorites` | `Channels` | `TV Guide`) keeping all
  * Live TV sub-modes inside a single top-level destination (`UI_UX_PHILOSOPHY.md` §2.1).
  */
 export const LiveModeSwitcher = memo(function LiveModeSwitcherInner({
@@ -126,15 +125,15 @@ export const LiveModeSwitcher = memo(function LiveModeSwitcherInner({
       style={[
         styles.modeBar,
         {
-          backgroundColor: theme.colors.glassBg,
-          borderColor: theme.colors.glassBorder,
-          borderRadius: theme.radius.pill,
+          backgroundColor: theme.colors.bgSurface,
+          borderColor: theme.colors.surfaceBorder,
+          borderRadius: theme.radius.card,
         },
         webBackdropBlur(12),
       ]}
     >
       {LIVE_MODES.map((opt, idx) => (
-        <ModePillButton
+        <ModeSegmentButton
           key={opt.mode}
           option={opt}
           label={i18n.t(opt.labelKey)}
@@ -149,37 +148,6 @@ export const LiveModeSwitcher = memo(function LiveModeSwitcherInner({
   );
 });
 
-const LiveCategoryChip = memo(function LiveCategoryChipInner(p: {
-  readonly category: DisplayCategory;
-  readonly index: number;
-  readonly selected: boolean;
-  readonly isTv: boolean;
-  readonly focused: boolean;
-  readonly onSelect: (categoryId: string) => void;
-  readonly onMeasureX: (index: number, x: number) => void;
-}): ReactElement {
-  const handlePress = useCallback(
-    () => p.onSelect(p.category.row.id),
-    [p.category.row.id, p.onSelect],
-  );
-  const handleLayout = useCallback(
-    (e: LayoutChangeEvent) => p.onMeasureX(p.index, e.nativeEvent.layout.x),
-    [p.index, p.onMeasureX],
-  );
-  return (
-    <View onLayout={handleLayout}>
-      <FilterChip
-        testID={`live-cat-chip-${p.index}`}
-        label={p.category.label}
-        selected={p.selected}
-        focusable={!p.isTv}
-        focused={p.focused}
-        onPress={handlePress}
-      />
-    </View>
-  );
-});
-
 /** Props of {@link LiveCategoryBar}. */
 export interface LiveCategoryBarProps {
   readonly categories: readonly DisplayCategory[];
@@ -190,7 +158,7 @@ export interface LiveCategoryBarProps {
   readonly onSelectCategory: (categoryId: string) => void;
 }
 
-/** Horizontal live category `FilterChip` bar with TV auto-scroll and tabular channel count. */
+/** Editorial underline live category bar (`EditorialCategoryBar`) with tabular channel count. */
 export const LiveCategoryBar = memo(function LiveCategoryBarInner({
   categories,
   activeCategoryId,
@@ -201,49 +169,19 @@ export const LiveCategoryBar = memo(function LiveCategoryBarInner({
 }: LiveCategoryBarProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
-  const scrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
-  const chipXRef = useRef<Map<number, number>>(new Map());
-  const recordChipX = useCallback((index: number, x: number) => {
-    chipXRef.current.set(index, x);
-  }, []);
 
-  useEffect(() => {
-    if (!layout.isTv || focusedChipIndex === null) return;
-    const x = chipXRef.current.get(focusedChipIndex);
-    scrollRef.current?.scrollTo({
-      x: Math.max(0, (x ?? focusedChipIndex * 116) - layout.padX),
-      animated: !theme.reduceMotion,
-    });
-  }, [focusedChipIndex, layout.isTv, layout.padX, theme.reduceMotion]);
+  const items = useMemo<readonly EditorialCategoryItem[]>(
+    () =>
+      categories.map((cat, idx) => ({
+        id: cat.row.id,
+        label: cat.label,
+        testID: `live-cat-chip-${idx}`,
+      })),
+    [categories],
+  );
 
-  return (
-    <View
-      testID="live-category-chips"
-      style={[styles.rowCenter, { paddingHorizontal: layout.padX, gap: 12 }]}
-    >
-      <ScrollView
-        ref={scrollRef}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.flex1}
-        contentContainerStyle={[
-          styles.rowCenter,
-          { paddingVertical: layout.isTv ? 8 : 4, gap: theme.spacing.xs },
-        ]}
-      >
-        {categories.map((cat, idx) => (
-          <LiveCategoryChip
-            key={cat.row.id}
-            category={cat}
-            index={idx}
-            selected={cat.row.id === activeCategoryId}
-            isTv={layout.isTv}
-            focused={layout.isTv && focusedChipIndex === idx}
-            onSelect={onSelectCategory}
-            onMeasureX={recordChipX}
-          />
-        ))}
-      </ScrollView>
+  const countBadge = useMemo(
+    () => (
       <Text
         testID="live-channel-count"
         numberOfLines={1}
@@ -256,7 +194,22 @@ export const LiveCategoryBar = memo(function LiveCategoryBarInner({
       >
         {i18n.t('live.channelsCount', { count: channelCount })}
       </Text>
-    </View>
+    ),
+    [channelCount, i18n, theme.colors.textMuted, theme.typography.caption],
+  );
+
+  return (
+    <EditorialCategoryBar
+      testID="live-category-chips"
+      items={items}
+      activeId={activeCategoryId}
+      onSelect={onSelectCategory}
+      pickerLabel={i18n.t('catalog.categories')}
+      rightAccessory={countBadge}
+      padX={layout.padX}
+      isTv={layout.isTv}
+      focusedIndex={focusedChipIndex}
+    />
   );
 });
 
@@ -283,11 +236,11 @@ export function LiveLoadingSkeleton({
   return (
     <View testID="live-skeleton" style={[styles.skeletonRoot, { paddingHorizontal: layout.padX }]}>
       <View style={styles.rowCenter}>
-        <SkeletonBox width={240} height={38} borderRadius={theme.radius.pill} />
+        <SkeletonBox width={240} height={38} borderRadius={theme.radius.card} />
       </View>
-      <View style={[styles.rowCenter, { gap: theme.spacing.xs }]}>
+      <View style={[styles.rowCenter, { gap: theme.spacing.sm }]}>
         {SKELETON_CHIPS.map((slot) => (
-          <SkeletonBox key={slot} width={88} height={32} borderRadius={theme.radius.pill} />
+          <SkeletonBox key={slot} width={88} height={24} borderRadius={theme.radius.button} />
         ))}
       </View>
       <View style={styles.skeletonGrid}>
@@ -367,7 +320,6 @@ export function LiveCategoryFallback({
 }
 
 const styles = StyleSheet.create({
-  flex1: { flex: 1 },
   noShrink: { flexShrink: 0 },
   rowCenter: { flexDirection: 'row', alignItems: 'center' },
   modeBar: {
@@ -378,7 +330,7 @@ const styles = StyleSheet.create({
     gap: 4,
     borderWidth: 1,
   },
-  modePill: {
+  modeBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

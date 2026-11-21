@@ -1,22 +1,26 @@
+import type { PlaybackClock, PlaybackService } from '@elv/playback';
 import {
-  type ClockAnchor,
-  type PlaybackClock,
-  type PlaybackService,
-  positionAt,
-} from '@elv/playback';
-import { TABULAR_NUMS_STYLE, useTheme, webCursorPointer, webTransition } from '@elv/ui-kit';
-import { type ReactElement, useRef } from 'react';
+  TABULAR_NUMS_STYLE,
+  useTheme,
+  webBackdropBlur,
+  webCursorPointer,
+  webTransition,
+} from '@elv/ui-kit';
+import { type ReactElement, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { usePlaybackTicker } from './usePlaybackTicker';
+import {
+  clampRatio,
+  formatPlaybackPosition,
+  type PressGeometry,
+  previewProgressSnapshot,
+  readEventRatio,
+  readProgressSnapshot,
+  readTrackRect,
+  sameProgressSnapshot,
+} from './vod-progress-helpers';
 
-/** Formats a millisecond playback timestamp as `m:ss` or `h:mm:ss`. */
-export function formatPlaybackPosition(ms: number): string {
-  const clamped = Math.max(0, Math.floor(ms / 1000));
-  const seconds = String(clamped % 60).padStart(2, '0');
-  const minutes = Math.floor(clamped / 60);
-  if (minutes < 60) return `${minutes}:${seconds}`;
-  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}:${seconds}`;
-}
+export { formatPlaybackPosition };
 
 /** Props of {@link VodProgressBar}. */
 export interface VodProgressBarProps {
@@ -24,118 +28,164 @@ export interface VodProgressBarProps {
   readonly clock: PlaybackClock;
   readonly isTv: boolean;
   readonly tvFocused?: boolean;
+  readonly docked?: boolean;
   readonly label: string;
   readonly previewPositionMs?: number | undefined;
   readonly dimmed?: boolean;
   readonly onSeekRatio: (ratio: number) => void;
 }
 
-interface ProgressSnapshot {
-  readonly timeText: string;
-  readonly fillPercent: number;
-  readonly positionSec: number;
-  readonly durationSec: number;
-  readonly durationMs: number | undefined;
-  readonly hasDuration: boolean;
-}
-
-function readSnapshot(anchor: ClockAnchor | undefined, nowMs: number): ProgressSnapshot {
-  if (anchor === undefined) {
-    return {
-      timeText: '0:00 / --:--',
-      fillPercent: 0,
-      positionSec: 0,
-      durationSec: 0,
-      durationMs: undefined,
-      hasDuration: false,
-    };
-  }
-  const rawPos = positionAt(anchor, nowMs);
-  const durationMs = anchor.durationMs;
-  const hasDuration = durationMs !== undefined && Number.isFinite(durationMs) && durationMs > 0;
-  const clampedPos = hasDuration ? Math.min(Math.max(0, rawPos), durationMs) : Math.max(0, rawPos);
-  const ratio = hasDuration ? clampedPos / durationMs : 0;
-  const fillPercent = Math.round(Math.max(0, Math.min(1, ratio)) * 1000) / 10;
-  const timeText = `${formatPlaybackPosition(clampedPos)} / ${
-    hasDuration ? formatPlaybackPosition(durationMs) : '--:--'
-  }`;
-  return {
-    timeText,
-    fillPercent,
-    positionSec: Math.floor(clampedPos / 1000),
-    durationSec: hasDuration ? Math.floor(durationMs / 1000) : 0,
-    durationMs: hasDuration ? durationMs : undefined,
-    hasDuration,
-  };
-}
-
-function sameSnapshot(a: ProgressSnapshot, b: ProgressSnapshot): boolean {
-  return a.timeText === b.timeText && a.fillPercent === b.fillPercent;
-}
-
-function previewSnapshot(live: ProgressSnapshot, previewPositionMs: number): ProgressSnapshot {
-  return readSnapshot(
-    {
-      positionMs: previewPositionMs,
-      atMs: 0,
-      rate: 0,
-      ...(live.durationMs === undefined ? {} : { durationMs: live.durationMs }),
-    },
-    0,
-  );
-}
-
-interface PressGeometry {
-  readonly nativeEvent: { locationX?: number; offsetX?: number; clientX?: number };
-  readonly currentTarget: {
-    blur?: () => void;
-    clientWidth?: number;
-    getBoundingClientRect?: () => { left: number; width: number };
-  } | null;
-}
-
-function pressRatio(event: PressGeometry, layoutWidth: number): number | undefined {
-  const target = event.currentTarget;
-  if ((Platform.OS as string) === 'web') {
-    target?.blur?.();
-    const rect = target?.getBoundingClientRect?.();
-    const clientX = event.nativeEvent.clientX;
-    if (rect !== undefined && typeof clientX === 'number' && rect.width > 0) {
-      return (clientX - rect.left) / rect.width;
-    }
-  }
-  const x = event.nativeEvent.locationX ?? event.nativeEvent.offsetX;
-  const width = layoutWidth > 0 ? layoutWidth : (target?.clientWidth ?? 0);
-  if (typeof x !== 'number' || width <= 0) return undefined;
-  return x / width;
+interface WebWindowLike {
+  addEventListener?: (type: string, fn: (e: { clientX?: number }) => void) => void;
+  removeEventListener?: (type: string, fn: (e: { clientX?: number }) => void) => void;
 }
 
 /**
- * Leaf VOD progress bar that extrapolates elapsed time and fill ratio from `ClockAnchor` on a gated
- * ticker (no frames while paused or before an anchor), shows a pending scrub preview when given,
- * and supports touch/mouse seek presses with live Cinema Quietude theme tokens.
+ * Flagship Cinema Quietude VOD scrubber (`3px` resting -> `6px` hover/drag/TV-focus) with web
+ * pointer drag-scrubbing, floating hover timecode preview pill, and TV D-pad seek-trap preview.
  */
 export function VodProgressBar({
   service,
   clock,
   isTv,
   tvFocused = false,
+  docked = false,
   label,
   previewPositionMs,
   dimmed = false,
   onSeekRatio,
 }: VodProgressBarProps): ReactElement {
   const theme = useTheme();
+  const isWeb = (Platform.OS as string) === 'web';
   const live = usePlaybackTicker({
     service,
     clock,
     mode: 'frame',
-    derive: readSnapshot,
-    isEqual: sameSnapshot,
+    derive: readProgressSnapshot,
+    isEqual: sameProgressSnapshot,
   });
-  const snapshot =
-    previewPositionMs === undefined ? live : previewSnapshot(live, previewPositionMs);
+
+  const [hovered, setHovered] = useState(false);
+  const [hoverRatio, setHoverRatio] = useState<number | null>(null);
+  const [dragRatio, setDragRatio] = useState<number | null>(null);
+
   const widthRef = useRef(0);
+  const dragRatioRef = useRef<number | null>(null);
+  const justDraggedRef = useRef(false);
+  const dragResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cleanupDragRef = useRef<(() => void) | null>(null);
+  const onSeekRatioRef = useRef(onSeekRatio);
+  onSeekRatioRef.current = onSeekRatio;
+
+  useEffect(
+    () => () => {
+      cleanupDragRef.current?.();
+      if (dragResetTimerRef.current !== null) clearTimeout(dragResetTimerRef.current);
+    },
+    [],
+  );
+
+  const isDragging = dragRatio !== null;
+  const isActive = tvFocused || hovered || isDragging;
+  const effectivePreviewMs =
+    previewPositionMs !== undefined
+      ? previewPositionMs
+      : dragRatio !== null && live.hasDuration && live.durationMs !== undefined
+        ? Math.round(dragRatio * live.durationMs)
+        : undefined;
+  const snapshot =
+    effectivePreviewMs === undefined ? live : previewProgressSnapshot(live, effectivePreviewMs);
+
+  const pillRatio = dragRatio ?? (hovered ? hoverRatio : null);
+  const showHoverPill =
+    isWeb && !isTv && pillRatio !== null && live.hasDuration && live.durationMs !== undefined;
+  const hoverTimeText =
+    showHoverPill && live.durationMs !== undefined
+      ? formatPlaybackPosition(Math.round(pillRatio * live.durationMs))
+      : null;
+  const hoverPillLeftPct =
+    pillRatio !== null ? Math.max(6, Math.min(94, Math.round(pillRatio * 1000) / 10)) : 50;
+
+  const startWebDrag = (event: PressGeometry): void => {
+    if (!isWeb || isTv || !live.hasDuration) return;
+    const btn = event.nativeEvent?.button ?? event.button;
+    if (typeof btn === 'number' && btn !== 0) return;
+    justDraggedRef.current = false;
+    const rect = readTrackRect(event.currentTarget, widthRef.current);
+    const initial = readEventRatio(event, widthRef.current, true);
+    if (rect === null || initial === undefined) return;
+    cleanupDragRef.current?.();
+    dragRatioRef.current = initial;
+    setDragRatio(initial);
+
+    const win = (globalThis as unknown as { window?: WebWindowLike }).window;
+    const ratioFromClientX = (clientX: number | undefined): number =>
+      typeof clientX === 'number' && Number.isFinite(clientX) && rect.width > 0
+        ? clampRatio((clientX - rect.left) / rect.width)
+        : (dragRatioRef.current ?? initial);
+
+    const onMove = (e: { clientX?: number }): void => {
+      const next = ratioFromClientX(e.clientX);
+      dragRatioRef.current = next;
+      setDragRatio(next);
+    };
+    const teardown = (): void => {
+      win?.removeEventListener?.('pointermove', onMove);
+      win?.removeEventListener?.('pointerup', onUp);
+      win?.removeEventListener?.('pointercancel', onCancel);
+      cleanupDragRef.current = null;
+    };
+    const onUp = (e: { clientX?: number }): void => {
+      teardown();
+      const finalRatio = ratioFromClientX(e.clientX);
+      dragRatioRef.current = null;
+      justDraggedRef.current = true;
+      if (dragResetTimerRef.current !== null) clearTimeout(dragResetTimerRef.current);
+      dragResetTimerRef.current = setTimeout(() => {
+        justDraggedRef.current = false;
+        dragResetTimerRef.current = null;
+      }, 0);
+      setDragRatio(null);
+      onSeekRatioRef.current(finalRatio);
+    };
+    const onCancel = (): void => {
+      teardown();
+      dragRatioRef.current = null;
+      setDragRatio(null);
+    };
+
+    win?.addEventListener?.('pointermove', onMove);
+    win?.addEventListener?.('pointerup', onUp);
+    win?.addEventListener?.('pointercancel', onCancel);
+    cleanupDragRef.current = teardown;
+  };
+
+  const webPointerProps =
+    isWeb && !isTv
+      ? ({
+          onHoverIn: () => setHovered(true),
+          onHoverOut: () => {
+            setHovered(false);
+            setHoverRatio(null);
+          },
+          onPointerMove: (e: PressGeometry) => {
+            setHovered(true);
+            const r = readEventRatio(e, widthRef.current, false);
+            if (r !== undefined) setHoverRatio(r);
+          },
+          onPointerDown: startWebDrag,
+        } as Record<string, unknown>)
+      : undefined;
+
+  const thumbOpacity = isActive
+    ? snapshot.hasDuration
+      ? 1
+      : 0.45
+    : isWeb && !isTv
+      ? 0
+      : snapshot.hasDuration
+        ? 1
+        : 0.45;
 
   return (
     <View
@@ -162,12 +212,50 @@ export function VodProgressBar({
           widthRef.current = event.nativeEvent.layout.width;
         }}
         onPress={(event) => {
-          const ratio = pressRatio(event as unknown as PressGeometry, widthRef.current);
+          if (justDraggedRef.current) {
+            justDraggedRef.current = false;
+            return;
+          }
+          const ratio = readEventRatio(event as unknown as PressGeometry, widthRef.current, true);
           if (!live.hasDuration || ratio === undefined || !Number.isFinite(ratio)) return;
-          onSeekRatio(Math.max(0, Math.min(1, ratio)));
+          onSeekRatio(ratio);
         }}
-        style={[styles.trackHitBox, !isTv ? webCursorPointer() : undefined]}
+        {...webPointerProps}
+        style={[
+          styles.trackHitBox,
+          docked ? styles.trackHitBoxDocked : null,
+          !isTv ? webCursorPointer() : undefined,
+        ]}
       >
+        {hoverTimeText !== null ? (
+          <View
+            testID="player-progress-hover-pill"
+            pointerEvents="none"
+            style={[
+              styles.hoverPill,
+              docked ? styles.hoverPillDocked : styles.hoverPillFloating,
+              {
+                left: `${hoverPillLeftPct}%`,
+                backgroundColor: theme.colors.glassBg,
+                borderColor: theme.colors.glassBorder,
+                borderRadius: theme.radius.button,
+              },
+              webBackdropBlur(16),
+            ]}
+          >
+            <Text
+              testID="player-progress-hover-time"
+              style={[
+                theme.typography.micro,
+                TABULAR_NUMS_STYLE,
+                styles.hoverPillText,
+                { color: theme.colors.textPrimary },
+              ]}
+            >
+              {hoverTimeText}
+            </Text>
+          </View>
+        ) : null}
         {tvFocused ? (
           <View
             testID="player-progress-focus-ring"
@@ -188,19 +276,18 @@ export function VodProgressBar({
           style={[
             styles.trackRail,
             {
+              height: isActive ? 6 : 3,
               backgroundColor: theme.colors.bgCard,
               borderColor: theme.colors.surfaceBorder,
             },
+            webTransition(theme, 'height', theme.motion.fastMs),
           ]}
         >
           <View
             testID="player-progress-fill"
             style={[
               styles.trackFill,
-              {
-                width: `${snapshot.fillPercent}%`,
-                backgroundColor: theme.colors.accent,
-              },
+              { width: `${snapshot.fillPercent}%`, backgroundColor: theme.colors.accent },
             ]}
           />
         </View>
@@ -209,14 +296,14 @@ export function VodProgressBar({
           pointerEvents="none"
           style={[
             styles.trackThumb,
-            tvFocused ? styles.trackThumbFocused : null,
+            tvFocused ? styles.trackThumbFocused : isActive ? styles.trackThumbActive : null,
             {
               left: `${snapshot.fillPercent}%`,
               backgroundColor: theme.colors.textPrimary,
               borderColor: theme.colors.bgCanvas,
-              opacity: snapshot.hasDuration ? 1 : 0.45,
+              opacity: thumbOpacity,
             },
-            webTransition(theme, 'transform, opacity', theme.motion.fastMs),
+            webTransition(theme, 'transform, opacity, width, height', theme.motion.fastMs),
           ]}
         />
       </Pressable>
@@ -236,33 +323,30 @@ export function VodProgressBar({
 }
 
 const styles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  trackHitBox: {
-    position: 'relative',
-    flex: 1,
-    paddingVertical: 10,
-    justifyContent: 'center',
-  },
-  focusRing: {
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  trackHitBox: { position: 'relative', flex: 1, paddingVertical: 10, justifyContent: 'center' },
+  trackHitBoxDocked: { paddingTop: 28, paddingBottom: 8 },
+  hoverPill: {
     position: 'absolute',
-    left: -4,
-    right: -4,
-    top: 3,
-    bottom: 3,
+    minWidth: 52,
+    marginLeft: -26,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    alignItems: 'center',
+    zIndex: 10,
   },
+  hoverPillFloating: { bottom: 24 },
+  hoverPillDocked: { top: 2 },
+  hoverPillText: { fontWeight: '700' },
+  focusRing: { position: 'absolute', left: -4, right: -4, top: 3, bottom: 3 },
   trackRail: {
-    height: 5,
+    height: 3,
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
   },
-  trackFill: {
-    height: '100%',
-  },
+  trackFill: { height: '100%' },
   trackThumb: {
     position: 'absolute',
     width: 12,
@@ -271,14 +355,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     borderWidth: 1.5,
   },
-  trackThumbFocused: {
-    width: 18,
-    height: 18,
-    marginLeft: -9,
-    borderRadius: 9,
-    borderWidth: 2,
-  },
-  timeText: {
-    fontWeight: '600',
-  },
+  trackThumbActive: { width: 14, height: 14, marginLeft: -7, borderRadius: 7 },
+  trackThumbFocused: { width: 18, height: 18, marginLeft: -9, borderRadius: 9, borderWidth: 2 },
+  timeText: { fontWeight: '600' },
 });
