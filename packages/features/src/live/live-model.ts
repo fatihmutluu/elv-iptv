@@ -204,6 +204,18 @@ export function recordChannelTune(
   };
 }
 
+/** Converts a live channel {@link ItemRow} into a {@link PlayableEntry}. */
+export function toLiveEntry(row: ItemRow): PlayableEntry {
+  return {
+    itemKey: row.key,
+    sourceId: row.sourceId,
+    title: formatLiveTitle(row),
+    kind: 'live',
+    logo: row.logo,
+    itemKind: 'live',
+  };
+}
+
 /** Builds a Live TV `PlayTarget` backed by an O(1) LRU-paged `LiveChannelPlaylist`. */
 export function buildLiveHubPlayTarget(opts: {
   readonly item: ItemRow;
@@ -221,27 +233,14 @@ export function buildLiveHubPlayTarget(opts: {
     loadPage: opts.loadPage,
   });
   return {
-    itemKey: opts.item.key,
-    sourceId: opts.item.sourceId,
-    title: formatLiveTitle(opts.item),
-    kind: 'live',
-    logo: opts.item.logo,
-    itemKind: 'live',
+    ...toLiveEntry(opts.item),
     playlist: {
       count,
       currentIndex: opts.currentIndex,
       onChangeIndex: opts.onChangeIndex ?? (() => undefined),
       async getAt(index: number): Promise<PlayableEntry | undefined> {
         const row = await loader.loadItem(index);
-        if (row === undefined) return undefined;
-        return {
-          itemKey: row.key,
-          sourceId: row.sourceId,
-          title: formatLiveTitle(row),
-          kind: 'live',
-          logo: row.logo,
-          itemKind: 'live',
-        };
+        return row === undefined ? undefined : toLiveEntry(row);
       },
     },
   };

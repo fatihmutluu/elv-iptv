@@ -4,6 +4,7 @@ import {
   type PlaybackService,
   positionAt,
 } from '@elv/playback';
+import { TABULAR_NUMS_STYLE, useTheme, webCursorPointer, webTransition } from '@elv/ui-kit';
 import { type ReactElement, useRef } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { usePlaybackTicker } from './usePlaybackTicker';
@@ -15,6 +16,17 @@ export function formatPlaybackPosition(ms: number): string {
   const minutes = Math.floor(clamped / 60);
   if (minutes < 60) return `${minutes}:${seconds}`;
   return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}:${seconds}`;
+}
+
+/** Props of {@link VodProgressBar}. */
+export interface VodProgressBarProps {
+  readonly service: PlaybackService | null;
+  readonly clock: PlaybackClock;
+  readonly isTv: boolean;
+  readonly label: string;
+  readonly previewPositionMs?: number | undefined;
+  readonly dimmed?: boolean;
+  readonly onSeekRatio: (ratio: number) => void;
 }
 
 interface ProgressSnapshot {
@@ -100,7 +112,7 @@ function pressRatio(event: PressGeometry, layoutWidth: number): number | undefin
 /**
  * Leaf VOD progress bar that extrapolates elapsed time and fill ratio from `ClockAnchor` on a gated
  * ticker (no frames while paused or before an anchor), shows a pending scrub preview when given,
- * and supports touch/mouse seek presses.
+ * and supports touch/mouse seek presses with live Cinema Quietude theme tokens.
  */
 export function VodProgressBar({
   service,
@@ -108,15 +120,10 @@ export function VodProgressBar({
   isTv,
   label,
   previewPositionMs,
+  dimmed = false,
   onSeekRatio,
-}: {
-  service: PlaybackService | null;
-  clock: PlaybackClock;
-  isTv: boolean;
-  label: string;
-  previewPositionMs?: number | undefined;
-  onSeekRatio: (ratio: number) => void;
-}): ReactElement {
+}: VodProgressBarProps): ReactElement {
+  const theme = useTheme();
   const live = usePlaybackTicker({
     service,
     clock,
@@ -129,10 +136,17 @@ export function VodProgressBar({
   const widthRef = useRef(0);
 
   return (
-    <View style={styles.row}>
+    <View
+      testID="player-progress-row"
+      style={[
+        styles.row,
+        { opacity: dimmed ? 0.2 : 1 },
+        webTransition(theme, 'opacity', theme.motion.fastMs),
+      ]}
+    >
       <Pressable
         testID="player-progress-bar"
-        {...(isTv ? { focusable: false } : {})}
+        focusable={!isTv}
         accessibilityRole="adjustable"
         accessibilityLabel={label}
         accessibilityValue={{
@@ -149,16 +163,54 @@ export function VodProgressBar({
           if (!live.hasDuration || ratio === undefined || !Number.isFinite(ratio)) return;
           onSeekRatio(Math.max(0, Math.min(1, ratio)));
         }}
-        style={styles.trackHitBox}
+        style={[styles.trackHitBox, !isTv ? webCursorPointer() : undefined]}
       >
-        <View testID="player-progress-rail" pointerEvents="none" style={styles.trackRail}>
+        <View
+          testID="player-progress-rail"
+          pointerEvents="none"
+          style={[
+            styles.trackRail,
+            {
+              backgroundColor: theme.colors.bgCard,
+              borderColor: theme.colors.surfaceBorder,
+            },
+          ]}
+        >
           <View
             testID="player-progress-fill"
-            style={[styles.trackFill, { width: `${snapshot.fillPercent}%` }]}
+            style={[
+              styles.trackFill,
+              {
+                width: `${snapshot.fillPercent}%`,
+                backgroundColor: theme.colors.accent,
+              },
+            ]}
           />
         </View>
+        <View
+          testID="player-progress-thumb"
+          pointerEvents="none"
+          style={[
+            styles.trackThumb,
+            {
+              left: `${snapshot.fillPercent}%`,
+              backgroundColor: theme.colors.textPrimary,
+              borderColor: theme.colors.bgCanvas,
+              opacity: snapshot.hasDuration ? 1 : 0.45,
+            },
+            webTransition(theme, 'transform, opacity', theme.motion.fastMs),
+          ]}
+        />
       </Pressable>
-      <Text testID="player-progress-time" style={styles.timeText}>
+      <Text
+        testID="player-progress-time"
+        style={[
+          theme.typography.caption,
+          TABULAR_NUMS_STYLE,
+          styles.timeText,
+          { color: theme.colors.textSecondary },
+        ]}
+      >
         {snapshot.timeText}
       </Text>
     </View>
@@ -172,23 +224,29 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   trackHitBox: {
+    position: 'relative',
     flex: 1,
-    paddingVertical: 6,
+    paddingVertical: 10,
     justifyContent: 'center',
   },
   trackRail: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#2c2c38',
+    height: 5,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
   },
   trackFill: {
     height: '100%',
-    backgroundColor: '#f4f4f6',
+  },
+  trackThumb: {
+    position: 'absolute',
+    width: 12,
+    height: 12,
+    marginLeft: -6,
+    borderRadius: 6,
+    borderWidth: 1.5,
   },
   timeText: {
-    color: '#d4d7e0',
-    fontSize: 13,
     fontWeight: '600',
   },
 });

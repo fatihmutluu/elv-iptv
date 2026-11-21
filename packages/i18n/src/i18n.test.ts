@@ -592,4 +592,35 @@ describe('@elv/i18n', () => {
     expect(tr.t('live.channelsCount', { count: 1 })).toBe('1 kanal');
     expect(tr.t('live.channelsCount', { count: 42 })).toBe('42 kanal');
   });
+
+  it('localizes player settings, stats HUD, touch lock, next episode, and previous channel strings in English and Turkish', () => {
+    const en = createAppI18n('en');
+    const tr = createAppI18n('tr');
+    const staticCases: ReadonlyArray<readonly [MessageId, string, string]> = [
+      ['player.settings', 'Player settings', 'Oynatıcı ayarları'],
+      ['player.settingsBack', 'Back to settings', 'Ayarlara dön'],
+      ['player.statsHud', 'Playback stats', 'Oynatma istatistikleri'],
+      ['player.stats.on', 'On', 'Açık'],
+      ['player.stats.off', 'Off', 'Kapalı'],
+      ['player.stats.audioNone', 'No audio track', 'Ses parçası yok'],
+      ['player.lockControls', 'Lock controls', 'Kontrolleri kilitle'],
+      ['player.unlockControls', 'Unlock controls', 'Kilidi aç'],
+      ['player.nextEpisode', 'Next episode', 'Sonraki bölüm'],
+      ['player.dismissNextEpisode', 'Dismiss next episode', 'Sonraki bölümü kapat'],
+      ['player.jumpPreviousChannel', 'Previous channel', 'Önceki kanal'],
+    ];
+    for (const [id, expectedEn, expectedTr] of staticCases) {
+      expect(en.t(id)).toBe(expectedEn);
+      expect(tr.t(id)).toBe(expectedTr);
+    }
+
+    expect(en.t('player.stats.latencyMs', { ms: 184 })).toBe('First frame 184 ms');
+    expect(tr.t('player.stats.latencyMs', { ms: 184 })).toBe('İlk kare 184 ms');
+    expect(en.t('player.nextEpisodeWithLabel', { label: 'S1 E4 · Finale' })).toBe(
+      'Next: S1 E4 · Finale',
+    );
+    expect(tr.t('player.nextEpisodeWithLabel', { label: 'S1 B4 · Final' })).toBe(
+      'Sonraki: S1 B4 · Final',
+    );
+  });
 });

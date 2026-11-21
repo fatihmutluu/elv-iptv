@@ -6,7 +6,7 @@ import {
 } from '@elv/data';
 import type { ElvError } from '@elv/domain';
 import type { AppI18n, MessageId } from '@elv/i18n';
-import type { PlayTarget } from '../ports/play-target';
+import type { PlayableEntry, PlayTarget } from '../ports/play-target';
 import type { DetailTarget } from '../shared';
 
 /** Resolved primary Play / Resume action displayed in the Detail Hero CTA. */
@@ -71,6 +71,7 @@ export interface BuildEpisodePlayTargetInput {
   readonly progress: WatchProgressRow | undefined;
   readonly seriesTitle: string;
   readonly t: AppI18n['t'];
+  readonly nextEpisodes?: readonly EpisodeRow[];
 }
 
 /** Input for {@link buildMoviePlayTarget}. */
@@ -111,6 +112,22 @@ function episodeDurationMs(episode: EpisodeRow, progress: WatchProgressRow | und
   return 0;
 }
 
+function makePrimarySelection(
+  episode: EpisodeRow,
+  index: number,
+  resume: boolean,
+  prog: WatchProgressRow | undefined,
+): SeriesPrimaryEpisodeSelection {
+  return {
+    episode,
+    index,
+    episodeNumber: episode.episode ?? index + 1,
+    resume,
+    positionMs: resume && prog !== undefined ? prog.positionMs : 0,
+    durationMs: episodeDurationMs(episode, prog),
+  };
+}
+
 /**
  * Selects the smart primary episode for a season's Play/Resume CTA:
  * 1. First in-progress unwatched episode (`positionMs >= MIN_RESUME_POSITION_MS`) -> `resume: true`.
@@ -128,23 +145,14 @@ export function resolveSeriesPrimaryEpisode(
     if (!ep) continue;
     const prog = progressByKey.get(ep.key);
     if (prog !== undefined && !prog.watched && prog.positionMs >= MIN_RESUME_POSITION_MS) {
-      return {
-        episode: ep,
-        index: i,
-        episodeNumber: ep.episode ?? i + 1,
-        resume: true,
-        positionMs: prog.positionMs,
-        durationMs: episodeDurationMs(ep, prog),
-      };
+      return makePrimarySelection(ep, i, true, prog);
     }
   }
 
   let lastWatchedIndex = -1;
   for (let i = 0; i < episodes.length; i++) {
     const ep = episodes[i];
-    if (ep && progressByKey.get(ep.key)?.watched) {
-      lastWatchedIndex = i;
-    }
+    if (ep && progressByKey.get(ep.key)?.watched) lastWatchedIndex = i;
   }
 
   if (lastWatchedIndex >= 0) {
@@ -152,16 +160,7 @@ export function resolveSeriesPrimaryEpisode(
       const ep = episodes[i];
       if (!ep) continue;
       const prog = progressByKey.get(ep.key);
-      if (!prog?.watched) {
-        return {
-          episode: ep,
-          index: i,
-          episodeNumber: ep.episode ?? i + 1,
-          resume: false,
-          positionMs: 0,
-          durationMs: episodeDurationMs(ep, prog),
-        };
-      }
+      if (!prog?.watched) return makePrimarySelection(ep, i, false, prog);
     }
   }
 
@@ -169,39 +168,23 @@ export function resolveSeriesPrimaryEpisode(
     const ep = episodes[i];
     if (!ep) continue;
     const prog = progressByKey.get(ep.key);
-    if (!prog?.watched) {
-      return {
-        episode: ep,
-        index: i,
-        episodeNumber: ep.episode ?? i + 1,
-        resume: false,
-        positionMs: 0,
-        durationMs: episodeDurationMs(ep, prog),
-      };
-    }
+    if (!prog?.watched) return makePrimarySelection(ep, i, false, prog);
   }
 
   const first = episodes[0];
-  if (!first) return undefined;
-  return {
-    episode: first,
-    index: 0,
-    episodeNumber: first.episode ?? 1,
-    resume: false,
-    positionMs: 0,
-    durationMs: episodeDurationMs(first, progressByKey.get(first.key)),
-  };
+  return first ? makePrimarySelection(first, 0, false, progressByKey.get(first.key)) : undefined;
 }
 
-/** Builds a full VOD episode {@link PlayTarget} with series metadata and 5-second smart rewind. */
-export function buildEpisodePlayTarget({
-  target,
-  episode,
-  index,
-  progress,
-  seriesTitle,
-  t,
-}: BuildEpisodePlayTargetInput): PlayTarget {
+const MAX_NEXT_EPISODES = 50;
+
+function episodeToPlayableEntry(
+  target: DetailTarget,
+  episode: EpisodeRow,
+  index: number,
+  seriesTitle: string,
+  startPositionMs: number,
+  t: AppI18n['t'],
+): PlayableEntry {
   const episodeNumber = episode.episode ?? index + 1;
   const trimmedTitle = episode.title?.trim() ?? '';
   const episodeLabel =
@@ -212,8 +195,6 @@ export function buildEpisodePlayTarget({
     trimmedTitle.length > 0
       ? `S${episode.season} E${episodeNumber} · ${trimmedTitle}`
       : `S${episode.season} E${episodeNumber}`;
-  const startPositionMs = progress !== undefined ? computeResumePositionMs(progress) : 0;
-
   return {
     itemKey: episode.key,
     sourceId: target.sourceId,
@@ -227,6 +208,25 @@ export function buildEpisodePlayTarget({
     subtitle,
     startPositionMs,
   };
+}
+
+/** Builds a full VOD episode {@link PlayTarget} with series metadata and 5-second smart rewind. */
+export function buildEpisodePlayTarget({
+  target,
+  episode,
+  index,
+  progress,
+  seriesTitle,
+  t,
+  nextEpisodes,
+}: BuildEpisodePlayTargetInput): PlayTarget {
+  const startPositionMs = progress !== undefined ? computeResumePositionMs(progress) : 0;
+  const base = episodeToPlayableEntry(target, episode, index, seriesTitle, startPositionMs, t);
+  if (nextEpisodes === undefined || nextEpisodes.length === 0) return base;
+  const mappedNext = nextEpisodes
+    .slice(0, MAX_NEXT_EPISODES)
+    .map((ep, offset) => episodeToPlayableEntry(target, ep, index + 1 + offset, seriesTitle, 0, t));
+  return { ...base, nextEpisodes: mappedNext };
 }
 
 /** Builds a VOD movie {@link PlayTarget} with 5-second smart rewind via `computeResumePositionMs`. */
@@ -290,6 +290,7 @@ export function buildPrimaryPlayAction({
       progress: episodeProgressByKey.get(picked.episode.key),
       seriesTitle: resolvedTitle,
       t,
+      nextEpisodes: episodes.slice(picked.index + 1),
     }),
   };
 }

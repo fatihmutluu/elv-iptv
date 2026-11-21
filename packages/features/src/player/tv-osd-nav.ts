@@ -1,7 +1,16 @@
 import type { KeyEvent } from '@elv/focus-core';
 
-/** Logical OSD button identifiers navigable on TV when the VOD OSD bar is focused. */
-export type TvOsdAction = 'back' | 'playPause' | 'seekBack' | 'seekForward' | 'tracks' | 'retry';
+/** Logical OSD button identifiers navigable on TV when the OSD bar is focused. */
+export type TvOsdAction =
+  | 'back'
+  | 'playPause'
+  | 'seekBack'
+  | 'seekForward'
+  | 'prevChannel'
+  | 'tracks'
+  | 'settings'
+  | 'nextEpisode'
+  | 'retry';
 
 /** Which OSD buttons are mounted; mirrors the guards in `PlayerOsd`. */
 export interface TvOsdAvailability {
@@ -9,6 +18,9 @@ export interface TvOsdAvailability {
   readonly hasService: boolean;
   readonly hasTracks: boolean;
   readonly showRetry: boolean;
+  readonly hasSettings?: boolean;
+  readonly hasNextEpisode?: boolean;
+  readonly hasPreviousChannel?: boolean;
 }
 
 const ORDER: readonly TvOsdAction[] = [
@@ -16,7 +28,10 @@ const ORDER: readonly TvOsdAction[] = [
   'playPause',
   'seekBack',
   'seekForward',
+  'prevChannel',
   'tracks',
+  'settings',
+  'nextEpisode',
   'retry',
 ];
 
@@ -27,8 +42,14 @@ export function availableTvOsdActions(a: TvOsdAvailability): TvOsdAction[] {
     switch (action) {
       case 'back':
         return true;
+      case 'prevChannel':
+        return !a.isVod && a.hasService && a.hasPreviousChannel === true;
       case 'tracks':
         return a.hasTracks && a.hasService;
+      case 'settings':
+        return a.hasService && a.hasSettings === true;
+      case 'nextEpisode':
+        return a.isVod && a.hasService && a.hasNextEpisode === true;
       case 'retry':
         return a.showRetry;
       default:

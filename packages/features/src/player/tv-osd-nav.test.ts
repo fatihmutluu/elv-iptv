@@ -48,6 +48,50 @@ describe('availableTvOsdActions', () => {
       'seekForward',
     ]);
   });
+
+  it('orders optional settings, nextEpisode, and prevChannel actions cleanly', () => {
+    expect(
+      availableTvOsdActions({
+        ...FULL,
+        hasSettings: true,
+        hasNextEpisode: true,
+        hasPreviousChannel: true,
+      }),
+    ).toEqual([
+      'back',
+      'playPause',
+      'seekBack',
+      'seekForward',
+      'tracks',
+      'settings',
+      'nextEpisode',
+      'retry',
+    ]);
+
+    expect(
+      availableTvOsdActions({
+        isVod: false,
+        hasService: true,
+        hasTracks: true,
+        showRetry: true,
+        hasPreviousChannel: true,
+        hasSettings: true,
+        hasNextEpisode: true,
+      }),
+    ).toEqual(['back', 'prevChannel', 'tracks', 'settings', 'retry']);
+
+    expect(
+      availableTvOsdActions({
+        isVod: false,
+        hasService: false,
+        hasTracks: true,
+        showRetry: false,
+        hasPreviousChannel: true,
+        hasSettings: true,
+        hasNextEpisode: true,
+      }),
+    ).toEqual(['back']);
+  });
 });
 
 describe('initialTvOsdAction', () => {

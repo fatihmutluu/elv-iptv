@@ -137,10 +137,11 @@ export function DetailScreen({
           progress: data.episodeProgressByKey.get(episode.key),
           seriesTitle: data.title,
           t: i18n.t,
+          nextEpisodes: data.episodes.slice(index + 1),
         }),
       );
     },
-    [data.episodeProgressByKey, data.title, i18n.t, onPlay, target],
+    [data.episodeProgressByKey, data.episodes, data.title, i18n.t, onPlay, target],
   );
 
   const handlePressRelated = useCallback(
