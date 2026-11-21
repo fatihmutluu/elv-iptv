@@ -208,7 +208,7 @@ describe('PlayerScreen VOD controls, hold-seek, and track picker', () => {
         });
       });
 
-      expect(screen.getByTestId('player-play-pause')).toHaveTextContent('Pause');
+      expect(screen.getByTestId('player-play-pause').props.accessibilityLabel).toBe('Pause');
       await fireEvent.press(screen.getByTestId('player-seek-forward'));
       expect(engine.commands.filter((c) => c.name === 'seek').at(-1)?.positionMs).toBe(22_000);
 
@@ -227,7 +227,7 @@ describe('PlayerScreen VOD controls, hold-seek, and track picker', () => {
       await act(async () => {
         engine.emit({ attempt: pauseAttempt, type: 'state', state: 'paused' });
       });
-      expect(screen.getByTestId('player-play-pause')).toHaveTextContent('Play');
+      expect(screen.getByTestId('player-play-pause').props.accessibilityLabel).toBe('Play');
 
       await fireEvent.press(screen.getByTestId('player-play-pause'));
       expect(engine.commands.some((c) => c.name === 'play')).toBe(true);
@@ -242,7 +242,7 @@ describe('PlayerScreen VOD controls, hold-seek, and track picker', () => {
         });
         engine.emit({ attempt: endedAttempt, type: 'state', state: 'ended' });
       });
-      expect(screen.getByTestId('player-play-pause')).toHaveTextContent('Play');
+      expect(screen.getByTestId('player-play-pause').props.accessibilityLabel).toBe('Play');
       await fireEvent.press(screen.getByTestId('player-seek-back'));
       expect(loadSpy).toHaveBeenLastCalledWith(
         expect.objectContaining({ kind: 'vod', startMs: 110_000 }),
@@ -250,7 +250,7 @@ describe('PlayerScreen VOD controls, hold-seek, and track picker', () => {
       await act(async () => {
         manual.advance(350);
       });
-      expect(screen.getByTestId('player-play-pause')).toHaveTextContent('Pause');
+      expect(screen.getByTestId('player-play-pause').props.accessibilityLabel).toBe('Pause');
       await fireEvent.press(screen.getByTestId('player-play-pause'));
       expect(engine.commands.at(-1)?.name).toBe('pause');
 

@@ -11,9 +11,11 @@ import {
   buildLiveHubPlayTarget,
   LIVE_MAX_PAGES,
   LIVE_PAGE_SIZE,
+  type LiveMode,
   recordChannelTune,
   toLiveEntry,
 } from './live-model';
+import { useLiveFavorites } from './useLiveFavorites';
 import { useLiveNowNext } from './useLiveNowNext';
 import { type LiveNumberFeedback, useLiveNumberJump } from './useLiveNumberJump';
 
@@ -24,6 +26,8 @@ export interface UseLiveCatalogOptions {
   readonly catalog: CatalogService;
   readonly sources: readonly SourceRow[];
   readonly refreshToken?: number;
+  readonly userStateVersion?: number;
+  readonly mode?: LiveMode;
   readonly selectedCategoryId: string | null;
   readonly activeChannelKey: string | null;
   readonly previousChannelKey: string | null;
@@ -36,7 +40,7 @@ export interface UseLiveCatalogOptions {
   readonly now?: () => number;
 }
 
-/** Live catalog, O(1) paged channel source, Now/Next TTL cache, channel history, and 0–9 jump state. */
+/** Live catalog, favorites, O(1) paged channel source, Now/Next TTL cache, channel history, and 0–9 jump state. */
 export interface LiveCatalogState {
   readonly categories: readonly DisplayCategory[];
   readonly activeCategory: DisplayCategory | null;
@@ -44,6 +48,11 @@ export interface LiveCatalogState {
   readonly channelSource: PagedListSource<ItemRow> | null;
   readonly channelCount: number;
   readonly sourceVersion: number;
+  readonly favoriteKeys: ReadonlySet<string>;
+  readonly favoriteChannels: readonly ItemRow[];
+  readonly favoriteSource: PagedListSource<ItemRow>;
+  readonly favoritesVersion: number;
+  readonly toggleFavorite: (channel: ItemRow) => Promise<void>;
   readonly nowNextByKey: ReadonlyMap<string, NowNextEntry>;
   readonly nowNextVersion: number;
   readonly hydrateNowNext: (channelKeys: readonly string[]) => void;
@@ -57,7 +66,11 @@ export interface LiveCatalogState {
   readonly pressDigit: (digit: string) => void;
   readonly clearNumber: () => void;
   readonly submitNumberJump: () => Promise<ItemRow | null>;
-  readonly buildPlayTarget: (channel: ItemRow, index?: number) => PlayTarget;
+  readonly buildPlayTarget: (
+    channel: ItemRow,
+    index?: number,
+    scope?: 'category' | 'favorites',
+  ) => PlayTarget;
 }
 
 interface ChannelHistory {
@@ -105,8 +118,8 @@ function findInitialChannel(
  * (`#43`), and `0–9` channel number jump with auto-tune timeout (`#44`/`#54`).
  */
 export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState {
-  const { catalog, sources, refreshToken = 0, selectedCategoryId } = options;
-  const { activeChannelKey, previousChannelKey, now = defaultNow } = options;
+  const { catalog, sources, refreshToken = 0, userStateVersion = 0, mode = 'channels' } = options;
+  const { selectedCategoryId, activeChannelKey, previousChannelKey, now = defaultNow } = options;
 
   const [categories, setCategories] = useState<readonly DisplayCategory[]>([]);
   const [loadingCategories, setLoadingCategories] = useState(true);
@@ -150,6 +163,13 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
 
   const nowNext = useLiveNowNext({ catalog, refreshToken, nowRef });
   const { hydrateNowNext } = nowNext;
+  const favorites = useLiveFavorites({ catalog, sources, refreshToken, userStateVersion });
+  const { favoriteChannels } = favorites;
+
+  useEffect(() => {
+    if (mode !== 'favorites' || favoriteChannels.length === 0) return;
+    hydrateNowNext(favoriteChannels.map((c) => c.key));
+  }, [favoriteChannels, hydrateNowNext, mode]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken reloads live categories
   useEffect(() => {
@@ -303,14 +323,25 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
   });
 
   const buildPlayTarget = useCallback(
-    (channel: ItemRow, index?: number): PlayTarget => {
-      const categoryId = activeCategory?.row.id ?? `${channel.sourceId}|live|all`;
+    (
+      channel: ItemRow,
+      index?: number,
+      scope: 'category' | 'favorites' = 'category',
+    ): PlayTarget => {
+      const useFavorites = scope === 'favorites' && favoriteChannels.length > 0;
+      const categoryId = useFavorites
+        ? 'favorites'
+        : (activeCategory?.row.id ?? `${channel.sourceId}|live|all`);
       const base = buildLiveHubPlayTarget({
         item: channel,
         categoryId,
-        categoryCount: Math.max(1, activeCategory?.row.itemCount ?? 1),
+        categoryCount: useFavorites
+          ? favoriteChannels.length
+          : Math.max(1, activeCategory?.row.itemCount ?? 1),
         currentIndex: index ?? latestRef.current.history.activeIndex,
-        loadPage: (offset, limit) => catalog.items(categoryId, offset, limit),
+        loadPage: useFavorites
+          ? async (offset, limit) => favoriteChannels.slice(offset, offset + limit)
+          : (offset, limit) => catalog.items(categoryId, offset, limit),
       });
       const prev = latestRef.current.history.previous;
       return prev !== null && prev.key !== channel.key
@@ -321,7 +352,7 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
           }
         : base;
     },
-    [activeCategory?.row.id, activeCategory?.row.itemCount, catalog],
+    [activeCategory?.row.id, activeCategory?.row.itemCount, catalog, favoriteChannels],
   );
 
   const channelCount = activeCategory?.row.itemCount ?? 0;
@@ -334,6 +365,7 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
       channelSource,
       channelCount,
       sourceVersion,
+      ...favorites,
       nowNextByKey: nowNext.byKey,
       nowNextVersion: nowNext.version,
       hydrateNowNext,
@@ -342,11 +374,7 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
       previousChannel: history.previous,
       tuneChannel,
       tunePreviousChannel,
-      numberBuffer: numJump.numberBuffer,
-      numberFeedback: numJump.numberFeedback,
-      pressDigit: numJump.pressDigit,
-      clearNumber: numJump.clearNumber,
-      submitNumberJump: numJump.submitNumberJump,
+      ...numJump,
       buildPlayTarget,
     }),
     [
@@ -355,6 +383,7 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
       categories,
       channelCount,
       channelSource,
+      favorites,
       history,
       hydrateNowNext,
       loadingCategories,

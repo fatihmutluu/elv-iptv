@@ -78,7 +78,12 @@ export interface OsdButtonProps {
   accessibilityLabel?: string;
   keyShortcuts?: string;
   icon?: IconName;
+  iconSize?: number;
   variant?: 'default' | 'primary' | 'icon';
+  size?: number;
+  circular?: boolean;
+  compact?: boolean;
+  tabularLabel?: boolean;
   active?: boolean;
   onPress: () => void;
   isTv: boolean;
@@ -89,9 +94,11 @@ export interface OsdButtonProps {
 export function OsdButton(p: OsdButtonProps): ReactElement {
   const theme = useTheme();
   const isPrimary = p.variant === 'primary';
-  const isIconOnly = p.variant === 'icon';
+  const isIconOnly = p.variant === 'icon' || p.circular === true;
   const focused = p.tvFocused === true;
   const active = p.active === true;
+  const boxSize = p.size ?? 40;
+  const iconSize = p.iconSize ?? 18;
 
   const backgroundColor = isPrimary
     ? theme.colors.ctaBg
@@ -129,7 +136,11 @@ export function OsdButton(p: OsdButtonProps): ReactElement {
       }}
       style={[
         styles.button,
+        p.compact === true ? styles.compactButton : null,
         isIconOnly ? styles.iconButton : isPrimary ? styles.primaryButton : null,
+        isIconOnly
+          ? { width: boxSize, height: boxSize, minWidth: boxSize, minHeight: boxSize }
+          : null,
         {
           backgroundColor,
           borderColor,
@@ -142,12 +153,13 @@ export function OsdButton(p: OsdButtonProps): ReactElement {
         !p.isTv ? webCursorPointer() : undefined,
       ]}
     >
-      {p.icon !== undefined ? <Icon name={p.icon} size={18} color={foreground} /> : null}
+      {p.icon !== undefined ? <Icon name={p.icon} size={iconSize} color={foreground} /> : null}
       {!isIconOnly && p.label !== undefined ? (
         <Text
           numberOfLines={1}
           style={[
-            theme.typography.title,
+            p.compact === true ? theme.typography.caption : theme.typography.title,
+            p.tabularLabel === true ? TABULAR_NUMS_STYLE : undefined,
             { color: foreground, fontWeight: isPrimary ? '700' : '600' },
           ]}
         >
@@ -161,7 +173,7 @@ export function OsdButton(p: OsdButtonProps): ReactElement {
           style={[
             styles.primaryFocusRing,
             {
-              borderRadius: theme.radius.button + 4,
+              borderRadius: isIconOnly ? theme.radius.pill : theme.radius.button + 4,
               borderWidth: theme.focus.ringWidth,
               borderColor: theme.colors.focusRingColor,
             },
@@ -232,6 +244,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   primaryButton: { paddingHorizontal: 18 },
+  compactButton: { minHeight: 34, paddingHorizontal: 10, paddingVertical: 5 },
   primaryFocusRing: {
     position: 'absolute',
     top: -4,

@@ -2,6 +2,7 @@ import type { ItemRow, ProgrammeRow } from '@elv/data';
 import {
   ArtworkImage,
   CtaButton,
+  IconButton,
   MicroPill,
   TABULAR_NUMS_STYLE,
   useI18n,
@@ -21,35 +22,31 @@ export interface EpgPreviewHeaderProps {
   readonly refreshingGuide: boolean;
   readonly isTv: boolean;
   readonly isPortrait: boolean;
-  readonly focusedAction?: 'watch' | 'refresh' | null;
+  readonly isFavorite?: boolean;
+  readonly focusedAction?: 'watch' | 'favorite' | 'refresh' | null;
   readonly onWatchChannel: (channel: ItemRow, channelIndex: number) => void;
+  readonly onToggleFavorite?: (channel: ItemRow) => void;
   readonly onRefreshGuide: () => void;
 }
 
 /**
  * Compact Cinema Quietude focused-channel preview card (`#56`) anchored above the EPG timeline.
- * Displays the `16:9` channel tile + `LIVE` micro-pill on the left and the focused programme title,
- * tabular time window, `ON AIR` badge, 2-line description, and Watch/Refresh CTAs on the right.
  */
-export const EpgPreviewHeader = memo(function EpgPreviewHeaderInner({
-  channel,
-  channelIndex,
-  programme,
-  nowMs,
-  refreshingGuide,
-  isTv,
-  isPortrait,
-  focusedAction = null,
-  onWatchChannel,
-  onRefreshGuide,
-}: EpgPreviewHeaderProps): ReactElement {
+export const EpgPreviewHeader = memo(function EpgPreviewHeaderInner(
+  props: EpgPreviewHeaderProps,
+): ReactElement {
+  const { channel, channelIndex, programme, nowMs, refreshingGuide, isTv, isPortrait } = props;
+  const { isFavorite = false, focusedAction = null, onWatchChannel, onToggleFavorite } = props;
+  const { onRefreshGuide } = props;
   const theme = useTheme();
   const i18n = useI18n();
 
   const handleWatch = useCallback(() => {
-    if (!channel) return;
-    onWatchChannel(channel, channelIndex);
+    if (channel) onWatchChannel(channel, channelIndex);
   }, [channel, channelIndex, onWatchChannel]);
+  const handleToggleFavorite = useCallback(() => {
+    if (channel) onToggleFavorite?.(channel);
+  }, [channel, onToggleFavorite]);
 
   const isLiveProgramme = programme !== null && programme.start <= nowMs && programme.stop > nowMs;
   const timeRangeLabel =
@@ -74,6 +71,18 @@ export const EpgPreviewHeader = memo(function EpgPreviewHeaderInner({
         onPress={handleWatch}
         style={styles.ctaButton}
       />
+      {onToggleFavorite ? (
+        <IconButton
+          testID="epg-favorite-toggle"
+          icon={isFavorite ? 'starFilled' : 'star'}
+          active={isFavorite}
+          accessibilityLabel={i18n.t(isFavorite ? 'live.favoriteRemove' : 'live.favoriteAdd')}
+          disabled={!channel}
+          focusable={!isTv}
+          focused={focusedAction === 'favorite'}
+          onPress={handleToggleFavorite}
+        />
+      ) : null}
       <CtaButton
         testID="epg-refresh-guide"
         variant="secondary"
@@ -207,18 +216,9 @@ export interface EpgTimeRulerProps {
  * Time navigation controls (`Earlier`, `Jump to live`, `Later`) and sticky 30-minute EPG time
  * ruler rendered directly above the virtualized channel matrix (`#6`).
  */
-export const EpgTimeRuler = memo(function EpgTimeRulerInner({
-  categoryLabel,
-  rulerTicks,
-  channelColWidth,
-  isTv,
-  isPortrait,
-  jumpHighlighted,
-  focusedButton = null,
-  onPanEarlier,
-  onJumpToLive,
-  onPanLater,
-}: EpgTimeRulerProps): ReactElement {
+export const EpgTimeRuler = memo(function EpgTimeRulerInner(p: EpgTimeRulerProps): ReactElement {
+  const { categoryLabel, rulerTicks, channelColWidth, isTv, isPortrait, jumpHighlighted } = p;
+  const { focusedButton = null, onPanEarlier, onJumpToLive, onPanLater } = p;
   const theme = useTheme();
   const i18n = useI18n();
   const cursor = webCursorPointer();

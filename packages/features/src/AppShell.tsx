@@ -4,7 +4,6 @@ import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } 
 import {
   buildShellDestinations,
   buildShellUtilities,
-  type CatalogMemoryMap,
   clearSourceFromCatalogMemory,
   clearSourceFromLiveMemory,
   createObservedCatalog,
@@ -63,8 +62,7 @@ export function AppShell(props: AppShellProps): ReactElement {
   const [refreshToken, setRefreshToken] = useState(0);
   const [userStateVersion, setUserStateVersion] = useState(0);
   const [liveMemory, setLiveMemory] = useState<LiveTabMemory>(EMPTY_LIVE_MEMORY);
-  const [catalogMemoryByTab, setCatalogMemoryByTab] =
-    useState<CatalogMemoryMap>(INITIAL_CATALOG_MEMORY);
+  const [catalogMemoryByTab, setCatalogMemoryByTab] = useState(INITIAL_CATALOG_MEMORY);
   const [detailStack, setDetailStack] = useState<readonly DetailTarget[]>([]);
   const [recentSearches, setRecentSearches] = useState<readonly string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -75,26 +73,29 @@ export function AppShell(props: AppShellProps): ReactElement {
   const mountedRef = useRef(true);
   const userPickedTabRef = useRef(false);
   const userPickedSettingsSectionRef = useRef(false);
-  const sourcesRef = useRef<readonly SourceRow[]>(sources);
+  const sourcesRef = useRef(sources);
   sourcesRef.current = sources;
   const autoImportedIdsRef = useRef(new Set<string>());
-  const playTargetRef = useRef<PlayTarget | null>(playTarget);
+  const playTargetRef = useRef(playTarget);
   playTargetRef.current = playTarget;
   const documentVisible = useDocumentVisible();
+  const [appForeground, setAppForeground] = useState(true);
 
   useEffect(() => {
     mountedRef.current = true;
+    const unsub = appLifecycle?.subscribe((state) => setAppForeground(state === 'active'));
+    if (!appLifecycle) setAppForeground(true);
     return () => {
       mountedRef.current = false;
+      unsub?.();
     };
-  }, []);
+  }, [appLifecycle]);
 
   const clearSearchSession = useCallback(() => {
     setRecentSearches([]);
     setSearchQuery('');
     setSearchScope('all');
   }, []);
-
   const syncSourcesAndBump = useCallback(async () => {
     try {
       const rows = await catalog.listSources();
@@ -103,10 +104,9 @@ export function AppShell(props: AppShellProps): ReactElement {
       if (rows.length === 0) clearSearchSession();
       setRefreshToken((n) => n + 1);
     } catch {
-      // Ignore transient catalog open errors in shell background refresh.
+      /* ignore transient catalog open errors in shell background refresh */
     }
   }, [catalog, clearSearchSession]);
-
   const stopForSource = useCallback((sourceId: string): void => {
     if (playTargetRef.current?.sourceId === sourceId) {
       playTargetRef.current = null;
@@ -116,7 +116,6 @@ export function AppShell(props: AppShellProps): ReactElement {
     setCatalogMemoryByTab((prev) => clearSourceFromCatalogMemory(prev, sourceId));
     setDetailStack((prev) => prev.filter((entry) => entry.sourceId !== sourceId));
   }, []);
-
   const playbackGuard = useMemo(() => createPlaybackGuard(stopForSource), [stopForSource]);
   useEffect(() => onPlaybackGuardReady?.(playbackGuard), [onPlaybackGuardReady, playbackGuard]);
   const handlePlay = useCallback((target: PlayTarget) => {
@@ -177,9 +176,8 @@ export function AppShell(props: AppShellProps): ReactElement {
   }, []);
   const openSearch = useCallback(() => selectTab('search', false), [selectTab]);
   const openSettings = useCallback(() => {
-    if (sourcesRef.current.length > 0 && !userPickedSettingsSectionRef.current) {
+    if (sourcesRef.current.length > 0 && !userPickedSettingsSectionRef.current)
       setSettingsSection('appearance');
-    }
     selectTab('settings', false);
   }, [selectTab]);
   const openSources = useCallback(() => {
@@ -197,31 +195,31 @@ export function AppShell(props: AppShellProps): ReactElement {
     setHeroScrolled(false);
     setUserStateVersion((v) => v + 1);
   }, []);
-
   const activeDetail = detailStack[detailStack.length - 1] ?? null;
-  const [home, live, movies, series, searchLabel, settingsLabel] = [
-    i18n.t('nav.home'),
-    i18n.t('nav.live'),
-    i18n.t('nav.movies'),
-    i18n.t('nav.series'),
-    i18n.t('nav.search'),
-    i18n.t('nav.settings'),
-  ];
+  const locale = i18n.locale;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: locale invalidates translated labels on live language switch
   const destinations = useMemo(
-    () => buildShellDestinations({ home, live, movies, series }),
-    [home, live, movies, series],
+    () =>
+      buildShellDestinations({
+        home: i18n.t('nav.home'),
+        live: i18n.t('nav.live'),
+        movies: i18n.t('nav.movies'),
+        series: i18n.t('nav.series'),
+      }),
+    [i18n, locale],
   );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: locale invalidates translated labels on live language switch
   const utilities = useMemo(
     () =>
       buildShellUtilities({
-        searchLabel,
-        settingsLabel,
+        searchLabel: i18n.t('nav.search'),
+        settingsLabel: i18n.t('nav.settings'),
         activeTab,
         hasActiveDetail: activeDetail !== null,
         onOpenSearch: openSearch,
         onOpenSettings: openSettings,
       }),
-    [searchLabel, settingsLabel, activeTab, activeDetail, openSearch, openSettings],
+    [i18n, locale, activeTab, activeDetail, openSearch, openSettings],
   );
 
   const handleSelectDestination = useCallback(
@@ -270,7 +268,7 @@ export function AppShell(props: AppShellProps): ReactElement {
   };
 
   return (
-    <RouteActiveProvider active={documentVisible}>
+    <RouteActiveProvider active={documentVisible && appForeground}>
       {playTarget !== null ? (
         <CrashRecoveryBoundary resetKey={playTarget.itemKey} {...crashProps}>
           <PlayerScreen
@@ -384,8 +382,11 @@ export function AppShell(props: AppShellProps): ReactElement {
             ) : (
               <LiveScreen
                 sources={sources}
+                userStateVersion={userStateVersion}
                 memory={liveMemory}
                 onMemoryChange={setLiveMemory}
+                videoHost={videoHost}
+                playbackGuard={playbackGuard}
                 onPlay={handlePlay}
                 onOpenSources={openSources}
                 {...stageProps}

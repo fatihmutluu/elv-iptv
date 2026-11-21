@@ -1,11 +1,13 @@
 import type {
   CatalogService,
   CategoryRow,
+  FavoriteRow,
   ItemRow,
   NowNextEntry,
   ProgrammeRow,
   SourceRow,
 } from '@elv/data';
+import { ok } from '@elv/domain';
 import { createAppI18n } from '@elv/i18n';
 import {
   type AndroidKeyEvent,
@@ -102,9 +104,25 @@ function createMockCatalog(opts?: {
   readonly categories?: readonly CategoryRow[];
   readonly channels?: readonly ItemRow[];
   readonly pendingCategories?: Promise<CategoryRow[]>;
+  readonly favoriteIndices?: readonly number[];
 }) {
   const categories = opts?.categories ?? [makeCategory(0, 6), makeCategory(1, 6)];
   const channels = opts?.channels ?? Array.from({ length: 6 }, (_, i) => makeChannel(i));
+  const favIndices = opts?.favoriteIndices ?? [0, 1];
+  const favRows: FavoriteRow[] = favIndices
+    .map((idx) => channels[idx])
+    .filter((ch): ch is ItemRow => ch !== undefined)
+    .map((ch) => ({
+      profileId: 'default',
+      sourceId: ch.sourceId,
+      itemKey: ch.key,
+      kind: 'live',
+      title: ch.name,
+      logo: ch.logo,
+      year: null,
+      rating: null,
+      addedAt: NOW_MS,
+    }));
 
   const catalog = {
     listSources: jest.fn(async () => [makeSource()]),
@@ -114,6 +132,13 @@ function createMockCatalog(opts?: {
     items: jest.fn(async (_catId: string, offset: number, limit: number) =>
       channels.slice(offset, offset + limit),
     ),
+    itemDetail: jest.fn(async (itemKey: string) => {
+      const hit = channels.find((c) => c.key === itemKey);
+      return hit ? { ...hit, plot: null } : null;
+    }),
+    listFavoriteKeys: jest.fn(async () => favRows.map((f) => f.itemKey)),
+    listFavorites: jest.fn(async () => [...favRows]),
+    toggleFavorite: jest.fn(async () => ok(true)),
     seasons: jest.fn(async () => []),
     episodes: jest.fn(async () => []),
     resolveStream: jest.fn(async () => ({
@@ -280,13 +305,15 @@ describe('LiveScreen', () => {
     expect(played.length).toBeGreaterThanOrEqual(2);
     expect(played[played.length - 1]?.kind).toBe('live');
 
-    // Switch to Watch mode -> category bar hidden, stage + Mini-Guide Zap Drawer visible
-    await fireEvent.press(screen.getByTestId('live-mode-watch'));
+    // Switch to Favorites mode -> category bar hidden, stage + Mini-Guide Zap Drawer visible
+    await fireEvent.press(screen.getByTestId('live-mode-favorites'));
     await waitFor(() => {
       expect(screen.getByTestId('live-watch-stage')).toBeTruthy();
       expect(screen.getByTestId('live-zap-drawer')).toBeTruthy();
     });
     expect(screen.queryByTestId('live-category-chips')).toBeNull();
+    expect(screen.queryByTestId('live-prev-channel')).toBeNull();
+    expect(screen.queryByTestId('live-toggle-numpad')).toBeNull();
 
     // Watch live CTA launches fullscreen PlayTarget
     const beforeWatch = played.length;
@@ -450,7 +477,7 @@ describe('LiveScreen', () => {
     expect(onFocusTopNav).toHaveBeenCalledTimes(1);
     await emptyView.unmount();
 
-    // Watch mode TV controls + Mini-Guide Zap Drawer
+    // Favorites mode TV controls + Mini-Guide Zap Drawer
     const watchRemote = createAndroidSource();
     const onPlay = jest.fn();
     const watchView = await renderWithProviders(
@@ -458,7 +485,7 @@ describe('LiveScreen', () => {
         catalog={catalog}
         sources={[makeSource()]}
         refreshToken={0}
-        memory={{ ...EMPTY_LIVE_MEMORY, mode: 'watch' }}
+        memory={{ ...EMPTY_LIVE_MEMORY, mode: 'favorites' }}
         onPlay={onPlay}
         onOpenSources={jest.fn()}
         onFocusTopNav={onFocusTopNav}
@@ -473,7 +500,7 @@ describe('LiveScreen', () => {
       expect(screen.getByTestId('live-zap-row-0')).toBeTruthy();
     });
 
-    // Down into Watch controls -> Down into Zap Drawer -> Down -> Select tunes channel 1
+    // Down into Favorites controls -> Down into Zap Drawer -> Down -> Select tunes favorite channel 1
     await watchRemote.sendKey(KEYCODE_DPAD_DOWN);
     await watchRemote.sendKey(KEYCODE_DPAD_DOWN);
     await watchRemote.sendKey(KEYCODE_DPAD_DOWN);
@@ -482,8 +509,7 @@ describe('LiveScreen', () => {
       expect(screen.getByTestId('live-stage-channel-title')).toHaveTextContent('102 · Channel 102');
     });
 
-    // Right returns to Watch controls -> Right x3 reaches Watch live CTA -> Select calls onPlay
-    await watchRemote.sendKey(KEYCODE_DPAD_RIGHT);
+    // Right returns to Favorites controls -> Right x2 reaches Watch live CTA (miniguide -> favorite -> watch) -> Select calls onPlay
     await watchRemote.sendKey(KEYCODE_DPAD_RIGHT);
     await watchRemote.sendKey(KEYCODE_DPAD_RIGHT);
     await watchRemote.sendKey(KEYCODE_DPAD_RIGHT);
@@ -494,7 +520,7 @@ describe('LiveScreen', () => {
     await watchView.unmount();
   });
 
-  it('traps 10-ft TV D-pad inside the 4x3 LiveNumberPad grid and tunes via channelByNumber', async () => {
+  it('traps 10-ft TV D-pad inside the 4x3 LiveNumberPad grid and tunes via channelByNumber in Channels mode', async () => {
     jest.replaceProperty(Platform, 'OS', 'android');
     jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
 
@@ -565,14 +591,13 @@ describe('LiveScreen', () => {
     await waitFor(() => {
       expect(catalog.channelByNumber).toHaveBeenCalledWith(103, 'src-1');
       expect(screen.queryByTestId('live-numpad')).toBeNull();
-      expect(screen.getByTestId('live-watch-stage')).toBeTruthy();
-      expect(screen.getByTestId('live-stage-channel-title')).toHaveTextContent('103 · Channel 103');
+      expect(screen.getByTestId('live-channels-grid')).toBeTruthy();
+      expect(screen.getByTestId('live-channel-card-2').props.accessibilityState.selected).toBe(
+        true,
+      );
     });
 
-    // In Watch mode, open numpad via TV D-pad and close with Back
-    await sendKey(KEYCODE_DPAD_DOWN);
-    await sendKey(KEYCODE_DPAD_RIGHT);
-    await sendKey(KEYCODE_DPAD_RIGHT);
+    // Re-open numpad in Channels mode and close cleanly with Back
     await sendKey(KEYCODE_DPAD_CENTER);
     expect(screen.getByTestId('live-numpad')).toBeTruthy();
     await sendKey(KEYCODE_DPAD_LEFT);
@@ -609,7 +634,7 @@ describe('LiveScreen', () => {
     await view.unmount();
   });
 
-  it('closes LiveNumberPad and reveals Watch stage automatically after 1.8s auto-tune in Channels mode', async () => {
+  it('closes LiveNumberPad and selects jumped channel automatically after 1.8s auto-tune in Channels mode', async () => {
     jest.useFakeTimers();
     try {
       const { catalog } = createMockCatalog();
@@ -642,9 +667,9 @@ describe('LiveScreen', () => {
       await waitFor(() => {
         expect(catalog.channelByNumber).toHaveBeenCalledWith(104, 'src-1');
         expect(screen.queryByTestId('live-numpad')).toBeNull();
-        expect(screen.getByTestId('live-watch-stage')).toBeTruthy();
-        expect(screen.getByTestId('live-stage-channel-title')).toHaveTextContent(
-          '104 · Channel 104',
+        expect(screen.getByTestId('live-channels-grid')).toBeTruthy();
+        expect(screen.getByTestId('live-channel-card-3').props.accessibilityState.selected).toBe(
+          true,
         );
       });
 

@@ -26,8 +26,8 @@ export interface TvOsdAvailability {
 
 const ORDER: readonly TvOsdAction[] = [
   'back',
-  'playPause',
   'seekBack',
+  'playPause',
   'seekForward',
   'prevChannel',
   'tracks',

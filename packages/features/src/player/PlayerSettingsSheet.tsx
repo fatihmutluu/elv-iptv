@@ -1,11 +1,11 @@
 import type { AppI18n } from '@elv/i18n';
-import type { MediaTracks, TrackInfo } from '@elv/playback';
+import type { MediaTracks } from '@elv/playback';
 import {
   AdaptiveSheet,
   type FormFactor,
   Icon,
   IconButton,
-  type IconName,
+  TABULAR_NUMS_STYLE,
   type Theme,
   useTheme,
   webBackdropBlur,
@@ -16,7 +16,7 @@ import { type ComponentRef, type ReactElement, useEffect, useRef } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useDesktopDialogTrap } from './desktop-dialog-trap';
 import type { SettingsMenuState, SettingsMenuView } from './settings-menu-nav';
-import { formatTrackLabel } from './track-labels';
+import { buildSettingsNavRows, buildSettingsRadioItems } from './settings-sheet-items';
 
 const APPROX_ROW_PITCH = 50;
 
@@ -25,6 +25,8 @@ export interface PlayerSettingsSheetProps {
   readonly visible: boolean;
   readonly menuState: SettingsMenuState;
   readonly tracks: MediaTracks;
+  readonly isVod?: boolean;
+  readonly playbackSpeed?: number;
   readonly statsVisible: boolean;
   readonly isTv: boolean;
   readonly formFactor: FormFactor;
@@ -32,6 +34,7 @@ export interface PlayerSettingsSheetProps {
   readonly onOpenView: (view: SettingsMenuView) => void;
   readonly onSelectAudio: (id: string) => void;
   readonly onSelectSubtitle: (id: string | null) => void;
+  readonly onSelectSpeed?: (rate: number) => void;
   readonly onToggleStats: () => void;
   readonly onClose: () => void;
 }
@@ -40,18 +43,6 @@ function blurWebTarget(target: unknown): void {
   if ((Platform.OS as string) === 'web') {
     (target as { blur?: () => void } | null | undefined)?.blur?.();
   }
-}
-
-function activeTrackSummary(
-  list: readonly TrackInfo[],
-  selectedId: string | null,
-  fallback: string,
-  i18n: AppI18n,
-): string {
-  if (selectedId === null) return fallback;
-  const idx = list.findIndex((t) => t.id === selectedId);
-  const track = idx >= 0 ? list[idx] : undefined;
-  return track !== undefined ? formatTrackLabel(track, idx, list, i18n) : fallback;
 }
 
 function rowStyle(theme: Theme, focused: boolean, selected: boolean, isTv: boolean) {
@@ -77,12 +68,14 @@ function rowStyle(theme: Theme, focused: boolean, selected: boolean, isTv: boole
 }
 
 /**
- * Adaptive 2-level Cinema Quietude Player Settings menu (`Subtitles`, `Audio`, `Stats HUD`).
- * Flex-docked below the video canvas on `desktop` (HWND-safe) and wrapped in `AdaptiveSheet`
- * (right popover on Landscape, inset bottom sheet on Portrait) on phone, tablet, and TV.
+ * Adaptive 2-level Cinema Quietude Player Settings menu (`Subtitles`, `Audio`, VOD `Speed`,
+ * `Stats HUD`). Flex-docked below the video canvas on `desktop` (HWND-safe) and wrapped in
+ * `AdaptiveSheet` (right popover on Landscape, inset bottom sheet on Portrait) elsewhere.
  */
 export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactElement | null {
   const { visible, menuState, tracks, statsVisible, isTv, formFactor, i18n } = props;
+  const isVod = props.isVod === true;
+  const playbackSpeed = props.playbackSpeed ?? 1;
   const theme = useTheme();
   const isWebDesktop = formFactor === 'desktop' && (Platform.OS as string) === 'web';
   const showCursor = isTv || formFactor === 'desktop';
@@ -110,56 +103,22 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
     ? i18n.t('player.settings')
     : menuState.view === 'subtitles'
       ? i18n.t('player.subtitleTracks')
-      : i18n.t('player.audioTracks');
+      : menuState.view === 'speed'
+        ? i18n.t('player.speed')
+        : i18n.t('player.audioTracks');
 
-  const subSummary = activeTrackSummary(
-    tracks.subtitles,
-    tracks.selectedSubtitleId,
-    i18n.t('player.subtitlesOff'),
-    i18n,
-  );
-  const audioSummary = activeTrackSummary(
-    tracks.audio,
-    tracks.selectedAudioId,
-    i18n.t('player.stats.audioNone'),
-    i18n,
-  );
-  const navRows: readonly [string, IconName, string, string, SettingsMenuView][] = [
-    [
-      'player-settings-row-subtitles',
-      'subtitles',
-      i18n.t('player.subtitleTracks'),
-      subSummary,
-      'subtitles',
-    ],
-    ['player-settings-row-audio', 'audio', i18n.t('player.audioTracks'), audioSummary, 'audio'],
-  ];
-
-  const radioItems =
-    menuState.view === 'subtitles'
-      ? [
-          {
-            key: 'off',
-            testID: 'player-settings-sub-off',
-            label: i18n.t('player.subtitlesOff'),
-            selected: tracks.selectedSubtitleId === null,
-            onPress: () => props.onSelectSubtitle(null),
-          },
-          ...tracks.subtitles.map((track, idx) => ({
-            key: track.id,
-            testID: `player-settings-sub-${track.id}`,
-            label: formatTrackLabel(track, idx, tracks.subtitles, i18n),
-            selected: tracks.selectedSubtitleId === track.id,
-            onPress: () => props.onSelectSubtitle(track.id),
-          })),
-        ]
-      : tracks.audio.map((track, idx) => ({
-          key: track.id,
-          testID: `player-settings-audio-${track.id}`,
-          label: formatTrackLabel(track, idx, tracks.audio, i18n),
-          selected: tracks.selectedAudioId === track.id,
-          onPress: () => props.onSelectAudio(track.id),
-        }));
+  const navRows = isRoot ? buildSettingsNavRows(tracks, isVod, playbackSpeed, i18n) : [];
+  const radioItems = isRoot
+    ? []
+    : buildSettingsRadioItems({
+        view: menuState.view,
+        tracks,
+        playbackSpeed,
+        i18n,
+        onSelectAudio: props.onSelectAudio,
+        onSelectSubtitle: props.onSelectSubtitle,
+        onSelectSpeed: props.onSelectSpeed,
+      });
 
   const content = (
     <View testID="player-settings-panel" style={styles.inner}>
@@ -168,7 +127,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
           <IconButton
             testID="player-settings-back"
             icon="back"
-            size={40}
+            size={36}
             accessibilityLabel={i18n.t('player.settingsBack')}
             focusable={!isTv}
             onPress={() => props.onOpenView('root')}
@@ -183,7 +142,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         <IconButton
           testID="player-settings-close"
           icon="close"
-          size={40}
+          size={36}
           accessibilityLabel={i18n.t('player.closeTracks')}
           focusable={!isTv}
           onPress={props.onClose}
@@ -192,7 +151,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
 
       {isRoot ? (
         <View style={styles.listGap}>
-          {navRows.map(([testID, icon, label, summary, targetView], idx) => (
+          {navRows.map(([testID, icon, label, summary, targetView, tabular], idx) => (
             <Pressable
               key={testID}
               testID={testID}
@@ -216,6 +175,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
                 numberOfLines={1}
                 style={[
                   theme.typography.caption,
+                  tabular ? TABULAR_NUMS_STYLE : undefined,
                   styles.summary,
                   { color: theme.colors.textSecondary },
                 ]}
@@ -235,7 +195,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
               blurWebTarget(e.currentTarget);
               props.onToggleStats();
             }}
-            style={rowStyle(theme, showCursor && menuState.index === 2, false, isTv)}
+            style={rowStyle(theme, showCursor && menuState.index === navRows.length, false, isTv)}
           >
             <Icon name="info" size={18} color={theme.colors.textSecondary} />
             <Text
@@ -290,20 +250,11 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
                 }}
                 style={rowStyle(theme, showCursor && menuState.index === idx, item.selected, isTv)}
               >
-                <View
-                  style={[
-                    styles.radioDot,
-                    {
-                      borderRadius: theme.radius.pill,
-                      borderColor: item.selected ? theme.colors.accent : theme.colors.textMuted,
-                      backgroundColor: item.selected ? theme.colors.accent : 'transparent',
-                    },
-                  ]}
-                />
                 <Text
                   numberOfLines={1}
                   style={[
                     theme.typography.title,
+                    item.tabular === true ? TABULAR_NUMS_STYLE : undefined,
                     styles.flex1,
                     {
                       color: item.selected ? theme.colors.textPrimary : theme.colors.textSecondary,
@@ -313,6 +264,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
                 >
                   {item.label}
                 </Text>
+                {item.selected ? <Icon name="check" size={16} color={theme.colors.accent} /> : null}
               </Pressable>
             ))
           ) : (
@@ -360,7 +312,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
 }
 
 const styles = StyleSheet.create({
-  desktopPanel: { borderTopWidth: 1, paddingHorizontal: 16, paddingVertical: 12 },
+  desktopPanel: { borderTopWidth: 1, paddingHorizontal: 18, paddingVertical: 12 },
   inner: { gap: 10 },
   header: {
     flexDirection: 'row',
@@ -371,9 +323,9 @@ const styles = StyleSheet.create({
   },
   flex1: { flex: 1 },
   listGap: { gap: 6 },
-  subList: { maxHeight: 220 },
+  subList: { maxHeight: 240 },
   row: {
-    minHeight: 44,
+    minHeight: 42,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
@@ -381,7 +333,6 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   summary: { maxWidth: 120, textAlign: 'right' },
-  radioDot: { width: 10, height: 10, borderWidth: 1.5 },
   togglePill: {
     borderWidth: 1,
     paddingHorizontal: 10,

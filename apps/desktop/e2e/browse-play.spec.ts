@@ -121,8 +121,9 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
     await expect(window.getByTestId('live-epg-view')).toBeVisible();
     await expect(window.getByTestId('epg-preview-header')).toBeVisible();
     await expect(window.getByTestId('epg-time-ruler')).toBeVisible();
+    await window.getByTestId('epg-favorite-toggle').click();
 
-    await window.getByTestId('live-mode-watch').click();
+    await window.getByTestId('live-mode-favorites').click();
     await expect(window.getByTestId('live-watch-stage')).toBeVisible();
     await expect(window.getByTestId('live-zap-drawer')).toBeVisible();
 

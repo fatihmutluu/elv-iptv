@@ -1,6 +1,7 @@
 import type { ItemRow, NowNextEntry } from '@elv/data';
 import {
   ArtworkImage,
+  IconButton,
   MicroPill,
   SkeletonBox,
   TABULAR_NUMS_STYLE,
@@ -27,6 +28,8 @@ export interface LiveGridShared {
   readonly liveBadge: string;
   readonly upNext: string;
   readonly noProgram: string;
+  readonly favoriteAdd: string;
+  readonly favoriteRemove: string;
 }
 
 function tileSurfaceStyle(
@@ -34,7 +37,6 @@ function tileSurfaceStyle(
   shared: LiveGridShared,
   isActive: boolean,
   focused: boolean,
-  pressed: boolean,
 ): ViewStyle {
   return {
     height: shared.cardHeight,
@@ -47,12 +49,11 @@ function tileSurfaceStyle(
       : isActive
         ? theme.colors.accent
         : theme.colors.surfaceBorder,
-    opacity: pressed ? 0.86 : 1,
     transform: [{ scale: focused ? theme.focus.cardScale : 1 }],
   };
 }
 
-/** Memoized Live TV channel tile with zero inline closures and live Now/Next progress bar. */
+/** Memoized Live TV channel tile with zero inline closures, 1-click favorite toggle, and live Now/Next progress bar. */
 export const ChannelGridTile = memo(function ChannelGridTileInner(p: {
   readonly item: ItemRow | undefined;
   readonly itemIndex: number;
@@ -60,8 +61,10 @@ export const ChannelGridTile = memo(function ChannelGridTileInner(p: {
   readonly nowMs: number;
   readonly shared: LiveGridShared;
   readonly isActive: boolean;
+  readonly isFavorite: boolean;
   readonly focused: boolean;
   readonly onWatchChannel: (channel: ItemRow, index: number) => void;
+  readonly onToggleFavorite?: (channel: ItemRow) => void;
 }): ReactElement {
   const theme = useTheme();
   const cursor = webCursorPointer();
@@ -69,6 +72,9 @@ export const ChannelGridTile = memo(function ChannelGridTileInner(p: {
   const handlePress = useCallback(() => {
     if (p.item) p.onWatchChannel(p.item, p.itemIndex);
   }, [p.item, p.itemIndex, p.onWatchChannel]);
+  const handleToggleFavorite = useCallback(() => {
+    if (p.item) p.onToggleFavorite?.(p.item);
+  }, [p.item, p.onToggleFavorite]);
 
   if (!p.item) {
     return (
@@ -87,76 +93,87 @@ export const ChannelGridTile = memo(function ChannelGridTileInner(p: {
   const pct = `${Math.round(ratio * 100)}%` as const;
 
   return (
-    <Pressable
-      testID={`live-channel-card-${p.itemIndex}`}
-      accessibilityRole="button"
-      accessibilityLabel={formatLiveTitle(p.item)}
-      accessibilityState={{ selected: p.isActive }}
-      focusable={!p.shared.isTv}
-      onPress={handlePress}
-      style={({ pressed }) => [
-        styles.tile,
-        tileSurfaceStyle(theme, p.shared, p.isActive, p.focused, pressed),
-        cursor,
-        transition,
-      ]}
+    <View
+      style={[styles.tile, tileSurfaceStyle(theme, p.shared, p.isActive, p.focused), transition]}
     >
-      <View style={styles.tileBody}>
-        <ArtworkImage
-          uri={p.item.logo}
-          label={p.item.name}
-          maxDecodePx={160}
-          resizeMode="contain"
-          logoBackdrop
-          borderRadius={theme.radius.button}
-          style={styles.logo}
-        />
-        <View style={styles.tileMeta}>
-          <View style={styles.tileHeader}>
-            {p.item.num !== null && p.item.num !== undefined ? (
+      <View style={styles.tileContentRow}>
+        <Pressable
+          testID={`live-channel-card-${p.itemIndex}`}
+          accessibilityRole="button"
+          accessibilityLabel={formatLiveTitle(p.item)}
+          accessibilityState={{ selected: p.isActive }}
+          focusable={!p.shared.isTv}
+          onPress={handlePress}
+          style={({ pressed }) => [styles.tileBody, { opacity: pressed ? 0.86 : 1 }, cursor]}
+        >
+          <ArtworkImage
+            uri={p.item.logo}
+            label={p.item.name}
+            maxDecodePx={160}
+            resizeMode="contain"
+            logoBackdrop
+            borderRadius={theme.radius.button}
+            style={styles.logo}
+          />
+          <View style={styles.tileMeta}>
+            <View style={styles.tileHeader}>
+              {p.item.num !== null && p.item.num !== undefined ? (
+                <Text
+                  testID={`live-channel-num-${p.itemIndex}`}
+                  numberOfLines={1}
+                  style={[
+                    theme.typography.caption,
+                    TABULAR_NUMS_STYLE,
+                    { color: theme.colors.textMuted, fontWeight: '700' },
+                  ]}
+                >
+                  {p.item.num}
+                </Text>
+              ) : null}
               <Text
-                testID={`live-channel-num-${p.itemIndex}`}
                 numberOfLines={1}
-                style={[
-                  theme.typography.caption,
-                  TABULAR_NUMS_STYLE,
-                  { color: theme.colors.textMuted, fontWeight: '700' },
-                ]}
+                style={[theme.typography.title, styles.flex1, { color: theme.colors.textPrimary }]}
               >
-                {p.item.num}
+                {p.item.name}
+              </Text>
+              <MicroPill label={p.shared.liveBadge} tone="live" />
+            </View>
+            <Text
+              testID={`live-channel-now-${p.itemIndex}`}
+              numberOfLines={1}
+              style={[
+                theme.typography.body,
+                {
+                  color: nowProg ? theme.colors.textPrimary : theme.colors.textMuted,
+                  fontWeight: nowProg ? '600' : '400',
+                },
+              ]}
+            >
+              {nowProg ? nowProg.title : p.shared.noProgram}
+            </Text>
+            {nextProg ? (
+              <Text
+                testID={`live-channel-next-${p.itemIndex}`}
+                numberOfLines={1}
+                style={[theme.typography.caption, { color: theme.colors.textSecondary }]}
+              >
+                {`${p.shared.upNext}: ${nextProg.title}`}
               </Text>
             ) : null}
-            <Text
-              numberOfLines={1}
-              style={[theme.typography.title, styles.flex1, { color: theme.colors.textPrimary }]}
-            >
-              {p.item.name}
-            </Text>
-            <MicroPill label={p.shared.liveBadge} tone="live" />
           </View>
-          <Text
-            testID={`live-channel-now-${p.itemIndex}`}
-            numberOfLines={1}
-            style={[
-              theme.typography.body,
-              {
-                color: nowProg ? theme.colors.textPrimary : theme.colors.textMuted,
-                fontWeight: nowProg ? '600' : '400',
-              },
-            ]}
-          >
-            {nowProg ? nowProg.title : p.shared.noProgram}
-          </Text>
-          {nextProg ? (
-            <Text
-              testID={`live-channel-next-${p.itemIndex}`}
-              numberOfLines={1}
-              style={[theme.typography.caption, { color: theme.colors.textSecondary }]}
-            >
-              {`${p.shared.upNext}: ${nextProg.title}`}
-            </Text>
-          ) : null}
-        </View>
+        </Pressable>
+        {p.onToggleFavorite ? (
+          <View style={styles.favSlot}>
+            <IconButton
+              testID={`live-channel-fav-${p.itemIndex}`}
+              icon={p.isFavorite ? 'starFilled' : 'star'}
+              active={p.isFavorite}
+              accessibilityLabel={p.isFavorite ? p.shared.favoriteRemove : p.shared.favoriteAdd}
+              focusable={!p.shared.isTv}
+              onPress={handleToggleFavorite}
+            />
+          </View>
+        ) : null}
       </View>
       <View style={[styles.progressTrack, { backgroundColor: theme.colors.subtleHighlight }]}>
         <View
@@ -164,7 +181,7 @@ export const ChannelGridTile = memo(function ChannelGridTileInner(p: {
           style={[styles.progressFill, { backgroundColor: theme.colors.accent, width: pct }]}
         />
       </View>
-    </Pressable>
+    </View>
   );
 });
 
@@ -176,8 +193,10 @@ export const ChannelGridRow = memo(function ChannelGridRowInner(p: {
   readonly nowNextByKey: ReadonlyMap<string, NowNextEntry>;
   readonly nowMs: number;
   readonly activeChannelKey: string | null;
+  readonly favoriteKeys?: ReadonlySet<string>;
   readonly focusedCol: number | null;
   readonly onWatchChannel: (channel: ItemRow, index: number) => void;
+  readonly onToggleFavorite?: (channel: ItemRow) => void;
 }): ReactElement {
   const padCount = Math.max(0, p.shared.cols - p.items.length);
   return (
@@ -199,8 +218,10 @@ export const ChannelGridRow = memo(function ChannelGridRowInner(p: {
             nowMs={p.nowMs}
             shared={p.shared}
             isActive={item !== undefined && item.key === p.activeChannelKey}
+            isFavorite={item !== undefined && (p.favoriteKeys?.has(item.key) ?? false)}
             focused={p.shared.isTv && p.focusedCol === colIdx}
             onWatchChannel={p.onWatchChannel}
+            {...(p.onToggleFavorite !== undefined ? { onToggleFavorite: p.onToggleFavorite } : {})}
           />
         );
       })}
@@ -215,16 +236,20 @@ const styles = StyleSheet.create({
   flex1: { flex: 1 },
   row: { flexDirection: 'row', alignItems: 'flex-start' },
   tile: { flex: 1, overflow: 'hidden', justifyContent: 'space-between' },
+  tileContentRow: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   tileBody: {
     flex: 1,
+    height: '100%',
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
+    paddingLeft: 12,
+    paddingRight: 8,
     paddingVertical: 10,
     gap: 12,
   },
+  favSlot: { paddingRight: 8, flexShrink: 0, justifyContent: 'center', alignItems: 'center' },
   logo: { width: 48, height: 48, flexShrink: 0 },
-  tileMeta: { flex: 1, gap: 3 },
+  tileMeta: { flex: 1, minWidth: 0, gap: 3 },
   tileHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   progressTrack: { height: 3, width: '100%' },
   progressFill: { height: 3 },

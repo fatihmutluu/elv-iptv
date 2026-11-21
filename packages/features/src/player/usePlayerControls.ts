@@ -1,27 +1,17 @@
 import type { KeyEvent, KeyInput } from '@elv/focus-core';
-import {
-  type MediaTracks,
-  type PlaybackClock,
-  type PlaybackService,
-  type PlaybackStatus,
-  type PlaybackTimers,
-  positionAt,
+import type {
+  MediaTracks,
+  PlaybackClock,
+  PlaybackService,
+  PlaybackStatus,
+  PlaybackTimers,
 } from '@elv/playback';
 import { type FormFactor, useKeyInterpreter, useTvKeySource } from '@elv/ui-kit';
-import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
+import { type MutableRefObject, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
-import {
-  canPauseStatus,
-  clampSeekPosition,
-  createScrubController,
-  digitKeyToRatio,
-  isScrubKey,
-  type ScrubController,
-  STEP_SEEK_MS,
-  shouldCancelScrubOnStatus,
-} from './scrub-controller';
-import { routeSettingsMenuKey } from './settings-menu-nav';
+import { canPauseStatus, digitKeyToRatio, isScrubKey, STEP_SEEK_MS } from './scrub-controller';
+import { rootIndexForSettingsView, routeSettingsMenuKey } from './settings-menu-nav';
 import { routePickerKey } from './track-picker-nav';
 import {
   clampTvOsdAction,
@@ -31,6 +21,7 @@ import {
 } from './tv-osd-nav';
 import { isWebButtonActive, useDesktopPlayerShortcuts } from './useDesktopPlayerShortcuts';
 import { usePlayerOverlayState } from './usePlayerOverlayState';
+import { usePlayerScrub } from './usePlayerScrub';
 
 export type { TvOsdAction } from './tv-osd-nav';
 
@@ -62,7 +53,7 @@ export interface PlayerControlsParams {
 
 /**
  * Coordinates VOD transport, decoupled preview-seek (`#292`), TV OSD bar focus,
- * `TrackPickerModal`, 2-level `PlayerSettingsSheet`, and touch-only lock for `PlayerScreen`.
+ * `TrackPickerModal`, 2-level `PlayerSettingsSheet` (incl. playback speed), and touch-only lock.
  */
 export function usePlayerControls(params: PlayerControlsParams) {
   const { formFactor, activeTarget, status, tracks, hasTracks, showRetry, hasService } = params;
@@ -74,43 +65,35 @@ export function usePlayerControls(params: PlayerControlsParams) {
   const cbRef = useRef(params);
   cbRef.current = params;
 
-  const [previewPositionMs, setPreviewPositionMs] = useState<number | undefined>(undefined);
+  const [muted, setMuted] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const playbackSpeedRef = useRef(1);
+  playbackSpeedRef.current = playbackSpeed;
 
-  const scrubRef = useRef<ScrubController | null>(null);
-  if (scrubRef.current === null) {
-    scrubRef.current = createScrubController({
-      timers: {
-        setTimeout: (fn, ms) => timersRef.current.setTimeout(fn, ms),
-        clearTimeout: (handle) => timersRef.current.clearTimeout(handle),
-      },
-      readPosition: () => {
-        const anchor =
-          cbRef.current.activeTarget.kind === 'vod'
-            ? serviceRef.current?.getState().anchor
-            : undefined;
-        return anchor === undefined
-          ? undefined
-          : {
-              positionMs: positionAt(anchor, clockRef.current.now()),
-              ...(anchor.durationMs === undefined ? {} : { durationMs: anchor.durationMs }),
-            };
-      },
-      seek: (ms) => {
-        if (cbRef.current.activeTarget.kind === 'vod') {
-          serviceRef.current?.seek(ms);
-          cbRef.current.onSeekCommit?.(ms);
-        }
-      },
-      onPreviewChange: setPreviewPositionMs,
+  useEffect(() => {
+    if (!hasService) setMuted(false);
+  }, [hasService]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset playback speed when active item changes
+  useEffect(() => {
+    setPlaybackSpeed(1);
+  }, [activeTarget.itemKey]);
+
+  const { scrub, previewPositionMs, cancelScrub, togglePlayPause, seekBy, seekToRatio, seekToEnd } =
+    usePlayerScrub({
+      activeTarget,
+      statusKind: status.kind,
+      serviceRef,
+      clockRef,
+      timersRef,
+      onSeekCommit: params.onSeekCommit,
     });
-  }
-  const scrub = scrubRef.current;
-  const cancelScrub = useCallback(() => scrub.cancel(), [scrub]);
 
   const overlay = usePlayerOverlayState({
     formFactor,
     itemKey: activeTarget.itemKey,
     isVod: activeTarget.kind === 'vod',
+    playbackSpeed,
     statusKind: status.kind,
     tracks,
     hasTracks,
@@ -127,12 +110,6 @@ export function usePlayerControls(params: PlayerControlsParams) {
     cancelScrub,
   });
 
-  const prevStatusRef = useRef(status.kind);
-  useEffect(() => {
-    if (shouldCancelScrubOnStatus(prevStatusRef.current, status.kind)) scrub.cancel();
-    prevStatusRef.current = status.kind;
-  }, [scrub, status.kind]);
-
   const retry = (): void => {
     scrub.cancel();
     overlay.blurTvOsd();
@@ -140,45 +117,10 @@ export function usePlayerControls(params: PlayerControlsParams) {
     serviceRef.current?.retry();
   };
 
-  const togglePlayPause = (): void => {
-    const svc = serviceRef.current;
-    if (svc === null || cbRef.current.activeTarget.kind !== 'vod') return;
-    scrub.cancel();
-    const kind = svc.getState().status.kind;
-    if (kind === 'paused' || kind === 'ended') svc.play();
-    else if (canPauseStatus(kind)) svc.pause();
+  const selectSpeed = (rate: number): void => {
+    setPlaybackSpeed(rate);
+    serviceRef.current?.setSpeed(rate);
   };
-
-  const commitVodSeek = (targetMs: number): void => {
-    serviceRef.current?.seek(targetMs);
-    cbRef.current.onSeekCommit?.(targetMs);
-  };
-
-  const seekBy = (deltaMs: number): void => {
-    const svc = serviceRef.current;
-    const anchor = cbRef.current.activeTarget.kind === 'vod' ? svc?.getState().anchor : undefined;
-    scrub.cancel();
-    if (svc === null || anchor === undefined) return;
-    commitVodSeek(
-      clampSeekPosition(positionAt(anchor, clockRef.current.now()) + deltaMs, anchor.durationMs),
-    );
-  };
-
-  const seekWithDuration = (compute: (dur: number) => number): void => {
-    const svc = serviceRef.current;
-    if (svc === null || cbRef.current.activeTarget.kind !== 'vod') return;
-    scrub.cancel();
-    const dur = svc.getState().anchor?.durationMs;
-    if (dur !== undefined && dur > 0) commitVodSeek(compute(dur));
-  };
-
-  const seekToRatio = (ratio: number): void => {
-    if (!Number.isFinite(ratio)) return;
-    seekWithDuration((dur) => Math.round(Math.max(0, Math.min(1, ratio)) * dur));
-  };
-
-  const seekToEnd = (): void =>
-    seekWithDuration((dur) => (dur > STEP_SEEK_MS ? dur - STEP_SEEK_MS : dur));
 
   const handleBack = (): void => {
     scrub.cancel();
@@ -188,7 +130,10 @@ export function usePlayerControls(params: PlayerControlsParams) {
       if (s.settingsMenu.view !== 'root') {
         overlay.updateSettingsMenu({
           view: 'root',
-          index: s.settingsMenu.view === 'subtitles' ? 0 : 1,
+          index: rootIndexForSettingsView(
+            s.settingsMenu.view,
+            cbRef.current.activeTarget.kind === 'vod',
+          ),
         });
       } else overlay.closeSettings();
     } else if (s.tracksOpen) overlay.closeTracks();
@@ -238,12 +183,16 @@ export function usePlayerControls(params: PlayerControlsParams) {
     }
 
     if (s.settingsOpen) {
-      const intent = routeSettingsMenuKey(event, s.settingsMenu, s.tracks);
+      const intent = routeSettingsMenuKey(event, s.settingsMenu, s.tracks, {
+        isVod: cbRef.current.activeTarget.kind === 'vod',
+        playbackSpeed: playbackSpeedRef.current,
+      });
       if (intent?.kind === 'close') overlay.closeSettings();
       else if (intent?.kind === 'state') overlay.updateSettingsMenu(intent.state);
       else if (intent?.kind === 'toggleStats') overlay.toggleStats();
       else if (intent?.kind === 'audio') serviceRef.current?.selectAudioTrack(intent.id);
       else if (intent?.kind === 'subtitle') serviceRef.current?.selectSubtitleTrack(intent.id);
+      else if (intent?.kind === 'speed') selectSpeed(intent.rate);
       return;
     }
 
@@ -348,7 +297,10 @@ export function usePlayerControls(params: PlayerControlsParams) {
     if (overlay.liveRef.current.settingsOpen) overlay.closeSettings();
     cbRef.current.onToggleFullscreen?.();
   };
-  const toggleMute = (): void => cbRef.current.onToggleMute?.();
+  const toggleMute = (): void => {
+    setMuted((prev) => !prev);
+    cbRef.current.onToggleMute?.();
+  };
   const desktopFallbackKeyProps = useDesktopPlayerShortcuts({
     formFactor,
     clockRef,
@@ -383,6 +335,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
   return {
     ...overlay.publicState,
     previewPositionMs,
+    muted,
+    playbackSpeed,
     isPausedOrEnded: status.kind === 'paused' || status.kind === 'ended',
     retry,
     togglePlayPause,
@@ -393,6 +347,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     seekToRatio,
     selectAudio: (id: string) => serviceRef.current?.selectAudioTrack(id),
     selectSubtitle: (id: string | null) => serviceRef.current?.selectSubtitleTrack(id),
+    selectSpeed,
     cancelScrub,
     handleBack,
     desktopFallbackKeyProps,

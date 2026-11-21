@@ -212,6 +212,8 @@ export function PlayerScreen({
       visible={controls.settingsOpen && activeService !== null}
       menuState={controls.settingsMenu}
       tracks={tracks}
+      isVod={activeTarget.kind === 'vod'}
+      playbackSpeed={controls.playbackSpeed}
       statsVisible={controls.statsVisible}
       isTv={isTv}
       formFactor={formFactor}
@@ -219,6 +221,7 @@ export function PlayerScreen({
       onOpenView={controls.openSettingsView}
       onSelectAudio={controls.selectAudio}
       onSelectSubtitle={controls.selectSubtitle}
+      onSelectSpeed={controls.selectSpeed}
       onToggleStats={controls.toggleStats}
       onClose={controls.closeSettings}
     />
@@ -239,11 +242,14 @@ export function PlayerScreen({
       showRetry={showRetry}
       isTv={isTv}
       isDesktop={isDesktop}
+      muted={controls.muted}
+      playbackSpeed={controls.playbackSpeed}
       tvOsdFocused={controls.tvOsdFocused}
       tvScrubberFocused={controls.tvScrubberFocused}
       tvOsdAction={controls.tvOsdAction}
       tracksOpen={controls.tracksOpen}
       settingsOpen={controls.settingsOpen}
+      settingsView={controls.settingsMenu.view}
       previewPositionMs={controls.previewPositionMs}
       i18n={i18n}
       service={activeService}
@@ -256,6 +262,11 @@ export function PlayerScreen({
       onOpenTracks={controls.openTracks}
       onOpenSettings={() =>
         controls.settingsOpen ? controls.closeSettings() : controls.openSettings()
+      }
+      onOpenSpeed={() =>
+        controls.settingsOpen && controls.settingsMenu.view === 'speed'
+          ? controls.closeSettings()
+          : controls.openSettings('speed')
       }
       {...(hostToggleMute !== undefined ? { onToggleMute: controls.toggleMute } : {})}
       {...(hostToggleFullscreen !== undefined
@@ -334,8 +345,8 @@ export function PlayerScreen({
           >
             {nextEpisodeNode}
           </View>
-          {trackPickerNode}
           {controls.osdHidden ? null : osdNode}
+          {trackPickerNode}
           {settingsSheetNode}
         </>
       )}

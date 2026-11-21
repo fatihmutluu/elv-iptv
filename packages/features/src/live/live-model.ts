@@ -1,9 +1,9 @@
 import type { ItemRow, NowNextEntry, ProgrammeRow } from '@elv/data';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
-import { createPagedListSource } from '../shared/paged-list-source';
+import { createPagedListSource, type PagedListSource } from '../shared/paged-list-source';
 
 /** Active sub-mode inside the unified Cinema Quietude Live TV hub (`UI_UX_PHILOSOPHY.md` §2.1). */
-export type LiveMode = 'watch' | 'channels' | 'epg';
+export type LiveMode = 'favorites' | 'channels' | 'epg';
 
 /** Persisted per-session Live TV hub memory preserved across tab switches and Player visits. */
 export interface LiveTabMemory {
@@ -14,7 +14,7 @@ export interface LiveTabMemory {
   readonly zapDrawerOpen: boolean;
 }
 
-/** Default initial Live TV hub memory (`Channels` grid ready immediately, switchable to `Watch` / `TV Guide`). */
+/** Default initial Live TV hub memory (`Channels` grid ready immediately, switchable to `Favorites` / `TV Guide`). */
 export const EMPTY_LIVE_MEMORY: LiveTabMemory = {
   mode: 'channels',
   categoryId: null,
@@ -296,4 +296,25 @@ export function indexNowNext(entries: readonly NowNextEntry[]): Map<string, NowN
   const out = new Map<string, NowNextEntry>();
   for (const entry of entries) out.set(entry.channelKey, entry);
   return out;
+}
+
+/** Creates a synchronous in-memory {@link PagedListSource} over a bounded item list (e.g. Favorites). */
+export function createStaticPagedListSource<T>(items: readonly T[]): PagedListSource<T> {
+  let disposed = false;
+  return {
+    count: () => (disposed ? 0 : items.length),
+    get: (index: number) =>
+      disposed || !Number.isInteger(index) || index < 0 || index >= items.length
+        ? undefined
+        : items[index],
+    prefetch: () => undefined,
+    onChange: () => () => undefined,
+    loadItem: async (index: number) =>
+      disposed || !Number.isInteger(index) || index < 0 || index >= items.length
+        ? undefined
+        : items[index],
+    dispose: () => {
+      disposed = true;
+    },
+  };
 }
