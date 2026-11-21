@@ -9,12 +9,7 @@ import {
   useState,
 } from 'react';
 import { type ScrollView, StyleSheet, View } from 'react-native';
-import {
-  computeCatalogLayout,
-  type DetailTarget,
-  detailTargetFromItem,
-  type WatchStatusFilter,
-} from '../shared';
+import { computeCatalogLayout, type DetailTarget, detailTargetFromItem } from '../shared';
 import {
   CatalogEmptyState,
   CatalogFilterHeader,
@@ -32,8 +27,7 @@ import {
   type CatalogNavRowId,
   type CatalogRailNavEntry,
   type CatalogTabMemory,
-  filterCatalogItems,
-  WATCH_STATUS_FILTERS,
+  detailTargetFromProgress,
 } from './catalog-model';
 import { useCatalogDiscovery, useCatalogTabMemory } from './useCatalogDiscovery';
 import { useTvCatalogNavigation } from './useTvCatalogNavigation';
@@ -55,8 +49,9 @@ export interface CatalogDiscoveryScreenProps {
 
 /**
  * Cinema Quietude Movies & Series Discovery screen (`UI_UX_PHILOSOPHY.md` §1–§4).
- * Presents category and watch-status `FilterChip` bars over bounded horizontal `2:3` poster peek
- * rails with progressive batch loading and O(1)-memory row-virtualized `CategoryGridView` drill-down.
+ * Presents an editorial underline category bar over a top `16:9` Continue Watching rail, bounded
+ * horizontal `2:3` poster peek rails with progressive batch loading, and O(1)-memory
+ * row-virtualized `CategoryGridView` drill-down.
  */
 export function CatalogDiscoveryScreen({
   kind,
@@ -112,53 +107,30 @@ export function CatalogDiscoveryScreen({
   );
 
   const isGridMode = selectedCategory !== null;
-  const watchFilter = activeMemory.watchFilter;
 
-  const { filteredRailItems, railEntries, isDiscoveryFilterEmpty } = useMemo(() => {
-    const map = new Map<string, ReturnType<typeof filterCatalogItems>>();
+  const railEntries = useMemo<CatalogRailNavEntry[]>(() => {
     const entries: CatalogRailNavEntry[] = [];
     for (let i = 0; i < discovery.visibleCategories.length; i++) {
       const cat = discovery.visibleCategories[i];
       if (!cat) continue;
-      const raw = discovery.railItemsByCategoryId.get(cat.row.id) ?? [];
-      const filtered = filterCatalogItems(raw, discovery.progressByKey, watchFilter);
-      map.set(cat.row.id, filtered);
-      if (filtered.length > 0) entries.push({ catIndex: i, count: filtered.length + 1 });
+      const items = discovery.railItemsByCategoryId.get(cat.row.id) ?? [];
+      if (items.length > 0) entries.push({ catIndex: i, count: items.length + 1 });
     }
-    const empty =
-      !isGridMode &&
-      watchFilter !== 'all' &&
-      discovery.visibleCategories.length > 0 &&
-      discovery.loadingRailIds.size === 0 &&
-      entries.length === 0;
-    return { filteredRailItems: map, railEntries: entries, isDiscoveryFilterEmpty: empty };
-  }, [
-    discovery.loadingRailIds.size,
-    discovery.progressByKey,
-    discovery.railItemsByCategoryId,
-    discovery.visibleCategories,
-    isGridMode,
-    watchFilter,
-  ]);
+    return entries;
+  }, [discovery.railItemsByCategoryId, discovery.visibleCategories]);
 
-  const [gridMeta, setGridMeta] = useState<CategoryGridMeta>({
-    itemCount: 0,
-    isFilterEmpty: false,
-  });
+  const [gridMeta, setGridMeta] = useState<CategoryGridMeta>({ itemCount: 0 });
   const gridAccessRef = useRef<CategoryGridAccess>({
     itemCount: 0,
-    isFilterEmpty: false,
     getItem: () => undefined,
   });
 
-  const handleSelectWatchFilter = useCallback(
-    (nextFilter: WatchStatusFilter) => updateMemory({ watchFilter: nextFilter }),
-    [updateMemory],
-  );
-  const handleResetFilter = useCallback(() => updateMemory({ watchFilter: 'all' }), [updateMemory]);
-
   const scrollViewRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
+  const continueYRef = useRef<number | undefined>(undefined);
   const railYRef = useRef<Map<number, number>>(new Map());
+  const recordContinueY = useCallback((y: number) => {
+    continueYRef.current = y;
+  }, []);
   const recordRailY = useCallback((catIndex: number, y: number) => {
     railYRef.current.set(catIndex, y);
   }, []);
@@ -167,9 +139,7 @@ export function CatalogDiscoveryScreen({
   const hasSources = sources.length > 0;
   const hasCategories = discovery.categories.length > 0;
 
-  const effectiveGridItemCount =
-    watchFilter === 'all' ? (selectedCategory?.row.itemCount ?? 0) : gridMeta.itemCount;
-  const effectiveGridFilterEmpty = watchFilter !== 'all' && gridMeta.isFilterEmpty;
+  const effectiveGridItemCount = selectedCategory?.row.itemCount ?? gridMeta.itemCount;
 
   const navRows = useMemo(
     () =>
@@ -178,19 +148,17 @@ export function CatalogDiscoveryScreen({
         hasSources,
         hasCategories,
         categoryChipCount: hasCategories ? discovery.categories.length + 1 : 0,
-        statusChipCount: hasCategories ? WATCH_STATUS_FILTERS.length : 0,
+        continueCount: !isGridMode ? discovery.continueItems.length : 0,
         railEntries,
         hasLoadMore: !isGridMode && discovery.hasMoreCategories,
         isGridMode,
-        isFilterEmpty: isGridMode ? effectiveGridFilterEmpty : isDiscoveryFilterEmpty,
       }),
     [
       discovery.categories.length,
+      discovery.continueItems.length,
       discovery.hasMoreCategories,
-      effectiveGridFilterEmpty,
       hasCategories,
       hasSources,
-      isDiscoveryFilterEmpty,
       isGridMode,
       isInitialLoading,
       railEntries,
@@ -201,7 +169,6 @@ export function CatalogDiscoveryScreen({
     (rowId: CatalogNavRowId, colIndex: number) => {
       if (rowId === 'empty') return onOpenSources();
       if (rowId === 'gridBack') return handleSelectCategory(null);
-      if (rowId === 'filterReset') return handleResetFilter();
       if (rowId === 'loadMore') return discovery.loadMoreCategories();
       if (rowId === 'catChips') {
         if (colIndex === 0) return handleSelectCategory(null);
@@ -209,15 +176,15 @@ export function CatalogDiscoveryScreen({
         if (cat) handleSelectCategory(cat.row.id);
         return;
       }
-      if (rowId === 'statusChips') {
-        const filter = WATCH_STATUS_FILTERS[colIndex];
-        if (filter) handleSelectWatchFilter(filter);
+      if (rowId === 'continue') {
+        const row = discovery.continueItems[colIndex];
+        if (row) onOpenDetail(detailTargetFromProgress(row, kind));
         return;
       }
       if (rowId.startsWith('rail-')) {
         const cat = discovery.visibleCategories[Number(rowId.slice(5))];
         if (!cat) return;
-        const items = filteredRailItems.get(cat.row.id) ?? [];
+        const items = discovery.railItemsByCategoryId.get(cat.row.id) ?? [];
         if (colIndex === items.length) return handleSelectCategory(cat.row.id);
         const item = items[colIndex];
         if (!item) return;
@@ -225,15 +192,7 @@ export function CatalogDiscoveryScreen({
         if (target) onOpenDetail(target);
       }
     },
-    [
-      discovery,
-      filteredRailItems,
-      handleResetFilter,
-      handleSelectCategory,
-      handleSelectWatchFilter,
-      onOpenDetail,
-      onOpenSources,
-    ],
+    [discovery, handleSelectCategory, kind, onOpenDetail, onOpenSources],
   );
 
   const handleActivateGridItem = useCallback(
@@ -249,8 +208,14 @@ export function CatalogDiscoveryScreen({
 
   const handleFocusRow = useCallback(
     (rowId: CatalogNavRowId) => {
-      if (rowId === 'catChips' || rowId === 'statusChips') {
+      if (rowId === 'catChips') {
         scrollViewRef.current?.scrollTo({ y: 0, animated: !theme.reduceMotion });
+      } else if (rowId === 'continue') {
+        const y = continueYRef.current ?? 0;
+        scrollViewRef.current?.scrollTo({
+          y: Math.max(0, y - 16),
+          animated: !theme.reduceMotion,
+        });
       } else if (rowId === 'loadMore') {
         scrollViewRef.current?.scrollToEnd({ animated: !theme.reduceMotion });
       } else if (rowId.startsWith('rail-')) {
@@ -273,7 +238,6 @@ export function CatalogDiscoveryScreen({
     rows: navRows,
     gridColumns: layout.gridColumns,
     gridItemCount: effectiveGridItemCount,
-    isGridFilterEmpty: effectiveGridFilterEmpty,
     onActivateRow: handleActivateRow,
     onActivateGridItem: handleActivateGridItem,
     onExitGrid: handleSelectAllCategories,
@@ -319,12 +283,8 @@ export function CatalogDiscoveryScreen({
             layout={layout}
             categories={discovery.categories}
             selectedCategoryId={selectedCategory?.row.id ?? null}
-            watchFilter={watchFilter}
             focusedCatChipIndex={tvNav.focusedRowId === 'catChips' ? tvNav.focusedCol : null}
-            focusedStatusChipIndex={tvNav.focusedRowId === 'statusChips' ? tvNav.focusedCol : null}
-            onSelectAllCategories={handleSelectAllCategories}
             onSelectCategory={handleSelectCategory}
-            onSelectWatchFilter={handleSelectWatchFilter}
           />
 
           {selectedCategory !== null ? (
@@ -332,36 +292,24 @@ export function CatalogDiscoveryScreen({
               kind={kind}
               category={selectedCategory}
               catalog={catalog}
-              watchFilter={watchFilter}
               refreshToken={refreshToken}
               userStateVersion={userStateVersion}
               layout={layout}
               backFocused={tvNav.focusedRowId === 'gridBack'}
-              filterResetFocused={tvNav.focusedRowId === 'filterReset'}
               focusedGridPos={tvNav.focusedGridPos}
               onBack={handleSelectAllCategories}
-              onResetFilter={handleResetFilter}
               onOpenDetail={onOpenDetail}
               onGridMetaChange={setGridMeta}
               gridAccessRef={gridAccessRef}
             />
-          ) : isDiscoveryFilterEmpty ? (
-            <CatalogEmptyState
-              testID="catalog-filter-empty"
-              description={i18n.t('catalog.emptyFilter')}
-              layout={layout}
-              ctaLabel={i18n.t('catalog.clearFilter')}
-              ctaTestID="catalog-filter-reset"
-              ctaFocused={tvNav.focusedRowId === 'filterReset'}
-              onPressCta={handleResetFilter}
-            />
           ) : (
             <CatalogRailsBody
+              kind={kind}
               scrollRef={scrollViewRef}
               layout={layout}
               safeBottomInset={viewport.safeArea.bottom}
+              continueItems={discovery.continueItems}
               visibleCategories={discovery.visibleCategories}
-              filteredRailItems={filteredRailItems}
               loadedRailItems={discovery.railItemsByCategoryId}
               loadingRailIds={discovery.loadingRailIds}
               progressByKey={discovery.progressByKey}
@@ -371,6 +319,7 @@ export function CatalogDiscoveryScreen({
               onOpenDetail={onOpenDetail}
               onSeeAll={handleSelectCategory}
               onLoadMore={discovery.loadMoreCategories}
+              onLayoutContinueY={recordContinueY}
               onLayoutRailY={recordRailY}
             />
           )}

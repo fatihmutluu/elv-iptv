@@ -16,6 +16,7 @@ import { Platform } from 'react-native';
 import type { PlayTarget } from '../../ports/play-target';
 import type { DetailTarget } from '../../shared';
 import { HomeScreen } from '../HomeScreen';
+import { computeHomeLayout } from '../HomeSkeleton';
 import type { HomePlayTarget } from '../home-model';
 import * as homeModel from '../home-model';
 
@@ -472,7 +473,7 @@ describe('HomeScreen', () => {
       expect(onFocusTopNav).toHaveBeenCalledTimes(2);
 
       // Verify TV horizontal strip padding clears 1.05x scaled card + -3px focus ring
-      const liveStrip = screen.getByTestId('home-rail-live-strip');
+      const liveStrip = screen.getByTestId('home-rail-live-strip-scroll');
       const flatStripStyle = Object.assign(
         {},
         ...(Array.isArray(liveStrip.props.contentContainerStyle)
@@ -734,5 +735,46 @@ describe('HomeScreen', () => {
     } finally {
       await env.cleanup();
     }
+  });
+
+  it('caps Home card widths and tightens hero height to ~52-58% viewport height across form factors', () => {
+    const theme = { spacing: { xs: 4, sm: 8, md: 16, lg: 24, xl: 32 } } as Parameters<
+      typeof computeHomeLayout
+    >[1];
+    const desktop = computeHomeLayout(
+      {
+        formFactor: 'desktop',
+        orientation: 'landscape',
+        inputModality: 'pointer',
+        width: 1920,
+        height: 820,
+        safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
+        overscan: { x: 0, y: 0 },
+        columns: { posterRail: 5.5, wideRail: 3.3, categoryGrid: 5 },
+        tvScale: 1,
+      },
+      theme,
+    );
+    expect(desktop.posterCardWidth).toBeLessThanOrEqual(184);
+    expect(desktop.wideCardWidth).toBeLessThanOrEqual(296);
+    expect(desktop.heroHeight).toBe(Math.round(820 * 0.55));
+
+    const phone = computeHomeLayout(
+      {
+        formFactor: 'phone',
+        orientation: 'portrait',
+        inputModality: 'touch',
+        width: 390,
+        height: 844,
+        safeArea: { top: 44, right: 0, bottom: 34, left: 0 },
+        overscan: { x: 0, y: 0 },
+        columns: { posterRail: 3.5, wideRail: 1.2, categoryGrid: 3 },
+        tvScale: 1,
+      },
+      theme,
+    );
+    expect(phone.posterCardWidth).toBeLessThanOrEqual(124);
+    expect(phone.wideCardWidth).toBeLessThanOrEqual(270);
+    expect(phone.heroHeight).toBe(410);
   });
 });

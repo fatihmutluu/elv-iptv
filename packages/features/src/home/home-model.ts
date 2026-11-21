@@ -71,23 +71,26 @@ const LIVE_PLAYLIST_PAGE_SIZE = 60;
 const LIVE_PLAYLIST_MAX_PAGES = 4;
 
 /**
- * Computes crisp horizontal peek card width matching `UI_UX_PHILOSOPHY.md` §3 column ratios
- * (`5.5` landscape / `3.5` portrait for 2:3 posters; `3.3` landscape / `1.2` Phone-P / `2.3`
- * Tablet-P for 16:9 wide cards).
+ * Computes crisp horizontal peek card width from active `ViewportInfo.columns` and optional
+ * form-factor max-width caps (`UI_UX_PHILOSOPHY.md` §3).
  */
 export function computePeekCardWidth(
   viewportWidth: number,
   padX: number,
   cols: number,
   gap: number,
+  maxWidth?: number,
 ): number {
   const safeViewport = Number.isFinite(viewportWidth) && viewportWidth > 0 ? viewportWidth : 1280;
   const safePad = Number.isFinite(padX) && padX > 0 ? padX : 0;
   const safeCols = Number.isFinite(cols) && cols > 0 ? cols : 1;
   const safeGap = Number.isFinite(gap) && gap >= 0 ? gap : 0;
-  const available = Math.max(0, safeViewport - safePad * 2);
-  const totalGaps = Math.max(0, safeCols - 1) * safeGap;
-  return Math.max(MIN_CARD_WIDTH, Math.floor((available - totalGaps) / safeCols));
+  const raw = Math.floor(
+    (Math.max(0, safeViewport - safePad * 2) - Math.max(0, safeCols - 1) * safeGap) / safeCols,
+  );
+  const capped =
+    maxWidth && Number.isFinite(maxWidth) && maxWidth > 0 ? Math.min(maxWidth, raw) : raw;
+  return Math.max(MIN_CARD_WIDTH, capped);
 }
 
 /** Clamps playback progress ratio into `[0, 1]`, returning `0` when duration is invalid. */
@@ -102,12 +105,8 @@ export function progressRatio(positionMs: number, durationMs: number): number {
  * missing or non-positive.
  */
 export function formatRemainingMinutes(positionMs: number, durationMs: number): number | null {
-  if (!Number.isFinite(positionMs) || !Number.isFinite(durationMs) || durationMs <= 0) {
-    return null;
-  }
-  const safePos = Math.max(0, positionMs);
-  const remainingMs = Math.max(0, durationMs - safePos);
-  return Math.max(1, Math.ceil(remainingMs / 60_000));
+  if (!Number.isFinite(positionMs) || !Number.isFinite(durationMs) || durationMs <= 0) return null;
+  return Math.max(1, Math.ceil(Math.max(0, durationMs - Math.max(0, positionMs)) / 60_000));
 }
 
 /** Formats a live channel title with its optional channel number prefix. */

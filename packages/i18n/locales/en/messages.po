@@ -471,6 +471,15 @@ msgstr "+10s"
 msgid "player.mute"
 msgstr "Mute"
 
+msgid "player.unmute"
+msgstr "Unmute"
+
+msgid "player.enterFullscreen"
+msgstr "Fullscreen"
+
+msgid "player.exitFullscreen"
+msgstr "Exit fullscreen"
+
 msgid "player.tracks"
 msgstr "Audio & Subtitles"
 
@@ -500,6 +509,9 @@ msgstr "Player settings"
 
 msgid "player.settingsBack"
 msgstr "Back to settings"
+
+msgid "player.speed"
+msgstr "Playback speed"
 
 msgid "player.statsHud"
 msgstr "Playback stats"
@@ -810,6 +822,15 @@ msgstr "Movies"
 msgid "catalog.seriesTitle"
 msgstr "Series"
 
+msgid "catalog.categories"
+msgstr "Categories"
+
+msgid "catalog.chooseCategory"
+msgstr "Browse categories"
+
+msgid "catalog.continueWatching"
+msgstr "Continue watching"
+
 msgid "catalog.allCategories"
 msgstr "All"
 
@@ -948,6 +969,9 @@ msgstr "Series"
 msgid "live.mode.watch"
 msgstr "Watch"
 
+msgid "live.mode.favorites"
+msgstr "Favorites"
+
 msgid "live.mode.channels"
 msgstr "Channels"
 
@@ -989,6 +1013,21 @@ msgstr "No live channels yet"
 
 msgid "live.emptyDescription"
 msgstr "Add or refresh a source to load live broadcasts and TV Guide schedules."
+
+msgid "live.favoritesEmptyTitle"
+msgstr "No favorite channels yet"
+
+msgid "live.favoritesEmptyBody"
+msgstr "Star channels in Channels or TV Guide to watch them here."
+
+msgid "live.browseChannels"
+msgstr "Browse channels"
+
+msgid "live.favoriteAdd"
+msgstr "Add to Favorites"
+
+msgid "live.favoriteRemove"
+msgstr "Remove from Favorites"
 
 msgid "epg.title"
 msgstr "TV Guide"
@@ -1052,3 +1091,9 @@ msgstr "The server responded with no stream data."
 
 msgid "player.diag.codecUnsupported"
 msgstr "This stream format or codec is not supported on this device."
+
+msgid "rail.scrollLeft"
+msgstr "Scroll left"
+
+msgid "rail.scrollRight"
+msgstr "Scroll right"

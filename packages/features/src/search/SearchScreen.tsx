@@ -71,10 +71,17 @@ function SearchScreenBody({
   const { wideColumns, wideCardWidth, wideRowHeight } = useMemo(() => {
     const safeWidth = Number.isFinite(viewport.width) && viewport.width > 0 ? viewport.width : 1280;
     const available = Math.max(0, safeWidth - layout.padX * 2);
-    const cols = Math.max(1, Math.floor(viewport.columns.wideRail));
+    const baseCols = Math.max(1, Math.floor(viewport.columns.wideRail));
+    const rawCardWidth = Math.floor(
+      (available - Math.max(0, baseCols - 1) * layout.gridGap) / baseCols,
+    );
+    const cols =
+      baseCols >= 2 && rawCardWidth > 296
+        ? Math.max(baseCols, Math.ceil((available + layout.gridGap) / (296 + layout.gridGap)))
+        : baseCols;
     const cardWidth = Math.max(
       160,
-      Math.floor((available - Math.max(0, cols - 1) * layout.gridGap) / cols),
+      Math.min(296, Math.floor((available - Math.max(0, cols - 1) * layout.gridGap) / cols)),
     );
     const cardHeight = Math.round((cardWidth * 9) / 16);
     const rowHeight = cardHeight + (layout.isTv ? 64 : 52) + layout.gridGap;
@@ -286,7 +293,7 @@ function SearchScreenBody({
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: layout.heroTopClearance, paddingBottom: bottomPad },
+          { paddingTop: theme.spacing.sm, paddingBottom: bottomPad },
         ]}
       >
         <SearchHeaderBar

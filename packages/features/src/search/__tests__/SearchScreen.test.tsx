@@ -204,6 +204,13 @@ describe('SearchScreen', () => {
     const view = await renderSearch({ catalog });
     expect(screen.getByTestId('search-screen')).toBeTruthy();
     expect(screen.getByTestId('search-prompt')).toBeTruthy();
+    expect(screen.getByTestId('search-scope-bar')).toBeTruthy();
+    const scrollContentStyle = StyleSheet.flatten(
+      screen.getByTestId('search-scroll').props.contentContainerStyle,
+    );
+    expect(scrollContentStyle.paddingTop).toBe(
+      buildTheme({ preset: 'obsidianCrimson' }).spacing.sm,
+    );
 
     await fireEvent.changeText(screen.getByTestId('search-input'), 'İstanbul Şampiyonlar');
     expect(screen.getByTestId('search-skeleton')).toBeTruthy();
@@ -231,6 +238,8 @@ describe('SearchScreen', () => {
 
     expect(screen.getByTestId('search-movie-item-0-progress')).toBeTruthy();
     expect(screen.getByTestId('search-series-item-0-badge')).toBeTruthy();
+    const liveCardStyle = StyleSheet.flatten(screen.getByTestId('search-live-item-0').props.style);
+    expect(liveCardStyle.width).toBeLessThanOrEqual(296);
 
     await view.unmount();
   });
@@ -387,9 +396,11 @@ describe('SearchScreen', () => {
     });
     expect(onRecentChange).toHaveBeenCalledWith(['Matrix']);
 
-    // Clear search immediately shows recent chip
+    // Clear search immediately shows recent chip with minimal radius (no pill capsule)
     await fireEvent.press(screen.getByTestId('search-clear'));
     expect(screen.getByTestId('search-recent-0')).toHaveTextContent('Matrix');
+    const recentStyle = StyleSheet.flatten(screen.getByTestId('search-recent-0').props.style);
+    expect(recentStyle.borderRadius).toBe(4);
 
     // Click recent chip re-triggers search
     await fireEvent.press(screen.getByTestId('search-recent-0'));
@@ -543,6 +554,9 @@ describe('SearchScreen', () => {
       expect(screen.getByTestId('search-clear').props.focusable).toBe(false);
       expect(screen.getByTestId('search-live-item-0').props.focusable).toBe(false);
       expect(screen.getByTestId('search-movie-item-0').props.focusable).toBe(false);
+      expect(StyleSheet.flatten(screen.getByTestId('search-live-item-0').props.style).width).toBe(
+        274,
+      );
 
       // Focus fell back to input (or top valid row); traverse Down to scopes -> Right to Live -> Select
       await sendKey(KEYCODE_DPAD_DOWN); // scopes col 0 (All)

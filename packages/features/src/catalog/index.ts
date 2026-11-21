@@ -3,6 +3,10 @@ export {
   type CatalogCategoryRailProps,
 } from './CatalogCategoryRail';
 export {
+  CatalogContinueWatchingRail,
+  type CatalogContinueWatchingRailProps,
+} from './CatalogContinueWatchingRail';
+export {
   CatalogDiscoveryScreen,
   type CatalogDiscoveryScreenProps,
 } from './CatalogDiscoveryScreen';
@@ -15,6 +19,7 @@ export {
 export {
   type BuildCatalogNavRowsInput,
   buildCatalogNavRows,
+  CATALOG_CONTINUE_LIMIT,
   CATEGORY_LOAD_BATCH,
   type CatalogNavRowDescriptor,
   type CatalogNavRowId,
@@ -24,16 +29,16 @@ export {
   clampGridFocus,
   computeProgressRatio,
   computeRowCount,
+  detailTargetFromProgress,
   EMPTY_CATALOG_MEMORY,
-  FILTERED_GRID_LIMIT,
-  filterCatalogItems,
+  filterContinueWatchingForCatalog,
+  formatCatalogRemainingMinutes,
   GRID_MAX_PAGES,
   GRID_PAGE_SIZE,
   type GridFocusPosition,
   INITIAL_VISIBLE_CATEGORIES,
   MAX_CONCURRENT_RAIL_QUERIES,
   RAIL_ITEM_LIMIT,
-  WATCH_STATUS_FILTERS,
 } from './catalog-model';
 export {
   type CatalogDiscoveryState,

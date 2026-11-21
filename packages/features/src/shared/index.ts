@@ -5,8 +5,6 @@ export {
   computeCatalogLayout,
   type DisplayCategory,
   formatVodMeta,
-  matchesWatchStatus,
-  type WatchStatusFilter,
 } from './catalog-helpers';
 export { type DetailCastMember, type DetailTarget, detailTargetFromItem } from './detail-target';
 export {

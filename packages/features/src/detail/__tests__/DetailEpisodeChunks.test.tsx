@@ -402,10 +402,12 @@ describe('DetailScreen 60+ episode chunking (#152)', () => {
         expect(screen.getByTestId('detail-episode-0')).toBeTruthy();
       });
 
-      // Zero native TV focus leaks on ScrollViews & chunk chips
+      // Zero native TV focus leaks on ScrollViews & chunk tabs
       expect(screen.getByTestId('detail-scroll').props.focusable).toBe(false);
-      expect(screen.getByTestId('detail-seasons-bar').props.focusable).toBe(false);
-      expect(screen.getByTestId('detail-episode-chunks-bar').props.focusable).toBe(false);
+      expect(screen.getByTestId('detail-seasons-bar-rail-scroll').props.focusable).toBe(false);
+      expect(screen.getByTestId('detail-episode-chunks-bar-rail-scroll').props.focusable).toBe(
+        false,
+      );
       expect(screen.getByTestId('detail-episode-chunk-0').props.focusable).toBe(false);
 
       // Initial focus is hero-play -> Down -> seasons -> Down -> episode-chunks

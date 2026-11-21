@@ -1,18 +1,19 @@
 import type { KeyEvent } from '@elv/focus-core';
-import type { MessageId } from '@elv/i18n';
 import {
   CtaButton,
-  FilterChip,
+  EditorialCategoryBar,
+  type EditorialCategoryItem,
   SkeletonBox,
   TvFocusAnchor,
   useI18n,
   useKeyInterpreter,
   useTheme,
 } from '@elv/ui-kit';
-import { type ComponentRef, memo, type ReactElement, useCallback, useEffect, useRef } from 'react';
-import { type LayoutChangeEvent, ScrollView, StyleSheet, Text, View } from 'react-native';
-import type { CatalogLayoutMetrics, DisplayCategory, WatchStatusFilter } from '../shared';
-import { WATCH_STATUS_FILTERS } from './catalog-model';
+import { memo, type ReactElement, useCallback, useMemo } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import type { CatalogLayoutMetrics, DisplayCategory } from '../shared';
+
+const ALL_CATEGORIES_ID = '__all__';
 
 /** TV key interpreter bridge mounted only when the Catalog tab is the active 10-ft focus scope. */
 export function CatalogTvKeyBridge({
@@ -26,93 +27,9 @@ export function CatalogTvKeyBridge({
   return <TvFocusAnchor testID={`catalog-tv-focus-anchor-${kind}`} />;
 }
 
-const FILTER_LABEL_KEYS: Readonly<Record<WatchStatusFilter, MessageId>> = {
-  all: 'catalog.filter.all',
-  unwatched: 'catalog.filter.unwatched',
-  inProgress: 'catalog.filter.inProgress',
-  watched: 'catalog.filter.watched',
-};
-
 const SKELETON_CHIPS = [0, 1, 2, 3, 4] as const;
 const SKELETON_RAILS = [0, 1] as const;
 const SKELETON_CARDS = [0, 1, 2, 3, 4, 5] as const;
-
-interface CategoryChipItemProps {
-  readonly category: DisplayCategory;
-  readonly index: number;
-  readonly selected: boolean;
-  readonly isTv: boolean;
-  readonly focused: boolean;
-  readonly onSelect: (categoryId: string) => void;
-  readonly onMeasureX: (chipIndex: number, x: number) => void;
-}
-
-const CategoryChipItem = memo(function CategoryChipItemInner({
-  category,
-  index,
-  selected,
-  isTv,
-  focused,
-  onSelect,
-  onMeasureX,
-}: CategoryChipItemProps): ReactElement {
-  const handlePress = useCallback(() => {
-    onSelect(category.row.id);
-  }, [category.row.id, onSelect]);
-
-  const handleLayout = useCallback(
-    (event: LayoutChangeEvent) => {
-      onMeasureX(index + 1, event.nativeEvent.layout.x);
-    },
-    [index, onMeasureX],
-  );
-
-  return (
-    <View onLayout={handleLayout}>
-      <FilterChip
-        testID={`catalog-cat-chip-${index}`}
-        label={category.label}
-        selected={selected}
-        focusable={!isTv}
-        focused={focused}
-        onPress={handlePress}
-      />
-    </View>
-  );
-});
-
-interface StatusChipItemProps {
-  readonly filter: WatchStatusFilter;
-  readonly label: string;
-  readonly selected: boolean;
-  readonly isTv: boolean;
-  readonly focused: boolean;
-  readonly onSelect: (filter: WatchStatusFilter) => void;
-}
-
-const StatusChipItem = memo(function StatusChipItemInner({
-  filter,
-  label,
-  selected,
-  isTv,
-  focused,
-  onSelect,
-}: StatusChipItemProps): ReactElement {
-  const handlePress = useCallback(() => {
-    onSelect(filter);
-  }, [filter, onSelect]);
-
-  return (
-    <FilterChip
-      testID={`catalog-status-${filter}`}
-      label={label}
-      selected={selected}
-      focusable={!isTv}
-      focused={focused}
-      onPress={handlePress}
-    />
-  );
-});
 
 /** Zero-CLS tonal skeleton rendered while initial Movies/Series categories load. */
 export function CatalogSkeleton({
@@ -123,15 +40,12 @@ export function CatalogSkeleton({
   const theme = useTheme();
   const posterHeight = Math.round(layout.posterRailWidth * 1.5);
   return (
-    <View
-      testID="catalog-skeleton"
-      style={[styles.skeletonRoot, { paddingTop: layout.heroTopClearance }]}
-    >
+    <View testID="catalog-skeleton" style={[styles.skeletonRoot, { paddingTop: theme.spacing.sm }]}>
       <View style={{ paddingHorizontal: layout.padX }}>
         <SkeletonBox width={140} height={28} borderRadius={theme.radius.button} />
-        <View style={[styles.skeletonRow, { gap: theme.spacing.xs, marginTop: 14 }]}>
+        <View style={[styles.skeletonRow, { gap: theme.spacing.md, marginTop: 14 }]}>
           {SKELETON_CHIPS.map((slot) => (
-            <SkeletonBox key={slot} width={84} height={32} borderRadius={theme.radius.pill} />
+            <SkeletonBox key={slot} width={76} height={24} borderRadius={theme.radius.button} />
           ))}
         </View>
       </View>
@@ -182,7 +96,7 @@ export function CatalogEmptyState({
       style={[
         styles.emptyBox,
         {
-          paddingTop: title ? layout.heroTopClearance : 0,
+          paddingTop: title ? theme.spacing.sm : 0,
           paddingHorizontal: layout.padX,
         },
       ]}
@@ -225,125 +139,74 @@ export interface CatalogFilterHeaderProps {
   readonly layout: CatalogLayoutMetrics;
   readonly categories: readonly DisplayCategory[];
   readonly selectedCategoryId: string | null;
-  readonly watchFilter: WatchStatusFilter;
   readonly focusedCatChipIndex: number | null;
-  readonly focusedStatusChipIndex: number | null;
-  readonly onSelectAllCategories: () => void;
-  readonly onSelectCategory: (categoryId: string) => void;
-  readonly onSelectWatchFilter: (filter: WatchStatusFilter) => void;
+  readonly onSelectCategory: (categoryId: string | null) => void;
 }
 
-/** Top screen title + horizontal category & watch-status `FilterChip` bars for Movies & Series. */
+/** Top screen title + editorial underline category bar for Movies & Series. */
 export const CatalogFilterHeader = memo(function CatalogFilterHeaderInner({
   screenTitle,
   layout,
   categories,
   selectedCategoryId,
-  watchFilter,
   focusedCatChipIndex,
-  focusedStatusChipIndex,
-  onSelectAllCategories,
   onSelectCategory,
-  onSelectWatchFilter,
 }: CatalogFilterHeaderProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
-  const chipPadY = layout.isTv ? 8 : 4;
-  const catScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
-  const chipXRef = useRef<Map<number, number>>(new Map());
 
-  const recordChipX = useCallback((chipIndex: number, x: number) => {
-    chipXRef.current.set(chipIndex, x);
-  }, []);
+  const items = useMemo<readonly EditorialCategoryItem[]>(
+    () => [
+      {
+        id: ALL_CATEGORIES_ID,
+        label: i18n.t('catalog.allCategories'),
+        testID: 'catalog-cat-chip-all',
+      },
+      ...categories.map((cat, index) => ({
+        id: cat.row.id,
+        label: cat.label,
+        testID: `catalog-cat-chip-${index}`,
+      })),
+    ],
+    [categories, i18n],
+  );
 
-  const handleAllChipLayout = useCallback((event: LayoutChangeEvent) => {
-    chipXRef.current.set(0, event.nativeEvent.layout.x);
-  }, []);
-
-  useEffect(() => {
-    if (!layout.isTv || focusedCatChipIndex === null) return;
-    const measuredX = chipXRef.current.get(focusedCatChipIndex);
-    const targetX =
-      measuredX !== undefined
-        ? Math.max(0, measuredX - layout.padX)
-        : Math.max(0, focusedCatChipIndex * 116 - layout.padX);
-    catScrollRef.current?.scrollTo({ x: targetX, animated: !theme.reduceMotion });
-  }, [focusedCatChipIndex, layout.isTv, layout.padX, theme.reduceMotion]);
+  const handleSelect = useCallback(
+    (id: string) => onSelectCategory(id === ALL_CATEGORIES_ID ? null : id),
+    [onSelectCategory],
+  );
 
   return (
-    <View style={{ paddingTop: layout.heroTopClearance }}>
+    <View style={[styles.headerRoot, { paddingTop: theme.spacing.sm }]}>
       <Text
         numberOfLines={1}
         style={[
           theme.typography.h1,
-          { color: theme.colors.textPrimary, paddingHorizontal: layout.padX, marginBottom: 8 },
+          { color: theme.colors.textPrimary, paddingHorizontal: layout.padX, marginBottom: 4 },
         ]}
       >
         {screenTitle}
       </Text>
 
-      <ScrollView
-        ref={catScrollRef}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={[
-          styles.chipRow,
-          { paddingHorizontal: layout.padX, paddingVertical: chipPadY, gap: theme.spacing.xs },
-        ]}
-      >
-        <View onLayout={handleAllChipLayout}>
-          <FilterChip
-            testID="catalog-cat-chip-all"
-            label={i18n.t('catalog.allCategories')}
-            selected={selectedCategoryId === null}
-            focusable={!layout.isTv}
-            focused={focusedCatChipIndex === 0}
-            onPress={onSelectAllCategories}
-          />
-        </View>
-        {categories.map((cat, index) => (
-          <CategoryChipItem
-            key={cat.row.id}
-            category={cat}
-            index={index}
-            selected={selectedCategoryId === cat.row.id}
-            isTv={layout.isTv}
-            focused={focusedCatChipIndex === index + 1}
-            onSelect={onSelectCategory}
-            onMeasureX={recordChipX}
-          />
-        ))}
-      </ScrollView>
-
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={[
-          styles.chipRow,
-          { paddingHorizontal: layout.padX, paddingVertical: chipPadY, gap: theme.spacing.xs },
-        ]}
-      >
-        {WATCH_STATUS_FILTERS.map((filter, idx) => (
-          <StatusChipItem
-            key={filter}
-            filter={filter}
-            label={i18n.t(FILTER_LABEL_KEYS[filter])}
-            selected={watchFilter === filter}
-            isTv={layout.isTv}
-            focused={focusedStatusChipIndex === idx}
-            onSelect={onSelectWatchFilter}
-          />
-        ))}
-      </ScrollView>
+      <EditorialCategoryBar
+        items={items}
+        activeId={selectedCategoryId ?? ALL_CATEGORIES_ID}
+        onSelect={handleSelect}
+        pickerLabel={i18n.t('catalog.categories')}
+        padX={layout.padX}
+        isTv={layout.isTv}
+        focusedIndex={focusedCatChipIndex}
+        testID="catalog-category-chips"
+      />
     </View>
   );
 });
 
 const styles = StyleSheet.create({
+  headerRoot: { position: 'relative', zIndex: 20 },
   skeletonRoot: { flex: 1, overflow: 'hidden' },
   skeletonSection: { marginTop: 22 },
   skeletonRow: { flexDirection: 'row', overflow: 'hidden' },
-  chipRow: { flexDirection: 'row', alignItems: 'center' },
   emptyBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   emptyDesc: { maxWidth: 420, textAlign: 'center' },
 });

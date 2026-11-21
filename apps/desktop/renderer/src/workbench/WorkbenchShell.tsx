@@ -12,7 +12,7 @@ import {
   ViewportProvider,
 } from '@elv/ui-kit';
 import { type ReactElement, useEffect, useMemo, useState } from 'react';
-import { Platform, Text, useWindowDimensions, View, type ViewStyle } from 'react-native';
+import { Text, useWindowDimensions, View } from 'react-native';
 import { DesignGallery } from './DesignGallery.tsx';
 import { createWorkbenchCatalog } from './mock-catalog.ts';
 import { createWorkbenchVideoHost } from './mock-video-host.tsx';
@@ -29,6 +29,7 @@ import {
   probeWorkbenchBridge,
   readWorkbenchBridgeConfig,
 } from './remote-catalog.ts';
+import { WorkbenchDeviceFrame } from './WorkbenchDeviceFrame.tsx';
 import { WorkbenchInspector } from './WorkbenchInspector.tsx';
 import {
   DRAWER_WIDTH,
@@ -36,7 +37,6 @@ import {
   readInitialDataMode,
   workbenchShellStyles as styles,
   TOPBAR_HEIGHT,
-  WEB_FRAME_SHADOW,
   WEB_STAGE_BG,
   WORKBENCH_FAMILY_TARGETS,
   WorkbenchBarButton,
@@ -76,7 +76,7 @@ export function WorkbenchShell(): ReactElement {
     fontScale: number;
     reduceMotion: boolean;
   }>({ preset: 'obsidianCrimson', locale: 'en', fontScale: 1.0, reduceMotion: false });
-  const [showOverscan, setShowOverscan] = useState<boolean>(true);
+  const [showOverscan, setShowOverscan] = useState<boolean>(false);
   const [drawerOpen, setDrawerOpen] = useState<boolean>(true);
 
   const device = getWorkbenchDevice(deviceId);
@@ -148,7 +148,8 @@ export function WorkbenchShell(): ReactElement {
   };
 
   const isFluid = device.frameWidth === 'fluid' || device.frameHeight === 'fluid';
-  const stageWidth = Math.max(200, winWidth - (drawerOpen ? DRAWER_WIDTH : 0));
+  const inspectorVisible = mode === 'gallery' && drawerOpen;
+  const stageWidth = Math.max(200, winWidth - (inspectorVisible ? DRAWER_WIDTH : 0));
   const stageHeight = Math.max(200, winHeight - TOPBAR_HEIGHT);
   const fitted = isFluid
     ? null
@@ -157,12 +158,9 @@ export function WorkbenchShell(): ReactElement {
         frameHeight: device.frameHeight as number,
         stageWidth,
         stageHeight,
-        paddingX: 56,
-        paddingY: 84,
+        paddingX: 28,
+        paddingY: 44,
       });
-
-  const bezelWidth = family === 'tv' ? 6 : family === 'tablet' ? 10 : 9;
-  const bezelRadius = family === 'tv' ? 12 : family === 'tablet' ? 22 : 32;
 
   const renderAppStage = (): ReactElement => {
     if (dataMode === 'demo') {
@@ -219,20 +217,6 @@ export function WorkbenchShell(): ReactElement {
     ) : (
       renderAppStage()
     );
-
-  const scaledInnerStyle: ViewStyle | undefined =
-    fitted !== null
-      ? ({
-          width: device.frameWidth as number,
-          height: device.frameHeight as number,
-          ...(fitted.scale < 1
-            ? {
-                transform: [{ scale: fitted.scale }],
-                ...(Platform.OS === 'web' ? { transformOrigin: 'top left' } : {}),
-              }
-            : {}),
-        } as unknown as ViewStyle)
-      : undefined;
 
   const tvInputHint =
     family === 'tv' && mode === 'app' ? ' · TV remote keys (use PC frame to type URLs)' : '';
@@ -310,17 +294,19 @@ export function WorkbenchShell(): ReactElement {
             />
           ) : null}
 
-          <WorkbenchBarButton
-            variant="tool"
-            label="Tokens"
-            active={drawerOpen}
-            onPress={() => setDrawerOpen((v) => !v)}
-          />
+          {mode === 'gallery' ? (
+            <WorkbenchBarButton
+              variant="tool"
+              label="Tokens"
+              active={drawerOpen}
+              onPress={() => setDrawerOpen((v) => !v)}
+            />
+          ) : null}
         </View>
       </View>
 
       <View style={styles.studioBody}>
-        {drawerOpen ? (
+        {inspectorVisible ? (
           <WorkbenchInspector
             preset={prefs.preset}
             onSelectPreset={(preset) => applyPrefs({ preset })}
@@ -347,37 +333,17 @@ export function WorkbenchShell(): ReactElement {
                   {`${device.label} · ${device.frameWidth}×${device.frameHeight} · Fit ${fitted.fitPercent}%${tvInputHint}`}
                 </Text>
               </View>
-              <View
-                style={[
-                  styles.deviceFrame,
-                  WEB_FRAME_SHADOW,
-                  {
-                    width: fitted.width + bezelWidth * 2,
-                    height: fitted.height + bezelWidth * 2,
-                    borderWidth: bezelWidth,
-                    borderRadius: bezelRadius,
-                    backgroundColor: activePalette.bgCanvas,
-                  },
-                ]}
+              <WorkbenchDeviceFrame
+                family={family}
+                orientation={device.viewport.orientation ?? 'landscape'}
+                frameWidth={device.frameWidth as number}
+                frameHeight={device.frameHeight as number}
+                fitted={fitted}
+                bgCanvas={activePalette.bgCanvas}
+                showOverscan={showOverscan}
               >
-                <View style={styles.frameInner}>
-                  <View style={scaledInnerStyle}>{stageContent}</View>
-                  {family === 'tv' && showOverscan ? (
-                    <View
-                      pointerEvents="none"
-                      style={[
-                        styles.overscanGuide,
-                        {
-                          top: Math.round(fitted.height * 0.05),
-                          bottom: Math.round(fitted.height * 0.05),
-                          left: Math.round(fitted.width * 0.05),
-                          right: Math.round(fitted.width * 0.05),
-                        },
-                      ]}
-                    />
-                  ) : null}
-                </View>
-              </View>
+                {stageContent}
+              </WorkbenchDeviceFrame>
             </View>
           ) : null}
         </View>

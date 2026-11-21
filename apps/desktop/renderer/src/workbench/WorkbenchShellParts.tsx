@@ -234,14 +234,6 @@ export const workbenchShellStyles = StyleSheet.create({
     borderRadius: 6,
   },
   frameMetaText: { ...SANS_FONT, color: '#94A3B8', fontSize: 11, fontVariant: ['tabular-nums'] },
-  deviceFrame: { borderColor: '#1A1E29', overflow: 'hidden' },
-  frameInner: { flex: 1, position: 'relative', overflow: 'hidden' },
-  overscanGuide: {
-    position: 'absolute',
-    borderWidth: 1.5,
-    borderStyle: 'dashed',
-    borderColor: 'rgba(250, 204, 21, 0.55)',
-  },
   bridgeNoticeWrap: {
     flex: 1,
     width: '100%',

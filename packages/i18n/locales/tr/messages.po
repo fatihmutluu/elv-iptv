@@ -471,6 +471,15 @@ msgstr "+10 sn"
 msgid "player.mute"
 msgstr "Sesi kapat"
 
+msgid "player.unmute"
+msgstr "Sesi aç"
+
+msgid "player.enterFullscreen"
+msgstr "Tam ekran"
+
+msgid "player.exitFullscreen"
+msgstr "Tam ekrandan çık"
+
 msgid "player.tracks"
 msgstr "Ses ve Altyazı"
 
@@ -500,6 +509,9 @@ msgstr "Oynatıcı ayarları"
 
 msgid "player.settingsBack"
 msgstr "Ayarlara dön"
+
+msgid "player.speed"
+msgstr "Oynatma hızı"
 
 msgid "player.statsHud"
 msgstr "Oynatma istatistikleri"
@@ -810,6 +822,15 @@ msgstr "Filmler"
 msgid "catalog.seriesTitle"
 msgstr "Diziler"
 
+msgid "catalog.categories"
+msgstr "Kategoriler"
+
+msgid "catalog.chooseCategory"
+msgstr "Kategori seç"
+
+msgid "catalog.continueWatching"
+msgstr "İzlemeye devam et"
+
 msgid "catalog.allCategories"
 msgstr "Tümü"
 
@@ -948,6 +969,9 @@ msgstr "Diziler"
 msgid "live.mode.watch"
 msgstr "İzle"
 
+msgid "live.mode.favorites"
+msgstr "Favoriler"
+
 msgid "live.mode.channels"
 msgstr "Kanallar"
 
@@ -989,6 +1013,21 @@ msgstr "Henüz canlı kanal yok"
 
 msgid "live.emptyDescription"
 msgstr "Canlı yayınları ve TV rehberini yüklemek için bir kaynak ekleyin veya yenileyin."
+
+msgid "live.favoritesEmptyTitle"
+msgstr "Henüz favori kanal yok"
+
+msgid "live.favoritesEmptyBody"
+msgstr "Burada izlemek için Kanallar veya TV Rehberi ekranından kanalları favorilere ekle."
+
+msgid "live.browseChannels"
+msgstr "Kanallara göz at"
+
+msgid "live.favoriteAdd"
+msgstr "Favorilere ekle"
+
+msgid "live.favoriteRemove"
+msgstr "Favorilerden çıkar"
 
 msgid "epg.title"
 msgstr "TV Rehberi"
@@ -1052,3 +1091,9 @@ msgstr "Sunucu yayın verisi göndermedi."
 
 msgid "player.diag.codecUnsupported"
 msgstr "Bu yayın biçimi veya çözücü bu cihazda desteklenmiyor."
+
+msgid "rail.scrollLeft"
+msgstr "Sola kaydır"
+
+msgid "rail.scrollRight"
+msgstr "Sağa kaydır"

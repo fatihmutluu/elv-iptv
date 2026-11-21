@@ -36,9 +36,22 @@ const EXPECTED_ICON_NAMES: readonly IconName[] = [
   'refresh',
   'trash',
   'warning',
+  'volumeMute',
+  'fullscreen',
+  'fullscreenExit',
+  'star',
+  'starFilled',
+  'chevronLeft',
+  'chevronDown',
 ];
 
-const FILLED_ICONS: ReadonlySet<IconName> = new Set(['play', 'pause', 'dots', 'keypad']);
+const FILLED_ICONS: ReadonlySet<IconName> = new Set([
+  'play',
+  'pause',
+  'dots',
+  'keypad',
+  'starFilled',
+]);
 
 function assertValidShape(shape: IconShape): void {
   if (shape.fill !== undefined) {

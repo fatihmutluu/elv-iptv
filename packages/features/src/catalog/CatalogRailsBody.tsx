@@ -4,14 +4,16 @@ import type { ComponentRef, ReactElement, RefObject } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import type { CatalogLayoutMetrics, DetailTarget, DisplayCategory } from '../shared';
 import { CatalogCategoryRail } from './CatalogCategoryRail';
+import { CatalogContinueWatchingRail } from './CatalogContinueWatchingRail';
 
 /** Props of {@link CatalogRailsBody}. */
 export interface CatalogRailsBodyProps {
+  readonly kind: 'movie' | 'series';
   readonly scrollRef: RefObject<ComponentRef<typeof ScrollView> | null>;
   readonly layout: CatalogLayoutMetrics;
   readonly safeBottomInset: number;
+  readonly continueItems: readonly WatchProgressRow[];
   readonly visibleCategories: readonly DisplayCategory[];
-  readonly filteredRailItems: ReadonlyMap<string, readonly ItemRow[]>;
   readonly loadedRailItems: ReadonlyMap<string, readonly ItemRow[]>;
   readonly loadingRailIds: ReadonlySet<string>;
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
@@ -21,16 +23,18 @@ export interface CatalogRailsBodyProps {
   readonly onOpenDetail: (target: DetailTarget) => void;
   readonly onSeeAll: (categoryId: string) => void;
   readonly onLoadMore: () => void;
+  readonly onLayoutContinueY?: (y: number) => void;
   readonly onLayoutRailY: (catIndex: number, y: number) => void;
 }
 
-/** Vertical Discovery Mode body rendering bounded horizontal poster rails and progressive `Load more`. */
+/** Vertical Discovery Mode body rendering top Continue Watching rail, bounded poster rails, and `Load more`. */
 export function CatalogRailsBody({
+  kind,
   scrollRef,
   layout,
   safeBottomInset,
+  continueItems,
   visibleCategories,
-  filteredRailItems,
   loadedRailItems,
   loadingRailIds,
   progressByKey,
@@ -40,6 +44,7 @@ export function CatalogRailsBody({
   onOpenDetail,
   onSeeAll,
   onLoadMore,
+  onLayoutContinueY,
   onLayoutRailY,
 }: CatalogRailsBodyProps): ReactElement {
   const theme = useTheme();
@@ -54,8 +59,22 @@ export function CatalogRailsBody({
         paddingBottom: theme.spacing.xl + safeBottomInset + (layout.isPortrait ? 20 : 12),
       }}
     >
+      {continueItems.length > 0 ? (
+        <CatalogContinueWatchingRail
+          kind={kind}
+          items={continueItems}
+          cardWidth={layout.wideRailWidth}
+          gap={layout.railGap}
+          padX={layout.padX}
+          isTv={layout.isTv}
+          focusedIndex={focusedRowId === 'continue' ? focusedCol : null}
+          onOpenDetail={onOpenDetail}
+          {...(onLayoutContinueY !== undefined ? { onLayoutY: onLayoutContinueY } : {})}
+        />
+      ) : null}
+
       {visibleCategories.map((cat, catIndex) => {
-        const items = filteredRailItems.get(cat.row.id) ?? [];
+        const items = loadedRailItems.get(cat.row.id) ?? [];
         const isRailLoading = loadingRailIds.has(cat.row.id) && !loadedRailItems.has(cat.row.id);
         return (
           <CatalogCategoryRail

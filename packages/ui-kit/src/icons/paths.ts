@@ -34,7 +34,14 @@ export type IconName =
   | 'sources'
   | 'refresh'
   | 'trash'
-  | 'warning';
+  | 'warning'
+  | 'volumeMute'
+  | 'fullscreen'
+  | 'fullscreenExit'
+  | 'star'
+  | 'starFilled'
+  | 'chevronLeft'
+  | 'chevronDown';
 
 /** Single SVG primitive shape within a 24x24 icon viewBox. */
 export type IconShape =
@@ -161,6 +168,29 @@ export const ICON_PATHS: Readonly<Record<IconName, IconSpec>> = {
     p('M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z'),
     p('M12 9v4M12 17h.01'),
   ),
+  volumeMute: stroke(p('M11 5 6 9H2v6h4l5 4V5z'), p('m22 9-6 6M16 9l6 6')),
+  fullscreen: stroke(
+    p(
+      'M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3',
+    ),
+  ),
+  fullscreenExit: stroke(
+    p(
+      'M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3',
+    ),
+  ),
+  star: stroke(
+    p(
+      'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
+    ),
+  ),
+  starFilled: filled(
+    fp(
+      'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
+    ),
+  ),
+  chevronLeft: stroke(p('M15 18l-6-6 6-6', 2)),
+  chevronDown: stroke(p('M6 9l6 6 6-6', 2)),
 };
 
 /** Ordered list of every icon identifier registered in {@link ICON_PATHS}. */

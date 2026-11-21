@@ -55,11 +55,50 @@ describe('workbench presets & dev gating', () => {
       'desktop',
     ]);
     const tv = getWorkbenchDevice('tv');
+    expect(tv.label).toBe('Living Room TV');
+    expect(tv.frameWidth).toBe(1280);
+    expect(tv.frameHeight).toBe(720);
     expect(tv.viewport.formFactor).toBe('tv');
     expect(tv.viewport.inputModality).toBe('tv');
-    expect(getWorkbenchDevice('phone-portrait').viewport.orientation).toBe('portrait');
-    expect(getWorkbenchDevice('phone-landscape').viewport.orientation).toBe('landscape');
-    expect(getWorkbenchDevice('desktop').frameWidth).toBe('fluid');
+
+    const phoneP = getWorkbenchDevice('phone-portrait');
+    expect(phoneP.label).toBe('Phone Portrait');
+    expect(phoneP.frameWidth).toBe(393);
+    expect(phoneP.frameHeight).toBe(852);
+    expect(phoneP.viewport.orientation).toBe('portrait');
+    expect(phoneP.viewport.width).toBe(393);
+    expect(phoneP.viewport.height).toBe(852);
+    expect(phoneP.viewport.safeArea).toEqual({ top: 59, right: 0, bottom: 34, left: 0 });
+
+    const phoneL = getWorkbenchDevice('phone-landscape');
+    expect(phoneL.label).toBe('Phone Landscape');
+    expect(phoneL.frameWidth).toBe(852);
+    expect(phoneL.frameHeight).toBe(393);
+    expect(phoneL.viewport.orientation).toBe('landscape');
+    expect(phoneL.viewport.width).toBe(852);
+    expect(phoneL.viewport.height).toBe(393);
+    expect(phoneL.viewport.safeArea).toEqual({ top: 0, right: 59, bottom: 21, left: 59 });
+
+    const tabP = getWorkbenchDevice('tablet-portrait');
+    expect(tabP.label).toBe('Tablet Portrait');
+    expect(tabP.frameWidth).toBe(834);
+    expect(tabP.frameHeight).toBe(1194);
+    expect(tabP.viewport.width).toBe(834);
+    expect(tabP.viewport.height).toBe(1194);
+    expect(tabP.viewport.safeArea).toEqual({ top: 24, right: 0, bottom: 20, left: 0 });
+
+    const tabL = getWorkbenchDevice('tablet-landscape');
+    expect(tabL.label).toBe('Tablet Landscape');
+    expect(tabL.frameWidth).toBe(1194);
+    expect(tabL.frameHeight).toBe(834);
+    expect(tabL.viewport.width).toBe(1194);
+    expect(tabL.viewport.height).toBe(834);
+    expect(tabL.viewport.safeArea).toEqual({ top: 24, right: 0, bottom: 20, left: 0 });
+
+    const desktop = getWorkbenchDevice('desktop');
+    expect(desktop.label).toBe('Desktop');
+    expect(desktop.frameWidth).toBe('fluid');
+    expect(desktop.frameHeight).toBe('fluid');
   });
 
   it('fits device frames inside the available stage without exceeding 100% scale or breaking aspect ratio', () => {
@@ -78,15 +117,15 @@ describe('workbench presets & dev gating', () => {
     expect(Math.abs(tvTight.width / tvTight.height - 16 / 9)).toBeLessThan(0.02);
 
     const phoneRoomy = computeFittedFrame({
-      frameWidth: 390,
-      frameHeight: 844,
+      frameWidth: 393,
+      frameHeight: 852,
       stageWidth: 1400,
       stageHeight: 1100,
     });
     expect(phoneRoomy.scale).toBe(1);
     expect(phoneRoomy.fitPercent).toBe(100);
-    expect(phoneRoomy.width).toBe(390);
-    expect(phoneRoomy.height).toBe(844);
+    expect(phoneRoomy.width).toBe(393);
+    expect(phoneRoomy.height).toBe(852);
   });
 
   it('toggles orientation only for phone and tablet device presets', () => {

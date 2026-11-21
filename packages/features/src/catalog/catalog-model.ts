@@ -1,5 +1,5 @@
-import type { ItemRow, WatchProgressRow } from '@elv/data';
-import { matchesWatchStatus, type PagedListSource, type WatchStatusFilter } from '../shared';
+import { MIN_RESUME_POSITION_MS, type WatchProgressRow } from '@elv/data';
+import type { DetailTarget, PagedListSource } from '../shared';
 
 /** Number of category rails loaded initially in Movies & Series Discovery Mode. */
 export const INITIAL_VISIBLE_CATEGORIES = 8;
@@ -19,21 +19,12 @@ export const GRID_PAGE_SIZE = 180;
 /** Maximum LRU pages retained in JS memory for a single Category Grid. */
 export const GRID_MAX_PAGES = 8;
 
-/** Upper bound of items fetched when an active watch-status filter (`!== 'all'`) is applied in Grid Mode. */
-export const FILTERED_GRID_LIMIT = 240;
-
-/** Ordered watch-status filter chips displayed across Movies & Series Discovery and Grids. */
-export const WATCH_STATUS_FILTERS: readonly WatchStatusFilter[] = [
-  'all',
-  'unwatched',
-  'inProgress',
-  'watched',
-];
+/** Maximum Continue Watching cards loaded at the top of Movies & Series Discovery. */
+export const CATALOG_CONTINUE_LIMIT = 20;
 
 /** Preserved tab navigation state for a Movies or Series tab across tab switches. */
 export interface CatalogTabMemory {
   readonly selectedCategoryId: string | null;
-  readonly watchFilter: WatchStatusFilter;
   readonly visibleCategoryCount: number;
   readonly gridScrollRow?: number;
 }
@@ -41,7 +32,6 @@ export interface CatalogTabMemory {
 /** Default clean {@link CatalogTabMemory} snapshot for initial tab entry. */
 export const EMPTY_CATALOG_MEMORY: CatalogTabMemory = {
   selectedCategoryId: null,
-  watchFilter: 'all',
   visibleCategoryCount: INITIAL_VISIBLE_CATEGORIES,
 };
 
@@ -49,10 +39,9 @@ export const EMPTY_CATALOG_MEMORY: CatalogTabMemory = {
 export type CatalogNavRowId =
   | 'empty'
   | 'catChips'
-  | 'statusChips'
+  | 'continue'
   | 'loadMore'
   | 'gridBack'
-  | 'filterReset'
   | `rail-${number}`;
 
 /** Descriptor of one currently visible focusable horizontal row inside Catalog Discovery or Grid header. */
@@ -73,11 +62,10 @@ export interface BuildCatalogNavRowsInput {
   readonly hasSources: boolean;
   readonly hasCategories: boolean;
   readonly categoryChipCount: number;
-  readonly statusChipCount: number;
+  readonly continueCount?: number;
   readonly railEntries?: readonly CatalogRailNavEntry[];
   readonly hasLoadMore?: boolean;
   readonly isGridMode?: boolean;
-  readonly isFilterEmpty?: boolean;
 }
 
 /** 2D `(row, col)` coordinate clamped inside a virtualized category grid. */
@@ -124,14 +112,34 @@ export function chunkRowItems<T>(
   return out;
 }
 
-/** Filters catalog items against `progressByKey` using the active {@link WatchStatusFilter}. */
-export function filterCatalogItems(
-  items: readonly ItemRow[],
-  progressByKey: ReadonlyMap<string, WatchProgressRow>,
-  watchFilter: WatchStatusFilter,
-): ItemRow[] {
-  if (watchFilter === 'all') return items.slice();
-  return items.filter((item) => matchesWatchStatus(progressByKey.get(item.key), watchFilter));
+/** Filters active Continue Watching progress rows for either the Movies or Series discovery tab. */
+export function filterContinueWatchingForCatalog(
+  rows: readonly WatchProgressRow[],
+  kind: 'movie' | 'series',
+): WatchProgressRow[] {
+  return rows.filter((row) => {
+    if (row.watched || row.positionMs < MIN_RESUME_POSITION_MS) return false;
+    return kind === 'movie'
+      ? row.kind === 'movie'
+      : row.kind === 'series' || row.kind === 'episode';
+  });
+}
+
+/** Builds a {@link DetailTarget} from a Continue Watching {@link WatchProgressRow}. */
+export function detailTargetFromProgress(
+  row: WatchProgressRow,
+  tabKind: 'movie' | 'series',
+): DetailTarget {
+  return {
+    itemKey: tabKind === 'series' ? (row.seriesKey ?? row.itemKey) : row.itemKey,
+    sourceId: row.sourceId,
+    kind: tabKind,
+    title: row.title,
+    posterUri: row.logo,
+    backdropUri: row.logo,
+    year: null,
+    rating: null,
+  };
 }
 
 /** Returns a `[0, 1]` watch-progress bar ratio for unwatched in-progress items, or `undefined`. */
@@ -146,6 +154,16 @@ export function computeProgressRatio(progress: WatchProgressRow | undefined): nu
     return undefined;
   }
   return Math.min(1, Math.max(0, progress.positionMs / progress.durationMs));
+}
+
+/** Computes remaining whole minutes (`>= 1`) for an in-progress item, or `null` when duration is invalid. */
+export function formatCatalogRemainingMinutes(
+  positionMs: number,
+  durationMs: number,
+): number | null {
+  if (!Number.isFinite(positionMs) || !Number.isFinite(durationMs) || durationMs <= 0) return null;
+  const remainingMs = Math.max(0, durationMs - Math.max(0, positionMs));
+  return Math.max(1, Math.ceil(remainingMs / 60_000));
 }
 
 /** Clamps a 2D TV grid focus coordinate `(row, col)` to a valid item slot, including partial last rows. */
@@ -177,21 +195,17 @@ export function buildCatalogNavRows(input: BuildCatalogNavRowsInput): CatalogNav
   if (input.categoryChipCount > 0) {
     rows.push({ id: 'catChips', count: input.categoryChipCount });
   }
-  if (input.statusChipCount > 0) {
-    rows.push({ id: 'statusChips', count: input.statusChipCount });
-  }
 
   if (input.isGridMode) {
     rows.push({ id: 'gridBack', count: 1 });
-    if (input.isFilterEmpty) {
-      rows.push({ id: 'filterReset', count: 1 });
-    }
     return rows;
   }
 
-  if (input.isFilterEmpty) {
-    rows.push({ id: 'filterReset', count: 1 });
-  } else if (input.railEntries !== undefined) {
+  if ((input.continueCount ?? 0) > 0) {
+    rows.push({ id: 'continue', count: input.continueCount ?? 0 });
+  }
+
+  if (input.railEntries !== undefined) {
     for (const entry of input.railEntries) {
       if (entry.count > 0) {
         rows.push({ id: `rail-${entry.catIndex}`, count: entry.count });

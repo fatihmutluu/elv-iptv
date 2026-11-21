@@ -112,7 +112,7 @@ export function HomeHero({
           minHeight,
           paddingTop: topClearance,
           paddingHorizontal: padX,
-          paddingBottom: isPortrait ? theme.spacing.md : theme.spacing.lg,
+          paddingBottom: isPortrait ? theme.spacing.sm : theme.spacing.md,
           backgroundColor: theme.colors.bgSurface,
         },
       ]}
@@ -216,14 +216,14 @@ export function HomeHero({
             style={[
               theme.typography.body,
               styles.overview,
-              { color: theme.colors.textSecondary, marginTop: theme.spacing.sm },
+              { color: theme.colors.textSecondary, marginTop: theme.spacing.xs },
             ]}
           >
             {slide.overview}
           </Text>
         ) : null}
 
-        <View style={[styles.bottomBar, { marginTop: theme.spacing.md, gap: theme.spacing.md }]}>
+        <View style={[styles.bottomBar, { marginTop: theme.spacing.sm, gap: theme.spacing.sm }]}>
           <View style={[styles.actionsRow, { gap: theme.spacing.sm }]}>
             <CtaButton
               testID="home-hero-play"
@@ -327,11 +327,11 @@ const styles = StyleSheet.create({
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   statusBar: {
     width: 3,
-    height: 13,
+    height: 11,
     borderRadius: 2,
   },
   metaRow: {
@@ -340,7 +340,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   overview: {
-    maxWidth: 560,
+    maxWidth: 520,
   },
   bottomBar: {
     flexDirection: 'row',

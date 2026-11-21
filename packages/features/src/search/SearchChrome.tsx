@@ -2,7 +2,8 @@ import type { SearchScope } from '@elv/data';
 import type { KeyEvent } from '@elv/focus-core';
 import {
   CtaButton,
-  FilterChip,
+  EditorialCategoryBar,
+  type EditorialCategoryItem,
   Icon,
   IconButton,
   TABULAR_NUMS_STYLE,
@@ -12,10 +13,11 @@ import {
   useI18n,
   useKeyInterpreter,
   useTheme,
+  webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { type MutableRefObject, memo, type ReactElement, useCallback } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { type MutableRefObject, memo, type ReactElement, useCallback, useMemo } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { MAX_SEARCH_QUERY_CHARS, SEARCH_SCOPES } from './search-model';
 
 /** Mounts the 10-ft TV key interpreter and focus anchor while `SearchScreen` owns focus. */
@@ -27,39 +29,6 @@ export function SearchTvKeyBridge({
   useKeyInterpreter(onEvent);
   return <TvFocusAnchor testID="search-tv-focus-anchor" />;
 }
-
-interface ScopeChipItemProps {
-  readonly scope: SearchScope;
-  readonly label: string;
-  readonly selected: boolean;
-  readonly isTv: boolean;
-  readonly focused: boolean;
-  readonly onSelect: (scope: SearchScope) => void;
-}
-
-const ScopeChipItem = memo(function ScopeChipItemInner({
-  scope,
-  label,
-  selected,
-  isTv,
-  focused,
-  onSelect,
-}: ScopeChipItemProps): ReactElement {
-  const handlePress = useCallback(() => {
-    onSelect(scope);
-  }, [onSelect, scope]);
-
-  return (
-    <FilterChip
-      testID={`search-scope-${scope}`}
-      label={label}
-      selected={selected}
-      focusable={!isTv}
-      focused={focused}
-      onPress={handlePress}
-    />
-  );
-});
 
 interface RecentChipItemProps {
   readonly term: string;
@@ -76,18 +45,41 @@ const RecentChipItem = memo(function RecentChipItemInner({
   focused,
   onSelect,
 }: RecentChipItemProps): ReactElement {
+  const theme = useTheme();
   const handlePress = useCallback(() => {
     onSelect(term);
   }, [onSelect, term]);
 
   return (
-    <FilterChip
+    <Pressable
       testID={`search-recent-${index}`}
-      label={term}
+      accessibilityRole="button"
+      accessibilityLabel={term}
       focusable={!isTv}
-      focused={focused}
       onPress={handlePress}
-    />
+      style={({ pressed }) => [
+        styles.recentButton,
+        webTransition(theme, 'background-color, border-color, opacity'),
+        webCursorPointer(),
+        {
+          borderRadius: 4,
+          backgroundColor: focused ? theme.colors.focusFill : theme.colors.chipBg,
+          borderColor: focused ? theme.colors.focusRingColor : theme.colors.chipBorder,
+          borderWidth: focused ? theme.focus.ringWidth : 1,
+          opacity: pressed ? 0.85 : 1,
+        },
+      ]}
+    >
+      <Text
+        numberOfLines={1}
+        style={[
+          theme.typography.caption,
+          { color: focused ? theme.colors.textPrimary : theme.colors.textSecondary },
+        ]}
+      >
+        {term}
+      </Text>
+    </Pressable>
   );
 });
 
@@ -154,6 +146,23 @@ export const SearchHeaderBar = memo(function SearchHeaderBarInner({
       : theme.colors.chipBorder;
   const inputTransition = webTransition(theme, 'border-color, background-color');
 
+  const scopeItems = useMemo<readonly EditorialCategoryItem[]>(
+    () =>
+      SEARCH_SCOPES.map((itemScope) => ({
+        id: itemScope,
+        label: scopeLabels[itemScope],
+        testID: `search-scope-${itemScope}`,
+      })),
+    [scopeLabels],
+  );
+
+  const handleSelectScopeId = useCallback(
+    (id: string) => {
+      onSelectScope(id as SearchScope);
+    },
+    [onSelectScope],
+  );
+
   return (
     <View style={{ paddingHorizontal: padX }}>
       <Text
@@ -210,34 +219,33 @@ export const SearchHeaderBar = memo(function SearchHeaderBarInner({
         ) : null}
       </View>
 
-      <View style={[styles.scopeRow, { gap: theme.spacing.xs, marginTop: 12 }]}>
-        {SEARCH_SCOPES.map((itemScope, idx) => (
-          <ScopeChipItem
-            key={itemScope}
-            scope={itemScope}
-            label={scopeLabels[itemScope]}
-            selected={scope === itemScope}
-            isTv={isTv}
-            focused={focusedScopeIndex === idx}
-            onSelect={onSelectScope}
-          />
-        ))}
-        {hasQuery && hasSearched ? (
-          <Text
-            testID="search-results-summary"
-            numberOfLines={1}
-            style={[
-              theme.typography.caption,
-              TABULAR_NUMS_STYLE,
-              styles.summaryText,
-              { color: theme.colors.textMuted },
-            ]}
-          >
-            {searching
-              ? i18n.t('search.searching')
-              : i18n.t('search.resultsSummary', { count: totalVisibleHits })}
-          </Text>
-        ) : null}
+      <View style={styles.scopeBarWrap}>
+        <EditorialCategoryBar
+          testID="search-scope-bar"
+          items={scopeItems}
+          activeId={scope}
+          onSelect={handleSelectScopeId}
+          isTv={isTv}
+          focusedIndex={focusedScopeIndex}
+          padX={0}
+          rightAccessory={
+            hasQuery && hasSearched ? (
+              <Text
+                testID="search-results-summary"
+                numberOfLines={1}
+                style={[
+                  theme.typography.caption,
+                  TABULAR_NUMS_STYLE,
+                  { color: theme.colors.textMuted },
+                ]}
+              >
+                {searching
+                  ? i18n.t('search.searching')
+                  : i18n.t('search.resultsSummary', { count: totalVisibleHits })}
+              </Text>
+            ) : undefined
+          }
+        />
       </View>
     </View>
   );
@@ -364,8 +372,14 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   input: { flex: 1, minHeight: 40, paddingVertical: 8 },
-  scopeRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', paddingVertical: 4 },
-  summaryText: { marginLeft: 'auto' },
+  scopeBarWrap: { marginTop: 10 },
+  recentButton: {
+    minHeight: 36,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   recentSection: { marginTop: 22 },
   recentHeader: {
     flexDirection: 'row',

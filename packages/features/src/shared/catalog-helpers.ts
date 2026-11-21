@@ -1,10 +1,4 @@
-import {
-  type CatalogService,
-  type CategoryRow,
-  MIN_RESUME_POSITION_MS,
-  type SourceRow,
-  type WatchProgressRow,
-} from '@elv/data';
+import type { CatalogService, CategoryRow, SourceRow, WatchProgressRow } from '@elv/data';
 import type { Theme, ViewportInfo } from '@elv/ui-kit';
 
 /** Category row paired with its source-disambiguated display label. */
@@ -12,9 +6,6 @@ export interface DisplayCategory {
   readonly row: CategoryRow;
   readonly label: string;
 }
-
-/** Watch-status filter chips supported in Movies & Series discovery and grids (`#14`). */
-export type WatchStatusFilter = 'all' | 'unwatched' | 'inProgress' | 'watched';
 
 /** Responsive Cinema Quietude layout metrics shared across Catalog Discovery, Grids, and Detail. */
 export interface CatalogLayoutMetrics {
@@ -26,6 +17,7 @@ export interface CatalogLayoutMetrics {
   readonly gridGap: number;
   readonly heroTopClearance: number;
   readonly posterRailWidth: number;
+  readonly wideRailWidth: number;
   readonly gridColumns: number;
   readonly gridCardWidth: number;
   readonly gridRowHeight: number;
@@ -65,24 +57,7 @@ export function formatVodMeta(year: number | null, rating: number | null): strin
   return parts.length > 0 ? parts.join(' · ') : undefined;
 }
 
-/** Evaluates whether a VOD item's watch progress matches the active {@link WatchStatusFilter}. */
-export function matchesWatchStatus(
-  progress: WatchProgressRow | undefined,
-  filter: WatchStatusFilter,
-): boolean {
-  if (filter === 'all') return true;
-  if (filter === 'watched') return progress?.watched === true;
-  if (filter === 'inProgress') {
-    return (
-      progress !== undefined && !progress.watched && progress.positionMs >= MIN_RESUME_POSITION_MS
-    );
-  }
-  return (
-    progress === undefined || (!progress.watched && progress.positionMs < MIN_RESUME_POSITION_MS)
-  );
-}
-
-/** Computes responsive peek/grid poster widths and fixed virtualized row heights from viewport tokens. */
+/** Computes responsive peek/grid poster & wide card widths with form-factor max-width caps. */
 export function computeCatalogLayout(viewport: ViewportInfo, theme: Theme): CatalogLayoutMetrics {
   const isTv = viewport.formFactor === 'tv';
   const isTouch = viewport.inputModality === 'touch';
@@ -107,17 +82,34 @@ export function computeCatalogLayout(viewport: ViewportInfo, theme: Theme): Cata
     : viewport.safeArea.top;
   const heroTopClearance = (!isPortrait ? (isTv ? 58 : 56) : 50) + topInset + 24;
 
+  const posterMaxW = isTv ? 184 : isPortrait ? (viewport.formFactor === 'tablet' ? 164 : 124) : 184;
+  const wideMaxW = isTv ? 290 : isPortrait ? (viewport.formFactor === 'tablet' ? 285 : 270) : 296;
+
   const available = Math.max(0, safeWidth - padX * 2);
   const railCols = Math.max(1, viewport.columns.posterRail);
   const posterRailWidth = Math.max(
     MIN_CARD_WIDTH,
-    Math.floor((available - Math.max(0, railCols - 1) * railGap) / railCols),
+    Math.min(posterMaxW, Math.floor((available - Math.max(0, railCols - 1) * railGap) / railCols)),
   );
 
-  const gridColumns = Math.max(1, Math.floor(viewport.columns.categoryGrid));
+  const wideCols = Math.max(1, viewport.columns.wideRail);
+  const wideRailWidth = Math.max(
+    MIN_CARD_WIDTH,
+    Math.min(wideMaxW, Math.floor((available - Math.max(0, wideCols - 1) * railGap) / wideCols)),
+  );
+
+  const baseGridCols = Math.max(1, Math.floor(viewport.columns.categoryGrid));
+  const baseCardWidth = (available - Math.max(0, baseGridCols - 1) * gridGap) / baseGridCols;
+  const gridColumns =
+    baseCardWidth > posterMaxW
+      ? Math.max(baseGridCols, Math.ceil((available + gridGap) / (posterMaxW + gridGap)))
+      : baseGridCols;
   const gridCardWidth = Math.max(
     MIN_CARD_WIDTH,
-    Math.floor((available - Math.max(0, gridColumns - 1) * gridGap) / gridColumns),
+    Math.min(
+      posterMaxW,
+      Math.floor((available - Math.max(0, gridColumns - 1) * gridGap) / gridColumns),
+    ),
   );
   const posterHeight = Math.round(gridCardWidth * 1.5);
   const textAndPad = isTv ? 68 : 54;
@@ -134,6 +126,7 @@ export function computeCatalogLayout(viewport: ViewportInfo, theme: Theme): Cata
     gridGap,
     heroTopClearance,
     posterRailWidth,
+    wideRailWidth,
     gridColumns,
     gridCardWidth,
     gridRowHeight,

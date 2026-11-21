@@ -685,4 +685,34 @@ describe('@elv/i18n', () => {
     expect(en.t('sources.badge.expiringSoon', { days: 5 })).toBe('Expires in 5d');
     expect(tr.t('sources.badge.expiringSoon', { days: 5 })).toBe('5 gün içinde doluyor');
   });
+
+  it('localizes Cinema Quietude v2 catalog, live favorites, player OSD, and rail scroll strings', () => {
+    const en = createAppI18n('en');
+    const tr = createAppI18n('tr');
+    const cases: ReadonlyArray<readonly [MessageId, string, string]> = [
+      ['catalog.categories', 'Categories', 'Kategoriler'],
+      ['catalog.chooseCategory', 'Browse categories', 'Kategori seç'],
+      ['catalog.continueWatching', 'Continue watching', 'İzlemeye devam et'],
+      ['live.mode.favorites', 'Favorites', 'Favoriler'],
+      ['live.favoritesEmptyTitle', 'No favorite channels yet', 'Henüz favori kanal yok'],
+      [
+        'live.favoritesEmptyBody',
+        'Star channels in Channels or TV Guide to watch them here.',
+        'Burada izlemek için Kanallar veya TV Rehberi ekranından kanalları favorilere ekle.',
+      ],
+      ['live.browseChannels', 'Browse channels', 'Kanallara göz at'],
+      ['live.favoriteAdd', 'Add to Favorites', 'Favorilere ekle'],
+      ['live.favoriteRemove', 'Remove from Favorites', 'Favorilerden çıkar'],
+      ['player.speed', 'Playback speed', 'Oynatma hızı'],
+      ['player.unmute', 'Unmute', 'Sesi aç'],
+      ['player.enterFullscreen', 'Fullscreen', 'Tam ekran'],
+      ['player.exitFullscreen', 'Exit fullscreen', 'Tam ekrandan çık'],
+      ['rail.scrollLeft', 'Scroll left', 'Sola kaydır'],
+      ['rail.scrollRight', 'Scroll right', 'Sağa kaydır'],
+    ];
+    for (const [id, expectedEn, expectedTr] of cases) {
+      expect(en.t(id)).toBe(expectedEn);
+      expect(tr.t(id)).toBe(expectedTr);
+    }
+  });
 });

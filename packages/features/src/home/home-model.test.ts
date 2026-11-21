@@ -60,6 +60,8 @@ describe('home-model', () => {
     expect(tabletWide).toBe(310);
     expect(phoneWide).toBeGreaterThan(phonePoster);
     expect(computePeekCardWidth(100, 16, 5.5, 8)).toBeGreaterThanOrEqual(88);
+    expect(computePeekCardWidth(1920, 24, 5.5, 10, 184)).toBe(184);
+    expect(computePeekCardWidth(1920, 24, 3.3, 10, 296)).toBe(296);
   });
 
   it('clamps progressRatio to [0, 1] and handles invalid durations safely', () => {

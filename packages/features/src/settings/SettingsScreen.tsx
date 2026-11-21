@@ -1,7 +1,8 @@
 import type { KeyEvent } from '@elv/focus-core';
 import type { MessageId } from '@elv/i18n';
 import {
-  FilterChip,
+  EditorialCategoryBar,
+  type EditorialCategoryItem,
   Icon,
   type IconName,
   TvFocusAnchor,
@@ -14,7 +15,7 @@ import {
   webTransition,
 } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { AboutLicensesPanel } from './AboutLicensesPanel';
 import {
   AppearancePanel,
@@ -96,8 +97,8 @@ const SECTION_META: readonly NavSectionMeta[] = [
  *
  * - **Landscape (`TV`, `Desktop`, `Tablet-L`, `Phone-L`):** Centered `maxWidth: 1120` 2-column
  *   shell (`220px` left category sidebar + `flex: 1` right detail pane without an outer ScrollView).
- * - **Portrait (`Phone-P`, `Tablet-P`):** Horizontal scrollable `FilterChip` tab strip (`>= 40px`
- *   touch targets) above a `flex: 1` detail pane.
+ * - **Portrait (`Phone-P`, `Tablet-P`):** Horizontal scrollable `EditorialCategoryBar` tab strip
+ *   (`>= 40px` touch targets) above a `flex: 1` detail pane.
  * - **10-Foot TV D-Pad:** Uses `@elv/focus-core` for sidebar + Appearance controls and cleanly
  *   delegates `isActiveScope` to embedded Sources and Licenses views.
  */
@@ -132,6 +133,22 @@ export function SettingsScreen({
       onSectionChange?.(next);
     },
     [controlledSection, onSectionChange],
+  );
+
+  const portraitTabItems = useMemo<readonly EditorialCategoryItem[]>(
+    () =>
+      SETTINGS_SECTIONS.flatMap((id) => {
+        const meta = SECTION_META.find((m) => m.id === id);
+        return meta ? [{ id: meta.id, label: i18n.t(meta.labelKey), testID: meta.testID }] : [];
+      }),
+    [i18n],
+  );
+
+  const handleSelectSectionId = useCallback(
+    (id: string) => {
+      handleSelectSection(id as SettingsSection);
+    },
+    [handleSelectSection],
   );
 
   const handleActivateAppearanceControl = useCallback(
@@ -291,27 +308,14 @@ export function SettingsScreen({
           </View>
         ) : (
           <View style={[styles.portraitBody, { gap: theme.spacing.md }]}>
-            <ScrollView
+            <EditorialCategoryBar
               testID="settings-portrait-tabs"
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.portraitTabsScroll}
-              contentContainerStyle={[styles.portraitTabsContent, { gap: theme.spacing.xs }]}
-            >
-              {SETTINGS_SECTIONS.map((id) => {
-                const meta = SECTION_META.find((m) => m.id === id);
-                if (!meta) return null;
-                return (
-                  <FilterChip
-                    key={meta.id}
-                    testID={meta.testID}
-                    label={i18n.t(meta.labelKey)}
-                    selected={activeSection === meta.id}
-                    onPress={() => handleSelectSection(meta.id)}
-                  />
-                );
-              })}
-            </ScrollView>
+              items={portraitTabItems}
+              activeId={activeSection}
+              onSelect={handleSelectSectionId}
+              isTv={false}
+              padX={0}
+            />
 
             <View style={styles.detailPane}>{detailContent}</View>
           </View>
@@ -347,7 +351,5 @@ const styles = StyleSheet.create({
   },
   sidebarLabel: { flex: 1 },
   portraitBody: { flex: 1, minHeight: 0 },
-  portraitTabsScroll: { flexGrow: 0, flexShrink: 0 },
-  portraitTabsContent: { alignItems: 'center', paddingVertical: 2 },
   detailPane: { flex: 1, minWidth: 0, minHeight: 0 },
 });

@@ -86,6 +86,7 @@ interface MockCatalogOptions {
   readonly categories: readonly CategoryRow[];
   readonly itemsByCategory: ReadonlyMap<string, readonly ItemRow[]>;
   readonly progressByKey?: ReadonlyMap<string, WatchProgressRow>;
+  readonly continueWatching?: readonly WatchProgressRow[];
   readonly dynamicCategory?: {
     readonly id: string;
     readonly count: number;
@@ -114,6 +115,9 @@ export function createMockCatalog(opts: MockCatalogOptions) {
       const list = opts.itemsByCategory.get(categoryId) ?? [];
       return list.slice(offset, offset + limit);
     }),
+    listContinueWatching: jest.fn(async (limit = 20) =>
+      (opts.continueWatching ?? []).slice(0, limit),
+    ),
     listProgressByKeys: jest.fn(async (keys: readonly string[]) => {
       progressCalls.push([...keys]);
       const out: WatchProgressRow[] = [];

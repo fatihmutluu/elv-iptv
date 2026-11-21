@@ -16,7 +16,6 @@ export interface UseTvCatalogNavigationOptions {
   readonly rows: readonly CatalogNavRowDescriptor[];
   readonly gridColumns: number;
   readonly gridItemCount: number;
-  readonly isGridFilterEmpty: boolean;
   readonly onActivateRow: (rowId: CatalogNavRowId, colIndex: number) => void;
   readonly onActivateGridItem: (itemIndex: number) => void;
   readonly onExitGrid: () => void;
@@ -35,7 +34,7 @@ export interface TvCatalogNavigationState {
 type FocusZone = CatalogNavRowId | 'grid' | null;
 
 /**
- * Manages 10-ft TV D-pad navigation across Catalog Discovery rows (`catChips`, `statusChips`,
+ * Manages 10-ft TV D-pad navigation across Catalog Discovery rows (`catChips`, `continue`,
  * `rail-N`, `loadMore`) and the O(1)-memory 2D `(row, col)` Category Grid viewport.
  */
 export function useTvCatalogNavigation({
@@ -45,7 +44,6 @@ export function useTvCatalogNavigation({
   rows,
   gridColumns,
   gridItemCount,
-  isGridFilterEmpty,
   onActivateRow,
   onActivateGridItem,
   onExitGrid,
@@ -73,8 +71,6 @@ export function useTvCatalogNavigation({
   gridColumnsRef.current = gridColumns;
   const gridItemCountRef = useRef(gridItemCount);
   gridItemCountRef.current = gridItemCount;
-  const isGridFilterEmptyRef = useRef(isGridFilterEmpty);
-  isGridFilterEmptyRef.current = isGridFilterEmpty;
 
   const onActivateRowRef = useRef(onActivateRow);
   onActivateRowRef.current = onActivateRow;
@@ -108,7 +104,7 @@ export function useTvCatalogNavigation({
     prevGridModeRef.current = isGridMode;
     if (prev === isGridMode) return;
     if (isGridMode) {
-      if (gridItemCountRef.current > 0 && !isGridFilterEmptyRef.current) {
+      if (gridItemCountRef.current > 0) {
         commitGrid({ row: 0, col: 0 });
       } else {
         commitRow('gridBack', 0);
@@ -128,8 +124,8 @@ export function useTvCatalogNavigation({
     const currentZone = zoneRef.current;
 
     if (currentZone === 'grid') {
-      if (!isGridMode || isGridFilterEmpty || gridItemCount <= 0) {
-        const fallback = currentRows.find((r) => r.id === 'filterReset') ?? currentRows[0] ?? null;
+      if (!isGridMode || gridItemCount <= 0) {
+        const fallback = currentRows[0] ?? null;
         commitRow(fallback?.id ?? null, 0);
         return;
       }
@@ -162,15 +158,7 @@ export function useTvCatalogNavigation({
       const saved = colMemoryRef.current.get(target.id) ?? 0;
       commitRow(target.id, Math.min(Math.max(0, saved), target.count - 1));
     }
-  }, [
-    commitGrid,
-    commitRow,
-    gridColumns,
-    gridItemCount,
-    isGridFilterEmpty,
-    isGridMode,
-    rowSignature,
-  ]);
+  }, [commitGrid, commitRow, gridColumns, gridItemCount, isGridMode, rowSignature]);
 
   const handleTvKey = useCallback(
     (event: KeyEvent) => {
@@ -255,7 +243,7 @@ export function useTvCatalogNavigation({
           const saved = colMemoryRef.current.get(nextRow.id) ?? 0;
           commitRow(nextRow.id, Math.min(Math.max(0, saved), nextRow.count - 1));
           onFocusRowRef.current?.(nextRow.id);
-        } else if (inGridMode && gridItemCountRef.current > 0 && !isGridFilterEmptyRef.current) {
+        } else if (inGridMode && gridItemCountRef.current > 0) {
           commitGrid({ row: 0, col: 0 });
         }
       } else if (event.key === 'left') {

@@ -62,6 +62,7 @@ function makeLayout(overrides?: Partial<CatalogLayoutMetrics>): CatalogLayoutMet
     gridGap: 14,
     heroTopClearance: 64,
     posterRailWidth: 160,
+    wideRailWidth: 280,
     gridColumns: 4,
     gridCardWidth: 160,
     gridRowHeight: 200,
@@ -100,17 +101,14 @@ describe('CategoryGridView layout, padding/border math, and resize handling (#16
               kind="movie"
               category={CATEGORY}
               catalog={catalog}
-              watchFilter="all"
               refreshToken={0}
               userStateVersion={0}
               layout={layout}
               backFocused={false}
-              filterResetFocused={false}
               focusedGridPos={focusedGridPos}
               contentPaddingTop={16}
               borderTopWidth={4}
               onBack={jest.fn()}
-              onResetFilter={jest.fn()}
               onOpenDetail={jest.fn()}
             />
           </I18nProvider>

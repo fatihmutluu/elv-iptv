@@ -103,7 +103,6 @@ describe('CatalogDiscoveryScreen — grid hydration, touch, and TV focus', () =>
       sources: [makeSource()],
       memory: {
         selectedCategoryId: 'src-1|movie|deleted-category',
-        watchFilter: 'all',
         visibleCategoryCount: 8,
       },
       onMemoryChange,
@@ -142,7 +141,6 @@ describe('CatalogDiscoveryScreen — grid hydration, touch, and TV focus', () =>
     const stableI18n = createAppI18n('en');
     const stableMemory = {
       selectedCategoryId: cat0.id,
-      watchFilter: 'all' as const,
       visibleCategoryCount: 8,
     };
     const onOpenDetail = jest.fn();
@@ -223,18 +221,21 @@ describe('CatalogDiscoveryScreen — grid hydration, touch, and TV focus', () =>
       expect(screen.getByTestId('catalog-load-more')).toBeTruthy();
     });
 
+    await fireEvent(screen.getByTestId('catalog-cat-chip-1'), 'layout', {
+      nativeEvent: { layout: { x: 240, y: 0, width: 100, height: 40 } },
+    });
     scrollToSpy.mockClear();
     await sendKey(KEYCODE_DPAD_RIGHT);
     await sendKey(KEYCODE_DPAD_RIGHT);
     expect(scrollToSpy).toHaveBeenCalled();
 
     scrollToEndSpy.mockClear();
-    for (let step = 0; step < 10; step++) {
+    for (let step = 0; step < 9; step++) {
       await sendKey(KEYCODE_DPAD_DOWN);
     }
     expect(scrollToEndSpy).toHaveBeenCalled();
 
-    for (let step = 0; step < 10; step++) {
+    for (let step = 0; step < 9; step++) {
       await sendKey(KEYCODE_DPAD_UP);
     }
     await sendKey(KEYCODE_DPAD_CENTER);
