@@ -30,6 +30,7 @@ export interface EventRouterDeps {
   setLastVodPosition(ms: number): void;
   freezeAnchor(): void;
   clearStartTimeout(): void;
+  onSeekSettled?(): void;
 }
 
 /** @internal Routes engine events into batched state transitions and recovery hooks (`#224`). */
@@ -94,6 +95,7 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
           store.update({ anchor: event.anchor, ...liveEdgePatch(event.anchor, now) });
           hooks.onClock?.(event.anchor);
         });
+        deps.onSeekSettled?.();
         return;
       }
       case 'tracks': {

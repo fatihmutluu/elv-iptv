@@ -499,4 +499,182 @@ describe('createFetchHttpClient', () => {
       (globalThis as { Symbol: typeof Symbol }).Symbol = OriginalSymbol;
     }
   });
+
+  it('sanitizes outbound headers and keeps single-request behavior when no credential headers are set', async () => {
+    let seen: Parameters<FetchLike>[1] | undefined;
+    const client = createFetchHttpClient(async (_u, init) => {
+      seen = init;
+      return { status: 200, headers: headers({}), body: null };
+    });
+    await client.get('https://origin.example/list.m3u', {
+      headers: {
+        'User-Agent': 'ELV/1.0\r\nInjected: yes',
+        'Invalid Name': 'drop-me',
+        'X-Empty': '\r\n\0',
+      },
+    });
+    expect(seen?.headers).toEqual({ 'User-Agent': 'ELV/1.0Injected: yes' });
+    expect(seen?.redirect).toBeUndefined();
+  });
+
+  it('manually follows redirects with credential headers, preserving them same-origin and stripping them cross-origin', async () => {
+    const calls: Array<{ url: string; init: Parameters<FetchLike>[1] }> = [];
+    const body1 = trackedReader(['r1']);
+    const body2 = trackedReader(['r2']);
+    const body3 = trackedReader(['r3']);
+    const client = createFetchHttpClient(async (u, init) => {
+      calls.push({ url: u, init });
+      if (calls.length === 1) {
+        return {
+          status: 302,
+          headers: headers({ Location: '/next/path?x=1' }),
+          body: body1.body,
+        };
+      }
+      if (calls.length === 2) {
+        return {
+          status: 307,
+          headers: headers({ Location: '../sibling' }),
+          body: body2.body,
+        };
+      }
+      if (calls.length === 3) {
+        return {
+          status: 301,
+          headers: headers({ Location: 'https://cdn.other.example/stream.ts' }),
+          body: body3.body,
+        };
+      }
+      return {
+        status: 200,
+        headers: headers({ 'Content-Type': 'video/mp2t' }),
+        body: readerBody([enc('ok')]).body,
+      };
+    });
+
+    const res = okOf(
+      await client.get('https://origin.example:443/start/live', {
+        headers: {
+          Authorization: 'Bearer secret\r\n',
+          'Proxy-Authorization': 'Basic proxy',
+          Cookie: 'sid=123',
+          'User-Agent': 'ELV/1.0',
+        },
+      }),
+    );
+
+    expect(await collect(res.body)).toEqual(['ok']);
+    expect(calls).toHaveLength(4);
+    expect(calls[0]?.init.redirect).toBe('manual');
+    expect(calls[0]?.init.headers).toEqual({
+      Authorization: 'Bearer secret',
+      'Proxy-Authorization': 'Basic proxy',
+      Cookie: 'sid=123',
+      'User-Agent': 'ELV/1.0',
+    });
+    // Hop 1: same-origin root-relative redirect keeps credentials
+    expect(calls[1]?.url).toBe('https://origin.example/next/path?x=1');
+    expect(calls[1]?.init.headers).toEqual(calls[0]?.init.headers);
+    // Hop 2: same-origin relative ../ redirect keeps credentials
+    expect(calls[2]?.url).toBe('https://origin.example/sibling');
+    expect(calls[2]?.init.headers).toEqual(calls[0]?.init.headers);
+    // Hop 3: cross-origin redirect strips Authorization, Proxy-Authorization, and Cookie
+    expect(calls[3]?.url).toBe('https://cdn.other.example/stream.ts');
+    expect(calls[3]?.init.headers).toEqual({ 'User-Agent': 'ELV/1.0' });
+    // Intermediate redirect bodies were all discarded cleanly
+    expect(body1.state).toEqual({ cancelled: 1, released: 1 });
+    expect(body2.state).toEqual({ cancelled: 1, released: 1 });
+    expect(body3.state).toEqual({ cancelled: 1, released: 1 });
+  });
+
+  it('never re-attaches credentials when a cross-origin redirect bounces back to the initial origin', async () => {
+    const calls: Array<{ url: string; headers: Record<string, string> | undefined }> = [];
+    const client = createFetchHttpClient(async (u, init) => {
+      calls.push({ url: u, headers: init.headers });
+      if (calls.length === 1) {
+        return {
+          status: 302,
+          headers: headers({ Location: '//untrusted.example/bounce' }),
+          body: null,
+        };
+      }
+      if (calls.length === 2) {
+        return {
+          status: 303,
+          headers: headers({ Location: '?step=2' }),
+          body: null,
+        };
+      }
+      if (calls.length === 3) {
+        return {
+          status: 302,
+          headers: headers({ Location: 'https://origin.example/final' }),
+          body: null,
+        };
+      }
+      return { status: 200, headers: headers({}), body: null };
+    });
+
+    const res = await client.get('https://origin.example/start', {
+      headers: { Authorization: 'Bearer secret', 'User-Agent': 'ELV/1.0' },
+    });
+    expect(res.ok).toBe(true);
+    expect(calls[1]?.url).toBe('https://untrusted.example/bounce');
+    expect(calls[1]?.headers).toEqual({ 'User-Agent': 'ELV/1.0' });
+    expect(calls[2]?.url).toBe('https://untrusted.example/bounce?step=2');
+    expect(calls[2]?.headers).toEqual({ 'User-Agent': 'ELV/1.0' });
+    expect(calls[3]?.url).toBe('https://origin.example/final');
+    expect(calls[3]?.headers).toEqual({ 'User-Agent': 'ELV/1.0' });
+  });
+
+  it('fails with network/too-many-redirects when a credentialed redirect loop exceeds 10 hops', async () => {
+    let calls = 0;
+    const bodies: Array<ReturnType<typeof trackedReader>> = [];
+    const client = createFetchHttpClient(async (u) => {
+      calls += 1;
+      const b = trackedReader([`hop-${calls}`]);
+      bodies.push(b);
+      return {
+        status: 308,
+        headers: headers({ Location: `${u}?n=${calls}` }),
+        body: b.body,
+      };
+    });
+
+    const res = await client.get('https://origin.example/loop', {
+      headers: { Authorization: 'Bearer tok' },
+    });
+    expect(res).toEqual({
+      ok: false,
+      error: { category: 'network', code: 'too-many-redirects' },
+    });
+    expect(calls).toBe(11);
+    for (const b of bodies) {
+      expect(b.state).toEqual({ cancelled: 1, released: 1 });
+    }
+  });
+
+  it('refuses redirects with missing or non-http(s) Location headers cleanly', async () => {
+    const noLocClient = createFetchHttpClient(async () => ({
+      status: 302,
+      headers: headers({}),
+      body: null,
+    }));
+    expect(
+      await noLocClient.get('https://origin.example/a', {
+        headers: { Cookie: 'a=1' },
+      }),
+    ).toEqual({ ok: false, error: { category: 'network', code: 'http-302' } });
+
+    const badSchemeClient = createFetchHttpClient(async () => ({
+      status: 302,
+      headers: headers({ Location: 'javascript:alert(1)' }),
+      body: null,
+    }));
+    expect(
+      await badSchemeClient.get('https://origin.example/a', {
+        headers: { Cookie: 'a=1' },
+      }),
+    ).toEqual({ ok: false, error: { category: 'network', code: 'http-302' } });
+  });
 });

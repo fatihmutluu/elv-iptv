@@ -10,24 +10,17 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
 - Source-first (`src/index.ts`, `./testing` -> `src/testing/index.ts`); allowed workspace dep: `domain`; tests `*.test.ts`.
 
 ## Public surface
-- `PlayerEngine` port with `LoadCommand` (`options`: `softwareAudio`, `audioTrackId`, `subtitleTrackId`),
-  `selectAudioTrack?`, `selectSubtitleTrack?` (`null` = Off), `MediaTracks`, `TrackInfo`, `EMPTY_TRACKS`, `EngineEvent`
-  (`tracks`), `EngineState`, `EngineCapabilities`, `AttemptToken`, and `bridgeNativeEngine(native, { capabilities,
-  uptimeMs, now })` (`NativeEngineHandle`, `NativeLoadCommand`). `positionAt(anchor, nowMs)` clamps to `[0, durationMs]`;
-  `isAtLiveEdge(anchor, nowMs, toleranceMs = LIVE_EDGE_TOLERANCE_MS)` applies the 5 s live-edge grace window (`#284`).
-- `EngineError` and the 14 `EngineErrorCode`s; `toPlaybackError` gives `elvError('playback', code)`;
-  `classifyError(code, httpStatus?)` gives `terminal | not-found | limit | recoverable` (`407`/`410`/`451` terminal, `458`/`460`–`463`/`469` limit).
-- `@elv/playback/testing`: `createFakePlayerEngine({ scripts, now, schedule, cancel })`, a scriptable engine for tests.
-  Scripts are keyed by URL and re-run on `retry` (`recreate` idles until a `load` or `retry`); `emit` injects any
-  event (stale tokens too); `openMedias()`, `maxConcurrentMedias()` check the one-media rule. Inject fake timers.
-  `anchorOnPlayPause` emits an extrapolated `clock` anchor (rate 1/0) after `play`/`pause`. `ENGINE_CONTRACT_CASES` is
-  the framework-free suite every engine runs through an `EngineContractHarness` (`contract.ts`; the fake: `contract.test.ts`).
-- `createPlaybackService({ engine, clock, timers, config? })` (`service.ts`, `service-events.ts`, `state-store.ts`, `seek-coalescer.ts`):
-  `tune`, `retry` (replays `ended` VOD from 0, resumes `failed`/post-`recreate` VOD from `lastVodPositionMs`), `stop`,
-  `play` (replays `ended` VOD from 0), `pause`, `seek` (coalesced ~80 ms, guards stale pre-seek clock ticks, bounded seek-settle
-  deadline, and reloads `ended`/`recovering` VOD), `selectAudioTrack`, `selectSubtitleTrack` (reconciled across reloads by exact id +
-  canonical `(language, label)` in `track-preferences.ts`), `getState`, `subscribe` (batched, equality-gated, `try/catch`-isolated), `dispose`.
-  `pause`/`play` advance `attempt`; `anchor` freezes on non-playing states; live `atLiveEdge` tracks the 5 s grace window. `DEFAULT_PLAYBACK_CONFIG` holds spec timings.
+- `PlayerEngine` port (`LoadCommand`, `setSpeed?`, `selectAudioTrack?`, `selectSubtitleTrack?`, `MediaTracks`,
+  `TrackInfo`, `EMPTY_TRACKS`, `EngineEvent`, `EngineState`, `EngineCapabilities`, `AttemptToken`) and
+  `bridgeNativeEngine`. `createMonotonicClock(nowFn?)` (`#159`) guards against backwards wall-clock jumps;
+  `positionAt(anchor, nowMs)` clamps to `[0, durationMs]`; `isAtLiveEdge(anchor, nowMs, toleranceMs)` applies the 5 s window (`#284`).
+- `EngineError` / `toPlaybackError` / `classifyError(code, httpStatus?)`; `diagnosePlaybackFailure`, `extractRedactedHost`,
+  and `createPlaybackDiagnoser({ clock, checkAccountHealth?, ttlMs? })` (`diagnoser.ts`, `#316`) classify failures with 60 s monotonic TTL caching and host-only redacted evidence.
+- `@elv/playback/testing`: `createFakePlayerEngine({ scripts, now, schedule, cancel })` and `ENGINE_CONTRACT_CASES` (`contract.ts`).
+- `createPlaybackService({ engine, clock, timers, config? })` (`service.ts`, `service-events.ts`, `state-store.ts`,
+  `seek-coalescer.ts`, `speed-coalescer.ts`): `tune`, `retry`, `stop`, `play`, `pause`, `seek` (coalesced ~80 ms, guards stale clock ticks),
+  `setSpeed` (clamped `[0.25, 4.0]`, coalesced across active seeks and in-flight transitions; `#302`), `selectAudioTrack`,
+  `selectSubtitleTrack` (`track-preferences.ts`), `getState`, `subscribe`, `dispose`. `DEFAULT_PLAYBACK_CONFIG` holds spec timings.
 
 ## Recovery (spec sections 5.4 and 5.5; `recovery.ts`, `ladder.ts`, `backoff.ts`, `stall-watchdog.ts`, always wired)
 - Entry: a stall of 4 s while `playing`, a frozen live clock (`positionMs` non-advancing for 4 s after first frame -> one bounded live-edge reload reset before escalating; `#148`), no `playing` 5 s after live `load` (8 s VOD), or a recoverable error. An unexpected live `ended` triggers at most one clean-end reload per tune (`#148`; VOD `ended` is untouched). Fast

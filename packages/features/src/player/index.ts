@@ -1,2 +1,6 @@
-export { type DescribedPlaybackFailure, describePlaybackFailure } from './errors';
+export {
+  type DescribedPlaybackFailure,
+  describePlaybackFailure,
+  type PlaybackFailureContext,
+} from './errors';
 export { PlayerScreen, type PlayerScreenProps } from './PlayerScreen';

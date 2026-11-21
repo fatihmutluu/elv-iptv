@@ -18,6 +18,7 @@ import {
 import { PlayerSettingsSheet } from './PlayerSettingsSheet';
 import { PlayerStatsHud } from './PlayerStatsHud';
 import { TrackPickerModal } from './TrackPickerModal';
+import { buildTouchHoverProps } from './touch-hover-guard';
 import { usePlayerControls } from './usePlayerControls';
 import { usePlayerSession } from './usePlayerSession';
 import { usePlayerTargetHandoff } from './usePlayerTargetHandoff';
@@ -256,11 +257,17 @@ export function PlayerScreen({
     />
   );
 
+  const touchHoverProps = buildTouchHoverProps(
+    controls.handleTouchActivity,
+    controls.handlePointerHover,
+  );
+
   return (
     <View
       testID="player-screen"
       style={[playerStyles.root, { backgroundColor: theme.colors.bgCanvas }]}
       {...controls.desktopFallbackKeyProps}
+      {...touchHoverProps}
     >
       {isTv ? (
         <View
@@ -297,7 +304,7 @@ export function PlayerScreen({
           {nextEpisodeNode}
           {trackPickerNode}
           {settingsSheetNode}
-          {osdNode}
+          {controls.osdHidden ? null : osdNode}
         </>
       ) : controls.locked ? (
         <PlayerLockedOverlay i18n={i18n} onUnlock={controls.unlockControls} />
@@ -316,7 +323,7 @@ export function PlayerScreen({
             {nextEpisodeNode}
           </View>
           {trackPickerNode}
-          {isTv && controls.osdHidden ? null : osdNode}
+          {controls.osdHidden ? null : osdNode}
           {settingsSheetNode}
         </>
       )}

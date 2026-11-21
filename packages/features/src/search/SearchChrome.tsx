@@ -112,7 +112,8 @@ export interface SearchHeaderBarProps {
   readonly onChangeQuery: (next: string) => void;
   readonly onInputFocus: () => void;
   readonly onInputBlur: () => void;
-  readonly onInputSubmit: () => void;
+  readonly onInputKeyPress?: (event: unknown) => void;
+  readonly onInputSubmit: (event?: unknown) => void;
   readonly onClearSearch: () => void;
   readonly onSelectScope: (next: SearchScope) => void;
 }
@@ -138,6 +139,7 @@ export const SearchHeaderBar = memo(function SearchHeaderBarInner({
   onChangeQuery,
   onInputFocus,
   onInputBlur,
+  onInputKeyPress,
   onInputSubmit,
   onClearSearch,
   onSelectScope,
@@ -183,6 +185,7 @@ export const SearchHeaderBar = memo(function SearchHeaderBarInner({
           onChangeText={onChangeQuery}
           onFocus={onInputFocus}
           onBlur={onInputBlur}
+          onKeyPress={onInputKeyPress}
           onSubmitEditing={onInputSubmit}
           editable={allowNativeEdit}
           focusable={allowNativeEdit}

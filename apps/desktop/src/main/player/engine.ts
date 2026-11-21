@@ -1,4 +1,9 @@
-import type { AttemptToken, EngineEvent, PlayerEngine } from '@elv/playback';
+import {
+  type AttemptToken,
+  clampPlaybackSpeed,
+  type EngineEvent,
+  type PlayerEngine,
+} from '@elv/playback';
 import {
   DESKTOP_CAPABILITIES,
   type PlayerArea,
@@ -68,6 +73,15 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   let spawning: Promise<LiveSession | undefined> | undefined;
   let spawnAbort: AbortController | undefined;
   let tickHandle: unknown;
+  let pendingSeeks = 0;
+  let speedInFlight = false;
+  let pendingSpeed: { slot: MediaSlot | undefined; rate: number } | undefined;
+
+  const resetSpeed = (): void => {
+    pendingSeeks = 0;
+    speedInFlight = false;
+    pendingSpeed = undefined;
+  };
 
   const emit = (events: readonly EngineEvent[]): void => {
     for (const event of events) {
@@ -101,6 +115,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   const detach = (L: LiveSession): void => {
     if (live !== L) return;
     live = undefined;
+    resetSpeed();
     if (media) media.entryId = undefined;
     L.hotplug.reset();
     L.repeatGate.reset();
@@ -195,17 +210,38 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
           opening.finish();
           return;
         }
-        case 'command':
-          if (
-            live &&
-            op.generation === queue.generation &&
-            (op.slot === undefined || op.slot === media)
-          ) {
-            await session.send(live, op.command);
+        case 'command': {
+          const isSeek = op.command[0] === 'seek';
+          const isSpeed = op.command[0] === 'set_property' && op.command[1] === 'speed';
+          try {
+            if (
+              live &&
+              op.generation === queue.generation &&
+              (op.slot === undefined || op.slot === media)
+            ) {
+              await session.send(live, op.command);
+            }
+          } finally {
+            if (op.generation === queue.generation) {
+              if (isSeek) pendingSeeks = Math.max(0, pendingSeeks - 1);
+              if (isSpeed) speedInFlight = false;
+              if (isSeek || isSpeed) flushPendingSpeed();
+            }
           }
+          return;
+        }
       }
     },
   });
+
+  const flushPendingSpeed = (): void => {
+    if (released || !live || pendingSeeks > 0 || speedInFlight || !pendingSpeed) return;
+    const next = pendingSpeed;
+    pendingSpeed = undefined;
+    if (next.slot !== media) return;
+    speedInFlight = true;
+    queue.enqueueCommand(['set_property', 'speed', next.rate], next.slot);
+  };
 
   const note = (token: AttemptToken): void => {
     if (token > latestToken) latestToken = token;
@@ -228,6 +264,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
 
   const startMedia = (token: AttemptToken, request: MediaRequest): void => {
     note(token);
+    resetSpeed();
     media = { token, request };
     queue.enqueueLoad(media);
     opening.wake();
@@ -290,24 +327,35 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     },
     play: (attempt) => command(attempt, ['set', 'pause', 'no']),
     pause: (attempt) => command(attempt, ['set', 'pause', 'yes']),
-    seek: (attempt, positionMs) => command(attempt, ['seek', positionMs / 1000, 'absolute']),
-    selectAudioTrack(attempt, id) {
+    seek(attempt, positionMs) {
       if (released) return;
-      const cmd = tracks.selectAudio(id);
-      if (!cmd) return;
+      pendingSeeks += 1;
+      command(attempt, ['seek', positionMs / 1000, 'absolute']);
+    },
+    setSpeed(attempt, rate) {
+      if (released || !media) return;
+      const clamped = clampPlaybackSpeed(rate);
+      if (clamped === undefined) return;
       adopt(attempt);
-      queue.enqueueCommand(cmd, media);
+      if (pendingSeeks > 0 || speedInFlight) {
+        pendingSpeed = { slot: media, rate: clamped };
+        return;
+      }
+      speedInFlight = true;
+      queue.enqueueCommand(['set_property', 'speed', clamped], media);
+    },
+    selectAudioTrack(attempt, id) {
+      const cmd = released ? undefined : tracks.selectAudio(id);
+      if (cmd) command(attempt, cmd);
     },
     selectSubtitleTrack(attempt, id) {
-      if (released) return;
-      const cmd = tracks.selectSubtitle(id);
-      if (!cmd) return;
-      adopt(attempt);
-      queue.enqueueCommand(cmd, media);
+      const cmd = released ? undefined : tracks.selectSubtitle(id);
+      if (cmd) command(attempt, cmd);
     },
     stop(attempt) {
       if (released) return;
       adopt(attempt);
+      resetSpeed();
       tracks.onStop();
       live?.repeatGate.reset();
       media = undefined;
@@ -317,12 +365,14 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     recreate(attempt) {
       if (released) return;
       adopt(attempt);
+      resetSpeed();
       tracks.onRetryOrRecreate();
       queue.enqueueRecreate();
     },
     release() {
       if (released) return;
       released = true;
+      resetSpeed();
       tracks.onStop();
       queue.clear();
       listeners.clear();

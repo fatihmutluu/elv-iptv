@@ -62,6 +62,9 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
   const fieldShared = {
     editingInputId: tv.editingInputId,
     onEndEditing: tv.handleEndEditing,
+    onSubmit: () => {
+      if (!ctrl.submitting) void ctrl.submit();
+    },
     registerRef: tv.registerRef,
     recordLayout: tv.recordLayout,
   };

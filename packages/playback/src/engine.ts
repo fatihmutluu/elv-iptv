@@ -131,6 +131,7 @@ export interface PlayerEngine {
   play(attempt: AttemptToken): void;
   pause(attempt: AttemptToken): void;
   seek(attempt: AttemptToken, positionMs: number): void;
+  setSpeed?(attempt: AttemptToken, rate: number): void;
   selectAudioTrack?(attempt: AttemptToken, id: string): void;
   selectSubtitleTrack?(attempt: AttemptToken, id: string | null): void;
   stop(attempt: AttemptToken): void;

@@ -13,15 +13,19 @@ import {
   nextTuneState,
   resolveSeekTarget,
 } from './service-events';
+import { createSpeedCoalescer, type SpeedCoalescer } from './speed-coalescer';
 import { createPlaybackStateStore } from './state-store';
 import { createTrackPreferences } from './track-preferences';
 import type {
   PlaybackClock,
   PlaybackService,
   PlaybackState,
+  PlaybackStatus,
   PlaybackTimers,
   TuneRequest,
 } from './types';
+
+const SPEED_BLOCKED = new Set<PlaybackStatus['kind']>(['idle', 'ended', 'recovering']);
 
 /** Dependencies of {@link createPlaybackService}. */
 export interface PlaybackServiceDeps {
@@ -44,7 +48,10 @@ export function createPlaybackServiceWith(
   const { engine, clock, timers } = deps;
   const config = mergePlaybackConfig(deps.config);
   const store = createPlaybackStateStore();
-  const seekCoalescer = createSeekCoalescer(clock, timers, config.seekCoalesceMs);
+  let speedCoalescer!: SpeedCoalescer;
+  const seekCoalescer = createSeekCoalescer(clock, timers, config.seekCoalesceMs, () =>
+    speedCoalescer.flush(),
+  );
   const formatCache = createWorkingFormatCache();
   const trackPrefs = createTrackPreferences();
 
@@ -56,6 +63,7 @@ export function createPlaybackServiceWith(
   let held = false;
   let disposed = false;
   let loadSeq = 0;
+  let speedAttempt: AttemptToken = 0;
   let startTimer: unknown;
   let resolveTimer: unknown;
 
@@ -86,9 +94,14 @@ export function createPlaybackServiceWith(
     });
   };
 
+  const resetCoalescers = (): void => {
+    seekCoalescer.reset();
+    speedCoalescer.reset();
+  };
+
   const stopEngine = (): void => {
     clearStartTimeout();
-    seekCoalescer.reset();
+    resetCoalescers();
     if (mediaOpen || loaded || state().status.kind === 'tuning') engine.stop(state().attempt);
     mediaOpen = false;
     loaded = false;
@@ -105,7 +118,7 @@ export function createPlaybackServiceWith(
   const sendLoad = (overrides: LoadOverrides = {}): boolean => {
     if (overrides.stream !== undefined) stream = overrides.stream;
     if (current === undefined || stream === undefined) return false;
-    seekCoalescer.reset();
+    resetCoalescers();
     const startMs = overrides.startMs ?? current.startMs;
     if (current.kind === 'vod' && startMs !== undefined) lastVodPositionMs = startMs;
     trackPrefs.beginReload();
@@ -152,7 +165,10 @@ export function createPlaybackServiceWith(
     startTimeoutMs,
     nextAttempt,
     setStatus: (status) => {
-      if (status.kind === 'recovering') trackPrefs.beginReload();
+      if (status.kind === 'recovering') {
+        trackPrefs.beginReload();
+        speedCoalescer.reset();
+      }
       store.update({ status });
     },
     freezeAnchor,
@@ -167,6 +183,19 @@ export function createPlaybackServiceWith(
     setTimer: (fn, ms) => timers.setTimeout(fn, ms),
     clearTimer: (handle) => timers.clearTimeout(handle),
   };
+
+  const speedAllowed = (st: PlaybackState): boolean =>
+    !disposed && loaded && !SPEED_BLOCKED.has(st.status.kind);
+
+  speedCoalescer = createSpeedCoalescer({
+    timers,
+    isSeekPending: () => seekCoalescer.isPending(),
+    apply: (rate) => {
+      const st = state();
+      if (speedAllowed(st) && st.attempt === speedAttempt) engine.setSpeed?.(speedAttempt, rate);
+    },
+    settleMs: config.seekCoalesceMs,
+  });
 
   const hooks: RecoveryHooks = recovery(control);
   const unsubscribeEngine = engine.subscribe(
@@ -184,6 +213,7 @@ export function createPlaybackServiceWith(
       },
       freezeAnchor,
       clearStartTimeout,
+      onSeekSettled: () => speedCoalescer.flush(),
     }),
   );
 
@@ -204,7 +234,7 @@ export function createPlaybackServiceWith(
 
   const startTune = (request: TuneRequest): AttemptToken => {
     clearStartTimeout();
-    seekCoalescer.reset();
+    resetCoalescers();
     held = hooks.onTune?.(request) ?? false;
     current = request;
     stream = undefined;
@@ -248,7 +278,7 @@ export function createPlaybackServiceWith(
         startTune(resumeMs === undefined ? current : { ...current, startMs: resumeMs });
         return;
       }
-      seekCoalescer.reset();
+      resetCoalescers();
       const token = store.batch(() => {
         freezeAnchor();
         hooks.onReset?.();
@@ -337,6 +367,12 @@ export function createPlaybackServiceWith(
         }
       });
     },
+    setSpeed(rate) {
+      const st = state();
+      if (!speedAllowed(st)) return;
+      speedAttempt = st.attempt;
+      speedCoalescer.request(rate);
+    },
     selectAudioTrack(id) {
       if (disposed || current === undefined || state().status.kind === 'idle') return;
       trackPrefs.selectAudio(id, state().tracks, loaded);
@@ -354,7 +390,7 @@ export function createPlaybackServiceWith(
       disposed = true;
       clearStartTimeout();
       clearResolveTimeout();
-      seekCoalescer.reset();
+      resetCoalescers();
       unsubscribeEngine();
       if (mediaOpen) stopEngine();
       hooks.onDispose?.();

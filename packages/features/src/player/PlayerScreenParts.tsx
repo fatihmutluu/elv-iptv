@@ -274,16 +274,23 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
           ]}
         >
           <Icon name="warning" size={16} color={theme.colors.liveColor} />
-          <Text
-            testID="osd-error-hint"
-            style={[
-              theme.typography.caption,
-              playerStyles.flex1,
-              { color: theme.colors.textPrimary },
-            ]}
-          >
-            {i18n.t(p.failure.hintId)}
-          </Text>
+          <View style={playerStyles.flex1}>
+            <Text
+              testID="osd-error-hint"
+              style={[theme.typography.caption, { color: theme.colors.textPrimary }]}
+            >
+              {i18n.t(p.failure.hintId)}
+            </Text>
+            {p.failure.evidence !== undefined && p.failure.evidence.trim().length > 0 ? (
+              <Text
+                testID="player-error-evidence"
+                numberOfLines={1}
+                style={[theme.typography.caption, { color: theme.colors.textMuted }]}
+              >
+                {p.failure.evidence}
+              </Text>
+            ) : null}
+          </View>
         </View>
       ) : null}
 

@@ -1,6 +1,7 @@
 import { AppProviders, AppShell, createLazyCatalog, type VideoHost } from '@elv/features';
 import { resolveLocale } from '@elv/i18n';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { attachMouseBackGuard } from './browser-back.ts';
 import { createDesktopCatalog } from './catalog/index.ts';
 import { GateScreen } from './gate/GateScreen.tsx';
 import { resolveGate } from './gate/params.ts';
@@ -78,6 +79,11 @@ function AppRoot() {
     return bridge.onChanged(() => {
       setRefreshToken((n) => n + 1);
     });
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    return attachMouseBackGuard(window);
   }, []);
 
   return (

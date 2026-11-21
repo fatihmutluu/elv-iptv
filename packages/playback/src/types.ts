@@ -66,6 +66,8 @@ export interface PlaybackService {
   pause(): void;
   /** Seeks; disarms the stall watchdog and any active VOD reconnect backoff, and updates `anchor` immediately. */
   seek(positionMs: number): void;
+  /** Sets playback speed (clamped to `[0.25, 4.0]`), coalescing across active seeks and in-flight transitions. */
+  setSpeed(rate: number): void;
   /** Selects an audio track in place and remembers the choice across recovery reloads of the current item. */
   selectAudioTrack(id: string): void;
   /** Selects a subtitle track in place (`null` turns subtitles off) and remembers the choice across reloads. */

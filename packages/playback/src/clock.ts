@@ -1,7 +1,31 @@
 import type { ClockAnchor } from './engine';
+import type { PlaybackClock } from './types';
 
 /** Default grace window (ms) behind `liveEdgeMs` that still counts as live (`#284`). */
 export const LIVE_EDGE_TOLERANCE_MS = 5_000;
+
+function readSystemMonotonicMs(): number {
+  const perf = (globalThis as { performance?: { now?: () => number } }).performance;
+  return typeof perf?.now === 'function' ? perf.now() : Date.now();
+}
+
+/**
+ * Creates a strictly non-decreasing {@link PlaybackClock} defaulting to `performance.now()`
+ * (falling back safely to `Date.now()` when absent) with a monotonic floor guard against
+ * backwards wall-clock jumps (`#159`).
+ */
+export function createMonotonicClock(nowFn?: () => number): PlaybackClock {
+  const source = nowFn ?? readSystemMonotonicMs;
+  let floor: number | undefined;
+  return {
+    now(): number {
+      const sample = source();
+      if (!Number.isFinite(sample)) return floor ?? 0;
+      if (floor === undefined || sample > floor) floor = sample;
+      return floor;
+    },
+  };
+}
 
 /** Extrapolates the playback position at `nowMs`, clamped to `[0, durationMs]`. */
 export function positionAt(anchor: ClockAnchor, nowMs: number): number {

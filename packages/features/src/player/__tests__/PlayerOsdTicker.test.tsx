@@ -217,4 +217,33 @@ describe('VodProgressBar and OsdClock gated ticking', () => {
       selected: false,
     });
   });
+
+  it('renders subtle single-line redacted diagnosis evidence when failure.evidence is non-empty (#316)', async () => {
+    const view = await render(
+      <PlayerOsd
+        {...osdProps({
+          failure: {
+            messageId: 'player.diag.serverSilent',
+            hintId: 'player.hint.unreachable',
+            evidence: 'host=edge.example.test:8080 status=503 bytes=0',
+          },
+        })}
+      />,
+    );
+    const evidence = screen.getByTestId('player-error-evidence');
+    expect(evidence).toHaveTextContent('host=edge.example.test:8080 status=503 bytes=0');
+    expect(evidence.props.numberOfLines).toBe(1);
+
+    await view.rerender(
+      <PlayerOsd
+        {...osdProps({
+          failure: {
+            messageId: 'player.error.unreachable',
+            hintId: 'player.hint.unreachable',
+          },
+        })}
+      />,
+    );
+    expect(screen.queryByTestId('player-error-evidence')).toBeNull();
+  });
 });

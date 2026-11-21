@@ -228,7 +228,7 @@ export async function spawnMpv(
   };
 
   let stream: Duplex | undefined;
-  const deadline = Date.now() + (opts.connectTimeoutMs ?? 5000);
+  const deadline = performance.now() + (opts.connectTimeoutMs ?? 5000);
   const retryMs = deps.retryDelayMs ?? 25;
   while (!stream) {
     if (opts.signal?.aborted) {
@@ -239,7 +239,7 @@ export async function spawnMpv(
     if (exitInfo) {
       throw new Error(`mpv exited with code ${exitInfo.code ?? 'null'} before its IPC was ready`);
     }
-    if (Date.now() > deadline) {
+    if (performance.now() > deadline) {
       await killAndClean();
       throw new Error('mpv IPC did not open in time');
     }

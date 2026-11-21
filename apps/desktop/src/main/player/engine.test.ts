@@ -655,3 +655,88 @@ describe('MpvEngine deferred start', () => {
     expect(states(events, 1)).toEqual(['opening', 'ended']);
   });
 });
+
+describe('MpvEngine setSpeed coalescing (#302)', () => {
+  const speedCmds = (sent: readonly (readonly unknown[])[]) =>
+    sent.filter((c) => c[0] === 'set_property' && c[1] === 'speed');
+
+  it('defers speed changes while a seek IPC is in flight and sends only the latest clamped rate', async () => {
+    const { engine, fake, events } = await setup({ scripts: { [URL_VOD]: VOD } });
+    engine.load({ attempt: 1, url: URL_VOD, headers: {}, kind: 'vod' });
+    await playing(events, 1);
+
+    fake.replyDelayMs = 40;
+    engine.seek(1, 20_000);
+    engine.setSpeed?.(1, 1.25);
+    engine.setSpeed?.(1, 1.5);
+    engine.setSpeed?.(1, 8);
+    engine.setSpeed?.(1, Number.NaN);
+
+    await vi.waitFor(() => expect(speedCmds(fake.sent)).toEqual([['set_property', 'speed', 4]]));
+    const seekIdx = fake.sent.findIndex((c) => c[0] === 'seek');
+    const speedIdx = fake.sent.findIndex((c) => c[0] === 'set_property' && c[1] === 'speed');
+    expect(seekIdx).toBeGreaterThan(-1);
+    expect(speedIdx).toBeGreaterThan(seekIdx);
+  });
+
+  it('coalesces rapid speed bursts while a prior speed IPC is in flight', async () => {
+    const { engine, fake, events } = await setup({ scripts: { [URL_VOD]: VOD } });
+    engine.load({ attempt: 1, url: URL_VOD, headers: {}, kind: 'vod' });
+    await playing(events, 1);
+
+    fake.replyDelayMs = 40;
+    engine.setSpeed?.(1, 1.25);
+    engine.setSpeed?.(1, 1.5);
+    engine.setSpeed?.(1, 2.0);
+    engine.setSpeed?.(1, 0.1);
+
+    await vi.waitFor(() => expect(speedCmds(fake.sent)).toHaveLength(2));
+    expect(speedCmds(fake.sent)).toEqual([
+      ['set_property', 'speed', 1.25],
+      ['set_property', 'speed', 0.25],
+    ]);
+  });
+
+  it('clears pending speed on load, stop, crash/detach, and release', async () => {
+    const { engine, fake, events } = await setup({ scripts: { [URL_VOD]: VOD } });
+    engine.load({ attempt: 1, url: URL_VOD, headers: {}, kind: 'vod' });
+    await playing(events, 1);
+
+    fake.replyDelayMs = 50;
+    engine.seek(1, 15_000);
+    engine.setSpeed?.(1, 2.5);
+    engine.load(live(2, URL_B));
+    fake.replyDelayMs = 0;
+    await playing(events, 2);
+    expect(speedCmds(fake.sent)).toEqual([]);
+
+    fake.replyDelayMs = 50;
+    engine.seek(2, 5_000);
+    engine.setSpeed?.(2, 1.75);
+    engine.stop(3);
+    await sleep(80);
+    expect(speedCmds(fake.sent)).toEqual([]);
+
+    fake.replyDelayMs = 0;
+    engine.load({ attempt: 4, url: URL_VOD, headers: {}, kind: 'vod' });
+    await playing(events, 4);
+    fake.replyDelayMs = 50;
+    engine.seek(4, 10_000);
+    engine.setSpeed?.(4, 3.0);
+    fake.crash();
+    await vi.waitFor(() => expect(errors(events)).toHaveLength(1));
+    await sleep(80);
+    expect(speedCmds(fake.sent)).toEqual([]);
+
+    engine.recreate(5);
+    fake.replyDelayMs = 0;
+    engine.load({ attempt: 6, url: URL_VOD, headers: {}, kind: 'vod' });
+    await playing(events, 6);
+    fake.replyDelayMs = 50;
+    engine.seek(6, 5_000);
+    engine.setSpeed?.(6, 2.0);
+    engine.release();
+    await sleep(80);
+    expect(speedCmds(fake.sent)).toEqual([]);
+  });
+});

@@ -362,6 +362,17 @@ export const enMessages = {
   'epg.later': 'Later',
   'epg.noGuideData': 'No guide schedule loaded for this window.',
   'epg.onAirBadge': 'ON AIR',
+  'crash.title': 'Something went wrong',
+  'crash.subtitle': 'The screen ran into an unexpected error. Choose how to recover.',
+  'crash.reload': 'Reload',
+  'crash.clearCache': 'Clear UI Cache',
+  'crash.switchSource': 'Switch Source',
+  'crash.code': 'Reference: {code}',
+  'player.diag.offline': 'You appear to be offline. Check your network connection.',
+  'player.diag.accountExpired': 'Your provider account has expired.',
+  'player.diag.accountDisabled': 'Your provider account is currently disabled.',
+  'player.diag.serverSilent': 'The server responded with no stream data.',
+  'player.diag.codecUnsupported': 'This stream format or codec is not supported on this device.',
 } as const;
 
 /** Valid message identifier across all supported locales. */
