@@ -528,7 +528,27 @@ describe('detail-model', () => {
       expect(
         buildDetailNavRows({
           heroActionCount: 1,
+          seasonsCount: 2,
+          episodeChunksCount: 4,
+          episodesCount: 30,
+          hasSeasonsError: false,
+          relatedCount: 4,
+        }),
+      ).toEqual([
+        { id: 'back', count: 1, orientation: 'horizontal' },
+        { id: 'hero-actions', count: 1, orientation: 'horizontal' },
+        { id: 'hero-play', count: 1, orientation: 'horizontal' },
+        { id: 'seasons', count: 2, orientation: 'horizontal' },
+        { id: 'episode-chunks', count: 4, orientation: 'horizontal' },
+        { id: 'episodes', count: 30, orientation: 'vertical' },
+        { id: 'related', count: 4, orientation: 'horizontal' },
+      ]);
+
+      expect(
+        buildDetailNavRows({
+          heroActionCount: 1,
           seasonsCount: 0,
+          episodeChunksCount: 4,
           episodesCount: 0,
           hasSeasonsError: true,
           relatedCount: 0,

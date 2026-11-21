@@ -34,6 +34,7 @@ import {
 } from './m3u-gate';
 import { entryHeaders, templated } from './m3u-headers';
 import { MAX_URLVARS_BYTES, SAMPLE_SIZE } from './m3u-templating';
+import { isPlaceholderLiveChannel } from './placeholder-filter';
 import {
   getSource,
   type HttpCacheValidator,
@@ -147,6 +148,7 @@ async function processBatch(
   entries: readonly M3uEntry[],
 ): Promise<void> {
   const vod = st.settings.vodPlaylist === true;
+  const filterPlaceholders = st.settings.includePlaceholderChannels !== true;
   const live: M3uLiveRow[] = [];
   const movies: M3uRow[] = [];
   const episodes: (M3uRow & { seriesKey: string })[] = [];
@@ -158,6 +160,11 @@ async function processBatch(
     series: [],
   };
   for (const entry of entries) {
+    const isLive = !vod && entry.kindHint !== 'movie' && entry.kindHint !== 'episode';
+    if (isLive && filterPlaceholders && isPlaceholderLiveChannel({ name: entry.name })) {
+      c.counts.skippedPlaceholders = (c.counts.skippedPlaceholders ?? 0) + 1;
+      continue;
+    }
     const template = templated(st, entry.url);
     const row: M3uRow = {
       key: m3uKey(c.sourceId, keyTemplate(template), entry.name),

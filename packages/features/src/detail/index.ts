@@ -18,3 +18,10 @@ export {
   resolveSeriesPrimaryEpisode,
   type SeriesPrimaryEpisodeSelection,
 } from './detail-model';
+export {
+  buildEpisodeChunks,
+  EPISODE_CHUNK_SIZE,
+  EPISODE_CHUNK_THRESHOLD,
+  type EpisodeChunk,
+  resolveInitialEpisodeChunkIndex,
+} from './episode-chunks';
