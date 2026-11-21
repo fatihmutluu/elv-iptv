@@ -1,6 +1,6 @@
 # ELV IPTV — UI/UX Design Philosophy & Feature Placement Rulebook
 
-> **Scope:** Binding UI/UX contract (**Cinema Quietude v2**) for Round 2 (`0.2`) and all future feature rounds (`0.3+`) across **Android TV, Fire OS, tvOS, Android Phone/Tablet, iOS/iPadOS, Windows, macOS, and Linux**.
+> **Scope:** Binding UI/UX contract (**Cinema Quietude v2**) for all current and future screens and features across **Android TV, Fire OS, tvOS, Android Phone/Tablet, iOS/iPadOS, Windows, macOS, and Linux**.
 > **Rule for Every Implementing Agent:** Whenever you build a new screen, component, or user-facing feature in `@elv/ui-kit`, `@elv/features`, `apps/tv-mobile`, or `apps/desktop`, you MUST follow this philosophy and place the feature according to Section 2. Never invent ad-hoc tabs, boxed card styles, pill-bubble category bars, oversized hero clearances on non-overlay screens, hardcoded dark colors, or extra player chrome.
 
 ---
@@ -43,7 +43,7 @@ Our **recommended default** top-level navigation is **4 primary destinations** +
 | **3. Movies** | `movies` | Top `16:9` **`Continue watching`** horizontal rail (in-progress movies), followed immediately by **`EditorialCategoryBar`** (with `Categories ▾` popover when `> 6` categories; zero `All \| Unwatched \| In progress \| Watched` pill chips) and proportional `2:3` category peek rails, each with `See all ›` drilling into a full vertical `category-grid`. |
 | **4. Series** | `series` | Identical structural grammar to Movies: top `16:9` **`Continue watching`** horizontal rail (in-progress series), followed immediately by **`EditorialCategoryBar`** (`Categories ▾` popover when `> 6`) + proportional `2:3` category peek rails + `See all ›` full `category-grid` (zero watch-status pill chips). |
 | **Utility 1 (Right)** | `search` | Instant Turkish-tolerant search across Live Channels, Movies, and Series + editorial underline scope tabs (`All`, `Live`, `Movies`, `Series`) + recent searches + constructive empty state (zero pill-bubble category chips). |
-| **Utility 2 (Right)** | `settings` | Settings hub (`Appearance`, `Sources`, `About & Licenses`) in `0.2`, evolving cleanly into a Profile avatar opening the Profile Picker with secondary entry points to **Settings** and **Sources**. |
+| **Utility 2 (Right)** | `settings` | Settings hub (`Appearance`, `Sources`, `About & Licenses`), evolving cleanly into a Profile avatar opening the Profile Picker with secondary entry points to **Settings** and **Sources** once local profiles land. |
 
 ### 2.2 Feature Placement Decision Matrix
 Before designing or coding any feature, locate its exact home here:

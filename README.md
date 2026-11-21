@@ -16,23 +16,22 @@ ELV IPTV is built openly with the community so everyone has a fast, rock-solid, 
 
 ## Status and roadmap
 
-Development follows focused version milestones tracked on the public [roadmap](https://github.com/users/fatihmutluu/projects/1) and [issues](https://github.com/fatihmutluu/elv-iptv/issues):
+Development is priority-driven and tracked openly on the public [roadmap](https://github.com/users/fatihmutluu/projects/1) and [issues](https://github.com/fatihmutluu/elv-iptv/issues) using `priority:*` (`critical`, `high`, `medium`, `low`), 12 `cluster:*` workstream labels, and Parent Epics — without rigid version-bucket gates. Releases are cut whenever ready.
 
-- **Version `0.1` (ready for testing):** A deliberately plain, ultra-fast, zero-leak live TV, movie and series player across Android TV, Fire OS, Android, Apple TV, iPhone/iPad, Windows and macOS — M3U and Xtream import into on-device SQLite, instant 100k+ item navigation, sub-second warm channel switching, strict single-connection safety on 1-connection providers, stream fault recovery, multi-audio and subtitle track selection, and English + Turkish localization. Visual styling waits for `0.2`.
-- **Version `0.2`:** Shared UI/UX design language across TV remote, touch and desktop, XMLTV electronic program guide (EPG) grid, home screen and favorites, watch progress and resume, Turkish-aware FTS5 search, essential settings, and direct-download builds on GitHub Releases.
-- **Version `0.3` and beyond (`…`):** Optional end-to-end encrypted cross-device sync (hosted or self-hosted), local profiles, catch-up, live time-shift, Stalker portals, parental controls, external subtitles and styling, remote key remapping, picture-in-picture and multi-view, official app-store launches, and Vega / Tizen / webOS targets.
+- **Working today:** Cross-platform live TV, movies and series player across Android TV, Fire OS, Android, Apple TV, iPhone/iPad, Windows and macOS — Cinema Quietude UI/UX design system, M3U and Xtream import into on-device SQLite, instant 100k+ item navigation, sub-second warm channel switching, strict single-connection safety on 1-connection providers, stream fault recovery, live Favorites stage, VOD play/pause/seek/speed, multi-audio and subtitle track selection, and English + Turkish localization.
+- **Active backlog (by priority):** XMLTV electronic program guide (EPG) grid, Home screen continue watching & favorites sync, watch progress/resume, Turkish-aware FTS5 search, in-canvas desktop video overlays, playback & codec hardening, direct-download GitHub Releases pipeline, optional end-to-end encrypted cross-device sync, local profiles, catch-up, live time-shift, Stalker portals, parental controls, external subtitles & styling, remote key remapping, picture-in-picture & multi-view, official store launches, and Vega / Tizen / webOS targets.
 
 ## Platforms
 
 | Platform | Runtime | Status |
 |---|---|---|
-| Android phone and tablet | Expo app + Media3 | `0.1` test builds ready (verified on emulator) |
-| Android TV / Google TV | Expo app (TV build) + Media3 | `0.1` test builds ready (verified on emulator) |
-| Fire TV (Fire OS 7+) | Expo app (TV build) + Media3 | `0.1` test builds ready (verified on emulator) |
-| iPhone and iPad (18+) | Expo app + AetherEngine | `0.1` ready (verified on simulator; device compile checked) |
-| Apple TV (tvOS 18+) | Expo app (TV build) + AetherEngine | `0.1` ready (verified on simulator; device compile checked) |
-| Windows 10/11 | Electron + react-native-web + LGPL mpv | `0.1` test build ready |
-| macOS | Electron + react-native-web + LGPL mpv | `0.1` test build ready |
+| Android phone and tablet | Expo app + Media3 | Working (verified on emulator) |
+| Android TV / Google TV | Expo app (TV build) + Media3 | Working (verified on emulator) |
+| Fire TV (Fire OS 7+) | Expo app (TV build) + Media3 | Working (verified on emulator) |
+| iPhone and iPad (18+) | Expo app + AetherEngine | Working (verified on simulator; device compile checked) |
+| Apple TV (tvOS 18+) | Expo app (TV build) + AetherEngine | Working (verified on simulator; device compile checked) |
+| Windows 10/11 | Electron + react-native-web + LGPL mpv | Working (test build ready) |
+| macOS | Electron + react-native-web + LGPL mpv | Working (test build ready) |
 | Linux | Electron + react-native-web + LGPL mpv | Scaffolded, best effort |
 | Fire TV (Vega OS) | Separate app sharing packages | Planned |
 | Samsung Tizen | Web-TV app from the react-native-web bundle | Planned |
@@ -55,7 +54,7 @@ Every kind of contribution moves the project forward:
 
 - **Share ideas and missing workflows:** You do not need to write code to help. Opening a [feature request](https://github.com/fatihmutluu/elv-iptv/issues/new?template=feature_request.yml) about a workflow, shortcut or detail you loved in another player — or always wished existed — helps hugely (please describe the behavior itself without naming third-party apps or pasting real playlist URLs).
 - **Test and report bugs:** Try builds on real TV boxes, sticks, phones and desktops and file [bug reports](https://github.com/fatihmutluu/elv-iptv/issues/new?template=bug_report.yml) (always strip playlist URLs and credentials).
-- **Build features and fixes:** Browse open [issues](https://github.com/fatihmutluu/elv-iptv/issues) by version milestone (`0.1`, `0.2`, `0.3`) or `help wanted` / `good first issue`, and read [CONTRIBUTING.md](CONTRIBUTING.md). The repository ships shared agent rules and skills (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/`, `.claude/`) so contributors using AI coding tools automatically follow the project's test-first workflow.
+- **Build features and fixes:** Browse open [issues](https://github.com/fatihmutluu/elv-iptv/issues) by priority (`priority:critical`, `priority:high`, `priority:medium`, `priority:low`), workstream cluster (`cluster:*`), or `help wanted` / `good first issue`, and read [CONTRIBUTING.md](CONTRIBUTING.md). The repository ships shared agent rules and skills (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.agents/`, `.claude/`) so contributors using AI coding tools automatically follow the project's test-first workflow.
 
 Contributions require signing the [CLA](CLA.md) on your first pull request. Please follow the [Code of Conduct](CODE_OF_CONDUCT.md) and report security vulnerabilities privately as described in [SECURITY.md](SECURITY.md). Full documentation is indexed in [docs/INDEX.md](docs/INDEX.md).
 
