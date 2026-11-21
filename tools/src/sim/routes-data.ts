@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -27,6 +28,84 @@ const PROFILE_ACCOUNT: Record<ProfileName, string> = {
   corpus: 'corpus',
 };
 const LOGO_COUNT = 16;
+const DAY_MS = 86_400_000;
+const PLAYLIST_EPOCH_MS = Date.UTC(2025, 0, 1);
+
+interface CacheValidator {
+  etag: string;
+  lastModified: string;
+  lastModifiedMs: number;
+}
+
+function makeValidator(
+  keyParts: readonly (string | number)[],
+  lastModifiedMs: number,
+  weak = false,
+): CacheValidator {
+  const digest = createHash('sha256').update(keyParts.join('|')).digest('hex').slice(0, 16);
+  const roundedMs = Math.floor(lastModifiedMs / 1000) * 1000;
+  return {
+    etag: `${weak ? 'W/' : ''}"elv-${digest}"`,
+    lastModified: new Date(roundedMs).toUTCString(),
+    lastModifiedMs: roundedMs,
+  };
+}
+
+function headerText(value: string | string[] | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return Array.isArray(value) ? value.join(', ') : value;
+}
+
+function stripWeak(tag: string): string {
+  return tag.startsWith('W/') ? tag.slice(2) : tag;
+}
+
+function parseEntityTags(header: string): string[] {
+  const tags: string[] = [];
+  let i = 0;
+  const len = header.length;
+  while (i < len) {
+    while (i < len && (header[i] === ' ' || header[i] === '\t' || header[i] === ',')) i++;
+    if (i >= len) break;
+    const start = i;
+    let inQuotes = false;
+    while (i < len) {
+      const ch = header[i];
+      if (ch === '"') inQuotes = !inQuotes;
+      else if (ch === ',' && !inQuotes) break;
+      i++;
+    }
+    const token = header.slice(start, i).trim();
+    if (token !== '') tags.push(token);
+  }
+  return tags;
+}
+
+function isNotModified(req: IncomingMessage, validator: CacheValidator): boolean {
+  const ifNoneMatch = headerText(req.headers['if-none-match']);
+  if (ifNoneMatch !== undefined) {
+    const target = stripWeak(validator.etag);
+    for (const token of parseEntityTags(ifNoneMatch)) {
+      if (token === '*' || stripWeak(token) === target) return true;
+    }
+    return false;
+  }
+  const ifModifiedSince = headerText(req.headers['if-modified-since']);
+  if (ifModifiedSince === undefined) return false;
+  const imsMs = Date.parse(ifModifiedSince);
+  if (Number.isNaN(imsMs)) return false;
+  return Math.floor(validator.lastModifiedMs / 1000) <= Math.floor(imsMs / 1000);
+}
+
+function sendNotModified(res: ServerResponse, validator: CacheValidator, varyGzip: boolean): void {
+  const headers: Record<string, string> = {
+    etag: validator.etag,
+    'last-modified': validator.lastModified,
+  };
+  if (varyGzip) headers.vary = 'accept-encoding';
+  res.writeHead(304, headers);
+  res.end();
+}
 
 /** Sends a complete small response. */
 export function sendText(res: ServerResponse, status: number, type: string, body = ''): void {
@@ -42,8 +121,13 @@ async function sendChunks(
   chunks: Iterable<string>,
   gzip: boolean,
   encoded: boolean,
+  validator?: CacheValidator,
 ): Promise<void> {
   const headers: Record<string, string> = { 'content-type': type };
+  if (validator) {
+    headers.etag = validator.etag;
+    headers['last-modified'] = validator.lastModified;
+  }
   if (gzip && encoded) headers['content-encoding'] = 'gzip';
   if (gzip) headers.vary = 'accept-encoding';
   res.writeHead(status, headers);
@@ -66,11 +150,19 @@ async function playlist(
   variant: M3uVariant,
   output: 'ts' | 'm3u8',
 ): Promise<void> {
+  const validator = makeValidator(
+    [ctx.seed, 'playlist', account.profile, account.username, variant, output],
+    PLAYLIST_EPOCH_MS + ((ctx.seed >>> 0) % 365) * DAY_MS,
+  );
+  if (isNotModified(req, validator)) {
+    sendNotModified(res, validator, false);
+    return;
+  }
   const baseUrl = baseUrlOf(req, ctx);
   const catalog = buildCatalog(account.profile, ctx.seed);
   const guideUrl = `${baseUrl}/guides/${account.profile}.xml`;
   const chunks = m3uChunks(catalog, { baseUrl, account, output, guideUrl, variant });
-  await sendChunks(res, 200, 'audio/x-mpegurl', chunks, false, false);
+  await sendChunks(res, 200, 'audio/x-mpegurl', chunks, false, false, validator);
 }
 
 async function guide(
@@ -81,16 +173,23 @@ async function guide(
   asFile: boolean,
   style: GuideStyle = 'plain',
 ): Promise<void> {
-  const accepts = /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''));
-  const chunks = xmltvChunks(
-    buildCatalog(profile, ctx.seed),
-    ctx.now(),
-    baseUrlOf(req, ctx),
-    style,
+  const now = ctx.now();
+  const dayStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const dayBucket = new Date(dayStartMs).toISOString().slice(0, 10);
+  const validator = makeValidator(
+    [ctx.seed, 'guide', profile, style, asFile ? 'gz' : 'xml', dayBucket],
+    dayStartMs,
+    !asFile,
   );
-  if (asFile) return sendChunks(res, 200, 'application/gzip', chunks, true, false);
+  const accepts = /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''));
+  if (isNotModified(req, validator)) {
+    sendNotModified(res, validator, asFile || accepts);
+    return;
+  }
+  const chunks = xmltvChunks(buildCatalog(profile, ctx.seed), now, baseUrlOf(req, ctx), style);
+  if (asFile) return sendChunks(res, 200, 'application/gzip', chunks, true, false, validator);
   const type = 'application/xml; charset=utf-8';
-  return sendChunks(res, 200, type, chunks, accepts, true);
+  return sendChunks(res, 200, type, chunks, accepts, true, validator);
 }
 
 function setAccount(meta: RequestMeta, username: string | null): void {

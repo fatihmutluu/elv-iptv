@@ -227,6 +227,94 @@ describe('watch progress queries & mutations', () => {
     ]);
   });
 
+  it('deduplicates multiple in-progress episodes of the same series while keeping movies and other series separate', async () => {
+    const { db } = await setupDb();
+
+    // Series A: S1E1 at t=100, S1E2 at t=200 -> only S1E2 should surface
+    await saveWatchProgress(
+      db,
+      {
+        sourceId: 's1',
+        itemKey: 'ep:a:1',
+        kind: 'episode',
+        title: 'Northern Signal',
+        subtitle: 'S1 E1',
+        seriesKey: 'ser:a',
+        season: 1,
+        episode: 1,
+        positionMs: 30_000,
+        durationMs: 100_000,
+      },
+      () => 100,
+    );
+    await saveWatchProgress(
+      db,
+      {
+        sourceId: 's1',
+        itemKey: 'ep:a:2',
+        kind: 'episode',
+        title: 'Northern Signal',
+        subtitle: 'S1 E2',
+        seriesKey: 'ser:a',
+        season: 1,
+        episode: 2,
+        positionMs: 40_000,
+        durationMs: 100_000,
+      },
+      () => 200,
+    );
+    // Two standalone movies (seriesKey: null) must both remain
+    await saveWatchProgress(
+      db,
+      {
+        sourceId: 's1',
+        itemKey: 'mov:1',
+        kind: 'movie',
+        title: 'Aurora Dawn',
+        positionMs: 25_000,
+        durationMs: 100_000,
+      },
+      () => 150,
+    );
+    await saveWatchProgress(
+      db,
+      {
+        sourceId: 's1',
+        itemKey: 'mov:2',
+        kind: 'movie',
+        title: 'Coastal Wind',
+        positionMs: 20_000,
+        durationMs: 100_000,
+      },
+      () => 250,
+    );
+    // Second series B must appear independently alongside Series A
+    await saveWatchProgress(
+      db,
+      {
+        sourceId: 's1',
+        itemKey: 'ep:b:1',
+        kind: 'episode',
+        title: 'Harbor Watch',
+        subtitle: 'S1 E1',
+        seriesKey: 'ser:b',
+        season: 1,
+        episode: 1,
+        positionMs: 15_000,
+        durationMs: 100_000,
+      },
+      () => 180,
+    );
+
+    const list = await listContinueWatching(db, 10);
+    expect(list.map((r) => r.itemKey)).toEqual(['mov:2', 'ep:a:2', 'ep:b:1', 'mov:1']);
+
+    // Marking S1E2 watched surfaces S1E1 because S1E1 is still unwatched and >= 10s
+    await setItemWatched(db, 'ep:a:2', true, () => 300);
+    const afterWatched = await listContinueWatching(db, 10);
+    expect(afterWatched.map((r) => r.itemKey)).toEqual(['mov:2', 'ep:b:1', 'mov:1', 'ep:a:1']);
+  });
+
   it('supports setItemWatched, listProgressByKeys (bounded to 200), and clearWatchProgress', async () => {
     const { db } = await setupDb();
     let now = 500;
@@ -541,5 +629,59 @@ describe('CatalogService user-state integration', () => {
     expect((await service.setWatched?.('m:src2:9', true))?.ok).toBe(true);
     expect((await service.clearProgress?.('m:src2:9'))?.ok).toBe(true);
     expect(await service.getProgress?.('m:src2:9')).toBeNull();
+  });
+
+  it('does not merge unrelated items when series_key is empty or whitespace in saveWatchProgress or legacy rows', async () => {
+    const { db } = await setupDb();
+    const r1 = await saveWatchProgress(
+      db,
+      {
+        sourceId: 's1',
+        itemKey: 'x:s1:movie:1',
+        kind: 'movie',
+        title: 'Blank Series 1',
+        seriesKey: '',
+        positionMs: 25_000,
+        durationMs: 100_000,
+      },
+      () => 1_000,
+    );
+    const r2 = await saveWatchProgress(
+      db,
+      {
+        sourceId: 's1',
+        itemKey: 'x:s1:movie:2',
+        kind: 'movie',
+        title: 'Blank Series 2',
+        seriesKey: '   ',
+        positionMs: 30_000,
+        durationMs: 100_000,
+      },
+      () => 2_000,
+    );
+    expect(r1.ok && r1.value.seriesKey).toBeNull();
+    expect(r2.ok && r2.value.seriesKey).toBeNull();
+
+    // Also insert two legacy raw SQLite rows with literal empty-string series_key = ''
+    await db.run(
+      `INSERT INTO watch_progress
+       (profile_id, source_id, item_key, kind, title, subtitle, logo, series_key, season, episode, position_ms, duration_ms, watched, updated_at)
+       VALUES (?, ?, ?, ?, ?, NULL, NULL, '', NULL, NULL, ?, ?, 0, ?)`,
+      ['default', 's1', 'x:s1:movie:legacy1', 'movie', 'Legacy 1', 20_000, 100_000, 3_000],
+    );
+    await db.run(
+      `INSERT INTO watch_progress
+       (profile_id, source_id, item_key, kind, title, subtitle, logo, series_key, season, episode, position_ms, duration_ms, watched, updated_at)
+       VALUES (?, ?, ?, ?, ?, NULL, NULL, '', NULL, NULL, ?, ?, 0, ?)`,
+      ['default', 's1', 'x:s1:movie:legacy2', 'movie', 'Legacy 2', 20_000, 100_000, 4_000],
+    );
+
+    const cw = await listContinueWatching(db, 10);
+    expect(cw.map((r) => r.itemKey)).toEqual([
+      'x:s1:movie:legacy2',
+      'x:s1:movie:legacy1',
+      'x:s1:movie:2',
+      'x:s1:movie:1',
+    ]);
   });
 });

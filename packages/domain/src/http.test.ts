@@ -83,6 +83,21 @@ describe('createFetchHttpClient', () => {
     expect(await collect(okOf(await client.get('http://h/x')).body)).toEqual([]);
   });
 
+  it('returns ok with headers and an empty body for HTTP 304 Not Modified', async () => {
+    const client = createFetchHttpClient(async () => ({
+      status: 304,
+      headers: headers({ ETag: '"v1"', 'Last-Modified': 'Mon, 15 Jun 2026 00:00:00 GMT' }),
+      body: null,
+    }));
+    const res = okOf(await client.get('http://h/x', { headers: { 'if-none-match': '"v1"' } }));
+    expect(res.status).toBe(304);
+    expect(res.headers).toEqual({
+      etag: '"v1"',
+      'last-modified': 'Mon, 15 Jun 2026 00:00:00 GMT',
+    });
+    expect(await collect(res.body)).toEqual([]);
+  });
+
   it('works with a real WHATWG Response body', async () => {
     const client = createFetchHttpClient(async () => new Response('hello'));
     expect((await collect(okOf(await client.get('http://h/x')).body)).join('')).toBe('hello');

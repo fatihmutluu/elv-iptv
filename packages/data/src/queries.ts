@@ -92,11 +92,17 @@ export async function queryCategories(
   kind: BrowseKind,
 ): Promise<CategoryRow[]> {
   const rows = await db.all<{ provider_id: string; name: string; position: number; n: number }>(
-    `SELECT c.provider_id, c.name, c.position,
-            (SELECT COUNT(*) FROM placements p
-              WHERE p.source_id = c.source_id AND p.kind = c.kind AND p.category_id = c.provider_id) AS n
-       FROM categories c WHERE c.source_id = ? AND c.kind = ? ORDER BY c.position, c.provider_id`,
-    [sourceId, kind],
+    `SELECT c.provider_id, c.name, c.position, COALESCE(p.n, 0) AS n
+       FROM categories c
+       LEFT JOIN (
+         SELECT category_id, COUNT(*) AS n
+           FROM placements
+          WHERE source_id = ? AND kind = ?
+          GROUP BY category_id
+       ) p ON p.category_id = c.provider_id
+      WHERE c.source_id = ? AND c.kind = ?
+      ORDER BY c.position, c.provider_id`,
+    [sourceId, kind, sourceId, kind],
   );
   return rows.map((r) => ({
     id: categoryId(sourceId, kind, r.provider_id),

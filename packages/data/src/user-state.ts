@@ -110,8 +110,9 @@ interface RawFavoriteRow {
   added_at: number;
 }
 
-const PROGRESS_SELECT =
-  'SELECT profile_id, source_id, item_key, kind, title, subtitle, logo, series_key, season, episode, position_ms, duration_ms, watched, updated_at FROM watch_progress';
+const PROGRESS_COLS =
+  'profile_id, source_id, item_key, kind, title, subtitle, logo, series_key, season, episode, position_ms, duration_ms, watched, updated_at';
+const PROGRESS_SELECT = `SELECT ${PROGRESS_COLS} FROM watch_progress`;
 const FAVORITE_SELECT =
   'SELECT profile_id, source_id, item_key, kind, title, logo, year, rating, added_at FROM favorites';
 
@@ -215,7 +216,7 @@ export async function saveWatchProgress(
     title: input.title,
     subtitle: input.subtitle ?? null,
     logo: await resolveSafeStorageLogo(db, input),
-    seriesKey: input.seriesKey ?? null,
+    seriesKey: input.seriesKey?.trim() || null,
     season: optInt(input.season),
     episode: optInt(input.episode),
     positionMs,
@@ -274,7 +275,7 @@ export async function getWatchProgress(
   return rows[0] === undefined ? null : mapProgressRow(rows[0]);
 }
 
-/** Lists in-progress, unwatched items at or above {@link MIN_RESUME_POSITION_MS}, most recent first. */
+/** Lists in-progress, unwatched items at or above {@link MIN_RESUME_POSITION_MS}, deduplicated per series, most recent first. */
 export async function listContinueWatching(
   db: SqlDriver,
   limit = 24,
@@ -283,7 +284,10 @@ export async function listContinueWatching(
   const clamped = clampLimit(limit, 24);
   if (clamped === 0) return [];
   const rows = await db.all<RawProgressRow>(
-    `${PROGRESS_SELECT} WHERE profile_id = ? AND watched = 0 AND position_ms >= ? ORDER BY updated_at DESC LIMIT ?`,
+    `SELECT ${PROGRESS_COLS} FROM (
+       SELECT ${PROGRESS_COLS}, ROW_NUMBER() OVER (PARTITION BY COALESCE(NULLIF(series_key, ''), item_key) ORDER BY updated_at DESC, item_key ASC) AS rn
+         FROM watch_progress WHERE profile_id = ? AND watched = 0 AND position_ms >= ?
+     ) WHERE rn = 1 ORDER BY updated_at DESC, item_key ASC LIMIT ?`,
     [normalizeProfileId(profileId), MIN_RESUME_POSITION_MS, clamped],
   );
   return rows.map(mapProgressRow);

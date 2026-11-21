@@ -174,9 +174,11 @@ function* compatSpecials(now: Date): Generator<string> {
 
 /** Malformed trailing programmes: one without `stop`, one with an unclosed `<title>`. */
 function* compatBroken(now: Date): Generator<string> {
-  const start = xmltvTime(new Date(Math.floor(now.getTime() / DAY) * DAY + 6 * HOUR), -300);
+  const startMs = Math.floor(now.getTime() / DAY) * DAY + 6 * HOUR;
+  const start = xmltvTime(new Date(startMs), -300);
+  const stop = xmltvTime(new Date(startMs + HOUR), -300);
   yield `<programme start="${start}" channel="${UNKNOWN}"><title>No Stop</title><desc>Missing stop.</desc></programme>\n`;
-  yield `<programme start="${start}" stop="${start}" channel="${UNKNOWN}"><title>Unclosed title</programme>\n`;
+  yield `<programme start="${start}" stop="${stop}" channel="${UNKNOWN}"><title>Unclosed title</programme>\n`;
 }
 
 function* documentPieces(

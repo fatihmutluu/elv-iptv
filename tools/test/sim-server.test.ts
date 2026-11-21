@@ -454,3 +454,145 @@ describe('startup', () => {
     expect(Math.abs(body.server_info.timestamp_now - CLOCK.getTime() / 1000)).toBeLessThan(30);
   });
 });
+
+describe('conditional caching (ETag / Last-Modified / 304)', () => {
+  it('returns ETag and Last-Modified on guides and playlists and answers 304 on matching If-None-Match', async () => {
+    const handle = await sim();
+    const routes = [
+      `/xmltv.php?${creds}`,
+      '/guides/small.xml',
+      '/guides/small.xml.gz',
+      `/get.php?${creds}&type=m3u_plus&output=ts`,
+      '/playlists/small.m3u',
+      '/playlists/small.m3u8',
+    ];
+    for (const route of routes) {
+      handle.clear();
+      const first = await fetch(`${handle.url}${route}`);
+      expect(first.status, route).toBe(200);
+      const etag = first.headers.get('etag');
+      const lastModified = first.headers.get('last-modified');
+      expect(etag, `${route} etag`).toMatch(/^(?:W\/)?"[^"]+"$/);
+      expect(lastModified, `${route} last-modified`).toMatch(/GMT$/);
+      const firstBody = await first.arrayBuffer();
+      expect(firstBody.byteLength, route).toBeGreaterThan(0);
+
+      const second = await fetch(`${handle.url}${route}`, {
+        headers: { 'if-none-match': etag as string },
+      });
+      expect(second.status, `${route} 304`).toBe(304);
+      expect(second.headers.get('etag')).toBe(etag);
+      expect(second.headers.get('last-modified')).toBe(lastModified);
+      expect(second.headers.get('content-type')).toBeNull();
+      expect((await second.arrayBuffer()).byteLength).toBe(0);
+
+      const logged = handle.requests().at(-1);
+      expect(logged, `${route} log`).toMatchObject({ status: 304, bytes: 0 });
+    }
+  });
+
+  it('matches weak W/ prefix, comma-separated tag lists, and wildcard * in If-None-Match', async () => {
+    const handle = await sim();
+    const first = await fetch(`${handle.url}/guides/small.xml`);
+    const etag = first.headers.get('etag') as string;
+    await first.text();
+    const bare = etag.startsWith('W/') ? etag.slice(2) : etag;
+
+    for (const header of [
+      `W/${bare}`,
+      `"other-1", ${etag}, "other-2"`,
+      `W/"nope", W/${bare}`,
+      '*',
+    ]) {
+      const res = await fetch(`${handle.url}/guides/small.xml`, {
+        headers: { 'if-none-match': header },
+      });
+      expect(res.status, header).toBe(304);
+      expect(await res.text()).toBe('');
+    }
+  });
+
+  it('answers 304 on matching If-Modified-Since and 200 when older', async () => {
+    const handle = await sim();
+    const first = await fetch(`${handle.url}/playlists/small.m3u`);
+    const lastModified = first.headers.get('last-modified') as string;
+    await first.text();
+
+    const notModified = await fetch(`${handle.url}/playlists/small.m3u`, {
+      headers: { 'if-modified-since': lastModified },
+    });
+    expect(notModified.status).toBe(304);
+    expect(await notModified.text()).toBe('');
+    expect(handle.requests().at(-1)).toMatchObject({ status: 304, bytes: 0 });
+
+    const older = await fetch(`${handle.url}/playlists/small.m3u`, {
+      headers: { 'if-modified-since': 'Wed, 01 Jan 2020 00:00:00 GMT' },
+    });
+    expect(older.status).toBe(200);
+    expect((await older.text()).startsWith('#EXTM3U')).toBe(true);
+  });
+
+  it('gives If-None-Match precedence over If-Modified-Since per RFC 9110', async () => {
+    const handle = await sim();
+    const first = await fetch(`${handle.url}/guides/small.xml`);
+    const lastModified = first.headers.get('last-modified') as string;
+    const body = await first.text();
+
+    const res = await fetch(`${handle.url}/guides/small.xml`, {
+      headers: {
+        'if-none-match': '"definitely-mismatched"',
+        'if-modified-since': lastModified,
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe(body);
+  });
+
+  it('enforces auth 401 and fault injection before 304', async () => {
+    const handle = await sim();
+    const unauthXmltv = await fetch(`${handle.url}/xmltv.php?${wrong}`, {
+      headers: { 'if-none-match': '*' },
+    });
+    expect(unauthXmltv.status).toBe(401);
+
+    const unauthGet = await fetch(`${handle.url}/get.php?${wrong}`, {
+      headers: { 'if-none-match': '*' },
+    });
+    expect(unauthGet.status).toBe(401);
+
+    const faulted = await fetch(`${handle.url}/guides/small.xml?fault=status=503`, {
+      headers: { 'if-none-match': '*' },
+    });
+    expect(faulted.status).toBe(503);
+  });
+
+  it('rotates guide ETag when UTC clock day or seed changes and playlist ETag when seed changes', async () => {
+    const day1 = await startSim({ port: 0, clock: new Date('2026-01-01T12:00:00Z'), seed: 1 });
+    const day2 = await startSim({ port: 0, clock: new Date('2026-01-02T12:00:00Z'), seed: 1 });
+    const seed2 = await startSim({ port: 0, clock: new Date('2026-01-01T12:00:00Z'), seed: 2 });
+    open.push(day1, day2, seed2);
+
+    const g1 = await fetch(`${day1.url}/guides/small.xml`);
+    const g2 = await fetch(`${day2.url}/guides/small.xml`);
+    const gSeed2 = await fetch(`${seed2.url}/guides/small.xml`);
+    await Promise.all([g1.text(), g2.text(), gSeed2.text()]);
+    expect(g1.headers.get('etag')).not.toBe(g2.headers.get('etag'));
+    expect(g1.headers.get('etag')).not.toBe(gSeed2.headers.get('etag'));
+
+    const p1 = await fetch(`${day1.url}/playlists/small.m3u`);
+    const pDay2 = await fetch(`${day2.url}/playlists/small.m3u`);
+    const pSeed2 = await fetch(`${seed2.url}/playlists/small.m3u`);
+    await Promise.all([p1.text(), pDay2.text(), pSeed2.text()]);
+    expect(p1.headers.get('etag')).toBe(pDay2.headers.get('etag'));
+    expect(p1.headers.get('etag')).not.toBe(pSeed2.headers.get('etag'));
+  });
+
+  it('emits weak ETags on gzip-negotiated XML guide routes per RFC 9110', async () => {
+    const handle = await sim();
+    for (const route of [`/xmltv.php?${creds}`, '/guides/small.xml']) {
+      const res = await fetch(`${handle.url}${route}`);
+      expect(res.headers.get('etag'), route).toMatch(/^W\/"elv-[0-9a-f]+"$/);
+      await res.text();
+    }
+  });
+});

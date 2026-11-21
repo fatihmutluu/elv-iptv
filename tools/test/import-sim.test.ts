@@ -115,9 +115,49 @@ describe('demo as an Xtream source', () => {
     expect(await count(e.db, 'programmes_next')).toBe(0);
     expect(await count(e.db, 'programmes WHERE stop <= start')).toBe(0);
   });
+
+  it('reuses cached validators to answer 304 with zero body bytes on guide refresh', async () => {
+    const e = await env();
+    const id = await xtreamSource(e, sim, 'demo');
+    must(await importCatalog(id, e.deps));
+    sim.clear();
+    const first = must(await importGuide(id, e.deps, { now: NOW }));
+    expect(first.unchanged).toBeUndefined();
+    const beforeCount = await count(e.db, 'programmes');
+    expect(beforeCount).toBeGreaterThan(0);
+
+    const second = must(await importGuide(id, e.deps, { now: NOW }));
+    expect(second.unchanged).toBe(true);
+    expect(await count(e.db, 'programmes')).toBe(beforeCount);
+
+    const xmltvCalls = sim.requests().filter((r) => r.path === '/xmltv.php');
+    expect(xmltvCalls).toHaveLength(2);
+    expect(xmltvCalls[0]).toMatchObject({ status: 200 });
+    expect(xmltvCalls[0]?.bytes).toBeGreaterThan(0);
+    expect(xmltvCalls[1]).toMatchObject({ status: 304, bytes: 0 });
+  });
 });
 
 describe('demo as an M3U source', () => {
+  it('reuses cached validators to answer 304 with zero body bytes on M3U playlist refresh', async () => {
+    const e = await env();
+    const id = await m3uSource(e, sim, 'demo');
+    sim.clear();
+    const first = must(await importCatalog(id, e.deps));
+    expect(first.unchanged).toBeUndefined();
+    const liveCount = await count(e.db, 'live');
+    expect(liveCount).toBe(small.live.length);
+
+    const second = must(await importCatalog(id, e.deps));
+    expect(second.unchanged).toBe(true);
+    expect(await count(e.db, 'live')).toBe(liveCount);
+
+    const getCalls = sim.requests().filter((r) => r.path === '/get.php');
+    expect(getCalls).toHaveLength(2);
+    expect(getCalls[0]).toMatchObject({ status: 200 });
+    expect(getCalls[0]?.bytes).toBeGreaterThan(0);
+    expect(getCalls[1]).toMatchObject({ status: 304, bytes: 0 });
+  });
   it('imports the playlist with credentials as template placeholders', async () => {
     const e = await env();
     const id = await m3uSource(e, sim, 'demo');

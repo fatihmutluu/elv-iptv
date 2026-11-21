@@ -56,10 +56,12 @@ export interface RunCtx {
   warningCodes: string[];
   /** Tables whose stale rows a guide run keeps; `beforeCleanup` adds to it when it keeps the previous guide. */
   keepTables: Set<string>;
+  /** Set by `execute` when HTTP 304 Not Modified kept all previously stored rows without rewriting. */
+  unchanged: boolean;
 }
 
 /** Adds a code-only warning to the run summary. */
-export function warn(c: RunCtx, code: string): void {
+export function warn(c: Pick<RunCtx, 'warnings' | 'warningCodes'>, code: string): void {
   c.warningCodes.push(code);
   c.warnings += 1;
 }
@@ -133,13 +135,18 @@ export async function performRun(
     warnings: 0,
     warningCodes: [],
     keepTables: new Set(),
+    unchanged: false,
   };
   let removed: number;
   let gone = false;
   try {
     await steps.execute(c);
     checkAbort(c);
-    if (steps.requireItems !== false && ITEM_COUNTS.every((k) => (counts[k] ?? 0) === 0)) {
+    if (
+      !c.unchanged &&
+      steps.requireItems !== false &&
+      ITEM_COUNTS.every((k) => (counts[k] ?? 0) === 0)
+    ) {
       throw new Stop(elvError('source-format', 'empty-source'));
     }
     await steps.beforeCommit?.(c);
@@ -158,7 +165,9 @@ export async function performRun(
       }
       await steps.beforeCleanup?.(tx, c);
       let stale: Record<string, number>;
-      if ((steps.kind ?? 'catalog') === 'catalog') {
+      if (c.unchanged) {
+        stale = {};
+      } else if ((steps.kind ?? 'catalog') === 'catalog') {
         const keep = await emptiedKinds(tx, source.id, runId, counts);
         for (const kind of keep) warn(c, `catalog/kind-empty-${kind}`);
         stale = await removeStaleCatalog(tx, source.id, runId, keep);
@@ -213,5 +222,6 @@ export async function performRun(
     warnings: c.warnings,
     warningCodes: c.warningCodes,
     durationMs: deps.clock() - started,
+    ...(c.unchanged ? { unchanged: true } : {}),
   });
 }

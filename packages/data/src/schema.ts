@@ -271,4 +271,7 @@ CREATE TRIGGER series_au AFTER UPDATE OF name_fold ON series WHEN old.name_fold 
 END;
 INSERT INTO series_fts(series_fts) VALUES ('rebuild');
 `,
+  `
+CREATE INDEX IF NOT EXISTS idx_programmes_source_start_stop ON programmes (source_id, start, stop);
+`,
 ];

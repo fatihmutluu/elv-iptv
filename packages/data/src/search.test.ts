@@ -36,13 +36,13 @@ describe('buildFtsQuery', () => {
     );
   });
 
-  it('caps tokens at MAX_SEARCH_TOKENS and neutralizes FTS5 operators', () => {
+  it('caps tokens at MAX_SEARCH_TOKENS (8) and neutralizes FTS5 operators', () => {
     expect(DEFAULT_SEARCH_LIMIT).toBe(40);
     expect(MAX_SEARCH_LIMIT).toBe(60);
-    expect(MAX_SEARCH_TOKENS).toBe(12);
+    expect(MAX_SEARCH_TOKENS).toBe(8);
 
-    const twentyWords = Array.from({ length: 20 }, (_, i) => `tok${i}`).join(' ');
-    const capped = buildFtsQuery(twentyWords);
+    const fifteenWords = Array.from({ length: 15 }, (_, i) => `tok${i}`).join(' ');
+    const capped = buildFtsQuery(fifteenWords);
     expect(capped).toBe(
       Array.from({ length: MAX_SEARCH_TOKENS }, (_, i) => `"tok${i}"*`).join(' AND '),
     );
@@ -330,6 +330,66 @@ describe('querySearch', () => {
       expect(await service.search?.('gunes')).toEqual({ live: [], movies: [], series: [] });
 
       await service.close();
+    } finally {
+      close();
+    }
+  });
+
+  it('ranks exact matches first, prefix matches second, and token matches third per section (English & Turkish)', async () => {
+    const { db, close } = testDb();
+    try {
+      await openCatalog(db);
+      await seedSource(db, 's1');
+      // Insert non-prefix before prefix before exact so insertion order cannot accidentally pass
+      await db.run(
+        `INSERT INTO movies (source_id, key, name, name_fold, run_id) VALUES
+           ('s1', 'x:s1:movie:1', 'Beyond Aurora', ?, 1),
+           ('s1', 'x:s1:movie:2', 'Alpha Aurora', ?, 1),
+           ('s1', 'x:s1:movie:3', 'Aurora Dawn', ?, 1),
+           ('s1', 'x:s1:movie:4', 'Aurora', ?, 1)`,
+        [
+          foldText('Beyond Aurora'),
+          foldText('Alpha Aurora'),
+          foldText('Aurora Dawn'),
+          foldText('Aurora'),
+        ],
+      );
+      await db.run(
+        `INSERT INTO live (source_id, key, name, name_fold, run_id) VALUES
+           ('s1', 'x:s1:live:1', 'Gece İstanbul', ?, 1),
+           ('s1', 'x:s1:live:2', 'İstanbul Hikayesi', ?, 1),
+           ('s1', 'x:s1:live:3', 'İstanbul', ?, 1)`,
+        [foldText('Gece İstanbul'), foldText('İstanbul Hikayesi'), foldText('İstanbul')],
+      );
+      await db.run(
+        `INSERT INTO series (source_id, key, name, name_fold, run_id) VALUES
+           ('s1', 'x:s1:series:1', 'Yeni Şampiyon', ?, 1),
+           ('s1', 'x:s1:series:2', 'Şampiyonlar Ligi', ?, 1),
+           ('s1', 'x:s1:series:3', 'Şampiyon', ?, 1)`,
+        [foldText('Yeni Şampiyon'), foldText('Şampiyonlar Ligi'), foldText('Şampiyon')],
+      );
+
+      const en = await querySearch(db, 'Aurora', { scope: 'movie' });
+      expect(en.movies.map((m) => m.name)).toEqual([
+        'Aurora',
+        'Aurora Dawn',
+        'Alpha Aurora',
+        'Beyond Aurora',
+      ]);
+
+      const trLive = await querySearch(db, 'ıstanbul', { scope: 'live' });
+      expect(trLive.live.map((c) => c.name)).toEqual([
+        'İstanbul',
+        'İstanbul Hikayesi',
+        'Gece İstanbul',
+      ]);
+
+      const trSeries = await querySearch(db, 'sampiyon', { scope: 'series' });
+      expect(trSeries.series.map((s) => s.name)).toEqual([
+        'Şampiyon',
+        'Şampiyonlar Ligi',
+        'Yeni Şampiyon',
+      ]);
     } finally {
       close();
     }

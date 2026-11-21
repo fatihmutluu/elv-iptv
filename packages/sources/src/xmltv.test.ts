@@ -94,6 +94,26 @@ describe('scanXmltv content', () => {
     const r = await expectSameEverywhere(text);
     expect(r.channels.map((c) => c.id)).toEqual(['z']);
   });
+
+  it('rejects zero-length and inverted programme intervals while keeping valid and open-ended ones', async () => {
+    const text = guide(
+      `<programme start="20260101000000 +0000" stop="20260101010000 +0000" channel="c"><title>Valid</title></programme>\n` +
+        `<programme start="20260101010000 +0000" stop="20260101010000 +0000" channel="c"><title>Zero Length</title></programme>\n` +
+        `<programme start="20260101030000 +0000" stop="20260101020000 +0000" channel="c"><title>Inverted</title></programme>\n` +
+        `<programme start="20260101040000 +0000" stop="20260101050000 +0100" channel="c"><title>Offset Equal</title></programme>\n` +
+        `<programme start="20260101050000 +0000" channel="c"><title>Open Ended</title></programme>`,
+    );
+    const r = await expectSameEverywhere(text);
+    expect(r.programmes.map((p) => p.title)).toEqual(['Valid', 'Open Ended']);
+    expect(r.programmes[0]?.stop).toBe(D('0100'));
+    expect(r.programmes[1]?.stop).toBeUndefined();
+    expect(r.stats?.skipped).toBe(3);
+    expect(r.stats?.warnings.map((w) => w.code)).toEqual([
+      'programme-bad-time',
+      'programme-bad-time',
+      'programme-bad-time',
+    ]);
+  });
 });
 
 describe('scanXmltv filters', () => {

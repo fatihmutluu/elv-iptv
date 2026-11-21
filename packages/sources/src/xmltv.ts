@@ -189,7 +189,11 @@ class XmltvScanner {
     }
     const start = parseXmltvTime(startText);
     const stop = stopText === undefined ? undefined : parseXmltvTime(stopText);
-    if (start === undefined || (stopText !== undefined && stop === undefined)) {
+    if (
+      start === undefined ||
+      (stopText !== undefined && stop === undefined) ||
+      (stop !== undefined && stop <= start)
+    ) {
       this.fail(bytes, lt, 'programme-bad-time');
       return;
     }
