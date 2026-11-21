@@ -157,13 +157,20 @@ describe('runCatalogPrewarm', () => {
     expect(uiCache3.getLive()).toBeNull();
   });
 
-  it('is a no-op when sources is empty', async () => {
+  it('is a no-op when sources is empty or all sources still need import', async () => {
     const mock = createMockCatalog();
     const uiCache = createCatalogUiCache({ revision: 0, locale: 'en' });
 
     await runCatalogPrewarm({
       catalog: mock.catalog,
       sources: [],
+      uiCache,
+      isCancelled: () => false,
+    });
+
+    await runCatalogPrewarm({
+      catalog: mock.catalog,
+      sources: [{ ...SOURCE, needsImport: true }],
       uiCache,
       isCancelled: () => false,
     });

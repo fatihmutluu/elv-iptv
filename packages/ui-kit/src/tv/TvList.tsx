@@ -9,7 +9,7 @@ import {
   useRef,
   useSyncExternalStore,
 } from 'react';
-import { Animated, View } from 'react-native';
+import { Animated, Platform, View } from 'react-native';
 import { useTheme } from '../theme';
 import { FocusRing } from './FocusRing';
 import type { ListSource } from './list-source';
@@ -245,18 +245,23 @@ export function TvList<T>({
     );
   }
 
+  const edgeFadeActive =
+    edgeFade ?? (Platform.OS === 'ios' && Boolean((Platform as { isTV?: boolean }).isTV));
+
   return (
     <View testID={testID} style={{ height: visibleRows * rowHeight, overflow: 'hidden' }}>
       <Animated.View style={{ transform: [{ translateY: offset.current }] }}>{rows}</Animated.View>
-      <TvScrollEdgeFade
-        showTop={windowStart > 0 && (!showFocus || safeIndex > windowStart)}
-        showBottom={
-          windowStart + visibleRows < count &&
-          (!showFocus || safeIndex < windowStart + visibleRows - 1)
-        }
-        enabled={edgeFade}
-        testID={testID === undefined ? undefined : `${testID}-edge-fade`}
-      />
+      {edgeFadeActive ? (
+        <TvScrollEdgeFade
+          showTop={windowStart > 0 && (!showFocus || safeIndex > windowStart)}
+          showBottom={
+            windowStart + visibleRows < count &&
+            (!showFocus || safeIndex < windowStart + visibleRows - 1)
+          }
+          enabled
+          testID={testID === undefined ? undefined : `${testID}-edge-fade`}
+        />
+      ) : null}
       {showFocus ? (
         <FocusRing
           testID={testID === undefined ? undefined : `${testID}-ring`}

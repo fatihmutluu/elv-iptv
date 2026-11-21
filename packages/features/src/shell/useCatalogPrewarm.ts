@@ -102,7 +102,8 @@ export async function runCatalogPrewarm({
     uiCache.getLocale() === targetLocale;
 
   const readySources = sources.filter((s) => !s.needsImport);
-  const activeSources = readySources.length > 0 ? readySources : sources;
+  if (readySources.length === 0) return;
+  const activeSources = readySources;
 
   let continuePromise: Promise<readonly WatchProgressRow[]> | null = null;
   let favKeysPromise: Promise<readonly string[]> | null = null;
