@@ -1,0 +1,307 @@
+import type { ItemRow, NowNextEntry } from '@elv/data';
+import type {
+  BoundedTtlMap,
+  CachedCatalogKindState,
+  CachedDetailEntry,
+  CachedEpgProgramEntry,
+  CachedHomeEntry,
+  CachedLiveState,
+  CachedSearchSnapshot,
+  CatalogUiCache,
+  CatalogUiCacheOptions,
+} from './catalog-ui-cache-types';
+
+export type {
+  CachedDetailEntry,
+  CachedDetailSeasonsState,
+  CachedDetailSnapshot,
+  CachedEpgProgramEntry,
+  CachedHomeSnapshot,
+  CatalogUiCache,
+  CatalogUiCacheOptions,
+} from './catalog-ui-cache-types';
+
+/** Max category rails retained per Movies/Series discovery slice (safe for 1 GB TV sticks). */
+export const MAX_CATALOG_RAIL_CATEGORIES = 16;
+/** Max preview items retained per category rail. */
+export const MAX_CATALOG_RAIL_ITEMS = 18;
+/** Max category grid first pages retained per kind via LRU. */
+export const MAX_GRID_FIRST_PAGES = 12;
+/** Max live categories with cached initial channel slices via LRU. */
+export const MAX_LIVE_CHANNEL_CATEGORIES = 8;
+/** Max channel rows retained per cached live category slice. */
+export const LIVE_CHANNEL_ROWS_CAP = 120;
+/** Max Detail screen entries retained in the bounded LRU cache. */
+export const MAX_DETAIL_ENTRIES = 32;
+const CACHE_EPG_MAX_ENTRIES = 240;
+const CACHE_NOW_NEXT_TTL_MS = 90_000;
+
+function createBoundedLru<V>(maxEntries: number) {
+  const cap = Math.max(1, Math.floor(maxEntries));
+  const map = new Map<string, V>();
+  return {
+    get(key: string): V | undefined {
+      const hit = map.get(key);
+      if (hit === undefined) return undefined;
+      map.delete(key);
+      map.set(key, hit);
+      return hit;
+    },
+    set(key: string, value: V): void {
+      if (map.has(key)) map.delete(key);
+      map.set(key, value);
+      while (map.size > cap) {
+        const oldest = map.keys().next().value;
+        if (oldest === undefined) break;
+        map.delete(oldest);
+      }
+    },
+    deleteWhere(predicate: (key: string, value: V) => boolean): void {
+      for (const [key, value] of [...map.entries()]) {
+        if (predicate(key, value)) map.delete(key);
+      }
+    },
+    clear(): void {
+      map.clear();
+    },
+  };
+}
+
+function createBoundedTtlMap<T>(maxEntries: number, ttlMs: number): BoundedTtlMap<T> {
+  const cap = Math.max(1, Math.floor(maxEntries));
+  const ttl = Math.max(1, Math.floor(ttlMs));
+  const map = new Map<string, { value: T; storedAt: number }>();
+
+  return {
+    get(key, nowMs) {
+      const hit = map.get(key);
+      if (hit === undefined) return undefined;
+      if (nowMs - hit.storedAt > ttl) {
+        map.delete(key);
+        return undefined;
+      }
+      map.delete(key);
+      map.set(key, hit);
+      return hit.value;
+    },
+    set(key, value, nowMs) {
+      if (map.has(key)) map.delete(key);
+      map.set(key, { value, storedAt: nowMs });
+      while (map.size > cap) {
+        const oldest = map.keys().next().value;
+        if (oldest === undefined) break;
+        map.delete(oldest);
+      }
+    },
+    deleteWhere(predicate) {
+      for (const key of [...map.keys()]) {
+        if (predicate(key)) map.delete(key);
+      }
+    },
+    snapshot(nowMs) {
+      const out = new Map<string, T>();
+      for (const [key, entry] of [...map.entries()]) {
+        if (nowMs - entry.storedAt > ttl) {
+          map.delete(key);
+        } else {
+          out.set(key, entry.value);
+        }
+      }
+      return out;
+    },
+    clear() {
+      map.clear();
+    },
+    size: () => map.size,
+  };
+}
+
+function itemKeyBelongsToSource(itemKey: string, sourceId: string): boolean {
+  return itemKey.split(':')[1] === sourceId;
+}
+
+function capCatalogRails(
+  rails: ReadonlyMap<string, readonly ItemRow[]>,
+): ReadonlyMap<string, readonly ItemRow[]> {
+  const out = new Map<string, readonly ItemRow[]>();
+  for (const [catId, rows] of rails) {
+    if (out.size >= MAX_CATALOG_RAIL_CATEGORIES) break;
+    out.set(
+      catId,
+      rows.length > MAX_CATALOG_RAIL_ITEMS ? rows.slice(0, MAX_CATALOG_RAIL_ITEMS) : rows,
+    );
+  }
+  return out;
+}
+
+/** Creates a scoped {@link CatalogUiCache} instance (one per `AppShell` catalog instance). */
+export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogUiCache {
+  let revision = opts.revision ?? 0;
+  let locale = opts.locale ?? 'en';
+
+  let home: CachedHomeEntry | null = null;
+  const catalogByKind: Record<'movie' | 'series', CachedCatalogKindState | null> = {
+    movie: null,
+    series: null,
+  };
+  const gridFirstPages = {
+    movie: createBoundedLru<readonly ItemRow[]>(MAX_GRID_FIRST_PAGES),
+    series: createBoundedLru<readonly ItemRow[]>(MAX_GRID_FIRST_PAGES),
+  };
+
+  let live: CachedLiveState | null = null;
+  const liveFirstChannels = createBoundedLru<readonly ItemRow[]>(MAX_LIVE_CHANNEL_CATEGORIES);
+  const nowNext = createBoundedTtlMap<NowNextEntry>(CACHE_EPG_MAX_ENTRIES, CACHE_NOW_NEXT_TTL_MS);
+  const epgWindow = createBoundedTtlMap<CachedEpgProgramEntry>(
+    CACHE_EPG_MAX_ENTRIES,
+    Number.MAX_SAFE_INTEGER,
+  );
+
+  const detailByItemKey = createBoundedLru<CachedDetailEntry>(MAX_DETAIL_ENTRIES);
+  let search: CachedSearchSnapshot | null = null;
+
+  function clearAll(): void {
+    home = null;
+    catalogByKind.movie = null;
+    catalogByKind.series = null;
+    gridFirstPages.movie.clear();
+    gridFirstPages.series.clear();
+    live = null;
+    liveFirstChannels.clear();
+    nowNext.clear();
+    epgWindow.clear();
+    detailByItemKey.clear();
+    search = null;
+  }
+
+  return {
+    getRevision: () => revision,
+    getLocale: () => locale,
+
+    setRevision(nextRevision, nextLocale) {
+      if (nextRevision === revision && nextLocale === locale) return;
+      revision = nextRevision;
+      locale = nextLocale;
+      clearAll();
+    },
+
+    getHome: () => home,
+    setHome(snapshot) {
+      home = { snapshot, heroIndex: home?.heroIndex ?? 0 };
+    },
+    setHomeHeroIndex(heroIndex) {
+      if (home === null) return;
+      home = { snapshot: home.snapshot, heroIndex };
+    },
+
+    getCatalog: (kind) => catalogByKind[kind],
+    setCatalog(kind, state) {
+      catalogByKind[kind] = {
+        categories: state.categories,
+        continueItems: state.continueItems,
+        railItemsByCategoryId: capCatalogRails(state.railItemsByCategoryId),
+        progressByKey: state.progressByKey,
+      };
+    },
+
+    getGridFirstPage: (kind, categoryId) => gridFirstPages[kind].get(categoryId),
+    setGridFirstPage(kind, categoryId, rows) {
+      gridFirstPages[kind].set(categoryId, rows);
+    },
+
+    getLive: () => live,
+    setLiveCategories(categories) {
+      live = {
+        categories,
+        favoriteKeys: live?.favoriteKeys ?? new Set(),
+        favoriteChannels: live?.favoriteChannels ?? [],
+        hasLoadedCategories: true,
+        hasLoadedFavorites: live?.hasLoadedFavorites ?? false,
+      };
+    },
+    setLiveFavorites(favoriteKeys, favoriteChannels) {
+      live = {
+        categories: live?.categories ?? [],
+        favoriteKeys,
+        favoriteChannels,
+        hasLoadedCategories: live?.hasLoadedCategories ?? false,
+        hasLoadedFavorites: true,
+      };
+    },
+
+    getLiveFirstChannels: (categoryId) => liveFirstChannels.get(categoryId),
+    setLiveFirstChannels(categoryId, rows) {
+      const capped =
+        rows.length > LIVE_CHANNEL_ROWS_CAP ? rows.slice(0, LIVE_CHANNEL_ROWS_CAP) : rows;
+      liveFirstChannels.set(categoryId, capped);
+    },
+
+    nowNext,
+    getNowNextSnapshot: (nowMs) => nowNext.snapshot(nowMs),
+    epgWindow,
+
+    getDetail: (itemKey) => detailByItemKey.get(itemKey) ?? null,
+    setDetail(itemKey, entry) {
+      detailByItemKey.set(itemKey, entry);
+    },
+
+    getSearch(query, scope) {
+      if (search === null) return null;
+      if (search.catalogRevision !== revision || search.query !== query || search.scope !== scope) {
+        return null;
+      }
+      return search;
+    },
+    setSearch(snapshot) {
+      search = snapshot;
+    },
+    clearSearch() {
+      search = null;
+    },
+
+    invalidateSource(sourceId) {
+      const catPrefix = `${sourceId}|`;
+      home = null;
+      for (const kind of ['movie', 'series'] as const) {
+        const cur = catalogByKind[kind];
+        if (cur !== null) {
+          const nextRails = new Map<string, readonly ItemRow[]>();
+          for (const [catId, rows] of cur.railItemsByCategoryId) {
+            if (!catId.startsWith(catPrefix)) nextRails.set(catId, rows);
+          }
+          catalogByKind[kind] = {
+            categories: cur.categories.filter((c) => c.row.sourceId !== sourceId),
+            continueItems: cur.continueItems.filter((r) => r.sourceId !== sourceId),
+            railItemsByCategoryId: nextRails,
+            progressByKey: cur.progressByKey,
+          };
+        }
+        gridFirstPages[kind].deleteWhere((catId) => catId.startsWith(catPrefix));
+      }
+      if (live !== null) {
+        const nextFavKeys = new Set<string>();
+        for (const key of live.favoriteKeys) {
+          if (!itemKeyBelongsToSource(key, sourceId)) nextFavKeys.add(key);
+        }
+        live = {
+          ...live,
+          categories: live.categories.filter((c) => c.row.sourceId !== sourceId),
+          favoriteKeys: nextFavKeys,
+          favoriteChannels: live.favoriteChannels.filter((c) => c.sourceId !== sourceId),
+        };
+      }
+      liveFirstChannels.deleteWhere((catId) => catId.startsWith(catPrefix));
+      nowNext.deleteWhere((key) => itemKeyBelongsToSource(key, sourceId));
+      epgWindow.deleteWhere((cacheKey) => {
+        const chKey = cacheKey.split('|')[0] ?? '';
+        return itemKeyBelongsToSource(chKey, sourceId);
+      });
+      detailByItemKey.deleteWhere(
+        (key, entry) => entry.sourceId === sourceId || itemKeyBelongsToSource(key, sourceId),
+      );
+      search = null;
+    },
+
+    clear: clearAll,
+  };
+}

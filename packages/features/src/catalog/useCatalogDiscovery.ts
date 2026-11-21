@@ -4,47 +4,17 @@ import {
   batchLoadProgressByKeys,
   buildSharedDisplayCategories,
   type DisplayCategory,
+  useCatalogUiCache,
 } from '../shared';
 import {
   CATALOG_CONTINUE_LIMIT,
   CATEGORY_LOAD_BATCH,
-  type CatalogTabMemory,
-  EMPTY_CATALOG_MEMORY,
   filterContinueWatchingForCatalog,
   MAX_CONCURRENT_RAIL_QUERIES,
   RAIL_ITEM_LIMIT,
 } from './catalog-model';
 
-/**
- * Controlled-or-uncontrolled tab memory state helper preserving category selection and progressive
- * batch count across tab switches.
- */
-export function useCatalogTabMemory(
-  memory: CatalogTabMemory | undefined,
-  onMemoryChange: ((next: CatalogTabMemory) => void) | undefined,
-): {
-  readonly memory: CatalogTabMemory;
-  readonly updateMemory: (patch: Partial<CatalogTabMemory>) => void;
-} {
-  const [localMemory, setLocalMemory] = useState<CatalogTabMemory>(
-    () => memory ?? EMPTY_CATALOG_MEMORY,
-  );
-  const activeMemory = onMemoryChange && memory !== undefined ? memory : localMemory;
-  const activeMemoryRef = useRef(activeMemory);
-  activeMemoryRef.current = activeMemory;
-
-  const updateMemory = useCallback(
-    (patch: Partial<CatalogTabMemory>) => {
-      const next: CatalogTabMemory = { ...activeMemoryRef.current, ...patch };
-      activeMemoryRef.current = next;
-      setLocalMemory(next);
-      onMemoryChange?.(next);
-    },
-    [onMemoryChange],
-  );
-
-  return useMemo(() => ({ memory: activeMemory, updateMemory }), [activeMemory, updateMemory]);
-}
+export { useCatalogTabMemory } from './useCatalogTabMemory';
 
 /** Options for {@link useCatalogDiscovery}. */
 export interface UseCatalogDiscoveryOptions {
@@ -80,7 +50,8 @@ const EMPTY_LOADING_SET: ReadonlySet<string> = new Set();
 /**
  * Loads Movies or Series categories across configured sources and progressively hydrates preview
  * rails (`LIMIT 18` per category, `<= 4` concurrent queries) plus batched watch progress without
- * N+1 queries. Guards every async write with monotonic generation refs.
+ * N+1 queries. Hydrates synchronously from `CatalogUiCache` and preserves rendered data across
+ * background refreshes (`#445`).
  */
 export function useCatalogDiscovery({
   kind,
@@ -93,27 +64,76 @@ export function useCatalogDiscovery({
   onVisibleCategoryCountChange,
   onClearStaleCategory,
 }: UseCatalogDiscoveryOptions): CatalogDiscoveryState {
-  const [categories, setCategories] = useState<readonly DisplayCategory[]>([]);
-  const [continueItems, setContinueItems] = useState<readonly WatchProgressRow[]>([]);
-  const [loadingCategories, setLoadingCategories] = useState(() => sources.length > 0);
-  const [hasLoadedCategories, setHasLoadedCategories] = useState(false);
-  const [railItemsByCategoryId, setRailItemsByCategoryId] =
-    useState<ReadonlyMap<string, readonly ItemRow[]>>(EMPTY_ITEMS_MAP);
+  const uiCache = useCatalogUiCache();
+  const initialCached = sources.length > 0 ? (uiCache?.getCatalog(kind) ?? null) : null;
+
+  const [categories, setCategories] = useState<readonly DisplayCategory[]>(
+    () => initialCached?.categories ?? [],
+  );
+  const [continueItems, setContinueItems] = useState<readonly WatchProgressRow[]>(
+    () => initialCached?.continueItems ?? [],
+  );
+  const [loadingCategories, setLoadingCategories] = useState(
+    () => sources.length > 0 && initialCached === null,
+  );
+  const [hasLoadedCategories, setHasLoadedCategories] = useState(() => initialCached !== null);
+  const [railItemsByCategoryId, setRailItemsByCategoryId] = useState<
+    ReadonlyMap<string, readonly ItemRow[]>
+  >(() => initialCached?.railItemsByCategoryId ?? EMPTY_ITEMS_MAP);
   const [loadingRailIds, setLoadingRailIds] = useState<ReadonlySet<string>>(EMPTY_LOADING_SET);
-  const [progressByKey, setProgressByKey] =
-    useState<ReadonlyMap<string, WatchProgressRow>>(EMPTY_PROGRESS_MAP);
+  const [progressByKey, setProgressByKey] = useState<ReadonlyMap<string, WatchProgressRow>>(
+    () => initialCached?.progressByKey ?? EMPTY_PROGRESS_MAP,
+  );
+  const [railRefreshTick, setRailRefreshTick] = useState(0);
 
   const catGenRef = useRef(0);
   const continueGenRef = useRef(0);
   const railGenRef = useRef(0);
-  const railItemsRef = useRef<Map<string, readonly ItemRow[]>>(new Map());
-  const loadedRailIdsRef = useRef<Set<string>>(new Set());
+  const hasLoadedRef = useRef(initialCached !== null);
+  const lastRefreshTokenRef = useRef(refreshToken);
+  const uiCacheRef = useRef(uiCache);
+  uiCacheRef.current = uiCache;
+
+  const categoriesRef = useRef(categories);
+  categoriesRef.current = categories;
+  const continueItemsRef = useRef(continueItems);
+  continueItemsRef.current = continueItems;
+  const progressByKeyRef = useRef(progressByKey);
+  progressByKeyRef.current = progressByKey;
+  const railItemsRef = useRef<Map<string, readonly ItemRow[]>>(
+    new Map(initialCached?.railItemsByCategoryId ?? []),
+  );
+  const loadedRailIdsRef = useRef<Set<string>>(
+    new Set(initialCached?.railItemsByCategoryId.keys() ?? []),
+  );
+
+  const syncCache = useCallback(
+    (overrides?: {
+      categories?: readonly DisplayCategory[];
+      continueItems?: readonly WatchProgressRow[];
+      railItemsByCategoryId?: ReadonlyMap<string, readonly ItemRow[]>;
+      progressByKey?: ReadonlyMap<string, WatchProgressRow>;
+    }) => {
+      const nextCats = overrides?.categories ?? categoriesRef.current;
+      const nextCw = overrides?.continueItems ?? continueItemsRef.current;
+      const nextRails = overrides?.railItemsByCategoryId ?? railItemsRef.current;
+      const nextProg = overrides?.progressByKey ?? progressByKeyRef.current;
+      uiCacheRef.current?.setCatalog(kind, {
+        categories: nextCats,
+        continueItems: nextCw,
+        railItemsByCategoryId: nextRails,
+        progressByKey: nextProg,
+      });
+    },
+    [kind],
+  );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken and userStateVersion trigger fresh continue-watching reads
   useEffect(() => {
     continueGenRef.current += 1;
     const gen = continueGenRef.current;
     if (sources.length === 0 || !catalog.listContinueWatching) {
+      continueItemsRef.current = [];
       setContinueItems([]);
       return undefined;
     }
@@ -121,29 +141,36 @@ export function useCatalogDiscovery({
       .listContinueWatching(CATALOG_CONTINUE_LIMIT)
       .then((rows) => {
         if (continueGenRef.current !== gen) return;
-        setContinueItems(filterContinueWatchingForCatalog(rows, kind));
+        const filtered = filterContinueWatchingForCatalog(rows, kind);
+        continueItemsRef.current = filtered;
+        setContinueItems(filtered);
+        if (hasLoadedRef.current) syncCache({ continueItems: filtered });
       })
       .catch(() => {
-        if (continueGenRef.current === gen) setContinueItems([]);
+        if (continueGenRef.current === gen && !hasLoadedRef.current) {
+          continueItemsRef.current = [];
+          setContinueItems([]);
+        }
       });
     return () => {
       continueGenRef.current += 1;
     };
-  }, [catalog, kind, refreshToken, sources.length, userStateVersion]);
+  }, [catalog, kind, refreshToken, sources.length, syncCache, userStateVersion]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken intentionally triggers fresh category reads
   useEffect(() => {
     catGenRef.current += 1;
-    railGenRef.current += 1;
     const gen = catGenRef.current;
 
-    railItemsRef.current = new Map();
-    loadedRailIdsRef.current = new Set();
-    setRailItemsByCategoryId(EMPTY_ITEMS_MAP);
-    setLoadingRailIds(EMPTY_LOADING_SET);
-    setProgressByKey(EMPTY_PROGRESS_MAP);
-
     if (sources.length === 0) {
+      railGenRef.current += 1;
+      railItemsRef.current = new Map();
+      loadedRailIdsRef.current = new Set();
+      categoriesRef.current = [];
+      progressByKeyRef.current = EMPTY_PROGRESS_MAP;
+      hasLoadedRef.current = true;
+      setRailItemsByCategoryId(EMPTY_ITEMS_MAP);
+      setLoadingRailIds(EMPTY_LOADING_SET);
+      setProgressByKey(EMPTY_PROGRESS_MAP);
       setCategories([]);
       setLoadingCategories(false);
       setHasLoadedCategories(true);
@@ -153,8 +180,13 @@ export function useCatalogDiscovery({
       };
     }
 
-    setLoadingCategories(true);
-    setHasLoadedCategories(false);
+    const tokenBumped = lastRefreshTokenRef.current !== refreshToken;
+    lastRefreshTokenRef.current = refreshToken;
+
+    // Only show skeleton on cold start; keep previous categories & rails visible during refresh.
+    if (!hasLoadedRef.current) {
+      setLoadingCategories(true);
+    }
 
     const readySources = sources.filter((s) => !s.needsImport);
     const activeSources = readySources.length > 0 ? readySources : sources;
@@ -169,9 +201,31 @@ export function useCatalogDiscovery({
         );
         if (catGenRef.current !== gen) return;
         const bySource = new Map<string, readonly CategoryRow[]>(perSource);
-        setCategories(buildSharedDisplayCategories(activeSources, bySource));
+        const nextCategories = buildSharedDisplayCategories(activeSources, bySource);
+        const validIds = new Set(nextCategories.map((c) => c.row.id));
+
+        const prunedRails = new Map<string, readonly ItemRow[]>();
+        for (const [catId, rows] of railItemsRef.current) {
+          if (validIds.has(catId)) prunedRails.set(catId, rows);
+        }
+        railItemsRef.current = prunedRails;
+        if (tokenBumped) {
+          loadedRailIdsRef.current = new Set();
+        } else {
+          for (const id of [...loadedRailIdsRef.current]) {
+            if (!validIds.has(id)) loadedRailIdsRef.current.delete(id);
+          }
+        }
+
+        categoriesRef.current = nextCategories;
+        hasLoadedRef.current = true;
+        setCategories(nextCategories);
+        setRailItemsByCategoryId(prunedRails);
+        syncCache({ categories: nextCategories, railItemsByCategoryId: prunedRails });
+        if (tokenBumped) setRailRefreshTick((t) => t + 1);
       } finally {
         if (catGenRef.current === gen) {
+          hasLoadedRef.current = true;
           setLoadingCategories(false);
           setHasLoadedCategories(true);
         }
@@ -182,9 +236,8 @@ export function useCatalogDiscovery({
 
     return () => {
       catGenRef.current += 1;
-      railGenRef.current += 1;
     };
-  }, [catalog, kind, refreshToken, sources]);
+  }, [catalog, kind, refreshToken, sources, syncCache]);
 
   const visibleCategories = useMemo(
     () => categories.slice(0, Math.max(0, visibleCategoryCount)),
@@ -202,7 +255,7 @@ export function useCatalogDiscovery({
     }
   }, [hasLoadedCategories, onClearStaleCategory, selectedCategoryExists, selectedCategoryId]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: userStateVersion and refreshToken intentionally trigger progress hydration
+  // biome-ignore lint/correctness/useExhaustiveDependencies: railRefreshTick, userStateVersion, and refreshToken hydrate rails and progress
   useEffect(() => {
     if (selectedCategoryExists || visibleCategories.length === 0) return undefined;
 
@@ -212,7 +265,10 @@ export function useCatalogDiscovery({
 
     const run = async () => {
       if (missing.length > 0) {
-        setLoadingRailIds(new Set(missing.map((cat) => cat.row.id)));
+        const coldMissing = missing.filter((cat) => !railItemsRef.current.has(cat.row.id));
+        if (coldMissing.length > 0) {
+          setLoadingRailIds(new Set(coldMissing.map((cat) => cat.row.id)));
+        }
         const fetched = new Map<string, readonly ItemRow[]>();
         let cursor = 0;
         const workerCount = Math.min(MAX_CONCURRENT_RAIL_QUERIES, missing.length);
@@ -241,6 +297,7 @@ export function useCatalogDiscovery({
         railItemsRef.current = nextItems;
         setRailItemsByCategoryId(nextItems);
         setLoadingRailIds(EMPTY_LOADING_SET);
+        syncCache({ railItemsByCategoryId: nextItems });
       }
 
       const loadedKeys: string[] = [];
@@ -251,7 +308,10 @@ export function useCatalogDiscovery({
       }
 
       if (loadedKeys.length === 0) {
-        if (railGenRef.current === gen) setProgressByKey(EMPTY_PROGRESS_MAP);
+        if (railGenRef.current === gen) {
+          progressByKeyRef.current = EMPTY_PROGRESS_MAP;
+          setProgressByKey(EMPTY_PROGRESS_MAP);
+        }
         return;
       }
 
@@ -259,7 +319,9 @@ export function useCatalogDiscovery({
         () => new Map<string, WatchProgressRow>(),
       );
       if (railGenRef.current !== gen) return;
+      progressByKeyRef.current = nextProgress;
       setProgressByKey(nextProgress);
+      syncCache({ progressByKey: nextProgress });
     };
 
     void run();
@@ -267,7 +329,15 @@ export function useCatalogDiscovery({
     return () => {
       railGenRef.current += 1;
     };
-  }, [catalog, refreshToken, selectedCategoryExists, userStateVersion, visibleCategories]);
+  }, [
+    catalog,
+    railRefreshTick,
+    refreshToken,
+    selectedCategoryExists,
+    syncCache,
+    userStateVersion,
+    visibleCategories,
+  ]);
 
   const hasMoreCategories = categories.length > visibleCategories.length;
 

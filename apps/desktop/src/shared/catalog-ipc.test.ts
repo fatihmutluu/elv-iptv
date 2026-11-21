@@ -203,6 +203,37 @@ describe('isCatalogClientMessage', () => {
       },
       {
         type: 'call',
+        reqId: 25,
+        call: {
+          method: 'setFavorite',
+          input: {
+            sourceId: 'src_1',
+            itemKey: 'm:src_1:10',
+            kind: 'movie',
+            title: 'Orbital Nine',
+            logo: null,
+            year: 2025,
+            rating: 8.2,
+          },
+          active: true,
+        },
+      },
+      {
+        type: 'call',
+        reqId: 25,
+        call: {
+          method: 'setFavorite',
+          input: {
+            sourceId: 'src_1',
+            itemKey: 'm:src_1:10',
+            kind: 'movie',
+            title: 'Orbital Nine',
+          },
+          active: false,
+        },
+      },
+      {
+        type: 'call',
         reqId: 26,
         call: { method: 'listFavorites', limit: 50 },
       },
@@ -469,6 +500,24 @@ describe('isCatalogClientMessage', () => {
         call: {
           method: 'toggleFavorite',
           input: { sourceId: 's1', itemKey: 'k1', kind: 'movie', title: 'T', rating: Number.NaN },
+        },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: {
+          method: 'setFavorite',
+          input: { sourceId: 's1', itemKey: 'k1', kind: 'movie', title: 'T' },
+          active: 'yes',
+        },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: {
+          method: 'setFavorite',
+          input: { sourceId: 's1', itemKey: 'k1', kind: 'movie', title: 'T', rating: Number.NaN },
+          active: true,
         },
       },
       {

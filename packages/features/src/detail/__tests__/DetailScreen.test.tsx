@@ -386,6 +386,7 @@ describe('DetailScreen', () => {
     const movie = requireFirst(env.movies, 'movie');
     const flakyCatalog: CatalogService = {
       ...env.catalog,
+      setFavorite: jest.fn(async () => err(elvError('storage', 'write-failed'))),
       toggleFavorite: jest.fn(async () => err(elvError('storage', 'write-failed'))),
       saveProgress: undefined,
       setWatched: jest.fn(async () => err(elvError('storage', 'disk-full'))),

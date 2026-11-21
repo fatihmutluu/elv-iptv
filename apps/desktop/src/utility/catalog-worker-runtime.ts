@@ -442,6 +442,16 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
               title: sanitizeDisplayText(call.input.title),
             })
           : err(elvError('storage', 'unsupported'));
+      case 'setFavorite':
+        return service.setFavorite
+          ? service.setFavorite(
+              {
+                ...call.input,
+                title: sanitizeDisplayText(call.input.title),
+              },
+              call.active,
+            )
+          : err(elvError('storage', 'unsupported'));
       case 'listFavorites':
         return service.listFavorites ? service.listFavorites(call.limit, call.profileId) : [];
       case 'listFavoriteKeys':

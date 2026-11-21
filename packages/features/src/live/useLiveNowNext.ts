@@ -1,5 +1,6 @@
 import { type CatalogService, MAX_NOW_NEXT_KEYS, type NowNextEntry } from '@elv/data';
 import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
+import { useCatalogUiCache } from '../shared';
 import {
   type BoundedTtlCache,
   createBoundedTtlCache,
@@ -30,7 +31,10 @@ function mergeNowNextBatch(
   return next;
 }
 
-/** Bounded in-memory Now/Next TTL cache (`#250`) with chunked `<= MAX_NOW_NEXT_KEYS` hydration. */
+/**
+ * Bounded in-memory Now/Next TTL cache (`#250`) backed by {@link CatalogUiCache} when mounted
+ * inside `AppShell` so switching Live sub-modes or tabs never drops EPG Now/Next data (`#445`).
+ */
 export function useLiveNowNext(opts: {
   readonly catalog: CatalogService;
   readonly refreshToken: number;
@@ -41,17 +45,26 @@ export function useLiveNowNext(opts: {
   readonly hydrateNowNext: (channelKeys: readonly string[]) => void;
 } {
   const { catalog, refreshToken, nowRef } = opts;
+  const uiCache = useCatalogUiCache();
+  const localTtlRef = useRef<BoundedTtlCache<NowNextEntry> | null>(null);
+  const getTtl = useCallback((): BoundedTtlCache<NowNextEntry> => {
+    if (uiCache) return uiCache.nowNext;
+    localTtlRef.current ??= createBoundedTtlCache<NowNextEntry>();
+    return localTtlRef.current;
+  }, [uiCache]);
+
   const [state, setState] = useState(() => ({
-    byKey: new Map<string, NowNextEntry>() as ReadonlyMap<string, NowNextEntry>,
+    byKey: (uiCache?.getNowNextSnapshot(nowRef.current()) ??
+      new Map<string, NowNextEntry>()) as ReadonlyMap<string, NowNextEntry>,
     version: 0,
   }));
 
   const aliveRef = useRef(true);
   const cacheRef = useRef({
-    ttl: createBoundedTtlCache<NowNextEntry>(),
     inFlight: new Set<string>(),
     gen: 0,
   });
+  const prevDepsRef = useRef({ catalog, refreshToken });
 
   useEffect(() => {
     aliveRef.current = true;
@@ -60,20 +73,23 @@ export function useLiveNowNext(opts: {
     };
   }, []);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken clears bounded Now/Next TTL cache
   useEffect(() => {
+    const prev = prevDepsRef.current;
+    if (prev.catalog === catalog && prev.refreshToken === refreshToken) return;
+    prevDepsRef.current = { catalog, refreshToken };
     cacheRef.current.gen += 1;
-    cacheRef.current.ttl.clear();
+    getTtl().clear();
     cacheRef.current.inFlight.clear();
-    setState((prev) => ({ byKey: new Map(), version: prev.version + 1 }));
-  }, [catalog, refreshToken]);
+    setState((prevState) => ({ byKey: new Map(), version: prevState.version + 1 }));
+  }, [catalog, getTtl, refreshToken]);
 
   const hydrateNowNext = useCallback(
     (channelKeys: readonly string[]) => {
       const fetchNowNext = catalog.nowNext;
       if (!fetchNowNext || channelKeys.length === 0) return;
       const nowMs = nowRef.current();
-      const { ttl, inFlight, gen } = cacheRef.current;
+      const ttl = getTtl();
+      const { inFlight, gen } = cacheRef.current;
       const missing: string[] = [];
       const seen = new Set<string>();
       for (const key of channelKeys) {
@@ -100,7 +116,7 @@ export function useLiveNowNext(opts: {
           });
       }
     },
-    [catalog, nowRef],
+    [catalog, getTtl, nowRef],
   );
 
   return { byKey: state.byKey, version: state.version, hydrateNowNext };

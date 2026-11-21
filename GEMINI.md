@@ -14,9 +14,10 @@ Antigravity and Gemini CLI automatically load [AGENTS.md](AGENTS.md) at the repo
 3. Run `pnpm check` (or `pnpm.cmd check` in restricted Windows PowerShell policies) until `check: 10 passed, 0 failed` before opening a PR.
 
 ## Subagent & Swarm model routing
+Pick the right Gemini tier thoughtfully per task complexity — **never compromise production quality**, and **never fall back to non-Gemini (Claude) models** on quota limits (wait for Gemini quota renewal and resume):
 - **Architecture, specs, plans, tricky native/concurrency/security (`libmpv`, `AetherEngine`, `Media3`, SQLite WAL, Electron security):** `Gemini 4 Neon (XHigh)` / `Gemini 4 Neon (High)`.
 - **Independent whole-branch PR reviews & performance/security audits:** `Gemini 4 Neon (High)` (`Neon (XHigh)` for high-risk native/security PRs).
-- **Well-specified multi-file UI screens, features, data logic & per-task reviews:** `Gemini 4 Neon (Medium)` (escalate to `Neon (High)` for tricky focus/concurrency).
+- **Well-specified multi-file UI screens, features, data logic & per-task reviews:** `Gemini 4 Neon (Medium)` (escalate to `Neon (High)` for tricky focus/concurrency/prewarm state).
 - **Scoped tests, small fixes, CI/YAML & helper scripts:** `Gemini 4 Neon (Low)` or `Gemini 4 Hydrogen (XHigh)`.
 - **Mechanical tasks (icon paths, `.po` entries, manifests, boilerplate):** `Gemini 4 Hydrogen (XHigh)`.
 - **Read-only triage & doc/log summarization:** `Gemini 3.8 Flash` (never for production code or code reviews).

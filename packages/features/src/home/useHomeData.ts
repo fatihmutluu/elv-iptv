@@ -1,7 +1,5 @@
 import {
-  type BrowseKind,
   type CatalogService,
-  type CategoryRow,
   DEFAULT_PROFILE_ID,
   type FavoriteRow,
   type ItemRow,
@@ -10,13 +8,21 @@ import {
   type WatchProgressRow,
 } from '@elv/data';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type CachedHomeSnapshot, useCatalogUiCache } from '../shared';
+import {
+  applyHomeFavUpdate,
+  applyHomeWatchedUpdate,
+  EMPTY_HOME_SNAPSHOT,
+  fetchHomeKindCategory,
+  mergeOptimisticHomeSnapshot,
+  releaseInFlightKey,
+} from './home-data-helpers';
 
 const HOME_CONTINUE_LIMIT = 16;
 const HOME_FAVORITES_LIMIT = 24;
 const HOME_LIVE_LIMIT = 12;
 const HOME_MOVIES_LIMIT = 18;
 const HOME_SERIES_LIMIT = 18;
-const MAX_SOURCES_TO_PROBE = 3;
 
 /** Options for {@link useHomeData}. */
 export interface UseHomeDataOptions {
@@ -46,27 +52,7 @@ interface ToggleWatchedTarget {
   readonly durationMs?: number;
 }
 
-interface HomeSnapshot {
-  readonly continueWatching: readonly WatchProgressRow[];
-  readonly favorites: readonly FavoriteRow[];
-  readonly favoriteKeys: ReadonlySet<string>;
-  readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
-  readonly liveCategory: CategoryRow | null;
-  readonly liveItems: readonly ItemRow[];
-  readonly movies: readonly ItemRow[];
-  readonly series: readonly ItemRow[];
-}
-
-const EMPTY_SNAPSHOT: HomeSnapshot = {
-  continueWatching: [],
-  favorites: [],
-  favoriteKeys: new Set<string>(),
-  progressByKey: new Map<string, WatchProgressRow>(),
-  liveCategory: null,
-  liveItems: [],
-  movies: [],
-  series: [],
-};
+type HomeSnapshot = CachedHomeSnapshot;
 
 /** Bounded Home dataset and live optimistic user-state mutations returned by {@link useHomeData}. */
 export interface HomeDataState extends HomeSnapshot {
@@ -76,34 +62,10 @@ export interface HomeDataState extends HomeSnapshot {
   readonly toggleWatched: (target: ToggleWatchedTarget, nextWatched: boolean) => Promise<void>;
 }
 
-function pickFirstCategory(lists: readonly (readonly CategoryRow[])[]): CategoryRow | null {
-  let fallback: CategoryRow | null = null;
-  for (const list of lists) {
-    for (const cat of list) {
-      if (fallback === null) fallback = cat;
-      if (cat.itemCount > 0) return cat;
-    }
-  }
-  return fallback;
-}
-
-async function fetchKindCategories(
-  catalog: CatalogService,
-  sources: readonly SourceRow[],
-  kind: BrowseKind,
-): Promise<CategoryRow | null> {
-  const lists = await Promise.all(
-    sources
-      .slice(0, MAX_SOURCES_TO_PROBE)
-      .map((source) => catalog.categories(source.id, kind).catch(() => [] as CategoryRow[])),
-  );
-  return pickFirstCategory(lists);
-}
-
 /**
  * Loads strictly bounded Home rail pages (`<= 24` rows per rail) in parallel with cancellation
- * protection and exposes optimistic `toggleMyList` and `toggleWatched` mutations backed by
- * SQLite (`#14`).
+ * protection, `CatalogUiCache` synchronous hydration (`#445`), and committed-baseline optimistic
+ * `toggleMyList` / `toggleWatched` mutations (`#14`, `#230`).
  */
 export function useHomeData({
   catalog,
@@ -111,13 +73,28 @@ export function useHomeData({
   refreshToken,
   userStateVersion = 0,
 }: UseHomeDataOptions): HomeDataState {
-  const [loading, setLoading] = useState(() => sources.length > 0);
-  const [hasLoaded, setHasLoaded] = useState(false);
-  const [snap, setSnap] = useState<HomeSnapshot>(EMPTY_SNAPSHOT);
+  const uiCache = useCatalogUiCache();
+  const initialCached = sources.length > 0 ? (uiCache?.getHome()?.snapshot ?? null) : null;
+
+  const [loading, setLoading] = useState(() => sources.length > 0 && initialCached === null);
+  const [hasLoaded, setHasLoaded] = useState(() => initialCached !== null);
+  const [snap, setSnap] = useState<HomeSnapshot>(() => initialCached ?? EMPTY_HOME_SNAPSHOT);
 
   const mountedRef = useRef(true);
-  const hasLoadedRef = useRef(false);
+  const hasLoadedRef = useRef(initialCached !== null);
   const snapRef = useRef(snap);
+  const uiCacheRef = useRef(uiCache);
+  uiCacheRef.current = uiCache;
+  const favGenByKeyRef = useRef(new Map<string, number>());
+  const favInFlightRef = useRef(new Map<string, number>());
+  const committedFavRef = useRef(
+    new Map<string, { inList: boolean; row: FavoriteRow | undefined }>(),
+  );
+  const watchedGenByKeyRef = useRef(new Map<string, number>());
+  const watchedInFlightRef = useRef(new Map<string, number>());
+  const committedWatchedRef = useRef(
+    new Map<string, { row: WatchProgressRow | undefined; cwRow: WatchProgressRow | undefined }>(),
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -129,8 +106,8 @@ export function useHomeData({
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken and userStateVersion intentionally trigger fresh bounded reads
   useEffect(() => {
     if (sources.length === 0) {
-      snapRef.current = EMPTY_SNAPSHOT;
-      setSnap(EMPTY_SNAPSHOT);
+      snapRef.current = EMPTY_HOME_SNAPSHOT;
+      setSnap(EMPTY_HOME_SNAPSHOT);
       setLoading(false);
       hasLoadedRef.current = true;
       setHasLoaded(true);
@@ -150,9 +127,9 @@ export function useHomeData({
           catalog.listFavorites?.(HOME_FAVORITES_LIMIT).catch(() => []) ??
             Promise.resolve([] as FavoriteRow[]),
           catalog.listFavoriteKeys?.().catch(() => []) ?? Promise.resolve([] as string[]),
-          fetchKindCategories(catalog, activeSources, 'live'),
-          fetchKindCategories(catalog, activeSources, 'movie'),
-          fetchKindCategories(catalog, activeSources, 'series'),
+          fetchHomeKindCategory(catalog, activeSources, 'live'),
+          fetchHomeKindCategory(catalog, activeSources, 'movie'),
+          fetchHomeKindCategory(catalog, activeSources, 'series'),
         ]);
         if (cancelled) return;
 
@@ -187,7 +164,7 @@ export function useHomeData({
         const nextFavKeys = new Set<string>(favKeys);
         for (const row of favRows) nextFavKeys.add(row.itemKey);
 
-        const nextSnap: HomeSnapshot = {
+        const fetchedSnap: HomeSnapshot = {
           continueWatching: cwRows,
           favorites: favRows,
           favoriteKeys: nextFavKeys,
@@ -197,8 +174,15 @@ export function useHomeData({
           movies: movieRows,
           series: seriesRows,
         };
-        snapRef.current = nextSnap;
-        setSnap(nextSnap);
+        const mergedSnap = mergeOptimisticHomeSnapshot(
+          fetchedSnap,
+          snapRef.current,
+          favInFlightRef.current,
+          watchedInFlightRef.current,
+        );
+        snapRef.current = mergedSnap;
+        uiCacheRef.current?.setHome(mergedSnap);
+        setSnap(mergedSnap);
       } finally {
         if (!cancelled) {
           hasLoadedRef.current = true;
@@ -216,22 +200,13 @@ export function useHomeData({
 
   const applyFavState = useCallback(
     (itemKey: string, inList: boolean, row: FavoriteRow | undefined) => {
-      const update = (prev: HomeSnapshot): HomeSnapshot => {
-        const nextKeys = new Set(prev.favoriteKeys);
-        if (inList) nextKeys.add(itemKey);
-        else nextKeys.delete(itemKey);
-        const filtered = prev.favorites.filter((f) => f.itemKey !== itemKey);
-        const nextFavs =
-          inList && row !== undefined
-            ? [row, ...filtered].slice(0, HOME_FAVORITES_LIMIT)
-            : filtered;
-        return { ...prev, favoriteKeys: nextKeys, favorites: nextFavs };
-      };
-      // Update ref synchronously before awaiting so rapid taps never double-toggle.
-      snapRef.current = update(snapRef.current);
+      const nextSync = applyHomeFavUpdate(snapRef.current, itemKey, inList, row);
+      snapRef.current = nextSync;
+      uiCacheRef.current?.setHome(nextSync);
       setSnap((prev) => {
-        const next = update(prev);
+        const next = applyHomeFavUpdate(prev, itemKey, inList, row);
         snapRef.current = next;
+        uiCacheRef.current?.setHome(next);
         return next;
       });
     },
@@ -240,12 +215,23 @@ export function useHomeData({
 
   const toggleMyList = useCallback(
     async (target: ToggleMyListTarget): Promise<void> => {
-      const wasInList = snapRef.current.favoriteKeys.has(target.itemKey);
-      const prevRow = snapRef.current.favorites.find((f) => f.itemKey === target.itemKey);
+      const key = target.itemKey;
+      const gen = (favGenByKeyRef.current.get(key) ?? 0) + 1;
+      favGenByKeyRef.current.set(key, gen);
+      const activeInFlight = favInFlightRef.current.get(key) ?? 0;
+      if (activeInFlight === 0) {
+        committedFavRef.current.set(key, {
+          inList: snapRef.current.favoriteKeys.has(key),
+          row: snapRef.current.favorites.find((f) => f.itemKey === key),
+        });
+      }
+      favInFlightRef.current.set(key, activeInFlight + 1);
+
+      const nextFav = !snapRef.current.favoriteKeys.has(key);
       const addedRow: FavoriteRow = {
         profileId: DEFAULT_PROFILE_ID,
         sourceId: target.sourceId,
-        itemKey: target.itemKey,
+        itemKey: key,
         kind: target.kind,
         title: target.title,
         logo: target.logo ?? null,
@@ -253,21 +239,42 @@ export function useHomeData({
         rating: target.rating ?? null,
         addedAt: Date.now(),
       };
-      applyFavState(target.itemKey, !wasInList, addedRow);
-      if (!catalog.toggleFavorite) return;
+      applyFavState(key, nextFav, addedRow);
+      const favInput = {
+        sourceId: target.sourceId,
+        itemKey: key,
+        kind: target.kind,
+        title: target.title,
+        logo: target.logo ?? null,
+        year: target.year ?? null,
+        rating: target.rating ?? null,
+      };
+      if (!catalog.setFavorite && !catalog.toggleFavorite) {
+        committedFavRef.current.set(key, { inList: nextFav, row: nextFav ? addedRow : undefined });
+        releaseInFlightKey(favInFlightRef.current, key);
+        return;
+      }
       try {
-        const res = await catalog.toggleFavorite({
-          sourceId: target.sourceId,
-          itemKey: target.itemKey,
-          kind: target.kind,
-          title: target.title,
-          logo: target.logo ?? null,
-          year: target.year ?? null,
-          rating: target.rating ?? null,
-        });
-        if (mountedRef.current && !res.ok) applyFavState(target.itemKey, wasInList, prevRow);
+        const res = catalog.setFavorite
+          ? await catalog.setFavorite(favInput, nextFav)
+          : await catalog.toggleFavorite?.(favInput);
+        if (!mountedRef.current || !res) return;
+        if (res.ok) {
+          committedFavRef.current.set(key, {
+            inList: res.value,
+            row: res.value ? addedRow : undefined,
+          });
+        } else if (favGenByKeyRef.current.get(key) === gen) {
+          const base = committedFavRef.current.get(key);
+          applyFavState(key, base?.inList ?? false, base?.row);
+        }
       } catch {
-        if (mountedRef.current) applyFavState(target.itemKey, wasInList, prevRow);
+        if (mountedRef.current && favGenByKeyRef.current.get(key) === gen) {
+          const base = committedFavRef.current.get(key);
+          applyFavState(key, base?.inList ?? false, base?.row);
+        }
+      } finally {
+        releaseInFlightKey(favInFlightRef.current, key);
       }
     },
     [applyFavState, catalog],
@@ -279,21 +286,13 @@ export function useHomeData({
       row: WatchProgressRow | undefined,
       restoreCw: WatchProgressRow | undefined,
     ) => {
-      const update = (prev: HomeSnapshot): HomeSnapshot => {
-        const nextProg = new Map(prev.progressByKey);
-        if (row !== undefined) nextProg.set(itemKey, row);
-        else nextProg.delete(itemKey);
-        const filtered = prev.continueWatching.filter((r) => r.itemKey !== itemKey);
-        const nextCw =
-          restoreCw !== undefined
-            ? [restoreCw, ...filtered].sort((a, b) => b.updatedAt - a.updatedAt)
-            : filtered;
-        return { ...prev, progressByKey: nextProg, continueWatching: nextCw };
-      };
-      snapRef.current = update(snapRef.current);
+      const nextSync = applyHomeWatchedUpdate(snapRef.current, itemKey, row, restoreCw);
+      snapRef.current = nextSync;
+      uiCacheRef.current?.setHome(nextSync);
       setSnap((prev) => {
-        const next = update(prev);
+        const next = applyHomeWatchedUpdate(prev, itemKey, row, restoreCw);
         snapRef.current = next;
+        uiCacheRef.current?.setHome(next);
         return next;
       });
     },
@@ -302,8 +301,17 @@ export function useHomeData({
 
   const toggleWatched = useCallback(
     async (target: ToggleWatchedTarget, nextWatched: boolean): Promise<void> => {
-      const existing = snapRef.current.progressByKey.get(target.itemKey);
-      const prevCwRow = snapRef.current.continueWatching.find((r) => r.itemKey === target.itemKey);
+      const key = target.itemKey;
+      const gen = (watchedGenByKeyRef.current.get(key) ?? 0) + 1;
+      watchedGenByKeyRef.current.set(key, gen);
+      const existing = snapRef.current.progressByKey.get(key);
+      const prevCwRow = snapRef.current.continueWatching.find((r) => r.itemKey === key);
+      const activeInFlight = watchedInFlightRef.current.get(key) ?? 0;
+      if (activeInFlight === 0) {
+        committedWatchedRef.current.set(key, { row: existing, cwRow: prevCwRow });
+      }
+      watchedInFlightRef.current.set(key, activeInFlight + 1);
+
       const durationMs = target.durationMs ?? 0;
       const nextRow: WatchProgressRow = existing
         ? {
@@ -315,7 +323,7 @@ export function useHomeData({
         : {
             profileId: DEFAULT_PROFILE_ID,
             sourceId: target.sourceId,
-            itemKey: target.itemKey,
+            itemKey: key,
             kind: target.kind,
             title: target.title,
             subtitle: target.subtitle ?? null,
@@ -328,15 +336,19 @@ export function useHomeData({
             watched: nextWatched,
             updatedAt: Date.now(),
           };
-      applyWatchedState(target.itemKey, nextRow, undefined);
+      applyWatchedState(key, nextRow, undefined);
 
       const useSave = existing === undefined && nextWatched && catalog.saveProgress !== undefined;
-      if (!useSave && !catalog.setWatched) return;
+      if (!useSave && !catalog.setWatched) {
+        committedWatchedRef.current.set(key, { row: nextRow, cwRow: undefined });
+        releaseInFlightKey(watchedInFlightRef.current, key);
+        return;
+      }
       try {
         const res = useSave
           ? await catalog.saveProgress?.({
               sourceId: target.sourceId,
-              itemKey: target.itemKey,
+              itemKey: key,
               kind: target.kind,
               title: target.title,
               subtitle: target.subtitle ?? null,
@@ -345,12 +357,21 @@ export function useHomeData({
               durationMs,
               watched: true,
             })
-          : await catalog.setWatched?.(target.itemKey, nextWatched);
-        if (mountedRef.current && res && !res.ok) {
-          applyWatchedState(target.itemKey, existing, prevCwRow);
+          : await catalog.setWatched?.(key, nextWatched);
+        if (!mountedRef.current || !res) return;
+        if (res.ok) {
+          committedWatchedRef.current.set(key, { row: nextRow, cwRow: undefined });
+        } else if (watchedGenByKeyRef.current.get(key) === gen) {
+          const base = committedWatchedRef.current.get(key);
+          applyWatchedState(key, base?.row, base?.cwRow);
         }
       } catch {
-        if (mountedRef.current) applyWatchedState(target.itemKey, existing, prevCwRow);
+        if (mountedRef.current && watchedGenByKeyRef.current.get(key) === gen) {
+          const base = committedWatchedRef.current.get(key);
+          applyWatchedState(key, base?.row, base?.cwRow);
+        }
+      } finally {
+        releaseInFlightKey(watchedInFlightRef.current, key);
       }
     },
     [applyWatchedState, catalog],

@@ -49,10 +49,12 @@ function createAndroidSecureStoreBackend(): PreferencesKvBackend {
  */
 export function createDevicePreferencesStore(): PreferencesStore {
   if (Platform.OS === 'ios') {
-    return createKvPreferencesStore(createAppleSettingsBackend());
+    return createKvPreferencesStore(createAppleSettingsBackend(), undefined, { coalesceMs: 500 });
   }
   if (Platform.OS === 'android') {
-    return createKvPreferencesStore(createAndroidSecureStoreBackend());
+    return createKvPreferencesStore(createAndroidSecureStoreBackend(), undefined, {
+      coalesceMs: 500,
+    });
   }
   return createMemoryPreferencesStore();
 }

@@ -103,6 +103,7 @@ export type CatalogRpcMethodCall =
   | { method: 'listProgressByKeys'; itemKeys: readonly string[]; profileId?: string }
   | { method: 'clearProgress'; itemKey: string; profileId?: string }
   | { method: 'toggleFavorite'; input: ToggleFavoriteInput }
+  | { method: 'setFavorite'; input: ToggleFavoriteInput; active: boolean }
   | { method: 'listFavorites'; limit?: number; profileId?: string }
   | { method: 'listFavoriteKeys'; profileId?: string };
 
@@ -161,6 +162,7 @@ export interface CatalogBridge {
   listProgressByKeys(itemKeys: readonly string[], profileId?: string): Promise<WatchProgressRow[]>;
   clearProgress(itemKey: string, profileId?: string): Promise<Result<void>>;
   toggleFavorite(input: ToggleFavoriteInput): Promise<Result<boolean>>;
+  setFavorite(input: ToggleFavoriteInput, active: boolean): Promise<Result<boolean>>;
   listFavorites(limit?: number, profileId?: string): Promise<FavoriteRow[]>;
   listFavoriteKeys(profileId?: string): Promise<string[]>;
   onChanged(listener: () => void): () => void;
@@ -237,6 +239,8 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
       return isItemKeyList(x['itemKeys']) && isOptionalProfileId(x['profileId']);
     case 'toggleFavorite':
       return isToggleFavoriteInput(x['input']);
+    case 'setFavorite':
+      return isToggleFavoriteInput(x['input']) && typeof x['active'] === 'boolean';
     case 'listFavoriteKeys':
       return isOptionalProfileId(x['profileId']);
     default:

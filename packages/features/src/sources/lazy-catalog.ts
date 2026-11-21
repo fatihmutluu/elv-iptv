@@ -107,9 +107,21 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
           ? cat.toggleFavorite(input)
           : err(elvError('storage', 'unsupported'));
       }),
+    setFavorite: (input, active) =>
+      wrapResult(async () => {
+        const cat = await open();
+        return cat.setFavorite
+          ? cat.setFavorite(input, active)
+          : err(elvError('storage', 'unsupported'));
+      }),
     listFavorites: async (limit, profileId) =>
       (await open()).listFavorites?.(limit, profileId) ?? [],
     listFavoriteKeys: async (profileId) => (await open()).listFavoriteKeys?.(profileId) ?? [],
+    flushPendingWrites: async () => {
+      if (cached === undefined) return;
+      const cat = await cached.catch(() => undefined);
+      await cat?.flushPendingWrites?.();
+    },
     close: async () => {
       const current = cached;
       cached = undefined;

@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import { Platform, type StyleProp, StyleSheet, View, type ViewStyle } from 'react-native';
 import { useUiAdapters } from '../adapters';
-import { useTheme } from '../theme';
+import { hexToRgba, useTheme } from '../theme';
 
 /** Direction from which the scrim fades smoothly into `theme.colors.bgCanvas`. */
 export type ScrimDirection = 'bottom' | 'top' | 'left' | 'right';
@@ -11,6 +11,8 @@ export interface ScrimProps {
   direction?: ScrimDirection;
   /** Optional strength multiplier (`'default'` or `'strong'` for high-contrast hero readability). */
   intensity?: 'default' | 'strong';
+  /** Optional theme surface token override (defaults to `theme.colors.bgCanvas`). */
+  color?: string;
   style?: StyleProp<ViewStyle>;
   testID?: string;
 }
@@ -62,6 +64,7 @@ const VECTORS: Readonly<
 export function Scrim({
   direction = 'bottom',
   intensity = 'default',
+  color,
   style,
   testID,
 }: ScrimProps): ReactElement {
@@ -70,19 +73,23 @@ export function Scrim({
   const vec = VECTORS[direction];
 
   const stops =
-    intensity === 'strong'
-      ? [
-          theme.colors.scrimTransparent,
-          theme.colors.scrimMedium,
-          theme.colors.scrimStrong,
-          theme.colors.bgCanvas,
-        ]
-      : [
-          theme.colors.scrimTransparent,
-          theme.colors.scrimSoft,
-          theme.colors.scrimMedium,
-          theme.colors.bgCanvas,
-        ];
+    color !== undefined
+      ? intensity === 'strong'
+        ? [hexToRgba(color, 0), hexToRgba(color, 0.56), hexToRgba(color, 0.88), color]
+        : [hexToRgba(color, 0), hexToRgba(color, 0.32), hexToRgba(color, 0.68), color]
+      : intensity === 'strong'
+        ? [
+            theme.colors.scrimTransparent,
+            theme.colors.scrimMedium,
+            theme.colors.scrimStrong,
+            theme.colors.bgCanvas,
+          ]
+        : [
+            theme.colors.scrimTransparent,
+            theme.colors.scrimSoft,
+            theme.colors.scrimMedium,
+            theme.colors.bgCanvas,
+          ];
 
   if (adapters.renderGradient) {
     return (

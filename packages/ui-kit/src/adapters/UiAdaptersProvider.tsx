@@ -1,6 +1,7 @@
 import { createContext, type ReactElement, type ReactNode, useContext } from 'react';
 import type { ImageResizeMode, ImageStyle, StyleProp, ViewStyle } from 'react-native';
 import type { IconSpec } from '../icons/paths';
+import type { ImageErrorInfo } from '../primitives/dead-host-registry';
 
 /** Props passed to an optional native gradient renderer (`expo-linear-gradient`, etc.). */
 export interface GradientAdapterProps {
@@ -28,7 +29,7 @@ export interface ImageAdapterProps {
   readonly style?: StyleProp<ImageStyle>;
   readonly accessibilityLabel?: string;
   readonly onLoad?: () => void;
-  readonly onError?: () => void;
+  readonly onError?: (error?: ImageErrorInfo) => void;
 }
 
 /** Props passed to an optional native vector renderer (`react-native-svg`, etc.). */

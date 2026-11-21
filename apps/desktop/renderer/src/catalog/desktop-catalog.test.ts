@@ -85,6 +85,7 @@ function makeFakeBridge(overrides?: Partial<CatalogBridge>): {
     listProgressByKeys: async () => [],
     clearProgress: async () => ok(undefined),
     toggleFavorite: async () => ok(true),
+    setFavorite: async (_input, active) => ok(active),
     listFavorites: async () => [],
     listFavoriteKeys: async () => [],
     importGuide: async () =>
@@ -259,6 +260,10 @@ describe('desktop CatalogService', () => {
         favInputs.push(input);
         return ok(true);
       },
+      setFavorite: async (input, active) => {
+        favInputs.push(input);
+        return ok(active);
+      },
     });
     const service = createDesktopCatalogFromBridge(bridge);
 
@@ -277,9 +282,19 @@ describe('desktop CatalogService', () => {
       kind: 'movie',
       title: 'Tab\tFilm\u0007',
     });
+    await service.setFavorite?.(
+      {
+        sourceId: 's1',
+        itemKey: 'k2',
+        kind: 'movie',
+        title: 'Set\tFav\r\nTitle',
+      },
+      true,
+    );
 
     expect(savedInputs[0]).toMatchObject({ title: 'Dirty Show Name', subtitle: 'S1 E2' });
     expect(favInputs[0]).toMatchObject({ title: 'Tab Film' });
+    expect(favInputs[1]).toMatchObject({ title: 'Set Fav Title' });
   });
 
   it('sanitizes control characters and >256-char queries before calling bridge.search', async () => {

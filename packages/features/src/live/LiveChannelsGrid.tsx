@@ -2,6 +2,7 @@ import type { ItemRow, NowNextEntry } from '@elv/data';
 import type { KeyEvent } from '@elv/focus-core';
 import {
   TvFocusAnchor,
+  TvScrollEdgeFade,
   useI18n,
   useKeyInterpreter,
   useTheme,
@@ -277,21 +278,32 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
       {layout.isTv && isActiveScope ? <TvChannelsKeyBridge onEvent={handleTvKey} /> : null}
       {layout.isTv ? (
         <View testID="live-channels-tv-viewport" style={styles.tvViewport}>
-          {tvWindowRows.map((row) => (
-            <ChannelGridRow
-              key={row.rowIndex}
-              rowIndex={row.rowIndex}
-              items={row.items}
-              shared={shared}
-              nowNextByKey={nowNextByKey}
-              nowMs={nowMs}
-              activeChannelKey={activeChannelKey}
-              {...(favoriteKeys !== undefined ? { favoriteKeys } : {})}
-              focusedCol={isActiveScope && focusPos.row === row.rowIndex ? focusPos.col : null}
-              onWatchChannel={onWatchChannel}
-              {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
+          {tvWindowRows.map((row) => {
+            const isFocusedRow = isActiveScope && focusPos.row === row.rowIndex;
+            return (
+              <View key={row.rowIndex} style={isFocusedRow ? styles.focusedRowLayer : undefined}>
+                <ChannelGridRow
+                  rowIndex={row.rowIndex}
+                  items={row.items}
+                  shared={shared}
+                  nowNextByKey={nowNextByKey}
+                  nowMs={nowMs}
+                  activeChannelKey={activeChannelKey}
+                  {...(favoriteKeys !== undefined ? { favoriteKeys } : {})}
+                  focusedCol={isFocusedRow ? focusPos.col : null}
+                  onWatchChannel={onWatchChannel}
+                  {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
+                />
+              </View>
+            );
+          })}
+          <View pointerEvents="none" style={styles.edgeFadeLayer}>
+            <TvScrollEdgeFade
+              testID="live-channels-edge-fade"
+              showTop={tvWindowStart > 0}
+              showBottom={tvWindowEnd < rowCount - 1}
             />
-          ))}
+          </View>
         </View>
       ) : (
         <VirtualizedList
@@ -320,5 +332,7 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
 
 const styles = StyleSheet.create({
   flex1: { flex: 1 },
-  tvViewport: { flex: 1, overflow: 'hidden', paddingTop: 6 },
+  tvViewport: { flex: 1, overflow: 'hidden', paddingTop: 6, position: 'relative' },
+  edgeFadeLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 1 },
+  focusedRowLayer: { zIndex: 2 },
 });

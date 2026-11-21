@@ -156,4 +156,41 @@ describe('createPagedListSource', () => {
     expect(typeof off).toBe('function');
     off();
   });
+
+  it('seeds page 0 synchronously when initialPage0 is supplied without fetching page 0 again', () => {
+    const loadPage = vi.fn(async (offset: number, limit: number) =>
+      makePageItems(offset, limit, 500),
+    );
+    const source = createPagedListSource({
+      count: 500,
+      pageSize: 120,
+      initialPage0: makePageItems(0, 120, 500),
+      loadPage,
+    });
+
+    expect(source.get(0)).toBe('Ch 0');
+    expect(source.get(119)).toBe('Ch 119');
+    source.prefetch(0, 60);
+    expect(loadPage).not.toHaveBeenCalled();
+
+    source.prefetch(120, 140);
+    expect(loadPage).toHaveBeenCalledWith(120, 120);
+  });
+
+  it('ignores an undersized initialPage0 so the tail of page 0 is not trapped unfetched', async () => {
+    const loadPage = vi.fn(async (offset: number, limit: number) =>
+      makePageItems(offset, limit, 500),
+    );
+    const source = createPagedListSource({
+      count: 500,
+      pageSize: 120,
+      initialPage0: makePageItems(0, 10, 500),
+      loadPage,
+    });
+
+    expect(source.get(0)).toBeUndefined();
+    source.prefetch(0, 60);
+    expect(loadPage).toHaveBeenCalledWith(0, 120);
+    expect(await source.loadItem(119)).toBe('Ch 119');
+  });
 });

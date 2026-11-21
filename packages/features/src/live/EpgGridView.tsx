@@ -1,6 +1,12 @@
 import type { CatalogService, ItemRow } from '@elv/data';
 import type { KeyEvent } from '@elv/focus-core';
-import { TvFocusAnchor, useKeyInterpreter, useTheme, useViewport } from '@elv/ui-kit';
+import {
+  TvFocusAnchor,
+  TvScrollEdgeFade,
+  useKeyInterpreter,
+  useTheme,
+  useViewport,
+} from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type NativeScrollEvent,
@@ -315,26 +321,33 @@ export function EpgGridView({
           <View testID="epg-tv-viewport" style={styles.tvViewport}>
             {tvRowIndices.map((rowIdx) => {
               const ch = channelSource.get(rowIdx);
+              const isFocusedRow = isTvGridFocused && rowIdx === cursor.focusedRow;
               return (
-                <EpgChannelRow
-                  key={rowIdx}
-                  rowIndex={rowIdx}
-                  channel={ch}
-                  programmes={ch ? epgData.getProgrammes(ch.key) : EMPTY_PROGRAMMES}
-                  windowStartMs={epgData.windowStartMs}
-                  spanMs={EPG_VISIBLE_SPAN_MS}
-                  nowMs={activeNowMs}
-                  channelColWidth={channelColWidth}
-                  rowHeight={rowHeight}
-                  isTv
-                  isFocusedRow={isTvGridFocused && rowIdx === cursor.focusedRow}
-                  focusedSlotIndex={
-                    isTvGridFocused && rowIdx === cursor.focusedRow ? cursor.focusedSlotIndex : 0
-                  }
-                  onSelectCell={cursor.handleSelectCell}
-                />
+                <View key={rowIdx} style={isFocusedRow ? styles.focusedRowLayer : undefined}>
+                  <EpgChannelRow
+                    rowIndex={rowIdx}
+                    channel={ch}
+                    programmes={ch ? epgData.getProgrammes(ch.key) : EMPTY_PROGRAMMES}
+                    windowStartMs={epgData.windowStartMs}
+                    spanMs={EPG_VISIBLE_SPAN_MS}
+                    nowMs={activeNowMs}
+                    channelColWidth={channelColWidth}
+                    rowHeight={rowHeight}
+                    isTv
+                    isFocusedRow={isFocusedRow}
+                    focusedSlotIndex={isFocusedRow ? cursor.focusedSlotIndex : 0}
+                    onSelectCell={cursor.handleSelectCell}
+                  />
+                </View>
               );
             })}
+            <View pointerEvents="none" style={styles.edgeFadeLayer}>
+              <TvScrollEdgeFade
+                testID="epg-grid-edge-fade"
+                showTop={tvWindowStart > 0}
+                showBottom={tvWindowEnd >= 0 && tvWindowEnd < channelCount - 1}
+              />
+            </View>
           </View>
         ) : (
           <VirtualizedList
@@ -376,7 +389,9 @@ export function EpgGridView({
 const styles = StyleSheet.create({
   root: { flex: 1 },
   matrixWrap: { flex: 1, position: 'relative' },
-  tvViewport: { flex: 1, overflow: 'hidden' },
+  tvViewport: { flex: 1, overflow: 'hidden', position: 'relative' },
+  edgeFadeLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 1 },
+  focusedRowLayer: { zIndex: 2 },
   listFlex: { flex: 1 },
   nowOverlay: { position: 'absolute', top: 0, bottom: 0, right: 0 },
   nowLine: { position: 'absolute', top: 0, bottom: 0, width: 2 },

@@ -5,11 +5,13 @@ import {
   createPagedListSource,
   type DisplayCategory,
   type PagedListSource,
+  useCatalogUiCache,
 } from '../shared';
 import { GRID_MAX_PAGES, GRID_PAGE_SIZE } from './catalog-model';
 
 /** Options for {@link useCategoryGridData}. */
 export interface UseCategoryGridDataOptions {
+  readonly kind?: 'movie' | 'series';
   readonly category: DisplayCategory;
   readonly catalog: CatalogService;
   readonly refreshToken: number;
@@ -31,9 +33,11 @@ export interface CategoryGridDataState {
 
 /**
  * Manages O(1)-memory `PagedListSource` pagination and deduped visible-window watch-progress
- * hydration for {@link CategoryGridView}.
+ * hydration for {@link CategoryGridView}. Hydrates page 0 synchronously from `CatalogUiCache` and
+ * keeps previously visible rows rendered while switching to an uncached category (`#445`).
  */
 export function useCategoryGridData({
+  kind = 'movie',
   category,
   catalog,
   refreshToken,
@@ -41,46 +45,164 @@ export function useCategoryGridData({
   cols,
   visibleGridRows,
 }: UseCategoryGridDataOptions): CategoryGridDataState {
-  const [pagedSource, setPagedSource] = useState<PagedListSource<ItemRow> | null>(null);
+  const uiCache = useCatalogUiCache();
+  const uiCacheRef = useRef(uiCache);
+  uiCacheRef.current = uiCache;
+
+  const buildSource = useCallback(
+    (
+      catId: string,
+      count: number,
+      initialPage0: readonly ItemRow[] | undefined,
+    ): PagedListSource<ItemRow> =>
+      createPagedListSource<ItemRow>({
+        count,
+        pageSize: GRID_PAGE_SIZE,
+        maxPages: GRID_MAX_PAGES,
+        ...(initialPage0 !== undefined ? { initialPage0 } : {}),
+        loadPage: async (offset, limit) => {
+          const rows = await catalog.items(catId, offset, limit);
+          if (offset === 0 && rows.length > 0) {
+            uiCacheRef.current?.setGridFirstPage(kind, catId, rows);
+          }
+          return rows;
+        },
+      }),
+    [catalog, kind],
+  );
+
+  const initialSourceRef = useRef<{
+    source: PagedListSource<ItemRow>;
+    catId: string;
+    count: number;
+    refreshToken: number;
+    catalog: CatalogService;
+  } | null>(null);
+
+  if (initialSourceRef.current === null) {
+    const seeded = uiCache?.getGridFirstPage(kind, category.row.id);
+    initialSourceRef.current = {
+      source: buildSource(category.row.id, category.row.itemCount, seeded),
+      catId: category.row.id,
+      count: category.row.itemCount,
+      refreshToken,
+      catalog,
+    };
+  }
+
+  const [pagedSource, setPagedSource] = useState<PagedListSource<ItemRow> | null>(
+    () => initialSourceRef.current?.source ?? null,
+  );
   const [pageVersion, setPageVersion] = useState(0);
   const [progressResetToken, setProgressResetToken] = useState(0);
   const [progressByKey, setProgressByKey] = useState<ReadonlyMap<string, WatchProgressRow>>(
     () => new Map(),
   );
 
-  const pagedSourceRef = useRef<PagedListSource<ItemRow> | null>(null);
+  const pagedSourceRef = useRef<PagedListSource<ItemRow> | null>(
+    initialSourceRef.current?.source ?? null,
+  );
+  const activeKeyRef = useRef({
+    catId: category.row.id,
+    count: category.row.itemCount,
+    refreshToken,
+    catalog,
+  });
+  const unsubRef = useRef<(() => void) | null>(null);
   const fetchedKeysRef = useRef<Set<string>>(new Set());
   const progressGenRef = useRef(0);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken intentionally recreates paged source
+  // Dispose active pagedSource on final unmount
+  useEffect(() => {
+    return () => {
+      unsubRef.current?.();
+      unsubRef.current = null;
+      pagedSourceRef.current?.dispose();
+      pagedSourceRef.current = null;
+    };
+  }, []);
+
   useEffect(() => {
     let alive = true;
-    const source = createPagedListSource<ItemRow>({
-      count: category.row.itemCount,
-      pageSize: GRID_PAGE_SIZE,
-      maxPages: GRID_MAX_PAGES,
-      loadPage: (offset, limit) => catalog.items(category.row.id, offset, limit),
-    });
-    const unsubscribe = source.onChange(() => {
-      if (alive) setPageVersion((v) => v + 1);
-    });
-    pagedSourceRef.current = source;
-    setPagedSource(source);
-    source.prefetch(0, (visibleGridRows + 4) * cols);
+    const catId = category.row.id;
+    const count = category.row.itemCount;
+    const sameActive =
+      pagedSourceRef.current !== null &&
+      activeKeyRef.current.catId === catId &&
+      activeKeyRef.current.count === count &&
+      activeKeyRef.current.refreshToken === refreshToken &&
+      activeKeyRef.current.catalog === catalog;
+
+    const attachAndActivate = (next: PagedListSource<ItemRow>) => {
+      if (pagedSourceRef.current && pagedSourceRef.current !== next) {
+        unsubRef.current?.();
+        pagedSourceRef.current.dispose();
+      } else {
+        unsubRef.current?.();
+      }
+      unsubRef.current = next.onChange(() => {
+        if (alive) setPageVersion((v) => v + 1);
+      });
+      pagedSourceRef.current = next;
+      activeKeyRef.current = { catId, count, refreshToken, catalog };
+      setPagedSource(next);
+      setPageVersion((v) => v + 1);
+      next.prefetch(0, (visibleGridRows + 4) * cols);
+    };
+
+    if (sameActive && pagedSourceRef.current) {
+      unsubRef.current?.();
+      unsubRef.current = pagedSourceRef.current.onChange(() => {
+        if (alive) setPageVersion((v) => v + 1);
+      });
+      pagedSourceRef.current.prefetch(0, (visibleGridRows + 4) * cols);
+      return () => {
+        alive = false;
+      };
+    }
+
+    const tokenBumped = activeKeyRef.current.refreshToken !== refreshToken;
+    const cachedPage0 = tokenBumped ? undefined : uiCacheRef.current?.getGridFirstPage(kind, catId);
+    const keepPreviousWhileFetching =
+      pagedSourceRef.current !== null && count > 0 && cachedPage0 === undefined;
+
+    if (!keepPreviousWhileFetching) {
+      attachAndActivate(buildSource(catId, count, cachedPage0));
+      return () => {
+        alive = false;
+      };
+    }
+
+    // Keep previously rendered rows visible while fetching fresh page 0 of the target category.
+    void catalog
+      .items(catId, 0, Math.min(GRID_PAGE_SIZE, count))
+      .then((rows) => {
+        if (!alive) return;
+        if (rows.length > 0) uiCacheRef.current?.setGridFirstPage(kind, catId, rows);
+        attachAndActivate(buildSource(catId, count, rows));
+      })
+      .catch(() => {
+        if (alive) attachAndActivate(buildSource(catId, count, undefined));
+      });
 
     return () => {
       alive = false;
-      unsubscribe();
-      source.dispose();
-      if (pagedSourceRef.current === source) pagedSourceRef.current = null;
     };
-  }, [catalog, category.row.id, category.row.itemCount, cols, refreshToken, visibleGridRows]);
+  }, [
+    buildSource,
+    catalog,
+    category.row.id,
+    category.row.itemCount,
+    cols,
+    kind,
+    refreshToken,
+    visibleGridRows,
+  ]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional reset triggers
   useEffect(() => {
     progressGenRef.current += 1;
     fetchedKeysRef.current = new Set();
-    setProgressByKey(new Map());
     setProgressResetToken((t) => t + 1);
   }, [category.row.id, refreshToken, userStateVersion]);
 
@@ -115,7 +237,7 @@ export function useCategoryGridData({
     [catalog, cols],
   );
 
-  const itemCount = category.row.itemCount;
+  const itemCount = pagedSource?.count() ?? category.row.itemCount;
 
   const getItemAt = useCallback(
     (index: number): ItemRow | undefined => pagedSource?.get(index),

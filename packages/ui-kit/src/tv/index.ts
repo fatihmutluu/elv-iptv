@@ -18,6 +18,7 @@ export {
 } from './remote-dispatcher';
 export { TvFocusAnchor, type TvFocusAnchorProps } from './TvFocusAnchor';
 export { type FrameWindow, TvList, type TvListProps } from './TvList';
+export { TvScrollEdgeFade, type TvScrollEdgeFadeProps } from './TvScrollEdgeFade';
 export {
   TextEntryBoundary,
   type TextEntrySuspension,

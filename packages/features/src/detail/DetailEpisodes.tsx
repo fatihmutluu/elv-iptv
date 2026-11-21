@@ -19,6 +19,7 @@ export interface DetailEpisodesProps {
   readonly selectedSeason: number | null;
   readonly episodes: readonly EpisodeRow[];
   readonly episodesLoading: boolean;
+  readonly episodesRefreshing?: boolean;
   readonly episodeProgressByKey: ReadonlyMap<string, WatchProgressRow>;
   readonly seriesBackdropUri: string | null;
   readonly onSelectSeason: (season: number) => void;
@@ -43,6 +44,7 @@ function DetailEpisodesInner({
   selectedSeason,
   episodes,
   episodesLoading,
+  episodesRefreshing = false,
   episodeProgressByKey,
   seriesBackdropUri,
   onSelectSeason,
@@ -234,6 +236,7 @@ function DetailEpisodesInner({
                   paddingHorizontal: padX,
                   paddingTop: isTv ? 6 : 2,
                   gap: isTv ? theme.spacing.sm : theme.spacing.xs,
+                  opacity: episodesRefreshing ? 0.72 : 1,
                 },
               ]}
             >

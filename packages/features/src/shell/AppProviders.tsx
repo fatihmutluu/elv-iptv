@@ -47,6 +47,7 @@ export interface PreferencesContextValue {
   readonly ready: boolean;
   updatePreferences(patch: PreferencesPatch): Promise<Result<PreferencesSnapshot>>;
   resetPreferences(): Promise<Result<PreferencesSnapshot>>;
+  flushPreferences(): Promise<void>;
 }
 
 const DEFAULT_PREFERENCES_CONTEXT: PreferencesContextValue = {
@@ -54,6 +55,7 @@ const DEFAULT_PREFERENCES_CONTEXT: PreferencesContextValue = {
   ready: false,
   updatePreferences: async () => ok(DEFAULT_PREFERENCES),
   resetPreferences: async () => ok(DEFAULT_PREFERENCES),
+  flushPreferences: async () => undefined,
 };
 
 const PreferencesContext = createContext<PreferencesContextValue>(DEFAULT_PREFERENCES_CONTEXT);
@@ -166,14 +168,25 @@ export function AppProviders({
 
   const resetPreferences = useCallback(() => store.reset(), [store]);
 
+  const flushPreferences = useCallback(() => store.flush?.() ?? Promise.resolve(), [store]);
+
+  useEffect(() => {
+    return () => {
+      void Promise.resolve()
+        .then(() => store.flush?.())
+        .catch(() => undefined);
+    };
+  }, [store]);
+
   const contextValue = useMemo<PreferencesContextValue>(
     () => ({
       preferences,
       ready,
       updatePreferences,
       resetPreferences,
+      flushPreferences,
     }),
-    [preferences, ready, updatePreferences, resetPreferences],
+    [preferences, ready, updatePreferences, resetPreferences, flushPreferences],
   );
 
   return (

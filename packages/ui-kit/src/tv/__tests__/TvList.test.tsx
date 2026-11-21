@@ -741,4 +741,57 @@ describe('TvList', () => {
       expect(lastPrefetch?.[1]).toBeGreaterThan(250);
     });
   });
+
+  describe('TvScrollEdgeFade integration (#230)', () => {
+    it('renders edge fades strictly between rows and FocusRing and toggles top/bottom with window position', async () => {
+      const { store, ui } = setup(4, 12, 1);
+      const view = await render(
+        <ThemeProvider>{cloneElement(ui, { edgeFade: true })}</ThemeProvider>,
+      );
+
+      // At top of list (windowStart = 0, visibleRows = 4 < 12): bottom fade only
+      expect(screen.queryByTestId('list-edge-fade-top')).toBeNull();
+      expect(screen.getByTestId('list-edge-fade-bottom')).toBeTruthy();
+
+      // Verify sibling order: Animated rows -> TvScrollEdgeFade -> FocusRing
+      const container = screen.getByTestId('list');
+      const childTestIds = (container.children as Array<{ props?: { testID?: string } }>).map(
+        (c) => c.props?.testID,
+      );
+      const fadeIdx = childTestIds.indexOf('list-edge-fade');
+      const ringIdx = childTestIds.indexOf('list-ring');
+      expect(fadeIdx).toBeGreaterThan(0);
+      expect(ringIdx).toBeGreaterThan(fadeIdx);
+
+      // Mid-list: both top and bottom fades visible
+      await act(async () => move(store, 'down', 5));
+      expect(screen.getByTestId('list-edge-fade-top')).toBeTruthy();
+      expect(screen.getByTestId('list-edge-fade-bottom')).toBeTruthy();
+
+      // Bottom of list: top fade only
+      await act(async () => move(store, 'down', 6));
+      expect(screen.getByTestId('list-edge-fade-top')).toBeTruthy();
+      expect(screen.queryByTestId('list-edge-fade-bottom')).toBeNull();
+      await view.unmount();
+
+      // focusLine === 0 mid-list: top fade hides so edge-focused row 0 isn't dimmed
+      const topEdge = setup(4, 12, 0);
+      const topView = await render(
+        <ThemeProvider>{cloneElement(topEdge.ui, { edgeFade: true })}</ThemeProvider>,
+      );
+      await act(async () => move(topEdge.store, 'down', 4));
+      expect(screen.queryByTestId('list-edge-fade-top')).toBeNull();
+      expect(screen.getByTestId('list-edge-fade-bottom')).toBeTruthy();
+      await topView.unmount();
+
+      // focusLine === visibleRows - 1 mid-list: bottom fade hides so edge-focused bottom row isn't dimmed
+      const bottomEdge = setup(4, 12, 3);
+      await render(
+        <ThemeProvider>{cloneElement(bottomEdge.ui, { edgeFade: true })}</ThemeProvider>,
+      );
+      await act(async () => move(bottomEdge.store, 'down', 6));
+      expect(screen.getByTestId('list-edge-fade-top')).toBeTruthy();
+      expect(screen.queryByTestId('list-edge-fade-bottom')).toBeNull();
+    });
+  });
 });
