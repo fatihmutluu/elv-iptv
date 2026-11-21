@@ -1,5 +1,6 @@
 import { type HttpRequestOptions, ok, type SqlDriver, type SqlValue } from '@elv/domain';
 import { describe, expect, it, vi } from 'vitest';
+import { createSerializedImportQueue } from './import-queue';
 import {
   extinf,
   M3U_PASS,
@@ -350,5 +351,155 @@ describe('CatalogService in @elv/data', () => {
       write: () => undefined,
     };
     expect(await reconcileManifest(fresh.db, mem)).toEqual(['restored1']);
+  });
+
+  it('imports XMLTV guide via importGuide, queries nowNext/epgWindow, and resolves M3U logos in channelByNumber', async () => {
+    const playlistUrl = 'http://panel.example:8080/list.m3u';
+    const guideUrl = 'http://panel.example:8080/guide.xml';
+    const tok = M3U_TOKEN;
+    const playlist = [
+      '#EXTM3U',
+      `#EXTINF:-1 tvg-id="cinema.1" tvg-chno="101" tvg-logo="http://img.example/${tok}/101.png" group-title="Cinema",Velvet Cinema`,
+      `http://cdn.example/${tok}/live/101.ts`,
+    ].join('\n');
+    // Clock is 2026-11-21T12:30:00Z = 1795177800000
+    const nowMs = Date.UTC(2026, 10, 21, 12, 30, 0);
+    const xmltv = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<tv>',
+      '  <channel id="cinema.1"><display-name>Velvet Cinema</display-name></channel>',
+      '  <programme start="20261121120000 +0000" stop="20261121130000 +0000" channel="cinema.1">',
+      '    <title>Noon Feature</title>',
+      '    <desc>A quiet afternoon film.</desc>',
+      '  </programme>',
+      '  <programme start="20261121130000 +0000" stop="20261121140000 +0000" channel="cinema.1">',
+      '    <title>Matinee Hour</title>',
+      '  </programme>',
+      '</tv>',
+    ].join('\n');
+
+    const t = testDb();
+    await openCatalog(t.db);
+    const service = createCatalogService({
+      db: t.db,
+      secrets: memorySecrets(),
+      scheduler: countingScheduler(),
+      http: m3uHttp({ [playlistUrl]: playlist, [guideUrl]: xmltv }),
+      clock: () => nowMs,
+      newId: () => 's1',
+    });
+
+    const added = await service.addSource({
+      kind: 'm3u',
+      name: 'Cinema M3U',
+      playlistUrl,
+      guideUrl,
+    });
+    if (!added.ok) throw new Error('add failed');
+    expect((await service.importSource('s1')).ok).toBe(true);
+    const guideRes = await service.importGuide?.('s1');
+    expect(guideRes?.ok).toBe(true);
+
+    const ch = await service.channelByNumber?.(101);
+    expect(ch).toMatchObject({
+      num: 101,
+      name: 'Velvet Cinema',
+      logo: `http://img.example/${tok}/101.png`,
+    });
+    expect(await service.channelByNumber?.(999)).toBeNull();
+
+    const chKey = ch?.key ?? '';
+    const nn = await service.nowNext?.([chKey], nowMs);
+    expect(nn).toHaveLength(1);
+    expect(nn?.[0]?.now?.title).toBe('Noon Feature');
+    expect(nn?.[0]?.next?.title).toBe('Matinee Hour');
+
+    const win = await service.epgWindow?.([chKey], nowMs - 30 * 60_000, nowMs + 90 * 60_000);
+    expect(win?.[chKey]?.map((p) => p.title)).toEqual(['Noon Feature', 'Matinee Hour']);
+
+    await service.close();
+  });
+
+  it('serializes importGuide with importSource, rejects duplicate importGuide, and aborts on removeSource', async () => {
+    const playlistUrl = 'http://panel.example:8080/list.m3u';
+    const guideUrl = 'http://panel.example:8080/guide.xml';
+    const nowMs = Date.UTC(2026, 10, 21, 12, 30, 0);
+    const playlist = `#EXTM3U\n${extinf('Ch 1', `http://cdn.example/${M3U_TOKEN}/live/1.ts`, 'tvg-id="c1" group-title="G"')}`;
+    const xmltv = [
+      '<tv><channel id="c1"><display-name>Ch 1</display-name></channel>',
+      ...Array.from(
+        { length: 40 },
+        (_, i) =>
+          `<programme start="20261121${String(Math.floor(i / 2)).padStart(2, '0')}${i % 2 === 0 ? '00' : '30'}00 +0000" stop="20261121${String(Math.floor((i + 1) / 2)).padStart(2, '0')}${(i + 1) % 2 === 0 ? '00' : '30'}00 +0000" channel="c1"><title>P${i}</title></programme>`,
+      ),
+      '</tv>',
+    ].join('');
+
+    const t = testDb();
+    await openCatalog(t.db);
+    const service = createCatalogService({
+      db: t.db,
+      secrets: memorySecrets(),
+      scheduler: countingScheduler(),
+      http: m3uHttp({ [playlistUrl]: playlist, [guideUrl]: xmltv }),
+      clock: () => nowMs,
+      newId: () => 's1',
+    });
+
+    const added = await service.addSource({ kind: 'm3u', name: 'M', playlistUrl, guideUrl });
+    if (!added.ok) throw new Error('add failed');
+
+    // Queue importGuide right after importSource; both succeed in order
+    const catP = service.importSource('s1');
+    const guideP = service.importGuide?.('s1');
+    const dupGuideP = service.importGuide?.('s1');
+    expect(await dupGuideP).toEqual({
+      ok: false,
+      error: { category: 'storage', code: 'import-in-progress' },
+    });
+    expect((await catP).ok).toBe(true);
+    expect((await guideP)?.ok).toBe(true);
+
+    // Abort in-flight importGuide via removeSource
+    let rmP: ReturnType<CatalogService['removeSource']> | undefined;
+    const abortedGuide = service.importGuide?.('s1', {
+      batchSize: 5,
+      onProgress: () => {
+        rmP ??= service.removeSource('s1');
+      },
+    });
+    expect(await abortedGuide).toMatchObject({ ok: false, error: { code: 'aborted' } });
+    expect(await rmP).toEqual({ ok: true, value: undefined });
+    await service.close();
+  });
+
+  it('never deadlocks close() or subsequent imports if queue onSettled rejects', async () => {
+    const t = testDb();
+    await openCatalog(t.db);
+    const queue = createSerializedImportQueue(t.db);
+    await expect(
+      queue.run(
+        's1',
+        'guide',
+        undefined,
+        async () => ({
+          ok: true,
+          value: {
+            runId: 1,
+            counts: { categories: 0, live: 0, movies: 0, series: 0, episodes: 0 },
+            warnings: 0,
+            warningCodes: [],
+            durationMs: 1,
+          },
+        }),
+        {
+          onSettled: async () => {
+            throw new Error('disk full');
+          },
+        },
+      ),
+    ).rejects.toThrow('disk full');
+    // Queue must not be deadlocked: close() resolves immediately
+    await queue.close();
   });
 });

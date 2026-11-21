@@ -538,4 +538,58 @@ describe('@elv/i18n', () => {
     expect(tr.t('search.resultsSummary', { count: 1 })).toBe('1 sonuç');
     expect(tr.t('search.resultsSummary', { count: 18 })).toBe('18 sonuç');
   });
+
+  it('localizes Live TV Hub, Mini-Guide, Number Pad, and EPG Grid strings in English and Turkish', () => {
+    const en = createAppI18n('en');
+    const tr = createAppI18n('tr');
+    const staticCases: ReadonlyArray<readonly [MessageId, string, string]> = [
+      ['live.mode.watch', 'Watch', 'İzle'],
+      ['live.mode.channels', 'Channels', 'Kanallar'],
+      ['live.mode.guide', 'TV Guide', 'TV Rehberi'],
+      ['live.miniGuide', 'Mini-Guide', 'Mini Rehber'],
+      ['live.prevChannel', 'Previous channel', 'Önceki kanal'],
+      ['live.numberPad', 'Channel number', 'Kanal numarası'],
+      ['live.numberJump', 'Tune', 'Git'],
+      ['live.numberClear', 'Clear', 'Temizle'],
+      ['live.watchFullscreen', 'Watch live', 'Canlı izle'],
+      ['live.upNext', 'Up next', 'Sıradaki'],
+      ['live.noProgramInfo', 'Program information unavailable', 'Program bilgisi yok'],
+      ['live.emptyTitle', 'No live channels yet', 'Henüz canlı kanal yok'],
+      [
+        'live.emptyDescription',
+        'Add or refresh a source to load live broadcasts and TV Guide schedules.',
+        'Canlı yayınları ve TV rehberini yüklemek için bir kaynak ekleyin veya yenileyin.',
+      ],
+      ['epg.title', 'TV Guide', 'TV Rehberi'],
+      ['epg.now', 'Now', 'Şimdi'],
+      ['epg.jumpToLive', 'Jump to live', 'Canlıya dön'],
+      ['epg.refreshGuide', 'Refresh guide', 'Rehberi yenile'],
+      ['epg.refreshingGuide', 'Refreshing…', 'Yenileniyor…'],
+      ['epg.watchNow', 'Watch now', 'Şimdi izle'],
+      ['epg.earlier', 'Earlier', 'Önceki'],
+      ['epg.later', 'Later', 'Sonraki'],
+      [
+        'epg.noGuideData',
+        'No guide schedule loaded for this window.',
+        'Bu zaman aralığı için rehber verisi yok.',
+      ],
+      ['epg.onAirBadge', 'ON AIR', 'YAYINDA'],
+    ];
+    for (const [id, expectedEn, expectedTr] of staticCases) {
+      expect(en.t(id)).toBe(expectedEn);
+      expect(tr.t(id)).toBe(expectedTr);
+    }
+
+    expect(en.t('live.numberNotFound', { number: 404 })).toBe('No channel #404');
+    expect(tr.t('live.numberNotFound', { number: 404 })).toBe('#404 numaralı kanal yok');
+    expect(en.t('live.numberNotFound', { number: '07' })).toBe('No channel #07');
+    expect(tr.t('live.numberNotFound', { number: '07' })).toBe('#07 numaralı kanal yok');
+
+    expect(en.t('live.channelsCount', { count: 0 })).toBe('0 channels');
+    expect(en.t('live.channelsCount', { count: 1 })).toBe('1 channel');
+    expect(en.t('live.channelsCount', { count: 42 })).toBe('42 channels');
+    expect(tr.t('live.channelsCount', { count: 0 })).toBe('0 kanal');
+    expect(tr.t('live.channelsCount', { count: 1 })).toBe('1 kanal');
+    expect(tr.t('live.channelsCount', { count: 42 })).toBe('42 kanal');
+  });
 });

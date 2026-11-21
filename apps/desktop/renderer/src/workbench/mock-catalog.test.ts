@@ -194,4 +194,75 @@ describe('createWorkbenchCatalog', () => {
       series: [],
     });
   });
+
+  it('provides synthetic multi-hour EPG schedules for all 10 workbench live channels, channelByNumber, and importGuide', async () => {
+    const catalog = createWorkbenchCatalog();
+    const sources = await catalog.listSources();
+    const srcId = sources[0]?.id ?? '';
+    const liveCats = await catalog.categories(srcId, 'live');
+    const allLive = (await Promise.all(liveCats.map((c) => catalog.items(c.id, 0, 50)))).flat();
+    expect(allLive).toHaveLength(10);
+
+    const nowMs = Date.UTC(2026, 10, 21, 14, 20, 0);
+    const keys = allLive.map((c) => c.key);
+
+    // nowNext returns active now + upcoming next for every workbench live channel
+    const nn = await catalog.nowNext?.(keys, nowMs);
+    expect(nn).toHaveLength(10);
+    for (const entry of nn ?? []) {
+      const { now, next } = entry;
+      expect(now).not.toBeNull();
+      expect(next).not.toBeNull();
+      if (!now || !next) continue;
+      expect(now.start).toBeLessThanOrEqual(nowMs);
+      expect(now.stop).toBeGreaterThan(nowMs);
+      expect(next.start).toBe(now.stop);
+      const durMin = (now.stop - now.start) / 60_000;
+      expect(durMin).toBeGreaterThanOrEqual(45);
+      expect(durMin).toBeLessThanOrEqual(60);
+      expect(now.description?.length).toBeGreaterThan(15);
+    }
+
+    // epgWindow returns overlapping multi-hour schedule consistent with nowNext
+    const fromMs = nowMs - 30 * 60_000;
+    const toMs = nowMs + 3 * 3_600_000;
+    const win = await catalog.epgWindow?.(keys, fromMs, toMs);
+    expect(Object.keys(win ?? {})).toHaveLength(10);
+    for (const entry of nn ?? []) {
+      const { now, next } = entry;
+      if (!now || !next) continue;
+      const list = win?.[entry.channelKey] ?? [];
+      expect(list.length).toBeGreaterThanOrEqual(4);
+      expect(list.some((p) => p.start === now.start && p.title === now.title)).toBe(true);
+      expect(list.some((p) => p.start === next.start && p.title === next.title)).toBe(true);
+      for (let i = 1; i < list.length; i += 1) {
+        const cur = list[i];
+        const prev = list[i - 1];
+        expect(cur && prev && cur.start >= prev.stop).toBe(true);
+      }
+    }
+
+    // channelByNumber finds workbench live channels and rejects missing/negative numbers
+    expect(await catalog.channelByNumber?.(101)).toMatchObject({
+      key: 'wb:live:101',
+      name: 'Velvet Cinema 4K',
+      num: 101,
+    });
+    expect(await catalog.channelByNumber?.(303, srcId)).toMatchObject({
+      key: 'wb:live:303',
+      name: 'Weather Pulse',
+      num: 303,
+    });
+    expect(await catalog.channelByNumber?.(303, 'missing-source')).toBeNull();
+    expect(await catalog.channelByNumber?.(999)).toBeNull();
+    expect(await catalog.channelByNumber?.(-1)).toBeNull();
+
+    // importGuide succeeds for existing sources and fails for unknown sources
+    const guideOk = await catalog.importGuide?.(srcId);
+    expect(guideOk?.ok).toBe(true);
+    expect(await catalog.importGuide?.('unknown-source')).toMatchObject({
+      ok: false,
+      error: { category: 'storage' },
+    });
+  });
 });

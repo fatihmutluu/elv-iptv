@@ -194,6 +194,10 @@ describe('createCatalogBridge', () => {
     });
     const favsP = bridge.listFavorites(20);
     const favKeysP = bridge.listFavoriteKeys();
+    const guideP = bridge.importGuide('s1');
+    const nowNextP = bridge.nowNext(['x:s1:live:1'], 1_700_000_000_000);
+    const epgWinP = bridge.epgWindow(['x:s1:live:1'], 1_700_000_000_000, 1_700_010_800_000);
+    const chNumP = bridge.channelByNumber(101, 's1');
     await Promise.resolve();
 
     for (const msg of port.sent.slice(4)) {
@@ -205,13 +209,18 @@ describe('createCatalogBridge', () => {
           msg.call.method === 'listContinueWatching' ||
           msg.call.method === 'listProgressByKeys' ||
           msg.call.method === 'listFavorites' ||
-          msg.call.method === 'listFavoriteKeys'
+          msg.call.method === 'listFavoriteKeys' ||
+          msg.call.method === 'nowNext'
             ? []
-            : msg.call.method === 'getProgress' || msg.call.method === 'itemDetail'
+            : msg.call.method === 'getProgress' ||
+                msg.call.method === 'itemDetail' ||
+                msg.call.method === 'channelByNumber'
               ? null
               : msg.call.method === 'search'
                 ? { live: [], movies: [], series: [] }
-                : ok(undefined);
+                : msg.call.method === 'epgWindow'
+                  ? {}
+                  : ok(undefined);
         port.deliver({ type: 'result', reqId: msg.reqId, value: val });
       }
     }
@@ -234,6 +243,10 @@ describe('createCatalogBridge', () => {
     expect((await togFavP).ok).toBe(true);
     expect(await favsP).toEqual([]);
     expect(await favKeysP).toEqual([]);
+    expect((await guideP).ok).toBe(true);
+    expect(await nowNextP).toEqual([]);
+    expect(await epgWinP).toEqual({});
+    expect(await chNumP).toBeNull();
 
     await bridge.close();
     expect(port.closed).toBe(true);
@@ -349,6 +362,21 @@ describe('createCatalogBridge', () => {
       ok: false,
       error: { category: 'source-format', code: 'invalid-request' },
     });
+    expect(await bridge.importGuide('')).toEqual({
+      ok: false,
+      error: { category: 'source-format', code: 'invalid-request' },
+    });
+    await expect(bridge.nowNext(['x:s1:live:1'], -1)).rejects.toThrow(
+      /source-format\/invalid-request/,
+    );
+    await expect(
+      bridge.epgWindow(
+        Array.from({ length: 41 }, (_, i) => `x:s1:live:${i}`),
+        1000,
+        2000,
+      ),
+    ).rejects.toThrow(/source-format\/invalid-request/);
+    await expect(bridge.channelByNumber(-5)).rejects.toThrow(/source-format\/invalid-request/);
     expect(h.outgoing).toHaveLength(0);
   });
 });

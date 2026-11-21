@@ -2,6 +2,7 @@ export * from './catalog';
 export * from './driver';
 export * from './fold';
 export * from './guide-match';
+export * from './guide-queries';
 export { importGuide } from './import-guide';
 export * from './import-types';
 export { importCatalog, loadSeriesEpisodes } from './import-xtream';

@@ -332,8 +332,20 @@ describe('App', () => {
     openedWith(null);
 
     const view = await render(<App />);
-    const liveCard = await screen.findByTestId('home-live-item-0');
-    await fireEvent.press(liveCard);
+    await screen.findByTestId('home-live-item-0');
+
+    await fireEvent.press(screen.getByTestId('nav-tab-live'));
+    expect(await screen.findByTestId('live-screen')).toBeOnTheScreen();
+    expect(await screen.findByTestId('live-channels-grid')).toBeOnTheScreen();
+    expect(await screen.findByTestId('live-channel-card-0')).toBeOnTheScreen();
+
+    await fireEvent.press(screen.getByTestId('live-mode-epg'));
+    expect(await screen.findByTestId('live-epg-view')).toBeOnTheScreen();
+    await fireEvent.press(screen.getByTestId('live-mode-watch'));
+    expect(await screen.findByTestId('live-watch-stage')).toBeOnTheScreen();
+    await fireEvent.press(screen.getByTestId('live-mode-channels'));
+    const reloadedCard = await screen.findByTestId('live-channel-card-0');
+    await fireEvent.press(reloadedCard);
 
     const surface = await screen.findByTestId('player-surface');
     expect(surface.props.accessibilityLabel).toBe('aether-surface');

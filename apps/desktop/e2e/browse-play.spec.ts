@@ -61,24 +61,23 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
     await expect(window.getByTestId('home-rail-mylist')).toBeVisible();
 
     await window.getByTestId('nav-tab-live').click();
-    await expect(window.getByTestId('browse-categories-list')).toBeVisible();
-    const row0 = window.getByTestId('browse-items-list-row-0');
-    const row1 = window.getByTestId('browse-items-list-row-1');
-    await expect(row0).toBeVisible();
-    await expect(row1).toBeVisible();
-    await expect(row0).not.toHaveText(/^(Loading…|Yükleniyor…)?$/);
-    await expect(row1).not.toHaveText(/^(Loading…|Yükleniyor…)?$/);
+    await expect(window.getByTestId('live-screen')).toBeVisible();
+    await expect(window.getByTestId('live-channels-grid')).toBeVisible();
+    const card0 = window.getByTestId('live-channel-card-0');
+    const card1 = window.getByTestId('live-channel-card-1');
+    await expect(card0).toBeVisible({ timeout: 15_000 });
+    await expect(card1).toBeVisible({ timeout: 15_000 });
+    await expect(card0).not.toHaveText(/^(Loading…|Yükleniyor…)?$/);
+    await expect(card1).not.toHaveText(/^(Loading…|Yükleniyor…)?$/);
 
-    const ch0Label = (await row0.textContent()) ?? '';
-    const ch1Label = (await row1.textContent()) ?? '';
+    const ch0Label = ((await card0.getAttribute('aria-label')) ?? '').trim();
+    const ch1Label = ((await card1.getAttribute('aria-label')) ?? '').trim();
     expect(ch0Label.length).toBeGreaterThan(0);
     expect(ch1Label.length).toBeGreaterThan(0);
 
-    await window.getByTestId('browse-items-list-row-0').focus();
-    await window.keyboard.press('ArrowDown');
-    await window.keyboard.press('Enter');
+    await card1.click();
     await expect(window.getByTestId('player-osd')).toBeVisible();
-    await expect(window.getByTestId('osd-title')).toHaveText(ch1Label.trim());
+    await expect(window.getByTestId('osd-title')).toHaveText(ch1Label);
 
     if (hasMpv) {
       await expect(window.getByTestId('player-area')).toBeVisible();
@@ -100,7 +99,7 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
     }
 
     await window.getByTestId('player-prev').click();
-    await expect(window.getByTestId('osd-title')).toHaveText(ch0Label.trim());
+    await expect(window.getByTestId('osd-title')).toHaveText(ch0Label);
     if (canPlayMedia) {
       await expect(window.getByTestId('osd-status')).toHaveText(/^(Playing|Oynatılıyor)$/, {
         timeout: 15_000,
@@ -108,7 +107,7 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
     }
 
     await window.getByTestId('player-next').click();
-    await expect(window.getByTestId('osd-title')).toHaveText(ch1Label.trim());
+    await expect(window.getByTestId('osd-title')).toHaveText(ch1Label);
     if (canPlayMedia) {
       await expect(window.getByTestId('osd-status')).toHaveText(/^(Playing|Oynatılıyor)$/, {
         timeout: 15_000,
@@ -116,7 +115,16 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
     }
 
     await window.getByTestId('player-back').click();
-    await expect(window.getByTestId('browse-items-list-row-1')).toBeVisible();
+    await expect(window.getByTestId('live-screen')).toBeVisible();
+
+    await window.getByTestId('live-mode-epg').click();
+    await expect(window.getByTestId('live-epg-view')).toBeVisible();
+    await expect(window.getByTestId('epg-preview-header')).toBeVisible();
+    await expect(window.getByTestId('epg-time-ruler')).toBeVisible();
+
+    await window.getByTestId('live-mode-watch').click();
+    await expect(window.getByTestId('live-watch-stage')).toBeVisible();
+    await expect(window.getByTestId('live-zap-drawer')).toBeVisible();
 
     await window.getByTestId('nav-tab-series').click();
     await expect(window.getByTestId('catalog-screen-series')).toBeVisible();

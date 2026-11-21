@@ -9,6 +9,8 @@ import type {
   ItemDetailRow,
   ItemRow,
   LinkSourceInput,
+  NowNextEntry,
+  ProgrammeRow,
   SaveProgressInput,
   SearchOptions,
   SearchResults,
@@ -24,11 +26,16 @@ import {
   isBoundedString,
   isCleanKey,
   isElvError,
+  isEpgWindowKeyList,
   isFiniteNumber,
   isImportProgress,
   isItemKeyList,
   isLinkSourceInput,
+  isNonNegativeFinite,
+  isNonNegativeSafeInt,
+  isNowNextKeyList,
   isOptionalProfileId,
+  isOptionalSourceId,
   isOptionalUserLimit,
   isPositiveId,
   isRecord,
@@ -77,11 +84,15 @@ export type CatalogRpcMethodCall =
       maxBodyBytes?: number;
       progress?: boolean;
     }
+  | { method: 'importGuide'; id: string }
   | { method: 'listSources' }
   | { method: 'categories'; sourceId: string; kind: BrowseKind }
   | { method: 'items'; categoryId: string; offset: number; limit: number }
   | { method: 'itemDetail'; itemKey: string }
   | { method: 'search'; query: string; opts?: SearchOptions }
+  | { method: 'nowNext'; channelKeys: readonly string[]; nowMs: number }
+  | { method: 'epgWindow'; channelKeys: readonly string[]; fromMs: number; toMs: number }
+  | { method: 'channelByNumber'; num: number; sourceId?: string }
   | { method: 'seasons'; seriesId: number }
   | { method: 'episodes'; seriesId: number; season: number }
   | { method: 'resolveStream'; itemKey: string }
@@ -127,11 +138,19 @@ export interface CatalogBridge {
   removeSource(id: string): Promise<Result<void>>;
   startImport(id: string, opts?: CatalogBridgeImportOptions): CatalogImportHandle;
   cancelImport(reqId: number): void;
+  importGuide(id: string): Promise<Result<ImportSummary>>;
   listSources(): Promise<SourceRow[]>;
   categories(sourceId: string, kind: BrowseKind): Promise<CategoryRow[]>;
   items(categoryId: string, offset: number, limit: number): Promise<ItemRow[]>;
   itemDetail(itemKey: string): Promise<ItemDetailRow | null>;
   search(query: string, opts?: SearchOptions): Promise<SearchResults>;
+  nowNext(channelKeys: readonly string[], nowMs: number): Promise<NowNextEntry[]>;
+  epgWindow(
+    channelKeys: readonly string[],
+    fromMs: number,
+    toMs: number,
+  ): Promise<Record<string, ProgrammeRow[]>>;
+  channelByNumber(num: number, sourceId?: string): Promise<ItemRow | null>;
   seasons(seriesId: number): Promise<Result<SeasonRow[]>>;
   episodes(seriesId: number, season: number): Promise<EpisodeRow[]>;
   resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
@@ -167,6 +186,8 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
         (x['maxBodyBytes'] === undefined || isPositiveId(x['maxBodyBytes'])) &&
         (x['progress'] === undefined || typeof x['progress'] === 'boolean')
       );
+    case 'importGuide':
+      return isCleanKey(x['id'], MAX_ID_CHARS);
     case 'categories':
       return (
         isBoundedString(x['sourceId'], 0, MAX_ID_CHARS) &&
@@ -182,6 +203,16 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
       return isCleanKey(x['itemKey']);
     case 'search':
       return isSearchQuery(x['query']) && (x['opts'] === undefined || isSearchOptions(x['opts']));
+    case 'nowNext':
+      return isNowNextKeyList(x['channelKeys']) && isNonNegativeFinite(x['nowMs']);
+    case 'epgWindow':
+      return (
+        isEpgWindowKeyList(x['channelKeys']) &&
+        isNonNegativeFinite(x['fromMs']) &&
+        isNonNegativeFinite(x['toMs'])
+      );
+    case 'channelByNumber':
+      return isNonNegativeSafeInt(x['num']) && isOptionalSourceId(x['sourceId']);
     case 'seasons':
       return isSafeInt(x['seriesId']);
     case 'episodes':

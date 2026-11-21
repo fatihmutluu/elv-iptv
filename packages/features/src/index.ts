@@ -3,6 +3,7 @@ export * from './browse';
 export * from './catalog';
 export * from './detail';
 export * from './home';
+export * from './live';
 export * from './notices';
 export * from './player';
 export {

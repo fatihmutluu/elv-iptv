@@ -893,3 +893,78 @@ msgstr "Filmler"
 
 msgid "search.section.series"
 msgstr "Diziler"
+
+msgid "live.mode.watch"
+msgstr "İzle"
+
+msgid "live.mode.channels"
+msgstr "Kanallar"
+
+msgid "live.mode.guide"
+msgstr "TV Rehberi"
+
+msgid "live.miniGuide"
+msgstr "Mini Rehber"
+
+msgid "live.prevChannel"
+msgstr "Önceki kanal"
+
+msgid "live.numberPad"
+msgstr "Kanal numarası"
+
+msgid "live.numberJump"
+msgstr "Git"
+
+msgid "live.numberClear"
+msgstr "Temizle"
+
+msgid "live.numberNotFound"
+msgstr "#{number} numaralı kanal yok"
+
+msgid "live.watchFullscreen"
+msgstr "Canlı izle"
+
+msgid "live.upNext"
+msgstr "Sıradaki"
+
+msgid "live.noProgramInfo"
+msgstr "Program bilgisi yok"
+
+msgid "live.channelsCount"
+msgstr "{count} kanal"
+
+msgid "live.emptyTitle"
+msgstr "Henüz canlı kanal yok"
+
+msgid "live.emptyDescription"
+msgstr "Canlı yayınları ve TV rehberini yüklemek için bir kaynak ekleyin veya yenileyin."
+
+msgid "epg.title"
+msgstr "TV Rehberi"
+
+msgid "epg.now"
+msgstr "Şimdi"
+
+msgid "epg.jumpToLive"
+msgstr "Canlıya dön"
+
+msgid "epg.refreshGuide"
+msgstr "Rehberi yenile"
+
+msgid "epg.refreshingGuide"
+msgstr "Yenileniyor…"
+
+msgid "epg.watchNow"
+msgstr "Şimdi izle"
+
+msgid "epg.earlier"
+msgstr "Önceki"
+
+msgid "epg.later"
+msgstr "Sonraki"
+
+msgid "epg.noGuideData"
+msgstr "Bu zaman aralığı için rehber verisi yok."
+
+msgid "epg.onAirBadge"
+msgstr "YAYINDA"

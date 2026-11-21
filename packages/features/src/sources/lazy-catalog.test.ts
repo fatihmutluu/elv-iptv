@@ -55,6 +55,10 @@ describe('createLazyCatalog', () => {
     expect(stream.ok).toBe(true);
     expect((await lazy.seasons(999)).ok).toBe(false);
     expect(await lazy.episodes(999, 1)).toEqual([]);
+    expect(await lazy.nowNext?.([items[0]?.key ?? ''], 1_000)).toEqual([]);
+    expect(await lazy.epgWindow?.([items[0]?.key ?? ''], 1_000, 10_000)).toEqual({});
+    expect(await lazy.channelByNumber?.(999)).toBeNull();
+    expect((await lazy.importGuide?.(added.value.id))?.ok).toBe(false);
     expect((await lazy.removeSource(added.value.id)).ok).toBe(true);
 
     await lazy.close();
@@ -107,10 +111,25 @@ describe('createLazyCatalog', () => {
       },
       clock: () => 100,
     });
-    const { itemDetail: _omitted, search: _omittedSearch, ...withoutDetail } = underlying;
+    const {
+      itemDetail: _omitted,
+      search: _omittedSearch,
+      importGuide: _omittedGuide,
+      nowNext: _omittedNowNext,
+      epgWindow: _omittedEpg,
+      channelByNumber: _omittedChNum,
+      ...withoutDetail
+    } = underlying;
     const lazy = createLazyCatalog(async () => withoutDetail);
     expect(await lazy.itemDetail?.('x:s1:movie:1')).toBeNull();
     expect(await lazy.search?.('horizon')).toEqual({ live: [], movies: [], series: [] });
+    expect(await lazy.importGuide?.('s1')).toEqual({
+      ok: false,
+      error: { category: 'storage', code: 'unsupported' },
+    });
+    expect(await lazy.nowNext?.(['x:s1:live:1'], 1000)).toEqual([]);
+    expect(await lazy.epgWindow?.(['x:s1:live:1'], 1000, 2000)).toEqual({});
+    expect(await lazy.channelByNumber?.(101)).toBeNull();
     await lazy.close();
     handle.close();
   });

@@ -893,3 +893,78 @@ msgstr "Movies"
 
 msgid "search.section.series"
 msgstr "Series"
+
+msgid "live.mode.watch"
+msgstr "Watch"
+
+msgid "live.mode.channels"
+msgstr "Channels"
+
+msgid "live.mode.guide"
+msgstr "TV Guide"
+
+msgid "live.miniGuide"
+msgstr "Mini-Guide"
+
+msgid "live.prevChannel"
+msgstr "Previous channel"
+
+msgid "live.numberPad"
+msgstr "Channel number"
+
+msgid "live.numberJump"
+msgstr "Tune"
+
+msgid "live.numberClear"
+msgstr "Clear"
+
+msgid "live.numberNotFound"
+msgstr "No channel #{number}"
+
+msgid "live.watchFullscreen"
+msgstr "Watch live"
+
+msgid "live.upNext"
+msgstr "Up next"
+
+msgid "live.noProgramInfo"
+msgstr "Program information unavailable"
+
+msgid "live.channelsCount"
+msgstr "{count, plural, one {# channel} other {# channels}}"
+
+msgid "live.emptyTitle"
+msgstr "No live channels yet"
+
+msgid "live.emptyDescription"
+msgstr "Add or refresh a source to load live broadcasts and TV Guide schedules."
+
+msgid "epg.title"
+msgstr "TV Guide"
+
+msgid "epg.now"
+msgstr "Now"
+
+msgid "epg.jumpToLive"
+msgstr "Jump to live"
+
+msgid "epg.refreshGuide"
+msgstr "Refresh guide"
+
+msgid "epg.refreshingGuide"
+msgstr "Refreshing…"
+
+msgid "epg.watchNow"
+msgstr "Watch now"
+
+msgid "epg.earlier"
+msgstr "Earlier"
+
+msgid "epg.later"
+msgstr "Later"
+
+msgid "epg.noGuideData"
+msgstr "No guide schedule loaded for this window."
+
+msgid "epg.onAirBadge"
+msgstr "ON AIR"

@@ -371,6 +371,15 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
         await checkpointWal(db);
         return res;
       }
+      case 'importGuide': {
+        if (!service.importGuide) return err(elvError('storage', 'unsupported'));
+        const res = await service.importGuide(
+          call.id,
+          ctl === undefined ? undefined : { signal: ctl.signal },
+        );
+        await checkpointWal(db);
+        return res;
+      }
       case 'listSources':
         return service.listSources();
       case 'categories':
@@ -383,6 +392,12 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
         return service.search
           ? service.search(call.query, call.opts)
           : { live: [], movies: [], series: [] };
+      case 'nowNext':
+        return service.nowNext ? service.nowNext(call.channelKeys, call.nowMs) : [];
+      case 'epgWindow':
+        return service.epgWindow ? service.epgWindow(call.channelKeys, call.fromMs, call.toMs) : {};
+      case 'channelByNumber':
+        return service.channelByNumber ? service.channelByNumber(call.num, call.sourceId) : null;
       case 'seasons':
         return service.seasons(call.seriesId);
       case 'episodes':
@@ -473,7 +488,10 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
         return;
       }
       const { reqId, call } = raw;
-      const ctl = call.method === 'importSource' ? new AbortController() : undefined;
+      const ctl =
+        call.method === 'importSource' || call.method === 'importGuide'
+          ? new AbortController()
+          : undefined;
       if (ctl !== undefined) session.controllers.set(reqId, ctl);
 
       const task = (async () => {
