@@ -15,6 +15,7 @@ const VOD_EXTENSIONS = new Set([
 ]);
 const LIVE_EXTENSIONS = new Set(['ts', 'm3u8']);
 const LAUNCHER_PREFIX_RE = /^(?:ffmpeg|ffrt\d*|auto|solution)\s+/i;
+const BACKUP_URL_SPLIT_RE = /#(?=(?:https?|rtmps?|rtsps?):\/\/)/i;
 const EPISODIC_RE = /\b(?:s\d{1,2}\s*e\d{1,3}|\d{1,2}x\d{2})\b/i;
 const STREAM_HEADERS_PROPS = new Set([
   'inputstream.adaptive.stream_headers',
@@ -45,6 +46,19 @@ function splitPipeUrl(raw: string): { url: string; pipeHeaders?: string } {
     url: raw.slice(0, pipeIdx).trimEnd(),
     pipeHeaders: raw.slice(pipeIdx + 1),
   };
+}
+
+function splitBackupUrls(raw: string): { primary: string; backups: string[] } {
+  const parts = raw.split(BACKUP_URL_SPLIT_RE);
+  const primary = (parts[0] ?? raw).trimEnd();
+  if (parts.length <= 1) return { primary, backups: [] };
+  const backups: string[] = [];
+  for (let i = 1; i < parts.length; i++) {
+    const segment = stripUrlLauncherPrefix((parts[i] ?? '').trim());
+    const cleaned = splitPipeUrl(segment).url.trim();
+    if (cleaned.length > 0) backups.push(cleaned);
+  }
+  return { primary, backups };
 }
 
 function safeDecodeComponent(raw: string): string {
@@ -81,7 +95,8 @@ function applyStreamHeaderPairs(e: M3uEntry, rawPairs: string): void {
  * is set, it is a relative reference without whitespace, `<`, `{`, `"`, `'`, `;`, `)` or `>`.
  */
 export function looksLikeUrl(raw: string, baseUrl: string | undefined): boolean {
-  const stripped = stripUrlLauncherPrefix(raw);
+  const { primary } = splitBackupUrls(raw);
+  const stripped = stripUrlLauncherPrefix(primary);
   const { url } = splitPipeUrl(stripped);
   if (url.length === 0) return false;
   const end = schemeEnd(url);
@@ -156,9 +171,10 @@ function kindOf(url: string, schemeLen: number, entryName: string): KindHint {
   return 'live';
 }
 
-/** Sets the entry's URL (parsing pipe headers first and resolving relative URLs), `kindHint` and `nonHttp`. */
+/** Sets the entry's URL (splitting inline backups, parsing pipe headers, and resolving relative URLs), `kindHint` and `nonHttp`. */
 export function finishEntry(e: M3uEntry, rawUrl: string, baseUrl: string | undefined): void {
-  const stripped = stripUrlLauncherPrefix(rawUrl);
+  const { primary, backups } = splitBackupUrls(rawUrl);
+  const stripped = stripUrlLauncherPrefix(primary);
   const { url: cleanRaw, pipeHeaders } = splitPipeUrl(stripped);
   if (pipeHeaders !== undefined) applyStreamHeaderPairs(e, pipeHeaders);
 
@@ -169,6 +185,7 @@ export function finishEntry(e: M3uEntry, rawUrl: string, baseUrl: string | undef
     end = schemeEnd(url);
   }
   e.url = url;
+  if (backups.length > 0) e.backupUrls = backups;
   if (end < 0) return;
   const scheme = url.slice(0, end).toLowerCase();
   e.nonHttp = scheme !== 'http' && scheme !== 'https';
@@ -222,11 +239,11 @@ export function applyKodiProp(e: M3uEntry, payload: string): void {
   }
 }
 
-/** Splits comma-, whitespace-, or `.xmlhttp`-concatenated `url-tvg` / `x-tvg-url` attributes (`#173`). */
+/** Splits comma-, semicolon-, whitespace-, or `.xml`/`gz` (`/`-optional) concatenated `url-tvg` / `x-tvg-url` attributes (`#173`). */
 export function splitGuideUrls(value: string): string[] {
   return value
-    .replace(/(\.(?:xml|gz))(?=https?:\/\/)/gi, '$1 ')
-    .split(/[\s,]+/)
+    .replace(/(\.(?:xml|gz))\/?(?=https?:\/\/)/gi, '$1 ')
+    .split(/[\s,;]+/)
     .map((u) => u.trim())
     .filter((u) => u.length > 0);
 }

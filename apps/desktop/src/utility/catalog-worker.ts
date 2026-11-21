@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 import type { FetchLike } from '@elv/domain';
 import Database from 'better-sqlite3';
 import { createCatalogWorkerRuntime, type WorkerParentPortLike } from './catalog-worker-runtime.ts';
+import { createNodeGzipDecompressor } from './node-gzip-decompressor.ts';
 
 const parentPort = (process as NodeJS.Process & { parentPort?: WorkerParentPortLike }).parentPort;
 if (!parentPort) {
@@ -16,5 +17,6 @@ createCatalogWorkerRuntime({
     return new Database(filePath);
   },
   fetchImpl: fetch as unknown as FetchLike,
+  decompressor: createNodeGzipDecompressor(),
   onExit: (code) => process.exit(code),
 });

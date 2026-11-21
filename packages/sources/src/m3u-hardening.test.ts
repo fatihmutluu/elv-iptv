@@ -1,6 +1,9 @@
+import type { Decompressor } from '@elv/domain';
 import { describe, expect, it } from 'vitest';
 import { type M3uBatch, type M3uEntry, scanM3u } from './m3u';
-import { chunksOf, utf8 } from './test-chunks';
+import { MAX_INLINE_LOGO_BYTES, parseExtinf } from './m3u-attrs';
+import { chunksOf, randomSplits, utf8 } from './test-chunks';
+import { gunzipper, gzip } from './xmltv-test-helpers';
 
 async function run(text: string, opts?: { baseUrl?: string }) {
   const bytes = utf8(text);
@@ -153,5 +156,363 @@ describe('M3U URL, directive & header hardening', () => {
     const url = 'http://cdn.example/live/play?path=%2flive%2fch1%3ahd&sig=AbCdEf';
     const e = await one(`#EXTINF:-1,Signed\n${url}\n`);
     expect(e.url).toBe(url);
+  });
+});
+
+async function runStream(
+  chunks: AsyncIterable<Uint8Array>,
+  opts?: {
+    baseUrl?: string;
+    batchSize?: number;
+    decompressor?: Decompressor;
+    maxDecompressedBytes?: number;
+  },
+) {
+  const gen = scanM3u(chunks, opts);
+  const batches: M3uBatch[] = [];
+  for (;;) {
+    const r = await gen.next();
+    if (r.done) return { batches, result: r.value };
+    batches.push(r.value);
+  }
+}
+
+describe('M3U inline base64 logo survival (#169)', () => {
+  it('survives a multi-megabyte (> 1 MiB) inline data: tvg-logo without overflowing MAX_LINE', async () => {
+    const hugeLogo = `data:image/png;base64,${'A'.repeat(2_100_000)}`;
+    const text =
+      `#EXTM3U\n` +
+      `#EXTINF:-1 tvg-id="ch.1" tvg-logo="${hugeLogo}" group-title="News",Channel One\n` +
+      `http://cdn.example/live/1.ts\n` +
+      `#EXTINF:-1 tvg-id="ch.2",Channel Two\n` +
+      `http://cdn.example/live/2.ts\n`;
+    const bytes = utf8(text);
+
+    for (const stream of [
+      chunksOf(bytes, [bytes.length]),
+      randomSplits(bytes, 13, 65_536),
+      chunksOf(bytes, [33, 7, 11, 4090, 20, 500_000, bytes.length]),
+    ]) {
+      const { batches, result } = await runStream(stream);
+      expect(result.ok).toBe(true);
+      const entries = batches.flatMap((b) => b.entries);
+      expect(entries).toHaveLength(2);
+      expect(entries[0]).toMatchObject({
+        name: 'Channel One',
+        url: 'http://cdn.example/live/1.ts',
+        tvgId: 'ch.1',
+        groups: ['News'],
+      });
+      expect(entries[0]?.tvgLogo).toBeUndefined();
+      expect(entries[1]).toMatchObject({
+        name: 'Channel Two',
+        url: 'http://cdn.example/live/2.ts',
+        tvgId: 'ch.2',
+      });
+      expect(batches.at(-1)?.stats?.warnings).toEqual([{ code: 'inline-logo-stripped', line: 2 }]);
+    }
+  });
+
+  it('strips > 4096-byte inline data: logos for tvg-logo and single-quoted LOGO (case-insensitive, with BOM)', async () => {
+    const tenKb = `DATA:image/jpeg;base64,${'B'.repeat(10_000)}`;
+    const text =
+      `\uFEFF#EXTINF:-1 LOGO='${tenKb}' tvg-id="c1" group-title="Sports",Match HD\n` +
+      `http://cdn.example/live/match.ts\n` +
+      `#EXTINF:-1 TVG-LOGO="data:image/png;base64,${'C'.repeat(MAX_INLINE_LOGO_BYTES + 1)}",Second\n` +
+      `http://cdn.example/live/second.ts\n`;
+    const bytes = utf8(text);
+
+    for (const stream of [chunksOf(bytes, [bytes.length]), randomSplits(bytes, 42, 17)]) {
+      const { batches, result } = await runStream(stream);
+      expect(result.ok).toBe(true);
+      const entries = batches.flatMap((b) => b.entries);
+      expect(entries).toHaveLength(2);
+      expect(entries[0]).toMatchObject({
+        name: 'Match HD',
+        tvgId: 'c1',
+        groups: ['Sports'],
+        url: 'http://cdn.example/live/match.ts',
+      });
+      expect(entries[0]?.tvgLogo).toBeUndefined();
+      expect(entries[1]).toMatchObject({
+        name: 'Second',
+        url: 'http://cdn.example/live/second.ts',
+      });
+      expect(entries[1]?.tvgLogo).toBeUndefined();
+      expect(batches.at(-1)?.stats?.warnings).toEqual([
+        { code: 'inline-logo-stripped', line: 1 },
+        { code: 'inline-logo-stripped', line: 3 },
+      ]);
+    }
+  });
+
+  it('keeps small (<= 4096 byte) inline data: logos and normal http(s):// logos untouched', async () => {
+    const exactPrefix = 'data:image/png;base64,';
+    const exactLogo = exactPrefix + 'D'.repeat(MAX_INLINE_LOGO_BYTES - exactPrefix.length);
+    expect(exactLogo.length).toBe(MAX_INLINE_LOGO_BYTES);
+    const longHttpLogo = `https://img.example/logos/${'x'.repeat(6000)}.png`;
+    const text =
+      `#EXTINF:-1 tvg-logo="${exactLogo}",Small Data\nhttp://cdn.example/1.ts\n` +
+      `#EXTINF:-1 tvg-logo="${longHttpLogo}",Long Http\nhttp://cdn.example/2.ts\n`;
+    const { batches, result } = await run(text);
+    expect(result.ok).toBe(true);
+    const entries = batches.flatMap((b) => b.entries);
+    expect(entries).toHaveLength(2);
+    expect(entries[0]?.tvgLogo).toBe(exactLogo);
+    expect(entries[1]?.tvgLogo).toBe(longHttpLogo);
+    expect(batches.at(-1)?.stats?.warnings).toEqual([]);
+  });
+
+  it('caps oversized inline data: logos in parseExtinf directly as defense-in-depth', () => {
+    const over = `data:image/png;base64,${'E'.repeat(10_000)}`;
+    const issues = { rawQuote: false, inlineLogoStripped: false };
+    const e = parseExtinf(`-1 tvg-logo="${over}" group-title="G",Direct`, issues);
+    expect(e.tvgLogo).toBeUndefined();
+    expect(e.name).toBe('Direct');
+    expect(e.groups).toEqual(['G']);
+    expect(issues.inlineLogoStripped).toBe(true);
+
+    const issuesSmall = { rawQuote: false, inlineLogoStripped: false };
+    const small = parseExtinf('-1 logo="data:image/png;base64,AAAA",Small', issuesSmall);
+    expect(small.tvgLogo).toBe('data:image/png;base64,AAAA');
+    expect(issuesSmall.inlineLogoStripped).toBe(false);
+  });
+
+  it('still triggers line-too-long on non-data lines exceeding MAX_LINE', async () => {
+    const hugeHttp = `http://img.example/${'z'.repeat(1_100_000)}.png`;
+    const text =
+      `#EXTINF:-1 tvg-logo="${hugeHttp}",DropMe\n` +
+      `#EXTINF:-1,KeepMe\n` +
+      `http://cdn.example/keep.ts\n`;
+    const { batches, result } = await run(text);
+    expect(result.ok).toBe(true);
+    const entries = batches.flatMap((b) => b.entries);
+    expect(entries.map((e) => e.name)).toEqual(['KeepMe']);
+    expect(batches.at(-1)?.stats?.warnings).toEqual([{ code: 'line-too-long', line: 1 }]);
+  });
+
+  it('handles unterminated oversized data: logo without overflowing MAX_LINE', async () => {
+    const text =
+      `#EXTINF:-1 tvg-id="u1" tvg-logo="data:image/png;base64,${'F'.repeat(1_200_000)}\n` +
+      `http://cdn.example/u1.ts\n` +
+      `#EXTINF:-1,After\n` +
+      `http://cdn.example/after.ts\n`;
+    const { batches, result } = await run(text);
+    expect(result.ok).toBe(true);
+    const entries = batches.flatMap((b) => b.entries);
+    expect(entries).toHaveLength(2);
+    expect(entries[0]?.tvgId).toBe('u1');
+    expect(entries[0]?.tvgLogo).toBeUndefined();
+    expect(entries[1]?.name).toBe('After');
+    expect(batches.at(-1)?.stats?.warnings).toEqual([{ code: 'inline-logo-stripped', line: 1 }]);
+  });
+});
+
+describe('M3U guide URL splitting & inline backup URLs (#173)', () => {
+  it('splits .xml/http, .gz/http, and semicolon-delimited url-tvg / x-tvg-url headers', async () => {
+    const header =
+      '#EXTM3U ' +
+      'url-tvg="https://a.example/epg.xml/https://b.example/epg.xml;http://c.example/epg.xml.gz/http://d.example/epg.gz" ' +
+      'x-tvg-url="https://e.example/1.XML/HTTPS://f.example/2.xml; https://proxy.example/fetch/https://origin.example/3.xml"\n';
+    const { batches } = await run(`${header}#EXTINF:-1,A\nhttp://h.example/1\n`);
+    expect(batches.at(-1)?.header?.guideUrls).toEqual([
+      'https://a.example/epg.xml',
+      'https://b.example/epg.xml',
+      'http://c.example/epg.xml.gz',
+      'http://d.example/epg.gz',
+      'https://e.example/1.XML',
+      'HTTPS://f.example/2.xml',
+      'https://proxy.example/fetch/https://origin.example/3.xml',
+    ]);
+  });
+
+  it('splits inline #http/#https/#rtmp/#rtmps/#rtsp/#rtsps backup URLs into entry.backupUrls', async () => {
+    const e = await one(
+      '#EXTINF:-1,Live 1\n' +
+        'http://primary.example/live/1.ts#http://backup1.example/live/1.ts#rtmp://backup2.example/live/1\n',
+    );
+    expect(e.url).toBe('http://primary.example/live/1.ts');
+    expect(e.backupUrls).toEqual([
+      'http://backup1.example/live/1.ts',
+      'rtmp://backup2.example/live/1',
+    ]);
+    expect(e.nonHttp).toBe(false);
+    expect(e.kindHint).toBe('live');
+
+    const allSchemes = await one(
+      '#EXTINF:-1,All\n' +
+        'https://p.example/1.m3u8#HTTPS://b1.example/1.m3u8#rtmps://b2.example/a#rtsp://b3.example/b#RTSPS://b4.example/c\n',
+    );
+    expect(allSchemes.url).toBe('https://p.example/1.m3u8');
+    expect(allSchemes.backupUrls).toEqual([
+      'HTTPS://b1.example/1.m3u8',
+      'rtmps://b2.example/a',
+      'rtsp://b3.example/b',
+      'RTSPS://b4.example/c',
+    ]);
+  });
+
+  it('preserves normal URL fragments untouched with backupUrls undefined', async () => {
+    for (const url of [
+      'http://h.example/v.mp4#t=10',
+      'http://h.example/stream.m3u8#chapter1',
+      'http://h.example/stream.m3u8#http_not_scheme',
+    ]) {
+      const e = await one(`#EXTINF:-1,Frag\n${url}\n`);
+      expect(e.url).toBe(url);
+      expect(e.backupUrls).toBeUndefined();
+    }
+
+    const mixed = await one(
+      '#EXTINF:-1,Mixed\nhttp://p.example/v.mp4#t=10#http://b.example/v.mp4#t=20\n',
+    );
+    expect(mixed.url).toBe('http://p.example/v.mp4#t=10');
+    expect(mixed.backupUrls).toEqual(['http://b.example/v.mp4#t=20']);
+    expect(mixed.kindHint).toBe('movie');
+  });
+
+  it('handles pipe headers, launcher prefixes, and relative primary URLs alongside backup URLs', async () => {
+    const withPipes = await one(
+      '#EXTINF:-1,Piped\n' +
+        'ffmpeg http://p.example/live/1.ts|User-Agent=ElvTV/1&Referer=https://site.example/#http://b1.example/1.ts|User-Agent=Ignored#https://b2.example/2.ts\n',
+    );
+    expect(withPipes.url).toBe('http://p.example/live/1.ts');
+    expect(withPipes.backupUrls).toEqual(['http://b1.example/1.ts', 'https://b2.example/2.ts']);
+    expect(withPipes.headers).toEqual({
+      userAgent: 'ElvTV/1',
+      referer: 'https://site.example/',
+      other: {},
+    });
+
+    const rel = await one('#EXTINF:-1,Rel\nlive/1.ts#http://backup.example/live/1.ts\n', {
+      baseUrl: 'http://cdn.example/list.m3u',
+    });
+    expect(rel.url).toBe('http://cdn.example/live/1.ts');
+    expect(rel.backupUrls).toEqual(['http://backup.example/live/1.ts']);
+  });
+});
+
+describe('M3U gzip decompression & bomb ceiling (#169)', () => {
+  it('transparently decompresses 0x1f 0x8b gzip M3U streams including split magic bytes', async () => {
+    const m3u =
+      '#EXTM3U url-tvg="http://epg.example/guide.xml"\n' +
+      '#EXTINF:-1 tvg-id="c1" group-title="News",Gzip Channel\n' +
+      'http://cdn.example/live/1.ts\n';
+    const gz = await gzip(utf8(m3u));
+    const { batches, result } = await runStream(chunksOf(gz, [1, 1, 7, gz.length]), {
+      decompressor: gunzipper,
+    });
+    expect(result.ok).toBe(true);
+    const entries = batches.flatMap((b) => b.entries);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      name: 'Gzip Channel',
+      tvgId: 'c1',
+      groups: ['News'],
+      url: 'http://cdn.example/live/1.ts',
+    });
+    expect(batches.at(-1)?.header?.guideUrls).toEqual(['http://epg.example/guide.xml']);
+  });
+
+  it('decompresses multi-member concatenated .gz M3U streams completely', async () => {
+    const part1 = await gzip(utf8('#EXTM3U\n#EXTINF:-1,One\nhttp://cdn.example/1.ts\n'));
+    const part2 = await gzip(utf8('#EXTINF:-1,Two\nhttp://cdn.example/2.ts\n'));
+    const combined = new Uint8Array(part1.length + part2.length);
+    combined.set(part1, 0);
+    combined.set(part2, part1.length);
+
+    const { batches, result } = await runStream(chunksOf(combined, [3, 5, 11, combined.length]), {
+      decompressor: gunzipper,
+    });
+    expect(result.ok).toBe(true);
+    expect(batches.flatMap((b) => b.entries).map((e) => e.name)).toEqual(['One', 'Two']);
+  });
+
+  it('returns source-format/gzip-unsupported when gzip M3U has no decompressor', async () => {
+    const gz = await gzip(utf8('#EXTM3U\n#EXTINF:-1,One\nhttp://cdn.example/1.ts\n'));
+    const { batches, result } = await runStream(chunksOf(gz, [gz.length]));
+    expect(result).toEqual({
+      ok: false,
+      error: { category: 'source-format', code: 'gzip-unsupported' },
+    });
+    expect(batches.some((b) => b.done)).toBe(false);
+  });
+
+  it('enforces maxDecompressedBytes ceiling on gzipped M3U streams (gzip bomb protection)', async () => {
+    let body = '#EXTM3U\n';
+    for (let i = 0; i < 100; i++) body += `#EXTINF:-1,Chan ${i}\nhttp://cdn.example/${i}.ts\n`;
+    const gz = await gzip(utf8(body));
+    const { batches, result } = await runStream(chunksOf(gz, [gz.length]), {
+      decompressor: gunzipper,
+      maxDecompressedBytes: 512,
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: { category: 'source-format', code: 'too-large' },
+    });
+    expect(batches.some((b) => b.done)).toBe(false);
+  });
+
+  it('returns source-format/gzip-corrupt on corrupt gzip M3U payloads', async () => {
+    const corrupt = Uint8Array.from([0x1f, 0x8b, 0x08, 0x00, 0xff, 0xff, 0xff, 0xff]);
+    const { batches, result } = await runStream(chunksOf(corrupt, [corrupt.length]), {
+      decompressor: gunzipper,
+    });
+    expect(result).toEqual({
+      ok: false,
+      error: { category: 'source-format', code: 'gzip-corrupt' },
+    });
+    expect(batches.some((b) => b.done)).toBe(false);
+  });
+
+  it('scans @@asyncIterator inputs and gzip decompressors when Symbol.asyncIterator is undefined', async () => {
+    const OriginalSymbol = globalThis.Symbol;
+    const FakeSymbol = Object.assign(
+      ((description?: string | number) => OriginalSymbol(description)) as typeof Symbol,
+      {
+        for: OriginalSymbol.for.bind(OriginalSymbol),
+        keyFor: OriginalSymbol.keyFor.bind(OriginalSymbol),
+        asyncIterator: undefined as unknown as typeof Symbol.asyncIterator,
+      },
+    );
+    const babelChunks = (items: Uint8Array[]): AsyncIterable<Uint8Array> => {
+      let i = 0;
+      const gen = {
+        '@@asyncIterator'() {
+          return gen;
+        },
+        next: async () =>
+          i < items.length
+            ? { done: false as const, value: items[i++] as Uint8Array }
+            : { done: true as const, value: undefined },
+      };
+      return gen as unknown as AsyncIterable<Uint8Array>;
+    };
+
+    const m3uBytes = utf8('#EXTM3U\n#EXTINF:-1,Hermes Channel\nhttp://cdn.example/hermes.ts\n');
+    const asyncGenProto = Object.getPrototypeOf(
+      Object.getPrototypeOf((async function* () {})()),
+    ) as Record<string, unknown>;
+    asyncGenProto['@@asyncIterator'] = function (this: unknown) {
+      return this;
+    };
+    (globalThis as { Symbol: typeof Symbol }).Symbol = FakeSymbol;
+    try {
+      const plainGen = scanM3u(babelChunks([m3uBytes]));
+      const plainStep = await plainGen.next();
+      expect(!plainStep.done && plainStep.value.entries[0]?.name).toBe('Hermes Channel');
+
+      const gzHeader = new Uint8Array([0x1f, 0x8b, 0x08]);
+      const gzGen = scanM3u(babelChunks([gzHeader]), {
+        decompressor: {
+          gunzip: () => babelChunks([m3uBytes]),
+        },
+      });
+      const gzStep = await gzGen.next();
+      expect(!gzStep.done && gzStep.value.entries[0]?.name).toBe('Hermes Channel');
+    } finally {
+      (globalThis as { Symbol: typeof Symbol }).Symbol = OriginalSymbol;
+      delete asyncGenProto['@@asyncIterator'];
+    }
   });
 });

@@ -56,19 +56,12 @@ import {
   writeM3uSeries,
 } from './writers-m3u';
 
-const REQUEST_TIMEOUT_MS = 60_000;
+const REQUEST_TIMEOUT_MS = 180_000;
 const UNGROUPED = 'Ungrouped';
 
 type PlaylistOpen =
-  | {
-      kind: 'body';
-      body: AsyncIterable<Uint8Array>;
-      validator: HttpCacheValidator | undefined;
-    }
-  | {
-      kind: 'not-modified';
-      validator: HttpCacheValidator | undefined;
-    };
+  | { kind: 'body'; body: AsyncIterable<Uint8Array>; validator: HttpCacheValidator | undefined }
+  | { kind: 'not-modified'; validator: HttpCacheValidator | undefined };
 
 type M3uOutcome =
   | { kind: 'imported'; staged: StagedM3u; validator: HttpCacheValidator | undefined }
@@ -255,7 +248,11 @@ async function execute(
     c.counts.unchanged = 1;
     return { kind: 'not-modified', validator: opened.validator };
   }
-  const scan = scanM3u(opened.body, { batchSize: c.batchSize, baseUrl: playlistUrl });
+  const scan = scanM3u(opened.body, {
+    batchSize: c.batchSize,
+    baseUrl: playlistUrl,
+    ...(c.deps.decompressor === undefined ? {} : { decompressor: c.deps.decompressor }),
+  });
   const buffered: M3uEntry[] = [];
   let st: M3uImportState | undefined;
   let gate: M3uEntryGate | undefined;

@@ -3,8 +3,9 @@
 Electron `utilityProcess` entrypoints bundled to `dist/utility/` with `--external:better-sqlite3`.
 
 ## Modules
-- `catalog-worker-runtime.ts`: pure dependency-injected runtime hosting `better-sqlite3` (`createSyncSqlDriver` + `openCatalog` in WAL mode) and `@elv/data`'s `CatalogService`.
-- `catalog-worker.ts`: thin process entrypoint binding `process.parentPort`, `better-sqlite3` and global `fetch`.
+- `catalog-worker-runtime.ts`: pure dependency-injected runtime hosting `better-sqlite3` (`createSyncSqlDriver` + `openCatalog` in WAL mode) and `@elv/data`'s `CatalogService` (with optional `decompressor`).
+- `node-gzip-decompressor.ts`: streaming Node `zlib.createGunzip()` `Decompressor` with write backpressure and upstream cancellation on early `.return()`.
+- `catalog-worker.ts`: thin process entrypoint binding `process.parentPort`, `better-sqlite3`, global `fetch`, and `createNodeGzipDecompressor()`.
 
 ## Rules
 - Keep >= 90 % line coverage on `catalog-worker-runtime.ts`.

@@ -10,7 +10,16 @@ import {
 } from '@elv/domain';
 import { detectAndDecodeText } from './encoding';
 import { toElvError } from './scan-error';
-import { acquireXtreamToken, parseXtreamJson } from './xtream-json';
+import { acquireXtreamToken, parseXtreamJson, resolveNowFn } from './xtream-json';
+import {
+  accountCooldownKey,
+  buildAttemptOrder,
+  buildServerList,
+  isAccountCoolingDown,
+  isFailoverEligible,
+  parseRetryAfterMs,
+  recordAccountCooldown,
+} from './xtream-mirrors';
 import {
   isRaw,
   type Raw,
@@ -29,6 +38,7 @@ export type * from './xtream-types';
 
 const TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_BODY = 128 * 1024 * 1024;
+const DEFAULT_PRIMARY_COOLDOWN_MS = 300_000;
 const FIRST_BUFFER = 64 * 1024;
 const NUMERIC_KEY_RE = /^\d+$/;
 const shape = () => elvError('source-format', 'unexpected-shape');
@@ -121,19 +131,36 @@ export function normalizeXtreamServer(server: string): string {
 export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
   const { http, transport } = options;
   const maxBody = options.maxBodyBytes ?? DEFAULT_MAX_BODY;
-  const base = normalizeXtreamServer(options.server);
+  const primary = normalizeXtreamServer(options.server);
+  const servers = buildServerList(primary, options.backupServers, normalizeXtreamServer);
+  const primaryCooldownMs = Math.max(0, options.primaryCooldownMs ?? DEFAULT_PRIMARY_COOLDOWN_MS);
+  const nowFn = resolveNowFn(options.rateLimit);
+  const accountKey = accountCooldownKey(options.username, options.password);
   const user = encodeURIComponent(options.username);
   const pass = encodeURIComponent(options.password);
   const credentials = `username=${user}&password=${pass}`;
   const liveFormat = transport?.xtreamFormat ?? 'ts';
   const headers = transportHeaders(transport);
 
-  async function getJson(query: string, call?: XtreamCallOptions): Promise<Result<unknown>> {
-    const token = await acquireXtreamToken(http, base, options.rateLimit, call?.signal);
+  let activeIndex = 0;
+  let failedOverAtMs: number | undefined;
+  let activeTimezone = options.serverTimezone?.trim() || undefined;
+
+  const currentBase = () => servers[activeIndex] as string;
+
+  async function fetchServerJson(
+    serverBase: string,
+    query: string,
+    call?: XtreamCallOptions,
+  ): Promise<Result<unknown>> {
+    const token = await acquireXtreamToken(http, serverBase, options.rateLimit, call?.signal);
     if (!token.ok) return token;
+    if (isAccountCoolingDown(http, accountKey, nowFn())) {
+      return err(httpStatusError(429));
+    }
     let response: Awaited<ReturnType<typeof http.get>>;
     try {
-      response = await http.get(`${base}/player_api.php?${credentials}${query}`, {
+      response = await http.get(`${serverBase}/player_api.php?${credentials}${query}`, {
         headers,
         timeoutMs: TIMEOUT_MS,
         ...(call?.signal ? { signal: call.signal } : {}),
@@ -142,8 +169,29 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
       if (call?.signal?.aborted) return err(elvError('network', 'aborted'));
       return err(elvError('network', 'request-failed'));
     }
-    if (!response.ok) return err(elvError(response.error.category, response.error.code));
+    if (!response.ok) {
+      if (response.error.category === 'network' && response.error.code === 'http-429') {
+        recordAccountCooldown(
+          http,
+          accountKey,
+          nowFn(),
+          parseRetryAfterMs(undefined, options.cooldown429Ms),
+        );
+        return err(httpStatusError(429));
+      }
+      return err(elvError(response.error.category, response.error.code));
+    }
     const { status, body } = response.value;
+    if (status === 429) {
+      await discard(body);
+      recordAccountCooldown(
+        http,
+        accountKey,
+        nowFn(),
+        parseRetryAfterMs(response.value.headers, options.cooldown429Ms),
+      );
+      return err(httpStatusError(429));
+    }
     if (status < 200 || status >= 300) {
       await discard(body);
       return err(httpStatusError(status));
@@ -151,6 +199,42 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     const bytes = await readAll(body, maxBody);
     if (!bytes.ok) return bytes;
     return parseXtreamJson(detectAndDecodeText(bytes.value));
+  }
+
+  async function getJson(query: string, call?: XtreamCallOptions): Promise<Result<unknown>> {
+    if (call?.signal?.aborted) return err(elvError('network', 'aborted'));
+    const startNow = nowFn();
+    if (isAccountCoolingDown(http, accountKey, startNow)) {
+      return err(httpStatusError(429));
+    }
+    const probePrimary =
+      activeIndex > 0 &&
+      failedOverAtMs !== undefined &&
+      startNow - failedOverAtMs >= primaryCooldownMs;
+    const order = buildAttemptOrder(servers.length, activeIndex, probePrimary);
+    let lastFailure: Result<unknown> = err(elvError('network', 'request-failed'));
+
+    for (const idx of order) {
+      const result = await fetchServerJson(servers[idx] as string, query, call);
+      if (result.ok) {
+        if (idx === 0) {
+          activeIndex = 0;
+          failedOverAtMs = undefined;
+        } else {
+          if (activeIndex === 0 || failedOverAtMs === undefined) {
+            failedOverAtMs = nowFn();
+          }
+          activeIndex = idx;
+        }
+        return result;
+      }
+      if (probePrimary && idx === 0) {
+        failedOverAtMs = nowFn();
+      }
+      if (!isFailoverEligible(result.error)) return result;
+      lastFailure = result;
+    }
+    return lastFailure;
   }
 
   async function object(query: string, call?: XtreamCallOptions): Promise<Result<Raw>> {
@@ -190,7 +274,7 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
   const withCategory = (categoryId?: string) =>
     categoryId === undefined ? '' : `&category_id=${encodeURIComponent(categoryId)}`;
   const withRoot = (path: string, id: number, ext: string) =>
-    `${base}/${path}/${user}/${pass}/${id}.${ext}`;
+    `${currentBase()}/${path}/${user}/${pass}/${id}.${ext}`;
 
   return {
     async account(call) {
@@ -202,7 +286,9 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
       if (failure) return err(failure);
       const status =
         typeof info.status === 'string' && info.status.trim() ? info.status.trim() : 'Active';
-      return ok(toAccount(info, isRaw(r.value.server_info) ? r.value.server_info : {}, status));
+      const acc = toAccount(info, isRaw(r.value.server_info) ? r.value.server_info : {}, status);
+      if (acc.serverTimezone !== undefined) activeTimezone = acc.serverTimezone;
+      return ok(acc);
     },
     categories(kind, call) {
       const action = kind === 'movie' ? 'vod' : kind;
@@ -225,10 +311,10 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     async shortEpg(streamId, limit, call) {
       const tail = limit === undefined ? '' : `&limit=${limit}`;
       const r = await object(`&action=get_short_epg&stream_id=${streamId}${tail}`, call);
-      return r.ok ? ok(toEpg(r.value)) : r;
+      return r.ok ? ok(toEpg(r.value, activeTimezone)) : r;
     },
-    playlistUrl: () => `${base}/get.php?${credentials}&type=m3u_plus&output=${liveFormat}`,
-    guideUrl: () => `${base}/xmltv.php?${credentials}`,
+    playlistUrl: () => `${currentBase()}/get.php?${credentials}&type=m3u_plus&output=${liveFormat}`,
+    guideUrl: () => `${currentBase()}/xmltv.php?${credentials}`,
     streamUrl(kind, id, extension) {
       if (kind === 'live') return withRoot('live', id, extension ?? liveFormat);
       if (kind === 'movie') return withRoot('movie', id, extension ?? 'mp4');

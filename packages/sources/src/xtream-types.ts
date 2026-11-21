@@ -105,6 +105,14 @@ export interface XtreamClientOptions {
   http: HttpClient;
   /** Panel address. A value without `://` gets `http://` prepended. */
   server: string;
+  /** Optional ordered failover mirrors used on network or 5xx failures (never on 429 or auth errors). */
+  backupServers?: readonly string[];
+  /** Milliseconds to stay on a healthy mirror before probing the primary server again (default 300_000). */
+  primaryCooldownMs?: number;
+  /** Fallback account-scoped cooldown in ms after an HTTP 429 without a `Retry-After` header (default 60_000). */
+  cooldown429Ms?: number;
+  /** Optional IANA timezone (e.g. `Europe/Berlin`) used for short-EPG datetime/codepage fallback before `account()` runs. */
+  serverTimezone?: string;
   /** Largest response body read into memory (default 128 MiB); bigger ones fail with `source-format` / `too-large`. */
   maxBodyBytes?: number;
   username: string;

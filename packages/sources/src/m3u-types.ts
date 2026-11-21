@@ -14,6 +14,8 @@ export interface M3uCatchup {
 export interface M3uEntry {
   name: string;
   url: string;
+  /** Optional inline backup stream URLs split from `#http://` / `#https://` / `#rtmp://` / `#rtsp://` delimiters. */
+  backupUrls?: string[];
   duration: number;
   tvgId?: string;
   tvgName?: string;

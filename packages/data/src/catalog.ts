@@ -1,4 +1,5 @@
 import {
+  type Decompressor,
   elvError,
   err,
   type HttpClient,
@@ -93,6 +94,8 @@ export interface CatalogDeps {
   manifest?: ManifestStore;
   /** Invoked synchronously at the start of `removeSource(id)` before deleting rows or secrets (`#67`). */
   beforeRemoveSource?: (sourceId: string) => void | Promise<void>;
+  /** Platform gzip decompressor used for compressed guides and playlists. */
+  decompressor?: Decompressor;
 }
 
 /** A source as the menu shows it. */
@@ -174,6 +177,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     scheduler: deps.scheduler,
     clock,
     maxBodyBytes: DEVICE_MAX_BODY_BYTES,
+    ...(deps.decompressor === undefined ? {} : { decompressor: deps.decompressor }),
   };
   const queue = createSerializedImportQueue(db);
   const playtime = createPlaytimeResolverCache({ db, secrets, http: deps.http });
