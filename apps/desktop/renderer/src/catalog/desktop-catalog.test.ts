@@ -57,6 +57,7 @@ function makeFakeBridge(overrides?: Partial<CatalogBridge>): {
     categories: async () => [],
     items: async () => [],
     itemDetail: async () => null,
+    search: async () => ({ live: [], movies: [], series: [] }),
     seasons: async () => ok([]),
     episodes: async () => [],
     resolveStream: async () =>
@@ -128,6 +129,11 @@ describe('desktop CatalogService', () => {
     expect(await c1.categories('s1', 'live')).toEqual([]);
     expect(await c1.items('cat1', 0, 25)).toEqual([]);
     expect(await c1.itemDetail?.('x:s1:series:1')).toBeNull();
+    expect(await c1.search?.('horizon', { scope: 'movie', limit: 10 })).toEqual({
+      live: [],
+      movies: [],
+      series: [],
+    });
     expect((await c1.seasons(1)).ok).toBe(true);
     expect(await c1.episodes(1, 1)).toEqual([]);
     expect((await c1.resolveStream('x:s1:live:1')).ok).toBe(true);
@@ -259,5 +265,21 @@ describe('desktop CatalogService', () => {
 
     expect(savedInputs[0]).toMatchObject({ title: 'Dirty Show Name', subtitle: 'S1 E2' });
     expect(favInputs[0]).toMatchObject({ title: 'Tab Film' });
+  });
+
+  it('sanitizes control characters and >256-char queries before calling bridge.search', async () => {
+    const seenQueries: string[] = [];
+    const { bridge } = makeFakeBridge({
+      search: async (query) => {
+        seenQueries.push(query);
+        return { live: [], movies: [], series: [] };
+      },
+    });
+    const service = createDesktopCatalogFromBridge(bridge);
+
+    await service.search?.('foo\t\nbar');
+    await service.search?.(`  ${'a'.repeat(300)}  `);
+
+    expect(seenQueries).toEqual(['foo bar', 'a'.repeat(256)]);
   });
 });

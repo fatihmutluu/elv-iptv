@@ -14,7 +14,8 @@ Screens and view models, one folder per feature, with ports for platform service
 - Never imports `modules/*`, `apps/*`, `expo-*`, navigation libraries or another feature's folder (`no-feature-to-feature`).
 - Platform services (`PlaybackGuard`, `VideoHost`, `AppLifecyclePort`, `PlayTarget`) live under `src/ports/`.
 - Source-first: `exports` points at `src/index.ts`; every focusable control carries a deterministic `testID` and `accessibilityLabel`.
-- `src/AppShell.tsx` composes canonical 4-destination nav (`Home`, `Live`, `Movies`, `Series`) + `Settings` utility (`Appearance`, `Sources`, `About & Licenses`), overlay `detailStack` (`DetailScreen`), and full-screen `PlayerScreen` via `AdaptiveNavShell` (`#13`, `#14`, `#98`, `#325`).
+- `src/AppShell.tsx` composes canonical 4+2 nav (`Home`, `Live`, `Movies`, `Series` + `Search`, `Settings` utilities), overlay `detailStack` (`DetailScreen`), and full-screen `PlayerScreen` via `AdaptiveNavShell` (`#13`, `#14`, `#98`, `#325`).
+- `src/search/` owns instant Turkish-tolerant `SearchScreen`, `SearchChrome`, `SearchResultsSection`, `search-model`, `useCatalogSearch`, and `useTvSearchNavigation` (`#14`).
 - `src/home/` owns flagship Cinema Quietude `HomeScreen`, `HomeHero`, `HomeRail`, `HomeSkeleton`, `home-model`, bounded `useHomeData` (Continue Watching, On Air Now, My List, Featured Movies/Series), and `useTvHomeNavigation` (`#14`).
 - `src/catalog/` owns `CatalogDiscoveryScreen`, `CatalogCategoryRail`, `CategoryGridView`, `catalog-model`, `useCatalogDiscovery`, and `useTvCatalogNavigation` for Movies & Series discovery (`#14`).
 - `src/detail/` owns 2-column `DetailScreen`, `DetailHero`, `DetailCastStrip`, `DetailEpisodes`, `DetailRelatedRail`, `detail-model`, `useDetailData`, and `useTvDetailNavigation` (`#14`).

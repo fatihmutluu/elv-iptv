@@ -1,8 +1,58 @@
-import type { CatalogService } from '@elv/data';
+import type { BrowseKind, CatalogService } from '@elv/data';
 import { EMPTY_TAB_MEMORY, type TabBrowseMemory } from './browse';
 import { type CatalogTabMemory, EMPTY_CATALOG_MEMORY } from './catalog';
 import type { PlaybackGuard } from './ports/playback-guard';
 import type { DetailTarget } from './shared';
+import type { NavDestination, NavUtility } from './shell';
+
+/** Primary top-level destination tabs (`Home`, `Live`, `Movies`, `Series`). */
+export type PrimaryNavTab = 'home' | BrowseKind;
+
+/** Builds the canonical 4-destination navigation items for `AdaptiveNavShell`. */
+export function buildShellDestinations(labels: {
+  readonly home: string;
+  readonly live: string;
+  readonly movies: string;
+  readonly series: string;
+}): readonly NavDestination<PrimaryNavTab>[] {
+  return [
+    { id: 'home', label: labels.home, icon: 'home', testID: 'nav-tab-home' },
+    { id: 'live', label: labels.live, icon: 'tv', testID: 'nav-tab-live' },
+    { id: 'movie', label: labels.movies, icon: 'film', testID: 'nav-tab-movie' },
+    { id: 'series', label: labels.series, icon: 'series', testID: 'nav-tab-series' },
+  ];
+}
+
+/** Builds the canonical 2-utility navigation items (`Search`, `Settings`) for `AdaptiveNavShell`. */
+export function buildShellUtilities(input: {
+  readonly searchLabel: string;
+  readonly settingsLabel: string;
+  readonly activeTab: string;
+  readonly hasActiveDetail: boolean;
+  readonly onOpenSearch: () => void;
+  readonly onOpenSettings: () => void;
+}): readonly NavUtility<'search' | 'settings'>[] {
+  return [
+    {
+      id: 'search',
+      label: input.searchLabel,
+      icon: 'search',
+      active: input.activeTab === 'search' && !input.hasActiveDetail,
+      showLabel: false,
+      testID: 'nav-tab-search',
+      onPress: input.onOpenSearch,
+    },
+    {
+      id: 'settings',
+      label: input.settingsLabel,
+      icon: 'settings',
+      active: input.activeTab === 'settings',
+      showLabel: false,
+      testID: 'nav-tab-settings',
+      onPress: input.onOpenSettings,
+    },
+  ];
+}
 
 /** Per-tab discovery memory for Movies and Series tabs. */
 export type CatalogMemoryMap = Readonly<Record<'movie' | 'series', CatalogTabMemory>>;
@@ -84,6 +134,7 @@ export function createObservedCatalog(
     ...(c.toggleFavorite ? { toggleFavorite: c.toggleFavorite.bind(c) } : {}),
     ...(c.listFavorites ? { listFavorites: c.listFavorites.bind(c) } : {}),
     ...(c.listFavoriteKeys ? { listFavoriteKeys: c.listFavoriteKeys.bind(c) } : {}),
+    ...(c.search ? { search: c.search.bind(c) } : {}),
     close: () => c.close(),
   };
 }

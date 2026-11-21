@@ -127,6 +127,7 @@ export const enMessages = {
   'nav.sources': 'Sources',
   'nav.notices': 'Notices',
   'nav.settings': 'Settings',
+  'nav.search': 'Search',
   'notices.title': 'Third-party software notices',
   'notices.lgplSummary':
     'ELV IPTV dynamically links LGPL media libraries (AetherEngine, FFmpeg, libmpv) so you remain free to inspect, relink, or replace them. Exact version tags, build recipes, and upstream source links are listed offline below.',
@@ -302,6 +303,26 @@ export const enMessages = {
   'detail.noSynopsis': 'No synopsis available from this source.',
   'detail.loadingEpisodes': 'Loading episodes…',
   'detail.cast': 'Cast',
+  'search.title': 'Search',
+  'search.placeholder': 'Search channels, movies, and series…',
+  'search.clear': 'Clear search',
+  'search.scope.all': 'All',
+  'search.scope.live': 'Live ({count})',
+  'search.scope.movies': 'Movies ({count})',
+  'search.scope.series': 'Series ({count})',
+  'search.recentTitle': 'Recent searches',
+  'search.clearRecent': 'Clear history',
+  'search.promptTitle': 'Find anything in your catalog',
+  'search.promptDescription':
+    'Search live channels, movies, and series. Accent and Turkish letter differences are matched automatically.',
+  'search.searching': 'Searching…',
+  'search.noResultsTitle': 'No matches for "{query}"',
+  'search.noResultsDescription':
+    'Try a shorter word, check the spelling, or switch the category filter.',
+  'search.resultsSummary': '{count, plural, one {# match} other {# matches}}',
+  'search.section.live': 'Live channels',
+  'search.section.movies': 'Movies',
+  'search.section.series': 'Series',
 } as const;
 
 /** Valid message identifier across all supported locales. */

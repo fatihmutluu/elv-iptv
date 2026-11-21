@@ -153,7 +153,7 @@ describe('AppShell Settings -> About & Licenses', () => {
       // Start on empty catalog (Settings -> Sources content pane)
       expect(screen.getByTestId('sources-screen')).toBeTruthy();
 
-      // Back -> Settings sidebar -> Back -> Top Nav -> Left -> Series -> Right -> Settings
+      // Back -> Settings sidebar -> Back -> Top Nav -> Left -> Search -> Right -> Settings
       await pressKey(KEYCODE_BACK);
       expect(
         screen.getByTestId('settings-tv-focus-anchor', { includeHiddenElements: true }),
@@ -165,7 +165,7 @@ describe('AppShell Settings -> About & Licenses', () => {
       ).toBeTruthy();
 
       await pressKey(KEYCODE_DPAD_LEFT);
-      expect(screen.getByTestId('nav-tab-series').props.accessibilityState.selected).toBe(true);
+      expect(screen.getByTestId('nav-tab-search').props.accessibilityState.selected).toBe(true);
 
       await pressKey(KEYCODE_DPAD_RIGHT);
       expect(screen.getByTestId('nav-tab-settings').props.accessibilityState.selected).toBe(true);

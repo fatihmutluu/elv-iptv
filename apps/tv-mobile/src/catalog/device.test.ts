@@ -1,15 +1,20 @@
-import { EXPECTED_TABLE_COLUMNS } from '@elv/data';
+import { EXPECTED_FTS_TABLES, EXPECTED_TABLE_COLUMNS } from '@elv/data';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const platform = vi.hoisted(() => ({ OS: 'android' }));
 vi.mock('react-native', () => ({ Platform: platform }));
 
-const migrated = async (sql: string): Promise<unknown[]> => {
+const FTS_SET = new Set<string>(EXPECTED_FTS_TABLES);
+
+const migrated = async (sql: string, params?: readonly unknown[]): Promise<unknown[]> => {
   if (sql.includes('user_version')) return [{ user_version: 1 }];
   const match = /PRAGMA table_info\(([^)]+)\)/.exec(sql);
   if (match !== null) {
     const table = match[1] as string;
     return (EXPECTED_TABLE_COLUMNS[table] ?? []).map((c) => ({ name: c.name }));
+  }
+  if (sql.includes('sqlite_master') && typeof params?.[0] === 'string' && FTS_SET.has(params[0])) {
+    return [{ name: params[0] }];
   }
   return [];
 };
@@ -72,9 +77,9 @@ describe('createDeviceCatalog', () => {
   it('opens the catalog when the manifest cannot be reconciled, logging only a category', async () => {
     platform.OS = 'ios';
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    driver.all.mockImplementation(async (sql: string) => {
+    driver.all.mockImplementation(async (sql: string, params?: readonly unknown[]) => {
       if (sql.includes('settings_json FROM sources')) throw new Error('disk I/O at /secret/path');
-      return migrated(sql);
+      return migrated(sql, params);
     });
     try {
       const { createDeviceCatalog } = await import('./device');

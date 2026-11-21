@@ -26,6 +26,7 @@ import {
   querySeries,
   type SeasonRow,
 } from './queries';
+import { querySearch, type SearchOptions, type SearchResults } from './search';
 import { addSourceFromLink, type LinkSourceInput } from './source-link';
 import {
   addM3uSource,
@@ -110,6 +111,7 @@ export interface CatalogService {
   categories(sourceId: string, kind: BrowseKind): Promise<CategoryRow[]>;
   items(categoryId: string, offset: number, limit: number): Promise<ItemRow[]>;
   itemDetail?(itemKey: string): Promise<ItemDetailRow | null>;
+  search?(query: string, opts?: SearchOptions): Promise<SearchResults>;
   seasons(seriesId: number): Promise<Result<SeasonRow[]>>;
   episodes(seriesId: number, season: number): Promise<EpisodeRow[]>;
   resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
@@ -313,6 +315,16 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       if (found === undefined) return null;
       const [resolved] = await playtime.resolveLogos([found], found.sourceId);
       return resolved ?? null;
+    },
+
+    async search(query, opts) {
+      const res = await querySearch(db, query, opts);
+      const [live, movies, series] = await Promise.all([
+        playtime.resolveRowLogos(res.live),
+        playtime.resolveRowLogos(res.movies),
+        playtime.resolveRowLogos(res.series),
+      ]);
+      return { live, movies, series };
     },
 
     async seasons(seriesId) {

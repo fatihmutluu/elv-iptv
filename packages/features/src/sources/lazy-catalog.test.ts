@@ -49,6 +49,8 @@ describe('createLazyCatalog', () => {
     const detail = await lazy.itemDetail?.(items[0]?.key ?? '');
     expect(detail).toMatchObject({ key: items[0]?.key, kind: 'live', name: 'Ch', plot: null });
     expect(await lazy.itemDetail?.('unknown-key')).toBeNull();
+    const hits = await lazy.search?.('ch', { scope: 'live' });
+    expect(hits?.live.map((r) => r.name)).toEqual(['Ch']);
     const stream = await lazy.resolveStream(items[0]?.key ?? '');
     expect(stream.ok).toBe(true);
     expect((await lazy.seasons(999)).ok).toBe(false);
@@ -105,9 +107,10 @@ describe('createLazyCatalog', () => {
       },
       clock: () => 100,
     });
-    const { itemDetail: _omitted, ...withoutDetail } = underlying;
+    const { itemDetail: _omitted, search: _omittedSearch, ...withoutDetail } = underlying;
     const lazy = createLazyCatalog(async () => withoutDetail);
     expect(await lazy.itemDetail?.('x:s1:movie:1')).toBeNull();
+    expect(await lazy.search?.('horizon')).toEqual({ live: [], movies: [], series: [] });
     await lazy.close();
     handle.close();
   });

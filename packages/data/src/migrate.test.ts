@@ -1,7 +1,7 @@
 import type { SqlDriver } from '@elv/domain';
 import { describe, expect, it } from 'vitest';
 import { openCatalog, SCHEMA_VERSION } from './migrate';
-import { EXPECTED_TABLE_COLUMNS, MIGRATIONS } from './schema';
+import { EXPECTED_FTS_TABLES, EXPECTED_TABLE_COLUMNS, MIGRATIONS } from './schema';
 import { tempFileDb, testDb } from './test-db';
 
 const TABLES = [
@@ -21,6 +21,12 @@ const TABLES = [
   'favorites',
 ];
 
+const FTS_TABLE_PREFIXES = ['live_fts', 'movies_fts', 'series_fts'] as const;
+
+function isFtsTableOrShadow(name: string): boolean {
+  return FTS_TABLE_PREFIXES.some((prefix) => name === prefix || name.startsWith(`${prefix}_`));
+}
+
 async function names(db: SqlDriver, type: 'table' | 'index') {
   const rows = await db.all<{ name: string }>(
     'SELECT name FROM sqlite_master WHERE type = ? AND name NOT LIKE ? ORDER BY name',
@@ -29,18 +35,23 @@ async function names(db: SqlDriver, type: 'table' | 'index') {
   return rows.map((r) => r.name);
 }
 
+async function regularTableNames(db: SqlDriver) {
+  return (await names(db, 'table')).filter((name) => !isFtsTableOrShadow(name));
+}
+
 async function plan(db: SqlDriver, sql: string, params: (string | number)[]) {
   const rows = await db.all<{ detail: string }>(`EXPLAIN QUERY PLAN ${sql}`, params);
   return rows.map((r) => r.detail).join('\n');
 }
 
 describe('openCatalog', () => {
-  it('creates schema v2 on a fresh database', async () => {
+  it('creates schema v3 with FTS5 tables on a fresh database', async () => {
     const { db } = testDb();
-    expect(SCHEMA_VERSION).toBe(2);
+    expect(SCHEMA_VERSION).toBe(3);
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 2 }]);
-    expect(await names(db, 'table')).toEqual([...TABLES].sort());
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 3 }]);
+    expect(await regularTableNames(db)).toEqual([...TABLES].sort());
+    expect(await names(db, 'table')).toEqual(expect.arrayContaining([...EXPECTED_FTS_TABLES]));
     expect(await names(db, 'index')).toEqual(
       expect.arrayContaining([
         'idx_placements_browse',
@@ -54,7 +65,7 @@ describe('openCatalog', () => {
     );
   });
 
-  it('upgrades a v1 database to v2 while preserving existing catalog rows', async () => {
+  it('upgrades a v1 database to v3 while preserving existing catalog rows and rebuilding FTS5', async () => {
     const { db } = testDb();
     await db.exec(MIGRATIONS[0] ?? '');
     await db.exec('PRAGMA user_version = 1');
@@ -66,12 +77,54 @@ describe('openCatalog', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 2 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 3 }]);
     expect(await db.all('SELECT id, name FROM sources')).toEqual([{ id: 's1', name: 'Main' }]);
     expect(await db.all('SELECT key, name FROM movies')).toEqual([
       { key: 'm:s1:1', name: 'Silent Horizon' },
     ]);
-    expect(await names(db, 'table')).toEqual([...TABLES].sort());
+    expect(await regularTableNames(db)).toEqual([...TABLES].sort());
+    expect(
+      await db.all<{ key: string }>(
+        `SELECT t.key FROM movies_fts JOIN movies t ON t.id = movies_fts.rowid WHERE movies_fts MATCH '"silent"*'`,
+      ),
+    ).toEqual([{ key: 'm:s1:1' }]);
+  });
+
+  it('upgrades a v2 database to v3 and makes pre-existing live, movie, and series rows immediately searchable', async () => {
+    const { db } = testDb();
+    await db.exec(MIGRATIONS[0] ?? '');
+    await db.exec(MIGRATIONS[1] ?? '');
+    await db.exec('PRAGMA user_version = 2');
+    await db.run(
+      "INSERT INTO sources (id, kind, name, created_at, settings_json) VALUES ('s1','xtream','Main',100,'{}')",
+    );
+    await db.run(
+      "INSERT INTO live (source_id, key, name, name_fold, run_id) VALUES ('s1', 'x:s1:live:1', 'İstanbul Haber HD', 'istanbul haber hd', 1)",
+    );
+    await db.run(
+      "INSERT INTO movies (source_id, key, name, name_fold, run_id) VALUES ('s1', 'x:s1:movie:1', 'Güneş Yolu', 'gunes yolu', 1)",
+    );
+    await db.run(
+      "INSERT INTO series (source_id, key, name, name_fold, run_id) VALUES ('s1', 'x:s1:series:1', 'Özgür Gece', 'ozgur gece', 1)",
+    );
+
+    expect((await openCatalog(db)).ok).toBe(true);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 3 }]);
+    expect(
+      await db.all<{ key: string }>(
+        `SELECT t.key FROM live_fts JOIN live t ON t.id = live_fts.rowid WHERE live_fts MATCH '"istanbul"*'`,
+      ),
+    ).toEqual([{ key: 'x:s1:live:1' }]);
+    expect(
+      await db.all<{ key: string }>(
+        `SELECT t.key FROM movies_fts JOIN movies t ON t.id = movies_fts.rowid WHERE movies_fts MATCH '"gunes"*'`,
+      ),
+    ).toEqual([{ key: 'x:s1:movie:1' }]);
+    expect(
+      await db.all<{ key: string }>(
+        `SELECT t.key FROM series_fts JOIN series t ON t.id = series_fts.rowid WHERE series_fts MATCH '"ozgur"*'`,
+      ),
+    ).toEqual([{ key: 'x:s1:series:1' }]);
   });
 
   it('is a no-op the second time', async () => {
@@ -82,7 +135,7 @@ describe('openCatalog', () => {
     );
     expect((await openCatalog(db)).ok).toBe(true);
     expect(await db.all('SELECT count(*) AS n FROM sources')).toEqual([{ n: 1 }]);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 2 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 3 }]);
   });
 
   it('applies pragmas, with WAL on file databases', async () => {
@@ -126,7 +179,7 @@ describe('openCatalog', () => {
 
   it('refuses a database written by a newer version', async () => {
     const { db } = testDb();
-    await db.exec('PRAGMA user_version = 3');
+    await db.exec(`PRAGMA user_version = ${SCHEMA_VERSION + 1}`);
     const r = await openCatalog(db);
     expect(r).toMatchObject({ ok: false, error: { category: 'storage', code: 'schema-too-new' } });
     expect(await names(db, 'table')).toEqual([]);
@@ -202,14 +255,18 @@ describe('openCatalog', () => {
     expect(favoritesBySource).toContain('idx_favorites_source');
   });
 
-  it('keeps EXPECTED_TABLE_COLUMNS aligned with every table and column in MIGRATIONS', async () => {
+  it('keeps EXPECTED_TABLE_COLUMNS and EXPECTED_FTS_TABLES aligned with MIGRATIONS', async () => {
     const { db } = testDb();
     expect((await openCatalog(db)).ok).toBe(true);
-    const tables = await names(db, 'table');
+    const tables = await regularTableNames(db);
     expect(Object.keys(EXPECTED_TABLE_COLUMNS).sort()).toEqual(tables);
     for (const [table, expected] of Object.entries(EXPECTED_TABLE_COLUMNS)) {
       const cols = await db.all<{ name: string }>(`PRAGMA table_info(${table})`);
       expect(cols.map((c) => c.name)).toEqual(expected.map((c) => c.name));
+    }
+    expect(EXPECTED_FTS_TABLES).toEqual(['live_fts', 'movies_fts', 'series_fts']);
+    for (const fts of EXPECTED_FTS_TABLES) {
+      expect(Object.hasOwn(EXPECTED_TABLE_COLUMNS, fts)).toBe(false);
     }
   });
 
@@ -279,6 +336,20 @@ describe('openCatalog', () => {
       ok: false,
       error: { category: 'storage', code: 'schema-corrupt' },
     });
+  });
+
+  it('returns storage/schema-corrupt when an FTS5 virtual table is missing at SCHEMA_VERSION', async () => {
+    for (const fts of ['live_fts', 'movies_fts', 'series_fts'] as const) {
+      const { db } = testDb();
+      expect((await openCatalog(db)).ok).toBe(true);
+      await db.exec(`DROP TABLE ${fts}`);
+
+      const result = await openCatalog(db);
+      expect(result).toMatchObject({
+        ok: false,
+        error: { category: 'storage', code: 'schema-corrupt' },
+      });
+    }
   });
 
   it('runs zero ALTER TABLE statements on a healthy database', async () => {

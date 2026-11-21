@@ -43,6 +43,8 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
       const svc = await load();
       return svc.itemDetail ? svc.itemDetail(itemKey) : null;
     },
+    search: async (query, opts) =>
+      (await load()).search?.(query, opts) ?? { live: [], movies: [], series: [] },
     seasons: (seriesId) => wrapResult(async () => (await load()).seasons(seriesId)),
     episodes: async (seriesId, season) => (await load()).episodes(seriesId, season),
     resolveStream: (itemKey) => wrapResult(async () => (await load()).resolveStream(itemKey)),
