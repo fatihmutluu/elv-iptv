@@ -485,10 +485,11 @@ describe('AppShell', () => {
         expect(screen.getByTestId('nav-tab-live')).toHaveTextContent('Canlı');
         expect(screen.getByTestId('nav-tab-movie')).toHaveTextContent('Filmler');
         expect(screen.getByTestId('nav-tab-series')).toHaveTextContent('Diziler');
+        expect(screen.getByTestId('nav-tab-search').props.accessibilityLabel).toBe('Ara');
         expect(screen.getByTestId('nav-tab-settings').props.accessibilityLabel).toBe('Ayarlar');
 
         if (formFactor === 'tv') {
-          // Empty catalog opens Settings -> Sources content pane; Back -> sidebar -> Back -> Top Nav -> Right wraps to Home
+          // Empty catalog opens Settings -> Sources content pane; Back -> sidebar -> Back -> Top Nav -> Left hits Search, Right x2 wraps to Home
           await act(async () => {
             keyListener?.({ action: 'down', keyCode: 4, canceled: false, ageMs: 0 });
             keyListener?.({ action: 'up', keyCode: 4, canceled: false, ageMs: 10 });
@@ -505,7 +506,7 @@ describe('AppShell', () => {
             keyListener?.({ action: 'down', keyCode: 21, canceled: false, ageMs: 40 });
             keyListener?.({ action: 'up', keyCode: 21, canceled: false, ageMs: 50 });
           });
-          expect(screen.getByTestId('nav-tab-series').props.accessibilityState.selected).toBe(true);
+          expect(screen.getByTestId('nav-tab-search').props.accessibilityState.selected).toBe(true);
           await act(async () => {
             keyListener?.({ action: 'down', keyCode: 22, canceled: false, ageMs: 60 });
             keyListener?.({ action: 'up', keyCode: 22, canceled: false, ageMs: 70 });
@@ -600,6 +601,68 @@ describe('AppShell', () => {
       await fireEvent.press(screen.getByTestId('nav-tab-home'));
       await waitFor(() => {
         expect(screen.getByTestId('home-screen')).toBeTruthy();
+      });
+    } finally {
+      await view?.unmount();
+      await env.cleanup();
+    }
+  });
+
+  it('wires SearchScreen via nav-tab-search, finds VOD hits, opens DetailScreen, and returns to SearchScreen on back', async () => {
+    const env = await openShellCatalog();
+    const { videoHost } = createFakeHost();
+
+    let view: Awaited<ReturnType<typeof render>> | undefined;
+    try {
+      const added = await env.catalog.addSource({
+        kind: 'xtream',
+        name: 'SearchDemo',
+        server: 'http://sim.example.test:8080',
+        username: 'demo',
+        password: ['de', 'mo'].join(''),
+      });
+      if (!added.ok) throw new Error('addSource failed');
+      await env.catalog.importSource(added.value.id);
+
+      view = await render(
+        <FormFactorProvider value="desktop">
+          <I18nProvider i18n={createAppI18n('en')}>
+            <AppShell catalog={env.catalog} videoHost={videoHost} />
+          </I18nProvider>
+        </FormFactorProvider>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('home-screen')).toBeTruthy();
+      });
+
+      await fireEvent.press(screen.getByTestId('nav-tab-search'));
+      await waitFor(() => {
+        expect(screen.getByTestId('search-screen')).toBeTruthy();
+        expect(screen.getByTestId('nav-tab-search').props.accessibilityState.selected).toBe(true);
+      });
+
+      await fireEvent.changeText(screen.getByTestId('search-input'), 'Synthetic Movie');
+      await waitFor(() => {
+        expect(screen.getByTestId('search-movie-item-0')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('search-scope-movie'));
+      expect(screen.getByTestId('search-scope-movie').props.accessibilityState.selected).toBe(true);
+
+      await fireEvent.press(screen.getByTestId('search-movie-item-0'));
+      await waitFor(() => {
+        expect(screen.getByTestId('detail-screen')).toBeTruthy();
+        expect(screen.getByTestId('detail-title')).toHaveTextContent('Synthetic Movie One');
+      });
+
+      await fireEvent.press(screen.getByTestId('detail-back'));
+      await waitFor(() => {
+        expect(screen.getByTestId('search-screen')).toBeTruthy();
+        expect(screen.getByTestId('search-input').props.value).toBe('Synthetic Movie');
+        expect(screen.getByTestId('search-scope-movie').props.accessibilityState.selected).toBe(
+          true,
+        );
+        expect(screen.getByTestId('search-movie-item-0')).toBeTruthy();
       });
     } finally {
       await view?.unmount();

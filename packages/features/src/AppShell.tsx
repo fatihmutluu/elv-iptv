@@ -1,12 +1,15 @@
-import type { BrowseKind, CatalogService, SourceRow } from '@elv/data';
+import type { CatalogService, SearchScope, SourceRow } from '@elv/data';
 import { useI18n } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  buildShellDestinations,
+  buildShellUtilities,
   type CatalogMemoryMap,
   clearSourceFromCatalogMemory,
   clearSourceFromLiveMemory,
   createObservedCatalog,
   INITIAL_CATALOG_MEMORY,
+  type PrimaryNavTab,
   pushDetailStack,
 } from './app-shell-state';
 import { BrowseScreen, EMPTY_TAB_MEMORY, type TabBrowseMemory } from './browse';
@@ -19,15 +22,14 @@ import type { AppLifecyclePort } from './ports/app-lifecycle';
 import type { PlayTarget } from './ports/play-target';
 import { createPlaybackGuard, type PlaybackGuard } from './ports/playback-guard';
 import type { VideoHost } from './ports/video-host';
+import { SearchScreen } from './search';
 import { SettingsScreen, type SettingsSection } from './settings';
 import type { DetailTarget } from './shared';
-import { AdaptiveNavShell, type NavDestination, type NavUtility, usePreferences } from './shell';
+import { AdaptiveNavShell, usePreferences } from './shell';
 import { SourcesScreen } from './sources';
 
 /** Top-level shell tab identifier. */
-export type AppTab = 'home' | 'live' | 'movie' | 'series' | 'settings';
-
-type PrimaryNavTab = 'home' | BrowseKind;
+export type AppTab = 'home' | 'live' | 'movie' | 'series' | 'search' | 'settings';
 
 /** Props of {@link AppShell}. */
 export interface AppShellProps {
@@ -40,11 +42,8 @@ export interface AppShellProps {
 }
 
 /**
- * Top-level Cinema Quietude application shell (`Home`, `Live`, `Movies`, `Series`, consolidated
- * `Settings` utility hosting Appearance, Sources, and About & Licenses, plus full-screen
- * `PlayerScreen`). Defaults to `Home` when sources are configured or `Settings -> Sources` when
- * empty, reconciles startup `needsImport` sources in the background, wires `PlaybackGuard`, and
- * preserves per-tab focus memory.
+ * Top-level Cinema Quietude shell (`Home`, `Live`, `Movies`, `Series` + `Search`, `Settings`
+ * utilities, overlay `DetailScreen`, and full-screen `PlayerScreen`).
  */
 export function AppShell({
   catalog,
@@ -67,6 +66,9 @@ export function AppShell({
   const [catalogMemoryByTab, setCatalogMemoryByTab] =
     useState<CatalogMemoryMap>(INITIAL_CATALOG_MEMORY);
   const [detailStack, setDetailStack] = useState<readonly DetailTarget[]>([]);
+  const [recentSearches, setRecentSearches] = useState<readonly string[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchScope, setSearchScope] = useState<SearchScope>('all');
   const [playTarget, setPlayTarget] = useState<PlayTarget | null>(null);
 
   const mountedRef = useRef(true);
@@ -85,16 +87,23 @@ export function AppShell({
     };
   }, []);
 
+  const clearSearchSession = useCallback(() => {
+    setRecentSearches([]);
+    setSearchQuery('');
+    setSearchScope('all');
+  }, []);
+
   const syncSourcesAndBump = useCallback(async () => {
     try {
       const rows = await catalog.listSources();
       if (!mountedRef.current) return;
       setSources(rows);
+      if (rows.length === 0) clearSearchSession();
       setRefreshToken((n) => n + 1);
     } catch {
       // Ignore transient catalog open errors in shell background refresh.
     }
-  }, [catalog]);
+  }, [catalog, clearSearchSession]);
 
   const stopForSource = useCallback((sourceId: string): void => {
     if (playTargetRef.current?.sourceId === sourceId) {
@@ -106,22 +115,16 @@ export function AppShell({
     setDetailStack((prev) => prev.filter((entry) => entry.sourceId !== sourceId));
   }, []);
 
-  const playbackGuard = useMemo<PlaybackGuard>(
-    () => createPlaybackGuard(stopForSource),
-    [stopForSource],
-  );
-
+  const playbackGuard = useMemo(() => createPlaybackGuard(stopForSource), [stopForSource]);
   useEffect(() => {
     onPlaybackGuardReady?.(playbackGuard);
   }, [onPlaybackGuardReady, playbackGuard]);
-
   const handlePlay = useCallback((target: PlayTarget) => {
     setHeroScrolled(false);
     playTargetRef.current = target;
     setPlayTarget(target);
   }, []);
-
-  const observedCatalog = useMemo<CatalogService>(
+  const observedCatalog = useMemo(
     () => createObservedCatalog(catalog, playbackGuard, syncSourcesAndBump),
     [catalog, playbackGuard, syncSourcesAndBump],
   );
@@ -134,6 +137,7 @@ export function AppShell({
       .then((initial) => {
         if (cancelled) return;
         setSources(initial);
+        if (initial.length === 0) clearSearchSession();
         setRefreshToken((n) => n + 1);
         if (initial.length > 0 && !userPickedTabRef.current) {
           setActiveTab('home');
@@ -170,90 +174,72 @@ export function AppShell({
     setHeroScrolled(false);
     if (focusContent) setTopNavFocused(false);
   }, []);
-
   const handleSettingsSectionChange = useCallback((next: SettingsSection) => {
     userPickedSettingsSectionRef.current = true;
     setSettingsSection(next);
   }, []);
-
+  const openSearch = useCallback(() => selectTab('search', false), [selectTab]);
   const openSettings = useCallback(() => {
     if (sourcesCountRef.current > 0 && !userPickedSettingsSectionRef.current) {
       setSettingsSection('appearance');
     }
     selectTab('settings', false);
   }, [selectTab]);
-
   const openSources = useCallback(() => {
     userPickedSettingsSectionRef.current = true;
     setSettingsSection('sources');
     selectTab('settings', true);
   }, [selectTab]);
-
   const openDetail = useCallback((target: DetailTarget) => {
     setDetailStack((prev) => pushDetailStack(prev, target));
     setHeroScrolled(false);
     setTopNavFocused(false);
   }, []);
-
   const popDetail = useCallback(() => {
     setDetailStack((prev) => prev.slice(0, -1));
     setHeroScrolled(false);
     setUserStateVersion((v) => v + 1);
   }, []);
 
-  const homeLabel = i18n.t('nav.home');
-  const liveLabel = i18n.t('nav.live');
-  const moviesLabel = i18n.t('nav.movies');
-  const seriesLabel = i18n.t('nav.series');
+  const activeDetail = detailStack[detailStack.length - 1] ?? null;
+  const home = i18n.t('nav.home');
+  const live = i18n.t('nav.live');
+  const movies = i18n.t('nav.movies');
+  const series = i18n.t('nav.series');
+  const searchLabel = i18n.t('nav.search');
   const settingsLabel = i18n.t('nav.settings');
 
-  const destinations = useMemo<readonly NavDestination<PrimaryNavTab>[]>(
-    () => [
-      { id: 'home', label: homeLabel, icon: 'home', testID: 'nav-tab-home' },
-      { id: 'live', label: liveLabel, icon: 'tv', testID: 'nav-tab-live' },
-      { id: 'movie', label: moviesLabel, icon: 'film', testID: 'nav-tab-movie' },
-      { id: 'series', label: seriesLabel, icon: 'series', testID: 'nav-tab-series' },
-    ],
-    [homeLabel, liveLabel, moviesLabel, seriesLabel],
+  const destinations = useMemo(
+    () => buildShellDestinations({ home, live, movies, series }),
+    [home, live, movies, series],
   );
-
-  const utilities = useMemo<readonly NavUtility<'settings'>[]>(
-    () => [
-      {
-        id: 'settings',
-        label: settingsLabel,
-        icon: 'settings',
-        active: activeTab === 'settings',
-        showLabel: false,
-        testID: 'nav-tab-settings',
-        onPress: openSettings,
-      },
-    ],
-    [settingsLabel, activeTab, openSettings],
+  const utilities = useMemo(
+    () =>
+      buildShellUtilities({
+        searchLabel,
+        settingsLabel,
+        activeTab,
+        hasActiveDetail: activeDetail !== null,
+        onOpenSearch: openSearch,
+        onOpenSettings: openSettings,
+      }),
+    [searchLabel, settingsLabel, activeTab, activeDetail, openSearch, openSettings],
   );
 
   const handleSelectDestination = useCallback(
-    (tab: PrimaryNavTab) => {
-      selectTab(tab, false);
-    },
+    (tab: PrimaryNavTab) => selectTab(tab, false),
     [selectTab],
   );
-
-  const handleExitNavFocus = useCallback(() => {
-    setTopNavFocused(false);
-  }, []);
-
-  const handleFocusTopNav = useCallback(() => {
-    setTopNavFocused(true);
-  }, []);
-
-  const handleMovieMemoryChange = useCallback((next: CatalogTabMemory) => {
-    setCatalogMemoryByTab((prev) => ({ ...prev, movie: next }));
-  }, []);
-
-  const handleSeriesMemoryChange = useCallback((next: CatalogTabMemory) => {
-    setCatalogMemoryByTab((prev) => ({ ...prev, series: next }));
-  }, []);
+  const handleExitNavFocus = useCallback(() => setTopNavFocused(false), []);
+  const handleFocusTopNav = useCallback(() => setTopNavFocused(true), []);
+  const handleMovieMemoryChange = useCallback(
+    (next: CatalogTabMemory) => setCatalogMemoryByTab((prev) => ({ ...prev, movie: next })),
+    [],
+  );
+  const handleSeriesMemoryChange = useCallback(
+    (next: CatalogTabMemory) => setCatalogMemoryByTab((prev) => ({ ...prev, series: next })),
+    [],
+  );
 
   if (playTarget !== null) {
     return (
@@ -278,7 +264,6 @@ export function AppShell({
   }
 
   const readySourcesCount = sources.filter((s) => !s.needsImport).length;
-  const activeDetail = detailStack[detailStack.length - 1] ?? null;
   const hasHeroOverlay = activeDetail !== null || activeTab === 'home';
 
   return (
@@ -336,6 +321,22 @@ export function AppShell({
               isActiveScope={slot.isActiveScope}
             />
           )}
+        />
+      ) : activeTab === 'search' ? (
+        <SearchScreen
+          catalog={observedCatalog}
+          refreshToken={refreshToken}
+          userStateVersion={userStateVersion}
+          initialQuery={searchQuery}
+          onQueryChange={setSearchQuery}
+          initialScope={searchScope}
+          onScopeChange={setSearchScope}
+          recentSearches={recentSearches}
+          onRecentSearchesChange={setRecentSearches}
+          onPlay={handlePlay}
+          onOpenDetail={openDetail}
+          onFocusTopNav={handleFocusTopNav}
+          isActiveScope={!topNavFocused}
         />
       ) : activeTab === 'home' ? (
         <HomeScreen

@@ -488,4 +488,54 @@ describe('@elv/i18n', () => {
     expect(ensurePluralRules(missingTarget)).toBe(false);
     expect(ensurePluralRules()).toBe(false);
   });
+
+  it('localizes search screen, top-bar nav, scope counts, and plural summaries in English and Turkish', () => {
+    const en = createAppI18n('en');
+    const tr = createAppI18n('tr');
+    const staticCases: ReadonlyArray<readonly [MessageId, string, string]> = [
+      ['nav.search', 'Search', 'Ara'],
+      ['search.title', 'Search', 'Ara'],
+      ['search.placeholder', 'Search channels, movies, and series…', 'Kanal, film ve dizi ara…'],
+      ['search.clear', 'Clear search', 'Aramayı temizle'],
+      ['search.scope.all', 'All', 'Tümü'],
+      ['search.recentTitle', 'Recent searches', 'Son aramalar'],
+      ['search.clearRecent', 'Clear history', 'Geçmişi temizle'],
+      ['search.promptTitle', 'Find anything in your catalog', 'Kataloğunuzda aradığınızı bulun'],
+      [
+        'search.promptDescription',
+        'Search live channels, movies, and series. Accent and Turkish letter differences are matched automatically.',
+        'Canlı kanallar, filmler ve diziler arasında arayın. Türkçe karakter ve aksan farkları otomatik eşleştirilir.',
+      ],
+      ['search.searching', 'Searching…', 'Aranıyor…'],
+      [
+        'search.noResultsDescription',
+        'Try a shorter word, check the spelling, or switch the category filter.',
+        'Daha kısa bir kelime deneyin, yazımı kontrol edin veya kategori filtresini değiştirin.',
+      ],
+      ['search.section.live', 'Live channels', 'Canlı kanallar'],
+      ['search.section.movies', 'Movies', 'Filmler'],
+      ['search.section.series', 'Series', 'Diziler'],
+    ];
+    for (const [id, expectedEn, expectedTr] of staticCases) {
+      expect(en.t(id)).toBe(expectedEn);
+      expect(tr.t(id)).toBe(expectedTr);
+    }
+
+    expect(en.t('search.scope.live', { count: 12 })).toBe('Live (12)');
+    expect(tr.t('search.scope.live', { count: 12 })).toBe('Canlı (12)');
+    expect(en.t('search.scope.movies', { count: 34 })).toBe('Movies (34)');
+    expect(tr.t('search.scope.movies', { count: 34 })).toBe('Filmler (34)');
+    expect(en.t('search.scope.series', { count: 7 })).toBe('Series (7)');
+    expect(tr.t('search.scope.series', { count: 7 })).toBe('Diziler (7)');
+
+    expect(en.t('search.noResultsTitle', { query: 'çağrı' })).toBe('No matches for "çağrı"');
+    expect(tr.t('search.noResultsTitle', { query: 'çağrı' })).toBe('"çağrı" için sonuç bulunamadı');
+
+    expect(en.t('search.resultsSummary', { count: 0 })).toBe('0 matches');
+    expect(en.t('search.resultsSummary', { count: 1 })).toBe('1 match');
+    expect(en.t('search.resultsSummary', { count: 18 })).toBe('18 matches');
+    expect(tr.t('search.resultsSummary', { count: 0 })).toBe('0 sonuç');
+    expect(tr.t('search.resultsSummary', { count: 1 })).toBe('1 sonuç');
+    expect(tr.t('search.resultsSummary', { count: 18 })).toBe('18 sonuç');
+  });
 });

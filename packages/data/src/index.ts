@@ -8,7 +8,13 @@ export { importCatalog, loadSeriesEpisodes } from './import-xtream';
 export * from './manifest';
 export * from './migrate';
 export * from './queries';
-export { EXPECTED_TABLE_COLUMNS, type ExpectedColumn, MIGRATIONS } from './schema';
+export {
+  EXPECTED_FTS_TABLES,
+  EXPECTED_TABLE_COLUMNS,
+  type ExpectedColumn,
+  MIGRATIONS,
+} from './schema';
+export * from './search';
 export * from './source-link';
 export * from './sources';
 export * from './stream-resolver';

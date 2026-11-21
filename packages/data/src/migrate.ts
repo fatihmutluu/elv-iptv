@@ -1,6 +1,6 @@
 import { elvError, err, ok, type Result, type SqlDriver } from '@elv/domain';
 import { recoverRuns } from './runs';
-import { EXPECTED_TABLE_COLUMNS, MIGRATIONS, OPEN_PRAGMAS } from './schema';
+import { EXPECTED_FTS_TABLES, EXPECTED_TABLE_COLUMNS, MIGRATIONS, OPEN_PRAGMAS } from './schema';
 
 /** Schema version this build writes and understands (`PRAGMA user_version`). */
 export const SCHEMA_VERSION = MIGRATIONS.length;
@@ -17,6 +17,15 @@ async function verifyAndHealSchema(db: SqlDriver): Promise<Result<void>> {
       if (!existing.has(column.name)) {
         repairs.push(`ALTER TABLE ${table} ADD COLUMN ${column.name} ${column.alterDefinition}`);
       }
+    }
+  }
+  for (const fts of EXPECTED_FTS_TABLES) {
+    const found = await db.all<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+      [fts],
+    );
+    if (found.length === 0) {
+      return err(elvError('storage', 'schema-corrupt', `missing table ${fts}`));
     }
   }
   if (repairs.length > 0) {

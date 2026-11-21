@@ -327,6 +327,9 @@ msgstr "Lisanslar"
 msgid "nav.settings"
 msgstr "Ayarlar"
 
+msgid "nav.search"
+msgstr "Ara"
+
 msgid "notices.title"
 msgstr "Üçüncü taraf yazılım bildirimleri"
 
@@ -836,3 +839,57 @@ msgstr "Bölümler yükleniyor…"
 
 msgid "detail.cast"
 msgstr "Oyuncular"
+
+msgid "search.title"
+msgstr "Ara"
+
+msgid "search.placeholder"
+msgstr "Kanal, film ve dizi ara…"
+
+msgid "search.clear"
+msgstr "Aramayı temizle"
+
+msgid "search.scope.all"
+msgstr "Tümü"
+
+msgid "search.scope.live"
+msgstr "Canlı ({count})"
+
+msgid "search.scope.movies"
+msgstr "Filmler ({count})"
+
+msgid "search.scope.series"
+msgstr "Diziler ({count})"
+
+msgid "search.recentTitle"
+msgstr "Son aramalar"
+
+msgid "search.clearRecent"
+msgstr "Geçmişi temizle"
+
+msgid "search.promptTitle"
+msgstr "Kataloğunuzda aradığınızı bulun"
+
+msgid "search.promptDescription"
+msgstr "Canlı kanallar, filmler ve diziler arasında arayın. Türkçe karakter ve aksan farkları otomatik eşleştirilir."
+
+msgid "search.searching"
+msgstr "Aranıyor…"
+
+msgid "search.noResultsTitle"
+msgstr "\"{query}\" için sonuç bulunamadı"
+
+msgid "search.noResultsDescription"
+msgstr "Daha kısa bir kelime deneyin, yazımı kontrol edin veya kategori filtresini değiştirin."
+
+msgid "search.resultsSummary"
+msgstr "{count} sonuç"
+
+msgid "search.section.live"
+msgstr "Canlı kanallar"
+
+msgid "search.section.movies"
+msgstr "Filmler"
+
+msgid "search.section.series"
+msgstr "Diziler"

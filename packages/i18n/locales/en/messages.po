@@ -327,6 +327,9 @@ msgstr "Notices"
 msgid "nav.settings"
 msgstr "Settings"
 
+msgid "nav.search"
+msgstr "Search"
+
 msgid "notices.title"
 msgstr "Third-party software notices"
 
@@ -836,3 +839,57 @@ msgstr "Loading episodes…"
 
 msgid "detail.cast"
 msgstr "Cast"
+
+msgid "search.title"
+msgstr "Search"
+
+msgid "search.placeholder"
+msgstr "Search channels, movies, and series…"
+
+msgid "search.clear"
+msgstr "Clear search"
+
+msgid "search.scope.all"
+msgstr "All"
+
+msgid "search.scope.live"
+msgstr "Live ({count})"
+
+msgid "search.scope.movies"
+msgstr "Movies ({count})"
+
+msgid "search.scope.series"
+msgstr "Series ({count})"
+
+msgid "search.recentTitle"
+msgstr "Recent searches"
+
+msgid "search.clearRecent"
+msgstr "Clear history"
+
+msgid "search.promptTitle"
+msgstr "Find anything in your catalog"
+
+msgid "search.promptDescription"
+msgstr "Search live channels, movies, and series. Accent and Turkish letter differences are matched automatically."
+
+msgid "search.searching"
+msgstr "Searching…"
+
+msgid "search.noResultsTitle"
+msgstr "No matches for \"{query}\""
+
+msgid "search.noResultsDescription"
+msgstr "Try a shorter word, check the spelling, or switch the category filter."
+
+msgid "search.resultsSummary"
+msgstr "{count, plural, one {# match} other {# matches}}"
+
+msgid "search.section.live"
+msgstr "Live channels"
+
+msgid "search.section.movies"
+msgstr "Movies"
+
+msgid "search.section.series"
+msgstr "Series"

@@ -104,6 +104,22 @@ describe('isCatalogClientMessage', () => {
         call: { method: 'items', categoryId: 'src_1|live|10', offset: 0, limit: 100 },
       },
       { type: 'call', reqId: 9, call: { method: 'itemDetail', itemKey: 'x:src_1:series:42' } },
+      { type: 'call', reqId: 9, call: { method: 'search', query: 'İstanbul Haber' } },
+      { type: 'call', reqId: 9, call: { method: 'search', query: '' } },
+      {
+        type: 'call',
+        reqId: 9,
+        call: {
+          method: 'search',
+          query: 'gunes',
+          opts: { scope: 'movie', limit: 60, sourceId: 'src_1' },
+        },
+      },
+      {
+        type: 'call',
+        reqId: 9,
+        call: { method: 'search', query: 'ozgur', opts: { scope: 'all', limit: 0 } },
+      },
       { type: 'call', reqId: 10, call: { method: 'seasons', seriesId: 12 } },
       { type: 'call', reqId: 10, call: { method: 'seasons', seriesId: 0 } },
       { type: 'call', reqId: 11, call: { method: 'episodes', seriesId: 12, season: 1 } },
@@ -257,6 +273,40 @@ describe('isCatalogClientMessage', () => {
       { type: 'call', reqId: 1, call: { method: 'itemDetail', itemKey: 'bad\nkey' } },
       { type: 'call', reqId: 1, call: { method: 'itemDetail', itemKey: 123 } },
       { type: 'call', reqId: 1, call: { method: 'itemDetail', itemKey: 'k'.repeat(1025) } },
+      { type: 'call', reqId: 1, call: { method: 'search', query: 123 } },
+      { type: 'call', reqId: 1, call: { method: 'search', query: 'q'.repeat(257) } },
+      { type: 'call', reqId: 1, call: { method: 'search', query: 'bad\nquery' } },
+      { type: 'call', reqId: 1, call: { method: 'search', query: 'ok', opts: null } },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'search', query: 'ok', opts: { scope: 'vod' } },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'search', query: 'ok', opts: { limit: 61 } },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'search', query: 'ok', opts: { limit: -1 } },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'search', query: 'ok', opts: { limit: 1.5 } },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'search', query: 'ok', opts: { sourceId: '' } },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'search', query: 'ok', opts: { sourceId: 'bad\nsrc' } },
+      },
       { type: 'call', reqId: 1, call: { method: 'episodes', seriesId: 1, season: 1.2 } },
       {
         type: 'call',

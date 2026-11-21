@@ -274,6 +274,8 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
     categories: (sourceId, kind) => callValue({ method: 'categories', sourceId, kind }),
     items: (categoryId, offset, limit) => callValue({ method: 'items', categoryId, offset, limit }),
     itemDetail: (itemKey) => callValue({ method: 'itemDetail', itemKey }),
+    search: (query, opts) =>
+      callValue({ method: 'search', query, ...(opts === undefined ? {} : { opts }) }),
     seasons: (seriesId) => callResult({ method: 'seasons', seriesId }),
     episodes: (seriesId, season) => callValue({ method: 'episodes', seriesId, season }),
     resolveStream: (itemKey) => callResult({ method: 'resolveStream', itemKey }),

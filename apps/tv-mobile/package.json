@@ -48,6 +48,6 @@
     "xcode": "4.0.0"
   },
   "op-sqlite": {
-    "fts5": false
+    "fts5": true
   }
 }

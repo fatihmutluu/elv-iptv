@@ -52,20 +52,33 @@ const CONNECTION_PRAGMAS = [
   'PRAGMA foreign_keys = ON',
 ];
 
+const IDENT_START = /[A-Za-z_]/;
+const IDENT_CONT = /[A-Za-z0-9_]/;
+
 /**
  * Splits a script into statements at semicolons outside single- and double-quoted literals, `--` and
- * block comments. Comments are dropped and empty statements skipped. Trigger bodies (`BEGIN ... END`
- * with inner semicolons) are not supported.
+ * block comments, and `CREATE [TEMP|TEMPORARY] TRIGGER ... BEGIN ... END` bodies (accounting for
+ * nested `CASE ... END`). Comments are dropped and empty statements skipped.
  */
 export function splitSqlStatements(script: string): string[] {
   const out: string[] = [];
   let current = '';
   let i = 0;
+  let seenCreate = false;
+  let isTrigger = false;
+  let inTriggerBody = false;
+  let caseDepth = 0;
+
   const flush = () => {
     const sql = current.trim();
     if (sql !== '') out.push(sql);
     current = '';
+    seenCreate = false;
+    isTrigger = false;
+    inTriggerBody = false;
+    caseDepth = 0;
   };
+
   while (i < script.length) {
     const c = script.charAt(i);
     const next = script.charAt(i + 1);
@@ -87,7 +100,29 @@ export function splitSqlStatements(script: string): string[] {
       const end = script.indexOf('*/', i + 2);
       i = end === -1 ? script.length : end + 2;
       current += ' ';
-    } else if (c === ';') {
+    } else if (IDENT_START.test(c)) {
+      let j = i + 1;
+      while (j < script.length && IDENT_CONT.test(script.charAt(j))) j += 1;
+      const word = script.slice(i, j);
+      const upper = word.toUpperCase();
+      if (!inTriggerBody) {
+        if (!seenCreate && current.trim() === '' && upper === 'CREATE') {
+          seenCreate = true;
+        } else if (seenCreate && !isTrigger) {
+          if (upper === 'TRIGGER') isTrigger = true;
+          else if (upper !== 'TEMP' && upper !== 'TEMPORARY') seenCreate = false;
+        } else if (isTrigger && upper === 'BEGIN') {
+          inTriggerBody = true;
+        }
+      } else if (upper === 'CASE') {
+        caseDepth += 1;
+      } else if (upper === 'END') {
+        if (caseDepth > 0) caseDepth -= 1;
+        else inTriggerBody = false;
+      }
+      current += word;
+      i = j;
+    } else if (c === ';' && !inTriggerBody) {
       flush();
       i += 1;
     } else {

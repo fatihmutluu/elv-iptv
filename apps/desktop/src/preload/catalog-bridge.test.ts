@@ -162,6 +162,7 @@ describe('createCatalogBridge', () => {
     const catsP = bridge.categories('s1', 'live');
     const itemsP = bridge.items('c1', 0, 20);
     const detailP = bridge.itemDetail('m:s1:1');
+    const searchP = bridge.search('horizon', { scope: 'movie', limit: 10 });
     const seasonsP = bridge.seasons(10);
     const episodesP = bridge.episodes(10, 1);
     const streamP = bridge.resolveStream('m:s1:key');
@@ -208,13 +209,16 @@ describe('createCatalogBridge', () => {
             ? []
             : msg.call.method === 'getProgress' || msg.call.method === 'itemDetail'
               ? null
-              : ok(undefined);
+              : msg.call.method === 'search'
+                ? { live: [], movies: [], series: [] }
+                : ok(undefined);
         port.deliver({ type: 'result', reqId: msg.reqId, value: val });
       }
     }
     expect(await catsP).toEqual([]);
     expect(await itemsP).toEqual([]);
     expect(await detailP).toBeNull();
+    expect(await searchP).toEqual({ live: [], movies: [], series: [] });
     expect((await seasonsP).ok).toBe(true);
     expect(await episodesP).toEqual([]);
     expect((await streamP).ok).toBe(true);
@@ -325,6 +329,10 @@ describe('createCatalogBridge', () => {
     );
     await expect(bridge.itemDetail('')).rejects.toThrow(/source-format\/invalid-request/);
     await expect(bridge.itemDetail('bad\nkey')).rejects.toThrow(/source-format\/invalid-request/);
+    await expect(bridge.search('bad\nquery')).rejects.toThrow(/source-format\/invalid-request/);
+    await expect(bridge.search('ok', { limit: 61 })).rejects.toThrow(
+      /source-format\/invalid-request/,
+    );
     await expect(bridge.listContinueWatching(101)).rejects.toThrow(
       /source-format\/invalid-request/,
     );

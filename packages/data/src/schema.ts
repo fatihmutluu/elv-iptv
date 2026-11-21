@@ -1,3 +1,9 @@
+export {
+  EXPECTED_FTS_TABLES,
+  EXPECTED_TABLE_COLUMNS,
+  type ExpectedColumn,
+} from './schema-expected';
+
 /** Bytes a write-ahead log is truncated back to after a checkpoint (64 MiB). */
 const JOURNAL_SIZE_LIMIT = 67_108_864;
 
@@ -10,180 +16,6 @@ export const OPEN_PRAGMAS = [
   'PRAGMA temp_store = MEMORY',
   `PRAGMA journal_size_limit = ${JOURNAL_SIZE_LIMIT}`,
 ];
-
-/** Declarative column specification used by {@link openCatalog} to verify and self-heal drifted schemas. */
-export interface ExpectedColumn {
-  readonly name: string;
-  readonly alterDefinition: string;
-}
-
-/**
- * Expected catalog tables and columns matching {@link MIGRATIONS}, with SQLite-valid
- * `ALTER TABLE ADD COLUMN` definitions (including safe defaults for `NOT NULL` columns).
- */
-export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedColumn[]>> = {
-  sources: [
-    { name: 'id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'kind', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'name', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'created_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-    { name: 'settings_json', alterDefinition: "TEXT NOT NULL DEFAULT '{}'" },
-  ],
-  import_runs: [
-    { name: 'id', alterDefinition: 'INTEGER' },
-    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'kind', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'started_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-    { name: 'finished_at', alterDefinition: 'INTEGER' },
-    { name: 'status', alterDefinition: "TEXT NOT NULL DEFAULT 'failed'" },
-    { name: 'error_category', alterDefinition: 'TEXT' },
-    { name: 'error_code', alterDefinition: 'TEXT' },
-    { name: 'counts_json', alterDefinition: 'TEXT' },
-  ],
-  categories: [
-    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'kind', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'provider_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'name', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'name_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'position', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-    { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-  ],
-  live: [
-    { name: 'id', alterDefinition: 'INTEGER' },
-    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'provider_id', alterDefinition: 'TEXT' },
-    { name: 'num', alterDefinition: 'INTEGER' },
-    { name: 'name', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'name_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'logo', alterDefinition: 'TEXT' },
-    { name: 'guide_id', alterDefinition: 'TEXT' },
-    { name: 'catchup_days', alterDefinition: 'INTEGER' },
-    { name: 'url_template', alterDefinition: 'TEXT' },
-    { name: 'headers_json', alterDefinition: 'TEXT' },
-    { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-  ],
-  movies: [
-    { name: 'id', alterDefinition: 'INTEGER' },
-    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'provider_id', alterDefinition: 'TEXT' },
-    { name: 'name', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'name_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'logo', alterDefinition: 'TEXT' },
-    { name: 'rating', alterDefinition: 'REAL' },
-    { name: 'year', alterDefinition: 'INTEGER' },
-    { name: 'extension', alterDefinition: 'TEXT' },
-    { name: 'added', alterDefinition: 'INTEGER' },
-    { name: 'url_template', alterDefinition: 'TEXT' },
-    { name: 'headers_json', alterDefinition: 'TEXT' },
-    { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-  ],
-  series: [
-    { name: 'id', alterDefinition: 'INTEGER' },
-    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'provider_id', alterDefinition: 'TEXT' },
-    { name: 'name', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'name_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'cover', alterDefinition: 'TEXT' },
-    { name: 'plot', alterDefinition: 'TEXT' },
-    { name: 'rating', alterDefinition: 'REAL' },
-    { name: 'year', alterDefinition: 'INTEGER' },
-    { name: 'last_modified', alterDefinition: 'INTEGER' },
-    { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-  ],
-  episodes: [
-    { name: 'id', alterDefinition: 'INTEGER' },
-    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'provider_id', alterDefinition: 'TEXT' },
-    { name: 'series_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'season', alterDefinition: 'INTEGER' },
-    { name: 'episode', alterDefinition: 'INTEGER' },
-    { name: 'title', alterDefinition: 'TEXT' },
-    { name: 'extension', alterDefinition: 'TEXT' },
-    { name: 'duration_sec', alterDefinition: 'INTEGER' },
-    { name: 'url_template', alterDefinition: 'TEXT' },
-    { name: 'headers_json', alterDefinition: 'TEXT' },
-    { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-  ],
-  placements: [
-    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'kind', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'item_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'category_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'position', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-    { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-  ],
-  guide_channels: [
-    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'guide_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'name', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'name_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'icon', alterDefinition: 'TEXT' },
-    { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-  ],
-  channel_guide: [
-    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'channel_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'guide_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-  ],
-  programmes: [
-    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'guide_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'start', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-    { name: 'stop', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-    { name: 'title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'sub_title', alterDefinition: 'TEXT' },
-    { name: 'description', alterDefinition: 'TEXT' },
-    { name: 'categories_json', alterDefinition: 'TEXT' },
-    { name: 'episode_num', alterDefinition: 'TEXT' },
-    { name: 'icon', alterDefinition: 'TEXT' },
-    { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-  ],
-  programmes_next: [
-    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'guide_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'start', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-    { name: 'stop', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-    { name: 'title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'sub_title', alterDefinition: 'TEXT' },
-    { name: 'description', alterDefinition: 'TEXT' },
-    { name: 'categories_json', alterDefinition: 'TEXT' },
-    { name: 'episode_num', alterDefinition: 'TEXT' },
-    { name: 'icon', alterDefinition: 'TEXT' },
-    { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-  ],
-  watch_progress: [
-    { name: 'profile_id', alterDefinition: "TEXT NOT NULL DEFAULT 'default'" },
-    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'item_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'kind', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'subtitle', alterDefinition: 'TEXT' },
-    { name: 'logo', alterDefinition: 'TEXT' },
-    { name: 'series_key', alterDefinition: 'TEXT' },
-    { name: 'season', alterDefinition: 'INTEGER' },
-    { name: 'episode', alterDefinition: 'INTEGER' },
-    { name: 'position_ms', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-    { name: 'duration_ms', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-    { name: 'watched', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-    { name: 'updated_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-  ],
-  favorites: [
-    { name: 'profile_id', alterDefinition: "TEXT NOT NULL DEFAULT 'default'" },
-    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'item_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'kind', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
-    { name: 'logo', alterDefinition: 'TEXT' },
-    { name: 'year', alterDefinition: 'INTEGER' },
-    { name: 'rating', alterDefinition: 'REAL' },
-    { name: 'added_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
-  ],
-};
 
 /** Ordered migrations; entry `i` upgrades a database from `user_version` `i` to `i + 1`. */
 export const MIGRATIONS: readonly string[] = [
@@ -383,5 +215,60 @@ CREATE TABLE favorites (
 ) WITHOUT ROWID;
 CREATE INDEX idx_favorites_recent ON favorites (profile_id, added_at DESC);
 CREATE INDEX idx_favorites_source ON favorites (source_id);
+`,
+  `
+CREATE VIRTUAL TABLE live_fts USING fts5(
+  name_fold,
+  content='live',
+  content_rowid='id',
+  tokenize='unicode61'
+);
+CREATE TRIGGER live_ai AFTER INSERT ON live BEGIN
+  INSERT INTO live_fts(rowid, name_fold) VALUES (new.id, new.name_fold);
+END;
+CREATE TRIGGER live_ad AFTER DELETE ON live BEGIN
+  INSERT INTO live_fts(live_fts, rowid, name_fold) VALUES ('delete', old.id, old.name_fold);
+END;
+CREATE TRIGGER live_au AFTER UPDATE OF name_fold ON live WHEN old.name_fold IS NOT new.name_fold BEGIN
+  INSERT INTO live_fts(live_fts, rowid, name_fold) VALUES ('delete', old.id, old.name_fold);
+  INSERT INTO live_fts(rowid, name_fold) VALUES (new.id, new.name_fold);
+END;
+INSERT INTO live_fts(live_fts) VALUES ('rebuild');
+
+CREATE VIRTUAL TABLE movies_fts USING fts5(
+  name_fold,
+  content='movies',
+  content_rowid='id',
+  tokenize='unicode61'
+);
+CREATE TRIGGER movies_ai AFTER INSERT ON movies BEGIN
+  INSERT INTO movies_fts(rowid, name_fold) VALUES (new.id, new.name_fold);
+END;
+CREATE TRIGGER movies_ad AFTER DELETE ON movies BEGIN
+  INSERT INTO movies_fts(movies_fts, rowid, name_fold) VALUES ('delete', old.id, old.name_fold);
+END;
+CREATE TRIGGER movies_au AFTER UPDATE OF name_fold ON movies WHEN old.name_fold IS NOT new.name_fold BEGIN
+  INSERT INTO movies_fts(movies_fts, rowid, name_fold) VALUES ('delete', old.id, old.name_fold);
+  INSERT INTO movies_fts(rowid, name_fold) VALUES (new.id, new.name_fold);
+END;
+INSERT INTO movies_fts(movies_fts) VALUES ('rebuild');
+
+CREATE VIRTUAL TABLE series_fts USING fts5(
+  name_fold,
+  content='series',
+  content_rowid='id',
+  tokenize='unicode61'
+);
+CREATE TRIGGER series_ai AFTER INSERT ON series BEGIN
+  INSERT INTO series_fts(rowid, name_fold) VALUES (new.id, new.name_fold);
+END;
+CREATE TRIGGER series_ad AFTER DELETE ON series BEGIN
+  INSERT INTO series_fts(series_fts, rowid, name_fold) VALUES ('delete', old.id, old.name_fold);
+END;
+CREATE TRIGGER series_au AFTER UPDATE OF name_fold ON series WHEN old.name_fold IS NOT new.name_fold BEGIN
+  INSERT INTO series_fts(series_fts, rowid, name_fold) VALUES ('delete', old.id, old.name_fold);
+  INSERT INTO series_fts(rowid, name_fold) VALUES (new.id, new.name_fold);
+END;
+INSERT INTO series_fts(series_fts) VALUES ('rebuild');
 `,
 ];

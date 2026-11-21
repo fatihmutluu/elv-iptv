@@ -1,3 +1,4 @@
+import { MIGRATIONS } from '@elv/data';
 import { describe, expect, it, vi } from 'vitest';
 import { createFakeOpSqlite } from './op-sqlite-fake';
 
@@ -31,6 +32,17 @@ describe('splitSqlStatements', () => {
       "INSERT INTO a VALUES ('it''s;')",
       'SELECT 1',
     ]);
+  });
+
+  it('keeps CREATE TRIGGER BEGIN ... END bodies intact including Migration v3', () => {
+    const stmts = splitSqlStatements(MIGRATIONS[2] ?? '');
+    expect(stmts).toHaveLength(15);
+    expect(stmts.filter((s) => s.startsWith('CREATE VIRTUAL TABLE'))).toHaveLength(3);
+    expect(stmts.filter((s) => s.startsWith('CREATE TRIGGER'))).toHaveLength(9);
+    expect(stmts.filter((s) => s.includes("VALUES ('rebuild')"))).toHaveLength(3);
+    for (const trigger of stmts.filter((s) => s.startsWith('CREATE TRIGGER'))) {
+      expect(trigger.endsWith('END')).toBe(true);
+    }
   });
 });
 

@@ -133,6 +133,7 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'nav.sources': 'Kaynaklar',
   'nav.notices': 'Lisanslar',
   'nav.settings': 'Ayarlar',
+  'nav.search': 'Ara',
   'notices.title': 'Üçüncü taraf yazılım bildirimleri',
   'notices.lgplSummary':
     'ELV IPTV, LGPL medya kütüphanelerini (AetherEngine, FFmpeg, libmpv) dinamik olarak bağlar; böylece bu bileşenleri incelemekte, yeniden bağlamakta veya değiştirmekte özgür kalırsınız. Tam sürüm etiketleri, derleme tarifleri ve kaynak bağlantıları aşağıda çevrimdışı olarak listelenmiştir.',
@@ -314,4 +315,24 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'detail.noSynopsis': 'Bu kaynak için özet bilgisi bulunmuyor.',
   'detail.loadingEpisodes': 'Bölümler yükleniyor…',
   'detail.cast': 'Oyuncular',
+  'search.title': 'Ara',
+  'search.placeholder': 'Kanal, film ve dizi ara…',
+  'search.clear': 'Aramayı temizle',
+  'search.scope.all': 'Tümü',
+  'search.scope.live': 'Canlı ({count})',
+  'search.scope.movies': 'Filmler ({count})',
+  'search.scope.series': 'Diziler ({count})',
+  'search.recentTitle': 'Son aramalar',
+  'search.clearRecent': 'Geçmişi temizle',
+  'search.promptTitle': 'Kataloğunuzda aradığınızı bulun',
+  'search.promptDescription':
+    'Canlı kanallar, filmler ve diziler arasında arayın. Türkçe karakter ve aksan farkları otomatik eşleştirilir.',
+  'search.searching': 'Aranıyor…',
+  'search.noResultsTitle': '"{query}" için sonuç bulunamadı',
+  'search.noResultsDescription':
+    'Daha kısa bir kelime deneyin, yazımı kontrol edin veya kategori filtresini değiştirin.',
+  'search.resultsSummary': '{count} sonuç',
+  'search.section.live': 'Canlı kanallar',
+  'search.section.movies': 'Filmler',
+  'search.section.series': 'Diziler',
 };

@@ -158,4 +158,40 @@ describe('createWorkbenchCatalog', () => {
     expect(await catalog.getProgress?.('wb:temp:1')).toBeNull();
     expect((await catalog.listFavoriteKeys?.())?.includes('wb:temp:1')).toBe(false);
   });
+
+  it('supports folded prefix search across live, movies, and series with scope, sourceId, and limit filtering', async () => {
+    const catalog = createWorkbenchCatalog();
+
+    // Empty / punctuation-only returns empty sets
+    expect(await catalog.search?.('   ')).toEqual({ live: [], movies: [], series: [] });
+    expect(await catalog.search?.('meridian', { limit: 0 })).toEqual({
+      live: [],
+      movies: [],
+      series: [],
+    });
+
+    // Cross-kind search ("Meridian" appears in live 'Meridian Business' and movie 'Glass Meridian')
+    const cross = await catalog.search?.('MERİDİAN');
+    expect(cross?.live.map((i) => i.name)).toEqual(['Meridian Business']);
+    expect(cross?.movies.map((i) => i.name)).toEqual(['Glass Meridian']);
+    expect(cross?.series).toEqual([]);
+
+    // Scope filtering
+    const movieOnly = await catalog.search?.('merid', { scope: 'movie' });
+    expect(movieOnly?.live).toEqual([]);
+    expect(movieOnly?.movies.map((i) => i.name)).toEqual(['Glass Meridian']);
+    expect(movieOnly?.series).toEqual([]);
+
+    const seriesOnly = await catalog.search?.('north sig', { scope: 'series' });
+    expect(seriesOnly?.series.map((i) => i.name)).toEqual(['Northern Signal']);
+
+    // Limit & sourceId filtering
+    const limited = await catalog.search?.('a', { scope: 'live', limit: 1 });
+    expect(limited?.live.length).toBeLessThanOrEqual(1);
+    expect(await catalog.search?.('meridian', { sourceId: 'nonexistent-source' })).toEqual({
+      live: [],
+      movies: [],
+      series: [],
+    });
+  });
 });

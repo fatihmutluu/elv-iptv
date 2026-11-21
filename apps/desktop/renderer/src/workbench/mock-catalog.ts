@@ -3,11 +3,18 @@ import {
   type BrowseKind,
   type CatalogService,
   DEFAULT_PROFILE_ID,
+  DEFAULT_SEARCH_LIMIT,
+  foldText,
   type ItemDetailRow,
+  type ItemRow,
   isCompletedProgress,
   type LinkSourceInput,
+  MAX_SEARCH_LIMIT,
+  MAX_SEARCH_TOKENS,
   MIN_RESUME_POSITION_MS,
   type SaveProgressInput,
+  type SearchOptions,
+  type SearchResults,
   type SourceRow,
   type ToggleFavoriteInput,
   type WatchProgressRow,
@@ -32,10 +39,22 @@ const normProfile = (profileId?: string): string => {
   const t = profileId?.trim();
   return t && t.length > 0 ? t : DEFAULT_PROFILE_ID;
 };
-const clampLimit = (limit: number | undefined, fallback: number): number => {
+const clampLimit = (limit: number | undefined, fallback: number, max = MAX_LIST_LIMIT): number => {
   const n = limit === undefined || !Number.isFinite(limit) ? fallback : Math.floor(limit);
-  return Math.min(MAX_LIST_LIMIT, Math.max(0, n));
+  return Math.min(max, Math.max(0, n));
 };
+
+const WORKBENCH_SEARCH_INDEX: readonly {
+  readonly row: ItemRow;
+  readonly words: readonly string[];
+}[] = [...WORKBENCH_ITEMS_BY_KEY.values()].map((row) => ({
+  row,
+  words: foldText(row.name).split(/\s+/).filter(Boolean),
+}));
+
+function matchesTokens(words: readonly string[], tokens: readonly string[]): boolean {
+  return tokens.every((tok) => words.some((w) => w.startsWith(tok)));
+}
 
 /**
  * In-memory synthetic {@link CatalogService} powering the browser UI Workbench (`pnpm dev:ui`)
@@ -130,6 +149,29 @@ export function createWorkbenchCatalog(): CatalogService {
     async itemDetail(itemKey: string): Promise<ItemDetailRow | null> {
       const found = WORKBENCH_ITEMS_BY_KEY.get(itemKey);
       return found ? { ...found, plot: WORKBENCH_PLOTS[itemKey] ?? null } : null;
+    },
+    async search(query: string, opts?: SearchOptions): Promise<SearchResults> {
+      const limit = clampLimit(opts?.limit, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
+      const tokens = foldText(query).split(/\s+/).filter(Boolean).slice(0, MAX_SEARCH_TOKENS);
+      if (limit === 0 || tokens.length === 0) return { live: [], movies: [], series: [] };
+      const scope = opts?.scope ?? 'all';
+      const activeSources = sources.filter(
+        (s) => !s.needsImport && (opts?.sourceId === undefined || s.id === opts.sourceId),
+      );
+      if (activeSources.length === 0) return { live: [], movies: [], series: [] };
+      const sourceId = activeSources[0]?.id ?? DEMO_SOURCE_ID;
+      const collect = (kind: BrowseKind): ItemRow[] => {
+        if (scope !== 'all' && scope !== kind) return [];
+        const out: ItemRow[] = [];
+        for (const entry of WORKBENCH_SEARCH_INDEX) {
+          if (entry.row.kind === kind && matchesTokens(entry.words, tokens)) {
+            out.push({ ...entry.row, sourceId });
+            if (out.length >= limit) break;
+          }
+        }
+        return out;
+      };
+      return { live: collect('live'), movies: collect('movie'), series: collect('series') };
     },
     seasons: async (seriesId: number) =>
       ok(

@@ -12,6 +12,7 @@ import type {
   ImportSummary,
   ItemDetailRow,
   ItemRow,
+  SearchResults,
   SeasonRow,
   SourceRow,
   StreamRequest,
@@ -486,6 +487,15 @@ describe('createCatalogWorkerRuntime', () => {
       plot: null,
     });
     expect(m3uDetail?.logo).toContain(SYNTH_M3U_VAL);
+    const searchHits = await client.call<SearchResults>({
+      method: 'search',
+      query: 'Channel One',
+      opts: { scope: 'live', sourceId: m3uId, limit: 10 },
+    }).promise;
+    expect(searchHits.live.map((r) => r.name)).toEqual(['Channel One']);
+    expect(searchHits.live[0]?.logo).toContain(SYNTH_M3U_VAL);
+    expect(searchHits.movies).toEqual([]);
+    expect(searchHits.series).toEqual([]);
     const m3uStream = await client.call<Result<StreamRequest>>({
       method: 'resolveStream',
       itemKey: m3uItems[0]?.key ?? '',
@@ -521,6 +531,13 @@ describe('createCatalogWorkerRuntime', () => {
     const removed = await client.call<Result<void>>({ method: 'removeSource', id: m3uId }).promise;
     expect(removed.ok).toBe(true);
     expect([...h.secrets.keys()].some((k) => k.includes(m3uId))).toBe(false);
+    expect(
+      await client.call<SearchResults>({
+        method: 'search',
+        query: 'Channel One',
+        opts: { scope: 'live', sourceId: m3uId },
+      }).promise,
+    ).toEqual({ live: [], movies: [], series: [] });
 
     await h.shutdown();
     expect(h.shutdownCount).toBe(1);
