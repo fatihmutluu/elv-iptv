@@ -609,13 +609,22 @@ describe('PlayerScreen Cinema Quietude OSD, 2-level Settings, Touch Lock, Next E
     expect(screen.getByTestId('player-settings-row-subtitles')).toBeTruthy();
     expect(onExit).not.toHaveBeenCalled();
 
-    // Down x3 (audio -> speed -> stats on VOD) -> Select toggles Stats HUD on -> Up back to speed
+    // Down x3 (audio -> speed -> aspect) -> Select toggles Fit/Fill -> Down to stats -> Select toggles Stats HUD on -> Up back to aspect
     await act(async () => {
       keys.tap(KEY_DOWN);
     });
     await act(async () => {
       keys.tap(KEY_DOWN);
     });
+    await act(async () => {
+      keys.tap(KEY_DOWN);
+    });
+    await act(async () => {
+      keys.tap(KEY_SELECT);
+    });
+    expect(
+      screen.getByTestId('player-resize-mode-toggle', { includeHiddenElements: true }),
+    ).toHaveTextContent(/Fill/);
     await act(async () => {
       keys.tap(KEY_DOWN);
     });

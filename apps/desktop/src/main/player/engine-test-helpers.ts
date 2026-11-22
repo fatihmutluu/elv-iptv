@@ -25,6 +25,8 @@ export const OBSERVED = [
   'duration',
   'speed',
   'demuxer-cache-state',
+  'demuxer-cache-duration',
+  'estimated-vf-fps',
   'video-params',
   'vid',
   'track-list',

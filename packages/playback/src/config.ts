@@ -8,6 +8,12 @@ export interface PlaybackConfig {
   liveStartTimeoutMs: number;
   /** No `playing` this long after a VOD `load` counts as a failed start; a first frame alone is not enough. */
   startTimeoutMs: number;
+  /** Hard ceiling for VOD start timeout extensions while transfer progress keeps arriving (`#314`). */
+  vodStartMaxTimeoutMs: number;
+  /** Advancing video playback with zero decoded frames for this long triggers decoder recovery (`#321`). */
+  zeroFrameWindowMs: number;
+  /** Maximum mid-stream stall window deferrals while network progress is actively arriving (`#321`). */
+  maxStallDeferrals: number;
   /** Time each recovery rung gets to reach `playing`. */
   rungTimeoutMs: number;
   /** Waits before rungs 1 to 4 on fast-failing errors; silent timeouts escalate immediately. */
@@ -40,6 +46,9 @@ export const DEFAULT_PLAYBACK_CONFIG: Readonly<PlaybackConfig> = Object.freeze({
   liveStallWindowMs: 4000,
   liveStartTimeoutMs: 5000,
   startTimeoutMs: 8000,
+  vodStartMaxTimeoutMs: 30000,
+  zeroFrameWindowMs: 4000,
+  maxStallDeferrals: 3,
   rungTimeoutMs: 2000,
   ladderGapsMs: Object.freeze([0, 1000, 2000, 4000] as const),
   stableRestoreMs: 30000,

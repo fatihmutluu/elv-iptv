@@ -189,4 +189,46 @@ describe('subscribeWebKeys IME and ARIA editable guards (#136, #139)', () => {
 
     unsubscribe();
   });
+
+  it('skips already defaultPrevented keydowns (e.g. Space handled in capture phase) and never hijacks Space/Backspace in editable inputs (#421, #136)', () => {
+    const { win, emit } = createFakeWindow();
+    const inputs: KeyInput[] = [];
+    const unsubscribe = subscribeWebKeys(
+      win,
+      { isActive: () => false },
+      () => 200,
+      (k) => inputs.push(k),
+    );
+
+    const preventAlready = jest.fn();
+    emit('keydown', { key: ' ', defaultPrevented: true, preventDefault: preventAlready });
+    emit('keyup', { key: ' ' });
+    emit('keydown', { key: 'Spacebar', defaultPrevented: true, preventDefault: preventAlready });
+    emit('keyup', { key: 'Spacebar' });
+    expect(inputs).toEqual([]);
+    expect(preventAlready).not.toHaveBeenCalled();
+
+    // Active editable element prevents Space, Spacebar, and Backspace hijacking
+    for (const activeElement of [
+      { tagName: 'INPUT' },
+      { tagName: 'TEXTAREA' },
+      { tagName: 'DIV', isContentEditable: true },
+    ]) {
+      if (win.document) win.document.activeElement = activeElement;
+      for (const key of [' ', 'Spacebar', 'Backspace']) {
+        const prevent = jest.fn();
+        emit('keydown', { key, preventDefault: prevent });
+        emit('keyup', { key });
+        expect(prevent).not.toHaveBeenCalled();
+      }
+    }
+    expect(inputs).toEqual([]);
+
+    if (win.document) win.document.activeElement = null;
+    emit('keydown', { key: ' ' });
+    emit('keyup', { key: ' ' });
+    expect(inputs.map((k) => `${k.key}:${k.action}`)).toEqual(['select:down', 'select:up']);
+
+    unsubscribe();
+  });
 });

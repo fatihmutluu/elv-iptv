@@ -1,4 +1,14 @@
 export {
+  BrowseFocusMemoryProvider,
+  type BrowseFocusMemoryProviderProps,
+  useBrowseFocusMemory,
+} from './BrowseFocusMemoryProvider';
+export {
+  type BrowseFocusMemory,
+  createBrowseFocusMemory,
+  DEFAULT_BROWSE_FOCUS_MAX_ENTRIES,
+} from './browse-focus-memory';
+export {
   CatalogUiCacheProvider,
   type CatalogUiCacheProviderProps,
   useCatalogUiCache,

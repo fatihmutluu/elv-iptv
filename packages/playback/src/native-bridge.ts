@@ -16,6 +16,7 @@ export interface NativeLoadCommand {
   kind: MediaKind;
   startMs?: number;
   softwareAudio?: boolean;
+  preferHevcOverDolbyVision?: boolean;
   audioTrackId?: string;
   subtitleTrackId?: string | null;
 }
@@ -47,13 +48,23 @@ function toNativeLoad(cmd: LoadCommand): NativeLoadCommand {
     kind,
     ...(startMs === undefined ? {} : { startMs }),
     ...(options?.softwareAudio === undefined ? {} : { softwareAudio: options.softwareAudio }),
+    ...(options?.preferHevcOverDolbyVision === undefined
+      ? {}
+      : { preferHevcOverDolbyVision: options.preferHevcOverDolbyVision }),
     ...(options?.audioTrackId === undefined ? {} : { audioTrackId: options.audioTrackId }),
     ...(options?.subtitleTrackId === undefined ? {} : { subtitleTrackId: options.subtitleTrackId }),
   };
 }
 
 function mapEventClock(event: EngineEvent, uptimeMs: () => number, now: () => number): EngineEvent {
-  if (event.type !== 'firstFrame' && event.type !== 'stall' && event.type !== 'clock') return event;
+  if (
+    event.type !== 'firstFrame' &&
+    event.type !== 'stall' &&
+    event.type !== 'clock' &&
+    event.type !== 'progress'
+  ) {
+    return event;
+  }
   const jsNow = now();
   const uptime = uptimeMs();
   const toJs = (atMs: number): number => jsNow - Math.max(0, uptime - atMs);

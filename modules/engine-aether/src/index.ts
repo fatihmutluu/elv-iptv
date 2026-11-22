@@ -77,6 +77,8 @@ export interface AetherSurfaceProps {
    * with black bars beside it, `fill` covers the view and crops the overflow.
    */
   resizeMode?: 'fit' | 'fill';
+  /** Extra bottom inset in pt to lift native subtitle cues above a visible OSD (`#136`). */
+  subtitleBottomInsetPx?: number;
   testID?: string;
 }
 
@@ -84,6 +86,7 @@ interface NativeSurfaceProps {
   engine: NativeEngineHandle;
   style?: StyleProp<ViewStyle>;
   resizeMode?: 'fit' | 'fill';
+  subtitleBottomInsetPx?: number;
   testID?: string;
 }
 
@@ -103,9 +106,16 @@ export function AetherSurface({
   engine,
   style,
   resizeMode,
+  subtitleBottomInsetPx,
   testID,
 }: AetherSurfaceProps): ReactElement | null {
   const native = handles.get(engine);
   if (NativeSurfaceView === null || native === undefined) return null;
-  return createElement(NativeSurfaceView, { engine: native, style, resizeMode, testID });
+  return createElement(NativeSurfaceView, {
+    engine: native,
+    style,
+    resizeMode,
+    subtitleBottomInsetPx,
+    testID,
+  });
 }

@@ -10,7 +10,8 @@ import { type ReactElement, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { usePlaybackTicker } from './usePlaybackTicker';
 import {
-  clampRatio,
+  attachWebProgressDrag,
+  createTouchScrubResponder,
   formatPlaybackPosition,
   type PressGeometry,
   previewProgressSnapshot,
@@ -33,11 +34,7 @@ export interface VodProgressBarProps {
   readonly previewPositionMs?: number | undefined;
   readonly dimmed?: boolean;
   readonly onSeekRatio: (ratio: number) => void;
-}
-
-interface WebWindowLike {
-  addEventListener?: (type: string, fn: (e: { clientX?: number }) => void) => void;
-  removeEventListener?: (type: string, fn: (e: { clientX?: number }) => void) => void;
+  readonly onScrubbingChange?: (scrubbing: boolean) => void;
 }
 
 /**
@@ -54,6 +51,7 @@ export function VodProgressBar({
   previewPositionMs,
   dimmed = false,
   onSeekRatio,
+  onScrubbingChange,
 }: VodProgressBarProps): ReactElement {
   const theme = useTheme();
   const isWeb = (Platform.OS as string) === 'web';
@@ -70,20 +68,61 @@ export function VodProgressBar({
   const [dragRatio, setDragRatio] = useState<number | null>(null);
 
   const widthRef = useRef(0);
+  const hasDurationRef = useRef(live.hasDuration);
+  hasDurationRef.current = live.hasDuration;
   const dragRatioRef = useRef<number | null>(null);
   const justDraggedRef = useRef(false);
   const dragResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cleanupDragRef = useRef<(() => void) | null>(null);
   const onSeekRatioRef = useRef(onSeekRatio);
   onSeekRatioRef.current = onSeekRatio;
+  const onScrubbingChangeRef = useRef(onScrubbingChange);
+  onScrubbingChangeRef.current = onScrubbingChange;
 
   useEffect(
     () => () => {
       cleanupDragRef.current?.();
+      if (dragRatioRef.current !== null) onScrubbingChangeRef.current?.(false);
       if (dragResetTimerRef.current !== null) clearTimeout(dragResetTimerRef.current);
     },
     [],
   );
+
+  const markDragEnded = (): void => {
+    justDraggedRef.current = true;
+    if (dragResetTimerRef.current !== null) clearTimeout(dragResetTimerRef.current);
+    dragResetTimerRef.current = setTimeout(() => {
+      justDraggedRef.current = false;
+      dragResetTimerRef.current = null;
+    }, 0);
+  };
+
+  const panResponderRef = useRef<ReturnType<typeof createTouchScrubResponder> | null>(null);
+  panResponderRef.current ??= createTouchScrubResponder({
+    canScrub: () => hasDurationRef.current,
+    getWidth: () => widthRef.current,
+    onStart: (r) => {
+      dragRatioRef.current = r;
+      setDragRatio(r);
+      onScrubbingChangeRef.current?.(true);
+    },
+    onMove: (r) => {
+      dragRatioRef.current = r;
+      setDragRatio(r);
+    },
+    onCommit: (r) => {
+      dragRatioRef.current = null;
+      setDragRatio(null);
+      onScrubbingChangeRef.current?.(false);
+      markDragEnded();
+      onSeekRatioRef.current(r);
+    },
+    onCancel: () => {
+      dragRatioRef.current = null;
+      setDragRatio(null);
+      onScrubbingChangeRef.current?.(false);
+    },
+  });
 
   const isDragging = dragRatio !== null;
   const isActive = tvFocused || hovered || isDragging;
@@ -98,9 +137,12 @@ export function VodProgressBar({
 
   const pillRatio = dragRatio ?? (hovered ? hoverRatio : null);
   const showHoverPill =
-    isWeb && !isTv && pillRatio !== null && live.hasDuration && live.durationMs !== undefined;
+    !isTv &&
+    (isWeb ? pillRatio !== null : dragRatio !== null) &&
+    live.hasDuration &&
+    live.durationMs !== undefined;
   const hoverTimeText =
-    showHoverPill && live.durationMs !== undefined
+    showHoverPill && pillRatio !== null && live.durationMs !== undefined
       ? formatPlaybackPosition(Math.round(pillRatio * live.durationMs))
       : null;
   const hoverPillLeftPct =
@@ -117,47 +159,30 @@ export function VodProgressBar({
     cleanupDragRef.current?.();
     dragRatioRef.current = initial;
     setDragRatio(initial);
-
-    const win = (globalThis as unknown as { window?: WebWindowLike }).window;
-    const ratioFromClientX = (clientX: number | undefined): number =>
-      typeof clientX === 'number' && Number.isFinite(clientX) && rect.width > 0
-        ? clampRatio((clientX - rect.left) / rect.width)
-        : (dragRatioRef.current ?? initial);
-
-    const onMove = (e: { clientX?: number }): void => {
-      const next = ratioFromClientX(e.clientX);
-      dragRatioRef.current = next;
-      setDragRatio(next);
-    };
-    const teardown = (): void => {
-      win?.removeEventListener?.('pointermove', onMove);
-      win?.removeEventListener?.('pointerup', onUp);
-      win?.removeEventListener?.('pointercancel', onCancel);
-      cleanupDragRef.current = null;
-    };
-    const onUp = (e: { clientX?: number }): void => {
-      teardown();
-      const finalRatio = ratioFromClientX(e.clientX);
-      dragRatioRef.current = null;
-      justDraggedRef.current = true;
-      if (dragResetTimerRef.current !== null) clearTimeout(dragResetTimerRef.current);
-      dragResetTimerRef.current = setTimeout(() => {
-        justDraggedRef.current = false;
-        dragResetTimerRef.current = null;
-      }, 0);
-      setDragRatio(null);
-      onSeekRatioRef.current(finalRatio);
-    };
-    const onCancel = (): void => {
-      teardown();
-      dragRatioRef.current = null;
-      setDragRatio(null);
-    };
-
-    win?.addEventListener?.('pointermove', onMove);
-    win?.addEventListener?.('pointerup', onUp);
-    win?.addEventListener?.('pointercancel', onCancel);
-    cleanupDragRef.current = teardown;
+    onScrubbingChangeRef.current?.(true);
+    cleanupDragRef.current = attachWebProgressDrag({
+      rect,
+      initial,
+      getLastRatio: () => dragRatioRef.current,
+      onMove: (next) => {
+        dragRatioRef.current = next;
+        setDragRatio(next);
+      },
+      onCommit: (finalRatio) => {
+        cleanupDragRef.current = null;
+        dragRatioRef.current = null;
+        markDragEnded();
+        setDragRatio(null);
+        onScrubbingChangeRef.current?.(false);
+        onSeekRatioRef.current(finalRatio);
+      },
+      onCancel: () => {
+        cleanupDragRef.current = null;
+        dragRatioRef.current = null;
+        setDragRatio(null);
+        onScrubbingChangeRef.current?.(false);
+      },
+    });
   };
 
   const webPointerProps =
@@ -306,6 +331,13 @@ export function VodProgressBar({
             webTransition(theme, 'transform, opacity, width, height', theme.motion.fastMs),
           ]}
         />
+        {!isWeb && !isTv ? (
+          <View
+            testID="player-progress-touch-scrubber"
+            style={StyleSheet.absoluteFill}
+            {...panResponderRef.current.panHandlers}
+          />
+        ) : null}
       </Pressable>
       <Text
         testID="player-progress-time"

@@ -45,6 +45,7 @@ export function isWebButtonActive(): boolean {
 
 interface WebKeyEventLike {
   key?: unknown;
+  keyCode?: unknown;
   repeat?: unknown;
   isComposing?: unknown;
   shiftKey?: unknown;
@@ -53,6 +54,18 @@ interface WebKeyEventLike {
   altKey?: unknown;
   target?: unknown;
   preventDefault?: () => void;
+  stopPropagation?: () => void;
+  stopImmediatePropagation?: () => void;
+}
+
+const IME_KEY_CODE = 229;
+
+function isImeComposing(e: WebKeyEventLike): boolean {
+  return e.isComposing === true || e.key === 'Process' || e.keyCode === IME_KEY_CODE;
+}
+
+function isSpaceKey(e: WebKeyEventLike): boolean {
+  return e.key === ' ' || e.key === 'Spacebar';
 }
 
 function hasControlModifier(e: WebKeyEventLike): boolean {
@@ -102,6 +115,14 @@ function dispatchVodShortcut(
 
   if (!guard.isVod() || !guard.canUseShortcuts()) return false;
   const repeat = e.repeat === true;
+
+  if (isSpaceKey(e) && e.shiftKey !== true) {
+    e.preventDefault?.();
+    e.stopPropagation?.();
+    e.stopImmediatePropagation?.();
+    if (!repeat) guard.onTogglePlayPause();
+    return true;
+  }
 
   if (e.shiftKey === true && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
     e.preventDefault?.();
@@ -179,30 +200,49 @@ export function useDesktopPlayerShortcuts(params: {
       globalThis as {
         window?: {
           document?: { activeElement?: unknown };
-          addEventListener?: (t: string, fn: (e: WebKeyEventLike) => void) => void;
-          removeEventListener?: (t: string, fn: (e: WebKeyEventLike) => void) => void;
+          addEventListener?: (
+            t: string,
+            fn: (e: WebKeyEventLike) => void,
+            capture?: boolean,
+          ) => void;
+          removeEventListener?: (
+            t: string,
+            fn: (e: WebKeyEventLike) => void,
+            capture?: boolean,
+          ) => void;
         };
       }
     ).window;
     if (win?.addEventListener === undefined || win.removeEventListener === undefined) return;
+    let handledSpaceDown = false;
     const onKeyDown = (e: WebKeyEventLike): void => {
-      if (e.isComposing === true) return;
+      if (isImeComposing(e)) return;
       if (isEditableWebTarget(e.target) || isEditableWebTarget(win.document?.activeElement)) return;
-      dispatchVodShortcut(e, guardRef.current, throttle);
+      if (dispatchVodShortcut(e, guardRef.current, throttle) && isSpaceKey(e)) {
+        handledSpaceDown = true;
+      }
     };
-    const onKeyUp = (): void => {
+    const onKeyUp = (e: WebKeyEventLike): void => {
       throttle.reset();
+      if (handledSpaceDown && isSpaceKey(e)) {
+        handledSpaceDown = false;
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        e.stopImmediatePropagation?.();
+      }
     };
     const onBlur = (): void => {
+      handledSpaceDown = false;
       throttle.reset();
     };
-    win.addEventListener('keydown', onKeyDown);
-    win.addEventListener('keyup', onKeyUp);
+    win.addEventListener('keydown', onKeyDown, true);
+    win.addEventListener('keyup', onKeyUp, true);
     win.addEventListener('blur', onBlur);
     return () => {
+      handledSpaceDown = false;
       throttle.reset();
-      win.removeEventListener?.('keydown', onKeyDown);
-      win.removeEventListener?.('keyup', onKeyUp);
+      win.removeEventListener?.('keydown', onKeyDown, true);
+      win.removeEventListener?.('keyup', onKeyUp, true);
       win.removeEventListener?.('blur', onBlur);
     };
   }, [isWebDesktop, throttle]);
@@ -211,7 +251,7 @@ export function useDesktopPlayerShortcuts(params: {
 
   return {
     onKeyDown: (e: WebKeyEventLike) => {
-      if (e.isComposing === true || isEditableWebTarget(e.target) || hasControlModifier(e)) return;
+      if (isImeComposing(e) || isEditableWebTarget(e.target) || hasControlModifier(e)) return;
       if (dispatchVodShortcut(e, guardRef.current, throttle)) return;
       const mapped = mapDesktopFallbackKey(e.key);
       if (!mapped) return;

@@ -232,6 +232,7 @@ export function CatalogDiscoveryScreen({
   );
 
   const tvNav = useTvCatalogNavigation({
+    focusMemoryKey: kind,
     isTv: layout.isTv,
     isActiveScope,
     isGridMode,

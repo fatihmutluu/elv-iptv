@@ -74,6 +74,7 @@ class Media3Engine : SharedObject {
     onBehindLiveWindow = ::recoverBehindLiveWindow,
     onAudioFocusDenied = ::handleAudioFocusDenied,
     onVideoCodecFailed = codecPolicy::recordVideoCodecFailure,
+    onDolbyVisionFailed = codecPolicy::recordDolbyVisionFallback,
     onFirstFrame = surfaces::onFramed,
     onCue = surfaces::onCue,
   )
@@ -104,6 +105,7 @@ class Media3Engine : SharedObject {
 
   private var player: ExoPlayer? = null
   private var playerSoftwareAudio = false
+  private var playerPreferHevc = false
   private var activeEpoch = 0
   private var token = 0
   private var generation = 0L
@@ -120,6 +122,7 @@ class Media3Engine : SharedObject {
       if (action !is CommandFence.MediaAction.Run) return@post
       activeEpoch = action.epoch
       reporter.end()
+      if (request?.url != next.url && !next.preferHevcOverDolbyVision) codecPolicy.clearDolbyVisionFallback()
       token = attempt
       request = next
       lastVodPositionMs = if (next.live) null else next.startMs?.coerceAtLeast(0L)
@@ -192,7 +195,7 @@ class Media3Engine : SharedObject {
       reporter.end()
       beginGeneration()
       releasePlayer()
-      player = buildPlayer(playerSoftwareAudio)
+      player = buildPlayer(playerSoftwareAudio, playerPreferHevc)
     }
   }
 
@@ -344,10 +347,12 @@ class Media3Engine : SharedObject {
     if (newGeneration) beginGeneration()
     val existing = player
     val terminal = existing != null && (existing.playbackState == Player.STATE_ENDED || existing.playerError != null)
-    val rebuild = forceRebuild || existing == null || terminal || playerSoftwareAudio != next.softwareAudio
+    val rebuild =
+      forceRebuild || existing == null || terminal ||
+        playerSoftwareAudio != next.softwareAudio || playerPreferHevc != next.preferHevcOverDolbyVision
     if (rebuild) {
       releasePlayer()
-      player = buildPlayer(next.softwareAudio)
+      player = buildPlayer(next.softwareAudio, next.preferHevcOverDolbyVision)
     } else {
       existing.stop()
     }
@@ -355,16 +360,21 @@ class Media3Engine : SharedObject {
     current.setSeekParameters(if (next.live) SeekParameters.EXACT else vodSeekParametersFor(positionMs ?: 0L, null))
     tracksBridge.applyInitialParameters(current)
     val serial = ++prepares
+    val prepareGen = generation
     reporter.begin(current, next.live, prepareSerial = serial, reused = !rebuild)
-    val source = createMediaSource(next, gate, generation, serial, lowRamDevice, http)
+    val transferListener = ProgressTransferListener(shouldReport = { reporter.isWaitingForMedia }) { bytes, atMs ->
+      post { if (generation == prepareGen) reporter.onTransferProgress(bytes, atMs) }
+    }
+    val source = createMediaSource(next, gate, prepareGen, serial, lowRamDevice, http, transferListener)
     if (positionMs == null) current.setMediaSource(source, true) else current.setMediaSource(source, positionMs)
     current.playWhenReady = true
     current.prepare()
   }
 
-  private fun buildPlayer(softwareAudio: Boolean): ExoPlayer {
+  private fun buildPlayer(softwareAudio: Boolean, preferHevcOverDolbyVision: Boolean = false): ExoPlayer {
     playerSoftwareAudio = softwareAudio
-    return playerFactory.build(softwareAudio).also { built ->
+    playerPreferHevc = preferHevcOverDolbyVision
+    return playerFactory.build(softwareAudio, preferHevcOverDolbyVision).also { built ->
       built.addListener(reporter)
       built.addListener(pictures)
       surfaces.attachToNewPlayer(built) { sendEvent(mapOf("type" to "surface", "change" to it)) }

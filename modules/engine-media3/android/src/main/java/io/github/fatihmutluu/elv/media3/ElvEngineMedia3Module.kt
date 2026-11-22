@@ -1,5 +1,6 @@
 package io.github.fatihmutluu.elv.media3
 
+import android.content.pm.ActivityInfo
 import android.os.SystemClock
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
@@ -20,6 +21,20 @@ class ElvEngineMedia3Module : Module() {
 
     Function("uptimeMs") {
       SystemClock.uptimeMillis().toDouble()
+    }
+
+    Function("setOrientationLocked") { locked: Boolean ->
+      val activity = appContext.currentActivity ?: return@Function
+      val orientation = if (locked) {
+        ActivityInfo.SCREEN_ORIENTATION_LOCKED
+      } else {
+        ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+      }
+      activity.runOnUiThread {
+        if (!activity.isFinishing && !activity.isDestroyed) {
+          activity.requestedOrientation = orientation
+        }
+      }
     }
 
     OnDestroy {
@@ -67,6 +82,10 @@ class ElvEngineMedia3Module : Module() {
       Prop("engine") { view: Media3SurfaceView, engine: Media3Engine? -> view.bind(engine) }
 
       Prop("resizeMode") { view: Media3SurfaceView, mode: String? -> view.setResizeMode(mode) }
+
+      Prop("subtitleBottomInsetPx") { view: Media3SurfaceView, inset: Double? ->
+        view.setSubtitleBottomInsetPx(inset)
+      }
 
       OnViewDestroys { view: Media3SurfaceView -> view.bind(null) }
     }

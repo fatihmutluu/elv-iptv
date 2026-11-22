@@ -9,6 +9,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.text.Cue
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -194,8 +195,49 @@ class TrackSelectorBridgeTest {
       )
       assertTrue(sameLanguage("tr", "tur"))
       assertTrue(sameLanguage("deu", "ger"))
+      assertTrue(sameLanguage("fra", "fre"))
+      assertTrue(sameLanguage("bod", "tib"))
+      assertTrue(sameLanguage("mya", "bur"))
+      assertTrue(sameLanguage("isl", "ice"))
+      assertTrue(sameLanguage("cym", "wel"))
+      assertTrue(sameLanguage("mri", "mao"))
       assertTrue(sameLanguage("en-US", "eng"))
       assertFalse(sameLanguage("und", "und"))
+      assertFalse(sameLanguage("es", "Chinese"))
+      assertFalse(sameLanguage("es", "Japanese"))
+      assertEquals("zh", extractLanguageFromLabel("Chinese (Simplified)"))
+      assertEquals("ja", extractLanguageFromLabel("Japanese"))
+      assertEquals("es", extractLanguageFromLabel("[ES] Audio"))
+      assertEquals("bo", extractLanguageFromLabel("TIB"))
+      assertNull(extractLanguageFromLabel("No Subtitles"))
+
+      val undLabeled = group(
+        "a-und",
+        listOf(
+          Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AAC).setLanguage("und").setLabel("Chinese").build(),
+          Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AAC).setLanguage("und").setLabel("Japanese").build(),
+        ),
+        selectedIndex = 0,
+      )
+      val undSnap = inspectMediaTracks(Tracks(listOf(videoGroup, undLabeled)), textDisabled = false)
+      assertEquals(listOf("zh", "ja"), undSnap.audio.map { it.language })
+
+      // Turkish locale (tr-TR) must not break ASCII case folding ('I' -> 'ı')
+      val previousLocale = Locale.getDefault()
+      try {
+        Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+        assertEquals("en", extractLanguageFromLabel("ENGLISH"))
+        assertEquals("it", extractLanguageFromLabel("ITALIAN"))
+        assertEquals("bo", extractLanguageFromLabel("TIB"))
+        assertEquals("is", extractLanguageFromLabel("ICE"))
+        assertEquals("id", extractLanguageFromLabel("IND"))
+        assertEquals("hi", extractLanguageFromLabel("HINDI"))
+        assertNull(extractLanguageFromLabel("HI-FI"))
+        assertTrue(sameLanguage("TIB", "BOD"))
+        assertTrue(sameLanguage("ICE", "ISL"))
+      } finally {
+        Locale.setDefault(previousLocale)
+      }
 
       // Reloading a new media with Default subtitle preference restores CaptioningManager accessibility defaults
       val (_, defaultReq) = parseLoadArgs(mapOf("attempt" to 9, "url" to "http://h/2.mkv", "kind" to "vod"))

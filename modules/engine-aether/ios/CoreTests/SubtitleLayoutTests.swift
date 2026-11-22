@@ -123,4 +123,59 @@ struct SubtitleLayoutTests {
     #expect(abs(pgsCanvas.height - 1080) < 0.5)
     #expect(abs(pgsCanvas.minY - 0) < 0.5)
   }
+
+  @Test("bottomInset lifts bottom-anchored pills above visible OSD, ignores top/middle, and returns cleanly at 0 (#136)")
+  func bottomInsetLiftsBottomSlotsAndClamps() {
+    let stage = LayoutRect(x: 0, y: 0, width: 1920, height: 1080)
+    let fontSize = SubtitleLayout.baseFontSize(for: stage)
+    let textSize = LayoutSize(width: 320, height: 48)
+
+    let baseBottom = SubtitleLayout.placeSlotPill(
+      slot: .bottomCenter,
+      visibleStage: stage,
+      measuredTextSize: textSize,
+      fontSize: fontSize,
+      bottomInset: 0
+    ).pillFrame
+    let liftedBottom = SubtitleLayout.placeSlotPill(
+      slot: .bottomCenter,
+      visibleStage: stage,
+      measuredTextSize: textSize,
+      fontSize: fontSize,
+      bottomInset: 120
+    ).pillFrame
+    #expect(abs((baseBottom.minY - liftedBottom.minY) - 120) < 0.5)
+    #expect(liftedBottom.maxY <= stage.maxY)
+
+    let restoredBottom = SubtitleLayout.placeSlotPill(
+      slot: .bottomCenter,
+      visibleStage: stage,
+      measuredTextSize: textSize,
+      fontSize: fontSize,
+      bottomInset: 0
+    ).pillFrame
+    #expect(restoredBottom == baseBottom)
+
+    // Top and middle slots are unaffected by bottomInset
+    let baseTop = SubtitleLayout.placeSlotPill(slot: .topCenter, visibleStage: stage, measuredTextSize: textSize, fontSize: fontSize, bottomInset: 0).pillFrame
+    let insetTop = SubtitleLayout.placeSlotPill(slot: .topCenter, visibleStage: stage, measuredTextSize: textSize, fontSize: fontSize, bottomInset: 120).pillFrame
+    #expect(baseTop == insetTop)
+
+    let baseMid = SubtitleLayout.placeSlotPill(slot: .middleCenter, visibleStage: stage, measuredTextSize: textSize, fontSize: fontSize, bottomInset: 0).pillFrame
+    let insetMid = SubtitleLayout.placeSlotPill(slot: .middleCenter, visibleStage: stage, measuredTextSize: textSize, fontSize: fontSize, bottomInset: 120).pillFrame
+    #expect(baseMid == insetMid)
+
+    // Negative, non-finite, and oversized insets stay cleanly clamped inside visibleStage
+    let negative = SubtitleLayout.placeSlotPill(slot: .bottomLeft, visibleStage: stage, measuredTextSize: textSize, fontSize: fontSize, bottomInset: -40).pillFrame
+    let zeroLeft = SubtitleLayout.placeSlotPill(slot: .bottomLeft, visibleStage: stage, measuredTextSize: textSize, fontSize: fontSize, bottomInset: 0).pillFrame
+    #expect(negative == zeroLeft)
+
+    let nanInset = SubtitleLayout.placeSlotPill(slot: .bottomRight, visibleStage: stage, measuredTextSize: textSize, fontSize: fontSize, bottomInset: .nan).pillFrame
+    let zeroRight = SubtitleLayout.placeSlotPill(slot: .bottomRight, visibleStage: stage, measuredTextSize: textSize, fontSize: fontSize, bottomInset: 0).pillFrame
+    #expect(nanInset == zeroRight)
+
+    let huge = SubtitleLayout.placeSlotPill(slot: .bottomCenter, visibleStage: stage, measuredTextSize: textSize, fontSize: fontSize, bottomInset: 9_999).pillFrame
+    #expect(huge.minY >= stage.minY)
+    #expect(huge.maxY <= stage.maxY)
+  }
 }

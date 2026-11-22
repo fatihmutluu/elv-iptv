@@ -29,14 +29,14 @@ const EMPTY_AUDIO: MediaTracks = { ...TRACKS, audio: [], selectedAudioId: null }
 
 describe('settings-menu-nav', () => {
   it('initializes root or sub-view state at index 0 and exposes root item order', () => {
-    expect(SETTINGS_ROOT_ITEMS).toEqual(['subtitles', 'audio', 'stats']);
+    expect(SETTINGS_ROOT_ITEMS).toEqual(['subtitles', 'audio', 'aspect', 'stats']);
     expect(initialSettingsMenu()).toEqual({ view: 'root', index: 0 });
     expect(initialSettingsMenu('audio')).toEqual({ view: 'audio', index: 0 });
     expect(initialSettingsMenu('subtitles')).toEqual({ view: 'subtitles', index: 0 });
   });
 
   it('computes row counts for root, subtitles (including Off), and audio views', () => {
-    expect(settingsRowCount('root', TRACKS)).toBe(3);
+    expect(settingsRowCount('root', TRACKS)).toBe(4);
     expect(settingsRowCount('subtitles', TRACKS)).toBe(3);
     expect(settingsRowCount('audio', TRACKS)).toBe(2);
     expect(settingsRowCount('audio', EMPTY_AUDIO)).toBe(0);
@@ -47,7 +47,7 @@ describe('settings-menu-nav', () => {
     expect(clampSettingsMenu(valid, TRACKS)).toBe(valid);
     expect(clampSettingsMenu({ view: 'root', index: 9 }, TRACKS)).toEqual({
       view: 'root',
-      index: 2,
+      index: 3,
     });
     expect(clampSettingsMenu({ view: 'root', index: -2 }, TRACKS)).toEqual({
       view: 'root',
@@ -126,18 +126,34 @@ describe('settings-menu-nav', () => {
       state: { view: 'audio', index: 1 },
     });
 
-    // Stats row: select toggles, right ignored
+    // Aspect row (index 2 on Live): select toggles resizeMode, right ignored
     expect(
       routeSettingsMenuKey(
         { key: 'select', kind: 'press', time: 0 },
         { view: 'root', index: 2 },
         TRACKS,
       ),
-    ).toEqual({ kind: 'toggleStats' });
+    ).toEqual({ kind: 'toggleResizeMode' });
     expect(
       routeSettingsMenuKey(
         { key: 'right', kind: 'press', time: 0 },
         { view: 'root', index: 2 },
+        TRACKS,
+      ),
+    ).toBeNull();
+
+    // Stats row (index 3 on Live): select toggles, right ignored
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 3 },
+        TRACKS,
+      ),
+    ).toEqual({ kind: 'toggleStats' });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'right', kind: 'press', time: 0 },
+        { view: 'root', index: 3 },
         TRACKS,
       ),
     ).toBeNull();
@@ -225,9 +241,9 @@ describe('settings-menu-nav', () => {
     });
     expect(formatPlaybackSpeed(1)).toBe('1×');
     expect(formatPlaybackSpeed(1.25)).toBe('1.25×');
-    expect(settingsRootItems(false)).toEqual(['subtitles', 'audio', 'stats']);
-    expect(settingsRootItems(true)).toEqual(['subtitles', 'audio', 'speed', 'stats']);
-    expect(settingsRowCount('root', TRACKS, { isVod: true })).toBe(4);
+    expect(settingsRootItems(false)).toEqual(['subtitles', 'audio', 'aspect', 'stats']);
+    expect(settingsRootItems(true)).toEqual(['subtitles', 'audio', 'speed', 'aspect', 'stats']);
+    expect(settingsRowCount('root', TRACKS, { isVod: true })).toBe(5);
     expect(settingsRowCount('speed', TRACKS, { isVod: true })).toBe(6);
 
     // Clamping speed view on non-VOD returns to root
@@ -269,13 +285,48 @@ describe('settings-menu-nav', () => {
       ),
     ).toEqual({ kind: 'state', state: { view: 'root', index: 2 } });
 
-    // Stats on VOD is index 3
+    // Aspect on VOD is index 3, Stats on VOD is index 4
     expect(
       routeSettingsMenuKey(
         { key: 'select', kind: 'press', time: 0 },
         { view: 'root', index: 3 },
         TRACKS,
         { isVod: true },
+      ),
+    ).toEqual({ kind: 'toggleResizeMode' });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 4 },
+        TRACKS,
+        { isVod: true },
+      ),
+    ).toEqual({ kind: 'toggleStats' });
+  });
+
+  it('omits aspect row when hasAspect is false (desktop) and keeps stats/clamping indices exact (#440)', () => {
+    expect(settingsRootItems(false, false)).toEqual(['subtitles', 'audio', 'stats']);
+    expect(settingsRootItems(true, false)).toEqual(['subtitles', 'audio', 'speed', 'stats']);
+    expect(settingsRowCount('root', TRACKS, { isVod: false, hasAspect: false })).toBe(3);
+    expect(settingsRowCount('root', TRACKS, { isVod: true, hasAspect: false })).toBe(4);
+    expect(clampSettingsMenu({ view: 'root', index: 9 }, TRACKS, { hasAspect: false })).toEqual({
+      view: 'root',
+      index: 2,
+    });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 2 },
+        TRACKS,
+        { isVod: false, hasAspect: false },
+      ),
+    ).toEqual({ kind: 'toggleStats' });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 3 },
+        TRACKS,
+        { isVod: true, hasAspect: false },
       ),
     ).toEqual({ kind: 'toggleStats' });
   });

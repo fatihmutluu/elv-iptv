@@ -42,12 +42,17 @@ private let decoderKinds: Set<String> = [
   "audioTrackSwitchFailed",
 ]
 
+private let dolbyVisionHardwareOnlyKinds: Set<String> = [
+  "dolbyVisionRequiresHardware",
+]
+
 /// Maps a backend or reader failure to the player core spec §5.3 error taxonomy.
 public func mapFailure(
   _ failure: BackendFailure,
   url: String,
   live: Bool,
-  played: Bool
+  played: Bool,
+  allowDolbyVisionFallback: Bool = false
 ) -> MappedError {
   let redacted = redactUrl(url)
   switch failure {
@@ -102,6 +107,10 @@ public func mapFailure(
         httpStatus: nil,
         detail: detail
       )
+    }
+
+    if allowDolbyVisionFallback && dolbyVisionHardwareOnlyKinds.contains(kind) {
+      return MappedError(code: "decoder", httpStatus: nil, detail: detail)
     }
 
     if unsupportedFormatKinds.contains(kind) {

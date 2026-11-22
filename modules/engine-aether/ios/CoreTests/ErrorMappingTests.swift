@@ -236,4 +236,34 @@ struct ErrorMappingTests {
     #expect(!redactedDetail.detail.contains("pass"))
     #expect(!redactedDetail.detail.contains("token"))
   }
+
+  @Test("dolbyVisionRequiresHardware maps to recoverable decoder when HEVC/software fallback is available (#189)")
+  func dolbyVisionHardwareFallbackMapping() {
+    let recoverable = mapFailure(
+      .engine(kind: "dolbyVisionRequiresHardware", underlyingDomain: nil, underlyingCode: nil),
+      url: sampleUrl,
+      live: false,
+      played: false,
+      allowDolbyVisionFallback: true
+    )
+    #expect(recoverable.code == "decoder")
+
+    let terminal = mapFailure(
+      .engine(kind: "dolbyVisionRequiresHardware", underlyingDomain: nil, underlyingCode: nil),
+      url: sampleUrl,
+      live: false,
+      played: false,
+      allowDolbyVisionFallback: false
+    )
+    #expect(terminal.code == "unsupported-format")
+
+    let softwareUnplayable = mapFailure(
+      .engine(kind: "dolbyVisionUnplayableOnSoftwarePath", underlyingDomain: nil, underlyingCode: nil),
+      url: sampleUrl,
+      live: false,
+      played: false,
+      allowDolbyVisionFallback: true
+    )
+    #expect(softwareUnplayable.code == "unsupported-format")
+  }
 }

@@ -19,6 +19,21 @@ import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.views.ExpoView
 
 private const val TAG = "ElvMedia3"
+internal const val DEFAULT_SUBTITLE_BOTTOM_PADDING_FRACTION = 0.08f
+internal const val MAX_SUBTITLE_BOTTOM_PADDING_FRACTION = 0.45f
+
+/**
+ * Computes the Media3 `SubtitleView` bottom padding fraction for an extra OSD inset in dp (#136),
+ * clamped to `[DEFAULT_SUBTITLE_BOTTOM_PADDING_FRACTION, MAX_SUBTITLE_BOTTOM_PADDING_FRACTION]`.
+ */
+internal fun subtitleBottomPaddingFraction(insetDp: Float, density: Float, viewHeightPx: Int): Float {
+  val cleanDp = if (insetDp.isFinite() && insetDp > 0f) insetDp else 0f
+  val cleanDensity = if (density.isFinite() && density > 0f) density else 1f
+  if (cleanDp <= 0f || viewHeightPx <= 0) return DEFAULT_SUBTITLE_BOTTOM_PADDING_FRACTION
+  val insetPx = cleanDp * cleanDensity
+  return (DEFAULT_SUBTITLE_BOTTOM_PADDING_FRACTION + insetPx / viewHeightPx.toFloat())
+    .coerceIn(DEFAULT_SUBTITLE_BOTTOM_PADDING_FRACTION, MAX_SUBTITLE_BOTTOM_PADDING_FRACTION)
+}
 
 /**
  * Longest UI-thread wait for the playback thread to let go of a surface: a release in progress (Media3's 500 ms
@@ -50,6 +65,7 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
   private var binding: Binding? = null
   private var surface: Surface? = null
   private var screenWanted = false
+  private var subtitleBottomInsetDp = 0f
 
   init {
     surfaceView.isFocusable = false
@@ -61,6 +77,7 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
     addView(shutterView)
     addView(subtitleView)
     showShutter(shutter.covers)
+    applySubtitleBottomPadding()
   }
 
   /**
@@ -99,6 +116,14 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
     placeSurface()
   }
 
+  /** The `subtitleBottomInsetPx` prop (in dp): lifts `SubtitleView` cues above a visible OSD (#136). */
+  fun setSubtitleBottomInsetPx(insetDp: Double?) {
+    val next = insetDp?.takeIf { it.isFinite() && it > 0.0 }?.toFloat() ?: 0f
+    if (next == subtitleBottomInsetDp) return
+    subtitleBottomInsetDp = next
+    applySubtitleBottomPadding()
+  }
+
   override fun surfaceCreated(holder: SurfaceHolder) {
     val created = holder.surface
     if (created == null || !created.isValid) return
@@ -128,6 +153,11 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
   override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
     shutterView.layout(0, 0, r - l, b - t)
     placeSurface(r - l, b - t)
+  }
+
+  override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+    super.onSizeChanged(w, h, oldw, oldh)
+    applySubtitleBottomPadding(h)
   }
 
   override fun onAttachedToWindow() {
@@ -175,6 +205,16 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
   private fun keepScreen(on: Boolean) {
     screenWanted = on
     keepScreenOn = on && isAttachedToWindow
+  }
+
+  private fun applySubtitleBottomPadding(viewHeight: Int = height) {
+    subtitleView.setBottomPaddingFraction(
+      subtitleBottomPaddingFraction(
+        insetDp = subtitleBottomInsetDp,
+        density = resources.displayMetrics.density,
+        viewHeightPx = viewHeight,
+      )
+    )
   }
 
   private fun detach(from: Media3Engine, old: Surface) {

@@ -295,4 +295,99 @@ struct EngineCoreTests {
       ]
     )
   }
+
+  @Test("dolbyVisionRequiresHardware escalates as decoder once and enables preferSoftwareDecode on retry (#189)")
+  func dolbyVisionFallbackRetryLifecycle() {
+    let (core, backend, sink, _) = makeHarness()
+    let url = "http://h:7878/movie/demo/demo/dv7.mkv"
+    core.load(LoadRequest(url: url, live: false), attempt: 1)
+    sink.events.removeAll()
+
+    core.observe(.failure(.engine(kind: "dolbyVisionRequiresHardware", underlyingDomain: nil, underlyingCode: nil)), serial: 1)
+    if case let .error(attempt, mapped) = sink.events.last {
+      #expect(attempt == 1)
+      #expect(mapped.code == "decoder")
+    } else {
+      Issue.record("expected recoverable decoder error on first DV hardware failure")
+    }
+
+    backend.calls.removeAll()
+    sink.events.removeAll()
+    core.retry(2)
+    #expect(
+      backend.calls == [
+        .stopMedia,
+        .start(
+          .vod(URL(string: url)!, startSeconds: nil),
+          EngineLoadOptions(isLive: false, maxConcurrentSourceRequests: 1, preferSoftwareDecode: true),
+          2
+        ),
+      ]
+    )
+
+    // Second DV hardware failure after fallback was already tried terminates as unsupported-format
+    sink.events.removeAll()
+    core.observe(.failure(.engine(kind: "dolbyVisionRequiresHardware", underlyingDomain: nil, underlyingCode: nil)), serial: 2)
+    if case let .error(attempt, mapped) = sink.events.last {
+      #expect(attempt == 2)
+      #expect(mapped.code == "unsupported-format")
+    } else {
+      Issue.record("expected terminal unsupported-format error after fallback exhausted")
+    }
+  }
+
+  @Test("progress telemetry emits throttled advancing bytes/buffer during opening and stall, and suppresses static or playing updates (#314)")
+  func progressTelemetryThrottledAndGated() {
+    let (core, _, sink, clock) = makeHarness()
+    core.load(LoadRequest(url: "http://h:7878/movie/demo/demo/1.mp4", live: false), attempt: 3)
+    sink.events.removeAll()
+
+    // First advancing byte progress during opening emits immediately
+    clock.nowMs = 1_000
+    core.observe(.progress(bytesReceived: 32_768, bufferedSeconds: nil), serial: 1)
+    #expect(sink.events == [.progress(attempt: 3, bytesReceived: 32_768, atMs: 1_000)])
+    #expect(sink.events[0].payload["type"] as? String == "progress")
+    #expect(sink.events[0].payload["bytesReceived"] as? Double == 32_768)
+    #expect(sink.events[0].payload["atMs"] as? Double == 1_000)
+
+    // Within 500 ms window is throttled even when bytes advance
+    sink.events.removeAll()
+    clock.nowMs = 1_499
+    core.observe(.progress(bytesReceived: 65_536, bufferedSeconds: nil), serial: 1)
+    #expect(sink.events.isEmpty)
+
+    // Past 500 ms with static bytes emits nothing
+    clock.nowMs = 1_600
+    core.observe(.progress(bytesReceived: 32_768, bufferedSeconds: nil), serial: 1)
+    #expect(sink.events.isEmpty)
+
+    // Past 500 ms with strictly higher bytes emits
+    clock.nowMs = 1_600
+    core.observe(.progress(bytesReceived: 98_304, bufferedSeconds: nil), serial: 1)
+    #expect(sink.events == [.progress(attempt: 3, bytesReceived: 98_304, atMs: 1_600)])
+
+    // Once actively playing, progress is suppressed while baseline tracks forward growth
+    core.observe(.firstFrame, serial: 1)
+    core.observe(.phase(.playing), serial: 1)
+    sink.events.removeAll()
+    clock.nowMs = 2_500
+    core.observe(.progress(bytesReceived: 262_144, bufferedSeconds: 10.0), serial: 1)
+    #expect(sink.events.isEmpty)
+
+    // Entering a mid-stream stall with static bytes/buffer emits ZERO progress
+    core.observe(.phase(.rebuffering), serial: 1)
+    sink.events.removeAll()
+    clock.nowMs = 3_200
+    core.observe(.progress(bytesReceived: 262_144, bufferedSeconds: 10.0), serial: 1)
+    #expect(sink.events.isEmpty)
+
+    // Advancing buffer duration during stall after drain emits pure advancement signal (no flat bytesReceived)
+    clock.nowMs = 3_800
+    core.observe(.progress(bytesReceived: nil, bufferedSeconds: 4.0), serial: 1)
+    #expect(sink.events.isEmpty)
+    clock.nowMs = 4_400
+    core.observe(.progress(bytesReceived: nil, bufferedSeconds: 6.5), serial: 1)
+    #expect(sink.events == [.progress(attempt: 3, bytesReceived: nil, atMs: 4_400)])
+    #expect(sink.events[0].payload["bytesReceived"] == nil)
+  }
 }

@@ -61,22 +61,26 @@ internal class PlayerFactory(
     audioFocusAllowed = false
   }
 
-  fun build(softwareAudio: Boolean): ExoPlayer {
+  fun build(softwareAudio: Boolean, preferHevcOverDolbyVision: Boolean = false): ExoPlayer {
     if (audioFocusAllowed) {
       try {
         audioFocusProbe(true)
-        return buildInternal(softwareAudio, handleAudioFocus = true)
+        return buildInternal(softwareAudio, preferHevcOverDolbyVision, handleAudioFocus = true)
       } catch (e: SecurityException) {
         Log.w(TAG, "TAKE_AUDIO_FOCUS denied (${e.javaClass.simpleName}); falling back to handleAudioFocus=false")
         audioFocusAllowed = false
       }
     }
     audioFocusProbe(false)
-    return buildInternal(softwareAudio, handleAudioFocus = false)
+    return buildInternal(softwareAudio, preferHevcOverDolbyVision, handleAudioFocus = false)
   }
 
-  private fun buildInternal(softwareAudio: Boolean, handleAudioFocus: Boolean): ExoPlayer {
-    val renderers = createRenderersFactory(context, codecPolicy, softwareAudio)
+  private fun buildInternal(
+    softwareAudio: Boolean,
+    preferHevcOverDolbyVision: Boolean,
+    handleAudioFocus: Boolean,
+  ): ExoPlayer {
+    val renderers = createRenderersFactory(context, codecPolicy, softwareAudio, preferHevcOverDolbyVision)
     val loadControl = DefaultLoadControl.Builder()
       .setBufferDurationsMs(
         buffers.minBufferMs,

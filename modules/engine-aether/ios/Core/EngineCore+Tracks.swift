@@ -33,6 +33,9 @@ extension EngineCore {
 
   func configuredLoadOptions(for plan: MediaPlan, request: LoadRequest) -> EngineLoadOptions {
     var options = loadOptions(for: plan, request: request)
+    if dolbyVisionFallbackLatched {
+      options.preferSoftwareDecode = true
+    }
     trackState.apply(to: &options)
     return options
   }

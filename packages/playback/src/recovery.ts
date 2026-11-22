@@ -47,7 +47,11 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
   const watchdog = createStallWatchdog(
     ctl,
     () => ladder.escalate(undefined, true),
-    () => ladder.resetBudgetAndLimit(),
+    () => {
+      ladder.resetBudgetAndLimit();
+      liveCleanEndRetried = false;
+      liveFrozenResetTried = false;
+    },
     () => {
       if (ctl.request()?.kind === 'live' && !liveFrozenResetTried && hasStream()) {
         cancelSteps();
@@ -59,6 +63,7 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
       }
       ladder.escalate(undefined, true);
     },
+    () => ladder.escalate({ code: 'decoder' }, true),
   );
 
   const clearRecoveryTimers = (): void => {
@@ -215,7 +220,11 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
       errorWhilePaused = false;
       ladder.clearStepAndRung();
       ladder.commitPendingFormat();
-      watchdog.onPlaying(isBudgetUsed(ladder.getBudget(), ladder.getLimit()));
+      watchdog.onPlaying(
+        isBudgetUsed(ladder.getBudget(), ladder.getLimit()) ||
+          liveCleanEndRetried ||
+          liveFrozenResetTried,
+      );
     },
     onLiveEnded() {
       const statusKind = ctl.getState().status.kind;
@@ -274,6 +283,9 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
     },
     onStall(phase) {
       watchdog.onStall(phase, canWatchStall());
+    },
+    onProgress(atMs, bytesReceived) {
+      watchdog.onProgress(atMs, bytesReceived);
     },
     onStartTimeout() {
       const budget = ladder.getBudget();

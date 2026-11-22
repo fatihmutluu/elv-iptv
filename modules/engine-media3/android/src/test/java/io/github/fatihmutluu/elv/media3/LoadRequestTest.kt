@@ -49,10 +49,18 @@ class LoadRequestTest {
       mapOf("attempt" to 1, "url" to "http://h/1.mp4", "kind" to "vod", "startMs" to Double.NaN)
     )
     val (_, validReq) = parseLoadArgs(
-      mapOf("attempt" to 1, "url" to "http://h/1.mp4", "kind" to "vod", "startMs" to 42_500.0)
+      mapOf(
+        "attempt" to 1,
+        "url" to "http://h/1.mp4",
+        "kind" to "vod",
+        "startMs" to 42_500.0,
+        "preferHevcOverDolbyVision" to true,
+      )
     )
     org.junit.Assert.assertNull(infReq.startMs)
     org.junit.Assert.assertNull(nanReq.startMs)
+    assertFalse(infReq.preferHevcOverDolbyVision)
     assertEquals(42_500L, validReq.startMs)
+    assertTrue(validReq.preferHevcOverDolbyVision)
   }
 }

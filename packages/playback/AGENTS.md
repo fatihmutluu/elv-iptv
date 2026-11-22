@@ -24,12 +24,12 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
 - `createAbrHysteresisController({ rungs, clock, initialIndex?, config? })` (`abr-hysteresis.ts`, `#176`): pure clock-injected anti-oscillation ABR selector (`downgradeSafetyFactor=0.85`, `stepDownCooldownMs=5s` bypassed on severe rebuffer, single-step ascent with `upgradeSafetyFactor=1.35`, `stepUpCooldownMs=20s` restarted on rebuffers, `3` samples over `15s`, rejects `<= 0` bps samples, and full window/cooldown reset on `onPause`/`onBackground`/`onTune`/`reset`).
 
 ## Recovery (spec sections 5.4 and 5.5; `recovery.ts`, `ladder.ts`, `backoff.ts`, `stall-watchdog.ts`, always wired)
-- Entry: a stall of 4 s while `playing`, a frozen live clock (`positionMs` non-advancing for 4 s after first frame -> one bounded live-edge reload reset before escalating; `#148`), no `playing` 5 s after live `load` (8 s VOD), or a recoverable error. An unexpected live `ended` triggers at most one clean-end reload per tune (`#148`; VOD `ended` is untouched). Fast
+- Entry: a stall of 4 s while `playing` (deferred up to `maxStallDeferrals=3` windows while `progress` arrives; `#321`), a zero-decoded-frame black screen (`hasVideoTrack && decodedVideoFrames===0` with advancing `positionMs` for `zeroFrameWindowMs=4s` -> `'decoder'` escalation; `#321`), a frozen live clock (`positionMs` non-advancing for 4 s after first frame -> one bounded live-edge reload reset before escalating; `#148`), no `playing` 5 s after live `load` (8 s VOD, extended by advancing `progress` bytes up to `vodStartMaxTimeoutMs=30s`; `#314`), or a recoverable error. An unexpected live `ended` triggers one clean-end reload (`#148`; VOD untouched). Fast
   errors wait gaps 0, 1, 2, 4 s; silent timeouts escalate immediately (live tunes with no first frame skip rung 1) and
-  each rung has 2 s to play (~9-11 s silent bound): 1 `retry`, 2 `load`, 3 `recreate` + `load`, 4 software audio or
+  each rung has 2 s to play (~9-11 s silent bound): 1 `retry`, 2 `load`, 3 `recreate` + `load`, 4 software audio + HEVC/DV fallback (`preferHevcOverDolbyVision`, `#189`) or
   alternates (`stopMedia` before async resolve; iterates `TuneRequest.alternates` and inline `StreamRequest.alternates`,
   skipping failed resolvers and endpoints matching per-tune canonical `failedCanonicalUrls` across `url`, `finalUrl`, and
-  `error.finalUrl`, `#287`) or container fallback; then `failed` + `stop`. 30 s of `playing` restores budgets.
+  `error.finalUrl`, `#287`) or container fallback; then `failed` + `stop`. 30 s of `playing` restores budgets and resets single-use live clean-end / frozen-clock flags (`#433`).
 - Limit path (`http-429`, `http-509`, `connection-limit`, even while `paused`): `stop`, `limited { nextAtMs }`, wait
   2, 4, 8, then 15 s, `load`; past 60 s `failed(connection-limit)`. Same-account `tune`s are held until wait ends.
 - VOD: reloads resume from last playing/seek position; `network` reconnects with backoff up to 120 s (paused time excluded).

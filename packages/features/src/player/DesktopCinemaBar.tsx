@@ -41,6 +41,7 @@ export interface PlayerOsdProps {
   onSeekBack: () => void;
   onSeekForward: () => void;
   onSeekRatio: (ratio: number) => void;
+  onScrubbingChange?: (scrubbing: boolean) => void;
   onOpenTracks: () => void;
   onOpenSettings?: () => void;
   onOpenSpeed?: () => void;
@@ -88,6 +89,7 @@ export function DesktopCinemaBar(p: PlayerOsdProps): ReactElement {
           label={i18n.t('player.progressLabel')}
           previewPositionMs={p.previewPositionMs}
           onSeekRatio={p.onSeekRatio}
+          {...(p.onScrubbingChange !== undefined ? { onScrubbingChange: p.onScrubbingChange } : {})}
         />
       ) : null}
 

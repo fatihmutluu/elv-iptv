@@ -1,4 +1,5 @@
 import { type CatalogService, createCoalescedCatalog } from '@elv/data';
+import { setOrientationLocked } from '@elv/engine-media3';
 import {
   type AppLifecyclePort,
   AppProviders,
@@ -63,13 +64,16 @@ function AppRoot() {
         if (engine === null) return null;
         return {
           engine,
-          renderSurface: ({ testID }) => (
+          renderSurface: ({ resizeMode, subtitleBottomInsetPx, testID }) => (
             <PlayerSurface
               engine={engine}
               style={styles.surface}
+              {...(resizeMode !== undefined ? { resizeMode } : {})}
+              {...(subtitleBottomInsetPx !== undefined ? { subtitleBottomInsetPx } : {})}
               {...(testID !== undefined ? { testID } : {})}
             />
           ),
+          ...(Platform.OS === 'android' ? { setOrientationLocked } : {}),
         };
       },
     }),

@@ -2,7 +2,7 @@ import type { CatalogService } from '@elv/data';
 import type { PlaybackClock, PlaybackService, PlaybackTimers } from '@elv/playback';
 import { useFormFactor, useI18n, useTheme } from '@elv/ui-kit';
 import { type ReactElement, useEffect, useRef, useState } from 'react';
-import { View } from 'react-native';
+import { Platform, View, type ViewStyle } from 'react-native';
 import { type AppLifecyclePort, noopAppLifecycle } from '../ports/app-lifecycle';
 import type { PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
@@ -11,6 +11,7 @@ import { describePlaybackFailure } from './errors';
 import { NextEpisodeBanner } from './NextEpisodeBanner';
 import {
   formatStatusLine,
+  PlayerCanvasTapTarget,
   PlayerLockedOverlay,
   PlayerOsd,
   playerStyles,
@@ -23,6 +24,11 @@ import { usePlayerControls } from './usePlayerControls';
 import { usePlayerSession } from './usePlayerSession';
 import { usePlayerTargetHandoff } from './usePlayerTargetHandoff';
 import { useWatchProgressSync } from './useWatchProgressSync';
+
+/** Default production OSD auto-hide delay in milliseconds (`#421`). */
+export const DEFAULT_AUTO_HIDE_OSD_MS = 3_500;
+
+const HIDE_CURSOR_WEB_STYLE = { cursor: 'none' } as unknown as ViewStyle;
 
 const DEFAULT_CLOCK: PlaybackClock = { now: () => performance.now() };
 const DEFAULT_TIMERS: PlaybackTimers = {
@@ -148,6 +154,8 @@ export function PlayerScreen({
   const hostToggleFullscreen =
     sessionState.kind === 'ready' ? sessionState.opened.toggleFullscreen : undefined;
   const hostToggleMute = sessionState.kind === 'ready' ? sessionState.opened.toggleMute : undefined;
+  const hostSetOrientationLocked =
+    sessionState.kind === 'ready' ? sessionState.opened.setOrientationLocked : undefined;
 
   const controls = usePlayerControls({
     formFactor,
@@ -172,6 +180,7 @@ export function PlayerScreen({
     onJumpPreviousChannel: handleJumpPreviousChannel,
     onToggleFullscreen: hostToggleFullscreen,
     onToggleMute: hostToggleMute,
+    onSetOrientationLocked: hostSetOrientationLocked,
   });
   hostBackRef.current = controls.handleBack;
   hostFullscreenRef.current = controls.toggleFullscreen;
@@ -214,6 +223,9 @@ export function PlayerScreen({
       tracks={tracks}
       isVod={activeTarget.kind === 'vod'}
       playbackSpeed={controls.playbackSpeed}
+      {...(!isDesktop
+        ? { resizeMode: controls.resizeMode, onToggleResizeMode: controls.toggleResizeMode }
+        : {})}
       statsVisible={controls.statsVisible}
       isTv={isTv}
       formFactor={formFactor}
@@ -259,6 +271,7 @@ export function PlayerScreen({
       onSeekBack={controls.seekStepBack}
       onSeekForward={controls.seekStepForward}
       onSeekRatio={controls.seekToRatio}
+      onScrubbingChange={controls.setBarScrubbing}
       onOpenTracks={controls.openTracks}
       onOpenSettings={() =>
         controls.settingsOpen ? controls.closeSettings() : controls.openSettings()
@@ -284,13 +297,36 @@ export function PlayerScreen({
     controls.handleTouchActivity,
     controls.handlePointerHover,
   );
+  const isWebDesktop = isDesktop && (Platform.OS as string) === 'web';
+  const hideDesktopCursor =
+    isWebDesktop &&
+    controls.osdHidden &&
+    status.kind === 'playing' &&
+    !controls.tracksOpen &&
+    !controls.settingsOpen;
+  const desktopContextMenuProps = isWebDesktop
+    ? ({
+        onContextMenu: (e?: { preventDefault?: () => void }) => {
+          e?.preventDefault?.();
+        },
+      } as Record<string, unknown>)
+    : undefined;
+  const subtitleBottomInsetPx =
+    !isDesktop && !controls.osdHidden && !controls.locked ? (isTv ? 120 : 96) : 0;
+  const showTouchCanvasTap =
+    !isTv && !isDesktop && !controls.locked && !controls.tracksOpen && !controls.settingsOpen;
 
   return (
     <View
       testID="player-screen"
-      style={[playerStyles.root, { backgroundColor: theme.colors.bgCanvas }]}
+      style={[
+        playerStyles.root,
+        { backgroundColor: theme.colors.bgCanvas },
+        hideDesktopCursor ? HIDE_CURSOR_WEB_STYLE : undefined,
+      ]}
       {...controls.desktopFallbackKeyProps}
       {...touchHoverProps}
+      {...desktopContextMenuProps}
     >
       {isTv ? (
         <View
@@ -309,9 +345,18 @@ export function PlayerScreen({
           {sessionState.opened.renderSurface({
             statusText: `${activeTarget.title} — ${statusLine}`,
             failed: status.kind === 'failed',
+            resizeMode: controls.resizeMode,
+            subtitleBottomInsetPx,
             testID: 'player-surface',
           })}
         </View>
+      ) : null}
+
+      {showTouchCanvasTap ? (
+        <PlayerCanvasTapTarget
+          onTouchActivity={controls.handleTouchActivity}
+          onToggleOsd={controls.toggleOsdByTouch}
+        />
       ) : null}
 
       <PlayerStatsHud

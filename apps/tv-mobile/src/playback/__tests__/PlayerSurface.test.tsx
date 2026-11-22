@@ -4,16 +4,42 @@ import { Platform, View } from 'react-native';
 import { PlayerSurface } from '../PlayerSurface';
 
 jest.mock('@elv/engine-aether', () => ({
-  AetherSurface: ({ testID, resizeMode }: { testID?: string; resizeMode?: string }) => {
+  AetherSurface: ({
+    testID,
+    resizeMode,
+    subtitleBottomInsetPx,
+  }: {
+    testID?: string;
+    resizeMode?: string;
+    subtitleBottomInsetPx?: number;
+  }) => {
     const { View: RNView } = require('react-native');
-    return <RNView testID={testID ?? 'aether'} accessibilityLabel={`aether:${resizeMode ?? ''}`} />;
+    return (
+      <RNView
+        testID={testID ?? 'aether'}
+        accessibilityLabel={`aether:${resizeMode ?? ''}:${subtitleBottomInsetPx ?? ''}`}
+      />
+    );
   },
 }));
 
 jest.mock('@elv/engine-media3', () => ({
-  Media3Surface: ({ testID, resizeMode }: { testID?: string; resizeMode?: string }) => {
+  Media3Surface: ({
+    testID,
+    resizeMode,
+    subtitleBottomInsetPx,
+  }: {
+    testID?: string;
+    resizeMode?: string;
+    subtitleBottomInsetPx?: number;
+  }) => {
     const { View: RNView } = require('react-native');
-    return <RNView testID={testID ?? 'media3'} accessibilityLabel={`media3:${resizeMode ?? ''}`} />;
+    return (
+      <RNView
+        testID={testID ?? 'media3'}
+        accessibilityLabel={`media3:${resizeMode ?? ''}:${subtitleBottomInsetPx ?? ''}`}
+      />
+    );
   },
 }));
 
@@ -24,23 +50,33 @@ describe('PlayerSurface', () => {
     jest.restoreAllMocks();
   });
 
-  it('renders AetherSurface on Apple platforms (Platform.OS === ios)', async () => {
+  it('renders AetherSurface on Apple platforms (Platform.OS === ios) forwarding resizeMode and subtitleBottomInsetPx', async () => {
     jest.replaceProperty(Platform, 'OS', 'ios');
     await render(
       <View>
-        <PlayerSurface engine={engine} resizeMode="fit" testID="surface" />
+        <PlayerSurface
+          engine={engine}
+          resizeMode="fit"
+          subtitleBottomInsetPx={96}
+          testID="surface"
+        />
       </View>,
     );
-    expect(screen.getByTestId('surface')).toHaveProp('accessibilityLabel', 'aether:fit');
+    expect(screen.getByTestId('surface')).toHaveProp('accessibilityLabel', 'aether:fit:96');
   });
 
-  it('renders Media3Surface on Android', async () => {
+  it('renders Media3Surface on Android forwarding resizeMode and subtitleBottomInsetPx', async () => {
     jest.replaceProperty(Platform, 'OS', 'android');
     await render(
       <View>
-        <PlayerSurface engine={engine} resizeMode="fill" testID="surface" />
+        <PlayerSurface
+          engine={engine}
+          resizeMode="fill"
+          subtitleBottomInsetPx={120}
+          testID="surface"
+        />
       </View>,
     );
-    expect(screen.getByTestId('surface')).toHaveProp('accessibilityLabel', 'media3:fill');
+    expect(screen.getByTestId('surface')).toHaveProp('accessibilityLabel', 'media3:fill:120');
   });
 });

@@ -229,10 +229,11 @@ extension AetherBackend {
     let id = isAudio ? formatAudioTrackId(track.id) : formatSubtitleTrackId(track.id)
     let label = track.name.trimmingCharacters(in: .whitespacesAndNewlines)
     let codec = track.codec.trimmingCharacters(in: .whitespacesAndNewlines)
+    let cleanLabel = label.isEmpty ? nil : label
     return TrackInfoOut(
       id: id,
-      language: normalizeTrackLanguage(track.language),
-      label: label.isEmpty ? nil : label,
+      language: normalizeTrackLanguage(track.language) ?? extractTrackLanguageFromLabel(cleanLabel),
+      label: cleanLabel,
       codec: codec.isEmpty ? nil : codec,
       channels: (isAudio && track.channels > 0) ? track.channels : nil,
       forced: track.isForced,

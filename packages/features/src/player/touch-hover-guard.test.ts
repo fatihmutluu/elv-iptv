@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   buildTouchHoverProps,
   createTouchHoverGuard,
+  DEFAULT_POINTER_DEADZONE_PX,
   DEFAULT_TOUCH_HOVER_SUPPRESS_MS,
 } from './touch-hover-guard';
 
@@ -78,5 +79,32 @@ describe('createTouchHoverGuard', () => {
 
     props.onMouseMove({});
     expect(onHover).toHaveBeenLastCalledWith('mouse');
+
+    props.onPointerMove({ nativeEvent: { pointerType: 'mouse', clientX: 120, clientY: 240 } });
+    expect(onHover).toHaveBeenLastCalledWith('mouse', { x: 120, y: 240 });
+
+    props.onMouseMove({ clientX: 150, clientY: 260 });
+    expect(onHover).toHaveBeenLastCalledWith('mouse', { x: 150, y: 260 });
+  });
+
+  it('ignores pointer micro-jitter under 10px deadzone and wakes at >= 10px (#421)', () => {
+    const guard = createTouchHoverGuard({ now: () => 1_000 });
+    expect(DEFAULT_POINTER_DEADZONE_PX).toBe(10);
+
+    // First coordinate establishes baseline and allows hover
+    expect(guard.shouldAllowHover('mouse', { x: 100, y: 100 })).toBe(true);
+
+    // Micro-jitter (< 10px) is ignored without drifting the anchor
+    expect(guard.shouldAllowHover('mouse', { x: 105, y: 105 })).toBe(false); // hypot(5,5) ~= 7.07
+    expect(guard.shouldAllowHover('mouse', { x: 109, y: 100 })).toBe(false); // 9px
+    expect(guard.shouldAllowHover('mouse', { x: 100, y: 109 })).toBe(false); // 9px
+
+    // Deliberate move >= 10px wakes and updates anchor to (106, 108) (hypot(6,8) = 10)
+    expect(guard.shouldAllowHover('mouse', { x: 106, y: 108 })).toBe(true);
+
+    // Further small jitter around new anchor (106, 108) is ignored
+    expect(guard.shouldAllowHover('mouse', { x: 112, y: 112 })).toBe(false); // hypot(6,4) ~= 7.21
+    // Deliberate move >= 10px from (106, 108) wakes again
+    expect(guard.shouldAllowHover('mouse', { x: 116, y: 108 })).toBe(true);
   });
 });

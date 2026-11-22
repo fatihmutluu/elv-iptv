@@ -1,12 +1,15 @@
 package io.github.fatihmutluu.elv.media3
 
 import android.net.Uri
+import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.datasource.TransferListener
 import androidx.media3.exoplayer.hls.DefaultHlsExtractorFactory
 import androidx.media3.exoplayer.hls.HlsDataSourceFactory
 import androidx.media3.exoplayer.hls.HlsMediaSource
@@ -31,6 +34,52 @@ internal const val TS_FLAGS =
 private const val TIMESTAMP_ADJUSTER_TIMEOUT_MS = 5_000L
 private const val LIVE_HLS_STUCK_TARGET_DURATION_COEFFICIENT = 8.0
 private const val NORMAL_RAM_TS_SEARCH_PACKETS = 1_200
+internal const val PROGRESS_MIN_INTERVAL_MS = 500L
+
+/**
+ * Lightweight throttled [TransferListener] emitting cumulative network bytes received at most once per
+ * [minIntervalMs] while [shouldReport] is true and bytes actually advanced (#314, #321).
+ */
+@OptIn(UnstableApi::class)
+internal class ProgressTransferListener(
+  private val minIntervalMs: Long = PROGRESS_MIN_INTERVAL_MS,
+  private val clockMs: () -> Long = SystemClock::uptimeMillis,
+  private val shouldReport: () -> Boolean = { true },
+  private val onProgress: (bytesReceived: Long, atMs: Long) -> Unit,
+) : TransferListener {
+  private val lock = Any()
+  private var totalBytes = 0L
+  private var lastEmittedBytes = 0L
+  private var lastEmittedAtMs = Long.MIN_VALUE
+
+  override fun onTransferInitializing(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) = Unit
+
+  override fun onTransferStart(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) = Unit
+
+  override fun onBytesTransferred(
+    source: DataSource,
+    dataSpec: DataSpec,
+    isNetwork: Boolean,
+    bytesTransferred: Int,
+  ) {
+    if (!isNetwork || bytesTransferred <= 0) return
+    val emitBytes: Long
+    val emitAt: Long
+    synchronized(lock) {
+      totalBytes += bytesTransferred.toLong()
+      if (!shouldReport() || totalBytes <= lastEmittedBytes) return
+      val now = clockMs()
+      if (lastEmittedAtMs != Long.MIN_VALUE && now - lastEmittedAtMs < minIntervalMs) return
+      lastEmittedAtMs = now
+      lastEmittedBytes = totalBytes
+      emitBytes = totalBytes
+      emitAt = now
+    }
+    onProgress(emitBytes, emitAt)
+  }
+
+  override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) = Unit
+}
 
 /** Scales MPEG-TS PCR/PTS search window by device RAM: 600 packets on low-RAM sticks, 1,200 packets otherwise. */
 @OptIn(UnstableApi::class)
@@ -104,6 +153,7 @@ internal fun requestSources(
   generation: Long,
   client: Call.Factory,
   gateTimeoutMs: Long = GATE_TIMEOUT_MS,
+  transferListener: TransferListener? = null,
   onManifestLoaded: () -> Unit = {},
 ): (RequestKind) -> DataSource = { kind ->
   val (http, calls) = streamDataSource(request.headers, client, request.url)
@@ -112,7 +162,9 @@ internal fun requestSources(
     kind = kind,
     onManifestLoaded = if (kind == RequestKind.MANIFEST) onManifestLoaded else ({}),
   )
-  GatedDataSource(sniffing, gate, generation, calls::cancel, gateTimeoutMs)
+  GatedDataSource(sniffing, gate, generation, calls::cancel, gateTimeoutMs).also { gatedSource ->
+    if (transferListener != null) gatedSource.addTransferListener(transferListener)
+  }
 }
 
 /**
@@ -128,10 +180,17 @@ internal fun createMediaSource(
   prepareSerial: Long,
   lowRam: Boolean,
   client: Call.Factory,
+  transferListener: TransferListener? = null,
 ): MediaSource {
   val manifestLoaded = AtomicBoolean(false)
   val type = request.sourceType()
-  val gated = requestSources(request, gate, generation, client) { manifestLoaded.set(true) }
+  val gated = requestSources(
+    request = request,
+    gate = gate,
+    generation = generation,
+    client = client,
+    transferListener = transferListener,
+  ) { manifestLoaded.set(true) }
   val progressive = DataSource.Factory { gated(RequestKind.PROGRESSIVE) }
   val factory: MediaSource.Factory = when (type) {
     SourceType.HLS ->

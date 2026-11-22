@@ -11,6 +11,7 @@ export interface WebKeyEventLike {
   ctrlKey?: boolean;
   altKey?: boolean;
   metaKey?: boolean;
+  defaultPrevented?: boolean;
   target?: unknown;
   preventDefault?: () => void;
 }
@@ -142,6 +143,7 @@ export function subscribeWebKeys(
 
   const onKeyDown = (event: WebKeyEventLike): void => {
     if (!event || typeof event.key !== 'string') return;
+    if (event.defaultPrevented === true) return;
     if (isImeComposingEvent(event)) return;
     if (event.ctrlKey || event.altKey || event.metaKey) return;
     if (event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) return;

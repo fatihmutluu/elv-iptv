@@ -118,4 +118,68 @@ describe('createTrackPreferences', () => {
       }),
     ).toEqual({ audioTrackId: 'a:1', subtitleTrackId: 's:1' });
   });
+
+  it('matches ISO 639-2(T+B) pairs without substring false positives and preserves preferHevcOverDolbyVision (#189)', () => {
+    const prefs = createTrackPreferences();
+    prefs.selectAudio(
+      'a:1',
+      {
+        audio: [{ id: 'a:1', language: 'fre', label: 'Français' }],
+        subtitles: [{ id: 's:1', language: 'tib', label: 'Tibetan' }],
+        selectedAudioId: 'a:1',
+        selectedSubtitleId: null,
+      },
+      true,
+    );
+    prefs.selectSubtitle(
+      's:1',
+      {
+        audio: [],
+        subtitles: [{ id: 's:1', language: 'tib', label: 'Tibetan' }],
+        selectedAudioId: null,
+        selectedSubtitleId: 's:1',
+      },
+      true,
+    );
+    expect(prefs.loadOptions({ preferHevcOverDolbyVision: true })).toEqual({
+      preferHevcOverDolbyVision: true,
+      audioTrackId: 'a:1',
+      subtitleTrackId: 's:1',
+    });
+
+    prefs.beginReload();
+    expect(
+      prefs.reconcile({
+        audio: [{ id: 'a:9', language: 'fra', label: 'Audio 2' }],
+        subtitles: [{ id: 's:9', language: 'bod', label: 'Sub 2' }],
+        selectedAudioId: null,
+        selectedSubtitleId: null,
+      }),
+    ).toEqual({ audioTrackId: 'a:9', subtitleTrackId: 's:9' });
+
+    // Anti-substring: 'es' must never match 'Chinese' or 'Japanese'
+    prefs.reset();
+    prefs.selectSubtitle(
+      's:es',
+      {
+        audio: [],
+        subtitles: [{ id: 's:es', language: 'es', label: 'Spanish' }],
+        selectedAudioId: null,
+        selectedSubtitleId: 's:es',
+      },
+      true,
+    );
+    prefs.beginReload();
+    expect(
+      prefs.reconcile({
+        audio: [],
+        subtitles: [
+          { id: 's:zh', language: 'Chinese', label: 'Chinese' },
+          { id: 's:ja', language: 'Japanese', label: 'Japanese' },
+        ],
+        selectedAudioId: null,
+        selectedSubtitleId: null,
+      }),
+    ).toEqual({});
+  });
 });

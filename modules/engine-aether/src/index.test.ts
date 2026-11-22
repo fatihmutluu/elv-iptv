@@ -187,13 +187,20 @@ describe('AetherSurface', () => {
   it('renders the native AetherSurfaceView bound to the native Engine shared object', async () => {
     const { native, engine, AetherSurface } = await engineWithView();
     const style = { flex: 1 };
-    const element = AetherSurface({ engine, style, resizeMode: 'fill', testID: 'apple-video' });
+    const element = AetherSurface({
+      engine,
+      style,
+      resizeMode: 'fill',
+      subtitleBottomInsetPx: 84,
+      testID: 'apple-video',
+    });
     expect(requireNativeViewManager).toHaveBeenCalledWith('ElvEngineAether', 'AetherSurfaceView');
     expect(element?.type).toBe(SurfaceView);
     expect(element?.props).toEqual({
       engine: native.engine,
       style,
       resizeMode: 'fill',
+      subtitleBottomInsetPx: 84,
       testID: 'apple-video',
     });
   });

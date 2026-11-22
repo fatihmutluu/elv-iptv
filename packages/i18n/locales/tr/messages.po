@@ -1097,3 +1097,12 @@ msgstr "Sola kaydır"
 
 msgid "rail.scrollRight"
 msgstr "Sağa kaydır"
+
+msgid "player.aspect"
+msgstr "Görüntü modu"
+
+msgid "player.aspect.fit"
+msgstr "Sığdır"
+
+msgid "player.aspect.fill"
+msgstr "Doldur"

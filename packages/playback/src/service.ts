@@ -9,6 +9,7 @@ import { createSeekCoalescer } from './seek-coalescer';
 import {
   buildOptimisticSeekAnchor,
   createEngineEventRouter,
+  createStartTimeoutController,
   mergePlaybackConfig,
   nextTuneState,
   resolveSeekTarget,
@@ -64,16 +65,20 @@ export function createPlaybackServiceWith(
   let disposed = false;
   let loadSeq = 0;
   let speedAttempt: AttemptToken = 0;
-  let startTimer: unknown;
   let resolveTimer: unknown;
 
   const state = (): PlaybackState => store.getState();
   const startTimeoutMs = (): number =>
     current?.kind === 'live' ? config.liveStartTimeoutMs : config.startTimeoutMs;
-  const clearStartTimeout = (): void => {
-    if (startTimer !== undefined) timers.clearTimeout(startTimer);
-    startTimer = undefined;
-  };
+  const startTimeout = createStartTimeoutController({
+    clock,
+    timers,
+    config,
+    currentRequest: () => current,
+    getState: state,
+    onTimeout: () => hooks.onStartTimeout?.(),
+  });
+  const clearStartTimeout = (): void => startTimeout.clear();
   const clearResolveTimeout = (): void => {
     if (resolveTimer !== undefined) timers.clearTimeout(resolveTimer);
     resolveTimer = undefined;
@@ -137,14 +142,7 @@ export function createPlaybackServiceWith(
     return true;
   };
 
-  const armStartTimeout = (ms: number): void => {
-    clearStartTimeout();
-    const token = state().attempt;
-    startTimer = timers.setTimeout(() => {
-      startTimer = undefined;
-      if (token === state().attempt) hooks.onStartTimeout?.();
-    }, ms);
-  };
+  const armStartTimeout = (ms: number): void => startTimeout.arm(ms);
 
   const nextAttempt = (): AttemptToken => {
     const next = state().attempt + 1;
@@ -213,6 +211,7 @@ export function createPlaybackServiceWith(
       },
       freezeAnchor,
       clearStartTimeout,
+      onVodProgress: (bytes) => startTimeout.onProgress(bytes),
       onSeekSettled: () => speedCoalescer.flush(),
     }),
   );
@@ -317,7 +316,7 @@ export function createPlaybackServiceWith(
         if (wasPaused && state().status.kind === 'paused')
           store.update({ status: { kind: 'tuning' } });
         engine.play(token);
-        if (wasPaused && state().status.kind === 'tuning' && startTimer === undefined) {
+        if (wasPaused && state().status.kind === 'tuning' && !startTimeout.isArmed()) {
           armStartTimeout(startTimeoutMs());
         }
       });

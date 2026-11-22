@@ -1097,3 +1097,12 @@ msgstr "Scroll left"
 
 msgid "rail.scrollRight"
 msgstr "Scroll right"
+
+msgid "player.aspect"
+msgstr "Aspect"
+
+msgid "player.aspect.fit"
+msgstr "Fit"
+
+msgid "player.aspect.fill"
+msgstr "Fill"

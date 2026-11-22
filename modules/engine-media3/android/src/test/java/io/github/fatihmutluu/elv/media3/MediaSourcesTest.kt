@@ -86,4 +86,44 @@ class MediaSourcesTest {
     )
     assertEquals("42", source.mediaItem.mediaId)
   }
+
+  @Test
+  fun `ProgressTransferListener throttles network byte progress to 500 ms and respects shouldReport (#314)`() {
+    var nowMs = 1_000L
+    var allow = true
+    val reported = mutableListOf<Pair<Long, Long>>()
+    val listener = ProgressTransferListener(
+      minIntervalMs = PROGRESS_MIN_INTERVAL_MS,
+      clockMs = { nowMs },
+      shouldReport = { allow },
+      onProgress = { bytes, at -> reported += bytes to at },
+    )
+    val dummySource = androidx.media3.datasource.ByteArrayDataSource(ByteArray(16))
+    val spec = DataSpec(Uri.parse("http://127.0.0.1:7878/movie/demo/demo/1.mp4"))
+
+    // Non-network or zero-byte reads are ignored
+    listener.onBytesTransferred(dummySource, spec, isNetwork = false, bytesTransferred = 4096)
+    listener.onBytesTransferred(dummySource, spec, isNetwork = true, bytesTransferred = 0)
+    assertTrue(reported.isEmpty())
+
+    // First network chunk emits immediately
+    listener.onBytesTransferred(dummySource, spec, isNetwork = true, bytesTransferred = 8192)
+    assertEquals(listOf(8192L to 1_000L), reported)
+
+    // Within 500 ms is throttled while still accumulating bytes
+    nowMs = 1_499L
+    listener.onBytesTransferred(dummySource, spec, isNetwork = true, bytesTransferred = 4096)
+    assertEquals(1, reported.size)
+
+    // At >= 500 ms emits cumulative total
+    nowMs = 1_500L
+    listener.onBytesTransferred(dummySource, spec, isNetwork = true, bytesTransferred = 4096)
+    assertEquals(listOf(8192L to 1_000L, 16_384L to 1_500L), reported)
+
+    // Suppressed when shouldReport() is false (steady playing)
+    allow = false
+    nowMs = 2_500L
+    listener.onBytesTransferred(dummySource, spec, isNetwork = true, bytesTransferred = 8192)
+    assertEquals(2, reported.size)
+  }
 }

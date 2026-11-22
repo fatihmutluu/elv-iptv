@@ -1,6 +1,7 @@
 import type { AttemptToken, ClockAnchor, EngineEvent, EngineState, MediaKind } from '@elv/playback';
 import type { MpvEvent } from './codec.ts';
 import { classifyEnd, type MpvLogLine } from './errors.ts';
+import { createMpvTelemetry, type MpvTelemetry } from './telemetry.ts';
 
 const MAX_LOG_LINES = 50;
 
@@ -41,6 +42,7 @@ interface Media {
   duration: number | undefined;
   cacheEnd: number | undefined;
   lastAnchorAt: number;
+  telemetry: MpvTelemetry;
 }
 
 type EventBody = EngineEvent extends infer E
@@ -61,14 +63,19 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
   const rate = (media: Media): number =>
     media.paused || media.cache || media.seeking || media.idle ? 0 : media.speed;
 
+  const isWaiting = (media: Media): boolean =>
+    !media.restarted || media.stalled || media.state === 'opening' || media.state === 'buffering';
+
   const anchor = (media: Media): EngineEvent[] => {
     if (media.timePos === undefined) return [];
     const atMs = opts.now();
     media.lastAnchorAt = atMs;
+    const currentRate = rate(media);
     const a: ClockAnchor = {
       positionMs: Math.max(0, Math.round(media.timePos * 1000)) + 0,
       atMs,
-      rate: rate(media),
+      rate: currentRate,
+      ...media.telemetry.clockFields(atMs, currentRate),
     };
     if (media.kind === 'vod' && media.duration !== undefined) {
       a.durationMs = Math.max(0, Math.round(media.duration * 1000)) + 0;
@@ -190,13 +197,21 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
       case 'time-pos':
         return media.hasPlaybackTime ? [] : updateTime(media, value);
       case 'video-params':
+        media.telemetry.onVideoParams(value);
         if (typeof value !== 'object' || value === null) return [];
         media.frameReady = true;
         return frameThenSettle(media);
       case 'vid':
+        media.telemetry.onVid(value, media.loaded);
         if (!media.loaded || (value !== false && value !== 'no')) return [];
         media.frameReady = true;
         return frameThenSettle(media);
+      case 'track-list':
+        media.telemetry.onTrackList(value);
+        return [];
+      case 'estimated-vf-fps':
+        media.telemetry.onEstimatedVfFps(value, opts.now());
+        return [];
       case 'duration': {
         const raw = num(value);
         const clean = raw !== undefined && raw > 0 ? raw : undefined;
@@ -204,12 +219,18 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
         media.duration = clean;
         return media.kind === 'vod' && media.restarted ? anchor(media) : [];
       }
-      case 'demuxer-cache-state':
+      case 'demuxer-cache-state': {
         media.cacheEnd =
           typeof value === 'object' && value !== null
             ? num((value as Record<string, unknown>)['cache-end'])
             : undefined;
-        return [];
+        const progress = media.telemetry.onCacheState(value, opts.now(), isWaiting(media));
+        return progress ? [ev(media, progress)] : [];
+      }
+      case 'demuxer-cache-duration': {
+        const progress = media.telemetry.onCacheDuration(value, opts.now(), isWaiting(media));
+        return progress ? [ev(media, progress)] : [];
+      }
       default:
         return [];
     }
@@ -237,6 +258,7 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
         duration: undefined,
         cacheEnd: undefined,
         lastAnchorAt: Number.NEGATIVE_INFINITY,
+        telemetry: createMpvTelemetry(),
       };
       return [ev(m, { type: 'state', state: 'opening' })];
     },
