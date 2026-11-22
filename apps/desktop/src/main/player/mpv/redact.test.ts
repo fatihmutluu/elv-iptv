@@ -62,4 +62,19 @@ describe('redactUrls', () => {
     expect(redactUrls('http://h')).toBe('http://h');
     expect(redactUrls('http://h/')).toBe('http://h/');
   });
+
+  it('delegates to @elv/domain parity rules for X-Api-Key, X-Auth-Token, udp://, file://, and expires/st/hash', () => {
+    expect(redactUrls('X-Api-Key: secret-key-1\nX-Auth-Token: secret-tok-2')).toBe(
+      'X-Api-Key: ***\nX-Auth-Token: ***',
+    );
+    expect(redactUrls('udp://239.0.0.1:1234/secret/1.ts?token=abc')).toBe(
+      'udp://239.0.0.1:1234/***/***.ts',
+    );
+    expect(redactUrls('Failed to open file:///Users/alice/private.m3u.')).toBe(
+      'Failed to open file://<redacted>.',
+    );
+    expect(redactUrls('expires=1700000&e=99&st=tok123&hash=deadbeef&mode=live')).toBe(
+      'expires=***&e=***&st=***&hash=***&mode=live',
+    );
+  });
 });

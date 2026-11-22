@@ -16,3 +16,4 @@ MADR format. Records are Accepted unless their status says otherwise; 0001 to 00
 | [0010](0010-future-tvs-vega-tizen-webos.md) | Future TVs: Vega as a separate app, Tizen and webOS as web bundles |
 | [0011](0011-content-keys.md) | Content keys keep distinct streams apart and drop only credentials |
 | [0012](0012-gpl-3-and-cla.md) | GPL-3.0-only with the existing contributor license agreement |
+| [0013](0013-security-architecture-and-gate.md) | Two-layer security architecture, threat model, and automated pre-release security gate |

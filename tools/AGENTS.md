@@ -14,6 +14,7 @@ Node 24 type-strips `.ts`: erasable syntax only (no enums, namespaces, parameter
 - `pnpm gate contract [flags]` runs the shared `PlayerEngine` contract gate on Android TV, tvOS and iOS simulators; flags: `src/gates/AGENTS.md`.
 - `pnpm gate corpus [flags]` runs the 29-item format corpus verification gate on Android, Apple simulators and desktop; flags: `src/gates/AGENTS.md`.
 - `pnpm gate desktop [flags]` runs the desktop mpv player zap, VOD, fault and orphan gate (Windows / macOS); flags, baseline and budget rules: `src/gates/AGENTS.md`.
+- `pnpm gate security [--ci] [--out file] [--skip-audit] [--tv] [--artifact path ...] [--android-manifest path ...] [--apple-plist path ...] [--gradle-deps path ...]` runs static security invariants, gitleaks rule/history scans, agent hook tests, `pnpm audit --audit-level=high`, optional release hygiene checks, and automatic LGPL native runtime licence checks.
 - `pnpm mpv fetch [--force]` / `pnpm mpv verify [--dir <folder>]` install and rescan the pinned mpv runtime for desktop; builds the Windows `elv-mpv.exe` launcher; macOS gets our CI build (`mpv-runtime/`, workflow `mpv-runtime.yml`) through `gh`; rules: `src/mpv/AGENTS.md`.
 - `pnpm scaffold <pure|rn|module> <name>` creates a workspace package (skill `add-package`).
 - `pnpm ffmpeg-media3 fetch [--force]` and `pnpm ffmpeg-media3 verify [--dir <folder>]` install and verify the LGPL-2.1+ Android FFmpeg + Media3 JNI bundle (`modules/engine-media3/ffmpeg-media3.lock.json`, 16 KB ELF alignment, dynamic `DT_NEEDED`).

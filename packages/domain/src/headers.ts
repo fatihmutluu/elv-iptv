@@ -3,9 +3,16 @@ const ANY_SCHEME_RE = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 const HTTP_SCHEME_RE = /^https?:\/\//i;
 const DIGITS_RE = /^[0-9]+$/;
 const DEFAULT_PORTS: Readonly<Record<string, number>> = { http: 80, https: 443 };
-const CREDENTIAL_HEADER_NAMES = new Set(['authorization', 'proxy-authorization', 'cookie']);
+const CREDENTIAL_HEADER_NAMES = new Set([
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+  'x-api-key',
+  'x-auth-token',
+]);
 
-function setSafeHeader(out: Record<string, string>, name: string, value: string): void {
+/** Sets a header entry on `out` safely without triggering `Object.prototype.__proto__` mutation. */
+export function setSafeHeader(out: Record<string, string>, name: string, value: string): void {
   if (name === '__proto__') {
     Object.defineProperty(out, name, {
       value,
@@ -132,7 +139,10 @@ export function sameOrigin(a: string, b: string): boolean {
   return oa !== undefined && oa === originOf(b);
 }
 
-/** Returns `true` when `headers` contains a non-empty `Authorization`, `Proxy-Authorization`, or `Cookie` header. */
+/**
+ * Returns `true` when `headers` contains a non-empty `Authorization`, `Proxy-Authorization`,
+ * `Cookie`, `X-Api-Key`, or `X-Auth-Token` header.
+ */
 export function hasCredentialHeaders(
   headers: Readonly<Record<string, string>> | undefined,
 ): boolean {
@@ -149,8 +159,8 @@ export function hasCredentialHeaders(
 }
 
 /**
- * Returns sanitized headers for `targetUrl`, stripping `Authorization`, `Proxy-Authorization`, and
- * `Cookie` whenever `targetUrl` is not exact-origin with `initialUrl`.
+ * Returns sanitized headers for `targetUrl`, stripping `Authorization`, `Proxy-Authorization`,
+ * `Cookie`, `X-Api-Key`, and `X-Auth-Token` whenever `targetUrl` is not exact-origin with `initialUrl`.
  */
 export function scopeCredentialHeaders(
   headers: Readonly<Record<string, string>> | undefined,

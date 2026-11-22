@@ -8,6 +8,7 @@ import {
   type SqlDriver,
   sanitizeHeaderName,
   sanitizeHeaderValue,
+  setSafeHeader,
   type TransportSettings,
   transportHeaders,
 } from '@elv/domain';
@@ -50,6 +51,47 @@ interface XtreamSecret {
 }
 
 const MULTICAST_AT_RE = /^(udp|rtp):\/\/@(?=[^:/?#\s])/i;
+const ALLOWED_PLAYBACK_SCHEMES: ReadonlySet<string> = new Set([
+  'http',
+  'https',
+  'rtsp',
+  'rtsps',
+  'rtmp',
+  'rtmps',
+  'udp',
+  'rtp',
+]);
+const PROTO_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
+
+function hasControlChar(s: string): boolean {
+  for (let i = 0; i < s.length; i += 1) {
+    const code = s.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
+
+/**
+ * Validates that a play-time stream URL uses an allowlisted streaming transport scheme
+ * (`http`, `https`, `rtsp`, `rtsps`, `rtmp`, `rtmps`, `udp`, `rtp`), has a non-empty host, and
+ * contains no ASCII control characters. Blocks `file:`, `javascript:`, `data:`, `blob:`,
+ * `content:`, `about:`, and malformed URLs.
+ */
+function isAllowedPlaybackUrl(raw: string): boolean {
+  if (hasControlChar(raw)) return false;
+  const url = raw.trim();
+  if (url.length === 0) return false;
+  const sep = url.indexOf('://');
+  if (sep <= 0) return false;
+  const scheme = url.slice(0, sep).toLowerCase();
+  if (!ALLOWED_PLAYBACK_SCHEMES.has(scheme)) return false;
+  const after = url.slice(sep + 3);
+  if (after.length === 0 || after[0] === '/' || after[0] === '\\') return false;
+  const authEnd = after.search(/[/?#\\]/);
+  const authority = authEnd < 0 ? after : after.slice(0, authEnd);
+  const hostPort = authority.slice(authority.lastIndexOf('@') + 1);
+  return hostPort.length > 0 && !/\s/.test(hostPort);
+}
 
 /**
  * Normalizes multicast URLs using leading `@` syntax (`udp://@host:port`, `rtp://@host:port`) to
@@ -78,7 +120,8 @@ function resolveAlternates(
     if (typeof item !== 'string' || item === '') continue;
     const resolved = resolver.resolve(item);
     if (resolved === undefined || resolved === '') continue;
-    alternates.push({ url: normalizeMulticastUrl(resolved), headers: { ...headers } });
+    if (!isAllowedPlaybackUrl(resolved)) continue;
+    alternates.push({ url: normalizeMulticastUrl(resolved.trim()), headers: { ...headers } });
   }
   return alternates.length > 0 ? alternates : undefined;
 }
@@ -234,10 +277,12 @@ export function createPlaytimeResolverCache(deps: {
           password: creds.password,
           ...(transport === undefined ? {} : { transport }),
         });
+        const rawXtreamUrl = client.streamUrl(play.streamKind, id, play.extension ?? undefined);
+        if (!isAllowedPlaybackUrl(rawXtreamUrl)) {
+          return err(elvError('playback', 'unsupported-scheme'));
+        }
         return ok({
-          url: normalizeMulticastUrl(
-            client.streamUrl(play.streamKind, id, play.extension ?? undefined),
-          ),
+          url: normalizeMulticastUrl(rawXtreamUrl.trim()),
           headers,
           accountKey,
         });
@@ -249,6 +294,10 @@ export function createPlaytimeResolverCache(deps: {
         resolvers.delete(play.sourceId);
         return err(elvError('storage', 'secret-missing'));
       }
+      if (!isAllowedPlaybackUrl(url)) {
+        return err(elvError('playback', 'unsupported-scheme'));
+      }
+      const finalUrl = normalizeMulticastUrl(url.trim());
       if (play.headersJson !== null) {
         interface StoredHeadersJson {
           userAgent?: unknown;
@@ -272,15 +321,17 @@ export function createPlaytimeResolverCache(deps: {
           ) {
             for (const [k, v] of Object.entries(extra.other as Record<string, unknown>)) {
               if (typeof v !== 'string') continue;
+              const lowerName = k.toLowerCase();
+              if (PROTO_KEYS.has(lowerName)) continue;
               const resolved = resolver.resolve(v);
               if (resolved === undefined) {
                 resolvers.delete(play.sourceId);
                 return err(elvError('storage', 'secret-missing'));
               }
-              const cleanName = sanitizeHeaderName(k.toLowerCase());
+              const cleanName = sanitizeHeaderName(lowerName);
               const cleanValue = sanitizeHeaderValue(resolved);
-              if (cleanName !== undefined && cleanValue.length > 0) {
-                headers[cleanName] = cleanValue;
+              if (cleanName !== undefined && !PROTO_KEYS.has(cleanName) && cleanValue.length > 0) {
+                setSafeHeader(headers, cleanName, cleanValue);
               }
             }
           }
@@ -306,7 +357,7 @@ export function createPlaytimeResolverCache(deps: {
       }
       const alternates = resolveAlternates(play.backupUrlsJson, resolver, headers);
       return ok({
-        url: normalizeMulticastUrl(url),
+        url: finalUrl,
         headers,
         accountKey,
         ...(alternates === undefined ? {} : { alternates }),

@@ -1,4 +1,5 @@
-import { resolve, sep } from 'node:path';
+import { lstatSync, realpathSync } from 'node:fs';
+import { dirname, resolve, sep } from 'node:path';
 
 /** Custom scheme that serves the exported renderer. */
 export const APP_SCHEME = 'app';
@@ -64,5 +65,36 @@ export function resolveAppFile(rootDir: string, requestUrl: string): string | nu
 
   const root = resolve(rootDir);
   const file = resolve(root, relative);
-  return file.startsWith(root + sep) ? file : null;
+  if (!file.startsWith(root + sep)) return null;
+
+  let realRoot: string;
+  try {
+    realRoot = realpathSync(root);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | null)?.code;
+    return code === 'ENOENT' ? file : null;
+  }
+
+  let probe = file;
+  for (;;) {
+    try {
+      const realProbe = realpathSync(probe);
+      if (realProbe === realRoot) {
+        return probe === root ? file : null;
+      }
+      return realProbe.startsWith(realRoot + sep) ? file : null;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException | null)?.code;
+      if (code !== 'ENOENT') return null;
+      try {
+        if (lstatSync(probe).isSymbolicLink()) return null;
+      } catch (lstatErr) {
+        const lstatCode = (lstatErr as NodeJS.ErrnoException | null)?.code;
+        if (lstatCode !== 'ENOENT') return null;
+      }
+      const parent = dirname(probe);
+      if (parent === probe) return null;
+      probe = parent;
+    }
+  }
 }

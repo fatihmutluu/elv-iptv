@@ -127,6 +127,11 @@ describe('exact-origin credential header scoping', () => {
     expect(hasCredentialHeaders({ 'Proxy-Authorization': 'Basic xyz' })).toBe(true);
     expect(hasCredentialHeaders({ Cookie: 'sid=1' })).toBe(true);
     expect(hasCredentialHeaders({ ' cookie ': 'sid=1' })).toBe(true);
+    expect(hasCredentialHeaders({ 'X-Api-Key': 'k123' })).toBe(true);
+    expect(hasCredentialHeaders({ 'x-api-key': 'k123' })).toBe(true);
+    expect(hasCredentialHeaders({ 'X-Auth-Token': 't123' })).toBe(true);
+    expect(hasCredentialHeaders({ 'x-auth-token': 't123' })).toBe(true);
+    expect(hasCredentialHeaders({ 'X-Api-Key': '\r\n  ' })).toBe(false);
   });
 
   it('keeps sanitized credentials on same-origin requests and strips them cross-origin', () => {
@@ -134,6 +139,8 @@ describe('exact-origin credential header scoping', () => {
       Authorization: 'Bearer secret\r\nX-Evil: 1',
       'Proxy-Authorization': 'Basic proxy',
       Cookie: 'sid=abc',
+      'X-Api-Key': 'api-key-val',
+      'X-Auth-Token': 'auth-tok-val',
       'User-Agent': 'ELV/1.0\n',
       'Bad Header': 'dropped',
     };
@@ -144,6 +151,8 @@ describe('exact-origin credential header scoping', () => {
       Authorization: 'Bearer secretX-Evil: 1',
       'Proxy-Authorization': 'Basic proxy',
       Cookie: 'sid=abc',
+      'X-Api-Key': 'api-key-val',
+      'X-Auth-Token': 'auth-tok-val',
       'User-Agent': 'ELV/1.0',
     });
 

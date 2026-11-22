@@ -7,11 +7,14 @@ import { isRaw, type Raw } from './xtream-records';
 
 const DEFAULT_BATCH_SIZE = 500;
 const MAX_SCALAR_BYTES = 64 * 1024;
+const MAX_COMPOSITE_BYTES = 1024 * 1024;
+const MAX_JSON_DEPTH = 64;
 const NUMERIC_KEY_RE = /^\d+$/;
 const ONE_BYTE = new Uint8Array(1);
 
 const invalidJson = (): ElvError => elvError('source-format', 'invalid-json');
 const unexpectedShape = (): ElvError => elvError('source-format', 'unexpected-shape');
+const tooLarge = (): ElvError => elvError('source-format', 'too-large');
 
 /** Options for {@link streamXtreamRecords}. */
 export interface XtreamStreamParseOptions {
@@ -236,7 +239,9 @@ class XtreamJsonStreamParser {
   private scanPrimitive(chunk: Uint8Array, start: number): number {
     let i = start;
     let ended = false;
-    while (i < chunk.length) {
+    const maxAdd = MAX_SCALAR_BYTES - this.elem.length;
+    const limit = this.skippingValue ? chunk.length : Math.min(chunk.length, start + maxAdd + 1);
+    while (i < limit) {
       const c = chunk[i] as number;
       if (c <= 0x20 || c === 0x2c || c === 0x5d || c === 0x7d) {
         ended = true;
@@ -244,7 +249,14 @@ class XtreamJsonStreamParser {
       }
       i++;
     }
-    if (!this.skippingValue && i > start) this.elem.append(chunk.subarray(start, i));
+    if (!this.skippingValue) {
+      const added = i - start;
+      if (added > maxAdd) {
+        clearBuf(this.elem);
+        return this.fail(tooLarge(), i);
+      }
+      if (added > 0) this.elem.append(chunk.subarray(start, i));
+    }
     if (ended) this.finishValue();
     return i;
   }
@@ -252,7 +264,9 @@ class XtreamJsonStreamParser {
   private scanString(chunk: Uint8Array, start: number, skip: boolean): [number, boolean] {
     let i = start;
     let closed = false;
-    while (i < chunk.length) {
+    const maxAdd = MAX_SCALAR_BYTES - this.elem.length;
+    const limit = skip ? chunk.length : Math.min(chunk.length, start + maxAdd + 1);
+    while (i < limit) {
       const c = chunk[i++] as number;
       if (this.escaped) this.escaped = false;
       else if (c === 0x5c) this.escaped = true;
@@ -261,14 +275,23 @@ class XtreamJsonStreamParser {
         break;
       }
     }
-    if (!skip && i > start) this.elem.append(chunk.subarray(start, i));
+    if (!skip) {
+      const added = i - start;
+      if (added > maxAdd) {
+        clearBuf(this.elem);
+        return [this.fail(tooLarge(), i), false];
+      }
+      if (added > 0) this.elem.append(chunk.subarray(start, i));
+    }
     return [i, closed];
   }
 
   private scanComposite(chunk: Uint8Array, start: number): number {
     let i = start;
     let closed = false;
-    while (i < chunk.length) {
+    const maxAdd = MAX_COMPOSITE_BYTES - this.elem.length;
+    const limit = this.skippingValue ? chunk.length : Math.min(chunk.length, start + maxAdd + 1);
+    while (i < limit) {
       const c = chunk[i++] as number;
       if (this.inString) {
         if (this.escaped) this.escaped = false;
@@ -277,7 +300,10 @@ class XtreamJsonStreamParser {
       } else if (c === 0x22) {
         this.inString = true;
       } else if (c === 0x7b || c === 0x5b) {
-        this.depth++;
+        if (++this.depth > MAX_JSON_DEPTH) {
+          clearBuf(this.elem);
+          return this.fail(tooLarge(), i);
+        }
       } else if (c === 0x7d || c === 0x5d) {
         if (--this.depth === 0) {
           closed = true;
@@ -285,7 +311,14 @@ class XtreamJsonStreamParser {
         }
       }
     }
-    if (!this.skippingValue && i > start) this.elem.append(chunk.subarray(start, i));
+    if (!this.skippingValue) {
+      const added = i - start;
+      if (added > maxAdd) {
+        clearBuf(this.elem);
+        return this.fail(tooLarge(), i);
+      }
+      if (added > 0) this.elem.append(chunk.subarray(start, i));
+    }
     if (closed) this.finishValue();
     return i;
   }
