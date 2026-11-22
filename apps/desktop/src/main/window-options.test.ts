@@ -19,6 +19,15 @@ describe('buildWindowOptions', () => {
   it('titles the window ELV IPTV', () => {
     expect(options.title).toBe('ELV IPTV');
   });
+
+  it('applies min dimensions and optional restored bounds (#408)', () => {
+    expect(options.minWidth).toBe(800);
+    expect(options.minHeight).toBe(500);
+    const restored = buildWindowOptions('/p.js', {
+      bounds: { x: 120, y: 80, width: 1440, height: 860 },
+    });
+    expect(restored).toMatchObject({ x: 120, y: 80, width: 1440, height: 860 });
+  });
 });
 
 describe('buildWindowOptions player baseline', () => {

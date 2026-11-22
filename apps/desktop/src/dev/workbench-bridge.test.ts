@@ -740,4 +740,34 @@ describe('createWorkbenchBridge', () => {
     req.destroy();
     await aborted;
   });
+
+  it('forwards listSeriesUnplayedCounts over POST /rpc and drops invalid inputs (#409)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'elv-wb-unplayed-'));
+    tempDirs.push(dir);
+    const token = 'test-token-unplayed';
+    const bridge = await createWorkbenchBridge({ dataDir: dir, token });
+    openBridges.push(bridge);
+
+    const res = await fetch(`${bridge.baseUrl}/rpc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Elv-Workbench-Token': token },
+      body: JSON.stringify({
+        method: 'listSeriesUnplayedCounts',
+        args: [['src-1|series|1'], 'default'],
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ value: [] });
+
+    const invalid = await fetch(`${bridge.baseUrl}/rpc`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Elv-Workbench-Token': token },
+      body: JSON.stringify({
+        method: 'listSeriesUnplayedCounts',
+        args: ['not-an-array'],
+      }),
+    });
+    expect(invalid.status).toBe(200);
+    expect(await invalid.json()).toEqual({ value: [] });
+  });
 });

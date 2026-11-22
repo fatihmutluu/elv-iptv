@@ -210,6 +210,12 @@ describe('catalog worker runtime setFavorite IPC', () => {
     ).toEqual({ ok: true, value: false });
 
     expect(await client.call<string[]>({ method: 'listFavoriteKeys' })).toEqual([]);
+    expect(
+      await client.call({
+        method: 'listSeriesUnplayedCounts',
+        seriesKeys: [`m:${sourceId}:series:1`],
+      }),
+    ).toEqual([]);
     await h.shutdown();
   });
 });

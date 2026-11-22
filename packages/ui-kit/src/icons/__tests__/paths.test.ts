@@ -43,6 +43,7 @@ const EXPECTED_ICON_NAMES: readonly IconName[] = [
   'starFilled',
   'chevronLeft',
   'chevronDown',
+  'pin',
 ];
 
 const FILLED_ICONS: ReadonlySet<IconName> = new Set([

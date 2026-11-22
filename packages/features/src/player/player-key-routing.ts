@@ -10,7 +10,7 @@ import type {
 import type { FormFactor } from '@elv/ui-kit';
 import type { MutableRefObject } from 'react';
 import type { PlayTarget } from '../ports/play-target';
-import type { HostKey } from '../ports/video-host';
+import type { AudioDeviceInfo, HostKey } from '../ports/video-host';
 import type { ChannelDigitBuffer } from './channel-digit-entry';
 import type { PlayerOverlayLive } from './player-overlay-model';
 import { COARSE_SEEK_MS, type ScrubController, STEP_SEEK_MS } from './scrub-controller';
@@ -53,6 +53,10 @@ export interface PlayerControlsParams {
   onJumpPreviousChannel?: () => void;
   onJumpToChannel?: (channelNumber: number) => void;
   onToggleFullscreen?: (() => void) | undefined;
+  onToggleAlwaysOnTop?: (() => void) | undefined;
+  audioDevices?: readonly AudioDeviceInfo[] | undefined;
+  activeAudioDevice?: string | undefined;
+  onSelectAudioDevice?: ((name: string) => void) | undefined;
   onToggleMute?: (() => void) | undefined;
   onSetVolume?: ((volume: number) => void) | undefined;
   onPersistVolume?: ((volume: number) => void) | undefined;
@@ -72,6 +76,9 @@ export interface OverlayKeyRouteDeps {
   readonly hasDeinterlace?: boolean;
   readonly hasAutoSubtitlesOnSkipBack?: boolean;
   readonly hasAutoPlayNextEpisode?: boolean;
+  readonly hasAudioDevice?: boolean;
+  readonly audioDevices?: readonly AudioDeviceInfo[];
+  readonly activeAudioDevice?: string;
   readonly playbackSpeed: number;
   readonly state: PlayerOverlayLive;
   readonly service: PlaybackService | null;
@@ -101,6 +108,7 @@ export interface OverlayKeyRouteDeps {
   readonly activateTvOsd: (action: TvOsdAction) => void;
   readonly selectSpeed: (rate: number) => void;
   readonly selectSubtitle?: (id: string | null) => void;
+  readonly selectAudioDevice?: ((name: string) => void) | undefined;
   readonly onExit: () => void;
   readonly onJumpPreviousChannel?: (() => void) | undefined;
 }
@@ -159,6 +167,9 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       hasDeinterlace: d.hasDeinterlace === true,
       hasAutoSubtitlesOnSkipBack: d.hasAutoSubtitlesOnSkipBack === true,
       hasAutoPlayNextEpisode: d.hasAutoPlayNextEpisode === true,
+      hasAudioDevice: d.hasAudioDevice === true,
+      ...(d.audioDevices !== undefined ? { audioDevices: d.audioDevices } : {}),
+      ...(d.activeAudioDevice !== undefined ? { activeAudioDevice: d.activeAudioDevice } : {}),
     });
     if (intent !== null && event.key === 'select' && !d.allowTvSelect()) return true;
     if (intent?.kind === 'close') d.closeSettings();
@@ -169,6 +180,7 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
     else if (intent?.kind === 'toggleAutoPlayNextEpisode') d.toggleAutoPlayNextEpisode?.();
     else if (intent?.kind === 'toggleStats') d.toggleStats();
     else if (intent?.kind === 'audio') d.service?.selectAudioTrack(intent.id);
+    else if (intent?.kind === 'audioDevice') d.selectAudioDevice?.(intent.name);
     else if (intent?.kind === 'subtitle') {
       if (d.selectSubtitle !== undefined) d.selectSubtitle(intent.id);
       else d.service?.selectSubtitleTrack(intent.id);
@@ -244,6 +256,7 @@ export interface HostKeyRouteDeps {
   >;
   readonly handleBack: () => void;
   readonly toggleFullscreen: () => void;
+  readonly toggleAlwaysOnTop?: (() => void) | undefined;
   readonly togglePlayPause: () => void;
   readonly seekBy: (deltaMs: number) => void;
   readonly stepSeekMs?: number | undefined;
@@ -310,6 +323,9 @@ export function routeHostKey(key: HostKey, d: HostKeyRouteDeps): void {
       return;
     case 'prev-channel':
       if (canUseShortcuts && !d.isVod) d.onJumpPreviousChannel?.();
+      return;
+    case 'always-on-top':
+      if (canUseShortcuts) d.toggleAlwaysOnTop?.();
       return;
   }
 }

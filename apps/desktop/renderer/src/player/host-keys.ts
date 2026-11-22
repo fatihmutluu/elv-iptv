@@ -29,6 +29,7 @@ export function mapHostKey(key: PlayerUiKey): DesktopHostKey {
     case 'prev-channel':
     case 'info':
     case 'channel-list':
+    case 'always-on-top':
       return key;
   }
 }

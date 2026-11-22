@@ -404,4 +404,35 @@ describe('createDesktopEngine', () => {
     f.ui('e1', { type: 'fullscreen-changed', fullscreen: false });
     expect(engine.isFullscreen()).toBe(false);
   });
+
+  it('tracks audio-devices UI updates, replays to late subscribers, and cleans up on release (#408)', async () => {
+    const f = fakeBridge();
+    const engine = await createDesktopEngine(f.bridge, () => 0);
+    expect(engine.getAudioDevices()).toEqual([]);
+    expect(engine.getActiveAudioDevice()).toBe('auto');
+
+    const seen: Array<{ devices: unknown; active: string }> = [];
+    const off = engine.onAudioDevicesChange((devices, active) => seen.push({ devices, active }));
+
+    const devices = [
+      { name: 'auto', description: 'Autoselect device' },
+      { name: 'wasapi/{1}', description: 'Headphones' },
+    ];
+    f.ui('e1', { type: 'audio-devices', devices, active: 'wasapi/{1}' });
+    expect(engine.getAudioDevices()).toEqual(devices);
+    expect(engine.getActiveAudioDevice()).toBe('wasapi/{1}');
+    expect(seen).toEqual([{ devices, active: 'wasapi/{1}' }]);
+
+    const late: Array<{ devices: unknown; active: string }> = [];
+    engine.onAudioDevicesChange((d, a) => late.push({ devices: d, active: a }));
+    expect(late).toEqual([{ devices, active: 'wasapi/{1}' }]);
+
+    off();
+    f.ui('e1', { type: 'audio-devices', devices, active: 'auto' });
+    expect(seen).toHaveLength(1);
+    expect(late).toHaveLength(2);
+
+    engine.release();
+    expect(engine.onAudioDevicesChange(() => undefined)).toBeTypeOf('function');
+  });
 });

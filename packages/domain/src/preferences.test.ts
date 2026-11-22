@@ -52,6 +52,8 @@ describe('preferences codec', () => {
       liveOkTwoStepPreview: false,
       cleanChannelTitles: false,
       artworkCacheLimitMb: 128,
+      confirmExitOnBack: true,
+      preferredAudioDevice: 'auto',
     });
   });
 

@@ -12,8 +12,10 @@ import {
 import { AccessibilityInfo, Platform } from 'react-native';
 import { DEFAULT_THEME_PRESET, type ThemePalette, type ThemePresetId } from './presets';
 import { buildTheme, clampFontScale, FONT_FAMILY_SANS, type Theme } from './tokens';
+import { buildFocusVisibleCss } from './web-styles';
 
 const WEB_BASE_STYLE_ID = 'elv-ui-kit-web-base';
+const WEB_FOCUS_VISIBLE_STYLE_ID = 'elv-focus-visible-styles';
 const WEB_BASE_FONT_FAMILY =
   FONT_FAMILY_SANS ??
   "'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
@@ -30,20 +32,31 @@ const WEB_BASE_CSS = [
 interface WebStyleElementLike {
   id: string;
   textContent: string | null;
+  remove?: () => void;
+  parentNode?: { removeChild?: (node: WebStyleElementLike) => void } | null;
 }
 
 interface WebDocumentLike {
   getElementById(id: string): unknown;
   createElement(tag: 'style'): WebStyleElementLike;
-  head?: { appendChild(node: WebStyleElementLike): void } | null;
+  head?: {
+    appendChild(node: WebStyleElementLike): void;
+    removeChild?: (node: WebStyleElementLike) => void;
+  } | null;
   documentElement?: {
     style?: { setProperty(name: string, value: string): void };
   } | null;
 }
 
+const focusVisibleRefCounts = new WeakMap<object, number>();
+
+function getWebDocument(): WebDocumentLike | undefined {
+  if (Platform.OS !== 'web') return undefined;
+  return (globalThis as { document?: WebDocumentLike }).document;
+}
+
 function ensureWebBaseStyles(): void {
-  if (Platform.OS !== 'web') return;
-  const doc = (globalThis as { document?: WebDocumentLike }).document;
+  const doc = getWebDocument();
   if (!doc?.head || doc.getElementById(WEB_BASE_STYLE_ID)) return;
   const styleEl = doc.createElement('style');
   styleEl.id = WEB_BASE_STYLE_ID;
@@ -51,9 +64,43 @@ function ensureWebBaseStyles(): void {
   doc.head.appendChild(styleEl);
 }
 
+function retainWebFocusVisibleStyles(): () => void {
+  const doc = getWebDocument();
+  if (!doc?.head) return () => undefined;
+  focusVisibleRefCounts.set(doc, (focusVisibleRefCounts.get(doc) ?? 0) + 1);
+  return () => {
+    const next = (focusVisibleRefCounts.get(doc) ?? 1) - 1;
+    if (next > 0) {
+      focusVisibleRefCounts.set(doc, next);
+      return;
+    }
+    focusVisibleRefCounts.delete(doc);
+    const existing = doc.getElementById(WEB_FOCUS_VISIBLE_STYLE_ID) as WebStyleElementLike | null;
+    if (!existing) return;
+    if (typeof existing.remove === 'function') {
+      existing.remove();
+    } else if (typeof existing.parentNode?.removeChild === 'function') {
+      existing.parentNode.removeChild(existing);
+    } else if (typeof doc.head?.removeChild === 'function') {
+      doc.head.removeChild(existing);
+    }
+  };
+}
+
+function syncWebFocusVisibleStyles(cssText: string): void {
+  const doc = getWebDocument();
+  if (!doc?.head) return;
+  let styleEl = doc.getElementById(WEB_FOCUS_VISIBLE_STYLE_ID) as WebStyleElementLike | null;
+  if (!styleEl) {
+    styleEl = doc.createElement('style');
+    styleEl.id = WEB_FOCUS_VISIBLE_STYLE_ID;
+    doc.head.appendChild(styleEl);
+  }
+  styleEl.textContent = cssText;
+}
+
 function syncWebScrollbarColors(thumb: string, thumbHover: string): void {
-  if (Platform.OS !== 'web') return;
-  const rootStyle = (globalThis as { document?: WebDocumentLike }).document?.documentElement?.style;
+  const rootStyle = getWebDocument()?.documentElement?.style;
   if (!rootStyle || typeof rootStyle.setProperty !== 'function') return;
   rootStyle.setProperty('--elv-scroll-thumb', thumb);
   rootStyle.setProperty('--elv-scroll-thumb-hover', thumbHover);
@@ -121,6 +168,7 @@ export function ThemeProvider({
 
   useEffect(() => {
     ensureWebBaseStyles();
+    return retainWebFocusVisibleStyles();
   }, []);
 
   useEffect(() => {
@@ -207,6 +255,12 @@ export function ThemeProvider({
       }),
     [activePreset, palette, activeFontScale, activeReduceMotion],
   );
+
+  const focusVisibleCss = useMemo(() => buildFocusVisibleCss(theme), [theme]);
+
+  useEffect(() => {
+    syncWebFocusVisibleStyles(focusVisibleCss);
+  }, [focusVisibleCss]);
 
   useEffect(() => {
     syncWebScrollbarColors(theme.colors.glassBorder, theme.colors.hoverRingBorder);

@@ -1,8 +1,9 @@
 import type { KeyEvent } from '@elv/focus-core';
 import type { MediaTracks } from '@elv/playback';
+import type { AudioDeviceInfo } from '../ports/video-host';
 
 /** Active level inside the 2-level Player Settings menu (`root` or a sub-view). */
-export type SettingsMenuView = 'root' | 'subtitles' | 'audio' | 'speed';
+export type SettingsMenuView = 'root' | 'subtitles' | 'audio' | 'audioDevice' | 'speed';
 
 /** Focused row state for the 2-level Player Settings menu. */
 export interface SettingsMenuState {
@@ -14,6 +15,7 @@ export interface SettingsMenuState {
 export type SettingsRootItem =
   | 'subtitles'
   | 'audio'
+  | 'audioDevice'
   | 'speed'
   | 'aspect'
   | 'deinterlace'
@@ -27,6 +29,22 @@ export const PLAYBACK_SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 /** Formats a playback speed multiplier as a compact tabular badge (e.g. `1×`, `1.25×`). */
 export function formatPlaybackSpeed(rate: number): string {
   return `${rate}×`;
+}
+
+/** Returns OS audio output devices excluding the implicit `'auto'` entry (which is always row 0). */
+export function normalizeAudioDeviceChoices(
+  devices: readonly AudioDeviceInfo[] | undefined,
+): readonly AudioDeviceInfo[] {
+  if (!devices || devices.length === 0) return [];
+  const seen = new Set<string>();
+  const out: AudioDeviceInfo[] = [];
+  for (const device of devices) {
+    const name = device.name.trim();
+    if (name === '' || name === 'auto' || seen.has(name)) continue;
+    seen.add(name);
+    out.push(device);
+  }
+  return out;
 }
 
 /** Canonical top-to-bottom order of root Player Settings rows for Live streams. */
@@ -44,8 +62,10 @@ export function settingsRootItems(
   hasDeinterlace = false,
   hasAutoSubtitlesOnSkipBack = false,
   hasAutoPlayNextEpisode = false,
+  hasAudioDevice = false,
 ): readonly SettingsRootItem[] {
   const items: SettingsRootItem[] = ['subtitles', 'audio'];
+  if (hasAudioDevice) items.push('audioDevice');
   if (isVod) items.push('speed');
   if (hasAspect) items.push('aspect');
   if (hasDeinterlace) items.push('deinterlace');
@@ -63,6 +83,9 @@ export interface SettingsMenuOptions {
   readonly hasDeinterlace?: boolean;
   readonly hasAutoSubtitlesOnSkipBack?: boolean;
   readonly hasAutoPlayNextEpisode?: boolean;
+  readonly hasAudioDevice?: boolean;
+  readonly audioDevices?: readonly AudioDeviceInfo[];
+  readonly activeAudioDevice?: string;
 }
 
 /** Result of routing a {@link KeyEvent} while the Player Settings menu is open. */
@@ -75,6 +98,7 @@ export type SettingsMenuIntent =
   | { readonly kind: 'toggleAutoPlayNextEpisode' }
   | { readonly kind: 'toggleStats' }
   | { readonly kind: 'audio'; readonly id: string }
+  | { readonly kind: 'audioDevice'; readonly name: string }
   | { readonly kind: 'subtitle'; readonly id: string | null }
   | { readonly kind: 'speed'; readonly rate: number };
 
@@ -86,10 +110,16 @@ export function initialSettingsMenu(
   if (view === 'speed' && options?.playbackSpeed !== undefined) {
     return { view, index: selectedSpeedIndex(options.playbackSpeed) };
   }
+  if (view === 'audioDevice') {
+    return {
+      view,
+      index: selectedAudioDeviceIndex(options?.audioDevices, options?.activeAudioDevice),
+    };
+  }
   return { view, index: 0 };
 }
 
-/** Number of focusable rows in `view` (`subtitles` includes row 0 for "Off"). */
+/** Number of focusable rows in `view` (`subtitles` includes row 0 for "Off", `audioDevice` includes row 0 for "System default"). */
 export function settingsRowCount(
   view: SettingsMenuView,
   tracks: MediaTracks,
@@ -102,9 +132,15 @@ export function settingsRowCount(
       options?.hasDeinterlace === true,
       options?.hasAutoSubtitlesOnSkipBack === true,
       options?.hasAutoPlayNextEpisode === true,
+      options?.hasAudioDevice === true,
     ).length;
   }
   if (view === 'subtitles') return tracks.subtitles.length + 1;
+  if (view === 'audioDevice') {
+    return options?.hasAudioDevice === true
+      ? normalizeAudioDeviceChoices(options?.audioDevices).length + 1
+      : 0;
+  }
   if (view === 'speed') return options?.isVod === true ? PLAYBACK_SPEED_OPTIONS.length : 0;
   return tracks.audio.length;
 }
@@ -117,6 +153,9 @@ export function clampSettingsMenu(
 ): SettingsMenuState {
   const isVod = options?.isVod === true;
   if (state.view === 'speed' && !isVod) return { view: 'root', index: 0 };
+  if (state.view === 'audioDevice' && options?.hasAudioDevice !== true) {
+    return { view: 'root', index: 0 };
+  }
   const count = settingsRowCount(state.view, tracks, options);
   const max = Math.max(0, count - 1);
   const index = Math.max(0, Math.min(max, state.index));
@@ -126,6 +165,15 @@ export function clampSettingsMenu(
 function selectedAudioIndex(tracks: MediaTracks): number {
   const idx = tracks.audio.findIndex((t) => t.id === tracks.selectedAudioId);
   return Math.max(0, idx);
+}
+
+function selectedAudioDeviceIndex(
+  devices: readonly AudioDeviceInfo[] | undefined,
+  activeAudioDevice: string | undefined,
+): number {
+  if (!activeAudioDevice || activeAudioDevice === 'auto') return 0;
+  const idx = normalizeAudioDeviceChoices(devices).findIndex((d) => d.name === activeAudioDevice);
+  return idx >= 0 ? idx + 1 : 0;
 }
 
 function selectedSubtitleIndex(tracks: MediaTracks): number {
@@ -147,6 +195,7 @@ export function rootIndexForSettingsView(
   hasDeinterlace = false,
   hasAutoSubtitlesOnSkipBack = false,
   hasAutoPlayNextEpisode = false,
+  hasAudioDevice = false,
 ): number {
   const idx = settingsRootItems(
     isVod,
@@ -154,6 +203,7 @@ export function rootIndexForSettingsView(
     hasDeinterlace,
     hasAutoSubtitlesOnSkipBack,
     hasAutoPlayNextEpisode,
+    hasAudioDevice,
   ).indexOf(view);
   return Math.max(idx, 0);
 }
@@ -165,6 +215,7 @@ function returnToRoot(
   hasDeinterlace: boolean,
   hasAutoSubtitlesOnSkipBack: boolean,
   hasAutoPlayNextEpisode: boolean,
+  hasAudioDevice: boolean,
 ): SettingsMenuIntent {
   return {
     kind: 'state',
@@ -177,6 +228,7 @@ function returnToRoot(
         hasDeinterlace,
         hasAutoSubtitlesOnSkipBack,
         hasAutoPlayNextEpisode,
+        hasAudioDevice,
       ),
     },
   };
@@ -192,6 +244,15 @@ function openSubView(
   }
   if (item === 'audio') {
     return { kind: 'state', state: { view: 'audio', index: selectedAudioIndex(tracks) } };
+  }
+  if (item === 'audioDevice' && options?.hasAudioDevice === true) {
+    return {
+      kind: 'state',
+      state: {
+        view: 'audioDevice',
+        index: selectedAudioDeviceIndex(options.audioDevices, options.activeAudioDevice),
+      },
+    };
   }
   if (item === 'speed' && options?.isVod === true) {
     return {
@@ -214,12 +275,14 @@ export function routeSettingsMenuKey(
   const hasDeinterlace = options?.hasDeinterlace === true;
   const hasAutoSubtitlesOnSkipBack = options?.hasAutoSubtitlesOnSkipBack === true;
   const hasAutoPlayNextEpisode = options?.hasAutoPlayNextEpisode === true;
+  const hasAudioDevice = options?.hasAudioDevice === true;
   const rootItems = settingsRootItems(
     isVod,
     hasAspect,
     hasDeinterlace,
     hasAutoSubtitlesOnSkipBack,
     hasAutoPlayNextEpisode,
+    hasAudioDevice,
   );
   const cur = clampSettingsMenu(state, tracks, options);
 
@@ -233,6 +296,7 @@ export function routeSettingsMenuKey(
           hasDeinterlace,
           hasAutoSubtitlesOnSkipBack,
           hasAutoPlayNextEpisode,
+          hasAudioDevice,
         );
   }
 
@@ -257,6 +321,7 @@ export function routeSettingsMenuKey(
           hasDeinterlace,
           hasAutoSubtitlesOnSkipBack,
           hasAutoPlayNextEpisode,
+          hasAudioDevice,
         );
   }
 
@@ -280,6 +345,11 @@ export function routeSettingsMenuKey(
       if (cur.index === 0) return { kind: 'subtitle', id: null };
       const track = tracks.subtitles[cur.index - 1];
       return track !== undefined ? { kind: 'subtitle', id: track.id } : null;
+    }
+    if (cur.view === 'audioDevice') {
+      if (cur.index === 0) return { kind: 'audioDevice', name: 'auto' };
+      const device = normalizeAudioDeviceChoices(options?.audioDevices)[cur.index - 1];
+      return device !== undefined ? { kind: 'audioDevice', name: device.name } : null;
     }
     if (cur.view === 'speed') {
       const rate = PLAYBACK_SPEED_OPTIONS[cur.index];

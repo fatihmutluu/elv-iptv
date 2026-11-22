@@ -4,7 +4,9 @@ import {
   clampSettingsMenu,
   formatPlaybackSpeed,
   initialSettingsMenu,
+  normalizeAudioDeviceChoices,
   PLAYBACK_SPEED_OPTIONS,
+  rootIndexForSettingsView,
   routeSettingsMenuKey,
   SETTINGS_ROOT_ITEMS,
   type SettingsMenuState,
@@ -517,5 +519,82 @@ describe('settings-menu-nav', () => {
         opts,
       ),
     ).toEqual({ kind: 'toggleStats' });
+  });
+
+  it('supports audioDevice submenu with auto normalization, active focus, and clamping (#408)', () => {
+    const devices = [
+      { name: 'auto', description: 'Autoselect' },
+      { name: 'wasapi/hdmi', description: 'HDMI' },
+      { name: 'wasapi/hdmi', description: 'Duplicate' },
+      { name: '', description: 'Blank' },
+      { name: 'wasapi/usb', description: 'USB DAC' },
+    ];
+    expect(normalizeAudioDeviceChoices(devices)).toEqual([
+      { name: 'wasapi/hdmi', description: 'HDMI' },
+      { name: 'wasapi/usb', description: 'USB DAC' },
+    ]);
+    expect(normalizeAudioDeviceChoices(undefined)).toEqual([]);
+
+    const opts = {
+      isVod: true,
+      hasAspect: false,
+      hasAudioDevice: true,
+      audioDevices: devices,
+      activeAudioDevice: 'wasapi/usb',
+    };
+    expect(settingsRootItems(true, false, false, false, false, true)).toEqual([
+      'subtitles',
+      'audio',
+      'audioDevice',
+      'speed',
+      'stats',
+    ]);
+    expect(rootIndexForSettingsView('audioDevice', true, false, false, false, false, true)).toBe(2);
+    expect(settingsRowCount('audioDevice', TRACKS, opts)).toBe(3);
+    expect(settingsRowCount('audioDevice', TRACKS, { hasAudioDevice: false })).toBe(0);
+    expect(initialSettingsMenu('audioDevice', opts)).toEqual({ view: 'audioDevice', index: 2 });
+    expect(initialSettingsMenu('audioDevice', { ...opts, activeAudioDevice: 'auto' })).toEqual({
+      view: 'audioDevice',
+      index: 0,
+    });
+    expect(
+      clampSettingsMenu({ view: 'audioDevice', index: 1 }, TRACKS, { hasAudioDevice: false }),
+    ).toEqual({ view: 'root', index: 0 });
+
+    // Open audioDevice from root index 2 -> lands on active device (index 2)
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 2 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'state', state: { view: 'audioDevice', index: 2 } });
+
+    // Select row 0 -> 'auto'; select row 1 -> 'wasapi/hdmi'; left/back -> root index 2
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'audioDevice', index: 0 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'audioDevice', name: 'auto' });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'audioDevice', index: 1 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'audioDevice', name: 'wasapi/hdmi' });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'back', kind: 'press', time: 0 },
+        { view: 'audioDevice', index: 1 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'state', state: { view: 'root', index: 2 } });
   });
 });

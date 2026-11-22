@@ -1,4 +1,10 @@
-import type { CatalogService, ItemRow, ItemSortOrder, WatchProgressRow } from '@elv/data';
+import type {
+  CatalogService,
+  ItemRow,
+  ItemSortOrder,
+  SeriesUnplayedSummary,
+  WatchProgressRow,
+} from '@elv/data';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   batchLoadProgressByKeys,
@@ -6,6 +12,7 @@ import {
   type DisplayCategory,
   type PagedListSource,
   useCatalogUiCache,
+  useSeriesUnplayedCounts,
 } from '../shared';
 import { GRID_MAX_PAGES, GRID_PAGE_SIZE } from './catalog-model';
 
@@ -27,6 +34,7 @@ export interface CategoryGridDataState {
   readonly pageVersion: number;
   readonly progressResetToken: number;
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
+  readonly unplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly itemCount: number;
   readonly getItemAt: (index: number) => ItemRow | undefined;
   readonly hydrateProgressRange: (startRow: number, endRow: number) => void;
@@ -109,6 +117,7 @@ export function useCategoryGridData({
   const [progressByKey, setProgressByKey] = useState<ReadonlyMap<string, WatchProgressRow>>(
     () => new Map(),
   );
+  const [visibleSeriesKeys, setVisibleSeriesKeys] = useState<readonly string[]>(() => []);
 
   const pagedSourceRef = useRef<PagedListSource<ItemRow> | null>(
     initialSourceRef.current?.source ?? null,
@@ -227,6 +236,7 @@ export function useCategoryGridData({
   useEffect(() => {
     progressGenRef.current += 1;
     fetchedKeysRef.current = new Set();
+    setVisibleSeriesKeys([]);
     setProgressResetToken((t) => t + 1);
   }, [category.row.id, refreshToken, userStateVersion]);
 
@@ -238,12 +248,28 @@ export function useCategoryGridData({
       const from = Math.max(0, startRow * cols);
       const to = Math.min(total, (endRow + 1) * cols);
       const missing: string[] = [];
+      const windowSeriesKeys: string[] = [];
       for (let i = from; i < to; i++) {
         const item = source.get(i);
-        if (item && !fetchedKeysRef.current.has(item.key)) {
+        if (!item) continue;
+        if (kind === 'series' && item.kind === 'series') {
+          windowSeriesKeys.push(item.key);
+        }
+        if (!fetchedKeysRef.current.has(item.key)) {
           fetchedKeysRef.current.add(item.key);
           missing.push(item.key);
         }
+      }
+      if (kind === 'series' && windowSeriesKeys.length > 0) {
+        setVisibleSeriesKeys((prev) => {
+          if (
+            prev.length === windowSeriesKeys.length &&
+            prev.every((k, idx) => k === windowSeriesKeys[idx])
+          ) {
+            return prev;
+          }
+          return windowSeriesKeys;
+        });
       }
       if (missing.length === 0) return;
       const gen = progressGenRef.current;
@@ -258,7 +284,13 @@ export function useCategoryGridData({
         })
         .catch(() => undefined);
     },
-    [catalog, cols],
+    [catalog, cols, kind],
+  );
+
+  const unplayedBySeriesKey = useSeriesUnplayedCounts(
+    catalog,
+    kind === 'series' ? visibleSeriesKeys : [],
+    refreshToken + userStateVersion,
   );
 
   const itemCount = pagedSource?.count() ?? category.row.itemCount;
@@ -274,6 +306,7 @@ export function useCategoryGridData({
       pageVersion,
       progressResetToken,
       progressByKey,
+      unplayedBySeriesKey,
       itemCount,
       getItemAt,
       hydrateProgressRange,
@@ -286,6 +319,7 @@ export function useCategoryGridData({
       pageVersion,
       progressByKey,
       progressResetToken,
+      unplayedBySeriesKey,
     ],
   );
 }

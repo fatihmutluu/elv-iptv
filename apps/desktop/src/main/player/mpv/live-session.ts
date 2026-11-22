@@ -1,6 +1,7 @@
 import type { AttemptToken, EngineEvent, MediaKind } from '@elv/playback';
 import type { PlayerUiEvent } from '../../../shared/player-ipc.ts';
 import type { VideoPresenter } from '../presenter/types.ts';
+import { type AudioDeviceTracker, createAudioDeviceTracker } from './audio-devices.ts';
 import { type AudioHotplug, createAudioHotplug } from './audio-hotplug.ts';
 import { MpvWedgedError } from './client.ts';
 import type { MpvCommand, MpvEvent, MpvReply } from './codec.ts';
@@ -48,6 +49,7 @@ export interface LiveSession {
   readonly entries: EntryTable;
   readonly deriver: Deriver;
   readonly hotplug: AudioHotplug;
+  readonly audioDevices: AudioDeviceTracker;
   readonly repeatGate: InputRepeatGate;
   readonly readahead: ReadaheadController;
   paused: boolean;
@@ -202,10 +204,12 @@ export function createSessionController(hooks: LiveSessionHooks) {
         }
         if (name === 'audio-device') {
           L.hotplug.onActiveDevice(e['data']);
+          L.audioDevices.onActiveDevice(e['data']);
           return;
         }
         if (name === 'audio-device-list') {
           L.hotplug.onDeviceList(e['data']);
+          L.audioDevices.onDeviceList(e['data']);
           return;
         }
         if (TRACK_PROPERTIES.has(name)) {
@@ -314,6 +318,9 @@ export function createSessionController(hooks: LiveSessionHooks) {
               hooks.enqueueCommand(['ao-reload'], hooks.getMedia());
             }
           },
+        }),
+        audioDevices: createAudioDeviceTracker((devices, active) => {
+          if (hooks.getLive() === L) hooks.ui({ type: 'audio-devices', devices, active });
         }),
         repeatGate: createInputRepeatGate({ now: hooks.now }),
         readahead: createReadaheadController({

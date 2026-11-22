@@ -46,6 +46,7 @@ export interface PlayerOsdProps {
   muted?: boolean;
   volume?: number;
   isFullscreen?: boolean;
+  alwaysOnTop?: boolean;
   playbackSpeed?: number;
   videoInfo?: StreamVideoInfo | undefined;
   tracks?: MediaTracks;
@@ -78,6 +79,7 @@ export interface PlayerOsdProps {
   onToggleMute?: () => void;
   onSetVolume?: (volume: number) => void;
   onToggleFullscreen?: () => void;
+  onToggleAlwaysOnTop?: () => void;
   onLock?: () => void;
   onJumpPreviousChannel?: () => void;
   onJumpToLiveEdge?: () => void;
@@ -103,6 +105,7 @@ export function DesktopCinemaBar(p: PlayerOsdProps): ReactElement {
     muted = false,
     volume = 100,
     isFullscreen = false,
+    alwaysOnTop = false,
     playbackSpeed = 1,
   } = p;
 
@@ -396,6 +399,21 @@ export function DesktopCinemaBar(p: PlayerOsdProps): ReactElement {
               accessibilityLabel={i18n.t('player.settings')}
               active={settingsOpen}
               onPress={p.onOpenSettings}
+              isTv={false}
+            />
+          ) : null}
+          {service !== null && p.onToggleAlwaysOnTop !== undefined ? (
+            <OsdButton
+              testID="player-always-on-top-button"
+              icon="pin"
+              variant="icon"
+              size={36}
+              accessibilityLabel={
+                alwaysOnTop ? i18n.t('player.exitAlwaysOnTop') : i18n.t('player.alwaysOnTop')
+              }
+              keyShortcuts={PLAYER_KEY_SHORTCUTS.alwaysOnTop}
+              active={alwaysOnTop}
+              onPress={p.onToggleAlwaysOnTop}
               isTv={false}
             />
           ) : null}

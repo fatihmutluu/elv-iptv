@@ -212,13 +212,15 @@ describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
       liveOkTwoStepPreview: true,
       cleanChannelTitles: true,
       artworkCacheLimitMb: 256,
+      confirmExitOnBack: false,
+      preferredAudioDevice: 'wasapi/{0.0.0.00000000}.{11111111-2222-3333-4444-555555555555}',
     };
 
     const encoded = serializePreferences(full);
     expect(encoded.ok).toBe(true);
     if (encoded.ok) {
       const byteLen = new TextEncoder().encode(encoded.value).byteLength;
-      expect(byteLen).toBeLessThan(1500);
+      expect(byteLen).toBeLessThan(1700);
       expect(byteLen).toBeLessThan(MAX_PREFERENCES_BYTES);
       expect(parsePreferences(encoded.value)).toEqual(full);
     }
@@ -353,5 +355,137 @@ describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
 
     const reset = await memStore.reset();
     expect(reset).toEqual({ ok: true, value: DEFAULT_PREFERENCES });
+  });
+});
+
+describe('Wave P4 ergonomics preferences (#55, #408)', () => {
+  it('defaults confirmExitOnBack to true and preferredAudioDevice to auto', () => {
+    expect(DEFAULT_PREFERENCES.confirmExitOnBack).toBe(true);
+    expect(DEFAULT_PREFERENCES.preferredAudioDevice).toBe('auto');
+  });
+
+  it('parses, trims, and validates confirmExitOnBack and preferredAudioDevice', () => {
+    const parsed = parsePreferences(
+      JSON.stringify({
+        version: 1,
+        confirmExitOnBack: false,
+        preferredAudioDevice: '  wasapi/{abc-123}  ',
+      }),
+    );
+    expect(parsed.confirmExitOnBack).toBe(false);
+    expect(parsed.preferredAudioDevice).toBe('wasapi/{abc-123}');
+
+    // Exactly 160 chars is accepted
+    const maxLen = 'd'.repeat(160);
+    expect(
+      parsePreferences(JSON.stringify({ version: 1, preferredAudioDevice: `  ${maxLen}  ` }))
+        .preferredAudioDevice,
+    ).toBe(maxLen);
+
+    // Invalid types, empty/blank, >160 chars, and control characters fall back to defaults
+    const invalidDevices: readonly unknown[] = [
+      '',
+      '   ',
+      'd'.repeat(161),
+      'wasapi/dev\u0000id',
+      'wasapi/dev\nid',
+      'wasapi/dev\rid',
+      'wasapi/dev\tid',
+      'wasapi/dev\u001fid',
+      'wasapi/dev\u007fid',
+      '\nwasapi/dev',
+      42,
+      null,
+      true,
+      ['auto'],
+    ];
+    for (const bad of invalidDevices) {
+      const res = parsePreferences(
+        JSON.stringify({
+          version: 1,
+          confirmExitOnBack: 'no',
+          preferredAudioDevice: bad,
+        }),
+      );
+      expect(res.confirmExitOnBack).toBe(true);
+      expect(res.preferredAudioDevice).toBe('auto');
+    }
+  });
+
+  it('keeps a maximal serialized snapshot (with 160-char audio device) well under 1700 bytes', () => {
+    const maximal: PreferencesSnapshot = {
+      ...DEFAULT_PREFERENCES,
+      themePreset: 'obsidianCrimson',
+      locale: 'tr-TR',
+      fontScale: 1.15,
+      reduceMotion: true,
+      bufferPreset: 'large',
+      useTextureView: true,
+      autoSubtitlesOnSkipBack: true,
+      autoPlayNextEpisode: false,
+      playerVolume: 85,
+      preferredAudioLang: 'abc-12345678',
+      preferredSubtitleLang: 'zh-hant',
+      subtitleMode: 'always',
+      seekStepSec: 30,
+      defaultResizeMode: 'stretch',
+      epgTimeSpanHours: 6,
+      epgGenreTints: false,
+      epgShowClock: false,
+      defaultLiveMode: 'channels',
+      guideRefreshHours: 24,
+      logoBackdropMode: 'invert',
+      showSourceBadges: false,
+      liveOkTwoStepPreview: true,
+      cleanChannelTitles: true,
+      artworkCacheLimitMb: 256,
+      confirmExitOnBack: false,
+      preferredAudioDevice: `wasapi/${'x'.repeat(153)}`,
+    };
+    const encoded = serializePreferences(maximal);
+    expect(encoded.ok).toBe(true);
+    if (encoded.ok) {
+      const byteLen = new TextEncoder().encode(encoded.value).byteLength;
+      expect(byteLen).toBeLessThan(1700);
+      expect(byteLen).toBeLessThan(MAX_PREFERENCES_BYTES);
+      expect(parsePreferences(encoded.value)).toEqual(maximal);
+    }
+  });
+
+  it('normalizes invalid preferredAudioDevice during direct serializePreferences and store updates', async () => {
+    const encoded = serializePreferences({
+      ...DEFAULT_PREFERENCES,
+      preferredAudioDevice: 'bad\u0007device',
+    });
+    expect(encoded.ok).toBe(true);
+    if (encoded.ok) {
+      expect(parsePreferences(encoded.value).preferredAudioDevice).toBe('auto');
+    }
+
+    const store = createMemoryPreferencesStore();
+    const u1 = await store.update({
+      confirmExitOnBack: false,
+      preferredAudioDevice: '  pulse/alsa_output.pci  ',
+    });
+    expect(u1.ok).toBe(true);
+    if (u1.ok) {
+      expect(u1.value.confirmExitOnBack).toBe(false);
+      expect(u1.value.preferredAudioDevice).toBe('pulse/alsa_output.pci');
+    }
+
+    // Passing non-boolean/non-string preserves previous values
+    const u2 = await store.update({
+      confirmExitOnBack: 'false' as unknown as boolean,
+      preferredAudioDevice: 123 as unknown as string,
+    });
+    expect(u2.ok).toBe(true);
+    if (u2.ok) {
+      expect(u2.value.confirmExitOnBack).toBe(false);
+      expect(u2.value.preferredAudioDevice).toBe('pulse/alsa_output.pci');
+    }
+
+    // Passing blank or control-char string resets preferredAudioDevice to 'auto'
+    const u3 = await store.update({ preferredAudioDevice: '   ' });
+    expect(u3.ok && u3.value.preferredAudioDevice).toBe('auto');
   });
 });

@@ -41,7 +41,8 @@ export type IconName =
   | 'star'
   | 'starFilled'
   | 'chevronLeft'
-  | 'chevronDown';
+  | 'chevronDown'
+  | 'pin';
 
 /** Single SVG primitive shape within a 24x24 icon viewBox. */
 export type IconShape =
@@ -191,6 +192,12 @@ export const ICON_PATHS: Readonly<Record<IconName, IconSpec>> = {
   ),
   chevronLeft: stroke(p('M15 18l-6-6 6-6', 2)),
   chevronDown: stroke(p('M6 9l6 6 6-6', 2)),
+  pin: stroke(
+    p('M12 17v5'),
+    p(
+      'M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16h14v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z',
+    ),
+  ),
 };
 
 /** Ordered list of every icon identifier registered in {@link ICON_PATHS}. */

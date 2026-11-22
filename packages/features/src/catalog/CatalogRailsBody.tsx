@@ -1,4 +1,4 @@
-import type { ItemRow, WatchProgressRow } from '@elv/data';
+import type { ItemRow, SeriesUnplayedSummary, WatchProgressRow } from '@elv/data';
 import { CtaButton, TvFocusGuideRegion, useI18n, useTheme } from '@elv/ui-kit';
 import type { ComponentRef, ReactElement, RefObject } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
@@ -22,10 +22,16 @@ export interface CatalogRailsBodyProps {
   readonly loadedRailItems: ReadonlyMap<string, readonly ItemRow[]>;
   readonly loadingRailIds: ReadonlySet<string>;
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
+  readonly favoriteKeys?: ReadonlySet<string>;
+  readonly watchedOverrides?: ReadonlyMap<string, boolean>;
+  readonly unplayedBySeriesKey?: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly hasMoreCategories: boolean;
   readonly focusedRowId: string | null;
   readonly focusedCol: number | null;
   readonly onOpenDetail: (target: DetailTarget) => void;
+  readonly onQuickPlay?: (item: ItemRow, categoryId: string) => void;
+  readonly onQuickToggleFavorite?: (item: ItemRow) => void;
+  readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
   readonly onSeeAll: (categoryId: string) => void;
   readonly onLoadMore: () => void;
   readonly onLayoutContinueY?: (y: number) => void;
@@ -43,10 +49,16 @@ export function CatalogRailsBody({
   loadedRailItems,
   loadingRailIds,
   progressByKey,
+  favoriteKeys,
+  watchedOverrides,
+  unplayedBySeriesKey,
   hasMoreCategories,
   focusedRowId,
   focusedCol,
   onOpenDetail,
+  onQuickPlay,
+  onQuickToggleFavorite,
+  onQuickToggleWatched,
   onSeeAll,
   onLoadMore,
   onLayoutContinueY,
@@ -107,6 +119,9 @@ export function CatalogRailsBody({
                 items={items}
                 loading={isRailLoading}
                 progressByKey={progressByKey}
+                {...(favoriteKeys !== undefined ? { favoriteKeys } : {})}
+                {...(watchedOverrides !== undefined ? { watchedOverrides } : {})}
+                {...(unplayedBySeriesKey !== undefined ? { unplayedBySeriesKey } : {})}
                 cardWidth={layout.posterRailWidth}
                 gap={layout.railGap}
                 padX={layout.padX}
@@ -114,6 +129,9 @@ export function CatalogRailsBody({
                 isTouch={layout.isTouch}
                 focusedIndex={focusedRowId === `rail-${catIndex}` ? focusedCol : null}
                 onOpenDetail={onOpenDetail}
+                {...(onQuickPlay !== undefined ? { onQuickPlay } : {})}
+                {...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {})}
+                {...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {})}
                 onSeeAll={onSeeAll}
               />
             </TvFocusGuideRegion>

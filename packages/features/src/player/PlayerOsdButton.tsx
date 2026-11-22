@@ -27,6 +27,7 @@ export const PLAYER_KEY_SHORTCUTS = {
   seekForward: 'ArrowRight l',
   mute: 'm',
   fullscreen: 'f',
+  alwaysOnTop: 't',
   tracks: 'c',
   info: 'i',
   channelList: 'g',

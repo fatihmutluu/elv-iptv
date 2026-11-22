@@ -248,6 +248,7 @@ export function createCoalescedCatalog(
   const queryNextEpisodeFn = c.queryNextEpisode?.bind(c);
   const listContinueWatchingFn = c.listContinueWatching?.bind(c);
   const listProgressByKeysFn = c.listProgressByKeys?.bind(c);
+  const listSeriesUnplayedCountsFn = c.listSeriesUnplayedCounts?.bind(c);
   const clearProgressFn = c.clearProgress?.bind(c);
   const setFavoriteFn = c.setFavorite?.bind(c);
   const toggleFavoriteFn = c.toggleFavorite?.bind(c);
@@ -316,6 +317,16 @@ export function createCoalescedCatalog(
               }
             }
             return listProgressByKeysFn(itemKeys, profileId);
+          },
+        }
+      : {}),
+    ...(listSeriesUnplayedCountsFn
+      ? {
+          listSeriesUnplayedCounts: async (seriesKeys, profileId) => {
+            const p = normalizeProfile(profileId);
+            await coalescer.flushPrefix(`progress:${p}:`);
+            await coalescer.flushPrefix(`watched:${p}:`);
+            return listSeriesUnplayedCountsFn(seriesKeys, profileId);
           },
         }
       : {}),

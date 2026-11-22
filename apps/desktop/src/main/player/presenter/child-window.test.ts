@@ -289,4 +289,24 @@ describe('createChildWindowPresenter', () => {
     video().emit('focus');
     expect(app.state.focusCalls).toBe(1);
   });
+
+  it('keeps child video HWND above an always-on-top parent and resets cleanly when unpinned (#408)', async () => {
+    const { app, presenter, video } = setup();
+    await presenter.prepare();
+    presenter.setArea(AREA);
+    video().state.alwaysOnTopCalls.length = 0;
+    video().state.moveTopCalls = 0;
+
+    app.state.alwaysOnTop = true;
+    app.emit('always-on-top-changed');
+    expect(video().state.alwaysOnTopCalls).toEqual([[true, 'floating', 1]]);
+    expect(video().state.moveTopCalls).toBeGreaterThanOrEqual(1);
+
+    app.state.alwaysOnTop = false;
+    app.emit('always-on-top-changed');
+    expect(video().state.alwaysOnTopCalls).toEqual([
+      [true, 'floating', 1],
+      [false, 'normal', undefined],
+    ]);
+  });
 });

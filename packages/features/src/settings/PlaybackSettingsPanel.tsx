@@ -152,6 +152,28 @@ export function PlaybackSettingsPanel({
     [i18n],
   );
 
+  const savedAudioDevice = activePrefs.preferredAudioDevice.trim();
+  const hasCustomAudioDevice = savedAudioDevice.length > 0 && savedAudioDevice !== 'auto';
+  const audioDeviceOptions = useMemo<readonly SettingsChipOption<string>[]>(() => {
+    const opts: SettingsChipOption<string>[] = [
+      {
+        value: 'auto',
+        label: i18n.t('player.audioDeviceAuto'),
+        focusId: 'audio-device-auto',
+        testID: 'settings-playback-audio-device-auto',
+      },
+    ];
+    if (hasCustomAudioDevice) {
+      opts.push({
+        value: savedAudioDevice,
+        label: savedAudioDevice,
+        focusId: 'audio-device-current',
+        testID: 'settings-playback-audio-device-current',
+      });
+    }
+    return opts;
+  }, [hasCustomAudioDevice, i18n, savedAudioDevice]);
+
   return (
     <ScrollView
       ref={scrollRef}
@@ -281,6 +303,17 @@ export function PlaybackSettingsPanel({
           onToggle={() =>
             applyPatch({ autoSubtitlesOnSkipBack: !activePrefs.autoSubtitlesOnSkipBack })
           }
+        />
+
+        <SettingsDivider />
+
+        <SettingsOptionRow
+          title={i18n.t('settings.playback.audioDevice')}
+          options={audioDeviceOptions}
+          selectedValue={hasCustomAudioDevice ? savedAudioDevice : 'auto'}
+          focusedControlId={focusedControlId}
+          isTv={isTv}
+          onSelect={(preferredAudioDevice) => applyPatch({ preferredAudioDevice })}
         />
       </Surface>
     </ScrollView>

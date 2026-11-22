@@ -117,6 +117,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     controls.reset();
     if (media) media.entryId = undefined;
     L.hotplug.reset();
+    L.audioDevices.reset();
     L.repeatGate.reset();
     L.readahead.reset();
     opening.finish();

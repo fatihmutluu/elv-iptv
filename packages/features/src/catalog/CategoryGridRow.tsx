@@ -1,7 +1,8 @@
-import type { ItemRow, ItemSortOrder, WatchProgressRow } from '@elv/data';
+import type { ItemRow, ItemSortOrder, SeriesUnplayedSummary, WatchProgressRow } from '@elv/data';
 import {
   Icon,
   PosterCard,
+  type PosterCardQuickActions,
   SkeletonBox,
   TABULAR_NUMS_STYLE,
   useI18n,
@@ -9,13 +10,14 @@ import {
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { memo, type ReactElement, useCallback } from 'react';
+import { memo, type ReactElement, useCallback, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   type CatalogLayoutMetrics,
   type DetailTarget,
   detailTargetFromItem,
   formatVodMeta,
+  resolveSeriesBadgeProps,
 } from '../shared';
 import { computeProgressRatio } from './catalog-model';
 
@@ -24,12 +26,24 @@ interface GridPosterSlotProps {
   readonly itemIndex: number;
   readonly categoryId: string;
   readonly progress: WatchProgressRow | undefined;
+  readonly isFavorite: boolean;
+  readonly watchedOverride: boolean | undefined;
+  readonly unplayedSummary: SeriesUnplayedSummary | undefined;
   readonly watchedLabel: string;
+  readonly formatUnplayed: (count: number) => string;
+  readonly formatQuickPlay: (title: string) => string;
+  readonly addToListLabel: string;
+  readonly inMyListLabel: string;
+  readonly markWatchedLabel: string;
+  readonly markUnwatchedLabel: string;
   readonly cardWidth: number;
   readonly posterHeight: number;
   readonly isTv: boolean;
   readonly focused: boolean;
   readonly onOpenDetail: (target: DetailTarget) => void;
+  readonly onQuickPlay?: (item: ItemRow, categoryId: string) => void;
+  readonly onQuickToggleFavorite?: (item: ItemRow) => void;
+  readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
 }
 
 const GridPosterSlot = memo(function GridPosterSlotInner({
@@ -37,12 +51,24 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
   itemIndex,
   categoryId,
   progress,
+  isFavorite,
+  watchedOverride,
+  unplayedSummary,
   watchedLabel,
+  formatUnplayed,
+  formatQuickPlay,
+  addToListLabel,
+  inMyListLabel,
+  markWatchedLabel,
+  markUnwatchedLabel,
   cardWidth,
   posterHeight,
   isTv,
   focused,
   onOpenDetail,
+  onQuickPlay,
+  onQuickToggleFavorite,
+  onQuickToggleWatched,
 }: GridPosterSlotProps): ReactElement {
   const theme = useTheme();
   const handlePress = useCallback(() => {
@@ -50,6 +76,52 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
     const target = detailTargetFromItem(item, categoryId);
     if (target) onOpenDetail(target);
   }, [categoryId, item, onOpenDetail]);
+
+  const isSeries = item?.kind === 'series';
+  const progressWatched = progress?.watched === true;
+  const effectiveWatched =
+    watchedOverride ?? (progressWatched || (isSeries && unplayedSummary?.watched === true));
+
+  const quickActions = useMemo<PosterCardQuickActions | undefined>(() => {
+    if (!item || (!onQuickPlay && !onQuickToggleFavorite && !onQuickToggleWatched)) {
+      return undefined;
+    }
+    return {
+      ...(onQuickPlay !== undefined
+        ? {
+            onPlay: () => onQuickPlay(item, categoryId),
+            playLabel: formatQuickPlay(item.name),
+          }
+        : {}),
+      ...(onQuickToggleFavorite !== undefined
+        ? {
+            isFavorite,
+            onToggleFavorite: () => onQuickToggleFavorite(item),
+            favoriteLabel: isFavorite ? inMyListLabel : addToListLabel,
+          }
+        : {}),
+      ...(onQuickToggleWatched !== undefined
+        ? {
+            isWatched: effectiveWatched,
+            onToggleWatched: () => onQuickToggleWatched(item, effectiveWatched),
+            watchedLabel: effectiveWatched ? markUnwatchedLabel : markWatchedLabel,
+          }
+        : {}),
+    };
+  }, [
+    addToListLabel,
+    categoryId,
+    effectiveWatched,
+    formatQuickPlay,
+    inMyListLabel,
+    isFavorite,
+    item,
+    markUnwatchedLabel,
+    markWatchedLabel,
+    onQuickPlay,
+    onQuickToggleFavorite,
+    onQuickToggleWatched,
+  ]);
 
   if (!item) {
     return (
@@ -66,8 +138,17 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
   }
 
   const meta = formatVodMeta(item.year, item.rating);
-  const ratio = computeProgressRatio(progress);
-  const badge = progress?.watched ? watchedLabel : undefined;
+  const ratio = !effectiveWatched ? computeProgressRatio(progress) : undefined;
+  const seriesBadge = isSeries
+    ? resolveSeriesBadgeProps({
+        summary: unplayedSummary,
+        progressWatched,
+        watchedOverride,
+        formatUnplayed,
+        watchedLabel,
+      })
+    : {};
+  const badge = !isSeries && effectiveWatched ? watchedLabel : undefined;
 
   return (
     <PosterCard
@@ -77,6 +158,8 @@ const GridPosterSlot = memo(function GridPosterSlotInner({
       imageUri={item.logo}
       {...(ratio !== undefined ? { progress: ratio } : {})}
       {...(badge !== undefined ? { badge } : {})}
+      {...seriesBadge}
+      {...(quickActions !== undefined ? { quickActions } : {})}
       width={cardWidth}
       maxDecodePx={320}
       focusable={!isTv}
@@ -93,10 +176,16 @@ export interface GridRowViewProps {
   readonly columns: number;
   readonly categoryId: string;
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
+  readonly favoriteKeys?: ReadonlySet<string>;
+  readonly watchedOverrides?: ReadonlyMap<string, boolean>;
+  readonly unplayedBySeriesKey?: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly watchedLabel: string;
   readonly layout: CatalogLayoutMetrics;
   readonly focusedCol: number | null;
   readonly onOpenDetail: (target: DetailTarget) => void;
+  readonly onQuickPlay?: (item: ItemRow, categoryId: string) => void;
+  readonly onQuickToggleFavorite?: (item: ItemRow) => void;
+  readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
 }
 
 /**
@@ -109,12 +198,32 @@ export const GridRowView = memo(function GridRowViewInner({
   columns,
   categoryId,
   progressByKey,
+  favoriteKeys,
+  watchedOverrides,
+  unplayedBySeriesKey,
   watchedLabel,
   layout,
   focusedCol,
   onOpenDetail,
+  onQuickPlay,
+  onQuickToggleFavorite,
+  onQuickToggleWatched,
 }: GridRowViewProps): ReactElement {
+  const i18n = useI18n();
   const posterHeight = Math.round(layout.gridCardWidth * 1.5);
+  const formatUnplayed = useCallback(
+    (count: number) => i18n.t('card.unplayedCount', { count }),
+    [i18n],
+  );
+  const formatQuickPlay = useCallback(
+    (title: string) => i18n.t('card.quickPlay', { title }),
+    [i18n],
+  );
+  const addToListLabel = i18n.t('home.addToList');
+  const inMyListLabel = i18n.t('home.inMyList');
+  const markWatchedLabel = i18n.t('home.markWatched');
+  const markUnwatchedLabel = i18n.t('home.markUnwatched');
+
   return (
     <View
       testID={`catalog-grid-row-${rowIndex}`}
@@ -137,12 +246,24 @@ export const GridRowView = memo(function GridRowViewInner({
             itemIndex={itemIndex}
             categoryId={categoryId}
             progress={item ? progressByKey.get(item.key) : undefined}
+            isFavorite={item ? (favoriteKeys?.has(item.key) ?? false) : false}
+            watchedOverride={item ? watchedOverrides?.get(item.key) : undefined}
+            unplayedSummary={item ? unplayedBySeriesKey?.get(item.key) : undefined}
             watchedLabel={watchedLabel}
+            formatUnplayed={formatUnplayed}
+            formatQuickPlay={formatQuickPlay}
+            addToListLabel={addToListLabel}
+            inMyListLabel={inMyListLabel}
+            markWatchedLabel={markWatchedLabel}
+            markUnwatchedLabel={markUnwatchedLabel}
             cardWidth={layout.gridCardWidth}
             posterHeight={posterHeight}
             isTv={layout.isTv}
             focused={layout.isTv && focusedCol === colIdx}
             onOpenDetail={onOpenDetail}
+            {...(onQuickPlay !== undefined ? { onQuickPlay } : {})}
+            {...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {})}
+            {...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {})}
           />
         );
       })}

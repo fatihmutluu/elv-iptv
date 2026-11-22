@@ -6,6 +6,7 @@ import type {
   PlayerEngine,
 } from '@elv/playback';
 import type {
+  AudioDeviceInfo,
   BridgeCommand,
   HwdecProfile,
   PlayerArea,
@@ -49,8 +50,16 @@ export interface DesktopEngine extends PlayerEngine {
   setAudioDelay(delaySec: number): void;
   /** Sets mpv subtitle delay in seconds (`-30`–`30`, `#434`). */
   setSubtitleDelay(delaySec: number): void;
-  /** Selects an mpv audio output device (`#434`). */
+  /** Selects an mpv audio output device (`#434`, `#408`). */
   setAudioDevice(device: string): void;
+  /** Returns the latest normalized desktop `libmpv` audio output device list (`#408`). */
+  getAudioDevices(): readonly AudioDeviceInfo[];
+  /** Returns the active desktop `libmpv` audio output device id (`#408`). */
+  getActiveAudioDevice(): string;
+  /** Subscribes to live desktop audio output device list or active selection changes (`#408`). */
+  onAudioDevicesChange(
+    listener: (devices: readonly AudioDeviceInfo[], active: string) => void,
+  ): () => void;
   /** Enables or disables per-file mpv deinterlacing (`#131`). */
   setDeinterlace(enabled: boolean): void;
   /** Selects the desktop `libmpv` hardware video decoding profile (`#435`, `#210`). */
@@ -86,6 +95,9 @@ export async function createDesktopEngine(
 ): Promise<DesktopEngine> {
   const listeners = new Set<(event: EngineEvent) => void>();
   const uiListeners = new Set<(event: PlayerUiEvent) => void>();
+  const audioDeviceListeners = new Set<
+    (devices: readonly AudioDeviceInfo[], active: string) => void
+  >();
   const frameUnsubs = new Set<() => void>();
   let engineId: string | undefined;
   let offset = 0;
@@ -94,7 +106,10 @@ export async function createDesktopEngine(
   const heldEvents: EngineEvent[] = [];
   let presenter: Extract<PlayerUiEvent, { type: 'presenter' }> | undefined;
   let fullscreenEvent: Extract<PlayerUiEvent, { type: 'fullscreen-changed' }> | undefined;
+  let audioDevicesEvent: Extract<PlayerUiEvent, { type: 'audio-devices' }> | undefined;
   let fullscreen = false;
+  let audioDevices: readonly AudioDeviceInfo[] = [];
+  let activeAudioDevice = 'auto';
   const earlyEvents: PlayerEventMessage[] = [];
   const earlyUi: PlayerUiMessage[] = [];
 
@@ -118,6 +133,18 @@ export async function createDesktopEngine(
     if (ui.type === 'fullscreen-changed') {
       fullscreen = ui.fullscreen;
       fullscreenEvent = ui;
+    }
+    if (ui.type === 'audio-devices') {
+      audioDevices = ui.devices;
+      activeAudioDevice = ui.active;
+      audioDevicesEvent = ui;
+      for (const listener of [...audioDeviceListeners]) {
+        try {
+          listener(ui.devices, ui.active);
+        } catch {
+          // isolate audio device subscribers
+        }
+      }
     }
     for (const listener of [...uiListeners]) {
       try {
@@ -185,6 +212,22 @@ export async function createDesktopEngine(
     setAudioDelay: (delaySec) => send({ name: 'setAudioDelay', delaySec }),
     setSubtitleDelay: (delaySec) => send({ name: 'setSubtitleDelay', delaySec }),
     setAudioDevice: (device) => send({ name: 'setAudioDevice', device }),
+    getAudioDevices: () => audioDevices,
+    getActiveAudioDevice: () => activeAudioDevice,
+    onAudioDevicesChange(listener) {
+      if (released) return () => undefined;
+      audioDeviceListeners.add(listener);
+      if (audioDevicesEvent) {
+        try {
+          listener(audioDevicesEvent.devices, audioDevicesEvent.active);
+        } catch {
+          // isolate audio device subscribers
+        }
+      }
+      return () => {
+        audioDeviceListeners.delete(listener);
+      };
+    },
     setDeinterlace: (enabled) => send({ name: 'setDeinterlace', enabled }),
     setHwdec: (profile) => send({ name: 'setHwdec', profile }),
     setArea(area) {
@@ -196,6 +239,7 @@ export async function createDesktopEngine(
       released = true;
       listeners.clear();
       uiListeners.clear();
+      audioDeviceListeners.clear();
       for (const offFrame of [...frameUnsubs]) offFrame();
       frameUnsubs.clear();
       offEvent();
@@ -232,6 +276,13 @@ export async function createDesktopEngine(
       if (fullscreenEvent) {
         try {
           listener(fullscreenEvent);
+        } catch {
+          // same isolation as deliverUi
+        }
+      }
+      if (audioDevicesEvent) {
+        try {
+          listener(audioDevicesEvent);
         } catch {
           // same isolation as deliverUi
         }

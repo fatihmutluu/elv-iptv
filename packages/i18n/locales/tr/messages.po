@@ -1358,3 +1358,30 @@ msgstr "Alfabetik sırala"
 
 msgid "catalog.sortDefaultLabel"
 msgstr "Varsayılan sıralama"
+
+msgid "player.alwaysOnTop"
+msgstr "Pencereyi üstte tut"
+
+msgid "player.exitAlwaysOnTop"
+msgstr "Sabitlemeyi kaldır"
+
+msgid "player.audioDevice"
+msgstr "Ses çıkışı"
+
+msgid "player.audioDeviceAuto"
+msgstr "Sistem varsayılanı"
+
+msgid "card.quickPlay"
+msgstr "{title} oynat"
+
+msgid "card.unplayedCount"
+msgstr "{count} izlenmemiş"
+
+msgid "shell.backToExitToast"
+msgstr "Çıkmak için tekrar Geri'ye basın"
+
+msgid "settings.appearance.confirmExitOnBack"
+msgstr "Geri tuşuyla çıkmadan önce sor"
+
+msgid "settings.playback.audioDevice"
+msgstr "Ses çıkış aygıtı"

@@ -36,7 +36,14 @@ export type HostKey =
   | 'tracks'
   | 'prev-channel'
   | 'info'
-  | 'channel-list';
+  | 'channel-list'
+  | 'always-on-top';
+
+/** Output audio device descriptor exposed by a host player engine (e.g. desktop `libmpv`, `#408`). */
+export interface AudioDeviceInfo {
+  readonly name: string;
+  readonly description: string;
+}
 
 /** Typed playback metadata pushed from `PlayerScreen` to OS media controls (`MediaSession`, `#435`). */
 export interface MediaSessionMetadata {
@@ -80,6 +87,22 @@ export interface OpenVideoEngine {
   setDeinterlace?: (enabled: boolean) => void;
   /** Optional typed media metadata sink for OS media session integrations (`#435`). */
   setMediaMetadata?: (metadata: MediaSessionMetadata | null) => void;
+  /** Optional desktop window always-on-top pin toggle (`#408`). */
+  toggleAlwaysOnTop?: () => void;
+  /** Optional current desktop always-on-top state reader (`#408`). */
+  isAlwaysOnTop?: () => boolean;
+  /** Optional desktop always-on-top transition subscription (`#408`). */
+  onAlwaysOnTopChange?: (listener: (pinned: boolean) => void) => () => void;
+  /** Optional available output audio devices list (`#408`). */
+  getAudioDevices?: () => readonly AudioDeviceInfo[];
+  /** Optional active output audio device identifier (`'auto'` for system default, `#408`). */
+  getActiveAudioDevice?: () => string;
+  /** Optional live output audio device switcher (`#408`). */
+  setAudioDevice?: (name: string) => void;
+  /** Optional output audio device list/selection change subscription (`#408`). */
+  onAudioDevicesChange?: (
+    listener: (devices: readonly AudioDeviceInfo[], active: string) => void,
+  ) => () => void;
 }
 
 /** Port supplied by the app composition root to open a `PlayerEngine` and render its surface. */

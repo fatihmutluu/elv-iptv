@@ -281,6 +281,17 @@ export function AppearancePanel({
           }}
           onToggle={() => applyPatch({ reduceMotion: !activePrefs.reduceMotion })}
         />
+
+        <SettingsDivider />
+
+        <SettingsToggleRow
+          testID="settings-toggle-confirm-exit"
+          title={i18n.t('settings.appearance.confirmExitOnBack')}
+          checked={activePrefs.confirmExitOnBack}
+          focused={focusedControlId === 'toggle-confirm-exit'}
+          isTv={isTv}
+          onToggle={() => applyPatch({ confirmExitOnBack: !activePrefs.confirmExitOnBack })}
+        />
       </Surface>
 
       <Surface

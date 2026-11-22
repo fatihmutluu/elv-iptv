@@ -9,10 +9,13 @@ import {
   Menu,
   MessageChannelMain,
   type MessagePortMain,
+  type NativeImage,
+  nativeImage,
   net,
   powerSaveBlocker,
   protocol,
   safeStorage,
+  screen,
   session,
   utilityProcess,
   type WebContents,
@@ -57,6 +60,18 @@ import { mpvRuntimePaths } from './player/runtime-path.ts';
 import { lockDownSession, lockDownWebContents } from './security.ts';
 import { type ServeDeps, serveAppRequest } from './serve-app.ts';
 import { focusWindow, startSingleInstance } from './single-instance.ts';
+import {
+  createTaskbarController,
+  createTaskbarIconPngs,
+  type TaskbarIcons,
+} from './taskbar-controls.ts';
+import {
+  createWindowBoundsController,
+  loadWindowState,
+  orderedDisplays,
+  type WindowBoundsController,
+} from './window-bounds.ts';
+import { registerWindowIpc } from './window-ipc.ts';
 import { attachRendererCrashRecovery, buildWindowOptions, WINDOW_TITLE } from './window-options.ts';
 
 declare const __ELV_DEV_SEED__: boolean;
@@ -78,7 +93,22 @@ if (gateQuery !== null) {
   app.setPath('userData', gateDir);
 }
 const samplers = new WeakMap<MpvEngine, VideoSampler>();
+const windowBoundsControllers = new Set<WindowBoundsController>();
 const powerBlocker = createPowerBlocker(powerSaveBlocker);
+let cachedTaskbarIcons: TaskbarIcons<NativeImage> | undefined;
+
+function getTaskbarIcons(): TaskbarIcons<NativeImage> {
+  if (!cachedTaskbarIcons) {
+    const pngs = createTaskbarIconPngs();
+    cachedTaskbarIcons = {
+      previous: nativeImage.createFromBuffer(pngs.previous),
+      play: nativeImage.createFromBuffer(pngs.play),
+      pause: nativeImage.createFromBuffer(pngs.pause),
+      next: nativeImage.createFromBuffer(pngs.next),
+    };
+  }
+  return cachedTaskbarIcons;
+}
 const logger = createDesktopLogger({
   logPath: join(app.getPath('userData'), 'logs', 'elv-desktop.log'),
   mirrorStderr: true,
@@ -136,11 +166,34 @@ function createWindow(): void {
   const isGate = gateQuery !== null;
   const appEntryUrl = devServerOrigin !== null ? `${devServerOrigin}/` : `${APP_ORIGIN}/`;
   const targetUrl = isGate ? `${APP_ORIGIN}/?${gateQuery}` : appEntryUrl;
+  const statePath = join(app.getPath('userData'), 'window-state.json');
+  const saved = isGate ? undefined : loadWindowState(statePath, orderedDisplays(screen));
   const window = new BrowserWindow(
     buildWindowOptions(join(__dirname, '..', 'preload', 'preload.js'), {
       gate: isGate,
+      ...(saved === undefined
+        ? {}
+        : {
+            bounds: {
+              x: saved.x,
+              y: saved.y,
+              width: saved.width,
+              height: saved.height,
+            },
+          }),
     }),
   );
+  if (saved) {
+    if (saved.isMaximized) window.maximize();
+    const boundsController = createWindowBoundsController(window, statePath, screen, {
+      initialState: saved,
+    });
+    windowBoundsControllers.add(boundsController);
+    window.on('closed', () => {
+      boundsController.dispose();
+      windowBoundsControllers.delete(boundsController);
+    });
+  }
   window.setMenuBarVisibility(false);
   lockDownWebContents(
     window.webContents,
@@ -166,6 +219,17 @@ async function startPlayer(): Promise<void> {
     now: () => performance.now(),
     log: logger.log,
     powerBlocker,
+    createTaskbarController: (owner, onAction) => {
+      if (process.platform !== 'win32') return undefined;
+      const window = BrowserWindow.fromWebContents(owner as WebContents);
+      if (!window || window.isDestroyed()) return undefined;
+      return createTaskbarController({
+        window,
+        platform: process.platform,
+        icons: getTaskbarIcons(),
+        onAction,
+      });
+    },
     gateReport: app.isPackaged ? undefined : (line, engine) => void printGateLine(line, engine),
     createEngine: async (owner, onUi, engineId) => {
       const window = BrowserWindow.fromWebContents(owner as WebContents);
@@ -287,6 +351,11 @@ if (hasLock) {
       cache: artworkCache,
       log: logger.log,
     });
+    registerWindowIpc({
+      ipcMain,
+      getWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender as WebContents),
+      log: logger.log,
+    });
     serveRenderer();
     catalogCoordinator = startCatalog();
     await startPlayer();
@@ -298,6 +367,8 @@ if (hasLock) {
 }
 
 app.on('will-quit', () => {
+  for (const ctl of [...windowBoundsControllers]) ctl.dispose();
+  windowBoundsControllers.clear();
   void artworkCache?.dispose();
   powerBlocker.releaseAll();
 });

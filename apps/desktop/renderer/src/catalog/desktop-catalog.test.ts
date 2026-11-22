@@ -338,4 +338,22 @@ describe('desktop CatalogService', () => {
     expect(itemsCalls).toEqual([['src-1|movie|10', 0, 18, opts]]);
     expect(allCalls).toEqual([['movie', 0, 12, ['src-1'], opts]]);
   });
+
+  it('forwards listSeriesUnplayedCounts and falls back to [] when bridge omits it (#409)', async () => {
+    const summary = [{ seriesKey: 'src-1|series|1', total: 4, unplayed: 2, watched: false }];
+    const calls: unknown[][] = [];
+    const { bridge } = makeFakeBridge({
+      listSeriesUnplayedCounts: async (...args) => {
+        calls.push(args);
+        return summary;
+      },
+    });
+    const service = createDesktopCatalogFromBridge(bridge);
+    expect(await service.listSeriesUnplayedCounts?.(['src-1|series|1'], 'p1')).toEqual(summary);
+    expect(calls).toEqual([[['src-1|series|1'], 'p1']]);
+
+    const { bridge: legacyBridge } = makeFakeBridge();
+    const legacyService = createDesktopCatalogFromBridge(legacyBridge);
+    expect(await legacyService.listSeriesUnplayedCounts?.(['src-1|series|1'])).toEqual([]);
+  });
 });

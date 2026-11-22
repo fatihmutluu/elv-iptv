@@ -81,7 +81,7 @@ export function computeAppearanceScrollY(
   if (controlId.startsWith('font-')) {
     return layouts.font ? Math.max(0, layouts.font.y - 12) : undefined;
   }
-  if (controlId === 'toggle-reduce-motion') {
+  if (controlId === 'toggle-reduce-motion' || controlId === 'toggle-confirm-exit') {
     return layouts.font ? Math.max(0, layouts.font.y + motionOffsetY - 12) : undefined;
   }
   if (controlId.startsWith('artwork-cache-')) {
@@ -132,6 +132,14 @@ export function activateAppearanceControl(
     const current = preferences ? preferences.preferences.reduceMotion : deps.reduceMotion;
     if (preferences) void preferences.updatePreferences({ reduceMotion: !current });
     else deps.setReduceMotion(!current);
+    return;
+  }
+  if (controlId === 'toggle-confirm-exit') {
+    if (preferences) {
+      void preferences.updatePreferences({
+        confirmExitOnBack: !preferences.preferences.confirmExitOnBack,
+      });
+    }
     return;
   }
   const cacheOpt = ARTWORK_CACHE_OPTIONS.find((opt) => opt.focusId === controlId);

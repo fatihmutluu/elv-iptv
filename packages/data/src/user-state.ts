@@ -18,6 +18,7 @@ import {
   type WatchProgressRow,
 } from './user-state-helpers';
 
+export { listSeriesUnplayedCounts, type SeriesUnplayedSummary } from './user-state-unplayed';
 export { DEFAULT_PROFILE_ID, type FavoriteRow, type UserItemKind, type WatchProgressRow };
 
 /** Fraction of duration watched at or above which an item is considered completed. */

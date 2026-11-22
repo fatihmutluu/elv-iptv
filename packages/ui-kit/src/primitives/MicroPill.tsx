@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react';
 import { type StyleProp, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { Icon, type IconName } from '../icons';
 import { TABULAR_NUMS_STYLE, useTheme, webBackdropBlur } from '../theme';
 
 /** Semantic color treatment of {@link MicroPill}. */
@@ -7,22 +8,26 @@ export type MicroPillTone = 'neutral' | 'live' | 'accent' | 'success';
 
 /** Props of {@link MicroPill}. */
 export interface MicroPillProps {
-  label: string;
+  label?: string;
+  icon?: IconName;
   tone?: MicroPillTone;
   dot?: boolean;
+  accessibilityLabel?: string;
   testID?: string;
   style?: StyleProp<ViewStyle>;
 }
 
 /**
- * Compact micro-badge (`4K HDR`, `16+`, `LIVE`, match/rating percentages).
+ * Compact micro-badge (`4K HDR`, `16+`, `LIVE`, match/rating percentages, unplayed counts).
  * Uses dark high-contrast `scrimStrong` / `glassBg` surfaces with semantic broadcast-red
  * `liveColor` dot/border so `10.5px` micro-labels remain >= 7:1 WCAG AAA across every preset.
  */
 export function MicroPill({
   label,
+  icon,
   tone = 'neutral',
   dot,
+  accessibilityLabel,
   testID,
   style,
 }: MicroPillProps): ReactElement {
@@ -61,6 +66,7 @@ export function MicroPill({
   return (
     <View
       testID={testID}
+      accessibilityLabel={accessibilityLabel}
       style={[
         styles.pill,
         {
@@ -84,17 +90,20 @@ export function MicroPill({
           ]}
         />
       ) : null}
-      <Text
-        numberOfLines={1}
-        style={[
-          theme.typography.micro,
-          TABULAR_NUMS_STYLE,
-          { color: textColor },
-          tone === 'live' ? styles.liveLabel : undefined,
-        ]}
-      >
-        {label}
-      </Text>
+      {icon !== undefined ? <Icon name={icon} size={11} color={textColor} /> : null}
+      {label !== undefined && label.length > 0 ? (
+        <Text
+          numberOfLines={1}
+          style={[
+            theme.typography.micro,
+            TABULAR_NUMS_STYLE,
+            { color: textColor },
+            tone === 'live' ? styles.liveLabel : undefined,
+          ]}
+        >
+          {label}
+        </Text>
+      ) : null}
     </View>
   );
 }

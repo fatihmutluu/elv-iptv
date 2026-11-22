@@ -482,6 +482,15 @@ export const enMessages = {
   'catalog.sortAlpha': 'A–Z',
   'catalog.sortAlphaLabel': 'Sort alphabetically',
   'catalog.sortDefaultLabel': 'Default order',
+  'player.alwaysOnTop': 'Pin window on top',
+  'player.exitAlwaysOnTop': 'Unpin window',
+  'player.audioDevice': 'Audio output',
+  'player.audioDeviceAuto': 'System default',
+  'card.quickPlay': 'Play {title}',
+  'card.unplayedCount': '{count} unwatched',
+  'shell.backToExitToast': 'Press Back again to exit',
+  'settings.appearance.confirmExitOnBack': 'Confirm before exiting with Back',
+  'settings.playback.audioDevice': 'Audio output device',
 } as const;
 
 /** Valid message identifier across all supported locales. */

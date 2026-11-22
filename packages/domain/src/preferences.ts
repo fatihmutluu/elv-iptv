@@ -79,6 +79,8 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   liveOkTwoStepPreview: false,
   cleanChannelTitles: false,
   artworkCacheLimitMb: 128,
+  confirmExitOnBack: true,
+  preferredAudioDevice: 'auto',
 });
 
 /** Partial update applied on top of the current {@link PreferencesSnapshot}. */

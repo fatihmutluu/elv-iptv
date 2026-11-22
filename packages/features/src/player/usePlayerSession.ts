@@ -17,7 +17,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import type { PlayTarget } from '../ports/play-target';
-import type { HostKey, OpenVideoEngine, VideoHost } from '../ports/video-host';
+import type { AudioDeviceInfo, HostKey, OpenVideoEngine, VideoHost } from '../ports/video-host';
 
 type SessionState =
   | { readonly kind: 'opening' }
@@ -132,6 +132,9 @@ export function usePlayerSession(params: {
   const openedEngine = sessionState.kind === 'ready' ? sessionState.opened : null;
   const [inPip, setInPip] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [alwaysOnTop, setAlwaysOnTop] = useState(false);
+  const [audioDevices, setAudioDevices] = useState<readonly AudioDeviceInfo[]>([]);
+  const [activeAudioDevice, setActiveAudioDevice] = useState('auto');
 
   useEffect(() => {
     const subscribePip = openedEngine?.onPictureInPictureChange;
@@ -151,6 +154,33 @@ export function usePlayerSession(params: {
     const subscribeFullscreen = openedEngine.onFullscreenChange;
     if (subscribeFullscreen === undefined) return;
     return subscribeFullscreen((next) => setIsFullscreen(next));
+  }, [openedEngine]);
+
+  useEffect(() => {
+    if (openedEngine === null) {
+      setAlwaysOnTop(false);
+      return;
+    }
+    setAlwaysOnTop(openedEngine.isAlwaysOnTop?.() === true);
+    const subscribePin = openedEngine.onAlwaysOnTopChange;
+    if (subscribePin === undefined) return;
+    return subscribePin((next) => setAlwaysOnTop(next));
+  }, [openedEngine]);
+
+  useEffect(() => {
+    if (openedEngine === null) {
+      setAudioDevices([]);
+      setActiveAudioDevice('auto');
+      return;
+    }
+    setAudioDevices(openedEngine.getAudioDevices?.() ?? []);
+    setActiveAudioDevice(openedEngine.getActiveAudioDevice?.() ?? 'auto');
+    const subscribeDevices = openedEngine.onAudioDevicesChange;
+    if (subscribeDevices === undefined) return;
+    return subscribeDevices((devices, active) => {
+      setAudioDevices(devices);
+      setActiveAudioDevice(active || 'auto');
+    });
   }, [openedEngine]);
 
   const canStepTrack = activeTarget.kind === 'live' && (activeTarget.playlist?.count ?? 0) > 1;
@@ -213,5 +243,8 @@ export function usePlayerSession(params: {
     surfaceRecreationToken,
     inPip,
     isFullscreen,
+    alwaysOnTop,
+    audioDevices,
+    activeAudioDevice,
   };
 }

@@ -22,6 +22,7 @@ const FOLLOWED: readonly AppWindowEvent[] = [
   'unmaximize',
   'enter-full-screen',
   'leave-full-screen',
+  'always-on-top-changed',
   'minimize',
   'restore',
   'show',
@@ -63,12 +64,25 @@ export function createChildWindowPresenter(deps: ChildWindowDeps): VideoPresente
     }
   };
 
+  let lastSyncedAlwaysOnTop: boolean | undefined;
+
+  const syncVideoZOrder = (target: VideoWindowLike): void => {
+    const pinned = appWindow.isAlwaysOnTop?.() === true;
+    if (lastSyncedAlwaysOnTop !== pinned) {
+      lastSyncedAlwaysOnTop = pinned;
+      if (pinned) target.setAlwaysOnTop?.(true, 'floating', 1);
+      else target.setAlwaysOnTop?.(false, 'normal');
+    }
+    if (pinned && target.isVisible()) target.moveTop?.();
+  };
+
   const layout = (): void => {
     if (!disposed && !appWindow.isDestroyed() && !appWindow.isFullScreen()) {
       restorePostFullscreen();
     }
     const target = usable();
     if (!target) return;
+    syncVideoZOrder(target);
     const show = area?.visible === true && appWindow.isVisible() && !appWindow.isMinimized();
     if (!area || !show) {
       if (target.isVisible()) target.hide();
@@ -78,6 +92,7 @@ export function createChildWindowPresenter(deps: ChildWindowDeps): VideoPresente
       areaToScreen(appWindow.getContentBounds(), area, appWindow.webContents.getZoomFactor()),
     );
     if (!target.isVisible()) target.showInactive();
+    if (appWindow.isAlwaysOnTop?.() === true) target.moveTop?.();
   };
 
   const onVideoFocus = (): void => {

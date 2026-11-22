@@ -8,6 +8,7 @@ import {
   type PlayerUiEvent,
   type PlayerUiMessage,
 } from '../../shared/player-ipc.ts';
+import type { TaskbarAction, TaskbarController } from '../taskbar-controls.ts';
 import type { MpvEngine } from './engine.ts';
 import type { PowerBlocker } from './power-blocker.ts';
 
@@ -59,6 +60,11 @@ export interface PlayerIpcDeps {
   bufferingReleaseMs?: number;
   /** Optional timer primitives for testing the buffering stall grace timeout. */
   timers?: PlayerIpcTimers;
+  /** Optional Windows taskbar progress & thumbar controller factory (`#410`). */
+  createTaskbarController?(
+    owner: WebContentsLike,
+    onAction: (action: TaskbarAction) => void,
+  ): TaskbarController | undefined;
   /**
    * Dev gate only: receives each valid `gate:report` line and the sender's engine (`undefined` when it has none). The
    * channel is not registered without it.
@@ -68,10 +74,20 @@ export interface PlayerIpcDeps {
 
 const DEFAULT_BUFFERING_RELEASE_MS = 30_000;
 
+interface TaskbarState {
+  active: boolean;
+  isVod: boolean;
+  paused: boolean;
+  positionMs: number;
+  durationMs: number;
+}
+
 interface Entry {
   owner: WebContentsLike;
   engine: MpvEngine;
   unsubscribe(): void;
+  taskbar?: TaskbarController;
+  taskbarState: TaskbarState;
 }
 
 /**
@@ -121,11 +137,23 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     return next;
   };
 
+  const syncTaskbar = (taskbar: TaskbarController | undefined, s: TaskbarState): void => {
+    taskbar?.updatePlayback({
+      active: s.active,
+      isVod: s.isVod,
+      paused: s.paused,
+      positionMs: s.positionMs,
+      durationMs: s.durationMs,
+      canStep: !s.isVod,
+    });
+  };
+
   const release = (id: string): void => {
     releasePowerBlocker(id);
     const entry = entries.get(id);
     if (!entry) return;
     entries.delete(id);
+    entry.taskbar?.clear();
     entry.unsubscribe();
     entry.engine.release();
   };
@@ -178,24 +206,34 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       !sender.isDestroyed() &&
       generations.get(sender.id) === gen &&
       (!registered || entries.has(engineId));
-    const engine = await deps.createEngine(
-      sender,
-      (ui) => {
-        if (!isCurrent()) return;
-        const message: PlayerUiMessage = { engineId, ui };
-        sendTo(sender, PLAYER_CHANNELS.ui, message);
-      },
-      engineId,
-    );
+    const emitUi = (ui: PlayerUiEvent): void => {
+      if (!isCurrent()) return;
+      const message: PlayerUiMessage = { engineId, ui };
+      sendTo(sender, PLAYER_CHANNELS.ui, message);
+    };
+    const engine = await deps.createEngine(sender, emitUi, engineId);
     if (!isCurrent()) {
       engine.release();
       throw new Error('the player open was superseded or the window closed while starting');
     }
+    const taskbar = deps.createTaskbarController?.(sender, (action) =>
+      emitUi({ type: 'key', key: action }),
+    );
+    const taskbarState: TaskbarState = {
+      active: false,
+      isVod: false,
+      paused: false,
+      positionMs: 0,
+      durationMs: 0,
+    };
     const unsubscribe = engine.subscribe((event) => {
       if (event.type === 'state') {
         if (event.state === 'playing') {
           clearBufferingTimer(engineId);
           powerBlocker?.acquire(engineId);
+          taskbarState.active = true;
+          taskbarState.paused = false;
+          syncTaskbar(taskbar, taskbarState);
         } else if (event.state === 'buffering') {
           armBufferingTimer(engineId);
         } else if (
@@ -204,16 +242,39 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
           event.state === 'opening'
         ) {
           releasePowerBlocker(engineId);
+          if (event.state === 'paused') {
+            taskbarState.active = true;
+            taskbarState.paused = true;
+            syncTaskbar(taskbar, taskbarState);
+          } else if (event.state === 'ended') {
+            taskbarState.active = false;
+            taskbarState.paused = false;
+            taskbar?.clear();
+          }
         } else {
           clearBufferingTimer(engineId);
         }
+      } else if (event.type === 'clock') {
+        taskbarState.positionMs = event.anchor.positionMs;
+        if (event.anchor.durationMs !== undefined)
+          taskbarState.durationMs = event.anchor.durationMs;
+        if (taskbarState.active) syncTaskbar(taskbar, taskbarState);
       } else if (event.type === 'error') {
         releasePowerBlocker(engineId);
+        taskbarState.active = false;
+        taskbarState.paused = false;
+        taskbar?.clear();
       }
       const message: PlayerEventMessage = { engineId, event };
       sendTo(sender, PLAYER_CHANNELS.event, message);
     });
-    entries.set(engineId, { owner: sender, engine, unsubscribe });
+    entries.set(engineId, {
+      owner: sender,
+      engine,
+      unsubscribe,
+      ...(taskbar === undefined ? {} : { taskbar }),
+      taskbarState,
+    });
     registered = true;
     engine.start();
     return { engineId, mainNowMs: (arrivedAtMs + deps.now()) / 2 };
@@ -251,12 +312,23 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     switch (command.name) {
       case 'load':
         releasePowerBlocker(engineId);
+        entry.taskbarState.isVod = command.cmd.kind === 'vod';
+        entry.taskbarState.positionMs = command.cmd.startMs ?? 0;
+        entry.taskbarState.durationMs = 0;
+        entry.taskbarState.active = false;
+        entry.taskbarState.paused = false;
+        entry.taskbar?.clear();
         engine.load(command.cmd);
         break;
       case 'pause':
       case 'stop':
       case 'recreate':
         releasePowerBlocker(engineId);
+        if (command.name === 'stop') {
+          entry.taskbarState.active = false;
+          entry.taskbarState.paused = false;
+          entry.taskbar?.clear();
+        }
         engine[command.name](command.attempt);
         break;
       case 'retry':

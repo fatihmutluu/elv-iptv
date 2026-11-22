@@ -528,10 +528,12 @@ describe('createWorkbenchRemoteCatalog', () => {
 
     await catalog.items('src-1|movie|10', 0, 18, opts);
     await catalog.allSourcesItems?.('series', 0, 12, ['src-1'], opts);
+    await catalog.listSeriesUnplayedCounts?.(['src-1|series|1'], 'p1');
 
     expect(calls).toEqual([
       { method: 'items', args: ['src-1|movie|10', 0, 18, opts] },
       { method: 'allSourcesItems', args: ['series', 0, 12, ['src-1'], opts] },
+      { method: 'listSeriesUnplayedCounts', args: [['src-1|series|1'], 'p1'] },
     ]);
   });
 });

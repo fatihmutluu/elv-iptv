@@ -1,7 +1,11 @@
 import type { BrowserWindowConstructorOptions } from 'electron';
+import type { Rect } from './window-bounds.ts';
 
 /** Title shown in the window frame and the task bar. */
 export const WINDOW_TITLE = 'ELV IPTV';
+
+const DEFAULT_MIN_WIDTH = 800;
+const DEFAULT_MIN_HEIGHT = 500;
 
 const DEFAULT_MAX_CRASH_RELOADS = 3;
 const DEFAULT_CRASH_WINDOW_MS = 60_000;
@@ -25,12 +29,23 @@ export interface CrashRecoverableWindow {
  */
 export function buildWindowOptions(
   preloadPath: string,
-  opts: { gate?: boolean } = {},
+  opts: { gate?: boolean; bounds?: Rect } = {},
 ): BrowserWindowConstructorOptions {
   return {
     title: WINDOW_TITLE,
-    width: 1280,
-    height: 720,
+    ...(opts.bounds
+      ? {
+          x: opts.bounds.x,
+          y: opts.bounds.y,
+          width: opts.bounds.width,
+          height: opts.bounds.height,
+        }
+      : {
+          width: 1280,
+          height: 720,
+        }),
+    minWidth: DEFAULT_MIN_WIDTH,
+    minHeight: DEFAULT_MIN_HEIGHT,
     backgroundColor: '#090A0E',
     webPreferences: {
       preload: preloadPath,

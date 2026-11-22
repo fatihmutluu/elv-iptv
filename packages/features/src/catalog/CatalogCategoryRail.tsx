@@ -1,8 +1,9 @@
-import type { ItemRow, WatchProgressRow } from '@elv/data';
+import type { ItemRow, SeriesUnplayedSummary, WatchProgressRow } from '@elv/data';
 import {
   HorizontalRailScroll,
   Icon,
   PosterCard,
+  type PosterCardQuickActions,
   SkeletonBox,
   TABULAR_NUMS_STYLE,
   useI18n,
@@ -10,7 +11,15 @@ import {
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { type ComponentRef, memo, type ReactElement, useCallback, useEffect, useRef } from 'react';
+import {
+  type ComponentRef,
+  memo,
+  type ReactElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+} from 'react';
 import {
   type LayoutChangeEvent,
   Pressable,
@@ -24,6 +33,7 @@ import {
   type DisplayCategory,
   detailTargetFromItem,
   formatVodMeta,
+  resolveSeriesBadgeProps,
 } from '../shared';
 import { computeProgressRatio } from './catalog-model';
 
@@ -34,6 +44,9 @@ export interface CatalogCategoryRailProps {
   readonly items: readonly ItemRow[];
   readonly loading: boolean;
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
+  readonly favoriteKeys?: ReadonlySet<string>;
+  readonly watchedOverrides?: ReadonlyMap<string, boolean>;
+  readonly unplayedBySeriesKey?: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly cardWidth: number;
   readonly gap: number;
   readonly padX: number;
@@ -41,6 +54,9 @@ export interface CatalogCategoryRailProps {
   readonly isTouch: boolean;
   readonly focusedIndex: number | null;
   readonly onOpenDetail: (target: DetailTarget) => void;
+  readonly onQuickPlay?: (item: ItemRow, categoryId: string) => void;
+  readonly onQuickToggleFavorite?: (item: ItemRow) => void;
+  readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
   readonly onSeeAll: (categoryId: string) => void;
   readonly onLayoutY?: (catIndex: number, y: number) => void;
 }
@@ -51,33 +67,110 @@ interface CatalogPosterCardItemProps {
   readonly item: ItemRow;
   readonly categoryId: string;
   readonly progress: WatchProgressRow | undefined;
+  readonly isFavorite: boolean;
+  readonly watchedOverride: boolean | undefined;
+  readonly unplayedSummary: SeriesUnplayedSummary | undefined;
   readonly watchedLabel: string;
+  readonly formatUnplayed: (count: number) => string;
+  readonly formatQuickPlay: (title: string) => string;
+  readonly addToListLabel: string;
+  readonly inMyListLabel: string;
+  readonly markWatchedLabel: string;
+  readonly markUnwatchedLabel: string;
   readonly cardWidth: number;
   readonly isTv: boolean;
   readonly focused: boolean;
   readonly testID: string;
   readonly onOpenDetail: (target: DetailTarget) => void;
+  readonly onQuickPlay?: (item: ItemRow, categoryId: string) => void;
+  readonly onQuickToggleFavorite?: (item: ItemRow) => void;
+  readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
 }
 
 const CatalogPosterCardItem = memo(function CatalogPosterCardItemInner({
   item,
   categoryId,
   progress,
+  isFavorite,
+  watchedOverride,
+  unplayedSummary,
   watchedLabel,
+  formatUnplayed,
+  formatQuickPlay,
+  addToListLabel,
+  inMyListLabel,
+  markWatchedLabel,
+  markUnwatchedLabel,
   cardWidth,
   isTv,
   focused,
   testID,
   onOpenDetail,
+  onQuickPlay,
+  onQuickToggleFavorite,
+  onQuickToggleWatched,
 }: CatalogPosterCardItemProps): ReactElement {
   const handlePress = useCallback(() => {
     const target = detailTargetFromItem(item, categoryId);
     if (target) onOpenDetail(target);
   }, [categoryId, item, onOpenDetail]);
 
+  const isSeries = item.kind === 'series';
+  const progressWatched = progress?.watched === true;
+  const effectiveWatched =
+    watchedOverride ?? (progressWatched || (isSeries && unplayedSummary?.watched === true));
+
+  const quickActions = useMemo<PosterCardQuickActions | undefined>(() => {
+    if (!onQuickPlay && !onQuickToggleFavorite && !onQuickToggleWatched) return undefined;
+    return {
+      ...(onQuickPlay !== undefined
+        ? {
+            onPlay: () => onQuickPlay(item, categoryId),
+            playLabel: formatQuickPlay(item.name),
+          }
+        : {}),
+      ...(onQuickToggleFavorite !== undefined
+        ? {
+            isFavorite,
+            onToggleFavorite: () => onQuickToggleFavorite(item),
+            favoriteLabel: isFavorite ? inMyListLabel : addToListLabel,
+          }
+        : {}),
+      ...(onQuickToggleWatched !== undefined
+        ? {
+            isWatched: effectiveWatched,
+            onToggleWatched: () => onQuickToggleWatched(item, effectiveWatched),
+            watchedLabel: effectiveWatched ? markUnwatchedLabel : markWatchedLabel,
+          }
+        : {}),
+    };
+  }, [
+    addToListLabel,
+    categoryId,
+    effectiveWatched,
+    formatQuickPlay,
+    inMyListLabel,
+    isFavorite,
+    item,
+    markUnwatchedLabel,
+    markWatchedLabel,
+    onQuickPlay,
+    onQuickToggleFavorite,
+    onQuickToggleWatched,
+  ]);
+
   const meta = formatVodMeta(item.year, item.rating);
-  const ratio = computeProgressRatio(progress);
-  const badge = progress?.watched ? watchedLabel : undefined;
+  const ratio = !effectiveWatched ? computeProgressRatio(progress) : undefined;
+  const seriesBadge = isSeries
+    ? resolveSeriesBadgeProps({
+        summary: unplayedSummary,
+        progressWatched,
+        watchedOverride,
+        formatUnplayed,
+        watchedLabel,
+      })
+    : {};
+  const badge = !isSeries && effectiveWatched ? watchedLabel : undefined;
 
   return (
     <PosterCard
@@ -87,6 +180,8 @@ const CatalogPosterCardItem = memo(function CatalogPosterCardItemInner({
       imageUri={item.logo}
       {...(ratio !== undefined ? { progress: ratio } : {})}
       {...(badge !== undefined ? { badge } : {})}
+      {...seriesBadge}
+      {...(quickActions !== undefined ? { quickActions } : {})}
       width={cardWidth}
       maxDecodePx={320}
       focusable={!isTv}
@@ -102,6 +197,9 @@ function CatalogCategoryRailInner({
   items,
   loading,
   progressByKey,
+  favoriteKeys,
+  watchedOverrides,
+  unplayedBySeriesKey,
   cardWidth,
   gap,
   padX,
@@ -109,6 +207,9 @@ function CatalogCategoryRailInner({
   isTouch,
   focusedIndex,
   onOpenDetail,
+  onQuickPlay,
+  onQuickToggleFavorite,
+  onQuickToggleWatched,
   onSeeAll,
   onLayoutY,
 }: CatalogCategoryRailProps): ReactElement | null {
@@ -133,11 +234,24 @@ function CatalogCategoryRailInner({
     onSeeAll(category.row.id);
   }, [category.row.id, onSeeAll]);
 
+  const formatUnplayed = useCallback(
+    (count: number) => i18n.t('card.unplayedCount', { count }),
+    [i18n],
+  );
+  const formatQuickPlay = useCallback(
+    (title: string) => i18n.t('card.quickPlay', { title }),
+    [i18n],
+  );
+
   if (!loading && items.length === 0) return null;
 
   const cursor = webCursorPointer();
   const linkTransition = webTransition(theme, 'color, opacity, background-color, transform');
   const watchedLabel = i18n.t('home.watchedBadge');
+  const addToListLabel = i18n.t('home.addToList');
+  const inMyListLabel = i18n.t('home.inMyList');
+  const markWatchedLabel = i18n.t('home.markWatched');
+  const markUnwatchedLabel = i18n.t('home.markUnwatched');
   const seeAllLabel = i18n.t('catalog.seeAll');
   const countLabel = i18n.t('catalog.itemsCount', { count: category.row.itemCount });
   const seeAllFocused = isTv && focusedIndex === items.length;
@@ -242,12 +356,24 @@ function CatalogCategoryRailInner({
                 item={item}
                 categoryId={category.row.id}
                 progress={progressByKey.get(item.key)}
+                isFavorite={favoriteKeys?.has(item.key) ?? false}
+                watchedOverride={watchedOverrides?.get(item.key)}
+                unplayedSummary={unplayedBySeriesKey?.get(item.key)}
                 watchedLabel={watchedLabel}
+                formatUnplayed={formatUnplayed}
+                formatQuickPlay={formatQuickPlay}
+                addToListLabel={addToListLabel}
+                inMyListLabel={inMyListLabel}
+                markWatchedLabel={markWatchedLabel}
+                markUnwatchedLabel={markUnwatchedLabel}
                 cardWidth={cardWidth}
                 isTv={isTv}
                 focused={isTv && focusedIndex === itemIdx}
                 testID={`catalog-rail-${catIndex}-item-${itemIdx}`}
                 onOpenDetail={onOpenDetail}
+                {...(onQuickPlay !== undefined ? { onQuickPlay } : {})}
+                {...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {})}
+                {...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {})}
               />
             ))}
       </HorizontalRailScroll>

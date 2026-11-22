@@ -3,6 +3,7 @@ import { createArtworkBridge } from './artwork-bridge.ts';
 import { createCatalogBridge } from './catalog-bridge.ts';
 import { isGateMode } from './gate-flag.ts';
 import { createPlayerBridge } from './player-bridge.ts';
+import { createWindowBridge } from './window-bridge.ts';
 
 contextBridge.exposeInMainWorld(
   'elv',
@@ -10,6 +11,7 @@ contextBridge.exposeInMainWorld(
     player: createPlayerBridge(ipcRenderer, sharedTexture),
     catalog: createCatalogBridge(ipcRenderer),
     artwork: createArtworkBridge(ipcRenderer),
+    window: createWindowBridge(ipcRenderer),
     gate: isGateMode(process.argv),
   }),
 );

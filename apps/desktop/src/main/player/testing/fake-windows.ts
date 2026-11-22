@@ -76,7 +76,15 @@ export function fakeAppWindow(content: Rect = { x: 100, y: 50, width: 1280, heig
 /** A video window that records bounds and visibility; `destroy` fires `closed` like Electron. */
 export function fakeVideoWindow(hwnd = 0x1234abcd) {
   const handlers = new Map<VideoWindowEvent, Set<Listener>>();
-  const state = { bounds: [] as Rect[], visible: false, destroyed: false, shows: 0, hides: 0 };
+  const state = {
+    bounds: [] as Rect[],
+    visible: false,
+    destroyed: false,
+    shows: 0,
+    hides: 0,
+    alwaysOnTopCalls: [] as unknown[][],
+    moveTopCalls: 0,
+  };
   const handle = Buffer.alloc(8);
   handle.writeUInt32LE(hwnd, 0);
   const emit = (event: VideoWindowEvent): void => {
@@ -104,6 +112,12 @@ export function fakeVideoWindow(hwnd = 0x1234abcd) {
       emit('closed');
     },
     getNativeWindowHandle: () => handle,
+    setAlwaysOnTop: (flag, level, relativeLevel) => {
+      state.alwaysOnTopCalls.push([flag, level, relativeLevel]);
+    },
+    moveTop: () => {
+      state.moveTopCalls += 1;
+    },
     on: (event, listener) => {
       const set = handlers.get(event) ?? new Set<Listener>();
       set.add(listener);

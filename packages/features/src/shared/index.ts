@@ -37,6 +37,7 @@ export {
   createPagedListSource,
   type PagedListSource,
 } from './paged-list-source';
+export { useCardQuickActionsState } from './useCardQuickActionsState';
 export {
   RouteActiveProvider,
   type RouteActiveProviderProps,
@@ -44,3 +45,7 @@ export {
   useDocumentVisible,
   useRouteActive,
 } from './useRouteActive';
+export {
+  resolveSeriesBadgeProps,
+  useSeriesUnplayedCounts,
+} from './useSeriesUnplayedCounts';

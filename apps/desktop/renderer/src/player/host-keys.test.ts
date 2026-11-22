@@ -25,6 +25,7 @@ describe('mapHostKey, routeDesktopUiEvent & dispatchDesktopClose', () => {
       ['prev-channel', 'prev-channel'],
       ['info', 'info'],
       ['channel-list', 'channel-list'],
+      ['always-on-top', 'always-on-top'],
     ];
     for (const [input, expected] of cases) {
       expect(mapHostKey(input)).toBe(expected);
@@ -59,6 +60,7 @@ describe('mapHostKey, routeDesktopUiEvent & dispatchDesktopClose', () => {
       'prev-channel',
       'info',
       'channel-list',
+      'always-on-top',
     ];
     for (const key of forwarded) {
       routeDesktopUiEvent({ type: 'key', key }, handlers);

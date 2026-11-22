@@ -1,14 +1,24 @@
 import type { CatalogService, SearchScope } from '@elv/data';
 import type { ConnectionTracker } from '@elv/playback';
-import { TvFocusAnchor, useFormFactor, useI18n, useUiAdapters } from '@elv/ui-kit';
+import {
+  TvFocusAnchor,
+  useFormFactor,
+  useI18n,
+  useTheme,
+  useUiAdapters,
+  webBackdropBlur,
+} from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import {
   buildShellCrashProps,
   buildShellNavigation,
   clearSourceFromCatalogMemory,
   clearSourceFromLiveMemory,
+  createExitBackConfirmGuard,
   createObservedCatalog,
+  DEFAULT_EXIT_BACK_CONFIRM_MS,
+  type ExitBackConfirmGuard,
   enrichPlayTargetAccountKey,
   handleShellTopNavBack,
   INITIAL_CATALOG_MEMORY,
@@ -69,8 +79,18 @@ export function AppShell(props: AppShellProps): ReactElement {
   const { catalog, videoHost, appLifecycle, onPlaybackGuardReady } = props;
   const externalRefreshToken = props.externalRefreshToken ?? 0;
   const i18n = useI18n();
+  const theme = useTheme();
   const isTv = useFormFactor() === 'tv';
   const preferences = usePreferences();
+  const confirmExitOnBack = preferences.preferences.confirmExitOnBack;
+  const confirmExitOnBackRef = useRef(confirmExitOnBack);
+  confirmExitOnBackRef.current = confirmExitOnBack;
+  const [exitToastVisible, setExitToastVisible] = useState(false);
+  const exitBackGuardRef = useRef<ExitBackConfirmGuard | null>(null);
+  exitBackGuardRef.current ??= createExitBackConfirmGuard(DEFAULT_EXIT_BACK_CONFIRM_MS, {
+    onVisibleChange: setExitToastVisible,
+  });
+  useEffect(() => () => exitBackGuardRef.current?.dispose(), []);
   const uiAdapters = useUiAdapters();
   const artworkCacheLimitMb = preferences.preferences.artworkCacheLimitMb;
   useEffect(() => {
@@ -145,6 +165,7 @@ export function AppShell(props: AppShellProps): ReactElement {
   const { sources, sourcesRef, sourcesResolved, refreshToken, catalogRevision } = shell;
   uiCache.setRevision(catalogRevision, locale);
   const openPlayTarget = useCallback((enriched: PlayTarget) => {
+    exitBackGuardRef.current?.reset();
     setHeroScrolled(false);
     playTargetRef.current = enriched;
     setPlayTarget(enriched);
@@ -216,6 +237,7 @@ export function AppShell(props: AppShellProps): ReactElement {
     onGuideRefreshed: handleGuideRefreshed,
   });
   const selectTab = useCallback((tab: AppTab, focusContent = true) => {
+    exitBackGuardRef.current?.reset();
     userPickedTabRef.current = true;
     setUserPickedTab(true);
     setActiveTab(tab);
@@ -238,6 +260,7 @@ export function AppShell(props: AppShellProps): ReactElement {
     selectTab('settings', true);
   }, [selectTab]);
   const openDetail = useCallback((target: DetailTarget) => {
+    exitBackGuardRef.current?.reset();
     setDetailStack((prev) => pushDetailStack(prev, target));
     setHeroScrolled(false);
     setTopNavFocused(false);
@@ -274,8 +297,21 @@ export function AppShell(props: AppShellProps): ReactElement {
     (t: PrimaryNavTab) => selectTab(t, false),
     [selectTab],
   );
-  const handleExitNavFocus = useCallback(() => setTopNavFocused(false), []);
+  const handleExitNavFocus = useCallback(() => {
+    exitBackGuardRef.current?.reset();
+    setTopNavFocused(false);
+  }, []);
   const handleFocusTopNav = useCallback(() => setTopNavFocused(true), []);
+  useEffect(() => {
+    if (
+      !confirmExitOnBack ||
+      playTarget !== null ||
+      activeTab !== 'home' ||
+      activeDetail !== null
+    ) {
+      exitBackGuardRef.current?.reset();
+    }
+  }, [activeDetail, activeTab, confirmExitOnBack, playTarget]);
   const handleNavBack = useCallback(
     () =>
       handleShellTopNavBack({
@@ -284,6 +320,8 @@ export function AppShell(props: AppShellProps): ReactElement {
         popDetail,
         exitNavFocus: handleExitNavFocus,
         selectHomeInTopNav: () => selectTab('home', false),
+        onRootHomeBack: () =>
+          exitBackGuardRef.current?.onRootBack(confirmExitOnBackRef.current) ?? false,
       }),
     [activeDetail, activeTab, handleExitNavFocus, popDetail, selectTab],
   );
@@ -385,6 +423,10 @@ export function AppShell(props: AppShellProps): ReactElement {
                 preferredAudioLang={preferences.preferences.preferredAudioLang}
                 preferredSubtitleLang={preferences.preferences.preferredSubtitleLang}
                 subtitleMode={preferences.preferences.subtitleMode}
+                preferredAudioDevice={preferences.preferences.preferredAudioDevice}
+                onPersistAudioDevice={(preferredAudioDevice) => {
+                  void preferences.updatePreferences({ preferredAudioDevice });
+                }}
                 {...(appLifecycle !== undefined ? { appLifecycle } : {})}
                 onTargetChange={onPlayerTargetChange}
                 onExit={onPlayerExit}
@@ -491,6 +533,7 @@ export function AppShell(props: AppShellProps): ReactElement {
                     onMemoryChange={
                       activeTab === 'movie' ? handleMovieMemoryChange : handleSeriesMemoryChange
                     }
+                    onPlay={handlePlay}
                     onOpenDetail={openDetail}
                     onOpenSources={openSources}
                     {...stageProps}
@@ -519,6 +562,27 @@ export function AppShell(props: AppShellProps): ReactElement {
               </CrashRecoveryBoundary>
             </AdaptiveNavShell>
           )}
+          {exitToastVisible && playTarget === null ? (
+            <View pointerEvents="none" style={styles.exitToastWrap}>
+              <View
+                testID="shell-exit-confirm-toast"
+                accessibilityLiveRegion="polite"
+                style={[
+                  styles.exitToastPill,
+                  {
+                    backgroundColor: theme.colors.glassBg,
+                    borderColor: theme.colors.glassBorder,
+                    borderRadius: theme.radius.pill,
+                  },
+                  webBackdropBlur(16),
+                ]}
+              >
+                <Text style={[theme.typography.caption, { color: theme.colors.textPrimary }]}>
+                  {i18n.t('shell.backToExitToast')}
+                </Text>
+              </View>
+            </View>
+          ) : null}
           {connectionGuard.pending !== null ? (
             <ConnectionLimitDialog
               check={connectionGuard.pending.check}
@@ -536,4 +600,17 @@ export function AppShell(props: AppShellProps): ReactElement {
 const styles = StyleSheet.create({
   bootCanvas: { flex: 1 },
   cachedStripWrap: { paddingHorizontal: 16, paddingTop: 8 },
+  exitToastWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  exitToastPill: {
+    borderWidth: 1,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
 });

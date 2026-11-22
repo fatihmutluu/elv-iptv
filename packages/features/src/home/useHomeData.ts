@@ -3,12 +3,13 @@ import {
   DEFAULT_PROFILE_ID,
   type FavoriteRow,
   type ItemRow,
+  type SeriesUnplayedSummary,
   type SourceRow,
   type UserItemKind,
   type WatchProgressRow,
 } from '@elv/data';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type CachedHomeSnapshot, useCatalogUiCache } from '../shared';
+import { type CachedHomeSnapshot, useCatalogUiCache, useSeriesUnplayedCounts } from '../shared';
 import {
   applyHomeFavUpdate,
   applyHomeWatchedUpdate,
@@ -58,6 +59,7 @@ type HomeSnapshot = CachedHomeSnapshot;
 export interface HomeDataState extends HomeSnapshot {
   readonly loading: boolean;
   readonly hasLoaded: boolean;
+  readonly unplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly toggleMyList: (target: ToggleMyListTarget) => Promise<void>;
   readonly toggleWatched: (target: ToggleWatchedTarget, nextWatched: boolean) => Promise<void>;
 }
@@ -381,8 +383,23 @@ export function useHomeData({
     [applyWatchedState, catalog],
   );
 
+  const homeSeriesKeys = useMemo(() => {
+    const keys: string[] = [];
+    for (const row of snap.series) keys.push(row.key);
+    for (const fav of snap.favorites) {
+      if (fav.kind === 'series') keys.push(fav.itemKey);
+    }
+    return keys;
+  }, [snap.favorites, snap.series]);
+
+  const unplayedBySeriesKey = useSeriesUnplayedCounts(
+    catalog,
+    homeSeriesKeys,
+    refreshToken + userStateVersion,
+  );
+
   return useMemo<HomeDataState>(
-    () => ({ loading, hasLoaded, ...snap, toggleMyList, toggleWatched }),
-    [hasLoaded, loading, snap, toggleMyList, toggleWatched],
+    () => ({ loading, hasLoaded, ...snap, unplayedBySeriesKey, toggleMyList, toggleWatched }),
+    [hasLoaded, loading, snap, toggleMyList, toggleWatched, unplayedBySeriesKey],
   );
 }
