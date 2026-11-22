@@ -16,6 +16,7 @@ function createFakeService(anchor: ClockAnchor | undefined) {
     attempt: 1,
     tracks: EMPTY_TRACKS,
     staleEventsDropped: 0,
+    surfaceRecreationToken: 0,
     ...(anchor === undefined ? {} : { anchor }),
   };
   const listeners = new Set<(s: PlaybackState) => void>();

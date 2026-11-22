@@ -277,6 +277,8 @@ export function AppShell(props: AppShellProps): ReactElement {
                 target={playTarget}
                 playbackGuard={playbackGuard}
                 autoHideOsdMs={DEFAULT_AUTO_HIDE_OSD_MS}
+                bufferPreset={preferences.preferences.bufferPreset}
+                useTextureView={preferences.preferences.useTextureView}
                 {...(appLifecycle !== undefined ? { appLifecycle } : {})}
                 onTargetChange={onPlayerTargetChange}
                 onExit={onPlayerExit}

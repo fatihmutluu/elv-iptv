@@ -2,6 +2,7 @@ package io.github.fatihmutluu.elv.media3
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -34,13 +35,21 @@ class LoadRequestTest {
       assertFalse(text, text.contains(leak))
     }
     assertEquals("LoadRequest(live=true, startMs=null, softwareAudio=false, playlistDetected=false, headers=2)", text)
+
+    val withPreset = secret.copy(bufferPreset = BufferPreset.LARGE).toString()
+    for (leak in listOf("user", "pass", "tk9", "s3cret", "Bearer", "http", "/live", "Referer")) {
+      assertFalse(withPreset, withPreset.contains(leak))
+    }
+    assertTrue(withPreset.contains("bufferPreset=large"))
   }
 
   @Test
-  fun `the source type follows the detection and parseLoadArgs rejects non-finite startMs`() {
+  fun `the source type follows the detection and parseLoadArgs rejects non-finite startMs and parses bufferPreset (#147)`() {
     assertFalse(guess.playlistDetected)
     assertEquals(SourceType.TS, guess.sourceType())
+    assertEquals(StreamKind.RAW_TS_LIVE, guess.streamKind())
     assertEquals(SourceType.HLS, guess.asDetectedPlaylist().sourceType())
+    assertEquals(StreamKind.HLS_LIVE, guess.asDetectedPlaylist().streamKind())
 
     val (_, infReq) = parseLoadArgs(
       mapOf("attempt" to 1, "url" to "http://h/1.mp4", "kind" to "vod", "startMs" to Double.POSITIVE_INFINITY)
@@ -55,12 +64,27 @@ class LoadRequestTest {
         "kind" to "vod",
         "startMs" to 42_500.0,
         "preferHevcOverDolbyVision" to true,
+        "bufferPreset" to "balanced",
       )
     )
-    org.junit.Assert.assertNull(infReq.startMs)
-    org.junit.Assert.assertNull(nanReq.startMs)
+    val (_, largeLiveHls) = parseLoadArgs(
+      mapOf(
+        "attempt" to 2,
+        "url" to "http://h/live/1.m3u8",
+        "kind" to "live",
+        "bufferPreset" to "large",
+      )
+    )
+    assertNull(infReq.startMs)
+    assertNull(nanReq.startMs)
     assertFalse(infReq.preferHevcOverDolbyVision)
+    assertEquals(BufferPreset.AUTO, infReq.bufferPreset)
+    assertEquals(StreamKind.VOD, infReq.streamKind())
     assertEquals(42_500L, validReq.startMs)
     assertTrue(validReq.preferHevcOverDolbyVision)
+    assertEquals(BufferPreset.BALANCED, validReq.bufferPreset)
+    assertEquals(StreamKind.VOD, validReq.streamKind())
+    assertEquals(BufferPreset.LARGE, largeLiveHls.bufferPreset)
+    assertEquals(StreamKind.HLS_LIVE, largeLiveHls.streamKind())
   }
 }

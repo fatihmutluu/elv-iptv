@@ -1,4 +1,5 @@
 import type { CatalogService } from '@elv/data';
+import type { BufferPreset } from '@elv/domain';
 import {
   type PlaybackClock,
   type PlaybackService,
@@ -36,6 +37,7 @@ export interface PlayerTargetHandoffParams {
   flushProgressRef: MutableRefObject<(overridePosMs?: number) => void>;
   cancelScrubRef: MutableRefObject<() => void>;
   onTargetChangeRef: MutableRefObject<((next: PlayTarget) => void) | undefined>;
+  bufferPresetRef?: MutableRefObject<BufferPreset>;
 }
 
 /**
@@ -53,6 +55,7 @@ export function usePlayerTargetHandoff({
   flushProgressRef,
   cancelScrubRef,
   onTargetChangeRef,
+  bufferPresetRef,
 }: PlayerTargetHandoffParams) {
   const [activeTarget, setActiveTarget] = useState<PlayTarget>(target);
 
@@ -78,15 +81,17 @@ export function usePlayerTargetHandoff({
 
   const tuneEntry = useCallback(
     (service: PlaybackService, entry: PlayableEntry, startMs?: number): void => {
+      const bufferPreset = bufferPresetRef?.current;
       service.tune({
         item: entry.itemKey,
         accountKey: entry.accountKey ?? entry.sourceId,
         kind: entry.kind,
         resolve: () => catalogRef.current.resolveStream(entry.itemKey),
         ...(startMs !== undefined ? { startMs } : {}),
+        ...(bufferPreset !== undefined ? { bufferPreset } : {}),
       });
     },
-    [catalogRef],
+    [bufferPresetRef, catalogRef],
   );
 
   const tuneWithResume = useCallback(

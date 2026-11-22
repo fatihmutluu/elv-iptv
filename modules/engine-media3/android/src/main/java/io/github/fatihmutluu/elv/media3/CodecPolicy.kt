@@ -2,6 +2,8 @@ package io.github.fatihmutluu.elv.media3
 
 import android.content.Context
 import android.media.MediaCodecInfo.CodecProfileLevel
+import android.media.MediaCodecList
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.annotation.OptIn
@@ -24,6 +26,16 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 private const val REPEATED_FAILURE_THRESHOLD = 2
+private const val AMLOGIC_MIN_MAX_WIDTH = 1920
+private const val AMLOGIC_MIN_MAX_HEIGHT = 1089
+private const val BRAVIA_DROP_LATE_THRESHOLD_US = -60_000L
+private const val BRAVIA_DROP_TO_KEYFRAME_THRESHOLD_US = -1_000_000L
+private const val BRAVIA_MAX_CONSECUTIVE_DROPS = 2
+private const val UHD_WIDTH = 3840
+private const val UHD_HEIGHT = 2160
+
+private val AMLOGIC_SUBSTRING_TOKENS = listOf("amlogic", "meson", "s905", "s912", "s922", "g12a", "g12b")
+private val AMLOGIC_EXACT_BOARD_TOKENS = setOf("sabrina", "gxl", "gxm", "sm1", "sc2")
 
 private val HEAVY_VIDEO_MIMES = setOf(
   MimeTypes.VIDEO_H265,
@@ -49,6 +61,121 @@ internal enum class AudioDecodePath {
   SOFTWARE_MEDIACODEC,
   FFMPEG_JNI,
   UNSUPPORTED,
+}
+
+/** Injectable Android build/SoC fingerprint driving deterministic video renderer quirks (#261). */
+internal data class DeviceQuirks(
+  val manufacturer: String,
+  val brand: String,
+  val model: String,
+  val hardware: String,
+  val board: String,
+  val socModel: String,
+) {
+  val isAmlogic: Boolean
+    get() {
+      val fields = listOf(hardware, board, socModel, model, manufacturer, brand)
+        .map { it.trim().lowercase(Locale.ROOT) }
+        .filter { it.isNotEmpty() }
+      return fields.any { field ->
+        AMLOGIC_SUBSTRING_TOKENS.any { token -> field.contains(token) } || field in AMLOGIC_EXACT_BOARD_TOKENS
+      }
+    }
+
+  val isSonyBravia: Boolean
+    get() {
+      val mfg = manufacturer.lowercase(Locale.ROOT)
+      val br = brand.lowercase(Locale.ROOT)
+      val mdl = model.lowercase(Locale.ROOT)
+      val brd = board.lowercase(Locale.ROOT)
+      val isSony = mfg.contains("sony") || br.contains("sony")
+      val isBraviaModel = mdl.contains("bravia") ||
+        brd.contains("bravia") ||
+        mdl.startsWith("kd-") ||
+        mdl.startsWith("xr-") ||
+        mdl.startsWith("xbr-") ||
+        mdl.startsWith("kdl-")
+      return isSony && isBraviaModel
+    }
+
+  companion object {
+    fun fromBuild(): DeviceQuirks = DeviceQuirks(
+      manufacturer = Build.MANUFACTURER.orEmpty(),
+      brand = Build.BRAND.orEmpty(),
+      model = Build.MODEL.orEmpty(),
+      hardware = Build.HARDWARE.orEmpty(),
+      board = Build.BOARD.orEmpty(),
+      socModel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.SOC_MODEL.orEmpty() else "",
+    )
+  }
+}
+
+/** Pure snapshot of a platform `MediaCodecInfo` entry for unit-testing the 4K HEVC hardware probe (#150). */
+internal data class HevcCodecProbeEntry(
+  val name: String,
+  val isEncoder: Boolean,
+  val isHardwareAccelerated: Boolean,
+  val isSoftwareOnly: Boolean,
+  val supportedTypes: List<String>,
+  val supports4k: Boolean,
+)
+
+/** True when [name] matches a known Android platform software decoder (`omx.google.*`, `c2.android.*`, `c2.google.*`). */
+internal fun isSoftwareDecoderName(name: String): Boolean {
+  val lower = name.lowercase(Locale.ROOT)
+  return lower.startsWith("omx.google.") || lower.startsWith("c2.android.") || lower.startsWith("c2.google.")
+}
+
+/** True when [name] is an Amlogic hardware MediaCodec name (`omx.amlogic.*` / `c2.amlogic.*`). */
+internal fun isAmlogicCodec(name: String): Boolean {
+  val lower = name.lowercase(Locale.ROOT)
+  return lower.startsWith("omx.amlogic.") || lower.startsWith("c2.amlogic.") || lower.contains(".amlogic.")
+}
+
+/** True when at least one non-encoder hardware-accelerated HEVC decoder supports 3840x2160 (#150). */
+internal fun probeHardwareHevc4kFromEntries(entries: List<HevcCodecProbeEntry>): Boolean =
+  entries.any { entry ->
+    !entry.isEncoder &&
+      entry.isHardwareAccelerated &&
+      !entry.isSoftwareOnly &&
+      !isSoftwareDecoderName(entry.name) &&
+      entry.supportedTypes.any { it.equals(MimeTypes.VIDEO_H265, ignoreCase = true) } &&
+      entry.supports4k
+  }
+
+private fun probeHardwareHevc4kFromPlatformCodecs(codecs: Array<android.media.MediaCodecInfo>): Boolean {
+  val entries = codecs.map { info ->
+    val types = runCatching { info.supportedTypes.toList() }.getOrDefault(emptyList())
+    val hasHevc = types.any { it.equals(MimeTypes.VIDEO_H265, ignoreCase = true) }
+    val supports4k = if (!info.isEncoder && hasHevc) {
+      runCatching {
+        info.getCapabilitiesForType(MimeTypes.VIDEO_H265)
+          ?.videoCapabilities
+          ?.isSizeSupported(UHD_WIDTH, UHD_HEIGHT) == true
+      }.getOrDefault(false)
+    } else {
+      false
+    }
+    val hwAccelerated = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      info.isHardwareAccelerated && !info.isSoftwareOnly
+    } else {
+      !isSoftwareDecoderName(info.name)
+    }
+    val swOnly = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      info.isSoftwareOnly || isSoftwareDecoderName(info.name)
+    } else {
+      isSoftwareDecoderName(info.name)
+    }
+    HevcCodecProbeEntry(
+      name = info.name.orEmpty(),
+      isEncoder = info.isEncoder,
+      isHardwareAccelerated = hwAccelerated,
+      isSoftwareOnly = swOnly,
+      supportedTypes = types,
+      supports4k = supports4k,
+    )
+  }
+  return probeHardwareHevc4kFromEntries(entries)
 }
 
 @OptIn(UnstableApi::class)
@@ -106,27 +233,42 @@ internal fun shouldFallbackDolbyVisionToHevc(
     (isDolbyVisionProfile7Codec(codecs) && !supportsDolbyVisionProfile7(dvDecoders))
 
 /**
- * Per-engine decoder selection policy (#109, #128, #184, #189, #312, #331):
- * - Orders hardware video decoders ahead of software decoders.
- * - Excludes `softwareOnly` heavy/UHD decoders on initial pass when a hardware decoder exists so Rung 1 retries
- *   hardware after transient zap HAL contention, then unlocks software fallback and deprioritizes repeatedly failing
- *   hardware decoders (`>= 2` failures) or on Rung 4 (`softwareAudio = true`).
- * - Falls back from `VIDEO_DOLBY_VISION` to HEVC (`VIDEO_H265`) base-layer decoders when `preferHevcOverDolbyVision`
- *   is set, no DV decoder exists, or a DV decoder failed on this stream.
+ * Per-engine decoder selection policy (#109, #128, #150, #184, #189, #261, #312, #331):
+ * - Orders hardware video decoders ahead of software decoders and filters software decoders when a healthy hardware
+ *   decoder confirms format support.
+ * - Probes hardware 4K HEVC decoding asynchronously off the UI thread.
+ * - Falls back from `VIDEO_DOLBY_VISION` to HEVC (`VIDEO_H265`) base-layer decoders when requested, unsupported, or
+ *   after a prior DV decoder failure.
  * - Filters silent stub platform DTS `MediaCodec`s when FFmpeg JNI supports DTS and HDMI passthrough is absent.
  */
 @OptIn(UnstableApi::class)
 internal class CodecPolicy {
   private val videoFailures = ConcurrentHashMap<String, Int>()
   private val dolbyVisionFallback = AtomicBoolean(false)
+  private val hevc4kProbeStarted = AtomicBoolean(false)
   @Volatile private var cachedAudioCapabilities: AudioCapabilities? = null
   private val capabilitiesLock = Any()
   private var audioCapabilitiesReceiver: AudioCapabilitiesReceiver? = null
   private var audioCapabilitiesStarted = false
   private var audioCapabilitiesEpoch = 0
 
+  @Volatile
+  var supportsHardwareHevc4k: Boolean = false
+    private set
+
   val isDolbyVisionFallbackActive: Boolean
     get() = dolbyVisionFallback.get()
+
+  /** Probes `MediaCodecList` for hardware 3840x2160 HEVC support asynchronously on [handler] (#150); idempotent. */
+  fun startHardwareHevc4kProbe(handler: Handler) {
+    if (!hevc4kProbeStarted.compareAndSet(false, true)) return
+    val posted = handler.post {
+      supportsHardwareHevc4k = runCatching {
+        probeHardwareHevc4kFromPlatformCodecs(MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos)
+      }.getOrDefault(false)
+    }
+    if (!posted) hevc4kProbeStarted.set(false)
+  }
 
   /** Starts caching HDMI/output [AudioCapabilities] via [AudioCapabilitiesReceiver] on [handler]; idempotent (#438). */
   fun startAudioCapabilities(context: Context, handler: Handler) {
@@ -211,6 +353,9 @@ internal class CodecPolicy {
     }
   }
 
+  internal fun isRepeatedlyFailing(codecInfo: MediaCodecInfo): Boolean =
+    !codecInfo.softwareOnly && (videoFailures[codecInfo.name] ?: 0) >= REPEATED_FAILURE_THRESHOLD
+
   fun selectDecoders(
     mimeType: String,
     decoders: List<MediaCodecInfo>,
@@ -219,6 +364,7 @@ internal class CodecPolicy {
     hasDtsPassthrough: Boolean,
     preferHevcOverDolbyVision: Boolean = false,
     hevcFallbackDecoders: List<MediaCodecInfo> = emptyList(),
+    stripHeavySoftwareWithoutFormatCheck: Boolean = true,
   ): List<MediaCodecInfo> {
     if (mimeType == MimeTypes.VIDEO_DOLBY_VISION &&
       (preferHevcOverDolbyVision || dolbyVisionFallback.get() || decoders.isEmpty()) &&
@@ -230,21 +376,20 @@ internal class CodecPolicy {
         softwareAudio = softwareAudio,
         ffmpegSupportsMime = false,
         hasDtsPassthrough = false,
+        stripHeavySoftwareWithoutFormatCheck = stripHeavySoftwareWithoutFormatCheck,
       )
     }
     if (MimeTypes.isVideo(mimeType)) {
       val ordered = decoders.sortedBy { info ->
         when {
-          !info.softwareOnly && (videoFailures[info.name] ?: 0) >= REPEATED_FAILURE_THRESHOLD -> 2
-          info.softwareOnly -> 1
+          isRepeatedlyFailing(info) -> 2
+          info.softwareOnly || isSoftwareDecoderName(info.name) -> 1
           else -> 0
         }
       }
-      val anyRepeatedFailure = decoders.any {
-        !it.softwareOnly && (videoFailures[it.name] ?: 0) >= REPEATED_FAILURE_THRESHOLD
-      }
-      if (mimeType in HEAVY_VIDEO_MIMES && !softwareAudio && !anyRepeatedFailure) {
-        val hardwareOnly = ordered.filter { !it.softwareOnly }
+      val anyRepeatedFailure = decoders.any { isRepeatedlyFailing(it) }
+      if (stripHeavySoftwareWithoutFormatCheck && mimeType in HEAVY_VIDEO_MIMES && !softwareAudio && !anyRepeatedFailure) {
+        val hardwareOnly = ordered.filter { !it.softwareOnly && !isSoftwareDecoderName(it.name) }
         if (hardwareOnly.isNotEmpty()) return hardwareOnly
       }
       return ordered
@@ -278,12 +423,14 @@ internal class CodecPolicy {
     context: Context,
     softwareAudio: Boolean,
     preferHevcOverDolbyVision: Boolean = false,
+    stripHeavySoftwareWithoutFormatCheck: Boolean = true,
+    baseSelector: MediaCodecSelector = MediaCodecSelector.DEFAULT,
   ): MediaCodecSelector =
     MediaCodecSelector { mimeType, secure, tunneling ->
-      val decoders = MediaCodecSelector.DEFAULT.getDecoderInfos(mimeType, secure, tunneling)
+      val decoders = baseSelector.getDecoderInfos(mimeType, secure, tunneling)
       val hevcFallback =
         if (mimeType == MimeTypes.VIDEO_DOLBY_VISION) {
-          MediaCodecSelector.DEFAULT.getDecoderInfos(MimeTypes.VIDEO_H265, secure, tunneling)
+          baseSelector.getDecoderInfos(MimeTypes.VIDEO_H265, secure, tunneling)
         } else {
           emptyList()
         }
@@ -298,6 +445,7 @@ internal class CodecPolicy {
         hasDtsPassthrough = passthrough,
         preferHevcOverDolbyVision = preferHevcOverDolbyVision,
         hevcFallbackDecoders = hevcFallback,
+        stripHeavySoftwareWithoutFormatCheck = stripHeavySoftwareWithoutFormatCheck,
       )
     }
 
@@ -312,17 +460,70 @@ internal class CodecPolicy {
   }
 }
 
+@OptIn(UnstableApi::class)
+private fun isSoftwareVideoCodec(info: MediaCodecInfo): Boolean =
+  info.softwareOnly || isSoftwareDecoderName(info.name)
+
+@OptIn(UnstableApi::class)
+private fun isCodecFormatSupportedSafely(context: Context, info: MediaCodecInfo, format: Format): Boolean =
+  runCatching { info.capabilities != null && info.isFormatSupported(context, format) }.getOrDefault(false)
+
+private fun amlogicMinInputSize(mimeType: String?, width: Int, height: Int): Int {
+  val macroblocks = ((width + 15) / 16) * ((height + 15) / 16)
+  val pixels = macroblocks * 16 * 16
+  val compressionRatio = when (mimeType) {
+    MimeTypes.VIDEO_H265, MimeTypes.VIDEO_VP9, MimeTypes.VIDEO_AV1, MimeTypes.VIDEO_DOLBY_VISION -> 4
+    else -> 2
+  }
+  return (pixels * 3) / (2 * compressionRatio)
+}
+
+private fun isBrokenOutputSurfaceCodec(name: String, deviceQuirks: DeviceQuirks): Boolean {
+  val lower = name.lowercase(Locale.ROOT)
+  if (isSoftwareDecoderName(lower)) return false
+  if (lower.startsWith("omx.allwinner.") || lower.startsWith("omx.rk.video_decoder.") || lower.startsWith("omx.realtek.")) {
+    return true
+  }
+  return deviceQuirks.isAmlogic && lower.startsWith("omx.amlogic.") && lower.endsWith(".awesome")
+}
+
 /**
- * Video renderer enforcing proactive Dolby Vision Profile 7 -> HEVC base-layer fallback (#189) where
- * [Format.codecs] is available (before opening an incompatible hardware DV decoder).
+ * Video renderer enforcing (#184, #189, #261):
+ * - Proactive Dolby Vision Profile 7 -> HEVC base-layer fallback.
+ * - Format-aware hardware-first decoder filtering (stripping software codecs only when healthy hardware confirms format).
+ * - Amlogic `CodecMaxValues` `>= 1920x1089` floor for adaptive 720p -> 1080p transitions.
+ * - Sony Bravia bounded consecutive frame-drop mitigation and output-surface workarounds.
  */
 @OptIn(UnstableApi::class)
 internal class PolicyVideoRenderer(
   builder: Builder,
+  private val appContext: Context,
   private val codecPolicy: CodecPolicy,
+  private val softwareAudio: Boolean,
   private val preferHevcOverDolbyVision: Boolean,
+  private val deviceQuirks: DeviceQuirks = DeviceQuirks.fromBuild(),
+  private val formatSupportChecker: (MediaCodecInfo, Format) -> Boolean = { info, fmt ->
+    isCodecFormatSupportedSafely(appContext, info, fmt)
+  },
 ) : MediaCodecVideoRenderer(builder) {
+  private var consecutiveBraviaDrops = 0
+
   override fun getDecoderInfos(
+    mediaCodecSelector: MediaCodecSelector,
+    format: Format,
+    requiresSecureDecoder: Boolean,
+  ): List<MediaCodecInfo> {
+    val candidates = resolveInitialDecoderInfos(mediaCodecSelector, format, requiresSecureDecoder)
+    if (candidates.size <= 1 || softwareAudio) return candidates
+    val confirmedHardware = candidates.filter { info ->
+      !isSoftwareVideoCodec(info) &&
+        !codecPolicy.isRepeatedlyFailing(info) &&
+        formatSupportChecker(info, format)
+    }
+    return if (confirmedHardware.isNotEmpty()) confirmedHardware else candidates
+  }
+
+  private fun resolveInitialDecoderInfos(
     mediaCodecSelector: MediaCodecSelector,
     format: Format,
     requiresSecureDecoder: Boolean,
@@ -351,11 +552,99 @@ internal class PolicyVideoRenderer(
     return super.getDecoderInfos(mediaCodecSelector, format, requiresSecureDecoder)
   }
 
+  override fun getCodecMaxValues(
+    codecInfo: MediaCodecInfo,
+    format: Format,
+    streamFormats: Array<Format>,
+  ): CodecMaxValues {
+    val base = super.getCodecMaxValues(codecInfo, format, streamFormats)
+    if (!deviceQuirks.isAmlogic && !isAmlogicCodec(codecInfo.name)) return base
+    val width = maxOf(base.width, AMLOGIC_MIN_MAX_WIDTH)
+    val height = maxOf(base.height, AMLOGIC_MIN_MAX_HEIGHT)
+    val minInput = amlogicMinInputSize(format.sampleMimeType, width, height)
+    val inputSize = if (base.inputSize == Format.NO_VALUE) minInput else maxOf(base.inputSize, minInput)
+    return CodecMaxValues(width, height, inputSize)
+  }
+
+  override fun shouldDropOutputBuffer(
+    earlyUs: Long,
+    elapsedRealtimeUs: Long,
+    isLastBuffer: Boolean,
+  ): Boolean {
+    if (!deviceQuirks.isSonyBravia) {
+      return super.shouldDropOutputBuffer(earlyUs, elapsedRealtimeUs, isLastBuffer)
+    }
+    if (isLastBuffer || earlyUs >= BRAVIA_DROP_LATE_THRESHOLD_US) {
+      consecutiveBraviaDrops = 0
+      return false
+    }
+    if (consecutiveBraviaDrops >= BRAVIA_MAX_CONSECUTIVE_DROPS) {
+      consecutiveBraviaDrops = 0
+      return false
+    }
+    consecutiveBraviaDrops += 1
+    return true
+  }
+
+  override fun shouldDropBuffersToKeyframe(
+    earlyUs: Long,
+    elapsedRealtimeUs: Long,
+    isLastBuffer: Boolean,
+  ): Boolean {
+    if (!deviceQuirks.isSonyBravia) {
+      return super.shouldDropBuffersToKeyframe(earlyUs, elapsedRealtimeUs, isLastBuffer)
+    }
+    return !isLastBuffer && earlyUs < BRAVIA_DROP_TO_KEYFRAME_THRESHOLD_US
+  }
+
+  override fun codecNeedsSetOutputSurfaceWorkaround(name: String): Boolean =
+    if (isSoftwareDecoderName(name)) {
+      false
+    } else {
+      super.codecNeedsSetOutputSurfaceWorkaround(name) || isBrokenOutputSurfaceCodec(name, deviceQuirks)
+    }
+
+  override fun onPositionReset(positionUs: Long, joining: Boolean, sampleStreamIsResetToKeyFrame: Boolean) {
+    consecutiveBraviaDrops = 0
+    super.onPositionReset(positionUs, joining, sampleStreamIsResetToKeyFrame)
+  }
+
+  override fun onDisabled() {
+    consecutiveBraviaDrops = 0
+    super.onDisabled()
+  }
+
   internal fun resolveDecoderInfosForTest(
     mediaCodecSelector: MediaCodecSelector,
     format: Format,
     requiresSecureDecoder: Boolean = false,
   ): List<MediaCodecInfo> = getDecoderInfos(mediaCodecSelector, format, requiresSecureDecoder)
+
+  internal data class CodecMaxValuesSnapshot(val width: Int, val height: Int, val inputSize: Int)
+
+  internal fun resolveCodecMaxValuesForTest(
+    codecInfo: MediaCodecInfo,
+    format: Format,
+    streamFormats: Array<Format> = arrayOf(format),
+  ): CodecMaxValuesSnapshot {
+    val max = getCodecMaxValues(codecInfo, format, streamFormats)
+    return CodecMaxValuesSnapshot(max.width, max.height, max.inputSize)
+  }
+
+  internal fun shouldDropOutputBufferForTest(
+    earlyUs: Long,
+    elapsedRealtimeUs: Long,
+    isLastBuffer: Boolean = false,
+  ): Boolean = shouldDropOutputBuffer(earlyUs, elapsedRealtimeUs, isLastBuffer)
+
+  internal fun shouldDropBuffersToKeyframeForTest(
+    earlyUs: Long,
+    elapsedRealtimeUs: Long,
+    isLastBuffer: Boolean = false,
+  ): Boolean = shouldDropBuffersToKeyframe(earlyUs, elapsedRealtimeUs, isLastBuffer)
+
+  internal fun codecNeedsSetOutputSurfaceWorkaroundForTest(name: String): Boolean =
+    codecNeedsSetOutputSurfaceWorkaround(name)
 }
 
 @OptIn(UnstableApi::class)
@@ -364,8 +653,10 @@ internal fun createRenderersFactory(
   codecPolicy: CodecPolicy,
   softwareAudio: Boolean,
   preferHevcOverDolbyVision: Boolean = false,
+  deviceQuirks: DeviceQuirks = DeviceQuirks.fromBuild(),
 ): DefaultRenderersFactory {
   FfmpegAudio.ensureConfigured()
+  val appContext = context.applicationContext ?: context
   return object : DefaultRenderersFactory(context) {
     override fun buildVideoRenderers(
       context: Context,
@@ -385,12 +676,28 @@ internal fun createRenderersFactory(
         .setEventHandler(eventHandler)
         .setEventListener(eventListener)
         .setMaxDroppedFramesToNotify(MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY)
-      out.add(PolicyVideoRenderer(builder, codecPolicy, preferHevcOverDolbyVision))
+      out.add(
+        PolicyVideoRenderer(
+          builder = builder,
+          appContext = appContext,
+          codecPolicy = codecPolicy,
+          softwareAudio = softwareAudio,
+          preferHevcOverDolbyVision = preferHevcOverDolbyVision,
+          deviceQuirks = deviceQuirks,
+        )
+      )
     }
   }
     .setEnableDecoderFallback(true)
     .setExtensionRendererMode(extensionRendererModeFor(softwareAudio))
-    .setMediaCodecSelector(codecPolicy.createSelector(context, softwareAudio, preferHevcOverDolbyVision))
+    .setMediaCodecSelector(
+      codecPolicy.createSelector(
+        context = context,
+        softwareAudio = softwareAudio,
+        preferHevcOverDolbyVision = preferHevcOverDolbyVision,
+        stripHeavySoftwareWithoutFormatCheck = false,
+      )
+    )
 }
 
 @OptIn(UnstableApi::class)

@@ -1,5 +1,15 @@
 import { type CatalogService, createCoalescedCatalog } from '@elv/data';
-import { setOrientationLocked } from '@elv/engine-media3';
+import {
+  type AndroidSafeAreaInsets,
+  applyAndroidShortEdgesCutoutMode,
+  enterAndroidPictureInPicture,
+  getAndroidSafeAreaInsets,
+  requestTemporaryOrientation,
+  setOrientationLocked,
+  subscribeAndroidPictureInPicture,
+  subscribeAndroidSafeAreaInsets,
+  subscribeAndroidStandby,
+} from '@elv/engine-media3';
 import {
   type AppLifecyclePort,
   AppProviders,
@@ -15,6 +25,7 @@ import { getLocales } from 'expo-localization';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useState } from 'react';
 import { AppState, Platform, StyleSheet, View } from 'react-native';
+import { createComposedAppLifecycle } from './android-lifecycle';
 import { createDeviceCatalog } from './catalog';
 import { waitForCatalogForeground } from './catalog/ios-prewarm-gate';
 import { ContractGateScreen } from './gate/contract/ContractGateScreen';
@@ -30,6 +41,10 @@ import { attachAppStateDeadHostReset, createMobileTvUiAdapters } from './ui/plat
 
 function AppRoot() {
   const [refreshToken, setRefreshToken] = useState(0);
+  const isAndroidMobile = Platform.OS === 'android' && !Platform.isTV;
+  const [safeArea, setSafeArea] = useState<AndroidSafeAreaInsets | undefined>(() =>
+    isAndroidMobile ? getAndroidSafeAreaInsets() : undefined,
+  );
 
   const systemLocale = useMemo(
     () => resolveLocale(getLocales().map((locale) => locale.languageTag)),
@@ -38,6 +53,21 @@ function AppRoot() {
 
   const preferencesStore = useMemo(() => createDevicePreferencesStore(), []);
   const uiAdapters = useMemo(() => createMobileTvUiAdapters(), []);
+
+  useEffect(() => {
+    if (!isAndroidMobile) {
+      setSafeArea(undefined);
+      return;
+    }
+    applyAndroidShortEdgesCutoutMode();
+    setSafeArea(getAndroidSafeAreaInsets());
+    return subscribeAndroidSafeAreaInsets(setSafeArea);
+  }, [isAndroidMobile]);
+
+  const viewportOverride = useMemo(
+    () => (safeArea !== undefined ? { safeArea } : undefined),
+    [safeArea],
+  );
 
   const openSharedCatalog = useMemo(() => {
     let cached: Promise<CatalogService> | undefined;
@@ -64,35 +94,45 @@ function AppRoot() {
         if (engine === null) return null;
         return {
           engine,
-          renderSurface: ({ resizeMode, subtitleBottomInsetPx, testID }) => (
+          renderSurface: ({
+            resizeMode,
+            subtitleBottomInsetPx,
+            surfaceRecreationToken,
+            useTextureView,
+            testID,
+          }) => (
             <PlayerSurface
               engine={engine}
               style={styles.surface}
               {...(resizeMode !== undefined ? { resizeMode } : {})}
               {...(subtitleBottomInsetPx !== undefined ? { subtitleBottomInsetPx } : {})}
+              {...(surfaceRecreationToken !== undefined ? { surfaceRecreationToken } : {})}
+              {...(useTextureView !== undefined ? { useTextureView } : {})}
               {...(testID !== undefined ? { testID } : {})}
             />
           ),
           ...(Platform.OS === 'android' ? { setOrientationLocked } : {}),
+          ...(isAndroidMobile
+            ? {
+                requestTemporaryOrientation,
+                enterPictureInPicture: enterAndroidPictureInPicture,
+                onPictureInPictureChange: subscribeAndroidPictureInPicture,
+              }
+            : {}),
         };
       },
     }),
-    [],
+    [isAndroidMobile],
   );
 
   const appLifecycle = useMemo<AppLifecyclePort>(
-    () => ({
-      subscribe(listener) {
-        const sub = AppState.addEventListener('change', (nextState) => {
-          if (nextState === 'active') listener('active');
-          else if (nextState === 'background') listener('background');
-        });
-        return () => {
-          sub.remove();
-        };
-      },
-    }),
-    [],
+    () =>
+      createComposedAppLifecycle({
+        appState: AppState,
+        ...(Platform.OS === 'android' ? { subscribeStandby: subscribeAndroidStandby } : {}),
+        ...(isAndroidMobile ? { subscribePip: subscribeAndroidPictureInPicture } : {}),
+      }),
+    [isAndroidMobile],
   );
 
   useEffect(() => {
@@ -129,7 +169,11 @@ function AppRoot() {
 
   return (
     <UiAdaptersProvider adapters={uiAdapters}>
-      <AppProviders preferencesStore={preferencesStore} systemLocale={systemLocale}>
+      <AppProviders
+        preferencesStore={preferencesStore}
+        systemLocale={systemLocale}
+        {...(viewportOverride !== undefined ? { viewport: viewportOverride } : {})}
+      >
         <AppShell
           catalog={catalog}
           videoHost={videoHost}

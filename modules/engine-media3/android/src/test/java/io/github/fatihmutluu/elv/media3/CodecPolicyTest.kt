@@ -19,6 +19,7 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.metadata.MetadataOutput
 import androidx.media3.exoplayer.text.TextOutput
+import androidx.media3.exoplayer.video.MediaCodecVideoRenderer
 import androidx.media3.exoplayer.video.VideoRendererEventListener
 import java.util.Locale
 import java.util.concurrent.CountDownLatch
@@ -58,6 +59,29 @@ class CodecPolicyTest {
     return renderers.filter { it.trackType == C.TRACK_TYPE_AUDIO }.map { it.javaClass.name }
   }
 
+  private fun buildVideoRenderer(
+    policy: CodecPolicy = CodecPolicy(),
+    softwareAudio: Boolean = false,
+    preferHevc: Boolean = false,
+    quirks: DeviceQuirks = DeviceQuirks("Generic", "Generic", "Phone", "qcom", "kona", "SM8250"),
+  ): PolicyVideoRenderer {
+    val app = RuntimeEnvironment.getApplication()
+    val renderers = createRenderersFactory(
+      context = app,
+      codecPolicy = policy,
+      softwareAudio = softwareAudio,
+      preferHevcOverDolbyVision = preferHevc,
+      deviceQuirks = quirks,
+    ).createRenderers(
+      Handler(Looper.getMainLooper()),
+      object : VideoRendererEventListener {},
+      object : AudioRendererEventListener {},
+      TextOutput {},
+      MetadataOutput {},
+    )
+    return renderers.filterIsInstance<PolicyVideoRenderer>().single()
+  }
+
   @Test
   fun `orders hardware video decoders ahead of software decoders (#184, #312)`() {
     val swH264 = codec("c2.android.avc.decoder", MimeTypes.VIDEO_H264, hw = false)
@@ -79,37 +103,257 @@ class CodecPolicyTest {
     val swHevc = codec("c2.android.hevc.decoder", MimeTypes.VIDEO_H265, hw = false)
     val policy = CodecPolicy()
 
-    // Initial pass: hardware-only so transient zap HAL contention retries hardware on Rung 1
     assertEquals(
       listOf(hwHevc.name),
       policy.selectDecoders(MimeTypes.VIDEO_H265, listOf(swHevc, hwHevc), false, false, false).map { it.name },
     )
 
-    // First failure: still retries hardware once on Rung 1
     policy.recordVideoCodecFailure(hwHevc)
     assertEquals(
       listOf(hwHevc.name),
       policy.selectDecoders(MimeTypes.VIDEO_H265, listOf(swHevc, hwHevc), false, false, false).map { it.name },
     )
 
-    // Second failure: unlocks software video fallback and deprioritizes failing hardware codec!
     policy.recordVideoCodecFailure(hwHevc)
     assertEquals(
       listOf(swHevc.name, hwHevc.name),
       policy.selectDecoders(MimeTypes.VIDEO_H265, listOf(hwHevc, swHevc), false, false, false).map { it.name },
     )
 
-    // Software-only device without any hardware HEVC decoder still keeps software on initial pass
     val freshPolicy = CodecPolicy()
     assertEquals(
       listOf(swHevc.name),
       freshPolicy.selectDecoders(MimeTypes.VIDEO_H265, listOf(swHevc), false, false, false).map { it.name },
     )
-    // And Rung 4 (softwareAudio = true) unlocks software fallback even before 2 failures
     assertEquals(
       listOf(hwHevc.name, swHevc.name),
       freshPolicy.selectDecoders(MimeTypes.VIDEO_H265, listOf(swHevc, hwHevc), true, false, false).map { it.name },
     )
+  }
+
+  @Test
+  fun `PolicyVideoRenderer filters software decoders only when healthy hardware confirms format support (#184)`() {
+    val app = RuntimeEnvironment.getApplication()
+    val hwH264 = codec("c2.qti.avc.decoder", MimeTypes.VIDEO_H264, hw = true)
+    val swGoogle = codec("OMX.google.h264.decoder", MimeTypes.VIDEO_H264, hw = false)
+    val swAndroid = codec("c2.android.avc.decoder", MimeTypes.VIDEO_H264, hw = false)
+    val format1080 = Format.Builder()
+      .setSampleMimeType(MimeTypes.VIDEO_H264)
+      .setWidth(1920)
+      .setHeight(1080)
+      .build()
+    val selector = MediaCodecSelector { _, _, _ -> listOf(hwH264, swGoogle, swAndroid) }
+
+    // 1. Hardware confirms format -> software decoders stripped
+    val policy = CodecPolicy()
+    val confirmedRenderer = PolicyVideoRenderer(
+      builder = MediaCodecVideoRenderer.Builder(app),
+      appContext = app,
+      codecPolicy = policy,
+      softwareAudio = false,
+      preferHevcOverDolbyVision = false,
+      formatSupportChecker = { info, _ -> info.name == hwH264.name },
+    )
+    assertEquals(
+      listOf(hwH264.name),
+      confirmedRenderer.resolveDecoderInfosForTest(selector, format1080).map { it.name },
+    )
+
+    // 2. Hardware rejects format (e.g. unsupported profile/level) -> software fallback preserved
+    val rejectedRenderer = PolicyVideoRenderer(
+      builder = MediaCodecVideoRenderer.Builder(app),
+      appContext = app,
+      codecPolicy = policy,
+      softwareAudio = false,
+      preferHevcOverDolbyVision = false,
+      formatSupportChecker = { _, _ -> false },
+    )
+    assertEquals(
+      listOf(hwH264.name, swGoogle.name, swAndroid.name),
+      rejectedRenderer.resolveDecoderInfosForTest(selector, format1080).map { it.name },
+    )
+
+    // 3. Repeatedly failing hardware -> software fallback preserved even if formatSupportChecker says true
+    policy.recordVideoCodecFailure(hwH264)
+    policy.recordVideoCodecFailure(hwH264)
+    assertEquals(
+      listOf(hwH264.name, swGoogle.name, swAndroid.name),
+      confirmedRenderer.resolveDecoderInfosForTest(selector, format1080).map { it.name },
+    )
+  }
+
+  @Test
+  fun `end-to-end PolicyVideoRenderer with CodecPolicy H265 selector strips SW when HW supports and preserves SW when HW rejects (#109, #184, #312)`() {
+    val app = RuntimeEnvironment.getApplication()
+    val swHevc = codec("c2.android.hevc.decoder", MimeTypes.VIDEO_H265, hw = false)
+    val hwHevc = codec("c2.amlogic.hevc.decoder", MimeTypes.VIDEO_H265, hw = true)
+    val hevc4k10 = Format.Builder()
+      .setSampleMimeType(MimeTypes.VIDEO_H265)
+      .setCodecs("hev1.2.4.L153.B0")
+      .setWidth(3840)
+      .setHeight(2160)
+      .build()
+    val platformSelector = MediaCodecSelector { mimeType, _, _ ->
+      if (mimeType == MimeTypes.VIDEO_H265) listOf(swHevc, hwHevc) else emptyList()
+    }
+    val policy = CodecPolicy()
+    val policySelector = policy.createSelector(
+      context = app,
+      softwareAudio = false,
+      preferHevcOverDolbyVision = false,
+      stripHeavySoftwareWithoutFormatCheck = false,
+      baseSelector = platformSelector,
+    )
+
+    // Selector passes ordered [hw, sw] into PolicyVideoRenderer without blindly stripping SW for H.265
+    assertEquals(
+      listOf(hwHevc.name, swHevc.name),
+      policySelector.getDecoderInfos(MimeTypes.VIDEO_H265, false, false).map { it.name },
+    )
+
+    // 1. Healthy HW confirms H.265 Format -> PolicyVideoRenderer strips SW (enforcing #109/#184/#312)
+    val hwSupportedRenderer = PolicyVideoRenderer(
+      builder = MediaCodecVideoRenderer.Builder(app),
+      appContext = app,
+      codecPolicy = policy,
+      softwareAudio = false,
+      preferHevcOverDolbyVision = false,
+      formatSupportChecker = { info, _ -> info.name == hwHevc.name },
+    )
+    assertEquals(
+      listOf(hwHevc.name),
+      hwSupportedRenderer.resolveDecoderInfosForTest(policySelector, hevc4k10).map { it.name },
+    )
+
+    // 2. HW rejects H.265 profile/level/resolution (or null caps) -> SW fallback preserved on pass 1!
+    val hwRejectedRenderer = PolicyVideoRenderer(
+      builder = MediaCodecVideoRenderer.Builder(app),
+      appContext = app,
+      codecPolicy = policy,
+      softwareAudio = false,
+      preferHevcOverDolbyVision = false,
+      formatSupportChecker = { _, _ -> false },
+    )
+    assertEquals(
+      listOf(hwHevc.name, swHevc.name),
+      hwRejectedRenderer.resolveDecoderInfosForTest(policySelector, hevc4k10).map { it.name },
+    )
+
+    // 3. After repeated HW failure (>= 2), SW moves ahead of failing HW even if formatSupportChecker says true
+    policy.recordVideoCodecFailure(hwHevc)
+    policy.recordVideoCodecFailure(hwHevc)
+    assertEquals(
+      listOf(swHevc.name, hwHevc.name),
+      hwSupportedRenderer.resolveDecoderInfosForTest(policySelector, hevc4k10).map { it.name },
+    )
+  }
+
+  @Test
+  fun `probeHardwareHevc4kFromEntries distinguishes 4K HW HEVC decoders from encoders, 1080p HW and SW codecs (#150)`() {
+    assertFalse(probeHardwareHevc4kFromEntries(emptyList()))
+    assertFalse(
+      probeHardwareHevc4kFromEntries(
+        listOf(
+          HevcCodecProbeEntry("c2.android.hevc.decoder", isEncoder = false, isHardwareAccelerated = false, isSoftwareOnly = true, supportedTypes = listOf(MimeTypes.VIDEO_H265), supports4k = true),
+          HevcCodecProbeEntry("c2.qti.hevc.encoder", isEncoder = true, isHardwareAccelerated = true, isSoftwareOnly = false, supportedTypes = listOf(MimeTypes.VIDEO_H265), supports4k = true),
+          HevcCodecProbeEntry("c2.amlogic.hevc.decoder", isEncoder = false, isHardwareAccelerated = true, isSoftwareOnly = false, supportedTypes = listOf(MimeTypes.VIDEO_H265), supports4k = false),
+          HevcCodecProbeEntry("c2.qti.avc.decoder", isEncoder = false, isHardwareAccelerated = true, isSoftwareOnly = false, supportedTypes = listOf(MimeTypes.VIDEO_H264), supports4k = true),
+        )
+      )
+    )
+    assertTrue(
+      probeHardwareHevc4kFromEntries(
+        listOf(
+          HevcCodecProbeEntry("c2.amlogic.hevc.decoder.awesome", isEncoder = false, isHardwareAccelerated = true, isSoftwareOnly = false, supportedTypes = listOf(MimeTypes.VIDEO_H265), supports4k = true),
+        )
+      )
+    )
+
+    // Off-UI-thread startHardwareHevc4kProbe executes on HandlerThread without crashing and defaults false before completion
+    val policy = CodecPolicy()
+    assertFalse(policy.supportsHardwareHevc4k)
+    val thread = HandlerThread("hevc-probe-test").apply { start() }
+    try {
+      val handler = Handler(thread.looper)
+      policy.startHardwareHevc4kProbe(handler)
+      policy.startHardwareHevc4kProbe(handler) // idempotent
+      val done = CountDownLatch(1)
+      handler.post { done.countDown() }
+      assertTrue(done.await(5, TimeUnit.SECONDS))
+    } finally {
+      thread.quitSafely()
+    }
+  }
+
+  @Test
+  fun `DeviceQuirks detects Amlogic and Sony Bravia and applies CodecMaxValues floor and Bravia drop limits (#261)`() {
+    val amlogicQuirks = DeviceQuirks("Google", "google", "Chromecast", "amlogic", "sabrina", "S905D3")
+    val braviaQuirks = DeviceQuirks("Sony", "Sony", "BRAVIA 4K VH2", "mt5895", "bravia", "MT5895")
+    val genericQuirks = DeviceQuirks("Google", "google", "Pixel 8", "shiba", "shiba", "Tensor G3")
+
+    assertTrue(amlogicQuirks.isAmlogic)
+    assertFalse(amlogicQuirks.isSonyBravia)
+    assertTrue(braviaQuirks.isSonyBravia)
+    assertFalse(braviaQuirks.isAmlogic)
+    assertFalse(genericQuirks.isAmlogic)
+    assertFalse(genericQuirks.isSonyBravia)
+
+    // Amlogic floors 720p CodecMaxValues to >= 1920x1089 and scales inputSize for 720p -> 1080p transitions
+    val amlRenderer = buildVideoRenderer(quirks = amlogicQuirks)
+    val genericRenderer = buildVideoRenderer(quirks = genericQuirks)
+    val amlCodec = codec("OMX.amlogic.avc.decoder.awesome", MimeTypes.VIDEO_H264, hw = true)
+    val qtiCodec = codec("c2.qti.avc.decoder", MimeTypes.VIDEO_H264, hw = true)
+    val hd720 = Format.Builder()
+      .setSampleMimeType(MimeTypes.VIDEO_H264)
+      .setWidth(1280)
+      .setHeight(720)
+      .build()
+    val uhd4k = Format.Builder()
+      .setSampleMimeType(MimeTypes.VIDEO_H264)
+      .setWidth(3840)
+      .setHeight(2160)
+      .build()
+
+    val amlMax720 = amlRenderer.resolveCodecMaxValuesForTest(qtiCodec, hd720)
+    assertTrue(amlMax720.width >= 1920)
+    assertTrue(amlMax720.height >= 1089)
+    assertTrue(amlMax720.inputSize >= 1_500_000)
+
+    // Amlogic codec name triggers floor even if DeviceQuirks hardware string didn't match
+    val codecNameFloor = genericRenderer.resolveCodecMaxValuesForTest(amlCodec, hd720)
+    assertTrue(codecNameFloor.width >= 1920)
+    assertTrue(codecNameFloor.height >= 1089)
+
+    // 4K streams on Amlogic keep full 3840x2160 bounds (never clamped downward)
+    val amlMax4k = amlRenderer.resolveCodecMaxValuesForTest(amlCodec, uhd4k)
+    assertEquals(3840, amlMax4k.width)
+    assertEquals(2160, amlMax4k.height)
+
+    // Generic non-Amlogic device keeps 1280x720 untouched
+    val genericMax720 = genericRenderer.resolveCodecMaxValuesForTest(qtiCodec, hd720)
+    assertEquals(1280, genericMax720.width)
+    assertEquals(720, genericMax720.height)
+
+    // Broken output-surface codec workaround
+    assertTrue(amlRenderer.codecNeedsSetOutputSurfaceWorkaroundForTest("OMX.amlogic.avc.decoder.awesome"))
+    assertTrue(genericRenderer.codecNeedsSetOutputSurfaceWorkaroundForTest("OMX.allwinner.video.decoder.avc"))
+    assertFalse(amlRenderer.codecNeedsSetOutputSurfaceWorkaroundForTest("c2.android.avc.decoder"))
+
+    // Sony Bravia widens drop threshold (-60 ms) and breaks consecutive drop cascades after 2 drops
+    val braviaRenderer = buildVideoRenderer(quirks = braviaQuirks)
+    // -45 ms late: generic drops (<-30 ms), Bravia renders smoothly
+    assertTrue(genericRenderer.shouldDropOutputBufferForTest(-45_000L, 1_000L))
+    assertFalse(braviaRenderer.shouldDropOutputBufferForTest(-45_000L, 1_000L))
+
+    // -80 ms late: Bravia allows at most 2 consecutive drops, then forces render on 3rd frame to stop cascade
+    assertTrue(braviaRenderer.shouldDropOutputBufferForTest(-80_000L, 1_000L))
+    assertTrue(braviaRenderer.shouldDropOutputBufferForTest(-80_000L, 2_000L))
+    assertFalse("3rd consecutive drop must be suppressed on Bravia", braviaRenderer.shouldDropOutputBufferForTest(-80_000L, 3_000L))
+
+    // Keyframe drop threshold widened on Bravia (-1000 ms vs -500 ms)
+    assertTrue(genericRenderer.shouldDropBuffersToKeyframeForTest(-600_000L, 1_000L))
+    assertFalse(braviaRenderer.shouldDropBuffersToKeyframeForTest(-600_000L, 1_000L))
+    assertTrue(braviaRenderer.shouldDropBuffersToKeyframeForTest(-1_200_000L, 1_000L))
   }
 
   @Test
@@ -202,148 +446,63 @@ class CodecPolicyTest {
       MimeTypes.VIDEO_DOLBY_VISION,
       MimeTypes.VIDEO_DOLBY_VISION,
       caps81,
-      /* hardwareAccelerated = */ true,
-      /* softwareOnly = */ false,
-      /* vendor = */ true,
-      /* forceDisableAdaptive = */ false,
-      /* forceSecure = */ false,
+      true,
+      false,
+      true,
+      false,
+      false,
     )
     val dv7Capable = MediaCodecInfo.newInstance(
       "c2.vendor.dv7.decoder",
       MimeTypes.VIDEO_DOLBY_VISION,
       MimeTypes.VIDEO_DOLBY_VISION,
       caps7,
-      /* hardwareAccelerated = */ true,
-      /* softwareOnly = */ false,
-      /* vendor = */ true,
-      /* forceDisableAdaptive = */ false,
-      /* forceSecure = */ false,
+      true,
+      false,
+      true,
+      false,
+      false,
     )
     assertFalse(supportsDolbyVisionProfile7(listOf(dv81Only)))
     assertTrue(supportsDolbyVisionProfile81(listOf(dv81Only)))
     assertTrue(supportsDolbyVisionProfile7(listOf(dv7Capable)))
 
-    assertTrue(
-      shouldFallbackDolbyVisionToHevc(
-        codecs = "dvhe.07.06",
-        dvDecoders = listOf(dv81Only),
-        preferHevcOverDolbyVision = false,
-        dvFallbackLatched = false,
-      )
-    )
-    assertFalse(
-      shouldFallbackDolbyVisionToHevc(
-        codecs = "dvhe.07.06",
-        dvDecoders = listOf(dv7Capable),
-        preferHevcOverDolbyVision = false,
-        dvFallbackLatched = false,
-      )
-    )
-    assertTrue(
-      shouldFallbackDolbyVisionToHevc(
-        codecs = "dvhe.08.06",
-        dvDecoders = listOf(dv7Capable),
-        preferHevcOverDolbyVision = true,
-        dvFallbackLatched = false,
-      )
-    )
+    assertTrue(shouldFallbackDolbyVisionToHevc("dvhe.07.06", listOf(dv81Only), false, false))
+    assertFalse(shouldFallbackDolbyVisionToHevc("dvhe.07.06", listOf(dv7Capable), false, false))
+    assertTrue(shouldFallbackDolbyVisionToHevc("dvhe.08.06", listOf(dv7Capable), true, false))
 
     val hwHevc = codec("c2.vendor.hevc.decoder", MimeTypes.VIDEO_H265, hw = true)
     val swHevc = codec("c2.android.hevc.decoder", MimeTypes.VIDEO_H265, hw = false)
     val policy = CodecPolicy()
 
-    // Default without preference or failure keeps DV decoder
     assertEquals(
       listOf(dv81Only.name),
-      policy.selectDecoders(
-        mimeType = MimeTypes.VIDEO_DOLBY_VISION,
-        decoders = listOf(dv81Only),
-        softwareAudio = false,
-        ffmpegSupportsMime = false,
-        hasDtsPassthrough = false,
-        preferHevcOverDolbyVision = false,
-        hevcFallbackDecoders = listOf(swHevc, hwHevc),
-      ).map { it.name },
+      policy.selectDecoders(MimeTypes.VIDEO_DOLBY_VISION, listOf(dv81Only), false, false, false, false, listOf(swHevc, hwHevc)).map { it.name },
     )
-
-    // Explicit preferHevcOverDolbyVision switches VIDEO_DOLBY_VISION to HEVC base-layer hardware decoder
     assertEquals(
       listOf(hwHevc.name),
-      policy.selectDecoders(
-        mimeType = MimeTypes.VIDEO_DOLBY_VISION,
-        decoders = listOf(dv81Only),
-        softwareAudio = false,
-        ffmpegSupportsMime = false,
-        hasDtsPassthrough = false,
-        preferHevcOverDolbyVision = true,
-        hevcFallbackDecoders = listOf(swHevc, hwHevc),
-      ).map { it.name },
+      policy.selectDecoders(MimeTypes.VIDEO_DOLBY_VISION, listOf(dv81Only), false, false, false, true, listOf(swHevc, hwHevc)).map { it.name },
     )
-
-    // Recording a DV video decoder failure latches HEVC fallback for subsequent preparations
     policy.recordVideoCodecFailure(dv81Only)
     assertTrue(policy.isDolbyVisionFallbackActive)
     assertEquals(
       listOf(hwHevc.name),
-      policy.selectDecoders(
-        mimeType = MimeTypes.VIDEO_DOLBY_VISION,
-        decoders = listOf(dv81Only),
-        softwareAudio = false,
-        ffmpegSupportsMime = false,
-        hasDtsPassthrough = false,
-        preferHevcOverDolbyVision = false,
-        hevcFallbackDecoders = listOf(swHevc, hwHevc),
-      ).map { it.name },
+      policy.selectDecoders(MimeTypes.VIDEO_DOLBY_VISION, listOf(dv81Only), false, false, false, false, listOf(swHevc, hwHevc)).map { it.name },
     )
-
-    // Clearing fallback restores DV selection for the next distinct channel
     policy.clearDolbyVisionFallback()
     assertFalse(policy.isDolbyVisionFallbackActive)
-    assertEquals(
-      listOf(dv81Only.name),
-      policy.selectDecoders(
-        mimeType = MimeTypes.VIDEO_DOLBY_VISION,
-        decoders = listOf(dv81Only),
-        softwareAudio = false,
-        ffmpegSupportsMime = false,
-        hasDtsPassthrough = false,
-        preferHevcOverDolbyVision = false,
-        hevcFallbackDecoders = listOf(swHevc, hwHevc),
-      ).map { it.name },
-    )
   }
 
   @Test
   fun `production PolicyVideoRenderer proactively falls back to HEVC for DV Profile 7 when unsupported and respects tr-TR locale (#189)`() {
-    val app = RuntimeEnvironment.getApplication()
     val caps81 = CodecCapabilities().apply {
       profileLevels = arrayOf(CodecProfileLevel().apply { profile = CodecProfileLevel.DolbyVisionProfileDvheSt })
     }
     val caps7 = CodecCapabilities().apply {
       profileLevels = arrayOf(CodecProfileLevel().apply { profile = CodecProfileLevel.DolbyVisionProfileDvheDtb })
     }
-    val dv81Only = MediaCodecInfo.newInstance(
-      "c2.vendor.dv81.decoder",
-      MimeTypes.VIDEO_DOLBY_VISION,
-      MimeTypes.VIDEO_DOLBY_VISION,
-      caps81,
-      true,
-      false,
-      true,
-      false,
-      false,
-    )
-    val dv7Capable = MediaCodecInfo.newInstance(
-      "c2.vendor.dv7.decoder",
-      MimeTypes.VIDEO_DOLBY_VISION,
-      MimeTypes.VIDEO_DOLBY_VISION,
-      caps7,
-      true,
-      false,
-      true,
-      false,
-      false,
-    )
+    val dv81Only = MediaCodecInfo.newInstance("c2.vendor.dv81.decoder", MimeTypes.VIDEO_DOLBY_VISION, MimeTypes.VIDEO_DOLBY_VISION, caps81, true, false, true, false, false)
+    val dv7Capable = MediaCodecInfo.newInstance("c2.vendor.dv7.decoder", MimeTypes.VIDEO_DOLBY_VISION, MimeTypes.VIDEO_DOLBY_VISION, caps7, true, false, true, false, false)
     val hwHevc = codec("c2.vendor.hevc.decoder", MimeTypes.VIDEO_H265, hw = true)
     val dv7Format = Format.Builder()
       .setSampleMimeType(MimeTypes.VIDEO_DOLBY_VISION)
@@ -351,18 +510,6 @@ class CodecPolicyTest {
       .setWidth(3840)
       .setHeight(2160)
       .build()
-
-    fun buildVideoRenderer(policy: CodecPolicy, preferHevc: Boolean): PolicyVideoRenderer {
-      val renderers = createRenderersFactory(app, policy, softwareAudio = false, preferHevcOverDolbyVision = preferHevc)
-        .createRenderers(
-          Handler(Looper.getMainLooper()),
-          object : VideoRendererEventListener {},
-          object : AudioRendererEventListener {},
-          TextOutput {},
-          MetadataOutput {},
-        )
-      return renderers.filterIsInstance<PolicyVideoRenderer>().single()
-    }
 
     val selectorDv81Only = MediaCodecSelector { mimeType, _, _ ->
       when (mimeType) {
@@ -386,22 +533,11 @@ class CodecPolicyTest {
       assertTrue(isDolbyVisionProfile7Codec("DVH1.07.09"))
 
       val defaultRenderer = buildVideoRenderer(CodecPolicy(), preferHevc = false)
-      // DV Profile 7 stream on DV 8.1-only device proactively selects HEVC base-layer decoder!
-      assertEquals(
-        listOf(hwHevc.name),
-        defaultRenderer.resolveDecoderInfosForTest(selectorDv81Only, dv7Format).map { it.name },
-      )
-      // DV Profile 7 stream on Profile 7-capable device keeps native DV decoder!
-      assertEquals(
-        listOf(dv7Capable.name),
-        defaultRenderer.resolveDecoderInfosForTest(selectorDv7Capable, dv7Format).map { it.name },
-      )
-      // Explicit preferHevcOverDolbyVision=true selects HEVC even on a Profile 7-capable device
+      assertEquals(listOf(hwHevc.name), defaultRenderer.resolveDecoderInfosForTest(selectorDv81Only, dv7Format).map { it.name })
+      assertEquals(listOf(dv7Capable.name), defaultRenderer.resolveDecoderInfosForTest(selectorDv7Capable, dv7Format).map { it.name })
+
       val preferHevcRenderer = buildVideoRenderer(CodecPolicy(), preferHevc = true)
-      assertEquals(
-        listOf(hwHevc.name),
-        preferHevcRenderer.resolveDecoderInfosForTest(selectorDv7Capable, dv7Format).map { it.name },
-      )
+      assertEquals(listOf(hwHevc.name), preferHevcRenderer.resolveDecoderInfosForTest(selectorDv7Capable, dv7Format).map { it.name })
     } finally {
       Locale.setDefault(previousLocale)
     }
@@ -419,40 +555,35 @@ class CodecPolicyTest {
       }
     }
 
-    // Cached DTS-only capabilities answer DTS=true, DTS-HD=false with zero IPC
     policy.updateAudioCapabilitiesForTest(AudioCapabilities(intArrayOf(C.ENCODING_DTS), 6))
     assertTrue(policy.hasDtsPassthrough(countingContext, MimeTypes.AUDIO_DTS))
     assertTrue(policy.hasDtsPassthrough(countingContext, MimeTypes.AUDIO_DTS_EXPRESS))
     assertFalse(policy.hasDtsPassthrough(countingContext, MimeTypes.AUDIO_DTS_HD))
     assertEquals(0, ipcQueries)
 
-    // Route change to AVR supporting DTS-HD updates both DTS and DTS-HD immediately
     policy.updateAudioCapabilitiesForTest(AudioCapabilities(intArrayOf(C.ENCODING_DTS_HD), 8))
     assertTrue(policy.hasDtsPassthrough(countingContext, MimeTypes.AUDIO_DTS))
     assertTrue(policy.hasDtsPassthrough(countingContext, MimeTypes.AUDIO_DTS_HD))
     assertEquals(0, ipcQueries)
 
-    // Route change to TV speakers (no DTS) flips back to false
     policy.updateAudioCapabilitiesForTest(AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES)
     assertFalse(policy.hasDtsPassthrough(countingContext, MimeTypes.AUDIO_DTS))
     assertFalse(policy.hasDtsPassthrough(countingContext, MimeTypes.AUDIO_DTS_HD))
     assertEquals(0, ipcQueries)
 
-    // Lifecycle start/stop on playback HandlerThread is idempotent and populates cache
     policy.updateAudioCapabilitiesForTest(null)
     val thread = HandlerThread("codec-policy-test").apply { start() }
     try {
       val handler = Handler(thread.looper)
       policy.startAudioCapabilities(app, handler)
-      policy.startAudioCapabilities(app, handler) // idempotent
+      policy.startAudioCapabilities(app, handler)
       val synced = CountDownLatch(1)
       handler.post { synced.countDown() }
       assertTrue(synced.await(5, TimeUnit.SECONDS))
-      // After startAudioCapabilities completes, cached lookup succeeds without hitting countingContext
       assertFalse(policy.hasDtsPassthrough(countingContext, MimeTypes.AUDIO_DTS))
       assertEquals(0, ipcQueries)
       policy.stopAudioCapabilities()
-      policy.stopAudioCapabilities() // idempotent
+      policy.stopAudioCapabilities()
     } finally {
       thread.quitSafely()
     }

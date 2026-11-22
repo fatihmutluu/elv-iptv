@@ -28,16 +28,20 @@ jest.mock('@elv/engine-media3', () => ({
     testID,
     resizeMode,
     subtitleBottomInsetPx,
+    surfaceRecreationToken,
+    useTextureView,
   }: {
     testID?: string;
     resizeMode?: string;
     subtitleBottomInsetPx?: number;
+    surfaceRecreationToken?: number;
+    useTextureView?: boolean;
   }) => {
     const { View: RNView } = require('react-native');
     return (
       <RNView
         testID={testID ?? 'media3'}
-        accessibilityLabel={`media3:${resizeMode ?? ''}:${subtitleBottomInsetPx ?? ''}`}
+        accessibilityLabel={`media3:${resizeMode ?? ''}:${subtitleBottomInsetPx ?? ''}:${surfaceRecreationToken ?? ''}:${useTextureView ?? ''}`}
       />
     );
   },
@@ -65,7 +69,7 @@ describe('PlayerSurface', () => {
     expect(screen.getByTestId('surface')).toHaveProp('accessibilityLabel', 'aether:fit:96');
   });
 
-  it('renders Media3Surface on Android forwarding resizeMode and subtitleBottomInsetPx', async () => {
+  it('renders Media3Surface on Android forwarding resizeMode, subtitleBottomInsetPx, surfaceRecreationToken, and useTextureView (#144, #262)', async () => {
     jest.replaceProperty(Platform, 'OS', 'android');
     await render(
       <View>
@@ -73,10 +77,15 @@ describe('PlayerSurface', () => {
           engine={engine}
           resizeMode="fill"
           subtitleBottomInsetPx={120}
+          surfaceRecreationToken={3}
+          useTextureView
           testID="surface"
         />
       </View>,
     );
-    expect(screen.getByTestId('surface')).toHaveProp('accessibilityLabel', 'media3:fill:120');
+    expect(screen.getByTestId('surface')).toHaveProp(
+      'accessibilityLabel',
+      'media3:fill:120:3:true',
+    );
   });
 });

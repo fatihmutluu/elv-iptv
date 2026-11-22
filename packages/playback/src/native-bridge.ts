@@ -1,3 +1,4 @@
+import type { BufferPreset } from '@elv/domain';
 import type {
   AttemptToken,
   ClockAnchor,
@@ -17,6 +18,7 @@ export interface NativeLoadCommand {
   startMs?: number;
   softwareAudio?: boolean;
   preferHevcOverDolbyVision?: boolean;
+  bufferPreset?: BufferPreset;
   audioTrackId?: string;
   subtitleTrackId?: string | null;
 }
@@ -28,6 +30,7 @@ export interface NativeEngineHandle {
   play(attempt: AttemptToken): void;
   pause(attempt: AttemptToken): void;
   seek(attempt: AttemptToken, positionMs: number): void;
+  setScrubbing?(attempt: AttemptToken, scrubbing: boolean): void;
   selectAudioTrack?(attempt: AttemptToken, id: string): void;
   selectSubtitleTrack?(attempt: AttemptToken, id: string | null): void;
   stop(attempt: AttemptToken): void;
@@ -51,6 +54,7 @@ function toNativeLoad(cmd: LoadCommand): NativeLoadCommand {
     ...(options?.preferHevcOverDolbyVision === undefined
       ? {}
       : { preferHevcOverDolbyVision: options.preferHevcOverDolbyVision }),
+    ...(options?.bufferPreset === undefined ? {} : { bufferPreset: options.bufferPreset }),
     ...(options?.audioTrackId === undefined ? {} : { audioTrackId: options.audioTrackId }),
     ...(options?.subtitleTrackId === undefined ? {} : { subtitleTrackId: options.subtitleTrackId }),
   };
@@ -139,6 +143,13 @@ export function bridgeNativeEngine(
       adoptAttempt(attempt);
       native.seek(attempt, positionMs);
     }),
+    ...(native.setScrubbing === undefined
+      ? {}
+      : {
+          setScrubbing: command((attempt: AttemptToken, scrubbing: boolean) => {
+            native.setScrubbing?.(hasCommand ? activeAttempt : attempt, scrubbing);
+          }),
+        }),
     ...(native.selectAudioTrack === undefined
       ? {}
       : {

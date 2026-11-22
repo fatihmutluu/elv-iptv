@@ -65,9 +65,10 @@ export function usePlayerControls(params: PlayerControlsParams) {
     if (!hasService) setMuted(false);
   }, [hasService]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset speed, digit buffer, and select guard on item change
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset speed, scrubbing, digit buffer, and select guard on item change
   useEffect(() => {
     setPlaybackSpeed(1);
+    setBarScrubbing(false);
     digitBuf.cancel();
     selectGuardRef.current?.reset();
     return () => digitBuf.cancel();
@@ -82,6 +83,24 @@ export function usePlayerControls(params: PlayerControlsParams) {
       timersRef,
       onSeekCommit: params.onSeekCommit,
     });
+
+  const scrubbingActive =
+    hasService && activeTarget.kind === 'vod' && (barScrubbing || previewPositionMs !== undefined);
+  const lastScrubbingSentRef = useRef(false);
+  useEffect(() => {
+    if (scrubbingActive !== lastScrubbingSentRef.current) {
+      lastScrubbingSentRef.current = scrubbingActive;
+      serviceRef.current?.setScrubbing?.(scrubbingActive);
+    }
+  }, [scrubbingActive, serviceRef]);
+  useEffect(() => {
+    return () => {
+      if (lastScrubbingSentRef.current) {
+        lastScrubbingSentRef.current = false;
+        serviceRef.current?.setScrubbing?.(false);
+      }
+    };
+  }, [serviceRef]);
 
   const overlay = usePlayerOverlayState({
     formFactor,

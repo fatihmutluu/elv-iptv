@@ -4,6 +4,7 @@ import android.graphics.SurfaceTexture
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.TextureView
 import android.view.View
 import androidx.annotation.OptIn
 import androidx.media3.common.VideoSize
@@ -11,6 +12,9 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.SubtitleView
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -110,10 +114,8 @@ class SurfaceControllerTest {
       deadSurface.release()
       tex.release()
 
-      val fakeHolder = object : SurfaceHolder by (view.getChildAt(0) as SurfaceView).holder {
-        override fun getSurface(): Surface = deadSurface
-      }
-      view.surfaceCreated(fakeHolder)
+      val holder = (view.getChildAt(0) as SurfaceView).holder
+      view.onSurfaceCreatedForTest(holder, deadSurface)
       Thread.sleep(50)
       assertTrue("invalid surface must never emit surface created", events.none { it["type"] == "surface" })
       view.bind(null)
@@ -157,6 +159,170 @@ class SurfaceControllerTest {
       realPlayer.release()
       surface.release()
       tex.release()
+    }
+  }
+
+  @Test
+  fun `setSurfaceRecreationToken replaces child 0 SurfaceView, keeps z-order, and ignores retired callbacks (#144)`() {
+    val context = RuntimeEnvironment.getApplication()
+    val appContext = createTestAppContext()
+    val engine = Media3Engine(context)
+    val events = java.util.concurrent.CopyOnWriteArrayList<Map<String, Any?>>()
+    engine.eventObserverForTest = { events += it }
+    val tex1 = SurfaceTexture(10)
+    val surface1 = Surface(tex1)
+    val tex2 = SurfaceTexture(11)
+    val surface2 = Surface(tex2)
+    try {
+      val view = Media3SurfaceView(context, appContext)
+      view.measure(
+        View.MeasureSpec.makeMeasureSpec(1280, View.MeasureSpec.EXACTLY),
+        View.MeasureSpec.makeMeasureSpec(720, View.MeasureSpec.EXACTLY),
+      )
+      view.layout(0, 0, 1280, 720)
+      view.bind(engine)
+
+      val originalSurfaceView = view.getChildAt(0) as SurfaceView
+      val shutterView = view.getChildAt(1)
+      val subtitleView = view.getChildAt(2) as SubtitleView
+
+      // Initial token 0 must NOT recreate SurfaceView
+      view.setSurfaceRecreationToken(0)
+      assertSame("initial token 0 must keep original SurfaceView", originalSurfaceView, view.getChildAt(0))
+
+      // Simulate active surface on original SurfaceView
+      val oldHolder = originalSurfaceView.holder
+      view.onSurfaceCreatedForTest(oldHolder, surface1)
+      waitForSurfaceEvents(events, expectedCount = 1)
+      assertEquals(listOf("created"), surfaceChanges(events))
+
+      // Incrementing token swaps child 0 to a brand-new SurfaceView while keeping shutter (1) & subtitleView (2)
+      view.setSurfaceRecreationToken(1)
+      val replacedSurfaceView = view.getChildAt(0) as SurfaceView
+      assertNotSame("token change must create a fresh SurfaceView", originalSurfaceView, replacedSurfaceView)
+      assertSame("child 1 shutter must stay intact", shutterView, view.getChildAt(1))
+      assertSame("child 2 SubtitleView must stay intact", subtitleView, view.getChildAt(2))
+      assertFalse("new SurfaceView must not be focusable", replacedSurfaceView.isFocusable)
+      assertEquals(1280, replacedSurfaceView.width)
+      assertEquals(720, replacedSurfaceView.height)
+      assertEquals("old surface must be detached on recreation", listOf("created", "destroyed"), surfaceChanges(events))
+
+      // Repeating same token 1 must be a no-op
+      view.setSurfaceRecreationToken(1)
+      assertSame("unchanged token must not recreate SurfaceView", replacedSurfaceView, view.getChildAt(0))
+
+      // Attach new surface on replaced SurfaceView
+      val newHolder = replacedSurfaceView.holder
+      view.onSurfaceCreatedForTest(newHolder, surface2)
+      waitForSurfaceEvents(events, expectedCount = 3)
+      assertEquals(listOf("created", "destroyed", "created"), surfaceChanges(events))
+
+      // Late callbacks from retired SurfaceView #1 must be strictly ignored
+      view.surfaceDestroyed(oldHolder)
+      view.onSurfaceCreatedForTest(oldHolder, surface1)
+      Thread.sleep(50)
+      assertEquals(
+        "late retired SurfaceView callbacks must not detach active surface",
+        listOf("created", "destroyed", "created"),
+        surfaceChanges(events),
+      )
+      view.bind(null)
+    } finally {
+      engine.dispose()
+      surface1.release()
+      tex1.release()
+      surface2.release()
+      tex2.release()
+    }
+  }
+
+  @Test
+  fun `setUseTextureView switches child 0 to TextureView with clean Surface release and retired-listener guard (#262)`() {
+    val context = RuntimeEnvironment.getApplication()
+    val appContext = createTestAppContext()
+    val engine = Media3Engine(context)
+    val events = java.util.concurrent.CopyOnWriteArrayList<Map<String, Any?>>()
+    engine.eventObserverForTest = { events += it }
+    val st1 = SurfaceTexture(20)
+    val st2 = SurfaceTexture(21)
+    try {
+      val view = Media3SurfaceView(context, appContext)
+      view.measure(
+        View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.EXACTLY),
+        View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+      )
+      view.layout(0, 0, 1920, 1080)
+      view.bind(engine)
+
+      val shutterView = view.getChildAt(1)
+      val subtitleView = view.getChildAt(2) as SubtitleView
+
+      // Default must remain SurfaceView
+      assertTrue(view.getChildAt(0) is SurfaceView)
+
+      // Opt into TextureView mode
+      view.setUseTextureView(true)
+      val tv1 = view.getChildAt(0) as TextureView
+      assertFalse("TextureView must not be focusable", tv1.isFocusable)
+      assertSame("child 1 shutter must stay intact", shutterView, view.getChildAt(1))
+      assertSame("child 2 SubtitleView must stay intact", subtitleView, view.getChildAt(2))
+      assertEquals(1920, tv1.width)
+      assertEquals(1080, tv1.height)
+
+      val listener1 = tv1.surfaceTextureListener
+      assertNotNull("TextureView must have SurfaceTextureListener installed", listener1)
+      listener1!!.onSurfaceTextureAvailable(st1, 1920, 1080)
+      waitForSurfaceEvents(events, expectedCount = 1)
+      assertEquals(listOf("created"), surfaceChanges(events))
+
+      val createdSurface1 = view.activeTextureSurfaceForTest
+      assertNotNull(createdSurface1)
+      assertTrue(createdSurface1!!.isValid)
+
+      // Recreating via token in TextureView mode creates a fresh TextureView, detaches and releases old Surface
+      view.setSurfaceRecreationToken(1)
+      val tv2 = view.getChildAt(0) as TextureView
+      assertNotSame(tv1, tv2)
+      assertFalse("old TextureView Surface must be released on swap", createdSurface1.isValid)
+      assertEquals(listOf("created", "destroyed"), surfaceChanges(events))
+
+      val listener2 = tv2.surfaceTextureListener!!
+      listener2.onSurfaceTextureAvailable(st2, 1920, 1080)
+      waitForSurfaceEvents(events, expectedCount = 3)
+      assertEquals(listOf("created", "destroyed", "created"), surfaceChanges(events))
+      val createdSurface2 = view.activeTextureSurfaceForTest!!
+      assertTrue(createdSurface2.isValid)
+
+      // Late destroy callback from retired TextureView #1 returns true (no SurfaceTexture leak) without detaching tv2
+      assertTrue(listener1.onSurfaceTextureDestroyed(st1))
+      assertTrue("retired listener must not release active tv2 Surface", createdSurface2.isValid)
+      assertEquals(listOf("created", "destroyed", "created"), surfaceChanges(events))
+
+      // Active TextureView destroy detaches, releases Surface, and returns true
+      assertTrue(listener2.onSurfaceTextureDestroyed(st2))
+      assertFalse("onSurfaceTextureDestroyed must release active TextureView Surface", createdSurface2.isValid)
+      assertEquals(listOf("created", "destroyed", "created", "destroyed"), surfaceChanges(events))
+
+      // Toggling back to false restores SurfaceView at child 0
+      view.setUseTextureView(false)
+      assertTrue("disabling TextureView must restore SurfaceView at child 0", view.getChildAt(0) is SurfaceView)
+      assertSame(shutterView, view.getChildAt(1))
+      assertSame(subtitleView, view.getChildAt(2))
+      view.bind(null)
+    } finally {
+      engine.dispose()
+      st1.release()
+      st2.release()
+    }
+  }
+
+  private fun surfaceChanges(events: List<Map<String, Any?>>): List<Any?> =
+    events.filter { it["type"] == "surface" }.map { it["change"] }
+
+  private fun waitForSurfaceEvents(events: List<Map<String, Any?>>, expectedCount: Int) {
+    val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3)
+    while (surfaceChanges(events).size < expectedCount && System.nanoTime() < deadline) {
+      Thread.sleep(10)
     }
   }
 

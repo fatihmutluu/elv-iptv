@@ -602,4 +602,166 @@ class Media3EngineTest {
       engine.dispose()
     }
   }
+
+  @Test
+  fun `rebuilds ExoPlayer when StreamKind or BufferPreset changes (#147)`() {
+    val engine = Media3Engine(RuntimeEnvironment.getApplication())
+    try {
+      val handlerField = Media3Engine::class.java.getDeclaredField("handler").apply { isAccessible = true }
+      val playerField = Media3Engine::class.java.getDeclaredField("player").apply { isAccessible = true }
+      val handler = handlerField.get(engine) as android.os.Handler
+
+      fun currentPlayer(): androidx.media3.exoplayer.ExoPlayer? {
+        var found: androidx.media3.exoplayer.ExoPlayer? = null
+        val latch = CountDownLatch(1)
+        handler.post {
+          found = playerField.get(engine) as androidx.media3.exoplayer.ExoPlayer?
+          latch.countDown()
+        }
+        assertTrue(latch.await(5, TimeUnit.SECONDS))
+        return found
+      }
+
+      // Raw TS live (AUTO)
+      engine.load(
+        1,
+        LoadRequest(
+          url = "http://127.0.0.1:9/live/demo/demo/1.ts",
+          headers = emptyMap(),
+          live = true,
+          startMs = null,
+          softwareAudio = false,
+          bufferPreset = BufferPreset.AUTO,
+        ),
+      )
+      val rawTsPlayer = currentPlayer()
+      org.junit.Assert.assertNotNull(rawTsPlayer)
+
+      // HLS live (AUTO) -> StreamKind changes RAW_TS_LIVE -> HLS_LIVE -> must rebuild
+      engine.load(
+        2,
+        LoadRequest(
+          url = "http://127.0.0.1:9/live/demo/demo/1.m3u8",
+          headers = emptyMap(),
+          live = true,
+          startMs = null,
+          softwareAudio = false,
+          bufferPreset = BufferPreset.AUTO,
+        ),
+      )
+      val hlsLivePlayer = currentPlayer()
+      org.junit.Assert.assertNotSame("RAW_TS_LIVE -> HLS_LIVE must rebuild ExoPlayer", rawTsPlayer, hlsLivePlayer)
+
+      // HLS live (LARGE) -> BufferPreset changes AUTO -> LARGE -> must rebuild
+      engine.load(
+        3,
+        LoadRequest(
+          url = "http://127.0.0.1:9/live/demo/demo/2.m3u8",
+          headers = emptyMap(),
+          live = true,
+          startMs = null,
+          softwareAudio = false,
+          bufferPreset = BufferPreset.LARGE,
+        ),
+      )
+      val largePresetPlayer = currentPlayer()
+      org.junit.Assert.assertNotSame("BufferPreset change must rebuild ExoPlayer", hlsLivePlayer, largePresetPlayer)
+    } finally {
+      engine.dispose()
+    }
+  }
+
+  @Test
+  fun `enables isScrubbingModeEnabled only on VOD and resets unconditionally on stop, load, retry, and recreate (#222)`() {
+    val engine = Media3Engine(RuntimeEnvironment.getApplication())
+    try {
+      val handlerField = Media3Engine::class.java.getDeclaredField("handler").apply { isAccessible = true }
+      val playerField = Media3Engine::class.java.getDeclaredField("player").apply { isAccessible = true }
+      val handler = handlerField.get(engine) as android.os.Handler
+
+      fun readScrubbing(): Boolean {
+        var value = false
+        val latch = CountDownLatch(1)
+        handler.post {
+          val current = playerField.get(engine) as androidx.media3.exoplayer.ExoPlayer?
+          value = current?.isScrubbingModeEnabled == true
+          latch.countDown()
+        }
+        assertTrue(latch.await(5, TimeUnit.SECONDS))
+        return value
+      }
+
+      // Live stream ignores scrubbing mode
+      engine.load(1, LoadRequest("http://127.0.0.1:9/live/demo/demo/1.ts", emptyMap(), live = true, startMs = null, softwareAudio = false))
+      engine.setScrubbing(1, true)
+      assertFalse("live stream must never enable scrubbing mode", readScrubbing())
+
+      // VOD enables scrubbing mode
+      engine.load(2, LoadRequest("http://127.0.0.1:9/movie/demo/demo/1.mp4", emptyMap(), live = false, startMs = 0L, softwareAudio = false))
+      engine.setScrubbing(2, true)
+      assertTrue("VOD must enable ExoPlayer scrubbing mode", readScrubbing())
+
+      // retry resets scrubbing mode unconditionally
+      engine.retry(3)
+      assertFalse("retry must reset scrubbing mode to false", readScrubbing())
+
+      // Re-enable then stop resets scrubbing mode unconditionally
+      engine.setScrubbing(3, true)
+      assertTrue(readScrubbing())
+      engine.stop(4)
+      assertFalse("stop must reset scrubbing mode to false", readScrubbing())
+
+      // Re-enable on new VOD load then recreate resets scrubbing mode unconditionally
+      engine.load(5, LoadRequest("http://127.0.0.1:9/movie/demo/demo/2.mp4", emptyMap(), live = false, startMs = 0L, softwareAudio = false))
+      engine.setScrubbing(5, true)
+      assertTrue(readScrubbing())
+      engine.recreate(6)
+      assertFalse("recreate must reset scrubbing mode to false", readScrubbing())
+    } finally {
+      engine.dispose()
+    }
+  }
+
+  @Test
+  fun `sanitizes subtitle mojibake cues before forwarding to ViewSink and exposes supportsHardwareHevc4k (#150, #184, #260)`() {
+    val engine = Media3Engine(RuntimeEnvironment.getApplication())
+    val receivedCues = java.util.concurrent.CopyOnWriteArrayList<List<androidx.media3.common.text.Cue>>()
+    try {
+      engine.bindView(object : ViewSink {
+        override fun onShutter(media: Long, framed: Boolean) = Unit
+        override fun onVideoSize(width: Int, height: Int, pixelRatio: Float) = Unit
+        override fun onScreenOn(on: Boolean) = Unit
+        override fun onCues(cues: List<androidx.media3.common.text.Cue>) {
+          receivedCues += cues
+        }
+      })
+
+      val handlerField = Media3Engine::class.java.getDeclaredField("handler").apply { isAccessible = true }
+      val picturesField = Media3Engine::class.java.getDeclaredField("pictures").apply { isAccessible = true }
+      val fenceField = Media3Engine::class.java.getDeclaredField("fence").apply { isAccessible = true }
+      val handler = handlerField.get(engine) as android.os.Handler
+      val pictures = picturesField.get(engine) as androidx.media3.common.Player.Listener
+      val fence = fenceField.get(engine) as PrepareFence
+
+      engine.load(1, LoadRequest("http://127.0.0.1:9/movie/demo/demo/1.mp4", emptyMap(), live = false, startMs = 0L, softwareAudio = false))
+      engine.setAudioBoostDb(1, 6.0)
+
+      val step = CountDownLatch(1)
+      handler.post {
+        fence.begin(99L, reused = false)
+        fence.passed(99L)
+        val mojibakeCue = androidx.media3.common.text.Cue.Builder().setText("Ã‡Ã¶p").build()
+        pictures.onCues(androidx.media3.common.text.CueGroup(listOf(mojibakeCue), 0L))
+        step.countDown()
+      }
+      assertTrue(step.await(5, TimeUnit.SECONDS))
+
+      val nonEmpty = receivedCues.lastOrNull { it.isNotEmpty() }
+      org.junit.Assert.assertNotNull("sanitized cue must be delivered to ViewSink", nonEmpty)
+      assertEquals("Çöp", nonEmpty!!.single().text.toString())
+      assertEquals(engine.codecPolicy.supportsHardwareHevc4k, engine.supportsHardwareHevc4k)
+    } finally {
+      engine.dispose()
+    }
+  }
 }

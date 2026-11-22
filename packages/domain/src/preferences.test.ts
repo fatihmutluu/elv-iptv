@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  BUFFER_PRESETS,
+  type BufferPreset,
   createKvPreferencesStore,
   createMemoryPreferencesStore,
   DEFAULT_PREFERENCES,
@@ -19,12 +21,15 @@ describe('preferences codec', () => {
     expect(MAX_PREFERENCES_BYTES).toBe(4096);
     expect(MIN_PREF_FONT_SCALE).toBe(0.9);
     expect(MAX_PREF_FONT_SCALE).toBe(1.2);
+    expect(BUFFER_PRESETS).toEqual(['auto', 'balanced', 'large']);
     expect(DEFAULT_PREFERENCES).toEqual({
       version: 1,
       themePreset: 'obsidianCrimson',
       locale: 'system',
       fontScale: 1,
       reduceMotion: false,
+      bufferPreset: 'auto',
+      useTextureView: false,
     });
   });
 
@@ -59,6 +64,29 @@ describe('preferences codec', () => {
       locale: 'tr-TR',
       fontScale: 1.1,
       reduceMotion: true,
+      bufferPreset: 'auto',
+      useTextureView: false,
+    });
+
+    const withPlaybackFields = parsePreferences(
+      JSON.stringify({
+        version: 1,
+        themePreset: 'midnightSlate',
+        locale: 'en',
+        fontScale: 1,
+        reduceMotion: false,
+        bufferPreset: 'large',
+        useTextureView: true,
+      }),
+    );
+    expect(withPlaybackFields).toEqual({
+      version: 1,
+      themePreset: 'midnightSlate',
+      locale: 'en',
+      fontScale: 1,
+      reduceMotion: false,
+      bufferPreset: 'large',
+      useTextureView: true,
     });
 
     const partialInvalid = parsePreferences(
@@ -68,6 +96,8 @@ describe('preferences codec', () => {
         locale: '   ',
         fontScale: 'large',
         reduceMotion: 'true',
+        bufferPreset: 'giant',
+        useTextureView: 'yes',
       }),
     );
     expect(partialInvalid).toEqual(DEFAULT_PREFERENCES);
@@ -79,6 +109,8 @@ describe('preferences codec', () => {
         locale: 'en',
         fontScale: Number.NaN,
         reduceMotion: true,
+        bufferPreset: 'balanced',
+        useTextureView: false,
       }),
     );
     expect(nonFinite).toEqual({
@@ -87,6 +119,8 @@ describe('preferences codec', () => {
       locale: 'en',
       fontScale: 1,
       reduceMotion: true,
+      bufferPreset: 'balanced',
+      useTextureView: false,
     });
   });
 
@@ -106,6 +140,8 @@ describe('preferences codec', () => {
       locale: 'system',
       fontScale: 0.9,
       reduceMotion: false,
+      bufferPreset: 'auto',
+      useTextureView: false,
     });
 
     const high = parsePreferences(
@@ -127,16 +163,31 @@ describe('preferences codec', () => {
       locale: 'tr',
       fontScale: 1.05,
       reduceMotion: true,
+      bufferPreset: 'large',
+      useTextureView: true,
     });
     expect(encoded.ok).toBe(true);
     if (encoded.ok) {
+      expect(encoded.value.length).toBeLessThan(2048);
       expect(parsePreferences(encoded.value)).toEqual({
         version: 1,
         themePreset: 'obsidianCrimson',
         locale: 'tr',
         fontScale: 1.05,
         reduceMotion: true,
+        bufferPreset: 'large',
+        useTextureView: true,
       });
+    }
+
+    // Invalid bufferPreset on direct serializePreferences falls back to default
+    const invalidPresetEncoded = serializePreferences({
+      ...DEFAULT_PREFERENCES,
+      bufferPreset: 'invalid' as unknown as BufferPreset,
+    });
+    expect(invalidPresetEncoded.ok).toBe(true);
+    if (invalidPresetEncoded.ok) {
+      expect(parsePreferences(invalidPresetEncoded.value).bufferPreset).toBe('auto');
     }
 
     const asciiOver: PreferencesSnapshot = {
@@ -177,6 +228,8 @@ describe('createMemoryPreferencesStore', () => {
       locale: 'tr',
       fontScale: 1.2,
       reduceMotion: false,
+      bufferPreset: 'auto',
+      useTextureView: false,
     });
 
     const seen: PreferencesSnapshot[] = [];
@@ -186,7 +239,12 @@ describe('createMemoryPreferencesStore', () => {
     const unsubThrow = store.subscribe(throwing);
     const unsub = store.subscribe((snap) => seen.push(snap));
 
-    const updated = await store.update({ reduceMotion: true, fontScale: 0.5 });
+    const updated = await store.update({
+      reduceMotion: true,
+      fontScale: 0.5,
+      bufferPreset: 'balanced',
+      useTextureView: true,
+    });
     expect(updated).toEqual({
       ok: true,
       value: {
@@ -195,6 +253,8 @@ describe('createMemoryPreferencesStore', () => {
         locale: 'tr',
         fontScale: 0.9,
         reduceMotion: true,
+        bufferPreset: 'balanced',
+        useTextureView: true,
       },
     });
     expect(throwing).toHaveBeenCalledTimes(1);
@@ -297,22 +357,25 @@ describe('createKvPreferencesStore', () => {
     };
     const store = createKvPreferencesStore(backend);
 
-    const [r1, r2, r3, r4] = await Promise.all([
+    const [r1, r2, r3, r4, r5] = await Promise.all([
       store.update({ reduceMotion: true }),
       store.update({ locale: 'tr' }),
       store.update({ fontScale: 1.15 }),
       store.update({ themePreset: 'midnightSlate' }),
+      store.update({ bufferPreset: 'large', useTextureView: true }),
     ]);
 
-    expect(r1.ok && r2.ok && r3.ok && r4.ok).toBe(true);
+    expect(r1.ok && r2.ok && r3.ok && r4.ok && r5.ok).toBe(true);
     const expected: PreferencesSnapshot = {
       version: 1,
       themePreset: 'midnightSlate',
       locale: 'tr',
       fontScale: 1.15,
       reduceMotion: true,
+      bufferPreset: 'large',
+      useTextureView: true,
     };
-    expect(r4.ok && r4.value).toEqual(expected);
+    expect(r5.ok && r5.value).toEqual(expected);
     expect(await store.load()).toEqual(expected);
     expect(parsePreferences(map.get('elv.preferences.v1'))).toEqual(expected);
   });
@@ -455,6 +518,8 @@ describe('createKvPreferencesStore', () => {
       locale: 'tr',
       fontScale: 1.15,
       reduceMotion: true,
+      bufferPreset: 'auto',
+      useTextureView: false,
     });
     expect(backend.set).not.toHaveBeenCalled();
     expect(timers.size).toBe(1);
@@ -472,6 +537,8 @@ describe('createKvPreferencesStore', () => {
           locale: 'tr',
           fontScale: 1.15,
           reduceMotion: true,
+          bufferPreset: 'auto',
+          useTextureView: false,
         },
       });
     }

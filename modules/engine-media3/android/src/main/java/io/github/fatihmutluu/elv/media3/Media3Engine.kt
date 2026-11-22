@@ -7,6 +7,7 @@ import android.os.Looper
 import android.util.Log
 import android.view.Surface
 import androidx.annotation.OptIn
+import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
@@ -54,33 +55,29 @@ class Media3Engine : SharedObject {
   internal val gate = ConnectionGate(closer)
   private val http = engineHttpClient()
   internal val codecPolicy = CodecPolicy()
+  private val audioEffects = AudioEffectsController(handler)
   private val fence = PrepareFence()
   private val surfaces = SurfaceController()
   private val reporter = EventReporter(
-    handler = handler,
-    fence = fence,
-    hasInvalidAttachedSurface = surfaces::hasInvalidAttachedSurface,
-    send = ::sendEvent,
-    onHlsDetected = ::playAsHls,
-    onBehindLiveWindow = ::recoverBehindLiveWindow,
-    onAudioFocusDenied = ::handleAudioFocusDenied,
-    onVideoCodecFailed = codecPolicy::recordVideoCodecFailure,
-    onDolbyVisionFailed = codecPolicy::recordDolbyVisionFallback,
-    onAudioCodecFailed = ::handleAudioCodecFailed,
-    onFirstFrame = surfaces::onFramed,
-    onCue = surfaces::onCue,
+    handler = handler, fence = fence, hasInvalidAttachedSurface = surfaces::hasInvalidAttachedSurface,
+    send = ::sendEvent, onHlsDetected = ::playAsHls, onBehindLiveWindow = ::recoverBehindLiveWindow,
+    onAudioFocusDenied = ::handleAudioFocusDenied, onVideoCodecFailed = codecPolicy::recordVideoCodecFailure,
+    onDolbyVisionFailed = codecPolicy::recordDolbyVisionFallback, onAudioCodecFailed = ::handleAudioCodecFailed,
+    onFirstFrame = surfaces::onFramed, onCue = surfaces::onCue,
   )
   private val pictures = object : Player.Listener {
-    override fun onVideoSizeChanged(videoSize: VideoSize) {
-      if (fence.isRendererOpen) surfaces.onVideoSizeChanged(videoSize)
-    }
+    override fun onVideoSizeChanged(videoSize: VideoSize) { if (fence.isRendererOpen) surfaces.onVideoSizeChanged(videoSize) }
     override fun onTracksChanged(tracks: Tracks) {
       val current = player ?: return
-      if (request != null && fence.acceptsPlayer(current)) tracksBridge.onTracksChanged(current, tracks)
+      if (request != null && fence.acceptsPlayer(current)) {
+        tracksBridge.onTracksChanged(current, tracks)
+        audioEffects.onTracksChanged(tracks)
+      }
     }
     override fun onCues(cueGroup: CueGroup) {
-      if (request != null && fence.isRendererOpen && !tracksBridge.isTextDisabled) surfaces.onCues(cueGroup.cues)
+      if (request != null && fence.isRendererOpen && !tracksBridge.isTextDisabled) surfaces.onCues(sanitizeCues(cueGroup.cues))
     }
+    override fun onAudioSessionIdChanged(audioSessionId: Int) = audioEffects.onAudioSessionIdChanged(audioSessionId)
   }
 
   @Volatile
@@ -89,7 +86,8 @@ class Media3Engine : SharedObject {
   private var player: ExoPlayer? = null
   private var playerSoftwareAudio = false
   private var playerPreferHevc = false
-  private var playerLive = false
+  private var playerStreamKind: StreamKind = StreamKind.VOD
+  private var playerBufferPreset: BufferPreset = BufferPreset.AUTO
   private var audioFallbackAttempted = false
   private var activeEpoch = 0
   private var token = 0
@@ -99,6 +97,9 @@ class Media3Engine : SharedObject {
   private var lastVodPositionMs: Long? = null
 
   override val releasesAfterPendingViewUpdates: Boolean = true
+
+  /** True once the off-UI-thread `MediaCodecList` probe confirms hardware 4K HEVC decoding (#150). */
+  val supportsHardwareHevc4k: Boolean get() = codecPolicy.supportsHardwareHevc4k
 
   internal fun load(attempt: Int, next: LoadRequest) {
     val epoch = commandFence.recordLoad(attempt, next) ?: return
@@ -133,7 +134,6 @@ class Media3Engine : SharedObject {
   }
 
   fun play(attempt: Int) = postInEpoch(attempt) { player?.play() }
-
   fun pause(attempt: Int) = postInEpoch(attempt) { player?.pause() }
 
   fun seek(attempt: Int, positionMs: Long) = postInEpoch(attempt) {
@@ -147,8 +147,15 @@ class Media3Engine : SharedObject {
     current.seekTo(clamped)
   }
 
-  fun selectAudioTrack(attempt: Int, id: String) = postInEpoch(attempt) { tracksBridge.selectAudioTrack(player, id) }
+  /** Enables Media3's scrubbing mode on VOD streams only; reset unconditionally on stop/load/retry/recreate (#222). */
+  fun setScrubbing(attempt: Int, scrubbing: Boolean) = postInEpoch(attempt) {
+    player?.let { it.isScrubbingModeEnabled = scrubbing && request?.live == false }
+  }
 
+  /** Configures stereo loudness boost in dB via [AudioEffectsController] (multichannel-safe, #260). */
+  fun setAudioBoostDb(attempt: Int, db: Double) = postInEpoch(attempt) { if (db.isFinite()) audioEffects.setBoostDb(db) }
+
+  fun selectAudioTrack(attempt: Int, id: String) = postInEpoch(attempt) { tracksBridge.selectAudioTrack(player, id) }
   fun selectSubtitleTrack(attempt: Int, id: String?) = postInEpoch(attempt) { tracksBridge.selectSubtitleTrack(player, id) }
 
   fun stop(attempt: Int) {
@@ -171,12 +178,13 @@ class Media3Engine : SharedObject {
       activeEpoch = action.epoch
       adopt(attempt)
       snapshotVodPosition()
+      player?.isScrubbingModeEnabled = false
       tracksBridge.onPrepareReuse()
       surfaces.clearCues()
       reporter.end()
       beginGeneration()
       releasePlayer()
-      player = buildPlayer(playerSoftwareAudio, playerPreferHevc, playerLive)
+      player = buildPlayer(playerSoftwareAudio, playerPreferHevc, playerStreamKind, playerBufferPreset)
     }
   }
 
@@ -204,9 +212,7 @@ class Media3Engine : SharedObject {
   }
 
   internal fun bindView(sink: ViewSink) = post { surfaces.bindView(sink) }
-
   internal fun unbindView(sink: ViewSink) = post { surfaces.unbindView(sink) }
-
   internal fun cueScreen(cue: ScreenCue, played: Boolean) = post { surfaces.onCue(cue, played) }
 
   fun dispose() {
@@ -218,6 +224,7 @@ class Media3Engine : SharedObject {
       http.dispatcher.cancelAll()
       codecPolicy.stopAudioCapabilities()
       releasePlayer()
+      audioEffects.release()
       http.dispatcher.executorService.shutdown()
       closer.shutdown()
       thread.quitSafely()
@@ -250,11 +257,12 @@ class Media3Engine : SharedObject {
   }
 
   private fun detachNow(old: Surface) = surfaces.detachNow(old, player, ::sendSurfaceChange)
-
   private fun sendSurfaceChange(change: String) = sendEvent(mapOf("type" to "surface", "change" to change))
 
   private fun clearSessionState() {
     reporter.end()
+    player?.isScrubbingModeEnabled = false
+    audioEffects.onStop()
     request = null
     audioFallbackAttempted = false
     lastVodPositionMs = null
@@ -269,7 +277,6 @@ class Media3Engine : SharedObject {
   }
 
   private fun currentVodPositionOrStart(req: LoadRequest): Long? = if (req.live) null else (lastVodPositionMs ?: req.startMs)
-
   private fun adopt(attempt: Int) { if (attempt > token) token = attempt }
 
   private fun sendEvent(fields: Map<String, Any?>) {
@@ -287,7 +294,7 @@ class Media3Engine : SharedObject {
   private fun initEngine(context: Context) {
     val profile = readDeviceMemoryProfile(context)
     lowRamDevice = profile.lowRam
-    playerFactory = PlayerFactory(context, thread.looper, profile::loadControl, codecPolicy)
+    playerFactory = PlayerFactory(context, thread.looper, { kind: StreamKind, preset: BufferPreset -> profile.loadControl(kind, preset) }, codecPolicy)
     tracksBridge = TrackSelectorBridge(
       isActivePlayer = { candidate -> candidate === player && fence.acceptsPlayer(candidate) },
       onTracks = { snapshot -> if (request != null) sendEvent(mapOf("type" to "tracks", "tracks" to snapshot)) },
@@ -296,6 +303,7 @@ class Media3Engine : SharedObject {
     )
     post {
       codecPolicy.startAudioCapabilities(context, handler)
+      codecPolicy.startHardwareHevc4kProbe(handler)
       player = buildPlayer(softwareAudio = false)
     }
   }
@@ -346,16 +354,22 @@ class Media3Engine : SharedObject {
     surfaces.clearCues()
     if (newGeneration) beginGeneration()
     val existing = player
+    val streamKind = next.streamKind()
+    val bufferPreset = next.bufferPreset
     val terminal = existing != null && (existing.playbackState == Player.STATE_ENDED || existing.playerError != null)
     val rebuild = forceRebuild || existing == null || terminal || playerSoftwareAudio != next.softwareAudio ||
-      playerPreferHevc != next.preferHevcOverDolbyVision || playerLive != next.live
+      playerPreferHevc != next.preferHevcOverDolbyVision || playerStreamKind != streamKind ||
+      playerBufferPreset != bufferPreset
     if (rebuild) {
+      existing?.isScrubbingModeEnabled = false
       releasePlayer()
-      player = buildPlayer(next.softwareAudio, next.preferHevcOverDolbyVision, next.live)
+      player = buildPlayer(next.softwareAudio, next.preferHevcOverDolbyVision, streamKind, bufferPreset)
     } else {
+      existing.isScrubbingModeEnabled = false
       existing.stop()
     }
     val current = player ?: return
+    current.isScrubbingModeEnabled = false
     current.setSeekParameters(if (next.live) SeekParameters.EXACT else vodSeekParametersFor(positionMs ?: 0L, null))
     tracksBridge.applyInitialParameters(current)
     val serial = ++prepares
@@ -370,13 +384,20 @@ class Media3Engine : SharedObject {
     current.prepare()
   }
 
-  private fun buildPlayer(softwareAudio: Boolean, preferHevc: Boolean = false, live: Boolean = false): ExoPlayer {
+  private fun buildPlayer(
+    softwareAudio: Boolean,
+    preferHevc: Boolean = false,
+    streamKind: StreamKind = StreamKind.VOD,
+    bufferPreset: BufferPreset = BufferPreset.AUTO,
+  ): ExoPlayer {
     playerSoftwareAudio = softwareAudio
     playerPreferHevc = preferHevc
-    playerLive = live
-    return playerFactory.build(softwareAudio, preferHevc, live).also { built ->
+    playerStreamKind = streamKind
+    playerBufferPreset = bufferPreset
+    return playerFactory.build(softwareAudio, preferHevc, live = streamKind != StreamKind.VOD, streamKind = streamKind, bufferPreset = bufferPreset).also { built ->
       built.addListener(reporter)
       built.addListener(pictures)
+      audioEffects.onAudioSessionIdChanged(built.audioSessionId)
       surfaces.attachToNewPlayer(built, ::sendSurfaceChange)
     }
   }
@@ -384,8 +405,11 @@ class Media3Engine : SharedObject {
   private fun releasePlayer() {
     val old = player ?: return
     player = null
+    old.isScrubbingModeEnabled = false
     old.removeListener(reporter)
     old.removeListener(pictures)
+    audioEffects.onStop()
+    audioEffects.onAudioSessionIdChanged(C.AUDIO_SESSION_ID_UNSET)
     old.release()
     gate.dropForced()
   }

@@ -387,3 +387,263 @@ describe('#321: zero-decoded-frame black-screen watchdog & bounded network-aware
     expect(status(r)).toEqual(recovering(2, 0));
   });
 });
+
+describe('#144, #147, #150, #222: surfaceRecreationToken, bufferPreset, rolling rebuffer, scrubbing', () => {
+  it('forwards TuneRequest.bufferPreset to initial load and recovery reloads (#147)', async () => {
+    const r = rig({ chan: [] });
+    r.service.tune(live('chan', { bufferPreset: 'large' }));
+    await tick(0);
+    expect(r.loads[0]).toMatchObject({
+      url: 'chan',
+      options: { bufferPreset: 'large' },
+    });
+
+    // Rung 2 reload preserves bufferPreset
+    error(r, 'network');
+    await tick(0);
+    error(r, 'network');
+    await tick(1_000);
+    expect(r.loads[1]).toMatchObject({
+      url: 'chan',
+      options: { bufferPreset: 'large' },
+    });
+  });
+
+  it('increments surfaceRecreationToken only on Rung 3 recreate for decoder errors, never on normal zaps or network retries (#144)', async () => {
+    const r = rig({ a: [], b: [] });
+    const seenTokens: number[] = [];
+    r.service.subscribe((s) => seenTokens.push(s.surfaceRecreationToken));
+    expect(r.service.getState().surfaceRecreationToken).toBe(0);
+
+    // Normal zaps never increment surfaceRecreationToken
+    await playing(r, live('a'));
+    await playing(r, live('b'));
+    expect(r.service.getState().surfaceRecreationToken).toBe(0);
+
+    // Rung 3 recreate after network errors does NOT increment surfaceRecreationToken
+    error(r, 'network');
+    await tick(0);
+    error(r, 'network');
+    await tick(1_000);
+    error(r, 'network');
+    await tick(2_000);
+    expect(r.engine.commands.some((c) => c.name === 'recreate')).toBe(true);
+    expect(r.service.getState().surfaceRecreationToken).toBe(0);
+
+    // Fresh tune + Rung 3 recreate after decoder errors DOES increment surfaceRecreationToken
+    await playing(r, live('a'));
+    error(r, 'decoder');
+    await tick(0);
+    expect(r.service.getState().surfaceRecreationToken).toBe(0);
+    error(r, 'decoder');
+    await tick(1_000);
+    expect(r.service.getState().surfaceRecreationToken).toBe(0);
+    error(r, 'decoder');
+    await tick(2_000);
+    expect(r.service.getState().surfaceRecreationToken).toBe(1);
+    expect(seenTokens).toContain(1);
+
+    // Subsequent normal zap preserves token without incrementing or resetting
+    await playing(r, live('b'));
+    expect(r.service.getState().surfaceRecreationToken).toBe(1);
+  });
+
+  it('escalates cleanly to next alternate on 3 non-seek rebuffer stalls within 120 s and resets transient retries (#150)', async () => {
+    expect(DEFAULT_PLAYBACK_CONFIG.rollingRebufferThreshold).toBe(3);
+    expect(DEFAULT_PLAYBACK_CONFIG.rollingRebufferWindowMs).toBe(120_000);
+
+    const r = rig({
+      'http://primary.example/live/1.ts': [],
+      'http://alt1.example/live/1.ts': [],
+    });
+    await playing(
+      r,
+      live('http://primary.example/live/1.ts', {
+        alternates: [resolved('http://alt1.example/live/1.ts')],
+      }),
+    );
+
+    // Stall 1 & recover
+    stall(r, 'start');
+    await tick(1_000);
+    stall(r, 'end');
+    await tick(20_000);
+
+    // Stall 2 & recover
+    stall(r, 'start');
+    await tick(1_000);
+    stall(r, 'end');
+    await tick(20_000);
+
+    expect(r.loads).toHaveLength(1);
+
+    // Stall 3 within 120 s -> escalates immediately to alternate!
+    stall(r, 'start');
+    await tick(0);
+    expect(r.loads.at(-1)?.url).toBe('http://alt1.example/live/1.ts');
+
+    // New alternate gets a fresh transient retry budget (Rung 1 on network error)
+    play(r);
+    error(r, 'network');
+    expect(status(r)).toEqual(recovering(1, 0));
+
+    // Inline stream alternates also escalate on 3 rolling stalls within 120 s
+    const rInline = rig({
+      'http://p.example/live/1.ts': [],
+      'http://inline-alt.example/live/1.ts': [],
+    });
+    await playing(
+      rInline,
+      live('http://p.example/live/1.ts', {
+        resolve: () =>
+          Promise.resolve({
+            ok: true,
+            value: {
+              url: 'http://p.example/live/1.ts',
+              headers: {},
+              alternates: [{ url: 'http://inline-alt.example/live/1.ts', headers: {} }],
+            },
+          }),
+      }),
+    );
+    for (let i = 0; i < 2; i += 1) {
+      stall(rInline, 'start');
+      await tick(1_000);
+      stall(rInline, 'end');
+      await tick(5_000);
+    }
+    stall(rInline, 'start');
+    await tick(0);
+    expect(rInline.loads.at(-1)?.url).toBe('http://inline-alt.example/live/1.ts');
+  });
+
+  it('prunes stalls outside 120 s window, clears rolling count on seek/tune, and ignores gracefully when no alternates remain (#150)', async () => {
+    const r = rig({
+      'http://primary.example/vod/1.mp4': [],
+      'http://alt.example/vod/1.mp4': [],
+    });
+    await playing(
+      r,
+      vod('http://primary.example/vod/1.mp4', {
+        alternates: [resolved('http://alt.example/vod/1.mp4')],
+      }),
+    );
+    emitClock(r, { positionMs: 10_000, atMs: Date.now(), rate: 1, durationMs: 300_000 });
+
+    // Stall 1 at t=0, Stall 2 at t=50s, then advance past 120s so Stall 1 expires
+    stall(r, 'start');
+    await tick(500);
+    stall(r, 'end');
+    await tick(50_000);
+
+    stall(r, 'start');
+    await tick(500);
+    stall(r, 'end');
+    await tick(80_000); // t=131s: Stall 1 (t=0) is > 120s old -> pruned!
+
+    stall(r, 'start');
+    await tick(500);
+    stall(r, 'end');
+    // Only 2 stalls in window -> still on primary!
+    expect(r.loads).toHaveLength(1);
+
+    // User seek clears rolling timestamps AND seek-settling stalls do not count
+    r.service.seek(60_000);
+    stall(r, 'start');
+    await tick(500);
+    stall(r, 'end');
+    await tick(1_000);
+    stall(r, 'start');
+    await tick(500);
+    stall(r, 'end');
+    await tick(1_000);
+    stall(r, 'start');
+    await tick(500);
+    stall(r, 'end');
+    // Only 2 post-seek stalls -> still on primary!
+    expect(r.loads).toHaveLength(1);
+
+    // No alternates stream: 3 stalls within 120s must NOT cause an infinite restart loop
+    const rNoAlt = rig({ 'http://only.example/live/1.ts': [] });
+    await playing(rNoAlt, live('http://only.example/live/1.ts'));
+    for (let i = 0; i < 4; i += 1) {
+      stall(rNoAlt, 'start');
+      await tick(1_000);
+      stall(rNoAlt, 'end');
+      await tick(5_000);
+    }
+    expect(rNoAlt.loads).toHaveLength(1);
+    expect(status(rNoAlt)).toEqual({ kind: 'playing' });
+  });
+
+  it('forwards setScrubbing only for VOD and resets it to false on stop, tune, and dispose (#222)', async () => {
+    const r = rig({ chan: [], movie: [], movie2: [] });
+
+    // Live: setScrubbing is ignored
+    await playing(r, live('chan'));
+    r.service.setScrubbing?.(true);
+    expect(r.engine.commands.filter((c) => c.name === 'setScrubbing')).toEqual([]);
+
+    // VOD: setScrubbing toggles cleanly and is idempotent
+    const vodAttempt = await playing(r, vod('movie'));
+    r.service.setScrubbing?.(true);
+    r.service.setScrubbing?.(true);
+    r.service.setScrubbing?.(false);
+    r.service.setScrubbing?.(false);
+    expect(r.engine.commands.filter((c) => c.name === 'setScrubbing')).toEqual([
+      { name: 'setScrubbing', attempt: vodAttempt, scrubbing: true },
+      { name: 'setScrubbing', attempt: vodAttempt, scrubbing: false },
+    ]);
+
+    // stop() resets active scrubbing to false
+    r.service.setScrubbing?.(true);
+    r.service.stop();
+    expect(r.engine.commands.filter((c) => c.name === 'setScrubbing').slice(-2)).toEqual([
+      { name: 'setScrubbing', attempt: vodAttempt, scrubbing: true },
+      { name: 'setScrubbing', attempt: vodAttempt, scrubbing: false },
+    ]);
+
+    // tune() resets active scrubbing to false
+    const vod2Attempt = await playing(r, vod('movie'));
+    r.service.setScrubbing?.(true);
+    r.service.tune(vod('movie2'));
+    await tick(0);
+    expect(r.engine.commands.filter((c) => c.name === 'setScrubbing').slice(-2)).toEqual([
+      { name: 'setScrubbing', attempt: vod2Attempt, scrubbing: true },
+      { name: 'setScrubbing', attempt: vod2Attempt, scrubbing: false },
+    ]);
+
+    // retry() clears JS scrubbingActive so subsequent setScrubbing(true) is not stuck (#222)
+    play(r);
+    r.service.setScrubbing?.(true);
+    r.service.retry();
+    const afterRetryAttempt = r.service.getState().attempt;
+    play(r);
+    r.service.setScrubbing?.(true);
+    expect(r.engine.commands.filter((c) => c.name === 'setScrubbing').at(-1)).toEqual({
+      name: 'setScrubbing',
+      attempt: afterRetryAttempt,
+      scrubbing: true,
+    });
+
+    // Entering recovering (Rung 1/3) clears JS scrubbingActive so setScrubbing(true) works after recovery
+    error(r, 'decoder');
+    await tick(0);
+    const rung1Attempt = r.service.getState().attempt;
+    play(r);
+    r.service.setScrubbing?.(true);
+    expect(r.engine.commands.filter((c) => c.name === 'setScrubbing').at(-1)).toEqual({
+      name: 'setScrubbing',
+      attempt: rung1Attempt,
+      scrubbing: true,
+    });
+
+    // VOD ended clears scrubbing and notifies engine(false)
+    state(r, 'ended');
+    expect(r.engine.commands.filter((c) => c.name === 'setScrubbing').at(-1)).toEqual({
+      name: 'setScrubbing',
+      attempt: rung1Attempt,
+      scrubbing: false,
+    });
+  });
+});

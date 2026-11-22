@@ -2,7 +2,13 @@ import { type ElvError, elvError, type Result } from '@elv/domain';
 import { createWorkingFormatCache } from './backoff';
 import { isAtLiveEdge, positionAt } from './clock';
 import type { PlaybackConfig } from './config';
-import { type AttemptToken, EMPTY_TRACKS, type PlayerEngine, type StreamRequest } from './engine';
+import {
+  type AttemptToken,
+  EMPTY_TRACKS,
+  type LoadOptions,
+  type PlayerEngine,
+  type StreamRequest,
+} from './engine';
 import { createRecovery } from './recovery';
 import type { LoadOverrides, RecoveryHooks, ServiceControl } from './seam';
 import { createSeekCoalescer } from './seek-coalescer';
@@ -65,6 +71,7 @@ export function createPlaybackServiceWith(
   let disposed = false;
   let loadSeq = 0;
   let speedAttempt: AttemptToken = 0;
+  let scrubbingActive = false;
   let resolveTimer: unknown;
 
   const state = (): PlaybackState => store.getState();
@@ -104,9 +111,16 @@ export function createPlaybackServiceWith(
     speedCoalescer.reset();
   };
 
+  const clearScrubbing = (notifyEngine = true): void => {
+    if (!scrubbingActive) return;
+    scrubbingActive = false;
+    if (notifyEngine && (mediaOpen || loaded)) engine.setScrubbing?.(state().attempt, false);
+  };
+
   const stopEngine = (): void => {
     clearStartTimeout();
     resetCoalescers();
+    clearScrubbing();
     if (mediaOpen || loaded || state().status.kind === 'tuning') engine.stop(state().attempt);
     mediaOpen = false;
     loaded = false;
@@ -124,10 +138,17 @@ export function createPlaybackServiceWith(
     if (overrides.stream !== undefined) stream = overrides.stream;
     if (current === undefined || stream === undefined) return false;
     resetCoalescers();
+    clearScrubbing(false);
     const startMs = overrides.startMs ?? current.startMs;
     if (current.kind === 'vod' && startMs !== undefined) lastVodPositionMs = startMs;
     trackPrefs.beginReload();
-    const options = trackPrefs.loadOptions(overrides.options);
+    const baseOptions: LoadOptions = {
+      ...(current.bufferPreset === undefined ? {} : { bufferPreset: current.bufferPreset }),
+      ...overrides.options,
+    };
+    const options = trackPrefs.loadOptions(
+      Object.keys(baseOptions).length > 0 ? baseOptions : undefined,
+    );
     loaded = true;
     mediaOpen = true;
     loadSeq += 1;
@@ -150,6 +171,12 @@ export function createPlaybackServiceWith(
     return next;
   };
 
+  const bumpSurfaceRecreationToken = (): number => {
+    const next = state().surfaceRecreationToken + 1;
+    store.update({ surfaceRecreationToken: next });
+    return next;
+  };
+
   const control: ServiceControl = {
     engine,
     config,
@@ -162,10 +189,12 @@ export function createPlaybackServiceWith(
     batch: (fn) => store.batch(fn),
     startTimeoutMs,
     nextAttempt,
+    bumpSurfaceRecreationToken,
     setStatus: (status) => {
       if (status.kind === 'recovering') {
         trackPrefs.beginReload();
         speedCoalescer.reset();
+        clearScrubbing(false);
       }
       store.update({ status });
     },
@@ -213,6 +242,7 @@ export function createPlaybackServiceWith(
       clearStartTimeout,
       onVodProgress: (bytes) => startTimeout.onProgress(bytes),
       onSeekSettled: () => speedCoalescer.flush(),
+      onEnded: () => clearScrubbing(),
     }),
   );
 
@@ -234,6 +264,7 @@ export function createPlaybackServiceWith(
   const startTune = (request: TuneRequest): AttemptToken => {
     clearStartTimeout();
     resetCoalescers();
+    clearScrubbing();
     held = hooks.onTune?.(request) ?? false;
     current = request;
     stream = undefined;
@@ -278,6 +309,7 @@ export function createPlaybackServiceWith(
         return;
       }
       resetCoalescers();
+      clearScrubbing(false);
       const token = store.batch(() => {
         freezeAnchor();
         hooks.onReset?.();
@@ -365,6 +397,16 @@ export function createPlaybackServiceWith(
           });
         }
       });
+    },
+    setScrubbing(scrubbing) {
+      if (disposed || current?.kind !== 'vod') return;
+      if (!scrubbing) {
+        clearScrubbing();
+        return;
+      }
+      if (!loaded || scrubbingActive) return;
+      scrubbingActive = true;
+      engine.setScrubbing?.(state().attempt, true);
     },
     setSpeed(rate) {
       const st = state();

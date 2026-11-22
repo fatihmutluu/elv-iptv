@@ -24,12 +24,15 @@ internal data class LoadRequest(
   val subtitlePreference: SubtitlePreference = SubtitlePreference.Default,
   /** The response to [url] was an HLS playlist (after redirects); the media is prepared as HLS from [url]. */
   val playlistDetected: Boolean = false,
+  /** User-selected buffer size preset (#147). */
+  val bufferPreset: BufferPreset = BufferPreset.AUTO,
 ) {
   /** Names no URL and no header value: both may carry credentials. */
   override fun toString(): String {
     val dvSuffix = if (preferHevcOverDolbyVision) ", preferHevcOverDolbyVision=true" else ""
+    val presetSuffix = if (bufferPreset != BufferPreset.AUTO) ", bufferPreset=${bufferPreset.wireName}" else ""
     return "LoadRequest(live=$live, startMs=$startMs, softwareAudio=$softwareAudio, " +
-      "playlistDetected=$playlistDetected, headers=${headers.size}$dvSuffix)"
+      "playlistDetected=$playlistDetected, headers=${headers.size}$dvSuffix$presetSuffix)"
   }
 }
 
@@ -53,6 +56,7 @@ internal fun parseLoadArgs(args: Map<String, Any?>): Pair<Int, LoadRequest> {
   val softwareAudio = args["softwareAudio"] as? Boolean ?: false
   val preferHevcOverDolbyVision = args["preferHevcOverDolbyVision"] as? Boolean ?: false
   val audioTrackId = (args["audioTrackId"] as? String)?.takeIf { it.isNotEmpty() }
+  val bufferPreset = parseBufferPreset(args["bufferPreset"] as? String)
   val subtitlePreference =
     if (!args.containsKey("subtitleTrackId")) {
       SubtitlePreference.Default
@@ -72,6 +76,7 @@ internal fun parseLoadArgs(args: Map<String, Any?>): Pair<Int, LoadRequest> {
     preferHevcOverDolbyVision = preferHevcOverDolbyVision,
     audioTrackId = audioTrackId,
     subtitlePreference = subtitlePreference,
+    bufferPreset = bufferPreset,
   )
 }
 
@@ -84,6 +89,16 @@ internal fun LoadRequest.asDetectedPlaylist(): LoadRequest = copy(playlistDetect
 
 /** How this request is played: see [sourceTypeFor]. */
 internal fun LoadRequest.sourceType(): SourceType = sourceTypeFor(url, live, playlistDetected)
+
+/** Stream buffer profile classification for [loadControlForStream] (#147). */
+internal fun LoadRequest.streamKind(): StreamKind =
+  if (!live) {
+    StreamKind.VOD
+  } else if (sourceType() == SourceType.TS) {
+    StreamKind.RAW_TS_LIVE
+  } else {
+    StreamKind.HLS_LIVE
+  }
 
 private fun finiteLongOrNull(raw: Any?): Long? =
   when (raw) {

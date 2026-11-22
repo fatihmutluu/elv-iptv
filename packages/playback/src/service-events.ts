@@ -107,6 +107,7 @@ export interface EventRouterDeps {
   clearStartTimeout(): void;
   onVodProgress?(bytesReceived?: number): void;
   onSeekSettled?(): void;
+  onEnded?(): void;
 }
 
 /** @internal Routes engine events into batched state transitions and recovery hooks (`#224`). */
@@ -210,6 +211,7 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
             if (deps.currentRequest()?.kind === 'live' && hooks.onLiveEnded?.() === true) {
               return;
             }
+            deps.onEnded?.();
             store.update({ status: { kind: 'ended' } });
           } else {
             const k = store.getState().status.kind;

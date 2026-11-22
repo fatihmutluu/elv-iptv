@@ -1,3 +1,5 @@
+import type { BufferPreset } from '@elv/domain';
+
 /** Monotonic tune token; the service increments it per tune, retry rung and zap. */
 export type AttemptToken = number;
 
@@ -20,6 +22,8 @@ export interface LoadOptions {
   softwareAudio?: boolean;
   /** Prefer HEVC base-layer / Profile 8.1 decoding over Dolby Vision Profile 7 (`#189`). */
   preferHevcOverDolbyVision?: boolean;
+  /** User-configured buffer size preset forwarded to the native engine (`#147`). */
+  bufferPreset?: BufferPreset;
   /** Preferred audio track ID to select once media tracks are available. */
   audioTrackId?: string;
   /** Preferred subtitle track ID to select, or `null` to disable subtitles explicitly. */
@@ -144,6 +148,8 @@ export interface PlayerEngine {
   play(attempt: AttemptToken): void;
   pause(attempt: AttemptToken): void;
   seek(attempt: AttemptToken, positionMs: number): void;
+  /** Toggles VOD scrubbing mode (e.g. Media3 `isScrubbingModeEnabled`, `#222`). */
+  setScrubbing?(attempt: AttemptToken, scrubbing: boolean): void;
   setSpeed?(attempt: AttemptToken, rate: number): void;
   selectAudioTrack?(attempt: AttemptToken, id: string): void;
   selectSubtitleTrack?(attempt: AttemptToken, id: string | null): void;

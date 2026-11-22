@@ -39,6 +39,10 @@ export interface PlaybackConfig {
   liveStalePauseMs: number;
   /** Grace window behind `liveEdgeMs` that still reports `atLiveEdge: true` (`#284`). */
   liveEdgeToleranceMs: number;
+  /** Non-seek rebuffer stalls within {@link rollingRebufferWindowMs} that escalate to an alternate (`#150`). */
+  rollingRebufferThreshold: number;
+  /** Rolling time window (ms) for counting non-seek rebuffer stalls (`#150`). */
+  rollingRebufferWindowMs: number;
 }
 
 /** Spec defaults, frozen so no caller can change them for every service. */
@@ -60,4 +64,6 @@ export const DEFAULT_PLAYBACK_CONFIG: Readonly<PlaybackConfig> = Object.freeze({
   seekSettleTimeoutMs: 12000,
   liveStalePauseMs: 20000,
   liveEdgeToleranceMs: LIVE_EDGE_TOLERANCE_MS,
+  rollingRebufferThreshold: 3,
+  rollingRebufferWindowMs: 120_000,
 });

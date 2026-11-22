@@ -1,5 +1,6 @@
 import type { ExpoConfig } from 'expo/config';
 import { withAetherFrameworks } from './with-aether-frameworks.ts';
+import { withAndroidDisplay } from './with-android-display.ts';
 
 /** The build environment (`process.env` when Expo loads `app.config.ts`). */
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -140,6 +141,9 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
 
   // `@expo/config-types` omits `ConfigPlugin` functions from `ExpoConfig['plugins']`; `@expo/config-plugins` runs them.
   plugins.push(withAetherFrameworks as unknown as NonNullable<ExpoConfig['plugins']>[number]);
+  plugins.push([withAndroidDisplay, { isTv: tv }] as unknown as NonNullable<
+    ExpoConfig['plugins']
+  >[number]);
 
   return {
     name: development ? 'ELV IPTV Dev' : 'ELV IPTV',

@@ -3,6 +3,7 @@ package io.github.fatihmutluu.elv.media3
 import android.os.Looper
 import android.provider.Settings
 import androidx.annotation.OptIn
+import androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
@@ -18,7 +19,7 @@ import org.robolectric.RuntimeEnvironment
 @RunWith(RobolectricTestRunner::class)
 class PlayerFactoryTest {
   @Test
-  fun `configures DefaultTrackSelector mixed-audio adaptiveness and capability invalidation (#111, #191)`() {
+  fun `configures DefaultTrackSelector mixed-audio adaptiveness, capability invalidation and AudioOffload without tunneling (#111, #191, #222)`() {
     val app = RuntimeEnvironment.getApplication()
     val factory = PlayerFactory(app, Looper.getMainLooper(), loadControlFor(lowRam = false), CodecPolicy())
     val player = factory.build(softwareAudio = false)
@@ -30,6 +31,8 @@ class PlayerFactoryTest {
       assertTrue(params.allowAudioMixedChannelCountAdaptiveness)
       assertTrue(params.allowAudioMixedDecoderSupportAdaptiveness)
       assertTrue(params.allowInvalidateSelectionsOnRendererCapabilitiesChange)
+      assertEquals(AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED, params.audioOffloadPreferences.audioOffloadMode)
+      assertFalse("tunneling must remain disabled (#222)", params.tunnelingEnabled)
     } finally {
       player.release()
     }
@@ -70,25 +73,48 @@ class PlayerFactoryTest {
   }
 
   @Test
-  fun `selects live vs VOD LoadControlValues per build call (#422)`() {
+  fun `selects StreamKind and BufferPreset LoadControlValues per build call and binds profile loadControl reference (#147, #422)`() {
     val app = RuntimeEnvironment.getApplication()
-    val seenLiveFlags = mutableListOf<Boolean>()
-    val profile = DeviceMemoryProfile(isLowRamDevice = true, totalMemBytes = 1024L * 1024L * 1024L, lowRam = true)
+    val seen = mutableListOf<Pair<StreamKind, BufferPreset>>()
+    val profile = DeviceMemoryProfile(isLowRamDevice = false, totalMemBytes = 4L * 1024L * 1024L * 1024L, lowRam = false)
+    // Verify backward-compatible DeviceMemoryProfile.loadControl(live) overload
+    assertEquals(0, profile.loadControl(live = true).backBufferMs)
+    assertEquals(12_000, profile.loadControl(live = false).backBufferMs)
+
+    // Verify unambiguous binding of profile::loadControl to PlayerFactory primary constructor
+    val refFactory = PlayerFactory(app, Looper.getMainLooper(), profile::loadControl, CodecPolicy())
+    val refPlayer = refFactory.build(
+      softwareAudio = false,
+      live = true,
+      streamKind = StreamKind.RAW_TS_LIVE,
+      bufferPreset = BufferPreset.BALANCED,
+    )
+    refPlayer.release()
+
     val factory = PlayerFactory(
       context = app,
       looper = Looper.getMainLooper(),
-      loadControlForLive = { live ->
-        seenLiveFlags += live
-        profile.loadControl(live)
+      loadControlForStream = { kind, preset ->
+        seen += kind to preset
+        profile.loadControl(kind, preset)
       },
       codecPolicy = CodecPolicy(),
     )
-    val livePlayer = factory.build(softwareAudio = false, live = true)
-    val vodPlayer = factory.build(softwareAudio = false, live = false)
+    val tsPlayer = factory.build(softwareAudio = false, live = true, streamKind = StreamKind.RAW_TS_LIVE, bufferPreset = BufferPreset.AUTO)
+    val hlsPlayer = factory.build(softwareAudio = false, live = true)
+    val vodPlayer = factory.build(softwareAudio = false, live = false, streamKind = StreamKind.VOD, bufferPreset = BufferPreset.LARGE)
     try {
-      assertEquals(listOf(true, false), seenLiveFlags)
+      assertEquals(
+        listOf(
+          StreamKind.RAW_TS_LIVE to BufferPreset.AUTO,
+          StreamKind.HLS_LIVE to BufferPreset.AUTO,
+          StreamKind.VOD to BufferPreset.LARGE,
+        ),
+        seen,
+      )
     } finally {
-      livePlayer.release()
+      tsPlayer.release()
+      hlsPlayer.release()
       vodPlayer.release()
     }
   }
@@ -104,7 +130,7 @@ class PlayerFactoryTest {
     val disabledFactory = PlayerFactory(
       context = app,
       looper = Looper.getMainLooper(),
-      loadControlForLive = { loadControlFor(lowRam = false, live = it) },
+      loadControlForStream = { kind, preset -> loadControlForStream(false, 2L * 1024 * 1024 * 1024, kind, preset) },
       codecPolicy = CodecPolicy(),
       captioningEnabled = { false },
     )
@@ -127,7 +153,7 @@ class PlayerFactoryTest {
     val enabledFactory = PlayerFactory(
       context = app,
       looper = Looper.getMainLooper(),
-      loadControlForLive = { loadControlFor(lowRam = false, live = it) },
+      loadControlForStream = { kind, preset -> loadControlForStream(false, 2L * 1024 * 1024 * 1024, kind, preset) },
       codecPolicy = CodecPolicy(),
       captioningEnabled = { true },
     )

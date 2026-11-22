@@ -6,6 +6,7 @@ import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSchemeDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.HttpDataSource
@@ -36,6 +37,53 @@ private const val LIVE_HLS_STUCK_TARGET_DURATION_COEFFICIENT = 8.0
 private const val LOW_RAM_TS_SEARCH_PACKETS = 1_800
 private const val NORMAL_RAM_TS_SEARCH_PACKETS = 2_400
 internal const val PROGRESS_MIN_INTERVAL_MS = 500L
+
+/**
+ * Routes `data:` URIs (such as synthesized VOD HLS `#EXT-X-MAP` init segments, #183) directly to Media3's
+ * [DataSchemeDataSource] without touching OkHttp or [ConnectionGate], delegating all other URIs lazily to
+ * [defaultDataSourceFactory].
+ */
+@OptIn(UnstableApi::class)
+internal class SchemeRoutingDataSource(
+  private val defaultDataSourceFactory: () -> DataSource,
+  private val dataSchemeDataSourceFactory: () -> DataSource = { DataSchemeDataSource() },
+) : DataSource {
+  private val transferListeners = mutableListOf<TransferListener>()
+  private var activeDataSource: DataSource? = null
+
+  override fun addTransferListener(transferListener: TransferListener) {
+    transferListeners += transferListener
+    activeDataSource?.addTransferListener(transferListener)
+  }
+
+  override fun open(dataSpec: DataSpec): Long {
+    val scheme = dataSpec.uri.normalizeScheme().scheme
+    val source = if (DataSchemeDataSource.SCHEME_DATA == scheme) {
+      dataSchemeDataSourceFactory()
+    } else {
+      defaultDataSourceFactory()
+    }
+    for (listener in transferListeners) {
+      source.addTransferListener(listener)
+    }
+    activeDataSource = source
+    return source.open(dataSpec)
+  }
+
+  override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
+    activeDataSource?.read(buffer, offset, length) ?: C.RESULT_END_OF_INPUT
+
+  override fun getUri(): Uri? = activeDataSource?.uri
+
+  override fun getResponseHeaders(): Map<String, List<String>> =
+    activeDataSource?.responseHeaders ?: emptyMap()
+
+  override fun close() {
+    val active = activeDataSource ?: return
+    activeDataSource = null
+    active.close()
+  }
+}
 
 /**
  * Lightweight throttled [TransferListener] emitting cumulative network bytes received at most once per
@@ -171,8 +219,9 @@ internal fun requestSources(
 
 /**
  * Builds the media source of one generation, tagged with [prepareSerial] as `MediaItem.mediaId`. Every request passes
- * the connection gate and the response sniffing; HLS requests wire [TS_FLAGS], bounded timestamp-adjuster initialization
- * and an `8.0` live playlist-stuck coefficient (#236, #247).
+ * the connection gate and the response sniffing; HLS requests route `data:` init segments via [SchemeRoutingDataSource],
+ * wire [TS_FLAGS], bounded timestamp-adjuster initialization, an `8.0` live playlist-stuck coefficient (#236, #247),
+ * and VOD `EXT-X-MAP` SPS/PPS synthesis (#183).
  */
 @OptIn(UnstableApi::class)
 internal fun createMediaSource(
@@ -196,7 +245,11 @@ internal fun createMediaSource(
   val progressive = DataSource.Factory { gated(RequestKind.PROGRESSIVE) }
   val factory: MediaSource.Factory = when (type) {
     SourceType.HLS ->
-      HlsMediaSource.Factory(HlsDataSourceFactory { dataType -> gated(requestKindFor(dataType)) })
+      HlsMediaSource.Factory(
+        HlsDataSourceFactory { dataType ->
+          SchemeRoutingDataSource(defaultDataSourceFactory = { gated(requestKindFor(dataType)) })
+        }
+      )
         .setExtractorFactory(DefaultHlsExtractorFactory(TS_FLAGS, true))
         .setTimestampAdjusterInitializationTimeoutMs(TIMESTAMP_ADJUSTER_TIMEOUT_MS)
         .apply {
@@ -211,6 +264,14 @@ internal fun createMediaSource(
                 downloadExecutor,
               )
             }
+          } else {
+            setPlaylistParserFactory(
+              InitSynthesizingPlaylistParserFactory(
+                probeSegment = { segmentUri ->
+                  probeSegmentPrefix(gated(RequestKind.SEGMENT), segmentUri)
+                }
+              )
+            )
           }
         }
     SourceType.TS -> ProgressiveMediaSource.Factory(progressive, TsOnlyExtractorsFactory(lowRam, request.live))

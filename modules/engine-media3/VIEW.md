@@ -4,20 +4,29 @@ How `Media3SurfaceView` (`android/.../Media3SurfaceView.kt`) and `SurfaceControl
 present an engine's video and subtitles (player core spec 6.1). The module's contract and rules are in `AGENTS.md`.
 
 ## Surface, shutter and subtitles
-- One `SurfaceView`, created with the view and never re-typed, replaced or put on top (`setZOrderOnTop` and
-  `setZOrderMediaOverlay` are never called), covered by a black zap shutter `View`, with `SubtitleView`
-  (`androidx.media3:media3-ui`) laid out above the shutter over the same fitted `VideoRect` (`placed`) for native text
-  (`SRT`, `ASS`, `WebVTT`, `TTML`) and bitmap (`DVB`, `PGS`) cues. Placing `SubtitleView` above the shutter keeps cues
-  visible on audio-only streams while the shutter stays closed over `SurfaceView`; cues clear immediately on every
-  prepare (`load`, `retry`, HLS handoff), `stop`, `recreate`, `bind` and `selectSubtitleTrack(..., null)`.
+- Child z-order is strictly fixed: child `0` is the active video surface (`SurfaceView` by default, never put on top via
+  `setZOrderOnTop`/`setZOrderMediaOverlay`, or an opt-in `TextureView` when `useTextureView = true`, #262), child `1` is
+  the black zap shutter `View`, and child `2` is `SubtitleView` (`androidx.media3:media3-ui`) laid out above the shutter
+  over the same fitted `VideoRect` (`placed`) for native text (`SRT`, `ASS`, `WebVTT`, `TTML`, sanitized via
+  `SubtitleSanitizer`) and bitmap (`DVB`, `PGS`) cues. Placing `SubtitleView` above the shutter keeps cues visible on
+  audio-only streams while the shutter stays closed; cues clear on every prepare (`load`, `retry`, HLS handoff), `stop`,
+  `recreate`, `bind` and `selectSubtitleTrack(..., null)`.
+- `surfaceRecreationToken` (#144) ignores unchanged values and initial `0` so normal channel zaps never recreate the
+  video surface; only when Rung 3 decoder-reset recovery increments the token does child `0` swap to a fresh
+  `SurfaceView` (or `TextureView`), detaching the old surface first, removing its callback/listener, adding the fresh
+  view at index `0`, and laying it out into `placed`. Late `surfaceCreated`/`surfaceDestroyed` and
+  `onSurfaceTextureAvailable`/`onSurfaceTextureDestroyed` callbacks from retired views are strictly ignored.
+- In `TextureView` mode (`useTextureView = true`), `Surface(surfaceTexture)` is attached to the engine on
+  `onSurfaceTextureAvailable`, and `onSurfaceTextureDestroyed` detaches it from the engine, calls `Surface.release()`,
+  and returns `true` so `SurfaceTexture` never leaks.
 - None of the child views is focusable. Only valid (`Surface.isValid`) surfaces are attached to `ExoPlayer`.
 - The view paints black bars beside the surface only, never over it, so React Native views drawn above compose over
   video and subtitles. `dispatchDraw` clips to the view, keeping a `fill` crop inside it.
 - Surface callbacks attach (posted to the playback thread) and detach the surface; the engine sends `surface`
   `created` once per attach and `destroyed` once when an attached surface detaches or is found invalid on player
-  rebuild. A detach (`surfaceDestroyed`, an engine swap on
-  one view) is the only UI-thread wait: it runs ahead of queued commands (inline on the playback thread) and is capped
-  at 3 s (Media3's 500 ms release timeout plus its 2 s detach timeout, with margin).
+  rebuild. A detach (`surfaceDestroyed`, `onSurfaceTextureDestroyed`, surface swap, or engine swap) runs ahead of queued
+  commands on the playback thread and is bounded to `DETACH_TIMEOUT_MS = 250 ms` (with immediate short-circuit once
+  disposed).
 
 ## Reports from the engine (`SurfaceController`)
 - `SurfaceController` posts every report to the bound view's `ViewSink` on the playback thread (logging a warning if a
@@ -29,7 +38,7 @@ present an engine's video and subtitles (player core spec 6.1). The module's con
 ## Zap shutter (`ZapShutter`, `PrepareFence`)
 - Covers before any media and from each `load` (a new media serial) until that video media's first frame; reports of
   older serials change nothing, and a media that showed its frame stays uncovered. Audio-only streams emit `firstFrame`
-  on initial `playing` while keeping the shutter closed over `SurfaceView`. Not re-covered on `retry`, `stop`,
+  on initial `playing` while keeping the shutter closed over the video surface. Not re-covered on `retry`, `stop`,
   `recreate`.
 - `PrepareFence` sends a `PlayerMessage` behind `stop` through Media3's internal playback thread so late first-frame,
   video-size, cue and reused-player callbacks from a stopped media are discarded before reaching the view or JS.

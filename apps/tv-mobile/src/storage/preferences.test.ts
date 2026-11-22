@@ -92,7 +92,7 @@ describe('createDevicePreferencesStore', () => {
       const second = createDevicePreferencesStore();
       const loaded = await second.load();
       expect(loaded).toEqual({
-        version: 1,
+        ...DEFAULT_PREFERENCES,
         themePreset: 'highContrast',
         locale: 'tr',
         fontScale: 1.15,
@@ -159,7 +159,7 @@ describe('createDevicePreferencesStore', () => {
 
       const second = createDevicePreferencesStore();
       expect(await second.load()).toEqual({
-        version: 1,
+        ...DEFAULT_PREFERENCES,
         themePreset: 'midnightCobalt',
         locale: 'en',
         fontScale: 1.1,

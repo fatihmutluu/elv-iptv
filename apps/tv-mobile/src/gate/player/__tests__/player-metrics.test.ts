@@ -15,6 +15,7 @@ function make(fault: PlayerFault = '', soak?: number) {
     attempt: 0,
     tracks: EMPTY_TRACKS,
     staleEventsDropped: 0,
+    surfaceRecreationToken: 0,
   };
   const show = (patch: Partial<PlaybackState>) => {
     state = { ...state, ...patch };

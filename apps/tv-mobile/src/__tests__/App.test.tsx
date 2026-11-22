@@ -14,7 +14,23 @@ let mockAetherEngine: PlayerEngine | null = null;
 let mockMedia3Engine: PlayerEngine | null = null;
 let mockCatalogOverride: CatalogService | undefined;
 const mockSetOrientationLocked = jest.fn();
-let lastMedia3SurfaceProps: { resizeMode?: string; subtitleBottomInsetPx?: number } | undefined;
+const mockRequestTemporaryOrientation = jest.fn();
+const mockApplyShortEdgesCutoutMode = jest.fn();
+const mockGetSafeAreaInsets = jest.fn(() => ({ top: 24, right: 0, bottom: 16, left: 0 }));
+const mockEnterPip = jest.fn<boolean, [number?, number?]>(() => true);
+const mockStandbyListeners = new Set<(standby: boolean) => void>();
+const mockSafeAreaListeners = new Set<
+  (insets: { top: number; right: number; bottom: number; left: number }) => void
+>();
+const mockPipListeners = new Set<(inPip: boolean) => void>();
+let lastMedia3SurfaceProps:
+  | {
+      resizeMode?: string;
+      subtitleBottomInsetPx?: number;
+      surfaceRecreationToken?: number;
+      useTextureView?: boolean;
+    }
+  | undefined;
 jest.mock('../catalog', () => {
   const actual = jest.requireActual<typeof import('../catalog')>('../catalog');
   return {
@@ -43,16 +59,49 @@ jest.mock('@elv/engine-aether', () => ({
 jest.mock('@elv/engine-media3', () => ({
   createMedia3Engine: () => mockMedia3Engine,
   setOrientationLocked: (locked: boolean) => mockSetOrientationLocked(locked),
+  requestTemporaryOrientation: (landscape: boolean) => mockRequestTemporaryOrientation(landscape),
+  applyAndroidShortEdgesCutoutMode: () => mockApplyShortEdgesCutoutMode(),
+  getAndroidSafeAreaInsets: () => mockGetSafeAreaInsets(),
+  enterAndroidPictureInPicture: (w?: number, h?: number) => mockEnterPip(w, h),
+  subscribeAndroidStandby: (listener: (standby: boolean) => void) => {
+    mockStandbyListeners.add(listener);
+    return () => {
+      mockStandbyListeners.delete(listener);
+    };
+  },
+  subscribeAndroidSafeAreaInsets: (
+    listener: (insets: { top: number; right: number; bottom: number; left: number }) => void,
+  ) => {
+    mockSafeAreaListeners.add(listener);
+    return () => {
+      mockSafeAreaListeners.delete(listener);
+    };
+  },
+  subscribeAndroidPictureInPicture: (listener: (inPip: boolean) => void) => {
+    mockPipListeners.add(listener);
+    return () => {
+      mockPipListeners.delete(listener);
+    };
+  },
   Media3Surface: ({
     testID,
     resizeMode,
     subtitleBottomInsetPx,
+    surfaceRecreationToken,
+    useTextureView,
   }: {
     testID?: string;
     resizeMode?: string;
     subtitleBottomInsetPx?: number;
+    surfaceRecreationToken?: number;
+    useTextureView?: boolean;
   }) => {
-    lastMedia3SurfaceProps = { resizeMode, subtitleBottomInsetPx };
+    lastMedia3SurfaceProps = {
+      resizeMode,
+      subtitleBottomInsetPx,
+      surfaceRecreationToken,
+      useTextureView,
+    };
     const { View } = require('react-native');
     return <View testID={testID ?? 'media3-surface'} accessibilityLabel="media3-surface" />;
   },
@@ -117,6 +166,13 @@ afterEach(() => {
   mockCatalogOverride = undefined;
   lastMedia3SurfaceProps = undefined;
   mockSetOrientationLocked.mockReset();
+  mockRequestTemporaryOrientation.mockReset();
+  mockApplyShortEdgesCutoutMode.mockReset();
+  mockGetSafeAreaInsets.mockClear();
+  mockEnterPip.mockClear();
+  mockStandbyListeners.clear();
+  mockSafeAreaListeners.clear();
+  mockPipListeners.clear();
 });
 
 describe('App', () => {
@@ -465,15 +521,29 @@ describe('App', () => {
     await fireEvent.press(liveCard);
 
     expect(await screen.findByTestId('player-surface')).toBeOnTheScreen();
-    expect(lastMedia3SurfaceProps).toEqual({ resizeMode: 'fit', subtitleBottomInsetPx: 96 });
+    expect(mockApplyShortEdgesCutoutMode).toHaveBeenCalledTimes(1);
+    expect(mockSafeAreaListeners.size).toBe(1);
+    expect(lastMedia3SurfaceProps).toEqual({
+      resizeMode: 'fit',
+      subtitleBottomInsetPx: 96,
+      surfaceRecreationToken: 0,
+      useTextureView: false,
+    });
 
     // Lock controls -> calls setOrientationLocked(true) and drops subtitle inset to 0
     await fireEvent.press(screen.getByTestId('player-lock-button'));
     expect(mockSetOrientationLocked).toHaveBeenLastCalledWith(true);
     expect(lastMedia3SurfaceProps?.subtitleBottomInsetPx).toBe(0);
 
+    // Entering PiP hides locked overlay cleanly (#266)
+    await act(async () => {
+      for (const l of mockPipListeners) l(true);
+    });
+    expect(screen.queryByTestId('player-locked-overlay')).toBeNull();
+
     // Unmount while locked -> guarantees setOrientationLocked(false)
     await view.unmount();
     expect(mockSetOrientationLocked).toHaveBeenLastCalledWith(false);
+    expect(mockSafeAreaListeners.size).toBe(0);
   });
 });

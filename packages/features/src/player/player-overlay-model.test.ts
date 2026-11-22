@@ -68,6 +68,7 @@ function makeState(overrides: Partial<PlaybackState> = {}): PlaybackState {
     attempt: 3,
     tracks: EMPTY_TRACKS,
     staleEventsDropped: 2,
+    surfaceRecreationToken: 0,
     ...overrides,
   };
 }

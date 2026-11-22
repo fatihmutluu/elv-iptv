@@ -4,12 +4,14 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.SurfaceTexture
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.TextureView
 import android.view.View
 import androidx.annotation.OptIn
 import androidx.media3.common.text.Cue
@@ -44,16 +46,18 @@ internal const val DETACH_TIMEOUT_MS = 250L
 private fun exactly(size: Int) = View.MeasureSpec.makeMeasureSpec(size.coerceAtLeast(0), View.MeasureSpec.EXACTLY)
 
 /**
- * The `Media3Surface` view (player core spec 6.1): a `SurfaceView`, created once and never re-typed or put on top,
- * covered by a black zap shutter `View`, with `SubtitleView` above the shutter over the fitted video rectangle so
- * subtitles stay visible on audio-only streams while stale cues are cleared on every prepare/stop/off. The view paints
- * black bars beside the video, never over it, so React Native views drawn above compose over video and subtitles.
+ * The `Media3Surface` view (player core spec 6.1): a `SurfaceView` by default (never put on top, or an opt-in
+ * `TextureView` fallback when `useTextureView = true`, #262) at child index 0, covered by a black zap shutter `View`
+ * at index 1, with `SubtitleView` at index 2 over the fitted video rectangle. `surfaceRecreationToken` (#144) swaps
+ * only child 0 for a fresh video surface on Rung 3 decoder reset while ignoring retired surface callbacks.
  */
 @OptIn(UnstableApi::class)
 class Media3SurfaceView(context: Context, appContext: AppContext) :
   ExpoView(context, appContext),
   SurfaceHolder.Callback {
-  private val surfaceView = SurfaceView(context)
+  private var activeSurfaceView: SurfaceView? = null
+  private var activeTextureView: TextureView? = null
+  private var activeVideoView: View
   internal val subtitleView = SubtitleView(context)
   private val shutterView = View(context)
   private val main = Handler(Looper.getMainLooper())
@@ -64,16 +68,26 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
   private var engine: Media3Engine? = null
   private var binding: Binding? = null
   private var surface: Surface? = null
+  private var textureSurface: Surface? = null
+  private var useTextureView = false
+  private var surfaceRecreationToken = 0
   private var screenWanted = false
   private var subtitleBottomInsetDp = 0f
 
+  internal val activeTextureSurfaceForTest: Surface?
+    get() = textureSurface
+
   init {
-    surfaceView.isFocusable = false
+    val initialSurfaceView = SurfaceView(context).apply {
+      isFocusable = false
+      holder.addCallback(this@Media3SurfaceView)
+    }
+    activeSurfaceView = initialSurfaceView
+    activeVideoView = initialSurfaceView
     shutterView.isFocusable = false
     subtitleView.isFocusable = false
     shutterView.setBackgroundColor(Color.BLACK)
-    surfaceView.holder.addCallback(this)
-    addView(surfaceView)
+    addView(initialSurfaceView)
     addView(shutterView)
     addView(subtitleView)
     showShutter(shutter.covers)
@@ -102,6 +116,10 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
     binding = next?.let { bound -> Binding().also { bound.bindView(it) } }
     val validSurface = surface?.takeIf { it.isValid }
     if (validSurface == null) {
+      if (textureSurface != null && textureSurface === surface) {
+        runCatching { textureSurface?.release() }
+        textureSurface = null
+      }
       surface = null
     } else {
       next?.attachSurface(validSurface)
@@ -124,8 +142,31 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
     applySubtitleBottomPadding()
   }
 
-  override fun surfaceCreated(holder: SurfaceHolder) {
-    val created = holder.surface
+  /**
+   * The `surfaceRecreationToken` prop (#144): ignores unchanged values and initial `0`; when incremented (Rung 3
+   * decoder reset), replaces child index 0 with a fresh `SurfaceView` or `TextureView`.
+   */
+  fun setSurfaceRecreationToken(token: Int) {
+    val normalized = token.coerceAtLeast(0)
+    if (normalized == surfaceRecreationToken) return
+    surfaceRecreationToken = normalized
+    if (normalized == 0) return
+    replaceVideoView()
+  }
+
+  /** The `useTextureView` prop (#262): defaults to `false` (`SurfaceView`); toggles child 0 to/from `TextureView`. */
+  fun setUseTextureView(enabled: Boolean) {
+    if (enabled == useTextureView) return
+    useTextureView = enabled
+    replaceVideoView()
+  }
+
+  override fun surfaceCreated(holder: SurfaceHolder) = onSurfaceCreated(holder, holder.surface)
+
+  internal fun onSurfaceCreatedForTest(holder: SurfaceHolder, created: Surface?) = onSurfaceCreated(holder, created)
+
+  private fun onSurfaceCreated(holder: SurfaceHolder, created: Surface?) {
+    if (useTextureView || holder !== activeSurfaceView?.holder) return
     if (created == null || !created.isValid) return
     surface = created
     engine?.attachSurface(created)
@@ -134,6 +175,7 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
   override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
 
   override fun surfaceDestroyed(holder: SurfaceHolder) {
+    if (useTextureView || holder !== activeSurfaceView?.holder) return
     val destroyed = surface ?: return
     surface = null
     engine?.let { detach(it, destroyed) }
@@ -146,7 +188,7 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
     setMeasuredDimension(width, height)
     shutterView.measure(exactly(width), exactly(height))
     val rect = fit.rect(width, height)
-    surfaceView.measure(exactly(rect.width), exactly(rect.height))
+    activeVideoView.measure(exactly(rect.width), exactly(rect.height))
     subtitleView.measure(exactly(rect.width), exactly(rect.height))
   }
 
@@ -182,19 +224,101 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
     super.dispatchDraw(canvas)
   }
 
+  private fun replaceVideoView() {
+    detachCurrentSurface()
+    activeSurfaceView?.let { old ->
+      old.holder.removeCallback(this)
+      removeView(old)
+    }
+    activeSurfaceView = null
+    activeTextureView?.let { old ->
+      old.surfaceTextureListener = null
+      removeView(old)
+    }
+    activeTextureView = null
+
+    val nextView: View = if (useTextureView) {
+      TextureView(context).apply {
+        isFocusable = false
+        activeTextureView = this
+        surfaceTextureListener = createTextureListener(this)
+      }
+    } else {
+      SurfaceView(context).apply {
+        isFocusable = false
+        activeSurfaceView = this
+        holder.addCallback(this@Media3SurfaceView)
+      }
+    }
+    activeVideoView = nextView
+    addView(nextView, 0)
+    placeSurface()
+    invalidate()
+  }
+
+  private fun detachCurrentSurface() {
+    val oldSurface = surface
+    val oldTextureSurface = textureSurface
+    surface = null
+    textureSurface = null
+    if (oldSurface != null) {
+      engine?.let { detach(it, oldSurface) }
+    }
+    if (oldTextureSurface != null) {
+      runCatching { oldTextureSurface.release() }
+    }
+  }
+
+  private fun createTextureListener(owner: TextureView): TextureView.SurfaceTextureListener =
+    object : TextureView.SurfaceTextureListener {
+      override fun onSurfaceTextureAvailable(surfaceTexture: SurfaceTexture, width: Int, height: Int) {
+        if (!useTextureView || owner !== activeTextureView) return
+        textureSurface?.let { stale ->
+          if (surface === stale) surface = null
+          engine?.let { detach(it, stale) }
+          runCatching { stale.release() }
+          textureSurface = null
+        }
+        val created = Surface(surfaceTexture)
+        if (!created.isValid) {
+          runCatching { created.release() }
+          return
+        }
+        textureSurface = created
+        surface = created
+        engine?.attachSurface(created)
+      }
+
+      override fun onSurfaceTextureSizeChanged(surfaceTexture: SurfaceTexture, width: Int, height: Int) = Unit
+
+      override fun onSurfaceTextureDestroyed(surfaceTexture: SurfaceTexture): Boolean {
+        if (owner !== activeTextureView) return true
+        val destroyed = textureSurface ?: surface
+        textureSurface = null
+        if (surface === destroyed) surface = null
+        if (destroyed != null) {
+          engine?.let { detach(it, destroyed) }
+          runCatching { destroyed.release() }
+        }
+        return true
+      }
+
+      override fun onSurfaceTextureUpdated(surfaceTexture: SurfaceTexture) = Unit
+    }
+
   /**
    * Sizes and centres the surface and subtitle layer in a [width] x [height] view; called from layout and when the
    * shape or the mode changes, which needs no layout pass (React Native would not run one for this view).
    */
   private fun placeSurface(width: Int = this.width, height: Int = this.height) {
     val rect = fit.rect(width, height)
-    if (surfaceView.measuredWidth != rect.width || surfaceView.measuredHeight != rect.height) {
-      surfaceView.measure(exactly(rect.width), exactly(rect.height))
+    if (activeVideoView.measuredWidth != rect.width || activeVideoView.measuredHeight != rect.height) {
+      activeVideoView.measure(exactly(rect.width), exactly(rect.height))
     }
     if (subtitleView.measuredWidth != rect.width || subtitleView.measuredHeight != rect.height) {
       subtitleView.measure(exactly(rect.width), exactly(rect.height))
     }
-    surfaceView.layout(rect.left, rect.top, rect.right, rect.bottom)
+    activeVideoView.layout(rect.left, rect.top, rect.right, rect.bottom)
     subtitleView.layout(rect.left, rect.top, rect.right, rect.bottom)
     if (rect == placed) return
     placed = rect

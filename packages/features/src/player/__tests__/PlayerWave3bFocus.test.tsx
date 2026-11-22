@@ -506,6 +506,7 @@ describe('Wave 3B Player TV focus, hidden-OSD passthrough, live controls, atomic
       attempt: 1,
       tracks: TRACKS,
       staleEventsDropped: 0,
+      surfaceRecreationToken: 0,
       anchor: { positionMs: 30_000, atMs: 1_000, rate: 0, durationMs: 120_000 },
     };
     const service = {

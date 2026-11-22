@@ -25,6 +25,7 @@ export function createStallWatchdog(
   onStableRestore: () => void,
   onFrozenClock: () => void,
   onDecoderStall: () => void,
+  onRollingRebufferEscalate?: () => boolean,
 ): StallWatchdog {
   const { config } = ctl;
   let stallTimer: unknown;
@@ -40,6 +41,7 @@ export function createStallWatchdog(
   let lastNetworkActivityAtMs: number | undefined;
   let lastStallProgressBytes: number | undefined;
   let stallDeferrals = 0;
+  let rebufferTimestamps: number[] = [];
 
   const clear = (handle: unknown): undefined => {
     if (handle !== undefined) ctl.clearTimer(handle);
@@ -135,6 +137,7 @@ export function createStallWatchdog(
     reset() {
       cancel();
       seekSettling = false;
+      rebufferTimestamps = [];
     },
 
     onSeek() {
@@ -144,6 +147,7 @@ export function createStallWatchdog(
       clearZeroFrame();
       lastStallProgressBytes = undefined;
       stallDeferrals = 0;
+      rebufferTimestamps = [];
       seekSettling = true;
       stalledDuringSeek = false;
       seekSettleTimer = ctl.setTimer(() => {
@@ -246,6 +250,16 @@ export function createStallWatchdog(
         return;
       }
       if (!canWatch || stallTimer !== undefined) return;
+      if (config.rollingRebufferThreshold > 0 && config.rollingRebufferWindowMs > 0) {
+        const now = ctl.now();
+        const cutoff = now - config.rollingRebufferWindowMs;
+        rebufferTimestamps = rebufferTimestamps.filter((ts) => ts >= cutoff && ts <= now);
+        rebufferTimestamps.push(now);
+        if (rebufferTimestamps.length >= config.rollingRebufferThreshold) {
+          rebufferTimestamps = [];
+          if (onRollingRebufferEscalate?.() === true) return;
+        }
+      }
       armStallTimer();
     },
   };

@@ -22,6 +22,7 @@ function fakeHandle() {
     play: vi.fn(),
     pause: vi.fn(),
     seek: vi.fn(),
+    setScrubbing: vi.fn(),
     selectAudioTrack: vi.fn(),
     selectSubtitleTrack: vi.fn(),
     stop: vi.fn(),
@@ -63,6 +64,7 @@ describe('bridgeNativeEngine', () => {
       options: {
         softwareAudio: true,
         preferHevcOverDolbyVision: true,
+        bufferPreset: 'large',
         audioTrackId: '1:0',
         subtitleTrackId: null,
       },
@@ -71,6 +73,8 @@ describe('bridgeNativeEngine', () => {
     engine.play(4);
     engine.pause(4);
     engine.seek(5, 12_000);
+    engine.setScrubbing?.(5, true);
+    engine.setScrubbing?.(5, false);
     engine.selectAudioTrack?.(5, '1:1');
     engine.selectSubtitleTrack?.(5, '2:0');
     engine.selectSubtitleTrack?.(6, null);
@@ -84,6 +88,7 @@ describe('bridgeNativeEngine', () => {
       startMs: 5_000,
       softwareAudio: true,
       preferHevcOverDolbyVision: true,
+      bufferPreset: 'large',
       audioTrackId: '1:0',
       subtitleTrackId: null,
     });
@@ -91,6 +96,8 @@ describe('bridgeNativeEngine', () => {
     expect(handle.play).toHaveBeenCalledWith(4);
     expect(handle.pause).toHaveBeenCalledWith(4);
     expect(handle.seek).toHaveBeenCalledWith(5, 12_000);
+    expect(handle.setScrubbing).toHaveBeenNthCalledWith(1, 5, true);
+    expect(handle.setScrubbing).toHaveBeenNthCalledWith(2, 5, false);
     expect(handle.selectAudioTrack).toHaveBeenCalledWith(5, '1:1');
     expect(handle.selectSubtitleTrack).toHaveBeenNthCalledWith(1, 5, '2:0');
     expect(handle.selectSubtitleTrack).toHaveBeenNthCalledWith(2, 6, null);
@@ -98,8 +105,13 @@ describe('bridgeNativeEngine', () => {
     expect(handle.recreate).toHaveBeenCalledWith(7);
   });
 
-  it('omits track selection methods when absent on the native handle', () => {
-    const { selectAudioTrack: _a, selectSubtitleTrack: _s, ...minimal } = fakeHandle().handle;
+  it('omits track selection and setScrubbing methods when absent on the native handle', () => {
+    const {
+      selectAudioTrack: _a,
+      selectSubtitleTrack: _s,
+      setScrubbing: _sc,
+      ...minimal
+    } = fakeHandle().handle;
     const engine = bridgeNativeEngine(minimal, {
       capabilities: CAPABILITIES,
       uptimeMs: () => 0,
@@ -107,6 +119,26 @@ describe('bridgeNativeEngine', () => {
     });
     expect(engine.selectAudioTrack).toBeUndefined();
     expect(engine.selectSubtitleTrack).toBeUndefined();
+    expect(engine.setScrubbing).toBeUndefined();
+  });
+
+  it('forwards setScrubbing with activeAttempt without disturbing attempt matching (#222)', () => {
+    const { handle, emit, engine } = fakeHandle();
+    const events: EngineEvent[] = [];
+    engine.subscribe((e) => events.push(e));
+
+    engine.load({ attempt: 3, url: 'http://sim/movie/1.mp4', headers: {}, kind: 'vod' });
+    engine.setScrubbing?.(99, true);
+    emit({ attempt: 3, type: 'state', state: 'playing' });
+    engine.setScrubbing?.(3, false);
+
+    expect(handle.setScrubbing).toHaveBeenNthCalledWith(1, 3, true);
+    expect(handle.setScrubbing).toHaveBeenNthCalledWith(2, 3, false);
+    expect(events).toEqual([{ attempt: 3, type: 'state', state: 'playing' }]);
+
+    engine.release();
+    engine.setScrubbing?.(3, true);
+    expect(handle.setScrubbing).toHaveBeenCalledTimes(2);
   });
 
   it('sends no optional load fields the command does not have', () => {
