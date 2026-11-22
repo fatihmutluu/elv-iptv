@@ -13,11 +13,18 @@ internal enum class ResizeMode {
 
   /** The view covered at the picture's display aspect ratio, centred, the overflow cropped. */
   FILL,
+
+  /** The picture stretched to fill the whole view, ignoring its display aspect ratio (#151). */
+  STRETCH,
   ;
 
   companion object {
-    /** The mode named by the prop; anything but `fill` (a removed prop too) is [FIT]. */
-    fun of(name: String?): ResizeMode = if (name == "fill") FILL else FIT
+    /** The mode named by the prop; `fill` -> [FILL], `stretch` -> [STRETCH], anything else -> [FIT]. */
+    fun of(name: String?): ResizeMode = when (name) {
+      "fill" -> FILL
+      "stretch" -> STRETCH
+      else -> FIT
+    }
   }
 }
 
@@ -45,6 +52,7 @@ internal fun fitRect(
   mode: ResizeMode,
 ): VideoRect {
   val whole = VideoRect(0, 0, viewW.coerceAtLeast(0), viewH.coerceAtLeast(0))
+  if (mode == ResizeMode.STRETCH) return whole
   if (viewW <= 0 || viewH <= 0 || videoW <= 0 || videoH <= 0 || !(pixelRatio > 0f) || pixelRatio.isInfinite()) {
     return whole
   }

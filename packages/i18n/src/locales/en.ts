@@ -193,6 +193,8 @@ export const enMessages = {
   'player.aspect': 'Aspect',
   'player.aspect.fit': 'Fit',
   'player.aspect.fill': 'Fill',
+  'player.aspect.stretch': 'Stretch',
+  'player.jumpToLive': 'Jump to live',
   'player.deinterlace': 'Deinterlace',
   'player.statsHud': 'Playback stats',
   'player.stats.on': 'On',
@@ -399,6 +401,19 @@ export const enMessages = {
   'desktop.catalogDisconnected.title': 'Catalog service stopped unexpectedly',
   'desktop.catalogDisconnected.retry': 'Reconnect',
   'desktop.catalogDisconnected.reconnecting': 'Reconnecting…',
+  'sources.cachedCatalog.banner': 'Showing cached catalog — provider refresh failed',
+  'sources.cachedCatalog.retry': 'Check again',
+  'sources.cachedCatalog.retrying': 'Checking…',
+  'player.connectionLimit.title': 'Connection limit warning',
+  'player.connectionLimit.ownActiveBody':
+    'Another stream is already playing in this app (limit {max}). Opening a new stream may interrupt playback or be rejected by your provider.',
+  'player.connectionLimit.providerReportedBody':
+    'The provider reports {active} active streams (limit {max}).',
+  'player.connectionLimit.unknownBody':
+    'This source allows up to {max} concurrent connections. Active connections on other devices could not be verified.',
+  'player.connectionLimit.stopOther': 'Stop other stream',
+  'player.connectionLimit.cancel': 'Cancel',
+  'player.connectionLimit.continueAnyway': 'Continue anyway',
 } as const;
 
 /** Valid message identifier across all supported locales. */

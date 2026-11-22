@@ -174,10 +174,10 @@ export interface Media3SurfaceProps {
   /** Layout only: nothing is painted over the video, so whatever is drawn above the view composes over it. */
   style?: StyleProp<ViewStyle>;
   /**
-   * How the picture meets the view at its display aspect ratio, centred: `fit` (the default) shows all of it with
-   * black bars beside it, `fill` covers the view and crops the overflow.
+   * How the picture meets the view: `fit` (the default) shows all of it with black bars beside it,
+   * `fill` covers the view and crops the overflow, `stretch` fills the view ignoring aspect ratio.
    */
-  resizeMode?: 'fit' | 'fill';
+  resizeMode?: 'fit' | 'fill' | 'stretch';
   /** Extra bottom inset in dp to lift native `SubtitleView` cues above a visible OSD (`#136`). */
   subtitleBottomInsetPx?: number;
   /** Monotonic token incremented on Rung 3 decoder reset to swap in a fresh `SurfaceView` (`#144`). */
@@ -191,7 +191,7 @@ interface NativeSurfaceProps {
   /** The shared object; expo-modules-core passes it to native as its registry id. */
   engine: NativeEngineHandle;
   style?: StyleProp<ViewStyle>;
-  resizeMode?: 'fit' | 'fill';
+  resizeMode?: 'fit' | 'fill' | 'stretch';
   subtitleBottomInsetPx?: number;
   surfaceRecreationToken?: number;
   useTextureView?: boolean;

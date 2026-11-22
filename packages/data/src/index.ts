@@ -15,7 +15,12 @@ export {
   type PlaceholderLiveChannelInput,
 } from './placeholder-filter';
 export * from './queries';
-export { type ReapOrphanedRunsResult, reapOrphanedRuns } from './runs';
+export {
+  latestImportHealth,
+  type ReapOrphanedRunsResult,
+  reapOrphanedRuns,
+  type SourceImportHealth,
+} from './runs';
 export {
   EXPECTED_FTS_TABLES,
   EXPECTED_TABLE_COLUMNS,
@@ -23,9 +28,11 @@ export {
   MIGRATIONS,
 } from './schema';
 export * from './search';
+export * from './short-epg-queue';
 export * from './source-link';
 export * from './sources';
 export * from './stream-resolver';
 export * from './templates';
+export * from './title-clean';
 export * from './user-state';
 export * from './write-coalescer';

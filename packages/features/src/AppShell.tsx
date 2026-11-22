@@ -1,4 +1,5 @@
 import type { CatalogService, SearchScope } from '@elv/data';
+import type { ConnectionTracker } from '@elv/playback';
 import { TvFocusAnchor, useFormFactor, useI18n } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -20,6 +21,7 @@ import { HomeScreen } from './home';
 import { EMPTY_LIVE_MEMORY, LiveScreen, type LiveTabMemory, recordChannelTune } from './live';
 import { ThirdPartyNoticesScreen } from './notices';
 import { DEFAULT_AUTO_HIDE_OSD_MS, PlayerScreen } from './player';
+import { ConnectionLimitDialog } from './player/ConnectionLimitDialog';
 import type { AppLifecyclePort } from './ports/app-lifecycle';
 import type { PlayTarget } from './ports/play-target';
 import { createPlaybackGuard, type PlaybackGuard } from './ports/playback-guard';
@@ -36,12 +38,15 @@ import {
   createCatalogUiCache,
   RouteActiveProvider,
   useCatalogPrewarm,
+  useConnectionLimitGuard,
   useDocumentVisible,
+  useImportHealth,
   usePreferences,
   useShellFlush,
   useShellSources,
 } from './shell';
 import { SourcesScreen } from './sources';
+import { CachedCatalogStrip } from './sources/CachedCatalogStrip';
 
 /** Top-level shell tab identifier. */
 export type AppTab = 'home' | 'live' | 'movie' | 'series' | 'search' | 'settings';
@@ -52,6 +57,8 @@ export interface AppShellProps {
   videoHost: VideoHost;
   appLifecycle?: AppLifecyclePort;
   externalRefreshToken?: number;
+  /** Optional shared per-account connection tracker for multi-surface pre-flight limits (`#87`). */
+  connectionTracker?: ConnectionTracker;
   /** Optional test/host hook notified with the active {@link PlaybackGuard}. */
   onPlaybackGuardReady?: (guard: PlaybackGuard) => void;
 }
@@ -109,34 +116,53 @@ export function AppShell(props: AppShellProps): ReactElement {
   });
   const { sources, sourcesRef, sourcesResolved, refreshToken, catalogRevision } = shell;
   uiCache.setRevision(catalogRevision, locale);
+  const openPlayTarget = useCallback((enriched: PlayTarget) => {
+    setHeroScrolled(false);
+    playTargetRef.current = enriched;
+    setPlayTarget(enriched);
+  }, []);
+  const replacePlayTarget = useCallback((enriched: PlayTarget) => {
+    playTargetRef.current = enriched;
+    setPlayTarget(enriched);
+    if (enriched.kind === 'live') {
+      setLiveMemory((p) => ({ ...p, ...recordChannelTune(p, enriched.itemKey) }));
+    }
+  }, []);
+  const connectionGuard = useConnectionLimitGuard({
+    sourcesRef,
+    enrichTarget: enrichPlayTargetAccountKey,
+    ...(props.connectionTracker !== undefined
+      ? { connectionTracker: props.connectionTracker }
+      : {}),
+    onOpenTarget: openPlayTarget,
+    onReplaceTarget: replacePlayTarget,
+  });
   const stopForSource = useCallback(
     (sourceId: string): void => {
       if (playTargetRef.current?.sourceId === sourceId) {
         playTargetRef.current = null;
         setPlayTarget(null);
+        connectionGuard.releaseActive();
       }
       uiCache.invalidateSource(sourceId);
       setLiveMemory((prev) => clearSourceFromLiveMemory(prev, sourceId));
       setCatalogMemoryByTab((prev) => clearSourceFromCatalogMemory(prev, sourceId));
       setDetailStack((prev) => prev.filter((entry) => entry.sourceId !== sourceId));
     },
-    [uiCache],
+    [connectionGuard.releaseActive, uiCache],
   );
   const playbackGuard = useMemo(() => createPlaybackGuard(stopForSource), [stopForSource]);
   useEffect(() => onPlaybackGuardReady?.(playbackGuard), [onPlaybackGuardReady, playbackGuard]);
-  const handlePlay = useCallback(
-    (target: PlayTarget) => {
-      const enriched = enrichPlayTargetAccountKey(target, sourcesRef.current);
-      setHeroScrolled(false);
-      playTargetRef.current = enriched;
-      setPlayTarget(enriched);
-    },
-    [sourcesRef],
-  );
+  const handlePlay = connectionGuard.requestPlay;
   const observedCatalog = useMemo(
     () => createObservedCatalog(catalog, playbackGuard, shell.syncSourcesAndBump),
     [catalog, playbackGuard, shell.syncSourcesAndBump],
   );
+  const importHealth = useImportHealth({
+    catalog: observedCatalog,
+    refreshToken,
+    externalRefreshToken,
+  });
   useShellFlush({
     catalog: observedCatalog,
     ...(appLifecycle !== undefined ? { appLifecycle } : {}),
@@ -253,19 +279,19 @@ export function AppShell(props: AppShellProps): ReactElement {
     onFocusTopNav: handleFocusTopNav,
     isActiveScope: !topNavFocused,
   };
-  const onPlayerTargetChange = (next: PlayTarget) => {
-    const enriched = enrichPlayTargetAccountKey(next, sourcesRef.current);
-    playTargetRef.current = enriched;
-    setPlayTarget(enriched);
-    if (enriched.kind === 'live')
-      setLiveMemory((p) => ({ ...p, ...recordChannelTune(p, enriched.itemKey) }));
-  };
+  const onPlayerTargetChange = connectionGuard.replaceActiveTarget;
   const onPlayerExit = () => {
+    connectionGuard.releaseActive();
     playTargetRef.current = null;
     setPlayTarget(null);
     setHeroScrolled(false);
     setUserStateVersion((v) => v + 1);
   };
+  const showCachedStrip =
+    !isResolvingInitialSources &&
+    activeDetail === null &&
+    activeTab !== 'settings' &&
+    importHealth.health.length > 0;
   return (
     <RouteActiveProvider active={documentVisible && appForeground}>
       <CatalogUiCacheProvider cache={uiCache}>
@@ -304,6 +330,15 @@ export function AppShell(props: AppShellProps): ReactElement {
                 resetKey={`${activeTab}:${activeDetail?.itemKey ?? ''}`}
                 {...crashProps}
               >
+                {showCachedStrip ? (
+                  <View style={styles.cachedStripWrap}>
+                    <CachedCatalogStrip
+                      health={importHealth.health}
+                      retrying={importHealth.retrying}
+                      onRetry={importHealth.retryFailedSources}
+                    />
+                  </View>
+                ) : null}
                 {isResolvingInitialSources ? (
                   <View testID="app-shell-boot" style={styles.bootCanvas}>
                     {isTv && !topNavFocused ? (
@@ -394,10 +429,21 @@ export function AppShell(props: AppShellProps): ReactElement {
               </CrashRecoveryBoundary>
             </AdaptiveNavShell>
           )}
+          {connectionGuard.pending !== null ? (
+            <ConnectionLimitDialog
+              check={connectionGuard.pending.check}
+              onStopOther={connectionGuard.handleStopOther}
+              onCancel={connectionGuard.handleCancel}
+              onContinueAnyway={connectionGuard.handleContinueAnyway}
+            />
+          ) : null}
         </BrowseFocusMemoryProvider>
       </CatalogUiCacheProvider>
     </RouteActiveProvider>
   );
 }
 
-const styles = StyleSheet.create({ bootCanvas: { flex: 1 } });
+const styles = StyleSheet.create({
+  bootCanvas: { flex: 1 },
+  cachedStripWrap: { paddingHorizontal: 16, paddingTop: 8 },
+});

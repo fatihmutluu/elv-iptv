@@ -8,7 +8,7 @@ import { Platform, type StyleProp, type ViewStyle } from 'react-native';
 export interface PlayerSurfaceProps {
   engine: PlayerEngine;
   style?: StyleProp<ViewStyle>;
-  resizeMode?: 'fit' | 'fill';
+  resizeMode?: 'fit' | 'fill' | 'stretch';
   subtitleBottomInsetPx?: number;
   surfaceRecreationToken?: number;
   useTextureView?: boolean;

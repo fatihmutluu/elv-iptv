@@ -1,4 +1,4 @@
-import { foldText } from './fold';
+import { foldGuideMatchText, foldText } from './fold';
 
 /** Live channels of a source indexed for guide matching; values are channel keys. */
 export interface ChannelIndex {
@@ -7,6 +7,7 @@ export interface ChannelIndex {
   byBaseGuideId: Map<string, string[]>;
   byFold: Map<string, string[]>;
   byNormalizedName: Map<string, string[]>;
+  byGuideFold: Map<string, string[]>;
   byNum: Map<number, string[]>;
   nameFoldByKey: Map<string, string>;
 }
@@ -22,12 +23,23 @@ const BRACKET_TAG_RE = /\[[^\]]*\]/g;
 const PAREN_TAG_RE = /\(([^)]*)\)/g;
 const CALL_SIGN_RE = /^[A-Z]{3,5}$/;
 const TWENTY_FOUR_SEVEN_RE = /(?:^|[^\p{L}\p{N}])24\/7(?=$|[^\p{L}\p{N}])/gu;
+const RESOLUTION_NOISE_RE = /(?:^|[^\p{L}\p{N}])(?:1080p|720p|480p)(?=$|[^\p{L}\p{N}])/giu;
 const NOISE_TOKENS = new Set(['east', 'west', '1080p', '720p', '480p', 'uhd', 'fhd', 'hd', 'sd']);
 
 /** Strips an `@feedId` suffix from an XMLTV guide id (e.g. `Channel.uk@East` -> `Channel.uk`). */
 export function stripFeedId(id: string): string {
   const at = id.indexOf('@');
   return at > 0 ? id.slice(0, at) : id;
+}
+
+function stripGuideTags(name: string): string {
+  return name
+    .replace(BRACKET_TAG_RE, ' ')
+    .replace(PAREN_TAG_RE, (_match, inner: string) => {
+      const trimmed = inner.trim();
+      return CALL_SIGN_RE.test(trimmed) ? ` ${trimmed} ` : ' ';
+    })
+    .replace(TWENTY_FOUR_SEVEN_RE, ' ');
 }
 
 /**
@@ -37,14 +49,17 @@ export function stripFeedId(id: string): string {
  * `hd`, `sd`), and folds via {@link foldText}.
  */
 export function normalizeGuideName(name: string): string {
-  const cleaned = name
-    .replace(BRACKET_TAG_RE, ' ')
-    .replace(PAREN_TAG_RE, (_match, inner: string) => {
-      const trimmed = inner.trim();
-      return CALL_SIGN_RE.test(trimmed) ? ` ${trimmed} ` : ' ';
-    })
-    .replace(TWENTY_FOUR_SEVEN_RE, ' ');
-  const folded = foldText(cleaned);
+  const folded = foldText(stripGuideTags(name));
+  if (folded === '') return '';
+  return folded
+    .split(' ')
+    .filter((token) => !NOISE_TOKENS.has(token))
+    .join(' ');
+}
+
+function normalizeGuideMatchName(name: string): string {
+  const cleaned = stripGuideTags(name).replace(RESOLUTION_NOISE_RE, ' ');
+  const folded = foldGuideMatchText(cleaned);
   if (folded === '') return '';
   return folded
     .split(' ')
@@ -85,6 +100,7 @@ export function buildChannelIndex(
     byBaseGuideId: new Map(),
     byFold: new Map(),
     byNormalizedName: new Map(),
+    byGuideFold: new Map(),
     byNum: new Map(),
     nameFoldByKey: new Map(),
   };
@@ -98,8 +114,11 @@ export function buildChannelIndex(
     const foldedName = row.name_fold !== '' ? row.name_fold : foldText(row.name ?? '');
     if (foldedName !== '') index.nameFoldByKey.set(row.key, foldedName);
     if (row.name_fold !== '') push(index.byFold, row.name_fold, row.key);
-    const norm = normalizeGuideName(row.name ?? row.name_fold);
+    const rawName = row.name ?? row.name_fold;
+    const norm = normalizeGuideName(rawName);
     if (norm !== '') push(index.byNormalizedName, norm, row.key);
+    const guideFold = normalizeGuideMatchName(rawName);
+    if (guideFold !== '') push(index.byGuideFold, guideFold, row.key);
     if (typeof row.num === 'number' && Number.isFinite(row.num) && row.num > 0) {
       push(index.byNum, row.num, row.key);
     }
@@ -156,6 +175,12 @@ export function matchGuideChannel(
   const foundNorm = matchUniqueName(guide.names, index.byNormalizedName, normalizeGuideName);
   if (foundNorm.size === 1) return { keys: [...foundNorm], byId: false, tier: 'normalized-name' };
   if (foundNorm.size > 1) return { keys: [], byId: false, tier: 'none' };
+
+  const foundGuideFold = matchUniqueName(guide.names, index.byGuideFold, normalizeGuideMatchName);
+  if (foundGuideFold.size === 1) {
+    return { keys: [...foundGuideFold], byId: false, tier: 'normalized-name' };
+  }
+  if (foundGuideFold.size > 1) return { keys: [], byId: false, tier: 'none' };
 
   const extractedNums = new Set<number>();
   for (const name of guide.names) {

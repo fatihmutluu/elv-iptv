@@ -135,7 +135,7 @@ describe('body limits', () => {
 });
 
 describe('server without a scheme', () => {
-  it('prepends http:// to every request and URL builder', async () => {
+  it('probes https:// first and resolves URL builders from the cached scheme (#229)', async () => {
     const { c, urls } = clientWith(
       async function* () {
         yield enc('{}');
@@ -143,10 +143,10 @@ describe('server without a scheme', () => {
       { server: 'h.example:8080/' },
     );
     await c.account();
-    expect(urls[0]?.startsWith('http://h.example:8080/player_api.php?')).toBe(true);
-    expect(c.playlistUrl().startsWith('http://h.example:8080/get.php?')).toBe(true);
-    expect(c.guideUrl().startsWith('http://h.example:8080/xmltv.php?')).toBe(true);
-    expect(c.streamUrl('live', 5).startsWith('http://h.example:8080/live/')).toBe(true);
+    expect(urls[0]?.startsWith('https://h.example:8080/player_api.php?')).toBe(true);
+    expect(c.playlistUrl().startsWith('https://h.example:8080/get.php?')).toBe(true);
+    expect(c.guideUrl().startsWith('https://h.example:8080/xmltv.php?')).toBe(true);
+    expect(c.streamUrl('live', 5).startsWith('https://h.example:8080/live/')).toBe(true);
     expect(c.streamUrl('live', 5).endsWith('/5.ts')).toBe(true);
   });
 });

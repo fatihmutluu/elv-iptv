@@ -20,8 +20,8 @@ export interface PlayerViewProps {
   status: string;
   /** True while the service status is `failed`: the video is hidden so the Retry card shows in the player area. */
   failed?: boolean;
-  /** Picture scaling mode (`fit` letterboxed, `fill` cropped to cover). */
-  resizeMode?: 'fit' | 'fill';
+  /** Picture scaling mode (`fit` letterboxed, `fill` cropped to cover, `stretch` fills bounds ignoring aspect). */
+  resizeMode?: 'fit' | 'fill' | 'stretch';
 }
 
 /**

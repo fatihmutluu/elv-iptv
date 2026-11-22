@@ -27,6 +27,8 @@ import { isPlaceholderLiveChannel } from './placeholder-filter';
 import { sourceExists } from './runs';
 import {
   getSource,
+  normalizeActiveConnections,
+  normalizeMaxConnections,
   type SourceRecord,
   type SourceSettings,
   secretKey,
@@ -292,9 +294,14 @@ async function importXtream(
       if (account !== undefined) {
         if (account.outputFormats.length > 0) settings.outputFormats = account.outputFormats;
         else delete settings.outputFormats;
+        const activeConnections = normalizeActiveConnections(account.activeConnections);
         settings.accountMeta = {
           isTrial: account.isTrial,
           ...(account.expiresAt !== undefined ? { expiresAt: account.expiresAt } : {}),
+          ...(account.maxConnections !== undefined
+            ? { maxConnections: normalizeMaxConnections(account.maxConnections) }
+            : {}),
+          ...(activeConnections !== undefined ? { activeConnections } : {}),
         };
       }
       if (opened.value.credentialFingerprint !== undefined)

@@ -2,6 +2,7 @@ package io.github.fatihmutluu.elv.media3
 
 import android.app.ActivityManager
 import android.content.Context
+import android.os.Build
 import android.os.Looper
 import android.util.Log
 import android.view.accessibility.CaptioningManager
@@ -61,6 +62,18 @@ internal fun isSystemCaptioningEnabled(context: Context): Boolean =
     .getOrDefault(false)
 
 /**
+ * Selects Media3's video frame-rate switching strategy by Android API level (#151):
+ * enables seamless-only frame-rate switching on Android 11+ (API 30+) and disables it on older APIs.
+ */
+@OptIn(UnstableApi::class)
+internal fun videoChangeFrameRateStrategyForApi(sdkInt: Int): Int =
+  if (sdkInt >= Build.VERSION_CODES.R) {
+    C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS
+  } else {
+    C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF
+  }
+
+/**
  * Builds configured [ExoPlayer] instances on the engine's playback [looper] (#111, #127, #147, #191, #222, #248, #249,
  * #260, #261, #262, #307, #422, #438):
  * - [DefaultLoadControl] split by [StreamKind], [BufferPreset], and RAM tier (hard `16 MiB` cap on low-RAM).
@@ -79,6 +92,7 @@ internal class PlayerFactory(
   private val audioFocusProbe: (Boolean) -> Unit = {},
   private val captioningEnabled: () -> Boolean = { isSystemCaptioningEnabled(context) },
   private val deviceQuirks: DeviceQuirks = DeviceQuirks.fromBuild(),
+  private val sdkInt: Int = Build.VERSION.SDK_INT,
 ) {
   constructor(
     context: Context,
@@ -88,6 +102,7 @@ internal class PlayerFactory(
     audioFocusProbe: (Boolean) -> Unit = {},
     captioningEnabled: () -> Boolean = { isSystemCaptioningEnabled(context) },
     deviceQuirks: DeviceQuirks = DeviceQuirks.fromBuild(),
+    sdkInt: Int = Build.VERSION.SDK_INT,
   ) : this(
     context = context,
     looper = looper,
@@ -96,6 +111,7 @@ internal class PlayerFactory(
     audioFocusProbe = audioFocusProbe,
     captioningEnabled = captioningEnabled,
     deviceQuirks = deviceQuirks,
+    sdkInt = sdkInt,
   )
 
   @Volatile
@@ -192,6 +208,7 @@ internal class PlayerFactory(
       .setReleaseTimeoutMs(PLAYER_RELEASE_TIMEOUT_MS)
       .setDetachSurfaceTimeoutMs(PLAYER_DETACH_SURFACE_TIMEOUT_MS)
       .setStuckBufferingDetectionTimeoutMs(PLAYER_STUCK_BUFFERING_TIMEOUT_MS)
+      .setVideoChangeFrameRateStrategy(videoChangeFrameRateStrategyForApi(sdkInt))
       .enablePerStreamMediaProgression(true)
       .build()
   }

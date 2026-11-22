@@ -200,6 +200,8 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'player.aspect': 'Görüntü modu',
   'player.aspect.fit': 'Sığdır',
   'player.aspect.fill': 'Doldur',
+  'player.aspect.stretch': 'Uzat',
+  'player.jumpToLive': 'Canlı uca atla',
   'player.deinterlace': 'Taramayı gider',
   'player.statsHud': 'Oynatma istatistikleri',
   'player.stats.on': 'Açık',
@@ -412,4 +414,18 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'desktop.catalogDisconnected.title': 'Katalog servisi beklenmedik şekilde durdu',
   'desktop.catalogDisconnected.retry': 'Yeniden bağlan',
   'desktop.catalogDisconnected.reconnecting': 'Yeniden bağlanıyor…',
+  'sources.cachedCatalog.banner':
+    'Önbellekteki katalog gösteriliyor — sağlayıcı yenilemesi başarısız oldu',
+  'sources.cachedCatalog.retry': 'Tekrar kontrol et',
+  'sources.cachedCatalog.retrying': 'Kontrol ediliyor…',
+  'player.connectionLimit.title': 'Bağlantı sınırı uyarısı',
+  'player.connectionLimit.ownActiveBody':
+    'Bu uygulamada zaten başka bir yayın oynatılıyor (sınır {max}). Yeni bir yayın açmak oynatmayı kesintiye uğratabilir veya sağlayıcınız tarafından reddedilebilir.',
+  'player.connectionLimit.providerReportedBody':
+    'Sağlayıcı {active} etkin yayın bildiriyor (sınır {max}).',
+  'player.connectionLimit.unknownBody':
+    'Bu kaynak en fazla {max} eşzamanlı bağlantıya izin verir. Diğer cihazlardaki etkin bağlantılar doğrulanamadı.',
+  'player.connectionLimit.stopOther': 'Diğer yayını durdur',
+  'player.connectionLimit.cancel': 'İptal',
+  'player.connectionLimit.continueAnyway': 'Yine de devam et',
 };

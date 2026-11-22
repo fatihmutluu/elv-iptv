@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { foldText, sortTitleKey } from './fold';
+import { foldGuideMatchText, foldText, sortTitleKey } from './fold';
 
 describe('foldText', () => {
   it.each([
@@ -41,5 +41,36 @@ describe('sortTitleKey', () => {
     ['---', ''],
   ])('maps %j to %j', (input, expected) => {
     expect(sortTitleKey(input)).toBe(expected);
+  });
+});
+
+describe('foldGuideMatchText (#194)', () => {
+  it.each([
+    ['NewsOne', 'news 1'],
+    ['NewsChannel', 'news channel'],
+    ['SportsTV2', 'sports tv 2'],
+    ['SportsTVNews', 'sports tv news'],
+    ['TV2HD', 'tv 2 hd'],
+    ['Channel Zero', 'channel 0'],
+    ['One Two Three Four Five Six Seven Eight Nine', '1 2 3 4 5 6 7 8 9'],
+    ['Someone Nineveh', 'someone nineveh'],
+    ['İSTANBULOne', 'istanbul 1'],
+    ['ÇağrıTVŞov', 'cagri tv sov'],
+    ['IğdırTwo', 'igdir 2'],
+    ['ÖzgürÜç', 'ozgur uc'],
+    ['Straße', 'strasse'],
+    ['', ''],
+    ['   ', ''],
+  ])('folds %j to %j', (input, expected) => {
+    expect(foldGuideMatchText(input)).toBe(expected);
+  });
+
+  it('is idempotent', () => {
+    fc.assert(
+      fc.property(
+        fc.string({ unit: 'binary' }),
+        (s) => foldGuideMatchText(foldGuideMatchText(s)) === foldGuideMatchText(s),
+      ),
+    );
   });
 });

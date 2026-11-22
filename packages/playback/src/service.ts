@@ -33,6 +33,8 @@ import type {
 } from './types';
 
 const SPEED_BLOCKED = new Set<PlaybackStatus['kind']>(['idle', 'ended', 'recovering']);
+const LIVE_TS_EDGE_MARGIN_MS = 3_000;
+const LIVE_TS_AT_EDGE_WINDOW_MS = 4_000;
 
 /** Dependencies of {@link createPlaybackService}. */
 export interface PlaybackServiceDeps {
@@ -289,6 +291,46 @@ export function createPlaybackServiceWith(
     startTune(req.kind === 'vod' ? { ...req, startMs: 0 } : req);
   };
 
+  const performSeek = (positionMs: number): void => {
+    const statusKind = state().status.kind;
+    const reloadableVod =
+      current?.kind === 'vod' && (statusKind === 'recovering' || statusKind === 'ended');
+    if (disposed || !Number.isFinite(positionMs) || (!loaded && !reloadableVod)) return;
+    const clamped = resolveSeekTarget(
+      positionMs,
+      current?.kind === 'vod',
+      statusKind,
+      state().anchor?.durationMs,
+    );
+    if (clamped === undefined) return;
+    store.batch(() => {
+      const now = clock.now();
+      const prevAnchor = state().anchor;
+      const optimisticBase = buildOptimisticSeekAnchor(clamped, now, statusKind, prevAnchor);
+      const optimistic =
+        prevAnchor?.isLiveTs === undefined
+          ? optimisticBase
+          : { ...optimisticBase, isLiveTs: prevAnchor.isLiveTs };
+      store.update({
+        anchor: optimistic,
+        ...(current?.kind === 'live'
+          ? { atLiveEdge: isAtLiveEdge(optimistic, now, config.liveEdgeToleranceMs) }
+          : {}),
+      });
+      if (current?.kind === 'vod') lastVodPositionMs = clamped;
+      const attemptBefore = state().attempt;
+      hooks.onSeek?.(clamped);
+      if (state().attempt === attemptBefore && loaded) {
+        const seekAttempt = state().attempt;
+        seekCoalescer.request(clamped, (targetMs) => {
+          if (!disposed && loaded && state().attempt === seekAttempt) {
+            engine.seek(seekAttempt, targetMs);
+          }
+        });
+      }
+    });
+  };
+
   return {
     tune(request) {
       if (disposed) return state().attempt;
@@ -364,39 +406,39 @@ export function createPlaybackServiceWith(
         if (wasLoaded && loaded) engine.pause(token);
       });
     },
-    seek(positionMs) {
-      const statusKind = state().status.kind;
-      const reloadableVod =
-        current?.kind === 'vod' && (statusKind === 'recovering' || statusKind === 'ended');
-      if (disposed || !Number.isFinite(positionMs) || (!loaded && !reloadableVod)) return;
-      const clamped = resolveSeekTarget(
-        positionMs,
-        current?.kind === 'vod',
-        statusKind,
-        state().anchor?.durationMs,
-      );
-      if (clamped === undefined) return;
-      store.batch(() => {
-        const now = clock.now();
-        const optimistic = buildOptimisticSeekAnchor(clamped, now, statusKind, state().anchor);
-        store.update({
-          anchor: optimistic,
-          ...(current?.kind === 'live'
-            ? { atLiveEdge: isAtLiveEdge(optimistic, now, config.liveEdgeToleranceMs) }
-            : {}),
-        });
-        if (current?.kind === 'vod') lastVodPositionMs = clamped;
-        const attemptBefore = state().attempt;
-        hooks.onSeek?.(clamped);
-        if (state().attempt === attemptBefore && loaded) {
-          const seekAttempt = state().attempt;
-          seekCoalescer.request(clamped, (targetMs) => {
-            if (!disposed && loaded && state().attempt === seekAttempt) {
-              engine.seek(seekAttempt, targetMs);
-            }
-          });
-        }
-      });
+    seek: performSeek,
+    jumpToLiveEdge() {
+      const st = state();
+      const statusKind = st.status.kind;
+      const anchor = st.anchor;
+      if (
+        disposed ||
+        !loaded ||
+        current?.kind !== 'live' ||
+        statusKind === 'idle' ||
+        statusKind === 'ended' ||
+        statusKind === 'failed' ||
+        statusKind === 'limited' ||
+        statusKind === 'recovering' ||
+        anchor?.isLiveTs !== true
+      ) {
+        return false;
+      }
+      const liveEdgeMs = anchor.liveEdgeMs;
+      if (
+        liveEdgeMs === undefined ||
+        !Number.isFinite(liveEdgeMs) ||
+        liveEdgeMs <= LIVE_TS_EDGE_MARGIN_MS
+      ) {
+        return false;
+      }
+      const now = clock.now();
+      const currentPos = positionAt(anchor, now);
+      if (!Number.isFinite(currentPos) || liveEdgeMs - currentPos <= LIVE_TS_AT_EDGE_WINDOW_MS) {
+        return false;
+      }
+      performSeek(Math.max(0, liveEdgeMs - LIVE_TS_EDGE_MARGIN_MS));
+      return true;
     },
     setScrubbing(scrubbing) {
       if (disposed || current?.kind !== 'vod') return;

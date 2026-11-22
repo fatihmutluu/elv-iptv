@@ -3,6 +3,7 @@ package io.github.fatihmutluu.elv.media3
 import android.os.Looper
 import android.provider.Settings
 import androidx.annotation.OptIn
+import androidx.media3.common.C
 import androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.SeekParameters
@@ -167,6 +168,39 @@ class PlayerFactoryTest {
     } finally {
       enabledPlayer.release()
       Settings.Secure.putInt(resolver, "accessibility_captioning_enabled", 0)
+    }
+  }
+
+  @Test
+  fun `gates seamless video frame-rate switching strategy on API 30+ (#151)`() {
+    assertEquals(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF, videoChangeFrameRateStrategyForApi(28))
+    assertEquals(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF, videoChangeFrameRateStrategyForApi(29))
+    assertEquals(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS, videoChangeFrameRateStrategyForApi(30))
+    assertEquals(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS, videoChangeFrameRateStrategyForApi(34))
+
+    val app = RuntimeEnvironment.getApplication()
+    val api30Factory = PlayerFactory(
+      context = app,
+      looper = Looper.getMainLooper(),
+      buffers = loadControlFor(lowRam = false),
+      codecPolicy = CodecPolicy(),
+      sdkInt = 30,
+    )
+    val api29Factory = PlayerFactory(
+      context = app,
+      looper = Looper.getMainLooper(),
+      buffers = loadControlFor(lowRam = false),
+      codecPolicy = CodecPolicy(),
+      sdkInt = 29,
+    )
+    val api30Player = api30Factory.build(softwareAudio = false)
+    val api29Player = api29Factory.build(softwareAudio = false)
+    try {
+      assertEquals(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS, api30Player.videoChangeFrameRateStrategy)
+      assertEquals(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF, api29Player.videoChangeFrameRateStrategy)
+    } finally {
+      api30Player.release()
+      api29Player.release()
     }
   }
 }

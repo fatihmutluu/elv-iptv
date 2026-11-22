@@ -347,13 +347,19 @@ describe('Player OSD recovery, input guards, subtitles, aspect, orientation & to
       subtitleBottomInsetPx: 96,
     });
 
-    // Toggle resizeMode Fit -> Fill inside PlayerSettingsSheet
+    // Cycle resizeMode Fit -> Fill -> Stretch -> Fit inside PlayerSettingsSheet (#151)
     await fireEvent.press(screen.getByTestId('player-settings-button'));
     const aspectBtn = screen.getByTestId('player-resize-mode-toggle');
     expect(aspectBtn).toHaveTextContent(/Fit/);
     await fireEvent.press(aspectBtn);
     expect(screen.getByTestId('player-resize-mode-toggle')).toHaveTextContent(/Fill/);
     expect(mobile.surfaceCalls.at(-1)?.resizeMode).toBe('fill');
+    await fireEvent.press(screen.getByTestId('player-resize-mode-toggle'));
+    expect(screen.getByTestId('player-resize-mode-toggle')).toHaveTextContent(/Stretch/);
+    expect(mobile.surfaceCalls.at(-1)?.resizeMode).toBe('stretch');
+    await fireEvent.press(screen.getByTestId('player-resize-mode-toggle'));
+    expect(screen.getByTestId('player-resize-mode-toggle')).toHaveTextContent(/Fit/);
+    expect(mobile.surfaceCalls.at(-1)?.resizeMode).toBe('fit');
 
     // Close settings and hide OSD -> subtitleBottomInsetPx drops to 0
     await fireEvent.press(screen.getByTestId('player-settings-close'));

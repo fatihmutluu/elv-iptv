@@ -1,4 +1,5 @@
 import { isAsyncIterable, openAsyncIterator } from './async-iterable';
+import { createCookieJar, extractSetCookies, mergeCookieHeader } from './cookie-jar';
 import { originOf, resolveRedirectUrl, sanitizeHeaders, scopeCredentialHeaders } from './headers';
 import { type ElvError, elvError, err, ok, type Result } from './result';
 
@@ -44,7 +45,11 @@ export type FetchLike = (
 ) => Promise<{
   status: number;
   readonly url?: string;
-  headers: { forEach(cb: (value: string, key: string) => void): void };
+  headers: {
+    forEach(cb: (value: string, key: string) => void): void;
+    get?(name: string): string | null;
+    getSetCookie?(): string[];
+  };
   body:
     | AsyncIterable<Uint8Array>
     | {
@@ -343,28 +348,31 @@ export function createFetchHttpClient(
           return fallbackUrl;
         };
 
+        const cookieJar = createCookieJar();
         let currentUrl = url;
-        let activeHeaders = sanitizedHeaders;
+        let callerHeaders = sanitizedHeaders;
         let hops = 0;
-        let res = await fetchOnce(currentUrl, activeHeaders);
+        let res = await fetchOnce(currentUrl, callerHeaders);
         const initialUrl = await adoptResponseUrl(res, currentUrl);
         if (initialUrl === undefined) return err(elvError('network', 'fetch-failed'));
         currentUrl = initialUrl;
         let headers = collectHeaders(res.headers);
         while (followRedirects && REDIRECT_STATUSES.has(res.status)) {
+          cookieJar.store(currentUrl, extractSetCookies(res.headers, headers));
           const location = headers.location;
           if (location === undefined) break;
           await discardBody(res.body);
           if (hops >= MAX_REDIRECT_HOPS) return err(elvError('network', 'too-many-redirects'));
           const nextUrl = resolveRedirectUrl(currentUrl, location);
           if (nextUrl === undefined) return err(httpStatusError(res.status));
-          activeHeaders =
-            activeHeaders === undefined
+          callerHeaders =
+            callerHeaders === undefined
               ? undefined
-              : scopeCredentialHeaders(activeHeaders, url, nextUrl);
+              : scopeCredentialHeaders(callerHeaders, url, nextUrl);
+          const hopHeaders = mergeCookieHeader(callerHeaders, cookieJar.headerFor(nextUrl));
           currentUrl = nextUrl;
           hops += 1;
-          res = await fetchOnce(currentUrl, activeHeaders);
+          res = await fetchOnce(currentUrl, hopHeaders);
           const hopUrl = await adoptResponseUrl(res, currentUrl);
           if (hopUrl === undefined) return err(elvError('network', 'fetch-failed'));
           currentUrl = hopUrl;

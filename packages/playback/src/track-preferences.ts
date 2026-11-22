@@ -1,4 +1,4 @@
-import { normalizeLanguageCode, sameLanguageCode } from '@elv/domain';
+import { extractLanguageCodeFromLabel, normalizeLanguageCode, sameLanguageCode } from '@elv/domain';
 import type { LoadOptions, MediaTracks, TrackInfo } from './engine';
 
 interface TrackChoice {
@@ -26,10 +26,17 @@ interface TrackPreferences {
   reconcile(tracks: MediaTracks): ReconciledTracks;
 }
 
+function resolveTrackLanguage(
+  track: Pick<TrackInfo, 'language' | 'label'> | undefined,
+): string | undefined {
+  if (track === undefined) return undefined;
+  return normalizeLanguageCode(track.language) ?? extractLanguageCodeFromLabel(track.label);
+}
+
 function toChoice(id: string, matched: TrackInfo | undefined, previous?: TrackChoice): TrackChoice {
-  const rawLang = matched?.language ?? (previous?.id === id ? previous.language : undefined);
-  const language = normalizeLanguageCode(rawLang);
-  const label = matched?.label ?? (previous?.id === id ? previous.label : undefined);
+  const prev = previous?.id === id ? previous : undefined;
+  const language = resolveTrackLanguage(matched) ?? resolveTrackLanguage(prev);
+  const label = matched?.label ?? prev?.label;
   return {
     id,
     ...(language === undefined ? {} : { language }),
@@ -43,7 +50,7 @@ function resolveChoice(
 ): TrackInfo | undefined {
   const exact = candidates.find((t) => t.id === wanted.id);
   const exactLangOk =
-    wanted.language === undefined || sameLanguageCode(exact?.language, wanted.language);
+    wanted.language === undefined || sameLanguageCode(resolveTrackLanguage(exact), wanted.language);
   const exactLabelOk =
     wanted.label === undefined || exact?.label === undefined || exact.label === wanted.label;
   if (exact && exactLangOk && exactLabelOk) {
@@ -51,12 +58,14 @@ function resolveChoice(
   }
   if (wanted.language !== undefined && wanted.label !== undefined) {
     const both = candidates.find(
-      (t) => sameLanguageCode(t.language, wanted.language) && t.label === wanted.label,
+      (t) => sameLanguageCode(resolveTrackLanguage(t), wanted.language) && t.label === wanted.label,
     );
     if (both) return both;
   }
   if (wanted.language !== undefined) {
-    const byLang = candidates.find((t) => sameLanguageCode(t.language, wanted.language));
+    const byLang = candidates.find((t) =>
+      sameLanguageCode(resolveTrackLanguage(t), wanted.language),
+    );
     if (byLang) return byLang;
   }
   if (wanted.label !== undefined) {

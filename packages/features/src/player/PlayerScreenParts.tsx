@@ -5,7 +5,13 @@ import type { ReactElement } from 'react';
 import { StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { DesktopCinemaBar, type PlayerOsdProps } from './DesktopCinemaBar';
 import { describePlaybackFailure } from './errors';
-import { OsdButton, OsdClock, PlayerCanvasTapTarget, PlayerLockedOverlay } from './PlayerOsdButton';
+import {
+  JumpToLiveButton,
+  OsdButton,
+  OsdClock,
+  PlayerCanvasTapTarget,
+  PlayerLockedOverlay,
+} from './PlayerOsdButton';
 import type { TvOsdAction } from './usePlayerControls';
 import { VodProgressBar } from './VodProgressBar';
 
@@ -299,6 +305,14 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
         <View style={playerStyles.bottomMetaRow}>
           <OsdClock service={service} clock={p.clock} previewPositionMs={p.previewPositionMs} />
           <View style={playerStyles.bottomActions}>
+            <JumpToLiveButton
+              isVod={isVod}
+              service={service}
+              clock={p.clock}
+              i18n={i18n}
+              isTv={isTv}
+              {...(p.onJumpToLiveEdge !== undefined ? { onPress: p.onJumpToLiveEdge } : {})}
+            />
             {showPrevChannelBtn && p.onJumpPreviousChannel !== undefined ? (
               <OsdButton
                 testID="player-prev-channel"

@@ -1,6 +1,6 @@
 import type { EngineEvent } from '@elv/playback';
 import { describe, expect, it } from 'vitest';
-import { createDeriver, type Deriver } from './derive.ts';
+import { createDeriver, type Deriver, isLiveMpegTsUrl } from './derive.ts';
 
 function setup(kind: 'live' | 'vod' = 'live') {
   const clock = { t: 1000 };
@@ -427,5 +427,46 @@ describe('deriver', () => {
     const radioClocks = clocks(restart(radio.d));
     expect(radioClocks[0]?.hasVideoTrack).toBe(false);
     expect(radioClocks[0]?.decodedVideoFrames).toBeUndefined();
+  });
+
+  it('emits isLiveTs strictly on live MPEG-TS streams and clears it for HLS or VOD (#141)', () => {
+    expect(isLiveMpegTsUrl('http://provider.invalid/live/demo/1001.ts')).toBe(true);
+    expect(isLiveMpegTsUrl('http://provider.invalid/live/demo/1001')).toBe(true);
+    expect(isLiveMpegTsUrl('http://provider.invalid/live/demo/1001.m3u8')).toBe(false);
+    expect(isLiveMpegTsUrl('http://provider.invalid/live/demo/1001?output=m3u8')).toBe(false);
+    expect(isLiveMpegTsUrl('http://provider.invalid/live/demo/1001.mpd')).toBe(false);
+
+    // Live MPEG-TS emits isLiveTs: true on clock anchors
+    const clock = { t: 1000 };
+    const tsDeriver = createDeriver({ now: () => clock.t, clockIntervalMs: 1000 });
+    tsDeriver.begin(1, 'live', true);
+    tsDeriver.fileEvent({ event: 'file-loaded' });
+    tsDeriver.property('video-params', { w: 1280 });
+    tsDeriver.property('demuxer-cache-state', { 'cache-end': 30 });
+    tsDeriver.property('time-pos', 10);
+    const tsClocks = clocks(restart(tsDeriver));
+    expect(tsClocks[0]).toMatchObject({ positionMs: 10_000, liveEdgeMs: 30_000, isLiveTs: true });
+
+    // If mpv probes an extensionless live stream as HLS via file-format, isLiveTs turns off
+    tsDeriver.property('file-format', 'hls');
+    clock.t = 2500;
+    const hlsClocks = clocks(tsDeriver.property('time-pos', 12));
+    expect(hlsClocks[0]?.isLiveTs).toBeUndefined();
+
+    // Confirmed mpegts demuxer turns isLiveTs back on for live
+    tsDeriver.property('file-format', 'mpegts');
+    clock.t = 4000;
+    const backToTs = clocks(tsDeriver.property('time-pos', 14));
+    expect(backToTs[0]?.isLiveTs).toBe(true);
+
+    // VOD never emits isLiveTs even if flagged or file-format is mpegts
+    const vodDeriver = createDeriver({ now: () => clock.t, clockIntervalMs: 1000 });
+    vodDeriver.begin(2, 'vod', true);
+    vodDeriver.fileEvent({ event: 'file-loaded' });
+    vodDeriver.property('file-format', 'mpegts');
+    vodDeriver.property('video-params', { w: 1280 });
+    vodDeriver.property('time-pos', 5);
+    const vodClocks = clocks(restart(vodDeriver));
+    expect(vodClocks[0]?.isLiveTs).toBeUndefined();
   });
 });

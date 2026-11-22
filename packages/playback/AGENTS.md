@@ -19,8 +19,10 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
 - `@elv/playback/testing`: `createFakePlayerEngine({ scripts, now, schedule, cancel })` and `ENGINE_CONTRACT_CASES` (`contract.ts`).
 - `createPlaybackService({ engine, clock, timers, config? })` (`service.ts`, `service-events.ts`, `state-store.ts`,
   `seek-coalescer.ts`, `speed-coalescer.ts`): `tune`, `retry`, `stop`, `play`, `pause`, `seek` (coalesced ~80 ms, guards stale clock ticks),
+  `jumpToLiveEdge` (live MPEG-TS only, seeks to `liveEdgeMs - 3_000` when lagging > 4 s; `#141`),
   `setSpeed` (clamped `[0.25, 4.0]`, coalesced across active seeks and in-flight transitions; `#302`), `selectAudioTrack`,
-  `selectSubtitleTrack` (`track-preferences.ts`), `getState`, `subscribe`, `dispose`. `DEFAULT_PLAYBACK_CONFIG` holds spec timings.
+  `selectSubtitleTrack` (`track-preferences.ts`, inferring language from labels on missing/`und` tags; `#151`), `getState`, `subscribe`, `dispose`. `DEFAULT_PLAYBACK_CONFIG` holds spec timings.
+- `createConnectionTracker()` (`connection-tracker.ts`, `#87`): pure per-`accountKey` connection tracker (`acquire`, `release`, `activeCount`, `activeStreamIds`, `checkLimit`) with non-double-counting `replacingStreamId` support for channel zaps.
 - `createAbrHysteresisController({ rungs, clock, initialIndex?, config? })` (`abr-hysteresis.ts`, `#176`): pure clock-injected anti-oscillation ABR selector (`downgradeSafetyFactor=0.85`, `stepDownCooldownMs=5s` bypassed on severe rebuffer, single-step ascent with `upgradeSafetyFactor=1.35`, `stepUpCooldownMs=20s` restarted on rebuffers, `3` samples over `15s`, rejects `<= 0` bps samples, and full window/cooldown reset on `onPause`/`onBackground`/`onTune`/`reset`).
 
 ## Recovery (spec sections 5.4 and 5.5; `recovery.ts`, `ladder.ts`, `backoff.ts`, `stall-watchdog.ts`, always wired)

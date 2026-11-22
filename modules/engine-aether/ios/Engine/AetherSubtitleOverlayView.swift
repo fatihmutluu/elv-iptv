@@ -176,7 +176,15 @@ final class AetherSubtitleOverlayView: UIView {
 
     let boundsRect = Self.toLayoutRect(bounds)
     let videoSize = LayoutSize(width: Double(presentation.videoSize.width), height: Double(presentation.videoSize.height))
-    let scaleMode: VideoScaleMode = (presentation.gravity == .resizeAspectFill) ? .fill : .fit
+    let scaleMode: VideoScaleMode
+    switch presentation.gravity {
+    case .resizeAspectFill:
+      scaleMode = .fill
+    case .resize:
+      scaleMode = .stretch
+    default:
+      scaleMode = .fit
+    }
     let videoRect = SubtitleLayout.computeVideoRect(in: boundsRect, videoSize: videoSize, scaleMode: scaleMode)
     guard videoRect.width > 0, videoRect.height > 0 else {
       hideAllSlots()

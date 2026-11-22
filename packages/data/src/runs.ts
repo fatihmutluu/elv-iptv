@@ -176,3 +176,64 @@ export async function reapOrphanedRuns(
     completedDeletes: deletingIds.length,
   };
 }
+
+/** Health snapshot of a source whose latest catalog refresh failed while cached items remain browsable (`#141`). */
+export interface SourceImportHealth {
+  sourceId: string;
+  status: 'failed';
+  errorCategory: string | null;
+  errorCode: string | null;
+  finishedAt: number | null;
+  hasCachedItems: boolean;
+}
+
+const LATEST_IMPORT_HEALTH_BASE = `SELECT
+    s.id AS source_id,
+    r.status AS status,
+    r.error_category AS error_category,
+    r.error_code AS error_code,
+    r.finished_at AS finished_at
+  FROM sources s
+  JOIN import_runs r ON r.id = (
+    SELECT r2.id FROM import_runs r2
+    WHERE r2.source_id = s.id AND r2.kind = 'catalog'
+    ORDER BY r2.id DESC
+    LIMIT 1
+  )
+  WHERE s.deleting = 0
+    AND r.status = 'failed'
+    AND (
+      EXISTS (SELECT 1 FROM live l WHERE l.source_id = s.id)
+      OR EXISTS (SELECT 1 FROM movies m WHERE m.source_id = s.id)
+      OR EXISTS (SELECT 1 FROM series sr WHERE sr.source_id = s.id)
+    )`;
+
+/**
+ * Returns health entries for active sources whose latest `catalog` import run failed while cached
+ * catalog items remain in SQLite (`#141`). Returns an empty array when healthy or uncached.
+ */
+export async function latestImportHealth(
+  db: SqlDriver,
+  sourceId?: string,
+): Promise<SourceImportHealth[]> {
+  const sql =
+    sourceId === undefined
+      ? `${LATEST_IMPORT_HEALTH_BASE} ORDER BY s.created_at, s.id`
+      : `${LATEST_IMPORT_HEALTH_BASE} AND s.id = ? ORDER BY s.created_at, s.id`;
+  const params = sourceId === undefined ? [] : [sourceId];
+  const rows = await db.all<{
+    source_id: string;
+    status: 'failed';
+    error_category: string | null;
+    error_code: string | null;
+    finished_at: number | null;
+  }>(sql, params);
+  return rows.map((row) => ({
+    sourceId: row.source_id,
+    status: row.status,
+    errorCategory: row.error_category,
+    errorCode: row.error_code,
+    finishedAt: row.finished_at,
+    hasCachedItems: true,
+  }));
+}

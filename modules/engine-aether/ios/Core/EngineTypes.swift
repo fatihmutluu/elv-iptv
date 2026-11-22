@@ -208,19 +208,22 @@ public struct ClockAnchorOut: Equatable, Sendable {
   public let rate: Double
   public let durationMs: Double?
   public let liveEdgeMs: Double?
+  public let isLiveTs: Bool?
 
   public init(
     positionMs: Double,
     atMs: Double,
     rate: Double,
     durationMs: Double? = nil,
-    liveEdgeMs: Double? = nil
+    liveEdgeMs: Double? = nil,
+    isLiveTs: Bool? = nil
   ) {
     self.positionMs = positionMs
     self.atMs = atMs
     self.rate = rate
     self.durationMs = durationMs
     self.liveEdgeMs = liveEdgeMs
+    self.isLiveTs = isLiveTs
   }
 }
 
@@ -253,6 +256,9 @@ public enum EngineEventOut: Equatable, Sendable {
       }
       if let liveEdgeMs = anchor.liveEdgeMs {
         anchorDict["liveEdgeMs"] = liveEdgeMs
+      }
+      if let isLiveTs = anchor.isLiveTs {
+        anchorDict["isLiveTs"] = isLiveTs
       }
       return ["attempt": attempt, "type": "clock", "anchor": anchorDict]
     case let .stall(attempt, phase, atMs):

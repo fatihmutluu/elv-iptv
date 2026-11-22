@@ -11,6 +11,12 @@ export {
 export { createMonotonicClock, isAtLiveEdge, LIVE_EDGE_TOLERANCE_MS, positionAt } from './clock';
 export { DEFAULT_PLAYBACK_CONFIG, type PlaybackConfig } from './config';
 export {
+  type ConnectionLimitCheck,
+  type ConnectionLimitCheckInput,
+  type ConnectionTracker,
+  createConnectionTracker,
+} from './connection-tracker';
+export {
   type AccountHealthSnapshot,
   createPlaybackDiagnoser,
   DEFAULT_ACCOUNT_HEALTH_TTL_MS,

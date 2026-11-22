@@ -25,15 +25,20 @@ public final class EngineHttpSession: HttpTaskSession, @unchecked Sendable {
   fileprivate final class DelegateMux: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private struct TaskEntry {
       let transport: URLSessionTransport
-      let origin: StreamOrigin?
+      var redirectState: RedirectScopeState
     }
 
     private let lock = NSLock()
     private var entries: [Int: TaskEntry] = [:]
+    private let cookieJar: OriginCookieJar
 
-    func register(taskId: Int, transport: URLSessionTransport, origin: StreamOrigin?) {
+    init(cookieJar: OriginCookieJar) {
+      self.cookieJar = cookieJar
+    }
+
+    func register(taskId: Int, transport: URLSessionTransport, redirectState: RedirectScopeState) {
       lock.withLock {
-        entries[taskId] = TaskEntry(transport: transport, origin: origin)
+        entries[taskId] = TaskEntry(transport: transport, redirectState: redirectState)
       }
     }
 
@@ -60,8 +65,15 @@ public final class EngineHttpSession: HttpTaskSession, @unchecked Sendable {
       newRequest request: URLRequest,
       completionHandler: @escaping (URLRequest?) -> Void
     ) {
-      let origin = lookup(task.taskIdentifier)?.origin
-      completionHandler(sanitizeRedirectRequest(request, origin: origin))
+      var state = lookup(task.taskIdentifier)?.redirectState ?? RedirectScopeState(initialOrigin: nil, callerCookie: nil)
+      let scoped = scopeRedirectRequest(request, state: &state, response: response, cookieJar: cookieJar)
+      lock.withLock {
+        if var entry = entries[task.taskIdentifier] {
+          entry.redirectState = state
+          entries[task.taskIdentifier] = entry
+        }
+      }
+      completionHandler(scoped)
     }
 
     func urlSession(
@@ -70,8 +82,11 @@ public final class EngineHttpSession: HttpTaskSession, @unchecked Sendable {
       didReceive response: URLResponse,
       completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
     ) {
+      let http = response as? HTTPURLResponse
+      if let http, let url = http.url, let setCookie = http.value(forHTTPHeaderField: "Set-Cookie") {
+        cookieJar.store(url: url, setCookieHeader: setCookie)
+      }
       if let entry = lookup(dataTask.taskIdentifier) {
-        let http = response as? HTTPURLResponse
         let status = http?.statusCode ?? 200
         let contentType = http?.value(forHTTPHeaderField: "Content-Type")
         entry.transport.didReceiveResponse(status: status, contentType: contentType)
@@ -99,14 +114,21 @@ public final class EngineHttpSession: HttpTaskSession, @unchecked Sendable {
 
   private let stateLock = NSLock()
   private var invalidated = false
-  private let mux = DelegateMux()
+  private let cookieJar: OriginCookieJar
+  private let mux: DelegateMux
   private let urlSession: URLSession
 
-  public init() {
+  public init(cookieJar: OriginCookieJar = OriginCookieJar()) {
+    self.cookieJar = cookieJar
+    let mux = DelegateMux(cookieJar: cookieJar)
+    self.mux = mux
+
     let config = URLSessionConfiguration.ephemeral
     config.httpMaximumConnectionsPerHost = 1
     config.urlCache = nil
     config.requestCachePolicy = .reloadIgnoringLocalCacheData
+    config.httpShouldSetCookies = false
+    config.httpCookieStorage = nil
     config.timeoutIntervalForRequest = 10
     config.waitsForConnectivity = false
 
@@ -124,8 +146,14 @@ public final class EngineHttpSession: HttpTaskSession, @unchecked Sendable {
   ) -> HttpTaskControlling? {
     stateLock.withLock {
       guard !invalidated else { return nil }
-      let dataTask = urlSession.dataTask(with: request)
-      mux.register(taskId: dataTask.taskIdentifier, transport: transport, origin: origin)
+      let initialOrigin = origin ?? request.url.flatMap(StreamOrigin.init(url:))
+      var redirectState = RedirectScopeState(
+        initialOrigin: initialOrigin,
+        callerCookie: request.value(forHTTPHeaderField: "Cookie")
+      )
+      let outbound = scopeRedirectRequest(request, state: &redirectState, cookieJar: cookieJar)
+      let dataTask = urlSession.dataTask(with: outbound)
+      mux.register(taskId: dataTask.taskIdentifier, transport: transport, redirectState: redirectState)
       return dataTask
     }
   }
@@ -141,6 +169,7 @@ public final class EngineHttpSession: HttpTaskSession, @unchecked Sendable {
       return true
     }
     guard shouldInvalidate else { return }
+    cookieJar.clear()
     for transport in mux.snapshotTransports() {
       transport.cancel()
     }

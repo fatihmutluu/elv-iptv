@@ -92,6 +92,7 @@ describe('PR 1 @elv/data Hardening', () => {
       value: {
         url: `http://cdn.example/${M3U_TOKEN}/live/1.ts`,
         accountKey: 'm1',
+        maxConnections: 1,
         headers: { 'user-agent': 'BaseUA/1.0' },
       },
     });

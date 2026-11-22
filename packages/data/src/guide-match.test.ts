@@ -519,3 +519,54 @@ describe('call-sign preserving normalized name matching (#267)', () => {
     ]);
   });
 });
+
+describe('CamelCase and English number-word EPG matching (#194)', () => {
+  it('matches CamelCase and English number-word channel names against spaced numeric guide names', () => {
+    const idx = buildChannelIndex([
+      { key: 'news1', guide_id: null, name: 'NewsOne HD', name_fold: 'newsone hd', num: 1 },
+      {
+        key: 'sports2',
+        guide_id: null,
+        name: 'SportsTV2 [FHD]',
+        name_fold: 'sportstv2 fhd',
+        num: 2,
+      },
+      { key: 'tr3', guide_id: null, name: 'ÇağrıTV Three', name_fold: 'cagritv three', num: 3 },
+      { key: 'num-only', guide_id: null, name: 'Unrelated', name_fold: 'unrelated', num: 50 },
+    ]);
+
+    expect(matchGuideChannel(idx, { id: 'g1', names: ['News 1'] })).toEqual({
+      keys: ['news1'],
+      byId: false,
+      tier: 'normalized-name',
+    });
+    expect(matchGuideChannel(idx, { id: 'g2', names: ['Sports TV Two'] })).toEqual({
+      keys: ['sports2'],
+      byId: false,
+      tier: 'normalized-name',
+    });
+    expect(matchGuideChannel(idx, { id: 'g3', names: ['Cagri TV 3'] })).toEqual({
+      keys: ['tr3'],
+      byId: false,
+      tier: 'normalized-name',
+    });
+  });
+
+  it('refuses ambiguous CamelCase/number-word matches without falling back to num', () => {
+    const idx = buildChannelIndex([
+      { key: 'n1a', guide_id: null, name: 'NewsOne HD', name_fold: 'newsone hd', num: 10 },
+      { key: 'n1b', guide_id: null, name: 'News 1 SD', name_fold: 'news 1 sd', num: 11 },
+      { key: 'other', guide_id: null, name: 'Other', name_fold: 'other', num: 77 },
+    ]);
+    expect(matchGuideChannel(idx, { id: 'g', names: ['News One', '77'] })).toEqual({
+      keys: ['other'],
+      byId: false,
+      tier: 'num',
+    });
+    expect(matchGuideChannel(idx, { id: 'g', names: ['News One'] })).toEqual({
+      keys: [],
+      byId: false,
+      tier: 'none',
+    });
+  });
+});

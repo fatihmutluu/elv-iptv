@@ -1,5 +1,14 @@
+import { clearXtreamSchemeCache, setCachedXtreamScheme } from '@elv/sources';
 import { describe, expect, it } from 'vitest';
-import { extinf, M3U_PASS, M3U_TOKEN, M3U_USER, setupM3u } from './import-test-helpers';
+import {
+  extinf,
+  M3U_PASS,
+  M3U_TOKEN,
+  M3U_USER,
+  sampleCatalog,
+  setupM3u,
+  setup as setupPanel,
+} from './import-test-helpers';
 import { importCatalog } from './import-xtream';
 import { secretKey } from './sources';
 import {
@@ -200,5 +209,79 @@ describe('normalizeMulticastUrl (#267)', () => {
     });
     const res = await cache.resolveStream(row?.key ?? '');
     expect(res.ok && res.value.headers['user-agent']).toBe('LegacyLiteralUA/9.0');
+  });
+
+  it('surfaces normalized maxConnections (default 1) and optional providerActiveConnections on resolved streams (#87)', async () => {
+    const e = await setupM3u(`#EXTM3U\n${extinf('Ch 1', 'http://cdn.example/live/1.ts')}`);
+    expect((await importCatalog(e.sourceId, e.deps)).ok).toBe(true);
+    const row = (await e.db.all<{ key: string }>('SELECT key FROM live LIMIT 1'))[0];
+    const cache = createPlaytimeResolverCache({
+      db: e.db,
+      secrets: e.secrets,
+      http: e.deps.http,
+    });
+
+    // M3U defaults to maxConnections = 1 and omits providerActiveConnections
+    const m3uRes = await cache.resolveStream(row?.key ?? '');
+    expect(m3uRes.ok).toBe(true);
+    if (m3uRes.ok) {
+      expect(m3uRes.value.maxConnections).toBe(1);
+      expect(m3uRes.value.providerActiveConnections).toBeUndefined();
+    }
+
+    // Account metadata with maxConnections and activeConnections flows through normalized
+    await e.db.run('UPDATE sources SET settings_json = ? WHERE id = ?', [
+      JSON.stringify({ accountMeta: { maxConnections: 3, activeConnections: 2 } }),
+      e.sourceId,
+    ]);
+    const customRes = await cache.resolveStream(row?.key ?? '');
+    expect(customRes.ok).toBe(true);
+    if (customRes.ok) {
+      expect(customRes.value.maxConnections).toBe(3);
+      expect(customRes.value.providerActiveConnections).toBe(2);
+    }
+
+    // Invalid/zero maxConnections coerces safely to 1
+    await e.db.run('UPDATE sources SET settings_json = ? WHERE id = ?', [
+      JSON.stringify({ accountMeta: { maxConnections: 0 } }),
+      e.sourceId,
+    ]);
+    const coercedRes = await cache.resolveStream(row?.key ?? '');
+    expect(coercedRes.ok && coercedRes.value.maxConnections).toBe(1);
+  });
+
+  it('uses session-cached scheme via resolveXtreamBaseUrl for scheme-less Xtream servers (#229)', async () => {
+    const panel = await setupPanel(sampleCatalog());
+    expect((await importCatalog(panel.sourceId, panel.deps)).ok).toBe(true);
+    const row = (await panel.db.all<{ key: string }>('SELECT key FROM live LIMIT 1'))[0];
+
+    // Store a scheme-less server in the xtream secret
+    await panel.secrets.set(
+      secretKey(panel.sourceId, 'xtream'),
+      JSON.stringify({ server: 'panel.example:8443', username: 'u', password: 'p' }),
+    );
+    clearXtreamSchemeCache(panel.deps.http);
+
+    const cache = createPlaytimeResolverCache({
+      db: panel.db,
+      secrets: panel.secrets,
+      http: panel.deps.http,
+    });
+
+    // Without cached scheme, scheme-less server defaults to https://
+    const httpsRes = await cache.resolveStream(row?.key ?? '');
+    expect(httpsRes.ok).toBe(true);
+    if (httpsRes.ok) {
+      expect(httpsRes.value.url.startsWith('https://panel.example:8443/')).toBe(true);
+    }
+
+    // Once session scheme cache records http, subsequent stream resolution uses http://
+    setCachedXtreamScheme(panel.deps.http, 'panel.example:8443', 'http');
+    const httpRes = await cache.resolveStream(row?.key ?? '');
+    expect(httpRes.ok).toBe(true);
+    if (httpRes.ok) {
+      expect(httpRes.value.url.startsWith('http://panel.example:8443/')).toBe(true);
+    }
+    clearXtreamSchemeCache(panel.deps.http);
   });
 });

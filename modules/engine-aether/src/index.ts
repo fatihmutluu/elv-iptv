@@ -101,10 +101,10 @@ export interface AetherSurfaceProps {
   /** Layout only: nothing is painted over the video, so overlays compose above it. */
   style?: StyleProp<ViewStyle>;
   /**
-   * How the picture meets the view at its display aspect ratio: `fit` (default) shows all of it
-   * with black bars beside it, `fill` covers the view and crops the overflow.
+   * How the picture meets the view: `fit` (default) shows all of it with black bars beside it,
+   * `fill` covers the view and crops the overflow, `stretch` fills the view ignoring aspect ratio.
    */
-  resizeMode?: 'fit' | 'fill';
+  resizeMode?: 'fit' | 'fill' | 'stretch';
   /** Extra bottom inset in pt to lift native subtitle cues above a visible OSD (`#136`). */
   subtitleBottomInsetPx?: number;
   /** Whether the player OSD is currently visible so native can throttle hidden-OSD clock ticks (`#442`). */
@@ -115,7 +115,7 @@ export interface AetherSurfaceProps {
 interface NativeSurfaceProps {
   engine: NativeEngineHandle;
   style?: StyleProp<ViewStyle>;
-  resizeMode?: 'fit' | 'fill';
+  resizeMode?: 'fit' | 'fill' | 'stretch';
   subtitleBottomInsetPx?: number;
   osdVisible?: boolean;
   testID?: string;

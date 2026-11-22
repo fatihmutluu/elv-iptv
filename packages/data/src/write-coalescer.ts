@@ -268,6 +268,7 @@ export function createCoalescedCatalog(
     episodes: (seriesId, season) => c.episodes(seriesId, season),
     resolveStream: (itemKey) => c.resolveStream(itemKey),
     ...(c.importGuide ? { importGuide: c.importGuide.bind(c) } : {}),
+    ...(c.latestImportHealth ? { latestImportHealth: c.latestImportHealth.bind(c) } : {}),
     ...(c.allSourcesItems ? { allSourcesItems: c.allSourcesItems.bind(c) } : {}),
     ...(c.itemDetail ? { itemDetail: c.itemDetail.bind(c) } : {}),
     ...(c.search ? { search: c.search.bind(c) } : {}),
