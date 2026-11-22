@@ -719,4 +719,22 @@ describe('@elv/i18n', () => {
       expect(tr.t(id)).toBe(expectedTr);
     }
   });
+
+  it('localizes desktop catalog-worker disconnect recovery banner strings (#435)', () => {
+    const en = createAppI18n('en');
+    const tr = createAppI18n('tr');
+    const cases: ReadonlyArray<readonly [MessageId, string, string]> = [
+      [
+        'desktop.catalogDisconnected.title',
+        'Catalog service stopped unexpectedly',
+        'Katalog servisi beklenmedik şekilde durdu',
+      ],
+      ['desktop.catalogDisconnected.retry', 'Reconnect', 'Yeniden bağlan'],
+      ['desktop.catalogDisconnected.reconnecting', 'Reconnecting…', 'Yeniden bağlanıyor…'],
+    ];
+    for (const [id, expectedEn, expectedTr] of cases) {
+      expect(en.t(id)).toBe(expectedEn);
+      expect(tr.t(id)).toBe(expectedTr);
+    }
+  });
 });

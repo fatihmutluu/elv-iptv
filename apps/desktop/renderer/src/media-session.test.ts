@@ -236,13 +236,7 @@ describe('createDesktopMediaSession', () => {
 });
 
 describe('bindDesktopMediaSession', () => {
-  it('mirrors engine state/clock to mediaSession, forwards media keys, and preserves heldEvents ordering', () => {
-    const env = createFakeMediaSessionEnv();
-    const session = createDesktopMediaSession({
-      navigator: env.navigator,
-      MediaMetadata: FakeMediaMetadata,
-    });
-
+  function createFakeEngine() {
     const listeners = new Set<(event: EngineEvent) => void>();
     const subscribeSpy = vi.fn((listener: (event: EngineEvent) => void) => {
       listeners.add(listener);
@@ -277,17 +271,26 @@ describe('bindDesktopMediaSession', () => {
       setSubtitleDelay: vi.fn(),
       setAudioDevice: vi.fn(),
       setDeinterlace: vi.fn(),
+      setHwdec: vi.fn(),
       onUi: vi.fn(() => () => undefined),
       release: vi.fn(),
       subscribe: subscribeSpy,
     };
+    const emit = (ev: EngineEvent) => {
+      for (const l of listeners) l(ev);
+    };
+    return { engine, subscribeSpy, emit };
+  }
 
-    let currentOsdTitle = 'Synthetic Movie';
-    const onTrackStep = vi.fn();
-    const wrapped = bindDesktopMediaSession(engine, session, {
-      getTitle: () => currentOsdTitle,
-      onTrackStep,
+  it('drives metadata from typed MediaSessionMetadata, gates standalone VOD track actions, and preserves heldEvents ordering (#435)', () => {
+    const env = createFakeMediaSessionEnv();
+    const session = createDesktopMediaSession({
+      navigator: env.navigator,
+      MediaMetadata: FakeMediaMetadata,
     });
+    const { engine, subscribeSpy, emit } = createFakeEngine();
+    const onTrackStep = vi.fn();
+    const wrapped = bindDesktopMediaSession(engine, session, { onTrackStep });
 
     // Does NOT eagerly call engine.subscribe before PlaybackService subscribes (preserves heldEvents!)
     expect(subscribeSpy).not.toHaveBeenCalled();
@@ -296,6 +299,15 @@ describe('bindDesktopMediaSession', () => {
     const unsub = wrapped.subscribe((ev) => received.push(ev));
     expect(subscribeSpy).toHaveBeenCalledTimes(1);
 
+    // Typed metadata pushed before load() is preserved across load() and sanitizes artwork URL
+    wrapped.setMediaMetadata({
+      title: 'Synthetic Movie',
+      subtitle: '2026 · Sci-Fi',
+      artworkUrl: 'https://demo:secret@cdn.example.test/poster.jpg?token=abc&w=512',
+      kind: 'vod',
+      canStepTrack: false,
+    });
+
     wrapped.load({
       attempt: 7,
       kind: 'vod',
@@ -303,9 +315,6 @@ describe('bindDesktopMediaSession', () => {
       headers: {},
     });
 
-    const emit = (ev: EngineEvent) => {
-      for (const l of listeners) l(ev);
-    };
     emit({ attempt: 7, type: 'state', state: 'playing' });
     emit({
       attempt: 7,
@@ -315,11 +324,19 @@ describe('bindDesktopMediaSession', () => {
 
     expect(received).toHaveLength(2);
     expect(env.mediaSession.playbackState).toBe('playing');
-    expect((env.mediaSession.metadata as FakeMediaMetadata | null)?.title).toBe('Synthetic Movie');
+    const movieMeta = env.mediaSession.metadata as FakeMediaMetadata | null;
+    expect(movieMeta?.title).toBe('Synthetic Movie');
+    expect(movieMeta?.artist).toBe('2026 · Sci-Fi');
+    expect(movieMeta?.artwork).toEqual([{ src: 'https://cdn.example.test/poster.jpg?w=512' }]);
     expect(env.positionCalls.at(-1)).toEqual({ duration: 120, position: 30, playbackRate: 1 });
 
-    // Once OSD auto-hides (empty title), subsequent playing events retain lastTitle instead of reverting to ELV IPTV
-    currentOsdTitle = '';
+    // Standalone single-movie VOD MUST omit previoustrack & nexttrack while keeping seek actions
+    expect(env.handlers.get('previoustrack')).toBeNull();
+    expect(env.handlers.get('nexttrack')).toBeNull();
+    env.trigger('nexttrack');
+    env.trigger('previoustrack');
+    expect(onTrackStep).not.toHaveBeenCalled();
+
     wrapped.pause(8);
     emit({ attempt: 8, type: 'state', state: 'paused' });
     expect(env.mediaSession.playbackState).toBe('paused');
@@ -340,9 +357,10 @@ describe('bindDesktopMediaSession', () => {
     // Non-attempt desktop IPC methods pass through unchanged
     wrapped.setDeinterlace(true);
     expect(engine.setDeinterlace).toHaveBeenCalledWith(true);
+    wrapped.setHwdec('auto-copy');
+    expect(engine.setHwdec).toHaveBeenCalledWith('auto-copy');
 
     wrapped.play(9);
-    // OS media keys use the latest attempt (9) and forward stop/seek/track actions
     env.trigger('pause');
     expect(engine.pause).toHaveBeenCalledWith(9);
     env.trigger('play');
@@ -355,12 +373,24 @@ describe('bindDesktopMediaSession', () => {
     expect(engine.seek).toHaveBeenCalledWith(9, 90_000);
     env.trigger('stop');
     expect(engine.stop).toHaveBeenCalledWith(9);
+
+    // Episodic VOD (canStepTrack: true) registers previoustrack & nexttrack and defaults artist to ELV IPTV
+    wrapped.setMediaMetadata({
+      title: 'Episode 1',
+      artworkUrl: 'file:///etc/passwd',
+      kind: 'vod',
+      canStepTrack: true,
+    });
+    const epMeta = env.mediaSession.metadata as FakeMediaMetadata | null;
+    expect(epMeta?.title).toBe('Episode 1');
+    expect(epMeta?.artist).toBe('ELV IPTV');
+    expect(epMeta?.artwork).toEqual([]);
     env.trigger('nexttrack');
     env.trigger('previoustrack');
     expect(onTrackStep).toHaveBeenNthCalledWith(1, 'next');
     expect(onTrackStep).toHaveBeenNthCalledWith(2, 'previous');
 
-    // Switching VOD -> Live clears stale VOD position state and resets retained title
+    // Switching VOD -> multi-channel Live clears stale VOD position state, omits seek handlers, and keeps track step
     env.positionCalls.length = 0;
     wrapped.load({
       attempt: 10,
@@ -368,8 +398,25 @@ describe('bindDesktopMediaSession', () => {
       url: 'http://sim.example.test/live.ts',
       headers: {},
     });
+    wrapped.setMediaMetadata({
+      title: 'Channel One',
+      subtitle: 'Evening News',
+      kind: 'live',
+      canStepTrack: true,
+    });
     expect(env.positionCalls).toEqual([undefined]);
-    expect((env.mediaSession.metadata as FakeMediaMetadata | null)?.title).toBe('ELV IPTV');
+    expect(env.handlers.get('seekforward')).toBeNull();
+    expect(env.handlers.get('seekbackward')).toBeNull();
+    expect(env.handlers.get('seekto')).toBeNull();
+    expect(env.handlers.get('nexttrack')).toBeTypeOf('function');
+    expect(env.handlers.get('previoustrack')).toBeTypeOf('function');
+    // Live clock events never push VOD position state
+    emit({
+      attempt: 10,
+      type: 'clock',
+      anchor: { positionMs: 5_000, atMs: 2000, rate: 1, durationMs: 60_000 },
+    });
+    expect(env.positionCalls).toEqual([undefined]);
 
     // Ended clears position state and sets playbackState to 'none'
     wrapped.seek(11, 5_000);
@@ -377,6 +424,13 @@ describe('bindDesktopMediaSession', () => {
     emit({ attempt: 12, type: 'state', state: 'ended' });
     expect(env.mediaSession.playbackState).toBe('none');
     expect(env.positionCalls.at(-1)).toBeUndefined();
+
+    // setMediaMetadata(null) clears metadata and handlers cleanly
+    wrapped.setMediaMetadata(null);
+    expect(env.mediaSession.metadata).toBeNull();
+    expect(env.mediaSession.playbackState).toBe('none');
+    expect(env.handlers.get('nexttrack')).toBeNull();
+    expect(env.handlers.get('previoustrack')).toBeNull();
 
     // Release disposes mediaSession cleanly
     unsub();

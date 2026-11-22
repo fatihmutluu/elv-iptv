@@ -103,6 +103,7 @@ export function PlayerScreen({
 
   const { sessionState, activeService, status, tracks } = usePlayerSession({
     videoHost,
+    activeTarget,
     serviceRef,
     clockRef,
     timersRef,

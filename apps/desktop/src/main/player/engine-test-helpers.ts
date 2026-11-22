@@ -5,6 +5,7 @@ import { createMpvEngine, type LoadMode, type MpvEngineDeps } from './engine.ts'
 import type { MpvClient } from './mpv/client.ts';
 import type { MpvCommand } from './mpv/codec.ts';
 import { createFakeMpv, type FakeMpv, type FakeMpvScript } from './mpv/fake-mpv.ts';
+import type { ReadaheadTierStore } from './mpv/readahead.ts';
 import type { PresenterEvent, VideoPresenter } from './presenter/types.ts';
 
 export const BASE = ['--no-config', '--idle=yes'];
@@ -34,6 +35,8 @@ export const OBSERVED = [
   'sid',
   'audio-device',
   'audio-device-list',
+  'volume',
+  'mute',
 ];
 
 export const VOD: FakeMpvScript = [
@@ -154,6 +157,9 @@ export interface SetupOptions {
   timers?: MpvEngineDeps['timers'];
   ready?: boolean;
   deferStart?: boolean;
+  platform?: NodeJS.Platform;
+  audioRampMs?: number;
+  readaheadStore?: ReadaheadTierStore;
 }
 
 export async function setupEngineTest(cleanups: Array<() => Promise<void>>, o: SetupOptions = {}) {
@@ -170,6 +176,9 @@ export async function setupEngineTest(cleanups: Array<() => Promise<void>>, o: S
     timers: o.timers ?? timers,
     onUi: (event) => ui.push(event),
     ...(o.deferStart ? { deferStart: true } : {}),
+    ...(o.platform ? { platform: o.platform } : {}),
+    ...(o.audioRampMs === undefined ? {} : { audioRampMs: o.audioRampMs }),
+    ...(o.readaheadStore === undefined ? {} : { readaheadStore: o.readaheadStore }),
   });
   const events: EngineEvent[] = [];
   engine.subscribe((e) => events.push(e));

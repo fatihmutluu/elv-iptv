@@ -38,6 +38,7 @@ import {
   sampleRect,
   type VideoSampler,
 } from './gate.ts';
+import { createDesktopLogger } from './log.ts';
 import type { MpvEngine } from './player/engine.ts';
 import { createEngineFor } from './player/factory.ts';
 import { registerPlayerIpc } from './player/ipc.ts';
@@ -70,6 +71,10 @@ if (gateQuery !== null) {
 }
 const samplers = new WeakMap<MpvEngine, VideoSampler>();
 const powerBlocker = createPowerBlocker(powerSaveBlocker);
+const logger = createDesktopLogger({
+  logPath: join(app.getPath('userData'), 'logs', 'elv-desktop.log'),
+  mirrorStderr: true,
+});
 
 /** Prints the gate line with main's measurements and quits: a gate run is one line long. */
 async function printGateLine(line: string, engine: MpvEngine | undefined): Promise<void> {
@@ -124,7 +129,7 @@ function createWindow(): void {
   attachRendererCrashRecovery(window, {
     gate: isGate,
     reloadUrl: appEntryUrl,
-    log: (line) => process.stderr.write(`${line}\n`),
+    log: logger.log,
   });
   window.on('page-title-updated', (event) => event.preventDefault());
   window.setTitle(WINDOW_TITLE);
@@ -138,7 +143,7 @@ async function startPlayer(): Promise<void> {
   registerPlayerIpc({
     ipcMain,
     now: () => performance.now(),
-    log: (line) => process.stderr.write(`${line}\n`),
+    log: logger.log,
     powerBlocker,
     gateReport: app.isPackaged ? undefined : (line, engine) => void printGateLine(line, engine),
     createEngine: async (owner, onUi) => {
@@ -198,21 +203,18 @@ function startCatalog(): CatalogCoordinator<MessagePortMain> {
     filePath: join(userData, 'secrets.json'),
     cipher,
   });
-  const log = (line: string): void => {
-    process.stderr.write(`${line}\n`);
-  };
   const coordinator = createCatalogCoordinator<MessagePortMain>({
     dbPath: join(userData, 'catalog.db'),
     workerPath: join(__dirname, '..', 'utility', 'catalog-worker.js'),
     secrets,
     fork: (workerPath) => utilityProcess.fork(workerPath, [], { serviceName: 'ELV Catalog' }),
     createChannel: () => new MessageChannelMain(),
-    log,
+    log: logger.log,
   });
   registerCatalogIpc({
     ipcMain,
     coordinator,
-    log,
+    log: logger.log,
   });
   if (__ELV_DEV_SEED__ && !app.isPackaged && gateQuery === null) {
     const seed = parseDevSeedEnv(process.env, { isPackaged: app.isPackaged });

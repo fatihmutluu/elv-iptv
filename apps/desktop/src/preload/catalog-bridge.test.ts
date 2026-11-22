@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CATALOG_CHANNELS,
   type CatalogClientMessage,
+  type CatalogDisconnectedMessage,
   type CatalogWorkerMessage,
 } from '../shared/catalog-ipc.ts';
 import {
@@ -388,5 +389,56 @@ describe('createCatalogBridge', () => {
     ).rejects.toThrow(/source-format\/invalid-request/);
     await expect(bridge.channelByNumber(-5)).rejects.toThrow(/source-format\/invalid-request/);
     expect(h.outgoing).toHaveLength(0);
+  });
+
+  it('notifies onDisconnected listeners only on unexpected worker exits, isolates throwing listeners, and supports idempotent unsubscribe (#435)', async () => {
+    const h = createFakeIpcRenderer();
+    const bridge = createCatalogBridge(h.ipc);
+
+    const openP = bridge.open();
+    const port = new FakeRendererPort();
+    h.deliverPort(1, port);
+    await Promise.resolve();
+    port.deliver({ type: 'result', reqId: 1, value: ok(undefined) });
+    expect(await openP).toEqual({ ok: true, value: undefined });
+
+    const seenA: CatalogDisconnectedMessage[] = [];
+    const seenB: CatalogDisconnectedMessage[] = [];
+    const offA = bridge.onDisconnected((msg) => {
+      seenA.push(msg);
+      throw new Error('renderer disconnect handler failure');
+    });
+    const offB = bridge.onDisconnected((msg) => {
+      seenB.push(msg);
+    });
+
+    // Intentional close must NOT notify onDisconnected
+    await bridge.close();
+    expect(seenA).toEqual([]);
+    expect(seenB).toEqual([]);
+
+    // Reopen and simulate unexpected worker exit
+    const open2 = bridge.open();
+    const port2 = new FakeRendererPort();
+    h.deliverPort(2, port2);
+    await Promise.resolve();
+    port2.deliver({ type: 'result', reqId: 2, value: ok(undefined) });
+    expect(await open2).toEqual({ ok: true, value: undefined });
+
+    h.deliverDisconnected();
+    expect(port2.closed).toBe(true);
+    expect(seenA).toEqual([{ reason: 'worker-exited' }]);
+    expect(seenB).toEqual([{ reason: 'worker-exited' }]);
+
+    // Unsubscribe is idempotent and stops further delivery for removed listener only
+    offA();
+    offA();
+    h.deliverDisconnected();
+    expect(seenA).toHaveLength(1);
+    expect(seenB).toEqual([{ reason: 'worker-exited' }, { reason: 'worker-exited' }]);
+
+    offB();
+    h.deliverDisconnected();
+    expect(seenB).toHaveLength(2);
   });
 });

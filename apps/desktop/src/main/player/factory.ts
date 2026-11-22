@@ -1,8 +1,14 @@
+import { dirname, join } from 'node:path';
 import type { BrowserWindow } from 'electron';
-import type { PlayerUiEvent } from '../../shared/player-ipc.ts';
+import type { HwdecProfile, PlayerUiEvent } from '../../shared/player-ipc.ts';
 import { createMpvEngine, type LoadMode, type MpvEngine } from './engine.ts';
 import { launchArgs } from './mpv/options.ts';
 import { spawnMpv } from './mpv/process.ts';
+import {
+  createFileReadaheadPersistence,
+  createReadaheadTierStore,
+  type ReadaheadTierStore,
+} from './mpv/readahead.ts';
 import { choosePresenter } from './presenter/choose.ts';
 import { createPresenter } from './presenter/create.ts';
 import type { MpvRuntimePaths } from './runtime-path.ts';
@@ -14,6 +20,12 @@ export interface EngineFactoryDeps {
   loadMode: LoadMode;
   /** Recorded launcher pids, swept at the next start if the app crashes (`<userData>/mpv-pids.json`). */
   pidFile: string;
+  /** Optional initial hardware decoding profile (defaults to `'auto-safe'`). */
+  hwdec?: HwdecProfile;
+  /** True only when using mpv's render-context API (appends `--video-timing-offset=0`). */
+  renderContext?: boolean;
+  /** Optional persistent adaptive readahead tier store (defaults to `<userData>/mpv-readahead.json`). */
+  readaheadStore?: ReadaheadTierStore;
   /** Presentation events for the window's renderer. */
   onUi(event: PlayerUiEvent): void;
 }
@@ -27,6 +39,13 @@ export async function createEngineFor(
   deps: EngineFactoryDeps,
 ): Promise<MpvEngine> {
   const presenter = createPresenter(choosePresenter(deps.platform), owner, deps.platform);
+  const readaheadStore =
+    deps.readaheadStore ??
+    createReadaheadTierStore({
+      persistence: createFileReadaheadPersistence(
+        join(dirname(deps.pidFile), 'mpv-readahead.json'),
+      ),
+    });
   const engine = createMpvEngine({
     spawn: (args, signal) =>
       spawnMpv({
@@ -43,8 +62,12 @@ export async function createEngineFor(
       presenterArgs: [],
       transportArgs: [],
       platform: deps.platform,
+      ...(deps.hwdec === undefined ? {} : { hwdec: deps.hwdec }),
+      ...(deps.renderContext === undefined ? {} : { renderContext: deps.renderContext }),
     }),
     loadMode: deps.loadMode,
+    platform: deps.platform,
+    readaheadStore,
     now: () => performance.now(),
     timers: {
       setTimeout: (fn, ms) => setTimeout(fn, ms),

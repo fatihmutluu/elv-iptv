@@ -1109,3 +1109,12 @@ msgstr "Fill"
 
 msgid "player.deinterlace"
 msgstr "Deinterlace"
+
+msgid "desktop.catalogDisconnected.title"
+msgstr "Catalog service stopped unexpectedly"
+
+msgid "desktop.catalogDisconnected.retry"
+msgstr "Reconnect"
+
+msgid "desktop.catalogDisconnected.reconnecting"
+msgstr "Reconnecting…"

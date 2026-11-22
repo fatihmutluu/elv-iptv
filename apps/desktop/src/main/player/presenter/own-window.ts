@@ -1,7 +1,7 @@
 import type { PlayerArea } from '../../../shared/player-ipc.ts';
 import type { MpvClient } from '../mpv/client.ts';
-import type { Rect } from './bounds.ts';
-import { areaToScreen } from './bounds.ts';
+import type { DisplayBounds, FullscreenMode, Rect } from './bounds.ts';
+import { areaToScreen, resolveFullscreenRect } from './bounds.ts';
 import type { AppWindowLike, VideoPresenter } from './types.ts';
 import { createSurfaceTracker } from './types.ts';
 
@@ -15,6 +15,10 @@ export interface OwnWindowDeps {
   toScreenPixels(rect: Rect): Rect;
   /** Optional macOS `NSScreen` index for multi-monitor setups (`--screen=<idx>`). */
   screenIndexOf?(rect: Rect): number | undefined;
+  /** Optional display bounds/workArea lookup for notched macOS fullscreen safe-area sizing (`#269`). */
+  displayBoundsOf?(rect: Rect): DisplayBounds;
+  /** Fullscreen sizing policy on notched displays: `'safe-area'` (default) stays within `workArea`, `'desktop'` spans `bounds`. */
+  fullscreenMode?: FullscreenMode;
   /** How long `prepare` waits for a first visible area before it uses the content bounds (default 1,000 ms). */
   firstAreaTimeoutMs?: number;
   /** Bounded window after fullscreen transitions during which non-essential fullscreen IPC is paused (default 400 ms). */
@@ -25,31 +29,46 @@ const DEFAULT_FIRST_AREA_TIMEOUT_MS = 1000;
 const DEFAULT_FULLSCREEN_TRANSITION_MS = 400;
 
 /**
- * macOS presenter and the Windows fallback: mpv shows its own window, placed over the player area when it first
- * shows and then left to the user. Each mpv process has its own window, so each attach is a new surface.
+ * macOS presenter and the Windows fallback: mpv runs in its own window, following host window moves,
+ * resizes, and fullscreen transitions bidirectionally (`#435`, `#269`). Each mpv process has its own
+ * window, so each attach is a new surface.
  */
 export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
   const { appWindow } = deps;
   const surface = createSurfaceTracker();
   const transitionMs = deps.fullscreenTransitionMs ?? DEFAULT_FULLSCREEN_TRANSITION_MS;
+  const fullscreenMode: FullscreenMode = deps.fullscreenMode ?? 'safe-area';
   let visibleArea: PlayerArea | undefined;
+  let areaVisible = false;
   let fullscreenTransitioning = false;
   let transitionTimer: ReturnType<typeof setTimeout> | undefined;
   let client: MpvClient | undefined;
   let detachClient: (() => void) | undefined;
+  let mpvFullscreen: boolean | undefined;
+  let pendingMpvFullscreen: boolean | undefined;
+  let pendingAppFullscreen: boolean | undefined;
   let disposed = false;
   const waiters = new Set<{ resolve(args: string[]): void; reject(error: Error): void }>();
 
-  const geometry = (area: PlayerArea): string[] => {
-    const dip = areaToScreen(
+  const computeGeometry = (area: PlayerArea): { spec: string; dip: Rect } => {
+    const rawDip = areaToScreen(
       appWindow.getContentBounds(),
       area,
       appWindow.webContents.getZoomFactor(),
     );
+    const dip =
+      appWindow.isFullScreen() && deps.displayBoundsOf
+        ? resolveFullscreenRect(rawDip, deps.displayBoundsOf(rawDip), fullscreenMode)
+        : rawDip;
     const px = deps.toScreenPixels(dip);
     const [x, y, w, h] = [px.x, px.y, px.width, px.height].map((n) => Math.round(n) + 0);
+    return { spec: `${w}x${h}+${x}+${y}`, dip };
+  };
+
+  const geometry = (area: PlayerArea): string[] => {
+    const { spec, dip } = computeGeometry(area);
     const screenIdx = deps.screenIndexOf?.(dip);
-    const args = [`--geometry=${w}x${h}+${x}+${y}`];
+    const args = [`--geometry=${spec}`];
     if (screenIdx !== undefined && Number.isInteger(screenIdx) && screenIdx >= 0) {
       args.push(`--screen=${screenIdx}`);
     }
@@ -74,6 +93,9 @@ export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
     detachClient?.();
     detachClient = undefined;
     client = undefined;
+    mpvFullscreen = undefined;
+    pendingMpvFullscreen = undefined;
+    pendingAppFullscreen = undefined;
   };
 
   const clearTransitionTimer = (): void => {
@@ -90,12 +112,47 @@ export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
     transitionTimer = setTimeout(() => {
       transitionTimer = undefined;
       fullscreenTransitioning = false;
+      syncGeometry();
     }, transitionMs);
   };
 
+  const syncGeometry = (): void => {
+    if (disposed || !client || !visibleArea || !areaVisible) return;
+    if (
+      appWindow.isDestroyed() ||
+      appWindow.isMinimized?.() ||
+      fullscreenTransitioning ||
+      appWindow.isFullScreen() ||
+      mpvFullscreen === true
+    ) {
+      return;
+    }
+    const { spec } = computeGeometry(visibleArea);
+    client.command(['set_property', 'geometry', spec]).catch(() => undefined);
+  };
+
+  const handleHostFullscreen = (isFullScreen: boolean): void => {
+    if (disposed) return;
+    beginFullscreenTransition();
+    if (pendingAppFullscreen === isFullScreen) {
+      pendingAppFullscreen = undefined;
+      return;
+    }
+    pendingAppFullscreen = undefined;
+    if (!client) return;
+    pendingMpvFullscreen = isFullScreen;
+    mpvFullscreen = isFullScreen;
+    client.command(['set_property', 'fullscreen', isFullScreen]).catch(() => undefined);
+  };
+
+  const onEnterFullScreen = (): void => handleHostFullscreen(true);
+  const onLeaveFullScreen = (): void => handleHostFullscreen(false);
+
   if (typeof appWindow.on === 'function') {
-    appWindow.on('enter-full-screen', beginFullscreenTransition);
-    appWindow.on('leave-full-screen', beginFullscreenTransition);
+    appWindow.on('move', syncGeometry);
+    appWindow.on('resize', syncGeometry);
+    appWindow.on('enter-full-screen', onEnterFullScreen);
+    appWindow.on('leave-full-screen', onLeaveFullScreen);
   }
 
   return {
@@ -138,18 +195,53 @@ export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
       detach();
       surface.gone();
       client = next;
+      const fsId = next.observe('fullscreen');
+      const offEvent = next.onEvent((event) => {
+        if (disposed || client !== next) return;
+        if (event.event !== 'property-change' || event['id'] !== fsId) return;
+        if (typeof event['data'] !== 'boolean') return;
+        const value = event['data'];
+        const wasUnknown = mpvFullscreen === undefined;
+        mpvFullscreen = value;
+        if (pendingMpvFullscreen === value) {
+          pendingMpvFullscreen = undefined;
+          return;
+        }
+        pendingMpvFullscreen = undefined;
+        if (wasUnknown && !value) {
+          if (!appWindow.isDestroyed() && appWindow.isFullScreen()) {
+            pendingMpvFullscreen = true;
+            mpvFullscreen = true;
+            next.command(['set_property', 'fullscreen', true]).catch(() => undefined);
+          }
+          return;
+        }
+        if (!appWindow.isDestroyed() && appWindow.isFullScreen() !== value) {
+          pendingAppFullscreen = value;
+          appWindow.setFullScreen(value);
+        }
+      });
       const offClose = next.onClose(() => {
         if (client !== next) return;
         detach();
         surface.gone();
       });
-      detachClient = offClose;
+      detachClient = () => {
+        offEvent();
+        offClose();
+      };
       surface.created();
     },
     setArea(area) {
-      if (disposed || !area.visible || appWindow.isDestroyed()) return;
+      if (disposed || appWindow.isDestroyed()) return;
+      if (!area.visible) {
+        areaVisible = false;
+        return;
+      }
       visibleArea = { ...area };
+      areaVisible = true;
       for (const waiter of [...waiters]) waiter.resolve(geometry(visibleArea));
+      syncGeometry();
     },
     toggleFullscreen() {
       if (disposed || fullscreenTransitioning) return;
@@ -162,8 +254,10 @@ export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
       fullscreenTransitioning = false;
       clearTransitionTimer();
       if (typeof appWindow.removeListener === 'function') {
-        appWindow.removeListener('enter-full-screen', beginFullscreenTransition);
-        appWindow.removeListener('leave-full-screen', beginFullscreenTransition);
+        appWindow.removeListener('move', syncGeometry);
+        appWindow.removeListener('resize', syncGeometry);
+        appWindow.removeListener('enter-full-screen', onEnterFullScreen);
+        appWindow.removeListener('leave-full-screen', onLeaveFullScreen);
       }
       for (const waiter of [...waiters]) waiter.reject(new Error('presenter disposed'));
       detach();

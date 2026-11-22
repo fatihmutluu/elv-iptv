@@ -10,6 +10,20 @@ import { createInputRepeatGate, type InputRepeatGate } from './input-repeat-gate
 import type { OpeningGate } from './opening-gate.ts';
 import { headerFields, loadfileCommand } from './options.ts';
 import type { MpvProcess } from './process.ts';
+import {
+  createReadaheadController,
+  type ReadaheadController,
+  type ReadaheadTierStore,
+} from './readahead.ts';
+import {
+  entryIdOf,
+  isUiKey,
+  keepMpvLog,
+  OBSERVED_PROPERTIES,
+  OBSERVED_PROPERTY_NAMES,
+  replyEntryId,
+  TRACK_PROPERTIES,
+} from './session-constants.ts';
 import type { TrackTracker } from './tracks.ts';
 
 /** Media request bound to an attempt slot. */
@@ -35,6 +49,7 @@ export interface LiveSession {
   readonly deriver: Deriver;
   readonly hotplug: AudioHotplug;
   readonly repeatGate: InputRepeatGate;
+  readonly readahead: ReadaheadController;
   paused: boolean;
   userQuit: boolean;
   hasCustomHeaders: boolean;
@@ -42,62 +57,11 @@ export interface LiveSession {
   readonly endWaiters: Set<{ id: number; done(ended: boolean): void }>;
 }
 
-const OBSERVED = [
-  'pause',
-  'paused-for-cache',
-  'core-idle',
-  'seeking',
-  'playback-time',
-  'time-pos',
-  'duration',
-  'speed',
-  'demuxer-cache-state',
-  'demuxer-cache-duration',
-  'estimated-vf-fps',
-  'video-params',
-  'vid',
-  'track-list',
-  'aid',
-  'sid',
-  'audio-device',
-  'audio-device-list',
-] as const;
-
-const TRACK_PROPS: ReadonlySet<string> = new Set(['track-list', 'aid', 'sid']);
-const OBSERVED_NAMES: ReadonlySet<string> = new Set(OBSERVED);
 const LOG_LEVEL = 'v';
-const KEPT_LEVELS: ReadonlySet<string> = new Set(['fatal', 'error', 'warn', 'info']);
 const OPEN_WAIT_MS = 1000;
 const START_TIMEOUT_MS = 3000;
 const END_TIMEOUT_MS = 3000;
 const CLOCK_INTERVAL_MS = 1000;
-
-type UiKey = Extract<PlayerUiEvent, { type: 'key' }>['key'];
-const UI_KEYS: ReadonlySet<string> = new Set<UiKey>([
-  'channel-up',
-  'channel-down',
-  'back',
-  'close',
-  'play-pause',
-  'seek-back',
-  'seek-forward',
-  'seek-coarse-back',
-  'seek-coarse-forward',
-  'mute',
-  'tracks',
-  'prev-channel',
-]);
-const isUiKey = (key: unknown): key is UiKey => typeof key === 'string' && UI_KEYS.has(key);
-const keepLog = (level: string, text: string): boolean =>
-  KEPT_LEVELS.has(level) || text.startsWith('Mime-type:');
-
-const entryIdOf = (value: unknown): number | undefined =>
-  typeof value === 'number' && Number.isInteger(value) ? value : undefined;
-
-const replyEntryId = (reply: MpvReply): number | undefined =>
-  typeof reply.data === 'object' && reply.data !== null
-    ? entryIdOf((reply.data as Record<string, unknown>)['playlist_entry_id'])
-    : undefined;
 
 /** Hooks connecting one `LiveSession` to `createMpvEngine`. */
 export interface LiveSessionHooks {
@@ -115,6 +79,8 @@ export interface LiveSessionHooks {
   ui(event: PlayerUiEvent): void;
   reportWedged(detail: string): void;
   enqueueCommand(cmd: MpvCommand, slot?: MediaSlot): void;
+  onAudioProperty?(name: 'volume' | 'mute', value: unknown): void;
+  readaheadStore?: ReadaheadTierStore;
 }
 
 /** Creates per-process mpv session helpers (`connect`, `send`, `stopCurrent`, `loadSlot`). */
@@ -132,7 +98,9 @@ export function createSessionController(hooks: LiveSessionHooks) {
   };
 
   const fromCurrent = (L: LiveSession, events: EngineEvent[]): void => {
-    if (isActive(L, L.entries.current()?.entryId)) hooks.emit(events);
+    if (!isActive(L, L.entries.current()?.entryId)) return;
+    if (events.some((ev) => ev.type === 'firstFrame')) L.readahead.onFirstFrame();
+    hooks.emit(events);
   };
 
   const bind = (L: LiveSession, slot: MediaSlot, entryId: number): void => {
@@ -172,7 +140,12 @@ export function createSessionController(hooks: LiveSessionHooks) {
     tracks.beginMedia(current.token);
     const events = L.deriver.begin(current.token, current.kind);
     if (L.paused) events.push(...L.deriver.property('pause', true));
-    if (isActive(L, entryId)) hooks.emit(events);
+    if (isActive(L, entryId)) {
+      const media = hooks.getMedia();
+      if (media) L.readahead.beginMedia(media.request.url);
+      if (L.paused) L.readahead.property('pause', true);
+      hooks.emit(events);
+    }
   };
 
   const onEndFile = (L: LiveSession, e: MpvEvent): void => {
@@ -209,11 +182,16 @@ export function createSessionController(hooks: LiveSessionHooks) {
         }
         return;
       case 'playback-restart':
+        if (isActive(L, L.entries.current()?.entryId)) L.readahead.onPlaybackRestart();
         fromCurrent(L, L.deriver.fileEvent(e));
         return;
       case 'property-change': {
         const name = String(e['name']);
         if (name === 'pause') L.paused = e['data'] === true;
+        if (name === 'volume' || name === 'mute') {
+          hooks.onAudioProperty?.(name, e['data']);
+          return;
+        }
         if (name === 'audio-device') {
           L.hotplug.onActiveDevice(e['data']);
           return;
@@ -222,19 +200,22 @@ export function createSessionController(hooks: LiveSessionHooks) {
           L.hotplug.onDeviceList(e['data']);
           return;
         }
-        if (TRACK_PROPS.has(name)) {
+        if (TRACK_PROPERTIES.has(name)) {
           fromCurrent(L, tracks.property(name, e['data']));
           if (name === 'track-list') fromCurrent(L, L.deriver.property(name, e['data']));
           if (!opening.isOpening()) queueReconcile(L);
           return;
         }
-        if (OBSERVED_NAMES.has(name)) fromCurrent(L, L.deriver.property(name, e['data']));
+        if (OBSERVED_PROPERTY_NAMES.has(name)) {
+          fromCurrent(L, L.deriver.property(name, e['data']));
+          if (isActive(L, L.entries.current()?.entryId)) L.readahead.property(name, e['data']);
+        }
         return;
       }
       case 'log-message': {
         const level = String(e['level']);
         const text = String(e['text'] ?? '').trimEnd();
-        if (keepLog(level, text)) L.deriver.log({ prefix: String(e['prefix']), level, text });
+        if (keepMpvLog(level, text)) L.deriver.log({ prefix: String(e['prefix']), level, text });
         return;
       }
       case 'client-message': {
@@ -327,6 +308,18 @@ export function createSessionController(hooks: LiveSessionHooks) {
           },
         }),
         repeatGate: createInputRepeatGate({ now: hooks.now }),
+        readahead: createReadaheadController({
+          now: hooks.now,
+          ...(hooks.readaheadStore === undefined ? {} : { store: hooks.readaheadStore }),
+          onApply: (secs) => {
+            if (hooks.getLive() === L) {
+              hooks.enqueueCommand(
+                ['set_property', 'demuxer-readahead-secs', secs],
+                hooks.getMedia(),
+              );
+            }
+          },
+        }),
         paused: false,
         userQuit: false,
         hasCustomHeaders: false,
@@ -338,7 +331,7 @@ export function createSessionController(hooks: LiveSessionHooks) {
       });
       proc.client.onClose(() => onClosed(L));
       presenter.attach(proc.client);
-      for (const name of OBSERVED) proc.client.observe(name);
+      for (const name of OBSERVED_PROPERTIES) proc.client.observe(name);
       void send(L, ['request_log_messages', LOG_LEVEL]);
       return L;
     },

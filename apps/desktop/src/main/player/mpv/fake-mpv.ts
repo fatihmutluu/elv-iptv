@@ -15,6 +15,8 @@ import {
   type FakeProc,
   fakeHttpError,
   parseResetOnNextFile,
+  RESETTABLE_PROPS,
+  STREAM_INTRINSIC_PROPS,
   scheduleFakeScript,
   syncTrackSelection,
 } from './fake-mpv-proc.ts';
@@ -43,23 +45,6 @@ export interface FakeMpv {
 }
 
 const LEVELS = ['fatal', 'error', 'warn', 'info', 'status', 'v', 'debug', 'trace'];
-const STREAM_INTRINSIC_PROPS: ReadonlyArray<[string, unknown]> = [
-  ['track-list', undefined],
-  ['video-params', undefined],
-  ['time-pos', undefined],
-  ['playback-time', undefined],
-  ['duration', undefined],
-];
-const RESETTABLE_PROPS: ReadonlyArray<[string, unknown]> = [
-  ['vid', 'auto'],
-  ['aid', 'auto'],
-  ['sid', 'auto'],
-  ['speed', 1],
-  ['deinterlace', 'no'],
-  ['video-aspect-override', '-1'],
-  ['audio-delay', 0],
-  ['sub-delay', 0],
-];
 const REPLY_TIMEOUT_MS = 3000;
 
 const abortError = (): Error =>
@@ -234,6 +219,12 @@ export function createFakeMpv(opts: {
         reply();
         return;
       }
+      case 'cycle': {
+        const prop = String(args[0]);
+        setProp(p, prop, !(p.props.get(prop) === true));
+        reply();
+        return;
+      }
       case 'seek': {
         const media = p.media;
         if (!media?.started) {
@@ -288,6 +279,8 @@ export function createFakeMpv(opts: {
         ['vid', 'auto'],
         ['aid', 'auto'],
         ['sid', 'auto'],
+        ['volume', 100],
+        ['mute', false],
       ]),
       resetOnNextFile,
       nextEntryId: 0,

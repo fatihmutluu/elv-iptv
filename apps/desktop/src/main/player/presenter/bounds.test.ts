@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { areaToScreen, countBuckets, cropInThumbnail, macOwnWindowGeometry } from './bounds.ts';
+import {
+  areaToScreen,
+  countBuckets,
+  cropInThumbnail,
+  macOwnWindowGeometry,
+  resolveFullscreenRect,
+} from './bounds.ts';
 
 const area = (x: number, y: number, width: number, height: number) => ({
   x,
@@ -138,5 +144,34 @@ describe('macOwnWindowGeometry', () => {
       width: 640,
       height: 360,
     });
+  });
+});
+
+describe('resolveFullscreenRect', () => {
+  const notchedDisplay = {
+    bounds: { x: 0, y: 0, width: 1512, height: 982 },
+    workArea: { x: 0, y: 37, width: 1512, height: 945 },
+  };
+
+  it('keeps safe-area geometry strictly within display.workArea to respect the notch (#269)', () => {
+    expect(resolveFullscreenRect({ x: 0, y: 0, width: 1512, height: 982 }, notchedDisplay)).toEqual(
+      notchedDisplay.workArea,
+    );
+    expect(
+      resolveFullscreenRect({ x: 0, y: 0, width: 1000, height: 982 }, notchedDisplay, 'safe-area'),
+    ).toEqual({ x: 0, y: 37, width: 1000, height: 945 });
+    expect(
+      resolveFullscreenRect(
+        { x: 2000, y: 0, width: 400, height: 300 },
+        notchedDisplay,
+        'safe-area',
+      ),
+    ).toEqual(notchedDisplay.workArea);
+  });
+
+  it('spans full display.bounds in desktop mode (#269)', () => {
+    expect(
+      resolveFullscreenRect({ x: 0, y: 37, width: 1512, height: 945 }, notchedDisplay, 'desktop'),
+    ).toEqual(notchedDisplay.bounds);
   });
 });

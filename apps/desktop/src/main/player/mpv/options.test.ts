@@ -34,6 +34,7 @@ describe('launchArgs', () => {
       '--hwdec=auto-safe',
       '--audio-fallback-to-null=yes',
       '--demuxer-mkv-probe-start-time=no',
+      '--demuxer-lavf-probe-info=yes',
       '--cache-on-disk=no',
       '--demuxer-donate-buffer=no',
       '--autoload-files=no',
@@ -75,6 +76,54 @@ describe('launchArgs', () => {
       '--geometry=1600x900+400+740',
       '--input-ipc-client=fd://3',
     ]);
+  });
+
+  it('parameterizes hwdec profiles and adds uyvy422 only for darwin-compat on darwin (#435, #210)', () => {
+    const base = {
+      inputConf: '/r/mpv-input.conf',
+      presenterArgs: [],
+      transportArgs: [],
+    };
+    const autoCopy = launchArgs({ ...base, platform: 'win32', hwdec: 'auto-copy' });
+    expect(autoCopy).toContain('--hwdec=auto-copy');
+    expect(autoCopy).not.toContain('--hwdec=auto-safe');
+    expect(autoCopy.some((a) => a.startsWith('--hwdec-image-format='))).toBe(false);
+
+    const software = launchArgs({ ...base, platform: 'win32', hwdec: 'no' });
+    expect(software).toContain('--hwdec=no');
+    expect(software).not.toContain('--hwdec=auto-safe');
+
+    const darwinCompat = launchArgs({ ...base, platform: 'darwin', hwdec: 'darwin-compat' });
+    expect(darwinCompat).toContain('--hwdec=auto-safe');
+    expect(darwinCompat).toContain('--hwdec-image-format=uyvy422');
+
+    const winCompat = launchArgs({ ...base, platform: 'win32', hwdec: 'darwin-compat' });
+    expect(winCompat).toContain('--hwdec=auto-safe');
+    expect(winCompat.some((a) => a.startsWith('--hwdec-image-format='))).toBe(false);
+  });
+
+  it('emits --video-timing-offset=0 only when renderContext is true (#210)', () => {
+    const base = {
+      inputConf: '/r/mpv-input.conf',
+      presenterArgs: [],
+      transportArgs: [],
+      platform: 'win32',
+    };
+    expect(launchArgs(base)).not.toContain('--video-timing-offset=0');
+    expect(launchArgs({ ...base, renderContext: false })).not.toContain('--video-timing-offset=0');
+    expect(launchArgs({ ...base, renderContext: true })).toContain('--video-timing-offset=0');
+  });
+
+  it('emits --pulse-buffer=50 only on linux (#269)', () => {
+    const base = {
+      inputConf: '/r/mpv-input.conf',
+      presenterArgs: [],
+      transportArgs: [],
+    };
+    expect(launchArgs({ ...base, platform: 'linux' })).toContain('--pulse-buffer=50');
+    expect(launchArgs({ ...base, platform: 'win32' })).not.toContain('--pulse-buffer=50');
+    expect(launchArgs({ ...base, platform: 'darwin' })).not.toContain('--pulse-buffer=50');
+    expect(launchArgs(base)).not.toContain('--pulse-buffer=50');
   });
 });
 

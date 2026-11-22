@@ -5,6 +5,7 @@ import {
   type CatalogBridge,
   type CatalogBridgeImportOptions,
   type CatalogClientMessage,
+  type CatalogDisconnectedMessage,
   type CatalogImportHandle,
   type CatalogRpcMethodCall,
   isCatalogClientMessage,
@@ -67,6 +68,7 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
   const pendingCalls = new Map<number, PendingCall>();
   const cancelledBeforeSend = new Set<number>();
   const changedListeners = new Set<() => void>();
+  const disconnectedListeners = new Set<(message: CatalogDisconnectedMessage) => void>();
 
   ipc.on(CATALOG_CHANNELS.changed, () => {
     for (const listener of [...changedListeners]) {
@@ -145,6 +147,14 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
 
   ipc.on(CATALOG_CHANNELS.disconnected, () => {
     dropActivePort(elvError('storage', 'worker-exited'));
+    const message: CatalogDisconnectedMessage = { reason: 'worker-exited' };
+    for (const listener of [...disconnectedListeners]) {
+      try {
+        listener(message);
+      } catch {
+        // isolate renderer disconnect callbacks
+      }
+    }
   });
 
   const ensurePort = (): Promise<PreloadClientPortLike> => {
@@ -338,6 +348,12 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
       changedListeners.add(listener);
       return () => {
         changedListeners.delete(listener);
+      };
+    },
+    onDisconnected(listener: (message: CatalogDisconnectedMessage) => void): () => void {
+      disconnectedListeners.add(listener);
+      return () => {
+        disconnectedListeners.delete(listener);
       };
     },
     async close(): Promise<void> {

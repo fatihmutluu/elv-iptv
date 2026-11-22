@@ -2,7 +2,13 @@ import type { EngineEvent, LoadCommand } from '@elv/playback';
 import { describe, expect, it, vi } from 'vitest';
 import { PLAYER_CHANNELS, type PlayerUiEvent } from '../../shared/player-ipc.ts';
 import type { MpvEngine } from './engine.ts';
-import { type IpcMainLike, registerPlayerIpc, type WebContentsLike } from './ipc.ts';
+import {
+  type IpcMainLike,
+  type PlayerIpcDeps,
+  registerPlayerIpc,
+  type WebContentsLike,
+} from './ipc.ts';
+import { createPowerBlocker } from './power-blocker.ts';
 
 type Listener = (event: { sender: WebContentsLike }, ...args: unknown[]) => unknown;
 
@@ -105,6 +111,7 @@ function stubEngine(): StubEngine {
     setSubtitleDelay: (delaySec: number) => e.calls.push(['setSubtitleDelay', delaySec]),
     setAudioDevice: (device: string) => e.calls.push(['setAudioDevice', device]),
     setDeinterlace: (enabled: boolean) => e.calls.push(['setDeinterlace', enabled]),
+    setHwdec: (profile: string) => e.calls.push(['setHwdec', profile]),
     stop: (a: number) => e.calls.push(['stop', a]),
     recreate: (a: number) => e.calls.push(['recreate', a]),
     release: () => {
@@ -131,7 +138,11 @@ const LOAD: LoadCommand = {
   kind: 'live',
 };
 
-function setup(extra: { gateReport?: (line: string, engine: MpvEngine | undefined) => void } = {}) {
+function setup(
+  extra: Partial<
+    Pick<PlayerIpcDeps, 'gateReport' | 'powerBlocker' | 'bufferingReleaseMs' | 'timers'>
+  > = {},
+) {
   const ipc = fakeIpcMain();
   const engines: StubEngine[] = [];
   const uiSinks: Array<(e: PlayerUiEvent) => void> = [];
@@ -342,6 +353,10 @@ describe('registerPlayerIpc', () => {
     });
     t.emit(PLAYER_CHANNELS.command, a, {
       engineId: ra.engineId,
+      command: { name: 'setHwdec', profile: 'darwin-compat' },
+    });
+    t.emit(PLAYER_CHANNELS.command, a, {
+      engineId: ra.engineId,
       command: { name: 'stop', attempt: 3 },
     });
     t.emit(PLAYER_CHANNELS.command, a, {
@@ -364,6 +379,7 @@ describe('registerPlayerIpc', () => {
       ['setSubtitleDelay', -0.5],
       ['setAudioDevice', 'wasapi/usb'],
       ['setDeinterlace', true],
+      ['setHwdec', 'darwin-compat'],
       ['stop', 3],
       ['recreate', 3],
       ['fullscreen'],
@@ -375,7 +391,7 @@ describe('registerPlayerIpc', () => {
       engineId: ra.engineId,
       command: { name: 'stop', attempt: 9 },
     });
-    expect(t.engines[0]?.calls).toHaveLength(17);
+    expect(t.engines[0]?.calls).toHaveLength(18);
     expect(t.logs.length).toBeGreaterThan(0);
   });
 
@@ -590,6 +606,151 @@ describe('registerPlayerIpc', () => {
       expect(t.engines[0]?.released).toBe(1);
       expect(t.engines[0]?.started).toBe(0);
       expect(a.sent).toEqual([]);
+    }
+  });
+});
+
+describe('registerPlayerIpc powerBlocker buffering stall timeout (#435)', () => {
+  function fakePowerBlocker() {
+    let nextId = 0;
+    const active = new Set<number>();
+    const starts: string[] = [];
+    const stops: number[] = [];
+    const blocker = createPowerBlocker({
+      start(type) {
+        const id = ++nextId;
+        starts.push(type);
+        active.add(id);
+        return id;
+      },
+      stop(id) {
+        stops.push(id);
+        return active.delete(id);
+      },
+    });
+    return { blocker, active, starts, stops };
+  }
+
+  it('releases powerBlocker after buffering stall grace timeout and re-acquires when playing resumes', async () => {
+    vi.useFakeTimers();
+    try {
+      const pb = fakePowerBlocker();
+      const t = setup({ powerBlocker: pb.blocker, bufferingReleaseMs: 30_000 });
+      const a = fakeContents(1);
+      await open(t, a);
+      const engine = t.engines[0];
+      if (!engine) throw new Error('missing engine');
+
+      engine.emit({ attempt: 1, type: 'state', state: 'playing' });
+      expect(pb.active.size).toBe(1);
+
+      engine.emit({ attempt: 1, type: 'state', state: 'buffering' });
+      vi.advanceTimersByTime(29_999);
+      expect(pb.active.size).toBe(1);
+
+      vi.advanceTimersByTime(1);
+      expect(pb.active.size).toBe(0);
+      expect(pb.blocker.activeCount).toBe(0);
+
+      engine.emit({ attempt: 1, type: 'state', state: 'playing' });
+      expect(pb.active.size).toBe(1);
+      expect(pb.blocker.activeCount).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels buffering stall timer when playing resumes before timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const pb = fakePowerBlocker();
+      const t = setup({ powerBlocker: pb.blocker, bufferingReleaseMs: 30_000 });
+      const a = fakeContents(1);
+      await open(t, a);
+      const engine = t.engines[0];
+      if (!engine) throw new Error('missing engine');
+
+      engine.emit({ attempt: 1, type: 'state', state: 'playing' });
+      engine.emit({ attempt: 1, type: 'state', state: 'buffering' });
+      vi.advanceTimersByTime(15_000);
+      expect(pb.active.size).toBe(1);
+
+      engine.emit({ attempt: 1, type: 'state', state: 'playing' });
+      vi.advanceTimersByTime(60_000);
+      expect(pb.active.size).toBe(1);
+      expect(pb.stops).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels buffering stall timer on paused, ended, opening, error, commands, close and dispose', async () => {
+    vi.useFakeTimers();
+    try {
+      const clearSpy = vi.fn((h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>));
+      const setSpy = vi.fn((fn: () => void, ms: number) => setTimeout(fn, ms));
+      const pb = fakePowerBlocker();
+      const t = setup({
+        powerBlocker: pb.blocker,
+        bufferingReleaseMs: 30_000,
+        timers: { setTimeout: setSpy, clearTimeout: clearSpy },
+      });
+      const a = fakeContents(1);
+      const ra = await open(t, a);
+      const engine = t.engines[0];
+      if (!engine) throw new Error('missing engine');
+
+      const cancelEvents: EngineEvent[] = [
+        { attempt: 1, type: 'state', state: 'paused' },
+        { attempt: 1, type: 'state', state: 'ended' },
+        { attempt: 1, type: 'state', state: 'opening' },
+        { attempt: 1, type: 'error', error: { code: 'network' } },
+      ];
+      for (const ev of cancelEvents) {
+        engine.emit({ attempt: 1, type: 'state', state: 'playing' });
+        engine.emit({ attempt: 1, type: 'state', state: 'buffering' });
+        const clearsBefore = clearSpy.mock.calls.length;
+        engine.emit(ev);
+        expect(clearSpy.mock.calls.length).toBe(clearsBefore + 1);
+        expect(pb.active.size).toBe(0);
+      }
+
+      const cancelCommands = [
+        { name: 'load', cmd: LOAD },
+        { name: 'pause', attempt: 2 },
+        { name: 'stop', attempt: 2 },
+        { name: 'recreate', attempt: 2 },
+      ] as const;
+      for (const command of cancelCommands) {
+        engine.emit({ attempt: 2, type: 'state', state: 'playing' });
+        engine.emit({ attempt: 2, type: 'state', state: 'buffering' });
+        const clearsBefore = clearSpy.mock.calls.length;
+        t.emit(PLAYER_CHANNELS.command, a, { engineId: ra.engineId, command });
+        expect(clearSpy.mock.calls.length).toBe(clearsBefore + 1);
+        expect(pb.active.size).toBe(0);
+      }
+
+      // Close clears armed buffering timer cleanly
+      engine.emit({ attempt: 3, type: 'state', state: 'playing' });
+      engine.emit({ attempt: 3, type: 'state', state: 'buffering' });
+      const clearsBeforeClose = clearSpy.mock.calls.length;
+      await t.invoke(PLAYER_CHANNELS.close, a, ra.engineId);
+      expect(clearSpy.mock.calls.length).toBe(clearsBeforeClose + 1);
+      expect(pb.active.size).toBe(0);
+
+      // Dispose clears armed buffering timer cleanly
+      await open(t, a);
+      const engine2 = t.engines[1];
+      if (!engine2) throw new Error('missing second engine');
+      engine2.emit({ attempt: 4, type: 'state', state: 'playing' });
+      engine2.emit({ attempt: 4, type: 'state', state: 'buffering' });
+      const clearsBeforeDispose = clearSpy.mock.calls.length;
+      t.dispose();
+      expect(clearSpy.mock.calls.length).toBe(clearsBeforeDispose + 1);
+      vi.advanceTimersByTime(60_000);
+      expect(pb.active.size).toBe(0);
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

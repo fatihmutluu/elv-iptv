@@ -1,4 +1,5 @@
 import type { MediaKind } from '@elv/playback';
+import type { HwdecProfile } from '../../../shared/player-ipc.ts';
 import type { MpvCommand } from './codec.ts';
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional HTTP header control-char stripper
@@ -21,6 +22,7 @@ export const LAUNCH_OPTIONS: readonly string[] = [
   '--hwdec=auto-safe',
   '--audio-fallback-to-null=yes',
   '--demuxer-mkv-probe-start-time=no',
+  '--demuxer-lavf-probe-info=yes',
   '--cache-on-disk=no',
   '--demuxer-donate-buffer=no',
   '--autoload-files=no',
@@ -38,21 +40,38 @@ function stripControlChars(value: string): string {
   return value.replace(HEADER_CONTROL_CHARS, '');
 }
 
+function hwdecFlags(hwdec: HwdecProfile, platform?: string): string[] {
+  if (hwdec === 'darwin-compat') {
+    return platform === 'darwin'
+      ? ['--hwdec=auto-safe', '--hwdec-image-format=uyvy422']
+      : ['--hwdec=auto-safe'];
+  }
+  return [`--hwdec=${hwdec}`];
+}
+
 /**
  * Builds the full argv. Stream URLs and headers never appear here; they travel over IPC.
  * Our macOS runtime is built without libcurl, so `--curl-enabled` does not exist there.
+ * Linux adds `--pulse-buffer=50` (#269); `--video-timing-offset=0` is added only for render-context mode (#210).
  */
 export function launchArgs(p: {
   inputConf: string;
   presenterArgs: readonly string[];
   transportArgs: readonly string[];
   platform?: string;
+  hwdec?: HwdecProfile;
+  renderContext?: boolean;
 }): string[] {
-  const base =
-    p.platform === 'darwin'
-      ? LAUNCH_OPTIONS.filter((o) => o !== '--curl-enabled=no')
-      : LAUNCH_OPTIONS;
-  return [...base, `--input-conf=${p.inputConf}`, ...p.presenterArgs, ...p.transportArgs];
+  const profile = p.hwdec ?? 'auto-safe';
+  const base = LAUNCH_OPTIONS.flatMap((opt) => {
+    if (p.platform === 'darwin' && opt === '--curl-enabled=no') return [];
+    if (opt === '--hwdec=auto-safe') return hwdecFlags(profile, p.platform);
+    return [opt];
+  });
+  const extra: string[] = [];
+  if (p.platform === 'linux') extra.push('--pulse-buffer=50');
+  if (p.renderContext === true) extra.push('--video-timing-offset=0');
+  return [...base, ...extra, `--input-conf=${p.inputConf}`, ...p.presenterArgs, ...p.transportArgs];
 }
 
 /** Maps `User-Agent` and `Referer`/`Referrer` headers to mpv's per-file `loadfile` options. */

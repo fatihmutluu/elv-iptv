@@ -8,6 +8,15 @@ export interface Rect {
   height: number;
 }
 
+/** Fullscreen bounds policy for notched displays without native modesetting (`#269`). */
+export type FullscreenMode = 'safe-area' | 'desktop';
+
+/** Display bounds and work area (DIPs) matching Electron's `Display`. */
+export interface DisplayBounds {
+  readonly bounds: Rect;
+  readonly workArea: Rect;
+}
+
 /** Rounds edges, not sizes, so neighbouring rects stay flush; `+ 0` turns `-0` into `0`. */
 function roundEdges(left: number, top: number, right: number, bottom: number): Rect {
   const x = Math.round(left) + 0;
@@ -80,6 +89,47 @@ export function macOwnWindowGeometry(dip: Rect, workArea: Rect, scaleFactor: num
     left + Math.max(0, dip.width) * scaleFactor,
     top + Math.max(0, dip.height) * scaleFactor,
   );
+}
+
+/**
+ * Clamps a DIP rectangle into `container` (at least 1x1), falling back to `container` when the
+ * rectangles do not overlap.
+ */
+function clampRectToBounds(rect: Rect, container: Rect): Rect {
+  const left = Math.max(rect.x, container.x);
+  const top = Math.max(rect.y, container.y);
+  const right = Math.min(rect.x + rect.width, container.x + container.width);
+  const bottom = Math.min(rect.y + rect.height, container.y + container.height);
+  if (right <= left || bottom <= top) {
+    return {
+      x: Math.round(container.x) + 0,
+      y: Math.round(container.y) + 0,
+      width: Math.max(1, Math.round(container.width)),
+      height: Math.max(1, Math.round(container.height)),
+    };
+  }
+  return roundEdges(left, top, right, bottom);
+}
+
+/**
+ * Resolves fullscreen DIP geometry for a display (`#269`): `'safe-area'` stays within `workArea`
+ * (respecting notched macOS displays without `CGDisplaySetDisplayMode` modesetting), while
+ * `'desktop'` spans full display `bounds`.
+ */
+export function resolveFullscreenRect(
+  rect: Rect,
+  display: DisplayBounds,
+  mode: FullscreenMode = 'safe-area',
+): Rect {
+  if (mode === 'desktop') {
+    return {
+      x: Math.round(display.bounds.x) + 0,
+      y: Math.round(display.bounds.y) + 0,
+      width: Math.max(1, Math.round(display.bounds.width)),
+      height: Math.max(1, Math.round(display.bounds.height)),
+    };
+  }
+  return clampRectToBounds(rect, display.workArea);
 }
 
 /** Counts the distinct colours of a BGRA bitmap after reducing each channel to 5 bits (alpha ignored). */

@@ -1,3 +1,4 @@
+import type { MediaSessionMetadata } from '@elv/features';
 import type { AttemptToken, EngineEvent, MediaKind } from '@elv/playback';
 import type { DesktopEngine } from './player/desktop-engine.ts';
 
@@ -94,16 +95,9 @@ export interface DesktopMediaSession {
   dispose(): void;
 }
 
-const ALL_ACTIONS = [
-  'play',
-  'pause',
-  'seekbackward',
-  'seekforward',
-  'seekto',
-  'previoustrack',
-  'nexttrack',
-  'stop',
-] as const satisfies readonly MediaSessionActionName[];
+const ALL_ACTIONS = 'play pause seekbackward seekforward seekto previoustrack nexttrack stop'.split(
+  ' ',
+) as MediaSessionActionName[];
 
 const CREDENTIAL_QUERY_KEYS = new Set(
   'username password user pass token access_token api_key apikey auth key secret sig signature'.split(
@@ -177,14 +171,19 @@ export function createDesktopMediaSession(
     if (mediaSession) safeCall(() => mediaSession.setPositionState?.());
   };
 
+  const setPlayback = (state: MediaSessionPlaybackStateValue): void => {
+    if (!mediaSession) return;
+    safeCall(() => {
+      mediaSession.playbackState = state;
+    });
+  };
+
   const clearSession = (): void => {
     if (!mediaSession) return;
     safeCall(() => {
       mediaSession.metadata = null;
     });
-    safeCall(() => {
-      mediaSession.playbackState = 'none';
-    });
+    setPlayback('none');
     clearPosition();
     for (const action of ALL_ACTIONS) setAction(action, null);
   };
@@ -203,10 +202,7 @@ export function createDesktopMediaSession(
       });
     },
     setPlaybackState(state) {
-      if (disposed || !mediaSession) return;
-      safeCall(() => {
-        mediaSession.playbackState = state;
-      });
+      if (!disposed) setPlayback(state);
     },
     setPositionState(input) {
       if (disposed || !mediaSession?.setPositionState) return;
@@ -255,30 +251,37 @@ export function createDesktopMediaSession(
 
 /** Hooks for {@link bindDesktopMediaSession}. */
 export interface BindDesktopMediaSessionHooks {
-  readonly getTitle?: () => string;
   readonly onTrackStep?: (direction: 'next' | 'previous') => void;
 }
 
+/** A {@link DesktopEngine} wrapped with typed OS `MediaSession` synchronization (`#166`, `#435`). */
+export interface MediaSessionBoundDesktopEngine extends DesktopEngine {
+  /** Updates OS media metadata from typed playback metadata, or clears it when `null`. */
+  setMediaMetadata(meta: MediaSessionMetadata | null): void;
+}
+
 /**
- * Wraps a {@link DesktopEngine} so live desktop playback mirrors state and VOD timeline progress
- * to `navigator.mediaSession` and routes OS hardware media keys without eagerly draining
- * `DesktopEngine`'s initial `heldEvents` buffer before `PlaybackService` subscribes.
+ * Wraps a {@link DesktopEngine} so live desktop playback mirrors state, typed metadata, and VOD
+ * timeline progress to `navigator.mediaSession` and routes OS hardware media keys without eagerly
+ * draining `DesktopEngine`'s initial `heldEvents` buffer before `PlaybackService` subscribes.
  */
 export function bindDesktopMediaSession(
   engine: DesktopEngine,
   session: DesktopMediaSession,
   hooks?: BindDesktopMediaSessionHooks,
-): DesktopEngine {
+): MediaSessionBoundDesktopEngine {
   let activeAttempt: AttemptToken | null = null;
   let activeKind: MediaKind = 'live';
+  let activeMeta: MediaSessionMetadata | null = null;
   let lastPositionMs = 0;
   let lastDurationMs: number | undefined;
-  let lastTitle = '';
 
   const syncMetadata = (): void => {
-    const liveTitle = hooks?.getTitle?.().trim() ?? '';
-    if (liveTitle) lastTitle = liveTitle;
-    session.setMetadata({ title: lastTitle || 'ELV IPTV', artist: 'ELV IPTV' });
+    session.setMetadata({
+      title: activeMeta?.title.trim() || 'ELV IPTV',
+      artist: activeMeta?.subtitle?.trim() || 'ELV IPTV',
+      ...(activeMeta?.artworkUrl ? { artworkUrl: activeMeta.artworkUrl } : {}),
+    });
   };
 
   const seekBy = (deltaSec: number): void => {
@@ -302,7 +305,7 @@ export function bindDesktopMediaSession(
             },
           }
         : {}),
-      ...(hooks?.onTrackStep
+      ...(activeMeta?.canStepTrack === true && hooks?.onTrackStep
         ? {
             previousTrack: () => hooks.onTrackStep?.('previous'),
             nextTrack: () => hooks.onTrackStep?.('next'),
@@ -338,21 +341,31 @@ export function bindDesktopMediaSession(
     }
   };
 
-  const track = <A extends unknown[]>(fn: (attempt: AttemptToken, ...args: A) => void) => {
-    return (attempt: AttemptToken, ...args: A): void => {
+  const track =
+    <A extends unknown[]>(fn: (attempt: AttemptToken, ...args: A) => void) =>
+    (attempt: AttemptToken, ...args: A): void => {
       activeAttempt = attempt;
       fn(attempt, ...args);
     };
-  };
 
   return {
     ...engine,
+    setMediaMetadata(meta) {
+      activeMeta = meta;
+      if (meta === null) {
+        session.clear();
+        return;
+      }
+      if (meta.kind === 'live' && activeKind !== 'live') session.clearPositionState();
+      activeKind = meta.kind;
+      syncMetadata();
+      syncHandlers();
+    },
     load(cmd) {
       activeAttempt = cmd.attempt;
       activeKind = cmd.kind;
       lastPositionMs = cmd.startMs ?? 0;
       lastDurationMs = undefined;
-      lastTitle = '';
       if (cmd.kind === 'live') session.clearPositionState();
       syncMetadata();
       syncHandlers();
@@ -366,12 +379,12 @@ export function bindDesktopMediaSession(
     recreate: track((a) => engine.recreate(a)),
     stop(attempt) {
       activeAttempt = attempt;
-      lastTitle = '';
       session.setPlaybackState('none');
       session.clearPositionState();
       engine.stop(attempt);
     },
     release() {
+      activeMeta = null;
       session.dispose();
       engine.release();
     },

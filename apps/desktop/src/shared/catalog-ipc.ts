@@ -165,6 +165,8 @@ export interface CatalogBridge {
   listFavorites(limit?: number, profileId?: string): Promise<FavoriteRow[]>;
   listFavoriteKeys(profileId?: string): Promise<string[]>;
   onChanged(listener: () => void): () => void;
+  /** Subscribes to unexpected `catalog-worker` disconnect notifications (`#435`). */
+  onDisconnected(listener: (message: CatalogDisconnectedMessage) => void): () => void;
   close(): Promise<void>;
 }
 

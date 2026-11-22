@@ -82,15 +82,143 @@ describe('createOwnWindowPresenter', () => {
     expect(await args).toEqual(['--geometry=1920x1080+150+75', '--input-vo-keyboard=yes']);
   });
 
-  it('later areas never move mpv window', async () => {
-    const { presenter } = setup();
+  it('follows host move, resize, and visible setArea updates via mpv geometry IPC (#435)', async () => {
+    const { app, presenter } = setup();
     presenter.setArea(AREA);
     await presenter.prepare();
     const mpv = fakeMpvClient();
     presenter.attach(mpv.client);
+
     presenter.setArea({ ...AREA, x: 300 });
+    expect(mpv.commands).toEqual([['set_property', 'geometry', '1200x675+600+135']]);
+
+    app.state.content = { x: 200, y: 100, width: 1280, height: 720 };
+    app.emit('move');
+    expect(mpv.commands.at(-1)).toEqual(['set_property', 'geometry', '1200x675+750+210']);
+
+    app.state.content = { x: 200, y: 100, width: 1600, height: 900 };
+    app.emit('resize');
+    expect(mpv.commands.at(-1)).toEqual(['set_property', 'geometry', '1200x675+750+210']);
+    expect(mpv.commands).toHaveLength(3);
+
+    // Minimized, hidden area, fullscreen, and destroyed windows do not push geometry
+    app.state.minimized = true;
+    app.emit('move');
+    expect(mpv.commands).toHaveLength(3);
+    app.state.minimized = false;
+
+    app.state.fullscreen = true;
+    app.emit('resize');
+    expect(mpv.commands).toHaveLength(3);
+    app.state.fullscreen = false;
+
     presenter.setArea({ ...AREA, visible: false });
-    expect(mpv.commands).toEqual([]);
+    app.emit('move');
+    expect(mpv.commands).toHaveLength(3);
+
+    presenter.setArea({ ...AREA, visible: true });
+    expect(mpv.commands).toHaveLength(4);
+    app.state.destroyed = true;
+    app.emit('resize');
+    expect(mpv.commands).toHaveLength(4);
+  });
+
+  it('swallows rejected geometry or fullscreen IPC cleanly', async () => {
+    const { app, presenter } = setup();
+    presenter.setArea(AREA);
+    const mpv = fakeMpvClient();
+    mpv.client.command = () => Promise.reject(new Error('pipe closed'));
+    presenter.attach(mpv.client);
+    expect(() => {
+      app.emit('move');
+      app.emit('enter-full-screen');
+    }).not.toThrow();
+    await Promise.resolve();
+  });
+
+  it('syncs fullscreen bidirectionally between host window and mpv without feedback loops (#435)', async () => {
+    vi.useFakeTimers();
+    const { app, presenter } = setup();
+    const mpv = fakeMpvClient();
+    presenter.attach(mpv.client);
+    expect(mpv.observed).toContain('fullscreen');
+    const fsId = mpv.observed.indexOf('fullscreen') + 1;
+
+    // Host enters fullscreen -> mpv receives set_property fullscreen true
+    app.state.fullscreen = true;
+    app.emit('enter-full-screen');
+    expect(mpv.commands).toEqual([['set_property', 'fullscreen', true]]);
+    // mpv echoing fullscreen: true does not loop back into appWindow.setFullScreen
+    mpv.push({ event: 'property-change', id: fsId, name: 'fullscreen', data: true });
+    expect(app.state.fullscreenCalls).toEqual([]);
+
+    // Host leaves fullscreen -> mpv receives set_property fullscreen false
+    app.state.fullscreen = false;
+    app.emit('leave-full-screen');
+    expect(mpv.commands).toEqual([
+      ['set_property', 'fullscreen', true],
+      ['set_property', 'fullscreen', false],
+    ]);
+    mpv.push({ event: 'property-change', id: fsId, name: 'fullscreen', data: false });
+    expect(app.state.fullscreenCalls).toEqual([]);
+
+    // mpv independently enters fullscreen -> appWindow.setFullScreen(true), and host event does NOT echo back to mpv
+    mpv.push({ event: 'property-change', id: fsId, name: 'fullscreen', data: true });
+    expect(app.state.fullscreenCalls).toEqual([true]);
+    app.emit('enter-full-screen');
+    expect(mpv.commands).toHaveLength(2);
+
+    // mpv independently leaves fullscreen -> appWindow.setFullScreen(false), and host event does NOT echo back
+    mpv.push({ event: 'property-change', id: fsId, name: 'fullscreen', data: false });
+    expect(app.state.fullscreenCalls).toEqual([true, false]);
+    app.emit('leave-full-screen');
+    expect(mpv.commands).toHaveLength(2);
+
+    // No-op if appWindow is already in the target state or destroyed
+    mpv.push({ event: 'property-change', id: fsId, name: 'fullscreen', data: false });
+    expect(app.state.fullscreenCalls).toEqual([true, false]);
+    app.state.destroyed = true;
+    mpv.push({ event: 'property-change', id: fsId, name: 'fullscreen', data: true });
+    expect(app.state.fullscreenCalls).toEqual([true, false]);
+
+    presenter.dispose();
+    expect(mpv.listenerCount()).toBe(0);
+    expect(app.listenerCount()).toBe(0);
+  });
+
+  it('respects macOS notch safe-area vs desktop fullscreenMode without native modesetting (#269)', async () => {
+    const notchedDisplay = {
+      bounds: { x: 0, y: 0, width: 1512, height: 982 },
+      workArea: { x: 0, y: 37, width: 1512, height: 945 },
+    };
+    const app = fakeAppWindow({ x: 0, y: 0, width: 1512, height: 982 });
+    app.state.fullscreen = true;
+    const fullArea = { x: 0, y: 0, width: 1512, height: 982, visible: true };
+
+    const safePresenter = createOwnWindowPresenter({
+      appWindow: app.window,
+      toScreenPixels: (dip) => macOwnWindowGeometry(dip, notchedDisplay.workArea, 2),
+      displayBoundsOf: () => notchedDisplay,
+    });
+    safePresenter.setArea(fullArea);
+    expect(await safePresenter.prepare()).toEqual([
+      '--geometry=3024x1890+0+0',
+      '--input-vo-keyboard=yes',
+    ]);
+    safePresenter.dispose();
+
+    const desktopPresenter = createOwnWindowPresenter({
+      appWindow: app.window,
+      toScreenPixels: (dip) => macOwnWindowGeometry(dip, notchedDisplay.workArea, 2),
+      displayBoundsOf: () => notchedDisplay,
+      fullscreenMode: 'desktop',
+    });
+    desktopPresenter.setArea(fullArea);
+    expect(await desktopPresenter.prepare()).toEqual([
+      '--geometry=3024x1964+0+-74',
+      '--input-vo-keyboard=yes',
+    ]);
+    desktopPresenter.dispose();
   });
 
   it('toggleFullscreen cycles mpv fullscreen', async () => {
@@ -174,7 +302,7 @@ describe('createOwnWindowPresenter', () => {
       toScreenPixels: scale(1.5),
       fullscreenTransitionMs: 400,
     });
-    expect(app.listenerCount()).toBe(2);
+    expect(app.listenerCount()).toBe(4);
 
     // Constructed while already fullscreen: setArea still updates visibleArea and resolves prepare immediately
     const waiting = presenter.prepare();
@@ -191,18 +319,63 @@ describe('createOwnWindowPresenter', () => {
       '--input-vo-keyboard=yes',
     ]);
 
-    // Non-essential fullscreen IPC is paused only during the bounded transition window
+    // enter-full-screen synced fullscreen=true; toggleFullscreen is paused during the bounded transition window
+    expect(mpv.commands).toEqual([['set_property', 'fullscreen', true]]);
     presenter.toggleFullscreen();
-    expect(mpv.commands).toEqual([]);
+    expect(mpv.commands).toEqual([['set_property', 'fullscreen', true]]);
     await vi.advanceTimersByTimeAsync(400);
     presenter.toggleFullscreen();
-    expect(mpv.commands).toEqual([['cycle', 'fullscreen']]);
+    expect(mpv.commands).toEqual([
+      ['set_property', 'fullscreen', true],
+      ['cycle', 'fullscreen'],
+    ]);
 
-    // leave-full-screen also arms the bounded transition guard and dispose cleans up listeners & timers
+    // leave-full-screen syncs fullscreen=false, arms the bounded transition guard, reconciles geometry after transition, and dispose cleans up
+    app.state.fullscreen = false;
     app.emit('leave-full-screen');
+    expect(mpv.commands).toEqual([
+      ['set_property', 'fullscreen', true],
+      ['cycle', 'fullscreen'],
+      ['set_property', 'fullscreen', false],
+    ]);
     presenter.toggleFullscreen();
-    expect(mpv.commands).toHaveLength(1);
+    expect(mpv.commands).toHaveLength(3);
+    app.state.content = { x: 240, y: 120, width: 1280, height: 720 };
+    app.emit('move');
+    expect(mpv.commands).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(mpv.commands).toEqual([
+      ['set_property', 'fullscreen', true],
+      ['cycle', 'fullscreen'],
+      ['set_property', 'fullscreen', false],
+      ['set_property', 'geometry', '1200x675+810+240'],
+    ]);
     presenter.dispose();
     expect(app.listenerCount()).toBe(0);
+  });
+
+  it('does not kick an already-fullscreen host out of fullscreen on initial mpv observe(fullscreen=false) snapshot', () => {
+    const app = fakeAppWindow();
+    app.state.fullscreen = true;
+    const presenter = createOwnWindowPresenter({
+      appWindow: app.window,
+      toScreenPixels: scale(1),
+    });
+    const mpv = fakeMpvClient();
+    presenter.attach(mpv.client);
+    const fsId = mpv.observed.indexOf('fullscreen') + 1;
+    expect(fsId).toBeGreaterThan(0);
+
+    // mpv sends initial fullscreen=false right after observe_property: keep host fullscreen and sync mpv to true
+    mpv.push({ event: 'property-change', id: fsId, name: 'fullscreen', data: false });
+    expect(app.state.fullscreenCalls).toEqual([]);
+    expect(mpv.commands).toEqual([['set_property', 'fullscreen', true]]);
+
+    // Echo fullscreen=true settles pending sync, then a subsequent user exit (false) exits host fullscreen
+    mpv.push({ event: 'property-change', id: fsId, name: 'fullscreen', data: true });
+    expect(app.state.fullscreenCalls).toEqual([]);
+    mpv.push({ event: 'property-change', id: fsId, name: 'fullscreen', data: false });
+    expect(app.state.fullscreenCalls).toEqual([false]);
+    presenter.dispose();
   });
 });

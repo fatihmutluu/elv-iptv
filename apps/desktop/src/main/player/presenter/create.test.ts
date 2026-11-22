@@ -6,7 +6,14 @@ const electron = vi.hoisted(() => ({
   made: [] as Array<{ options: unknown; openHandler?: () => { action: string } }>,
   screenListeners: new Map<string, Set<() => void>>(),
   dipCalls: [] as unknown[],
-  displays: [{ id: 1, workArea: { x: 0, y: 30, width: 2056, height: 1299 }, scaleFactor: 2 }],
+  displays: [
+    {
+      id: 1,
+      bounds: { x: 0, y: 0, width: 2056, height: 1329 },
+      workArea: { x: 0, y: 30, width: 2056, height: 1299 },
+      scaleFactor: 2,
+    },
+  ],
   matchingId: 1,
 }));
 
@@ -65,7 +72,12 @@ beforeEach(() => {
   electron.screenListeners.clear();
   electron.dipCalls = [];
   electron.displays = [
-    { id: 1, workArea: { x: 0, y: 30, width: 2056, height: 1299 }, scaleFactor: 2 },
+    {
+      id: 1,
+      bounds: { x: 0, y: 0, width: 2056, height: 1329 },
+      workArea: { x: 0, y: 30, width: 2056, height: 1299 },
+      scaleFactor: 2,
+    },
   ];
   electron.matchingId = 1;
 });
@@ -110,8 +122,18 @@ describe('createPresenter', () => {
     expect(electron.dipCalls).toHaveLength(1);
 
     electron.displays = [
-      { id: 1, workArea: { x: 0, y: 30, width: 2056, height: 1299 }, scaleFactor: 2 },
-      { id: 2, workArea: { x: -1920, y: 25, width: 1920, height: 1055 }, scaleFactor: 1 },
+      {
+        id: 1,
+        bounds: { x: 0, y: 0, width: 2056, height: 1329 },
+        workArea: { x: 0, y: 30, width: 2056, height: 1299 },
+        scaleFactor: 2,
+      },
+      {
+        id: 2,
+        bounds: { x: -1920, y: 0, width: 1920, height: 1080 },
+        workArea: { x: -1920, y: 25, width: 1920, height: 1055 },
+        scaleFactor: 1,
+      },
     ];
     electron.matchingId = 2;
     const multiApp = fakeAppWindow({ x: -1820, y: 125, width: 1280, height: 720 });
@@ -126,5 +148,42 @@ describe('createPresenter', () => {
       '--screen=1',
       '--input-vo-keyboard=yes',
     ]);
+
+    // Notched macOS fullscreen: safe-area default keeps workArea, desktop spans full bounds (#269)
+    electron.displays = [
+      {
+        id: 1,
+        bounds: { x: 0, y: 0, width: 1512, height: 982 },
+        workArea: { x: 0, y: 37, width: 1512, height: 945 },
+        scaleFactor: 2,
+      },
+    ];
+    electron.matchingId = 1;
+    const notchedApp = fakeAppWindow({ x: 0, y: 0, width: 1512, height: 982 });
+    notchedApp.state.fullscreen = true;
+    const macSafe = createPresenter(
+      'own-window',
+      notchedApp.window as unknown as BrowserWindow,
+      'darwin',
+    );
+    macSafe.setArea({ x: 0, y: 0, width: 1512, height: 982, visible: true });
+    expect(await macSafe.prepare()).toEqual([
+      '--geometry=3024x1890+0+0',
+      '--input-vo-keyboard=yes',
+    ]);
+    macSafe.dispose();
+
+    const macDesktop = createPresenter(
+      'own-window',
+      notchedApp.window as unknown as BrowserWindow,
+      'darwin',
+      { fullscreenMode: 'desktop' },
+    );
+    macDesktop.setArea({ x: 0, y: 0, width: 1512, height: 982, visible: true });
+    expect(await macDesktop.prepare()).toEqual([
+      '--geometry=3024x1964+0+-74',
+      '--input-vo-keyboard=yes',
+    ]);
+    macDesktop.dispose();
   });
 });

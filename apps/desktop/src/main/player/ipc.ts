@@ -34,6 +34,12 @@ export interface IpcMainLike {
   removeListener(channel: string, listener: IpcListener): unknown;
 }
 
+/** Optional timer primitives used by `registerPlayerIpc` for buffering stall grace release. */
+interface PlayerIpcTimers {
+  setTimeout(fn: () => void, ms: number): unknown;
+  clearTimeout(handle: unknown): void;
+}
+
 /** What `registerPlayerIpc` needs from the app. */
 export interface PlayerIpcDeps {
   ipcMain: IpcMainLike;
@@ -45,12 +51,18 @@ export interface PlayerIpcDeps {
   log(line: string): void;
   /** Optional display-sleep guard acquired only while an engine is actively `'playing'`. */
   powerBlocker?: PowerBlocker;
+  /** Grace period (ms) before releasing `powerBlocker` during a continuous `'buffering'` stall (default `30_000`). */
+  bufferingReleaseMs?: number;
+  /** Optional timer primitives for testing the buffering stall grace timeout. */
+  timers?: PlayerIpcTimers;
   /**
    * Dev gate only: receives each valid `gate:report` line and the sender's engine (`undefined` when it has none). The
    * channel is not registered without it.
    */
   gateReport?(line: string, engine: MpvEngine | undefined): void;
 }
+
+const DEFAULT_BUFFERING_RELEASE_MS = 30_000;
 
 interface Entry {
   owner: WebContentsLike;
@@ -66,11 +78,38 @@ interface Entry {
  */
 export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
   const { ipcMain, log, powerBlocker } = deps;
+  const bufferingReleaseMs = Math.max(0, deps.bufferingReleaseMs ?? DEFAULT_BUFFERING_RELEASE_MS);
+  const timers: PlayerIpcTimers = deps.timers ?? {
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  };
   const entries = new Map<string, Entry>();
+  const bufferingTimers = new Map<string, unknown>();
   const watched = new Set<number>();
   const generations = new Map<number, number>();
   let counter = 0;
   let disposed = false;
+
+  const clearBufferingTimer = (id: string): void => {
+    const handle = bufferingTimers.get(id);
+    if (handle === undefined) return;
+    bufferingTimers.delete(id);
+    timers.clearTimeout(handle);
+  };
+
+  const armBufferingTimer = (id: string): void => {
+    if (!powerBlocker || bufferingTimers.has(id)) return;
+    const handle = timers.setTimeout(() => {
+      bufferingTimers.delete(id);
+      powerBlocker.release(id);
+    }, bufferingReleaseMs);
+    bufferingTimers.set(id, handle);
+  };
+
+  const releasePowerBlocker = (id: string): void => {
+    clearBufferingTimer(id);
+    powerBlocker?.release(id);
+  };
 
   const bumpGeneration = (ownerId: number): number => {
     const next = (generations.get(ownerId) ?? 0) + 1;
@@ -79,7 +118,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
   };
 
   const release = (id: string): void => {
-    powerBlocker?.release(id);
+    releasePowerBlocker(id);
     const entry = entries.get(id);
     if (!entry) return;
     entries.delete(id);
@@ -146,12 +185,22 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     }
     const unsubscribe = engine.subscribe((event) => {
       if (event.type === 'state') {
-        if (event.state === 'playing') powerBlocker?.acquire(engineId);
-        else if (event.state === 'paused' || event.state === 'ended' || event.state === 'opening') {
-          powerBlocker?.release(engineId);
+        if (event.state === 'playing') {
+          clearBufferingTimer(engineId);
+          powerBlocker?.acquire(engineId);
+        } else if (event.state === 'buffering') {
+          armBufferingTimer(engineId);
+        } else if (
+          event.state === 'paused' ||
+          event.state === 'ended' ||
+          event.state === 'opening'
+        ) {
+          releasePowerBlocker(engineId);
+        } else {
+          clearBufferingTimer(engineId);
         }
       } else if (event.type === 'error') {
-        powerBlocker?.release(engineId);
+        releasePowerBlocker(engineId);
       }
       const message: PlayerEventMessage = { engineId, event };
       sendTo(sender, PLAYER_CHANNELS.event, message);
@@ -193,13 +242,13 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     const { engine } = entry;
     switch (command.name) {
       case 'load':
-        powerBlocker?.release(engineId);
+        releasePowerBlocker(engineId);
         engine.load(command.cmd);
         break;
       case 'pause':
       case 'stop':
       case 'recreate':
-        powerBlocker?.release(engineId);
+        releasePowerBlocker(engineId);
         engine[command.name](command.attempt);
         break;
       case 'retry':
@@ -232,6 +281,9 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
         break;
       case 'setDeinterlace':
         engine.setDeinterlace(command.enabled);
+        break;
+      case 'setHwdec':
+        engine.setHwdec(command.profile);
         break;
       case 'fullscreen':
         engine.toggleFullscreen();
@@ -283,6 +335,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     ipcMain.removeListener(PLAYER_CHANNELS.command, onCommand);
     ipcMain.removeListener(PLAYER_CHANNELS.area, onArea);
     ipcMain.removeListener(PLAYER_CHANNELS.gateReport, onGate);
+    for (const id of [...bufferingTimers.keys()]) clearBufferingTimer(id);
     for (const id of [...entries.keys()]) release(id);
     powerBlocker?.releaseAll();
   };

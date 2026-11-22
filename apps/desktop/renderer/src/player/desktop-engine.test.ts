@@ -119,6 +119,10 @@ describe('createDesktopEngine', () => {
     engine.setAudioDevice('wasapi/{out-1}');
     engine.setDeinterlace(true);
     engine.setDeinterlace(false);
+    engine.setHwdec('auto-safe');
+    engine.setHwdec('auto-copy');
+    engine.setHwdec('no');
+    engine.setHwdec('darwin-compat');
     engine.stop(4);
     engine.recreate(5);
     engine.toggleFullscreen();
@@ -139,6 +143,10 @@ describe('createDesktopEngine', () => {
       { engineId: 'e1', command: { name: 'setAudioDevice', device: 'wasapi/{out-1}' } },
       { engineId: 'e1', command: { name: 'setDeinterlace', enabled: true } },
       { engineId: 'e1', command: { name: 'setDeinterlace', enabled: false } },
+      { engineId: 'e1', command: { name: 'setHwdec', profile: 'auto-safe' } },
+      { engineId: 'e1', command: { name: 'setHwdec', profile: 'auto-copy' } },
+      { engineId: 'e1', command: { name: 'setHwdec', profile: 'no' } },
+      { engineId: 'e1', command: { name: 'setHwdec', profile: 'darwin-compat' } },
       { engineId: 'e1', command: { name: 'stop', attempt: 4 } },
       { engineId: 'e1', command: { name: 'recreate', attempt: 5 } },
       { engineId: 'e1', command: { name: 'fullscreen' } },
@@ -265,6 +273,7 @@ describe('createDesktopEngine', () => {
     engine.setSubtitleDelay(0.1);
     engine.setAudioDevice('auto');
     engine.setDeinterlace(true);
+    engine.setHwdec('no');
     expect(f.sent).toHaveLength(1);
     expect(f.areas).toEqual([]);
     const late = engine.subscribe(() => undefined);
