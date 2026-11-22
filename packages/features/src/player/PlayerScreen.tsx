@@ -299,6 +299,7 @@ export function PlayerScreen({
         : {})}
       onLock={controls.lockControls}
       onJumpPreviousChannel={handoff.handleJumpPreviousChannel}
+      onJumpToLiveEdge={controls.jumpToLiveEdge}
       onPrev={() => zapBy(-1)}
       onNext={() => zapBy(1)}
       onRetry={controls.retry}

@@ -71,11 +71,20 @@ class SurfaceFitTest {
   }
 
   @Test
-  fun `the resize mode prop is fit unless it says fill`() {
+  fun `stretch fills the entire view regardless of video aspect ratio (#151)`() {
+    assertEquals(VideoRect(0, 0, 1920, 1080), fit(640, 480, mode = ResizeMode.STRETCH))
+    assertEquals(VideoRect(0, 0, 1920, 1080), fit(2560, 1080, mode = ResizeMode.STRETCH))
+    assertEquals(VideoRect(0, 0, 1080, 1920), fit(640, 480, viewW = 1080, viewH = 1920, mode = ResizeMode.STRETCH))
+    assertEquals(VideoRect(0, 0, 0, 0), fit(640, 480, viewW = 0, viewH = 0, mode = ResizeMode.STRETCH))
+  }
+
+  @Test
+  fun `the resize mode prop maps fit, fill, and stretch with fit default (#151)`() {
     assertEquals(ResizeMode.FILL, ResizeMode.of("fill"))
+    assertEquals(ResizeMode.STRETCH, ResizeMode.of("stretch"))
     assertEquals(ResizeMode.FIT, ResizeMode.of("fit"))
     assertEquals(ResizeMode.FIT, ResizeMode.of(null))
-    assertEquals(ResizeMode.FIT, ResizeMode.of("stretch"))
+    assertEquals(ResizeMode.FIT, ResizeMode.of("unknown"))
   }
 
   @Test

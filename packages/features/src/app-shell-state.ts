@@ -287,6 +287,7 @@ export function createObservedCatalog(
     ...(c.flushPendingWrites ? { flushPendingWrites: c.flushPendingWrites.bind(c) } : {}),
     ...(c.search ? { search: c.search.bind(c) } : {}),
     ...(c.importGuide ? { importGuide: c.importGuide.bind(c) } : {}),
+    ...(c.latestImportHealth ? { latestImportHealth: c.latestImportHealth.bind(c) } : {}),
     ...(c.nowNext ? { nowNext: c.nowNext.bind(c) } : {}),
     ...(c.epgWindow ? { epgWindow: c.epgWindow.bind(c) } : {}),
     ...(c.channelByNumber ? { channelByNumber: c.channelByNumber.bind(c) } : {}),

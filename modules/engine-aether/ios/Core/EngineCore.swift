@@ -11,6 +11,7 @@ public final class EngineCore {
   var serial = 0
   var released = false
   var currentRequest: LoadRequest?
+  var currentPlan: MediaPlan?
   var active = false
   var trackState = TrackSelectionState()
 
@@ -62,6 +63,7 @@ public final class EngineCore {
     trackState.onLoad(request)
     sink?.clearSubtitles()
     currentRequest = request
+    currentPlan = nil
     setShutter(covered: true)
 
     guard let plan = planMedia(request) else {
@@ -75,6 +77,7 @@ public final class EngineCore {
       return
     }
 
+    currentPlan = plan
     active = true
     emit(.state(attempt: token, state: .opening))
     backend.start(plan, options: configuredLoadOptions(for: plan, request: request), serial: serial)
@@ -100,6 +103,7 @@ public final class EngineCore {
     resetSerialState(startMs: resumeMs)
     trackState.onPrepareReuse()
     sink?.clearSubtitles()
+    currentPlan = plan
     active = true
     emit(.state(attempt: token, state: .opening))
     backend.start(plan, options: configuredLoadOptions(for: plan, request: request), serial: serial)
@@ -163,6 +167,7 @@ public final class EngineCore {
     userPaused = false
     playbackRate = 1.0
     currentRequest = nil
+    currentPlan = nil
     dolbyVisionFallbackLatched = false
     trackState.onStop()
     sink?.clearSubtitles()
@@ -201,6 +206,7 @@ public final class EngineCore {
     userPaused = false
     playbackRate = 1.0
     currentRequest = nil
+    currentPlan = nil
     dolbyVisionFallbackLatched = false
     trackState.onStop()
     sink?.clearSubtitles()

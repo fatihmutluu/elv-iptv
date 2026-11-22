@@ -4,6 +4,7 @@ import Foundation
 public enum VideoScaleMode: Equatable, Sendable {
   case fit
   case fill
+  case stretch
 }
 
 /// Pure 2D size in view points or coded pixels.
@@ -115,6 +116,8 @@ public enum SubtitleLayout {
     }
     let scale: Double
     switch scaleMode {
+    case .stretch:
+      return bounds
     case .fill:
       scale = max(bounds.width / videoSize.width, bounds.height / videoSize.height)
     case .fit:

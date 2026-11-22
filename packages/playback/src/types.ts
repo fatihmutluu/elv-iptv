@@ -70,6 +70,11 @@ export interface PlaybackService {
   pause(): void;
   /** Seeks; disarms the stall watchdog and any active VOD reconnect backoff, and updates `anchor` immediately. */
   seek(positionMs: number): void;
+  /**
+   * Seeks a lagging live MPEG-TS stream to `Math.max(0, liveEdgeMs - 3_000)` (`#141`).
+   * Strictly a no-op returning `false` for HLS, VOD, missing `liveEdgeMs`, or streams already within 4 s of live edge.
+   */
+  jumpToLiveEdge(): boolean;
   /** Toggles VOD scrubbing mode on the underlying engine when supported (`#222`). */
   setScrubbing?(scrubbing: boolean): void;
   /** Sets playback speed (clamped to `[0.25, 4.0]`), coalescing across active seeks and in-flight transitions. */

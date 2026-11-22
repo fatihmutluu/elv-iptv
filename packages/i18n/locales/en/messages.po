@@ -1118,3 +1118,39 @@ msgstr "Reconnect"
 
 msgid "desktop.catalogDisconnected.reconnecting"
 msgstr "Reconnecting…"
+
+msgid "player.aspect.stretch"
+msgstr "Stretch"
+
+msgid "player.jumpToLive"
+msgstr "Jump to live"
+
+msgid "sources.cachedCatalog.banner"
+msgstr "Showing cached catalog — provider refresh failed"
+
+msgid "sources.cachedCatalog.retry"
+msgstr "Check again"
+
+msgid "sources.cachedCatalog.retrying"
+msgstr "Checking…"
+
+msgid "player.connectionLimit.title"
+msgstr "Connection limit warning"
+
+msgid "player.connectionLimit.ownActiveBody"
+msgstr "Another stream is already playing in this app (limit {max}). Opening a new stream may interrupt playback or be rejected by your provider."
+
+msgid "player.connectionLimit.providerReportedBody"
+msgstr "The provider reports {active} active streams (limit {max})."
+
+msgid "player.connectionLimit.unknownBody"
+msgstr "This source allows up to {max} concurrent connections. Active connections on other devices could not be verified."
+
+msgid "player.connectionLimit.stopOther"
+msgstr "Stop other stream"
+
+msgid "player.connectionLimit.cancel"
+msgstr "Cancel"
+
+msgid "player.connectionLimit.continueAnyway"
+msgstr "Continue anyway"

@@ -106,7 +106,7 @@ struct EngineCoreTests {
     #expect(
       sink.events == [
         .state(attempt: 6, state: .playing),
-        .clock(attempt: 6, anchor: ClockAnchorOut(positionMs: 0, atMs: 1_000, rate: 1.0)),
+        .clock(attempt: 6, anchor: ClockAnchorOut(positionMs: 0, atMs: 1_000, rate: 1.0, isLiveTs: true)),
       ]
     )
   }
@@ -196,10 +196,10 @@ struct EngineCoreTests {
       sink.events == [
         .stall(attempt: 1, phase: .start, atMs: 1_300),
         .state(attempt: 1, state: .buffering),
-        .clock(attempt: 1, anchor: ClockAnchorOut(positionMs: 4_000, atMs: 1_300, rate: 0, liveEdgeMs: 4_000)),
+        .clock(attempt: 1, anchor: ClockAnchorOut(positionMs: 4_000, atMs: 1_300, rate: 0, liveEdgeMs: 4_000, isLiveTs: true)),
         .stall(attempt: 1, phase: .end, atMs: 1_800),
         .state(attempt: 1, state: .playing),
-        .clock(attempt: 1, anchor: ClockAnchorOut(positionMs: 4_000, atMs: 1_800, rate: 1.0, liveEdgeMs: 4_000)),
+        .clock(attempt: 1, anchor: ClockAnchorOut(positionMs: 4_000, atMs: 1_800, rate: 1.0, liveEdgeMs: 4_000, isLiveTs: true)),
       ]
     )
   }
@@ -389,5 +389,56 @@ struct EngineCoreTests {
     core.observe(.progress(bytesReceived: nil, bufferedSeconds: 6.5), serial: 1)
     #expect(sink.events == [.progress(attempt: 3, bytesReceived: nil, atMs: 4_400)])
     #expect(sink.events[0].payload["bytesReceived"] == nil)
+  }
+
+  @Test("clock anchors emit isLiveTs strictly for liveTs plans and omit it for HLS and VOD (#141)")
+  func clockAnchorIsLiveTsFlag() {
+    let (core, _, sink, clock) = makeHarness()
+
+    // Live MPEG-TS plan sets isLiveTs = true on anchor and JS payload
+    core.load(LoadRequest(url: "http://h:7878/live/demo/demo/1001.ts", live: true), attempt: 1)
+    core.observe(.firstFrame, serial: 1)
+    core.observe(.phase(.playing), serial: 1)
+    sink.events.removeAll()
+    clock.nowMs = 2_000
+    core.observe(.clock(positionSeconds: 10.0, rate: 1.0, durationSeconds: nil, liveEdgeSeconds: 30.0), serial: 1)
+    #expect(
+      sink.events == [
+        .clock(
+          attempt: 1,
+          anchor: ClockAnchorOut(positionMs: 10_000, atMs: 2_000, rate: 1.0, liveEdgeMs: 30_000, isLiveTs: true)
+        ),
+      ]
+    )
+    let tsAnchorDict = sink.events[0].payload["anchor"] as? [String: Any]
+    #expect(tsAnchorDict?["isLiveTs"] as? Bool == true)
+
+    // Live HLS plan omits isLiveTs
+    core.load(LoadRequest(url: "http://h:7878/live/demo/demo/1001.m3u8", live: true), attempt: 2)
+    core.observe(.firstFrame, serial: 2)
+    core.observe(.phase(.playing), serial: 2)
+    sink.events.removeAll()
+    clock.nowMs = 4_000
+    core.observe(.clock(positionSeconds: 10.0, rate: 1.0, durationSeconds: nil, liveEdgeSeconds: 30.0), serial: 2)
+    #expect(
+      sink.events == [
+        .clock(
+          attempt: 2,
+          anchor: ClockAnchorOut(positionMs: 10_000, atMs: 4_000, rate: 1.0, liveEdgeMs: 30_000)
+        ),
+      ]
+    )
+    let hlsAnchorDict = sink.events[0].payload["anchor"] as? [String: Any]
+    #expect(hlsAnchorDict?["isLiveTs"] == nil)
+
+    // VOD plan omits isLiveTs
+    core.load(LoadRequest(url: "http://h:7878/movie/demo/demo/1.mp4", live: false), attempt: 3)
+    core.observe(.firstFrame, serial: 3)
+    core.observe(.phase(.playing), serial: 3)
+    sink.events.removeAll()
+    clock.nowMs = 6_000
+    core.observe(.clock(positionSeconds: 10.0, rate: 1.0, durationSeconds: 120.0, liveEdgeSeconds: nil), serial: 3)
+    let vodAnchorDict = sink.events[0].payload["anchor"] as? [String: Any]
+    #expect(vodAnchorDict?["isLiveTs"] == nil)
   }
 }

@@ -178,7 +178,8 @@ extension EngineCore {
       atMs: atMs,
       rate: rate,
       durationMs: lastDurationSeconds.map { $0 * 1_000.0 },
-      liveEdgeMs: lastLiveEdgeSeconds.map { $0 * 1_000.0 }
+      liveEdgeMs: lastLiveEdgeSeconds.map { $0 * 1_000.0 },
+      isLiveTs: (currentPlan?.isLiveTs == true) ? true : nil
     )
     emit(.clock(attempt: token, anchor: anchor))
   }

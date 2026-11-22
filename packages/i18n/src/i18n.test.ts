@@ -737,4 +737,41 @@ describe('@elv/i18n', () => {
       expect(tr.t(id)).toBe(expectedTr);
     }
   });
+
+  it('localizes Wave P1 cached-catalog, connection-limit, stretch aspect, and live-edge jump strings (#87, #141, #151)', () => {
+    const en = createAppI18n('en');
+    const tr = createAppI18n('tr');
+    const cases: ReadonlyArray<readonly [MessageId, string, string]> = [
+      ['player.aspect.stretch', 'Stretch', 'Uzat'],
+      ['player.jumpToLive', 'Jump to live', 'Canlı uca atla'],
+      [
+        'sources.cachedCatalog.banner',
+        'Showing cached catalog — provider refresh failed',
+        'Önbellekteki katalog gösteriliyor — sağlayıcı yenilemesi başarısız oldu',
+      ],
+      ['sources.cachedCatalog.retry', 'Check again', 'Tekrar kontrol et'],
+      ['sources.cachedCatalog.retrying', 'Checking…', 'Kontrol ediliyor…'],
+      ['player.connectionLimit.title', 'Connection limit warning', 'Bağlantı sınırı uyarısı'],
+      ['player.connectionLimit.stopOther', 'Stop other stream', 'Diğer yayını durdur'],
+      ['player.connectionLimit.cancel', 'Cancel', 'İptal'],
+      ['player.connectionLimit.continueAnyway', 'Continue anyway', 'Yine de devam et'],
+    ];
+    for (const [id, expectedEn, expectedTr] of cases) {
+      expect(en.t(id)).toBe(expectedEn);
+      expect(tr.t(id)).toBe(expectedTr);
+    }
+
+    expect(en.t('player.connectionLimit.ownActiveBody', { max: 1 })).toContain(
+      'Another stream is already playing in this app',
+    );
+    expect(tr.t('player.connectionLimit.ownActiveBody', { max: 1 })).toContain('(sınır 1)');
+    expect(en.t('player.connectionLimit.providerReportedBody', { active: 2, max: 2 })).toBe(
+      'The provider reports 2 active streams (limit 2).',
+    );
+    expect(tr.t('player.connectionLimit.providerReportedBody', { active: 2, max: 2 })).toBe(
+      'Sağlayıcı 2 etkin yayın bildiriyor (sınır 2).',
+    );
+    expect(en.t('player.connectionLimit.unknownBody', { max: 3 })).toContain('3');
+    expect(tr.t('player.connectionLimit.unknownBody', { max: 3 })).toContain('3');
+  });
 });

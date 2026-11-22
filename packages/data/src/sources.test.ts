@@ -4,6 +4,8 @@ import {
   addM3uSource,
   addXtreamSource,
   getSource,
+  normalizeActiveConnections,
+  normalizeMaxConnections,
   removeSecrets,
   removeSource,
   secretKey,
@@ -496,5 +498,40 @@ describe('table coverage and secret removal', () => {
 
     expect((await removeSecrets('src1', s.secrets)).ok).toBe(true);
     expect(s.secrets.dump()).toEqual({});
+  });
+});
+
+describe('connection limit normalization (#87)', () => {
+  it('coerces 0, empty, negative, non-numeric, and missing maxConnections values to 1', () => {
+    expect(normalizeMaxConnections(undefined)).toBe(1);
+    expect(normalizeMaxConnections(null)).toBe(1);
+    expect(normalizeMaxConnections('')).toBe(1);
+    expect(normalizeMaxConnections('   ')).toBe(1);
+    expect(normalizeMaxConnections(0)).toBe(1);
+    expect(normalizeMaxConnections('0')).toBe(1);
+    expect(normalizeMaxConnections(-3)).toBe(1);
+    expect(normalizeMaxConnections('-2')).toBe(1);
+    expect(normalizeMaxConnections('unlimited')).toBe(1);
+    expect(normalizeMaxConnections('3abc')).toBe(1);
+    expect(normalizeMaxConnections(Number.NaN)).toBe(1);
+    expect(normalizeMaxConnections(Number.POSITIVE_INFINITY)).toBe(1);
+    expect(normalizeMaxConnections(1)).toBe(1);
+    expect(normalizeMaxConnections('1')).toBe(1);
+    expect(normalizeMaxConnections(3)).toBe(3);
+    expect(normalizeMaxConnections(' 4 ')).toBe(4);
+    expect(normalizeMaxConnections(2.9)).toBe(2);
+  });
+
+  it('normalizes optional provider activeConnections without inventing counts when absent', () => {
+    expect(normalizeActiveConnections(undefined)).toBeUndefined();
+    expect(normalizeActiveConnections(null)).toBeUndefined();
+    expect(normalizeActiveConnections('')).toBeUndefined();
+    expect(normalizeActiveConnections('abc')).toBeUndefined();
+    expect(normalizeActiveConnections(-1)).toBeUndefined();
+    expect(normalizeActiveConnections(Number.NaN)).toBeUndefined();
+    expect(normalizeActiveConnections(0)).toBe(0);
+    expect(normalizeActiveConnections('0')).toBe(0);
+    expect(normalizeActiveConnections(2)).toBe(2);
+    expect(normalizeActiveConnections(' 3 ')).toBe(3);
   });
 });

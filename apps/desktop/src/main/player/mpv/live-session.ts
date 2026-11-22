@@ -4,7 +4,7 @@ import type { VideoPresenter } from '../presenter/types.ts';
 import { type AudioHotplug, createAudioHotplug } from './audio-hotplug.ts';
 import { MpvWedgedError } from './client.ts';
 import type { MpvCommand, MpvEvent, MpvReply } from './codec.ts';
-import { createDeriver, type Deriver } from './derive.ts';
+import { createDeriver, type Deriver, isLiveMpegTsUrl } from './derive.ts';
 import { createEntryTable, type EntryTable } from './entries.ts';
 import { createInputRepeatGate, type InputRepeatGate } from './input-repeat-gate.ts';
 import type { OpeningGate } from './opening-gate.ts';
@@ -138,7 +138,15 @@ export function createSessionController(hooks: LiveSessionHooks) {
     const current = L.entries.current();
     if (current?.entryId !== entryId) return;
     tracks.beginMedia(current.token);
-    const events = L.deriver.begin(current.token, current.kind);
+    const activeMedia = hooks.getMedia();
+    const slotUrl =
+      activeMedia?.entryId === entryId
+        ? activeMedia.request.url
+        : L.inFlight?.entryId === entryId
+          ? L.inFlight.request.url
+          : undefined;
+    const isLiveTs = current.kind === 'live' && slotUrl !== undefined && isLiveMpegTsUrl(slotUrl);
+    const events = L.deriver.begin(current.token, current.kind, isLiveTs);
     if (L.paused) events.push(...L.deriver.property('pause', true));
     if (isActive(L, entryId)) {
       const media = hooks.getMedia();

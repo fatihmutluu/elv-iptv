@@ -26,5 +26,13 @@ export {
   type XtreamLiveFormat,
   type XtreamLiveFormatProbeOptions,
 } from './xtream-probe';
+export {
+  clearXtreamSchemeCache,
+  getCachedXtreamScheme,
+  hasExplicitScheme,
+  resolveXtreamBaseUrl,
+  setCachedXtreamScheme,
+  type XtreamScheme,
+} from './xtream-scheme';
 export { streamXtreamRecords, type XtreamStreamParseOptions } from './xtream-stream';
 export type * from './xtream-types';

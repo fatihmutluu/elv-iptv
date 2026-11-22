@@ -27,10 +27,55 @@ export interface SourceHttpCache {
   guide?: Record<string, HttpCacheValidator>;
 }
 
-/** Non-secret Xtream account lifecycle metadata persisted for expiry/trial indicators (`#170`). */
+/** Non-secret Xtream account lifecycle metadata persisted for expiry/trial/connection indicators (`#170`, `#87`). */
 export interface SourceAccountMeta {
   isTrial?: boolean;
   expiresAt?: number;
+  /** Normalized maximum concurrent streams allowed by the source (`>= 1`, default `1`, `#87`). */
+  maxConnections?: number;
+  /** Last provider-reported active connection count when supplied by Xtream `user_info.active_cons` (`#87`). */
+  activeConnections?: number;
+}
+
+const STRICT_NUMERIC_RE = /^[+-]?\d+(?:\.\d+)?$/;
+
+/**
+ * Coerces a provider-reported `max_connections` value into a safe integer `>= 1` (`#87`).
+ * Missing, `0`, negative, empty, non-finite, or non-numeric values default conservatively to `1`
+ * (M3U sources also default to `1`).
+ */
+export function normalizeMaxConnections(raw: unknown): number {
+  let num: number;
+  if (typeof raw === 'number') {
+    num = raw;
+  } else if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!STRICT_NUMERIC_RE.test(trimmed)) return 1;
+    num = Number(trimmed);
+  } else {
+    return 1;
+  }
+  if (!Number.isFinite(num)) return 1;
+  return Math.max(1, Math.floor(num));
+}
+
+/**
+ * Parses an optional provider-reported `active_cons` count (`>= 0`) without ever guessing when
+ * missing, empty, negative, or non-numeric (`#87`).
+ */
+export function normalizeActiveConnections(raw: unknown): number | undefined {
+  let num: number;
+  if (typeof raw === 'number') {
+    num = raw;
+  } else if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!STRICT_NUMERIC_RE.test(trimmed)) return undefined;
+    num = Number(trimmed);
+  } else {
+    return undefined;
+  }
+  if (!Number.isFinite(num) || num < 0) return undefined;
+  return Math.floor(num);
 }
 
 /** Non-secret, per-source settings stored as JSON in the `sources` table. */

@@ -407,7 +407,13 @@ class Media3Engine : SharedObject {
     tracksBridge.applyInitialParameters(current)
     val serial = ++prepares
     val prepareGen = generation
-    reporter.begin(current, next.live, prepareSerial = serial, reused = !rebuild)
+    reporter.begin(
+      current,
+      next.live,
+      prepareSerial = serial,
+      reused = !rebuild,
+      isLiveTs = next.live && next.sourceType() == SourceType.TS,
+    )
     val transferListener = ProgressTransferListener(shouldReport = { reporter.isWaitingForMedia }) { bytes, atMs ->
       post { if (generation == prepareGen) reporter.onTransferProgress(bytes, atMs) }
     }

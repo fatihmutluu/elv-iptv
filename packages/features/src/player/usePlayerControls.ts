@@ -407,6 +407,9 @@ export function usePlayerControls(params: PlayerControlsParams) {
     seekStepForward: () => seekBy(STEP_SEEK_MS),
     seekToRatio,
     setBarScrubbing,
+    jumpToLiveEdge: () => {
+      serviceRef.current?.jumpToLiveEdge();
+    },
     selectAudio: (id: string) => serviceRef.current?.selectAudioTrack(id),
     selectSubtitle: (id: string | null) => serviceRef.current?.selectSubtitleTrack(id),
     selectSpeed,

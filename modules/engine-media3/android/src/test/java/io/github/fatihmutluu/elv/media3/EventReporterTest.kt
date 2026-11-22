@@ -495,4 +495,54 @@ class EventReporterTest {
       real.release()
     }
   }
+
+  @Test
+  fun `emits isLiveTs on clock anchors strictly for live MPEG-TS streams (#141)`() {
+    val events = mutableListOf<Map<String, Any?>>()
+    val real = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).setLooper(Looper.getMainLooper()).build()
+    try {
+      val player = ScriptedPlayer(real).apply {
+        state = Player.STATE_READY
+        playing = true
+        scriptedPosition = 10_000L
+        scriptedDuration = 30_000L
+      }
+      val reporter = EventReporter(
+        handler = Handler(Looper.getMainLooper()),
+        fence = PrepareFence(),
+        send = { events += it },
+        onHlsDetected = {},
+        onBehindLiveWindow = {},
+        onAudioFocusDenied = { false },
+        onVideoCodecFailed = {},
+        onFirstFrame = {},
+        onCue = { _, _ -> },
+      )
+
+      // Live MPEG-TS emits isLiveTs = true
+      reporter.begin(player, live = true, prepareSerial = 1L, reused = false, isLiveTs = true)
+      events.clear()
+      reporter.onEvents(player, eventsFlag(Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_IS_PLAYING_CHANGED))
+      val tsClock = events.first { it["type"] == "clock" }["anchor"] as Map<*, *>
+      assertEquals(true, tsClock["isLiveTs"])
+      assertEquals(30_000.0, tsClock["liveEdgeMs"])
+
+      // Live HLS omits isLiveTs
+      reporter.begin(player, live = true, prepareSerial = 2L, reused = false, isLiveTs = false)
+      events.clear()
+      reporter.onEvents(player, eventsFlag(Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_IS_PLAYING_CHANGED))
+      val hlsClock = events.first { it["type"] == "clock" }["anchor"] as Map<*, *>
+      assertFalse(hlsClock.containsKey("isLiveTs"))
+
+      // VOD omits isLiveTs even if isLiveTs=true is accidentally passed
+      reporter.begin(player, live = false, prepareSerial = 3L, reused = false, isLiveTs = true)
+      events.clear()
+      reporter.onEvents(player, eventsFlag(Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_IS_PLAYING_CHANGED))
+      val vodClock = events.first { it["type"] == "clock" }["anchor"] as Map<*, *>
+      assertFalse(vodClock.containsKey("isLiveTs"))
+      reporter.end()
+    } finally {
+      real.release()
+    }
+  }
 }

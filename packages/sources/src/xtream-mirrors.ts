@@ -1,4 +1,5 @@
 import type { ElvError, HttpClient } from '@elv/domain';
+import { hasExplicitScheme, normalizeXtreamHostKey, resolveXtreamBaseUrl } from './xtream-scheme';
 
 const DEFAULT_COOLDOWN_429_MS = 60_000;
 const MIN_RETRY_AFTER_MS = 1_000;
@@ -77,18 +78,64 @@ export function recordAccountCooldown(
   }
 }
 
-/** Deduplicates `[primary, ...backupServers]` after normalizing each non-blank entry. */
-export function buildServerList(
-  primary: string,
+/** Normalized server slot retaining whether the caller supplied an explicit scheme. */
+export interface XtreamServerEntry {
+  readonly raw: string;
+  readonly hostKey: string;
+  readonly explicitScheme: boolean;
+}
+
+/** Deduplicates `[primary, ...backupServers]` while preserving explicit schemes and scheme-less probing. */
+export function buildServerEntries(
+  primaryRaw: string,
   backups: readonly string[] | undefined,
-  normalize: (server: string) => string,
-): string[] {
-  const out = [primary];
+): XtreamServerEntry[] {
+  const primaryTrimmed = primaryRaw.trim();
+  const primaryExplicit = hasExplicitScheme(primaryTrimmed);
+  const primaryExplicitScheme = primaryExplicit
+    ? primaryTrimmed.slice(0, primaryTrimmed.indexOf('://') + 3).toLowerCase()
+    : undefined;
+
+  const toEntry = (raw: string, isPrimary: boolean): XtreamServerEntry => {
+    const trimmed = raw.trim();
+    if (hasExplicitScheme(trimmed)) {
+      return {
+        raw: resolveXtreamBaseUrl(trimmed),
+        hostKey: normalizeXtreamHostKey(trimmed),
+        explicitScheme: true,
+      };
+    }
+    if (!isPrimary && primaryExplicitScheme !== undefined) {
+      const inherited = `${primaryExplicitScheme}${trimmed}`;
+      return {
+        raw: resolveXtreamBaseUrl(inherited),
+        hostKey: normalizeXtreamHostKey(trimmed),
+        explicitScheme: true,
+      };
+    }
+    return {
+      raw: trimmed,
+      hostKey: normalizeXtreamHostKey(trimmed),
+      explicitScheme: false,
+    };
+  };
+
+  const dedupKey = (entry: XtreamServerEntry): string =>
+    entry.explicitScheme ? entry.raw : resolveXtreamBaseUrl(entry.raw);
+
+  const primaryEntry = toEntry(primaryTrimmed, true);
+  const out: XtreamServerEntry[] = [primaryEntry];
+  const seen = new Set<string>([dedupKey(primaryEntry)]);
+
   if (backups === undefined) return out;
   for (const raw of backups) {
     if (raw.trim().length === 0) continue;
-    const normalized = normalize(raw);
-    if (normalized.length > 0 && !out.includes(normalized)) out.push(normalized);
+    const entry = toEntry(raw, false);
+    const key = dedupKey(entry);
+    if (key.length > 0 && !seen.has(key)) {
+      seen.add(key);
+      out.push(entry);
+    }
   }
   return out;
 }

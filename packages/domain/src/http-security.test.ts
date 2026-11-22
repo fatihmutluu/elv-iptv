@@ -276,4 +276,120 @@ describe('createFetchHttpClient security invariants', () => {
     });
     expect(cancelled).toBe(true);
   });
+
+  it('echoes same-origin 302 Set-Cookie headers across redirects, merges with caller Cookie, and never leaks cross-origin or Secure over http (#171)', async () => {
+    const seen: Array<{ url: string; headers?: Record<string, string> }> = [];
+    const fetchImpl: FetchLike = async (url, init) => {
+      seen.push({ url, ...(init.headers ? { headers: { ...init.headers } } : {}) });
+      if (url === 'https://origin.example/live/start') {
+        return {
+          status: 302,
+          headers: {
+            forEach(cb) {
+              cb('https://origin.example/live/hop1', 'Location');
+            },
+            getSetCookie: () => [
+              'edge=tok1; Path=/live; Secure',
+              'sid=updated; Path=/; Domain=.example',
+            ],
+          },
+          body: emptyBody(),
+        };
+      }
+      if (url === 'https://origin.example/live/hop1') {
+        return {
+          status: 302,
+          headers: headersOf({
+            Location: 'https://cdn.example/media/step1',
+          }),
+          body: emptyBody(),
+        };
+      }
+      if (url === 'https://cdn.example/media/step1') {
+        return {
+          status: 302,
+          headers: {
+            forEach(cb) {
+              cb('https://cdn.example/media/step2', 'Location');
+            },
+            get(name) {
+              if (name.toLowerCase() === 'set-cookie') {
+                return 'cdn_s=abc; Expires=Wed, 21 Oct 2030 07:28:00 GMT; Path=/media, cdn_f=1; Path=/';
+              }
+              return null;
+            },
+          },
+          body: emptyBody(),
+        };
+      }
+      if (url === 'https://cdn.example/media/step2') {
+        return {
+          status: 302,
+          headers: headersOf({ Location: 'https://origin.example/live/bounce' }),
+          body: emptyBody(),
+        };
+      }
+      return { status: 200, headers: headersOf({}), body: emptyBody() };
+    };
+
+    const res = await createFetchHttpClient(fetchImpl).get('https://origin.example/live/start', {
+      headers: {
+        Authorization: 'Bearer secret',
+        Cookie: 'caller=keep; sid=old',
+        'User-Agent': 'ELV/1.0',
+      },
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) await res.value.body[Symbol.asyncIterator]().return?.();
+
+    expect(seen).toHaveLength(5);
+    // Hop 1 (same origin): caller Cookie merged with Set-Cookie (jar overrides sid, keeps caller=keep, adds edge=tok1)
+    expect(seen[1]?.headers?.Authorization).toBe('Bearer secret');
+    expect(seen[1]?.headers?.Cookie).toBe('caller=keep; edge=tok1; sid=updated');
+    // Hop 2 (cross origin to cdn.example): Authorization + caller Cookie + origin jar cookies ALL stripped
+    expect(seen[2]?.headers).toEqual({ 'User-Agent': 'ELV/1.0' });
+    // Hop 3 (same origin on cdn.example): receives ONLY cdn.example's Set-Cookie (via get('set-cookie') fallback!)
+    expect(seen[3]?.headers).toEqual({
+      'User-Agent': 'ELV/1.0',
+      Cookie: 'cdn_s=abc; cdn_f=1',
+    });
+    // Hop 4 (bounce back to origin.example): caller Authorization stays stripped, cdn cookies NEVER leak, origin jar cookies apply
+    expect(seen[4]?.headers?.Authorization).toBeUndefined();
+    expect(seen[4]?.headers?.Cookie).toBe('edge=tok1; sid=updated');
+  });
+
+  it('never leaks Secure cookies on https-to-http redirect downgrade or http Set-Cookie (#171)', async () => {
+    const seen: Array<{ url: string; headers?: Record<string, string> }> = [];
+    const fetchImpl: FetchLike = async (url, init) => {
+      seen.push({ url, ...(init.headers ? { headers: { ...init.headers } } : {}) });
+      if (url === 'https://origin.example/start') {
+        return {
+          status: 302,
+          headers: headersOf({
+            Location: 'http://origin.example/downgraded',
+            'Set-Cookie': 'sec=secret; Path=/; Secure',
+          }),
+          body: emptyBody(),
+        };
+      }
+      if (url === 'http://origin.example/downgraded') {
+        return {
+          status: 302,
+          headers: headersOf({
+            Location: 'http://origin.example/final',
+            'Set-Cookie': 'http_sec=no; Path=/; Secure, plain=yes; Path=/',
+          }),
+          body: emptyBody(),
+        };
+      }
+      return { status: 200, headers: headersOf({}), body: emptyBody() };
+    };
+
+    const res = await createFetchHttpClient(fetchImpl).get('https://origin.example/start');
+    expect(res.ok).toBe(true);
+    if (res.ok) await res.value.body[Symbol.asyncIterator]().return?.();
+
+    expect(seen[1]?.headers?.Cookie).toBeUndefined();
+    expect(seen[2]?.headers?.Cookie).toBe('plain=yes');
+  });
 });

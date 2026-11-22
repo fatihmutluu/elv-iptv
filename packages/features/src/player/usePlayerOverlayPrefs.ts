@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { VideoResizeMode } from '../ports/video-host';
 
 /**
  * Owns session-scoped player settings toggles (`resizeMode`, `statsVisible`), opt-in per-stream
@@ -12,7 +13,7 @@ export function usePlayerOverlayPrefs(params: {
   onSetOrientationLocked?: ((locked: boolean) => void) | undefined;
 }) {
   const { itemKey, hasService, onSetDeinterlace, onSetOrientationLocked } = params;
-  const [resizeMode, setResizeMode] = useState<'fit' | 'fill'>('fit');
+  const [resizeMode, setResizeMode] = useState<VideoResizeMode>('fit');
   const [deinterlace, setDeinterlace] = useState(false);
   const [statsVisible, setStatsVisible] = useState(false);
 
@@ -49,7 +50,8 @@ export function usePlayerOverlayPrefs(params: {
     setDeinterlace(false);
   }, [itemKey]);
 
-  const toggleResizeMode = (): void => setResizeMode((prev) => (prev === 'fit' ? 'fill' : 'fit'));
+  const toggleResizeMode = (): void =>
+    setResizeMode((prev) => (prev === 'fit' ? 'fill' : prev === 'fill' ? 'stretch' : 'fit'));
   const toggleDeinterlace = (): void => {
     if (onSetDeinterlaceRef.current === undefined) return;
     const next = !deinterlaceRef.current;

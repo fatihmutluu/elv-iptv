@@ -38,6 +38,17 @@ export {
   type UseCatalogPrewarmOptions,
   useCatalogPrewarm,
 } from './useCatalogPrewarm';
+export {
+  type ConnectionLimitGuard,
+  type PendingConnectionPrompt,
+  type UseConnectionLimitGuardOptions,
+  useConnectionLimitGuard,
+} from './useConnectionLimitGuard';
+export {
+  type ImportHealthState,
+  type UseImportHealthOptions,
+  useImportHealth,
+} from './useImportHealth';
 export { type UseShellFlushOptions, useShellFlush } from './useShellFlush';
 export {
   type ShellSourcesState,

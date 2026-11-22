@@ -282,9 +282,12 @@ extension AetherBackend {
     let label = track.name.trimmingCharacters(in: .whitespacesAndNewlines)
     let codec = track.codec.trimmingCharacters(in: .whitespacesAndNewlines)
     let cleanLabel = label.isEmpty ? nil : label
+    let normalizedLang = normalizeTrackLanguage(track.language)
+    let resolvedLang = (canonicalTrackLanguage(normalizedLang) != nil ? normalizedLang : nil)
+      ?? extractTrackLanguageFromLabel(cleanLabel)
     return TrackInfoOut(
       id: id,
-      language: normalizeTrackLanguage(track.language) ?? extractTrackLanguageFromLabel(cleanLabel),
+      language: resolvedLang,
       label: cleanLabel,
       codec: codec.isEmpty ? nil : codec,
       channels: (isAudio && track.channels > 0) ? track.channels : nil,

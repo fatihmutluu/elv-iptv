@@ -126,7 +126,7 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
     }
   }
 
-  /** The `resizeMode` prop: `fit` (default) or `fill`. */
+  /** The `resizeMode` prop: `fit` (default), `fill`, or `stretch` (#151). */
   fun setResizeMode(name: String?) {
     val next = ResizeMode.of(name)
     if (next == fit.mode) return

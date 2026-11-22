@@ -1118,3 +1118,39 @@ msgstr "Yeniden bağlan"
 
 msgid "desktop.catalogDisconnected.reconnecting"
 msgstr "Yeniden bağlanıyor…"
+
+msgid "player.aspect.stretch"
+msgstr "Uzat"
+
+msgid "player.jumpToLive"
+msgstr "Canlı uca atla"
+
+msgid "sources.cachedCatalog.banner"
+msgstr "Önbellekteki katalog gösteriliyor — sağlayıcı yenilemesi başarısız oldu"
+
+msgid "sources.cachedCatalog.retry"
+msgstr "Tekrar kontrol et"
+
+msgid "sources.cachedCatalog.retrying"
+msgstr "Kontrol ediliyor…"
+
+msgid "player.connectionLimit.title"
+msgstr "Bağlantı sınırı uyarısı"
+
+msgid "player.connectionLimit.ownActiveBody"
+msgstr "Bu uygulamada zaten başka bir yayın oynatılıyor (sınır {max}). Yeni bir yayın açmak oynatmayı kesintiye uğratabilir veya sağlayıcınız tarafından reddedilebilir."
+
+msgid "player.connectionLimit.providerReportedBody"
+msgstr "Sağlayıcı {active} etkin yayın bildiriyor (sınır {max})."
+
+msgid "player.connectionLimit.unknownBody"
+msgstr "Bu kaynak en fazla {max} eşzamanlı bağlantıya izin verir. Diğer cihazlardaki etkin bağlantılar doğrulanamadı."
+
+msgid "player.connectionLimit.stopOther"
+msgstr "Diğer yayını durdur"
+
+msgid "player.connectionLimit.cancel"
+msgstr "İptal"
+
+msgid "player.connectionLimit.continueAnyway"
+msgstr "Yine de devam et"

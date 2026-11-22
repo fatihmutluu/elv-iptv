@@ -4,8 +4,8 @@ import type { DesktopEngine } from './desktop-engine.ts';
 /** Props of {@link PlayerCanvas}. */
 export interface PlayerCanvasProps {
   engine: DesktopEngine;
-  /** Picture scaling mode (`fit` letterboxed, `fill` cropped to cover). */
-  resizeMode?: 'fit' | 'fill';
+  /** Picture scaling mode (`fit` letterboxed, `fill` cropped to cover, `stretch` fills bounds ignoring aspect). */
+  resizeMode?: 'fit' | 'fill' | 'stretch';
   /** When `false`, incoming frames are closed without drawing and the canvas is cleared. */
   visible: boolean;
 }
@@ -73,7 +73,7 @@ export function PlayerCanvas({
         height: '100%',
         display: 'block',
         pointerEvents: 'none',
-        objectFit: resizeMode === 'fill' ? 'cover' : 'contain',
+        objectFit: resizeMode === 'fill' ? 'cover' : resizeMode === 'stretch' ? 'fill' : 'contain',
         opacity: visible ? 1 : 0,
       }}
     />

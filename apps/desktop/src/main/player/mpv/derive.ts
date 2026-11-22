@@ -5,10 +5,25 @@ import { createMpvTelemetry, type MpvTelemetry } from './telemetry.ts';
 
 const MAX_LOG_LINES = 50;
 
+/** Returns whether a live stream URL is raw MPEG-TS rather than an HLS/DASH manifest (`#141`). */
+export function isLiveMpegTsUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname.toLowerCase();
+    if (path.endsWith('.m3u8') || path.endsWith('.m3u') || path.endsWith('.mpd')) return false;
+    const output = parsed.searchParams.get('output')?.toLowerCase();
+    const type = parsed.searchParams.get('type')?.toLowerCase();
+    if (output === 'm3u8' || output === 'hls' || type === 'm3u8' || type === 'hls') return false;
+    return true;
+  } catch {
+    return !/\.m3u8?(?:[?#]|$)/i.test(url);
+  }
+}
+
 /** Turns mpv property changes and file events of one media at a time into token-tagged port events. */
 export interface Deriver {
   /** Starts a new media (call on its `start-file`); drops the previous media's state and logs. Returns `opening`. */
-  begin(token: AttemptToken, kind: MediaKind): EngineEvent[];
+  begin(token: AttemptToken, kind: MediaKind, isLiveTs?: boolean): EngineEvent[];
   /** Tags the current media's later events with a newer token. */
   adopt(token: AttemptToken): void;
   /** Applies one observed property value; `undefined` or `null` means unavailable. */
@@ -24,6 +39,7 @@ export interface Deriver {
 interface Media {
   token: AttemptToken;
   kind: MediaKind;
+  isLiveTs: boolean;
   logs: MpvLogLine[];
   state: EngineState;
   loaded: boolean;
@@ -82,6 +98,9 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
     }
     if (media.kind === 'live' && media.cacheEnd !== undefined) {
       a.liveEdgeMs = Math.max(0, Math.round(media.cacheEnd * 1000)) + 0;
+    }
+    if (media.kind === 'live' && media.isLiveTs) {
+      a.isLiveTs = true;
     }
     return [ev(media, { type: 'clock', anchor: a })];
   };
@@ -231,16 +250,27 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
         const progress = media.telemetry.onCacheDuration(value, opts.now(), isWaiting(media));
         return progress ? [ev(media, progress)] : [];
       }
+      case 'file-format': {
+        if (media.kind !== 'live' || typeof value !== 'string') return [];
+        const formats = value.toLowerCase().split(',');
+        if (formats.some((f) => f === 'hls' || f === 'dash')) {
+          media.isLiveTs = false;
+        } else if (formats.includes('mpegts')) {
+          media.isLiveTs = true;
+        }
+        return [];
+      }
       default:
         return [];
     }
   };
 
   return {
-    begin(token, kind) {
+    begin(token, kind, isLiveTs = false) {
       m = {
         token,
         kind,
+        isLiveTs: kind === 'live' && isLiveTs,
         logs: [],
         state: 'opening',
         loaded: false,

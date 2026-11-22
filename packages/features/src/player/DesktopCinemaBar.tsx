@@ -4,7 +4,7 @@ import { Icon, MicroPill, useTheme, webBackdropBlur } from '@elv/ui-kit';
 import type { ReactElement } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { DescribedPlaybackFailure } from './errors';
-import { OsdButton, OsdClock, PLAYER_KEY_SHORTCUTS } from './PlayerOsdButton';
+import { JumpToLiveButton, OsdButton, OsdClock, PLAYER_KEY_SHORTCUTS } from './PlayerOsdButton';
 import { formatPlaybackSpeed, type SettingsMenuView } from './settings-menu-nav';
 import type { TvOsdAction } from './usePlayerControls';
 import { VodProgressBar } from './VodProgressBar';
@@ -50,6 +50,7 @@ export interface PlayerOsdProps {
   onToggleFullscreen?: () => void;
   onLock?: () => void;
   onJumpPreviousChannel?: () => void;
+  onJumpToLiveEdge?: () => void;
   onPrev: () => void;
   onNext: () => void;
   onRetry: () => void;
@@ -259,6 +260,15 @@ export function DesktopCinemaBar(p: PlayerOsdProps): ReactElement {
         </View>
 
         <View style={styles.rightCluster}>
+          <JumpToLiveButton
+            isVod={isVod}
+            service={service}
+            clock={p.clock}
+            i18n={i18n}
+            isTv={false}
+            compact
+            {...(p.onJumpToLiveEdge !== undefined ? { onPress: p.onJumpToLiveEdge } : {})}
+          />
           <OsdClock service={service} clock={p.clock} previewPositionMs={p.previewPositionMs} />
           {p.hasTracks && service !== null ? (
             <OsdButton

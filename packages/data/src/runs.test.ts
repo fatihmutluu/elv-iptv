@@ -1,8 +1,10 @@
 import type { Result } from '@elv/domain';
 import { describe, expect, it } from 'vitest';
+import { createCatalogService } from './catalog';
+import { sampleCatalog, setup as setupPanel } from './import-test-helpers';
 import { DEFAULT_BATCH_SIZE } from './import-types';
 import { openCatalog } from './migrate';
-import { finishRun, reapOrphanedRuns, removeStale, startRun } from './runs';
+import { finishRun, latestImportHealth, reapOrphanedRuns, removeStale, startRun } from './runs';
 import { testDb } from './test-db';
 
 async function id(r: Promise<Result<number>>): Promise<number> {
@@ -279,5 +281,117 @@ describe('runs', () => {
   it('refuses tables that are not run-scoped', async () => {
     const { db } = await fresh();
     await expect(removeStale(db, 's1', 1, ['sources'])).rejects.toThrow();
+  });
+
+  it('reports latestImportHealth only when the latest catalog run failed while cached items remain (#141)', async () => {
+    const { db } = await fresh();
+
+    // No runs yet -> empty
+    expect(await latestImportHealth(db)).toEqual([]);
+
+    // First run failed with no cached items -> not reported as cached-catalog failure
+    const r1 = await id(startRun(db, 's1', 'catalog', 100));
+    await finishRun(
+      db,
+      r1,
+      { status: 'failed', error: { category: 'network', code: 'http-503' } },
+      110,
+    );
+    expect(await latestImportHealth(db)).toEqual([]);
+
+    // Second run succeeds and writes a cached live channel
+    const r2 = await id(startRun(db, 's1', 'catalog', 200));
+    await db.run(
+      "INSERT INTO live (source_id, key, name, name_fold, run_id) VALUES ('s1', 's1:live:1', 'News 1', 'news 1', ?)",
+      [r2],
+    );
+    await finishRun(db, r2, { status: 'ok', counts: { live: 1 } }, 210);
+    expect(await latestImportHealth(db)).toEqual([]);
+
+    // Third run fails -> cached live row remains untouched, latestImportHealth reports s1
+    const r3 = await id(startRun(db, 's1', 'catalog', 300));
+    await finishRun(
+      db,
+      r3,
+      { status: 'failed', error: { category: 'network', code: 'timeout' } },
+      350,
+    );
+    expect(await latestImportHealth(db)).toEqual([
+      {
+        sourceId: 's1',
+        status: 'failed',
+        errorCategory: 'network',
+        errorCode: 'timeout',
+        finishedAt: 350,
+        hasCachedItems: true,
+      },
+    ]);
+    expect(await latestImportHealth(db, 's1')).toHaveLength(1);
+    expect(await latestImportHealth(db, 's2')).toEqual([]);
+
+    // Fourth run recovers -> healthy again
+    const r4 = await id(startRun(db, 's1', 'catalog', 400));
+    await finishRun(db, r4, { status: 'ok', counts: { live: 1 } }, 410);
+    expect(await latestImportHealth(db)).toEqual([]);
+  });
+
+  it('CatalogService persists maxConnections/activeConnections and preserves cached rows on failed refresh (#87, #141)', async () => {
+    const data = sampleCatalog();
+    data.user = {
+      auth: 1,
+      status: 'Active',
+      is_trial: '0',
+      max_connections: '3',
+      active_cons: '1',
+      allowed_output_formats: ['ts'],
+    };
+    const panel = await setupPanel(data);
+    let failRefresh = false;
+    const baseHttp = panel.panel.http;
+    const service = createCatalogService({
+      db: panel.db,
+      secrets: panel.secrets,
+      scheduler: panel.scheduler,
+      http: {
+        get: async (url, opts) =>
+          failRefresh
+            ? { ok: false, error: { category: 'network', code: 'http-503' } }
+            : baseHttp.get(url, opts),
+      },
+      clock: () => 5_000,
+    });
+    const added = await service.addSource({
+      kind: 'xtream',
+      name: 'Conn Panel',
+      server: 'http://panel.example:8080',
+      username: 'u',
+      password: 'p',
+    });
+    if (!added.ok) throw new Error('add failed');
+    const sid = added.value.id;
+    expect((await service.importSource(sid)).ok).toBe(true);
+    expect((await service.listSources()).find((s) => s.id === sid)?.accountMeta).toEqual({
+      isTrial: false,
+      maxConnections: 3,
+      activeConnections: 1,
+    });
+    expect(await service.latestImportHealth?.(sid)).toEqual([]);
+    const catsBefore = await service.categories(sid, 'live');
+    expect(catsBefore.length).toBeGreaterThan(0);
+
+    failRefresh = true;
+    expect((await service.importSource(sid)).ok).toBe(false);
+    expect(await service.categories(sid, 'live')).toEqual(catsBefore);
+    expect(await service.latestImportHealth?.(sid)).toEqual([
+      {
+        sourceId: sid,
+        status: 'failed',
+        errorCategory: 'network',
+        errorCode: 'http-503',
+        finishedAt: 5_000,
+        hasCachedItems: true,
+      },
+    ]);
+    await service.close();
   });
 });

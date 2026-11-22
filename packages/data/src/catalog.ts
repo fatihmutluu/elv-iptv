@@ -40,6 +40,7 @@ import {
   querySeries,
   type SeasonRow,
 } from './queries';
+import { latestImportHealth, type SourceImportHealth } from './runs';
 import { querySearch, type SearchOptions, type SearchResults } from './search';
 import { addSourceFromLink, type LinkSourceInput } from './source-link';
 import {
@@ -47,6 +48,8 @@ import {
   addXtreamSource,
   getSource,
   type M3uSourceInput,
+  normalizeActiveConnections,
+  normalizeMaxConnections,
   removeSource,
   type SourceAccountMeta,
   type SourceKind,
@@ -132,6 +135,7 @@ export interface CatalogService {
   importSource(id: string, opts?: DeviceImportOptions): Promise<Result<ImportSummary>>;
   importGuide?(sourceId: string, opts?: ImportOptions): Promise<Result<ImportSummary>>;
   listSources(): Promise<SourceRow[]>;
+  latestImportHealth?(sourceId?: string): Promise<SourceImportHealth[]>;
   categories(sourceId: string, kind: BrowseKind): Promise<CategoryRow[]>;
   items(categoryId: string, offset: number, limit: number): Promise<ItemRow[]>;
   allSourcesItems?(
@@ -189,7 +193,19 @@ function parseSourceMeta(
       if (typeof meta.expiresAt === 'number' && Number.isFinite(meta.expiresAt)) {
         accountMeta.expiresAt = meta.expiresAt;
       }
-      if (accountMeta.isTrial !== undefined || accountMeta.expiresAt !== undefined) {
+      if ('maxConnections' in meta && meta.maxConnections !== undefined) {
+        accountMeta.maxConnections = normalizeMaxConnections(meta.maxConnections);
+      }
+      if ('activeConnections' in meta && meta.activeConnections !== undefined) {
+        const active = normalizeActiveConnections(meta.activeConnections);
+        if (active !== undefined) accountMeta.activeConnections = active;
+      }
+      if (
+        accountMeta.isTrial !== undefined ||
+        accountMeta.expiresAt !== undefined ||
+        accountMeta.maxConnections !== undefined ||
+        accountMeta.activeConnections !== undefined
+      ) {
         out.accountMeta = accountMeta;
       }
     }
@@ -325,6 +341,8 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
         ...parseSourceMeta(r.settings_json),
       }));
     },
+
+    latestImportHealth: (sourceId) => latestImportHealth(db, sourceId),
 
     categories: (sourceId, kind) => queryCategories(db, sourceId, kind),
 

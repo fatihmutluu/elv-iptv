@@ -118,6 +118,7 @@ describe('CatalogService in @elv/data', () => {
       value: {
         url: `http://cdn.example/${tok}/live/1.ts`,
         accountKey: id,
+        maxConnections: 1,
         headers: {
           'user-agent': 'CustomUA/2.0',
           referer: `http://ref.example/${tok}/home`,
@@ -135,6 +136,7 @@ describe('CatalogService in @elv/data', () => {
       value: {
         url: `http://cdn.example/${tok}/vod/10.mkv`,
         accountKey: id,
+        maxConnections: 1,
         headers: {
           'user-agent': 'MovieUA/1.0',
           cookie: 'sid=secret-cookie-88',
@@ -154,6 +156,7 @@ describe('CatalogService in @elv/data', () => {
       value: {
         url: `http://cdn.example/${tok}/series/20.mp4`,
         accountKey: id,
+        maxConnections: 1,
         headers: {
           'user-agent': 'SeriesUA/3.0',
           'x-auth-token': 'ep-token-77',
@@ -216,7 +219,12 @@ describe('CatalogService in @elv/data', () => {
     const refreshed = await service.resolveStream(listed[0]?.key ?? '');
     expect(refreshed).toEqual({
       ok: true,
-      value: { url: `http://cdn.example/${segB}/live/1.ts`, headers: {}, accountKey: 's1' },
+      value: {
+        url: `http://cdn.example/${segB}/live/1.ts`,
+        headers: {},
+        accountKey: 's1',
+        maxConnections: 1,
+      },
     });
   });
 

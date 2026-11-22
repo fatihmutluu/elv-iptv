@@ -101,6 +101,8 @@ export interface ClockAnchor {
   rate: number;
   durationMs?: number;
   liveEdgeMs?: number;
+  /** Whether the active live stream is raw MPEG-TS (eligible for live-edge jump, `#141`; never HLS/VOD). */
+  isLiveTs?: boolean;
   /** Cumulative rendered/decoded video frames reported by the engine for black-screen detection (`#321`). */
   decodedVideoFrames?: number;
   /** Whether the active media declares a video track (distinguishes radio/audio-only from black screen). */

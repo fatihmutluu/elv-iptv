@@ -18,11 +18,12 @@ import {
 import {
   accountCooldownKey,
   buildAttemptOrder,
-  buildServerList,
+  buildServerEntries,
   isAccountCoolingDown,
   isFailoverEligible,
   parseRetryAfterMs,
   recordAccountCooldown,
+  type XtreamServerEntry,
 } from './xtream-mirrors';
 import {
   isRaw,
@@ -36,6 +37,15 @@ import {
   toSeriesInfo,
   toVodInfo,
 } from './xtream-records';
+import {
+  buildXtreamBaseUrlWithScheme,
+  getCachedXtreamScheme,
+  isHttpResponseError,
+  isSchemeFallbackEligible,
+  resolveXtreamBaseUrl,
+  setCachedXtreamScheme,
+  stripXtreamTail,
+} from './xtream-scheme';
 import { streamXtreamRecords } from './xtream-stream';
 import type {
   XtreamCallOptions,
@@ -47,6 +57,7 @@ import type {
 export type * from './xtream-types';
 
 const TIMEOUT_MS = 60_000;
+const HTTPS_PROBE_TIMEOUT_MS = 8_000;
 const DEFAULT_MAX_BODY = 128 * 1024 * 1024;
 const DEFAULT_PRIMARY_COOLDOWN_MS = 300_000;
 const NUMERIC_KEY_RE = /^\d+$/;
@@ -66,11 +77,7 @@ async function discard(body: AsyncIterable<Uint8Array>): Promise<void> {
  */
 export function normalizeXtreamServer(server: string): string {
   const trimmed = server.trim();
-  return (trimmed.includes('://') ? trimmed : `http://${trimmed}`)
-    .replace(/[?#].*$/s, '')
-    .replace(/\/+$/, '')
-    .replace(/\/(?:player_api|get|xmltv)\.php$/i, '')
-    .replace(/\/+$/, '');
+  return stripXtreamTail(trimmed.includes('://') ? trimmed : `http://${trimmed}`);
 }
 
 /**
@@ -81,8 +88,7 @@ export function normalizeXtreamServer(server: string): string {
 export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
   const { http, transport } = options;
   const maxBody = options.maxBodyBytes ?? DEFAULT_MAX_BODY;
-  const primary = normalizeXtreamServer(options.server);
-  const servers = buildServerList(primary, options.backupServers, normalizeXtreamServer);
+  const servers = buildServerEntries(options.server, options.backupServers);
   const primaryCooldownMs = Math.max(0, options.primaryCooldownMs ?? DEFAULT_PRIMARY_COOLDOWN_MS);
   const nowFn = resolveNowFn(options.rateLimit);
   const accountKey = accountCooldownKey(options.username, options.password);
@@ -96,7 +102,10 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
   let failedOverAtMs: number | undefined;
   let activeTimezone = options.serverTimezone?.trim() || undefined;
 
-  const currentBase = () => servers[activeIndex] as string;
+  const resolveEntryBase = (entry: XtreamServerEntry): string =>
+    entry.explicitScheme ? entry.raw : resolveXtreamBaseUrl(entry.raw, http);
+
+  const currentBase = () => resolveEntryBase(servers[activeIndex] as XtreamServerEntry);
 
   const promoteServer = (idx: number): void => {
     if (idx === 0) {
@@ -110,21 +119,17 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     }
   };
 
-  async function openServerBody(
+  async function requestServerBody(
     serverBase: string,
     query: string,
+    timeoutMs: number,
     call?: XtreamCallOptions,
   ): Promise<Result<AsyncIterable<Uint8Array>>> {
-    const token = await acquireXtreamToken(http, serverBase, options.rateLimit, call?.signal);
-    if (!token.ok) return token;
-    if (isAccountCoolingDown(http, accountKey, nowFn())) {
-      return err(httpStatusError(429));
-    }
     let response: Awaited<ReturnType<typeof http.get>>;
     try {
       response = await http.get(`${serverBase}/player_api.php?${credentials}${query}`, {
         headers,
-        timeoutMs: TIMEOUT_MS,
+        timeoutMs,
         ...(call?.signal ? { signal: call.signal } : {}),
       });
     } catch {
@@ -165,12 +170,45 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     return ok(body);
   }
 
+  async function openServerBody(
+    entry: XtreamServerEntry,
+    query: string,
+    call?: XtreamCallOptions,
+  ): Promise<Result<AsyncIterable<Uint8Array>>> {
+    const initialBase = resolveEntryBase(entry);
+    const token = await acquireXtreamToken(http, initialBase, options.rateLimit, call?.signal);
+    if (!token.ok) return token;
+    if (isAccountCoolingDown(http, accountKey, nowFn())) {
+      return err(httpStatusError(429));
+    }
+    if (entry.explicitScheme || getCachedXtreamScheme(http, entry.hostKey) !== undefined) {
+      return requestServerBody(resolveEntryBase(entry), query, TIMEOUT_MS, call);
+    }
+
+    const httpsBase = buildXtreamBaseUrlWithScheme(entry.raw, 'https');
+    const probe = await requestServerBody(httpsBase, query, HTTPS_PROBE_TIMEOUT_MS, call);
+    if (probe.ok || isHttpResponseError(probe.error)) {
+      setCachedXtreamScheme(http, entry.hostKey, 'https');
+      return probe;
+    }
+    if (!isSchemeFallbackEligible(probe.error)) return probe;
+    if (call?.signal?.aborted) return err(elvError('network', 'aborted'));
+    if (isAccountCoolingDown(http, accountKey, nowFn())) return err(httpStatusError(429));
+
+    const httpBase = buildXtreamBaseUrlWithScheme(entry.raw, 'http');
+    const fallback = await requestServerBody(httpBase, query, TIMEOUT_MS, call);
+    if (fallback.ok || isHttpResponseError(fallback.error)) {
+      setCachedXtreamScheme(http, entry.hostKey, 'http');
+    }
+    return fallback;
+  }
+
   async function fetchServerJson(
-    serverBase: string,
+    entry: XtreamServerEntry,
     query: string,
     call?: XtreamCallOptions,
   ): Promise<Result<unknown>> {
-    const opened = await openServerBody(serverBase, query, call);
+    const opened = await openServerBody(entry, query, call);
     if (!opened.ok) return opened;
     const bytes = await readXtreamBody(opened.value, maxBody);
     if (!bytes.ok) return bytes;
@@ -191,7 +229,7 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     let lastFailure: Result<unknown> = err(elvError('network', 'request-failed'));
 
     for (const idx of order) {
-      const result = await fetchServerJson(servers[idx] as string, query, call);
+      const result = await fetchServerJson(servers[idx] as XtreamServerEntry, query, call);
       if (result.ok) {
         promoteServer(idx);
         return result;
@@ -221,7 +259,7 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     let lastFailure: Result<void> = err(elvError('network', 'request-failed'));
 
     for (const idx of order) {
-      const opened = await openServerBody(servers[idx] as string, query, call);
+      const opened = await openServerBody(servers[idx] as XtreamServerEntry, query, call);
       if (!opened.ok) {
         if (probePrimary && idx === 0) failedOverAtMs = nowFn();
         if (!isFailoverEligible(opened.error)) return opened;

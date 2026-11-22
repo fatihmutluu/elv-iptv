@@ -66,12 +66,16 @@ struct EngineCoreTracksTests {
     #expect(extractTrackLanguageFromLabel("Chinese") == "zh")
     #expect(extractTrackLanguageFromLabel("Chinese (Simplified)") == "zh")
     #expect(extractTrackLanguageFromLabel("Japanese") == "ja")
+    #expect(extractTrackLanguageFromLabel("Turkish") == "tr")
+    #expect(extractTrackLanguageFromLabel("Türkçe") == "tr")
+    #expect(extractTrackLanguageFromLabel("English (Dolby)") == "en")
     #expect(extractTrackLanguageFromLabel("[ES] Audio") == "es")
     #expect(extractTrackLanguageFromLabel("GER 5.1") == "de")
     #expect(extractTrackLanguageFromLabel("TIB") == "bo")
     #expect(extractTrackLanguageFromLabel("en-US (SDH)") == "en")
     #expect(extractTrackLanguageFromLabel("No Subtitles") == nil)
     #expect(extractTrackLanguageFromLabel("Hi-Fi Stereo") == nil)
+    #expect(canonicalTrackLanguage("und-US") == nil)
   }
 
   @Test("tracks observations are serial-fenced, deduplicated, and formatted for JS payload")

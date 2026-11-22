@@ -175,7 +175,15 @@ final class AetherSurfaceView: ExpoView {
 
   @MainActor
   func setResizeMode(_ mode: String?) {
-    let gravity: AVLayerVideoGravity = (mode == "fill") ? .resizeAspectFill : .resizeAspect
+    let gravity: AVLayerVideoGravity
+    switch mode {
+    case "fill":
+      gravity = .resizeAspectFill
+    case "stretch":
+      gravity = .resize
+    default:
+      gravity = .resizeAspect
+    }
     guard gravity != currentVideoGravity else { return }
     currentVideoGravity = gravity
     subtitleOverlayView.updateGravity(gravity)

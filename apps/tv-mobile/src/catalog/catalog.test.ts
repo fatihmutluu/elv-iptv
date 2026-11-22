@@ -23,7 +23,12 @@ describe('sources', () => {
         name: 'Main',
         createdAt: 1_000,
         needsImport: false,
-        accountMeta: { isTrial: false, expiresAt: expect.any(Number) },
+        accountMeta: {
+          isTrial: false,
+          expiresAt: expect.any(Number),
+          maxConnections: 1,
+          activeConnections: 0,
+        },
         credentialFingerprint: expect.stringMatching(/^fp:[0-9a-f]{64}$/),
       },
     ]);

@@ -11,6 +11,7 @@ import {
 } from '@elv/ui-kit';
 import { type ComponentRef, type ReactElement, useEffect, useRef } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import type { VideoResizeMode } from '../ports/video-host';
 import { useDesktopDialogTrap } from './desktop-dialog-trap';
 import { blurWebTarget, SettingsToggleRow, settingsRowStyle } from './PlayerSettingsRows';
 import type { SettingsMenuState, SettingsMenuView } from './settings-menu-nav';
@@ -25,7 +26,7 @@ export interface PlayerSettingsSheetProps {
   readonly tracks: MediaTracks;
   readonly isVod?: boolean;
   readonly playbackSpeed?: number;
-  readonly resizeMode?: 'fit' | 'fill';
+  readonly resizeMode?: VideoResizeMode;
   readonly deinterlace?: boolean;
   readonly statsVisible: boolean;
   readonly isTv: boolean;
@@ -55,7 +56,11 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
   const deinterlace = props.deinterlace === true;
   const resizeMode = props.resizeMode ?? 'fit';
   const resizeModeLabel =
-    resizeMode === 'fill' ? i18n.t('player.aspect.fill') : i18n.t('player.aspect.fit');
+    resizeMode === 'fill'
+      ? i18n.t('player.aspect.fill')
+      : resizeMode === 'stretch'
+        ? i18n.t('player.aspect.stretch')
+        : i18n.t('player.aspect.fit');
   const theme = useTheme();
   const isWebDesktop = formFactor === 'desktop' && (Platform.OS as string) === 'web';
   const showCursor = isTv || formFactor === 'desktop';
@@ -171,7 +176,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
               icon="aspect"
               label={i18n.t('player.aspect')}
               pillLabel={resizeModeLabel}
-              active={resizeMode === 'fill'}
+              active={resizeMode !== 'fit'}
               focused={showCursor && menuState.index === navRows.length}
               isTv={isTv}
               role="button"

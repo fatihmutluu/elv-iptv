@@ -43,6 +43,7 @@ internal class EventReporter(
   private var player: Player? = null
   private var active = false
   private var live = false
+  private var isLiveTs = false
   private var lastState: String? = null
   private var played = false
   private var stalled = false
@@ -59,10 +60,11 @@ internal class EventReporter(
    * Starts reporting a new prepare [prepareSerial] of [player], sends the post-`stop` fence message through Media3's
    * playback thread and reports `opening`.
    */
-  fun begin(player: ExoPlayer, live: Boolean, prepareSerial: Long, reused: Boolean) {
+  fun begin(player: ExoPlayer, live: Boolean, prepareSerial: Long, reused: Boolean, isLiveTs: Boolean = false) {
     end()
     this.player = player
     this.live = live
+    this.isLiveTs = live && isLiveTs
     fence.begin(prepareSerial, reused = reused)
     player.createMessage { _, _ -> fence.passed(prepareSerial) }.setLooper(handler.looper).send()
     active = true
@@ -74,6 +76,7 @@ internal class EventReporter(
   fun end() {
     if (active && stalled) sendStall("end")
     active = false
+    isLiveTs = false
     isWaitingForMedia = false
     fence.reset()
     lastState = null
@@ -251,6 +254,7 @@ internal class EventReporter(
     )
     val duration = player.duration
     if (duration != C.TIME_UNSET) anchor[if (live) "liveEdgeMs" else "durationMs"] = duration.toDouble()
+    if (live && isLiveTs) anchor["isLiveTs"] = true
     val tracks = player.currentTracks
     val hasVideo = if (tracks.isEmpty) null else hasSelectedVideoTrack(tracks)
     if (hasVideo != null) anchor["hasVideoTrack"] = hasVideo

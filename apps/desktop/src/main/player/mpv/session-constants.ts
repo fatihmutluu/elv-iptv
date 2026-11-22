@@ -13,6 +13,7 @@ export const OBSERVED_PROPERTIES = [
   'speed',
   'demuxer-cache-state',
   'demuxer-cache-duration',
+  'file-format',
   'estimated-vf-fps',
   'video-params',
   'vid',

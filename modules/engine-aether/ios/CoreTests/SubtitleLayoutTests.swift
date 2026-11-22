@@ -178,4 +178,37 @@ struct SubtitleLayoutTests {
     #expect(huge.minY >= stage.minY)
     #expect(huge.maxY <= stage.maxY)
   }
+
+  @Test("resizeMode=stretch returns full bounds regardless of video aspect ratio (#151)")
+  func stretchReturnsFullBounds() {
+    let tvBounds = LayoutRect(x: 0, y: 0, width: 1920, height: 1080)
+    let fourByThree = SubtitleLayout.computeVideoRect(
+      in: tvBounds,
+      videoSize: LayoutSize(width: 640, height: 480),
+      scaleMode: .stretch
+    )
+    #expect(fourByThree == tvBounds)
+
+    let ultraWide = SubtitleLayout.computeVideoRect(
+      in: tvBounds,
+      videoSize: LayoutSize(width: 2560, height: 1080),
+      scaleMode: .stretch
+    )
+    #expect(ultraWide == tvBounds)
+
+    let phoneBounds = LayoutRect(x: 10, y: 20, width: 390, height: 844)
+    let phoneStretch = SubtitleLayout.computeVideoRect(
+      in: phoneBounds,
+      videoSize: LayoutSize(width: 1920, height: 1080),
+      scaleMode: .stretch
+    )
+    #expect(phoneStretch == phoneBounds)
+
+    let zeroBounds = SubtitleLayout.computeVideoRect(
+      in: .zero,
+      videoSize: LayoutSize(width: 1920, height: 1080),
+      scaleMode: .stretch
+    )
+    #expect(zeroBounds == .zero)
+  }
 }

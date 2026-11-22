@@ -1,12 +1,15 @@
 import type { PlayerEngine } from '@elv/playback';
 import type { ReactElement } from 'react';
 
+/** Picture scaling mode (`fit` letterboxed, `fill` cropped to cover, `stretch` fills bounds ignoring aspect). */
+export type VideoResizeMode = 'fit' | 'fill' | 'stretch';
+
 /** Props passed to the platform video surface rendered underneath or alongside the OSD. */
 export interface VideoSurfaceProps {
   statusText: string;
   failed: boolean;
-  /** Picture scaling mode (`fit` letterboxed, `fill` cropped to cover). */
-  resizeMode?: 'fit' | 'fill';
+  /** Picture scaling mode (`fit` letterboxed, `fill` cropped to cover, `stretch` fills bounds ignoring aspect). */
+  resizeMode?: VideoResizeMode;
   /** Extra bottom inset in dp/px to lift native subtitles above a visible OSD (`#136`). */
   subtitleBottomInsetPx?: number;
   /** Monotonic token incremented on Rung 3 decoder reset to swap in a fresh native surface (`#144`). */

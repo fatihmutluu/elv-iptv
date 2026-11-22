@@ -12,11 +12,17 @@ import {
   type TransportSettings,
   transportHeaders,
 } from '@elv/domain';
-import { createXtreamClient } from '@elv/sources';
+import { createXtreamClient, resolveXtreamBaseUrl } from '@elv/sources';
 import { isCredentialFingerprint, resolveAccountPoolKey } from './credential-fingerprint';
 import { placeholderNames } from './m3u-templating';
 import { type ItemRow, queryPlayable } from './queries';
-import { getSource, type SourceRecord, secretKey } from './sources';
+import {
+  getSource,
+  normalizeActiveConnections,
+  normalizeMaxConnections,
+  type SourceRecord,
+  secretKey,
+} from './sources';
 import { resolveTemplate } from './templates';
 import { readUrlVars } from './urlvars-store';
 
@@ -35,9 +41,16 @@ export interface StreamRequest {
   headers: Record<string, string>;
   /** Opaque account pool key (`credentialFingerprint` when known, else `sourceId`) for connection pooling (`#265`). */
   accountKey?: string;
+  /** Normalized per-source concurrent connection limit (`>= 1`, default `1`, `#87`). */
+  maxConnections?: number;
+  /** Optional provider-reported active connection count when known (`#87`). */
+  providerActiveConnections?: number;
   /** Optional resolved backup stream endpoints persisted from M3U `#backup` delimiters (`#430`). */
   alternates?: readonly StreamAlternate[];
 }
+
+/** Alias for {@link StreamRequest}. */
+export type ResolvedStream = StreamRequest;
 
 /** Rebuilds the stored templates of one source in memory. */
 export interface StreamResolver {
@@ -263,6 +276,14 @@ export function createPlaytimeResolverCache(deps: {
         id: source.id,
         ...(isCredentialFingerprint(fp) ? { credentialFingerprint: fp } : {}),
       });
+      const maxConnections = normalizeMaxConnections(source.settings.accountMeta?.maxConnections);
+      const providerActiveConnections = normalizeActiveConnections(
+        source.settings.accountMeta?.activeConnections,
+      );
+      const connectionMeta = {
+        maxConnections,
+        ...(providerActiveConnections !== undefined ? { providerActiveConnections } : {}),
+      };
 
       if (play.urlTemplate === null) {
         const creds = await xtreamSecretFor(play.sourceId);
@@ -270,9 +291,12 @@ export function createPlaytimeResolverCache(deps: {
         const id = Number(play.providerId);
         if (play.providerId === null || !Number.isFinite(id)) return notFound();
         const transport = effectiveXtreamTransport(source);
+        const server = creds.server.includes('://')
+          ? creds.server
+          : resolveXtreamBaseUrl(creds.server, deps.http);
         const client = createXtreamClient({
           http: deps.http,
-          server: creds.server,
+          server,
           username: creds.username,
           password: creds.password,
           ...(transport === undefined ? {} : { transport }),
@@ -285,6 +309,7 @@ export function createPlaytimeResolverCache(deps: {
           url: normalizeMulticastUrl(rawXtreamUrl.trim()),
           headers,
           accountKey,
+          ...connectionMeta,
         });
       }
 
@@ -360,6 +385,7 @@ export function createPlaytimeResolverCache(deps: {
         url: finalUrl,
         headers,
         accountKey,
+        ...connectionMeta,
         ...(alternates === undefined ? {} : { alternates }),
       });
     },

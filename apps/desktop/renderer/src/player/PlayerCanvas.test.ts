@@ -205,7 +205,7 @@ describe('PlayerCanvas', () => {
     hookState.unmount();
   });
 
-  it('maps resizeMode fit vs fill to CSS objectFit contain vs cover', () => {
+  it('maps resizeMode fit, fill, and stretch to CSS objectFit contain, cover, and fill (#151)', () => {
     const { engine } = createFakeEngine();
     const { canvas } = createFakeCanvas();
 
@@ -214,6 +214,9 @@ describe('PlayerCanvas', () => {
 
     const fillEl = renderCanvas({ engine, resizeMode: 'fill', visible: true }, canvas);
     expect((fillEl.props.style as Record<string, unknown>).objectFit).toBe('cover');
+
+    const stretchEl = renderCanvas({ engine, resizeMode: 'stretch', visible: true }, canvas);
+    expect((stretchEl.props.style as Record<string, unknown>).objectFit).toBe('fill');
 
     hookState.unmount();
   });

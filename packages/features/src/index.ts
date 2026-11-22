@@ -7,6 +7,11 @@ export * from './live';
 export * from './notices';
 export * from './player';
 export {
+  type ConnectionLimitCheckInfo,
+  ConnectionLimitDialog,
+  type ConnectionLimitDialogProps,
+} from './player/ConnectionLimitDialog';
+export {
   type AppLifecyclePort,
   type AppLifecycleState,
   noopAppLifecycle,
@@ -19,3 +24,7 @@ export * from './settings';
 export { type DetailCastMember, type DetailTarget, detailTargetFromItem } from './shared';
 export * from './shell';
 export * from './sources';
+export {
+  CachedCatalogStrip,
+  type CachedCatalogStripProps,
+} from './sources/CachedCatalogStrip';

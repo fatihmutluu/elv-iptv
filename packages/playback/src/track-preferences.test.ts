@@ -182,4 +182,145 @@ describe('createTrackPreferences', () => {
       }),
     ).toEqual({});
   });
+
+  it('infers language from label when tag is undefined, empty, or und without false-matching Chinese as es (#151)', () => {
+    const prefs = createTrackPreferences();
+
+    // Case 1: und + "Turkish" -> reconciles to explicit "tur" track on reload even with a different label
+    prefs.selectAudio(
+      'a:1',
+      {
+        audio: [
+          { id: 'a:1', language: 'und', label: 'Turkish' },
+          { id: 'a:2', language: 'und', label: 'English (Dolby)' },
+        ],
+        subtitles: [{ id: 's:1', language: 'UND', label: 'Türkçe' }],
+        selectedAudioId: 'a:1',
+        selectedSubtitleId: null,
+      },
+      true,
+    );
+    prefs.selectSubtitle(
+      's:1',
+      {
+        audio: [],
+        subtitles: [{ id: 's:1', language: 'UND', label: 'Türkçe' }],
+        selectedAudioId: null,
+        selectedSubtitleId: 's:1',
+      },
+      true,
+    );
+
+    prefs.beginReload();
+    expect(
+      prefs.reconcile({
+        audio: [
+          { id: 'a:10', language: 'eng', label: 'Stereo' },
+          { id: 'a:11', language: 'tur', label: 'Audio 2' },
+        ],
+        subtitles: [{ id: 's:10', language: 'tr', label: 'Sub 1' }],
+        selectedAudioId: 'a:10',
+        selectedSubtitleId: null,
+      }),
+    ).toEqual({ audioTrackId: 'a:11', subtitleTrackId: 's:10' });
+
+    // Case 2: empty/undefined language + "English (Dolby)" -> reconciles to und + "English" and vice versa
+    prefs.reset();
+    prefs.selectAudio(
+      'a:2',
+      {
+        audio: [
+          { id: 'a:1', language: '', label: 'Turkish' },
+          { id: 'a:2', label: 'English (Dolby)' },
+        ],
+        subtitles: [],
+        selectedAudioId: 'a:2',
+        selectedSubtitleId: null,
+      },
+      true,
+    );
+    prefs.beginReload();
+    expect(
+      prefs.reconcile({
+        audio: [
+          { id: 'a:5', language: 'und', label: 'Turkish Stereo' },
+          { id: 'a:6', language: 'eng', label: 'Main' },
+        ],
+        subtitles: [],
+        selectedAudioId: 'a:5',
+        selectedSubtitleId: null,
+      }),
+    ).toEqual({ audioTrackId: 'a:6' });
+
+    // Case 3: explicit "tur" selected -> reconciles to und + "Türkçe" when reload drops container language tag
+    prefs.reset();
+    prefs.selectAudio(
+      'a:1',
+      {
+        audio: [{ id: 'a:1', language: 'tur', label: 'Main' }],
+        subtitles: [],
+        selectedAudioId: 'a:1',
+        selectedSubtitleId: null,
+      },
+      true,
+    );
+    prefs.beginReload();
+    expect(
+      prefs.reconcile({
+        audio: [
+          { id: 'a:2', language: 'und', label: 'English (Dolby)' },
+          { id: 'a:3', language: 'und', label: 'Türkçe' },
+        ],
+        subtitles: [],
+        selectedAudioId: 'a:2',
+        selectedSubtitleId: null,
+      }),
+    ).toEqual({ audioTrackId: 'a:3' });
+
+    // Case 4: "Chinese" with und tag is inferred as zh and NEVER false-matched as "es"
+    prefs.reset();
+    prefs.selectSubtitle(
+      's:es',
+      {
+        audio: [],
+        subtitles: [{ id: 's:es', language: 'es', label: 'Spanish' }],
+        selectedAudioId: null,
+        selectedSubtitleId: 's:es',
+      },
+      true,
+    );
+    prefs.beginReload();
+    expect(
+      prefs.reconcile({
+        audio: [],
+        subtitles: [{ id: 's:zh', language: 'und', label: 'Chinese' }],
+        selectedAudioId: null,
+        selectedSubtitleId: null,
+      }),
+    ).toEqual({});
+
+    prefs.reset();
+    prefs.selectSubtitle(
+      's:zh1',
+      {
+        audio: [],
+        subtitles: [{ id: 's:zh1', language: 'und', label: 'Chinese' }],
+        selectedAudioId: null,
+        selectedSubtitleId: 's:zh1',
+      },
+      true,
+    );
+    prefs.beginReload();
+    expect(
+      prefs.reconcile({
+        audio: [],
+        subtitles: [
+          { id: 's:es2', language: 'spa', label: 'Español' },
+          { id: 's:zh2', language: 'zho', label: 'Mandarin' },
+        ],
+        selectedAudioId: null,
+        selectedSubtitleId: null,
+      }),
+    ).toEqual({ subtitleTrackId: 's:zh2' });
+  });
 });
