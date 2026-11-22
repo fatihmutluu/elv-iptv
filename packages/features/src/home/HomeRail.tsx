@@ -92,10 +92,11 @@ export interface HomeRailProps {
   readonly focusedIndex: number | null;
   readonly onPressItem: (entry: HomeRailEntry, index: number) => void;
   readonly favoriteKeys?: ReadonlySet<string>;
+  readonly watchedOverrides?: ReadonlyMap<string, boolean>;
   readonly unplayedBySeriesKey?: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly onQuickPlay?: (entry: HomeRailEntry, index: number) => void;
   readonly onQuickToggleFavorite?: (entry: HomeRailEntry) => void;
-  readonly onQuickToggleWatched?: (entry: HomeRailEntry) => void;
+  readonly onQuickToggleWatched?: (entry: HomeRailEntry, currentWatched: boolean) => void;
   readonly onLayoutY?: (id: HomeRailKind, y: number) => void;
   readonly testID: string;
   readonly itemTestIdPrefix: string;
@@ -119,6 +120,7 @@ interface RailCardItemProps {
   readonly liveKindLabel: string;
   readonly watchedLabel: string;
   readonly isFavorite: boolean;
+  readonly watchedOverride: boolean | undefined;
   readonly unplayedSummary: SeriesUnplayedSummary | undefined;
   readonly formatRemMin: (minutes: number) => string;
   readonly formatUnplayed: (count: number) => string;
@@ -130,7 +132,7 @@ interface RailCardItemProps {
   readonly onPressItem: (entry: HomeRailEntry, index: number) => void;
   readonly onQuickPlay?: (entry: HomeRailEntry, index: number) => void;
   readonly onQuickToggleFavorite?: (entry: HomeRailEntry) => void;
-  readonly onQuickToggleWatched?: (entry: HomeRailEntry) => void;
+  readonly onQuickToggleWatched?: (entry: HomeRailEntry, currentWatched: boolean) => void;
 }
 
 const RailCardItem = memo(function RailCardItemInner({
@@ -144,6 +146,7 @@ const RailCardItem = memo(function RailCardItemInner({
   liveKindLabel,
   watchedLabel,
   isFavorite,
+  watchedOverride,
   unplayedSummary,
   formatRemMin,
   formatUnplayed,
@@ -162,7 +165,8 @@ const RailCardItem = memo(function RailCardItemInner({
   }, [entry, index, onPressItem]);
 
   const isSeries = entry.kind === 'series';
-  const effectiveWatched = entry.watched || (isSeries && unplayedSummary?.watched === true);
+  const effectiveWatched =
+    watchedOverride ?? (entry.watched || (isSeries && unplayedSummary?.watched === true));
 
   const quickActions = useMemo<PosterCardQuickActions | undefined>(() => {
     if (variant !== 'poster' || (!onQuickPlay && !onQuickToggleFavorite && !onQuickToggleWatched)) {
@@ -185,7 +189,7 @@ const RailCardItem = memo(function RailCardItemInner({
       ...(onQuickToggleWatched !== undefined
         ? {
             isWatched: effectiveWatched,
-            onToggleWatched: () => onQuickToggleWatched(entry),
+            onToggleWatched: () => onQuickToggleWatched(entry, effectiveWatched),
             watchedLabel: effectiveWatched ? markUnwatchedLabel : markWatchedLabel,
           }
         : {}),
@@ -244,19 +248,19 @@ const RailCardItem = memo(function RailCardItemInner({
 
   const meta = buildPosterMeta(entry);
   const ratio =
-    !entry.watched && entry.positionMs > 0 && entry.durationMs > 0
+    !effectiveWatched && entry.positionMs > 0 && entry.durationMs > 0
       ? progressRatio(entry.positionMs, entry.durationMs)
       : undefined;
   const seriesBadge = isSeries
     ? resolveSeriesBadgeProps({
         summary: unplayedSummary,
         progressWatched: entry.watched,
-        watchedOverride: undefined,
+        watchedOverride,
         formatUnplayed,
         watchedLabel,
       })
     : {};
-  const badge = !isSeries && entry.watched ? watchedLabel : undefined;
+  const badge = !isSeries && effectiveWatched ? watchedLabel : undefined;
 
   return (
     <PosterCard
@@ -293,6 +297,7 @@ function HomeRailInner({
   focusedIndex,
   onPressItem,
   favoriteKeys,
+  watchedOverrides,
   unplayedBySeriesKey,
   onQuickPlay,
   onQuickToggleFavorite,
@@ -407,6 +412,7 @@ function HomeRailInner({
               liveKindLabel={liveKindLabel}
               watchedLabel={watchedLabel}
               isFavorite={favoriteKeys?.has(entry.itemKey) ?? false}
+              watchedOverride={watchedOverrides?.get(entry.itemKey)}
               unplayedSummary={unplayedBySeriesKey?.get(entry.itemKey)}
               formatRemMin={formatRemMin}
               formatUnplayed={formatUnplayed}

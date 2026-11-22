@@ -242,6 +242,51 @@ describe('listSeriesUnplayedCounts (#409)', () => {
     }
   });
 
+  it('unwatching a series clears individually watched episode rows for that profile only (#409)', async () => {
+    const { db, close } = await setupDb();
+    try {
+      await db.run(
+        `INSERT INTO series (source_id, key, name, name_fold, run_id)
+         VALUES
+           ('s1', 'x:s1:series:10', 'Show Ten', 'show ten', 1),
+           ('s1', 'x:s1:series:20', 'Show Twenty', 'show twenty', 1)`,
+      );
+      for (let i = 1; i <= 3; i += 1) {
+        await db.run(
+          `INSERT INTO episodes (source_id, key, series_key, season, episode, title, run_id)
+           VALUES ('s1', ?, 'x:s1:series:10', 1, ?, ?, 1)`,
+          [`x:s1:ep:10${i}`, i, `Ep ${i}`],
+        );
+        await setItemWatched(db, `x:s1:ep:10${i}`, true, () => 100 + i, 'default');
+        await setItemWatched(db, `x:s1:ep:10${i}`, true, () => 200 + i, 'kids');
+      }
+      await db.run(
+        `INSERT INTO episodes (source_id, key, series_key, season, episode, title, run_id)
+         VALUES ('s1', 'x:s1:ep:201', 'x:s1:series:20', 1, 1, 'Other Ep', 1)`,
+      );
+      await setItemWatched(db, 'x:s1:ep:201', true, () => 300, 'default');
+
+      expect(await listSeriesUnplayedCounts(db, ['x:s1:series:10'], 'default')).toEqual([
+        { seriesKey: 'x:s1:series:10', total: 3, unplayed: 0, watched: true },
+      ]);
+
+      await setItemWatched(db, 'x:s1:series:10', false, () => 400, 'default');
+
+      expect(await listSeriesUnplayedCounts(db, ['x:s1:series:10'], 'default')).toEqual([
+        { seriesKey: 'x:s1:series:10', total: 3, unplayed: 3, watched: false },
+      ]);
+      // Other profile and other series remain untouched
+      expect(await listSeriesUnplayedCounts(db, ['x:s1:series:10'], 'kids')).toEqual([
+        { seriesKey: 'x:s1:series:10', total: 3, unplayed: 0, watched: true },
+      ]);
+      expect(await listSeriesUnplayedCounts(db, ['x:s1:series:20'], 'default')).toEqual([
+        { seriesKey: 'x:s1:series:20', total: 1, unplayed: 0, watched: true },
+      ]);
+    } finally {
+      close();
+    }
+  });
+
   it('executes a single indexed SQL aggregation over idx_episodes_series without table scans', async () => {
     const { db, close } = await setupDb();
     try {

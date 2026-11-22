@@ -22,6 +22,14 @@ export interface AlwaysOnTopWindowLike {
   isAlwaysOnTop(): boolean;
   setAlwaysOnTop(flag: boolean, level?: 'normal' | 'floating'): void;
   getChildWindows?(): readonly ChildZOrderWindowLike[];
+  on?(
+    event: 'always-on-top-changed',
+    listener: (event: unknown, isAlwaysOnTop: boolean) => void,
+  ): unknown;
+  removeListener?(
+    event: 'always-on-top-changed',
+    listener: (event: unknown, isAlwaysOnTop: boolean) => void,
+  ): unknown;
   readonly webContents: {
     isDestroyed(): boolean;
     send(channel: string, ...args: unknown[]): void;
@@ -35,8 +43,7 @@ export interface WindowIpcDeps {
   log?(line: string): void;
 }
 
-/** Syncs owned child presenter windows so their HWND stays above an always-on-top parent and resets when unpinned. */
-export function syncChildWindowZOrder(win: AlwaysOnTopWindowLike, enabled: boolean): void {
+function syncChildWindowZOrder(win: AlwaysOnTopWindowLike, enabled: boolean): void {
   const children = win.getChildWindows?.();
   if (!children) return;
   for (const child of children) {
@@ -58,6 +65,8 @@ export function syncChildWindowZOrder(win: AlwaysOnTopWindowLike, enabled: boole
 export function registerWindowIpc(deps: WindowIpcDeps): () => void {
   const { ipcMain, getWindowFromSender, log } = deps;
   const lastNotified = new WeakMap<AlwaysOnTopWindowLike, boolean>();
+  const watched = new WeakSet<AlwaysOnTopWindowLike>();
+  const detachListeners: Array<() => void> = [];
 
   const notifyIfChanged = (win: AlwaysOnTopWindowLike, enabled: boolean): void => {
     if (lastNotified.get(win) === enabled) return;
@@ -67,9 +76,27 @@ export function registerWindowIpc(deps: WindowIpcDeps): () => void {
     }
   };
 
+  const watchWindow = (win: AlwaysOnTopWindowLike): void => {
+    if (watched.has(win) || typeof win.on !== 'function') return;
+    watched.add(win);
+    const onAlwaysOnTopChanged = (_event: unknown, isAlwaysOnTop: boolean): void => {
+      if (win.isDestroyed()) return;
+      const actual = typeof isAlwaysOnTop === 'boolean' ? isAlwaysOnTop : win.isAlwaysOnTop();
+      syncChildWindowZOrder(win, actual);
+      notifyIfChanged(win, actual);
+    };
+    win.on('always-on-top-changed', onAlwaysOnTopChanged);
+    detachListeners.push(() => {
+      if (!win.isDestroyed()) {
+        win.removeListener?.('always-on-top-changed', onAlwaysOnTopChanged);
+      }
+    });
+  };
+
   ipcMain.handle(WINDOW_CHANNELS.getAlwaysOnTop, ({ sender }) => {
     const win = getWindowFromSender(sender);
     if (!win || win.isDestroyed()) return false;
+    watchWindow(win);
     return win.isAlwaysOnTop();
   });
 
@@ -80,6 +107,7 @@ export function registerWindowIpc(deps: WindowIpcDeps): () => void {
       return win && !win.isDestroyed() ? win.isAlwaysOnTop() : false;
     }
     if (!win || win.isDestroyed()) return false;
+    watchWindow(win);
     if (win.isAlwaysOnTop() !== enabled) {
       win.setAlwaysOnTop(enabled, 'floating');
     }
@@ -92,5 +120,6 @@ export function registerWindowIpc(deps: WindowIpcDeps): () => void {
   return () => {
     ipcMain.removeHandler(WINDOW_CHANNELS.getAlwaysOnTop);
     ipcMain.removeHandler(WINDOW_CHANNELS.setAlwaysOnTop);
+    for (const detach of detachListeners.splice(0)) detach();
   };
 }

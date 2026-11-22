@@ -55,6 +55,7 @@ export interface LiveSession {
   paused: boolean;
   userQuit: boolean;
   hasCustomHeaders: boolean;
+  appliedAudioDevice?: string;
   inFlight?: MediaSlot;
   readonly endWaiters: Set<{ id: number; done(ended: boolean): void }>;
 }
@@ -82,6 +83,7 @@ export interface LiveSessionHooks {
   reportWedged(detail: string): void;
   enqueueCommand(cmd: MpvCommand, slot?: MediaSlot): void;
   onAudioProperty?(name: 'volume' | 'mute', value: unknown): void;
+  getDesiredAudioDevice?(): string | undefined;
   readaheadStore?: ReadaheadTierStore;
 }
 
@@ -348,11 +350,22 @@ export function createSessionController(hooks: LiveSessionHooks) {
       presenter.attach(proc.client);
       for (const name of OBSERVED_PROPERTIES) proc.client.observe(name);
       void send(L, ['request_log_messages', LOG_LEVEL]);
+      const desiredAudio = hooks.getDesiredAudioDevice?.();
+      if (desiredAudio !== undefined) {
+        L.appliedAudioDevice = desiredAudio;
+        void send(L, ['set_property', 'audio-device', desiredAudio]);
+      }
       return L;
     },
     async loadSlot(L: LiveSession, slot: MediaSlot, stopFirst: boolean): Promise<void> {
       if (stopFirst && !(await stopCurrent(L))) return;
       if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
+      const desiredAudio = hooks.getDesiredAudioDevice?.();
+      if (desiredAudio !== undefined && L.appliedAudioDevice !== desiredAudio) {
+        L.appliedAudioDevice = desiredAudio;
+        await send(L, ['set_property', 'audio-device', desiredAudio]);
+        if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
+      }
       const fields = headerFields(slot.request.headers);
       if (fields.length > 0 || L.hasCustomHeaders) {
         if (fields.length > 0) L.hasCustomHeaders = true;

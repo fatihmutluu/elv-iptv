@@ -3,8 +3,7 @@ import { deflateSync } from 'node:zlib';
 /** Playback action dispatched when the user clicks a Windows taskbar thumbnail button (`#410`). */
 export type TaskbarAction = 'play-pause' | 'channel-up' | 'channel-down';
 
-/** Electron `ProgressBarOptions['mode']` subset used for Windows taskbar progress. */
-export type TaskbarProgressMode = 'none' | 'normal' | 'indeterminate' | 'error' | 'paused';
+type TaskbarProgressMode = 'none' | 'normal' | 'indeterminate' | 'error' | 'paused';
 
 /** Electron `ThumbarButton` subset accepted by {@link TaskbarWindow.setThumbarButtons}. */
 export interface ThumbarButtonLike<TIcon = unknown> {

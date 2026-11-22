@@ -152,6 +152,58 @@ describe('Desktop card hover quick-actions & series unplayed badges (#409)', () 
     expect(onOpenDetail).not.toHaveBeenCalled();
   });
 
+  it('unwatches an all-episodes-watched series on HomeScreen with nextWatched=false, optimistic badge restore, and rollback on failure', async () => {
+    let rejectUnwatch!: (err: Error) => void;
+    const setWatched = jest.fn(
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          rejectUnwatch = reject;
+        }),
+    );
+    const catalog = createTestCatalog({ setWatched });
+    const i18n = createAppI18n('en');
+
+    await render(
+      <I18nProvider i18n={i18n}>
+        <ThemeProvider>
+          <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
+            <HomeScreen
+              catalog={catalog}
+              sources={[SOURCE]}
+              refreshToken={0}
+              onPlay={jest.fn()}
+              onOpenTab={jest.fn()}
+              onOpenDetail={jest.fn()}
+              onOpenSources={jest.fn()}
+            />
+          </ViewportProvider>
+        </ThemeProvider>
+      </I18nProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('home-series-item-1-watched-badge')).toBeTruthy();
+    });
+
+    await fireEvent(screen.getByTestId('home-series-item-1'), 'hoverIn');
+    const watchedBtn = screen.getByTestId('home-series-item-1-quick-watched');
+    expect(watchedBtn.props.accessibilityState?.selected).toBe(true);
+
+    await fireEvent.press(watchedBtn, { stopPropagation: jest.fn(), preventDefault: jest.fn() });
+    expect(setWatched).toHaveBeenCalledWith(SERIES_2.key, false);
+    expect(screen.queryByTestId('home-series-item-1-watched-badge')).toBeNull();
+    expect(screen.getByTestId('home-series-item-1-unplayed')).toBeTruthy();
+    expect(screen.getByText('12')).toBeTruthy();
+
+    await act(async () => {
+      rejectUnwatch(new Error('sqlite-busy'));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('home-series-item-1-watched-badge')).toBeTruthy();
+    });
+  });
+
   it('optimistically toggles Favorite & Watched on CatalogDiscoveryScreen and rolls back on rejection', async () => {
     let rejectFav!: (err: Error) => void;
     let rejectWatched!: (err: Error) => void;

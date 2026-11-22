@@ -59,6 +59,16 @@ describe('resolveSeriesBadgeProps & useSeriesUnplayedCounts (#409)', () => {
 
     expect(
       resolveSeriesBadgeProps({
+        summary: watchedSummary,
+        progressWatched: false,
+        watchedOverride: false,
+        formatUnplayed: fmt,
+        watchedLabel: 'Watched',
+      }),
+    ).toEqual({ unplayedCount: 10, unplayedLabel: '10 unwatched' });
+
+    expect(
+      resolveSeriesBadgeProps({
         summary: undefined,
         progressWatched: true,
         watchedOverride: false,

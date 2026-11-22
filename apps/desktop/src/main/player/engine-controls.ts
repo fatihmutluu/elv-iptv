@@ -33,6 +33,7 @@ export interface EngineControls {
   setAudioDelay(delaySec: number): void;
   setSubtitleDelay(delaySec: number): void;
   setAudioDevice(device: string): void;
+  getDesiredAudioDevice(): string | undefined;
   setDeinterlace(enabled: boolean): void;
   setHwdec(profile: HwdecProfile): void;
 }
@@ -43,6 +44,7 @@ export function createEngineControls(deps: EngineControlsDeps): EngineControls {
   let speedInFlight = false;
   let pendingSpeed: { slot: MediaSlot | undefined; rate: number } | undefined;
   let darwinCompatActive = deps.initialDarwinCompat === true;
+  let desiredAudioDevice: string | undefined;
 
   const restoreVolumeDirect = (volume: number): void => {
     const live = deps.getLive();
@@ -163,7 +165,12 @@ export function createEngineControls(deps: EngineControlsDeps): EngineControls {
       if (Number.isFinite(delaySec)) setProp('sub-delay', delaySec);
     },
     setAudioDevice(device) {
-      if (device.length > 0) setProp('audio-device', device);
+      if (deps.isReleased() || device.length === 0) return;
+      desiredAudioDevice = device;
+      if (deps.getLive() !== undefined) setProp('audio-device', device);
+    },
+    getDesiredAudioDevice() {
+      return desiredAudioDevice;
     },
     setDeinterlace(enabled) {
       setProp('deinterlace', enabled ? 'yes' : 'no');

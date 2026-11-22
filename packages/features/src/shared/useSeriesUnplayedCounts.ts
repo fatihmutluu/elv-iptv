@@ -30,6 +30,9 @@ export function resolveSeriesBadgeProps(options: {
     if (summary && summary.unplayed > 0) {
       return { unplayedCount: summary.unplayed, unplayedLabel: formatUnplayed(summary.unplayed) };
     }
+    if (summary?.watched && summary.total > 0) {
+      return { unplayedCount: summary.total, unplayedLabel: formatUnplayed(summary.total) };
+    }
     return {};
   }
   if (summary !== undefined) {

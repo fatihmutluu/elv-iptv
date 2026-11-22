@@ -50,6 +50,7 @@ function fakeWindow(children: ChildZOrderWindowLike[] = []) {
   let destroyed = false;
   const setCalls: unknown[][] = [];
   const sent: Array<{ channel: string; args: unknown[] }> = [];
+  const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
   const sender = { id: 1 };
   const win: AlwaysOnTopWindowLike = {
     isDestroyed: () => destroyed,
@@ -59,6 +60,17 @@ function fakeWindow(children: ChildZOrderWindowLike[] = []) {
       setCalls.push([flag, level]);
     },
     getChildWindows: () => children,
+    on: (event, listener) => {
+      let set = listeners.get(event);
+      if (!set) {
+        set = new Set();
+        listeners.set(event, set);
+      }
+      set.add(listener as (...args: unknown[]) => void);
+    },
+    removeListener: (event, listener) => {
+      listeners.get(event)?.delete(listener as (...args: unknown[]) => void);
+    },
     webContents: {
       isDestroyed: () => destroyed,
       send: (channel, ...args) => {
@@ -71,6 +83,13 @@ function fakeWindow(children: ChildZOrderWindowLike[] = []) {
     sender,
     setCalls,
     sent,
+    emitAlwaysOnTopChanged: (nextPinned: boolean) => {
+      pinned = nextPinned;
+      for (const listener of [...(listeners.get('always-on-top-changed') ?? [])]) {
+        listener({}, nextPinned);
+      }
+    },
+    listenerCount: () => listeners.get('always-on-top-changed')?.size ?? 0,
     destroy: () => {
       destroyed = true;
     },
@@ -158,5 +177,40 @@ describe('window-ipc (#408)', () => {
     expect(await ipc.invoke(WINDOW_CHANNELS.setAlwaysOnTop, fw.sender, true)).toBe(false);
 
     dispose();
+  });
+
+  it('syncs external always-on-top-changed events (e.g. fullscreen exit restore) without duplicate pushes', async () => {
+    const ipc = fakeIpcMain();
+    const child = fakeChild(true);
+    const fw = fakeWindow([child.child]);
+
+    const dispose = registerWindowIpc({
+      ipcMain: ipc.ipcMain,
+      getWindowFromSender: (s) => (s === fw.sender ? fw.win : null),
+    });
+
+    // Initial getAlwaysOnTop attaches the window listener cleanly
+    expect(await ipc.invoke(WINDOW_CHANNELS.getAlwaysOnTop, fw.sender)).toBe(false);
+    expect(fw.listenerCount()).toBe(1);
+
+    // Pin via IPC
+    expect(await ipc.invoke(WINDOW_CHANNELS.setAlwaysOnTop, fw.sender, true)).toBe(true);
+    expect(fw.sent).toEqual([{ channel: WINDOW_CHANNELS.alwaysOnTopChanged, args: [true] }]);
+
+    // Electron/Windows emits always-on-top-changed(false) on fullscreen entry, then (true) on exit restore
+    fw.emitAlwaysOnTopChanged(false);
+    fw.emitAlwaysOnTopChanged(false);
+    fw.emitAlwaysOnTopChanged(true);
+
+    expect(fw.sent).toEqual([
+      { channel: WINDOW_CHANNELS.alwaysOnTopChanged, args: [true] },
+      { channel: WINDOW_CHANNELS.alwaysOnTopChanged, args: [false] },
+      { channel: WINDOW_CHANNELS.alwaysOnTopChanged, args: [true] },
+    ]);
+    expect(child.calls.at(-2)).toEqual(['setAlwaysOnTop', true, 'floating', 1]);
+    expect(child.calls.at(-1)).toEqual(['moveTop']);
+
+    dispose();
+    expect(fw.listenerCount()).toBe(0);
   });
 });

@@ -250,7 +250,7 @@ export function HomeScreen({
     [toggleMyList],
   );
   const handleQuickToggleWatched = useCallback(
-    (entry: HomeRailEntry) =>
+    (entry: HomeRailEntry, currentWatched: boolean) =>
       void toggleWatched(
         {
           sourceId: entry.sourceId,
@@ -261,7 +261,7 @@ export function HomeScreen({
           logo: entry.posterUri ?? entry.backdropUri,
           durationMs: entry.durationMs,
         },
-        !entry.watched,
+        !currentWatched,
       ),
     [toggleWatched],
   );
@@ -453,6 +453,7 @@ export function HomeScreen({
               {...(spec.variant === 'poster'
                 ? {
                     favoriteKeys: data.favoriteKeys,
+                    watchedOverrides: data.watchedOverrides,
                     unplayedBySeriesKey: data.unplayedBySeriesKey,
                     onQuickPlay: activateEntry,
                     onQuickToggleFavorite: handleQuickToggleFavorite,

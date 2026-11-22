@@ -142,6 +142,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     reportWedged,
     enqueueCommand: (cmd, slot) => queue.enqueueCommand(cmd, slot),
     onAudioProperty: (name, value) => controls.onAudioProperty(name, value),
+    getDesiredAudioDevice: () => controls.getDesiredAudioDevice(),
     ...(deps.readaheadStore === undefined ? {} : { readaheadStore: deps.readaheadStore }),
   });
 
@@ -220,7 +221,16 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
               op.generation === queue.generation &&
               (op.slot === undefined || op.slot === media)
             ) {
-              await session.send(live, op.command);
+              const target = live;
+              await session.send(target, op.command);
+              if (
+                op.command[0] === 'set_property' &&
+                op.command[1] === 'audio-device' &&
+                typeof op.command[2] === 'string' &&
+                live === target
+              ) {
+                target.appliedAudioDevice = op.command[2];
+              }
             }
           } finally {
             if (op.generation === queue.generation) controls.onCommandSettled(op.command);
