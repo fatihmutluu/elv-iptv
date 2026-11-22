@@ -389,31 +389,109 @@ describe('m3u import', () => {
     expect((await run(e)).ok).toBe(true);
     const v = await vars(e);
 
-    const live = await rows(e, 'SELECT catchup_days, headers_json FROM live');
+    const live = await rows(e, 'SELECT key, catchup_days, headers_json FROM live');
     expect(live[0]?.catchup_days).toBe(7);
     const liveH = JSON.parse(String(live[0]?.headers_json)) as {
       userAgent?: string;
       referer?: string;
       other?: Record<string, string>;
     };
-    expect(liveH.userAgent).toBe('Probe/1');
+    expect(liveH.userAgent).not.toContain('Probe/1');
+    expect(resolveTemplate(liveH.userAgent ?? '', v)).toBe('Probe/1');
     expect(liveH.referer).not.toContain(M3U_TOKEN);
     expect(resolveTemplate(liveH.referer ?? '', v)).toBe(referer);
     expect(liveH.other?.['x-custom']).toBe('val1');
     expect(liveH.other?.authorization).not.toContain('s3cret-jwt');
     expect(resolveTemplate(liveH.other?.authorization ?? '', v)).toBe('Bearer s3cret-jwt');
 
-    const movies = await rows(e, 'SELECT headers_json FROM movies');
+    const movies = await rows(e, 'SELECT key, headers_json FROM movies');
     const movieH = JSON.parse(String(movies[0]?.headers_json)) as typeof liveH;
-    expect(movieH.userAgent).toBe('MovieUA/2');
+    expect(movieH.userAgent).not.toContain('MovieUA/2');
+    expect(resolveTemplate(movieH.userAgent ?? '', v)).toBe('MovieUA/2');
     expect(movieH.referer).not.toContain(M3U_TOKEN);
     expect(resolveTemplate(movieH.referer ?? '', v)).toBe(`http://ref.example/${M3U_TOKEN}/vod`);
     expect(movieH.other).toEqual({ 'x-vod': 'ok' });
 
-    const eps = await rows(e, 'SELECT headers_json FROM episodes');
+    const eps = await rows(e, 'SELECT key, headers_json FROM episodes');
     const epH = JSON.parse(String(eps[0]?.headers_json)) as typeof liveH;
-    expect(epH.userAgent).toBe('EpUA/3');
+    expect(epH.userAgent).not.toContain('EpUA/3');
+    expect(resolveTemplate(epH.userAgent ?? '', v)).toBe('EpUA/3');
     expect(epH.other).toEqual({ 'x-ep': 'yes' });
+
+    const { createPlaytimeResolverCache } = await import('./stream-resolver');
+    const cache = createPlaytimeResolverCache({
+      db: e.db,
+      secrets: e.secrets,
+      http: e.deps.http,
+    });
+    const rLive = await cache.resolveStream(String(live[0]?.key));
+    const rMovie = await cache.resolveStream(String(movies[0]?.key));
+    const rEp = await cache.resolveStream(String(eps[0]?.key));
+    expect(rLive.ok && rLive.value.headers['user-agent']).toBe('Probe/1');
+    expect(rMovie.ok && rMovie.value.headers['user-agent']).toBe('MovieUA/2');
+    expect(rEp.ok && rEp.value.headers['user-agent']).toBe('EpUA/3');
+  });
+
+  it('persists templated backup_urls_json on live/movies/episodes and epg_shift_ms on live without leaking tokens (#430, #121)', async () => {
+    const backupToken = ['bk', 'Tok', '99887766'].join('');
+    const body = [
+      '#EXTM3U',
+      '#EXTINF:-1 tvg-shift="+2.5" group-title="News",Live Shifted',
+      `http://cdn.example:8080/${M3U_TOKEN}/live/1.ts#http://backup.example/${backupToken}/live/1.ts#http://backup2.example/plain/1.ts`,
+      '#EXTINF:-1 group-title="Films",Movie With Backup',
+      `http://cdn.example:8080/${M3U_TOKEN}/movie/1.mp4#http://backup.example/${backupToken}/movie/1.mp4`,
+      '#EXTINF:-1 group-title="Show S",Episode With Backup',
+      `http://cdn.example:8080/${M3U_TOKEN}/series/1.mkv#http://backup.example/${backupToken}/series/1.mkv`,
+      '',
+    ].join('\n');
+    const e = await setupM3u(body);
+    expect((await run(e)).ok).toBe(true);
+
+    const live = await rows(e, 'SELECT key, backup_urls_json, epg_shift_ms FROM live');
+    expect(live[0]?.epg_shift_ms).toBe(9_000_000);
+    expect(String(live[0]?.backup_urls_json)).not.toContain(backupToken);
+    const movies = await rows(e, 'SELECT key, backup_urls_json FROM movies');
+    expect(String(movies[0]?.backup_urls_json)).not.toContain(backupToken);
+    const eps = await rows(e, 'SELECT key, backup_urls_json FROM episodes');
+    expect(String(eps[0]?.backup_urls_json)).not.toContain(backupToken);
+
+    const { createPlaytimeResolverCache } = await import('./stream-resolver');
+    const cache = createPlaytimeResolverCache({
+      db: e.db,
+      secrets: e.secrets,
+      http: e.deps.http,
+    });
+    const rLive = await cache.resolveStream(String(live[0]?.key));
+    expect(rLive.ok && rLive.value.alternates?.map((a) => a.url)).toEqual([
+      `http://backup.example/${backupToken}/live/1.ts`,
+      'http://backup2.example/plain/1.ts',
+    ]);
+    const rMovie = await cache.resolveStream(String(movies[0]?.key));
+    expect(rMovie.ok && rMovie.value.alternates?.map((a) => a.url)).toEqual([
+      `http://backup.example/${backupToken}/movie/1.mp4`,
+    ]);
+    const rEp = await cache.resolveStream(String(eps[0]?.key));
+    expect(rEp.ok && rEp.value.alternates?.map((a) => a.url)).toEqual([
+      `http://backup.example/${backupToken}/series/1.mkv`,
+    ]);
+  });
+
+  it('redacts a single tokenized logo URL on a multi-stream host so the token never enters live.logo (#430)', async () => {
+    const logoTok = ['logo', 'Secret', '77665544'].join('');
+    let body = '#EXTM3U\n';
+    for (let i = 0; i < 60; i += 1) {
+      const attrs = i === 0 ? `tvg-logo="http://shared.example/${logoTok}/only-logo.png"` : '';
+      body += extinf(`Ch ${i}`, `http://shared.example/live/s${i}.ts`, attrs);
+    }
+    const e = await setupM3u(body);
+    expect((await run(e)).ok).toBe(true);
+    const storedLogos = await rows(e, 'SELECT logo FROM live WHERE logo IS NOT NULL');
+    expect(storedLogos).toHaveLength(1);
+    expect(String(storedLogos[0]?.logo)).not.toContain(logoTok);
+    const v = await vars(e);
+    expect(resolveTemplate(String(storedLogos[0]?.logo), v)).toBe(
+      `http://shared.example/${logoTok}/only-logo.png`,
+    );
   });
 
   it('reports exact deduplicated SQL counts when duplicate entries appear across batches', async () => {
@@ -635,7 +713,28 @@ describe('m3u import', () => {
       expect(await count(e.db, next)).toBe(0);
     }
 
+    // urlvars-too-large above the chunk/sharded ceiling leaves live, FTS5, and urlvars untouched and purges *_next.
+    const urlvarsBefore = await e.secrets.get('source.s1.urlvars');
+    const oversizedToken = `tok_${'p'.repeat(60_050)}`;
+    e.state.body =
+      '#EXTM3U\n' +
+      extinf(
+        'TooBigCh 0',
+        `http://perstream.example/play/0.m3u8?token=${oversizedToken}`,
+        'group-title="New"',
+      );
+    expectErr(await run(e, { batchSize: 50 }), 'source-format', 'urlvars-too-large');
+    expect(await rows(e, 'SELECT * FROM live ORDER BY id')).toEqual(liveSnap);
+    expect(await rows(e, "SELECT rowid FROM live_fts WHERE live_fts MATCH 'toobigch'")).toEqual([]);
+    expect(await count(e.db, 'live_next')).toBe(0);
+    expect(await e.secrets.get('source.s1.urlvars')).toBe(urlvarsBefore);
+
     // secret-write-failed also leaves live untouched and *_next empty.
+    e.state.body =
+      '#EXTM3U\n' +
+      Array.from({ length: 10 }, (_, i) =>
+        extinf(`SecretFailCh ${i}`, cdn(M3U_TOKEN, 700 + i), 'group-title="New"'),
+      ).join('');
     e.secrets.set = async () => {
       throw new Error('keychain');
     };

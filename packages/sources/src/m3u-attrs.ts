@@ -1,13 +1,14 @@
+import { MAX_INLINE_LOGO_BYTES, sanitizeArtworkUrl } from './artwork-url';
 import type { M3uEntry } from './m3u-types';
+
+export { MAX_INLINE_LOGO_BYTES };
 
 const SPACE = 32;
 const DQUOTE = 34;
 const SQUOTE = 39;
 const COMMA = 44;
 const EQUALS = 61;
-
-/** Maximum byte/char length kept for inline `data:` `tvg-logo` / `logo` attributes (`#169`). */
-export const MAX_INLINE_LOGO_BYTES = 4096;
+const BACKSLASH = 92;
 
 /** Non-fatal issues encountered while parsing an `#EXTINF:` attribute list. */
 export interface ExtinfIssues {
@@ -17,16 +18,56 @@ export interface ExtinfIssues {
 }
 
 const SENTINEL_TVG_IDS = new Set(['(no tvg-id)', 'no tvg-id', 'null', 'none', 'n/a', 'undefined']);
-const SATIP_CHNO_PREFIX_RE = /^(\d{1,5})\.\s+(\S.*)$/;
-const INLINE_DATA_URI_RE = /^data:/i;
+const TRAILING_QUOTED_ATTR_RE = /["']\s+[a-z][a-z0-9_-]*=["']/i;
 
-function isOversizedInlineDataLogo(value: string): boolean {
-  return value.length > MAX_INLINE_LOGO_BYTES && INLINE_DATA_URI_RE.test(value);
+function isEscapableInQuote(ch: number): boolean {
+  return ch === DQUOTE || ch === SQUOTE || ch === BACKSLASH;
+}
+
+function readQuoted(line: string, openIdx: number, quote: number): { value: string; end: number } {
+  const n = line.length;
+  let out = '';
+  let segStart = openIdx + 1;
+  let p = openIdx + 1;
+  while (p < n) {
+    const ch = line.charCodeAt(p);
+    if (ch === BACKSLASH && p + 1 < n && isEscapableInQuote(line.charCodeAt(p + 1))) {
+      out += line.slice(segStart, p) + (line[p + 1] as string);
+      p += 2;
+      segStart = p;
+      continue;
+    }
+    if (ch === quote) {
+      return {
+        value: out.length === 0 ? line.slice(segStart, p) : out + line.slice(segStart, p),
+        end: p,
+      };
+    }
+    p++;
+  }
+  return {
+    value: out.length === 0 ? line.slice(segStart, n) : out + line.slice(segStart, n),
+    end: n,
+  };
+}
+
+function findUnescapedQuote(text: string, from: number, quote: number): number {
+  const n = text.length;
+  for (let i = from; i < n; i++) {
+    const c = text.charCodeAt(i);
+    if (c === BACKSLASH && i + 1 < n && isEscapableInQuote(text.charCodeAt(i + 1))) {
+      i++;
+      continue;
+    }
+    if (c === quote) return i;
+  }
+  return -1;
 }
 
 /**
  * Walks `key=value` pairs from `from`, calling `onAttr(lowerCaseKey, value)`. Values may be double-quoted,
- * single-quoted or bare. Returns the text after the first comma outside a value (trimmed), or `undefined`.
+ * single-quoted (supporting `\"`, `\'`, `\\` escapes) or bare. Returns the text after the first comma outside
+ * a value (trimmed), or `undefined`.
  */
 export function parseAttrs(
   line: string,
@@ -43,7 +84,11 @@ export function parseAttrs(
       continue;
     }
     if (c === COMMA) {
-      if (!issues?.recover) return line.slice(i + 1).trim();
+      if (!issues?.recover) {
+        const tail = line.slice(i + 1).trim();
+        if (issues && TRAILING_QUOTED_ATTR_RE.test(tail)) issues.rawQuote = true;
+        return tail;
+      }
       i++;
       continue;
     }
@@ -63,10 +108,9 @@ export function parseAttrs(
     let value: string;
     let clean = true;
     if (q === DQUOTE || q === SQUOTE) {
-      let end = line.indexOf(q === DQUOTE ? '"' : "'", k + 1);
-      if (end < 0) end = n;
-      value = line.slice(k + 1, end);
-      i = end + 1;
+      const quoted = readQuoted(line, k, q);
+      value = quoted.value;
+      i = quoted.end + 1;
       clean = !gluedToken(line, i);
       if (!clean && issues) issues.rawQuote = true;
     } else {
@@ -113,7 +157,7 @@ function positiveChno(value: string): number | undefined {
 function cleanTvgId(value: string): string | undefined {
   const trimmed = value.trim();
   if (trimmed === '' || SENTINEL_TVG_IDS.has(trimmed.toLowerCase())) return undefined;
-  return value;
+  return trimmed;
 }
 
 function setNum(
@@ -154,20 +198,18 @@ function applyAttr(
     case 'tvg-name':
       if (value) e.tvgName = value;
       return;
-    case 'tvg-logo':
-      if (isOversizedInlineDataLogo(value)) {
-        if (issues) issues.inlineLogoStripped = true;
-        return;
-      }
-      if (value) e.tvgLogo = value;
+    case 'tvg-logo': {
+      const logo = sanitizeArtworkUrl(value);
+      if (logo.oversizedData && issues) issues.inlineLogoStripped = true;
+      if (logo.url !== undefined) e.tvgLogo = logo.url;
       return;
-    case 'logo':
-      if (isOversizedInlineDataLogo(value)) {
-        if (issues) issues.inlineLogoStripped = true;
-        return;
-      }
-      if (e.tvgLogo === undefined && value) e.tvgLogo = value;
+    }
+    case 'logo': {
+      const logo = sanitizeArtworkUrl(value);
+      if (logo.oversizedData && issues) issues.inlineLogoStripped = true;
+      if (e.tvgLogo === undefined && logo.url !== undefined) e.tvgLogo = logo.url;
       return;
+    }
     case 'tvg-chno':
       setNum(e, 'chno', positiveChno(value));
       return;
@@ -239,9 +281,9 @@ export function newEntry(): M3uEntry {
 export function parseExtinf(text: string, issues?: ExtinfIssues): M3uEntry {
   const seen: ExtinfIssues = issues ?? { rawQuote: false };
   const first = readExtinf(text, seen, true);
-  if (!seen.rawQuote) return applySatIpPrefix(first);
+  if (!seen.rawQuote) return first;
   const comma = nameCommaAfterLastValue(text);
-  if (comma < 0) return applySatIpPrefix(first);
+  if (comma < 0) return first;
   const recoveryIssues: ExtinfIssues = {
     rawQuote: false,
     inlineLogoStripped: seen.inlineLogoStripped === true,
@@ -250,31 +292,27 @@ export function parseExtinf(text: string, issues?: ExtinfIssues): M3uEntry {
   const second = readExtinf(text.slice(0, comma), recoveryIssues, false);
   if (recoveryIssues.inlineLogoStripped) seen.inlineLogoStripped = true;
   second.name = text.slice(comma + 1).trim() || second.tvgName || '';
-  return applySatIpPrefix(second);
+  return second;
 }
 
-function applySatIpPrefix(e: M3uEntry): M3uEntry {
-  if (e.chno !== undefined || e.name.length === 0) return e;
-  const match = SATIP_CHNO_PREFIX_RE.exec(e.name);
-  if (match === null) return e;
-  const n = Number(match[1]);
-  if (Number.isFinite(n) && n > 0) {
-    e.chno = n;
-    e.name = (match[2] ?? '').trim();
-  }
-  return e;
+function findLastQuotedAttrOpen(text: string): { open: number; quote: number } | undefined {
+  const dq = text.lastIndexOf('="');
+  const sq = text.lastIndexOf("='");
+  if (dq < 0 && sq < 0) return undefined;
+  return dq > sq ? { open: dq, quote: DQUOTE } : { open: sq, quote: SQUOTE };
 }
 
 function nameCommaAfterLastValue(text: string): number {
-  const open = text.lastIndexOf('="');
-  if (open < 0) return -1;
+  const last = findLastQuotedAttrOpen(text);
+  if (last === undefined) return -1;
+  const { open, quote } = last;
   let pos = open + 2;
   while (pos < text.length) {
-    const close = text.indexOf('"', pos);
+    const close = findUnescapedQuote(text, pos, quote);
     if (close < 0) return -1;
     if (!gluedToken(text, close + 1)) return text.indexOf(',', close + 1);
     if (close === open + 2 || text.charCodeAt(close - 1) <= SPACE) {
-      const innerEnd = text.indexOf('"', close + 1);
+      const innerEnd = findUnescapedQuote(text, close + 1, quote);
       if (innerEnd < 0) return -1;
       pos = innerEnd + 1;
     } else {

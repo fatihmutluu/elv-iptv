@@ -553,3 +553,139 @@ describe('M3U multicast udp://@ and rtp://@ normalization (#267)', () => {
     expect(httpAt.url).toBe('http://@host.example/live.ts');
   });
 });
+
+describe('M3U parser safety hardening (#428)', () => {
+  it('returns trimmed tvg-id and channel-id values', async () => {
+    const a = await one('#EXTINF:-1 tvg-id="  bbc.one  ",BBC One\nhttp://h.example/1.ts\n');
+    expect(a.tvgId).toBe('bbc.one');
+
+    const b = await one('#EXTINF:-1 channel-id="\t cnn.hd \t",CNN\nhttp://h.example/2.ts\n');
+    expect(b.tvgId).toBe('cnn.hd');
+  });
+
+  it('sanitizes tvg-logo and logo schemes and falls back when tvg-logo is rejected', async () => {
+    for (const bad of [
+      'javascript:alert(1)',
+      'file:///etc/passwd',
+      'ftp://cdn.example/a.png',
+      'content://provider/logo',
+      'data:image/svg+xml,<svg/>',
+      'data:text/html,<b>hi</b>',
+      '//cdn.example/logo.png',
+      '/relative/logo.png',
+      'logo.png',
+    ]) {
+      const e = await one(`#EXTINF:-1 tvg-logo="${bad}",Chan\nhttp://h.example/1.ts\n`);
+      expect(e.tvgLogo, bad).toBeUndefined();
+    }
+
+    const fallback = await one(
+      '#EXTINF:-1 tvg-logo="javascript:alert(1)" logo="https://img.example/good.png",Chan\nhttp://h.example/1.ts\n',
+    );
+    expect(fallback.tvgLogo).toBe('https://img.example/good.png');
+  });
+
+  it('supports backslash-escaped quotes and backslashes inside quoted attributes without warning', async () => {
+    const a = await run(
+      '#EXTINF:-1 tvg-id="c1" tvg-name="Show \\"Live\\" HD" group-title="News",Show "Live" HD\nhttp://h.example/1.ts\n',
+    );
+    expect(a.result.ok).toBe(true);
+    const e1 = a.batches.flatMap((b) => b.entries)[0];
+    expect(e1).toMatchObject({
+      tvgId: 'c1',
+      tvgName: 'Show "Live" HD',
+      groups: ['News'],
+      name: 'Show "Live" HD',
+    });
+    expect(a.batches.at(-1)?.stats?.warnings).toEqual([]);
+
+    const b = await run(
+      '#EXTINF:-1 tvg-name="Show \\"Live\\", HD" group-title="A\\\\B",Title, Full\nhttp://h.example/2.ts\n',
+    );
+    const e2 = b.batches.flatMap((x) => x.entries)[0];
+    expect(e2).toMatchObject({
+      tvgName: 'Show "Live", HD',
+      groups: ['A\\B'],
+      name: 'Title, Full',
+    });
+    expect(b.batches.at(-1)?.stats?.warnings).toEqual([]);
+
+    const c = await run(
+      "#EXTINF:-1 tvg-name='It\\'s \"Live\"' group-title='Path \\\\',Title\nhttp://h.example/3.ts\n",
+    );
+    const e3 = c.batches.flatMap((x) => x.entries)[0];
+    expect(e3).toMatchObject({
+      tvgName: 'It\'s "Live"',
+      groups: ['Path \\'],
+      name: 'Title',
+    });
+    expect(c.batches.at(-1)?.stats?.warnings).toEqual([]);
+  });
+
+  it('recovers malformed unescaped inner quotes in single-quoted and comma-containing attributes', async () => {
+    const sq = await run(
+      "#EXTINF:-1 tvg-id='c1' tvg-name='Channel 'Raw', Quote',Channel 'Raw', Quote\nhttp://h.example/1.ts\n",
+    );
+    const e1 = sq.batches.flatMap((b) => b.entries)[0];
+    expect(e1).toMatchObject({
+      tvgId: 'c1',
+      name: "Channel 'Raw', Quote",
+    });
+    expect(sq.batches.at(-1)?.stats?.warnings).toEqual([{ code: 'attr-quote', line: 1 }]);
+
+    const innerComma = await run(
+      '#EXTINF:-1 tvg-id="c2" tvg-name="Show 12", Part 2" group-title="News",Real Title\nhttp://h.example/2.ts\n',
+    );
+    const e2 = innerComma.batches.flatMap((b) => b.entries)[0];
+    expect(e2).toMatchObject({
+      tvgId: 'c2',
+      groups: ['News'],
+      name: 'Real Title',
+    });
+    expect(innerComma.batches.at(-1)?.stats?.warnings).toEqual([{ code: 'attr-quote', line: 1 }]);
+  });
+
+  it('restricts Sat>IP numeric prefix stripping to live entries, preserving VOD movie and episode titles', async () => {
+    const vod = await one(
+      '#EXTINF:-1,2001. A Space Odyssey\nhttp://cdn.example/movie/u/p/2001.mkv\n',
+    );
+    expect(vod.kindHint).toBe('movie');
+    expect(vod.chno).toBeUndefined();
+    expect(vod.name).toBe('2001. A Space Odyssey');
+
+    const ep = await one('#EXTINF:-1,2001. Pilot S01E01\nhttp://cdn.example/series/u/p/1.mp4\n');
+    expect(ep.kindHint).toBe('episode');
+    expect(ep.chno).toBeUndefined();
+    expect(ep.name).toBe('2001. Pilot S01E01');
+
+    const sat = await one('#EXTINF:-1,84. Das Erste HD\nhttp://h.example/live/84.ts\n');
+    expect(sat.kindHint).toBe('live');
+    expect(sat.chno).toBe(84);
+    expect(sat.name).toBe('Das Erste HD');
+
+    for (const keep of ['24 TV', '360 TV', '100.5 FM']) {
+      const k = await one(`#EXTINF:-1,${keep}\nhttp://h.example/live.ts\n`);
+      expect(k.chno).toBeUndefined();
+      expect(k.name).toBe(keep);
+    }
+  });
+
+  it('preserves backslash escape state when LOGO_PREFIX transitions to ATTR_QUOTED before an oversized data: logo', async () => {
+    const hugeLogo = `data:image/png;base64,${'A'.repeat(1_200_000)}`;
+    const text =
+      `#EXTINF:-1 tvg-logo="\\" k='v" logo="${hugeLogo}" tvg-id="c1",Escaped Logo Chan\n` +
+      `http://cdn.example/live/1.ts\n`;
+    const bytes = utf8(text);
+    const { batches, result } = await runStream(chunksOf(bytes, [19, 3, 5, 1024, bytes.length]));
+    expect(result.ok).toBe(true);
+    const entries = batches.flatMap((b) => b.entries);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      tvgId: 'c1',
+      name: 'Escaped Logo Chan',
+      url: 'http://cdn.example/live/1.ts',
+    });
+    expect(entries[0]?.tvgLogo).toBeUndefined();
+    expect(batches.at(-1)?.stats?.warnings).toEqual([{ code: 'inline-logo-stripped', line: 1 }]);
+  });
+});

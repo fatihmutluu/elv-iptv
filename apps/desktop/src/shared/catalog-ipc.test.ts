@@ -296,6 +296,7 @@ describe('isCatalogClientMessage', () => {
       },
       { type: 'call', reqId: 34, call: { method: 'channelByNumber', num: 0 } },
       { type: 'call', reqId: 35, call: { method: 'channelByNumber', num: 101, sourceId: 'src_1' } },
+      { type: 'call', reqId: 36, call: { method: 'channelByNumber', num: 4.1, sourceId: 'src_1' } },
       { type: 'cancel', reqId: 6 },
     ];
     for (const msg of valid) {
@@ -620,7 +621,12 @@ describe('isCatalogClientMessage', () => {
         },
       },
       { type: 'call', reqId: 1, call: { method: 'channelByNumber', num: -1 } },
-      { type: 'call', reqId: 1, call: { method: 'channelByNumber', num: 1.5 } },
+      { type: 'call', reqId: 1, call: { method: 'channelByNumber', num: Number.NaN } },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'channelByNumber', num: Number.POSITIVE_INFINITY },
+      },
       { type: 'call', reqId: 1, call: { method: 'channelByNumber', num: 101, sourceId: '' } },
       {
         type: 'call',

@@ -1,22 +1,35 @@
+import { normalizeLanguageCode } from '@elv/domain';
+import { decodeCodepageSlice, type XmlEncoding } from './codepages';
 import { decodeUtf8 } from './utf8';
 
-/** WHATWG Windows-1252 C1 block (0x80–0x9F); unmapped positions fall back to U+FFFD. */
-const WIN1252_C1: readonly number[] = [
-  0x20ac, 0xfffd, 0x201a, 0x0192, 0x201e, 0x2026, 0x2020, 0x2021, 0x02c6, 0x2030, 0x0160, 0x2039,
-  0x0152, 0xfffd, 0x017d, 0xfffd, 0xfffd, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014,
-  0x02dc, 0x2122, 0x0161, 0x203a, 0x0153, 0xfffd, 0x017e, 0x0178,
-];
-
-const LATIN1_ENCODINGS = new Set([
-  'iso-8859-1',
-  'iso8859-1',
-  'iso_8859-1',
-  'latin1',
-  'latin-1',
-  'windows-1252',
-  'cp1252',
-  'x-cp1252',
-]);
+const XML_PROLOG_ENCODINGS: Readonly<Record<string, XmlEncoding>> = {
+  'iso-8859-1': 'windows-1252',
+  'iso8859-1': 'windows-1252',
+  'iso_8859-1': 'windows-1252',
+  latin1: 'windows-1252',
+  'latin-1': 'windows-1252',
+  'windows-1252': 'windows-1252',
+  cp1252: 'windows-1252',
+  'x-cp1252': 'windows-1252',
+  'windows-1254': 'windows-1254',
+  cp1254: 'windows-1254',
+  'x-cp1254': 'windows-1254',
+  'iso-8859-9': 'windows-1254',
+  'iso8859-9': 'windows-1254',
+  'iso_8859-9': 'windows-1254',
+  latin5: 'windows-1254',
+  'latin-5': 'windows-1254',
+  'windows-1251': 'windows-1251',
+  cp1251: 'windows-1251',
+  'x-cp1251': 'windows-1251',
+  'windows-1256': 'windows-1256',
+  cp1256: 'windows-1256',
+  'x-cp1256': 'windows-1256',
+  'iso-8859-6': 'iso-8859-6',
+  'iso8859-6': 'iso-8859-6',
+  'iso_8859-6': 'iso-8859-6',
+  arabic: 'iso-8859-6',
+};
 
 const INLINE_HTML_TAG_RE =
   /<(\/?)(b|i|u|em|strong|br|p|span|font|small|sub|sup|mark|del|ins)(?:\s+[^<>]*)?\s*\/?>/gi;
@@ -49,37 +62,82 @@ const SUPERSCRIPT_TO_ASCII: Readonly<Record<string, string>> = {
 const XMLTV_NS_RE = /^\s*\d*(?:\/\d+)?\s*\.\s*\d*(?:\/\d+)?(?:\s*\.\s*\d*(?:\/\d+)?)?\s*$/;
 const DESC_EPISODE_RE = /^\s*(S\d{1,3}E\d{1,4})\b/i;
 
-/** Returns whether an XML prolog `encoding` value selects Latin-1 / Windows-1252 decoding. */
-export function isLatin1PrologEncoding(encoding: string | undefined): boolean {
-  if (encoding === undefined) return false;
-  return LATIN1_ENCODINGS.has(encoding.trim().toLowerCase());
+/** Resolves an XML prolog `encoding` attribute to a supported {@link XmlEncoding}, defaulting to `'utf-8'`. */
+export function resolveXmlPrologEncoding(encoding: string | undefined): XmlEncoding {
+  if (encoding === undefined) return 'utf-8';
+  return XML_PROLOG_ENCODINGS[encoding.trim().toLowerCase()] ?? 'utf-8';
 }
 
 /**
- * Decodes `bytes[start, end)` as UTF-8 on the default fast path (`latin1 === false`) or as
- * WHATWG Windows-1252 / ISO-8859-1 when the XML prolog declared a Latin-1 encoding.
+ * Decodes `bytes[start, end)` as UTF-8 on the default fast path or using the shared WHATWG
+ * single-byte codepage tables when the XML prolog declared a legacy encoding (`#429`).
  */
 export function decodeXmlBytes(
   bytes: Uint8Array,
   start = 0,
   end: number = bytes.length,
-  latin1 = false,
+  encoding: XmlEncoding = 'utf-8',
 ): string {
-  if (!latin1) return decodeUtf8(bytes, start, end);
-  const limit = Math.min(end, bytes.length);
-  const units: number[] = [];
-  let out = '';
-  for (let i = Math.max(start, 0); i < limit; i++) {
-    const b = bytes[i] as number;
-    const cp = b >= 0x80 && b <= 0x9f ? (WIN1252_C1[b - 0x80] ?? 0xfffd) : b;
-    units.push(cp);
-    if (units.length >= 4096) {
-      out += String.fromCharCode(...units);
-      units.length = 0;
+  if (encoding === 'utf-8') return decodeUtf8(bytes, start, end);
+  return decodeCodepageSlice(bytes, start, end, encoding);
+}
+
+/** Function scoring an XML `lang` attribute against caller language preferences (higher wins). */
+export type LanguageScorer = (lang: string | undefined) => number;
+
+function normalizeBcp47(raw: string): string {
+  return raw.trim().toLowerCase().replaceAll('_', '-');
+}
+
+/**
+ * Compiles a scorer for `preferredLanguages` (`#121`, `#429`) enforcing strict precedence:
+ * exact BCP-47 tag > primary language subtag (including ISO-639-2/B/T aliases) > untagged > first seen.
+ * Returns `undefined` when no valid preferences were provided.
+ */
+export function createLanguageScorer(
+  preferredLanguages: readonly string[] | undefined,
+): LanguageScorer | undefined {
+  if (preferredLanguages === undefined || preferredLanguages.length === 0) return undefined;
+  const primaryGroup = new Map<string, number>();
+  const exactPref = new Map<string, { group: number; prefIdx: number }>();
+  let prefCount = 0;
+
+  for (const raw of preferredLanguages) {
+    const exact = normalizeBcp47(raw);
+    if (exact.length === 0) continue;
+    const primary = normalizeLanguageCode(exact);
+    if (primary === undefined) continue;
+    let group = primaryGroup.get(primary);
+    if (group === undefined) {
+      group = primaryGroup.size;
+      primaryGroup.set(primary, group);
     }
+    const idx = prefCount++;
+    if (!exactPref.has(exact)) exactPref.set(exact, { group, prefIdx: idx });
   }
-  if (units.length > 0) out += String.fromCharCode(...units);
-  return out;
+
+  const groupCount = primaryGroup.size;
+  if (groupCount === 0) return undefined;
+
+  return (lang: string | undefined): number => {
+    if (lang === undefined) return 2;
+    const exact = normalizeBcp47(lang);
+    if (exact.length === 0) return 2;
+    const exactMatch = exactPref.get(exact);
+    if (exactMatch !== undefined) {
+      return (
+        3 + (groupCount - 1 - exactMatch.group) * (prefCount + 1) + (prefCount - exactMatch.prefIdx)
+      );
+    }
+    const primary = normalizeLanguageCode(exact);
+    if (primary !== undefined) {
+      const group = primaryGroup.get(primary);
+      if (group !== undefined) {
+        return 3 + (groupCount - 1 - group) * (prefCount + 1);
+      }
+    }
+    return 1;
+  };
 }
 
 /**

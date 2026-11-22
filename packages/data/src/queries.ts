@@ -191,6 +191,7 @@ export interface PlayableRow {
   extension: string | null;
   urlTemplate: string | null;
   headersJson: string | null;
+  backupUrlsJson: string | null;
 }
 
 /** The source id inside a content key (`x:<source>:...` or `m:<source>:...`), so lookups use the unique index. */
@@ -258,14 +259,15 @@ export async function queryPlayable(db: SqlDriver, key: string): Promise<Playabl
     extension: string | null;
     url_template: string | null;
     headers_json: string | null;
+    backup_urls_json: string | null;
   }>(
-    `SELECT source_id, 'live' AS stream_kind, provider_id, NULL AS extension, url_template, headers_json
+    `SELECT source_id, 'live' AS stream_kind, provider_id, NULL AS extension, url_template, headers_json, backup_urls_json
        FROM live WHERE source_id = ? AND key = ?
      UNION ALL
-     SELECT source_id, 'movie', provider_id, extension, url_template, headers_json
+     SELECT source_id, 'movie', provider_id, extension, url_template, headers_json, backup_urls_json
        FROM movies WHERE source_id = ? AND key = ?
      UNION ALL
-     SELECT source_id, 'series', provider_id, extension, url_template, headers_json
+     SELECT source_id, 'series', provider_id, extension, url_template, headers_json, backup_urls_json
        FROM episodes WHERE source_id = ? AND key = ?
      LIMIT 1`,
     [sourceId, key, sourceId, key, sourceId, key],
@@ -279,6 +281,7 @@ export async function queryPlayable(db: SqlDriver, key: string): Promise<Playabl
     extension: r.extension,
     urlTemplate: r.url_template,
     headersJson: r.headers_json,
+    backupUrlsJson: r.backup_urls_json,
   };
 }
 

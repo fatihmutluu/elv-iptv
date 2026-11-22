@@ -166,15 +166,57 @@ describe('m3u settings and secrets commit with the run', () => {
     expect(writes.at(-1)?.v0).toBe(rotated);
   });
 
-  it('fails closed with urlvars-too-large above 64 KiB and preserves prior catalog and urlvars', async () => {
-    const { e, snap } = await imported(20);
+  it('shards urlvars above 64 KiB for 10,000+ unique per-channel tokens and resolves streams cleanly (#430)', async () => {
     let huge = '#EXTM3U\n';
-    for (let i = 0; i < 1600; i += 1) {
+    const total = 10_050;
+    for (let i = 0; i < total; i += 1) {
       const perStreamToken = `tok_${i.toString().padStart(6, '0')}_${'x'.repeat(28)}`;
-      huge += extinf(`Bad ${i}`, `http://perstream.example/play/${i}.m3u8?token=${perStreamToken}`);
+      huge += extinf(`Ch ${i}`, `http://perstream.example/play/${i}.m3u8?token=${perStreamToken}`);
     }
-    e.state.body = huge;
-    const r = await run(e, { batchSize: 200 });
+    const e = await setupM3u(huge);
+    const r = await run(e, { batchSize: 1000 });
+    expect(r.ok).toBe(true);
+    expect(await count(e.db, 'live')).toBe(total);
+
+    const dump = e.secrets.dump();
+    const manifest = JSON.parse(dump['source.s1.urlvars'] ?? '{}') as { __chunks?: number };
+    expect(manifest.__chunks).toBeGreaterThan(5);
+    for (let i = 0; i < (manifest.__chunks ?? 0); i += 1) {
+      expect(dump[`source.s1.urlvars.${i}`]).toBeDefined();
+    }
+
+    // Verify stream resolution across shards (first and last channel)
+    const { createPlaytimeResolverCache } = await import('./stream-resolver');
+    const cache = createPlaytimeResolverCache({ db: e.db, secrets: e.secrets, http: e.deps.http });
+    const sampleLive = await rows(
+      e,
+      "SELECT key, name FROM live WHERE name IN ('Ch 0', 'Ch 10049') ORDER BY name",
+    );
+    const r0 = await cache.resolveStream(String(sampleLive[0]?.key));
+    const rLast = await cache.resolveStream(String(sampleLive[1]?.key));
+    expect(r0.ok && r0.value.url).toBe(
+      `http://perstream.example/play/0.m3u8?token=tok_000000_${'x'.repeat(28)}`,
+    );
+    expect(rLast.ok && rLast.value.url).toBe(
+      `http://perstream.example/play/10049.m3u8?token=tok_010049_${'x'.repeat(28)}`,
+    );
+
+    // Re-importing a small playlist shrinks shards back to single-key storage cleanly.
+    e.state.body = big(rotated, 10);
+    expect((await run(e)).ok).toBe(true);
+    expect(Object.keys(e.secrets.dump()).filter((k) => k.startsWith('source.s1.urlvars'))).toEqual([
+      'source.s1.urlvars',
+    ]);
+  });
+
+  it('fails closed with urlvars-too-large above the sharded ceiling and preserves prior catalog and urlvars (#430)', async () => {
+    const { e, snap } = await imported(20);
+    // An entry whose extracted secret exceeds URLVARS_CHUNK_BYTES (60,000 B) cannot fit in any shard and fails closed
+    const oversizedToken = `tok_${'z'.repeat(60_050)}`;
+    e.state.body =
+      '#EXTM3U\n' +
+      extinf('Huge 0', `http://perstream.example/play/0.m3u8?token=${oversizedToken}`);
+    const r = await run(e, { batchSize: 50 });
     expect(!r.ok && r.error).toMatchObject({
       category: 'source-format',
       code: 'urlvars-too-large',

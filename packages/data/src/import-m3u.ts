@@ -47,8 +47,8 @@ import {
   secretKey,
   updateSourceSettings,
 } from './sources';
-import { readUrlVars } from './stream-resolver';
 import { keyTemplate, type UrlVars } from './templates';
+import { deleteUrlVars, partitionUrlVars, readUrlVars, writeUrlVars } from './urlvars-store';
 import { writeCategories, writePlacements } from './writers';
 import {
   type M3uLiveRow,
@@ -154,6 +154,10 @@ async function processBatch(
     }
     const template = templated(st, entry.url);
     const legacyKey = m3uKey(c.sourceId, keyTemplate(template), entry.name);
+    const backupUrlsJson =
+      entry.backupUrls !== undefined && entry.backupUrls.length > 0
+        ? JSON.stringify(entry.backupUrls.map((b) => templated(st, b)))
+        : null;
     const row: M3uRow = {
       key: stableM3uKey(st, c.sourceId, kind, entry, legacyKey),
       legacyKey,
@@ -161,6 +165,7 @@ async function processBatch(
       logo: entry.tvgLogo === undefined ? null : templated(st, entry.tvgLogo),
       template,
       headersJson: entryHeaders(st, entry),
+      backupUrlsJson,
     };
     if (st.book.byteLength > MAX_URLVARS_BYTES) {
       throw new Stop(elvError('source-format', 'urlvars-too-large'));
@@ -189,6 +194,10 @@ async function processBatch(
         num: entry.chno ?? null,
         guideId: entry.tvgId ?? null,
         catchupDays: entry.catchup?.days ?? entry.timeshiftDays ?? null,
+        epgShiftMs:
+          entry.shiftHours !== undefined && Number.isFinite(entry.shiftHours)
+            ? Math.round(entry.shiftHours * 3_600_000)
+            : null,
       });
       st.written.live += 1;
       placeM3uEntry(st, 'live', row.key, groupsOf(entry), fresh, links);
@@ -312,10 +321,10 @@ export async function importM3u(
     .get(secretKey(source.id, 'playlist'))
     .catch(() => undefined);
   if (playlistUrl === undefined) return err(elvError('storage', 'secret-missing'));
-  const urlvarsKey = secretKey(source.id, 'urlvars');
   const oldVars = await readUrlVars(deps, source.id);
   let outcome: M3uOutcome | undefined;
   let secretsStaged = false;
+  let stagedMerged = false;
   return performRun(source, deps, opts, {
     execute: async (c) => {
       outcome = await execute(c, source, playlistUrl, oldVars);
@@ -323,12 +332,11 @@ export async function importM3u(
     beforeCommit: async () => {
       if (outcome?.kind !== 'imported') return;
       const merged: UrlVars = { ...oldVars, ...outcome.staged.vars };
-      try {
-        await deps.secrets.set(urlvarsKey, JSON.stringify(merged));
-        secretsStaged = true;
-      } catch {
-        throw new Stop(elvError('storage', 'secret-write-failed'));
-      }
+      const toStage = partitionUrlVars(merged) !== undefined ? merged : outcome.staged.vars;
+      stagedMerged = toStage === merged;
+      secretsStaged = true;
+      const written = await writeUrlVars(deps.secrets, source.id, toStage);
+      if (!written.ok) throw new Stop(written.error);
     },
     beforeCleanup: async (tx, c) => {
       if (outcome === undefined) return;
@@ -372,17 +380,16 @@ export async function importM3u(
     afterCommit: async () => {
       if (outcome?.kind !== 'imported') return;
       const vars = outcome.staged.vars;
-      if (Object.keys(oldVars).some((k) => !Object.hasOwn(vars, k))) {
-        await deps.secrets.set(urlvarsKey, JSON.stringify(vars)).catch(() => undefined);
+      if (stagedMerged && Object.keys(oldVars).some((k) => !Object.hasOwn(vars, k))) {
+        await writeUrlVars(deps.secrets, source.id, vars).catch(() => undefined);
       }
     },
     onAbortOrFail: async (_c, outcomeKind) => {
+      if (!secretsStaged) return;
       if (outcomeKind === 'source-removed') {
-        if (secretsStaged) await deps.secrets.delete(urlvarsKey).catch(() => undefined);
-        return;
-      }
-      if (secretsStaged) {
-        await deps.secrets.set(urlvarsKey, JSON.stringify(oldVars)).catch(() => undefined);
+        await deleteUrlVars(deps.secrets, source.id).catch(() => undefined);
+      } else {
+        await writeUrlVars(deps.secrets, source.id, oldVars).catch(() => undefined);
       }
     },
   });

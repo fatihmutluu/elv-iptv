@@ -102,4 +102,15 @@ describe('RuleBook', () => {
       { host: 'logos.example', position: 0, name: 'v1' },
     ]);
   });
+
+  it('does not bypass single tokenized logo URLs on a multi-stream host (#430)', () => {
+    const book = new RuleBook();
+    book.start([]);
+    for (let i = 0; i < 20; i += 1) {
+      book.hold(`https://shared.example/live/s${i}.ts`, 'stream');
+    }
+    book.hold(`https://shared.example/${ACCT}/only-logo.png`, 'logo');
+    book.settle();
+    expect(book.final()).toEqual([{ host: 'shared.example', position: 0, name: 'v0' }]);
+  });
 });

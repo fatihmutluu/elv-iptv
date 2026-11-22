@@ -3,16 +3,10 @@ import type { M3uEntry } from '@elv/sources';
 import { type RunCtx, Stop } from './import-run';
 import { collectSampleUrls, holdEntry } from './m3u-headers';
 import { RuleBook } from './m3u-rules';
-import {
-  knownCredentials,
-  MAX_URLVARS_BYTES,
-  placeholderNames,
-  SAMPLE_SIZE,
-  utf8ByteLength,
-  VarBook,
-} from './m3u-templating';
+import { knownCredentials, placeholderNames, SAMPLE_SIZE, VarBook } from './m3u-templating';
 import { guideSecret, type SourceRecord, type SourceSettings } from './sources';
 import type { SegmentRule, UrlVars } from './templates';
+import { partitionUrlVars } from './urlvars-store';
 
 export type M3uBrowseKind = 'live' | 'movie' | 'series';
 
@@ -168,7 +162,7 @@ export function finishM3uRun(
       return g.template;
     });
   }
-  if (utf8ByteLength(JSON.stringify(vars)) > MAX_URLVARS_BYTES) {
+  if (partitionUrlVars(vars) === undefined) {
     throw new Stop(elvError('source-format', 'urlvars-too-large'));
   }
   c.counts.live = st.written.live;

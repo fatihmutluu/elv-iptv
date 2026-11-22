@@ -1,4 +1,6 @@
-import { ok, type Result } from '@elv/domain';
+import { ok, openAsyncIterator, type Result } from '@elv/domain';
+import type { XmlEncoding } from './codepages';
+import { normalizeBomChunks } from './encoding';
 import { decodeMaybeGzip } from './gzip-stream';
 import { createStats, MAX_WARNINGS, type ScanStats, warn } from './stats';
 import { ByteBuffer } from './utf8';
@@ -22,7 +24,7 @@ import {
   startsWith,
 } from './xml-tokens';
 import { parseChildren } from './xmltv-children';
-import { isLatin1PrologEncoding } from './xmltv-meta';
+import { createLanguageScorer, type LanguageScorer, resolveXmlPrologEncoding } from './xmltv-meta';
 import { parseXmltvTime } from './xmltv-time';
 import type { XmltvBatch, XmltvChannel, XmltvOptions, XmltvProgramme } from './xmltv-types';
 
@@ -31,10 +33,44 @@ export type { XmltvBatch, XmltvChannel, XmltvOptions, XmltvProgramme } from './x
 
 const MAX_ELEMENT = 1 << 20;
 const DEFAULT_BATCH = 500;
+const TAR_HEADER_BYTES = 512;
+const TAR_USTAR_OFFSET = 257;
 const NEED = -1;
 const PROGRAMME_ATTRS = ['channel', 'start', 'stop'] as const;
 const CHANNEL_ATTRS = ['id'] as const;
 const ENCODING_ATTR = ['encoding'] as const;
+
+async function* stripLeadingTarHeader(
+  chunks: AsyncIterable<Uint8Array>,
+): AsyncGenerator<Uint8Array> {
+  const it = openAsyncIterator(chunks);
+  let head: Uint8Array = new Uint8Array(0);
+  try {
+    while (head.length < TAR_HEADER_BYTES) {
+      const step = await it.next();
+      if (step.done) break;
+      if (step.value.length === 0) continue;
+      const combined = new Uint8Array(head.length + step.value.length);
+      combined.set(head, 0);
+      combined.set(step.value, head.length);
+      head = combined;
+    }
+    if (head.length === 0) return;
+    if (head.length >= TAR_HEADER_BYTES && startsWith(head, TAR_USTAR_OFFSET, 'ustar')) {
+      const rest = head.subarray(TAR_HEADER_BYTES);
+      if (rest.length > 0) yield rest;
+    } else {
+      yield head;
+    }
+    for (;;) {
+      const step = await it.next();
+      if (step.done) break;
+      if (step.value.length > 0) yield step.value;
+    }
+  } finally {
+    await it.return?.();
+  }
+}
 
 class XmltvScanner {
   readonly stats: ScanStats = createStats();
@@ -44,11 +80,13 @@ class XmltvScanner {
   private hint = 0;
   /** Set when a programme waits behind unreported channels, so the caller can grow `programmeChannels` first. */
   private flush = false;
-  private latin1 = false;
+  private encoding: XmlEncoding = 'utf-8';
+  bomLocked = false;
   private kind = '';
   private readonly res: Resume = { at: 0 };
   private readonly attrs: (string | undefined)[] = [undefined, undefined, undefined];
   private readonly encodingAttr: (string | undefined)[] = [undefined];
+  private readonly scoreLang: LanguageScorer | undefined;
 
   private readonly size: number;
   private readonly opts: XmltvOptions;
@@ -56,6 +94,7 @@ class XmltvScanner {
   constructor(size: number, opts: XmltvOptions) {
     this.size = size;
     this.opts = opts;
+    this.scoreLang = createLanguageScorer(opts.preferredLanguages);
   }
 
   /** Processes complete elements (all remaining input when `final`) until the batch is full or input runs out. */
@@ -162,31 +201,32 @@ class XmltvScanner {
       return end;
     }
     const names = kind === 'programme' ? PROGRAMME_ATTRS : CHANNEL_ATTRS;
-    readAttrs(bytes, nameEnd(bytes, lt + 1), tagEnd - 1, names, this.attrs, this.latin1);
+    readAttrs(bytes, nameEnd(bytes, lt + 1), tagEnd - 1, names, this.attrs, this.encoding);
     if (kind === 'programme') this.programme(bytes, lt, tagEnd, bodyEnd);
     else this.channel(bytes, lt, tagEnd, bodyEnd);
     return end;
   }
 
   private checkProlog(bytes: Uint8Array, lt: number, end: number): void {
+    if (this.bomLocked) return;
     if (!startsWith(bytes, lt, '<?xml') || lt + 5 >= end - 2) return;
     const after = bytes[lt + 5] as number;
     if (after !== 32 && after !== 9 && after !== 10 && after !== 13) return;
     readAttrs(bytes, lt + 5, end - 2, ENCODING_ATTR, this.encodingAttr);
     if (this.encodingAttr[0] !== undefined) {
-      this.latin1 = isLatin1PrologEncoding(this.encodingAttr[0]);
+      this.encoding = resolveXmlPrologEncoding(this.encodingAttr[0]);
     }
   }
 
   private channel(bytes: Uint8Array, lt: number, bodyStart: number, bodyEnd: number): void {
-    const id = this.attrs[0];
+    const id = this.attrs[0]?.trim();
     if (!id) {
       this.fail(bytes, lt, 'channel-missing-id');
       return;
     }
     if (this.opts.channels && !this.opts.channels.has(id)) return;
     const channel: XmltvChannel = { id, names: [] };
-    if (!parseChildren(bytes.subarray(bodyStart, bodyEnd), channel, false, this.latin1)) {
+    if (!parseChildren(bytes.subarray(bodyStart, bodyEnd), channel, false, this.encoding)) {
       this.fail(bytes, lt, 'channel-malformed');
       return;
     }
@@ -195,8 +235,9 @@ class XmltvScanner {
   }
 
   private programme(bytes: Uint8Array, lt: number, bodyStart: number, bodyEnd: number): void {
-    const [channel, startText, stopText] = this.attrs;
-    if (channel === undefined) {
+    const [rawChannel, startText, stopText] = this.attrs;
+    const channel = rawChannel?.trim();
+    if (!channel) {
       this.fail(bytes, lt, 'programme-missing-channel');
       return;
     }
@@ -221,7 +262,15 @@ class XmltvScanner {
     if (from !== undefined && (stop === undefined ? start < from : stop <= from)) return;
     const programme: XmltvProgramme = { channel, start, title: '', categories: [] };
     if (stop !== undefined) programme.stop = stop;
-    if (!parseChildren(bytes.subarray(bodyStart, bodyEnd), programme, true, this.latin1)) {
+    if (
+      !parseChildren(
+        bytes.subarray(bodyStart, bodyEnd),
+        programme,
+        true,
+        this.encoding,
+        this.scoreLang,
+      )
+    ) {
       this.fail(bytes, lt, 'programme-malformed');
       return;
     }
@@ -276,15 +325,34 @@ export async function* scanXmltv(
   });
 
   const scanner = new XmltvScanner(size, opts);
-  let exhausted = false;
+  let decodeResult: Result<void> = ok(undefined);
+  let decodedExhausted = false;
+  async function* decodedChunks(): AsyncGenerator<Uint8Array> {
+    try {
+      for (;;) {
+        const step = await decoded.next();
+        if (step.done) {
+          decodedExhausted = true;
+          decodeResult = step.value;
+          return;
+        }
+        yield step.value;
+      }
+    } finally {
+      if (!decodedExhausted) await decoded.return(ok(undefined));
+    }
+  }
+
+  const normalized = openAsyncIterator(
+    normalizeBomChunks(stripLeadingTarHeader(decodedChunks()), () => {
+      scanner.bomLocked = true;
+    }),
+  );
   try {
     for (;;) {
-      const r = await decoded.next();
-      if (r.done) {
-        exhausted = true;
-        if (!r.value.ok) return r.value;
-        break;
-      }
+      const r = await normalized.next();
+      if (!decodeResult.ok) return decodeResult;
+      if (r.done) break;
       scanner.buf.append(r.value);
       for (;;) {
         scanner.run(false);
@@ -293,8 +361,9 @@ export async function* scanXmltv(
       }
     }
   } finally {
-    if (!exhausted) await decoded.return(ok(undefined));
+    await normalized.return?.();
   }
+  if (!decodeResult.ok) return decodeResult;
   for (;;) {
     scanner.run(true);
     if (!scanner.full) break;

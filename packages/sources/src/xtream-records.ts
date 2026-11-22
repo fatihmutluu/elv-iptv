@@ -1,3 +1,4 @@
+import { sanitizeArtworkUrl } from './artwork-url';
 import { decodeLegacyCodepage } from './codepages';
 import { decodeUtf8 } from './utf8';
 import { mergeById, toNumber, toStrictInt, toText } from './xtream-normalize';
@@ -55,6 +56,11 @@ function put<T extends object>(target: T, key: string, value: unknown): void {
   if (value !== undefined) (target as Record<string, unknown>)[key] = value;
 }
 
+function artworkUrl(value: unknown): string | undefined {
+  const text = toText(value);
+  return text === undefined ? undefined : sanitizeArtworkUrl(text).url;
+}
+
 /** Maps `user_info`/`server_info`; the caller has already checked `auth` and `status`. */
 export function toAccount(userInfo: Raw, serverInfo: Raw, status: string): XtreamAccount {
   const account: XtreamAccount = {
@@ -100,7 +106,7 @@ export function toLive(rows: Raw[]): XtreamLive[] {
     };
     const num = toStrictInt(r.num);
     if (num !== undefined && num > 0) live.num = num;
-    put(live, 'icon', toText(r.stream_icon));
+    put(live, 'icon', artworkUrl(r.stream_icon));
     put(live, 'epgId', toText(r.epg_channel_id));
     put(live, 'added', ms(r.added));
     out.push(live);
@@ -120,7 +126,7 @@ export function toMovies(rows: Raw[]): XtreamMovie[] {
       categoryIds: categoryIds(r),
       extension: toText(r.container_extension) ?? 'mp4',
     };
-    put(movie, 'icon', toText(r.stream_icon));
+    put(movie, 'icon', artworkUrl(r.stream_icon));
     put(movie, 'rating', toNumber(r.rating));
     put(movie, 'year', yearOf(r.year));
     put(movie, 'added', ms(r.added));
@@ -136,7 +142,7 @@ export function toSeries(rows: Raw[]): XtreamSeries[] {
     const id = toStrictInt(r.series_id);
     if (id === undefined) continue;
     const series: XtreamSeries = { id, name: toText(r.name) ?? '', categoryIds: categoryIds(r) };
-    put(series, 'cover', toText(r.cover));
+    put(series, 'cover', artworkUrl(r.cover));
     put(series, 'plot', toText(r.plot));
     put(series, 'rating', toNumber(r.rating));
     put(series, 'year', yearOf(r.year, r.release_date, r.releaseDate));

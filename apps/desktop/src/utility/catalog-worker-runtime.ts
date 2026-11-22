@@ -69,6 +69,7 @@ export interface CatalogWorkerRuntimeDeps {
   sleep?: (ms: number) => Promise<void>;
   log?: (line: string) => void;
   onExit?: (code: number) => void;
+  maxSecretValueChars?: number;
 }
 
 interface OpenedCatalog {
@@ -234,6 +235,7 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
   const clients = new Map<number, ClientSession>();
   const inFlightCalls = new Set<Promise<void>>();
 
+  const maxSecretValueChars = deps.maxSecretValueChars ?? MAX_SECRET_VALUE_CHARS;
   const requestSecret = (
     msg: { op: 'get' | 'delete'; key: string } | { op: 'set'; key: string; value: string },
   ): Promise<string | undefined> => {
@@ -241,7 +243,7 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
     if (!SECRET_KEY_RE.test(msg.key)) {
       return Promise.reject(new Error('invalid secret key'));
     }
-    if (msg.op === 'set' && msg.value.length > MAX_SECRET_VALUE_CHARS) {
+    if (msg.op === 'set' && msg.value.length > maxSecretValueChars) {
       return Promise.reject(new Error('secret value exceeds maximum length'));
     }
     const reqId = ++nextSecretReqId;

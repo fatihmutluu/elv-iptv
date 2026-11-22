@@ -26,7 +26,9 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
 - Entry: a stall of 4 s while `playing`, a frozen live clock (`positionMs` non-advancing for 4 s after first frame -> one bounded live-edge reload reset before escalating; `#148`), no `playing` 5 s after live `load` (8 s VOD), or a recoverable error. An unexpected live `ended` triggers at most one clean-end reload per tune (`#148`; VOD `ended` is untouched). Fast
   errors wait gaps 0, 1, 2, 4 s; silent timeouts escalate immediately (live tunes with no first frame skip rung 1) and
   each rung has 2 s to play (~9-11 s silent bound): 1 `retry`, 2 `load`, 3 `recreate` + `load`, 4 software audio or
-  alternate (`stopMedia` before async resolve); then `failed` + `stop`. 30 s of `playing` restores budgets.
+  alternates (`stopMedia` before async resolve; iterates `TuneRequest.alternates` and inline `StreamRequest.alternates`,
+  skipping failed resolvers and endpoints matching per-tune canonical `failedCanonicalUrls` across `url`, `finalUrl`, and
+  `error.finalUrl`, `#287`) or container fallback; then `failed` + `stop`. 30 s of `playing` restores budgets.
 - Limit path (`http-429`, `http-509`, `connection-limit`, even while `paused`): `stop`, `limited { nextAtMs }`, wait
   2, 4, 8, then 15 s, `load`; past 60 s `failed(connection-limit)`. Same-account `tune`s are held until wait ends.
 - VOD: reloads resume from last playing/seek position; `network` reconnects with backoff up to 120 s (paused time excluded).

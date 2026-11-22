@@ -73,6 +73,7 @@ class FakePortPair {
 function createRuntimeHarness(
   fetchImpl: FetchLike,
   onSecretSet?: (key: string, value: string, sendShutdown: () => void) => void,
+  maxSecretValueChars?: number,
 ) {
   const dir = makeTempDir();
   const dbPath = join(dir, 'catalog.db');
@@ -130,6 +131,7 @@ function createRuntimeHarness(
     openDatabase: (path) => new Database(path),
     fetchImpl,
     log: () => undefined,
+    ...(maxSecretValueChars !== undefined ? { maxSecretValueChars } : {}),
   });
 
   sendToWorker({ type: 'init', dbPath });
@@ -401,25 +403,27 @@ describe('catalog-worker-runtime security, parity, and shutdown guarantees', () 
   });
 
   it('fails closed without hanging when a secret write exceeds MAX_SECRET_VALUE_CHARS', async () => {
-    const h = createRuntimeHarness(async () => ({
-      status: 200,
-      headers: new Headers(),
-      body: (async function* () {
-        yield Buffer.from(
-          `#EXTM3U\n#EXTINF:-1,Ch\nhttp://s.example/1.ts?token=${'b'.repeat(800)}\n`,
-          'utf8',
-        );
-      })(),
-    }));
+    const h = createRuntimeHarness(
+      async () => ({
+        status: 200,
+        headers: new Headers(),
+        body: (async function* () {
+          yield Buffer.from(
+            `#EXTM3U\n#EXTINF:-1,Ch\nhttp://s.example/1.ts?token=${'b'.repeat(800)}\n`,
+            'utf8',
+          );
+        })(),
+      }),
+      undefined,
+      256,
+    );
 
     const src = await h.call<Result<SourceRow>>({
       method: 'addSource',
-      input: { kind: 'm3u', name: 'Oversized Merged Vars', playlistUrl: 'http://s.example/a.m3u' },
+      input: { kind: 'm3u', name: 'Oversized Secret', playlistUrl: 'http://s.example/a.m3u' },
     });
     expect(src.ok).toBe(true);
     if (!src.ok) throw new Error('expected ok');
-
-    h.secrets.set(`source.${src.value.id}.urlvars`, JSON.stringify({ pad: 'a'.repeat(130_800) }));
 
     const imp = await h.call<Result<ImportSummary>>({ method: 'importSource', id: src.value.id });
     expect(imp).toEqual({

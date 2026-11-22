@@ -37,6 +37,7 @@ export interface ClampedBatch {
 function emitClampedRow(
   rows: ProgrammeStageRow[],
   inBatchIndex: Map<string, number>,
+  inBatchByChannel: Map<string, ProgrammeStageRow[]>,
   lastByChannel: Map<string, ProgrammeStageRow>,
   row: ProgrammeStageRow,
 ): number {
@@ -44,9 +45,18 @@ function emitClampedRow(
   const start = row[2] as number;
   const stop = row[3] as number;
   const prev = lastByChannel.get(ch);
+  const track = (r: ProgrammeStageRow) => {
+    let list = inBatchByChannel.get(ch);
+    if (list === undefined) {
+      list = [];
+      inBatchByChannel.set(ch, list);
+    }
+    list.push(r);
+  };
   if (prev === undefined) {
     inBatchIndex.set(ch, rows.length);
     rows.push(row);
+    track(row);
     lastByChannel.set(ch, row);
     return 0;
   }
@@ -56,11 +66,14 @@ function emitClampedRow(
     const idx = inBatchIndex.get(ch);
     if (idx !== undefined) {
       rows[idx] = row;
+      const list = inBatchByChannel.get(ch);
+      if (list !== undefined && list.length > 0) list[list.length - 1] = row;
       lastByChannel.set(ch, row);
       return 0;
     }
     inBatchIndex.set(ch, rows.length);
     rows.push(row);
+    track(row);
     lastByChannel.set(ch, row);
     return 1;
   }
@@ -70,16 +83,42 @@ function emitClampedRow(
       prev[3] = start;
       if (!inBatchIndex.has(ch)) {
         rows.push(prev);
+        track(prev);
         reupserts = 1;
       }
     }
     inBatchIndex.set(ch, rows.length);
     rows.push(row);
+    track(row);
     lastByChannel.set(ch, row);
     return reupserts;
   }
-  if (stop > prevStart) row[3] = prevStart;
+  // Out-of-order earlier start: clamp against nearest following start (including prevStart) and clamp any earlier overlapping in-batch row.
+  let nextStart = prevStart;
+  let dupIdx = -1;
+  const list = inBatchByChannel.get(ch);
+  if (list !== undefined) {
+    for (let i = 0; i < list.length; i += 1) {
+      const existing = list[i] as ProgrammeStageRow;
+      const eStart = existing[2] as number;
+      if (eStart === start) {
+        dupIdx = i;
+        continue;
+      }
+      if (eStart > start && eStart < nextStart) nextStart = eStart;
+      if (eStart < start && (existing[3] as number) > start) existing[3] = start;
+    }
+  }
+  if (stop > nextStart) row[3] = nextStart;
+  if (dupIdx >= 0 && list !== undefined) {
+    const existing = list[dupIdx] as ProgrammeStageRow;
+    const rowPos = rows.indexOf(existing);
+    if (rowPos >= 0) rows[rowPos] = row;
+    list[dupIdx] = row;
+    return 0;
+  }
   rows.push(row);
+  track(row);
   return 0;
 }
 
@@ -92,6 +131,7 @@ export function closeOpenProgrammesBatch(
 ): ClampedBatch {
   const rows: ProgrammeStageRow[] = [];
   const inBatchIndex = new Map<string, number>();
+  const inBatchByChannel = new Map<string, ProgrammeStageRow[]>();
   let reupserts = 0;
   for (const p of programmes) {
     if (
@@ -108,6 +148,7 @@ export function closeOpenProgrammesBatch(
         reupserts += emitClampedRow(
           rows,
           inBatchIndex,
+          inBatchByChannel,
           lastByChannel,
           programmeRow(c.sourceId, c.runId, prev, p.start),
         );
@@ -117,6 +158,7 @@ export function closeOpenProgrammesBatch(
         reupserts += emitClampedRow(
           rows,
           inBatchIndex,
+          inBatchByChannel,
           lastByChannel,
           programmeRow(c.sourceId, c.runId, p, prev.start),
         );
@@ -126,6 +168,7 @@ export function closeOpenProgrammesBatch(
         reupserts += emitClampedRow(
           rows,
           inBatchIndex,
+          inBatchByChannel,
           lastByChannel,
           programmeRow(c.sourceId, c.runId, p, clampedStop),
         );
@@ -137,6 +180,7 @@ export function closeOpenProgrammesBatch(
       reupserts += emitClampedRow(
         rows,
         inBatchIndex,
+        inBatchByChannel,
         lastByChannel,
         programmeRow(c.sourceId, c.runId, p, p.stop),
       );
@@ -169,11 +213,13 @@ export function flushOpenProgrammes(
 ): ClampedBatch {
   const rows: ProgrammeStageRow[] = [];
   const inBatchIndex = new Map<string, number>();
+  const inBatchByChannel = new Map<string, ProgrammeStageRow[]>();
   let reupserts = 0;
   for (const p of open.values()) {
     reupserts += emitClampedRow(
       rows,
       inBatchIndex,
+      inBatchByChannel,
       lastByChannel,
       programmeRow(c.sourceId, c.runId, p, p.start + OPEN_END_MS),
     );

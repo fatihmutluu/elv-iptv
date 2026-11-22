@@ -18,6 +18,7 @@ const LAUNCHER_PREFIX_RE = /^(?:ffmpeg|ffrt\d*|auto|solution)\s+/i;
 const BACKUP_URL_SPLIT_RE = /#(?=(?:https?|rtmps?|rtsps?|udp|rtp):\/\/)/i;
 const MULTICAST_AT_RE = /^(udp|rtp):\/\/@(?=[^:/?#\s])/i;
 const EPISODIC_RE = /\b(?:s\d{1,2}\s*e\d{1,3}|\d{1,2}x\d{2})\b/i;
+const SATIP_CHNO_PREFIX_RE = /^(\d{1,5})\.\s+(\S.*)$/;
 const STREAM_HEADERS_PROPS = new Set([
   'inputstream.adaptive.stream_headers',
   'inputstream.ffmpegdirect.stream_headers',
@@ -176,6 +177,17 @@ function kindOf(url: string, schemeLen: number, entryName: string): KindHint {
   return 'live';
 }
 
+function applySatIpPrefix(e: M3uEntry): void {
+  if (e.chno !== undefined || e.name.length === 0) return;
+  const match = SATIP_CHNO_PREFIX_RE.exec(e.name);
+  if (match === null) return;
+  const n = Number(match[1]);
+  if (Number.isFinite(n) && n > 0) {
+    e.chno = n;
+    e.name = (match[2] ?? '').trim();
+  }
+}
+
 /** Sets the entry's URL (splitting inline backups, parsing pipe headers, and resolving relative URLs), `kindHint` and `nonHttp`. */
 export function finishEntry(e: M3uEntry, rawUrl: string, baseUrl: string | undefined): void {
   const { primary, backups } = splitBackupUrls(rawUrl);
@@ -195,6 +207,7 @@ export function finishEntry(e: M3uEntry, rawUrl: string, baseUrl: string | undef
   const scheme = url.slice(0, end).toLowerCase();
   e.nonHttp = scheme !== 'http' && scheme !== 'https';
   e.kindHint = e.nonHttp ? 'live' : kindOf(url, end, e.name);
+  if (e.kindHint === 'live') applySatIpPrefix(e);
 }
 
 /** Applies one `#EXTVLCOPT:` or `#EXTVLCOPT--` payload (`key=value`) to the entry. */

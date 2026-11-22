@@ -16,7 +16,16 @@ import { isCredentialFingerprint, resolveAccountPoolKey } from './credential-fin
 import { placeholderNames } from './m3u-templating';
 import { type ItemRow, queryPlayable } from './queries';
 import { getSource, type SourceRecord, secretKey } from './sources';
-import { resolveTemplate, type UrlVars } from './templates';
+import { resolveTemplate } from './templates';
+import { readUrlVars } from './urlvars-store';
+
+export { readUrlVars };
+
+/** Resolved alternate/backup stream endpoint with its own cloned headers map (`#430`). */
+export interface StreamAlternate {
+  url: string;
+  headers: Record<string, string>;
+}
 
 /** What a player needs to open an item. Never log or store it. */
 export interface StreamRequest {
@@ -25,6 +34,8 @@ export interface StreamRequest {
   headers: Record<string, string>;
   /** Opaque account pool key (`credentialFingerprint` when known, else `sourceId`) for connection pooling (`#265`). */
   accountKey?: string;
+  /** Optional resolved backup stream endpoints persisted from M3U `#backup` delimiters (`#430`). */
+  alternates?: readonly StreamAlternate[];
 }
 
 /** Rebuilds the stored templates of one source in memory. */
@@ -49,18 +60,27 @@ export function normalizeMulticastUrl(url: string): string {
   return url.replace(MULTICAST_AT_RE, '$1://');
 }
 
-/** Reads the `urlvars` secret of a source; a missing or unreadable value yields an empty object. */
-export async function readUrlVars(
-  deps: { secrets: SecretStore },
-  sourceId: string,
-): Promise<UrlVars> {
-  const raw = await deps.secrets.get(secretKey(sourceId, 'urlvars')).catch(() => undefined);
+function resolveAlternates(
+  backupUrlsJson: string | null,
+  resolver: StreamResolver,
+  headers: Record<string, string>,
+): StreamAlternate[] | undefined {
+  if (backupUrlsJson === null) return undefined;
+  let parsed: unknown;
   try {
-    const parsed: unknown = raw === undefined ? {} : JSON.parse(raw);
-    return parsed !== null && typeof parsed === 'object' ? (parsed as UrlVars) : {};
+    parsed = JSON.parse(backupUrlsJson);
   } catch {
-    return {};
+    return undefined;
   }
+  if (!Array.isArray(parsed)) return undefined;
+  const alternates: StreamAlternate[] = [];
+  for (const item of parsed) {
+    if (typeof item !== 'string' || item === '') continue;
+    const resolved = resolver.resolve(item);
+    if (resolved === undefined || resolved === '') continue;
+    alternates.push({ url: normalizeMulticastUrl(resolved), headers: { ...headers } });
+  }
+  return alternates.length > 0 ? alternates : undefined;
 }
 
 /**
@@ -265,7 +285,12 @@ export function createPlaytimeResolverCache(deps: {
             }
           }
           if (typeof extra.userAgent === 'string') {
-            const ua = sanitizeHeaderValue(extra.userAgent);
+            const resolvedUa = resolver.resolve(extra.userAgent);
+            if (resolvedUa === undefined) {
+              resolvers.delete(play.sourceId);
+              return err(elvError('storage', 'secret-missing'));
+            }
+            const ua = sanitizeHeaderValue(resolvedUa);
             if (ua.length > 0) headers['user-agent'] = ua;
           }
           if (typeof extra.referer === 'string') {
@@ -279,7 +304,13 @@ export function createPlaytimeResolverCache(deps: {
           }
         }
       }
-      return ok({ url: normalizeMulticastUrl(url), headers, accountKey });
+      const alternates = resolveAlternates(play.backupUrlsJson, resolver, headers);
+      return ok({
+        url: normalizeMulticastUrl(url),
+        headers,
+        accountKey,
+        ...(alternates === undefined ? {} : { alternates }),
+      });
     },
   };
 }

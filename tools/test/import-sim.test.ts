@@ -269,7 +269,8 @@ describe('compat account', () => {
         n,
       )[0];
     expect(byNum(13)?.catchup_days).toBe(3);
-    expect(byNum(20)?.headers_json).toContain('ELV-Compat-UA/1.0');
+    expect(byNum(20)?.headers_json).toContain('{{h:user-agent}}');
+    expect(urlVars(e, id)['h:user-agent']).toBe('ELV-Compat-UA/1.0');
     expect(byNum(21)?.headers_json).toContain('referrer-check');
     expect(byNum(27)?.url_template).toMatch(/^udp:\/\//);
     expect(byNum(28)?.url_template).toMatch(/^rtp:\/\//);

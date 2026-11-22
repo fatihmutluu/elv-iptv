@@ -8,6 +8,10 @@ export type MediaKind = 'live' | 'vod';
 export interface StreamRequest {
   url: string;
   headers: Readonly<Record<string, string>>;
+  /** Post-redirect effective stream URL observed by a resolver or probe, if known (`#287`). */
+  finalUrl?: string;
+  /** Inline backup stream requests associated with the primary stream (`#287`). */
+  alternates?: readonly StreamRequest[];
 }
 
 /** Engine choices for one load. */
@@ -80,6 +84,8 @@ export interface EngineError {
   code: EngineErrorCode;
   httpStatus?: number;
   detail?: string;
+  /** Post-redirect effective stream URL observed by the engine before failing (`#287`). */
+  finalUrl?: string;
 }
 
 /** Position sample: the media was at `positionMs` when the JS clock read `atMs`. */

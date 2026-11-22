@@ -387,7 +387,9 @@ describe('conditional HTTP 304 guide downloads (#66)', () => {
 
     // Run 2: override fails (503), xtream fallback commits with NO validator -> stale override validator MUST be cleared
     overrideStatus = 503;
-    expect((await importGuide(e.sourceId, deps, { now: NOW })).ok).toBe(true);
+    expect((await importGuide(e.sourceId, deps, { now: NOW, retryDelayMs: () => 0 })).ok).toBe(
+      true,
+    );
     expect((await getSource(e.db, e.sourceId))?.settings.httpCache?.guide).toBeUndefined();
     expect(
       (await e.db.all<{ title: string }>('SELECT title FROM programmes')).map((r) => r.title),
@@ -398,7 +400,7 @@ describe('conditional HTTP 304 guide downloads (#66)', () => {
     const r3 = await importGuide(e.sourceId, deps, { now: NOW });
     if (!r3.ok) throw new Error(JSON.stringify(r3.error));
     expect(r3.value.unchanged).toBeUndefined();
-    expect(overrideReqs[2]?.['if-none-match']).toBeUndefined();
+    expect(overrideReqs.at(-1)?.['if-none-match']).toBeUndefined();
     expect(
       (await e.db.all<{ title: string }>('SELECT title FROM programmes')).map((r) => r.title),
     ).toEqual(['FromOverride']);

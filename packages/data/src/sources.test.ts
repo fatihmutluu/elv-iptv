@@ -484,4 +484,17 @@ describe('table coverage and secret removal', () => {
     expect((await removeSecrets('src1', s.secrets)).ok).toBe(true);
     expect(s.secrets.dump()).toEqual({});
   });
+
+  it('removes all sharded urlvars keys along with manifest, xtream, and playlist secrets (#430)', async () => {
+    const s = await setup();
+    await addM3uSource({ name: 'Sharded', playlistUrl: 'https://h.example/a.m3u' }, s.deps);
+    const rootKey = secretKey('src1', 'urlvars');
+    await s.secrets.set(rootKey, JSON.stringify({ __chunks: 3 }));
+    await s.secrets.set(`${rootKey}.0`, JSON.stringify({ a: '1' }));
+    await s.secrets.set(`${rootKey}.1`, JSON.stringify({ b: '2' }));
+    await s.secrets.set(`${rootKey}.2`, JSON.stringify({ c: '3' }));
+
+    expect((await removeSecrets('src1', s.secrets)).ok).toBe(true);
+    expect(s.secrets.dump()).toEqual({});
+  });
 });

@@ -1,3 +1,4 @@
+import type { XmlEncoding } from './codepages';
 import { decodeEntities } from './entities';
 import { decodeXmlBytes } from './xmltv-meta';
 
@@ -183,7 +184,7 @@ export function readAttrs(
   to: number,
   names: readonly string[],
   values: (string | undefined)[],
-  latin1 = false,
+  encoding: XmlEncoding = 'utf-8',
 ): void {
   values.fill(undefined);
   let i = from;
@@ -219,7 +220,7 @@ export function readAttrs(
         nameStop - nameStart === want.length &&
         startsWith(bytes, nameStart, want)
       ) {
-        values[n] = decodeEntities(decodeXmlBytes(bytes, vs, ve, latin1));
+        values[n] = decodeEntities(decodeXmlBytes(bytes, vs, ve, encoding));
         break;
       }
     }
@@ -248,19 +249,24 @@ function isNestedBrTag(bytes: Uint8Array, lt: number): boolean {
 }
 
 /** Decodes element text: entities resolved, CDATA kept literal, nested tags and comments dropped, trimmed. */
-export function readText(bytes: Uint8Array, start: number, end: number, latin1 = false): string {
+export function readText(
+  bytes: Uint8Array,
+  start: number,
+  end: number,
+  encoding: XmlEncoding = 'utf-8',
+): string {
   const view = bytes.subarray(start, end);
   if (view.indexOf(LT) < 0)
-    return decodeEntities(decodeXmlBytes(view, 0, view.length, latin1)).trim();
+    return decodeEntities(decodeXmlBytes(view, 0, view.length, encoding)).trim();
   let out = '';
   let i = 0;
   while (i < view.length) {
     const lt = view.indexOf(LT, i);
     if (lt < 0) {
-      out += decodeEntities(decodeXmlBytes(view, i, view.length, latin1));
+      out += decodeEntities(decodeXmlBytes(view, i, view.length, encoding));
       break;
     }
-    out += decodeEntities(decodeXmlBytes(view, i, lt, latin1));
+    out += decodeEntities(decodeXmlBytes(view, i, lt, encoding));
     if (!isMarkupStart(view[lt + 1])) {
       out += '<';
       i = lt + 1;
@@ -269,10 +275,10 @@ export function readText(bytes: Uint8Array, start: number, end: number, latin1 =
     if (startsWith(view, lt, '<![CDATA[')) {
       const e = indexOfSeq(view, lt + 9, ']]>');
       if (e < 0) {
-        out += decodeXmlBytes(view, lt + 9, view.length, latin1);
+        out += decodeXmlBytes(view, lt + 9, view.length, encoding);
         break;
       }
-      out += decodeXmlBytes(view, lt + 9, e, latin1);
+      out += decodeXmlBytes(view, lt + 9, e, encoding);
       i = e + 3;
     } else {
       const m = skipMarkup(view, lt);

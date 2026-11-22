@@ -10,6 +10,7 @@ import {
   type TransportSettings,
 } from '@elv/domain';
 import type { SegmentRule, UrlVars } from './templates';
+import { deleteUrlVars } from './urlvars-store';
 
 /** Kind of source a user can add. */
 export type SourceKind = 'xtream' | 'm3u';
@@ -52,6 +53,8 @@ export interface SourceSettings {
   accountMeta?: SourceAccountMeta;
   /** Non-reversible SHA-256 credential fingerprint (`fp:<64-hex>`) for cross-source pooling (`#265`). */
   credentialFingerprint?: string;
+  /** Optional source-wide EPG time shift in milliseconds applied at query time (`#121`). */
+  epgShiftMs?: number;
 }
 
 /** A row of the `sources` table. */
@@ -151,7 +154,7 @@ export const TABLES_BY_SOURCE: readonly string[] = [
   'watch_progress',
   'favorites',
 ];
-const PARTS = ['xtream', 'playlist', 'urlvars'] as const;
+const NON_URLVARS_PARTS = ['xtream', 'playlist'] as const;
 
 /** Characters a source id may use: the set every platform secret store accepts in a key. */
 export const SOURCE_ID = /^[A-Za-z0-9._-]+$/;
@@ -304,12 +307,13 @@ export async function updateSourceSettings(
   await db.run('UPDATE sources SET settings_json = ? WHERE id = ?', [JSON.stringify(settings), id]);
 }
 
-/** Deletes the three secrets of a source; reports `storage/secret-delete-failed` when any deletion failed. */
+/** Deletes the secrets of a source (including all `urlvars` shards); reports `storage/secret-delete-failed` on failure. */
 export async function removeSecrets(id: string, secrets: SecretStore): Promise<Result<void>> {
-  const results = await Promise.allSettled(
-    PARTS.map((part) => secrets.delete(secretKey(id, part))),
-  );
-  return results.some((r) => r.status === 'rejected')
+  const [partResults, urlvarsResult] = await Promise.all([
+    Promise.allSettled(NON_URLVARS_PARTS.map((part) => secrets.delete(secretKey(id, part)))),
+    deleteUrlVars(secrets, id),
+  ]);
+  return partResults.some((r) => r.status === 'rejected') || !urlvarsResult.ok
     ? err(elvError('storage', 'secret-delete-failed'))
     : ok(undefined);
 }
