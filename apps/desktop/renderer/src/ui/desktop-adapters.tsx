@@ -42,6 +42,11 @@ export function createDesktopUiAdapters(options?: DesktopUiAdaptersOptions): UiA
   let fallbackLimitBytes = DEFAULT_LIMIT_BYTES;
 
   const artworkCache: ArtworkCacheAdapter = {
+    async resolveUri(uri: string): Promise<string | null> {
+      const bridge = resolveBridge();
+      if (!bridge) return null;
+      return bridge.resolve(uri);
+    },
     async clear(): Promise<void> {
       loadedUris.clear();
       const bridge = resolveBridge();

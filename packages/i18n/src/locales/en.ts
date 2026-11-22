@@ -451,7 +451,7 @@ export const enMessages = {
   'settings.liveTv.defaultMode': 'Default Live TV view',
   'settings.liveTv.epgSpan': 'TV guide time span',
   'settings.liveTv.epgSpanHours': '{hours} hours',
-  'settings.liveTv.epgGenreTints': 'Colour-code guide genres',
+  'settings.liveTv.epgGenreTints': 'Color-code guide genres',
   'settings.liveTv.epgShowClock': 'Show clock in TV guide',
   'settings.liveTv.guideRefresh': 'Guide refresh interval',
   'settings.liveTv.guideRefreshHours': 'Every {hours} h',
@@ -479,6 +479,9 @@ export const enMessages = {
   'detail.director': 'Director',
   'detail.searchPerson': 'Search {name}',
   'live.pressAgainFullscreen': 'Press OK again for fullscreen',
+  'catalog.sortAlpha': 'A–Z',
+  'catalog.sortAlphaLabel': 'Sort alphabetically',
+  'catalog.sortDefaultLabel': 'Default order',
 } as const;
 
 /** Valid message identifier across all supported locales. */

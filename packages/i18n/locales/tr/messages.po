@@ -1349,3 +1349,12 @@ msgstr "{name} için ara"
 
 msgid "live.pressAgainFullscreen"
 msgstr "Tam ekran için tekrar OK'a basın"
+
+msgid "catalog.sortAlpha"
+msgstr "A–Z"
+
+msgid "catalog.sortAlphaLabel"
+msgstr "Alfabetik sırala"
+
+msgid "catalog.sortDefaultLabel"
+msgstr "Varsayılan sıralama"

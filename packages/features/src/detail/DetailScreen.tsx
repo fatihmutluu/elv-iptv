@@ -104,6 +104,7 @@ export function DetailScreen({
   });
   const scrollViewRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const scrolledRef = useRef(false);
+  const castYRef = useRef<number | null>(null);
   const episodesYRef = useRef<number | null>(null);
   const relatedYRef = useRef<number | null>(null);
 
@@ -120,6 +121,7 @@ export function DetailScreen({
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset scroll & frosted header whenever opening a new title
   useEffect(() => {
     scrolledRef.current = false;
+    castYRef.current = null;
     onScrollTopChange?.(false);
     scrollViewRef.current?.scrollTo({ y: 0, animated: false });
   }, [onScrollTopChange, target.itemKey]);
@@ -305,6 +307,12 @@ export function DetailScreen({
         reportScrolled(false);
         return;
       }
+      if (rowId === 'cast' && castYRef.current !== null) {
+        const targetY = Math.max(0, castYRef.current - heroTopClearance);
+        scrollViewRef.current?.scrollTo({ y: targetY, animated: !theme.reduceMotion });
+        reportScrolled(targetY > SCROLL_FROST_THRESHOLD);
+        return;
+      }
       if (
         rowId === 'seasons' ||
         rowId === 'episode-chunks' ||
@@ -348,6 +356,9 @@ export function DetailScreen({
     [reportScrolled],
   );
 
+  const recordCastY = useCallback((y: number) => {
+    castYRef.current = y;
+  }, []);
   const recordEpisodesY = useCallback((y: number) => {
     episodesYRef.current = y;
   }, []);
@@ -424,6 +435,7 @@ export function DetailScreen({
             isTv={isTv}
             focusedIndex={tvNav.focusedRowId === 'cast' ? tvNav.focusedCol : null}
             {...(onSearchPerson !== undefined ? { onSearchPerson } : {})}
+            onLayoutY={recordCastY}
           />
         ) : null}
 

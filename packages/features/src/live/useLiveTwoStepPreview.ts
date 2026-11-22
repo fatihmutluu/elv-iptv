@@ -56,6 +56,8 @@ export function useLiveTwoStepPreview(opts: UseLiveTwoStepPreviewOptions): {
   const [previewedChannel, setPreviewedChannel] = useState<TwoStepPreviewEntry | null>(null);
   const previewedRef = useRef<TwoStepPreviewEntry | null>(null);
   previewedRef.current = previewedChannel;
+  const modeRef = useRef<LiveMode>(mode);
+  modeRef.current = mode;
   const mountedRef = useRef(true);
   const handoffInFlightRef = useRef(false);
 
@@ -117,20 +119,37 @@ export function useLiveTwoStepPreview(opts: UseLiveTwoStepPreviewOptions): {
         onPlay(target);
         return;
       }
+      const capturedMode = modeRef.current;
+      const capturedCategoryId = memoryRef.current.categoryId;
       handoffInFlightRef.current = true;
-      void preview.stopAndRelease().then(() => {
-        handoffInFlightRef.current = false;
-        if (mountedRef.current) {
+      void (async () => {
+        let releasedOk = false;
+        try {
+          await preview.stopAndRelease();
+          releasedOk = true;
+        } catch {
+          releasedOk = false;
+        } finally {
+          handoffInFlightRef.current = false;
+        }
+        if (
+          releasedOk &&
+          mountedRef.current &&
+          modeRef.current === capturedMode &&
+          memoryRef.current.mode === capturedMode &&
+          memoryRef.current.categoryId === capturedCategoryId
+        ) {
           clearTwoStepPreview();
           onPlay(target);
         }
-      });
+      })();
     },
     [
       clearTwoStepPreview,
       live.buildPlayTarget,
       live.tuneChannel,
       liveOkTwoStepPreview,
+      memoryRef,
       onPlay,
       preview.stopAndRelease,
       videoHost,
@@ -144,10 +163,20 @@ export function useLiveTwoStepPreview(opts: UseLiveTwoStepPreviewOptions): {
       const target = live.buildPlayTarget(ch, idx, 'favorites');
       if (videoHost === undefined) return onPlay(target);
       handoffInFlightRef.current = true;
-      void preview.stopAndRelease().then(() => {
-        handoffInFlightRef.current = false;
-        if (mountedRef.current && memoryRef.current.mode === 'favorites') onPlay(target);
-      });
+      void (async () => {
+        let releasedOk = false;
+        try {
+          await preview.stopAndRelease();
+          releasedOk = true;
+        } catch {
+          releasedOk = false;
+        } finally {
+          handoffInFlightRef.current = false;
+        }
+        if (releasedOk && mountedRef.current && memoryRef.current.mode === 'favorites') {
+          onPlay(target);
+        }
+      })();
     },
     [live.buildPlayTarget, live.tuneChannel, memoryRef, onPlay, preview.stopAndRelease, videoHost],
   );

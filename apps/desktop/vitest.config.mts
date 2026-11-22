@@ -19,6 +19,7 @@ export default defineConfig({
         'src/main/player/runtime-path.ts',
         'src/main/catalog/*.ts',
         'src/main/artwork-cache.ts',
+        'src/main/artwork-protocol.ts',
         'src/utility/catalog-worker-runtime.ts',
         'src/preload/artwork-bridge.ts',
         'src/preload/catalog-bridge.ts',

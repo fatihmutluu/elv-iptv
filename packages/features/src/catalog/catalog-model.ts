@@ -67,6 +67,7 @@ export interface BuildCatalogNavRowsInput {
   readonly railEntries?: readonly CatalogRailNavEntry[];
   readonly hasLoadMore?: boolean;
   readonly isGridMode?: boolean;
+  readonly gridHeaderCount?: number;
 }
 
 /** 2D `(row, col)` coordinate clamped inside a virtualized category grid. */
@@ -198,7 +199,7 @@ export function buildCatalogNavRows(input: BuildCatalogNavRowsInput): CatalogNav
   }
 
   if (input.isGridMode) {
-    rows.push({ id: 'gridBack', count: 1 });
+    rows.push({ id: 'gridBack', count: Math.max(1, input.gridHeaderCount ?? 1) });
     return rows;
   }
 

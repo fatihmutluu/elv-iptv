@@ -4,6 +4,7 @@ import {
   PosterCard,
   SkeletonBox,
   TABULAR_NUMS_STYLE,
+  useI18n,
   useTheme,
   webCursorPointer,
   webTransition,
@@ -156,6 +157,7 @@ export interface GridHeaderBarProps {
   readonly countLabel: string;
   readonly layout: CatalogLayoutMetrics;
   readonly backFocused: boolean;
+  readonly sortFocused?: boolean;
   readonly onBack: () => void;
   readonly sortBy?: ItemSortOrder;
   readonly onToggleSort?: () => void;
@@ -168,14 +170,20 @@ export function GridHeaderBar({
   countLabel,
   layout,
   backFocused,
+  sortFocused = false,
   onBack,
   sortBy = 'default',
   onToggleSort,
 }: GridHeaderBarProps): ReactElement {
   const theme = useTheme();
+  const i18n = useI18n();
   const cursor = webCursorPointer();
   const transition = webTransition(theme, 'background-color, opacity, transform');
   const isAlpha = sortBy === 'alpha';
+  const sortLabel = i18n.t('catalog.sortAlpha');
+  const sortA11yLabel = isAlpha
+    ? i18n.t('catalog.sortDefaultLabel')
+    : i18n.t('catalog.sortAlphaLabel');
 
   return (
     <View style={[styles.header, { paddingHorizontal: layout.padX }]}>
@@ -225,7 +233,7 @@ export function GridHeaderBar({
           <Pressable
             testID="catalog-grid-sort"
             accessibilityRole="button"
-            accessibilityLabel="A–Z"
+            accessibilityLabel={sortA11yLabel}
             accessibilityState={{ selected: isAlpha }}
             focusable={!layout.isTv}
             onPress={onToggleSort}
@@ -234,10 +242,19 @@ export function GridHeaderBar({
               layout.isTouch ? styles.touchTarget : null,
               {
                 borderRadius: theme.radius.button,
-                backgroundColor: isAlpha ? theme.colors.accentTint : theme.colors.chipBg,
-                borderWidth: 1,
-                borderColor: isAlpha ? theme.colors.accent : theme.colors.chipBorder,
+                backgroundColor: sortFocused
+                  ? theme.colors.focusFill
+                  : isAlpha
+                    ? theme.colors.accentTint
+                    : theme.colors.chipBg,
+                borderWidth: sortFocused ? theme.focus.ringWidth : 1,
+                borderColor: sortFocused
+                  ? theme.colors.focusRingColor
+                  : isAlpha
+                    ? theme.colors.accent
+                    : theme.colors.chipBorder,
                 opacity: pressed ? 0.8 : 1,
+                transform: [{ scale: sortFocused ? theme.focus.buttonScale : 1 }],
               },
               cursor,
               transition,
@@ -248,13 +265,28 @@ export function GridHeaderBar({
                 theme.typography.caption,
                 TABULAR_NUMS_STYLE,
                 {
-                  color: isAlpha ? theme.colors.textPrimary : theme.colors.textSecondary,
+                  color:
+                    sortFocused || isAlpha ? theme.colors.textPrimary : theme.colors.textSecondary,
                   fontWeight: '600',
                 },
               ]}
             >
-              A–Z
+              {sortLabel}
             </Text>
+            {sortFocused ? (
+              <View
+                pointerEvents="none"
+                testID="catalog-grid-sort-focus-ring"
+                style={[
+                  styles.sortFocusRing,
+                  {
+                    borderRadius: theme.radius.button,
+                    borderWidth: theme.focus.ringWidth,
+                    borderColor: theme.colors.focusRingColor,
+                  },
+                ]}
+              />
+            ) : null}
           </Pressable>
         ) : null}
       </View>
@@ -280,11 +312,19 @@ const styles = StyleSheet.create({
   },
   touchTarget: { minHeight: 40, minWidth: 40 },
   sortButton: {
+    position: 'relative',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 10,
     paddingVertical: 5,
+  },
+  sortFocusRing: {
+    position: 'absolute',
+    top: -3,
+    bottom: -3,
+    left: -3,
+    right: -3,
   },
   headerMeta: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 },
   categoryName: { flexShrink: 1 },

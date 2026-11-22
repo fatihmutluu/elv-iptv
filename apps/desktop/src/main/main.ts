@@ -1,5 +1,5 @@
 import { rmSync } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { lstat, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
@@ -17,9 +17,15 @@ import {
   utilityProcess,
   type WebContents,
 } from 'electron';
+import { ARTWORK_PROTOCOL_SCHEME } from '../shared/artwork-ipc.ts';
 import { CATALOG_CHANNELS } from '../shared/catalog-ipc.ts';
 import { APP_ORIGIN, APP_SCHEME } from './app-protocol.ts';
-import { createDesktopArtworkCache, registerArtworkIpc } from './artwork-cache.ts';
+import {
+  createDesktopArtworkCache,
+  type DesktopArtworkCache,
+  registerArtworkIpc,
+} from './artwork-cache.ts';
+import { serveArtworkRequest } from './artwork-protocol.ts';
 import { attachBrowserBackGuard } from './browser-back.ts';
 import { type CatalogCoordinator, createCatalogCoordinator } from './catalog/coordinator.ts';
 import { parseDevSeedEnv, runDesktopDevSeedOnce } from './catalog/dev-seed.ts';
@@ -103,6 +109,7 @@ async function printGateLine(line: string, engine: MpvEngine | undefined): Promi
 
 protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  { scheme: ARTWORK_PROTOCOL_SCHEME, privileges: { standard: true, secure: true } },
 ]);
 
 function serveRenderer(): void {
@@ -111,6 +118,18 @@ function serveRenderer(): void {
     fetchFile: (path) => net.fetch(pathToFileURL(path).toString()),
   };
   protocol.handle(APP_SCHEME, (request) => serveAppRequest(rendererDir, request.url, deps));
+}
+
+function serveArtwork(cacheDir: string): void {
+  protocol.handle(ARTWORK_PROTOCOL_SCHEME, (request) =>
+    serveArtworkRequest(cacheDir, request.url, {
+      isFile: async (path) => {
+        const info = await lstat(path);
+        return info.isFile() && !info.isSymbolicLink();
+      },
+      readFile: (path) => readFile(path),
+    }),
+  );
 }
 
 function createWindow(): void {
@@ -246,6 +265,7 @@ const hasLock = startSingleInstance(app, {
 });
 
 let catalogCoordinator: CatalogCoordinator<MessagePortMain> | undefined;
+let artworkCache: DesktopArtworkCache | undefined;
 
 registerCatalogQuitHandler({
   app,
@@ -257,10 +277,11 @@ if (hasLock) {
   void app.whenReady().then(async () => {
     if (app.isPackaged) Menu.setApplicationMenu(null);
     lockDownSession(session.defaultSession);
-    const artworkCache = createDesktopArtworkCache({
+    artworkCache = createDesktopArtworkCache({
       userDataDir: app.getPath('userData'),
       onClear: () => session.defaultSession.clearCache(),
     });
+    serveArtwork(artworkCache.dir);
     registerArtworkIpc({
       ipcMain,
       cache: artworkCache,
@@ -277,6 +298,7 @@ if (hasLock) {
 }
 
 app.on('will-quit', () => {
+  void artworkCache?.dispose();
   powerBlocker.releaseAll();
 });
 

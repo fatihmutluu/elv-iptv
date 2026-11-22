@@ -15,7 +15,7 @@ export const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https: http:",
+  "img-src 'self' data: blob: elv-art: https: http:",
   "media-src 'self' blob: https: http:",
   "connect-src 'self' https: http:",
   "worker-src 'self'",

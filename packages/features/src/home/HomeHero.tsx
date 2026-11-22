@@ -48,6 +48,7 @@ export interface HomeHeroProps {
   readonly onToggleMyList: (slide: HomeHeroSlide) => void;
   readonly onToggleWatched: (slide: HomeHeroSlide) => void;
   readonly onHoverChange?: (hovered: boolean) => void;
+  readonly onFocusChange?: (focused: boolean) => void;
   readonly isTv: boolean;
   readonly isTouch: boolean;
   readonly isPortrait: boolean;
@@ -80,6 +81,7 @@ export function HomeHero({
   onToggleMyList,
   onToggleWatched,
   onHoverChange,
+  onFocusChange,
   isTv,
   isTouch,
   isPortrait,
@@ -95,6 +97,23 @@ export function HomeHero({
   const slide = slides[safeIndex];
   const handleHoverIn = useCallback(() => onHoverChange?.(true), [onHoverChange]);
   const handleHoverOut = useCallback(() => onHoverChange?.(false), [onHoverChange]);
+  const handleFocus = useCallback(() => onFocusChange?.(true), [onFocusChange]);
+  const handleBlur = useCallback(
+    (event?: unknown) => {
+      const ev = event as
+        | { currentTarget?: { contains?: (node: unknown) => boolean }; relatedTarget?: unknown }
+        | undefined;
+      if (
+        ev?.relatedTarget != null &&
+        typeof ev.currentTarget?.contains === 'function' &&
+        ev.currentTarget.contains(ev.relatedTarget)
+      ) {
+        return;
+      }
+      onFocusChange?.(false);
+    },
+    [onFocusChange],
+  );
 
   if (slide === undefined) return null;
 
@@ -123,6 +142,8 @@ export function HomeHero({
       focusable={false}
       onHoverIn={handleHoverIn}
       onHoverOut={handleHoverOut}
+      onFocus={handleFocus}
+      onBlur={handleBlur}
       style={[
         styles.container,
         {

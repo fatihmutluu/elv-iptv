@@ -8,15 +8,25 @@ import {
   clampArtworkCacheLimitBytes,
   DEFAULT_ARTWORK_CACHE_BYTES,
   type DesktopArtworkCacheStats,
+  formatArtworkProtocolUrl,
   isArtworkSetLimitBytes,
   isSafeArtworkUrl,
 } from '../shared/artwork-ipc.ts';
 
 const DEFAULT_MAX_ARTWORK_ENTRY_BYTES = 4 * 1024 * 1024;
 const DEFAULT_ARTWORK_FETCH_TIMEOUT_MS = 8_000;
+const DEFAULT_INDEX_FLUSH_DELAY_MS = 1_500;
 const MAX_REDIRECTS = 3;
 const INDEX_FILENAME = 'index.json';
 const SHA256_HEX = /^[a-f0-9]{64}$/;
+
+function isAllowedImageContentType(header: string | null): boolean {
+  if (header === null) return true;
+  const mime = header.split(';')[0]?.trim().toLowerCase() ?? '';
+  if (mime.length === 0) return true;
+  if (mime === 'application/octet-stream') return true;
+  return mime.startsWith('image/') && mime !== 'image/svg+xml';
+}
 
 function sha256Hex(value: string): string {
   return createHash('sha256').update(value).digest('hex');
@@ -83,6 +93,7 @@ export interface DesktopArtworkCacheOptions {
   readonly maxLimitBytes?: number;
   readonly maxEntryBytes?: number;
   readonly timeoutMs?: number;
+  readonly indexFlushDelayMs?: number;
   readonly fetch?: typeof globalThis.fetch;
   readonly allowPrivateHosts?: boolean;
   readonly onClear?: () => Promise<void> | void;
@@ -94,9 +105,11 @@ export interface DesktopArtworkCache {
   get(uri: string): Promise<string | null>;
   put(uri: string, data: Uint8Array): Promise<string | null>;
   fetchAndCache(uri: string): Promise<string | null>;
+  resolve(uri: string): Promise<string | null>;
   setLimitBytes(nextMaxBytes: number): Promise<void>;
   clear(): Promise<void>;
   stats(): Promise<DesktopArtworkCacheStats>;
+  dispose(): Promise<void>;
 }
 
 /**
@@ -115,6 +128,10 @@ export function createDesktopArtworkCache(
     Math.floor(options.maxEntryBytes ?? DEFAULT_MAX_ARTWORK_ENTRY_BYTES),
   );
   const timeoutMs = Math.max(10, Math.floor(options.timeoutMs ?? DEFAULT_ARTWORK_FETCH_TIMEOUT_MS));
+  const indexFlushDelayMs = Math.max(
+    1,
+    Math.floor(options.indexFlushDelayMs ?? DEFAULT_INDEX_FLUSH_DELAY_MS),
+  );
   const fetchFn = options.fetch ?? globalThis.fetch;
   const allowPrivateHosts = Boolean(options.allowPrivateHosts);
 
@@ -126,8 +143,11 @@ export function createDesktopArtworkCache(
 
   let limitBytes = clampLimit(options.maxBytes ?? DEFAULT_ARTWORK_CACHE_BYTES);
   const entries = new Map<string, number>();
+  const inFlight = new Map<string, Promise<string | null>>();
   let totalBytes = 0;
   let initialized = false;
+  let indexDirty = false;
+  let flushTimer: ReturnType<typeof setTimeout> | null = null;
   let queue: Promise<void> = Promise.resolve();
 
   const runExclusive = <T>(task: () => Promise<T>): Promise<T> => {
@@ -139,9 +159,29 @@ export function createDesktopArtworkCache(
     return next;
   };
   const filePathFor = (key: string): string => join(dir, `${key}.img`);
-  const persistIndex = async (): Promise<void> => {
+  const cancelScheduledFlush = (): void => {
+    if (flushTimer !== null) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+  };
+  const persistIndexNow = async (): Promise<void> => {
+    cancelScheduledFlush();
+    indexDirty = false;
     const list = [...entries.entries()].map(([key, bytes]) => ({ key, bytes }));
     await writeFileAtomic(dir, indexPath, JSON.stringify({ entries: list }));
+  };
+  const scheduleIndexFlush = (): void => {
+    indexDirty = true;
+    if (flushTimer !== null) return;
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      void runExclusive(async () => {
+        if (!initialized || !indexDirty) return;
+        await persistIndexNow();
+      }).catch(() => undefined);
+    }, indexFlushDelayMs);
+    flushTimer.unref?.();
   };
   const evictOverflow = async (incomingBytes: number): Promise<void> => {
     const evicted: string[] = [];
@@ -212,7 +252,7 @@ export function createDesktopArtworkCache(
       totalBytes += file.size;
     }
     await evictOverflow(0);
-    await persistIndex();
+    await persistIndexNow();
     initialized = true;
   };
 
@@ -229,12 +269,12 @@ export function createDesktopArtworkCache(
     } catch {
       entries.delete(key);
       totalBytes -= size;
-      await persistIndex();
+      scheduleIndexFlush();
       return null;
     }
     entries.delete(key);
     entries.set(key, size);
-    await persistIndex();
+    scheduleIndexFlush();
     return path;
   };
 
@@ -256,23 +296,20 @@ export function createDesktopArtworkCache(
     await evictOverflow(size);
     entries.set(key, size);
     totalBytes += size;
-    await persistIndex();
+    await persistIndexNow();
     return path;
   };
 
-  return {
-    dir,
-    get(uri: string): Promise<string | null> {
-      return runExclusive(() => getInternal(uri));
-    },
-    put(uri: string, data: Uint8Array): Promise<string | null> {
-      return runExclusive(() => putInternal(uri, data));
-    },
-    async fetchAndCache(uri: string): Promise<string | null> {
-      if (!isSafeArtworkUrl(uri, { allowPrivateHosts })) return null;
-      const hit = await runExclusive(() => getInternal(uri));
-      if (hit !== null) return hit;
+  const fetchAndCacheInternal = async (uri: string): Promise<string | null> => {
+    if (!isSafeArtworkUrl(uri, { allowPrivateHosts })) return null;
+    const hit = await runExclusive(() => getInternal(uri));
+    if (hit !== null) return hit;
 
+    const key = sha256Hex(uri);
+    const existingFlight = inFlight.get(key);
+    if (existingFlight) return existingFlight;
+
+    const task = (async (): Promise<string | null> => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
@@ -295,6 +332,7 @@ export function createDesktopArtworkCache(
           break;
         }
         if (!response?.ok) return null;
+        if (!isAllowedImageContentType(response.headers.get('content-type'))) return null;
         const maxAllowed = Math.min(maxEntryBytes, limitBytes);
         const bytes = await readBoundedBody(response, maxAllowed);
         if (!bytes) return null;
@@ -303,19 +341,43 @@ export function createDesktopArtworkCache(
         return null;
       } finally {
         clearTimeout(timer);
+        inFlight.delete(key);
       }
+    })();
+
+    inFlight.set(key, task);
+    return task;
+  };
+
+  return {
+    dir,
+    get(uri: string): Promise<string | null> {
+      return runExclusive(() => getInternal(uri));
+    },
+    put(uri: string, data: Uint8Array): Promise<string | null> {
+      return runExclusive(() => putInternal(uri, data));
+    },
+    fetchAndCache: fetchAndCacheInternal,
+    async resolve(uri: string): Promise<string | null> {
+      const cachedPath = await fetchAndCacheInternal(uri);
+      if (cachedPath === null) return null;
+      return formatArtworkProtocolUrl(sha256Hex(uri));
     },
     setLimitBytes(nextMaxBytes: number): Promise<void> {
       return runExclusive(async () => {
         await ensureInitialized();
         limitBytes = clampLimit(nextMaxBytes);
         await evictOverflow(0);
-        await persistIndex();
+        await persistIndexNow();
       });
     },
     clear(): Promise<void> {
       return runExclusive(async () => {
+        cancelScheduledFlush();
+        indexDirty = false;
         await ensureInitialized();
+        cancelScheduledFlush();
+        indexDirty = false;
         entries.clear();
         totalBytes = 0;
         const names = await readdir(dir).catch(() => [] as string[]);
@@ -331,6 +393,13 @@ export function createDesktopArtworkCache(
         return { bytes: totalBytes, entries: entries.size, maxBytes: limitBytes };
       });
     },
+    dispose(): Promise<void> {
+      cancelScheduledFlush();
+      return runExclusive(async () => {
+        if (!initialized || !indexDirty) return;
+        await persistIndexNow();
+      });
+    },
   };
 }
 
@@ -340,7 +409,7 @@ export interface ArtworkIpcMainLike {
   removeHandler(channel: string): void;
 }
 
-/** Registers `artwork:clear`, `artwork:set-limit`, and `artwork:stats` handlers on `ipcMain`. */
+/** Registers `artwork:clear`, `artwork:resolve`, `artwork:set-limit`, and `artwork:stats` handlers on `ipcMain`. */
 export function registerArtworkIpc(deps: {
   readonly ipcMain: ArtworkIpcMainLike;
   readonly cache: DesktopArtworkCache;
@@ -350,6 +419,14 @@ export function registerArtworkIpc(deps: {
 
   ipcMain.handle(ARTWORK_CHANNELS.clear, async () => {
     await cache.clear();
+  });
+
+  ipcMain.handle(ARTWORK_CHANNELS.resolve, async (_event, uri) => {
+    if (typeof uri !== 'string' || uri.length === 0) {
+      log(`artwork ipc: dropped invalid ${ARTWORK_CHANNELS.resolve} payload`);
+      return null;
+    }
+    return cache.resolve(uri);
   });
 
   ipcMain.handle(ARTWORK_CHANNELS.setLimit, async (_event, maxBytes) => {
@@ -364,6 +441,7 @@ export function registerArtworkIpc(deps: {
 
   return () => {
     ipcMain.removeHandler(ARTWORK_CHANNELS.clear);
+    ipcMain.removeHandler(ARTWORK_CHANNELS.resolve);
     ipcMain.removeHandler(ARTWORK_CHANNELS.setLimit);
     ipcMain.removeHandler(ARTWORK_CHANNELS.stats);
   };

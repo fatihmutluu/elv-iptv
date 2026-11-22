@@ -14,9 +14,19 @@ export const ARTWORK_CACHE_MAX_BYTES = ARTWORK_CACHE_MAX_MB * BYTES_PER_MIB;
 /** Default artwork disk cache ceiling in bytes (`#405`). */
 export const DEFAULT_ARTWORK_CACHE_BYTES = DEFAULT_ARTWORK_CACHE_MB * BYTES_PER_MIB;
 
+/** Custom Electron protocol scheme serving cached artwork strictly from disk (`#405`). */
+export const ARTWORK_PROTOCOL_SCHEME = 'elv-art';
+const ARTWORK_PROTOCOL_HOST = 'cache';
+/** Origin prefix for cached desktop artwork protocol URLs (`#405`). */
+export const ARTWORK_PROTOCOL_ORIGIN = `${ARTWORK_PROTOCOL_SCHEME}://${ARTWORK_PROTOCOL_HOST}`;
+
+const SHA256_KEY = /^[a-f0-9]{64}$/;
+const ARTWORK_PROTOCOL_URL = /^elv-art:\/\/cache\/([a-f0-9]{64})$/;
+
 /** IPC channels exposed by main for artwork disk cache management (`#405`). */
 export const ARTWORK_CHANNELS = Object.freeze({
   clear: 'artwork:clear',
+  resolve: 'artwork:resolve',
   setLimit: 'artwork:set-limit',
   stats: 'artwork:stats',
 } as const);
@@ -31,8 +41,29 @@ export interface DesktopArtworkCacheStats {
 /** Frozen `window.elv.artwork` bridge exposed by the Electron preload (`#405`). */
 export interface ArtworkBridge {
   clear(): Promise<void>;
+  resolve(uri: string): Promise<string | null>;
   setLimitBytes(maxBytes: number): Promise<void>;
   stats(): Promise<DesktopArtworkCacheStats>;
+}
+
+/** Formats a 64-char lowercase SHA-256 hex key into its canonical `elv-art://cache/<key>` URL. */
+export function formatArtworkProtocolUrl(key: string): string {
+  if (!SHA256_KEY.test(key)) {
+    throw new Error('artwork cache key must be a 64-character lowercase SHA-256 hex digest');
+  }
+  return `${ARTWORK_PROTOCOL_ORIGIN}/${key}`;
+}
+
+/** Extracts the 64-char lowercase SHA-256 hex key from a canonical `elv-art://cache/<key>` URL. */
+export function parseArtworkProtocolKey(requestUrl: string): string | null {
+  if (typeof requestUrl !== 'string') return null;
+  const match = ARTWORK_PROTOCOL_URL.exec(requestUrl);
+  return match?.[1] ?? null;
+}
+
+/** Runtime guard validating a canonical `elv-art://cache/<64-hex>` URL returned over IPC. */
+export function isArtworkProtocolUrl(x: unknown): x is string {
+  return typeof x === 'string' && ARTWORK_PROTOCOL_URL.test(x);
 }
 
 /** Clamps a byte limit to `[64 MiB, 256 MiB]` (defaulting to `128 MiB` on non-finite input). */
@@ -97,10 +128,10 @@ function isPrivateIpv6(rawHost: string): boolean {
   if (
     lower === '::1' ||
     lower === '::' ||
+    lower === '0:0:0:0:0:0:0:0' ||
     lower === '0:0:0:0:0:0:0:1' ||
-    lower.startsWith('fe80:') ||
-    lower.startsWith('fc') ||
-    lower.startsWith('fd')
+    /^fe[89ab][0-9a-f]:/.test(lower) ||
+    /^f[cd][0-9a-f]{2}:/.test(lower)
   ) {
     return true;
   }

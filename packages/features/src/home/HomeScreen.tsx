@@ -96,6 +96,7 @@ export function HomeScreen({
   const data = useHomeData({ catalog, sources, refreshToken, userStateVersion });
   const [heroIndex, setHeroIndexState] = useState(() => uiCache?.getHome()?.heroIndex ?? 0);
   const [heroHovered, setHeroHovered] = useState(false);
+  const [heroKeyboardFocused, setHeroKeyboardFocused] = useState(false);
   const setHeroIndex = useCallback(
     (idx: number) => {
       setHeroIndexState(idx);
@@ -337,7 +338,7 @@ export function HomeScreen({
     reduceMotion: theme.reduceMotion,
     routeActive,
     hovered: heroHovered,
-    tvFocused: isTv && isActiveScope && tvNav.focusedRowId === 'hero',
+    tvFocused: heroKeyboardFocused || (isTv && isActiveScope && tvNav.focusedRowId === 'hero'),
     onAdvance: advanceHeroSlide,
   });
 
@@ -393,6 +394,7 @@ export function HomeScreen({
             onToggleMyList={handleToggleMyList}
             onToggleWatched={handleToggleWatched}
             onHoverChange={setHeroHovered}
+            onFocusChange={setHeroKeyboardFocused}
             isTv={isTv}
             isTouch={isTouch}
             isPortrait={isPortrait}

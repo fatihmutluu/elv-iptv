@@ -350,7 +350,7 @@ describe('ArtworkImage ambient placeholder, loaded-URI cache & resolveUri (#405)
     expect((revealStyle as Record<string, unknown>).transitionProperty).toBe('none');
   });
 
-  it('resolves cached local URI via artworkCache.resolveUri, guards against stale responses, and falls back on local error', async () => {
+  it('waits for artworkCache.resolveUri before rendering Image (single request, no double-download) and falls back on local error', async () => {
     jest.replaceProperty(Platform, 'OS', 'android');
     const registry = createDeadHostRegistry();
     const loadedUris = createLoadedUriCache();
@@ -384,11 +384,11 @@ describe('ArtworkImage ambient placeholder, loaded-URI cache & resolveUri (#405)
       </ThemeProvider>,
     );
 
+    expect(resolveUri).toHaveBeenCalledTimes(1);
     expect(resolveUri).toHaveBeenCalledWith('https://cdn.example/cached.jpg', 240);
-    // Initial render is never blocked
-    expect(screen.getByTestId('cached-img').props.source.uri).toBe(
-      'https://cdn.example/cached.jpg',
-    );
+    // While resolveUri is in flight, show placeholder and do NOT issue a parallel <Image> network request
+    expect(screen.getByTestId('cached-placeholder', { includeHiddenElements: true })).toBeTruthy();
+    expect(screen.queryByTestId('cached-img')).toBeNull();
 
     await act(async () => {
       resolvePending?.('file:///cache/artwork/abc.img');
@@ -404,6 +404,143 @@ describe('ArtworkImage ambient placeholder, loaded-URI cache & resolveUri (#405)
       'https://cdn.example/cached.jpg',
     );
     expect(registry.isDead('https://cdn.example/cached.jpg')).toBe(false);
+  });
+
+  it('falls back cleanly to original URI when resolveUri returns null or rejects', async () => {
+    jest.replaceProperty(Platform, 'OS', 'web');
+    const registry = createDeadHostRegistry();
+    const loadedUris = createLoadedUriCache();
+
+    const nullView = await render(
+      <ThemeProvider>
+        <UiAdaptersProvider
+          adapters={{
+            artworkCache: {
+              resolveUri: jest.fn(async () => null),
+              clear: async () => undefined,
+            },
+          }}
+        >
+          <ArtworkImage
+            uri="https://cdn.example/null-resolve.jpg"
+            label="Null Resolve"
+            deadHosts={registry}
+            loadedUris={loadedUris}
+            testID="null-res"
+          />
+        </UiAdaptersProvider>
+      </ThemeProvider>,
+    );
+    expect(screen.getByTestId('null-res-img').props.source.uri).toBe(
+      'https://cdn.example/null-resolve.jpg',
+    );
+    await nullView.unmount();
+
+    await render(
+      <ThemeProvider>
+        <UiAdaptersProvider
+          adapters={{
+            artworkCache: {
+              resolveUri: jest.fn(async () => {
+                throw new Error('ipc failed');
+              }),
+              clear: async () => undefined,
+            },
+          }}
+        >
+          <ArtworkImage
+            uri="https://cdn.example/reject-resolve.jpg"
+            label="Reject Resolve"
+            deadHosts={registry}
+            loadedUris={loadedUris}
+            testID="reject-res"
+          />
+        </UiAdaptersProvider>
+      </ThemeProvider>,
+    );
+    expect(screen.getByTestId('reject-res-img').props.source.uri).toBe(
+      'https://cdn.example/reject-resolve.jpg',
+    );
+  });
+
+  it('ignores stale onLoad and onError callbacks from recycled slot A after prop switches to URI B', async () => {
+    const registry = createDeadHostRegistry();
+    const loadedUris = createLoadedUriCache();
+    const capturedByUri = new Map<
+      string,
+      { onLoad?: () => void; onError?: (err?: { message?: string }) => void }
+    >();
+
+    const renderImage = jest.fn(
+      (props: {
+        uri: string;
+        onLoad?: () => void;
+        onError?: (err?: { message?: string }) => void;
+      }) => {
+        capturedByUri.set(props.uri, { onLoad: props.onLoad, onError: props.onError });
+        return <View testID="recycled-img" accessibilityLabel={props.uri} />;
+      },
+    );
+
+    const view = await render(
+      <ThemeProvider>
+        <UiAdaptersProvider adapters={{ renderImage }}>
+          <ArtworkImage
+            uri="https://host-a.example/poster-a.jpg"
+            label="Poster A"
+            deadHosts={registry}
+            loadedUris={loadedUris}
+            testID="slot"
+          />
+        </UiAdaptersProvider>
+      </ThemeProvider>,
+    );
+
+    const callbacksA = capturedByUri.get('https://host-a.example/poster-a.jpg');
+    expect(callbacksA?.onLoad).toBeDefined();
+    expect(callbacksA?.onError).toBeDefined();
+
+    // Recycle pooled slot to URI B before A settles
+    await view.rerender(
+      <ThemeProvider>
+        <UiAdaptersProvider adapters={{ renderImage }}>
+          <ArtworkImage
+            uri="https://host-b.example/poster-b.jpg"
+            label="Poster B"
+            deadHosts={registry}
+            loadedUris={loadedUris}
+            testID="slot"
+          />
+        </UiAdaptersProvider>
+      </ThemeProvider>,
+    );
+
+    // Late onLoad from A must NOT mark B loaded or hide B's placeholder
+    await act(async () => {
+      callbacksA?.onLoad?.();
+    });
+    expect(loadedUris.has('https://host-b.example/poster-b.jpg')).toBe(false);
+    expect(loadedUris.has('https://host-a.example/poster-a.jpg')).toBe(false);
+    expect(screen.getByTestId('slot-placeholder', { includeHiddenElements: true })).toBeTruthy();
+
+    // Late onError (DNS failure) from A must NOT mark B failed or blacklist B's host
+    await act(async () => {
+      callbacksA?.onError?.({ message: 'ENOTFOUND' });
+    });
+    expect(registry.isDead('https://host-b.example/other.jpg')).toBe(false);
+    expect(registry.isDead('https://host-a.example/other.jpg')).toBe(false);
+    expect(screen.queryByTestId('slot-fallback')).toBeNull();
+    expect(screen.getByTestId('recycled-img').props.accessibilityLabel).toBe(
+      'https://host-b.example/poster-b.jpg',
+    );
+
+    // Real onLoad from B still works cleanly
+    const callbacksB = capturedByUri.get('https://host-b.example/poster-b.jpg');
+    await act(async () => {
+      callbacksB?.onLoad?.();
+    });
+    expect(loadedUris.has('https://host-b.example/poster-b.jpg')).toBe(true);
+    expect(screen.queryByTestId('slot-placeholder', { includeHiddenElements: true })).toBeNull();
   });
 
   it('does not invoke resolveUri for confirmed dead hosts', async () => {

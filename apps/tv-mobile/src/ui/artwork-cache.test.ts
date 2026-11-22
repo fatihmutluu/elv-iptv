@@ -36,6 +36,7 @@ import {
   type ArtworkCacheFsPort,
   createExpoFileSystemPort,
   createMobileArtworkCache,
+  isSafeMobileArtworkUrl,
 } from './artwork-cache';
 
 function createFakeFs(sizesByUrl: Record<string, number> = {}): {
@@ -214,7 +215,9 @@ describe('createMobileArtworkCache (#405)', () => {
     const readAsStringAsync = vi.fn(async () => '{"entries":[]}');
     const writeAsStringAsync = vi.fn(async () => undefined);
     const deleteAsync = vi.fn(async () => undefined);
-    const downloadAsync = vi.fn(async () => ({ status: 200 }));
+    const downloadAsync = vi.fn(
+      async (): Promise<{ status: number; headers?: Record<string, string> }> => ({ status: 200 }),
+    );
 
     const port = createExpoFileSystemPort({
       cacheDirectory: 'file:///expo/cache/',
@@ -244,7 +247,185 @@ describe('createMobileArtworkCache (#405)', () => {
     expect(
       await port.downloadToFile?.('https://cdn.example/a.jpg', 'file:///expo/cache/a.img', 100),
     ).toEqual({ bytes: 64 });
+    // Rejects private SSRF targets before invoking downloadAsync
+    downloadAsync.mockClear();
+    expect(
+      await port.downloadToFile?.('http://127.0.0.1/secret.jpg', 'file:///expo/cache/s.img', 100),
+    ).toBeNull();
+    expect(downloadAsync).not.toHaveBeenCalled();
+
+    // Rejects non-image content-type header and cleans up file
+    downloadAsync.mockResolvedValueOnce({
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+    expect(
+      await port.downloadToFile?.('https://cdn.example/page', 'file:///expo/cache/p.img', 100),
+    ).toBeNull();
+    expect(deleteAsync).toHaveBeenCalledWith('file:///expo/cache/p.img', { idempotent: true });
+
     await port.deleteFile('file:///expo/cache/a.img');
     expect(deleteAsync).toHaveBeenCalledWith('file:///expo/cache/a.img', { idempotent: true });
+  });
+
+  it('blocks loopback, RFC1918, metadata, unspecified, and full IPv6 link-local/ULA SSRF targets', () => {
+    expect(isSafeMobileArtworkUrl('https://cdn.example/poster.jpg')).toBe(true);
+    expect(isSafeMobileArtworkUrl('https://[2001:4860:4860::8888]/logo.png')).toBe(true);
+
+    for (const unsafe of [
+      '',
+      'file:///etc/passwd',
+      'https://user:pass@cdn.example/a.jpg',
+      'http://localhost/a.jpg',
+      'http://sub.localhost/a.jpg',
+      'http://127.0.0.1/a.jpg',
+      'http://0.0.0.0/a.jpg',
+      'http://10.0.0.1/a.jpg',
+      'http://172.16.0.1/a.jpg',
+      'http://192.168.1.1/a.jpg',
+      'http://169.254.169.254/latest/meta-data/',
+      'http://100.64.0.1/a.jpg',
+      'http://[::1]/a.jpg',
+      'http://[::]/a.jpg',
+      'http://[fc00::1]/a.jpg',
+      'http://[fd12::1]/a.jpg',
+      'http://[fe80::1]/a.jpg',
+      'http://[fe90::1]/a.jpg',
+      'http://[fea0::1]/a.jpg',
+      'http://[febf::1]/a.jpg',
+      'http://[::ffff:127.0.0.1]/a.jpg',
+      'http://[::ffff:7f00:1]/a.jpg',
+    ]) {
+      expect(isSafeMobileArtworkUrl(unsafe)).toBe(false);
+    }
+  });
+
+  it('adapts Expo SDK 58 native FileSystem, enforces bounded reads + SSRF redirects + content-type BEFORE writing, and debounces index writes', async () => {
+    const store = new Map<string, { data: string | Uint8Array; modifiedMs: number }>();
+    let nowMs = 10_000;
+    let indexWrites = 0;
+
+    class FakeDir {
+      readonly uri: string;
+      constructor(uri: string) {
+        this.uri = uri;
+      }
+      create(): void {
+        // No-op in-memory directory creation.
+      }
+      listAsRecords(): Array<{ isDirectory: boolean; uri: string }> {
+        const prefix = `${this.uri}/`;
+        return [...store.keys()]
+          .filter((key) => key.startsWith(prefix))
+          .map((uri) => ({ isDirectory: false, uri }));
+      }
+    }
+
+    class FakeFile {
+      readonly uri: string;
+      constructor(uri: string) {
+        this.uri = uri;
+      }
+      info() {
+        const entry = store.get(this.uri);
+        if (!entry) return { exists: false };
+        const size = typeof entry.data === 'string' ? entry.data.length : entry.data.byteLength;
+        return { exists: true, size, modificationTime: entry.modifiedMs };
+      }
+      async text(): Promise<string> {
+        const entry = store.get(this.uri);
+        if (!entry || typeof entry.data !== 'string') throw new Error('ENOENT');
+        return entry.data;
+      }
+      async write(content: string | Uint8Array): Promise<void> {
+        nowMs += 10;
+        if (this.uri.endsWith('/index.json')) indexWrites += 1;
+        store.set(this.uri, { data: content, modifiedMs: nowMs });
+      }
+      delete(): void {
+        store.delete(this.uri);
+      }
+    }
+
+    const port = createExpoFileSystemPort({
+      cacheDirectory: 'file:///expo58/cache/',
+      FileSystemDirectory: FakeDir,
+      FileSystemFile: FakeFile,
+    });
+    if (!port) throw new Error('expected Expo 58 FS port');
+
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === 'https://cdn.example/poster.png') {
+        return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]), {
+          status: 200,
+          headers: { 'content-type': 'image/png', 'content-length': '8' },
+        });
+      }
+      if (url === 'https://cdn.example/oversized-header.jpg') {
+        return new Response(new Uint8Array(10), {
+          status: 200,
+          headers: { 'content-type': 'image/jpeg', 'content-length': '99999' },
+        });
+      }
+      if (url === 'https://cdn.example/oversized-stream.jpg') {
+        return new Response(new Uint8Array(120), {
+          status: 200,
+          headers: { 'content-type': 'image/jpeg' },
+        });
+      }
+      if (url === 'https://cdn.example/redirect-private') {
+        return new Response(null, {
+          status: 302,
+          headers: { location: 'http://[febf::1]/secret.png' },
+        });
+      }
+      if (url === 'https://cdn.example/html-error') {
+        return new Response('<html>bad</html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        });
+      }
+      return new Response(null, { status: 404 });
+    });
+
+    const cache = createMobileArtworkCache({
+      fs: port,
+      maxBytes: 100,
+      minLimitBytes: 20,
+      maxLimitBytes: 500,
+      maxEntryBytes: 64,
+      indexFlushDelayMs: 50,
+      fetch: fetchMock as unknown as typeof globalThis.fetch,
+    });
+
+    // Rejects private host, private redirect, oversized Content-Length, oversized stream, and non-image before writing
+    expect(await cache.resolveUri?.('http://[fe90::1]/private.png', 240)).toBeNull();
+    expect(await cache.resolveUri?.('https://cdn.example/redirect-private', 240)).toBeNull();
+    expect(await cache.resolveUri?.('https://cdn.example/oversized-header.jpg', 240)).toBeNull();
+    expect(await cache.resolveUri?.('https://cdn.example/oversized-stream.jpg', 240)).toBeNull();
+    expect(await cache.resolveUri?.('https://cdn.example/html-error', 240)).toBeNull();
+    expect(await cache.stats?.()).toEqual({ bytes: 0, entries: 0, maxBytes: 100 });
+
+    // Valid image caches cleanly on disk
+    const cached = await cache.resolveUri?.('https://cdn.example/poster.png', 240);
+    expect(cached).toMatch(/^file:\/\/\/expo58\/cache\/artwork-cache\/[a-f0-9]+\.img$/);
+    expect(await cache.stats?.()).toEqual({ bytes: 8, entries: 1, maxBytes: 100 });
+
+    // Repeated hits debounce index.json persistence (0 extra index writes during hits)
+    const writesBeforeHits = indexWrites;
+    for (let i = 0; i < 8; i += 1) {
+      expect(await cache.resolveUri?.('https://cdn.example/poster.png', 240)).toBe(cached);
+    }
+    expect(indexWrites).toBe(writesBeforeHits);
+
+    // Waiting past debounce delay coalesces into a single index.json flush
+    await new Promise((r) => setTimeout(r, 100));
+    expect(indexWrites).toBe(writesBeforeHits + 1);
+
+    // Another hit followed by dispose() flushes immediately
+    expect(await cache.resolveUri?.('https://cdn.example/poster.png', 240)).toBe(cached);
+    expect(indexWrites).toBe(writesBeforeHits + 1);
+    await cache.dispose();
+    expect(indexWrites).toBe(writesBeforeHits + 2);
   });
 });

@@ -493,4 +493,7 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'detail.director': 'Yönetmen',
   'detail.searchPerson': '{name} için ara',
   'live.pressAgainFullscreen': "Tam ekran için tekrar OK'a basın",
+  'catalog.sortAlpha': 'A–Z',
+  'catalog.sortAlphaLabel': 'Alfabetik sırala',
+  'catalog.sortDefaultLabel': 'Varsayılan sıralama',
 };

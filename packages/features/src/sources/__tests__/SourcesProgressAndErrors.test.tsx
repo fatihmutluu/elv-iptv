@@ -104,6 +104,54 @@ describe('SourcesScreen localized HTTP errors & moving import progress (#63, #65
     }
   });
 
+  it('renders localized HTTP status inside the add-source form error banner in EN & TR (#63)', async () => {
+    const env = await openTestCatalog();
+    const i18n = createAppI18n('en');
+    try {
+      const failingAddCatalog: CatalogService = {
+        ...env.catalog,
+        async addSource() {
+          return err(elvError('network', 'http-503'));
+        },
+      };
+
+      const view = await render(
+        <ThemeProvider>
+          <FormFactorProvider value="desktop">
+            <I18nProvider i18n={i18n}>
+              <SourcesScreen catalog={failingAddCatalog} />
+            </I18nProvider>
+          </FormFactorProvider>
+        </ThemeProvider>,
+      );
+
+      await fireEvent.changeText(
+        screen.getByTestId('sources-input-server'),
+        'http://sim.example.test:7878',
+      );
+      await fireEvent.changeText(screen.getByTestId('sources-input-username'), 'demo');
+      await fireEvent.changeText(screen.getByTestId('sources-input-password'), 'demo');
+      await fireEvent.press(screen.getByTestId('sources-submit'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('sources-form-http-status')).toHaveTextContent(
+          'Server returned HTTP 503',
+        );
+      });
+
+      await act(async () => {
+        i18n.setLocale('tr');
+      });
+      expect(screen.getByTestId('sources-form-http-status')).toHaveTextContent(
+        'Sunucu HTTP 503 döndürdü',
+      );
+
+      await view.unmount();
+    } finally {
+      await env.cleanup();
+    }
+  });
+
   it('updates moving progress bar across phases and preserves committed ready state on Cancel (#65)', async () => {
     const env = await openTestCatalog();
     const i18n = createAppI18n('en');

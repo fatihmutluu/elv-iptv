@@ -213,6 +213,9 @@ describe('AppShell', () => {
       await fireEvent.press(screen.getByTestId('nav-tab-live'));
       await waitFor(() => {
         expect(screen.getByTestId('live-screen')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('live-mode-channels'));
+      await waitFor(() => {
         expect(screen.getByTestId('live-channels-grid')).toBeTruthy();
         expect(screen.getByTestId('live-channel-card-0')).toBeTruthy();
         expect(screen.getByText('Channel 1')).toBeTruthy();
@@ -268,6 +271,9 @@ describe('AppShell', () => {
       await fireEvent.press(screen.getByTestId('nav-tab-live'));
       await waitFor(() => {
         expect(screen.getByTestId('live-screen')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('live-mode-channels'));
+      await waitFor(() => {
         expect(screen.getByTestId('live-channels-grid')).toBeTruthy();
         expect(screen.getByTestId('live-channel-card-1')).toBeTruthy();
       });
@@ -727,6 +733,8 @@ describe('AppShell', () => {
 
       await waitFor(() => expect(screen.getByTestId('home-screen')).toBeTruthy());
       await fireEvent.press(screen.getByTestId('nav-tab-live'));
+      await waitFor(() => expect(screen.getByTestId('live-mode-channels')).toBeTruthy());
+      await fireEvent.press(screen.getByTestId('live-mode-channels'));
       await waitFor(() => expect(screen.getByTestId('live-channel-fav-0')).toBeTruthy());
       await fireEvent.press(screen.getByTestId('live-channel-fav-0'));
       await fireEvent.press(screen.getByTestId('live-mode-favorites'));

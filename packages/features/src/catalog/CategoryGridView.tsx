@@ -51,6 +51,7 @@ export interface CategoryGridViewProps {
   readonly userStateVersion: number;
   readonly layout: CatalogLayoutMetrics;
   readonly backFocused: boolean;
+  readonly sortFocused?: boolean;
   readonly focusedGridPos: GridFocusPosition | null;
   readonly onBack: () => void;
   readonly onOpenDetail: (target: DetailTarget) => void;
@@ -302,6 +303,7 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
         countLabel={countLabel}
         layout={layout}
         backFocused={props.backFocused}
+        {...(props.sortFocused !== undefined ? { sortFocused: props.sortFocused } : {})}
         onBack={props.onBack}
         {...(props.sortBy !== undefined ? { sortBy: props.sortBy } : {})}
         {...(props.onToggleSort !== undefined ? { onToggleSort: props.onToggleSort } : {})}

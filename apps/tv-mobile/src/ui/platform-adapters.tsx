@@ -13,7 +13,12 @@ import {
   type UiAdapters,
 } from '@elv/ui-kit';
 import { type AppStateStatus, Image } from 'react-native';
-import { createMobileArtworkCache } from './artwork-cache';
+import {
+  type ArtworkCacheFsPort,
+  createExpoFileSystemPort,
+  createMobileArtworkCache,
+  type ExpoFileSystemLike,
+} from './artwork-cache';
 
 const MIN_DECODE_PX = 32;
 
@@ -21,6 +26,22 @@ function clampDecodePx(maxDecodePx: number | undefined): number {
   const raw = maxDecodePx ?? DEFAULT_MAX_DECODE_PX;
   const safe = Number.isFinite(raw) ? raw : DEFAULT_MAX_DECODE_PX;
   return Math.max(MIN_DECODE_PX, Math.round(safe));
+}
+
+function resolveDefaultExpoFileSystemPort(): ArtworkCacheFsPort | undefined {
+  try {
+    const expo = require('expo') as {
+      requireOptionalNativeModule?: (name: string) => unknown;
+    };
+    const nativeFs = expo.requireOptionalNativeModule?.('FileSystem');
+    if (nativeFs && typeof nativeFs === 'object') {
+      const port = createExpoFileSystemPort(nativeFs as ExpoFileSystemLike);
+      if (port) return port;
+    }
+  } catch {
+    // Non-native or Jest environment where Expo FileSystem is unavailable.
+  }
+  return undefined;
 }
 
 /**
@@ -32,10 +53,13 @@ export function createMobileTvUiAdapters(options?: {
   readonly hardwareTier?: AppleHardwareTier;
   readonly renderBlur?: UiAdapters['renderBlur'];
   readonly artworkCache?: ArtworkCacheAdapter;
+  readonly artworkFs?: ArtworkCacheFsPort;
 }): UiAdapters {
   const tier = options?.hardwareTier ?? resolveAppleHardwareTier(getAppleDeviceModel());
   const renderBlur = tier === 'mid-power' ? undefined : options?.renderBlur;
-  const artworkCache = options?.artworkCache ?? createMobileArtworkCache();
+  const fs = options?.artworkFs ?? resolveDefaultExpoFileSystemPort();
+  const artworkCache =
+    options?.artworkCache ?? createMobileArtworkCache(fs !== undefined ? { fs } : undefined);
   return {
     artworkCache,
     ...(renderBlur !== undefined ? { renderBlur } : {}),

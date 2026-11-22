@@ -303,19 +303,32 @@ describe('HomeHero crossfade, Details CTA & auto-rotation (#399) + Watched clean
       });
       expect(screen.getByTestId('home-hero-title')).toHaveTextContent('Starlight Harbor');
 
+      // Pauses on desktop keyboard focus and resumes on blur (#399)
+      await fireEvent(screen.getByTestId('home-hero'), 'focus');
+      await act(async () => {
+        jest.advanceTimersByTime(HOME_HERO_AUTO_ROTATE_MS * 2);
+      });
+      expect(screen.getByTestId('home-hero-title')).toHaveTextContent('Starlight Harbor');
+
+      await fireEvent(screen.getByTestId('home-hero'), 'blur');
+      await act(async () => {
+        jest.advanceTimersByTime(HOME_HERO_AUTO_ROTATE_MS);
+      });
+      expect(screen.getByTestId('home-hero-title')).toHaveTextContent('Neon Horizon');
+
       // Pauses when routeActive is false
       await view.rerender(renderTree({ routeActive: false }));
       await act(async () => {
         jest.advanceTimersByTime(HOME_HERO_AUTO_ROTATE_MS * 2);
       });
-      expect(screen.getByTestId('home-hero-title')).toHaveTextContent('Starlight Harbor');
+      expect(screen.getByTestId('home-hero-title')).toHaveTextContent('Neon Horizon');
 
       // Pauses when reduceMotion is true
       await view.rerender(renderTree({ routeActive: true, reduceMotion: true }));
       await act(async () => {
         jest.advanceTimersByTime(HOME_HERO_AUTO_ROTATE_MS * 2);
       });
-      expect(screen.getByTestId('home-hero-title')).toHaveTextContent('Starlight Harbor');
+      expect(screen.getByTestId('home-hero-title')).toHaveTextContent('Neon Horizon');
 
       await view.unmount();
     } finally {

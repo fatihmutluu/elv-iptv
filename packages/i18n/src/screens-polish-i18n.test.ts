@@ -39,7 +39,7 @@ describe('@elv/i18n Wave P3 screens polish strings (#401, #405, #63, #65, #399, 
       ],
       ['settings.liveTv.defaultMode', 'Default Live TV view', 'Varsayılan Canlı TV görünümü'],
       ['settings.liveTv.epgSpan', 'TV guide time span', 'TV rehberi zaman aralığı'],
-      ['settings.liveTv.epgGenreTints', 'Colour-code guide genres', 'Rehber türlerini renklendir'],
+      ['settings.liveTv.epgGenreTints', 'Color-code guide genres', 'Rehber türlerini renklendir'],
       ['settings.liveTv.epgShowClock', 'Show clock in TV guide', 'TV rehberinde saati göster'],
       ['settings.liveTv.guideRefresh', 'Guide refresh interval', 'Rehber yenileme aralığı'],
       ['settings.liveTv.logoBackdrop', 'Channel logo readability', 'Kanal logosu okunabilirliği'],
@@ -94,6 +94,9 @@ describe('@elv/i18n Wave P3 screens polish strings (#401, #405, #63, #65, #399, 
         'Press OK again for fullscreen',
         "Tam ekran için tekrar OK'a basın",
       ],
+      ['catalog.sortAlpha', 'A–Z', 'A–Z'],
+      ['catalog.sortAlphaLabel', 'Sort alphabetically', 'Alfabetik sırala'],
+      ['catalog.sortDefaultLabel', 'Default order', 'Varsayılan sıralama'],
     ];
 
     for (const [id, expectedEn, expectedTr] of staticCases) {

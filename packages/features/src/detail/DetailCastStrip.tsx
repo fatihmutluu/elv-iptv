@@ -6,8 +6,8 @@ import {
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { memo, type ReactElement } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { memo, type ReactElement, useCallback } from 'react';
+import { type LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { DetailCastMember } from '../shared';
 
 /** Props of {@link DetailCastStrip}. */
@@ -18,6 +18,7 @@ export interface DetailCastStripProps {
   readonly isTv?: boolean;
   readonly focusedIndex?: number | null;
   readonly onSearchPerson?: (name: string) => void;
+  readonly onLayoutY?: (y: number) => void;
 }
 
 function DetailCastStripInner({
@@ -27,9 +28,16 @@ function DetailCastStripInner({
   isTv = false,
   focusedIndex = null,
   onSearchPerson,
+  onLayoutY,
 }: DetailCastStripProps): ReactElement | null {
   const theme = useTheme();
   const i18n = useI18n();
+  const handleLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      onLayoutY?.(e.nativeEvent.layout.y);
+    },
+    [onLayoutY],
+  );
   const trimmedDirector = director?.trim() ?? '';
   const hasDirector = trimmedDirector.length > 0;
   if (cast.length === 0 && !hasDirector) return null;
@@ -40,7 +48,11 @@ function DetailCastStripInner({
   const castOffset = hasDirector ? 1 : 0;
 
   return (
-    <View testID="detail-cast" style={[styles.section, { marginTop: theme.spacing.lg }]}>
+    <View
+      testID="detail-cast"
+      onLayout={handleLayout}
+      style={[styles.section, { marginTop: theme.spacing.lg }]}
+    >
       <Text
         numberOfLines={1}
         style={[

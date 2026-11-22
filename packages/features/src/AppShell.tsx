@@ -40,6 +40,7 @@ import {
   useCatalogPrewarm,
   useConnectionLimitGuard,
   useDocumentVisible,
+  useGuideAutoRefresh,
   useImportHealth,
   usePreferences,
   useShellFlush,
@@ -83,7 +84,27 @@ export function AppShell(props: AppShellProps): ReactElement {
   const [heroScrolled, setHeroScrolled] = useState(false);
   const [userPickedTab, setUserPickedTab] = useState(false);
   const [userStateVersion, setUserStateVersion] = useState(0);
-  const [liveMemory, setLiveMemory] = useState<LiveTabMemory>(EMPTY_LIVE_MEMORY);
+  const defaultLiveMode = preferences.preferences.defaultLiveMode;
+  const userPickedLiveModeRef = useRef(false);
+  const prevDefaultLiveModeRef = useRef(defaultLiveMode);
+  const defaultLiveModeRef = useRef(defaultLiveMode);
+  defaultLiveModeRef.current = defaultLiveMode;
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+  const [liveMemory, setLiveMemory] = useState<LiveTabMemory>(() => ({
+    ...EMPTY_LIVE_MEMORY,
+    mode: defaultLiveMode,
+  }));
+  useEffect(() => {
+    if (prevDefaultLiveModeRef.current === defaultLiveMode) return;
+    prevDefaultLiveModeRef.current = defaultLiveMode;
+    if (!userPickedLiveModeRef.current || activeTabRef.current !== 'live') {
+      userPickedLiveModeRef.current = false;
+      setLiveMemory((prev) =>
+        prev.mode === defaultLiveMode ? prev : { ...prev, mode: defaultLiveMode },
+      );
+    }
+  }, [defaultLiveMode]);
   const [catalogMemoryByTab, setCatalogMemoryByTab] = useState(INITIAL_CATALOG_MEMORY);
   const [detailStack, setDetailStack] = useState<readonly DetailTarget[]>([]);
   const [recentSearches, setRecentSearches] = useState<readonly string[]>([]);
@@ -184,6 +205,16 @@ export function AppShell(props: AppShellProps): ReactElement {
     uiCache,
     activeTab,
   });
+  const handleGuideRefreshed = useCallback(() => {
+    void shell.syncSourcesAndBump();
+  }, [shell.syncSourcesAndBump]);
+  useGuideAutoRefresh({
+    catalog: observedCatalog,
+    sources,
+    guideRefreshHours: preferences.preferences.guideRefreshHours,
+    enabled: documentVisible && appForeground && playTarget === null,
+    onGuideRefreshed: handleGuideRefreshed,
+  });
   const selectTab = useCallback((tab: AppTab, focusContent = true) => {
     userPickedTabRef.current = true;
     setUserPickedTab(true);
@@ -256,6 +287,14 @@ export function AppShell(props: AppShellProps): ReactElement {
       }),
     [activeDetail, activeTab, handleExitNavFocus, popDetail, selectTab],
   );
+  const handleLiveMemoryChange = useCallback((next: LiveTabMemory) => {
+    setLiveMemory((prev) => {
+      if (next.mode !== prev.mode) {
+        userPickedLiveModeRef.current = true;
+      }
+      return next;
+    });
+  }, []);
   const handleMovieMemoryChange = useCallback(
     (movie: CatalogTabMemory) => setCatalogMemoryByTab((p) => ({ ...p, movie })),
     [],
@@ -273,7 +312,8 @@ export function AppShell(props: AppShellProps): ReactElement {
           uiCache.clear();
           focusMemory.clear();
           shell.bumpCatalogRevision();
-          setLiveMemory(EMPTY_LIVE_MEMORY);
+          userPickedLiveModeRef.current = false;
+          setLiveMemory({ ...EMPTY_LIVE_MEMORY, mode: defaultLiveModeRef.current });
           setCatalogMemoryByTab(INITIAL_CATALOG_MEMORY);
           setDetailStack([]);
           clearSearchSession();
@@ -460,7 +500,7 @@ export function AppShell(props: AppShellProps): ReactElement {
                     sources={sources}
                     userStateVersion={userStateVersion}
                     memory={liveMemory}
-                    onMemoryChange={setLiveMemory}
+                    onMemoryChange={handleLiveMemoryChange}
                     videoHost={videoHost}
                     playbackGuard={playbackGuard}
                     defaultLiveMode={preferences.preferences.defaultLiveMode}

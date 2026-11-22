@@ -1,4 +1,4 @@
-import { type ReactElement, useCallback, useEffect, useState } from 'react';
+import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Image,
   type ImageResizeMode,
@@ -87,10 +87,38 @@ const DECORATIVE_VIEW_PROPS = {
   importantForAccessibility: 'no',
 } as const;
 
+const MAX_REMEMBERED_LOCAL_URIS = 1_000;
+const resolvedUrisByCache = new WeakMap<LoadedUriCache, Map<string, string>>();
+
+function getRememberedLocalUri(cache: LoadedUriCache, sourceUri: string): string | null {
+  if (!cache.has(sourceUri)) return null;
+  return resolvedUrisByCache.get(cache)?.get(sourceUri) ?? null;
+}
+
+function rememberLocalUri(cache: LoadedUriCache, sourceUri: string, localUri: string): void {
+  let map = resolvedUrisByCache.get(cache);
+  if (!map) {
+    map = new Map<string, string>();
+    resolvedUrisByCache.set(cache, map);
+  }
+  if (map.has(sourceUri)) {
+    map.delete(sourceUri);
+  } else if (map.size >= MAX_REMEMBERED_LOCAL_URIS) {
+    const oldest = map.keys().next().value;
+    if (oldest !== undefined) map.delete(oldest);
+  }
+  map.set(sourceUri, localUri);
+}
+
+function forgetLocalUri(cache: LoadedUriCache, sourceUri: string): void {
+  resolvedUrisByCache.get(cache)?.delete(sourceUri);
+}
+
 /**
  * Memory-safe poster, backdrop, and channel-logo image primitive (`#126`, `#202`, `#311`, `#405`).
  * Short-circuits confirmed dead hosts synchronously (safe under pooled `TvList` slot recycling),
- * resolves optional bounded disk-cache URIs without blocking first paint, renders an ambient
+ * resolves optional bounded disk-cache URIs before issuing an image request (preventing duplicate
+ * downloads), guards late load/error callbacks against recycled-slot URI swaps, renders an ambient
  * placeholder fading smoothly into loaded artwork (with zero flicker on revisited URIs), supports
  * dark-mode logo readability modes, and renders an atmospheric monogram fallback on error.
  */
@@ -119,9 +147,9 @@ export function ArtworkImage({
   const [loadedUri, setLoadedUri] = useState<string | null>(() =>
     cachedOnRender ? trimmedUri : null,
   );
-  const [resolvedEntry, setResolvedEntry] = useState<{
+  const [resolvedState, setResolvedState] = useState<{
     readonly source: string;
-    readonly local: string;
+    readonly local: string | null;
   } | null>(null);
   const [rejectedLocalUri, setRejectedLocalUri] = useState<string | null>(null);
 
@@ -133,53 +161,112 @@ export function ArtworkImage({
   useEffect(() => {
     if (!resolveUriFn || trimmedUri.length === 0 || failed || cachedOnRender) return;
     let cancelled = false;
-    void Promise.resolve(resolveUriFn(trimmedUri, cappedPx))
+    let pending: Promise<string | null>;
+    try {
+      pending = Promise.resolve(resolveUriFn(trimmedUri, cappedPx));
+    } catch {
+      setResolvedState({ source: trimmedUri, local: null });
+      return;
+    }
+    void pending
       .then((localUri) => {
-        if (cancelled || !localUri || localUri === trimmedUri) return;
-        if (loadedUris.has(trimmedUri)) return;
-        setResolvedEntry((prev) =>
-          prev && prev.source === trimmedUri && prev.local === localUri
+        if (cancelled) return;
+        const usableLocal = localUri && localUri !== trimmedUri ? localUri : null;
+        setResolvedState((prev) =>
+          prev && prev.source === trimmedUri && prev.local === usableLocal
             ? prev
-            : { source: trimmedUri, local: localUri },
+            : { source: trimmedUri, local: usableLocal },
         );
       })
       .catch(() => {
-        // Ignore cache resolver failures and continue loading original URI cleanly.
+        if (cancelled) return;
+        setResolvedState((prev) =>
+          prev && prev.source === trimmedUri && prev.local === null
+            ? prev
+            : { source: trimmedUri, local: null },
+        );
       });
     return () => {
       cancelled = true;
     };
-  }, [resolveUriFn, trimmedUri, cappedPx, failed, cachedOnRender, loadedUris]);
+  }, [resolveUriFn, trimmedUri, cappedPx, failed, cachedOnRender]);
 
-  const localCandidate =
-    resolvedEntry !== null &&
-    resolvedEntry.source === trimmedUri &&
-    resolvedEntry.local !== rejectedLocalUri
-      ? resolvedEntry.local
+  const resolutionReady =
+    !resolveUriFn ||
+    cachedOnRender ||
+    (resolvedState !== null && resolvedState.source === trimmedUri);
+
+  const rawLocalCandidate = cachedOnRender
+    ? getRememberedLocalUri(loadedUris, trimmedUri)
+    : resolvedState !== null && resolvedState.source === trimmedUri
+      ? resolvedState.local
       : null;
+  const localCandidate =
+    rawLocalCandidate !== null && rawLocalCandidate !== rejectedLocalUri ? rawLocalCandidate : null;
   const effectiveUri = localCandidate ?? trimmedUri;
 
-  const handleLoad = useCallback(() => {
-    setFailedUri(null);
-    if (trimmedUri.length > 0) {
-      deadHosts.recordSuccess(trimmedUri);
-      loadedUris.markLoaded(trimmedUri);
-      setLoadedUri(trimmedUri);
-    }
-  }, [trimmedUri, deadHosts, loadedUris]);
+  const activeUriRef = useRef(trimmedUri);
+  const activeRenderUriRef = useRef(effectiveUri);
+  activeUriRef.current = trimmedUri;
+  activeRenderUriRef.current = effectiveUri;
 
-  const handleError = useCallback(
-    (error?: ImageErrorInfo) => {
-      if (localCandidate !== null) {
-        setRejectedLocalUri(localCandidate);
+  useEffect(() => {
+    activeUriRef.current = trimmedUri;
+    activeRenderUriRef.current = effectiveUri;
+    return () => {
+      activeUriRef.current = '';
+      activeRenderUriRef.current = '';
+    };
+  }, [trimmedUri, effectiveUri]);
+
+  const handleLoadFor = useCallback(
+    (sourceUri: string, renderUri: string) => () => {
+      if (
+        sourceUri.length === 0 ||
+        sourceUri !== activeUriRef.current ||
+        renderUri !== activeRenderUriRef.current
+      ) {
         return;
       }
-      if (trimmedUri.length > 0) {
-        deadHosts.recordFailure(trimmedUri, error);
-        setFailedUri(trimmedUri);
+      setFailedUri(null);
+      deadHosts.recordSuccess(sourceUri);
+      loadedUris.markLoaded(sourceUri);
+      if (renderUri !== sourceUri) {
+        rememberLocalUri(loadedUris, sourceUri, renderUri);
       }
+      setLoadedUri(sourceUri);
     },
-    [localCandidate, trimmedUri, deadHosts],
+    [deadHosts, loadedUris],
+  );
+
+  const handleErrorFor = useCallback(
+    (sourceUri: string, renderUri: string) => (error?: ImageErrorInfo) => {
+      if (
+        sourceUri.length === 0 ||
+        sourceUri !== activeUriRef.current ||
+        renderUri !== activeRenderUriRef.current
+      ) {
+        return;
+      }
+      if (renderUri !== sourceUri) {
+        forgetLocalUri(loadedUris, sourceUri);
+        setRejectedLocalUri(renderUri);
+        return;
+      }
+      deadHosts.recordFailure(sourceUri, error);
+      setFailedUri(sourceUri);
+    },
+    [deadHosts, loadedUris],
+  );
+
+  const handleLoad = useMemo(
+    () => handleLoadFor(trimmedUri, effectiveUri),
+    [handleLoadFor, trimmedUri, effectiveUri],
+  );
+
+  const handleError = useMemo(
+    () => handleErrorFor(trimmedUri, effectiveUri),
+    [handleErrorFor, trimmedUri, effectiveUri],
   );
 
   const handleNativeError = useCallback(
@@ -284,45 +371,47 @@ export function ArtworkImage({
               ]}
             />
           ) : null}
-          <View
-            testID={testID ? `${testID}-zoom` : undefined}
-            {...decorativeViewProps}
-            style={zoomStyle}
-          >
+          {resolutionReady ? (
             <View
-              testID={testID ? `${testID}-reveal` : undefined}
+              testID={testID ? `${testID}-zoom` : undefined}
               {...decorativeViewProps}
-              style={revealStyle}
+              style={zoomStyle}
             >
-              {adapters.renderImage ? (
-                adapters.renderImage({
-                  uri: effectiveUri,
-                  resizeMode,
-                  maxDecodePx: cappedPx,
-                  style: styles.image,
-                  ...(decorative ? {} : { accessibilityLabel: label }),
-                  onLoad: handleLoad,
-                  onError: handleError,
-                })
-              ) : (
-                <Image
-                  testID={testID ? `${testID}-img` : undefined}
-                  source={
-                    isWeb
-                      ? { uri: effectiveUri }
-                      : { uri: effectiveUri, width: cappedPx, height: cappedPx }
-                  }
-                  resizeMode={resizeMode}
-                  resizeMethod="resize"
-                  fadeDuration={0}
-                  {...(decorative ? { accessible: false } : { accessibilityLabel: label })}
-                  onLoad={handleLoad}
-                  onError={handleNativeError}
-                  style={styles.image}
-                />
-              )}
+              <View
+                testID={testID ? `${testID}-reveal` : undefined}
+                {...decorativeViewProps}
+                style={revealStyle}
+              >
+                {adapters.renderImage ? (
+                  adapters.renderImage({
+                    uri: effectiveUri,
+                    resizeMode,
+                    maxDecodePx: cappedPx,
+                    style: styles.image,
+                    ...(decorative ? {} : { accessibilityLabel: label }),
+                    onLoad: handleLoad,
+                    onError: handleError,
+                  })
+                ) : (
+                  <Image
+                    testID={testID ? `${testID}-img` : undefined}
+                    source={
+                      isWeb
+                        ? { uri: effectiveUri }
+                        : { uri: effectiveUri, width: cappedPx, height: cappedPx }
+                    }
+                    resizeMode={resizeMode}
+                    resizeMethod="resize"
+                    fadeDuration={0}
+                    {...(decorative ? { accessible: false } : { accessibilityLabel: label })}
+                    onLoad={handleLoad}
+                    onError={handleNativeError}
+                    style={styles.image}
+                  />
+                )}
+              </View>
             </View>
-          </View>
+          ) : null}
         </>
       )}
     </View>

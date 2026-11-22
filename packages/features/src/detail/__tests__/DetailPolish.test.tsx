@@ -12,7 +12,7 @@ import {
   ViewportProvider,
 } from '@elv/ui-kit';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { Platform } from 'react-native';
+import { Platform, ScrollView } from 'react-native';
 import type { PlayTarget } from '../../ports/play-target';
 import type { DetailTarget } from '../../shared';
 import { DetailScreen } from '../DetailScreen';
@@ -453,8 +453,22 @@ describe('DetailScreen technical badges, pre-play selectors, expandable synopsis
       expect(screen.queryByTestId('detail-synopsis-sheet')).toBeNull();
       expect(onBack).not.toHaveBeenCalled();
 
-      // Down moves into Cast row (director at index 0, cast at index 1) -> Right -> Select searches cast
+      // Record Cast strip layout Y and verify Down scrolls Cast smoothly into view (#398)
+      const scrollToSpy = jest
+        .spyOn(ScrollView.prototype, 'scrollTo')
+        .mockImplementation(() => undefined);
+      await fireEvent(screen.getByTestId('detail-cast'), 'layout', {
+        nativeEvent: { layout: { x: 0, y: 520, width: 1920, height: 180 } },
+      });
+      scrollToSpy.mockClear();
+
+      // Down moves into Cast row (director at index 0, cast at index 1) -> scrolls into view -> Right -> Select searches cast
       await pressKey(KEYCODE_DPAD_DOWN);
+      expect(scrollToSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ y: expect.any(Number), animated: true }),
+      );
+      const scrolledY = (scrollToSpy.mock.calls[0]?.[0] as { y?: number } | undefined)?.y ?? 0;
+      expect(scrolledY).toBeGreaterThan(0);
       await pressKey(KEYCODE_DPAD_RIGHT);
       await pressKey(KEYCODE_DPAD_CENTER);
       expect(onSearchPerson).toHaveBeenCalledWith('Leyla Demir');

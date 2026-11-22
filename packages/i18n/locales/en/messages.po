@@ -1267,7 +1267,7 @@ msgid "settings.liveTv.epgSpanHours"
 msgstr "{hours} hours"
 
 msgid "settings.liveTv.epgGenreTints"
-msgstr "Colour-code guide genres"
+msgstr "Color-code guide genres"
 
 msgid "settings.liveTv.epgShowClock"
 msgstr "Show clock in TV guide"
@@ -1349,3 +1349,12 @@ msgstr "Search {name}"
 
 msgid "live.pressAgainFullscreen"
 msgstr "Press OK again for fullscreen"
+
+msgid "catalog.sortAlpha"
+msgstr "A–Z"
+
+msgid "catalog.sortAlphaLabel"
+msgstr "Sort alphabetically"
+
+msgid "catalog.sortDefaultLabel"
+msgstr "Default order"
