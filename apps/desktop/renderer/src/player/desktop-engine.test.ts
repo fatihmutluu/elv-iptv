@@ -2,6 +2,7 @@ import type { EngineEvent } from '@elv/playback';
 import { describe, expect, it, vi } from 'vitest';
 import {
   DESKTOP_CAPABILITIES,
+  isPlayerCommandMessage,
   type PlayerBridge,
   type PlayerCommandMessage,
   type PlayerEventMessage,
@@ -108,9 +109,16 @@ describe('createDesktopEngine', () => {
     engine.play(2);
     engine.pause(2);
     engine.seek(3, 900);
+    engine.setSpeed(3, 1.5);
     engine.selectAudioTrack?.(3, 'a:2');
     engine.selectSubtitleTrack?.(3, 's:1');
     engine.selectSubtitleTrack?.(3, null);
+    engine.setVolume(75);
+    engine.setAudioDelay(0.25);
+    engine.setSubtitleDelay(-0.5);
+    engine.setAudioDevice('wasapi/{out-1}');
+    engine.setDeinterlace(true);
+    engine.setDeinterlace(false);
     engine.stop(4);
     engine.recreate(5);
     engine.toggleFullscreen();
@@ -121,14 +129,24 @@ describe('createDesktopEngine', () => {
       { engineId: 'e1', command: { name: 'play', attempt: 2 } },
       { engineId: 'e1', command: { name: 'pause', attempt: 2 } },
       { engineId: 'e1', command: { name: 'seek', attempt: 3, positionMs: 900 } },
+      { engineId: 'e1', command: { name: 'setSpeed', attempt: 3, rate: 1.5 } },
       { engineId: 'e1', command: { name: 'selectAudioTrack', attempt: 3, id: 'a:2' } },
       { engineId: 'e1', command: { name: 'selectSubtitleTrack', attempt: 3, id: 's:1' } },
       { engineId: 'e1', command: { name: 'selectSubtitleTrack', attempt: 3, id: null } },
+      { engineId: 'e1', command: { name: 'setVolume', volume: 75 } },
+      { engineId: 'e1', command: { name: 'setAudioDelay', delaySec: 0.25 } },
+      { engineId: 'e1', command: { name: 'setSubtitleDelay', delaySec: -0.5 } },
+      { engineId: 'e1', command: { name: 'setAudioDevice', device: 'wasapi/{out-1}' } },
+      { engineId: 'e1', command: { name: 'setDeinterlace', enabled: true } },
+      { engineId: 'e1', command: { name: 'setDeinterlace', enabled: false } },
       { engineId: 'e1', command: { name: 'stop', attempt: 4 } },
       { engineId: 'e1', command: { name: 'recreate', attempt: 5 } },
       { engineId: 'e1', command: { name: 'fullscreen' } },
       { engineId: 'e1', command: { name: 'mute' } },
     ]);
+    for (const msg of f.sent) {
+      expect(isPlayerCommandMessage(msg)).toBe(true);
+    }
   });
 
   it('sends the player area', async () => {
@@ -241,6 +259,12 @@ describe('createDesktopEngine', () => {
     engine.stop(2);
     engine.setArea({ x: 0, y: 0, width: 1, height: 1, visible: false });
     engine.toggleFullscreen();
+    engine.setSpeed(2, 1.5);
+    engine.setVolume(50);
+    engine.setAudioDelay(0.1);
+    engine.setSubtitleDelay(0.1);
+    engine.setAudioDevice('auto');
+    engine.setDeinterlace(true);
     expect(f.sent).toHaveLength(1);
     expect(f.areas).toEqual([]);
     const late = engine.subscribe(() => undefined);

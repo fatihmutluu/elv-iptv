@@ -703,4 +703,39 @@ describe('CatalogService in @elv/data', () => {
 
     await service.close();
   });
+
+  it('honors CatalogDeps.maxBodyBytes as default streaming cap without breaking per-run override', async () => {
+    const panel = await setupPanel(sampleCatalog());
+    let seenCategoryCalls = 0;
+    const baseHttp = panel.panel.http;
+    const countingHttp: typeof baseHttp = {
+      get: async (url, opts) => {
+        if (url.includes('category_id=')) seenCategoryCalls += 1;
+        return baseHttp.get(url, opts);
+      },
+    };
+    const service = createCatalogService({
+      db: panel.db,
+      secrets: panel.secrets,
+      scheduler: panel.scheduler,
+      http: countingHttp,
+      maxBodyBytes: 64 * 1024 * 1024,
+      clock: () => 3_000,
+    });
+    const added = await service.addSource({
+      kind: 'xtream',
+      name: 'Desktop Streaming Cap',
+      server: 'http://panel.example:8080',
+      username: 'u',
+      password: 'p',
+    });
+    if (!added.ok) throw new Error('add failed');
+    const wholeRes = await service.importSource(added.value.id);
+    expect(wholeRes.ok).toBe(true);
+    expect(seenCategoryCalls).toBe(0);
+    const cappedRes = await service.importSource(added.value.id, { maxBodyBytes: 250 });
+    expect(cappedRes.ok).toBe(true);
+    expect(seenCategoryCalls).toBeGreaterThan(0);
+    await service.close();
+  });
 });

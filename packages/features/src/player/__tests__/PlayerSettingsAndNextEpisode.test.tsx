@@ -230,6 +230,50 @@ describe('PlayerSettingsSheet 2-level menu', () => {
     expect(screen.getByTestId('player-settings-panel')).toHaveTextContent(/No audio track/);
     await view.unmount();
   });
+
+  it('renders Deinterlace switch row only when onToggleDeinterlace is provided and syncs checked state (#131)', async () => {
+    const onToggleDeinterlace = jest.fn();
+    const hcTheme = buildTheme({ preset: 'highContrast' });
+
+    const view = await render(settingsEl({ preset: 'highContrast' }));
+    expect(screen.queryByTestId('player-deinterlace-toggle')).toBeNull();
+
+    await view.rerender(
+      settingsEl({
+        preset: 'highContrast',
+        menuState: { view: 'root', index: 2 },
+        deinterlace: false,
+        onToggleDeinterlace,
+      }),
+    );
+
+    const toggle = screen.getByTestId('player-deinterlace-toggle');
+    expect(toggle.props.accessibilityRole).toBe('switch');
+    expect(toggle.props.accessibilityState).toEqual({ checked: false });
+    expect(toggle).toHaveTextContent(/Deinterlace/);
+    expect(toggle).toHaveTextContent(/Off/);
+    expect(flatStyle('player-deinterlace-toggle')?.borderColor).toBe(hcTheme.colors.focusRingColor);
+
+    await fireEvent.press(toggle);
+    expect(onToggleDeinterlace).toHaveBeenCalledTimes(1);
+
+    await view.rerender(
+      settingsEl({
+        preset: 'highContrast',
+        menuState: { view: 'root', index: 3 },
+        deinterlace: true,
+        onToggleDeinterlace,
+        i18n: createAppI18n('tr'),
+      }),
+    );
+    const toggleTr = screen.getByTestId('player-deinterlace-toggle');
+    expect(toggleTr.props.accessibilityState).toEqual({ checked: true });
+    expect(toggleTr).toHaveTextContent(/Taramayı gider/);
+    expect(toggleTr).toHaveTextContent(/Açık/);
+    expect(flatStyle('player-stats-toggle')?.borderColor).toBe(hcTheme.colors.focusRingColor);
+
+    await view.unmount();
+  });
 });
 
 describe('PlayerStatsHud zero-overhead subscription and live telemetry', () => {

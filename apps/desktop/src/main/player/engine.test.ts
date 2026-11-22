@@ -756,4 +756,33 @@ describe('MpvEngine setSpeed coalescing (#302)', () => {
       countBeforeRelease,
     );
   });
+
+  it('queues volume, audio/sub delay, audio device and deinterlace properties and ignores after release (#434)', async () => {
+    const { engine, fake, events } = await setup();
+    engine.load(live(1, URL_A));
+    await playing(events, 1);
+
+    engine.setVolume(80);
+    engine.setAudioDelay(0.25);
+    engine.setSubtitleDelay(-0.5);
+    engine.setAudioDevice('wasapi/usb');
+    engine.setDeinterlace(true);
+    engine.setDeinterlace(false);
+    await vi.waitFor(() => expect(fake.sent).toContainEqual(['set_property', 'deinterlace', 'no']));
+    expect(fake.sent).toContainEqual(['set_property', 'volume', 80]);
+    expect(fake.sent).toContainEqual(['set_property', 'audio-delay', 0.25]);
+    expect(fake.sent).toContainEqual(['set_property', 'sub-delay', -0.5]);
+    expect(fake.sent).toContainEqual(['set_property', 'audio-device', 'wasapi/usb']);
+    expect(fake.sent).toContainEqual(['set_property', 'deinterlace', 'yes']);
+
+    const countBeforeRelease = fake.sent.length;
+    engine.release();
+    engine.setVolume(10);
+    engine.setAudioDelay(1);
+    engine.setSubtitleDelay(1);
+    engine.setAudioDevice('auto');
+    engine.setDeinterlace(true);
+    await sleep(20);
+    expect(fake.sent.slice(countBeforeRelease).every((c) => c[0] !== 'set_property')).toBe(true);
+  });
 });

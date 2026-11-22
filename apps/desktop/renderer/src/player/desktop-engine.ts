@@ -31,12 +31,24 @@ const CAPABILITIES: EngineCapabilities = Object.freeze({
 /** The renderer's `PlayerEngine` for the desktop app, plus the presenter's controls. */
 export interface DesktopEngine extends PlayerEngine {
   readonly engineId: string;
+  /** Sets VOD playback speed on the active attempt (`#434`). */
+  setSpeed(attempt: AttemptToken, rate: number): void;
   /** Tells main where the video belongs, in CSS pixels of the window content. */
   setArea(area: PlayerArea): void;
   /** Toggles the presenter's fullscreen (not a port command). */
   toggleFullscreen(): void;
   /** Toggles mpv audio mute (`cycle mute`). */
   toggleMute(): void;
+  /** Sets mpv output volume (`0`–`100`, `#434`). */
+  setVolume(volume: number): void;
+  /** Sets mpv audio delay in seconds (`-30`–`30`, `#434`). */
+  setAudioDelay(delaySec: number): void;
+  /** Sets mpv subtitle delay in seconds (`-30`–`30`, `#434`). */
+  setSubtitleDelay(delaySec: number): void;
+  /** Selects an mpv audio output device (`#434`). */
+  setAudioDevice(device: string): void;
+  /** Enables or disables per-file mpv deinterlacing (`#131`). */
+  setDeinterlace(enabled: boolean): void;
   /** Presentation events outside the port; the latest `presenter` event is replayed to a new listener. */
   onUi(listener: (event: PlayerUiEvent) => void): () => void;
 }
@@ -144,6 +156,7 @@ export async function createDesktopEngine(
     play: (attempt) => send({ name: 'play', attempt }),
     pause: (attempt) => send({ name: 'pause', attempt }),
     seek: (attempt, positionMs) => send({ name: 'seek', attempt, positionMs }),
+    setSpeed: (attempt, rate) => send({ name: 'setSpeed', attempt, rate }),
     selectAudioTrack: (attempt, trackId) =>
       send({ name: 'selectAudioTrack', attempt, id: trackId }),
     selectSubtitleTrack: (attempt, trackId) =>
@@ -152,6 +165,11 @@ export async function createDesktopEngine(
     recreate: (attempt) => send({ name: 'recreate', attempt }),
     toggleFullscreen: () => send({ name: 'fullscreen' }),
     toggleMute: () => send({ name: 'mute' }),
+    setVolume: (volume) => send({ name: 'setVolume', volume }),
+    setAudioDelay: (delaySec) => send({ name: 'setAudioDelay', delaySec }),
+    setSubtitleDelay: (delaySec) => send({ name: 'setSubtitleDelay', delaySec }),
+    setAudioDevice: (device) => send({ name: 'setAudioDevice', device }),
+    setDeinterlace: (enabled) => send({ name: 'setDeinterlace', enabled }),
     setArea(area) {
       if (!released) bridge.setArea({ engineId: id, area });
     },

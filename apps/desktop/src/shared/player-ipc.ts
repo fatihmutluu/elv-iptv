@@ -26,10 +26,26 @@ export const DESKTOP_CAPABILITIES: EngineCapabilities = Object.freeze({
   subtitleTrackSelection: true,
 });
 
+/** Key forwarded from mpv's native input handler to the renderer (`player:ui`). */
+export type PlayerUiKey =
+  | 'channel-up'
+  | 'channel-down'
+  | 'back'
+  | 'fullscreen'
+  | 'close'
+  | 'play-pause'
+  | 'seek-back'
+  | 'seek-forward'
+  | 'seek-coarse-back'
+  | 'seek-coarse-forward'
+  | 'mute'
+  | 'tracks'
+  | 'prev-channel';
+
 /** Presentation events outside the port, main to renderer (`player:ui`). */
 export type PlayerUiEvent =
   | { type: 'presenter'; kind: PresenterKind; coversArea: boolean }
-  | { type: 'key'; key: 'channel-up' | 'channel-down' | 'back' | 'fullscreen' | 'close' }
+  | { type: 'key'; key: PlayerUiKey }
   | { type: 'closed' };
 
 /** The IPC channel names between the renderer, the preload bridge and the main process. */
@@ -48,8 +64,14 @@ export type BridgeCommand =
   | { name: 'load'; cmd: LoadCommand }
   | { name: 'retry' | 'play' | 'pause' | 'stop' | 'recreate'; attempt: AttemptToken }
   | { name: 'seek'; attempt: AttemptToken; positionMs: number }
+  | { name: 'setSpeed'; attempt: AttemptToken; rate: number }
   | { name: 'selectAudioTrack'; attempt: AttemptToken; id: string }
   | { name: 'selectSubtitleTrack'; attempt: AttemptToken; id: string | null }
+  | { name: 'setVolume'; volume: number }
+  | { name: 'setAudioDelay'; delaySec: number }
+  | { name: 'setSubtitleDelay'; delaySec: number }
+  | { name: 'setAudioDevice'; device: string }
+  | { name: 'setDeinterlace'; enabled: boolean }
   | { name: 'release' }
   | { name: 'fullscreen' }
   | { name: 'mute' };
@@ -180,6 +202,19 @@ const isSubtitleTrackId = (x: unknown): x is string => {
   return match !== null && Number(match[1]) <= MAX_MPV_TRACK_ID;
 };
 
+const MIN_SPEED_RATE = 0.25;
+const MAX_SPEED_RATE = 4;
+const MAX_VOLUME = 100;
+const MAX_DELAY_SEC = 30;
+const MAX_AUDIO_DEVICE_CHARS = 256;
+
+const isSpeedRate = (x: unknown): x is number =>
+  isNumber(x) && x >= MIN_SPEED_RATE && x <= MAX_SPEED_RATE;
+const isVolume = (x: unknown): x is number => isNumber(x) && x >= 0 && x <= MAX_VOLUME;
+const isDelaySec = (x: unknown): x is number => isNumber(x) && Math.abs(x) <= MAX_DELAY_SEC;
+const isAudioDevice = (x: unknown): x is string =>
+  typeof x === 'string' && x.length > 0 && x.length <= MAX_AUDIO_DEVICE_CHARS && !hasControlChar(x);
+
 function isLoadCommand(x: unknown): x is LoadCommand {
   if (!isRecord(x)) return false;
   if (!isAttempt(x['attempt']) || !isStreamUrl(x['url']) || !isHeaders(x['headers'])) return false;
@@ -190,6 +225,8 @@ function isLoadCommand(x: unknown): x is LoadCommand {
   return (
     isRecord(options) &&
     (options['softwareAudio'] === undefined || typeof options['softwareAudio'] === 'boolean') &&
+    (options['preferHevcOverDolbyVision'] === undefined ||
+      typeof options['preferHevcOverDolbyVision'] === 'boolean') &&
     (options['audioTrackId'] === undefined || isAudioTrackId(options['audioTrackId'])) &&
     (options['subtitleTrackId'] === undefined ||
       options['subtitleTrackId'] === null ||
@@ -210,10 +247,21 @@ function isBridgeCommand(x: unknown): x is BridgeCommand {
       return isAttempt(x['attempt']);
     case 'seek':
       return isAttempt(x['attempt']) && isMs(x['positionMs']);
+    case 'setSpeed':
+      return isAttempt(x['attempt']) && isSpeedRate(x['rate']);
     case 'selectAudioTrack':
       return isAttempt(x['attempt']) && isAudioTrackId(x['id']);
     case 'selectSubtitleTrack':
       return isAttempt(x['attempt']) && (x['id'] === null || isSubtitleTrackId(x['id']));
+    case 'setVolume':
+      return isVolume(x['volume']);
+    case 'setAudioDelay':
+    case 'setSubtitleDelay':
+      return isDelaySec(x['delaySec']);
+    case 'setAudioDevice':
+      return isAudioDevice(x['device']);
+    case 'setDeinterlace':
+      return typeof x['enabled'] === 'boolean';
     case 'release':
     case 'fullscreen':
     case 'mute':

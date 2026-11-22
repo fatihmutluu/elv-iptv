@@ -6,15 +6,13 @@ import {
   Icon,
   IconButton,
   TABULAR_NUMS_STYLE,
-  type Theme,
   useTheme,
   webBackdropBlur,
-  webCursorPointer,
-  webTransition,
 } from '@elv/ui-kit';
 import { type ComponentRef, type ReactElement, useEffect, useRef } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useDesktopDialogTrap } from './desktop-dialog-trap';
+import { blurWebTarget, SettingsToggleRow, settingsRowStyle } from './PlayerSettingsRows';
 import type { SettingsMenuState, SettingsMenuView } from './settings-menu-nav';
 import { buildSettingsNavRows, buildSettingsRadioItems } from './settings-sheet-items';
 
@@ -28,6 +26,7 @@ export interface PlayerSettingsSheetProps {
   readonly isVod?: boolean;
   readonly playbackSpeed?: number;
   readonly resizeMode?: 'fit' | 'fill';
+  readonly deinterlace?: boolean;
   readonly statsVisible: boolean;
   readonly isTv: boolean;
   readonly formFactor: FormFactor;
@@ -37,80 +36,23 @@ export interface PlayerSettingsSheetProps {
   readonly onSelectSubtitle: (id: string | null) => void;
   readonly onSelectSpeed?: (rate: number) => void;
   readonly onToggleResizeMode?: () => void;
+  readonly onToggleDeinterlace?: () => void;
   readonly onToggleStats: () => void;
   readonly onClose: () => void;
 }
 
-function blurWebTarget(target: unknown): void {
-  if ((Platform.OS as string) === 'web') {
-    (target as { blur?: () => void } | null | undefined)?.blur?.();
-  }
-}
-
-function rowStyle(theme: Theme, focused: boolean, selected: boolean, isTv: boolean) {
-  return [
-    styles.row,
-    {
-      borderRadius: theme.radius.card,
-      backgroundColor: selected
-        ? theme.colors.accentTint
-        : focused
-          ? theme.colors.focusFill
-          : theme.colors.bgSurface,
-      borderColor: focused
-        ? theme.colors.focusRingColor
-        : selected
-          ? theme.colors.accent
-          : theme.colors.surfaceBorder,
-      borderWidth: focused ? theme.focus.ringWidth : selected ? 1.5 : 1,
-    },
-    webTransition(theme, 'border-color, background-color'),
-    !isTv ? webCursorPointer() : undefined,
-  ];
-}
-
-function TogglePill({
-  theme,
-  active,
-  label,
-}: {
-  readonly theme: Theme;
-  readonly active: boolean;
-  readonly label: string;
-}): ReactElement {
-  return (
-    <View
-      style={[
-        styles.togglePill,
-        {
-          borderRadius: theme.radius.pill,
-          backgroundColor: active ? theme.colors.accent : theme.colors.chipBg,
-          borderColor: active ? theme.colors.accent : theme.colors.chipBorder,
-        },
-      ]}
-    >
-      <Text
-        style={[
-          theme.typography.micro,
-          { color: active ? theme.colors.accentContrast : theme.colors.textSecondary },
-        ]}
-      >
-        {label}
-      </Text>
-    </View>
-  );
-}
-
 /**
  * Adaptive 2-level Cinema Quietude Player Settings menu (`Subtitles`, `Audio`, VOD `Speed`,
- * `Aspect` where supported, `Stats HUD`). Flex-docked below the video canvas on `desktop`
- * (HWND-safe) and wrapped in `AdaptiveSheet` (right popover on Landscape, inset bottom sheet on Portrait) elsewhere.
+ * `Aspect` where supported, `Deinterlace` where supported, `Stats HUD`). Flex-docked below the video canvas
+ * on `desktop` (HWND-safe) and wrapped in `AdaptiveSheet` elsewhere.
  */
 export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactElement | null {
   const { visible, menuState, tracks, statsVisible, isTv, formFactor, i18n } = props;
   const isVod = props.isVod === true;
   const playbackSpeed = props.playbackSpeed ?? 1;
   const showAspect = props.onToggleResizeMode !== undefined;
+  const showDeinterlace = props.onToggleDeinterlace !== undefined;
+  const deinterlace = props.deinterlace === true;
   const resizeMode = props.resizeMode ?? 'fit';
   const resizeModeLabel =
     resizeMode === 'fill' ? i18n.t('player.aspect.fill') : i18n.t('player.aspect.fit');
@@ -200,7 +142,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
                 blurWebTarget(e.currentTarget);
                 props.onOpenView(targetView);
               }}
-              style={rowStyle(theme, showCursor && menuState.index === idx, false, isTv)}
+              style={settingsRowStyle(theme, showCursor && menuState.index === idx, false, isTv)}
             >
               <Icon name={icon} size={18} color={theme.colors.textSecondary} />
               <Text
@@ -224,57 +166,51 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
             </Pressable>
           ))}
           {showAspect ? (
-            <Pressable
+            <SettingsToggleRow
               testID="player-resize-mode-toggle"
-              focusable={!isTv}
-              accessibilityRole="button"
+              icon="aspect"
+              label={i18n.t('player.aspect')}
+              pillLabel={resizeModeLabel}
+              active={resizeMode === 'fill'}
+              focused={showCursor && menuState.index === navRows.length}
+              isTv={isTv}
+              role="button"
               accessibilityLabel={`${i18n.t('player.aspect')}: ${resizeModeLabel}`}
-              onPress={(e) => {
-                blurWebTarget(e.currentTarget);
-                props.onToggleResizeMode?.();
-              }}
-              style={rowStyle(theme, showCursor && menuState.index === navRows.length, false, isTv)}
-            >
-              <Icon name="aspect" size={18} color={theme.colors.textSecondary} />
-              <Text
-                numberOfLines={1}
-                style={[theme.typography.title, styles.flex1, { color: theme.colors.textPrimary }]}
-              >
-                {i18n.t('player.aspect')}
-              </Text>
-              <TogglePill theme={theme} active={resizeMode === 'fill'} label={resizeModeLabel} />
-            </Pressable>
-          ) : null}
-          <Pressable
-            testID="player-stats-toggle"
-            focusable={!isTv}
-            accessibilityRole="switch"
-            accessibilityLabel={i18n.t('player.statsHud')}
-            accessibilityState={{ checked: statsVisible }}
-            onPress={(e) => {
-              blurWebTarget(e.currentTarget);
-              props.onToggleStats();
-            }}
-            style={rowStyle(
-              theme,
-              showCursor && menuState.index === navRows.length + (showAspect ? 1 : 0),
-              false,
-              isTv,
-            )}
-          >
-            <Icon name="info" size={18} color={theme.colors.textSecondary} />
-            <Text
-              numberOfLines={1}
-              style={[theme.typography.title, styles.flex1, { color: theme.colors.textPrimary }]}
-            >
-              {i18n.t('player.statsHud')}
-            </Text>
-            <TogglePill
               theme={theme}
-              active={statsVisible}
-              label={statsVisible ? i18n.t('player.stats.on') : i18n.t('player.stats.off')}
+              onPress={() => props.onToggleResizeMode?.()}
             />
-          </Pressable>
+          ) : null}
+          {showDeinterlace ? (
+            <SettingsToggleRow
+              testID="player-deinterlace-toggle"
+              icon="layers"
+              label={i18n.t('player.deinterlace')}
+              pillLabel={deinterlace ? i18n.t('player.stats.on') : i18n.t('player.stats.off')}
+              active={deinterlace}
+              focused={showCursor && menuState.index === navRows.length + (showAspect ? 1 : 0)}
+              isTv={isTv}
+              role="switch"
+              accessibilityLabel={i18n.t('player.deinterlace')}
+              theme={theme}
+              onPress={() => props.onToggleDeinterlace?.()}
+            />
+          ) : null}
+          <SettingsToggleRow
+            testID="player-stats-toggle"
+            icon="info"
+            label={i18n.t('player.statsHud')}
+            pillLabel={statsVisible ? i18n.t('player.stats.on') : i18n.t('player.stats.off')}
+            active={statsVisible}
+            focused={
+              showCursor &&
+              menuState.index === navRows.length + (showAspect ? 1 : 0) + (showDeinterlace ? 1 : 0)
+            }
+            isTv={isTv}
+            role="switch"
+            accessibilityLabel={i18n.t('player.statsHud')}
+            theme={theme}
+            onPress={props.onToggleStats}
+          />
         </View>
       ) : (
         <ScrollView
@@ -297,7 +233,12 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
                   blurWebTarget(e.currentTarget);
                   item.onPress();
                 }}
-                style={rowStyle(theme, showCursor && menuState.index === idx, item.selected, isTv)}
+                style={settingsRowStyle(
+                  theme,
+                  showCursor && menuState.index === idx,
+                  item.selected,
+                  isTv,
+                )}
               >
                 <Text
                   numberOfLines={1}
@@ -373,21 +314,6 @@ const styles = StyleSheet.create({
   flex1: { flex: 1 },
   listGap: { gap: 6 },
   subList: { maxHeight: 240 },
-  row: {
-    minHeight: 42,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
   summary: { maxWidth: 120, textAlign: 'right' },
-  togglePill: {
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    minWidth: 44,
-    alignItems: 'center',
-  },
   empty: { paddingVertical: 12, paddingHorizontal: 4 },
 });

@@ -32,6 +32,7 @@ export const OBSERVED = [
   'track-list',
   'aid',
   'sid',
+  'audio-device',
   'audio-device-list',
 ];
 
@@ -144,6 +145,7 @@ export async function advanceUntil(
 
 export interface SetupOptions {
   scripts?: Record<string, FakeMpvScript>;
+  baseArgs?: readonly string[];
   kind?: PresenterKind;
   loadMode?: LoadMode;
   spawnDelayMs?: number;
@@ -162,7 +164,7 @@ export async function setupEngineTest(cleanups: Array<() => Promise<void>>, o: S
   const engine = createMpvEngine({
     spawn: o.spawn?.(fake) ?? ((args, signal) => fake.spawn(args, signal)),
     presenter,
-    baseArgs: BASE,
+    baseArgs: o.baseArgs ?? BASE,
     loadMode: o.loadMode ?? 'replace',
     now: o.now ?? (() => Date.now()),
     timers: o.timers ?? timers,

@@ -34,6 +34,8 @@ import { formatSqliteOpenError, openSqliteWithRetry } from './sqlite-open-retry.
 
 const SAFE_SOURCE_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
 const NON_HOST_SCHEME_RE = /^[A-Za-z][A-Za-z0-9+.-]*:(?!\/\/)(?!\d+(?:[/?#]|$))/;
+/** Desktop streams Xtream JSON incrementally in `O(batchSize)` memory, matching `xtream.ts` `DEFAULT_MAX_BODY`. */
+const DESKTOP_MAX_BODY_BYTES = 128 * 1024 * 1024;
 
 /** Subset of Electron's `MessagePortMain` used inside the catalog utility process. */
 export interface WorkerClientPortLike {
@@ -293,6 +295,7 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
             secrets,
             scheduler: { yieldNow },
             http: createFetchHttpClient(safeFetch),
+            maxBodyBytes: DESKTOP_MAX_BODY_BYTES,
             clock,
             ...(deps.decompressor === undefined ? {} : { decompressor: deps.decompressor }),
           });

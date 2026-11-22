@@ -24,7 +24,7 @@ const record = process.env['ELV_RECORD_MPV_FIXTURES'] === '1';
 const optedIn = process.env['ELV_MPV_SPIKE'] === '1' || record;
 const ready = optedIn && runtime !== null && (await simulatorAnswers());
 
-/** Launcher arguments for a hidden-ish test window; the OSC stays on. */
+/** Launcher arguments for a hidden-ish test window; OSC and OSD stay disabled by default (#419). */
 const TEST_ARGS = [
   '--no-config',
   '--idle=yes',
@@ -152,16 +152,15 @@ async function simRequests(since: string): Promise<SimEntry[]> {
 }
 
 describe.skipIf(!ready)('mpv spike against the simulator', { timeout: 120000 }, () => {
-  it('the OSC runs', async () => {
+  it('keeps the OSC and OSD disabled by default (#419)', async () => {
     const mpv = await launch();
     try {
-      const reply = await mpv.client.command([
-        'script-message-to',
-        'osc',
-        'osc-visibility',
-        'always',
-      ]);
-      expect(reply.error).toBe('success');
+      const osc = await mpv.client.command(['get_property', 'osc']);
+      const osdLevel = await mpv.client.command(['get_property', 'osd-level']);
+      expect(osc.error).toBe('success');
+      expect(osc.data).toBe(false);
+      expect(osdLevel.error).toBe('success');
+      expect(osdLevel.data).toBe(0);
     } finally {
       await mpv.quit();
     }

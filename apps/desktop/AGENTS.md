@@ -29,10 +29,10 @@ Expo project with `platforms: ["web"]` rendered by react-native-web.
   in 9-240 ms when fd 3 closes). Keep >= 90 % line coverage.
 - `spike.integration.test.ts` runs real mpv against `pnpm sim` (`ELV_SIM_URL`); opt-in via `ELV_MPV_SPIKE=1` on win32
   and darwin. `ELV_RECORD_MPV_FIXTURES=1` re-records `fixtures/*.jsonl` (win32) or `fixtures/darwin/*.jsonl` (darwin).
-- Spike outcome (mpv 0.42.0, win32 + darwin): Lua yes and the OSC runs (`osc-visibility` replies `success`), so no
-  scripting task; `loadfile replace` x10 at 300 ms gives no 509 and one connection at a time (`loadMode`: `replace`).
-  macOS is built without libcurl (`launchArgs` omits `--curl-enabled=no`) and without Vulkan: mpv picks `vo=libmpv`
-  (`cocoa-cb`, OpenGL) with `videotoolbox` hwdec and renders live frames without a `--vo` flag.
+- Runtime (mpv 0.42.0, win32 + darwin): OSC, OSD and default bindings are disabled (`--osc=no`, `--osd-level=0`,
+  `--input-default-bindings=no`); `child-window` sets `--input-vo-keyboard=no`, `own-window` sets `--input-vo-keyboard=yes`
+  for `mpv-input.conf`. `loadfile replace` x10 at 300 ms gives no 509 (`loadMode`: `replace`). macOS omits
+  `--curl-enabled=no` and Vulkan; mpv picks `vo=libmpv` (`cocoa-cb`, OpenGL) with `videotoolbox` hwdec.
 - Fault signatures (FFmpeg networking): `ffmpeg warn http: HTTP error <status>`; refused port is
   `ffmpeg error tcp: Connection to tcp://... failed` + `end-file error "loading failed"`; `text-notice` logs
   `Mime-type: 'text/plain'` + `end-file error "unrecognized file format"`; live drop is `end-file eof`.

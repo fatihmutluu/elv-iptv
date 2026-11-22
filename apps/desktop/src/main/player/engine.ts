@@ -1,15 +1,11 @@
-import {
-  type AttemptToken,
-  clampPlaybackSpeed,
-  type EngineEvent,
-  type PlayerEngine,
-} from '@elv/playback';
+import type { AttemptToken, EngineEvent, PlayerEngine } from '@elv/playback';
 import {
   DESKTOP_CAPABILITIES,
   type PlayerArea,
   type PlayerUiEvent,
   type PresenterKind,
 } from '../../shared/player-ipc.ts';
+import { createEngineControls } from './engine-controls.ts';
 import { createEngineQueue, type QueuedOp } from './engine-queue.ts';
 import type { MpvCommand } from './mpv/codec.ts';
 import {
@@ -49,6 +45,11 @@ export interface MpvEngine extends PlayerEngine {
   readonly lastArea: PlayerArea | undefined;
   toggleFullscreen(): void;
   toggleMute(): void;
+  setVolume(volume: number): void;
+  setAudioDelay(delaySec: number): void;
+  setSubtitleDelay(delaySec: number): void;
+  setAudioDevice(device: string): void;
+  setDeinterlace(enabled: boolean): void;
 }
 
 const QUIT_GRACE_MS = 500;
@@ -74,15 +75,6 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   let spawning: Promise<LiveSession | undefined> | undefined;
   let spawnAbort: AbortController | undefined;
   let tickHandle: unknown;
-  let pendingSeeks = 0;
-  let speedInFlight = false;
-  let pendingSpeed: { slot: MediaSlot | undefined; rate: number } | undefined;
-
-  const resetSpeed = (): void => {
-    pendingSeeks = 0;
-    speedInFlight = false;
-    pendingSpeed = undefined;
-  };
 
   const emit = (events: readonly EngineEvent[]): void => {
     for (const event of events) {
@@ -115,7 +107,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   const detach = (L: LiveSession): void => {
     if (live !== L) return;
     live = undefined;
-    resetSpeed();
+    controls.reset();
     if (media) media.entryId = undefined;
     L.hotplug.reset();
     L.repeatGate.reset();
@@ -211,8 +203,6 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
           return;
         }
         case 'command': {
-          const isSeek = op.command[0] === 'seek';
-          const isSpeed = op.command[0] === 'set_property' && op.command[1] === 'speed';
           try {
             if (
               live &&
@@ -222,26 +212,13 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
               await session.send(live, op.command);
             }
           } finally {
-            if (op.generation === queue.generation) {
-              if (isSeek) pendingSeeks = Math.max(0, pendingSeeks - 1);
-              if (isSpeed) speedInFlight = false;
-              if (isSeek || isSpeed) flushPendingSpeed();
-            }
+            if (op.generation === queue.generation) controls.onCommandSettled(op.command);
           }
           return;
         }
       }
     },
   });
-
-  const flushPendingSpeed = (): void => {
-    if (released || !live || pendingSeeks > 0 || speedInFlight || !pendingSpeed) return;
-    const next = pendingSpeed;
-    pendingSpeed = undefined;
-    if (next.slot !== media) return;
-    speedInFlight = true;
-    queue.enqueueCommand(['set_property', 'speed', next.rate], next.slot);
-  };
 
   const note = (token: AttemptToken): void => {
     if (token > latestToken) latestToken = token;
@@ -262,9 +239,17 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     }
   };
 
+  const controls = createEngineControls({
+    isReleased: () => released,
+    hasLive: () => live !== undefined,
+    getMedia: () => media,
+    adopt,
+    enqueueCommand: (cmd, slot) => queue.enqueueCommand(cmd, slot),
+  });
+
   const startMedia = (token: AttemptToken, request: MediaRequest): void => {
     note(token);
-    resetSpeed();
+    controls.reset();
     media = { token, request };
     queue.enqueueLoad(media);
     opening.wake();
@@ -302,6 +287,11 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     },
     toggleFullscreen: () => !released && presenter.toggleFullscreen(),
     toggleMute: () => !released && queue.enqueueCommand(['cycle', 'mute']),
+    setVolume: (volume) => controls.setVolume(volume),
+    setAudioDelay: (delaySec) => controls.setAudioDelay(delaySec),
+    setSubtitleDelay: (delaySec) => controls.setSubtitleDelay(delaySec),
+    setAudioDevice: (device) => controls.setAudioDevice(device),
+    setDeinterlace: (enabled) => controls.setDeinterlace(enabled),
     get spawns() {
       return spawns;
     },
@@ -328,21 +318,10 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     pause: (attempt) => command(attempt, ['set', 'pause', 'yes']),
     seek(attempt, positionMs) {
       if (released) return;
-      pendingSeeks += 1;
+      controls.onSeekQueued();
       command(attempt, ['seek', positionMs / 1000, 'absolute']);
     },
-    setSpeed(attempt, rate) {
-      if (released || !media) return;
-      const clamped = clampPlaybackSpeed(rate);
-      if (clamped === undefined) return;
-      adopt(attempt);
-      if (pendingSeeks > 0 || speedInFlight) {
-        pendingSpeed = { slot: media, rate: clamped };
-        return;
-      }
-      speedInFlight = true;
-      queue.enqueueCommand(['set_property', 'speed', clamped], media);
-    },
+    setSpeed: (attempt, rate) => controls.setSpeed(attempt, rate),
     selectAudioTrack(attempt, id) {
       const cmd = released ? undefined : tracks.selectAudio(id);
       if (cmd) command(attempt, cmd);
@@ -354,7 +333,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     stop(attempt) {
       if (released) return;
       adopt(attempt);
-      resetSpeed();
+      controls.reset();
       tracks.onStop();
       live?.repeatGate.reset();
       media = undefined;
@@ -364,14 +343,14 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     recreate(attempt) {
       if (released) return;
       adopt(attempt);
-      resetSpeed();
+      controls.reset();
       tracks.onRetryOrRecreate();
       queue.enqueueRecreate();
     },
     release() {
       if (released) return;
       released = true;
-      resetSpeed();
+      controls.reset();
       tracks.onStop();
       queue.clear();
       listeners.clear();

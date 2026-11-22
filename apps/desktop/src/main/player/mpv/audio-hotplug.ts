@@ -4,15 +4,20 @@ export interface HotplugTimers {
   clearTimeout(handle: unknown): void;
 }
 
-/** Debounced `audio-device-list` watcher that triggers audio output re-initialization on device hotplug (#110). */
+/**
+ * Targeted, debounced `audio-device` + `audio-device-list` watcher that triggers audio output
+ * re-initialization (`ao-reload`) only when the active output device actually changes or flips presence (#110, #434).
+ */
 export interface AudioHotplug {
+  onActiveDevice(value: unknown): void;
   onDeviceList(value: unknown): void;
   reset(): void;
 }
 
 const DEFAULT_DEBOUNCE_MS = 500;
+const AUTO_DEVICE = 'auto';
 
-function deviceListSignature(list: readonly unknown[]): string {
+function parseDeviceNames(list: readonly unknown[]): string[] {
   const names: string[] = [];
   for (const item of list) {
     if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
@@ -20,7 +25,14 @@ function deviceListSignature(list: readonly unknown[]): string {
       if (typeof name === 'string') names.push(name);
     }
   }
-  return names.join('\0');
+  return names;
+}
+
+function primaryConcreteDevice(names: readonly string[]): string | undefined {
+  for (const name of names) {
+    if (name !== AUTO_DEVICE) return name;
+  }
+  return undefined;
 }
 
 /** Creates an `AudioHotplug` watcher with a 500 ms debounce window. */
@@ -30,7 +42,11 @@ export function createAudioHotplug(opts: {
   debounceMs?: number;
 }): AudioHotplug {
   const debounceMs = opts.debounceMs ?? DEFAULT_DEBOUNCE_MS;
-  let lastSignature: string | undefined;
+  let activeDevice = AUTO_DEVICE;
+  let initialized = false;
+  let lastDevices: readonly string[] | undefined;
+  let lastPrimary: string | undefined;
+  let lastExplicitPresent: boolean | undefined;
   let timer: unknown;
 
   const clearTimer = (): void => {
@@ -40,25 +56,61 @@ export function createAudioHotplug(opts: {
     }
   };
 
+  const scheduleReinit = (): void => {
+    clearTimer();
+    timer = opts.timers.setTimeout(() => {
+      timer = undefined;
+      opts.onReinit();
+    }, debounceMs);
+  };
+
+  const syncBaseline = (names: readonly string[]): void => {
+    if (activeDevice === AUTO_DEVICE) {
+      lastPrimary = primaryConcreteDevice(names);
+      lastExplicitPresent = undefined;
+    } else {
+      lastExplicitPresent = names.includes(activeDevice);
+      lastPrimary = undefined;
+    }
+  };
+
   return {
+    onActiveDevice(value) {
+      if (typeof value !== 'string' || value.length === 0) return;
+      if (value !== activeDevice) {
+        clearTimer();
+        activeDevice = value;
+      }
+      if (initialized && lastDevices) syncBaseline(lastDevices);
+    },
     onDeviceList(value) {
       if (!Array.isArray(value)) return;
-      const sig = deviceListSignature(value);
-      if (lastSignature === undefined) {
-        lastSignature = sig;
+      const names = parseDeviceNames(value);
+      lastDevices = names;
+      if (!initialized) {
+        initialized = true;
+        syncBaseline(names);
         return;
       }
-      if (sig === lastSignature) return;
-      lastSignature = sig;
-      clearTimer();
-      timer = opts.timers.setTimeout(() => {
-        timer = undefined;
-        opts.onReinit();
-      }, debounceMs);
+      if (activeDevice === AUTO_DEVICE) {
+        const primary = primaryConcreteDevice(names);
+        if (primary === lastPrimary) return;
+        lastPrimary = primary;
+        scheduleReinit();
+        return;
+      }
+      const present = names.includes(activeDevice);
+      if (present === lastExplicitPresent) return;
+      lastExplicitPresent = present;
+      scheduleReinit();
     },
     reset() {
       clearTimer();
-      lastSignature = undefined;
+      activeDevice = AUTO_DEVICE;
+      initialized = false;
+      lastDevices = undefined;
+      lastPrimary = undefined;
+      lastExplicitPresent = undefined;
     },
   };
 }

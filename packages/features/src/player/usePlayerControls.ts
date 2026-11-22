@@ -7,13 +7,18 @@ import type { PlaybackStatus } from '@elv/playback';
 import { type UseKeyInterpreterOptions, useKeyInterpreter, useTvKeySource } from '@elv/ui-kit';
 import { useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
+import type { HostKey } from '../ports/video-host';
 import {
   type ChannelDigitBuffer,
   createChannelDigitBuffer,
   digitKeyToChar,
   isHiddenOsdPassthroughKey,
 } from './channel-digit-entry';
-import { type PlayerControlsParams, routeOverlayAndMediaKey } from './player-key-routing';
+import {
+  type PlayerControlsParams,
+  routeHostKey,
+  routeOverlayAndMediaKey,
+} from './player-key-routing';
 import { canPauseStatus, digitKeyToRatio, isScrubKey, STEP_SEEK_MS } from './scrub-controller';
 import { rootIndexForSettingsView } from './settings-menu-nav';
 import { type clampTvOsdAction, initialTvOsdAction } from './tv-osd-nav';
@@ -98,6 +103,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     timersRef,
     cancelScrub,
     onSetOrientationLocked: params.onSetOrientationLocked,
+    onSetDeinterlace: params.onSetDeinterlace,
   });
 
   const allowTvSelect = (): boolean =>
@@ -142,6 +148,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
             s.settingsMenu.view,
             cbRef.current.activeTarget.kind === 'vod',
             formFactor !== 'desktop',
+            cbRef.current.onSetDeinterlace !== undefined,
           ),
         });
       } else overlay.closeSettings();
@@ -208,6 +215,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
         isTv,
         isVod: isVodTarget,
         hasAspect: formFactor !== 'desktop',
+        hasDeinterlace: cbRef.current.onSetDeinterlace !== undefined,
         playbackSpeed: playbackSpeedRef.current,
         state: s,
         service: serviceRef.current,
@@ -217,6 +225,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
         showOsd: overlay.showOsd,
         toggleStats: overlay.toggleStats,
         toggleResizeMode: overlay.toggleResizeMode,
+        toggleDeinterlace: overlay.toggleDeinterlace,
         togglePlayPause,
         openTracks: overlay.openTracks,
         closeTracks: overlay.closeTracks,
@@ -317,6 +326,22 @@ export function usePlayerControls(params: PlayerControlsParams) {
     setMuted((prev) => !prev);
     cbRef.current.onToggleMute?.();
   };
+  const handleHostKey = (key: HostKey): void => {
+    overlay.notifyOsdActivity();
+    routeHostKey(key, {
+      isVod: cbRef.current.activeTarget.kind === 'vod',
+      state: overlay.liveRef.current,
+      handleBack,
+      toggleFullscreen,
+      togglePlayPause,
+      seekBy,
+      toggleMute: cbRef.current.onToggleMute !== undefined ? toggleMute : undefined,
+      openTracks: overlay.openTracks,
+      closeTracks: overlay.closeTracks,
+      zapBy: (delta) => zapByRef.current(delta),
+      onJumpPreviousChannel: cbRef.current.onJumpPreviousChannel,
+    });
+  };
   const desktopFallbackKeyProps = useDesktopPlayerShortcuts({
     formFactor,
     clockRef,
@@ -368,6 +393,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     selectSpeed,
     cancelScrub,
     handleBack,
+    handleHostKey,
     desktopFallbackKeyProps,
   };
 }

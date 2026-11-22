@@ -64,12 +64,16 @@ describe.skipIf(!enabled)('elv-mpv.exe', () => {
     expect(reply.data).toMatch(/^mpv v?0\.42\.0/);
   });
 
-  it('enables default bindings and the OSC', async () => {
+  it('disables default bindings, VO keyboard, OSC and OSD by default (#419)', async () => {
     const { pipe } = start();
     const bindings = JSON.parse(await ask(pipe, ['get_property', 'input-default-bindings']));
+    const voKeyboard = JSON.parse(await ask(pipe, ['get_property', 'input-vo-keyboard']));
     const osc = JSON.parse(await ask(pipe, ['get_property', 'osc']));
-    expect(bindings.data).toBe(true);
-    expect(osc.data).toBe(true);
+    const osdLevel = JSON.parse(await ask(pipe, ['get_property', 'osd-level']));
+    expect(bindings.data).toBe(false);
+    expect(voKeyboard.data).toBe(false);
+    expect(osc.data).toBe(false);
+    expect(osdLevel.data).toBe(0);
   });
 
   it('quits when its parent exits', async () => {
@@ -100,7 +104,7 @@ describe.skipIf(!enabled)('elv-mpv.exe', () => {
     expect(Date.now() - t0).toBeLessThan(2000);
   }, 15000);
 
-  it('starts hardened without any caller flags and still runs the OSC', async () => {
+  it('starts hardened without any caller flags and keeps the OSC disabled (#419)', async () => {
     const pipe = `\\\\.\\pipe\\elv-test-${randomBytes(6).toString('hex')}`;
     const child = spawn(
       exe,
@@ -113,11 +117,16 @@ describe.skipIf(!enabled)('elv-mpv.exe', () => {
       ['load-scripts', false],
       ['ytdl', false],
       ['load-unsafe-playlists', false],
+      ['input-default-bindings', false],
+      ['input-vo-keyboard', false],
+      ['osc', false],
+      ['osd-level', 0],
     ] as const) {
       expect(JSON.parse(await ask(pipe, ['get_property', name])).data).toBe(want);
     }
     const osc = JSON.parse(await ask(pipe, ['get_property', 'user-data/osc']));
-    expect(osc.data.visibility).toBe('auto');
+    expect(osc.error).not.toBe('success');
+    expect(osc.data).toBeUndefined();
   });
 
   it('is per-monitor DPI aware, so --geometry and --wid sizes are physical pixels', async () => {

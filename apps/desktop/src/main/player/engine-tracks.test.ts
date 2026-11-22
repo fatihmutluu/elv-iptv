@@ -319,4 +319,59 @@ describe('MpvEngine audio and subtitle track selection', () => {
     await until(() => fake.sent.some((c) => c[0] === 'ao-reload'));
     expect(fake.sent).toContainEqual(['ao-reload']);
   });
+
+  it('resets speed, deinterlace, aspect override and delays on next file in FakeMpv (#434)', async () => {
+    const { fake, engine, events } = await setup({
+      [URL_MULTI]: MULTI_TRACK_VOD,
+      [URL_CH_B]: MULTI_TRACK_VOD,
+    });
+    const client = await (async () => {
+      let c: MpvClient | undefined;
+      const e2 = createMpvEngine({
+        spawn: (args, signal) => fake.spawn(args, signal),
+        presenter: stubPresenter((cl) => {
+          c = cl;
+        }),
+        baseArgs: LAUNCH_OPTIONS,
+        loadMode: 'replace',
+        now: () => Date.now(),
+        timers,
+        onUi: () => undefined,
+      });
+      cleanups.push(async () => e2.release());
+      await vi.waitFor(() => expect(c).toBeDefined());
+      const ev2: EngineEvent[] = [];
+      e2.subscribe((ev) => ev2.push(ev));
+      e2.load({ attempt: 1, url: URL_MULTI, headers: {}, kind: 'vod' });
+      await vi.waitFor(() =>
+        expect(
+          ev2.some((e) => e.attempt === 1 && e.type === 'state' && e.state === 'playing'),
+        ).toBe(true),
+      );
+      e2.setSpeed?.(1, 2);
+      e2.setDeinterlace(true);
+      e2.setAudioDelay(0.5);
+      e2.setSubtitleDelay(-0.25);
+      await c?.command(['set_property', 'video-aspect-override', '16:9']);
+      await vi.waitFor(() =>
+        expect(fake.sent).toContainEqual(['set_property', 'sub-delay', -0.25]),
+      );
+
+      e2.load({ attempt: 2, url: URL_CH_B, headers: {}, kind: 'vod' });
+      await vi.waitFor(() =>
+        expect(
+          ev2.some((e) => e.attempt === 2 && e.type === 'state' && e.state === 'playing'),
+        ).toBe(true),
+      );
+      return c;
+    })();
+    void engine;
+    void events;
+
+    expect((await client?.command(['get_property', 'speed']))?.data).toBe(1);
+    expect((await client?.command(['get_property', 'deinterlace']))?.data).toBe('no');
+    expect((await client?.command(['get_property', 'video-aspect-override']))?.data).toBe('-1');
+    expect((await client?.command(['get_property', 'audio-delay']))?.data).toBe(0);
+    expect((await client?.command(['get_property', 'sub-delay']))?.data).toBe(0);
+  });
 });

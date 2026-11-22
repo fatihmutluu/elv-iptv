@@ -118,4 +118,38 @@ describe('content-hash', () => {
     expect(hashSeriesRow({ ...input, year: 2025 })).not.toBe(base);
     expect(hashSeriesRow({ ...input, lastModified: 1_700_000_600 })).not.toBe(base);
   });
+
+  it('matches the 64-bit BigInt FNV-1a specification across ASCII, UTF-8, emoji, numbers, and nulls', () => {
+    const refFnv1a64 = (fields: readonly (string | number | null | undefined)[]): string => {
+      let h = 0xcbf29ce484222325n;
+      const feed = (bytes: Uint8Array) => {
+        for (const b of bytes) h = ((h ^ BigInt(b)) * 0x100000001b3n) & 0xffffffffffffffffn;
+      };
+      const enc = new TextEncoder();
+      for (const f of fields) {
+        if (f === null || f === undefined) feed(new Uint8Array([0, 0]));
+        else if (typeof f === 'number') {
+          const text = String(Object.is(f, -0) ? 0 : f);
+          feed(new Uint8Array([1]));
+          feed(enc.encode(`${text.length}:${text}`));
+          feed(new Uint8Array([0]));
+        } else {
+          feed(new Uint8Array([2]));
+          feed(enc.encode(`${f.length}:`));
+          feed(enc.encode(f));
+          feed(new Uint8Array([0]));
+        }
+      }
+      return h.toString(16).padStart(16, '0');
+    };
+    const vectors: readonly (readonly (string | number | null | undefined)[])[] = [
+      [],
+      [null, undefined, '', 0, -0],
+      ['12345', 'İstanbul Şampiyonlar Ligi 🎬📺', 'istanbul sampiyonlar ligi', 7.85, 2026],
+      ['A'.repeat(257), 'ÖÇŞİĞÜöçşığü', -42.5, 1_700_000_000, null],
+    ];
+    for (const v of vectors) {
+      expect(fnv1a64Hex(v)).toBe(refFnv1a64(v));
+    }
+  });
 });
