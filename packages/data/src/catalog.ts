@@ -93,6 +93,8 @@ export interface CatalogDeps {
   secrets: SecretStore;
   scheduler: Scheduler;
   http: HttpClient;
+  /** Default per-response body cap for Xtream imports; defaults to {@link DEVICE_MAX_BODY_BYTES}. */
+  maxBodyBytes?: number;
   /** Epoch milliseconds. */
   clock: () => number;
   /** A new source id of letters, digits, `.`, `-` and `_`; defaults to clock plus random digits. */
@@ -230,7 +232,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     secrets,
     scheduler: deps.scheduler,
     clock,
-    maxBodyBytes: DEVICE_MAX_BODY_BYTES,
+    maxBodyBytes: deps.maxBodyBytes ?? DEVICE_MAX_BODY_BYTES,
     ...(deps.decompressor === undefined ? {} : { decompressor: deps.decompressor }),
   };
   const queue = createSerializedImportQueue(db);

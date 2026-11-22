@@ -1,52 +1,61 @@
-const FNV_OFFSET_BASIS = 0xcbf29ce484222325n;
-const FNV_PRIME = 0x100000001b3n;
-const MASK_64 = 0xffffffffffffffffn;
+const FNV_OFFSET_HI = 0xcbf29ce4;
+const FNV_OFFSET_LO = 0x84222325;
+const FNV_PRIME_LO = 0x1b3;
 
 /** Scalar field value accepted by {@link fnv1a64Hex}. `null` and `undefined` both hash as SQL `NULL`. */
 export type HashField = string | number | null | undefined;
 
-function feedByte(hash: bigint, byte: number): bigint {
-  return ((hash ^ BigInt(byte & 0xff)) * FNV_PRIME) & MASK_64;
+interface FnvState {
+  hi: number;
+  lo: number;
 }
 
-function feedAscii(hash: bigint, text: string): bigint {
-  let h = hash;
+/**
+ * Feeds one byte into 64-bit FNV-1a using pure 32-bit integer ops (zero `BigInt` allocations):
+ * multiplying by `0x100000001b3` equals `(h << 40) + h * 0x1b3` modulo 2^64.
+ */
+function feedByte(s: FnvState, byte: number): void {
+  const lo = (s.lo ^ (byte & 0xff)) >>> 0;
+  const p0 = (lo & 0xffff) * FNV_PRIME_LO;
+  const p1 = (lo >>> 16) * FNV_PRIME_LO + (p0 >>> 16);
+  s.lo = (((p1 & 0xffff) << 16) | (p0 & 0xffff)) >>> 0;
+  s.hi = (Math.imul(s.hi, FNV_PRIME_LO) + (lo << 8) + (p1 >>> 16)) >>> 0;
+}
+
+function feedAscii(s: FnvState, text: string): void {
   for (let i = 0; i < text.length; i += 1) {
-    h = ((h ^ BigInt(text.charCodeAt(i) & 0xff)) * FNV_PRIME) & MASK_64;
+    feedByte(s, text.charCodeAt(i));
   }
-  return h;
 }
 
-function feedUtf8(hash: bigint, text: string): bigint {
-  let h = hash;
+function feedUtf8(s: FnvState, text: string): void {
   for (let i = 0; i < text.length; i += 1) {
     const code = text.charCodeAt(i);
     if (code < 0x80) {
-      h = feedByte(h, code);
+      feedByte(s, code);
     } else if (code < 0x800) {
-      h = feedByte(h, 0xc0 | (code >>> 6));
-      h = feedByte(h, 0x80 | (code & 0x3f));
+      feedByte(s, 0xc0 | (code >>> 6));
+      feedByte(s, 0x80 | (code & 0x3f));
     } else if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length) {
       const low = text.charCodeAt(i + 1);
       if (low >= 0xdc00 && low <= 0xdfff) {
         const cp = ((code - 0xd800) << 10) + (low - 0xdc00) + 0x10000;
-        h = feedByte(h, 0xf0 | (cp >>> 18));
-        h = feedByte(h, 0x80 | ((cp >>> 12) & 0x3f));
-        h = feedByte(h, 0x80 | ((cp >>> 6) & 0x3f));
-        h = feedByte(h, 0x80 | (cp & 0x3f));
+        feedByte(s, 0xf0 | (cp >>> 18));
+        feedByte(s, 0x80 | ((cp >>> 12) & 0x3f));
+        feedByte(s, 0x80 | ((cp >>> 6) & 0x3f));
+        feedByte(s, 0x80 | (cp & 0x3f));
         i += 1;
         continue;
       }
-      h = feedByte(h, 0xe0 | (code >>> 12));
-      h = feedByte(h, 0x80 | ((code >>> 6) & 0x3f));
-      h = feedByte(h, 0x80 | (code & 0x3f));
+      feedByte(s, 0xe0 | (code >>> 12));
+      feedByte(s, 0x80 | ((code >>> 6) & 0x3f));
+      feedByte(s, 0x80 | (code & 0x3f));
     } else {
-      h = feedByte(h, 0xe0 | (code >>> 12));
-      h = feedByte(h, 0x80 | ((code >>> 6) & 0x3f));
-      h = feedByte(h, 0x80 | (code & 0x3f));
+      feedByte(s, 0xe0 | (code >>> 12));
+      feedByte(s, 0x80 | ((code >>> 6) & 0x3f));
+      feedByte(s, 0x80 | (code & 0x3f));
     }
   }
-  return h;
 }
 
 /**
@@ -54,26 +63,26 @@ function feedUtf8(hash: bigint, text: string): bigint {
  * type-tagged, length-prefixed, null-delimited fields (`#192`). Pure JS with zero `node:*` imports.
  */
 export function fnv1a64Hex(fields: readonly HashField[]): string {
-  let h = FNV_OFFSET_BASIS;
+  const s: FnvState = { hi: FNV_OFFSET_HI, lo: FNV_OFFSET_LO };
   for (const field of fields) {
     if (field === null || field === undefined) {
-      h = feedByte(h, 0x00);
-      h = feedByte(h, 0x00);
+      feedByte(s, 0x00);
+      feedByte(s, 0x00);
     } else if (typeof field === 'number') {
       const normalized = Object.is(field, -0) ? 0 : field;
       const text = String(normalized);
-      h = feedByte(h, 0x01);
-      h = feedAscii(h, `${text.length}:`);
-      h = feedAscii(h, text);
-      h = feedByte(h, 0x00);
+      feedByte(s, 0x01);
+      feedAscii(s, `${text.length}:`);
+      feedAscii(s, text);
+      feedByte(s, 0x00);
     } else {
-      h = feedByte(h, 0x02);
-      h = feedAscii(h, `${field.length}:`);
-      h = feedUtf8(h, field);
-      h = feedByte(h, 0x00);
+      feedByte(s, 0x02);
+      feedAscii(s, `${field.length}:`);
+      feedUtf8(s, field);
+      feedByte(s, 0x00);
     }
   }
-  return h.toString(16).padStart(16, '0');
+  return s.hi.toString(16).padStart(8, '0') + s.lo.toString(16).padStart(8, '0');
 }
 
 /** Persisted mutable columns of a `categories` row. */
