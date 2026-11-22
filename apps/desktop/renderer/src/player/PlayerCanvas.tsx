@@ -38,9 +38,17 @@ export function PlayerCanvas({
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
-        if (frame.codedWidth <= 0 || frame.codedHeight <= 0) return;
-        if (canvas.width !== frame.codedWidth) canvas.width = frame.codedWidth;
-        if (canvas.height !== frame.codedHeight) canvas.height = frame.codedHeight;
+        const targetWidth =
+          typeof frame.displayWidth === 'number' && frame.displayWidth > 0
+            ? frame.displayWidth
+            : frame.codedWidth;
+        const targetHeight =
+          typeof frame.displayHeight === 'number' && frame.displayHeight > 0
+            ? frame.displayHeight
+            : frame.codedHeight;
+        if (targetWidth <= 0 || targetHeight <= 0) return;
+        if (canvas.width !== targetWidth) canvas.width = targetWidth;
+        if (canvas.height !== targetHeight) canvas.height = targetHeight;
         ctx.drawImage(frame as unknown as CanvasImageSource, 0, 0, canvas.width, canvas.height);
       } catch {
         // Ignore transient GPU/context draw failures; finally always releases the frame.

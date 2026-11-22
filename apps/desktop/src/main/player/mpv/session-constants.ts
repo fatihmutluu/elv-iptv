@@ -27,6 +27,8 @@ export const OBSERVED_PROPERTIES = [
   'audio-device-list',
   'volume',
   'mute',
+  'chapter-list',
+  'frame-drop-count',
 ] as const;
 
 /** Properties routed to `TrackTracker`. */

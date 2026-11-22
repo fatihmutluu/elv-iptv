@@ -22,6 +22,8 @@ export interface LoadOptions {
   softwareAudio?: boolean;
   /** Prefer HEVC base-layer / Profile 8.1 decoding over Dolby Vision Profile 7 (`#189`). */
   preferHevcOverDolbyVision?: boolean;
+  /** Strip SDH / hearing-impaired annotations from rendered text subtitles (`#310`). */
+  filterSdhSubtitles?: boolean;
   /** User-configured buffer size preset forwarded to the native engine (`#147`). */
   bufferPreset?: BufferPreset;
   /** User-configured Android video decoder selection mode forwarded to Media3 (`#411`). */
@@ -114,13 +116,22 @@ export interface ClockAnchor {
 /** Dynamic range transfer classification of the active video stream (`#58`). */
 export type StreamHdrKind = 'sdr' | 'hdr10' | 'hlg' | 'dv';
 
-/** Real decoded video stream telemetry emitted by native and desktop engines (`#58`). */
+/** One chapter marker reported by the media container or engine (`#118`). */
+export interface ChapterInfo {
+  readonly id: string;
+  readonly title?: string;
+  readonly startMs: number;
+  readonly endMs?: number;
+}
+
+/** Real decoded video stream telemetry emitted by native and desktop engines (`#58`, `#160`). */
 export interface StreamVideoInfo {
   readonly width?: number;
   readonly height?: number;
   readonly fps?: number;
   readonly codec?: string;
   readonly hdr?: StreamHdrKind;
+  readonly droppedFrames?: number;
 }
 
 /** Every event echoes the token of the media or command it belongs to. */
@@ -129,7 +140,9 @@ export type EngineEvent = { attempt: AttemptToken } & (
   | { type: 'firstFrame'; atMs: number }
   | { type: 'clock'; anchor: ClockAnchor }
   | { type: 'tracks'; tracks: MediaTracks }
+  | { type: 'chapters'; chapters: readonly ChapterInfo[] }
   | { type: 'mediaInfo'; info: StreamVideoInfo }
+  | { type: 'telemetry'; droppedFrames?: number }
   | { type: 'stall'; phase: 'start' | 'end'; atMs: number }
   | { type: 'progress'; bytesReceived?: number; atMs: number }
   | { type: 'error'; error: EngineError }

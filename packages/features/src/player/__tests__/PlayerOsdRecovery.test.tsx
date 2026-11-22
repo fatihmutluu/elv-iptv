@@ -403,11 +403,11 @@ describe('Player OSD recovery, input guards, subtitles, aspect, orientation & to
     expect(tv.surfaceCalls.at(-1)?.subtitleBottomInsetPx).toBe(120);
     await tv.view.unmount();
 
-    // Desktop always passes 0 and omits dead Aspect row in PlayerSettingsSheet
+    // Desktop always passes 0 and exposes Aspect & Stats toggles in PlayerSettingsSheet (#124/Wave C1)
     const desktop = await mountPlayer({ formFactor: 'desktop', os: 'web' });
     expect(desktop.surfaceCalls.at(-1)?.subtitleBottomInsetPx).toBe(0);
     await fireEvent.press(screen.getByTestId('player-settings-button'));
-    expect(screen.queryByTestId('player-resize-mode-toggle')).toBeNull();
+    expect(screen.getByTestId('player-resize-mode-toggle')).toBeTruthy();
     expect(screen.getByTestId('player-stats-toggle')).toBeTruthy();
     await desktop.view.unmount();
   });
@@ -490,7 +490,8 @@ describe('Player OSD recovery, input guards, subtitles, aspect, orientation & to
       nativeEvent: { locationX: 150, pageX: 150, identifier: 1 },
     });
     expect(screen.getByTestId('player-progress-hover-time')).toHaveTextContent('1:30');
-    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('1:30 / 2:00');
+    expect(screen.getByTestId('player-progress-time-current')).toHaveTextContent('1:30');
+    expect(screen.getByTestId('player-progress-time')).toHaveTextContent('2:00');
     expect(onSeekRatio).not.toHaveBeenCalled();
 
     // Drag past right edge (x=280) -> clamps cleanly to 1.0 (2:00)
@@ -499,9 +500,9 @@ describe('Player OSD recovery, input guards, subtitles, aspect, orientation & to
     });
     expect(screen.getByTestId('player-progress-hover-time')).toHaveTextContent('2:00');
 
-    // Release at 75% (x=150) -> commits ONE coalesced seek at 0.75 and hides preview pill
+    // Reverse 50px from overshoot (x=280 -> x=230) -> zero overshoot dead-zone debt, commits 0.75
     await fireEvent(scrubber, 'responderRelease', {
-      nativeEvent: { locationX: 150, pageX: 150, identifier: 1 },
+      nativeEvent: { locationX: 230, pageX: 230, identifier: 1 },
     });
     expect(onSeekRatio).toHaveBeenCalledTimes(1);
     expect(onSeekRatio).toHaveBeenCalledWith(0.75);

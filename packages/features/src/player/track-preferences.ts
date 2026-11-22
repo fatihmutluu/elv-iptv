@@ -61,11 +61,26 @@ export function chooseInitialSubtitleTrack(
     readonly subtitleMode?: SubtitleModePref | undefined;
   },
 ): string | null | undefined {
-  const mode = opts.subtitleMode ?? 'auto';
+  const mode = opts.subtitleMode ?? 'smart';
   if (mode === 'off') return null;
   if (tracks.length === 0) return undefined;
 
   const target = normalizeTrackLanguage(opts.preferredLang);
+  if (mode === 'onlyForced') {
+    if (target.length > 0) {
+      const forcedMatch = tracks.find(
+        (t) => t.forced === true && normalizeTrackLanguage(t.language) === target,
+      );
+      if (forcedMatch) return forcedMatch.id;
+    }
+    return null;
+  }
+
+  if (mode === 'default') {
+    const def = tracks.find((t) => t.isDefault === true);
+    return def?.id ?? null;
+  }
+
   if (target.length > 0) {
     const matches = tracks.filter((t) => normalizeTrackLanguage(t.language) === target);
     if (matches.length > 0) {
@@ -91,6 +106,15 @@ export interface EffectiveTrackPrefs {
   readonly subtitleMode: SubtitleModePref;
 }
 
+/** Resolves the persistence scope key for per-item/per-series track preferences (`#208`). */
+export function resolveTrackPreferenceScopeKey(target: {
+  readonly itemKey: string;
+  readonly seriesKey?: string | null | undefined;
+}): string {
+  const series = target.seriesKey?.trim();
+  return series !== undefined && series.length > 0 ? series : target.itemKey;
+}
+
 /** Combines global player track preferences with optional per-target pre-play overrides (`#398`, `#401`). */
 export function resolveEffectiveTrackPrefs(input: {
   readonly globalAudioLang?: string | undefined;
@@ -101,7 +125,7 @@ export function resolveEffectiveTrackPrefs(input: {
 }): EffectiveTrackPrefs {
   const targetAudio = input.targetAudioLang?.trim() ?? '';
   const targetSub = input.targetSubtitleLang?.trim() ?? '';
-  const baseMode = input.globalSubtitleMode ?? 'auto';
+  const baseMode = input.globalSubtitleMode ?? 'smart';
   const audioLang = targetAudio.length > 0 ? targetAudio : input.globalAudioLang;
   const subtitleLang =
     targetSub.length > 0 && targetSub.toLowerCase() !== 'off'
@@ -111,7 +135,7 @@ export function resolveEffectiveTrackPrefs(input: {
     targetSub.toLowerCase() === 'off'
       ? 'off'
       : targetSub.length > 0 && baseMode === 'off'
-        ? 'auto'
+        ? 'smart'
         : baseMode;
   return { audioLang, subtitleLang, subtitleMode };
 }

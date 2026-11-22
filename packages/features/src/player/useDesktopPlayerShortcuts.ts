@@ -38,6 +38,8 @@ export interface DesktopShortcutGuard {
   readonly onSeekBy: (deltaMs: number) => void;
   readonly onSeekToRatio: (ratio: number) => void;
   readonly onSeekToEnd: () => void;
+  readonly onPrevChapter?: () => void;
+  readonly onNextChapter?: () => void;
   readonly onTogglePlayPause: () => void;
   readonly onKeyEvent: (event: KeyEvent) => void;
 }
@@ -194,6 +196,16 @@ function dispatchVodShortcut(
   if (e.key === 'End') {
     e.preventDefault?.();
     if (!repeat) guard.onSeekToEnd();
+    return true;
+  }
+  if ((e.key === '[' || e.key === 'PageUp') && guard.onPrevChapter !== undefined) {
+    e.preventDefault?.();
+    if (!repeat) guard.onPrevChapter();
+    return true;
+  }
+  if ((e.key === ']' || e.key === 'PageDown') && guard.onNextChapter !== undefined) {
+    e.preventDefault?.();
+    if (!repeat) guard.onNextChapter();
     return true;
   }
 

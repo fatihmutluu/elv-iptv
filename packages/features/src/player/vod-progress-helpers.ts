@@ -1,19 +1,20 @@
 import { type ClockAnchor, positionAt } from '@elv/playback';
 import { Platform } from 'react-native';
+import {
+  clampProgressRatio,
+  formatPlaybackPosition,
+  formatVodEndTimestamp,
+  integrateFineScrubStep,
+  type TouchScrubSensitivityTier,
+} from './vod-progress-math';
 
-/** Formats a millisecond playback timestamp as `m:ss` or `h:mm:ss`. */
-export function formatPlaybackPosition(ms: number): string {
-  if (!Number.isFinite(ms)) return '0:00';
-  const clamped = Math.max(0, Math.floor(ms / 1000));
-  const seconds = String(clamped % 60).padStart(2, '0');
-  const minutes = Math.floor(clamped / 60);
-  if (minutes < 60) return `${minutes}:${seconds}`;
-  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}:${seconds}`;
-}
+export { formatPlaybackPosition, formatVodEndTimestamp, type TouchScrubSensitivityTier };
 
 export interface ProgressSnapshot {
   readonly timeText: string;
+  readonly currentText: string;
   readonly fillPercent: number;
+  readonly positionMs: number;
   readonly positionSec: number;
   readonly durationSec: number;
   readonly durationMs: number | undefined;
@@ -41,11 +42,6 @@ export interface PressGeometry {
   } | null;
 }
 
-function clampRatio(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(1, value));
-}
-
 export function readProgressSnapshot(
   anchor: ClockAnchor | undefined,
   nowMs: number,
@@ -53,7 +49,9 @@ export function readProgressSnapshot(
   if (anchor === undefined) {
     return {
       timeText: '0:00 / --:--',
+      currentText: '0:00',
       fillPercent: 0,
+      positionMs: 0,
       positionSec: 0,
       durationSec: 0,
       durationMs: undefined,
@@ -65,13 +63,14 @@ export function readProgressSnapshot(
   const hasDuration = durationMs !== undefined && Number.isFinite(durationMs) && durationMs > 0;
   const clampedPos = hasDuration ? Math.min(Math.max(0, rawPos), durationMs) : Math.max(0, rawPos);
   const ratio = hasDuration ? clampedPos / durationMs : 0;
-  const fillPercent = Math.round(clampRatio(ratio) * 1000) / 10;
-  const timeText = `${formatPlaybackPosition(clampedPos)} / ${
-    hasDuration ? formatPlaybackPosition(durationMs) : '--:--'
-  }`;
+  const fillPercent = Math.round(clampProgressRatio(ratio) * 1000) / 10;
+  const currentText = formatPlaybackPosition(clampedPos);
+  const timeText = `${currentText} / ${hasDuration ? formatPlaybackPosition(durationMs) : '--:--'}`;
   return {
     timeText,
+    currentText,
     fillPercent,
+    positionMs: clampedPos,
     positionSec: Math.floor(clampedPos / 1000),
     durationSec: hasDuration ? Math.floor(durationMs / 1000) : 0,
     durationMs: hasDuration ? durationMs : undefined,
@@ -118,48 +117,31 @@ export function readEventRatio(
   const clientX = event.nativeEvent?.clientX ?? event.clientX;
   const rect = target?.getBoundingClientRect?.();
   if (rect !== undefined && typeof clientX === 'number' && rect.width > 0) {
-    return clampRatio((clientX - rect.left) / rect.width);
+    return clampProgressRatio((clientX - rect.left) / rect.width);
   }
   const x = event.nativeEvent?.locationX ?? event.nativeEvent?.offsetX;
   const width = layoutWidth > 0 ? layoutWidth : (target?.clientWidth ?? 0);
   if (typeof x !== 'number' || width <= 0) return undefined;
-  return clampRatio(x / width);
-}
-
-/** Resolves a clamped `[0, 1]` drag ratio for a native touch responder event (`#440`). */
-function resolveTouchDragRatio(params: {
-  readonly startRatio: number;
-  readonly startPageX: number | undefined;
-  readonly width: number;
-  readonly gestureDx: number | undefined;
-  readonly nativeEvent?: { locationX?: number; pageX?: number } | undefined;
-}): number {
-  const { startRatio, startPageX, width, gestureDx, nativeEvent } = params;
-  if (width <= 0) return startRatio;
-  if (typeof gestureDx === 'number' && Number.isFinite(gestureDx) && gestureDx !== 0) {
-    return clampRatio(startRatio + gestureDx / width);
-  }
-  const pageX = nativeEvent?.pageX;
-  if (
-    typeof pageX === 'number' &&
-    Number.isFinite(pageX) &&
-    typeof startPageX === 'number' &&
-    Number.isFinite(startPageX)
-  ) {
-    return clampRatio(startRatio + (pageX - startPageX) / width);
-  }
-  const locX = nativeEvent?.locationX;
-  if (typeof locX === 'number' && Number.isFinite(locX)) {
-    return clampRatio(locX / width);
-  }
-  return startRatio;
+  return clampProgressRatio(x / width);
 }
 
 interface TouchResponderEvent {
-  readonly nativeEvent?: { locationX?: number; pageX?: number };
+  readonly nativeEvent?: {
+    locationX?: number;
+    locationY?: number;
+    pageX?: number;
+    pageY?: number;
+  };
 }
 
-/** Creates native RN touch responder handlers for drag-scrubbing `VodProgressBar` (`#440`). */
+const ORIGIN_DEPART_RATIO = 0.02;
+const ORIGIN_SNAP_TOLERANCE = 0.006;
+
+/**
+ * Creates native RN touch responder handlers for drag-scrubbing `VodProgressBar` with vertical
+ * fine-scrubbing zoom tiers (`1×`, `0.25×`, `0.1×`, `#355`, `#440`).
+ * Integrates incrementally so crossing vertical sensitivity boundaries never jumps the playhead.
+ */
 export function createTouchScrubResponder(hooks: {
   readonly canScrub: () => boolean;
   readonly getWidth: () => number;
@@ -167,9 +149,94 @@ export function createTouchScrubResponder(hooks: {
   readonly onMove: (ratio: number) => void;
   readonly onCommit: (ratio: number) => void;
   readonly onCancel: () => void;
+  readonly onSensitivityChange?: (tier: TouchScrubSensitivityTier) => void;
+  readonly onFineScrubHaptic?: (kind: 'tier' | 'origin') => void;
 }) {
-  let start: { ratio: number; pageX: number | undefined } | null = null;
-  let lastRatio: number | null = null;
+  let state: {
+    startRatio: number;
+    currentRatio: number;
+    prevPageX: number | undefined;
+    prevLocX: number | undefined;
+    startPageY: number | undefined;
+    tier: TouchScrubSensitivityTier;
+    departedOrigin: boolean;
+  } | null = null;
+
+  const stepFromEvent = (evt: TouchResponderEvent): number | null => {
+    if (state === null) return null;
+    const width = hooks.getWidth();
+    if (width <= 0) return state.currentRatio;
+
+    const ne = evt?.nativeEvent;
+    const pageX = ne?.pageX;
+    const locX = ne?.locationX;
+    const pageY = ne?.pageY ?? ne?.locationY;
+
+    let dxDelta = 0;
+    let axis: 'page' | 'loc' | 'none' = 'none';
+    if (
+      typeof pageX === 'number' &&
+      Number.isFinite(pageX) &&
+      state.prevPageX !== undefined &&
+      Number.isFinite(state.prevPageX)
+    ) {
+      dxDelta = pageX - state.prevPageX;
+      axis = 'page';
+    } else if (
+      typeof locX === 'number' &&
+      Number.isFinite(locX) &&
+      state.prevLocX !== undefined &&
+      Number.isFinite(state.prevLocX)
+    ) {
+      dxDelta = locX - state.prevLocX;
+      axis = 'loc';
+    }
+
+    const absDy =
+      typeof pageY === 'number' &&
+      Number.isFinite(pageY) &&
+      state.startPageY !== undefined &&
+      Number.isFinite(state.startPageY)
+        ? Math.abs(pageY - state.startPageY)
+        : 0;
+
+    const prevRatio = state.currentRatio;
+    const { nextRatio, tier } = integrateFineScrubStep({
+      prevRatio,
+      dxDelta,
+      width,
+      absDy,
+    });
+
+    // Always advance reference X to current pointer position since nextRatio is already clamped,
+    // so reversing after overshooting 0% / 100% responds immediately with zero dead-zone debt.
+    if (axis === 'page' && typeof pageX === 'number' && Number.isFinite(pageX)) {
+      state.prevPageX = pageX;
+    } else if (axis === 'loc' && typeof locX === 'number' && Number.isFinite(locX)) {
+      state.prevLocX = locX;
+    }
+
+    if (tier !== state.tier) {
+      state.tier = tier;
+      hooks.onSensitivityChange?.(tier);
+      hooks.onFineScrubHaptic?.('tier');
+    }
+
+    const distFromOrigin = Math.abs(nextRatio - state.startRatio);
+    if (!state.departedOrigin && distFromOrigin >= ORIGIN_DEPART_RATIO) {
+      state.departedOrigin = true;
+    } else if (
+      state.departedOrigin &&
+      Math.abs(prevRatio - state.startRatio) > ORIGIN_SNAP_TOLERANCE &&
+      distFromOrigin <= ORIGIN_SNAP_TOLERANCE
+    ) {
+      hooks.onFineScrubHaptic?.('origin');
+    }
+
+    state.currentRatio = nextRatio;
+    return nextRatio;
+  };
+
   return {
     panHandlers: {
       onStartShouldSetResponder: () => hooks.canScrub() && hooks.getWidth() > 0,
@@ -178,47 +245,38 @@ export function createTouchScrubResponder(hooks: {
       onResponderGrant: (evt: TouchResponderEvent) => {
         const width = hooks.getWidth();
         if (!hooks.canScrub() || width <= 0) return;
-        const locX = evt?.nativeEvent?.locationX;
+        const ne = evt?.nativeEvent;
+        const locX = ne?.locationX;
         if (typeof locX !== 'number' || !Number.isFinite(locX)) return;
-        const initial = clampRatio(locX / width);
-        start = { ratio: initial, pageX: evt.nativeEvent?.pageX };
-        lastRatio = initial;
+        const initial = clampProgressRatio(locX / width);
+        state = {
+          startRatio: initial,
+          currentRatio: initial,
+          prevPageX: ne?.pageX,
+          prevLocX: locX,
+          startPageY: ne?.pageY ?? ne?.locationY,
+          tier: 'normal',
+          departedOrigin: false,
+        };
+        hooks.onSensitivityChange?.('normal');
         hooks.onStart(initial);
       },
       onResponderMove: (evt: TouchResponderEvent) => {
-        if (start === null) return;
-        const next = resolveTouchDragRatio({
-          startRatio: start.ratio,
-          startPageX: start.pageX,
-          width: hooks.getWidth(),
-          gestureDx: undefined,
-          nativeEvent: evt?.nativeEvent,
-        });
-        lastRatio = next;
-        hooks.onMove(next);
+        const next = stepFromEvent(evt);
+        if (next !== null) hooks.onMove(next);
       },
       onResponderRelease: (evt: TouchResponderEvent) => {
-        const curStart = start;
-        const fallback = lastRatio;
-        start = null;
-        lastRatio = null;
-        const finalRatio =
-          curStart !== null
-            ? resolveTouchDragRatio({
-                startRatio: curStart.ratio,
-                startPageX: curStart.pageX,
-                width: hooks.getWidth(),
-                gestureDx: undefined,
-                nativeEvent: evt?.nativeEvent,
-              })
-            : fallback;
+        const finalRatio = stepFromEvent(evt);
+        state = null;
+        hooks.onSensitivityChange?.('normal');
         if (finalRatio !== null) hooks.onCommit(finalRatio);
         else hooks.onCancel();
       },
       onResponderTerminate: () => {
-        start = null;
-        if (lastRatio !== null) {
-          lastRatio = null;
+        const hadActive = state !== null;
+        state = null;
+        if (hadActive) {
+          hooks.onSensitivityChange?.('normal');
           hooks.onCancel();
         }
       },
@@ -244,7 +302,7 @@ export function attachWebProgressDrag(params: {
   const win = (globalThis as unknown as { window?: WebWindowLike }).window;
   const ratioFromClientX = (clientX: number | undefined): number =>
     typeof clientX === 'number' && Number.isFinite(clientX) && rect.width > 0
-      ? clampRatio((clientX - rect.left) / rect.width)
+      ? clampProgressRatio((clientX - rect.left) / rect.width)
       : (getLastRatio() ?? initial);
 
   const handleMove = (e: { clientX?: number }): void => onMove(ratioFromClientX(e.clientX));

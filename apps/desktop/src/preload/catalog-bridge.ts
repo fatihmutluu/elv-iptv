@@ -373,6 +373,19 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         method: 'listFavoriteKeys',
         ...(profileId === undefined ? {} : { profileId }),
       }),
+    getTrackPreference: (scopeKey, profileId) =>
+      callValue({
+        method: 'getTrackPreference',
+        scopeKey,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    saveTrackPreference: (input) => callValue({ method: 'saveTrackPreference', input }),
+    clearTrackPreference: (scopeKey, profileId) =>
+      callValue({
+        method: 'clearTrackPreference',
+        scopeKey,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
     onChanged(listener: () => void): () => void {
       changedListeners.add(listener);
       return () => {

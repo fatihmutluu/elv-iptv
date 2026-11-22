@@ -365,6 +365,12 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       case 'setHwdec':
         engine.setHwdec(command.profile);
         break;
+      case 'setResizeMode':
+        engine.setResizeMode(command.mode);
+        break;
+      case 'setFilterSdh':
+        engine.setFilterSdh(command.enabled);
+        break;
       case 'fullscreen':
         engine.toggleFullscreen();
         break;

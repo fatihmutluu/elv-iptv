@@ -112,6 +112,8 @@ export function loadfileCommand(r: {
   headers: Readonly<Record<string, string>>;
   kind: MediaKind;
   startMs?: number;
+  preferHevcOverDolbyVision?: boolean;
+  filterSdhSubtitles?: boolean;
 }): MpvCommand {
   const options: Record<string, string> = {
     ...headerOptions(r.headers),
@@ -124,5 +126,9 @@ export function loadfileCommand(r: {
         }),
   };
   if (r.startMs !== undefined) options['start'] = (r.startMs / 1000).toFixed(3);
+  if (r.preferHevcOverDolbyVision === true) options['hwdec'] = 'no';
+  if (r.filterSdhSubtitles !== undefined) {
+    options['sub-filter-sdh'] = r.filterSdhSubtitles ? 'yes' : 'no';
+  }
   return ['loadfile', r.url, 'replace', -1, options];
 }

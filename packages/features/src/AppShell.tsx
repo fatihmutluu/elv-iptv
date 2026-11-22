@@ -36,6 +36,7 @@ import type { AppLifecyclePort } from './ports/app-lifecycle';
 import type { PlayTarget } from './ports/play-target';
 import { createPlaybackGuard, type PlaybackGuard } from './ports/playback-guard';
 import type { VideoHost } from './ports/video-host';
+import { OledScreensaverOverlay, useOledScreensaver } from './screensaver';
 import { SearchScreen } from './search';
 import { SettingsScreen, type SettingsSection } from './settings';
 import type { DetailTarget } from './shared';
@@ -131,8 +132,16 @@ export function AppShell(props: AppShellProps): ReactElement {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchScope, setSearchScope] = useState<SearchScope>('all');
   const [playTarget, setPlayTarget] = useState<PlayTarget | null>(null);
+  const [playerPlaybackActive, setPlayerPlaybackActive] = useState(false);
+  const [liveEmbeddedPlaybackActive, setLiveEmbeddedPlaybackActive] = useState(false);
   const [stageKey, setStageKey] = useState(0);
   const [appForeground, setAppForeground] = useState(true);
+  const oledScreensaver = useOledScreensaver({
+    timeoutMin: preferences.preferences.oledScreensaverTimeoutMin,
+    isBlocked:
+      (playTarget !== null && playerPlaybackActive) ||
+      (playTarget === null && activeTab === 'live' && liveEmbeddedPlaybackActive),
+  });
   const userPickedTabRef = useRef(false);
   const userPickedSettingsSectionRef = useRef(false);
   const playTargetRef = useRef(playTarget);
@@ -391,214 +400,235 @@ export function AppShell(props: AppShellProps): ReactElement {
     <RouteActiveProvider active={documentVisible && appForeground}>
       <CatalogUiCacheProvider cache={uiCache}>
         <BrowseFocusMemoryProvider memory={focusMemory}>
-          {playTarget !== null ? (
-            <CrashRecoveryBoundary resetKey={playTarget.itemKey} {...crashProps}>
-              <PlayerScreen
-                catalog={observedCatalog}
-                videoHost={videoHost}
-                target={playTarget}
-                playbackGuard={playbackGuard}
-                autoHideOsdMs={DEFAULT_AUTO_HIDE_OSD_MS}
-                initialVolume={preferences.preferences.playerVolume}
-                onPersistVolume={(volume) => {
-                  void preferences.updatePreferences({ playerVolume: volume });
-                }}
-                autoSubtitlesOnSkipBack={preferences.preferences.autoSubtitlesOnSkipBack}
-                onToggleAutoSubtitlesOnSkipBack={() => {
-                  void preferences.updatePreferences({
-                    autoSubtitlesOnSkipBack: !preferences.preferences.autoSubtitlesOnSkipBack,
-                  });
-                }}
-                autoPlayNextEpisode={preferences.preferences.autoPlayNextEpisode}
-                onToggleAutoPlayNextEpisode={() => {
-                  void preferences.updatePreferences({
-                    autoPlayNextEpisode: !preferences.preferences.autoPlayNextEpisode,
-                  });
-                }}
-                reduceMotion={preferences.preferences.reduceMotion}
-                bufferPreset={preferences.preferences.bufferPreset}
-                useTextureView={preferences.preferences.useTextureView}
-                seekStepSec={preferences.preferences.seekStepSec}
-                defaultResizeMode={preferences.preferences.defaultResizeMode}
-                preferredAudioLang={preferences.preferences.preferredAudioLang}
-                preferredSubtitleLang={preferences.preferences.preferredSubtitleLang}
-                subtitleMode={preferences.preferences.subtitleMode}
-                preferredAudioDevice={preferences.preferences.preferredAudioDevice}
-                onPersistAudioDevice={(preferredAudioDevice) => {
-                  void preferences.updatePreferences({ preferredAudioDevice });
-                }}
-                {...(Platform.OS === 'android'
-                  ? {
-                      androidDecoderMode: preferences.preferences.androidDecoderMode,
-                      onSelectAndroidDecoderMode: (androidDecoderMode) => {
-                        void preferences.updatePreferences({ androidDecoderMode });
-                      },
-                    }
-                  : {})}
-                {...(appLifecycle !== undefined ? { appLifecycle } : {})}
-                onTargetChange={onPlayerTargetChange}
-                onExit={onPlayerExit}
-              />
-            </CrashRecoveryBoundary>
-          ) : (
-            <AdaptiveNavShell
-              brandTitle={i18n.t('app.title')}
-              showBrand
-              destinations={destinations}
-              utilities={utilities}
-              activeId={activeTab}
-              onSelectDestination={handleSelectDestination}
-              navFocused={topNavFocused}
-              onExitNavFocus={handleExitNavFocus}
-              onBack={handleNavBack}
-              overlay={hasHeroOverlay}
-              frosted={hasHeroOverlay ? heroScrolled : true}
-              testID="app-shell"
-            >
-              <CrashRecoveryBoundary
-                resetKey={`${activeTab}:${activeDetail?.itemKey ?? ''}`}
-                {...crashProps}
-              >
-                {showCachedStrip ? (
-                  <View style={styles.cachedStripWrap}>
-                    <CachedCatalogStrip
-                      health={importHealth.health}
-                      retrying={importHealth.retrying}
-                      onRetry={importHealth.retryFailedSources}
-                    />
-                  </View>
-                ) : null}
-                {isResolvingInitialSources ? (
-                  <View testID="app-shell-boot" style={styles.bootCanvas}>
-                    {isTv && !topNavFocused ? (
-                      <TvFocusAnchor testID="app-shell-boot-focus-anchor" />
-                    ) : null}
-                  </View>
-                ) : activeDetail !== null ? (
-                  <DetailScreen
-                    key={activeDetail.itemKey}
-                    target={activeDetail}
-                    userStateVersion={userStateVersion}
-                    preferredAudioLang={preferences.preferences.preferredAudioLang}
-                    preferredSubtitleLang={preferences.preferences.preferredSubtitleLang}
-                    onSearchPerson={handleSearchPerson}
-                    onBack={popDetail}
-                    onPlay={handlePlay}
-                    onOpenDetail={openDetail}
-                    onScrollTopChange={setHeroScrolled}
-                    {...stageProps}
-                  />
-                ) : activeTab === 'settings' ? (
-                  <SettingsScreen
-                    section={settingsSection}
-                    onSectionChange={handleSettingsSectionChange}
-                    preferences={preferences}
-                    onFocusTopNav={handleFocusTopNav}
-                    isActiveScope={!topNavFocused}
-                    renderSources={(slot) => (
-                      <SourcesScreen
-                        catalog={observedCatalog}
-                        embedded
-                        playbackGuard={playbackGuard}
-                        externalRefreshToken={externalRefreshToken + refreshToken}
-                        {...(readySourcesCount > 0 ? { onOpenMenu: () => selectTab('home') } : {})}
-                        {...slot}
-                      />
-                    )}
-                    renderLicenses={(slot) => <ThirdPartyNoticesScreen embedded {...slot} />}
-                  />
-                ) : activeTab === 'search' ? (
-                  <SearchScreen
-                    userStateVersion={userStateVersion}
-                    initialQuery={searchQuery}
-                    onQueryChange={setSearchQuery}
-                    initialScope={searchScope}
-                    onScopeChange={setSearchScope}
-                    recentSearches={recentSearches}
-                    onRecentSearchesChange={setRecentSearches}
-                    onPlay={handlePlay}
-                    onOpenDetail={openDetail}
-                    {...stageProps}
-                  />
-                ) : activeTab === 'home' ? (
-                  <HomeScreen
-                    sources={sources}
-                    userStateVersion={userStateVersion}
-                    onPlay={handlePlay}
-                    onOpenTab={selectTab}
-                    onOpenDetail={openDetail}
-                    onOpenSources={openSources}
-                    onScrollTopChange={setHeroScrolled}
-                    {...stageProps}
-                  />
-                ) : activeTab === 'movie' || activeTab === 'series' ? (
-                  <CatalogDiscoveryScreen
-                    key={activeTab}
-                    kind={activeTab}
-                    sources={sources}
-                    userStateVersion={userStateVersion}
-                    memory={catalogMemoryByTab[activeTab]}
-                    onMemoryChange={
-                      activeTab === 'movie' ? handleMovieMemoryChange : handleSeriesMemoryChange
-                    }
-                    onPlay={handlePlay}
-                    onOpenDetail={openDetail}
-                    onOpenSources={openSources}
-                    {...stageProps}
-                  />
-                ) : (
-                  <LiveScreen
-                    sources={sources}
-                    userStateVersion={userStateVersion}
-                    memory={liveMemory}
-                    onMemoryChange={handleLiveMemoryChange}
-                    videoHost={videoHost}
-                    playbackGuard={playbackGuard}
-                    defaultLiveMode={preferences.preferences.defaultLiveMode}
-                    epgTimeSpanHours={preferences.preferences.epgTimeSpanHours}
-                    epgGenreTints={preferences.preferences.epgGenreTints}
-                    epgShowClock={preferences.preferences.epgShowClock}
-                    logoBackdropMode={preferences.preferences.logoBackdropMode}
-                    showSourceBadges={preferences.preferences.showSourceBadges}
-                    liveOkTwoStepPreview={preferences.preferences.liveOkTwoStepPreview}
-                    cleanChannelTitles={preferences.preferences.cleanChannelTitles}
-                    onPlay={handlePlay}
-                    onOpenSources={openSources}
-                    {...stageProps}
-                  />
-                )}
+          <View style={styles.root} onTouchStart={oledScreensaver.recordActivity}>
+            {playTarget !== null ? (
+              <CrashRecoveryBoundary resetKey={playTarget.itemKey} {...crashProps}>
+                <PlayerScreen
+                  catalog={observedCatalog}
+                  videoHost={videoHost}
+                  target={playTarget}
+                  playbackGuard={playbackGuard}
+                  autoHideOsdMs={DEFAULT_AUTO_HIDE_OSD_MS}
+                  initialVolume={preferences.preferences.playerVolume}
+                  onPersistVolume={(volume) => {
+                    void preferences.updatePreferences({ playerVolume: volume });
+                  }}
+                  autoSubtitlesOnSkipBack={preferences.preferences.autoSubtitlesOnSkipBack}
+                  onToggleAutoSubtitlesOnSkipBack={() => {
+                    void preferences.updatePreferences({
+                      autoSubtitlesOnSkipBack: !preferences.preferences.autoSubtitlesOnSkipBack,
+                    });
+                  }}
+                  autoPlayNextEpisode={preferences.preferences.autoPlayNextEpisode}
+                  onToggleAutoPlayNextEpisode={() => {
+                    void preferences.updatePreferences({
+                      autoPlayNextEpisode: !preferences.preferences.autoPlayNextEpisode,
+                    });
+                  }}
+                  reduceMotion={preferences.preferences.reduceMotion}
+                  bufferPreset={preferences.preferences.bufferPreset}
+                  useTextureView={preferences.preferences.useTextureView}
+                  seekStepSec={preferences.preferences.seekStepSec}
+                  defaultResizeMode={preferences.preferences.defaultResizeMode}
+                  preferredAudioLang={preferences.preferences.preferredAudioLang}
+                  preferredSubtitleLang={preferences.preferences.preferredSubtitleLang}
+                  preferredAudioLanguages={preferences.preferences.preferredAudioLanguages}
+                  preferredSubtitleLanguages={preferences.preferences.preferredSubtitleLanguages}
+                  preferDefaultAudioTrack={preferences.preferences.preferDefaultAudioTrack}
+                  preferHevcOverDolbyVision={preferences.preferences.preferHevcOverDolbyVision}
+                  filterSdhSubtitles={preferences.preferences.filterSdhSubtitles}
+                  subtitleMode={preferences.preferences.subtitleMode}
+                  osdTimeDisplayMode={preferences.preferences.osdTimeDisplayMode}
+                  onPersistOsdTimeDisplayMode={(osdTimeDisplayMode) => {
+                    void preferences.updatePreferences({ osdTimeDisplayMode });
+                  }}
+                  sleepTimerDefaultAction={preferences.preferences.sleepTimerDefaultAction}
+                  onPersistSleepTimerAction={(sleepTimerDefaultAction) => {
+                    void preferences.updatePreferences({ sleepTimerDefaultAction });
+                  }}
+                  stillWatchingTimeoutMin={preferences.preferences.stillWatchingTimeoutMin}
+                  onPlaybackActiveChange={setPlayerPlaybackActive}
+                  preferredAudioDevice={preferences.preferences.preferredAudioDevice}
+                  onPersistAudioDevice={(preferredAudioDevice) => {
+                    void preferences.updatePreferences({ preferredAudioDevice });
+                  }}
+                  {...(Platform.OS === 'android'
+                    ? {
+                        androidDecoderMode: preferences.preferences.androidDecoderMode,
+                        onSelectAndroidDecoderMode: (androidDecoderMode) => {
+                          void preferences.updatePreferences({ androidDecoderMode });
+                        },
+                      }
+                    : {})}
+                  {...(appLifecycle !== undefined ? { appLifecycle } : {})}
+                  onTargetChange={onPlayerTargetChange}
+                  onExit={onPlayerExit}
+                />
               </CrashRecoveryBoundary>
-            </AdaptiveNavShell>
-          )}
-          {exitToastVisible && playTarget === null ? (
-            <View pointerEvents="none" style={styles.exitToastWrap}>
-              <View
-                testID="shell-exit-confirm-toast"
-                accessibilityLiveRegion="polite"
-                style={[
-                  styles.exitToastPill,
-                  {
-                    backgroundColor: theme.colors.glassBg,
-                    borderColor: theme.colors.glassBorder,
-                    borderRadius: theme.radius.pill,
-                  },
-                  webBackdropBlur(16),
-                ]}
+            ) : (
+              <AdaptiveNavShell
+                brandTitle={i18n.t('app.title')}
+                showBrand
+                destinations={destinations}
+                utilities={utilities}
+                activeId={activeTab}
+                onSelectDestination={handleSelectDestination}
+                navFocused={topNavFocused}
+                onExitNavFocus={handleExitNavFocus}
+                onBack={handleNavBack}
+                overlay={hasHeroOverlay}
+                frosted={hasHeroOverlay ? heroScrolled : true}
+                testID="app-shell"
               >
-                <Text style={[theme.typography.caption, { color: theme.colors.textPrimary }]}>
-                  {i18n.t('shell.backToExitToast')}
-                </Text>
+                <CrashRecoveryBoundary
+                  resetKey={`${activeTab}:${activeDetail?.itemKey ?? ''}`}
+                  {...crashProps}
+                >
+                  {showCachedStrip ? (
+                    <View style={styles.cachedStripWrap}>
+                      <CachedCatalogStrip
+                        health={importHealth.health}
+                        retrying={importHealth.retrying}
+                        onRetry={importHealth.retryFailedSources}
+                      />
+                    </View>
+                  ) : null}
+                  {isResolvingInitialSources ? (
+                    <View testID="app-shell-boot" style={styles.bootCanvas}>
+                      {isTv && !topNavFocused ? (
+                        <TvFocusAnchor testID="app-shell-boot-focus-anchor" />
+                      ) : null}
+                    </View>
+                  ) : activeDetail !== null ? (
+                    <DetailScreen
+                      key={activeDetail.itemKey}
+                      target={activeDetail}
+                      userStateVersion={userStateVersion}
+                      preferredAudioLang={preferences.preferences.preferredAudioLang}
+                      preferredSubtitleLang={preferences.preferences.preferredSubtitleLang}
+                      onSearchPerson={handleSearchPerson}
+                      onBack={popDetail}
+                      onPlay={handlePlay}
+                      onOpenDetail={openDetail}
+                      onScrollTopChange={setHeroScrolled}
+                      {...stageProps}
+                    />
+                  ) : activeTab === 'settings' ? (
+                    <SettingsScreen
+                      section={settingsSection}
+                      onSectionChange={handleSettingsSectionChange}
+                      preferences={preferences}
+                      onFocusTopNav={handleFocusTopNav}
+                      isActiveScope={!topNavFocused}
+                      renderSources={(slot) => (
+                        <SourcesScreen
+                          catalog={observedCatalog}
+                          embedded
+                          playbackGuard={playbackGuard}
+                          externalRefreshToken={externalRefreshToken + refreshToken}
+                          {...(readySourcesCount > 0
+                            ? { onOpenMenu: () => selectTab('home') }
+                            : {})}
+                          {...slot}
+                        />
+                      )}
+                      renderLicenses={(slot) => <ThirdPartyNoticesScreen embedded {...slot} />}
+                    />
+                  ) : activeTab === 'search' ? (
+                    <SearchScreen
+                      userStateVersion={userStateVersion}
+                      initialQuery={searchQuery}
+                      onQueryChange={setSearchQuery}
+                      initialScope={searchScope}
+                      onScopeChange={setSearchScope}
+                      recentSearches={recentSearches}
+                      onRecentSearchesChange={setRecentSearches}
+                      onPlay={handlePlay}
+                      onOpenDetail={openDetail}
+                      {...stageProps}
+                    />
+                  ) : activeTab === 'home' ? (
+                    <HomeScreen
+                      sources={sources}
+                      userStateVersion={userStateVersion}
+                      onPlay={handlePlay}
+                      onOpenTab={selectTab}
+                      onOpenDetail={openDetail}
+                      onOpenSources={openSources}
+                      onScrollTopChange={setHeroScrolled}
+                      {...stageProps}
+                    />
+                  ) : activeTab === 'movie' || activeTab === 'series' ? (
+                    <CatalogDiscoveryScreen
+                      key={activeTab}
+                      kind={activeTab}
+                      sources={sources}
+                      userStateVersion={userStateVersion}
+                      memory={catalogMemoryByTab[activeTab]}
+                      onMemoryChange={
+                        activeTab === 'movie' ? handleMovieMemoryChange : handleSeriesMemoryChange
+                      }
+                      onPlay={handlePlay}
+                      onOpenDetail={openDetail}
+                      onOpenSources={openSources}
+                      {...stageProps}
+                    />
+                  ) : (
+                    <LiveScreen
+                      sources={sources}
+                      userStateVersion={userStateVersion}
+                      memory={liveMemory}
+                      onMemoryChange={handleLiveMemoryChange}
+                      videoHost={videoHost}
+                      playbackGuard={playbackGuard}
+                      defaultLiveMode={preferences.preferences.defaultLiveMode}
+                      epgTimeSpanHours={preferences.preferences.epgTimeSpanHours}
+                      epgGenreTints={preferences.preferences.epgGenreTints}
+                      epgShowClock={preferences.preferences.epgShowClock}
+                      logoBackdropMode={preferences.preferences.logoBackdropMode}
+                      showSourceBadges={preferences.preferences.showSourceBadges}
+                      liveOkTwoStepPreview={preferences.preferences.liveOkTwoStepPreview}
+                      cleanChannelTitles={preferences.preferences.cleanChannelTitles}
+                      onEmbeddedPlaybackActiveChange={setLiveEmbeddedPlaybackActive}
+                      onPlay={handlePlay}
+                      onOpenSources={openSources}
+                      {...stageProps}
+                    />
+                  )}
+                </CrashRecoveryBoundary>
+              </AdaptiveNavShell>
+            )}
+            {exitToastVisible && playTarget === null ? (
+              <View pointerEvents="none" style={styles.exitToastWrap}>
+                <View
+                  testID="shell-exit-confirm-toast"
+                  accessibilityLiveRegion="polite"
+                  style={[
+                    styles.exitToastPill,
+                    {
+                      backgroundColor: theme.colors.glassBg,
+                      borderColor: theme.colors.glassBorder,
+                      borderRadius: theme.radius.pill,
+                    },
+                    webBackdropBlur(16),
+                  ]}
+                >
+                  <Text style={[theme.typography.caption, { color: theme.colors.textPrimary }]}>
+                    {i18n.t('shell.backToExitToast')}
+                  </Text>
+                </View>
               </View>
-            </View>
-          ) : null}
-          {connectionGuard.pending !== null ? (
-            <ConnectionLimitDialog
-              check={connectionGuard.pending.check}
-              onStopOther={connectionGuard.handleStopOther}
-              onCancel={connectionGuard.handleCancel}
-              onContinueAnyway={connectionGuard.handleContinueAnyway}
-            />
-          ) : null}
+            ) : null}
+            {connectionGuard.pending !== null ? (
+              <ConnectionLimitDialog
+                check={connectionGuard.pending.check}
+                onStopOther={connectionGuard.handleStopOther}
+                onCancel={connectionGuard.handleCancel}
+                onContinueAnyway={connectionGuard.handleContinueAnyway}
+              />
+            ) : null}
+            <OledScreensaverOverlay state={oledScreensaver.state} onWake={oledScreensaver.wake} />
+          </View>
         </BrowseFocusMemoryProvider>
       </CatalogUiCacheProvider>
     </RouteActiveProvider>
@@ -606,6 +636,7 @@ export function AppShell(props: AppShellProps): ReactElement {
 }
 
 const styles = StyleSheet.create({
+  root: { flex: 1 },
   bootCanvas: { flex: 1 },
   cachedStripWrap: { paddingHorizontal: 16, paddingTop: 8 },
   exitToastWrap: {

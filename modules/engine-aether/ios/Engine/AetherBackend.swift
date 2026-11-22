@@ -75,6 +75,7 @@ final class AetherBackend: PlayerBackend {
   var desiredVolume: Float = 1.0
   var lastAVBufferReportedBuffering = false
   var playbackActiveIntent = false
+  var lastDroppedVideoFrames = 0
 
   init(gate: ConnectionGate, httpSession: EngineHttpSession) {
     self.gate = gate
@@ -325,6 +326,7 @@ final class AetherBackend: PlayerBackend {
     requestedRate = 1.0
     lastAVBufferReportedBuffering = false
     playbackActiveIntent = false
+    lastDroppedVideoFrames = 0
     liveRecoveryPolicy.reset()
     osdClockThrottle.reset()
   }

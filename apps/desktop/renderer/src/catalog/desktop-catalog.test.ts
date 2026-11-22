@@ -356,4 +356,50 @@ describe('desktop CatalogService', () => {
     const legacyService = createDesktopCatalogFromBridge(legacyBridge);
     expect(await legacyService.listSeriesUnplayedCounts?.(['src-1|series|1'])).toEqual([]);
   });
+
+  it('forwards track_preferences methods and falls back safely when bridge omits them (#208)', async () => {
+    const saved = {
+      profileId: 'default',
+      scopeKey: 'series:s1:10',
+      sourceId: 's1',
+      audioLang: 'tr',
+      audioLabel: 'Turkish',
+      subLang: 'en',
+      subLabel: 'English',
+      subDisabled: false,
+      audioDelayMs: 0,
+      subDelayMs: 250,
+      resizeMode: 'fill' as const,
+      updatedAt: 100,
+    };
+    const saveCalls: unknown[] = [];
+    const clearCalls: unknown[][] = [];
+    const { bridge } = makeFakeBridge({
+      getTrackPreference: async (scopeKey) => (scopeKey === saved.scopeKey ? saved : null),
+      saveTrackPreference: async (input) => {
+        saveCalls.push(input);
+      },
+      clearTrackPreference: async (...args) => {
+        clearCalls.push(args);
+      },
+    });
+    const service = createDesktopCatalogFromBridge(bridge);
+    expect(await service.getTrackPreference?.(saved.scopeKey, 'default')).toEqual(saved);
+    await service.saveTrackPreference?.({
+      scopeKey: saved.scopeKey,
+      sourceId: 's1',
+      resizeMode: 'fill',
+    });
+    await service.clearTrackPreference?.(saved.scopeKey, 'default');
+    expect(saveCalls).toEqual([{ scopeKey: saved.scopeKey, sourceId: 's1', resizeMode: 'fill' }]);
+    expect(clearCalls).toEqual([[saved.scopeKey, 'default']]);
+
+    const { bridge: legacyBridge } = makeFakeBridge();
+    const legacyService = createDesktopCatalogFromBridge(legacyBridge);
+    expect(await legacyService.getTrackPreference?.('series:s1:10')).toBeNull();
+    await expect(
+      legacyService.saveTrackPreference?.({ scopeKey: 'series:s1:10', sourceId: 's1' }),
+    ).resolves.toBeUndefined();
+    await expect(legacyService.clearTrackPreference?.('series:s1:10')).resolves.toBeUndefined();
+  });
 });

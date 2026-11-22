@@ -106,6 +106,14 @@ export interface OpenVideoEngine {
   onAudioDevicesChange?: (
     listener: (devices: readonly AudioDeviceInfo[], active: string) => void,
   ) => () => void;
+  /** Optional presentation overlay mode (`'floating'` over canvas, `'docked'` around legacy child HWND). */
+  readonly overlayMode?: 'floating' | 'docked';
+  /** Optional subscription invoked when host switches between `'floating'` and `'docked'` overlay modes. */
+  onOverlayModeChange?: (listener: (mode: 'floating' | 'docked') => void) => () => void;
+  /** Optional live video aspect/resize mode setter (`#124`). */
+  setResizeMode?: (mode: VideoResizeMode) => void;
+  /** Optional live SDH subtitle annotation filter toggle (`#310`). */
+  setFilterSdh?: (enabled: boolean) => void;
 }
 
 /** Port supplied by the app composition root to open a `PlayerEngine` and render its surface. */

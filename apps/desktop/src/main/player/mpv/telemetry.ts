@@ -1,4 +1,4 @@
-import type { ClockAnchor } from '@elv/playback';
+import type { ChapterInfo, ClockAnchor } from '@elv/playback';
 
 /** Minimum interval between emitted byte/cache progress events (`#314`). */
 export const PROGRESS_THROTTLE_MS = 500;
@@ -9,9 +9,19 @@ interface ProgressBody {
   readonly atMs: number;
 }
 
+interface TelemetryBody {
+  readonly type: 'telemetry';
+  readonly droppedFrames: number;
+}
+
+interface ChaptersBody {
+  readonly type: 'chapters';
+  readonly chapters: readonly ChapterInfo[];
+}
+
 type ClockTelemetryFields = Pick<ClockAnchor, 'hasVideoTrack' | 'decodedVideoFrames'>;
 
-/** Per-media mpv progress and video-frame telemetry tracker. */
+/** Per-media mpv progress, dropped-frame telemetry (`#160`), chapters (`#118`), and video-frame tracker. */
 export interface MpvTelemetry {
   onCacheState(value: unknown, atMs: number, waiting: boolean): ProgressBody | undefined;
   onCacheDuration(value: unknown, atMs: number, waiting: boolean): ProgressBody | undefined;
@@ -19,6 +29,9 @@ export interface MpvTelemetry {
   onVid(value: unknown, loaded: boolean): void;
   onVideoParams(value: unknown): void;
   onEstimatedVfFps(value: unknown, atMs: number): void;
+  onFrameDropCount(value: unknown): TelemetryBody | undefined;
+  onChapterList(value: unknown, durationSec?: number): ChaptersBody | undefined;
+  onDurationForChapters(durationSec: number | undefined): ChaptersBody | undefined;
   clockFields(atMs: number, rate: number): ClockTelemetryFields;
 }
 
@@ -28,7 +41,60 @@ const nonNegNum = (v: unknown): number | undefined =>
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
-/** Tracks throttled demuxer cache progress (`#314`) and rendered video-frame counts (`#321`). */
+/** Parses mpv `chapter-list` (`{ title?, time }[]`) into sorted `ChapterInfo[]` with derived `endMs` (`#118`). */
+export function parseMpvChapters(value: unknown, durationSec?: number): ChapterInfo[] {
+  if (!Array.isArray(value) || value.length === 0) return [];
+  const rawEntries: Array<{ readonly title?: string; readonly startMs: number }> = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const sec = nonNegNum(item['time']);
+    if (sec === undefined) continue;
+    const rawTitle = typeof item['title'] === 'string' ? item['title'].trim() : '';
+    rawEntries.push({
+      startMs: Math.round(sec * 1000) + 0,
+      ...(rawTitle.length > 0 ? { title: rawTitle } : {}),
+    });
+  }
+  if (rawEntries.length === 0) return [];
+  rawEntries.sort((a, b) => a.startMs - b.startMs);
+  const durationMs =
+    durationSec !== undefined && Number.isFinite(durationSec) && durationSec > 0
+      ? Math.round(durationSec * 1000)
+      : undefined;
+  return rawEntries.map((entry, idx) => {
+    const next = rawEntries[idx + 1];
+    const candidateEnd = next !== undefined ? next.startMs : durationMs;
+    const endMs =
+      candidateEnd !== undefined && candidateEnd > entry.startMs ? candidateEnd : undefined;
+    return {
+      id: `ch:${idx}`,
+      ...(entry.title === undefined ? {} : { title: entry.title }),
+      startMs: entry.startMs,
+      ...(endMs === undefined ? {} : { endMs }),
+    };
+  });
+}
+
+function chaptersEqual(a: readonly ChapterInfo[] | undefined, b: readonly ChapterInfo[]): boolean {
+  if (!a || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      !x ||
+      !y ||
+      x.id !== y.id ||
+      x.title !== y.title ||
+      x.startMs !== y.startMs ||
+      x.endMs !== y.endMs
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Tracks throttled demuxer cache progress (`#314`), chapters (`#118`), dropped frames (`#160`), and video frames (`#321`). */
 export function createMpvTelemetry(): MpvTelemetry {
   let lastSeenBytes = 0;
   let lastSeenDuration = 0;
@@ -42,6 +108,9 @@ export function createMpvTelemetry(): MpvTelemetry {
   let lastFps = 0;
   let lastFpsAt: number | undefined;
   let decodedFrames = 0;
+  let lastEmittedDroppedFrames = 0;
+  let rawChapterList: unknown;
+  let lastEmittedChapters: readonly ChapterInfo[] | undefined;
 
   const maybeEmitProgress = (
     bytes: number | undefined,
@@ -128,6 +197,38 @@ export function createMpvTelemetry(): MpvTelemetry {
         if (decodedFrames === 0) decodedFrames = 1;
         lastFpsAt ??= atMs;
       }
+    },
+
+    onFrameDropCount(value) {
+      const raw = nonNegNum(value);
+      if (raw === undefined) return undefined;
+      const count = Math.floor(raw);
+      if (count <= lastEmittedDroppedFrames) return undefined;
+      lastEmittedDroppedFrames = count;
+      return { type: 'telemetry', droppedFrames: count };
+    },
+
+    onChapterList(value, durationSec) {
+      rawChapterList = value;
+      const parsed = parseMpvChapters(value, durationSec);
+      if (parsed.length === 0 && lastEmittedChapters === undefined) return undefined;
+      if (chaptersEqual(lastEmittedChapters, parsed)) return undefined;
+      lastEmittedChapters = parsed;
+      return { type: 'chapters', chapters: parsed };
+    },
+
+    onDurationForChapters(durationSec) {
+      if (
+        rawChapterList === undefined ||
+        !lastEmittedChapters ||
+        lastEmittedChapters.length === 0
+      ) {
+        return undefined;
+      }
+      const parsed = parseMpvChapters(rawChapterList, durationSec);
+      if (chaptersEqual(lastEmittedChapters, parsed)) return undefined;
+      lastEmittedChapters = parsed;
+      return { type: 'chapters', chapters: parsed };
     },
 
     clockFields(atMs, rate) {

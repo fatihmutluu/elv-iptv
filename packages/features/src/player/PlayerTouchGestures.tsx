@@ -1,7 +1,7 @@
 import type { AppI18n } from '@elv/i18n';
 import { TABULAR_NUMS_STYLE, useTheme, webBackdropBlur } from '@elv/ui-kit';
 import { type ReactElement, useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { formatPlaybackPosition } from './vod-progress-helpers';
 
 /** System gesture exclusion inset on all 4 screen edges (px). */
@@ -45,8 +45,12 @@ interface TouchPointEvent {
   readonly nativeEvent?: {
     readonly locationX?: number;
     readonly locationY?: number;
+    readonly offsetX?: number;
+    readonly offsetY?: number;
     readonly pageX?: number;
     readonly pageY?: number;
+    readonly clientX?: number;
+    readonly clientY?: number;
   };
 }
 
@@ -131,8 +135,8 @@ function formatScrubDelta(deltaMs: number): string {
 
 function readPoint(event: TouchPointEvent | undefined): { x: number; y: number } | null {
   const n = event?.nativeEvent;
-  const x = n?.locationX ?? n?.pageX;
-  const y = n?.locationY ?? n?.pageY;
+  const x = n?.locationX ?? n?.offsetX ?? n?.pageX ?? n?.clientX;
+  const y = n?.locationY ?? n?.offsetY ?? n?.pageY ?? n?.clientY;
   return typeof x === 'number' && Number.isFinite(x) && typeof y === 'number' && Number.isFinite(y)
     ? { x, y }
     : null;
@@ -163,6 +167,7 @@ export function PlayerTouchGestures(props: PlayerTouchGesturesProps): ReactEleme
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const singleTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTapRef = useRef<{ atMs: number; side: -1 | 1 } | null>(null);
+  const lastResponderReleaseAtRef = useRef(0);
   const propsRef = useRef(props);
   propsRef.current = props;
 
@@ -267,6 +272,7 @@ export function PlayerTouchGestures(props: PlayerTouchGesturesProps): ReactEleme
   };
 
   const handleRelease = (): void => {
+    lastResponderReleaseAtRef.current = Date.now();
     stopHoldTimer();
     const g = gestureRef.current;
     gestureRef.current = null;
@@ -326,6 +332,17 @@ export function PlayerTouchGestures(props: PlayerTouchGesturesProps): ReactEleme
     if (g?.kind === 'scrub') propsRef.current.onScrubPreview?.(undefined);
   };
 
+  const webClickProps =
+    (Platform.OS as string) === 'web'
+      ? ({
+          onClick: () => {
+            if (Date.now() - lastResponderReleaseAtRef.current < 350) return;
+            propsRef.current.onTouchActivity();
+            propsRef.current.onSingleTap();
+          },
+        } as Record<string, unknown>)
+      : undefined;
+
   const dimOpacity = computeBrightnessDimOpacity(props.brightness);
 
   return (
@@ -343,6 +360,7 @@ export function PlayerTouchGestures(props: PlayerTouchGesturesProps): ReactEleme
       <View
         testID="player-touch-gestures"
         style={StyleSheet.absoluteFill}
+        {...webClickProps}
         onLayout={(e) => {
           layoutRef.current = {
             width: e.nativeEvent.layout.width,

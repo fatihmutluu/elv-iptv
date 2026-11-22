@@ -1400,3 +1400,159 @@ msgstr "Yazılım"
 
 msgid "player.videoDecoder"
 msgstr "Video çözücü"
+
+msgid "player.close"
+msgstr "Kapat"
+
+msgid "player.nextEpisodeCta"
+msgstr "Sonraki Bölüm"
+
+msgid "player.channelsCta"
+msgstr "Kanallar"
+
+msgid "player.endsAt"
+msgstr "Bitiş {time}"
+
+msgid "player.remainingTime"
+msgstr "Kalan süre"
+
+msgid "player.totalDuration"
+msgstr "Toplam süre"
+
+msgid "player.timeDisplayMode"
+msgstr "Süre gösterimi"
+
+msgid "player.timeDisplayToggleHint"
+msgstr "Toplam, kalan ve bitiş saati arasında geçmek için süreye dokun"
+
+msgid "player.sleepTimer"
+msgstr "Uyku zamanlayıcı"
+
+msgid "player.sleepTimerOff"
+msgstr "Kapalı"
+
+msgid "player.sleepTimerMinutes"
+msgstr "{minutes} dk"
+
+msgid "player.sleepTimerRemaining"
+msgstr "{minutes} dk kaldı"
+
+msgid "player.sleepTimerAction"
+msgstr "Süre dolunca"
+
+msgid "player.sleepTimerStop"
+msgstr "Oynatmayı durdur"
+
+msgid "player.sleepTimerPause"
+msgstr "Duraklat"
+
+msgid "player.sleepTimerEnded"
+msgstr "Uyku zamanlayıcı oynatmayı durdurdu"
+
+msgid "player.chapters"
+msgstr "Bölümler"
+
+msgid "player.prevChapter"
+msgstr "Önceki bölüm"
+
+msgid "player.nextChapter"
+msgstr "Sonraki bölüm"
+
+msgid "player.chapterCount"
+msgstr "{count} bölüm"
+
+msgid "player.stillWatchingTitle"
+msgstr "Hâlâ izliyor musunuz?"
+
+msgid "player.stillWatchingBody"
+msgstr "Bant genişliğini korumak için oynatma {seconds} sn içinde duracak."
+
+msgid "player.stillWatchingContinue"
+msgstr "İzlemeye devam et"
+
+msgid "player.stillWatchingStop"
+msgstr "Şimdi durdur"
+
+msgid "screensaver.title"
+msgstr "Ekran koruyucu etkin"
+
+msgid "screensaver.wakeHint"
+msgstr "Dönmek için bir tuşa basın veya dokunun"
+
+msgid "settings.playback.oledScreensaver"
+msgstr "OLED ekran koruyucu"
+
+msgid "settings.playback.oledScreensaverDesc"
+msgstr "Menüler veya duraklatılmış oynatma boşta kalınca saf siyaha geçer"
+
+msgid "settings.playback.stillWatching"
+msgstr "İzleme onayı uyarısı"
+
+msgid "settings.playback.stillWatchingDesc"
+msgstr "Uzun süreli kesintisiz izlemede onay iste"
+
+msgid "settings.playback.minutesOption"
+msgstr "{minutes} dk"
+
+msgid "settings.playback.hoursOption"
+msgstr "{hours} sa"
+
+msgid "settings.playback.off"
+msgstr "Kapalı"
+
+msgid "player.stats.droppedFrames"
+msgstr "Atlanan kare"
+
+msgid "player.stats.cacheHitRate"
+msgstr "Önbellek isabeti"
+
+msgid "player.stats.longTasks"
+msgstr "Arayüz takılmaları"
+
+msgid "player.scrub.normal"
+msgstr "1×"
+
+msgid "player.scrub.quarter"
+msgstr "0.25× · Hassas"
+
+msgid "player.scrub.fine"
+msgstr "0.1× · Çok hassas"
+
+msgid "player.scrub.dragUpHint"
+msgstr "Hassas sarma için yukarı kaydır"
+
+msgid "settings.playback.subtitleModeDefault"
+msgstr "Varsayılan"
+
+msgid "settings.playback.subtitleModeSmart"
+msgstr "Akıllı"
+
+msgid "settings.playback.subtitleModeOnlyForced"
+msgstr "Yalnızca zorunlu"
+
+msgid "settings.playback.subtitleModeAlways"
+msgstr "Her zaman"
+
+msgid "settings.playback.subtitleModeOff"
+msgstr "Kapalı"
+
+msgid "settings.playback.preferDefaultAudio"
+msgstr "Yayının varsayılan sesini tercih et"
+
+msgid "settings.playback.preferDefaultAudioDesc"
+msgstr "Aksi seçilmedikçe yayının varsayılan ses parçasını kullan"
+
+msgid "settings.playback.preferHevcOverDv"
+msgstr "Dolby Vision yerine HEVC tercih et"
+
+msgid "settings.playback.preferHevcOverDvDesc"
+msgstr "Dolby Vision siyah ekran veya takılma yaparsa standart HEVC’ye düş"
+
+msgid "settings.playback.filterSdh"
+msgstr "SDH altyazı açıklamalarını filtrele"
+
+msgid "settings.playback.filterSdhDesc"
+msgstr "Metin altyazılardaki [ses efekti], (açıklama) ve KONUŞMACI: etiketlerini gizle"
+
+msgid "settings.playback.osdTimeMode"
+msgstr "Oynatıcı süre gösterimi"

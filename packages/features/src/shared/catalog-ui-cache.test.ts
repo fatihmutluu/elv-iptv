@@ -330,4 +330,17 @@ describe('createCatalogUiCache', () => {
     expect(cache.getLive()).toBeNull();
     expect(cache.getDetail('x:src-2:series:2')).toBeNull();
   });
+
+  it('tracks hit/miss counts and hitRatePct via getMetrics() (#160)', () => {
+    const cache = createCatalogUiCache({ locale: 'en' });
+    expect(cache.getMetrics?.()).toEqual({ hits: 0, misses: 0, hitRatePct: null });
+
+    expect(cache.getHome()).toBeNull();
+    cache.setHome(makeHomeSnapshot('src-1'));
+    expect(cache.getHome()).not.toBeNull();
+    expect(cache.getHome()).not.toBeNull();
+
+    const metrics = cache.getMetrics?.();
+    expect(metrics).toEqual({ hits: 2, misses: 1, hitRatePct: 67 });
+  });
 });

@@ -42,7 +42,13 @@ export type IconName =
   | 'starFilled'
   | 'chevronLeft'
   | 'chevronDown'
-  | 'pin';
+  | 'pin'
+  | 'skipBack10'
+  | 'skipForward10'
+  | 'moon'
+  | 'chapters'
+  | 'skipPrev'
+  | 'skipNext';
 
 /** Single SVG primitive shape within a 24x24 icon viewBox. */
 export type IconShape =
@@ -88,10 +94,22 @@ const c = (cx: number, cy: number, rad: number, strokeWidth?: number): IconShape
     ? { kind: 'circle', cx, cy, r: rad }
     : { kind: 'circle', cx, cy, r: rad, strokeWidth };
 
-const rect = (x: number, y: number, width: number, height: number, rx?: number): IconShape =>
-  rx === undefined
-    ? { kind: 'rect', x, y, width, height }
-    : { kind: 'rect', x, y, width, height, rx };
+const rect = (
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  rx?: number,
+  strokeWidth?: number,
+): IconShape => ({
+  kind: 'rect',
+  x,
+  y,
+  width,
+  height,
+  ...(rx !== undefined ? { rx } : {}),
+  ...(strokeWidth !== undefined ? { strokeWidth } : {}),
+});
 
 const fp = (d: string): IconShape => ({ kind: 'path', d, fill: 'currentColor' });
 
@@ -198,6 +216,22 @@ export const ICON_PATHS: Readonly<Record<IconName, IconSpec>> = {
       'M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16h14v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z',
     ),
   ),
+  skipBack10: stroke(
+    p('M3.5 13a8.5 8.5 0 1 0 2.5-6', 1.7),
+    p('M6 3.8V7h3.2', 1.7),
+    p('M8.7 10.1v5.8', 1.5),
+    rect(11.7, 10.1, 3.6, 5.8, 1.8, 1.5),
+  ),
+  skipForward10: stroke(
+    p('M20.5 13a8.5 8.5 0 1 1-2.5-6', 1.7),
+    p('M18 3.8V7h-3.2', 1.7),
+    p('M8.7 10.1v5.8', 1.5),
+    rect(11.7, 10.1, 3.6, 5.8, 1.8, 1.5),
+  ),
+  moon: stroke(p('M12 3a6.5 6.5 0 0 0 9 9 9 9 0 1 1-9-9z')),
+  chapters: stroke(p('M4 5h5v8.5l-2.5-1.8L4 13.5z'), p('M13 6.5h7M13 12h7M4 18h16')),
+  skipPrev: filled(fp('M5 5h2.5v14H5z'), fp('M19 5v14L9 12z')),
+  skipNext: filled(fp('M5 5v14l10-7z'), fp('M16.5 5H19v14h-2.5z')),
 };
 
 /** Ordered list of every icon identifier registered in {@link ICON_PATHS}. */

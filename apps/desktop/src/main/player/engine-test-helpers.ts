@@ -41,6 +41,8 @@ export const OBSERVED = [
   'audio-device-list',
   'volume',
   'mute',
+  'chapter-list',
+  'frame-drop-count',
 ];
 
 export const VOD: FakeMpvScript = [

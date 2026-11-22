@@ -12,8 +12,10 @@ import type {
   ListItemsOptions,
   NextEpisodeRow,
   NowNextEntry,
+  PersistedTrackPreference,
   ProgrammeRow,
   SaveProgressInput,
+  SaveTrackPreferenceInput,
   SearchOptions,
   SearchResults,
   SeasonRow,
@@ -44,6 +46,7 @@ import {
   isRecord,
   isSafeInt,
   isSaveProgressInput,
+  isSaveTrackPreferenceInput,
   isSearchOptions,
   isSearchQuery,
   isSeriesKeyList,
@@ -126,7 +129,10 @@ export type CatalogRpcMethodCall =
   | { method: 'toggleFavorite'; input: ToggleFavoriteInput }
   | { method: 'setFavorite'; input: ToggleFavoriteInput; active: boolean }
   | { method: 'listFavorites'; limit?: number; profileId?: string }
-  | { method: 'listFavoriteKeys'; profileId?: string };
+  | { method: 'listFavoriteKeys'; profileId?: string }
+  | { method: 'getTrackPreference'; scopeKey: string; profileId?: string }
+  | { method: 'saveTrackPreference'; input: SaveTrackPreferenceInput }
+  | { method: 'clearTrackPreference'; scopeKey: string; profileId?: string };
 
 /** Preload to utility process over `MessagePort`. */
 export type CatalogClientMessage =
@@ -207,6 +213,12 @@ export interface CatalogBridge {
   setFavorite(input: ToggleFavoriteInput, active: boolean): Promise<Result<boolean>>;
   listFavorites(limit?: number, profileId?: string): Promise<FavoriteRow[]>;
   listFavoriteKeys(profileId?: string): Promise<string[]>;
+  getTrackPreference?(
+    scopeKey: string,
+    profileId?: string,
+  ): Promise<PersistedTrackPreference | null>;
+  saveTrackPreference?(input: SaveTrackPreferenceInput): Promise<void>;
+  clearTrackPreference?(scopeKey: string, profileId?: string): Promise<void>;
   onChanged(listener: () => void): () => void;
   /** Subscribes to unexpected `catalog-worker` disconnect notifications (`#435`). */
   onDisconnected(listener: (message: CatalogDisconnectedMessage) => void): () => void;
@@ -304,6 +316,11 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
       return isToggleFavoriteInput(x['input']) && typeof x['active'] === 'boolean';
     case 'listFavoriteKeys':
       return isOptionalProfileId(x['profileId']);
+    case 'getTrackPreference':
+    case 'clearTrackPreference':
+      return isCleanKey(x['scopeKey']) && isOptionalProfileId(x['profileId']);
+    case 'saveTrackPreference':
+      return isSaveTrackPreferenceInput(x['input']);
     default:
       return false;
   }

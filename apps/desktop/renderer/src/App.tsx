@@ -78,6 +78,22 @@ function AppRoot() {
         const rawEngine = await createDesktopEngine(playerBridge, () => performance.now());
         const mediaSession = createDesktopMediaSession();
         let activeHostKeyListener: ((key: DesktopHostKey) => void) | null = null;
+        let overlayMode: 'floating' | 'docked' = 'floating';
+        const overlayModeListeners = new Set<(mode: 'floating' | 'docked') => void>();
+        const offPresenterOverlay = rawEngine.onUi((event) => {
+          if (event.type !== 'presenter') return;
+          const nextMode: 'floating' | 'docked' =
+            event.kind === 'canvas' || !event.coversArea ? 'floating' : 'docked';
+          if (nextMode === overlayMode) return;
+          overlayMode = nextMode;
+          for (const listener of [...overlayModeListeners]) {
+            try {
+              listener(nextMode);
+            } catch {
+              // isolate overlay mode subscribers
+            }
+          }
+        });
         const windowBridge = window.elv?.window;
         let alwaysOnTop = windowBridge
           ? await windowBridge.getAlwaysOnTop().catch(() => false)
@@ -104,20 +120,35 @@ function AppRoot() {
         const engine = {
           ...boundEngine,
           release() {
+            offPresenterOverlay();
+            overlayModeListeners.clear();
             offWindowAlwaysOnTop?.();
             offWindowAlwaysOnTop = undefined;
             alwaysOnTopListeners.clear();
             boundEngine.release();
           },
         };
-        return {
+        const opened = {
           engine,
-          renderSurface: ({ failed, resizeMode }) => (
-            <PlayerView engine={engine} status="" failed={failed} resizeMode={resizeMode} />
-          ),
+          get overlayMode(): 'floating' | 'docked' {
+            return overlayMode;
+          },
+          onOverlayModeChange: (listener: (mode: 'floating' | 'docked') => void) => {
+            overlayModeListeners.add(listener);
+            return () => {
+              overlayModeListeners.delete(listener);
+            };
+          },
+          renderSurface: ({
+            failed,
+            resizeMode,
+          }: {
+            failed: boolean;
+            resizeMode?: 'fit' | 'fill' | 'stretch';
+          }) => <PlayerView engine={engine} status="" failed={failed} resizeMode={resizeMode} />,
           toggleFullscreen: () => rawEngine.toggleFullscreen(),
           isFullscreen: () => rawEngine.isFullscreen(),
-          onFullscreenChange: (listener) => {
+          onFullscreenChange: (listener: (fullscreen: boolean) => void) => {
             let last: boolean | undefined;
             return rawEngine.onUi((event) => {
               if (event.type !== 'fullscreen-changed' || event.fullscreen === last) return;
@@ -126,13 +157,17 @@ function AppRoot() {
             });
           },
           toggleMute: () => rawEngine.toggleMute(),
-          setVolume: (volume) => rawEngine.setVolume(volume),
-          setDeinterlace: (enabled) => rawEngine.setDeinterlace(enabled),
-          setMediaMetadata: (metadata) => engine.setMediaMetadata(metadata),
+          setVolume: (volume: number) => rawEngine.setVolume(volume),
+          setDeinterlace: (enabled: boolean) => rawEngine.setDeinterlace(enabled),
+          setResizeMode: (mode: 'fit' | 'fill' | 'stretch') => rawEngine.setResizeMode(mode),
+          setFilterSdh: (enabled: boolean) => rawEngine.setFilterSdh(enabled),
+          setMediaMetadata: (metadata: Parameters<typeof engine.setMediaMetadata>[0]) =>
+            engine.setMediaMetadata(metadata),
           getAudioDevices: () => rawEngine.getAudioDevices(),
           getActiveAudioDevice: () => rawEngine.getActiveAudioDevice(),
-          setAudioDevice: (name) => rawEngine.setAudioDevice(name),
-          onAudioDevicesChange: (listener) => rawEngine.onAudioDevicesChange(listener),
+          setAudioDevice: (name: string) => rawEngine.setAudioDevice(name),
+          onAudioDevicesChange: (listener: Parameters<typeof rawEngine.onAudioDevicesChange>[0]) =>
+            rawEngine.onAudioDevicesChange(listener),
           ...(windowBridge
             ? {
                 toggleAlwaysOnTop: () => {
@@ -150,7 +185,7 @@ function AppRoot() {
                 },
               }
             : {}),
-          onHostKey: (listener) => {
+          onHostKey: (listener: (key: DesktopHostKey) => void) => {
             activeHostKeyListener = listener;
             const offUi = rawEngine.onUi((event) =>
               routeDesktopUiEvent(event, {
@@ -165,6 +200,7 @@ function AppRoot() {
             };
           },
         };
+        return opened;
       },
     }),
     [],

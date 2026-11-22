@@ -13,6 +13,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecRenderer
@@ -40,7 +41,7 @@ internal class EventReporter(
   private val onAudioCodecFailed: () -> Boolean = { false },
   private val onFirstFrame: () -> Unit,
   private val onCue: (ScreenCue, Boolean) -> Unit,
-) : Player.Listener {
+) : Player.Listener, AnalyticsListener {
   private var player: Player? = null
   private var active = false
   private var live = false
@@ -52,6 +53,8 @@ internal class EventReporter(
   private var anchoredRate: Float? = null
   private var lastVideoSize: VideoSize? = null
   private var lastVideoInfo: VideoInfoSnapshot? = null
+  private var analyticsDroppedFrames = 0
+  private var reportedDroppedFrames = 0
   private val tick = Runnable { player?.let { anchor(it) } }
 
   /** True while this prepare is opening, buffering, or stalled and transfer progress should be reported. */
@@ -89,6 +92,8 @@ internal class EventReporter(
     anchoredRate = null
     lastVideoSize = null
     lastVideoInfo = null
+    analyticsDroppedFrames = 0
+    reportedDroppedFrames = 0
     handler.removeCallbacks(tick)
   }
 
@@ -149,6 +154,21 @@ internal class EventReporter(
     val current = player
     if (!active || current == null || !fence.acceptsPlayer(current)) return
     maybeEmitMediaInfo(current, tracks)
+  }
+
+  override fun onDroppedVideoFrames(
+    eventTime: AnalyticsListener.EventTime,
+    droppedFrames: Int,
+    elapsedMs: Long,
+  ) {
+    val current = player
+    if (!active || current == null || !fence.acceptsPlayer(current) || droppedFrames <= 0) return
+    analyticsDroppedFrames += droppedFrames
+    val counterDropped = (current as? ExoPlayer)?.videoDecoderCounters?.let { counters ->
+      counters.ensureUpdated()
+      counters.droppedBufferCount
+    } ?: 0
+    maybeEmitDroppedFrames(maxOf(analyticsDroppedFrames, counterDropped))
   }
 
   override fun onPlayerError(error: PlaybackException) {
@@ -282,11 +302,18 @@ internal class EventReporter(
     if (counters != null) {
       counters.ensureUpdated()
       anchor["decodedVideoFrames"] = counters.renderedOutputBufferCount.toDouble()
+      maybeEmitDroppedFrames(maxOf(analyticsDroppedFrames, counters.droppedBufferCount))
     } else if (hasVideo == true) {
       anchor["decodedVideoFrames"] = 0.0
     }
     send(mapOf("type" to "clock", "anchor" to anchor))
     if (rate > 0f) handler.postDelayed(tick, TICK_MS)
+  }
+
+  private fun maybeEmitDroppedFrames(total: Int) {
+    if (total <= reportedDroppedFrames) return
+    reportedDroppedFrames = total
+    send(mapOf("type" to "telemetry", "droppedFrames" to total))
   }
 
   private fun sendState(state: String) {

@@ -1400,3 +1400,159 @@ msgstr "Software"
 
 msgid "player.videoDecoder"
 msgstr "Video decoder"
+
+msgid "player.close"
+msgstr "Close"
+
+msgid "player.nextEpisodeCta"
+msgstr "Next Episode"
+
+msgid "player.channelsCta"
+msgstr "Channels"
+
+msgid "player.endsAt"
+msgstr "Ends at {time}"
+
+msgid "player.remainingTime"
+msgstr "Remaining"
+
+msgid "player.totalDuration"
+msgstr "Total duration"
+
+msgid "player.timeDisplayMode"
+msgstr "Time display"
+
+msgid "player.timeDisplayToggleHint"
+msgstr "Tap time to switch between total, remaining, and end time"
+
+msgid "player.sleepTimer"
+msgstr "Sleep timer"
+
+msgid "player.sleepTimerOff"
+msgstr "Off"
+
+msgid "player.sleepTimerMinutes"
+msgstr "{minutes} min"
+
+msgid "player.sleepTimerRemaining"
+msgstr "{minutes}m left"
+
+msgid "player.sleepTimerAction"
+msgstr "When timer ends"
+
+msgid "player.sleepTimerStop"
+msgstr "Stop playback"
+
+msgid "player.sleepTimerPause"
+msgstr "Pause playback"
+
+msgid "player.sleepTimerEnded"
+msgstr "Playback stopped by sleep timer"
+
+msgid "player.chapters"
+msgstr "Chapters"
+
+msgid "player.prevChapter"
+msgstr "Previous chapter"
+
+msgid "player.nextChapter"
+msgstr "Next chapter"
+
+msgid "player.chapterCount"
+msgstr "{count} chapters"
+
+msgid "player.stillWatchingTitle"
+msgstr "Are you still watching?"
+
+msgid "player.stillWatchingBody"
+msgstr "Playback will stop in {seconds}s to save bandwidth."
+
+msgid "player.stillWatchingContinue"
+msgstr "Keep watching"
+
+msgid "player.stillWatchingStop"
+msgstr "Stop now"
+
+msgid "screensaver.title"
+msgstr "Screensaver active"
+
+msgid "screensaver.wakeHint"
+msgstr "Press any key or tap to return"
+
+msgid "settings.playback.oledScreensaver"
+msgstr "OLED screensaver"
+
+msgid "settings.playback.oledScreensaverDesc"
+msgstr "Dim to pure black when menus or paused playback stay idle"
+
+msgid "settings.playback.stillWatching"
+msgstr "Still-watching prompt"
+
+msgid "settings.playback.stillWatchingDesc"
+msgstr "Confirm active viewing after continuous playback"
+
+msgid "settings.playback.minutesOption"
+msgstr "{minutes} min"
+
+msgid "settings.playback.hoursOption"
+msgstr "{hours} hr"
+
+msgid "settings.playback.off"
+msgstr "Off"
+
+msgid "player.stats.droppedFrames"
+msgstr "Dropped frames"
+
+msgid "player.stats.cacheHitRate"
+msgstr "Cache hit rate"
+
+msgid "player.stats.longTasks"
+msgstr "UI stalls"
+
+msgid "player.scrub.normal"
+msgstr "1×"
+
+msgid "player.scrub.quarter"
+msgstr "0.25× · Fine"
+
+msgid "player.scrub.fine"
+msgstr "0.1× · Ultra fine"
+
+msgid "player.scrub.dragUpHint"
+msgstr "Slide up for fine scrubbing"
+
+msgid "settings.playback.subtitleModeDefault"
+msgstr "Default"
+
+msgid "settings.playback.subtitleModeSmart"
+msgstr "Smart"
+
+msgid "settings.playback.subtitleModeOnlyForced"
+msgstr "Forced only"
+
+msgid "settings.playback.subtitleModeAlways"
+msgstr "Always"
+
+msgid "settings.playback.subtitleModeOff"
+msgstr "Off"
+
+msgid "settings.playback.preferDefaultAudio"
+msgstr "Prefer stream default audio"
+
+msgid "settings.playback.preferDefaultAudioDesc"
+msgstr "Keep the provider's default audio track unless overridden"
+
+msgid "settings.playback.preferHevcOverDv"
+msgstr "Prefer HEVC over Dolby Vision"
+
+msgid "settings.playback.preferHevcOverDvDesc"
+msgstr "Fallback to standard HEVC if Dolby Vision causes black screens or stutter"
+
+msgid "settings.playback.filterSdh"
+msgstr "Filter SDH subtitle cues"
+
+msgid "settings.playback.filterSdhDesc"
+msgstr "Hide [sound effects], (descriptions), and SPEAKER: labels in text subtitles"
+
+msgid "settings.playback.osdTimeMode"
+msgstr "Player time display"

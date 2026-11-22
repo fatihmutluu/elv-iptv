@@ -121,6 +121,7 @@ export function createTvRemoteDispatcher(
   lifecycle?: TvRemoteDispatcherLifecycle,
 ): TvRemoteDispatcher {
   const listeners = new Set<(event: TvRemoteEvent) => void>();
+  const interceptors: Array<(input: KeyInput) => boolean> = [];
   const textEntries = new Map<TextEntryActiveSource, number>();
   let backDownWhileTextEntryAt: number | undefined;
   let detachLifecycle: (() => void) | undefined;
@@ -173,7 +174,26 @@ export function createTvRemoteDispatcher(
         }
       };
     },
+    registerInterceptor(interceptor) {
+      interceptors.push(interceptor);
+      let active = true;
+      return () => {
+        if (!active) return;
+        active = false;
+        const idx = interceptors.lastIndexOf(interceptor);
+        if (idx >= 0) interceptors.splice(idx, 1);
+      };
+    },
     dispatch(input, requirePriorDown): boolean {
+      for (let i = interceptors.length - 1; i >= 0; i -= 1) {
+        const interceptor = interceptors[i];
+        if (!interceptor) continue;
+        try {
+          if (interceptor(input)) return true;
+        } catch {
+          // Isolate throwing interceptors.
+        }
+      }
       if (input.key === 'back') {
         if (input.action === 'press') {
           if (exitActiveTextEntry()) return true;

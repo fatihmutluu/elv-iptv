@@ -1,24 +1,11 @@
-import type { CatalogService } from '@elv/data';
-import type {
-  AndroidDecoderMode,
-  BufferPreset,
-  DefaultResizeModePref,
-  SeekStepSecPref,
-  SubtitleModePref,
-} from '@elv/domain';
-import {
-  type PlaybackClock,
-  type PlaybackService,
-  type PlaybackTimers,
-  positionAt,
-} from '@elv/playback';
-import { MicroPill, TvFocusAnchor, useFormFactor, useI18n, useTheme } from '@elv/ui-kit';
+import type { BufferPreset } from '@elv/domain';
+import { type PlaybackService, positionAt } from '@elv/playback';
+import { useFormFactor, useI18n } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
-import { type AppLifecyclePort, noopAppLifecycle } from '../ports/app-lifecycle';
-import type { PlayableEntry, PlayTarget } from '../ports/play-target';
-import type { PlaybackGuard } from '../ports/playback-guard';
-import type { HostKey, VideoHost } from '../ports/video-host';
+import { Platform, View } from 'react-native';
+import { noopAppLifecycle } from '../ports/app-lifecycle';
+import type { PlayableEntry } from '../ports/play-target';
+import type { HostKey } from '../ports/video-host';
 import { describePlaybackFailure } from './errors';
 import { NextEpisodeBanner } from './NextEpisodeBanner';
 import { type ChannelDrawerNavHandle, PlayerChannelDrawer } from './PlayerChannelDrawer';
@@ -27,22 +14,16 @@ import {
   DEFAULT_PLAYER_CLOCK,
   DEFAULT_PLAYER_TIMERS,
   formatStatusLine,
-  HIDE_CURSOR_WEB_STYLE,
-  PlayerLockedOverlay,
-  PlayerOsd,
   playerStyles,
 } from './PlayerScreenParts';
+import { type PlayerScreenProps, PlayerScreenStage } from './PlayerScreenStage';
 import { PlayerSettingsSheet } from './PlayerSettingsSheet';
-import { PlayerStatsHud } from './PlayerStatsHud';
-import {
-  computeBrightnessDimOpacity,
-  MIN_BRIGHTNESS,
-  PlayerTouchGestures,
-} from './PlayerTouchGestures';
+import { MIN_BRIGHTNESS } from './PlayerTouchGestures';
 import { clampVolume } from './player-overlay-model';
 import { TrackPickerModal } from './TrackPickerModal';
 import { buildTouchHoverProps } from './touch-hover-guard';
 import { useNextEpisodeResolver } from './useNextEpisodeResolver';
+import { usePlayerCinemaExtras } from './usePlayerCinemaExtras';
 import { usePlayerControls } from './usePlayerControls';
 import { usePlayerNowNext } from './usePlayerNowNext';
 import { usePlayerSession } from './usePlayerSession';
@@ -53,64 +34,12 @@ import {
 } from './usePlayerTrackAndDecoderSync';
 import { useWatchProgressSync } from './useWatchProgressSync';
 
+export type { PlayerScreenProps };
+
 /** Default production OSD auto-hide delay in milliseconds (`#421`). */
 export const DEFAULT_AUTO_HIDE_OSD_MS = 3_500;
 
-/** Props of {@link PlayerScreen}. */
-export interface PlayerScreenProps {
-  catalog: Pick<CatalogService, 'resolveStream' | 'getProgress' | 'saveProgress'> &
-    Partial<Pick<CatalogService, 'channelByNumber' | 'nowNext' | 'queryNextEpisode'>> & {
-      readonly epgNowNext?: CatalogService['nowNext'];
-    };
-  videoHost: VideoHost;
-  target: PlayTarget;
-  playbackGuard?: PlaybackGuard;
-  appLifecycle?: AppLifecyclePort;
-  clock?: PlaybackClock;
-  /** Wall-clock Unix epoch timestamp provider in ms for EPG Now/Next queries & progress (`Date.now`). */
-  wallClock?: () => number;
-  timers?: PlaybackTimers;
-  initialOsdHidden?: boolean;
-  autoHideOsdMs?: number;
-  /** Persisted player volume (`0`–`100`, `#394`). */
-  initialVolume?: number;
-  /** Persists user volume changes (`0`–`100`, `#394`). */
-  onPersistVolume?: (volume: number) => void;
-  /** Temporarily turns on subtitles on VOD backward skip (`#114`). */
-  autoSubtitlesOnSkipBack?: boolean;
-  /** Toggles persisted `autoSubtitlesOnSkipBack` preference (`#114`). */
-  onToggleAutoSubtitlesOnSkipBack?: () => void;
-  /** Automatically advances to the next episode after countdown (`#392`). */
-  autoPlayNextEpisode?: boolean;
-  /** Toggles persisted `autoPlayNextEpisode` preference (`#392`). */
-  onToggleAutoPlayNextEpisode?: () => void;
-  /** Disables smooth motion transitions when reduced motion is enabled (`#392`). */
-  reduceMotion?: boolean;
-  /** User-selected playback buffer preset forwarded on load (`#147`). */
-  bufferPreset?: BufferPreset;
-  /** Opt-in TextureView fallback for broken Android SurfaceView compositing (`#262`). */
-  useTextureView?: boolean;
-  /** Preferred VOD skip interval in seconds (`5 | 10 | 15 | 30`, `#401`). */
-  seekStepSec?: SeekStepSecPref;
-  /** Initial aspect / resize mode (`'fit' | 'fill' | 'stretch'`, `#401`). */
-  defaultResizeMode?: DefaultResizeModePref;
-  /** Preferred ISO 639-1/2 audio track language code (`''` = automatic, `#401`). */
-  preferredAudioLang?: string;
-  /** Preferred ISO 639-1/2 subtitle track language code (`''` = automatic, `#401`). */
-  preferredSubtitleLang?: string;
-  /** Default subtitle activation mode (`'auto' | 'always' | 'off'`, `#401`). */
-  subtitleMode?: SubtitleModePref;
-  preferredAudioDevice?: string;
-  onPersistAudioDevice?: (deviceName: string) => void;
-  /** Android Media3 video decoder preference (`#411`). */
-  androidDecoderMode?: AndroidDecoderMode;
-  /** Persists Android Media3 video decoder preference (`#411`). */
-  onSelectAndroidDecoderMode?: (mode: AndroidDecoderMode) => void;
-  onTargetChange?: (next: PlayTarget) => void;
-  onExit: () => void;
-}
-
-/** Cross-platform Cinema Quietude v2 playback screen over injected {@link VideoHost} and {@link AppLifecyclePort} ports. */
+/** Cross-platform Minimalist Cinema playback screen over injected {@link VideoHost} and {@link AppLifecyclePort} ports. */
 export function PlayerScreen({
   catalog,
   videoHost,
@@ -133,9 +62,22 @@ export function PlayerScreen({
   useTextureView = false,
   seekStepSec = 10,
   defaultResizeMode = 'fit',
+  onPersistResizeMode,
   preferredAudioLang,
   preferredSubtitleLang,
-  subtitleMode = 'auto',
+  preferredAudioLanguages,
+  preferredSubtitleLanguages,
+  preferDefaultAudioTrack = true,
+  preferHevcOverDolbyVision = false,
+  filterSdhSubtitles = false,
+  subtitleMode = 'smart',
+  osdTimeDisplayMode = 'total',
+  onPersistOsdTimeDisplayMode,
+  sleepTimerDefaultAction = 'stop',
+  onPersistSleepTimerAction,
+  stillWatchingTimeoutMin = 0,
+  onPlaybackActiveChange,
+  onFineScrubHaptic,
   preferredAudioDevice,
   onPersistAudioDevice,
   androidDecoderMode,
@@ -144,7 +86,6 @@ export function PlayerScreen({
   onExit,
 }: PlayerScreenProps): ReactElement {
   const formFactor = useFormFactor();
-  const theme = useTheme();
   const i18n = useI18n();
   const isTv = formFactor === 'tv';
   const isDesktop = formFactor === 'desktop';
@@ -168,6 +109,10 @@ export function PlayerScreen({
   onExitRef.current = onExit;
   const bufferPresetRef = useRef<BufferPreset>(bufferPreset);
   bufferPresetRef.current = bufferPreset;
+  const preferHevcRef = useRef<boolean>(preferHevcOverDolbyVision);
+  preferHevcRef.current = preferHevcOverDolbyVision;
+  const filterSdhRef = useRef<boolean>(filterSdhSubtitles);
+  filterSdhRef.current = filterSdhSubtitles;
   const reloadActiveTargetRef = useRef<() => void>(() => undefined);
   const { decoderModeRef, activeDecoderMode, showAndroidDecoder, handleSelectAndroidDecoderMode } =
     useAndroidDecoderModeSync({
@@ -189,6 +134,8 @@ export function PlayerScreen({
     onTargetChangeRef,
     bufferPresetRef,
     decoderModeRef,
+    preferHevcOverDolbyVisionRef: preferHevcRef,
+    filterSdhSubtitlesRef: filterSdhRef,
     resolvedNextEpisodeRef,
   });
   reloadActiveTargetRef.current = handoff.reloadActiveTarget;
@@ -206,15 +153,18 @@ export function PlayerScreen({
     status,
     tracks,
     videoInfo,
+    chapters,
     surfaceRecreationToken,
     inPip,
     isFullscreen,
     alwaysOnTop,
+    overlayMode,
     audioDevices,
     activeAudioDevice,
   } = usePlayerSession({
     videoHost,
     activeTarget,
+    isDesktop,
     serviceRef,
     clockRef,
     timersRef,
@@ -254,13 +204,27 @@ export function PlayerScreen({
     setTouchScrubDeltaMs(undefined);
   }, [activeTarget.itemKey]);
 
-  useInitialTrackSelection({
-    activeService,
+  const openedEngine = sessionState.kind === 'ready' ? sessionState.opened : undefined;
+  const extras = usePlayerCinemaExtras({
     activeTarget,
+    status,
     tracks,
-    preferredAudioLang,
-    preferredSubtitleLang,
-    subtitleMode,
+    chapters,
+    openedEngine,
+    catalogRef,
+    serviceRef,
+    clockRef,
+    timersRef,
+    flushProgressRef,
+    onExitRef,
+    filterSdhSubtitles,
+    osdTimeDisplayMode,
+    onPersistOsdTimeDisplayMode,
+    onPersistResizeMode,
+    sleepTimerDefaultAction,
+    onPersistSleepTimerAction,
+    stillWatchingTimeoutMin,
+    onPlaybackActiveChange,
   });
 
   const hasTracks = tracks.audio.length > 0 || tracks.subtitles.length > 0;
@@ -278,7 +242,6 @@ export function PlayerScreen({
     activeTarget.kind === 'live' &&
     activeTarget.previousChannel !== undefined &&
     activeTarget.previousChannel.itemKey !== activeTarget.itemKey;
-  const openedEngine = sessionState.kind === 'ready' ? sessionState.opened : undefined;
   const hostToggleFullscreen = openedEngine?.toggleFullscreen;
   const hostToggleAlwaysOnTop = openedEngine?.toggleAlwaysOnTop;
   const hostSetAudioDevice = openedEngine?.setAudioDevice;
@@ -296,6 +259,13 @@ export function PlayerScreen({
     [hostSetAudioDevice, onPersistAudioDevice],
   );
 
+  const [stillWatchingAction, setStillWatchingAction] = useState<'continue' | 'stop'>('continue');
+  const stillWatchingActionRef = useRef(stillWatchingAction);
+  stillWatchingActionRef.current = stillWatchingAction;
+  useEffect(() => {
+    if (extras.stillWatching.promptVisible) setStillWatchingAction('continue');
+  }, [extras.stillWatching.promptVisible]);
+
   const controls = usePlayerControls({
     formFactor,
     activeTarget,
@@ -307,7 +277,7 @@ export function PlayerScreen({
     hasSettings: activeService !== null,
     hasInfo: activeService !== null,
     hasChannelList: canZap,
-    hasNextEpisode: nextEpisodeVisible,
+    hasNextEpisode: nextEpisodeVisible || nextEpisode !== undefined,
     hasPreviousChannel,
     initialOsdHidden,
     autoHideOsdMs,
@@ -344,12 +314,59 @@ export function PlayerScreen({
     onChannelListSelect: () => channelDrawerNavRef.current?.select(),
     onSetOrientationLocked: hostSetOrientationLocked,
     onSetDeinterlace: hostSetDeinterlace,
+    onResizeModeChange: extras.handleResizeModeChange,
+    onAudioTrackSelected: extras.handleAudioTrackSelected,
+    onSubtitleTrackSelected: extras.handleSubtitleTrackSelected,
+    chapters,
+    onSelectChapter: extras.handleSelectChapter,
+    onPrevChapter: (chapters?.length ?? 0) > 0 ? extras.handlePrevChapter : undefined,
+    onNextChapter: (chapters?.length ?? 0) > 0 ? extras.handleNextChapter : undefined,
+    sleepTimerMinutes: extras.sleepTimer.active ? extras.sleepTimer.totalMinutes : 0,
+    onSelectSleepTimer: extras.selectSleepTimer,
+    onToggleSleepTimerAction: extras.toggleSleepTimerAction,
+    onCycleTimeDisplayMode: extras.handleCycleTimeDisplayMode,
+    onUserActivity: extras.stillWatching.recordUserActivity,
+    stillWatchingVisible: !inPip && extras.stillWatching.promptVisible,
+    onStillWatchingKey: (key) => {
+      if (key === 'left' || key === 'up') {
+        setStillWatchingAction('continue');
+      } else if (key === 'right' || key === 'down') {
+        setStillWatchingAction('stop');
+      } else if (key === 'back') {
+        extras.stillWatching.keepWatching();
+      } else if (key === 'select') {
+        if (stillWatchingActionRef.current === 'stop') extras.stillWatching.stopNow();
+        else extras.stillWatching.keepWatching();
+      }
+    },
   });
   hostKeyRef.current = controls.handleHostKey;
   cancelScrubRef.current = controls.cancelScrub;
 
+  const setResizeModeRef = useRef(controls.setResizeMode);
+  setResizeModeRef.current = controls.setResizeMode;
+
+  useInitialTrackSelection({
+    activeService,
+    activeTarget,
+    tracks,
+    catalog,
+    preferredAudioLang,
+    preferredSubtitleLang,
+    preferredAudioLanguages,
+    preferredSubtitleLanguages,
+    preferDefaultAudioTrack,
+    subtitleMode,
+    onHydratedResizeMode: (mode) => {
+      setResizeModeRef.current(mode, false);
+      openedEngine?.setResizeMode?.(mode);
+    },
+  });
+
   const latestVolumeRef = useRef(controls.volume);
   latestVolumeRef.current = controls.volume;
+  const latestResizeModeRef = useRef(controls.resizeMode);
+  latestResizeModeRef.current = controls.resizeMode;
   const initialVolumeRef = useRef(initialVolume);
   initialVolumeRef.current = initialVolume;
   const preferredAudioDeviceRef = useRef(preferredAudioDevice);
@@ -361,11 +378,20 @@ export function PlayerScreen({
         ? latestVolumeRef.current
         : (openedEngine.initialVolume ?? latestVolumeRef.current);
     openedEngine.setVolume?.(clampVolume(effective));
+    openedEngine.setResizeMode?.(latestResizeModeRef.current);
     const savedDevice = preferredAudioDeviceRef.current?.trim();
     if (savedDevice && savedDevice !== 'auto') {
       openedEngine.setAudioDevice?.(savedDevice);
     }
   }, [openedEngine]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-send resizeMode when activeTarget.itemKey changes so mpv --reset-on-next-file never reverts to fit
+  useEffect(() => {
+    if (openedEngine === undefined) return;
+    if (status.kind === 'playing' || status.kind === 'paused') {
+      openedEngine.setResizeMode?.(controls.resizeMode);
+    }
+  }, [openedEngine, activeTarget.itemKey, status.kind, controls.resizeMode]);
 
   const fetchChannelNowNext = useCallback(async (itemKey: string) => {
     const query = catalogRef.current.nowNext ?? catalogRef.current.epgNowNext;
@@ -388,6 +414,7 @@ export function PlayerScreen({
     hostSetBrightness?.(clamped);
   };
   const handleTouchScrubCommit = (deltaMs: number): void => {
+    extras.stillWatching.recordUserActivity();
     const latestAnchor = serviceRef.current?.getState().anchor;
     const dur = latestAnchor?.durationMs;
     if (latestAnchor !== undefined && dur !== undefined && dur > 0) {
@@ -400,6 +427,7 @@ export function PlayerScreen({
   const anySheetOpen =
     controls.tracksOpen || controls.settingsOpen || controls.infoOpen || controls.channelListOpen;
   const isWebDesktop = isDesktop && (Platform.OS as string) === 'web';
+  const useDockedDesktopLayout = isDesktop && overlayMode === 'docked';
   const hideDesktopCursor =
     isWebDesktop && controls.osdHidden && status.kind === 'playing' && !anySheetOpen;
   const desktopWebProps = isWebDesktop
@@ -413,25 +441,40 @@ export function PlayerScreen({
           preventDefault?: () => void;
         }) => {
           if (controls.handleWheelVolume(e?.deltaY ?? e?.nativeEvent?.deltaY ?? 0)) {
+            extras.stillWatching.recordUserActivity();
             e?.preventDefault?.();
           }
         },
       } as Record<string, unknown>)
     : undefined;
   const touchHoverProps = buildTouchHoverProps(
-    controls.handleTouchActivity,
-    controls.handlePointerHover,
+    () => {
+      extras.stillWatching.recordUserActivity();
+      controls.handleTouchActivity();
+    },
+    (pointerType, point) => {
+      extras.stillWatching.recordUserActivity();
+      controls.handlePointerHover(pointerType, point);
+    },
   );
   const osdVisible = !inPip && !controls.osdHidden && !controls.locked;
   const subtitleBottomInsetPx =
-    !isDesktop && osdVisible ? (isTv ? 120 : controls.osdTier === 'progress' ? 64 : 96) : 0;
+    !useDockedDesktopLayout && osdVisible
+      ? isTv
+        ? 120
+        : controls.osdTier === 'progress'
+          ? 64
+          : 96
+      : 0;
   const showTouchGestures = !inPip && !isTv && !isDesktop && !controls.locked && !anySheetOpen;
 
   const surfaceNode =
     sessionState.kind === 'ready' ? (
       <View
         testID="player-surface-layer"
-        style={isDesktop ? playerStyles.surfaceLayerDesktop : playerStyles.surfaceLayer}
+        style={
+          useDockedDesktopLayout ? playerStyles.surfaceLayerDesktop : playerStyles.surfaceLayer
+        }
       >
         {sessionState.opened.renderSurface({
           statusText: `${activeTarget.title} — ${statusLine}`,
@@ -460,7 +503,10 @@ export function PlayerScreen({
       {...(reduceMotion !== undefined ? { reduceMotion } : {})}
       timers={timers}
       onPlayNext={(expectedKey) => handoff.handlePlayNextEpisode(expectedKey, nextEpisode)}
-      onDismiss={() => setNextEpisodeDismissed(true)}
+      onDismiss={() => {
+        extras.stillWatching.recordUserActivity();
+        setNextEpisodeDismissed(true);
+      }}
       onVisibilityChange={setNextEpisodeVisible}
     />
   );
@@ -482,6 +528,7 @@ export function PlayerScreen({
   const infoSheetNode = (
     <PlayerInfoSheet
       visible={controls.infoOpen && activeService !== null}
+      docked={useDockedDesktopLayout}
       title={activeTarget.title}
       subtitle={activeTarget.subtitle}
       isVod={activeTarget.kind === 'vod'}
@@ -499,6 +546,7 @@ export function PlayerScreen({
   const channelDrawerNode = (
     <PlayerChannelDrawer
       visible={controls.channelListOpen && canZap}
+      docked={useDockedDesktopLayout}
       playlist={activeTarget.playlist}
       currentItemKey={activeTarget.itemKey}
       formFactor={formFactor}
@@ -507,6 +555,7 @@ export function PlayerScreen({
       fetchNowNext={fetchChannelNowNext}
       navigationRef={channelDrawerNavRef}
       onSelectChannel={(entry, index) => {
+        extras.stillWatching.recordUserActivity();
         handoff.selectChannel(entry, index);
         controls.closeChannelList();
       }}
@@ -517,12 +566,18 @@ export function PlayerScreen({
   const settingsSheetNode = (
     <PlayerSettingsSheet
       visible={controls.settingsOpen && activeService !== null}
+      docked={useDockedDesktopLayout}
       menuState={controls.settingsMenu}
       tracks={tracks}
       isVod={activeTarget.kind === 'vod'}
       playbackSpeed={controls.playbackSpeed}
-      {...(!isDesktop
-        ? { resizeMode: controls.resizeMode, onToggleResizeMode: controls.toggleResizeMode }
+      resizeMode={controls.resizeMode}
+      onToggleResizeMode={controls.toggleResizeMode}
+      timeDisplayMode={extras.timeDisplayMode}
+      onCycleTimeDisplayMode={extras.handleCycleTimeDisplayMode}
+      onToggleInfo={controls.toggleInfo}
+      {...(hostToggleAlwaysOnTop !== undefined
+        ? { alwaysOnTop, onToggleAlwaysOnTop: hostToggleAlwaysOnTop }
         : {})}
       {...(hostSetDeinterlace !== undefined
         ? { deinterlace: controls.deinterlace, onToggleDeinterlace: controls.toggleDeinterlace }
@@ -539,6 +594,11 @@ export function PlayerScreen({
             onToggleAutoPlayNextEpisode,
           }
         : {})}
+      chapters={chapters}
+      onSelectChapter={extras.handleSelectChapter}
+      sleepTimer={extras.sleepTimer}
+      onSelectSleepTimer={extras.selectSleepTimer}
+      onToggleSleepTimerAction={extras.toggleSleepTimerAction}
       statsVisible={controls.statsVisible}
       {...(hostSetAudioDevice !== undefined
         ? { audioDevices, activeAudioDevice, onSelectAudioDevice: selectAudioDevice }
@@ -561,199 +621,153 @@ export function PlayerScreen({
     />
   );
 
-  const osdNode = (
-    <PlayerOsd
-      title={activeTarget.title}
-      subtitle={activeTarget.subtitle}
-      channelDigits={controls.channelDigits}
-      statusLine={statusLine}
-      statusKind={sessionState.kind === 'unavailable' ? 'idle' : status.kind}
-      osdTier={controls.osdTier}
-      isBuffering={status.kind === 'tuning' || status.kind === 'recovering'}
-      failure={failure}
-      isVod={activeTarget.kind === 'vod'}
-      isPausedOrEnded={controls.isPausedOrEnded}
-      canZap={canZap}
-      hasTracks={hasTracks}
-      hasPreviousChannel={hasPreviousChannel}
-      canLock={controls.canLock}
-      showRetry={showRetry}
-      isTv={isTv}
-      isDesktop={isDesktop}
-      muted={controls.muted}
-      volume={controls.volume}
-      isFullscreen={isFullscreen}
-      alwaysOnTop={alwaysOnTop}
-      playbackSpeed={controls.playbackSpeed}
-      videoInfo={videoInfo}
-      tracks={tracks}
-      nowNext={nowNext}
-      nowMs={wallClock()}
-      tvOsdFocused={controls.tvOsdFocused}
-      tvScrubberFocused={controls.tvScrubberFocused}
-      tvOsdAction={controls.tvOsdAction}
-      tracksOpen={controls.tracksOpen}
-      settingsOpen={controls.settingsOpen}
-      settingsView={controls.settingsMenu.view}
-      infoOpen={controls.infoOpen}
-      channelListOpen={controls.channelListOpen}
-      previewPositionMs={effectivePreviewMs}
-      i18n={i18n}
-      service={activeService}
-      clock={clock}
-      onExit={onExit}
-      onTogglePlayPause={controls.togglePlayPause}
-      onSeekBack={controls.seekStepBack}
-      onSeekForward={controls.seekStepForward}
-      onSeekRatio={controls.seekToRatio}
-      onScrubbingChange={controls.setBarScrubbing}
-      onOpenTracks={controls.openTracks}
-      onOpenSettings={() =>
-        controls.settingsOpen ? controls.closeSettings() : controls.openSettings()
-      }
-      onOpenSpeed={() =>
-        controls.settingsOpen && controls.settingsMenu.view === 'speed'
-          ? controls.closeSettings()
-          : controls.openSettings('speed')
-      }
-      onToggleInfo={controls.toggleInfo}
-      {...(canZap ? { onToggleChannelList: controls.toggleChannelList } : {})}
-      {...(hostToggleMute !== undefined ? { onToggleMute: controls.toggleMute } : {})}
-      onSetVolume={controls.setVolume}
-      {...(hostToggleFullscreen !== undefined
-        ? { onToggleFullscreen: controls.toggleFullscreen }
-        : {})}
-      {...(hostToggleAlwaysOnTop !== undefined
-        ? { onToggleAlwaysOnTop: hostToggleAlwaysOnTop }
-        : {})}
-      onLock={controls.lockControls}
-      onJumpPreviousChannel={handoff.handleJumpPreviousChannel}
-      onJumpToLiveEdge={controls.jumpToLiveEdge}
-      onPrev={() => zapBy(-1)}
-      onNext={() => zapBy(1)}
-      onRetry={controls.retry}
-    />
-  );
+  const osdProps = {
+    title: activeTarget.title,
+    subtitle: activeTarget.subtitle,
+    channelDigits: controls.channelDigits,
+    statusLine,
+    statusKind: sessionState.kind === 'unavailable' ? ('idle' as const) : status.kind,
+    osdTier: controls.osdTier,
+    overlayMode: isDesktop ? overlayMode : ('floating' as const),
+    isBuffering: status.kind === 'tuning' || status.kind === 'recovering',
+    failure,
+    isVod: activeTarget.kind === 'vod',
+    isPausedOrEnded: controls.isPausedOrEnded,
+    canZap,
+    hasTracks,
+    hasPreviousChannel,
+    hasNextEpisodeAction: activeTarget.kind === 'vod' && nextEpisode !== undefined,
+    nextEpisodeBannerVisible: nextEpisodeVisible,
+    canLock: controls.canLock,
+    showRetry,
+    isTv,
+    isDesktop,
+    muted: controls.muted,
+    volume: controls.volume,
+    isFullscreen,
+    alwaysOnTop,
+    playbackSpeed: controls.playbackSpeed,
+    chapters,
+    timeDisplayMode: extras.timeDisplayMode,
+    videoInfo,
+    tracks,
+    nowNext,
+    nowMs: wallClock(),
+    wallClock,
+    tvOsdFocused: controls.tvOsdFocused,
+    tvScrubberFocused: controls.tvScrubberFocused,
+    tvOsdAction: controls.tvOsdAction,
+    tracksOpen: controls.tracksOpen,
+    settingsOpen: controls.settingsOpen,
+    settingsView: controls.settingsMenu.view,
+    infoOpen: controls.infoOpen,
+    channelListOpen: controls.channelListOpen,
+    previewPositionMs: effectivePreviewMs,
+    i18n,
+    service: activeService,
+    clock,
+    onExit,
+    onTogglePlayPause: controls.togglePlayPause,
+    onSeekBack: controls.seekStepBack,
+    onSeekForward: controls.seekStepForward,
+    onSeekRatio: controls.seekToRatio,
+    onScrubbingChange: controls.setBarScrubbing,
+    onCycleTimeDisplayMode: extras.handleCycleTimeDisplayMode,
+    ...(onFineScrubHaptic !== undefined ? { onFineScrubHaptic } : {}),
+    onOpenTracks: controls.openTracks,
+    onOpenSettings: () =>
+      controls.settingsOpen ? controls.closeSettings() : controls.openSettings(),
+    onOpenSpeed: () =>
+      controls.settingsOpen && controls.settingsMenu.view === 'speed'
+        ? controls.closeSettings()
+        : controls.openSettings('speed'),
+    onToggleResizeMode: controls.toggleResizeMode,
+    onToggleInfo: controls.toggleInfo,
+    ...(canZap ? { onToggleChannelList: controls.toggleChannelList } : {}),
+    onPlayNextEpisode: () => {
+      extras.stillWatching.recordUserActivity();
+      handoff.handlePlayNextEpisode(undefined, nextEpisode);
+    },
+    ...((chapters?.length ?? 0) > 0
+      ? { onPrevChapter: extras.handlePrevChapter, onNextChapter: extras.handleNextChapter }
+      : {}),
+    ...(hostToggleMute !== undefined ? { onToggleMute: controls.toggleMute } : {}),
+    onSetVolume: controls.setVolume,
+    ...(hostToggleFullscreen !== undefined
+      ? { onToggleFullscreen: controls.toggleFullscreen }
+      : {}),
+    ...(hostToggleAlwaysOnTop !== undefined ? { onToggleAlwaysOnTop: hostToggleAlwaysOnTop } : {}),
+    onLock: controls.lockControls,
+    onJumpPreviousChannel: handoff.handleJumpPreviousChannel,
+    onJumpToLiveEdge: controls.jumpToLiveEdge,
+    onPrev: () => {
+      extras.stillWatching.recordUserActivity();
+      zapBy(-1);
+    },
+    onNext: () => {
+      extras.stillWatching.recordUserActivity();
+      zapBy(1);
+    },
+    onRetry: controls.retry,
+  };
 
   return (
-    <View
-      testID="player-screen"
-      style={[
-        playerStyles.root,
-        { backgroundColor: theme.colors.bgCanvas },
-        hideDesktopCursor ? HIDE_CURSOR_WEB_STYLE : undefined,
-      ]}
-      {...controls.desktopFallbackKeyProps}
-      {...touchHoverProps}
-      {...desktopWebProps}
-    >
-      {isTv ? (
-        <TvFocusAnchor
-          testID="player-tv-focus-anchor"
-          hasTVPreferredFocus={!anySheetOpen && !controls.locked}
-        />
-      ) : null}
-
-      {isDesktop ? (
-        <View testID="player-desktop-stage" style={playerStyles.desktopStageRow}>
-          {!inPip ? channelDrawerNode : null}
-          {surfaceNode}
-        </View>
-      ) : (
-        surfaceNode
-      )}
-
-      {!inPip && !isTv && !isDesktop && brightness < 1 ? (
-        <View
-          testID="player-brightness-dim-overlay"
-          pointerEvents="none"
-          style={[
-            StyleSheet.absoluteFill,
-            {
-              backgroundColor: theme.colors.bgCanvas,
-              opacity: computeBrightnessDimOpacity(brightness),
-            },
-          ]}
-        />
-      ) : null}
-
-      {showTouchGestures ? (
-        <PlayerTouchGestures
-          isVod={activeTarget.kind === 'vod'}
-          volume={controls.volume}
-          brightness={brightness}
-          renderDimOverlay={false}
-          durationMs={durationMs}
-          positionMs={currentPosMs}
-          i18n={i18n}
-          onTouchActivity={controls.handleTouchActivity}
-          onSingleTap={controls.toggleOsdByTouch}
-          {...(activeTarget.kind === 'vod'
-            ? {
-                onDoubleTapSeek: (deltaMs) => {
-                  if (deltaMs < 0) controls.seekStepBack();
-                  else controls.seekStepForward();
-                },
-                onScrubPreview: setTouchScrubDeltaMs,
-                onScrubCommit: handleTouchScrubCommit,
-                onHoldSpeedStart: controls.startHoldSpeed,
-                onHoldSpeedEnd: controls.endHoldSpeed,
-              }
-            : {})}
-          onVolumeChange={controls.setVolume}
-          onBrightnessChange={handleBrightnessChange}
-        />
-      ) : null}
-
-      {controls.holdSpeedActive && !showTouchGestures ? (
-        <View pointerEvents="none" style={playerStyles.holdSpeedWrap}>
-          <MicroPill
-            testID="player-hold-speed-pill"
-            label={i18n.t('player.holdSpeedActive')}
-            tone="accent"
-          />
-        </View>
-      ) : null}
-
-      <PlayerStatsHud
-        visible={!inPip && controls.statsVisible}
-        service={activeService}
-        clock={clock}
-        i18n={i18n}
-        isDesktop={isDesktop}
-      />
-
-      {inPip ? null : isDesktop ? (
-        <>
-          {nextEpisodeNode}
-          {trackPickerNode}
-          {infoSheetNode}
-          {settingsSheetNode}
-          {controls.osdHidden ? null : osdNode}
-        </>
-      ) : controls.locked ? (
-        <PlayerLockedOverlay i18n={i18n} onUnlock={controls.unlockControls} />
-      ) : (
-        <>
-          <View
-            pointerEvents="box-none"
-            style={
-              nextEpisodeVisible
-                ? isTv
-                  ? playerStyles.nextEpisodeOverlayTv
-                  : playerStyles.nextEpisodeOverlay
-                : undefined
-            }
-          >
-            {nextEpisodeNode}
-          </View>
-          {controls.osdHidden ? null : osdNode}
-          {channelDrawerNode}
-          {trackPickerNode}
-          {infoSheetNode}
-          {settingsSheetNode}
-        </>
-      )}
-    </View>
+    <PlayerScreenStage
+      isTv={isTv}
+      isDesktop={isDesktop}
+      inPip={inPip}
+      isVod={activeTarget.kind === 'vod'}
+      useDockedDesktopLayout={useDockedDesktopLayout}
+      hideDesktopCursor={hideDesktopCursor}
+      anySheetOpen={anySheetOpen}
+      locked={controls.locked}
+      osdHidden={controls.osdHidden}
+      showTouchGestures={showTouchGestures}
+      holdSpeedActive={controls.holdSpeedActive}
+      statsVisible={controls.statsVisible}
+      nextEpisodeVisible={nextEpisodeVisible}
+      brightness={brightness}
+      volume={controls.volume}
+      durationMs={durationMs}
+      currentPosMs={currentPosMs}
+      activeService={activeService}
+      clock={clock}
+      i18n={i18n}
+      osdProps={osdProps}
+      desktopFallbackKeyProps={controls.desktopFallbackKeyProps as Record<string, unknown>}
+      touchHoverProps={touchHoverProps as Record<string, unknown>}
+      desktopWebProps={desktopWebProps}
+      surfaceNode={surfaceNode}
+      nextEpisodeNode={nextEpisodeNode}
+      trackPickerNode={trackPickerNode}
+      infoSheetNode={infoSheetNode}
+      channelDrawerNode={channelDrawerNode}
+      settingsSheetNode={settingsSheetNode}
+      stillWatchingVisible={extras.stillWatching.promptVisible}
+      stillWatchingRemainingSec={extras.stillWatching.remainingSeconds}
+      stillWatchingFocusedAction={stillWatchingAction}
+      onKeepWatching={extras.stillWatching.keepWatching}
+      onStopWatching={extras.stillWatching.stopNow}
+      onTouchActivity={() => {
+        extras.stillWatching.recordUserActivity();
+        controls.handleTouchActivity();
+      }}
+      onSingleTap={() => {
+        extras.stillWatching.recordUserActivity();
+        controls.toggleOsdByTouch();
+      }}
+      onDoubleTapSeek={(deltaMs) => {
+        extras.stillWatching.recordUserActivity();
+        if (deltaMs < 0) controls.seekStepBack();
+        else controls.seekStepForward();
+      }}
+      onScrubPreview={setTouchScrubDeltaMs}
+      onScrubCommit={handleTouchScrubCommit}
+      onHoldSpeedStart={controls.startHoldSpeed}
+      onHoldSpeedEnd={controls.endHoldSpeed}
+      onVolumeChange={controls.setVolume}
+      onBrightnessChange={handleBrightnessChange}
+      onUnlock={controls.unlockControls}
+    />
   );
 }

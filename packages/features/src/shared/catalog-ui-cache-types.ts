@@ -110,6 +110,13 @@ export interface CatalogUiCacheOptions {
   readonly locale?: string;
 }
 
+/** Lightweight diagnostic hit/miss counters for {@link CatalogUiCache} (`#160`). */
+export interface CatalogUiCacheMetrics {
+  readonly hits: number;
+  readonly misses: number;
+  readonly hitRatePct: number | null;
+}
+
 /**
  * Bounded, `catalogRevision`-keyed in-memory UI snapshot cache powering zero-blink tab switches,
  * category drill-downs, detail re-opens, season switches, and search returns (`#445`).
@@ -118,6 +125,7 @@ export interface CatalogUiCache {
   getRevision(): number;
   getLocale(): string;
   setRevision(revision: number, locale: string): void;
+  getMetrics?(): CatalogUiCacheMetrics;
   getHome(): CachedHomeEntry | null;
   setHome(snapshot: CachedHomeSnapshot): void;
   setHomeHeroIndex(heroIndex: number): void;

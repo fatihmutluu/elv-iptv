@@ -2,6 +2,7 @@ import type { ItemRow } from '@elv/data';
 import type { AndroidDecoderMode, DefaultResizeModePref } from '@elv/domain';
 import { type AppI18n, resolveLanguageLabel } from '@elv/i18n';
 import {
+  type ChapterInfo,
   type MediaTracks,
   type PlaybackClock,
   type PlaybackState,
@@ -14,7 +15,7 @@ import {
 import type { FormFactor } from '@elv/ui-kit';
 import type { MutableRefObject } from 'react';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
-import type { AudioDeviceInfo } from '../ports/video-host';
+import type { AudioDeviceInfo, VideoResizeMode } from '../ports/video-host';
 import { describePlaybackFailure } from './errors';
 import type { SettingsMenuState } from './settings-menu-nav';
 import type { TrackPickerCursor } from './track-picker-nav';
@@ -154,6 +155,11 @@ export interface PlayerOverlayStateParams {
   activeAudioDevice?: string | undefined;
   hasVideoDecoder?: boolean | undefined;
   androidDecoderMode?: AndroidDecoderMode | undefined;
+  chapters?: readonly ChapterInfo[] | undefined;
+  hasSleepTimer?: boolean | undefined;
+  sleepTimerMinutes?: number | undefined;
+  hasTimeDisplay?: boolean | undefined;
+  hasAlwaysOnTop?: boolean | undefined;
   hasNextEpisode: boolean;
   hasPreviousChannel: boolean;
   initialOsdHidden?: boolean | undefined;
@@ -163,6 +169,7 @@ export interface PlayerOverlayStateParams {
   clockRef: MutableRefObject<PlaybackClock>;
   timersRef: MutableRefObject<PlaybackTimers>;
   cancelScrub: () => void;
+  onResizeModeChange?: ((mode: VideoResizeMode) => void) | undefined;
   onSetOrientationLocked?: ((locked: boolean) => void) | undefined;
   onSetDeinterlace?: ((enabled: boolean) => void) | undefined;
 }
@@ -424,14 +431,22 @@ function formatActiveSubtitle(track: TrackInfo | undefined, i18n: Pick<AppI18n, 
   );
 }
 
+/** Optional extended diagnostic counters surfaced in {@link formatStatsHudLines} (`#160`). */
+export interface StatsHudExtras {
+  readonly cacheHitRatePct?: number | null | undefined;
+  readonly uiStalls?: number | undefined;
+}
+
 /**
- * Formats 3 concise monospace Stats HUD lines directly from live {@link PlaybackState} telemetry
- * (status & clock, active audio/subtitle tracks, first-frame latency, attempt, and dropped events).
+ * Formats concise monospace Stats HUD lines directly from live {@link PlaybackState} telemetry
+ * (status & clock, active audio/subtitle tracks, first-frame latency, attempt, stale events,
+ * dropped frames, UI cache hit rate, and UI stalls `#160`).
  */
 export function formatStatsHudLines(
   state: PlaybackState,
   nowMs: number,
   i18n: Pick<AppI18n, 't'>,
+  extras?: StatsHudExtras,
 ): readonly string[] {
   const statusText = formatStatusText(state.status, i18n);
   let clockPart = '--:--';
@@ -462,5 +477,25 @@ export function formatStatsHudLines(
   line3Parts.push(`#${state.attempt}`);
   line3Parts.push(`stale ${state.staleEventsDropped}`);
 
-  return [line1, line2, line3Parts.join(' · ')];
+  const line4Parts: string[] = [];
+  const dropped = state.droppedFrames ?? state.videoInfo?.droppedFrames;
+  if (dropped !== undefined && Number.isFinite(dropped) && dropped >= 0) {
+    line4Parts.push(`${i18n.t('player.stats.droppedFrames')}: ${Math.round(dropped)}`);
+  }
+  if (
+    extras?.cacheHitRatePct !== undefined &&
+    extras.cacheHitRatePct !== null &&
+    Number.isFinite(extras.cacheHitRatePct)
+  ) {
+    line4Parts.push(
+      `${i18n.t('player.stats.cacheHitRate')}: ${Math.round(extras.cacheHitRatePct)}%`,
+    );
+  }
+  if (extras?.uiStalls !== undefined && Number.isFinite(extras.uiStalls) && extras.uiStalls >= 0) {
+    line4Parts.push(`${i18n.t('player.stats.longTasks')}: ${Math.round(extras.uiStalls)}`);
+  }
+
+  return line4Parts.length > 0
+    ? [line1, line2, line3Parts.join(' · '), line4Parts.join(' · ')]
+    : [line1, line2, line3Parts.join(' · ')];
 }

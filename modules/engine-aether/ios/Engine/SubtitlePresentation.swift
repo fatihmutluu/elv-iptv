@@ -4,15 +4,22 @@ import UIKit
 
 /// Snapshot of active subtitle cues and picture geometry rendered above `AetherPlayerView` and below `shutterView`.
 struct SubtitlePresentation: Equatable {
-  static let empty = SubtitlePresentation(cues: [], videoSize: .zero, gravity: .resizeAspect)
+  static let empty = SubtitlePresentation(cues: [], videoSize: .zero, gravity: .resizeAspect, filterSdhSubtitles: false)
+
+  /// Strips SDH / Hearing-Impaired annotations from plain or joined rich subtitle text (`#310`).
+  static func stripSdhAnnotations(_ text: String) -> String {
+    SdhSubtitleFilter.stripSdhAnnotations(text)
+  }
 
   var cues: [SubtitleCue]
   var videoSize: CGSize
   var gravity: AVLayerVideoGravity
+  var filterSdhSubtitles: Bool = false
 
   static func == (lhs: SubtitlePresentation, rhs: SubtitlePresentation) -> Bool {
     guard lhs.videoSize == rhs.videoSize,
           lhs.gravity == rhs.gravity,
+          lhs.filterSdhSubtitles == rhs.filterSdhSubtitles,
           lhs.cues.count == rhs.cues.count
     else {
       return false

@@ -180,11 +180,24 @@ extension EngineCore {
       height: incoming.height.flatMap { $0 > 0 ? $0 : nil } ?? lastVideoInfo?.height,
       fps: incoming.fps.flatMap { ($0.isFinite && $0 > 0) ? $0 : nil } ?? lastVideoInfo?.fps,
       codec: (trimmedCodec?.isEmpty == false ? trimmedCodec : nil) ?? lastVideoInfo?.codec,
-      hdr: (trimmedHdr?.isEmpty == false ? trimmedHdr : nil) ?? lastVideoInfo?.hdr
+      hdr: (trimmedHdr?.isEmpty == false ? trimmedHdr : nil) ?? lastVideoInfo?.hdr,
+      droppedFrames: incoming.droppedFrames.flatMap { $0 >= 0 ? $0 : nil } ?? lastVideoInfo?.droppedFrames
     )
     guard !merged.isEmpty, merged != lastVideoInfo else { return }
     lastVideoInfo = merged
     emit(.mediaInfo(attempt: token, info: merged))
+  }
+
+  func handleTelemetry(droppedFrames: Int) {
+    guard droppedFrames > 0, droppedFrames > lastDroppedFrames else { return }
+    lastDroppedFrames = droppedFrames
+    emit(.telemetry(attempt: token, droppedFrames: droppedFrames))
+  }
+
+  func handleChapters(_ chapters: [ChapterInfoOut]) {
+    guard chapters != lastChapters else { return }
+    lastChapters = chapters
+    emit(.chapters(attempt: token, chapters: chapters))
   }
 
   func emitAnchor(rate: Double, atMs: Double) {

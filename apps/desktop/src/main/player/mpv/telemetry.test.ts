@@ -2,7 +2,7 @@ import type { EngineEvent } from '@elv/playback';
 import { describe, expect, it } from 'vitest';
 import { createMpvEngine } from '../engine.ts';
 import { createFakeMpv, type FakeMpvScript } from './fake-mpv.ts';
-import { createMpvTelemetry, PROGRESS_THROTTLE_MS } from './telemetry.ts';
+import { createMpvTelemetry, PROGRESS_THROTTLE_MS, parseMpvChapters } from './telemetry.ts';
 
 describe('createMpvTelemetry', () => {
   it('emits throttled progress events only when cache bytes or duration advance while waiting (#314)', () => {
@@ -104,6 +104,77 @@ describe('createMpvTelemetry', () => {
     radio.onVid(false, true);
     expect(radio.clockFields(2_000, 1)).toEqual({ hasVideoTrack: false });
   });
+
+  it('parses and deduplicates chapter-list and frame-drop-count telemetry (#118, #160)', () => {
+    expect(
+      parseMpvChapters(
+        [
+          { title: 'Cold Open', time: 0 },
+          { title: '  Act I  ', time: 500 },
+          { title: '', time: 1090 },
+        ],
+        1500,
+      ),
+    ).toEqual([
+      { id: 'ch:0', title: 'Cold Open', startMs: 0, endMs: 500_000 },
+      { id: 'ch:1', title: 'Act I', startMs: 500_000, endMs: 1_090_000 },
+      { id: 'ch:2', startMs: 1_090_000, endMs: 1_500_000 },
+    ]);
+
+    const t = createMpvTelemetry();
+    // Empty chapter-list initially emits nothing
+    expect(t.onChapterList([])).toBeUndefined();
+    const firstChapters = t.onChapterList([
+      { title: 'Cold Open', time: 0 },
+      { title: 'Finale', time: 600 },
+    ]);
+    expect(firstChapters).toEqual({
+      type: 'chapters',
+      chapters: [
+        { id: 'ch:0', title: 'Cold Open', startMs: 0, endMs: 600_000 },
+        { id: 'ch:1', title: 'Finale', startMs: 600_000 },
+      ],
+    });
+    // Identical list is deduplicated
+    expect(
+      t.onChapterList([
+        { title: 'Cold Open', time: 0 },
+        { title: 'Finale', time: 600 },
+      ]),
+    ).toBeUndefined();
+    // Arriving duration updates final chapter endMs
+    expect(t.onDurationForChapters(1200)).toEqual({
+      type: 'chapters',
+      chapters: [
+        { id: 'ch:0', title: 'Cold Open', startMs: 0, endMs: 600_000 },
+        { id: 'ch:1', title: 'Finale', startMs: 600_000, endMs: 1_200_000 },
+      ],
+    });
+
+    // frame-drop-count emits strictly increasing positive counts
+    expect(t.onFrameDropCount(0)).toBeUndefined();
+    expect(t.onFrameDropCount(-1)).toBeUndefined();
+    expect(t.onFrameDropCount(3)).toEqual({ type: 'telemetry', droppedFrames: 3 });
+    expect(t.onFrameDropCount(3)).toBeUndefined();
+    expect(t.onFrameDropCount(8)).toEqual({ type: 'telemetry', droppedFrames: 8 });
+  });
+
+  it('sorts unsorted chapter-list entries by startMs before deriving endMs (#118)', () => {
+    expect(
+      parseMpvChapters(
+        [
+          { title: 'Finale', time: 1090 },
+          { title: 'Cold Open', time: 0 },
+          { title: 'Act I', time: 500 },
+        ],
+        1500,
+      ),
+    ).toEqual([
+      { id: 'ch:0', title: 'Cold Open', startMs: 0, endMs: 500_000 },
+      { id: 'ch:1', title: 'Act I', startMs: 500_000, endMs: 1_090_000 },
+      { id: 'ch:2', title: 'Finale', startMs: 1_090_000, endMs: 1_500_000 },
+    ]);
+  });
 });
 
 describe('createMpvEngine telemetry wiring (#314, #321)', () => {
@@ -173,6 +244,111 @@ describe('createMpvEngine telemetry wiring (#314, #321)', () => {
       const frames =
         clockEvents[0]?.type === 'clock' ? clockEvents[0].anchor.decodedVideoFrames : 0;
       expect(frames).toBeGreaterThan(0);
+    } finally {
+      off();
+      engine.release();
+      await fake.dispose();
+    }
+  });
+
+  it('forwards chapters, droppedFrames, setResizeMode, setFilterSdh, and DV fallback over mpv IPC and resets on load (#118, #124, #160, #310)', async () => {
+    const url1 = 'http://sim/movie/demo/demo/ch1.mkv';
+    const url2 = 'http://sim/movie/demo/demo/ch2.mkv';
+    const script1: FakeMpvScript = [
+      { afterMs: 0, event: 'start-file' },
+      { afterMs: 1, event: 'file-loaded' },
+      { afterMs: 2, property: 'duration', value: 1500 },
+      {
+        afterMs: 3,
+        property: 'chapter-list',
+        value: [
+          { title: 'Cold Open', time: 0 },
+          { title: 'Act I', time: 500 },
+          { title: 'Finale', time: 1090 },
+        ],
+      },
+      { afterMs: 4, property: 'video-params', value: { w: 1920, h: 1080 } },
+      { afterMs: 5, property: 'frame-drop-count', value: 4 },
+      { afterMs: 6, event: 'playback-restart' },
+    ];
+    const script2: FakeMpvScript = [
+      { afterMs: 0, event: 'start-file' },
+      { afterMs: 1, event: 'file-loaded' },
+      { afterMs: 2, property: 'video-params', value: { w: 1920, h: 1080 } },
+      { afterMs: 3, property: 'frame-drop-count', value: 1 },
+      { afterMs: 4, event: 'playback-restart' },
+    ];
+    const fake = createFakeMpv({
+      scripts: { [url1]: script1, [url2]: script2 },
+      transport: 'socket',
+    });
+    let nowMs = 20_000;
+    const events: EngineEvent[] = [];
+    const engine = createMpvEngine({
+      spawn: (args, signal) => fake.spawn(args, signal),
+      presenter: {
+        kind: 'child-window',
+        prepare: async () => [],
+        attach: () => undefined,
+        setArea: () => undefined,
+        coversArea: false,
+        toggleFullscreen: () => undefined,
+        onEvent: () => () => undefined,
+        dispose: () => undefined,
+      },
+      baseArgs: [],
+      loadMode: 'replace',
+      now: () => {
+        nowMs += 100;
+        return nowMs;
+      },
+      timers: { setTimeout, clearTimeout },
+      onUi: () => undefined,
+    });
+    const off = engine.subscribe((e) => events.push(e));
+    try {
+      engine.load({
+        attempt: 1,
+        url: url1,
+        headers: {},
+        kind: 'vod',
+        options: { preferHevcOverDolbyVision: true, filterSdhSubtitles: true },
+      });
+      engine.setResizeMode('fill');
+      engine.setResizeMode('stretch');
+      engine.setResizeMode('fit');
+      engine.setFilterSdh(false);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+
+      const chEvent = events.find((e) => e.type === 'chapters');
+      expect(chEvent).toEqual({
+        attempt: 1,
+        type: 'chapters',
+        chapters: [
+          { id: 'ch:0', title: 'Cold Open', startMs: 0, endMs: 500_000 },
+          { id: 'ch:1', title: 'Act I', startMs: 500_000, endMs: 1_090_000 },
+          { id: 'ch:2', title: 'Finale', startMs: 1_090_000, endMs: 1_500_000 },
+        ],
+      });
+      expect(events.filter((e) => e.type === 'telemetry')).toEqual([
+        { attempt: 1, type: 'telemetry', droppedFrames: 4 },
+      ]);
+
+      // Verify loadfile options + resize mode + SDH commands sent to mpv
+      const loadCmd = fake.sent.find((c) => c[0] === 'loadfile');
+      expect(loadCmd?.[4]).toMatchObject({ hwdec: 'no', 'sub-filter-sdh': 'yes' });
+      expect(fake.sent).toContainEqual(['set_property', 'keepaspect', 'yes']);
+      expect(fake.sent).toContainEqual(['set_property', 'panscan', 1]);
+      expect(fake.sent).toContainEqual(['set_property', 'keepaspect', 'no']);
+      expect(fake.sent).toContainEqual(['set_property', 'video-aspect-override', '-1']);
+      expect(fake.sent).toContainEqual(['set_property', 'sub-filter-sdh', 'no']);
+
+      // Second load resets droppedFrames so count=1 (< previous 4) emits cleanly on attempt 2
+      engine.load({ attempt: 2, url: url2, headers: {}, kind: 'vod' });
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      expect(events.filter((e) => e.type === 'telemetry' && e.attempt === 2)).toEqual([
+        { attempt: 2, type: 'telemetry', droppedFrames: 1 },
+      ]);
     } finally {
       off();
       engine.release();

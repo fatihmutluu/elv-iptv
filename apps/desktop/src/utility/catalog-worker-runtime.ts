@@ -475,6 +475,18 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
         return service.listFavorites ? service.listFavorites(call.limit, call.profileId) : [];
       case 'listFavoriteKeys':
         return service.listFavoriteKeys ? service.listFavoriteKeys(call.profileId) : [];
+      case 'getTrackPreference':
+        return service.getTrackPreference
+          ? service.getTrackPreference(call.scopeKey, call.profileId)
+          : null;
+      case 'saveTrackPreference':
+        if (service.saveTrackPreference) await service.saveTrackPreference(call.input);
+        return undefined;
+      case 'clearTrackPreference':
+        if (service.clearTrackPreference) {
+          await service.clearTrackPreference(call.scopeKey, call.profileId);
+        }
+        return undefined;
     }
   };
 

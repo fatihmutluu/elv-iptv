@@ -14,6 +14,7 @@ import type {
   PlayerEventMessage,
   PlayerUiEvent,
   PlayerUiMessage,
+  ResizeMode,
   VideoFrameLike,
 } from '../../../src/shared/player-ipc.ts';
 
@@ -64,6 +65,10 @@ export interface DesktopEngine extends PlayerEngine {
   setDeinterlace(enabled: boolean): void;
   /** Selects the desktop `libmpv` hardware video decoding profile (`#435`, `#210`). */
   setHwdec(profile: HwdecProfile): void;
+  /** Sets picture scaling mode (`fit` / `fill` / `stretch`) on non-canvas mpv presenters (`#124`). */
+  setResizeMode(mode: ResizeMode): void;
+  /** Toggles mpv's built-in SDH subtitle annotation filter (`sub-filter-sdh`, `#310`). */
+  setFilterSdh(enabled: boolean): void;
   /** Presentation events outside the port; the latest `presenter` event is replayed to a new listener. */
   onUi(listener: (event: PlayerUiEvent) => void): () => void;
   /** Subscribes to decoded GPU `VideoFrame` deliveries in `'canvas'` mode (`#95`); returns unsubscribe. */
@@ -230,6 +235,8 @@ export async function createDesktopEngine(
     },
     setDeinterlace: (enabled) => send({ name: 'setDeinterlace', enabled }),
     setHwdec: (profile) => send({ name: 'setHwdec', profile }),
+    setResizeMode: (mode) => send({ name: 'setResizeMode', mode }),
+    setFilterSdh: (enabled) => send({ name: 'setFilterSdh', enabled }),
     setArea(area) {
       if (!released) bridge.setArea({ engineId: id, area });
     },

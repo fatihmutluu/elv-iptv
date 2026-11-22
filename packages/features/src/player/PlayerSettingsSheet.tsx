@@ -1,11 +1,12 @@
-import type { AndroidDecoderMode } from '@elv/domain';
+import type { AndroidDecoderMode, OsdTimeDisplayMode } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
-import type { MediaTracks } from '@elv/playback';
+import type { ChapterInfo, MediaTracks } from '@elv/playback';
 import {
   AdaptiveSheet,
   type FormFactor,
   Icon,
   IconButton,
+  type IconName,
   TABULAR_NUMS_STYLE,
   useTheme,
   webBackdropBlur,
@@ -17,21 +18,27 @@ import { useDesktopDialogTrap } from './desktop-dialog-trap';
 import { blurWebTarget, SettingsToggleRow, settingsRowStyle } from './PlayerSettingsRows';
 import type { SettingsMenuState, SettingsMenuView } from './settings-menu-nav';
 import { buildSettingsNavRows, buildSettingsRadioItems } from './settings-sheet-items';
+import type { SleepTimerSnapshot } from './sleep-timer';
 
 const APPROX_ROW_PITCH = 50;
 
 /** Props of {@link PlayerSettingsSheet}. */
 export interface PlayerSettingsSheetProps {
   readonly visible: boolean;
+  readonly docked?: boolean;
   readonly menuState: SettingsMenuState;
   readonly tracks: MediaTracks;
   readonly isVod?: boolean;
   readonly playbackSpeed?: number;
   readonly resizeMode?: VideoResizeMode;
+  readonly timeDisplayMode?: OsdTimeDisplayMode;
+  readonly alwaysOnTop?: boolean;
   readonly deinterlace?: boolean;
   readonly autoSubtitlesOnSkipBack?: boolean;
   readonly autoPlayNextEpisode?: boolean;
   readonly statsVisible: boolean;
+  readonly chapters?: readonly ChapterInfo[] | undefined;
+  readonly sleepTimer?: SleepTimerSnapshot | undefined;
   readonly audioDevices?: readonly AudioDeviceInfo[];
   readonly activeAudioDevice?: string;
   readonly androidDecoderMode?: AndroidDecoderMode;
@@ -43,8 +50,14 @@ export interface PlayerSettingsSheetProps {
   readonly onSelectAudioDevice?: (name: string) => void;
   readonly onSelectSubtitle: (id: string | null) => void;
   readonly onSelectSpeed?: (rate: number) => void;
+  readonly onSelectChapter?: (startMs: number) => void;
+  readonly onSelectSleepTimer?: (minutes: number) => void;
+  readonly onToggleSleepTimerAction?: () => void;
   readonly onSelectAndroidDecoderMode?: (mode: AndroidDecoderMode) => void;
   readonly onToggleResizeMode?: () => void;
+  readonly onCycleTimeDisplayMode?: () => void;
+  readonly onToggleInfo?: () => void;
+  readonly onToggleAlwaysOnTop?: () => void;
   readonly onToggleDeinterlace?: () => void;
   readonly onToggleAutoSubtitlesOnSkipBack?: () => void;
   readonly onToggleAutoPlayNextEpisode?: () => void;
@@ -52,29 +65,47 @@ export interface PlayerSettingsSheetProps {
   readonly onClose: () => void;
 }
 
+interface ToggleDescriptor {
+  readonly testID: string;
+  readonly icon: IconName;
+  readonly label: string;
+  readonly pillLabel: string;
+  readonly active: boolean;
+  readonly role: 'button' | 'switch';
+  readonly accessibilityLabel: string;
+  readonly onPress: () => void;
+}
+
+function resolveViewTitle(view: SettingsMenuView, i18n: AppI18n): string {
+  switch (view) {
+    case 'root':
+      return i18n.t('player.settings');
+    case 'subtitles':
+      return i18n.t('player.subtitleTracks');
+    case 'audioDevice':
+      return i18n.t('player.audioDevice');
+    case 'speed':
+      return i18n.t('player.speed');
+    case 'chapters':
+      return i18n.t('player.chapters');
+    case 'sleepTimer':
+      return i18n.t('player.sleepTimer');
+    case 'videoDecoder':
+      return i18n.t('player.videoDecoder');
+    case 'audio':
+      return i18n.t('player.audioTracks');
+  }
+}
+
 /**
- * Adaptive 2-level Cinema Quietude Player Settings menu (`Subtitles`, `Audio`, VOD `Speed`,
- * `Aspect` where supported, `Deinterlace` where supported, `Stats HUD`). Flex-docked below the video canvas
- * on `desktop` (HWND-safe) and wrapped in `AdaptiveSheet` elsewhere.
+ * Adaptive 2-level Cinema Quietude Player Settings popover / portrait bottom sheet
+ * (`Subtitles`, `Audio`, `Speed`, `Chapters`, `Sleep timer`, `Aspect`, `Time display`,
+ * `Programme info`, `Always on top`, `Deinterlace`, `Stats HUD`).
  */
 export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactElement | null {
   const { visible, menuState, tracks, statsVisible, isTv, formFactor, i18n } = props;
   const isVod = props.isVod === true;
   const playbackSpeed = props.playbackSpeed ?? 1;
-  const showAspect = props.onToggleResizeMode !== undefined;
-  const showDeinterlace = props.onToggleDeinterlace !== undefined;
-  const showAutoSubtitlesOnSkipBack = isVod && props.onToggleAutoSubtitlesOnSkipBack !== undefined;
-  const showAutoPlayNextEpisode = isVod && props.onToggleAutoPlayNextEpisode !== undefined;
-  const deinterlace = props.deinterlace === true;
-  const autoSubtitlesOnSkipBack = props.autoSubtitlesOnSkipBack === true;
-  const autoPlayNextEpisode = props.autoPlayNextEpisode !== false;
-  const resizeMode = props.resizeMode ?? 'fit';
-  const resizeModeLabel =
-    resizeMode === 'fill'
-      ? i18n.t('player.aspect.fill')
-      : resizeMode === 'stretch'
-        ? i18n.t('player.aspect.stretch')
-        : i18n.t('player.aspect.fit');
   const theme = useTheme();
   const isWebDesktop = formFactor === 'desktop' && (Platform.OS as string) === 'web';
   const showCursor = isTv || formFactor === 'desktop';
@@ -103,18 +134,9 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
   const showVideoDecoder =
     props.androidDecoderMode !== undefined && props.onSelectAndroidDecoderMode !== undefined;
   const androidDecoderMode = props.androidDecoderMode ?? 'auto';
+  const showSleepTimer = props.onSelectSleepTimer !== undefined;
   const isRoot = menuState.view === 'root';
-  const title = isRoot
-    ? i18n.t('player.settings')
-    : menuState.view === 'subtitles'
-      ? i18n.t('player.subtitleTracks')
-      : menuState.view === 'audioDevice'
-        ? i18n.t('player.audioDevice')
-        : menuState.view === 'speed'
-          ? i18n.t('player.speed')
-          : menuState.view === 'videoDecoder'
-            ? i18n.t('player.videoDecoder')
-            : i18n.t('player.audioTracks');
+  const title = resolveViewTitle(menuState.view, i18n);
 
   const navRows = isRoot
     ? buildSettingsNavRows(
@@ -127,12 +149,129 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
           devices: props.audioDevices ?? [],
           activeDevice: activeAudioDevice,
         },
-        {
-          show: showVideoDecoder,
-          mode: androidDecoderMode,
-        },
+        { show: showVideoDecoder, mode: androidDecoderMode },
+        { chapters: props.chapters, showSleepTimer, sleepTimer: props.sleepTimer },
       )
     : [];
+
+  const toggles: ToggleDescriptor[] = [];
+  if (isRoot) {
+    if (props.onToggleResizeMode !== undefined) {
+      const rm = props.resizeMode ?? 'fit';
+      const rmLabel =
+        rm === 'fill'
+          ? i18n.t('player.aspect.fill')
+          : rm === 'stretch'
+            ? i18n.t('player.aspect.stretch')
+            : i18n.t('player.aspect.fit');
+      toggles.push({
+        testID: 'player-resize-mode-toggle',
+        icon: 'aspect',
+        label: i18n.t('player.aspect'),
+        pillLabel: rmLabel,
+        active: rm !== 'fit',
+        role: 'button',
+        accessibilityLabel: `${i18n.t('player.aspect')}: ${rmLabel}`,
+        onPress: props.onToggleResizeMode,
+      });
+    }
+    if (props.onCycleTimeDisplayMode !== undefined) {
+      const tm = props.timeDisplayMode ?? 'total';
+      const tmLabel =
+        tm === 'remaining'
+          ? i18n.t('player.remainingTime')
+          : tm === 'endsAt'
+            ? i18n.t('player.endsAt', { time: 'HH:MM' })
+            : i18n.t('player.totalDuration');
+      toggles.push({
+        testID: 'player-time-display-toggle',
+        icon: 'speed',
+        label: i18n.t('player.timeDisplayMode'),
+        pillLabel: tmLabel,
+        active: tm !== 'total',
+        role: 'button',
+        accessibilityLabel: `${i18n.t('player.timeDisplayMode')}: ${tmLabel}`,
+        onPress: props.onCycleTimeDisplayMode,
+      });
+    }
+    if (props.onToggleInfo !== undefined) {
+      toggles.push({
+        testID: 'player-info-button',
+        icon: 'info',
+        label: i18n.t('player.info'),
+        pillLabel: i18n.t('home.details'),
+        active: false,
+        role: 'button',
+        accessibilityLabel: i18n.t('player.info'),
+        onPress: props.onToggleInfo,
+      });
+    }
+    if (props.onToggleAlwaysOnTop !== undefined) {
+      const pinned = props.alwaysOnTop === true;
+      toggles.push({
+        testID: 'player-always-on-top-button',
+        icon: 'pin',
+        label: pinned ? i18n.t('player.exitAlwaysOnTop') : i18n.t('player.alwaysOnTop'),
+        pillLabel: pinned ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
+        active: pinned,
+        role: 'switch',
+        accessibilityLabel: pinned
+          ? i18n.t('player.exitAlwaysOnTop')
+          : i18n.t('player.alwaysOnTop'),
+        onPress: props.onToggleAlwaysOnTop,
+      });
+    }
+    if (props.onToggleDeinterlace !== undefined) {
+      const on = props.deinterlace === true;
+      toggles.push({
+        testID: 'player-deinterlace-toggle',
+        icon: 'layers',
+        label: i18n.t('player.deinterlace'),
+        pillLabel: on ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
+        active: on,
+        role: 'switch',
+        accessibilityLabel: i18n.t('player.deinterlace'),
+        onPress: props.onToggleDeinterlace,
+      });
+    }
+    if (isVod && props.onToggleAutoSubtitlesOnSkipBack !== undefined) {
+      const on = props.autoSubtitlesOnSkipBack === true;
+      toggles.push({
+        testID: 'player-auto-subtitles-skip-back-toggle',
+        icon: 'subtitles',
+        label: i18n.t('player.autoSubtitlesOnSkipBack'),
+        pillLabel: on ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
+        active: on,
+        role: 'switch',
+        accessibilityLabel: i18n.t('player.autoSubtitlesOnSkipBack'),
+        onPress: props.onToggleAutoSubtitlesOnSkipBack,
+      });
+    }
+    if (isVod && props.onToggleAutoPlayNextEpisode !== undefined) {
+      const on = props.autoPlayNextEpisode !== false;
+      toggles.push({
+        testID: 'player-auto-play-next-toggle',
+        icon: 'play',
+        label: i18n.t('player.autoPlayNextEpisode'),
+        pillLabel: on ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
+        active: on,
+        role: 'switch',
+        accessibilityLabel: i18n.t('player.autoPlayNextEpisode'),
+        onPress: props.onToggleAutoPlayNextEpisode,
+      });
+    }
+    toggles.push({
+      testID: 'player-stats-toggle',
+      icon: 'info',
+      label: i18n.t('player.statsHud'),
+      pillLabel: statsVisible ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
+      active: statsVisible,
+      role: 'switch',
+      accessibilityLabel: i18n.t('player.statsHud'),
+      onPress: props.onToggleStats,
+    });
+  }
+
   const radioItems = isRoot
     ? []
     : buildSettingsRadioItems({
@@ -142,11 +281,16 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         audioDevices: props.audioDevices,
         activeAudioDevice,
         androidDecoderMode,
+        chapters: props.chapters,
+        sleepTimer: props.sleepTimer,
         i18n,
         onSelectAudio: props.onSelectAudio,
         onSelectAudioDevice: props.onSelectAudioDevice,
         onSelectSubtitle: props.onSelectSubtitle,
         onSelectSpeed: props.onSelectSpeed,
+        onSelectChapter: props.onSelectChapter,
+        onSelectSleepTimer: props.onSelectSleepTimer,
+        onToggleSleepTimerAction: props.onToggleSleepTimerAction,
         onSelectAndroidDecoderMode: props.onSelectAndroidDecoderMode,
       });
 
@@ -180,7 +324,11 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
       </View>
 
       {isRoot ? (
-        <View style={styles.listGap}>
+        <ScrollView
+          focusable={!isTv}
+          style={styles.rootList}
+          contentContainerStyle={styles.listGap}
+        >
           {navRows.map(([testID, icon, label, summary, targetView, tabular], idx) => (
             <Pressable
               key={testID}
@@ -215,103 +363,16 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
               <Icon name="chevronRight" size={16} color={theme.colors.textMuted} />
             </Pressable>
           ))}
-          {showAspect ? (
+          {toggles.map((item, idx) => (
             <SettingsToggleRow
-              testID="player-resize-mode-toggle"
-              icon="aspect"
-              label={i18n.t('player.aspect')}
-              pillLabel={resizeModeLabel}
-              active={resizeMode !== 'fit'}
-              focused={showCursor && menuState.index === navRows.length}
+              key={item.testID}
+              {...item}
+              focused={showCursor && menuState.index === navRows.length + idx}
               isTv={isTv}
-              role="button"
-              accessibilityLabel={`${i18n.t('player.aspect')}: ${resizeModeLabel}`}
               theme={theme}
-              onPress={() => props.onToggleResizeMode?.()}
             />
-          ) : null}
-          {showDeinterlace ? (
-            <SettingsToggleRow
-              testID="player-deinterlace-toggle"
-              icon="layers"
-              label={i18n.t('player.deinterlace')}
-              pillLabel={deinterlace ? i18n.t('player.stats.on') : i18n.t('player.stats.off')}
-              active={deinterlace}
-              focused={showCursor && menuState.index === navRows.length + (showAspect ? 1 : 0)}
-              isTv={isTv}
-              role="switch"
-              accessibilityLabel={i18n.t('player.deinterlace')}
-              theme={theme}
-              onPress={() => props.onToggleDeinterlace?.()}
-            />
-          ) : null}
-          {showAutoSubtitlesOnSkipBack ? (
-            <SettingsToggleRow
-              testID="player-auto-subtitles-skip-back-toggle"
-              icon="subtitles"
-              label={i18n.t('player.autoSubtitlesOnSkipBack')}
-              pillLabel={
-                autoSubtitlesOnSkipBack ? i18n.t('player.stats.on') : i18n.t('player.stats.off')
-              }
-              active={autoSubtitlesOnSkipBack}
-              focused={
-                showCursor &&
-                menuState.index ===
-                  navRows.length + (showAspect ? 1 : 0) + (showDeinterlace ? 1 : 0)
-              }
-              isTv={isTv}
-              role="switch"
-              accessibilityLabel={i18n.t('player.autoSubtitlesOnSkipBack')}
-              theme={theme}
-              onPress={() => props.onToggleAutoSubtitlesOnSkipBack?.()}
-            />
-          ) : null}
-          {showAutoPlayNextEpisode ? (
-            <SettingsToggleRow
-              testID="player-auto-play-next-toggle"
-              icon="play"
-              label={i18n.t('player.autoPlayNextEpisode')}
-              pillLabel={
-                autoPlayNextEpisode ? i18n.t('player.stats.on') : i18n.t('player.stats.off')
-              }
-              active={autoPlayNextEpisode}
-              focused={
-                showCursor &&
-                menuState.index ===
-                  navRows.length +
-                    (showAspect ? 1 : 0) +
-                    (showDeinterlace ? 1 : 0) +
-                    (showAutoSubtitlesOnSkipBack ? 1 : 0)
-              }
-              isTv={isTv}
-              role="switch"
-              accessibilityLabel={i18n.t('player.autoPlayNextEpisode')}
-              theme={theme}
-              onPress={() => props.onToggleAutoPlayNextEpisode?.()}
-            />
-          ) : null}
-          <SettingsToggleRow
-            testID="player-stats-toggle"
-            icon="info"
-            label={i18n.t('player.statsHud')}
-            pillLabel={statsVisible ? i18n.t('player.stats.on') : i18n.t('player.stats.off')}
-            active={statsVisible}
-            focused={
-              showCursor &&
-              menuState.index ===
-                navRows.length +
-                  (showAspect ? 1 : 0) +
-                  (showDeinterlace ? 1 : 0) +
-                  (showAutoSubtitlesOnSkipBack ? 1 : 0) +
-                  (showAutoPlayNextEpisode ? 1 : 0)
-            }
-            isTv={isTv}
-            role="switch"
-            accessibilityLabel={i18n.t('player.statsHud')}
-            theme={theme}
-            onPress={props.onToggleStats}
-          />
-        </View>
+          ))}
+        </ScrollView>
       ) : (
         <ScrollView
           ref={listScrollRef}
@@ -373,14 +434,19 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
     const dialogA11yProps = isWebDesktop
       ? ({ role: 'dialog', 'aria-modal': true, 'aria-label': title } as Record<string, unknown>)
       : undefined;
+    const dockedMode = props.docked ?? true;
     return (
       <View
         ref={desktopPanelRef}
         testID="player-settings-desktop-dialog"
         {...dialogA11yProps}
         style={[
-          styles.desktopPanel,
-          { backgroundColor: theme.colors.glassBg, borderTopColor: theme.colors.glassBorder },
+          dockedMode ? styles.desktopPanelDocked : styles.desktopPanelFloating,
+          {
+            backgroundColor: theme.colors.glassBg,
+            borderColor: theme.colors.glassBorder,
+            ...(dockedMode ? {} : { borderRadius: theme.radius.modal }),
+          },
           webBackdropBlur(20),
         ]}
       >
@@ -394,7 +460,7 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
       visible={visible}
       onDismiss={props.onClose}
       testID="player-settings-sheet"
-      popoverWidth={300}
+      popoverWidth={310}
     >
       {content}
     </AdaptiveSheet>
@@ -402,8 +468,19 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
 }
 
 const styles = StyleSheet.create({
-  desktopPanel: { borderTopWidth: 1, paddingHorizontal: 18, paddingVertical: 12 },
-  inner: { gap: 10 },
+  desktopPanelDocked: { borderTopWidth: 1, paddingHorizontal: 18, paddingVertical: 12 },
+  desktopPanelFloating: {
+    position: 'absolute',
+    top: 68,
+    right: 24,
+    width: 320,
+    maxHeight: 520,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    zIndex: 35,
+  },
+  inner: { gap: 8 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -412,8 +489,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   flex1: { flex: 1 },
-  listGap: { gap: 6 },
-  subList: { maxHeight: 240 },
+  listGap: { gap: 2 },
+  rootList: { maxHeight: 440 },
+  subList: { maxHeight: 280 },
   summary: { maxWidth: 120, textAlign: 'right' },
   empty: { paddingVertical: 12, paddingHorizontal: 4 },
 });

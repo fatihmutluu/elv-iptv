@@ -277,4 +277,18 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'rating', alterDefinition: 'REAL' },
     { name: 'added_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
   ],
+  track_preferences: [
+    { name: 'profile_id', alterDefinition: "TEXT NOT NULL DEFAULT 'default'" },
+    { name: 'scope_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'audio_lang', alterDefinition: 'TEXT' },
+    { name: 'audio_label', alterDefinition: 'TEXT' },
+    { name: 'sub_lang', alterDefinition: 'TEXT' },
+    { name: 'sub_label', alterDefinition: 'TEXT' },
+    { name: 'sub_disabled', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'audio_delay_ms', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'sub_delay_ms', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'resize_mode', alterDefinition: 'TEXT' },
+    { name: 'updated_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+  ],
 };

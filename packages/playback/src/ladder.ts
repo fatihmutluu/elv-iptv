@@ -97,9 +97,12 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
   const reload = (stream?: StreamRequest): boolean => {
     const startMs = isVod() ? positions.resumePosition() : undefined;
     const bufferPreset = ctl.request()?.bufferPreset;
+    const preferHevcFallback =
+      softwareAudio || (budget.lastError?.code === 'decoder' && budget.rung >= 2);
     const options: LoadOptions = {
       ...(bufferPreset === undefined ? {} : { bufferPreset }),
-      ...(softwareAudio ? { softwareAudio: true, preferHevcOverDolbyVision: true } : {}),
+      ...(softwareAudio ? { softwareAudio: true } : {}),
+      ...(preferHevcFallback ? { preferHevcOverDolbyVision: true } : {}),
     };
     return ctl.load({
       ...(stream === undefined ? {} : { stream }),

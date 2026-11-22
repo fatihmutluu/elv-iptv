@@ -205,6 +205,41 @@ describe('PlayerCanvas', () => {
     hookState.unmount();
   });
 
+  it('uses displayWidth/displayHeight over codedWidth/codedHeight for anamorphic container DAR (#124)', () => {
+    const { engine, deliver } = createFakeEngine();
+    const { canvas, ctx } = createFakeCanvas();
+
+    renderCanvas({ engine, visible: true }, canvas);
+
+    // Anamorphic PAL 720x576 with 16:9 DAR -> displayWidth 1024, displayHeight 576
+    const anamorphicPal = {
+      codedWidth: 720,
+      codedHeight: 576,
+      displayWidth: 1024,
+      displayHeight: 576,
+      close: vi.fn<() => void>(),
+    };
+    deliver(anamorphicPal);
+    expect(canvas.width).toBe(1024);
+    expect(canvas.height).toBe(576);
+    expect(ctx.drawImage).toHaveBeenLastCalledWith(anamorphicPal, 0, 0, 1024, 576);
+    expect(anamorphicPal.close).toHaveBeenCalledTimes(1);
+
+    // Falls back to codedWidth/codedHeight when display dimensions are absent or non-positive
+    const fallbackFrame = {
+      codedWidth: 1280,
+      codedHeight: 720,
+      close: vi.fn<() => void>(),
+    };
+    deliver(fallbackFrame);
+    expect(canvas.width).toBe(1280);
+    expect(canvas.height).toBe(720);
+    expect(ctx.drawImage).toHaveBeenLastCalledWith(fallbackFrame, 0, 0, 1280, 720);
+    expect(fallbackFrame.close).toHaveBeenCalledTimes(1);
+
+    hookState.unmount();
+  });
+
   it('maps resizeMode fit, fill, and stretch to CSS objectFit contain, cover, and fill (#151)', () => {
     const { engine } = createFakeEngine();
     const { canvas } = createFakeCanvas();

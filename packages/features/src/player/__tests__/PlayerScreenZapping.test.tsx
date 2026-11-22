@@ -308,7 +308,7 @@ describe('PlayerScreen zapping and failure handling', () => {
     });
 
     expect(screen.queryByTestId('player-progress-bar')).toBeNull();
-    expect(screen.queryByTestId('player-play-pause')).toBeNull();
+    expect(screen.getByTestId('player-play-pause')).toBeTruthy();
 
     await act(async () => {
       keys.tap(KEYCODE_MENU);

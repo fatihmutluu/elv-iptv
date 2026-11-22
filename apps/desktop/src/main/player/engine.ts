@@ -5,6 +5,7 @@ import {
   type PlayerArea,
   type PlayerUiEvent,
   type PresenterKind,
+  type ResizeMode,
 } from '../../shared/player-ipc.ts';
 import { createEngineControls } from './engine-controls.ts';
 import { createEngineQueue, type QueuedOp } from './engine-queue.ts';
@@ -56,6 +57,8 @@ export interface MpvEngine extends PlayerEngine {
   setAudioDevice(device: string): void;
   setDeinterlace(enabled: boolean): void;
   setHwdec(profile: HwdecProfile): void;
+  setResizeMode(mode: ResizeMode): void;
+  setFilterSdh(enabled: boolean): void;
 }
 
 const QUIT_GRACE_MS = 500;
@@ -320,6 +323,8 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     setAudioDevice: (device) => controls.setAudioDevice(device),
     setDeinterlace: (enabled) => controls.setDeinterlace(enabled),
     setHwdec: (profile) => controls.setHwdec(profile),
+    setResizeMode: (mode) => controls.setResizeMode(mode),
+    setFilterSdh: (enabled) => controls.setFilterSdh(enabled),
     get spawns() {
       return spawns;
     },
@@ -332,8 +337,19 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     load(cmd) {
       if (released) return;
       tracks.onLoad(cmd.options);
-      const { url, headers, kind } = cmd;
-      startMedia(cmd.attempt, withStart({ url, headers, kind }, cmd.startMs));
+      const { url, headers, kind, options } = cmd;
+      const req: MediaRequest = {
+        url,
+        headers,
+        kind,
+        ...(options?.preferHevcOverDolbyVision === undefined
+          ? {}
+          : { preferHevcOverDolbyVision: options.preferHevcOverDolbyVision }),
+        ...(options?.filterSdhSubtitles === undefined
+          ? {}
+          : { filterSdhSubtitles: options.filterSdhSubtitles }),
+      };
+      startMedia(cmd.attempt, withStart(req, cmd.startMs));
     },
     retry(attempt) {
       if (released || !media) return;

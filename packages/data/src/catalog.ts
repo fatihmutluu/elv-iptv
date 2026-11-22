@@ -61,6 +61,13 @@ import {
 } from './sources';
 import { createPlaytimeResolverCache, type StreamRequest } from './stream-resolver';
 import {
+  clearTrackPreference,
+  getTrackPreference,
+  type PersistedTrackPreference,
+  type SaveTrackPreferenceInput,
+  saveTrackPreference,
+} from './track-preferences-repo';
+import {
   clearWatchProgress,
   type FavoriteRow,
   getWatchProgress,
@@ -194,6 +201,12 @@ export interface CatalogService {
   setFavorite?(input: ToggleFavoriteInput, active: boolean): Promise<Result<boolean>>;
   listFavorites?(limit?: number, profileId?: string): Promise<FavoriteRow[]>;
   listFavoriteKeys?(profileId?: string): Promise<string[]>;
+  getTrackPreference?(
+    scopeKey: string,
+    profileId?: string,
+  ): Promise<PersistedTrackPreference | null>;
+  saveTrackPreference?(input: SaveTrackPreferenceInput): Promise<void>;
+  clearTrackPreference?(scopeKey: string, profileId?: string): Promise<void>;
   flushPendingWrites?(): Promise<void>;
   close(): Promise<void>;
 }
@@ -491,6 +504,15 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     listFavorites: async (limit, profileId) =>
       playtime.resolveRowLogos(await listFavorites(db, limit, profileId)),
     listFavoriteKeys: (profileId) => listFavoriteKeys(db, profileId),
+    getTrackPreference: (scopeKey, profileId) => getTrackPreference(db, scopeKey, profileId),
+    async saveTrackPreference(input) {
+      await saveTrackPreference(db, input, clock);
+      await syncUserData();
+    },
+    async clearTrackPreference(scopeKey, profileId) {
+      await clearTrackPreference(db, scopeKey, profileId);
+      await syncUserData();
+    },
 
     close() {
       if (closePromise !== undefined) return closePromise;

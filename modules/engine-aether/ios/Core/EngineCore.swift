@@ -41,6 +41,8 @@ public final class EngineCore {
   var lastProgressBytes: Int64 = 0
   var lastProgressBufferedSeconds: Double = 0
   var lastVideoInfo: StreamVideoInfo?
+  var lastDroppedFrames: Int = 0
+  var lastChapters: [ChapterInfoOut]?
 
   private var shutterCovered = true
   private var screenOn = false
@@ -274,6 +276,12 @@ public final class EngineCore {
     case let .mediaInfo(info):
       handleMediaInfo(info)
 
+    case let .telemetry(droppedFrames):
+      handleTelemetry(droppedFrames: droppedFrames)
+
+    case let .chapters(chapters):
+      handleChapters(chapters)
+
     case let .progress(bytesReceived, bufferedSeconds):
       handleProgress(bytesReceived: bytesReceived, bufferedSeconds: bufferedSeconds)
 
@@ -368,5 +376,7 @@ public final class EngineCore {
     lastProgressBytes = 0
     lastProgressBufferedSeconds = 0
     lastVideoInfo = nil
+    lastDroppedFrames = 0
+    lastChapters = nil
   }
 }

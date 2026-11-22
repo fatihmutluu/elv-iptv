@@ -243,7 +243,8 @@ describe('Wave P2 review fixes (P0/P1/P2 #699)', () => {
       expect(nowNext).toHaveBeenCalledWith(['ch:0'], EPOCH_NOW);
     });
 
-    // Open Info sheet -> 50% progress derived from wallClock
+    // Open Info sheet via Player Settings -> 50% progress derived from wallClock
+    await fireEvent.press(screen.getByTestId('player-settings-button'));
     await fireEvent.press(screen.getByTestId('player-info-button'));
     expect(
       StyleSheet.flatten(screen.getByTestId('player-info-progress-fill').props.style)?.width,

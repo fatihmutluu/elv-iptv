@@ -603,5 +603,26 @@ describe('player-overlay-model', () => {
       expect(stepVolume(3, -5)).toBe(0);
       expect(stepVolume(40, Number.NaN)).toBe(40);
     });
+
+    it('appends dropped frames, cache hit rate, and UI stalls diagnostic line when present (#160)', () => {
+      const state = makeState({
+        status: { kind: 'playing' },
+        droppedFrames: 7,
+      });
+      const lines = formatStatsHudLines(state, 1_000, i18nEn, {
+        cacheHitRatePct: 88,
+        uiStalls: 2,
+      });
+      expect(lines).toHaveLength(4);
+      expect(lines[3]).toBe('Dropped frames: 7 · Cache hit rate: 88% · UI stalls: 2');
+
+      const fromVideoInfo = formatStatsHudLines(
+        makeState({ videoInfo: { droppedFrames: 3 } }),
+        1_000,
+        i18nEn,
+      );
+      expect(fromVideoInfo).toHaveLength(4);
+      expect(fromVideoInfo[3]).toBe('Dropped frames: 3');
+    });
   });
 });

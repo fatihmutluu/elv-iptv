@@ -217,4 +217,24 @@ describe('loadfileCommand', () => {
       'demuxer-hysteresis-secs': '10',
     });
   });
+
+  it('forwards preferHevcOverDolbyVision as hwdec=no and filterSdhSubtitles as sub-filter-sdh (#124, #310)', () => {
+    const dvOpts = loadfileCommand({
+      ...base,
+      kind: 'vod',
+      preferHevcOverDolbyVision: true,
+      filterSdhSubtitles: true,
+    })[4] as Record<string, string>;
+    expect(dvOpts['hwdec']).toBe('no');
+    expect(dvOpts['sub-filter-sdh']).toBe('yes');
+
+    const offOpts = loadfileCommand({
+      ...base,
+      kind: 'vod',
+      preferHevcOverDolbyVision: false,
+      filterSdhSubtitles: false,
+    })[4] as Record<string, string>;
+    expect(offOpts).not.toHaveProperty('hwdec');
+    expect(offOpts['sub-filter-sdh']).toBe('no');
+  });
 });

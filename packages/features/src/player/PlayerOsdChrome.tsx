@@ -1,6 +1,8 @@
 import type { NowNextEntry } from '@elv/data';
+import type { OsdTimeDisplayMode } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import {
+  type ChapterInfo,
   EMPTY_TRACKS,
   type MediaTracks,
   type PlaybackClock,
@@ -15,6 +17,7 @@ import { computeProgrammeProgress } from './PlayerInfoSheet';
 import { formatStreamBadges } from './player-overlay-model';
 import { formatPlaybackSpeed } from './settings-menu-nav';
 import { VodProgressBar } from './VodProgressBar';
+import { formatWallClockHm } from './vod-progress-math';
 
 /** Shared Cinema Quietude error hint + redacted diagnosis evidence box. */
 export function PlayerFailureBanner({
@@ -98,16 +101,18 @@ export function StreamBadgePills({
   );
 }
 
-/** Sleek Live Now & Next programme progress strip for TV / mobile / peek overlays (`#58`). */
+/** Sleek Live Now & Next programme progress strip for TV / mobile / desktop / peek overlays (`#58`, `#160`). */
 export function LiveNowNextStrip({
   nowNext,
   nowMs,
   i18n,
+  timeDisplayMode = 'total',
   compact = false,
 }: {
   readonly nowNext: NowNextEntry | null | undefined;
   readonly nowMs: number;
   readonly i18n: AppI18n;
+  readonly timeDisplayMode?: OsdTimeDisplayMode | undefined;
   readonly compact?: boolean;
 }): ReactElement | null {
   const theme = useTheme();
@@ -115,6 +120,8 @@ export function LiveNowNextStrip({
   const nextProg = nowNext?.next ?? null;
   if (nowProg === null) return null;
   const progressPct = computeProgrammeProgress(nowProg.start, nowProg.stop, nowMs);
+  const showEndsAt =
+    timeDisplayMode === 'endsAt' && Number.isFinite(nowProg.stop) && nowProg.stop > 0;
 
   return (
     <View testID="player-live-now-next" style={compact ? styles.nowNextCompact : styles.nowNextBox}>
@@ -130,31 +137,46 @@ export function LiveNowNextStrip({
         >
           {`${i18n.t('player.nowPlaying')} · ${nowProg.title}`}
         </Text>
-        {!compact && nextProg !== null ? (
-          <Text
-            testID="osd-next-programme"
-            numberOfLines={1}
-            style={[
-              theme.typography.caption,
-              styles.nextText,
-              { color: theme.colors.textSecondary },
-            ]}
-          >
-            {`${i18n.t('player.upNext')}: ${nextProg.title}`}
-          </Text>
-        ) : null}
+        <View style={styles.peekRight}>
+          {showEndsAt ? (
+            <Text
+              testID="osd-live-ends-at"
+              numberOfLines={1}
+              style={[
+                theme.typography.caption,
+                TABULAR_NUMS_STYLE,
+                { color: theme.colors.textSecondary },
+              ]}
+            >
+              {i18n.t('player.endsAt', { time: formatWallClockHm(nowProg.stop) })}
+            </Text>
+          ) : null}
+          {!compact && nextProg !== null ? (
+            <Text
+              testID="osd-next-programme"
+              numberOfLines={1}
+              style={[
+                theme.typography.caption,
+                styles.nextText,
+                { color: theme.colors.textSecondary },
+              ]}
+            >
+              {`${i18n.t('player.upNext')}: ${nextProg.title}`}
+            </Text>
+          ) : null}
+        </View>
       </View>
       <View
         testID="osd-now-progress"
         style={[
           compact ? styles.nowProgTrackCompact : styles.nowProgTrack,
-          { backgroundColor: theme.colors.bgCard },
+          { backgroundColor: theme.colors.actionGlassBorder },
         ]}
       >
         <View
           style={[
             styles.nowProgFill,
-            { width: `${progressPct}%`, backgroundColor: theme.colors.accent },
+            { width: `${progressPct}%`, backgroundColor: theme.colors.textPrimary },
           ]}
         />
       </View>
@@ -171,12 +193,16 @@ export interface PeekBarProps {
   readonly muted: boolean;
   readonly volume: number;
   readonly playbackSpeed: number;
+  readonly chapters?: readonly ChapterInfo[] | undefined;
+  readonly timeDisplayMode?: OsdTimeDisplayMode | undefined;
+  readonly wallClock?: (() => number) | undefined;
   readonly nowNext?: NowNextEntry | null | undefined;
   readonly nowMs?: number | undefined;
   readonly previewPositionMs?: number | undefined;
   readonly service: PlaybackService | null;
   readonly clock: PlaybackClock;
   readonly i18n: AppI18n;
+  readonly onCycleTimeDisplayMode?: (() => void) | undefined;
   readonly onSeekRatio: (ratio: number) => void;
   readonly onScrubbingChange?: ((scrubbing: boolean) => void) | undefined;
 }
@@ -198,6 +224,12 @@ export function DesktopPeekStrip(p: PeekBarProps): ReactElement {
             docked
             label={p.i18n.t('player.progressLabel')}
             previewPositionMs={p.previewPositionMs}
+            chapters={p.chapters}
+            timeDisplayMode={p.timeDisplayMode}
+            playbackSpeed={p.playbackSpeed}
+            wallClock={p.wallClock}
+            i18n={p.i18n}
+            onCycleTimeDisplayMode={p.onCycleTimeDisplayMode}
             onSeekRatio={p.onSeekRatio}
             {...(p.onScrubbingChange !== undefined
               ? { onScrubbingChange: p.onScrubbingChange }
@@ -331,6 +363,12 @@ export function FloatingPeekOsd(
               isTv={p.isTv}
               label={p.i18n.t('player.progressLabel')}
               previewPositionMs={p.previewPositionMs}
+              chapters={p.chapters}
+              timeDisplayMode={p.timeDisplayMode}
+              playbackSpeed={p.playbackSpeed}
+              wallClock={p.wallClock}
+              i18n={p.i18n}
+              onCycleTimeDisplayMode={p.onCycleTimeDisplayMode}
               onSeekRatio={p.onSeekRatio}
               {...(p.onScrubbingChange !== undefined
                 ? { onScrubbingChange: p.onScrubbingChange }
@@ -356,7 +394,12 @@ export function FloatingPeekOsd(
                 <MicroPill testID="player-channel-digits" label={p.channelDigits} tone="accent" />
               ) : null}
             </View>
-            <LiveNowNextStrip nowNext={p.nowNext} nowMs={p.nowMs ?? Date.now()} i18n={p.i18n} />
+            <LiveNowNextStrip
+              nowNext={p.nowNext}
+              nowMs={p.nowMs ?? Date.now()}
+              i18n={p.i18n}
+              timeDisplayMode={p.timeDisplayMode}
+            />
           </View>
         )}
       </View>

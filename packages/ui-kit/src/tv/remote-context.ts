@@ -18,6 +18,11 @@ export interface TvRemoteDispatcher {
   /** Subscribes to broadcasted remote key events; returns an idempotent unsubscribe function. */
   subscribe(listener: (event: TvRemoteEvent) => void): () => void;
   /**
+   * Registers a top-most exclusive interceptor evaluated before text-entry and normal subscribers
+   * (LIFO). Returning `true` consumes the input immediately without broadcasting underneath (`#160`).
+   */
+  registerInterceptor?(interceptor: (input: KeyInput) => boolean): () => void;
+  /**
    * Broadcasts a remote key input to all active subscribers, isolating any thrown subscriber errors.
    * Returns `true` if text-entry exit or at least one subscriber consumed the event (`#425`).
    */

@@ -42,7 +42,7 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const { isScrubbing, clockRef, timersRef, cancelScrub } = params;
   const isTv = formFactor === 'tv';
   const canLock = formFactor === 'phone' || formFactor === 'tablet';
-  const hasAspect = formFactor !== 'desktop';
+  const hasAspect = true;
   const hasDeinterlace = params.onSetDeinterlace !== undefined;
   const hasAutoSubtitlesOnSkipBack = params.hasAutoSubtitlesOnSkipBack === true;
   const hasAutoPlayNextEpisode = params.hasAutoPlayNextEpisode === true;
@@ -51,6 +51,12 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const activeAudioDevice = params.activeAudioDevice;
   const hasVideoDecoder = params.hasVideoDecoder === true;
   const androidDecoderMode = params.androidDecoderMode;
+  const chapters = params.chapters;
+  const hasChapters = isVod && (chapters?.length ?? 0) > 0;
+  const hasSleepTimer = params.hasSleepTimer === true;
+  const sleepTimerMinutes = params.sleepTimerMinutes;
+  const hasTimeDisplay = params.hasTimeDisplay === true;
+  const hasAlwaysOnTop = params.hasAlwaysOnTop === true;
   const canOpenInfo = params.hasInfo !== false;
   const canOpenChannelList = !isVod && params.hasChannelList === true;
 
@@ -69,6 +75,7 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     itemKey,
     hasService,
     defaultResizeMode: params.defaultResizeMode,
+    onResizeModeChange: params.onResizeModeChange,
     onSetDeinterlace: params.onSetDeinterlace,
     onSetOrientationLocked: params.onSetOrientationLocked,
   });
@@ -106,6 +113,13 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     ...(activeAudioDevice !== undefined ? { activeAudioDevice } : {}),
     hasVideoDecoder,
     ...(androidDecoderMode !== undefined ? { androidDecoderMode } : {}),
+    hasChapters,
+    ...(chapters !== undefined ? { chapters } : {}),
+    hasSleepTimer,
+    ...(sleepTimerMinutes !== undefined ? { sleepTimerMinutes } : {}),
+    hasTimeDisplay,
+    hasInfo: canOpenInfo,
+    hasAlwaysOnTop,
   });
   const availableOsd = availableTvOsdActions({
     isVod,
@@ -113,7 +127,7 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     hasTracks,
     showRetry,
     hasSettings,
-    hasInfo: params.hasInfo === true,
+    hasInfo: false,
     hasChannelList: params.hasChannelList === true,
     hasNextEpisode,
     hasPreviousChannel,
@@ -373,6 +387,13 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     ...(activeAudioDevice !== undefined ? { activeAudioDevice } : {}),
     hasVideoDecoder,
     ...(androidDecoderMode !== undefined ? { androidDecoderMode } : {}),
+    hasChapters,
+    ...(chapters !== undefined ? { chapters } : {}),
+    hasSleepTimer,
+    ...(sleepTimerMinutes !== undefined ? { sleepTimerMinutes } : {}),
+    hasTimeDisplay,
+    hasInfo: canOpenInfo,
+    hasAlwaysOnTop,
   });
 
   const openSettings = (view: SettingsMenuView = 'root'): void => {

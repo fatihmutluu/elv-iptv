@@ -349,9 +349,11 @@ extension AetherBackend {
         }
         Self.onMainActor {
           guard let self, let target, self.engineLoadSerial > 0 else { return }
-          let bytes = target.currentAVPlayerItem?.accessLog()?.events.reduce(Int64(0)) { acc, ev in
+          let accessEvents = target.currentAVPlayerItem?.accessLog()?.events ?? []
+          let bytes = accessEvents.reduce(Int64(0)) { acc, ev in
             acc + max(0, ev.numberOfBytesTransferred)
-          } ?? 0
+          }
+          self.pollDroppedVideoFrames(from: target, serial: self.engineLoadSerial, accessEvents: accessEvents)
           if bytes > 0 || bufferedEnd > 0 {
             self.onObservation?(
               .progress(
@@ -467,6 +469,21 @@ extension AetherBackend {
     NSLog("ELV_AETHER route=%@ open=%.0f audio=%@", route.rawValue, openMs, audio.rawValue)
   }
 
+  func pollDroppedVideoFrames(
+    from target: AetherEngine,
+    serial: Int,
+    accessEvents: [AVPlayerItemAccessLogEvent]? = nil
+  ) {
+    let events = accessEvents ?? target.currentAVPlayerItem?.accessLog()?.events ?? []
+    guard !events.isEmpty else { return }
+    let dropped = events.reduce(0) { acc, ev in
+      acc + max(0, ev.numberOfDroppedVideoFrames)
+    }
+    guard dropped > lastDroppedVideoFrames else { return }
+    lastDroppedVideoFrames = dropped
+    onObservation?(.telemetry(droppedFrames: dropped), serial)
+  }
+
   func emitClockSnapshot(
     from target: AetherEngine,
     positionSeconds: Double,
@@ -474,6 +491,7 @@ extension AetherBackend {
     durationOverride: Double?,
     serial: Int
   ) {
+    pollDroppedVideoFrames(from: target, serial: serial)
     let isPlaying = (rateOverride ?? 0) > 0 || target.playbackPhase == .playing || target.state == .playing
     let rate: Double = rateOverride ?? (isPlaying ? requestedRate : 0.0)
     if target.isLive {

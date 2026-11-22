@@ -106,4 +106,59 @@ class SubtitleSanitizerTest {
     val cleanList = listOf(bitmapCue, cleanCue)
     assertSame(cleanList, sanitizeCues(cleanList))
   }
+
+  @Test
+  fun `stripSdhAnnotations strips brackets, nested brackets, speaker labels, and music lines while preserving years, dialogue, Turkish and RTL (#310)`() {
+    // Balanced brackets and parentheses
+    assertEquals("Hello world", stripSdhAnnotations("[dramatic music] Hello (sighs) world"))
+    assertEquals("Hello", stripSdhAnnotations("[laughs [snorts]] Hello"))
+    assertEquals("Hello", stripSdhAnnotations("[soft music\nplaying]\nHello"))
+    assertEquals("", stripSdhAnnotations("[thunder rumbling]"))
+    assertEquals("", stripSdhAnnotations("(footsteps approaching)"))
+
+    // Preserves numeric/year/range expressions inside parentheses
+    assertEquals("Released in (2024)", stripSdhAnnotations("Released in (2024)"))
+    assertEquals("Episode (1-2) and (1–2)", stripSdhAnnotations("Episode (1-2) and (1–2)"))
+    assertEquals("Score (98%)", stripSdhAnnotations("Score (98%)"))
+
+    // Turkish Unicode uppercase speaker labels + dialogue dashes
+    assertEquals("Başlıyoruz", stripSdhAnnotations("ŞEF: Başlıyoruz"))
+    assertEquals("Merhaba (2024)", stripSdhAnnotations("İSTANBUL: [müzik] Merhaba (2024)"))
+    assertEquals("- Hi\n- Yo", stripSdhAnnotations("- JOHN: Hi\n- MARY: Yo"))
+    assertEquals("— Stay back.", stripSdhAnnotations("— DR. O'CONNOR: Stay back."))
+    assertEquals("- Yo", stripSdhAnnotations("- JOHN: [laughs]\n- MARY: Yo"))
+
+    // Preserves prose colons, timestamps, and RTL uncased text
+    assertEquals("Note: meet at 10:30", stripSdhAnnotations("Note: meet at 10:30"))
+    assertEquals("مرحبا: أهلا (2024)", stripSdhAnnotations("مرحبا: أهلا (2024)"))
+    assertEquals("مرحبا أهلا", stripSdhAnnotations("مرحبا [موسيقى] أهلا"))
+    assertEquals("\u2067- Hi\u2069", stripSdhAnnotations("\u2067- \u2066JOHN: Hi\u2069"))
+
+    // Drops lone dashes and music lines
+    assertEquals("", stripSdhAnnotations("♪"))
+    assertEquals("", stripSdhAnnotations("♫\n♪ ♫"))
+    assertEquals("", stripSdhAnnotations("- ♪"))
+    assertEquals("", stripSdhAnnotations("-"))
+    assertEquals("Keep this line", stripSdhAnnotations("♪ [upbeat music] ♪\nKeep this line\n—"))
+  }
+
+  @Test
+  fun `sanitizeCues applies SDH filtering after mojibake repair, drops blank cues, and preserves bitmap cues (#310)`() {
+    val bitmap = Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
+    val bitmapCue = Cue.Builder().setBitmap(bitmap).build()
+    val mojibakeSdhCue = Cue.Builder()
+      .setText(mojibakeWindows1252("ŞEF: [alkış] Şimdi başlıyor (2024)"))
+      .build()
+    val sdhOnlyCue = Cue.Builder().setText("[dramatic music]\n♪").build()
+    val cleanCue = Cue.Builder().setText("Normal dialogue").build()
+
+    val filtered = sanitizeCues(listOf(bitmapCue, mojibakeSdhCue, sdhOnlyCue, cleanCue), filterSdh = true)
+    assertEquals(3, filtered.size)
+    assertSame(bitmapCue, filtered[0])
+    assertEquals("Şimdi başlıyor (2024)", filtered[1].text.toString())
+    assertSame(cleanCue, filtered[2])
+
+    // All-blank text cues become empty list so SubtitleView clears cleanly
+    assertEquals(emptyList<Cue>(), sanitizeCues(listOf(sdhOnlyCue), filterSdh = true))
+  }
 }

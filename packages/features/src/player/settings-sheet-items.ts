@@ -1,6 +1,6 @@
-import { ANDROID_DECODER_MODES, type AndroidDecoderMode } from '@elv/domain';
+import { ANDROID_DECODER_MODES, type AndroidDecoderMode, type SleepTimerAction } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
-import type { MediaTracks, TrackInfo } from '@elv/playback';
+import type { ChapterInfo, MediaTracks, TrackInfo } from '@elv/playback';
 import type { IconName } from '@elv/ui-kit';
 import type { AudioDeviceInfo } from '../ports/video-host';
 import {
@@ -9,7 +9,9 @@ import {
   PLAYBACK_SPEED_OPTIONS,
   type SettingsMenuView,
 } from './settings-menu-nav';
+import { SLEEP_TIMER_PRESETS_MIN, type SleepTimerSnapshot } from './sleep-timer';
 import { formatTrackLabel } from './track-labels';
+import { formatPlaybackPosition } from './vod-progress-math';
 
 export interface SettingsRadioItem {
   readonly key: string;
@@ -59,7 +61,7 @@ function formatVideoDecoderLabel(mode: AndroidDecoderMode, i18n: AppI18n): strin
   return i18n.t('settings.playback.videoDecoder.auto');
 }
 
-/** Builds ordered root navigation rows for `PlayerSettingsSheet` (`Subtitles`, `Audio`, optional `Audio output`, VOD `Speed`, optional Android `Video decoder`). */
+/** Builds ordered root navigation rows for `PlayerSettingsSheet`. */
 export function buildSettingsNavRows(
   tracks: MediaTracks,
   isVod: boolean,
@@ -73,6 +75,11 @@ export function buildSettingsNavRows(
   videoDecoder?: {
     readonly show: boolean;
     readonly mode: AndroidDecoderMode;
+  },
+  extras?: {
+    readonly chapters?: readonly ChapterInfo[] | undefined;
+    readonly showSleepTimer?: boolean | undefined;
+    readonly sleepTimer?: SleepTimerSnapshot | undefined;
   },
 ): readonly SettingsNavRow[] {
   const subSummary = activeTrackSummary(
@@ -125,6 +132,31 @@ export function buildSettingsNavRows(
       true,
     ]);
   }
+  if ((extras?.chapters?.length ?? 0) > 0) {
+    rows.push([
+      'player-settings-row-chapters',
+      'chapters',
+      i18n.t('player.chapters'),
+      i18n.t('player.chapterCount', { count: extras?.chapters?.length ?? 0 }),
+      'chapters',
+      true,
+    ]);
+  }
+  if (extras?.showSleepTimer === true) {
+    const st = extras.sleepTimer;
+    const summary =
+      st?.active === true
+        ? i18n.t('player.sleepTimerRemaining', { minutes: st.remainingMinutes })
+        : i18n.t('player.sleepTimerOff');
+    rows.push([
+      'player-settings-row-sleep-timer',
+      'moon',
+      i18n.t('player.sleepTimer'),
+      summary,
+      'sleepTimer',
+      true,
+    ]);
+  }
   if (videoDecoder?.show === true) {
     rows.push([
       'player-settings-row-video-decoder',
@@ -146,11 +178,16 @@ export function buildSettingsRadioItems(params: {
   audioDevices?: readonly AudioDeviceInfo[] | undefined;
   activeAudioDevice?: string | undefined;
   androidDecoderMode?: AndroidDecoderMode | undefined;
+  chapters?: readonly ChapterInfo[] | undefined;
+  sleepTimer?: SleepTimerSnapshot | undefined;
   i18n: AppI18n;
   onSelectAudio: (id: string) => void;
   onSelectAudioDevice?: ((name: string) => void) | undefined;
   onSelectSubtitle: (id: string | null) => void;
   onSelectSpeed?: ((rate: number) => void) | undefined;
+  onSelectChapter?: ((startMs: number) => void) | undefined;
+  onSelectSleepTimer?: ((minutes: number) => void) | undefined;
+  onToggleSleepTimerAction?: (() => void) | undefined;
   onSelectAndroidDecoderMode?: ((mode: AndroidDecoderMode) => void) | undefined;
 }): readonly SettingsRadioItem[] {
   const {
@@ -160,13 +197,57 @@ export function buildSettingsRadioItems(params: {
     audioDevices,
     activeAudioDevice = 'auto',
     androidDecoderMode = 'auto',
+    chapters = [],
+    sleepTimer,
     i18n,
     onSelectAudio,
     onSelectAudioDevice,
     onSelectSubtitle,
     onSelectSpeed,
+    onSelectChapter,
+    onSelectSleepTimer,
+    onToggleSleepTimerAction,
     onSelectAndroidDecoderMode,
   } = params;
+
+  if (view === 'chapters') {
+    return chapters.map((ch, idx) => ({
+      key: ch.id,
+      testID: `player-settings-chapter-${ch.id}`,
+      label: `${formatPlaybackPosition(ch.startMs)} · ${ch.title?.trim() || `${idx + 1}`}`,
+      selected: false,
+      tabular: true,
+      onPress: () => onSelectChapter?.(ch.startMs),
+    }));
+  }
+
+  if (view === 'sleepTimer') {
+    const activeMin = sleepTimer?.active === true ? sleepTimer.totalMinutes : 0;
+    const action: SleepTimerAction = sleepTimer?.action ?? 'stop';
+    const actionLabel =
+      action === 'pause' ? i18n.t('player.sleepTimerPause') : i18n.t('player.sleepTimerStop');
+    return [
+      {
+        key: 'sleep-action',
+        testID: 'player-settings-sleep-action',
+        label: `${i18n.t('player.sleepTimerAction')}: ${actionLabel}`,
+        selected: false,
+        onPress: () => onToggleSleepTimerAction?.(),
+      },
+      ...SLEEP_TIMER_PRESETS_MIN.map((minutes) => ({
+        key: `sleep-${minutes}`,
+        testID: `player-settings-sleep-${minutes}`,
+        label:
+          minutes === 0
+            ? i18n.t('player.sleepTimerOff')
+            : i18n.t('player.sleepTimerMinutes', { minutes }),
+        selected: activeMin === minutes,
+        tabular: true,
+        onPress: () => onSelectSleepTimer?.(minutes),
+      })),
+    ];
+  }
+
   if (view === 'videoDecoder') {
     return ANDROID_DECODER_MODES.map((mode) => ({
       key: `decoder-${mode}`,

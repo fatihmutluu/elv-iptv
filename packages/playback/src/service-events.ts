@@ -186,9 +186,34 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
         }
         return;
       }
+      case 'chapters': {
+        const chapters = event.chapters.filter(
+          (ch) => typeof ch.id === 'string' && Number.isFinite(ch.startMs) && ch.startMs >= 0,
+        );
+        store.update({ chapters });
+        return;
+      }
       case 'mediaInfo': {
         const merged = mergeVideoInfo(cur.videoInfo, event.info);
-        if (merged !== undefined) store.update({ videoInfo: merged });
+        const droppedFrames = nonNegativeInt(event.info.droppedFrames);
+        if (merged !== undefined || droppedFrames !== undefined) {
+          store.update({
+            ...(merged === undefined ? {} : { videoInfo: merged }),
+            ...(droppedFrames === undefined ? {} : { droppedFrames }),
+          });
+        }
+        return;
+      }
+      case 'telemetry': {
+        const droppedFrames = nonNegativeInt(event.droppedFrames);
+        if (droppedFrames !== undefined) {
+          const nextVideoInfo =
+            cur.videoInfo === undefined ? undefined : { ...cur.videoInfo, droppedFrames };
+          store.update({
+            droppedFrames,
+            ...(nextVideoInfo === undefined ? {} : { videoInfo: nextVideoInfo }),
+          });
+        }
         return;
       }
       case 'stall':
@@ -287,6 +312,9 @@ export function buildOptimisticSeekAnchor(
 const positiveNumber = (value: number | undefined): number | undefined =>
   value !== undefined && Number.isFinite(value) && value > 0 ? value : undefined;
 
+const nonNegativeInt = (value: number | undefined): number | undefined =>
+  value !== undefined && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined;
+
 const cleanCodec = (value: string | undefined): string | undefined => {
   const trimmed = value?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
@@ -301,12 +329,14 @@ function mergeVideoInfo(
   const fps = positiveNumber(incoming.fps) ?? prev?.fps;
   const codec = cleanCodec(incoming.codec) ?? prev?.codec;
   const hdr = incoming.hdr ?? prev?.hdr;
+  const droppedFrames = nonNegativeInt(incoming.droppedFrames) ?? prev?.droppedFrames;
   if (
     width === undefined &&
     height === undefined &&
     fps === undefined &&
     codec === undefined &&
-    hdr === undefined
+    hdr === undefined &&
+    droppedFrames === undefined
   ) {
     return undefined;
   }
@@ -316,6 +346,7 @@ function mergeVideoInfo(
     ...(fps === undefined ? {} : { fps }),
     ...(codec === undefined ? {} : { codec }),
     ...(hdr === undefined ? {} : { hdr }),
+    ...(droppedFrames === undefined ? {} : { droppedFrames }),
   };
 }
 
@@ -331,6 +362,8 @@ export function nextTuneState(
     atLiveEdge: _l,
     firstFrameAt: _f,
     videoInfo: _v,
+    chapters: _c,
+    droppedFrames: _df,
     externalPlaybackActive: _ep,
     ...kept
   } = prev;

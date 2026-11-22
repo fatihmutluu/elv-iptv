@@ -30,6 +30,7 @@ struct LoadArgs: Record {
   @Field var startMs: Double? = nil
   @Field var softwareAudio: Bool = false
   @Field var preferHevcOverDolbyVision: Bool = false
+  @Field var filterSdhSubtitles: Bool = false
   @Field var audioTrackId: String? = nil
   @Field var subtitleTrackId: ValueOrUndefined<String?> = .undefined
 
@@ -56,6 +57,7 @@ struct LoadArgs: Record {
       startMs: cleanStartMs,
       softwareAudio: softwareAudio,
       preferHevcOverDolbyVision: preferHevcOverDolbyVision,
+      filterSdhSubtitles: filterSdhSubtitles,
       audioTrackId: (trimmedAudio?.isEmpty == false) ? trimmedAudio : nil,
       subtitlePreference: subtitlePref
     )

@@ -5,7 +5,7 @@ export {
   mapAndroidKeyCode,
 } from './android-keys';
 export { FocusRing, type FocusRingProps } from './FocusRing';
-export { type TvPlatform, toKeyInput, useTvKeySource } from './key-source';
+export { type TvPlatform, toKeyInput, useTvKeyInterceptor, useTvKeySource } from './key-source';
 export { createSyntheticSource, type ListSource } from './list-source';
 export { RemoteKeysProvider } from './RemoteKeysProvider';
 export {

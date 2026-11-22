@@ -1,6 +1,7 @@
 import type { AndroidDecoderMode, DefaultResizeModePref, SeekStepSecPref } from '@elv/domain';
 import type { KeyEvent } from '@elv/focus-core';
 import type {
+  ChapterInfo,
   MediaTracks,
   PlaybackClock,
   PlaybackService,
@@ -10,7 +11,7 @@ import type {
 import type { FormFactor } from '@elv/ui-kit';
 import type { MutableRefObject } from 'react';
 import type { PlayTarget } from '../ports/play-target';
-import type { AudioDeviceInfo, HostKey } from '../ports/video-host';
+import type { AudioDeviceInfo, HostKey, VideoResizeMode } from '../ports/video-host';
 import type { ChannelDigitBuffer } from './channel-digit-entry';
 import type { PlayerOverlayLive } from './player-overlay-model';
 import { COARSE_SEEK_MS, type ScrubController, STEP_SEEK_MS } from './scrub-controller';
@@ -68,6 +69,20 @@ export interface PlayerControlsParams {
   onChannelListSelect?: (() => void) | undefined;
   onSetOrientationLocked?: ((locked: boolean) => void) | undefined;
   onSetDeinterlace?: ((enabled: boolean) => void) | undefined;
+  onResizeModeChange?: ((mode: VideoResizeMode) => void) | undefined;
+  onAudioTrackSelected?: ((id: string) => void) | undefined;
+  onSubtitleTrackSelected?: ((id: string | null) => void) | undefined;
+  chapters?: readonly ChapterInfo[] | undefined;
+  onSelectChapter?: ((startMs: number) => void) | undefined;
+  onPrevChapter?: (() => void) | undefined;
+  onNextChapter?: (() => void) | undefined;
+  sleepTimerMinutes?: number | undefined;
+  onSelectSleepTimer?: ((minutes: number) => void) | undefined;
+  onToggleSleepTimerAction?: (() => void) | undefined;
+  onCycleTimeDisplayMode?: (() => void) | undefined;
+  onUserActivity?: (() => void) | undefined;
+  stillWatchingVisible?: boolean | undefined;
+  onStillWatchingKey?: ((key: KeyEvent['key']) => void) | undefined;
 }
 
 /** Collaborators for {@link routeOverlayAndMediaKey}. */
@@ -83,6 +98,12 @@ export interface OverlayKeyRouteDeps {
   readonly activeAudioDevice?: string;
   readonly hasVideoDecoder?: boolean;
   readonly androidDecoderMode?: AndroidDecoderMode;
+  readonly hasChapters?: boolean;
+  readonly chapters?: readonly ChapterInfo[];
+  readonly hasSleepTimer?: boolean;
+  readonly sleepTimerMinutes?: number;
+  readonly hasTimeDisplay?: boolean;
+  readonly hasAlwaysOnTop?: boolean;
   readonly playbackSpeed: number;
   readonly state: PlayerOverlayLive;
   readonly service: PlaybackService | null;
@@ -92,6 +113,8 @@ export interface OverlayKeyRouteDeps {
   readonly showOsd: () => void;
   readonly toggleStats: () => void;
   readonly toggleInfo?: () => void;
+  readonly toggleAlwaysOnTop?: () => void;
+  readonly toggleTimeDisplayMode?: () => void;
   readonly toggleChannelList?: () => void;
   readonly toggleResizeMode: () => void;
   readonly toggleDeinterlace?: () => void;
@@ -111,7 +134,11 @@ export interface OverlayKeyRouteDeps {
   readonly blurTvScrubber: () => void;
   readonly activateTvOsd: (action: TvOsdAction) => void;
   readonly selectSpeed: (rate: number) => void;
+  readonly selectAudio?: (id: string) => void;
   readonly selectSubtitle?: (id: string | null) => void;
+  readonly selectChapter?: ((startMs: number) => void) | undefined;
+  readonly selectSleepTimer?: ((minutes: number) => void) | undefined;
+  readonly toggleSleepTimerAction?: (() => void) | undefined;
   readonly selectAudioDevice?: ((name: string) => void) | undefined;
   readonly selectAndroidDecoderMode?: ((mode: AndroidDecoderMode) => void) | undefined;
   readonly onExit: () => void;
@@ -177,18 +204,33 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       ...(d.activeAudioDevice !== undefined ? { activeAudioDevice: d.activeAudioDevice } : {}),
       hasVideoDecoder: d.hasVideoDecoder === true,
       ...(d.androidDecoderMode !== undefined ? { androidDecoderMode: d.androidDecoderMode } : {}),
+      hasChapters: d.hasChapters === true,
+      ...(d.chapters !== undefined ? { chapters: d.chapters } : {}),
+      hasSleepTimer: d.hasSleepTimer === true,
+      ...(d.sleepTimerMinutes !== undefined ? { sleepTimerMinutes: d.sleepTimerMinutes } : {}),
+      hasTimeDisplay: d.hasTimeDisplay === true,
+      hasInfo: s.canOpenInfo,
+      hasAlwaysOnTop: d.hasAlwaysOnTop === true,
     });
     if (intent !== null && event.key === 'select' && !d.allowTvSelect()) return true;
     if (intent?.kind === 'close') d.closeSettings();
     else if (intent?.kind === 'state') d.updateSettingsMenu(intent.state);
     else if (intent?.kind === 'toggleResizeMode') d.toggleResizeMode();
+    else if (intent?.kind === 'toggleTimeDisplayMode') d.toggleTimeDisplayMode?.();
+    else if (intent?.kind === 'toggleInfo') d.toggleInfo?.();
+    else if (intent?.kind === 'toggleAlwaysOnTop') d.toggleAlwaysOnTop?.();
     else if (intent?.kind === 'toggleDeinterlace') d.toggleDeinterlace?.();
     else if (intent?.kind === 'toggleAutoSubtitlesOnSkipBack') d.toggleAutoSubtitlesOnSkipBack?.();
     else if (intent?.kind === 'toggleAutoPlayNextEpisode') d.toggleAutoPlayNextEpisode?.();
     else if (intent?.kind === 'toggleStats') d.toggleStats();
-    else if (intent?.kind === 'audio') d.service?.selectAudioTrack(intent.id);
-    else if (intent?.kind === 'audioDevice') d.selectAudioDevice?.(intent.name);
+    else if (intent?.kind === 'audio') {
+      if (d.selectAudio !== undefined) d.selectAudio(intent.id);
+      else d.service?.selectAudioTrack(intent.id);
+    } else if (intent?.kind === 'audioDevice') d.selectAudioDevice?.(intent.name);
     else if (intent?.kind === 'videoDecoder') d.selectAndroidDecoderMode?.(intent.mode);
+    else if (intent?.kind === 'chapter') d.selectChapter?.(intent.startMs);
+    else if (intent?.kind === 'sleepTimer') d.selectSleepTimer?.(intent.minutes);
+    else if (intent?.kind === 'toggleSleepTimerAction') d.toggleSleepTimerAction?.();
     else if (intent?.kind === 'subtitle') {
       if (d.selectSubtitle !== undefined) d.selectSubtitle(intent.id);
       else d.service?.selectSubtitleTrack(intent.id);
@@ -200,8 +242,10 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
     const intent = routePickerKey(event, s.pickerCursor, s.tracks);
     if (intent !== null && event.key === 'select' && !d.allowTvSelect()) return true;
     if (intent?.kind === 'move') d.updatePickerCursor(intent.cursor);
-    else if (intent?.kind === 'audio') d.service?.selectAudioTrack(intent.id);
-    else if (intent?.kind === 'subtitle') {
+    else if (intent?.kind === 'audio') {
+      if (d.selectAudio !== undefined) d.selectAudio(intent.id);
+      else d.service?.selectAudioTrack(intent.id);
+    } else if (intent?.kind === 'subtitle') {
       if (d.selectSubtitle !== undefined) d.selectSubtitle(intent.id);
       else d.service?.selectSubtitleTrack(intent.id);
     }

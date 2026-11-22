@@ -13,10 +13,12 @@ import {
   isAndroidDecoderMode,
   type LogoBackdropModePref,
   MAX_PREFERENCES_BYTES,
+  type OsdTimeDisplayMode,
   type PreferencesKvBackend,
   type PreferencesSnapshot,
   parsePreferences,
   type SeekStepSecPref,
+  type SleepTimerAction,
   type SubtitleModePref,
   serializePreferences,
 } from './index';
@@ -25,7 +27,7 @@ describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
   it('includes all 15 new preference defaults on DEFAULT_PREFERENCES', () => {
     expect(DEFAULT_PREFERENCES.preferredAudioLang).toBe('');
     expect(DEFAULT_PREFERENCES.preferredSubtitleLang).toBe('');
-    expect(DEFAULT_PREFERENCES.subtitleMode).toBe('auto');
+    expect(DEFAULT_PREFERENCES.subtitleMode).toBe('smart');
     expect(DEFAULT_PREFERENCES.seekStepSec).toBe(10);
     expect(DEFAULT_PREFERENCES.defaultResizeMode).toBe('fit');
     expect(DEFAULT_PREFERENCES.epgTimeSpanHours).toBe(3);
@@ -41,7 +43,13 @@ describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
   });
 
   it('parses all valid union and boolean values across the new preference fields', () => {
-    const subtitleModes: readonly SubtitleModePref[] = ['auto', 'always', 'off'];
+    const subtitleModes: readonly SubtitleModePref[] = [
+      'default',
+      'smart',
+      'onlyForced',
+      'always',
+      'off',
+    ];
     for (const subtitleMode of subtitleModes) {
       expect(parsePreferences(JSON.stringify({ version: 1, subtitleMode })).subtitleMode).toBe(
         subtitleMode,
@@ -202,9 +210,18 @@ describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
       playerVolume: 85,
       preferredAudioLang: 'abc-12345678',
       preferredSubtitleLang: 'zh-hant',
+      preferredAudioLanguages: ['abc-12345678'],
+      preferredSubtitleLanguages: ['zh-hant'],
+      preferDefaultAudioTrack: false,
+      preferHevcOverDolbyVision: true,
+      filterSdhSubtitles: true,
       subtitleMode: 'always',
       seekStepSec: 30,
       defaultResizeMode: 'stretch',
+      osdTimeDisplayMode: 'endsAt',
+      oledScreensaverTimeoutMin: 15,
+      stillWatchingTimeoutMin: 180,
+      sleepTimerDefaultAction: 'pause',
       epgTimeSpanHours: 6,
       epgGenreTints: false,
       epgShowClock: false,
@@ -249,7 +266,9 @@ describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
       expect(parsePreferences(encoded.value)).toEqual({
         ...DEFAULT_PREFERENCES,
         preferredAudioLang: 'en-us',
+        preferredAudioLanguages: ['en-us'],
         preferredSubtitleLang: '',
+        preferredSubtitleLanguages: [],
       });
     }
   });
@@ -289,7 +308,9 @@ describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
       expect(updated.value).toEqual({
         ...DEFAULT_PREFERENCES,
         preferredAudioLang: 'tr-tr',
+        preferredAudioLanguages: ['tr-tr'],
         preferredSubtitleLang: 'en',
+        preferredSubtitleLanguages: ['en'],
         subtitleMode: 'always',
         seekStepSec: 15,
         defaultResizeMode: 'fill',
@@ -430,9 +451,18 @@ describe('Wave P4 ergonomics preferences (#55, #408)', () => {
       playerVolume: 85,
       preferredAudioLang: 'abc-12345678',
       preferredSubtitleLang: 'zh-hant',
+      preferredAudioLanguages: ['abc-12345678'],
+      preferredSubtitleLanguages: ['zh-hant'],
+      preferDefaultAudioTrack: false,
+      preferHevcOverDolbyVision: true,
+      filterSdhSubtitles: true,
       subtitleMode: 'always',
       seekStepSec: 30,
       defaultResizeMode: 'stretch',
+      osdTimeDisplayMode: 'endsAt',
+      oledScreensaverTimeoutMin: 15,
+      stillWatchingTimeoutMin: 180,
+      sleepTimerDefaultAction: 'pause',
       epgTimeSpanHours: 6,
       epgGenreTints: false,
       epgShowClock: false,
@@ -548,5 +578,178 @@ describe('Wave P5 Android decoder mode preference (#411)', () => {
 
     const reset = await store.reset();
     expect(reset.ok && reset.value.androidDecoderMode).toBe('auto');
+  });
+});
+
+describe('Wave C1 cinema player preferences (#124, #393, #310, #160, #118)', () => {
+  it('exposes safe defaults for all Wave C1 preference fields', () => {
+    expect(DEFAULT_PREFERENCES.subtitleMode).toBe('smart');
+    expect(DEFAULT_PREFERENCES.preferredAudioLanguages).toEqual([]);
+    expect(DEFAULT_PREFERENCES.preferredSubtitleLanguages).toEqual([]);
+    expect(DEFAULT_PREFERENCES.preferDefaultAudioTrack).toBe(true);
+    expect(DEFAULT_PREFERENCES.preferHevcOverDolbyVision).toBe(false);
+    expect(DEFAULT_PREFERENCES.filterSdhSubtitles).toBe(false);
+    expect(DEFAULT_PREFERENCES.osdTimeDisplayMode).toBe('total');
+    expect(DEFAULT_PREFERENCES.oledScreensaverTimeoutMin).toBe(0);
+    expect(DEFAULT_PREFERENCES.stillWatchingTimeoutMin).toBe(0);
+    expect(DEFAULT_PREFERENCES.sleepTimerDefaultAction).toBe('stop');
+  });
+
+  it('maps legacy subtitleMode values auto -> smart and none -> off', () => {
+    expect(
+      parsePreferences(JSON.stringify({ version: 1, subtitleMode: 'auto' })).subtitleMode,
+    ).toBe('smart');
+    expect(
+      parsePreferences(JSON.stringify({ version: 1, subtitleMode: 'none' })).subtitleMode,
+    ).toBe('off');
+    expect(
+      parsePreferences(JSON.stringify({ version: 1, subtitleMode: 'onlyForced' })).subtitleMode,
+    ).toBe('onlyForced');
+    expect(
+      parsePreferences(JSON.stringify({ version: 1, subtitleMode: 'default' })).subtitleMode,
+    ).toBe('default');
+  });
+
+  it('normalizes, deduplicates, caps at 5, and syncs preferredAudioLanguages / preferredSubtitleLanguages', async () => {
+    const seeded = parsePreferences(
+      JSON.stringify({ version: 1, preferredAudioLang: '  TR ', preferredSubtitleLang: 'EN-us' }),
+    );
+    expect(seeded.preferredAudioLanguages).toEqual(['tr']);
+    expect(seeded.preferredAudioLang).toBe('tr');
+    expect(seeded.preferredSubtitleLanguages).toEqual(['en-us']);
+    expect(seeded.preferredSubtitleLang).toBe('en-us');
+
+    const fromArray = parsePreferences(
+      JSON.stringify({
+        version: 1,
+        preferredAudioLang: 'fr',
+        preferredAudioLanguages: [
+          '  TR ',
+          'en',
+          'tr',
+          'und',
+          'bad_lang',
+          42,
+          'de',
+          'fr',
+          'es',
+          'it',
+        ],
+        preferredSubtitleLanguages: ['en', 'tr', 'EN'],
+      }),
+    );
+    expect(fromArray.preferredAudioLanguages).toEqual(['tr', 'en', 'de', 'fr', 'es']);
+    expect(fromArray.preferredAudioLang).toBe('tr');
+    expect(fromArray.preferredSubtitleLanguages).toEqual(['en', 'tr']);
+    expect(fromArray.preferredSubtitleLang).toBe('en');
+
+    const clearedArray = parsePreferences(
+      JSON.stringify({ version: 1, preferredAudioLang: 'tr', preferredAudioLanguages: [] }),
+    );
+    expect(clearedArray.preferredAudioLanguages).toEqual([]);
+    expect(clearedArray.preferredAudioLang).toBe('');
+
+    const store = createMemoryPreferencesStore();
+    const u1 = await store.update({
+      preferredAudioLanguages: ['de', 'en', 'tr'],
+      preferredSubtitleLanguages: ['tr', 'en'],
+    });
+    expect(u1.ok && u1.value.preferredAudioLang).toBe('de');
+    expect(u1.ok && u1.value.preferredAudioLanguages).toEqual(['de', 'en', 'tr']);
+    expect(u1.ok && u1.value.preferredSubtitleLang).toBe('tr');
+    expect(u1.ok && u1.value.preferredSubtitleLanguages).toEqual(['tr', 'en']);
+
+    const u2 = await store.update({ preferredAudioLang: 'ja' });
+    expect(u2.ok && u2.value.preferredAudioLang).toBe('ja');
+    expect(u2.ok && u2.value.preferredAudioLanguages).toEqual(['ja']);
+
+    const u3 = await store.update({ preferredAudioLanguages: [] });
+    expect(u3.ok && u3.value.preferredAudioLang).toBe('');
+    expect(u3.ok && u3.value.preferredAudioLanguages).toEqual([]);
+  });
+
+  it('validates and clamps osdTimeDisplayMode, sleepTimerDefaultAction, timeouts, and booleans', async () => {
+    const osdModes: readonly OsdTimeDisplayMode[] = ['total', 'remaining', 'endsAt'];
+    for (const osdTimeDisplayMode of osdModes) {
+      expect(
+        parsePreferences(JSON.stringify({ version: 1, osdTimeDisplayMode })).osdTimeDisplayMode,
+      ).toBe(osdTimeDisplayMode);
+    }
+    const actions: readonly SleepTimerAction[] = ['stop', 'pause'];
+    for (const sleepTimerDefaultAction of actions) {
+      expect(
+        parsePreferences(JSON.stringify({ version: 1, sleepTimerDefaultAction }))
+          .sleepTimerDefaultAction,
+      ).toBe(sleepTimerDefaultAction);
+    }
+
+    const clamped = parsePreferences(
+      JSON.stringify({
+        version: 1,
+        oledScreensaverTimeoutMin: 90,
+        stillWatchingTimeoutMin: 999,
+        preferDefaultAudioTrack: false,
+        preferHevcOverDolbyVision: true,
+        filterSdhSubtitles: true,
+      }),
+    );
+    expect(clamped.oledScreensaverTimeoutMin).toBe(60);
+    expect(clamped.stillWatchingTimeoutMin).toBe(480);
+    expect(clamped.preferDefaultAudioTrack).toBe(false);
+    expect(clamped.preferHevcOverDolbyVision).toBe(true);
+    expect(clamped.filterSdhSubtitles).toBe(true);
+
+    const neg = parsePreferences(
+      JSON.stringify({ version: 1, oledScreensaverTimeoutMin: -5, stillWatchingTimeoutMin: -0.2 }),
+    );
+    expect(Object.is(neg.oledScreensaverTimeoutMin, 0)).toBe(true);
+    expect(Object.is(neg.stillWatchingTimeoutMin, 0)).toBe(true);
+
+    const invalid = parsePreferences(
+      JSON.stringify({
+        version: 1,
+        osdTimeDisplayMode: 'clock',
+        sleepTimerDefaultAction: 'quit',
+        oledScreensaverTimeoutMin: '15',
+        stillWatchingTimeoutMin: Number.NaN,
+        preferDefaultAudioTrack: 'no',
+        preferHevcOverDolbyVision: 1,
+        filterSdhSubtitles: 'yes',
+      }),
+    );
+    expect(invalid).toEqual(DEFAULT_PREFERENCES);
+
+    const store = createMemoryPreferencesStore();
+    const u = await store.update({
+      osdTimeDisplayMode: 'remaining',
+      sleepTimerDefaultAction: 'pause',
+      oledScreensaverTimeoutMin: 10.4,
+      stillWatchingTimeoutMin: 120.6,
+      preferDefaultAudioTrack: false,
+      preferHevcOverDolbyVision: true,
+      filterSdhSubtitles: true,
+    });
+    expect(u.ok).toBe(true);
+    if (u.ok) {
+      expect(u.value.osdTimeDisplayMode).toBe('remaining');
+      expect(u.value.sleepTimerDefaultAction).toBe('pause');
+      expect(u.value.oledScreensaverTimeoutMin).toBe(10);
+      expect(u.value.stillWatchingTimeoutMin).toBe(121);
+      expect(u.value.preferDefaultAudioTrack).toBe(false);
+      expect(u.value.preferHevcOverDolbyVision).toBe(true);
+      expect(u.value.filterSdhSubtitles).toBe(true);
+    }
+
+    const encoded = serializePreferences({
+      ...DEFAULT_PREFERENCES,
+      preferredAudioLanguages: ['tr', 'en', 'de', 'fr', 'es'],
+      preferredSubtitleLanguages: ['tr', 'en', 'de', 'fr', 'es'],
+    });
+    expect(encoded.ok).toBe(true);
+    if (encoded.ok) {
+      expect(new TextEncoder().encode(encoded.value).byteLength).toBeLessThan(
+        MAX_PREFERENCES_BYTES,
+      );
+    }
   });
 });

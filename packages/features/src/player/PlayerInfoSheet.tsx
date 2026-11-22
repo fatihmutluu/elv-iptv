@@ -28,6 +28,7 @@ export interface StreamQualityBadge {
 /** Props of {@link PlayerInfoSheet}. */
 export interface PlayerInfoSheetProps {
   readonly visible: boolean;
+  readonly docked?: boolean;
   readonly title: string;
   readonly subtitle?: string | null | undefined;
   readonly isVod: boolean;
@@ -150,6 +151,7 @@ export function buildStreamQualityBadges(
  */
 export function PlayerInfoSheet({
   visible,
+  docked,
   title,
   subtitle,
   isVod,
@@ -162,6 +164,7 @@ export function PlayerInfoSheet({
   nowMs,
   onClose,
 }: PlayerInfoSheetProps): ReactElement | null {
+  const isDocked = docked ?? formFactor === 'desktop';
   const theme = useTheme();
   const isWebDesktop = formFactor === 'desktop' && (Platform.OS as string) === 'web';
   const desktopPanelRef = useRef<ComponentRef<typeof View> | null>(null);
@@ -346,8 +349,12 @@ export function PlayerInfoSheet({
         testID="player-info-desktop-dialog"
         {...dialogProps}
         style={[
-          styles.desktopPanel,
-          { backgroundColor: theme.colors.glassBg, borderTopColor: theme.colors.glassBorder },
+          isDocked ? styles.desktopPanel : styles.desktopPanelFloating,
+          {
+            backgroundColor: theme.colors.glassBg,
+            borderColor: theme.colors.glassBorder,
+            ...(isDocked ? {} : { borderRadius: theme.radius.modal }),
+          },
           webBackdropBlur(20),
         ]}
       >
@@ -370,6 +377,17 @@ export function PlayerInfoSheet({
 
 const styles = StyleSheet.create({
   desktopPanel: { borderTopWidth: 1, paddingHorizontal: 18, paddingVertical: 12 },
+  desktopPanelFloating: {
+    position: 'absolute',
+    top: 68,
+    right: 24,
+    width: 340,
+    maxHeight: 440,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    zIndex: 35,
+  },
   inner: { gap: 12 },
   header: {
     flexDirection: 'row',

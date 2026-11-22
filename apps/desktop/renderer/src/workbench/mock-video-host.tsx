@@ -1,14 +1,33 @@
 import type { VideoHost } from '@elv/features';
 import type {
   AttemptToken,
+  ChapterInfo,
   EngineEvent,
   LoadCommand,
   MediaTracks,
   PlayerEngine,
+  StreamVideoInfo,
 } from '@elv/playback';
 import { MicroPill, TABULAR_NUMS_STYLE, useTheme } from '@elv/ui-kit';
 import { type ReactElement, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+
+const WORKBENCH_VOD_DURATION_MS = 1_500_000;
+
+const SAMPLE_MEDIA_INFO: StreamVideoInfo = {
+  width: 1920,
+  height: 1080,
+  fps: 24,
+  codec: 'hevc',
+  hdr: 'hdr10',
+  droppedFrames: 0,
+};
+
+const SAMPLE_VOD_CHAPTERS: readonly ChapterInfo[] = [
+  { id: 'ch:0', title: 'Cold Open', startMs: 0, endMs: 500_000 },
+  { id: 'ch:1', title: 'Act I', startMs: 500_000, endMs: 1_090_000 },
+  { id: 'ch:2', title: 'Finale', startMs: 1_090_000, endMs: WORKBENCH_VOD_DURATION_MS },
+];
 
 const SAMPLE_TRACKS: MediaTracks = {
   audio: [
@@ -93,12 +112,17 @@ export function createWorkbenchVideoHost(): VideoHost {
     open() {
       const listeners = new Set<(event: EngineEvent) => void>();
       const previewListeners = new Set<(state: PreviewState) => void>();
+      const fullscreenListeners = new Set<(fullscreen: boolean) => void>();
       let attempt: AttemptToken = 0;
       let kind: 'live' | 'vod' = 'live';
       let label = 'Synthetic Cinema Feed';
       let positionMs = 0;
       let durationMs: number | undefined;
       let playing = false;
+      let playbackRate = 1;
+      let muted = false;
+      let volume = 100;
+      let fullscreen = false;
       let tracks: MediaTracks = SAMPLE_TRACKS;
       let timer: ReturnType<typeof setInterval> | null = null;
 
@@ -107,10 +131,12 @@ export function createWorkbenchVideoHost(): VideoHost {
       };
 
       const notifyPreview = (stateName: string) => {
+        const suffix = muted ? ' · muted' : volume < 100 ? ` · ${Math.round(volume)}%` : '';
+        const speedSuffix = playbackRate !== 1 ? ` · ${playbackRate}x` : '';
         const snapshot: PreviewState = {
           label,
           kind,
-          state: stateName,
+          state: `${stateName}${speedSuffix}${suffix}`,
           positionMs,
           ...(durationMs !== undefined ? { durationMs } : {}),
         };
@@ -128,7 +154,7 @@ export function createWorkbenchVideoHost(): VideoHost {
         stopTimer();
         timer = setInterval(() => {
           if (!playing) return;
-          positionMs += 1000;
+          positionMs += Math.round(1000 * playbackRate);
           if (durationMs !== undefined && positionMs > durationMs) positionMs = durationMs;
           emit({
             attempt,
@@ -136,7 +162,7 @@ export function createWorkbenchVideoHost(): VideoHost {
             anchor: {
               positionMs,
               atMs: performance.now(),
-              rate: 1,
+              rate: playbackRate,
               ...(durationMs !== undefined ? { durationMs } : {}),
             },
           });
@@ -159,19 +185,24 @@ export function createWorkbenchVideoHost(): VideoHost {
           kind = cmd.kind;
           label = decodeURIComponent(cmd.url.split('/').pop() ?? 'Synthetic Stream');
           positionMs = cmd.startMs ?? 0;
-          durationMs = cmd.kind === 'vod' ? 5400_000 : undefined;
+          durationMs = cmd.kind === 'vod' ? WORKBENCH_VOD_DURATION_MS : undefined;
+          playbackRate = 1;
           playing = true;
           tracks = { ...SAMPLE_TRACKS };
           emit({ attempt, type: 'state', state: 'playing' });
           emit({ attempt, type: 'firstFrame', atMs: performance.now() });
+          emit({ attempt, type: 'mediaInfo', info: SAMPLE_MEDIA_INFO });
           emit({ attempt, type: 'tracks', tracks });
+          if (cmd.kind === 'vod') {
+            emit({ attempt, type: 'chapters', chapters: SAMPLE_VOD_CHAPTERS });
+          }
           emit({
             attempt,
             type: 'clock',
             anchor: {
               positionMs,
               atMs: performance.now(),
-              rate: 1,
+              rate: playbackRate,
               ...(durationMs !== undefined ? { durationMs } : {}),
             },
           });
@@ -188,7 +219,7 @@ export function createWorkbenchVideoHost(): VideoHost {
             anchor: {
               positionMs,
               atMs: performance.now(),
-              rate: 1,
+              rate: playbackRate,
               ...(durationMs !== undefined ? { durationMs } : {}),
             },
           });
@@ -205,7 +236,7 @@ export function createWorkbenchVideoHost(): VideoHost {
             anchor: {
               positionMs,
               atMs: performance.now(),
-              rate: 1,
+              rate: playbackRate,
               ...(durationMs !== undefined ? { durationMs } : {}),
             },
           });
@@ -238,11 +269,26 @@ export function createWorkbenchVideoHost(): VideoHost {
             anchor: {
               positionMs,
               atMs: performance.now(),
-              rate: playing ? 1 : 0,
+              rate: playing ? playbackRate : 0,
               ...(durationMs !== undefined ? { durationMs } : {}),
             },
           });
           notifyPreview(playing ? 'playing' : 'paused');
+        },
+        setSpeed(nextAttempt, rate) {
+          attempt = nextAttempt;
+          if (!Number.isFinite(rate) || rate <= 0) return;
+          playbackRate = Math.min(4, Math.max(0.25, rate));
+          emit({
+            attempt,
+            type: 'clock',
+            anchor: {
+              positionMs,
+              atMs: performance.now(),
+              rate: playing ? playbackRate : 0,
+              ...(durationMs !== undefined ? { durationMs } : {}),
+            },
+          });
         },
         selectAudioTrack(nextAttempt, id) {
           attempt = nextAttempt;
@@ -270,6 +316,7 @@ export function createWorkbenchVideoHost(): VideoHost {
           stopTimer();
           listeners.clear();
           previewListeners.clear();
+          fullscreenListeners.clear();
         },
         subscribe(listener) {
           listeners.add(listener);
@@ -289,10 +336,39 @@ export function createWorkbenchVideoHost(): VideoHost {
         return () => previewListeners.delete(listener);
       };
 
-      return {
+      const opened = {
         engine,
+        overlayMode: 'floating' as const,
         renderSurface: () => <WorkbenchVideoSurface subscribePreview={subscribePreview} />,
+        toggleMute: () => {
+          muted = !muted;
+        },
+        setVolume: (next: number) => {
+          if (Number.isFinite(next)) volume = Math.min(100, Math.max(0, next));
+          if (volume > 0) muted = false;
+        },
+        setResizeMode: (_mode: 'fit' | 'fill' | 'stretch') => undefined,
+        setFilterSdh: (_enabled: boolean) => undefined,
+        initialVolume: volume,
+        toggleFullscreen: () => {
+          fullscreen = !fullscreen;
+          for (const listener of [...fullscreenListeners]) {
+            try {
+              listener(fullscreen);
+            } catch {
+              // isolate fullscreen subscribers
+            }
+          }
+        },
+        isFullscreen: () => fullscreen,
+        onFullscreenChange: (listener: (next: boolean) => void) => {
+          fullscreenListeners.add(listener);
+          return () => {
+            fullscreenListeners.delete(listener);
+          };
+        },
       };
+      return opened;
     },
   };
 }

@@ -83,29 +83,36 @@ describe('Desktop Audio Output Picker & Always-on-Top Player Controls (#408)', (
       </ThemeProvider>,
     );
 
+    // Always-on-Top lives inside Player Settings sheet in Minimalist Cinema OSD (#408 / Wave C1)
+    await fireEvent.press(await screen.findByTestId('player-settings-button'));
     const pinBtn = await screen.findByTestId('player-always-on-top-button');
-    expect(pinBtn.props.accessibilityLabel).toBe('Pin window on top');
+    expect(pinBtn.props.accessibilityLabel).toContain('Pin window on top');
 
     await fireEvent.press(pinBtn);
     expect(toggleAlwaysOnTop).toHaveBeenCalledTimes(1);
     await waitFor(() => {
-      expect(screen.getByTestId('player-always-on-top-button').props.accessibilityLabel).toBe(
+      expect(screen.getByTestId('player-always-on-top-button').props.accessibilityLabel).toContain(
         'Unpin window',
       );
     });
+
+    // Close settings so global HostKey 'always-on-top' & 't' shortcuts are active (not blocked by open sheet)
+    await fireEvent.press(screen.getByTestId('player-settings-close'));
 
     // HostKey 'always-on-top' toggles pin state
     await act(async () => {
       onHostKey?.('always-on-top');
     });
     expect(toggleAlwaysOnTop).toHaveBeenCalledTimes(2);
+    await fireEvent.press(screen.getByTestId('player-settings-button'));
     await waitFor(() => {
-      expect(screen.getByTestId('player-always-on-top-button').props.accessibilityLabel).toBe(
+      expect(screen.getByTestId('player-always-on-top-button').props.accessibilityLabel).toContain(
         'Pin window on top',
       );
     });
 
-    // Desktop fallback keyDown 't' toggles pin state when no sheet is open
+    // Close settings so desktop fallback keyDown 't' toggles pin state when no sheet is open
+    await fireEvent.press(screen.getByTestId('player-settings-close'));
     await fireEvent(screen.getByTestId('player-screen'), 'keyDown', {
       key: 't',
       preventDefault: jest.fn(),

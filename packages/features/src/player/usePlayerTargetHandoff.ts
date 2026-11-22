@@ -39,6 +39,8 @@ export interface PlayerTargetHandoffParams {
   onTargetChangeRef: MutableRefObject<((next: PlayTarget) => void) | undefined>;
   bufferPresetRef?: MutableRefObject<BufferPreset>;
   decoderModeRef?: MutableRefObject<AndroidDecoderMode | undefined>;
+  preferHevcOverDolbyVisionRef?: MutableRefObject<boolean>;
+  filterSdhSubtitlesRef?: MutableRefObject<boolean>;
   resolvedNextEpisodeRef?: MutableRefObject<PlayableEntry | undefined>;
 }
 
@@ -60,6 +62,8 @@ export function usePlayerTargetHandoff({
   onTargetChangeRef,
   bufferPresetRef,
   decoderModeRef,
+  preferHevcOverDolbyVisionRef,
+  filterSdhSubtitlesRef,
   resolvedNextEpisodeRef,
 }: PlayerTargetHandoffParams) {
   const [activeTarget, setActiveTarget] = useState<PlayTarget>(target);
@@ -88,6 +92,8 @@ export function usePlayerTargetHandoff({
     (service: PlaybackService, entry: PlayableEntry, startMs?: number): void => {
       const bufferPreset = bufferPresetRef?.current;
       const decoderMode = decoderModeRef?.current;
+      const preferHevcOverDolbyVision = preferHevcOverDolbyVisionRef?.current;
+      const filterSdhSubtitles = filterSdhSubtitlesRef?.current;
       service.tune({
         item: entry.itemKey,
         accountKey: entry.accountKey ?? entry.sourceId,
@@ -96,9 +102,17 @@ export function usePlayerTargetHandoff({
         ...(startMs !== undefined ? { startMs } : {}),
         ...(bufferPreset !== undefined ? { bufferPreset } : {}),
         ...(decoderMode !== undefined ? { decoderMode } : {}),
+        ...(preferHevcOverDolbyVision !== undefined ? { preferHevcOverDolbyVision } : {}),
+        ...(filterSdhSubtitles !== undefined ? { filterSdhSubtitles } : {}),
       });
     },
-    [bufferPresetRef, catalogRef, decoderModeRef],
+    [
+      bufferPresetRef,
+      catalogRef,
+      decoderModeRef,
+      filterSdhSubtitlesRef,
+      preferHevcOverDolbyVisionRef,
+    ],
   );
 
   const reloadActiveTarget = useCallback((): void => {

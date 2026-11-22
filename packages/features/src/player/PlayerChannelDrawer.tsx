@@ -44,6 +44,8 @@ export interface ChannelDrawerNavHandle {
 /** Props of {@link PlayerChannelDrawer}. */
 export interface PlayerChannelDrawerProps {
   readonly visible: boolean;
+  /** When true (desktop child-HWND docked layout), docks in flex flow; when false (floating), overlays on the left (`Decision #40`). */
+  readonly docked?: boolean;
   readonly playlist: LiveChannelPlaylist | undefined;
   readonly currentItemKey: string;
   readonly formFactor: FormFactor;
@@ -128,6 +130,7 @@ function ChannelDrawerTvKeyFallback({
  */
 export function PlayerChannelDrawer({
   visible,
+  docked = true,
   playlist,
   currentItemKey,
   formFactor,
@@ -497,6 +500,7 @@ export function PlayerChannelDrawer({
   );
 
   if (formFactor === 'desktop') {
+    const dockedMode = docked;
     const keyProps = {
       onKeyDown: handleKeyDown,
       ...(isWebDesktop ? { role: 'dialog', 'aria-modal': false, 'aria-label': headerTitle } : {}),
@@ -507,8 +511,12 @@ export function PlayerChannelDrawer({
         testID="player-channel-drawer-desktop"
         {...keyProps}
         style={[
-          styles.desktopDocked,
-          { backgroundColor: theme.colors.bgElevated, borderRightColor: theme.colors.glassBorder },
+          dockedMode ? styles.desktopDocked : styles.desktopFloating,
+          {
+            backgroundColor: dockedMode ? theme.colors.bgElevated : theme.colors.glassBg,
+            borderRightColor: theme.colors.glassBorder,
+          },
+          !dockedMode ? webBackdropBlur(20) : undefined,
         ]}
       >
         {content}
@@ -563,6 +571,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     overflow: 'hidden',
+  },
+  desktopFloating: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    width: 320,
+    borderRightWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    overflow: 'hidden',
+    zIndex: 35,
   },
   overlayRoot: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 35 },
   sidePanel: {

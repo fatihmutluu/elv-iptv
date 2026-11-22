@@ -8,6 +8,7 @@ import type {
   CachedLiveState,
   CachedSearchSnapshot,
   CatalogUiCache,
+  CatalogUiCacheMetrics,
   CatalogUiCacheOptions,
 } from './catalog-ui-cache-types';
 
@@ -67,7 +68,11 @@ function createBoundedLru<V>(maxEntries: number) {
   };
 }
 
-function createBoundedTtlMap<T>(maxEntries: number, ttlMs: number): BoundedTtlMap<T> {
+function createBoundedTtlMap<T>(
+  maxEntries: number,
+  ttlMs: number,
+  onLookup?: (hit: boolean) => void,
+): BoundedTtlMap<T> {
   const cap = Math.max(1, Math.floor(maxEntries));
   const ttl = Math.max(1, Math.floor(ttlMs));
   const map = new Map<string, { value: T; storedAt: number }>();
@@ -75,13 +80,18 @@ function createBoundedTtlMap<T>(maxEntries: number, ttlMs: number): BoundedTtlMa
   return {
     get(key, nowMs) {
       const hit = map.get(key);
-      if (hit === undefined) return undefined;
+      if (hit === undefined) {
+        onLookup?.(false);
+        return undefined;
+      }
       if (nowMs - hit.storedAt > ttl) {
         map.delete(key);
+        onLookup?.(false);
         return undefined;
       }
       map.delete(key);
       map.set(key, hit);
+      onLookup?.(true);
       return hit.value;
     },
     set(key, value, nowMs) {
@@ -138,6 +148,12 @@ function capCatalogRails(
 export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogUiCache {
   let revision = opts.revision ?? 0;
   let locale = opts.locale ?? 'en';
+  let hits = 0;
+  let misses = 0;
+  const recordLookup = (hit: boolean): void => {
+    if (hit) hits += 1;
+    else misses += 1;
+  };
 
   let home: CachedHomeEntry | null = null;
   const catalogByKind: Record<'movie' | 'series', CachedCatalogKindState | null> = {
@@ -151,10 +167,15 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
 
   let live: CachedLiveState | null = null;
   const liveFirstChannels = createBoundedLru<readonly ItemRow[]>(MAX_LIVE_CHANNEL_CATEGORIES);
-  const nowNext = createBoundedTtlMap<NowNextEntry>(CACHE_EPG_MAX_ENTRIES, CACHE_NOW_NEXT_TTL_MS);
+  const nowNext = createBoundedTtlMap<NowNextEntry>(
+    CACHE_EPG_MAX_ENTRIES,
+    CACHE_NOW_NEXT_TTL_MS,
+    recordLookup,
+  );
   const epgWindow = createBoundedTtlMap<CachedEpgProgramEntry>(
     CACHE_EPG_MAX_ENTRIES,
     Number.MAX_SAFE_INTEGER,
+    recordLookup,
   );
 
   const detailByItemKey = createBoundedLru<CachedDetailEntry>(MAX_DETAIL_ENTRIES);
@@ -177,6 +198,14 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
   return {
     getRevision: () => revision,
     getLocale: () => locale,
+    getMetrics(): CatalogUiCacheMetrics {
+      const total = hits + misses;
+      return {
+        hits,
+        misses,
+        hitRatePct: total > 0 ? Math.round((hits / total) * 100) : null,
+      };
+    },
 
     setRevision(nextRevision, nextLocale) {
       if (nextRevision === revision && nextLocale === locale) return;
@@ -185,7 +214,10 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
       clearAll();
     },
 
-    getHome: () => home,
+    getHome: () => {
+      recordLookup(home !== null);
+      return home;
+    },
     setHome(snapshot) {
       home = { snapshot, heroIndex: home?.heroIndex ?? 0 };
     },
@@ -194,7 +226,11 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
       home = { snapshot: home.snapshot, heroIndex };
     },
 
-    getCatalog: (kind) => catalogByKind[kind],
+    getCatalog: (kind) => {
+      const hit = catalogByKind[kind];
+      recordLookup(hit !== null);
+      return hit;
+    },
     setCatalog(kind, state) {
       catalogByKind[kind] = {
         categories: state.categories,
@@ -204,12 +240,19 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
       };
     },
 
-    getGridFirstPage: (kind, categoryId) => gridFirstPages[kind].get(categoryId),
+    getGridFirstPage: (kind, categoryId) => {
+      const hit = gridFirstPages[kind].get(categoryId);
+      recordLookup(hit !== undefined);
+      return hit;
+    },
     setGridFirstPage(kind, categoryId, rows) {
       gridFirstPages[kind].set(categoryId, rows);
     },
 
-    getLive: () => live,
+    getLive: () => {
+      recordLookup(live !== null);
+      return live;
+    },
     setLiveCategories(categories) {
       live = {
         categories,
@@ -229,7 +272,11 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
       };
     },
 
-    getLiveFirstChannels: (categoryId) => liveFirstChannels.get(categoryId),
+    getLiveFirstChannels: (categoryId) => {
+      const hit = liveFirstChannels.get(categoryId);
+      recordLookup(hit !== undefined);
+      return hit;
+    },
     setLiveFirstChannels(categoryId, rows) {
       const capped =
         rows.length > LIVE_CHANNEL_ROWS_CAP ? rows.slice(0, LIVE_CHANNEL_ROWS_CAP) : rows;
@@ -240,16 +287,25 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
     getNowNextSnapshot: (nowMs) => nowNext.snapshot(nowMs),
     epgWindow,
 
-    getDetail: (itemKey) => detailByItemKey.get(itemKey) ?? null,
+    getDetail: (itemKey) => {
+      const hit = detailByItemKey.get(itemKey) ?? null;
+      recordLookup(hit !== null);
+      return hit;
+    },
     setDetail(itemKey, entry) {
       detailByItemKey.set(itemKey, entry);
     },
 
     getSearch(query, scope) {
-      if (search === null) return null;
-      if (search.catalogRevision !== revision || search.query !== query || search.scope !== scope) {
+      if (search === null) {
+        recordLookup(false);
         return null;
       }
+      if (search.catalogRevision !== revision || search.query !== query || search.scope !== scope) {
+        recordLookup(false);
+        return null;
+      }
+      recordLookup(true);
       return search;
     },
     setSearch(snapshot) {

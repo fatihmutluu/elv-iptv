@@ -255,7 +255,18 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
         const clean = raw !== undefined && raw > 0 ? raw : undefined;
         if (media.duration === clean) return [];
         media.duration = clean;
-        return media.kind === 'vod' && media.restarted ? anchor(media) : [];
+        const out = media.kind === 'vod' && media.restarted ? anchor(media) : [];
+        const ch = media.telemetry.onDurationForChapters(clean);
+        if (ch) out.push(ev(media, ch));
+        return out;
+      }
+      case 'chapter-list': {
+        const ch = media.telemetry.onChapterList(value, media.duration);
+        return ch ? [ev(media, ch)] : [];
+      }
+      case 'frame-drop-count': {
+        const dropped = media.telemetry.onFrameDropCount(value);
+        return dropped ? [ev(media, dropped)] : [];
       }
       case 'demuxer-cache-state': {
         media.cacheEnd =

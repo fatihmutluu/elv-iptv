@@ -49,11 +49,11 @@ async function queryPlan(
 }
 
 describe('Schema v8 migration — sort_title (#125)', () => {
-  it('opens a fresh database at version 8 with sort_title columns and sort indexes', async () => {
+  it('opens a fresh database at version 8+ with sort_title columns and sort indexes', async () => {
     const { db } = testDb();
-    expect(SCHEMA_VERSION).toBe(8);
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(8);
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 8 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: SCHEMA_VERSION }]);
 
     for (const table of ['live', 'live_next', 'movies', 'movies_next', 'series', 'series_next']) {
       const cols = (await db.all<{ name: string }>(`PRAGMA table_info(${table})`)).map(
@@ -114,7 +114,7 @@ describe('Schema v8 migration — sort_title (#125)', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 8 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: SCHEMA_VERSION }]);
 
     expect(await db.all('SELECT key, sort_title FROM live')).toEqual([
       { key: 'x:s1:live:1', sort_title: sortTitleKey('The News Network') },
