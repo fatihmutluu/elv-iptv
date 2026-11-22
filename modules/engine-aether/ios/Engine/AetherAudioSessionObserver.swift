@@ -10,24 +10,32 @@ private let routeRemovalPortTypes: Set<String> = [
   "USBAudio",
 ]
 
-/// Passive `AVAudioSession` observer distinguishing genuine call/headphone pauses (`#256`) from unrequested live stalls (`#227`).
+/// `Sendable` representation of `AVAudioSession` interruption and route-change notifications.
+enum AudioSessionEvent: Equatable, Sendable {
+  case interruptionBegan
+  case interruptionEnded(shouldResume: Bool)
+  case oldDeviceUnavailable(isRemovedAudioRoute: Bool)
+}
+
+/// Passive `AVAudioSession` observer distinguishing call/headphone pauses (`#256`, `#427`) from unrequested live stalls (`#227`).
 final class AetherAudioSessionObserver: @unchecked Sendable {
   private let lock = NSLock()
   private var tokens: [NSObjectProtocol] = []
 
-  init(onEvent: @escaping @MainActor @Sendable (_ interrupted: Bool?, _ holdWindowMs: Double) -> Void) {
+  init(onEvent: @escaping @MainActor @Sendable (AudioSessionEvent) -> Void) {
     let center = NotificationCenter.default
     let interruptionToken = center.addObserver(
       forName: AVAudioSession.interruptionNotification,
       object: nil,
       queue: .main
     ) { note in
-      let rawType = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
-      guard let rawType else { return }
+      guard let rawType = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt else { return }
       if rawType == AVAudioSession.InterruptionType.began.rawValue {
-        AetherBackend.onMainActor { onEvent(true, 2_000.0) }
+        AetherBackend.onMainActor { onEvent(.interruptionBegan) }
       } else if rawType == AVAudioSession.InterruptionType.ended.rawValue {
-        AetherBackend.onMainActor { onEvent(false, 500.0) }
+        let optionsRaw = (note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt) ?? 0
+        let shouldResume = AVAudioSession.InterruptionOptions(rawValue: optionsRaw).contains(.shouldResume)
+        AetherBackend.onMainActor { onEvent(.interruptionEnded(shouldResume: shouldResume)) }
       }
     }
 
@@ -36,13 +44,13 @@ final class AetherAudioSessionObserver: @unchecked Sendable {
       object: nil,
       queue: .main
     ) { note in
-      let reasonRaw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+      guard let reasonRaw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+            reasonRaw == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue
+      else { return }
       let previous = note.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription
       let portTypes = previous?.outputs.map(\.portType.rawValue) ?? []
-      let removedAutoPausePort = reasonRaw == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue
-        && portTypes.contains(where: routeRemovalPortTypes.contains)
-      guard removedAutoPausePort else { return }
-      AetherBackend.onMainActor { onEvent(nil, 1_500.0) }
+      let isRemovedAudioRoute = portTypes.contains(where: routeRemovalPortTypes.contains)
+      AetherBackend.onMainActor { onEvent(.oldDeviceUnavailable(isRemovedAudioRoute: isRemovedAudioRoute)) }
     }
 
     lock.withLock {

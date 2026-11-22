@@ -47,6 +47,12 @@ struct SubtitlePresentation: Equatable {
   }
 }
 
+extension CaptionAppearanceColor {
+  var uiColor: UIColor {
+    UIColor(red: CGFloat(red), green: CGFloat(green), blue: CGFloat(blue), alpha: CGFloat(alpha))
+  }
+}
+
 /// Attributed-string builders for plain and ASS/teletext rich-text subtitle cues.
 enum SubtitleTextStyling {
   static func textAlignment(for slot: SubtitleSlot) -> NSTextAlignment {
@@ -57,21 +63,53 @@ enum SubtitleTextStyling {
     }
   }
 
-  static func makeStyledString(text: String, fontSize: CGFloat, slot: SubtitleSlot) -> NSAttributedString {
+  static func makeFont(
+    size: CGFloat,
+    weight: UIFont.Weight,
+    italic: Bool = false,
+    style: CaptionAppearanceStyle
+  ) -> UIFont {
+    let base: UIFont
+    if let fontName = style.fontName, !fontName.isEmpty, let custom = UIFont(name: fontName, size: size) {
+      base = custom
+    } else {
+      base = UIFont.systemFont(ofSize: size, weight: weight)
+    }
+    var traits: UIFontDescriptor.SymbolicTraits = []
+    if weight == .bold { traits.insert(.traitBold) }
+    if italic { traits.insert(.traitItalic) }
+    if !traits.isEmpty, let descriptor = base.fontDescriptor.withSymbolicTraits(traits) {
+      return UIFont(descriptor: descriptor, size: size)
+    }
+    return base
+  }
+
+  static func makeStyledString(
+    text: String,
+    fontSize: CGFloat,
+    slot: SubtitleSlot,
+    style: CaptionAppearanceStyle = .default
+  ) -> NSAttributedString {
     let paragraph = NSMutableParagraphStyle()
     paragraph.alignment = textAlignment(for: slot)
     paragraph.lineBreakMode = .byWordWrapping
-    return NSAttributedString(
-      string: text,
-      attributes: [
-        .font: UIFont.systemFont(ofSize: fontSize, weight: .semibold),
-        .foregroundColor: UIColor.white,
-        .paragraphStyle: paragraph,
-      ]
-    )
+    var attrs: [NSAttributedString.Key: Any] = [
+      .font: makeFont(size: fontSize, weight: .semibold, style: style),
+      .foregroundColor: style.foreground.uiColor,
+      .paragraphStyle: paragraph,
+    ]
+    if style.window != nil && style.background.alpha > 0.01 {
+      attrs[.backgroundColor] = style.background.uiColor
+    }
+    return NSAttributedString(string: text, attributes: attrs)
   }
 
-  static func makeRichString(runs: [SubtitleTextRun], fontSize: CGFloat, slot: SubtitleSlot) -> NSAttributedString? {
+  static func makeRichString(
+    runs: [SubtitleTextRun],
+    fontSize: CGFloat,
+    slot: SubtitleSlot,
+    style: CaptionAppearanceStyle = .default
+  ) -> NSAttributedString? {
     let combinedText = runs.map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines)
     guard !combinedText.isEmpty else { return nil }
 
@@ -81,20 +119,23 @@ enum SubtitleTextStyling {
 
     let out = NSMutableAttributedString()
     for run in runs where !run.text.isEmpty {
-      var font = UIFont.systemFont(ofSize: fontSize, weight: run.isBold ? .bold : .semibold)
-      if run.isItalic, let descriptor = font.fontDescriptor.withSymbolicTraits(
-        run.isBold ? [.traitBold, .traitItalic] : [.traitItalic]
-      ) {
-        font = UIFont(descriptor: descriptor, size: fontSize)
-      }
+      let font = makeFont(
+        size: fontSize,
+        weight: run.isBold ? .bold : .semibold,
+        italic: run.isItalic,
+        style: style
+      )
       let color = run.color.map {
         UIColor(red: CGFloat($0.r) / 255.0, green: CGFloat($0.g) / 255.0, blue: CGFloat($0.b) / 255.0, alpha: 1.0)
-      } ?? .white
+      } ?? style.foreground.uiColor
       var attrs: [NSAttributedString.Key: Any] = [
         .font: font,
         .foregroundColor: color,
         .paragraphStyle: paragraph,
       ]
+      if style.window != nil && style.background.alpha > 0.01 {
+        attrs[.backgroundColor] = style.background.uiColor
+      }
       if run.isUnderlined { attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue }
       if run.isStruckThrough { attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
       out.append(NSAttributedString(string: run.text, attributes: attrs))

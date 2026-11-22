@@ -31,6 +31,7 @@ let lastMedia3SurfaceProps:
       useTextureView?: boolean;
     }
   | undefined;
+let lastAetherSurfaceProps: { osdVisible?: boolean } | undefined;
 jest.mock('../catalog', () => {
   const actual = jest.requireActual<typeof import('../catalog')>('../catalog');
   return {
@@ -49,13 +50,19 @@ jest.mock('@elv/remote-keys', () => ({
     },
   },
 }));
-jest.mock('@elv/engine-aether', () => ({
-  createAetherEngine: () => mockAetherEngine,
-  AetherSurface: ({ testID }: { testID?: string }) => {
-    const { View } = require('react-native');
-    return <View testID={testID ?? 'aether-surface'} accessibilityLabel="aether-surface" />;
-  },
-}));
+jest.mock('@elv/engine-aether', () => {
+  const actual = jest.requireActual<typeof import('@elv/engine-aether')>('@elv/engine-aether');
+  return {
+    ...actual,
+    createAetherEngine: () => mockAetherEngine,
+    getAppleDeviceModel: () => null,
+    AetherSurface: ({ testID, osdVisible }: { testID?: string; osdVisible?: boolean }) => {
+      lastAetherSurfaceProps = { osdVisible };
+      const { View } = require('react-native');
+      return <View testID={testID ?? 'aether-surface'} accessibilityLabel="aether-surface" />;
+    },
+  };
+});
 jest.mock('@elv/engine-media3', () => ({
   createMedia3Engine: () => mockMedia3Engine,
   setOrientationLocked: (locked: boolean) => mockSetOrientationLocked(locked),
@@ -165,6 +172,7 @@ afterEach(() => {
   mockMedia3Engine = null;
   mockCatalogOverride = undefined;
   lastMedia3SurfaceProps = undefined;
+  lastAetherSurfaceProps = undefined;
   mockSetOrientationLocked.mockReset();
   mockRequestTemporaryOrientation.mockReset();
   mockApplyShortEdgesCutoutMode.mockReset();
@@ -419,6 +427,7 @@ describe('App', () => {
 
     const surface = await screen.findByTestId('player-surface');
     expect(surface.props.accessibilityLabel).toBe('aether-surface');
+    expect(lastAetherSurfaceProps).toEqual({ osdVisible: true });
     expect(loadedUrls).toEqual(['http://127.0.0.1:7878/live/demo/1001.ts']);
 
     await view.unmount();
@@ -545,5 +554,29 @@ describe('App', () => {
     await view.unmount();
     expect(mockSetOrientationLocked).toHaveBeenLastCalledWith(false);
     expect(mockSafeAreaListeners.size).toBe(0);
+  });
+
+  it('mounts app-pending-focus-anchor on TV while gate route resolution is pending (#186)', async () => {
+    mockGate = true;
+    jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
+    let resolveInitialUrl: ((url: string | null) => void) | undefined;
+    jest.spyOn(Linking, 'getInitialURL').mockImplementation(
+      () =>
+        new Promise<string | null>((resolve) => {
+          resolveInitialUrl = resolve;
+        }),
+    );
+    jest.spyOn(Linking, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+
+    const view = await render(<App />);
+    const anchor = screen.getByTestId('app-pending-focus-anchor', { includeHiddenElements: true });
+    expect(anchor.props.focusable).toBe(true);
+    expect(anchor.props.hasTVPreferredFocus).toBe(true);
+
+    await act(async () => {
+      resolveInitialUrl?.(null);
+    });
+    expect(await screen.findByTestId('sources-screen')).toBeOnTheScreen();
+    await view.unmount();
   });
 });

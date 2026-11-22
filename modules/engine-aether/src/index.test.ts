@@ -14,7 +14,7 @@ async function load() {
 
 type NativeListener = (event: EngineEvent) => void;
 
-function fakeNative(version = '7.66.1') {
+function fakeNative(version = '7.66.1', model?: string) {
   const clock = { uptime: 0 };
   const listeners = new Set<NativeListener>();
   const remove = vi.fn();
@@ -24,6 +24,7 @@ function fakeNative(version = '7.66.1') {
     play: vi.fn(),
     pause: vi.fn(),
     seek: vi.fn(),
+    setSpeed: vi.fn(),
     selectAudioTrack: vi.fn(),
     selectSubtitleTrack: vi.fn(),
     stop: vi.fn(),
@@ -44,11 +45,17 @@ function fakeNative(version = '7.66.1') {
   });
   const uptimeMs = vi.fn(() => clock.uptime);
   const engineVersion = vi.fn(() => version);
-  requireOptionalNativeModule.mockReturnValue({ Engine, uptimeMs, engineVersion });
+  const deviceModel = model === undefined ? undefined : vi.fn(() => model);
+  requireOptionalNativeModule.mockReturnValue({
+    Engine,
+    uptimeMs,
+    engineVersion,
+    ...(deviceModel === undefined ? {} : { deviceModel }),
+  });
   const emit = (event: EngineEvent) => {
     for (const listener of [...listeners]) listener(event);
   };
-  return { clock, engine, Engine, uptimeMs, engineVersion, remove, emit };
+  return { clock, engine, Engine, uptimeMs, engineVersion, deviceModel, remove, emit };
 }
 
 afterEach(() => {
@@ -165,6 +172,20 @@ describe('createAetherEngine', () => {
     };
     native.emit(tracksEvent);
     expect(events).toEqual([tracksEvent]);
+
+    engine.setSpeed?.(5, 1.5);
+    expect(native.engine.setSpeed).toHaveBeenCalledWith(5, 1.5);
+  });
+
+  it('omits setSpeed when the native engine object does not expose it (#442)', async () => {
+    const native = fakeNative();
+    const { setSpeed: _omitted, ...withoutSpeed } = native.engine;
+    native.Engine.mockImplementation(function constructWithoutSpeed() {
+      return withoutSpeed as typeof native.engine;
+    });
+    const { createAetherEngine } = await load();
+    const engine = createAetherEngine();
+    expect(engine?.setSpeed).toBeUndefined();
   });
 });
 
@@ -215,5 +236,58 @@ describe('AetherSurface', () => {
     expect(AetherSurface({ engine: foreign })).toBeNull();
     engine.release();
     expect(AetherSurface({ engine })).toBeNull();
+  });
+
+  it('forwards osdVisible when defined and omits it when undefined (#442)', async () => {
+    const { native, engine, AetherSurface } = await engineWithView();
+    const hidden = AetherSurface({ engine, osdVisible: false });
+    expect(hidden?.props).toEqual({
+      engine: native.engine,
+      style: undefined,
+      resizeMode: undefined,
+      subtitleBottomInsetPx: undefined,
+      osdVisible: false,
+      testID: undefined,
+    });
+
+    const visible = AetherSurface({ engine, osdVisible: true });
+    expect(visible?.props).toEqual({
+      engine: native.engine,
+      style: undefined,
+      resizeMode: undefined,
+      subtitleBottomInsetPx: undefined,
+      osdVisible: true,
+      testID: undefined,
+    });
+  });
+});
+
+describe('Apple hardware tiering (#186)', () => {
+  it('classifies AppleTV5,* (2 GB) and AppleTV6,* (3 GB) as mid-power and newer/other models as standard', async () => {
+    const { resolveAppleHardwareTier } = await load();
+    expect(resolveAppleHardwareTier('AppleTV5,3')).toBe('mid-power');
+    expect(resolveAppleHardwareTier('AppleTV6,2')).toBe('mid-power');
+    expect(resolveAppleHardwareTier('  AppleTV6,2  ')).toBe('mid-power');
+    expect(resolveAppleHardwareTier('AppleTV11,1')).toBe('standard');
+    expect(resolveAppleHardwareTier('AppleTV14,1')).toBe('standard');
+    expect(resolveAppleHardwareTier('iPhone16,1')).toBe('standard');
+    expect(resolveAppleHardwareTier('iPad14,1')).toBe('standard');
+    expect(resolveAppleHardwareTier('')).toBe('standard');
+    expect(resolveAppleHardwareTier(null)).toBe('standard');
+    expect(resolveAppleHardwareTier(undefined)).toBe('standard');
+  });
+
+  it('reads deviceModel safely from the native module when available', async () => {
+    requireOptionalNativeModule.mockReturnValue(null);
+    expect((await load()).getAppleDeviceModel()).toBeNull();
+
+    fakeNative('7.66.1');
+    expect((await load()).getAppleDeviceModel()).toBeNull();
+
+    fakeNative('7.66.1', '   ');
+    expect((await load()).getAppleDeviceModel()).toBeNull();
+
+    fakeNative('7.66.1', 'AppleTV6,2');
+    expect((await load()).getAppleDeviceModel()).toBe('AppleTV6,2');
   });
 });

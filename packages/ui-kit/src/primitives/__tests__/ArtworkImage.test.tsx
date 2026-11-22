@@ -209,4 +209,62 @@ describe('ArtworkImage decode caps & error classification (#202, #311)', () => {
     capturedOnError?.({ message: 'NSURLErrorCannotFindHost' });
     expect(registry.isDead('https://adapter-dns.example/b.png')).toBe(true);
   });
+
+  it('applies non-interactive hit-test and accessibility guards across outer, zoom, and fallback views when decorative (#186)', async () => {
+    const registry = createDeadHostRegistry();
+
+    const loaded = await render(
+      <ThemeProvider>
+        <ArtworkImage
+          uri="https://img.example/backdrop.jpg"
+          label="Hero Backdrop"
+          decorative
+          deadHosts={registry}
+          testID="hero-bg"
+        />
+      </ThemeProvider>,
+    );
+
+    const outer = screen.getByTestId('hero-bg', { includeHiddenElements: true });
+    expect(outer.props.pointerEvents).toBe('none');
+    expect(outer.props.accessible).toBe(false);
+    expect(outer.props.accessibilityElementsHidden).toBe(true);
+    expect(outer.props.importantForAccessibility).toBe('no');
+
+    const zoom = screen.getByTestId('hero-bg-zoom', { includeHiddenElements: true });
+    expect(zoom.props.pointerEvents).toBe('none');
+    expect(zoom.props.accessible).toBe(false);
+    expect(zoom.props.accessibilityElementsHidden).toBe(true);
+    expect(zoom.props.importantForAccessibility).toBe('no');
+
+    const img = screen.getByTestId('hero-bg-img', { includeHiddenElements: true });
+    expect(img.props.accessible).toBe(false);
+    expect(img.props.accessibilityLabel).toBeUndefined();
+    await loaded.unmount();
+
+    await render(
+      <ThemeProvider>
+        <ArtworkImage
+          uri={null}
+          label="Missing Backdrop"
+          decorative
+          deadHosts={registry}
+          testID="hero-empty"
+        />
+      </ThemeProvider>,
+    );
+
+    const emptyOuter = screen.getByTestId('hero-empty', { includeHiddenElements: true });
+    expect(emptyOuter.props.pointerEvents).toBe('none');
+    expect(emptyOuter.props.accessible).toBe(false);
+    expect(emptyOuter.props.accessibilityElementsHidden).toBe(true);
+    expect(emptyOuter.props.importantForAccessibility).toBe('no');
+
+    const fallback = screen.getByTestId('hero-empty-fallback', { includeHiddenElements: true });
+    expect(fallback.props.pointerEvents).toBe('none');
+    expect(fallback.props.accessible).toBe(false);
+    expect(fallback.props.accessibilityElementsHidden).toBe(true);
+    expect(fallback.props.importantForAccessibility).toBe('no');
+    expect(fallback.props.accessibilityLabel).toBeUndefined();
+  });
 });

@@ -113,6 +113,7 @@ function DetailHeroInner({
         label={title}
         maxDecodePx={960}
         borderRadius={0}
+        decorative
         style={StyleSheet.absoluteFill}
       />
       <Scrim direction="bottom" intensity="strong" testID="detail-hero-scrim-bottom" />

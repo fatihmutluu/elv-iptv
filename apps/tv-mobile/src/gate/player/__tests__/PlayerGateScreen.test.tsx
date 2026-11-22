@@ -376,6 +376,16 @@ describe('PlayerGateScreen', () => {
     expect(playerLines(log)).toHaveLength(0);
   });
 
+  it('mounts player-gate-idle-focus-anchor on TV when no engine exists (#186)', async () => {
+    jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
+    await render(<PlayerGateScreen params={params} createEngine={() => null} />);
+    const anchor = screen.getByTestId('player-gate-idle-focus-anchor', {
+      includeHiddenElements: true,
+    });
+    expect(anchor.props.focusable).toBe(true);
+    expect(anchor.props.hasTVPreferredFocus).toBe(true);
+  });
+
   it('releases the engine and stops zapping when it unmounts', async () => {
     const log = jest.spyOn(console, 'log').mockImplementation(() => {});
     const engine = setup();

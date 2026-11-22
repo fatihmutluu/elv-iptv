@@ -66,50 +66,33 @@ extension AetherBackend {
       .store(in: &cancellables)
 
     target.$currentAVPlayer
-      .sink { [weak target] player in
+      .sink { [weak self, weak target] player in
         if Thread.isMainThread {
           MainActor.assumeIsolated {
-            player?.preventsDisplaySleepDuringVideoPlayback = true
+            guard let self, let target else { return }
+            self.observeAVPlayer(player, target: target)
           }
         } else {
           Self.onMainActor {
-            target?.currentAVPlayer?.preventsDisplaySleepDuringVideoPlayback = true
+            guard let self, let target else { return }
+            self.observeAVPlayer(target.currentAVPlayer, target: target)
           }
         }
       }
       .store(in: &cancellables)
 
     target.$currentAVPlayerItem
-      .sink { [weak self, weak target] _ in
-        Self.onMainActor {
-          guard let self, let target else { return }
-          self.itemProgressCancellable?.cancel()
-          self.itemProgressCancellable = nil
-          guard self.engineLoadSerial > 0 else { return }
-          self.refreshSubtitleGeometry(from: target)
-          guard let item = target.currentAVPlayerItem else { return }
-          self.itemProgressCancellable = item.publisher(for: \.loadedTimeRanges)
-            .sink { [weak self, weak target] ranges in
-              let bufferedEnd = ranges.reduce(0.0) { acc, value in
-                let end = CMTimeGetSeconds(CMTimeRangeGetEnd(value.timeRangeValue))
-                return (end.isFinite && end > acc) ? end : acc
-              }
-              Self.onMainActor {
-                guard let self, let target, self.engineLoadSerial > 0 else { return }
-                let bytes = target.currentAVPlayerItem?.accessLog()?.events.reduce(Int64(0)) { acc, ev in
-                  acc + max(0, ev.numberOfBytesTransferred)
-                } ?? 0
-                if bytes > 0 || bufferedEnd > 0 {
-                  self.onObservation?(
-                    .progress(
-                      bytesReceived: bytes > 0 ? bytes : nil,
-                      bufferedSeconds: bufferedEnd > 0 ? bufferedEnd : nil
-                    ),
-                    self.engineLoadSerial
-                  )
-                }
-              }
-            }
+      .sink { [weak self, weak target] item in
+        if Thread.isMainThread {
+          MainActor.assumeIsolated {
+            guard let self, let target else { return }
+            self.observeAVPlayerItem(item, target: target)
+          }
+        } else {
+          Self.onMainActor {
+            guard let self, let target else { return }
+            self.observeAVPlayerItem(target.currentAVPlayerItem, target: target)
+          }
         }
       }
       .store(in: &cancellables)
@@ -127,6 +110,8 @@ extension AetherBackend {
           case .playing:
             self.readySerial = serial
             self.inReloadFromState = false
+            self.lastAVBufferReportedBuffering = false
+            self.playbackActiveIntent = true
             self.maybeLogRouteDiagnostics(from: target, serial: serial, phaseOverride: .playing)
             self.onObservation?(.phase(.playing), serial)
             if self.tracksEmittedSerial != serial || self.tracksDeferredForReload {
@@ -138,7 +123,7 @@ extension AetherBackend {
               self.emitClockSnapshot(
                 from: target,
                 positionSeconds: target.currentTime,
-                rateOverride: 1.0,
+                rateOverride: self.requestedRate,
                 durationOverride: nil,
                 serial: serial
               )
@@ -149,8 +134,7 @@ extension AetherBackend {
               self.onObservation?(.phase(.loading), serial)
             } else {
               self.inReloadFromState = false
-              let nowMs = ProcessInfo.processInfo.systemUptime * 1_000.0
-              let bySystem = self.audioInterrupted || nowMs <= self.systemPauseUntilUptimeMs
+              let bySystem = self.audioSessionPolicy.shouldTreatPauseAsSystem
               self.onObservation?(.phase(bySystem ? .systemPaused : .paused), serial)
             }
           case .seeking:
@@ -160,6 +144,7 @@ extension AetherBackend {
           case .stalled:
             self.onObservation?(.phase(.stalled), serial)
           case .ended:
+            self.playbackActiveIntent = false
             self.forwardVodDurationBeforeEnd(from: target, serial: serial)
             self.forwardReaderFaultIfPresent(serial: serial)
             self.onObservation?(.phase(.ended), serial)
@@ -171,28 +156,52 @@ extension AetherBackend {
     target.$state
       .sink { [weak self, weak target] state in
         Self.onMainActor {
-          guard let self, let target, self.engineLoadSerial > 0 else { return }
+          guard let self, let target else { return }
+          if case .error = state {
+            let errorSerial = self.engineLoadSerial > 0 ? self.engineLoadSerial : self.activeLoadSerial
+            guard errorSerial > 0, self.errorReportedSerial != errorSerial else { return }
+            self.playbackActiveIntent = false
+            let capturedReaderFault = self.currentReader?.lastFailure
+            if let info = target.errorInfo {
+              let capturedKind = info.kind.rawValue
+              let capturedDomain = info.underlyingDomain
+              let capturedCode = info.underlyingCode
+              self.errorReportedSerial = errorSerial
+              if let capturedReaderFault {
+                self.onObservation?(.readerFault(capturedReaderFault), errorSerial)
+              }
+              self.onObservation?(
+                .failure(.engine(kind: capturedKind, underlyingDomain: capturedDomain, underlyingCode: capturedCode)),
+                errorSerial
+              )
+            } else {
+              DispatchQueue.main.async { [weak self, weak target] in
+                MainActor.assumeIsolated {
+                  guard let self, let target,
+                        (self.engineLoadSerial == errorSerial || self.activeLoadSerial == errorSerial),
+                        self.errorReportedSerial != errorSerial
+                  else { return }
+                  self.errorReportedSerial = errorSerial
+                  if let readerFault = capturedReaderFault ?? self.currentReader?.lastFailure {
+                    self.onObservation?(.readerFault(readerFault), errorSerial)
+                  }
+                  let kind = target.errorInfo?.kind.rawValue ?? "unknown"
+                  let domain = target.errorInfo?.underlyingDomain
+                  let code = target.errorInfo?.underlyingCode
+                  self.onObservation?(
+                    .failure(.engine(kind: kind, underlyingDomain: domain, underlyingCode: code)),
+                    errorSerial
+                  )
+                }
+              }
+            }
+            return
+          }
+          guard self.engineLoadSerial > 0 else { return }
           let serial = self.engineLoadSerial
           switch state {
           case .error:
-            guard self.errorReportedSerial != serial else { return }
-            DispatchQueue.main.async { [weak self, weak target] in
-              MainActor.assumeIsolated {
-                guard let self, let target,
-                      self.engineLoadSerial == serial,
-                      self.errorReportedSerial != serial
-                else { return }
-                self.errorReportedSerial = serial
-                self.forwardReaderFaultIfPresent(serial: serial)
-                let kind = target.errorInfo?.kind.rawValue ?? "unknown"
-                let domain = target.errorInfo?.underlyingDomain
-                let code = target.errorInfo?.underlyingCode
-                self.onObservation?(
-                  .failure(.engine(kind: kind, underlyingDomain: domain, underlyingCode: code)),
-                  serial
-                )
-              }
-            }
+            break
           case .loading:
             if self.readySerial == serial {
               self.inReloadFromState = true
@@ -201,6 +210,7 @@ extension AetherBackend {
           case .playing:
             if self.inReloadFromState && target.playbackPhase == .playing {
               self.inReloadFromState = false
+              self.playbackActiveIntent = true
               self.onObservation?(.phase(.playing), serial)
             }
             if self.tracksDeferredForReload {
@@ -210,8 +220,7 @@ extension AetherBackend {
           case .paused:
             if self.inReloadFromState {
               self.inReloadFromState = false
-              let nowMs = ProcessInfo.processInfo.systemUptime * 1_000.0
-              let bySystem = self.audioInterrupted || nowMs <= self.systemPauseUntilUptimeMs
+              let bySystem = self.audioSessionPolicy.shouldTreatPauseAsSystem
               self.onObservation?(.phase(bySystem ? .systemPaused : .paused), serial)
             }
             if self.tracksDeferredForReload {
@@ -219,6 +228,7 @@ extension AetherBackend {
               self.scheduleTracksSnapshot(from: target, serial: serial)
             }
           case .ended:
+            self.playbackActiveIntent = false
             self.forwardVodDurationBeforeEnd(from: target, serial: serial)
             self.forwardReaderFaultIfPresent(serial: serial)
             self.onObservation?(.phase(.ended), serial)
@@ -256,6 +266,15 @@ extension AetherBackend {
           guard phase != .idle, phase != .loading, phase != .seeking,
                 target.state != .idle, target.state != .loading, target.state != .seeking
           else { return }
+          let isPlaying = phase == .playing || target.state == .playing
+          if target.isLive {
+            self.liveRecoveryPolicy.noteClockProgress(positionSeconds: currentTime, isPlaying: isPlaying)
+          }
+          let rate = isPlaying ? self.requestedRate : 0.0
+          let nowSeconds = ProcessInfo.processInfo.systemUptime
+          guard self.osdClockThrottle.shouldEmit(nowSeconds: nowSeconds, rate: rate, isPlaying: isPlaying) else {
+            return
+          }
           self.emitClockSnapshot(
             from: target,
             positionSeconds: currentTime,
@@ -279,6 +298,134 @@ extension AetherBackend {
       .store(in: &cancellables)
 
     subscribeTracksAndSubtitles(to: target)
+  }
+
+  private func observeAVPlayer(_ player: AVPlayer?, target: AetherEngine) {
+    avPlayerBufferCancellables.removeAll()
+    lastAVBufferReportedBuffering = false
+    guard let player else { return }
+    player.preventsDisplaySleepDuringVideoPlayback = true
+    player.publisher(for: \.timeControlStatus, options: [.new])
+      .sink { [weak self, weak target] _ in
+        Self.onMainActor {
+          guard let self, let target else { return }
+          self.evaluateAVPlayerBufferingState(from: target)
+        }
+      }
+      .store(in: &avPlayerBufferCancellables)
+    player.publisher(for: \.reasonForWaitingToPlay, options: [.new])
+      .sink { [weak self, weak target] _ in
+        Self.onMainActor {
+          guard let self, let target else { return }
+          self.evaluateAVPlayerBufferingState(from: target)
+        }
+      }
+      .store(in: &avPlayerBufferCancellables)
+  }
+
+  private func observeAVPlayerItem(_ item: AVPlayerItem?, target: AetherEngine) {
+    itemProgressCancellable?.cancel()
+    itemProgressCancellable = nil
+    avPlayerItemBufferCancellables.removeAll()
+    lastAVBufferReportedBuffering = false
+    guard engineLoadSerial > 0 else { return }
+    refreshSubtitleGeometry(from: target)
+    guard let item else { return }
+    itemProgressCancellable = item.publisher(for: \.loadedTimeRanges)
+      .sink { [weak self, weak target] ranges in
+        let bufferedEnd = ranges.reduce(0.0) { acc, value in
+          let end = CMTimeGetSeconds(CMTimeRangeGetEnd(value.timeRangeValue))
+          return (end.isFinite && end > acc) ? end : acc
+        }
+        Self.onMainActor {
+          guard let self, let target, self.engineLoadSerial > 0 else { return }
+          let bytes = target.currentAVPlayerItem?.accessLog()?.events.reduce(Int64(0)) { acc, ev in
+            acc + max(0, ev.numberOfBytesTransferred)
+          } ?? 0
+          if bytes > 0 || bufferedEnd > 0 {
+            self.onObservation?(
+              .progress(
+                bytesReceived: bytes > 0 ? bytes : nil,
+                bufferedSeconds: bufferedEnd > 0 ? bufferedEnd : nil
+              ),
+              self.engineLoadSerial
+            )
+          }
+        }
+      }
+
+    item.publisher(for: \.isPlaybackBufferEmpty, options: [.new])
+      .sink { [weak self, weak target] _ in
+        Self.onMainActor {
+          guard let self, let target else { return }
+          self.evaluateAVPlayerBufferingState(from: target)
+        }
+      }
+      .store(in: &avPlayerItemBufferCancellables)
+    item.publisher(for: \.isPlaybackBufferFull, options: [.new])
+      .sink { [weak self, weak target] _ in
+        Self.onMainActor {
+          guard let self, let target else { return }
+          self.evaluateAVPlayerBufferingState(from: target)
+        }
+      }
+      .store(in: &avPlayerItemBufferCancellables)
+    item.publisher(for: \.isPlaybackLikelyToKeepUp, options: [.new])
+      .sink { [weak self, weak target] _ in
+        Self.onMainActor {
+          guard let self, let target else { return }
+          self.evaluateAVPlayerBufferingState(from: target)
+        }
+      }
+      .store(in: &avPlayerItemBufferCancellables)
+  }
+
+  private func evaluateAVPlayerBufferingState(from target: AetherEngine) {
+    guard engineLoadSerial > 0,
+          target.hasFirstFrameReadyForDisplay || target.videoRoute == .audio
+    else {
+      lastAVBufferReportedBuffering = false
+      return
+    }
+    let phase = target.playbackPhase
+    guard phase != .idle, phase != .loading, phase != .seeking, phase != .ended,
+          target.state != .idle, target.state != .loading, target.state != .seeking, target.state != .ended
+    else {
+      lastAVBufferReportedBuffering = false
+      return
+    }
+    guard let player = target.currentAVPlayer, let item = target.currentAVPlayerItem else {
+      lastAVBufferReportedBuffering = false
+      return
+    }
+
+    let isWaiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+    let waitingReason = player.reasonForWaitingToPlay
+    let waitingToMinimizeStallsOrEvaluating = waitingReason == .toMinimizeStalls
+      || waitingReason == .evaluatingBufferingRate
+    let isUserPaused = player.timeControlStatus == .paused
+      || phase == .paused
+      || target.state == .paused
+      || audioSessionPolicy.shouldTreatPauseAsSystem
+
+    let snapshot = AVBufferSnapshot(
+      isPlaybackBufferEmpty: item.isPlaybackBufferEmpty,
+      isPlaybackBufferFull: item.isPlaybackBufferFull,
+      isPlaybackLikelyToKeepUp: item.isPlaybackLikelyToKeepUp,
+      isWaitingToPlay: isWaiting,
+      waitingToMinimizeStallsOrEvaluating: waitingToMinimizeStallsOrEvaluating,
+      isUserPaused: isUserPaused
+    )
+    let isBuffering = evaluateAVPlayerBuffering(snapshot)
+    if isBuffering && !lastAVBufferReportedBuffering {
+      lastAVBufferReportedBuffering = true
+      onObservation?(.phase(.rebuffering), engineLoadSerial)
+    } else if !isBuffering && lastAVBufferReportedBuffering {
+      lastAVBufferReportedBuffering = false
+      if player.timeControlStatus == .playing && (phase == .playing || target.state == .playing) {
+        onObservation?(.phase(.playing), engineLoadSerial)
+      }
+    }
   }
 
   private func forwardVodDurationBeforeEnd(from target: AetherEngine, serial: Int) {
@@ -314,7 +461,7 @@ extension AetherBackend {
     serial: Int
   ) {
     let isPlaying = (rateOverride ?? 0) > 0 || target.playbackPhase == .playing || target.state == .playing
-    let rate: Double = rateOverride ?? (isPlaying ? 1.0 : 0.0)
+    let rate: Double = rateOverride ?? (isPlaying ? requestedRate : 0.0)
     if target.isLive {
       liveRecoveryPolicy.noteClockProgress(positionSeconds: positionSeconds, isPlaying: isPlaying)
     }

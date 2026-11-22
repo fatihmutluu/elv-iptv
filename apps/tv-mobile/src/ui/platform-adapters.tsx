@@ -1,4 +1,9 @@
 import {
+  type AppleHardwareTier,
+  getAppleDeviceModel,
+  resolveAppleHardwareTier,
+} from '@elv/engine-aether';
+import {
   DEFAULT_MAX_DECODE_PX,
   type DeadHostRegistry,
   defaultDeadHostRegistry,
@@ -18,10 +23,17 @@ function clampDecodePx(maxDecodePx: number | undefined): number {
 
 /**
  * Creates native mobile/TV {@link UiAdapters} enforcing bounded artwork decode caps (`#311`),
- * zero fade blink on recycled `TvList` rows, and structured error extraction for `#202`.
+ * zero fade blink on recycled `TvList` rows, structured error extraction for `#202`, and
+ * disabling heavy blur on 2–3 GB Apple TV (`'mid-power'`) hardware (`#186`).
  */
-export function createMobileTvUiAdapters(): UiAdapters {
+export function createMobileTvUiAdapters(options?: {
+  readonly hardwareTier?: AppleHardwareTier;
+  readonly renderBlur?: UiAdapters['renderBlur'];
+}): UiAdapters {
+  const tier = options?.hardwareTier ?? resolveAppleHardwareTier(getAppleDeviceModel());
+  const renderBlur = tier === 'mid-power' ? undefined : options?.renderBlur;
   return {
+    ...(renderBlur !== undefined ? { renderBlur } : {}),
     renderImage({
       uri,
       resizeMode,
@@ -39,7 +51,7 @@ export function createMobileTvUiAdapters(): UiAdapters {
           resizeMethod="resize"
           fadeDuration={0}
           progressiveRenderingEnabled
-          accessibilityLabel={accessibilityLabel}
+          {...(accessibilityLabel ? { accessibilityLabel } : { accessible: false })}
           style={style}
           onLoad={onLoad}
           onError={(event) => onError?.(extractNativeImageError(event))}

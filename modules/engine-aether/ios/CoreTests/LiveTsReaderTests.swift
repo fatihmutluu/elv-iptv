@@ -27,9 +27,23 @@ struct LiveTsReaderTests {
     headers: [String: String] = [:],
     generation: Int = 1,
     gate: ConnectionGate,
+    maxReconnectsInWindow: Int = 3,
+    reconnectWindowSeconds: TimeInterval = 60.0,
+    stableStreamingResetSeconds: TimeInterval = 30.0,
+    now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
     makeTransport: @escaping @Sendable () -> ByteTransport
   ) -> LiveTsReader {
-    LiveTsReader(url: streamUrl, headers: headers, generation: generation, gate: gate, makeTransport: makeTransport)
+    LiveTsReader(
+      url: streamUrl,
+      headers: headers,
+      generation: generation,
+      gate: gate,
+      makeTransport: makeTransport,
+      maxReconnectsInWindow: maxReconnectsInWindow,
+      reconnectWindowSeconds: reconnectWindowSeconds,
+      stableStreamingResetSeconds: stableStreamingResetSeconds,
+      now: now
+    )
   }
 
   @Test("a 404 answer fails the open with status 404 and hands nothing to the engine")
@@ -206,15 +220,20 @@ struct LiveTsReaderTests {
     reader.close()
   }
 
-  @Test("a second drop fails with the transport error")
-  func secondDropFailsWithTransportError() async {
+  @Test("rapid drops exceeding reconnect budget within the window fail deterministically (#441)")
+  func rapidDropsExceedingBudgetFailWithTransportError() async {
     let gate = ConnectionGate()
+    let clock = VirtualClock(now: 100.0)
     let part1 = makeTsPackets(count: 6, seed: 0x11)
-    let part2 = makeTsPackets(count: 3, seed: 0x22)
+    let part2 = makeTsPackets(count: 6, seed: 0x22)
+    let part3 = makeTsPackets(count: 6, seed: 0x33)
+    let part4 = makeTsPackets(count: 6, seed: 0x44)
 
     let transport1 = FakeTransport()
     let transport2 = FakeTransport()
-    let box = TransportSequence([transport1, transport2])
+    let transport3 = FakeTransport()
+    let transport4 = FakeTransport()
+    let box = TransportSequence([transport1, transport2, transport3, transport4])
 
     transport1.onStart = { t in
       t.sendStatus(200, contentType: "video/mp2t")
@@ -224,26 +243,193 @@ struct LiveTsReaderTests {
       t.sendStatus(200, contentType: "video/mp2t")
       t.sendData(part2)
     }
+    transport3.onStart = { t in
+      t.sendStatus(200, contentType: "video/mp2t")
+      t.sendData(part3)
+    }
+    transport4.onStart = { t in
+      t.sendStatus(200, contentType: "video/mp2t")
+      t.sendData(part4)
+    }
 
-    let reader = makeReader(gate: gate, makeTransport: { box.next() })
+    let reader = makeReader(
+      gate: gate,
+      maxReconnectsInWindow: 3,
+      reconnectWindowSeconds: 60.0,
+      stableStreamingResetSeconds: 30.0,
+      now: { clock.current() },
+      makeTransport: { box.next() }
+    )
 
     #expect(await reader.open() == .media(formatHint: "mpegts"))
     _ = readChunk(reader, maxBytes: part1.count)
 
+    clock.advance(by: 5.0)
     transport1.complete(error: .transport(domain: NSURLErrorDomain, code: -1005))
+    #expect(box.createdCount == 2)
     _ = readChunk(reader, maxBytes: part2.count)
 
-    let secondError = ReaderFailure.transport(domain: NSURLErrorDomain, code: -1001)
-    transport2.complete(error: secondError)
+    clock.advance(by: 5.0)
+    transport2.complete(error: .transport(domain: NSURLErrorDomain, code: -1005))
+    #expect(box.createdCount == 3)
+    _ = readChunk(reader, maxBytes: part3.count)
 
-    #expect(box.createdCount == 2)
+    clock.advance(by: 5.0)
+    transport3.complete(error: .transport(domain: NSURLErrorDomain, code: -1005))
+    #expect(box.createdCount == 4)
+    _ = readChunk(reader, maxBytes: part4.count)
+
+    // 4th drop within 60s window exceeds maxReconnectsInWindow == 3 and terminates cleanly.
+    clock.advance(by: 5.0)
+    let terminalError = ReaderFailure.transport(domain: NSURLErrorDomain, code: -1001)
+    transport4.complete(error: terminalError)
+
+    #expect(box.createdCount == 4)
     let (nEnd, _) = readChunk(reader, maxBytes: 1_024)
     #expect(nEnd == -1)
-    #expect(reader.lastFailure == secondError)
+    #expect(reader.lastFailure == terminalError)
 
     let nextOpened = await gate.open(generation: 2, forceClose: {})
     #expect(nextOpened)
     gate.closed(generation: 2)
+  }
+
+  @Test("2nd, 3rd, and 4th drops after stable streaming windows reconnect cleanly (#441)")
+  func dropsAfterStableStreamingWindowResetBudgetAndReconnect() async {
+    let gate = ConnectionGate()
+    let clock = VirtualClock(now: 500.0)
+    let transports = (0..<5).map { _ in FakeTransport() }
+    let box = TransportSequence(transports)
+
+    for (index, transport) in transports.enumerated() {
+      let seed = UInt8(0x10 + index * 0x10)
+      transport.onStart = { t in
+        t.sendStatus(200, contentType: "video/mp2t")
+        t.sendData(makeTsPackets(count: 6, seed: seed))
+      }
+    }
+
+    let reader = makeReader(
+      gate: gate,
+      maxReconnectsInWindow: 2,
+      reconnectWindowSeconds: 60.0,
+      stableStreamingResetSeconds: 30.0,
+      now: { clock.current() },
+      makeTransport: { box.next() }
+    )
+
+    #expect(await reader.open() == .media(formatHint: "mpegts"))
+    _ = readChunk(reader, maxBytes: 188 * 6)
+
+    for idx in 0..<4 {
+      // Sustain streaming progress past stableStreamingResetSeconds before each drop.
+      clock.advance(by: 31.0)
+      let steadyChunk = makeTsPackets(count: 2, seed: UInt8(0xA0 + idx))
+      transports[idx].sendData(steadyChunk)
+      let (steadyRead, steadyData) = readChunk(reader, maxBytes: steadyChunk.count)
+      #expect(Int(steadyRead) == steadyChunk.count)
+      #expect(steadyData == steadyChunk)
+
+      clock.advance(by: 1.0)
+      transports[idx].complete(error: .transport(domain: NSURLErrorDomain, code: -1005))
+      #expect(box.createdCount == idx + 2)
+      let (reconnectedRead, _) = readChunk(reader, maxBytes: 188 * 6)
+      #expect(reconnectedRead == Int32(188 * 6))
+      #expect(reader.lastFailure == nil)
+    }
+
+    reader.close()
+  }
+
+  @Test("expired reconnect timestamps outside the rolling window are pruned (#441)")
+  func expiredReconnectTimestampsPrunedByRollingWindow() async {
+    let gate = ConnectionGate()
+    let clock = VirtualClock(now: 1_000.0)
+    let transports = (0..<4).map { _ in FakeTransport() }
+    let box = TransportSequence(transports)
+
+    for (index, transport) in transports.enumerated() {
+      let seed = UInt8(0x20 + index * 0x10)
+      transport.onStart = { t in
+        t.sendStatus(200, contentType: "video/mp2t")
+        t.sendData(makeTsPackets(count: 6, seed: seed))
+      }
+    }
+
+    let reader = makeReader(
+      gate: gate,
+      maxReconnectsInWindow: 2,
+      reconnectWindowSeconds: 60.0,
+      stableStreamingResetSeconds: 300.0,
+      now: { clock.current() },
+      makeTransport: { box.next() }
+    )
+
+    #expect(await reader.open() == .media(formatHint: "mpegts"))
+    _ = readChunk(reader, maxBytes: 188 * 6)
+
+    // Two drops at t=1010 and t=1020 fill the 2-reconnect budget.
+    clock.advance(by: 10.0)
+    transports[0].complete(error: .transport(domain: NSURLErrorDomain, code: -1005))
+    _ = readChunk(reader, maxBytes: 188 * 6)
+
+    clock.advance(by: 10.0)
+    transports[1].complete(error: .transport(domain: NSURLErrorDomain, code: -1005))
+    _ = readChunk(reader, maxBytes: 188 * 6)
+    #expect(box.createdCount == 3)
+
+    // Advance past t=1010 + 60s so the first reconnect timestamp ages out; 3rd drop reconnects cleanly.
+    clock.advance(by: 55.0)
+    transports[2].complete(error: .transport(domain: NSURLErrorDomain, code: -1005))
+    #expect(box.createdCount == 4)
+    let (n, _) = readChunk(reader, maxBytes: 188 * 6)
+    #expect(n == Int32(188 * 6))
+    #expect(reader.lastFailure == nil)
+
+    reader.close()
+  }
+
+  @Test("reconnect timestamp at exact 60.0 s window boundary is pruned cleanly (#441)")
+  func exactWindowBoundaryTimestampIsPruned() async {
+    let gate = ConnectionGate()
+    let clock = VirtualClock(now: 2_000.0)
+    let transports = (0..<3).map { _ in FakeTransport() }
+    let box = TransportSequence(transports)
+
+    for (index, transport) in transports.enumerated() {
+      let seed = UInt8(0x40 + index * 0x10)
+      transport.onStart = { t in
+        t.sendStatus(200, contentType: "video/mp2t")
+        t.sendData(makeTsPackets(count: 6, seed: seed))
+      }
+    }
+
+    let reader = makeReader(
+      gate: gate,
+      maxReconnectsInWindow: 1,
+      reconnectWindowSeconds: 60.0,
+      stableStreamingResetSeconds: 300.0,
+      now: { clock.current() },
+      makeTransport: { box.next() }
+    )
+
+    #expect(await reader.open() == .media(formatHint: "mpegts"))
+    _ = readChunk(reader, maxBytes: 188 * 6)
+
+    // First drop at t=2000 fills the 1-reconnect window budget.
+    transports[0].complete(error: .transport(domain: NSURLErrorDomain, code: -1005))
+    #expect(box.createdCount == 2)
+    _ = readChunk(reader, maxBytes: 188 * 6)
+
+    // Second drop at exact boundary t=2060.0 (2060.0 - 2000.0 == 60.0) prunes the expired entry and reconnects.
+    clock.advance(by: 60.0)
+    transports[1].complete(error: .transport(domain: NSURLErrorDomain, code: -1005))
+    #expect(box.createdCount == 3)
+    let (n, _) = readChunk(reader, maxBytes: 188 * 6)
+    #expect(n == Int32(188 * 6))
+    #expect(reader.lastFailure == nil)
+
+    reader.close()
   }
 
   @Test("MPEG-TS bytes labelled as mpegurl open as mpegts after sniffing")
@@ -283,5 +469,22 @@ private final class TransportSequence: @unchecked Sendable {
       index += 1
       return item
     }
+  }
+}
+
+private final class VirtualClock: @unchecked Sendable {
+  private let lock = NSLock()
+  private var nowSeconds: TimeInterval
+
+  init(now: TimeInterval) {
+    self.nowSeconds = now
+  }
+
+  func current() -> TimeInterval {
+    lock.withLock { nowSeconds }
+  }
+
+  func advance(by delta: TimeInterval) {
+    lock.withLock { nowSeconds += delta }
   }
 }

@@ -65,7 +65,7 @@ public func loadOptions(for plan: MediaPlan, request: LoadRequest) -> EngineLoad
     httpHeaders: sanitizeRequestHeaders(request.headers),
     maxConcurrentSourceRequests: maxConcurrent,
     preferSoftwareDecode: request.preferHevcOverDolbyVision,
-    displayCriteriaOwner: .host,
+    displayCriteriaOwner: .engine,
     liveStartupGraceSeconds: liveStartupGraceSeconds,
     liveStartupSingleSegmentMinimumSeconds: liveStartupSingleSegmentMinimumSeconds,
     liveEdgeCushionSeconds: cushion,

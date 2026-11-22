@@ -246,4 +246,193 @@ struct EngineCoreHardeningTests {
       ]
     )
   }
+
+  @Test("setSpeed clamps VOD rates, updates anchors across pause/stall/reload, ignores live/invalid rates, and resets across lifecycle boundaries (#442)")
+  func setSpeedClampsPersistsAcrossPausesAndResetsOnLifecycle() {
+    let (core, backend, sink, clock) = makeHarness()
+
+    // Live stream ignores setSpeed completely.
+    core.load(LoadRequest(url: "http://h:7878/live/demo/demo/1001.ts", live: true), attempt: 1)
+    core.observe(.firstFrame, serial: 1)
+    core.observe(.phase(.playing), serial: 1)
+    backend.calls.removeAll()
+    sink.events.removeAll()
+    core.setSpeed(2, rate: 1.5)
+    #expect(backend.calls.isEmpty)
+    #expect(sink.events.isEmpty)
+
+    // VOD clamps to [0.25, 4.0], rejects NaN/Inf/<=0, and immediately emits clock anchor while playing.
+    core.load(LoadRequest(url: "http://h:7878/movie/demo/demo/1.mp4", live: false), attempt: 3)
+    core.observe(.firstFrame, serial: 2)
+    core.observe(.phase(.playing), serial: 2)
+    clock.nowMs = 1_200
+    core.observe(.clock(positionSeconds: 10.0, rate: 1.0, durationSeconds: 300.0, liveEdgeSeconds: nil), serial: 2)
+    backend.calls.removeAll()
+    sink.events.removeAll()
+
+    core.setSpeed(4, rate: 0.0)
+    core.setSpeed(4, rate: -1.0)
+    core.setSpeed(4, rate: .nan)
+    core.setSpeed(4, rate: .infinity)
+    #expect(backend.calls.isEmpty)
+    #expect(sink.events.isEmpty)
+
+    clock.nowMs = 1_500
+    core.setSpeed(5, rate: 8.0)
+    #expect(backend.calls == [.setRate(4.0)])
+    #expect(
+      sink.events == [
+        .clock(attempt: 5, anchor: ClockAnchorOut(positionMs: 10_000, atMs: 1_500, rate: 4.0, durationMs: 300_000)),
+      ]
+    )
+
+    backend.calls.removeAll()
+    sink.events.removeAll()
+    clock.nowMs = 1_600
+    core.setSpeed(6, rate: 0.1)
+    #expect(backend.calls == [.setRate(0.25)])
+    #expect(
+      sink.events == [
+        .clock(attempt: 6, anchor: ClockAnchorOut(positionMs: 10_000, atMs: 1_600, rate: 0.25, durationMs: 300_000)),
+      ]
+    )
+
+    // Resuming from pause and from stall emits the active playbackRate instead of hardcoded 1.0.
+    clock.nowMs = 1_800
+    core.setSpeed(7, rate: 1.5)
+    core.pause(8)
+    core.observe(.phase(.paused), serial: 2)
+    sink.events.removeAll()
+
+    clock.nowMs = 2_200
+    core.play(9)
+    core.observe(.phase(.playing), serial: 2)
+    #expect(
+      sink.events == [
+        .state(attempt: 9, state: .playing),
+        .clock(attempt: 9, anchor: ClockAnchorOut(positionMs: 10_000, atMs: 2_200, rate: 1.5, durationMs: 300_000)),
+      ]
+    )
+
+    sink.events.removeAll()
+    clock.nowMs = 2_400
+    core.observe(.phase(.rebuffering), serial: 2)
+    sink.events.removeAll()
+    clock.nowMs = 2_600
+    core.observe(.phase(.playing), serial: 2)
+    #expect(
+      sink.events == [
+        .stall(attempt: 9, phase: .end, atMs: 2_600),
+        .state(attempt: 9, state: .playing),
+        .clock(attempt: 9, anchor: ClockAnchorOut(positionMs: 10_000, atMs: 2_600, rate: 1.5, durationMs: 300_000)),
+      ]
+    )
+
+    // Retry resets playbackRate back to 1.0.
+    core.retry(10)
+    core.observe(.firstFrame, serial: 3)
+    core.observe(.phase(.playing), serial: 3)
+    core.observe(.phase(.rebuffering), serial: 3)
+    sink.events.removeAll()
+    clock.nowMs = 3_000
+    core.observe(.phase(.playing), serial: 3)
+    #expect(
+      sink.events == [
+        .stall(attempt: 10, phase: .end, atMs: 3_000),
+        .state(attempt: 10, state: .playing),
+        .clock(attempt: 10, anchor: ClockAnchorOut(positionMs: 10_000, atMs: 3_000, rate: 1.0)),
+      ]
+    )
+
+    // setSpeed while paused updates backend without emitting a playing anchor until resumed.
+    core.pause(11)
+    core.observe(.phase(.paused), serial: 3)
+    backend.calls.removeAll()
+    sink.events.removeAll()
+    core.setSpeed(12, rate: 2.0)
+    #expect(backend.calls == [.setRate(2.0)])
+    #expect(sink.events.isEmpty)
+
+    clock.nowMs = 3_500
+    core.play(13)
+    core.observe(.phase(.playing), serial: 3)
+    #expect(
+      sink.events == [
+        .state(attempt: 13, state: .playing),
+        .clock(attempt: 13, anchor: ClockAnchorOut(positionMs: 10_000, atMs: 3_500, rate: 2.0)),
+      ]
+    )
+
+    // stop / recreate / release reset rate and block subsequent calls after release.
+    core.stop(14)
+    core.load(LoadRequest(url: "http://h:7878/movie/demo/demo/2.mp4", live: false), attempt: 15)
+    core.observe(.firstFrame, serial: 5)
+    core.observe(.phase(.playing), serial: 5)
+    core.setSpeed(16, rate: 1.75)
+    #expect(core.recreate(17))
+    core.release()
+    backend.calls.removeAll()
+    core.setSpeed(18, rate: 2.0)
+    #expect(backend.calls.isEmpty)
+  }
+
+  @Test("setOsdVisible forwards visibility to backend until released (#442)")
+  func setOsdVisibleForwardsUntilReleased() {
+    let (core, backend, _, _) = makeHarness()
+    core.setOsdVisible(false)
+    core.setOsdVisible(true)
+    #expect(backend.calls == [.setOsdVisible(false), .setOsdVisible(true)])
+
+    backend.calls.removeAll()
+    core.release()
+    core.setOsdVisible(false)
+    #expect(backend.calls == [.stopMedia, .dispose])
+  }
+
+  @Test("observing phase(.playing) after phase(.rebuffering) clears stalled and immediately resumes clock anchors (#187)")
+  func rebufferingRecoveryClearsStalledAndResumesClockAnchors() {
+    let (core, _, sink, clock) = makeHarness()
+    core.load(LoadRequest(url: "http://h:7878/movie/demo/demo/1.mp4", live: false), attempt: 1)
+    core.observe(.firstFrame, serial: 1)
+    core.observe(.phase(.playing), serial: 1)
+    clock.nowMs = 1_000
+    core.observe(.clock(positionSeconds: 12.0, rate: 1.0, durationSeconds: 120.0, liveEdgeSeconds: nil), serial: 1)
+    sink.events.removeAll()
+
+    // Entering .rebuffering sets stalled = true and blocks clock ticks while stalled.
+    clock.nowMs = 1_500
+    core.observe(.phase(.rebuffering), serial: 1)
+    #expect(
+      sink.events == [
+        .stall(attempt: 1, phase: .start, atMs: 1_500),
+        .state(attempt: 1, state: .buffering),
+        .clock(attempt: 1, anchor: ClockAnchorOut(positionMs: 12_000, atMs: 1_500, rate: 0, durationMs: 120_000)),
+      ]
+    )
+    sink.events.removeAll()
+
+    clock.nowMs = 2_600
+    core.observe(.clock(positionSeconds: 12.2, rate: 1.0, durationSeconds: 120.0, liveEdgeSeconds: nil), serial: 1)
+    #expect(sink.events.isEmpty)
+
+    // Receiving .phase(.playing) clears stalled and immediately allows subsequent clock anchors.
+    clock.nowMs = 2_800
+    core.observe(.phase(.playing), serial: 1)
+    #expect(
+      sink.events == [
+        .stall(attempt: 1, phase: .end, atMs: 2_800),
+        .state(attempt: 1, state: .playing),
+        .clock(attempt: 1, anchor: ClockAnchorOut(positionMs: 12_200, atMs: 2_800, rate: 1.0, durationMs: 120_000)),
+      ]
+    )
+    sink.events.removeAll()
+
+    clock.nowMs = 3_900
+    core.observe(.clock(positionSeconds: 13.3, rate: 1.0, durationSeconds: 120.0, liveEdgeSeconds: nil), serial: 1)
+    #expect(
+      sink.events == [
+        .clock(attempt: 1, anchor: ClockAnchorOut(positionMs: 13_300, atMs: 3_900, rate: 1.0, durationMs: 120_000)),
+      ]
+    )
+  }
 }

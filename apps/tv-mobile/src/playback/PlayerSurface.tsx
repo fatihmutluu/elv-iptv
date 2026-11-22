@@ -12,6 +12,7 @@ export interface PlayerSurfaceProps {
   subtitleBottomInsetPx?: number;
   surfaceRecreationToken?: number;
   useTextureView?: boolean;
+  osdVisible?: boolean;
   testID?: string;
 }
 
@@ -26,6 +27,7 @@ export function PlayerSurface({
   subtitleBottomInsetPx,
   surfaceRecreationToken,
   useTextureView,
+  osdVisible,
   testID,
 }: PlayerSurfaceProps): ReactElement | null {
   if (Platform.OS === 'ios') {
@@ -35,6 +37,7 @@ export function PlayerSurface({
         style={style}
         resizeMode={resizeMode}
         subtitleBottomInsetPx={subtitleBottomInsetPx}
+        {...(osdVisible !== undefined ? { osdVisible } : {})}
         testID={testID}
       />
     );

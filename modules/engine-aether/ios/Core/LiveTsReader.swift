@@ -1,6 +1,6 @@
 import Foundation
 
-/// Forward-only live MPEG-TS reader with `LiveTsSniffer` open/reconnect classification, gate coordination, and single-drop reconnect.
+/// Forward-only live MPEG-TS reader with `LiveTsSniffer` open/reconnect classification, gate coordination, and a time-windowed reconnect budget.
 public final class LiveTsReader: @unchecked Sendable {
   private final class TransportRelay: ByteTransportDelegate, @unchecked Sendable {
     let connectionId: Int
@@ -29,6 +29,10 @@ public final class LiveTsReader: @unchecked Sendable {
   private let gate: ConnectionGate
   private let makeTransport: @Sendable () -> ByteTransport
   private let onBytesReceived: (@Sendable (Int64) -> Void)?
+  private let maxReconnectsInWindow: Int
+  private let reconnectWindowSeconds: TimeInterval
+  private let stableStreamingResetSeconds: TimeInterval
+  private let now: @Sendable () -> TimeInterval
   private let fifo = ByteFifo()
   private let lock = NSLock()
   private var phase: Phase = .idle
@@ -44,7 +48,8 @@ public final class LiveTsReader: @unchecked Sendable {
   private var deliveredAnyBytes = false
   private var cumulativeBytesReceived: Int64 = 0
   private var lastProgressNotifiedAt: TimeInterval = -.infinity
-  private var reconnectedOnce = false
+  private var reconnectTimestamps: [TimeInterval] = []
+  private var streamingSince: TimeInterval?
   private var reconnectRejected = false
   private var storedFailure: ReaderFailure?
 
@@ -54,10 +59,22 @@ public final class LiveTsReader: @unchecked Sendable {
     generation: Int,
     gate: ConnectionGate,
     makeTransport: @escaping @Sendable () -> ByteTransport,
-    onBytesReceived: (@Sendable (Int64) -> Void)? = nil
+    onBytesReceived: (@Sendable (Int64) -> Void)? = nil,
+    maxReconnectsInWindow: Int = 3,
+    reconnectWindowSeconds: TimeInterval = 60.0,
+    stableStreamingResetSeconds: TimeInterval = 30.0,
+    now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
   ) {
-    self.url = url; self.headers = headers; self.generation = generation
-    self.gate = gate; self.makeTransport = makeTransport; self.onBytesReceived = onBytesReceived
+    self.url = url
+    self.headers = headers
+    self.generation = generation
+    self.gate = gate
+    self.makeTransport = makeTransport
+    self.onBytesReceived = onBytesReceived
+    self.maxReconnectsInWindow = max(0, maxReconnectsInWindow)
+    self.reconnectWindowSeconds = reconnectWindowSeconds.isFinite ? max(0.0, reconnectWindowSeconds) : 60.0
+    self.stableStreamingResetSeconds = stableStreamingResetSeconds.isFinite ? max(0.0, stableStreamingResetSeconds) : 30.0
+    self.now = now
   }
 
   deinit {
@@ -155,10 +172,10 @@ public final class LiveTsReader: @unchecked Sendable {
     lock.withLock {
       guard connectionId == activeConnectionId, !abortedByCaller else { return }
       cumulativeBytesReceived += Int64(data.count)
+      let currentTime = now()
       if onBytesReceived != nil {
-        let now = ProcessInfo.processInfo.systemUptime
-        if now - lastProgressNotifiedAt >= 0.45 {
-          lastProgressNotifiedAt = now
+        if currentTime - lastProgressNotifiedAt >= 0.45 {
+          lastProgressNotifiedAt = currentTime
           fx.reportProgressBytes = cumulativeBytesReceived
         }
       }
@@ -167,6 +184,13 @@ public final class LiveTsReader: @unchecked Sendable {
         applySniffDecisionLocked(sniffer.onData(data), isReconnect: phase == .reconnectSniff, into: &fx)
       case .streaming where !reconnectRejected:
         deliveredAnyBytes = true
+        if let started = streamingSince {
+          if currentTime - started >= stableStreamingResetSeconds {
+            reconnectTimestamps.removeAll()
+          }
+        } else {
+          streamingSince = currentTime
+        }
         fx.forwardToFifo = data
       default:
         break
@@ -241,6 +265,7 @@ public final class LiveTsReader: @unchecked Sendable {
       deliveredAnyBytes = deliveredAnyBytes || !initialBytes.isEmpty
       fx.forwardToFifo = initialBytes
       phase = .streaming
+      streamingSince = now()
       if !isReconnect { fx.openResult = popOpenLocked(.media(formatHint: hint)) }
     case .playlist:
       if isReconnect {
@@ -271,8 +296,11 @@ public final class LiveTsReader: @unchecked Sendable {
   }
 
   private func reconnectOrFinishLocked(error: ReaderFailure?, into fx: inout SideEffects) {
-    if !reconnectRejected && deliveredAnyBytes && !reconnectedOnce {
-      reconnectedOnce = true
+    let currentTime = now()
+    streamingSince = nil
+    reconnectTimestamps.removeAll { currentTime - $0 >= reconnectWindowSeconds }
+    if !reconnectRejected && deliveredAnyBytes && reconnectTimestamps.count < maxReconnectsInWindow {
+      reconnectTimestamps.append(currentTime)
       phase = .reconnectSniff
       sniffer.reset()
       fx.reconnectStart = prepareNextTransportLocked()

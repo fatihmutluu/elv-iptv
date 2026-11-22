@@ -77,6 +77,14 @@ final class EngineObject: SharedObject, @unchecked Sendable {
     }
   }
 
+  func setSpeed(_ attempt: Int, rate: Double) {
+    guard let epoch = fence.recordInEpochCommand(attempt: attempt) else { return }
+    enqueueMain { [weak self] in
+      guard let self, self.fence.beginInEpoch(epoch: epoch), let driver = self.driver else { return }
+      driver.core.setSpeed(attempt, rate: rate)
+    }
+  }
+
   func selectAudioTrack(_ attempt: Int, id: String) {
     guard let epoch = fence.recordInEpochCommand(attempt: attempt) else { return }
     enqueueMain { [weak self] in

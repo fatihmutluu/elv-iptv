@@ -13,6 +13,8 @@ export interface VideoSurfaceProps {
   surfaceRecreationToken?: number;
   /** Opt-in TextureView fallback on Android devices with broken SurfaceView compositing (`#262`). */
   useTextureView?: boolean;
+  /** Whether the player OSD is currently visible so native engines can throttle hidden-OSD clock updates (`#442`). */
+  osdVisible?: boolean;
   testID?: string;
 }
 

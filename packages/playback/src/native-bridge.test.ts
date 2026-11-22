@@ -23,6 +23,7 @@ function fakeHandle() {
     pause: vi.fn(),
     seek: vi.fn(),
     setScrubbing: vi.fn(),
+    setSpeed: vi.fn(),
     selectAudioTrack: vi.fn(),
     selectSubtitleTrack: vi.fn(),
     stop: vi.fn(),
@@ -75,6 +76,7 @@ describe('bridgeNativeEngine', () => {
     engine.seek(5, 12_000);
     engine.setScrubbing?.(5, true);
     engine.setScrubbing?.(5, false);
+    engine.setSpeed?.(5, 1.5);
     engine.selectAudioTrack?.(5, '1:1');
     engine.selectSubtitleTrack?.(5, '2:0');
     engine.selectSubtitleTrack?.(6, null);
@@ -98,6 +100,7 @@ describe('bridgeNativeEngine', () => {
     expect(handle.seek).toHaveBeenCalledWith(5, 12_000);
     expect(handle.setScrubbing).toHaveBeenNthCalledWith(1, 5, true);
     expect(handle.setScrubbing).toHaveBeenNthCalledWith(2, 5, false);
+    expect(handle.setSpeed).toHaveBeenCalledWith(5, 1.5);
     expect(handle.selectAudioTrack).toHaveBeenCalledWith(5, '1:1');
     expect(handle.selectSubtitleTrack).toHaveBeenNthCalledWith(1, 5, '2:0');
     expect(handle.selectSubtitleTrack).toHaveBeenNthCalledWith(2, 6, null);
@@ -105,8 +108,9 @@ describe('bridgeNativeEngine', () => {
     expect(handle.recreate).toHaveBeenCalledWith(7);
   });
 
-  it('omits track selection and setScrubbing methods when absent on the native handle', () => {
+  it('omits track selection, speed, and setScrubbing methods when absent on the native handle', () => {
     const {
+      setSpeed: _sp,
       selectAudioTrack: _a,
       selectSubtitleTrack: _s,
       setScrubbing: _sc,
@@ -117,6 +121,7 @@ describe('bridgeNativeEngine', () => {
       uptimeMs: () => 0,
       now: () => 0,
     });
+    expect(engine.setSpeed).toBeUndefined();
     expect(engine.selectAudioTrack).toBeUndefined();
     expect(engine.selectSubtitleTrack).toBeUndefined();
     expect(engine.setScrubbing).toBeUndefined();
@@ -139,6 +144,26 @@ describe('bridgeNativeEngine', () => {
     engine.release();
     engine.setScrubbing?.(3, true);
     expect(handle.setScrubbing).toHaveBeenCalledTimes(2);
+  });
+
+  it('adopts the attempt token on setSpeed and turns post-release calls into no-ops (#442)', () => {
+    const { handle, emit, engine } = fakeHandle();
+    const received: EngineEvent[] = [];
+    engine.subscribe((event) => received.push(event));
+
+    engine.load({ attempt: 1, url: 'http://sim/movie/a/a/1.mp4', headers: {}, kind: 'vod' });
+    engine.setSpeed?.(2, 1.75);
+    emit({ attempt: 1, type: 'state', state: 'playing' });
+    emit({ attempt: 2, type: 'clock', anchor: { positionMs: 500, atMs: 0, rate: 1.75 } });
+
+    expect(handle.setSpeed).toHaveBeenCalledWith(2, 1.75);
+    expect(received).toEqual([
+      { attempt: 2, type: 'clock', anchor: { positionMs: 500, atMs: 0, rate: 1.75 } },
+    ]);
+
+    engine.release();
+    engine.setSpeed?.(3, 2);
+    expect(handle.setSpeed).toHaveBeenCalledTimes(1);
   });
 
   it('sends no optional load fields the command does not have', () => {
