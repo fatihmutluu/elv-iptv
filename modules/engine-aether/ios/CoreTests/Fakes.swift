@@ -11,6 +11,8 @@ final class FakeBackend: PlayerBackend {
     case play
     case pause
     case seek(Double)
+    case setRate(Double)
+    case setOsdVisible(Bool)
     case selectAudioTrack(Int)
     case selectSubtitleTrack(Int?)
     case rebuild
@@ -38,6 +40,14 @@ final class FakeBackend: PlayerBackend {
 
   func seek(toSeconds: Double) {
     calls.append(.seek(toSeconds))
+  }
+
+  func setRate(_ rate: Double) {
+    calls.append(.setRate(rate))
+  }
+
+  func setOsdVisible(_ visible: Bool) {
+    calls.append(.setOsdVisible(visible))
   }
 
   func selectAudioTrack(_ streamId: Int) {

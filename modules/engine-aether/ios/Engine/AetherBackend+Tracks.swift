@@ -30,39 +30,86 @@ extension AetherBackend {
     }
     .store(in: &cancellables)
 
-    let subRenderStatePub = Publishers.CombineLatest3(
+    Publishers.CombineLatest4(
+      target.$subtitleCues,
       target.clock.$sourceTimeFollowsPicture,
       target.$isSubtitleActive,
       target.$softwareDisplaySize
     )
-
-    Publishers.CombineLatest3(
-      target.$subtitleCues,
-      target.clock.$sourceTime,
-      subRenderStatePub
-    )
-    .sink { [weak self, weak target] cues, sourceTime, state in
+    .sink { [weak self, weak target] cues, followsPicture, isSubActive, softwareSize in
       Self.onMainActor {
         guard let self, let target else { return }
-        let (followsPicture, isSubActive, softwareSize) = state
-        guard self.engineLoadSerial > 0, isSubActive, followsPicture, !cues.isEmpty else {
-          self.publishSubtitlePresentation(.empty)
-          return
-        }
-        let activeCues = cues.filter { cue in
-          cue.startTime <= sourceTime && sourceTime < cue.endTime
-        }
-        let resolvedSize = Self.resolveVideoSize(from: target, softwareSize: softwareSize)
-        self.publishSubtitlePresentation(
-          SubtitlePresentation(
-            cues: activeCues,
-            videoSize: resolvedSize,
-            gravity: self.gravity
-          )
+        self.updateSubtitleClockSubscription(
+          target: target,
+          cues: cues,
+          followsPicture: followsPicture,
+          isSubActive: isSubActive,
+          softwareSize: softwareSize
         )
       }
     }
     .store(in: &cancellables)
+  }
+
+  private func updateSubtitleClockSubscription(
+    target: AetherEngine,
+    cues: [SubtitleCue],
+    followsPicture: Bool,
+    isSubActive: Bool,
+    softwareSize: CGSize?
+  ) {
+    guard engineLoadSerial > 0, isSubActive, followsPicture, !cues.isEmpty else {
+      subtitleClockCancellable?.cancel()
+      subtitleClockCancellable = nil
+      publishSubtitlePresentation(.empty)
+      return
+    }
+    renderSubtitles(
+      from: target,
+      cues: cues,
+      sourceTime: target.clock.sourceTime,
+      softwareSize: softwareSize
+    )
+    if subtitleClockCancellable == nil {
+      subtitleClockCancellable = target.clock.$sourceTime
+        .dropFirst()
+        .sink { [weak self, weak target] sourceTime in
+          Self.onMainActor {
+            guard let self, let target, self.engineLoadSerial > 0 else { return }
+            guard target.isSubtitleActive, target.clock.sourceTimeFollowsPicture, !target.subtitleCues.isEmpty else {
+              self.subtitleClockCancellable?.cancel()
+              self.subtitleClockCancellable = nil
+              self.publishSubtitlePresentation(.empty)
+              return
+            }
+            self.renderSubtitles(
+              from: target,
+              cues: target.subtitleCues,
+              sourceTime: sourceTime,
+              softwareSize: target.softwareDisplaySize
+            )
+          }
+        }
+    }
+  }
+
+  private func renderSubtitles(
+    from target: AetherEngine,
+    cues: [SubtitleCue],
+    sourceTime: Double,
+    softwareSize: CGSize?
+  ) {
+    let activeCues = cues.filter { cue in
+      cue.startTime <= sourceTime && sourceTime < cue.endTime
+    }
+    let resolvedSize = Self.resolveVideoSize(from: target, softwareSize: softwareSize)
+    publishSubtitlePresentation(
+      SubtitlePresentation(
+        cues: activeCues,
+        videoSize: resolvedSize,
+        gravity: gravity
+      )
+    )
   }
 
   /// Coalesces `@Published` `willSet` track signals onto the next `@MainActor` turn so `target`'s properties
@@ -118,9 +165,14 @@ extension AetherBackend {
     let serial = engineLoadSerial
     guard serial > 0 else { return }
     audioSwitchTask?.cancel()
-    if let pendingSeek = seekTask {
+    if seekTask != nil {
       audioSwitchTask = Task { @MainActor [weak self] in
-        await pendingSeek.value
+        while let self, let pendingSeek = self.seekTask {
+          await pendingSeek.value
+          guard !Task.isCancelled, self.engineLoadSerial == serial else {
+            return
+          }
+        }
         guard let self, !Task.isCancelled, self.engineLoadSerial == serial,
               let currentEngine = self.engine, let targetStream = self.desiredAudioStreamId
         else {

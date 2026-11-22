@@ -28,7 +28,11 @@ final class AetherBackend: PlayerBackend {
 
   var engine: AetherEngine?
   var cancellables = Set<AnyCancellable>()
+  var avPlayerBufferCancellables = Set<AnyCancellable>()
+  var avPlayerItemBufferCancellables = Set<AnyCancellable>()
   var itemProgressCancellable: AnyCancellable?
+  var subtitleClockCancellable: AnyCancellable?
+  let audioSessionController = AetherAudioSessionController()
   private var audioSessionObserver: AetherAudioSessionObserver?
   weak var boundPlayerView: AetherPlayerView?
   var gravity: AVLayerVideoGravity = .resizeAspect
@@ -61,19 +65,17 @@ final class AetherBackend: PlayerBackend {
   var liveRecoveryTask: Task<Void, Never>?
   var liveRecoveryPolicy = LiveRecoveryPolicy()
 
-  var audioInterrupted = false
-  var systemPauseUntilUptimeMs: Double = 0
+  var audioSessionPolicy = AudioSessionPolicy()
+  var osdClockThrottle = OsdClockThrottle(hiddenIntervalSeconds: 5.0, osdVisible: true)
+  var requestedRate: Double = 1.0
+  var lastAVBufferReportedBuffering = false
+  var playbackActiveIntent = false
 
   init(gate: ConnectionGate, httpSession: EngineHttpSession) {
     self.gate = gate
     self.httpSession = httpSession
-    self.audioSessionObserver = AetherAudioSessionObserver { [weak self] interrupted, holdWindowMs in
-      guard let self else { return }
-      if let interrupted {
-        self.audioInterrupted = interrupted
-      }
-      let nowMs = ProcessInfo.processInfo.systemUptime * 1_000.0
-      self.systemPauseUntilUptimeMs = max(self.systemPauseUntilUptimeMs, nowMs + holdWindowMs)
+    self.audioSessionObserver = AetherAudioSessionObserver { [weak self] event in
+      self?.handleAudioSessionEvent(event)
     }
     _ = try? installFreshEngine()
   }
@@ -137,12 +139,15 @@ final class AetherBackend: PlayerBackend {
     currentLoadOptions = options
     desiredAudioStreamId = options.audioStreamIndex.map(Int.init)
     desiredSubtitleStreamId = options.subtitlesDisabled ? nil : options.initialSubtitleTrackId
+    audioSessionPolicy.clearLatchesOnUserPlay()
+    audioSessionController.activateForPlayback()
 
     runMediaLoad(plan: plan, fallbackOptions: options, serial: serial, currentEngine: currentEngine)
   }
 
   func stopMedia() {
     resetSerialBookkeeping()
+    audioSessionPolicy.reset()
     currentPlan = nil
     currentLoadOptions = nil
     desiredAudioStreamId = nil
@@ -152,15 +157,48 @@ final class AetherBackend: PlayerBackend {
     cancelTasksAndReader()
     publishSubtitlePresentation(.empty)
     engine?.stop(resetDisplayCriteria: false, finalTeardown: false)
+    audioSessionController.deactivateIfOwned()
   }
 
   func play() {
-    systemPauseUntilUptimeMs = 0
+    if activeLoadSerial > 0 {
+      playbackActiveIntent = true
+    }
+    audioSessionPolicy.clearLatchesOnUserPlay()
+    audioSessionController.activateForPlayback()
     engine?.play()
   }
 
   func pause() {
+    playbackActiveIntent = false
     engine?.pause()
+  }
+
+  func setRate(_ rate: Double) {
+    guard rate.isFinite, rate > 0 else { return }
+    requestedRate = rate
+    engine?.setRate(Float(rate))
+  }
+
+  func setOsdVisible(_ visible: Bool) {
+    let becameVisible = osdClockThrottle.setOsdVisible(visible)
+    guard becameVisible,
+          let target = engine,
+          engineLoadSerial > 0,
+          target.videoRoute != .none,
+          target.hasFirstFrameReadyForDisplay || target.videoRoute == .audio
+    else { return }
+    let phase = target.playbackPhase
+    guard phase != .idle, phase != .loading, phase != .seeking,
+          target.state != .idle, target.state != .loading, target.state != .seeking
+    else { return }
+    emitClockSnapshot(
+      from: target,
+      positionSeconds: target.currentTime,
+      rateOverride: nil,
+      durationOverride: nil,
+      serial: engineLoadSerial
+    )
   }
 
   func seek(toSeconds: Double) {
@@ -183,6 +221,7 @@ final class AetherBackend: PlayerBackend {
 
   func rebuild() throws {
     resetSerialBookkeeping()
+    audioSessionPolicy.reset()
     currentPlan = nil
     currentLoadOptions = nil
     desiredAudioStreamId = nil
@@ -192,6 +231,7 @@ final class AetherBackend: PlayerBackend {
     cancelTasksAndReader()
     publishSubtitlePresentation(.empty)
     cancellables.removeAll()
+    avPlayerBufferCancellables.removeAll()
 
     if let previous = engine {
       previous.stop(resetDisplayCriteria: false, finalTeardown: true)
@@ -200,11 +240,13 @@ final class AetherBackend: PlayerBackend {
       }
       engine = nil
     }
+    audioSessionController.deactivateIfOwned()
     _ = try installFreshEngine()
   }
 
   func dispose() {
     resetSerialBookkeeping()
+    audioSessionPolicy.reset()
     currentPlan = nil
     currentLoadOptions = nil
     desiredAudioStreamId = nil
@@ -214,6 +256,7 @@ final class AetherBackend: PlayerBackend {
     cancelTasksAndReader()
     publishSubtitlePresentation(.empty)
     cancellables.removeAll()
+    avPlayerBufferCancellables.removeAll()
     audioSessionObserver?.dispose()
     audioSessionObserver = nil
 
@@ -224,6 +267,7 @@ final class AetherBackend: PlayerBackend {
       }
       engine = nil
     }
+    audioSessionController.deactivateIfOwned()
     boundPlayerView = nil
     httpSession.dispose()
   }
@@ -231,6 +275,10 @@ final class AetherBackend: PlayerBackend {
   func cancelTasksAndReader() {
     itemProgressCancellable?.cancel()
     itemProgressCancellable = nil
+    avPlayerItemBufferCancellables.removeAll()
+    subtitleClockCancellable?.cancel()
+    subtitleClockCancellable = nil
+    lastAVBufferReportedBuffering = false
     loadTask?.cancel()
     loadTask = nil
     seekTask?.cancel()
@@ -253,7 +301,55 @@ final class AetherBackend: PlayerBackend {
     errorReportedSerial = 0
     loggedRouteSerial = 0
     openedMsForSerial = nil
+    requestedRate = 1.0
+    lastAVBufferReportedBuffering = false
+    playbackActiveIntent = false
     liveRecoveryPolicy.reset()
+    osdClockThrottle.reset()
+  }
+
+  private func handleAudioSessionEvent(_ event: AudioSessionEvent) {
+    let activeSerial = engineLoadSerial > 0 ? engineLoadSerial : activeLoadSerial
+    switch event {
+    case .interruptionBegan:
+      let currentlyPlaying = playbackActiveIntent
+        || engine?.playbackPhase == .playing
+        || engine?.state == .playing
+      let action = audioSessionPolicy.handleInterruptionBegan(currentlyPlaying: currentlyPlaying)
+      applyAudioSessionAction(action, serial: activeSerial)
+
+    case let .interruptionEnded(shouldResume):
+      let action = audioSessionPolicy.handleInterruptionEnded(shouldResume: shouldResume)
+      applyAudioSessionAction(action, serial: activeSerial)
+
+    case let .oldDeviceUnavailable(isRemovedAudioRoute):
+      let action = audioSessionPolicy.handleOldDeviceUnavailable(isRemovedAudioRoute: isRemovedAudioRoute)
+      applyAudioSessionAction(action, serial: activeSerial)
+    }
+  }
+
+  private func applyAudioSessionAction(_ action: AudioSessionAction, serial: Int) {
+    switch action {
+    case .none:
+      break
+    case .systemPause:
+      playbackActiveIntent = false
+      if serial > 0 {
+        engine?.pause()
+        onObservation?(.phase(.systemPaused), serial)
+      }
+    case .pauseAndSystemPause:
+      playbackActiveIntent = false
+      engine?.pause()
+      if serial > 0 {
+        onObservation?(.phase(.systemPaused), serial)
+      }
+    case .resume:
+      guard serial > 0 else { return }
+      playbackActiveIntent = true
+      audioSessionController.activateForPlayback()
+      engine?.play()
+    }
   }
 
   private func ensureEngine() throws -> AetherEngine {

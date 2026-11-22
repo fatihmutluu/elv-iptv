@@ -1,5 +1,5 @@
 import type { CatalogService, SearchScope } from '@elv/data';
-import { useI18n } from '@elv/ui-kit';
+import { TvFocusAnchor, useFormFactor, useI18n } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import {
@@ -61,6 +61,7 @@ export function AppShell(props: AppShellProps): ReactElement {
   const { catalog, videoHost, appLifecycle, onPlaybackGuardReady } = props;
   const externalRefreshToken = props.externalRefreshToken ?? 0;
   const i18n = useI18n();
+  const isTv = useFormFactor() === 'tv';
   const preferences = usePreferences();
   const [activeTab, setActiveTab] = useState<AppTab>('settings');
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('sources');
@@ -304,7 +305,11 @@ export function AppShell(props: AppShellProps): ReactElement {
                 {...crashProps}
               >
                 {isResolvingInitialSources ? (
-                  <View testID="app-shell-boot" style={styles.bootCanvas} />
+                  <View testID="app-shell-boot" style={styles.bootCanvas}>
+                    {isTv && !topNavFocused ? (
+                      <TvFocusAnchor testID="app-shell-boot-focus-anchor" />
+                    ) : null}
+                  </View>
                 ) : activeDetail !== null ? (
                   <DetailScreen
                     key={activeDetail.itemKey}

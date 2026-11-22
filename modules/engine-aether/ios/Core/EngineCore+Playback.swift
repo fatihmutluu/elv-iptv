@@ -94,11 +94,11 @@ extension EngineCore {
       let now = uptimeMs()
       emit(.stall(attempt: token, phase: .end, atMs: now))
       emit(.state(attempt: token, state: .playing))
-      emitAnchor(rate: 1.0, atMs: now)
+      emitAnchor(rate: playbackRate, atMs: now)
     } else {
       emit(.state(attempt: token, state: .playing))
       if lastClockRate == 0 {
-        emitAnchor(rate: 1.0, atMs: uptimeMs())
+        emitAnchor(rate: playbackRate, atMs: uptimeMs())
       }
     }
   }

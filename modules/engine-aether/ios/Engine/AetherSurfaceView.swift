@@ -71,6 +71,7 @@ final class AetherSurfaceView: ExpoView {
   private var appInBackground = false
   private var wantsScreenOn = false
   private(set) var currentVideoGravity: AVLayerVideoGravity = .resizeAspect
+  private(set) var currentOsdVisible = true
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -114,7 +115,7 @@ final class AetherSurfaceView: ExpoView {
     super.didMoveToWindow()
     MainActor.assumeIsolated {
       refreshIdleTimer()
-      notifySurfaceAvailability()
+      notifySurfaceAvailability(isBackground: isAppInBackground)
     }
   }
 
@@ -124,12 +125,18 @@ final class AetherSurfaceView: ExpoView {
       bind(nil)
       setResizeMode("fit")
       setSubtitleBottomInsetPx(0)
+      setOsdVisible(true)
     }
   }
 
   @MainActor
+  var isAppInBackground: Bool {
+    appInBackground || UIApplication.shared.applicationState == .background
+  }
+
+  @MainActor
   var isSurfaceAvailable: Bool {
-    window != nil && !appInBackground && boundEngine != nil
+    window != nil && !isAppInBackground && boundEngine != nil
   }
 
   @MainActor
@@ -181,6 +188,16 @@ final class AetherSurfaceView: ExpoView {
   func setSubtitleBottomInsetPx(_ inset: Double?) {
     let clean = inset.flatMap { $0.isFinite && $0 > 0 ? CGFloat($0) : nil } ?? 0
     subtitleOverlayView.updateBottomInset(clean)
+  }
+
+  @MainActor
+  func setOsdVisible(_ visible: Bool?) {
+    let next = visible ?? true
+    guard next != currentOsdVisible else { return }
+    currentOsdVisible = next
+    boundEngine?.withDriver { driver in
+      driver.setOsdVisible(next, from: self)
+    }
   }
 
   @MainActor
@@ -247,7 +264,7 @@ final class AetherSurfaceView: ExpoView {
         guard let self else { return }
         self.appInBackground = true
         self.refreshIdleTimer()
-        self.notifySurfaceAvailability()
+        self.notifySurfaceAvailability(isBackground: true)
       }
     }
 
@@ -260,7 +277,7 @@ final class AetherSurfaceView: ExpoView {
         guard let self else { return }
         self.appInBackground = false
         self.refreshIdleTimer()
-        self.notifySurfaceAvailability()
+        self.notifySurfaceAvailability(isBackground: false)
       }
     }
 
@@ -273,7 +290,7 @@ final class AetherSurfaceView: ExpoView {
         guard let self, self.appInBackground else { return }
         self.appInBackground = false
         self.refreshIdleTimer()
-        self.notifySurfaceAvailability()
+        self.notifySurfaceAvailability(isBackground: false)
       }
     }
 
@@ -281,18 +298,18 @@ final class AetherSurfaceView: ExpoView {
   }
 
   @MainActor
-  private func notifySurfaceAvailability() {
+  private func notifySurfaceAvailability(isBackground: Bool) {
     guard let engine = boundEngine else { return }
     let available = isSurfaceAvailable
     engine.withDriver { driver in
-      driver.surfaceAvailabilityDidChange(available, from: self)
+      driver.surfaceAvailabilityDidChange(available, isBackground: isBackground, from: self)
     }
   }
 
   @MainActor
   private func refreshIdleTimer() {
     guard let ownerId = boundOwnerId else { return }
-    let shouldHold = boundEngine != nil && wantsScreenOn && window != nil && !appInBackground
+    let shouldHold = boundEngine != nil && wantsScreenOn && window != nil && !isAppInBackground
     IdleTimer.setHeld(shouldHold, ownerId: ownerId)
   }
 }

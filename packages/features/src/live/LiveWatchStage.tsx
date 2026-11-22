@@ -295,6 +295,7 @@ export function LiveWatchStage(p: LiveWatchStageProps): ReactElement {
                 maxDecodePx={640}
                 resizeMode="cover"
                 borderRadius={0}
+                decorative
                 style={styles.flex1}
               />
             )}
@@ -326,6 +327,7 @@ export function LiveWatchStage(p: LiveWatchStageProps): ReactElement {
           maxDecodePx={640}
           resizeMode="cover"
           borderRadius={0}
+          decorative
           style={StyleSheet.absoluteFill}
         />
       )}

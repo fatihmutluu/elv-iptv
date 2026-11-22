@@ -123,6 +123,7 @@ export function HomeHero({
         label={slide.title}
         maxDecodePx={960}
         borderRadius={0}
+        decorative
         style={StyleSheet.absoluteFill}
       />
       <Scrim direction="bottom" intensity="strong" testID="home-hero-scrim-bottom" />

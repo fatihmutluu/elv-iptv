@@ -31,6 +31,7 @@ export interface NativeEngineHandle {
   pause(attempt: AttemptToken): void;
   seek(attempt: AttemptToken, positionMs: number): void;
   setScrubbing?(attempt: AttemptToken, scrubbing: boolean): void;
+  setSpeed?(attempt: AttemptToken, rate: number): void;
   selectAudioTrack?(attempt: AttemptToken, id: string): void;
   selectSubtitleTrack?(attempt: AttemptToken, id: string | null): void;
   stop(attempt: AttemptToken): void;
@@ -148,6 +149,14 @@ export function bridgeNativeEngine(
       : {
           setScrubbing: command((attempt: AttemptToken, scrubbing: boolean) => {
             native.setScrubbing?.(hasCommand ? activeAttempt : attempt, scrubbing);
+          }),
+        }),
+    ...(native.setSpeed === undefined
+      ? {}
+      : {
+          setSpeed: command((attempt: AttemptToken, rate: number) => {
+            adoptAttempt(attempt);
+            native.setSpeed?.(attempt, rate);
           }),
         }),
     ...(native.selectAudioTrack === undefined

@@ -26,6 +26,7 @@ public final class EngineCore {
   var errorReported = false
   var latchedReaderFailure: ReaderFailure?
   var forceNextClock = false
+  var playbackRate: Double = 1.0
   var dolbyVisionFallbackLatched = false
 
   var lastClockUptimeMs: Double?
@@ -134,12 +135,33 @@ public final class EngineCore {
     backend.seek(toSeconds: clampedMs / 1_000.0)
   }
 
+  /// Adjusts VOD playback speed within `[0.25, 4.0]`; ignored for live streams and non-positive or non-finite rates.
+  public func setSpeed(_ attempt: Int, rate: Double) {
+    guard !released else { return }
+    adopt(attempt)
+    guard active, currentRequest?.live == false, rate.isFinite, rate > 0 else { return }
+    let clamped = min(4.0, max(0.25, rate))
+    playbackRate = clamped
+    backend.setRate(clamped)
+    forceNextClock = true
+    if played && !userPaused && !stalled && !seeking && !reloading {
+      emitAnchor(rate: playbackRate, atMs: uptimeMs())
+    }
+  }
+
+  /// Forwards player overlay visibility so the backend can throttle clock emissions while controls are hidden.
+  public func setOsdVisible(_ visible: Bool) {
+    guard !released else { return }
+    backend.setOsdVisible(visible)
+  }
+
   public func stop(_ attempt: Int) {
     guard !released else { return }
     adopt(attempt)
     serial += 1
     active = false
     userPaused = false
+    playbackRate = 1.0
     currentRequest = nil
     dolbyVisionFallbackLatched = false
     trackState.onStop()
@@ -155,6 +177,7 @@ public final class EngineCore {
     serial += 1
     active = false
     userPaused = false
+    playbackRate = 1.0
     trackState.onPrepareReuse()
     sink?.clearSubtitles()
     backend.stopMedia()
@@ -176,6 +199,7 @@ public final class EngineCore {
     serial += 1
     active = false
     userPaused = false
+    playbackRate = 1.0
     currentRequest = nil
     dolbyVisionFallbackLatched = false
     trackState.onStop()
@@ -247,13 +271,19 @@ public final class EngineCore {
     }
   }
 
-  public func surfaceChanged(available: Bool) {
+  /// Reports native surface availability transitions, decoupling background detach from fatal foreground surface loss.
+  public func surfaceChanged(available: Bool, isBackground: Bool = false) {
     guard !released, available != surfaceAvailable else { return }
     surfaceAvailable = available
     if available {
       emit(.surface(attempt: token, change: .created))
     } else {
       sink?.clearSubtitles()
+      if isBackground {
+        setScreenOn(false)
+        emit(.surface(attempt: token, change: .destroyed))
+        return
+      }
       emit(.surface(attempt: token, change: .destroyed))
       if active && !errorReported {
         serial += 1
@@ -303,6 +333,7 @@ public final class EngineCore {
     errorReported = false
     latchedReaderFailure = nil
     forceNextClock = false
+    playbackRate = 1.0
     lastClockUptimeMs = nil
     lastClockRate = nil
     let validStartMs = startMs.flatMap { $0.isFinite ? max(0, $0) : nil }

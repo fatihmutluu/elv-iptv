@@ -323,8 +323,8 @@ export function PlayerScreen({
         },
       } as Record<string, unknown>)
     : undefined;
-  const subtitleBottomInsetPx =
-    !inPip && !isDesktop && !controls.osdHidden && !controls.locked ? (isTv ? 120 : 96) : 0;
+  const osdVisible = !inPip && !controls.osdHidden && !controls.locked;
+  const subtitleBottomInsetPx = !isDesktop && osdVisible ? (isTv ? 120 : 96) : 0;
   const showTouchCanvasTap =
     !inPip &&
     !isTv &&
@@ -364,6 +364,7 @@ export function PlayerScreen({
             subtitleBottomInsetPx,
             surfaceRecreationToken,
             useTextureView,
+            osdVisible,
             testID: 'player-surface',
           })}
         </View>

@@ -15,7 +15,13 @@ interface NativeEngineModule {
   Engine: new () => NativeEngineHandle;
   uptimeMs(): number;
   engineVersion(): string;
+  deviceModel?(): string;
 }
+
+/** Hardware rendering tier derived from the Apple machine identifier (`#186`). */
+export type AppleHardwareTier = 'standard' | 'mid-power';
+
+const MID_POWER_APPLE_TV_PATTERN = /^AppleTV(?:5|6),/;
 
 const CAPABILITIES: EngineCapabilities = Object.freeze({
   mpegTsOverHttp: true,
@@ -38,6 +44,28 @@ const nativeModule = requireOptionalNativeModule<NativeEngineModule>('ElvEngineA
  */
 export function aetherEngineVersion(): string | null {
   return nativeModule === null ? null : nativeModule.engineVersion();
+}
+
+/**
+ * Classifies constrained Apple TV hardware (`AppleTV5,*` 2 GB HD and `AppleTV6,*` 3 GB 4K 1st gen)
+ * as `'mid-power'` so heavy blur/compositor effects can be bypassed (`#186`).
+ */
+export function resolveAppleHardwareTier(model: string | null | undefined): AppleHardwareTier {
+  if (typeof model !== 'string') return 'standard';
+  const trimmed = model.trim();
+  if (trimmed.length === 0) return 'standard';
+  return MID_POWER_APPLE_TV_PATTERN.test(trimmed) ? 'mid-power' : 'standard';
+}
+
+/**
+ * Returns the Apple hardware machine identifier (e.g. `'AppleTV6,2'`, `'iPhone16,1'`) from the
+ * native module, or `null` when unavailable or empty (`#186`).
+ */
+export function getAppleDeviceModel(): string | null {
+  const raw = nativeModule?.deviceModel?.();
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function wrap(module: NativeEngineModule): PlayerEngine {
@@ -79,6 +107,8 @@ export interface AetherSurfaceProps {
   resizeMode?: 'fit' | 'fill';
   /** Extra bottom inset in pt to lift native subtitle cues above a visible OSD (`#136`). */
   subtitleBottomInsetPx?: number;
+  /** Whether the player OSD is currently visible so native can throttle hidden-OSD clock ticks (`#442`). */
+  osdVisible?: boolean;
   testID?: string;
 }
 
@@ -87,6 +117,7 @@ interface NativeSurfaceProps {
   style?: StyleProp<ViewStyle>;
   resizeMode?: 'fit' | 'fill';
   subtitleBottomInsetPx?: number;
+  osdVisible?: boolean;
   testID?: string;
 }
 
@@ -107,6 +138,7 @@ export function AetherSurface({
   style,
   resizeMode,
   subtitleBottomInsetPx,
+  osdVisible,
   testID,
 }: AetherSurfaceProps): ReactElement | null {
   const native = handles.get(engine);
@@ -116,6 +148,7 @@ export function AetherSurface({
     style,
     resizeMode,
     subtitleBottomInsetPx,
+    ...(osdVisible !== undefined ? { osdVisible } : {}),
     testID,
   });
 }

@@ -80,7 +80,7 @@ public struct EngineLoadOptions: Equatable, Sendable {
     httpHeaders: [String: String] = [:],
     maxConcurrentSourceRequests: Int? = nil,
     preferSoftwareDecode: Bool = false,
-    displayCriteriaOwner: DisplayCriteriaOwnerOption = .host,
+    displayCriteriaOwner: DisplayCriteriaOwnerOption = .engine,
     liveStartupGraceSeconds: Double? = nil,
     liveStartupSingleSegmentMinimumSeconds: Double? = nil,
     liveEdgeCushionSeconds: Double? = nil,
@@ -288,6 +288,8 @@ public protocol PlayerBackend: AnyObject {
   func play()
   func pause()
   func seek(toSeconds: Double)
+  func setRate(_ rate: Double)
+  func setOsdVisible(_ visible: Bool)
   func selectAudioTrack(_ streamId: Int)
   func selectSubtitleTrack(_ streamId: Int?)
   func rebuild() throws

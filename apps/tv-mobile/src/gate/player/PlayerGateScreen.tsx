@@ -7,7 +7,7 @@ import {
   type PlayerEngine,
   positionAt,
 } from '@elv/playback';
-import { useTvKeySource } from '@elv/ui-kit';
+import { TvFocusAnchor, useTvKeySource } from '@elv/ui-kit';
 import {
   memo,
   type ReactElement,
@@ -285,6 +285,7 @@ export function PlayerGateScreen({
   if (session === null) {
     return (
       <View style={styles.root}>
+        {Platform.isTV ? <TvFocusAnchor testID="player-gate-idle-focus-anchor" /> : null}
         <Text style={styles.channel}>No player engine on this platform</Text>
       </View>
     );

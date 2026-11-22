@@ -1,7 +1,20 @@
 import { createDeadHostRegistry } from '@elv/ui-kit';
 import { fireEvent, render, screen } from '@testing-library/react-native';
-import type { AppStateStatus } from 'react-native';
+import { type AppStateStatus, View } from 'react-native';
 import { attachAppStateDeadHostReset, createMobileTvUiAdapters } from '../platform-adapters';
+
+let mockAppleDeviceModel: string | null = null;
+jest.mock('@elv/engine-aether', () => {
+  const actual = jest.requireActual<typeof import('@elv/engine-aether')>('@elv/engine-aether');
+  return {
+    ...actual,
+    getAppleDeviceModel: () => mockAppleDeviceModel,
+  };
+});
+
+afterEach(() => {
+  mockAppleDeviceModel = null;
+});
 
 describe('createMobileTvUiAdapters (#311, #202)', () => {
   it('renders an Image with clamped maxDecodePx, resizeMethod="resize", fadeDuration={0}, and progressiveRenderingEnabled', async () => {
@@ -67,6 +80,48 @@ describe('createMobileTvUiAdapters (#311, #202)', () => {
 
     await fireEvent(img, 'error');
     expect(onError).toHaveBeenCalledWith(undefined);
+  });
+
+  it('omits renderBlur on mid-power Apple TV hardware (AppleTV5,*, AppleTV6,*) and keeps it on standard hardware (#186)', () => {
+    const renderBlur = () => <View testID="native-blur" />;
+
+    for (const midPowerModel of ['AppleTV5,3', 'AppleTV6,2']) {
+      mockAppleDeviceModel = midPowerModel;
+      const adapters = createMobileTvUiAdapters({ renderBlur });
+      expect(adapters.renderBlur).toBeUndefined();
+    }
+
+    for (const standardModel of ['AppleTV11,1', 'AppleTV14,1', 'iPhone16,1', null]) {
+      mockAppleDeviceModel = standardModel;
+      const adapters = createMobileTvUiAdapters({ renderBlur });
+      expect(adapters.renderBlur).toBe(renderBlur);
+    }
+
+    expect(createMobileTvUiAdapters({ hardwareTier: 'mid-power', renderBlur }).renderBlur).toBe(
+      undefined,
+    );
+    expect(createMobileTvUiAdapters({ hardwareTier: 'standard', renderBlur }).renderBlur).toBe(
+      renderBlur,
+    );
+  });
+
+  it('marks decorative renderImage calls without accessibilityLabel as accessible={false} (#186)', async () => {
+    const adapters = createMobileTvUiAdapters();
+    if (!adapters.renderImage) throw new Error('expected renderImage adapter');
+
+    const view = await render(
+      adapters.renderImage({
+        uri: 'https://cdn.example/backdrop.jpg',
+        resizeMode: 'cover',
+        maxDecodePx: 640,
+      }),
+    );
+
+    const tree = view.toJSON();
+    expect(tree).not.toBeNull();
+    if (tree === null || Array.isArray(tree)) throw new Error('expected single Image host node');
+    expect(tree.props.accessible).toBe(false);
+    expect(tree.props.accessibilityLabel).toBeUndefined();
   });
 });
 

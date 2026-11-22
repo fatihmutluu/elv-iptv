@@ -37,6 +37,11 @@ export interface ArtworkImageProps {
   logoBackdrop?: boolean;
   /** Smoothly zooms artwork (`scale(1.05)`) on pointer hover; disabled when `theme.reduceMotion` is true. */
   zoomed?: boolean;
+  /**
+   * Marks artwork as purely decorative backdrop art: sets `pointerEvents="none"` and hides
+   * containers from assistive/tvOS focus hit-testing (`#186`).
+   */
+  decorative?: boolean;
   /** Injectable dead-host circuit breaker (defaults to {@link defaultDeadHostRegistry}, `#202`). */
   deadHosts?: DeadHostRegistry;
   style?: StyleProp<ViewStyle>;
@@ -77,6 +82,7 @@ export function ArtworkImage({
   borderRadius,
   logoBackdrop = false,
   zoomed = false,
+  decorative = false,
   deadHosts = defaultDeadHostRegistry,
   style,
   testID,
@@ -128,10 +134,19 @@ export function ArtworkImage({
       : undefined;
 
   const isWeb = Platform.OS === 'web';
+  const decorativeViewProps = decorative
+    ? ({
+        pointerEvents: 'none',
+        accessible: false,
+        accessibilityElementsHidden: true,
+        importantForAccessibility: 'no',
+      } as const)
+    : undefined;
 
   return (
     <View
       testID={testID}
+      {...decorativeViewProps}
       style={[
         styles.frame,
         {
@@ -145,8 +160,9 @@ export function ArtworkImage({
       {failed ? (
         <View
           testID={testID ? `${testID}-fallback` : undefined}
-          accessible
-          accessibilityLabel={label}
+          accessible={!decorative}
+          {...(decorative ? {} : { accessibilityLabel: label })}
+          {...decorativeViewProps}
           style={[styles.fallback, { backgroundColor: theme.colors.bgCard }, fallbackSheen]}
         >
           <Text
@@ -157,14 +173,18 @@ export function ArtworkImage({
           </Text>
         </View>
       ) : (
-        <View testID={testID ? `${testID}-zoom` : undefined} style={zoomStyle}>
+        <View
+          testID={testID ? `${testID}-zoom` : undefined}
+          {...decorativeViewProps}
+          style={zoomStyle}
+        >
           {adapters.renderImage ? (
             adapters.renderImage({
               uri: trimmedUri,
               resizeMode,
               maxDecodePx: cappedPx,
               style: styles.image,
-              accessibilityLabel: label,
+              ...(decorative ? {} : { accessibilityLabel: label }),
               onLoad: handleLoad,
               onError: handleError,
             })
@@ -177,7 +197,7 @@ export function ArtworkImage({
               resizeMode={resizeMode}
               resizeMethod="resize"
               fadeDuration={0}
-              accessibilityLabel={label}
+              {...(decorative ? { accessible: false } : { accessibilityLabel: label })}
               onLoad={handleLoad}
               onError={handleNativeError}
               style={styles.image}

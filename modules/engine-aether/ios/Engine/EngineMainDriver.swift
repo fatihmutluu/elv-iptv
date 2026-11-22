@@ -60,17 +60,19 @@ final class EngineMainDriver: EngineSink {
     boundSurface = view
     backend.setVideoGravity(view.currentVideoGravity)
     backend.bindPlayerView(view.playerView)
+    core.setOsdVisible(view.currentOsdVisible)
     let snapshot = core.viewSnapshot
     view.applyShutter(covered: snapshot.shutterCovered, from: owner)
     view.applySubtitles(backend.lastSubtitlePresentation, from: owner)
     view.applyScreenOn(snapshot.screenOn, from: owner)
-    core.surfaceChanged(available: view.isSurfaceAvailable)
+    core.surfaceChanged(available: view.isSurfaceAvailable, isBackground: view.isAppInBackground)
   }
 
   func unbindSurface(_ view: AetherSurfaceView) {
     guard boundSurface === view else { return }
     view.applySubtitles(.empty, from: owner)
-    core.surfaceChanged(available: false)
+    core.surfaceChanged(available: false, isBackground: view.isAppInBackground)
+    core.setOsdVisible(true)
     boundSurface = nil
     backend.bindPlayerView(nil)
     IdleTimer.setHeld(false, ownerId: ownerId)
@@ -84,9 +86,14 @@ final class EngineMainDriver: EngineSink {
     }
   }
 
-  func surfaceAvailabilityDidChange(_ available: Bool, from view: AetherSurfaceView) {
+  func surfaceAvailabilityDidChange(_ available: Bool, isBackground: Bool, from view: AetherSurfaceView) {
     guard boundSurface === view else { return }
-    core.surfaceChanged(available: available)
+    core.surfaceChanged(available: available, isBackground: isBackground)
+  }
+
+  func setOsdVisible(_ visible: Bool, from view: AetherSurfaceView) {
+    guard boundSurface === view else { return }
+    core.setOsdVisible(visible)
   }
 
   func updateGravity(_ gravity: AVLayerVideoGravity, from view: AetherSurfaceView) {

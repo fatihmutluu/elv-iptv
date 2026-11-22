@@ -1,6 +1,25 @@
 import AetherEngine
+import Darwin
 import ExpoModulesCore
 import Foundation
+
+private func resolveAppleDeviceModel() -> String {
+  var sysInfo = utsname()
+  uname(&sysInfo)
+  let machineCapacity = MemoryLayout.size(ofValue: sysInfo.machine)
+  let machine = withUnsafePointer(to: sysInfo.machine) { ptr in
+    ptr.withMemoryRebound(to: CChar.self, capacity: machineCapacity) {
+      String(cString: $0)
+    }
+  }
+  if machine == "x86_64" || machine == "arm64",
+     let simModel = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"],
+     !simModel.isEmpty
+  {
+    return simModel
+  }
+  return machine
+}
 
 /// Flattened `LoadCommand` record sent from JavaScript (`@elv/playback`'s `bridgeNativeEngine`).
 struct LoadArgs: Record {
@@ -63,6 +82,10 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
       AetherEngine.version
     }
 
+    Function("deviceModel") { () -> String in
+      resolveAppleDeviceModel()
+    }
+
     OnDestroy {
       let remaining: [EngineObject] = self.enginesLock.withLock {
         let list = self.engineTable.values.compactMap(\.value)
@@ -103,6 +126,10 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
         engine.seek(attempt, positionMs: positionMs)
       }
 
+      Function("setSpeed") { (engine: EngineObject, attempt: Int, rate: Double) in
+        engine.setSpeed(attempt, rate: rate)
+      }
+
       Function("selectAudioTrack") { (engine: EngineObject, attempt: Int, id: String) in
         engine.selectAudioTrack(attempt, id: id)
       }
@@ -131,6 +158,10 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
 
       Prop("subtitleBottomInsetPx") { (view: AetherSurfaceView, inset: Double?) in
         view.setSubtitleBottomInsetPx(inset)
+      }
+
+      Prop("osdVisible") { (view: AetherSurfaceView, visible: Bool?) in
+        view.setOsdVisible(visible)
       }
     }
   }

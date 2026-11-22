@@ -19,7 +19,7 @@ import {
 } from '@elv/features';
 import { resolveLocale } from '@elv/i18n';
 import { remoteKeys } from '@elv/remote-keys';
-import { RemoteKeysProvider, UiAdaptersProvider } from '@elv/ui-kit';
+import { RemoteKeysProvider, TvFocusAnchor, UiAdaptersProvider } from '@elv/ui-kit';
 import Constants from 'expo-constants';
 import { getLocales } from 'expo-localization';
 import { StatusBar } from 'expo-status-bar';
@@ -99,6 +99,7 @@ function AppRoot() {
             subtitleBottomInsetPx,
             surfaceRecreationToken,
             useTextureView,
+            osdVisible,
             testID,
           }) => (
             <PlayerSurface
@@ -108,6 +109,7 @@ function AppRoot() {
               {...(subtitleBottomInsetPx !== undefined ? { subtitleBottomInsetPx } : {})}
               {...(surfaceRecreationToken !== undefined ? { surfaceRecreationToken } : {})}
               {...(useTextureView !== undefined ? { useTextureView } : {})}
+              {...(osdVisible !== undefined ? { osdVisible } : {})}
               {...(testID !== undefined ? { testID } : {})}
             />
           ),
@@ -199,6 +201,7 @@ export function App() {
     return (
       <RemoteKeysProvider android={remoteKeys}>
         <View style={styles.pending}>
+          {Platform.isTV ? <TvFocusAnchor testID="app-pending-focus-anchor" /> : null}
           <StatusBar style="light" />
         </View>
       </RemoteKeysProvider>

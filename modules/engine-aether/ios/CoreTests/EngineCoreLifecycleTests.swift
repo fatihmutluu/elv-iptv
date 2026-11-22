@@ -59,6 +59,41 @@ struct EngineCoreLifecycleTests {
     #expect(backend.calls.count == 2)
   }
 
+  @Test("background surface detach clears subtitles, turns screen off, and never emits fatal surface-lost (#426)")
+  func backgroundSurfaceDetachDoesNotEmitSurfaceLost() {
+    let backend = FakeBackend()
+    let sink = RecordingSink()
+    let clock = FakeClock()
+    let core = EngineCore(backend: backend, sink: sink, uptimeMs: { clock.uptimeMs() })
+
+    core.surfaceChanged(available: true)
+    core.load(LoadRequest(url: "http://h:7878/live/demo/demo/1001.ts"), attempt: 4)
+    core.observe(.firstFrame, serial: 1)
+    core.observe(.phase(.playing), serial: 1)
+    #expect(sink.screenOn)
+
+    sink.events.removeAll()
+    sink.clearSubtitlesCount = 0
+    backend.calls.removeAll()
+
+    core.surfaceChanged(available: false, isBackground: true)
+    #expect(!sink.screenOn)
+    #expect(sink.clearSubtitlesCount == 1)
+    #expect(backend.calls.isEmpty)
+    #expect(sink.events == [.surface(attempt: 4, change: .destroyed)])
+
+    // Serial stays active so neither AppState stop() nor a quick foreground return races a fatal error.
+    sink.events.removeAll()
+    core.surfaceChanged(available: true, isBackground: false)
+    #expect(sink.events == [.surface(attempt: 4, change: .created)])
+
+    sink.events.removeAll()
+    clock.nowMs = 2_000
+    core.observe(.phase(.playing), serial: 1)
+    #expect(sink.screenOn)
+    #expect(sink.events == [.state(attempt: 4, state: .playing)])
+  }
+
   @Test("the screen stays on across a zap from a playing media")
   func screenStaysOnAcrossZap() {
     let backend = FakeBackend()

@@ -38,8 +38,13 @@ final class AetherSubtitleOverlayView: UIView {
   private var slotViews: [SubtitleSlot: SlotPillView] = [:]
   private var presentation: SubtitlePresentation = .empty
   private var bottomInset: CGFloat = 0
+  private let captionAppearanceSource = SystemCaptionAppearanceSource()
+  private var captionStyle: CaptionAppearanceStyle
+  private var captionObserver: SystemCaptionAppearanceObserver?
+  private var voiceOverDeduper = VoiceOverAnnouncementDeduper()
 
   override init(frame: CGRect) {
+    self.captionStyle = resolveCaptionAppearance(source: captionAppearanceSource)
     super.init(frame: frame)
     backgroundColor = .clear
     clipsToBounds = true
@@ -50,6 +55,10 @@ final class AetherSubtitleOverlayView: UIView {
     bitmapContainer.isUserInteractionEnabled = false
     bitmapContainer.isAccessibilityElement = false
     addSubview(bitmapContainer)
+
+    captionObserver = SystemCaptionAppearanceObserver { [weak self] in
+      self?.refreshCaptionStyle()
+    }
   }
 
   @available(*, unavailable)
@@ -68,6 +77,7 @@ final class AetherSubtitleOverlayView: UIView {
   func apply(_ next: SubtitlePresentation) {
     guard next != presentation else { return }
     presentation = next
+    announceVoiceOverIfNeeded(for: next.cues)
     rebuildBitmaps()
     setNeedsLayout()
   }
@@ -86,7 +96,37 @@ final class AetherSubtitleOverlayView: UIView {
   }
 
   func clear() {
+    voiceOverDeduper.reset()
     apply(.empty)
+  }
+
+  private func refreshCaptionStyle() {
+    let updated = resolveCaptionAppearance(source: captionAppearanceSource)
+    guard updated != captionStyle else { return }
+    captionStyle = updated
+    let pillBg = (updated.window ?? updated.background).uiColor
+    for pill in slotViews.values {
+      pill.backgroundColor = pillBg
+    }
+    setNeedsLayout()
+  }
+
+  private func announceVoiceOverIfNeeded(for cues: [SubtitleCue]) {
+    var lines: [String] = []
+    for cue in cues {
+      switch cue.body {
+      case let .text(raw):
+        lines.append(raw)
+      case let .richText(runs):
+        lines.append(runs.map(\.text).joined())
+      case .image:
+        break
+      }
+    }
+    guard let announcement = voiceOverDeduper.nextAnnouncement(for: lines) else { return }
+    if UIAccessibility.isVoiceOverRunning {
+      UIAccessibility.post(notification: .announcement, argument: announcement)
+    }
   }
 
   private func rebuildBitmaps() {
@@ -144,7 +184,8 @@ final class AetherSubtitleOverlayView: UIView {
     }
 
     let visibleStage = SubtitleLayout.visibleTextStage(videoRect: videoRect, bounds: boundsRect)
-    let fontSize = CGFloat(SubtitleLayout.baseFontSize(for: visibleStage))
+    let rawFontSize = SubtitleLayout.baseFontSize(for: visibleStage) * captionStyle.relativeCharacterSize
+    let fontSize = CGFloat(min(max(8, rawFontSize), max(8, visibleStage.height * 0.45)))
     var bitmapIdx = 0
     var bucketed: [SubtitleSlot: [NSAttributedString]] = [:]
 
@@ -170,11 +211,13 @@ final class AetherSubtitleOverlayView: UIView {
         let cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { break }
         let slot = SubtitleSlot.from(assAlignment: cue.placement?.alignment)
-        bucketed[slot, default: []].append(SubtitleTextStyling.makeStyledString(text: cleaned, fontSize: fontSize, slot: slot))
+        bucketed[slot, default: []].append(
+          SubtitleTextStyling.makeStyledString(text: cleaned, fontSize: fontSize, slot: slot, style: captionStyle)
+        )
 
       case let .richText(runs):
         let slot = SubtitleSlot.from(assAlignment: cue.placement?.alignment)
-        if let styled = SubtitleTextStyling.makeRichString(runs: runs, fontSize: fontSize, slot: slot) {
+        if let styled = SubtitleTextStyling.makeRichString(runs: runs, fontSize: fontSize, slot: slot, style: captionStyle) {
           bucketed[slot, default: []].append(styled)
         }
       }
@@ -185,6 +228,7 @@ final class AetherSubtitleOverlayView: UIView {
       return
     }
 
+    let pillBackgroundColor = (captionStyle.window ?? captionStyle.background).uiColor
     for slot in SubtitleSlot.allCases {
       guard let blocks = bucketed[slot], !blocks.isEmpty else {
         if let existing = slotViews[slot] {
@@ -195,10 +239,13 @@ final class AetherSubtitleOverlayView: UIView {
       }
 
       let pill = ensureSlotView(for: slot)
+      pill.backgroundColor = pillBackgroundColor
       let combined = NSMutableAttributedString()
       for (idx, block) in blocks.enumerated() {
         if idx > 0 {
-          combined.append(SubtitleTextStyling.makeStyledString(text: "\n", fontSize: fontSize, slot: slot))
+          combined.append(
+            SubtitleTextStyling.makeStyledString(text: "\n", fontSize: fontSize, slot: slot, style: captionStyle)
+          )
         }
         combined.append(block)
       }
