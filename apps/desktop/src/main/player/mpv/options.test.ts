@@ -102,16 +102,30 @@ describe('launchArgs', () => {
     expect(winCompat.some((a) => a.startsWith('--hwdec-image-format='))).toBe(false);
   });
 
-  it('emits --video-timing-offset=0 only when renderContext is true (#210)', () => {
+  it('switches to --force-window=no, --vo=libmpv, and --video-timing-offset=0 only when renderContext is true (#210, #95)', () => {
     const base = {
       inputConf: '/r/mpv-input.conf',
       presenterArgs: [],
       transportArgs: [],
       platform: 'win32',
     };
-    expect(launchArgs(base)).not.toContain('--video-timing-offset=0');
-    expect(launchArgs({ ...base, renderContext: false })).not.toContain('--video-timing-offset=0');
-    expect(launchArgs({ ...base, renderContext: true })).toContain('--video-timing-offset=0');
+    const defaultArgs = launchArgs(base);
+    expect(defaultArgs).toContain('--force-window=immediate');
+    expect(defaultArgs).not.toContain('--force-window=no');
+    expect(defaultArgs).not.toContain('--vo=libmpv');
+    expect(defaultArgs).not.toContain('--video-timing-offset=0');
+
+    const falseArgs = launchArgs({ ...base, renderContext: false });
+    expect(falseArgs).toContain('--force-window=immediate');
+    expect(falseArgs).not.toContain('--force-window=no');
+    expect(falseArgs).not.toContain('--vo=libmpv');
+    expect(falseArgs).not.toContain('--video-timing-offset=0');
+
+    const renderArgs = launchArgs({ ...base, renderContext: true });
+    expect(renderArgs).not.toContain('--force-window=immediate');
+    expect(renderArgs).toContain('--force-window=no');
+    expect(renderArgs).toContain('--vo=libmpv');
+    expect(renderArgs).toContain('--video-timing-offset=0');
   });
 
   it('emits --pulse-buffer=50 only on linux (#269)', () => {

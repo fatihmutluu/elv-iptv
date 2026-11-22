@@ -47,9 +47,27 @@ function systemTar(): string {
   return join(windir, 'System32', 'tar.exe');
 }
 
+/** SHA-256 of all `.c` and `.h` launcher sources in `dir` in deterministic sorted order. */
+export async function hashLauncherSources(dir: string): Promise<string> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const names = entries
+    .filter((entry) => entry.isFile() && /\.[ch]$/.test(entry.name))
+    .map((entry) => entry.name)
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  if (names.length === 0) throw new Error(`mpv: no launcher source files (.c/.h) found in ${dir}`);
+  const hash = createHash('sha256');
+  for (const name of names) {
+    hash.update(`${name}\0`);
+    hash.update(await readFile(join(dir, name)));
+    hash.update('\0');
+  }
+  return hash.digest('hex');
+}
+
 /** Real side effects for `pnpm mpv`: https download, SHA-256, system tar, `gh run download`. */
 export function realDeps(log: (line: string) => void, root: string): FetchDeps {
-  const launcherSource = `${root}/apps/desktop/native/mpv-host/elv-mpv.c`;
+  const launcherDir = `${root}/apps/desktop/native/mpv-host`;
+  const launcherSource = `${launcherDir}/elv-mpv.c`;
   return {
     async download(url, file) {
       const res = await fetch(url, { redirect: 'follow' });
@@ -91,9 +109,7 @@ export function realDeps(log: (line: string) => void, root: string): FetchDeps {
     },
     async launcherSourceHash() {
       if (process.platform !== 'win32') return null;
-      return createHash('sha256')
-        .update(await readFile(launcherSource))
-        .digest('hex');
+      return hashLauncherSources(launcherDir);
     },
     log,
     readText: (file) => readFile(file, 'utf8'),

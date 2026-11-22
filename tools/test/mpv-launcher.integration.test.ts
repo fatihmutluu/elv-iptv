@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { connect } from 'node:net';
+import { connect, createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -11,9 +11,11 @@ const exe = join(dir, 'elv-mpv.exe');
 const enabled = process.platform === 'win32' && existsSync(exe);
 const BASE = ['--no-config', '--idle=yes', '--vo=null', '--ao=null', '--terminal=no'];
 const children: ChildProcess[] = [];
+const servers: Server[] = [];
 
 afterEach(() => {
   for (const c of children.splice(0)) c.kill();
+  for (const s of servers.splice(0)) s.close();
 });
 
 function start(extra: string[] = [], file = exe): { child: ChildProcess; pipe: string } {
@@ -56,6 +58,117 @@ const exited = (c: ChildProcess): Promise<number | null> =>
     if (c.exitCode !== null) resolve(c.exitCode);
     else c.on('exit', (code) => resolve(code));
   });
+
+interface CanvasSurface {
+  gen: number;
+  slot: number;
+  handle: bigint;
+  width: number;
+  height: number;
+}
+interface CanvasFrame {
+  gen: number;
+  slot: number;
+  width: number;
+  height: number;
+}
+
+async function openCanvasHarness(opts: { ackSurface?: boolean; ackFrame?: boolean } = {}): Promise<{
+  canvasPipe: string;
+  ipcPipe: string;
+  surfaces: CanvasSurface[];
+  frames: CanvasFrame[];
+  connected: Promise<Socket>;
+  waitFor: (predicate: () => boolean, timeoutMs?: number) => Promise<void>;
+  spawnHost: (extra?: string[]) => ChildProcess;
+}> {
+  const canvasPipe = `\\\\.\\pipe\\elv-test-canvas-${randomBytes(6).toString('hex')}`;
+  const ipcPipe = `\\\\.\\pipe\\elv-test-ipc-${randomBytes(6).toString('hex')}`;
+  const surfaces: CanvasSurface[] = [];
+  const frames: CanvasFrame[] = [];
+  const waiters: Array<() => void> = [];
+  let onConnected!: (socket: Socket) => void;
+  const connected = new Promise<Socket>((resolve) => {
+    onConnected = resolve;
+  });
+  const notify = (): void => {
+    for (const fn of waiters.splice(0)) fn();
+  };
+  const waitFor = (predicate: () => boolean, timeoutMs = 8000): Promise<void> => {
+    if (predicate()) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`canvas wait timed out (S=${surfaces.length}, F=${frames.length})`)),
+        timeoutMs,
+      );
+      const check = (): void => {
+        if (predicate()) {
+          clearTimeout(timer);
+          resolve();
+        } else {
+          waiters.push(check);
+        }
+      };
+      waiters.push(check);
+    });
+  };
+  const server = createServer((socket) => {
+    onConnected(socket);
+    let buf = '';
+    socket.on('data', (chunk) => {
+      buf += chunk.toString('utf8');
+      let nl = buf.indexOf('\n');
+      while (nl >= 0) {
+        const parts = buf.slice(0, nl).trim().split(' ');
+        buf = buf.slice(nl + 1);
+        nl = buf.indexOf('\n');
+        if (parts[0] === 'S' && parts.length === 6) {
+          const gen = Number(parts[1]);
+          const slot = Number(parts[2]);
+          surfaces.push({
+            gen,
+            slot,
+            handle: BigInt(parts[3] as string),
+            width: Number(parts[4]),
+            height: Number(parts[5]),
+          });
+          if (opts.ackSurface !== false) socket.write(`I ${gen} ${slot}\n`);
+          notify();
+        } else if (parts[0] === 'F' && parts.length === 5) {
+          const gen = Number(parts[1]);
+          const slot = Number(parts[2]);
+          frames.push({ gen, slot, width: Number(parts[3]), height: Number(parts[4]) });
+          if (opts.ackFrame !== false) socket.write(`A ${gen} ${slot}\n`);
+          notify();
+        }
+      }
+    });
+  });
+  servers.push(server);
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(canvasPipe, () => resolve());
+  });
+  const spawnHost = (extra: string[] = []): ChildProcess => {
+    const child = spawn(
+      exe,
+      [
+        '--no-config',
+        '--idle=yes',
+        '--ao=null',
+        '--terminal=no',
+        `--input-ipc-server=${ipcPipe}`,
+        `--elv-parent-pid=${process.pid}`,
+        `--elv-canvas-pipe=${canvasPipe}`,
+        ...extra,
+      ],
+      { stdio: 'ignore' },
+    );
+    children.push(child);
+    return child;
+  };
+  return { canvasPipe, ipcPipe, surfaces, frames, connected, waitFor, spawnHost };
+}
 
 describe.skipIf(!enabled)('elv-mpv.exe', () => {
   it('answers mpv-version 0.42.0 over its pipe', async () => {
@@ -178,4 +291,106 @@ describe.skipIf(!enabled)('elv-mpv.exe', () => {
       rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  it('rejects a malformed --elv-canvas-pipe argument with exit code 2', async () => {
+    for (const bad of [
+      '--elv-canvas-pipe=',
+      '--elv-canvas-pipe=not-a-pipe',
+      '--elv-canvas-pipe=\\\\.\\pipe\\',
+    ]) {
+      const { child } = start([`--elv-parent-pid=${process.pid}`, bad]);
+      expect(await exited(child)).toBe(2);
+    }
+  });
+
+  it('exits 5 when --elv-canvas-pipe is passed without --elv-parent-pid', async () => {
+    const pipe = `\\\\.\\pipe\\elv-test-nopid-${randomBytes(6).toString('hex')}`;
+    const { child } = start([`--elv-canvas-pipe=${pipe}`]);
+    expect(await exited(child)).toBe(5);
+  });
+
+  it('renders D3D11 shared textures over --elv-canvas-pipe, handles R/A/I, and exits 0 on quit', async () => {
+    const h = await openCanvasHarness();
+    const child = h.spawnHost([
+      '--vo=libmpv',
+      '--force-window=no',
+      '--video-timing-offset=0',
+      '--keep-open=yes',
+    ]);
+
+    await h.waitFor(() => h.surfaces.filter((s) => s.gen === 1).length === 3);
+    const gen1 = h.surfaces.filter((s) => s.gen === 1);
+    expect(gen1.map((s) => s.slot).sort()).toEqual([0, 1, 2]);
+    for (const s of gen1) {
+      expect(s.handle).toBeGreaterThan(0n);
+      expect(s.width).toBe(1280);
+      expect(s.height).toBe(720);
+    }
+
+    const loadReply = JSON.parse(
+      await ask(h.ipcPipe, ['loadfile', 'av://lavfi:color=c=magenta:s=64x64:d=2']),
+    );
+    expect(loadReply.error).toBe('success');
+    await h.waitFor(() => h.frames.some((f) => f.gen === 1));
+    const firstFrame = h.frames.find((f) => f.gen === 1);
+    expect(firstFrame?.width).toBe(1280);
+    expect(firstFrame?.height).toBe(720);
+    expect([0, 1, 2]).toContain(firstFrame?.slot);
+
+    const sock = await h.connected;
+    sock.write('R 320 180\n');
+    await h.waitFor(() => h.surfaces.filter((s) => s.gen === 2).length === 3);
+    const gen2 = h.surfaces.filter((s) => s.gen === 2);
+    expect(gen2.map((s) => s.slot).sort()).toEqual([0, 1, 2]);
+    for (const s of gen2) {
+      expect(s.handle).toBeGreaterThan(0n);
+      expect(s.width).toBe(320);
+      expect(s.height).toBe(180);
+    }
+    await h.waitFor(() => h.frames.some((f) => f.gen === 2 && f.width === 320 && f.height === 180));
+
+    await ask(h.ipcPipe, ['quit']);
+    expect(await exited(child)).toBe(0);
+  }, 20000);
+
+  it('exits 0 cleanly when the canvas pipe closes (EOF)', async () => {
+    const h = await openCanvasHarness({ ackSurface: false });
+    const child = h.spawnHost();
+    const sock = await h.connected;
+    await h.waitFor(() => h.surfaces.length >= 3);
+    sock.destroy();
+    expect(await exited(child)).toBe(0);
+  }, 15000);
+
+  it('closes duplicated parent NT handles on I acks across repeated resizes (no handle leak)', async () => {
+    const handleCount = (): number => {
+      const out = spawnSync(
+        'powershell',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `(Get-Process -Id ${process.pid}).HandleCount`,
+        ],
+        { encoding: 'utf8', timeout: 10000 },
+      );
+      return Number(out.stdout.trim());
+    };
+    const h = await openCanvasHarness();
+    const child = h.spawnHost();
+    const sock = await h.connected;
+    await h.waitFor(() => h.surfaces.filter((s) => s.gen === 1).length === 3);
+
+    const before = handleCount();
+    for (let i = 0; i < 20; i++) {
+      const w = 160 + (i % 2) * 32;
+      const height = 90 + (i % 2) * 18;
+      sock.write(`R ${w} ${height}\n`);
+      const targetGen = i + 2;
+      await h.waitFor(() => h.surfaces.filter((s) => s.gen === targetGen).length === 3);
+    }
+    await ask(h.ipcPipe, ['quit']);
+    expect(await exited(child)).toBe(0);
+    expect(handleCount() - before).toBeLessThan(20);
+  }, 25000);
 });

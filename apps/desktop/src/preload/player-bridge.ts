@@ -4,6 +4,7 @@ import {
   type PlayerEventMessage,
   type PlayerOpenReply,
   type PlayerUiMessage,
+  type VideoFrameLike,
 } from '../shared/player-ipc.ts';
 
 /** The part of Electron's `ipcRenderer` the bridge uses; it never leaves the preload. */
@@ -12,6 +13,21 @@ export interface IpcRendererLike {
   send(channel: string, ...args: unknown[]): void;
   on(channel: string, listener: (event: unknown, ...args: unknown[]) => void): unknown;
   removeListener(channel: string, listener: (event: unknown, ...args: unknown[]) => void): unknown;
+}
+
+/** Minimal subset of Electron's `sharedTexture` API used in the sandboxed preload (`#95`). */
+export interface SharedTextureReceiverLike {
+  setSharedTextureReceiver(
+    cb: (
+      data: {
+        importedSharedTexture: {
+          getVideoFrame(): VideoFrameLike;
+          release(): void;
+        };
+      },
+      engineId?: unknown,
+    ) => Promise<void> | void,
+  ): void;
 }
 
 const isOpenReply = (x: unknown): x is PlayerOpenReply =>
@@ -36,7 +52,34 @@ function subscribe<T>(
  * Builds `window.elv.player` over `ipcRenderer`: one function per channel and nothing else, so the renderer gets no
  * raw IPC, no event object and no way to name a channel of its own.
  */
-export function createPlayerBridge(ipc: IpcRendererLike): PlayerBridge {
+export function createPlayerBridge(
+  ipc: IpcRendererLike,
+  sharedTex?: SharedTextureReceiverLike,
+): PlayerBridge {
+  const frameListeners = new Map<string, (frame: VideoFrameLike) => void>();
+
+  if (sharedTex) {
+    sharedTex.setSharedTextureReceiver(async ({ importedSharedTexture }, targetEngineId) => {
+      try {
+        const listener =
+          typeof targetEngineId === 'string' ? frameListeners.get(targetEngineId) : undefined;
+        if (!listener) return;
+        const frame = importedSharedTexture.getVideoFrame();
+        try {
+          listener(frame);
+        } catch {
+          try {
+            frame.close();
+          } catch {
+            // ignore frame close failure after listener error
+          }
+        }
+      } finally {
+        importedSharedTexture.release();
+      }
+    });
+  }
+
   const bridge: PlayerBridge = {
     async open() {
       const reply = await ipc.invoke(PLAYER_CHANNELS.open);
@@ -54,6 +97,14 @@ export function createPlayerBridge(ipc: IpcRendererLike): PlayerBridge {
     },
     onEvent: (listener) => subscribe<PlayerEventMessage>(ipc, PLAYER_CHANNELS.event, listener),
     onUi: (listener) => subscribe<PlayerUiMessage>(ipc, PLAYER_CHANNELS.ui, listener),
+    onFrame(engineId, listener) {
+      frameListeners.set(engineId, listener);
+      return () => {
+        if (frameListeners.get(engineId) === listener) {
+          frameListeners.delete(engineId);
+        }
+      };
+    },
     reportGate(line) {
       ipc.send(PLAYER_CHANNELS.gateReport, line);
     },

@@ -8,12 +8,18 @@ import {
   type PlayerEventMessage,
   type PlayerUiEvent,
   type PlayerUiMessage,
+  type VideoFrameLike,
 } from '../../../src/shared/player-ipc.ts';
 import { createDesktopEngine } from './desktop-engine.ts';
 
-function fakeBridge(reply = { engineId: 'e1', mainNowMs: 51_000 }, onOpen?: () => void) {
+function fakeBridge(
+  reply = { engineId: 'e1', mainNowMs: 51_000 },
+  onOpen?: () => void,
+  opts?: { omitOnFrame?: boolean },
+) {
   const eventListeners = new Set<(m: PlayerEventMessage) => void>();
   const uiListeners = new Set<(m: PlayerUiMessage) => void>();
+  const frameListeners = new Map<string, (frame: VideoFrameLike) => void>();
   const sent: PlayerCommandMessage[] = [];
   const areas: unknown[] = [];
   const closed: string[] = [];
@@ -33,6 +39,16 @@ function fakeBridge(reply = { engineId: 'e1', mainNowMs: 51_000 }, onOpen?: () =
       uiListeners.add(l);
       return () => uiListeners.delete(l);
     },
+    ...(opts?.omitOnFrame
+      ? {}
+      : {
+          onFrame: vi.fn((engineId: string, l: (frame: VideoFrameLike) => void) => {
+            frameListeners.set(engineId, l);
+            return () => {
+              if (frameListeners.get(engineId) === l) frameListeners.delete(engineId);
+            };
+          }),
+        }),
     reportGate: () => undefined,
   };
   return {
@@ -42,11 +58,15 @@ function fakeBridge(reply = { engineId: 'e1', mainNowMs: 51_000 }, onOpen?: () =
     closed,
     eventListeners,
     uiListeners,
+    frameListeners,
     event: (engineId: string, event: EngineEvent) => {
       for (const l of [...eventListeners]) l({ engineId, event });
     },
     ui: (engineId: string, ui: PlayerUiEvent) => {
       for (const l of [...uiListeners]) l({ engineId, ui });
+    },
+    frame: (engineId: string, frame: VideoFrameLike) => {
+      frameListeners.get(engineId)?.(frame);
     },
   };
 }
@@ -315,5 +335,43 @@ describe('createDesktopEngine', () => {
     engine.onUi((e) => seenUi.push(e));
     expect(seenEvents).toHaveLength(100);
     expect(seenUi).toEqual([{ type: 'presenter', kind: 'child-window', coversArea: true }]);
+  });
+
+  it('delegates onFrame with engineId, cleans up on unsubscribe and release, and handles missing bridge.onFrame', async () => {
+    const f = fakeBridge();
+    const engine = await createDesktopEngine(f.bridge, () => 0);
+
+    const received: VideoFrameLike[] = [];
+    const off = engine.onFrame?.((frame) => received.push(frame));
+    expect(f.frameListeners.size).toBe(1);
+
+    const frame1: VideoFrameLike = { codedWidth: 1280, codedHeight: 720, close: vi.fn() };
+    f.frame('e1', frame1);
+    expect(received).toEqual([frame1]);
+
+    // Explicit unsubscribe is idempotent and removes the listener.
+    off?.();
+    off?.();
+    expect(f.frameListeners.size).toBe(0);
+
+    // Active frame listener is cleaned up automatically on release().
+    const afterRebind = vi.fn();
+    engine.onFrame?.(afterRebind);
+    expect(f.frameListeners.size).toBe(1);
+    engine.release();
+    expect(f.frameListeners.size).toBe(0);
+
+    // Subscribing after release is a no-op.
+    const lateOff = engine.onFrame?.(vi.fn());
+    expect(f.frameListeners.size).toBe(0);
+    expect(() => lateOff?.()).not.toThrow();
+
+    // Bridge without onFrame returns a safe no-op unsubscribe.
+    const legacy = fakeBridge(undefined, undefined, { omitOnFrame: true });
+    const legacyEngine = await createDesktopEngine(legacy.bridge, () => 0);
+    const noop = legacyEngine.onFrame?.(vi.fn());
+    expect(noop).toBeTypeOf('function');
+    expect(() => noop?.()).not.toThrow();
+    legacyEngine.release();
   });
 });

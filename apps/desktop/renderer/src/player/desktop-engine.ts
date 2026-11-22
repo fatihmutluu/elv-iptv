@@ -13,6 +13,7 @@ import type {
   PlayerEventMessage,
   PlayerUiEvent,
   PlayerUiMessage,
+  VideoFrameLike,
 } from '../../../src/shared/player-ipc.ts';
 
 /**
@@ -54,6 +55,8 @@ export interface DesktopEngine extends PlayerEngine {
   setHwdec(profile: HwdecProfile): void;
   /** Presentation events outside the port; the latest `presenter` event is replayed to a new listener. */
   onUi(listener: (event: PlayerUiEvent) => void): () => void;
+  /** Subscribes to decoded GPU `VideoFrame` deliveries in `'canvas'` mode (`#95`); returns unsubscribe. */
+  onFrame?(listener: (frame: VideoFrameLike) => void): () => void;
 }
 
 const MAX_HELD_EVENTS = 100;
@@ -81,6 +84,7 @@ export async function createDesktopEngine(
 ): Promise<DesktopEngine> {
   const listeners = new Set<(event: EngineEvent) => void>();
   const uiListeners = new Set<(event: PlayerUiEvent) => void>();
+  const frameUnsubs = new Set<() => void>();
   let engineId: string | undefined;
   let offset = 0;
   let released = false;
@@ -183,6 +187,8 @@ export async function createDesktopEngine(
       released = true;
       listeners.clear();
       uiListeners.clear();
+      for (const offFrame of [...frameUnsubs]) offFrame();
+      frameUnsubs.clear();
       offEvent();
       offUi();
       bridge.close(id).catch(() => undefined);
@@ -217,6 +223,19 @@ export async function createDesktopEngine(
       return () => {
         uiListeners.delete(listener);
       };
+    },
+    onFrame(listener) {
+      if (released || !bridge.onFrame) return () => undefined;
+      const off = bridge.onFrame(id, listener);
+      let active = true;
+      const cleanup = (): void => {
+        if (!active) return;
+        active = false;
+        frameUnsubs.delete(cleanup);
+        off();
+      };
+      frameUnsubs.add(cleanup);
+      return cleanup;
     },
   };
 }

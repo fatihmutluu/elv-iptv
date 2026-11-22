@@ -10,7 +10,7 @@ export interface FetchDeps {
   readBytes(file: string): Promise<Uint8Array>;
   exists(path: string): boolean;
   buildLauncher(runtimeDir: string): Promise<void>;
-  /** SHA-256 of the launcher source (`elv-mpv.c`), or null where no launcher is built. */
+  /** SHA-256 of the launcher sources (`apps/desktop/native/mpv-host/*.{c,h}`), or null where no launcher is built. */
   launcherSourceHash(): Promise<string | null>;
   log(line: string): void;
   readText(file: string): Promise<string>;
@@ -38,7 +38,8 @@ export interface FetchOptions {
 }
 
 /** Files that embed the FFmpeg configuration or the mpv build options; other dylibs carry neither. */
-const BINARY = /(\.dll|(^|\/)libav(codec|format|util)[^/]*\.dylib|\.so(\.\d+)*|(^|\/)mpv)$/;
+const BINARY =
+  /(\.dll|(^|\/)(libav(codec|format|util)|libmpv)[^/]*\.dylib|\.so(\.\d+)*|(^|\/)mpv)$/;
 
 function runtimeDir(root: string, key: string): string {
   return `${root}/apps/desktop/resources/mpv/${key}`;
@@ -112,14 +113,14 @@ async function buildStamped(dir: string, hash: string | null, deps: FetchDeps): 
   if (hash !== null) await deps.writeText(`${dir}/elv-mpv.stamp`, `${hash}\n`);
 }
 
-/** A current runtime keeps its launcher only while the stamp matches `elv-mpv.c` and the exe exists. */
+/** A current runtime keeps its launcher only while the stamp matches the launcher sources and the exe exists. */
 async function refreshLauncher(dir: string, key: string, deps: FetchDeps): Promise<void> {
   const hash = await deps.launcherSourceHash();
   if (hash === null) return;
   const stamp = `${dir}/elv-mpv.stamp`;
   const built = deps.exists(stamp) ? (await deps.readText(stamp)).trim() : null;
   if (built === hash && deps.exists(`${dir}/elv-mpv.exe`)) return;
-  deps.log(`mpv: ${key} elv-mpv.exe is out of date with elv-mpv.c; rebuilding`);
+  deps.log(`mpv: ${key} elv-mpv.exe is out of date with launcher sources; rebuilding`);
   await buildStamped(dir, hash, deps);
 }
 

@@ -439,4 +439,29 @@ describe('bindDesktopMediaSession', () => {
     expect(env.mediaSession.playbackState).toBe('none');
     expect(env.mediaSession.metadata).toBeNull();
   });
+
+  it('forwards onFrame to the underlying DesktopEngine and returns a no-op when absent', () => {
+    const env = createFakeMediaSessionEnv();
+    const session = createDesktopMediaSession({
+      navigator: env.navigator,
+      MediaMetadata: FakeMediaMetadata,
+    });
+    const { engine } = createFakeEngine();
+    const offFrame = vi.fn();
+    engine.onFrame = vi.fn(() => offFrame);
+
+    const wrapped = bindDesktopMediaSession(engine, session);
+    const frameListener = vi.fn();
+    const off = wrapped.onFrame?.(frameListener);
+    expect(engine.onFrame).toHaveBeenCalledWith(frameListener);
+    off?.();
+    expect(offFrame).toHaveBeenCalledTimes(1);
+
+    // When underlying engine omits onFrame, wrapper still returns a safe no-op unsubscribe.
+    const { engine: legacyEngine } = createFakeEngine();
+    const wrappedLegacy = bindDesktopMediaSession(legacyEngine, session);
+    const noop = wrappedLegacy.onFrame?.(vi.fn());
+    expect(noop).toBeTypeOf('function');
+    expect(() => noop?.()).not.toThrow();
+  });
 });

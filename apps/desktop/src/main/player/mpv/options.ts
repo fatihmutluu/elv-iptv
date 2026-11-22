@@ -52,7 +52,8 @@ function hwdecFlags(hwdec: HwdecProfile, platform?: string): string[] {
 /**
  * Builds the full argv. Stream URLs and headers never appear here; they travel over IPC.
  * Our macOS runtime is built without libcurl, so `--curl-enabled` does not exist there.
- * Linux adds `--pulse-buffer=50` (#269); `--video-timing-offset=0` is added only for render-context mode (#210).
+ * Linux adds `--pulse-buffer=50` (#269); render-context mode (#210, #95) switches to
+ * `--force-window=no`, `--vo=libmpv`, and `--video-timing-offset=0`.
  */
 export function launchArgs(p: {
   inputConf: string;
@@ -66,11 +67,14 @@ export function launchArgs(p: {
   const base = LAUNCH_OPTIONS.flatMap((opt) => {
     if (p.platform === 'darwin' && opt === '--curl-enabled=no') return [];
     if (opt === '--hwdec=auto-safe') return hwdecFlags(profile, p.platform);
+    if (p.renderContext === true && opt === '--force-window=immediate') {
+      return ['--force-window=no'];
+    }
     return [opt];
   });
   const extra: string[] = [];
   if (p.platform === 'linux') extra.push('--pulse-buffer=50');
-  if (p.renderContext === true) extra.push('--video-timing-offset=0');
+  if (p.renderContext === true) extra.push('--vo=libmpv', '--video-timing-offset=0');
   return [...base, ...extra, `--input-conf=${p.inputConf}`, ...p.presenterArgs, ...p.transportArgs];
 }
 

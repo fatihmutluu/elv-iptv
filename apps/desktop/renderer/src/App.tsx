@@ -91,7 +91,9 @@ function AppRoot() {
         });
         return {
           engine,
-          renderSurface: ({ failed }) => <PlayerView engine={engine} status="" failed={failed} />,
+          renderSurface: ({ failed, resizeMode }) => (
+            <PlayerView engine={engine} status="" failed={failed} resizeMode={resizeMode} />
+          ),
           toggleFullscreen: () => rawEngine.toggleFullscreen(),
           toggleMute: () => rawEngine.toggleMute(),
           setDeinterlace: (enabled) => rawEngine.setDeinterlace(enabled),
