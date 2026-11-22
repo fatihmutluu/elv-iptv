@@ -1,4 +1,4 @@
-import { type ElvError, elvError, type Result } from '@elv/domain';
+import { type ElvError, elvError, normalizeStreamUrl, type Result } from '@elv/domain';
 import {
   type Budget,
   backoff,
@@ -37,10 +37,14 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
   let budget: Budget = freshBudget();
   let limit: Limit = freshLimit();
   let alternate = 0;
+  let inlineAlternate = 0;
+  let inlineAlternates: readonly StreamRequest[] | undefined;
+  let primaryCaptured = false;
   let softwareAudio = false;
   let heldFresh = false;
   let containerFallbackTried = false;
   let pendingFormat: LiveContainerFormat | undefined;
+  const failedCanonicalUrls = new Set<string>();
 
   const inBatch = <T>(fn: () => T): T => (ctl.batch !== undefined ? ctl.batch(fn) : fn());
   const isVod = (): boolean => ctl.request()?.kind === 'vod';
@@ -48,6 +52,40 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
     if (h !== undefined) ctl.clearTimer(h);
     return undefined;
   };
+
+  const canonicalKey = (url: string | undefined): string | undefined => {
+    const trimmed = url?.trim();
+    return trimmed ? normalizeStreamUrl(trimmed) : undefined;
+  };
+
+  const recordFailedUrl = (url: string | undefined): void => {
+    const key = canonicalKey(url);
+    if (key !== undefined) failedCanonicalUrls.add(key);
+  };
+
+  const recordCurrentFailure = (error?: EngineError): void => {
+    const current = ctl.stream?.();
+    if (!primaryCaptured && current !== undefined) {
+      primaryCaptured = true;
+      inlineAlternates = current.alternates;
+    }
+    recordFailedUrl(current?.url);
+    recordFailedUrl(current?.finalUrl);
+    recordFailedUrl(error?.finalUrl);
+  };
+
+  const isFailedCanonical = (s: StreamRequest): boolean => {
+    const u = canonicalKey(s.url);
+    const f = canonicalKey(s.finalUrl);
+    return (
+      (u !== undefined && failedCanonicalUrls.has(u)) ||
+      (f !== undefined && failedCanonicalUrls.has(f))
+    );
+  };
+
+  const hasMoreAlternates = (): boolean =>
+    alternate < (ctl.request()?.alternates?.length ?? 0) ||
+    inlineAlternate < (inlineAlternates?.length ?? 0);
 
   const failWith = (error: ElvError): void => {
     deps.onResetAll();
@@ -72,6 +110,60 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
     const err = budget.lastError;
     if (err === undefined) return false;
     return err.code === 'network' || classifyError(err.code, err.httpStatus) === 'not-found';
+  };
+
+  const nextContainerFallback = ():
+    | { stream: StreamRequest; format: LiveContainerFormat }
+    | undefined => {
+    if (!canTryContainerFallback()) return undefined;
+    const currentStream = ctl.stream?.();
+    if (currentStream === undefined) return undefined;
+    const swapped = swapLiveContainerUrl(currentStream.url);
+    if (swapped === undefined) return undefined;
+    const candidate: StreamRequest = { url: swapped.url, headers: currentStream.headers };
+    if (isFailedCanonical(candidate)) return undefined;
+    return { stream: candidate, format: swapped.format };
+  };
+
+  const tryContainerFallbackNow = (): boolean => {
+    const fallback = nextContainerFallback();
+    if (fallback === undefined) return false;
+    budget.rung = 4;
+    containerFallbackTried = true;
+    pendingFormat = fallback.format;
+    const acc = ctl.request()?.accountKey;
+    if (acc !== undefined) ctl.formatCache?.evict(acc);
+    reload(fallback.stream);
+    return true;
+  };
+
+  const advanceAlternates = (at: number): void => {
+    const reqAlts = ctl.request()?.alternates;
+    if (reqAlts !== undefined && alternate < reqAlts.length) {
+      const next = reqAlts[alternate] as () => Promise<Result<StreamRequest>>;
+      const settle = (result: Result<StreamRequest> | undefined): void => {
+        if (at !== epoch) return;
+        budget.rung = 4;
+        alternate += 1;
+        if (result?.ok && !isFailedCanonical(result.value)) reload(result.value);
+        else advanceAlternates(at);
+      };
+      new Promise<Result<StreamRequest>>((resolve) => resolve(next())).then(settle, () =>
+        settle(undefined),
+      );
+      return;
+    }
+    while (inlineAlternates !== undefined && inlineAlternate < inlineAlternates.length) {
+      const candidate = inlineAlternates[inlineAlternate] as StreamRequest;
+      inlineAlternate += 1;
+      if (!isFailedCanonical(candidate)) {
+        budget.rung = 4;
+        reload(candidate);
+        return;
+      }
+    }
+    budget.rung = 4;
+    if (!tryContainerFallbackNow()) giveUp();
   };
 
   const buildAction = (rung: Rung): RungAction | undefined => {
@@ -106,37 +198,16 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
         reload();
       };
     }
-    const next = ctl.request()?.alternates?.[alternate];
-    if (next !== undefined) {
+    if (hasMoreAlternates()) {
       return () => {
         ctl.stopMedia();
-        const at = epoch;
-        const settle = (result: Result<StreamRequest> | undefined): void => {
-          if (at !== epoch) return;
-          budget.rung = 4;
-          alternate += 1;
-          if (result?.ok) reload(result.value);
-          else giveUp();
-        };
-        new Promise<Result<StreamRequest>>((resolve) => resolve(next())).then(settle, () =>
-          settle(undefined),
-        );
+        advanceAlternates(epoch);
       };
     }
-    if (canTryContainerFallback()) {
-      const currentStream = ctl.stream?.();
-      const swapped =
-        currentStream === undefined ? undefined : swapLiveContainerUrl(currentStream.url);
-      if (swapped !== undefined && currentStream !== undefined) {
-        return () => {
-          budget.rung = 4;
-          containerFallbackTried = true;
-          pendingFormat = swapped.format;
-          const acc = ctl.request()?.accountKey;
-          if (acc !== undefined) ctl.formatCache?.evict(acc);
-          reload({ ...currentStream, url: swapped.url });
-        };
-      }
+    if (nextContainerFallback() !== undefined) {
+      return () => {
+        if (!tryContainerFallbackNow()) giveUp();
+      };
     }
     return undefined;
   };
@@ -181,24 +252,28 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
 
   function escalate(error?: EngineError, silent = false): void {
     if (error !== undefined) budget.lastError = error;
+    recordCurrentFailure(error);
     deps.cancelAll();
     freeze();
-    const next = RUNGS[budget.rung];
+    const next =
+      budget.rung === 4
+        ? !softwareAudio && (hasMoreAlternates() || nextContainerFallback() !== undefined)
+          ? 4
+          : undefined
+        : RUNGS[budget.rung];
     if (next === undefined) giveUp();
     else goTo(next, onSilentTimeout, silent);
   }
 
   function onNotFound(error: EngineError): void {
     budget.lastError = error;
+    recordCurrentFailure(error);
     if (budget.notFound || budget.rung >= 2) {
-      if (canTryContainerFallback()) {
-        const currentStream = ctl.stream?.();
-        if (currentStream !== undefined && swapLiveContainerUrl(currentStream.url) !== undefined) {
-          deps.cancelAll();
-          freeze();
-          goTo(4, giveUp, true);
-          return;
-        }
+      if (nextContainerFallback() !== undefined) {
+        deps.cancelAll();
+        freeze();
+        goTo(4, giveUp, true);
+        return;
       }
       failWith(toPlaybackError(error));
       return;
@@ -285,9 +360,13 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
     resetItem() {
       budget = freshBudget();
       alternate = 0;
+      inlineAlternate = 0;
+      inlineAlternates = undefined;
+      primaryCaptured = false;
       softwareAudio = false;
       containerFallbackTried = false;
       pendingFormat = undefined;
+      failedCanonicalUrls.clear();
     },
     resetLimit() {
       limit = freshLimit();

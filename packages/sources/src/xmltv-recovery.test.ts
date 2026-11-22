@@ -229,11 +229,28 @@ describe('scanXmltv hostile bodies and error attribution', () => {
 
   it('reads fields after an unclosed unknown tag and never takes a nested icon', async () => {
     const text = guide(
-      `<programme start="20260101000000" channel="c"><br><rating><icon src="r.png"/></rating><title>T</title><icon src="p.png"/></programme>`,
+      `<programme start="20260101000000" channel="c"><br><rating><icon src="http://img.example/r.png"/></rating><title>T</title><icon src="http://img.example/p.png"/></programme>`,
     );
     const r = await collect(whole(text));
     expect(r.programmes[0]?.title).toBe('T');
-    expect(r.programmes[0]?.icon).not.toBe('r.png');
+    expect(r.programmes[0]?.icon).not.toBe('http://img.example/r.png');
+  });
+
+  it('rejects unsafe and relative <icon src> URLs on channels and programmes (#428)', async () => {
+    const text = guide(
+      `<channel id="c1"><display-name>C1</display-name><icon src="javascript:alert(1)"/><icon src="https://img.example/c1.png"/></channel>` +
+        `<channel id="c2"><display-name>C2</display-name><icon src="file:///etc/passwd"/></channel>` +
+        `<programme start="20260101000000" channel="c1"><title>P1</title><icon src="data:image/svg+xml,&lt;svg/&gt;"/></programme>` +
+        `<programme start="20260101010000" channel="c1"><title>P2</title><icon src="relative.png"/></programme>` +
+        `<programme start="20260101020000" channel="c1"><title>P3</title><icon src="data:image/png;base64,AAAA"/></programme>`,
+    );
+    const r = await collect(whole(text));
+    expect(r.channels.map((c) => c.icon)).toEqual(['https://img.example/c1.png', undefined]);
+    expect(r.programmes.map((p) => p.icon)).toEqual([
+      undefined,
+      undefined,
+      'data:image/png;base64,AAAA',
+    ]);
   });
 
   it('lets scanner bugs propagate instead of reporting them as input errors', async () => {

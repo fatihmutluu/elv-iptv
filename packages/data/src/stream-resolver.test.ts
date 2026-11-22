@@ -150,4 +150,55 @@ describe('normalizeMulticastUrl (#267)', () => {
     const withBadFp = await cache.resolveStream(row?.key ?? '');
     expect(withBadFp.ok && withBadFp.value.accountKey).toBe(e.sourceId);
   });
+
+  it('resolves backup_urls_json into alternates with cloned headers, multicast normalization, and skips unresolvable backups (#430)', async () => {
+    const e = await setupM3u(
+      `#EXTM3U\n#EXTINF:-1 group-title="G",Multi\n#EXTVLCOPT:http-user-agent=MyAgent/1\nhttp://cdn.example/live/1.m3u8\n`,
+    );
+    expect((await importCatalog(e.sourceId, e.deps)).ok).toBe(true);
+    const row = (await e.db.all<{ key: string }>('SELECT key FROM live LIMIT 1'))[0];
+    await e.db.run('UPDATE live SET backup_urls_json = ? WHERE key = ?', [
+      JSON.stringify([
+        'udp://@239.1.2.3:5000',
+        'http://missing-secret.example/{{missing_var}}/1.ts',
+        'http://alt.example/live/2.m3u8',
+      ]),
+      row?.key ?? '',
+    ]);
+
+    const cache = createPlaytimeResolverCache({
+      db: e.db,
+      secrets: e.secrets,
+      http: e.deps.http,
+    });
+    const res = await cache.resolveStream(row?.key ?? '');
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.url).toBe('http://cdn.example/live/1.m3u8');
+    expect(res.value.headers['user-agent']).toBe('MyAgent/1');
+    expect(res.value.alternates).toEqual([
+      { url: 'udp://239.1.2.3:5000', headers: { 'user-agent': 'MyAgent/1' } },
+      { url: 'http://alt.example/live/2.m3u8', headers: { 'user-agent': 'MyAgent/1' } },
+    ]);
+    // Headers are cloned per alternate, not aliased to primary headers
+    expect(res.value.alternates?.[0]?.headers).not.toBe(res.value.headers);
+    expect(res.value.alternates?.[0]?.headers).not.toBe(res.value.alternates?.[1]?.headers);
+  });
+
+  it('preserves backward compatibility with legacy literal userAgent rows in headers_json (#430)', async () => {
+    const e = await setupM3u(`#EXTM3U\n${extinf('Legacy', 'http://cdn.example/live/1.m3u8')}`);
+    expect((await importCatalog(e.sourceId, e.deps)).ok).toBe(true);
+    const row = (await e.db.all<{ key: string }>('SELECT key FROM live LIMIT 1'))[0];
+    await e.db.run('UPDATE live SET headers_json = ? WHERE key = ?', [
+      JSON.stringify({ userAgent: 'LegacyLiteralUA/9.0' }),
+      row?.key ?? '',
+    ]);
+    const cache = createPlaytimeResolverCache({
+      db: e.db,
+      secrets: e.secrets,
+      http: e.deps.http,
+    });
+    const res = await cache.resolveStream(row?.key ?? '');
+    expect(res.ok && res.value.headers['user-agent']).toBe('LegacyLiteralUA/9.0');
+  });
 });

@@ -16,32 +16,30 @@ M3U and XMLTV scanners and the Xtream client.
   simulator, 100k entries in CI, 500k with `SIM_HUGE=1`) live in `tools/test/sources-*.test.ts`.
 
 ## API
-- `scanM3u(chunks, { batchSize?, baseUrl?, decompressor?, maxDecompressedBytes? })` streams an M3U/M3U8 playlist (plain or
-  gzip `1f 8b` via `decodeMaybeGzip`) into `M3uBatch`es of typed `M3uEntry` values in bounded memory (draining every full
-  batch per chunk); the last batch has `done: true`, `M3uHeader` (`present` when `#EXTM3U` was seen) and `ScanStats`.
-  Failure contract (same as `scanXmltv`): returns `Result<void>`; an input that throws returns `err` (own category/code if
-  ElvError-shaped, `AbortError` -> `network`/`aborted`, else `network`/`stream-failed`) with no `done` batch. Never throws on
-  bad content (warnings: `not-a-url`, `extinf-without-url`, `exthttp-malformed`, `line-too-long`, `attr-quote`,
-  `inline-logo-stripped`); oversized inline `data:` logos (> 4 KiB) are stream-stripped in O(1) memory (`m3u-logo-filter.ts`),
-  other lines over 1 MiB are skipped. Splits `#http`/`#rtmp`/`#rtsp`/`#udp`/`#rtp` inline backups into `backupUrls` (preserving
-  `#fragment`), normalizes `udp://@`/`rtp://@` multicast URLs, and splits `.xml/http`/`.gz/http`/`;` `url-tvg` lists. Non-`#`
-  lines need `xx://` or, with `baseUrl`, no whitespace/`<`/`{`/`"`. `extra`, `kodiProps`, `headers.other` and `header.attrs` have
-  no prototype. Files: `m3u.ts`, `m3u-logo-filter.ts`, `m3u-attrs.ts`, `m3u-url.ts`, `m3u-types.ts`. Rejects HLS manifests.
-- Utilities: `decodeMaybeGzip` (`gzip-stream.ts` + O(1)-memory RFC 1952/1951 member framer `gzip-member-splitter.ts`,
-  multi-member `.gz` + `DEFAULT_MAX_DECOMPRESSED_BYTES` 256 MiB ceiling),
-  `decodeLegacyCodepage` (`codepages.ts`, `windows-1256`/`iso-8859-6`/`windows-1254`/`windows-1252`), `detectAndDecodeText`
-  (`encoding.ts`), `toElvError`, `decodeUtf8`, `ByteBuffer`, `decodeEntities`, `createStats`/`warn`; test helpers in `test-chunks.ts`.
-- `scanXmltv(chunks, { batchSize?, channels?, programmeChannels?, from?, to?, decompressor?, maxDecompressedBytes? })` streams
-  XMLTV via `decodeMaybeGzip` into `XmltvBatch`es (`channels`, `programmes` with epoch-ms times, `isLive`/`isNew`/`previouslyShown`
-  flags; `batchSize` bounds total) in bounded memory; returns `err` `source-format`/`gzip-unsupported` without `Decompressor`,
-  `gzip-corrupt`, or `too-large`, else `ok`. Decodes Latin-1/Windows-1252 prologs, strips inline HTML & Unicode superscripts
-  (promoting `LIVE`/`NEW`), ranks `<episode-num>` (`xmltv_ns` validated > `onscreen` > `dd_progid` > other, `<desc>` `S##E##`
-  fallback). Salvages stray `<` and bare `&`; skips malformed or > 1 MiB elements. Files: `xmltv.ts`, `xml-tokens.ts`,
+- `scanM3u(chunks, { batchSize?, baseUrl?, decompressor?, maxDecompressedBytes? })` streams M3U/M3U8 (plain or gzip `1f 8b`
+  via `decodeMaybeGzip`) into `M3uBatch`es in bounded memory; final batch has `done: true`, `M3uHeader`, `ScanStats`.
+  Failure contract (same as `scanXmltv`): returns `Result<void>`; input throw -> `err` (own category/code, `AbortError` ->
+  `network`/`aborted`, else `network`/`stream-failed`) with no `done` batch. Never throws on bad content (warnings:
+  `not-a-url`, `extinf-without-url`, `exthttp-malformed`, `line-too-long`, `attr-quote`, `inline-logo-stripped`); strips
+  >4 KiB `data:` logos in O(1) memory (`m3u-logo-filter.ts`), skips >1 MiB lines. Splits `#http`/`#rtmp`/`#rtsp`/`#udp`/`#rtp`
+  `backupUrls`, normalizes `udp://@`/`rtp://@`, trims `tvg-id`/`channel-id`, supports `\"`/`\'`/`\\` escapes, limits Sat>IP
+  prefix stripping to live (`finishEntry`), validates artwork URLs (`artwork-url.ts`: `http(s)://` or bounded non-SVG
+  `data:image/*` across M3U/XMLTV/Xtream). Prototype-free `extra`/`kodiProps`/`headers.other`/`header.attrs`. Rejects HLS.
+  Files: `m3u.ts`, `m3u-logo-filter.ts`, `m3u-attrs.ts`, `m3u-url.ts`, `m3u-types.ts`, `artwork-url.ts`.
+- Utilities: `decodeMaybeGzip` (`gzip-stream.ts` + `gzip-member-splitter.ts`, multi-member `.gz`, 256 MiB ceiling),
+  `decodeLegacyCodepage`/`decodeCodepageSlice` (`codepages.ts`, `windows-1256`/`iso-8859-6`/`windows-1254`/`windows-1252`/`windows-1251`),
+  `detectAndDecodeText`/`normalizeBomChunks` (`encoding.ts`), `toElvError`, `decodeUtf8`, `ByteBuffer`, `decodeEntities`, `createStats`/`warn`.
+- `scanXmltv(chunks, { batchSize?, channels?, programmeChannels?, from?, to?, decompressor?, maxDecompressedBytes?, preferredLanguages? })`
+  streams XMLTV via `decodeMaybeGzip`, 512 B POSIX `ustar` tar header strip, and `normalizeBomChunks` (UTF-8/16/32 BOM, locking
+  UTF-8 over conflicting prologs) into `XmltvBatch`es (`channels`, `programmes` with epoch-ms times supporting numeric/`Z`/`UTC`/`GMT`
+  offsets, `isLive`/`isNew`/`previouslyShown`). Decodes legacy prologs (`windows-1252`/`iso-8859-1`, `windows-1254`/`iso-8859-9`,
+  `windows-1251`, `windows-1256`, `iso-8859-6`), trims channel IDs, ranks multi-language `<title>`/`<sub-title>`/`<desc>` by
+  `preferredLanguages`, strips inline HTML & Unicode superscripts, ranks `<episode-num>` (`xmltv_ns` > `onscreen` > `dd_progid` >
+  `<desc>` `S##E##`). Salvages stray `<` / bare `&`; skips malformed or >1 MiB elements. Files: `xmltv.ts`, `xml-tokens.ts`,
   `xmltv-children.ts`, `xmltv-meta.ts`, `xmltv-time.ts`, `xmltv-types.ts`.
 - `createXtreamClient({ http, server, username, password, transport?, maxBodyBytes?, backupServers?, primaryCooldownMs?, cooldown429Ms?, serverTimezone? })`
   wraps `player_api.php` (`account`, `categories`, `liveStreams`/`vodStreams`/`series`, `seriesInfo`, `vodInfo`, `shortEpg`),
-  `playlistUrl`, `guideUrl`, `streamUrl`; `probeXtreamLiveFormat` (`xtream-probe.ts`) auto-detects `ts` vs `m3u8` in <= 512 B.
-  Tracks per-`HttpClient` account-scoped `429` cooldowns (`Retry-After`, never fails over on `429`) and ordered mirror failover
-  with primary promotion (`xtream-mirrors.ts`). Empty `{}` -> `[]`, `[]` -> `{}`; array `episodes` preserve Season `0` and
-  deduplicate. Credentials appear only in URL builders; errors never hold URLs. Files: `xtream.ts`, `xtream-probe.ts`,
-  `xtream-json.ts`, `xtream-mirrors.ts`, `xtream-records.ts`, `xtream-normalize.ts`, `xtream-types.ts`.
+  `playlistUrl`, `guideUrl`, `streamUrl`; `probeXtreamLiveFormat` (`xtream-probe.ts`) auto-detects `ts` vs `m3u8` in <=512 B.
+  Per-`HttpClient` account-scoped `429` cooldowns (`Retry-After`, no failover on `429`) and ordered mirror failover (`xtream-mirrors.ts`).
+  Empty `{}` -> `[]`, `[]` -> `{}`; array `episodes` keep Season `0` and deduplicate. Credentials only in URL builders; errors omit URLs.
+  Files: `xtream.ts`, `xtream-probe.ts`, `xtream-json.ts`, `xtream-mirrors.ts`, `xtream-records.ts`, `xtream-normalize.ts`, `xtream-types.ts`.

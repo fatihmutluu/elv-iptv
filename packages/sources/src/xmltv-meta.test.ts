@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { chunksOf, randomSplits } from './test-chunks';
-import { collect, expectSameEverywhere, guide } from './xmltv-test-helpers';
+import { chunksOf, randomSplits, utf8 } from './test-chunks';
+import { collect, expectSameEverywhere, guide, gunzipper, gzip } from './xmltv-test-helpers';
 
 /** Encodes a string containing ASCII + Latin-1/Windows-1252 characters as single-byte Latin-1/CP1252. */
 function latin1Bytes(text: string): Uint8Array {
@@ -246,5 +246,289 @@ describe('XMLTV Latin-1 / Windows-1252 XML prolog decoding (#181)', () => {
     expect(r.result).toEqual({ ok: true, value: undefined });
     expect(r.programmes[0]?.desc).toBe(longText);
     expect(r.programmes[0]?.subTitle).toBe('Part A Part B');
+  });
+});
+
+function encodeSingleByte(text: string, encoding: string): Uint8Array {
+  const td = new TextDecoder(encoding);
+  const reverse = new Map<string, number>();
+  for (let b = 0; b <= 0xff; b++) {
+    if (encoding === 'iso-8859-6' && b >= 0x80 && b <= 0x9f) continue;
+    const ch = td.decode(new Uint8Array([b]));
+    if (ch !== '\ufffd' && !reverse.has(ch)) reverse.set(ch, b);
+  }
+  const out = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i] as string;
+    const b = reverse.get(ch);
+    if (b === undefined) throw new Error(`Cannot encode ${ch} in ${encoding}`);
+    out[i] = b;
+  }
+  return out;
+}
+
+function encodeUtf16(text: string, le: boolean): Uint8Array {
+  const out = new Uint8Array(2 + text.length * 2);
+  out[0] = le ? 0xff : 0xfe;
+  out[1] = le ? 0xfe : 0xff;
+  for (let i = 0; i < text.length; i++) {
+    const cu = text.charCodeAt(i);
+    out[2 + i * 2] = le ? cu & 0xff : cu >> 8;
+    out[2 + i * 2 + 1] = le ? cu >> 8 : cu & 0xff;
+  }
+  return out;
+}
+
+function encodeUtf32(text: string, le: boolean): Uint8Array {
+  const cps: number[] = [];
+  for (const ch of text) cps.push(ch.codePointAt(0) as number);
+  const out = new Uint8Array(4 + cps.length * 4);
+  if (le) {
+    out[0] = 0xff;
+    out[1] = 0xfe;
+  } else {
+    out[2] = 0xfe;
+    out[3] = 0xff;
+  }
+  for (let i = 0; i < cps.length; i++) {
+    const cp = cps[i] as number;
+    const off = 4 + i * 4;
+    if (le) {
+      out[off] = cp & 0xff;
+      out[off + 1] = (cp >> 8) & 0xff;
+      out[off + 2] = (cp >> 16) & 0xff;
+      out[off + 3] = (cp >>> 24) & 0xff;
+    } else {
+      out[off] = (cp >>> 24) & 0xff;
+      out[off + 1] = (cp >> 16) & 0xff;
+      out[off + 2] = (cp >> 8) & 0xff;
+      out[off + 3] = cp & 0xff;
+    }
+  }
+  return out;
+}
+
+function wrapInUstarTar(filename: string, payload: Uint8Array): Uint8Array {
+  const header = new Uint8Array(512);
+  header.set(utf8(filename), 0);
+  header.set(utf8('ustar\x0000'), 257);
+  const trailer = new Uint8Array(1024);
+  const out = new Uint8Array(header.length + payload.length + trailer.length);
+  out.set(header, 0);
+  out.set(payload, 512);
+  out.set(trailer, 512 + payload.length);
+  return out;
+}
+
+describe('XMLTV codepages, BOMs, ustar tar headers & trimmed IDs (#429)', () => {
+  it('decodes Windows-1254/ISO-8859-9/latin5, Windows-1251/cp1251, Windows-1256, and ISO-8859-6 XML prologs', async () => {
+    const cases = [
+      {
+        prologs: ['windows-1254', 'ISO-8859-9', 'latin5'],
+        encoder: 'windows-1254',
+        chanName: 'İstanbul Şehir TV',
+        title: 'Akşam Haberleri: Öğle Bülteni — ĞğİıŞş',
+      },
+      {
+        prologs: ['windows-1251', 'cp1251'],
+        encoder: 'windows-1251',
+        chanName: 'Первый Канал',
+        title: 'Новости №1: Ёлка и Їжак — €5',
+      },
+      {
+        prologs: ['windows-1256'],
+        encoder: 'windows-1256',
+        chanName: 'الأخبار العربية',
+        title: 'نشرة المساء — پخش',
+      },
+      {
+        prologs: ['iso-8859-6'],
+        encoder: 'iso-8859-6',
+        chanName: 'القناة الأولى',
+        title: 'فيلم وثائقي',
+      },
+    ];
+    for (const c of cases) {
+      for (const enc of c.prologs) {
+        const xml =
+          `<?xml version="1.0" encoding="${enc}"?>\n<tv>` +
+          `<channel id="ch1"><display-name>${c.chanName}</display-name></channel>` +
+          `<programme start="20260101000000 UTC" channel="ch1"><title>${c.title}</title></programme></tv>`;
+        const bytes = encodeSingleByte(xml, c.encoder);
+        const r = await collect(randomSplits(bytes, 31, 13));
+        expect(r.result, enc).toEqual({ ok: true, value: undefined });
+        expect(r.channels, enc).toEqual([{ id: 'ch1', names: [c.chanName] }]);
+        expect(r.programmes[0]?.title, enc).toBe(c.title);
+        expect(r.programmes[0]?.title, enc).not.toContain('\ufffd');
+      }
+    }
+  });
+
+  it('transcodes UTF-16LE, UTF-16BE, UTF-32LE, and UTF-32BE BOM XMLTV streams across arbitrary splits', async () => {
+    const xml =
+      `<?xml version="1.0" encoding="UTF-16"?>\n<tv>` +
+      `<channel id="c1"><display-name>İstanbul</display-name></channel>` +
+      `<programme start="20260101000000 +0000" channel="c1"><title>Café 日本</title></programme></tv>`;
+    for (const bytes of [
+      encodeUtf16(xml, true),
+      encodeUtf16(xml, false),
+      encodeUtf32(xml, true),
+      encodeUtf32(xml, false),
+    ]) {
+      const r = await collect(chunksOf(bytes, [1, 1, 3, 7, bytes.length]));
+      expect(r.result).toEqual({ ok: true, value: undefined });
+      expect(r.channels).toEqual([{ id: 'c1', names: ['İstanbul'] }]);
+      expect(r.programmes[0]?.title).toBe('Café 日本');
+    }
+  });
+
+  it('locks UTF-8 decoding when a BOM is present even if the XML prolog declares a legacy single-byte encoding', async () => {
+    const utf16Xml =
+      `<?xml version="1.0" encoding="windows-1254"?>\n<tv>` +
+      `<channel id="c1"><display-name>İstanbul Şehir TV</display-name></channel>` +
+      `<programme start="20260101000000 +0000" channel="c1"><title>Akşam Haberleri</title></programme></tv>`;
+    const utf16Bytes = encodeUtf16(utf16Xml, true);
+    const r16 = await collect(chunksOf(utf16Bytes, [1, 1, 7, utf16Bytes.length]));
+    expect(r16.result).toEqual({ ok: true, value: undefined });
+    expect(r16.channels).toEqual([{ id: 'c1', names: ['İstanbul Şehir TV'] }]);
+    expect(r16.programmes[0]?.title).toBe('Akşam Haberleri');
+
+    const utf8Xml =
+      `\uFEFF<?xml version="1.0" encoding="iso-8859-1"?>\n<tv>` +
+      `<channel id="c2"><display-name>Café Über</display-name></channel>` +
+      `<programme start="20260101000000 +0000" channel="c2"><title>Émission Spéciale</title></programme></tv>`;
+    const utf8Bytes = utf8(utf8Xml);
+    const r8 = await collect(chunksOf(utf8Bytes, [1, 1, 1, 11, utf8Bytes.length]));
+    expect(r8.result).toEqual({ ok: true, value: undefined });
+    expect(r8.channels).toEqual([{ id: 'c2', names: ['Café Über'] }]);
+    expect(r8.programmes[0]?.title).toBe('Émission Spéciale');
+  });
+
+  it('strips leading 512-byte POSIX ustar tar headers in plain .tar and .tar.gz XMLTV feeds', async () => {
+    const xml = guide(
+      `<channel id="t1"><display-name>Tar TV</display-name></channel>` +
+        `<programme start="20260101000000 GMT" channel="t1"><title>Tar Show</title></programme>`,
+    );
+    const tar = wrapInUstarTar('guide.xml', utf8(xml));
+    for (const stream of [
+      chunksOf(tar, [tar.length]),
+      chunksOf(tar, [100, 160, 260, tar.length]),
+      randomSplits(tar, 7, 19),
+    ]) {
+      const r = await collect(stream);
+      expect(r.result).toEqual({ ok: true, value: undefined });
+      expect(r.channels).toEqual([{ id: 't1', names: ['Tar TV'] }]);
+      expect(r.programmes[0]?.title).toBe('Tar Show');
+    }
+
+    const targz = await gzip(wrapInUstarTar('utf16.xml', encodeUtf16(xml, true)));
+    const rGz = await collect(chunksOf(targz, [3, 17, targz.length]), { decompressor: gunzipper });
+    expect(rGz.result).toEqual({ ok: true, value: undefined });
+    expect(rGz.channels).toEqual([{ id: 't1', names: ['Tar TV'] }]);
+    expect(rGz.programmes[0]?.title).toBe('Tar Show');
+  });
+
+  it('trims <channel id> and <programme channel> and rejects whitespace-only IDs with warnings', async () => {
+    const xml = guide(
+      `<channel id="  ch.1  "><display-name>One</display-name></channel>` +
+        `<channel id="   "><display-name>Blank</display-name></channel>` +
+        `<programme start="20260101000000" channel="  ch.1\t"><title>Matched</title></programme>` +
+        `<programme start="20260101010000" channel="   "><title>BlankProg</title></programme>`,
+    );
+    const r = await expectSameEverywhere(xml);
+    expect(r.channels).toEqual([{ id: 'ch.1', names: ['One'] }]);
+    expect(r.programmes.map((p) => ({ channel: p.channel, title: p.title }))).toEqual([
+      { channel: 'ch.1', title: 'Matched' },
+    ]);
+    expect(r.stats?.warnings.map((w) => w.code)).toEqual([
+      'channel-missing-id',
+      'programme-missing-channel',
+    ]);
+  });
+});
+
+describe('XMLTV preferredLanguages selection (#121, #429)', () => {
+  it('scores <title>, <sub-title>, and <desc> by exact BCP-47 -> primary subtag & ISO-639-2 aliases -> untagged -> first seen', async () => {
+    const xml = guide(
+      `<programme start="20260101000000" channel="c1">` +
+        `<title lang="fr">Bonjour</title>` +
+        `<title>Untagged Title</title>` +
+        `<title lang="pt-PT">Olá PT</title>` +
+        `<title lang="pt-BR">Olá BR</title>` +
+        `<sub-title lang="de">Teil 1</sub-title>` +
+        `<sub-title lang="por">Parte Um</sub-title>` +
+        `<desc lang="en">S01E01 English summary</desc>` +
+        `<desc>S02E03 Untagged summary</desc>` +
+        `</programme>`,
+    );
+    const r = await collect(chunksOf(utf8(xml), [utf8(xml).length]), {
+      preferredLanguages: ['pt-BR', 'es'],
+    });
+    expect(r.programmes[0]).toMatchObject({
+      title: 'Olá BR',
+      subTitle: 'Parte Um',
+      desc: 'S02E03 Untagged summary',
+      episodeNum: 'S02E03',
+    });
+  });
+
+  it('supports ISO-639-2/B/T aliases (tur, eng, deu/ger, fra/fre, spa, ara, rus) and preference order', async () => {
+    const xml = guide(
+      `<programme start="20260101000000" channel="c1">` +
+        `<title lang="eng">English News</title>` +
+        `<title lang="tur">Türkçe Haberler</title>` +
+        `</programme>` +
+        `<programme start="20260101010000" channel="c1">` +
+        `<title lang="fre">Français</title>` +
+        `<title lang="ger">Deutsch</title>` +
+        `</programme>` +
+        `<programme start="20260101020000" channel="c1">` +
+        `<title lang="spa">Español</title>` +
+        `<title lang="ara">عربي</title>` +
+        `<title lang="rus">Русский</title>` +
+        `</programme>` +
+        `<programme start="20260101030000" channel="c1">` +
+        `<title lang="it">Primo</title>` +
+        `<title lang="nl">Tweede</title>` +
+        `</programme>`,
+    );
+    const bytes = utf8(xml);
+    const rTr = await collect(chunksOf(bytes, [bytes.length]), {
+      preferredLanguages: ['tr-TR', 'en'],
+    });
+    expect(rTr.programmes[0]?.title).toBe('Türkçe Haberler');
+    expect(rTr.programmes[3]?.title).toBe('Primo');
+
+    const rDe = await collect(chunksOf(bytes, [bytes.length]), {
+      preferredLanguages: ['de', 'fr'],
+    });
+    expect(rDe.programmes[1]?.title).toBe('Deutsch');
+
+    const rRu = await collect(chunksOf(bytes, [bytes.length]), {
+      preferredLanguages: ['ru', 'ar', 'es'],
+    });
+    expect(rRu.programmes[2]?.title).toBe('Русский');
+  });
+
+  it('keeps <live/> and <new/> tag flags independent from title-badge flags when a higher-priority title wins', async () => {
+    const xml = guide(
+      `<programme start="20260101000000" channel="c1">` +
+        `<title lang="en">Match ᴸᴵⱽᴱ ᴺᴱᵂ</title>` +
+        `<title lang="tr">Maç</title>` +
+        `</programme>` +
+        `<programme start="20260101010000" channel="c1">` +
+        `<live/>` +
+        `<title lang="en">Match ᴸᴵⱽᴱ</title>` +
+        `<title lang="tr">Maç ᴺᴱᵂ</title>` +
+        `</programme>`,
+    );
+    const r = await collect(chunksOf(utf8(xml), [utf8(xml).length]), {
+      preferredLanguages: ['tr', 'en'],
+    });
+    expect(r.programmes[0]).toMatchObject({ title: 'Maç' });
+    expect(r.programmes[0]?.isLive).toBeUndefined();
+    expect(r.programmes[0]?.isNew).toBeUndefined();
+
+    expect(r.programmes[1]).toMatchObject({ title: 'Maç', isLive: true, isNew: true });
   });
 });

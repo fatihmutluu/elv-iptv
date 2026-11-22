@@ -1,16 +1,22 @@
 import type { SqlDriver } from '@elv/domain';
+import { bucketProgrammesByLocalDay, localDayKey } from './guide-queries-day';
+import { queryChannelByNumber } from './guide-queries-number';
 import {
   type CrossChannelProgrammeRow,
   DEFAULT_EPG_SLICE_LIMIT,
   MAX_EPG_SLICE_LIMIT,
   queryCrossChannelEpgSlice,
 } from './guide-queries-slice';
-import { type ItemRow, sourceOfKey } from './queries';
+import { sourceOfKey } from './queries';
+import type { SourceSettings } from './sources';
 
 export {
+  bucketProgrammesByLocalDay,
   type CrossChannelProgrammeRow,
   DEFAULT_EPG_SLICE_LIMIT,
+  localDayKey,
   MAX_EPG_SLICE_LIMIT,
+  queryChannelByNumber,
   queryCrossChannelEpgSlice,
 };
 
@@ -50,6 +56,7 @@ export interface NowNextEntry {
 interface RawGuideMapRow {
   channel_key: string;
   guide_id: string;
+  epg_shift_ms: number | null;
 }
 
 interface RawProgrammeRow {
@@ -63,33 +70,44 @@ interface RawProgrammeRow {
   icon: string | null;
 }
 
-interface RawLiveNumberRow {
-  id: number;
-  key: string;
-  source_id: string;
-  provider_id: string | null;
-  name: string;
-  logo: string | null;
-  num: number | null;
-}
-
 function placeholders(count: number): string {
   return Array.from({ length: count }, () => '?').join(', ');
 }
 
-function toProgrammeRow(channelKey: string, sourceId: string, r: RawProgrammeRow): ProgrammeRow {
+function toProgrammeRow(
+  channelKey: string,
+  sourceId: string,
+  r: RawProgrammeRow,
+  shiftMs = 0,
+): ProgrammeRow {
   return {
     channelKey,
     sourceId,
     guideId: r.guide_id,
-    start: r.start,
-    stop: r.stop,
+    start: r.start + shiftMs,
+    stop: r.stop + shiftMs,
     title: r.title,
     subTitle: r.sub_title,
     description: r.description,
     episodeNum: r.episode_num,
     icon: r.icon,
   };
+}
+
+async function readSourceEpgShiftMs(db: SqlDriver, sourceId: string): Promise<number> {
+  const rows = await db.all<{ settings_json: string }>(
+    'SELECT settings_json FROM sources WHERE id = ? LIMIT 1',
+    [sourceId],
+  );
+  const raw = rows[0]?.settings_json;
+  if (raw === undefined) return 0;
+  try {
+    const parsed = JSON.parse(raw) as Partial<SourceSettings> | null;
+    const shift = parsed?.epgShiftMs;
+    return typeof shift === 'number' && Number.isFinite(shift) ? Math.round(shift) : 0;
+  } catch {
+    return 0;
+  }
 }
 
 function groupChannelKeys(
@@ -113,9 +131,49 @@ function groupChannelKeys(
   return { ordered, bySource };
 }
 
+async function loadChannelGuideAndShifts(
+  db: SqlDriver,
+  sourceId: string,
+  keys: readonly string[],
+): Promise<{
+  mapRows: RawGuideMapRow[];
+  shiftByChannel: Map<string, number>;
+  minShift: number;
+  maxShift: number;
+}> {
+  const [sourceShiftMs, mapRows] = await Promise.all([
+    readSourceEpgShiftMs(db, sourceId),
+    db.all<RawGuideMapRow>(
+      `SELECT cg.channel_key, cg.guide_id, l.epg_shift_ms
+         FROM channel_guide cg
+         LEFT JOIN live l ON l.source_id = cg.source_id AND l.key = cg.channel_key
+        WHERE cg.source_id = ? AND cg.channel_key IN (${placeholders(keys.length)})`,
+      [sourceId, ...keys],
+    ),
+  ]);
+  const shiftByChannel = new Map<string, number>();
+  let minShift = Number.POSITIVE_INFINITY;
+  let maxShift = Number.NEGATIVE_INFINITY;
+  for (const row of mapRows) {
+    if (row.guide_id === '') continue;
+    const chShift =
+      typeof row.epg_shift_ms === 'number' && Number.isFinite(row.epg_shift_ms)
+        ? row.epg_shift_ms
+        : 0;
+    const total = chShift + sourceShiftMs;
+    shiftByChannel.set(row.channel_key, total);
+    if (total < minShift) minShift = total;
+    if (total > maxShift) maxShift = total;
+  }
+  if (!Number.isFinite(minShift)) minShift = 0;
+  if (!Number.isFinite(maxShift)) maxShift = 0;
+  return { mapRows, shiftByChannel, minShift, maxShift };
+}
+
 /**
  * Queries the current (`now`) and upcoming (`next`) programmes for up to {@link MAX_NOW_NEXT_KEYS}
- * live channels via `channel_guide` and `programmes` primary keys (zero full-table scans).
+ * live channels via `channel_guide`, `live`, and `programmes` indexes (zero full-table scans),
+ * applying per-channel `live.epg_shift_ms` plus source-level `SourceSettings.epgShiftMs`.
  */
 export async function queryNowNext(
   db: SqlDriver,
@@ -129,10 +187,10 @@ export async function queryNowNext(
   const entryByChannel = new Map<string, NowNextEntry>();
 
   for (const [sourceId, keys] of bySource) {
-    const mapRows = await db.all<RawGuideMapRow>(
-      `SELECT channel_key, guide_id FROM channel_guide
-        WHERE source_id = ? AND channel_key IN (${placeholders(keys.length)})`,
-      [sourceId, ...keys],
+    const { mapRows, shiftByChannel, minShift, maxShift } = await loadChannelGuideAndShifts(
+      db,
+      sourceId,
+      keys,
     );
     if (mapRows.length === 0) continue;
 
@@ -152,7 +210,7 @@ export async function queryNowNext(
         WHERE source_id = ? AND guide_id IN (${placeholders(guideIds.length)})
           AND start < ? AND stop > ?
         ORDER BY guide_id, start`,
-      [sourceId, ...guideIds, nowMs + NOW_NEXT_LOOKAHEAD_MS, nowMs],
+      [sourceId, ...guideIds, nowMs + NOW_NEXT_LOOKAHEAD_MS - minShift, nowMs - maxShift],
     );
 
     const progsByGuide = new Map<string, RawProgrammeRow[]>();
@@ -165,26 +223,31 @@ export async function queryNowNext(
     for (const channelKey of keys) {
       const guideId = guideByChannel.get(channelKey);
       if (guideId === undefined) continue;
+      const shiftMs = shiftByChannel.get(channelKey) ?? 0;
       const list = progsByGuide.get(guideId) ?? [];
       let nowRow: RawProgrammeRow | undefined;
       for (const prog of list) {
-        if (prog.start <= nowMs && prog.stop > nowMs) {
+        const s = prog.start + shiftMs;
+        const e = prog.stop + shiftMs;
+        if (s <= nowMs && e > nowMs) {
           nowRow = prog;
           break;
         }
       }
-      const nextFloor = nowRow === undefined ? nowMs : nowRow.stop;
+      const nextFloor = nowRow === undefined ? nowMs : nowRow.stop + shiftMs;
+      const nextCeiling = nowMs + NOW_NEXT_LOOKAHEAD_MS;
       let nextRow: RawProgrammeRow | undefined;
       for (const prog of list) {
-        if (prog.start >= nextFloor) {
+        const s = prog.start + shiftMs;
+        if (s >= nextFloor && s < nextCeiling) {
           nextRow = prog;
           break;
         }
       }
       entryByChannel.set(channelKey, {
         channelKey,
-        now: nowRow === undefined ? null : toProgrammeRow(channelKey, sourceId, nowRow),
-        next: nextRow === undefined ? null : toProgrammeRow(channelKey, sourceId, nextRow),
+        now: nowRow === undefined ? null : toProgrammeRow(channelKey, sourceId, nowRow, shiftMs),
+        next: nextRow === undefined ? null : toProgrammeRow(channelKey, sourceId, nextRow, shiftMs),
       });
     }
   }
@@ -199,7 +262,8 @@ export async function queryNowNext(
 
 /**
  * Queries programmes overlapping `[fromMs, toMs]` for up to {@link MAX_EPG_WINDOW_KEYS} live
- * channels (clamped to {@link MAX_EPG_WINDOW_SPAN_MS}), ordered by `start` ascending.
+ * channels (clamped to {@link MAX_EPG_WINDOW_SPAN_MS}), ordered by `start` ascending, applying
+ * per-channel `live.epg_shift_ms` plus source-level `SourceSettings.epgShiftMs`.
  */
 export async function queryEpgWindow(
   db: SqlDriver,
@@ -217,10 +281,10 @@ export async function queryEpgWindow(
   const out: Record<string, ProgrammeRow[]> = {};
 
   for (const [sourceId, keys] of bySource) {
-    const mapRows = await db.all<RawGuideMapRow>(
-      `SELECT channel_key, guide_id FROM channel_guide
-        WHERE source_id = ? AND channel_key IN (${placeholders(keys.length)})`,
-      [sourceId, ...keys],
+    const { mapRows, shiftByChannel, minShift, maxShift } = await loadChannelGuideAndShifts(
+      db,
+      sourceId,
+      keys,
     );
     if (mapRows.length === 0) continue;
 
@@ -241,144 +305,20 @@ export async function queryEpgWindow(
         WHERE source_id = ? AND guide_id IN (${placeholders(guideIds.length)})
           AND start < ? AND stop > ?
         ORDER BY guide_id, start`,
-      [sourceId, ...guideIds, clampedToMs, fromMs],
+      [sourceId, ...guideIds, clampedToMs - minShift, fromMs - maxShift],
     );
 
     for (const prog of progRows) {
       const targetChannels = channelsByGuide.get(prog.guide_id);
       if (targetChannels === undefined) continue;
       for (const chKey of targetChannels) {
-        out[chKey]?.push(toProgrammeRow(chKey, sourceId, prog));
+        const shiftMs = shiftByChannel.get(chKey) ?? 0;
+        if (prog.start + shiftMs < clampedToMs && prog.stop + shiftMs > fromMs) {
+          out[chKey]?.push(toProgrammeRow(chKey, sourceId, prog, shiftMs));
+        }
       }
     }
   }
 
   return out;
-}
-
-const LIVE_BY_NUM_SQL = `SELECT l.id, l.key, l.source_id, l.provider_id, l.name, l.logo, l.num
-  FROM live l
-  JOIN sources s ON s.id = l.source_id AND s.deleting = 0
- WHERE l.source_id = ? AND l.num = ? AND l.is_hidden = 0
- ORDER BY l.id LIMIT 1`;
-
-async function queryChannelByNumberInSource(
-  db: SqlDriver,
-  sourceId: string,
-  num: number,
-): Promise<ItemRow | undefined> {
-  const rows = await db.all<RawLiveNumberRow>(LIVE_BY_NUM_SQL, [sourceId, num]);
-  const r = rows[0];
-  if (r === undefined) return undefined;
-  return {
-    id: r.id,
-    key: r.key,
-    kind: 'live',
-    sourceId: r.source_id,
-    providerId: r.provider_id,
-    name: r.name,
-    logo: r.logo,
-    rating: null,
-    year: null,
-    num: r.num,
-  };
-}
-
-/**
- * Looks up a live channel by channel number using `idx_live_num (source_id, num)` with zero full
- * table scans. When `sourceId` is omitted, probes sources in creation order.
- */
-export async function queryChannelByNumber(
-  db: SqlDriver,
-  num: number,
-  sourceId?: string,
-): Promise<ItemRow | undefined> {
-  if (!Number.isSafeInteger(num) || num < 0) return undefined;
-  if (sourceId !== undefined) {
-    return queryChannelByNumberInSource(db, sourceId, num);
-  }
-  const sources = await db.all<{ id: string }>(
-    'SELECT id FROM sources WHERE deleting = 0 ORDER BY created_at, id',
-  );
-  for (const src of sources) {
-    const match = await queryChannelByNumberInSource(db, src.id, num);
-    if (match !== undefined) return match;
-  }
-  return undefined;
-}
-
-const MAX_FORMATTER_CACHE = 16;
-const dayFormatters = new Map<string, Intl.DateTimeFormat>();
-
-function formatLocalDate(d: Date): string {
-  const year = String(d.getFullYear()).padStart(4, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function getDayFormatter(timeZone: string): Intl.DateTimeFormat | undefined {
-  const cached = dayFormatters.get(timeZone);
-  if (cached !== undefined) return cached;
-  if (typeof Intl === 'undefined' || typeof Intl.DateTimeFormat !== 'function') return undefined;
-  try {
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    });
-    if (dayFormatters.size >= MAX_FORMATTER_CACHE) dayFormatters.clear();
-    dayFormatters.set(timeZone, formatter);
-    return formatter;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Formats an epoch-millisecond timestamp as a local calendar day key (`YYYY-MM-DD`) in `timeZone`
- * via `Intl.DateTimeFormat` (with safe local-`Date` fallback when `timeZone` is omitted/invalid or
- * `Intl` is unavailable). Returns `""` for non-finite or out-of-range timestamps.
- */
-export function localDayKey(epochMs: number, timeZone?: string): string {
-  if (!Number.isFinite(epochMs)) return '';
-  const date = new Date(epochMs);
-  if (Number.isNaN(date.getTime())) return '';
-  if (timeZone !== undefined && timeZone !== '') {
-    const formatter = getDayFormatter(timeZone);
-    if (formatter !== undefined) {
-      let year = '';
-      let month = '';
-      let day = '';
-      for (const part of formatter.formatToParts(date)) {
-        if (part.type === 'year') year = part.value;
-        else if (part.type === 'month') month = part.value;
-        else if (part.type === 'day') day = part.value;
-      }
-      if (year !== '' && month !== '' && day !== '') {
-        return `${year.padStart(4, '0')}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-      }
-    }
-  }
-  return formatLocalDate(date);
-}
-
-/**
- * Buckets programmes into local calendar days (`YYYY-MM-DD`) by `start` epoch-ms timestamp in the
- * optional IANA `timeZone`, preserving input order within each day and skipping invalid starts.
- */
-export function bucketProgrammesByLocalDay<T extends { start: number }>(
-  programmes: readonly T[],
-  timeZone?: string,
-): Map<string, T[]> {
-  const buckets = new Map<string, T[]>();
-  for (const programme of programmes) {
-    const key = localDayKey(programme.start, timeZone);
-    if (key === '') continue;
-    const list = buckets.get(key);
-    if (list === undefined) buckets.set(key, [programme]);
-    else list.push(programme);
-  }
-  return buckets;
 }

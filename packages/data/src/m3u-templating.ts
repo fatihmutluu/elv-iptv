@@ -1,4 +1,5 @@
 import type { UrlVars } from './templates';
+import { MAX_URLVARS_TOTAL_BYTES } from './urlvars-store';
 
 const PLACEHOLDER = /\{\{([^{}]+)\}\}/g;
 const PLAYLIST_URL = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)(?:\/[^?#]*)?(?:\?([^#]*))?/i;
@@ -8,10 +9,10 @@ const utf8 = new TextEncoder();
 /** Entries of the first rule judgement, and the most entries held back while a later host is judged. */
 export const SAMPLE_SIZE = 1000;
 
-/** Maximum serialized UTF-8 byte size of `urlvars` per M3U source (64 KiB). */
-export const MAX_URLVARS_BYTES = 65_536;
+/** Maximum serialized UTF-8 byte ceiling of `urlvars` per M3U source across shards (~15 MiB). */
+export const MAX_URLVARS_BYTES = MAX_URLVARS_TOTAL_BYTES;
 
-export function utf8ByteLength(text: string): number {
+function utf8ByteLength(text: string): number {
   return utf8.encode(text).byteLength;
 }
 

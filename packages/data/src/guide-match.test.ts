@@ -155,10 +155,41 @@ describe('guide matching', () => {
       tier: 'none',
     });
     // Non-positive, invalid, or non-channel-number prefixes never match
-    expect(keys('x', ['0', '-5', '12.5', '101:30 News', '101/7', '101p HD'])).toEqual([]);
+    expect(keys('x', ['0', '-5', '101:30 News', '101/7', '101p HD'])).toEqual([]);
     expect(index.byNum.has(0)).toBe(false);
     expect(index.byNum.has(-5)).toBe(false);
-    expect(index.byNum.has(12.5)).toBe(false);
+    // Positive finite decimal sub-channel numbers ARE supported (#431)
+    expect(index.byNum.has(12.5)).toBe(true);
+    expect(matchGuideChannel(index, { id: 'x', names: ['12.5'] })).toEqual({
+      keys: ['k'],
+      byId: false,
+      tier: 'num',
+    });
+  });
+
+  it('supports decimal sub-channel numbers (e.g. 4.1, 10.2) and rejects NaN/Infinity (#431)', () => {
+    const decIndex = buildChannelIndex([
+      { key: 'c41', guide_id: null, name_fold: 'local news', num: 4.1 },
+      { key: 'c102', guide_id: null, name_fold: 'classic cinema', num: 10.2 },
+      { key: 'cnan', guide_id: null, name_fold: 'nan ch', num: Number.NaN },
+      { key: 'cinf', guide_id: null, name_fold: 'inf ch', num: Number.POSITIVE_INFINITY },
+    ]);
+    expect(matchGuideChannel(decIndex, { id: 'x', names: ['4.1'] })).toEqual({
+      keys: ['c41'],
+      byId: false,
+      tier: 'num',
+    });
+    expect(matchGuideChannel(decIndex, { id: 'x', names: ['#4.1 Local'] })).toEqual({
+      keys: ['c41'],
+      byId: false,
+      tier: 'num',
+    });
+    expect(matchGuideChannel(decIndex, { id: 'x', names: ['10.2 - Classic'] })).toEqual({
+      keys: ['c102'],
+      byId: false,
+      tier: 'num',
+    });
+    expect(decIndex.byNum.size).toBe(2);
   });
 });
 
@@ -276,6 +307,91 @@ describe('@feedId sub-feed matching (#181)', () => {
       byId: true,
       tier: 'id',
     });
+  });
+
+  it('matches case-insensitive guide_id strictly below exact guide_id and above @feedId base fallback (#121, #431)', () => {
+    const ciIndex = buildChannelIndex([
+      { key: 'live-ci', guide_id: 'BBC1.UK', name: 'BBC One', name_fold: 'bbc one', num: 1 },
+      { key: 'live-base', guide_id: 'CHAN.US', name: 'Chan East', name_fold: 'chan east', num: 2 },
+    ]);
+    expect(matchGuideChannel(ciIndex, { id: 'bbc1.uk', names: ['Other'] })).toEqual({
+      keys: ['live-ci'],
+      byId: true,
+      tier: 'id',
+    });
+    expect(matchGuideChannel(ciIndex, { id: 'chan.us@East', names: ['Other'] })).toEqual({
+      keys: ['live-base'],
+      byId: true,
+      tier: 'id',
+    });
+  });
+
+  it('disambiguates regional @feedId feeds by live channel name token and lexicographical tie-break (#431)', () => {
+    const channelNameFolds = new Map([
+      ['k-east', 'chan east hd'],
+      ['k-west', 'chan west hd'],
+      ['k-plain', 'chan main'],
+    ]);
+    // Regardless of XMLTV arrival order (West before East vs East before West), results are deterministic
+    for (const order of [
+      [
+        ['k-east', 'Chan.us@West'],
+        ['k-west', 'Chan.us@West'],
+        ['k-plain', 'Chan.us@West'],
+        ['k-east', 'Chan.us@East'],
+        ['k-west', 'Chan.us@East'],
+        ['k-plain', 'Chan.us@East'],
+      ],
+      [
+        ['k-east', 'Chan.us@East'],
+        ['k-west', 'Chan.us@East'],
+        ['k-plain', 'Chan.us@East'],
+        ['k-east', 'Chan.us@West'],
+        ['k-west', 'Chan.us@West'],
+        ['k-plain', 'Chan.us@West'],
+      ],
+    ] as const) {
+      const resolved = resolveMappings([], [], [], [], {
+        byBaseId: order,
+        channelNameFolds,
+      });
+      expect(new Map(resolved)).toEqual(
+        new Map([
+          ['k-east', 'Chan.us@East'],
+          ['k-west', 'Chan.us@West'],
+          ['k-plain', 'Chan.us@East'],
+        ]),
+      );
+    }
+
+    // Precedence: exact byId > case-insensitive byCiId > byBaseId > byName > byNormalizedName > byNum
+    expect(
+      resolveMappings(
+        [['k1', 'Exact.ID']],
+        [['k4', 'Name.ID']],
+        [['k6', 'Num.ID']],
+        [['k5', 'Norm.ID']],
+        {
+          byCiId: [
+            ['k1', 'exact.id'],
+            ['k2', 'ci.id'],
+          ],
+          byBaseId: [
+            ['k2', 'ci.id@East'],
+            ['k3', 'base.id@West'],
+            ['k3', 'base.id@East'],
+          ],
+          channelNameFolds: new Map([['k3', 'base main']]),
+        },
+      ),
+    ).toEqual([
+      ['k1', 'Exact.ID'],
+      ['k2', 'ci.id'],
+      ['k3', 'base.id@East'],
+      ['k4', 'Name.ID'],
+      ['k5', 'Norm.ID'],
+      ['k6', 'Num.ID'],
+    ]);
   });
 });
 

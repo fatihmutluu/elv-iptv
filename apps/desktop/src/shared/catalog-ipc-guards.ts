@@ -53,7 +53,6 @@ export const isRecord = (x: unknown): x is Record<string, unknown> =>
 export const isPositiveId = (x: unknown): x is number =>
   Number.isSafeInteger(x) && (x as number) > 0;
 export const isSafeInt = (x: unknown): x is number => Number.isSafeInteger(x);
-export const isNonNegativeSafeInt = (x: unknown): x is number => isSafeInt(x) && x >= 0;
 export const isFiniteNumber = (x: unknown): x is number =>
   typeof x === 'number' && Number.isFinite(x);
 export const isNonNegativeFinite = (x: unknown): x is number => isFiniteNumber(x) && x >= 0;

@@ -18,15 +18,38 @@ const GUIDE_CHANNEL_SQL = `INSERT INTO guide_channels (source_id, guide_id, name
     icon = excluded.icon, run_id = excluded.run_id`;
 
 const SWAP_PROGRAMMES = `INSERT INTO programmes (${PROGRAMME_COLUMNS})
-  SELECT ${PROGRAMME_COLUMNS} FROM programmes_next
-  WHERE source_id = ? AND run_id = ? AND guide_id IN (SELECT guide_id FROM channel_guide WHERE source_id = ?)`;
+  SELECT
+    source_id,
+    guide_id,
+    start,
+    CASE WHEN next_start IS NOT NULL AND stop > next_start THEN next_start ELSE stop END AS stop,
+    title,
+    sub_title,
+    description,
+    categories_json,
+    episode_num,
+    icon,
+    run_id
+  FROM (
+    SELECT ${PROGRAMME_COLUMNS},
+      LEAD(start) OVER (PARTITION BY guide_id ORDER BY start) AS next_start
+    FROM programmes_next
+    WHERE source_id = ? AND run_id = ? AND guide_id IN (SELECT guide_id FROM channel_guide WHERE source_id = ?)
+  )
+  WHERE CASE WHEN next_start IS NOT NULL AND stop > next_start THEN next_start ELSE stop END > start`;
 
 /** What a guide run collected for its cleanup transaction. */
 export interface GuideResult {
   /** `guide_channels` rows. */
   channelRows: SqlValue[][];
-  /** `[channelKey, guideId]` pairs matched by guide id. */
+  /** `[channelKey, guideId]` pairs matched by exact guide id. */
   byId: [string, string][];
+  /** `[channelKey, guideId]` pairs matched by case-insensitive guide id. */
+  byCiId?: [string, string][];
+  /** `[channelKey, guideId]` pairs matched by `@feedId`-stripped base guide id. */
+  byBaseId?: [string, string][];
+  /** Live channel folded display names keyed by channel key for regional `@feedId` disambiguation. */
+  channelNameFolds?: ReadonlyMap<string, string>;
   /** `[channelKey, guideId]` pairs matched by exact folded name; id matches win over them. */
   byName: [string, string][];
   /** `[channelKey, guideId]` pairs matched by normalized name; exact folded names win over them. */
@@ -38,14 +61,19 @@ export interface GuideResult {
 }
 
 /**
- * Replaces the guide of a source inside the cleanup transaction: the mappings (id matches first, then unambiguous
- * exact/normalized name matches, then unambiguous channel-number matches), the guide channels, and the staged
- * programmes of mapped guide ids only. Sets `counts.mapped` and `counts.programmes` to what was stored. A guide
- * that would store no programme while the previous one has some is dropped instead: the previous guide stays
- * (also its channels, via `keepTables`) and the run gets the warning `guide/empty`.
+ * Replaces the guide of a source inside the cleanup transaction: the mappings (exact/CI/base id matches first,
+ * then unambiguous exact/normalized name matches, then unambiguous channel-number matches), the guide channels,
+ * and the staged programmes of mapped guide ids normalized into strictly non-overlapping `[start, stop)`
+ * intervals. Sets `counts.mapped` and `counts.programmes` to what was stored. A guide that would store no
+ * programme while the previous one has some is dropped instead: the previous guide stays (also its channels,
+ * via `keepTables`) and the run gets the warning `guide/empty`.
  */
 export async function commitGuide(tx: SqlDriver, c: RunCtx, g: GuideResult): Promise<void> {
-  const mappings = resolveMappings(g.byId, g.byName, g.byNum, g.byNormalizedName);
+  const mappings = resolveMappings(g.byId, g.byName, g.byNum, g.byNormalizedName, {
+    ...(g.byCiId === undefined ? {} : { byCiId: g.byCiId }),
+    ...(g.byBaseId === undefined ? {} : { byBaseId: g.byBaseId }),
+    ...(g.channelNameFolds === undefined ? {} : { channelNameFolds: g.channelNameFolds }),
+  });
   const mapped = new Set(mappings.map(([, guideId]) => guideId));
   const empty = ![...mapped].some((guideId) => (g.staged.get(guideId) ?? 0) > 0);
   if (empty && (await hasProgrammes(tx, c.sourceId))) {

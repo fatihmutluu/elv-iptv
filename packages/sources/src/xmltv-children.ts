@@ -1,3 +1,5 @@
+import { sanitizeArtworkUrl } from './artwork-url';
+import type { XmlEncoding } from './codepages';
 import { decodeUtf8 } from './utf8';
 import {
   BANG,
@@ -21,12 +23,14 @@ import {
   episodeNumRank,
   extractDescEpisodeNum,
   isValidXmltvNs,
+  type LanguageScorer,
   stripInlineHtml,
 } from './xmltv-meta';
 import type { XmltvChannel, XmltvProgramme } from './xmltv-types';
 
 const SRC = ['src'] as const;
 const SYSTEM = ['system'] as const;
+const LANG = ['lang'] as const;
 
 const is = (body: Uint8Array, at: number, len: number, name: string): boolean =>
   len === name.length && startsWith(body, at, name);
@@ -37,30 +41,43 @@ const ONE_ATTR: (string | undefined)[] = [undefined];
  * Reads the children of one `<programme>` (`target` is a programme) or `<channel>` body. Only the elements
  * that become fields are decoded. Other elements are tracked on a small stack of open names so that, for
  * example, the `<icon>` inside a `<rating>` is not mistaken for the programme icon; work stays linear
- * because no element is ever searched for its closing tag unless it becomes a field. The first `title`, `sub-title`,
- * `desc` and `icon` win; `episode-num` follows `xmltv_ns` > `onscreen` > `dd_progid` > other precedence.
+ * because no element is ever searched for its closing tag unless it becomes a field. When `scoreLang` is
+ * omitted, the first `title`, `sub-title`, `desc` and `icon` win; when supplied, `title`, `sub-title`,
+ * and `desc` select by language precedence while keeping `<live/>`/`<new/>` tag flags independent from
+ * title-badge flags. `episode-num` follows `xmltv_ns` > `onscreen` > `dd_progid` > other precedence.
  * Returns false when a wanted element or markup is not closed.
  */
 export function parseChildren(
   body: Uint8Array,
   target: XmltvProgramme | XmltvChannel,
   isProgramme: boolean,
-  latin1 = false,
+  encoding: XmlEncoding = 'utf-8',
+  scoreLang?: LanguageScorer,
 ): boolean {
   const res: Resume = { at: 0 };
   const open = new OpenStack();
   const prog = isProgramme ? (target as XmltvProgramme) : undefined;
   const chan = isProgramme ? undefined : (target as XmltvChannel);
-  let haveTitle = false;
+  let titleScore = 0;
+  let subTitleScore = 0;
+  let descScore = 0;
+  let tagLive = false;
+  let tagNew = false;
+  let titleBadgeLive = false;
+  let titleBadgeNew = false;
   let episodeRank = -1;
   let i = 0;
   for (;;) {
     const lt = body.indexOf(LT, i);
     const b1 = lt < 0 ? undefined : body[lt + 1];
     if (b1 === undefined) {
-      if (prog && prog.episodeNum === undefined && prog.desc !== undefined) {
-        const fromDesc = extractDescEpisodeNum(prog.desc);
-        if (fromDesc !== undefined) prog.episodeNum = fromDesc;
+      if (prog) {
+        if (tagLive || titleBadgeLive) prog.isLive = true;
+        if (tagNew || titleBadgeNew) prog.isNew = true;
+        if (prog.episodeNum === undefined && prog.desc !== undefined) {
+          const fromDesc = extractDescEpisodeNum(prog.desc);
+          if (fromDesc !== undefined) prog.episodeNum = fromDesc;
+        }
       }
       return true;
     }
@@ -87,9 +104,10 @@ export function parseChildren(
 
     if (is(body, ns, len, 'icon')) {
       if (open.starts.length === 0 && (prog ? prog.icon === undefined : chan?.icon === undefined)) {
-        readAttrs(body, ns + len, tagEnd - 1, SRC, ONE_ATTR, latin1);
-        const src = ONE_ATTR[0];
-        if (src) {
+        readAttrs(body, ns + len, tagEnd - 1, SRC, ONE_ATTR, encoding);
+        const rawSrc = ONE_ATTR[0];
+        const src = rawSrc ? sanitizeArtworkUrl(rawSrc).url : undefined;
+        if (src !== undefined) {
           if (prog) prog.icon = src;
           else if (chan) chan.icon = src;
         }
@@ -98,7 +116,31 @@ export function parseChildren(
       i = tagEnd;
       continue;
     }
-    if (prog && applyFlagTag(body, ns, len, open.starts.length === 0, prog)) {
+    if (prog && open.starts.length === 0) {
+      if (is(body, ns, len, 'live')) {
+        tagLive = true;
+        if (!selfClosing) open.push(ns, len);
+        i = tagEnd;
+        continue;
+      }
+      if (is(body, ns, len, 'new')) {
+        tagNew = true;
+        if (!selfClosing) open.push(ns, len);
+        i = tagEnd;
+        continue;
+      }
+      if (is(body, ns, len, 'previously-shown')) {
+        prog.previouslyShown = true;
+        if (!selfClosing) open.push(ns, len);
+        i = tagEnd;
+        continue;
+      }
+    } else if (
+      prog &&
+      (is(body, ns, len, 'live') ||
+        is(body, ns, len, 'new') ||
+        is(body, ns, len, 'previously-shown'))
+    ) {
       if (!selfClosing) open.push(ns, len);
       i = tagEnd;
       continue;
@@ -123,33 +165,48 @@ export function parseChildren(
 
     if (chan) {
       if (is(body, ns, len, 'display-name')) {
-        const t = readText(body, tagEnd, close, latin1);
+        const t = readText(body, tagEnd, close, encoding);
         if (t) chan.names.push(t);
       }
     } else if (prog) {
       if (is(body, ns, len, 'title')) {
-        if (!haveTitle) {
-          haveTitle = true;
-          const cleaned = cleanTitleAndFlags(readText(body, tagEnd, close, latin1));
-          prog.title = cleaned.title;
-          if (cleaned.isLive) prog.isLive = true;
-          if (cleaned.isNew) prog.isNew = true;
+        const candidateScore = readLangScore(body, ns + len, tagEnd - 1, encoding, scoreLang);
+        if (titleScore === 0 || candidateScore > titleScore) {
+          const cleaned = cleanTitleAndFlags(readText(body, tagEnd, close, encoding));
+          if (titleScore === 0 || cleaned.title.length > 0) {
+            prog.title = cleaned.title;
+            titleBadgeLive = cleaned.isLive;
+            titleBadgeNew = cleaned.isNew;
+            titleScore = cleaned.title.length > 0 ? candidateScore : 0;
+            if (scoreLang === undefined) titleScore = 1;
+          }
         }
       } else if (is(body, ns, len, 'category')) {
-        const t = readText(body, tagEnd, close, latin1);
+        const t = readText(body, tagEnd, close, encoding);
         if (t) prog.categories.push(t);
       } else if (is(body, ns, len, 'desc')) {
-        if (prog.desc === undefined) setText(body, tagEnd, close, latin1, (t) => (prog.desc = t));
+        const candidateScore = readLangScore(body, ns + len, tagEnd - 1, encoding, scoreLang);
+        if (candidateScore > descScore) {
+          const t = readText(body, tagEnd, close, encoding);
+          if (t) {
+            prog.desc = t;
+            descScore = candidateScore;
+          }
+        }
       } else if (is(body, ns, len, 'sub-title')) {
-        if (prog.subTitle === undefined) {
-          const t = stripInlineHtml(readText(body, tagEnd, close, latin1));
-          if (t) prog.subTitle = t;
+        const candidateScore = readLangScore(body, ns + len, tagEnd - 1, encoding, scoreLang);
+        if (candidateScore > subTitleScore) {
+          const t = stripInlineHtml(readText(body, tagEnd, close, encoding));
+          if (t) {
+            prog.subTitle = t;
+            subTitleScore = candidateScore;
+          }
         }
       } else if (is(body, ns, len, 'episode-num')) {
-        readAttrs(body, ns + len, tagEnd - 1, SYSTEM, ONE_ATTR, latin1);
+        readAttrs(body, ns + len, tagEnd - 1, SYSTEM, ONE_ATTR, encoding);
         const rank = episodeNumRank(ONE_ATTR[0]);
         if (rank > episodeRank) {
-          const t = readText(body, tagEnd, close, latin1);
+          const t = readText(body, tagEnd, close, encoding);
           if (t && (rank !== 3 || isValidXmltvNs(t))) {
             prog.episodeNum = t;
             episodeRank = rank;
@@ -160,37 +217,16 @@ export function parseChildren(
   }
 }
 
-function applyFlagTag(
+function readLangScore(
   body: Uint8Array,
-  ns: number,
-  len: number,
-  topLevel: boolean,
-  prog: XmltvProgramme,
-): boolean {
-  if (is(body, ns, len, 'live')) {
-    if (topLevel) prog.isLive = true;
-    return true;
-  }
-  if (is(body, ns, len, 'new')) {
-    if (topLevel) prog.isNew = true;
-    return true;
-  }
-  if (is(body, ns, len, 'previously-shown')) {
-    if (topLevel) prog.previouslyShown = true;
-    return true;
-  }
-  return false;
-}
-
-function setText(
-  body: Uint8Array,
-  start: number,
-  end: number,
-  latin1: boolean,
-  set: (text: string) => void,
-): void {
-  const t = readText(body, start, end, latin1);
-  if (t) set(t);
+  from: number,
+  to: number,
+  encoding: XmlEncoding,
+  scoreLang: LanguageScorer | undefined,
+): number {
+  if (scoreLang === undefined) return 1;
+  readAttrs(body, from, to, LANG, ONE_ATTR, encoding);
+  return scoreLang(ONE_ATTR[0]);
 }
 
 function isWanted(body: Uint8Array, at: number, len: number, isProgramme: boolean): boolean {

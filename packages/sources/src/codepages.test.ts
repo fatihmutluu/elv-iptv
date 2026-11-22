@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeLegacyCodepage } from './codepages';
+import { decodeCodepageSlice, decodeLegacyCodepage } from './codepages';
 
 const WIN1256_TABLE = (() => {
   const map = new Map<string, number>();
@@ -136,5 +136,31 @@ describe('decodeLegacyCodepage (#329)', () => {
     expect(
       decodeLegacyCodepage(new Uint8Array([0x32, 0x8b, 0xe2, 0x78, 0xc6, 0xb1])),
     ).toBeUndefined();
+  });
+});
+
+describe('decodeCodepageSlice (#429)', () => {
+  it('matches WHATWG single-byte tables byte-for-byte for mapped bytes and emits U+FFFD for unmapped positions', () => {
+    for (const cp of ['windows-1251', 'windows-1252', 'windows-1254', 'windows-1256'] as const) {
+      const td = new TextDecoder(cp);
+      for (let b = 0x80; b <= 0xff; b++) {
+        const expectedRaw = td.decode(new Uint8Array([b]));
+        const cpVal = expectedRaw.charCodeAt(0);
+        // WHATWG leaves undefined C1 slots as C1 controls (U+0080–U+009F); decodeCodepageSlice maps them to U+FFFD.
+        const expected = cpVal >= 0x80 && cpVal <= 0x9f ? '\ufffd' : expectedRaw;
+        expect(
+          decodeCodepageSlice(new Uint8Array([b]), 0, 1, cp),
+          `${cp} 0x${b.toString(16)}`,
+        ).toBe(expected);
+      }
+    }
+    expect(decodeCodepageSlice(new Uint8Array([0x98]), 0, 1, 'windows-1251')).toBe('\ufffd');
+  });
+
+  it('decodes ISO-8859-6 slices non-throwing with U+FFFD for unmapped bytes', () => {
+    const sample = Uint8Array.from([0x41, 0x20, 0xc7, 0xe4, 0x80, 0xa5, 0x42]);
+    expect(decodeCodepageSlice(sample, 1, sample.length - 1, 'iso-8859-6')).toBe(
+      ' \u0627\u0644\ufffd\ufffd',
+    );
   });
 });

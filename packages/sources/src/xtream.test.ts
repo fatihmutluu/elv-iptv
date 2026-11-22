@@ -206,7 +206,7 @@ describe('lists', () => {
           container_extension: 'mkv',
           rating: '7.5',
           year: '2020',
-          stream_icon: 'x',
+          stream_icon: 'http://img.example/x.png',
         },
         {
           stream_id: 10,
@@ -226,7 +226,7 @@ describe('lists', () => {
         id: 9,
         name: 'M & N',
         categoryIds: ['1', '2'],
-        icon: 'x',
+        icon: 'http://img.example/x.png',
         rating: 7.5,
         year: 2020,
         extension: 'mkv',
@@ -243,7 +243,7 @@ describe('lists', () => {
           series_id: 4,
           name: 'S',
           category_id: '1',
-          cover: 'c',
+          cover: 'http://img.example/c.png',
           plot: ' P &lt; ',
           rating: '8',
           release_date: '2019-05-01',
@@ -260,7 +260,7 @@ describe('lists', () => {
       id: 4,
       name: 'S',
       categoryIds: ['1', '2'],
-      cover: 'c',
+      cover: 'http://img.example/c.png',
       plot: 'P <',
       rating: 8,
       year: 2019,
@@ -268,6 +268,50 @@ describe('lists', () => {
     });
     expect(list.map((s) => s.year)).toEqual([2019, 2018, 2001, undefined]);
     expect(action(requests[0]?.url ?? '')).toBe('get_series');
+  });
+
+  it('rejects unsafe and relative artwork URLs in live stream_icon, movie stream_icon, and series cover (#428)', async () => {
+    const liveRes = value(
+      await client(() => ({
+        json: [
+          { stream_id: 1, name: 'A', stream_icon: 'javascript:alert(1)' },
+          { stream_id: 2, name: 'B', stream_icon: 'file:///etc/passwd' },
+          { stream_id: 3, name: 'C', stream_icon: 'data:image/svg+xml,<svg/>' },
+          { stream_id: 4, name: 'D', stream_icon: 'data:image/png;base64,AAAA' },
+        ],
+      })).c.liveStreams(),
+    );
+    expect(liveRes.map((l) => l.icon)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      'data:image/png;base64,AAAA',
+    ]);
+
+    const movieRes = value(
+      await client(() => ({
+        json: [
+          { stream_id: 1, name: 'M1', stream_icon: '//cdn.example/poster.jpg' },
+          { stream_id: 2, name: 'M2', stream_icon: 'https://cdn.example/poster.jpg' },
+        ],
+      })).c.vodStreams(),
+    );
+    expect(movieRes.map((m) => m.icon)).toEqual([undefined, 'https://cdn.example/poster.jpg']);
+
+    const seriesRes = value(
+      await client(() => ({
+        json: [
+          { series_id: 1, name: 'S1', cover: 'relative/cover.png' },
+          { series_id: 2, name: 'S2', cover: 'ftp://cdn.example/cover.png' },
+          { series_id: 3, name: 'S3', cover: 'http://cdn.example/cover.png' },
+        ],
+      })).c.series(),
+    );
+    expect(seriesRes.map((s) => s.cover)).toEqual([
+      undefined,
+      undefined,
+      'http://cdn.example/cover.png',
+    ]);
   });
 });
 

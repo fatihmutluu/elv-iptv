@@ -97,10 +97,10 @@ describe('scanM3u entries', () => {
 
   it('accepts unquoted values, any key case and keeps unknown keys', async () => {
     const e = await one(
-      '#EXTINF:-1 TVG-ID=abc xui-id="9" stray tvg-logo=\'q\' =x,N\nhttp://h.example/1\n',
+      '#EXTINF:-1 TVG-ID=abc xui-id="9" stray tvg-logo=\'http://img.example/q.png\' =x,N\nhttp://h.example/1\n',
     );
     expect(e.tvgId).toBe('abc');
-    expect(e.tvgLogo).toBe('q');
+    expect(e.tvgLogo).toBe('http://img.example/q.png');
     expect(e.extra).toEqual({ 'xui-id': '9' });
     expect(e.name).toBe('N');
   });

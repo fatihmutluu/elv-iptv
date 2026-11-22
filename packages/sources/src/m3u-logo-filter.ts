@@ -9,6 +9,7 @@ const HASH = 35;
 const SQUOTE = 39;
 const COMMA = 44;
 const EQUALS = 61;
+const BACKSLASH = 92;
 
 const MAX_LINE = 1 << 20;
 
@@ -74,6 +75,7 @@ export class M3uLineAccumulator {
   private keyLen = 0;
   private isLogoKey = false;
   private quoteByte = DQUOTE;
+  private quotedEscaped = false;
   private dataStart = 0;
   private dataLen = 0;
 
@@ -144,6 +146,7 @@ export class M3uLineAccumulator {
     this.hasBytes = false;
     this.tooLong = false;
     this.inlineLogoStripped = false;
+    this.quotedEscaped = false;
     this.state = LEAD_WS;
   }
 
@@ -237,14 +240,30 @@ export class M3uLineAccumulator {
         return;
       }
       if (st === ATTR_QUOTED) {
-        const close = chunk.indexOf(this.quoteByte, i);
-        const stop = close >= 0 && close < end ? close + 1 : end;
+        let stop = end;
+        let closed = false;
+        for (let p = i; p < end; p++) {
+          const cur = chunk[p] as number;
+          if (this.quotedEscaped) {
+            this.quotedEscaped = false;
+            continue;
+          }
+          if (cur === BACKSLASH) {
+            this.quotedEscaped = true;
+            continue;
+          }
+          if (cur === this.quoteByte) {
+            stop = p + 1;
+            closed = true;
+            break;
+          }
+        }
         if (this.len + (stop - i) > MAX_LINE) {
           this.markTooLong();
           return;
         }
         this.pushSliceUnchecked(chunk, i, stop);
-        if (close >= 0 && close < end) this.state = ATTR_SPACE;
+        if (closed) this.state = ATTR_SPACE;
         i = stop;
         continue;
       }
@@ -268,6 +287,7 @@ export class M3uLineAccumulator {
             this.markTooLong();
             return;
           }
+          this.quotedEscaped = b === BACKSLASH;
           this.state = ATTR_QUOTED;
         }
         continue;

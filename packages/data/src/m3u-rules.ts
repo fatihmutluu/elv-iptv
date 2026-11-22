@@ -128,12 +128,10 @@ export class RuleBook {
   }
 
   private judgeBuckets(host: string, buckets: Buckets): void {
-    const streamLen = buckets.get('stream')?.length ?? 0;
     const positions = new Set<number>();
     let totalUrls = 0;
-    for (const [role, urls] of buckets) {
+    for (const [, urls] of buckets) {
       totalUrls += urls.length;
-      if (urls.length === 1 && role !== 'stream' && streamLen > 1) continue;
       for (const r of detectSegmentRules(urls)) positions.add(r.position);
     }
     if (totalUrls === 0) return;

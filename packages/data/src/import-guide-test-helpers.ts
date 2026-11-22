@@ -154,7 +154,8 @@ export async function ready(guide = defaultGuide()): Promise<Env> {
   return e;
 }
 
-export const run = (e: Env, opts = {}) => importGuide(e.sourceId, e.deps, { now: NOW, ...opts });
+export const run = (e: Env, opts: Parameters<typeof importGuide>[2] = {}) =>
+  importGuide(e.sourceId, e.deps, { now: NOW, retryDelayMs: () => 0, ...opts });
 
 export function expectErr(
   r: { ok: boolean; error?: { category: string; code: string } },

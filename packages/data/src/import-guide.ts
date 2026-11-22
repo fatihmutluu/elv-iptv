@@ -1,18 +1,19 @@
-import {
-  type ElvError,
-  elvError,
-  err,
-  type HttpResponse,
-  httpStatusError,
-  ok,
-  openAsyncIterator,
-  type Result,
-  transportHeaders,
-} from '@elv/domain';
+import { elvError, err, ok, type Result } from '@elv/domain';
 import { scanXmltv, type XmltvChannel, type XmltvProgramme } from '@elv/sources';
 import { foldText } from './fold';
 import { commitGuide, dropStaging, type GuideResult, STAGE_PROGRAMME_SQL } from './guide-commit';
-import { buildChannelIndex, type ChannelIndex, matchGuideChannel } from './guide-match';
+import {
+  candidateGuideUrls,
+  defaultGuideRetryDelayMs,
+  type GuideCandidate,
+  openGuide,
+} from './guide-fetch';
+import {
+  buildChannelIndex,
+  type ChannelIndex,
+  matchGuideChannel,
+  stripFeedId,
+} from './guide-match';
 import {
   type ClampedBatch,
   closeOpenProgrammes,
@@ -21,149 +22,40 @@ import {
   type ProgrammeStageRow,
 } from './guide-programmes';
 import {
-  conditionalHeaders,
-  extractValidators,
   hasStoredProgrammes,
   merge304Validator,
   replaceGuideValidator,
   sameGuideCache,
   sameValidator,
-  sanitizeValidator,
   withGuideValidator,
 } from './http-cache';
 import { checkAbort, performRun, type RunCtx, Stop } from './import-run';
 import type { ImportDeps, ImportOptions, ImportSummary } from './import-types';
-import { openClient } from './import-xtream';
 import {
   getSource,
   type HttpCacheValidator,
   type SourceRecord,
   updateSourceSettings,
 } from './sources';
-import { readUrlVars } from './stream-resolver';
-import { resolveTemplate } from './templates';
 
 export { closeOpenProgrammes };
 
-const REQUEST_TIMEOUT_MS = 180_000;
 const DAY_MS = 86_400_000;
 const DEFAULT_WINDOW = { daysBack: 1, daysForward: 7 };
-
-interface GuideCandidate {
-  slot: string;
-  url: string;
-}
-
-type GuideOpen =
-  | {
-      kind: 'body';
-      slot: string;
-      body: AsyncIterable<Uint8Array>;
-      validator: HttpCacheValidator | undefined;
-      failed: ElvError[];
-    }
-  | {
-      kind: 'not-modified';
-      slot: string;
-      validator: HttpCacheValidator | undefined;
-      failed: ElvError[];
-    };
 
 type GuideOutcome =
   | { kind: 'imported'; slot: string; state: GuideState; validator: HttpCacheValidator | undefined }
   | { kind: 'not-modified'; slot: string; validator: HttpCacheValidator | undefined };
 
-async function discard(body: AsyncIterable<Uint8Array>): Promise<void> {
-  try {
-    await openAsyncIterator(body).return?.();
-  } catch {
-    // the response is already classified by its status
-  }
-}
-
-/** Guide candidates to try, in order, resolved in memory only; unresolved placeholders are dropped. */
-async function candidateUrls(
-  source: SourceRecord,
-  deps: ImportDeps,
-): Promise<Result<GuideCandidate[]>> {
-  const candidates: GuideCandidate[] = [];
-  const vars = await readUrlVars(deps, source.id);
-  if (source.kind === 'xtream') {
-    const own = source.settings.guideUrl;
-    if (own !== undefined && own !== '') {
-      candidates.push({ slot: 'override', url: resolveTemplate(own, vars) });
-    }
-    const client = await openClient(source, deps);
-    if (!client.ok) return client;
-    candidates.push({ slot: 'xtream', url: client.value.guideUrl() });
-  } else {
-    if (source.settings.guideUrl !== undefined && source.settings.guideUrl !== '') {
-      candidates.push({ slot: 'override', url: resolveTemplate(source.settings.guideUrl, vars) });
-    }
-    for (const [i, t] of (source.settings.discoveredGuideUrls ?? []).entries()) {
-      candidates.push({ slot: `discovered:${i}`, url: resolveTemplate(t, vars) });
-    }
-  }
-  return ok(candidates.filter((c) => c.url !== '' && !c.url.includes('{{')));
-}
-
-/** Opens the first candidate URL that answers 2xx or conditional 304, plus code-only errors tried before it. */
-async function openGuide(
-  candidates: readonly GuideCandidate[],
-  source: SourceRecord,
-  deps: ImportDeps,
-  signal: AbortSignal | undefined,
-  allowConditional: boolean,
-): Promise<GuideOpen> {
-  let first: ElvError | undefined;
-  const failed: ElvError[] = [];
-  const miss = (e: ElvError) => {
-    failed.push(elvError(e.category, e.code));
-    first ??= failed[0];
-  };
-  const baseHeaders = transportHeaders(source.settings.transport);
-  for (const { slot, url } of candidates) {
-    checkAbort({ signal });
-    const sent = allowConditional
-      ? sanitizeValidator(source.settings.httpCache?.guide?.[slot])
-      : undefined;
-    let response: Result<HttpResponse>;
-    try {
-      response = await deps.http.get(url, {
-        headers: conditionalHeaders(baseHeaders, sent),
-        timeoutMs: REQUEST_TIMEOUT_MS,
-        ...(signal === undefined ? {} : { signal }),
-      });
-    } catch {
-      miss(elvError('network', 'request-failed'));
-      continue;
-    }
-    if (!response.ok) {
-      miss(response.error);
-      continue;
-    }
-    const { status, body, headers } = response.value;
-    const validator = extractValidators(headers);
-    if (status === 304 && sent !== undefined) {
-      await discard(body);
-      return { kind: 'not-modified', slot, validator, failed };
-    }
-    if (status >= 200 && status < 300) return { kind: 'body', slot, body, validator, failed };
-    await discard(body);
-    miss(httpStatusError(status));
-  }
-  throw new Stop(first ?? elvError('source-format', 'no-guide-url'));
-}
-
 interface GuideState extends GuideResult {
   index: ChannelIndex;
-  /** Guide ids of matched channels; the scanner consults it per programme, so it grows as channels arrive. */
-  mapped: Set<string>;
+  /** Merged XMLTV channel declarations keyed by `channel.id` so duplicate blocks accumulate cleanly. */
+  channelsById: Map<string, XmltvChannel>;
   /** Programmes without `stop`, waiting for the next programme of their channel. */
   open: Map<string, XmltvProgramme>;
   /** Latest emitted row per channel across batches for overlap/duplicate clamping. */
   lastByChannel: Map<string, ProgrammeStageRow>;
-  /** `@feedId` base-id fallback pairs, appended after exact `byId` so exact IDs always win regardless of order. */
+  byCiId: [string, string][];
   byBaseId: [string, string][];
   byNormalizedName: [string, string][];
   channels: number;
@@ -171,26 +63,68 @@ interface GuideState extends GuideResult {
   seenProgrammes: number;
 }
 
-function writeChannels(c: RunCtx, st: GuideState, channels: readonly XmltvChannel[]): void {
+function mergeChannels(st: GuideState, channels: readonly XmltvChannel[]): void {
   for (const ch of channels) {
-    const match = matchGuideChannel(st.index, ch);
-    if (match.keys.length > 0) st.mapped.add(ch.id);
-    else st.mapped.delete(ch.id);
-    const bucket =
-      match.tier === 'id'
-        ? st.index.byGuideId.has(ch.id)
-          ? st.byId
-          : st.byBaseId
-        : match.tier === 'name'
+    const existing = st.channelsById.get(ch.id);
+    if (existing === undefined) {
+      const names: string[] = [];
+      for (const n of ch.names) {
+        if (!names.includes(n)) names.push(n);
+      }
+      st.channelsById.set(ch.id, {
+        id: ch.id,
+        names,
+        ...(ch.icon !== undefined && ch.icon !== '' ? { icon: ch.icon } : {}),
+      });
+    } else {
+      for (const n of ch.names) {
+        if (!existing.names.includes(n)) existing.names.push(n);
+      }
+      if (
+        (existing.icon === undefined || existing.icon === '') &&
+        ch.icon !== undefined &&
+        ch.icon !== ''
+      ) {
+        existing.icon = ch.icon;
+      }
+    }
+  }
+  st.channels = st.channelsById.size;
+}
+
+function finalizeChannels(c: RunCtx, st: GuideState): void {
+  for (const ch of st.channelsById.values()) {
+    const exactKeys = st.index.byGuideId.get(ch.id);
+    const ciKeys = st.index.byGuideIdFold.get(ch.id.toLowerCase());
+    const baseId = stripFeedId(ch.id).toLowerCase();
+    const baseKeys = baseId === '' ? undefined : st.index.byBaseGuideId.get(baseId);
+    let matchedId = false;
+    if (exactKeys !== undefined) {
+      matchedId = true;
+      for (const key of exactKeys) st.byId.push([key, ch.id]);
+    }
+    if (ciKeys !== undefined) {
+      matchedId = true;
+      for (const key of ciKeys) st.byCiId.push([key, ch.id]);
+    }
+    if (baseKeys !== undefined) {
+      matchedId = true;
+      for (const key of baseKeys) st.byBaseId.push([key, ch.id]);
+    }
+    if (!matchedId) {
+      const match = matchGuideChannel(st.index, ch);
+      const bucket =
+        match.tier === 'name'
           ? st.byName
           : match.tier === 'normalized-name'
             ? st.byNormalizedName
             : st.byNum;
-    for (const key of match.keys) bucket.push([key, ch.id]);
+      for (const key of match.keys) bucket.push([key, ch.id]);
+    }
     const name = ch.names[0] ?? ch.id;
     st.channelRows.push([c.sourceId, ch.id, name, foldText(name), ch.icon ?? null, c.runId]);
   }
-  st.channels += channels.length;
+  st.channelNameFolds = st.index.nameFoldByKey;
 }
 
 async function writeProgrammes(c: RunCtx, st: GuideState, batch: ClampedBatch): Promise<void> {
@@ -212,9 +146,17 @@ async function execute(
   source: SourceRecord,
   candidates: readonly GuideCandidate[],
   now: number,
+  retryDelayMs: (attempt: number) => number,
 ): Promise<GuideOutcome> {
   const allowConditional = await hasStoredProgrammes(c.db, c.sourceId);
-  const opened = await openGuide(candidates, source, c.deps, c.signal, allowConditional);
+  const opened = await openGuide(
+    candidates,
+    source,
+    c.deps,
+    c.signal,
+    allowConditional,
+    retryDelayMs,
+  );
   for (const f of opened.failed) c.warningCodes.push(`${f.category}/${f.code}`);
   c.warnings += opened.failed.length;
   if (opened.kind === 'not-modified') {
@@ -235,11 +177,12 @@ async function execute(
   }>('SELECT key, guide_id, name, name_fold, num FROM live WHERE source_id = ?', [c.sourceId]);
   const st: GuideState = {
     index: buildChannelIndex(live),
-    mapped: new Set(),
+    channelsById: new Map(),
     channelRows: [],
     open: new Map(),
     lastByChannel: new Map(),
     byId: [],
+    byCiId: [],
     byBaseId: [],
     byName: [],
     byNormalizedName: [],
@@ -252,7 +195,6 @@ async function execute(
   const window = source.settings.guideWindow ?? DEFAULT_WINDOW;
   const scan = scanXmltv(opened.body, {
     batchSize: c.batchSize,
-    programmeChannels: st.mapped,
     from: now - window.daysBack * DAY_MS,
     to: now + window.daysForward * DAY_MS,
     ...(c.deps.decompressor === undefined ? {} : { decompressor: c.deps.decompressor }),
@@ -268,7 +210,7 @@ async function execute(
         break;
       }
       const batch = step.value;
-      writeChannels(c, st, batch.channels);
+      mergeChannels(st, batch.channels);
       st.seenProgrammes += batch.programmes.length;
       await writeProgrammes(
         c,
@@ -283,7 +225,7 @@ async function execute(
     await scan.return(ok(undefined));
   }
   await writeProgrammes(c, st, flushOpenProgrammes(c, st.open, st.lastByChannel));
-  if (st.byBaseId.length > 0) st.byId.push(...st.byBaseId);
+  finalizeChannels(c, st);
   if (st.channels === 0 && st.seenProgrammes === 0) {
     throw new Stop(elvError('source-format', 'not-a-guide'));
   }
@@ -293,29 +235,26 @@ async function execute(
 }
 
 /**
- * Imports the XMLTV guide of a source: streams it, matches guide channels to live channels in strict precedence
- * (exact guide id, then unambiguous folded display name, then unambiguous channel number fallback), stores the
- * programmes of mapped guide channels inside the time window (default one day back, seven forward, relative to
- * `opts.now`) and replaces the previous guide in one cleanup transaction. The first guide URL that answers 2xx
- * (or conditional 304 when programmes are already stored) wins: the user override, then the Xtream guide or the
- * playlist's discovered URLs. URLs are resolved in memory only; cache validators are keyed by opaque slot names.
- * A document without channels and programmes fails with `source-format/not-a-guide`; failure and cancel keep the
- * previous guide. After a successful swap the write-ahead log is checkpointed and truncated.
+ * Imports the XMLTV guide of a source: streams it (with up to 2 jittered transient retries per candidate URL),
+ * merges duplicate `<channel id>` blocks, matches guide channels to live channels in strict 6-tier precedence,
+ * normalizes out-of-order/overlapping programmes into strictly half-open `[start, stop)` intervals, and
+ * atomically replaces the previous guide in one cleanup transaction.
  */
 export async function importGuide(
   sourceId: string,
   deps: ImportDeps,
-  opts: ImportOptions & { now?: number } = {},
+  opts: ImportOptions & { now?: number; retryDelayMs?: (attempt: number) => number } = {},
 ): Promise<Result<ImportSummary>> {
   const source = await getSource(deps.db, sourceId);
   if (source === undefined) return err(elvError('storage', 'source-not-found'));
   if (source.kind !== 'xtream' && source.kind !== 'm3u') {
     return err(elvError('source-format', 'unsupported-source'));
   }
-  const candidates = await candidateUrls(source, deps);
+  const candidates = await candidateGuideUrls(source, deps);
   if (!candidates.ok) return candidates;
   if (candidates.value.length === 0) return err(elvError('source-format', 'no-guide-url'));
   const now = opts.now ?? deps.clock();
+  const retryDelayMs = opts.retryDelayMs ?? defaultGuideRetryDelayMs;
   let outcome: GuideOutcome | undefined;
   let runId: number | undefined;
   const result = await performRun(source, deps, opts, {
@@ -324,7 +263,7 @@ export async function importGuide(
     requireItems: false,
     execute: async (c) => {
       runId = c.runId;
-      outcome = await execute(c, source, candidates.value, now);
+      outcome = await execute(c, source, candidates.value, now, retryDelayMs);
     },
     beforeCleanup: async (tx, c) => {
       if (outcome === undefined) return;

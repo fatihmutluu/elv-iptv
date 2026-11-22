@@ -527,8 +527,13 @@ describe('xtream guide override', () => {
     (globalThis as { Symbol: typeof Symbol }).Symbol = FakeSymbol;
     try {
       expectErr(await importCatalog(e.sourceId, failingDeps), 'network', 'http-502');
-      expectErr(await importGuide(e.sourceId, failingDeps, { now: NOW }), 'network', 'http-502');
-      expect(discarded).toBe(2);
+      expectErr(
+        await importGuide(e.sourceId, failingDeps, { now: NOW, retryDelayMs: () => 0 }),
+        'network',
+        'http-502',
+      );
+      // 1 catalog attempt + 3 guide attempts (1 initial + 2 retries on 502) all discard their body
+      expect(discarded).toBe(4);
     } finally {
       (globalThis as { Symbol: typeof Symbol }).Symbol = OriginalSymbol;
     }
@@ -667,7 +672,8 @@ describe('guide precision: @feedId, call-signs & overlap clamping (#181, #267)',
       'SELECT l.name, g.guide_id FROM channel_guide g JOIN live l ON l.key = g.channel_key ORDER BY l.name',
     );
     expect(mappings).toEqual([
-      { name: 'Channel Base', guide_id: 'Channel.uk@West' },
+      // Channel Base has no regional token in its name, so deterministic lexicographical tie-break selects @East over @West
+      { name: 'Channel Base', guide_id: 'Channel.uk@East' },
       { name: 'Channel East', guide_id: 'Channel.uk@East' },
       { name: 'Harbor News', guide_id: 'harbor.exact' },
       { name: 'Metro One [HD] (XELV) East', guide_id: 'metro.xelv' },

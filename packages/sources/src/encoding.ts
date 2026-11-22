@@ -218,9 +218,11 @@ function encodeStringToUtf8(text: string): Uint8Array {
 /**
  * Streams byte chunks unchanged unless a leading UTF-16LE/BE or UTF-32LE/BE BOM is present, in
  * which case chunks are incrementally transcoded to UTF-8 so byte-level line framing works cleanly.
+ * Calls `onBom` whenever any leading UTF-8/UTF-16/UTF-32 BOM is detected.
  */
 export async function* normalizeBomChunks(
   chunks: AsyncIterable<Uint8Array>,
+  onBom?: () => void,
 ): AsyncGenerator<Uint8Array> {
   const it = openAsyncIterator(chunks);
   let head: Uint8Array = new Uint8Array(0);
@@ -270,6 +272,9 @@ export async function* normalizeBomChunks(
     }
 
     if (width === 0) {
+      if (head.length >= 3 && head[0] === 0xef && head[1] === 0xbb && head[2] === 0xbf) {
+        onBom?.();
+      }
       yield head;
       for (;;) {
         const step = await it.next();
@@ -278,6 +283,7 @@ export async function* normalizeBomChunks(
       }
       return;
     }
+    onBom?.();
 
     let carry: Uint8Array = head.subarray(skip);
     const decodeSlice = (buf: Uint8Array, end: number): Uint8Array =>

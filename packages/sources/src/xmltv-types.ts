@@ -52,4 +52,6 @@ export interface XmltvOptions {
   decompressor?: Decompressor;
   /** Maximum decompressed byte count allowed for gzip input (default 256 MiB). */
   maxDecompressedBytes?: number;
+  /** Ordered BCP-47 / ISO-639 language preferences for selecting `<title>`, `<sub-title>`, and `<desc>` (`#121`, `#429`). */
+  preferredLanguages?: readonly string[];
 }

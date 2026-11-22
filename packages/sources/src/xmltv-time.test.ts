@@ -13,6 +13,16 @@ describe('parseXmltvTime', () => {
     expect(parseXmltvTime('20260101030000 +03:00')).toBe(T);
     expect(parseXmltvTime('20260101030000 +03')).toBe(T);
     expect(parseXmltvTime('20260101000000Z')).toBe(T);
+    expect(parseXmltvTime('20260101000000 UTC')).toBe(T);
+    expect(parseXmltvTime('20260101000000 GMT')).toBe(T);
+    expect(parseXmltvTime('20260101000000UTC')).toBe(T);
+    expect(parseXmltvTime('20260101000000 gmt')).toBe(T);
+    expect(parseXmltvTime('20260101030000 UTC+0300')).toBe(T);
+    expect(parseXmltvTime('20251231190000 UTC-05:00')).toBe(T);
+    expect(parseXmltvTime('20260101020000 GMT+0200')).toBe(T);
+    expect(parseXmltvTime('20260101023000 GMT+02:30')).toBe(T);
+    expect(parseXmltvTime('20260101030000 GMT+03')).toBe(T);
+    expect(parseXmltvTime('20260101030000 UTC +0300')).toBe(T);
   });
 
   it('accepts shorter forms as UTC', () => {
@@ -39,6 +49,12 @@ describe('parseXmltvTime', () => {
       '20260101000000 +01x0',
       '20260101000000 +2460',
       '20260101000000 +1',
+      '20260101000000 EST',
+      '20260101000000 PST',
+      '20260101000000 CET',
+      '20260101000000 UTC0300',
+      '20260101000000 UTCA',
+      '20260101000000 GMT+2500',
       '202x0101000000',
       '0099010100',
       'abc',

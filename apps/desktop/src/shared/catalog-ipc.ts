@@ -32,7 +32,6 @@ import {
   isItemKeyList,
   isLinkSourceInput,
   isNonNegativeFinite,
-  isNonNegativeSafeInt,
   isNowNextKeyList,
   isOptionalProfileId,
   isOptionalSourceId,
@@ -214,7 +213,7 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
         isNonNegativeFinite(x['toMs'])
       );
     case 'channelByNumber':
-      return isNonNegativeSafeInt(x['num']) && isOptionalSourceId(x['sourceId']);
+      return isNonNegativeFinite(x['num']) && isOptionalSourceId(x['sourceId']);
     case 'seasons':
       return isSafeInt(x['seriesId']);
     case 'episodes':

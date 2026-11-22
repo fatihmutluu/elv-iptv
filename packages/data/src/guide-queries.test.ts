@@ -349,7 +349,8 @@ describe('guide-queries', () => {
 
       const spied = spyQueries(h.db);
       expect(await queryChannelByNumber(spied.db, -1)).toBeUndefined();
-      expect(await queryChannelByNumber(spied.db, 1.5)).toBeUndefined();
+      expect(await queryChannelByNumber(spied.db, Number.POSITIVE_INFINITY)).toBeUndefined();
+      expect(await queryChannelByNumber(spied.db, Number.NEGATIVE_INFINITY)).toBeUndefined();
       expect(await queryChannelByNumber(spied.db, Number.NaN)).toBeUndefined();
       expect(spied.queries).toHaveLength(0);
 
@@ -408,6 +409,144 @@ describe('guide-queries', () => {
       expect(progDetail).toContain('SEARCH programmes USING PRIMARY KEY');
       expect(progDetail).not.toMatch(/\bSCAN programmes\b/);
 
+      h.close();
+    });
+
+    it('supports decimal channel numbers (4.1) and deterministic tie-breaking (favorite > lowest visible position > id) (#431)', async () => {
+      const h = testDb();
+      await openCatalog(h.db);
+      await seedSource(h.db, 's1', 100);
+      await h.db.run(
+        "INSERT INTO categories (source_id, kind, provider_id, name, name_fold, position, run_id, is_hidden) VALUES ('s1','live','c-vis','News','news',0,1,0), ('s1','live','c-hid','Hidden','hidden',1,1,1)",
+      );
+      await seedLive(h.db, [
+        ['s1', 'x:s1:live:1', '1', 4.1, 'Sub A', null],
+        ['s1', 'x:s1:live:2', '2', 4.1, 'Sub B', null],
+        ['s1', 'x:s1:live:3', '3', 4.1, 'Sub C', null],
+      ]);
+      // Placements: live:1 in hidden cat (pos 0) & visible cat (pos 10); live:2 in visible cat (pos 2); live:3 unplaced
+      await h.db.run(
+        `INSERT INTO placements (source_id, kind, item_key, category_id, position, run_id, is_hidden) VALUES
+          ('s1', 'live', 'x:s1:live:1', 'c-hid', 0, 1, 0),
+          ('s1', 'live', 'x:s1:live:1', 'c-vis', 10, 1, 0),
+          ('s1', 'live', 'x:s1:live:2', 'c-vis', 2, 1, 0)`,
+      );
+
+      // Without favorites, lowest visible category placement position wins (live:2 pos 2 < live:1 pos 10)
+      expect(await queryChannelByNumber(h.db, 4.1, 's1')).toMatchObject({
+        key: 'x:s1:live:2',
+        num: 4.1,
+      });
+
+      // Favoriting live:3 beats placement position and live.id
+      await h.db.run(
+        "INSERT INTO favorites (profile_id, source_id, item_key, kind, title, added_at) VALUES ('default', 's1', 'x:s1:live:3', 'live', 'Sub C', 100)",
+      );
+      expect(await queryChannelByNumber(h.db, 4.1, 's1')).toMatchObject({
+        key: 'x:s1:live:3',
+        num: 4.1,
+      });
+
+      // When both live:1 and live:3 are favorited, lowest visible placement position breaks the tie (live:1 pos 10 < live:3 unplaced)
+      await h.db.run(
+        "INSERT INTO favorites (profile_id, source_id, item_key, kind, title, added_at) VALUES ('default', 's1', 'x:s1:live:1', 'live', 'Sub A', 90)",
+      );
+      expect(await queryChannelByNumber(h.db, 4.1, 's1')).toMatchObject({
+        key: 'x:s1:live:1',
+        num: 4.1,
+      });
+
+      // Verify decimal lookup still uses idx_live_num
+      const plan = await h.db.all<{ detail: string }>(
+        'EXPLAIN QUERY PLAN SELECT l.id, l.key, l.source_id, l.provider_id, l.name, l.logo, l.num FROM live l JOIN sources s ON s.id = l.source_id AND s.deleting = 0 WHERE l.source_id = ? AND l.num = ? AND l.is_hidden = 0 ORDER BY l.id',
+        ['s1', 4.1],
+      );
+      const detail = plan.map((r) => r.detail).join('\n');
+      expect(detail).toContain('SEARCH l USING INDEX idx_live_num');
+      expect(detail).not.toMatch(/\bSCAN l\b/);
+      h.close();
+    });
+
+    it('applies per-channel epg_shift_ms and source-level SourceSettings.epgShiftMs at query time for queryNowNext and queryEpgWindow (#121)', async () => {
+      const h = testDb();
+      await openCatalog(h.db);
+      // Source-level shift of +1h
+      await h.db.run(
+        'INSERT INTO sources (id, kind, name, created_at, settings_json) VALUES (?, ?, ?, ?, ?)',
+        ['s1', 'm3u', 'Shifted', 100, JSON.stringify({ epgShiftMs: HOUR })],
+      );
+      // Two channels sharing the SAME guide_id ('shared.eu') with distinct per-channel shifts:
+      // ch1: +1h channel + +1h source = +2h total
+      // ch2: -2h channel + +1h source = -1h total
+      await h.db.run(
+        `INSERT INTO live (source_id, key, provider_id, num, name, name_fold, epg_shift_ms, run_id) VALUES
+          ('s1', 'm:s1:live:1', '1', 1, 'Ch Plus2', 'ch plus2', ?, 1),
+          ('s1', 'm:s1:live:2', '2', 2, 'Ch Minus1', 'ch minus1', ?, 1)`,
+        [HOUR, -2 * HOUR],
+      );
+      await seedGuideMap(h.db, [
+        ['s1', 'm:s1:live:1', 'shared.eu'],
+        ['s1', 'm:s1:live:2', 'shared.eu'],
+      ]);
+      // Raw programmes in SQLite (unshifted):
+      // P0: [BASE - 2h, BASE - 1h) -> for ch1 (+2h): [BASE, BASE + 1h) (NOW!)
+      // P1: [BASE - 1h, BASE)      -> for ch1 (+2h): [BASE + 1h, BASE + 2h) (NEXT!)
+      // P2: [BASE + 1h, BASE + 2h) -> for ch2 (-1h): [BASE, BASE + 1h) (NOW!)
+      // P3: [BASE + 2h, BASE + 3h) -> for ch2 (-1h): [BASE + 1h, BASE + 2h) (NEXT!)
+      await seedProgrammes(h.db, [
+        ['s1', 'shared.eu', BASE - 2 * HOUR, BASE - HOUR, 'Raw Minus2'],
+        ['s1', 'shared.eu', BASE - HOUR, BASE, 'Raw Minus1'],
+        ['s1', 'shared.eu', BASE + HOUR, BASE + 2 * HOUR, 'Raw Plus1'],
+        ['s1', 'shared.eu', BASE + 2 * HOUR, BASE + 3 * HOUR, 'Raw Plus2'],
+      ]);
+
+      const nn = await queryNowNext(h.db, ['m:s1:live:1', 'm:s1:live:2'], BASE + 1000);
+      expect(nn).toHaveLength(2);
+      expect(nn[0]?.now).toMatchObject({
+        channelKey: 'm:s1:live:1',
+        title: 'Raw Minus2',
+        start: BASE,
+        stop: BASE + HOUR,
+      });
+      expect(nn[0]?.next).toMatchObject({
+        channelKey: 'm:s1:live:1',
+        title: 'Raw Minus1',
+        start: BASE + HOUR,
+        stop: BASE + 2 * HOUR,
+      });
+      expect(nn[1]?.now).toMatchObject({
+        channelKey: 'm:s1:live:2',
+        title: 'Raw Plus1',
+        start: BASE,
+        stop: BASE + HOUR,
+      });
+      expect(nn[1]?.next).toMatchObject({
+        channelKey: 'm:s1:live:2',
+        title: 'Raw Plus2',
+        start: BASE + HOUR,
+        stop: BASE + 2 * HOUR,
+      });
+
+      const win = await queryEpgWindow(h.db, ['m:s1:live:1', 'm:s1:live:2'], BASE, BASE + HOUR);
+      expect(win['m:s1:live:1']?.map((p) => [p.title, p.start, p.stop])).toEqual([
+        ['Raw Minus2', BASE, BASE + HOUR],
+      ]);
+      expect(win['m:s1:live:2']?.map((p) => [p.title, p.start, p.stop])).toEqual([
+        ['Raw Plus1', BASE, BASE + HOUR],
+      ]);
+
+      // Verify EXPLAIN QUERY PLAN for the LEFT JOIN query has zero full-table SCANs
+      const joinPlan = await h.db.all<{ detail: string }>(
+        `EXPLAIN QUERY PLAN
+         SELECT cg.channel_key, cg.guide_id, l.epg_shift_ms
+           FROM channel_guide cg
+           LEFT JOIN live l ON l.source_id = cg.source_id AND l.key = cg.channel_key
+          WHERE cg.source_id = ? AND cg.channel_key IN (?, ?)`,
+        ['s1', 'm:s1:live:1', 'm:s1:live:2'],
+      );
+      const joinDetail = joinPlan.map((r) => r.detail).join('\n');
+      expect(joinDetail).toContain('SEARCH cg USING PRIMARY KEY');
+      expect(joinDetail).not.toMatch(/\bSCAN\b/);
       h.close();
     });
   });

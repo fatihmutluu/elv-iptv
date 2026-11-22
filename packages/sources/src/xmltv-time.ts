@@ -16,13 +16,19 @@ function daysIn(year: number, month: number): number {
   return month === 2 && leap ? 29 : (DAYS[month - 1] as number);
 }
 
-/** Offset in minutes of the suffix (`+0100`, `-05:00`, `+01`, `Z`), or undefined when malformed. */
+/** Offset in minutes of the suffix (`+0100`, `-05:00`, `+01`, `Z`, `UTC`, `GMT`, `UTC±HHMM`, `GMT±HH:MM`), or undefined when malformed. */
 function parseOffset(text: string): number | undefined {
-  if (text === '' || text === 'Z') return 0;
-  const sign = text[0] === '-' ? -1 : text[0] === '+' ? 1 : 0;
+  if (text === '') return 0;
+  const upper = text.toUpperCase();
+  if (upper === 'Z' || upper === 'UTC' || upper === 'GMT') return 0;
+  let rest = upper;
+  if (rest.startsWith('UTC') || rest.startsWith('GMT')) {
+    rest = rest.slice(3).trimStart();
+  }
+  const sign = rest[0] === '-' ? -1 : rest[0] === '+' ? 1 : 0;
   if (sign === 0) return undefined;
   const body =
-    text.length === 6 && text[3] === ':' ? text.slice(1, 3) + text.slice(4) : text.slice(1);
+    rest.length === 6 && rest[3] === ':' ? rest.slice(1, 3) + rest.slice(4) : rest.slice(1);
   if (body.length !== 2 && body.length !== 4) return undefined;
   const hours = digits(body, 0, 2);
   const minutes = body.length === 4 ? digits(body, 2, 2) : 0;
