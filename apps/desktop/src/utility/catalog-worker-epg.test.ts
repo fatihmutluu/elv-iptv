@@ -256,6 +256,13 @@ describe('catalog worker EPG & channelByNumber RPCs', () => {
     });
     expect(win[chKey]?.map((p) => p.title)).toEqual(['Midday Feature', 'Afternoon Encore']);
 
+    const nextEp = await call<unknown>({
+      method: 'queryNextEpisode',
+      seriesKey: 'x:missing:series:1',
+      currentItemKey: 'x:missing:episode:1',
+    });
+    expect(nextEp).toBeNull();
+
     const done = new Promise<void>((resolve) => parentEmitter.once('worker-shutdown', resolve));
     sendToWorker({ type: 'shutdown' });
     await done;

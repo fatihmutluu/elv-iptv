@@ -1,4 +1,4 @@
-import { type ClockAnchor, EMPTY_TRACKS } from './engine';
+import { type ClockAnchor, EMPTY_TRACKS, type StreamVideoInfo } from './engine';
 import type { PlaybackState, PlaybackStatus } from './types';
 
 function sameStatus(a: PlaybackStatus, b: PlaybackStatus): boolean {
@@ -37,6 +37,18 @@ function sameAnchor(a: ClockAnchor | undefined, b: ClockAnchor | undefined): boo
   );
 }
 
+function sameVideoInfo(a: StreamVideoInfo | undefined, b: StreamVideoInfo | undefined): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  return (
+    a.width === b.width &&
+    a.height === b.height &&
+    a.fps === b.fps &&
+    a.codec === b.codec &&
+    a.hdr === b.hdr
+  );
+}
+
 function samePlaybackState(a: PlaybackState, b: PlaybackState): boolean {
   if (a === b) return true;
   return (
@@ -49,7 +61,8 @@ function samePlaybackState(a: PlaybackState, b: PlaybackState): boolean {
     a.atLiveEdge === b.atLiveEdge &&
     a.surfaceRecreationToken === b.surfaceRecreationToken &&
     sameStatus(a.status, b.status) &&
-    sameAnchor(a.anchor, b.anchor)
+    sameAnchor(a.anchor, b.anchor) &&
+    sameVideoInfo(a.videoInfo, b.videoInfo)
   );
 }
 

@@ -704,7 +704,7 @@ describe('PlayerScreen VOD watch progress persistence and smart resume (#14)', (
     });
 
     expect(catalog.saveProgress).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId('osd-status')).toHaveTextContent('Playing');
+    expect(screen.queryByTestId('osd-status')).toBeNull();
     await view.unmount();
   });
 });

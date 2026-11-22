@@ -74,6 +74,8 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
       (await open()).channelByNumber?.(num, sourceId) ?? null,
     seasons: (seriesId) => wrapResult(async () => (await open()).seasons(seriesId)),
     episodes: async (seriesId, season) => (await open()).episodes(seriesId, season),
+    queryNextEpisode: async (seriesKey, currentItemKey, profileId) =>
+      (await open()).queryNextEpisode?.(seriesKey, currentItemKey, profileId) ?? null,
     resolveStream: (itemKey) => wrapResult(async () => (await open()).resolveStream(itemKey)),
     saveProgress: (input) =>
       wrapResult(async () => {

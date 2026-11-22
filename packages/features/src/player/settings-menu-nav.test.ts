@@ -418,4 +418,104 @@ describe('settings-menu-nav', () => {
       ),
     ).toEqual({ kind: 'toggleStats' });
   });
+
+  it('includes autoSubtitlesOnSkipBack row before stats when enabled (#114)', () => {
+    expect(settingsRootItems(true, true, false, true)).toEqual([
+      'subtitles',
+      'audio',
+      'speed',
+      'aspect',
+      'autoSubtitlesOnSkipBack',
+      'stats',
+    ]);
+    expect(settingsRootItems(true, false, true, true)).toEqual([
+      'subtitles',
+      'audio',
+      'speed',
+      'deinterlace',
+      'autoSubtitlesOnSkipBack',
+      'stats',
+    ]);
+    expect(
+      settingsRowCount('root', TRACKS, {
+        isVod: true,
+        hasAspect: false,
+        hasDeinterlace: true,
+        hasAutoSubtitlesOnSkipBack: true,
+      }),
+    ).toBe(6);
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 4 },
+        TRACKS,
+        {
+          isVod: true,
+          hasAspect: false,
+          hasDeinterlace: true,
+          hasAutoSubtitlesOnSkipBack: true,
+        },
+      ),
+    ).toEqual({ kind: 'toggleAutoSubtitlesOnSkipBack' });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'right', kind: 'press', time: 0 },
+        { view: 'root', index: 4 },
+        TRACKS,
+        {
+          isVod: true,
+          hasAspect: false,
+          hasDeinterlace: true,
+          hasAutoSubtitlesOnSkipBack: true,
+        },
+      ),
+    ).toBeNull();
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 5 },
+        TRACKS,
+        {
+          isVod: true,
+          hasAspect: false,
+          hasDeinterlace: true,
+          hasAutoSubtitlesOnSkipBack: true,
+        },
+      ),
+    ).toEqual({ kind: 'toggleStats' });
+  });
+
+  it('includes autoPlayNextEpisode before stats on VOD and emits toggleAutoPlayNextEpisode on Select (#392)', () => {
+    const opts = {
+      isVod: true,
+      hasAspect: false,
+      hasDeinterlace: false,
+      hasAutoSubtitlesOnSkipBack: true,
+      hasAutoPlayNextEpisode: true,
+    };
+    expect(settingsRootItems(true, false, false, true, true)).toEqual([
+      'subtitles',
+      'audio',
+      'speed',
+      'autoSubtitlesOnSkipBack',
+      'autoPlayNextEpisode',
+      'stats',
+    ]);
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 4 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'toggleAutoPlayNextEpisode' });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 5 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'toggleStats' });
+  });
 });

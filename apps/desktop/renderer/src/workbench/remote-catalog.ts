@@ -294,6 +294,8 @@ export function createWorkbenchRemoteCatalog(
     channelByNumber: (num, sourceId) => rpcQuery('channelByNumber', [num, sourceId]),
     seasons: (seriesId) => rpcResult('seasons', [seriesId]),
     episodes: (seriesId, season) => rpcQuery('episodes', [seriesId, season]),
+    queryNextEpisode: (seriesKey, currentItemKey, profileId) =>
+      rpcQuery('queryNextEpisode', [seriesKey, currentItemKey, profileId]),
     resolveStream: (itemKey) => rpcResult('resolveStream', [itemKey]),
     saveProgress: (input) => rpcResult('saveProgress', [input]),
     setWatched: (itemKey, watched, profileId) =>

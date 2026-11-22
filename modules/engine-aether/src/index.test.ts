@@ -173,6 +173,14 @@ describe('createAetherEngine', () => {
     native.emit(tracksEvent);
     expect(events).toEqual([tracksEvent]);
 
+    const mediaInfoEvent: EngineEvent = {
+      attempt: 4,
+      type: 'mediaInfo',
+      info: { width: 3840, height: 2160, fps: 60, codec: 'hevc', hdr: 'dv' },
+    };
+    native.emit(mediaInfoEvent);
+    expect(events).toEqual([tracksEvent, mediaInfoEvent]);
+
     engine.setSpeed?.(5, 1.5);
     expect(native.engine.setSpeed).toHaveBeenCalledWith(5, 1.5);
   });

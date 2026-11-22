@@ -1,13 +1,18 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { _electron as electron, expect, test } from '@playwright/test';
+import { _electron as electron, expect, type Page, test } from '@playwright/test';
 import { mpvRuntimePaths } from '../src/main/player/runtime-path.ts';
 import { type BrowseTestEnv, startBrowseTestEnv } from './browse-test-server.ts';
 
 const DESKTOP_ROOT = join(__dirname, '..');
 
 let env: BrowseTestEnv | undefined;
+
+async function expectPlayingQuietly(window: Page, timeout = 15_000): Promise<void> {
+  await expect(window.getByTestId('osd-status')).toHaveCount(0, { timeout });
+  await expect(window.getByTestId('osd-error-hint')).toHaveCount(0);
+}
 
 function cipherLaunchArgs(): string[] {
   if (process.platform === 'darwin' && process.env.ELV_REAL_KEYCHAIN !== '1') {
@@ -82,36 +87,57 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
     if (hasMpv) {
       await expect(window.getByTestId('player-area')).toBeVisible();
       await expect(window.getByTestId('player-status')).toHaveCount(0);
+      await expect(window.getByTestId('player-volume-slider')).toBeVisible();
       const areaBox = await window.getByTestId('player-area').boundingBox();
       const osdBox = await window.getByTestId('player-osd').boundingBox();
       expect(areaBox).not.toBeNull();
       expect(osdBox).not.toBeNull();
       expect((areaBox?.height ?? 0) > 50).toBe(true);
       expect((areaBox?.y ?? 0) + (areaBox?.height ?? 0)).toBeLessThanOrEqual((osdBox?.y ?? 0) + 1);
+
+      await window.getByTestId('player-info-button').click();
+      await expect(window.getByTestId('player-info-desktop-dialog')).toBeVisible();
+      const infoAreaBox = await window.getByTestId('player-area').boundingBox();
+      const infoBox = await window.getByTestId('player-info-desktop-dialog').boundingBox();
+      expect(infoAreaBox).not.toBeNull();
+      expect(infoBox).not.toBeNull();
+      expect((infoAreaBox?.y ?? 0) + (infoAreaBox?.height ?? 0)).toBeLessThanOrEqual(
+        (infoBox?.y ?? 0) + 1,
+      );
+      await window.keyboard.press('Escape');
+      await expect(window.getByTestId('player-info-desktop-dialog')).toHaveCount(0);
+      await expect(window.getByTestId('player-osd')).toBeVisible();
+
+      await window.getByTestId('player-channel-list-button').click();
+      await expect(window.getByTestId('player-channel-drawer-desktop')).toBeVisible();
+      const drawerAreaBox = await window.getByTestId('player-area').boundingBox();
+      const drawerBox = await window.getByTestId('player-channel-drawer-desktop').boundingBox();
+      expect(drawerAreaBox).not.toBeNull();
+      expect(drawerBox).not.toBeNull();
+      expect((drawerBox?.x ?? 0) + (drawerBox?.width ?? 0)).toBeLessThanOrEqual(
+        (drawerAreaBox?.x ?? 0) + 1,
+      );
+      await window.keyboard.press('Escape');
+      await expect(window.getByTestId('player-channel-drawer-desktop')).toHaveCount(0);
+      await expect(window.getByTestId('player-osd')).toBeVisible();
     } else {
       await expect(window.getByTestId('player-area')).toHaveCount(0);
     }
 
     if (canPlayMedia) {
-      await expect(window.getByTestId('osd-status')).toHaveText(/^(Playing|Oynatılıyor)$/, {
-        timeout: 15_000,
-      });
+      await expectPlayingQuietly(window);
     }
 
     await window.getByTestId('player-prev').click();
     await expect(window.getByTestId('osd-title')).toHaveText(ch0Label);
     if (canPlayMedia) {
-      await expect(window.getByTestId('osd-status')).toHaveText(/^(Playing|Oynatılıyor)$/, {
-        timeout: 15_000,
-      });
+      await expectPlayingQuietly(window);
     }
 
     await window.getByTestId('player-next').click();
     await expect(window.getByTestId('osd-title')).toHaveText(ch1Label);
     if (canPlayMedia) {
-      await expect(window.getByTestId('osd-status')).toHaveText(/^(Playing|Oynatılıyor)$/, {
-        timeout: 15_000,
-      });
+      await expectPlayingQuietly(window);
     }
 
     await window.getByTestId('player-back').click();
@@ -140,9 +166,7 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
 
     await expect(window.getByTestId('player-osd')).toBeVisible();
     if (canPlayMedia) {
-      await expect(window.getByTestId('osd-status')).toHaveText(/^(Playing|Oynatılıyor)$/, {
-        timeout: 15_000,
-      });
+      await expectPlayingQuietly(window);
     }
     await window.getByTestId('player-back').click();
     await expect(window.getByTestId('detail-screen')).toBeVisible();
@@ -226,9 +250,7 @@ test('plays corpus Two audio tracks and subtitles (MKV) movie, pauses, seeks +10
     await window.getByTestId('detail-play').click();
 
     await expect(window.getByTestId('player-osd')).toBeVisible();
-    await expect(window.getByTestId('osd-status')).toHaveText(/^(Playing|Oynatılıyor)$/, {
-      timeout: 15_000,
-    });
+    await expectPlayingQuietly(window);
 
     await window.getByTestId('player-play-pause').click();
     await expect(window.getByTestId('osd-status')).toHaveText(/^(Paused|Duraklatıldı)$/, {
@@ -237,9 +259,7 @@ test('plays corpus Two audio tracks and subtitles (MKV) movie, pauses, seeks +10
 
     await window.getByTestId('player-seek-forward').click();
     await window.getByTestId('player-play-pause').click();
-    await expect(window.getByTestId('osd-status')).toHaveText(/^(Playing|Oynatılıyor)$/, {
-      timeout: 10_000,
-    });
+    await expectPlayingQuietly(window, 10_000);
 
     await expect(window.getByTestId('player-tracks-button')).toBeVisible({ timeout: 10_000 });
     await window.getByTestId('player-tracks-button').click();

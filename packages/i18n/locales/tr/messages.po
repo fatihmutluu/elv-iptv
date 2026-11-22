@@ -1154,3 +1154,45 @@ msgstr "İptal"
 
 msgid "player.connectionLimit.continueAnyway"
 msgstr "Yine de devam et"
+
+msgid "player.info"
+msgstr "Program bilgisi"
+
+msgid "player.channelList"
+msgstr "Kanallar"
+
+msgid "player.channelListEmpty"
+msgstr "Bu grupta kanal yok"
+
+msgid "player.nowPlaying"
+msgstr "Şimdi yayında"
+
+msgid "player.upNext"
+msgstr "Sıradaki"
+
+msgid "player.noProgrammeInfo"
+msgstr "Program bilgisi mevcut değil"
+
+msgid "player.streamQuality"
+msgstr "Yayın kalitesi"
+
+msgid "player.volume"
+msgstr "Ses seviyesi"
+
+msgid "player.brightness"
+msgstr "Parlaklık"
+
+msgid "player.holdSpeedActive"
+msgstr "2× hız"
+
+msgid "player.autoSubtitlesOnSkipBack"
+msgstr "Geri sararken altyazı"
+
+msgid "player.nextUpCountdown"
+msgstr "{seconds} sn sonra sonraki bölüm"
+
+msgid "player.playNextNow"
+msgstr "Şimdi oynat"
+
+msgid "player.autoPlayNextEpisode"
+msgstr "Sonraki bölümü otomatik oynat"

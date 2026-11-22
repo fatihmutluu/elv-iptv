@@ -49,11 +49,14 @@ export type PlayerUiKey =
   | 'seek-coarse-forward'
   | 'mute'
   | 'tracks'
-  | 'prev-channel';
+  | 'prev-channel'
+  | 'info'
+  | 'channel-list';
 
 /** Presentation events outside the port, main to renderer (`player:ui`). */
 export type PlayerUiEvent =
   | { type: 'presenter'; kind: PresenterKind; coversArea: boolean }
+  | { type: 'fullscreen-changed'; fullscreen: boolean }
   | { type: 'key'; key: PlayerUiKey }
   | { type: 'closed' };
 

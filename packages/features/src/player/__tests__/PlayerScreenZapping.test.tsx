@@ -225,7 +225,7 @@ describe('PlayerScreen zapping and failure handling', () => {
     await act(async () => {
       manual.advance(50);
     });
-    expect(screen.getByTestId('osd-status')).toHaveTextContent('Playing');
+    expect(screen.queryByTestId('osd-status')).toBeNull();
 
     await act(async () => {
       keys.tap(KEYCODE_BACK);

@@ -1154,3 +1154,45 @@ msgstr "Cancel"
 
 msgid "player.connectionLimit.continueAnyway"
 msgstr "Continue anyway"
+
+msgid "player.info"
+msgstr "Programme info"
+
+msgid "player.channelList"
+msgstr "Channels"
+
+msgid "player.channelListEmpty"
+msgstr "No channels in this group"
+
+msgid "player.nowPlaying"
+msgstr "On now"
+
+msgid "player.upNext"
+msgstr "Up next"
+
+msgid "player.noProgrammeInfo"
+msgstr "No programme information available"
+
+msgid "player.streamQuality"
+msgstr "Stream quality"
+
+msgid "player.volume"
+msgstr "Volume"
+
+msgid "player.brightness"
+msgstr "Brightness"
+
+msgid "player.holdSpeedActive"
+msgstr "2× speed"
+
+msgid "player.autoSubtitlesOnSkipBack"
+msgstr "Subtitles on skip back"
+
+msgid "player.nextUpCountdown"
+msgstr "Next episode in {seconds}s"
+
+msgid "player.playNextNow"
+msgstr "Play now"
+
+msgid "player.autoPlayNextEpisode"
+msgstr "Auto-play next episode"

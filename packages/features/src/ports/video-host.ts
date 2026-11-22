@@ -34,7 +34,9 @@ export type HostKey =
   | 'seek-coarse-forward'
   | 'mute'
   | 'tracks'
-  | 'prev-channel';
+  | 'prev-channel'
+  | 'info'
+  | 'channel-list';
 
 /** Typed playback metadata pushed from `PlayerScreen` to OS media controls (`MediaSession`, `#435`). */
 export interface MediaSessionMetadata {
@@ -54,8 +56,18 @@ export interface OpenVideoEngine {
   onHostKey?: (listener: (key: HostKey) => void) => () => void;
   /** Optional host fullscreen toggle (e.g. desktop presenter window fullscreen). */
   toggleFullscreen?: () => void;
+  /** Optional current host fullscreen state reader (`#394`). */
+  isFullscreen?: () => boolean;
+  /** Optional host fullscreen transition subscription (`#394`). */
+  onFullscreenChange?: (listener: (fullscreen: boolean) => void) => () => void;
   /** Optional host audio mute toggle. */
   toggleMute?: () => void;
+  /** Optional host output volume setter (`0`–`100`, `#394`). */
+  setVolume?: (volume: number) => void;
+  /** Optional initial host output volume (`0`–`100`, `#394`). */
+  initialVolume?: number;
+  /** Optional native screen brightness setter (`0`–`1`, `#114`). */
+  setBrightness?: (level: number) => void;
   /** Optional native screen-orientation lock toggle for touch lock (`#440`). */
   setOrientationLocked?: (locked: boolean) => void;
   /** Optional temporary sensor-releasing orientation request on mobile (`#266`). */

@@ -22,6 +22,7 @@ const HIDDEN_OSD_PASSTHROUGH_KEYS: ReadonlySet<Key> = new Set([
   'captions',
   'audioTrack',
   'info',
+  'guide',
   'lastChannel',
 ]);
 

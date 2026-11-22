@@ -1,6 +1,7 @@
 import AetherEngine
 import AVFoundation
 import Combine
+import CoreMedia
 import Foundation
 
 extension AetherBackend {
@@ -139,6 +140,7 @@ extension AetherBackend {
           activeSubtitleIndex: target.activeSubtitleTrackIndex,
           serial: serial
         )
+        self.inspectAndEmitVideoInfo(from: target, serial: serial)
       }
     }
   }
@@ -312,5 +314,84 @@ extension AetherBackend {
     publishSubtitlePresentation(.empty)
     currentEngine.stop(resetDisplayCriteria: false, finalTeardown: false)
     runMediaLoad(plan: .liveTs(url), fallbackOptions: options, serial: serial, currentEngine: currentEngine)
+  }
+
+  func inspectAndEmitVideoInfo(from target: AetherEngine, serial: Int) {
+    let size = Self.resolveVideoSize(from: target, softwareSize: target.softwareDisplaySize)
+    if size.width > 0, size.height > 0 {
+      onObservation?(
+        .mediaInfo(
+          StreamVideoInfo(
+            width: Int(size.width.rounded()),
+            height: Int(size.height.rounded()),
+            hdr: nil
+          )
+        ),
+        serial
+      )
+    }
+    guard let item = target.currentAVPlayerItem ?? target.nativePlayerLayer?.player?.currentItem else {
+      return
+    }
+    let asset = item.asset
+    mediaInfoTask?.cancel()
+    mediaInfoTask = Task { @MainActor [weak self] in
+      guard let videoTracks = try? await asset.loadTracks(withMediaType: .video),
+            let track = videoTracks.first,
+            !Task.isCancelled
+      else { return }
+      let loaded = try? await track.load(.naturalSize, .nominalFrameRate, .formatDescriptions)
+      guard let self, !Task.isCancelled, self.engineLoadSerial == serial, let loaded else { return }
+      let (naturalSize, nominalRate, descriptions) = loaded
+      let width = naturalSize.width > 0 ? Int(naturalSize.width.rounded()) : nil
+      let height = naturalSize.height > 0 ? Int(naturalSize.height.rounded()) : nil
+      let fps: Double? = (nominalRate.isFinite && nominalRate > 0)
+        ? (Double(nominalRate) * 100.0).rounded() / 100.0
+        : nil
+      let (codec, hdr) = Self.classifyFormatDescriptions(descriptions)
+      let info = StreamVideoInfo(width: width, height: height, fps: fps, codec: codec, hdr: hdr)
+      if !info.isEmpty {
+        self.onObservation?(.mediaInfo(info), serial)
+      }
+    }
+  }
+
+  private static func classifyFormatDescriptions(_ descriptions: [CMFormatDescription]) -> (codec: String?, hdr: String) {
+    guard let desc = descriptions.first else { return (nil, "sdr") }
+    let subType = CMFormatDescriptionGetMediaSubType(desc)
+    var isDolbyVision = false
+    let codec: String?
+    switch subType {
+    case kCMVideoCodecType_HEVC, 0x6865_7631: // 'hev1'
+      codec = "hevc"
+    case 0x6476_6831, 0x6476_6865: // 'dvh1', 'dvhe'
+      codec = "hevc"
+      isDolbyVision = true
+    case kCMVideoCodecType_H264:
+      codec = "h264"
+    case kCMVideoCodecType_VP9:
+      codec = "vp9"
+    case 0x6176_3031: // 'av01'
+      codec = "av1"
+    case kCMVideoCodecType_MPEG2Video:
+      codec = "mpeg2"
+    default:
+      codec = nil
+    }
+    if isDolbyVision {
+      return (codec, "dv")
+    }
+    if let transfer = CMFormatDescriptionGetExtension(
+      desc,
+      extensionKey: kCMFormatDescriptionExtension_TransferFunction
+    ) as? String {
+      if transfer == (kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ as String) {
+        return (codec, "hdr10")
+      }
+      if transfer == (kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG as String) {
+        return (codec, "hlg")
+      }
+    }
+    return (codec, "sdr")
   }
 }

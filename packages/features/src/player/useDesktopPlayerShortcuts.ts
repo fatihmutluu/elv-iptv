@@ -20,6 +20,12 @@ export interface DesktopShortcutGuard {
   readonly onJumpPreviousChannel: () => void;
   readonly canToggleTracks: () => boolean;
   readonly onToggleTracks: () => void;
+  readonly canToggleInfo?: () => boolean;
+  readonly onToggleInfo?: () => void;
+  readonly canToggleStats?: () => boolean;
+  readonly onToggleStats?: () => void;
+  readonly canToggleChannelList?: () => boolean;
+  readonly onToggleChannelList?: () => void;
   readonly canToggleMute: () => boolean;
   readonly onToggleMute: () => void;
   readonly canToggleFullscreen: () => boolean;
@@ -92,6 +98,26 @@ function dispatchVodShortcut(
 ): boolean {
   if (typeof e.key !== 'string' || hasControlModifier(e)) return false;
 
+  if (
+    (e.key === 'i' || e.key === 'I') &&
+    e.shiftKey === true &&
+    e.repeat !== true &&
+    guard.canToggleStats?.()
+  ) {
+    e.preventDefault?.();
+    guard.onToggleStats?.();
+    return true;
+  }
+  if (isPlainLetter(e, 'i', 'I') && guard.canToggleInfo?.()) {
+    e.preventDefault?.();
+    guard.onToggleInfo?.();
+    return true;
+  }
+  if (isPlainLetter(e, 'g', 'G') && guard.canToggleChannelList?.()) {
+    e.preventDefault?.();
+    guard.onToggleChannelList?.();
+    return true;
+  }
   if (isPlainLetter(e, 'f', 'F') && guard.canToggleFullscreen()) {
     e.preventDefault?.();
     guard.onToggleFullscreen();

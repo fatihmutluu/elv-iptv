@@ -7,6 +7,7 @@ import {
   type PlaybackStatus,
   type PlaybackTimers,
   positionAt,
+  type StreamVideoInfo,
   type TrackInfo,
 } from '@elv/playback';
 import type { FormFactor } from '@elv/ui-kit';
@@ -17,13 +18,107 @@ import type { SettingsMenuState } from './settings-menu-nav';
 import type { TrackPickerCursor } from './track-picker-nav';
 import type { TvOsdAction } from './tv-osd-nav';
 
+/** Progressive 3-tier OSD visibility state (`#391`). */
+export type OsdTier = 'hidden' | 'progress' | 'controls';
+
+/** Short auto-hide timeout (`2 000 ms`) used when OSD is in the lightweight `'progress'` peek tier (`#391`). */
+export const PROGRESS_OSD_AUTO_HIDE_MS = 2_000;
+
+/** Compact telemetry badge shown in the player header/info surfaces (`#58`). */
+export interface StreamBadge {
+  readonly key: string;
+  readonly label: string;
+  readonly tone?: 'neutral' | 'accent';
+}
+
+const KNOWN_AUDIO_BADGE_CODECS: Readonly<Record<string, string>> = {
+  EAC3: 'EAC3',
+  EC3: 'EAC3',
+  AC3: 'AC3',
+  DTS: 'DTS',
+  DTSHD: 'DTS',
+  TRUEHD: 'TRUEHD',
+  MLP: 'TRUEHD',
+  FLAC: 'FLAC',
+  ATMOS: 'ATMOS',
+};
+
+function finitePositive(v: number | undefined): number {
+  return v !== undefined && Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+function formatAudioBadgeLabel(track: TrackInfo | undefined): string | undefined {
+  if (track === undefined) return undefined;
+  if (track.channels === 8) return '7.1';
+  if (track.channels === 6) return '5.1';
+  const raw = track.codec?.trim();
+  if (raw === undefined || raw.length === 0) return undefined;
+  const normalized = raw
+    .replace(/^audio\//i, '')
+    .replace(/[^a-z0-9]/gi, '')
+    .toUpperCase();
+  return KNOWN_AUDIO_BADGE_CODECS[normalized];
+}
+
+/**
+ * Derives up to 4 concise stream badges (resolution, high frame rate, HDR, audio format)
+ * strictly from real decoded {@link StreamVideoInfo} and active {@link MediaTracks} (`#58`).
+ */
+export function formatStreamBadges(
+  videoInfo: StreamVideoInfo | undefined,
+  tracks: MediaTracks,
+): readonly StreamBadge[] {
+  const badges: StreamBadge[] = [];
+  const h = finitePositive(videoInfo?.height);
+  const w = finitePositive(videoInfo?.width);
+
+  if (h >= 2160 || w >= 3840) badges.push({ key: 'res', label: '4K', tone: 'accent' });
+  else if (h >= 1440 || w >= 2560) badges.push({ key: 'res', label: '1440p', tone: 'neutral' });
+  else if (h >= 1080 || w >= 1920) badges.push({ key: 'res', label: '1080p', tone: 'neutral' });
+  else if (h >= 720 || w >= 1280) badges.push({ key: 'res', label: '720p', tone: 'neutral' });
+  else if (h >= 480 || w >= 854) badges.push({ key: 'res', label: '480p', tone: 'neutral' });
+
+  if (videoInfo?.fps !== undefined && Number.isFinite(videoInfo.fps) && videoInfo.fps >= 45) {
+    badges.push({ key: 'fps', label: `${Math.round(videoInfo.fps)} fps`, tone: 'neutral' });
+  }
+
+  if (videoInfo?.hdr === 'dv') badges.push({ key: 'hdr', label: 'DV', tone: 'accent' });
+  else if (videoInfo?.hdr === 'hdr10') badges.push({ key: 'hdr', label: 'HDR10', tone: 'accent' });
+  else if (videoInfo?.hdr === 'hlg') badges.push({ key: 'hdr', label: 'HLG', tone: 'accent' });
+
+  const activeAudio = tracks.audio.find((t) => t.id === tracks.selectedAudioId);
+  const audioLabel = formatAudioBadgeLabel(activeAudio);
+  if (audioLabel !== undefined) badges.push({ key: 'audio', label: audioLabel, tone: 'neutral' });
+
+  return badges.slice(0, 4);
+}
+
+/** Clamps a volume percentage to an integer in `[0, 100]` (`#394`). */
+export function clampVolume(v: number): number {
+  if (Number.isNaN(v) || v <= 0) return 0;
+  if (v >= 100) return 100;
+  return Math.round(v);
+}
+
+/** Adjusts `current` volume by `delta` (default `5`), clamped to `[0, 100]` (`#394`). */
+export function stepVolume(current: number, delta = 5): number {
+  const base = clampVolume(current);
+  if (!Number.isFinite(delta)) return base;
+  return clampVolume(base + delta);
+}
+
 /** Live mutable snapshot shared with synchronous key handlers in `usePlayerControls`. */
 export interface PlayerOverlayLive {
   tracksOpen: boolean;
   pickerCursor: TrackPickerCursor;
   settingsOpen: boolean;
   settingsMenu: SettingsMenuState;
+  infoOpen: boolean;
+  channelListOpen: boolean;
+  canOpenInfo: boolean;
+  canOpenChannelList: boolean;
   locked: boolean;
+  osdTier: OsdTier;
   osdHidden: boolean;
   tvOsdFocused: boolean;
   tvScrubberFocused: boolean;
@@ -48,6 +143,10 @@ export interface PlayerOverlayStateParams {
   hasService: boolean;
   showRetry: boolean;
   hasSettings: boolean;
+  hasInfo?: boolean | undefined;
+  hasChannelList?: boolean | undefined;
+  hasAutoSubtitlesOnSkipBack?: boolean | undefined;
+  hasAutoPlayNextEpisode?: boolean | undefined;
   hasNextEpisode: boolean;
   hasPreviousChannel: boolean;
   initialOsdHidden?: boolean | undefined;
@@ -115,15 +214,19 @@ export function canAutoHideOsd(
   live: Pick<
     PlayerOverlayLive,
     'osdHidden' | 'tracksOpen' | 'settingsOpen' | 'locked' | 'tvOsdFocused' | 'tvScrubberFocused'
-  >,
+  > &
+    Partial<Pick<PlayerOverlayLive, 'osdTier' | 'infoOpen' | 'channelListOpen'>>,
   isScrubbing: boolean,
 ): boolean {
+  const isHidden = live.osdTier !== undefined ? live.osdTier === 'hidden' : live.osdHidden;
   return (
     statusKind === 'playing' &&
-    !live.osdHidden &&
+    !isHidden &&
     !isScrubbing &&
     !live.tracksOpen &&
     !live.settingsOpen &&
+    live.infoOpen !== true &&
+    live.channelListOpen !== true &&
     !live.locked &&
     !live.tvOsdFocused &&
     !live.tvScrubberFocused

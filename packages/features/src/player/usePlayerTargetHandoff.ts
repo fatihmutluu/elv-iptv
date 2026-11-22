@@ -38,11 +38,13 @@ export interface PlayerTargetHandoffParams {
   cancelScrubRef: MutableRefObject<() => void>;
   onTargetChangeRef: MutableRefObject<((next: PlayTarget) => void) | undefined>;
   bufferPresetRef?: MutableRefObject<BufferPreset>;
+  resolvedNextEpisodeRef?: MutableRefObject<PlayableEntry | undefined>;
 }
 
 /**
  * Owns active `PlayTarget` state, VOD resume lookup, live zapping, single-connection Next Episode
- * (`#353`) and Previous Channel handoffs, `playbackGuard`, and `appLifecycle` suspend/resume.
+ * (`#353`, `#392`), Channel Drawer selection (`#57`), Previous Channel handoffs, `playbackGuard`,
+ * and `appLifecycle` suspend/resume.
  */
 export function usePlayerTargetHandoff({
   target,
@@ -56,6 +58,7 @@ export function usePlayerTargetHandoff({
   cancelScrubRef,
   onTargetChangeRef,
   bufferPresetRef,
+  resolvedNextEpisodeRef,
 }: PlayerTargetHandoffParams) {
   const [activeTarget, setActiveTarget] = useState<PlayTarget>(target);
 
@@ -176,10 +179,16 @@ export function usePlayerTargetHandoff({
   );
 
   const handlePlayNextEpisode = useCallback(
-    (expectedNextKey?: string): void => {
+    (expectedNextKey?: string, resolvedNext?: PlayableEntry): void => {
       const current = activeTargetRef.current;
       if (transitioningToRef.current === current.itemKey) return;
-      const next = buildNextEpisodeTarget(current);
+      const queuedNext = buildNextEpisodeTarget(current);
+      const fallbackEntry = resolvedNext ?? resolvedNextEpisodeRef?.current;
+      const next: PlayTarget | null =
+        queuedNext ??
+        (fallbackEntry !== undefined && fallbackEntry.itemKey !== current.itemKey
+          ? { ...fallbackEntry, startPositionMs: 0 }
+          : null);
       if (next === null) return;
       if (expectedNextKey !== undefined && next.itemKey !== expectedNextKey) return;
       transitioningToRef.current = next.itemKey;
@@ -203,45 +212,57 @@ export function usePlayerTargetHandoff({
       cancelScrubRef,
       flushProgressRef,
       onTargetChangeRef,
+      resolvedNextEpisodeRef,
       serviceRef,
       tuneEntry,
     ],
+  );
+
+  const commitLiveTarget = useCallback(
+    (next: PlayTarget, syncPlaylistIndex?: number): void => {
+      cancelScrubRef.current();
+      cancelPendingResume();
+      vodResumeMsRef.current = undefined;
+      zapController.reset(next.playlist?.currentIndex ?? 0);
+      if (syncPlaylistIndex !== undefined) next.playlist?.onChangeIndex(syncPlaylistIndex);
+      prevPropKeyRef.current = next.itemKey;
+      activeTargetRef.current = next;
+      setActiveTarget(next);
+      onTargetChangeRef.current?.(next);
+      const svc = serviceRef.current;
+      if (backgroundedRef.current) resumeOnActiveRef.current = true;
+      else if (svc !== null) {
+        svc.stop();
+        tuneEntry(svc, next);
+      }
+    },
+    [cancelPendingResume, cancelScrubRef, onTargetChangeRef, serviceRef, tuneEntry, zapController],
   );
 
   const handleJumpPreviousChannel = useCallback((): void => {
     const current = activeTargetRef.current;
     const next = buildPreviousChannelTarget(current);
     if (next === null) return;
-    cancelScrubRef.current();
-    cancelPendingResume();
-    vodResumeMsRef.current = undefined;
     const nextIndex = next.playlist?.currentIndex ?? 0;
-    zapController.reset(nextIndex);
-    if (
+    const syncIdx =
       next.playlist !== undefined &&
       current.previousChannelIndex !== undefined &&
       nextIndex === current.previousChannelIndex
-    ) {
-      next.playlist.onChangeIndex(nextIndex);
-    }
-    prevPropKeyRef.current = next.itemKey;
-    activeTargetRef.current = next;
-    setActiveTarget(next);
-    onTargetChangeRef.current?.(next);
-    const svc = serviceRef.current;
-    if (backgroundedRef.current) resumeOnActiveRef.current = true;
-    else if (svc !== null) {
-      svc.stop();
-      tuneEntry(svc, next);
-    }
-  }, [
-    cancelPendingResume,
-    cancelScrubRef,
-    onTargetChangeRef,
-    serviceRef,
-    tuneEntry,
-    zapController,
-  ]);
+        ? nextIndex
+        : undefined;
+    commitLiveTarget(next, syncIdx);
+  }, [commitLiveTarget]);
+
+  const selectChannel = useCallback(
+    (entry: PlayableEntry, index?: number): void => {
+      const current = activeTargetRef.current;
+      if (current.kind !== 'live') return;
+      const next = buildChannelJumpTarget(current, entry, index);
+      if (next === null) return;
+      commitLiveTarget(next, index);
+    },
+    [commitLiveTarget],
+  );
 
   const jumpToChannel = useCallback(
     (channelNumber: number): void => {
@@ -257,24 +278,11 @@ export function usePlayerTargetHandoff({
               ? buildChannelJumpTarget(latest, resolved.entry, resolved.index)
               : null;
           if (next === null) return;
-          cancelScrubRef.current();
-          vodResumeMsRef.current = undefined;
-          zapController.reset(next.playlist?.currentIndex ?? 0);
-          if (resolved.index !== undefined) next.playlist?.onChangeIndex(resolved.index);
-          prevPropKeyRef.current = next.itemKey;
-          activeTargetRef.current = next;
-          setActiveTarget(next);
-          onTargetChangeRef.current?.(next);
-          const svc = serviceRef.current;
-          if (backgroundedRef.current) resumeOnActiveRef.current = true;
-          else if (svc !== null) {
-            svc.stop();
-            tuneEntry(svc, next);
-          }
+          commitLiveTarget(next, resolved.index);
         })
         .catch(() => undefined);
     },
-    [catalogRef, cancelScrubRef, onTargetChangeRef, serviceRef, tuneEntry, zapController],
+    [catalogRef, commitLiveTarget],
   );
 
   const onServiceReady = useCallback(
@@ -384,6 +392,7 @@ export function usePlayerTargetHandoff({
   return {
     activeTarget,
     zapBy,
+    selectChannel,
     jumpToChannel,
     onServiceReady,
     handlePlayNextEpisode,

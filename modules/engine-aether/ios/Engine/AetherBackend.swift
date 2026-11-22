@@ -63,6 +63,7 @@ final class AetherBackend: PlayerBackend {
   var seekTask: Task<Void, Never>?
   var audioSwitchTask: Task<Void, Never>?
   var liveRecoveryTask: Task<Void, Never>?
+  var mediaInfoTask: Task<Void, Never>?
   var liveRecoveryPolicy = LiveRecoveryPolicy()
 
   var audioSessionPolicy = AudioSessionPolicy()
@@ -287,6 +288,8 @@ final class AetherBackend: PlayerBackend {
     audioSwitchTask = nil
     liveRecoveryTask?.cancel()
     liveRecoveryTask = nil
+    mediaInfoTask?.cancel()
+    mediaInfoTask = nil
     closeCurrentReader()
   }
 

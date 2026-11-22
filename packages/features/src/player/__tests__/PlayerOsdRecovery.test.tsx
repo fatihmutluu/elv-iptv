@@ -208,21 +208,41 @@ describe('Player OSD recovery, input guards, subtitles, aspect, orientation & to
     const mobile = await mountPlayer({ formFactor: 'phone', os: 'android' });
     expect(screen.getByTestId('player-osd')).toBeTruthy();
 
-    // Drag > 10px does NOT hide OSD
-    const tapTarget = screen.getByTestId('player-canvas-tap-target');
-    await fireEvent(tapTarget, 'pressIn', { nativeEvent: { pageX: 100, pageY: 200 } });
-    await fireEvent.press(tapTarget, { nativeEvent: { pageX: 125, pageY: 200 } });
+    // Configure gesture canvas geometry so edge exclusion and drag thresholds apply
+    const gestureSurface = screen.getByTestId('player-touch-gestures');
+    await fireEvent(gestureSurface, 'layout', {
+      nativeEvent: { layout: { width: 400, height: 800 } },
+    });
+
+    // Drag > 18px does NOT hide OSD (classified as scrub, not tap)
+    await fireEvent(gestureSurface, 'responderGrant', {
+      nativeEvent: { locationX: 200, locationY: 400 },
+    });
+    await fireEvent(gestureSurface, 'responderMove', {
+      nativeEvent: { locationX: 240, locationY: 400 },
+    });
+    await fireEvent(gestureSurface, 'responderRelease', {
+      nativeEvent: { locationX: 240, locationY: 400 },
+    });
     expect(screen.getByTestId('player-osd')).toBeTruthy();
 
-    // Clean single tap hides OSD while playing
-    await fireEvent(tapTarget, 'pressIn', { nativeEvent: { pageX: 100, pageY: 200 } });
-    await fireEvent.press(tapTarget, { nativeEvent: { pageX: 102, pageY: 201 } });
+    // Clean center single tap hides OSD while playing
+    await fireEvent(gestureSurface, 'responderGrant', {
+      nativeEvent: { locationX: 200, locationY: 400 },
+    });
+    await fireEvent(gestureSurface, 'responderRelease', {
+      nativeEvent: { locationX: 202, locationY: 401 },
+    });
     expect(screen.queryByTestId('player-osd')).toBeNull();
 
-    // Transparent tap target stays active while hidden so single tap wakes OSD back up
-    const hiddenTarget = screen.getByTestId('player-canvas-tap-target');
-    await fireEvent(hiddenTarget, 'pressIn', { nativeEvent: { pageX: 100, pageY: 200 } });
-    await fireEvent.press(hiddenTarget, { nativeEvent: { pageX: 100, pageY: 200 } });
+    // Gesture surface stays active while hidden so single tap wakes OSD back up
+    const hiddenTarget = screen.getByTestId('player-touch-gestures');
+    await fireEvent(hiddenTarget, 'responderGrant', {
+      nativeEvent: { locationX: 200, locationY: 400 },
+    });
+    await fireEvent(hiddenTarget, 'responderRelease', {
+      nativeEvent: { locationX: 200, locationY: 400 },
+    });
     expect(screen.getByTestId('player-osd')).toBeTruthy();
 
     // Pressing an OSD button pauses playback without toggle-hiding OSD
@@ -236,7 +256,12 @@ describe('Player OSD recovery, input guards, subtitles, aspect, orientation & to
     await act(async () => {
       mobile.engine.emit({ attempt: pauseAttempt, type: 'state', state: 'paused' });
     });
-    await fireEvent.press(screen.getByTestId('player-canvas-tap-target'));
+    await fireEvent(screen.getByTestId('player-touch-gestures'), 'responderGrant', {
+      nativeEvent: { locationX: 200, locationY: 400 },
+    });
+    await fireEvent(screen.getByTestId('player-touch-gestures'), 'responderRelease', {
+      nativeEvent: { locationX: 200, locationY: 400 },
+    });
     expect(screen.getByTestId('player-osd')).toBeTruthy();
 
     await mobile.view.unmount();
@@ -363,7 +388,13 @@ describe('Player OSD recovery, input guards, subtitles, aspect, orientation & to
 
     // Close settings and hide OSD -> subtitleBottomInsetPx drops to 0
     await fireEvent.press(screen.getByTestId('player-settings-close'));
-    await fireEvent.press(screen.getByTestId('player-canvas-tap-target'));
+    const touchSurface = screen.getByTestId('player-touch-gestures');
+    await fireEvent(touchSurface, 'responderGrant', {
+      nativeEvent: { locationX: 200, locationY: 400 },
+    });
+    await fireEvent(touchSurface, 'responderRelease', {
+      nativeEvent: { locationX: 200, locationY: 400 },
+    });
     expect(mobile.surfaceCalls.at(-1)?.subtitleBottomInsetPx).toBe(0);
     await mobile.view.unmount();
 

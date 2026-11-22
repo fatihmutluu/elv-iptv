@@ -42,6 +42,7 @@ vi.mock('./engine.ts', () => ({
     mocks.engineDeps.push(deps);
     return {
       presenterKind: deps.presenter.kind,
+      release: vi.fn(),
     } as unknown as MpvEngine;
   },
 }));
@@ -233,5 +234,54 @@ describe('createEngineFor', () => {
 
     await mocks.engineDeps[0]?.spawn(['--arg'], new AbortController().signal);
     expect(mocks.spawnCalls[0]).toMatchObject({ executable: macFallbackRuntime.executable });
+  });
+
+  it('forwards owner enter-full-screen and leave-full-screen events as fullscreen-changed UI and detaches on release (#394)', async () => {
+    const listeners = new Map<string, Set<() => void>>();
+    let fullScreen = true;
+    const windowOwner = {
+      isFullScreen: () => fullScreen,
+      isDestroyed: () => false,
+      on: vi.fn((event: string, listener: () => void) => {
+        let set = listeners.get(event);
+        if (!set) {
+          set = new Set();
+          listeners.set(event, set);
+        }
+        set.add(listener);
+      }),
+      removeListener: vi.fn((event: string, listener: () => void) => {
+        listeners.get(event)?.delete(listener);
+      }),
+    } as unknown as BrowserWindow;
+
+    const uiEvents: PlayerUiEvent[] = [];
+    const engine = await createEngineFor(windowOwner, {
+      runtime,
+      platform: 'win32',
+      loadMode: 'replace',
+      pidFile: 'C:\\tmp\\mpv-pids.json',
+      engineId: 'engine-fs',
+      readaheadStore: stubReadaheadStore,
+      onUi: (ev) => uiEvents.push(ev),
+    });
+
+    expect(uiEvents).toEqual([
+      { type: 'presenter', kind: 'canvas', coversArea: false },
+      { type: 'fullscreen-changed', fullscreen: true },
+    ]);
+
+    fullScreen = false;
+    for (const l of listeners.get('leave-full-screen') ?? []) l();
+    fullScreen = true;
+    for (const l of listeners.get('enter-full-screen') ?? []) l();
+    expect(uiEvents.slice(2)).toEqual([
+      { type: 'fullscreen-changed', fullscreen: false },
+      { type: 'fullscreen-changed', fullscreen: true },
+    ]);
+
+    engine.release();
+    expect(listeners.get('enter-full-screen')?.size).toBe(0);
+    expect(listeners.get('leave-full-screen')?.size).toBe(0);
   });
 });

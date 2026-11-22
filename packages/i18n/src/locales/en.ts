@@ -414,6 +414,20 @@ export const enMessages = {
   'player.connectionLimit.stopOther': 'Stop other stream',
   'player.connectionLimit.cancel': 'Cancel',
   'player.connectionLimit.continueAnyway': 'Continue anyway',
+  'player.info': 'Programme info',
+  'player.channelList': 'Channels',
+  'player.channelListEmpty': 'No channels in this group',
+  'player.nowPlaying': 'On now',
+  'player.upNext': 'Up next',
+  'player.noProgrammeInfo': 'No programme information available',
+  'player.streamQuality': 'Stream quality',
+  'player.volume': 'Volume',
+  'player.brightness': 'Brightness',
+  'player.holdSpeedActive': '2× speed',
+  'player.autoSubtitlesOnSkipBack': 'Subtitles on skip back',
+  'player.autoPlayNextEpisode': 'Auto-play next episode',
+  'player.nextUpCountdown': 'Next episode in {seconds}s',
+  'player.playNextNow': 'Play now',
 } as const;
 
 /** Valid message identifier across all supported locales. */

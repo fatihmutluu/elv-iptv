@@ -13,6 +13,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackGroup
 import androidx.media3.common.Tracks
+import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DecoderCounters
 import androidx.media3.exoplayer.ExoPlaybackException
@@ -540,6 +541,63 @@ class EventReporterTest {
       reporter.onEvents(player, eventsFlag(Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_IS_PLAYING_CHANGED))
       val vodClock = events.first { it["type"] == "clock" }["anchor"] as Map<*, *>
       assertFalse(vodClock.containsKey("isLiveTs"))
+      reporter.end()
+    } finally {
+      real.release()
+    }
+  }
+
+  @Test
+  fun `emits deduplicated mediaInfo on tracks and video size changes and resets between prepares (#58)`() {
+    val events = mutableListOf<Map<String, Any?>>()
+    val real = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).setLooper(Looper.getMainLooper()).build()
+    try {
+      val player = ScriptedPlayer(real)
+      val hdrColor = androidx.media3.common.ColorInfo.Builder()
+        .setColorTransfer(C.COLOR_TRANSFER_ST2084)
+        .build()
+      val videoFmt = Format.Builder()
+        .setSampleMimeType(MimeTypes.VIDEO_H265)
+        .setWidth(1920)
+        .setHeight(1080)
+        .setFrameRate(50f)
+        .setColorInfo(hdrColor)
+        .build()
+      player.scriptedTracks = Tracks(
+        listOf(
+          Tracks.Group(TrackGroup("v", videoFmt), false, intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true)),
+        )
+      )
+      val reporter = EventReporter(
+        handler = Handler(Looper.getMainLooper()),
+        fence = PrepareFence(),
+        send = { events += it },
+        onHlsDetected = {},
+        onBehindLiveWindow = {},
+        onAudioFocusDenied = { false },
+        onVideoCodecFailed = {},
+        onFirstFrame = {},
+        onCue = { _, _ -> },
+      )
+      reporter.begin(player, live = true, prepareSerial = 1L, reused = false)
+      events.clear()
+
+      reporter.onTracksChanged(player.scriptedTracks)
+      reporter.onTracksChanged(player.scriptedTracks)
+      assertEquals(1, events.count { it["type"] == "mediaInfo" })
+      assertEquals(
+        mapOf("width" to 1920, "height" to 1080, "fps" to 50.0, "codec" to "hevc", "hdr" to "hdr10"),
+        events.single()["info"],
+      )
+
+      // Video size change emits updated dimensions once and deduplicates repeat calls
+      reporter.onVideoSizeChanged(VideoSize(3840, 2160))
+      reporter.onVideoSizeChanged(VideoSize(3840, 2160))
+      assertEquals(2, events.count { it["type"] == "mediaInfo" })
+      assertEquals(
+        mapOf("width" to 3840, "height" to 2160, "fps" to 50.0, "codec" to "hevc", "hdr" to "hdr10"),
+        events.last()["info"],
+      )
       reporter.end()
     } finally {
       real.release()

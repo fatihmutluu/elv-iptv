@@ -109,12 +109,25 @@ export interface ClockAnchor {
   hasVideoTrack?: boolean;
 }
 
+/** Dynamic range transfer classification of the active video stream (`#58`). */
+export type StreamHdrKind = 'sdr' | 'hdr10' | 'hlg' | 'dv';
+
+/** Real decoded video stream telemetry emitted by native and desktop engines (`#58`). */
+export interface StreamVideoInfo {
+  readonly width?: number;
+  readonly height?: number;
+  readonly fps?: number;
+  readonly codec?: string;
+  readonly hdr?: StreamHdrKind;
+}
+
 /** Every event echoes the token of the media or command it belongs to. */
 export type EngineEvent = { attempt: AttemptToken } & (
   | { type: 'state'; state: EngineState }
   | { type: 'firstFrame'; atMs: number }
   | { type: 'clock'; anchor: ClockAnchor }
   | { type: 'tracks'; tracks: MediaTracks }
+  | { type: 'mediaInfo'; info: StreamVideoInfo }
   | { type: 'stall'; phase: 'start' | 'end'; atMs: number }
   | { type: 'progress'; bytesReceived?: number; atMs: number }
   | { type: 'error'; error: EngineError }

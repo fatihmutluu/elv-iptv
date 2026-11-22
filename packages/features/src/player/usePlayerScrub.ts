@@ -23,7 +23,7 @@ export function usePlayerScrub(params: {
   serviceRef: MutableRefObject<PlaybackService | null>;
   clockRef: MutableRefObject<PlaybackClock>;
   timersRef: MutableRefObject<PlaybackTimers>;
-  onSeekCommit?: ((positionMs: number) => void) | undefined;
+  onSeekCommit?: ((positionMs: number, priorPositionMs?: number) => void) | undefined;
 }) {
   const { statusKind, serviceRef, clockRef, timersRef } = params;
   const cbRef = useRef(params);
@@ -52,8 +52,11 @@ export function usePlayerScrub(params: {
       },
       seek: (ms) => {
         if (cbRef.current.activeTarget.kind === 'vod') {
+          const anchor = serviceRef.current?.getState().anchor;
+          const priorMs =
+            anchor !== undefined ? positionAt(anchor, clockRef.current.now()) : undefined;
           serviceRef.current?.seek(ms);
-          cbRef.current.onSeekCommit?.(ms);
+          cbRef.current.onSeekCommit?.(ms, priorMs);
         }
       },
       onPreviewChange: setPreviewPositionMs,
@@ -77,9 +80,9 @@ export function usePlayerScrub(params: {
     else if (canPauseStatus(kind)) svc.pause();
   };
 
-  const commitVodSeek = (targetMs: number): void => {
+  const commitVodSeek = (targetMs: number, priorMs?: number): void => {
     serviceRef.current?.seek(targetMs);
-    cbRef.current.onSeekCommit?.(targetMs);
+    cbRef.current.onSeekCommit?.(targetMs, priorMs);
   };
 
   const seekBy = (deltaMs: number): void => {
@@ -87,17 +90,19 @@ export function usePlayerScrub(params: {
     const anchor = cbRef.current.activeTarget.kind === 'vod' ? svc?.getState().anchor : undefined;
     scrub.cancel();
     if (svc === null || anchor === undefined) return;
-    commitVodSeek(
-      clampSeekPosition(positionAt(anchor, clockRef.current.now()) + deltaMs, anchor.durationMs),
-    );
+    const priorMs = positionAt(anchor, clockRef.current.now());
+    commitVodSeek(clampSeekPosition(priorMs + deltaMs, anchor.durationMs), priorMs);
   };
 
   const seekWithDuration = (compute: (dur: number) => number): void => {
     const svc = serviceRef.current;
     if (svc === null || cbRef.current.activeTarget.kind !== 'vod') return;
     scrub.cancel();
-    const dur = svc.getState().anchor?.durationMs;
-    if (dur !== undefined && dur > 0) commitVodSeek(compute(dur));
+    const anchor = svc.getState().anchor;
+    const dur = anchor?.durationMs;
+    if (anchor !== undefined && dur !== undefined && dur > 0) {
+      commitVodSeek(compute(dur), positionAt(anchor, clockRef.current.now()));
+    }
   };
 
   const seekToRatio = (ratio: number): void => {

@@ -278,12 +278,14 @@ describe('Wave 3B Player TV focus, hidden-OSD passthrough, live controls, atomic
     expect(screen.getByTestId('player-osd')).toBeTruthy();
     expect(tv.engine.commands.filter((c) => c.name === 'seek').at(-1)?.positionMs).toBe(100_000);
 
-    // Hide OSD -> Info while hidden wakes OSD AND toggles stats HUD immediately
+    // Hide OSD -> Info while hidden wakes OSD AND opens Programme Info sheet immediately (#58)
     await act(async () => tv.keys.tap(KEY_UP));
-    expect(screen.queryByTestId('player-stats-hud')).toBeNull();
+    expect(screen.queryByTestId('player-info-panel')).toBeNull();
     await act(async () => tv.keys.tap(KEY_INFO));
-    expect(screen.getByTestId('player-osd')).toBeTruthy();
-    expect(screen.getByTestId('player-stats-hud')).toBeTruthy();
+    expect(screen.getByTestId('player-osd', { includeHiddenElements: true })).toBeTruthy();
+    expect(screen.getByTestId('player-info-panel')).toBeTruthy();
+    await act(async () => tv.keys.tap(KEY_BACK));
+    expect(screen.queryByTestId('player-info-panel')).toBeNull();
 
     // Hide OSD -> Captions opens TrackPicker focused on subtitles column
     await act(async () => tv.keys.tap(KEY_UP));

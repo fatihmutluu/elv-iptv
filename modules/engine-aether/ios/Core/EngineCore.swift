@@ -39,6 +39,7 @@ public final class EngineCore {
   var lastProgressUptimeMs: Double?
   var lastProgressBytes: Int64 = 0
   var lastProgressBufferedSeconds: Double = 0
+  var lastVideoInfo: StreamVideoInfo?
 
   private var shutterCovered = true
   private var screenOn = false
@@ -266,6 +267,9 @@ public final class EngineCore {
     case let .tracks(observedTracks):
       handleTracksObservation(observedTracks)
 
+    case let .mediaInfo(info):
+      handleMediaInfo(info)
+
     case let .progress(bytesReceived, bufferedSeconds):
       handleProgress(bytesReceived: bytesReceived, bufferedSeconds: bufferedSeconds)
 
@@ -350,5 +354,6 @@ public final class EngineCore {
     lastProgressUptimeMs = nil
     lastProgressBytes = 0
     lastProgressBufferedSeconds = 0
+    lastVideoInfo = nil
   }
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   canAutoHideOsd,
+  type OsdTier,
   type PlayerOverlayLive,
   type PlayerOverlayStateParams,
 } from './player-overlay-model';
@@ -27,9 +28,11 @@ import { usePlayerOverlayPrefs } from './usePlayerOverlayPrefs';
 
 export type { PlayerOverlayLive };
 
+type SheetOpener = 'tracks' | 'settings' | 'info' | 'channelList' | null;
+
 /**
- * Owns track picker, 2-level Settings menu, Stats HUD toggle, mobile Touch Lock, TV OSD
- * visibility/auto-hide, and TV OSD/scrubber focus state for {@link usePlayerControls}.
+ * Owns track picker, 2-level Settings menu, Info sheet (`#58`), Channel drawer (`#57`),
+ * Stats HUD toggle, mobile Touch Lock, 3-tier OSD visibility/auto-hide (`#391`), and TV focus state.
  */
 export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const { formFactor, itemKey, isVod, statusKind, tracks, hasTracks, hasService, showRetry } =
@@ -41,6 +44,10 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const canLock = formFactor === 'phone' || formFactor === 'tablet';
   const hasAspect = formFactor !== 'desktop';
   const hasDeinterlace = params.onSetDeinterlace !== undefined;
+  const hasAutoSubtitlesOnSkipBack = params.hasAutoSubtitlesOnSkipBack === true;
+  const hasAutoPlayNextEpisode = params.hasAutoPlayNextEpisode === true;
+  const canOpenInfo = params.hasInfo !== false;
+  const canOpenChannelList = !isVod && params.hasChannelList === true;
 
   const [rawTracksOpen, setTracksOpen] = useState(false);
   const [rawPickerCursor, setPickerCursor] = useState<TrackPickerCursor>({
@@ -51,6 +58,8 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const [rawSettingsMenu, setSettingsMenu] = useState<SettingsMenuState>(() =>
     initialSettingsMenu(),
   );
+  const [rawInfoOpen, setInfoOpen] = useState(false);
+  const [rawChannelListOpen, setChannelListOpen] = useState(false);
   const { publicPrefs, acquireOrientationLock, releaseOrientationLock } = usePlayerOverlayPrefs({
     itemKey,
     hasService,
@@ -58,26 +67,34 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     onSetOrientationLocked: params.onSetOrientationLocked,
   });
   const [rawLocked, setLocked] = useState(false);
-  const [rawOsdHidden, setOsdHidden] = useState(initialOsdHidden === true);
+  const [rawOsdTier, setOsdTier] = useState<OsdTier>(
+    initialOsdHidden === true ? 'hidden' : 'controls',
+  );
   const [tvOsdFocused, setTvOsdFocused] = useState(false);
   const [rawTvScrubberFocused, setTvScrubberFocused] = useState(false);
   const [rawTvOsdAction, setTvOsdAction] = useState<TvOsdAction>('playPause');
 
   const statusKindRef = useRef(statusKind);
   statusKindRef.current = statusKind;
-  const sheetOpenerRef = useRef<'tracks' | 'settings' | null>(null);
+  const sheetOpenerRef = useRef<SheetOpener>(null);
 
   const tracksOpen = rawTracksOpen && hasTracks;
   const settingsOpen = rawSettingsOpen && hasService;
+  const infoOpen = rawInfoOpen && canOpenInfo;
+  const channelListOpen = rawChannelListOpen && canOpenChannelList;
   const locked = canLock && rawLocked;
-  const osdHidden = rawOsdHidden && !locked && !tracksOpen && !settingsOpen;
+  const anySheetOpen = tracksOpen || settingsOpen || infoOpen || channelListOpen;
+  const osdTier: OsdTier = locked ? 'hidden' : anySheetOpen ? 'controls' : rawOsdTier;
+  const osdHidden = osdTier === 'hidden';
   const tvScrubberFocused =
-    isTv && isVod && rawTvScrubberFocused && !locked && !tracksOpen && !settingsOpen && !osdHidden;
+    isTv && isVod && rawTvScrubberFocused && !locked && !anySheetOpen && osdTier === 'controls';
   const pickerCursor = clampPickerCursor(rawPickerCursor, tracks);
   const settingsMenu = clampSettingsMenu(rawSettingsMenu, tracks, {
     isVod,
     hasAspect,
     hasDeinterlace,
+    hasAutoSubtitlesOnSkipBack,
+    hasAutoPlayNextEpisode,
   });
   const availableOsd = availableTvOsdActions({
     isVod,
@@ -85,6 +102,8 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     hasTracks,
     showRetry,
     hasSettings,
+    hasInfo: params.hasInfo === true,
+    hasChannelList: params.hasChannelList === true,
     hasNextEpisode,
     hasPreviousChannel,
   });
@@ -95,7 +114,12 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     pickerCursor,
     settingsOpen,
     settingsMenu,
+    infoOpen,
+    channelListOpen,
+    canOpenInfo,
+    canOpenChannelList,
     locked,
+    osdTier,
     osdHidden,
     tvOsdFocused,
     tvScrubberFocused,
@@ -112,6 +136,7 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const prevItemKeyRef = useRef(itemKey);
   const hoverGuardRef = useRef<TouchHoverGuard | null>(null);
   hoverGuardRef.current ??= createTouchHoverGuard({ now: () => clockRef.current.now() });
+
   const clearTvFocus = useCallback((): void => {
     liveRef.current.tvOsdFocused = false;
     liveRef.current.tvScrubberFocused = false;
@@ -121,13 +146,15 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
 
   const { clearAutoHide, notifyOsdActivity } = useOsdAutoHide({
     autoHideOsdMs,
+    osdTier,
     active: canAutoHideOsd(statusKind, liveSnapshot, isScrubbing),
     itemKey,
     timersRef,
     onAutoHide: () => {
+      liveRef.current.osdTier = 'hidden';
       liveRef.current.osdHidden = true;
       clearTvFocus();
-      setOsdHidden(true);
+      setOsdTier('hidden');
     },
   });
 
@@ -140,14 +167,26 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
       sheetOpenerRef.current = null;
       setSettingsOpen(false);
     } else if (settingsOpen && settingsMenu !== rawSettingsMenu) setSettingsMenu(settingsMenu);
+    if (rawInfoOpen && !canOpenInfo) {
+      sheetOpenerRef.current = null;
+      setInfoOpen(false);
+    }
+    if (rawChannelListOpen && !canOpenChannelList) {
+      sheetOpenerRef.current = null;
+      setChannelListOpen(false);
+    }
     if (rawTvScrubberFocused && (!isTv || !isVod)) setTvScrubberFocused(false);
     if (tvOsdAction !== rawTvOsdAction) setTvOsdAction(tvOsdAction);
   }, [
+    canOpenChannelList,
+    canOpenInfo,
     hasService,
     hasTracks,
     isTv,
     isVod,
     pickerCursor,
+    rawChannelListOpen,
+    rawInfoOpen,
     rawPickerCursor,
     rawSettingsMenu,
     rawSettingsOpen,
@@ -166,25 +205,31 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     sheetOpenerRef.current = null;
     liveRef.current.tracksOpen = false;
     liveRef.current.settingsOpen = false;
+    liveRef.current.infoOpen = false;
+    liveRef.current.channelListOpen = false;
     liveRef.current.locked = false;
     clearTvFocus();
     setTracksOpen(false);
     setSettingsOpen(false);
+    setInfoOpen(false);
+    setChannelListOpen(false);
     setLocked(false);
     if (prevItemKeyRef.current !== itemKey) {
       prevItemKeyRef.current = itemKey;
+      liveRef.current.osdTier = 'controls';
       liveRef.current.osdHidden = false;
       notifyOsdActivity();
-      setOsdHidden(false);
+      setOsdTier('controls');
     }
     return () => cancelScrub();
   }, [itemKey, cancelScrub, clearTvFocus, notifyOsdActivity, releaseOrientationLock]);
 
   useEffect(() => {
     if (statusKind === 'failed' || statusKind === 'paused' || statusKind === 'ended') {
+      liveRef.current.osdTier = 'controls';
       liveRef.current.osdHidden = false;
       notifyOsdActivity();
-      setOsdHidden(false);
+      setOsdTier('controls');
     }
   }, [notifyOsdActivity, statusKind]);
 
@@ -192,30 +237,45 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     cancelScrub();
     clearAutoHide();
     sheetOpenerRef.current = null;
+    liveRef.current.osdTier = 'hidden';
     liveRef.current.osdHidden = true;
     clearTvFocus();
-    setOsdHidden(true);
+    setOsdTier('hidden');
   };
 
-  const showOsd = (): void => {
+  const showControlsOsd = (): void => {
     notifyOsdActivity();
+    liveRef.current.osdTier = 'controls';
     liveRef.current.osdHidden = false;
-    setOsdHidden(false);
+    setOsdTier('controls');
   };
+
+  const showProgressOsd = (): void => {
+    if (liveRef.current.locked) return;
+    notifyOsdActivity();
+    if (liveRef.current.osdTier === 'controls') return;
+    liveRef.current.osdTier = 'progress';
+    liveRef.current.osdHidden = false;
+    setOsdTier('progress');
+  };
+
+  const showOsd = showControlsOsd;
 
   const handleTouchActivity = (): void => hoverGuardRef.current?.markTouch();
 
   const handlePointerHover = (pointerType?: string, point?: PointerPoint): void => {
     if (!hoverGuardRef.current?.shouldAllowHover(pointerType, point)) return;
-    if (liveRef.current.osdHidden) showOsd();
+    if (liveRef.current.osdTier !== 'controls') showControlsOsd();
     else notifyOsdActivity();
   };
 
   const toggleOsdByTouch = (): void => {
     const s = liveRef.current;
-    if (!canLock || s.locked || s.tracksOpen || s.settingsOpen) return;
-    if (s.osdHidden) {
-      showOsd();
+    if (!canLock || s.locked || s.tracksOpen || s.settingsOpen || s.infoOpen || s.channelListOpen) {
+      return;
+    }
+    if (s.osdTier !== 'controls') {
+      showControlsOsd();
       return;
     }
     if (statusKindRef.current === 'playing') hideOsd();
@@ -265,20 +325,29 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     }
   };
 
-  const openTracks = (preferredColumn?: TrackPickerColumn): void => {
-    if (!liveRef.current.hasTracks) return;
+  const setExclusiveSheet = (target: Exclude<SheetOpener, null>, opener: SheetOpener): void => {
     cancelScrub();
-    const initial = initialPickerCursor(liveRef.current.tracks, preferredColumn);
-    sheetOpenerRef.current = isTv ? 'tracks' : null;
-    liveRef.current.pickerCursor = initial;
-    liveRef.current.tracksOpen = true;
-    liveRef.current.settingsOpen = false;
+    sheetOpenerRef.current = opener;
+    liveRef.current.tracksOpen = target === 'tracks';
+    liveRef.current.settingsOpen = target === 'settings';
+    liveRef.current.infoOpen = target === 'info';
+    liveRef.current.channelListOpen = target === 'channelList';
+    liveRef.current.osdTier = 'controls';
     liveRef.current.osdHidden = false;
     clearTvFocus();
+    setTracksOpen(target === 'tracks');
+    setSettingsOpen(target === 'settings');
+    setInfoOpen(target === 'info');
+    setChannelListOpen(target === 'channelList');
+    setOsdTier('controls');
+  };
+
+  const openTracks = (preferredColumn?: TrackPickerColumn): void => {
+    if (!liveRef.current.hasTracks) return;
+    const initial = initialPickerCursor(liveRef.current.tracks, preferredColumn);
+    liveRef.current.pickerCursor = initial;
     setPickerCursor(initial);
-    setSettingsOpen(false);
-    setOsdHidden(false);
-    setTracksOpen(true);
+    setExclusiveSheet('tracks', isTv ? 'tracks' : null);
   };
 
   const readSettingsOpts = () => ({
@@ -286,41 +355,31 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     playbackSpeed: liveRef.current.playbackSpeed,
     hasAspect,
     hasDeinterlace,
+    hasAutoSubtitlesOnSkipBack,
+    hasAutoPlayNextEpisode,
   });
 
   const openSettings = (view: SettingsMenuView = 'root'): void => {
     if (!liveRef.current.hasService) return;
-    cancelScrub();
     const opts = readSettingsOpts();
     const initial = clampSettingsMenu(
       initialSettingsMenu(view, opts),
       liveRef.current.tracks,
       opts,
     );
-    sheetOpenerRef.current = isTv ? 'settings' : null;
     liveRef.current.settingsMenu = initial;
-    liveRef.current.settingsOpen = true;
-    liveRef.current.tracksOpen = false;
-    liveRef.current.osdHidden = false;
-    clearTvFocus();
     setSettingsMenu(initial);
-    setTracksOpen(false);
-    setOsdHidden(false);
-    setSettingsOpen(true);
+    setExclusiveSheet('settings', isTv ? 'settings' : null);
   };
 
-  const lockControls = (): void => {
-    if (!canLock) return;
-    cancelScrub();
-    sheetOpenerRef.current = null;
-    liveRef.current.tracksOpen = false;
-    liveRef.current.settingsOpen = false;
-    liveRef.current.locked = true;
-    clearTvFocus();
-    setTracksOpen(false);
-    setSettingsOpen(false);
-    setLocked(true);
-    acquireOrientationLock();
+  const openInfo = (): void => {
+    if (!liveRef.current.canOpenInfo) return;
+    setExclusiveSheet('info', isTv ? 'info' : null);
+  };
+
+  const openChannelList = (): void => {
+    if (!liveRef.current.canOpenChannelList) return;
+    setExclusiveSheet('channelList', isTv ? 'channelList' : null);
   };
 
   const closeTracks = (): void => {
@@ -329,21 +388,72 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     setTracksOpen(false);
     restoreSheetOpenerFocus();
   };
+
   const closeSettings = (): void => {
     if (!liveRef.current.settingsOpen) return;
     liveRef.current.settingsOpen = false;
     setSettingsOpen(false);
     restoreSheetOpenerFocus();
   };
+
+  const closeInfo = (): void => {
+    if (!liveRef.current.infoOpen) return;
+    liveRef.current.infoOpen = false;
+    setInfoOpen(false);
+    restoreSheetOpenerFocus();
+  };
+
+  const closeChannelList = (): void => {
+    if (!liveRef.current.channelListOpen) return;
+    liveRef.current.channelListOpen = false;
+    setChannelListOpen(false);
+    restoreSheetOpenerFocus();
+  };
+
+  const toggleInfo = (): void => {
+    if (liveRef.current.infoOpen) closeInfo();
+    else openInfo();
+  };
+
+  const toggleChannelList = (): void => {
+    if (liveRef.current.channelListOpen) closeChannelList();
+    else openChannelList();
+  };
+
   const openSettingsView = (view: SettingsMenuView): void => {
     const opts = readSettingsOpts();
     updateSettingsMenu(
       clampSettingsMenu(initialSettingsMenu(view, opts), liveRef.current.tracks, opts),
     );
   };
+
+  const lockControls = (): void => {
+    if (!canLock) return;
+    cancelScrub();
+    sheetOpenerRef.current = null;
+    liveRef.current.tracksOpen = false;
+    liveRef.current.settingsOpen = false;
+    liveRef.current.infoOpen = false;
+    liveRef.current.channelListOpen = false;
+    liveRef.current.locked = true;
+    liveRef.current.osdTier = 'hidden';
+    liveRef.current.osdHidden = true;
+    clearTvFocus();
+    setTracksOpen(false);
+    setSettingsOpen(false);
+    setInfoOpen(false);
+    setChannelListOpen(false);
+    setLocked(true);
+    acquireOrientationLock();
+  };
+
   const unlockControls = (): void => {
     liveRef.current.locked = false;
+    liveRef.current.osdTier = 'controls';
+    liveRef.current.osdHidden = false;
     setLocked(false);
+    setOsdTier('controls');
+    notifyOsdActivity();
     releaseOrientationLock();
   };
 
@@ -351,6 +461,8 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     liveRef,
     hideOsd,
     showOsd,
+    showProgressOsd,
+    showControlsOsd,
     notifyOsdActivity,
     blurTvOsd,
     focusTvOsd,
@@ -362,6 +474,12 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     closeTracks,
     openSettings,
     closeSettings,
+    openInfo,
+    closeInfo,
+    toggleInfo,
+    openChannelList,
+    closeChannelList,
+    toggleChannelList,
     toggleResizeMode: publicPrefs.toggleResizeMode,
     toggleDeinterlace: publicPrefs.toggleDeinterlace,
     toggleStats: publicPrefs.toggleStats,
@@ -371,18 +489,31 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
       pickerCursor,
       settingsOpen,
       settingsMenu,
+      infoOpen,
+      channelListOpen,
       ...publicPrefs,
       canLock,
       locked,
+      osdTier,
       osdHidden,
       tvOsdFocused,
       tvScrubberFocused,
       tvOsdAction,
+      showProgressOsd,
+      showControlsOsd,
+      showOsd,
+      hideOsd,
       openTracks,
       closeTracks,
       openSettings,
       closeSettings,
       openSettingsView,
+      openInfo,
+      closeInfo,
+      toggleInfo,
+      openChannelList,
+      closeChannelList,
+      toggleChannelList,
       lockControls,
       unlockControls,
       toggleOsdByTouch,

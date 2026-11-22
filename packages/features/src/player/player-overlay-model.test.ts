@@ -8,14 +8,19 @@ import {
   buildNextEpisodeTarget,
   buildPreviousChannelTarget,
   canAutoHideOsd,
+  clampVolume,
   formatStatsHudLines,
+  formatStreamBadges,
   hasTargetMetaChanged,
   isPromiseLike,
   itemRowToPlayableEntry,
   NEXT_EPISODE_MIN_DURATION_MS,
   NEXT_EPISODE_RATIO_THRESHOLD,
   NEXT_EPISODE_REMAINING_MS,
+  type OsdTier,
+  PROGRESS_OSD_AUTO_HIDE_MS,
   shouldShowNextEpisodePrompt,
+  stepVolume,
 } from './player-overlay-model';
 
 const i18nEn = createAppI18n('en');
@@ -460,12 +465,143 @@ describe('player-overlay-model', () => {
       expect(canAutoHideOsd('paused', clear, false)).toBe(false);
       expect(canAutoHideOsd('playing', { ...clear, tvOsdFocused: true }, false)).toBe(false);
       expect(canAutoHideOsd('playing', clear, true)).toBe(false);
+      expect(canAutoHideOsd('playing', { ...clear, infoOpen: true }, false)).toBe(false);
+      expect(canAutoHideOsd('playing', { ...clear, channelListOpen: true }, false)).toBe(false);
+      expect(canAutoHideOsd('playing', { ...clear, osdTier: 'hidden' }, false)).toBe(false);
+      expect(canAutoHideOsd('playing', { ...clear, osdTier: 'progress' }, false)).toBe(true);
+      expect(canAutoHideOsd('playing', { ...clear, osdTier: 'controls' }, false)).toBe(true);
       expect(isPromiseLike(Promise.resolve(1))).toBe(true);
       expect(isPromiseLike(42)).toBe(false);
       expect(hasTargetMetaChanged(BASE_EP_TARGET, { ...BASE_EP_TARGET })).toBe(false);
       expect(hasTargetMetaChanged(BASE_EP_TARGET, { ...BASE_EP_TARGET, title: 'Other' })).toBe(
         true,
       );
+    });
+  });
+
+  describe('3-tier OSD constants, stream badges, and volume helpers (#391, #58, #394)', () => {
+    it('exports PROGRESS_OSD_AUTO_HIDE_MS as 2000ms and valid OsdTier values', () => {
+      const tiers: readonly OsdTier[] = ['hidden', 'progress', 'controls'];
+      expect(tiers).toHaveLength(3);
+      expect(PROGRESS_OSD_AUTO_HIDE_MS).toBe(2_000);
+    });
+
+    it('formats concise stream badges (max 4) from decoded videoInfo and active audio track', () => {
+      const uhdTracks = {
+        audio: [{ id: 'a1', channels: 8, codec: 'truehd' }],
+        subtitles: [],
+        selectedAudioId: 'a1',
+        selectedSubtitleId: null,
+      };
+      expect(
+        formatStreamBadges(
+          { width: 3840, height: 2160, fps: 59.94, codec: 'hevc', hdr: 'dv' },
+          uhdTracks,
+        ),
+      ).toEqual([
+        { key: 'res', label: '4K', tone: 'accent' },
+        { key: 'fps', label: '60 fps', tone: 'neutral' },
+        { key: 'hdr', label: 'DV', tone: 'accent' },
+        { key: 'audio', label: '7.1', tone: 'neutral' },
+      ]);
+
+      expect(
+        formatStreamBadges(
+          { width: 2560, height: 1440, fps: 50, hdr: 'hdr10' },
+          {
+            audio: [{ id: 'a1', channels: 6, codec: 'eac3' }],
+            subtitles: [],
+            selectedAudioId: 'a1',
+            selectedSubtitleId: null,
+          },
+        ),
+      ).toEqual([
+        { key: 'res', label: '1440p', tone: 'neutral' },
+        { key: 'fps', label: '50 fps', tone: 'neutral' },
+        { key: 'hdr', label: 'HDR10', tone: 'accent' },
+        { key: 'audio', label: '5.1', tone: 'neutral' },
+      ]);
+
+      expect(
+        formatStreamBadges(
+          { height: 1080, fps: 24, hdr: 'hlg' },
+          {
+            audio: [{ id: 'a1', channels: 2, codec: 'audio/eac3' }],
+            subtitles: [],
+            selectedAudioId: 'a1',
+            selectedSubtitleId: null,
+          },
+        ),
+      ).toEqual([
+        { key: 'res', label: '1080p', tone: 'neutral' },
+        { key: 'hdr', label: 'HLG', tone: 'accent' },
+        { key: 'audio', label: 'EAC3', tone: 'neutral' },
+      ]);
+
+      expect(
+        formatStreamBadges(
+          { height: 720, hdr: 'sdr' },
+          {
+            audio: [{ id: 'a1', channels: 2, codec: 'dts' }],
+            subtitles: [],
+            selectedAudioId: 'a1',
+            selectedSubtitleId: null,
+          },
+        ),
+      ).toEqual([
+        { key: 'res', label: '720p', tone: 'neutral' },
+        { key: 'audio', label: 'DTS', tone: 'neutral' },
+      ]);
+
+      expect(
+        formatStreamBadges(
+          { height: 480 },
+          {
+            audio: [{ id: 'a1', channels: 2, codec: 'flac' }],
+            subtitles: [],
+            selectedAudioId: 'a1',
+            selectedSubtitleId: null,
+          },
+        ),
+      ).toEqual([
+        { key: 'res', label: '480p', tone: 'neutral' },
+        { key: 'audio', label: 'FLAC', tone: 'neutral' },
+      ]);
+
+      // Cinema 2.39:1 4K width & omitted sub-480p / generic stereo AAC / missing videoInfo
+      expect(formatStreamBadges({ width: 3840, height: 1600 }, EMPTY_TRACKS)).toEqual([
+        { key: 'res', label: '4K', tone: 'accent' },
+      ]);
+      expect(
+        formatStreamBadges(
+          { width: 640, height: 360, fps: 30, hdr: 'sdr' },
+          {
+            audio: [{ id: 'a1', channels: 2, codec: 'aac' }],
+            subtitles: [],
+            selectedAudioId: 'a1',
+            selectedSubtitleId: null,
+          },
+        ),
+      ).toEqual([]);
+      expect(formatStreamBadges(undefined, EMPTY_TRACKS)).toEqual([]);
+    });
+
+    it('clamps and steps volume integers cleanly in [0, 100]', () => {
+      expect(clampVolume(-10)).toBe(0);
+      expect(clampVolume(-0)).toBe(0);
+      expect(clampVolume(0)).toBe(0);
+      expect(clampVolume(42.6)).toBe(43);
+      expect(clampVolume(150)).toBe(100);
+      expect(clampVolume(Number.NaN)).toBe(0);
+      expect(clampVolume(Number.POSITIVE_INFINITY)).toBe(100);
+      expect(clampVolume(Number.NEGATIVE_INFINITY)).toBe(0);
+
+      expect(stepVolume(50, 5)).toBe(55);
+      expect(stepVolume(50, -5)).toBe(45);
+      expect(stepVolume(50)).toBe(55);
+      expect(stepVolume(98, 5)).toBe(100);
+      expect(stepVolume(3, -5)).toBe(0);
+      expect(stepVolume(40, Number.NaN)).toBe(40);
     });
   });
 });

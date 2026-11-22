@@ -1,5 +1,12 @@
 import type { BufferPreset, ElvError, Result } from '@elv/domain';
-import type { AttemptToken, ClockAnchor, MediaKind, MediaTracks, StreamRequest } from './engine';
+import type {
+  AttemptToken,
+  ClockAnchor,
+  MediaKind,
+  MediaTracks,
+  StreamRequest,
+  StreamVideoInfo,
+} from './engine';
 
 /** Time source, injected so tests control it. */
 export interface PlaybackClock {
@@ -42,6 +49,8 @@ export interface PlaybackState {
   status: PlaybackStatus;
   attempt: AttemptToken;
   tracks: MediaTracks;
+  /** Decoded video metadata reported by the engine for the active media (`#58`). */
+  readonly videoInfo?: StreamVideoInfo;
   item?: string;
   accountKey?: string;
   anchor?: ClockAnchor;

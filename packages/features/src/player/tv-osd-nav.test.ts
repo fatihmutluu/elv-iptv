@@ -93,6 +93,33 @@ describe('availableTvOsdActions', () => {
       }),
     ).toEqual(['back']);
   });
+
+  it('orders optional channelList (Live only) and info actions cleanly (#57, #58)', () => {
+    expect(
+      availableTvOsdActions({
+        isVod: false,
+        hasService: true,
+        hasTracks: true,
+        showRetry: false,
+        hasPreviousChannel: true,
+        hasChannelList: true,
+        hasInfo: true,
+        hasSettings: true,
+      }),
+    ).toEqual(['back', 'prevChannel', 'channelList', 'info', 'tracks', 'settings']);
+
+    expect(
+      availableTvOsdActions({
+        isVod: true,
+        hasService: true,
+        hasTracks: false,
+        showRetry: false,
+        hasChannelList: true,
+        hasInfo: true,
+        hasSettings: true,
+      }),
+    ).toEqual(['back', 'seekBack', 'playPause', 'seekForward', 'info', 'settings']);
+  });
 });
 
 describe('initialTvOsdAction', () => {

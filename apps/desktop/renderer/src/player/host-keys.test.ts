@@ -23,6 +23,8 @@ describe('mapHostKey, routeDesktopUiEvent & dispatchDesktopClose', () => {
       ['mute', 'mute'],
       ['tracks', 'tracks'],
       ['prev-channel', 'prev-channel'],
+      ['info', 'info'],
+      ['channel-list', 'channel-list'],
     ];
     for (const [input, expected] of cases) {
       expect(mapHostKey(input)).toBe(expected);
@@ -55,6 +57,8 @@ describe('mapHostKey, routeDesktopUiEvent & dispatchDesktopClose', () => {
       'mute',
       'tracks',
       'prev-channel',
+      'info',
+      'channel-list',
     ];
     for (const key of forwarded) {
       routeDesktopUiEvent({ type: 'key', key }, handlers);
@@ -68,13 +72,9 @@ describe('mapHostKey, routeDesktopUiEvent & dispatchDesktopClose', () => {
     expect(onHostKey).toHaveBeenCalledTimes(1 + forwarded.length);
   });
 
-  it('dispatchDesktopClose sends back once normally, or twice when track picker modal is open', () => {
+  it('dispatchDesktopClose forwards close directly so PlayerScreen exits regardless of open sheets or drawers', () => {
     const keys: string[] = [];
-    dispatchDesktopClose((k) => keys.push(k), false);
-    expect(keys).toEqual(['back']);
-
-    keys.length = 0;
-    dispatchDesktopClose((k) => keys.push(k), true);
-    expect(keys).toEqual(['back', 'back']);
+    dispatchDesktopClose((k) => keys.push(k));
+    expect(keys).toEqual(['close']);
   });
 });

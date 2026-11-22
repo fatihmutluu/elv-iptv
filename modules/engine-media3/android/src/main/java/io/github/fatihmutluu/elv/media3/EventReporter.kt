@@ -8,6 +8,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
+import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlaybackException
@@ -49,6 +50,8 @@ internal class EventReporter(
   private var stalled = false
   private var behindLiveRecoveries = 0
   private var anchoredRate: Float? = null
+  private var lastVideoSize: VideoSize? = null
+  private var lastVideoInfo: VideoInfoSnapshot? = null
   private val tick = Runnable { player?.let { anchor(it) } }
 
   /** True while this prepare is opening, buffering, or stalled and transfer progress should be reported. */
@@ -84,6 +87,8 @@ internal class EventReporter(
     stalled = false
     behindLiveRecoveries = 0
     anchoredRate = null
+    lastVideoSize = null
+    lastVideoInfo = null
     handler.removeCallbacks(tick)
   }
 
@@ -129,6 +134,21 @@ internal class EventReporter(
     if (!active || !fence.acceptFirstFrame()) return
     send(mapOf("type" to "firstFrame", "atMs" to SystemClock.uptimeMillis().toDouble()))
     onFirstFrame()
+  }
+
+  override fun onVideoSizeChanged(videoSize: VideoSize) {
+    val current = player
+    if (!active || current == null || !fence.acceptsPlayer(current)) return
+    if (videoSize.width > 0 && videoSize.height > 0) {
+      lastVideoSize = videoSize
+      maybeEmitMediaInfo(current)
+    }
+  }
+
+  override fun onTracksChanged(tracks: Tracks) {
+    val current = player
+    if (!active || current == null || !fence.acceptsPlayer(current)) return
+    maybeEmitMediaInfo(current, tracks)
   }
 
   override fun onPlayerError(error: PlaybackException) {
@@ -282,6 +302,14 @@ internal class EventReporter(
     if (httpStatus != null) error["httpStatus"] = httpStatus
     send(mapOf("type" to "error", "error" to error))
     onCue(ScreenCue.ERROR, played)
+  }
+
+  private fun maybeEmitMediaInfo(player: Player, tracks: Tracks = player.currentTracks) {
+    val format = extractSelectedVideoFormat(tracks) ?: (player as? ExoPlayer)?.videoFormat
+    val snapshot = deriveVideoInfo(format, lastVideoSize) ?: return
+    if (snapshot == lastVideoInfo) return
+    lastVideoInfo = snapshot
+    send(mapOf("type" to "mediaInfo", "info" to snapshot.toMap()))
   }
 
   private companion object {

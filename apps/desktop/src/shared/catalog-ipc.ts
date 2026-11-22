@@ -9,6 +9,7 @@ import type {
   ItemDetailRow,
   ItemRow,
   LinkSourceInput,
+  NextEpisodeRow,
   NowNextEntry,
   ProgrammeRow,
   SaveProgressInput,
@@ -94,6 +95,7 @@ export type CatalogRpcMethodCall =
   | { method: 'channelByNumber'; num: number; sourceId?: string }
   | { method: 'seasons'; seriesId: number }
   | { method: 'episodes'; seriesId: number; season: number }
+  | { method: 'queryNextEpisode'; seriesKey: string; currentItemKey: string; profileId?: string }
   | { method: 'resolveStream'; itemKey: string }
   | { method: 'saveProgress'; input: SaveProgressInput }
   | { method: 'setWatched'; itemKey: string; watched: boolean; profileId?: string }
@@ -153,6 +155,11 @@ export interface CatalogBridge {
   channelByNumber(num: number, sourceId?: string): Promise<ItemRow | null>;
   seasons(seriesId: number): Promise<Result<SeasonRow[]>>;
   episodes(seriesId: number, season: number): Promise<EpisodeRow[]>;
+  queryNextEpisode(
+    seriesKey: string,
+    currentItemKey: string,
+    profileId?: string,
+  ): Promise<NextEpisodeRow | null>;
   resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
   saveProgress(input: SaveProgressInput): Promise<Result<WatchProgressRow>>;
   setWatched(itemKey: string, watched: boolean, profileId?: string): Promise<Result<void>>;
@@ -220,6 +227,12 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
       return isSafeInt(x['seriesId']);
     case 'episodes':
       return isSafeInt(x['seriesId']) && isSafeInt(x['season']);
+    case 'queryNextEpisode':
+      return (
+        isCleanKey(x['seriesKey']) &&
+        isCleanKey(x['currentItemKey']) &&
+        isOptionalProfileId(x['profileId'])
+      );
     case 'resolveStream':
       return isBoundedString(x['itemKey'], 0, MAX_ITEM_KEY_CHARS);
     case 'saveProgress':

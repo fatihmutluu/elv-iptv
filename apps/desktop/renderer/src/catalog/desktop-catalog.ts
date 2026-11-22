@@ -87,6 +87,8 @@ export function createDesktopCatalogFromBridge(
     channelByNumber: (num, sourceId) => bridge.channelByNumber(num, sourceId),
     seasons: (seriesId) => bridge.seasons(seriesId),
     episodes: (seriesId, season) => bridge.episodes(seriesId, season),
+    queryNextEpisode: (seriesKey, currentItemKey, profileId) =>
+      bridge.queryNextEpisode(seriesKey, currentItemKey, profileId),
     resolveStream: (itemKey) => bridge.resolveStream(itemKey),
     saveProgress: (input) =>
       bridge.saveProgress({

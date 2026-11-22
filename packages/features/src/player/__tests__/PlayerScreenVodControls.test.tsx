@@ -84,7 +84,7 @@ describe('PlayerScreen VOD controls, hold-seek, and track picker', () => {
     await act(async () => {
       manual.advance(350);
     });
-    expect(screen.getByTestId('osd-status')).toHaveTextContent('Playing');
+    expect(screen.queryByTestId('osd-status')).toBeNull();
 
     const loadAttempt = engine.commands.find((c) => c.name === 'load')?.attempt ?? 1;
     await act(async () => {
@@ -149,7 +149,7 @@ describe('PlayerScreen VOD controls, hold-seek, and track picker', () => {
     await act(async () => {
       engine.emit({ attempt: playCmd?.attempt ?? 3, type: 'state', state: 'playing' });
     });
-    expect(screen.getByTestId('osd-status')).toHaveTextContent('Playing');
+    expect(screen.queryByTestId('osd-status')).toBeNull();
 
     await view.unmount();
   });

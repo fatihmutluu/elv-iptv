@@ -46,13 +46,6 @@ const WorkbenchShell = IS_DEV
     )
   : null;
 
-function isTrackPickerModalOpen(): boolean {
-  return (
-    typeof document !== 'undefined' &&
-    document.querySelector('[data-testid="player-tracks-panel"]') !== null
-  );
-}
-
 function AppRoot() {
   const [refreshToken, setRefreshToken] = useState(0);
   const [catalogDisconnected, setCatalogDisconnected] = useState(false);
@@ -95,7 +88,17 @@ function AppRoot() {
             <PlayerView engine={engine} status="" failed={failed} resizeMode={resizeMode} />
           ),
           toggleFullscreen: () => rawEngine.toggleFullscreen(),
+          isFullscreen: () => rawEngine.isFullscreen(),
+          onFullscreenChange: (listener) => {
+            let last: boolean | undefined;
+            return rawEngine.onUi((event) => {
+              if (event.type !== 'fullscreen-changed' || event.fullscreen === last) return;
+              last = event.fullscreen;
+              listener(event.fullscreen);
+            });
+          },
           toggleMute: () => rawEngine.toggleMute(),
+          setVolume: (volume) => rawEngine.setVolume(volume),
           setDeinterlace: (enabled) => rawEngine.setDeinterlace(enabled),
           setMediaMetadata: (metadata) => engine.setMediaMetadata(metadata),
           onHostKey: (listener) => {
@@ -104,7 +107,7 @@ function AppRoot() {
               routeDesktopUiEvent(event, {
                 toggleFullscreen: () => listener('fullscreen'),
                 onHostKey: listener,
-                onClose: () => dispatchDesktopClose(listener, isTrackPickerModalOpen()),
+                onClose: () => dispatchDesktopClose(listener),
               }),
             );
             return () => {

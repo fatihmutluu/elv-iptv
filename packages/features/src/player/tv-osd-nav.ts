@@ -8,6 +8,8 @@ export type TvOsdAction =
   | 'seekBack'
   | 'seekForward'
   | 'prevChannel'
+  | 'channelList'
+  | 'info'
   | 'tracks'
   | 'settings'
   | 'nextEpisode'
@@ -20,6 +22,8 @@ export interface TvOsdAvailability {
   readonly hasTracks: boolean;
   readonly showRetry: boolean;
   readonly hasSettings?: boolean;
+  readonly hasInfo?: boolean;
+  readonly hasChannelList?: boolean;
   readonly hasNextEpisode?: boolean;
   readonly hasPreviousChannel?: boolean;
 }
@@ -30,6 +34,8 @@ const ORDER: readonly TvOsdAction[] = [
   'playPause',
   'seekForward',
   'prevChannel',
+  'channelList',
+  'info',
   'tracks',
   'settings',
   'nextEpisode',
@@ -45,6 +51,10 @@ export function availableTvOsdActions(a: TvOsdAvailability): TvOsdAction[] {
         return true;
       case 'prevChannel':
         return !a.isVod && a.hasService && a.hasPreviousChannel === true;
+      case 'channelList':
+        return !a.isVod && a.hasService && a.hasChannelList === true;
+      case 'info':
+        return a.hasService && a.hasInfo === true;
       case 'tracks':
         return a.hasTracks && a.hasService;
       case 'settings':
