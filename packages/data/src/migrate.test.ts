@@ -51,11 +51,11 @@ async function plan(db: SqlDriver, sql: string, params: (string | number)[]) {
 }
 
 describe('openCatalog', () => {
-  it('creates schema v6 with FTS5 tables, staging tables, backup_urls_json, epg_shift_ms, and visible browse index on a fresh database', async () => {
+  it('creates schema v7 with FTS5 tables, staging tables, backup_urls_json, epg_shift_ms, content_hash, and visible browse index on a fresh database', async () => {
     const { db } = testDb();
-    expect(SCHEMA_VERSION).toBe(6);
+    expect(SCHEMA_VERSION).toBe(7);
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 6 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 7 }]);
     expect(await regularTableNames(db)).toEqual([...TABLES].sort());
     expect(await names(db, 'table')).toEqual(expect.arrayContaining([...EXPECTED_FTS_TABLES]));
     expect(await names(db, 'index')).toEqual(
@@ -85,7 +85,7 @@ describe('openCatalog', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 6 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 7 }]);
     expect(await db.all('SELECT id, name, deleting FROM sources')).toEqual([
       { id: 's1', name: 'Main', deleting: 0 },
     ]);
@@ -121,7 +121,7 @@ describe('openCatalog', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 6 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 7 }]);
     expect(await names(db, 'index')).toContain('idx_programmes_source_start_stop');
     expect(
       await db.all<{ key: string }>(
@@ -156,7 +156,7 @@ describe('openCatalog', () => {
     expect(await names(db, 'index')).not.toContain('idx_programmes_source_start_stop');
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 6 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 7 }]);
     expect(await names(db, 'index')).toContain('idx_programmes_source_start_stop');
     expect(await db.all('SELECT guide_id, title FROM programmes')).toEqual([
       { guide_id: 'g1', title: 'Morning Brief' },
@@ -190,7 +190,7 @@ describe('openCatalog', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 6 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 7 }]);
     expect(await db.all('SELECT id, deleting FROM sources')).toEqual([{ id: 's1', deleting: 0 }]);
     expect(await db.all('SELECT provider_id, is_hidden FROM categories')).toEqual([
       { provider_id: 'c1', is_hidden: 0 },
@@ -238,7 +238,7 @@ describe('openCatalog', () => {
     );
 
     expect((await openCatalog(db)).ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 6 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 7 }]);
     expect(await db.all('SELECT key, backup_urls_json, epg_shift_ms FROM live')).toEqual([
       { key: 'm:s1:live:1', backup_urls_json: null, epg_shift_ms: null },
     ]);
@@ -264,6 +264,57 @@ describe('openCatalog', () => {
     }
   });
 
+  it('upgrades a v6 database to v7, adding content_hash cleanly across live and staging catalog tables (#192)', async () => {
+    const { db } = testDb();
+    for (let i = 0; i < 6; i += 1) await db.exec(MIGRATIONS[i] ?? '');
+    await db.exec('PRAGMA user_version = 6');
+    await db.run(
+      "INSERT INTO sources (id, kind, name, created_at, settings_json) VALUES ('s1','xtream','Main',100,'{}')",
+    );
+    await db.run(
+      "INSERT INTO categories (source_id, kind, provider_id, name, name_fold, position, run_id) VALUES ('s1','live','c1','News','news',0,1)",
+    );
+    await db.run(
+      "INSERT INTO live (source_id, key, name, name_fold, run_id) VALUES ('s1','x:s1:live:1','Ch1','ch1',1)",
+    );
+    await db.run(
+      "INSERT INTO movies (source_id, key, name, name_fold, run_id) VALUES ('s1','x:s1:movie:1','Mov1','mov1',1)",
+    );
+    await db.run(
+      "INSERT INTO series (source_id, key, name, name_fold, run_id) VALUES ('s1','x:s1:series:1','Ser1','ser1',1)",
+    );
+
+    expect((await openCatalog(db)).ok).toBe(true);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 7 }]);
+    expect(await db.all('SELECT provider_id, content_hash FROM categories')).toEqual([
+      { provider_id: 'c1', content_hash: null },
+    ]);
+    expect(await db.all('SELECT key, content_hash FROM live')).toEqual([
+      { key: 'x:s1:live:1', content_hash: null },
+    ]);
+    expect(await db.all('SELECT key, content_hash FROM movies')).toEqual([
+      { key: 'x:s1:movie:1', content_hash: null },
+    ]);
+    expect(await db.all('SELECT key, content_hash FROM series')).toEqual([
+      { key: 'x:s1:series:1', content_hash: null },
+    ]);
+    for (const table of [
+      'categories',
+      'categories_next',
+      'live',
+      'live_next',
+      'movies',
+      'movies_next',
+      'series',
+      'series_next',
+    ]) {
+      const cols = (await db.all<{ name: string }>(`PRAGMA table_info(${table})`)).map(
+        (c) => c.name,
+      );
+      expect(cols).toContain('content_hash');
+    }
+  });
+
   it('is a no-op the second time', async () => {
     const { db } = testDb();
     await openCatalog(db);
@@ -272,7 +323,7 @@ describe('openCatalog', () => {
     );
     expect((await openCatalog(db)).ok).toBe(true);
     expect(await db.all('SELECT count(*) AS n FROM sources')).toEqual([{ n: 1 }]);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 6 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 7 }]);
   });
 
   it('applies pragmas, with WAL on file databases', async () => {
@@ -442,6 +493,8 @@ describe('openCatalog', () => {
     await db.exec('ALTER TABLE episodes DROP COLUMN duration_sec');
     await db.exec('ALTER TABLE live_next DROP COLUMN legacy_key');
     await db.exec('ALTER TABLE live_next DROP COLUMN backup_urls_json');
+    await db.exec('ALTER TABLE categories DROP COLUMN content_hash');
+    await db.exec('ALTER TABLE series_next DROP COLUMN content_hash');
     await db.run(
       "INSERT INTO movies (source_id, key, name, name_fold, run_id) VALUES ('s1', 'k1', 'Film', 'film', 1)",
     );
@@ -479,9 +532,11 @@ describe('openCatalog', () => {
         expect.stringMatching(/^ALTER TABLE episodes ADD COLUMN duration_sec /),
         expect.stringMatching(/^ALTER TABLE live_next ADD COLUMN legacy_key /),
         expect.stringMatching(/^ALTER TABLE live_next ADD COLUMN backup_urls_json /),
+        expect.stringMatching(/^ALTER TABLE categories ADD COLUMN content_hash /),
+        expect.stringMatching(/^ALTER TABLE series_next ADD COLUMN content_hash /),
       ]),
     );
-    expect(txAlters).toHaveLength(9);
+    expect(txAlters).toHaveLength(11);
 
     const movieRows = await db.all<{
       key: string;

@@ -132,41 +132,6 @@ export async function emptiedKinds(
   return kinds;
 }
 
-/**
- * Deletes the catalog rows of `sourceId` written by an older run than `runId`, kind by kind (items, categories,
- * placements), except every row of the kinds in `keep`. Call it only after the run succeeded. Returns the number
- * of rows removed per table.
- */
-export async function removeStaleCatalog(
-  db: SqlDriver,
-  sourceId: string,
-  runId: number,
-  keep: readonly CatalogKind[],
-): Promise<Record<string, number>> {
-  const removed: Record<string, number> = {};
-  const add = (table: string, n: number) => {
-    removed[table] = (removed[table] ?? 0) + n;
-  };
-  for (const kind of KINDS) {
-    if (keep.includes(kind)) continue;
-    for (const table of KIND_TABLES[kind]) {
-      const r = await db.run(`DELETE FROM ${table} WHERE source_id = ? AND run_id < ?`, [
-        sourceId,
-        runId,
-      ]);
-      add(table, r.changes);
-    }
-    for (const table of ['categories', 'placements']) {
-      const r = await db.run(
-        `DELETE FROM ${table} WHERE source_id = ? AND kind = ? AND run_id < ?`,
-        [sourceId, kind, runId],
-      );
-      add(table, r.changes);
-    }
-  }
-  return removed;
-}
-
 /** Counts reported by {@link reapOrphanedRuns}. */
 export interface ReapOrphanedRunsResult {
   reapedRuns: number;

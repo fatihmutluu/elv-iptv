@@ -21,6 +21,7 @@ PlayerEngine contract, PlaybackService, recovery ladder and FakePlayerEngine.
   `seek-coalescer.ts`, `speed-coalescer.ts`): `tune`, `retry`, `stop`, `play`, `pause`, `seek` (coalesced ~80 ms, guards stale clock ticks),
   `setSpeed` (clamped `[0.25, 4.0]`, coalesced across active seeks and in-flight transitions; `#302`), `selectAudioTrack`,
   `selectSubtitleTrack` (`track-preferences.ts`), `getState`, `subscribe`, `dispose`. `DEFAULT_PLAYBACK_CONFIG` holds spec timings.
+- `createAbrHysteresisController({ rungs, clock, initialIndex?, config? })` (`abr-hysteresis.ts`, `#176`): pure clock-injected anti-oscillation ABR selector (`downgradeSafetyFactor=0.85`, `stepDownCooldownMs=5s` bypassed on severe rebuffer, single-step ascent with `upgradeSafetyFactor=1.35`, `stepUpCooldownMs=20s` restarted on rebuffers, `3` samples over `15s`, rejects `<= 0` bps samples, and full window/cooldown reset on `onPause`/`onBackground`/`onTune`/`reset`).
 
 ## Recovery (spec sections 5.4 and 5.5; `recovery.ts`, `ladder.ts`, `backoff.ts`, `stall-watchdog.ts`, always wired)
 - Entry: a stall of 4 s while `playing`, a frozen live clock (`positionMs` non-advancing for 4 s after first frame -> one bounded live-edge reload reset before escalating; `#148`), no `playing` 5 s after live `load` (8 s VOD), or a recoverable error. An unexpected live `ended` triggers at most one clean-end reload per tune (`#148`; VOD `ended` is untouched). Fast

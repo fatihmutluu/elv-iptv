@@ -41,6 +41,8 @@ export interface ImportProgress {
     | 'cleanup';
   done: number;
   total?: number;
+  /** Optional overall run progress in `[0, 1]`, strictly non-decreasing across the run. */
+  fraction?: number;
 }
 
 /** Outcome of a successful run. */

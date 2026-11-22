@@ -1,23 +1,27 @@
 import type { SqlDriver } from '@elv/domain';
-import { type CatalogKind, removeStaleCatalog } from './runs';
+import type { CatalogKind } from './runs';
 import { purgeStagedCatalog } from './sources';
 
 export { purgeStagedCatalog };
 
 const ACTIVE_KINDS: readonly CatalogKind[] = ['live', 'movie', 'series'];
 
-const UPSERT_CATEGORIES = `INSERT INTO categories (source_id, kind, provider_id, name, name_fold, position, run_id)
-  SELECT source_id, kind, provider_id, name, name_fold, position, run_id
+const UPSERT_CATEGORIES = `INSERT INTO categories (source_id, kind, provider_id, name, name_fold, position, run_id, content_hash)
+  SELECT source_id, kind, provider_id, name, name_fold, position, run_id, content_hash
   FROM categories_next
   WHERE source_id = ? AND kind = ? AND run_id = ?
   ON CONFLICT(source_id, kind, provider_id) DO UPDATE SET
     name = excluded.name,
     name_fold = excluded.name_fold,
     position = excluded.position,
-    run_id = excluded.run_id`;
+    run_id = excluded.run_id,
+    content_hash = excluded.content_hash
+  WHERE categories.content_hash IS NULL
+     OR excluded.content_hash IS NULL
+     OR categories.content_hash != excluded.content_hash`;
 
-const UPSERT_LIVE = `INSERT INTO live (source_id, key, provider_id, num, name, name_fold, logo, guide_id, catchup_days, url_template, headers_json, backup_urls_json, epg_shift_ms, run_id)
-  SELECT source_id, key, provider_id, num, name, name_fold, logo, guide_id, catchup_days, url_template, headers_json, backup_urls_json, epg_shift_ms, run_id
+const UPSERT_LIVE = `INSERT INTO live (source_id, key, provider_id, num, name, name_fold, logo, guide_id, catchup_days, url_template, headers_json, backup_urls_json, epg_shift_ms, run_id, content_hash)
+  SELECT source_id, key, provider_id, num, name, name_fold, logo, guide_id, catchup_days, url_template, headers_json, backup_urls_json, epg_shift_ms, run_id, content_hash
   FROM live_next
   WHERE source_id = ? AND run_id = ?
   ON CONFLICT(source_id, key) DO UPDATE SET
@@ -32,10 +36,14 @@ const UPSERT_LIVE = `INSERT INTO live (source_id, key, provider_id, num, name, n
     headers_json = excluded.headers_json,
     backup_urls_json = excluded.backup_urls_json,
     epg_shift_ms = excluded.epg_shift_ms,
-    run_id = excluded.run_id`;
+    run_id = excluded.run_id,
+    content_hash = excluded.content_hash
+  WHERE live.content_hash IS NULL
+     OR excluded.content_hash IS NULL
+     OR live.content_hash != excluded.content_hash`;
 
-const UPSERT_MOVIES = `INSERT INTO movies (source_id, key, provider_id, name, name_fold, logo, rating, year, extension, added, url_template, headers_json, backup_urls_json, run_id)
-  SELECT source_id, key, provider_id, name, name_fold, logo, rating, year, extension, added, url_template, headers_json, backup_urls_json, run_id
+const UPSERT_MOVIES = `INSERT INTO movies (source_id, key, provider_id, name, name_fold, logo, rating, year, extension, added, url_template, headers_json, backup_urls_json, run_id, content_hash)
+  SELECT source_id, key, provider_id, name, name_fold, logo, rating, year, extension, added, url_template, headers_json, backup_urls_json, run_id, content_hash
   FROM movies_next
   WHERE source_id = ? AND run_id = ?
   ON CONFLICT(source_id, key) DO UPDATE SET
@@ -50,10 +58,14 @@ const UPSERT_MOVIES = `INSERT INTO movies (source_id, key, provider_id, name, na
     url_template = excluded.url_template,
     headers_json = excluded.headers_json,
     backup_urls_json = excluded.backup_urls_json,
-    run_id = excluded.run_id`;
+    run_id = excluded.run_id,
+    content_hash = excluded.content_hash
+  WHERE movies.content_hash IS NULL
+     OR excluded.content_hash IS NULL
+     OR movies.content_hash != excluded.content_hash`;
 
-const UPSERT_SERIES = `INSERT INTO series (source_id, key, provider_id, name, name_fold, cover, plot, rating, year, last_modified, run_id)
-  SELECT source_id, key, provider_id, name, name_fold, cover, plot, rating, year, last_modified, run_id
+const UPSERT_SERIES = `INSERT INTO series (source_id, key, provider_id, name, name_fold, cover, plot, rating, year, last_modified, run_id, content_hash)
+  SELECT source_id, key, provider_id, name, name_fold, cover, plot, rating, year, last_modified, run_id, content_hash
   FROM series_next
   WHERE source_id = ? AND run_id = ?
   ON CONFLICT(source_id, key) DO UPDATE SET
@@ -65,7 +77,11 @@ const UPSERT_SERIES = `INSERT INTO series (source_id, key, provider_id, name, na
     rating = excluded.rating,
     year = excluded.year,
     last_modified = excluded.last_modified,
-    run_id = excluded.run_id`;
+    run_id = excluded.run_id,
+    content_hash = excluded.content_hash
+  WHERE series.content_hash IS NULL
+     OR excluded.content_hash IS NULL
+     OR series.content_hash != excluded.content_hash`;
 
 const UPSERT_EPISODES = `INSERT INTO episodes (source_id, key, provider_id, series_key, season, episode, title, extension, duration_sec, url_template, headers_json, backup_urls_json, run_id)
   SELECT source_id, key, provider_id, series_key, season, episode, title, extension, duration_sec, url_template, headers_json, backup_urls_json, run_id
@@ -90,7 +106,64 @@ const UPSERT_PLACEMENTS = `INSERT INTO placements (source_id, kind, item_key, ca
   WHERE source_id = ? AND kind = ? AND run_id = ?
   ON CONFLICT(source_id, kind, category_id, item_key) DO UPDATE SET
     position = excluded.position,
-    run_id = excluded.run_id`;
+    run_id = excluded.run_id
+  WHERE placements.position != excluded.position`;
+
+const DELETE_STALE_LIVE = `DELETE FROM live
+  WHERE source_id = ?
+    AND NOT EXISTS (
+      SELECT 1 FROM live_next n
+      WHERE n.source_id = live.source_id AND n.key = live.key AND n.run_id = ?
+    )`;
+
+const DELETE_STALE_MOVIES = `DELETE FROM movies
+  WHERE source_id = ?
+    AND NOT EXISTS (
+      SELECT 1 FROM movies_next n
+      WHERE n.source_id = movies.source_id AND n.key = movies.key AND n.run_id = ?
+    )`;
+
+const DELETE_STALE_SERIES = `DELETE FROM series
+  WHERE source_id = ?
+    AND NOT EXISTS (
+      SELECT 1 FROM series_next n
+      WHERE n.source_id = series.source_id AND n.key = series.key AND n.run_id = ?
+    )`;
+
+const DELETE_STALE_EPISODES_BY_STAGED = `DELETE FROM episodes
+  WHERE source_id = ?
+    AND NOT EXISTS (
+      SELECT 1 FROM episodes_next n
+      WHERE n.source_id = episodes.source_id AND n.key = episodes.key AND n.run_id = ?
+    )`;
+
+const DELETE_ORPHAN_EPISODES_BY_SERIES = `DELETE FROM episodes
+  WHERE source_id = ?
+    AND NOT EXISTS (
+      SELECT 1 FROM series_next n
+      WHERE n.source_id = episodes.source_id AND n.key = episodes.series_key AND n.run_id = ?
+    )`;
+
+const DELETE_STALE_CATEGORIES = `DELETE FROM categories
+  WHERE source_id = ? AND kind = ?
+    AND NOT EXISTS (
+      SELECT 1 FROM categories_next n
+      WHERE n.source_id = categories.source_id
+        AND n.kind = categories.kind
+        AND n.provider_id = categories.provider_id
+        AND n.run_id = ?
+    )`;
+
+const DELETE_STALE_PLACEMENTS = `DELETE FROM placements
+  WHERE source_id = ? AND kind = ?
+    AND NOT EXISTS (
+      SELECT 1 FROM placements_next n
+      WHERE n.source_id = placements.source_id
+        AND n.kind = placements.kind
+        AND n.category_id = placements.category_id
+        AND n.item_key = placements.item_key
+        AND n.run_id = ?
+    )`;
 
 const MERGE_WATCH_PROGRESS = `UPDATE watch_progress
   SET position_ms = CASE WHEN old.updated_at > watch_progress.updated_at THEN old.position_ms ELSE watch_progress.position_ms END,
@@ -230,11 +303,49 @@ async function migrateLegacyKeysForTable(
   }
 }
 
+async function deleteStaleFromStaged(
+  tx: SqlDriver,
+  sourceId: string,
+  runId: number,
+  skip: ReadonlySet<CatalogKind>,
+): Promise<Record<string, number>> {
+  const removed: Record<string, number> = {};
+  const add = (table: string, changes: number) => {
+    removed[table] = (removed[table] ?? 0) + changes;
+  };
+  if (!skip.has('live')) {
+    add('live', (await tx.run(DELETE_STALE_LIVE, [sourceId, runId])).changes);
+  }
+  if (!skip.has('movie')) {
+    add('movies', (await tx.run(DELETE_STALE_MOVIES, [sourceId, runId])).changes);
+  }
+  if (!skip.has('series')) {
+    add('series', (await tx.run(DELETE_STALE_SERIES, [sourceId, runId])).changes);
+    const hasStagedEpisodes =
+      (
+        await tx.all('SELECT 1 FROM episodes_next WHERE source_id = ? AND run_id = ? LIMIT 1', [
+          sourceId,
+          runId,
+        ])
+      ).length > 0;
+    const epSql = hasStagedEpisodes
+      ? DELETE_STALE_EPISODES_BY_STAGED
+      : DELETE_ORPHAN_EPISODES_BY_SERIES;
+    add('episodes', (await tx.run(epSql, [sourceId, runId])).changes);
+  }
+  for (const kind of ACTIVE_KINDS) {
+    if (skip.has(kind)) continue;
+    add('categories', (await tx.run(DELETE_STALE_CATEGORIES, [sourceId, kind, runId])).changes);
+    add('placements', (await tx.run(DELETE_STALE_PLACEMENTS, [sourceId, kind, runId])).changes);
+  }
+  return removed;
+}
+
 /**
- * Atomically commits staged `*_next` catalog rows for `(sourceId, runId)` inside an open transaction (`#418`, `#201`):
+ * Atomically commits staged `*_next` catalog rows for `(sourceId, runId)` inside an open transaction (`#418`, `#201`, `#192`):
  * 1. Losslessly remaps legacy URL-based M3U keys in `watch_progress`, `favorites`, `channel_guide`, live tables, and `placements`.
- * 2. Upserts staged rows for `runId` into live tables preserving existing row `id` and `is_hidden`, skipping `keepKinds`.
- * 3. Removes stale live rows (`run_id < runId`) honoring `keepKinds` and purges all 6 `*_next` tables for `sourceId`.
+ * 2. Upserts staged rows for `runId` into live tables guarded by `content_hash` (zero UPDATEs for unchanged rows), preserving `id`, `is_hidden`, and original `run_id`, skipping `keepKinds`.
+ * 3. Removes deleted live rows via indexed `NOT EXISTS` lookups against `*_next` (honoring `keepKinds` and preserving surviving Xtream episodes), then purges all 6 `*_next` tables for `sourceId`.
  */
 export async function commitStagedCatalog(
   tx: SqlDriver,
@@ -263,7 +374,7 @@ export async function commitStagedCatalog(
     await tx.run(UPSERT_PLACEMENTS, [sourceId, kind, runId]);
   }
 
-  const removed = await removeStaleCatalog(tx, sourceId, runId, keepKinds);
+  const removed = await deleteStaleFromStaged(tx, sourceId, runId, skip);
   await purgeStagedCatalog(tx, sourceId);
   return removed;
 }

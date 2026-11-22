@@ -4,10 +4,13 @@ import { M3U_TOKEN, sampleCatalog, setup as setupPanel } from './import-test-hel
 import {
   createCatalogService,
   type ItemDetailRow,
+  type ItemsCursor,
   openCatalog,
+  queryCatalogByIdCursor,
   queryCategories,
   queryItemDetail,
   queryItems,
+  queryItemsByCursor,
 } from './index';
 import { countingScheduler, memorySecrets, testDb } from './test-db';
 
@@ -381,6 +384,165 @@ describe('queryCategories grouped counts & scale', () => {
       expect(
         await queryItems(db, { sourceId: 's1', kind: 'movie', providerId: 'c-vis' }, 0, 10),
       ).toEqual([]);
+    } finally {
+      close();
+    }
+  });
+});
+
+describe('key-cursor pagination (#176)', () => {
+  it('queryItemsByCursor paginates cleanly with tie-breaking, zero drift under concurrent inserts/deletes, and idx_placements_visible', async () => {
+    const { db, close } = testDb();
+    try {
+      await openCatalog(db);
+      await db.run(
+        "INSERT INTO sources (id, kind, name, created_at, settings_json) VALUES ('s1', 'xtream', 'Src', 100, '{}')",
+      );
+      await db.run(
+        "INSERT INTO categories (source_id, kind, provider_id, name, name_fold, position, run_id) VALUES ('s1', 'movie', 'c1', 'Films', 'films', 0, 1)",
+      );
+      await db.run(
+        `INSERT INTO movies (source_id, key, name, name_fold, is_hidden, run_id) VALUES
+           ('s1', 'x:s1:movie:1', 'M1', 'm1', 0, 1),
+           ('s1', 'x:s1:movie:2', 'M2', 'm2', 0, 1),
+           ('s1', 'x:s1:movie:3', 'M3 Hidden', 'm3 hidden', 1, 1),
+           ('s1', 'x:s1:movie:4', 'M4', 'm4', 0, 1),
+           ('s1', 'x:s1:movie:5', 'M5', 'm5', 0, 1),
+           ('s1', 'x:s1:movie:6', 'M6', 'm6', 0, 1)`,
+      );
+      // Items 4 and 5 intentionally share position=3 to verify deterministic item_key tie-breaking.
+      await db.run(
+        `INSERT INTO placements (source_id, kind, item_key, category_id, position, is_hidden, run_id) VALUES
+           ('s1', 'movie', 'x:s1:movie:1', 'c1', 1, 0, 1),
+           ('s1', 'movie', 'x:s1:movie:2', 'c1', 2, 0, 1),
+           ('s1', 'movie', 'x:s1:movie:3', 'c1', 2, 0, 1),
+           ('s1', 'movie', 'x:s1:movie:4', 'c1', 3, 0, 1),
+           ('s1', 'movie', 'x:s1:movie:5', 'c1', 3, 0, 1),
+           ('s1', 'movie', 'x:s1:movie:6', 'c1', 4, 0, 1)`,
+      );
+
+      // Invalid categoryId and limit=0 short-circuit cleanly.
+      expect(await queryItemsByCursor(db, 'bad-category-id', undefined, 10)).toEqual({
+        items: [],
+        nextCursor: null,
+        hasMore: false,
+      });
+      expect(await queryItemsByCursor(db, 's1|movie|c1', undefined, 0)).toEqual({
+        items: [],
+        nextCursor: null,
+        hasMore: false,
+      });
+
+      const page1 = await queryItemsByCursor(db, 's1|movie|c1', undefined, 2);
+      expect(page1.items.map((r) => r.key)).toEqual(['x:s1:movie:1', 'x:s1:movie:2']);
+      expect(page1.hasMore).toBe(true);
+      expect(page1.nextCursor).toEqual<ItemsCursor>({ position: 2, itemKey: 'x:s1:movie:2' });
+
+      // Concurrent mutation between pages: insert at position 0 AND delete position 1 before cursor!
+      await db.run(
+        "INSERT INTO movies (source_id, key, name, name_fold, is_hidden, run_id) VALUES ('s1', 'x:s1:movie:0', 'M0', 'm0', 0, 1)",
+      );
+      await db.run(
+        "INSERT INTO placements (source_id, kind, item_key, category_id, position, is_hidden, run_id) VALUES ('s1', 'movie', 'x:s1:movie:0', 'c1', 0, 0, 1)",
+      );
+      await db.run("DELETE FROM placements WHERE item_key = 'x:s1:movie:1'");
+
+      // Page 2 resumes strictly after (2, 'x:s1:movie:2') with zero skipped or duplicated items.
+      const page2 = await queryItemsByCursor(db, 's1|movie|c1', page1.nextCursor ?? undefined, 2);
+      expect(page2.items.map((r) => r.key)).toEqual(['x:s1:movie:4', 'x:s1:movie:5']);
+      expect(page2.hasMore).toBe(true);
+      expect(page2.nextCursor).toEqual<ItemsCursor>({ position: 3, itemKey: 'x:s1:movie:5' });
+
+      // Page 3 gets the final item; exact-fit end reports hasMore=false & nextCursor=null.
+      const page3 = await queryItemsByCursor(db, 's1|movie|c1', page2.nextCursor ?? undefined, 1);
+      expect(page3.items.map((r) => r.key)).toEqual(['x:s1:movie:6']);
+      expect(page3.hasMore).toBe(false);
+      expect(page3.nextCursor).toBeNull();
+
+      // Verify EXPLAIN QUERY PLAN uses idx_placements_visible with zero TEMP B-TREE.
+      const captured: { sql: string; params: readonly SqlValue[] | undefined }[] = [];
+      const captureDb: SqlDriver = {
+        ...db,
+        all: <T>(sql: string, params?: readonly SqlValue[]) => {
+          captured.push({ sql, params });
+          return db.all<T>(sql, params);
+        },
+      };
+      await queryItemsByCursor(
+        captureDb,
+        's1|movie|c1',
+        { position: 2, itemKey: 'x:s1:movie:2' },
+        2,
+      );
+      const plan = await db.all<{ detail: string }>(
+        `EXPLAIN QUERY PLAN ${captured[0]?.sql ?? ''}`,
+        captured[0]?.params,
+      );
+      const planText = plan.map((r) => r.detail).join('\n');
+      expect(planText).toContain('idx_placements_visible');
+      expect(planText).not.toMatch(/TEMP B-TREE/i);
+
+      // Deleting source hides results immediately.
+      await db.run("UPDATE sources SET deleting = 1 WHERE id = 's1'");
+      expect(await queryItemsByCursor(db, 's1|movie|c1', undefined, 10)).toEqual({
+        items: [],
+        nextCursor: null,
+        hasMore: false,
+      });
+    } finally {
+      close();
+    }
+  });
+
+  it('queryCatalogByIdCursor paginates by id > afterId without drift and uses INTEGER PRIMARY KEY', async () => {
+    const { db, close } = testDb();
+    try {
+      await openCatalog(db);
+      await db.run(
+        "INSERT INTO sources (id, kind, name, created_at, settings_json) VALUES ('s1', 'xtream', 'Src', 100, '{}')",
+      );
+      await db.run(
+        `INSERT INTO live (id, source_id, key, num, name, name_fold, is_hidden, run_id) VALUES
+           (10, 's1', 'x:s1:live:10', 10, 'Ch 10', 'ch 10', 0, 1),
+           (20, 's1', 'x:s1:live:20', 20, 'Ch 20 Hidden', 'ch 20 hidden', 1, 1),
+           (30, 's1', 'x:s1:live:30', 30, 'Ch 30', 'ch 30', 0, 1),
+           (40, 's1', 'x:s1:live:40', 40, 'Ch 40', 'ch 40', 0, 1),
+           (50, 's1', 'x:s1:live:50', 50, 'Ch 50', 'ch 50', 0, 1)`,
+      );
+
+      expect(await queryCatalogByIdCursor(db, 's1', 'live', 0, 0)).toEqual([]);
+
+      const p1 = await queryCatalogByIdCursor(db, 's1', 'live', 0, 2);
+      expect(p1.map((r) => r.id)).toEqual([10, 30]);
+
+      // Delete id=10 before cursor and insert id=15 before cursor -> neither shifts p2.
+      await db.run('DELETE FROM live WHERE id = 10');
+      await db.run(
+        "INSERT INTO live (id, source_id, key, num, name, name_fold, is_hidden, run_id) VALUES (15, 's1', 'x:s1:live:15', 15, 'Ch 15', 'ch 15', 0, 1)",
+      );
+
+      const p2 = await queryCatalogByIdCursor(db, 's1', 'live', p1[p1.length - 1]?.id ?? 0, 2);
+      expect(p2.map((r) => r.id)).toEqual([40, 50]);
+
+      const p3 = await queryCatalogByIdCursor(db, 's1', 'live', p2[p2.length - 1]?.id ?? 0, 2);
+      expect(p3).toEqual([]);
+
+      const captured: { sql: string; params: readonly SqlValue[] | undefined }[] = [];
+      const captureDb: SqlDriver = {
+        ...db,
+        all: <T>(sql: string, params?: readonly SqlValue[]) => {
+          captured.push({ sql, params });
+          return db.all<T>(sql, params);
+        },
+      };
+      await queryCatalogByIdCursor(captureDb, 's1', 'live', 30, 2);
+      const plan = await db.all<{ detail: string }>(
+        `EXPLAIN QUERY PLAN ${captured[0]?.sql ?? ''}`,
+        captured[0]?.params,
+      );
+      const planText = plan.map((r) => r.detail).join('\n');
+      expect(planText).toMatch(/INTEGER PRIMARY KEY/i);
+      expect(planText).not.toMatch(/TEMP B-TREE/i);
     } finally {
       close();
     }

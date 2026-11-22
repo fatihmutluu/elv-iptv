@@ -1,5 +1,4 @@
 import {
-  type ElvError,
   elvError,
   err,
   httpStatusError,
@@ -9,8 +8,13 @@ import {
   transportHeaders,
 } from '@elv/domain';
 import { detectAndDecodeText } from './encoding';
-import { toElvError } from './scan-error';
-import { acquireXtreamToken, parseXtreamJson, resolveNowFn } from './xtream-json';
+import {
+  accountFailure,
+  acquireXtreamToken,
+  parseXtreamJson,
+  readXtreamBody,
+  resolveNowFn,
+} from './xtream-json';
 import {
   accountCooldownKey,
   buildAttemptOrder,
@@ -32,14 +36,19 @@ import {
   toSeriesInfo,
   toVodInfo,
 } from './xtream-records';
-import type { XtreamCallOptions, XtreamClient, XtreamClientOptions } from './xtream-types';
+import { streamXtreamRecords } from './xtream-stream';
+import type {
+  XtreamCallOptions,
+  XtreamClient,
+  XtreamClientOptions,
+  XtreamStreamOptions,
+} from './xtream-types';
 
 export type * from './xtream-types';
 
 const TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_BODY = 128 * 1024 * 1024;
 const DEFAULT_PRIMARY_COOLDOWN_MS = 300_000;
-const FIRST_BUFFER = 64 * 1024;
 const NUMERIC_KEY_RE = /^\d+$/;
 const shape = () => elvError('source-format', 'unexpected-shape');
 
@@ -49,65 +58,6 @@ async function discard(body: AsyncIterable<Uint8Array>): Promise<void> {
   } catch {
     // Response is already classified by its status or early HTML sniff.
   }
-}
-
-function startsWithHtmlMarkup(chunk: Uint8Array): boolean {
-  let i = 0;
-  if (chunk.length >= 3 && chunk[0] === 0xef && chunk[1] === 0xbb && chunk[2] === 0xbf) i = 3;
-  while (i < chunk.length && (chunk[i] as number) <= 0x20) i++;
-  return i < chunk.length && chunk[i] === 0x3c; // '<'
-}
-
-async function readAll(body: AsyncIterable<Uint8Array>, max: number): Promise<Result<Uint8Array>> {
-  let buffer = new Uint8Array(Math.min(FIRST_BUFFER, max));
-  let total = 0;
-  let checkedPrefix = false;
-  const it = openAsyncIterator(body);
-  try {
-    for (;;) {
-      const step = await it.next();
-      if (step.done) break;
-      const chunk = step.value;
-      if (!checkedPrefix && chunk.length > 0) {
-        let nonWs = false;
-        for (let k = 0; k < chunk.length; k++) {
-          const b = chunk[k] as number;
-          if (b > 0x20 && !(k < 3 && (b === 0xef || b === 0xbb || b === 0xbf))) {
-            nonWs = true;
-            break;
-          }
-        }
-        if (nonWs) {
-          checkedPrefix = true;
-          if (startsWithHtmlMarkup(chunk)) {
-            await it.return?.();
-            return err(elvError('source-format', 'invalid-json'));
-          }
-        }
-      }
-      if (total + chunk.length > max) {
-        await it.return?.();
-        return err(elvError('source-format', 'too-large'));
-      }
-      if (total + chunk.length > buffer.length) {
-        const grown = new Uint8Array(
-          Math.min(max, Math.max(buffer.length * 2, total + chunk.length)),
-        );
-        grown.set(buffer.subarray(0, total));
-        buffer = grown;
-      }
-      buffer.set(chunk, total);
-      total += chunk.length;
-    }
-  } catch (e) {
-    try {
-      await it.return?.();
-    } catch {
-      // Ignore secondary return failure.
-    }
-    return err(toElvError(e));
-  }
-  return ok(buffer.subarray(0, total));
 }
 
 /**
@@ -148,11 +98,23 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
 
   const currentBase = () => servers[activeIndex] as string;
 
-  async function fetchServerJson(
+  const promoteServer = (idx: number): void => {
+    if (idx === 0) {
+      activeIndex = 0;
+      failedOverAtMs = undefined;
+    } else {
+      if (activeIndex === 0 || failedOverAtMs === undefined) {
+        failedOverAtMs = nowFn();
+      }
+      activeIndex = idx;
+    }
+  };
+
+  async function openServerBody(
     serverBase: string,
     query: string,
     call?: XtreamCallOptions,
-  ): Promise<Result<unknown>> {
+  ): Promise<Result<AsyncIterable<Uint8Array>>> {
     const token = await acquireXtreamToken(http, serverBase, options.rateLimit, call?.signal);
     if (!token.ok) return token;
     if (isAccountCoolingDown(http, accountKey, nowFn())) {
@@ -196,7 +158,21 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
       await discard(body);
       return err(httpStatusError(status));
     }
-    const bytes = await readAll(body, maxBody);
+    if (call?.signal?.aborted) {
+      await discard(body);
+      return err(elvError('network', 'aborted'));
+    }
+    return ok(body);
+  }
+
+  async function fetchServerJson(
+    serverBase: string,
+    query: string,
+    call?: XtreamCallOptions,
+  ): Promise<Result<unknown>> {
+    const opened = await openServerBody(serverBase, query, call);
+    if (!opened.ok) return opened;
+    const bytes = await readXtreamBody(opened.value, maxBody);
     if (!bytes.ok) return bytes;
     return parseXtreamJson(detectAndDecodeText(bytes.value));
   }
@@ -217,22 +193,79 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
     for (const idx of order) {
       const result = await fetchServerJson(servers[idx] as string, query, call);
       if (result.ok) {
-        if (idx === 0) {
-          activeIndex = 0;
-          failedOverAtMs = undefined;
-        } else {
-          if (activeIndex === 0 || failedOverAtMs === undefined) {
-            failedOverAtMs = nowFn();
-          }
-          activeIndex = idx;
-        }
+        promoteServer(idx);
         return result;
       }
-      if (probePrimary && idx === 0) {
-        failedOverAtMs = nowFn();
-      }
+      if (probePrimary && idx === 0) failedOverAtMs = nowFn();
       if (!isFailoverEligible(result.error)) return result;
       lastFailure = result;
+    }
+    return lastFailure;
+  }
+
+  async function* streamRows<T>(
+    query: string,
+    map: (rows: Raw[]) => T[],
+    call?: XtreamStreamOptions,
+  ): AsyncGenerator<T[], Result<void>> {
+    if (call?.signal?.aborted) return err(elvError('network', 'aborted'));
+    const startNow = nowFn();
+    if (isAccountCoolingDown(http, accountKey, startNow)) {
+      return err(httpStatusError(429));
+    }
+    const probePrimary =
+      activeIndex > 0 &&
+      failedOverAtMs !== undefined &&
+      startNow - failedOverAtMs >= primaryCooldownMs;
+    const order = buildAttemptOrder(servers.length, activeIndex, probePrimary);
+    let lastFailure: Result<void> = err(elvError('network', 'request-failed'));
+
+    for (const idx of order) {
+      const opened = await openServerBody(servers[idx] as string, query, call);
+      if (!opened.ok) {
+        if (probePrimary && idx === 0) failedOverAtMs = nowFn();
+        if (!isFailoverEligible(opened.error)) return opened;
+        lastFailure = opened;
+        continue;
+      }
+      const gen = streamXtreamRecords(opened.value, {
+        maxBodyBytes: maxBody,
+        ...(call?.batchSize === undefined ? {} : { batchSize: call.batchSize }),
+        ...(call?.signal === undefined ? {} : { signal: call.signal }),
+      });
+      let yieldedAny = false;
+      let promoted = false;
+      let failover = false;
+      try {
+        for (;;) {
+          const step = await gen.next();
+          if (step.done) {
+            if (step.value.ok) {
+              if (!promoted) promoteServer(idx);
+              return ok(undefined);
+            }
+            if (probePrimary && idx === 0) failedOverAtMs = nowFn();
+            if (!yieldedAny && isFailoverEligible(step.value.error)) {
+              lastFailure = step.value;
+              failover = true;
+              break;
+            }
+            return step.value;
+          }
+          const mapped = map(step.value);
+          if (mapped.length > 0) {
+            if (!promoted) {
+              promoteServer(idx);
+              promoted = true;
+            }
+            yieldedAny = true;
+            yield mapped;
+          }
+        }
+      } finally {
+        await gen.return(ok(undefined));
+      }
+      if (!failover) return lastFailure;
     }
     return lastFailure;
   }
@@ -300,6 +333,12 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
       rows(`&action=get_vod_streams${withCategory(categoryId)}`, toMovies, call),
     series: (categoryId, call) =>
       rows(`&action=get_series${withCategory(categoryId)}`, toSeries, call),
+    streamLiveStreams: (categoryId, call) =>
+      streamRows(`&action=get_live_streams${withCategory(categoryId)}`, toLive, call),
+    streamVodStreams: (categoryId, call) =>
+      streamRows(`&action=get_vod_streams${withCategory(categoryId)}`, toMovies, call),
+    streamSeries: (categoryId, call) =>
+      streamRows(`&action=get_series${withCategory(categoryId)}`, toSeries, call),
     async seriesInfo(seriesId, call) {
       const r = await object(`&action=get_series_info&series_id=${seriesId}`, call);
       return r.ok ? ok(toSeriesInfo(r.value)) : r;
@@ -321,15 +360,4 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
       return withRoot('series', id, extension ?? 'mp4');
     },
   };
-}
-
-function accountFailure(info: Raw): ElvError | undefined {
-  if (Number(info.auth) === 0) return elvError('auth', 'invalid-credentials');
-  const status = typeof info.status === 'string' ? info.status.trim() : '';
-  if (status === '' || status.toLowerCase() === 'active') return undefined;
-  const slug = status
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
-  return elvError('auth', `account-${slug || 'unknown'}`);
 }

@@ -191,7 +191,9 @@ describe('xtream import', () => {
     expect(e.scheduler.count).toBeGreaterThanOrEqual(10);
     const live = events.filter((p) => p.phase === 'live');
     expect(live.length).toBeGreaterThanOrEqual(10);
-    expect(live.at(-1)).toEqual({ phase: 'live', done: 1000, total: 1000 });
+    expect(live.at(-1)).toMatchObject({ phase: 'live', done: 1000, total: 1000 });
+    expect(live.at(-1)?.fraction).toBeGreaterThan(0);
+    expect(live.at(-1)?.fraction).toBeLessThanOrEqual(1);
     const phases = new Set(events.map((p) => p.phase));
     for (const phase of phases) {
       const dones = events.filter((p) => p.phase === phase).map((p) => p.done);

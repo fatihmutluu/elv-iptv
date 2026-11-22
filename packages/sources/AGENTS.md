@@ -38,8 +38,9 @@ M3U and XMLTV scanners and the Xtream client.
   `<desc>` `S##E##`). Salvages stray `<` / bare `&`; skips malformed or >1 MiB elements. Files: `xmltv.ts`, `xml-tokens.ts`,
   `xmltv-children.ts`, `xmltv-meta.ts`, `xmltv-time.ts`, `xmltv-types.ts`.
 - `createXtreamClient({ http, server, username, password, transport?, maxBodyBytes?, backupServers?, primaryCooldownMs?, cooldown429Ms?, serverTimezone? })`
-  wraps `player_api.php` (`account`, `categories`, `liveStreams`/`vodStreams`/`series`, `seriesInfo`, `vodInfo`, `shortEpg`),
-  `playlistUrl`, `guideUrl`, `streamUrl`; `probeXtreamLiveFormat` (`xtream-probe.ts`) auto-detects `ts` vs `m3u8` in <=512 B.
+  wraps `player_api.php` (`account`, `categories`, `liveStreams`/`vodStreams`/`series`, streaming `streamLiveStreams`/`streamVodStreams`/`streamSeries`,
+  `seriesInfo`, `vodInfo`, `shortEpg`), `playlistUrl`, `guideUrl`, `streamUrl`; `streamXtreamRecords` (`xtream-stream.ts`) parses `[...]` and numeric-keyed
+  `{ "0": ... }` incrementally in `O(batchSize)` memory; `probeXtreamLiveFormat` (`xtream-probe.ts`) auto-detects `ts` vs `m3u8` in <=512 B.
   Per-`HttpClient` account-scoped `429` cooldowns (`Retry-After`, no failover on `429`) and ordered mirror failover (`xtream-mirrors.ts`).
   Empty `{}` -> `[]`, `[]` -> `{}`; array `episodes` keep Season `0` and deduplicate. Credentials only in URL builders; errors omit URLs.
-  Files: `xtream.ts`, `xtream-probe.ts`, `xtream-json.ts`, `xtream-mirrors.ts`, `xtream-records.ts`, `xtream-normalize.ts`, `xtream-types.ts`.
+  Files: `xtream.ts`, `xtream-stream.ts`, `xtream-probe.ts`, `xtream-json.ts`, `xtream-mirrors.ts`, `xtream-records.ts`, `xtream-normalize.ts`, `xtream-types.ts`.

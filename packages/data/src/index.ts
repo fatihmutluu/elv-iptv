@@ -1,4 +1,5 @@
 export * from './catalog';
+export * from './content-hash';
 export * from './credential-fingerprint';
 export * from './driver';
 export * from './fold';

@@ -657,6 +657,27 @@ describe('isCatalogWorkerMessage', () => {
         progress: { phase: 'live', done: 5000, total: 25000 },
       }),
     ).toBe(true);
+    expect(
+      isCatalogWorkerMessage({
+        type: 'progress',
+        reqId: 4,
+        progress: { phase: 'live', done: 5000, fraction: 0.42 },
+      }),
+    ).toBe(true);
+    expect(
+      isCatalogWorkerMessage({
+        type: 'progress',
+        reqId: 5,
+        progress: { phase: 'cleanup', done: 0, fraction: 1 },
+      }),
+    ).toBe(true);
+    expect(
+      isCatalogWorkerMessage({
+        type: 'progress',
+        reqId: 6,
+        progress: { phase: 'categories', done: 0, fraction: 0 },
+      }),
+    ).toBe(true);
 
     for (const bad of [
       null,
@@ -667,6 +688,15 @@ describe('isCatalogWorkerMessage', () => {
       { type: 'progress', reqId: 1, progress: { phase: 'unknown', done: 0 } },
       { type: 'progress', reqId: 1, progress: { phase: 'live', done: -1 } },
       { type: 'progress', reqId: 1, progress: { phase: 'live', done: 1, total: -2 } },
+      { type: 'progress', reqId: 1, progress: { phase: 'live', done: 1, fraction: -0.01 } },
+      { type: 'progress', reqId: 1, progress: { phase: 'live', done: 1, fraction: 1.01 } },
+      { type: 'progress', reqId: 1, progress: { phase: 'live', done: 1, fraction: Number.NaN } },
+      {
+        type: 'progress',
+        reqId: 1,
+        progress: { phase: 'live', done: 1, fraction: Number.POSITIVE_INFINITY },
+      },
+      { type: 'progress', reqId: 1, progress: { phase: 'live', done: 1, fraction: '0.5' } },
     ]) {
       expect(isCatalogWorkerMessage(bad)).toBe(false);
     }

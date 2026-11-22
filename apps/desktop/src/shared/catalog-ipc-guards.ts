@@ -219,6 +219,8 @@ export function isImportProgress(x: unknown): x is ImportProgress {
     IMPORT_PHASES.has(x['phase'] as ImportProgress['phase']) &&
     isFiniteNumber(x['done']) &&
     x['done'] >= 0 &&
-    (x['total'] === undefined || (isFiniteNumber(x['total']) && x['total'] >= 0))
+    (x['total'] === undefined || (isFiniteNumber(x['total']) && x['total'] >= 0)) &&
+    (x['fraction'] === undefined ||
+      (isFiniteNumber(x['fraction']) && x['fraction'] >= 0 && x['fraction'] <= 1))
   );
 }

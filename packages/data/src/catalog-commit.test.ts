@@ -1,8 +1,19 @@
+import type { SqlDriver } from '@elv/domain';
 import { describe, expect, it } from 'vitest';
 import { commitStagedCatalog, purgeStagedCatalog } from './catalog-commit';
+import { hashCategoryRow, hashLiveRow, hashMovieRow, hashSeriesRow } from './content-hash';
 import { performRun } from './import-run';
 import { openCatalog } from './migrate';
 import { countingScheduler, memorySecrets, testDb } from './test-db';
+import {
+  liveWriter,
+  movieWriter,
+  seriesWriter,
+  writeCategories,
+  writeItems,
+  writePlacements,
+} from './writers';
+import { writeM3uEpisodes, writeM3uLive, writeM3uMovies, writeM3uSeries } from './writers-m3u';
 
 async function setup() {
   const t = testDb();
@@ -71,7 +82,7 @@ describe('catalog-commit', () => {
       "INSERT INTO episodes_next (source_id, key, series_key, title, run_id) VALUES ('s1', 'm:s1:episode:n:ep1|s1', 'm:s1:series:s1', 'Ep 1', 2)",
     );
     await db.run(
-      "INSERT INTO placements_next (source_id, kind, item_key, category_id, position, run_id) VALUES ('s1', 'live', 'm:s1:live:t:ch1', 'News', 0, 2)",
+      "INSERT INTO placements_next (source_id, kind, item_key, category_id, position, run_id) VALUES ('s1', 'live', 'm:s1:live:t:ch1', 'News', 1, 2)",
     );
 
     const removed = await db.transaction((tx) => commitStagedCatalog(tx, 's1', 2, []));
@@ -425,6 +436,329 @@ describe('catalog-commit', () => {
     expect(s2CountAtExecuteStart).toBe(1);
     expect(await db.all("SELECT key FROM live WHERE source_id = 's1'")).toEqual([
       { key: 'm:s1:live:t:fresh' },
+    ]);
+  });
+
+  it('performs zero SQLite UPDATEs on unchanged re-sync rows, preserving run_id, id, is_hidden, and FTS5 (#192)', async () => {
+    const { db } = await setup();
+
+    async function stageSnapshot(runId: number, live1Name: string, includeLive2: boolean) {
+      await writeCategories(db, 's1', 'live', runId, [{ id: 'c1', name: 'News' }], 0);
+      await writeCategories(db, 's1', 'movie', runId, [{ id: 'm1', name: 'Action' }], 0);
+      await writeCategories(db, 's1', 'series', runId, [{ id: 'sr1', name: 'Drama' }], 0);
+      const liveItems = [
+        {
+          key: 'x:s1:live:1',
+          item: {
+            id: 1,
+            num: 1,
+            name: live1Name,
+            icon: 'http://img/1.png',
+            epgId: 'ch1',
+            catchupDays: 2,
+            categoryIds: ['c1'],
+          },
+        },
+        ...(includeLive2
+          ? [
+              {
+                key: 'x:s1:live:2',
+                item: { id: 2, num: 2, name: 'Channel Two', catchupDays: 0, categoryIds: ['c1'] },
+              },
+            ]
+          : []),
+      ];
+      await writeItems(db, liveWriter, 's1', runId, liveItems);
+      await writeItems(db, movieWriter, 's1', runId, [
+        {
+          key: 'x:s1:movie:1',
+          item: {
+            id: 1,
+            name: 'Film One',
+            extension: 'mkv',
+            rating: 8.1,
+            year: 2024,
+            added: 100,
+            categoryIds: ['m1'],
+          },
+        },
+      ]);
+      await writeItems(db, seriesWriter, 's1', runId, [
+        {
+          key: 'x:s1:series:1',
+          item: {
+            id: 1,
+            name: 'Show One',
+            cover: 'http://img/s1.png',
+            plot: 'Plot 1',
+            rating: 8.5,
+            year: 2025,
+            lastModified: 200,
+            categoryIds: ['sr1'],
+          },
+        },
+      ]);
+      const livePlaces: [string, string, number][] = includeLive2
+        ? [
+            ['x:s1:live:1', 'c1', 0],
+            ['x:s1:live:2', 'c1', 1],
+          ]
+        : [['x:s1:live:1', 'c1', 0]];
+      await writePlacements(db, 's1', 'live', runId, livePlaces);
+      await writePlacements(db, 's1', 'movie', runId, [['x:s1:movie:1', 'm1', 0]]);
+      await writePlacements(db, 's1', 'series', runId, [['x:s1:series:1', 'sr1', 0]]);
+    }
+
+    await stageSnapshot(1, 'Channel One', true);
+    await db.transaction((tx) => commitStagedCatalog(tx, 's1', 1, []));
+
+    // Mark hidden flags and record ids + UPDATE audit triggers.
+    await db.run("UPDATE categories SET is_hidden = 1 WHERE provider_id = 'c1'");
+    await db.run("UPDATE live SET is_hidden = 1 WHERE key = 'x:s1:live:1'");
+    await db.run("UPDATE movies SET is_hidden = 1 WHERE key = 'x:s1:movie:1'");
+    await db.run("UPDATE series SET is_hidden = 1 WHERE key = 'x:s1:series:1'");
+    await db.run("UPDATE placements SET is_hidden = 1 WHERE item_key = 'x:s1:live:1'");
+    await db.exec(`
+      CREATE TABLE _audit_updates (tbl TEXT NOT NULL);
+      CREATE TRIGGER _audit_live_u AFTER UPDATE ON live BEGIN INSERT INTO _audit_updates VALUES ('live'); END;
+      CREATE TRIGGER _audit_movies_u AFTER UPDATE ON movies BEGIN INSERT INTO _audit_updates VALUES ('movies'); END;
+      CREATE TRIGGER _audit_series_u AFTER UPDATE ON series BEGIN INSERT INTO _audit_updates VALUES ('series'); END;
+      CREATE TRIGGER _audit_cats_u AFTER UPDATE ON categories BEGIN INSERT INTO _audit_updates VALUES ('categories'); END;
+      CREATE TRIGGER _audit_place_u AFTER UPDATE ON placements BEGIN INSERT INTO _audit_updates VALUES ('placements'); END;
+    `);
+
+    const liveId = (
+      await db.all<{ id: number }>("SELECT id FROM live WHERE key = 'x:s1:live:1'")
+    )[0]?.id;
+    const movieId = (
+      await db.all<{ id: number }>("SELECT id FROM movies WHERE key = 'x:s1:movie:1'")
+    )[0]?.id;
+    const seriesId = (
+      await db.all<{ id: number }>("SELECT id FROM series WHERE key = 'x:s1:series:1'")
+    )[0]?.id;
+
+    // Run 2: identical snapshot -> zero UPDATEs, zero audit trigger fires, run_id stays 1.
+    await stageSnapshot(2, 'Channel One', true);
+    const upsertChanges: number[] = [];
+    const spyTx = (tx: SqlDriver): SqlDriver => ({
+      ...tx,
+      run: async (sql, params) => {
+        const res = await tx.run(sql, params);
+        if (sql.startsWith('INSERT INTO ')) upsertChanges.push(res.changes);
+        return res;
+      },
+    });
+
+    const removed = await db.transaction((tx) => commitStagedCatalog(spyTx(tx), 's1', 2, []));
+    expect(Object.values(removed).every((n) => n === 0)).toBe(true);
+    expect(upsertChanges.every((c) => c === 0)).toBe(true);
+    expect(await db.all('SELECT tbl FROM _audit_updates')).toEqual([]);
+
+    expect(
+      await db.all("SELECT id, is_hidden, run_id FROM live WHERE key = 'x:s1:live:1'"),
+    ).toEqual([{ id: liveId, is_hidden: 1, run_id: 1 }]);
+    expect(
+      await db.all("SELECT id, is_hidden, run_id FROM movies WHERE key = 'x:s1:movie:1'"),
+    ).toEqual([{ id: movieId, is_hidden: 1, run_id: 1 }]);
+    expect(
+      await db.all("SELECT id, is_hidden, run_id FROM series WHERE key = 'x:s1:series:1'"),
+    ).toEqual([{ id: seriesId, is_hidden: 1, run_id: 1 }]);
+    expect(
+      await db.all("SELECT is_hidden, run_id FROM categories WHERE provider_id = 'c1'"),
+    ).toEqual([{ is_hidden: 1, run_id: 1 }]);
+    expect(
+      await db.all("SELECT is_hidden, run_id FROM placements WHERE item_key = 'x:s1:live:1'"),
+    ).toEqual([{ is_hidden: 1, run_id: 1 }]);
+
+    // Run 3: modify Channel One, delete Channel Two, keep Film One & Show One unchanged.
+    await stageSnapshot(3, 'Channel One 4K', false);
+    const removed3 = await db.transaction((tx) => commitStagedCatalog(tx, 's1', 3, []));
+    expect(removed3.live).toBe(1);
+    expect(removed3.placements).toBe(1);
+    expect(await db.all('SELECT tbl FROM _audit_updates')).toEqual([{ tbl: 'live' }]);
+    const expectedLiveHash = hashLiveRow({
+      providerId: '1',
+      num: 1,
+      name: 'Channel One 4K',
+      nameFold: 'channel one 4k',
+      logo: 'http://img/1.png',
+      guideId: 'ch1',
+      catchupDays: 2,
+    });
+    expect(
+      await db.all(
+        "SELECT id, name, is_hidden, run_id, content_hash FROM live WHERE source_id = 's1'",
+      ),
+    ).toEqual([
+      {
+        id: liveId,
+        name: 'Channel One 4K',
+        is_hidden: 1,
+        run_id: 3,
+        content_hash: expectedLiveHash,
+      },
+    ]);
+    expect(
+      await db.all<{ rowid: number }>("SELECT rowid FROM live_fts WHERE live_fts MATCH '4k'"),
+    ).toEqual([{ rowid: liveId }]);
+    expect(
+      await db.all("SELECT run_id, content_hash FROM movies WHERE key = 'x:s1:movie:1'"),
+    ).toEqual([
+      {
+        run_id: 1,
+        content_hash: hashMovieRow({
+          providerId: '1',
+          name: 'Film One',
+          nameFold: 'film one',
+          rating: 8.1,
+          year: 2024,
+          extension: 'mkv',
+          added: 100,
+        }),
+      },
+    ]);
+    expect(
+      await db.all("SELECT run_id, content_hash FROM series WHERE key = 'x:s1:series:1'"),
+    ).toEqual([
+      {
+        run_id: 1,
+        content_hash: hashSeriesRow({
+          providerId: '1',
+          name: 'Show One',
+          nameFold: 'show one',
+          cover: 'http://img/s1.png',
+          plot: 'Plot 1',
+          rating: 8.5,
+          year: 2025,
+          lastModified: 200,
+        }),
+      },
+    ]);
+    expect(
+      await db.all("SELECT run_id, content_hash FROM categories WHERE provider_id = 'c1'"),
+    ).toEqual([
+      {
+        run_id: 1,
+        content_hash: hashCategoryRow({ name: 'News', nameFold: 'news', position: 0 }),
+      },
+    ]);
+  });
+
+  it('preserves surviving Xtream episodes while pruning episodes of removed series, and prunes removed M3U episodes (#192)', async () => {
+    const { db } = await setup();
+
+    // Seed Xtream-style series (no episodes_next staged) + pre-loaded episodes for both series.
+    await writeItems(db, seriesWriter, 's1', 1, [
+      { key: 'x:s1:series:1', item: { id: 1, name: 'Keep Show', categoryIds: [] } },
+      { key: 'x:s1:series:2', item: { id: 2, name: 'Drop Show', categoryIds: [] } },
+    ]);
+    await db.transaction((tx) => commitStagedCatalog(tx, 's1', 1, []));
+    await db.batch(
+      'INSERT INTO episodes (source_id, key, series_key, title, run_id) VALUES (?, ?, ?, ?, ?)',
+      [
+        ['s1', 'x:s1:ep:1', 'x:s1:series:1', 'Keep Ep', 1],
+        ['s1', 'x:s1:ep:2', 'x:s1:series:2', 'Drop Ep', 1],
+      ],
+    );
+
+    // Run 2 (Xtream): Keep Show unchanged, Drop Show removed, episodes_next empty.
+    await writeItems(db, seriesWriter, 's1', 2, [
+      { key: 'x:s1:series:1', item: { id: 1, name: 'Keep Show', categoryIds: [] } },
+    ]);
+    const removedXtream = await db.transaction((tx) => commitStagedCatalog(tx, 's1', 2, []));
+    expect(removedXtream.series).toBe(1);
+    expect(removedXtream.episodes).toBe(1);
+    expect(await db.all("SELECT key, run_id FROM episodes WHERE source_id = 's1'")).toEqual([
+      { key: 'x:s1:ep:1', run_id: 1 },
+    ]);
+
+    // M3U source s2: stages episodes in episodes_next; unchanged live/movie/series rows skip UPDATEs too.
+    await writeM3uLive(db, 's2', 1, [
+      {
+        key: 'm:s2:live:1',
+        name: 'M3U Ch',
+        logo: null,
+        template: 'http://h/1.ts',
+        headersJson: null,
+        num: 1,
+        guideId: null,
+        catchupDays: null,
+      },
+    ]);
+    await writeM3uMovies(db, 's2', 1, [
+      {
+        key: 'm:s2:movie:1',
+        name: 'M3U Mov',
+        logo: null,
+        template: 'http://h/m.mkv',
+        headersJson: null,
+      },
+    ]);
+    await writeM3uSeries(db, 's2', 1, [{ key: 'm:s2:series:1', name: 'M3U Show' }]);
+    await writeM3uEpisodes(db, 's2', 1, [
+      {
+        key: 'm:s2:ep:1',
+        seriesKey: 'm:s2:series:1',
+        name: 'Ep 1',
+        logo: null,
+        template: 'http://h/e1.mkv',
+        headersJson: null,
+      },
+      {
+        key: 'm:s2:ep:2',
+        seriesKey: 'm:s2:series:1',
+        name: 'Ep 2',
+        logo: null,
+        template: 'http://h/e2.mkv',
+        headersJson: null,
+      },
+    ]);
+    await db.transaction((tx) => commitStagedCatalog(tx, 's2', 1, []));
+
+    // Run 2 on s2: live/movie/series unchanged, ep:2 removed from episodes_next.
+    await writeM3uLive(db, 's2', 2, [
+      {
+        key: 'm:s2:live:1',
+        name: 'M3U Ch',
+        logo: null,
+        template: 'http://h/1.ts',
+        headersJson: null,
+        num: 1,
+        guideId: null,
+        catchupDays: null,
+      },
+    ]);
+    await writeM3uMovies(db, 's2', 2, [
+      {
+        key: 'm:s2:movie:1',
+        name: 'M3U Mov',
+        logo: null,
+        template: 'http://h/m.mkv',
+        headersJson: null,
+      },
+    ]);
+    await writeM3uSeries(db, 's2', 2, [{ key: 'm:s2:series:1', name: 'M3U Show' }]);
+    await writeM3uEpisodes(db, 's2', 2, [
+      {
+        key: 'm:s2:ep:1',
+        seriesKey: 'm:s2:series:1',
+        name: 'Ep 1',
+        logo: null,
+        template: 'http://h/e1.mkv',
+        headersJson: null,
+      },
+    ]);
+    const removedM3u = await db.transaction((tx) => commitStagedCatalog(tx, 's2', 2, []));
+    expect(removedM3u.episodes).toBe(1);
+    expect(await db.all("SELECT key FROM episodes WHERE source_id = 's2'")).toEqual([
+      { key: 'm:s2:ep:1' },
+    ]);
+    expect(await db.all("SELECT run_id FROM live WHERE source_id = 's2'")).toEqual([{ run_id: 1 }]);
+    expect(await db.all("SELECT run_id FROM movies WHERE source_id = 's2'")).toEqual([
+      { run_id: 1 },
+    ]);
+    expect(await db.all("SELECT run_id FROM series WHERE source_id = 's2'")).toEqual([
+      { run_id: 1 },
     ]);
   });
 });

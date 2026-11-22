@@ -92,6 +92,12 @@ export interface XtreamCallOptions {
   signal?: AbortSignal;
 }
 
+/** Per-call options of streaming {@link XtreamClient} list methods. */
+export interface XtreamStreamOptions extends XtreamCallOptions {
+  /** Maximum records yielded per batch (default 500). */
+  batchSize?: number;
+}
+
 /** Per-host token-bucket pacing options for {@link createXtreamClient}. */
 export interface XtreamRateLimitOptions {
   burst?: number;
@@ -133,6 +139,21 @@ export interface XtreamClient {
   liveStreams(categoryId?: string, options?: XtreamCallOptions): Promise<Result<XtreamLive[]>>;
   vodStreams(categoryId?: string, options?: XtreamCallOptions): Promise<Result<XtreamMovie[]>>;
   series(categoryId?: string, options?: XtreamCallOptions): Promise<Result<XtreamSeries[]>>;
+  /** Incrementally streams live channels in bounded-memory batches. */
+  streamLiveStreams(
+    categoryId?: string,
+    options?: XtreamStreamOptions,
+  ): AsyncGenerator<XtreamLive[], Result<void>>;
+  /** Incrementally streams movies in bounded-memory batches. */
+  streamVodStreams(
+    categoryId?: string,
+    options?: XtreamStreamOptions,
+  ): AsyncGenerator<XtreamMovie[], Result<void>>;
+  /** Incrementally streams series in bounded-memory batches. */
+  streamSeries(
+    categoryId?: string,
+    options?: XtreamStreamOptions,
+  ): AsyncGenerator<XtreamSeries[], Result<void>>;
   seriesInfo(seriesId: number, options?: XtreamCallOptions): Promise<Result<XtreamSeriesInfo>>;
   vodInfo(vodId: number, options?: XtreamCallOptions): Promise<Result<XtreamVodInfo>>;
   shortEpg(
