@@ -164,6 +164,44 @@ export function findProgramIndexAtTime(
   return bestIdx;
 }
 
+/**
+ * Selects the programme in `programmes` with strictly greatest positive time overlap against
+ * `[windowStartMs, windowStopMs]`, breaking ties by smallest `|p.start - windowStartMs|` (then
+ * earlier index). Falls back to {@link findProgramIndexAtTime} with `fallbackAnchorMs` when no
+ * programme overlaps the window (`#112`).
+ */
+export function findOverlappingProgramIndex(
+  programmes: readonly ProgrammeRow[],
+  windowStartMs: number,
+  windowStopMs: number,
+  fallbackAnchorMs: number,
+): number {
+  if (programmes.length === 0) return -1;
+  if (
+    !Number.isFinite(windowStartMs) ||
+    !Number.isFinite(windowStopMs) ||
+    windowStopMs <= windowStartMs
+  ) {
+    return findProgramIndexAtTime(programmes, fallbackAnchorMs);
+  }
+  let bestIdx = -1;
+  let bestOverlap = 0;
+  let bestStartDist = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < programmes.length; i++) {
+    const p = programmes[i];
+    if (p === undefined) continue;
+    const overlap = Math.min(p.stop, windowStopMs) - Math.max(p.start, windowStartMs);
+    if (overlap <= 0) continue;
+    const startDist = Math.abs(p.start - windowStartMs);
+    if (overlap > bestOverlap || (overlap === bestOverlap && startDist < bestStartDist)) {
+      bestOverlap = overlap;
+      bestStartDist = startDist;
+      bestIdx = i;
+    }
+  }
+  return bestOverlap > 0 ? bestIdx : findProgramIndexAtTime(programmes, fallbackAnchorMs);
+}
+
 /** Appends a single digit (`'0'..'9'`) to a channel number jump buffer, capping length cleanly. */
 export function appendNumberDigit(buffer: string, digit: string): string {
   if (!/^[0-9]$/.test(digit)) return buffer;

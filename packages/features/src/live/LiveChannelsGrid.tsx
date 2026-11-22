@@ -17,7 +17,12 @@ import {
   View,
   VirtualizedList,
 } from 'react-native';
-import { type CatalogLayoutMetrics, type PagedListSource, useBrowseFocusMemory } from '../shared';
+import {
+  type CatalogLayoutMetrics,
+  type PagedListSource,
+  useBrowseFocusMemory,
+  useRouteActive,
+} from '../shared';
 import { ChannelGridRow, type LiveGridShared } from './LiveChannelTile';
 
 const SCROLL_QUANTUM = 2;
@@ -71,10 +76,11 @@ function syncChannelWindow(
 function TvChannelsKeyBridge({
   onEvent,
 }: {
-  readonly onEvent: (e: KeyEvent) => void;
+  readonly onEvent: Parameters<typeof useKeyInterpreter>[0];
 }): ReactElement {
+  const routeActive = useRouteActive();
   useKeyInterpreter(onEvent);
-  return <TvFocusAnchor testID="live-channels-tv-focus-anchor" />;
+  return <TvFocusAnchor testID="live-channels-tv-focus-anchor" hasTVPreferredFocus={routeActive} />;
 }
 
 /** Props of {@link LiveChannelsGrid}. */
@@ -198,31 +204,43 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
   ]);
 
   const handleTvKey = useCallback(
-    (event: KeyEvent) => {
+    (event: KeyEvent): boolean => {
+      if (event.key === 'back' && event.kind === 'press') {
+        onEdgeTop?.();
+        return true;
+      }
       if ((event.kind !== 'press' && event.kind !== 'repeat') || !channelSource || itemCount === 0)
-        return;
+        return false;
       const cur = focusPosRef.current;
       if (event.key === 'up') {
         if (cur.row === 0) onEdgeTop?.();
         else commitFocusPos({ row: cur.row - 1, col: cur.col });
-      } else if (event.key === 'down') {
+        return true;
+      }
+      if (event.key === 'down') {
         const nextRow = Math.min(rowCount - 1, cur.row + 1);
         const maxCol = Math.max(0, Math.min(cols, itemCount - nextRow * cols) - 1);
         commitFocusPos({ row: nextRow, col: Math.min(cur.col, maxCol) });
-      } else if (event.key === 'left') {
+        return true;
+      }
+      if (event.key === 'left') {
         commitFocusPos({ row: cur.row, col: Math.max(0, cur.col - 1) });
-      } else if (event.key === 'right') {
+        return true;
+      }
+      if (event.key === 'right') {
         const maxCol = Math.max(0, Math.min(cols, itemCount - cur.row * cols) - 1);
         commitFocusPos({ row: cur.row, col: Math.min(maxCol, cur.col + 1) });
-      } else if (event.key === 'back' && event.kind === 'press') {
-        onEdgeTop?.();
-      } else if (event.key === 'select' && event.kind === 'press') {
+        return true;
+      }
+      if (event.key === 'select' && event.kind === 'press') {
         const idx = cur.row * cols + cur.col;
         const hit = channelSource.get(idx);
         if (hit) onWatchChannel(hit, idx);
         else
           void channelSource.loadItem(idx).then((loaded) => loaded && onWatchChannel(loaded, idx));
+        return true;
       }
+      return false;
     },
     [channelSource, cols, commitFocusPos, itemCount, onEdgeTop, onWatchChannel, rowCount],
   );

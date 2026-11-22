@@ -1,4 +1,3 @@
-import type { KeyEvent } from '@elv/focus-core';
 import type { MessageId } from '@elv/i18n';
 import {
   EditorialCategoryBar,
@@ -16,6 +15,7 @@ import {
 } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRouteActive } from '../shared';
 import { AboutLicensesPanel } from './AboutLicensesPanel';
 import {
   AppearancePanel,
@@ -29,9 +29,14 @@ import {
   useTvSettingsNavigation,
 } from './useTvSettingsNavigation';
 
-function SettingsTvKeyBridge({ onEvent }: { onEvent: (event: KeyEvent) => void }): ReactElement {
+function SettingsTvKeyBridge({
+  onEvent,
+}: {
+  onEvent: Parameters<typeof useKeyInterpreter>[0];
+}): ReactElement {
+  const routeActive = useRouteActive();
   useKeyInterpreter(onEvent);
-  return <TvFocusAnchor testID="settings-tv-focus-anchor" />;
+  return <TvFocusAnchor testID="settings-tv-focus-anchor" hasTVPreferredFocus={routeActive} />;
 }
 
 /** Slot props supplied to embedded Sources and Third-Party Notices views inside {@link SettingsScreen}. */

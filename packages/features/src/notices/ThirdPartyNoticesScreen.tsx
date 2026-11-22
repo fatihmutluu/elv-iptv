@@ -19,6 +19,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useRouteActive } from '../shared';
 import { NoticesDetailPane } from './NoticesDetailPane';
 import { THIRD_PARTY_NOTICES, type ThirdPartyNotice } from './notices-data';
 import { createNoticesListSource, NOTICES_LIST_ID, syncNoticesScopeActive } from './notices-scope';
@@ -50,9 +51,14 @@ export interface ThirdPartyNoticesScreenProps {
   embedded?: boolean;
 }
 
-function NoticesTvKeyBridge({ onEvent }: { onEvent: (event: KeyEvent) => void }): ReactElement {
+function NoticesTvKeyBridge({
+  onEvent,
+}: {
+  onEvent: Parameters<typeof useKeyInterpreter>[0];
+}): ReactElement {
+  const routeActive = useRouteActive();
   useKeyInterpreter(onEvent);
-  return <TvFocusAnchor testID="notices-tv-focus-anchor" />;
+  return <TvFocusAnchor testID="notices-tv-focus-anchor" hasTVPreferredFocus={routeActive} />;
 }
 
 /**

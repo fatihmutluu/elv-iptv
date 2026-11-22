@@ -4,6 +4,7 @@ import android.view.KeyEvent
 import java.lang.ref.WeakReference
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -156,6 +157,179 @@ class KeyForwardingTest {
   }
 
   @Test
+  fun `wrapWindow re-wraps automatically when an SDK or DevSupport replaces window callback`() {
+    val windowKey = Any()
+    val originalBase = FakeCallback()
+    val first = KeyForwarding.wrapWindow(windowKey, originalBase)
+    assertTrue(first is ForwardingWindowCallback)
+
+    // Simulate DevSupport or an SDK completely replacing window.callback without delegating to `first`.
+    val replacement = FakeCallback()
+    val rewrapped = KeyForwarding.wrapWindow(windowKey, replacement)
+    assertNotSame(replacement, rewrapped)
+    assertNotSame(first, rewrapped)
+    assertTrue(rewrapped is ForwardingWindowCallback)
+
+    val events = mutableListOf<Map<String, Any>>()
+    KeyForwarding.setSink { events.add(it) }
+    rewrapped.onWindowFocusChanged(false)
+    assertEquals(listOf(mapOf("action" to "blur")), events)
+    assertEquals(listOf(false), replacement.focusChanges)
+
+    // Re-checking the freshly wrapped callback is idempotent.
+    assertSame(rewrapped, KeyForwarding.wrapWindow(windowKey, rewrapped))
+  }
+
+  @Test
+  fun `wrapWindow preserves WindowCallbackWrapper getWrapped chains and survives cyclic third-party delegates`() {
+    val windowKey = Any()
+    val base = FakeCallback()
+    val first = KeyForwarding.wrapWindow(windowKey, base)
+
+    val opaqueWrapper = WrappedGetterCallback(first)
+    assertSame(opaqueWrapper, KeyForwarding.wrapWindow(windowKey, opaqueWrapper))
+
+    // Cyclic replacement without `first` terminates safely and re-wraps.
+    val cyclicA = CyclicCallback()
+    val cyclicB = CyclicCallback()
+    cyclicA.delegate = cyclicB
+    cyclicB.delegate = cyclicA
+    val rewrapped = KeyForwarding.wrapWindow(windowKey, cyclicA)
+    assertNotSame(cyclicA, rewrapped)
+    assertTrue(rewrapped is ForwardingWindowCallback)
+  }
+
+  @Test
+  fun `modal and secondary window forwarding works independently and deduplicates modal views`() {
+    val mainWindow = Any()
+    val modalWindow = Any()
+    val mainBase = FakeCallback()
+    val modalBase = FakeCallback()
+    var focusLossTriggered = 0
+
+    val mainWrapped = KeyForwarding.wrapWindow(mainWindow, mainBase) { focusLossTriggered += 1 }
+    val modalWrapped = KeyForwarding.wrapWindow(modalWindow, modalBase)
+
+    val events = mutableListOf<Map<String, Any>>()
+    KeyForwarding.setSink { events.add(it) }
+
+    // Main window focus loss triggers the modal scan hook without breaking delegation.
+    mainWrapped.onWindowFocusChanged(false)
+    assertEquals(1, focusLossTriggered)
+    assertEquals(listOf(false), mainBase.focusChanges)
+
+    // Modal window forwards blur and raw key payloads independently.
+    modalWrapped.onWindowFocusChanged(false)
+    assertEquals(listOf(false), modalBase.focusChanges)
+    assertTrue(KeyForwarding.forwardRawKey(KeyEvent.ACTION_DOWN, 0, 0, 23, 42L))
+    assertFalse(KeyForwarding.forwardRawKey(KeyEvent.ACTION_DOWN, 2, 0, 23, 43L))
+    assertEquals(
+      listOf(
+        mapOf("action" to "blur"),
+        mapOf("action" to "blur"),
+        mapOf("action" to "down", "keyCode" to 23, "canceled" to false, "eventTime" to 42.0),
+      ),
+      events,
+    )
+
+    // Modal view attachment is deduplicated per view and independent across distinct views.
+    val modalViewA = Any()
+    val modalViewB = Any()
+    var attaches = 0
+    assertTrue(KeyForwarding.installModalView(modalViewA) { attaches += 1 })
+    assertFalse(KeyForwarding.installModalView(modalViewA) { attaches += 1 })
+    assertTrue(KeyForwarding.installModalView(modalViewB) { attaches += 1 })
+    assertEquals(2, attaches)
+  }
+
+  @Test
+  fun `wrapDialogWindow deduplicates with installModalView so unhandled keys never emit twice`() {
+    val dialogWindow = Any()
+    val dialogDecorView = Any()
+    val dialogBase = FakeCallback()
+
+    val wrapped = KeyForwarding.wrapDialogWindow(dialogWindow, dialogBase, dialogDecorView)
+    assertTrue(wrapped is ForwardingWindowCallback)
+    assertTrue(KeyForwarding.isModalViewHandled(dialogDecorView))
+
+    var fallbackAttachCount = 0
+    var fallbackListener: (() -> Unit)? = null
+    val attached = KeyForwarding.installModalViewCandidate(
+      viewKey = dialogDecorView,
+      tryWrapDialog = { false },
+      attachUnhandledListener = {
+        fallbackAttachCount += 1
+        fallbackListener = { KeyForwarding.forwardRawKey(KeyEvent.ACTION_DOWN, 0, 0, 23, 99L) }
+      },
+    )
+    assertFalse(attached)
+    assertEquals(0, fallbackAttachCount)
+
+    // Simulating an unhandled key reaching the dialog: only the window callback path emits.
+    val events = mutableListOf<Map<String, Any>>()
+    KeyForwarding.setSink { events.add(it) }
+    KeyForwarding.forwardRawKey(KeyEvent.ACTION_DOWN, 0, 0, 23, 99L)
+    fallbackListener?.invoke()
+    assertEquals(
+      listOf(mapOf("action" to "down", "keyCode" to 23, "canceled" to false, "eventTime" to 99.0)),
+      events,
+    )
+  }
+
+  @Test
+  fun `installModalViewCandidate prefers dialog window wrapping over unhandled listener fallback`() {
+    val dialogView = Any()
+    var dialogWrapped = 0
+    var fallbackAttached = 0
+
+    assertTrue(
+      KeyForwarding.installModalViewCandidate(
+        viewKey = dialogView,
+        tryWrapDialog = {
+          dialogWrapped += 1
+          true
+        },
+        attachUnhandledListener = { fallbackAttached += 1 },
+      ),
+    )
+    assertEquals(1, dialogWrapped)
+    assertEquals(0, fallbackAttached)
+    assertTrue(KeyForwarding.isModalViewHandled(dialogView))
+
+    // Second scan skips already-handled dialog view.
+    assertFalse(
+      KeyForwarding.installModalViewCandidate(
+        viewKey = dialogView,
+        tryWrapDialog = {
+          dialogWrapped += 1
+          true
+        },
+        attachUnhandledListener = { fallbackAttached += 1 },
+      ),
+    )
+    assertEquals(1, dialogWrapped)
+    assertEquals(0, fallbackAttached)
+
+    // When no dialog window is accessible, falls back to unhandled listener once.
+    val plainModalView = Any()
+    assertTrue(
+      KeyForwarding.installModalViewCandidate(
+        viewKey = plainModalView,
+        tryWrapDialog = { false },
+        attachUnhandledListener = { fallbackAttached += 1 },
+      ),
+    )
+    assertFalse(
+      KeyForwarding.installModalViewCandidate(
+        viewKey = plainModalView,
+        tryWrapDialog = { false },
+        attachUnhandledListener = { fallbackAttached += 1 },
+      ),
+    )
+    assertEquals(1, fallbackAttached)
+  }
+
+  @Test
   fun `emitBlur sends blur payload for background transitions and ignores absent sink`() {
     // Safe no-op when no sink is set.
     KeyForwarding.emitBlur()
@@ -189,4 +363,16 @@ class KeyForwardingTest {
     @Suppress("unused")
     val ownedWindow: Any,
   ) : android.view.Window.Callback by FakeCallback()
+
+  /** Mirrors AndroidX WindowCallbackWrapper exposing getWrapped() over an opaque field type. */
+  private class WrappedGetterCallback(
+    private val hidden: Any,
+  ) : android.view.Window.Callback by FakeCallback() {
+    @Suppress("unused")
+    fun getWrapped(): android.view.Window.Callback = hidden as android.view.Window.Callback
+  }
+
+  private class CyclicCallback : android.view.Window.Callback by FakeCallback() {
+    var delegate: android.view.Window.Callback? = null
+  }
 }

@@ -44,6 +44,7 @@ export {
   EPG_SLOT_MS,
   EPG_VISIBLE_SPAN_MS,
   type EpgPositionedSlot,
+  findOverlappingProgramIndex,
   findProgramIndexAtTime,
   floorToEpgSlot,
   formatClockTime,

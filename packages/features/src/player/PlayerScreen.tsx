@@ -1,8 +1,8 @@
 import type { CatalogService } from '@elv/data';
 import type { PlaybackClock, PlaybackService, PlaybackTimers } from '@elv/playback';
-import { useFormFactor, useI18n, useTheme } from '@elv/ui-kit';
+import { TvFocusAnchor, useFormFactor, useI18n, useTheme } from '@elv/ui-kit';
 import { type ReactElement, useEffect, useRef, useState } from 'react';
-import { Platform, View, type ViewStyle } from 'react-native';
+import { Platform, View } from 'react-native';
 import { type AppLifecyclePort, noopAppLifecycle } from '../ports/app-lifecycle';
 import type { PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
@@ -10,7 +10,10 @@ import type { VideoHost } from '../ports/video-host';
 import { describePlaybackFailure } from './errors';
 import { NextEpisodeBanner } from './NextEpisodeBanner';
 import {
+  DEFAULT_PLAYER_CLOCK,
+  DEFAULT_PLAYER_TIMERS,
   formatStatusLine,
+  HIDE_CURSOR_WEB_STYLE,
   PlayerCanvasTapTarget,
   PlayerLockedOverlay,
   PlayerOsd,
@@ -28,17 +31,10 @@ import { useWatchProgressSync } from './useWatchProgressSync';
 /** Default production OSD auto-hide delay in milliseconds (`#421`). */
 export const DEFAULT_AUTO_HIDE_OSD_MS = 3_500;
 
-const HIDE_CURSOR_WEB_STYLE = { cursor: 'none' } as unknown as ViewStyle;
-
-const DEFAULT_CLOCK: PlaybackClock = { now: () => performance.now() };
-const DEFAULT_TIMERS: PlaybackTimers = {
-  setTimeout: (fn, ms) => setTimeout(fn, ms),
-  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
-};
-
 /** Props of {@link PlayerScreen}. */
 export interface PlayerScreenProps {
-  catalog: Pick<CatalogService, 'resolveStream' | 'getProgress' | 'saveProgress'>;
+  catalog: Pick<CatalogService, 'resolveStream' | 'getProgress' | 'saveProgress'> &
+    Partial<Pick<CatalogService, 'channelByNumber'>>;
   videoHost: VideoHost;
   target: PlayTarget;
   playbackGuard?: PlaybackGuard;
@@ -58,8 +54,8 @@ export function PlayerScreen({
   target,
   playbackGuard,
   appLifecycle = noopAppLifecycle,
-  clock = DEFAULT_CLOCK,
-  timers = DEFAULT_TIMERS,
+  clock = DEFAULT_PLAYER_CLOCK,
+  timers = DEFAULT_PLAYER_TIMERS,
   initialOsdHidden,
   autoHideOsdMs,
   onTargetChange,
@@ -85,19 +81,19 @@ export function PlayerScreen({
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
 
-  const { activeTarget, zapBy, onServiceReady, handlePlayNextEpisode, handleJumpPreviousChannel } =
-    usePlayerTargetHandoff({
-      target,
-      playbackGuard,
-      appLifecycle,
-      catalogRef,
-      serviceRef,
-      clockRef,
-      timersRef,
-      flushProgressRef,
-      cancelScrubRef,
-      onTargetChangeRef,
-    });
+  const handoff = usePlayerTargetHandoff({
+    target,
+    playbackGuard,
+    appLifecycle,
+    catalogRef,
+    serviceRef,
+    clockRef,
+    timersRef,
+    flushProgressRef,
+    cancelScrubRef,
+    onTargetChangeRef,
+  });
+  const { activeTarget, zapBy, jumpToChannel } = handoff;
 
   const zapByRef = useRef<(delta: 1 | -1, repeat?: boolean) => void>(zapBy);
   zapByRef.current = zapBy;
@@ -113,7 +109,7 @@ export function PlayerScreen({
     hostFullscreenRef,
     onExitRef,
     zapByRef,
-    onServiceReady,
+    onServiceReady: handoff.onServiceReady,
   });
 
   const { flushProgress } = useWatchProgressSync({
@@ -176,8 +172,9 @@ export function PlayerScreen({
     onExitRef,
     zapByRef,
     onSeekCommit: flushProgress,
-    onPlayNextEpisode: handlePlayNextEpisode,
-    onJumpPreviousChannel: handleJumpPreviousChannel,
+    onPlayNextEpisode: handoff.handlePlayNextEpisode,
+    onJumpPreviousChannel: handoff.handleJumpPreviousChannel,
+    onJumpToChannel: jumpToChannel,
     onToggleFullscreen: hostToggleFullscreen,
     onToggleMute: hostToggleMute,
     onSetOrientationLocked: hostSetOrientationLocked,
@@ -196,7 +193,7 @@ export function PlayerScreen({
       isTv={isTv}
       tvFocused={isTv && controls.tvOsdFocused && controls.tvOsdAction === 'nextEpisode'}
       i18n={i18n}
-      onPlayNext={handlePlayNextEpisode}
+      onPlayNext={handoff.handlePlayNextEpisode}
       onDismiss={() => setNextEpisodeDismissed(true)}
       onVisibilityChange={setNextEpisodeVisible}
     />
@@ -243,6 +240,7 @@ export function PlayerScreen({
     <PlayerOsd
       title={activeTarget.title}
       subtitle={activeTarget.subtitle}
+      channelDigits={controls.channelDigits}
       statusLine={statusLine}
       failure={failure}
       isVod={activeTarget.kind === 'vod'}
@@ -286,7 +284,7 @@ export function PlayerScreen({
         ? { onToggleFullscreen: controls.toggleFullscreen }
         : {})}
       onLock={controls.lockControls}
-      onJumpPreviousChannel={handleJumpPreviousChannel}
+      onJumpPreviousChannel={handoff.handleJumpPreviousChannel}
       onPrev={() => zapBy(-1)}
       onNext={() => zapBy(1)}
       onRetry={controls.retry}
@@ -329,11 +327,9 @@ export function PlayerScreen({
       {...desktopContextMenuProps}
     >
       {isTv ? (
-        <View
+        <TvFocusAnchor
           testID="player-tv-focus-anchor"
-          focusable
-          hasTVPreferredFocus
-          style={playerStyles.tvFocusAnchor}
+          hasTVPreferredFocus={!controls.tracksOpen && !controls.settingsOpen && !controls.locked}
         />
       ) : null}
 

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { ListState } from './list';
-import { createScope, findList, resolveFallbackId, setListIndex, withCount } from './scope';
+import {
+  createScope,
+  findList,
+  hasNonEmptyList,
+  resolveFallbackId,
+  setListIndex,
+  withCount,
+} from './scope';
 
 const l = (id: string, over: Partial<ListState> = {}): ListState => ({
   id,
@@ -23,6 +30,44 @@ describe('createScope', () => {
     expect(() => createScope('s', [l('a')], 'x')).toThrow();
     expect(() => createScope('s', [l('a'), l('a')], 'a')).toThrow();
     expect(() => createScope('s', [], 'a')).toThrow();
+  });
+
+  it('immediately resolves active to a reachable non-empty fallback when initial active list is empty (#112)', () => {
+    const direct = createScope(
+      's',
+      [l('items', { count: 0, fallbackId: 'cats' }), l('cats', { count: 6, index: 2 })],
+      'items',
+    );
+    expect(direct.active).toBe('cats');
+
+    const chained = createScope(
+      's',
+      [
+        l('items', { count: 0, fallbackId: 'sub' }),
+        l('sub', { count: 0, fallbackId: 'rail' }),
+        l('rail', { count: 3 }),
+      ],
+      'items',
+    );
+    expect(chained.active).toBe('rail');
+
+    const allEmpty = createScope(
+      's',
+      [l('items', { count: 0, fallbackId: 'cats' }), l('cats', { count: 0 })],
+      'items',
+    );
+    expect(allEmpty.active).toBe('items');
+  });
+});
+
+describe('hasNonEmptyList (#112)', () => {
+  it('reports whether any list in the scope has items', () => {
+    expect(
+      hasNonEmptyList(createScope('s', [l('a', { count: 0 }), l('b', { count: 0 })], 'a')),
+    ).toBe(false);
+    expect(
+      hasNonEmptyList(createScope('s', [l('a', { count: 0 }), l('b', { count: 1 })], 'a')),
+    ).toBe(true);
   });
 });
 

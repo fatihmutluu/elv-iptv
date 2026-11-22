@@ -3,14 +3,17 @@ import {
   createElement,
   type ReactElement,
   type ReactNode,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
+  useRef,
 } from 'react';
 import { BackHandler, Platform, TVEventControl, TVEventHandler } from 'react-native';
 import { type AndroidKeySource, createAndroidKeyAdapter } from './android-keys';
 import { RemoteKeysContext } from './RemoteKeysProvider';
 import {
+  isEventConsumed,
   type TextEntryActiveSource,
   TvRemoteContext,
   type TvRemoteDispatcher,
@@ -23,6 +26,14 @@ export { TvRemoteContext, type TvRemoteDispatcher, type TvRemoteEvent };
 
 /** Platforms whose remote events differ: on tvOS the Menu button is Back. */
 export type TvPlatform = 'ios' | 'android';
+
+/** Optional subscriber-count lifecycle callbacks for {@link createTvRemoteDispatcher} (#277). */
+export interface TvRemoteDispatcherLifecycle {
+  /** Invoked when subscriber count transitions `0 -> 1`; may return a cleanup function invoked on `1 -> 0`. */
+  onFirstListener?: (() => (() => void) | undefined) | (() => void);
+  /** Invoked after subscriber count transitions `1 -> 0` and any `onFirstListener` cleanup runs. */
+  onLastListener?: () => void;
+}
 
 /** Props of {@link TvRemoteProvider}. */
 export interface TvRemoteProviderProps {
@@ -40,8 +51,17 @@ const KEYS: Readonly<Record<string, Key>> = {
   playPause: 'playPause',
   play: 'play',
   pause: 'pause',
+  stop: 'stop',
   rewind: 'rewind',
   fastForward: 'fastForward',
+  next: 'next',
+  previous: 'previous',
+  captions: 'captions',
+  audioTrack: 'audioTrack',
+  guide: 'guide',
+  info: 'info',
+  search: 'search',
+  lastChannel: 'lastChannel',
   menu: 'menu',
   channelUp: 'channelUp',
   channelDown: 'channelDown',
@@ -97,10 +117,13 @@ export function toKeyInput(
 }
 
 /** Creates an isolated {@link TvRemoteDispatcher} that fans out platform key inputs to subscribers safely. */
-export function createTvRemoteDispatcher(): TvRemoteDispatcher {
+export function createTvRemoteDispatcher(
+  lifecycle?: TvRemoteDispatcherLifecycle,
+): TvRemoteDispatcher {
   const listeners = new Set<(event: TvRemoteEvent) => void>();
   const textEntries = new Map<TextEntryActiveSource, number>();
   let backDownWhileTextEntryAt: number | undefined;
+  let detachLifecycle: (() => void) | undefined;
 
   const isTextEntryActive = (): boolean => {
     for (const controller of textEntries.keys()) {
@@ -132,18 +155,28 @@ export function createTvRemoteDispatcher(): TvRemoteDispatcher {
 
   return {
     subscribe(listener) {
+      const wasEmpty = listeners.size === 0;
       listeners.add(listener);
+      if (wasEmpty) {
+        const cleanup = lifecycle?.onFirstListener?.();
+        detachLifecycle = typeof cleanup === 'function' ? cleanup : undefined;
+      }
       let active = true;
       return () => {
         if (!active) return;
         active = false;
-        listeners.delete(listener);
+        if (listeners.delete(listener) && listeners.size === 0) {
+          const cleanup = detachLifecycle;
+          detachLifecycle = undefined;
+          cleanup?.();
+          lifecycle?.onLastListener?.();
+        }
       };
     },
-    dispatch(input, requirePriorDown) {
+    dispatch(input, requirePriorDown): boolean {
       if (input.key === 'back') {
         if (input.action === 'press') {
-          if (exitActiveTextEntry()) return;
+          if (exitActiveTextEntry()) return true;
         } else if (input.action === 'down') {
           backDownWhileTextEntryAt = isTextEntryActive() ? input.time : undefined;
         } else if (input.action === 'up') {
@@ -156,20 +189,22 @@ export function createTvRemoteDispatcher(): TvRemoteDispatcher {
                 input: { key: 'back', action: 'cancel', time: input.time },
                 requirePriorDown,
               });
-              return;
+              return true;
             }
           } else if (!requirePriorDown && exitActiveTextEntry()) {
             broadcast({
               input: { key: 'back', action: 'cancel', time: input.time },
               requirePriorDown: false,
             });
-            return;
+            return true;
           }
         } else if (input.action === 'cancel') {
           backDownWhileTextEntryAt = undefined;
         }
       }
-      broadcast({ input, requirePriorDown });
+      const event: TvRemoteEvent = { input, requirePriorDown };
+      broadcast(event);
+      return isEventConsumed(event);
     },
     registerTextEntry(controller) {
       textEntries.set(controller, (textEntries.get(controller) ?? 0) + 1);
@@ -191,7 +226,7 @@ export function createTvRemoteDispatcher(): TvRemoteDispatcher {
 export function attachPlatformKeySource(options: {
   raw: AndroidKeySource | null;
   isTextEntryActive: () => boolean;
-  emit: (input: KeyInput, requirePriorDown: boolean) => void;
+  emit: (input: KeyInput, requirePriorDown: boolean) => boolean;
 }): () => void {
   const { raw, isTextEntryActive, emit } = options;
 
@@ -203,7 +238,9 @@ export function attachPlatformKeySource(options: {
             win,
             { isActive: isTextEntryActive },
             () => performance.now(),
-            (k) => emit(k, true),
+            (k) => {
+              emit(k, true);
+            },
           )
         : undefined;
     return () => {
@@ -216,23 +253,35 @@ export function attachPlatformKeySource(options: {
     let rawBackHeld = false;
     let pendingRawBackUp = false;
     let lastRawBackUpAt = 0;
+    let lastRawBackConsumed = false;
 
     const sub = raw.addListener((event) => {
       const now = performance.now();
       if (event.action === 'blur') {
         rawBackHeld = false;
         pendingRawBackUp = false;
+        lastRawBackConsumed = false;
       }
       for (const input of adapt(event, now)) {
         if (input.key === 'back') {
-          if (input.action === 'down') rawBackHeld = true;
-          else if (input.action === 'up') {
+          if (input.action === 'down') {
+            rawBackHeld = true;
+            emit(input, true);
+            continue;
+          }
+          if (input.action === 'up') {
             rawBackHeld = false;
             pendingRawBackUp = true;
             lastRawBackUpAt = now;
-          } else if (input.action === 'cancel') {
+            lastRawBackConsumed = emit(input, true);
+            continue;
+          }
+          if (input.action === 'cancel') {
             rawBackHeld = false;
             pendingRawBackUp = false;
+            lastRawBackConsumed = false;
+            emit(input, true);
+            continue;
           }
         }
         emit(input, true);
@@ -243,11 +292,10 @@ export function attachPlatformKeySource(options: {
       if (rawBackHeld) return true;
       if (pendingRawBackUp && now - lastRawBackUpAt < RAW_BACK_DEDUP_MS) {
         pendingRawBackUp = false;
-        return true;
+        return lastRawBackConsumed;
       }
       pendingRawBackUp = false;
-      emit({ key: 'back', action: 'press', time: now }, false);
-      return true;
+      return emit({ key: 'back', action: 'press', time: now }, false);
     });
     return () => {
       for (const input of adapt({ action: 'blur' }, performance.now())) emit(input, true);
@@ -262,8 +310,7 @@ export function attachPlatformKeySource(options: {
     if (input) emit(input, false);
   });
   const back = BackHandler?.addEventListener?.('hardwareBackPress', () => {
-    emit({ key: 'back', action: 'press', time: performance.now() }, false);
-    return true;
+    return emit({ key: 'back', action: 'press', time: performance.now() }, false);
   });
   return () => {
     remote?.remove();
@@ -275,28 +322,68 @@ export function attachPlatformKeySource(options: {
 /**
  * Mounts one root platform remote/keyboard listener and fans events out to all descendant `useTvKeySource` hooks
  * without tearing down native or DOM listeners as screens mount, unmount, or change handler identities (#277).
+ * Uses lazy `0 -> 1` / `1 -> 0` attachment when managing its own dispatcher so idle providers register zero native
+ * listeners.
  */
 export function TvRemoteProvider({ dispatcher, children }: TvRemoteProviderProps): ReactElement {
   const parentDispatcher = useContext(TvRemoteContext);
-  const ownDispatcher = useMemo(() => createTvRemoteDispatcher(), []);
-  const activeDispatcher = dispatcher ?? ownDispatcher;
   const raw = useContext(RemoteKeysContext);
   const parentTextEntry = useContext(TextEntryContext);
+  const rawRef = useRef(raw);
+  rawRef.current = raw;
+  const detachOwnRef = useRef<(() => void) | undefined>(undefined);
+  const attachedRawRef = useRef<AndroidKeySource | null | undefined>(undefined);
+
+  const detachOwn = useCallback(() => {
+    detachOwnRef.current?.();
+    detachOwnRef.current = undefined;
+    attachedRawRef.current = undefined;
+  }, []);
+
+  const attachOwn = useCallback(
+    (target: TvRemoteDispatcher) => {
+      detachOwn();
+      const currentRaw = rawRef.current;
+      attachedRawRef.current = currentRaw;
+      detachOwnRef.current = attachPlatformKeySource({
+        raw: currentRaw,
+        isTextEntryActive: () => target.isTextEntryActive(),
+        emit: (input, requirePriorDown) => target.dispatch(input, requirePriorDown),
+      });
+      return detachOwn;
+    },
+    [detachOwn],
+  );
+
+  const ownDispatcher = useMemo(() => {
+    const created: TvRemoteDispatcher = createTvRemoteDispatcher({
+      onFirstListener: () => attachOwn(created),
+    });
+    return created;
+  }, [attachOwn]);
+
+  const activeDispatcher = dispatcher ?? ownDispatcher;
   const ownedByAncestor = parentDispatcher === activeDispatcher;
 
   useEffect(() => {
     if (ownedByAncestor) return;
-    const unregisterParentTextEntry = activeDispatcher.registerTextEntry(parentTextEntry);
-    const detach = attachPlatformKeySource({
-      raw,
-      isTextEntryActive: () => activeDispatcher.isTextEntryActive(),
-      emit: (input, requirePriorDown) => activeDispatcher.dispatch(input, requirePriorDown),
-    });
-    return () => {
-      detach();
-      unregisterParentTextEntry();
-    };
-  }, [ownedByAncestor, raw, parentTextEntry, activeDispatcher]);
+    return activeDispatcher.registerTextEntry(parentTextEntry);
+  }, [ownedByAncestor, parentTextEntry, activeDispatcher]);
+
+  useEffect(() => {
+    if (ownedByAncestor) return;
+    if (dispatcher !== undefined) {
+      return attachPlatformKeySource({
+        raw,
+        isTextEntryActive: () => activeDispatcher.isTextEntryActive(),
+        emit: (input, requirePriorDown) => activeDispatcher.dispatch(input, requirePriorDown),
+      });
+    }
+    if (activeDispatcher.subscriberCount() > 0 && attachedRawRef.current !== raw) {
+      attachOwn(activeDispatcher);
+    }
+    return detachOwn;
+  }, [ownedByAncestor, dispatcher, raw, activeDispatcher, attachOwn, detachOwn]);
 
   return createElement(TvRemoteContext.Provider, { value: activeDispatcher }, children);
 }

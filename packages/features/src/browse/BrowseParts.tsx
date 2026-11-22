@@ -1,8 +1,9 @@
 import type { ItemRow } from '@elv/data';
-import type { FocusStore, KeyEvent } from '@elv/focus-core';
-import { ElvList, type ListSource, useI18n, useKeyInterpreter } from '@elv/ui-kit';
+import type { FocusStore } from '@elv/focus-core';
+import { ElvList, type ListSource, TvFocusAnchor, useI18n, useKeyInterpreter } from '@elv/ui-kit';
 import { type ReactElement, useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRouteActive } from '../shared';
 import { type DisplayCategory, formatItemTitle } from './browse-model';
 
 export const BROWSE_VISIBLE_ROWS = 10;
@@ -25,17 +26,11 @@ export function createArrayListSource<T>(items: readonly T[]): ListSource<T> {
 export function BrowseTvKeyBridge({
   onEvent,
 }: {
-  onEvent: (event: KeyEvent) => void;
+  onEvent: Parameters<typeof useKeyInterpreter>[0];
 }): ReactElement {
+  const routeActive = useRouteActive();
   useKeyInterpreter(onEvent);
-  return (
-    <View
-      testID="browse-tv-focus-anchor"
-      focusable
-      hasTVPreferredFocus
-      style={browseStyles.tvFocusAnchor}
-    />
-  );
+  return <TvFocusAnchor testID="browse-tv-focus-anchor" hasTVPreferredFocus={routeActive} />;
 }
 
 /** Plain monochrome header/action button that disables Android native focus when `isTv` is true. */
@@ -241,7 +236,6 @@ export const browseStyles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0a0a0a' },
   rootTv: { paddingHorizontal: 48, paddingVertical: 20 },
   rootPointer: { paddingHorizontal: 16, paddingVertical: 12 },
-  tvFocusAnchor: { position: 'absolute', width: 1, height: 1, opacity: 0 },
   splitRow: { flex: 1, flexDirection: 'row', gap: 16 },
   singlePane: { flex: 1 },
   leftColumn: {

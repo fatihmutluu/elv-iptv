@@ -1,7 +1,9 @@
 import type { KeyEvent } from '@elv/focus-core';
 import {
   GlassBar,
+  scaleTv,
   TvFocusAnchor,
+  TvFocusGuideRegion,
   useKeyInterpreter,
   useTheme,
   useViewport,
@@ -10,6 +12,7 @@ import {
 } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, type TextStyle, View } from 'react-native';
+import { useRouteActive } from '../shared';
 import { PortraitBottomBar, UtilitiesRow } from './NavBars';
 import type { AdaptiveNavShellProps } from './types';
 
@@ -19,9 +22,15 @@ interface UnifiedNavItem {
   readonly activate: () => void;
 }
 
-function NavTvBridge({ onEvent }: { onEvent: (event: KeyEvent) => void }): ReactElement {
+function NavTvBridge({
+  onEvent,
+  preferredFocus,
+}: {
+  readonly onEvent: Parameters<typeof useKeyInterpreter>[0];
+  readonly preferredFocus: boolean;
+}): ReactElement {
   useKeyInterpreter(onEvent);
-  return <TvFocusAnchor testID="nav-tv-focus-anchor" />;
+  return <TvFocusAnchor testID="nav-tv-focus-anchor" hasTVPreferredFocus={preferredFocus} />;
 }
 
 /**
@@ -43,6 +52,7 @@ export function AdaptiveNavShell<TId extends string = string>({
   onSelectDestination,
   navFocused = false,
   onExitNavFocus,
+  onBack,
   frosted = true,
   overlay = false,
   testID = 'app-shell',
@@ -50,6 +60,7 @@ export function AdaptiveNavShell<TId extends string = string>({
 }: AdaptiveNavShellProps<TId>): ReactElement {
   const theme = useTheme();
   const viewport = useViewport();
+  const routeActive = useRouteActive();
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
   const isTv = viewport.formFactor === 'tv';
@@ -92,14 +103,19 @@ export function AdaptiveNavShell<TId extends string = string>({
   unifiedItemsRef.current = unifiedItems;
   const onExitNavFocusRef = useRef(onExitNavFocus);
   onExitNavFocusRef.current = onExitNavFocus;
+  const onBackRef = useRef(onBack);
+  onBackRef.current = onBack;
   const pendingNavIndexRef = useRef(resolvedTvFocusedIndex);
   pendingNavIndexRef.current = resolvedTvFocusedIndex;
 
-  const handleTvNavKey = useCallback((event: KeyEvent) => {
-    if (event.kind !== 'press' && event.kind !== 'repeat') return;
+  const handleTvNavKey = useCallback((event: KeyEvent): boolean => {
+    if (event.kind === 'press' && event.key === 'back') {
+      return onBackRef.current ? onBackRef.current() : false;
+    }
+    if (event.kind !== 'press' && event.kind !== 'repeat') return false;
     if (event.key === 'left' || event.key === 'right') {
       const items = unifiedItemsRef.current;
-      if (items.length === 0) return;
+      if (items.length === 0) return false;
       const baseIdx =
         pendingNavIndexRef.current >= 0 && pendingNavIndexRef.current < items.length
           ? pendingNavIndexRef.current
@@ -109,21 +125,32 @@ export function AdaptiveNavShell<TId extends string = string>({
       pendingNavIndexRef.current = nextIdx;
       setFallbackFocusedIndex(nextIdx);
       items[nextIdx]?.activate();
-    } else if (event.kind === 'press' && (event.key === 'down' || event.key === 'select')) {
-      onExitNavFocusRef.current?.();
+      return true;
     }
+    if (event.kind === 'press' && (event.key === 'down' || event.key === 'select')) {
+      onExitNavFocusRef.current?.();
+      return true;
+    }
+    return false;
   }, []);
 
   const topInset = isTv
     ? Math.max(viewport.safeArea.top, viewport.overscan.y)
     : viewport.safeArea.top;
   const topHorizontalPadding = isTv
-    ? Math.max(theme.spacing.xl, viewport.overscan.x)
+    ? Math.max(scaleTv(theme.spacing.xl, viewport), viewport.overscan.x)
     : theme.spacing.md;
-  const topBarMinHeight = (isLandscape ? (isTv ? 58 : 56) : 50) + topInset;
+  const tvTopBarBase = isTv ? Math.max(44, scaleTv(58, viewport)) : 56;
+  const topBarMinHeight = (isLandscape ? tvTopBarBase : 50) + topInset;
   const brandSpaceIdx = brandTitle.indexOf(' ');
-  const brandFontSize = Math.round((isTv ? 18 : 16) * theme.fontScale);
-  const navFontSize = Math.round((isTv ? 15 : 13.5) * theme.fontScale);
+  const brandBase = isTv ? Math.max(14, scaleTv(18, viewport)) : 16;
+  const navBase = isTv ? Math.max(12, scaleTv(15, viewport)) : 13.5;
+  const brandFontSize = Math.round(brandBase * theme.fontScale);
+  const navFontSize = Math.round(navBase * theme.fontScale);
+  const leftClusterGap = isTv
+    ? Math.max(16, scaleTv(theme.spacing.xl, viewport))
+    : theme.spacing.lg;
+  const destinationsGap = isTv ? Math.max(12, scaleTv(18, viewport)) : 18;
   const bodyFontFamily = theme.typography.body.fontFamily;
   const linkWebTransition = webTransition(theme, 'color, background-color, border-color');
   const linkWebCursor = webCursorPointer();
@@ -142,134 +169,148 @@ export function AdaptiveNavShell<TId extends string = string>({
 
   return (
     <View testID={testID} style={[styles.root, { backgroundColor: theme.colors.bgCanvas }]}>
-      {isTv && navFocused ? <NavTvBridge onEvent={handleTvNavKey} /> : null}
+      {isTv && navFocused ? (
+        <NavTvBridge onEvent={handleTvNavKey} preferredFocus={routeActive && navFocused} />
+      ) : null}
 
-      <GlassBar
-        testID="app-top-nav"
-        scrolled={frosted}
-        hairlineEdge="bottom"
-        style={[
-          overlay ? styles.topNavOverlay : null,
-          {
+      <TvFocusGuideRegion
+        testID="nav-focus-guide-top"
+        enabled={isTv && routeActive}
+        autoFocus
+        style={overlay ? styles.topNavOverlay : undefined}
+      >
+        <GlassBar
+          testID="app-top-nav"
+          scrolled={frosted}
+          hairlineEdge="bottom"
+          style={{
             minHeight: topBarMinHeight,
             paddingTop: topInset,
             paddingHorizontal: topHorizontalPadding,
-          },
-        ]}
-        contentStyle={styles.topNavContent}
-      >
-        <View style={[styles.leftCluster, { gap: isTv ? theme.spacing.xl : theme.spacing.lg }]}>
-          {showBrand ? (
-            <Text numberOfLines={1} style={[styles.brandTitle, brandFontStyle]}>
-              {brandSpaceIdx > 0 ? (
-                <>
-                  <Text testID="app-brand-accent" style={{ color: theme.colors.accent }}>
-                    {brandTitle.slice(0, brandSpaceIdx)}
-                  </Text>
-                  {brandTitle.slice(brandSpaceIdx)}
-                </>
-              ) : (
-                brandTitle
-              )}
-            </Text>
-          ) : null}
+          }}
+          contentStyle={styles.topNavContent}
+        >
+          <View style={[styles.leftCluster, { gap: leftClusterGap }]}>
+            {showBrand ? (
+              <Text numberOfLines={1} style={[styles.brandTitle, brandFontStyle]}>
+                {brandSpaceIdx > 0 ? (
+                  <>
+                    <Text testID="app-brand-accent" style={{ color: theme.colors.accent }}>
+                      {brandTitle.slice(0, brandSpaceIdx)}
+                    </Text>
+                    {brandTitle.slice(brandSpaceIdx)}
+                  </>
+                ) : (
+                  brandTitle
+                )}
+              </Text>
+            ) : null}
 
-          {isLandscape ? (
-            <View accessibilityRole="tablist" style={styles.destinationsRow}>
-              {destinations.map((dest) => {
-                const tabTestId = dest.testID ?? `nav-tab-${dest.id}`;
-                const selected = dest.id === activeId;
-                const tvFocused = focusedItemId === dest.id;
-                const hovered = hoveredId === dest.id;
-                const fgColor =
-                  selected || hovered ? theme.colors.textPrimary : theme.colors.textSecondary;
+            {isLandscape ? (
+              <View
+                accessibilityRole="tablist"
+                style={[styles.destinationsRow, { gap: destinationsGap }]}
+              >
+                {destinations.map((dest) => {
+                  const tabTestId = dest.testID ?? `nav-tab-${dest.id}`;
+                  const selected = dest.id === activeId;
+                  const tvFocused = focusedItemId === dest.id;
+                  const hovered = hoveredId === dest.id;
+                  const fgColor =
+                    selected || hovered ? theme.colors.textPrimary : theme.colors.textSecondary;
 
-                return (
-                  <Pressable
-                    key={dest.id}
-                    testID={tabTestId}
-                    accessibilityRole="tab"
-                    accessibilityLabel={dest.label}
-                    accessibilityState={{ selected }}
-                    {...(isTv ? { focusable: false } : {})}
-                    onHoverIn={() => setHoveredId(dest.id)}
-                    onHoverOut={() => setHoveredId((prev) => (prev === dest.id ? null : prev))}
-                    onPress={() => {
-                      onSelectDestination(dest.id);
-                      onExitNavFocus?.();
-                    }}
-                    style={[
-                      styles.landscapeLink,
-                      isTouch ? styles.touchTarget : null,
-                      linkWebTransition,
-                      linkWebCursor,
-                      {
-                        borderRadius: theme.radius.button,
-                        borderWidth: isTv ? theme.focus.ringWidth : 0,
-                        borderColor: tvFocused ? theme.colors.focusRingColor : 'transparent',
-                        backgroundColor: tvFocused ? theme.colors.focusFill : 'transparent',
-                      },
-                    ]}
-                  >
-                    <View style={styles.linkLabelRow}>
-                      <Text
-                        numberOfLines={1}
-                        style={[
-                          navFontBase,
-                          labelWebTransition,
-                          {
-                            fontWeight: selected ? '700' : '500',
-                            color: fgColor,
-                          },
-                        ]}
-                      >
-                        {dest.label}
-                      </Text>
-                      {dest.badge !== undefined ? (
-                        <View
+                  return (
+                    <Pressable
+                      key={dest.id}
+                      testID={tabTestId}
+                      accessibilityRole="tab"
+                      accessibilityLabel={dest.label}
+                      accessibilityState={{ selected }}
+                      {...(isTv ? { focusable: false } : {})}
+                      onHoverIn={() => setHoveredId(dest.id)}
+                      onHoverOut={() => setHoveredId((prev) => (prev === dest.id ? null : prev))}
+                      onPress={() => {
+                        onSelectDestination(dest.id);
+                        onExitNavFocus?.();
+                      }}
+                      style={[
+                        styles.landscapeLink,
+                        isTouch ? styles.touchTarget : null,
+                        linkWebTransition,
+                        linkWebCursor,
+                        {
+                          borderRadius: theme.radius.button,
+                          borderWidth: isTv ? theme.focus.ringWidth : 0,
+                          borderColor: tvFocused ? theme.colors.focusRingColor : 'transparent',
+                          backgroundColor: tvFocused ? theme.colors.focusFill : 'transparent',
+                        },
+                      ]}
+                    >
+                      <View style={styles.linkLabelRow}>
+                        <Text
+                          numberOfLines={1}
                           style={[
-                            styles.badge,
+                            navFontBase,
+                            labelWebTransition,
                             {
-                              backgroundColor: theme.colors.accent,
-                              borderRadius: theme.radius.pill,
+                              fontWeight: selected ? '700' : '500',
+                              color: fgColor,
                             },
                           ]}
                         >
-                          <Text
-                            numberOfLines={1}
-                            style={[theme.typography.micro, { color: theme.colors.accentContrast }]}
+                          {dest.label}
+                        </Text>
+                        {dest.badge !== undefined ? (
+                          <View
+                            style={[
+                              styles.badge,
+                              {
+                                backgroundColor: theme.colors.accent,
+                                borderRadius: theme.radius.pill,
+                              },
+                            ]}
                           >
-                            {dest.badge}
-                          </Text>
-                        </View>
-                      ) : null}
-                    </View>
-                    <View
-                      testID={`${tabTestId}-underline`}
-                      style={[
-                        styles.activeUnderline,
-                        { backgroundColor: selected ? theme.colors.accent : 'transparent' },
-                      ]}
-                    />
-                  </Pressable>
-                );
-              })}
-            </View>
-          ) : null}
-        </View>
+                            <Text
+                              numberOfLines={1}
+                              style={[
+                                theme.typography.micro,
+                                { color: theme.colors.accentContrast },
+                              ]}
+                            >
+                              {dest.badge}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
+                      <View
+                        testID={`${tabTestId}-underline`}
+                        style={[
+                          styles.activeUnderline,
+                          { backgroundColor: selected ? theme.colors.accent : 'transparent' },
+                        ]}
+                      />
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
+          </View>
 
-        <UtilitiesRow
-          utilities={utilities}
-          activeId={activeId}
-          isTv={isTv}
-          isTouch={isTouch}
-          {...(focusedItemId !== undefined ? { focusedItemId } : {})}
-          compactPortrait={!isLandscape}
-          {...(onExitNavFocus !== undefined ? { onExitNavFocus } : {})}
-        />
-      </GlassBar>
+          <UtilitiesRow
+            utilities={utilities}
+            activeId={activeId}
+            isTv={isTv}
+            isTouch={isTouch}
+            {...(focusedItemId !== undefined ? { focusedItemId } : {})}
+            compactPortrait={!isLandscape}
+            {...(onExitNavFocus !== undefined ? { onExitNavFocus } : {})}
+          />
+        </GlassBar>
+      </TvFocusGuideRegion>
 
-      <View style={styles.body}>{children}</View>
+      <View testID="app-shell-body" style={styles.body}>
+        {children}
+      </View>
 
       {!isLandscape ? (
         <PortraitBottomBar

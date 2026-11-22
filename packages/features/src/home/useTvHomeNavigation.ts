@@ -75,7 +75,7 @@ export interface UseTvHomeNavigationOptions {
 export interface TvHomeNavigationState {
   readonly focusedRowId: HomeNavRowId | null;
   readonly focusedCol: number | null;
-  readonly handleTvKey: (event: KeyEvent) => void;
+  readonly handleTvKey: (event: KeyEvent) => boolean;
 }
 
 /**
@@ -217,13 +217,14 @@ export function useTvHomeNavigation({
   }, [rowSignature, store]);
 
   const handleTvKey = useCallback(
-    (event: KeyEvent) => {
+    (event: KeyEvent): boolean => {
       const currentRows = rowsRef.current;
       if (currentRows.length === 0) {
         if (event.kind === 'press' && (event.key === 'up' || event.key === 'back')) {
           onFocusTopNavRef.current?.();
+          return true;
         }
-        return;
+        return false;
       }
 
       const currentId = activeRowIdRef.current ?? currentRows[0]?.id;
@@ -232,7 +233,7 @@ export function useTvHomeNavigation({
         currentRows.findIndex((r) => r.id === currentId),
       );
       const currentRow = currentRows[currentIdx];
-      if (!currentRow) return;
+      if (!currentRow) return false;
 
       pendingRestoreRef.current = null;
       store.activate(currentRow.id);
@@ -240,10 +241,10 @@ export function useTvHomeNavigation({
       if ((event.kind === 'press' || event.kind === 'repeat') && event.key === 'up') {
         if (currentIdx === 0) {
           onFocusTopNavRef.current?.();
-          return;
+          return true;
         }
         const nextRow = currentRows[currentIdx - 1];
-        if (!nextRow) return;
+        if (!nextRow) return false;
         store.activate(nextRow.id);
         const found = findList(store.getState().scopes, nextRow.id)?.list;
         const col = found?.index ?? 0;
@@ -252,13 +253,13 @@ export function useTvHomeNavigation({
         setActiveCol(col);
         persistHomeFocus(nextRow.id, col);
         onFocusRowRef.current?.(nextRow.id);
-        return;
+        return true;
       }
 
       if ((event.kind === 'press' || event.kind === 'repeat') && event.key === 'down') {
-        if (currentIdx >= currentRows.length - 1) return;
+        if (currentIdx >= currentRows.length - 1) return false;
         const nextRow = currentRows[currentIdx + 1];
-        if (!nextRow) return;
+        if (!nextRow) return false;
         store.activate(nextRow.id);
         const found = findList(store.getState().scopes, nextRow.id)?.list;
         const col = found?.index ?? 0;
@@ -267,7 +268,7 @@ export function useTvHomeNavigation({
         setActiveCol(col);
         persistHomeFocus(nextRow.id, col);
         onFocusRowRef.current?.(nextRow.id);
-        return;
+        return true;
       }
 
       const intents = store.dispatch(event);
@@ -279,10 +280,14 @@ export function useTvHomeNavigation({
       for (const intent of intents) {
         if (intent.kind === 'back') {
           onFocusTopNavRef.current?.();
-        } else if (intent.kind === 'select') {
+          return true;
+        }
+        if (intent.kind === 'select') {
           onActivateRef.current(currentRow.id, col);
+          return true;
         }
       }
+      return event.key === 'left' || event.key === 'right';
     },
     [persistHomeFocus, store],
   );

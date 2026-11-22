@@ -1,60 +1,32 @@
-import type { KeyEvent, KeyInput } from '@elv/focus-core';
-import type {
-  MediaTracks,
-  PlaybackClock,
-  PlaybackService,
-  PlaybackStatus,
-  PlaybackTimers,
-} from '@elv/playback';
-import { type FormFactor, useKeyInterpreter, useTvKeySource } from '@elv/ui-kit';
-import { type MutableRefObject, useEffect, useRef, useState } from 'react';
-import { Platform } from 'react-native';
-import type { PlayTarget } from '../ports/play-target';
-import { canPauseStatus, digitKeyToRatio, isScrubKey, STEP_SEEK_MS } from './scrub-controller';
-import { rootIndexForSettingsView, routeSettingsMenuKey } from './settings-menu-nav';
-import { routePickerKey } from './track-picker-nav';
 import {
-  clampTvOsdAction,
-  initialTvOsdAction,
-  routeTvOsdKey,
-  routeTvScrubberKey,
-} from './tv-osd-nav';
+  createSelectDebounceGuard,
+  type KeyEvent,
+  type SelectDebounceGuard,
+} from '@elv/focus-core';
+import type { PlaybackStatus } from '@elv/playback';
+import { type UseKeyInterpreterOptions, useKeyInterpreter, useTvKeySource } from '@elv/ui-kit';
+import { useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
+import {
+  type ChannelDigitBuffer,
+  createChannelDigitBuffer,
+  digitKeyToChar,
+  isHiddenOsdPassthroughKey,
+} from './channel-digit-entry';
+import { type PlayerControlsParams, routeOverlayAndMediaKey } from './player-key-routing';
+import { canPauseStatus, digitKeyToRatio, isScrubKey, STEP_SEEK_MS } from './scrub-controller';
+import { rootIndexForSettingsView } from './settings-menu-nav';
+import { type clampTvOsdAction, initialTvOsdAction } from './tv-osd-nav';
 import { isWebButtonActive, useDesktopPlayerShortcuts } from './useDesktopPlayerShortcuts';
 import { usePlayerOverlayState } from './usePlayerOverlayState';
 import { usePlayerScrub } from './usePlayerScrub';
 
 export type { TvOsdAction } from './tv-osd-nav';
-
-/** Parameters of {@link usePlayerControls}. */
-export interface PlayerControlsParams {
-  formFactor: FormFactor;
-  activeTarget: PlayTarget;
-  status: PlaybackStatus;
-  tracks: MediaTracks;
-  hasTracks: boolean;
-  showRetry: boolean;
-  hasService: boolean;
-  hasSettings?: boolean;
-  hasNextEpisode?: boolean;
-  hasPreviousChannel?: boolean;
-  initialOsdHidden?: boolean | undefined;
-  autoHideOsdMs?: number | undefined;
-  serviceRef: MutableRefObject<PlaybackService | null>;
-  clockRef: MutableRefObject<PlaybackClock>;
-  timersRef: MutableRefObject<PlaybackTimers>;
-  onExitRef: MutableRefObject<() => void>;
-  zapByRef: MutableRefObject<(delta: 1 | -1, repeat?: boolean) => void>;
-  onSeekCommit?: (positionMs: number) => void;
-  onPlayNextEpisode?: () => void;
-  onJumpPreviousChannel?: () => void;
-  onToggleFullscreen?: (() => void) | undefined;
-  onToggleMute?: (() => void) | undefined;
-  onSetOrientationLocked?: ((locked: boolean) => void) | undefined;
-}
+export type { PlayerControlsParams };
 
 /**
- * Coordinates VOD transport, decoupled preview-seek (`#292`), TV OSD bar focus,
- * `TrackPickerModal`, 2-level `PlayerSettingsSheet` (incl. playback speed), and touch-only lock.
+ * Coordinates VOD & Live transport, decoupled preview-seek (`#292`), hidden-OSD passthrough (`#439`),
+ * TV OSD bar focus, `TrackPickerModal`, 2-level `PlayerSettingsSheet`, Select debounce (`#130`), and touch lock.
  */
 export function usePlayerControls(params: PlayerControlsParams) {
   const { formFactor, activeTarget, status, tracks, hasTracks, showRetry, hasService } = params;
@@ -69,17 +41,32 @@ export function usePlayerControls(params: PlayerControlsParams) {
   const [muted, setMuted] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [barScrubbing, setBarScrubbing] = useState(false);
+  const [channelDigits, setChannelDigits] = useState('');
   const playbackSpeedRef = useRef(1);
   playbackSpeedRef.current = playbackSpeed;
+
+  const selectGuardRef = useRef<SelectDebounceGuard | null>(null);
+  selectGuardRef.current ??= createSelectDebounceGuard();
+
+  const digitBufRef = useRef<ChannelDigitBuffer | null>(null);
+  digitBufRef.current ??= createChannelDigitBuffer({
+    timers: () => timersRef.current,
+    onChange: setChannelDigits,
+    onCommit: (num) => cbRef.current.onJumpToChannel?.(num),
+  });
+  const digitBuf = digitBufRef.current;
 
   useEffect(() => {
     if (!hasService) setMuted(false);
   }, [hasService]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset playback speed when active item changes
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset speed, digit buffer, and select guard on item change
   useEffect(() => {
     setPlaybackSpeed(1);
-  }, [activeTarget.itemKey]);
+    digitBuf.cancel();
+    selectGuardRef.current?.reset();
+    return () => digitBuf.cancel();
+  }, [activeTarget.itemKey, digitBuf]);
 
   const { scrub, previewPositionMs, cancelScrub, togglePlayPause, seekBy, seekToRatio, seekToEnd } =
     usePlayerScrub({
@@ -113,6 +100,9 @@ export function usePlayerControls(params: PlayerControlsParams) {
     onSetOrientationLocked: params.onSetOrientationLocked,
   });
 
+  const allowTvSelect = (): boolean =>
+    !isTv || (selectGuardRef.current?.allow(clockRef.current.now(), 'tv-select') ?? true);
+
   const retry = (): void => {
     scrub.cancel();
     overlay.blurTvOsd();
@@ -125,8 +115,23 @@ export function usePlayerControls(params: PlayerControlsParams) {
     serviceRef.current?.setSpeed(rate);
   };
 
+  const applyPlayOrPause = (
+    key: 'play' | 'pause',
+    statusKind: PlaybackStatus['kind'] | undefined,
+  ): void => {
+    scrub.cancel();
+    if (key === 'play') {
+      if (statusKind === 'paused' || statusKind === 'ended') serviceRef.current?.play();
+      else if (statusKind === 'failed') retry();
+    } else if (canPauseStatus(statusKind)) {
+      serviceRef.current?.pause();
+    }
+  };
+
   const handleBack = (): void => {
     scrub.cancel();
+    digitBuf.cancel();
+    selectGuardRef.current?.reset();
     const s = overlay.liveRef.current;
     if (s.locked) overlay.unlockControls();
     else if (s.settingsOpen) {
@@ -147,6 +152,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
   };
 
   const activateTvOsd = (act: ReturnType<typeof clampTvOsdAction>): void => {
+    if (!allowTvSelect()) return;
     if (act === 'back') onExitRef.current();
     else if (act === 'playPause') togglePlayPause();
     else if (act === 'seekBack') seekBy(-STEP_SEEK_MS);
@@ -163,10 +169,13 @@ export function usePlayerControls(params: PlayerControlsParams) {
     }
   };
 
-  const handleKeyEvent = (event: KeyEvent): void => {
+  const handleKeyEvent = (event: KeyEvent): boolean => {
     const s = overlay.liveRef.current;
-    if (event.kind === 'press' && event.key === 'back') return void handleBack();
-    if (s.locked) return;
+    if (event.kind === 'press' && event.key === 'back') {
+      handleBack();
+      return true;
+    }
+    if (s.locked) return true;
     if (isTv && s.osdHidden) {
       if (
         cbRef.current.activeTarget.kind === 'live' &&
@@ -174,119 +183,120 @@ export function usePlayerControls(params: PlayerControlsParams) {
         (event.key === 'channelUp' || event.key === 'channelDown')
       ) {
         zapByRef.current(event.key === 'channelUp' ? 1 : -1, event.kind === 'repeat');
-        return;
+        return true;
       }
       overlay.showOsd();
-      return;
+      if (!isHiddenOsdPassthroughKey(event.key)) {
+        if (event.kind === 'press' && event.key === 'select') allowTvSelect();
+        return true;
+      }
+    }
+    if (
+      event.key === 'up' ||
+      event.key === 'down' ||
+      event.key === 'left' ||
+      event.key === 'right'
+    ) {
+      selectGuardRef.current?.reset();
     }
     if (isTv) overlay.notifyOsdActivity();
-    if (event.kind === 'press' && event.key === 'select' && isWebButtonActive()) return;
-    if (event.kind === 'press' && event.key === 'menu') {
-      if (s.settingsOpen) return void overlay.closeSettings();
-      return void (s.tracksOpen ? overlay.closeTracks() : overlay.openTracks());
-    }
+    if (event.kind === 'press' && event.key === 'select' && isWebButtonActive()) return true;
 
-    if (s.settingsOpen) {
-      const intent = routeSettingsMenuKey(event, s.settingsMenu, s.tracks, {
-        isVod: cbRef.current.activeTarget.kind === 'vod',
-        playbackSpeed: playbackSpeedRef.current,
+    const isVodTarget = cbRef.current.activeTarget.kind === 'vod';
+    if (
+      routeOverlayAndMediaKey(event, {
+        isTv,
+        isVod: isVodTarget,
         hasAspect: formFactor !== 'desktop',
-      });
-      if (intent?.kind === 'close') overlay.closeSettings();
-      else if (intent?.kind === 'state') overlay.updateSettingsMenu(intent.state);
-      else if (intent?.kind === 'toggleResizeMode') overlay.toggleResizeMode();
-      else if (intent?.kind === 'toggleStats') overlay.toggleStats();
-      else if (intent?.kind === 'audio') serviceRef.current?.selectAudioTrack(intent.id);
-      else if (intent?.kind === 'subtitle') serviceRef.current?.selectSubtitleTrack(intent.id);
-      else if (intent?.kind === 'speed') selectSpeed(intent.rate);
-      return;
+        playbackSpeed: playbackSpeedRef.current,
+        state: s,
+        service: serviceRef.current,
+        scrub,
+        digitBuf,
+        allowTvSelect,
+        showOsd: overlay.showOsd,
+        toggleStats: overlay.toggleStats,
+        toggleResizeMode: overlay.toggleResizeMode,
+        togglePlayPause,
+        openTracks: overlay.openTracks,
+        closeTracks: overlay.closeTracks,
+        closeSettings: overlay.closeSettings,
+        updateSettingsMenu: overlay.updateSettingsMenu,
+        updatePickerCursor: overlay.updatePickerCursor,
+        focusTvOsd: overlay.focusTvOsd,
+        blurTvOsd: overlay.blurTvOsd,
+        focusTvScrubber: overlay.focusTvScrubber,
+        blurTvScrubber: overlay.blurTvScrubber,
+        activateTvOsd,
+        selectSpeed,
+        onExit: () => onExitRef.current(),
+        onJumpPreviousChannel: cbRef.current.onJumpPreviousChannel,
+      })
+    ) {
+      return true;
     }
 
-    if (s.tracksOpen) {
-      const intent = routePickerKey(event, s.pickerCursor, s.tracks);
-      if (intent?.kind === 'move') overlay.updatePickerCursor(intent.cursor);
-      else if (intent?.kind === 'audio') serviceRef.current?.selectAudioTrack(intent.id);
-      else if (intent?.kind === 'subtitle') serviceRef.current?.selectSubtitleTrack(intent.id);
-      return;
-    }
-
-    if (isTv && s.tvScrubberFocused) {
-      const intent = routeTvScrubberKey(event);
-      if (intent?.kind === 'step') scrub.step(intent.direction, intent.stepKind);
-      else if (intent?.kind === 'commitOrToggle') {
-        if (scrub.previewPositionMs !== undefined) scrub.commit();
-        else togglePlayPause();
-      } else if (intent?.kind === 'togglePlayPause') togglePlayPause();
-      else if (intent?.kind === 'toOsd') {
-        scrub.cancel();
-        overlay.focusTvOsd(clampTvOsdAction(s.tvOsdAction, s.availableOsd));
-      } else if (intent?.kind === 'blur') {
-        scrub.cancel();
-        overlay.blurTvScrubber();
-      }
-      return;
-    }
-
-    if (isTv && s.tvOsdFocused) {
-      const intent = routeTvOsdKey(event, s.tvOsdAction, s.availableOsd);
-      if (intent?.kind === 'blur') {
-        if (cbRef.current.activeTarget.kind === 'vod') overlay.focusTvScrubber();
-        else overlay.blurTvOsd();
-      } else if (intent?.kind === 'focus') overlay.focusTvOsd(intent.action);
-      else if (intent?.kind === 'activate') activateTvOsd(intent.action);
-      return;
-    }
-
-    const svc = serviceRef.current;
-    const statusKind = svc?.getState().status.kind;
+    const statusKind = serviceRef.current?.getState().status.kind;
     if (event.kind === 'press' && event.key === 'select' && statusKind === 'failed') {
-      retry();
-      return;
+      if (allowTvSelect()) retry();
+      return true;
     }
 
-    if (cbRef.current.activeTarget.kind === 'vod') {
+    if (isVodTarget) {
       const digitRatio =
         !isWebDesktop && event.kind === 'press' ? digitKeyToRatio(event.key) : undefined;
-      if (digitRatio !== undefined) {
-        seekToRatio(digitRatio);
-      } else if (event.kind === 'press' && (event.key === 'select' || event.key === 'playPause')) {
+      if (digitRatio !== undefined) seekToRatio(digitRatio);
+      else if (event.kind === 'press' && event.key === 'next') cbRef.current.onPlayNextEpisode?.();
+      else if (event.kind === 'press' && (event.key === 'select' || event.key === 'playPause')) {
+        if (event.key === 'select' && !allowTvSelect()) return true;
         if (event.key === 'select' && scrub.previewPositionMs !== undefined) scrub.commit();
         else togglePlayPause();
-      } else if (event.kind === 'press' && event.key === 'play') {
-        if (statusKind === 'paused' || statusKind === 'ended') {
-          scrub.cancel();
-          svc?.play();
-        } else if (statusKind === 'failed') retry();
-      } else if (event.kind === 'press' && event.key === 'pause') {
-        scrub.cancel();
-        if (canPauseStatus(statusKind)) svc?.pause();
+      } else if (event.kind === 'press' && (event.key === 'play' || event.key === 'pause')) {
+        applyPlayOrPause(event.key, statusKind);
       } else if ((event.kind === 'press' || event.kind === 'repeat') && isScrubKey(event.key)) {
         scrub.step(event.key === 'left' || event.key === 'rewind' ? -1 : 1, event.kind);
-      } else if (isTv && event.kind === 'press' && event.key === 'up') {
-        overlay.hideOsd();
-      } else if (isTv && event.kind === 'press' && event.key === 'down') {
+      } else if (isTv && event.kind === 'press' && event.key === 'up') overlay.hideOsd();
+      else if (isTv && event.kind === 'press' && event.key === 'down') {
         overlay.focusTvOsd(initialTvOsdAction(s.availableOsd));
       }
-      return;
+      return true;
     }
 
-    if (isTv && event.kind === 'press' && event.key === 'left' && s.hasTracks) overlay.openTracks();
-    else if (isTv && event.kind === 'press' && (event.key === 'select' || event.key === 'right')) {
-      overlay.focusTvOsd(initialTvOsdAction(s.availableOsd));
+    const digitChar = event.kind === 'press' ? digitKeyToChar(event.key) : undefined;
+    if (digitChar !== undefined) digitBuf.push(digitChar);
+    else if (event.kind === 'press' && event.key === 'playPause') togglePlayPause();
+    else if (event.kind === 'press' && (event.key === 'play' || event.key === 'pause')) {
+      applyPlayOrPause(event.key, statusKind);
+    } else if (event.kind === 'press' && event.key === 'next') zapByRef.current(1, false);
+    else if (event.kind === 'press' && event.key === 'previous') zapByRef.current(-1, false);
+    else if (isTv && event.kind === 'press' && event.key === 'left' && s.hasTracks) {
+      overlay.openTracks();
+    } else if (
+      isTv &&
+      event.kind === 'press' &&
+      (event.key === 'select' || event.key === 'right')
+    ) {
+      if (event.key !== 'select' || allowTvSelect()) {
+        overlay.focusTvOsd(initialTvOsdAction(s.availableOsd));
+      }
     } else if (event.kind === 'press' || event.kind === 'repeat') {
       const repeat = event.kind === 'repeat';
       if (event.key === 'channelUp' || event.key === 'up') zapByRef.current(1, repeat);
       else if (event.key === 'channelDown' || event.key === 'down') zapByRef.current(-1, repeat);
     }
+    return true;
   };
 
-  const interpreterInputRef = useRef<(input: KeyInput) => void>(() => undefined);
+  const interpreterInputRef = useRef<
+    Parameters<NonNullable<UseKeyInterpreterOptions['keySource']>>[0]
+  >(() => undefined);
   useTvKeySource((input) => {
-    interpreterInputRef.current(input);
+    const consumed = interpreterInputRef.current(input);
     if (isScrubKey(input.key)) {
       if (input.action === 'up') scrub.commit();
       else if (input.action === 'cancel') scrub.cancel();
     }
+    return consumed;
   });
   useKeyInterpreter(handleKeyEvent, {
     keySource: (onInput) => {
@@ -341,6 +351,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
   return {
     ...overlay.publicState,
     previewPositionMs,
+    channelDigits,
     muted,
     playbackSpeed,
     isPausedOrEnded: status.kind === 'paused' || status.kind === 'ended',

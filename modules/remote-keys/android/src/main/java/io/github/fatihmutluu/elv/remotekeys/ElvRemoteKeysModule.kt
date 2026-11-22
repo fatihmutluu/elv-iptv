@@ -64,7 +64,13 @@ class ElvRemoteKeysModule : Module() {
   private fun install(activity: Activity) {
     val window = activity.window ?: return
     val current = window.callback ?: return
-    val wrapped = KeyForwarding.wrap(window, current)
+    val weakActivity = WeakReference(activity)
+    val wrapped = KeyForwarding.wrap(window, current) {
+      weakActivity.get()?.let { act ->
+        act.window?.decorView?.post { KeyForwarding.installModalWindows(act) }
+      }
+    }
     if (wrapped !== current) window.callback = wrapped
+    KeyForwarding.installModalWindows(activity)
   }
 }

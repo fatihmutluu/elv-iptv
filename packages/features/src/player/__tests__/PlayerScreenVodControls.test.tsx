@@ -376,14 +376,21 @@ describe('PlayerScreen VOD controls, hold-seek, and track picker', () => {
       null,
     );
 
-    // Back closes TrackPickerModal without exiting PlayerScreen
+    // Back closes TrackPickerModal and restores TV OSD focus to 'tracks' without exiting (#130)
     await act(async () => {
       keys.tap(KEYCODE_BACK);
     });
     expect(screen.queryByTestId('player-tracks-panel')).toBeNull();
+    expect(screen.getByTestId('player-tracks-button').props.accessibilityState).toMatchObject({
+      selected: true,
+    });
     expect(onExit).not.toHaveBeenCalled();
 
-    // Second Back exits PlayerScreen
+    // Second Back blurs TV OSD focus without exiting; third Back exits PlayerScreen
+    await act(async () => {
+      keys.tap(KEYCODE_BACK);
+    });
+    expect(onExit).not.toHaveBeenCalled();
     await act(async () => {
       keys.tap(KEYCODE_BACK);
     });

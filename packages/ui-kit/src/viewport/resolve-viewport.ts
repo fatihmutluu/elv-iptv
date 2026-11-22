@@ -178,3 +178,15 @@ export function resolveViewport(input: {
     tvScale,
   };
 }
+
+/**
+ * Scales a 1920x1080 reference 10-foot dimension by `viewport.tvScale` on TV so `960x540dp` Android TV
+ * and `1920x1080pt` tvOS render at consistent physical proportions without mutating native `DisplayMetrics` (`#281`).
+ */
+export function scaleTv(
+  reference1080pPx: number,
+  viewport: Pick<ViewportInfo, 'formFactor' | 'tvScale'>,
+): number {
+  if (viewport.formFactor !== 'tv') return reference1080pPx;
+  return Math.round(reference1080pPx * viewport.tvScale);
+}

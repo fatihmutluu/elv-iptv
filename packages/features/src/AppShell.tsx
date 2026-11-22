@@ -3,12 +3,13 @@ import { useI18n } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import {
-  buildShellDestinations,
-  buildShellUtilities,
+  buildShellCrashProps,
+  buildShellNavigation,
   clearSourceFromCatalogMemory,
   clearSourceFromLiveMemory,
   createObservedCatalog,
   enrichPlayTargetAccountKey,
+  handleShellTopNavBack,
   INITIAL_CATALOG_MEMORY,
   type PrimaryNavTab,
   pushDetailStack,
@@ -183,22 +184,10 @@ export function AppShell(props: AppShellProps): ReactElement {
   }, []);
   const activeDetail = detailStack[detailStack.length - 1] ?? null;
   // biome-ignore lint/correctness/useExhaustiveDependencies: locale invalidates translated labels on live language switch
-  const destinations = useMemo(
+  const { destinations, utilities } = useMemo(
     () =>
-      buildShellDestinations({
-        home: i18n.t('nav.home'),
-        live: i18n.t('nav.live'),
-        movies: i18n.t('nav.movies'),
-        series: i18n.t('nav.series'),
-      }),
-    [i18n, locale],
-  );
-  // biome-ignore lint/correctness/useExhaustiveDependencies: locale invalidates translated labels on live language switch
-  const utilities = useMemo(
-    () =>
-      buildShellUtilities({
-        searchLabel: i18n.t('nav.search'),
-        settingsLabel: i18n.t('nav.settings'),
+      buildShellNavigation({
+        t: i18n.t,
         activeTab,
         hasActiveDetail: activeDetail !== null,
         onOpenSearch: () => selectTab('search', false),
@@ -212,36 +201,46 @@ export function AppShell(props: AppShellProps): ReactElement {
   );
   const handleExitNavFocus = useCallback(() => setTopNavFocused(false), []);
   const handleFocusTopNav = useCallback(() => setTopNavFocused(true), []);
+  const handleNavBack = useCallback(
+    () =>
+      handleShellTopNavBack({
+        activeTab,
+        hasActiveDetail: activeDetail !== null,
+        popDetail,
+        exitNavFocus: handleExitNavFocus,
+        selectHomeInTopNav: () => selectTab('home', false),
+      }),
+    [activeDetail, activeTab, handleExitNavFocus, popDetail, selectTab],
+  );
   const handleMovieMemoryChange = useCallback(
-    (n: CatalogTabMemory) => setCatalogMemoryByTab((p) => ({ ...p, movie: n })),
+    (movie: CatalogTabMemory) => setCatalogMemoryByTab((p) => ({ ...p, movie })),
     [],
   );
   const handleSeriesMemoryChange = useCallback(
-    (n: CatalogTabMemory) => setCatalogMemoryByTab((p) => ({ ...p, series: n })),
+    (series: CatalogTabMemory) => setCatalogMemoryByTab((p) => ({ ...p, series })),
     [],
   );
   const crashProps = useMemo(
-    () => ({
-      remountKey: stageKey,
-      onReload: () => setStageKey((k) => k + 1),
-      onClearUiCache: () => {
-        uiCache.clear();
-        focusMemory.clear();
-        shell.bumpCatalogRevision();
-        setLiveMemory(EMPTY_LIVE_MEMORY);
-        setCatalogMemoryByTab(INITIAL_CATALOG_MEMORY);
-        setDetailStack([]);
-        clearSearchSession();
-        setHeroScrolled(false);
-        setStageKey((k) => k + 1);
-      },
-      onSwitchSource: () => {
-        playTargetRef.current = null;
-        setPlayTarget(null);
-        openSources();
-        setStageKey((k) => k + 1);
-      },
-    }),
+    () =>
+      buildShellCrashProps({
+        stageKey,
+        bumpStageKey: () => setStageKey((k) => k + 1),
+        clearCaches: () => {
+          uiCache.clear();
+          focusMemory.clear();
+          shell.bumpCatalogRevision();
+          setLiveMemory(EMPTY_LIVE_MEMORY);
+          setCatalogMemoryByTab(INITIAL_CATALOG_MEMORY);
+          setDetailStack([]);
+          clearSearchSession();
+          setHeroScrolled(false);
+        },
+        switchSource: () => {
+          playTargetRef.current = null;
+          setPlayTarget(null);
+          openSources();
+        },
+      }),
     [stageKey, shell.bumpCatalogRevision, clearSearchSession, openSources, uiCache, focusMemory],
   );
   const readySourcesCount = sources.filter((s) => !s.needsImport).length;
@@ -257,9 +256,8 @@ export function AppShell(props: AppShellProps): ReactElement {
     const enriched = enrichPlayTargetAccountKey(next, sourcesRef.current);
     playTargetRef.current = enriched;
     setPlayTarget(enriched);
-    if (enriched.kind === 'live') {
+    if (enriched.kind === 'live')
       setLiveMemory((p) => ({ ...p, ...recordChannelTune(p, enriched.itemKey) }));
-    }
   };
   const onPlayerExit = () => {
     playTargetRef.current = null;
@@ -267,7 +265,6 @@ export function AppShell(props: AppShellProps): ReactElement {
     setHeroScrolled(false);
     setUserStateVersion((v) => v + 1);
   };
-
   return (
     <RouteActiveProvider active={documentVisible && appForeground}>
       <CatalogUiCacheProvider cache={uiCache}>
@@ -295,6 +292,7 @@ export function AppShell(props: AppShellProps): ReactElement {
               onSelectDestination={handleSelectDestination}
               navFocused={topNavFocused}
               onExitNavFocus={handleExitNavFocus}
+              onBack={handleNavBack}
               overlay={hasHeroOverlay}
               frosted={hasHeroOverlay ? heroScrolled : true}
               testID="app-shell"

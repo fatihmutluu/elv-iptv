@@ -3,6 +3,7 @@ import { useContext, useEffect, useRef } from 'react';
 import { RemoteKeysContext } from './RemoteKeysProvider';
 import {
   isEventTextEntryConsumed,
+  markEventConsumed,
   markEventTextEntryConsumed,
   TvRemoteContext,
   type TvRemoteEvent,
@@ -17,7 +18,9 @@ export { type TvPlatform, toKeyInput };
  * active (#48). When rendered inside {@link TvRemoteProvider}, subscribes to its shared root dispatcher with zero
  * additional native/web listeners (#277); outside a provider, attaches a direct platform listener fallback.
  */
-export function useTvKeySource(onInput: (k: KeyInput) => void): void {
+export function useTvKeySource(
+  onInput: ((k: KeyInput) => boolean | undefined) | ((k: KeyInput) => void),
+): void {
   const handler = useRef(onInput);
   handler.current = onInput;
   const dispatcher = useContext(TvRemoteContext);
@@ -34,7 +37,13 @@ export function useTvKeySource(onInput: (k: KeyInput) => void): void {
       input: KeyInput,
       requirePriorDown: boolean,
       remoteEvent?: TvRemoteEvent,
-    ): void => {
+    ): boolean => {
+      const deliver = (k: KeyInput): boolean => {
+        const consumed = handler.current(k) !== false;
+        if (consumed && remoteEvent !== undefined) markEventConsumed(remoteEvent);
+        return consumed;
+      };
+
       if (input.key !== 'back') {
         if (textEntry.isActive()) {
           if (input.action === 'down') suppressedDowns.add(input.key);
@@ -42,80 +51,73 @@ export function useTvKeySource(onInput: (k: KeyInput) => void): void {
             suppressedDowns.delete(input.key);
             deliveredHeld.delete(input.key);
           }
-          return;
+          return false;
         }
         if (input.action === 'down') {
           suppressedDowns.delete(input.key);
           deliveredHeld.add(input.key);
-          handler.current(input);
-          return;
+          return deliver(input);
         }
         if (input.action === 'up') {
-          if (suppressedDowns.delete(input.key)) return;
-          if (requirePriorDown && !deliveredHeld.delete(input.key)) return;
+          if (suppressedDowns.delete(input.key)) return false;
+          if (requirePriorDown && !deliveredHeld.delete(input.key)) return false;
           deliveredHeld.delete(input.key);
-          handler.current(input);
-          return;
+          return deliver(input);
         }
         if (input.action === 'cancel') {
           suppressedDowns.delete(input.key);
-          if (!requirePriorDown || deliveredHeld.delete(input.key)) handler.current(input);
-          return;
+          if (!requirePriorDown || deliveredHeld.delete(input.key)) return deliver(input);
+          return false;
         }
-        handler.current(input);
-        return;
+        return deliver(input);
       }
 
       if (input.action === 'press') {
-        if (remoteEvent !== undefined && isEventTextEntryConsumed(remoteEvent)) return;
+        if (remoteEvent !== undefined && isEventTextEntryConsumed(remoteEvent)) return true;
         if (textEntry.isActive()) {
           if (remoteEvent !== undefined) markEventTextEntryConsumed(remoteEvent);
           textEntry.exit();
-          return;
+          return true;
         }
-        handler.current(input);
-        return;
+        return deliver(input);
       }
       if (input.action === 'long') {
-        handler.current(input);
-        return;
+        return deliver(input);
       }
       if (input.action === 'down') {
         textEntryBackDownAt = textEntry.isActive() ? input.time : undefined;
         deliveredHeld.add('back');
-        handler.current(input);
-        return;
+        return deliver(input);
       }
       if (input.action === 'up') {
-        if (requirePriorDown && !deliveredHeld.delete('back')) return;
+        if (requirePriorDown && !deliveredHeld.delete('back')) return false;
         deliveredHeld.delete('back');
         const downAt = textEntryBackDownAt;
         textEntryBackDownAt = undefined;
         if (remoteEvent !== undefined && isEventTextEntryConsumed(remoteEvent)) {
           handler.current({ key: 'back', action: 'cancel', time: input.time });
-          return;
+          return true;
         }
         if (downAt !== undefined) {
           if (input.time - downAt < LONG_PRESS_MS) {
             if (remoteEvent !== undefined) markEventTextEntryConsumed(remoteEvent);
             if (textEntry.isActive()) textEntry.exit();
             handler.current({ key: 'back', action: 'cancel', time: input.time });
-            return;
+            return true;
           }
-          handler.current(input);
-          return;
+          return deliver(input);
         }
         if (textEntry.isActive()) {
           if (remoteEvent !== undefined) markEventTextEntryConsumed(remoteEvent);
           textEntry.exit();
           handler.current({ key: 'back', action: 'cancel', time: input.time });
-          return;
+          return true;
         }
-        handler.current(input);
-        return;
+        return deliver(input);
       }
       textEntryBackDownAt = undefined;
-      if (!requirePriorDown || deliveredHeld.delete('back')) handler.current(input);
+      if (!requirePriorDown || deliveredHeld.delete('back')) return deliver(input);
+      return false;
     };
 
     const offEnter = textEntry.onEnter(() => {

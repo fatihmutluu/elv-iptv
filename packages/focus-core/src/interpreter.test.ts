@@ -152,9 +152,26 @@ describe('step keys (arrows and channel keys)', () => {
     expect(k.input(up('left', 900))).toEqual([{ key: 'left', kind: 'long', time: 500 }]);
   });
 
-  it('keeps select, back, menu, playPause, play, pause and digits pressing on up', () => {
+  it('keeps select, back, menu, media, utility and digit keys pressing on up', () => {
     const k = createKeyInterpreter();
-    for (const key of ['select', 'back', 'menu', 'playPause', 'play', 'pause', 'digit7'] as const) {
+    for (const key of [
+      'select',
+      'back',
+      'menu',
+      'playPause',
+      'play',
+      'pause',
+      'stop',
+      'next',
+      'previous',
+      'captions',
+      'audioTrack',
+      'guide',
+      'info',
+      'search',
+      'lastChannel',
+      'digit7',
+    ] as const) {
       expect(k.input(down(key, 0))).toEqual([]);
       expect(k.input(up(key, 100))).toEqual([{ key, kind: 'press', time: 100 }]);
     }

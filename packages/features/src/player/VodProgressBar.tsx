@@ -356,7 +356,13 @@ export function VodProgressBar({
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  trackHitBox: { position: 'relative', flex: 1, paddingVertical: 10, justifyContent: 'center' },
+  trackHitBox: {
+    position: 'relative',
+    flex: 1,
+    paddingVertical: 10,
+    justifyContent: 'center',
+    direction: 'ltr',
+  },
   trackHitBoxDocked: { paddingTop: 28, paddingBottom: 8 },
   hoverPill: {
     position: 'absolute',
@@ -377,6 +383,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
+    direction: 'ltr',
   },
   trackFill: { height: '100%' },
   trackThumb: {

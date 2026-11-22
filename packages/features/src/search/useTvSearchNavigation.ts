@@ -37,7 +37,7 @@ export interface TvSearchNavigationState {
   readonly inputRef: MutableRefObject<TvTextInputInstance | null>;
   readonly startInputEdit: () => void;
   readonly endInputEdit: () => void;
-  readonly handleTvKey: (event: KeyEvent) => void;
+  readonly handleTvKey: (event: KeyEvent) => boolean;
 }
 
 function getVisualRow(rows: readonly SearchNavRowDescriptor[], pos: SearchFocusPosition): number {
@@ -170,40 +170,40 @@ export function useTvSearchNavigation({
   }, []);
 
   const handleTvKey = useCallback(
-    (event: KeyEvent) => {
+    (event: KeyEvent): boolean => {
       if (event.kind === 'press' && event.key === 'back') {
         if (editingInputRef.current) {
           inputRef.current?.blur?.();
           editingInputRef.current = false;
           setEditingInput(false);
-          return;
+          return true;
         }
         if (hasQueryRef.current) {
           onClearSearchRef.current();
-          return;
+          return true;
         }
         onFocusTopNavRef.current?.();
-        return;
+        return true;
       }
 
       if (event.kind === 'press' && event.key === 'select') {
         const current = posRef.current;
         if (current.rowId === 'input' && current.col === 0) {
           startInputEdit();
-          return;
+          return true;
         }
         onActivateRef.current(current.rowId, current.col);
-        return;
+        return true;
       }
 
-      if (event.kind !== 'press' && event.kind !== 'repeat') return;
+      if (event.kind !== 'press' && event.kind !== 'repeat') return false;
       if (
         event.key !== 'up' &&
         event.key !== 'down' &&
         event.key !== 'left' &&
         event.key !== 'right'
       ) {
-        return;
+        return false;
       }
 
       const currentRows = rowsRef.current;
@@ -212,7 +212,7 @@ export function useTvSearchNavigation({
       const stepped = stepSearchFocus(currentRows, prevPos, event.key);
       if (stepped.edgeTop) {
         onFocusTopNavRef.current?.();
-        return;
+        return true;
       }
       if (stepped.position !== null) {
         commitPos(stepped.position);
@@ -221,6 +221,7 @@ export function useTvSearchNavigation({
           onFocusPositionRef.current?.(stepped.position);
         }
       }
+      return true;
     },
     [commitPos, startInputEdit],
   );

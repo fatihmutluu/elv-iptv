@@ -87,7 +87,7 @@ export interface TvLiveNavigationState {
   readonly focusedWatchControl: LiveWatchControl | null;
   readonly focusedZapIndex: number | null;
   readonly focusedNumpadKey: string | null;
-  readonly handleTvKey: (event: KeyEvent) => void;
+  readonly handleTvKey: (event: KeyEvent) => boolean;
   readonly handleChildEdgeTop: () => void;
 }
 
@@ -208,52 +208,54 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
   }, [updateNav]);
 
   const handleTvKey = useCallback(
-    (event: KeyEvent) => {
+    (event: KeyEvent): boolean => {
       const o = optsRef.current;
       const cur = navRef.current;
 
       if (o.numpadOpen) {
         if (event.kind === 'press' && event.key === 'back') {
           o.onCloseNumpad();
-          return;
+          return true;
         }
-        if (event.kind !== 'press' && event.kind !== 'repeat') return;
-        if (event.key === 'up') {
-          setNav((p) => ({ ...p, numpadRow: Math.max(0, p.numpadRow - 1) }));
-        } else if (event.key === 'down') {
+        if (event.kind !== 'press' && event.kind !== 'repeat') return false;
+        if (event.key === 'up') setNav((p) => ({ ...p, numpadRow: Math.max(0, p.numpadRow - 1) }));
+        else if (event.key === 'down')
           setNav((p) => ({ ...p, numpadRow: Math.min(NUMPAD_GRID.length - 1, p.numpadRow + 1) }));
-        } else if (event.key === 'left') {
+        else if (event.key === 'left')
           setNav((p) => ({ ...p, numpadCol: Math.max(0, p.numpadCol - 1) }));
-        } else if (event.key === 'right') {
+        else if (event.key === 'right')
           setNav((p) => ({ ...p, numpadCol: Math.min(2, p.numpadCol + 1) }));
-        } else if (event.key === 'select' && event.kind === 'press') {
+        else if (event.key === 'select' && event.kind === 'press') {
           const keyVal = NUMPAD_GRID[cur.numpadRow]?.[cur.numpadCol];
           if (keyVal) o.onPressNumpadKey(keyVal);
-        }
-        return;
+        } else return false;
+        return true;
       }
 
       if (event.kind === 'press' && event.key === 'back') {
         if (cur.zone === 'body' && o.mode === 'favorites') {
-          if (cur.watchZone === 'zap') {
-            updateNav((p) => ({ ...p, watchZone: 'controls' }));
-          } else {
-            updateNav((p) => ({ ...p, zone: 'header', headerRow: 'modes' }));
-          }
-          return;
+          updateNav((p) =>
+            cur.watchZone === 'zap'
+              ? { ...p, watchZone: 'controls' }
+              : { ...p, zone: 'header', headerRow: 'modes' },
+          );
+          return true;
         }
         o.onFocusTopNav?.();
-        return;
+        return true;
       }
 
-      if (event.kind !== 'press' && event.kind !== 'repeat') return;
-
+      if (event.kind !== 'press' && event.kind !== 'repeat') return false;
       if (o.isEmpty) {
-        if (event.key === 'up') o.onFocusTopNav?.();
-        else if (event.key === 'select' && event.kind === 'press' && o.hasOpenSourcesCta) {
-          o.onOpenSources();
+        if (event.key === 'up') {
+          o.onFocusTopNav?.();
+          return true;
         }
-        return;
+        if (event.key === 'select' && event.kind === 'press' && o.hasOpenSourcesCta) {
+          o.onOpenSources();
+          return true;
+        }
+        return false;
       }
 
       const showCats = (o.mode === 'channels' || o.mode === 'epg') && o.categoryCount > 0;
@@ -262,54 +264,52 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
         if (cur.headerRow === 'modes') {
           const maxCol = o.mode === 'channels' ? 3 : 2;
           if (event.key === 'up') o.onFocusTopNav?.();
-          else if (event.key === 'left') {
+          else if (event.key === 'left')
             updateNav((p) => ({ ...p, modeCol: Math.max(0, p.modeCol - 1) }));
-          } else if (event.key === 'right') {
+          else if (event.key === 'right')
             updateNav((p) => ({ ...p, modeCol: Math.min(maxCol, p.modeCol + 1) }));
-          } else if (event.key === 'down') {
+          else if (event.key === 'down') {
             if (showCats) updateNav((p) => ({ ...p, headerRow: 'categories' }));
             else if (o.hasBody) updateNav((p) => ({ ...p, zone: 'body', watchZone: 'controls' }));
           } else if (event.key === 'select' && event.kind === 'press') {
-            if (cur.modeCol === 3 && o.mode === 'channels') {
-              o.onToggleNumpad();
-            } else {
+            if (cur.modeCol === 3 && o.mode === 'channels') o.onToggleNumpad();
+            else {
               const target = MODE_ORDER[cur.modeCol];
               if (target) o.onSelectMode(target);
             }
-          }
-          return;
+          } else return false;
+          return true;
         }
 
-        if (event.key === 'up') {
-          updateNav((p) => ({ ...p, headerRow: 'modes' }));
-        } else if (event.key === 'left') {
+        if (event.key === 'up') updateNav((p) => ({ ...p, headerRow: 'modes' }));
+        else if (event.key === 'left')
           updateNav((p) => ({ ...p, catCol: Math.max(0, p.catCol - 1) }));
-        } else if (event.key === 'right') {
+        else if (event.key === 'right')
           updateNav((p) => ({
             ...p,
             catCol: Math.min(Math.max(0, o.categoryCount - 1), p.catCol + 1),
           }));
-        } else if (event.key === 'down') {
+        else if (event.key === 'down') {
           if (o.hasBody) updateNav((p) => ({ ...p, zone: 'body' }));
-        } else if (event.key === 'select' && event.kind === 'press') {
+        } else if (event.key === 'select' && event.kind === 'press')
           o.onSelectCategoryIndex(cur.catCol);
-        }
-        return;
+        else return false;
+        return true;
       }
 
-      if (o.mode !== 'favorites') return;
+      if (o.mode !== 'favorites') return false;
 
       if (o.channelCount === 0) {
         if (event.key === 'up') updateNav((p) => ({ ...p, zone: 'header', headerRow: 'modes' }));
         else if (event.key === 'select' && event.kind === 'press')
           o.onActivateWatchControl('browse');
-        return;
+        else return false;
+        return true;
       }
 
       if (cur.watchZone === 'controls') {
-        if (event.key === 'up') {
-          updateNav((p) => ({ ...p, zone: 'header', headerRow: 'modes' }));
-        } else if (event.key === 'left' || event.key === 'right') {
+        if (event.key === 'up') updateNav((p) => ({ ...p, zone: 'header', headerRow: 'modes' }));
+        else if (event.key === 'left' || event.key === 'right') {
           const delta = event.key === 'left' ? -1 : 1;
           updateNav((p) => ({
             ...p,
@@ -319,29 +319,27 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
             ),
           }));
         } else if (event.key === 'down') {
-          if (o.zapDrawerOpen && o.channelCount > 0) {
-            updateNav((p) => ({ ...p, watchZone: 'zap' }));
-          }
+          if (o.zapDrawerOpen && o.channelCount > 0) updateNav((p) => ({ ...p, watchZone: 'zap' }));
         } else if (event.key === 'select' && event.kind === 'press') {
           const ctrl = WATCH_CONTROLS[cur.watchControlIdx];
           if (ctrl) o.onActivateWatchControl(ctrl);
-        }
-        return;
+        } else return false;
+        return true;
       }
 
-      if (event.key === 'up') {
-        if (cur.zapIdx <= 0) updateNav((p) => ({ ...p, watchZone: 'controls' }));
-        else updateNav((p) => ({ ...p, zapIdx: p.zapIdx - 1 }));
-      } else if (event.key === 'down') {
+      if (event.key === 'up')
+        updateNav((p) =>
+          cur.zapIdx <= 0 ? { ...p, watchZone: 'controls' } : { ...p, zapIdx: p.zapIdx - 1 },
+        );
+      else if (event.key === 'down')
         updateNav((p) => ({
           ...p,
           zapIdx: Math.min(Math.max(0, o.channelCount - 1), p.zapIdx + 1),
         }));
-      } else if (event.key === 'right') {
-        updateNav((p) => ({ ...p, watchZone: 'controls' }));
-      } else if (event.key === 'select' && event.kind === 'press') {
-        o.onSelectZapIndex(cur.zapIdx);
-      }
+      else if (event.key === 'right') updateNav((p) => ({ ...p, watchZone: 'controls' }));
+      else if (event.key === 'select' && event.kind === 'press') o.onSelectZapIndex(cur.zapIdx);
+      else return false;
+      return true;
     },
     [updateNav],
   );

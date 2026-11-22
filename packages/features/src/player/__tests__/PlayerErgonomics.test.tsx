@@ -177,7 +177,9 @@ describe('Player ergonomics (#296, #297, #212)', () => {
     // Up on unfocused TV VOD hides OSD cleanly while preserving anchor + video surface
     await act(async () => tvVod.keys.tap(KEY_UP));
     expect(screen.queryByTestId('player-osd')).toBeNull();
-    expect(screen.getByTestId('player-tv-focus-anchor')).toBeTruthy();
+    expect(
+      screen.getByTestId('player-tv-focus-anchor', { includeHiddenElements: true }),
+    ).toBeTruthy();
     expect(screen.getByTestId('player-surface-layer')).toBeTruthy();
 
     // First keypress (Select) wakes OSD ONLY — never pauses!

@@ -1,4 +1,4 @@
-import type { KeyInput } from '@elv/focus-core';
+import type { KeyEvent, KeyInput } from '@elv/focus-core';
 import { act, fireEvent, render, renderHook, screen } from '@testing-library/react-native';
 import type { ReactNode } from 'react';
 import { BackHandler, Platform, TVEventControl, TVEventHandler, View } from 'react-native';
@@ -9,6 +9,7 @@ import {
   TextEntryBoundary,
   TvRemoteProvider,
   TvTextInput,
+  useKeyInterpreter,
   useTvKeySource,
 } from '../index';
 
@@ -55,7 +56,11 @@ function mockTvApis(os: 'android' | 'ios', isTV = true) {
       for (const fn of remoteSet) fn(event);
     },
     emitBack: () => {
-      for (const fn of backSet) fn();
+      let consumed = false;
+      for (const fn of backSet) {
+        if (fn() === true) consumed = true;
+      }
+      return consumed;
     },
   };
 }
@@ -104,8 +109,21 @@ function setupFakeWebWindow() {
   return { win, emit, count };
 }
 
-function Consumer({ onInput }: { onInput: (k: KeyInput) => void }) {
+function Consumer({
+  onInput,
+}: {
+  onInput: ((k: KeyInput) => boolean | undefined) | ((k: KeyInput) => void);
+}) {
   useTvKeySource(onInput);
+  return <View />;
+}
+
+function InterpreterConsumer({
+  onEvent,
+}: {
+  onEvent: ((e: KeyEvent) => boolean | undefined) | ((e: KeyEvent) => void);
+}) {
+  useKeyInterpreter(onEvent);
   return <View />;
 }
 
@@ -161,6 +179,34 @@ describe('createTvRemoteDispatcher', () => {
 
     offB();
     expect(dispatcher.isTextEntryActive()).toBe(false);
+  });
+
+  it('invokes lifecycle hooks on 0->1 and 1->0 subscriber transitions (#277)', () => {
+    const cleanup = jest.fn();
+    const onFirstListener = jest.fn(() => cleanup);
+    const onLastListener = jest.fn();
+    const dispatcher = createTvRemoteDispatcher({ onFirstListener, onLastListener });
+
+    expect(onFirstListener).not.toHaveBeenCalled();
+    const off1 = dispatcher.subscribe(() => {});
+    expect(onFirstListener).toHaveBeenCalledTimes(1);
+    const off2 = dispatcher.subscribe(() => {});
+    expect(onFirstListener).toHaveBeenCalledTimes(1);
+
+    off1();
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(onLastListener).not.toHaveBeenCalled();
+
+    off2();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(onLastListener).toHaveBeenCalledTimes(1);
+
+    // Re-attaching after 0 triggers onFirstListener again
+    const off3 = dispatcher.subscribe(() => {});
+    expect(onFirstListener).toHaveBeenCalledTimes(2);
+    off3();
+    expect(cleanup).toHaveBeenCalledTimes(2);
+    expect(onLastListener).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -451,6 +497,120 @@ describe('TvRemoteProvider (#277)', () => {
       fireEvent(screen.getByTestId('solo-input'), 'focus');
     });
     expect(shared.isTextEntryActive()).toBe(true);
+    await view.unmount();
+  });
+
+  it('attaches platform listeners lazily on 0->1 subscribers and detaches on 1->0 (#277)', async () => {
+    const apis = mockTvApis('android', true);
+    const view = await render(
+      <TvRemoteProvider>
+        <View />
+      </TvRemoteProvider>,
+    );
+    expect(apis.addRemote).not.toHaveBeenCalled();
+    expect(apis.addBack).not.toHaveBeenCalled();
+
+    const handler = jest.fn<boolean, [KeyInput]>(() => true);
+    await view.rerender(
+      <TvRemoteProvider>
+        <Consumer onInput={handler} />
+      </TvRemoteProvider>,
+    );
+    expect(apis.addRemote).toHaveBeenCalledTimes(1);
+    expect(apis.addBack).toHaveBeenCalledTimes(1);
+    expect(apis.activeRemoteListeners()).toBe(1);
+
+    await view.rerender(
+      <TvRemoteProvider>
+        <View />
+      </TvRemoteProvider>,
+    );
+    expect(apis.activeRemoteListeners()).toBe(0);
+    expect(apis.activeBackListeners()).toBe(0);
+
+    await view.unmount();
+  });
+
+  it('propagates BackHandler false when zero subscribers or subscriber returns false, and true when consumed or exiting text entry (#425)', async () => {
+    const apis = mockTvApis('android', true);
+    const shared = createTvRemoteDispatcher();
+    const emptyView = await render(
+      <TvRemoteProvider dispatcher={shared}>
+        <View />
+      </TvRemoteProvider>,
+    );
+    expect(apis.emitBack()).toBe(false);
+    await emptyView.unmount();
+
+    const unconsumed = jest.fn<boolean, [KeyEvent]>(() => false);
+    const view = await render(
+      <TvRemoteProvider>
+        <InterpreterConsumer onEvent={unconsumed} />
+      </TvRemoteProvider>,
+    );
+    expect(apis.emitBack()).toBe(false);
+    expect(unconsumed).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'back', kind: 'press' }),
+    );
+
+    const consumed = jest.fn<boolean, [KeyEvent]>(() => true);
+    await view.rerender(
+      <TvRemoteProvider>
+        <InterpreterConsumer onEvent={unconsumed} />
+        <InterpreterConsumer onEvent={consumed} />
+      </TvRemoteProvider>,
+    );
+    expect(apis.emitBack()).toBe(true);
+    expect(consumed).toHaveBeenCalledWith(expect.objectContaining({ key: 'back', kind: 'press' }));
+
+    await view.unmount();
+  });
+
+  it('propagates raw Android KEYCODE_BACK unconsumed/consumed and text-entry exit through BackHandler (#425)', async () => {
+    const apis = mockTvApis('android', true);
+    const raw = fakeAndroidSource();
+    let shouldConsume = false;
+    const onEvent = jest.fn<boolean, [KeyEvent]>(() => shouldConsume);
+
+    const view = await render(
+      <RemoteKeysProvider android={raw.source}>
+        <TvRemoteProvider>
+          <TextEntryBoundary>
+            <InterpreterConsumer onEvent={onEvent} />
+            <TvTextInput testID="back-text-input" />
+          </TextEntryBoundary>
+        </TvRemoteProvider>
+      </RemoteKeysProvider>,
+    );
+
+    // 1. Raw down while held -> BackHandler returns true (hold in progress)
+    raw.emit({ action: 'down', keyCode: 4, canceled: false, ageMs: 0 });
+    expect(apis.emitBack()).toBe(true);
+
+    // 2. Raw up unconsumed -> BackHandler dedup returns false so Android exits cleanly
+    raw.emit({ action: 'up', keyCode: 4, canceled: false, ageMs: 0 });
+    expect(onEvent).toHaveBeenLastCalledWith(
+      expect.objectContaining({ key: 'back', kind: 'press' }),
+    );
+    expect(apis.emitBack()).toBe(false);
+
+    // 3. Raw down+up consumed -> BackHandler dedup returns true
+    shouldConsume = true;
+    raw.emit({ action: 'down', keyCode: 4, canceled: false, ageMs: 0 });
+    raw.emit({ action: 'up', keyCode: 4, canceled: false, ageMs: 0 });
+    expect(apis.emitBack()).toBe(true);
+
+    // 4. Raw back exiting active TextEntryBoundary -> BackHandler returns true even when consumer returns false
+    shouldConsume = false;
+    onEvent.mockClear();
+    await act(async () => {
+      fireEvent(screen.getByTestId('back-text-input'), 'focus');
+    });
+    raw.emit({ action: 'down', keyCode: 4, canceled: false, ageMs: 0 });
+    raw.emit({ action: 'up', keyCode: 4, canceled: false, ageMs: 0 });
+    expect(onEvent).not.toHaveBeenCalled();
+    expect(apis.emitBack()).toBe(true);
+
     await view.unmount();
   });
 });

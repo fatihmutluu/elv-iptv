@@ -12,6 +12,7 @@ import {
 import type { ReactElement } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import type { PlaybackGuard } from '../ports/playback-guard';
+import { useRouteActive } from '../shared';
 import { SavedSourcesPanel } from './SavedSourcesPanel';
 import { ActionButton, FieldInput } from './SourcesScreenParts';
 import { sourcesStyles as styles } from './sources-styles';
@@ -39,6 +40,7 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
   const theme = useTheme();
   const viewport = useViewport();
   const isTv = formFactor === 'tv';
+  const routeActive = useRouteActive();
   const isActiveScope = props.isActiveScope ?? true;
   const embedded = props.embedded ?? false;
   const twoColumn = formFactor !== 'phone';
@@ -64,9 +66,7 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
   const fieldShared = {
     editingInputId: tv.editingInputId,
     onEndEditing: tv.handleEndEditing,
-    onSubmit: () => {
-      if (!ctrl.submitting) void ctrl.submit();
-    },
+    onSubmit: () => !ctrl.submitting && void ctrl.submit(),
     registerRef: tv.registerRef,
     recordLayout: tv.recordLayout,
   };
@@ -84,7 +84,10 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
     <View style={[styles.root, { backgroundColor: rootBackground }]}>
       {isTv && isActiveScope ? (
         <>
-          <TvFocusAnchor testID="sources-tv-focus-anchor" />
+          <TvFocusAnchor
+            testID="sources-tv-focus-anchor"
+            hasTVPreferredFocus={routeActive && isActiveScope}
+          />
           <TvRemoteBridge
             store={tv.focusStore}
             controls={tv.controls}

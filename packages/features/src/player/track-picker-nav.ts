@@ -1,7 +1,8 @@
 import type { KeyEvent } from '@elv/focus-core';
 import type { MediaTracks, TrackInfo } from '@elv/playback';
 
-type TrackPickerColumn = 'audio' | 'subtitles';
+/** Column identifier inside the two-column track picker. */
+export type TrackPickerColumn = 'audio' | 'subtitles';
 
 /** Logical D-pad / keyboard cursor inside the track picker; subtitle row 0 is "Off". */
 export interface TrackPickerCursor {
@@ -31,8 +32,13 @@ function rowCount(column: TrackPickerColumn, tracks: MediaTracks): number {
   return column === 'audio' ? tracks.audio.length : tracks.subtitles.length + 1;
 }
 
-/** Cursor when the picker opens: the selected audio track, else the selected subtitle row. */
-export function initialPickerCursor(tracks: MediaTracks): TrackPickerCursor {
+/** Cursor when the picker opens: honors `preferredColumn` when available, else audio then subtitles. */
+export function initialPickerCursor(
+  tracks: MediaTracks,
+  preferredColumn?: TrackPickerColumn,
+): TrackPickerCursor {
+  if (preferredColumn === 'subtitles') return selectedSubtitleCursor(tracks);
+  if (preferredColumn === 'audio' && tracks.audio.length > 0) return selectedAudioCursor(tracks);
   return tracks.audio.length > 0 ? selectedAudioCursor(tracks) : selectedSubtitleCursor(tracks);
 }
 

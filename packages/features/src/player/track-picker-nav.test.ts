@@ -47,6 +47,12 @@ describe('initialPickerCursor', () => {
       index: 0,
     });
   });
+
+  it('honors preferredColumn for captions/audioTrack shortcut opening', () => {
+    expect(initialPickerCursor(TRACKS, 'subtitles')).toEqual({ column: 'subtitles', index: 2 });
+    expect(initialPickerCursor(TRACKS, 'audio')).toEqual({ column: 'audio', index: 1 });
+    expect(initialPickerCursor(NO_AUDIO, 'audio')).toEqual({ column: 'subtitles', index: 2 });
+  });
 });
 
 describe('clampPickerCursor', () => {

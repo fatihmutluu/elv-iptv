@@ -117,7 +117,9 @@ export function GateListScreen({ params }: GateListScreenProps): ReactElement {
     (event: KeyEvent, t0: number) => {
       const before = currentIndex(store);
       recorder.workStart(performance.now());
-      for (const intent of store.dispatch(event)) recorder.intent(intent.kind);
+      for (const intent of store.dispatch(event)) {
+        if (intent.kind !== 'emptyScope') recorder.intent(intent.kind);
+      }
       if (currentIndex(store) === before) {
         recorder.workEnd(performance.now());
         return;

@@ -9,52 +9,17 @@ import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 
 import type { AppLifecyclePort } from '../ports/app-lifecycle';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
-import { buildNextEpisodeTarget, buildPreviousChannelTarget } from './player-overlay-model';
+import { resolveChannelJump } from './channel-digit-entry';
+import {
+  buildChannelJumpTarget,
+  buildNextEpisodeTarget,
+  buildPreviousChannelTarget,
+  hasTargetMetaChanged,
+  isPromiseLike,
+  toPlayableEntry,
+} from './player-overlay-model';
 import { resolveVodStartPositionMs } from './useWatchProgressSync';
 import { createZapController, type ZapController } from './zap-controller';
-
-function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as { then?: unknown }).then === 'function'
-  );
-}
-
-function hasTargetMetaChanged(prev: PlayTarget, next: PlayTarget): boolean {
-  return (
-    prev.playlist !== next.playlist ||
-    prev.title !== next.title ||
-    prev.sourceId !== next.sourceId ||
-    prev.accountKey !== next.accountKey ||
-    prev.logo !== next.logo ||
-    prev.subtitle !== next.subtitle ||
-    prev.seriesKey !== next.seriesKey ||
-    prev.season !== next.season ||
-    prev.episode !== next.episode ||
-    prev.itemKind !== next.itemKind ||
-    prev.nextEpisodes !== next.nextEpisodes ||
-    prev.previousChannel !== next.previousChannel ||
-    prev.previousChannelIndex !== next.previousChannelIndex
-  );
-}
-
-function toFlatPlayableEntry(target: PlayTarget): PlayableEntry {
-  return {
-    itemKey: target.itemKey,
-    sourceId: target.sourceId,
-    ...(target.accountKey !== undefined ? { accountKey: target.accountKey } : {}),
-    title: target.title,
-    kind: target.kind,
-    ...(target.startPositionMs !== undefined ? { startPositionMs: target.startPositionMs } : {}),
-    ...(target.logo !== undefined ? { logo: target.logo } : {}),
-    ...(target.subtitle !== undefined ? { subtitle: target.subtitle } : {}),
-    ...(target.seriesKey !== undefined ? { seriesKey: target.seriesKey } : {}),
-    ...(target.season !== undefined ? { season: target.season } : {}),
-    ...(target.episode !== undefined ? { episode: target.episode } : {}),
-    ...(target.itemKind !== undefined ? { itemKind: target.itemKind } : {}),
-  };
-}
 
 /** Parameters of {@link usePlayerTargetHandoff}. */
 export interface PlayerTargetHandoffParams {
@@ -62,7 +27,8 @@ export interface PlayerTargetHandoffParams {
   playbackGuard?: PlaybackGuard | undefined;
   appLifecycle: AppLifecyclePort;
   catalogRef: MutableRefObject<
-    Pick<CatalogService, 'resolveStream' | 'getProgress' | 'saveProgress'>
+    Pick<CatalogService, 'resolveStream' | 'getProgress' | 'saveProgress'> &
+      Partial<Pick<CatalogService, 'channelByNumber'>>
   >;
   serviceRef: MutableRefObject<PlaybackService | null>;
   clockRef: MutableRefObject<PlaybackClock>;
@@ -167,7 +133,7 @@ export function usePlayerTargetHandoff({
           nextTarget.itemKey !== prevTarget.itemKey
             ? {
                 ...nextTarget,
-                previousChannel: toFlatPlayableEntry(prevTarget),
+                previousChannel: toPlayableEntry(prevTarget),
                 ...(prevIdx !== undefined ? { previousChannelIndex: prevIdx } : {}),
               }
             : {
@@ -198,9 +164,10 @@ export function usePlayerTargetHandoff({
 
   const zapBy = useCallback(
     (delta: 1 | -1, repeat = false): void => {
+      cancelPendingResume();
       zapController.zap(delta, repeat);
     },
-    [zapController],
+    [cancelPendingResume, zapController],
   );
 
   const handlePlayNextEpisode = useCallback(
@@ -270,6 +237,40 @@ export function usePlayerTargetHandoff({
     tuneEntry,
     zapController,
   ]);
+
+  const jumpToChannel = useCallback(
+    (channelNumber: number): void => {
+      const current = activeTargetRef.current;
+      if (current.kind !== 'live' || !Number.isInteger(channelNumber) || channelNumber <= 0) return;
+      const gen = ++tuneGenRef.current;
+      void resolveChannelJump(channelNumber, current, catalogRef.current)
+        .then((resolved) => {
+          if (!mountedRef.current || gen !== tuneGenRef.current || resolved === null) return;
+          const latest = activeTargetRef.current;
+          const next =
+            latest.kind === 'live'
+              ? buildChannelJumpTarget(latest, resolved.entry, resolved.index)
+              : null;
+          if (next === null) return;
+          cancelScrubRef.current();
+          vodResumeMsRef.current = undefined;
+          zapController.reset(next.playlist?.currentIndex ?? 0);
+          if (resolved.index !== undefined) next.playlist?.onChangeIndex(resolved.index);
+          prevPropKeyRef.current = next.itemKey;
+          activeTargetRef.current = next;
+          setActiveTarget(next);
+          onTargetChangeRef.current?.(next);
+          const svc = serviceRef.current;
+          if (backgroundedRef.current) resumeOnActiveRef.current = true;
+          else if (svc !== null) {
+            svc.stop();
+            tuneEntry(svc, next);
+          }
+        })
+        .catch(() => undefined);
+    },
+    [catalogRef, cancelScrubRef, onTargetChangeRef, serviceRef, tuneEntry, zapController],
+  );
 
   const onServiceReady = useCallback(
     (service: PlaybackService): void => {
@@ -378,6 +379,7 @@ export function usePlayerTargetHandoff({
   return {
     activeTarget,
     zapBy,
+    jumpToChannel,
     onServiceReady,
     handlePlayNextEpisode,
     handleJumpPreviousChannel,

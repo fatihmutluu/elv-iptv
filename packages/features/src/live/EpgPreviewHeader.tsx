@@ -312,7 +312,7 @@ export const EpgTimeRuler = memo(function EpgTimeRulerInner(p: EpgTimeRulerProps
             {categoryLabel}
           </Text>
         </View>
-        <View style={styles.rulerTrack}>
+        <View testID="epg-ruler-track" style={styles.rulerTrack}>
           {rulerTicks.map((tickMs, idx) => (
             <View
               key={tickMs}
@@ -371,6 +371,7 @@ const styles = StyleSheet.create({
   },
   rulerRow: {
     flexDirection: 'row',
+    direction: 'ltr',
     alignItems: 'center',
     height: 32,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -381,7 +382,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     borderRightWidth: StyleSheet.hairlineWidth,
   },
-  rulerTrack: { flex: 1, flexDirection: 'row', height: '100%' },
+  rulerTrack: { flex: 1, flexDirection: 'row', direction: 'ltr', height: '100%' },
   rulerTickCell: {
     flex: 1,
     justifyContent: 'center',

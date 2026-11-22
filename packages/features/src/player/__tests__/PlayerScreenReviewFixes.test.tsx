@@ -133,12 +133,15 @@ describe('PlayerScreen review fixes (TV Live OSD, double-tap, scrub cancel, focu
     await act(async () => keys.tap(KEY_SELECT));
     expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
 
-    // Back closes Settings
+    // Back closes Settings and restores TV OSD focus to 'settings' (#130)
     await act(async () => keys.tap(KEY_BACK));
     expect(screen.queryByTestId('player-settings-panel')).toBeNull();
+    expect(screen.getByTestId('player-settings-button').props.accessibilityState).toMatchObject({
+      selected: true,
+    });
 
-    // Right enters Live TV OSD focus (lands on 'tracks') -> Left moves to 'prevChannel' -> Select jumps to ch:0
-    await act(async () => keys.tap(KEY_RIGHT));
+    // Left moves 'settings' -> 'tracks' -> 'prevChannel' -> Select jumps to ch:0
+    await act(async () => keys.tap(KEY_LEFT));
     await act(async () => keys.tap(KEY_LEFT));
     await act(async () => keys.tap(KEY_SELECT));
 

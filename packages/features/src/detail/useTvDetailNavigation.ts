@@ -51,7 +51,7 @@ export interface UseTvDetailNavigationOptions {
 export interface TvDetailNavigationState {
   readonly focusedRowId: DetailNavRowId | null;
   readonly focusedCol: number | null;
-  readonly handleTvKey: (event: KeyEvent) => void;
+  readonly handleTvKey: (event: KeyEvent) => boolean;
 }
 
 /**
@@ -243,21 +243,32 @@ export function useTvDetailNavigation({
   );
 
   const handleTvKey = useCallback(
-    (event: KeyEvent) => {
+    (event: KeyEvent): boolean => {
       if (event.kind === 'press' && event.key === 'back') {
         onBackRef.current();
-        return;
+        return true;
       }
 
       const currentRows = rowsRef.current;
-      if (currentRows.length === 0) return;
+      if (currentRows.length === 0) return false;
 
       const currentIdx = Math.max(
         0,
         currentRows.findIndex((r) => r.id === activeRowIdRef.current),
       );
       const currentRow = currentRows[currentIdx];
-      if (!currentRow) return;
+      if (!currentRow) return false;
+
+      if (
+        (event.kind === 'press' || event.kind === 'repeat') &&
+        (event.key === 'up' ||
+          event.key === 'down' ||
+          event.key === 'left' ||
+          event.key === 'right' ||
+          event.key === 'select')
+      ) {
+        pendingRestoreRef.current = null;
+      }
 
       store.activate(currentRow.id);
       const currentList = findList(store.getState().scopes, currentRow.id)?.list;
@@ -272,15 +283,15 @@ export function useTvDetailNavigation({
           setActiveCol(nextCol);
           persistDetailFocus(currentRow.id, nextCol);
           onFocusRowRef.current?.(currentRow.id, nextCol);
-          return;
+          return true;
         }
         if (currentIdx === 0) {
           onFocusTopNavRef.current?.();
-          return;
+          return true;
         }
         const prevRow = currentRows[currentIdx - 1];
         if (prevRow) moveToRow(prevRow);
-        return;
+        return true;
       }
 
       if ((event.kind === 'press' || event.kind === 'repeat') && event.key === 'down') {
@@ -292,19 +303,19 @@ export function useTvDetailNavigation({
           setActiveCol(nextCol);
           persistDetailFocus(currentRow.id, nextCol);
           onFocusRowRef.current?.(currentRow.id, nextCol);
-          return;
+          return true;
         }
-        if (currentIdx >= currentRows.length - 1) return;
+        if (currentIdx >= currentRows.length - 1) return false;
         const nextRow = currentRows[currentIdx + 1];
         if (nextRow) moveToRow(nextRow);
-        return;
+        return true;
       }
 
       if (
         currentRow.orientation === 'vertical' &&
         (event.key === 'left' || event.key === 'right')
       ) {
-        return;
+        return false;
       }
 
       const intents = store.dispatch(event);
@@ -316,10 +327,14 @@ export function useTvDetailNavigation({
       for (const intent of intents) {
         if (intent.kind === 'back') {
           onBackRef.current();
-        } else if (intent.kind === 'select') {
+          return true;
+        }
+        if (intent.kind === 'select') {
           onActivateRef.current(currentRow.id, col);
+          return true;
         }
       }
+      return event.key === 'left' || event.key === 'right';
     },
     [moveToRow, persistDetailFocus, store],
   );

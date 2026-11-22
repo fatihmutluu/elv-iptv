@@ -588,6 +588,7 @@ describe('PlayerScreen Cinema Quietude OSD, 2-level Settings, Touch Lock, Next E
     expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
 
     await act(async () => {
+      manual.advance(250);
       keys.tap(KEY_SELECT);
     });
     expect(screen.getByTestId('player-settings-sub-s:1')).toBeTruthy();
@@ -636,15 +637,22 @@ describe('PlayerScreen Cinema Quietude OSD, 2-level Settings, Touch Lock, Next E
       keys.tap(KEY_UP);
     });
 
-    // Back closes Settings root without exiting PlayerScreen (Stats HUD remains visible)
+    // Back closes Settings root and restores TV OSD focus to 'settings' (Stats HUD remains visible, #130)
     await act(async () => {
       keys.tap(KEY_BACK);
     });
     expect(screen.queryByTestId('player-settings-panel')).toBeNull();
     expect(screen.getByTestId('player-stats-hud')).toBeTruthy();
+    expect(flatStyle('player-settings-button')?.borderColor).toBe(
+      THEME_PRESETS.highContrast.focusRingColor,
+    );
     expect(onExit).not.toHaveBeenCalled();
 
-    // Next Back exits PlayerScreen
+    // Next Back blurs TV OSD without exiting; following Back exits PlayerScreen
+    await act(async () => {
+      keys.tap(KEY_BACK);
+    });
+    expect(onExit).not.toHaveBeenCalled();
     await act(async () => {
       keys.tap(KEY_BACK);
     });

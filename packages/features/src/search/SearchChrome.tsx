@@ -1,5 +1,4 @@
 import type { SearchScope } from '@elv/data';
-import type { KeyEvent } from '@elv/focus-core';
 import {
   CtaButton,
   EditorialCategoryBar,
@@ -18,16 +17,25 @@ import {
 } from '@elv/ui-kit';
 import { type MutableRefObject, memo, type ReactElement, useCallback, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRouteActive } from '../shared';
 import { MAX_SEARCH_QUERY_CHARS, SEARCH_SCOPES } from './search-model';
 
 /** Mounts the 10-ft TV key interpreter and focus anchor while `SearchScreen` owns focus. */
 export function SearchTvKeyBridge({
   onEvent,
+  preferredFocus = true,
 }: {
-  readonly onEvent: (event: KeyEvent) => void;
+  readonly onEvent: Parameters<typeof useKeyInterpreter>[0];
+  readonly preferredFocus?: boolean;
 }): ReactElement {
+  const routeActive = useRouteActive();
   useKeyInterpreter(onEvent);
-  return <TvFocusAnchor testID="search-tv-focus-anchor" />;
+  return (
+    <TvFocusAnchor
+      testID="search-tv-focus-anchor"
+      hasTVPreferredFocus={routeActive && preferredFocus}
+    />
+  );
 }
 
 interface RecentChipItemProps {
@@ -46,9 +54,7 @@ const RecentChipItem = memo(function RecentChipItemInner({
   onSelect,
 }: RecentChipItemProps): ReactElement {
   const theme = useTheme();
-  const handlePress = useCallback(() => {
-    onSelect(term);
-  }, [onSelect, term]);
+  const handlePress = useCallback(() => onSelect(term), [onSelect, term]);
 
   return (
     <Pressable
@@ -157,9 +163,7 @@ export const SearchHeaderBar = memo(function SearchHeaderBarInner({
   );
 
   const handleSelectScopeId = useCallback(
-    (id: string) => {
-      onSelectScope(id as SearchScope);
-    },
+    (id: string) => onSelectScope(id as SearchScope),
     [onSelectScope],
   );
 
