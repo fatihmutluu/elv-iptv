@@ -35,6 +35,7 @@ describe('buildVideoWindowOptions', () => {
       parent,
       frame: false,
       show: false,
+      focusable: false,
       skipTaskbar: true,
       closable: false,
       resizable: false,

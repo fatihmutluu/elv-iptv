@@ -75,7 +75,11 @@ describe('createPresenter', () => {
     const app = fakeAppWindow();
     const appWindow = app.window as unknown as BrowserWindow;
     const presenter = createPresenter('child-window', appWindow, 'win32');
-    expect(await presenter.prepare()).toEqual(['--wid=2748', '--auto-window-resize=no']);
+    expect(await presenter.prepare()).toEqual([
+      '--wid=2748',
+      '--auto-window-resize=no',
+      '--input-vo-keyboard=no',
+    ]);
     expect(electron.made).toHaveLength(1);
     expect(electron.made[0]?.options).toMatchObject({
       parent: appWindow,
@@ -96,10 +100,13 @@ describe('createPresenter', () => {
     const appWindow = app.window as unknown as BrowserWindow;
     const windows = createPresenter('own-window', appWindow, 'win32');
     windows.setArea(AREA);
-    expect(await windows.prepare()).toEqual(['--geometry=1280x720+20+100']);
+    expect(await windows.prepare()).toEqual([
+      '--geometry=1280x720+20+100',
+      '--input-vo-keyboard=yes',
+    ]);
     const mac = createPresenter('own-window', appWindow, 'darwin');
     mac.setArea(AREA);
-    expect(await mac.prepare()).toEqual(['--geometry=1280x720+20+40']);
+    expect(await mac.prepare()).toEqual(['--geometry=1280x720+20+40', '--input-vo-keyboard=yes']);
     expect(electron.dipCalls).toHaveLength(1);
 
     electron.displays = [
@@ -114,6 +121,10 @@ describe('createPresenter', () => {
       'darwin',
     );
     macMulti.setArea(AREA);
-    expect(await macMulti.prepare()).toEqual(['--geometry=640x360+100+100', '--screen=1']);
+    expect(await macMulti.prepare()).toEqual([
+      '--geometry=640x360+100+100',
+      '--screen=1',
+      '--input-vo-keyboard=yes',
+    ]);
   });
 });

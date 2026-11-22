@@ -1,7 +1,12 @@
 import type { MpvClient } from '../mpv/client.ts';
 import type { MpvCommand, MpvEvent, MpvReply } from '../mpv/codec.ts';
 import type { Rect } from '../presenter/bounds.ts';
-import type { AppWindowEvent, AppWindowLike, VideoWindowLike } from '../presenter/types.ts';
+import type {
+  AppWindowEvent,
+  AppWindowLike,
+  VideoWindowEvent,
+  VideoWindowLike,
+} from '../presenter/types.ts';
 
 type Listener = () => void;
 
@@ -18,6 +23,7 @@ export function fakeAppWindow(content: Rect = { x: 100, y: 50, width: 1280, heig
     fullscreen: false,
     destroyed: false,
     fullscreenCalls: [] as boolean[],
+    focusCalls: 0,
   };
   const window: AppWindowLike = {
     getContentBounds: () => ({ ...state.content }),
@@ -41,6 +47,9 @@ export function fakeAppWindow(content: Rect = { x: 100, y: 50, width: 1280, heig
         state.maximized = false;
         state.alwaysOnTop = false;
       }
+    },
+    focus: () => {
+      state.focusCalls += 1;
     },
     isDestroyed: () => state.destroyed,
     on: (event, listener) => {
@@ -66,10 +75,13 @@ export function fakeAppWindow(content: Rect = { x: 100, y: 50, width: 1280, heig
 
 /** A video window that records bounds and visibility; `destroy` fires `closed` like Electron. */
 export function fakeVideoWindow(hwnd = 0x1234abcd) {
-  const closed = new Set<Listener>();
+  const handlers = new Map<VideoWindowEvent, Set<Listener>>();
   const state = { bounds: [] as Rect[], visible: false, destroyed: false, shows: 0, hides: 0 };
   const handle = Buffer.alloc(8);
   handle.writeUInt32LE(hwnd, 0);
+  const emit = (event: VideoWindowEvent): void => {
+    for (const l of [...(handlers.get(event) ?? [])]) l();
+  };
   const window: VideoWindowLike = {
     setBounds: (bounds) => {
       if (state.destroyed) throw new Error('Object has been destroyed');
@@ -89,15 +101,30 @@ export function fakeVideoWindow(hwnd = 0x1234abcd) {
       if (state.destroyed) return;
       state.destroyed = true;
       state.visible = false;
-      for (const l of [...closed]) l();
+      emit('closed');
     },
     getNativeWindowHandle: () => handle,
-    on: (_event, listener) => {
-      closed.add(listener);
+    on: (event, listener) => {
+      const set = handlers.get(event) ?? new Set<Listener>();
+      set.add(listener);
+      handlers.set(event, set);
+      return window;
+    },
+    removeListener: (event, listener) => {
+      handlers.get(event)?.delete(listener);
       return window;
     },
   };
-  return { window, state, lastBounds: () => state.bounds[state.bounds.length - 1] };
+  return {
+    window,
+    state,
+    emit,
+    listenerCount: (event?: VideoWindowEvent) =>
+      event
+        ? (handlers.get(event)?.size ?? 0)
+        : [...handlers.values()].reduce((n, set) => n + set.size, 0),
+    lastBounds: () => state.bounds[state.bounds.length - 1],
+  };
 }
 
 /** An mpv client that records commands and lets tests push events and a close. */

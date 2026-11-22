@@ -158,9 +158,10 @@ int wmain(int argc, wchar_t **argv)
     set_option(h, "load-scripts", "no");
     set_option(h, "ytdl", "no");
     set_option(h, "load-unsafe-playlists", "no");
-    set_option(h, "input-default-bindings", "yes");
-    set_option(h, "input-vo-keyboard", "yes");
-    set_option(h, "osc", "yes");
+    set_option(h, "input-default-bindings", "no");
+    set_option(h, "input-vo-keyboard", "no");
+    set_option(h, "osc", "no");
+    set_option(h, "osd-level", "0");
     code = apply_args(argc, argv, set_option, h, &parent_pid);
     if (code == 0 && parent_pid != 0 && !(parent = OpenProcess(SYNCHRONIZE, FALSE, parent_pid)))
         code = 5;

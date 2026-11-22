@@ -9,9 +9,10 @@ import type {
 import type { FormFactor } from '@elv/ui-kit';
 import type { MutableRefObject } from 'react';
 import type { PlayTarget } from '../ports/play-target';
+import type { HostKey } from '../ports/video-host';
 import type { ChannelDigitBuffer } from './channel-digit-entry';
 import type { PlayerOverlayLive } from './player-overlay-model';
-import type { ScrubController } from './scrub-controller';
+import { COARSE_SEEK_MS, type ScrubController, STEP_SEEK_MS } from './scrub-controller';
 import { routeSettingsMenuKey, type SettingsMenuState } from './settings-menu-nav';
 import { routePickerKey, type TrackPickerColumn, type TrackPickerCursor } from './track-picker-nav';
 import {
@@ -47,6 +48,7 @@ export interface PlayerControlsParams {
   onToggleFullscreen?: (() => void) | undefined;
   onToggleMute?: (() => void) | undefined;
   onSetOrientationLocked?: ((locked: boolean) => void) | undefined;
+  onSetDeinterlace?: ((enabled: boolean) => void) | undefined;
 }
 
 /** Collaborators for {@link routeOverlayAndMediaKey}. */
@@ -54,6 +56,7 @@ export interface OverlayKeyRouteDeps {
   readonly isTv: boolean;
   readonly isVod: boolean;
   readonly hasAspect: boolean;
+  readonly hasDeinterlace?: boolean;
   readonly playbackSpeed: number;
   readonly state: PlayerOverlayLive;
   readonly service: PlaybackService | null;
@@ -63,6 +66,7 @@ export interface OverlayKeyRouteDeps {
   readonly showOsd: () => void;
   readonly toggleStats: () => void;
   readonly toggleResizeMode: () => void;
+  readonly toggleDeinterlace?: () => void;
   readonly togglePlayPause: () => void;
   readonly openTracks: (preferredColumn?: TrackPickerColumn) => void;
   readonly closeTracks: () => void;
@@ -120,11 +124,13 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       isVod: d.isVod,
       playbackSpeed: d.playbackSpeed,
       hasAspect: d.hasAspect,
+      hasDeinterlace: d.hasDeinterlace === true,
     });
     if (intent !== null && event.key === 'select' && !d.allowTvSelect()) return true;
     if (intent?.kind === 'close') d.closeSettings();
     else if (intent?.kind === 'state') d.updateSettingsMenu(intent.state);
     else if (intent?.kind === 'toggleResizeMode') d.toggleResizeMode();
+    else if (intent?.kind === 'toggleDeinterlace') d.toggleDeinterlace?.();
     else if (intent?.kind === 'toggleStats') d.toggleStats();
     else if (intent?.kind === 'audio') d.service?.selectAudioTrack(intent.id);
     else if (intent?.kind === 'subtitle') d.service?.selectSubtitleTrack(intent.id);
@@ -170,4 +176,66 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
   }
 
   return false;
+}
+
+/** Collaborators for {@link routeHostKey}. */
+export interface HostKeyRouteDeps {
+  readonly isVod: boolean;
+  readonly state: Pick<PlayerOverlayLive, 'locked' | 'tracksOpen' | 'settingsOpen'>;
+  readonly handleBack: () => void;
+  readonly toggleFullscreen: () => void;
+  readonly togglePlayPause: () => void;
+  readonly seekBy: (deltaMs: number) => void;
+  readonly toggleMute?: (() => void) | undefined;
+  readonly openTracks: () => void;
+  readonly closeTracks: () => void;
+  readonly zapBy: (delta: 1 | -1) => void;
+  readonly onJumpPreviousChannel?: (() => void) | undefined;
+}
+
+/** Routes a forwarded out-of-DOM host key (`#420`) through the same controls as DOM shortcuts. */
+export function routeHostKey(key: HostKey, d: HostKeyRouteDeps): void {
+  const { state } = d;
+  const canUseShortcuts = !state.locked && !state.tracksOpen && !state.settingsOpen;
+  switch (key) {
+    case 'back':
+      d.handleBack();
+      return;
+    case 'fullscreen':
+      if (!state.locked) d.toggleFullscreen();
+      return;
+    case 'channel-up':
+      if (!state.locked) d.zapBy(1);
+      return;
+    case 'channel-down':
+      if (!state.locked) d.zapBy(-1);
+      return;
+    case 'play-pause':
+      if (canUseShortcuts) d.togglePlayPause();
+      return;
+    case 'seek-back':
+      if (canUseShortcuts && d.isVod) d.seekBy(-STEP_SEEK_MS);
+      return;
+    case 'seek-forward':
+      if (canUseShortcuts && d.isVod) d.seekBy(STEP_SEEK_MS);
+      return;
+    case 'seek-coarse-back':
+      if (canUseShortcuts && d.isVod) d.seekBy(-COARSE_SEEK_MS);
+      return;
+    case 'seek-coarse-forward':
+      if (canUseShortcuts && d.isVod) d.seekBy(COARSE_SEEK_MS);
+      return;
+    case 'mute':
+      if (canUseShortcuts) d.toggleMute?.();
+      return;
+    case 'tracks':
+      if (!state.locked && !state.settingsOpen) {
+        if (state.tracksOpen) d.closeTracks();
+        else d.openTracks();
+      }
+      return;
+    case 'prev-channel':
+      if (canUseShortcuts && !d.isVod) d.onJumpPreviousChannel?.();
+      return;
+  }
 }

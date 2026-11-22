@@ -15,7 +15,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import type { OpenVideoEngine, VideoHost } from '../ports/video-host';
+import type { HostKey, OpenVideoEngine, VideoHost } from '../ports/video-host';
 
 type SessionState =
   | { readonly kind: 'opening' }
@@ -48,22 +48,11 @@ export function usePlayerSession(params: {
   serviceRef: MutableRefObject<PlaybackService | null>;
   clockRef: MutableRefObject<PlaybackClock>;
   timersRef: MutableRefObject<PlaybackTimers>;
-  hostBackRef: MutableRefObject<() => void>;
-  hostFullscreenRef?: MutableRefObject<() => void>;
+  hostKeyRef: MutableRefObject<(key: HostKey) => void>;
   onExitRef: MutableRefObject<() => void>;
-  zapByRef: MutableRefObject<(delta: 1 | -1, repeat?: boolean) => void>;
   onServiceReady: (service: PlaybackService) => void;
 }) {
-  const {
-    videoHost,
-    serviceRef,
-    clockRef,
-    timersRef,
-    hostBackRef,
-    hostFullscreenRef,
-    onExitRef,
-    zapByRef,
-  } = params;
+  const { videoHost, serviceRef, clockRef, timersRef, hostKeyRef, onExitRef } = params;
   const onReadyRef = useRef(params.onServiceReady);
   onReadyRef.current = params.onServiceReady;
 
@@ -99,10 +88,7 @@ export function usePlayerSession(params: {
       });
       const offHostKey = opened.onHostKey?.((key) => {
         if ((key as string) === 'close') onExitRef.current();
-        else if (key === 'back') hostBackRef.current();
-        else if (key === 'fullscreen') hostFullscreenRef?.current();
-        else if (key === 'channel-up') zapByRef.current(1);
-        else if (key === 'channel-down') zapByRef.current(-1);
+        else hostKeyRef.current(key);
       });
       activeSession = { opened, service, ...(offHostKey !== undefined ? { offHostKey } : {}) };
       serviceRef.current = service;
@@ -129,16 +115,7 @@ export function usePlayerSession(params: {
         activeSession = null;
       }
     };
-  }, [
-    clockRef,
-    hostBackRef,
-    hostFullscreenRef,
-    onExitRef,
-    serviceRef,
-    timersRef,
-    videoHost,
-    zapByRef,
-  ]);
+  }, [clockRef, hostKeyRef, onExitRef, serviceRef, timersRef, videoHost]);
 
   const activeService = sessionState.kind === 'ready' ? sessionState.service : null;
   const sliceRef = useRef<PlaybackUiSlice>(OPENING_PLAYBACK_SLICE);

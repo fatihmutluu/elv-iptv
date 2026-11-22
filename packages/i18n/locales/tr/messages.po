@@ -1106,3 +1106,6 @@ msgstr "Sığdır"
 
 msgid "player.aspect.fill"
 msgstr "Doldur"
+
+msgid "player.deinterlace"
+msgstr "Taramayı gider"

@@ -266,11 +266,17 @@ describe('bindDesktopMediaSession', () => {
       play: vi.fn(),
       pause: vi.fn(),
       seek: vi.fn(),
+      setSpeed: vi.fn(),
       stop: vi.fn(),
       recreate: vi.fn(),
       setArea: vi.fn(),
       toggleFullscreen: vi.fn(),
       toggleMute: vi.fn(),
+      setVolume: vi.fn(),
+      setAudioDelay: vi.fn(),
+      setSubtitleDelay: vi.fn(),
+      setAudioDevice: vi.fn(),
+      setDeinterlace: vi.fn(),
       onUi: vi.fn(() => () => undefined),
       release: vi.fn(),
       subscribe: subscribeSpy,
@@ -325,6 +331,17 @@ describe('bindDesktopMediaSession', () => {
     emit({ attempt: 9, type: 'state', state: 'playing' });
     expect((env.mediaSession.metadata as FakeMediaMetadata | null)?.title).toBe('Synthetic Movie');
 
+    // setSpeed forwards cleanly and updates activeAttempt for subsequent OS media key callbacks
+    wrapped.setSpeed(15, 1.5);
+    expect(engine.setSpeed).toHaveBeenCalledWith(15, 1.5);
+    env.trigger('pause');
+    expect(engine.pause).toHaveBeenCalledWith(15);
+
+    // Non-attempt desktop IPC methods pass through unchanged
+    wrapped.setDeinterlace(true);
+    expect(engine.setDeinterlace).toHaveBeenCalledWith(true);
+
+    wrapped.play(9);
     // OS media keys use the latest attempt (9) and forward stop/seek/track actions
     env.trigger('pause');
     expect(engine.pause).toHaveBeenCalledWith(9);

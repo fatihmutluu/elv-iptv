@@ -25,12 +25,13 @@ export const LAUNCH_OPTIONS: readonly string[] = [
   '--demuxer-donate-buffer=no',
   '--autoload-files=no',
   '--tls-verify=yes',
-  '--stream-lavf-o=icy=0',
-  '--reset-on-next-file=aid,sid,vid,sub-visibility,audio-delay,sub-delay,video-aspect-override,deinterlace',
+  '--stream-lavf-o=icy=0,reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5',
+  '--reset-on-next-file=aid,sid,vid,sub-visibility,audio-delay,sub-delay,video-aspect-override,deinterlace,speed,panscan,keepaspect,video-unscaled,gamma,brightness,contrast,saturation',
   '--network-timeout=10',
   '--curl-enabled=no',
-  // The OSC paints a logo on the idle window before the first load; it is only reachable as a launch option.
-  '--script-opts=osc-idlescreen=no',
+  '--osc=no',
+  '--osd-level=0',
+  '--input-default-bindings=no',
 ];
 
 function stripControlChars(value: string): string {

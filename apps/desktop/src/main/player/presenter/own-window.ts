@@ -17,9 +17,12 @@ export interface OwnWindowDeps {
   screenIndexOf?(rect: Rect): number | undefined;
   /** How long `prepare` waits for a first visible area before it uses the content bounds (default 1,000 ms). */
   firstAreaTimeoutMs?: number;
+  /** Bounded window after fullscreen transitions during which non-essential fullscreen IPC is paused (default 400 ms). */
+  fullscreenTransitionMs?: number;
 }
 
 const DEFAULT_FIRST_AREA_TIMEOUT_MS = 1000;
+const DEFAULT_FULLSCREEN_TRANSITION_MS = 400;
 
 /**
  * macOS presenter and the Windows fallback: mpv shows its own window, placed over the player area when it first
@@ -28,7 +31,10 @@ const DEFAULT_FIRST_AREA_TIMEOUT_MS = 1000;
 export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
   const { appWindow } = deps;
   const surface = createSurfaceTracker();
+  const transitionMs = deps.fullscreenTransitionMs ?? DEFAULT_FULLSCREEN_TRANSITION_MS;
   let visibleArea: PlayerArea | undefined;
+  let fullscreenTransitioning = false;
+  let transitionTimer: ReturnType<typeof setTimeout> | undefined;
   let client: MpvClient | undefined;
   let detachClient: (() => void) | undefined;
   let disposed = false;
@@ -47,6 +53,7 @@ export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
     if (screenIdx !== undefined && Number.isInteger(screenIdx) && screenIdx >= 0) {
       args.push(`--screen=${screenIdx}`);
     }
+    args.push('--input-vo-keyboard=yes');
     return args;
   };
 
@@ -68,6 +75,28 @@ export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
     detachClient = undefined;
     client = undefined;
   };
+
+  const clearTransitionTimer = (): void => {
+    if (transitionTimer !== undefined) {
+      clearTimeout(transitionTimer);
+      transitionTimer = undefined;
+    }
+  };
+
+  const beginFullscreenTransition = (): void => {
+    if (disposed) return;
+    fullscreenTransitioning = true;
+    clearTransitionTimer();
+    transitionTimer = setTimeout(() => {
+      transitionTimer = undefined;
+      fullscreenTransitioning = false;
+    }, transitionMs);
+  };
+
+  if (typeof appWindow.on === 'function') {
+    appWindow.on('enter-full-screen', beginFullscreenTransition);
+    appWindow.on('leave-full-screen', beginFullscreenTransition);
+  }
 
   return {
     kind: 'own-window',
@@ -123,12 +152,19 @@ export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
       for (const waiter of [...waiters]) waiter.resolve(geometry(visibleArea));
     },
     toggleFullscreen() {
+      if (disposed || fullscreenTransitioning) return;
       client?.command(['cycle', 'fullscreen']).catch(() => undefined);
     },
     onEvent: (listener) => surface.onEvent(listener),
     dispose() {
       if (disposed) return;
       disposed = true;
+      fullscreenTransitioning = false;
+      clearTransitionTimer();
+      if (typeof appWindow.removeListener === 'function') {
+        appWindow.removeListener('enter-full-screen', beginFullscreenTransition);
+        appWindow.removeListener('leave-full-screen', beginFullscreenTransition);
+      }
       for (const waiter of [...waiters]) waiter.reject(new Error('presenter disposed'));
       detach();
       surface.gone();

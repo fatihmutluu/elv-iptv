@@ -6,7 +6,7 @@ import { Platform, View } from 'react-native';
 import { type AppLifecyclePort, noopAppLifecycle } from '../ports/app-lifecycle';
 import type { PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
-import type { VideoHost } from '../ports/video-host';
+import type { HostKey, VideoHost } from '../ports/video-host';
 import { describePlaybackFailure } from './errors';
 import { NextEpisodeBanner } from './NextEpisodeBanner';
 import {
@@ -97,18 +97,17 @@ export function PlayerScreen({
 
   const zapByRef = useRef<(delta: 1 | -1, repeat?: boolean) => void>(zapBy);
   zapByRef.current = zapBy;
-  const hostBackRef = useRef<() => void>(() => onExitRef.current());
-  const hostFullscreenRef = useRef<() => void>(() => undefined);
+  const hostKeyRef = useRef<(key: HostKey) => void>((key) => {
+    if (key === 'back') onExitRef.current();
+  });
 
   const { sessionState, activeService, status, tracks } = usePlayerSession({
     videoHost,
     serviceRef,
     clockRef,
     timersRef,
-    hostBackRef,
-    hostFullscreenRef,
+    hostKeyRef,
     onExitRef,
-    zapByRef,
     onServiceReady: handoff.onServiceReady,
   });
 
@@ -147,11 +146,11 @@ export function PlayerScreen({
     activeTarget.previousChannel !== undefined &&
     activeTarget.previousChannel.itemKey !== activeTarget.itemKey;
   const nextEpisode = activeTarget.kind === 'vod' ? activeTarget.nextEpisodes?.[0] : undefined;
-  const hostToggleFullscreen =
-    sessionState.kind === 'ready' ? sessionState.opened.toggleFullscreen : undefined;
-  const hostToggleMute = sessionState.kind === 'ready' ? sessionState.opened.toggleMute : undefined;
-  const hostSetOrientationLocked =
-    sessionState.kind === 'ready' ? sessionState.opened.setOrientationLocked : undefined;
+  const openedEngine = sessionState.kind === 'ready' ? sessionState.opened : undefined;
+  const hostToggleFullscreen = openedEngine?.toggleFullscreen;
+  const hostToggleMute = openedEngine?.toggleMute;
+  const hostSetOrientationLocked = openedEngine?.setOrientationLocked;
+  const hostSetDeinterlace = openedEngine?.setDeinterlace;
 
   const controls = usePlayerControls({
     formFactor,
@@ -178,9 +177,9 @@ export function PlayerScreen({
     onToggleFullscreen: hostToggleFullscreen,
     onToggleMute: hostToggleMute,
     onSetOrientationLocked: hostSetOrientationLocked,
+    onSetDeinterlace: hostSetDeinterlace,
   });
-  hostBackRef.current = controls.handleBack;
-  hostFullscreenRef.current = controls.toggleFullscreen;
+  hostKeyRef.current = controls.handleHostKey;
   cancelScrubRef.current = controls.cancelScrub;
 
   const nextEpisodeNode = (
@@ -222,6 +221,9 @@ export function PlayerScreen({
       playbackSpeed={controls.playbackSpeed}
       {...(!isDesktop
         ? { resizeMode: controls.resizeMode, onToggleResizeMode: controls.toggleResizeMode }
+        : {})}
+      {...(hostSetDeinterlace !== undefined
+        ? { deinterlace: controls.deinterlace, onToggleDeinterlace: controls.toggleDeinterlace }
         : {})}
       statsVisible={controls.statsVisible}
       isTv={isTv}

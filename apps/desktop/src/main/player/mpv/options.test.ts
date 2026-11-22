@@ -38,12 +38,16 @@ describe('launchArgs', () => {
       '--demuxer-donate-buffer=no',
       '--autoload-files=no',
       '--tls-verify=yes',
-      '--stream-lavf-o=icy=0',
-      '--reset-on-next-file=aid,sid,vid,sub-visibility,audio-delay,sub-delay,video-aspect-override,deinterlace',
+      '--stream-lavf-o=icy=0,reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5',
+      '--reset-on-next-file=aid,sid,vid,sub-visibility,audio-delay,sub-delay,video-aspect-override,deinterlace,speed,panscan,keepaspect,video-unscaled,gamma,brightness,contrast,saturation',
       '--network-timeout=10',
       '--curl-enabled=no',
-      '--script-opts=osc-idlescreen=no',
+      '--osc=no',
+      '--osd-level=0',
+      '--input-default-bindings=no',
     ]);
+    expect(LAUNCH_OPTIONS).not.toContain('--script-opts=osc-idlescreen=no');
+    expect(LAUNCH_OPTIONS).not.toContain('--input-vo-keyboard=no');
     expect(LAUNCH_OPTIONS.some((o) => o.startsWith('--tls-ca-file'))).toBe(false);
     expect(LAUNCH_OPTIONS.some((o) => o.startsWith('--video-timing-offset'))).toBe(false);
     expect(LAUNCH_OPTIONS.some((o) => o.startsWith('--flatten-editions'))).toBe(false);

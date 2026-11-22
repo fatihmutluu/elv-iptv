@@ -59,6 +59,7 @@ const OBSERVED = [
   'track-list',
   'aid',
   'sid',
+  'audio-device',
   'audio-device-list',
 ] as const;
 
@@ -77,6 +78,14 @@ const UI_KEYS: ReadonlySet<string> = new Set<UiKey>([
   'channel-down',
   'back',
   'close',
+  'play-pause',
+  'seek-back',
+  'seek-forward',
+  'seek-coarse-back',
+  'seek-coarse-forward',
+  'mute',
+  'tracks',
+  'prev-channel',
 ]);
 const isUiKey = (key: unknown): key is UiKey => typeof key === 'string' && UI_KEYS.has(key);
 const keepLog = (level: string, text: string): boolean =>
@@ -205,6 +214,10 @@ export function createSessionController(hooks: LiveSessionHooks) {
       case 'property-change': {
         const name = String(e['name']);
         if (name === 'pause') L.paused = e['data'] === true;
+        if (name === 'audio-device') {
+          L.hotplug.onActiveDevice(e['data']);
+          return;
+        }
         if (name === 'audio-device-list') {
           L.hotplug.onDeviceList(e['data']);
           return;

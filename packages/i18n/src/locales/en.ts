@@ -193,6 +193,7 @@ export const enMessages = {
   'player.aspect': 'Aspect',
   'player.aspect.fit': 'Fit',
   'player.aspect.fill': 'Fill',
+  'player.deinterlace': 'Deinterlace',
   'player.statsHud': 'Playback stats',
   'player.stats.on': 'On',
   'player.stats.off': 'Off',

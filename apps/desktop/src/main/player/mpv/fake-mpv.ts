@@ -50,10 +50,15 @@ const STREAM_INTRINSIC_PROPS: ReadonlyArray<[string, unknown]> = [
   ['playback-time', undefined],
   ['duration', undefined],
 ];
-const RESETTABLE_TRACK_PROPS: ReadonlyArray<[string, unknown]> = [
+const RESETTABLE_PROPS: ReadonlyArray<[string, unknown]> = [
   ['vid', 'auto'],
   ['aid', 'auto'],
   ['sid', 'auto'],
+  ['speed', 1],
+  ['deinterlace', 'no'],
+  ['video-aspect-override', '-1'],
+  ['audio-delay', 0],
+  ['sub-delay', 0],
 ];
 const REPLY_TIMEOUT_MS = 3000;
 
@@ -156,7 +161,7 @@ export function createFakeMpv(opts: {
       maxOpen = Math.max(maxOpen, open);
       write(p, { event: 'start-file', playlist_entry_id: media.id });
       for (const [name, value] of STREAM_INTRINSIC_PROPS) setProp(p, name, value);
-      for (const [name, value] of RESETTABLE_TRACK_PROPS) {
+      for (const [name, value] of RESETTABLE_PROPS) {
         if (p.resetOnNextFile.has('all') || p.resetOnNextFile.has(name)) {
           setProp(p, name, value);
         }
@@ -276,6 +281,10 @@ export function createFakeMpv(opts: {
         ['pause', false],
         ['core-idle', true],
         ['speed', 1],
+        ['deinterlace', 'no'],
+        ['video-aspect-override', '-1'],
+        ['audio-delay', 0],
+        ['sub-delay', 0],
         ['vid', 'auto'],
         ['aid', 'auto'],
         ['sid', 'auto'],

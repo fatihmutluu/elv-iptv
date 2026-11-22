@@ -200,6 +200,7 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'player.aspect': 'Görüntü modu',
   'player.aspect.fit': 'Sığdır',
   'player.aspect.fill': 'Doldur',
+  'player.deinterlace': 'Taramayı gider',
   'player.statsHud': 'Oynatma istatistikleri',
   'player.stats.on': 'Açık',
   'player.stats.off': 'Kapalı',

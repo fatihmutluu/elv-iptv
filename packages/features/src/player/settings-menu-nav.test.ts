@@ -330,4 +330,92 @@ describe('settings-menu-nav', () => {
       ),
     ).toEqual({ kind: 'toggleStats' });
   });
+
+  it('includes deinterlace row right before stats only when hasDeinterlace is true (#131)', () => {
+    expect(settingsRootItems(false, true, true)).toEqual([
+      'subtitles',
+      'audio',
+      'aspect',
+      'deinterlace',
+      'stats',
+    ]);
+    expect(settingsRootItems(false, false, true)).toEqual([
+      'subtitles',
+      'audio',
+      'deinterlace',
+      'stats',
+    ]);
+    expect(settingsRootItems(true, true, true)).toEqual([
+      'subtitles',
+      'audio',
+      'speed',
+      'aspect',
+      'deinterlace',
+      'stats',
+    ]);
+    expect(settingsRootItems(true, false, true)).toEqual([
+      'subtitles',
+      'audio',
+      'speed',
+      'deinterlace',
+      'stats',
+    ]);
+
+    expect(
+      settingsRowCount('root', TRACKS, { isVod: false, hasAspect: false, hasDeinterlace: true }),
+    ).toBe(4);
+    expect(
+      settingsRowCount('root', TRACKS, { isVod: true, hasAspect: false, hasDeinterlace: true }),
+    ).toBe(5);
+    expect(
+      clampSettingsMenu({ view: 'root', index: 9 }, TRACKS, {
+        hasAspect: false,
+        hasDeinterlace: true,
+      }),
+    ).toEqual({ view: 'root', index: 3 });
+
+    // On desktop Live (no aspect, with deinterlace): index 2 is deinterlace, index 3 is stats
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 2 },
+        TRACKS,
+        { isVod: false, hasAspect: false, hasDeinterlace: true },
+      ),
+    ).toEqual({ kind: 'toggleDeinterlace' });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'right', kind: 'press', time: 0 },
+        { view: 'root', index: 2 },
+        TRACKS,
+        { isVod: false, hasAspect: false, hasDeinterlace: true },
+      ),
+    ).toBeNull();
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 3 },
+        TRACKS,
+        { isVod: false, hasAspect: false, hasDeinterlace: true },
+      ),
+    ).toEqual({ kind: 'toggleStats' });
+
+    // On desktop VOD (no aspect, with deinterlace): index 3 is deinterlace, index 4 is stats
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 3 },
+        TRACKS,
+        { isVod: true, hasAspect: false, hasDeinterlace: true },
+      ),
+    ).toEqual({ kind: 'toggleDeinterlace' });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 4 },
+        TRACKS,
+        { isVod: true, hasAspect: false, hasDeinterlace: true },
+      ),
+    ).toEqual({ kind: 'toggleStats' });
+  });
 });

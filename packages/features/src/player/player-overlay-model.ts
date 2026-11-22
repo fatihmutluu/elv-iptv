@@ -57,6 +57,7 @@ export interface PlayerOverlayStateParams {
   timersRef: MutableRefObject<PlaybackTimers>;
   cancelScrub: () => void;
   onSetOrientationLocked?: ((locked: boolean) => void) | undefined;
+  onSetDeinterlace?: ((enabled: boolean) => void) | undefined;
 }
 
 /** Progress ratio threshold (`>= 90%`) at which the Next Episode banner appears. */

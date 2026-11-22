@@ -707,6 +707,7 @@ describe('@elv/i18n', () => {
       ['player.aspect', 'Aspect', 'Görüntü modu'],
       ['player.aspect.fit', 'Fit', 'Sığdır'],
       ['player.aspect.fill', 'Fill', 'Doldur'],
+      ['player.deinterlace', 'Deinterlace', 'Taramayı gider'],
       ['player.unmute', 'Unmute', 'Sesi aç'],
       ['player.enterFullscreen', 'Fullscreen', 'Tam ekran'],
       ['player.exitFullscreen', 'Exit fullscreen', 'Tam ekrandan çık'],

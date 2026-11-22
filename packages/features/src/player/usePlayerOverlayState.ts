@@ -23,6 +23,7 @@ import {
 } from './track-picker-nav';
 import { availableTvOsdActions, clampTvOsdAction, type TvOsdAction } from './tv-osd-nav';
 import { useOsdAutoHide } from './useOsdAutoHide';
+import { usePlayerOverlayPrefs } from './usePlayerOverlayPrefs';
 
 export type { PlayerOverlayLive };
 
@@ -39,6 +40,7 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const isTv = formFactor === 'tv';
   const canLock = formFactor === 'phone' || formFactor === 'tablet';
   const hasAspect = formFactor !== 'desktop';
+  const hasDeinterlace = params.onSetDeinterlace !== undefined;
 
   const [rawTracksOpen, setTracksOpen] = useState(false);
   const [rawPickerCursor, setPickerCursor] = useState<TrackPickerCursor>({
@@ -49,8 +51,12 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const [rawSettingsMenu, setSettingsMenu] = useState<SettingsMenuState>(() =>
     initialSettingsMenu(),
   );
-  const [resizeMode, setResizeMode] = useState<'fit' | 'fill'>('fit');
-  const [statsVisible, setStatsVisible] = useState(false);
+  const { publicPrefs, acquireOrientationLock, releaseOrientationLock } = usePlayerOverlayPrefs({
+    itemKey,
+    hasService,
+    onSetDeinterlace: params.onSetDeinterlace,
+    onSetOrientationLocked: params.onSetOrientationLocked,
+  });
   const [rawLocked, setLocked] = useState(false);
   const [rawOsdHidden, setOsdHidden] = useState(initialOsdHidden === true);
   const [tvOsdFocused, setTvOsdFocused] = useState(false);
@@ -59,18 +65,7 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
 
   const statusKindRef = useRef(statusKind);
   statusKindRef.current = statusKind;
-  const onSetOrientationLockedRef = useRef(params.onSetOrientationLocked);
-  onSetOrientationLockedRef.current = params.onSetOrientationLocked;
-  const orientationLockedRef = useRef(false);
   const sheetOpenerRef = useRef<'tracks' | 'settings' | null>(null);
-
-  const releaseOrientationLock = useCallback((): void => {
-    if (!orientationLockedRef.current) return;
-    orientationLockedRef.current = false;
-    onSetOrientationLockedRef.current?.(false);
-  }, []);
-
-  useEffect(() => releaseOrientationLock, [releaseOrientationLock]);
 
   const tracksOpen = rawTracksOpen && hasTracks;
   const settingsOpen = rawSettingsOpen && hasService;
@@ -79,7 +74,11 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const tvScrubberFocused =
     isTv && isVod && rawTvScrubberFocused && !locked && !tracksOpen && !settingsOpen && !osdHidden;
   const pickerCursor = clampPickerCursor(rawPickerCursor, tracks);
-  const settingsMenu = clampSettingsMenu(rawSettingsMenu, tracks, { isVod, hasAspect });
+  const settingsMenu = clampSettingsMenu(rawSettingsMenu, tracks, {
+    isVod,
+    hasAspect,
+    hasDeinterlace,
+  });
   const availableOsd = availableTvOsdActions({
     isVod,
     hasService,
@@ -286,6 +285,7 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     isVod: liveRef.current.isVod,
     playbackSpeed: liveRef.current.playbackSpeed,
     hasAspect,
+    hasDeinterlace,
   });
 
   const openSettings = (view: SettingsMenuView = 'root'): void => {
@@ -320,8 +320,7 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     setTracksOpen(false);
     setSettingsOpen(false);
     setLocked(true);
-    orientationLockedRef.current = true;
-    onSetOrientationLockedRef.current?.(true);
+    acquireOrientationLock();
   };
 
   const closeTracks = (): void => {
@@ -342,8 +341,6 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
       clampSettingsMenu(initialSettingsMenu(view, opts), liveRef.current.tracks, opts),
     );
   };
-  const toggleResizeMode = (): void => setResizeMode((prev) => (prev === 'fit' ? 'fill' : 'fit'));
-  const toggleStats = (): void => setStatsVisible((prev) => !prev);
   const unlockControls = (): void => {
     liveRef.current.locked = false;
     setLocked(false);
@@ -365,16 +362,16 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     closeTracks,
     openSettings,
     closeSettings,
-    toggleResizeMode,
-    toggleStats,
+    toggleResizeMode: publicPrefs.toggleResizeMode,
+    toggleDeinterlace: publicPrefs.toggleDeinterlace,
+    toggleStats: publicPrefs.toggleStats,
     unlockControls,
     publicState: {
       tracksOpen,
       pickerCursor,
       settingsOpen,
       settingsMenu,
-      resizeMode,
-      statsVisible,
+      ...publicPrefs,
       canLock,
       locked,
       osdHidden,
@@ -386,8 +383,6 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
       openSettings,
       closeSettings,
       openSettingsView,
-      toggleResizeMode,
-      toggleStats,
       lockControls,
       unlockControls,
       toggleOsdByTouch,

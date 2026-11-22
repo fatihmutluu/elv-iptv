@@ -209,11 +209,29 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       case 'seek':
         engine.seek(command.attempt, command.positionMs);
         break;
+      case 'setSpeed':
+        engine.setSpeed?.(command.attempt, command.rate);
+        break;
       case 'selectAudioTrack':
         engine.selectAudioTrack?.(command.attempt, command.id);
         break;
       case 'selectSubtitleTrack':
         engine.selectSubtitleTrack?.(command.attempt, command.id);
+        break;
+      case 'setVolume':
+        engine.setVolume(command.volume);
+        break;
+      case 'setAudioDelay':
+        engine.setAudioDelay(command.delaySec);
+        break;
+      case 'setSubtitleDelay':
+        engine.setSubtitleDelay(command.delaySec);
+        break;
+      case 'setAudioDevice':
+        engine.setAudioDevice(command.device);
+        break;
+      case 'setDeinterlace':
+        engine.setDeinterlace(command.enabled);
         break;
       case 'fullscreen':
         engine.toggleFullscreen();

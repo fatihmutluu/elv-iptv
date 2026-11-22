@@ -90,6 +90,7 @@ function AppRoot() {
           renderSurface: ({ failed }) => <PlayerView engine={engine} status="" failed={failed} />,
           toggleFullscreen: () => rawEngine.toggleFullscreen(),
           toggleMute: () => rawEngine.toggleMute(),
+          setDeinterlace: (enabled) => rawEngine.setDeinterlace(enabled),
           onHostKey: (listener) => {
             activeHostKeyListener = listener;
             const offUi = rawEngine.onUi((event) =>

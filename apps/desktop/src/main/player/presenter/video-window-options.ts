@@ -19,6 +19,7 @@ export function buildVideoWindowOptions(parent: BrowserWindow): BrowserWindowCon
     parent,
     frame: false,
     show: false,
+    focusable: false,
     skipTaskbar: true,
     closable: false,
     resizable: false,

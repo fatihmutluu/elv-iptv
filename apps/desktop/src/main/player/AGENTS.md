@@ -5,8 +5,8 @@ over the JSON IPC client (`mpv/`) and a `VideoPresenter` (`presenter/`). Zero `e
 `engine.ts`, `engine-queue.ts` or `mpv/*`. Read `apps/desktop/AGENTS.md` first.
 
 ## Module layout
-- `engine.ts`: lean orchestrator composing `EngineQueue`, `OpeningGate`, `LiveSession` (`mpv/live-session.ts`),
-  `TrackTracker` and `VideoPresenter`.
+- `engine.ts` & `engine-controls.ts`: lean orchestrator composing `EngineQueue`, `OpeningGate`, `LiveSession` (`mpv/live-session.ts`),
+  `TrackTracker`, speed coalescing / property setters, and `VideoPresenter`.
 - `engine-queue.ts`: generation-tagged serialized async op queue (`load`, `command`, `stop`, `recreate`) that purges
   queued `load` and `command` ops whenever superseded by `load`, `stop` or `recreate`.
 - `power-blocker.ts`: reference-counted `prevent-display-sleep` guard wired by `ipc.ts` / `main.ts` to active
@@ -20,10 +20,10 @@ over the JSON IPC client (`mpv/`) and a `VideoPresenter` (`presenter/`). Zero `e
   launchers (`LC_NUMERIC=C` on POSIX), `SIGKILL` escalation with bounded post-kill wait, and safe `tasklist` / `ps`
   leftover launcher sweep.
 - `mpv/opening-gate.ts`: zap-coalescing state machine (`START_TIMEOUT_MS = 3000`, `OPEN_WAIT_MS = 1000`, `maxHoldMs`).
-- `mpv/audio-hotplug.ts`: 500 ms debounced `audio-device-list` watcher queueing `ao-reload` on active media.
-- `mpv/input-repeat-gate.ts`: per-key hold and auto-repeat limiter (`LONG_HOLD_MS = 350`, `AUTOREPEAT_MS = 160`, 600 ms idle reset) gating repeatable `elv-key` `client-message` events before `onUi`.
-- `mpv/options.ts`: hardened `LAUNCH_OPTIONS` (`--reset-on-next-file=...`, `--tls-verify=yes`, `--audio-fallback-to-null=yes`,
-  `--stream-lavf-o=icy=0`, diskless cache), case-insensitive deduplicated & control-char-stripped headers, and `loadfile`.
+- `mpv/audio-hotplug.ts`: 500 ms debounced `audio-device` + `audio-device-list` watcher queueing `ao-reload` only when the active output changes or flips presence.
+- `mpv/input-repeat-gate.ts` & `mpv/render-coalescer.ts`: per-key hold/repeat limiter (`LONG_HOLD_MS = 350`, `AUTOREPEAT_MS = 160`) and atomic render-wakeup coalescer.
+- `mpv/options.ts`: hardened `LAUNCH_OPTIONS` (`--osc=no`, `--osd-level=0`, `--input-default-bindings=no`,
+  expanded `--reset-on-next-file`, `--tls-verify=yes`, `--stream-lavf-o=icy=0,reconnect=1,...`), headers, and `loadfile`.
 - `mpv/derive.ts`, `mpv/entries.ts`, `mpv/tracks.ts`, `mpv/track-snapshot.ts`, `mpv/errors.ts`, `mpv/redact.ts`:
   state/clock derivation (`playback-time` with `time-pos` fallback, post-`file-loaded` audio-only `vid` guard, late VOD
   `duration` anchor), playlist entry binding, ISO 639-1/639-2/BCP-47 track reconciliation (`sid="no"` latch safety),

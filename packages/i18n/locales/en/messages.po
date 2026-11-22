@@ -1106,3 +1106,6 @@ msgstr "Fit"
 
 msgid "player.aspect.fill"
 msgstr "Fill"
+
+msgid "player.deinterlace"
+msgstr "Deinterlace"

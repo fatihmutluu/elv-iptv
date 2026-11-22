@@ -96,9 +96,15 @@ function stubEngine(): StubEngine {
     play: (a: number) => e.calls.push(['play', a]),
     pause: (a: number) => e.calls.push(['pause', a]),
     seek: (a: number, ms: number) => e.calls.push(['seek', a, ms]),
+    setSpeed: (a: number, rate: number) => e.calls.push(['setSpeed', a, rate]),
     selectAudioTrack: (a: number, id: string) => e.calls.push(['selectAudioTrack', a, id]),
     selectSubtitleTrack: (a: number, id: string | null) =>
       e.calls.push(['selectSubtitleTrack', a, id]),
+    setVolume: (volume: number) => e.calls.push(['setVolume', volume]),
+    setAudioDelay: (delaySec: number) => e.calls.push(['setAudioDelay', delaySec]),
+    setSubtitleDelay: (delaySec: number) => e.calls.push(['setSubtitleDelay', delaySec]),
+    setAudioDevice: (device: string) => e.calls.push(['setAudioDevice', device]),
+    setDeinterlace: (enabled: boolean) => e.calls.push(['setDeinterlace', enabled]),
     stop: (a: number) => e.calls.push(['stop', a]),
     recreate: (a: number) => e.calls.push(['recreate', a]),
     release: () => {
@@ -304,11 +310,35 @@ describe('registerPlayerIpc', () => {
     });
     t.emit(PLAYER_CHANNELS.command, a, {
       engineId: ra.engineId,
+      command: { name: 'setSpeed', attempt: 2, rate: 1.5 },
+    });
+    t.emit(PLAYER_CHANNELS.command, a, {
+      engineId: ra.engineId,
       command: { name: 'selectAudioTrack', attempt: 2, id: 'a:2' },
     });
     t.emit(PLAYER_CHANNELS.command, a, {
       engineId: ra.engineId,
       command: { name: 'selectSubtitleTrack', attempt: 2, id: null },
+    });
+    t.emit(PLAYER_CHANNELS.command, a, {
+      engineId: ra.engineId,
+      command: { name: 'setVolume', volume: 75 },
+    });
+    t.emit(PLAYER_CHANNELS.command, a, {
+      engineId: ra.engineId,
+      command: { name: 'setAudioDelay', delaySec: 0.25 },
+    });
+    t.emit(PLAYER_CHANNELS.command, a, {
+      engineId: ra.engineId,
+      command: { name: 'setSubtitleDelay', delaySec: -0.5 },
+    });
+    t.emit(PLAYER_CHANNELS.command, a, {
+      engineId: ra.engineId,
+      command: { name: 'setAudioDevice', device: 'wasapi/usb' },
+    });
+    t.emit(PLAYER_CHANNELS.command, a, {
+      engineId: ra.engineId,
+      command: { name: 'setDeinterlace', enabled: true },
     });
     t.emit(PLAYER_CHANNELS.command, a, {
       engineId: ra.engineId,
@@ -326,8 +356,14 @@ describe('registerPlayerIpc', () => {
       ['play', 2],
       ['pause', 2],
       ['seek', 2, 900],
+      ['setSpeed', 2, 1.5],
       ['selectAudioTrack', 2, 'a:2'],
       ['selectSubtitleTrack', 2, null],
+      ['setVolume', 75],
+      ['setAudioDelay', 0.25],
+      ['setSubtitleDelay', -0.5],
+      ['setAudioDevice', 'wasapi/usb'],
+      ['setDeinterlace', true],
       ['stop', 3],
       ['recreate', 3],
       ['fullscreen'],
@@ -339,7 +375,7 @@ describe('registerPlayerIpc', () => {
       engineId: ra.engineId,
       command: { name: 'stop', attempt: 9 },
     });
-    expect(t.engines[0]?.calls).toHaveLength(11);
+    expect(t.engines[0]?.calls).toHaveLength(17);
     expect(t.logs.length).toBeGreaterThan(0);
   });
 

@@ -80,8 +80,13 @@ export function createChildWindowPresenter(deps: ChildWindowDeps): VideoPresente
     if (!target.isVisible()) target.showInactive();
   };
 
+  const onVideoFocus = (): void => {
+    if (!disposed && !appWindow.isDestroyed()) appWindow.focus?.();
+  };
+
   const unfollow = (): void => {
     for (const event of FOLLOWED) appWindow.removeListener(event, layout);
+    if (video && !video.isDestroyed()) video.removeListener?.('focus', onVideoFocus);
     stopDisplay?.();
     stopDisplay = undefined;
   };
@@ -98,6 +103,7 @@ export function createChildWindowPresenter(deps: ChildWindowDeps): VideoPresente
     }
     video = created;
     hwnd = handle;
+    created.on('focus', onVideoFocus);
     created.on('closed', () => {
       unfollow();
       surface.gone();
@@ -130,7 +136,7 @@ export function createChildWindowPresenter(deps: ChildWindowDeps): VideoPresente
       if (disposed) throw new Error('presenter disposed');
       const window = ensureWindow();
       if (window.isDestroyed()) throw new Error('video window is gone');
-      return [`--wid=${hwnd}`, '--auto-window-resize=no'];
+      return [`--wid=${hwnd}`, '--auto-window-resize=no', '--input-vo-keyboard=no'];
     },
     attach(client: MpvClient) {
       if (disposed) return;

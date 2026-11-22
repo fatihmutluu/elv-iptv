@@ -48,10 +48,14 @@ export interface AppWindowLike {
   isVisible(): boolean;
   isFullScreen(): boolean;
   setFullScreen(flag: boolean): void;
+  focus?(): void;
   isDestroyed(): boolean;
   on(event: AppWindowEvent, listener: () => void): unknown;
   removeListener(event: AppWindowEvent, listener: () => void): unknown;
 }
+
+/** Video window events the child-window presenter observes. */
+export type VideoWindowEvent = 'closed' | 'focus';
 
 /** The part of the video `BrowserWindow` the child-window presenter uses. */
 export interface VideoWindowLike {
@@ -62,7 +66,8 @@ export interface VideoWindowLike {
   isDestroyed(): boolean;
   destroy(): void;
   getNativeWindowHandle(): Buffer;
-  on(event: 'closed', listener: () => void): unknown;
+  on(event: VideoWindowEvent, listener: () => void): unknown;
+  removeListener?(event: VideoWindowEvent, listener: () => void): unknown;
 }
 
 /** A presenter's surface bookkeeping: `created` once per live surface, `destroyed` once when it goes. */

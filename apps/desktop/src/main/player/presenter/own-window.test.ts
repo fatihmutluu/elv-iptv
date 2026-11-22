@@ -36,7 +36,7 @@ describe('createOwnWindowPresenter', () => {
     const args = presenter.prepare();
     presenter.setArea(AREA);
     presenter.setArea({ ...AREA, x: 400 });
-    expect(await args).toEqual(['--geometry=1200x675+210+135']);
+    expect(await args).toEqual(['--geometry=1200x675+210+135', '--input-vo-keyboard=yes']);
   });
 
   it('own-window geometry on darwin maps screen points into work-area backing pixels', async () => {
@@ -47,20 +47,29 @@ describe('createOwnWindowPresenter', () => {
       toScreenPixels: (dip) => macOwnWindowGeometry(dip, workArea, 2),
     });
     presenter.setArea(AREA);
-    expect(await presenter.prepare()).toEqual(['--geometry=1600x900+400+740']);
+    expect(await presenter.prepare()).toEqual([
+      '--geometry=1600x900+400+740',
+      '--input-vo-keyboard=yes',
+    ]);
   });
 
   it('uses the latest visible area when one is known', async () => {
     const { app, presenter } = setup();
     app.state.zoom = 2;
     presenter.setArea(AREA);
-    expect(await presenter.prepare()).toEqual(['--geometry=2400x1350+270+195']);
+    expect(await presenter.prepare()).toEqual([
+      '--geometry=2400x1350+270+195',
+      '--input-vo-keyboard=yes',
+    ]);
   });
 
   it('keeps negative coordinates in the geometry', async () => {
     const { presenter } = setup({ x: -1920, y: -200, width: 1280, height: 720 });
     presenter.setArea({ ...AREA, x: 0, y: 0 });
-    expect(await presenter.prepare()).toEqual(['--geometry=1200x675+-2880+-300']);
+    expect(await presenter.prepare()).toEqual([
+      '--geometry=1200x675+-2880+-300',
+      '--input-vo-keyboard=yes',
+    ]);
   });
 
   it('falls back to the content bounds when no visible area arrives in time', async () => {
@@ -70,7 +79,7 @@ describe('createOwnWindowPresenter', () => {
     await vi.advanceTimersByTimeAsync(999);
     presenter.setArea({ ...AREA, visible: false });
     await vi.advanceTimersByTimeAsync(1);
-    expect(await args).toEqual(['--geometry=1920x1080+150+75']);
+    expect(await args).toEqual(['--geometry=1920x1080+150+75', '--input-vo-keyboard=yes']);
   });
 
   it('later areas never move mpv window', async () => {
@@ -137,7 +146,11 @@ describe('createOwnWindowPresenter', () => {
       screenIndexOf: () => 1,
     });
     presenter.setArea(AREA);
-    expect(await presenter.prepare()).toEqual(['--geometry=800x450+-1760+140', '--screen=1']);
+    expect(await presenter.prepare()).toEqual([
+      '--geometry=800x450+-1760+140',
+      '--screen=1',
+      '--input-vo-keyboard=yes',
+    ]);
   });
 
   it('guards appWindow.isDestroyed() in prepare, setArea and firstAreaTimeoutMs fallback', async () => {
@@ -150,5 +163,46 @@ describe('createOwnWindowPresenter', () => {
     await vi.advanceTimersByTimeAsync(1000);
     await assertion;
     await expect(presenter.prepare()).rejects.toThrow(/gone|destroyed/);
+  });
+
+  it('resolves prepare immediately with fresh visibleArea while fullscreen and gates fullscreen IPC only during the bounded transition (#131)', async () => {
+    vi.useFakeTimers();
+    const app = fakeAppWindow();
+    app.state.fullscreen = true;
+    const presenter = createOwnWindowPresenter({
+      appWindow: app.window,
+      toScreenPixels: scale(1.5),
+      fullscreenTransitionMs: 400,
+    });
+    expect(app.listenerCount()).toBe(2);
+
+    // Constructed while already fullscreen: setArea still updates visibleArea and resolves prepare immediately
+    const waiting = presenter.prepare();
+    presenter.setArea({ ...AREA, x: 200 });
+    expect(await waiting).toEqual(['--geometry=1200x675+450+135', '--input-vo-keyboard=yes']);
+
+    // Even right after enter-full-screen, recreating mpv resolves prepare immediately with fresh visibleArea
+    const mpv = fakeMpvClient();
+    presenter.attach(mpv.client);
+    app.emit('enter-full-screen');
+    presenter.setArea({ ...AREA, x: 300 });
+    expect(await presenter.prepare()).toEqual([
+      '--geometry=1200x675+600+135',
+      '--input-vo-keyboard=yes',
+    ]);
+
+    // Non-essential fullscreen IPC is paused only during the bounded transition window
+    presenter.toggleFullscreen();
+    expect(mpv.commands).toEqual([]);
+    await vi.advanceTimersByTimeAsync(400);
+    presenter.toggleFullscreen();
+    expect(mpv.commands).toEqual([['cycle', 'fullscreen']]);
+
+    // leave-full-screen also arms the bounded transition guard and dispose cleans up listeners & timers
+    app.emit('leave-full-screen');
+    presenter.toggleFullscreen();
+    expect(mpv.commands).toHaveLength(1);
+    presenter.dispose();
+    expect(app.listenerCount()).toBe(0);
   });
 });
