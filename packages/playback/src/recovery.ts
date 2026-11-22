@@ -64,6 +64,7 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
       ladder.escalate(undefined, true);
     },
     () => ladder.escalate({ code: 'decoder' }, true),
+    () => ladder.escalateRollingRebuffer(),
   );
 
   const clearRecoveryTimers = (): void => {

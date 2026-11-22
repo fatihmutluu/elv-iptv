@@ -44,6 +44,7 @@ function createFakePlaybackService(initial?: Partial<PlaybackState>) {
     attempt: 1,
     tracks: SAMPLE_TRACKS,
     staleEventsDropped: 0,
+    surfaceRecreationToken: 0,
     ...initial,
   };
   const listeners = new Set<(s: PlaybackState) => void>();

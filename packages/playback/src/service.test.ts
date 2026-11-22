@@ -83,6 +83,8 @@ describe('config', () => {
       seekSettleTimeoutMs: 12000,
       liveStalePauseMs: 20000,
       liveEdgeToleranceMs: 5000,
+      rollingRebufferThreshold: 3,
+      rollingRebufferWindowMs: 120000,
     });
   });
 

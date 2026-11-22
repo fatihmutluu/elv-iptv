@@ -38,6 +38,7 @@ export interface FakeCommand {
   attempt?: AttemptToken;
   url?: string;
   positionMs?: number;
+  scrubbing?: boolean;
   trackId?: string | null;
 }
 
@@ -193,6 +194,9 @@ export function createFakePlayerEngine(opts: FakeEngineOptions): FakePlayerEngin
       commands.push({ name: 'seek', attempt, positionMs: nextPos });
       adopt(attempt);
       last = { ...last, positionMs: nextPos, atMs: opts.now() };
+    },
+    setScrubbing(attempt, scrubbing) {
+      commands.push({ name: 'setScrubbing', attempt, scrubbing });
     },
     selectAudioTrack(attempt, id) {
       commands.push({ name: 'selectAudioTrack', attempt, trackId: id });

@@ -13,6 +13,7 @@ function make(fault: GateFault = '') {
     attempt: 0,
     tracks: EMPTY_TRACKS,
     staleEventsDropped: 0,
+    surfaceRecreationToken: 0,
   };
   const show = (patch: Partial<PlaybackState>) => {
     state = { ...state, ...patch };

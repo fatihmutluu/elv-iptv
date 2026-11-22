@@ -10,6 +10,8 @@ export interface PlayerSurfaceProps {
   style?: StyleProp<ViewStyle>;
   resizeMode?: 'fit' | 'fill';
   subtitleBottomInsetPx?: number;
+  surfaceRecreationToken?: number;
+  useTextureView?: boolean;
   testID?: string;
 }
 
@@ -22,6 +24,8 @@ export function PlayerSurface({
   style,
   resizeMode,
   subtitleBottomInsetPx,
+  surfaceRecreationToken,
+  useTextureView,
   testID,
 }: PlayerSurfaceProps): ReactElement | null {
   if (Platform.OS === 'ios') {
@@ -41,6 +45,8 @@ export function PlayerSurface({
       style={style}
       resizeMode={resizeMode}
       subtitleBottomInsetPx={subtitleBottomInsetPx}
+      {...(surfaceRecreationToken !== undefined ? { surfaceRecreationToken } : {})}
+      {...(useTextureView !== undefined ? { useTextureView } : {})}
       testID={testID}
     />
   );

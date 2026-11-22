@@ -47,6 +47,7 @@ function samePlaybackState(a: PlaybackState, b: PlaybackState): boolean {
     a.tuneAt === b.tuneAt &&
     a.firstFrameAt === b.firstFrameAt &&
     a.atLiveEdge === b.atLiveEdge &&
+    a.surfaceRecreationToken === b.surfaceRecreationToken &&
     sameStatus(a.status, b.status) &&
     sameAnchor(a.anchor, b.anchor)
   );
@@ -69,6 +70,7 @@ export function createPlaybackStateStore(): PlaybackStateStore {
     attempt: 0,
     tracks: EMPTY_TRACKS,
     staleEventsDropped: 0,
+    surfaceRecreationToken: 0,
   };
   let lastNotified: PlaybackState = state;
   let depth = 0;

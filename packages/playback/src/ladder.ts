@@ -9,7 +9,7 @@ import {
   type PositionTracker,
   swapLiveContainerUrl,
 } from './backoff';
-import type { AttemptToken, EngineError, StreamRequest } from './engine';
+import type { AttemptToken, EngineError, LoadOptions, StreamRequest } from './engine';
 import { classifyError, toPlaybackError } from './errors';
 import type { LiveContainerFormat, ServiceControl } from './seam';
 
@@ -96,12 +96,15 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
 
   const reload = (stream?: StreamRequest): boolean => {
     const startMs = isVod() ? positions.resumePosition() : undefined;
+    const bufferPreset = ctl.request()?.bufferPreset;
+    const options: LoadOptions = {
+      ...(bufferPreset === undefined ? {} : { bufferPreset }),
+      ...(softwareAudio ? { softwareAudio: true, preferHevcOverDolbyVision: true } : {}),
+    };
     return ctl.load({
       ...(stream === undefined ? {} : { stream }),
       ...(startMs === undefined ? {} : { startMs }),
-      ...(softwareAudio
-        ? { options: { softwareAudio: true, preferHevcOverDolbyVision: true } }
-        : {}),
+      ...(Object.keys(options).length > 0 ? { options } : {}),
     });
   };
 
@@ -139,16 +142,19 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
     return true;
   };
 
-  const advanceAlternates = (at: number): void => {
+  const advanceAlternates = (at: number, resetTransientRetries = false): void => {
     const reqAlts = ctl.request()?.alternates;
     if (reqAlts !== undefined && alternate < reqAlts.length) {
       const next = reqAlts[alternate] as () => Promise<Result<StreamRequest>>;
       const settle = (result: Result<StreamRequest> | undefined): void => {
         if (at !== epoch) return;
-        budget.rung = 4;
         alternate += 1;
-        if (result?.ok && !isFailedCanonical(result.value)) reload(result.value);
-        else advanceAlternates(at);
+        if (result?.ok && !isFailedCanonical(result.value)) {
+          if (!resetTransientRetries) budget.rung = 4;
+          reload(result.value);
+        } else {
+          advanceAlternates(at, resetTransientRetries);
+        }
       };
       new Promise<Result<StreamRequest>>((resolve) => resolve(next())).then(settle, () =>
         settle(undefined),
@@ -159,13 +165,23 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
       const candidate = inlineAlternates[inlineAlternate] as StreamRequest;
       inlineAlternate += 1;
       if (!isFailedCanonical(candidate)) {
-        budget.rung = 4;
+        if (!resetTransientRetries) budget.rung = 4;
         reload(candidate);
         return;
       }
     }
     budget.rung = 4;
     if (!tryContainerFallbackNow()) giveUp();
+  };
+
+  const hasEligibleRollingAlternate = (): boolean => {
+    if (alternate < (ctl.request()?.alternates?.length ?? 0)) return true;
+    if (inlineAlternates === undefined) return false;
+    for (let i = inlineAlternate; i < inlineAlternates.length; i += 1) {
+      const candidate = inlineAlternates[i];
+      if (candidate !== undefined && !isFailedCanonical(candidate)) return true;
+    }
+    return false;
   };
 
   const buildAction = (rung: Rung): RungAction | undefined => {
@@ -185,6 +201,9 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
       return (token) => {
         budget.rung = 3;
         const at = epoch;
+        if (budget.lastError?.code === 'decoder') {
+          ctl.bumpSurfaceRecreationToken?.();
+        }
         if (engine.capabilities.recreate) engine.recreate(token);
         if (at === epoch) reload();
       };
@@ -339,6 +358,28 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
     }, delay);
   }
 
+  function escalateRollingRebuffer(): boolean {
+    const current = ctl.stream?.();
+    if (!primaryCaptured && current !== undefined) {
+      primaryCaptured = true;
+      inlineAlternates = current.alternates;
+    }
+    recordCurrentFailure(STALLED);
+    if (!hasEligibleRollingAlternate()) return false;
+    deps.cancelAll();
+    freeze();
+    budget = freshBudget();
+    budget.lastError = STALLED;
+    inBatch(() => {
+      ctl.setStatus({ kind: 'recovering', rung: 4, nextAtMs: ctl.now() });
+      ctl.nextAttempt();
+      watch(onSilentTimeout);
+      ctl.stopMedia();
+      advanceAlternates(epoch, true);
+    });
+    return true;
+  }
+
   return {
     getBudget: () => budget,
     getLimit: () => limit,
@@ -393,6 +434,7 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
     failWith,
     goTo,
     escalate,
+    escalateRollingRebuffer,
     onNotFound,
     reconnectVod,
     enterLimit,

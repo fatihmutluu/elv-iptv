@@ -1,4 +1,4 @@
-import type { ElvError, Result } from '@elv/domain';
+import type { BufferPreset, ElvError, Result } from '@elv/domain';
 import type { AttemptToken, ClockAnchor, MediaKind, MediaTracks, StreamRequest } from './engine';
 
 /** Time source, injected so tests control it. */
@@ -22,6 +22,8 @@ export interface TuneRequest {
   /** Other ways to play the same item, tried in order by recovery rung 4. */
   alternates?: readonly (() => Promise<Result<StreamRequest>>)[];
   startMs?: number;
+  /** User-selected playback buffer preset forwarded on load and recovery reloads (`#147`). */
+  bufferPreset?: BufferPreset;
 }
 
 /** What the service is doing now. */
@@ -48,6 +50,8 @@ export interface PlaybackState {
   tuneAt?: number;
   firstFrameAt?: number;
   staleEventsDropped: number;
+  /** Monotonic token incremented only on Rung 3 decoder-error recreate to request a fresh native surface (`#144`). */
+  readonly surfaceRecreationToken: number;
 }
 
 /** Playback controller; the UI talks to this, never to the engine. */
@@ -66,6 +70,8 @@ export interface PlaybackService {
   pause(): void;
   /** Seeks; disarms the stall watchdog and any active VOD reconnect backoff, and updates `anchor` immediately. */
   seek(positionMs: number): void;
+  /** Toggles VOD scrubbing mode on the underlying engine when supported (`#222`). */
+  setScrubbing?(scrubbing: boolean): void;
   /** Sets playback speed (clamped to `[0.25, 4.0]`), coalescing across active seeks and in-flight transitions. */
   setSpeed(rate: number): void;
   /** Selects an audio track in place and remembers the choice across recovery reloads of the current item. */

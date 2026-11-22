@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.ByteArrayDataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.source.LoadEventInfo
@@ -12,6 +13,7 @@ import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.extractor.ts.TsExtractor
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -66,7 +68,39 @@ class MediaSourcesTest {
   }
 
   @Test
-  fun `tsSearchBytesFor scales timestamp search bytes by device RAM and createMediaSource tags mediaId (#111, #438)`() {
+  fun `SchemeRoutingDataSource serves data URIs via DataSchemeDataSource without touching OkHttp or ConnectionGate (#183)`() {
+    var defaultFactoryCalls = 0
+    val httpPayload = byteArrayOf(1, 2, 3, 4)
+    val routing = SchemeRoutingDataSource(
+      defaultDataSourceFactory = {
+        defaultFactoryCalls += 1
+        ByteArrayDataSource(httpPayload)
+      },
+    )
+
+    // 1. data:video/mp2t;base64,... opens and reads cleanly without invoking defaultDataSourceFactory
+    val tsPayload = ByteArray(188) { idx -> if (idx == 0) 0x47 else (idx and 0xFF).toByte() }
+    val dataUri = encodeTsInitDataUri(tsPayload)
+    val dataLen = routing.open(DataSpec(Uri.parse(dataUri)))
+    assertEquals(tsPayload.size.toLong(), dataLen)
+    val decoded = ByteArray(tsPayload.size)
+    assertEquals(tsPayload.size, routing.read(decoded, 0, decoded.size))
+    routing.close()
+    assertArrayEquals(tsPayload, decoded)
+    assertEquals("data: URI must never touch OkHttp/ConnectionGate factory", 0, defaultFactoryCalls)
+
+    // 2. Non-data HTTP URI delegates to defaultDataSourceFactory
+    val httpLen = routing.open(DataSpec(Uri.parse("http://127.0.0.1:7878/vod/seg0.ts")))
+    assertEquals(httpPayload.size.toLong(), httpLen)
+    val readHttp = ByteArray(httpPayload.size)
+    assertEquals(httpPayload.size, routing.read(readHttp, 0, readHttp.size))
+    routing.close()
+    assertArrayEquals(httpPayload, readHttp)
+    assertEquals(1, defaultFactoryCalls)
+  }
+
+  @Test
+  fun `tsSearchBytesFor scales timestamp search bytes by device RAM and createMediaSource tags mediaId (#111, #183, #438)`() {
     assertEquals(1_800 * TsExtractor.TS_PACKET_SIZE, tsSearchBytesFor(lowRam = true))
     assertEquals(2_400 * TsExtractor.TS_PACKET_SIZE, tsSearchBytesFor(lowRam = false))
     assertTrue(tsSearchBytesFor(lowRam = true) > TsExtractor.DEFAULT_TIMESTAMP_SEARCH_BYTES)
@@ -96,6 +130,22 @@ class MediaSourcesTest {
     )
     assertEquals("42", source.mediaItem.mediaId)
 
+    val vodHlsSource = createMediaSource(
+      request = LoadRequest(
+        url = "http://127.0.0.1:7878/movie/demo/demo/1001.m3u8",
+        headers = emptyMap(),
+        live = false,
+        startMs = null,
+        softwareAudio = false,
+      ),
+      gate = ConnectionGate { it.run() },
+      generation = 2L,
+      prepareSerial = 44L,
+      lowRam = false,
+      client = engineHttpClient(),
+    )
+    assertEquals("44", vodHlsSource.mediaItem.mediaId)
+
     val vodTsSource = createMediaSource(
       request = LoadRequest(
         url = "http://127.0.0.1:7878/movie/demo/demo/1001.ts",
@@ -105,7 +155,7 @@ class MediaSourcesTest {
         softwareAudio = false,
       ),
       gate = ConnectionGate { it.run() },
-      generation = 2L,
+      generation = 3L,
       prepareSerial = 43L,
       lowRam = true,
       client = engineHttpClient(),
@@ -124,7 +174,7 @@ class MediaSourcesTest {
       shouldReport = { allow },
       onProgress = { bytes, at -> reported += bytes to at },
     )
-    val dummySource = androidx.media3.datasource.ByteArrayDataSource(ByteArray(16))
+    val dummySource = ByteArrayDataSource(ByteArray(16))
     val spec = DataSpec(Uri.parse("http://127.0.0.1:7878/movie/demo/demo/1.mp4"))
 
     // Non-network or zero-byte reads are ignored

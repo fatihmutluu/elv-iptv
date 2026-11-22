@@ -15,6 +15,12 @@ export const MAX_PREF_FONT_SCALE = 1.2;
 const MAX_PREF_STRING_LENGTH = 64;
 const DEFAULT_PREFERENCES_KEY = 'elv.preferences.v1';
 
+/** Supported Media3/player buffer size presets (`#147`). */
+export const BUFFER_PRESETS = ['auto', 'balanced', 'large'] as const;
+
+/** User-selectable playback buffer preset (`#147`). */
+export type BufferPreset = (typeof BUFFER_PRESETS)[number];
+
 /** Immutable snapshot of user-configurable app preferences. */
 export interface PreferencesSnapshot {
   readonly version: typeof PREFERENCES_SCHEMA_VERSION;
@@ -22,6 +28,8 @@ export interface PreferencesSnapshot {
   readonly locale: string;
   readonly fontScale: number;
   readonly reduceMotion: boolean;
+  readonly bufferPreset: BufferPreset;
+  readonly useTextureView: boolean;
 }
 
 /** Default preferences applied on fresh installs, reset, or corrupt storage recovery. */
@@ -31,6 +39,8 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   locale: 'system',
   fontScale: 1,
   reduceMotion: false,
+  bufferPreset: 'auto',
+  useTextureView: false,
 });
 
 /** Partial update applied on top of the current {@link PreferencesSnapshot}. */
@@ -73,6 +83,10 @@ function isValidShortString(value: unknown): value is string {
   return (
     typeof value === 'string' && value.trim().length > 0 && value.length <= MAX_PREF_STRING_LENGTH
   );
+}
+
+function isBufferPreset(value: unknown): value is BufferPreset {
+  return typeof value === 'string' && (BUFFER_PRESETS as readonly string[]).includes(value);
 }
 
 function utf8ByteLength(text: string): number {
@@ -130,6 +144,13 @@ export function parsePreferences(raw: string | undefined): PreferencesSnapshot {
     typeof parsed.reduceMotion === 'boolean'
       ? parsed.reduceMotion
       : DEFAULT_PREFERENCES.reduceMotion;
+  const bufferPreset = isBufferPreset(parsed.bufferPreset)
+    ? parsed.bufferPreset
+    : DEFAULT_PREFERENCES.bufferPreset;
+  const useTextureView =
+    typeof parsed.useTextureView === 'boolean'
+      ? parsed.useTextureView
+      : DEFAULT_PREFERENCES.useTextureView;
 
   return Object.freeze({
     version: PREFERENCES_SCHEMA_VERSION,
@@ -137,6 +158,8 @@ export function parsePreferences(raw: string | undefined): PreferencesSnapshot {
     locale,
     fontScale,
     reduceMotion,
+    bufferPreset,
+    useTextureView,
   });
 }
 
@@ -153,6 +176,10 @@ export function serializePreferences(snapshot: PreferencesSnapshot): Result<stri
       ? clampFontScale(snapshot.fontScale)
       : DEFAULT_PREFERENCES.fontScale,
     reduceMotion: Boolean(snapshot.reduceMotion),
+    bufferPreset: isBufferPreset(snapshot.bufferPreset)
+      ? snapshot.bufferPreset
+      : DEFAULT_PREFERENCES.bufferPreset,
+    useTextureView: Boolean(snapshot.useTextureView),
   });
   if (utf8ByteLength(payload) > MAX_PREFERENCES_BYTES) {
     return err(elvError('storage', 'preferences-too-large'));
@@ -169,12 +196,17 @@ function mergeCandidate(base: PreferencesSnapshot, patch: PreferencesPatch): Pre
       : base.fontScale;
   const reduceMotion =
     typeof patch.reduceMotion === 'boolean' ? patch.reduceMotion : base.reduceMotion;
+  const bufferPreset = isBufferPreset(patch.bufferPreset) ? patch.bufferPreset : base.bufferPreset;
+  const useTextureView =
+    typeof patch.useTextureView === 'boolean' ? patch.useTextureView : base.useTextureView;
   return Object.freeze({
     version: PREFERENCES_SCHEMA_VERSION,
     themePreset,
     locale,
     fontScale,
     reduceMotion,
+    bufferPreset,
+    useTextureView,
   });
 }
 
@@ -197,6 +229,9 @@ function mergeRawCandidate(
         ? clampFontScale(patch.fontScale)
         : base.fontScale,
     reduceMotion: typeof patch.reduceMotion === 'boolean' ? patch.reduceMotion : base.reduceMotion,
+    bufferPreset: isBufferPreset(patch.bufferPreset) ? patch.bufferPreset : base.bufferPreset,
+    useTextureView:
+      typeof patch.useTextureView === 'boolean' ? patch.useTextureView : base.useTextureView,
   };
 }
 

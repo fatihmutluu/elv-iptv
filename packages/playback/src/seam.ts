@@ -49,6 +49,8 @@ export interface ServiceControl {
   startTimeoutMs(): number;
   /** Takes a new token; later events of older tokens are dropped. */
   nextAttempt(): AttemptToken;
+  /** Increments `state.surfaceRecreationToken` when Rung 3 decoder recovery requests a fresh surface (`#144`). */
+  bumpSurfaceRecreationToken?(): number;
   setStatus(status: PlaybackStatus): void;
   /** Freezes `state.anchor` at `positionAt(anchor, now)` with `rate: 0`. */
   freezeAnchor(): void;

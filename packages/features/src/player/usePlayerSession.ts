@@ -26,10 +26,15 @@ type SessionState =
 interface PlaybackUiSlice {
   readonly status: PlaybackStatus;
   readonly tracks: MediaTracks;
+  readonly surfaceRecreationToken: number;
 }
 
 const OPENING_STATUS: PlaybackStatus = { kind: 'tuning' };
-const OPENING_PLAYBACK_SLICE: PlaybackUiSlice = { status: OPENING_STATUS, tracks: EMPTY_TRACKS };
+const OPENING_PLAYBACK_SLICE: PlaybackUiSlice = {
+  status: OPENING_STATUS,
+  tracks: EMPTY_TRACKS,
+  surfaceRecreationToken: 0,
+};
 
 function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
   return (
@@ -122,6 +127,17 @@ export function usePlayerSession(params: {
   }, [clockRef, hostKeyRef, onExitRef, serviceRef, timersRef, videoHost]);
 
   const openedEngine = sessionState.kind === 'ready' ? sessionState.opened : null;
+  const [inPip, setInPip] = useState(false);
+
+  useEffect(() => {
+    const subscribePip = openedEngine?.onPictureInPictureChange;
+    if (subscribePip === undefined) {
+      setInPip(false);
+      return;
+    }
+    return subscribePip((next) => setInPip(next));
+  }, [openedEngine]);
+
   const canStepTrack = activeTarget.kind === 'live' && (activeTarget.playlist?.count ?? 0) > 1;
 
   useEffect(() => {
@@ -149,17 +165,19 @@ export function usePlayerSession(params: {
   );
   const getPlaybackSnapshot = useCallback((): PlaybackUiSlice => {
     if (activeService === null) return OPENING_PLAYBACK_SLICE;
-    const { status: st, tracks: tr } = activeService.getState();
+    const { status: st, tracks: tr, surfaceRecreationToken: token } = activeService.getState();
     const prev = sliceRef.current;
-    if (prev.status === st && prev.tracks === tr) return prev;
-    sliceRef.current = { status: st, tracks: tr };
+    if (prev.status === st && prev.tracks === tr && prev.surfaceRecreationToken === token) {
+      return prev;
+    }
+    sliceRef.current = { status: st, tracks: tr, surfaceRecreationToken: token };
     return sliceRef.current;
   }, [activeService]);
-  const { status, tracks } = useSyncExternalStore(
+  const { status, tracks, surfaceRecreationToken } = useSyncExternalStore(
     subscribePlayback,
     getPlaybackSnapshot,
     getPlaybackSnapshot,
   );
 
-  return { sessionState, activeService, status, tracks };
+  return { sessionState, activeService, status, tracks, surfaceRecreationToken, inPip };
 }

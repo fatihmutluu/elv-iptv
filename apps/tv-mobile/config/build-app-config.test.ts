@@ -6,6 +6,7 @@ import {
   isNativeDebugConfigEmbed,
 } from './build-app-config';
 import { withAetherFrameworks } from './with-aether-frameworks.ts';
+import { withAndroidDisplay } from './with-android-display.ts';
 
 const baseOptions: BuildOptions = { version: '1.2.3', now: new Date('2026-11-13T00:00:00Z') };
 const build = (env: Env, overrides: Partial<BuildOptions> = {}) =>
@@ -182,11 +183,16 @@ describe('buildAppConfig', () => {
       const custom = (config.plugins ?? []).some(
         (p) =>
           (typeof p === 'function' && p !== withAetherFrameworks) ||
-          (Array.isArray(p) && typeof p[0] === 'function'),
+          (Array.isArray(p) && typeof p[0] === 'function' && p[0] !== withAndroidDisplay),
       );
       expect(custom).toBe(false);
     },
   );
+
+  it('wires withAndroidDisplay with isTv matching EXPO_TV (#255, #266)', () => {
+    expect(build({}).plugins).toContainEqual([withAndroidDisplay, { isTv: false }]);
+    expect(build({ EXPO_TV: '1' }).plugins).toContainEqual([withAndroidDisplay, { isTv: true }]);
+  });
 
   it.each(['development', 'production', undefined])(
     'blocks legacy external storage permissions and disables Android predictive back (variant %s)',

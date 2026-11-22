@@ -1,4 +1,5 @@
 import type { CatalogService } from '@elv/data';
+import type { BufferPreset } from '@elv/domain';
 import type { PlaybackClock, PlaybackService, PlaybackTimers } from '@elv/playback';
 import { TvFocusAnchor, useFormFactor, useI18n, useTheme } from '@elv/ui-kit';
 import { type ReactElement, useEffect, useRef, useState } from 'react';
@@ -43,6 +44,10 @@ export interface PlayerScreenProps {
   timers?: PlaybackTimers;
   initialOsdHidden?: boolean;
   autoHideOsdMs?: number;
+  /** User-selected playback buffer preset forwarded on load (`#147`). */
+  bufferPreset?: BufferPreset;
+  /** Opt-in TextureView fallback for broken Android SurfaceView compositing (`#262`). */
+  useTextureView?: boolean;
   onTargetChange?: (next: PlayTarget) => void;
   onExit: () => void;
 }
@@ -58,6 +63,8 @@ export function PlayerScreen({
   timers = DEFAULT_PLAYER_TIMERS,
   initialOsdHidden,
   autoHideOsdMs,
+  bufferPreset = 'auto',
+  useTextureView = false,
   onTargetChange,
   onExit,
 }: PlayerScreenProps): ReactElement {
@@ -80,6 +87,8 @@ export function PlayerScreen({
   onTargetChangeRef.current = onTargetChange;
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
+  const bufferPresetRef = useRef<BufferPreset>(bufferPreset);
+  bufferPresetRef.current = bufferPreset;
 
   const handoff = usePlayerTargetHandoff({
     target,
@@ -92,6 +101,7 @@ export function PlayerScreen({
     flushProgressRef,
     cancelScrubRef,
     onTargetChangeRef,
+    bufferPresetRef,
   });
   const { activeTarget, zapBy, jumpToChannel } = handoff;
 
@@ -101,16 +111,17 @@ export function PlayerScreen({
     if (key === 'back') onExitRef.current();
   });
 
-  const { sessionState, activeService, status, tracks } = usePlayerSession({
-    videoHost,
-    activeTarget,
-    serviceRef,
-    clockRef,
-    timersRef,
-    hostKeyRef,
-    onExitRef,
-    onServiceReady: handoff.onServiceReady,
-  });
+  const { sessionState, activeService, status, tracks, surfaceRecreationToken, inPip } =
+    usePlayerSession({
+      videoHost,
+      activeTarget,
+      serviceRef,
+      clockRef,
+      timersRef,
+      hostKeyRef,
+      onExitRef,
+      onServiceReady: handoff.onServiceReady,
+    });
 
   const { flushProgress } = useWatchProgressSync({
     activeTarget,
@@ -313,9 +324,14 @@ export function PlayerScreen({
       } as Record<string, unknown>)
     : undefined;
   const subtitleBottomInsetPx =
-    !isDesktop && !controls.osdHidden && !controls.locked ? (isTv ? 120 : 96) : 0;
+    !inPip && !isDesktop && !controls.osdHidden && !controls.locked ? (isTv ? 120 : 96) : 0;
   const showTouchCanvasTap =
-    !isTv && !isDesktop && !controls.locked && !controls.tracksOpen && !controls.settingsOpen;
+    !inPip &&
+    !isTv &&
+    !isDesktop &&
+    !controls.locked &&
+    !controls.tracksOpen &&
+    !controls.settingsOpen;
 
   return (
     <View
@@ -346,6 +362,8 @@ export function PlayerScreen({
             failed: status.kind === 'failed',
             resizeMode: controls.resizeMode,
             subtitleBottomInsetPx,
+            surfaceRecreationToken,
+            useTextureView,
             testID: 'player-surface',
           })}
         </View>
@@ -359,14 +377,14 @@ export function PlayerScreen({
       ) : null}
 
       <PlayerStatsHud
-        visible={controls.statsVisible}
+        visible={!inPip && controls.statsVisible}
         service={activeService}
         clock={clock}
         i18n={i18n}
         isDesktop={isDesktop}
       />
 
-      {isDesktop ? (
+      {inPip ? null : isDesktop ? (
         <>
           {nextEpisodeNode}
           {trackPickerNode}

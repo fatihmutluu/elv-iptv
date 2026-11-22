@@ -67,7 +67,7 @@ export function AppearancePanel({
 
   const isTv = viewport.formFactor === 'tv';
   const activePrefs: PreferencesSnapshot = suppliedPrefs?.preferences ?? {
-    version: DEFAULT_PREFERENCES.version,
+    ...DEFAULT_PREFERENCES,
     themePreset: theme.preset === 'custom' ? DEFAULT_PREFERENCES.themePreset : theme.preset,
     locale: i18n.locale,
     fontScale: theme.fontScale,

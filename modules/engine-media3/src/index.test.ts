@@ -21,13 +21,16 @@ type NativeListener = (event: EngineEvent) => void;
 function fakeNative() {
   const clock = { uptime: 0 };
   const listeners = new Set<NativeListener>();
+  const moduleListeners = new Map<string, Set<(payload: unknown) => void>>();
   const remove = vi.fn();
+  const moduleRemove = vi.fn();
   const engine = {
     load: vi.fn(),
     retry: vi.fn(),
     play: vi.fn(),
     pause: vi.fn(),
     seek: vi.fn(),
+    setScrubbing: vi.fn(),
     selectAudioTrack: vi.fn(),
     selectSubtitleTrack: vi.fn(),
     stop: vi.fn(),
@@ -48,11 +51,56 @@ function fakeNative() {
   });
   const uptimeMs = vi.fn(() => clock.uptime);
   const setOrientationLocked = vi.fn();
-  requireOptionalNativeModule.mockReturnValue({ Engine, uptimeMs, setOrientationLocked });
+  const requestTemporaryOrientation = vi.fn();
+  const applyShortEdgesCutoutMode = vi.fn();
+  const getSafeAreaInsets = vi.fn(() => ({ top: 32, right: 0, bottom: 16, left: 0 }));
+  const enterPictureInPicture = vi.fn(() => true);
+  const addListener = vi.fn((eventName: string, listener: (payload: unknown) => void) => {
+    let set = moduleListeners.get(eventName);
+    if (set === undefined) {
+      set = new Set();
+      moduleListeners.set(eventName, set);
+    }
+    set.add(listener);
+    return {
+      remove: () => {
+        moduleRemove(eventName);
+        set.delete(listener);
+      },
+    };
+  });
+  requireOptionalNativeModule.mockReturnValue({
+    Engine,
+    uptimeMs,
+    setOrientationLocked,
+    requestTemporaryOrientation,
+    applyShortEdgesCutoutMode,
+    getSafeAreaInsets,
+    enterPictureInPicture,
+    addListener,
+  });
   const emit = (event: EngineEvent) => {
     for (const listener of [...listeners]) listener(event);
   };
-  return { clock, engine, Engine, uptimeMs, setOrientationLocked, remove, emit };
+  const emitModule = (eventName: string, payload: unknown) => {
+    for (const listener of [...(moduleListeners.get(eventName) ?? [])]) listener(payload);
+  };
+  return {
+    clock,
+    engine,
+    Engine,
+    uptimeMs,
+    setOrientationLocked,
+    requestTemporaryOrientation,
+    applyShortEdgesCutoutMode,
+    getSafeAreaInsets,
+    enterPictureInPicture,
+    addListener,
+    remove,
+    moduleRemove,
+    emit,
+    emitModule,
+  };
 }
 
 afterEach(() => {
@@ -89,7 +137,7 @@ describe('createMedia3Engine', () => {
     expect(events).toEqual([{ attempt: 2, type: 'firstFrame', atMs: 49_960 }]);
   });
 
-  it('forwards track options and track selection commands through bridgeNativeEngine', async () => {
+  it('forwards track options, bufferPreset, scrubbing, and track selection commands through bridgeNativeEngine', async () => {
     const native = fakeNative();
     const engine = await create();
     engine?.load({
@@ -98,8 +146,15 @@ describe('createMedia3Engine', () => {
       headers: { 'User-Agent': 'ua' },
       kind: 'live',
       startMs: 5_000,
-      options: { softwareAudio: true, audioTrackId: '1:0', subtitleTrackId: null },
+      options: {
+        softwareAudio: true,
+        bufferPreset: 'balanced',
+        audioTrackId: '1:0',
+        subtitleTrackId: null,
+      },
     });
+    engine?.setScrubbing?.(3, true);
+    engine?.setScrubbing?.(3, false);
     engine?.selectAudioTrack?.(5, '1:1');
     engine?.selectSubtitleTrack?.(5, '2:0');
     engine?.selectSubtitleTrack?.(6, null);
@@ -110,9 +165,12 @@ describe('createMedia3Engine', () => {
       kind: 'live',
       startMs: 5_000,
       softwareAudio: true,
+      bufferPreset: 'balanced',
       audioTrackId: '1:0',
       subtitleTrackId: null,
     });
+    expect(native.engine.setScrubbing).toHaveBeenNthCalledWith(1, 3, true);
+    expect(native.engine.setScrubbing).toHaveBeenNthCalledWith(2, 3, false);
     expect(native.engine.selectAudioTrack).toHaveBeenCalledWith(5, '1:1');
     expect(native.engine.selectSubtitleTrack).toHaveBeenNthCalledWith(1, 5, '2:0');
     expect(native.engine.selectSubtitleTrack).toHaveBeenNthCalledWith(2, 6, null);
@@ -148,14 +206,75 @@ describe('Media3Surface', () => {
 
   it('passes the resize mode and subtitle bottom inset to the native view and leaves defaults to native', async () => {
     const { native, engine, Media3Surface } = await engineWithView();
-    expect(Media3Surface({ engine, resizeMode: 'fill', subtitleBottomInsetPx: 96 })?.props).toEqual(
-      {
-        engine: native.engine,
+    expect(
+      Media3Surface({
+        engine,
         resizeMode: 'fill',
         subtitleBottomInsetPx: 96,
-      },
-    );
+        surfaceRecreationToken: 2,
+        useTextureView: true,
+      })?.props,
+    ).toEqual({
+      engine: native.engine,
+      resizeMode: 'fill',
+      subtitleBottomInsetPx: 96,
+      surfaceRecreationToken: 2,
+      useTextureView: true,
+    });
     expect(Media3Surface({ engine })?.props).toEqual({ engine: native.engine });
+  });
+
+  it('forwards Android standby, cutout, safe-area, PiP, and orientation helpers and no-ops when absent (#143, #255, #266)', async () => {
+    const native = fakeNative();
+    const mod = await load();
+
+    const standbySeen: boolean[] = [];
+    const offStandby = mod.subscribeAndroidStandby((s) => standbySeen.push(s));
+    native.emitModule('onStandbyChanged', { standby: true });
+    native.emitModule('onStandbyChanged', { standby: false });
+    offStandby();
+    native.emitModule('onStandbyChanged', { standby: true });
+    expect(standbySeen).toEqual([true, false]);
+    expect(native.moduleRemove).toHaveBeenCalledWith('onStandbyChanged');
+
+    mod.applyAndroidShortEdgesCutoutMode();
+    expect(native.applyShortEdgesCutoutMode).toHaveBeenCalledTimes(1);
+
+    expect(mod.getAndroidSafeAreaInsets()).toEqual({ top: 32, right: 0, bottom: 16, left: 0 });
+    const insetsSeen: unknown[] = [];
+    const offInsets = mod.subscribeAndroidSafeAreaInsets((i) => insetsSeen.push(i));
+    native.emitModule('onSafeAreaInsetsChanged', {
+      top: 44,
+      right: -5,
+      bottom: 24,
+      left: Number.NaN,
+    });
+    offInsets();
+    expect(insetsSeen).toEqual([{ top: 44, right: 0, bottom: 24, left: 0 }]);
+
+    expect(mod.enterAndroidPictureInPicture(16, 9)).toBe(true);
+    expect(native.enterPictureInPicture).toHaveBeenCalledWith(16, 9);
+
+    const pipSeen: boolean[] = [];
+    const offPip = mod.subscribeAndroidPictureInPicture((inPip) => pipSeen.push(inPip));
+    native.emitModule('onPictureInPictureChanged', { inPip: true });
+    native.emitModule('onPictureInPictureChanged', { inPip: false });
+    offPip();
+    expect(pipSeen).toEqual([true, false]);
+
+    mod.requestTemporaryOrientation(true);
+    expect(native.requestTemporaryOrientation).toHaveBeenCalledWith(true);
+
+    // Absent native module: every helper safely no-ops / returns defaults
+    requireOptionalNativeModule.mockReturnValue(null);
+    const absent = await load();
+    expect(() => absent.subscribeAndroidStandby(() => {})()).not.toThrow();
+    expect(() => absent.applyAndroidShortEdgesCutoutMode()).not.toThrow();
+    expect(absent.getAndroidSafeAreaInsets()).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
+    expect(() => absent.subscribeAndroidSafeAreaInsets(() => {})()).not.toThrow();
+    expect(absent.enterAndroidPictureInPicture(16, 9)).toBe(false);
+    expect(() => absent.subscribeAndroidPictureInPicture(() => {})()).not.toThrow();
+    expect(() => absent.requestTemporaryOrientation(false)).not.toThrow();
   });
 
   it('forwards setOrientationLocked to the native module and no-ops when absent (#440)', async () => {

@@ -38,7 +38,7 @@ describe('createDesktopPreferencesStore', () => {
 
     const reloaded = createDesktopPreferencesStore(storage);
     expect(await reloaded.load()).toEqual({
-      version: 1,
+      ...DEFAULT_PREFERENCES,
       themePreset: 'highContrast',
       locale: 'tr',
       fontScale: 1.2,

@@ -267,6 +267,7 @@ describe('#148: single-attempt live clean-end reconnect', () => {
         attempt,
         tracks: EMPTY_TRACKS,
         staleEventsDropped: 0,
+        surfaceRecreationToken: 0,
       }),
       request: () => live('chan'),
       startTimeoutMs: () => 5000,

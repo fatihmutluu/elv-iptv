@@ -42,6 +42,7 @@ function createFakeService(positionMs = 30_000, durationMs = 120_000): PlaybackS
     attempt: 1,
     tracks: TRACKS,
     staleEventsDropped: 0,
+    surfaceRecreationToken: 0,
     anchor: { positionMs, atMs: 1_000, rate: 0, durationMs },
   };
   return {

@@ -237,7 +237,7 @@ describe('AppProviders', () => {
         }),
       update: async (patch) => {
         const next: PreferencesSnapshot = {
-          version: 1,
+          ...DEFAULT_PREFERENCES,
           themePreset: patch.themePreset ?? 'obsidianCrimson',
           locale: patch.locale ?? 'system',
           fontScale: patch.fontScale ?? 1,
@@ -267,11 +267,8 @@ describe('AppProviders', () => {
     await act(async () => {
       await customStore.update({ locale: 'tr', themePreset: 'abyssalSapphire' });
       resolveLoad?.({
-        version: 1,
-        themePreset: 'obsidianCrimson',
+        ...DEFAULT_PREFERENCES,
         locale: 'en',
-        fontScale: 1,
-        reduceMotion: false,
       });
     });
     expect(screen.getByTestId('theme-preset')).toHaveTextContent('abyssalSapphire');
