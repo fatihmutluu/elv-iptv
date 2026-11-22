@@ -64,7 +64,7 @@ internal class SniffingDataSource(
       if (kind == RequestKind.OTHER) return length
       if (dataSpec.position > 0L && hasContentRange(upstream.responseHeaders)) return length
       val contentType = contentTypeOf(upstream.responseHeaders)
-      val filled = readAhead(length)
+      val filled = readAhead(length, contentType)
       if (filled == 0 && (kind == RequestKind.PROGRESSIVE || kind == RequestKind.MANIFEST)) {
         if (isNoticeContentType(contentType, hls = kind == RequestKind.MANIFEST)) {
           throw ProviderNoticeException(contentType)
@@ -112,7 +112,7 @@ internal class SniffingDataSource(
     upstream.close()
   }
 
-  private fun readAhead(length: Long): Int {
+  private fun readAhead(length: Long, contentType: String?): Int {
     val limit = if (length == C.LENGTH_UNSET.toLong()) prefix.size else min(prefix.size.toLong(), length).toInt()
     var filled = 0
     while (filled < limit) {
@@ -122,6 +122,7 @@ internal class SniffingDataSource(
         break
       }
       filled += read
+      if (canStopSniffing(kind, contentType, prefix, filled)) break
     }
     return filled
   }

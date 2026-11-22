@@ -239,10 +239,20 @@ class TrackSelectorBridgeTest {
         Locale.setDefault(previousLocale)
       }
 
-      // Reloading a new media with Default subtitle preference restores CaptioningManager accessibility defaults
+      // Reloading a new media with Default subtitle preference only enables CaptioningManager when system captioning is enabled (#438)
       val (_, defaultReq) = parseLoadArgs(mapOf("attempt" to 9, "url" to "http://h/2.mkv", "kind" to "vod"))
       bridge.onLoad(defaultReq)
       bridge.applyInitialParameters(player)
+      assertFalse(player.trackSelectionParameters.usePreferredTextLanguagesAndRoleFlagsFromCaptioningManager)
+      assertFalse(player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT))
+
+      val captionBridge = TrackSelectorBridge(
+        onTracks = {},
+        onClearCues = {},
+        captioningEnabled = { true },
+      )
+      captionBridge.onLoad(defaultReq)
+      captionBridge.applyInitialParameters(player)
       assertTrue(player.trackSelectionParameters.usePreferredTextLanguagesAndRoleFlagsFromCaptioningManager)
       assertFalse(player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT))
 
@@ -375,6 +385,156 @@ class TrackSelectorBridgeTest {
       assertTrue(cuesHistory.all { it.isEmpty() })
     } finally {
       engine.dispose()
+    }
+  }
+
+  @Test
+  fun `resolves und tracks by formatId then codec and channels across re-indexed groups before positional fallback (#438)`() {
+    val bridge = TrackSelectorBridge(onTracks = {}, onClearCues = {})
+    val player = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build()
+    try {
+      // 1) Multiple und tracks distinguished by formatId swap indices after HLS discontinuity
+      val undById = group(
+        "a-und-id",
+        listOf(
+          Format.Builder().setId("pid-101").setSampleMimeType(MimeTypes.AUDIO_AAC).setLanguage("und").setChannelCount(2).build(),
+          Format.Builder().setId("pid-102").setSampleMimeType(MimeTypes.AUDIO_AAC).setLanguage("und").setChannelCount(2).build(),
+        ),
+        selectedIndex = 0,
+      )
+      bridge.onTracksChanged(player, Tracks(listOf(videoGroup, undById)))
+      bridge.selectAudioTrack(player, "1:1") // pid-102
+
+      bridge.onPrepareReuse()
+      val swappedById = group(
+        "a-und-id-swapped",
+        listOf(
+          Format.Builder().setId("pid-102").setSampleMimeType(MimeTypes.AUDIO_AAC).setLanguage("und").setChannelCount(2).build(),
+          Format.Builder().setId("pid-101").setSampleMimeType(MimeTypes.AUDIO_AAC).setLanguage("und").setChannelCount(2).build(),
+        ),
+        selectedIndex = 1,
+      )
+      bridge.onTracksChanged(player, Tracks(listOf(videoGroup, swappedById)))
+      assertEquals(
+        "must follow formatId 'pid-102' to index 0 instead of stale positional index 1",
+        listOf(0),
+        player.trackSelectionParameters.overrides[swappedById.mediaTrackGroup]?.trackIndices,
+      )
+
+      // 2) Multiple und tracks without formatId swap indices; match by (codec, channels) signature
+      val undBySignature = group(
+        "a-und-sig",
+        listOf(
+          Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AAC).setCodecs("mp4a.40.2").setLanguage("und").setChannelCount(2).build(),
+          Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AC3).setCodecs("ac-3").setLanguage("und").setChannelCount(6).build(),
+        ),
+        selectedIndex = 0,
+      )
+      bridge.onTracksChanged(player, Tracks(listOf(videoGroup, undBySignature)))
+      bridge.selectAudioTrack(player, "1:1") // ac-3, 6ch
+
+      bridge.onPrepareReuse()
+      val swappedBySignature = group(
+        "a-und-sig-swapped",
+        listOf(
+          Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AC3).setCodecs("ac-3").setLanguage("und").setChannelCount(6).build(),
+          Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AAC).setCodecs("mp4a.40.2").setLanguage("und").setChannelCount(2).build(),
+        ),
+        selectedIndex = 1,
+      )
+      bridge.onTracksChanged(player, Tracks(listOf(videoGroup, swappedBySignature)))
+      assertEquals(
+        "must follow (ac-3, 6ch) to index 0 instead of stale positional index 1",
+        listOf(0),
+        player.trackSelectionParameters.overrides[swappedBySignature.mediaTrackGroup]?.trackIndices,
+      )
+
+      // 3) Wire map keeps formatId internal and unchanged
+      val snap = inspectMediaTracks(Tracks(listOf(videoGroup, undById)), textDisabled = false)
+      assertEquals("pid-101", snap.audio[0].formatId)
+      assertFalse("formatId must stay internal and not alter toMap wire format", snap.audio[0].toMap().containsKey("formatId"))
+    } finally {
+      player.release()
+    }
+  }
+
+  @Test
+  fun `exposes unselected FORMAT_EXCEEDS_CAPABILITIES audio tracks when FFmpeg supports the codec (#438)`() {
+    val exceedsGroup = group(
+      "a-exceeds-ffmpeg",
+      listOf(
+        Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AAC).setLanguage("eng").setChannelCount(2).build(),
+        Format.Builder().setSampleMimeType(MimeTypes.AUDIO_DTS).setLanguage("tur").setChannelCount(6).build(),
+        Format.Builder().setSampleMimeType("audio/x-unknown").setLanguage("deu").setChannelCount(6).build(),
+      ),
+      selectedIndex = 0,
+      supported = intArrayOf(C.FORMAT_HANDLED, C.FORMAT_EXCEEDS_CAPABILITIES, C.FORMAT_EXCEEDS_CAPABILITIES),
+    )
+    val tracks = Tracks(listOf(videoGroup, exceedsGroup))
+    val ffmpegStub: (String?) -> Boolean = { it == MimeTypes.AUDIO_DTS }
+
+    val snapshot = inspectMediaTracks(tracks, textDisabled = false, ffmpegSupportsAudio = ffmpegStub)
+    assertEquals(listOf("1:0", "1:1"), snapshot.audio.map { it.id })
+    assertEquals("tr", snapshot.audio[1].language)
+
+    val emitted = mutableListOf<Map<String, Any?>>()
+    val bridge = TrackSelectorBridge(
+      onTracks = { emitted += it },
+      onClearCues = {},
+      ffmpegSupportsAudio = ffmpegStub,
+    )
+    val player = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build()
+    try {
+      bridge.onTracksChanged(player, tracks)
+      bridge.selectAudioTrack(player, "1:1")
+      assertEquals(
+        listOf(1),
+        player.trackSelectionParameters.overrides[exceedsGroup.mediaTrackGroup]?.trackIndices,
+      )
+    } finally {
+      player.release()
+    }
+  }
+
+  @Test
+  fun `gates CaptioningManager defaults on captioningEnabled and never overrides explicit Selected subtitles (#438)`() {
+    val player = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build()
+    try {
+      val (_, defaultReq) = parseLoadArgs(mapOf("attempt" to 1, "url" to "http://h/1.mkv", "kind" to "vod"))
+      val (_, selectedNoLangReq) = parseLoadArgs(
+        mapOf("attempt" to 2, "url" to "http://h/1.mkv", "kind" to "vod", "subtitleTrackId" to "2:0")
+      )
+
+      // System captioning OFF -> Default clears preferred text language and role flags
+      val offBridge = TrackSelectorBridge(onTracks = {}, onClearCues = {}, captioningEnabled = { false })
+      offBridge.onLoad(defaultReq)
+      offBridge.applyInitialParameters(player)
+      assertFalse(player.trackSelectionParameters.usePreferredTextLanguagesAndRoleFlagsFromCaptioningManager)
+      assertTrue(player.trackSelectionParameters.preferredTextLanguages.isEmpty())
+      assertEquals(0, player.trackSelectionParameters.preferredTextRoleFlags)
+
+      // System captioning ON -> Default enables CaptioningManager settings
+      val onBridge = TrackSelectorBridge(onTracks = {}, onClearCues = {}, captioningEnabled = { true })
+      onBridge.onLoad(defaultReq)
+      onBridge.applyInitialParameters(player)
+      assertTrue(player.trackSelectionParameters.usePreferredTextLanguagesAndRoleFlagsFromCaptioningManager)
+
+      // Explicit Selected subtitle with unknown language NEVER falls back to CaptioningManager even when enabled
+      onBridge.onLoad(selectedNoLangReq)
+      onBridge.applyInitialParameters(player)
+      assertFalse(player.trackSelectionParameters.usePreferredTextLanguagesAndRoleFlagsFromCaptioningManager)
+      assertTrue(player.trackSelectionParameters.preferredTextLanguages.isEmpty())
+      assertEquals(0, player.trackSelectionParameters.preferredTextRoleFlags)
+
+      // Explicit Selected subtitle with known language applies that language without CaptioningManager
+      onBridge.onTracksChanged(player, Tracks(listOf(videoGroup, audioGroup, textGroup)))
+      onBridge.selectSubtitleTrack(player, "2:1") // English VTT
+      onBridge.onPrepareReuse()
+      onBridge.applyInitialParameters(player)
+      assertFalse(player.trackSelectionParameters.usePreferredTextLanguagesAndRoleFlagsFromCaptioningManager)
+      assertEquals(listOf("en"), player.trackSelectionParameters.preferredTextLanguages)
+    } finally {
+      player.release()
     }
   }
 }

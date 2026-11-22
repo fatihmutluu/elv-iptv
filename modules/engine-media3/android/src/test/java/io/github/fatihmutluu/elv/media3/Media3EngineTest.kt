@@ -349,4 +349,257 @@ class Media3EngineTest {
       }
     }
   }
+
+  @Test
+  fun `rebuilds ExoPlayer when switching between Live and VOD while preserving Surface (#422)`() {
+    val engine = Media3Engine(RuntimeEnvironment.getApplication())
+    val tex = android.graphics.SurfaceTexture(0)
+    val surface = android.view.Surface(tex)
+    try {
+      engine.attachSurface(surface)
+      val handlerField = Media3Engine::class.java.getDeclaredField("handler").apply { isAccessible = true }
+      val playerField = Media3Engine::class.java.getDeclaredField("player").apply { isAccessible = true }
+      val handler = handlerField.get(engine) as android.os.Handler
+
+      fun currentPlayer(): androidx.media3.exoplayer.ExoPlayer? {
+        var found: androidx.media3.exoplayer.ExoPlayer? = null
+        val latch = CountDownLatch(1)
+        handler.post {
+          found = playerField.get(engine) as androidx.media3.exoplayer.ExoPlayer?
+          latch.countDown()
+        }
+        assertTrue(latch.await(5, TimeUnit.SECONDS))
+        return found
+      }
+
+      engine.load(1, LoadRequest("http://127.0.0.1:9/live/demo/demo/1.ts", emptyMap(), live = true, startMs = null, softwareAudio = false))
+      val livePlayer1 = currentPlayer()
+      org.junit.Assert.assertNotNull(livePlayer1)
+
+      engine.load(2, LoadRequest("http://127.0.0.1:9/movie/demo/demo/1.mp4", emptyMap(), live = false, startMs = 0L, softwareAudio = false))
+      val vodPlayer = currentPlayer()
+      org.junit.Assert.assertNotNull(vodPlayer)
+      org.junit.Assert.assertNotSame("switching Live -> VOD must rebuild ExoPlayer with VOD LoadControl", livePlayer1, vodPlayer)
+
+      engine.load(3, LoadRequest("http://127.0.0.1:9/live/demo/demo/2.ts", emptyMap(), live = true, startMs = null, softwareAudio = false))
+      val livePlayer2 = currentPlayer()
+      org.junit.Assert.assertNotNull(livePlayer2)
+      org.junit.Assert.assertNotSame("switching VOD -> Live must rebuild ExoPlayer with Live LoadControl", vodPlayer, livePlayer2)
+    } finally {
+      engine.dispose()
+      surface.release()
+      tex.release()
+    }
+  }
+
+  @Test
+  fun `handleAudioFocusDenied and playAsHls advance ConnectionGate generation (#423)`() {
+    val engine = Media3Engine(RuntimeEnvironment.getApplication())
+    try {
+      val handlerField = Media3Engine::class.java.getDeclaredField("handler").apply { isAccessible = true }
+      val generationField = Media3Engine::class.java.getDeclaredField("generation").apply { isAccessible = true }
+      val handleFocusMethod = Media3Engine::class.java.getDeclaredMethod("handleAudioFocusDenied").apply { isAccessible = true }
+      val playAsHlsMethod = Media3Engine::class.java.getDeclaredMethod("playAsHls").apply { isAccessible = true }
+      val handler = handlerField.get(engine) as android.os.Handler
+
+      engine.load(1, LoadRequest("http://127.0.0.1:9/live/demo/demo/1001.ts", emptyMap(), live = true, startMs = null, softwareAudio = false))
+
+      var genAfterLoad = 0L
+      var genAfterFocus = 0L
+      var genAfterHls = 0L
+
+      val step1 = CountDownLatch(1)
+      handler.post {
+        genAfterLoad = generationField.getLong(engine)
+        val handled = handleFocusMethod.invoke(engine) as Boolean
+        assertTrue(handled)
+        genAfterFocus = generationField.getLong(engine)
+        step1.countDown()
+      }
+      assertTrue(step1.await(5, TimeUnit.SECONDS))
+      assertTrue("handleAudioFocusDenied must advance generation ($genAfterLoad -> $genAfterFocus)", genAfterFocus > genAfterLoad)
+      assertFalse("old generation must be superseded in ConnectionGate", engine.gate.tryOpen(genAfterLoad))
+
+      val step2 = CountDownLatch(1)
+      handler.post {
+        playAsHlsMethod.invoke(engine)
+        handler.post {
+          genAfterHls = generationField.getLong(engine)
+          step2.countDown()
+        }
+      }
+      assertTrue(step2.await(5, TimeUnit.SECONDS))
+      assertTrue("playAsHls must advance generation ($genAfterFocus -> $genAfterHls)", genAfterHls > genAfterFocus)
+      assertFalse("pre-HLS generation must be superseded in ConnectionGate", engine.gate.tryOpen(genAfterFocus))
+    } finally {
+      engine.dispose()
+    }
+  }
+
+  @Test
+  fun `detachSurface short-circuits immediately without blocking after dispose (#424)`() {
+    val engine = Media3Engine(RuntimeEnvironment.getApplication())
+    val tex = android.graphics.SurfaceTexture(0)
+    val surface = android.view.Surface(tex)
+    val hold = CountDownLatch(1)
+    try {
+      val handlerField = Media3Engine::class.java.getDeclaredField("handler").apply { isAccessible = true }
+      val handler = handlerField.get(engine) as android.os.Handler
+      val blocked = CountDownLatch(1)
+      handler.post {
+        blocked.countDown()
+        hold.await(5, TimeUnit.SECONDS)
+      }
+      assertTrue(blocked.await(5, TimeUnit.SECONDS))
+
+      engine.dispose()
+      val startNs = System.nanoTime()
+      val detached = engine.detachSurface(surface, timeoutMs = 3_000L)
+      val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs)
+      assertTrue("disposed engine must return true immediately from detachSurface", detached)
+      assertTrue("detachSurface on disposed engine must not wait on blocked looper (took $elapsedMs ms)", elapsedMs < 200L)
+    } finally {
+      hold.countDown()
+      surface.release()
+      tex.release()
+    }
+  }
+
+  @Test
+  fun `audio decoder failure escalates once to softwareAudio with new generation and resets on load (#436)`() {
+    val engine = Media3Engine(RuntimeEnvironment.getApplication())
+    val events = java.util.concurrent.CopyOnWriteArrayList<Map<String, Any?>>()
+    engine.eventObserverForTest = { events += it }
+    try {
+      val handlerField = Media3Engine::class.java.getDeclaredField("handler").apply { isAccessible = true }
+      val reporterField = Media3Engine::class.java.getDeclaredField("reporter").apply { isAccessible = true }
+      val fenceField = Media3Engine::class.java.getDeclaredField("fence").apply { isAccessible = true }
+      val playerField = Media3Engine::class.java.getDeclaredField("player").apply { isAccessible = true }
+      val swField = Media3Engine::class.java.getDeclaredField("playerSoftwareAudio").apply { isAccessible = true }
+      val genField = Media3Engine::class.java.getDeclaredField("generation").apply { isAccessible = true }
+      val fallbackField = Media3Engine::class.java.getDeclaredField("audioFallbackAttempted").apply { isAccessible = true }
+      val handler = handlerField.get(engine) as android.os.Handler
+      val reporter = reporterField.get(engine) as EventReporter
+      val fence = fenceField.get(engine) as PrepareFence
+
+      fun waitForFenceOpen() {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (System.nanoTime() < deadline) {
+          var open = false
+          val check = CountDownLatch(1)
+          handler.post {
+            val current = playerField.get(engine) as androidx.media3.exoplayer.ExoPlayer?
+            open = current != null && fence.acceptsPlayer(current)
+            check.countDown()
+          }
+          assertTrue(check.await(2, TimeUnit.SECONDS))
+          if (open) return
+          Thread.sleep(10)
+        }
+        org.junit.Assert.fail("PrepareFence did not open within 5 s")
+      }
+
+      engine.load(1, LoadRequest("http://127.0.0.1:9/movie/demo/demo/1.mp4", emptyMap(), live = false, startMs = 45_000L, softwareAudio = false))
+      waitForFenceOpen()
+
+      var genBefore = 0L
+      var genAfter = 0L
+      var swAfterFirst = false
+      val step1 = CountDownLatch(1)
+      handler.post {
+        genBefore = genField.getLong(engine)
+        events.clear()
+        val err = androidx.media3.common.PlaybackException(
+          "audio init failed",
+          null,
+          androidx.media3.common.PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED,
+        )
+        reporter.onPlayerError(err)
+        genAfter = genField.getLong(engine)
+        swAfterFirst = swField.getBoolean(engine)
+        step1.countDown()
+      }
+      assertTrue(step1.await(5, TimeUnit.SECONDS))
+      assertTrue("audio failure must escalate playerSoftwareAudio to true", swAfterFirst)
+      assertTrue("audio escalation must advance generation", genAfter > genBefore)
+      assertTrue("handled first audio failure must not emit error event: $events", events.none { it["type"] == "error" })
+
+      waitForFenceOpen()
+
+      // Second audio failure on same load must NOT re-escalate; emits decoder error
+      val step2 = CountDownLatch(1)
+      handler.post {
+        events.clear()
+        val err = androidx.media3.common.PlaybackException(
+          "audio write failed",
+          null,
+          androidx.media3.common.PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED,
+        )
+        reporter.onPlayerError(err)
+        step2.countDown()
+      }
+      assertTrue(step2.await(5, TimeUnit.SECONDS))
+      assertEquals(
+        "decoder",
+        (events.first { it["type"] == "error" }["error"] as Map<*, *>)["code"],
+      )
+
+      // Fresh load resets audioFallbackAttempted
+      engine.load(2, LoadRequest("http://127.0.0.1:9/movie/demo/demo/2.mp4", emptyMap(), live = false, startMs = 0L, softwareAudio = false))
+      var resetAfterLoad = true
+      val step3 = CountDownLatch(1)
+      handler.post {
+        resetAfterLoad = fallbackField.getBoolean(engine)
+        step3.countDown()
+      }
+      assertTrue(step3.await(5, TimeUnit.SECONDS))
+      assertFalse("fresh load must reset audioFallbackAttempted", resetAfterLoad)
+    } finally {
+      engine.dispose()
+    }
+  }
+
+  @Test
+  fun `early seek on non-seekable VOD does not poison lastVodPositionMs and closer uses 4 daemon threads (#437)`() {
+    val engine = Media3Engine(RuntimeEnvironment.getApplication())
+    try {
+      val closerField = Media3Engine::class.java.getDeclaredField("closer").apply { isAccessible = true }
+      val closer = closerField.get(engine) as java.util.concurrent.ThreadPoolExecutor
+      assertEquals(4, closer.corePoolSize)
+      assertEquals(4, closer.maximumPoolSize)
+      assertTrue(closer.allowsCoreThreadTimeOut())
+
+      val handlerField = Media3Engine::class.java.getDeclaredField("handler").apply { isAccessible = true }
+      val playerField = Media3Engine::class.java.getDeclaredField("player").apply { isAccessible = true }
+      val lastVodField = Media3Engine::class.java.getDeclaredField("lastVodPositionMs").apply { isAccessible = true }
+      val handler = handlerField.get(engine) as android.os.Handler
+
+      engine.load(1, LoadRequest("http://127.0.0.1:9/movie/demo/demo/1.mp4", emptyMap(), live = false, startMs = 12_000L, softwareAudio = false))
+
+      val setup = CountDownLatch(1)
+      handler.post {
+        val real = playerField.get(engine) as androidx.media3.exoplayer.ExoPlayer
+        playerField.set(
+          engine,
+          object : androidx.media3.exoplayer.ExoPlayer by real {
+            override fun isCurrentMediaItemSeekable(): Boolean = false
+          },
+        )
+        setup.countDown()
+      }
+      assertTrue(setup.await(5, TimeUnit.SECONDS))
+
+      engine.seek(1, 999_000L)
+      var storedVodPos: Long? = null
+      val verify = CountDownLatch(1)
+      handler.post {
+        storedVodPos = lastVodField.get(engine) as Long?
+        verify.countDown()
+      }
+      assertTrue(verify.await(5, TimeUnit.SECONDS))
+      assertEquals("non-seekable early seek must not poison lastVodPositionMs", 12_000L, storedVodPos)
+    } finally {
+      engine.dispose()
+    }
+  }
 }

@@ -1,10 +1,26 @@
 package io.github.fatihmutluu.elv.media3
 
 import java.util.concurrent.Executor
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
+
+internal const val CLOSER_POOL_SIZE = 4
+
+/** Bounded 4-thread daemon executor for parallel socket force-closes without head-of-line blocking (#437). */
+internal fun createCloserExecutor(): ThreadPoolExecutor =
+  ThreadPoolExecutor(
+    CLOSER_POOL_SIZE,
+    CLOSER_POOL_SIZE,
+    10,
+    TimeUnit.SECONDS,
+    LinkedBlockingQueue(),
+  ) { runnable ->
+    Thread(runnable, "ElvMedia3Closer").apply { isDaemon = true }
+  }.apply { allowCoreThreadTimeOut(true) }
 
 /**
  * After the backstop's second force-close, a connection whose force-close finished (its call is cancelled) but that
@@ -196,30 +212,26 @@ class ConnectionGate(private val closer: Executor) {
 
   private fun forceClose(overstaying: List<ForceClosable>) {
     if (overstaying.isEmpty()) return
-    try {
-      closer.execute {
-        for (connection in overstaying) {
+    for (connection in overstaying) {
+      try {
+        closer.execute {
           try {
             connection.forceClose()
           } catch (_: Exception) {
           }
-          lock.withLock {
-            forcing.remove(connection)
-            if (connections.values.any { connection in it }) {
-              cancelled.add(connection)
-              if (releasedBefore > 0L) drop(releasedBefore)
-            }
-          }
+          markCancelled(connection)
         }
+      } catch (_: RejectedExecutionException) {
+        markCancelled(connection)
       }
-    } catch (_: RejectedExecutionException) {
-      lock.withLock {
-        for (connection in overstaying) {
-          forcing.remove(connection)
-          if (connections.values.any { connection in it }) {
-            cancelled.add(connection)
-          }
-        }
+    }
+  }
+
+  private fun markCancelled(connection: ForceClosable) {
+    lock.withLock {
+      forcing.remove(connection)
+      if (connections.values.any { connection in it }) {
+        cancelled.add(connection)
         if (releasedBefore > 0L) drop(releasedBefore)
       }
     }

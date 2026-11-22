@@ -10,15 +10,17 @@ import androidx.media3.exoplayer.ExoPlayer
 
 /**
  * Playback-thread bridge between `Player.Listener.onTracksChanged` / `TrackSelectionParameters` and the `@elv/playback`
- * track selection contract. Ignores transient `Tracks.EMPTY`, preserves Android `CaptioningManager` defaults on
- * `Default`, guards unmatched IDs, preserves active cues when re-selecting the already-active subtitle track, and
- * emits confirmed selections (#111).
+ * track selection contract. Ignores transient `Tracks.EMPTY`, gates Android `CaptioningManager` defaults on
+ * [captioningEnabled], guards unmatched IDs, preserves active cues when re-selecting the already-active subtitle track,
+ * and emits confirmed selections (#111, #438).
  */
 @OptIn(UnstableApi::class)
 internal class TrackSelectorBridge(
   private val isActivePlayer: (ExoPlayer) -> Boolean = { true },
   private val onTracks: (Map<String, Any?>) -> Unit,
   private val onClearCues: () -> Unit,
+  private val captioningEnabled: () -> Boolean = { false },
+  private val ffmpegSupportsAudio: (String?) -> Boolean = ::defaultFfmpegSupportsAudio,
 ) {
   private sealed interface SubChoice {
     data object Default : SubChoice
@@ -84,13 +86,18 @@ internal class TrackSelectorBridge(
       .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, subtitleChoice is SubChoice.Off)
       .setPreferredAudioLanguage(audioChoice?.language)
     when (val sub = subtitleChoice) {
-      SubChoice.Default -> builder.setPreferredTextLanguageAndRoleFlagsToCaptioningManagerSettings()
-      SubChoice.Off -> builder.setPreferredTextLanguage(null)
+      SubChoice.Default ->
+        if (captioningEnabled()) {
+          builder.setPreferredTextLanguageAndRoleFlagsToCaptioningManagerSettings()
+        } else {
+          builder.setPreferredTextLanguage(null).setPreferredTextRoleFlags(0)
+        }
+      SubChoice.Off -> builder.setPreferredTextLanguage(null).setPreferredTextRoleFlags(0)
       is SubChoice.Selected ->
         if (sub.choice.language != null) {
           builder.setPreferredTextLanguage(sub.choice.language)
         } else {
-          builder.setPreferredTextLanguageAndRoleFlagsToCaptioningManagerSettings()
+          builder.setPreferredTextLanguage(null).setPreferredTextRoleFlags(0)
         }
     }
     player.trackSelectionParameters = builder.build()
@@ -99,13 +106,16 @@ internal class TrackSelectorBridge(
   /** Selects audio track [id] in place without restarting playback; ignores unmatched IDs once tracks are loaded. */
   fun selectAudioTrack(player: ExoPlayer?, id: String) {
     val tracks = activeTracks(player)
-    val matched = findCandidateById(tracks, C.TRACK_TYPE_AUDIO, id)
+    val matched = findCandidateById(tracks, C.TRACK_TYPE_AUDIO, id, ffmpegSupportsAudio)
     if (!tracks.isEmpty && matched == null) return
     val prev = audioChoice?.takeIf { it.id == id }
     audioChoice = TrackChoice(
       id = id,
       language = matched?.info?.language ?: prev?.language,
       label = matched?.info?.label ?: prev?.label,
+      formatId = matched?.info?.formatId ?: prev?.formatId,
+      codec = matched?.info?.codec ?: prev?.codec,
+      channels = matched?.info?.channels ?: prev?.channels,
     )
     if (player != null && matched != null) {
       val builder = player.trackSelectionParameters.buildUpon()
@@ -130,13 +140,13 @@ internal class TrackSelectorBridge(
           .build()
       }
       if (!latestTracks.isEmpty) {
-        emitIfChanged(inspectMediaTracks(latestTracks, textDisabled = true))
+        emitIfChanged(inspectMediaTracks(latestTracks, textDisabled = true, ffmpegSupportsAudio = ffmpegSupportsAudio))
       }
       return
     }
 
     val tracks = activeTracks(player)
-    val matched = findCandidateById(tracks, C.TRACK_TYPE_TEXT, id)
+    val matched = findCandidateById(tracks, C.TRACK_TYPE_TEXT, id, ffmpegSupportsAudio)
     if (!tracks.isEmpty && matched == null) return
 
     val currentlyDisabled =
@@ -150,6 +160,9 @@ internal class TrackSelectorBridge(
         id = id,
         language = matched?.info?.language ?: prev?.language,
         label = matched?.info?.label ?: prev?.label,
+        formatId = matched?.info?.formatId ?: prev?.formatId,
+        codec = matched?.info?.codec ?: prev?.codec,
+        channels = matched?.info?.channels ?: prev?.channels,
       )
     )
     if (player != null && matched != null) {
@@ -173,9 +186,9 @@ internal class TrackSelectorBridge(
     var targetSubtitleId: String? = null
 
     audioChoice?.let { wanted ->
-      val target = resolveCandidate(tracks, C.TRACK_TYPE_AUDIO, wanted)
+      val target = resolveCandidate(tracks, C.TRACK_TYPE_AUDIO, wanted, ffmpegSupportsAudio)
       if (target != null) {
-        audioChoice = TrackChoice(target.info.id, target.info.language, target.info.label)
+        audioChoice = choiceOf(target.info)
         targetAudioId = target.info.id
         val currentOverride = params.overrides[target.group.mediaTrackGroup]?.trackIndices
         if (currentOverride != listOf(target.trackIndex) || params.disabledTrackTypes.contains(C.TRACK_TYPE_AUDIO)) {
@@ -197,9 +210,9 @@ internal class TrackSelectorBridge(
         }
       }
       is SubChoice.Selected -> {
-        val target = resolveCandidate(tracks, C.TRACK_TYPE_TEXT, wantedSub.choice)
+        val target = resolveCandidate(tracks, C.TRACK_TYPE_TEXT, wantedSub.choice, ffmpegSupportsAudio)
         if (target != null) {
-          subtitleChoice = SubChoice.Selected(TrackChoice(target.info.id, target.info.language, target.info.label))
+          subtitleChoice = SubChoice.Selected(choiceOf(target.info))
           targetSubtitleId = target.info.id
           val currentOverride = params.overrides[target.group.mediaTrackGroup]?.trackIndices
           if (currentOverride != listOf(target.trackIndex) || params.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) {
@@ -225,7 +238,7 @@ internal class TrackSelectorBridge(
     }
 
     val textDisabled = isTextEffectivelyDisabled(player)
-    val inspected = inspectMediaTracks(tracks, textDisabled = textDisabled)
+    val inspected = inspectMediaTracks(tracks, textDisabled = textDisabled, ffmpegSupportsAudio = ffmpegSupportsAudio)
     val snapshot = if (changedParams) {
       inspected.copy(
         selectedAudioId = targetAudioId ?: inspected.selectedAudioId,
@@ -242,8 +255,20 @@ internal class TrackSelectorBridge(
     val current = player.currentTracks
     if (current.isEmpty) return
     latestTracks = current
-    emitIfChanged(inspectMediaTracks(current, textDisabled = isTextEffectivelyDisabled(player)))
+    emitIfChanged(
+      inspectMediaTracks(current, textDisabled = isTextEffectivelyDisabled(player), ffmpegSupportsAudio = ffmpegSupportsAudio)
+    )
   }
+
+  private fun choiceOf(info: TrackInfoSnapshot): TrackChoice =
+    TrackChoice(
+      id = info.id,
+      language = info.language,
+      label = info.label,
+      formatId = info.formatId,
+      codec = info.codec,
+      channels = info.channels,
+    )
 
   private fun isTextEffectivelyDisabled(player: ExoPlayer): Boolean =
     subtitleChoice is SubChoice.Off ||

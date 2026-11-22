@@ -26,6 +26,9 @@ internal const val CONNECT_TIMEOUT_MS = 3_500L
  */
 internal const val READ_TIMEOUT_MS = 10_000L
 
+/** Explicit socket write timeout so stalled TLS/HTTP uploads never rely on an unbounded or implicit default (#438). */
+internal const val WRITE_TIMEOUT_MS = 10_000L
+
 /** Calls one engine's client runs at once, in all and per host: the gate, not OkHttp, bounds the real connections. */
 private const val MAX_REQUESTS = 64
 private const val MAX_REQUESTS_PER_HOST = 16
@@ -71,6 +74,7 @@ private val streamClient: OkHttpClient by lazy {
   OkHttpClient.Builder()
     .connectTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
     .readTimeout(READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+    .writeTimeout(WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
     .addNetworkInterceptor { chain ->
       val request = chain.request()
       val origin = request.tag(StreamOrigin::class.java)

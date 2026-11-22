@@ -107,6 +107,8 @@ class StreamHttpTest {
     assertSame(one.connectionPool, two.connectionPool)
     assertEquals(CONNECT_TIMEOUT_MS.toInt(), one.connectTimeoutMillis)
     assertEquals(READ_TIMEOUT_MS.toInt(), one.readTimeoutMillis)
+    assertEquals(WRITE_TIMEOUT_MS.toInt(), one.writeTimeoutMillis)
+    assertEquals(10_000L, WRITE_TIMEOUT_MS)
     assertTrue(one.followSslRedirects)
   }
 
