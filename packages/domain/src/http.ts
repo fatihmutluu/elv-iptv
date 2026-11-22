@@ -1,10 +1,5 @@
 import { isAsyncIterable, openAsyncIterator } from './async-iterable';
-import {
-  hasCredentialHeaders,
-  resolveRedirectUrl,
-  sanitizeHeaders,
-  scopeCredentialHeaders,
-} from './headers';
+import { resolveRedirectUrl, sanitizeHeaders, scopeCredentialHeaders } from './headers';
 import { type ElvError, elvError, err, ok, type Result } from './result';
 
 /** A response whose body streams in chunks. */
@@ -12,6 +7,8 @@ export interface HttpResponse {
   status: number;
   headers: Readonly<Record<string, string>>;
   body: AsyncIterable<Uint8Array>;
+  /** Resolved final URL after following any HTTP redirects (defaults to the request URL when none occurred). */
+  finalUrl?: string;
 }
 
 /** Per-request options. */
@@ -22,6 +19,8 @@ export interface HttpRequestOptions {
   timeoutMs?: number;
   /** Longest silence between body chunks; the body then fails with `network` / `timeout`. */
   idleTimeoutMs?: number;
+  /** Redirect handling: default `'follow'` traverses hops manually with cross-origin credential stripping; `'manual'` stops at the first 3xx. */
+  redirect?: 'follow' | 'manual';
 }
 
 /**
@@ -296,11 +295,13 @@ export function createFetchHttpClient(
       try {
         const sanitizedHeaders =
           options?.headers !== undefined ? sanitizeHeaders(options.headers) : undefined;
-        const manualRedirects = hasCredentialHeaders(sanitizedHeaders);
+        const followRedirects = options?.redirect !== 'manual';
         const fetchOnce = (targetUrl: string, reqHeaders: Record<string, string> | undefined) => {
-          const init: Parameters<FetchLike>[1] = { signal: controller.signal };
+          const init: Parameters<FetchLike>[1] = {
+            signal: controller.signal,
+            redirect: 'manual',
+          };
           if (reqHeaders !== undefined) init.headers = { ...reqHeaders };
-          if (manualRedirects) init.redirect = 'manual';
           const attempt = () => {
             let settledBeforeAbort = false;
             const inflight = fetchImpl(targetUrl, init);
@@ -331,14 +332,17 @@ export function createFetchHttpClient(
         let hops = 0;
         let res = await fetchOnce(currentUrl, activeHeaders);
         let headers = collectHeaders(res.headers);
-        while (manualRedirects && REDIRECT_STATUSES.has(res.status)) {
+        while (followRedirects && REDIRECT_STATUSES.has(res.status)) {
           const location = headers.location;
           if (location === undefined) break;
           await discardBody(res.body);
           if (hops >= MAX_REDIRECT_HOPS) return err(elvError('network', 'too-many-redirects'));
           const nextUrl = resolveRedirectUrl(currentUrl, location);
           if (nextUrl === undefined) return err(httpStatusError(res.status));
-          activeHeaders = scopeCredentialHeaders(activeHeaders, url, nextUrl);
+          activeHeaders =
+            activeHeaders === undefined
+              ? undefined
+              : scopeCredentialHeaders(activeHeaders, url, nextUrl);
           currentUrl = nextUrl;
           hops += 1;
           res = await fetchOnce(currentUrl, activeHeaders);
@@ -354,6 +358,7 @@ export function createFetchHttpClient(
           status: res.status,
           headers,
           body: streamBody(res.body, controller, idleMs, dispose),
+          finalUrl: currentUrl,
         });
       } catch {
         if (timedOut) return err(elvError('network', 'timeout'));

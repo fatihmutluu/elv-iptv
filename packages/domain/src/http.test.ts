@@ -500,21 +500,24 @@ describe('createFetchHttpClient', () => {
     }
   });
 
-  it('sanitizes outbound headers and keeps single-request behavior when no credential headers are set', async () => {
+  it('sanitizes outbound headers, sets manual redirect mode, and returns finalUrl', async () => {
     let seen: Parameters<FetchLike>[1] | undefined;
     const client = createFetchHttpClient(async (_u, init) => {
       seen = init;
       return { status: 200, headers: headers({}), body: null };
     });
-    await client.get('https://origin.example/list.m3u', {
-      headers: {
-        'User-Agent': 'ELV/1.0\r\nInjected: yes',
-        'Invalid Name': 'drop-me',
-        'X-Empty': '\r\n\0',
-      },
-    });
+    const res = okOf(
+      await client.get('https://origin.example/list.m3u', {
+        headers: {
+          'User-Agent': 'ELV/1.0\r\nInjected: yes',
+          'Invalid Name': 'drop-me',
+          'X-Empty': '\r\n\0',
+        },
+      }),
+    );
     expect(seen?.headers).toEqual({ 'User-Agent': 'ELV/1.0Injected: yes' });
-    expect(seen?.redirect).toBeUndefined();
+    expect(seen?.redirect).toBe('manual');
+    expect(res.finalUrl).toBe('https://origin.example/list.m3u');
   });
 
   it('manually follows redirects with credential headers, preserving them same-origin and stripping them cross-origin', async () => {
@@ -676,5 +679,64 @@ describe('createFetchHttpClient', () => {
         headers: { Cookie: 'a=1' },
       }),
     ).toEqual({ ok: false, error: { category: 'network', code: 'http-302' } });
+  });
+
+  it('manually follows URL-credential redirects without credential headers, discards intermediate bodies, rejects non-HTTP(S) schemes, and reports finalUrl', async () => {
+    const calls: Array<{ url: string; init: Parameters<FetchLike>[1] }> = [];
+    const hopBody = trackedReader(['redirecting']);
+    const client = createFetchHttpClient(async (u, init) => {
+      calls.push({ url: u, init });
+      if (calls.length === 1) {
+        return {
+          status: 302,
+          headers: headers({ Location: 'https://cdn.other.example/lists/channel.m3u' }),
+          body: hopBody.body,
+        };
+      }
+      if (calls.length === 2) {
+        return {
+          status: 301,
+          headers: headers({ Location: 'v2/playlist.m3u' }),
+          body: null,
+        };
+      }
+      return { status: 200, headers: headers({}), body: readerBody([enc('#EXTM3U')]).body };
+    });
+
+    const res = okOf(
+      await client.get('https://user:pass@origin.example/get.php?token=secret&password=pw', {
+        headers: { 'User-Agent': 'ELV/1.0' },
+      }),
+    );
+    expect(res.finalUrl).toBe('https://cdn.other.example/lists/v2/playlist.m3u');
+    expect(await collect(res.body)).toEqual(['#EXTM3U']);
+    expect(calls.map((c) => c.init.redirect)).toEqual(['manual', 'manual', 'manual']);
+    expect(calls[1]?.url).toBe('https://cdn.other.example/lists/channel.m3u');
+    expect(calls[1]?.init.headers).toEqual({ 'User-Agent': 'ELV/1.0' });
+    expect(hopBody.state).toEqual({ cancelled: 1, released: 1 });
+
+    // Rejects non-HTTP(S) redirect target even with no credential headers
+    const fileHop = trackedReader(['bad']);
+    const fileClient = createFetchHttpClient(async () => ({
+      status: 302,
+      headers: headers({ Location: 'file:///etc/passwd' }),
+      body: fileHop.body,
+    }));
+    expect(await fileClient.get('https://origin.example/get.php?token=secret')).toEqual({
+      ok: false,
+      error: { category: 'network', code: 'http-302' },
+    });
+    expect(fileHop.state).toEqual({ cancelled: 1, released: 1 });
+
+    // Respects explicit redirect: 'manual' by not following hops
+    const manualClient = createFetchHttpClient(async () => ({
+      status: 302,
+      headers: headers({ Location: 'https://origin.example/next' }),
+      body: null,
+    }));
+    expect(await manualClient.get('https://origin.example/a', { redirect: 'manual' })).toEqual({
+      ok: false,
+      error: { category: 'network', code: 'http-302' },
+    });
   });
 });

@@ -4,6 +4,7 @@ import {
   err,
   ok,
   type Result,
+  type Scheduler,
   type SecretStore,
   type SqlDriver,
   type TransportSettings,
@@ -91,19 +92,62 @@ export interface AddSourceDeps {
   newId: () => string;
 }
 
+/** Staging tables populated during catalog import before atomic commit (`#418`). */
+export const STAGED_CATALOG_TABLES = [
+  'categories_next',
+  'live_next',
+  'movies_next',
+  'series_next',
+  'episodes_next',
+  'placements_next',
+] as const;
+
+/** Default maximum rows deleted per transaction during budgeted source removal (`#138`). */
+export const DEFAULT_DELETE_CHUNK_SIZE = 2_000;
+
+interface BulkDeleteSpec {
+  readonly table: string;
+  readonly sql: string;
+  readonly repeatId: boolean;
+}
+
+const ROWID_DELETE_TABLES = ['import_runs', 'live', 'movies', 'series', 'episodes'] as const;
+
+const WITHOUT_ROWID_DELETE_SPECS: readonly (readonly [string, string])[] = [
+  ['categories', '(kind, provider_id)'],
+  ['categories_next', '(kind, provider_id)'],
+  ['live_next', 'key'],
+  ['movies_next', 'key'],
+  ['series_next', 'key'],
+  ['episodes_next', 'key'],
+  ['placements', '(kind, category_id, item_key)'],
+  ['placements_next', '(kind, category_id, item_key)'],
+  ['guide_channels', 'guide_id'],
+  ['channel_guide', 'channel_key'],
+  ['programmes', '(guide_id, start)'],
+  ['programmes_next', '(guide_id, start)'],
+];
+
+const BULK_DELETE_SPECS: readonly BulkDeleteSpec[] = [
+  ...ROWID_DELETE_TABLES.map((table) => ({
+    table,
+    sql: `DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE source_id = ? LIMIT ?)`,
+    repeatId: false,
+  })),
+  ...WITHOUT_ROWID_DELETE_SPECS.map(([table, cols]) => {
+    const inner = cols.startsWith('(') ? cols.slice(1, -1) : cols;
+    return {
+      table,
+      sql: `DELETE FROM ${table} WHERE source_id = ? AND ${cols} IN (SELECT ${inner} FROM ${table} WHERE source_id = ? LIMIT ?)`,
+      repeatId: true,
+    };
+  }),
+];
+
 /** Every table with a `source_id` column; {@link removeSource} clears them all (no foreign keys). */
 export const TABLES_BY_SOURCE: readonly string[] = [
-  'import_runs',
-  'categories',
-  'live',
-  'movies',
-  'series',
-  'episodes',
-  'placements',
-  'guide_channels',
-  'channel_guide',
-  'programmes',
-  'programmes_next',
+  ...ROWID_DELETE_TABLES,
+  ...WITHOUT_ROWID_DELETE_SPECS.map(([table]) => table),
   'watch_progress',
   'favorites',
 ];
@@ -228,7 +272,7 @@ export async function addM3uSource(
   ]);
 }
 
-/** Reads one source; `undefined` when the id is unknown. */
+/** Reads one active source; `undefined` when the id is unknown or marked `deleting = 1`. */
 export async function getSource(db: SqlDriver, id: string): Promise<SourceRecord | undefined> {
   const rows = await db.all<{
     id: string;
@@ -236,7 +280,10 @@ export async function getSource(db: SqlDriver, id: string): Promise<SourceRecord
     name: string;
     created_at: number;
     settings_json: string;
-  }>('SELECT id, kind, name, created_at, settings_json FROM sources WHERE id = ?', [id]);
+  }>(
+    'SELECT id, kind, name, created_at, settings_json FROM sources WHERE id = ? AND deleting = 0',
+    [id],
+  );
   const row = rows[0];
   if (row === undefined) return undefined;
   return {
@@ -267,6 +314,19 @@ export async function removeSecrets(id: string, secrets: SecretStore): Promise<R
     : ok(undefined);
 }
 
+/** Deletes staged catalog rows from all 6 `*_next` tables (for `sourceId`, or all rows when omitted). */
+export async function purgeStagedCatalog(db: SqlDriver, sourceId?: string): Promise<number> {
+  let purged = 0;
+  for (const table of STAGED_CATALOG_TABLES) {
+    const r =
+      sourceId === undefined
+        ? await db.run(`DELETE FROM ${table}`)
+        : await db.run(`DELETE FROM ${table} WHERE source_id = ?`, [sourceId]);
+    purged += r.changes;
+  }
+  return purged;
+}
+
 /** Deletes every row of a source in the tables of {@link TABLES_BY_SOURCE} except `keep` (never the `sources` row). */
 export async function purgeSourceRows(
   tx: SqlDriver,
@@ -279,13 +339,40 @@ export async function purgeSourceRows(
 }
 
 /**
- * Deletes a source and every catalog and guide row that belongs to it, then its secrets. While an import of the
- * source is running nothing is deleted and the result is `storage/import-in-progress`. The rows are gone even when
- * the result is `storage/secret-delete-failed`; the caller can retry {@link removeSecrets}.
+ * Purges catalog, guide, staging, and run rows of a `deleting = 1` source in bounded chunked transactions,
+ * then deletes `watch_progress`, `favorites`, and the `sources` row atomically last (`#138`).
+ */
+export async function finishDeletingSource(
+  db: SqlDriver,
+  id: string,
+  opts?: { chunkSize?: number; scheduler?: Scheduler },
+): Promise<void> {
+  const chunkSize = Math.max(1, Math.floor(opts?.chunkSize ?? DEFAULT_DELETE_CHUNK_SIZE));
+  for (const spec of BULK_DELETE_SPECS) {
+    const params = spec.repeatId ? [id, id, chunkSize] : [id, chunkSize];
+    for (;;) {
+      const { changes } = await db.transaction((tx) => tx.run(spec.sql, params));
+      if (changes < chunkSize) break;
+      await opts?.scheduler?.yieldNow();
+    }
+  }
+  await db.transaction(async (tx) => {
+    await tx.run('DELETE FROM watch_progress WHERE source_id = ?', [id]);
+    await tx.run('DELETE FROM favorites WHERE source_id = ?', [id]);
+    await tx.run('DELETE FROM sources WHERE id = ?', [id]);
+  });
+}
+
+/**
+ * Marks `sources.deleting = 1` immediately (refusing with `storage/import-in-progress` while a run is active),
+ * purges bulk catalog/EPG/staging tables in bounded chunks, atomically commits user-state and `sources` row
+ * deletion last, then deletes secrets. If secret deletion fails, rows are already gone and the caller can retry
+ * {@link removeSecrets}.
  */
 export async function removeSource(
   id: string,
-  deps: { db: SqlDriver; secrets: SecretStore },
+  deps: { db: SqlDriver; secrets: SecretStore; scheduler?: Scheduler },
+  opts?: { chunkSize?: number },
 ): Promise<Result<void>> {
   const busy = await deps.db.transaction(async (tx) => {
     const running = await tx.all(
@@ -293,10 +380,13 @@ export async function removeSource(
       [id],
     );
     if (running.length > 0) return true;
-    await purgeSourceRows(tx, id);
-    await tx.run('DELETE FROM sources WHERE id = ?', [id]);
+    await tx.run('UPDATE sources SET deleting = 1 WHERE id = ?', [id]);
     return false;
   });
   if (busy) return err(elvError('storage', 'import-in-progress'));
+  await finishDeletingSource(deps.db, id, {
+    ...(opts?.chunkSize === undefined ? {} : { chunkSize: opts.chunkSize }),
+    ...(deps.scheduler === undefined ? {} : { scheduler: deps.scheduler }),
+  });
   return removeSecrets(id, deps.secrets);
 }

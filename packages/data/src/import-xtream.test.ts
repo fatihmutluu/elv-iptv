@@ -133,9 +133,19 @@ describe('xtream import', () => {
       error_category: 'network',
       error_code: 'http-500',
     });
-    const newRun = (await rows(e, 'SELECT id FROM import_runs ORDER BY id'))[1]?.id;
+    const firstRun = (await rows(e, 'SELECT id FROM import_runs ORDER BY id'))[0]?.id;
     const liveRuns = await rows(e, 'SELECT DISTINCT run_id FROM live');
-    expect(liveRuns).toEqual([{ run_id: newRun }]);
+    expect(liveRuns).toEqual([{ run_id: firstRun }]);
+    for (const next of [
+      'categories_next',
+      'live_next',
+      'movies_next',
+      'series_next',
+      'episodes_next',
+      'placements_next',
+    ]) {
+      expect(await count(e.db, next)).toBe(0);
+    }
   });
 
   it('keeps the previous catalog when cancelled', async () => {
@@ -242,9 +252,13 @@ describe('xtream import', () => {
     expectErr(await importCatalog('nope', e.deps), 'storage', 'source-not-found');
     await e.secrets.delete('source.s1.xtream');
     expectErr(await run(e), 'storage', 'secret-missing');
-    await e.db.run("INSERT INTO sources VALUES ('m', 'm3u', 'M', 1, '{}')");
+    await e.db.run(
+      "INSERT INTO sources (id, kind, name, created_at, settings_json) VALUES ('m', 'm3u', 'M', 1, '{}')",
+    );
     expectErr(await importCatalog('m', e.deps), 'storage', 'secret-missing');
-    await e.db.run("INSERT INTO sources VALUES ('o', 'other', 'O', 1, '{}')");
+    await e.db.run(
+      "INSERT INTO sources (id, kind, name, created_at, settings_json) VALUES ('o', 'other', 'O', 1, '{}')",
+    );
     expectErr(await importCatalog('o', e.deps), 'source-format', 'unsupported-source');
   });
 
@@ -345,6 +359,49 @@ describe('xtream import', () => {
     expect(rawSettings).not.toContain('panel.example');
     expect(rawSettings).not.toContain('demo-user');
     expect(rawSettings).not.toContain(['pw', 'Xyz', '19'].join(''));
+  });
+
+  it('preserves is_hidden across Xtream re-imports and leaves live/FTS5 untouched on mid-run abort (#418)', async () => {
+    const e = await setup(sampleCatalog());
+    expect((await run(e)).ok).toBe(true);
+    await e.db.run("UPDATE live SET is_hidden = 1 WHERE key = 'x:s1:live:100'");
+    await e.db.run("UPDATE movies SET is_hidden = 1 WHERE key = 'x:s1:movie:200'");
+    await e.db.run("UPDATE categories SET is_hidden = 1 WHERE provider_id = '1' AND kind = 'live'");
+    await e.db.run("UPDATE placements SET is_hidden = 1 WHERE item_key = 'x:s1:live:100'");
+
+    expect((await run(e)).ok).toBe(true);
+    expect(await rows(e, "SELECT is_hidden FROM live WHERE key = 'x:s1:live:100'")).toEqual([
+      { is_hidden: 1 },
+    ]);
+    expect(await rows(e, "SELECT is_hidden FROM movies WHERE key = 'x:s1:movie:200'")).toEqual([
+      { is_hidden: 1 },
+    ]);
+    expect(
+      await rows(e, "SELECT is_hidden FROM categories WHERE provider_id = '1' AND kind = 'live'"),
+    ).toEqual([{ is_hidden: 1 }]);
+    expect(
+      await rows(e, "SELECT is_hidden FROM placements WHERE item_key = 'x:s1:live:100'"),
+    ).toEqual([{ is_hidden: 1 }]);
+
+    const liveSnap = await rows(e, 'SELECT * FROM live ORDER BY id');
+    e.panel.state.data = {
+      ...sampleCatalog(),
+      live: [{ num: 1, name: 'ShouldNotLeak', stream_id: 999, category_id: '1' }],
+    };
+    const ctl = new AbortController();
+    const aborted = await run(e, {
+      signal: ctl.signal,
+      onProgress: (p: ImportProgress) => {
+        if (p.phase === 'live') ctl.abort();
+      },
+    });
+    expectErr(aborted, 'network', 'aborted');
+    expect(await rows(e, 'SELECT * FROM live ORDER BY id')).toEqual(liveSnap);
+    expect(
+      await rows(e, "SELECT rowid FROM live_fts WHERE live_fts MATCH 'shouldnotleak'"),
+    ).toEqual([]);
+    expect(await count(e.db, 'live_next')).toBe(0);
+    expect(await count(e.db, 'categories_next')).toBe(0);
   });
 });
 

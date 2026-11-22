@@ -90,3 +90,46 @@ export function xtreamKey(
 export function m3uKey(sourceId: string, url: string, name: string): string {
   return `m:${sourceId}:${normalizeStreamUrl(url)}|${name}`;
 }
+
+/** Input for {@link m3uStableKey}. */
+export interface M3uStableKeyInput {
+  readonly sourceId: string;
+  readonly kind: ContentKind;
+  readonly tvgId?: string | null | undefined;
+  readonly name: string;
+  readonly group?: string | null | undefined;
+  /** 1-based duplicate index when multiple entries in the same source/kind share the same base key. */
+  readonly occurrence?: number | undefined;
+}
+
+function foldM3uKeyPart(text: string): string {
+  return text
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'ı')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/\p{M}+/gu, '')
+    .replace(/ß/g, 'ss')
+    .replace(/ı/g, 'i')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+/**
+ * Deterministic, URL-free catalog key for an M3U entry that survives provider URL, host, and token
+ * rotations. Uses normalized `tvgId` when non-empty, otherwise Turkish-safe folded `name` + `group`.
+ * Appends `#<occurrence>` when `occurrence > 1` so duplicate entries in the same source/kind remain
+ * distinct. Keeps the `m:<sourceId>:` prefix for compatibility with `sourceOfKey()`.
+ */
+export function m3uStableKey(input: M3uStableKeyInput): string {
+  const normTvgId = input.tvgId?.trim().toLowerCase() ?? '';
+  const base =
+    normTvgId.length > 0
+      ? `m:${input.sourceId}:${input.kind}:t:${normTvgId}`
+      : `m:${input.sourceId}:${input.kind}:n:${foldM3uKeyPart(input.name)}|${foldM3uKeyPart(input.group ?? '')}`;
+  const occ =
+    input.occurrence !== undefined && Number.isFinite(input.occurrence)
+      ? Math.floor(input.occurrence)
+      : 1;
+  return occ > 1 ? `${base}#${occ}` : base;
+}

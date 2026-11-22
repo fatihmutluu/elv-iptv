@@ -14,10 +14,13 @@ async function id(r: Promise<Result<number>>): Promise<number> {
 async function fresh() {
   const t = testDb();
   await openCatalog(t.db);
-  await t.db.batch('INSERT INTO sources VALUES (?, ?, ?, ?, ?)', [
-    ['s1', 'm3u', 'One', 1, '{}'],
-    ['s2', 'm3u', 'Two', 1, '{}'],
-  ]);
+  await t.db.batch(
+    'INSERT INTO sources (id, kind, name, created_at, settings_json) VALUES (?, ?, ?, ?, ?)',
+    [
+      ['s1', 'm3u', 'One', 1, '{}'],
+      ['s2', 'm3u', 'Two', 1, '{}'],
+    ],
+  );
   return t;
 }
 
@@ -153,7 +156,12 @@ describe('runs', () => {
     );
 
     const reaped = await reapOrphanedRuns(db, 999);
-    expect(reaped).toEqual({ reapedRuns: 2, purgedProgrammes: 2 });
+    expect(reaped).toEqual({
+      reapedRuns: 2,
+      purgedProgrammes: 2,
+      purgedStaged: 0,
+      completedDeletes: 0,
+    });
 
     const rows = await db.all<Record<string, unknown>>('SELECT * FROM import_runs ORDER BY id');
     expect(rows.find((r) => r.id === runningCat)).toMatchObject({
@@ -189,9 +197,70 @@ describe('runs', () => {
     expect(await db.all('SELECT * FROM programmes_next')).toEqual([]);
 
     // Reaping again is a clean no-op, and new runs start immediately.
-    expect(await reapOrphanedRuns(db, 1000)).toEqual({ reapedRuns: 0, purgedProgrammes: 0 });
+    expect(await reapOrphanedRuns(db, 1000)).toEqual({
+      reapedRuns: 0,
+      purgedProgrammes: 0,
+      purgedStaged: 0,
+      completedDeletes: 0,
+    });
     await id(startRun(db, 's1', 'catalog', 1001));
     await id(startRun(db, 's1', 'guide', 1002));
+  });
+
+  it('reapOrphanedRuns purges all 6 catalog *_next staging tables and resumes deleting = 1 sources (#418, #138)', async () => {
+    const { db } = await fresh();
+    await db.run(
+      "INSERT INTO categories_next (source_id, kind, provider_id, name, name_fold, position, run_id) VALUES ('s1', 'live', 'c1', 'Cat', 'cat', 0, 1)",
+    );
+    await db.run(
+      "INSERT INTO live_next (source_id, key, name, name_fold, run_id) VALUES ('s1', 'k1', 'Ch', 'ch', 1)",
+    );
+    await db.run(
+      "INSERT INTO movies_next (source_id, key, name, name_fold, run_id) VALUES ('s1', 'k2', 'M', 'm', 1)",
+    );
+    await db.run(
+      "INSERT INTO series_next (source_id, key, name, name_fold, run_id) VALUES ('s1', 'k3', 'S', 's', 1)",
+    );
+    await db.run(
+      "INSERT INTO episodes_next (source_id, key, series_key, title, run_id) VALUES ('s1', 'k4', 'k3', 'E', 1)",
+    );
+    await db.run(
+      "INSERT INTO placements_next (source_id, kind, item_key, category_id, position, run_id) VALUES ('s1', 'live', 'k1', 'c1', 0, 1)",
+    );
+
+    // Mark s2 as mid-delete crash with leftover catalog & user-state rows.
+    await db.run("UPDATE sources SET deleting = 1 WHERE id = 's2'");
+    await db.run(
+      "INSERT INTO live (source_id, key, name, name_fold, run_id) VALUES ('s2', 'k2', 'Ch2', 'ch2', 1)",
+    );
+    await db.run(
+      "INSERT INTO favorites (profile_id, source_id, item_key, kind, title, added_at) VALUES ('default', 's2', 'k2', 'live', 'Ch2', 1)",
+    );
+    expect(await startRun(db, 's2', 'catalog', 10)).toEqual({
+      ok: false,
+      error: { category: 'storage', code: 'source-not-found' },
+    });
+
+    const res = await reapOrphanedRuns(db, 2000);
+    expect(res).toEqual({
+      reapedRuns: 0,
+      purgedProgrammes: 0,
+      purgedStaged: 6,
+      completedDeletes: 1,
+    });
+    for (const t of [
+      'categories_next',
+      'live_next',
+      'movies_next',
+      'series_next',
+      'episodes_next',
+      'placements_next',
+    ]) {
+      expect(await db.all(`SELECT * FROM ${t}`)).toEqual([]);
+    }
+    expect(await db.all('SELECT id FROM sources ORDER BY id')).toEqual([{ id: 's1' }]);
+    expect(await db.all("SELECT * FROM live WHERE source_id = 's2'")).toEqual([]);
+    expect(await db.all("SELECT * FROM favorites WHERE source_id = 's2'")).toEqual([]);
   });
 
   it('uses a modest 200-row DEFAULT_BATCH_SIZE for WAL write transactions', () => {

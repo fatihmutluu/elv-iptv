@@ -1,8 +1,24 @@
 import { elvError, err, ok, type Result, type SqlDriver } from '@elv/domain';
 import { resolveSafeStorageLogo } from './queries';
+import {
+  clampLimit,
+  clampMs,
+  DEFAULT_PROFILE_ID,
+  type FavoriteRow,
+  hasValidMeta,
+  lookupCatalogItemForWatched,
+  mapFavoriteRow,
+  mapProgressRow,
+  normalizeProfileId,
+  optFloat,
+  optInt,
+  type RawFavoriteRow,
+  type RawProgressRow,
+  type UserItemKind,
+  type WatchProgressRow,
+} from './user-state-helpers';
 
-/** Default profile identifier used before multi-profile selection is configured. */
-export const DEFAULT_PROFILE_ID = 'default';
+export { DEFAULT_PROFILE_ID, type FavoriteRow, type UserItemKind, type WatchProgressRow };
 
 /** Fraction of duration watched at or above which an item is considered completed. */
 export const WATCHED_THRESHOLD_RATIO = 0.9;
@@ -13,31 +29,8 @@ export const MIN_RESUME_POSITION_MS = 10_000;
 /** Smart rewind offset (ms) applied when resuming an in-progress item. */
 export const SMART_RESUME_REWIND_MS = 5_000;
 
-const MAX_LIST_LIMIT = 100;
 const MAX_PROGRESS_KEYS = 200;
 const MAX_FAVORITE_KEYS = 2_000;
-const USER_ITEM_KINDS = new Set<UserItemKind>(['live', 'movie', 'series', 'episode']);
-
-/** Content kind stored in `watch_progress` and `favorites`. */
-export type UserItemKind = 'live' | 'movie' | 'series' | 'episode';
-
-/** One row of the `watch_progress` table. */
-export interface WatchProgressRow {
-  profileId: string;
-  sourceId: string;
-  itemKey: string;
-  kind: UserItemKind;
-  title: string;
-  subtitle: string | null;
-  logo: string | null;
-  seriesKey: string | null;
-  season: number | null;
-  episode: number | null;
-  positionMs: number;
-  durationMs: number;
-  watched: boolean;
-  updatedAt: number;
-}
 
 /** Input for {@link saveWatchProgress}. */
 export interface SaveProgressInput {
@@ -56,19 +49,6 @@ export interface SaveProgressInput {
   watched?: boolean;
 }
 
-/** One row of the `favorites` table. */
-export interface FavoriteRow {
-  profileId: string;
-  sourceId: string;
-  itemKey: string;
-  kind: UserItemKind;
-  title: string;
-  logo: string | null;
-  year: number | null;
-  rating: number | null;
-  addedAt: number;
-}
-
 /** Input for {@link toggleFavorite}. */
 export interface ToggleFavoriteInput {
   profileId?: string;
@@ -79,35 +59,6 @@ export interface ToggleFavoriteInput {
   logo?: string | null;
   year?: number | null;
   rating?: number | null;
-}
-
-interface RawProgressRow {
-  profile_id: string;
-  source_id: string;
-  item_key: string;
-  kind: UserItemKind;
-  title: string;
-  subtitle: string | null;
-  logo: string | null;
-  series_key: string | null;
-  season: number | null;
-  episode: number | null;
-  position_ms: number;
-  duration_ms: number;
-  watched: number;
-  updated_at: number;
-}
-
-interface RawFavoriteRow {
-  profile_id: string;
-  source_id: string;
-  item_key: string;
-  kind: UserItemKind;
-  title: string;
-  logo: string | null;
-  year: number | null;
-  rating: number | null;
-  added_at: number;
 }
 
 const PROGRESS_COLS =
@@ -124,61 +75,15 @@ ON CONFLICT(profile_id, item_key) DO UPDATE SET
   source_id = excluded.source_id, kind = excluded.kind, title = excluded.title,
   subtitle = excluded.subtitle, logo = excluded.logo, series_key = excluded.series_key,
   season = excluded.season, episode = excluded.episode, position_ms = excluded.position_ms,
-  duration_ms = excluded.duration_ms, watched = excluded.watched, updated_at = excluded.updated_at`;
+  duration_ms = excluded.duration_ms, watched = MAX(watch_progress.watched, excluded.watched),
+  updated_at = excluded.updated_at`;
 
-const normalizeProfileId = (profileId?: string): string => {
-  const trimmed = profileId?.trim();
-  return trimmed && trimmed.length > 0 ? trimmed : DEFAULT_PROFILE_ID;
-};
-const clampMs = (v: number): number => (Number.isFinite(v) ? Math.max(0, Math.round(v)) : 0);
-const clampLimit = (limit: number | undefined, fallback: number): number => {
-  const n = limit === undefined || !Number.isFinite(limit) ? fallback : Math.floor(limit);
-  return Math.min(MAX_LIST_LIMIT, Math.max(0, n));
-};
-const optInt = (v: number | null | undefined): number | null =>
-  v !== undefined && v !== null && Number.isFinite(v) ? Math.trunc(v) : null;
-const optFloat = (v: number | null | undefined): number | null =>
-  v !== undefined && v !== null && Number.isFinite(v) ? v : null;
-
-const mapProgressRow = (r: RawProgressRow): WatchProgressRow => ({
-  profileId: r.profile_id,
-  sourceId: r.source_id,
-  itemKey: r.item_key,
-  kind: r.kind,
-  title: r.title,
-  subtitle: r.subtitle,
-  logo: r.logo,
-  seriesKey: r.series_key,
-  season: r.season,
-  episode: r.episode,
-  positionMs: r.position_ms,
-  durationMs: r.duration_ms,
-  watched: r.watched !== 0,
-  updatedAt: r.updated_at,
-});
-
-const mapFavoriteRow = (r: RawFavoriteRow): FavoriteRow => ({
-  profileId: r.profile_id,
-  sourceId: r.source_id,
-  itemKey: r.item_key,
-  kind: r.kind,
-  title: r.title,
-  logo: r.logo,
-  year: r.year,
-  rating: r.rating,
-  addedAt: r.added_at,
-});
-
-const hasValidMeta = (input: {
-  sourceId: string;
-  itemKey: string;
-  title: string;
-  kind: UserItemKind;
-}): boolean =>
-  input.sourceId.trim() !== '' &&
-  input.itemKey.trim() !== '' &&
-  input.title.trim() !== '' &&
-  USER_ITEM_KINDS.has(input.kind);
+const INSERT_WATCHED_SEED = `INSERT INTO watch_progress (
+  profile_id, source_id, item_key, kind, title, subtitle, logo,
+  series_key, season, episode, position_ms, duration_ms, watched, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 1, ?)
+ON CONFLICT(profile_id, item_key) DO UPDATE SET
+  watched = 1, updated_at = excluded.updated_at`;
 
 /** Returns `true` when playback has reached or passed {@link WATCHED_THRESHOLD_RATIO}. */
 export function isCompletedProgress(positionMs: number, durationMs: number): boolean {
@@ -199,7 +104,11 @@ export function computeResumePositionMs(
   return Math.max(0, Math.round(row.positionMs) - SMART_RESUME_REWIND_MS);
 }
 
-/** Upserts a playback progress snapshot for `(profileId, itemKey)`. */
+/**
+ * Upserts a playback progress snapshot for `(profileId, itemKey)`. Keeps `watched` monotonic
+ * (`MAX(watch_progress.watched, excluded.watched)`) so rewatching an already-watched item never
+ * silently clears `watched`; returns the actual persisted `watched` state.
+ */
 export async function saveWatchProgress(
   db: SqlDriver,
   input: SaveProgressInput,
@@ -240,12 +149,23 @@ export async function saveWatchProgress(
     row.watched ? 1 : 0,
     row.updatedAt,
   ]);
+  if (!row.watched) {
+    const persisted = await db.all<{ watched: number }>(
+      'SELECT watched FROM watch_progress WHERE profile_id = ? AND item_key = ? LIMIT 1',
+      [row.profileId, row.itemKey],
+    );
+    if (persisted[0]?.watched !== 0 && persisted[0] !== undefined) {
+      row.watched = true;
+    }
+  }
   return ok(row);
 }
 
 /**
- * Explicitly marks an existing watch progress row watched or unwatched. Marking unwatched resets
- * `position_ms` to `0`. Safe no-op if no row exists for `(profileId, itemKey)`.
+ * Explicitly marks a catalog item watched or unwatched. Updates an existing progress row first;
+ * when none exists and `watched` is `true`, hydrates catalog metadata (`movies`, `series`,
+ * `episodes`, `live`) and inserts a watched row with `position_ms = 0, duration_ms = 0`.
+ * Marking unwatched resets `position_ms` to `0` and is a safe no-op when absent.
  */
 export async function setItemWatched(
   db: SqlDriver,
@@ -254,10 +174,30 @@ export async function setItemWatched(
   clock: () => number = Date.now,
   profileId: string = DEFAULT_PROFILE_ID,
 ): Promise<Result<void>> {
+  const normalizedProfile = normalizeProfileId(profileId);
+  const updatedAt = Math.round(clock());
   const sql = watched
     ? 'UPDATE watch_progress SET watched = 1, updated_at = ? WHERE profile_id = ? AND item_key = ?'
     : 'UPDATE watch_progress SET watched = 0, position_ms = 0, updated_at = ? WHERE profile_id = ? AND item_key = ?';
-  await db.run(sql, [Math.round(clock()), normalizeProfileId(profileId), itemKey]);
+  const result = await db.run(sql, [updatedAt, normalizedProfile, itemKey]);
+  if (result.changes === 0 && watched) {
+    const seed = await lookupCatalogItemForWatched(db, itemKey);
+    if (seed !== null) {
+      await db.run(INSERT_WATCHED_SEED, [
+        normalizedProfile,
+        seed.sourceId,
+        itemKey,
+        seed.kind,
+        seed.title,
+        seed.subtitle,
+        seed.logo,
+        seed.seriesKey,
+        seed.season,
+        seed.episode,
+        updatedAt,
+      ]);
+    }
+  }
   return ok(undefined);
 }
 
@@ -275,7 +215,10 @@ export async function getWatchProgress(
   return rows[0] === undefined ? null : mapProgressRow(rows[0]);
 }
 
-/** Lists in-progress, unwatched items at or above {@link MIN_RESUME_POSITION_MS}, deduplicated per series, most recent first. */
+/**
+ * Lists in-progress, unwatched items with known positive duration (`duration_ms > 0`) at or above
+ * {@link MIN_RESUME_POSITION_MS}, deduplicated per series, most recent first.
+ */
 export async function listContinueWatching(
   db: SqlDriver,
   limit = 24,
@@ -286,7 +229,7 @@ export async function listContinueWatching(
   const rows = await db.all<RawProgressRow>(
     `SELECT ${PROGRESS_COLS} FROM (
        SELECT ${PROGRESS_COLS}, ROW_NUMBER() OVER (PARTITION BY COALESCE(NULLIF(series_key, ''), item_key) ORDER BY updated_at DESC, item_key ASC) AS rn
-         FROM watch_progress WHERE profile_id = ? AND watched = 0 AND position_ms >= ?
+         FROM watch_progress WHERE profile_id = ? AND watched = 0 AND position_ms >= ? AND duration_ms > 0
      ) WHERE rn = 1 ORDER BY updated_at DESC, item_key ASC LIMIT ?`,
     [normalizeProfileId(profileId), MIN_RESUME_POSITION_MS, clamped],
   );

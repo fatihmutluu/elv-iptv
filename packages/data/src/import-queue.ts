@@ -11,6 +11,18 @@ interface ActiveImport {
   readonly settled: Promise<void>;
 }
 
+/** Lane kinds serialized by {@link SerializedImportQueue}. */
+type ImportQueueKind = 'catalog' | 'guide' | 'series-episodes';
+
+/** Lifecycle hooks accepted by {@link SerializedImportQueue.run}. */
+interface ImportQueueHooks {
+  onStart?: () => void;
+  onFinally?: () => void;
+  onSettled?: () => Promise<void> | void;
+  /** Optional sub-key scoping duplicate rejection for `'series-episodes'` (e.g. a series key). */
+  taskKey?: string;
+}
+
 function turnOrAbort(previous: Promise<void>, signal: AbortSignal | undefined): Promise<boolean> {
   if (signal === undefined) return previous.then(() => true);
   if (signal.aborted) return Promise.resolve(false);
@@ -24,38 +36,46 @@ function turnOrAbort(previous: Promise<void>, signal: AbortSignal | undefined): 
   });
 }
 
-/** @internal Serializes catalog & guide imports per service with abort, `removeSource`, and `close()` safety. */
+/** @internal Serializes catalog, guide, and on-demand series-episode imports per service with abort, `removeSource`, and `close()` safety. */
 export interface SerializedImportQueue {
-  run(
+  run<T = ImportSummary>(
     sourceId: string,
-    kind: 'catalog' | 'guide',
+    kind: ImportQueueKind,
     signal: AbortSignal | undefined,
-    task: (runSignal: AbortSignal) => Promise<Result<ImportSummary>>,
-    hooks?: {
-      onStart?: () => void;
-      onFinally?: () => void;
-      onSettled?: () => Promise<void> | void;
-    },
-  ): Promise<Result<ImportSummary>>;
+    task: (runSignal: AbortSignal) => Promise<Result<T>>,
+    hooks?: ImportQueueHooks,
+  ): Promise<Result<T>>;
   markRemoving(sourceId: string): void;
   unmarkRemoving(sourceId: string): void;
   abortForSource(sourceId: string): Promise<void>;
   close(): Promise<void>;
 }
 
-/** @internal Builds a serialized import queue shared by `importSource` and `importGuide`. */
+/** @internal Builds a serialized import queue shared by `importSource`, `importGuide`, and `loadSeriesEpisodes`. */
 export function createSerializedImportQueue(db: SqlDriver): SerializedImportQueue {
   const abortable = db as SqlDriver & AbortBindable;
   const activeImports = new Map<string, ActiveImport>();
   const removing = new Set<string>();
   let lastImport: Promise<void> = Promise.resolve();
   let closed = false;
+  let nextSeq = 0;
 
   return {
-    async run(sourceId, kind, callerSignal, task, hooks) {
+    async run<T = ImportSummary>(
+      sourceId: string,
+      kind: ImportQueueKind,
+      callerSignal: AbortSignal | undefined,
+      task: (runSignal: AbortSignal) => Promise<Result<T>>,
+      hooks?: ImportQueueHooks,
+    ): Promise<Result<T>> {
       if (closed) return err(elvError('network', 'aborted'));
       if (removing.has(sourceId)) return err(elvError('storage', 'source-not-found'));
-      const key = `${kind}:${sourceId}`;
+      const key =
+        kind === 'series-episodes'
+          ? hooks?.taskKey !== undefined && hooks.taskKey !== ''
+            ? `${kind}:${sourceId}:${hooks.taskKey}`
+            : `${kind}:${sourceId}#${++nextSeq}`
+          : `${kind}:${sourceId}`;
       if (activeImports.has(key)) return err(elvError('storage', 'import-in-progress'));
 
       const runCtl = new AbortController();

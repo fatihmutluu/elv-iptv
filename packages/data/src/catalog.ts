@@ -11,9 +11,11 @@ import {
 } from '@elv/domain';
 import { isCredentialFingerprint } from './credential-fingerprint';
 import {
+  type CrossChannelProgrammeRow,
   type NowNextEntry,
   type ProgrammeRow,
   queryChannelByNumber,
+  queryCrossChannelEpgSlice,
   queryEpgWindow,
   queryNowNext,
 } from './guide-queries';
@@ -29,6 +31,7 @@ import {
   type ItemDetailRow,
   type ItemRow,
   parseCategoryId,
+  queryAllSourcesItems,
   queryCategories,
   queryEpisodes,
   queryItemDetail,
@@ -129,6 +132,12 @@ export interface CatalogService {
   listSources(): Promise<SourceRow[]>;
   categories(sourceId: string, kind: BrowseKind): Promise<CategoryRow[]>;
   items(categoryId: string, offset: number, limit: number): Promise<ItemRow[]>;
+  allSourcesItems?(
+    kind: BrowseKind,
+    offset: number,
+    limit: number,
+    sourceIds?: readonly string[],
+  ): Promise<ItemRow[]>;
   itemDetail?(itemKey: string): Promise<ItemDetailRow | null>;
   search?(query: string, opts?: SearchOptions): Promise<SearchResults>;
   nowNext?(channelKeys: readonly string[], nowMs: number): Promise<NowNextEntry[]>;
@@ -137,6 +146,12 @@ export interface CatalogService {
     fromMs: number,
     toMs: number,
   ): Promise<Record<string, ProgrammeRow[]>>;
+  epgSlice?(
+    sourceId: string,
+    fromMs: number,
+    toMs: number,
+    limit?: number,
+  ): Promise<CrossChannelProgrammeRow[]>;
   channelByNumber?(num: number, sourceId?: string): Promise<ItemRow | null>;
   seasons(seriesId: number): Promise<Result<SeasonRow[]>>;
   episodes(seriesId: number, season: number): Promise<EpisodeRow[]>;
@@ -196,7 +211,7 @@ const row = (r: SourceRecord): SourceRow => ({
 
 const LIST_SOURCES = `SELECT s.id, s.kind, s.name, s.created_at, s.settings_json,
   EXISTS (SELECT 1 FROM import_runs r WHERE r.source_id = s.id AND r.kind = 'catalog' AND r.status = 'ok') AS imported
-  FROM sources s ORDER BY s.created_at, s.id`;
+  FROM sources s WHERE s.deleting = 0 ORDER BY s.created_at, s.id`;
 
 const notFound = () => err(elvError('storage', 'item-not-found'));
 
@@ -249,7 +264,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
         }
         await queue.abortForSource(id);
         playtime.evict(id);
-        const removed = await removeSource(id, { db, secrets });
+        const removed = await removeSource(id, { db, secrets, scheduler: deps.scheduler });
         playtime.evict(id);
         await syncManifest();
         return removed;
@@ -317,6 +332,9 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       return playtime.resolveLogos(await queryItems(db, ref, offset, limit), ref.sourceId);
     },
 
+    allSourcesItems: async (kind, offset, limit, sourceIds) =>
+      playtime.resolveRowLogos(await queryAllSourcesItems(db, kind, offset, limit, sourceIds)),
+
     async itemDetail(itemKey) {
       const found = await queryItemDetail(db, itemKey);
       if (found === undefined) return null;
@@ -336,6 +354,8 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
 
     nowNext: (channelKeys, nowMs) => queryNowNext(db, channelKeys, nowMs),
     epgWindow: (channelKeys, fromMs, toMs) => queryEpgWindow(db, channelKeys, fromMs, toMs),
+    epgSlice: (sourceId, fromMs, toMs, limit) =>
+      queryCrossChannelEpgSlice(db, sourceId, fromMs, toMs, limit),
     async channelByNumber(num, sourceId) {
       const found = await queryChannelByNumber(db, num, sourceId);
       if (found === undefined) return null;
@@ -350,7 +370,14 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       if (seasons.length === 0) {
         const source = await getSource(db, series.sourceId);
         if (source?.kind === 'xtream') {
-          const loaded = await loadSeriesEpisodes(series.sourceId, series.key, importDeps);
+          const loaded = await queue.run(
+            series.sourceId,
+            'series-episodes',
+            undefined,
+            (runSignal) =>
+              loadSeriesEpisodes(series.sourceId, series.key, importDeps, { signal: runSignal }),
+            { taskKey: series.key },
+          );
           if (!loaded.ok) return loaded;
           seasons = await querySeasons(db, series);
         }

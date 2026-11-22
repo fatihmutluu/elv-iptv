@@ -1,4 +1,5 @@
 import { type ElvError, elvError, err, ok, type Result, type SqlDriver } from '@elv/domain';
+import { commitStagedCatalog, purgeStagedCatalog } from './catalog-commit';
 import {
   DEFAULT_BATCH_SIZE,
   type ImportDeps,
@@ -6,14 +7,7 @@ import {
   type ImportProgress,
   type ImportSummary,
 } from './import-types';
-import {
-  emptiedKinds,
-  finishRun,
-  removeStale,
-  removeStaleCatalog,
-  sourceExists,
-  startRun,
-} from './runs';
+import { emptiedKinds, finishRun, removeStale, sourceExists, startRun } from './runs';
 import { purgeSourceRows, type SourceRecord } from './sources';
 
 const SOURCE_REMOVED = elvError('storage', 'source-removed');
@@ -140,6 +134,9 @@ export async function performRun(
   let removed: number;
   let gone = false;
   try {
+    if ((steps.kind ?? 'catalog') === 'catalog') {
+      await deps.db.transaction((tx) => purgeStagedCatalog(tx, source.id));
+    }
     await steps.execute(c);
     checkAbort(c);
     if (
@@ -170,7 +167,7 @@ export async function performRun(
       } else if ((steps.kind ?? 'catalog') === 'catalog') {
         const keep = await emptiedKinds(tx, source.id, runId, counts);
         for (const kind of keep) warn(c, `catalog/kind-empty-${kind}`);
-        stale = await removeStaleCatalog(tx, source.id, runId, keep);
+        stale = await commitStagedCatalog(tx, source.id, runId, keep);
         await tx.run(DROP_STALE_MAPPINGS, [source.id, source.id]);
       } else {
         const tables = (steps.staleTables ?? []).filter((t) => !c.keepTables.has(t));
@@ -186,6 +183,9 @@ export async function performRun(
       : e instanceof Stop
         ? e.error
         : elvError('storage', 'import-failed');
+    if ((steps.kind ?? 'catalog') === 'catalog') {
+      await deps.db.transaction((tx) => purgeStagedCatalog(tx, source.id)).catch(() => undefined);
+    }
     await steps
       .onAbortOrFail?.(c, cancelled ? 'cancelled' : 'failed', error)
       .catch(() => undefined);

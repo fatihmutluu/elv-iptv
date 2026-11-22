@@ -1,4 +1,4 @@
-import { elvError } from '@elv/domain';
+import { type ContentKind, elvError, m3uStableKey } from '@elv/domain';
 import type { M3uEntry } from '@elv/sources';
 import { type RunCtx, Stop } from './import-run';
 import { collectSampleUrls, holdEntry } from './m3u-headers';
@@ -24,7 +24,64 @@ export interface M3uImportState {
   categories: Record<M3uBrowseKind, Map<string, number>>;
   positions: Map<string, number>;
   placedSeries: Set<string>;
+  /** Tracks per-import occurrence indices by base stable key -> legacy key so distinct duplicates get `#2`, `#3` while exact duplicates coalesce. */
+  occurrences: Map<string, Map<string, number>>;
   written: Record<'live' | 'movies' | 'episodes' | 'series', number>;
+}
+
+/**
+ * Computes a deterministic, URL-free M3U key for `entry`, assigning `#2`, `#3` when distinct streams
+ * share the same base key (`tvgId` or folded `name|group`) while coalescing identical duplicate lines.
+ */
+export function stableM3uKey(
+  st: M3uImportState,
+  sourceId: string,
+  kind: ContentKind,
+  entry: M3uEntry,
+  legacyKey: string,
+): string {
+  const baseKey = m3uStableKey({
+    sourceId,
+    kind,
+    tvgId: entry.tvgId,
+    name: entry.name,
+    group: entry.groups[0],
+  });
+  let byLegacy = st.occurrences.get(baseKey);
+  if (byLegacy === undefined) {
+    byLegacy = new Map();
+    st.occurrences.set(baseKey, byLegacy);
+  }
+  let occurrence = byLegacy.get(legacyKey);
+  if (occurrence === undefined) {
+    occurrence = byLegacy.size + 1;
+    byLegacy.set(legacyKey, occurrence);
+  }
+  return occurrence > 1 ? `${baseKey}#${occurrence}` : baseKey;
+}
+
+/** Records a category placement in first-seen order and collects any newly discovered categories. */
+export function placeM3uEntry(
+  st: M3uImportState,
+  kind: M3uBrowseKind,
+  key: string,
+  groups: readonly string[],
+  fresh: Map<M3uBrowseKind, string[]>,
+  links: Record<M3uBrowseKind, [string, string, number][]>,
+): void {
+  const known = st.categories[kind];
+  for (const group of groups) {
+    if (!known.has(group)) {
+      known.set(group, known.size);
+      const list = fresh.get(kind) ?? [];
+      if (!fresh.has(kind)) fresh.set(kind, list);
+      list.push(group);
+    }
+    const slot = `${kind}\n${group}`;
+    const position = st.positions.get(slot) ?? 0;
+    st.positions.set(slot, position + 1);
+    links[kind].push([key, group, position]);
+  }
 }
 
 /** Initializes M3U import state and seeds `RuleBook` with the initial entry sample. */
@@ -43,6 +100,7 @@ export function createM3uImportState(
     categories: { live: new Map(), movie: new Map(), series: new Map() },
     positions: new Map(),
     placedSeries: new Set(),
+    occurrences: new Map(),
     written: { live: 0, movies: 0, episodes: 0, series: 0 },
   };
 }

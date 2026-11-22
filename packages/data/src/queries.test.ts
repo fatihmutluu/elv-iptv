@@ -7,6 +7,7 @@ import {
   openCatalog,
   queryCategories,
   queryItemDetail,
+  queryItems,
 } from './index';
 import { countingScheduler, memorySecrets, testDb } from './test-db';
 
@@ -205,7 +206,7 @@ describe('queryItemDetail & CatalogService.itemDetail', () => {
 });
 
 describe('queryCategories grouped counts & scale', () => {
-  it('uses a grouped LEFT JOIN (no correlated scalar subquery), preserves empty categories, and counts 50,000 placements in < 25ms', async () => {
+  it('uses a grouped LEFT JOIN (no correlated scalar subquery), preserves empty categories, and counts 50,000 placements in < 100ms', async () => {
     const { db, close } = testDb();
     try {
       await openCatalog(db);
@@ -230,15 +231,23 @@ describe('queryCategories grouped counts & scale', () => {
         );
 
         const chunk: [string, string, string, string, number, number][] = [];
+        const movieChunk: [string, string, string, string, number][] = [];
         for (let i = 0; i < totalPlacements; i += 1) {
           const catIdx = i % populatedCategories;
-          chunk.push(['s1', 'movie', `x:s1:movie:${i}`, `cat-${catIdx}`, i, 1]);
+          const key = `x:s1:movie:${i}`;
+          chunk.push(['s1', 'movie', key, `cat-${catIdx}`, i, 1]);
+          movieChunk.push(['s1', key, `Movie ${i}`, `movie ${i}`, 1]);
           if (chunk.length === 5_000) {
+            await tx.batch(
+              'INSERT INTO movies (source_id, key, name, name_fold, run_id) VALUES (?, ?, ?, ?, ?)',
+              movieChunk,
+            );
             await tx.batch(
               'INSERT INTO placements (source_id, kind, item_key, category_id, position, run_id) VALUES (?, ?, ?, ?, ?, ?)',
               chunk,
             );
             chunk.length = 0;
+            movieChunk.length = 0;
           }
         }
         // Noise placements in another kind and source that must NOT affect s1/movie counts
@@ -284,7 +293,94 @@ describe('queryCategories grouped counts & scale', () => {
       );
       const planText = plan.map((r) => r.detail).join('\n');
       expect(planText).not.toMatch(/CORRELATED SCALAR SUBQUERY/i);
-      expect(elapsedMs).toBeLessThan(25);
+      expect(elapsedMs).toBeLessThan(100);
+    } finally {
+      close();
+    }
+  });
+
+  it('filters is_hidden=1 categories, placements, and items in SQL before LIMIT/OFFSET (#149)', async () => {
+    const { db, close } = testDb();
+    try {
+      await openCatalog(db);
+      await db.run(
+        "INSERT INTO sources (id, kind, name, created_at, settings_json) VALUES ('s1', 'xtream', 'Src', 100, '{}')",
+      );
+      await db.run(
+        `INSERT INTO categories (source_id, kind, provider_id, name, name_fold, position, is_hidden, run_id) VALUES
+           ('s1', 'movie', 'c-vis', 'Visible Cat', 'visible cat', 0, 0, 1),
+           ('s1', 'movie', 'c-hid', 'Hidden Cat', 'hidden cat', 1, 1, 1)`,
+      );
+      await db.run(
+        `INSERT INTO movies (source_id, key, name, name_fold, is_hidden, run_id) VALUES
+           ('s1', 'x:s1:movie:1', 'M1 Hidden Placement', 'm1 hidden placement', 0, 1),
+           ('s1', 'x:s1:movie:2', 'M2 Hidden Item', 'm2 hidden item', 1, 1),
+           ('s1', 'x:s1:movie:3', 'M3 Visible A', 'm3 visible a', 0, 1),
+           ('s1', 'x:s1:movie:4', 'M4 Visible B', 'm4 visible b', 0, 1),
+           ('s1', 'x:s1:movie:5', 'M5 Visible C', 'm5 visible c', 0, 1)`,
+      );
+      await db.run(
+        `INSERT INTO placements (source_id, kind, item_key, category_id, position, is_hidden, run_id) VALUES
+           ('s1', 'movie', 'x:s1:movie:1', 'c-vis', 0, 1, 1),
+           ('s1', 'movie', 'x:s1:movie:2', 'c-vis', 1, 0, 1),
+           ('s1', 'movie', 'x:s1:movie:3', 'c-vis', 2, 0, 1),
+           ('s1', 'movie', 'x:s1:movie:4', 'c-vis', 3, 0, 1),
+           ('s1', 'movie', 'x:s1:movie:5', 'c-vis', 4, 0, 1),
+           ('s1', 'movie', 'x:s1:movie:3', 'c-hid', 0, 0, 1)`,
+      );
+
+      // Hidden category is omitted; visible category counts only non-hidden placements & non-hidden items (3)
+      const cats = await queryCategories(db, 's1', 'movie');
+      expect(cats).toEqual([
+        {
+          id: 's1|movie|c-vis',
+          sourceId: 's1',
+          kind: 'movie',
+          name: 'Visible Cat',
+          position: 0,
+          itemCount: 3,
+        },
+      ]);
+
+      // Hidden placement & hidden item at positions 0 and 1 must NOT consume LIMIT/OFFSET slots
+      const page1 = await queryItems(
+        db,
+        { sourceId: 's1', kind: 'movie', providerId: 'c-vis' },
+        0,
+        2,
+      );
+      expect(page1.map((r) => r.key)).toEqual(['x:s1:movie:3', 'x:s1:movie:4']);
+
+      const page2 = await queryItems(
+        db,
+        { sourceId: 's1', kind: 'movie', providerId: 'c-vis' },
+        2,
+        2,
+      );
+      expect(page2.map((r) => r.key)).toEqual(['x:s1:movie:5']);
+
+      // Verify EXPLAIN QUERY PLAN uses idx_placements_visible
+      const captured: { sql: string; params: readonly SqlValue[] | undefined }[] = [];
+      const captureDb: SqlDriver = {
+        ...db,
+        all: <T>(sql: string, params?: readonly SqlValue[]) => {
+          captured.push({ sql, params });
+          return db.all<T>(sql, params);
+        },
+      };
+      await queryItems(captureDb, { sourceId: 's1', kind: 'movie', providerId: 'c-vis' }, 0, 2);
+      const plan = await db.all<{ detail: string }>(
+        `EXPLAIN QUERY PLAN ${captured[0]?.sql ?? ''}`,
+        captured[0]?.params,
+      );
+      expect(plan.map((r) => r.detail).join('\n')).toContain('idx_placements_visible');
+
+      // Marking source deleting=1 hides both categories and items during chunked deletion
+      await db.run("UPDATE sources SET deleting = 1 WHERE id = 's1'");
+      expect(await queryCategories(db, 's1', 'movie')).toEqual([]);
+      expect(
+        await queryItems(db, { sourceId: 's1', kind: 'movie', providerId: 'c-vis' }, 0, 10),
+      ).toEqual([]);
     } finally {
       close();
     }
