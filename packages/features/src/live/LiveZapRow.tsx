@@ -1,4 +1,4 @@
-import type { ItemRow } from '@elv/data';
+import type { ItemRow, ProgrammeRow } from '@elv/data';
 import type { LogoBackdropModePref } from '@elv/domain';
 import {
   ArtworkImage,
@@ -10,7 +10,7 @@ import {
   webTransition,
 } from '@elv/ui-kit';
 import { memo, type ReactElement, useCallback } from 'react';
-import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { formatLiveTitle } from './live-model';
 import { SourceBadgePill } from './SourceBadgePill';
 import { formatChannelDisplayName, type SourceBadgeInfo } from './source-badge';
@@ -44,6 +44,7 @@ export const ZapChannelRow = memo(function ZapChannelRowInner(p: {
   readonly index: number;
   readonly item: ItemRow | undefined;
   readonly nowTitle: string | null;
+  readonly nowProgramme?: ProgrammeRow | null;
   readonly noProgramLabel: string;
   readonly rowHeight: number;
   readonly isActive: boolean;
@@ -54,6 +55,11 @@ export const ZapChannelRow = memo(function ZapChannelRowInner(p: {
   readonly sourceBadge?: SourceBadgeInfo | null;
   readonly cleanChannelTitles?: boolean;
   readonly onSelectChannel: (channel: ItemRow, index: number) => void;
+  readonly onOpenContextMenu?: (
+    channel: ItemRow,
+    index: number,
+    programme: ProgrammeRow | null,
+  ) => void;
 }): ReactElement {
   const theme = useTheme();
   const cursor = webCursorPointer();
@@ -61,6 +67,19 @@ export const ZapChannelRow = memo(function ZapChannelRowInner(p: {
   const handlePress = useCallback(() => {
     if (p.item) p.onSelectChannel(p.item, p.index);
   }, [p.index, p.item, p.onSelectChannel]);
+  const handleLongPress = useCallback(() => {
+    if (p.item) p.onOpenContextMenu?.(p.item, p.index, p.nowProgramme ?? null);
+  }, [p.index, p.item, p.nowProgramme, p.onOpenContextMenu]);
+  const isWeb = (Platform.OS as string) === 'web';
+  const webContextProps =
+    isWeb && p.item !== undefined && p.onOpenContextMenu !== undefined
+      ? ({
+          onContextMenu: (e?: { preventDefault?: () => void }) => {
+            e?.preventDefault?.();
+            if (p.item) p.onOpenContextMenu?.(p.item, p.index, p.nowProgramme ?? null);
+          },
+        } as Record<string, unknown>)
+      : undefined;
 
   if (!p.item) {
     return (
@@ -84,6 +103,10 @@ export const ZapChannelRow = memo(function ZapChannelRowInner(p: {
       accessibilityState={{ selected: p.isActive }}
       focusable={!p.isTv}
       onPress={handlePress}
+      {...(p.onOpenContextMenu !== undefined
+        ? { onLongPress: handleLongPress, delayLongPress: 450 }
+        : {})}
+      {...webContextProps}
       style={({ pressed }) => [
         styles.zapRow,
         zapRowStyle(theme, p.rowHeight, p.isTouch, p.isActive, p.focused, pressed),

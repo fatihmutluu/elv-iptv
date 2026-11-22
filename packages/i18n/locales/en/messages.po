@@ -1556,3 +1556,123 @@ msgstr "Hide [sound effects], (descriptions), and SPEAKER: labels in text subtit
 
 msgid "settings.playback.osdTimeMode"
 msgstr "Player time display"
+
+msgid "settings.liveTv.catalogRefreshInterval"
+msgstr "Catalog auto-refresh"
+
+msgid "settings.liveTv.catalogRefreshIntervalDesc"
+msgstr "Automatically refresh channels, movies, and series in the background"
+
+msgid "settings.liveTv.refreshManualOnly"
+msgstr "Manual only"
+
+msgid "settings.liveTv.refreshHours"
+msgstr "Every {hours}h"
+
+msgid "sources.refreshGuide"
+msgstr "Refresh guide"
+
+msgid "sources.lastSynced"
+msgstr "Synced {time}"
+
+msgid "sources.neverSynced"
+msgstr "Not synced yet"
+
+msgid "live.previousChannel"
+msgstr "Previous channel"
+
+msgid "home.recentChannels"
+msgstr "Recently watched channels"
+
+msgid "player.channelDrawerAll"
+msgstr "All"
+
+msgid "player.channelDrawerRecent"
+msgstr "Recent"
+
+msgid "player.channelDrawerRecentEmpty"
+msgstr "Channels you watch appear here"
+
+msgid "settings.liveTv.channelSwitchMode"
+msgstr "CH+/CH- channel switching"
+
+msgid "settings.liveTv.channelSwitchModeDesc"
+msgstr "Switch immediately or preview programme info before tuning"
+
+msgid "settings.liveTv.switchInstant"
+msgstr "Instant switch"
+
+msgid "settings.liveTv.switchPreview"
+msgstr "Preview first"
+
+msgid "player.previewChannelHint"
+msgstr "Press OK to tune · Back to cancel"
+
+msgid "player.previewBadge"
+msgstr "Preview"
+
+msgid "epg.today"
+msgstr "Today"
+
+msgid "epg.tomorrow"
+msgstr "Tomorrow"
+
+msgid "epg.programmeDetails"
+msgstr "Programme details"
+
+msgid "epg.tuneChannel"
+msgstr "Tune to channel"
+
+msgid "epg.durationMinutes"
+msgstr "{minutes} min"
+
+msgid "epg.noDescription"
+msgstr "No programme description available."
+
+msgid "epg.upcoming"
+msgstr "Upcoming"
+
+msgid "epg.badge.live"
+msgstr "Live"
+
+msgid "epg.badge.new"
+msgstr "New"
+
+msgid "epg.badge.premiere"
+msgstr "Premiere"
+
+msgid "epg.genre.sports"
+msgstr "Sports"
+
+msgid "epg.genre.movie"
+msgstr "Movie"
+
+msgid "epg.genre.news"
+msgstr "News"
+
+msgid "epg.genre.kids"
+msgstr "Kids"
+
+msgid "epg.genre.series"
+msgstr "Series"
+
+msgid "epg.genre.other"
+msgstr "General"
+
+msgid "live.contextMenuTitle"
+msgstr "Channel options"
+
+msgid "live.context.play"
+msgstr "Play channel"
+
+msgid "live.context.addFavorite"
+msgstr "Add to favorites"
+
+msgid "live.context.removeFavorite"
+msgstr "Remove from favorites"
+
+msgid "live.context.programmeDetails"
+msgstr "Programme details"
+
+msgid "live.context.hideChannel"
+msgstr "Hide channel"

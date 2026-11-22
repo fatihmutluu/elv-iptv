@@ -305,6 +305,8 @@ describe('Wave C1 Minimalist Cinema OSD, #160 Ends At/Stats, #355 Fine Scrub, #1
         description: null,
         episodeNum: null,
         icon: null,
+        genre: null,
+        flags: 0,
         start: EPOCH_BASE - 15 * 60_000,
         stop: EPOCH_BASE + 45 * 60_000,
       },

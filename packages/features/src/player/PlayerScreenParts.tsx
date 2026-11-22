@@ -1,8 +1,10 @@
+import type { ItemRow } from '@elv/data';
 import type { AppI18n } from '@elv/i18n';
 import type { PlaybackClock, PlaybackStatus, PlaybackTimers } from '@elv/playback';
 import { Scrim, useTheme, useViewport } from '@elv/ui-kit';
 import type { ReactElement } from 'react';
 import { ActivityIndicator, StyleSheet, View, type ViewStyle } from 'react-native';
+import type { PlayableEntry } from '../ports/play-target';
 import {
   DesktopCinemaBar,
   DesktopDockedTopBar,
@@ -25,6 +27,17 @@ export const DEFAULT_PLAYER_TIMERS: PlaybackTimers = {
   setTimeout: (fn, ms) => setTimeout(fn, ms),
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
+
+/** Maps `@elv/data` recent channel `ItemRow`s into `PlayableEntry` rows for `PlayerChannelDrawer`. */
+export function mapRecentChannelRows(rows: readonly ItemRow[]): readonly PlayableEntry[] {
+  return rows.map((r) => ({
+    itemKey: r.key,
+    sourceId: r.sourceId,
+    kind: 'live' as const,
+    title: r.name,
+    ...(r.logo ? { logo: r.logo } : {}),
+  }));
+}
 
 /** Formats localized OSD status text from `PlaybackStatus`. */
 export function formatStatusLine(status: PlaybackStatus, i18n: AppI18n): string {

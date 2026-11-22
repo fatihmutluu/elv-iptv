@@ -132,6 +132,11 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
     clearTrackPreference: async (scopeKey, profileId) => {
       await (await open()).clearTrackPreference?.(scopeKey, profileId);
     },
+    recordRecentChannel: async (itemKey, sourceId, profileId) => {
+      await (await open()).recordRecentChannel?.(itemKey, sourceId, profileId);
+    },
+    listRecentChannels: async (limit, profileId) =>
+      (await open()).listRecentChannels?.(limit, profileId) ?? [],
     flushPendingWrites: async () => {
       if (cached === undefined) return;
       const cat = await cached.catch(() => undefined);

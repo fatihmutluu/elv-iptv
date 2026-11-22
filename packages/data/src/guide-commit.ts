@@ -3,14 +3,15 @@ import { resolveMappings } from './guide-match';
 import { type RunCtx, warn } from './import-run';
 
 const PROGRAMME_COLUMNS =
-  'source_id, guide_id, start, stop, title, sub_title, description, categories_json, episode_num, icon, run_id';
+  'source_id, guide_id, start, stop, title, sub_title, description, categories_json, episode_num, icon, run_id, genre, flags';
 
 /** Upserts one staged programme into `programmes_next`. */
 export const STAGE_PROGRAMME_SQL = `INSERT INTO programmes_next (${PROGRAMME_COLUMNS})
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(source_id, guide_id, start) DO UPDATE SET stop = excluded.stop, title = excluded.title,
     sub_title = excluded.sub_title, description = excluded.description, categories_json = excluded.categories_json,
-    episode_num = excluded.episode_num, icon = excluded.icon, run_id = excluded.run_id`;
+    episode_num = excluded.episode_num, icon = excluded.icon, run_id = excluded.run_id,
+    genre = excluded.genre, flags = excluded.flags`;
 
 const GUIDE_CHANNEL_SQL = `INSERT INTO guide_channels (source_id, guide_id, name, name_fold, icon, run_id)
   VALUES (?, ?, ?, ?, ?, ?)
@@ -29,7 +30,9 @@ const SWAP_PROGRAMMES = `INSERT INTO programmes (${PROGRAMME_COLUMNS})
     categories_json,
     episode_num,
     icon,
-    run_id
+    run_id,
+    genre,
+    flags
   FROM (
     SELECT ${PROGRAMME_COLUMNS},
       LEAD(start) OVER (PARTITION BY guide_id ORDER BY start) AS next_start

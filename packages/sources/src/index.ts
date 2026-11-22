@@ -1,6 +1,18 @@
 export { detectAndDecodeText } from './encoding';
 export { decodeEntities } from './entities';
 export {
+  type DecodedProgrammeFlags,
+  decodeProgrammeFlags,
+  EPG_FLAG_LIVE,
+  EPG_FLAG_NEW,
+  EPG_FLAG_PREMIERE,
+  EPG_FLAG_REPEAT,
+  type EpgGenre,
+  encodeProgrammeFlags,
+  normalizeEpgGenre,
+  type ProgrammeFlagInput,
+} from './epg-metadata';
+export {
   type KindHint,
   type M3uBatch,
   type M3uCatchup,

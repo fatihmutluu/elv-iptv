@@ -72,6 +72,8 @@ function makeNowNext(channelKey: string, num: number): NowNextEntry {
       description: null,
       episodeNum: null,
       icon: null,
+      genre: null,
+      flags: 0,
     },
     next: {
       channelKey,
@@ -84,6 +86,8 @@ function makeNowNext(channelKey: string, num: number): NowNextEntry {
       description: null,
       episodeNum: null,
       icon: null,
+      genre: null,
+      flags: 0,
     },
   };
 }

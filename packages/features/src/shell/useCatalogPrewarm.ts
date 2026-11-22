@@ -148,14 +148,17 @@ export async function runCatalogPrewarm({
   const warmHome = async (): Promise<void> => {
     if (!stillValid() || uiCache.getHome() !== null) return;
     const probeSources = activeSources.slice(0, MAX_HOME_SOURCES);
-    const [cwAll, favAll, favKeys, liveMap, movieMap, seriesMap] = await Promise.all([
-      getContinue(),
-      getFavRows(),
-      getFavKeys(),
-      loadKindCategories('live', probeSources),
-      loadKindCategories('movie', probeSources),
-      loadKindCategories('series', probeSources),
-    ]);
+    const [cwAll, recentChannels, favAll, favKeys, liveMap, movieMap, seriesMap] =
+      await Promise.all([
+        getContinue(),
+        catalog.listRecentChannels?.(20).catch(() => [] as ItemRow[]) ??
+          Promise.resolve([] as ItemRow[]),
+        getFavRows(),
+        getFavKeys(),
+        loadKindCategories('live', probeSources),
+        loadKindCategories('movie', probeSources),
+        loadKindCategories('series', probeSources),
+      ]);
     if (!stillValid() || uiCache.getHome() !== null) return;
 
     const firstLive = pickFirstCategory([...liveMap.values()]);
@@ -202,6 +205,7 @@ export async function runCatalogPrewarm({
       progressByKey,
       liveCategory: firstLive,
       liveItems,
+      recentChannels,
       movies,
       series,
     });

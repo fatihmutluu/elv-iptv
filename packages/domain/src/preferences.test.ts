@@ -56,6 +56,8 @@ describe('preferences codec', () => {
       epgShowClock: true,
       defaultLiveMode: 'favorites',
       guideRefreshHours: 12,
+      catalogRefreshHours: 24,
+      liveChannelSwitchMode: 'instant',
       logoBackdropMode: 'plate',
       showSourceBadges: true,
       liveOkTwoStepPreview: false,

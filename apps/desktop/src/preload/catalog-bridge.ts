@@ -386,6 +386,19 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         scopeKey,
         ...(profileId === undefined ? {} : { profileId }),
       }),
+    recordRecentChannel: (itemKey, sourceId, profileId) =>
+      callValue({
+        method: 'recordRecentChannel',
+        itemKey,
+        sourceId,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
+    listRecentChannels: (limit, profileId) =>
+      callValue({
+        method: 'listRecentChannels',
+        ...(limit === undefined ? {} : { limit }),
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
     onChanged(listener: () => void): () => void {
       changedListeners.add(listener);
       return () => {

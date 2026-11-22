@@ -1,5 +1,5 @@
 import type { CatalogService } from '@elv/data';
-import type { AndroidDecoderMode, BufferPreset } from '@elv/domain';
+import type { AndroidDecoderMode, BufferPreset, LiveChannelSwitchModePref } from '@elv/domain';
 import {
   type PlaybackClock,
   type PlaybackService,
@@ -29,7 +29,7 @@ export interface PlayerTargetHandoffParams {
   appLifecycle: AppLifecyclePort;
   catalogRef: MutableRefObject<
     Pick<CatalogService, 'resolveStream' | 'getProgress' | 'saveProgress'> &
-      Partial<Pick<CatalogService, 'channelByNumber'>>
+      Partial<Pick<CatalogService, 'channelByNumber' | 'recordRecentChannel'>>
   >;
   serviceRef: MutableRefObject<PlaybackService | null>;
   clockRef: MutableRefObject<PlaybackClock>;
@@ -41,6 +41,7 @@ export interface PlayerTargetHandoffParams {
   decoderModeRef?: MutableRefObject<AndroidDecoderMode | undefined>;
   preferHevcOverDolbyVisionRef?: MutableRefObject<boolean>;
   filterSdhSubtitlesRef?: MutableRefObject<boolean>;
+  liveChannelSwitchModeRef?: MutableRefObject<LiveChannelSwitchModePref>;
   resolvedNextEpisodeRef?: MutableRefObject<PlayableEntry | undefined>;
 }
 
@@ -64,12 +65,19 @@ export function usePlayerTargetHandoff({
   decoderModeRef,
   preferHevcOverDolbyVisionRef,
   filterSdhSubtitlesRef,
+  liveChannelSwitchModeRef,
   resolvedNextEpisodeRef,
 }: PlayerTargetHandoffParams) {
   const [activeTarget, setActiveTarget] = useState<PlayTarget>(target);
+  const [previewTarget, setPreviewTarget] = useState<PlayTarget | null>(null);
 
   const mountedRef = useRef(true);
   const activeTargetRef = useRef<PlayTarget>(target);
+  const previewTargetRef = useRef<PlayTarget | null>(null);
+  const previewIndexRef = useRef<number | null>(null);
+  const previewSeqRef = useRef(0);
+  const burstOriginRef = useRef<PlayTarget | null>(null);
+  const lastRecordedRecentKeyRef = useRef<string | null>(null);
   const prevPropKeyRef = useRef(target.itemKey);
   const transitioningToRef = useRef<string | null>(null);
   const backgroundedRef = useRef(false);
@@ -88,12 +96,34 @@ export function usePlayerTargetHandoff({
     pendingResumeRef.current = false;
   }, []);
 
+  const cancelPreviewChannel = useCallback((): void => {
+    previewSeqRef.current += 1;
+    previewIndexRef.current = null;
+    if (previewTargetRef.current !== null) {
+      previewTargetRef.current = null;
+      setPreviewTarget(null);
+    }
+  }, []);
+
+  const recordSettledRecentChannel = useCallback(
+    (entry: PlayableEntry): void => {
+      if (entry.kind !== 'live') return;
+      if (lastRecordedRecentKeyRef.current === entry.itemKey) return;
+      lastRecordedRecentKeyRef.current = entry.itemKey;
+      void catalogRef.current
+        .recordRecentChannel?.(entry.itemKey, entry.sourceId)
+        ?.catch(() => undefined);
+    },
+    [catalogRef],
+  );
+
   const tuneEntry = useCallback(
     (service: PlaybackService, entry: PlayableEntry, startMs?: number): void => {
       const bufferPreset = bufferPresetRef?.current;
       const decoderMode = decoderModeRef?.current;
       const preferHevcOverDolbyVision = preferHevcOverDolbyVisionRef?.current;
       const filterSdhSubtitles = filterSdhSubtitlesRef?.current;
+      recordSettledRecentChannel(entry);
       service.tune({
         item: entry.itemKey,
         accountKey: entry.accountKey ?? entry.sourceId,
@@ -112,6 +142,7 @@ export function usePlayerTargetHandoff({
       decoderModeRef,
       filterSdhSubtitlesRef,
       preferHevcOverDolbyVisionRef,
+      recordSettledRecentChannel,
     ],
   );
 
@@ -178,22 +209,25 @@ export function usePlayerTargetHandoff({
       current: () => activeTargetRef.current,
       show: (nextTarget) => {
         if (!mountedRef.current) return;
-        const prevTarget = activeTargetRef.current;
-        const prevIdx = prevTarget.playlist?.currentIndex;
+        if (burstOriginRef.current === null) {
+          burstOriginRef.current = activeTargetRef.current;
+        }
+        const originTarget = burstOriginRef.current;
+        const originIdx = originTarget.playlist?.currentIndex;
         const enriched: PlayTarget =
-          nextTarget.itemKey !== prevTarget.itemKey
+          nextTarget.itemKey !== originTarget.itemKey
             ? {
                 ...nextTarget,
-                previousChannel: toPlayableEntry(prevTarget),
-                ...(prevIdx !== undefined ? { previousChannelIndex: prevIdx } : {}),
+                previousChannel: toPlayableEntry(originTarget),
+                ...(originIdx !== undefined ? { previousChannelIndex: originIdx } : {}),
               }
             : {
                 ...nextTarget,
-                ...(prevTarget.previousChannel !== undefined
-                  ? { previousChannel: prevTarget.previousChannel }
+                ...(originTarget.previousChannel !== undefined
+                  ? { previousChannel: originTarget.previousChannel }
                   : {}),
-                ...(prevTarget.previousChannelIndex !== undefined
-                  ? { previousChannelIndex: prevTarget.previousChannelIndex }
+                ...(originTarget.previousChannelIndex !== undefined
+                  ? { previousChannelIndex: originTarget.previousChannelIndex }
                   : {}),
               };
         vodResumeMsRef.current = undefined;
@@ -204,6 +238,7 @@ export function usePlayerTargetHandoff({
       },
       tune: (nextTarget) => {
         if (!mountedRef.current) return;
+        burstOriginRef.current = null;
         cancelPendingResume();
         const svc = serviceRef.current;
         if (backgroundedRef.current) resumeOnActiveRef.current = true;
@@ -215,10 +250,33 @@ export function usePlayerTargetHandoff({
 
   const zapBy = useCallback(
     (delta: 1 | -1, repeat = false): void => {
+      if (liveChannelSwitchModeRef?.current === 'preview') {
+        const current = activeTargetRef.current;
+        const playlist = current.playlist;
+        if (current.kind !== 'live' || playlist === undefined || playlist.count <= 0) return;
+        const base = previewIndexRef.current ?? playlist.currentIndex;
+        const nextIndex = (((base + delta) % playlist.count) + playlist.count) % playlist.count;
+        previewIndexRef.current = nextIndex;
+        const seq = ++previewSeqRef.current;
+        void playlist.getAt(nextIndex).then(
+          (entry) => {
+            if (!mountedRef.current || seq !== previewSeqRef.current || entry === undefined) return;
+            const nextPreview: PlayTarget = {
+              ...entry,
+              playlist: { ...playlist, currentIndex: nextIndex },
+            };
+            previewTargetRef.current = nextPreview;
+            setPreviewTarget(nextPreview);
+          },
+          () => undefined,
+        );
+        return;
+      }
+      cancelPreviewChannel();
       cancelPendingResume();
       zapController.zap(delta, repeat);
     },
-    [cancelPendingResume, zapController],
+    [cancelPendingResume, cancelPreviewChannel, liveChannelSwitchModeRef, zapController],
   );
 
   const handlePlayNextEpisode = useCallback(
@@ -263,6 +321,8 @@ export function usePlayerTargetHandoff({
 
   const commitLiveTarget = useCallback(
     (next: PlayTarget, syncPlaylistIndex?: number): void => {
+      burstOriginRef.current = null;
+      cancelPreviewChannel();
       cancelScrubRef.current();
       cancelPendingResume();
       vodResumeMsRef.current = undefined;
@@ -279,7 +339,15 @@ export function usePlayerTargetHandoff({
         tuneEntry(svc, next);
       }
     },
-    [cancelPendingResume, cancelScrubRef, onTargetChangeRef, serviceRef, tuneEntry, zapController],
+    [
+      cancelPendingResume,
+      cancelPreviewChannel,
+      cancelScrubRef,
+      onTargetChangeRef,
+      serviceRef,
+      tuneEntry,
+      zapController,
+    ],
   );
 
   const handleJumpPreviousChannel = useCallback((): void => {
@@ -306,6 +374,14 @@ export function usePlayerTargetHandoff({
     },
     [commitLiveTarget],
   );
+
+  const confirmPreviewChannel = useCallback((): void => {
+    const preview = previewTargetRef.current;
+    cancelPreviewChannel();
+    if (preview === null) return;
+    if (preview.itemKey === activeTargetRef.current.itemKey) return;
+    selectChannel(preview, preview.playlist?.currentIndex);
+  }, [cancelPreviewChannel, selectChannel]);
 
   const jumpToChannel = useCallback(
     (channelNumber: number): void => {
@@ -360,6 +436,8 @@ export function usePlayerTargetHandoff({
     });
     return () => {
       mountedRef.current = false;
+      lastRecordedRecentKeyRef.current = null;
+      burstOriginRef.current = null;
       zapController.reset(activeTargetRef.current.playlist?.currentIndex ?? 0);
       unregGuard?.();
     };
@@ -376,6 +454,8 @@ export function usePlayerTargetHandoff({
     }
     flushProgressRef.current();
     cancelPendingResume();
+    burstOriginRef.current = null;
+    cancelPreviewChannel();
     prevPropKeyRef.current = target.itemKey;
     vodResumeMsRef.current = undefined;
     zapController.reset(target.playlist?.currentIndex ?? 0);
@@ -384,7 +464,15 @@ export function usePlayerTargetHandoff({
     const svc = serviceRef.current;
     if (backgroundedRef.current) resumeOnActiveRef.current = true;
     else if (svc !== null) tuneWithResume(svc, target);
-  }, [cancelPendingResume, flushProgressRef, serviceRef, target, tuneWithResume, zapController]);
+  }, [
+    cancelPendingResume,
+    cancelPreviewChannel,
+    flushProgressRef,
+    serviceRef,
+    target,
+    tuneWithResume,
+    zapController,
+  ]);
 
   useEffect(() => {
     return appLifecycle.subscribe((lifecycleState) => {
@@ -434,7 +522,10 @@ export function usePlayerTargetHandoff({
 
   return {
     activeTarget,
+    previewTarget,
     zapBy,
+    confirmPreviewChannel,
+    cancelPreviewChannel,
     selectChannel,
     jumpToChannel,
     onServiceReady,

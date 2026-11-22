@@ -1,7 +1,9 @@
 import type {
+  CatalogRefreshHoursPref,
   DefaultLiveModePref,
   EpgTimeSpanHoursPref,
   GuideRefreshHoursPref,
+  LiveChannelSwitchModePref,
   LogoBackdropModePref,
 } from '@elv/domain';
 import type { MessageId } from '@elv/i18n';
@@ -44,14 +46,47 @@ export const EPG_SPAN_OPTIONS: ReadonlyArray<{
   { hours: 6, focusId: 'epg-span-6', testID: 'settings-livetv-epg-span-6' },
 ];
 
+export const CATALOG_REFRESH_OPTIONS: ReadonlyArray<{
+  readonly hours: CatalogRefreshHoursPref;
+  readonly focusId: LiveTvFocusId;
+  readonly testID: string;
+}> = [
+  { hours: 0, focusId: 'catalog-refresh-0', testID: 'settings-livetv-catalog-refresh-0' },
+  { hours: 6, focusId: 'catalog-refresh-6', testID: 'settings-livetv-catalog-refresh-6' },
+  { hours: 12, focusId: 'catalog-refresh-12', testID: 'settings-livetv-catalog-refresh-12' },
+  { hours: 24, focusId: 'catalog-refresh-24', testID: 'settings-livetv-catalog-refresh-24' },
+  { hours: 48, focusId: 'catalog-refresh-48', testID: 'settings-livetv-catalog-refresh-48' },
+];
+
 export const GUIDE_REFRESH_OPTIONS: ReadonlyArray<{
   readonly hours: GuideRefreshHoursPref;
   readonly focusId: LiveTvFocusId;
   readonly testID: string;
 }> = [
+  { hours: 0, focusId: 'guide-refresh-0', testID: 'settings-livetv-guide-refresh-0' },
   { hours: 6, focusId: 'guide-refresh-6', testID: 'settings-livetv-guide-refresh-6' },
   { hours: 12, focusId: 'guide-refresh-12', testID: 'settings-livetv-guide-refresh-12' },
   { hours: 24, focusId: 'guide-refresh-24', testID: 'settings-livetv-guide-refresh-24' },
+];
+
+export const CHANNEL_SWITCH_MODE_OPTIONS: ReadonlyArray<{
+  readonly value: LiveChannelSwitchModePref;
+  readonly focusId: LiveTvFocusId;
+  readonly testID: string;
+  readonly labelKey: MessageId;
+}> = [
+  {
+    value: 'instant',
+    focusId: 'channel-switch-instant',
+    testID: 'settings-livetv-channel-switch-instant',
+    labelKey: 'settings.liveTv.switchInstant',
+  },
+  {
+    value: 'preview',
+    focusId: 'channel-switch-preview',
+    testID: 'settings-livetv-channel-switch-preview',
+    labelKey: 'settings.liveTv.switchPreview',
+  },
 ];
 
 export const LOGO_BACKDROP_OPTIONS: ReadonlyArray<{
@@ -80,7 +115,7 @@ export const LOGO_BACKDROP_OPTIONS: ReadonlyArray<{
   },
 ];
 
-/** Applies a TV D-pad activation on a Live TV & Guide settings control (`#401`, `#126`, `#145`). */
+/** Applies a TV D-pad activation on a Live TV & Guide settings control (`#68`, `#251`, `#401`, `#126`, `#145`). */
 export function activateLiveTvControl(
   controlId: LiveTvFocusId,
   preferences?: SettingsPreferencesController,
@@ -104,9 +139,19 @@ export function activateLiveTvControl(
     void preferences.updatePreferences({ epgShowClock: !preferences.preferences.epgShowClock });
     return;
   }
+  const catalogRefreshOpt = CATALOG_REFRESH_OPTIONS.find((o) => o.focusId === controlId);
+  if (catalogRefreshOpt) {
+    void preferences.updatePreferences({ catalogRefreshHours: catalogRefreshOpt.hours });
+    return;
+  }
   const refreshOpt = GUIDE_REFRESH_OPTIONS.find((o) => o.focusId === controlId);
   if (refreshOpt) {
     void preferences.updatePreferences({ guideRefreshHours: refreshOpt.hours });
+    return;
+  }
+  const switchOpt = CHANNEL_SWITCH_MODE_OPTIONS.find((o) => o.focusId === controlId);
+  if (switchOpt) {
+    void preferences.updatePreferences({ liveChannelSwitchMode: switchOpt.value });
     return;
   }
   const logoOpt = LOGO_BACKDROP_OPTIONS.find((o) => o.focusId === controlId);

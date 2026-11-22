@@ -1,11 +1,24 @@
 export { EpgChannelRow, type EpgChannelRowProps } from './EpgChannelRow';
 export { EpgGridView, type EpgGridViewProps } from './EpgGridView';
 export {
+  EpgDateTabStrip,
+  type EpgDateTabStripProps,
   EpgPreviewHeader,
   type EpgPreviewHeaderProps,
   EpgTimeRuler,
   type EpgTimeRulerProps,
 } from './EpgPreviewHeader';
+export {
+  EpgProgrammeDetailModal,
+  type EpgProgrammeDetailModalProps,
+} from './EpgProgrammeDetailModal';
+export {
+  buildEpgDateTabs,
+  computeDayJumpWindowStart,
+  EPG_DATE_TAB_COUNT,
+  type EpgDateTab,
+  localDayKey,
+} from './epg-date-tabs';
 export {
   computeLiveGridColumns,
   LiveChannelsGrid,
@@ -20,6 +33,7 @@ export {
   LiveNumberPad,
   type LiveNumberPadProps,
 } from './LiveChrome';
+export { LiveContextMenu, type LiveContextMenuProps } from './LiveContextMenu';
 export { LivePreviewBanner, type LivePreviewBannerProps } from './LivePreviewBanner';
 export { LiveScreen, type LiveScreenProps } from './LiveScreen';
 export {
@@ -67,7 +81,9 @@ export {
   type EpgGenreKind,
   type EpgGenreTint,
   formatChannelDisplayName,
+  type ProgrammeBadgeKind,
   resolveEpgGenreTint,
+  resolveProgrammeBadges,
   resolveSourceBadge,
   type SourceBadgeInfo,
 } from './source-badge';

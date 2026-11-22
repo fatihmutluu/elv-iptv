@@ -1,4 +1,4 @@
-import type { BufferPreset } from '@elv/domain';
+import type { BufferPreset, LiveChannelSwitchModePref } from '@elv/domain';
 import { type PlaybackService, positionAt } from '@elv/playback';
 import { useFormFactor, useI18n } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
@@ -14,6 +14,7 @@ import {
   DEFAULT_PLAYER_CLOCK,
   DEFAULT_PLAYER_TIMERS,
   formatStatusLine,
+  mapRecentChannelRows,
   playerStyles,
 } from './PlayerScreenParts';
 import { type PlayerScreenProps, PlayerScreenStage } from './PlayerScreenStage';
@@ -82,6 +83,7 @@ export function PlayerScreen({
   onPersistAudioDevice,
   androidDecoderMode,
   onSelectAndroidDecoderMode,
+  liveChannelSwitchMode = 'instant',
   onTargetChange,
   onExit,
 }: PlayerScreenProps): ReactElement {
@@ -113,6 +115,8 @@ export function PlayerScreen({
   preferHevcRef.current = preferHevcOverDolbyVision;
   const filterSdhRef = useRef<boolean>(filterSdhSubtitles);
   filterSdhRef.current = filterSdhSubtitles;
+  const switchModeRef = useRef<LiveChannelSwitchModePref>(liveChannelSwitchMode);
+  switchModeRef.current = liveChannelSwitchMode;
   const reloadActiveTargetRef = useRef<() => void>(() => undefined);
   const { decoderModeRef, activeDecoderMode, showAndroidDecoder, handleSelectAndroidDecoderMode } =
     useAndroidDecoderModeSync({
@@ -136,10 +140,11 @@ export function PlayerScreen({
     decoderModeRef,
     preferHevcOverDolbyVisionRef: preferHevcRef,
     filterSdhSubtitlesRef: filterSdhRef,
+    liveChannelSwitchModeRef: switchModeRef,
     resolvedNextEpisodeRef,
   });
   reloadActiveTargetRef.current = handoff.reloadActiveTarget;
-  const { activeTarget, zapBy, jumpToChannel } = handoff;
+  const { activeTarget, previewTarget, zapBy, jumpToChannel } = handoff;
 
   const zapByRef = useRef<(delta: 1 | -1, repeat?: boolean) => void>(zapBy);
   zapByRef.current = zapBy;
@@ -185,7 +190,7 @@ export function PlayerScreen({
 
   const nowNext = usePlayerNowNext({
     catalog,
-    itemKey: activeTarget.itemKey,
+    itemKey: previewTarget?.itemKey ?? activeTarget.itemKey,
     enabled: activeTarget.kind === 'live' && !inPip,
     wallClock,
   });
@@ -311,6 +316,7 @@ export function PlayerScreen({
     onToggleAutoSubtitlesOnSkipBack,
     onToggleAutoPlayNextEpisode,
     onChannelListMove: (delta) => channelDrawerNavRef.current?.move(delta),
+    onChannelListSwitchTab: (dir) => channelDrawerNavRef.current?.switchTab(dir),
     onChannelListSelect: () => channelDrawerNavRef.current?.select(),
     onSetOrientationLocked: hostSetOrientationLocked,
     onSetDeinterlace: hostSetDeinterlace,
@@ -326,15 +332,15 @@ export function PlayerScreen({
     onToggleSleepTimerAction: extras.toggleSleepTimerAction,
     onCycleTimeDisplayMode: extras.handleCycleTimeDisplayMode,
     onUserActivity: extras.stillWatching.recordUserActivity,
+    previewChannelActive: previewTarget !== null,
+    onConfirmPreviewChannel: handoff.confirmPreviewChannel,
+    onCancelPreviewChannel: handoff.cancelPreviewChannel,
     stillWatchingVisible: !inPip && extras.stillWatching.promptVisible,
     onStillWatchingKey: (key) => {
-      if (key === 'left' || key === 'up') {
-        setStillWatchingAction('continue');
-      } else if (key === 'right' || key === 'down') {
-        setStillWatchingAction('stop');
-      } else if (key === 'back') {
-        extras.stillWatching.keepWatching();
-      } else if (key === 'select') {
+      if (key === 'left' || key === 'up') setStillWatchingAction('continue');
+      else if (key === 'right' || key === 'down') setStillWatchingAction('stop');
+      else if (key === 'back') extras.stillWatching.keepWatching();
+      else if (key === 'select') {
         if (stillWatchingActionRef.current === 'stop') extras.stillWatching.stopNow();
         else extras.stillWatching.keepWatching();
       }
@@ -393,12 +399,30 @@ export function PlayerScreen({
     }
   }, [openedEngine, activeTarget.itemKey, status.kind, controls.resizeMode]);
 
+  const showOsdRef = useRef(controls.showOsd);
+  showOsdRef.current = controls.showOsd;
+  const prevOsdHiddenRef = useRef(controls.osdHidden);
+  const cancelPreview = handoff.cancelPreviewChannel;
+  useEffect(() => {
+    if (previewTarget !== null) showOsdRef.current();
+  }, [previewTarget]);
+  useEffect(() => {
+    const wasHidden = prevOsdHiddenRef.current;
+    prevOsdHiddenRef.current = controls.osdHidden;
+    if (!wasHidden && controls.osdHidden && previewTarget !== null) cancelPreview();
+  }, [cancelPreview, controls.osdHidden, previewTarget]);
+
   const fetchChannelNowNext = useCallback(async (itemKey: string) => {
     const query = catalogRef.current.nowNext ?? catalogRef.current.epgNowNext;
     if (query === undefined) return null;
     const rows = await query([itemKey], wallClockRef.current());
     return rows.find((r) => r.channelKey === itemKey) ?? rows[0] ?? null;
   }, []);
+  const fetchRecentChannels = useCallback(
+    async (): Promise<readonly PlayableEntry[]> =>
+      mapRecentChannelRows((await catalogRef.current.listRecentChannels?.(20)) ?? []),
+    [],
+  );
 
   const anchor = activeService?.getState().anchor;
   const currentPosMs = anchor !== undefined ? positionAt(anchor, clock.now()) : undefined;
@@ -553,6 +577,7 @@ export function PlayerScreen({
       isTv={isTv}
       i18n={i18n}
       fetchNowNext={fetchChannelNowNext}
+      {...(catalog.listRecentChannels !== undefined ? { fetchRecentChannels } : {})}
       navigationRef={channelDrawerNavRef}
       onSelectChannel={(entry, index) => {
         extras.stillWatching.recordUserActivity();
@@ -622,8 +647,9 @@ export function PlayerScreen({
   );
 
   const osdProps = {
-    title: activeTarget.title,
-    subtitle: activeTarget.subtitle,
+    title: previewTarget?.title ?? activeTarget.title,
+    subtitle: previewTarget !== null ? previewTarget.subtitle : activeTarget.subtitle,
+    isChannelPreview: previewTarget !== null,
     channelDigits: controls.channelDigits,
     statusLine,
     statusKind: sessionState.kind === 'unavailable' ? ('idle' as const) : status.kind,

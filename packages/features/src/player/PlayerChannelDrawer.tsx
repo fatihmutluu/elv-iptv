@@ -38,6 +38,7 @@ const MAX_CACHED_ENTRIES = 75;
 /** Imperative navigation handle used by `PlayerScreen` to route TV D-pad input cleanly (`#57`). */
 export interface ChannelDrawerNavHandle {
   readonly move: (delta: 1 | -1) => void;
+  readonly switchTab: (dir: -1 | 1) => void;
   readonly select: () => void;
 }
 
@@ -52,9 +53,11 @@ export interface PlayerChannelDrawerProps {
   readonly isTv: boolean;
   readonly i18n: AppI18n;
   readonly fetchNowNext?: (itemKey: string) => Promise<NowNextEntry | null>;
+  /** Optional recent-channels loader for the `All | Recent` filter toggle (`#53`). */
+  readonly fetchRecentChannels?: () => Promise<readonly PlayableEntry[]>;
   /** Optional parent-owned navigation handle for unified `usePlayerControls` TV key routing (`#57`). */
   readonly navigationRef?: MutableRefObject<ChannelDrawerNavHandle | null>;
-  readonly onSelectChannel: (entry: PlayableEntry, index: number) => void;
+  readonly onSelectChannel: (entry: PlayableEntry, index?: number) => void;
   readonly onClose: () => void;
 }
 
@@ -96,10 +99,12 @@ function isInteractiveButtonTarget(target: unknown): boolean {
 
 function ChannelDrawerTvKeyFallback({
   onMove,
+  onSwitchTab,
   onSelect,
   onClose,
 }: {
   readonly onMove: (delta: 1 | -1) => void;
+  readonly onSwitchTab: (dir: -1 | 1) => void;
   readonly onSelect: () => void;
   readonly onClose: () => void;
 }): null {
@@ -113,6 +118,10 @@ function ChannelDrawerTvKeyFallback({
       (event.key === 'up' || event.key === 'down')
     ) {
       onMove(event.key === 'down' ? 1 : -1);
+      return true;
+    }
+    if (event.kind === 'press' && (event.key === 'left' || event.key === 'right')) {
+      onSwitchTab(event.key === 'right' ? 1 : -1);
       return true;
     }
     if (event.kind === 'press' && event.key === 'select') {
@@ -137,6 +146,7 @@ export function PlayerChannelDrawer({
   isTv,
   i18n,
   fetchNowNext,
+  fetchRecentChannels,
   navigationRef,
   onSelectChannel,
   onClose,
@@ -157,6 +167,16 @@ export function PlayerChannelDrawer({
   const initialIndex =
     totalCount > 0 ? Math.max(0, Math.min(totalCount - 1, playlist?.currentIndex ?? 0)) : 0;
 
+  const [filterTab, setFilterTab] = useState<'all' | 'recent'>('all');
+  const [recentEntries, setRecentEntries] = useState<readonly PlayableEntry[]>([]);
+  const filterTabRef = useRef(filterTab);
+  filterTabRef.current = filterTab;
+  const recentEntriesRef = useRef(recentEntries);
+  recentEntriesRef.current = recentEntries;
+
+  const isRecentTab = filterTab === 'recent' && fetchRecentChannels !== undefined;
+  const activeCount = isRecentTab ? recentEntries.length : totalCount;
+
   const [focusedIndex, setFocusedIndex] = useState(initialIndex);
   const [entriesByIndex, setEntriesByIndex] = useState<ReadonlyMap<number, PlayableEntry>>(
     () => new Map(),
@@ -175,17 +195,34 @@ export function PlayerChannelDrawer({
   onSelectRef.current = onSelectChannel;
 
   const moveFocus = (delta: 1 | -1): void => {
-    if (totalCount <= 0) return;
-    setFocusedIndex((prev) => Math.max(0, Math.min(totalCount - 1, prev + delta)));
+    const count =
+      filterTabRef.current === 'recent' && fetchRecentChannels !== undefined
+        ? recentEntriesRef.current.length
+        : totalCount;
+    if (count <= 0) return;
+    setFocusedIndex((prev) => Math.max(0, Math.min(count - 1, prev + delta)));
+  };
+  const switchTab = (dir: -1 | 1): void => {
+    if (fetchRecentChannels === undefined) return;
+    const nextTab: 'all' | 'recent' = dir > 0 ? 'recent' : 'all';
+    if (filterTabRef.current === nextTab) return;
+    filterTabRef.current = nextTab;
+    setFilterTab(nextTab);
+    setFocusedIndex(nextTab === 'all' ? initialIndex : 0);
   };
   const selectFocused = (): void => {
     const idx = focusedIndexRef.current;
+    if (filterTabRef.current === 'recent' && fetchRecentChannels !== undefined) {
+      const entry = recentEntriesRef.current[idx];
+      if (entry !== undefined) onSelectRef.current(entry, undefined);
+      return;
+    }
     const entry = entriesCacheRef.current.get(idx);
     if (entry !== undefined) onSelectRef.current(entry, idx);
   };
 
   if (navigationRef !== undefined) {
-    navigationRef.current = visible ? { move: moveFocus, select: selectFocused } : null;
+    navigationRef.current = visible ? { move: moveFocus, switchTab, select: selectFocused } : null;
   }
 
   useEffect(
@@ -196,9 +233,29 @@ export function PlayerChannelDrawer({
   );
 
   useEffect(() => {
-    if (visible && !wasVisibleRef.current) setFocusedIndex(initialIndex);
+    if (visible && !wasVisibleRef.current) {
+      setFilterTab('all');
+      setFocusedIndex(initialIndex);
+    }
     wasVisibleRef.current = visible;
   }, [initialIndex, visible]);
+
+  useEffect(() => {
+    if (!visible || !isRecentTab || fetchRecentChannels === undefined) return;
+    let cancelled = false;
+    void fetchRecentChannels()
+      .then((rows) => {
+        if (cancelled) return;
+        setRecentEntries(rows);
+        setFocusedIndex(0);
+      })
+      .catch(() => {
+        if (!cancelled) setRecentEntries([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchRecentChannels, isRecentTab, visible]);
 
   const { start: windowStart, end: windowEnd } = useMemo(
     () => computeChannelWindow(totalCount, focusedIndex, CHANNEL_DRAWER_WINDOW_SIZE),
@@ -253,7 +310,7 @@ export function PlayerChannelDrawer({
     };
   }, [playlist, visible, windowEnd, windowStart]);
 
-  const focusedEntry = entriesByIndex.get(focusedIndex);
+  const focusedEntry = isRecentTab ? recentEntries[focusedIndex] : entriesByIndex.get(focusedIndex);
   const focusedKey = focusedEntry?.itemKey;
 
   useEffect(() => {
@@ -290,11 +347,17 @@ export function PlayerChannelDrawer({
       onClose();
       return;
     }
-    if (totalCount <= 0) return;
+    if ((key === 'ArrowLeft' || key === 'ArrowRight') && fetchRecentChannels !== undefined) {
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      switchTab(key === 'ArrowRight' ? 1 : -1);
+      return;
+    }
+    if (activeCount <= 0) return;
     if (key === 'ArrowDown') {
       event.preventDefault?.();
       event.stopPropagation?.();
-      setFocusedIndex((prev) => Math.min(totalCount - 1, prev + 1));
+      setFocusedIndex((prev) => Math.min(activeCount - 1, prev + 1));
     } else if (key === 'ArrowUp') {
       event.preventDefault?.();
       event.stopPropagation?.();
@@ -303,11 +366,13 @@ export function PlayerChannelDrawer({
       const activeEl = (globalThis as { document?: { activeElement?: unknown } }).document
         ?.activeElement;
       if (isInteractiveButtonTarget(event.target ?? activeEl)) return;
-      const entry = entriesCacheRef.current.get(focusedIndex);
+      const entry = isRecentTab
+        ? recentEntriesRef.current[focusedIndex]
+        : entriesCacheRef.current.get(focusedIndex);
       if (entry !== undefined) {
         event.preventDefault?.();
         event.stopPropagation?.();
-        onSelectChannel(entry, focusedIndex);
+        onSelectChannel(entry, isRecentTab ? undefined : focusedIndex);
       }
     }
   };
@@ -318,7 +383,12 @@ export function PlayerChannelDrawer({
   const content = (
     <View testID="player-channel-drawer-panel" style={styles.inner}>
       {isTv && navigationRef === undefined ? (
-        <ChannelDrawerTvKeyFallback onMove={moveFocus} onSelect={selectFocused} onClose={onClose} />
+        <ChannelDrawerTvKeyFallback
+          onMove={moveFocus}
+          onSwitchTab={switchTab}
+          onSelect={selectFocused}
+          onClose={onClose}
+        />
       ) : null}
       <View style={[styles.header, { borderBottomColor: theme.colors.surfaceBorder }]}>
         <Text
@@ -337,10 +407,66 @@ export function PlayerChannelDrawer({
         />
       </View>
 
-      {totalCount === 0 ? (
-        <View testID="player-channel-drawer-empty" style={styles.emptyBox}>
+      {fetchRecentChannels !== undefined ? (
+        <View
+          testID="player-channel-drawer-tabs"
+          accessibilityRole="tablist"
+          style={[styles.filterTabs, { borderBottomColor: theme.colors.surfaceBorder }]}
+        >
+          {(['all', 'recent'] as const).map((tabKey) => {
+            const active = filterTab === tabKey;
+            const label =
+              tabKey === 'all'
+                ? i18n.t('player.channelDrawerAll')
+                : i18n.t('player.channelDrawerRecent');
+            return (
+              <Pressable
+                key={tabKey}
+                testID={`player-channel-drawer-tab-${tabKey}`}
+                accessibilityRole="tab"
+                accessibilityLabel={label}
+                accessibilityState={{ selected: active }}
+                focusable={!isTv}
+                onPress={() => {
+                  setFilterTab(tabKey);
+                  setFocusedIndex(tabKey === 'all' ? initialIndex : 0);
+                }}
+                style={[
+                  styles.filterTab,
+                  {
+                    borderBottomColor: active ? theme.colors.accent : 'transparent',
+                  },
+                  !isTv ? webCursorPointer() : undefined,
+                ]}
+              >
+                <Text
+                  style={[
+                    theme.typography.caption,
+                    {
+                      color: active ? theme.colors.textPrimary : theme.colors.textSecondary,
+                      fontWeight: active ? '700' : '500',
+                    },
+                  ]}
+                >
+                  {label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+
+      {activeCount === 0 ? (
+        <View
+          testID={
+            isRecentTab ? 'player-channel-drawer-recent-empty' : 'player-channel-drawer-empty'
+          }
+          style={styles.emptyBox}
+        >
           <Text style={[theme.typography.body, { color: theme.colors.textMuted }]}>
-            {i18n.t('player.channelListEmpty')}
+            {isRecentTab
+              ? i18n.t('player.channelDrawerRecentEmpty')
+              : i18n.t('player.channelListEmpty')}
           </Text>
         </View>
       ) : (
@@ -351,8 +477,8 @@ export function PlayerChannelDrawer({
             style={styles.list}
             showsVerticalScrollIndicator={false}
           >
-            {indices.map((idx) => {
-              const entry = entriesByIndex.get(idx);
+            {(isRecentTab ? recentEntries.map((_, idx) => idx) : indices).map((idx) => {
+              const entry = isRecentTab ? recentEntries[idx] : entriesByIndex.get(idx);
               const isPlaying = entry !== undefined && entry.itemKey === currentItemKey;
               const isFocused = idx === focusedIndex;
               if (entry === undefined) {
@@ -372,12 +498,14 @@ export function PlayerChannelDrawer({
               return (
                 <Pressable
                   key={entry.itemKey}
-                  testID={`player-channel-row-${idx}`}
+                  testID={
+                    isRecentTab ? `player-channel-recent-row-${idx}` : `player-channel-row-${idx}`
+                  }
                   focusable={!isTv}
                   accessibilityRole="button"
                   accessibilityLabel={entry.title}
                   accessibilityState={{ selected: isPlaying }}
-                  onPress={() => onSelectChannel(entry, idx)}
+                  onPress={() => onSelectChannel(entry, isRecentTab ? undefined : idx)}
                   {...hoverProps}
                   style={({ pressed }) => [
                     styles.row,
@@ -601,6 +729,16 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingBottom: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  filterTabs: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  filterTab: {
+    paddingVertical: 6,
+    borderBottomWidth: 2,
   },
   flex1: { flex: 1 },
   list: { flex: 1, maxHeight: 360 },

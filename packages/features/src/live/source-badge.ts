@@ -1,9 +1,15 @@
-import { cleanDisplayTitle, type ProgrammeRow, type SourceRow } from '@elv/data';
+import {
+  cleanDisplayTitle,
+  decodeProgrammeFlags,
+  type EpgGenre,
+  type ProgrammeRow,
+  type SourceRow,
+} from '@elv/data';
 import type { Theme } from '@elv/ui-kit';
 
 const MAX_SOURCE_BADGE_CHARS = 10;
 
-/** Subset of theme colors consumed by pure live badge & genre helpers (`#126`, `#401`). */
+/** Subset of theme colors consumed by pure live badge & genre helpers (`#126`, `#396`, `#401`). */
 export type SourceBadgeTheme = {
   readonly colors: Pick<
     Theme['colors'],
@@ -18,14 +24,17 @@ export interface SourceBadgeInfo {
   readonly color: string;
 }
 
-/** Semantic EPG genre classification used for subtle theme-derived cell tints (`#401`). */
-export type EpgGenreKind = 'sports' | 'news' | 'movies' | 'kids-doc';
+/** Semantic EPG genre classification used for subtle theme-derived cell tints (`#396`, `#401`). */
+export type EpgGenreKind = 'sports' | 'news' | 'movies' | 'kids-doc' | 'series';
 
-/** Resolved theme-derived EPG genre accent tint (`#401`). */
+/** Resolved theme-derived EPG genre accent tint (`#396`, `#401`). */
 export interface EpgGenreTint {
   readonly genre: EpgGenreKind;
   readonly accentColor: string;
 }
+
+/** Compact broadcast flag badge identifiers decoded from `ProgrammeRow.flags` (`#396`). */
+export type ProgrammeBadgeKind = 'live' | 'new' | 'premiere';
 
 const SPORTS_RE =
   /\b(?:sport|sports|football|soccer|basketball|tennis|formula|f1|match|league|futbol|basketbol|spor|maç)\b/i;
@@ -100,13 +109,40 @@ export function formatChannelDisplayName(name: string, cleanChannelTitles: boole
   return cleaned.length > 0 ? cleaned : name;
 }
 
-/**
- * Maps an EPG programme's text metadata onto a subtle theme-derived genre accent token (`#401`).
- */
-export function resolveEpgGenreTint(
-  programme: Pick<ProgrammeRow, 'title' | 'subTitle' | 'description'>,
+function mapNormalizedGenreTint(
+  genre: EpgGenre | null,
   theme: SourceBadgeTheme,
 ): EpgGenreTint | null {
+  switch (genre) {
+    case 'sports':
+      return { genre: 'sports', accentColor: theme.colors.successColor };
+    case 'news':
+      return { genre: 'news', accentColor: theme.colors.liveColor };
+    case 'movie':
+      return { genre: 'movies', accentColor: theme.colors.accent };
+    case 'kids':
+      return { genre: 'kids-doc', accentColor: theme.colors.focusRingColor };
+    case 'series':
+      return { genre: 'series', accentColor: theme.colors.accent };
+    default:
+      return null;
+  }
+}
+
+/**
+ * Maps an EPG programme onto a subtle theme-derived genre accent token (`#396`, `#401`).
+ * Uses O(1) lookup on `programme.genre` when populated (zero per-cell regex at render time),
+ * falling back to lightweight text matching only when `genre` is omitted.
+ */
+export function resolveEpgGenreTint(
+  programme: Pick<ProgrammeRow, 'title' | 'subTitle' | 'description'> & {
+    readonly genre?: EpgGenre | null;
+  },
+  theme: SourceBadgeTheme,
+): EpgGenreTint | null {
+  if (programme.genre !== undefined && programme.genre !== null) {
+    return mapNormalizedGenreTint(programme.genre, theme);
+  }
   const text = `${programme.title} ${programme.subTitle ?? ''} ${programme.description ?? ''}`;
   if (SPORTS_RE.test(text)) return { genre: 'sports', accentColor: theme.colors.successColor };
   if (NEWS_RE.test(text)) return { genre: 'news', accentColor: theme.colors.liveColor };
@@ -114,4 +150,15 @@ export function resolveEpgGenreTint(
   if (KIDS_DOC_RE.test(text))
     return { genre: 'kids-doc', accentColor: theme.colors.focusRingColor };
   return null;
+}
+
+/** Decodes `ProgrammeRow.flags` bitmask into ordered compact badge kinds (`#396`). */
+export function resolveProgrammeBadges(flags?: number): readonly ProgrammeBadgeKind[] {
+  if (flags === undefined || flags === 0) return [];
+  const decoded = decodeProgrammeFlags(flags);
+  const badges: ProgrammeBadgeKind[] = [];
+  if (decoded.isLive) badges.push('live');
+  if (decoded.isPremiere) badges.push('premiere');
+  if (decoded.isNew) badges.push('new');
+  return badges;
 }

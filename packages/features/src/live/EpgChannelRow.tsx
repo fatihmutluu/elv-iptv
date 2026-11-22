@@ -3,6 +3,7 @@ import type { LogoBackdropModePref } from '@elv/domain';
 import {
   ArtworkImage,
   hexToRgba,
+  MicroPill,
   SkeletonBox,
   TABULAR_NUMS_STYLE,
   useI18n,
@@ -11,7 +12,7 @@ import {
   webTransition,
 } from '@elv/ui-kit';
 import { memo, type ReactElement, useCallback, useMemo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   computeProgramProgress,
   type EpgPositionedSlot,
@@ -21,14 +22,38 @@ import {
 import { SourceBadgePill } from './SourceBadgePill';
 import {
   formatChannelDisplayName,
+  type ProgrammeBadgeKind,
   resolveEpgGenreTint,
+  resolveProgrammeBadges,
   type SourceBadgeInfo,
 } from './source-badge';
+
+const MIN_BADGE_WIDTH_RATIO = 0.14;
+const MIN_TIME_WIDTH_RATIO = 0.08;
+const LONG_PRESS_DELAY_MS = 450;
+
+function cellBadgeKey(kind: ProgrammeBadgeKind) {
+  if (kind === 'live') return 'epg.badge.live' as const;
+  if (kind === 'premiere') return 'epg.badge.premiere' as const;
+  return 'epg.badge.new' as const;
+}
+
+function cellBadgeTone(kind: ProgrammeBadgeKind): 'live' | 'accent' | 'neutral' {
+  if (kind === 'live') return 'live';
+  if (kind === 'premiere') return 'accent';
+  return 'neutral';
+}
 
 type SelectCellHandler = (
   rowIndex: number,
   slotIndex: number,
   channel: ItemRow,
+  programme: ProgrammeRow | null,
+) => void;
+
+type ContextMenuCellHandler = (
+  channel: ItemRow,
+  rowIndex: number,
   programme: ProgrammeRow | null,
 ) => void;
 
@@ -44,6 +69,7 @@ interface EpgSlotCellProps {
   readonly epgGenreTints: boolean;
   readonly focusBorderWidth: number;
   readonly onSelectCell: SelectCellHandler;
+  readonly onOpenContextMenu?: ContextMenuCellHandler;
 }
 
 const EpgSlotCell = memo(function EpgSlotCellInner({
@@ -58,11 +84,27 @@ const EpgSlotCell = memo(function EpgSlotCellInner({
   epgGenreTints,
   focusBorderWidth,
   onSelectCell,
+  onOpenContextMenu,
 }: EpgSlotCellProps): ReactElement {
   const theme = useTheme();
+  const i18n = useI18n();
   const handlePress = useCallback(() => {
     onSelectCell(rowIndex, slotIndex, channel, slot.programme);
   }, [channel, onSelectCell, rowIndex, slot.programme, slotIndex]);
+  const handleLongPress = useCallback(() => {
+    onOpenContextMenu?.(channel, rowIndex, slot.programme);
+  }, [channel, onOpenContextMenu, rowIndex, slot.programme]);
+
+  const isWeb = (Platform.OS as string) === 'web';
+  const webContextProps =
+    isWeb && onOpenContextMenu !== undefined
+      ? ({
+          onContextMenu: (e?: { preventDefault?: () => void }) => {
+            e?.preventDefault?.();
+            onOpenContextMenu(channel, rowIndex, slot.programme);
+          },
+        } as Record<string, unknown>)
+      : undefined;
 
   const progressRatio = slot.isLive
     ? computeProgramProgress(slot.programme.start, slot.programme.stop, nowMs)
@@ -71,6 +113,9 @@ const EpgSlotCell = memo(function EpgSlotCellInner({
     epgGenreTints && !isSelected && !slot.isLive
       ? resolveEpgGenreTint(slot.programme, theme)
       : null;
+  const badges =
+    slot.widthRatio >= MIN_BADGE_WIDTH_RATIO ? resolveProgrammeBadges(slot.programme.flags) : [];
+  const showTime = slot.widthRatio >= MIN_TIME_WIDTH_RATIO;
   const bgColor = isSelected
     ? theme.colors.focusFill
     : slot.isLive
@@ -98,6 +143,10 @@ const EpgSlotCell = memo(function EpgSlotCellInner({
         accessibilityLabel={`${displayName}, ${slot.programme.title}`}
         accessibilityState={{ selected: isSelected }}
         onPress={handlePress}
+        {...(onOpenContextMenu !== undefined
+          ? { onLongPress: handleLongPress, delayLongPress: LONG_PRESS_DELAY_MS }
+          : {})}
+        {...webContextProps}
         style={[
           styles.slotCard,
           {
@@ -113,22 +162,54 @@ const EpgSlotCell = memo(function EpgSlotCellInner({
           webTransition(theme, 'background-color, border-color'),
         ]}
       >
-        <Text
-          numberOfLines={1}
-          style={[theme.typography.caption, styles.slotTitle, { color: theme.colors.textPrimary }]}
-        >
-          {slot.programme.title}
-        </Text>
-        <Text
-          numberOfLines={1}
-          style={[
-            theme.typography.micro,
-            TABULAR_NUMS_STYLE,
-            { color: theme.colors.textSecondary },
-          ]}
-        >
-          {`${formatClockTime(slot.programme.start)} – ${formatClockTime(slot.programme.stop)}`}
-        </Text>
+        <View style={styles.slotTitleRow}>
+          {slot.clippedStart ? (
+            <Text
+              testID={`epg-cell-clipped-${rowIndex}-${slotIndex}`}
+              style={[
+                theme.typography.caption,
+                styles.clippedMarker,
+                { color: theme.colors.accent },
+              ]}
+            >
+              ‹
+            </Text>
+          ) : null}
+          <Text
+            numberOfLines={1}
+            style={[
+              theme.typography.caption,
+              styles.slotTitle,
+              { color: theme.colors.textPrimary },
+            ]}
+          >
+            {slot.programme.title}
+          </Text>
+          {badges.length > 0 ? (
+            <View style={styles.cellBadges}>
+              {badges.slice(0, 2).map((b) => (
+                <MicroPill
+                  key={b}
+                  testID={`epg-cell-badge-${rowIndex}-${slotIndex}-${b}`}
+                  label={i18n.t(cellBadgeKey(b))}
+                  tone={cellBadgeTone(b)}
+                />
+              ))}
+            </View>
+          ) : null}
+        </View>
+        {showTime ? (
+          <Text
+            numberOfLines={1}
+            style={[
+              theme.typography.micro,
+              TABULAR_NUMS_STYLE,
+              { color: theme.colors.textSecondary },
+            ]}
+          >
+            {`${formatClockTime(slot.programme.start)} – ${formatClockTime(slot.programme.stop)}`}
+          </Text>
+        ) : null}
         {slot.isLive ? (
           <View
             testID={`epg-cell-progress-track-${rowIndex}-${slotIndex}`}
@@ -169,6 +250,7 @@ export interface EpgChannelRowProps {
   readonly cleanChannelTitles?: boolean;
   readonly epgGenreTints?: boolean;
   readonly onSelectCell: SelectCellHandler;
+  readonly onOpenContextMenu?: ContextMenuCellHandler;
 }
 
 /**
@@ -193,6 +275,7 @@ export const EpgChannelRow = memo(function EpgChannelRowInner({
   cleanChannelTitles = false,
   epgGenreTints = true,
   onSelectCell,
+  onOpenContextMenu,
 }: EpgChannelRowProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
@@ -211,6 +294,20 @@ export const EpgChannelRow = memo(function EpgChannelRowInner({
     if (!channel) return;
     onSelectCell(rowIndex, 0, channel, null);
   }, [channel, onSelectCell, rowIndex]);
+  const handleRowContext = useCallback(() => {
+    if (!channel) return;
+    onOpenContextMenu?.(channel, rowIndex, slots[0]?.programme ?? null);
+  }, [channel, onOpenContextMenu, rowIndex, slots]);
+  const isWeb = (Platform.OS as string) === 'web';
+  const rowWebContextProps =
+    isWeb && channel && onOpenContextMenu !== undefined
+      ? ({
+          onContextMenu: (e?: { preventDefault?: () => void }) => {
+            e?.preventDefault?.();
+            onOpenContextMenu(channel, rowIndex, slots[0]?.programme ?? null);
+          },
+        } as Record<string, unknown>)
+      : undefined;
 
   if (!channel) {
     return (
@@ -258,6 +355,10 @@ export const EpgChannelRow = memo(function EpgChannelRowInner({
         accessibilityRole="button"
         accessibilityLabel={displayName}
         onPress={handleChannelPress}
+        {...(onOpenContextMenu !== undefined
+          ? { onLongPress: handleRowContext, delayLongPress: LONG_PRESS_DELAY_MS }
+          : {})}
+        {...rowWebContextProps}
         style={[
           styles.channelCol,
           {
@@ -312,6 +413,10 @@ export const EpgChannelRow = memo(function EpgChannelRowInner({
             accessibilityLabel={`${displayName}, ${i18n.t('epg.noGuideData')}`}
             accessibilityState={{ selected: isFocusedRow && focusedSlotIndex === 0 }}
             onPress={handleEmptyPress}
+            {...(onOpenContextMenu !== undefined
+              ? { onLongPress: handleRowContext, delayLongPress: LONG_PRESS_DELAY_MS }
+              : {})}
+            {...rowWebContextProps}
             style={[
               styles.emptySlot,
               {
@@ -352,6 +457,7 @@ export const EpgChannelRow = memo(function EpgChannelRowInner({
               epgGenreTints={epgGenreTints}
               focusBorderWidth={focusBorderWidth}
               onSelectCell={onSelectCell}
+              {...(onOpenContextMenu !== undefined ? { onOpenContextMenu } : {})}
             />
           ))
         )}
@@ -395,7 +501,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  slotTitle: { fontWeight: '600' },
+  slotTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 0 },
+  clippedMarker: { fontWeight: '700', flexShrink: 0 },
+  slotTitle: { flex: 1, fontWeight: '600', minWidth: 0 },
+  cellBadges: { flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 0 },
   emptySlot: {
     position: 'absolute',
     top: 4,

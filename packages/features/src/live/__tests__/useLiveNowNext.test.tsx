@@ -15,6 +15,8 @@ function makeProgramme(channelKey: string, title: string, nowMs: number): Progra
     description: null,
     episodeNum: null,
     icon: null,
+    genre: null,
+    flags: 0,
   };
 }
 

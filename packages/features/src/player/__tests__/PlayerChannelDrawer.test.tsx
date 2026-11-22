@@ -44,6 +44,8 @@ function makeNowNext(channelKey: string, nowTitle: string, nextTitle: string): N
       description: null,
       episodeNum: null,
       icon: null,
+      genre: null,
+      flags: 0,
     },
     next: {
       channelKey,
@@ -56,6 +58,8 @@ function makeNowNext(channelKey: string, nowTitle: string, nextTitle: string): N
       description: null,
       episodeNum: null,
       icon: null,
+      genre: null,
+      flags: 0,
     },
   };
 }

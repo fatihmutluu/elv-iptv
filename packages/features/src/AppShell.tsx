@@ -178,12 +178,21 @@ export function AppShell(props: AppShellProps): ReactElement {
     setHeroScrolled(false);
     playTargetRef.current = enriched;
     setPlayTarget(enriched);
+    if (enriched.kind === 'live') {
+      setLiveMemory((p) => ({ ...p, ...recordChannelTune(p, enriched.itemKey) }));
+    }
   }, []);
   const replacePlayTarget = useCallback((enriched: PlayTarget) => {
     playTargetRef.current = enriched;
     setPlayTarget(enriched);
     if (enriched.kind === 'live') {
-      setLiveMemory((p) => ({ ...p, ...recordChannelTune(p, enriched.itemKey) }));
+      setLiveMemory((p) => ({
+        ...p,
+        ...recordChannelTune(p, enriched.itemKey),
+        ...(enriched.previousChannel !== undefined
+          ? { previousChannelKey: enriched.previousChannel.itemKey }
+          : {}),
+      }));
     }
   }, []);
   const connectionGuard = useConnectionLimitGuard({
@@ -239,10 +248,16 @@ export function AppShell(props: AppShellProps): ReactElement {
     void shell.syncSourcesAndBump();
   }, [shell.syncSourcesAndBump]);
   useGuideAutoRefresh({
-    catalog: observedCatalog,
+    catalog,
     sources,
+    catalogRefreshHours: preferences.preferences.catalogRefreshHours,
     guideRefreshHours: preferences.preferences.guideRefreshHours,
-    enabled: documentVisible && appForeground && playTarget === null,
+    sessionImportedIdsRef: shell.autoImportedIdsRef,
+    enabled:
+      documentVisible &&
+      appForeground &&
+      playTarget === null &&
+      !(activeTab === 'live' && liveEmbeddedPlaybackActive),
     onGuideRefreshed: handleGuideRefreshed,
   });
   const selectTab = useCallback((tab: AppTab, focusContent = true) => {
@@ -385,6 +400,16 @@ export function AppShell(props: AppShellProps): ReactElement {
   };
   const onPlayerTargetChange = connectionGuard.replaceActiveTarget;
   const onPlayerExit = () => {
+    const exiting = playTargetRef.current;
+    if (exiting?.kind === 'live') {
+      setLiveMemory((p) => ({
+        ...p,
+        activeChannelKey: exiting.itemKey,
+        ...(exiting.previousChannel !== undefined
+          ? { previousChannelKey: exiting.previousChannel.itemKey }
+          : {}),
+      }));
+    }
     connectionGuard.releaseActive();
     playTargetRef.current = null;
     setPlayTarget(null);
@@ -461,6 +486,7 @@ export function AppShell(props: AppShellProps): ReactElement {
                       }
                     : {})}
                   {...(appLifecycle !== undefined ? { appLifecycle } : {})}
+                  liveChannelSwitchMode={preferences.preferences.liveChannelSwitchMode}
                   onTargetChange={onPlayerTargetChange}
                   onExit={onPlayerExit}
                 />

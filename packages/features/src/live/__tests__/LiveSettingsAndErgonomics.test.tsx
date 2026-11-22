@@ -98,6 +98,8 @@ function makeMockCatalog(
         description: 'Top headlines',
         episodeNum: null,
         icon: null,
+        genre: null,
+        flags: 0,
       },
       {
         channelKey: ch0.key,
@@ -110,6 +112,8 @@ function makeMockCatalog(
         description: 'Championship sports coverage',
         episodeNum: null,
         icon: null,
+        genre: null,
+        flags: 0,
       },
     ],
     [ch1.key]: [
@@ -124,6 +128,8 @@ function makeMockCatalog(
         description: 'Sports highlights',
         episodeNum: null,
         icon: null,
+        genre: null,
+        flags: 0,
       },
     ],
   };

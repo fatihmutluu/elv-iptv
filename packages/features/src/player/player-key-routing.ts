@@ -66,6 +66,7 @@ export interface PlayerControlsParams {
   onToggleAutoSubtitlesOnSkipBack?: (() => void) | undefined;
   onToggleAutoPlayNextEpisode?: (() => void) | undefined;
   onChannelListMove?: ((delta: 1 | -1) => void) | undefined;
+  onChannelListSwitchTab?: ((dir: -1 | 1) => void) | undefined;
   onChannelListSelect?: (() => void) | undefined;
   onSetOrientationLocked?: ((locked: boolean) => void) | undefined;
   onSetDeinterlace?: ((enabled: boolean) => void) | undefined;
@@ -83,6 +84,9 @@ export interface PlayerControlsParams {
   onUserActivity?: (() => void) | undefined;
   stillWatchingVisible?: boolean | undefined;
   onStillWatchingKey?: ((key: KeyEvent['key']) => void) | undefined;
+  previewChannelActive?: boolean | undefined;
+  onConfirmPreviewChannel?: (() => void) | undefined;
+  onCancelPreviewChannel?: (() => void) | undefined;
 }
 
 /** Collaborators for {@link routeOverlayAndMediaKey}. */
@@ -121,6 +125,7 @@ export interface OverlayKeyRouteDeps {
   readonly toggleAutoSubtitlesOnSkipBack?: () => void;
   readonly toggleAutoPlayNextEpisode?: () => void;
   readonly onChannelListMove?: (delta: 1 | -1) => void;
+  readonly onChannelListSwitchTab?: ((dir: -1 | 1) => void) | undefined;
   readonly onChannelListSelect?: () => void;
   readonly togglePlayPause: () => void;
   readonly openTracks: (preferredColumn?: TrackPickerColumn) => void;
@@ -258,6 +263,8 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       (event.key === 'up' || event.key === 'down')
     ) {
       d.onChannelListMove?.(event.key === 'down' ? 1 : -1);
+    } else if (event.kind === 'press' && (event.key === 'left' || event.key === 'right')) {
+      d.onChannelListSwitchTab?.(event.key === 'right' ? 1 : -1);
     } else if (event.kind === 'press' && event.key === 'select') {
       if (d.allowTvSelect()) d.onChannelListSelect?.();
     }

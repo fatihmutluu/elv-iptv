@@ -1556,3 +1556,123 @@ msgstr "Metin altyazılardaki [ses efekti], (açıklama) ve KONUŞMACI: etiketle
 
 msgid "settings.playback.osdTimeMode"
 msgstr "Oynatıcı süre gösterimi"
+
+msgid "settings.liveTv.catalogRefreshInterval"
+msgstr "Katalog otomatik yenileme"
+
+msgid "settings.liveTv.catalogRefreshIntervalDesc"
+msgstr "Kanalları, filmleri ve dizileri arka planda otomatik yenile"
+
+msgid "settings.liveTv.refreshManualOnly"
+msgstr "Yalnızca manuel"
+
+msgid "settings.liveTv.refreshHours"
+msgstr "{hours} saatte bir"
+
+msgid "sources.refreshGuide"
+msgstr "Rehberi yenile"
+
+msgid "sources.lastSynced"
+msgstr "Güncellendi: {time}"
+
+msgid "sources.neverSynced"
+msgstr "Henüz güncellenmedi"
+
+msgid "live.previousChannel"
+msgstr "Önceki kanal"
+
+msgid "home.recentChannels"
+msgstr "Son izlenen kanallar"
+
+msgid "player.channelDrawerAll"
+msgstr "Tümü"
+
+msgid "player.channelDrawerRecent"
+msgstr "Son izlenenler"
+
+msgid "player.channelDrawerRecentEmpty"
+msgstr "İzlediğin kanallar burada görünür"
+
+msgid "settings.liveTv.channelSwitchMode"
+msgstr "CH+/CH- kanal değiştirme"
+
+msgid "settings.liveTv.channelSwitchModeDesc"
+msgstr "Hemen kanala geç veya açmadan önce program bilgisini önizle"
+
+msgid "settings.liveTv.switchInstant"
+msgstr "Anında geç"
+
+msgid "settings.liveTv.switchPreview"
+msgstr "Önce önizle"
+
+msgid "player.previewChannelHint"
+msgstr "Açmak için OK · İptal için Geri"
+
+msgid "player.previewBadge"
+msgstr "Önizleme"
+
+msgid "epg.today"
+msgstr "Bugün"
+
+msgid "epg.tomorrow"
+msgstr "Yarın"
+
+msgid "epg.programmeDetails"
+msgstr "Program detayları"
+
+msgid "epg.tuneChannel"
+msgstr "Kanalı aç"
+
+msgid "epg.durationMinutes"
+msgstr "{minutes} dk"
+
+msgid "epg.noDescription"
+msgstr "Program açıklaması bulunmuyor."
+
+msgid "epg.upcoming"
+msgstr "Yaklaşan"
+
+msgid "epg.badge.live"
+msgstr "Canlı"
+
+msgid "epg.badge.new"
+msgstr "Yeni"
+
+msgid "epg.badge.premiere"
+msgstr "İlk gösterim"
+
+msgid "epg.genre.sports"
+msgstr "Spor"
+
+msgid "epg.genre.movie"
+msgstr "Film"
+
+msgid "epg.genre.news"
+msgstr "Haber"
+
+msgid "epg.genre.kids"
+msgstr "Çocuk"
+
+msgid "epg.genre.series"
+msgstr "Dizi"
+
+msgid "epg.genre.other"
+msgstr "Genel"
+
+msgid "live.contextMenuTitle"
+msgstr "Kanal seçenekleri"
+
+msgid "live.context.play"
+msgstr "Kanalı oynat"
+
+msgid "live.context.addFavorite"
+msgstr "Favorilere ekle"
+
+msgid "live.context.removeFavorite"
+msgstr "Favorilerden çıkar"
+
+msgid "live.context.programmeDetails"
+msgstr "Program detayları"
+
+msgid "live.context.hideChannel"
+msgstr "Kanalı gizle"

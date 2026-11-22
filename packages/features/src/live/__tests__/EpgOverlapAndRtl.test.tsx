@@ -61,6 +61,8 @@ function makeProgramme(
     description: `Synopsis for ${title}`,
     episodeNum: null,
     icon: null,
+    genre: null,
+    flags: 0,
   };
 }
 

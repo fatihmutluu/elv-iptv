@@ -1,8 +1,10 @@
+import { EPG_FLAG_LIVE, EPG_FLAG_NEW, EPG_FLAG_PREMIERE } from '@elv/data';
 import { describe, expect, it } from 'vitest';
 import {
   buildSourceBadgeMap,
   formatChannelDisplayName,
   resolveEpgGenreTint,
+  resolveProgrammeBadges,
   resolveSourceBadge,
   type SourceBadgeTheme,
 } from './source-badge';
@@ -98,5 +100,34 @@ describe('resolveSourceBadge, formatChannelDisplayName & resolveEpgGenreTint (#1
         MOCK_THEME,
       ),
     ).toBeNull();
+  });
+
+  it('uses O(1) programme.genre lookup without regex fallback and decodes Live/New/Premiere badges (#396)', () => {
+    expect(
+      resolveEpgGenreTint(
+        { title: 'News Hour', subTitle: null, description: null, genre: 'sports' },
+        MOCK_THEME,
+      ),
+    ).toEqual({ genre: 'sports', accentColor: MOCK_THEME.colors.successColor });
+    expect(
+      resolveEpgGenreTint(
+        { title: 'Football Match', subTitle: null, description: null, genre: 'other' },
+        MOCK_THEME,
+      ),
+    ).toBeNull();
+    expect(
+      resolveEpgGenreTint(
+        { title: 'Drama', subTitle: null, description: null, genre: 'series' },
+        MOCK_THEME,
+      ),
+    ).toEqual({ genre: 'series', accentColor: MOCK_THEME.colors.accent });
+
+    expect(resolveProgrammeBadges(0)).toEqual([]);
+    expect(resolveProgrammeBadges(undefined)).toEqual([]);
+    expect(resolveProgrammeBadges(EPG_FLAG_LIVE | EPG_FLAG_PREMIERE | EPG_FLAG_NEW)).toEqual([
+      'live',
+      'premiere',
+      'new',
+    ]);
   });
 });

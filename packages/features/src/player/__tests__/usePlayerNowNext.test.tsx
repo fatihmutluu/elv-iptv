@@ -15,6 +15,8 @@ const ENTRY_1: NowNextEntry = {
     description: 'Top stories.',
     episodeNum: null,
     icon: null,
+    genre: null,
+    flags: 0,
   },
   next: {
     channelKey: 'ch:1',
@@ -27,6 +29,8 @@ const ENTRY_1: NowNextEntry = {
     description: null,
     episodeNum: null,
     icon: null,
+    genre: null,
+    flags: 0,
   },
 };
 

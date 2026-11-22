@@ -1,4 +1,4 @@
-import type { ItemRow, NowNextEntry } from '@elv/data';
+import type { ItemRow, NowNextEntry, ProgrammeRow } from '@elv/data';
 import type { LogoBackdropModePref } from '@elv/domain';
 import {
   ArtworkImage,
@@ -44,6 +44,11 @@ export interface LiveWatchStageProps {
   readonly onToggleFavorite?: (channel: ItemRow) => void;
   readonly onBrowseChannels?: () => void;
   readonly onSelectChannel: (channel: ItemRow, index: number) => void;
+  readonly onOpenContextMenu?: (
+    channel: ItemRow,
+    index: number,
+    programme: ProgrammeRow | null,
+  ) => void;
   readonly onWatchFullscreen: (channel: ItemRow, index: number) => void;
   readonly focusedControl?: 'miniguide' | 'favorite' | 'watch' | 'browse' | null;
   readonly focusedZapIndex?: number | null;
@@ -290,6 +295,9 @@ export function LiveWatchStage(p: LiveWatchStageProps): ReactElement {
             cleanChannelTitles={cleanChannelTitles}
             hydrateNowNext={p.hydrateNowNext}
             onSelectChannel={p.onSelectChannel}
+            {...(p.onOpenContextMenu !== undefined
+              ? { onOpenContextMenu: p.onOpenContextMenu }
+              : {})}
           />
         ) : null}
         <View style={styles.desktopMainCol}>
@@ -369,6 +377,7 @@ export function LiveWatchStage(p: LiveWatchStageProps): ReactElement {
           cleanChannelTitles={cleanChannelTitles}
           hydrateNowNext={p.hydrateNowNext}
           onSelectChannel={p.onSelectChannel}
+          {...(p.onOpenContextMenu !== undefined ? { onOpenContextMenu: p.onOpenContextMenu } : {})}
         />
       ) : null}
     </View>

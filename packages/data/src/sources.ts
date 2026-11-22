@@ -199,6 +199,7 @@ export const TABLES_BY_SOURCE: readonly string[] = [
   'watch_progress',
   'favorites',
   'track_preferences',
+  'recent_channels',
 ];
 const NON_URLVARS_PARTS = ['xtream', 'playlist'] as const;
 
@@ -410,6 +411,7 @@ export async function finishDeletingSource(
     await tx.run('DELETE FROM watch_progress WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM favorites WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM track_preferences WHERE source_id = ?', [id]);
+    await tx.run('DELETE FROM recent_channels WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM sources WHERE id = ?', [id]);
   });
 }

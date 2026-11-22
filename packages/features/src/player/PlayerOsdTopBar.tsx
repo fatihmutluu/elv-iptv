@@ -36,6 +36,7 @@ export interface PlayerOsdProps {
   canZap: boolean;
   hasTracks: boolean;
   hasPreviousChannel?: boolean;
+  isChannelPreview?: boolean;
   hasNextEpisodeAction?: boolean;
   canLock?: boolean;
   showRetry: boolean;
@@ -191,7 +192,13 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
           >
             {displayTitle}
           </Text>
-          {!isVod ? (
+          {!isVod && p.isChannelPreview === true ? (
+            <MicroPill
+              testID="player-preview-badge"
+              label={i18n.t('player.previewBadge')}
+              tone="accent"
+            />
+          ) : !isVod ? (
             <MicroPill testID="player-live-badge" label={i18n.t('ui.liveBadge')} tone="live" />
           ) : null}
           {!isVod && p.channelDigits !== undefined && p.channelDigits.length > 0 ? (
@@ -201,6 +208,15 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
             <StreamBadgePills videoInfo={p.videoInfo} tracks={p.tracks} />
           ) : null}
         </View>
+        {!isVod && p.isChannelPreview === true ? (
+          <Text
+            testID="player-preview-hint"
+            numberOfLines={1}
+            style={[theme.typography.caption, { color: theme.colors.accent }]}
+          >
+            {i18n.t('player.previewChannelHint')}
+          </Text>
+        ) : null}
         {topSubtitle !== null ? (
           <Text
             testID="osd-subtitle"

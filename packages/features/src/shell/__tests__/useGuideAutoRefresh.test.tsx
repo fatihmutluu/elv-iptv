@@ -1,7 +1,9 @@
 import type { CatalogService, SourceRow } from '@elv/data';
-import { ok } from '@elv/domain';
+import { elvError, err, ok } from '@elv/domain';
 import { act, render } from '@testing-library/react-native';
 import type { ReactElement } from 'react';
+import { createObservedCatalog } from '../../app-shell-state';
+import { createPlaybackGuard } from '../../ports/playback-guard';
 import { type UseGuideAutoRefreshOptions, useGuideAutoRefresh } from '../useGuideAutoRefresh';
 
 function makeClock() {
@@ -250,5 +252,152 @@ describe('useGuideAutoRefresh (#401)', () => {
     await view.unmount();
     expect(signals[1]?.aborted).toBe(true);
     expect(clock.activeTimerCount()).toBe(0);
+  });
+
+  it('checks persisted lastCatalogSyncAt/lastGuideSyncAt on startup, honors 0 (manual only), and applies 1h failure backoff (#68)', async () => {
+    const clock = makeClock();
+    const staleSource: SourceRow = {
+      ...READY_SOURCE,
+      lastCatalogSyncAt: clock.now() - 25 * 3_600_000,
+      lastGuideSyncAt: clock.now() - 13 * 3_600_000,
+    };
+    const importSource = jest.fn(async () => err(elvError('network', 'offline')));
+    const importGuide = jest.fn(async () => OK_SUMMARY);
+    const onGuideRefreshed = jest.fn();
+    const catalog = { importSource, importGuide } as unknown as CatalogService;
+
+    const view = await render(
+      <Probe
+        catalog={catalog}
+        sources={[staleSource]}
+        catalogRefreshHours={24}
+        guideRefreshHours={12}
+        enabled
+        onGuideRefreshed={onGuideRefreshed}
+        now={clock.now}
+        setTimeoutFn={clock.setTimeoutFn}
+        clearTimeoutFn={clock.clearTimeoutFn}
+      />,
+    );
+
+    // Immediate startup check triggers both stale catalog and guide
+    await clock.advance(0);
+    expect(importSource).toHaveBeenCalledTimes(1);
+    expect(importGuide).toHaveBeenCalledTimes(1);
+    expect(onGuideRefreshed).toHaveBeenCalledTimes(1);
+
+    // Failed catalog refresh must NOT tight-loop every 15m (1h failure backoff)
+    await clock.advance(45 * 60_000);
+    expect(importSource).toHaveBeenCalledTimes(1);
+
+    // After 1h backoff elapses, catalog retries once
+    await clock.advance(20 * 60_000);
+    expect(importSource).toHaveBeenCalledTimes(2);
+
+    // Setting both intervals to 0 (manual only) schedules zero timers
+    await view.rerender(
+      <Probe
+        catalog={catalog}
+        sources={[staleSource]}
+        catalogRefreshHours={0}
+        guideRefreshHours={0}
+        enabled
+        onGuideRefreshed={onGuideRefreshed}
+        now={clock.now}
+        setTimeoutFn={clock.setTimeoutFn}
+        clearTimeoutFn={clock.clearTimeoutFn}
+      />,
+    );
+    expect(clock.activeTimerCount()).toBe(0);
+  });
+
+  it('clears failure backoff immediately on network online event (#68)', async () => {
+    const clock = makeClock();
+    const listeners = new Map<string, Set<() => void>>();
+    const win = globalThis as unknown as {
+      addEventListener?: (type: string, fn: () => void) => void;
+      removeEventListener?: (type: string, fn: () => void) => void;
+    };
+    const origAdd = win.addEventListener;
+    const origRemove = win.removeEventListener;
+    win.addEventListener = (type, fn) => {
+      const set = listeners.get(type) ?? new Set();
+      set.add(fn);
+      listeners.set(type, set);
+    };
+    win.removeEventListener = (type, fn) => {
+      listeners.get(type)?.delete(fn);
+    };
+    try {
+      const staleSource: SourceRow = {
+        ...READY_SOURCE,
+        lastGuideSyncAt: clock.now() - 13 * 3_600_000,
+      };
+      const importGuide = jest
+        .fn()
+        .mockResolvedValueOnce(err(elvError('network', 'offline')))
+        .mockResolvedValueOnce(OK_SUMMARY);
+      const onGuideRefreshed = jest.fn();
+      const catalog = { importGuide } as unknown as CatalogService;
+
+      const view = await render(
+        <Probe
+          catalog={catalog}
+          sources={[staleSource]}
+          catalogRefreshHours={0}
+          guideRefreshHours={12}
+          enabled
+          onGuideRefreshed={onGuideRefreshed}
+          now={clock.now}
+          setTimeoutFn={clock.setTimeoutFn}
+          clearTimeoutFn={clock.clearTimeoutFn}
+        />,
+      );
+
+      await clock.advance(0);
+      expect(importGuide).toHaveBeenCalledTimes(1);
+      expect(onGuideRefreshed).not.toHaveBeenCalled();
+
+      // Network reconnects 2 minutes later (well inside 1h backoff) -> retries immediately!
+      await clock.advance(2 * 60_000);
+      await act(async () => {
+        for (const fn of listeners.get('online') ?? []) fn();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(importGuide).toHaveBeenCalledTimes(2);
+      expect(onGuideRefreshed).toHaveBeenCalledTimes(1);
+      await view.unmount();
+    } finally {
+      win.addEventListener = origAdd;
+      win.removeEventListener = origRemove;
+    }
+  });
+
+  it('createObservedCatalog wraps importGuide with syncSourcesAndBump so manual guide refresh invalidates cache (#68)', async () => {
+    const syncSourcesAndBump = jest.fn(async () => undefined);
+    const importGuide = jest.fn(async () => OK_SUMMARY);
+    const rawCatalog = {
+      addSource: jest.fn(),
+      removeSource: jest.fn(),
+      importSource: jest.fn(async () => OK_SUMMARY),
+      importGuide,
+      listSources: jest.fn(async () => []),
+      categories: jest.fn(async () => []),
+      items: jest.fn(async () => []),
+      seasons: jest.fn(async () => []),
+      episodes: jest.fn(async () => []),
+      resolveStream: jest.fn(),
+      close: jest.fn(async () => undefined),
+    } as unknown as CatalogService;
+
+    const observed = createObservedCatalog(
+      rawCatalog,
+      createPlaybackGuard(() => undefined),
+      syncSourcesAndBump,
+    );
+    await observed.importGuide?.('s1');
+    expect(importGuide).toHaveBeenCalledWith('s1', undefined);
+    expect(syncSourcesAndBump).toHaveBeenCalledTimes(1);
   });
 });

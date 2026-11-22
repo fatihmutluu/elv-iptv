@@ -82,6 +82,14 @@ const isOptionalTrimmedCleanString = (x: unknown): boolean =>
 
 export const isCleanKey = (x: unknown, max = MAX_ITEM_KEY_CHARS): x is string =>
   isBoundedString(x, 1, max) && !hasControlChar(x);
+export const isSafeRecentChannelKey = (x: unknown): x is string =>
+  isBoundedString(x, 1, 256) &&
+  x.trim().length > 0 &&
+  !hasControlChar(x) &&
+  !x.includes('://') &&
+  !x.includes('{{') &&
+  !x.includes('@') &&
+  !x.includes('?');
 export const isOptionalProfileId = (x: unknown): boolean =>
   x === undefined || isCleanKey(x, MAX_PROFILE_ID_CHARS);
 export const isOptionalSourceId = (x: unknown): boolean =>

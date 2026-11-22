@@ -228,6 +228,8 @@ describe('createCatalogUiCache', () => {
       description: null,
       episodeNum: null,
       icon: null,
+      genre: null,
+      flags: 0,
     };
     cache.epgWindow.set(`${favCh.key}|1000`, { rows: [prog], storedAt: 1_000 }, 0);
     expect(cache.epgWindow.get(`${favCh.key}|1000`, 0)?.rows).toEqual([prog]);

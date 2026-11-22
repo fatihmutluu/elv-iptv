@@ -43,6 +43,8 @@ function generateWindowForChannel(
         description: tpl.description,
         episodeNum: tpl.episodeNum,
         icon: null,
+        genre: tpl.genre === 'other' ? schedule.genre : tpl.genre,
+        flags: tpl.flags,
       });
     }
   }

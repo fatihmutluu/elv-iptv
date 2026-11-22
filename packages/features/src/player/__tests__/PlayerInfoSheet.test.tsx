@@ -42,6 +42,8 @@ const SAMPLE_NOW_NEXT: NowNextEntry = {
     description: 'Comprehensive evening news coverage from around the world.',
     episodeNum: null,
     icon: null,
+    genre: null,
+    flags: 0,
   },
   next: {
     channelKey: 'm:src:ch:1',
@@ -54,6 +56,8 @@ const SAMPLE_NOW_NEXT: NowNextEntry = {
     description: null,
     episodeNum: null,
     icon: null,
+    genre: null,
+    flags: 0,
   },
 };
 

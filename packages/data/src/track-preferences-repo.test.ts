@@ -36,7 +36,7 @@ function memoryUserDataStore(): UserDataStore & { value: string | undefined } {
 
 describe('MIGRATION_V9 & track_preferences repo (#208)', () => {
   it('upgrades a v8 database to v9 with track_preferences table and source index', async () => {
-    expect(SCHEMA_VERSION).toBe(9);
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(9);
     expect(TABLES_BY_SOURCE).toContain('track_preferences');
 
     const { db } = testDb();
@@ -47,7 +47,7 @@ describe('MIGRATION_V9 & track_preferences repo (#208)', () => {
 
     const res = await openCatalog(db);
     expect(res.ok).toBe(true);
-    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: 9 }]);
+    expect(await db.all('PRAGMA user_version')).toEqual([{ user_version: SCHEMA_VERSION }]);
     const indexes = await db.all<{ name: string }>(
       "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_track_preferences_source'",
     );

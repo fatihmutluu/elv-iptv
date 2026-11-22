@@ -179,6 +179,8 @@ describe('guide-queries', () => {
           description: 'A coastal mystery.',
           episodeNum: 'S01E02',
           icon: 'http://img.example/1.png',
+          genre: null,
+          flags: 0,
         },
         next: {
           channelKey: 'x:s1:live:1',
@@ -191,6 +193,8 @@ describe('guide-queries', () => {
           description: null,
           episodeNum: null,
           icon: null,
+          genre: null,
+          flags: 0,
         },
       });
       // Shared guide_id maps cleanly onto second channel with its own channelKey

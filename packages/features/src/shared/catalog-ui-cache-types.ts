@@ -22,6 +22,7 @@ export interface CachedHomeSnapshot {
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
   readonly liveCategory: CategoryRow | null;
   readonly liveItems: readonly ItemRow[];
+  readonly recentChannels?: readonly ItemRow[];
   readonly movies: readonly ItemRow[];
   readonly series: readonly ItemRow[];
 }

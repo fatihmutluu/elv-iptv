@@ -1,4 +1,5 @@
 import type { SqlDriver } from '@elv/domain';
+import type { EpgGenre } from '@elv/sources';
 
 /** Default maximum rows returned by {@link queryCrossChannelEpgSlice}. */
 export const DEFAULT_EPG_SLICE_LIMIT = 200;
@@ -17,6 +18,8 @@ export interface CrossChannelProgrammeRow {
   readonly description: string | null;
   readonly episodeNum: string | null;
   readonly icon: string | null;
+  readonly genre: EpgGenre | null;
+  readonly flags: number;
 }
 
 interface RawSliceProgrammeRow {
@@ -28,6 +31,14 @@ interface RawSliceProgrammeRow {
   description: string | null;
   episode_num: string | null;
   icon: string | null;
+  genre: string | null;
+  flags: number | null;
+}
+
+const VALID_GENRES = new Set<EpgGenre>(['sports', 'movie', 'news', 'kids', 'series', 'other']);
+
+function toEpgGenre(raw: string | null | undefined): EpgGenre | null {
+  return typeof raw === 'string' && VALID_GENRES.has(raw as EpgGenre) ? (raw as EpgGenre) : null;
 }
 
 /**
@@ -56,7 +67,7 @@ export async function queryCrossChannelEpgSlice(
   if (clampedLimit === 0) return [];
 
   const rows = await db.all<RawSliceProgrammeRow>(
-    `SELECT guide_id, start, stop, title, sub_title, description, episode_num, icon
+    `SELECT guide_id, start, stop, title, sub_title, description, episode_num, icon, genre, flags
        FROM programmes
       WHERE source_id = ? AND start < ? AND stop > ?
       ORDER BY start ASC, guide_id ASC
@@ -73,5 +84,7 @@ export async function queryCrossChannelEpgSlice(
     description: r.description,
     episodeNum: r.episode_num,
     icon: r.icon,
+    genre: toEpgGenre(r.genre),
+    flags: typeof r.flags === 'number' && Number.isFinite(r.flags) ? Math.trunc(r.flags) : 0,
   }));
 }

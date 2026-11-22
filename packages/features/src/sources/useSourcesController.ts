@@ -32,11 +32,13 @@ export interface SourcesController {
   submitting: boolean;
   sources: readonly SourceRow[];
   statusById: Readonly<Record<string, SourceRuntimeStatus>>;
+  canRefreshGuide: boolean;
   setMode(mode: 'xtream' | 'm3u'): void;
   updateField<K extends keyof SourceFormState>(key: K, value: SourceFormState[K]): void;
   toggleAdvanced(): void;
   submit(): Promise<void>;
   runImport(sourceId: string): Promise<void>;
+  runGuideRefresh(sourceId: string): Promise<void>;
   cancelImport(sourceId: string): void;
   remove(sourceId: string): Promise<void>;
 }
@@ -226,6 +228,75 @@ export function useSourcesController({
     [catalog, refreshSources, setStatus],
   );
 
+  const runGuideRefresh = useCallback(
+    async (sourceId: string): Promise<void> => {
+      const importGuide = catalog.importGuide;
+      if (
+        importGuide === undefined ||
+        controllersRef.current.has(sourceId) ||
+        removedIdsRef.current.has(sourceId)
+      ) {
+        return;
+      }
+      const previousStatus = statusByIdRef.current[sourceId];
+      const ctl = new AbortController();
+      controllersRef.current.set(sourceId, ctl);
+      setStatus(sourceId, { kind: 'importing', progress: null });
+
+      const result = await importGuide(sourceId, {
+        signal: ctl.signal,
+        onProgress: (progress) => {
+          if (controllersRef.current.get(sourceId) === ctl) {
+            setStatus(sourceId, { kind: 'importing', progress });
+          }
+        },
+      });
+
+      if (controllersRef.current.get(sourceId) === ctl) {
+        controllersRef.current.delete(sourceId);
+      }
+      if (!mountedRef.current || removedIdsRef.current.has(sourceId)) {
+        return;
+      }
+
+      const rows = await refreshSources().catch(() => []);
+      if (!mountedRef.current || removedIdsRef.current.has(sourceId)) {
+        return;
+      }
+      const currentRow = rows.find((row) => row.id === sourceId);
+      if (currentRow === undefined) {
+        return;
+      }
+
+      if (!result.ok) {
+        if (result.error.category === 'network' && result.error.code === 'aborted') {
+          if (previousStatus?.kind === 'ready') {
+            setStatus(sourceId, previousStatus);
+          } else {
+            setStatusById((prev) => {
+              const next = { ...prev };
+              delete next[sourceId];
+              return next;
+            });
+          }
+          return;
+        }
+        setStatus(sourceId, { kind: 'error', failure: describeSourceFailure(result.error) });
+        return;
+      }
+      if (previousStatus?.kind === 'ready') {
+        setStatus(sourceId, previousStatus);
+      } else {
+        setStatusById((prev) => {
+          const next = { ...prev };
+          delete next[sourceId];
+          return next;
+        });
+      }
+    },
+    [catalog, refreshSources, setStatus],
+  );
+
   const cancelImport = useCallback((sourceId: string) => {
     controllersRef.current.get(sourceId)?.abort();
   }, []);
@@ -317,6 +388,7 @@ export function useSourcesController({
   );
 
   const detectedXtreamInM3u = form.mode === 'm3u' && detectPastedXtreamLink(form.playlistUrl);
+  const canRefreshGuide = catalog.importGuide !== undefined;
 
   return {
     form,
@@ -326,11 +398,13 @@ export function useSourcesController({
     submitting,
     sources,
     statusById,
+    canRefreshGuide,
     setMode,
     updateField,
     toggleAdvanced,
     submit,
     runImport,
+    runGuideRefresh,
     cancelImport,
     remove,
   };

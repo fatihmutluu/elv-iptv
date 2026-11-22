@@ -74,6 +74,8 @@ function makeEpochNowNext(channelKey: string): NowNextEntry {
       description: null,
       episodeNum: null,
       icon: null,
+      genre: null,
+      flags: 0,
       start: EPOCH_START,
       stop: EPOCH_STOP,
     },

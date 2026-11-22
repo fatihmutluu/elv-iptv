@@ -1,8 +1,9 @@
-import type { CatalogService, ItemRow } from '@elv/data';
+import type { CatalogService, ItemRow, ProgrammeRow } from '@elv/data';
 import type { EpgTimeSpanHoursPref, LogoBackdropModePref } from '@elv/domain';
 import {
   TvFocusAnchor,
   TvScrollEdgeFade,
+  useI18n,
   useKeyInterpreter,
   useTheme,
   useViewport,
@@ -22,7 +23,10 @@ import {
   useRouteActive,
 } from '../shared';
 import { EpgChannelRow } from './EpgChannelRow';
-import { EpgPreviewHeader, EpgTimeRuler } from './EpgPreviewHeader';
+import { EpgDateTabStrip, EpgPreviewHeader, EpgTimeRuler } from './EpgPreviewHeader';
+import { EpgProgrammeDetailModal } from './EpgProgrammeDetailModal';
+import { buildEpgDateTabs, type EpgDateTab, localDayKey } from './epg-date-tabs';
+import { LiveContextMenu } from './LiveContextMenu';
 import { buildEpgRulerTicks, computeNowLineRatio, EPG_VISIBLE_SPAN_MS } from './live-model';
 import type { SourceBadgeInfo } from './source-badge';
 import { EMPTY_PROGRAMMES, useEpgTimeCursor, useEpgWindowData } from './useEpgWindowData';
@@ -51,6 +55,8 @@ export interface EpgGridViewProps {
   readonly favoriteKeys?: ReadonlySet<string>;
   readonly onWatchChannel: (channel: ItemRow, index: number) => void;
   readonly onToggleFavorite?: (channel: ItemRow) => void;
+  readonly onJumpPreviousChannel?: () => void;
+  readonly onHideChannel?: (channel: ItemRow) => void;
   readonly onGuideRefreshed?: () => void;
   readonly onEdgeTop?: () => void;
   readonly isActiveScope?: boolean;
@@ -70,7 +76,15 @@ export interface EpgGridViewProps {
  */
 export function EpgGridView(p: EpgGridViewProps): ReactElement {
   const { catalog, category, channelSource, sourceVersion, refreshToken, nowMs, favoriteKeys } = p;
-  const { onWatchChannel, onToggleFavorite, onGuideRefreshed, onEdgeTop, isActiveScope = true } = p;
+  const {
+    onWatchChannel,
+    onToggleFavorite,
+    onJumpPreviousChannel,
+    onHideChannel,
+    onGuideRefreshed,
+    onEdgeTop,
+    isActiveScope = true,
+  } = p;
   const {
     epgTimeSpanHours,
     epgGenreTints = true,
@@ -82,6 +96,7 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
   const visibleSpanMs =
     epgTimeSpanHours !== undefined ? epgTimeSpanHours * 3_600_000 : EPG_VISIBLE_SPAN_MS;
   const theme = useTheme();
+  const i18n = useI18n();
   const viewport = useViewport();
 
   const isTv = viewport.inputModality === 'tv';
@@ -123,6 +138,43 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
     [epgData.refreshGuide],
   );
 
+  const [detailModal, setDetailModal] = useState<{
+    readonly channel: ItemRow;
+    readonly index: number;
+    readonly programme: ProgrammeRow;
+  } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    readonly channel: ItemRow;
+    readonly index: number;
+    readonly programme: ProgrammeRow | null;
+  } | null>(null);
+
+  const dateTabs = useMemo(() => buildEpgDateTabs(activeNowMs, i18n), [activeNowMs, i18n]);
+  const activeDayKey = useMemo(() => localDayKey(epgData.windowStartMs), [epgData.windowStartMs]);
+  const dateTabsRef = useRef(dateTabs);
+  dateTabsRef.current = dateTabs;
+  const handleJumpToDayRef = useRef<(dayStartMs: number) => void>(() => undefined);
+
+  const handleSelectDateTabIndex = useCallback((offsetIdx: number) => {
+    const tab = dateTabsRef.current[offsetIdx];
+    if (tab) handleJumpToDayRef.current(tab.dayStartMs);
+  }, []);
+
+  const handleOpenProgrammeDetail = useCallback(
+    (channel: ItemRow, index: number, programme: ProgrammeRow) => {
+      setContextMenu(null);
+      setDetailModal({ channel, index, programme });
+    },
+    [],
+  );
+  const handleOpenContextMenu = useCallback(
+    (channel: ItemRow, index: number, programme: ProgrammeRow | null) => {
+      setDetailModal(null);
+      setContextMenu({ channel, index, programme });
+    },
+    [],
+  );
+
   const cursor = useEpgTimeCursor({
     categoryId: category.row.id,
     channelSource,
@@ -131,12 +183,25 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
     activeNowMs,
     spanMs: visibleSpanMs,
     epgData,
+    dateTabCount: dateTabs.length,
+    onSelectDateTab: handleSelectDateTabIndex,
     onWatchChannel,
+    onOpenProgrammeDetail: handleOpenProgrammeDetail,
+    onOpenContextMenu: handleOpenContextMenu,
+    ...(onJumpPreviousChannel !== undefined ? { onJumpPreviousChannel } : {}),
     ...(onToggleFavorite !== undefined ? { onToggleFavorite } : {}),
     onRefreshGuide: handleRefreshGuide,
     onEdgeTop,
   });
+  handleJumpToDayRef.current = cursor.handleJumpToDay;
   refreshSourceIdRef.current = cursor.focusedChannel?.sourceId ?? category.row.sourceId;
+
+  const handleSelectDateTab = useCallback(
+    (tab: EpgDateTab) => {
+      cursor.handleJumpToDay(tab.dayStartMs);
+    },
+    [cursor.handleJumpToDay],
+  );
 
   const listRef = useRef<InstanceType<typeof VirtualizedList> | null>(null);
   const lastScrollBucketRef = useRef(-1);
@@ -255,6 +320,7 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
           cleanChannelTitles={cleanChannelTitles}
           epgGenreTints={epgGenreTints}
           onSelectCell={cursor.handleSelectCell}
+          onOpenContextMenu={handleOpenContextMenu}
         />
       );
     },
@@ -268,6 +334,7 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
       epgData.getProgrammes,
       epgData.windowStartMs,
       epgGenreTints,
+      handleOpenContextMenu,
       logoBackdropMode,
       rowHeight,
       sourceBadges,
@@ -311,10 +378,15 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
       ? tvToolbarAction
       : null;
   const isTvGridFocused = isTv && isActiveScope && cursor.focusedArea === 'grid';
+  const focusedDateTabIndex =
+    isTv && isActiveScope && cursor.focusedArea === 'dateTabs' ? cursor.focusedDateTabIndex : null;
+  const anyOverlayOpen = detailModal !== null || contextMenu !== null;
 
   return (
     <View testID="live-epg-view" style={[styles.root, { backgroundColor: theme.colors.bgCanvas }]}>
-      {isTv && isActiveScope ? <EpgTvKeyBridge onEvent={cursor.handleTvKey} /> : null}
+      {isTv && isActiveScope && !anyOverlayOpen ? (
+        <EpgTvKeyBridge onEvent={cursor.handleTvKey} />
+      ) : null}
 
       <EpgPreviewHeader
         channel={cursor.focusedChannel}
@@ -334,6 +406,15 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
         onWatchChannel={onWatchChannel}
         {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
         onRefreshGuide={handleRefreshGuide}
+      />
+
+      <EpgDateTabStrip
+        tabs={dateTabs}
+        activeDayKey={activeDayKey}
+        isTv={isTv}
+        isPortrait={isPortrait}
+        focusedTabIndex={focusedDateTabIndex}
+        onSelectTab={handleSelectDateTab}
       />
 
       <EpgTimeRuler
@@ -376,6 +457,7 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
                     cleanChannelTitles={cleanChannelTitles}
                     epgGenreTints={epgGenreTints}
                     onSelectCell={cursor.handleSelectCell}
+                    onOpenContextMenu={handleOpenContextMenu}
                   />
                 </View>
               );
@@ -421,6 +503,35 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
           </View>
         ) : null}
       </View>
+
+      <EpgProgrammeDetailModal
+        visible={detailModal !== null}
+        channel={detailModal?.channel ?? null}
+        channelIndex={detailModal?.index ?? 0}
+        programme={detailModal?.programme ?? null}
+        nowMs={activeNowMs}
+        isFavorite={detailModal !== null && (favoriteKeys?.has(detailModal.channel.key) ?? false)}
+        isTv={isTv}
+        cleanChannelTitles={cleanChannelTitles}
+        onTuneChannel={onWatchChannel}
+        {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
+        onClose={() => setDetailModal(null)}
+      />
+
+      <LiveContextMenu
+        visible={contextMenu !== null}
+        channel={contextMenu?.channel ?? null}
+        channelIndex={contextMenu?.index ?? 0}
+        programme={contextMenu?.programme ?? null}
+        isFavorite={contextMenu !== null && (favoriteKeys?.has(contextMenu.channel.key) ?? false)}
+        isTv={isTv}
+        cleanChannelTitles={cleanChannelTitles}
+        onPlay={onWatchChannel}
+        {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
+        onShowProgrammeDetails={handleOpenProgrammeDetail}
+        {...(onHideChannel !== undefined ? { onHideChannel } : {})}
+        onClose={() => setContextMenu(null)}
+      />
     </View>
   );
 }

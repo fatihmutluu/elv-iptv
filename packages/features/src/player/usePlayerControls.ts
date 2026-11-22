@@ -351,6 +351,10 @@ export function usePlayerControls(params: PlayerControlsParams) {
     digitBuf.cancel();
     selectGuardRef.current?.reset();
     const s = overlay.liveRef.current;
+    if (cbRef.current.previewChannelActive) {
+      cbRef.current.onCancelPreviewChannel?.();
+      return;
+    }
     if (s.locked) overlay.unlockControls();
     else if (s.settingsOpen) {
       if (s.settingsMenu.view !== 'root') {
@@ -457,6 +461,17 @@ export function usePlayerControls(params: PlayerControlsParams) {
     if (isTv) overlay.notifyOsdActivity();
     if (event.kind === 'press' && event.key === 'select' && isWebButtonActive()) return true;
 
+    const anySheetOpen = s.settingsOpen || s.tracksOpen || s.channelListOpen || s.infoOpen;
+    if (
+      cbRef.current.previewChannelActive &&
+      !anySheetOpen &&
+      event.kind === 'press' &&
+      event.key === 'select'
+    ) {
+      if (allowTvSelect()) cbRef.current.onConfirmPreviewChannel?.();
+      return true;
+    }
+
     const isVodTarget = cbRef.current.activeTarget.kind === 'vod';
     if (
       routeOverlayAndMediaKey(event, {
@@ -508,6 +523,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
         toggleAutoSubtitlesOnSkipBack: cbRef.current.onToggleAutoSubtitlesOnSkipBack,
         toggleAutoPlayNextEpisode: cbRef.current.onToggleAutoPlayNextEpisode,
         onChannelListMove: cbRef.current.onChannelListMove,
+        onChannelListSwitchTab: cbRef.current.onChannelListSwitchTab,
         onChannelListSelect: cbRef.current.onChannelListSelect,
         togglePlayPause,
         openTracks: overlay.openTracks,

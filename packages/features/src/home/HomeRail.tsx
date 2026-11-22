@@ -51,6 +51,13 @@ export function buildHomeRailSpecs(t: AppI18n['t']): readonly HomeRailSpec[] {
   return [
     { id: 'continue', title: t('home.continueWatching'), variant: 'wide' },
     {
+      id: 'recentChannels',
+      title: t('home.recentChannels'),
+      variant: 'wide',
+      actionLabel: t('home.channels'),
+      tab: 'live',
+    },
+    {
       id: 'live',
       title: t('home.onAirNow'),
       variant: 'wide',

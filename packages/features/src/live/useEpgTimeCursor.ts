@@ -2,6 +2,7 @@ import type { ItemRow, ProgrammeRow } from '@elv/data';
 import type { KeyEvent } from '@elv/focus-core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PagedListSource } from '../shared';
+import { computeDayJumpWindowStart, localDayKey } from './epg-date-tabs';
 import {
   EPG_PAN_STEP_MS,
   EPG_SLOT_MS,
@@ -18,11 +19,12 @@ interface EpgWindowCursorPort {
   readonly panEarlier: () => void;
   readonly panLater: () => void;
   readonly jumpToLive: () => void;
+  readonly jumpToDay?: (dayStartMs: number) => void;
   readonly getProgrammes: (channelKey: string) => readonly ProgrammeRow[];
 }
 
 /** Focus area inside {@link EpgGridView} during 10-ft TV D-pad navigation. */
-type EpgFocusArea = 'toolbar' | 'grid';
+type EpgFocusArea = 'toolbar' | 'dateTabs' | 'grid';
 
 /** Ordered TV-focusable toolbar actions rendered above the EPG matrix. */
 type EpgToolbarAction = 'watch' | 'favorite' | 'refresh' | 'earlier' | 'jump' | 'later';
@@ -65,7 +67,20 @@ export interface UseEpgTimeCursorOptions {
   readonly activeNowMs: number;
   readonly spanMs?: number;
   readonly epgData: EpgWindowCursorPort;
+  readonly dateTabCount?: number;
+  readonly onSelectDateTab?: (offsetDays: number) => void;
   readonly onWatchChannel: (channel: ItemRow, index: number) => void;
+  readonly onOpenProgrammeDetail?: (
+    channel: ItemRow,
+    index: number,
+    programme: ProgrammeRow,
+  ) => void;
+  readonly onOpenContextMenu?: (
+    channel: ItemRow,
+    index: number,
+    programme: ProgrammeRow | null,
+  ) => void;
+  readonly onJumpPreviousChannel?: () => void;
   readonly onToggleFavorite?: (channel: ItemRow) => void;
   readonly onRefreshGuide?: () => void;
   readonly onEdgeTop?: () => void;
@@ -76,6 +91,7 @@ export interface EpgTimeCursorState {
   readonly focusedArea: EpgFocusArea;
   readonly focusedToolbarIndex: number;
   readonly focusedToolbarAction: EpgToolbarAction | null;
+  readonly focusedDateTabIndex: number;
   readonly focusedRow: number;
   readonly focusedSlotIndex: number;
   readonly focusedChannel: ItemRow | undefined;
@@ -83,6 +99,7 @@ export interface EpgTimeCursorState {
   readonly handlePanEarlier: () => void;
   readonly handlePanLater: () => void;
   readonly handleJumpToLive: () => void;
+  readonly handleJumpToDay: (dayStartMs: number) => void;
   readonly handleSelectCell: (
     rowIdx: number,
     slotIdx: number,
@@ -105,22 +122,29 @@ export function useEpgTimeCursor({
   activeNowMs,
   spanMs = EPG_VISIBLE_SPAN_MS,
   epgData,
+  dateTabCount = 0,
+  onSelectDateTab,
   onWatchChannel,
+  onOpenProgrammeDetail,
+  onOpenContextMenu,
+  onJumpPreviousChannel,
   onToggleFavorite,
   onRefreshGuide,
   onEdgeTop,
 }: UseEpgTimeCursorOptions): EpgTimeCursorState {
-  const { windowStartMs, panEarlier, panLater, jumpToLive, getProgrammes } = epgData;
+  const { windowStartMs, panEarlier, panLater, jumpToLive, jumpToDay, getProgrammes } = epgData;
   const toolbarActions = onToggleFavorite ? FAV_TOOLBAR_ACTIONS : BASE_TOOLBAR_ACTIONS;
 
   const [focusedArea, setFocusedArea] = useState<EpgFocusArea>('grid');
   const [focusedToolbarIndex, setFocusedToolbarIndex] = useState(0);
+  const [focusedDateTabIndex, setFocusedDateTabIndex] = useState(0);
   const [focusedRow, setFocusedRow] = useState(0);
   const [focusedSlotIndex, setFocusedSlotIndex] = useState(0);
 
   const cursorRef = useRef<{
     area: EpgFocusArea;
     toolbarIdx: number;
+    dateTabIdx: number;
     row: number;
     slot: number;
     anchorMs: number;
@@ -128,6 +152,7 @@ export function useEpgTimeCursor({
   }>({
     area: 'grid',
     toolbarIdx: 0,
+    dateTabIdx: 0,
     row: 0,
     slot: 0,
     anchorMs: activeNowMs,
@@ -135,11 +160,30 @@ export function useEpgTimeCursor({
   });
   cursorRef.current.area = focusedArea;
   cursorRef.current.toolbarIdx = focusedToolbarIndex;
+  cursorRef.current.dateTabIdx = focusedDateTabIndex;
   cursorRef.current.row = focusedRow;
   cursorRef.current.slot = focusedSlotIndex;
 
-  const callbacksRef = useRef({ onWatchChannel, onToggleFavorite, onRefreshGuide, onEdgeTop });
-  callbacksRef.current = { onWatchChannel, onToggleFavorite, onRefreshGuide, onEdgeTop };
+  const callbacksRef = useRef({
+    onWatchChannel,
+    onOpenProgrammeDetail,
+    onOpenContextMenu,
+    onJumpPreviousChannel,
+    onSelectDateTab,
+    onToggleFavorite,
+    onRefreshGuide,
+    onEdgeTop,
+  });
+  callbacksRef.current = {
+    onWatchChannel,
+    onOpenProgrammeDetail,
+    onOpenContextMenu,
+    onJumpPreviousChannel,
+    onSelectDateTab,
+    onToggleFavorite,
+    onRefreshGuide,
+    onEdgeTop,
+  };
 
   const commitSlot = useCallback((slotIdx: number) => {
     cursorRef.current.slot = slotIdx;
@@ -157,6 +201,7 @@ export function useEpgTimeCursor({
     cursorRef.current = {
       area: 'grid',
       toolbarIdx: 0,
+      dateTabIdx: 0,
       row: 0,
       slot: 0,
       anchorMs: activeNowMs,
@@ -164,6 +209,7 @@ export function useEpgTimeCursor({
     };
     setFocusedArea('grid');
     setFocusedToolbarIndex(0);
+    setFocusedDateTabIndex(0);
     setFocusedRow(0);
     setFocusedSlotIndex(0);
   }, [categoryId]);
@@ -208,8 +254,34 @@ export function useEpgTimeCursor({
     jumpToLive();
   }, [activeNowMs, jumpToLive]);
 
+  const handleJumpToDay = useCallback(
+    (dayStartMs: number) => {
+      cursorRef.current.originWindow = null;
+      if (localDayKey(dayStartMs) === localDayKey(activeNowMs)) {
+        cursorRef.current.anchorMs = activeNowMs;
+      } else {
+        const nextWindowStart = computeDayJumpWindowStart(dayStartMs, activeNowMs, windowStartMs);
+        cursorRef.current.anchorMs = nextWindowStart + EPG_SLOT_MS / 2;
+      }
+      jumpToDay?.(dayStartMs);
+    },
+    [activeNowMs, jumpToDay, windowStartMs],
+  );
+
   const handleSelectCell = useCallback(
     (rowIdx: number, slotIdx: number, channel: ItemRow, programme: ProgrammeRow | null) => {
+      const isUpcoming = programme !== null && programme.start > activeNowMs;
+      if (isUpcoming && callbacksRef.current.onOpenProgrammeDetail !== undefined) {
+        cursorRef.current.area = 'grid';
+        cursorRef.current.row = rowIdx;
+        cursorRef.current.originWindow = null;
+        setFocusedArea('grid');
+        setFocusedRow(rowIdx);
+        commitSlot(slotIdx);
+        cursorRef.current.anchorMs = Math.floor((programme.start + programme.stop) / 2);
+        callbacksRef.current.onOpenProgrammeDetail(channel, rowIdx, programme);
+        return;
+      }
       if (rowIdx === cursorRef.current.row && slotIdx === cursorRef.current.slot) {
         callbacksRef.current.onWatchChannel(channel, rowIdx);
         return;
@@ -224,7 +296,7 @@ export function useEpgTimeCursor({
         cursorRef.current.anchorMs = Math.floor((programme.start + programme.stop) / 2);
       }
     },
-    [commitSlot],
+    [activeNowMs, commitSlot],
   );
 
   const moveRow = useCallback(
@@ -293,6 +365,10 @@ export function useEpgTimeCursor({
 
   const handleTvKey = useCallback(
     (event: KeyEvent): boolean => {
+      if (event.kind === 'press' && event.key === 'lastChannel') {
+        callbacksRef.current.onJumpPreviousChannel?.();
+        return true;
+      }
       if (event.kind === 'press' && event.key === 'back') {
         callbacksRef.current.onEdgeTop?.();
         return true;
@@ -307,8 +383,9 @@ export function useEpgTimeCursor({
         if (event.key === 'up') {
           callbacksRef.current.onEdgeTop?.();
         } else if (event.key === 'down') {
-          cursorRef.current.area = 'grid';
-          setFocusedArea('grid');
+          const nextArea: EpgFocusArea = dateTabCount > 0 ? 'dateTabs' : 'grid';
+          cursorRef.current.area = nextArea;
+          setFocusedArea(nextArea);
         } else if (event.key === 'left') {
           const next = Math.max(0, cursorRef.current.toolbarIdx - 1);
           cursorRef.current.toolbarIdx = next;
@@ -323,16 +400,67 @@ export function useEpgTimeCursor({
         return true;
       }
 
+      if (cursorRef.current.area === 'dateTabs') {
+        if (event.kind === 'press' && event.key === 'select') {
+          callbacksRef.current.onSelectDateTab?.(cursorRef.current.dateTabIdx);
+          return true;
+        }
+        if (event.kind !== 'press' && event.kind !== 'repeat') return false;
+        if (event.key === 'up') {
+          cursorRef.current.area = 'toolbar';
+          setFocusedArea('toolbar');
+        } else if (event.key === 'down') {
+          cursorRef.current.area = 'grid';
+          setFocusedArea('grid');
+        } else if (event.key === 'left') {
+          const next = Math.max(0, cursorRef.current.dateTabIdx - 1);
+          cursorRef.current.dateTabIdx = next;
+          setFocusedDateTabIndex(next);
+        } else if (event.key === 'right') {
+          const next = Math.min(Math.max(0, dateTabCount - 1), cursorRef.current.dateTabIdx + 1);
+          cursorRef.current.dateTabIdx = next;
+          setFocusedDateTabIndex(next);
+        } else {
+          return false;
+        }
+        return true;
+      }
+
+      if (
+        (event.kind === 'long' && event.key === 'select') ||
+        (event.kind === 'press' && event.key === 'menu')
+      ) {
+        const current = channelSource.get(cursorRef.current.row);
+        if (current && callbacksRef.current.onOpenContextMenu !== undefined) {
+          const prog = focusedSlots[cursorRef.current.slot]?.programme ?? null;
+          callbacksRef.current.onOpenContextMenu(current, cursorRef.current.row, prog);
+          return true;
+        }
+        return false;
+      }
+
       if (event.kind === 'press' && event.key === 'select') {
         const current = channelSource.get(cursorRef.current.row);
-        if (current) callbacksRef.current.onWatchChannel(current, cursorRef.current.row);
+        if (current) {
+          const prog = focusedSlots[cursorRef.current.slot]?.programme ?? null;
+          if (
+            prog !== null &&
+            prog.start > activeNowMs &&
+            callbacksRef.current.onOpenProgrammeDetail !== undefined
+          ) {
+            callbacksRef.current.onOpenProgrammeDetail(current, cursorRef.current.row, prog);
+          } else {
+            callbacksRef.current.onWatchChannel(current, cursorRef.current.row);
+          }
+        }
         return true;
       }
       if (event.kind !== 'press' && event.kind !== 'repeat') return false;
       if (event.key === 'up') {
         if (cursorRef.current.row === 0) {
-          cursorRef.current.area = 'toolbar';
-          setFocusedArea('toolbar');
+          const nextArea: EpgFocusArea = dateTabCount > 0 ? 'dateTabs' : 'toolbar';
+          cursorRef.current.area = nextArea;
+          setFocusedArea(nextArea);
         } else {
           moveRow(cursorRef.current.row - 1);
         }
@@ -352,7 +480,17 @@ export function useEpgTimeCursor({
       }
       return false;
     },
-    [activateToolbarAction, channelCount, channelSource, moveRow, stepHorizontal, toolbarActions],
+    [
+      activateToolbarAction,
+      activeNowMs,
+      channelCount,
+      channelSource,
+      dateTabCount,
+      focusedSlots,
+      moveRow,
+      stepHorizontal,
+      toolbarActions,
+    ],
   );
 
   const focusedToolbarAction =
@@ -364,6 +502,7 @@ export function useEpgTimeCursor({
       focusedArea,
       focusedToolbarIndex,
       focusedToolbarAction,
+      focusedDateTabIndex,
       focusedRow,
       focusedSlotIndex,
       focusedChannel,
@@ -371,17 +510,20 @@ export function useEpgTimeCursor({
       handlePanEarlier,
       handlePanLater,
       handleJumpToLive,
+      handleJumpToDay,
       handleSelectCell,
       handleTvKey,
     }),
     [
       focusedArea,
       focusedChannel,
+      focusedDateTabIndex,
       focusedProgramme,
       focusedRow,
       focusedSlotIndex,
       focusedToolbarAction,
       focusedToolbarIndex,
+      handleJumpToDay,
       handleJumpToLive,
       handlePanEarlier,
       handlePanLater,

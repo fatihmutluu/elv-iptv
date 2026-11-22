@@ -1,4 +1,4 @@
-import type { ItemRow, NowNextEntry } from '@elv/data';
+import type { ItemRow, NowNextEntry, ProgrammeRow } from '@elv/data';
 import type { LogoBackdropModePref } from '@elv/domain';
 import type { KeyEvent } from '@elv/focus-core';
 import {
@@ -97,6 +97,12 @@ export interface LiveChannelsGridProps {
   readonly hydrateNowNext: (channelKeys: readonly string[]) => void;
   readonly onWatchChannel: (channel: ItemRow, index: number) => void;
   readonly onToggleFavorite?: (channel: ItemRow) => void;
+  readonly onOpenContextMenu?: (
+    channel: ItemRow,
+    index: number,
+    programme: ProgrammeRow | null,
+  ) => void;
+  readonly onJumpPreviousChannel?: () => void;
   readonly onEdgeTop?: () => void;
   readonly isActiveScope?: boolean;
   readonly logoBackdropMode?: LogoBackdropModePref;
@@ -113,7 +119,15 @@ export interface LiveChannelsGridProps {
 export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
   const { channelSource, sourceVersion, nowNextByKey, nowNextVersion, activeChannelKey, layout } =
     p;
-  const { favoriteKeys, hydrateNowNext, onWatchChannel, onToggleFavorite, onEdgeTop } = p;
+  const {
+    favoriteKeys,
+    hydrateNowNext,
+    onWatchChannel,
+    onToggleFavorite,
+    onOpenContextMenu,
+    onJumpPreviousChannel,
+    onEdgeTop,
+  } = p;
   const {
     isActiveScope = false,
     logoBackdropMode = 'plate',
@@ -229,13 +243,36 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
 
   const handleTvKey = useCallback(
     (event: KeyEvent): boolean => {
+      if (event.key === 'lastChannel' && event.kind === 'press') {
+        onJumpPreviousChannel?.();
+        return true;
+      }
       if (event.key === 'back' && event.kind === 'press') {
         onEdgeTop?.();
         return true;
       }
-      if ((event.kind !== 'press' && event.kind !== 'repeat') || !channelSource || itemCount === 0)
-        return false;
+      if (!channelSource || itemCount === 0) return false;
       const cur = focusPosRef.current;
+      if (
+        (event.kind === 'long' && event.key === 'select') ||
+        (event.kind === 'press' && event.key === 'menu')
+      ) {
+        if (onOpenContextMenu === undefined) return false;
+        const idx = cur.row * cols + cur.col;
+        const hit = channelSource.get(idx);
+        if (hit) {
+          onOpenContextMenu(hit, idx, nowNextByKey.get(hit.key)?.now ?? null);
+        } else {
+          void channelSource
+            .loadItem(idx)
+            .then(
+              (loaded) =>
+                loaded && onOpenContextMenu(loaded, idx, nowNextByKey.get(loaded.key)?.now ?? null),
+            );
+        }
+        return true;
+      }
+      if (event.kind !== 'press' && event.kind !== 'repeat') return false;
       if (event.key === 'up') {
         if (cur.row === 0) onEdgeTop?.();
         else commitFocusPos({ row: cur.row - 1, col: cur.col });
@@ -266,7 +303,18 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
       }
       return false;
     },
-    [channelSource, cols, commitFocusPos, itemCount, onEdgeTop, onWatchChannel, rowCount],
+    [
+      channelSource,
+      cols,
+      commitFocusPos,
+      itemCount,
+      nowNextByKey,
+      onEdgeTop,
+      onJumpPreviousChannel,
+      onOpenContextMenu,
+      onWatchChannel,
+      rowCount,
+    ],
   );
 
   const handleScroll = useCallback(
@@ -319,6 +367,7 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
           focusedCol={null}
           onWatchChannel={onWatchChannel}
           {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
+          {...(onOpenContextMenu !== undefined ? { onOpenContextMenu } : {})}
         />
       );
     },
@@ -327,6 +376,7 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
       favoriteKeys,
       nowMs,
       nowNextByKey,
+      onOpenContextMenu,
       onToggleFavorite,
       onWatchChannel,
       shared,
@@ -386,6 +436,7 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
                   focusedCol={isFocusedRow ? focusPos.col : null}
                   onWatchChannel={onWatchChannel}
                   {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
+                  {...(onOpenContextMenu !== undefined ? { onOpenContextMenu } : {})}
                 />
               </View>
             );
