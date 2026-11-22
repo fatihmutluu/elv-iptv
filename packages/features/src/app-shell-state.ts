@@ -291,6 +291,7 @@ export function createObservedCatalog(
     ...(c.nowNext ? { nowNext: c.nowNext.bind(c) } : {}),
     ...(c.epgWindow ? { epgWindow: c.epgWindow.bind(c) } : {}),
     ...(c.channelByNumber ? { channelByNumber: c.channelByNumber.bind(c) } : {}),
+    ...(c.queryNextEpisode ? { queryNextEpisode: c.queryNextEpisode.bind(c) } : {}),
     close: () => c.close(),
   };
 }

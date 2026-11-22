@@ -39,6 +39,8 @@ export interface DesktopEngine extends PlayerEngine {
   setArea(area: PlayerArea): void;
   /** Toggles the presenter's fullscreen (not a port command). */
   toggleFullscreen(): void;
+  /** Returns the latest known fullscreen state of the desktop presenter window (`#394`). */
+  isFullscreen(): boolean;
   /** Toggles mpv audio mute (`cycle mute`). */
   toggleMute(): void;
   /** Sets mpv output volume (`0`–`100`, `#434`). */
@@ -91,6 +93,8 @@ export async function createDesktopEngine(
   let everSubscribed = false;
   const heldEvents: EngineEvent[] = [];
   let presenter: Extract<PlayerUiEvent, { type: 'presenter' }> | undefined;
+  let fullscreenEvent: Extract<PlayerUiEvent, { type: 'fullscreen-changed' }> | undefined;
+  let fullscreen = false;
   const earlyEvents: PlayerEventMessage[] = [];
   const earlyUi: PlayerUiMessage[] = [];
 
@@ -111,6 +115,10 @@ export async function createDesktopEngine(
   };
   const deliverUi = (ui: PlayerUiEvent): void => {
     if (ui.type === 'presenter') presenter = ui;
+    if (ui.type === 'fullscreen-changed') {
+      fullscreen = ui.fullscreen;
+      fullscreenEvent = ui;
+    }
     for (const listener of [...uiListeners]) {
       try {
         listener(ui);
@@ -171,6 +179,7 @@ export async function createDesktopEngine(
     stop: (attempt) => send({ name: 'stop', attempt }),
     recreate: (attempt) => send({ name: 'recreate', attempt }),
     toggleFullscreen: () => send({ name: 'fullscreen' }),
+    isFullscreen: () => fullscreen,
     toggleMute: () => send({ name: 'mute' }),
     setVolume: (volume) => send({ name: 'setVolume', volume }),
     setAudioDelay: (delaySec) => send({ name: 'setAudioDelay', delaySec }),
@@ -216,6 +225,13 @@ export async function createDesktopEngine(
       if (presenter) {
         try {
           listener(presenter);
+        } catch {
+          // same isolation as deliverUi
+        }
+      }
+      if (fullscreenEvent) {
+        try {
+          listener(fullscreenEvent);
         } catch {
           // same isolation as deliverUi
         }

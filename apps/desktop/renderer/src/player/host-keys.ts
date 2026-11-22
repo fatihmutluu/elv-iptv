@@ -27,6 +27,8 @@ export function mapHostKey(key: PlayerUiKey): DesktopHostKey {
     case 'mute':
     case 'tracks':
     case 'prev-channel':
+    case 'info':
+    case 'channel-list':
       return key;
   }
 }

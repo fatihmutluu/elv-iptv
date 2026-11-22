@@ -370,7 +370,7 @@ export function createPlaybackServiceWith(
       stopEngine();
       trackPrefs.reset();
       lastVodPositionMs = undefined;
-      const { anchor: _a, atLiveEdge: _l, ...rest } = state();
+      const { anchor: _a, atLiveEdge: _l, videoInfo: _v, ...rest } = state();
       store.replace({ ...rest, status: { kind: 'idle' }, tracks: EMPTY_TRACKS });
     },
     play() {

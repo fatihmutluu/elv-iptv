@@ -412,6 +412,10 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
         return service.seasons(call.seriesId);
       case 'episodes':
         return service.episodes(call.seriesId, call.season);
+      case 'queryNextEpisode':
+        return service.queryNextEpisode
+          ? service.queryNextEpisode(call.seriesKey, call.currentItemKey, call.profileId)
+          : null;
       case 'resolveStream':
         return service.resolveStream(call.itemKey);
       case 'saveProgress':

@@ -28,6 +28,7 @@ export interface PlayerSettingsSheetProps {
   readonly playbackSpeed?: number;
   readonly resizeMode?: VideoResizeMode;
   readonly deinterlace?: boolean;
+  readonly autoSubtitlesOnSkipBack?: boolean;
   readonly statsVisible: boolean;
   readonly isTv: boolean;
   readonly formFactor: FormFactor;
@@ -38,6 +39,7 @@ export interface PlayerSettingsSheetProps {
   readonly onSelectSpeed?: (rate: number) => void;
   readonly onToggleResizeMode?: () => void;
   readonly onToggleDeinterlace?: () => void;
+  readonly onToggleAutoSubtitlesOnSkipBack?: () => void;
   readonly onToggleStats: () => void;
   readonly onClose: () => void;
 }
@@ -53,7 +55,9 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
   const playbackSpeed = props.playbackSpeed ?? 1;
   const showAspect = props.onToggleResizeMode !== undefined;
   const showDeinterlace = props.onToggleDeinterlace !== undefined;
+  const showAutoSubtitlesOnSkipBack = isVod && props.onToggleAutoSubtitlesOnSkipBack !== undefined;
   const deinterlace = props.deinterlace === true;
+  const autoSubtitlesOnSkipBack = props.autoSubtitlesOnSkipBack === true;
   const resizeMode = props.resizeMode ?? 'fit';
   const resizeModeLabel =
     resizeMode === 'fill'
@@ -200,6 +204,27 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
               onPress={() => props.onToggleDeinterlace?.()}
             />
           ) : null}
+          {showAutoSubtitlesOnSkipBack ? (
+            <SettingsToggleRow
+              testID="player-auto-subtitles-skip-back-toggle"
+              icon="subtitles"
+              label={i18n.t('player.autoSubtitlesOnSkipBack')}
+              pillLabel={
+                autoSubtitlesOnSkipBack ? i18n.t('player.stats.on') : i18n.t('player.stats.off')
+              }
+              active={autoSubtitlesOnSkipBack}
+              focused={
+                showCursor &&
+                menuState.index ===
+                  navRows.length + (showAspect ? 1 : 0) + (showDeinterlace ? 1 : 0)
+              }
+              isTv={isTv}
+              role="switch"
+              accessibilityLabel={i18n.t('player.autoSubtitlesOnSkipBack')}
+              theme={theme}
+              onPress={() => props.onToggleAutoSubtitlesOnSkipBack?.()}
+            />
+          ) : null}
           <SettingsToggleRow
             testID="player-stats-toggle"
             icon="info"
@@ -208,7 +233,11 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
             active={statsVisible}
             focused={
               showCursor &&
-              menuState.index === navRows.length + (showAspect ? 1 : 0) + (showDeinterlace ? 1 : 0)
+              menuState.index ===
+                navRows.length +
+                  (showAspect ? 1 : 0) +
+                  (showDeinterlace ? 1 : 0) +
+                  (showAutoSubtitlesOnSkipBack ? 1 : 0)
             }
             isTv={isTv}
             role="switch"

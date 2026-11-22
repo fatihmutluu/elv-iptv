@@ -55,6 +55,7 @@ describe('createLazyCatalog', () => {
     expect(stream.ok).toBe(true);
     expect((await lazy.seasons(999)).ok).toBe(false);
     expect(await lazy.episodes(999, 1)).toEqual([]);
+    expect(await lazy.queryNextEpisode?.('x:s1:series:1', 'x:s1:episode:1')).toBeNull();
     expect(await lazy.nowNext?.([items[0]?.key ?? ''], 1_000)).toEqual([]);
     expect(await lazy.epgWindow?.([items[0]?.key ?? ''], 1_000, 10_000)).toEqual({});
     expect(await lazy.channelByNumber?.(999)).toBeNull();
@@ -118,6 +119,7 @@ describe('createLazyCatalog', () => {
       nowNext: _omittedNowNext,
       epgWindow: _omittedEpg,
       channelByNumber: _omittedChNum,
+      queryNextEpisode: _omittedNextEp,
       ...withoutDetail
     } = underlying;
     const lazy = createLazyCatalog(async () => withoutDetail);
@@ -130,6 +132,7 @@ describe('createLazyCatalog', () => {
     expect(await lazy.nowNext?.(['x:s1:live:1'], 1000)).toEqual([]);
     expect(await lazy.epgWindow?.(['x:s1:live:1'], 1000, 2000)).toEqual({});
     expect(await lazy.channelByNumber?.(101)).toBeNull();
+    expect(await lazy.queryNextEpisode?.('x:s1:series:1', 'x:s1:episode:1')).toBeNull();
     await lazy.close();
     handle.close();
   });

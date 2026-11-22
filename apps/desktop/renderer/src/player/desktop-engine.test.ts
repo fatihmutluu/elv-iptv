@@ -374,4 +374,34 @@ describe('createDesktopEngine', () => {
     expect(() => noop?.()).not.toThrow();
     legacyEngine.release();
   });
+
+  it('forwards mediaInfo events untouched and tracks fullscreen-changed UI state (#58, #394)', async () => {
+    const f = fakeBridge();
+    const engine = await createDesktopEngine(f.bridge, () => 1000);
+    const events: EngineEvent[] = [];
+    engine.subscribe((e) => events.push(e));
+
+    const mediaInfo: EngineEvent = {
+      attempt: 2,
+      type: 'mediaInfo',
+      info: { width: 3840, height: 2160, fps: 60, codec: 'hevc', hdr: 'hdr10' },
+    };
+    f.event('e1', mediaInfo);
+    expect(events).toEqual([mediaInfo]);
+
+    expect(engine.isFullscreen()).toBe(false);
+    const seenUi: PlayerUiEvent[] = [];
+    engine.onUi((e) => seenUi.push(e));
+    f.ui('e1', { type: 'fullscreen-changed', fullscreen: true });
+    expect(engine.isFullscreen()).toBe(true);
+    expect(seenUi).toEqual([{ type: 'fullscreen-changed', fullscreen: true }]);
+
+    // Late UI subscriber receives the latest fullscreen-changed state
+    const lateUi: PlayerUiEvent[] = [];
+    engine.onUi((e) => lateUi.push(e));
+    expect(lateUi).toEqual([{ type: 'fullscreen-changed', fullscreen: true }]);
+
+    f.ui('e1', { type: 'fullscreen-changed', fullscreen: false });
+    expect(engine.isFullscreen()).toBe(false);
+  });
 });

@@ -208,6 +208,7 @@ describe('createCatalogBridge', () => {
     const nowNextP = bridge.nowNext(['x:s1:live:1'], 1_700_000_000_000);
     const epgWinP = bridge.epgWindow(['x:s1:live:1'], 1_700_000_000_000, 1_700_010_800_000);
     const chNumP = bridge.channelByNumber(101, 's1');
+    const nextEpP = bridge.queryNextEpisode('x:s1:series:1', 'x:s1:episode:1', 'default');
     await Promise.resolve();
 
     for (const msg of port.sent.slice(4)) {
@@ -224,7 +225,8 @@ describe('createCatalogBridge', () => {
             ? []
             : msg.call.method === 'getProgress' ||
                 msg.call.method === 'itemDetail' ||
-                msg.call.method === 'channelByNumber'
+                msg.call.method === 'channelByNumber' ||
+                msg.call.method === 'queryNextEpisode'
               ? null
               : msg.call.method === 'search'
                 ? { live: [], movies: [], series: [] }
@@ -258,6 +260,7 @@ describe('createCatalogBridge', () => {
     expect(await nowNextP).toEqual([]);
     expect(await epgWinP).toEqual({});
     expect(await chNumP).toBeNull();
+    expect(await nextEpP).toBeNull();
 
     await bridge.close();
     expect(port.closed).toBe(true);
@@ -388,6 +391,9 @@ describe('createCatalogBridge', () => {
       ),
     ).rejects.toThrow(/source-format\/invalid-request/);
     await expect(bridge.channelByNumber(-5)).rejects.toThrow(/source-format\/invalid-request/);
+    await expect(bridge.queryNextEpisode('', 'x:s1:episode:1')).rejects.toThrow(
+      /source-format\/invalid-request/,
+    );
     expect(h.outgoing).toHaveLength(0);
   });
 

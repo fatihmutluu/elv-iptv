@@ -96,7 +96,7 @@ describe('PlayerScreen lifecycle', () => {
       manual.advance(350);
     });
     expect(screen.getByTestId('osd-title')).toHaveTextContent('1. Channel Alpha');
-    expect(screen.getByTestId('osd-status')).toHaveTextContent('Playing');
+    expect(screen.queryByTestId('osd-status')).toBeNull();
 
     await fireEvent.press(screen.getByTestId('player-back'));
     expect(onExit).toHaveBeenCalledTimes(1);
@@ -302,7 +302,7 @@ describe('PlayerScreen lifecycle', () => {
     await act(async () => {
       manual.advance(350);
     });
-    expect(screen.getByTestId('osd-status')).toHaveTextContent('Playing');
+    expect(screen.queryByTestId('osd-status')).toBeNull();
 
     const loadsBefore = engine.commands.filter((c) => c.name === 'load').length;
     await act(async () => {

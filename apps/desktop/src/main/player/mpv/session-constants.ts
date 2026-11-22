@@ -15,6 +15,9 @@ export const OBSERVED_PROPERTIES = [
   'demuxer-cache-duration',
   'file-format',
   'estimated-vf-fps',
+  'container-fps',
+  'video-format',
+  'video-codec',
   'video-params',
   'vid',
   'track-list',
@@ -49,6 +52,8 @@ const UI_KEYS: ReadonlySet<string> = new Set<UiKey>([
   'mute',
   'tracks',
   'prev-channel',
+  'info',
+  'channel-list',
 ]);
 
 /** Type guard for `elv-key` client messages forwarded to the renderer. */

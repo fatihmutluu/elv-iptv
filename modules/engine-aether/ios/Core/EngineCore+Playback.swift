@@ -168,6 +168,21 @@ extension EngineCore {
     )
   }
 
+  func handleMediaInfo(_ incoming: StreamVideoInfo) {
+    let trimmedCodec = incoming.codec?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmedHdr = incoming.hdr?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let merged = StreamVideoInfo(
+      width: incoming.width.flatMap { $0 > 0 ? $0 : nil } ?? lastVideoInfo?.width,
+      height: incoming.height.flatMap { $0 > 0 ? $0 : nil } ?? lastVideoInfo?.height,
+      fps: incoming.fps.flatMap { ($0.isFinite && $0 > 0) ? $0 : nil } ?? lastVideoInfo?.fps,
+      codec: (trimmedCodec?.isEmpty == false ? trimmedCodec : nil) ?? lastVideoInfo?.codec,
+      hdr: (trimmedHdr?.isEmpty == false ? trimmedHdr : nil) ?? lastVideoInfo?.hdr
+    )
+    guard !merged.isEmpty, merged != lastVideoInfo else { return }
+    lastVideoInfo = merged
+    emit(.mediaInfo(attempt: token, info: merged))
+  }
+
   func emitAnchor(rate: Double, atMs: Double) {
     let positionMs = lastPositionSeconds * 1_000.0
     lastAnchoredPositionMs = positionMs

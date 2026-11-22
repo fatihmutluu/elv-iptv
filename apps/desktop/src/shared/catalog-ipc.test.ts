@@ -297,6 +297,25 @@ describe('isCatalogClientMessage', () => {
       { type: 'call', reqId: 34, call: { method: 'channelByNumber', num: 0 } },
       { type: 'call', reqId: 35, call: { method: 'channelByNumber', num: 101, sourceId: 'src_1' } },
       { type: 'call', reqId: 36, call: { method: 'channelByNumber', num: 4.1, sourceId: 'src_1' } },
+      {
+        type: 'call',
+        reqId: 37,
+        call: {
+          method: 'queryNextEpisode',
+          seriesKey: 'x:src_1:series:10',
+          currentItemKey: 'x:src_1:episode:101',
+        },
+      },
+      {
+        type: 'call',
+        reqId: 38,
+        call: {
+          method: 'queryNextEpisode',
+          seriesKey: 'x:src_1:series:10',
+          currentItemKey: 'x:src_1:episode:101',
+          profileId: 'default',
+        },
+      },
       { type: 'cancel', reqId: 6 },
     ];
     for (const msg of valid) {
@@ -632,6 +651,30 @@ describe('isCatalogClientMessage', () => {
         type: 'call',
         reqId: 1,
         call: { method: 'channelByNumber', num: 101, sourceId: 'bad\nsrc' },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: { method: 'queryNextEpisode', seriesKey: '', currentItemKey: 'x:s1:episode:1' },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: {
+          method: 'queryNextEpisode',
+          seriesKey: 'x:s1:series:1',
+          currentItemKey: 'bad\nkey',
+        },
+      },
+      {
+        type: 'call',
+        reqId: 1,
+        call: {
+          method: 'queryNextEpisode',
+          seriesKey: 'x:s1:series:1',
+          currentItemKey: 'x:s1:episode:1',
+          profileId: '',
+        },
       },
     ];
     for (const msg of invalid) {

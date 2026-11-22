@@ -265,6 +265,7 @@ describe('bindDesktopMediaSession', () => {
       recreate: vi.fn(),
       setArea: vi.fn(),
       toggleFullscreen: vi.fn(),
+      isFullscreen: vi.fn(() => false),
       toggleMute: vi.fn(),
       setVolume: vi.fn(),
       setAudioDelay: vi.fn(),

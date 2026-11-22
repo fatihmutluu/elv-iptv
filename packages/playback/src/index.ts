@@ -42,7 +42,9 @@ export {
   type MediaKind,
   type MediaTracks,
   type PlayerEngine,
+  type StreamHdrKind,
   type StreamRequest,
+  type StreamVideoInfo,
   type TrackInfo,
 } from './engine';
 export { classifyError, type ErrorClass, toPlaybackError } from './errors';

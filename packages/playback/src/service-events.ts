@@ -7,6 +7,7 @@ import {
   type EngineEvent,
   type MediaTracks,
   type PlayerEngine,
+  type StreamVideoInfo,
 } from './engine';
 import type { RecoveryHooks } from './seam';
 import type { SeekCoalescer } from './seek-coalescer';
@@ -185,6 +186,11 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
         }
         return;
       }
+      case 'mediaInfo': {
+        const merged = mergeVideoInfo(cur.videoInfo, event.info);
+        if (merged !== undefined) store.update({ videoInfo: merged });
+        return;
+      }
       case 'stall':
         hooks.onStall?.(event.phase);
         return;
@@ -272,6 +278,41 @@ export function buildOptimisticSeekAnchor(
   };
 }
 
+const positiveNumber = (value: number | undefined): number | undefined =>
+  value !== undefined && Number.isFinite(value) && value > 0 ? value : undefined;
+
+const cleanCodec = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+};
+
+function mergeVideoInfo(
+  prev: StreamVideoInfo | undefined,
+  incoming: StreamVideoInfo,
+): StreamVideoInfo | undefined {
+  const width = positiveNumber(incoming.width) ?? prev?.width;
+  const height = positiveNumber(incoming.height) ?? prev?.height;
+  const fps = positiveNumber(incoming.fps) ?? prev?.fps;
+  const codec = cleanCodec(incoming.codec) ?? prev?.codec;
+  const hdr = incoming.hdr ?? prev?.hdr;
+  if (
+    width === undefined &&
+    height === undefined &&
+    fps === undefined &&
+    codec === undefined &&
+    hdr === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    ...(width === undefined ? {} : { width }),
+    ...(height === undefined ? {} : { height }),
+    ...(fps === undefined ? {} : { fps }),
+    ...(codec === undefined ? {} : { codec }),
+    ...(hdr === undefined ? {} : { hdr }),
+  };
+}
+
 export function nextTuneState(
   prev: PlaybackState,
   token: AttemptToken,
@@ -279,7 +320,7 @@ export function nextTuneState(
   held: boolean,
   now: number,
 ): PlaybackState {
-  const { anchor: _a, atLiveEdge: _l, firstFrameAt: _f, ...kept } = prev;
+  const { anchor: _a, atLiveEdge: _l, firstFrameAt: _f, videoInfo: _v, ...kept } = prev;
   return {
     ...kept,
     status: held ? prev.status : { kind: 'tuning' },

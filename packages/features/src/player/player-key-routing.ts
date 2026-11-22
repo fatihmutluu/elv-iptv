@@ -32,10 +32,14 @@ export interface PlayerControlsParams {
   showRetry: boolean;
   hasService: boolean;
   hasSettings?: boolean;
+  hasInfo?: boolean;
+  hasChannelList?: boolean;
   hasNextEpisode?: boolean;
   hasPreviousChannel?: boolean;
   initialOsdHidden?: boolean | undefined;
   autoHideOsdMs?: number | undefined;
+  initialVolume?: number | undefined;
+  autoSubtitlesOnSkipBack?: boolean | undefined;
   serviceRef: MutableRefObject<PlaybackService | null>;
   clockRef: MutableRefObject<PlaybackClock>;
   timersRef: MutableRefObject<PlaybackTimers>;
@@ -47,6 +51,9 @@ export interface PlayerControlsParams {
   onJumpToChannel?: (channelNumber: number) => void;
   onToggleFullscreen?: (() => void) | undefined;
   onToggleMute?: (() => void) | undefined;
+  onSetVolume?: ((volume: number) => void) | undefined;
+  onPersistVolume?: ((volume: number) => void) | undefined;
+  onToggleAutoSubtitlesOnSkipBack?: (() => void) | undefined;
   onSetOrientationLocked?: ((locked: boolean) => void) | undefined;
   onSetDeinterlace?: ((enabled: boolean) => void) | undefined;
 }
@@ -57,6 +64,7 @@ export interface OverlayKeyRouteDeps {
   readonly isVod: boolean;
   readonly hasAspect: boolean;
   readonly hasDeinterlace?: boolean;
+  readonly hasAutoSubtitlesOnSkipBack?: boolean;
   readonly playbackSpeed: number;
   readonly state: PlayerOverlayLive;
   readonly service: PlaybackService | null;
@@ -67,6 +75,7 @@ export interface OverlayKeyRouteDeps {
   readonly toggleStats: () => void;
   readonly toggleResizeMode: () => void;
   readonly toggleDeinterlace?: () => void;
+  readonly toggleAutoSubtitlesOnSkipBack?: () => void;
   readonly togglePlayPause: () => void;
   readonly openTracks: (preferredColumn?: TrackPickerColumn) => void;
   readonly closeTracks: () => void;
@@ -79,6 +88,7 @@ export interface OverlayKeyRouteDeps {
   readonly blurTvScrubber: () => void;
   readonly activateTvOsd: (action: TvOsdAction) => void;
   readonly selectSpeed: (rate: number) => void;
+  readonly selectSubtitle?: (id: string | null) => void;
   readonly onExit: () => void;
   readonly onJumpPreviousChannel?: (() => void) | undefined;
 }
@@ -125,16 +135,20 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       playbackSpeed: d.playbackSpeed,
       hasAspect: d.hasAspect,
       hasDeinterlace: d.hasDeinterlace === true,
+      hasAutoSubtitlesOnSkipBack: d.hasAutoSubtitlesOnSkipBack === true,
     });
     if (intent !== null && event.key === 'select' && !d.allowTvSelect()) return true;
     if (intent?.kind === 'close') d.closeSettings();
     else if (intent?.kind === 'state') d.updateSettingsMenu(intent.state);
     else if (intent?.kind === 'toggleResizeMode') d.toggleResizeMode();
     else if (intent?.kind === 'toggleDeinterlace') d.toggleDeinterlace?.();
+    else if (intent?.kind === 'toggleAutoSubtitlesOnSkipBack') d.toggleAutoSubtitlesOnSkipBack?.();
     else if (intent?.kind === 'toggleStats') d.toggleStats();
     else if (intent?.kind === 'audio') d.service?.selectAudioTrack(intent.id);
-    else if (intent?.kind === 'subtitle') d.service?.selectSubtitleTrack(intent.id);
-    else if (intent?.kind === 'speed') d.selectSpeed(intent.rate);
+    else if (intent?.kind === 'subtitle') {
+      if (d.selectSubtitle !== undefined) d.selectSubtitle(intent.id);
+      else d.service?.selectSubtitleTrack(intent.id);
+    } else if (intent?.kind === 'speed') d.selectSpeed(intent.rate);
     return true;
   }
 
@@ -143,7 +157,14 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
     if (intent !== null && event.key === 'select' && !d.allowTvSelect()) return true;
     if (intent?.kind === 'move') d.updatePickerCursor(intent.cursor);
     else if (intent?.kind === 'audio') d.service?.selectAudioTrack(intent.id);
-    else if (intent?.kind === 'subtitle') d.service?.selectSubtitleTrack(intent.id);
+    else if (intent?.kind === 'subtitle') {
+      if (d.selectSubtitle !== undefined) d.selectSubtitle(intent.id);
+      else d.service?.selectSubtitleTrack(intent.id);
+    }
+    return true;
+  }
+
+  if (s.infoOpen || s.channelListOpen) {
     return true;
   }
 
@@ -181,7 +202,10 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
 /** Collaborators for {@link routeHostKey}. */
 export interface HostKeyRouteDeps {
   readonly isVod: boolean;
-  readonly state: Pick<PlayerOverlayLive, 'locked' | 'tracksOpen' | 'settingsOpen'>;
+  readonly state: Pick<
+    PlayerOverlayLive,
+    'locked' | 'tracksOpen' | 'settingsOpen' | 'infoOpen' | 'channelListOpen'
+  >;
   readonly handleBack: () => void;
   readonly toggleFullscreen: () => void;
   readonly togglePlayPause: () => void;
@@ -189,6 +213,8 @@ export interface HostKeyRouteDeps {
   readonly toggleMute?: (() => void) | undefined;
   readonly openTracks: () => void;
   readonly closeTracks: () => void;
+  readonly toggleInfo?: (() => void) | undefined;
+  readonly toggleChannelList?: (() => void) | undefined;
   readonly zapBy: (delta: 1 | -1) => void;
   readonly onJumpPreviousChannel?: (() => void) | undefined;
 }
@@ -196,7 +222,12 @@ export interface HostKeyRouteDeps {
 /** Routes a forwarded out-of-DOM host key (`#420`) through the same controls as DOM shortcuts. */
 export function routeHostKey(key: HostKey, d: HostKeyRouteDeps): void {
   const { state } = d;
-  const canUseShortcuts = !state.locked && !state.tracksOpen && !state.settingsOpen;
+  const canUseShortcuts =
+    !state.locked &&
+    !state.tracksOpen &&
+    !state.settingsOpen &&
+    !state.infoOpen &&
+    !state.channelListOpen;
   switch (key) {
     case 'back':
       d.handleBack();
@@ -229,10 +260,16 @@ export function routeHostKey(key: HostKey, d: HostKeyRouteDeps): void {
       if (canUseShortcuts) d.toggleMute?.();
       return;
     case 'tracks':
-      if (!state.locked && !state.settingsOpen) {
+      if (!state.locked && !state.settingsOpen && !state.infoOpen && !state.channelListOpen) {
         if (state.tracksOpen) d.closeTracks();
         else d.openTracks();
       }
+      return;
+    case 'info':
+      if (!state.locked) d.toggleInfo?.();
+      return;
+    case 'channel-list':
+      if (!state.locked && !d.isVod) d.toggleChannelList?.();
       return;
     case 'prev-channel':
       if (canUseShortcuts && !d.isVod) d.onJumpPreviousChannel?.();

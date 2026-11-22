@@ -131,6 +131,9 @@ public final class CommandFence: @unchecked Sendable {
     case let .tracks(_, tracks):
       guard driverEpoch == snapshot.epoch else { return nil }
       return .tracks(attempt: snapshot.token, tracks: tracks)
+    case let .mediaInfo(_, info):
+      guard driverEpoch == snapshot.epoch else { return nil }
+      return .mediaInfo(attempt: snapshot.token, info: info)
     case let .state(attempt, _),
       let .firstFrame(attempt, _),
       let .clock(attempt, _),

@@ -11,7 +11,14 @@ export interface SettingsMenuState {
 }
 
 /** Ordered rows shown on the root level of the Player Settings menu. */
-export type SettingsRootItem = 'subtitles' | 'audio' | 'speed' | 'aspect' | 'deinterlace' | 'stats';
+export type SettingsRootItem =
+  | 'subtitles'
+  | 'audio'
+  | 'speed'
+  | 'aspect'
+  | 'deinterlace'
+  | 'autoSubtitlesOnSkipBack'
+  | 'stats';
 
 /** Supported VOD playback speed multipliers (`0.5×` through `2×`). */
 export const PLAYBACK_SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
@@ -34,11 +41,13 @@ export function settingsRootItems(
   isVod: boolean,
   hasAspect = true,
   hasDeinterlace = false,
+  hasAutoSubtitlesOnSkipBack = false,
 ): readonly SettingsRootItem[] {
   const items: SettingsRootItem[] = ['subtitles', 'audio'];
   if (isVod) items.push('speed');
   if (hasAspect) items.push('aspect');
   if (hasDeinterlace) items.push('deinterlace');
+  if (hasAutoSubtitlesOnSkipBack) items.push('autoSubtitlesOnSkipBack');
   items.push('stats');
   return items;
 }
@@ -49,6 +58,7 @@ export interface SettingsMenuOptions {
   readonly playbackSpeed?: number;
   readonly hasAspect?: boolean;
   readonly hasDeinterlace?: boolean;
+  readonly hasAutoSubtitlesOnSkipBack?: boolean;
 }
 
 /** Result of routing a {@link KeyEvent} while the Player Settings menu is open. */
@@ -57,6 +67,7 @@ export type SettingsMenuIntent =
   | { readonly kind: 'close' }
   | { readonly kind: 'toggleResizeMode' }
   | { readonly kind: 'toggleDeinterlace' }
+  | { readonly kind: 'toggleAutoSubtitlesOnSkipBack' }
   | { readonly kind: 'toggleStats' }
   | { readonly kind: 'audio'; readonly id: string }
   | { readonly kind: 'subtitle'; readonly id: string | null }
@@ -84,6 +95,7 @@ export function settingsRowCount(
       options?.isVod === true,
       options?.hasAspect !== false,
       options?.hasDeinterlace === true,
+      options?.hasAutoSubtitlesOnSkipBack === true,
     ).length;
   }
   if (view === 'subtitles') return tracks.subtitles.length + 1;
@@ -127,8 +139,14 @@ export function rootIndexForSettingsView(
   isVod: boolean,
   hasAspect = true,
   hasDeinterlace = false,
+  hasAutoSubtitlesOnSkipBack = false,
 ): number {
-  const idx = settingsRootItems(isVod, hasAspect, hasDeinterlace).indexOf(view);
+  const idx = settingsRootItems(
+    isVod,
+    hasAspect,
+    hasDeinterlace,
+    hasAutoSubtitlesOnSkipBack,
+  ).indexOf(view);
   return Math.max(idx, 0);
 }
 
@@ -137,12 +155,19 @@ function returnToRoot(
   isVod: boolean,
   hasAspect: boolean,
   hasDeinterlace: boolean,
+  hasAutoSubtitlesOnSkipBack: boolean,
 ): SettingsMenuIntent {
   return {
     kind: 'state',
     state: {
       view: 'root',
-      index: rootIndexForSettingsView(view, isVod, hasAspect, hasDeinterlace),
+      index: rootIndexForSettingsView(
+        view,
+        isVod,
+        hasAspect,
+        hasDeinterlace,
+        hasAutoSubtitlesOnSkipBack,
+      ),
     },
   };
 }
@@ -177,13 +202,14 @@ export function routeSettingsMenuKey(
   const isVod = options?.isVod === true;
   const hasAspect = options?.hasAspect !== false;
   const hasDeinterlace = options?.hasDeinterlace === true;
-  const rootItems = settingsRootItems(isVod, hasAspect, hasDeinterlace);
+  const hasAutoSubtitlesOnSkipBack = options?.hasAutoSubtitlesOnSkipBack === true;
+  const rootItems = settingsRootItems(isVod, hasAspect, hasDeinterlace, hasAutoSubtitlesOnSkipBack);
   const cur = clampSettingsMenu(state, tracks, options);
 
   if (event.kind === 'press' && event.key === 'back') {
     return cur.view === 'root'
       ? { kind: 'close' }
-      : returnToRoot(cur.view, isVod, hasAspect, hasDeinterlace);
+      : returnToRoot(cur.view, isVod, hasAspect, hasDeinterlace, hasAutoSubtitlesOnSkipBack);
   }
 
   if (
@@ -198,7 +224,9 @@ export function routeSettingsMenuKey(
   }
 
   if (event.kind === 'press' && event.key === 'left') {
-    return cur.view === 'root' ? null : returnToRoot(cur.view, isVod, hasAspect, hasDeinterlace);
+    return cur.view === 'root'
+      ? null
+      : returnToRoot(cur.view, isVod, hasAspect, hasDeinterlace, hasAutoSubtitlesOnSkipBack);
   }
 
   if (event.kind === 'press' && event.key === 'right') {
@@ -212,6 +240,7 @@ export function routeSettingsMenuKey(
       const item = rootItems[cur.index];
       if (item === 'aspect') return { kind: 'toggleResizeMode' };
       if (item === 'deinterlace') return { kind: 'toggleDeinterlace' };
+      if (item === 'autoSubtitlesOnSkipBack') return { kind: 'toggleAutoSubtitlesOnSkipBack' };
       if (item === 'stats') return { kind: 'toggleStats' };
       return item !== undefined ? openSubView(item, tracks, options) : null;
     }

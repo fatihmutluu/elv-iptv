@@ -12,6 +12,12 @@ export const MIN_PREF_FONT_SCALE = 0.9;
 /** Maximum supported UI font scale multiplier. */
 export const MAX_PREF_FONT_SCALE = 1.2;
 
+/** Minimum supported persisted player volume percentage. */
+export const MIN_PREF_PLAYER_VOLUME = 0;
+
+/** Maximum supported persisted player volume percentage. */
+export const MAX_PREF_PLAYER_VOLUME = 100;
+
 const MAX_PREF_STRING_LENGTH = 64;
 const DEFAULT_PREFERENCES_KEY = 'elv.preferences.v1';
 
@@ -30,6 +36,9 @@ export interface PreferencesSnapshot {
   readonly reduceMotion: boolean;
   readonly bufferPreset: BufferPreset;
   readonly useTextureView: boolean;
+  readonly autoSubtitlesOnSkipBack: boolean;
+  readonly autoPlayNextEpisode: boolean;
+  readonly playerVolume: number;
 }
 
 /** Default preferences applied on fresh installs, reset, or corrupt storage recovery. */
@@ -41,6 +50,9 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   reduceMotion: false,
   bufferPreset: 'auto',
   useTextureView: false,
+  autoSubtitlesOnSkipBack: false,
+  autoPlayNextEpisode: true,
+  playerVolume: 100,
 });
 
 /** Partial update applied on top of the current {@link PreferencesSnapshot}. */
@@ -77,6 +89,14 @@ export interface PreferencesStore {
 
 function clampFontScale(value: number): number {
   return Math.min(MAX_PREF_FONT_SCALE, Math.max(MIN_PREF_FONT_SCALE, value));
+}
+
+function clampPlayerVolume(value: number): number {
+  const clamped = Math.min(
+    MAX_PREF_PLAYER_VOLUME,
+    Math.max(MIN_PREF_PLAYER_VOLUME, Math.round(value)),
+  );
+  return clamped === 0 ? 0 : clamped;
 }
 
 function isValidShortString(value: unknown): value is string {
@@ -151,6 +171,18 @@ export function parsePreferences(raw: string | undefined): PreferencesSnapshot {
     typeof parsed.useTextureView === 'boolean'
       ? parsed.useTextureView
       : DEFAULT_PREFERENCES.useTextureView;
+  const autoSubtitlesOnSkipBack =
+    typeof parsed.autoSubtitlesOnSkipBack === 'boolean'
+      ? parsed.autoSubtitlesOnSkipBack
+      : DEFAULT_PREFERENCES.autoSubtitlesOnSkipBack;
+  const autoPlayNextEpisode =
+    typeof parsed.autoPlayNextEpisode === 'boolean'
+      ? parsed.autoPlayNextEpisode
+      : DEFAULT_PREFERENCES.autoPlayNextEpisode;
+  const playerVolume =
+    typeof parsed.playerVolume === 'number' && Number.isFinite(parsed.playerVolume)
+      ? clampPlayerVolume(parsed.playerVolume)
+      : DEFAULT_PREFERENCES.playerVolume;
 
   return Object.freeze({
     version: PREFERENCES_SCHEMA_VERSION,
@@ -160,6 +192,9 @@ export function parsePreferences(raw: string | undefined): PreferencesSnapshot {
     reduceMotion,
     bufferPreset,
     useTextureView,
+    autoSubtitlesOnSkipBack,
+    autoPlayNextEpisode,
+    playerVolume,
   });
 }
 
@@ -180,6 +215,12 @@ export function serializePreferences(snapshot: PreferencesSnapshot): Result<stri
       ? snapshot.bufferPreset
       : DEFAULT_PREFERENCES.bufferPreset,
     useTextureView: Boolean(snapshot.useTextureView),
+    autoSubtitlesOnSkipBack: Boolean(snapshot.autoSubtitlesOnSkipBack),
+    autoPlayNextEpisode: Boolean(snapshot.autoPlayNextEpisode),
+    playerVolume:
+      typeof snapshot.playerVolume === 'number' && Number.isFinite(snapshot.playerVolume)
+        ? clampPlayerVolume(snapshot.playerVolume)
+        : DEFAULT_PREFERENCES.playerVolume,
   });
   if (utf8ByteLength(payload) > MAX_PREFERENCES_BYTES) {
     return err(elvError('storage', 'preferences-too-large'));
@@ -199,6 +240,18 @@ function mergeCandidate(base: PreferencesSnapshot, patch: PreferencesPatch): Pre
   const bufferPreset = isBufferPreset(patch.bufferPreset) ? patch.bufferPreset : base.bufferPreset;
   const useTextureView =
     typeof patch.useTextureView === 'boolean' ? patch.useTextureView : base.useTextureView;
+  const autoSubtitlesOnSkipBack =
+    typeof patch.autoSubtitlesOnSkipBack === 'boolean'
+      ? patch.autoSubtitlesOnSkipBack
+      : base.autoSubtitlesOnSkipBack;
+  const autoPlayNextEpisode =
+    typeof patch.autoPlayNextEpisode === 'boolean'
+      ? patch.autoPlayNextEpisode
+      : base.autoPlayNextEpisode;
+  const playerVolume =
+    typeof patch.playerVolume === 'number' && Number.isFinite(patch.playerVolume)
+      ? clampPlayerVolume(patch.playerVolume)
+      : base.playerVolume;
   return Object.freeze({
     version: PREFERENCES_SCHEMA_VERSION,
     themePreset,
@@ -207,6 +260,9 @@ function mergeCandidate(base: PreferencesSnapshot, patch: PreferencesPatch): Pre
     reduceMotion,
     bufferPreset,
     useTextureView,
+    autoSubtitlesOnSkipBack,
+    autoPlayNextEpisode,
+    playerVolume,
   });
 }
 
@@ -232,6 +288,18 @@ function mergeRawCandidate(
     bufferPreset: isBufferPreset(patch.bufferPreset) ? patch.bufferPreset : base.bufferPreset,
     useTextureView:
       typeof patch.useTextureView === 'boolean' ? patch.useTextureView : base.useTextureView,
+    autoSubtitlesOnSkipBack:
+      typeof patch.autoSubtitlesOnSkipBack === 'boolean'
+        ? patch.autoSubtitlesOnSkipBack
+        : base.autoSubtitlesOnSkipBack,
+    autoPlayNextEpisode:
+      typeof patch.autoPlayNextEpisode === 'boolean'
+        ? patch.autoPlayNextEpisode
+        : base.autoPlayNextEpisode,
+    playerVolume:
+      typeof patch.playerVolume === 'number' && Number.isFinite(patch.playerVolume)
+        ? clampPlayerVolume(patch.playerVolume)
+        : base.playerVolume,
   };
 }
 

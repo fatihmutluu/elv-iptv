@@ -24,6 +24,7 @@ import { createSerializedImportQueue } from './import-queue';
 import type { ImportDeps, ImportOptions, ImportSummary } from './import-types';
 import { importCatalog, loadSeriesEpisodes } from './import-xtream';
 import { type ManifestStore, saveManifest } from './manifest';
+import { type NextEpisodeRow, queryNextEpisode } from './next-episode';
 import {
   type BrowseKind,
   type CategoryRow,
@@ -161,6 +162,11 @@ export interface CatalogService {
   channelByNumber?(num: number, sourceId?: string): Promise<ItemRow | null>;
   seasons(seriesId: number): Promise<Result<SeasonRow[]>>;
   episodes(seriesId: number, season: number): Promise<EpisodeRow[]>;
+  queryNextEpisode?(
+    seriesKey: string,
+    currentItemKey: string,
+    profileId?: string,
+  ): Promise<NextEpisodeRow | null>;
   resolveStream(itemKey: string): Promise<Result<StreamRequest>>;
   saveProgress?(input: SaveProgressInput): Promise<Result<WatchProgressRow>>;
   setWatched?(itemKey: string, watched: boolean, profileId?: string): Promise<Result<void>>;
@@ -408,6 +414,12 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     async episodes(seriesId, season) {
       const series = await querySeries(db, seriesId);
       return series === undefined ? [] : queryEpisodes(db, series, season);
+    },
+    async queryNextEpisode(seriesKey, currentItemKey, profileId) {
+      const found = await queryNextEpisode(db, seriesKey, currentItemKey, profileId);
+      if (found === null) return null;
+      const [resolved] = await playtime.resolveRowLogos([found]);
+      return resolved ?? found;
     },
     resolveStream: (itemKey) => playtime.resolveStream(itemKey),
 

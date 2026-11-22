@@ -101,5 +101,31 @@ export async function createEngineFor(
     deferStart: true,
   });
   deps.onUi({ type: 'presenter', kind: presenter.kind, coversArea: presenter.coversArea });
+  if (
+    typeof owner.on === 'function' &&
+    typeof owner.removeListener === 'function' &&
+    typeof owner.isFullScreen === 'function'
+  ) {
+    const emitFullscreen = (fullscreen: boolean): void => {
+      deps.onUi({ type: 'fullscreen-changed', fullscreen });
+    };
+    const onEnterFullScreen = (): void => emitFullscreen(true);
+    const onLeaveFullScreen = (): void => emitFullscreen(false);
+    owner.on('enter-full-screen', onEnterFullScreen);
+    owner.on('leave-full-screen', onLeaveFullScreen);
+    if (owner.isFullScreen()) emitFullscreen(true);
+    const baseRelease = engine.release;
+    let cleanedUp = false;
+    engine.release = () => {
+      if (!cleanedUp) {
+        cleanedUp = true;
+        if (typeof owner.isDestroyed !== 'function' || !owner.isDestroyed()) {
+          owner.removeListener('enter-full-screen', onEnterFullScreen);
+          owner.removeListener('leave-full-screen', onLeaveFullScreen);
+        }
+      }
+      baseRelease();
+    };
+  }
   return engine;
 }

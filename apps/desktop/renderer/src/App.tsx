@@ -95,7 +95,17 @@ function AppRoot() {
             <PlayerView engine={engine} status="" failed={failed} resizeMode={resizeMode} />
           ),
           toggleFullscreen: () => rawEngine.toggleFullscreen(),
+          isFullscreen: () => rawEngine.isFullscreen(),
+          onFullscreenChange: (listener) => {
+            let last: boolean | undefined;
+            return rawEngine.onUi((event) => {
+              if (event.type !== 'fullscreen-changed' || event.fullscreen === last) return;
+              last = event.fullscreen;
+              listener(event.fullscreen);
+            });
+          },
           toggleMute: () => rawEngine.toggleMute(),
+          setVolume: (volume) => rawEngine.setVolume(volume),
           setDeinterlace: (enabled) => rawEngine.setDeinterlace(enabled),
           setMediaMetadata: (metadata) => engine.setMediaMetadata(metadata),
           onHostKey: (listener) => {

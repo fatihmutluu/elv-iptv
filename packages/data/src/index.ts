@@ -10,6 +10,7 @@ export * from './import-types';
 export { importCatalog, loadSeriesEpisodes } from './import-xtream';
 export * from './manifest';
 export * from './migrate';
+export * from './next-episode';
 export {
   isPlaceholderLiveChannel,
   type PlaceholderLiveChannelInput,

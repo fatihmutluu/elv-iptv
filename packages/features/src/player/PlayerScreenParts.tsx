@@ -1,21 +1,21 @@
 import type { AppI18n } from '@elv/i18n';
 import type { PlaybackClock, PlaybackStatus, PlaybackTimers } from '@elv/playback';
-import { Icon, MicroPill, Scrim, useTheme, useViewport } from '@elv/ui-kit';
+import { MicroPill, Scrim, useTheme, useViewport } from '@elv/ui-kit';
 import type { ReactElement } from 'react';
 import { StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { DesktopCinemaBar, type PlayerOsdProps } from './DesktopCinemaBar';
 import { describePlaybackFailure } from './errors';
+import { JumpToLiveButton, OsdButton, OsdClock, PlayerLockedOverlay } from './PlayerOsdButton';
 import {
-  JumpToLiveButton,
-  OsdButton,
-  OsdClock,
-  PlayerCanvasTapTarget,
-  PlayerLockedOverlay,
-} from './PlayerOsdButton';
+  FloatingPeekOsd,
+  LiveNowNextStrip,
+  PlayerFailureBanner,
+  StreamBadgePills,
+} from './PlayerOsdChrome';
 import type { TvOsdAction } from './usePlayerControls';
 import { VodProgressBar } from './VodProgressBar';
 
-export { PlayerCanvasTapTarget, PlayerLockedOverlay, type PlayerOsdProps };
+export { PlayerLockedOverlay, type PlayerOsdProps };
 
 /** Web-only cursor style applied while desktop OSD is hidden during playback. */
 export const HIDE_CURSOR_WEB_STYLE = { cursor: 'none' } as unknown as ViewStyle;
@@ -50,37 +50,73 @@ export function formatStatusLine(status: PlaybackStatus, i18n: AppI18n): string 
 }
 
 /**
- * Cinema Quietude on-screen display: native-HWND flex-safe Desktop Cinema Bar on `desktop`,
- * and Floating 3-Zone Cinema OSD (top scrim, centered transport stage, bottom scrim) elsewhere.
+ * Cinema Quietude v2 on-screen display: native-HWND flex-safe Desktop Cinema Bar on `desktop`,
+ * and Floating 3-Zone Cinema OSD (with `'progress'` peek and `'controls'` tiers) elsewhere (`#391`, `#58`, `#57`, `#114`).
  */
 export function PlayerOsd(p: PlayerOsdProps): ReactElement {
   const theme = useTheme();
   const viewport = useViewport();
-  const { i18n, isTv, isVod, service, settingsOpen = false } = p;
+  const {
+    i18n,
+    isTv,
+    isVod,
+    service,
+    osdTier = 'controls',
+    settingsOpen = false,
+    infoOpen = false,
+    channelListOpen = false,
+    muted = false,
+    volume = 100,
+    playbackSpeed = 1,
+  } = p;
   const resolvedDesktop = p.isDesktop ?? viewport.formFactor === 'desktop';
 
   if (resolvedDesktop) return <DesktopCinemaBar {...p} />;
-
-  const isPortrait = !isTv && viewport.orientation === 'portrait';
-  const isFocused = (action: TvOsdAction): boolean =>
-    isTv && p.tvOsdFocused && p.tvOsdAction === action;
-  const trimmedSubtitle = p.subtitle?.trim();
-  const showPrevChannelBtn =
-    !isVod &&
-    service !== null &&
-    p.hasPreviousChannel === true &&
-    p.onJumpPreviousChannel !== undefined;
-  const showCenterTransport =
-    !p.tracksOpen &&
-    !settingsOpen &&
-    p.failure === null &&
-    ((isVod && service !== null) || p.canZap);
 
   const padH = (isTv ? 48 : 16) + viewport.overscan.x;
   const padTop = (isTv ? 24 : 14) + viewport.safeArea.top + viewport.overscan.y;
   const padBottom = (isTv ? 24 : 14) + viewport.safeArea.bottom + viewport.overscan.y;
   const padLeft = padH + viewport.safeArea.left;
   const padRight = padH + viewport.safeArea.right;
+
+  if (osdTier === 'progress') {
+    return (
+      <FloatingPeekOsd
+        title={p.title}
+        channelDigits={p.channelDigits}
+        isVod={isVod}
+        isTv={isTv}
+        muted={muted}
+        volume={volume}
+        playbackSpeed={playbackSpeed}
+        nowNext={p.nowNext}
+        previewPositionMs={p.previewPositionMs}
+        service={service}
+        clock={p.clock}
+        i18n={i18n}
+        onSeekRatio={p.onSeekRatio}
+        onScrubbingChange={p.onScrubbingChange}
+        padBottom={padBottom}
+        padLeft={padLeft}
+        padRight={padRight}
+      />
+    );
+  }
+
+  const isPortrait = !isTv && viewport.orientation === 'portrait';
+  const isFocused = (action: TvOsdAction): boolean =>
+    isTv && p.tvOsdFocused && p.tvOsdAction === action;
+  const trimmedSubtitle = p.subtitle?.trim();
+  const showStatus = p.statusKind !== 'playing' && p.statusLine.trim().length > 0;
+  const nowProg = !isVod ? (p.nowNext?.now ?? null) : null;
+  const anySheetOpen = p.tracksOpen || settingsOpen || infoOpen || channelListOpen;
+  const showPrevChannelBtn =
+    !isVod &&
+    service !== null &&
+    p.hasPreviousChannel === true &&
+    p.onJumpPreviousChannel !== undefined;
+  const showCenterTransport =
+    !anySheetOpen && p.failure === null && ((isVod && service !== null) || p.canZap);
 
   return (
     <View testID="player-osd" pointerEvents="box-none" style={playerStyles.floatingOsd}>
@@ -123,8 +159,17 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
               {!isVod && p.channelDigits !== undefined && p.channelDigits.length > 0 ? (
                 <MicroPill testID="player-channel-digits" label={p.channelDigits} tone="accent" />
               ) : null}
+              <StreamBadgePills videoInfo={p.videoInfo} tracks={p.tracks} />
             </View>
-            {trimmedSubtitle !== undefined && trimmedSubtitle.length > 0 ? (
+            {nowProg !== null ? (
+              <Text
+                testID="osd-now-programme"
+                numberOfLines={1}
+                style={[theme.typography.caption, { color: theme.colors.textSecondary }]}
+              >
+                {`${i18n.t('player.nowPlaying')} · ${nowProg.title}`}
+              </Text>
+            ) : trimmedSubtitle !== undefined && trimmedSubtitle.length > 0 ? (
               <Text
                 testID="osd-subtitle"
                 numberOfLines={1}
@@ -133,16 +178,42 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
                 {trimmedSubtitle}
               </Text>
             ) : null}
-            <Text
-              testID="osd-status"
-              numberOfLines={1}
-              style={[theme.typography.caption, { color: theme.colors.textSecondary }]}
-            >
-              {p.statusLine}
-            </Text>
+            {showStatus ? (
+              <Text
+                testID="osd-status"
+                numberOfLines={1}
+                style={[theme.typography.caption, { color: theme.colors.textSecondary }]}
+              >
+                {p.statusLine}
+              </Text>
+            ) : null}
           </View>
 
           <View style={playerStyles.utilityCluster}>
+            {!isVod && p.canZap && p.onToggleChannelList !== undefined ? (
+              <OsdButton
+                testID="player-channel-list-button"
+                icon="list"
+                variant="icon"
+                accessibilityLabel={i18n.t('player.channelList')}
+                active={channelListOpen}
+                onPress={p.onToggleChannelList}
+                isTv={isTv}
+                tvFocused={isFocused('channelList')}
+              />
+            ) : null}
+            {service !== null && p.onToggleInfo !== undefined ? (
+              <OsdButton
+                testID="player-info-button"
+                icon="info"
+                variant="icon"
+                accessibilityLabel={i18n.t('player.info')}
+                active={infoOpen}
+                onPress={p.onToggleInfo}
+                isTv={isTv}
+                tvFocused={isFocused('info')}
+              />
+            ) : null}
             {p.hasTracks && service !== null ? (
               <OsdButton
                 testID="player-tracks-button"
@@ -207,6 +278,7 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
                 circular
                 size={isTv ? 54 : 48}
                 iconSize={isTv ? 26 : 22}
+                loading={p.isBuffering === true}
                 icon={p.isPausedOrEnded ? 'play' : 'pause'}
                 accessibilityLabel={
                   p.isPausedOrEnded ? i18n.t('player.play') : i18n.t('player.pause')
@@ -231,13 +303,21 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
             <View style={playerStyles.transportCluster}>
               <OsdButton
                 testID="player-prev"
-                label={i18n.t('player.prevChannel')}
+                icon="chevronLeft"
+                variant="icon"
+                size={isTv ? 48 : 44}
+                iconSize={22}
+                accessibilityLabel={i18n.t('player.prevChannel')}
                 onPress={p.onPrev}
                 isTv={isTv}
               />
               <OsdButton
                 testID="player-next"
-                label={i18n.t('player.nextChannel')}
+                icon="chevronRight"
+                variant="icon"
+                size={isTv ? 48 : 44}
+                iconSize={22}
+                accessibilityLabel={i18n.t('player.nextChannel')}
                 onPress={p.onNext}
                 isTv={isTv}
               />
@@ -262,48 +342,24 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
             tvFocused={isTv && p.tvScrubberFocused === true}
             label={i18n.t('player.progressLabel')}
             previewPositionMs={p.previewPositionMs}
-            dimmed={isPortrait && (p.tracksOpen || settingsOpen)}
+            dimmed={isPortrait && anySheetOpen}
             onSeekRatio={p.onSeekRatio}
             {...(p.onScrubbingChange !== undefined
               ? { onScrubbingChange: p.onScrubbingChange }
               : {})}
           />
-        ) : null}
+        ) : (
+          <LiveNowNextStrip nowNext={p.nowNext} nowMs={p.clock.now()} i18n={i18n} />
+        )}
 
-        {p.failure !== null ? (
-          <View
-            style={[
-              playerStyles.errorBox,
-              {
-                backgroundColor: theme.colors.scrimStrong,
-                borderColor: theme.colors.liveColor,
-                borderRadius: theme.radius.card,
-              },
-            ]}
-          >
-            <Icon name="warning" size={16} color={theme.colors.liveColor} />
-            <View style={playerStyles.flex1}>
-              <Text
-                testID="osd-error-hint"
-                style={[theme.typography.caption, { color: theme.colors.textPrimary }]}
-              >
-                {i18n.t(p.failure.hintId)}
-              </Text>
-              {p.failure.evidence !== undefined && p.failure.evidence.trim().length > 0 ? (
-                <Text
-                  testID="player-error-evidence"
-                  numberOfLines={1}
-                  style={[theme.typography.caption, { color: theme.colors.textMuted }]}
-                >
-                  {p.failure.evidence}
-                </Text>
-              ) : null}
-            </View>
-          </View>
-        ) : null}
+        {p.failure !== null ? <PlayerFailureBanner failure={p.failure} i18n={i18n} /> : null}
 
         <View style={playerStyles.bottomMetaRow}>
-          <OsdClock service={service} clock={p.clock} previewPositionMs={p.previewPositionMs} />
+          {!isVod ? (
+            <OsdClock service={service} clock={p.clock} previewPositionMs={p.previewPositionMs} />
+          ) : (
+            <View />
+          )}
           <View style={playerStyles.bottomActions}>
             <JumpToLiveButton
               isVod={isVod}
@@ -333,7 +389,7 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
                 tvFocused={
                   p.tvOsdFocused
                     ? isFocused('retry')
-                    : isTv && !p.tracksOpen && !settingsOpen && p.tvScrubberFocused !== true
+                    : isTv && !anySheetOpen && p.tvScrubberFocused !== true
                 }
               />
             ) : null}
@@ -346,6 +402,7 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
 
 export const playerStyles = StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
+  desktopStageRow: { flex: 1, flexDirection: 'row' },
   flex1: { flex: 1 },
   surfaceLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
   surfaceLayerDesktop: { flex: 1 },
@@ -356,7 +413,7 @@ export const playerStyles = StyleSheet.create({
   transportCluster: { flexDirection: 'row', alignItems: 'center', gap: 20 },
   osdTopRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   osdTitles: { flex: 1, minWidth: 0, gap: 2 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   titleShrink: { flexShrink: 1 },
   utilityCluster: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },
   bottomMetaRow: {
@@ -366,13 +423,13 @@ export const playerStyles = StyleSheet.create({
     gap: 12,
   },
   bottomActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  errorBox: {
-    flexDirection: 'row',
+  holdSpeedWrap: {
+    position: 'absolute',
+    top: 20,
+    left: 0,
+    right: 0,
     alignItems: 'center',
-    gap: 8,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    zIndex: 25,
   },
   nextEpisodeOverlay: { paddingHorizontal: 16, marginBottom: 88, zIndex: 15 },
   nextEpisodeOverlayTv: { paddingHorizontal: 48, marginBottom: 104, zIndex: 15 },

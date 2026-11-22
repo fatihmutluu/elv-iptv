@@ -304,6 +304,18 @@ export function AppShell(props: AppShellProps): ReactElement {
                 target={playTarget}
                 playbackGuard={playbackGuard}
                 autoHideOsdMs={DEFAULT_AUTO_HIDE_OSD_MS}
+                initialVolume={preferences.preferences.playerVolume}
+                onPersistVolume={(volume) => {
+                  void preferences.updatePreferences({ playerVolume: volume });
+                }}
+                autoSubtitlesOnSkipBack={preferences.preferences.autoSubtitlesOnSkipBack}
+                onToggleAutoSubtitlesOnSkipBack={() => {
+                  void preferences.updatePreferences({
+                    autoSubtitlesOnSkipBack: !preferences.preferences.autoSubtitlesOnSkipBack,
+                  });
+                }}
+                autoPlayNextEpisode={preferences.preferences.autoPlayNextEpisode}
+                reduceMotion={preferences.preferences.reduceMotion}
                 bufferPreset={preferences.preferences.bufferPreset}
                 useTextureView={preferences.preferences.useTextureView}
                 {...(appLifecycle !== undefined ? { appLifecycle } : {})}

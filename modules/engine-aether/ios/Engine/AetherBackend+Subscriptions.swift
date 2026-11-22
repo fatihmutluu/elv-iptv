@@ -61,6 +61,7 @@ extension AetherBackend {
           self.maybeLogRouteDiagnostics(from: target, serial: serial, firstFrameOverride: true)
           self.onObservation?(.firstFrame, serial)
           self.refreshSubtitleGeometry(from: target)
+          self.inspectAndEmitVideoInfo(from: target, serial: serial)
         }
       }
       .store(in: &cancellables)

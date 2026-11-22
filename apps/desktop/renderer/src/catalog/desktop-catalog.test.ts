@@ -99,6 +99,7 @@ function makeFakeBridge(overrides?: Partial<CatalogBridge>): {
     nowNext: async () => [],
     epgWindow: async () => ({}),
     channelByNumber: async () => null,
+    queryNextEpisode: async () => null,
     onChanged: () => () => undefined,
     onDisconnected: () => () => undefined,
     close: async () => undefined,
@@ -181,6 +182,7 @@ describe('desktop CatalogService', () => {
     expect(await c1.nowNext?.(['x:s1:live:1'], 1_700_000_000_000)).toEqual([]);
     expect(await c1.epgWindow?.(['x:s1:live:1'], 1_700_000_000_000, 1_700_010_800_000)).toEqual({});
     expect(await c1.channelByNumber?.(101, 's1')).toBeNull();
+    expect(await c1.queryNextEpisode?.('x:s1:series:1', 'x:s1:episode:1', 'default')).toBeNull();
 
     await c1.close();
   });

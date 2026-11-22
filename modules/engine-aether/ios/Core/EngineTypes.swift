@@ -174,6 +174,7 @@ public enum BackendObservation: Equatable, Sendable {
   case clock(positionSeconds: Double, rate: Double, durationSeconds: Double?, liveEdgeSeconds: Double?)
   case duration(Double)
   case tracks(MediaTracksOut)
+  case mediaInfo(StreamVideoInfo)
   case progress(bytesReceived: Int64?, bufferedSeconds: Double?)
   case readerFault(ReaderFailure)
   case failure(BackendFailure)
@@ -227,6 +228,43 @@ public struct ClockAnchorOut: Equatable, Sendable {
   }
 }
 
+/// Decoded video stream metadata emitted on `onEngineEvent` (`#58`).
+public struct StreamVideoInfo: Equatable, Sendable {
+  public let width: Int?
+  public let height: Int?
+  public let fps: Double?
+  public let codec: String?
+  public let hdr: String?
+
+  public init(
+    width: Int? = nil,
+    height: Int? = nil,
+    fps: Double? = nil,
+    codec: String? = nil,
+    hdr: String? = nil
+  ) {
+    self.width = width
+    self.height = height
+    self.fps = fps
+    self.codec = codec
+    self.hdr = hdr
+  }
+
+  public var isEmpty: Bool {
+    width == nil && height == nil && fps == nil && codec == nil && hdr == nil
+  }
+
+  public func toDictionary() -> [String: Any] {
+    var out: [String: Any] = [:]
+    if let width { out["width"] = width }
+    if let height { out["height"] = height }
+    if let fps { out["fps"] = fps }
+    if let codec { out["codec"] = codec }
+    if let hdr { out["hdr"] = hdr }
+    return out
+  }
+}
+
 /// Typed representation of every event emitted to JavaScript on `onEngineEvent`.
 public enum EngineEventOut: Equatable, Sendable {
   case state(attempt: Int, state: EngineStateOut)
@@ -235,6 +273,7 @@ public enum EngineEventOut: Equatable, Sendable {
   case stall(attempt: Int, phase: StallPhaseOut, atMs: Double)
   case progress(attempt: Int, bytesReceived: Double?, atMs: Double)
   case tracks(attempt: Int, tracks: MediaTracksOut)
+  case mediaInfo(attempt: Int, info: StreamVideoInfo)
   case error(attempt: Int, error: MappedError)
   case surface(attempt: Int, change: SurfaceChangeOut)
 
@@ -271,6 +310,8 @@ public enum EngineEventOut: Equatable, Sendable {
       return out
     case let .tracks(attempt, tracks):
       return ["attempt": attempt, "type": "tracks", "tracks": tracks.toDictionary()]
+    case let .mediaInfo(attempt, info):
+      return ["attempt": attempt, "type": "mediaInfo", "info": info.toDictionary()]
     case let .error(attempt, error):
       var errorDict: [String: Any] = [
         "code": error.code,

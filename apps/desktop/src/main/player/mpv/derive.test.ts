@@ -469,4 +469,77 @@ describe('deriver', () => {
     const vodClocks = clocks(restart(vodDeriver));
     expect(vodClocks[0]?.isLiveTs).toBeUndefined();
   });
+
+  it('derives deduplicated StreamVideoInfo mediaInfo from video-params, codec, and fps properties (#58)', () => {
+    const mediaInfos = (events: EngineEvent[]) =>
+      events.flatMap((e) => (e.type === 'mediaInfo' ? [e.info] : []));
+
+    // 4K HDR10 HEVC with container-fps fallback then estimated-vf-fps override
+    const hdr = setup('vod');
+    expect(mediaInfos(hdr.d.property('video-format', 'hevc'))).toEqual([{ codec: 'hevc' }]);
+    expect(mediaInfos(hdr.d.property('container-fps', 23.976))).toEqual([
+      { codec: 'hevc', fps: 23.98 },
+    ]);
+    expect(
+      mediaInfos(
+        hdr.d.property('video-params', {
+          w: 3840,
+          h: 2160,
+          primaries: 'bt.2020',
+          gamma: 'pq',
+        }),
+      ),
+    ).toEqual([{ width: 3840, height: 2160, fps: 23.98, codec: 'hevc', hdr: 'hdr10' }]);
+    // Identical re-emission and tiny estimated-vf-fps jitter are suppressed
+    expect(
+      mediaInfos(
+        hdr.d.property('video-params', {
+          w: 3840,
+          h: 2160,
+          primaries: 'bt.2020',
+          gamma: 'pq',
+        }),
+      ),
+    ).toEqual([]);
+    expect(mediaInfos(hdr.d.property('estimated-vf-fps', 24.02))).toEqual([]);
+    // Genuine frame rate jump (e.g. bob deinterlace or 50p) updates cleanly
+    expect(mediaInfos(hdr.d.property('estimated-vf-fps', 50))).toEqual([
+      { width: 3840, height: 2160, fps: 50, codec: 'hevc', hdr: 'hdr10' },
+    ]);
+
+    // HLG and verbose video-codec normalization
+    const hlg = setup('live');
+    expect(
+      mediaInfos(hlg.d.property('video-codec', 'H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10')),
+    ).toEqual([{ codec: 'h264' }]);
+    expect(mediaInfos(hlg.d.property('video-params', { w: 1920, h: 1080, gamma: 'hlg' }))).toEqual([
+      { width: 1920, height: 1080, codec: 'h264', hdr: 'hlg' },
+    ]);
+
+    // Dolby Vision detection from colormatrix/gamma or codec
+    const dv = setup('vod');
+    expect(
+      mediaInfos(
+        dv.d.property('video-params', {
+          w: 3840,
+          h: 2160,
+          colormatrix: 'dolbyvision',
+          gamma: 'pq',
+        }),
+      ),
+    ).toEqual([{ width: 3840, height: 2160, hdr: 'dv' }]);
+
+    // SDR default when video-params has w & h without HDR transfer, and AV1 / VP9 normalization
+    const sdr = setup('live');
+    expect(mediaInfos(sdr.d.property('video-format', 'av01'))).toEqual([{ codec: 'av1' }]);
+    expect(
+      mediaInfos(sdr.d.property('video-params', { w: 1280, h: 720, gamma: 'bt.1886' })),
+    ).toEqual([{ width: 1280, height: 720, codec: 'av1', hdr: 'sdr' }]);
+
+    // Reset on new begin() clears previous stream metadata
+    sdr.d.begin(99, 'live');
+    expect(
+      mediaInfos(sdr.d.property('video-params', { w: 1920, h: 1080, gamma: 'bt.1886' })),
+    ).toEqual([{ width: 1920, height: 1080, hdr: 'sdr' }]);
+  });
 });

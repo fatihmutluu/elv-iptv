@@ -140,8 +140,12 @@ describe('PlayerScreen review fixes (TV Live OSD, double-tap, scrub cancel, focu
       selected: true,
     });
 
-    // Left moves 'settings' -> 'tracks' -> 'prevChannel' -> Select jumps to ch:0
+    // Left moves 'settings' -> 'tracks' -> 'info' -> 'prevChannel' -> Select jumps to ch:0
     await act(async () => keys.tap(KEY_LEFT));
+    await act(async () => keys.tap(KEY_LEFT));
+    expect(screen.getByTestId('player-info-button').props.accessibilityState).toMatchObject({
+      selected: true,
+    });
     await act(async () => keys.tap(KEY_LEFT));
     await act(async () => keys.tap(KEY_SELECT));
 

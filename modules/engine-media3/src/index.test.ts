@@ -174,6 +174,16 @@ describe('createMedia3Engine', () => {
     expect(native.engine.selectAudioTrack).toHaveBeenCalledWith(5, '1:1');
     expect(native.engine.selectSubtitleTrack).toHaveBeenNthCalledWith(1, 5, '2:0');
     expect(native.engine.selectSubtitleTrack).toHaveBeenNthCalledWith(2, 6, null);
+
+    const events: EngineEvent[] = [];
+    engine?.subscribe((event) => events.push(event));
+    const mediaInfo: EngineEvent = {
+      attempt: 6,
+      type: 'mediaInfo',
+      info: { width: 3840, height: 2160, fps: 59.94, codec: 'hevc', hdr: 'hdr10' },
+    };
+    native.emit(mediaInfo);
+    expect(events).toEqual([mediaInfo]);
   });
 });
 

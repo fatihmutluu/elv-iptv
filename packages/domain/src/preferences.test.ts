@@ -6,8 +6,10 @@ import {
   createMemoryPreferencesStore,
   DEFAULT_PREFERENCES,
   MAX_PREF_FONT_SCALE,
+  MAX_PREF_PLAYER_VOLUME,
   MAX_PREFERENCES_BYTES,
   MIN_PREF_FONT_SCALE,
+  MIN_PREF_PLAYER_VOLUME,
   PREFERENCES_SCHEMA_VERSION,
   type PreferencesKvBackend,
   type PreferencesSnapshot,
@@ -21,6 +23,8 @@ describe('preferences codec', () => {
     expect(MAX_PREFERENCES_BYTES).toBe(4096);
     expect(MIN_PREF_FONT_SCALE).toBe(0.9);
     expect(MAX_PREF_FONT_SCALE).toBe(1.2);
+    expect(MIN_PREF_PLAYER_VOLUME).toBe(0);
+    expect(MAX_PREF_PLAYER_VOLUME).toBe(100);
     expect(BUFFER_PRESETS).toEqual(['auto', 'balanced', 'large']);
     expect(DEFAULT_PREFERENCES).toEqual({
       version: 1,
@@ -30,6 +34,9 @@ describe('preferences codec', () => {
       reduceMotion: false,
       bufferPreset: 'auto',
       useTextureView: false,
+      autoSubtitlesOnSkipBack: false,
+      autoPlayNextEpisode: true,
+      playerVolume: 100,
     });
   });
 
@@ -66,6 +73,9 @@ describe('preferences codec', () => {
       reduceMotion: true,
       bufferPreset: 'auto',
       useTextureView: false,
+      autoSubtitlesOnSkipBack: false,
+      autoPlayNextEpisode: true,
+      playerVolume: 100,
     });
 
     const withPlaybackFields = parsePreferences(
@@ -77,6 +87,9 @@ describe('preferences codec', () => {
         reduceMotion: false,
         bufferPreset: 'large',
         useTextureView: true,
+        autoSubtitlesOnSkipBack: true,
+        autoPlayNextEpisode: false,
+        playerVolume: 65,
       }),
     );
     expect(withPlaybackFields).toEqual({
@@ -87,6 +100,9 @@ describe('preferences codec', () => {
       reduceMotion: false,
       bufferPreset: 'large',
       useTextureView: true,
+      autoSubtitlesOnSkipBack: true,
+      autoPlayNextEpisode: false,
+      playerVolume: 65,
     });
 
     const partialInvalid = parsePreferences(
@@ -98,6 +114,9 @@ describe('preferences codec', () => {
         reduceMotion: 'true',
         bufferPreset: 'giant',
         useTextureView: 'yes',
+        autoSubtitlesOnSkipBack: 'yes',
+        autoPlayNextEpisode: 0,
+        playerVolume: 'loud',
       }),
     );
     expect(partialInvalid).toEqual(DEFAULT_PREFERENCES);
@@ -111,6 +130,7 @@ describe('preferences codec', () => {
         reduceMotion: true,
         bufferPreset: 'balanced',
         useTextureView: false,
+        playerVolume: Number.NaN,
       }),
     );
     expect(nonFinite).toEqual({
@@ -121,6 +141,9 @@ describe('preferences codec', () => {
       reduceMotion: true,
       bufferPreset: 'balanced',
       useTextureView: false,
+      autoSubtitlesOnSkipBack: false,
+      autoPlayNextEpisode: true,
+      playerVolume: 100,
     });
   });
 
@@ -142,6 +165,9 @@ describe('preferences codec', () => {
       reduceMotion: false,
       bufferPreset: 'auto',
       useTextureView: false,
+      autoSubtitlesOnSkipBack: false,
+      autoPlayNextEpisode: true,
+      playerVolume: 100,
     });
 
     const high = parsePreferences(
@@ -156,6 +182,65 @@ describe('preferences codec', () => {
     expect(high.fontScale).toBe(1.2);
   });
 
+  it('normalizes and clamps playerVolume (-10 -> 0, 150 -> 100, 72.6 -> 73, NaN -> 100) and round-trips player preferences', () => {
+    expect(parsePreferences(JSON.stringify({ version: 1, playerVolume: -10 })).playerVolume).toBe(
+      0,
+    );
+    expect(parsePreferences(JSON.stringify({ version: 1, playerVolume: 150 })).playerVolume).toBe(
+      100,
+    );
+    expect(parsePreferences(JSON.stringify({ version: 1, playerVolume: 72.6 })).playerVolume).toBe(
+      73,
+    );
+    expect(
+      Object.is(
+        parsePreferences(JSON.stringify({ version: 1, playerVolume: -0.1 })).playerVolume,
+        0,
+      ),
+    ).toBe(true);
+    expect(
+      parsePreferences(JSON.stringify({ version: 1, playerVolume: Number.NaN })).playerVolume,
+    ).toBe(100);
+
+    // Direct serializePreferences clamps fractional/out-of-bounds and falls back on non-finite volume
+    const clampSerialized = serializePreferences({
+      ...DEFAULT_PREFERENCES,
+      autoSubtitlesOnSkipBack: true,
+      autoPlayNextEpisode: false,
+      playerVolume: 72.6,
+    });
+    expect(clampSerialized.ok).toBe(true);
+    if (clampSerialized.ok) {
+      expect(parsePreferences(clampSerialized.value)).toEqual({
+        ...DEFAULT_PREFERENCES,
+        autoSubtitlesOnSkipBack: true,
+        autoPlayNextEpisode: false,
+        playerVolume: 73,
+      });
+    }
+
+    const nanSerialized = serializePreferences({
+      ...DEFAULT_PREFERENCES,
+      playerVolume: Number.NaN,
+    });
+    expect(nanSerialized.ok).toBe(true);
+    if (nanSerialized.ok) {
+      expect(parsePreferences(nanSerialized.value).playerVolume).toBe(100);
+    }
+
+    const lowSerialized = serializePreferences({
+      ...DEFAULT_PREFERENCES,
+      playerVolume: -10,
+    });
+    expect(lowSerialized.ok && parsePreferences(lowSerialized.value).playerVolume).toBe(0);
+
+    const highSerialized = serializePreferences({
+      ...DEFAULT_PREFERENCES,
+      playerVolume: 150,
+    });
+    expect(highSerialized.ok && parsePreferences(highSerialized.value).playerVolume).toBe(100);
+  });
+
   it('serializes valid snapshots and rejects payloads over 4096 UTF-8 bytes', () => {
     const encoded = serializePreferences({
       version: 1,
@@ -165,6 +250,9 @@ describe('preferences codec', () => {
       reduceMotion: true,
       bufferPreset: 'large',
       useTextureView: true,
+      autoSubtitlesOnSkipBack: true,
+      autoPlayNextEpisode: false,
+      playerVolume: 73,
     });
     expect(encoded.ok).toBe(true);
     if (encoded.ok) {
@@ -177,6 +265,9 @@ describe('preferences codec', () => {
         reduceMotion: true,
         bufferPreset: 'large',
         useTextureView: true,
+        autoSubtitlesOnSkipBack: true,
+        autoPlayNextEpisode: false,
+        playerVolume: 73,
       });
     }
 
@@ -230,6 +321,9 @@ describe('createMemoryPreferencesStore', () => {
       reduceMotion: false,
       bufferPreset: 'auto',
       useTextureView: false,
+      autoSubtitlesOnSkipBack: false,
+      autoPlayNextEpisode: true,
+      playerVolume: 100,
     });
 
     const seen: PreferencesSnapshot[] = [];
@@ -244,6 +338,9 @@ describe('createMemoryPreferencesStore', () => {
       fontScale: 0.5,
       bufferPreset: 'balanced',
       useTextureView: true,
+      autoSubtitlesOnSkipBack: true,
+      autoPlayNextEpisode: false,
+      playerVolume: 72.6,
     });
     expect(updated).toEqual({
       ok: true,
@@ -255,6 +352,9 @@ describe('createMemoryPreferencesStore', () => {
         reduceMotion: true,
         bufferPreset: 'balanced',
         useTextureView: true,
+        autoSubtitlesOnSkipBack: true,
+        autoPlayNextEpisode: false,
+        playerVolume: 73,
       },
     });
     expect(throwing).toHaveBeenCalledTimes(1);
@@ -362,7 +462,13 @@ describe('createKvPreferencesStore', () => {
       store.update({ locale: 'tr' }),
       store.update({ fontScale: 1.15 }),
       store.update({ themePreset: 'midnightSlate' }),
-      store.update({ bufferPreset: 'large', useTextureView: true }),
+      store.update({
+        bufferPreset: 'large',
+        useTextureView: true,
+        autoSubtitlesOnSkipBack: true,
+        autoPlayNextEpisode: false,
+        playerVolume: 42,
+      }),
     ]);
 
     expect(r1.ok && r2.ok && r3.ok && r4.ok && r5.ok).toBe(true);
@@ -374,6 +480,9 @@ describe('createKvPreferencesStore', () => {
       reduceMotion: true,
       bufferPreset: 'large',
       useTextureView: true,
+      autoSubtitlesOnSkipBack: true,
+      autoPlayNextEpisode: false,
+      playerVolume: 42,
     };
     expect(r5.ok && r5.value).toEqual(expected);
     expect(await store.load()).toEqual(expected);
@@ -520,6 +629,9 @@ describe('createKvPreferencesStore', () => {
       reduceMotion: true,
       bufferPreset: 'auto',
       useTextureView: false,
+      autoSubtitlesOnSkipBack: false,
+      autoPlayNextEpisode: true,
+      playerVolume: 100,
     });
     expect(backend.set).not.toHaveBeenCalled();
     expect(timers.size).toBe(1);
@@ -539,6 +651,9 @@ describe('createKvPreferencesStore', () => {
           reduceMotion: true,
           bufferPreset: 'auto',
           useTextureView: false,
+          autoSubtitlesOnSkipBack: false,
+          autoPlayNextEpisode: true,
+          playerVolume: 100,
         },
       });
     }

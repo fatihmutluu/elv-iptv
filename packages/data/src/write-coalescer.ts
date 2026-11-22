@@ -245,6 +245,7 @@ export function createCoalescedCatalog(
   const saveProgressFn = c.saveProgress?.bind(c);
   const setWatchedFn = c.setWatched?.bind(c);
   const getProgressFn = c.getProgress?.bind(c);
+  const queryNextEpisodeFn = c.queryNextEpisode?.bind(c);
   const listContinueWatchingFn = c.listContinueWatching?.bind(c);
   const listProgressByKeysFn = c.listProgressByKeys?.bind(c);
   const clearProgressFn = c.clearProgress?.bind(c);
@@ -276,6 +277,16 @@ export function createCoalescedCatalog(
     ...(c.epgWindow ? { epgWindow: c.epgWindow.bind(c) } : {}),
     ...(c.epgSlice ? { epgSlice: c.epgSlice.bind(c) } : {}),
     ...(c.channelByNumber ? { channelByNumber: c.channelByNumber.bind(c) } : {}),
+    ...(queryNextEpisodeFn
+      ? {
+          queryNextEpisode: async (seriesKey, currentItemKey, profileId) => {
+            const p = normalizeProfile(profileId);
+            await coalescer.flushPrefix(`progress:${p}:`);
+            await coalescer.flushPrefix(`watched:${p}:`);
+            return queryNextEpisodeFn(seriesKey, currentItemKey, profileId);
+          },
+        }
+      : {}),
     ...(getProgressFn
       ? {
           getProgress: async (itemKey, profileId) => {

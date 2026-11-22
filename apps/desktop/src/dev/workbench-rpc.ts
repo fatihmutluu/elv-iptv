@@ -30,6 +30,7 @@ export const ALLOWED_RPC_METHODS: ReadonlySet<string> = new Set([
   'channelByNumber',
   'seasons',
   'episodes',
+  'queryNextEpisode',
   'resolveStream',
   'saveProgress',
   'setWatched',
@@ -149,6 +150,11 @@ export async function dispatchWorkbenchRpc(
       return service.seasons(Number(args[0] ?? 0));
     case 'episodes':
       return service.episodes(Number(args[0] ?? 0), Number(args[1] ?? 0));
+    case 'queryNextEpisode':
+      return (
+        service.queryNextEpisode?.(String(args[0] ?? ''), String(args[1] ?? ''), optStr(args[2])) ??
+        null
+      );
     case 'resolveStream':
       return resolveRedactedStream(db, service, String(args[0] ?? ''));
     case 'saveProgress':

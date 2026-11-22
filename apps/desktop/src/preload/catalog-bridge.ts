@@ -298,6 +298,13 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
       }),
     seasons: (seriesId) => callResult({ method: 'seasons', seriesId }),
     episodes: (seriesId, season) => callValue({ method: 'episodes', seriesId, season }),
+    queryNextEpisode: (seriesKey, currentItemKey, profileId) =>
+      callValue({
+        method: 'queryNextEpisode',
+        seriesKey,
+        currentItemKey,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
     resolveStream: (itemKey) => callResult({ method: 'resolveStream', itemKey }),
     saveProgress: (input) => callResult({ method: 'saveProgress', input }),
     setWatched: (itemKey, watched, profileId) =>

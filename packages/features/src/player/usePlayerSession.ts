@@ -6,6 +6,7 @@ import {
   type PlaybackService,
   type PlaybackStatus,
   type PlaybackTimers,
+  type StreamVideoInfo,
 } from '@elv/playback';
 import {
   type MutableRefObject,
@@ -26,6 +27,7 @@ type SessionState =
 interface PlaybackUiSlice {
   readonly status: PlaybackStatus;
   readonly tracks: MediaTracks;
+  readonly videoInfo: StreamVideoInfo | undefined;
   readonly surfaceRecreationToken: number;
 }
 
@@ -33,6 +35,7 @@ const OPENING_STATUS: PlaybackStatus = { kind: 'tuning' };
 const OPENING_PLAYBACK_SLICE: PlaybackUiSlice = {
   status: OPENING_STATUS,
   tracks: EMPTY_TRACKS,
+  videoInfo: undefined,
   surfaceRecreationToken: 0,
 };
 
@@ -128,6 +131,7 @@ export function usePlayerSession(params: {
 
   const openedEngine = sessionState.kind === 'ready' ? sessionState.opened : null;
   const [inPip, setInPip] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
     const subscribePip = openedEngine?.onPictureInPictureChange;
@@ -136,6 +140,17 @@ export function usePlayerSession(params: {
       return;
     }
     return subscribePip((next) => setInPip(next));
+  }, [openedEngine]);
+
+  useEffect(() => {
+    if (openedEngine === null) {
+      setIsFullscreen(false);
+      return;
+    }
+    setIsFullscreen(openedEngine.isFullscreen?.() === true);
+    const subscribeFullscreen = openedEngine.onFullscreenChange;
+    if (subscribeFullscreen === undefined) return;
+    return subscribeFullscreen((next) => setIsFullscreen(next));
   }, [openedEngine]);
 
   const canStepTrack = activeTarget.kind === 'live' && (activeTarget.playlist?.count ?? 0) > 1;
@@ -165,19 +180,38 @@ export function usePlayerSession(params: {
   );
   const getPlaybackSnapshot = useCallback((): PlaybackUiSlice => {
     if (activeService === null) return OPENING_PLAYBACK_SLICE;
-    const { status: st, tracks: tr, surfaceRecreationToken: token } = activeService.getState();
+    const {
+      status: st,
+      tracks: tr,
+      videoInfo: vi,
+      surfaceRecreationToken: token,
+    } = activeService.getState();
     const prev = sliceRef.current;
-    if (prev.status === st && prev.tracks === tr && prev.surfaceRecreationToken === token) {
+    if (
+      prev.status === st &&
+      prev.tracks === tr &&
+      prev.videoInfo === vi &&
+      prev.surfaceRecreationToken === token
+    ) {
       return prev;
     }
-    sliceRef.current = { status: st, tracks: tr, surfaceRecreationToken: token };
+    sliceRef.current = { status: st, tracks: tr, videoInfo: vi, surfaceRecreationToken: token };
     return sliceRef.current;
   }, [activeService]);
-  const { status, tracks, surfaceRecreationToken } = useSyncExternalStore(
+  const { status, tracks, videoInfo, surfaceRecreationToken } = useSyncExternalStore(
     subscribePlayback,
     getPlaybackSnapshot,
     getPlaybackSnapshot,
   );
 
-  return { sessionState, activeService, status, tracks, surfaceRecreationToken, inPip };
+  return {
+    sessionState,
+    activeService,
+    status,
+    tracks,
+    videoInfo,
+    surfaceRecreationToken,
+    inPip,
+    isFullscreen,
+  };
 }

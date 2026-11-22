@@ -2,6 +2,7 @@ import type { AttemptToken, ClockAnchor, EngineEvent, EngineState, MediaKind } f
 import type { MpvEvent } from './codec.ts';
 import { classifyEnd, type MpvLogLine } from './errors.ts';
 import { createMpvTelemetry, type MpvTelemetry } from './telemetry.ts';
+import { createMpvVideoInfoTracker, type MpvVideoInfoTracker } from './video-info.ts';
 
 const MAX_LOG_LINES = 50;
 
@@ -59,6 +60,7 @@ interface Media {
   cacheEnd: number | undefined;
   lastAnchorAt: number;
   telemetry: MpvTelemetry;
+  videoInfo: MpvVideoInfoTracker;
 }
 
 type EventBody = EngineEvent extends infer E
@@ -215,11 +217,26 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
       }
       case 'time-pos':
         return media.hasPlaybackTime ? [] : updateTime(media, value);
-      case 'video-params':
+      case 'video-params': {
         media.telemetry.onVideoParams(value);
+        const info = media.videoInfo.onVideoParams(value);
         if (typeof value !== 'object' || value === null) return [];
         media.frameReady = true;
-        return frameThenSettle(media);
+        const settled = frameThenSettle(media);
+        return info ? [...settled, ev(media, info)] : settled;
+      }
+      case 'video-format': {
+        const info = media.videoInfo.onVideoFormat(value);
+        return info ? [ev(media, info)] : [];
+      }
+      case 'video-codec': {
+        const info = media.videoInfo.onVideoCodec(value);
+        return info ? [ev(media, info)] : [];
+      }
+      case 'container-fps': {
+        const info = media.videoInfo.onContainerFps(value);
+        return info ? [ev(media, info)] : [];
+      }
       case 'vid':
         media.telemetry.onVid(value, media.loaded);
         if (!media.loaded || (value !== false && value !== 'no')) return [];
@@ -228,9 +245,11 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
       case 'track-list':
         media.telemetry.onTrackList(value);
         return [];
-      case 'estimated-vf-fps':
+      case 'estimated-vf-fps': {
         media.telemetry.onEstimatedVfFps(value, opts.now());
-        return [];
+        const info = media.videoInfo.onEstimatedVfFps(value);
+        return info ? [ev(media, info)] : [];
+      }
       case 'duration': {
         const raw = num(value);
         const clean = raw !== undefined && raw > 0 ? raw : undefined;
@@ -289,6 +308,7 @@ export function createDeriver(opts: { now(): number; clockIntervalMs: number }):
         cacheEnd: undefined,
         lastAnchorAt: Number.NEGATIVE_INFINITY,
         telemetry: createMpvTelemetry(),
+        videoInfo: createMpvVideoInfoTracker(),
       };
       return [ev(m, { type: 'state', state: 'opening' })];
     },

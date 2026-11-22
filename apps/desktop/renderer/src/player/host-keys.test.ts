@@ -23,6 +23,8 @@ describe('mapHostKey, routeDesktopUiEvent & dispatchDesktopClose', () => {
       ['mute', 'mute'],
       ['tracks', 'tracks'],
       ['prev-channel', 'prev-channel'],
+      ['info', 'info'],
+      ['channel-list', 'channel-list'],
     ];
     for (const [input, expected] of cases) {
       expect(mapHostKey(input)).toBe(expected);
@@ -55,6 +57,8 @@ describe('mapHostKey, routeDesktopUiEvent & dispatchDesktopClose', () => {
       'mute',
       'tracks',
       'prev-channel',
+      'info',
+      'channel-list',
     ];
     for (const key of forwarded) {
       routeDesktopUiEvent({ type: 'key', key }, handlers);
