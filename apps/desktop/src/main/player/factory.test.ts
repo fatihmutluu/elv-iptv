@@ -136,10 +136,88 @@ describe('createEngineFor', () => {
     expect(baseArgs).not.toContain('--video-timing-offset=0');
   });
 
-  it('uses own-window without renderContext by default on darwin', async () => {
+  it('defaults darwin with canvasExecutable and ioSurfaceAddon to canvas, forwards ioSurfaceAddon, enables renderContext, and spawns canvasExecutable', async () => {
     const uiEvents: PlayerUiEvent[] = [];
+    const macRuntime = {
+      executable: '/res/mpv/ELV IPTV Player.app/Contents/MacOS/mpv',
+      canvasExecutable: '/res/mpv/ELV IPTV Player.app/Contents/MacOS/elv-mpv',
+      ioSurfaceAddon: '/res/mpv/elv-iosurface.node',
+      inputConf: '/res/mpv-input.conf',
+    };
+    const engine = await createEngineFor(fakeOwner, {
+      runtime: macRuntime,
+      platform: 'darwin',
+      loadMode: 'replace',
+      pidFile: '/tmp/mpv-pids.json',
+      engineId: 'engine-mac-1',
+      readaheadStore: stubReadaheadStore,
+      onUi: (ev) => uiEvents.push(ev),
+    });
+
+    expect(engine.presenterKind).toBe('canvas');
+    expect(mocks.presenterCalls).toEqual([
+      {
+        kind: 'canvas',
+        owner: fakeOwner,
+        platform: 'darwin',
+        opts: { engineId: 'engine-mac-1', ioSurfaceAddon: macRuntime.ioSurfaceAddon },
+      },
+    ]);
+    const baseArgs = mocks.engineDeps[0]?.baseArgs ?? [];
+    expect(baseArgs).toContain('--force-window=no');
+    expect(baseArgs).toContain('--vo=libmpv');
+    expect(baseArgs).toContain('--video-timing-offset=0');
+    expect(uiEvents).toEqual([{ type: 'presenter', kind: 'canvas', coversArea: false }]);
+
+    await mocks.engineDeps[0]?.spawn(['--arg'], new AbortController().signal);
+    expect(mocks.spawnCalls[0]).toMatchObject({ executable: macRuntime.canvasExecutable });
+  });
+
+  it('respects own-window presenterOverride on darwin, disables renderContext, and spawns standalone mpv', async () => {
+    const uiEvents: PlayerUiEvent[] = [];
+    const macRuntime = {
+      executable: '/res/mpv/ELV IPTV Player.app/Contents/MacOS/mpv',
+      canvasExecutable: '/res/mpv/ELV IPTV Player.app/Contents/MacOS/elv-mpv',
+      ioSurfaceAddon: '/res/mpv/elv-iosurface.node',
+      inputConf: '/res/mpv-input.conf',
+    };
+    const engine = await createEngineFor(fakeOwner, {
+      runtime: macRuntime,
+      platform: 'darwin',
+      loadMode: 'replace',
+      pidFile: '/tmp/mpv-pids.json',
+      engineId: 'engine-mac-2',
+      presenterOverride: 'own-window',
+      readaheadStore: stubReadaheadStore,
+      onUi: (ev) => uiEvents.push(ev),
+    });
+
+    expect(engine.presenterKind).toBe('own-window');
+    expect(mocks.presenterCalls).toEqual([
+      {
+        kind: 'own-window',
+        owner: fakeOwner,
+        platform: 'darwin',
+        opts: { engineId: 'engine-mac-2' },
+      },
+    ]);
+    const baseArgs = mocks.engineDeps[0]?.baseArgs ?? [];
+    expect(baseArgs).toContain('--force-window=immediate');
+    expect(baseArgs).not.toContain('--vo=libmpv');
+    expect(uiEvents).toEqual([{ type: 'presenter', kind: 'own-window', coversArea: false }]);
+
+    await mocks.engineDeps[0]?.spawn(['--arg'], new AbortController().signal);
+    expect(mocks.spawnCalls[0]).toMatchObject({ executable: macRuntime.executable });
+  });
+
+  it('falls back to own-window without renderContext on darwin when canvas artifacts are absent', async () => {
+    const uiEvents: PlayerUiEvent[] = [];
+    const macFallbackRuntime = {
+      executable: '/res/mpv/ELV IPTV Player.app/Contents/MacOS/mpv',
+      inputConf: '/res/mpv-input.conf',
+    };
     await createEngineFor(fakeOwner, {
-      runtime,
+      runtime: macFallbackRuntime,
       platform: 'darwin',
       loadMode: 'replace',
       pidFile: '/tmp/mpv-pids.json',
@@ -152,5 +230,8 @@ describe('createEngineFor', () => {
     expect(baseArgs).toContain('--force-window=immediate');
     expect(baseArgs).not.toContain('--vo=libmpv');
     expect(uiEvents).toEqual([{ type: 'presenter', kind: 'own-window', coversArea: false }]);
+
+    await mocks.engineDeps[0]?.spawn(['--arg'], new AbortController().signal);
+    expect(mocks.spawnCalls[0]).toMatchObject({ executable: macFallbackRuntime.executable });
   });
 });

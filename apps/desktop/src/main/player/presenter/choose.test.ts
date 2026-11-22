@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { choosePresenter, parsePresenterOverride, WINDOWS_DEFAULT_PRESENTER } from './choose.ts';
+import {
+  choosePresenter,
+  DARWIN_DEFAULT_PRESENTER,
+  parsePresenterOverride,
+  WINDOWS_DEFAULT_PRESENTER,
+} from './choose.ts';
 
 describe('choosePresenter', () => {
   it('defaults win32 to canvas', () => {
@@ -7,8 +12,9 @@ describe('choosePresenter', () => {
     expect(choosePresenter('win32')).toBe('canvas');
   });
 
-  it('darwin is own-window', () => {
-    expect(choosePresenter('darwin')).toBe('own-window');
+  it('defaults darwin to canvas', () => {
+    expect(DARWIN_DEFAULT_PRESENTER).toBe('canvas');
+    expect(choosePresenter('darwin')).toBe('canvas');
   });
 
   it('other platforms use own-window', () => {
@@ -16,6 +22,7 @@ describe('choosePresenter', () => {
   });
 
   it('an override wins', () => {
+    expect(choosePresenter('darwin', 'own-window')).toBe('own-window');
     expect(choosePresenter('darwin', 'child-window')).toBe('child-window');
     expect(choosePresenter('win32', 'own-window')).toBe('own-window');
     expect(choosePresenter('win32', 'child-window')).toBe('child-window');

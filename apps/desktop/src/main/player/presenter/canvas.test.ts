@@ -7,6 +7,7 @@ import {
   type SharedTextureImportedLike,
   type SharedTextureImporterLike,
 } from './canvas.ts';
+import type { CanvasEndpoint, IoSurfaceResolver } from './iosurface.ts';
 import type { PresenterEvent } from './types.ts';
 
 function fakePipeSocket() {
@@ -55,7 +56,11 @@ function fakePipeSocket() {
   };
 }
 
-function fakePipeServer(options?: { deferListen?: boolean; failListen?: Error }) {
+function fakePipeServer(options?: {
+  deferListen?: boolean;
+  failListen?: Error;
+  throwListenSync?: Error;
+}) {
   const connectionListeners = new Set<(socket: CanvasPipeSocketLike) => void>();
   const errorListeners = new Set<(err: Error) => void>();
   const listenCalls: Array<{ path: string; exclusive: boolean }> = [];
@@ -65,6 +70,9 @@ function fakePipeServer(options?: { deferListen?: boolean; failListen?: Error })
   const server: CanvasPipeServerLike = {
     listen(opts, onListening) {
       listenCalls.push({ ...opts });
+      if (options?.throwListenSync) {
+        throw options.throwListenSync;
+      }
       if (options?.failListen) {
         queueMicrotask(() => {
           for (const fn of [...errorListeners]) fn(options.failListen as Error);
@@ -184,7 +192,10 @@ function fakeSharedTexture() {
 function setup(opts?: {
   scaleFactor?: number;
   engineId?: string;
-  serverOpts?: { deferListen?: boolean; failListen?: Error };
+  serverOpts?: { deferListen?: boolean; failListen?: Error; throwListenSync?: Error };
+  ioSurfaceResolver?: IoSurfaceResolver;
+  createEndpoint?: () => CanvasEndpoint;
+  generatePipeName?: () => string;
 }) {
   const app = fakeAppWindow();
   const pipe = fakePipeServer(opts?.serverOpts);
@@ -211,6 +222,9 @@ function setup(opts?: {
         displayListeners.delete(listener);
       };
     },
+    ...(opts?.ioSurfaceResolver ? { ioSurfaceResolver: opts.ioSurfaceResolver } : {}),
+    ...(opts?.createEndpoint ? { createEndpoint: opts.createEndpoint } : {}),
+    ...(opts?.generatePipeName ? { generatePipeName: opts.generatePipeName } : {}),
   });
   presenter.onEvent((e) => events.push(e));
 
@@ -408,8 +422,12 @@ describe('createCanvasPresenter', () => {
     const first = t.st.imported[0];
     expect(first?.options.textureInfo.pixelFormat).toBe('bgra');
     expect(first?.options.textureInfo.codedSize).toEqual({ width: 1920, height: 1080 });
-    expect(first?.options.textureInfo.handle.ntHandle.length).toBe(8);
-    expect(first?.options.textureInfo.handle.ntHandle.readBigUInt64LE(0)).toBe(bigHandle);
+    const firstHandle = first?.options.textureInfo.handle;
+    expect(firstHandle && 'ntHandle' in firstHandle).toBe(true);
+    if (firstHandle && 'ntHandle' in firstHandle) {
+      expect(firstHandle.ntHandle.length).toBe(8);
+      expect(firstHandle.ntHandle.readBigUInt64LE(0)).toBe(bigHandle);
+    }
     expect(t.events).toEqual([{ type: 'surface', change: 'created' }]);
     expect(sock.written).toEqual(['I 1 0\n', 'I 1 1\n', 'I 1 2\n']);
 
@@ -631,5 +649,148 @@ describe('createCanvasPresenter', () => {
       { type: 'surface', change: 'created' },
       { type: 'surface', change: 'destroyed' },
     ]);
+  });
+
+  it('resolves macOS IOSurfaceIDs via ioSurfaceResolver, always releases, and handles errors and out-of-range IDs', async () => {
+    const surfaceBuf = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]);
+    let lookupThrows = false;
+    const lookup = vi.fn((id: number) => {
+      if (lookupThrows) throw new Error('lookup boom');
+      return id === 12345 || id === 12346 ? surfaceBuf : null;
+    });
+    const release = vi.fn();
+
+    const t = setup({ ioSurfaceResolver: { lookup, release } });
+    await t.presenter.prepare();
+    t.presenter.setArea({ x: 0, y: 0, width: 1280, height: 720, visible: true });
+
+    const sock = fakePipeSocket();
+    t.pipe.connect(sock.socket);
+    sock.written.length = 0;
+
+    // Normal IOSurface import -> release -> I ack -> surface created
+    sock.push('S 1 0 12345 1280 720\n');
+    expect(lookup).toHaveBeenCalledWith(12345);
+    expect(t.st.imported).toHaveLength(1);
+    expect(t.st.imported[0]?.options.textureInfo).toEqual({
+      pixelFormat: 'bgra',
+      codedSize: { width: 1280, height: 720 },
+      handle: { ioSurface: surfaceBuf },
+    });
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledWith(surfaceBuf);
+    expect(sock.written).toEqual(['I 1 0\n']);
+    expect(t.events).toEqual([{ type: 'surface', change: 'created' }]);
+
+    // importSharedTexture throws -> STILL calls release and sends I ack
+    t.st.setImportThrows(true);
+    sock.push('S 1 1 12346 1280 720\n');
+    expect(lookup).toHaveBeenCalledWith(12346);
+    expect(release).toHaveBeenCalledTimes(2);
+    expect(t.st.imported).toHaveLength(1);
+    expect(sock.written.at(-1)).toBe('I 1 1\n');
+    t.st.setImportThrows(false);
+
+    // lookup returns null -> skips import and release, STILL sends I ack
+    sock.push('S 1 2 99999 1280 720\n');
+    expect(lookup).toHaveBeenCalledWith(99999);
+    expect(release).toHaveBeenCalledTimes(2);
+    expect(t.st.imported).toHaveLength(1);
+    expect(sock.written.at(-1)).toBe('I 1 2\n');
+
+    // lookup throws -> skips import and release, STILL sends I ack
+    lookupThrows = true;
+    sock.push('S 1 2 12345 1280 720\n');
+    expect(release).toHaveBeenCalledTimes(2);
+    expect(sock.written.at(-1)).toBe('I 1 2\n');
+    lookupThrows = false;
+
+    // IOSurfaceID > uint32 max (0xffffffff) -> rejected safely without calling lookup, STILL sends I ack
+    lookup.mockClear();
+    sock.push('S 1 2 4294967296 1280 720\n');
+    expect(lookup).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(2);
+    expect(sock.written.at(-1)).toBe('I 1 2\n');
+
+    t.presenter.dispose();
+  });
+
+  it('invokes createEndpoint onListening on listen and cleanup on dispose, listen error, and mid-listen dispose', async () => {
+    const onListening1 = vi.fn();
+    const cleanup1 = vi.fn();
+    const t1 = setup({
+      createEndpoint: () => ({
+        path: '/tmp/elv-c-abc/c.sock',
+        onListening: onListening1,
+        cleanup: cleanup1,
+      }),
+    });
+    const args = await t1.presenter.prepare();
+    expect(args).toEqual(['--elv-canvas-pipe=/tmp/elv-c-abc/c.sock', '--input-vo-keyboard=no']);
+    expect(onListening1).toHaveBeenCalledTimes(1);
+    expect(cleanup1).toHaveBeenCalledTimes(0);
+
+    t1.presenter.dispose();
+    expect(cleanup1).toHaveBeenCalledTimes(1);
+
+    // Listen error cleans up endpoint and never calls onListening
+    const onListening2 = vi.fn();
+    const cleanup2 = vi.fn();
+    const t2 = setup({
+      serverOpts: { failListen: new Error('EADDRINUSE') },
+      createEndpoint: () => ({
+        path: '/tmp/elv-c-err/c.sock',
+        onListening: onListening2,
+        cleanup: cleanup2,
+      }),
+    });
+    await expect(t2.presenter.prepare()).rejects.toThrow('EADDRINUSE');
+    expect(onListening2).not.toHaveBeenCalled();
+    expect(cleanup2).toHaveBeenCalledTimes(1);
+    t2.presenter.dispose();
+
+    // Disposed mid-listen cleans up endpoint and does not call onListening
+    const onListening3 = vi.fn();
+    const cleanup3 = vi.fn();
+    const t3 = setup({
+      serverOpts: { deferListen: true },
+      createEndpoint: () => ({
+        path: '/tmp/elv-c-mid/c.sock',
+        onListening: onListening3,
+        cleanup: cleanup3,
+      }),
+    });
+    const pending = t3.presenter.prepare();
+    t3.presenter.dispose();
+    await expect(pending).rejects.toThrow(/disposed/);
+    expect(onListening3).not.toHaveBeenCalled();
+    expect(cleanup3).toHaveBeenCalledTimes(1);
+
+    // Legacy generatePipeName still works
+    const t4 = setup({ generatePipeName: () => '\\\\.\\pipe\\custom-pipe' });
+    expect(await t4.presenter.prepare()).toEqual([
+      '--elv-canvas-pipe=\\\\.\\pipe\\custom-pipe',
+      '--input-vo-keyboard=no',
+    ]);
+    t4.presenter.dispose();
+
+    // Synchronous throw from server.listen cleans up endpoint, closes server, and resets listenPromise
+    const cleanup5 = vi.fn();
+    let attempt = 0;
+    const t5 = setup({
+      serverOpts: { throwListenSync: new Error('EINVAL sync') },
+      createEndpoint: () => ({
+        path: `/tmp/elv-c-sync-${++attempt}/c.sock`,
+        cleanup: cleanup5,
+      }),
+    });
+    await expect(t5.presenter.prepare()).rejects.toThrow('EINVAL sync');
+    expect(t5.pipe.closed).toBe(true);
+    expect(cleanup5).toHaveBeenCalledTimes(1);
+    // Subsequent prepare attempts a fresh endpoint rather than returning a stale listenPromise
+    await expect(t5.presenter.prepare()).rejects.toThrow('EINVAL sync');
+    expect(attempt).toBe(2);
+    expect(cleanup5).toHaveBeenCalledTimes(2);
+    t5.presenter.dispose();
   });
 });

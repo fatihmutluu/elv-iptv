@@ -4,6 +4,7 @@ import type { PresenterKind } from '../../../shared/player-ipc.ts';
 import { type FullscreenMode, macOwnWindowGeometry } from './bounds.ts';
 import { createCanvasPresenter } from './canvas.ts';
 import { createChildWindowPresenter } from './child-window.ts';
+import { createCanvasEndpoint, type IoSurfaceResolver, loadIoSurfaceAddon } from './iosurface.ts';
 import { createOwnWindowPresenter } from './own-window.ts';
 import type { VideoPresenter } from './types.ts';
 import { createVideoWindow, nativeHwnd } from './video-window-options.ts';
@@ -23,6 +24,8 @@ function subscribeDisplayChanges(listener: () => void): () => void {
 export interface CreatePresenterOptions {
   fullscreenMode?: FullscreenMode;
   engineId?: string;
+  ioSurfaceAddon?: string;
+  ioSurfaceResolver?: IoSurfaceResolver;
 }
 
 /** Builds the presenter of `kind` for an app window with Electron's real windows and screen. */
@@ -33,6 +36,13 @@ export function createPresenter(
   opts?: CreatePresenterOptions,
 ): VideoPresenter {
   if (kind === 'canvas') {
+    let ioSurfaceResolver = opts?.ioSurfaceResolver;
+    if (!ioSurfaceResolver && platform === 'darwin') {
+      if (!opts?.ioSurfaceAddon) {
+        throw new Error('macOS canvas presenter requires ioSurfaceAddon or ioSurfaceResolver');
+      }
+      ioSurfaceResolver = loadIoSurfaceAddon(opts.ioSurfaceAddon);
+    }
     return createCanvasPresenter({
       appWindow,
       engineId: opts?.engineId ?? '',
@@ -47,7 +57,9 @@ export function createPresenter(
         return display.scaleFactor > 0 ? display.scaleFactor : 1;
       },
       createPipeServer: () => createServer(),
+      createEndpoint: () => createCanvasEndpoint(platform),
       onDisplayChange: subscribeDisplayChanges,
+      ...(ioSurfaceResolver ? { ioSurfaceResolver } : {}),
     });
   }
   if (kind === 'child-window') {

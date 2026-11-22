@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { FetchDeps } from './fetch.ts';
-import { buildLauncher } from './launcher.ts';
+import { buildLauncher, buildMacLauncher } from './launcher.ts';
 
 function run(cmd: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -68,6 +68,8 @@ export async function hashLauncherSources(dir: string): Promise<string> {
 export function realDeps(log: (line: string) => void, root: string): FetchDeps {
   const launcherDir = `${root}/apps/desktop/native/mpv-host`;
   const launcherSource = `${launcherDir}/elv-mpv.c`;
+  const macLauncherSource = `${launcherDir}/elv-mpv-macos.c`;
+  const macAddonSource = `${launcherDir}/elv-iosurface.c`;
   return {
     async download(url, file) {
       const res = await fetch(url, { redirect: 'follow' });
@@ -102,13 +104,23 @@ export function realDeps(log: (line: string) => void, root: string): FetchDeps {
     readBytes: (file) => readFile(file),
     exists: existsSync,
     async buildLauncher(runtimeDir) {
-      if (process.platform !== 'win32') return;
-      const win = (p: string): string => p.replaceAll('/', String.fromCharCode(92));
-      await buildLauncher({ runtimeDir: win(runtimeDir), source: win(launcherSource) });
-      log('mpv: built elv-mpv.exe');
+      if (process.platform === 'win32') {
+        const win = (p: string): string => p.replaceAll('/', String.fromCharCode(92));
+        await buildLauncher({ runtimeDir: win(runtimeDir), source: win(launcherSource) });
+        log('mpv: built elv-mpv.exe');
+        return;
+      }
+      if (process.platform === 'darwin') {
+        await buildMacLauncher({
+          runtimeDir,
+          launcherSource: macLauncherSource,
+          addonSource: macAddonSource,
+        });
+        log('mpv: built elv-mpv and elv-iosurface.node');
+      }
     },
     async launcherSourceHash() {
-      if (process.platform !== 'win32') return null;
+      if (process.platform !== 'win32' && process.platform !== 'darwin') return null;
       return hashLauncherSources(launcherDir);
     },
     log,

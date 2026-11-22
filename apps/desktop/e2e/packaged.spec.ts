@@ -180,10 +180,15 @@ test('the packaged app ships the runtime', () => {
       expect(existsSync(join(resources, 'mpv', file))).toBe(true);
     }
   } else {
-    expect(
-      existsSync(join(resources, 'mpv', 'ELV IPTV Player.app', 'Contents', 'MacOS', 'mpv')),
-    ).toBe(true);
-    expect(existsSync(join(resources, 'mpv', 'BUILDINFO.json'))).toBe(true);
+    for (const segments of [
+      ['ELV IPTV Player.app', 'Contents', 'MacOS', 'mpv'],
+      ['ELV IPTV Player.app', 'Contents', 'MacOS', 'elv-mpv'],
+      ['ELV IPTV Player.app', 'Contents', 'Frameworks', 'libmpv.2.dylib'],
+      ['elv-iosurface.node'],
+      ['BUILDINFO.json'],
+    ]) {
+      expect(existsSync(join(resources, 'mpv', ...segments))).toBe(true);
+    }
   }
 });
 

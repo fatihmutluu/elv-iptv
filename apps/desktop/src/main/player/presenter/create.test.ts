@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { BrowserWindow } from 'electron';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeAppWindow, fakeVideoWindow } from '../testing/fake-windows.ts';
@@ -202,6 +204,78 @@ describe('createPresenter', () => {
     presenter.dispose();
     expect(electron.netServers[0]?.closed).toBe(true);
     expect(listenerTotal()).toBe(0);
+  });
+
+  it('canvas on darwin uses a private Unix socket endpoint, resolves IOSurface handles, and cleans up on dispose', async () => {
+    const app = fakeAppWindow();
+    const mainFrame = { frameId: 11 };
+    Object.assign(app.window.webContents, {
+      isDestroyed: () => false,
+      mainFrame,
+    });
+    const surfaceBuf = Buffer.from([9, 8, 7, 6, 5, 4, 3, 2]);
+    const lookup = vi.fn((id: number) => (id === 4242 ? surfaceBuf : null));
+    const release = vi.fn();
+
+    const appWindow = app.window as unknown as BrowserWindow;
+    const presenter = createPresenter('canvas', appWindow, 'darwin', {
+      engineId: 'engine-mac',
+      ioSurfaceResolver: { lookup, release },
+    });
+
+    const args = await presenter.prepare();
+    expect(args).toHaveLength(2);
+    expect(args[0]?.startsWith('--elv-canvas-pipe=')).toBe(true);
+    expect(args[1]).toBe('--input-vo-keyboard=no');
+    const sockPath = (args[0] ?? '').slice('--elv-canvas-pipe='.length);
+    const sockDir = dirname(sockPath);
+    expect(sockPath).toBe(join(sockDir, 'c.sock'));
+    expect(sockPath.length).toBeLessThanOrEqual(96);
+    expect(existsSync(sockDir)).toBe(true);
+
+    const written: string[] = [];
+    const dataListeners: Array<(chunk: string) => void> = [];
+    const fakeSocket = {
+      write: (chunk: string) => written.push(chunk),
+      destroy: () => undefined,
+      on: (event: string, listener: (arg: never) => void) => {
+        if (event === 'data') dataListeners.push(listener as (chunk: string) => void);
+        return fakeSocket;
+      },
+    };
+    presenter.setArea(AREA);
+    electron.netServers[0]?.connect(fakeSocket);
+    written.length = 0;
+
+    for (const fn of dataListeners) fn('S 1 0 4242 1280 720\nF 1 0 1280 720\n');
+    expect(lookup).toHaveBeenCalledWith(4242);
+    expect(release).toHaveBeenCalledWith(surfaceBuf);
+    expect(electron.importedTextures).toHaveLength(1);
+    expect(electron.importedTextures[0]?.options).toEqual({
+      textureInfo: {
+        pixelFormat: 'bgra',
+        codedSize: { width: 1280, height: 720 },
+        handle: { ioSurface: surfaceBuf },
+      },
+    });
+    expect(written).toContain('I 1 0\n');
+    await vi.waitFor(() => expect(electron.sentTextures).toHaveLength(1));
+    expect(electron.sentTextures[0]?.options).toMatchObject({ frame: mainFrame });
+    expect(electron.sentTextures[0]?.args).toEqual(['engine-mac']);
+    await vi.waitFor(() => expect(written).toContain('A 1 0\n'));
+
+    presenter.dispose();
+    expect(electron.netServers[0]?.closed).toBe(true);
+    expect(existsSync(sockDir)).toBe(false);
+    expect(listenerTotal()).toBe(0);
+  });
+
+  it('canvas on darwin fails fast when neither ioSurfaceResolver nor ioSurfaceAddon is provided', () => {
+    const app = fakeAppWindow();
+    const appWindow = app.window as unknown as BrowserWindow;
+    expect(() =>
+      createPresenter('canvas', appWindow, 'darwin', { engineId: 'engine-mac' }),
+    ).toThrow(/ioSurfaceAddon|ioSurfaceResolver|IOSurface/i);
   });
 
   it('child-window makes one video window owned by the app window and follows displays', async () => {

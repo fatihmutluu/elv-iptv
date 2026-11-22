@@ -9,9 +9,9 @@
     "kind": "workflow-artifact",
     "mpv": "0.42.0",
     "repo": "fatihmutluu/elv-iptv",
-    "runId": 43641362989,
+    "runId": 44996151000,
     "artifact": "mpv-runtime-darwin-arm64",
     "file": "mpv-runtime-darwin-arm64.tar.gz",
-    "sha256": "10eb65c586d944d0a96b47f6226834d6bc43c9f3ced6d9d6bae9518f50cc48b6"
+    "sha256": "050d58e333a7b2e0f138f5f5bb35448d887da056be6086fe5037ea9305494361"
   }
 }

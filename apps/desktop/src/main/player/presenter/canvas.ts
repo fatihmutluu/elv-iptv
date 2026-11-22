@@ -1,6 +1,12 @@
-import { randomBytes } from 'node:crypto';
 import type { PlayerArea } from '../../../shared/player-ipc.ts';
 import type { MpvClient } from '../mpv/client.ts';
+import {
+  type CanvasEndpoint,
+  type IoSurfaceResolver,
+  resolveCanvasEndpoint,
+  type SharedTexturePlatformHandle,
+  withPlatformSurfaceHandle,
+} from './iosurface.ts';
 import {
   type AppWindowEvent,
   type AppWindowLike,
@@ -22,7 +28,7 @@ export interface SharedTextureImporterLike<
     textureInfo: {
       pixelFormat: 'bgra';
       codedSize: { width: number; height: number };
-      handle: { ntHandle: Buffer };
+      handle: SharedTexturePlatformHandle;
     };
   }): TImported;
   sendSharedTexture(
@@ -40,7 +46,7 @@ export interface CanvasPipeSocketLike {
   on(event: 'error', listener: (error: Error) => void): unknown;
 }
 
-/** Injectable subset of a Node `net.Server` listening on the Windows canvas named pipe. */
+/** Injectable subset of a Node `net.Server` listening on the canvas IPC endpoint. */
 export interface CanvasPipeServerLike {
   listen(options: { path: string; exclusive: boolean }, listeningListener: () => void): unknown;
   on(event: 'connection', listener: (socket: CanvasPipeSocketLike) => void): unknown;
@@ -62,6 +68,8 @@ export interface CanvasPresenterDeps<
   getScaleFactor(): number;
   createPipeServer(pipePath: string): CanvasPipeServerLike;
   onDisplayChange?(listener: () => void): () => void;
+  ioSurfaceResolver?: IoSurfaceResolver;
+  createEndpoint?(): CanvasEndpoint;
   generatePipeName?(): string;
 }
 
@@ -72,7 +80,6 @@ const MAX_SLOT = 7;
 const MAX_BUFFER_BYTES = 16 * 1024;
 const UINT64_MAX = 0xffff_ffff_ffff_ffffn;
 const UNSIGNED_INT_RE = /^\d+$/;
-
 const FOLLOWED_EVENTS: readonly AppWindowEvent[] = [
   'resize',
   'move',
@@ -92,6 +99,9 @@ function safeRun(fn: () => void): void {
   }
 }
 
+function positiveOrOne(raw: number): number {
+  return Number.isFinite(raw) && raw > 0 ? raw : 1;
+}
 function clampDim(raw: number): number {
   return Number.isFinite(raw) ? Math.max(MIN_DIM, Math.min(MAX_DIM, Math.round(raw))) : MIN_DIM;
 }
@@ -105,12 +115,19 @@ function parseStrictHandle(raw: string | undefined): bigint | undefined {
   const value = BigInt(raw);
   return value > 0n && value <= UINT64_MAX ? value : undefined;
 }
+function parseMeta(parts: readonly string[], wIdx: number, hIdx: number) {
+  const gen = parseStrictInt(parts[1], 1, Number.MAX_SAFE_INTEGER);
+  const slot = parseStrictInt(parts[2], 0, MAX_SLOT);
+  const width = parseStrictInt(parts[wIdx], 1, MAX_TEXTURE_DIM);
+  const height = parseStrictInt(parts[hIdx], 1, MAX_TEXTURE_DIM);
+  return gen && slot !== undefined && width && height ? { gen, slot, width, height } : undefined;
+}
 
 /**
  * Out-of-process in-canvas presenter (`#95`): receives triple-buffered GPU shared textures from
- * `elv-mpv.exe` over an exclusive Windows named pipe, imports them into Electron `sharedTexture`,
- * acks each imported handle (`I <gen> <slot>`) so the child closes the duplicated parent NT handle,
- * and forwards frames to the renderer's main frame without covering the DOM.
+ * `elv-mpv` over a private IPC endpoint (Windows named pipe or macOS Unix domain socket), imports
+ * them into Electron `sharedTexture`, acks each imported handle (`I <gen> <slot>`) so the child
+ * releases its temporary handle/IOSurface retention, and forwards frames without covering the DOM.
  */
 export function createCanvasPresenter<
   TFrame = unknown,
@@ -120,14 +137,13 @@ export function createCanvasPresenter<
   const surface = createSurfaceTracker();
   const slots = new Map<number, TImported>();
   let server: CanvasPipeServerLike | undefined;
-  let pipePath: string | undefined;
+  let endpoint: CanvasEndpoint | undefined;
   let listenPromise: Promise<string> | undefined;
   let rejectListen: ((error: Error) => void) | undefined;
   let activeSocket: CanvasPipeSocketLike | undefined;
   let area: PlayerArea | undefined;
   let visible = false;
-  let sentWidth = 0;
-  let sentHeight = 0;
+  let sent = { w: 0, h: 0 };
   let currentGen = 0;
   let surfaceLive = false;
   let rxBuffer = '';
@@ -141,14 +157,10 @@ export function createCanvasPresenter<
   const writeLine = (socket: CanvasPipeSocketLike, line: string): void => {
     if (!disposed && activeSocket === socket) safeRun(() => socket.write(line));
   };
-  const sendSurfaceAck = (socket: CanvasPipeSocketLike, gen: number, slot: number): void => {
-    writeLine(socket, `I ${gen} ${slot}\n`);
-  };
   const resetRx = (): void => {
     rxBuffer = '';
     droppingLine = false;
-    sentWidth = 0;
-    sentHeight = 0;
+    sent = { w: 0, h: 0 };
   };
 
   const syncSize = (): void => {
@@ -161,42 +173,32 @@ export function createCanvasPresenter<
     } catch {
       return;
     }
-    const zoom = Number.isFinite(rawZoom) && rawZoom > 0 ? rawZoom : 1;
-    const rawScale = deps.getScaleFactor();
-    const scale = Number.isFinite(rawScale) && rawScale > 0 ? rawScale : 1;
-    const width = clampDim(area.width * zoom * scale);
-    const height = clampDim(area.height * zoom * scale);
-    if (!activeSocket || (width === sentWidth && height === sentHeight)) return;
-    sentWidth = width;
-    sentHeight = height;
+    const factor = positiveOrOne(rawZoom) * positiveOrOne(deps.getScaleFactor());
+    const width = clampDim(area.width * factor);
+    const height = clampDim(area.height * factor);
+    if (!activeSocket || (width === sent.w && height === sent.h)) return;
+    sent = { w: width, h: height };
     writeLine(activeSocket, `R ${width} ${height}\n`);
   };
 
   const handleSurfaceMessage = (socket: CanvasPipeSocketLike, parts: readonly string[]): void => {
     if (parts.length !== 6) return;
-    const gen = parseStrictInt(parts[1], 1, Number.MAX_SAFE_INTEGER);
-    const slot = parseStrictInt(parts[2], 0, MAX_SLOT);
+    const meta = parseMeta(parts, 4, 5);
     const handle = parseStrictHandle(parts[3]);
-    const width = parseStrictInt(parts[4], 1, MAX_TEXTURE_DIM);
-    const height = parseStrictInt(parts[5], 1, MAX_TEXTURE_DIM);
-    if (!gen || slot === undefined || !handle || !width || !height) return;
+    if (!meta || !handle) return;
+    const { gen, slot, width, height } = meta;
+    const ack = `I ${gen} ${slot}\n`;
     if (gen < currentGen) {
-      sendSurfaceAck(socket, gen, slot);
+      writeLine(socket, ack);
       return;
     }
 
-    const ntHandle = Buffer.alloc(8);
-    ntHandle.writeBigUInt64LE(handle, 0);
-    let imported: TImported | undefined;
-    try {
-      imported = deps.sharedTexture.importSharedTexture({
-        textureInfo: { pixelFormat: 'bgra', codedSize: { width, height }, handle: { ntHandle } },
-      });
-    } catch {
-      // ack in finally so child still closes the duplicated parent handle
-    } finally {
-      sendSurfaceAck(socket, gen, slot);
-    }
+    const imported = withPlatformSurfaceHandle(handle, deps.ioSurfaceResolver, (h) =>
+      deps.sharedTexture.importSharedTexture({
+        textureInfo: { pixelFormat: 'bgra', codedSize: { width, height }, handle: h },
+      }),
+    );
+    writeLine(socket, ack);
     if (!imported) return;
 
     if (gen > currentGen) {
@@ -215,11 +217,9 @@ export function createCanvasPresenter<
 
   const handleFrameMessage = (socket: CanvasPipeSocketLike, parts: readonly string[]): void => {
     if (parts.length !== 5) return;
-    const gen = parseStrictInt(parts[1], 1, Number.MAX_SAFE_INTEGER);
-    const slot = parseStrictInt(parts[2], 0, MAX_SLOT);
-    const width = parseStrictInt(parts[3], 1, MAX_TEXTURE_DIM);
-    const height = parseStrictInt(parts[4], 1, MAX_TEXTURE_DIM);
-    if (!gen || slot === undefined || !width || !height) return;
+    const meta = parseMeta(parts, 3, 4);
+    if (!meta) return;
+    const { gen, slot } = meta;
 
     const ack = `A ${gen} ${slot}\n`;
     const imported = gen === currentGen ? slots.get(slot) : undefined;
@@ -310,44 +310,50 @@ export function createCanvasPresenter<
     syncSize();
   };
   const ensureServer = (): Promise<string> => {
-    if (pipePath && server && !listenPromise) {
+    if (endpoint && server && !listenPromise) {
       closeActiveSocket();
-      return Promise.resolve(pipePath);
+      return Promise.resolve(endpoint.path);
     }
     if (listenPromise) return listenPromise;
-    const nextPath =
-      deps.generatePipeName?.() ?? `\\\\.\\pipe\\elv-mpv-canvas-${randomBytes(8).toString('hex')}`;
-    const nextServer = deps.createPipeServer(nextPath);
-    server = nextServer;
-    pipePath = nextPath;
-    nextServer.on('connection', handleConnection);
-    listenPromise = new Promise<string>((resolve, reject) => {
+    const nextEndpoint = resolveCanvasEndpoint(deps.createEndpoint, deps.generatePipeName);
+    let nextServer: CanvasPipeServerLike | undefined;
+    let pending = true;
+    const promise = new Promise<string>((resolve, reject) => {
       rejectListen = reject;
-      const onListenError = (error: Error): void => {
-        listenPromise = undefined;
-        rejectListen = undefined;
-        if (server === nextServer) {
-          server = undefined;
-          pipePath = undefined;
-        }
-        safeRun(() => nextServer.close());
+      const fail = (error: Error): void => {
+        pending = false;
+        listenPromise = rejectListen = undefined;
+        if (nextServer && server === nextServer) server = undefined;
+        if (endpoint === nextEndpoint) endpoint = undefined;
+        if (nextServer) safeRun(() => nextServer?.close());
+        safeRun(() => nextEndpoint.cleanup());
         reject(error);
       };
-      nextServer.once('error', onListenError);
-      nextServer.listen({ path: nextPath, exclusive: true }, () => {
-        nextServer.removeListener('error', onListenError);
-        nextServer.on('error', () => undefined);
-        listenPromise = undefined;
-        rejectListen = undefined;
-        if (disposed) {
-          safeRun(() => nextServer.close());
-          reject(new Error('presenter disposed'));
-          return;
-        }
-        resolve(nextPath);
-      });
+      try {
+        nextServer = deps.createPipeServer(nextEndpoint.path);
+        server = nextServer;
+        endpoint = nextEndpoint;
+        nextServer.on('connection', handleConnection);
+        nextServer.once('error', fail);
+        nextServer.listen({ path: nextEndpoint.path, exclusive: true }, () => {
+          nextServer?.removeListener('error', fail);
+          nextServer?.on('error', () => undefined);
+          pending = false;
+          listenPromise = rejectListen = undefined;
+          if (disposed) {
+            fail(new Error('presenter disposed'));
+            return;
+          }
+          safeRun(() => nextEndpoint.onListening?.());
+          resolve(nextEndpoint.path);
+        });
+      } catch (error) {
+        nextServer?.removeListener('error', fail);
+        fail(error instanceof Error ? error : new Error(String(error)));
+      }
     });
-    return listenPromise;
+    if (pending) listenPromise = promise;
+    return promise;
   };
 
   for (const event of FOLLOWED_EVENTS) appWindow.on(event, syncSize);
@@ -381,13 +387,10 @@ export function createCanvasPresenter<
       stopDisplay?.();
       stopDisplay = undefined;
       closeActiveSocket();
-      const pendingReject = rejectListen;
-      rejectListen = undefined;
-      listenPromise = undefined;
-      const activeServer = server;
-      server = undefined;
-      pipePath = undefined;
+      const [pendingReject, activeServer, activeEndpoint] = [rejectListen, server, endpoint];
+      rejectListen = listenPromise = server = endpoint = undefined;
       if (activeServer) safeRun(() => activeServer.close());
+      if (activeEndpoint) safeRun(() => activeEndpoint.cleanup());
       pendingReject?.(new Error('presenter disposed'));
       surface.gone();
       surface.clear();

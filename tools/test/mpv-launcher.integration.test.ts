@@ -4,18 +4,25 @@ import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Duplex } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const dir = join(import.meta.dirname, '../../apps/desktop/resources/mpv/win32-x64');
 const exe = join(dir, 'elv-mpv.exe');
 const enabled = process.platform === 'win32' && existsSync(exe);
+const macDir = join(import.meta.dirname, '../../apps/desktop/resources/mpv/darwin-arm64');
+const macExe = join(macDir, 'ELV IPTV Player.app/Contents/MacOS/elv-mpv');
+const macAddon = join(macDir, 'elv-iosurface.node');
+const darwinEnabled = process.platform === 'darwin' && existsSync(macExe) && existsSync(macAddon);
 const BASE = ['--no-config', '--idle=yes', '--vo=null', '--ao=null', '--terminal=no'];
 const children: ChildProcess[] = [];
 const servers: Server[] = [];
+const tempDirs: string[] = [];
 
 afterEach(() => {
   for (const c of children.splice(0)) c.kill();
   for (const s of servers.splice(0)) s.close();
+  for (const d of tempDirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
 function start(extra: string[] = [], file = exe): { child: ChildProcess; pipe: string } {
@@ -392,5 +399,360 @@ describe.skipIf(!enabled)('elv-mpv.exe', () => {
     await ask(h.ipcPipe, ['quit']);
     expect(await exited(child)).toBe(0);
     expect(handleCount() - before).toBeLessThan(20);
+  }, 25000);
+});
+
+interface IoSurfaceAddon {
+  lookup(surfaceId: number): Buffer | null;
+  release(surfaceBuf: Buffer): void;
+}
+
+function loadIoSurfaceAddon(addonPath: string): IoSurfaceAddon {
+  const mod: { exports: unknown } = { exports: {} };
+  process.dlopen(mod, addonPath);
+  return mod.exports as IoSurfaceAddon;
+}
+
+function createFd3Client(stream: Duplex): {
+  ask: (command: unknown[], timeoutMs?: number) => Promise<{ error: string; data?: unknown }>;
+} {
+  let buf = '';
+  let nextId = 1;
+  const pending = new Map<
+    number,
+    { resolve: (v: { error: string; data?: unknown }) => void; reject: (e: Error) => void }
+  >();
+  stream.on('error', () => undefined);
+  stream.on('data', (chunk: Buffer | string) => {
+    buf += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+    let nl = buf.indexOf('\n');
+    while (nl >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      nl = buf.indexOf('\n');
+      if (!line) continue;
+      try {
+        const msg = JSON.parse(line) as { request_id?: number; error?: string; data?: unknown };
+        if (typeof msg.request_id === 'number' && typeof msg.error === 'string') {
+          const entry = pending.get(msg.request_id);
+          if (entry) {
+            pending.delete(msg.request_id);
+            entry.resolve({ error: msg.error, data: msg.data });
+          }
+        }
+      } catch {
+        // ignore non-JSON lines
+      }
+    }
+  });
+  return {
+    ask(command: unknown[], timeoutMs = 8000) {
+      const id = nextId++;
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pending.delete(id);
+          reject(new Error(`fd3 command timed out: ${JSON.stringify(command)}`));
+        }, timeoutMs);
+        pending.set(id, {
+          resolve: (v) => {
+            clearTimeout(timer);
+            resolve(v);
+          },
+          reject: (e) => {
+            clearTimeout(timer);
+            reject(e);
+          },
+        });
+        stream.write(`${JSON.stringify({ command, request_id: id })}\n`);
+      });
+    },
+  };
+}
+
+function startMac(extra: string[] = [], base: string[] = BASE) {
+  const child = spawn(macExe, [...base, '--input-ipc-client=fd://3', ...extra], {
+    stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
+    env: { ...process.env, LC_NUMERIC: 'C' },
+  });
+  children.push(child);
+  const ipc = createFd3Client(child.stdio[3] as Duplex);
+  return { child, ipc };
+}
+
+async function openMacCanvasHarness(
+  opts: {
+    ackSurface?: boolean;
+    ackFrame?: boolean;
+    onSurface?: (s: CanvasSurface, sock: Socket) => void;
+  } = {},
+) {
+  const sockDir = mkdtempSync('/tmp/elv-mac-t-');
+  tempDirs.push(sockDir);
+  const sockPath = join(sockDir, 'c.sock');
+  const surfaces: CanvasSurface[] = [];
+  const frames: CanvasFrame[] = [];
+  const waiters: Array<() => void> = [];
+  let onConnected!: (socket: Socket) => void;
+  const connected = new Promise<Socket>((resolve) => {
+    onConnected = resolve;
+  });
+  const notify = (): void => {
+    for (const fn of waiters.splice(0)) fn();
+  };
+  const waitFor = (predicate: () => boolean, timeoutMs = 8000): Promise<void> => {
+    if (predicate()) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () =>
+          reject(new Error(`mac canvas wait timed out (S=${surfaces.length}, F=${frames.length})`)),
+        timeoutMs,
+      );
+      const check = (): void => {
+        if (predicate()) {
+          clearTimeout(timer);
+          resolve();
+        } else {
+          waiters.push(check);
+        }
+      };
+      waiters.push(check);
+    });
+  };
+  const server = createServer((socket) => {
+    onConnected(socket);
+    let buf = '';
+    socket.on('error', () => undefined);
+    socket.on('data', (chunk) => {
+      buf += chunk.toString('utf8');
+      let nl = buf.indexOf('\n');
+      while (nl >= 0) {
+        const parts = buf.slice(0, nl).trim().split(' ');
+        buf = buf.slice(nl + 1);
+        nl = buf.indexOf('\n');
+        if (parts[0] === 'S' && parts.length === 6) {
+          const surface: CanvasSurface = {
+            gen: Number(parts[1]),
+            slot: Number(parts[2]),
+            handle: BigInt(parts[3] as string),
+            width: Number(parts[4]),
+            height: Number(parts[5]),
+          };
+          surfaces.push(surface);
+          opts.onSurface?.(surface, socket);
+          if (opts.ackSurface !== false) socket.write(`I ${surface.gen} ${surface.slot}\n`);
+          notify();
+        } else if (parts[0] === 'F' && parts.length === 5) {
+          const frame: CanvasFrame = {
+            gen: Number(parts[1]),
+            slot: Number(parts[2]),
+            width: Number(parts[3]),
+            height: Number(parts[4]),
+          };
+          frames.push(frame);
+          if (opts.ackFrame !== false) socket.write(`A ${frame.gen} ${frame.slot}\n`);
+          notify();
+        }
+      }
+    });
+  });
+  servers.push(server);
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(sockPath, () => resolve());
+  });
+  const spawnHost = (extra: string[] = []) =>
+    startMac(
+      [`--elv-canvas-pipe=${sockPath}`, ...extra],
+      ['--no-config', '--idle=yes', '--ao=null', '--terminal=no'],
+    );
+  return { sockPath, surfaces, frames, connected, waitFor, spawnHost };
+}
+
+describe.skipIf(!darwinEnabled)('elv-mpv (darwin) and elv-iosurface.node', () => {
+  it('answers mpv-version 0.42.0 over fd://3 IPC and starts hardened', async () => {
+    const { child, ipc } = startMac([], ['--idle=yes', '--vo=null', '--ao=null']);
+    expect((await ipc.ask(['get_property', 'mpv-version'])).data).toMatch(/^mpv v?0\.42\.0/);
+    for (const [name, want] of [
+      ['config', false],
+      ['load-scripts', false],
+      ['ytdl', false],
+      ['load-unsafe-playlists', false],
+      ['input-default-bindings', false],
+      ['input-vo-keyboard', false],
+      ['osc', false],
+      ['osd-level', 0],
+    ] as const) {
+      expect((await ipc.ask(['get_property', name])).data).toBe(want);
+    }
+    const osc = await ipc.ask(['get_property', 'user-data/osc']);
+    expect(osc.error).not.toBe('success');
+    await ipc.ask(['quit']);
+    expect(await exited(child)).toBe(0);
+  }, 15000);
+
+  it('quits promptly when its parent exits via kqueue EVFILT_PROC', async () => {
+    const script = `
+      const { spawn } = require('node:child_process');
+      const c = spawn(${JSON.stringify(macExe)}, ${JSON.stringify([...BASE, '--elv-parent-pid=PID'])}.map(a => a.replace('PID', String(process.pid))), {
+        stdio: 'ignore',
+        detached: true,
+        env: { ...process.env, LC_NUMERIC: 'C' },
+      });
+      c.unref();
+      console.log(c.pid);
+      setTimeout(() => process.exit(0), 1000);
+    `;
+    const parent = spawn(process.execPath, ['-e', script], {
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    const pid = await new Promise<number>((resolve) =>
+      parent.stdout?.once('data', (d) => resolve(Number(String(d).trim()))),
+    );
+    try {
+      await exited(parent);
+      const t0 = Date.now();
+      let alive = true;
+      while (alive && Date.now() - t0 < 5000) {
+        try {
+          process.kill(pid, 0);
+          await new Promise((r) => setTimeout(r, 50));
+        } catch {
+          alive = false;
+        }
+      }
+      expect(alive).toBe(false);
+      expect(Date.now() - t0).toBeLessThan(2000);
+    } finally {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        // already exited
+      }
+    }
+  }, 15000);
+
+  it('validates arguments, missing libmpv, and explicit parent pid exit codes', async () => {
+    expect(await exited(startMac(['--elv-parent-pid=+5']).child)).toBe(2);
+    expect(await exited(startMac(['--elv-parent-pid=4000000']).child)).toBe(5);
+    expect(await exited(startMac(['--no-such-option-elv=1']).child)).toBe(2);
+    expect(await exited(startMac(['plain']).child)).toBe(2);
+    for (const bad of [
+      '--elv-canvas-pipe=',
+      '--elv-canvas-pipe=relative/path',
+      '--elv-canvas-pipe=/',
+      `--elv-canvas-pipe=/${'a'.repeat(120)}`,
+    ]) {
+      expect(await exited(startMac([bad]).child)).toBe(2);
+    }
+    const tmp = mkdtempSync(join(tmpdir(), 'elv-mac-nolib-'));
+    tempDirs.push(tmp);
+    const lone = join(tmp, 'elv-mpv');
+    copyFileSync(macExe, lone);
+    expect(spawnSync(lone, [], { timeout: 5000 }).status).toBe(3);
+  }, 15000);
+
+  it('validates elv-iosurface.node lookup/release errors and null lookups', () => {
+    const addon = loadIoSurfaceAddon(macAddon);
+    expect(addon.lookup(0)).toBeNull();
+    expect(addon.lookup(0xfffffffe)).toBeNull();
+    for (const bad of [
+      undefined,
+      '1',
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      0x1_0000_0000,
+    ]) {
+      expect(() => addon.lookup(bad as number)).toThrow(TypeError);
+    }
+    expect(() => addon.release('bad' as unknown as Buffer)).toThrow(TypeError);
+    expect(() => addon.release(Buffer.alloc(4))).toThrow(TypeError);
+    expect(() => addon.release(Buffer.alloc(8))).not.toThrow();
+  });
+
+  it('streams OpenGL IOSurfaces over --elv-canvas-pipe, resolves via addon with double-release safety, and resizes', async () => {
+    const addon = loadIoSurfaceAddon(macAddon);
+    const resolvedBuffers: Buffer[] = [];
+    const h = await openMacCanvasHarness({
+      onSurface(s) {
+        const buf = addon.lookup(Number(s.handle));
+        expect(Buffer.isBuffer(buf)).toBe(true);
+        expect(buf?.byteLength).toBe(8);
+        expect(buf?.readBigUInt64LE(0)).toBeGreaterThan(0n);
+        if (buf) {
+          resolvedBuffers.push(buf);
+          addon.release(buf);
+          expect(buf.readBigUInt64LE(0)).toBe(0n);
+          addon.release(buf);
+        }
+      },
+    });
+    const { child, ipc } = h.spawnHost(['--keep-open=yes']);
+    await h.waitFor(() => h.surfaces.filter((s) => s.gen === 1).length === 3);
+    expect(
+      h.surfaces
+        .filter((s) => s.gen === 1)
+        .map((s) => s.slot)
+        .sort(),
+    ).toEqual([0, 1, 2]);
+    expect(resolvedBuffers).toHaveLength(3);
+
+    const loadReply = await ipc.ask(['loadfile', 'av://lavfi:color=c=magenta:s=64x64:d=2']);
+    expect(loadReply.error).toBe('success');
+    await h.waitFor(() => h.frames.some((f) => f.gen === 1));
+
+    const sock = await h.connected;
+    sock.write('R 320 180\n');
+    await h.waitFor(() => h.surfaces.filter((s) => s.gen === 2).length === 3);
+    expect(
+      h.surfaces.filter((s) => s.gen === 2).every((s) => s.width === 320 && s.height === 180),
+    ).toBe(true);
+    await h.waitFor(() => h.frames.some((f) => f.gen === 2 && f.width === 320 && f.height === 180));
+
+    await ipc.ask(['quit']);
+    expect(await exited(child)).toBe(0);
+  }, 20000);
+
+  it('exits 0 cleanly on canvas Unix socket EOF', async () => {
+    const h = await openMacCanvasHarness({ ackSurface: false });
+    const { child } = h.spawnHost();
+    const sock = await h.connected;
+    await h.waitFor(() => h.surfaces.length >= 3);
+    sock.destroy();
+    expect(await exited(child)).toBe(0);
+  }, 15000);
+
+  it('handles 20 resizes with cross-process IOSurface lookup/release and zero leaked IOSurfaces', async () => {
+    const addon = loadIoSurfaceAddon(macAddon);
+    let lookedUp = 0;
+    const h = await openMacCanvasHarness({
+      onSurface(s) {
+        const buf = addon.lookup(Number(s.handle));
+        expect(buf).not.toBeNull();
+        if (buf) {
+          lookedUp += 1;
+          addon.release(buf);
+        }
+      },
+    });
+    const { child, ipc } = h.spawnHost();
+    const sock = await h.connected;
+    await h.waitFor(() => h.surfaces.filter((s) => s.gen === 1).length === 3);
+    const gen1Ids = h.surfaces.filter((s) => s.gen === 1).map((s) => Number(s.handle));
+
+    for (let i = 0; i < 20; i++) {
+      const w = 160 + (i % 2) * 32;
+      const height = 90 + (i % 2) * 18;
+      sock.write(`R ${w} ${height}\n`);
+      const targetGen = i + 2;
+      await h.waitFor(() => h.surfaces.filter((s) => s.gen === targetGen).length === 3);
+    }
+    expect(lookedUp).toBe(63);
+    await ipc.ask(['quit']);
+    expect(await exited(child)).toBe(0);
+    for (const id of gen1Ids) {
+      expect(addon.lookup(id)).toBeNull();
+    }
   }, 25000);
 });

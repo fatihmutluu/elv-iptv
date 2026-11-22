@@ -97,9 +97,11 @@ jobs:
             desktop_macos:
               - 'apps/desktop/src/main/main.ts'
               - 'apps/desktop/src/main/catalog/secret-store.ts'
+              - 'apps/desktop/src/main/player/factory.ts'
               - 'apps/desktop/src/main/player/runtime-path.ts'
               - 'apps/desktop/src/main/player/mpv/**'
               - 'apps/desktop/src/main/player/presenter/**'
+              - 'apps/desktop/native/**'
               - 'apps/desktop/e2e/packaged.spec.ts'
               - 'apps/desktop/mpv-runtime.lock.json'
               - 'apps/desktop/electron-builder.*'
