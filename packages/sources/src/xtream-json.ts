@@ -1,4 +1,15 @@
-import { elvError, err, type HttpClient, ok, type Result } from '@elv/domain';
+import {
+  type ElvError,
+  elvError,
+  err,
+  type HttpClient,
+  ok,
+  openAsyncIterator,
+  type Result,
+} from '@elv/domain';
+import { detectAndDecodeText } from './encoding';
+import { toElvError } from './scan-error';
+import type { Raw } from './xtream-records';
 import type { XtreamRateLimitOptions } from './xtream-types';
 
 const HEX4_RE = /^[0-9a-fA-F]{4}$/;
@@ -284,4 +295,92 @@ export async function acquireXtreamToken(
   } catch {
     return err(elvError('network', 'aborted'));
   }
+}
+
+/** Classifies a `user_info` payload into an `auth/*` error when credentials or account status fail. */
+export function accountFailure(info: Raw): ElvError | undefined {
+  if (Number(info.auth) === 0) return elvError('auth', 'invalid-credentials');
+  const status = typeof info.status === 'string' ? info.status.trim() : '';
+  if (status === '' || status.toLowerCase() === 'active') return undefined;
+  const slug = status
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+  return elvError('auth', `account-${slug || 'unknown'}`);
+}
+
+const FIRST_BUFFER = 64 * 1024;
+
+function startsWithHtmlMarkup(chunk: Uint8Array): boolean {
+  let i = 0;
+  if (chunk.length >= 3 && chunk[0] === 0xef && chunk[1] === 0xbb && chunk[2] === 0xbf) i = 3;
+  while (i < chunk.length && (chunk[i] as number) <= 0x20) i++;
+  return i < chunk.length && chunk[i] === 0x3c;
+}
+
+/** Reads an Xtream HTTP response body up to `max` bytes, aborting early on HTML captive-portal markup. */
+export async function readXtreamBody(
+  body: AsyncIterable<Uint8Array>,
+  max: number,
+): Promise<Result<Uint8Array>> {
+  let buffer = new Uint8Array(Math.min(FIRST_BUFFER, max));
+  let total = 0;
+  let checkedPrefix = false;
+  const it = openAsyncIterator(body);
+  try {
+    for (;;) {
+      const step = await it.next();
+      if (step.done) break;
+      const chunk = step.value;
+      if (!checkedPrefix && chunk.length > 0) {
+        let nonWs = false;
+        for (let k = 0; k < chunk.length; k++) {
+          const b = chunk[k] as number;
+          if (b > 0x20 && !(k < 3 && (b === 0xef || b === 0xbb || b === 0xbf))) {
+            nonWs = true;
+            break;
+          }
+        }
+        if (nonWs) {
+          checkedPrefix = true;
+          if (startsWithHtmlMarkup(chunk)) {
+            await it.return?.();
+            return err(elvError('source-format', 'invalid-json'));
+          }
+        }
+      }
+      if (total + chunk.length > max) {
+        await it.return?.();
+        return err(elvError('source-format', 'too-large'));
+      }
+      if (total + chunk.length > buffer.length) {
+        const grown = new Uint8Array(
+          Math.min(max, Math.max(buffer.length * 2, total + chunk.length)),
+        );
+        grown.set(buffer.subarray(0, total));
+        buffer = grown;
+      }
+      buffer.set(chunk, total);
+      total += chunk.length;
+    }
+  } catch (e) {
+    await it.return?.().catch(() => undefined);
+    return err(toElvError(e));
+  }
+  return ok(buffer.subarray(0, total));
+}
+
+/** Decodes and parses one framed JSON element or string key, repairing PHP string escapes if needed. */
+export function parseXtreamElementBytes(bytes: Uint8Array): Result<unknown> {
+  const text = detectAndDecodeText(bytes);
+  const direct = parseXtreamJson(text);
+  if (direct.ok) return direct;
+  const trimmed = text.trim();
+  if (trimmed.startsWith('"')) {
+    const wrapped = parseXtreamJson(`[${trimmed}]`);
+    if (wrapped.ok && Array.isArray(wrapped.value) && wrapped.value.length === 1) {
+      return ok(wrapped.value[0]);
+    }
+  }
+  return direct;
 }

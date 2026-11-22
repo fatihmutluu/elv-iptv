@@ -1,5 +1,12 @@
 import type { SqlDriver } from '@elv/domain';
-import { allocateFairQuotas, queryAllSourcesItems } from './queries-all-sources';
+import {
+  type AllSourcesCursorPage,
+  allocateFairQuotas,
+  queryAllSourcesItems,
+  queryAllSourcesItemsByCursor,
+  queryCatalogByIdCursor,
+  type SourceNameCursor,
+} from './queries-all-sources';
 import {
   type BrowseKind,
   clampPage,
@@ -10,7 +17,29 @@ import {
   type RawItemRow,
 } from './queries-shared';
 
-export { allocateFairQuotas, type BrowseKind, type ItemRow, queryAllSourcesItems };
+export {
+  type AllSourcesCursorPage,
+  allocateFairQuotas,
+  type BrowseKind,
+  type ItemRow,
+  queryAllSourcesItems,
+  queryAllSourcesItemsByCursor,
+  queryCatalogByIdCursor,
+  type SourceNameCursor,
+};
+
+/** Key-cursor pointing to the last returned placement row in category order (`#176`). */
+export interface ItemsCursor {
+  readonly position: number;
+  readonly itemKey: string;
+}
+
+/** One key-cursor page along with the cursor for the next page, if any (`#176`). */
+export interface CursorPage<T, C> {
+  readonly items: T[];
+  readonly nextCursor: C | null;
+  readonly hasMore: boolean;
+}
 
 /** A category of one source. `id` is opaque; hand it back to `items`. */
 export interface CategoryRow {
@@ -112,12 +141,7 @@ export async function queryItems(
          SELECT source_id, item_key, position FROM placements
           WHERE source_id = ? AND kind = ? AND category_id = ? AND is_hidden = 0
             AND EXISTS (SELECT 1 FROM sources s WHERE s.id = placements.source_id AND s.deleting = 0)
-            AND EXISTS (
-              SELECT 1 FROM ${ITEM_TABLE[ref.kind]} jt
-               WHERE jt.source_id = placements.source_id
-                 AND jt.key = placements.item_key
-                 AND jt.is_hidden = 0
-            )
+            AND EXISTS (SELECT 1 FROM ${ITEM_TABLE[ref.kind]} jt WHERE jt.source_id = placements.source_id AND jt.key = placements.item_key AND jt.is_hidden = 0)
           ORDER BY position, item_key LIMIT ? OFFSET ?
        ) p
        JOIN ${ITEM_TABLE[ref.kind]} t ON t.source_id = p.source_id AND t.key = p.item_key
@@ -127,16 +151,61 @@ export async function queryItems(
   return rows.map((r) => mapItemRow(ref.kind, ref.sourceId, r));
 }
 
+/**
+ * One key-cursor page of a category's visible items in `(position, item_key)` order (`#176`).
+ * Backed by `idx_placements_visible` with `limit + 1` lookahead for exact `hasMore`.
+ */
+export async function queryItemsByCursor(
+  db: SqlDriver,
+  categoryId: string | { sourceId: string; kind: BrowseKind; providerId: string },
+  cursor: ItemsCursor | undefined,
+  limit: number,
+): Promise<CursorPage<ItemRow, ItemsCursor>> {
+  const ref = typeof categoryId === 'string' ? parseCategoryId(categoryId) : categoryId;
+  const page = clampPage(0, limit);
+  if (ref === undefined || page.limit === 0) return { items: [], nextCursor: null, hasMore: false };
+  const table = ITEM_TABLE[ref.kind];
+  const cursorClause = cursor
+    ? ' AND position >= ? AND (position > ? OR (position = ? AND item_key > ?))'
+    : '';
+  const cursorParams = cursor
+    ? [cursor.position, cursor.position, cursor.position, cursor.itemKey]
+    : [];
+  const params = [ref.sourceId, ref.kind, ref.providerId, ...cursorParams, page.limit + 1];
+  const rows = await db.all<RawItemRow & { _pos: number }>(
+    `SELECT t.id, t.key, t.provider_id, t.name, ${ITEM_COLS[ref.kind]}, p.position AS _pos
+       FROM (
+         SELECT source_id, item_key, position FROM placements
+          WHERE source_id = ? AND kind = ? AND category_id = ? AND is_hidden = 0${cursorClause}
+            AND EXISTS (SELECT 1 FROM sources s WHERE s.id = placements.source_id AND s.deleting = 0)
+            AND EXISTS (SELECT 1 FROM ${table} jt WHERE jt.source_id = placements.source_id AND jt.key = placements.item_key AND jt.is_hidden = 0)
+          ORDER BY position ASC, item_key ASC LIMIT ?
+       ) p
+       JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key
+      ORDER BY p.position ASC, p.item_key ASC`,
+    params,
+  );
+  const hasMore = rows.length > page.limit;
+  const slice = hasMore ? rows.slice(0, page.limit) : rows;
+  const last = slice[slice.length - 1];
+  return {
+    items: slice.map((r) => mapItemRow(ref.kind, ref.sourceId, r)),
+    nextCursor: hasMore && last !== undefined ? { position: last._pos, itemKey: last.key } : null,
+    hasMore,
+  };
+}
+
 /** A series row: what loading and listing episodes needs. */
 export async function querySeries(
   db: SqlDriver,
   seriesId: number,
 ): Promise<{ sourceId: string; key: string } | undefined> {
-  const rows = await db.all<{ source_id: string; key: string }>(
-    'SELECT source_id, key FROM series WHERE id = ?',
-    [seriesId],
-  );
-  const row = rows[0];
+  const row = (
+    await db.all<{ source_id: string; key: string }>(
+      'SELECT source_id, key FROM series WHERE id = ?',
+      [seriesId],
+    )
+  )[0];
   return row === undefined ? undefined : { sourceId: row.source_id, key: row.key };
 }
 
@@ -207,19 +276,9 @@ export async function queryItemDetail(
 ): Promise<ItemDetailRow | undefined> {
   const sourceId = sourceOfKey(itemKey);
   if (sourceId === undefined) return undefined;
-  const rows = await db.all<{
-    id: number;
-    key: string;
-    kind: BrowseKind;
-    source_id: string;
-    provider_id: string | null;
-    name: string;
-    logo: string | null;
-    rating: number | null;
-    year: number | null;
-    num: number | null;
-    plot: string | null;
-  }>(
+  const rows = await db.all<
+    RawItemRow & { kind: BrowseKind; source_id: string; plot: string | null }
+  >(
     `SELECT id, key, 'live' AS kind, source_id, provider_id, name, logo, NULL AS rating, NULL AS year, num, NULL AS plot
        FROM live WHERE source_id = ? AND key = ?
      UNION ALL
@@ -232,20 +291,7 @@ export async function queryItemDetail(
     [sourceId, itemKey, sourceId, itemKey, sourceId, itemKey],
   );
   const r = rows[0];
-  if (r === undefined) return undefined;
-  return {
-    id: r.id,
-    key: r.key,
-    kind: r.kind,
-    sourceId: r.source_id,
-    providerId: r.provider_id,
-    name: r.name,
-    logo: r.logo,
-    rating: r.rating,
-    year: r.year,
-    num: r.num,
-    plot: r.plot,
-  };
+  return r === undefined ? undefined : { ...mapItemRow(r.kind, r.source_id, r), plot: r.plot };
 }
 
 /** Finds a live channel, movie or episode by content key. */

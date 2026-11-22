@@ -6,6 +6,7 @@ import type {
   XtreamMovie,
   XtreamSeries,
 } from '@elv/sources';
+import { hashCategoryRow, hashLiveRow, hashMovieRow, hashSeriesRow } from './content-hash';
 import { foldText } from './fold';
 
 /** An item with the fields every Xtream list shares. */
@@ -24,71 +25,118 @@ const n = (v: number | undefined): SqlValue => v ?? null;
 const s = (v: string | undefined): SqlValue => v ?? null;
 
 export const liveWriter: ItemWriter<XtreamLive> = {
-  sql: `INSERT INTO live_next (source_id, key, provider_id, num, name, name_fold, logo, guide_id, catchup_days, run_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  sql: `INSERT INTO live_next (source_id, key, provider_id, num, name, name_fold, logo, guide_id, catchup_days, run_id, content_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_id, key) DO UPDATE SET provider_id = excluded.provider_id, num = excluded.num,
           name = excluded.name, name_fold = excluded.name_fold, logo = excluded.logo,
-          guide_id = excluded.guide_id, catchup_days = excluded.catchup_days, run_id = excluded.run_id`,
-  row: (sourceId, key, runId, i) => [
-    sourceId,
-    key,
-    String(i.id),
-    n(i.num),
-    i.name,
-    foldText(i.name),
-    s(i.icon),
-    s(i.epgId),
-    i.catchupDays,
-    runId,
-  ],
+          guide_id = excluded.guide_id, catchup_days = excluded.catchup_days, run_id = excluded.run_id,
+          content_hash = excluded.content_hash`,
+  row: (sourceId, key, runId, i) => {
+    const providerId = String(i.id);
+    const nameFold = foldText(i.name);
+    const contentHash = hashLiveRow({
+      providerId,
+      num: i.num,
+      name: i.name,
+      nameFold,
+      logo: i.icon,
+      guideId: i.epgId,
+      catchupDays: i.catchupDays,
+    });
+    return [
+      sourceId,
+      key,
+      providerId,
+      n(i.num),
+      i.name,
+      nameFold,
+      s(i.icon),
+      s(i.epgId),
+      i.catchupDays,
+      runId,
+      contentHash,
+    ];
+  },
 };
 
 export const movieWriter: ItemWriter<XtreamMovie> = {
-  sql: `INSERT INTO movies_next (source_id, key, provider_id, name, name_fold, logo, rating, year, extension, added, run_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  sql: `INSERT INTO movies_next (source_id, key, provider_id, name, name_fold, logo, rating, year, extension, added, run_id, content_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_id, key) DO UPDATE SET provider_id = excluded.provider_id, name = excluded.name,
           name_fold = excluded.name_fold, logo = excluded.logo, rating = excluded.rating, year = excluded.year,
-          extension = excluded.extension, added = excluded.added, run_id = excluded.run_id`,
-  row: (sourceId, key, runId, i) => [
-    sourceId,
-    key,
-    String(i.id),
-    i.name,
-    foldText(i.name),
-    s(i.icon),
-    n(i.rating),
-    n(i.year),
-    i.extension,
-    n(i.added),
-    runId,
-  ],
+          extension = excluded.extension, added = excluded.added, run_id = excluded.run_id,
+          content_hash = excluded.content_hash`,
+  row: (sourceId, key, runId, i) => {
+    const providerId = String(i.id);
+    const nameFold = foldText(i.name);
+    const contentHash = hashMovieRow({
+      providerId,
+      name: i.name,
+      nameFold,
+      logo: i.icon,
+      rating: i.rating,
+      year: i.year,
+      extension: i.extension,
+      added: i.added,
+    });
+    return [
+      sourceId,
+      key,
+      providerId,
+      i.name,
+      nameFold,
+      s(i.icon),
+      n(i.rating),
+      n(i.year),
+      i.extension,
+      n(i.added),
+      runId,
+      contentHash,
+    ];
+  },
 };
 
 export const seriesWriter: ItemWriter<XtreamSeries> = {
-  sql: `INSERT INTO series_next (source_id, key, provider_id, name, name_fold, cover, plot, rating, year, last_modified, run_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  sql: `INSERT INTO series_next (source_id, key, provider_id, name, name_fold, cover, plot, rating, year, last_modified, run_id, content_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_id, key) DO UPDATE SET provider_id = excluded.provider_id, name = excluded.name,
           name_fold = excluded.name_fold, cover = excluded.cover, plot = excluded.plot, rating = excluded.rating,
-          year = excluded.year, last_modified = excluded.last_modified, run_id = excluded.run_id`,
-  row: (sourceId, key, runId, i) => [
-    sourceId,
-    key,
-    String(i.id),
-    i.name,
-    foldText(i.name),
-    s(i.cover),
-    s(i.plot),
-    n(i.rating),
-    n(i.year),
-    n(i.lastModified),
-    runId,
-  ],
+          year = excluded.year, last_modified = excluded.last_modified, run_id = excluded.run_id,
+          content_hash = excluded.content_hash`,
+  row: (sourceId, key, runId, i) => {
+    const providerId = String(i.id);
+    const nameFold = foldText(i.name);
+    const contentHash = hashSeriesRow({
+      providerId,
+      name: i.name,
+      nameFold,
+      cover: i.cover,
+      plot: i.plot,
+      rating: i.rating,
+      year: i.year,
+      lastModified: i.lastModified,
+    });
+    return [
+      sourceId,
+      key,
+      providerId,
+      i.name,
+      nameFold,
+      s(i.cover),
+      s(i.plot),
+      n(i.rating),
+      n(i.year),
+      n(i.lastModified),
+      runId,
+      contentHash,
+    ];
+  },
 };
 
-const CATEGORY_SQL = `INSERT INTO categories_next (source_id, kind, provider_id, name, name_fold, position, run_id)
-  VALUES (?, ?, ?, ?, ?, ?, ?)
+const CATEGORY_SQL = `INSERT INTO categories_next (source_id, kind, provider_id, name, name_fold, position, run_id, content_hash)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(source_id, kind, provider_id) DO UPDATE SET name = excluded.name, name_fold = excluded.name_fold,
-    position = excluded.position, run_id = excluded.run_id`;
+    position = excluded.position, run_id = excluded.run_id, content_hash = excluded.content_hash`;
 
 const PLACEMENT_SQL = `INSERT INTO placements_next (source_id, kind, item_key, category_id, position, run_id)
   VALUES (?, ?, ?, ?, ?, ?)
@@ -113,7 +161,12 @@ export async function writeCategories(
 ): Promise<void> {
   await db.batch(
     CATEGORY_SQL,
-    rows.map((c, i) => [sourceId, kind, c.id, c.name, foldText(c.name), offset + i, runId]),
+    rows.map((c, i) => {
+      const nameFold = foldText(c.name);
+      const position = offset + i;
+      const contentHash = hashCategoryRow({ name: c.name, nameFold, position });
+      return [sourceId, kind, c.id, c.name, nameFold, position, runId, contentHash];
+    }),
   );
 }
 

@@ -5,15 +5,22 @@ import {
   type XtreamCategory,
   type XtreamClient,
   type XtreamClientOptions,
+  type XtreamStreamOptions,
 } from '@elv/sources';
 import { fingerprintXtreamCredentials } from './credential-fingerprint';
 import { importM3u } from './import-m3u';
+import {
+  createMonotonicProgressMeter,
+  createStreamBatchDeduper,
+  type MonotonicProgressMeter,
+  runParallelFailFast,
+  wrapCleanupProgress,
+} from './import-progress';
 import { checkAbort, notify, performRun, type RunCtx, Stop, unwrap } from './import-run';
 import {
   DEFAULT_BATCH_SIZE,
   type ImportDeps,
   type ImportOptions,
-  type ImportProgress,
   type ImportSummary,
 } from './import-types';
 import { isPlaceholderLiveChannel } from './placeholder-filter';
@@ -39,28 +46,24 @@ import {
 
 type ItemKind = 'live' | 'movie' | 'series';
 
-/** Category id and name of items the provider lists without a category (like M3U's `Ungrouped`). */
 const UNCATEGORIZED = 'Uncategorized';
+const KIND_META: Readonly<Record<ItemKind, readonly [string, 'live' | 'movies' | 'series']>> = {
+  live: ['live_next', 'live'],
+  movie: ['movies_next', 'movies'],
+  series: ['series_next', 'series'],
+};
 
-/**
- * Clients of one source: `client` bounds bodies to `ImportDeps.maxBodyBytes`; `retries` are tried in turn on a body
- * over that cap (the same source without the cap; empty when there is no cap).
- */
 interface Clients {
   client: XtreamClient;
   retries: readonly XtreamClient[];
   credentialFingerprint: string | undefined;
 }
 
-type Ctx = RunCtx & Clients;
+type Ctx = RunCtx & Clients & { meter: MonotonicProgressMeter };
 
 const isTooLarge = (e: { category: string; code: string }) =>
   e.category === 'source-format' && e.code === 'too-large';
 
-/**
- * Calls `fn` with the capped client and, while the body is over the cap, once more with each retry client: one stall
- * on an oversized category or series beats a missing catalog.
- */
 async function withinCap<T>(
   clients: Clients,
   fn: (client: XtreamClient) => Promise<Result<T>>,
@@ -104,13 +107,14 @@ async function openClients(source: SourceRecord, deps: ImportDeps): Promise<Resu
 }
 
 async function importCategories(c: Ctx): Promise<Record<ItemKind, XtreamCategory[]>> {
-  const call = c.signal === undefined ? undefined : { signal: c.signal };
-  const lists = {} as Record<ItemKind, XtreamCategory[]>;
-  for (const kind of ['live', 'movie', 'series'] as const) {
-    checkAbort(c);
-    lists[kind] = unwrap(await c.client.categories(kind, call));
-  }
-  const total = lists.live.length + lists.movie.length + lists.series.length;
+  checkAbort(c);
+  const [live, movie, series] = await runParallelFailFast(c.signal, [
+    async (signal) => unwrap(await c.client.categories('live', { signal })),
+    async (signal) => unwrap(await c.client.categories('movie', { signal })),
+    async (signal) => unwrap(await c.client.categories('series', { signal })),
+  ]);
+  const lists: Record<ItemKind, XtreamCategory[]> = { live, movie, series };
+  const total = live.length + movie.length + series.length;
   let done = 0;
   for (const kind of ['live', 'movie', 'series'] as const) {
     const list = lists[kind];
@@ -119,154 +123,152 @@ async function importCategories(c: Ctx): Promise<Record<ItemKind, XtreamCategory
       const slice = list.slice(i, i + c.batchSize);
       await writeCategories(c.db, c.sourceId, kind, c.runId, slice, i);
       done += slice.length;
-      c.progress({ phase: 'categories', done, total });
+      c.progress(c.meter.report('categories', done, total));
       await c.deps.scheduler.yieldNow();
     }
   }
+  c.meter.markComplete('categories');
   c.counts.categories = total;
   return lists;
 }
 
 interface ListSpec<T extends Listed> {
   kind: ItemKind;
-  phase: ImportProgress['phase'];
-  countKey: string;
   writer: ItemWriter<T>;
-  fetch(client: XtreamClient, categoryId?: string): Promise<Result<T[]>>;
+  stream(
+    client: XtreamClient,
+    categoryId?: string,
+    options?: XtreamStreamOptions,
+  ): AsyncGenerator<T[], Result<void>>;
   skip?: ((item: T) => boolean) | undefined;
+}
+
+async function clearStagedKind(c: Ctx, kind: ItemKind, dropUncat: boolean): Promise<void> {
+  await c.db.transaction(async (tx) => {
+    await tx.run(`DELETE FROM ${KIND_META[kind][0]} WHERE source_id = ? AND run_id = ?`, [
+      c.sourceId,
+      c.runId,
+    ]);
+    await tx.run('DELETE FROM placements_next WHERE source_id = ? AND kind = ? AND run_id = ?', [
+      c.sourceId,
+      kind,
+      c.runId,
+    ]);
+    if (dropUncat) {
+      await tx.run(
+        'DELETE FROM categories_next WHERE source_id = ? AND kind = ? AND provider_id = ? AND run_id = ?',
+        [c.sourceId, kind, UNCATEGORIZED, c.runId],
+      );
+    }
+  });
 }
 
 async function importList<T extends Listed>(
   c: Ctx,
   spec: ListSpec<T>,
   categories: readonly XtreamCategory[],
+  signal: AbortSignal,
 ): Promise<void> {
-  const seen = new Set<number>();
-  const positions = new Map<string, number>();
-  let done = 0;
-  let placements = 0;
-  let skippedPlaceholders = 0;
-  let uncategorized = false;
+  const phase = KIND_META[spec.kind][1];
+  const dedup = createStreamBatchDeduper<T>();
+  const keyOf = (id: number) => xtreamKey(c.sourceId, spec.kind, id);
 
-  async function categoriesOf(item: T, only: string | undefined): Promise<readonly string[]> {
-    if (only !== undefined) return [only];
-    if (item.categoryIds.length > 0) return item.categoryIds;
-    if (!uncategorized) {
-      uncategorized = true;
-      const category = { id: UNCATEGORIZED, name: UNCATEGORIZED };
-      await writeCategories(c.db, c.sourceId, spec.kind, c.runId, [category], categories.length);
+  async function writeBatch(items: readonly T[], only: string | undefined): Promise<void> {
+    checkAbort({ signal });
+    const { entries, links, createdUncategorized } = dedup.consume(
+      items,
+      only,
+      keyOf,
+      UNCATEGORIZED,
+      spec.skip,
+    );
+    if (createdUncategorized) {
+      await writeCategories(
+        c.db,
+        c.sourceId,
+        spec.kind,
+        c.runId,
+        [{ id: UNCATEGORIZED, name: UNCATEGORIZED }],
+        categories.length,
+      );
       c.counts.categories = (c.counts.categories ?? 0) + 1;
     }
-    return [UNCATEGORIZED];
-  }
-
-  async function write(items: readonly T[], only: string | undefined, total?: number) {
-    let filtered = items;
-    if (spec.skip !== undefined) {
-      const kept: T[] = [];
-      for (const item of items) {
-        if (spec.skip(item)) skippedPlaceholders += 1;
-        else kept.push(item);
-      }
-      filtered = kept;
-    }
-    const effectiveTotal = total === undefined ? undefined : filtered.length;
-    for (let i = 0; i < filtered.length; i += c.batchSize) {
-      checkAbort(c);
-      const slice = filtered.slice(i, i + c.batchSize);
-      const entries = slice.map((item) => ({
-        key: xtreamKey(c.sourceId, spec.kind, item.id),
-        item,
-      }));
+    if (entries.length > 0) {
       await writeItems(c.db, spec.writer, c.sourceId, c.runId, entries);
-      const links: [string, string, number][] = [];
-      for (const { key, item } of entries) {
-        seen.add(item.id);
-        for (const category of await categoriesOf(item, only)) {
-          const position = positions.get(category) ?? 0;
-          positions.set(category, position + 1);
-          links.push([key, category, position]);
-        }
-      }
+      dedup.wroteAny = true;
+    }
+    if (links.length > 0) {
       await writePlacements(c.db, c.sourceId, spec.kind, c.runId, links);
-      placements += links.length;
-      done += slice.length;
-      c.progress(
-        effectiveTotal === undefined
-          ? { phase: spec.phase, done }
-          : { phase: spec.phase, done, total: effectiveTotal },
-      );
-      await c.deps.scheduler.yieldNow();
+      dedup.wroteAny = true;
+    }
+    if (entries.length > 0 || links.length > 0) {
+      c.progress(c.meter.report(phase, dedup.uniqueCount));
+    }
+    await c.deps.scheduler.yieldNow();
+  }
+
+  async function consumeStream(client: XtreamClient, categoryId?: string): Promise<Result<void>> {
+    const gen = spec.stream(client, categoryId, { signal, batchSize: c.batchSize });
+    try {
+      for (;;) {
+        checkAbort({ signal });
+        const step = await gen.next();
+        if (step.done) return step.value;
+        await writeBatch(step.value, categoryId);
+      }
+    } finally {
+      await gen.return(ok(undefined));
     }
   }
 
-  checkAbort(c);
-  const whole = await spec.fetch(c.client);
-  if (whole.ok) {
-    await write(whole.value, undefined, whole.value.length);
-  } else if (isTooLarge(whole.error)) {
-    for (const category of categories) {
-      checkAbort(c);
-      await write(
-        unwrap(await withinCap(c, (client) => spec.fetch(client, category.id))),
-        category.id,
-      );
+  checkAbort({ signal });
+  const whole = await consumeStream(c.client);
+  if (!whole.ok) {
+    if (!isTooLarge(whole.error)) throw new Stop(whole.error);
+    if (dedup.wroteAny) {
+      await clearStagedKind(c, spec.kind, dedup.uncategorized);
+      if (dedup.uncategorized) c.counts.categories = Math.max(0, (c.counts.categories ?? 0) - 1);
+      dedup.reset();
     }
-  } else {
-    throw new Stop(whole.error);
+    for (const category of categories) {
+      checkAbort({ signal });
+      unwrap(await withinCap(c, (client) => consumeStream(client, category.id)));
+    }
   }
-  c.counts[spec.countKey] = seen.size;
-  c.counts.placements = (c.counts.placements ?? 0) + placements;
-  if (skippedPlaceholders > 0) {
-    c.counts.skippedPlaceholders = (c.counts.skippedPlaceholders ?? 0) + skippedPlaceholders;
+
+  if (dedup.uniqueCount > 0) c.progress(c.meter.complete(phase, dedup.uniqueCount));
+  else c.meter.markComplete(phase);
+  c.counts[phase] = dedup.uniqueCount;
+  c.counts.placements = (c.counts.placements ?? 0) + dedup.placements;
+  if (dedup.skippedPlaceholders > 0) {
+    c.counts.skippedPlaceholders = (c.counts.skippedPlaceholders ?? 0) + dedup.skippedPlaceholders;
   }
 }
 
 async function execute(c: Ctx, includePlaceholders: boolean): Promise<XtreamAccount> {
-  const call = c.signal === undefined ? undefined : { signal: c.signal };
-  const account = unwrap(await c.client.account(call));
+  const account = unwrap(await c.client.account(c.signal ? { signal: c.signal } : undefined));
   const cats = await importCategories(c);
-  await importList(
-    c,
-    {
-      kind: 'live',
-      phase: 'live',
-      countKey: 'live',
-      writer: liveWriter,
-      fetch: (client, id) => client.liveStreams(id, call),
-      skip: includePlaceholders
-        ? undefined
-        : (item) => isPlaceholderLiveChannel({ name: item.name, streamId: item.id }),
-    },
-    cats.live,
-  );
-  await importList(
-    c,
-    {
-      kind: 'movie',
-      phase: 'movies',
-      countKey: 'movies',
-      writer: movieWriter,
-      fetch: (client, id) => client.vodStreams(id, call),
-    },
-    cats.movie,
-  );
-  await importList(
-    c,
-    {
-      kind: 'series',
-      phase: 'series',
-      countKey: 'series',
-      writer: seriesWriter,
-      fetch: (client, id) => client.series(id, call),
-    },
-    cats.series,
-  );
+  const skip = includePlaceholders
+    ? undefined
+    : (i: { name: string; id: number }) =>
+        isPlaceholderLiveChannel({ name: i.name, streamId: i.id });
+  const run =
+    <T extends Listed>(
+      kind: ItemKind,
+      writer: ItemWriter<T>,
+      stream: ListSpec<T>['stream'],
+      list: readonly XtreamCategory[],
+      filter?: (item: T) => boolean,
+    ) =>
+    (signal: AbortSignal) =>
+      importList(c, { kind, writer, stream, skip: filter }, list, signal);
+  await runParallelFailFast(c.signal, [
+    run('live', liveWriter, (cl, id, o) => cl.streamLiveStreams(id, o), cats.live, skip),
+    run('movie', movieWriter, (cl, id, o) => cl.streamVodStreams(id, o), cats.movie),
+    run('series', seriesWriter, (cl, id, o) => cl.streamSeries(id, o), cats.series),
+  ]);
   return account;
 }
-
-const KEEP_EPISODES =
-  'UPDATE episodes SET run_id = ? WHERE source_id = ? AND series_key IN (SELECT key FROM series_next WHERE source_id = ? AND run_id = ?)';
 
 async function importXtream(
   source: SourceRecord,
@@ -275,16 +277,16 @@ async function importXtream(
 ): Promise<Result<ImportSummary>> {
   const opened = await openClients(source, deps);
   if (!opened.ok) return opened;
+  const meter = createMonotonicProgressMeter();
   let account: XtreamAccount | undefined;
-  return performRun(source, deps, opts, {
+  return performRun(source, deps, wrapCleanupProgress(opts, meter, notify), {
     execute: async (base) => {
       account = await execute(
-        { ...base, ...opened.value },
+        { ...base, ...opened.value, meter },
         source.settings.includePlaceholderChannels === true,
       );
     },
-    beforeCleanup: async (tx, c) => {
-      await tx.run(KEEP_EPISODES, [c.runId, c.sourceId, c.sourceId, c.runId]);
+    beforeCleanup: async (tx) => {
       const current = (await getSource(tx, source.id))?.settings ?? source.settings;
       const settings: SourceSettings = { ...current };
       if (account !== undefined) {
@@ -339,29 +341,23 @@ export async function loadSeriesEpisodes(
   const opened = await openClients(source, deps);
   if (!opened.ok) return opened;
   try {
-    const row = (
-      await deps.db.all<{ provider_id: string | null; run_id: number }>(
-        'SELECT provider_id, run_id FROM series WHERE source_id = ? AND key = ?',
-        [sourceId, seriesKey],
-      )
-    )[0];
+    const query = 'SELECT provider_id, run_id FROM series WHERE source_id = ? AND key = ?';
+    const lookup = (db: ImportDeps['db']) =>
+      db.all<{ provider_id: string | null; run_id: number }>(query, [sourceId, seriesKey]);
+    const row = (await lookup(deps.db))[0];
     if (row?.provider_id == null) return err(elvError('source-format', 'unknown-series'));
     checkAbort({ signal: opts.signal });
     const call = opts.signal === undefined ? undefined : { signal: opts.signal };
-    const id = Number(row.provider_id);
-    const info = unwrap(await withinCap(opened.value, (client) => client.seriesInfo(id, call)));
+    const info = unwrap(
+      await withinCap(opened.value, (client) => client.seriesInfo(Number(row.provider_id), call)),
+    );
     const entries = info.episodes.map((episode) => ({
       key: xtreamKey(sourceId, 'episode', episode.id),
       episode,
     }));
     const stored = await deps.db.transaction<'ok' | 'no-source' | 'no-series'>(async (tx) => {
       if (!(await sourceExists(tx, sourceId))) return 'no-source';
-      const current = (
-        await tx.all<{ provider_id: string | null; run_id: number }>(
-          'SELECT provider_id, run_id FROM series WHERE source_id = ? AND key = ?',
-          [sourceId, seriesKey],
-        )
-      )[0];
+      const current = (await lookup(tx))[0];
       if (current?.provider_id == null) return 'no-series';
       const previous = await tx.all<{ key: string }>(
         'SELECT key FROM episodes WHERE source_id = ? AND series_key = ?',

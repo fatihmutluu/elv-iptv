@@ -197,7 +197,11 @@ function encodeStringToUtf8(text: string): Uint8Array {
       if (low >= 0xdc00 && low <= 0xdfff) {
         cp = 0x10000 + ((cp - 0xd800) << 10) + (low - 0xdc00);
         i++;
+      } else {
+        cp = 0xfffd;
       }
+    } else if (cp >= 0xd800 && cp <= 0xdfff) {
+      cp = 0xfffd;
     }
     if (cp < 0x80) bytes.push(cp);
     else if (cp < 0x800) bytes.push(0xc0 | (cp >> 6), 0x80 | (cp & 0x3f));
@@ -292,7 +296,13 @@ export async function* normalizeBomChunks(
       );
 
     for (;;) {
-      const aligned = carry.length - (carry.length % width);
+      let aligned = carry.length - (carry.length % width);
+      if (width === 2 && aligned >= 2) {
+        const b0 = carry[aligned - 2] as number;
+        const b1 = carry[aligned - 1] as number;
+        const lastUnit = le ? b0 | (b1 << 8) : (b0 << 8) | b1;
+        if (lastUnit >= 0xd800 && lastUnit <= 0xdbff) aligned -= 2;
+      }
       if (aligned > 0) {
         yield decodeSlice(carry, aligned);
         carry = carry.subarray(aligned);

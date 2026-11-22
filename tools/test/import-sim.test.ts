@@ -362,8 +362,9 @@ describe('re-imports', () => {
     expect(await count(e.db, 'live')).toBe(small.live.length - 10);
     expect(await count(e.db, 'movies')).toBe(small.movies.length - 5);
     expect(await count(e.db, "placements WHERE kind = 'live'")).toBe(small.live.length - 10);
+    expect(idOf(1)).toBeUndefined();
     expect(idOf(11)).toBe(keptId);
-    expect(await count(e.db, 'live WHERE run_id < 2')).toBe(0);
+    expect(await count(e.db, 'live WHERE run_id = 1')).toBe(small.live.length - 10);
   });
 
   it('applies the changes of another simulator seed and keeps row ids', async () => {

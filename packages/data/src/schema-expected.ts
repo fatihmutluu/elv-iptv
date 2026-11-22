@@ -40,6 +40,7 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'position', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'is_hidden', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'content_hash', alterDefinition: 'TEXT' },
   ],
   categories_next: [
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
@@ -49,6 +50,7 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'name_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
     { name: 'position', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'content_hash', alterDefinition: 'TEXT' },
   ],
   live: [
     { name: 'id', alterDefinition: 'INTEGER' },
@@ -67,6 +69,7 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'is_hidden', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'backup_urls_json', alterDefinition: 'TEXT' },
     { name: 'epg_shift_ms', alterDefinition: 'INTEGER' },
+    { name: 'content_hash', alterDefinition: 'TEXT' },
   ],
   live_next: [
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
@@ -84,6 +87,7 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'backup_urls_json', alterDefinition: 'TEXT' },
     { name: 'epg_shift_ms', alterDefinition: 'INTEGER' },
+    { name: 'content_hash', alterDefinition: 'TEXT' },
   ],
   movies: [
     { name: 'id', alterDefinition: 'INTEGER' },
@@ -102,6 +106,7 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'is_hidden', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'backup_urls_json', alterDefinition: 'TEXT' },
+    { name: 'content_hash', alterDefinition: 'TEXT' },
   ],
   movies_next: [
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
@@ -119,6 +124,7 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'headers_json', alterDefinition: 'TEXT' },
     { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'backup_urls_json', alterDefinition: 'TEXT' },
+    { name: 'content_hash', alterDefinition: 'TEXT' },
   ],
   series: [
     { name: 'id', alterDefinition: 'INTEGER' },
@@ -134,6 +140,7 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'last_modified', alterDefinition: 'INTEGER' },
     { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'is_hidden', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'content_hash', alterDefinition: 'TEXT' },
   ],
   series_next: [
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
@@ -147,6 +154,7 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'year', alterDefinition: 'INTEGER' },
     { name: 'last_modified', alterDefinition: 'INTEGER' },
     { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'content_hash', alterDefinition: 'TEXT' },
   ],
   episodes: [
     { name: 'id', alterDefinition: 'INTEGER' },

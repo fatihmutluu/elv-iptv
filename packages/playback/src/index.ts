@@ -1,3 +1,13 @@
+export {
+  type AbrDecision,
+  type AbrDecisionReason,
+  type AbrHysteresisConfig,
+  type AbrHysteresisController,
+  type AbrHysteresisDeps,
+  type AbrQualityRung,
+  createAbrHysteresisController,
+  DEFAULT_ABR_HYSTERESIS_CONFIG,
+} from './abr-hysteresis';
 export { createMonotonicClock, isAtLiveEdge, LIVE_EDGE_TOLERANCE_MS, positionAt } from './clock';
 export { DEFAULT_PLAYBACK_CONFIG, type PlaybackConfig } from './config';
 export {

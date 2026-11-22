@@ -115,6 +115,155 @@ function interleaveSlices(
   return out;
 }
 
+/** One key-cursor page of a source's visible catalog items ordered by `id ASC` (`#176`). */
+export async function queryCatalogByIdCursor(
+  db: SqlDriver,
+  sourceId: string,
+  kind: BrowseKind,
+  afterId: number,
+  limit: number,
+): Promise<ItemRow[]> {
+  const page = clampPage(0, limit);
+  if (page.limit === 0) return [];
+  const cursorId = Number.isFinite(afterId) ? Math.floor(afterId) : 0;
+  // Unary `+t.source_id` prevents SQLite from choosing secondary `(source_id, ...)` indexes that require TEMP B-TREE sorting.
+  const rows = await db.all<RawItemRow>(
+    `SELECT t.id, t.key, t.provider_id, t.name, ${ITEM_COLS[kind]}
+       FROM ${ITEM_TABLE[kind]} t
+      WHERE +t.source_id = ? AND t.is_hidden = 0 AND t.id > ?
+        AND EXISTS (SELECT 1 FROM sources s WHERE s.id = ? AND s.deleting = 0)
+      ORDER BY t.id ASC
+      LIMIT ?`,
+    [sourceId, cursorId, sourceId, page.limit],
+  );
+  return rows.map((r) => mapItemRow(kind, sourceId, r));
+}
+
+/** Per-source key-cursor for drift-free multi-source pagination (`#176`). */
+export interface SourceNameCursor {
+  readonly nameFold: string;
+  readonly id: number;
+}
+
+/** One page returned by {@link queryAllSourcesItemsByCursor}. */
+export interface AllSourcesCursorPage {
+  readonly items: ItemRow[];
+  readonly nextCursors: Record<string, SourceNameCursor>;
+  readonly hasMore: boolean;
+}
+
+interface CursorRawItemRow extends RawItemRow {
+  name_fold: string;
+}
+
+async function fetchSourceCursorSlice(
+  db: SqlDriver,
+  kind: BrowseKind,
+  sourceId: string,
+  cursor: SourceNameCursor | undefined,
+  limit: number,
+): Promise<{ rows: ItemRow[]; cursors: SourceNameCursor[] }> {
+  if (limit <= 0) return { rows: [], cursors: [] };
+  const table = ITEM_TABLE[kind];
+  const raw =
+    cursor === undefined
+      ? await db.all<CursorRawItemRow>(
+          `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, t.name_fold, ${ITEM_COLS[kind]}
+             FROM ${table} t
+            WHERE t.source_id = ? AND t.is_hidden = 0
+            ORDER BY t.name_fold ASC, t.id ASC
+            LIMIT ?`,
+          [sourceId, limit],
+        )
+      : await db.all<CursorRawItemRow>(
+          `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, t.name_fold, ${ITEM_COLS[kind]}
+             FROM ${table} t
+            WHERE t.source_id = ? AND t.is_hidden = 0
+              AND (t.name_fold > ? OR (t.name_fold = ? AND t.id > ?))
+            ORDER BY t.name_fold ASC, t.id ASC
+            LIMIT ?`,
+          [sourceId, cursor.nameFold, cursor.nameFold, cursor.id, limit],
+        );
+  return {
+    rows: raw.map((r) => mapItemRow(kind, sourceId, r)),
+    cursors: raw.map((r) => ({ nameFold: r.name_fold, id: r.id })),
+  };
+}
+
+/**
+ * Queries visible items (`is_hidden = 0`) of `kind` across active (`sources.deleting = 0`)
+ * sources using fair per-source quotas and drift-free `(nameFold, id)` key cursors (`#176`).
+ */
+export async function queryAllSourcesItemsByCursor(
+  db: SqlDriver,
+  kind: BrowseKind,
+  cursors: Readonly<Record<string, SourceNameCursor>>,
+  limit: number,
+  sourceIds?: readonly string[],
+): Promise<AllSourcesCursorPage> {
+  const page = clampPage(0, limit);
+  const nextCursors: Record<string, SourceNameCursor> = { ...cursors };
+  if (page.limit === 0) return { items: [], nextCursors, hasMore: false };
+  const activeIds = await resolveActiveSources(db, sourceIds);
+  if (activeIds.length === 0) return { items: [], nextCursors, hasMore: false };
+
+  if (activeIds.length === 1) {
+    const id = activeIds[0] ?? '';
+    const slice = await fetchSourceCursorSlice(db, kind, id, cursors[id], page.limit + 1);
+    const hasMore = slice.rows.length > page.limit;
+    const items = hasMore ? slice.rows.slice(0, page.limit) : slice.rows;
+    const lastCursor = slice.cursors[items.length - 1];
+    if (lastCursor !== undefined) nextCursors[id] = lastCursor;
+    return { items, nextCursors, hasMore };
+  }
+
+  const cap = page.limit + 1;
+  const table = ITEM_TABLE[kind];
+  const counts = await Promise.all(
+    activeIds.map(async (id) => {
+      const c = cursors[id];
+      const rows =
+        c === undefined
+          ? await db.all<{ n: number }>(
+              `SELECT COUNT(*) AS n FROM (
+                 SELECT 1 FROM ${table} WHERE source_id = ? AND is_hidden = 0 LIMIT ?
+               )`,
+              [id, cap],
+            )
+          : await db.all<{ n: number }>(
+              `SELECT COUNT(*) AS n FROM (
+                 SELECT 1 FROM ${table} t
+                  WHERE t.source_id = ? AND t.is_hidden = 0
+                    AND (t.name_fold > ? OR (t.name_fold = ? AND t.id > ?))
+                  LIMIT ?
+               )`,
+              [id, c.nameFold, c.nameFold, c.id, cap],
+            );
+      return rows[0]?.n ?? 0;
+    }),
+  );
+
+  const quotas = allocateFairQuotas(counts, page.limit);
+  const slices = await Promise.all(
+    activeIds.map((id, i) => fetchSourceCursorSlice(db, kind, id, cursors[id], quotas[i] ?? 0)),
+  );
+  for (let i = 0; i < activeIds.length; i += 1) {
+    const id = activeIds[i] ?? '';
+    const sliceCursors = slices[i]?.cursors;
+    const last = sliceCursors?.[sliceCursors.length - 1];
+    if (last !== undefined) nextCursors[id] = last;
+  }
+
+  const zeros = activeIds.map(() => 0);
+  const items = interleaveSlices(
+    slices.map((s) => s.rows),
+    zeros,
+    quotas,
+  );
+  const hasMore = counts.some((c, i) => c > (quotas[i] ?? 0));
+  return { items, nextCursors, hasMore };
+}
+
 /**
  * Queries visible items (`is_hidden = 0`) of `kind` across active (`sources.deleting = 0`)
  * sources using fair per-source quotas (`floor(limit / activeSourceCount)` with remainder
