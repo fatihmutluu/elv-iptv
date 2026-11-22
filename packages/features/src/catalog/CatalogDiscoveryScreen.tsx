@@ -1,4 +1,4 @@
-import type { CatalogService, SourceRow } from '@elv/data';
+import type { CatalogService, ItemRow, SourceRow } from '@elv/data';
 import { useI18n, useTheme, useViewport } from '@elv/ui-kit';
 import {
   type ComponentRef,
@@ -9,7 +9,13 @@ import {
   useState,
 } from 'react';
 import { type ScrollView, StyleSheet, View } from 'react-native';
-import { computeCatalogLayout, type DetailTarget, detailTargetFromItem } from '../shared';
+import type { PlayTarget } from '../ports/play-target';
+import {
+  computeCatalogLayout,
+  type DetailTarget,
+  detailTargetFromItem,
+  useCardQuickActionsState,
+} from '../shared';
 import {
   CatalogEmptyState,
   CatalogFilterHeader,
@@ -41,6 +47,7 @@ export interface CatalogDiscoveryScreenProps {
   readonly userStateVersion?: number;
   readonly memory?: CatalogTabMemory;
   readonly onMemoryChange?: (next: CatalogTabMemory) => void;
+  readonly onPlay?: (target: PlayTarget) => void;
   readonly onOpenDetail: (target: DetailTarget) => void;
   readonly onOpenSources: () => void;
   readonly onFocusTopNav?: () => void;
@@ -61,6 +68,7 @@ export function CatalogDiscoveryScreen({
   userStateVersion = 0,
   memory,
   onMemoryChange,
+  onPlay,
   onOpenDetail,
   onOpenSources,
   onFocusTopNav,
@@ -103,6 +111,40 @@ export function CatalogDiscoveryScreen({
     onVisibleCategoryCountChange: handleVisibleCategoryCountChange,
     onClearStaleCategory: handleSelectAllCategories,
   });
+
+  const quickActionsState = useCardQuickActionsState({
+    catalog,
+    refreshToken,
+    userStateVersion,
+  });
+
+  const handleQuickPlay = useCallback(
+    (item: ItemRow, categoryId: string) => {
+      if (item.kind === 'movie' && onPlay) {
+        onPlay({
+          itemKey: item.key,
+          sourceId: item.sourceId,
+          title: item.name,
+          kind: 'vod',
+          itemKind: 'movie',
+          ...(item.logo !== null ? { logo: item.logo } : {}),
+        });
+        return;
+      }
+      const target = detailTargetFromItem(item, categoryId);
+      if (target) onOpenDetail(target);
+    },
+    [onOpenDetail, onPlay],
+  );
+  const handleQuickToggleFavorite = useCallback(
+    (item: ItemRow) => void quickActionsState.toggleFavorite(item),
+    [quickActionsState.toggleFavorite],
+  );
+  const handleQuickToggleWatched = useCallback(
+    (item: ItemRow, currentWatched: boolean) =>
+      void quickActionsState.toggleWatched(item, currentWatched),
+    [quickActionsState.toggleWatched],
+  );
 
   const selectedCategory = useMemo(
     () =>
@@ -312,6 +354,11 @@ export function CatalogDiscoveryScreen({
               onToggleSort={handleToggleSort}
               onBack={handleSelectAllCategories}
               onOpenDetail={onOpenDetail}
+              favoriteKeys={quickActionsState.favoriteKeys}
+              watchedOverrides={quickActionsState.watchedOverrides}
+              onQuickPlay={handleQuickPlay}
+              onQuickToggleFavorite={handleQuickToggleFavorite}
+              onQuickToggleWatched={handleQuickToggleWatched}
               onGridMetaChange={setGridMeta}
               gridAccessRef={gridAccessRef}
             />
@@ -326,10 +373,16 @@ export function CatalogDiscoveryScreen({
               loadedRailItems={discovery.railItemsByCategoryId}
               loadingRailIds={discovery.loadingRailIds}
               progressByKey={discovery.progressByKey}
+              favoriteKeys={quickActionsState.favoriteKeys}
+              watchedOverrides={quickActionsState.watchedOverrides}
+              unplayedBySeriesKey={discovery.unplayedBySeriesKey}
               hasMoreCategories={discovery.hasMoreCategories}
               focusedRowId={tvNav.focusedRowId}
               focusedCol={tvNav.focusedCol}
               onOpenDetail={onOpenDetail}
+              onQuickPlay={handleQuickPlay}
+              onQuickToggleFavorite={handleQuickToggleFavorite}
+              onQuickToggleWatched={handleQuickToggleWatched}
               onSeeAll={handleSelectCategory}
               onLoadMore={discovery.loadMoreCategories}
               onLayoutContinueY={recordContinueY}

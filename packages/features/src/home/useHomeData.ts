@@ -3,12 +3,13 @@ import {
   DEFAULT_PROFILE_ID,
   type FavoriteRow,
   type ItemRow,
+  type SeriesUnplayedSummary,
   type SourceRow,
   type UserItemKind,
   type WatchProgressRow,
 } from '@elv/data';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type CachedHomeSnapshot, useCatalogUiCache } from '../shared';
+import { type CachedHomeSnapshot, useCatalogUiCache, useSeriesUnplayedCounts } from '../shared';
 import {
   applyHomeFavUpdate,
   applyHomeWatchedUpdate,
@@ -58,6 +59,8 @@ type HomeSnapshot = CachedHomeSnapshot;
 export interface HomeDataState extends HomeSnapshot {
   readonly loading: boolean;
   readonly hasLoaded: boolean;
+  readonly unplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
+  readonly watchedOverrides: ReadonlyMap<string, boolean>;
   readonly toggleMyList: (target: ToggleMyListTarget) => Promise<void>;
   readonly toggleWatched: (target: ToggleWatchedTarget, nextWatched: boolean) => Promise<void>;
 }
@@ -79,10 +82,16 @@ export function useHomeData({
   const [loading, setLoading] = useState(() => sources.length > 0 && initialCached === null);
   const [hasLoaded, setHasLoaded] = useState(() => initialCached !== null);
   const [snap, setSnap] = useState<HomeSnapshot>(() => initialCached ?? EMPTY_HOME_SNAPSHOT);
+  const [watchedOverrides, setWatchedOverrides] = useState<ReadonlyMap<string, boolean>>(
+    () => new Map(),
+  );
+  const [unplayedTick, setUnplayedTick] = useState(0);
 
   const mountedRef = useRef(true);
   const hasLoadedRef = useRef(initialCached !== null);
   const snapRef = useRef(snap);
+  const watchedOverridesRef = useRef(watchedOverrides);
+  watchedOverridesRef.current = watchedOverrides;
   const uiCacheRef = useRef(uiCache);
   uiCacheRef.current = uiCache;
   const favGenByKeyRef = useRef(new Map<string, number>());
@@ -93,7 +102,14 @@ export function useHomeData({
   const watchedGenByKeyRef = useRef(new Map<string, number>());
   const watchedInFlightRef = useRef(new Map<string, number>());
   const committedWatchedRef = useRef(
-    new Map<string, { row: WatchProgressRow | undefined; cwRow: WatchProgressRow | undefined }>(),
+    new Map<
+      string,
+      {
+        row: WatchProgressRow | undefined;
+        cwRow: WatchProgressRow | undefined;
+        override: boolean | undefined;
+      }
+    >(),
   );
 
   useEffect(() => {
@@ -105,6 +121,15 @@ export function useHomeData({
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken and userStateVersion intentionally trigger fresh bounded reads
   useEffect(() => {
+    setWatchedOverrides((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Map<string, boolean>();
+      for (const [k, v] of prev) {
+        if ((watchedInFlightRef.current.get(k) ?? 0) > 0) next.set(k, v);
+      }
+      watchedOverridesRef.current = next;
+      return next;
+    });
     if (sources.length === 0) {
       snapRef.current = EMPTY_HOME_SNAPSHOT;
       setSnap(EMPTY_HOME_SNAPSHOT);
@@ -303,6 +328,16 @@ export function useHomeData({
     [],
   );
 
+  const setWatchedOverrideForKey = useCallback((itemKey: string, value: boolean | undefined) => {
+    setWatchedOverrides((prev) => {
+      const next = new Map(prev);
+      if (value === undefined) next.delete(itemKey);
+      else next.set(itemKey, value);
+      watchedOverridesRef.current = next;
+      return next;
+    });
+  }, []);
+
   const toggleWatched = useCallback(
     async (target: ToggleWatchedTarget, nextWatched: boolean): Promise<void> => {
       const key = target.itemKey;
@@ -310,9 +345,14 @@ export function useHomeData({
       watchedGenByKeyRef.current.set(key, gen);
       const existing = snapRef.current.progressByKey.get(key);
       const prevCwRow = snapRef.current.continueWatching.find((r) => r.itemKey === key);
+      const prevOverride = watchedOverridesRef.current.get(key);
       const activeInFlight = watchedInFlightRef.current.get(key) ?? 0;
       if (activeInFlight === 0) {
-        committedWatchedRef.current.set(key, { row: existing, cwRow: prevCwRow });
+        committedWatchedRef.current.set(key, {
+          row: existing,
+          cwRow: prevCwRow,
+          override: prevOverride,
+        });
       }
       watchedInFlightRef.current.set(key, activeInFlight + 1);
 
@@ -341,10 +381,15 @@ export function useHomeData({
             updatedAt: Date.now(),
           };
       applyWatchedState(key, nextRow, undefined);
+      setWatchedOverrideForKey(key, nextWatched);
 
       const useSave = existing === undefined && nextWatched && catalog.saveProgress !== undefined;
       if (!useSave && !catalog.setWatched) {
-        committedWatchedRef.current.set(key, { row: nextRow, cwRow: undefined });
+        committedWatchedRef.current.set(key, {
+          row: nextRow,
+          cwRow: undefined,
+          override: nextWatched,
+        });
         releaseInFlightKey(watchedInFlightRef.current, key);
         return;
       }
@@ -364,25 +409,55 @@ export function useHomeData({
           : await catalog.setWatched?.(key, nextWatched);
         if (!mountedRef.current || !res) return;
         if (res.ok) {
-          committedWatchedRef.current.set(key, { row: nextRow, cwRow: undefined });
+          committedWatchedRef.current.set(key, {
+            row: nextRow,
+            cwRow: undefined,
+            override: nextWatched,
+          });
+          if (target.kind === 'series') setUnplayedTick((t) => t + 1);
         } else if (watchedGenByKeyRef.current.get(key) === gen) {
           const base = committedWatchedRef.current.get(key);
           applyWatchedState(key, base?.row, base?.cwRow);
+          setWatchedOverrideForKey(key, base?.override);
         }
       } catch {
         if (mountedRef.current && watchedGenByKeyRef.current.get(key) === gen) {
           const base = committedWatchedRef.current.get(key);
           applyWatchedState(key, base?.row, base?.cwRow);
+          setWatchedOverrideForKey(key, base?.override);
         }
       } finally {
         releaseInFlightKey(watchedInFlightRef.current, key);
       }
     },
-    [applyWatchedState, catalog],
+    [applyWatchedState, catalog, setWatchedOverrideForKey],
+  );
+
+  const homeSeriesKeys = useMemo(() => {
+    const keys: string[] = [];
+    for (const row of snap.series) keys.push(row.key);
+    for (const fav of snap.favorites) {
+      if (fav.kind === 'series') keys.push(fav.itemKey);
+    }
+    return keys;
+  }, [snap.favorites, snap.series]);
+
+  const unplayedBySeriesKey = useSeriesUnplayedCounts(
+    catalog,
+    homeSeriesKeys,
+    refreshToken + userStateVersion + unplayedTick,
   );
 
   return useMemo<HomeDataState>(
-    () => ({ loading, hasLoaded, ...snap, toggleMyList, toggleWatched }),
-    [hasLoaded, loading, snap, toggleMyList, toggleWatched],
+    () => ({
+      loading,
+      hasLoaded,
+      ...snap,
+      unplayedBySeriesKey,
+      watchedOverrides,
+      toggleMyList,
+      toggleWatched,
+    }),
+    [hasLoaded, loading, snap, toggleMyList, toggleWatched, unplayedBySeriesKey, watchedOverrides],
   );
 }

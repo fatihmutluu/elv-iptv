@@ -1,6 +1,7 @@
 import type { ArtworkBridge } from '../../src/shared/artwork-ipc.ts';
 import type { CatalogBridge } from '../../src/shared/catalog-ipc.ts';
 import type { PlayerBridge } from '../../src/shared/player-ipc.ts';
+import type { WindowBridge } from '../../src/shared/window-ipc.ts';
 
 declare global {
   interface Window {
@@ -9,6 +10,7 @@ declare global {
       readonly player: PlayerBridge;
       readonly catalog: CatalogBridge;
       readonly artwork?: ArtworkBridge;
+      readonly window?: WindowBridge;
       readonly gate?: boolean;
     };
   }

@@ -3,6 +3,7 @@ import type {
   CategoryRow,
   ItemRow,
   ItemSortOrder,
+  SeriesUnplayedSummary,
   SourceRow,
   WatchProgressRow,
 } from '@elv/data';
@@ -12,6 +13,7 @@ import {
   buildSharedDisplayCategories,
   type DisplayCategory,
   useCatalogUiCache,
+  useSeriesUnplayedCounts,
 } from '../shared';
 import {
   CATALOG_CONTINUE_LIMIT,
@@ -45,6 +47,7 @@ export interface CatalogDiscoveryState {
   readonly railItemsByCategoryId: ReadonlyMap<string, readonly ItemRow[]>;
   readonly loadingRailIds: ReadonlySet<string>;
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
+  readonly unplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly loadingCategories: boolean;
   readonly hasLoadedCategories: boolean;
   readonly hasMoreCategories: boolean;
@@ -362,6 +365,25 @@ export function useCatalogDiscovery({
     visibleCategories,
   ]);
 
+  const loadedSeriesKeys = useMemo(() => {
+    if (kind !== 'series') return [] as string[];
+    const keys: string[] = [];
+    for (const cat of visibleCategories) {
+      const rows = railItemsByCategoryId.get(cat.row.id);
+      if (!rows) continue;
+      for (const item of rows) {
+        if (item.kind === 'series') keys.push(item.key);
+      }
+    }
+    return keys;
+  }, [kind, railItemsByCategoryId, visibleCategories]);
+
+  const unplayedBySeriesKey = useSeriesUnplayedCounts(
+    catalog,
+    loadedSeriesKeys,
+    refreshToken + userStateVersion,
+  );
+
   const hasMoreCategories = categories.length > visibleCategories.length;
 
   const loadMoreCategories = useCallback(() => {
@@ -379,6 +401,7 @@ export function useCatalogDiscovery({
       railItemsByCategoryId,
       loadingRailIds,
       progressByKey,
+      unplayedBySeriesKey,
       loadingCategories,
       hasLoadedCategories,
       hasMoreCategories,
@@ -394,6 +417,7 @@ export function useCatalogDiscovery({
       loadingRailIds,
       progressByKey,
       railItemsByCategoryId,
+      unplayedBySeriesKey,
       visibleCategories,
     ],
   );

@@ -28,6 +28,7 @@ export type AppearanceFocusId =
   | 'font-110'
   | 'font-120'
   | 'toggle-reduce-motion'
+  | 'toggle-confirm-exit'
   | 'artwork-cache-64'
   | 'artwork-cache-128'
   | 'artwork-cache-256'
@@ -62,7 +63,8 @@ export type PlaybackFocusId =
   | 'buffer-balanced'
   | 'buffer-large'
   | 'toggle-auto-play-next'
-  | 'toggle-skip-back-subtitles';
+  | 'toggle-skip-back-subtitles'
+  | 'audio-device-auto';
 
 /** Focusable control identifiers inside the Live TV & Guide settings panel. */
 export type LiveTvFocusId =
@@ -92,6 +94,7 @@ const APPEARANCE_ROWS: readonly (readonly AppearanceFocusId[])[] = [
   ['theme-velvetViolet', 'theme-pitchEmerald', 'theme-highContrast'],
   ['font-90', 'font-100', 'font-110', 'font-120'],
   ['toggle-reduce-motion'],
+  ['toggle-confirm-exit'],
   ['artwork-cache-64', 'artwork-cache-128', 'artwork-cache-256'],
   ['artwork-cache-clear'],
   ['reset-preferences'],
@@ -113,6 +116,7 @@ const PLAYBACK_ROWS: readonly (readonly PlaybackFocusId[])[] = [
   ['buffer-auto', 'buffer-balanced', 'buffer-large'],
   ['toggle-auto-play-next'],
   ['toggle-skip-back-subtitles'],
+  ['audio-device-auto'],
 ];
 
 const LIVE_TV_ROWS: readonly (readonly LiveTvFocusId[])[] = [

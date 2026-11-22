@@ -98,6 +98,8 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
       (await open()).listContinueWatching?.(limit, profileId) ?? [],
     listProgressByKeys: async (itemKeys, profileId) =>
       (await open()).listProgressByKeys?.(itemKeys, profileId) ?? [],
+    listSeriesUnplayedCounts: async (seriesKeys, profileId) =>
+      (await open()).listSeriesUnplayedCounts?.(seriesKeys, profileId) ?? [],
     clearProgress: (itemKey, profileId) =>
       wrapResult(async () => {
         const cat = await open();

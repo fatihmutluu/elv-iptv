@@ -159,6 +159,8 @@ function isBoundedKeyList(x: unknown, max: number): x is readonly string[] {
 
 export const isItemKeyList = (x: unknown): x is readonly string[] =>
   isBoundedKeyList(x, MAX_PROGRESS_KEYS);
+export const isSeriesKeyList = (x: unknown): x is readonly string[] =>
+  isBoundedKeyList(x, MAX_PROGRESS_KEYS);
 export const isNowNextKeyList = (x: unknown): x is readonly string[] =>
   isBoundedKeyList(x, MAX_NOW_NEXT_KEYS);
 export const isEpgWindowKeyList = (x: unknown): x is readonly string[] =>

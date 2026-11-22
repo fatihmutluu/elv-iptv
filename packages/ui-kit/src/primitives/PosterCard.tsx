@@ -1,10 +1,31 @@
 import { memo, type ReactElement, useCallback, useState } from 'react';
-import { Pressable, type StyleProp, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import {
+  type GestureResponderEvent,
+  Pressable,
+  type StyleProp,
+  StyleSheet,
+  Text,
+  View,
+  type ViewStyle,
+} from 'react-native';
+import { Icon } from '../icons';
 import { TABULAR_NUMS_STYLE, useTheme, webCursorPointer, webShadow, webTransition } from '../theme';
 import { useViewport } from '../viewport';
 import { ArtworkImage } from './ArtworkImage';
 import type { DeadHostRegistry } from './dead-host-registry';
 import { MicroPill } from './MicroPill';
+
+/** Desktop pointer-only hover quick-action handlers for {@link PosterCard} (`#409`). */
+export interface PosterCardQuickActions {
+  readonly onPlay?: () => void;
+  readonly playLabel?: string;
+  readonly isFavorite?: boolean;
+  readonly onToggleFavorite?: () => void;
+  readonly favoriteLabel?: string;
+  readonly isWatched?: boolean;
+  readonly onToggleWatched?: () => void;
+  readonly watchedLabel?: string;
+}
 
 /** Props of {@link PosterCard}. */
 export interface PosterCardProps {
@@ -14,6 +35,14 @@ export interface PosterCardProps {
   aspectRatio?: number;
   progress?: number;
   badge?: string;
+  /** Remaining unwatched episode count for series cards (`#409`). */
+  readonly unplayedCount?: number;
+  /** Shows a restrained watched checkmark pill when `true` and `unplayedCount` is not positive (`#409`). */
+  readonly allWatched?: boolean;
+  /** Localized accessibility label for the unplayed count or watched checkmark badge (`#409`). */
+  readonly unplayedLabel?: string;
+  /** Pointer-only hover quick-actions (`#409`). Never rendered on touch or TV. */
+  readonly quickActions?: PosterCardQuickActions;
   onPress?: () => void;
   onFocus?: () => void;
   focusable?: boolean;
@@ -59,6 +88,12 @@ function scaleFont(size: number, fontScale: number): number {
   return Math.round(size * fontScale * 2) / 2;
 }
 
+function stopQuickActionEvent(event: GestureResponderEvent | undefined): void {
+  const evt = event as { stopPropagation?: () => void; preventDefault?: () => void } | undefined;
+  evt?.stopPropagation?.();
+  evt?.preventDefault?.();
+}
+
 function PosterCardInner({
   title,
   meta,
@@ -66,6 +101,10 @@ function PosterCardInner({
   aspectRatio = 2 / 3,
   progress,
   badge,
+  unplayedCount,
+  allWatched,
+  unplayedLabel,
+  quickActions,
   onPress,
   onFocus,
   focusable = true,
@@ -90,6 +129,14 @@ function PosterCardInner({
   const handleHoverOut = useCallback(() => setHovered(false), []);
 
   const trimmedBadge = badge?.trim() ?? '';
+  const showUnplayedCount =
+    unplayedCount !== undefined && Number.isFinite(unplayedCount) && unplayedCount > 0;
+  const showAllWatched = !showUnplayedCount && allWatched === true;
+  const hasQuickActions =
+    quickActions !== undefined &&
+    (quickActions.onPlay !== undefined ||
+      quickActions.onToggleFavorite !== undefined ||
+      quickActions.onToggleWatched !== undefined);
   const clamped = progress !== undefined ? clampProgress(progress) : undefined;
   const cardTransition = webTransition(theme, 'transform, opacity');
   const shadowTransition = webTransition(theme, 'box-shadow');
@@ -173,6 +220,149 @@ function PosterCardInner({
                       label={trimmedBadge}
                       testID={testID ? `${testID}-badge` : undefined}
                     />
+                  </View>
+                ) : null}
+                {showUnplayedCount ? (
+                  <View
+                    pointerEvents="none"
+                    style={[styles.badgeSlot, { top: theme.spacing.xs, right: theme.spacing.xs }]}
+                  >
+                    <MicroPill
+                      label={String(Math.floor(unplayedCount))}
+                      accessibilityLabel={unplayedLabel}
+                      testID={testID ? `${testID}-unplayed` : undefined}
+                    />
+                  </View>
+                ) : showAllWatched ? (
+                  <View
+                    pointerEvents="none"
+                    style={[styles.badgeSlot, { top: theme.spacing.xs, right: theme.spacing.xs }]}
+                  >
+                    <MicroPill
+                      icon="check"
+                      tone="success"
+                      accessibilityLabel={unplayedLabel}
+                      testID={testID ? `${testID}-watched-badge` : undefined}
+                    />
+                  </View>
+                ) : null}
+                {showPointerHover && hasQuickActions && quickActions !== undefined ? (
+                  <View
+                    pointerEvents="box-none"
+                    style={[
+                      styles.quickActionsOverlay,
+                      { backgroundColor: theme.colors.scrimSoft },
+                    ]}
+                  >
+                    {quickActions.onPlay !== undefined ? (
+                      <Pressable
+                        testID={testID ? `${testID}-quick-play` : undefined}
+                        accessibilityRole="button"
+                        accessibilityLabel={quickActions.playLabel ?? title}
+                        focusable={false}
+                        onPress={(e) => {
+                          stopQuickActionEvent(e);
+                          quickActions.onPlay?.();
+                        }}
+                        style={({ pressed }) => [
+                          styles.quickPlayButton,
+                          {
+                            borderRadius: theme.radius.pill,
+                            backgroundColor: theme.colors.ctaBg,
+                            opacity: pressed ? 0.88 : 1,
+                          },
+                          cursor,
+                        ]}
+                      >
+                        <Icon name="play" size={18} color={theme.colors.ctaFg} />
+                      </Pressable>
+                    ) : null}
+                    {quickActions.onToggleFavorite !== undefined ||
+                    quickActions.onToggleWatched !== undefined ? (
+                      <View
+                        pointerEvents="box-none"
+                        style={[
+                          styles.quickCornerRow,
+                          {
+                            bottom: theme.spacing.xs + (clamped !== undefined ? 4 : 0),
+                            right: theme.spacing.xs,
+                          },
+                        ]}
+                      >
+                        {quickActions.onToggleFavorite !== undefined ? (
+                          <Pressable
+                            testID={testID ? `${testID}-quick-favorite` : undefined}
+                            accessibilityRole="button"
+                            accessibilityLabel={quickActions.favoriteLabel}
+                            accessibilityState={{ selected: Boolean(quickActions.isFavorite) }}
+                            focusable={false}
+                            onPress={(e) => {
+                              stopQuickActionEvent(e);
+                              quickActions.onToggleFavorite?.();
+                            }}
+                            style={({ pressed }) => [
+                              styles.quickCornerButton,
+                              {
+                                borderRadius: theme.radius.pill,
+                                backgroundColor: quickActions.isFavorite
+                                  ? theme.colors.accentTint
+                                  : theme.colors.scrimStrong,
+                                borderColor: quickActions.isFavorite
+                                  ? theme.colors.accent
+                                  : theme.colors.actionGlassBorder,
+                                opacity: pressed ? 0.85 : 1,
+                              },
+                              cursor,
+                            ]}
+                          >
+                            <Icon
+                              name={quickActions.isFavorite ? 'starFilled' : 'star'}
+                              size={13}
+                              color={
+                                quickActions.isFavorite
+                                  ? theme.colors.accent
+                                  : theme.colors.textPrimary
+                              }
+                            />
+                          </Pressable>
+                        ) : null}
+                        {quickActions.onToggleWatched !== undefined ? (
+                          <Pressable
+                            testID={testID ? `${testID}-quick-watched` : undefined}
+                            accessibilityRole="button"
+                            accessibilityLabel={quickActions.watchedLabel}
+                            accessibilityState={{ selected: Boolean(quickActions.isWatched) }}
+                            focusable={false}
+                            onPress={(e) => {
+                              stopQuickActionEvent(e);
+                              quickActions.onToggleWatched?.();
+                            }}
+                            style={({ pressed }) => [
+                              styles.quickCornerButton,
+                              {
+                                borderRadius: theme.radius.pill,
+                                backgroundColor: theme.colors.scrimStrong,
+                                borderColor: quickActions.isWatched
+                                  ? theme.colors.successColor
+                                  : theme.colors.actionGlassBorder,
+                                opacity: pressed ? 0.85 : 1,
+                              },
+                              cursor,
+                            ]}
+                          >
+                            <Icon
+                              name="check"
+                              size={13}
+                              color={
+                                quickActions.isWatched
+                                  ? theme.colors.successColor
+                                  : theme.colors.textPrimary
+                              }
+                            />
+                          </Pressable>
+                        ) : null}
+                      </View>
+                    ) : null}
                   </View>
                 ) : null}
                 {clamped !== undefined ? (
@@ -290,6 +480,34 @@ const styles = StyleSheet.create({
   },
   badgeSlot: {
     position: 'absolute',
+  },
+  quickActionsOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickPlayButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickCornerRow: {
+    position: 'absolute',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  quickCornerButton: {
+    width: 28,
+    height: 28,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   progressTrack: {
     position: 'absolute',

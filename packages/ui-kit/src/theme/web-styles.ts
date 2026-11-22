@@ -43,3 +43,34 @@ export function webCursorPointer(): ViewStyle | undefined {
   if (Platform.OS !== 'web') return undefined;
   return { cursor: 'pointer' } as unknown as ViewStyle;
 }
+
+const FOCUS_INTERACTIVE_SELECTORS = [
+  '[role="button"]',
+  '[role="tab"]',
+  '[role="switch"]',
+  '[role="radio"]',
+  '[role="adjustable"]',
+  'button',
+  'a',
+  'input',
+  '[tabindex]',
+] as const;
+
+/**
+ * Builds the theme-tokenized web `:focus-visible` stylesheet (`#410`).
+ * Suppresses default browser focus outlines on mouse clicks (`:focus:not(:focus-visible)`)
+ * while drawing crisp theme-colored keyboard focus rings on `:focus-visible`.
+ */
+export function buildFocusVisibleCss(theme: Theme): string {
+  const suppressSelectors = FOCUS_INTERACTIVE_SELECTORS.map(
+    (selector) => `${selector}:focus:not(:focus-visible)`,
+  ).join(',\n');
+  const visibleSelectors = FOCUS_INTERACTIVE_SELECTORS.map(
+    (selector) => `${selector}:focus-visible`,
+  ).join(',\n');
+
+  return [
+    `${suppressSelectors} { outline: none; }`,
+    `${visibleSelectors} { outline: ${theme.focus.ringWidth}px solid ${theme.colors.focusRingColor}; outline-offset: 2px; }`,
+  ].join('\n');
+}

@@ -446,6 +446,10 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
         return service.listProgressByKeys
           ? service.listProgressByKeys(call.itemKeys, call.profileId)
           : [];
+      case 'listSeriesUnplayedCounts':
+        return service.listSeriesUnplayedCounts
+          ? service.listSeriesUnplayedCounts(call.seriesKeys, call.profileId)
+          : [];
       case 'clearProgress':
         return service.clearProgress
           ? service.clearProgress(call.itemKey, call.profileId)

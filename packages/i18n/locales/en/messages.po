@@ -1358,3 +1358,30 @@ msgstr "Sort alphabetically"
 
 msgid "catalog.sortDefaultLabel"
 msgstr "Default order"
+
+msgid "player.alwaysOnTop"
+msgstr "Pin window on top"
+
+msgid "player.exitAlwaysOnTop"
+msgstr "Unpin window"
+
+msgid "player.audioDevice"
+msgstr "Audio output"
+
+msgid "player.audioDeviceAuto"
+msgstr "System default"
+
+msgid "card.quickPlay"
+msgstr "Play {title}"
+
+msgid "card.unplayedCount"
+msgstr "{count} unwatched"
+
+msgid "shell.backToExitToast"
+msgstr "Press Back again to exit"
+
+msgid "settings.appearance.confirmExitOnBack"
+msgstr "Confirm before exiting with Back"
+
+msgid "settings.playback.audioDevice"
+msgstr "Audio output device"

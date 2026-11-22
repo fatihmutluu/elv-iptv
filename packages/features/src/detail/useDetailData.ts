@@ -1,7 +1,12 @@
-import type { CatalogService, EpisodeRow, WatchProgressRow } from '@elv/data';
+import type {
+  CatalogService,
+  EpisodeRow,
+  SeriesUnplayedSummary,
+  WatchProgressRow,
+} from '@elv/data';
 import { elvError } from '@elv/domain';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type DetailTarget, useCatalogUiCache } from '../shared';
+import { type DetailTarget, useCatalogUiCache, useSeriesUnplayedCounts } from '../shared';
 import {
   type DetailSeasonsState,
   type DetailSnapshot,
@@ -29,6 +34,7 @@ export interface DetailDataState extends Omit<DetailSnapshot, 'detailRow'> {
   readonly year: number | null;
   readonly rating: number | null;
   readonly plot: string | null;
+  readonly relatedUnplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
   readonly selectSeason: (season: number) => void;
   readonly retrySeasons: () => void;
   readonly toggleMyList: () => Promise<void>;
@@ -355,6 +361,16 @@ export function useDetailData({
     updateSnap,
   });
 
+  const relatedSeriesKeys = useMemo(
+    () => snap.related.filter((item) => item.kind === 'series').map((item) => item.key),
+    [snap.related],
+  );
+  const relatedUnplayedBySeriesKey = useSeriesUnplayedCounts(
+    catalog,
+    relatedSeriesKeys,
+    refreshToken + userStateVersion,
+  );
+
   return useMemo<DetailDataState>(() => {
     const { detailRow: _ignored, ...rest } = snap;
     return {
@@ -365,6 +381,7 @@ export function useDetailData({
       year,
       rating,
       plot,
+      relatedUnplayedBySeriesKey,
       selectSeason,
       retrySeasons,
       toggleMyList,
@@ -375,6 +392,7 @@ export function useDetailData({
     plot,
     posterUri,
     rating,
+    relatedUnplayedBySeriesKey,
     retrySeasons,
     selectSeason,
     snap,

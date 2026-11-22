@@ -21,6 +21,7 @@ import {
   computeCatalogLayout,
   type DetailTarget,
   detailTargetFromItem,
+  useCardQuickActionsState,
   useRouteActive,
 } from '../shared';
 import { DetailCastStrip } from './DetailCastStrip';
@@ -96,6 +97,11 @@ export function DetailScreen({
     computeCatalogLayout(viewport, theme);
 
   const data = useDetailData({ target, catalog, refreshToken, userStateVersion });
+  const relatedQuickActions = useCardQuickActionsState({
+    catalog,
+    refreshToken,
+    userStateVersion,
+  });
   const extras = useDetailExtrasState({
     target,
     plot: data.plot,
@@ -192,6 +198,32 @@ export function DetailScreen({
       if (next) onOpenDetail(next);
     },
     [data.relatedCategoryId, onOpenDetail],
+  );
+  const handleQuickPlayRelated = useCallback(
+    (item: ItemRow) => {
+      if (item.kind === 'movie') {
+        onPlay({
+          itemKey: item.key,
+          sourceId: item.sourceId,
+          title: item.name,
+          kind: 'vod',
+          itemKind: 'movie',
+          ...(item.logo !== null ? { logo: item.logo } : {}),
+        });
+        return;
+      }
+      handlePressRelated(item);
+    },
+    [handlePressRelated, onPlay],
+  );
+  const handleQuickToggleRelatedFavorite = useCallback(
+    (item: ItemRow) => void relatedQuickActions.toggleFavorite(item),
+    [relatedQuickActions.toggleFavorite],
+  );
+  const handleQuickToggleRelatedWatched = useCallback(
+    (item: ItemRow, currentWatched: boolean) =>
+      void relatedQuickActions.toggleWatched(item, currentWatched),
+    [relatedQuickActions.toggleWatched],
   );
 
   const seasons = data.seasonsState.kind === 'ready' ? data.seasonsState.seasons : [];
@@ -469,12 +501,18 @@ export function DetailScreen({
         <DetailRelatedRail
           items={data.related}
           progressByKey={data.relatedProgressByKey}
+          favoriteKeys={relatedQuickActions.favoriteKeys}
+          watchedOverrides={relatedQuickActions.watchedOverrides}
+          unplayedBySeriesKey={data.relatedUnplayedBySeriesKey}
           cardWidth={posterRailWidth}
           gap={railGap}
           padX={padX}
           isTv={isTv}
           focusedIndex={tvNav.focusedRowId === 'related' ? tvNav.focusedCol : null}
           onPressItem={handlePressRelated}
+          onQuickPlay={handleQuickPlayRelated}
+          onQuickToggleFavorite={handleQuickToggleRelatedFavorite}
+          onQuickToggleWatched={handleQuickToggleRelatedWatched}
           onLayoutY={recordRelatedY}
         />
       </ScrollView>

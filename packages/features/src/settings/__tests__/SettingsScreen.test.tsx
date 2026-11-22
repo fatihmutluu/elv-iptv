@@ -527,6 +527,10 @@ describe('SettingsScreen', () => {
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 458, animated: true });
 
+    // Down -> Confirm Exit on Back row -> stays inside font/accessibility card
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 458, animated: true });
+
     // Down -> Artwork cache limit row -> scrolls to artworkCache section
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 538, animated: true });
@@ -539,8 +543,8 @@ describe('SettingsScreen', () => {
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 688, animated: true });
 
-    // Up x7 -> back to Language row -> resets scroll to y: 0
-    for (let i = 0; i < 7; i += 1) {
+    // Up x8 -> back to Language row -> resets scroll to y: 0
+    for (let i = 0; i < 8; i += 1) {
       await pressKey(KEYCODE_DPAD_UP);
     }
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 0, animated: true });

@@ -100,6 +100,10 @@ export interface PlayerScreenProps {
   preferredSubtitleLang?: string;
   /** Default subtitle activation mode (`'auto' | 'always' | 'off'`, `#401`). */
   subtitleMode?: SubtitleModePref;
+  /** Preferred output audio device name (`'auto'` = system default, `#408`). */
+  preferredAudioDevice?: string;
+  /** Persists user-selected output audio device (`#408`). */
+  onPersistAudioDevice?: (deviceName: string) => void;
   onTargetChange?: (next: PlayTarget) => void;
   onExit: () => void;
 }
@@ -130,6 +134,8 @@ export function PlayerScreen({
   preferredAudioLang,
   preferredSubtitleLang,
   subtitleMode = 'auto',
+  preferredAudioDevice,
+  onPersistAudioDevice,
   onTargetChange,
   onExit,
 }: PlayerScreenProps): ReactElement {
@@ -190,6 +196,9 @@ export function PlayerScreen({
     surfaceRecreationToken,
     inPip,
     isFullscreen,
+    alwaysOnTop,
+    audioDevices,
+    activeAudioDevice,
   } = usePlayerSession({
     videoHost,
     activeTarget,
@@ -296,11 +305,21 @@ export function PlayerScreen({
     activeTarget.previousChannel.itemKey !== activeTarget.itemKey;
   const openedEngine = sessionState.kind === 'ready' ? sessionState.opened : undefined;
   const hostToggleFullscreen = openedEngine?.toggleFullscreen;
+  const hostToggleAlwaysOnTop = openedEngine?.toggleAlwaysOnTop;
+  const hostSetAudioDevice = openedEngine?.setAudioDevice;
   const hostToggleMute = openedEngine?.toggleMute;
   const hostSetVolume = openedEngine?.setVolume;
   const hostSetBrightness = openedEngine?.setBrightness;
   const hostSetOrientationLocked = openedEngine?.setOrientationLocked;
   const hostSetDeinterlace = openedEngine?.setDeinterlace;
+
+  const selectAudioDevice = useCallback(
+    (name: string) => {
+      hostSetAudioDevice?.(name);
+      onPersistAudioDevice?.(name);
+    },
+    [hostSetAudioDevice, onPersistAudioDevice],
+  );
 
   const controls = usePlayerControls({
     formFactor,
@@ -331,6 +350,10 @@ export function PlayerScreen({
     onJumpPreviousChannel: handoff.handleJumpPreviousChannel,
     onJumpToChannel: jumpToChannel,
     onToggleFullscreen: hostToggleFullscreen,
+    onToggleAlwaysOnTop: hostToggleAlwaysOnTop,
+    audioDevices,
+    activeAudioDevice,
+    onSelectAudioDevice: hostSetAudioDevice !== undefined ? selectAudioDevice : undefined,
     onToggleMute: hostToggleMute,
     onSetVolume: hostSetVolume,
     onPersistVolume,
@@ -348,6 +371,8 @@ export function PlayerScreen({
   latestVolumeRef.current = controls.volume;
   const initialVolumeRef = useRef(initialVolume);
   initialVolumeRef.current = initialVolume;
+  const preferredAudioDeviceRef = useRef(preferredAudioDevice);
+  preferredAudioDeviceRef.current = preferredAudioDevice;
   useEffect(() => {
     if (openedEngine === undefined) return;
     const effective =
@@ -355,6 +380,10 @@ export function PlayerScreen({
         ? latestVolumeRef.current
         : (openedEngine.initialVolume ?? latestVolumeRef.current);
     openedEngine.setVolume?.(clampVolume(effective));
+    const savedDevice = preferredAudioDeviceRef.current?.trim();
+    if (savedDevice && savedDevice !== 'auto') {
+      openedEngine.setAudioDevice?.(savedDevice);
+    }
   }, [openedEngine]);
 
   const fetchChannelNowNext = useCallback(async (itemKey: string) => {
@@ -530,6 +559,13 @@ export function PlayerScreen({
           }
         : {})}
       statsVisible={controls.statsVisible}
+      {...(hostSetAudioDevice !== undefined
+        ? {
+            audioDevices,
+            activeAudioDevice,
+            onSelectAudioDevice: selectAudioDevice,
+          }
+        : {})}
       isTv={isTv}
       formFactor={formFactor}
       i18n={i18n}
@@ -564,6 +600,7 @@ export function PlayerScreen({
       muted={controls.muted}
       volume={controls.volume}
       isFullscreen={isFullscreen}
+      alwaysOnTop={alwaysOnTop}
       playbackSpeed={controls.playbackSpeed}
       videoInfo={videoInfo}
       tracks={tracks}
@@ -602,6 +639,9 @@ export function PlayerScreen({
       onSetVolume={controls.setVolume}
       {...(hostToggleFullscreen !== undefined
         ? { onToggleFullscreen: controls.toggleFullscreen }
+        : {})}
+      {...(hostToggleAlwaysOnTop !== undefined
+        ? { onToggleAlwaysOnTop: hostToggleAlwaysOnTop }
         : {})}
       onLock={controls.lockControls}
       onJumpPreviousChannel={handoff.handleJumpPreviousChannel}

@@ -226,7 +226,9 @@ describe('AppShell Android TV BackHandler exit (#425), TvFocusGuideRegions (#281
         screen.getByTestId('nav-tv-focus-anchor', { includeHiddenElements: true }),
       ).toBeTruthy();
 
-      // 6. Pressing Back again at root Home top-nav returns false so Android TV exits cleanly to launcher!
+      // 6. First Back at root Home top-nav shows exit confirmation toast (#55); second Back returns false so Android TV exits cleanly!
+      expect(await triggerHardwareBack()).toBe(true);
+      expect(screen.getByTestId('shell-exit-confirm-toast')).toBeTruthy();
       expect(await triggerHardwareBack()).toBe(false);
     } finally {
       await view?.unmount();

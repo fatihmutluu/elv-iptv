@@ -57,10 +57,14 @@ export interface ExtendedPreferencesFields {
   readonly liveOkTwoStepPreview: boolean;
   readonly cleanChannelTitles: boolean;
   readonly artworkCacheLimitMb: ArtworkCacheLimitMbPref;
+  readonly confirmExitOnBack: boolean;
+  readonly preferredAudioDevice: string;
 }
 
 const MAX_PREF_STRING_LENGTH = 64;
 const MAX_PREF_LANG_LENGTH = 12;
+const MAX_PREF_AUDIO_DEVICE_LENGTH = 160;
+const DEFAULT_AUDIO_DEVICE = 'auto';
 const PREF_LANG_PATTERN = /^[a-z]{2,3}(-[a-z0-9]{2,8})?$/i;
 
 const SUBTITLE_MODES: readonly SubtitleModePref[] = ['auto', 'always', 'off'];
@@ -100,6 +104,23 @@ function normalizePrefLang(value: unknown): string {
   if (trimmed.length === 0 || trimmed.length > MAX_PREF_LANG_LENGTH) return '';
   if (!PREF_LANG_PATTERN.test(trimmed)) return '';
   return trimmed.toLowerCase();
+}
+
+function hasControlChar(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
+
+function normalizeAudioDevice(value: unknown): string {
+  if (typeof value !== 'string' || hasControlChar(value)) return DEFAULT_AUDIO_DEVICE;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_PREF_AUDIO_DEVICE_LENGTH) {
+    return DEFAULT_AUDIO_DEVICE;
+  }
+  return trimmed;
 }
 
 function isSubtitleModePref(value: unknown): value is SubtitleModePref {
@@ -208,6 +229,11 @@ export function parseExtendedPreferences(
     artworkCacheLimitMb: isArtworkCacheLimitMbPref(parsed.artworkCacheLimitMb)
       ? parsed.artworkCacheLimitMb
       : defaults.artworkCacheLimitMb,
+    confirmExitOnBack:
+      typeof parsed.confirmExitOnBack === 'boolean'
+        ? parsed.confirmExitOnBack
+        : defaults.confirmExitOnBack,
+    preferredAudioDevice: normalizeAudioDevice(parsed.preferredAudioDevice),
   };
 }
 
@@ -247,6 +273,8 @@ export function serializeExtendedPreferences(
     artworkCacheLimitMb: isArtworkCacheLimitMbPref(snapshot.artworkCacheLimitMb)
       ? snapshot.artworkCacheLimitMb
       : defaults.artworkCacheLimitMb,
+    confirmExitOnBack: Boolean(snapshot.confirmExitOnBack),
+    preferredAudioDevice: normalizeAudioDevice(snapshot.preferredAudioDevice),
   };
 }
 
@@ -296,5 +324,13 @@ export function mergeExtendedPreferences(
     artworkCacheLimitMb: isArtworkCacheLimitMbPref(patch.artworkCacheLimitMb)
       ? patch.artworkCacheLimitMb
       : base.artworkCacheLimitMb,
+    confirmExitOnBack:
+      typeof patch.confirmExitOnBack === 'boolean'
+        ? patch.confirmExitOnBack
+        : base.confirmExitOnBack,
+    preferredAudioDevice:
+      typeof patch.preferredAudioDevice === 'string'
+        ? normalizeAudioDevice(patch.preferredAudioDevice)
+        : base.preferredAudioDevice,
   };
 }

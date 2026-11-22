@@ -348,6 +348,12 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         itemKeys,
         ...(profileId === undefined ? {} : { profileId }),
       }),
+    listSeriesUnplayedCounts: (seriesKeys, profileId) =>
+      callValue({
+        method: 'listSeriesUnplayedCounts',
+        seriesKeys,
+        ...(profileId === undefined ? {} : { profileId }),
+      }),
     clearProgress: (itemKey, profileId) =>
       callResult({
         method: 'clearProgress',

@@ -35,6 +35,12 @@ export const DESKTOP_CAPABILITIES: EngineCapabilities = Object.freeze({
   subtitleTrackSelection: true,
 });
 
+/** One desktop `libmpv` audio output device reported via `audio-device-list` (`#408`). */
+export interface AudioDeviceInfo {
+  readonly name: string;
+  readonly description: string;
+}
+
 /** Key forwarded from mpv's native input handler to the renderer (`player:ui`). */
 export type PlayerUiKey =
   | 'channel-up'
@@ -51,12 +57,14 @@ export type PlayerUiKey =
   | 'tracks'
   | 'prev-channel'
   | 'info'
-  | 'channel-list';
+  | 'channel-list'
+  | 'always-on-top';
 
 /** Presentation events outside the port, main to renderer (`player:ui`). */
 export type PlayerUiEvent =
   | { type: 'presenter'; kind: PresenterKind; coversArea: boolean }
   | { type: 'fullscreen-changed'; fullscreen: boolean }
+  | { type: 'audio-devices'; devices: readonly AudioDeviceInfo[]; active: string }
   | { type: 'key'; key: PlayerUiKey }
   | { type: 'closed' };
 
@@ -229,7 +237,7 @@ const MIN_SPEED_RATE = 0.25;
 const MAX_SPEED_RATE = 4;
 const MAX_VOLUME = 100;
 const MAX_DELAY_SEC = 30;
-const MAX_AUDIO_DEVICE_CHARS = 256;
+const MAX_AUDIO_DEVICE_CHARS = 160;
 
 const isSpeedRate = (x: unknown): x is number =>
   isNumber(x) && x >= MIN_SPEED_RATE && x <= MAX_SPEED_RATE;

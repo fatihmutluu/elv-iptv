@@ -191,6 +191,26 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
     });
   });
 
+  it('displays saved preferredAudioDevice in PlaybackSettingsPanel and resets to System default (#408)', async () => {
+    const store = createMemoryPreferencesStore({ preferredAudioDevice: 'wasapi/hdmi' });
+    await render(<Harness store={store} initialSection="playback" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-playback-audio-device-current')).toBeTruthy();
+    });
+    expect(
+      screen.getByTestId('settings-playback-audio-device-current').props.accessibilityState
+        .selected,
+    ).toBe(true);
+
+    await fireEvent.press(screen.getByTestId('settings-playback-audio-device-auto'));
+    await waitFor(async () => {
+      const loaded = await store.load();
+      expect(loaded.preferredAudioDevice).toBe('auto');
+    });
+    expect(screen.queryByTestId('settings-playback-audio-device-current')).toBeNull();
+  });
+
   it('persists every Live TV & Guide panel preference via updatePreferences (#401, #126, #145)', async () => {
     const store = createMemoryPreferencesStore();
     await render(<Harness store={store} initialSection="liveTv" />);

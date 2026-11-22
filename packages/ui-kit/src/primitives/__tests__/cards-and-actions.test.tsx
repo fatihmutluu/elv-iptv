@@ -285,6 +285,125 @@ describe('PosterCard & WideCard (Cinema Quietude compliance)', () => {
     expect(hoverRingStyle.bottom).toBe(-1.5);
   });
 
+  it('renders unplayed count badge or watched checkmark badge across platforms (#409)', async () => {
+    await render(
+      <ThemeProvider>
+        <ViewportProvider value={{ formFactor: 'phone', orientation: 'portrait' }}>
+          <PosterCard
+            title="Show A"
+            unplayedCount={5}
+            unplayedLabel="5 unwatched"
+            testID="series-unplayed"
+          />
+          <PosterCard
+            title="Show B"
+            unplayedCount={0}
+            allWatched
+            unplayedLabel="Watched"
+            testID="series-watched"
+          />
+          <PosterCard title="Show C" unplayedCount={0} testID="series-none" />
+        </ViewportProvider>
+      </ThemeProvider>,
+    );
+
+    const unplayed = screen.getByTestId('series-unplayed-unplayed');
+    expect(unplayed.props.accessibilityLabel).toBe('5 unwatched');
+    expect(screen.getByText('5')).toBeTruthy();
+    expect(screen.queryByTestId('series-unplayed-watched-badge')).toBeNull();
+
+    const watched = screen.getByTestId('series-watched-watched-badge');
+    expect(flat(watched.props.style).borderColor).toBe(defaultTheme.colors.successColor);
+    expect(screen.queryByTestId('series-watched-unplayed')).toBeNull();
+
+    expect(screen.queryByTestId('series-none-unplayed')).toBeNull();
+    expect(screen.queryByTestId('series-none-watched-badge')).toBeNull();
+  });
+
+  it('renders pointer-only hover quick-actions that stop propagation and never render on touch or TV (#409)', async () => {
+    const onPress = jest.fn();
+    const onPlay = jest.fn();
+    const onToggleFavorite = jest.fn();
+    const onToggleWatched = jest.fn();
+
+    const desktopView = await render(
+      <ThemeProvider>
+        <ViewportProvider value={{ formFactor: 'desktop', orientation: 'landscape' }}>
+          <PosterCard
+            title="Dune"
+            onPress={onPress}
+            quickActions={{
+              onPlay,
+              playLabel: 'Play Dune',
+              isFavorite: false,
+              onToggleFavorite,
+              favoriteLabel: 'Add to My list',
+              isWatched: true,
+              onToggleWatched,
+              watchedLabel: 'Mark unwatched',
+            }}
+            testID="qa-poster"
+          />
+        </ViewportProvider>
+      </ThemeProvider>,
+    );
+
+    expect(screen.queryByTestId('qa-poster-quick-play')).toBeNull();
+    expect(screen.queryByTestId('qa-poster-quick-favorite')).toBeNull();
+    expect(screen.queryByTestId('qa-poster-quick-watched')).toBeNull();
+
+    await fireEvent(screen.getByTestId('qa-poster'), 'hoverIn');
+    const playBtn = screen.getByTestId('qa-poster-quick-play');
+    const favBtn = screen.getByTestId('qa-poster-quick-favorite');
+    const watchedBtn = screen.getByTestId('qa-poster-quick-watched');
+
+    const playEvt = { stopPropagation: jest.fn(), preventDefault: jest.fn() };
+    await fireEvent.press(playBtn, playEvt);
+    expect(playEvt.stopPropagation).toHaveBeenCalledTimes(1);
+    expect(playEvt.preventDefault).toHaveBeenCalledTimes(1);
+    expect(onPlay).toHaveBeenCalledTimes(1);
+    expect(onPress).not.toHaveBeenCalled();
+
+    const favEvt = { stopPropagation: jest.fn(), preventDefault: jest.fn() };
+    await fireEvent.press(favBtn, favEvt);
+    expect(favEvt.stopPropagation).toHaveBeenCalledTimes(1);
+    expect(onToggleFavorite).toHaveBeenCalledTimes(1);
+    expect(onPress).not.toHaveBeenCalled();
+
+    const watchedEvt = { stopPropagation: jest.fn(), preventDefault: jest.fn() };
+    await fireEvent.press(watchedBtn, watchedEvt);
+    expect(watchedEvt.stopPropagation).toHaveBeenCalledTimes(1);
+    expect(onToggleWatched).toHaveBeenCalledTimes(1);
+    expect(onPress).not.toHaveBeenCalled();
+
+    await fireEvent(screen.getByTestId('qa-poster'), 'hoverOut');
+    expect(screen.queryByTestId('qa-poster-quick-play')).toBeNull();
+    await desktopView.unmount();
+
+    // Never renders on touch or TV even if hoverIn fires.
+    for (const vp of [
+      { formFactor: 'phone' as const, orientation: 'portrait' as const },
+      { formFactor: 'tv' as const, width: 1920, height: 1080 },
+    ]) {
+      const view = await render(
+        <ThemeProvider>
+          <ViewportProvider value={vp}>
+            <PosterCard
+              title="Dune"
+              quickActions={{ onPlay, onToggleFavorite, onToggleWatched }}
+              testID="non-pointer-poster"
+            />
+          </ViewportProvider>
+        </ThemeProvider>,
+      );
+      await fireEvent(screen.getByTestId('non-pointer-poster'), 'hoverIn');
+      expect(screen.queryByTestId('non-pointer-poster-quick-play')).toBeNull();
+      expect(screen.queryByTestId('non-pointer-poster-quick-favorite')).toBeNull();
+      expect(screen.queryByTestId('non-pointer-poster-quick-watched')).toBeNull();
+      await view.unmount();
+    }
+  });
+
   it('renders 16:9 WideCard with LIVE pill, scrim, optional circular play badge, and reduceMotion', async () => {
     await render(
       <ThemeProvider preset="highContrast" reduceMotion>

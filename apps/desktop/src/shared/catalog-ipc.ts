@@ -17,6 +17,7 @@ import type {
   SearchOptions,
   SearchResults,
   SeasonRow,
+  SeriesUnplayedSummary,
   SourceRow,
   StreamRequest,
   ToggleFavoriteInput,
@@ -45,6 +46,7 @@ import {
   isSaveProgressInput,
   isSearchOptions,
   isSearchQuery,
+  isSeriesKeyList,
   isSourceIdList,
   isToggleFavoriteInput,
   MAX_ID_CHARS,
@@ -119,6 +121,7 @@ export type CatalogRpcMethodCall =
   | { method: 'getProgress'; itemKey: string; profileId?: string }
   | { method: 'listContinueWatching'; limit?: number; profileId?: string }
   | { method: 'listProgressByKeys'; itemKeys: readonly string[]; profileId?: string }
+  | { method: 'listSeriesUnplayedCounts'; seriesKeys: readonly string[]; profileId?: string }
   | { method: 'clearProgress'; itemKey: string; profileId?: string }
   | { method: 'toggleFavorite'; input: ToggleFavoriteInput }
   | { method: 'setFavorite'; input: ToggleFavoriteInput; active: boolean }
@@ -195,6 +198,10 @@ export interface CatalogBridge {
   getProgress(itemKey: string, profileId?: string): Promise<WatchProgressRow | null>;
   listContinueWatching(limit?: number, profileId?: string): Promise<WatchProgressRow[]>;
   listProgressByKeys(itemKeys: readonly string[], profileId?: string): Promise<WatchProgressRow[]>;
+  listSeriesUnplayedCounts?(
+    seriesKeys: readonly string[],
+    profileId?: string,
+  ): Promise<SeriesUnplayedSummary[]>;
   clearProgress(itemKey: string, profileId?: string): Promise<Result<void>>;
   toggleFavorite(input: ToggleFavoriteInput): Promise<Result<boolean>>;
   setFavorite(input: ToggleFavoriteInput, active: boolean): Promise<Result<boolean>>;
@@ -289,6 +296,8 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
       return isOptionalUserLimit(x['limit']) && isOptionalProfileId(x['profileId']);
     case 'listProgressByKeys':
       return isItemKeyList(x['itemKeys']) && isOptionalProfileId(x['profileId']);
+    case 'listSeriesUnplayedCounts':
+      return isSeriesKeyList(x['seriesKeys']) && isOptionalProfileId(x['profileId']);
     case 'toggleFavorite':
       return isToggleFavoriteInput(x['input']);
     case 'setFavorite':

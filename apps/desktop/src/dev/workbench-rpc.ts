@@ -12,7 +12,12 @@ import {
   type ToggleFavoriteInput,
 } from '@elv/data';
 import { elvError, err, ok, type SqlDriver } from '@elv/domain';
-import { isListItemsOptions, isSourceIdList } from '../shared/catalog-ipc-guards.ts';
+import {
+  isListItemsOptions,
+  isOptionalProfileId,
+  isSeriesKeyList,
+  isSourceIdList,
+} from '../shared/catalog-ipc-guards.ts';
 
 const PREVIEW_STREAM_URL = 'https://workbench.invalid/preview.m3u8';
 
@@ -40,6 +45,7 @@ export const ALLOWED_RPC_METHODS: ReadonlySet<string> = new Set([
   'getProgress',
   'listContinueWatching',
   'listProgressByKeys',
+  'listSeriesUnplayedCounts',
   'clearProgress',
   'toggleFavorite',
   'listFavorites',
@@ -193,6 +199,10 @@ export async function dispatchWorkbenchRpc(
       return service.listContinueWatching?.(optNum(args[0]), optStr(args[1])) ?? [];
     case 'listProgressByKeys':
       return service.listProgressByKeys?.(args[0] as readonly string[], optStr(args[1])) ?? [];
+    case 'listSeriesUnplayedCounts': {
+      if (!isSeriesKeyList(args[0]) || !isOptionalProfileId(args[1])) return [];
+      return service.listSeriesUnplayedCounts?.(args[0], optStr(args[1])) ?? [];
+    }
     case 'clearProgress':
       return (
         service.clearProgress?.(String(args[0] ?? ''), optStr(args[1])) ??

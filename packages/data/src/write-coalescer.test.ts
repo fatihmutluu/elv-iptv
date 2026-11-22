@@ -507,4 +507,64 @@ describe('createCoalescedCatalog', () => {
     expect(order).toEqual(['setWatched:true', 'saveProgress:false']);
     expect(persistedWatched).toBe(false);
   });
+
+  it('flushes pending progress and watched writes before listSeriesUnplayedCounts (#409)', async () => {
+    const timers = createFakeTimers();
+    const events: string[] = [];
+    const base = makeStubCatalog({
+      saveProgress: vi.fn(async (input) => {
+        events.push(`save:${input.itemKey}`);
+        return ok({
+          profileId: input.profileId ?? 'default',
+          sourceId: input.sourceId,
+          itemKey: input.itemKey,
+          kind: input.kind,
+          title: input.title,
+          subtitle: null,
+          logo: null,
+          seriesKey: input.seriesKey ?? null,
+          season: input.season ?? null,
+          episode: input.episode ?? null,
+          positionMs: input.positionMs,
+          durationMs: input.durationMs,
+          watched: input.watched ?? true,
+          updatedAt: 1,
+        });
+      }),
+      setWatched: vi.fn(async (itemKey, watched) => {
+        events.push(`watched:${itemKey}:${watched}`);
+        return ok(undefined);
+      }),
+      listSeriesUnplayedCounts: vi.fn(async (seriesKeys) => {
+        events.push(`unplayed:${seriesKeys.join(',')}`);
+        return [{ seriesKey: 'x:s1:series:1', total: 3, unplayed: 1, watched: false }];
+      }),
+    });
+
+    const catalog = createCoalescedCatalog(base, {
+      windowMs: 500,
+      setTimeoutFn: timers.setTimeoutFn,
+      clearTimeoutFn: timers.clearTimeoutFn,
+    });
+
+    const pSave = catalog.saveProgress?.({
+      sourceId: 's1',
+      itemKey: 'x:s1:ep:1',
+      kind: 'episode',
+      title: 'Ep 1',
+      seriesKey: 'x:s1:series:1',
+      positionMs: 95_000,
+      durationMs: 100_000,
+      watched: true,
+    });
+    const pWatch = catalog.setWatched?.('x:s1:ep:2', true);
+
+    const summaries = await catalog.listSeriesUnplayedCounts?.(['x:s1:series:1']);
+    await Promise.all([pSave, pWatch]);
+
+    expect(summaries).toEqual([
+      { seriesKey: 'x:s1:series:1', total: 3, unplayed: 1, watched: false },
+    ]);
+    expect(events).toEqual(['save:x:s1:ep:1', 'watched:x:s1:ep:2:true', 'unplayed:x:s1:series:1']);
+  });
 });

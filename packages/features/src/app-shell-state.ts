@@ -108,10 +108,94 @@ export function pushDetailStack(
   return next.length > MAX_DETAIL_STACK ? next.slice(next.length - MAX_DETAIL_STACK) : next;
 }
 
+/** Default confirmation window (ms) for TV root Back-to-exit (`#55`). */
+export const DEFAULT_EXIT_BACK_CONFIRM_MS = 2_500;
+
+/** Pure stateful guard for 2-step Back-to-exit confirmation (`#55`, zero `#425` Back-trap). */
+export interface ExitBackConfirmGuard {
+  /**
+   * Evaluates a root-level Back press. Returns `true` on the first press when enabled
+   * (arming the toast window), or `false` when disabled or pressed again within the window.
+   */
+  onRootBack(enabled: boolean): boolean;
+  /** Disarms any pending confirmation window and hides the toast immediately. */
+  reset(): void;
+  /** Cancels any pending timer on unmount without invoking visibility listeners. */
+  dispose(): void;
+}
+
 /**
- * Resolves TV top-nav `Back` presses in `AppShell` (`#425`): pops any active detail overlay,
- * returns secondary tabs to `'home'` (keeping top-nav focused), or returns `false` at root
- * `'home'` so Android TV's `BackHandler` exits cleanly to the system launcher.
+ * Creates a bounded 2-step Back-to-exit confirmation guard (`#55`) so users never accidentally
+ * quit on a single remote press while guaranteeing a second Back press exits cleanly (`#425`).
+ */
+export function createExitBackConfirmGuard(
+  windowMs = DEFAULT_EXIT_BACK_CONFIRM_MS,
+  deps?: {
+    readonly onVisibleChange?: (visible: boolean) => void;
+    readonly setTimeoutFn?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
+    readonly clearTimeoutFn?: (handle: ReturnType<typeof setTimeout>) => void;
+  },
+): ExitBackConfirmGuard {
+  const safeWindowMs =
+    Number.isFinite(windowMs) && windowMs > 0 ? windowMs : DEFAULT_EXIT_BACK_CONFIRM_MS;
+  const setTimer =
+    deps?.setTimeoutFn ?? ((fn: () => void, ms: number) => globalThis.setTimeout(fn, ms));
+  const clearTimer =
+    deps?.clearTimeoutFn ??
+    ((handle: ReturnType<typeof setTimeout>) => {
+      globalThis.clearTimeout(handle);
+    });
+
+  let armed = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const cancelTimer = (): void => {
+    if (timer !== undefined) {
+      clearTimer(timer);
+      timer = undefined;
+    }
+  };
+
+  const setArmed = (next: boolean): void => {
+    if (armed === next) return;
+    armed = next;
+    deps?.onVisibleChange?.(next);
+  };
+
+  return {
+    onRootBack(enabled: boolean): boolean {
+      if (!enabled) {
+        cancelTimer();
+        setArmed(false);
+        return false;
+      }
+      if (armed) {
+        cancelTimer();
+        setArmed(false);
+        return false;
+      }
+      setArmed(true);
+      timer = setTimer(() => {
+        timer = undefined;
+        setArmed(false);
+      }, safeWindowMs);
+      return true;
+    },
+    reset(): void {
+      cancelTimer();
+      setArmed(false);
+    },
+    dispose(): void {
+      cancelTimer();
+      armed = false;
+    },
+  };
+}
+
+/**
+ * Resolves TV top-nav `Back` presses in `AppShell` (`#425`, `#55`): pops any active detail overlay,
+ * returns secondary tabs to `'home'` (keeping top-nav focused), or delegates root `'home'` Back
+ * to `onRootHomeBack` (defaulting to `false` so Android TV exits cleanly to the system launcher).
  */
 export function handleShellTopNavBack(input: {
   readonly activeTab: string;
@@ -119,6 +203,7 @@ export function handleShellTopNavBack(input: {
   readonly popDetail: () => void;
   readonly exitNavFocus: () => void;
   readonly selectHomeInTopNav: () => void;
+  readonly onRootHomeBack?: () => boolean;
 }): boolean {
   if (input.hasActiveDetail) {
     input.popDetail();
@@ -129,7 +214,7 @@ export function handleShellTopNavBack(input: {
     input.selectHomeInTopNav();
     return true;
   }
-  return false;
+  return input.onRootHomeBack ? input.onRootHomeBack() : false;
 }
 
 /** Builds the `CrashRecoveryBoundary` recovery handlers shared by `AppShell` stage & player trees. */
@@ -279,6 +364,9 @@ export function createObservedCatalog(
     ...(c.getProgress ? { getProgress: c.getProgress.bind(c) } : {}),
     ...(c.listContinueWatching ? { listContinueWatching: c.listContinueWatching.bind(c) } : {}),
     ...(c.listProgressByKeys ? { listProgressByKeys: c.listProgressByKeys.bind(c) } : {}),
+    ...(c.listSeriesUnplayedCounts
+      ? { listSeriesUnplayedCounts: c.listSeriesUnplayedCounts.bind(c) }
+      : {}),
     ...(c.clearProgress ? { clearProgress: c.clearProgress.bind(c) } : {}),
     ...(c.toggleFavorite ? { toggleFavorite: c.toggleFavorite.bind(c) } : {}),
     ...(c.setFavorite ? { setFavorite: c.setFavorite.bind(c) } : {}),

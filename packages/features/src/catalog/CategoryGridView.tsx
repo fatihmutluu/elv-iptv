@@ -55,6 +55,11 @@ export interface CategoryGridViewProps {
   readonly focusedGridPos: GridFocusPosition | null;
   readonly onBack: () => void;
   readonly onOpenDetail: (target: DetailTarget) => void;
+  readonly favoriteKeys?: ReadonlySet<string>;
+  readonly watchedOverrides?: ReadonlyMap<string, boolean>;
+  readonly onQuickPlay?: (item: ItemRow, categoryId: string) => void;
+  readonly onQuickToggleFavorite?: (item: ItemRow) => void;
+  readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
   readonly onGridMetaChange?: (meta: CategoryGridMeta) => void;
   readonly gridAccessRef?: MutableRefObject<CategoryGridAccess>;
   /** Optional sort order (`'default'` or `'alpha'` via `sort_title`). */
@@ -243,11 +248,34 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
       columns: cols,
       categoryId: category.row.id,
       progressByKey: gridData.progressByKey,
+      ...(props.favoriteKeys !== undefined ? { favoriteKeys: props.favoriteKeys } : {}),
+      ...(props.watchedOverrides !== undefined ? { watchedOverrides: props.watchedOverrides } : {}),
+      unplayedBySeriesKey: gridData.unplayedBySeriesKey,
       watchedLabel,
       layout,
       onOpenDetail,
+      ...(props.onQuickPlay !== undefined ? { onQuickPlay: props.onQuickPlay } : {}),
+      ...(props.onQuickToggleFavorite !== undefined
+        ? { onQuickToggleFavorite: props.onQuickToggleFavorite }
+        : {}),
+      ...(props.onQuickToggleWatched !== undefined
+        ? { onQuickToggleWatched: props.onQuickToggleWatched }
+        : {}),
     }),
-    [category.row.id, cols, gridData.progressByKey, layout, onOpenDetail, watchedLabel],
+    [
+      category.row.id,
+      cols,
+      gridData.progressByKey,
+      gridData.unplayedBySeriesKey,
+      layout,
+      onOpenDetail,
+      props.favoriteKeys,
+      props.onQuickPlay,
+      props.onQuickToggleFavorite,
+      props.onQuickToggleWatched,
+      props.watchedOverrides,
+      watchedLabel,
+    ],
   );
 
   const renderRow = useCallback(
@@ -270,8 +298,18 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
       cols,
       pageVersion: gridData.pageVersion,
       progressByKey: gridData.progressByKey,
+      unplayedBySeriesKey: gridData.unplayedBySeriesKey,
+      favoriteKeys: props.favoriteKeys,
+      watchedOverrides: props.watchedOverrides,
     }),
-    [cols, gridData.pageVersion, gridData.progressByKey],
+    [
+      cols,
+      gridData.pageVersion,
+      gridData.progressByKey,
+      gridData.unplayedBySeriesKey,
+      props.favoriteKeys,
+      props.watchedOverrides,
+    ],
   );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: pageVersion refreshes memoized TV row slices when LRU pages arrive

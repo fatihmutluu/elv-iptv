@@ -1,9 +1,10 @@
-import type { BrowseKind } from '@elv/data';
+import type { BrowseKind, SeriesUnplayedSummary } from '@elv/data';
 import type { AppI18n } from '@elv/i18n';
 import {
   HorizontalRailScroll,
   Icon,
   PosterCard,
+  type PosterCardQuickActions,
   TvFocusGuideRegion,
   useI18n,
   useTheme,
@@ -11,7 +12,15 @@ import {
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { type ComponentRef, memo, type ReactElement, useCallback, useEffect, useRef } from 'react';
+import {
+  type ComponentRef,
+  memo,
+  type ReactElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+} from 'react';
 import {
   type LayoutChangeEvent,
   Pressable,
@@ -20,7 +29,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useRouteActive } from '../shared';
+import { resolveSeriesBadgeProps, useRouteActive } from '../shared';
 import {
   formatRemainingMinutes,
   type HomeRailEntry,
@@ -82,6 +91,12 @@ export interface HomeRailProps {
   readonly isTouch: boolean;
   readonly focusedIndex: number | null;
   readonly onPressItem: (entry: HomeRailEntry, index: number) => void;
+  readonly favoriteKeys?: ReadonlySet<string>;
+  readonly watchedOverrides?: ReadonlyMap<string, boolean>;
+  readonly unplayedBySeriesKey?: ReadonlyMap<string, SeriesUnplayedSummary>;
+  readonly onQuickPlay?: (entry: HomeRailEntry, index: number) => void;
+  readonly onQuickToggleFavorite?: (entry: HomeRailEntry) => void;
+  readonly onQuickToggleWatched?: (entry: HomeRailEntry, currentWatched: boolean) => void;
   readonly onLayoutY?: (id: HomeRailKind, y: number) => void;
   readonly testID: string;
   readonly itemTestIdPrefix: string;
@@ -104,8 +119,20 @@ interface RailCardItemProps {
   readonly testID: string;
   readonly liveKindLabel: string;
   readonly watchedLabel: string;
+  readonly isFavorite: boolean;
+  readonly watchedOverride: boolean | undefined;
+  readonly unplayedSummary: SeriesUnplayedSummary | undefined;
   readonly formatRemMin: (minutes: number) => string;
+  readonly formatUnplayed: (count: number) => string;
+  readonly formatQuickPlay: (title: string) => string;
+  readonly addToListLabel: string;
+  readonly inMyListLabel: string;
+  readonly markWatchedLabel: string;
+  readonly markUnwatchedLabel: string;
   readonly onPressItem: (entry: HomeRailEntry, index: number) => void;
+  readonly onQuickPlay?: (entry: HomeRailEntry, index: number) => void;
+  readonly onQuickToggleFavorite?: (entry: HomeRailEntry) => void;
+  readonly onQuickToggleWatched?: (entry: HomeRailEntry, currentWatched: boolean) => void;
 }
 
 const RailCardItem = memo(function RailCardItemInner({
@@ -118,12 +145,70 @@ const RailCardItem = memo(function RailCardItemInner({
   testID,
   liveKindLabel,
   watchedLabel,
+  isFavorite,
+  watchedOverride,
+  unplayedSummary,
   formatRemMin,
+  formatUnplayed,
+  formatQuickPlay,
+  addToListLabel,
+  inMyListLabel,
+  markWatchedLabel,
+  markUnwatchedLabel,
   onPressItem,
+  onQuickPlay,
+  onQuickToggleFavorite,
+  onQuickToggleWatched,
 }: RailCardItemProps): ReactElement {
   const handlePress = useCallback(() => {
     onPressItem(entry, index);
   }, [entry, index, onPressItem]);
+
+  const isSeries = entry.kind === 'series';
+  const effectiveWatched =
+    watchedOverride ?? (entry.watched || (isSeries && unplayedSummary?.watched === true));
+
+  const quickActions = useMemo<PosterCardQuickActions | undefined>(() => {
+    if (variant !== 'poster' || (!onQuickPlay && !onQuickToggleFavorite && !onQuickToggleWatched)) {
+      return undefined;
+    }
+    return {
+      ...(onQuickPlay !== undefined
+        ? {
+            onPlay: () => onQuickPlay(entry, index),
+            playLabel: formatQuickPlay(entry.title),
+          }
+        : {}),
+      ...(onQuickToggleFavorite !== undefined
+        ? {
+            isFavorite,
+            onToggleFavorite: () => onQuickToggleFavorite(entry),
+            favoriteLabel: isFavorite ? inMyListLabel : addToListLabel,
+          }
+        : {}),
+      ...(onQuickToggleWatched !== undefined
+        ? {
+            isWatched: effectiveWatched,
+            onToggleWatched: () => onQuickToggleWatched(entry, effectiveWatched),
+            watchedLabel: effectiveWatched ? markUnwatchedLabel : markWatchedLabel,
+          }
+        : {}),
+    };
+  }, [
+    addToListLabel,
+    effectiveWatched,
+    entry,
+    formatQuickPlay,
+    inMyListLabel,
+    index,
+    isFavorite,
+    markUnwatchedLabel,
+    markWatchedLabel,
+    onQuickPlay,
+    onQuickToggleFavorite,
+    onQuickToggleWatched,
+    variant,
+  ]);
 
   if (variant === 'wide') {
     const isLive = Boolean(entry.live || entry.kind === 'live');
@@ -163,10 +248,19 @@ const RailCardItem = memo(function RailCardItemInner({
 
   const meta = buildPosterMeta(entry);
   const ratio =
-    !entry.watched && entry.positionMs > 0 && entry.durationMs > 0
+    !effectiveWatched && entry.positionMs > 0 && entry.durationMs > 0
       ? progressRatio(entry.positionMs, entry.durationMs)
       : undefined;
-  const badge = entry.watched ? watchedLabel : undefined;
+  const seriesBadge = isSeries
+    ? resolveSeriesBadgeProps({
+        summary: unplayedSummary,
+        progressWatched: entry.watched,
+        watchedOverride,
+        formatUnplayed,
+        watchedLabel,
+      })
+    : {};
+  const badge = !isSeries && effectiveWatched ? watchedLabel : undefined;
 
   return (
     <PosterCard
@@ -176,6 +270,8 @@ const RailCardItem = memo(function RailCardItemInner({
       imageUri={entry.posterUri}
       {...(ratio !== undefined ? { progress: ratio } : {})}
       {...(badge !== undefined ? { badge } : {})}
+      {...seriesBadge}
+      {...(quickActions !== undefined ? { quickActions } : {})}
       width={cardWidth}
       maxDecodePx={320}
       focusable={!isTv}
@@ -200,6 +296,12 @@ function HomeRailInner({
   isTouch,
   focusedIndex,
   onPressItem,
+  favoriteKeys,
+  watchedOverrides,
+  unplayedBySeriesKey,
+  onQuickPlay,
+  onQuickToggleFavorite,
+  onQuickToggleWatched,
   onLayoutY,
   testID,
   itemTestIdPrefix,
@@ -230,6 +332,14 @@ function HomeRailInner({
     (minutes: number) => i18n.t('home.remainingMin', { minutes }),
     [i18n],
   );
+  const formatUnplayed = useCallback(
+    (count: number) => i18n.t('card.unplayedCount', { count }),
+    [i18n],
+  );
+  const formatQuickPlay = useCallback(
+    (cardTitle: string) => i18n.t('card.quickPlay', { title: cardTitle }),
+    [i18n],
+  );
 
   if (items.length === 0) return null;
 
@@ -237,6 +347,10 @@ function HomeRailInner({
   const linkTransition = webTransition(theme, 'color, opacity');
   const liveKindLabel = i18n.t('home.kind.live');
   const watchedLabel = i18n.t('home.watchedBadge');
+  const addToListLabel = i18n.t('home.addToList');
+  const inMyListLabel = i18n.t('home.inMyList');
+  const markWatchedLabel = i18n.t('home.markWatched');
+  const markUnwatchedLabel = i18n.t('home.markUnwatched');
 
   return (
     <View testID={testID} onLayout={onLayoutY ? handleLayout : undefined} style={styles.section}>
@@ -297,8 +411,20 @@ function HomeRailInner({
               testID={`${itemTestIdPrefix}-${index}`}
               liveKindLabel={liveKindLabel}
               watchedLabel={watchedLabel}
+              isFavorite={favoriteKeys?.has(entry.itemKey) ?? false}
+              watchedOverride={watchedOverrides?.get(entry.itemKey)}
+              unplayedSummary={unplayedBySeriesKey?.get(entry.itemKey)}
               formatRemMin={formatRemMin}
+              formatUnplayed={formatUnplayed}
+              formatQuickPlay={formatQuickPlay}
+              addToListLabel={addToListLabel}
+              inMyListLabel={inMyListLabel}
+              markWatchedLabel={markWatchedLabel}
+              markUnwatchedLabel={markUnwatchedLabel}
               onPressItem={onPressItem}
+              {...(onQuickPlay !== undefined ? { onQuickPlay } : {})}
+              {...(onQuickToggleFavorite !== undefined ? { onQuickToggleFavorite } : {})}
+              {...(onQuickToggleWatched !== undefined ? { onQuickToggleWatched } : {})}
             />
           ))}
         </HorizontalRailScroll>

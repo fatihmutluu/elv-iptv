@@ -106,6 +106,10 @@ export function createDesktopCatalogFromBridge(
     getProgress: (itemKey, profileId) => bridge.getProgress(itemKey, profileId),
     listContinueWatching: (limit, profileId) => bridge.listContinueWatching(limit, profileId),
     listProgressByKeys: (itemKeys, profileId) => bridge.listProgressByKeys(itemKeys, profileId),
+    listSeriesUnplayedCounts: (seriesKeys, profileId) =>
+      bridge.listSeriesUnplayedCounts
+        ? bridge.listSeriesUnplayedCounts(seriesKeys, profileId)
+        : Promise.resolve([]),
     clearProgress: (itemKey, profileId) => bridge.clearProgress(itemKey, profileId),
     toggleFavorite: (input) =>
       bridge.toggleFavorite({ ...input, title: sanitizeDisplayText(input.title) }),

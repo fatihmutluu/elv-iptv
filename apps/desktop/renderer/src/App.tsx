@@ -78,10 +78,38 @@ function AppRoot() {
         const rawEngine = await createDesktopEngine(playerBridge, () => performance.now());
         const mediaSession = createDesktopMediaSession();
         let activeHostKeyListener: ((key: DesktopHostKey) => void) | null = null;
-        const engine = bindDesktopMediaSession(rawEngine, mediaSession, {
+        const windowBridge = window.elv?.window;
+        let alwaysOnTop = windowBridge
+          ? await windowBridge.getAlwaysOnTop().catch(() => false)
+          : false;
+        const alwaysOnTopListeners = new Set<(pinned: boolean) => void>();
+        const notifyAlwaysOnTop = (pinned: boolean): void => {
+          if (alwaysOnTop === pinned) return;
+          alwaysOnTop = pinned;
+          for (const listener of [...alwaysOnTopListeners]) {
+            try {
+              listener(pinned);
+            } catch {
+              // isolate always-on-top subscribers
+            }
+          }
+        };
+        let offWindowAlwaysOnTop = windowBridge?.onAlwaysOnTopChanged((pinned) => {
+          notifyAlwaysOnTop(pinned);
+        });
+        const boundEngine = bindDesktopMediaSession(rawEngine, mediaSession, {
           onTrackStep: (dir) =>
             activeHostKeyListener?.(dir === 'next' ? 'channel-up' : 'channel-down'),
         });
+        const engine = {
+          ...boundEngine,
+          release() {
+            offWindowAlwaysOnTop?.();
+            offWindowAlwaysOnTop = undefined;
+            alwaysOnTopListeners.clear();
+            boundEngine.release();
+          },
+        };
         return {
           engine,
           renderSurface: ({ failed, resizeMode }) => (
@@ -101,6 +129,27 @@ function AppRoot() {
           setVolume: (volume) => rawEngine.setVolume(volume),
           setDeinterlace: (enabled) => rawEngine.setDeinterlace(enabled),
           setMediaMetadata: (metadata) => engine.setMediaMetadata(metadata),
+          getAudioDevices: () => rawEngine.getAudioDevices(),
+          getActiveAudioDevice: () => rawEngine.getActiveAudioDevice(),
+          setAudioDevice: (name) => rawEngine.setAudioDevice(name),
+          onAudioDevicesChange: (listener) => rawEngine.onAudioDevicesChange(listener),
+          ...(windowBridge
+            ? {
+                toggleAlwaysOnTop: () => {
+                  void windowBridge
+                    .setAlwaysOnTop(!alwaysOnTop)
+                    .then((pinned) => notifyAlwaysOnTop(pinned))
+                    .catch(() => undefined);
+                },
+                isAlwaysOnTop: () => alwaysOnTop,
+                onAlwaysOnTopChange: (listener: (pinned: boolean) => void) => {
+                  alwaysOnTopListeners.add(listener);
+                  return () => {
+                    alwaysOnTopListeners.delete(listener);
+                  };
+                },
+              }
+            : {}),
           onHostKey: (listener) => {
             activeHostKeyListener = listener;
             const offUi = rawEngine.onUi((event) =>

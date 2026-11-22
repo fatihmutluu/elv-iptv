@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { AccessibilityInfo, Platform, Pressable, Text } from 'react-native';
 import {
+  buildFocusVisibleCss,
   buildTheme,
   clampFontScale,
   contrastRatio,
@@ -261,16 +262,58 @@ describe('ThemeProvider & useThemeController', () => {
     addSpy.mockRestore();
   });
 
-  it('injects an idempotent web base stylesheet and syncs dynamic scrollbar CSS vars on web', async () => {
-    const appended: Array<{ id: string; textContent: string | null }> = [];
+  it('builds theme-tokenized :focus-visible CSS and suppresses :focus:not(:focus-visible) (#410)', () => {
+    const defaultTheme = buildTheme();
+    const hcTheme = buildTheme({ preset: 'highContrast' });
+
+    const defaultCss = buildFocusVisibleCss(defaultTheme);
+    for (const selector of [
+      '[role="button"]:focus-visible',
+      '[role="tab"]:focus-visible',
+      '[role="switch"]:focus-visible',
+      '[role="radio"]:focus-visible',
+      '[role="adjustable"]:focus-visible',
+      'button:focus-visible',
+      'a:focus-visible',
+      'input:focus-visible',
+      '[tabindex]:focus-visible',
+    ]) {
+      expect(defaultCss).toContain(selector);
+    }
+    expect(defaultCss).toContain(
+      `outline: ${defaultTheme.focus.ringWidth}px solid ${defaultTheme.colors.focusRingColor}; outline-offset: 2px;`,
+    );
+    expect(defaultCss).toContain(':focus:not(:focus-visible)');
+    expect(defaultCss).toContain('outline: none');
+
+    const hcCss = buildFocusVisibleCss(hcTheme);
+    expect(hcCss).toContain(
+      `outline: ${hcTheme.focus.ringWidth}px solid #FACC15; outline-offset: 2px;`,
+    );
+  });
+
+  it('injects an idempotent web base stylesheet, live-updates :focus-visible styles, and cleans up on refcount 0', async () => {
+    const appended: Array<{ id: string; textContent: string | null; remove: jest.Mock }> = [];
     const cssVars = new Map<string, string>();
     const fakeDoc = {
       getElementById: jest.fn((id: string) => appended.find((node) => node.id === id) ?? null),
-      createElement: jest.fn(() => ({ id: '', textContent: null as string | null })),
+      createElement: jest.fn(() => {
+        const node = {
+          id: '',
+          textContent: null as string | null,
+          remove: jest.fn(() => {
+            const idx = appended.indexOf(node);
+            if (idx >= 0) appended.splice(idx, 1);
+          }),
+        };
+        return node;
+      }),
       head: {
-        appendChild: jest.fn((node: { id: string; textContent: string | null }) => {
-          appended.push(node);
-        }),
+        appendChild: jest.fn(
+          (node: { id: string; textContent: string | null; remove: jest.Mock }) => {
+            appended.push(node);
+          },
+        ),
       },
       documentElement: {
         style: {
@@ -292,28 +335,40 @@ describe('ThemeProvider & useThemeController', () => {
           <ThemeControlProbe />
         </ThemeProvider>,
       );
-      expect(appended).toHaveLength(1);
-      expect(appended[0]?.id).toBe('elv-ui-kit-web-base');
-      expect(appended[0]?.textContent).toContain('-webkit-font-smoothing: antialiased');
-      expect(appended[0]?.textContent).toContain('Plus Jakarta Sans');
-      expect(appended[0]?.textContent).toContain('var(--elv-scroll-thumb');
-      expect(appended[0]?.textContent).toContain('var(--elv-scroll-thumb-hover');
+      const baseStyle = appended.find((n) => n.id === 'elv-ui-kit-web-base');
+      const focusStyle = appended.find((n) => n.id === 'elv-focus-visible-styles');
+      expect(baseStyle).toBeDefined();
+      expect(focusStyle).toBeDefined();
+      expect(appended).toHaveLength(2);
+      expect(baseStyle?.textContent).toContain('-webkit-font-smoothing: antialiased');
+      expect(baseStyle?.textContent).toContain('Plus Jakarta Sans');
+      expect(baseStyle?.textContent).toContain('var(--elv-scroll-thumb');
+      expect(baseStyle?.textContent).toContain('var(--elv-scroll-thumb-hover');
+      expect(focusStyle?.textContent).toContain(defaultTheme.colors.focusRingColor);
+      expect(focusStyle?.textContent).toContain(':focus:not(:focus-visible)');
       expect(cssVars.get('--elv-scroll-thumb')).toBe(defaultTheme.colors.glassBorder);
       expect(cssVars.get('--elv-scroll-thumb-hover')).toBe(defaultTheme.colors.hoverRingBorder);
 
       await fireEvent.press(screen.getByTestId('to-hc'));
       expect(cssVars.get('--elv-scroll-thumb')).toBe(hcTheme.colors.glassBorder);
       expect(cssVars.get('--elv-scroll-thumb-hover')).toBe(hcTheme.colors.hoverRingBorder);
+      expect(focusStyle?.textContent).toContain('#FACC15');
+      expect(focusStyle?.textContent).toContain(`${hcTheme.focus.ringWidth}px solid #FACC15`);
 
       const second = await render(
         <ThemeProvider>
           <ReduceMotionProbe />
         </ThemeProvider>,
       );
-      expect(appended).toHaveLength(1);
+      expect(appended).toHaveLength(2);
 
       await second.unmount();
+      // Refcount is still 1 so focus-visible style remains mounted.
+      expect(appended.find((n) => n.id === 'elv-focus-visible-styles')).toBeDefined();
+
       await first.unmount();
+      // Refcount reached 0 so focus-visible style is cleaned up.
+      expect(appended.find((n) => n.id === 'elv-focus-visible-styles')).toBeUndefined();
     } finally {
       Object.defineProperty(Platform, 'OS', { value: originalOs, configurable: true });
       Object.defineProperty(globalThis, 'document', { value: originalDoc, configurable: true });

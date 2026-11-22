@@ -308,6 +308,8 @@ export function createWorkbenchRemoteCatalog(
       rpcQuery('listContinueWatching', [limit, profileId]),
     listProgressByKeys: (itemKeys, profileId) =>
       rpcQuery('listProgressByKeys', [itemKeys, profileId]),
+    listSeriesUnplayedCounts: (seriesKeys, profileId) =>
+      rpcQuery('listSeriesUnplayedCounts', [seriesKeys, profileId]),
     clearProgress: (itemKey, profileId) => rpcResult('clearProgress', [itemKey, profileId]),
     toggleFavorite: (input) => rpcResult('toggleFavorite', [input]),
     listFavorites: (limit, profileId) => rpcQuery('listFavorites', [limit, profileId]),

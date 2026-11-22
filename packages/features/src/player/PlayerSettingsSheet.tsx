@@ -11,7 +11,7 @@ import {
 } from '@elv/ui-kit';
 import { type ComponentRef, type ReactElement, useEffect, useRef } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import type { VideoResizeMode } from '../ports/video-host';
+import type { AudioDeviceInfo, VideoResizeMode } from '../ports/video-host';
 import { useDesktopDialogTrap } from './desktop-dialog-trap';
 import { blurWebTarget, SettingsToggleRow, settingsRowStyle } from './PlayerSettingsRows';
 import type { SettingsMenuState, SettingsMenuView } from './settings-menu-nav';
@@ -31,11 +31,14 @@ export interface PlayerSettingsSheetProps {
   readonly autoSubtitlesOnSkipBack?: boolean;
   readonly autoPlayNextEpisode?: boolean;
   readonly statsVisible: boolean;
+  readonly audioDevices?: readonly AudioDeviceInfo[];
+  readonly activeAudioDevice?: string;
   readonly isTv: boolean;
   readonly formFactor: FormFactor;
   readonly i18n: AppI18n;
   readonly onOpenView: (view: SettingsMenuView) => void;
   readonly onSelectAudio: (id: string) => void;
+  readonly onSelectAudioDevice?: (name: string) => void;
   readonly onSelectSubtitle: (id: string | null) => void;
   readonly onSelectSpeed?: (rate: number) => void;
   readonly onToggleResizeMode?: () => void;
@@ -91,24 +94,38 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
 
   if (!visible) return null;
 
+  const showAudioDevice =
+    (props.audioDevices?.length ?? 0) > 0 && props.onSelectAudioDevice !== undefined;
+  const activeAudioDevice = props.activeAudioDevice ?? 'auto';
   const isRoot = menuState.view === 'root';
   const title = isRoot
     ? i18n.t('player.settings')
     : menuState.view === 'subtitles'
       ? i18n.t('player.subtitleTracks')
-      : menuState.view === 'speed'
-        ? i18n.t('player.speed')
-        : i18n.t('player.audioTracks');
+      : menuState.view === 'audioDevice'
+        ? i18n.t('player.audioDevice')
+        : menuState.view === 'speed'
+          ? i18n.t('player.speed')
+          : i18n.t('player.audioTracks');
 
-  const navRows = isRoot ? buildSettingsNavRows(tracks, isVod, playbackSpeed, i18n) : [];
+  const navRows = isRoot
+    ? buildSettingsNavRows(tracks, isVod, playbackSpeed, i18n, {
+        show: showAudioDevice,
+        devices: props.audioDevices ?? [],
+        activeDevice: activeAudioDevice,
+      })
+    : [];
   const radioItems = isRoot
     ? []
     : buildSettingsRadioItems({
         view: menuState.view,
         tracks,
         playbackSpeed,
+        audioDevices: props.audioDevices,
+        activeAudioDevice,
         i18n,
         onSelectAudio: props.onSelectAudio,
+        onSelectAudioDevice: props.onSelectAudioDevice,
         onSelectSubtitle: props.onSelectSubtitle,
         onSelectSpeed: props.onSelectSpeed,
       });

@@ -194,6 +194,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
     activeTarget.kind === 'vod' && params.onToggleAutoSubtitlesOnSkipBack !== undefined;
   const hasAutoPlayNextToggle =
     activeTarget.kind === 'vod' && params.onToggleAutoPlayNextEpisode !== undefined;
+  const hasAudioDevicePicker =
+    (params.audioDevices?.length ?? 0) > 0 && params.onSelectAudioDevice !== undefined;
 
   const overlay = usePlayerOverlayState({
     formFactor,
@@ -210,6 +212,9 @@ export function usePlayerControls(params: PlayerControlsParams) {
     hasChannelList: params.hasChannelList,
     hasAutoSubtitlesOnSkipBack: hasAutoSubtitlesToggle,
     hasAutoPlayNextEpisode: hasAutoPlayNextToggle,
+    hasAudioDevice: hasAudioDevicePicker,
+    audioDevices: params.audioDevices,
+    activeAudioDevice: params.activeAudioDevice,
     hasNextEpisode: params.hasNextEpisode ?? false,
     hasPreviousChannel,
     initialOsdHidden: params.initialOsdHidden,
@@ -343,6 +348,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
             cbRef.current.onSetDeinterlace !== undefined,
             isVodTarget && cbRef.current.onToggleAutoSubtitlesOnSkipBack !== undefined,
             isVodTarget && cbRef.current.onToggleAutoPlayNextEpisode !== undefined,
+            (cbRef.current.audioDevices?.length ?? 0) > 0 &&
+              cbRef.current.onSelectAudioDevice !== undefined,
           ),
         });
       } else overlay.closeSettings();
@@ -427,6 +434,15 @@ export function usePlayerControls(params: PlayerControlsParams) {
           isVodTarget && cbRef.current.onToggleAutoSubtitlesOnSkipBack !== undefined,
         hasAutoPlayNextEpisode:
           isVodTarget && cbRef.current.onToggleAutoPlayNextEpisode !== undefined,
+        hasAudioDevice:
+          (cbRef.current.audioDevices?.length ?? 0) > 0 &&
+          cbRef.current.onSelectAudioDevice !== undefined,
+        ...(cbRef.current.audioDevices !== undefined
+          ? { audioDevices: cbRef.current.audioDevices }
+          : {}),
+        ...(cbRef.current.activeAudioDevice !== undefined
+          ? { activeAudioDevice: cbRef.current.activeAudioDevice }
+          : {}),
         playbackSpeed: playbackSpeedRef.current,
         state: s,
         service: serviceRef.current,
@@ -456,6 +472,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
         activateTvOsd,
         selectSpeed,
         selectSubtitle,
+        selectAudioDevice: cbRef.current.onSelectAudioDevice,
         onExit: () => onExitRef.current(),
         onJumpPreviousChannel: cbRef.current.onJumpPreviousChannel,
       })
@@ -560,6 +577,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
       state: overlay.liveRef.current,
       handleBack,
       toggleFullscreen,
+      toggleAlwaysOnTop: cbRef.current.onToggleAlwaysOnTop,
       togglePlayPause,
       seekBy,
       stepSeekMs: getStepSeekMs(),
@@ -623,6 +641,9 @@ export function usePlayerControls(params: PlayerControlsParams) {
       canToggleFullscreen: () =>
         !overlay.liveRef.current.locked && cbRef.current.onToggleFullscreen !== undefined,
       onToggleFullscreen: toggleFullscreen,
+      canToggleAlwaysOnTop: () =>
+        canUseDesktopShortcuts() && cbRef.current.onToggleAlwaysOnTop !== undefined,
+      onToggleAlwaysOnTop: () => cbRef.current.onToggleAlwaysOnTop?.(),
       isVod: () => cbRef.current.activeTarget.kind === 'vod',
       canUseShortcuts: canUseDesktopShortcuts,
       stepSeekMs: getStepSeekMs,

@@ -18,6 +18,7 @@ import {
   type WatchProgressRow,
 } from './user-state-helpers';
 
+export { listSeriesUnplayedCounts, type SeriesUnplayedSummary } from './user-state-unplayed';
 export { DEFAULT_PROFILE_ID, type FavoriteRow, type UserItemKind, type WatchProgressRow };
 
 /** Fraction of duration watched at or above which an item is considered completed. */
@@ -180,7 +181,12 @@ export async function setItemWatched(
     ? 'UPDATE watch_progress SET watched = 1, updated_at = ? WHERE profile_id = ? AND item_key = ?'
     : 'UPDATE watch_progress SET watched = 0, position_ms = 0, updated_at = ? WHERE profile_id = ? AND item_key = ?';
   const result = await db.run(sql, [updatedAt, normalizedProfile, itemKey]);
-  if (result.changes === 0 && watched) {
+  if (!watched) {
+    await db.run(
+      'UPDATE watch_progress SET watched = 0, position_ms = 0, updated_at = ? WHERE profile_id = ? AND series_key = ?',
+      [updatedAt, normalizedProfile, itemKey],
+    );
+  } else if (result.changes === 0) {
     const seed = await lookupCatalogItemForWatched(db, itemKey);
     if (seed !== null) {
       await db.run(INSERT_WATCHED_SEED, [

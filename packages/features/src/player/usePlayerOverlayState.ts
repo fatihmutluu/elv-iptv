@@ -46,6 +46,9 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const hasDeinterlace = params.onSetDeinterlace !== undefined;
   const hasAutoSubtitlesOnSkipBack = params.hasAutoSubtitlesOnSkipBack === true;
   const hasAutoPlayNextEpisode = params.hasAutoPlayNextEpisode === true;
+  const hasAudioDevice = params.hasAudioDevice === true;
+  const audioDevices = params.audioDevices;
+  const activeAudioDevice = params.activeAudioDevice;
   const canOpenInfo = params.hasInfo !== false;
   const canOpenChannelList = !isVod && params.hasChannelList === true;
 
@@ -96,6 +99,9 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     hasDeinterlace,
     hasAutoSubtitlesOnSkipBack,
     hasAutoPlayNextEpisode,
+    hasAudioDevice,
+    ...(audioDevices !== undefined ? { audioDevices } : {}),
+    ...(activeAudioDevice !== undefined ? { activeAudioDevice } : {}),
   });
   const availableOsd = availableTvOsdActions({
     isVod,
@@ -358,6 +364,9 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     hasDeinterlace,
     hasAutoSubtitlesOnSkipBack,
     hasAutoPlayNextEpisode,
+    hasAudioDevice,
+    ...(audioDevices !== undefined ? { audioDevices } : {}),
+    ...(activeAudioDevice !== undefined ? { activeAudioDevice } : {}),
   });
 
   const openSettings = (view: SettingsMenuView = 'root'): void => {

@@ -236,6 +236,35 @@ export function HomeScreen({
       void toggleWatched({ ...s, logo: s.posterUri ?? s.backdropUri }, !s.watched),
     [toggleWatched],
   );
+  const handleQuickToggleFavorite = useCallback(
+    (entry: HomeRailEntry) =>
+      void toggleMyList({
+        sourceId: entry.sourceId,
+        itemKey: entry.itemKey,
+        kind: entry.kind,
+        title: entry.title,
+        logo: entry.posterUri ?? entry.backdropUri,
+        year: entry.year,
+        rating: entry.rating,
+      }),
+    [toggleMyList],
+  );
+  const handleQuickToggleWatched = useCallback(
+    (entry: HomeRailEntry, currentWatched: boolean) =>
+      void toggleWatched(
+        {
+          sourceId: entry.sourceId,
+          itemKey: entry.itemKey,
+          kind: entry.kind,
+          title: entry.title,
+          subtitle: entry.subtitle,
+          logo: entry.posterUri ?? entry.backdropUri,
+          durationMs: entry.durationMs,
+        },
+        !currentWatched,
+      ),
+    [toggleWatched],
+  );
 
   const handleTvActivate = useCallback(
     (rowId: HomeNavRowId, colIndex: number) => {
@@ -421,6 +450,16 @@ export function HomeScreen({
               isTouch={isTouch}
               focusedIndex={tvNav.focusedRowId === spec.id ? tvNav.focusedCol : null}
               onPressItem={spec.variant === 'poster' ? activatePosterEntry : activateEntry}
+              {...(spec.variant === 'poster'
+                ? {
+                    favoriteKeys: data.favoriteKeys,
+                    watchedOverrides: data.watchedOverrides,
+                    unplayedBySeriesKey: data.unplayedBySeriesKey,
+                    onQuickPlay: activateEntry,
+                    onQuickToggleFavorite: handleQuickToggleFavorite,
+                    onQuickToggleWatched: handleQuickToggleWatched,
+                  }
+                : {})}
               onLayoutY={recordRailY}
             />
           ))}

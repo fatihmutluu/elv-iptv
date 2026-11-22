@@ -30,6 +30,8 @@ export interface DesktopShortcutGuard {
   readonly onToggleMute: () => void;
   readonly canToggleFullscreen: () => boolean;
   readonly onToggleFullscreen: () => void;
+  readonly canToggleAlwaysOnTop?: () => boolean;
+  readonly onToggleAlwaysOnTop?: () => void;
   readonly isVod: () => boolean;
   readonly canUseShortcuts: () => boolean;
   readonly stepSeekMs?: () => number;
@@ -122,6 +124,11 @@ function dispatchVodShortcut(
   if (isPlainLetter(e, 'f', 'F') && guard.canToggleFullscreen()) {
     e.preventDefault?.();
     guard.onToggleFullscreen();
+    return true;
+  }
+  if (isPlainLetter(e, 't', 'T') && guard.canToggleAlwaysOnTop?.()) {
+    e.preventDefault?.();
+    guard.onToggleAlwaysOnTop?.();
     return true;
   }
   if (isPlainLetter(e, 'c', 'C') && guard.canToggleTracks()) {

@@ -33,4 +33,10 @@ export {
   type ThemeOptions,
   type TypeScaleStep,
 } from './tokens';
-export { webBackdropBlur, webCursorPointer, webShadow, webTransition } from './web-styles';
+export {
+  buildFocusVisibleCss,
+  webBackdropBlur,
+  webCursorPointer,
+  webShadow,
+  webTransition,
+} from './web-styles';

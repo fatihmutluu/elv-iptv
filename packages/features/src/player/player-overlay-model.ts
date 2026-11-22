@@ -14,6 +14,7 @@ import {
 import type { FormFactor } from '@elv/ui-kit';
 import type { MutableRefObject } from 'react';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
+import type { AudioDeviceInfo } from '../ports/video-host';
 import { describePlaybackFailure } from './errors';
 import type { SettingsMenuState } from './settings-menu-nav';
 import type { TrackPickerCursor } from './track-picker-nav';
@@ -148,6 +149,9 @@ export interface PlayerOverlayStateParams {
   hasChannelList?: boolean | undefined;
   hasAutoSubtitlesOnSkipBack?: boolean | undefined;
   hasAutoPlayNextEpisode?: boolean | undefined;
+  hasAudioDevice?: boolean | undefined;
+  audioDevices?: readonly AudioDeviceInfo[] | undefined;
+  activeAudioDevice?: string | undefined;
   hasNextEpisode: boolean;
   hasPreviousChannel: boolean;
   initialOsdHidden?: boolean | undefined;

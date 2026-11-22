@@ -158,5 +158,9 @@ export function activatePlaybackControl(
     void preferences.updatePreferences({
       autoSubtitlesOnSkipBack: !preferences.preferences.autoSubtitlesOnSkipBack,
     });
+    return;
+  }
+  if (controlId === 'audio-device-auto') {
+    void preferences.updatePreferences({ preferredAudioDevice: 'auto' });
   }
 }

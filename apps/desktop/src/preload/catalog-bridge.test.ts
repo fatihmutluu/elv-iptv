@@ -486,5 +486,20 @@ describe('createCatalogBridge', () => {
     port.deliver({ type: 'result', reqId: 3, value: [] });
     expect(await itemsP).toEqual([]);
     expect(await allP).toEqual([]);
+
+    const unplayedP = bridge.listSeriesUnplayedCounts?.(['src-1|series|1'], 'p1');
+    await Promise.resolve();
+    expect(port.sent.at(-1)).toEqual({
+      type: 'call',
+      reqId: 4,
+      call: {
+        method: 'listSeriesUnplayedCounts',
+        seriesKeys: ['src-1|series|1'],
+        profileId: 'p1',
+      },
+    });
+    const summary = [{ seriesKey: 'src-1|series|1', total: 5, unplayed: 3, watched: false }];
+    port.deliver({ type: 'result', reqId: 4, value: summary });
+    expect(await unplayedP).toEqual(summary);
   });
 });

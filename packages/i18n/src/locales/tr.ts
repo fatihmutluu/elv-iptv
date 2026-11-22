@@ -496,4 +496,13 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'catalog.sortAlpha': 'A–Z',
   'catalog.sortAlphaLabel': 'Alfabetik sırala',
   'catalog.sortDefaultLabel': 'Varsayılan sıralama',
+  'player.alwaysOnTop': 'Pencereyi üstte tut',
+  'player.exitAlwaysOnTop': 'Sabitlemeyi kaldır',
+  'player.audioDevice': 'Ses çıkışı',
+  'player.audioDeviceAuto': 'Sistem varsayılanı',
+  'card.quickPlay': '{title} oynat',
+  'card.unplayedCount': '{count} izlenmemiş',
+  'shell.backToExitToast': "Çıkmak için tekrar Geri'ye basın",
+  'settings.appearance.confirmExitOnBack': 'Geri tuşuyla çıkmadan önce sor',
+  'settings.playback.audioDevice': 'Ses çıkış aygıtı',
 };

@@ -68,7 +68,9 @@ import {
   listFavoriteKeys,
   listFavorites,
   listProgressByKeys,
+  listSeriesUnplayedCounts,
   type SaveProgressInput,
+  type SeriesUnplayedSummary,
   saveWatchProgress,
   setFavorite,
   setItemWatched,
@@ -180,6 +182,10 @@ export interface CatalogService {
   getProgress?(itemKey: string, profileId?: string): Promise<WatchProgressRow | null>;
   listContinueWatching?(limit?: number, profileId?: string): Promise<WatchProgressRow[]>;
   listProgressByKeys?(itemKeys: readonly string[], profileId?: string): Promise<WatchProgressRow[]>;
+  listSeriesUnplayedCounts?(
+    seriesKeys: readonly string[],
+    profileId?: string,
+  ): Promise<SeriesUnplayedSummary[]>;
   clearProgress?(itemKey: string, profileId?: string): Promise<Result<void>>;
   toggleFavorite?(input: ToggleFavoriteInput): Promise<Result<boolean>>;
   setFavorite?(input: ToggleFavoriteInput, active: boolean): Promise<Result<boolean>>;
@@ -450,6 +456,8 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       playtime.resolveRowLogos(await listContinueWatching(db, limit, profileId)),
     listProgressByKeys: async (itemKeys, profileId) =>
       playtime.resolveRowLogos(await listProgressByKeys(db, itemKeys, profileId)),
+    listSeriesUnplayedCounts: (seriesKeys, profileId) =>
+      listSeriesUnplayedCounts(db, seriesKeys, profileId),
     clearProgress: (itemKey, profileId) => clearWatchProgress(db, itemKey, profileId),
     toggleFavorite: (input) => toggleFavorite(db, input, clock),
     setFavorite: (input, active) => setFavorite(db, input, active, clock),
