@@ -115,6 +115,8 @@ describe('reconcileManifest', () => {
         name: 'Main',
         createdAt: 1_000,
         needsImport: true,
+        lastCatalogSyncAt: null,
+        lastGuideSyncAt: null,
         accountMeta: {
           isTrial: false,
           expiresAt: expect.any(Number),

@@ -127,6 +127,12 @@ export function createDesktopCatalogFromBridge(
       bridge.clearTrackPreference
         ? bridge.clearTrackPreference(scopeKey, profileId)
         : Promise.resolve(),
+    recordRecentChannel: (itemKey, sourceId, profileId) =>
+      bridge.recordRecentChannel
+        ? bridge.recordRecentChannel(itemKey, sourceId, profileId)
+        : Promise.resolve(),
+    listRecentChannels: (limit, profileId) =>
+      bridge.listRecentChannels ? bridge.listRecentChannels(limit, profileId) : Promise.resolve([]),
     async close() {
       onClose?.();
       await bridge.close();

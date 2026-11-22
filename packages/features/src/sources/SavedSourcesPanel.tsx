@@ -20,6 +20,31 @@ import {
 } from './useSourcesController';
 import type { ControlLayoutRecorder } from './useTvSourcesNavigation';
 
+function formatCompactSyncAge(timestampMs: number, nowMs: number): string {
+  const diffMin = Math.max(0, Math.floor((nowMs - timestampMs) / 60_000));
+  if (diffMin < 1) return '<1m';
+  if (diffMin < 60) return `${diffMin}m`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours}h`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d`;
+}
+
+function resolveLastSyncedText(source: SourceRow, i18n: AppI18n, nowMs: number): string {
+  const catalogAt =
+    typeof source.lastCatalogSyncAt === 'number' && Number.isFinite(source.lastCatalogSyncAt)
+      ? source.lastCatalogSyncAt
+      : null;
+  const guideAt =
+    typeof source.lastGuideSyncAt === 'number' && Number.isFinite(source.lastGuideSyncAt)
+      ? source.lastGuideSyncAt
+      : null;
+  const latest =
+    catalogAt !== null && guideAt !== null ? Math.max(catalogAt, guideAt) : (catalogAt ?? guideAt);
+  if (latest === null) return i18n.t('sources.neverSynced');
+  return i18n.t('sources.lastSynced', { time: formatCompactSyncAge(latest, nowMs) });
+}
+
 function renderSourceStatusText(
   source: SourceRow,
   runtime: SourceRuntimeStatus | undefined,
@@ -181,6 +206,16 @@ export function SavedSourcesPanel({
                 >
                   {renderSourceStatusText(source, runtime, i18n, progressPct)}
                 </Text>
+                <Text
+                  testID={`source-last-synced-${source.id}`}
+                  style={[
+                    theme.typography.caption,
+                    TABULAR_NUMS_STYLE,
+                    { color: theme.colors.textMuted },
+                  ]}
+                >
+                  {resolveLastSyncedText(source, i18n, nowMs)}
+                </Text>
               </View>
               {isImporting ? (
                 <View
@@ -256,14 +291,26 @@ export function SavedSourcesPanel({
                     recordLayout={recordLayout}
                   />
                 ) : (
-                  <ActionButton
-                    focusId={`source-sync-${source.id}`}
-                    testID={syncTestId}
-                    label={`${syncLabel} ${source.name}`}
-                    tvFocused={tvFocusId === `source-sync-${source.id}`}
-                    onPress={() => void ctrl.runImport(source.id)}
-                    recordLayout={recordLayout}
-                  />
+                  <>
+                    <ActionButton
+                      focusId={`source-sync-${source.id}`}
+                      testID={syncTestId}
+                      label={`${syncLabel} ${source.name}`}
+                      tvFocused={tvFocusId === `source-sync-${source.id}`}
+                      onPress={() => void ctrl.runImport(source.id)}
+                      recordLayout={recordLayout}
+                    />
+                    {!source.needsImport && ctrl.canRefreshGuide ? (
+                      <ActionButton
+                        focusId={`source-guide-${source.id}`}
+                        testID={`source-refresh-guide-${source.id}`}
+                        label={i18n.t('sources.refreshGuide')}
+                        tvFocused={tvFocusId === `source-guide-${source.id}`}
+                        onPress={() => void ctrl.runGuideRefresh(source.id)}
+                        recordLayout={recordLayout}
+                      />
+                    ) : null}
+                  </>
                 )}
                 <ActionButton
                   focusId={`source-remove-${source.id}`}

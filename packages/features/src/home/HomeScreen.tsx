@@ -54,7 +54,14 @@ export interface HomeScreenProps {
 export { HOME_HERO_AUTO_ROTATE_MS };
 
 const SCROLL_FROST_THRESHOLD = 24;
-const RAIL_ORDER: readonly HomeRailKind[] = ['continue', 'live', 'mylist', 'movies', 'series'];
+const RAIL_ORDER: readonly HomeRailKind[] = [
+  'continue',
+  'recentChannels',
+  'live',
+  'mylist',
+  'movies',
+  'series',
+];
 
 type TvKeyHandler = Parameters<typeof useKeyInterpreter>[0];
 
@@ -127,6 +134,7 @@ export function HomeScreen({
     () =>
       buildHomeRailSets({
         continueWatching: data.continueWatching,
+        recentChannels: data.recentChannels ?? [],
         liveItems: data.liveItems,
         liveCategoryName: data.liveCategory?.name ?? null,
         favorites: data.favorites,
@@ -156,6 +164,7 @@ export function HomeScreen({
         railOrder: RAIL_ORDER,
         railCounts: {
           continue: railSets.continue.length,
+          recentChannels: railSets.recentChannels.length,
           live: railSets.live.length,
           mylist: railSets.mylist.length,
           movies: railSets.movies.length,

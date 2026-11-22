@@ -487,6 +487,15 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
           await service.clearTrackPreference(call.scopeKey, call.profileId);
         }
         return undefined;
+      case 'recordRecentChannel':
+        if (service.recordRecentChannel) {
+          await service.recordRecentChannel(call.itemKey, call.sourceId, call.profileId);
+        }
+        return undefined;
+      case 'listRecentChannels':
+        return service.listRecentChannels
+          ? service.listRecentChannels(call.limit, call.profileId)
+          : [];
     }
   };
 

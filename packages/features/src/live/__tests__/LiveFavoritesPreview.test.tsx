@@ -89,6 +89,8 @@ function makeProgramme(channelKey: string, num: number): ProgrammeRow {
     description: `Broadcast ${num}`,
     episodeNum: null,
     icon: null,
+    genre: null,
+    flags: 0,
   };
 }
 

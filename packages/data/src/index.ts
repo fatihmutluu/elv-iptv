@@ -1,3 +1,14 @@
+export {
+  type DecodedProgrammeFlags,
+  decodeProgrammeFlags,
+  EPG_FLAG_LIVE,
+  EPG_FLAG_NEW,
+  EPG_FLAG_PREMIERE,
+  EPG_FLAG_REPEAT,
+  type EpgGenre,
+  encodeProgrammeFlags,
+  normalizeEpgGenre,
+} from '@elv/sources';
 export * from './catalog';
 export * from './content-hash';
 export * from './credential-fingerprint';
@@ -16,6 +27,14 @@ export {
   type PlaceholderLiveChannelInput,
 } from './placeholder-filter';
 export * from './queries';
+export {
+  DEFAULT_RECENT_CHANNELS_LIMIT,
+  isSafeRecentChannelKey,
+  listRecentChannels,
+  MAX_RECENT_CHANNELS_PER_PROFILE,
+  type RecentChannelRow,
+  recordRecentChannel,
+} from './recent-channels-repo';
 export {
   latestImportHealth,
   type ReapOrphanedRunsResult,

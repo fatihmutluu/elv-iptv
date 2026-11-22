@@ -1,4 +1,5 @@
 import type { SqlDriver } from '@elv/domain';
+import type { EpgGenre } from '@elv/sources';
 import { bucketProgrammesByLocalDay, localDayKey } from './guide-queries-day';
 import { queryChannelByNumber } from './guide-queries-number';
 import {
@@ -44,6 +45,8 @@ export interface ProgrammeRow {
   readonly description: string | null;
   readonly episodeNum: string | null;
   readonly icon: string | null;
+  readonly genre: EpgGenre | null;
+  readonly flags: number;
 }
 
 /** Current (`now`) and upcoming (`next`) programme pair for a single live channel. */
@@ -68,6 +71,14 @@ interface RawProgrammeRow {
   description: string | null;
   episode_num: string | null;
   icon: string | null;
+  genre: string | null;
+  flags: number | null;
+}
+
+const VALID_GENRES = new Set<EpgGenre>(['sports', 'movie', 'news', 'kids', 'series', 'other']);
+
+function toEpgGenre(raw: string | null | undefined): EpgGenre | null {
+  return typeof raw === 'string' && VALID_GENRES.has(raw as EpgGenre) ? (raw as EpgGenre) : null;
 }
 
 function placeholders(count: number): string {
@@ -91,6 +102,8 @@ function toProgrammeRow(
     description: r.description,
     episodeNum: r.episode_num,
     icon: r.icon,
+    genre: toEpgGenre(r.genre),
+    flags: typeof r.flags === 'number' && Number.isFinite(r.flags) ? Math.trunc(r.flags) : 0,
   };
 }
 
@@ -205,7 +218,7 @@ export async function queryNowNext(
     if (guideIds.length === 0) continue;
 
     const progRows = await db.all<RawProgrammeRow>(
-      `SELECT guide_id, start, stop, title, sub_title, description, episode_num, icon
+      `SELECT guide_id, start, stop, title, sub_title, description, episode_num, icon, genre, flags
          FROM programmes
         WHERE source_id = ? AND guide_id IN (${placeholders(guideIds.length)})
           AND start < ? AND stop > ?
@@ -300,7 +313,7 @@ export async function queryEpgWindow(
     if (guideIds.length === 0) continue;
 
     const progRows = await db.all<RawProgrammeRow>(
-      `SELECT guide_id, start, stop, title, sub_title, description, episode_num, icon
+      `SELECT guide_id, start, stop, title, sub_title, description, episode_num, icon, genre, flags
          FROM programmes
         WHERE source_id = ? AND guide_id IN (${placeholders(guideIds.length)})
           AND start < ? AND stop > ?

@@ -42,6 +42,7 @@ import {
   querySeries,
   type SeasonRow,
 } from './queries';
+import { listRecentChannels, recordRecentChannel } from './recent-channels-repo';
 import { latestImportHealth, type SourceImportHealth } from './runs';
 import { querySearch, type SearchOptions, type SearchResults } from './search';
 import { addSourceFromLink, type LinkSourceInput } from './source-link';
@@ -131,6 +132,8 @@ export interface SourceRow {
   name: string;
   createdAt: number;
   needsImport: boolean;
+  lastCatalogSyncAt?: number | null;
+  lastGuideSyncAt?: number | null;
   accountMeta?: SourceAccountMeta;
   credentialFingerprint?: string;
 }
@@ -207,6 +210,8 @@ export interface CatalogService {
   ): Promise<PersistedTrackPreference | null>;
   saveTrackPreference?(input: SaveTrackPreferenceInput): Promise<void>;
   clearTrackPreference?(scopeKey: string, profileId?: string): Promise<void>;
+  recordRecentChannel?(itemKey: string, sourceId: string, profileId?: string): Promise<void>;
+  listRecentChannels?(limit?: number, profileId?: string): Promise<ItemRow[]>;
   flushPendingWrites?(): Promise<void>;
   close(): Promise<void>;
 }
@@ -256,6 +261,8 @@ const row = (r: SourceRecord): SourceRow => ({
   name: r.name,
   createdAt: r.createdAt,
   needsImport: true,
+  lastCatalogSyncAt: null,
+  lastGuideSyncAt: null,
   ...(r.settings.accountMeta === undefined ? {} : { accountMeta: r.settings.accountMeta }),
   ...(isCredentialFingerprint(r.settings.credentialFingerprint)
     ? { credentialFingerprint: r.settings.credentialFingerprint }
@@ -263,7 +270,9 @@ const row = (r: SourceRecord): SourceRow => ({
 });
 
 const LIST_SOURCES = `SELECT s.id, s.kind, s.name, s.created_at, s.settings_json,
-  EXISTS (SELECT 1 FROM import_runs r WHERE r.source_id = s.id AND r.kind = 'catalog' AND r.status = 'ok') AS imported
+  EXISTS (SELECT 1 FROM import_runs r WHERE r.source_id = s.id AND r.kind = 'catalog' AND r.status = 'ok') AS imported,
+  (SELECT r.finished_at FROM import_runs r WHERE r.source_id = s.id AND r.kind = 'catalog' AND r.status = 'ok' ORDER BY r.finished_at DESC LIMIT 1) AS last_catalog_sync_at,
+  (SELECT r.finished_at FROM import_runs r WHERE r.source_id = s.id AND r.kind = 'guide' AND r.status = 'ok' ORDER BY r.finished_at DESC LIMIT 1) AS last_guide_sync_at
   FROM sources s WHERE s.deleting = 0 ORDER BY s.created_at, s.id`;
 
 const notFound = () => err(elvError('storage', 'item-not-found'));
@@ -374,6 +383,8 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
         created_at: number;
         settings_json: string;
         imported: number;
+        last_catalog_sync_at: number | null;
+        last_guide_sync_at: number | null;
       }>(LIST_SOURCES);
       return rows.map((r) => ({
         id: r.id,
@@ -381,6 +392,14 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
         name: r.name,
         createdAt: r.created_at,
         needsImport: r.imported === 0,
+        lastCatalogSyncAt:
+          typeof r.last_catalog_sync_at === 'number' && Number.isFinite(r.last_catalog_sync_at)
+            ? r.last_catalog_sync_at
+            : null,
+        lastGuideSyncAt:
+          typeof r.last_guide_sync_at === 'number' && Number.isFinite(r.last_guide_sync_at)
+            ? r.last_guide_sync_at
+            : null,
         ...parseSourceMeta(r.settings_json),
       }));
     },
@@ -513,6 +532,12 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       await clearTrackPreference(db, scopeKey, profileId);
       await syncUserData();
     },
+    async recordRecentChannel(itemKey, sourceId, profileId) {
+      await recordRecentChannel(db, itemKey, sourceId, profileId, clock());
+      await syncUserData();
+    },
+    listRecentChannels: async (limit, profileId) =>
+      playtime.resolveRowLogos(await listRecentChannels(db, limit, profileId)),
 
     close() {
       if (closePromise !== undefined) return closePromise;

@@ -117,6 +117,8 @@ function makeProgramme(
     description,
     episodeNum: null,
     icon: null,
+    genre: null,
+    flags: 0,
   };
 }
 
@@ -418,11 +420,15 @@ describe('EpgGridView — Cinema Quietude Virtualized XMLTV EPG Grid', () => {
     expect(focusedStyle.borderColor).toBe(defaultTheme.colors.focusRingColor);
     expect(focusedStyle.borderWidth).toBe(2.5);
 
-    // Pressing Select immediately watches Ch 1 at index 1
+    // Pressing Select on upcoming programme (19:15-20:30) opens Programme Detail modal (#395);
+    // pressing Select again tunes the channel via the primary "Tune to channel" CTA!
+    await sendKey(KEYCODE_DPAD_CENTER);
+    expect(screen.getByTestId('epg-programme-detail-modal')).toBeTruthy();
     await sendKey(KEYCODE_DPAD_CENTER);
     expect(onWatchChannel).toHaveBeenCalledWith(ch1, 1);
 
-    // Moving Up back to row 0, then Up enters EPG toolbar (Watch now -> Right -> Refresh guide -> Select)
+    // Moving Up back to row 0, then Up -> date tabs -> Up enters EPG toolbar (Watch now -> Right -> Refresh guide -> Select)
+    await sendKey(KEYCODE_DPAD_UP);
     await sendKey(KEYCODE_DPAD_UP);
     await sendKey(KEYCODE_DPAD_UP);
     expect(onEdgeTop).not.toHaveBeenCalled();
@@ -435,9 +441,10 @@ describe('EpgGridView — Cinema Quietude Virtualized XMLTV EPG Grid', () => {
       expect(importGuideCalls).toEqual(['src-1']);
     });
 
-    // Up from EPG toolbar calls onEdgeTop; Down returns to row 0
+    // Up from EPG toolbar calls onEdgeTop; Down -> date tabs -> Down returns to row 0
     await sendKey(KEYCODE_DPAD_UP);
     expect(onEdgeTop).toHaveBeenCalledTimes(1);
+    await sendKey(KEYCODE_DPAD_DOWN);
     await sendKey(KEYCODE_DPAD_DOWN);
     expect(screen.queryByTestId('epg-refresh-guide-focus-ring')).toBeNull();
 

@@ -1,4 +1,4 @@
-import type { XmltvProgramme } from '@elv/sources';
+import { encodeProgrammeFlags, normalizeEpgGenre, type XmltvProgramme } from '@elv/sources';
 import { type RunCtx, warn } from './import-run';
 
 /** Length given to a programme with no `stop` when no later programme of its channel closes it. */
@@ -25,6 +25,13 @@ function programmeRow(
     p.episodeNum ?? null,
     p.icon ?? null,
     runId,
+    normalizeEpgGenre(p.categories),
+    encodeProgrammeFlags({
+      isLive: p.isLive,
+      isNew: p.isNew,
+      isPremiere: p.isPremiere,
+      previouslyShown: p.previouslyShown,
+    }),
   ];
 }
 

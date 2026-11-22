@@ -23,6 +23,8 @@ describe('sources', () => {
         name: 'Main',
         createdAt: 1_000,
         needsImport: false,
+        lastCatalogSyncAt: 1_000,
+        lastGuideSyncAt: null,
         accountMeta: {
           isTrial: false,
           expiresAt: expect.any(Number),

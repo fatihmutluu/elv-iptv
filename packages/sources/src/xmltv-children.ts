@@ -129,6 +129,12 @@ export function parseChildren(
         i = tagEnd;
         continue;
       }
+      if (is(body, ns, len, 'premiere')) {
+        prog.isPremiere = true;
+        if (!selfClosing) open.push(ns, len);
+        i = tagEnd;
+        continue;
+      }
       if (is(body, ns, len, 'previously-shown')) {
         prog.previouslyShown = true;
         if (!selfClosing) open.push(ns, len);
@@ -139,6 +145,7 @@ export function parseChildren(
       prog &&
       (is(body, ns, len, 'live') ||
         is(body, ns, len, 'new') ||
+        is(body, ns, len, 'premiere') ||
         is(body, ns, len, 'previously-shown'))
     ) {
       if (!selfClosing) open.push(ns, len);

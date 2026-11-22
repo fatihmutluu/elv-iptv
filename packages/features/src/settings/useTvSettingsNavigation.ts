@@ -98,9 +98,17 @@ export type LiveTvFocusId =
   | 'epg-span-6'
   | 'toggle-epg-genre-tints'
   | 'toggle-epg-show-clock'
+  | 'catalog-refresh-0'
+  | 'catalog-refresh-6'
+  | 'catalog-refresh-12'
+  | 'catalog-refresh-24'
+  | 'catalog-refresh-48'
+  | 'guide-refresh-0'
   | 'guide-refresh-6'
   | 'guide-refresh-12'
   | 'guide-refresh-24'
+  | 'channel-switch-instant'
+  | 'channel-switch-preview'
   | 'logo-backdrop-plate'
   | 'logo-backdrop-invert'
   | 'logo-backdrop-off'
@@ -178,7 +186,15 @@ const LIVE_TV_ROWS: readonly (readonly LiveTvFocusId[])[] = [
   ['epg-span-2', 'epg-span-3', 'epg-span-6'],
   ['toggle-epg-genre-tints'],
   ['toggle-epg-show-clock'],
-  ['guide-refresh-6', 'guide-refresh-12', 'guide-refresh-24'],
+  [
+    'catalog-refresh-0',
+    'catalog-refresh-6',
+    'catalog-refresh-12',
+    'catalog-refresh-24',
+    'catalog-refresh-48',
+  ],
+  ['guide-refresh-0', 'guide-refresh-6', 'guide-refresh-12', 'guide-refresh-24'],
+  ['channel-switch-instant', 'channel-switch-preview'],
   ['logo-backdrop-plate', 'logo-backdrop-invert', 'logo-backdrop-off'],
   ['toggle-source-badges'],
   ['toggle-two-step-preview'],

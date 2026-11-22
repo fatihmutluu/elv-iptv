@@ -79,6 +79,8 @@ export function createWorkbenchCatalog(): CatalogService {
       name: 'Studio Demo Catalog',
       createdAt: 1_700_000_000_000,
       needsImport: false,
+      lastCatalogSyncAt: 1_700_000_100_000,
+      lastGuideSyncAt: 1_700_000_200_000,
     },
   ];
   const progress = new Map(
@@ -87,6 +89,38 @@ export function createWorkbenchCatalog(): CatalogService {
   const favorites = new Map(
     WORKBENCH_SEED_FAVORITES.map((r) => [pKey(r.profileId, r.itemKey), { ...r }]),
   );
+  const recentChannels = new Map<
+    string,
+    { profileId: string; sourceId: string; itemKey: string; watchedAt: number }
+  >([
+    [
+      pKey(DEFAULT_PROFILE_ID, 'wb:live:101'),
+      {
+        profileId: DEFAULT_PROFILE_ID,
+        sourceId: DEMO_SOURCE_ID,
+        itemKey: 'wb:live:101',
+        watchedAt: 1_700_000_290_000,
+      },
+    ],
+    [
+      pKey(DEFAULT_PROFILE_ID, 'wb:live:201'),
+      {
+        profileId: DEFAULT_PROFILE_ID,
+        sourceId: DEMO_SOURCE_ID,
+        itemKey: 'wb:live:201',
+        watchedAt: 1_700_000_280_000,
+      },
+    ],
+    [
+      pKey(DEFAULT_PROFILE_ID, 'wb:live:301'),
+      {
+        profileId: DEFAULT_PROFILE_ID,
+        sourceId: DEMO_SOURCE_ID,
+        itemKey: 'wb:live:301',
+        watchedAt: 1_700_000_270_000,
+      },
+    ],
+  ]);
 
   return {
     async addSource(input: AddSourceInput) {
@@ -96,6 +130,8 @@ export function createWorkbenchCatalog(): CatalogService {
         name: input.name?.trim() || `Synthetic ${input.kind.toUpperCase()}`,
         createdAt: Date.now(),
         needsImport: true,
+        lastCatalogSyncAt: null,
+        lastGuideSyncAt: null,
       };
       sources.push(row);
       return ok(row);
@@ -107,6 +143,8 @@ export function createWorkbenchCatalog(): CatalogService {
         name: input.name?.trim() || 'Synthetic Playlist',
         createdAt: Date.now(),
         needsImport: true,
+        lastCatalogSyncAt: null,
+        lastGuideSyncAt: null,
       };
       sources.push(row);
       return ok(row);
@@ -116,12 +154,14 @@ export function createWorkbenchCatalog(): CatalogService {
       if (idx >= 0) sources.splice(idx, 1);
       for (const [k, row] of progress) if (row.sourceId === id) progress.delete(k);
       for (const [k, row] of favorites) if (row.sourceId === id) favorites.delete(k);
+      for (const [k, row] of recentChannels) if (row.sourceId === id) recentChannels.delete(k);
       return ok(undefined);
     },
     async importSource(id: string) {
       const src = sources.find((s) => s.id === id);
       if (!src) return err(elvError('storage', 'not-found', `Unknown source ${id}`));
       src.needsImport = false;
+      src.lastCatalogSyncAt = Date.now();
       return ok({
         runId: nextId++,
         counts: {
@@ -139,6 +179,7 @@ export function createWorkbenchCatalog(): CatalogService {
     async importGuide(sourceId: string) {
       const src = sources.find((s) => s.id === sourceId);
       if (!src) return err(elvError('storage', 'source-not-found', `Unknown source ${sourceId}`));
+      src.lastGuideSyncAt = Date.now();
       return ok({
         runId: nextId++,
         counts: { guideChannels: 10, programmes: 240 },
@@ -315,6 +356,35 @@ export function createWorkbenchCatalog(): CatalogService {
         .filter((f) => f.profileId === normProfile(profileId))
         .sort((a, b) => b.addedAt - a.addedAt)
         .map((f) => f.itemKey),
+    async recordRecentChannel(itemKey: string, sourceId: string, profileId?: string) {
+      const pid = normProfile(profileId);
+      const trimmed = itemKey.trim();
+      if (trimmed.length === 0) return;
+      recentChannels.set(pKey(pid, trimmed), {
+        profileId: pid,
+        sourceId,
+        itemKey: trimmed,
+        watchedAt: nextTick(),
+      });
+    },
+    async listRecentChannels(limit?: number, profileId?: string) {
+      const pid = normProfile(profileId);
+      const max = clampLimit(limit, 20, 50);
+      if (max === 0) return [];
+      const activeIds = new Set(sources.filter((s) => !s.needsImport).map((s) => s.id));
+      const out: ItemRow[] = [];
+      const ordered = [...recentChannels.values()]
+        .filter((r) => r.profileId === pid && activeIds.has(r.sourceId))
+        .sort((a, b) => b.watchedAt - a.watchedAt || (a.itemKey < b.itemKey ? -1 : 1));
+      for (const entry of ordered) {
+        const item = WORKBENCH_ITEMS_BY_KEY.get(entry.itemKey);
+        if (item && item.kind === 'live') {
+          out.push({ ...item, sourceId: entry.sourceId });
+          if (out.length >= max) break;
+        }
+      }
+      return out;
+    },
     close: async () => undefined,
   };
 }

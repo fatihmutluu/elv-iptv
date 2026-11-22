@@ -11,6 +11,8 @@ import {
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { SettingsPreferencesController } from './appearance-controls';
 import {
+  CATALOG_REFRESH_OPTIONS,
+  CHANNEL_SWITCH_MODE_OPTIONS,
   DEFAULT_LIVE_MODE_OPTIONS,
   EPG_SPAN_OPTIONS,
   GUIDE_REFRESH_OPTIONS,
@@ -63,6 +65,7 @@ export function LiveTvSettingsPanel({
       focusedControlId.startsWith('epg-span-') ||
       focusedControlId === 'toggle-epg-genre-tints' ||
       focusedControlId === 'toggle-epg-show-clock' ||
+      focusedControlId.startsWith('catalog-refresh-') ||
       focusedControlId.startsWith('guide-refresh-')
     ) {
       targetY = focusedControlId.startsWith('live-mode-')
@@ -100,11 +103,39 @@ export function LiveTvSettingsPanel({
     [i18n],
   );
 
+  const catalogRefreshOptions = useMemo(
+    () =>
+      CATALOG_REFRESH_OPTIONS.map((opt) => ({
+        value: opt.hours,
+        label:
+          opt.hours === 0
+            ? i18n.t('settings.liveTv.refreshManualOnly')
+            : i18n.t('settings.liveTv.refreshHours', { hours: opt.hours }),
+        focusId: opt.focusId,
+        testID: opt.testID,
+      })),
+    [i18n],
+  );
+
   const guideRefreshOptions = useMemo(
     () =>
       GUIDE_REFRESH_OPTIONS.map((opt) => ({
         value: opt.hours,
-        label: i18n.t('settings.liveTv.guideRefreshHours', { hours: opt.hours }),
+        label:
+          opt.hours === 0
+            ? i18n.t('settings.liveTv.refreshManualOnly')
+            : i18n.t('settings.liveTv.guideRefreshHours', { hours: opt.hours }),
+        focusId: opt.focusId,
+        testID: opt.testID,
+      })),
+    [i18n],
+  );
+
+  const channelSwitchModeOptions = useMemo(
+    () =>
+      CHANNEL_SWITCH_MODE_OPTIONS.map((opt) => ({
+        value: opt.value,
+        label: i18n.t(opt.labelKey),
         focusId: opt.focusId,
         testID: opt.testID,
       })),
@@ -194,6 +225,19 @@ export function LiveTvSettingsPanel({
         <SettingsDivider />
 
         <SettingsOptionRow
+          title={i18n.t('settings.liveTv.catalogRefreshInterval')}
+          description={i18n.t('settings.liveTv.catalogRefreshIntervalDesc')}
+          options={catalogRefreshOptions}
+          selectedValue={activePrefs.catalogRefreshHours}
+          focusedControlId={focusedControlId}
+          isTv={isTv}
+          tabularNums
+          onSelect={(catalogRefreshHours) => applyPatch({ catalogRefreshHours })}
+        />
+
+        <SettingsDivider />
+
+        <SettingsOptionRow
           title={i18n.t('settings.liveTv.guideRefresh')}
           options={guideRefreshOptions}
           selectedValue={activePrefs.guideRefreshHours}
@@ -213,6 +257,18 @@ export function LiveTvSettingsPanel({
           cardYRef.current.display = e.nativeEvent.layout.y;
         }}
       >
+        <SettingsOptionRow
+          title={i18n.t('settings.liveTv.channelSwitchMode')}
+          description={i18n.t('settings.liveTv.channelSwitchModeDesc')}
+          options={channelSwitchModeOptions}
+          selectedValue={activePrefs.liveChannelSwitchMode}
+          focusedControlId={focusedControlId}
+          isTv={isTv}
+          onSelect={(liveChannelSwitchMode) => applyPatch({ liveChannelSwitchMode })}
+        />
+
+        <SettingsDivider />
+
         <SettingsOptionRow
           title={i18n.t('settings.liveTv.logoBackdrop')}
           options={logoBackdropOptions}

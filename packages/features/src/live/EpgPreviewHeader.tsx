@@ -11,9 +11,26 @@ import {
   webCursorPointer,
 } from '@elv/ui-kit';
 import { memo, type ReactElement, useCallback } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import type { EpgDateTab } from './epg-date-tabs';
 import { formatClockTime } from './live-model';
-import { formatChannelDisplayName } from './source-badge';
+import {
+  formatChannelDisplayName,
+  type ProgrammeBadgeKind,
+  resolveProgrammeBadges,
+} from './source-badge';
+
+function previewBadgeKey(kind: ProgrammeBadgeKind) {
+  if (kind === 'live') return 'epg.badge.live' as const;
+  if (kind === 'premiere') return 'epg.badge.premiere' as const;
+  return 'epg.badge.new' as const;
+}
+
+function previewBadgeTone(kind: ProgrammeBadgeKind): 'live' | 'accent' | 'neutral' {
+  if (kind === 'live') return 'live';
+  if (kind === 'premiere') return 'accent';
+  return 'neutral';
+}
 
 /** Props of {@link EpgPreviewHeader}. */
 export interface EpgPreviewHeaderProps {
@@ -185,6 +202,14 @@ export const EpgPreviewHeader = memo(function EpgPreviewHeaderInner(
             {isLiveProgramme ? (
               <MicroPill testID="epg-preview-on-air" label={i18n.t('epg.onAirBadge')} tone="live" />
             ) : null}
+            {resolveProgrammeBadges(programme?.flags).map((b) => (
+              <MicroPill
+                key={b}
+                testID={`epg-preview-badge-${b}`}
+                label={i18n.t(previewBadgeKey(b))}
+                tone={previewBadgeTone(b)}
+              />
+            ))}
           </View>
           <Text
             numberOfLines={2}
@@ -201,6 +226,91 @@ export const EpgPreviewHeader = memo(function EpgPreviewHeaderInner(
       </View>
 
       {isPortrait ? actions : null}
+    </View>
+  );
+});
+
+/** Props of {@link EpgDateTabStrip}. */
+export interface EpgDateTabStripProps {
+  readonly tabs: readonly EpgDateTab[];
+  readonly activeDayKey: string;
+  readonly isTv: boolean;
+  readonly isPortrait: boolean;
+  readonly focusedTabIndex: number | null;
+  readonly onSelectTab: (tab: EpgDateTab) => void;
+}
+
+/** Multi-day DST-safe editorial underline date tab strip rendered above the 30-min EPG ruler (`#395`). */
+export const EpgDateTabStrip = memo(function EpgDateTabStripInner({
+  tabs,
+  activeDayKey,
+  isTv,
+  isPortrait,
+  focusedTabIndex,
+  onSelectTab,
+}: EpgDateTabStripProps): ReactElement {
+  const theme = useTheme();
+  const cursor = webCursorPointer();
+  return (
+    <View
+      testID="epg-date-tabs"
+      accessibilityRole="tablist"
+      style={[
+        styles.dateStripWrap,
+        {
+          backgroundColor: theme.colors.bgSurface,
+          borderBottomColor: theme.colors.surfaceBorder,
+          paddingHorizontal: isPortrait ? theme.spacing.sm : theme.spacing.md,
+        },
+      ]}
+    >
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.dateStripRow}
+      >
+        {tabs.map((tab, idx) => {
+          const selected = tab.dayKey === activeDayKey;
+          const focused = isTv && focusedTabIndex === idx;
+          return (
+            <Pressable
+              key={tab.dayKey}
+              testID={`epg-date-tab-${tab.offsetDays}`}
+              accessibilityRole="tab"
+              accessibilityLabel={tab.label}
+              accessibilityState={{ selected }}
+              focusable={!isTv}
+              onPress={() => onSelectTab(tab)}
+              style={[
+                styles.dateTab,
+                {
+                  borderBottomColor: selected ? theme.colors.accent : 'transparent',
+                  backgroundColor: focused ? theme.colors.focusFill : 'transparent',
+                  borderColor: focused ? theme.colors.focusRingColor : 'transparent',
+                  borderWidth: focused ? theme.focus.ringWidth : 0,
+                  borderRadius: focused ? theme.radius.button : 0,
+                },
+                cursor,
+              ]}
+            >
+              <Text
+                numberOfLines={1}
+                style={[
+                  theme.typography.caption,
+                  TABULAR_NUMS_STYLE,
+                  {
+                    color:
+                      selected || focused ? theme.colors.textPrimary : theme.colors.textSecondary,
+                    fontWeight: selected || focused ? '700' : '500',
+                  },
+                ]}
+              >
+                {tab.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
     </View>
   );
 });
@@ -377,6 +487,21 @@ const styles = StyleSheet.create({
   description: { maxWidth: 720 },
   actionsRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 10 },
   ctaButton: { minWidth: 40, minHeight: 40 },
+  dateStripWrap: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  dateStripRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  dateTab: {
+    minHeight: 38,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    borderBottomWidth: 2,
+    justifyContent: 'center',
+  },
   timeNavBar: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -3,6 +3,7 @@ import type {
   AndroidDecoderMode,
   BufferPreset,
   DefaultResizeModePref,
+  LiveChannelSwitchModePref,
   OsdTimeDisplayMode,
   SeekStepSecPref,
   SleepTimerAction,
@@ -40,6 +41,8 @@ export interface PlayerScreenProps {
         | 'queryNextEpisode'
         | 'getTrackPreference'
         | 'saveTrackPreference'
+        | 'recordRecentChannel'
+        | 'listRecentChannels'
       >
     > & {
       readonly epgNowNext?: CatalogService['nowNext'];
@@ -85,6 +88,7 @@ export interface PlayerScreenProps {
   onPersistAudioDevice?: (deviceName: string) => void;
   androidDecoderMode?: AndroidDecoderMode;
   onSelectAndroidDecoderMode?: (mode: AndroidDecoderMode) => void;
+  liveChannelSwitchMode?: LiveChannelSwitchModePref;
   onTargetChange?: (next: PlayTarget) => void;
   onExit: () => void;
 }

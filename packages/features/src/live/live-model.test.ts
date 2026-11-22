@@ -41,6 +41,8 @@ const makeProg = (
   description: null,
   episodeNum: null,
   icon: null,
+  genre: null,
+  flags: 0,
 });
 
 describe('live-model pure helpers', () => {

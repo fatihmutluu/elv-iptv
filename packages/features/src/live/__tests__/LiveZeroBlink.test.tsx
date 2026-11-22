@@ -94,6 +94,8 @@ describe('Live TV zero-blink CatalogUiCache hydration, setFavorite & tvOS edge f
       description: null,
       episodeNum: null,
       icon: null,
+      genre: null,
+      flags: 0,
     };
     const nowNextEntry: NowNextEntry = {
       channelKey: firstChannel.key,

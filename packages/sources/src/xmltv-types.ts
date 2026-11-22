@@ -21,6 +21,7 @@ export interface XmltvProgramme {
   icon?: string;
   isLive?: boolean;
   isNew?: boolean;
+  isPremiere?: boolean;
   previouslyShown?: boolean;
 }
 

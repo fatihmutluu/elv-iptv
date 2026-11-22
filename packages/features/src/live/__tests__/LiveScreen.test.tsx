@@ -76,6 +76,8 @@ function makeProgramme(channelKey: string, num: number): ProgrammeRow {
     description: `Live coverage on channel ${num}.`,
     episodeNum: null,
     icon: null,
+    genre: null,
+    flags: 0,
   };
 }
 
@@ -424,7 +426,8 @@ describe('LiveScreen', () => {
     ).toBeNull();
     expect(screen.getByTestId('epg-tv-focus-anchor', { includeHiddenElements: true })).toBeTruthy();
 
-    // Up from EPG row 0 enters EPG toolbar, and Up again returns cleanly to LiveScreen header
+    // Up from EPG row 0 -> date tabs -> EPG toolbar -> LiveScreen header (#395)
+    await sendKey(KEYCODE_DPAD_UP);
     await sendKey(KEYCODE_DPAD_UP);
     await sendKey(KEYCODE_DPAD_UP);
     expect(

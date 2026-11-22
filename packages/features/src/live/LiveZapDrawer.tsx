@@ -1,4 +1,4 @@
-import type { ItemRow, NowNextEntry } from '@elv/data';
+import type { ItemRow, NowNextEntry, ProgrammeRow } from '@elv/data';
 import type { LogoBackdropModePref } from '@elv/domain';
 import { TvScrollEdgeFade, useI18n, useTheme, webBackdropBlur } from '@elv/ui-kit';
 import { memo, type ReactElement, useCallback, useEffect, useMemo, useRef } from 'react';
@@ -57,6 +57,11 @@ export interface LiveZapDrawerProps {
   readonly cleanChannelTitles?: boolean;
   readonly hydrateNowNext: (channelKeys: readonly string[]) => void;
   readonly onSelectChannel: (channel: ItemRow, index: number) => void;
+  readonly onOpenContextMenu?: (
+    channel: ItemRow,
+    index: number,
+    programme: ProgrammeRow | null,
+  ) => void;
 }
 
 /**
@@ -78,6 +83,7 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
     cleanChannelTitles = false,
     hydrateNowNext,
     onSelectChannel,
+    onOpenContextMenu,
   } = p;
   const theme = useTheme();
   const i18n = useI18n();
@@ -155,6 +161,7 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
             index={slot.index}
             item={row}
             nowTitle={row ? (nowNextByKey.get(row.key)?.now?.title ?? null) : null}
+            nowProgramme={row ? (nowNextByKey.get(row.key)?.now ?? null) : null}
             noProgramLabel={noProgramLabel}
             rowHeight={zapRowHeight}
             isActive={row !== undefined && row.key === activeChannelKey}
@@ -165,6 +172,7 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
             sourceBadge={row ? (sourceBadges?.get(row.sourceId) ?? null) : null}
             cleanChannelTitles={cleanChannelTitles}
             onSelectChannel={onSelectChannel}
+            {...(onOpenContextMenu !== undefined ? { onOpenContextMenu } : {})}
           />
         </View>
       );
@@ -178,6 +186,7 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
       logoBackdropMode,
       noProgramLabel,
       nowNextByKey,
+      onOpenContextMenu,
       onSelectChannel,
       sourceBadges,
       zapRowHeight,

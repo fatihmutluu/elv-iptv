@@ -43,8 +43,14 @@ export type EpgTimeSpanHoursPref = 2 | 3 | 6;
 /** User-selectable default landing mode for Live TV (`#401`). */
 export type DefaultLiveModePref = 'favorites' | 'channels' | 'epg';
 
-/** User-selectable EPG guide auto-refresh interval in hours (`#401`). */
-export type GuideRefreshHoursPref = 6 | 12 | 24;
+/** User-selectable EPG guide auto-refresh interval in hours (`0` = manual only, `#68`, `#401`). */
+export type GuideRefreshHoursPref = 0 | 6 | 12 | 24;
+
+/** User-selectable catalog auto-refresh interval in hours (`0` = manual only, `#68`). */
+export type CatalogRefreshHoursPref = 0 | 6 | 12 | 24 | 48;
+
+/** User-selectable Live TV channel switch behavior during playback (`#251`). */
+export type LiveChannelSwitchModePref = 'instant' | 'preview';
 
 /** User-selectable channel logo readability backdrop treatment (`#126`, `#401`). */
 export type LogoBackdropModePref = 'plate' | 'invert' | 'off';
@@ -73,6 +79,8 @@ export interface ExtendedPreferencesFields {
   readonly epgShowClock: boolean;
   readonly defaultLiveMode: DefaultLiveModePref;
   readonly guideRefreshHours: GuideRefreshHoursPref;
+  readonly catalogRefreshHours: CatalogRefreshHoursPref;
+  readonly liveChannelSwitchMode: LiveChannelSwitchModePref;
   readonly logoBackdropMode: LogoBackdropModePref;
   readonly showSourceBadges: boolean;
   readonly liveOkTwoStepPreview: boolean;
@@ -106,7 +114,9 @@ const SEEK_STEP_SECS: readonly SeekStepSecPref[] = [5, 10, 15, 30];
 const DEFAULT_RESIZE_MODES: readonly DefaultResizeModePref[] = ['fit', 'fill', 'stretch'];
 const EPG_TIME_SPAN_HOURS: readonly EpgTimeSpanHoursPref[] = [2, 3, 6];
 const DEFAULT_LIVE_MODES: readonly DefaultLiveModePref[] = ['favorites', 'channels', 'epg'];
-const GUIDE_REFRESH_HOURS: readonly GuideRefreshHoursPref[] = [6, 12, 24];
+const GUIDE_REFRESH_HOURS: readonly GuideRefreshHoursPref[] = [0, 6, 12, 24];
+const CATALOG_REFRESH_HOURS: readonly CatalogRefreshHoursPref[] = [0, 6, 12, 24, 48];
+const LIVE_CHANNEL_SWITCH_MODES: readonly LiveChannelSwitchModePref[] = ['instant', 'preview'];
 const LOGO_BACKDROP_MODES: readonly LogoBackdropModePref[] = ['plate', 'invert', 'off'];
 const ARTWORK_CACHE_LIMITS_MB: readonly ArtworkCacheLimitMbPref[] = [64, 128, 256];
 
@@ -219,6 +229,16 @@ function isDefaultLiveModePref(value: unknown): value is DefaultLiveModePref {
 
 function isGuideRefreshHoursPref(value: unknown): value is GuideRefreshHoursPref {
   return typeof value === 'number' && (GUIDE_REFRESH_HOURS as readonly number[]).includes(value);
+}
+
+function isCatalogRefreshHoursPref(value: unknown): value is CatalogRefreshHoursPref {
+  return typeof value === 'number' && (CATALOG_REFRESH_HOURS as readonly number[]).includes(value);
+}
+
+function isLiveChannelSwitchModePref(value: unknown): value is LiveChannelSwitchModePref {
+  return (
+    typeof value === 'string' && (LIVE_CHANNEL_SWITCH_MODES as readonly string[]).includes(value)
+  );
 }
 
 function isLogoBackdropModePref(value: unknown): value is LogoBackdropModePref {
@@ -368,6 +388,12 @@ export function parseExtendedPreferences(
     guideRefreshHours: isGuideRefreshHoursPref(parsed.guideRefreshHours)
       ? parsed.guideRefreshHours
       : defaults.guideRefreshHours,
+    catalogRefreshHours: isCatalogRefreshHoursPref(parsed.catalogRefreshHours)
+      ? parsed.catalogRefreshHours
+      : defaults.catalogRefreshHours,
+    liveChannelSwitchMode: isLiveChannelSwitchModePref(parsed.liveChannelSwitchMode)
+      ? parsed.liveChannelSwitchMode
+      : defaults.liveChannelSwitchMode,
     logoBackdropMode: isLogoBackdropModePref(parsed.logoBackdropMode)
       ? parsed.logoBackdropMode
       : defaults.logoBackdropMode,
@@ -451,6 +477,12 @@ export function serializeExtendedPreferences(
     guideRefreshHours: isGuideRefreshHoursPref(snapshot.guideRefreshHours)
       ? snapshot.guideRefreshHours
       : defaults.guideRefreshHours,
+    catalogRefreshHours: isCatalogRefreshHoursPref(snapshot.catalogRefreshHours)
+      ? snapshot.catalogRefreshHours
+      : defaults.catalogRefreshHours,
+    liveChannelSwitchMode: isLiveChannelSwitchModePref(snapshot.liveChannelSwitchMode)
+      ? snapshot.liveChannelSwitchMode
+      : defaults.liveChannelSwitchMode,
     logoBackdropMode: isLogoBackdropModePref(snapshot.logoBackdropMode)
       ? snapshot.logoBackdropMode
       : defaults.logoBackdropMode,
@@ -534,6 +566,12 @@ export function mergeExtendedPreferences(
     guideRefreshHours: isGuideRefreshHoursPref(patch.guideRefreshHours)
       ? patch.guideRefreshHours
       : base.guideRefreshHours,
+    catalogRefreshHours: isCatalogRefreshHoursPref(patch.catalogRefreshHours)
+      ? patch.catalogRefreshHours
+      : base.catalogRefreshHours,
+    liveChannelSwitchMode: isLiveChannelSwitchModePref(patch.liveChannelSwitchMode)
+      ? patch.liveChannelSwitchMode
+      : base.liveChannelSwitchMode,
     logoBackdropMode: isLogoBackdropModePref(patch.logoBackdropMode)
       ? patch.logoBackdropMode
       : base.logoBackdropMode,

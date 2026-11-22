@@ -1,6 +1,7 @@
 import { type CatalogService, MAX_EPG_WINDOW_KEYS, type ProgrammeRow } from '@elv/data';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type CachedEpgProgramEntry, useCatalogUiCache } from '../shared';
+import { computeDayJumpWindowStart } from './epg-date-tabs';
 import {
   type BoundedTtlCache,
   createBoundedTtlCache,
@@ -36,6 +37,7 @@ export interface EpgWindowData {
   readonly panEarlier: () => void;
   readonly panLater: () => void;
   readonly jumpToLive: () => void;
+  readonly jumpToDay: (dayStartMs: number) => void;
   readonly hydrateChannels: (channelKeys: readonly string[]) => void;
   readonly getProgrammes: (channelKey: string) => readonly ProgrammeRow[];
   readonly refreshGuide: (sourceId: string) => Promise<void>;
@@ -127,6 +129,13 @@ export function useEpgWindowData({
     () => commitWindowStart(floorToEpgSlot(propsRef.current.nowMs)),
     [commitWindowStart],
   );
+  const jumpToDay = useCallback(
+    (dayStartMs: number) =>
+      commitWindowStart(
+        computeDayJumpWindowStart(dayStartMs, propsRef.current.nowMs, windowStartRef.current),
+      ),
+    [commitWindowStart],
+  );
 
   const hydrateChannels = useCallback((channelKeys: readonly string[]) => {
     const epgWindow = propsRef.current.catalog.epgWindow;
@@ -215,6 +224,7 @@ export function useEpgWindowData({
       panEarlier,
       panLater,
       jumpToLive,
+      jumpToDay,
       hydrateChannels,
       getProgrammes,
       refreshGuide,
@@ -223,6 +233,7 @@ export function useEpgWindowData({
       getProgrammes,
       hydrateChannels,
       isAtLiveWindow,
+      jumpToDay,
       jumpToLive,
       panEarlier,
       panLater,

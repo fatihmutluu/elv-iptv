@@ -13,6 +13,7 @@ export interface UseShellSourcesOptions {
 export interface ShellSourcesState {
   readonly sources: readonly SourceRow[];
   readonly sourcesRef: { readonly current: readonly SourceRow[] };
+  readonly autoImportedIdsRef: { readonly current: ReadonlySet<string> };
   readonly sourcesResolved: boolean;
   readonly refreshToken: number;
   readonly catalogRevision: number;
@@ -110,6 +111,7 @@ export function useShellSources({
   return {
     sources,
     sourcesRef,
+    autoImportedIdsRef,
     sourcesResolved,
     refreshToken,
     catalogRevision,

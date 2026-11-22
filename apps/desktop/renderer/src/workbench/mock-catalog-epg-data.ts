@@ -1,14 +1,25 @@
+import {
+  EPG_FLAG_LIVE,
+  EPG_FLAG_NEW,
+  EPG_FLAG_PREMIERE,
+  EPG_FLAG_REPEAT,
+  type EpgGenre,
+} from '@elv/data';
+
 interface WorkbenchSlotTemplate {
   readonly title: string;
   readonly subTitle: string | null;
   readonly description: string;
   readonly episodeNum: string | null;
   readonly durationMin: number;
+  readonly genre: EpgGenre;
+  readonly flags: number;
 }
 
 export interface WorkbenchChannelSchedule {
   readonly guideId: string;
   readonly offsetMin: number;
+  readonly genre: EpgGenre;
   readonly slots: readonly WorkbenchSlotTemplate[];
 }
 
@@ -18,19 +29,33 @@ const s = (
   description: string,
   subTitle: string | null = null,
   episodeNum: string | null = null,
-): WorkbenchSlotTemplate => ({ title, subTitle, description, episodeNum, durationMin });
+  genre: EpgGenre = 'other',
+  flags = 0,
+): WorkbenchSlotTemplate => ({
+  title,
+  subTitle,
+  description,
+  episodeNum,
+  durationMin,
+  genre,
+  flags,
+});
 
 /** Synthetic rotating 45–60 min EPG schedules for all 10 UI Workbench live channels (zero third-party brands). */
 export const WORKBENCH_SCHEDULES: Readonly<Record<string, WorkbenchChannelSchedule>> = {
   'wb:live:101': {
     guideId: 'wb-guide-101',
     offsetMin: 0,
+    genre: 'movie',
     slots: [
       s(
         'Silent Horizon: Showcase',
         60,
         'Widescreen restoration with commentary on coastal cinematography.',
         '4K Restoration',
+        null,
+        'movie',
+        EPG_FLAG_PREMIERE,
       ),
       s(
         'Amber Courtyard',
@@ -65,12 +90,16 @@ export const WORKBENCH_SCHEDULES: Readonly<Record<string, WorkbenchChannelSchedu
   'wb:live:102': {
     guideId: 'wb-guide-102',
     offsetMin: 15,
+    genre: 'movie',
     slots: [
       s(
         'Harbour Telegraph',
         60,
         'Classic monochrome rail drama restored from studio archival prints.',
         '1954 Archive',
+        null,
+        'movie',
+        EPG_FLAG_REPEAT,
       ),
       s('The Brass Compass', 50, 'Voyage aboard a survey schooner charting remote fjord channels.'),
       s(
@@ -99,6 +128,7 @@ export const WORKBENCH_SCHEDULES: Readonly<Record<string, WorkbenchChannelSchedu
   'wb:live:103': {
     guideId: 'wb-guide-103',
     offsetMin: 30,
+    genre: 'series',
     slots: [
       s(
         'Rain on Fourth Pier',
@@ -106,6 +136,8 @@ export const WORKBENCH_SCHEDULES: Readonly<Record<string, WorkbenchChannelSchedu
         'A night watchman deciphers an unmarked shipping ledger on the dock.',
         'Noir Anthology',
         'S1E07',
+        'series',
+        EPG_FLAG_NEW,
       ),
       s(
         'Shadow Over Canal Street',
@@ -133,12 +165,16 @@ export const WORKBENCH_SCHEDULES: Readonly<Record<string, WorkbenchChannelSchedu
   'wb:live:104': {
     guideId: 'wb-guide-104',
     offsetMin: 45,
+    genre: 'series',
     slots: [
       s(
         'Solstice Chamber Concert',
         60,
         'String quartet performs contemporary suites from the courtyard hall.',
         'Live Stage',
+        null,
+        'series',
+        EPG_FLAG_LIVE,
       ),
       s(
         'Backstage Craft',
@@ -172,18 +208,25 @@ export const WORKBENCH_SCHEDULES: Readonly<Record<string, WorkbenchChannelSchedu
   'wb:live:201': {
     guideId: 'wb-guide-201',
     offsetMin: 10,
+    genre: 'sports',
     slots: [
       s(
         'Matchday Tactical Preview',
         45,
         'Analysts break down pressing lines, midfield shape, and set pieces.',
         'Pre-Match',
+        null,
+        'sports',
+        EPG_FLAG_LIVE,
       ),
       s(
         'Northern Cup: First Half',
         60,
         'Live stadium coverage from the coastal arena under evening lights.',
         'Live Fixture',
+        null,
+        'sports',
+        EPG_FLAG_LIVE | EPG_FLAG_PREMIERE,
       ),
       s(
         'Pitch Side Analysis',
@@ -208,12 +251,16 @@ export const WORKBENCH_SCHEDULES: Readonly<Record<string, WorkbenchChannelSchedu
   'wb:live:202': {
     guideId: 'wb-guide-202',
     offsetMin: 25,
+    genre: 'sports',
     slots: [
       s(
         'Grid Walk & Telemetry',
         45,
         'Engineers examine aero setups, brake cooling, and track surface grip.',
         'Paddock Live',
+        null,
+        'sports',
+        EPG_FLAG_LIVE,
       ),
       s(
         'Endurance Circuit: Stint 1',
@@ -244,12 +291,16 @@ export const WORKBENCH_SCHEDULES: Readonly<Record<string, WorkbenchChannelSchedu
   'wb:live:203': {
     guideId: 'wb-guide-203',
     offsetMin: 40,
+    genre: 'sports',
     slots: [
       s(
         'Center Court Warmup',
         45,
         'Serve speed telemetry and return positioning ahead of first serve.',
         'Court Live',
+        null,
+        'sports',
+        EPG_FLAG_LIVE,
       ),
       s(
         'Harbour Open: Quarterfinal',
@@ -283,12 +334,16 @@ export const WORKBENCH_SCHEDULES: Readonly<Record<string, WorkbenchChannelSchedu
   'wb:live:301': {
     guideId: 'wb-guide-301',
     offsetMin: 5,
+    genre: 'news',
     slots: [
       s(
         'World Desk Briefing',
         60,
         'Top international headlines, maritime logistics, and field dispatches.',
         'Live Desk',
+        null,
+        'news',
+        EPG_FLAG_LIVE,
       ),
       s(
         'Civic & Science Hour',
@@ -321,12 +376,16 @@ export const WORKBENCH_SCHEDULES: Readonly<Record<string, WorkbenchChannelSchedu
   'wb:live:302': {
     guideId: 'wb-guide-302',
     offsetMin: 20,
+    genre: 'news',
     slots: [
       s(
         'Opening Bell Ledger',
         60,
         'Equities, sovereign yields, and shipping freight indices at market open.',
         'Markets',
+        null,
+        'news',
+        EPG_FLAG_LIVE,
       ),
       s(
         'Supply Chain Pulse',
@@ -360,12 +419,16 @@ export const WORKBENCH_SCHEDULES: Readonly<Record<string, WorkbenchChannelSchedu
   'wb:live:303': {
     guideId: 'wb-guide-303',
     offsetMin: 35,
+    genre: 'news',
     slots: [
       s(
         'Continental Radar Loop',
         45,
         'High-resolution precipitation bands, jet stream ridges, and fronts.',
         'Live Radar',
+        null,
+        'news',
+        EPG_FLAG_LIVE | EPG_FLAG_NEW,
       ),
       s(
         'Coastal & Marine Forecast',

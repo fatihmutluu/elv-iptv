@@ -45,6 +45,7 @@ import {
   isPositiveId,
   isRecord,
   isSafeInt,
+  isSafeRecentChannelKey,
   isSaveProgressInput,
   isSaveTrackPreferenceInput,
   isSearchOptions,
@@ -132,7 +133,9 @@ export type CatalogRpcMethodCall =
   | { method: 'listFavoriteKeys'; profileId?: string }
   | { method: 'getTrackPreference'; scopeKey: string; profileId?: string }
   | { method: 'saveTrackPreference'; input: SaveTrackPreferenceInput }
-  | { method: 'clearTrackPreference'; scopeKey: string; profileId?: string };
+  | { method: 'clearTrackPreference'; scopeKey: string; profileId?: string }
+  | { method: 'recordRecentChannel'; itemKey: string; sourceId: string; profileId?: string }
+  | { method: 'listRecentChannels'; limit?: number; profileId?: string };
 
 /** Preload to utility process over `MessagePort`. */
 export type CatalogClientMessage =
@@ -219,6 +222,8 @@ export interface CatalogBridge {
   ): Promise<PersistedTrackPreference | null>;
   saveTrackPreference?(input: SaveTrackPreferenceInput): Promise<void>;
   clearTrackPreference?(scopeKey: string, profileId?: string): Promise<void>;
+  recordRecentChannel?(itemKey: string, sourceId: string, profileId?: string): Promise<void>;
+  listRecentChannels?(limit?: number, profileId?: string): Promise<ItemRow[]>;
   onChanged(listener: () => void): () => void;
   /** Subscribes to unexpected `catalog-worker` disconnect notifications (`#435`). */
   onDisconnected(listener: (message: CatalogDisconnectedMessage) => void): () => void;
@@ -321,6 +326,14 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
       return isCleanKey(x['scopeKey']) && isOptionalProfileId(x['profileId']);
     case 'saveTrackPreference':
       return isSaveTrackPreferenceInput(x['input']);
+    case 'recordRecentChannel':
+      return (
+        isSafeRecentChannelKey(x['itemKey']) &&
+        isCleanKey(x['sourceId'], MAX_ID_CHARS) &&
+        isOptionalProfileId(x['profileId'])
+      );
+    case 'listRecentChannels':
+      return isOptionalUserLimit(x['limit']) && isOptionalProfileId(x['profileId']);
     default:
       return false;
   }

@@ -18,6 +18,7 @@ export const EMPTY_HOME_SNAPSHOT: CachedHomeSnapshot = {
   progressByKey: new Map<string, WatchProgressRow>(),
   liveCategory: null,
   liveItems: [],
+  recentChannels: [],
   movies: [],
   series: [],
 };

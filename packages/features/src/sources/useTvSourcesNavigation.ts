@@ -110,6 +110,14 @@ function buildSourcesFocusItems(
         rowGroup,
         run: () => void ctrl.runImport(source.id),
       });
+      if (!source.needsImport && ctrl.canRefreshGuide) {
+        items.push({
+          id: `source-guide-${source.id}`,
+          kind: 'action',
+          rowGroup,
+          run: () => void ctrl.runGuideRefresh(source.id),
+        });
+      }
     }
     items.push({
       id: `source-remove-${source.id}`,

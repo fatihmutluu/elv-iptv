@@ -1,4 +1,4 @@
-import type { ItemRow, NowNextEntry } from '@elv/data';
+import type { ItemRow, NowNextEntry, ProgrammeRow } from '@elv/data';
 import type { LogoBackdropModePref } from '@elv/domain';
 import {
   ArtworkImage,
@@ -12,7 +12,7 @@ import {
   webTransition,
 } from '@elv/ui-kit';
 import { memo, type ReactElement, useCallback } from 'react';
-import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { computeProgramProgress, formatLiveTitle } from './live-model';
 import { SourceBadgePill } from './SourceBadgePill';
 import { formatChannelDisplayName, type SourceBadgeInfo } from './source-badge';
@@ -71,6 +71,11 @@ export const ChannelGridTile = memo(function ChannelGridTileInner(p: {
   readonly sourceBadge?: SourceBadgeInfo | null;
   readonly onWatchChannel: (channel: ItemRow, index: number) => void;
   readonly onToggleFavorite?: (channel: ItemRow) => void;
+  readonly onOpenContextMenu?: (
+    channel: ItemRow,
+    index: number,
+    programme: ProgrammeRow | null,
+  ) => void;
 }): ReactElement {
   const theme = useTheme();
   const cursor = webCursorPointer();
@@ -81,6 +86,19 @@ export const ChannelGridTile = memo(function ChannelGridTileInner(p: {
   const handleToggleFavorite = useCallback(() => {
     if (p.item) p.onToggleFavorite?.(p.item);
   }, [p.item, p.onToggleFavorite]);
+  const handleLongPress = useCallback(() => {
+    if (p.item) p.onOpenContextMenu?.(p.item, p.itemIndex, p.nowNext?.now ?? null);
+  }, [p.item, p.itemIndex, p.nowNext?.now, p.onOpenContextMenu]);
+  const isWeb = (Platform.OS as string) === 'web';
+  const webContextProps =
+    isWeb && p.item !== undefined && p.onOpenContextMenu !== undefined
+      ? ({
+          onContextMenu: (e?: { preventDefault?: () => void }) => {
+            e?.preventDefault?.();
+            if (p.item) p.onOpenContextMenu?.(p.item, p.itemIndex, p.nowNext?.now ?? null);
+          },
+        } as Record<string, unknown>)
+      : undefined;
 
   if (!p.item) {
     return (
@@ -111,6 +129,10 @@ export const ChannelGridTile = memo(function ChannelGridTileInner(p: {
           accessibilityState={{ selected: p.isActive }}
           focusable={!p.shared.isTv}
           onPress={handlePress}
+          {...(p.onOpenContextMenu !== undefined
+            ? { onLongPress: handleLongPress, delayLongPress: 450 }
+            : {})}
+          {...webContextProps}
           style={({ pressed }) => [styles.tileBody, { opacity: pressed ? 0.86 : 1 }, cursor]}
         >
           <ArtworkImage
@@ -209,6 +231,11 @@ export const ChannelGridRow = memo(function ChannelGridRowInner(p: {
   readonly focusedCol: number | null;
   readonly onWatchChannel: (channel: ItemRow, index: number) => void;
   readonly onToggleFavorite?: (channel: ItemRow) => void;
+  readonly onOpenContextMenu?: (
+    channel: ItemRow,
+    index: number,
+    programme: ProgrammeRow | null,
+  ) => void;
 }): ReactElement {
   const padCount = Math.max(0, p.shared.cols - p.items.length);
   return (
@@ -235,6 +262,9 @@ export const ChannelGridRow = memo(function ChannelGridRowInner(p: {
             sourceBadge={item ? (p.sourceBadges?.get(item.sourceId) ?? null) : null}
             onWatchChannel={p.onWatchChannel}
             {...(p.onToggleFavorite !== undefined ? { onToggleFavorite: p.onToggleFavorite } : {})}
+            {...(p.onOpenContextMenu !== undefined
+              ? { onOpenContextMenu: p.onOpenContextMenu }
+              : {})}
           />
         );
       })}

@@ -374,7 +374,20 @@ export function createObservedCatalog(
     ...(c.listFavoriteKeys ? { listFavoriteKeys: c.listFavoriteKeys.bind(c) } : {}),
     ...(c.flushPendingWrites ? { flushPendingWrites: c.flushPendingWrites.bind(c) } : {}),
     ...(c.search ? { search: c.search.bind(c) } : {}),
-    ...(c.importGuide ? { importGuide: c.importGuide.bind(c) } : {}),
+    ...(c.importGuide
+      ? {
+          importGuide: async (
+            id: Parameters<NonNullable<CatalogService['importGuide']>>[0],
+            opts?: Parameters<NonNullable<CatalogService['importGuide']>>[1],
+          ) => {
+            const fn = c.importGuide;
+            if (fn === undefined) throw new Error('importGuide unavailable');
+            const res = await fn.call(c, id, opts);
+            await syncSourcesAndBump();
+            return res;
+          },
+        }
+      : {}),
     ...(c.latestImportHealth ? { latestImportHealth: c.latestImportHealth.bind(c) } : {}),
     ...(c.nowNext ? { nowNext: c.nowNext.bind(c) } : {}),
     ...(c.epgWindow ? { epgWindow: c.epgWindow.bind(c) } : {}),
@@ -383,6 +396,8 @@ export function createObservedCatalog(
     ...(c.getTrackPreference ? { getTrackPreference: c.getTrackPreference.bind(c) } : {}),
     ...(c.saveTrackPreference ? { saveTrackPreference: c.saveTrackPreference.bind(c) } : {}),
     ...(c.clearTrackPreference ? { clearTrackPreference: c.clearTrackPreference.bind(c) } : {}),
+    ...(c.recordRecentChannel ? { recordRecentChannel: c.recordRecentChannel.bind(c) } : {}),
+    ...(c.listRecentChannels ? { listRecentChannels: c.listRecentChannels.bind(c) } : {}),
     close: () => c.close(),
   };
 }

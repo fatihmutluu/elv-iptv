@@ -236,6 +236,8 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'episode_num', alterDefinition: 'TEXT' },
     { name: 'icon', alterDefinition: 'TEXT' },
     { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'genre', alterDefinition: 'TEXT' },
+    { name: 'flags', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
   ],
   programmes_next: [
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
@@ -249,6 +251,8 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'episode_num', alterDefinition: 'TEXT' },
     { name: 'icon', alterDefinition: 'TEXT' },
     { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'genre', alterDefinition: 'TEXT' },
+    { name: 'flags', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
   ],
   watch_progress: [
     { name: 'profile_id', alterDefinition: "TEXT NOT NULL DEFAULT 'default'" },
@@ -290,5 +294,11 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'sub_delay_ms', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'resize_mode', alterDefinition: 'TEXT' },
     { name: 'updated_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+  ],
+  recent_channels: [
+    { name: 'profile_id', alterDefinition: "TEXT NOT NULL DEFAULT 'default'" },
+    { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'item_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'watched_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
   ],
 };

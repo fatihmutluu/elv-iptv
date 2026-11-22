@@ -20,6 +20,7 @@ import {
 } from './home-data-helpers';
 
 const HOME_CONTINUE_LIMIT = 16;
+const HOME_RECENT_CHANNELS_LIMIT = 20;
 const HOME_FAVORITES_LIMIT = 24;
 const HOME_LIVE_LIMIT = 12;
 const HOME_MOVIES_LIMIT = 18;
@@ -146,16 +147,19 @@ export function useHomeData({
 
     const run = async () => {
       try {
-        const [cwRows, favRows, favKeys, firstLive, firstMovie, firstSeries] = await Promise.all([
-          catalog.listContinueWatching?.(HOME_CONTINUE_LIMIT).catch(() => []) ??
-            Promise.resolve([] as WatchProgressRow[]),
-          catalog.listFavorites?.(HOME_FAVORITES_LIMIT).catch(() => []) ??
-            Promise.resolve([] as FavoriteRow[]),
-          catalog.listFavoriteKeys?.().catch(() => []) ?? Promise.resolve([] as string[]),
-          fetchHomeKindCategory(catalog, activeSources, 'live'),
-          fetchHomeKindCategory(catalog, activeSources, 'movie'),
-          fetchHomeKindCategory(catalog, activeSources, 'series'),
-        ]);
+        const [cwRows, recentChannelRows, favRows, favKeys, firstLive, firstMovie, firstSeries] =
+          await Promise.all([
+            catalog.listContinueWatching?.(HOME_CONTINUE_LIMIT).catch(() => []) ??
+              Promise.resolve([] as WatchProgressRow[]),
+            catalog.listRecentChannels?.(HOME_RECENT_CHANNELS_LIMIT).catch(() => []) ??
+              Promise.resolve([] as ItemRow[]),
+            catalog.listFavorites?.(HOME_FAVORITES_LIMIT).catch(() => []) ??
+              Promise.resolve([] as FavoriteRow[]),
+            catalog.listFavoriteKeys?.().catch(() => []) ?? Promise.resolve([] as string[]),
+            fetchHomeKindCategory(catalog, activeSources, 'live'),
+            fetchHomeKindCategory(catalog, activeSources, 'movie'),
+            fetchHomeKindCategory(catalog, activeSources, 'series'),
+          ]);
         if (cancelled) return;
 
         const [liveRows, movieRows, seriesRows] = await Promise.all([
@@ -200,6 +204,7 @@ export function useHomeData({
           progressByKey: nextProgress,
           liveCategory: firstLive,
           liveItems: liveRows,
+          recentChannels: recentChannelRows,
           movies: movieRows,
           series: seriesRows,
         };

@@ -113,6 +113,8 @@ describe('queryCrossChannelEpgSlice (#113)', () => {
         description: 'Desc B',
         episodeNum: 'S01E01',
         icon: 'http://img/b.png',
+        genre: null,
+        flags: 0,
       });
 
       // Verify EXPLAIN QUERY PLAN uses idx_programmes_source_start_stop and never full-table SCANs programmes

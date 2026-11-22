@@ -64,7 +64,7 @@ export interface HomeRailEntry {
 }
 
 /** Semantic identifier of each Home horizontal rail. */
-export type HomeRailKind = 'continue' | 'live' | 'mylist' | 'movies' | 'series';
+export type HomeRailKind = 'continue' | 'recentChannels' | 'live' | 'mylist' | 'movies' | 'series';
 
 const MIN_CARD_WIDTH = 88;
 const LIVE_PLAYLIST_PAGE_SIZE = 60;
@@ -285,6 +285,7 @@ export function buildHomeLivePlayTarget(
 /** Input for {@link buildHomeRailSets}. */
 export interface BuildHomeRailSetsInput {
   readonly continueWatching: readonly WatchProgressRow[];
+  readonly recentChannels?: readonly ItemRow[];
   readonly liveItems: readonly ItemRow[];
   readonly liveCategoryName: string | null;
   readonly favorites: readonly FavoriteRow[];
@@ -321,6 +322,30 @@ export function buildHomeRailSets(input: BuildHomeRailSetsInput): HomeRailSets {
       };
     });
 
+  const seenRecent = new Set<string>();
+  const recentChannels: HomeRailEntry[] = [];
+  for (const item of input.recentChannels ?? []) {
+    if (recentChannels.length >= 20 || seenRecent.has(item.key)) continue;
+    seenRecent.add(item.key);
+    recentChannels.push({
+      itemKey: item.key,
+      sourceId: item.sourceId,
+      kind: 'live',
+      title: formatLiveChannelName(item),
+      subtitle: null,
+      backdropUri: item.logo,
+      posterUri: item.logo,
+      year: null,
+      rating: null,
+      durationMs: 0,
+      positionMs: 0,
+      watched: false,
+      live: true,
+      channelNum: item.num,
+      catalogItem: item,
+    });
+  }
+
   return {
     continue: input.continueWatching.map((row) => ({
       itemKey: row.itemKey,
@@ -336,6 +361,7 @@ export function buildHomeRailSets(input: BuildHomeRailSetsInput): HomeRailSets {
       positionMs: row.positionMs,
       watched: row.watched,
     })),
+    recentChannels,
     live: input.liveItems.map((item) => ({
       itemKey: item.key,
       sourceId: item.sourceId,

@@ -78,6 +78,8 @@ export interface UseTvLiveNavigationOptions {
   readonly onPressNumpadKey: (key: string) => void;
   readonly onActivateWatchControl: (control: LiveWatchControl) => void;
   readonly onSelectZapIndex: (index: number) => void;
+  readonly onOpenZapContextMenu?: (index: number) => void;
+  readonly onJumpPreviousChannel?: () => void;
   readonly onOpenSources: () => void;
   readonly onFocusTopNav?: () => void;
 }
@@ -250,7 +252,16 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
         return true;
       }
 
-      if (event.kind !== 'press' && event.kind !== 'repeat') return false;
+      if (
+        event.kind === 'press' &&
+        event.key === 'lastChannel' &&
+        (o.mode === 'channels' || o.mode === 'epg')
+      ) {
+        o.onJumpPreviousChannel?.();
+        return true;
+      }
+
+      if (event.kind !== 'press' && event.kind !== 'repeat' && event.kind !== 'long') return false;
       if (o.isEmpty) {
         if (event.key === 'up') {
           o.onFocusTopNav?.();
@@ -342,7 +353,12 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
           zapIdx: Math.min(Math.max(0, o.channelCount - 1), p.zapIdx + 1),
         }));
       else if (event.key === 'right') updateNav((p) => ({ ...p, watchZone: 'controls' }));
-      else if (event.key === 'select' && event.kind === 'press') o.onSelectZapIndex(cur.zapIdx);
+      else if (
+        (event.key === 'select' && event.kind === 'long') ||
+        (event.key === 'menu' && event.kind === 'press')
+      ) {
+        o.onOpenZapContextMenu?.(cur.zapIdx);
+      } else if (event.key === 'select' && event.kind === 'press') o.onSelectZapIndex(cur.zapIdx);
       else return false;
       return true;
     },
