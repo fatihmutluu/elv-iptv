@@ -1,3 +1,5 @@
+import { MIGRATION_V5 } from './schema-v5';
+
 export {
   EXPECTED_FTS_TABLES,
   EXPECTED_TABLE_COLUMNS,
@@ -274,4 +276,5 @@ INSERT INTO series_fts(series_fts) VALUES ('rebuild');
   `
 CREATE INDEX IF NOT EXISTS idx_programmes_source_start_stop ON programmes (source_id, start, stop);
 `,
+  MIGRATION_V5,
 ];

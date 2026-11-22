@@ -82,7 +82,9 @@ async function sourceEntries(db: SqlDriver): Promise<ManifestEntry[]> {
     name: string;
     created_at: number;
     settings_json: string;
-  }>('SELECT id, kind, name, created_at, settings_json FROM sources ORDER BY created_at, id');
+  }>(
+    'SELECT id, kind, name, created_at, settings_json FROM sources WHERE deleting = 0 ORDER BY created_at, id',
+  );
   return rows.map((r) => ({
     id: r.id,
     kind: r.kind,

@@ -1,4 +1,5 @@
 import { type ElvError, elvError, err, ok, type Result, type SqlDriver } from '@elv/domain';
+import { finishDeletingSource, purgeStagedCatalog } from './sources';
 
 const RUN_TABLES: ReadonlySet<string> = new Set([
   'categories',
@@ -11,9 +12,12 @@ const RUN_TABLES: ReadonlySet<string> = new Set([
   'programmes',
 ]);
 
-/** Whether the `sources` row still exists; inside a transaction it cannot vanish before the commit. */
+/** Whether the active (`deleting = 0`) `sources` row still exists; inside a transaction it cannot vanish before commit. */
 export async function sourceExists(db: SqlDriver, sourceId: string): Promise<boolean> {
-  return (await db.all('SELECT 1 FROM sources WHERE id = ? LIMIT 1', [sourceId])).length > 0;
+  return (
+    (await db.all('SELECT 1 FROM sources WHERE id = ? AND deleting = 0 LIMIT 1', [sourceId]))
+      .length > 0
+  );
 }
 
 /**
@@ -167,22 +171,43 @@ export async function removeStaleCatalog(
 export interface ReapOrphanedRunsResult {
   reapedRuns: number;
   purgedProgrammes: number;
+  purgedStaged: number;
+  completedDeletes: number;
 }
 
 /**
- * Marks every `running` run as `failed` (`storage/interrupted`) and purges any leftover staged rows in
- * `programmes_next` inside a single transaction. Call once when the catalog is opened.
+ * Marks every `running` run as `failed` (`storage/interrupted`), purges leftover staged rows in
+ * `programmes_next` and all 6 catalog `*_next` tables in one transaction, and finishes purging any
+ * `sources` left with `deleting = 1` by a mid-delete crash. Call once when the catalog is opened.
  */
 export async function reapOrphanedRuns(
   db: SqlDriver,
   now: number,
 ): Promise<ReapOrphanedRunsResult> {
-  return db.transaction(async (tx) => {
-    const runsRes = await tx.run(
-      "UPDATE import_runs SET finished_at = ?, status = 'failed', error_category = 'storage', error_code = 'interrupted' WHERE status = 'running'",
-      [now],
-    );
-    const progRes = await tx.run('DELETE FROM programmes_next');
-    return { reapedRuns: runsRes.changes, purgedProgrammes: progRes.changes };
-  });
+  const { reapedRuns, purgedProgrammes, purgedStaged, deletingIds } = await db.transaction(
+    async (tx) => {
+      const runsRes = await tx.run(
+        "UPDATE import_runs SET finished_at = ?, status = 'failed', error_category = 'storage', error_code = 'interrupted' WHERE status = 'running'",
+        [now],
+      );
+      const progRes = await tx.run('DELETE FROM programmes_next');
+      const stagedCount = await purgeStagedCatalog(tx);
+      const deleting = await tx.all<{ id: string }>('SELECT id FROM sources WHERE deleting = 1');
+      return {
+        reapedRuns: runsRes.changes,
+        purgedProgrammes: progRes.changes,
+        purgedStaged: stagedCount,
+        deletingIds: deleting.map((r) => r.id),
+      };
+    },
+  );
+  for (const id of deletingIds) {
+    await finishDeletingSource(db, id);
+  }
+  return {
+    reapedRuns,
+    purgedProgrammes,
+    purgedStaged,
+    completedDeletes: deletingIds.length,
+  };
 }

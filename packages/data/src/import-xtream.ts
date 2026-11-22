@@ -266,7 +266,7 @@ async function execute(c: Ctx, includePlaceholders: boolean): Promise<XtreamAcco
 }
 
 const KEEP_EPISODES =
-  'UPDATE episodes SET run_id = ? WHERE source_id = ? AND series_key IN (SELECT key FROM series WHERE source_id = ? AND run_id = ?)';
+  'UPDATE episodes SET run_id = ? WHERE source_id = ? AND series_key IN (SELECT key FROM series_next WHERE source_id = ? AND run_id = ?)';
 
 async function importXtream(
   source: SourceRecord,

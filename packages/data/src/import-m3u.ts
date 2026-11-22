@@ -1,4 +1,5 @@
 import {
+  type ContentKind,
   elvError,
   err,
   type HttpResponse,
@@ -31,7 +32,9 @@ import {
   type M3uBrowseKind,
   M3uEntryGate,
   type M3uImportState,
+  placeM3uEntry,
   type StagedM3u,
+  stableM3uKey,
 } from './m3u-gate';
 import { entryHeaders, templated } from './m3u-headers';
 import { MAX_URLVARS_BYTES, SAMPLE_SIZE } from './m3u-templating';
@@ -50,7 +53,6 @@ import { writeCategories, writePlacements } from './writers';
 import {
   type M3uLiveRow,
   type M3uRow,
-  rollbackUnresolvedM3uRows,
   writeM3uEpisodes,
   writeM3uLive,
   writeM3uMovies,
@@ -61,7 +63,12 @@ const REQUEST_TIMEOUT_MS = 180_000;
 const UNGROUPED = 'Ungrouped';
 
 type PlaylistOpen =
-  | { kind: 'body'; body: AsyncIterable<Uint8Array>; validator: HttpCacheValidator | undefined }
+  | {
+      kind: 'body';
+      body: AsyncIterable<Uint8Array>;
+      validator: HttpCacheValidator | undefined;
+      finalUrl: string;
+    }
   | { kind: 'not-modified'; validator: HttpCacheValidator | undefined };
 
 type M3uOutcome =
@@ -101,42 +108,21 @@ async function openPlaylist(
   } catch {
     throw new Stop(elvError('network', signal?.aborted ? 'aborted' : 'request-failed'));
   }
-  const { status, body, headers } = unwrap(response);
+  const { status, body, headers, finalUrl } = unwrap(response);
   const validator = extractValidators(headers);
   if (status === 304 && sent !== undefined) {
     await discard(body);
     return { kind: 'not-modified', validator };
   }
-  if (status >= 200 && status < 300) return { kind: 'body', body, validator };
+  if (status >= 200 && status < 300) {
+    return { kind: 'body', body, validator, finalUrl: finalUrl ?? url };
+  }
   await discard(body);
   throw new Stop(httpStatusError(status));
 }
 
 const groupsOf = (entry: M3uEntry): readonly string[] =>
   entry.groups.length === 0 ? [UNGROUPED] : entry.groups;
-
-function place(
-  st: M3uImportState,
-  kind: M3uBrowseKind,
-  key: string,
-  groups: readonly string[],
-  fresh: Map<M3uBrowseKind, string[]>,
-  links: Record<M3uBrowseKind, [string, string, number][]>,
-): void {
-  const known = st.categories[kind];
-  for (const group of groups) {
-    if (!known.has(group)) {
-      known.set(group, known.size);
-      const list = fresh.get(kind) ?? [];
-      if (!fresh.has(kind)) fresh.set(kind, list);
-      list.push(group);
-    }
-    const slot = `${kind}\n${group}`;
-    const position = st.positions.get(slot) ?? 0;
-    st.positions.set(slot, position + 1);
-    links[kind].push([key, group, position]);
-  }
-}
 
 async function processBatch(
   c: RunCtx,
@@ -156,14 +142,21 @@ async function processBatch(
     series: [],
   };
   for (const entry of entries) {
-    const isLive = !vod && entry.kindHint !== 'movie' && entry.kindHint !== 'episode';
-    if (isLive && filterPlaceholders && isPlaceholderLiveChannel({ name: entry.name })) {
+    const kind: ContentKind =
+      vod || entry.kindHint === 'movie'
+        ? 'movie'
+        : entry.kindHint === 'episode'
+          ? 'episode'
+          : 'live';
+    if (kind === 'live' && filterPlaceholders && isPlaceholderLiveChannel({ name: entry.name })) {
       c.counts.skippedPlaceholders = (c.counts.skippedPlaceholders ?? 0) + 1;
       continue;
     }
     const template = templated(st, entry.url);
+    const legacyKey = m3uKey(c.sourceId, keyTemplate(template), entry.name);
     const row: M3uRow = {
-      key: m3uKey(c.sourceId, keyTemplate(template), entry.name),
+      key: stableM3uKey(st, c.sourceId, kind, entry, legacyKey),
+      legacyKey,
       name: entry.name,
       logo: entry.tvgLogo === undefined ? null : templated(st, entry.tvgLogo),
       template,
@@ -172,10 +165,10 @@ async function processBatch(
     if (st.book.byteLength > MAX_URLVARS_BYTES) {
       throw new Stop(elvError('source-format', 'urlvars-too-large'));
     }
-    if (vod || entry.kindHint === 'movie') {
+    if (kind === 'movie') {
       movies.push(row);
       st.written.movies += 1;
-      place(st, 'movie', row.key, groupsOf(entry), fresh, links);
+      placeM3uEntry(st, 'movie', row.key, groupsOf(entry), fresh, links);
     } else if (entry.kindHint === 'episode') {
       const group = entry.groups[0] ?? UNGROUPED;
       const folded = foldText(group);
@@ -187,7 +180,7 @@ async function processBatch(
       const freshGroups = groups.filter((g) => !st.placedSeries.has(`${seriesKey}\n${g}`));
       if (freshGroups.length > 0) {
         st.written.series += 1;
-        place(st, 'series', seriesKey, freshGroups, fresh, links);
+        placeM3uEntry(st, 'series', seriesKey, freshGroups, fresh, links);
         for (const g of freshGroups) st.placedSeries.add(`${seriesKey}\n${g}`);
       }
     } else {
@@ -198,7 +191,7 @@ async function processBatch(
         catchupDays: entry.catchup?.days ?? entry.timeshiftDays ?? null,
       });
       st.written.live += 1;
-      place(st, 'live', row.key, groupsOf(entry), fresh, links);
+      placeM3uEntry(st, 'live', row.key, groupsOf(entry), fresh, links);
     }
   }
   for (const kind of ['live', 'movie', 'series'] as const) {
@@ -252,7 +245,7 @@ async function execute(
   }
   const scan = scanM3u(opened.body, {
     batchSize: c.batchSize,
-    baseUrl: playlistUrl,
+    baseUrl: opened.finalUrl,
     ...(c.deps.decompressor === undefined ? {} : { decompressor: c.deps.decompressor }),
   });
   const buffered: M3uEntry[] = [];
@@ -306,8 +299,9 @@ async function execute(
 }
 
 /**
- * Imports an M3U source: streams entries into catalog tables with credential-free templates and `urlvars` secrets,
- * or keeps the stored catalog untouched on conditional HTTP 304 Not Modified.
+ * Imports an M3U source: streams entries into `*_next` staging tables with credential-free templates,
+ * URL-free stable keys, and `urlvars` secrets, then atomically commits via {@link performRun} (or keeps
+ * the stored catalog untouched on conditional HTTP 304 Not Modified).
  */
 export async function importM3u(
   source: SourceRecord,
@@ -350,7 +344,7 @@ export async function importM3u(
       const { staged } = outcome;
       for (const table of ['live', 'movies', 'series', 'episodes'] as const) {
         const r = await tx.all<{ n: number }>(
-          `SELECT COUNT(*) AS n FROM ${table} WHERE source_id = ? AND run_id = ?`,
+          `SELECT COUNT(*) AS n FROM ${table}_next WHERE source_id = ? AND run_id = ?`,
           [c.sourceId, c.runId],
         );
         c.counts[table] = r[0]?.n ?? 0;
@@ -382,16 +376,13 @@ export async function importM3u(
         await deps.secrets.set(urlvarsKey, JSON.stringify(vars)).catch(() => undefined);
       }
     },
-    onAbortOrFail: async (c, outcomeKind, error) => {
+    onAbortOrFail: async (_c, outcomeKind) => {
       if (outcomeKind === 'source-removed') {
         if (secretsStaged) await deps.secrets.delete(urlvarsKey).catch(() => undefined);
         return;
       }
       if (secretsStaged) {
         await deps.secrets.set(urlvarsKey, JSON.stringify(oldVars)).catch(() => undefined);
-      }
-      if (error.code === 'urlvars-too-large' || error.code === 'secret-write-failed') {
-        await rollbackUnresolvedM3uRows(deps.db, source.id, c.runId, oldVars);
       }
     },
   });

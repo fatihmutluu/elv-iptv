@@ -1,5 +1,18 @@
 import type { SqlDriver } from '@elv/domain';
+import {
+  type CrossChannelProgrammeRow,
+  DEFAULT_EPG_SLICE_LIMIT,
+  MAX_EPG_SLICE_LIMIT,
+  queryCrossChannelEpgSlice,
+} from './guide-queries-slice';
 import { type ItemRow, sourceOfKey } from './queries';
+
+export {
+  type CrossChannelProgrammeRow,
+  DEFAULT_EPG_SLICE_LIMIT,
+  MAX_EPG_SLICE_LIMIT,
+  queryCrossChannelEpgSlice,
+};
 
 /** Hard upper bound on channel keys accepted by {@link queryNowNext}. */
 export const MAX_NOW_NEXT_KEYS = 60;
@@ -243,8 +256,11 @@ export async function queryEpgWindow(
   return out;
 }
 
-const LIVE_BY_NUM_SQL = `SELECT id, key, source_id, provider_id, name, logo, num
-  FROM live WHERE source_id = ? AND num = ? ORDER BY id LIMIT 1`;
+const LIVE_BY_NUM_SQL = `SELECT l.id, l.key, l.source_id, l.provider_id, l.name, l.logo, l.num
+  FROM live l
+  JOIN sources s ON s.id = l.source_id AND s.deleting = 0
+ WHERE l.source_id = ? AND l.num = ? AND l.is_hidden = 0
+ ORDER BY l.id LIMIT 1`;
 
 async function queryChannelByNumberInSource(
   db: SqlDriver,
@@ -281,7 +297,9 @@ export async function queryChannelByNumber(
   if (sourceId !== undefined) {
     return queryChannelByNumberInSource(db, sourceId, num);
   }
-  const sources = await db.all<{ id: string }>('SELECT id FROM sources ORDER BY created_at, id');
+  const sources = await db.all<{ id: string }>(
+    'SELECT id FROM sources WHERE deleting = 0 ORDER BY created_at, id',
+  );
   for (const src of sources) {
     const match = await queryChannelByNumberInSource(db, src.id, num);
     if (match !== undefined) return match;

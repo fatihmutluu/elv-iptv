@@ -15,6 +15,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useState } from 'react';
 import { AppState, Platform, StyleSheet, View } from 'react-native';
 import { createDeviceCatalog } from './catalog';
+import { waitForCatalogForeground } from './catalog/ios-prewarm-gate';
 import { ContractGateScreen } from './gate/contract/ContractGateScreen';
 import { CorpusGateScreen } from './gate/corpus/CorpusGateScreen';
 import { GateListScreen } from './gate/GateListScreen';
@@ -40,10 +41,12 @@ function AppRoot() {
   const openSharedCatalog = useMemo(() => {
     let cached: Promise<CatalogService> | undefined;
     return () => {
-      cached ??= createDeviceCatalog().catch((err: unknown) => {
-        cached = undefined;
-        throw err;
-      });
+      cached ??= waitForCatalogForeground(Platform.OS, AppState)
+        .then(() => createDeviceCatalog())
+        .catch((err: unknown) => {
+          cached = undefined;
+          throw err;
+        });
       return cached;
     };
   }, []);

@@ -24,7 +24,7 @@ const n = (v: number | undefined): SqlValue => v ?? null;
 const s = (v: string | undefined): SqlValue => v ?? null;
 
 export const liveWriter: ItemWriter<XtreamLive> = {
-  sql: `INSERT INTO live (source_id, key, provider_id, num, name, name_fold, logo, guide_id, catchup_days, run_id)
+  sql: `INSERT INTO live_next (source_id, key, provider_id, num, name, name_fold, logo, guide_id, catchup_days, run_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_id, key) DO UPDATE SET provider_id = excluded.provider_id, num = excluded.num,
           name = excluded.name, name_fold = excluded.name_fold, logo = excluded.logo,
@@ -44,7 +44,7 @@ export const liveWriter: ItemWriter<XtreamLive> = {
 };
 
 export const movieWriter: ItemWriter<XtreamMovie> = {
-  sql: `INSERT INTO movies (source_id, key, provider_id, name, name_fold, logo, rating, year, extension, added, run_id)
+  sql: `INSERT INTO movies_next (source_id, key, provider_id, name, name_fold, logo, rating, year, extension, added, run_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_id, key) DO UPDATE SET provider_id = excluded.provider_id, name = excluded.name,
           name_fold = excluded.name_fold, logo = excluded.logo, rating = excluded.rating, year = excluded.year,
@@ -65,7 +65,7 @@ export const movieWriter: ItemWriter<XtreamMovie> = {
 };
 
 export const seriesWriter: ItemWriter<XtreamSeries> = {
-  sql: `INSERT INTO series (source_id, key, provider_id, name, name_fold, cover, plot, rating, year, last_modified, run_id)
+  sql: `INSERT INTO series_next (source_id, key, provider_id, name, name_fold, cover, plot, rating, year, last_modified, run_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_id, key) DO UPDATE SET provider_id = excluded.provider_id, name = excluded.name,
           name_fold = excluded.name_fold, cover = excluded.cover, plot = excluded.plot, rating = excluded.rating,
@@ -85,12 +85,12 @@ export const seriesWriter: ItemWriter<XtreamSeries> = {
   ],
 };
 
-const CATEGORY_SQL = `INSERT INTO categories (source_id, kind, provider_id, name, name_fold, position, run_id)
+const CATEGORY_SQL = `INSERT INTO categories_next (source_id, kind, provider_id, name, name_fold, position, run_id)
   VALUES (?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(source_id, kind, provider_id) DO UPDATE SET name = excluded.name, name_fold = excluded.name_fold,
     position = excluded.position, run_id = excluded.run_id`;
 
-const PLACEMENT_SQL = `INSERT INTO placements (source_id, kind, item_key, category_id, position, run_id)
+const PLACEMENT_SQL = `INSERT INTO placements_next (source_id, kind, item_key, category_id, position, run_id)
   VALUES (?, ?, ?, ?, ?, ?)
   ON CONFLICT(source_id, kind, category_id, item_key) DO UPDATE SET position = excluded.position,
     run_id = excluded.run_id`;

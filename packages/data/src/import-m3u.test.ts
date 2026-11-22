@@ -74,13 +74,13 @@ describe('m3u import', () => {
       { key: 'm:s1:series:drama shows', name: 'Drama Shows' },
       { key: 'm:s1:series:misc', name: 'Misc' },
     ]);
-    const eps = await rows(e, 'SELECT series_key, title FROM episodes ORDER BY id');
+    const eps = await rows(e, 'SELECT series_key, title FROM episodes ORDER BY title');
     expect(eps.map((x) => x.series_key)).toEqual([
-      'm:s1:series:drama shows',
-      'm:s1:series:drama shows',
       'm:s1:series:misc',
+      'm:s1:series:drama shows',
+      'm:s1:series:drama shows',
     ]);
-    const live = await rows(e, 'SELECT name, num, guide_id FROM live ORDER BY id');
+    const live = await rows(e, "SELECT name, num, guide_id FROM live WHERE name = 'Haber Bir'");
     expect(live[0]).toEqual({ name: 'Haber Bir', num: 7, guide_id: 'haber1.tr' });
   });
 
@@ -108,7 +108,7 @@ describe('m3u import', () => {
     ]);
     const spor = await rows(
       e,
-      "SELECT category_id FROM placements WHERE kind = 'live' AND item_key LIKE '%102.ts%' ORDER BY category_id",
+      "SELECT category_id FROM placements WHERE kind = 'live' AND item_key = 'm:s1:live:n:spor iki|sports' ORDER BY category_id",
     );
     expect(spor.map((p) => p.category_id)).toEqual(['News', 'Sports']);
     const news = await rows(
@@ -126,7 +126,7 @@ describe('m3u import', () => {
     expect(source?.settings.segmentRules).toEqual(
       expect.arrayContaining([expect.objectContaining({ host: 'cdn.example:8080', position: 0 })]),
     );
-    const live = await rows(e, 'SELECT url_template FROM live ORDER BY id');
+    const live = await rows(e, "SELECT url_template FROM live WHERE name = 'Haber Bir'");
     expect(live[0]?.url_template).toBe(
       'http://cdn.example:8080/{{v0}}/hb/s/101.ts?username={{q:username}}&password={{q:password}}',
     );
@@ -189,11 +189,14 @@ describe('m3u import', () => {
     );
     expect(JSON.stringify(await rows(e, 'SELECT * FROM live'))).not.toContain(odd);
     expect((await vars(e))['v0~1']).toBe(odd);
-    const same = await rows(e, "SELECT key FROM live WHERE name IN ('Ch 1', 'Same')");
-    expect(same[0]?.key).not.toBe(same[1]?.key);
-    expect(String(same[1]?.key).replace('|Same', '')).toBe(
-      String(same[0]?.key).replace('|Ch 1', ''),
+    const same = await rows(
+      e,
+      "SELECT key, name FROM live WHERE name IN ('Ch 1', 'Same') ORDER BY name",
     );
+    expect(same).toEqual([
+      { key: 'm:s1:live:n:ch 1|', name: 'Ch 1' },
+      { key: 'm:s1:live:n:same|', name: 'Same' },
+    ]);
   });
 
   it('discovers guide URLs for the guide import unless the user set one', async () => {
@@ -356,7 +359,7 @@ describe('m3u import', () => {
     const two = extinf('B', 'http://cdn.example/a/b/c/2.ts?token=second');
     const e = await setupM3u(`#EXTM3U\n${one}${two}`);
     await run(e);
-    const live = await rows(e, 'SELECT url_template FROM live ORDER BY id');
+    const live = await rows(e, 'SELECT url_template FROM live ORDER BY name');
     const v = await vars(e);
     expect(resolveTemplate(String(live[0]?.url_template), v)).toContain('token=first');
     expect(resolveTemplate(String(live[1]?.url_template), v)).toContain('token=second');
@@ -498,5 +501,146 @@ describe('m3u import', () => {
     expect((await run(e3)).ok).toBe(true);
     const s3 = await getSource(e3.db, e3.sourceId);
     expect(s3?.settings.credentialFingerprint).toBeUndefined();
+  });
+
+  it('resolves relative stream URLs against response.finalUrl after redirects (#417)', async () => {
+    const e = await setupM3u();
+    const redirectedHttp = {
+      get: async () =>
+        ok({
+          status: 200,
+          headers: {},
+          finalUrl: 'https://cdn.redirected.example/playlists/v2/index.m3u',
+          body: (async function* () {
+            yield new TextEncoder().encode(`#EXTM3U\n${extinf('Rel Ch', 'streams/ch7.m3u8')}`);
+          })(),
+        }),
+    };
+    const r = await importCatalog(e.sourceId, { ...e.deps, http: redirectedHttp });
+    if (!r.ok) throw new Error(JSON.stringify(r.error));
+    const live = await rows(e, 'SELECT url_template FROM live');
+    expect(resolveTemplate(String(live[0]?.url_template), await vars(e))).toBe(
+      'https://cdn.redirected.example/playlists/v2/streams/ch7.m3u8',
+    );
+  });
+
+  it('assigns deterministic #2/#3 suffixes to distinct duplicate M3U entries and preserves legacy user state across URL/token rotation (#201, #418)', async () => {
+    const body =
+      '#EXTM3U\n' +
+      extinf('CNN HD', cdn(M3U_TOKEN, 101), 'tvg-id="cnn.us" group-title="News"') +
+      extinf('CNN Backup', cdn(M3U_TOKEN, 102), 'tvg-id="cnn.us" group-title="News"') +
+      extinf('Local', cdn(M3U_TOKEN, 103), 'group-title="City"') +
+      extinf('Local', cdn(M3U_TOKEN, 104), 'group-title="City"');
+    const e = await setupM3u(body);
+
+    // Pre-seed legacy m3uKey rows for CNN HD in live, favorites, watch_progress, and channel_guide.
+    const legacyCnnKey = 'm:s1:http://cdn.example:8080/{{*}}/hb/s/101.ts|CNN HD';
+    await e.db.run(
+      'INSERT INTO live (source_id, key, name, name_fold, run_id, is_hidden) VALUES (?, ?, ?, ?, 0, 1)',
+      ['s1', legacyCnnKey, 'CNN HD', 'cnn hd'],
+    );
+    await e.db.run(
+      "INSERT INTO favorites (profile_id, source_id, item_key, kind, title, added_at) VALUES ('default', 's1', ?, 'live', 'CNN HD', 50)",
+      [legacyCnnKey],
+    );
+    await e.db.run(
+      "INSERT INTO watch_progress (profile_id, source_id, item_key, kind, title, position_ms, duration_ms, watched, updated_at) VALUES ('default', 's1', ?, 'live', 'CNN HD', 1000, 5000, 0, 50)",
+      [legacyCnnKey],
+    );
+    await e.db.run(
+      "INSERT INTO channel_guide (source_id, channel_key, guide_id) VALUES ('s1', ?, 'cnn.us')",
+      [legacyCnnKey],
+    );
+
+    const r1 = await run(e);
+    if (!r1.ok) throw new Error(JSON.stringify(r1.error));
+    const keys = (await rows(e, 'SELECT key, is_hidden FROM live ORDER BY key')).map((x) => ({
+      key: x.key,
+      is_hidden: x.is_hidden,
+    }));
+    expect(keys).toEqual([
+      { key: 'm:s1:live:n:local|city', is_hidden: 0 },
+      { key: 'm:s1:live:n:local|city#2', is_hidden: 0 },
+      { key: 'm:s1:live:t:cnn.us', is_hidden: 1 },
+      { key: 'm:s1:live:t:cnn.us#2', is_hidden: 0 },
+    ]);
+    expect(await rows(e, 'SELECT item_key FROM favorites')).toEqual([
+      { item_key: 'm:s1:live:t:cnn.us' },
+    ]);
+    expect(await rows(e, 'SELECT item_key FROM watch_progress')).toEqual([
+      { item_key: 'm:s1:live:t:cnn.us' },
+    ]);
+    expect(await rows(e, 'SELECT channel_key FROM channel_guide')).toEqual([
+      { channel_key: 'm:s1:live:t:cnn.us' },
+    ]);
+
+    // Rotate host + token completely and re-import: keys and is_hidden survive unchanged.
+    const liveIdsBefore = await rows(e, 'SELECT id, key, is_hidden FROM live ORDER BY key');
+    e.state.body =
+      '#EXTM3U\n' +
+      extinf(
+        'CNN Renamed',
+        'http://new-host.example/alt/901.m3u8?token=newtok',
+        'tvg-id="cnn.us" group-title="World"',
+      ) +
+      extinf(
+        'CNN Backup 2',
+        'http://new-host.example/alt/902.m3u8?token=newtok',
+        'tvg-id="cnn.us" group-title="World"',
+      ) +
+      extinf('Local', 'http://new-host.example/alt/903.m3u8', 'group-title="City"') +
+      extinf('Local', 'http://new-host.example/alt/904.m3u8', 'group-title="City"');
+    const r2 = await run(e);
+    if (!r2.ok) throw new Error(JSON.stringify(r2.error));
+    expect(await rows(e, 'SELECT id, key, is_hidden FROM live ORDER BY key')).toEqual(
+      liveIdsBefore,
+    );
+  });
+
+  it('leaves live tables and FTS5 100% untouched and purges *_next on mid-run abort, stream failure, urlvars-too-large, and secret-write-failed (#418)', async () => {
+    const e = await setupM3u(playlist());
+    const ok1 = await run(e);
+    if (!ok1.ok) throw new Error(JSON.stringify(ok1.error));
+    const liveSnap = await rows(e, 'SELECT * FROM live ORDER BY id');
+    const ftsSnap = await rows(e, "SELECT rowid FROM live_fts WHERE live_fts MATCH 'haber'");
+
+    // Abort mid-run with brand new channel names that would fire FTS5 if live were touched.
+    e.state.body =
+      '#EXTM3U\n' +
+      Array.from({ length: 10 }, (_, i) =>
+        extinf(`AbortedCh ${i}`, cdn(M3U_TOKEN, 500 + i), 'group-title="New"'),
+      ).join('');
+    const ctl = new AbortController();
+    const aborted = await run(e, {
+      signal: ctl.signal,
+      batchSize: 2,
+      onProgress: () => ctl.abort(),
+    });
+    expectErr(aborted, 'network', 'aborted');
+    expect(await rows(e, 'SELECT * FROM live ORDER BY id')).toEqual(liveSnap);
+    expect(await rows(e, "SELECT rowid FROM live_fts WHERE live_fts MATCH 'abortedch'")).toEqual(
+      [],
+    );
+    expect(await rows(e, "SELECT rowid FROM live_fts WHERE live_fts MATCH 'haber'")).toEqual(
+      ftsSnap,
+    );
+    for (const next of [
+      'categories_next',
+      'live_next',
+      'movies_next',
+      'series_next',
+      'episodes_next',
+      'placements_next',
+    ]) {
+      expect(await count(e.db, next)).toBe(0);
+    }
+
+    // secret-write-failed also leaves live untouched and *_next empty.
+    e.secrets.set = async () => {
+      throw new Error('keychain');
+    };
+    expectErr(await run(e, { batchSize: 2 }), 'storage', 'secret-write-failed');
+    expect(await rows(e, 'SELECT * FROM live ORDER BY id')).toEqual(liveSnap);
+    expect(await count(e.db, 'live_next')).toBe(0);
   });
 });

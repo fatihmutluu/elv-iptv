@@ -30,6 +30,7 @@ import {
   type CatalogWorkerMessage,
   isCatalogClientMessage,
 } from '../shared/catalog-ipc.ts';
+import { formatSqliteOpenError, openSqliteWithRetry } from './sqlite-open-retry.ts';
 
 const SAFE_SOURCE_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
 const NON_HOST_SCHEME_RE = /^[A-Za-z][A-Za-z0-9+.-]*:(?!\/\/)(?!\d+(?:[/?#]|$))/;
@@ -65,6 +66,7 @@ export interface CatalogWorkerRuntimeDeps {
   decompressor?: Decompressor;
   clock?: () => number;
   yieldNow?: () => Promise<void>;
+  sleep?: (ms: number) => Promise<void>;
   log?: (line: string) => void;
   onExit?: (code: number) => void;
 }
@@ -273,33 +275,33 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
     if (configuredDbPath === undefined) {
       return err(elvError('storage', 'not-initialized'));
     }
-    let db: SqlDriver | undefined;
-    try {
-      db = createSyncSqlDriver(openDatabase(configuredDbPath));
-      const opened = await openCatalog(db, clock);
-      if (!opened.ok) {
-        await db.close?.();
-        return opened;
-      }
-      const service = createCatalogService({
-        db,
-        secrets,
-        scheduler: { yieldNow },
-        http: createFetchHttpClient(safeFetch),
-        clock,
-        ...(deps.decompressor === undefined ? {} : { decompressor: deps.decompressor }),
-      });
-      return ok({ db, service });
-    } catch (error) {
-      await db?.close?.().catch(() => undefined);
-      return err(
-        elvError(
-          'storage',
-          'migration-failed',
-          error instanceof Error ? error.message : 'open failed',
-        ),
-      );
-    }
+    const dbPath = configuredDbPath;
+    return openSqliteWithRetry(
+      async (): Promise<Result<OpenedCatalog>> => {
+        let db: SqlDriver | undefined;
+        try {
+          db = createSyncSqlDriver(openDatabase(dbPath));
+          const opened = await openCatalog(db, clock);
+          if (!opened.ok) {
+            await db.close?.().catch(() => undefined);
+            return opened;
+          }
+          const service = createCatalogService({
+            db,
+            secrets,
+            scheduler: { yieldNow },
+            http: createFetchHttpClient(safeFetch),
+            clock,
+            ...(deps.decompressor === undefined ? {} : { decompressor: deps.decompressor }),
+          });
+          return ok({ db, service });
+        } catch (error) {
+          await db?.close?.().catch(() => undefined);
+          return err(elvError('storage', 'migration-failed', formatSqliteOpenError(error)));
+        }
+      },
+      deps.sleep === undefined ? undefined : { sleep: deps.sleep },
+    );
   };
 
   const ensureService = (): Promise<Result<OpenedCatalog>> => {

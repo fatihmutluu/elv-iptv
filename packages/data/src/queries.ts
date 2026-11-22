@@ -1,10 +1,16 @@
 import type { SqlDriver } from '@elv/domain';
+import { allocateFairQuotas, queryAllSourcesItems } from './queries-all-sources';
+import {
+  type BrowseKind,
+  clampPage,
+  ITEM_COLS,
+  ITEM_TABLE,
+  type ItemRow,
+  mapItemRow,
+  type RawItemRow,
+} from './queries-shared';
 
-/** Kinds a menu browses; stored as `kind` in `categories` and `placements`. */
-export type BrowseKind = 'live' | 'movie' | 'series';
-
-/** Largest page `items` returns. */
-const MAX_PAGE = 500;
+export { allocateFairQuotas, type BrowseKind, type ItemRow, queryAllSourcesItems };
 
 /** A category of one source. `id` is opaque; hand it back to `items`. */
 export interface CategoryRow {
@@ -15,24 +21,6 @@ export interface CategoryRow {
   /** Provider order, ascending. */
   position: number;
   itemCount: number;
-}
-
-/** A live channel, movie or series in a category. */
-export interface ItemRow {
-  /** Row id in its table; the argument of `seasons` and `episodes` for a series. */
-  id: number;
-  /** Stable content key; the argument of `resolveStream`. */
-  key: string;
-  kind: BrowseKind;
-  sourceId: string;
-  providerId: string | null;
-  name: string;
-  /** Logo or cover as stored (an M3U template is resolved by the service). */
-  logo: string | null;
-  rating: number | null;
-  year: number | null;
-  /** Channel number (live only). */
-  num: number | null;
 }
 
 /** Detail lookup row for a live channel, movie or series, including series synopsis when present. */
@@ -76,16 +64,7 @@ export function parseCategoryId(
   return { sourceId: id.slice(0, first), kind, providerId: id.slice(second + 1) };
 }
 
-/** Clamps a page request; `limit` is 0 to {@link MAX_PAGE}, `offset` at least 0. */
-function clampPage(offset: number, limit: number): { offset: number; limit: number } {
-  const whole = (n: number) => (Number.isFinite(n) ? Math.floor(n) : 0);
-  return {
-    offset: Math.max(0, whole(offset)),
-    limit: Math.min(MAX_PAGE, Math.max(0, whole(limit))),
-  };
-}
-
-/** Categories of one kind with the number of items placed in each, in provider order. */
+/** Visible categories of one kind with the number of visible items placed in each, in provider order. */
 export async function queryCategories(
   db: SqlDriver,
   sourceId: string,
@@ -95,12 +74,16 @@ export async function queryCategories(
     `SELECT c.provider_id, c.name, c.position, COALESCE(p.n, 0) AS n
        FROM categories c
        LEFT JOIN (
-         SELECT category_id, COUNT(*) AS n
-           FROM placements
-          WHERE source_id = ? AND kind = ?
-          GROUP BY category_id
+         SELECT pl.category_id, COUNT(*) AS n
+           FROM placements pl
+           JOIN ${ITEM_TABLE[kind]} t
+             ON t.source_id = pl.source_id AND t.key = pl.item_key
+          WHERE pl.source_id = ? AND pl.kind = ?
+            AND pl.is_hidden = 0 AND t.is_hidden = 0
+          GROUP BY pl.category_id
        ) p ON p.category_id = c.provider_id
-      WHERE c.source_id = ? AND c.kind = ?
+      WHERE c.source_id = ? AND c.kind = ? AND c.is_hidden = 0
+        AND EXISTS (SELECT 1 FROM sources s WHERE s.id = c.source_id AND s.deleting = 0)
       ORDER BY c.position, c.provider_id`,
     [sourceId, kind, sourceId, kind],
   );
@@ -114,20 +97,7 @@ export async function queryCategories(
   }));
 }
 
-/** Columns and target table per kind; fixed strings, never built from data. */
-const ITEM_COLS: Record<BrowseKind, string> = {
-  live: 't.logo AS logo, NULL AS rating, NULL AS year, t.num AS num',
-  movie: 't.logo AS logo, t.rating AS rating, t.year AS year, NULL AS num',
-  series: 't.cover AS logo, t.rating AS rating, t.year AS year, NULL AS num',
-};
-
-const ITEM_TABLE: Record<BrowseKind, string> = {
-  live: 'live',
-  movie: 'movies',
-  series: 'series',
-};
-
-/** One page of a category's items in provider order; limits placements via covering index before joining. */
+/** One page of a category's visible items in provider order; filters hidden rows before `LIMIT`/`OFFSET`. */
 export async function queryItems(
   db: SqlDriver,
   ref: { sourceId: string; kind: BrowseKind; providerId: string },
@@ -136,38 +106,25 @@ export async function queryItems(
 ): Promise<ItemRow[]> {
   const page = clampPage(offset, limit);
   if (page.limit === 0) return [];
-  const rows = await db.all<{
-    id: number;
-    key: string;
-    provider_id: string | null;
-    name: string;
-    logo: string | null;
-    rating: number | null;
-    year: number | null;
-    num: number | null;
-  }>(
+  const rows = await db.all<RawItemRow>(
     `SELECT t.id, t.key, t.provider_id, t.name, ${ITEM_COLS[ref.kind]}
        FROM (
          SELECT source_id, item_key, position FROM placements
-          WHERE source_id = ? AND kind = ? AND category_id = ?
+          WHERE source_id = ? AND kind = ? AND category_id = ? AND is_hidden = 0
+            AND EXISTS (SELECT 1 FROM sources s WHERE s.id = placements.source_id AND s.deleting = 0)
+            AND EXISTS (
+              SELECT 1 FROM ${ITEM_TABLE[ref.kind]} jt
+               WHERE jt.source_id = placements.source_id
+                 AND jt.key = placements.item_key
+                 AND jt.is_hidden = 0
+            )
           ORDER BY position, item_key LIMIT ? OFFSET ?
        ) p
        JOIN ${ITEM_TABLE[ref.kind]} t ON t.source_id = p.source_id AND t.key = p.item_key
       ORDER BY p.position, t.id`,
     [ref.sourceId, ref.kind, ref.providerId, page.limit, page.offset],
   );
-  return rows.map((r) => ({
-    id: r.id,
-    key: r.key,
-    kind: ref.kind,
-    sourceId: ref.sourceId,
-    providerId: r.provider_id,
-    name: r.name,
-    logo: r.logo,
-    rating: r.rating,
-    year: r.year,
-    num: r.num,
-  }));
+  return rows.map((r) => mapItemRow(ref.kind, ref.sourceId, r));
 }
 
 /** A series row: what loading and listing episodes needs. */

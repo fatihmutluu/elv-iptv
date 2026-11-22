@@ -52,6 +52,39 @@ const CONNECTION_PRAGMAS = [
   'PRAGMA foreign_keys = ON',
 ];
 
+const OPEN_MAX_ATTEMPTS = 3;
+const OPEN_BACKOFF_MS: readonly number[] = [100, 250];
+const TRANSIENT_SQLITE_LOCK_RE = /sqlite_busy|sqlite_locked|database(?:\s+table)?\s+is\s+locked/i;
+
+/** Options for {@link createOpSqliteDriver} open-retry behavior (`#138`). */
+export interface OpSqliteOpenOptions {
+  /** Maximum open attempts on transient busy/locked errors (default `3`). */
+  maxAttempts?: number;
+  /** Backoff delays in milliseconds between retries (default `[100, 250]`). */
+  backoffMs?: readonly number[];
+  /** Injectable delay function for deterministic unit tests. */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+function isTransientSqliteOpenError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code === 'string' && TRANSIENT_SQLITE_LOCK_RE.test(code)) return true;
+  const msg = error instanceof Error ? error.message : String(error);
+  return TRANSIENT_SQLITE_LOCK_RE.test(msg);
+}
+
+function closeQuietly(conn: OpConnection | undefined): void {
+  if (conn === undefined) return;
+  try {
+    conn.close();
+  } catch {
+    // Closing an already-broken handle during retry/cleanup must not mask the original error.
+  }
+}
+
+const defaultSleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
 const IDENT_START = /[A-Za-z_]/;
 const IDENT_CONT = /[A-Za-z0-9_]/;
 
@@ -157,18 +190,44 @@ export function databaseLocation(os: string): string | undefined {
 /**
  * Opens `name` twice (WAL) in `location` (an absolute directory; op-sqlite's default when omitted): a writer for writes
  * and transactions and a reader for plain `all` calls, so list queries are not queued behind an import batch. Both
- * connections receive connection-scoped pragmas (`busy_timeout`, `temp_store`, `foreign_keys`) on open.
+ * connections receive connection-scoped pragmas (`busy_timeout`, `temp_store`, `foreign_keys`) on open. Partial
+ * handles are always closed on failure, and transient `SQLITE_BUSY`/`SQLITE_LOCKED` open errors retry up to 3 times.
  */
 export async function createOpSqliteDriver(
   name: string,
   location?: string,
+  openOptions?: OpSqliteOpenOptions,
 ): Promise<OpSqliteDriver> {
   const options = location === undefined ? { name } : { name, location };
-  const writer = open(options) as unknown as OpConnection;
-  const reader = open(options) as unknown as OpConnection;
-  for (const pragma of CONNECTION_PRAGMAS) {
-    await writer.execute(pragma);
-    await reader.execute(pragma);
+  const maxAttempts = Math.max(1, openOptions?.maxAttempts ?? OPEN_MAX_ATTEMPTS);
+  const backoffMs = openOptions?.backoffMs ?? OPEN_BACKOFF_MS;
+  const sleep = openOptions?.sleep ?? defaultSleep;
+
+  let writer!: OpConnection;
+  let reader!: OpConnection;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    let w: OpConnection | undefined;
+    let r: OpConnection | undefined;
+    try {
+      w = open(options) as unknown as OpConnection;
+      r = open(options) as unknown as OpConnection;
+      for (const pragma of CONNECTION_PRAGMAS) {
+        await w.execute(pragma);
+        await r.execute(pragma);
+      }
+      writer = w;
+      reader = r;
+      break;
+    } catch (error) {
+      closeQuietly(r);
+      closeQuietly(w);
+      if (attempt + 1 < maxAttempts && isTransientSqliteOpenError(error)) {
+        const delay = backoffMs[attempt] ?? backoffMs[backoffMs.length - 1] ?? 250;
+        await sleep(delay);
+        continue;
+      }
+      throw error;
+    }
   }
 
   let signal: AbortSignal | undefined;

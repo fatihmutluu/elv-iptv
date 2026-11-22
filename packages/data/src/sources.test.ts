@@ -176,11 +176,19 @@ describe('removeSource', () => {
       import_runs: "(id, source_id, kind, started_at, status) VALUES (?, ?, 'catalog', 1, 'ok')",
       categories:
         "(source_id, kind, provider_id, name, name_fold, position, run_id) VALUES (?, 'live', 'c', 'n', 'n', 0, 1)",
+      categories_next:
+        "(source_id, kind, provider_id, name, name_fold, position, run_id) VALUES (?, 'live', 'c', 'n', 'n', 0, 1)",
       live: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
+      live_next: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
       movies: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
+      movies_next: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
       series: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
+      series_next: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
       episodes: "(source_id, key, series_key, run_id) VALUES (?, 'k', 's', 1)",
+      episodes_next: "(source_id, key, series_key, run_id) VALUES (?, 'k', 's', 1)",
       placements:
+        "(source_id, kind, item_key, category_id, position, run_id) VALUES (?, 'live', 'k', 'c', 0, 1)",
+      placements_next:
         "(source_id, kind, item_key, category_id, position, run_id) VALUES (?, 'live', 'k', 'c', 0, 1)",
       guide_channels: "(source_id, guide_id, name, name_fold, run_id) VALUES (?, 'g', 'n', 'n', 1)",
       channel_guide: "(source_id, channel_key, guide_id) VALUES (?, 'k', 'g')",
@@ -215,7 +223,7 @@ describe('removeSource', () => {
     expect(await getSource(s.db, 'src2')).toBeDefined();
   });
 
-  it('rolls back all catalog tables atomically and leaves secrets intact when SQLite delete fails mid-flight', async () => {
+  it('marks deleting = 1 before chunked purge, keeps user state and secrets until final commit, and recovers via openCatalog on crash (#138)', async () => {
     const s = await setup();
     await addXtreamSource(
       { name: 'A', server: 'https://p.example', username: USER, password: PW },
@@ -226,11 +234,19 @@ describe('removeSource', () => {
       import_runs: "(id, source_id, kind, started_at, status) VALUES (?, ?, 'catalog', 1, 'ok')",
       categories:
         "(source_id, kind, provider_id, name, name_fold, position, run_id) VALUES (?, 'live', 'c', 'n', 'n', 0, 1)",
+      categories_next:
+        "(source_id, kind, provider_id, name, name_fold, position, run_id) VALUES (?, 'live', 'c', 'n', 'n', 0, 1)",
       live: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
+      live_next: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
       movies: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
+      movies_next: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
       series: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
+      series_next: "(source_id, key, name, name_fold, run_id) VALUES (?, 'k', 'n', 'n', 1)",
       episodes: "(source_id, key, series_key, run_id) VALUES (?, 'k', 's', 1)",
+      episodes_next: "(source_id, key, series_key, run_id) VALUES (?, 'k', 's', 1)",
       placements:
+        "(source_id, kind, item_key, category_id, position, run_id) VALUES (?, 'live', 'k', 'c', 0, 1)",
+      placements_next:
         "(source_id, kind, item_key, category_id, position, run_id) VALUES (?, 'live', 'k', 'c', 0, 1)",
       guide_channels: "(source_id, guide_id, name, name_fold, run_id) VALUES (?, 'g', 'n', 'n', 1)",
       channel_guide: "(source_id, channel_key, guide_id) VALUES (?, 'k', 'g')",
@@ -276,15 +292,85 @@ describe('removeSource', () => {
       'SQLITE_IOERR',
     );
 
-    expect(await getSource(s.db, 'src1')).toBeDefined();
-    expect(await getSource(s.db, 'src2')).toBeDefined();
-    for (const table of TABLES_BY_SOURCE) {
+    // src1 is hidden immediately via deleting = 1 while user state, sources row, secrets, and src2 stay intact.
+    expect(await getSource(s.db, 'src1')).toBeUndefined();
+    expect(
+      await s.db.all<{ id: string; deleting: number }>(
+        'SELECT id, deleting FROM sources ORDER BY id',
+      ),
+    ).toEqual([
+      { id: 'src1', deleting: 1 },
+      { id: 'src2', deleting: 0 },
+    ]);
+    for (const table of ['watch_progress', 'favorites']) {
       const rows = await s.db.all<{ source_id: string }>(
         `SELECT source_id FROM ${table} ORDER BY source_id`,
       );
       expect(rows.map((r) => r.source_id)).toEqual(['src1', 'src2']);
     }
     expect(s.secrets.dump()).toEqual(secretsBefore);
+
+    // Reopening the catalog resumes and finishes purging src1 cleanly without touching src2.
+    expect((await openCatalog(s.db)).ok).toBe(true);
+    expect(await s.db.all('SELECT id FROM sources ORDER BY id')).toEqual([{ id: 'src2' }]);
+    for (const table of TABLES_BY_SOURCE) {
+      if (table.endsWith('_next')) {
+        expect(await s.db.all(`SELECT source_id FROM ${table}`)).toEqual([]);
+      } else {
+        const rows = await s.db.all<{ source_id: string }>(`SELECT source_id FROM ${table}`);
+        expect(rows.map((r) => r.source_id)).toEqual(['src2']);
+      }
+    }
+  });
+
+  it('deletes large rowid and WITHOUT ROWID tables in bounded chunks and yields between chunks (#138)', async () => {
+    const s = await setup();
+    await addM3uSource({ name: 'Big', playlistUrl: 'https://h.example/a.m3u' }, s.deps);
+    await s.db.batch(
+      'INSERT INTO live (source_id, key, name, name_fold, run_id) VALUES (?, ?, ?, ?, 1)',
+      Array.from({ length: 12 }, (_, i) => ['src1', `k${i}`, `Ch ${i}`, `ch ${i}`]),
+    );
+    await s.db.batch(
+      "INSERT INTO placements (source_id, kind, item_key, category_id, position, run_id) VALUES (?, 'live', ?, 'News', ?, 1)",
+      Array.from({ length: 12 }, (_, i) => ['src1', `k${i}`, i]),
+    );
+
+    const liveDeletes: string[] = [];
+    const placementDeletes: string[] = [];
+    let yields = 0;
+    const trackedDb = {
+      ...s.db,
+      transaction: <T>(fn: (tx: typeof s.db) => Promise<T>) =>
+        s.db.transaction((tx) =>
+          fn({
+            ...tx,
+            run: async (sql, params) => {
+              if (sql.startsWith('DELETE FROM live ')) liveDeletes.push(sql);
+              if (sql.startsWith('DELETE FROM placements ')) placementDeletes.push(sql);
+              return tx.run(sql, params);
+            },
+          }),
+        ),
+    };
+    const res = await removeSource(
+      'src1',
+      {
+        db: trackedDb,
+        secrets: s.secrets,
+        scheduler: {
+          yieldNow: async () => {
+            yields += 1;
+          },
+        },
+      },
+      { chunkSize: 5 },
+    );
+    expect(res.ok).toBe(true);
+    expect(liveDeletes).toHaveLength(3);
+    expect(placementDeletes).toHaveLength(3);
+    expect(yields).toBeGreaterThanOrEqual(4);
+    expect(await s.db.all('SELECT * FROM live')).toEqual([]);
+    expect(await s.db.all('SELECT * FROM placements')).toEqual([]);
   });
 });
 

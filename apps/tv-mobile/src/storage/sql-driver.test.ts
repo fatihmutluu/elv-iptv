@@ -273,4 +273,113 @@ describe('createOpSqliteDriver', () => {
     await db.run('FAIL').catch(() => undefined);
     expect(await db.run('UPDATE t SET a = 1')).toEqual({ changes: 1 });
   });
+
+  it('closes partial handles immediately on non-transient open or pragma failures without retrying (#138)', async () => {
+    const f1 = createFakeOpSqlite();
+    let opens = 0;
+    fake.current = {
+      open(o: { name: string; location?: string }) {
+        opens += 1;
+        if (opens === 2) throw new Error('SQLITE_CANTOPEN: permission denied');
+        return f1.open(o);
+      },
+    };
+    const sleeps: number[] = [];
+    await expect(
+      createOpSqliteDriver('catalog.db', undefined, {
+        sleep: async (ms) => {
+          sleeps.push(ms);
+        },
+      }),
+    ).rejects.toThrow('SQLITE_CANTOPEN');
+    expect(opens).toBe(2);
+    expect(sleeps).toEqual([]);
+    expect(f1.conns[0]?.log).toContain('close');
+
+    // Pragma failure on reader closes both writer and reader without retrying
+    const f2 = createFakeOpSqlite();
+    let pragmaOpens = 0;
+    fake.current = {
+      open(o: { name: string; location?: string }) {
+        pragmaOpens += 1;
+        const conn = f2.open(o);
+        if (pragmaOpens === 2) {
+          const origExec = conn.execute;
+          conn.execute = async (sql, params) => {
+            if (sql.includes('foreign_keys')) throw new Error('SQLITE_CORRUPT');
+            return origExec(sql, params);
+          };
+        }
+        return conn;
+      },
+    };
+    await expect(
+      createOpSqliteDriver('catalog.db', undefined, {
+        sleep: async (ms) => {
+          sleeps.push(ms);
+        },
+      }),
+    ).rejects.toThrow('SQLITE_CORRUPT');
+    expect(sleeps).toEqual([]);
+    expect(f2.conns[0]?.log).toContain('close');
+    expect(f2.conns[1]?.log).toContain('close');
+  });
+
+  it('retries up to 3 times with [100, 250]ms backoff on transient SQLITE_BUSY/SQLITE_LOCKED open errors and closes partial handles (#138)', async () => {
+    const f = createFakeOpSqlite();
+    let attempt = 0;
+    fake.current = {
+      open(o: { name: string; location?: string }) {
+        const conn = f.open(o);
+        // Attempt 1 fails on reader pragma with SQLITE_BUSY; Attempt 2 fails on writer open with database is locked; Attempt 3 succeeds.
+        if (f.conns.length === 2) {
+          attempt = 1;
+          conn.execute = async () => {
+            throw new Error('SQLITE_BUSY: database is locked');
+          };
+        } else if (f.conns.length === 3 && attempt === 1) {
+          attempt = 2;
+          // Simulate open failing on reader after writer opened
+        } else if (f.conns.length === 4 && attempt === 2) {
+          throw new Error('SQLITE_LOCKED: database table is locked');
+        }
+        return conn;
+      },
+    };
+    const sleeps: number[] = [];
+    const driver = await createOpSqliteDriver('catalog.db', undefined, {
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
+    expect(sleeps).toEqual([100, 250]);
+    // Attempt 1 writer + reader closed; Attempt 2 writer closed (reader threw during open)
+    expect(f.conns[0]?.log).toContain('close');
+    expect(f.conns[1]?.log).toContain('close');
+    expect(f.conns[2]?.log).toContain('close');
+    await driver.close();
+
+    // Exhausting all 3 attempts rejects and leaves every handle closed
+    const fExhaust = createFakeOpSqlite();
+    const exhaustSleeps: number[] = [];
+    fake.current = {
+      open(o: { name: string; location?: string }) {
+        const conn = fExhaust.open(o);
+        conn.execute = async () => {
+          throw new Error('database is locked');
+        };
+        return conn;
+      },
+    };
+    await expect(
+      createOpSqliteDriver('catalog.db', undefined, {
+        sleep: async (ms) => {
+          exhaustSleeps.push(ms);
+        },
+      }),
+    ).rejects.toThrow('database is locked');
+    expect(exhaustSleeps).toEqual([100, 250]);
+    expect(fExhaust.conns).toHaveLength(6);
+    for (const c of fExhaust.conns) expect(c.log).toContain('close');
+  });
 });

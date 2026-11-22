@@ -1,6 +1,12 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { m3uKey, normalizeStreamUrl, xtreamKey } from './content-key';
+import {
+  type M3uStableKeyInput,
+  m3uKey,
+  m3uStableKey,
+  normalizeStreamUrl,
+  xtreamKey,
+} from './content-key';
 import { transportHeaders } from './source';
 
 describe('transportHeaders', () => {
@@ -87,5 +93,88 @@ describe('keys', () => {
       m3uKey('s1', 'http://h/timeshift/c/d/60/t/1.ts', 'N'),
     );
     expect(m3uKey('s1', 'http://h/live/c/d/1.ts', 'Sports')).not.toBe(a);
+  });
+});
+
+describe('m3uStableKey', () => {
+  it('uses normalized tvg-id when non-empty, staying stable across title, group, and URL changes', () => {
+    const a: M3uStableKeyInput = {
+      sourceId: 's1',
+      kind: 'live',
+      tvgId: '  BBC.One.UK  ',
+      name: 'BBC One HD',
+      group: 'UK Entertainment',
+    };
+    const b: M3uStableKeyInput = {
+      sourceId: 's1',
+      kind: 'live',
+      tvgId: 'bbc.one.uk',
+      name: 'BBC 1 (Backup Stream)',
+      group: 'News',
+    };
+    expect(m3uStableKey(a)).toBe('m:s1:live:t:bbc.one.uk');
+    expect(m3uStableKey(b)).toBe(m3uStableKey(a));
+  });
+
+  it('separates keys by sourceId and kind even with the same tvg-id', () => {
+    expect(m3uStableKey({ sourceId: 's1', kind: 'live', tvgId: 'ch1', name: 'A' })).not.toBe(
+      m3uStableKey({ sourceId: 's2', kind: 'live', tvgId: 'ch1', name: 'A' }),
+    );
+    expect(m3uStableKey({ sourceId: 's1', kind: 'live', tvgId: 'ch1', name: 'A' })).not.toBe(
+      m3uStableKey({ sourceId: 's1', kind: 'movie', tvgId: 'ch1', name: 'A' }),
+    );
+  });
+
+  it('falls back to Turkish-folded name and group when tvg-id is absent or blank', () => {
+    expect(
+      m3uStableKey({
+        sourceId: 's1',
+        kind: 'live',
+        tvgId: '   ',
+        name: 'İstanbul — Şehir & Ğüneş (Ilık)',
+        group: 'TR: Haber / Ulusal!',
+      }),
+    ).toBe('m:s1:live:n:istanbul sehir gunes ilik|tr haber ulusal');
+
+    expect(
+      m3uStableKey({
+        sourceId: 's1',
+        kind: 'movie',
+        tvgId: null,
+        name: 'GÜNEŞ YOLU',
+        group: null,
+      }),
+    ).toBe('m:s1:movie:n:gunes yolu|');
+
+    expect(
+      m3uStableKey({
+        sourceId: 's1',
+        kind: 'movie',
+        name: 'Gunes   Yolu!!!',
+        group: undefined,
+      }),
+    ).toBe('m:s1:movie:n:gunes yolu|');
+  });
+
+  it('appends #occurrence suffix only when occurrence > 1', () => {
+    const base: M3uStableKeyInput = {
+      sourceId: 's1',
+      kind: 'live',
+      tvgId: 'cnn.us',
+      name: 'CNN',
+    };
+    expect(m3uStableKey(base)).toBe('m:s1:live:t:cnn.us');
+    expect(m3uStableKey({ ...base, occurrence: 1 })).toBe('m:s1:live:t:cnn.us');
+    expect(m3uStableKey({ ...base, occurrence: 2 })).toBe('m:s1:live:t:cnn.us#2');
+    expect(m3uStableKey({ ...base, occurrence: 3 })).toBe('m:s1:live:t:cnn.us#3');
+    expect(
+      m3uStableKey({
+        sourceId: 's1',
+        kind: 'live',
+        name: 'Local News',
+        group: 'Local',
+        occurrence: 2,
+      }),
+    ).toBe('m:s1:live:n:local news|local#2');
   });
 });

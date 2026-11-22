@@ -371,6 +371,18 @@ describe('guide-queries', () => {
       });
       expect(await queryChannelByNumber(h.db, 999)).toBeUndefined();
 
+      // Hidden channels and deleting=1 sources are excluded from queryChannelByNumber
+      await h.db.run("UPDATE live SET is_hidden = 1 WHERE key = 'x:s1:live:10'");
+      expect(await queryChannelByNumber(h.db, 101, 's1')).toBeUndefined();
+      expect(await queryChannelByNumber(h.db, 101)).toMatchObject({
+        key: 'x:s2:live:20',
+        sourceId: 's2',
+      });
+      await h.db.run("UPDATE sources SET deleting = 1 WHERE id = 's2'");
+      expect(await queryChannelByNumber(h.db, 101, 's2')).toBeUndefined();
+      expect(await queryChannelByNumber(h.db, 101)).toBeUndefined();
+      expect(await queryChannelByNumber(h.db, 205)).toBeUndefined();
+
       // Verify EXPLAIN QUERY PLAN uses idx_live_num & PKs with zero full-table SCANs
       const livePlan = await h.db.all<{ detail: string }>(
         'EXPLAIN QUERY PLAN SELECT id, key, source_id, provider_id, name, logo, num FROM live WHERE source_id = ? AND num = ? ORDER BY id LIMIT 1',

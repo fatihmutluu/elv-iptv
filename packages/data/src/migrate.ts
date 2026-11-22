@@ -41,8 +41,9 @@ async function verifyAndHealSchema(db: SqlDriver): Promise<Result<void>> {
  * expected table columns via `PRAGMA table_info` and self-heals any missing columns in a single transaction.
  * Returns `storage/schema-too-new` for a database written by a newer build, `storage/schema-corrupt` if a required
  * table is missing at `SCHEMA_VERSION`, and `storage/migration-failed` (rolled back, `user_version` unchanged) when
- * a migration throws. Runs left `running` by a crashed process are marked `failed` / `interrupted` and leftover
- * staged rows in `programmes_next` are purged in one transaction (no import can be running while the catalog opens).
+ * a migration throws. Runs left `running` by a crashed process are marked `failed` / `interrupted`, leftover
+ * staged rows in `programmes_next` and the six catalog `*_next` tables are purged, and any sources left
+ * `deleting = 1` by a mid-delete crash finish purging inside `reapOrphanedRuns` (no import can be running while the catalog opens).
  */
 export async function openCatalog(
   db: SqlDriver,
