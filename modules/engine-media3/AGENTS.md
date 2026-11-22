@@ -9,40 +9,35 @@ Android-only Expo module: the Media3 1.11.1 `PlayerEngine` and its `Media3Surfac
 - Native (`ElvEngineMedia3Module`, `LoadRequest`): `load(flattened LoadCommand)`, `retry`, `play`, `pause`, `seek`,
   `selectAudioTrack`, `selectSubtitleTrack`, `stop`, `recreate`, `onEngineEvent`, sync `uptimeMs()`. Non-finite
   `startMs`/`seek` values are ignored. `load` takes its token, others adopt a newer one; `liveSeek: false`.
+- Library `AndroidManifest.xml` declares `WAKE_LOCK` and `ACCESS_WIFI_STATE` for `C.WAKE_MODE_NETWORK`.
 
 ## Threading, player factory, codecs and view
-- `Media3Engine` + `CommandFence`: runs `ExoPlayer` on its `HandlerThread` (application looper); synchronous caller-side
-  `CommandFence` coalesces superseded `load`/`retry`/`recreate` before ExoPlayer starts and filters stale outbound
-  events by `(mediaEpoch, token)`; `OnDestroy` and `sharedObjectDidRelease` cancel OkHttp calls immediately and tear
-  down player and threads. Terminal `STATE_ENDED`/`playerError` prepares rebuild `ExoPlayer` while keeping the attached
-  `Surface`.
-- `PlayerFactory` + `LoadControlConfig`: `15–30 s` window, `1/2 s` start, `16/32/48 MiB` RAM-tiered byte target with
-  `prioritizeTimeOverSizeThresholds = true`, `5/12 s` keyframe back-buffer, `DefaultTrackSelector` (mixed-audio
-  adaptiveness, capability invalidation, `CaptioningManager` defaults), `C.WAKE_MODE_NETWORK`, `500 ms` release / `2 s`
-  detach / `30 s` stuck-buffering timeouts, `enablePerStreamMediaProgression`, `TAKE_AUDIO_FOCUS` `SecurityException`
-  fallback, and VOD `SeekParameters` (`PREVIOUS_SYNC` resume/rewind, `CLOSEST_SYNC` forward).
-- `CodecPolicy` + `FfmpegAudio`: LGPL-2.1+ FFmpeg 9.0.2 (`ON` default, `PREFER` on `softwareAudio`), hardware-first
-  video ordering, hardware-only initial UHD/HEVC/VP9/AV1/DV pass unlocking software fallback after `>= 2` hardware
-  failures or Rung 4, silent stub DTS `MediaCodec` filter without HDMI passthrough, and `AudioDecodePath` lookup.
-- `SurfaceController` + `Media3SurfaceView` (`VIEW.md`): valid `Surface` attach/detach, `awaitingVideoSize` zap gate,
-  `PrepareFence` shutter serials, cues and `keepsScreenOn`.
+- `Media3Engine` + `CommandFence`: runs `ExoPlayer` on its `HandlerThread`; synchronous `CommandFence` coalesces
+  superseded `load`/`retry`/`recreate` and filters stale events by `(mediaEpoch, token)`; `OnDestroy`/release cancels
+  OkHttp and tears down player/threads; `seek()` updates `lastVodPositionMs` only when `isCurrentMediaItemSeekable`;
+  `handleAudioFocusDenied`, `playAsHls`, and one-shot audio escalation all advance `ConnectionGate` generation.
+- `PlayerFactory` + `LoadControlConfig`: Live (`backBufferMs = 0`, low-RAM `10–20 s`) vs VOD (`5/12 s` back-buffer,
+  `15–30 s`) split with rebuild on Live/VOD switch; low-RAM (`< 1.5 GiB`) disables `prioritizeTimeOverSizeThresholds`
+  (`16 MiB` hard cap); `DefaultTrackSelector` (mixed-audio adaptiveness, capability invalidation, `CaptioningManager`
+  gated on system `isEnabled`); `C.WAKE_MODE_NETWORK`, pinned timeouts, `TAKE_AUDIO_FOCUS` fallback, VOD `SeekParameters`.
+- `CodecPolicy` + `FfmpegAudio`: LGPL-2.1+ FFmpeg 9.0.2 (`ON` default, `PREFER` on `softwareAudio` or one-shot audio
+  decoder fallback); `AudioCapabilitiesReceiver` cache (stopped on `dispose`); hardware-first video ordering, DV->HEVC
+  fallback, and stub DTS `MediaCodec` filter without HDMI passthrough.
+- `SurfaceController` + `Media3SurfaceView` (`VIEW.md`): `250 ms` bounded detach (disposed short-circuit),
+  `offered === active` guard on `attachToNewPlayer`, `awaitingVideoSize` gate, `PrepareFence` shutter, cues, `keepsScreenOn`.
 
 ## Playback, tracks, requests and errors
 - `EventReporter` gates callbacks behind `PrepareFence` + `MediaItem.mediaId`, ignores `SupersededMediaException`,
-  maps transient audio-focus suppression to `paused`, emits audio-only `firstFrame` keeping the shutter closed, recovers
-  `BEHIND_LIVE_WINDOW` in place (`<= 2`), and distinguishes valid VOD EOF from empty unplayed VOD / live `ended`.
-- `TrackInspection` + `TrackSelectorBridge` include selected `FORMAT_EXCEEDS_CAPABILITIES` audio, ignore `Tracks.EMPTY`,
-  keep `CaptioningManager` defaults on `Default`, guard unmatched IDs, keep cues on active-subtitle re-select, match
-  `(id, language, label)` with ISO 639-1/2/BCP-47 parity, and emit confirmed selections.
-- `SourceType` + `MediaSources`: `.m3u8`/`.m3u` and 256-entry cached `#EXTM3U` discoveries use HLS (`TS_FLAGS`, `5 s`
-  PTS timeout, `8.0` live stuck coefficient); `.ts` and unknown live extensions use `TsOnlyExtractorsFactory`; known
-  containers and VOD sniff (`CBR` seeking, artwork disabled, RAM-scaled TS search bytes).
-- `ConnectionGate`, `GatedDataSource`, `StreamHttp`, `SniffingDataSource`, `ResponseSniffing`, `LoadRetry`,
-  `ErrorMapping`, `UrlRedaction`: generation-gated sockets with bounded stalled-closer drop; sanitized headers and
-  cross-origin `Authorization`/`Cookie`/`Proxy-Authorization`/`X-Api-Key`/`X-Auth-Token` stripping; `1 KB` EOF-aware
-  sniffing (`\u000B`/`\u000C` text, 3-packet TS sync, WebVTT/TTML/SRT segments, direct `manifestLoaded`, retryable
-  post-manifest empty HLS refreshes); `ServiceOwnedRetryPolicy` (`causeOf` + fallback blocking); `407 -> http-401`,
-  `410/451 -> http-404`, `458/460–463/469` and notices -> `connection-limit`; strict allowlist `redactUrl`.
+  holds state (`rate = 0`, no OSD pause/stall) on `TRANSIENT_AUDIO_FOCUS_LOSS`, escalates audio decoder/sink failures,
+  recovers `BEHIND_LIVE_WINDOW` (`<= 2`), and distinguishes valid VOD EOF from empty unplayed VOD / live `ended`.
+- `TrackInspection` + `TrackSelectorBridge` expose selected or FFmpeg-decodable `FORMAT_EXCEEDS_CAPABILITIES` audio,
+  resolve `und` tracks via `formatId` / `(codec, channels)`, gate `CaptioningManager` on system `isEnabled`, ignore
+  `Tracks.EMPTY`, guard unmatched IDs, and preserve cues on active-subtitle re-select.
+- `SourceType` + `MediaSources`: HLS (`TS_FLAGS`, `5 s` PTS timeout, `8.0` live stuck coefficient); `.ts`/unknown live
+  use `TsOnlyExtractorsFactory`; widened TS search (`1,800`/`2,400` packets) and VOD `constantBitrateSeekingAlwaysEnabled`.
+- `ConnectionGate` (4-thread daemon `closer`, per-connection dispatch), `GatedDataSource`, `StreamHttp` (`writeTimeout`
+  `10 s`, cross-origin credential stripping), `SniffingDataSource` / `ResponseSniffing` (incremental early-stop sniffing,
+  `Locale.ROOT`), `ServiceOwnedRetryPolicy`, `ErrorMapping`, and `redactUrl`.
 
 ## Tests and rules
 - `pnpm --filter @elv/engine-media3 test`; in `apps/tv-mobile/android` (`EXPO_TV=1`): `./gradlew.bat

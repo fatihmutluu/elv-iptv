@@ -17,8 +17,6 @@ import androidx.media3.exoplayer.SeekParameters
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.sharedobjects.SharedObject
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
 private const val TAG = "ElvMedia3"
@@ -33,33 +31,26 @@ private const val EVENT = "onEngineEvent"
 class Media3Engine : SharedObject {
   private val hasAppContext: Boolean
   private val onDisposed: (Media3Engine) -> Unit
-  private val lowRamDevice: Boolean
-  private val playerFactory: PlayerFactory
+  private var lowRamDevice = false
+  private lateinit var playerFactory: PlayerFactory
+  private lateinit var tracksBridge: TrackSelectorBridge
 
   constructor(context: Context, appContext: AppContext, onDisposed: (Media3Engine) -> Unit) : super(appContext) {
     this.hasAppContext = true
     this.onDisposed = onDisposed
-    val (lowRam, buffers) = readDeviceMemoryProfile(context)
-    this.lowRamDevice = lowRam
-    this.playerFactory = PlayerFactory(context, thread.looper, buffers, codecPolicy)
-    post { player = buildPlayer(softwareAudio = false) }
+    initEngine(context)
   }
 
   internal constructor(context: Context, onDisposed: (Media3Engine) -> Unit = {}) : super() {
     this.hasAppContext = false
     this.onDisposed = onDisposed
-    val (lowRam, buffers) = readDeviceMemoryProfile(context)
-    this.lowRamDevice = lowRam
-    this.playerFactory = PlayerFactory(context, thread.looper, buffers, codecPolicy)
-    post { player = buildPlayer(softwareAudio = false) }
+    initEngine(context)
   }
 
   private val thread = HandlerThread("ElvMedia3").apply { start() }
   private val handler = Handler(thread.looper)
   private val commandFence = CommandFence()
-  private val closer = ThreadPoolExecutor(0, 1, 10, TimeUnit.SECONDS, LinkedBlockingQueue()) {
-    Thread(it, "ElvMedia3Closer")
-  }
+  private val closer = createCloserExecutor()
   internal val gate = ConnectionGate(closer)
   private val http = engineHttpClient()
   internal val codecPolicy = CodecPolicy()
@@ -75,28 +66,20 @@ class Media3Engine : SharedObject {
     onAudioFocusDenied = ::handleAudioFocusDenied,
     onVideoCodecFailed = codecPolicy::recordVideoCodecFailure,
     onDolbyVisionFailed = codecPolicy::recordDolbyVisionFallback,
+    onAudioCodecFailed = ::handleAudioCodecFailed,
     onFirstFrame = surfaces::onFramed,
     onCue = surfaces::onCue,
-  )
-  private val tracksBridge = TrackSelectorBridge(
-    isActivePlayer = { candidate -> candidate === player && fence.acceptsPlayer(candidate) },
-    onTracks = { snapshot -> if (request != null) sendEvent(mapOf("type" to "tracks", "tracks" to snapshot)) },
-    onClearCues = surfaces::clearCues,
   )
   private val pictures = object : Player.Listener {
     override fun onVideoSizeChanged(videoSize: VideoSize) {
       if (fence.isRendererOpen) surfaces.onVideoSizeChanged(videoSize)
     }
-
     override fun onTracksChanged(tracks: Tracks) {
       val current = player ?: return
       if (request != null && fence.acceptsPlayer(current)) tracksBridge.onTracksChanged(current, tracks)
     }
-
     override fun onCues(cueGroup: CueGroup) {
-      if (request != null && fence.isRendererOpen && !tracksBridge.isTextDisabled) {
-        surfaces.onCues(cueGroup.cues)
-      }
+      if (request != null && fence.isRendererOpen && !tracksBridge.isTextDisabled) surfaces.onCues(cueGroup.cues)
     }
   }
 
@@ -106,6 +89,8 @@ class Media3Engine : SharedObject {
   private var player: ExoPlayer? = null
   private var playerSoftwareAudio = false
   private var playerPreferHevc = false
+  private var playerLive = false
+  private var audioFallbackAttempted = false
   private var activeEpoch = 0
   private var token = 0
   private var generation = 0L
@@ -125,6 +110,7 @@ class Media3Engine : SharedObject {
       if (request?.url != next.url && !next.preferHevcOverDolbyVision) codecPolicy.clearDolbyVisionFallback()
       token = attempt
       request = next
+      audioFallbackAttempted = false
       lastVodPositionMs = if (next.live) null else next.startMs?.coerceAtLeast(0L)
       tracksBridge.onLoad(next)
       surfaces.onLoad()
@@ -152,18 +138,18 @@ class Media3Engine : SharedObject {
 
   fun seek(attempt: Int, positionMs: Long) = postInEpoch(attempt) {
     val clamped = positionMs.coerceAtLeast(0L)
-    if (request?.live == false) lastVodPositionMs = clamped
     val current = player ?: return@postInEpoch
     if (!current.isCurrentMediaItemSeekable) return@postInEpoch
-    if (request?.live == false) current.setSeekParameters(vodSeekParametersFor(clamped, current.currentPosition))
+    if (request?.live == false) {
+      lastVodPositionMs = clamped
+      current.setSeekParameters(vodSeekParametersFor(clamped, current.currentPosition))
+    }
     current.seekTo(clamped)
   }
 
   fun selectAudioTrack(attempt: Int, id: String) = postInEpoch(attempt) { tracksBridge.selectAudioTrack(player, id) }
 
-  fun selectSubtitleTrack(attempt: Int, id: String?) = postInEpoch(attempt) {
-    tracksBridge.selectSubtitleTrack(player, id)
-  }
+  fun selectSubtitleTrack(attempt: Int, id: String?) = postInEpoch(attempt) { tracksBridge.selectSubtitleTrack(player, id) }
 
   fun stop(attempt: Int) {
     val epoch = commandFence.recordStop(attempt) ?: return
@@ -171,14 +157,9 @@ class Media3Engine : SharedObject {
       if (!commandFence.canRunStop()) return@post
       if (epoch > activeEpoch) activeEpoch = epoch
       adopt(attempt)
-      reporter.end()
-      request = null
-      lastVodPositionMs = null
-      tracksBridge.onStop()
-      beginGeneration()
+      clearSessionState()
       player?.stop()
       player?.clearMediaItems()
-      surfaces.onStop()
     }
   }
 
@@ -195,19 +176,18 @@ class Media3Engine : SharedObject {
       reporter.end()
       beginGeneration()
       releasePlayer()
-      player = buildPlayer(playerSoftwareAudio, playerPreferHevc)
+      player = buildPlayer(playerSoftwareAudio, playerPreferHevc, playerLive)
     }
   }
 
   fun attachSurface(next: Surface) {
     surfaces.offerSurface(next)
-    post {
-      surfaces.attachPendingSurface(next, player) { sendEvent(mapOf("type" to "surface", "change" to it)) }
-    }
+    post { surfaces.attachPendingSurface(next, player, ::sendSurfaceChange) }
   }
 
   fun detachSurface(old: Surface, timeoutMs: Long): Boolean {
     surfaces.clearOfferedIfSame(old)
+    if (commandFence.isDisposedNow) return true
     if (Looper.myLooper() === thread.looper) {
       detachNow(old)
       return true
@@ -234,13 +214,9 @@ class Media3Engine : SharedObject {
     onDisposed(this)
     http.dispatcher.cancelAll()
     handler.post {
-      reporter.end()
-      request = null
-      lastVodPositionMs = null
-      tracksBridge.onStop()
-      surfaces.onStop()
-      beginGeneration()
+      clearSessionState()
       http.dispatcher.cancelAll()
+      codecPolicy.stopAudioCapabilities()
       releasePlayer()
       http.dispatcher.executorService.shutdown()
       closer.shutdown()
@@ -273,8 +249,18 @@ class Media3Engine : SharedObject {
     }
   }
 
-  private fun detachNow(old: Surface) {
-    surfaces.detachNow(old, player) { sendEvent(mapOf("type" to "surface", "change" to it)) }
+  private fun detachNow(old: Surface) = surfaces.detachNow(old, player, ::sendSurfaceChange)
+
+  private fun sendSurfaceChange(change: String) = sendEvent(mapOf("type" to "surface", "change" to change))
+
+  private fun clearSessionState() {
+    reporter.end()
+    request = null
+    audioFallbackAttempted = false
+    lastVodPositionMs = null
+    tracksBridge.onStop()
+    surfaces.onStop()
+    beginGeneration()
   }
 
   private fun snapshotVodPosition() {
@@ -282,19 +268,12 @@ class Media3Engine : SharedObject {
     if (request?.live == false && p.mediaItemCount > 0) lastVodPositionMs = p.currentPosition.coerceAtLeast(0L)
   }
 
-  private fun currentVodPositionOrStart(req: LoadRequest): Long? =
-    if (req.live) null else (lastVodPositionMs ?: req.startMs)
+  private fun currentVodPositionOrStart(req: LoadRequest): Long? = if (req.live) null else (lastVodPositionMs ?: req.startMs)
 
-  private fun adopt(attempt: Int) {
-    if (attempt > token) token = attempt
-  }
+  private fun adopt(attempt: Int) { if (attempt > token) token = attempt }
 
   private fun sendEvent(fields: Map<String, Any?>) {
-    val stamped = commandFence.filterOutboundToken(
-      eventType = fields["type"] as? String,
-      driverEpoch = activeEpoch,
-      driverToken = token,
-    ) ?: return
+    val stamped = commandFence.filterOutboundToken(fields["type"] as? String, activeEpoch, token) ?: return
     val payload = fields + ("attempt" to stamped)
     eventObserverForTest?.invoke(payload)
     if (hasAppContext) emit(EVENT, payload)
@@ -305,6 +284,22 @@ class Media3Engine : SharedObject {
     gate.beginMedia(generation)
   }
 
+  private fun initEngine(context: Context) {
+    val profile = readDeviceMemoryProfile(context)
+    lowRamDevice = profile.lowRam
+    playerFactory = PlayerFactory(context, thread.looper, profile::loadControl, codecPolicy)
+    tracksBridge = TrackSelectorBridge(
+      isActivePlayer = { candidate -> candidate === player && fence.acceptsPlayer(candidate) },
+      onTracks = { snapshot -> if (request != null) sendEvent(mapOf("type" to "tracks", "tracks" to snapshot)) },
+      onClearCues = surfaces::clearCues,
+      captioningEnabled = { isSystemCaptioningEnabled(context) },
+    )
+    post {
+      codecPolicy.startAudioCapabilities(context, handler)
+      player = buildPlayer(softwareAudio = false)
+    }
+  }
+
   private fun playAsHls() {
     val detectedIn = generation
     post {
@@ -313,7 +308,7 @@ class Media3Engine : SharedObject {
       rememberHlsUrl(current.url)
       val next = current.asDetectedPlaylist()
       request = next
-      prepare(next, currentVodPositionOrStart(next), newGeneration = false)
+      prepare(next, currentVodPositionOrStart(next), newGeneration = true)
     }
   }
 
@@ -330,29 +325,33 @@ class Media3Engine : SharedObject {
     playerFactory.disableAudioFocus()
     val current = request ?: return true
     snapshotVodPosition()
-    releasePlayer()
-    prepare(current, currentVodPositionOrStart(current), newGeneration = false)
+    prepare(current, currentVodPositionOrStart(current), newGeneration = true, forceRebuild = true)
     return true
   }
 
-  private fun prepare(
-    next: LoadRequest,
-    positionMs: Long?,
-    newGeneration: Boolean = true,
-    forceRebuild: Boolean = false,
-  ) {
+  private fun handleAudioCodecFailed(): Boolean {
+    if (playerSoftwareAudio || audioFallbackAttempted) return false
+    val current = request ?: return false
+    audioFallbackAttempted = true
+    snapshotVodPosition()
+    val next = current.copy(softwareAudio = true)
+    request = next
+    prepare(next, currentVodPositionOrStart(next), newGeneration = true)
+    return true
+  }
+
+  private fun prepare(next: LoadRequest, positionMs: Long?, newGeneration: Boolean = true, forceRebuild: Boolean = false) {
     reporter.end()
     tracksBridge.onPrepareReuse()
     surfaces.clearCues()
     if (newGeneration) beginGeneration()
     val existing = player
     val terminal = existing != null && (existing.playbackState == Player.STATE_ENDED || existing.playerError != null)
-    val rebuild =
-      forceRebuild || existing == null || terminal ||
-        playerSoftwareAudio != next.softwareAudio || playerPreferHevc != next.preferHevcOverDolbyVision
+    val rebuild = forceRebuild || existing == null || terminal || playerSoftwareAudio != next.softwareAudio ||
+      playerPreferHevc != next.preferHevcOverDolbyVision || playerLive != next.live
     if (rebuild) {
       releasePlayer()
-      player = buildPlayer(next.softwareAudio, next.preferHevcOverDolbyVision)
+      player = buildPlayer(next.softwareAudio, next.preferHevcOverDolbyVision, next.live)
     } else {
       existing.stop()
     }
@@ -371,13 +370,14 @@ class Media3Engine : SharedObject {
     current.prepare()
   }
 
-  private fun buildPlayer(softwareAudio: Boolean, preferHevcOverDolbyVision: Boolean = false): ExoPlayer {
+  private fun buildPlayer(softwareAudio: Boolean, preferHevc: Boolean = false, live: Boolean = false): ExoPlayer {
     playerSoftwareAudio = softwareAudio
-    playerPreferHevc = preferHevcOverDolbyVision
-    return playerFactory.build(softwareAudio, preferHevcOverDolbyVision).also { built ->
+    playerPreferHevc = preferHevc
+    playerLive = live
+    return playerFactory.build(softwareAudio, preferHevc, live).also { built ->
       built.addListener(reporter)
       built.addListener(pictures)
-      surfaces.attachToNewPlayer(built) { sendEvent(mapOf("type" to "surface", "change" to it)) }
+      surfaces.attachToNewPlayer(built, ::sendSurfaceChange)
     }
   }
 

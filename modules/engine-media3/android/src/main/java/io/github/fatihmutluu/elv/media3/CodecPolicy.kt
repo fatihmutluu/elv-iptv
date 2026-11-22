@@ -3,6 +3,7 @@ package io.github.fatihmutluu.elv.media3
 import android.content.Context
 import android.media.MediaCodecInfo.CodecProfileLevel
 import android.os.Handler
+import android.os.Looper
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -12,6 +13,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.audio.AudioCapabilities
+import androidx.media3.exoplayer.audio.AudioCapabilitiesReceiver
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
@@ -117,9 +119,80 @@ internal fun shouldFallbackDolbyVisionToHevc(
 internal class CodecPolicy {
   private val videoFailures = ConcurrentHashMap<String, Int>()
   private val dolbyVisionFallback = AtomicBoolean(false)
+  @Volatile private var cachedAudioCapabilities: AudioCapabilities? = null
+  private val capabilitiesLock = Any()
+  private var audioCapabilitiesReceiver: AudioCapabilitiesReceiver? = null
+  private var audioCapabilitiesStarted = false
+  private var audioCapabilitiesEpoch = 0
 
   val isDolbyVisionFallbackActive: Boolean
     get() = dolbyVisionFallback.get()
+
+  /** Starts caching HDMI/output [AudioCapabilities] via [AudioCapabilitiesReceiver] on [handler]; idempotent (#438). */
+  fun startAudioCapabilities(context: Context, handler: Handler) {
+    val appContext = context.applicationContext ?: context
+    val startEpoch = synchronized(capabilitiesLock) {
+      if (audioCapabilitiesStarted) return
+      audioCapabilitiesStarted = true
+      audioCapabilitiesEpoch += 1
+      audioCapabilitiesEpoch
+    }
+    val register = Runnable {
+      val receiver = runCatching {
+        AudioCapabilitiesReceiver(
+          appContext,
+          AudioCapabilitiesReceiver.Listener { caps ->
+            synchronized(capabilitiesLock) {
+              if (audioCapabilitiesStarted && audioCapabilitiesEpoch == startEpoch) {
+                cachedAudioCapabilities = caps
+              }
+            }
+          },
+          STREAM_AUDIO_ATTRIBUTES,
+          null,
+        )
+      }.getOrNull()
+      if (receiver == null) {
+        synchronized(capabilitiesLock) {
+          if (audioCapabilitiesEpoch == startEpoch) audioCapabilitiesStarted = false
+        }
+        return@Runnable
+      }
+      val initial = runCatching { receiver.register() }.getOrNull()
+      val keep = synchronized(capabilitiesLock) {
+        if (audioCapabilitiesStarted && audioCapabilitiesEpoch == startEpoch && audioCapabilitiesReceiver == null) {
+          audioCapabilitiesReceiver = receiver
+          if (initial != null) cachedAudioCapabilities = initial
+          true
+        } else {
+          false
+        }
+      }
+      if (!keep) runCatching { receiver.unregister() }
+    }
+    if (Looper.myLooper() == handler.looper) {
+      register.run()
+    } else if (!handler.post(register)) {
+      synchronized(capabilitiesLock) {
+        if (audioCapabilitiesEpoch == startEpoch) audioCapabilitiesStarted = false
+      }
+    }
+  }
+
+  /** Stops the [AudioCapabilitiesReceiver] and clears cached capabilities; idempotent (#438). */
+  fun stopAudioCapabilities() {
+    val receiver = synchronized(capabilitiesLock) {
+      audioCapabilitiesStarted = false
+      audioCapabilitiesEpoch += 1
+      cachedAudioCapabilities = null
+      audioCapabilitiesReceiver.also { audioCapabilitiesReceiver = null }
+    }
+    if (receiver != null) runCatching { receiver.unregister() }
+  }
+
+  internal fun updateAudioCapabilitiesForTest(caps: AudioCapabilities?) {
+    cachedAudioCapabilities = caps
+  }
 
   fun recordDolbyVisionFallback() {
     dolbyVisionFallback.set(true)
@@ -228,8 +301,8 @@ internal class CodecPolicy {
       )
     }
 
-  private fun hasDtsPassthrough(context: Context, mimeType: String): Boolean {
-    val caps = runCatching {
+  internal fun hasDtsPassthrough(context: Context, mimeType: String): Boolean {
+    val caps = cachedAudioCapabilities ?: runCatching {
       AudioCapabilities.getCapabilities(context, STREAM_AUDIO_ATTRIBUTES, null, emptyList())
     }.getOrDefault(AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES)
     return when (mimeType) {

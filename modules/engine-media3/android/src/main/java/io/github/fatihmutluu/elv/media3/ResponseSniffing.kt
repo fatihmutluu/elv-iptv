@@ -1,6 +1,7 @@
 package io.github.fatihmutluu.elv.media3
 
 import androidx.media3.common.C
+import java.util.Locale
 
 /** What a response is: [MEDIA] goes to the player as it is, [HLS] is a playlist, [NOTICE] the provider's notice. */
 enum class ResponseKind { MEDIA, HLS, NOTICE }
@@ -16,6 +17,7 @@ const val SNIFF_BYTES = 1024
 
 private const val TS_PACKET = 188
 private const val TS_SYNC: Byte = 0x47
+private const val MIN_EARLY_STOP_BYTES = 16
 
 private val EXTM3U = "#EXTM3U".toByteArray(Charsets.US_ASCII)
 private val WEBVTT = "WEBVTT".toByteArray(Charsets.US_ASCII)
@@ -67,6 +69,32 @@ fun classifyResponse(kind: RequestKind, contentType: String?, prefix: ByteArray,
   }
 }
 
+/**
+ * True when the first [length] bytes of [prefix] already determine [classifyResponse] unambiguously so
+ * [SniffingDataSource] can stop reading ahead without waiting for [SNIFF_BYTES] bytes (#438). Never stops early
+ * for text responses that might be HTML/provider notices or WebVTT/TTML/SRT subtitles.
+ */
+internal fun canStopSniffing(
+  kind: RequestKind,
+  @Suppress("UNUSED_PARAMETER") contentType: String?,
+  prefix: ByteArray,
+  length: Int,
+): Boolean {
+  if (kind == RequestKind.OTHER) return true
+  if (length >= TS_PACKET * 3 && hasTsSync(prefix, length)) return true
+  if (kind != RequestKind.MANIFEST && length >= MIN_EARLY_STOP_BYTES && !isText(prefix, length, allowTruncatedTail = true)) {
+    return true
+  }
+  if (
+    (kind == RequestKind.PROGRESSIVE || kind == RequestKind.MANIFEST) &&
+    length >= MIN_EARLY_STOP_BYTES &&
+    startsWith(prefix, length, EXTM3U)
+  ) {
+    return true
+  }
+  return false
+}
+
 /** True when a readable text segment is WebVTT, TTML/XML subtitles (excluding HTML/XHTML) or SubRip cues. */
 private fun isSubtitleSegment(contentType: String?, prefix: ByteArray, length: Int): Boolean {
   if (startsWith(prefix, length, WEBVTT)) return true
@@ -76,8 +104,8 @@ private fun isSubtitleSegment(contentType: String?, prefix: ByteArray, length: I
     if (after in " \t\r\n>:/") return true
   }
   val ascii = String(prefix, start, length - start, Charsets.ISO_8859_1)
-  val type = contentType?.substringBefore(';')?.trim()?.lowercase()
-  val lower = ascii.lowercase()
+  val type = contentType?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT)
+  val lower = ascii.lowercase(Locale.ROOT)
   val html = type == "text/html" || type == "application/xhtml+xml" ||
     lower.contains("<!doctype html") || lower.contains("<html")
   if (type == "text/vtt" && !html) return true
@@ -117,40 +145,45 @@ private fun hasTsSync(prefix: ByteArray, length: Int): Boolean {
 
 /**
  * Valid UTF-8 printable text (RFC 3629): printable ASCII, ASCII whitespace (`0x09..0x0D`), or well-formed multi-byte
- * UTF-8 sequences. A multi-byte sequence truncated right at [SNIFF_BYTES] is accepted when its present bytes are valid.
+ * UTF-8 sequences. A multi-byte sequence truncated at the end of the buffer is accepted when [allowTruncatedTail] is
+ * true (either at [SNIFF_BYTES] or while checking partial chunks in [canStopSniffing]).
  */
-private fun isText(prefix: ByteArray, length: Int): Boolean {
+private fun isText(
+  prefix: ByteArray,
+  length: Int,
+  allowTruncatedTail: Boolean = length >= SNIFF_BYTES,
+): Boolean {
   var i = 0
   while (i < length) {
     val b0 = prefix[i].toInt() and 0xFF
     when {
       b0 in 0x09..0x0D || b0 in 0x20..0x7E -> i += 1
       b0 in 0xC2..0xDF -> {
-        if (!checkContinuations(prefix, length, i + 1, 1, 0x80..0xBF)) return false
+        if (!checkContinuations(prefix, length, i + 1, 1, 0x80..0xBF, allowTruncatedTail)) return false
         i += 2
       }
       b0 == 0xE0 -> {
-        if (!checkContinuations(prefix, length, i + 1, 2, 0xA0..0xBF)) return false
+        if (!checkContinuations(prefix, length, i + 1, 2, 0xA0..0xBF, allowTruncatedTail)) return false
         i += 3
       }
       b0 in 0xE1..0xEC || b0 in 0xEE..0xEF -> {
-        if (!checkContinuations(prefix, length, i + 1, 2, 0x80..0xBF)) return false
+        if (!checkContinuations(prefix, length, i + 1, 2, 0x80..0xBF, allowTruncatedTail)) return false
         i += 3
       }
       b0 == 0xED -> {
-        if (!checkContinuations(prefix, length, i + 1, 2, 0x80..0x9F)) return false
+        if (!checkContinuations(prefix, length, i + 1, 2, 0x80..0x9F, allowTruncatedTail)) return false
         i += 3
       }
       b0 == 0xF0 -> {
-        if (!checkContinuations(prefix, length, i + 1, 3, 0x90..0xBF)) return false
+        if (!checkContinuations(prefix, length, i + 1, 3, 0x90..0xBF, allowTruncatedTail)) return false
         i += 4
       }
       b0 in 0xF1..0xF3 -> {
-        if (!checkContinuations(prefix, length, i + 1, 3, 0x80..0xBF)) return false
+        if (!checkContinuations(prefix, length, i + 1, 3, 0x80..0xBF, allowTruncatedTail)) return false
         i += 4
       }
       b0 == 0xF4 -> {
-        if (!checkContinuations(prefix, length, i + 1, 3, 0x80..0x8F)) return false
+        if (!checkContinuations(prefix, length, i + 1, 3, 0x80..0x8F, allowTruncatedTail)) return false
         i += 4
       }
       else -> return false
@@ -165,8 +198,9 @@ private fun checkContinuations(
   start: Int,
   count: Int,
   firstRange: IntRange,
+  allowTruncatedTail: Boolean,
 ): Boolean {
-  if (start + count > length && length < SNIFF_BYTES) return false
+  if (start + count > length && !allowTruncatedTail) return false
   val end = minOf(start + count, length)
   for (idx in start until end) {
     val b = prefix[idx].toInt() and 0xFF

@@ -33,7 +33,8 @@ internal const val TS_FLAGS =
 
 private const val TIMESTAMP_ADJUSTER_TIMEOUT_MS = 5_000L
 private const val LIVE_HLS_STUCK_TARGET_DURATION_COEFFICIENT = 8.0
-private const val NORMAL_RAM_TS_SEARCH_PACKETS = 1_200
+private const val LOW_RAM_TS_SEARCH_PACKETS = 1_800
+private const val NORMAL_RAM_TS_SEARCH_PACKETS = 2_400
 internal const val PROGRESS_MIN_INTERVAL_MS = 500L
 
 /**
@@ -81,23 +82,24 @@ internal class ProgressTransferListener(
   override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) = Unit
 }
 
-/** Scales MPEG-TS PCR/PTS search window by device RAM: 600 packets on low-RAM sticks, 1,200 packets otherwise. */
+/** Scales MPEG-TS PCR/PTS search window by device RAM: 1,800 packets on low-RAM sticks, 2,400 packets otherwise (#438). */
 @OptIn(UnstableApi::class)
 internal fun tsSearchBytesFor(lowRam: Boolean): Int =
-  if (lowRam) TsExtractor.DEFAULT_TIMESTAMP_SEARCH_BYTES else NORMAL_RAM_TS_SEARCH_PACKETS * TsExtractor.TS_PACKET_SIZE
+  (if (lowRam) LOW_RAM_TS_SEARCH_PACKETS else NORMAL_RAM_TS_SEARCH_PACKETS) * TsExtractor.TS_PACKET_SIZE
 
 @OptIn(UnstableApi::class)
-private fun tsCapableFactory(lowRam: Boolean): DefaultExtractorsFactory =
+internal fun tsCapableFactory(lowRam: Boolean, live: Boolean): DefaultExtractorsFactory =
   DefaultExtractorsFactory()
     .setTsExtractorFlags(TS_FLAGS)
     .setTsExtractorTimestampSearchBytes(tsSearchBytesFor(lowRam))
     .setConstantBitrateSeekingEnabled(true)
+    .setConstantBitrateSeekingAlwaysEnabled(!live)
     .setDisableArtworkMetadata(true)
 
 /** Only the MPEG-TS extractor, configured as [tsCapableFactory] does it, so nothing else sniffs the stream. */
 @OptIn(UnstableApi::class)
-private class TsOnlyExtractorsFactory(lowRam: Boolean) : ExtractorsFactory {
-  private val delegate = tsCapableFactory(lowRam)
+private class TsOnlyExtractorsFactory(lowRam: Boolean, live: Boolean) : ExtractorsFactory {
+  private val delegate = tsCapableFactory(lowRam, live)
 
   override fun createExtractors(): Array<Extractor> = tsOnly(delegate.createExtractors())
 
@@ -211,8 +213,8 @@ internal fun createMediaSource(
             }
           }
         }
-    SourceType.TS -> ProgressiveMediaSource.Factory(progressive, TsOnlyExtractorsFactory(lowRam))
-    SourceType.PROGRESSIVE -> ProgressiveMediaSource.Factory(progressive, tsCapableFactory(lowRam))
+    SourceType.TS -> ProgressiveMediaSource.Factory(progressive, TsOnlyExtractorsFactory(lowRam, request.live))
+    SourceType.PROGRESSIVE -> ProgressiveMediaSource.Factory(progressive, tsCapableFactory(lowRam, request.live))
   }
   val mediaItem = MediaItem.Builder()
     .setUri(request.url)

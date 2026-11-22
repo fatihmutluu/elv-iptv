@@ -122,6 +122,44 @@ class SurfaceControllerTest {
     }
   }
 
+  @Test
+  fun `attachToNewPlayer drops surface whose UI offer was cleared even while isValid is still true, and caps detach timeout at 250 ms (#424)`() {
+    assertEquals(250L, DETACH_TIMEOUT_MS)
+
+    val controller = SurfaceController()
+    val events = mutableListOf<String>()
+    val tex = SurfaceTexture(2)
+    val surface = Surface(tex)
+    val realPlayer = androidx.media3.exoplayer.ExoPlayer.Builder(RuntimeEnvironment.getApplication()).build()
+    var boundSurface: Surface? = null
+    val trackingPlayer = object : androidx.media3.exoplayer.ExoPlayer by realPlayer {
+      override fun setVideoSurface(s: Surface?) {
+        boundSurface = s
+      }
+    }
+    try {
+      controller.offerSurface(surface)
+      assertTrue(controller.attachPendingSurface(surface, player = null) { events += it })
+      assertEquals(listOf("created"), events)
+      assertTrue(surface.isValid)
+
+      // UI thread enters surfaceDestroyed -> clears offered before playback thread runs detachNow
+      controller.clearOfferedIfSame(surface)
+      controller.attachToNewPlayer(trackingPlayer) { events += it }
+
+      assertEquals("stale surface must not be bound to rebuilt player", null, boundSurface)
+      assertEquals(listOf("created", "destroyed"), events)
+
+      // Later detachNow must not double-emit destroyed
+      controller.detachNow(surface, trackingPlayer) { events += it }
+      assertEquals(listOf("created", "destroyed"), events)
+    } finally {
+      realPlayer.release()
+      surface.release()
+      tex.release()
+    }
+  }
+
   private fun createTestAppContext(): expo.modules.kotlin.AppContext {
     val unsafeClass = Class.forName("sun.misc.Unsafe")
     val unsafe = unsafeClass.getDeclaredField("theUnsafe").apply { isAccessible = true }.get(null)

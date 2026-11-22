@@ -15,7 +15,9 @@ import androidx.media3.common.TrackGroup
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DecoderCounters
+import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecRenderer
 import androidx.media3.exoplayer.video.MediaCodecVideoDecoderException
@@ -195,7 +197,7 @@ class EventReporterTest {
   }
 
   @Test
-  fun `transient audio-focus suppression emits paused without stalling, and audio-only streams emit firstFrame keeping shutter`() {
+  fun `transient audio-focus suppression holds state with zero clock rate without emitting paused or stall, while explicit pause and other suppression emit paused (#436)`() {
     val events = mutableListOf<Map<String, Any?>>()
     var shutterLifted = false
     val real = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).setLooper(Looper.getMainLooper()).build()
@@ -226,7 +228,7 @@ class EventReporterTest {
       assertEquals(1, events.count { it["type"] == "firstFrame" })
       assertFalse("audio-only stream must keep shutterView covering surfaceView", shutterLifted)
 
-      // Transient audio-focus loss suppresses playback while playWhenReady stays true -> emits paused, no stall!
+      // Transient audio-focus loss suppresses playback while playWhenReady stays true -> holds state, rate=0, no stall!
       events.clear()
       player.playing = false
       player.state = Player.STATE_BUFFERING
@@ -235,8 +237,120 @@ class EventReporterTest {
         player,
         eventsFlag(Player.EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED, Player.EVENT_PLAYBACK_STATE_CHANGED),
       )
-      assertEquals(listOf("paused"), events.filter { it["type"] == "state" }.map { it["state"] })
+      assertTrue(
+        "transient audio-focus suppression must not emit paused/buffering state: $events",
+        events.none { it["type"] == "state" },
+      )
       assertTrue(events.none { it["type"] == "stall" })
+      val pausedClock = events.first { it["type"] == "clock" }["anchor"] as Map<*, *>
+      assertEquals(0.0, pausedClock["rate"])
+
+      // Non-transient suppression reason while playWhenReady == true still emits paused
+      events.clear()
+      player.state = Player.STATE_READY
+      player.suppressionReason = Player.PLAYBACK_SUPPRESSION_REASON_UNSUITABLE_AUDIO_OUTPUT
+      reporter.onEvents(player, eventsFlag(Player.EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED))
+      assertEquals(listOf("paused"), events.filter { it["type"] == "state" }.map { it["state"] })
+
+      // Resume playing, then explicit !playWhenReady during transient suppression still emits paused
+      events.clear()
+      player.suppressionReason = Player.PLAYBACK_SUPPRESSION_REASON_NONE
+      player.playing = true
+      reporter.onEvents(player, eventsFlag(Player.EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED, Player.EVENT_IS_PLAYING_CHANGED))
+      events.clear()
+      player.playing = false
+      player.wantPlay = false
+      player.suppressionReason = Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS
+      reporter.onEvents(player, eventsFlag(Player.EVENT_PLAY_WHEN_READY_CHANGED))
+      assertEquals(listOf("paused"), events.filter { it["type"] == "state" }.map { it["state"] })
+      reporter.end()
+    } finally {
+      real.release()
+    }
+  }
+
+  @Test
+  fun `detects audio decoder and AudioSink failures and delegates once to onAudioCodecFailed (#436)`() {
+    val events = mutableListOf<Map<String, Any?>>()
+    var audioFailures = 0
+    var handleAudioFailure = true
+    val real = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).setLooper(Looper.getMainLooper()).build()
+    try {
+      val reporter = EventReporter(
+        handler = Handler(Looper.getMainLooper()),
+        fence = PrepareFence(),
+        send = { events += it },
+        onHlsDetected = {},
+        onBehindLiveWindow = {},
+        onAudioFocusDenied = { false },
+        onVideoCodecFailed = {},
+        onAudioCodecFailed = {
+          audioFailures += 1
+          handleAudioFailure
+        },
+        onFirstFrame = {},
+        onCue = { _, _ -> },
+      )
+      reporter.begin(real, live = false, prepareSerial = 1L, reused = false)
+      events.clear()
+
+      val audioFmt = Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AC3).setChannelCount(6).setSampleRate(48_000).build()
+
+      // 1. Audio DecoderInitializationException
+      val audioInit = MediaCodecRenderer.DecoderInitializationException(audioFmt, IllegalStateException("no ac3"), false, -49_999)
+      reporter.onPlayerError(PlaybackException("audio init", audioInit, PlaybackException.ERROR_CODE_DECODER_INIT_FAILED))
+      assertEquals(1, audioFailures)
+      assertTrue("handled audio failure must suppress error emission", events.isEmpty())
+
+      // 2. AudioSink.InitializationException
+      val sinkInit = AudioSink.InitializationException("sink init", 0, audioFmt, false, null)
+      reporter.onPlayerError(PlaybackException("sink init", sinkInit, PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED))
+      assertEquals(2, audioFailures)
+      assertTrue(events.isEmpty())
+
+      // 3. AudioSink.WriteException
+      val sinkWrite = AudioSink.WriteException(-1, audioFmt, false)
+      reporter.onPlayerError(PlaybackException("sink write", sinkWrite, PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED))
+      assertEquals(3, audioFailures)
+      assertTrue(events.isEmpty())
+
+      // 4. Non-video ERROR_CODE_DECODING_FAILED without video exception
+      reporter.onPlayerError(PlaybackException("audio decode", IllegalStateException("bad frame"), PlaybackException.ERROR_CODE_DECODING_FAILED))
+      assertEquals(4, audioFailures)
+      assertTrue(events.isEmpty())
+
+      // 5. Video decoder failure and non-audio ExoPlaybackException must NOT invoke onAudioCodecFailed
+      val hwInfo = MediaCodecInfo.newInstance("c2.vid", MimeTypes.VIDEO_H265, MimeTypes.VIDEO_H265, null, true, false, true, false, false)
+      val vidErr = PlaybackException(
+        "video decode",
+        MediaCodecVideoDecoderException(IllegalStateException("bad slice"), hwInfo, null),
+        PlaybackException.ERROR_CODE_DECODING_FAILED,
+      )
+      reporter.onPlayerError(vidErr)
+      assertEquals(4, audioFailures)
+      assertEquals("decoder", (events.last()["error"] as Map<*, *>)["code"])
+
+      events.clear()
+      val textFmt = Format.Builder().setSampleMimeType(MimeTypes.TEXT_VTT).build()
+      val textExoErr = ExoPlaybackException.createForRenderer(
+        IllegalStateException("malformed cue"),
+        "TextRenderer",
+        2,
+        textFmt,
+        C.FORMAT_HANDLED,
+        false,
+        PlaybackException.ERROR_CODE_DECODING_FAILED,
+      )
+      reporter.onPlayerError(textExoErr)
+      assertEquals(4, audioFailures)
+      assertEquals("decoder", (events.single()["error"] as Map<*, *>)["code"])
+
+      // 6. When onAudioCodecFailed returns false, audio failure emits decoder error normally
+      events.clear()
+      handleAudioFailure = false
+      reporter.onPlayerError(PlaybackException("sink init 2", sinkInit, PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED))
+      assertEquals(5, audioFailures)
+      assertEquals("decoder", (events.single()["error"] as Map<*, *>)["code"])
       reporter.end()
     } finally {
       real.release()

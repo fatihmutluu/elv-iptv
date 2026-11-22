@@ -10,7 +10,9 @@ import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecRenderer
 import androidx.media3.exoplayer.video.MediaCodecVideoDecoderException
@@ -34,6 +36,7 @@ internal class EventReporter(
   private val onAudioFocusDenied: () -> Boolean,
   private val onVideoCodecFailed: (MediaCodecInfo) -> Unit,
   private val onDolbyVisionFailed: () -> Unit = {},
+  private val onAudioCodecFailed: () -> Boolean = { false },
   private val onFirstFrame: () -> Unit,
   private val onCue: (ScreenCue, Boolean) -> Unit,
 ) : Player.Listener {
@@ -144,10 +147,31 @@ internal class EventReporter(
       return
     }
     val videoDecoderError = causeOf<MediaCodecVideoDecoderException>(error)
-    val videoInitError =
-      causeOf<MediaCodecRenderer.DecoderInitializationException>(error)?.takeIf {
-        it.mimeType != null && MimeTypes.isVideo(it.mimeType)
-      }
+    val decoderInitError = causeOf<MediaCodecRenderer.DecoderInitializationException>(error)
+    val videoInitError = decoderInitError?.takeIf { it.mimeType != null && MimeTypes.isVideo(it.mimeType) }
+    val audioInitError = decoderInitError?.takeIf { it.mimeType != null && MimeTypes.isAudio(it.mimeType) }
+    val nonAudioInitError = decoderInitError != null && decoderInitError.mimeType != null && !MimeTypes.isAudio(decoderInitError.mimeType)
+    val rendererMime = (error as? ExoPlaybackException)?.rendererFormat?.sampleMimeType
+    val nonAudioRenderer = rendererMime != null && !MimeTypes.isAudio(rendererMime)
+    val audioSinkError =
+      causeOf<AudioSink.InitializationException>(error) != null ||
+        causeOf<AudioSink.WriteException>(error) != null
+    val isAudioErrorCode =
+      error.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED ||
+        error.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED ||
+        (
+          videoDecoderError == null &&
+            videoInitError == null &&
+            !nonAudioInitError &&
+            !nonAudioRenderer &&
+            (
+              error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
+                error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED
+              )
+          )
+    if ((audioInitError != null || audioSinkError || isAudioErrorCode) && onAudioCodecFailed()) {
+      return
+    }
     val surfaceLost =
       (videoDecoderError?.let { !it.isSurfaceValid } == true) ||
         (videoInitError != null && hasInvalidAttachedSurface())
@@ -271,14 +295,18 @@ internal class EventReporter(
       return hasAudio
     }
 
-    /** `paused` when playback is not wanted or transiently suppressed (e.g. phone call audio-focus loss). */
+    /**
+     * Maps playback state: explicit `!playWhenReady` and non-transient suppression emit `paused`; transient audio-focus
+     * loss while `playWhenReady` holds the current state (`null`) with zero clock rate (#436).
+     */
     fun stateOf(player: Player): String? =
       when (player.playbackState) {
         Player.STATE_IDLE -> null
         Player.STATE_ENDED -> "ended"
         else -> when {
-          !player.playWhenReady ||
-            player.playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_NONE -> "paused"
+          !player.playWhenReady -> "paused"
+          player.playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS -> null
+          player.playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_NONE -> "paused"
           player.playbackState == Player.STATE_BUFFERING -> "buffering"
           player.isPlaying -> "playing"
           else -> "ready"

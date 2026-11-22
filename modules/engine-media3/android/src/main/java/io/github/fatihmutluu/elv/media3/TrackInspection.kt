@@ -142,6 +142,7 @@ internal data class TrackInfoSnapshot(
   val channels: Int? = null,
   val forced: Boolean = false,
   val isDefault: Boolean = false,
+  val formatId: String? = null,
 ) {
   fun toMap(): Map<String, Any> = buildMap {
     put("id", id)
@@ -173,6 +174,9 @@ internal data class TrackChoice(
   val id: String,
   val language: String?,
   val label: String?,
+  val formatId: String? = null,
+  val codec: String? = null,
+  val channels: Int? = null,
 )
 
 internal data class TrackCandidate(
@@ -245,20 +249,58 @@ internal fun extractLanguageFromLabel(label: String?): String? {
   return null
 }
 
-/** Includes supported tracks plus actively selected `FORMAT_EXCEEDS_CAPABILITIES` audio tracks. */
+/** Default FFmpeg software-audio probe used to expose decodable `FORMAT_EXCEEDS_CAPABILITIES` audio tracks (#438). */
+internal fun defaultFfmpegSupportsAudio(mimeType: String?): Boolean =
+  mimeType != null && runCatching { FfmpegAudio.supportsMimeType(mimeType) }.getOrDefault(false)
+
+/** Includes supported tracks plus `FORMAT_EXCEEDS_CAPABILITIES` audio that is selected or FFmpeg-decodable (#438). */
 @OptIn(UnstableApi::class)
-internal fun isSelectableTrack(group: Tracks.Group, trackIndex: Int): Boolean =
+internal fun isSelectableTrack(
+  group: Tracks.Group,
+  trackIndex: Int,
+  ffmpegSupportsAudio: (String?) -> Boolean = ::defaultFfmpegSupportsAudio,
+): Boolean =
   group.isTrackSupported(trackIndex) ||
     (group.type == C.TRACK_TYPE_AUDIO &&
-      group.isTrackSelected(trackIndex) &&
-      group.isTrackSupported(trackIndex, /* allowExceedsCapabilities = */ true))
+      group.isTrackSupported(trackIndex, /* allowExceedsCapabilities = */ true) &&
+      (group.isTrackSelected(trackIndex) || ffmpegSupportsAudio(group.getTrackFormat(trackIndex).sampleMimeType)))
+
+@OptIn(UnstableApi::class)
+private fun snapshotOf(group: Tracks.Group, groupIndex: Int, trackIndex: Int): TrackInfoSnapshot {
+  val format = group.getTrackFormat(trackIndex)
+  val label = format.label?.trim()?.takeIf { it.isNotEmpty() }
+  val language = normalizeLang(format.language) ?: extractLanguageFromLabel(label)
+  val codec =
+    format.codecs?.trim()?.takeIf { it.isNotEmpty() }
+      ?: format.sampleMimeType?.trim()?.takeIf { it.isNotEmpty() }
+  val channels =
+    if (group.type == C.TRACK_TYPE_AUDIO && format.channelCount != Format.NO_VALUE && format.channelCount > 0) {
+      format.channelCount
+    } else {
+      null
+    }
+  return TrackInfoSnapshot(
+    id = "$groupIndex:$trackIndex",
+    language = language,
+    label = label,
+    codec = codec,
+    channels = channels,
+    forced = (format.selectionFlags and C.SELECTION_FLAG_FORCED) != 0,
+    isDefault = (format.selectionFlags and C.SELECTION_FLAG_DEFAULT) != 0,
+    formatId = format.id?.trim()?.takeIf { it.isNotEmpty() },
+  )
+}
 
 /**
  * Inspects [tracks] and maps selectable `C.TRACK_TYPE_AUDIO` and `C.TRACK_TYPE_TEXT` entries to stable
  * `"$groupIndex:$trackIndex"` IDs. When [textDisabled] is true, `selectedSubtitleId` is always `null`.
  */
 @OptIn(UnstableApi::class)
-internal fun inspectMediaTracks(tracks: Tracks, textDisabled: Boolean): MediaTracksSnapshot {
+internal fun inspectMediaTracks(
+  tracks: Tracks,
+  textDisabled: Boolean,
+  ffmpegSupportsAudio: (String?) -> Boolean = ::defaultFfmpegSupportsAudio,
+): MediaTracksSnapshot {
   val audio = mutableListOf<TrackInfoSnapshot>()
   val subtitles = mutableListOf<TrackInfoSnapshot>()
   var selectedAudioId: String? = null
@@ -267,36 +309,15 @@ internal fun inspectMediaTracks(tracks: Tracks, textDisabled: Boolean): MediaTra
   tracks.groups.forEachIndexed { groupIndex, group ->
     if (group.type != C.TRACK_TYPE_AUDIO && group.type != C.TRACK_TYPE_TEXT) return@forEachIndexed
     for (trackIndex in 0 until group.length) {
-      if (!isSelectableTrack(group, trackIndex)) continue
-      val id = "$groupIndex:$trackIndex"
-      val format = group.getTrackFormat(trackIndex)
-      val label = format.label?.trim()?.takeIf { it.isNotEmpty() }
-      val language = normalizeLang(format.language) ?: extractLanguageFromLabel(label)
-      val codec =
-        format.codecs?.trim()?.takeIf { it.isNotEmpty() }
-          ?: format.sampleMimeType?.trim()?.takeIf { it.isNotEmpty() }
-      val channels =
-        if (group.type == C.TRACK_TYPE_AUDIO && format.channelCount != Format.NO_VALUE && format.channelCount > 0) {
-          format.channelCount
-        } else {
-          null
-        }
-      val info = TrackInfoSnapshot(
-        id = id,
-        language = language,
-        label = label,
-        codec = codec,
-        channels = channels,
-        forced = (format.selectionFlags and C.SELECTION_FLAG_FORCED) != 0,
-        isDefault = (format.selectionFlags and C.SELECTION_FLAG_DEFAULT) != 0,
-      )
+      if (!isSelectableTrack(group, trackIndex, ffmpegSupportsAudio)) continue
+      val info = snapshotOf(group, groupIndex, trackIndex)
       if (group.type == C.TRACK_TYPE_AUDIO) {
         audio += info
-        if (selectedAudioId == null && group.isTrackSelected(trackIndex)) selectedAudioId = id
+        if (selectedAudioId == null && group.isTrackSelected(trackIndex)) selectedAudioId = info.id
       } else {
         subtitles += info
         if (!textDisabled && selectedSubtitleId == null && group.isTrackSelected(trackIndex)) {
-          selectedSubtitleId = id
+          selectedSubtitleId = info.id
         }
       }
     }
@@ -311,31 +332,49 @@ internal fun inspectMediaTracks(tracks: Tracks, textDisabled: Boolean): MediaTra
 }
 
 @OptIn(UnstableApi::class)
-internal fun candidatesOf(tracks: Tracks, trackType: Int): List<TrackCandidate> {
+internal fun candidatesOf(
+  tracks: Tracks,
+  trackType: Int,
+  ffmpegSupportsAudio: (String?) -> Boolean = ::defaultFfmpegSupportsAudio,
+): List<TrackCandidate> {
   val result = mutableListOf<TrackCandidate>()
   tracks.groups.forEachIndexed { groupIndex, group ->
     if (group.type != trackType) return@forEachIndexed
     for (trackIndex in 0 until group.length) {
-      if (!isSelectableTrack(group, trackIndex)) continue
-      val format = group.getTrackFormat(trackIndex)
-      val label = format.label?.trim()?.takeIf { it.isNotEmpty() }
-      val info = TrackInfoSnapshot(
-        id = "$groupIndex:$trackIndex",
-        language = normalizeLang(format.language) ?: extractLanguageFromLabel(label),
-        label = label,
-      )
-      result += TrackCandidate(group = group, trackIndex = trackIndex, info = info)
+      if (!isSelectableTrack(group, trackIndex, ffmpegSupportsAudio)) continue
+      result += TrackCandidate(group = group, trackIndex = trackIndex, info = snapshotOf(group, groupIndex, trackIndex))
     }
   }
   return result
 }
 
-internal fun findCandidateById(tracks: Tracks, trackType: Int, id: String): TrackCandidate? =
-  candidatesOf(tracks, trackType).firstOrNull { it.info.id == id }
+internal fun findCandidateById(
+  tracks: Tracks,
+  trackType: Int,
+  id: String,
+  ffmpegSupportsAudio: (String?) -> Boolean = ::defaultFfmpegSupportsAudio,
+): TrackCandidate? =
+  candidatesOf(tracks, trackType, ffmpegSupportsAudio).firstOrNull { it.info.id == id }
 
-internal fun resolveCandidate(tracks: Tracks, trackType: Int, wanted: TrackChoice): TrackCandidate? {
-  val candidates = candidatesOf(tracks, trackType)
+internal fun resolveCandidate(
+  tracks: Tracks,
+  trackType: Int,
+  wanted: TrackChoice,
+  ffmpegSupportsAudio: (String?) -> Boolean = ::defaultFfmpegSupportsAudio,
+): TrackCandidate? {
+  val candidates = candidatesOf(tracks, trackType, ffmpegSupportsAudio)
   val exact = candidates.firstOrNull { it.info.id == wanted.id }
+  if (wanted.language == null && wanted.label == null) {
+    if (wanted.formatId != null) {
+      if (exact != null && exact.info.formatId == wanted.formatId) return exact
+      candidates.firstOrNull { it.info.formatId == wanted.formatId }?.let { return it }
+    }
+    if (wanted.codec != null) {
+      if (exact != null && exact.info.codec == wanted.codec && exact.info.channels == wanted.channels) return exact
+      candidates.firstOrNull { it.info.codec == wanted.codec && it.info.channels == wanted.channels }?.let { return it }
+    }
+    return exact
+  }
   if (exact != null) {
     val langOk = wanted.language == null || sameLanguage(exact.info.language, wanted.language)
     val labelOk =

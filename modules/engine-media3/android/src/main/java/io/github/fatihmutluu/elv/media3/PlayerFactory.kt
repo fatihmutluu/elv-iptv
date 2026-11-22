@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.content.Context
 import android.os.Looper
 import android.util.Log
+import android.view.accessibility.CaptioningManager
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
@@ -29,19 +30,38 @@ internal fun vodSeekParametersFor(targetPositionMs: Long, currentPositionMs: Lon
     SeekParameters.CLOSEST_SYNC
   }
 
-internal fun readDeviceMemoryProfile(context: Context): Pair<Boolean, LoadControlValues> {
-  val activity = context.getSystemService(ActivityManager::class.java)
-    ?: return true to loadControlFor(lowRam = true)
-  val memory = ActivityManager.MemoryInfo().also { activity.getMemoryInfo(it) }
-  return isLowRam(activity.isLowRamDevice, memory.totalMem) to
-    loadControlForMemory(activity.isLowRamDevice, memory.totalMem)
+/** Snapshot of Android device memory tier used to derive live vs VOD [LoadControlValues] (#422). */
+internal data class DeviceMemoryProfile(
+  val isLowRamDevice: Boolean,
+  val totalMemBytes: Long,
+  val lowRam: Boolean = isLowRam(isLowRamDevice, totalMemBytes),
+) {
+  fun loadControl(live: Boolean): LoadControlValues =
+    loadControlForMemory(isLowRamDevice, totalMemBytes, live = live)
 }
 
+internal fun readDeviceMemoryProfile(context: Context): DeviceMemoryProfile {
+  val activity = context.getSystemService(ActivityManager::class.java)
+    ?: return DeviceMemoryProfile(isLowRamDevice = true, totalMemBytes = 0L, lowRam = true)
+  val memory = ActivityManager.MemoryInfo().also { activity.getMemoryInfo(it) }
+  return DeviceMemoryProfile(
+    isLowRamDevice = activity.isLowRamDevice,
+    totalMemBytes = memory.totalMem,
+    lowRam = isLowRam(activity.isLowRamDevice, memory.totalMem),
+  )
+}
+
+/** True only when Android system accessibility captioning is explicitly enabled (#438). */
+internal fun isSystemCaptioningEnabled(context: Context): Boolean =
+  runCatching { context.getSystemService(CaptioningManager::class.java)?.isEnabled == true }
+    .getOrDefault(false)
+
 /**
- * Builds configured [ExoPlayer] instances on the engine's playback [looper] (#111, #127, #191, #248, #249, #260, #307):
- * - [DefaultLoadControl] with time-over-size priority and RAM-tiered back-buffer.
- * - [DefaultTrackSelector] with mixed-audio adaptiveness, renderer capability-change invalidation, and Android
- *   `CaptioningManager` accessibility defaults.
+ * Builds configured [ExoPlayer] instances on the engine's playback [looper] (#111, #127, #191, #248, #249, #260, #307,
+ * #422, #438):
+ * - [DefaultLoadControl] split by live vs VOD and RAM tier (hard byte cap on low-RAM).
+ * - [DefaultTrackSelector] with mixed-audio adaptiveness, renderer capability-change invalidation, and
+ *   `CaptioningManager` defaults applied only when system captioning is enabled.
  * - `C.WAKE_MODE_NETWORK`, pinned release/detach/stuck-buffering timeouts, and `enablePerStreamMediaProgression(true)`.
  * - Automatic fallback to `handleAudioFocus = false` on firmwares throwing `SecurityException` on `TAKE_AUDIO_FOCUS`.
  */
@@ -49,10 +69,27 @@ internal fun readDeviceMemoryProfile(context: Context): Pair<Boolean, LoadContro
 internal class PlayerFactory(
   private val context: Context,
   private val looper: Looper,
-  private val buffers: LoadControlValues,
+  private val loadControlForLive: (Boolean) -> LoadControlValues,
   private val codecPolicy: CodecPolicy,
   private val audioFocusProbe: (Boolean) -> Unit = {},
+  private val captioningEnabled: () -> Boolean = { isSystemCaptioningEnabled(context) },
 ) {
+  constructor(
+    context: Context,
+    looper: Looper,
+    buffers: LoadControlValues,
+    codecPolicy: CodecPolicy,
+    audioFocusProbe: (Boolean) -> Unit = {},
+    captioningEnabled: () -> Boolean = { isSystemCaptioningEnabled(context) },
+  ) : this(
+    context = context,
+    looper = looper,
+    loadControlForLive = { buffers },
+    codecPolicy = codecPolicy,
+    audioFocusProbe = audioFocusProbe,
+    captioningEnabled = captioningEnabled,
+  )
+
   @Volatile
   var audioFocusAllowed: Boolean = true
     private set
@@ -61,25 +98,31 @@ internal class PlayerFactory(
     audioFocusAllowed = false
   }
 
-  fun build(softwareAudio: Boolean, preferHevcOverDolbyVision: Boolean = false): ExoPlayer {
+  fun build(
+    softwareAudio: Boolean,
+    preferHevcOverDolbyVision: Boolean = false,
+    live: Boolean = false,
+  ): ExoPlayer {
     if (audioFocusAllowed) {
       try {
         audioFocusProbe(true)
-        return buildInternal(softwareAudio, preferHevcOverDolbyVision, handleAudioFocus = true)
+        return buildInternal(softwareAudio, preferHevcOverDolbyVision, live, handleAudioFocus = true)
       } catch (e: SecurityException) {
         Log.w(TAG, "TAKE_AUDIO_FOCUS denied (${e.javaClass.simpleName}); falling back to handleAudioFocus=false")
         audioFocusAllowed = false
       }
     }
     audioFocusProbe(false)
-    return buildInternal(softwareAudio, preferHevcOverDolbyVision, handleAudioFocus = false)
+    return buildInternal(softwareAudio, preferHevcOverDolbyVision, live, handleAudioFocus = false)
   }
 
   private fun buildInternal(
     softwareAudio: Boolean,
     preferHevcOverDolbyVision: Boolean,
+    live: Boolean,
     handleAudioFocus: Boolean,
   ): ExoPlayer {
+    val buffers = loadControlForLive(live)
     val renderers = createRenderersFactory(context, codecPolicy, softwareAudio, preferHevcOverDolbyVision)
     val loadControl = DefaultLoadControl.Builder()
       .setBufferDurationsMs(
@@ -93,15 +136,18 @@ internal class PlayerFactory(
       .setBackBuffer(buffers.backBufferMs, buffers.retainBackBufferFromKeyframe)
       .build()
     val trackSelector = DefaultTrackSelector(context).apply {
-      setParameters(
-        buildUponParameters()
-          .setAllowAudioMixedMimeTypeAdaptiveness(true)
-          .setAllowAudioMixedSampleRateAdaptiveness(true)
-          .setAllowAudioMixedChannelCountAdaptiveness(true)
-          .setAllowAudioMixedDecoderSupportAdaptiveness(true)
-          .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true)
-          .setPreferredTextLanguageAndRoleFlagsToCaptioningManagerSettings()
-      )
+      val params = buildUponParameters()
+        .setAllowAudioMixedMimeTypeAdaptiveness(true)
+        .setAllowAudioMixedSampleRateAdaptiveness(true)
+        .setAllowAudioMixedChannelCountAdaptiveness(true)
+        .setAllowAudioMixedDecoderSupportAdaptiveness(true)
+        .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true)
+      if (captioningEnabled()) {
+        params.setPreferredTextLanguageAndRoleFlagsToCaptioningManagerSettings()
+      } else {
+        params.setPreferredTextLanguage(null).setPreferredTextRoleFlags(0)
+      }
+      setParameters(params)
     }
     return ExoPlayer.Builder(context, renderers)
       .setLooper(looper)

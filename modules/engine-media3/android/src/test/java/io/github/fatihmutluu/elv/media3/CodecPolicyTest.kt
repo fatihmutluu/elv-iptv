@@ -1,9 +1,11 @@
 package io.github.fatihmutluu.elv.media3
 
 import android.content.Context
+import android.content.ContextWrapper
 import android.media.MediaCodecInfo.CodecCapabilities
 import android.media.MediaCodecInfo.CodecProfileLevel
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import androidx.annotation.OptIn
 import androidx.media3.common.C
@@ -11,6 +13,7 @@ import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.audio.AudioCapabilities
 import androidx.media3.exoplayer.audio.AudioRendererEventListener
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
@@ -18,6 +21,8 @@ import androidx.media3.exoplayer.metadata.MetadataOutput
 import androidx.media3.exoplayer.text.TextOutput
 import androidx.media3.exoplayer.video.VideoRendererEventListener
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -399,6 +404,57 @@ class CodecPolicyTest {
       )
     } finally {
       Locale.setDefault(previousLocale)
+    }
+  }
+
+  @Test
+  fun `caches AudioCapabilities via receiver and uses cached DTS passthrough without IPC (#438)`() {
+    val app = RuntimeEnvironment.getApplication()
+    val policy = CodecPolicy()
+    var ipcQueries = 0
+    val countingContext = object : ContextWrapper(app) {
+      override fun getSystemService(name: String): Any? {
+        ipcQueries += 1
+        throw AssertionError("must not query synchronous AudioCapabilities IPC while cached")
+      }
+    }
+
+    // Cached DTS-only capabilities answer DTS=true, DTS-HD=false with zero IPC
+    policy.updateAudioCapabilitiesForTest(AudioCapabilities(intArrayOf(C.ENCODING_DTS), 6))
+    assertTrue(policy.hasDtsPassthrough(countingContext, MimeTypes.AUDIO_DTS))
+    assertTrue(policy.hasDtsPassthrough(countingContext, MimeTypes.AUDIO_DTS_EXPRESS))
+    assertFalse(policy.hasDtsPassthrough(countingContext, MimeTypes.AUDIO_DTS_HD))
+    assertEquals(0, ipcQueries)
+
+    // Route change to AVR supporting DTS-HD updates both DTS and DTS-HD immediately
+    policy.updateAudioCapabilitiesForTest(AudioCapabilities(intArrayOf(C.ENCODING_DTS_HD), 8))
+    assertTrue(policy.hasDtsPassthrough(countingContext, MimeTypes.AUDIO_DTS))
+    assertTrue(policy.hasDtsPassthrough(countingContext, MimeTypes.AUDIO_DTS_HD))
+    assertEquals(0, ipcQueries)
+
+    // Route change to TV speakers (no DTS) flips back to false
+    policy.updateAudioCapabilitiesForTest(AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES)
+    assertFalse(policy.hasDtsPassthrough(countingContext, MimeTypes.AUDIO_DTS))
+    assertFalse(policy.hasDtsPassthrough(countingContext, MimeTypes.AUDIO_DTS_HD))
+    assertEquals(0, ipcQueries)
+
+    // Lifecycle start/stop on playback HandlerThread is idempotent and populates cache
+    policy.updateAudioCapabilitiesForTest(null)
+    val thread = HandlerThread("codec-policy-test").apply { start() }
+    try {
+      val handler = Handler(thread.looper)
+      policy.startAudioCapabilities(app, handler)
+      policy.startAudioCapabilities(app, handler) // idempotent
+      val synced = CountDownLatch(1)
+      handler.post { synced.countDown() }
+      assertTrue(synced.await(5, TimeUnit.SECONDS))
+      // After startAudioCapabilities completes, cached lookup succeeds without hitting countingContext
+      assertFalse(policy.hasDtsPassthrough(countingContext, MimeTypes.AUDIO_DTS))
+      assertEquals(0, ipcQueries)
+      policy.stopAudioCapabilities()
+      policy.stopAudioCapabilities() // idempotent
+    } finally {
+      thread.quitSafely()
     }
   }
 }

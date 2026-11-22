@@ -202,7 +202,7 @@ class SniffingDataSourceTest {
   }
 
   @Test
-  fun `marks manifestLoaded on valid EXTM3U manifest and avoids redundant upstream read after readAhead EOF`() {
+  fun `marks manifestLoaded on valid EXTM3U manifest, stops early at 16 bytes, and avoids redundant EOF read (#438)`() {
     var manifestMarked = false
     var eofReads = 0
     val playlist = "#EXTM3U\n#EXT-X-VERSION:3\n".toByteArray(Charsets.UTF_8)
@@ -229,10 +229,110 @@ class SniffingDataSourceTest {
     val sniffing = SniffingDataSource(chunkedUpstream, RequestKind.MANIFEST) { manifestMarked = true }
     sniffing.open(DataSpec(Uri.parse("http://127.0.0.1:7878/live/demo/demo/1.m3u8")))
     assertTrue("manifestLoaded must flip as soon as MANIFEST EXTM3U opens", manifestMarked)
-    assertEquals(1, eofReads)
+    assertEquals("open() must stop early once >=16-byte #EXTM3U header arrives without probing EOF", 0, eofReads)
     assertArrayEquals(playlist, readAll(sniffing, playlist.size))
-    assertEquals("must not call upstream.read again after readAhead already saw EOF", 1, eofReads)
+    assertEquals(1, eofReads)
+    assertEquals(C.RESULT_END_OF_INPUT, sniffing.read(ByteArray(1), 0, 1))
+    assertEquals("must not call upstream.read again after EOF was observed", 1, eofReads)
     sniffing.close()
+
+    // Short (< 16 bytes) manifest hits EOF during readAhead and still avoids redundant EOF reads
+    var shortEofReads = 0
+    val shortPlaylist = "#EXTM3U\n".toByteArray(Charsets.UTF_8)
+    val shortUpstream = object : DataSource {
+      private var offset = 0
+      override fun addTransferListener(transferListener: TransferListener) = Unit
+      override fun open(dataSpec: DataSpec): Long {
+        offset = 0
+        return C.LENGTH_UNSET.toLong()
+      }
+      override fun read(buffer: ByteArray, bufferOffset: Int, length: Int): Int {
+        if (offset >= shortPlaylist.size) {
+          shortEofReads += 1
+          return C.RESULT_END_OF_INPUT
+        }
+        val count = min(length, shortPlaylist.size - offset)
+        System.arraycopy(shortPlaylist, offset, buffer, bufferOffset, count)
+        offset += count
+        return count
+      }
+      override fun getUri(): Uri = Uri.parse("http://127.0.0.1:7878/live/demo/demo/1.m3u8")
+      override fun close() = Unit
+    }
+    val shortSniffing = SniffingDataSource(shortUpstream, RequestKind.MANIFEST)
+    shortSniffing.open(DataSpec(Uri.parse("http://127.0.0.1:7878/live/demo/demo/1.m3u8")))
+    assertEquals(1, shortEofReads)
+    assertArrayEquals(shortPlaylist, readAll(shortSniffing, shortPlaylist.size))
+    assertEquals("must not call upstream.read again after readAhead already saw EOF", 1, shortEofReads)
+    shortSniffing.close()
+  }
+
+  @Test
+  fun `incremental readAhead stops after first binary or TS sync chunk without filling SNIFF_BYTES, while reading full notices and subtitles (#438)`() {
+    class ChunkedSource(
+      private val body: ByteArray,
+      private val chunkSize: Int,
+      private val headers: Map<String, List<String>> = emptyMap(),
+    ) : DataSource {
+      var readCalls = 0
+      private var offset = 0
+      override fun addTransferListener(transferListener: TransferListener) = Unit
+      override fun open(dataSpec: DataSpec): Long {
+        readCalls = 0
+        offset = 0
+        return body.size.toLong()
+      }
+      override fun read(buffer: ByteArray, bufferOffset: Int, length: Int): Int {
+        readCalls += 1
+        if (offset >= body.size) return C.RESULT_END_OF_INPUT
+        val count = minOf(length, chunkSize, body.size - offset)
+        System.arraycopy(body, offset, buffer, bufferOffset, count)
+        offset += count
+        return count
+      }
+      override fun getUri(): Uri = Uri.parse("http://127.0.0.1:7878/live/demo/demo/1")
+      override fun getResponseHeaders(): Map<String, List<String>> = headers
+      override fun close() = Unit
+    }
+
+    // 1) Binary MP4 stream delivering 32-byte chunks stops after 1 read instead of filling 1024 bytes
+    val mp4Body = byteArrayOf(0, 0, 0, 0x18) + "ftypmp42".toByteArray(Charsets.US_ASCII) + ByteArray(2048) { 0x2A }
+    val mp4Upstream = ChunkedSource(mp4Body, chunkSize = 32, headers = mapOf("Content-Type" to listOf("video/mp4")))
+    val mp4Sniffing = SniffingDataSource(mp4Upstream, RequestKind.PROGRESSIVE)
+    mp4Sniffing.open(DataSpec(Uri.parse("http://127.0.0.1:7878/movie/demo/demo/1.mp4")))
+    assertEquals("binary progressive stream must stop sniffing after first >=16-byte chunk", 1, mp4Upstream.readCalls)
+    assertArrayEquals(mp4Body, readAll(mp4Sniffing, mp4Body.size))
+    mp4Sniffing.close()
+
+    // 2) Printable mid-packet MPEG-TS stops at 3 packets (564 bytes = 3 reads of 188) instead of 1024 bytes
+    val printableTs = ByteArray(1_500) { index -> if ((index - 40).mod(188) == 0) 0x47 else 'x'.code.toByte() }
+    val tsUpstream = ChunkedSource(printableTs, chunkSize = 188, headers = mapOf("Content-Type" to listOf("text/plain")))
+    val tsSniffing = SniffingDataSource(tsUpstream, RequestKind.PROGRESSIVE)
+    tsSniffing.open(DataSpec(Uri.parse("http://127.0.0.1:7878/live/demo/demo/1.ts")))
+    assertEquals("printable TS must stop as soon as 3 sync packets (564 bytes) arrive", 3, tsUpstream.readCalls)
+    assertArrayEquals(printableTs, readAll(tsSniffing, printableTs.size))
+    tsSniffing.close()
+
+    // 3) UTF-8 notice split mid-character at byte 16 must NOT early-stop as binary; must still throw ProviderNoticeException
+    val splitNotice = ("123456789012345" + "ğ" + " max connections reached").toByteArray(Charsets.UTF_8)
+    assertEquals(0xC4.toByte(), splitNotice[15])
+    val noticeUpstream = ChunkedSource(splitNotice, chunkSize = 16, headers = mapOf("Content-Type" to listOf("text/plain")))
+    val noticeSniffing = SniffingDataSource(noticeUpstream, RequestKind.PROGRESSIVE)
+    try {
+      noticeSniffing.open(DataSpec(Uri.parse("http://127.0.0.1:7878/live/demo/demo/1.ts")))
+      fail("expected ProviderNoticeException for multi-chunk UTF-8 notice")
+    } catch (_: ProviderNoticeException) {
+    }
+    assertTrue("notice must read past first 16-byte chunk", noticeUpstream.readCalls > 1)
+
+    // 4) WebVTT subtitle segment with cue timing beyond byte 16 reads full segment and passes as MEDIA
+    val vtt = "NOTE header comment padding\n\n00:00.000 --> 00:02.000\nHello world\n".toByteArray(Charsets.UTF_8)
+    val vttUpstream = ChunkedSource(vtt, chunkSize = 16, headers = mapOf("Content-Type" to listOf("text/plain")))
+    val vttSniffing = SniffingDataSource(vttUpstream, RequestKind.SEGMENT)
+    vttSniffing.open(DataSpec(Uri.parse("http://127.0.0.1:7878/hls/sub1.vtt")))
+    assertTrue("subtitle segment must read past first chunk to see cue timing", vttUpstream.readCalls > 1)
+    assertArrayEquals(vtt, readAll(vttSniffing, vtt.size))
+    vttSniffing.close()
   }
 
   @Test

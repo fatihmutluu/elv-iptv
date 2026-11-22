@@ -36,10 +36,10 @@ internal fun subtitleBottomPaddingFraction(insetDp: Float, density: Float, viewH
 }
 
 /**
- * Longest UI-thread wait for the playback thread to let go of a surface: a release in progress (Media3's 500 ms
- * release timeout) plus Media3's own 2 s surface detach timeout, with margin. The wait ends as soon as the detach ran.
+ * Longest UI-thread wait for the playback thread to let go of a surface (#424): bounded to 250 ms to avoid UI-thread
+ * ANRs when `ExoPlayer.release()` or `MediaCodec.release()` is slow. The wait ends as soon as the detach ran.
  */
-private const val DETACH_TIMEOUT_MS = 3_000L
+internal const val DETACH_TIMEOUT_MS = 250L
 
 private fun exactly(size: Int) = View.MeasureSpec.makeMeasureSpec(size.coerceAtLeast(0), View.MeasureSpec.EXACTLY)
 

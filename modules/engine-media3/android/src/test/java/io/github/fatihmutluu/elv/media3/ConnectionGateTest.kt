@@ -257,4 +257,74 @@ class ConnectionGateTest {
     assertEquals(BoundaryWait.DROPPED, stallResult.get())
     assertEquals(BoundaryWait.CLOSED, stalledGate.awaitPreviousClosed(2, 0))
   }
+
+  @Test
+  fun `forceClose dispatches each superseded connection independently so a wedged close cannot block siblings (#437)`() {
+    val closer = createCloserExecutor()
+    try {
+      assertEquals(4, closer.corePoolSize)
+      assertEquals(4, closer.maximumPoolSize)
+      assertTrue(closer.allowsCoreThreadTimeOut())
+
+      val wedgedStarted = CountDownLatch(1)
+      val releaseWedged = CountDownLatch(1)
+      val siblingClosed = CountDownLatch(1)
+      val ranOnDaemon = AtomicReference<Boolean?>(null)
+
+      val gate = ConnectionGate(closer)
+      gate.beginMedia(1)
+      val wedged = ForceClosable {
+        ranOnDaemon.set(Thread.currentThread().isDaemon)
+        wedgedStarted.countDown()
+        releaseWedged.await(5, TimeUnit.SECONDS)
+      }
+      val sibling = object : ForceClosable {
+        override fun forceClose() {
+          gate.closed(1, this)
+          siblingClosed.countDown()
+        }
+      }
+      gate.tryOpen(1, wedged)
+      gate.tryOpen(1, sibling)
+
+      gate.beginMedia(2)
+      assertTrue("wedged closer must start", wedgedStarted.await(2, TimeUnit.SECONDS))
+      assertTrue("sibling connection must close without waiting for wedged closer", siblingClosed.await(2, TimeUnit.SECONDS))
+      assertEquals(true, ranOnDaemon.get())
+      releaseWedged.countDown()
+    } finally {
+      closer.shutdownNow()
+    }
+  }
+
+  @Test
+  fun `forceClose handles RejectedExecutionException per connection without dropping accepted siblings (#437)`() {
+    val submissions = AtomicInteger(0)
+    val closedCount = AtomicInteger(0)
+    val gate = ConnectionGate { task ->
+      if (submissions.incrementAndGet() == 1) {
+        throw RejectedExecutionException("busy")
+      }
+      task.run()
+    }
+    gate.beginMedia(1)
+    val first = object : ForceClosable {
+      override fun forceClose() {
+        gate.closed(1, this)
+        closedCount.incrementAndGet()
+      }
+    }
+    val second = object : ForceClosable {
+      override fun forceClose() {
+        gate.closed(1, this)
+        closedCount.incrementAndGet()
+      }
+    }
+    gate.tryOpen(1, first)
+    gate.tryOpen(1, second)
+
+    gate.beginMedia(2)
+    assertEquals("both connections must be submitted independently", 2, submissions.get())
+    assertEquals("accepted sibling must close even when first submission threw RejectedExecutionException", 1, closedCount.get())
+  }
 }

@@ -66,9 +66,19 @@ class MediaSourcesTest {
   }
 
   @Test
-  fun `tsSearchBytesFor scales timestamp search bytes by device RAM and createMediaSource tags mediaId (#111)`() {
-    assertEquals(TsExtractor.DEFAULT_TIMESTAMP_SEARCH_BYTES, tsSearchBytesFor(lowRam = true))
-    assertTrue(tsSearchBytesFor(lowRam = false) > TsExtractor.DEFAULT_TIMESTAMP_SEARCH_BYTES)
+  fun `tsSearchBytesFor scales timestamp search bytes by device RAM and createMediaSource tags mediaId (#111, #438)`() {
+    assertEquals(1_800 * TsExtractor.TS_PACKET_SIZE, tsSearchBytesFor(lowRam = true))
+    assertEquals(2_400 * TsExtractor.TS_PACKET_SIZE, tsSearchBytesFor(lowRam = false))
+    assertTrue(tsSearchBytesFor(lowRam = true) > TsExtractor.DEFAULT_TIMESTAMP_SEARCH_BYTES)
+    assertTrue(tsSearchBytesFor(lowRam = false) > tsSearchBytesFor(lowRam = true))
+
+    val vodFactory = tsCapableFactory(lowRam = false, live = false)
+    val liveFactory = tsCapableFactory(lowRam = false, live = true)
+    val alwaysEnabledField = vodFactory.javaClass.getDeclaredField("constantBitrateSeekingAlwaysEnabled").apply {
+      isAccessible = true
+    }
+    assertTrue("VOD must enable constantBitrateSeekingAlwaysEnabled", alwaysEnabledField.getBoolean(vodFactory))
+    assertTrue("Live must leave constantBitrateSeekingAlwaysEnabled disabled", !alwaysEnabledField.getBoolean(liveFactory))
 
     val source = createMediaSource(
       request = LoadRequest(
@@ -85,6 +95,22 @@ class MediaSourcesTest {
       client = engineHttpClient(),
     )
     assertEquals("42", source.mediaItem.mediaId)
+
+    val vodTsSource = createMediaSource(
+      request = LoadRequest(
+        url = "http://127.0.0.1:7878/movie/demo/demo/1001.ts",
+        headers = emptyMap(),
+        live = false,
+        startMs = null,
+        softwareAudio = false,
+      ),
+      gate = ConnectionGate { it.run() },
+      generation = 2L,
+      prepareSerial = 43L,
+      lowRam = true,
+      client = engineHttpClient(),
+    )
+    assertEquals("43", vodTsSource.mediaItem.mediaId)
   }
 
   @Test

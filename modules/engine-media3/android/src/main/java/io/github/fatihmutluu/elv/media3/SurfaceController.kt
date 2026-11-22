@@ -80,11 +80,11 @@ internal class SurfaceController {
 
   /**
    * Binds the currently attached valid [Surface] onto a newly constructed [ExoPlayer], or clears [surface] and emits
-   * `destroyed` when an attached surface invalidated asynchronously before `surfaceDestroyed` ran.
+   * `destroyed` when the UI offer was cleared or the surface invalidated before `detachNow` ran (#424).
    */
   fun attachToNewPlayer(player: ExoPlayer, onSurfaceChange: (String) -> Unit = {}) {
     val active = surface ?: return
-    if (!active.isValid) {
+    if (offered !== active || !active.isValid) {
       surface = null
       onSurfaceChange("destroyed")
       return

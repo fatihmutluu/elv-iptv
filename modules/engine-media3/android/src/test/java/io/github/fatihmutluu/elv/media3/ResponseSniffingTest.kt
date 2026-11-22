@@ -1,6 +1,7 @@
 package io.github.fatihmutluu.elv.media3
 
 import androidx.media3.common.C
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -218,5 +219,56 @@ class ResponseSniffingTest {
     val xhtmlNotice = bytes("<?xml version=\"1.0\"?>\n<!DOCTYPE html>\n<html><body>Limit</body></html>")
     assertEquals(ResponseKind.NOTICE, classify(RequestKind.SEGMENT, "application/xhtml+xml", xhtmlNotice))
     assertEquals(ResponseKind.NOTICE, classify(RequestKind.SEGMENT, "text/plain", bytes("{\"error\":\"limit\"}")))
+  }
+
+  @Test
+  fun `HTML and XHTML content-type classification respects Locale ROOT under tr-TR locale (#438)`() {
+    val previousLocale = Locale.getDefault()
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      val xhtmlNotice = bytes("<?xml version=\"1.0\"?>\n<error>Limit</error>")
+      assertEquals(ResponseKind.NOTICE, classify(RequestKind.SEGMENT, "APPLICATION/XHTML+XML", xhtmlNotice))
+      val htmlTag = bytes("<?xml version=\"1.0\"?>\n<HTML><BODY>Limit</BODY></HTML>")
+      assertEquals(ResponseKind.NOTICE, classify(RequestKind.SEGMENT, "TEXT/VTT", htmlTag))
+    } finally {
+      Locale.setDefault(previousLocale)
+    }
+  }
+
+  @Test
+  fun `canStopSniffing stops early on 3-packet TS sync, unambiguous binary media, and EXTM3U, never on text (#438)`() {
+    // 3-packet MPEG-TS sync stops immediately for all kinds once >= 564 bytes arrive
+    val ts = tsPackets()
+    assertTrue(canStopSniffing(RequestKind.PROGRESSIVE, "video/mp2t", ts, ts.size))
+    assertTrue(canStopSniffing(RequestKind.SEGMENT, "video/mp2t", ts, ts.size))
+    assertTrue(canStopSniffing(RequestKind.MANIFEST, "text/plain", ts, ts.size))
+    val printableTs = printableTsFromMidPacket()
+    assertFalse(canStopSniffing(RequestKind.PROGRESSIVE, "text/plain", printableTs, 188 * 2))
+    assertTrue(canStopSniffing(RequestKind.PROGRESSIVE, "text/plain", printableTs, 188 * 3))
+
+    // Unambiguous binary container (>= 16 bytes) stops early for PROGRESSIVE and SEGMENT, not MANIFEST
+    val mp4 = byteArrayOf(0, 0, 0, 0x18) + bytes("ftypmp42") + ByteArray(16)
+    assertFalse(canStopSniffing(RequestKind.PROGRESSIVE, "video/mp4", mp4, 15))
+    assertTrue(canStopSniffing(RequestKind.PROGRESSIVE, "video/mp4", mp4, 16))
+    assertTrue(canStopSniffing(RequestKind.SEGMENT, "video/mp4", mp4, 16))
+    assertFalse(canStopSniffing(RequestKind.MANIFEST, "application/vnd.apple.mpegurl", mp4, 16))
+
+    // #EXTM3U header (>= 16 bytes) stops early for PROGRESSIVE and MANIFEST, not SEGMENT
+    val playlist = bytes("#EXTM3U\n#EXT-X-VERSION:3\n")
+    assertFalse(canStopSniffing(RequestKind.MANIFEST, "application/vnd.apple.mpegurl", playlist, 15))
+    assertTrue(canStopSniffing(RequestKind.MANIFEST, "application/vnd.apple.mpegurl", playlist, 16))
+    assertTrue(canStopSniffing(RequestKind.PROGRESSIVE, "text/plain", playlist, 16))
+    assertFalse(canStopSniffing(RequestKind.SEGMENT, "text/plain", playlist, 16))
+
+    // Plain text notices, HTML, and subtitle segments never stop early
+    assertFalse(canStopSniffing(RequestKind.PROGRESSIVE, "text/plain", notice, notice.size))
+    assertFalse(canStopSniffing(RequestKind.MANIFEST, "text/html", bytes("<html><body>Limit reached</body></html>"), 39))
+    val vtt = bytes("WEBVTT\n\n00:00.000 --> 00:02.000\nHello\n")
+    assertFalse(canStopSniffing(RequestKind.SEGMENT, "text/vtt", vtt, vtt.size))
+
+    // Partial UTF-8 text whose trailing byte is the lead byte of a multi-byte character must NOT early-stop as binary
+    val partialUtf8 = ByteArray(16) { 'a'.code.toByte() }.also { it[15] = 0xC4.toByte() }
+    assertFalse(canStopSniffing(RequestKind.PROGRESSIVE, "text/plain", partialUtf8, 16))
+    assertFalse(canStopSniffing(RequestKind.SEGMENT, "text/plain", partialUtf8, 16))
   }
 }
