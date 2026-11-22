@@ -2,7 +2,7 @@ export { createDeviceHttpClient } from './http';
 export { createDevicePreferencesStore } from './preferences';
 export { createMacrotaskScheduler } from './scheduler';
 export { createSecureSecretStore } from './secret-store';
-export { createSettingsStore } from './settings-store';
+export { createAppleUserDataStore, createSettingsStore } from './settings-store';
 export {
   createOpSqliteDriver,
   databaseLocation,

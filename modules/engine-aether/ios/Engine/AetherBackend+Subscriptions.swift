@@ -306,6 +306,15 @@ extension AetherBackend {
     lastAVBufferReportedBuffering = false
     guard let player else { return }
     player.preventsDisplaySleepDuringVideoPlayback = true
+    player.allowsExternalPlayback = true
+    applyOutputAudioPreferences(to: player)
+    player.publisher(for: \.isExternalPlaybackActive, options: [.initial, .new])
+      .sink { [weak self] active in
+        Self.onMainActor {
+          self?.handleExternalPlaybackChange(active)
+        }
+      }
+      .store(in: &avPlayerBufferCancellables)
     player.publisher(for: \.timeControlStatus, options: [.new])
       .sink { [weak self, weak target] _ in
         Self.onMainActor {
@@ -396,6 +405,10 @@ extension AetherBackend {
       return
     }
     guard let player = target.currentAVPlayer, let item = target.currentAVPlayerItem else {
+      lastAVBufferReportedBuffering = false
+      return
+    }
+    if player.isExternalPlaybackActive {
       lastAVBufferReportedBuffering = false
       return
     }

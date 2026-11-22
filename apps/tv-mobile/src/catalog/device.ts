@@ -4,10 +4,13 @@ import {
   type ManifestStore,
   openCatalog,
   reconcileManifest,
+  reconcileUserData,
+  type UserDataStore,
 } from '@elv/data';
 import type { ElvError, SqlDriver } from '@elv/domain';
 import { Platform } from 'react-native';
 import {
+  createAppleUserDataStore,
   createDeviceHttpClient,
   createMacrotaskScheduler,
   createOpSqliteDriver,
@@ -19,12 +22,15 @@ import {
 /**
  * File name of the catalog database: in `Library/Caches` on Apple platforms (tvOS hardware gives apps only purgeable
  * storage; iOS backs `Library` up to iCloud), in op-sqlite's databases directory on Android. The OS may purge the
- * Apple copy; the source manifest brings the sources back.
+ * Apple copy; the source manifest and user-data store bring sources, favorites, and watch progress back (ADR 0014).
  */
 const DATABASE_NAME = 'catalog.db';
 
 /** `Settings` key of the source manifest (Apple platforms). */
 const MANIFEST_KEY = 'elv.catalog.sources';
+
+/** Persistent KV key of the purge-safe user-data snapshot on Apple platforms (`#79`, ADR 0014). */
+const USER_DATA_KEY = 'elv.catalog.userstate.v1';
 
 /** The database could not be opened or migrated; `error` carries the typed cause (no secrets). */
 export class CatalogOpenError extends Error {
@@ -59,6 +65,19 @@ async function reconcile(db: SqlDriver, manifest: ManifestStore): Promise<void> 
   }
 }
 
+/**
+ * Restores favorites and watch progress after an Apple `Library/Caches` purge without blocking catalog open on
+ * unexpected read/write failures (`#79`, ADR 0014).
+ */
+async function reconcileAppleUserData(db: SqlDriver, store: UserDataStore): Promise<void> {
+  try {
+    await reconcileUserData(db, store);
+  } catch {
+    // biome-ignore lint/suspicious/noConsole: a categorized warning without values; there is no logging port yet
+    console.warn('catalog: storage/user-data-failed');
+  }
+}
+
 async function open(): Promise<CatalogService> {
   const db = await createOpSqliteDriver(DATABASE_NAME, databaseLocation(Platform.OS));
   try {
@@ -66,8 +85,11 @@ async function open(): Promise<CatalogService> {
     if (!opened.ok) {
       throw new CatalogOpenError(opened.error);
     }
-    const manifest = Platform.OS === 'ios' ? createSettingsStore(MANIFEST_KEY) : undefined;
+    const isApple = Platform.OS === 'ios';
+    const manifest = isApple ? createSettingsStore(MANIFEST_KEY) : undefined;
+    const userData = isApple ? createAppleUserDataStore(USER_DATA_KEY) : undefined;
     if (manifest !== undefined) await reconcile(db, manifest);
+    if (userData !== undefined) await reconcileAppleUserData(db, userData);
     return createCatalogService({
       db,
       secrets: createSecureSecretStore(),
@@ -75,6 +97,7 @@ async function open(): Promise<CatalogService> {
       http: createDeviceHttpClient(),
       clock: Date.now,
       ...(manifest === undefined ? {} : { manifest }),
+      ...(userData === undefined ? {} : { userData }),
     });
   } catch (error) {
     try {

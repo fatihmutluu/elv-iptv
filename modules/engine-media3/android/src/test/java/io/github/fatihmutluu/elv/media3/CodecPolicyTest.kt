@@ -48,8 +48,17 @@ class CodecPolicyTest {
       /* forceSecure = */ false,
     )
 
-  private fun audioRendererClassNames(context: Context, softwareAudio: Boolean): List<String> {
-    val renderers = createRenderersFactory(context, CodecPolicy(), softwareAudio).createRenderers(
+  private fun audioRendererClassNames(
+    context: Context,
+    softwareAudio: Boolean,
+    decoderMode: VideoDecoderMode = VideoDecoderMode.AUTO,
+  ): List<String> {
+    val renderers = createRenderersFactory(
+      context = context,
+      codecPolicy = CodecPolicy(),
+      softwareAudio = softwareAudio,
+      decoderMode = decoderMode,
+    ).createRenderers(
       Handler(Looper.getMainLooper()),
       object : VideoRendererEventListener {},
       object : AudioRendererEventListener {},
@@ -64,6 +73,7 @@ class CodecPolicyTest {
     softwareAudio: Boolean = false,
     preferHevc: Boolean = false,
     quirks: DeviceQuirks = DeviceQuirks("Generic", "Generic", "Phone", "qcom", "kona", "SM8250"),
+    decoderMode: VideoDecoderMode = VideoDecoderMode.AUTO,
   ): PolicyVideoRenderer {
     val app = RuntimeEnvironment.getApplication()
     val renderers = createRenderersFactory(
@@ -72,6 +82,7 @@ class CodecPolicyTest {
       softwareAudio = softwareAudio,
       preferHevcOverDolbyVision = preferHevc,
       deviceQuirks = quirks,
+      decoderMode = decoderMode,
     ).createRenderers(
       Handler(Looper.getMainLooper()),
       object : VideoRendererEventListener {},
@@ -587,5 +598,124 @@ class CodecPolicyTest {
     } finally {
       thread.quitSafely()
     }
+  }
+
+  @Test
+  fun `extensionRendererModeFor prefers extension renderers on softwareAudio or SOFTWARE video decoderMode (#411)`() {
+    val app = RuntimeEnvironment.getApplication()
+    assertEquals(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON, extensionRendererModeFor(false, VideoDecoderMode.AUTO))
+    assertEquals(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON, extensionRendererModeFor(false, VideoDecoderMode.HARDWARE))
+    assertEquals(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER, extensionRendererModeFor(false, VideoDecoderMode.SOFTWARE))
+    assertEquals(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER, extensionRendererModeFor(true, VideoDecoderMode.AUTO))
+    assertEquals(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER, extensionRendererModeFor(true, VideoDecoderMode.HARDWARE))
+    assertEquals(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER, extensionRendererModeFor(true, VideoDecoderMode.SOFTWARE))
+
+    assertEquals(
+      listOf("androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer", "androidx.media3.exoplayer.audio.MediaCodecAudioRenderer"),
+      audioRendererClassNames(app, softwareAudio = false, decoderMode = VideoDecoderMode.SOFTWARE),
+    )
+    assertEquals(
+      listOf("androidx.media3.exoplayer.audio.MediaCodecAudioRenderer", "androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer"),
+      audioRendererClassNames(app, softwareAudio = false, decoderMode = VideoDecoderMode.HARDWARE),
+    )
+  }
+
+  @Test
+  fun `selectDecoders enforces AUTO, HARDWARE and SOFTWARE video decoder modes including Dolby Vision fallback (#411)`() {
+    val hwHevcHealthy = codec("c2.qti.hevc.decoder", MimeTypes.VIDEO_H265, hw = true)
+    val hwHevcFailing = codec("c2.vendor.hevc.decoder", MimeTypes.VIDEO_H265, hw = true)
+    val swHevc = codec("c2.android.hevc.decoder", MimeTypes.VIDEO_H265, hw = false)
+    val hwAvc = codec("c2.qti.avc.decoder", MimeTypes.VIDEO_H264, hw = true)
+    val swAvc = codec("OMX.google.h264.decoder", MimeTypes.VIDEO_H264, hw = false)
+    val dvHw = codec("c2.vendor.dv.decoder", MimeTypes.VIDEO_DOLBY_VISION, hw = true)
+    val policy = CodecPolicy()
+
+    // SOFTWARE selects SW immediately without waiting for HW crashes (even on heavy H.265)
+    assertEquals(
+      listOf(swHevc.name),
+      policy.selectDecoders(MimeTypes.VIDEO_H265, listOf(hwHevcHealthy, swHevc), false, false, false, stripHeavySoftwareWithoutFormatCheck = true, decoderMode = VideoDecoderMode.SOFTWARE).map { it.name },
+    )
+    assertEquals(
+      listOf(swAvc.name),
+      policy.selectDecoders(MimeTypes.VIDEO_H264, listOf(hwAvc, swAvc), false, false, false, decoderMode = VideoDecoderMode.SOFTWARE).map { it.name },
+    )
+
+    // SOFTWARE falls back to HW (healthy ahead of failing) when zero SW decoders exist
+    policy.recordVideoCodecFailure(hwHevcFailing)
+    policy.recordVideoCodecFailure(hwHevcFailing)
+    assertEquals(
+      listOf(hwHevcHealthy.name, hwHevcFailing.name),
+      policy.selectDecoders(MimeTypes.VIDEO_H265, listOf(hwHevcFailing, hwHevcHealthy), false, false, false, decoderMode = VideoDecoderMode.SOFTWARE).map { it.name },
+    )
+
+    // HARDWARE strictly excludes software decoders even when failing HW is present or only SW exists
+    assertEquals(
+      listOf(hwHevcHealthy.name, hwHevcFailing.name),
+      policy.selectDecoders(MimeTypes.VIDEO_H265, listOf(swHevc, hwHevcFailing, hwHevcHealthy), false, false, false, decoderMode = VideoDecoderMode.HARDWARE).map { it.name },
+    )
+    assertEquals(
+      emptyList<String>(),
+      policy.selectDecoders(MimeTypes.VIDEO_H265, listOf(swHevc), false, false, false, decoderMode = VideoDecoderMode.HARDWARE).map { it.name },
+    )
+
+    // Dolby Vision fallback recursion forwards decoderMode to HEVC selection
+    assertEquals(
+      listOf(swHevc.name),
+      policy.selectDecoders(MimeTypes.VIDEO_DOLBY_VISION, listOf(dvHw), false, false, false, preferHevcOverDolbyVision = true, hevcFallbackDecoders = listOf(hwHevcHealthy, swHevc), decoderMode = VideoDecoderMode.SOFTWARE).map { it.name },
+    )
+    assertEquals(
+      listOf(hwHevcHealthy.name),
+      policy.selectDecoders(MimeTypes.VIDEO_DOLBY_VISION, listOf(dvHw), false, false, false, preferHevcOverDolbyVision = true, hevcFallbackDecoders = listOf(hwHevcHealthy, swHevc), decoderMode = VideoDecoderMode.HARDWARE).map { it.name },
+    )
+
+    // Audio selection stays governed by softwareAudio regardless of video decoderMode
+    val hwAac = codec("OMX.vendor.aac.decoder", MimeTypes.AUDIO_AAC, hw = true)
+    val swAac = codec("c2.android.aac.decoder", MimeTypes.AUDIO_AAC, hw = false)
+    assertEquals(
+      listOf(hwAac.name, swAac.name),
+      policy.selectDecoders(MimeTypes.AUDIO_AAC, listOf(hwAac, swAac), false, false, false, decoderMode = VideoDecoderMode.SOFTWARE).map { it.name },
+    )
+  }
+
+  @Test
+  fun `PolicyVideoRenderer enforces AUTO, HARDWARE and SOFTWARE decoderMode (#411)`() {
+    val app = RuntimeEnvironment.getApplication()
+    val hwHealthy = codec("c2.qti.avc.decoder", MimeTypes.VIDEO_H264, hw = true)
+    val hwFailing = codec("c2.vendor.avc.decoder", MimeTypes.VIDEO_H264, hw = true)
+    val swAndroid = codec("c2.android.avc.decoder", MimeTypes.VIDEO_H264, hw = false)
+    val format1080 = Format.Builder().setSampleMimeType(MimeTypes.VIDEO_H264).setWidth(1920).setHeight(1080).build()
+    val mixedSelector = MediaCodecSelector { _, _, _ -> listOf(hwFailing, hwHealthy, swAndroid) }
+    val hwOnlySelector = MediaCodecSelector { _, _, _ -> listOf(hwHealthy) }
+    val swOnlySelector = MediaCodecSelector { _, _, _ -> listOf(swAndroid) }
+    val policy = CodecPolicy().apply {
+      recordVideoCodecFailure(hwFailing)
+      recordVideoCodecFailure(hwFailing)
+    }
+
+    val autoRenderer = PolicyVideoRenderer(
+      MediaCodecVideoRenderer.Builder(app), app, policy, false, false,
+      formatSupportChecker = { info, _ -> info.name == hwHealthy.name },
+      decoderMode = VideoDecoderMode.AUTO,
+    )
+    assertEquals(listOf(hwHealthy.name), autoRenderer.resolveDecoderInfosForTest(mixedSelector, format1080).map { it.name })
+
+    val hwRenderer = PolicyVideoRenderer(
+      MediaCodecVideoRenderer.Builder(app), app, policy, false, false,
+      formatSupportChecker = { _, _ -> false },
+      decoderMode = VideoDecoderMode.HARDWARE,
+    )
+    assertEquals(listOf(hwHealthy.name, hwFailing.name), hwRenderer.resolveDecoderInfosForTest(mixedSelector, format1080).map { it.name })
+    assertEquals(emptyList<String>(), hwRenderer.resolveDecoderInfosForTest(swOnlySelector, format1080).map { it.name })
+
+    val swRenderer = PolicyVideoRenderer(
+      MediaCodecVideoRenderer.Builder(app), app, policy, false, false,
+      formatSupportChecker = { _, _ -> true },
+      decoderMode = VideoDecoderMode.SOFTWARE,
+    )
+    assertEquals(listOf(swAndroid.name), swRenderer.resolveDecoderInfosForTest(mixedSelector, format1080).map { it.name })
+    assertEquals(listOf(hwHealthy.name), swRenderer.resolveDecoderInfosForTest(hwOnlySelector, format1080).map { it.name })
+
+    assertEquals(VideoDecoderMode.SOFTWARE, buildVideoRenderer(decoderMode = VideoDecoderMode.SOFTWARE).decoderModeForTest)
+    assertEquals(VideoDecoderMode.HARDWARE, buildVideoRenderer(decoderMode = VideoDecoderMode.HARDWARE).decoderModeForTest)
   }
 }

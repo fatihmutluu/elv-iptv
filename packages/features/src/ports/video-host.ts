@@ -37,7 +37,10 @@ export type HostKey =
   | 'prev-channel'
   | 'info'
   | 'channel-list'
-  | 'always-on-top';
+  | 'always-on-top'
+  | 'aspect'
+  | 'volume-up'
+  | 'volume-down';
 
 /** Output audio device descriptor exposed by a host player engine (e.g. desktop `libmpv`, `#408`). */
 export interface AudioDeviceInfo {

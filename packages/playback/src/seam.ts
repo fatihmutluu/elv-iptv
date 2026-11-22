@@ -86,6 +86,7 @@ export interface RecoveryHooks {
   onClock?(anchor: ClockAnchor): void;
   onError?(error: EngineError): void;
   onStall?(phase: 'start' | 'end'): void;
+  onExternalPlayback?(active: boolean): void;
   onProgress?(atMs: number, bytesReceived?: number): void;
   onStartTimeout?(): void;
   /** Every surface event, whatever its token: the surface belongs to the view, not the media. */

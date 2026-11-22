@@ -7,7 +7,7 @@ extension EngineCore {
       if played && !stalled && !reloading {
         reloading = true
         let now = uptimeMs()
-        setScreenOn(true)
+        setScreenOn(!externalPlaybackActive)
         emit(.state(attempt: token, state: .buffering))
         emitAnchor(rate: 0, atMs: now)
       }
@@ -45,9 +45,12 @@ extension EngineCore {
       seeking = false
       reloading = false
       let isLive = currentRequest?.live ?? true
-      if isLive && !userPaused {
+      if isLive && !userPaused && !externalPlaybackActive {
         handleUnrequestedLivePause()
       } else {
+        if externalPlaybackActive {
+          userPaused = true
+        }
         applyGenuinePause()
       }
 
@@ -61,6 +64,7 @@ extension EngineCore {
       reloading = false
       pendingPlaying = false
       stalled = false
+      externalPlaybackActive = false
       active = false
       setScreenOn(false)
       sink?.clearSubtitles()
@@ -89,7 +93,7 @@ extension EngineCore {
     let wasStalled = stalled
     stalled = false
     played = true
-    setScreenOn(true)
+    setScreenOn(!externalPlaybackActive)
     if wasStalled {
       let now = uptimeMs()
       emit(.stall(attempt: token, phase: .end, atMs: now))
@@ -199,11 +203,27 @@ extension EngineCore {
     emit(.clock(attempt: token, anchor: anchor))
   }
 
+  func handleExternalPlayback(_ isExternal: Bool) {
+    guard isExternal != externalPlaybackActive else { return }
+    externalPlaybackActive = isExternal
+    emit(.externalPlayback(attempt: token, active: isExternal))
+    if isExternal {
+      setScreenOn(false)
+      if stalled {
+        stalled = false
+        emit(.stall(attempt: token, phase: .end, atMs: uptimeMs()))
+      }
+    } else {
+      setScreenOn(played && !userPaused && !stalled)
+    }
+  }
+
   func reportFailure(_ failure: BackendFailure) {
     errorReported = true
     active = false
     pendingPlaying = false
     stalled = false
+    externalPlaybackActive = false
     seeking = false
     reloading = false
     setScreenOn(false)
@@ -248,7 +268,7 @@ extension EngineCore {
   }
 
   private func beginStallIfPlayed() {
-    guard played, !stalled else { return }
+    guard !externalPlaybackActive, played, !stalled else { return }
     stalled = true
     let now = uptimeMs()
     emit(.stall(attempt: token, phase: .start, atMs: now))

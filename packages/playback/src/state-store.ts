@@ -60,6 +60,7 @@ function samePlaybackState(a: PlaybackState, b: PlaybackState): boolean {
     a.firstFrameAt === b.firstFrameAt &&
     a.atLiveEdge === b.atLiveEdge &&
     a.surfaceRecreationToken === b.surfaceRecreationToken &&
+    a.externalPlaybackActive === b.externalPlaybackActive &&
     sameStatus(a.status, b.status) &&
     sameAnchor(a.anchor, b.anchor) &&
     sameVideoInfo(a.videoInfo, b.videoInfo)

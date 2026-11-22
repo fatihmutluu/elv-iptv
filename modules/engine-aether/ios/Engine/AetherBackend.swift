@@ -67,8 +67,12 @@ final class AetherBackend: PlayerBackend {
   var liveRecoveryPolicy = LiveRecoveryPolicy()
 
   var audioSessionPolicy = AudioSessionPolicy()
+  var airPlayTracker = AirPlayCapabilityTracker()
+  var airPlayMonitor: AetherAirPlayMonitor?
   var osdClockThrottle = OsdClockThrottle(hiddenIntervalSeconds: 5.0, osdVisible: true)
   var requestedRate: Double = 1.0
+  var desiredMuted = false
+  var desiredVolume: Float = 1.0
   var lastAVBufferReportedBuffering = false
   var playbackActiveIntent = false
 
@@ -77,6 +81,9 @@ final class AetherBackend: PlayerBackend {
     self.httpSession = httpSession
     self.audioSessionObserver = AetherAudioSessionObserver { [weak self] event in
       self?.handleAudioSessionEvent(event)
+    }
+    self.airPlayMonitor = AetherAirPlayMonitor { [weak self] services in
+      self?.handleAirPlayServicesUpdated(services)
     }
     _ = try? installFreshEngine()
   }
@@ -140,15 +147,23 @@ final class AetherBackend: PlayerBackend {
     currentLoadOptions = options
     desiredAudioStreamId = options.audioStreamIndex.map(Int.init)
     desiredSubtitleStreamId = options.subtitlesDisabled ? nil : options.initialSubtitleTrackId
+    let isExternal = currentEngine.currentAVPlayer?.isExternalPlaybackActive ?? false
+    airPlayTracker.updateRoute(airPlayPortName: AetherAudioSessionObserver.currentAirPlayPortName())
+    airPlayTracker.updateExternalPlayback(active: isExternal)
+    syncAirPlayState()
     audioSessionPolicy.clearLatchesOnUserPlay()
     audioSessionController.activateForPlayback()
 
     runMediaLoad(plan: plan, fallbackOptions: options, serial: serial, currentEngine: currentEngine)
+    if isExternal {
+      onObservation?(.externalPlayback(true), serial)
+    }
   }
 
   func stopMedia() {
     resetSerialBookkeeping()
     audioSessionPolicy.reset()
+    resetAirPlayState()
     currentPlan = nil
     currentLoadOptions = nil
     desiredAudioStreamId = nil
@@ -223,6 +238,7 @@ final class AetherBackend: PlayerBackend {
   func rebuild() throws {
     resetSerialBookkeeping()
     audioSessionPolicy.reset()
+    resetAirPlayState()
     currentPlan = nil
     currentLoadOptions = nil
     desiredAudioStreamId = nil
@@ -248,6 +264,8 @@ final class AetherBackend: PlayerBackend {
   func dispose() {
     resetSerialBookkeeping()
     audioSessionPolicy.reset()
+    resetAirPlayState()
+    airPlayMonitor = nil
     currentPlan = nil
     currentLoadOptions = nil
     desiredAudioStreamId = nil
@@ -328,6 +346,9 @@ final class AetherBackend: PlayerBackend {
     case let .oldDeviceUnavailable(isRemovedAudioRoute):
       let action = audioSessionPolicy.handleOldDeviceUnavailable(isRemovedAudioRoute: isRemovedAudioRoute)
       applyAudioSessionAction(action, serial: activeSerial)
+
+    case let .routeChanged(activeAirPlayPortName):
+      handleAirPlayRouteChanged(activeAirPlayPortName)
     }
   }
 
@@ -366,6 +387,8 @@ final class AetherBackend: PlayerBackend {
     fresh.backgroundPlaybackEnabled = false
     fresh.videoGravity = gravity
     fresh.currentAVPlayer?.preventsDisplaySleepDuringVideoPlayback = true
+    fresh.currentAVPlayer?.allowsExternalPlayback = true
+    applyOutputAudioPreferences(to: fresh.currentAVPlayer)
     subscribe(to: fresh)
     if let view = boundPlayerView {
       fresh.bind(view: view)

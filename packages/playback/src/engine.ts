@@ -1,4 +1,4 @@
-import type { BufferPreset } from '@elv/domain';
+import type { AndroidDecoderMode, BufferPreset } from '@elv/domain';
 
 /** Monotonic tune token; the service increments it per tune, retry rung and zap. */
 export type AttemptToken = number;
@@ -24,6 +24,8 @@ export interface LoadOptions {
   preferHevcOverDolbyVision?: boolean;
   /** User-configured buffer size preset forwarded to the native engine (`#147`). */
   bufferPreset?: BufferPreset;
+  /** User-configured Android video decoder selection mode forwarded to Media3 (`#411`). */
+  decoderMode?: AndroidDecoderMode;
   /** Preferred audio track ID to select once media tracks are available. */
   audioTrackId?: string;
   /** Preferred subtitle track ID to select, or `null` to disable subtitles explicitly. */
@@ -131,6 +133,7 @@ export type EngineEvent = { attempt: AttemptToken } & (
   | { type: 'stall'; phase: 'start' | 'end'; atMs: number }
   | { type: 'progress'; bytesReceived?: number; atMs: number }
   | { type: 'error'; error: EngineError }
+  | { type: 'externalPlayback'; active: boolean }
   | { type: 'surface'; change: 'created' | 'destroyed' }
 );
 

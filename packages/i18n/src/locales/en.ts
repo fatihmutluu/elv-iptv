@@ -491,6 +491,11 @@ export const enMessages = {
   'shell.backToExitToast': 'Press Back again to exit',
   'settings.appearance.confirmExitOnBack': 'Confirm before exiting with Back',
   'settings.playback.audioDevice': 'Audio output device',
+  'settings.playback.videoDecoder': 'Video decoder',
+  'settings.playback.videoDecoder.auto': 'Auto',
+  'settings.playback.videoDecoder.hardware': 'Hardware',
+  'settings.playback.videoDecoder.software': 'Software',
+  'player.videoDecoder': 'Video decoder',
 } as const;
 
 /** Valid message identifier across all supported locales. */

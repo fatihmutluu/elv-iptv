@@ -194,6 +194,12 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
       case 'stall':
         hooks.onStall?.(event.phase);
         return;
+      case 'externalPlayback':
+        store.batch(() => {
+          store.update({ externalPlaybackActive: event.active });
+          hooks.onExternalPlayback?.(event.active);
+        });
+        return;
       case 'progress':
         deps.onVodProgress?.(event.bytesReceived);
         hooks.onProgress?.(event.atMs, event.bytesReceived);
@@ -320,7 +326,14 @@ export function nextTuneState(
   held: boolean,
   now: number,
 ): PlaybackState {
-  const { anchor: _a, atLiveEdge: _l, firstFrameAt: _f, videoInfo: _v, ...kept } = prev;
+  const {
+    anchor: _a,
+    atLiveEdge: _l,
+    firstFrameAt: _f,
+    videoInfo: _v,
+    externalPlaybackActive: _ep,
+    ...kept
+  } = prev;
   return {
     ...kept,
     status: held ? prev.status : { kind: 'tuning' },

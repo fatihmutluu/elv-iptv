@@ -1,6 +1,7 @@
 import { createFocusStore, type FocusStore, findList, type KeyEvent } from '@elv/focus-core';
 import type { THEME_PRESET_IDS } from '@elv/ui-kit';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 
 /** Navigable category sections inside {@link SettingsScreen}. */
 export type SettingsSection = 'appearance' | 'playback' | 'liveTv' | 'sources' | 'licenses';
@@ -62,6 +63,9 @@ export type PlaybackFocusId =
   | 'buffer-auto'
   | 'buffer-balanced'
   | 'buffer-large'
+  | 'video-decoder-auto'
+  | 'video-decoder-hardware'
+  | 'video-decoder-software'
   | 'toggle-auto-play-next'
   | 'toggle-skip-back-subtitles'
   | 'audio-device-auto';
@@ -100,7 +104,7 @@ const APPEARANCE_ROWS: readonly (readonly AppearanceFocusId[])[] = [
   ['reset-preferences'],
 ];
 
-const PLAYBACK_ROWS: readonly (readonly PlaybackFocusId[])[] = [
+const PLAYBACK_ROWS_HEAD: readonly (readonly PlaybackFocusId[])[] = [
   [
     'audio-lang-auto',
     'audio-lang-tr',
@@ -114,9 +118,29 @@ const PLAYBACK_ROWS: readonly (readonly PlaybackFocusId[])[] = [
   ['seek-step-5', 'seek-step-10', 'seek-step-15', 'seek-step-30'],
   ['aspect-fit', 'aspect-fill', 'aspect-stretch'],
   ['buffer-auto', 'buffer-balanced', 'buffer-large'],
+];
+
+const PLAYBACK_DECODER_ROW: readonly PlaybackFocusId[] = [
+  'video-decoder-auto',
+  'video-decoder-hardware',
+  'video-decoder-software',
+];
+
+const PLAYBACK_ROWS_TAIL: readonly (readonly PlaybackFocusId[])[] = [
   ['toggle-auto-play-next'],
   ['toggle-skip-back-subtitles'],
   ['audio-device-auto'],
+];
+
+const PLAYBACK_ROWS_DEFAULT: readonly (readonly PlaybackFocusId[])[] = [
+  ...PLAYBACK_ROWS_HEAD,
+  ...PLAYBACK_ROWS_TAIL,
+];
+
+const PLAYBACK_ROWS_WITH_DECODER: readonly (readonly PlaybackFocusId[])[] = [
+  ...PLAYBACK_ROWS_HEAD,
+  PLAYBACK_DECODER_ROW,
+  ...PLAYBACK_ROWS_TAIL,
 ];
 
 const LIVE_TV_ROWS: readonly (readonly LiveTvFocusId[])[] = [
@@ -137,11 +161,15 @@ const PREFERENCE_SECTIONS: readonly PreferenceSettingsSection[] = [
   'liveTv',
 ];
 
-const SECTION_ROWS: Readonly<Record<PreferenceSettingsSection, readonly (readonly string[])[]>> = {
-  appearance: APPEARANCE_ROWS,
-  playback: PLAYBACK_ROWS,
-  liveTv: LIVE_TV_ROWS,
-};
+function getSectionRows(
+  showAndroidDecoder: boolean,
+): Readonly<Record<PreferenceSettingsSection, readonly (readonly string[])[]>> {
+  return {
+    appearance: APPEARANCE_ROWS,
+    playback: showAndroidDecoder ? PLAYBACK_ROWS_WITH_DECODER : PLAYBACK_ROWS_DEFAULT,
+    liveTv: LIVE_TV_ROWS,
+  };
+}
 
 /** Whether `section` uses generalized row-by-row preference D-pad traversal. */
 function isPreferenceSection(section: SettingsSection): section is PreferenceSettingsSection {
@@ -151,10 +179,14 @@ function isPreferenceSection(section: SettingsSection): section is PreferenceSet
 const rowListId = (section: PreferenceSettingsSection, rowIndex: number): string =>
   `${section}-row-${rowIndex}`;
 
-function createSettingsFocusStore(initialSection: SettingsSection): FocusStore {
+function createSettingsFocusStore(
+  initialSection: SettingsSection,
+  showAndroidDecoder: boolean,
+): FocusStore {
   const initialIdx = Math.max(0, SETTINGS_SECTIONS.indexOf(initialSection));
+  const sectionRows = getSectionRows(showAndroidDecoder);
   const sectionLists = PREFERENCE_SECTIONS.flatMap((sec) =>
-    SECTION_ROWS[sec].map((row, i) => ({
+    sectionRows[sec].map((row, i) => ({
       id: rowListId(sec, i),
       count: row.length,
       index: 0,
@@ -196,6 +228,8 @@ export interface UseTvSettingsNavigationOptions {
   /** Backwards-compatible Appearance-only activation callback. */
   readonly onActivateAppearanceControl?: (id: AppearanceFocusId) => void;
   readonly onFocusTopNav?: () => void;
+  /** Whether the Android-only Video decoder row is rendered in Playback settings (`#411`). */
+  readonly showAndroidDecoder?: boolean;
 }
 
 /** Return value of {@link useTvSettingsNavigation}. */
@@ -223,15 +257,21 @@ export function useTvSettingsNavigation({
   onActivateControl,
   onActivateAppearanceControl,
   onFocusTopNav,
+  showAndroidDecoder = Platform.OS === 'android',
 }: UseTvSettingsNavigationOptions): TvSettingsNavigationState {
   const [pane, setPane] = useState<'nav' | 'content'>(() =>
     isActiveScope && section === 'sources' ? 'content' : 'nav',
   );
   const [coords, setCoords] = useState<SectionCoords>(INITIAL_COORDS);
 
+  const sectionRows = getSectionRows(showAndroidDecoder);
+  const sectionRowsRef = useRef(sectionRows);
+  sectionRowsRef.current = sectionRows;
   const storeRef = useRef<FocusStore | null>(null);
-  if (storeRef.current === null) {
-    storeRef.current = createSettingsFocusStore(section);
+  const storeDecoderFlagRef = useRef(showAndroidDecoder);
+  if (storeRef.current === null || storeDecoderFlagRef.current !== showAndroidDecoder) {
+    storeDecoderFlagRef.current = showAndroidDecoder;
+    storeRef.current = createSettingsFocusStore(section, showAndroidDecoder);
   }
   const store = storeRef.current;
 
@@ -268,11 +308,13 @@ export function useTvSettingsNavigation({
     setPane('content');
     const curSection = sectionRef.current;
     if (isPreferenceSection(curSection)) {
-      const targetRow = coordsRef.current[curSection].row;
+      const rows = sectionRowsRef.current[curSection];
+      const targetRow = Math.min(coordsRef.current[curSection].row, Math.max(0, rows.length - 1));
       const listId = rowListId(curSection, targetRow);
       store.activate(listId);
       const found = findList(store.getState().scopes, listId);
-      const col = found?.list.index ?? 0;
+      const rowLen = rows[targetRow]?.length ?? 0;
+      const col = Math.min(found?.list.index ?? 0, Math.max(0, rowLen - 1));
       setCoords((prev) => ({ ...prev, [curSection]: { row: targetRow, col } }));
     }
   }, [store]);
@@ -322,8 +364,11 @@ export function useTvSettingsNavigation({
         return false;
       }
 
-      const rows = SECTION_ROWS[activeSection];
-      const currentRow = coordsRef.current[activeSection].row;
+      const rows = sectionRowsRef.current[activeSection];
+      const currentRow = Math.min(
+        coordsRef.current[activeSection].row,
+        Math.max(0, rows.length - 1),
+      );
       const activeListId = rowListId(activeSection, currentRow);
       store.activate(activeListId);
 
@@ -386,10 +431,14 @@ export function useTvSettingsNavigation({
 
   const ownsTvRemote = isTv && isActiveScope && (pane === 'nav' || isPreferenceSection(section));
   const focusedSection = isTv && isActiveScope && pane === 'nav' ? section : null;
-  const focusedControlId =
-    isTv && isActiveScope && pane === 'content' && isPreferenceSection(section)
-      ? (SECTION_ROWS[section][coords[section].row]?.[coords[section].col] ?? null)
-      : null;
+  let focusedControlId: string | null = null;
+  if (isTv && isActiveScope && pane === 'content' && isPreferenceSection(section)) {
+    const rows = sectionRows[section];
+    const rowIdx = Math.min(coords[section].row, Math.max(0, rows.length - 1));
+    const row = rows[rowIdx];
+    const colIdx = Math.min(coords[section].col, Math.max(0, (row?.length ?? 0) - 1));
+    focusedControlId = row?.[colIdx] ?? null;
+  }
   const focusedAppearanceId =
     section === 'appearance' ? (focusedControlId as AppearanceFocusId | null) : null;
 

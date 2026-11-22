@@ -29,13 +29,20 @@ const driver = {
 };
 const createOpSqliteDriver = vi.fn(async (_name: string, _location?: string) => driver);
 const manifest = { read: vi.fn((): string | undefined => undefined), write: vi.fn() };
+const userData = {
+  maxBytes: 393_216,
+  read: vi.fn((): string | undefined => undefined),
+  write: vi.fn(),
+};
 const createSettingsStore = vi.fn((_key: string) => manifest);
+const createAppleUserDataStore = vi.fn((_key: string) => userData);
 const createSecureSecretStore = vi.fn(() => ({ get: vi.fn(), set: vi.fn(), delete: vi.fn() }));
 
 vi.mock('../storage', () => ({
   createOpSqliteDriver,
   databaseLocation: (os: string) => (os === 'ios' ? '/app/Library/Caches' : undefined),
   createSettingsStore,
+  createAppleUserDataStore,
   createMacrotaskScheduler: () => ({ yieldNow: async () => undefined }),
   createDeviceHttpClient: () => ({ get: vi.fn() }),
   createSecureSecretStore,
@@ -45,9 +52,12 @@ beforeEach(() => {
   vi.resetModules();
   createOpSqliteDriver.mockClear();
   createSettingsStore.mockClear();
+  createAppleUserDataStore.mockClear();
   createSecureSecretStore.mockClear();
   manifest.read.mockClear();
   manifest.write.mockClear();
+  userData.read.mockClear();
+  userData.write.mockClear();
   driver.close.mockClear();
   driver.all.mockImplementation(migrated);
 });
@@ -65,13 +75,33 @@ describe('createDeviceCatalog', () => {
     expect(typeof first.importSource).toBe('function');
   });
 
-  it('opens catalog.db in Caches on Apple platforms and reconciles the source manifest', async () => {
+  it('opens catalog.db in Caches on Apple platforms and reconciles both manifest and user data (#79)', async () => {
     platform.OS = 'ios';
     const { createDeviceCatalog } = await import('./device');
     await createDeviceCatalog();
     expect(createOpSqliteDriver).toHaveBeenCalledWith('catalog.db', '/app/Library/Caches');
     expect(createSettingsStore).toHaveBeenCalledWith('elv.catalog.sources');
+    expect(createAppleUserDataStore).toHaveBeenCalledWith('elv.catalog.userstate.v1');
     expect(manifest.read).toHaveBeenCalled();
+    expect(userData.read).toHaveBeenCalled();
+  });
+
+  it('opens the catalog when user-data reconciliation fails, logging only a category (#79)', async () => {
+    platform.OS = 'ios';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    driver.all.mockImplementation(async (sql: string, params?: readonly unknown[]) => {
+      if (sql.includes('FROM favorites')) throw new Error('disk I/O at /secret/userstate');
+      return migrated(sql, params);
+    });
+    try {
+      const { createDeviceCatalog } = await import('./device');
+      const catalog = await createDeviceCatalog();
+      expect(catalog).toBeDefined();
+      expect(warn).toHaveBeenCalledWith('catalog: storage/user-data-failed');
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('secret');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('opens the catalog when the manifest cannot be reconciled, logging only a category', async () => {

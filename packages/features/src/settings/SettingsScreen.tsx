@@ -17,7 +17,7 @@ import {
   webTransition,
 } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouteActive } from '../shared';
 import { AboutLicensesPanel } from './AboutLicensesPanel';
 import {
@@ -79,6 +79,8 @@ export interface SettingsScreenProps {
   readonly onFocusTopNav?: () => void;
   /** Whether Settings currently owns TV remote focus (`false` while Top Nav owns focus). */
   readonly isActiveScope?: boolean;
+  /** Overrides Android-only Video decoder row visibility in Playback settings (`#411`). */
+  readonly showAndroidDecoder?: boolean;
 }
 
 interface NavSectionMeta {
@@ -142,6 +144,7 @@ export function SettingsScreen({
   renderLicenses,
   onFocusTopNav,
   isActiveScope = true,
+  showAndroidDecoder = Platform.OS === 'android',
 }: SettingsScreenProps): ReactElement {
   const theme = useTheme();
   const themeCtrl = useThemeController();
@@ -249,6 +252,7 @@ export function SettingsScreen({
     section: activeSection,
     onSectionChange: handleSelectSection,
     onActivateControl: handleActivateControl,
+    showAndroidDecoder,
     ...(onFocusTopNav !== undefined ? { onFocusTopNav } : {}),
   });
 
@@ -284,6 +288,7 @@ export function SettingsScreen({
         focusedControlId={
           activeSection === 'playback' ? (tv.focusedControlId as PlaybackFocusId | null) : null
         }
+        showAndroidDecoder={showAndroidDecoder}
       />
     ) : activeSection === 'liveTv' ? (
       <LiveTvSettingsPanel

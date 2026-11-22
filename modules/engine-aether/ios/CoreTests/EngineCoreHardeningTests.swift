@@ -435,4 +435,111 @@ struct EngineCoreHardeningTests {
       ]
     )
   }
+
+  @Test("externalPlayback suspends local stalls and screen lock, clears active stall, and restores on local return (#234)")
+  func externalPlaybackSuspendsStallsAndScreenLock() {
+    let (core, _, sink, clock) = makeHarness()
+    core.load(LoadRequest(url: "http://h:7878/live/demo/demo/1001.m3u8", live: true), attempt: 1)
+    core.observe(.firstFrame, serial: 1)
+    core.observe(.phase(.playing), serial: 1)
+    #expect(sink.screenOn == true)
+
+    // Duplicate initial false is ignored; entering a local stall before AirPlay starts cleanly.
+    sink.events.removeAll()
+    core.observe(.externalPlayback(false), serial: 1)
+    #expect(sink.events.isEmpty)
+
+    clock.nowMs = 1_500
+    core.observe(.phase(.rebuffering), serial: 1)
+    #expect(sink.events.first == .stall(attempt: 1, phase: .start, atMs: 1_500))
+    sink.events.removeAll()
+
+    // AirPlay handoff releases local screen lock, emits externalPlayback(true), and ends any active stall.
+    clock.nowMs = 2_000
+    core.observe(.externalPlayback(true), serial: 1)
+    #expect(sink.screenOn == false)
+    #expect(
+      sink.events == [
+        .externalPlayback(attempt: 1, active: true),
+        .stall(attempt: 1, phase: .end, atMs: 2_000),
+      ]
+    )
+    let payload = EngineEventOut.externalPlayback(attempt: 1, active: true).payload
+    #expect(payload["type"] as? String == "externalPlayback")
+    #expect(payload["attempt"] as? Int == 1)
+    #expect(payload["active"] as? Bool == true)
+    sink.events.removeAll()
+
+    // While external playback is active, rebuffering/stalled do not emit local stall(.start) and playing keeps screen lock off.
+    clock.nowMs = 2_500
+    core.observe(.phase(.rebuffering), serial: 1)
+    core.observe(.phase(.stalled), serial: 1)
+    #expect(sink.events.isEmpty)
+    #expect(sink.screenOn == false)
+
+    core.observe(.phase(.playing), serial: 1)
+    #expect(
+      sink.events == [
+        .state(attempt: 1, state: .playing),
+        .clock(attempt: 1, anchor: ClockAnchorOut(positionMs: 0, atMs: 2_500, rate: 1.0)),
+      ]
+    )
+    #expect(sink.screenOn == false)
+    sink.events.removeAll()
+
+    // Returning to local playback restores keep-screen-on when playing and re-enables stall reporting.
+    clock.nowMs = 3_000
+    core.observe(.externalPlayback(false), serial: 1)
+    #expect(sink.events == [.externalPlayback(attempt: 1, active: false)])
+    #expect(sink.screenOn == true)
+    sink.events.removeAll()
+
+    clock.nowMs = 3_400
+    core.observe(.phase(.rebuffering), serial: 1)
+    #expect(sink.events.first == .stall(attempt: 1, phase: .start, atMs: 3_400))
+
+    // Returning to local playback while user-paused keeps local screen lock off.
+    core.observe(.externalPlayback(true), serial: 1)
+    core.pause(2)
+    core.observe(.phase(.paused), serial: 1)
+    core.observe(.externalPlayback(false), serial: 1)
+    #expect(sink.screenOn == false)
+
+    // Lifecycle reset clears externalPlaybackActive so a fresh load can enter external playback again.
+    core.observe(.externalPlayback(true), serial: 1)
+    core.load(LoadRequest(url: "http://h:7878/movie/demo/demo/1.mp4", live: false), attempt: 3)
+    #expect(core.isLivePlayback == false)
+    sink.events.removeAll()
+    core.observe(.externalPlayback(true), serial: 2)
+    #expect(sink.events == [.externalPlayback(attempt: 3, active: true)])
+  }
+
+  @Test("remote pause during live externalPlayback transitions to paused without auto-resuming (#234)")
+  func liveRemotePauseDuringExternalPlaybackIsRespected() {
+    let (core, backend, sink, clock) = makeHarness()
+    core.load(LoadRequest(url: "http://h:7878/live/demo/demo/1001.m3u8", live: true), attempt: 1)
+    core.observe(.firstFrame, serial: 1)
+    core.observe(.phase(.playing), serial: 1)
+    core.observe(.externalPlayback(true), serial: 1)
+    backend.calls.removeAll()
+    sink.events.removeAll()
+
+    // Remote AirPlay pause on a live stream must not trigger handleUnrequestedLivePause() / backend.play().
+    clock.nowMs = 2_000
+    core.observe(.phase(.paused), serial: 1)
+    #expect(backend.calls.isEmpty)
+    #expect(sink.screenOn == false)
+    #expect(
+      sink.events == [
+        .state(attempt: 1, state: .paused),
+        .clock(attempt: 1, anchor: ClockAnchorOut(positionMs: 0, atMs: 2_000, rate: 0)),
+      ]
+    )
+
+    // Returning to local playback while remotely paused keeps keep-screen-on disabled until playback resumes.
+    core.observe(.externalPlayback(false), serial: 1)
+    #expect(sink.screenOn == false)
+    core.observe(.phase(.playing), serial: 1)
+    #expect(sink.screenOn == true)
+  }
 }

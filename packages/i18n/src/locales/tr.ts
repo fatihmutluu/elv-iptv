@@ -505,4 +505,9 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'shell.backToExitToast': "Çıkmak için tekrar Geri'ye basın",
   'settings.appearance.confirmExitOnBack': 'Geri tuşuyla çıkmadan önce sor',
   'settings.playback.audioDevice': 'Ses çıkış aygıtı',
+  'settings.playback.videoDecoder': 'Video çözücü',
+  'settings.playback.videoDecoder.auto': 'Otomatik',
+  'settings.playback.videoDecoder.hardware': 'Donanım',
+  'settings.playback.videoDecoder.software': 'Yazılım',
+  'player.videoDecoder': 'Video çözücü',
 };

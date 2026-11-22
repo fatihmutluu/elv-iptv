@@ -15,12 +15,20 @@ enum AudioSessionEvent: Equatable, Sendable {
   case interruptionBegan
   case interruptionEnded(shouldResume: Bool)
   case oldDeviceUnavailable(isRemovedAudioRoute: Bool)
+  case routeChanged(activeAirPlayPortName: String?)
 }
 
-/// Passive `AVAudioSession` observer distinguishing call/headphone pauses (`#256`, `#427`) from unrequested live stalls (`#227`).
+/// Passive `AVAudioSession` observer distinguishing call/headphone pauses (`#256`, `#427`) from unrequested live stalls (`#227`)
+/// and reporting active AirPlay output port names for Bonjour capability matching (`#234`).
 final class AetherAudioSessionObserver: @unchecked Sendable {
   private let lock = NSLock()
   private var tokens: [NSObjectProtocol] = []
+
+  /// Returns the current `.airPlay` output port name, or `nil` when playing locally.
+  static func currentAirPlayPortName() -> String? {
+    let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
+    return outputs.first(where: { $0.portType == .airPlay })?.portName
+  }
 
   init(onEvent: @escaping @MainActor @Sendable (AudioSessionEvent) -> Void) {
     let center = NotificationCenter.default
@@ -44,13 +52,15 @@ final class AetherAudioSessionObserver: @unchecked Sendable {
       object: nil,
       queue: .main
     ) { note in
-      guard let reasonRaw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
-            reasonRaw == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue
-      else { return }
-      let previous = note.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription
-      let portTypes = previous?.outputs.map(\.portType.rawValue) ?? []
-      let isRemovedAudioRoute = portTypes.contains(where: routeRemovalPortTypes.contains)
-      AetherBackend.onMainActor { onEvent(.oldDeviceUnavailable(isRemovedAudioRoute: isRemovedAudioRoute)) }
+      let reasonRaw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+      if reasonRaw == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue {
+        let previous = note.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription
+        let portTypes = previous?.outputs.map(\.portType.rawValue) ?? []
+        let isRemovedAudioRoute = portTypes.contains(where: routeRemovalPortTypes.contains)
+        AetherBackend.onMainActor { onEvent(.oldDeviceUnavailable(isRemovedAudioRoute: isRemovedAudioRoute)) }
+      }
+      let airPlayPortName = Self.currentAirPlayPortName()
+      AetherBackend.onMainActor { onEvent(.routeChanged(activeAirPlayPortName: airPlayPortName)) }
     }
 
     lock.withLock {

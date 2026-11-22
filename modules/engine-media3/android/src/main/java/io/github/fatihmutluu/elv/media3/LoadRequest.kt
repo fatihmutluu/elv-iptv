@@ -1,5 +1,6 @@
 package io.github.fatihmutluu.elv.media3
 
+import java.util.Locale
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
@@ -32,6 +33,21 @@ internal sealed interface SubtitlePreference {
   data class Selected(val id: String) : SubtitlePreference
 }
 
+/** User-selected video decoder preference for Android Media3 (#411). */
+internal enum class VideoDecoderMode(val wireName: String) {
+  AUTO("auto"),
+  HARDWARE("hardware"),
+  SOFTWARE("software"),
+}
+
+/** Parses a wire video decoder mode name (case-insensitive, trimmed), falling back to [VideoDecoderMode.AUTO]. */
+internal fun parseVideoDecoderMode(raw: String?): VideoDecoderMode =
+  when (raw?.trim()?.lowercase(Locale.ROOT)) {
+    VideoDecoderMode.HARDWARE.wireName -> VideoDecoderMode.HARDWARE
+    VideoDecoderMode.SOFTWARE.wireName -> VideoDecoderMode.SOFTWARE
+    else -> VideoDecoderMode.AUTO
+  }
+
 /** One `load`: what to play and how. Built from the JavaScript `LoadCommand`; never persisted. */
 internal data class LoadRequest(
   val url: String,
@@ -46,13 +62,16 @@ internal data class LoadRequest(
   val playlistDetected: Boolean = false,
   /** User-selected buffer size preset (#147). */
   val bufferPreset: BufferPreset = BufferPreset.AUTO,
+  /** User-selected video decoder preference (#411). */
+  val decoderMode: VideoDecoderMode = VideoDecoderMode.AUTO,
 ) {
   /** Names no URL and no header value: both may carry credentials. */
   override fun toString(): String {
     val dvSuffix = if (preferHevcOverDolbyVision) ", preferHevcOverDolbyVision=true" else ""
     val presetSuffix = if (bufferPreset != BufferPreset.AUTO) ", bufferPreset=${bufferPreset.wireName}" else ""
+    val decoderSuffix = if (decoderMode != VideoDecoderMode.AUTO) ", decoderMode=${decoderMode.wireName}" else ""
     return "LoadRequest(live=$live, startMs=$startMs, softwareAudio=$softwareAudio, " +
-      "playlistDetected=$playlistDetected, headers=${headers.size}$dvSuffix$presetSuffix)"
+      "playlistDetected=$playlistDetected, headers=${headers.size}$dvSuffix$presetSuffix$decoderSuffix)"
   }
 }
 
@@ -77,6 +96,7 @@ internal fun parseLoadArgs(args: Map<String, Any?>): Pair<Int, LoadRequest> {
   val preferHevcOverDolbyVision = args["preferHevcOverDolbyVision"] as? Boolean ?: false
   val audioTrackId = (args["audioTrackId"] as? String)?.takeIf { it.isNotEmpty() }
   val bufferPreset = parseBufferPreset(args["bufferPreset"] as? String)
+  val decoderMode = parseVideoDecoderMode(args["decoderMode"] as? String)
   val subtitlePreference =
     if (!args.containsKey("subtitleTrackId")) {
       SubtitlePreference.Default
@@ -97,6 +117,7 @@ internal fun parseLoadArgs(args: Map<String, Any?>): Pair<Int, LoadRequest> {
     audioTrackId = audioTrackId,
     subtitlePreference = subtitlePreference,
     bufferPreset = bufferPreset,
+    decoderMode = decoderMode,
   )
 }
 

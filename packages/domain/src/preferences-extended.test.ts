@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ANDROID_DECODER_MODES,
+  type AndroidDecoderMode,
   type ArtworkCacheLimitMbPref,
   createKvPreferencesStore,
   createMemoryPreferencesStore,
@@ -8,6 +10,7 @@ import {
   type DefaultResizeModePref,
   type EpgTimeSpanHoursPref,
   type GuideRefreshHoursPref,
+  isAndroidDecoderMode,
   type LogoBackdropModePref,
   MAX_PREFERENCES_BYTES,
   type PreferencesKvBackend,
@@ -214,6 +217,7 @@ describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
       artworkCacheLimitMb: 256,
       confirmExitOnBack: false,
       preferredAudioDevice: 'wasapi/{0.0.0.00000000}.{11111111-2222-3333-4444-555555555555}',
+      androidDecoderMode: 'hardware',
     };
 
     const encoded = serializePreferences(full);
@@ -487,5 +491,62 @@ describe('Wave P4 ergonomics preferences (#55, #408)', () => {
     // Passing blank or control-char string resets preferredAudioDevice to 'auto'
     const u3 = await store.update({ preferredAudioDevice: '   ' });
     expect(u3.ok && u3.value.preferredAudioDevice).toBe('auto');
+  });
+});
+
+describe('Wave P5 Android decoder mode preference (#411)', () => {
+  it('exposes ANDROID_DECODER_MODES, isAndroidDecoderMode, and default auto mode', () => {
+    expect(ANDROID_DECODER_MODES).toEqual(['auto', 'hardware', 'software']);
+    expect(DEFAULT_PREFERENCES.androidDecoderMode).toBe('auto');
+    expect(isAndroidDecoderMode('auto')).toBe(true);
+    expect(isAndroidDecoderMode('hardware')).toBe(true);
+    expect(isAndroidDecoderMode('software')).toBe(true);
+    expect(isAndroidDecoderMode('hybrid')).toBe(false);
+    expect(isAndroidDecoderMode(null)).toBe(false);
+    expect(isAndroidDecoderMode(123)).toBe(false);
+  });
+
+  it('parses valid androidDecoderMode values and falls back on invalid values', () => {
+    for (const androidDecoderMode of ANDROID_DECODER_MODES) {
+      expect(
+        parsePreferences(JSON.stringify({ version: 1, androidDecoderMode })).androidDecoderMode,
+      ).toBe(androidDecoderMode);
+    }
+
+    for (const bad of ['', 'hw', 'sw', 'AUTO', 0, true, null, ['software']]) {
+      expect(
+        parsePreferences(JSON.stringify({ version: 1, androidDecoderMode: bad }))
+          .androidDecoderMode,
+      ).toBe('auto');
+    }
+  });
+
+  it('serializes, merges, validates, persists, and resets androidDecoderMode within byte budget', async () => {
+    const normalized = serializePreferences({
+      ...DEFAULT_PREFERENCES,
+      androidDecoderMode: 'invalid' as unknown as AndroidDecoderMode,
+    });
+    expect(normalized.ok).toBe(true);
+    if (normalized.ok) {
+      expect(parsePreferences(normalized.value).androidDecoderMode).toBe('auto');
+      expect(new TextEncoder().encode(normalized.value).byteLength).toBeLessThan(
+        MAX_PREFERENCES_BYTES,
+      );
+    }
+
+    const store = createMemoryPreferencesStore();
+    const u1 = await store.update({ androidDecoderMode: 'software' });
+    expect(u1.ok && u1.value.androidDecoderMode).toBe('software');
+
+    const u2 = await store.update({
+      androidDecoderMode: 'bogus' as unknown as AndroidDecoderMode,
+    });
+    expect(u2.ok && u2.value.androidDecoderMode).toBe('software');
+
+    const u3 = await store.update({ androidDecoderMode: 'hardware' });
+    expect(u3.ok && u3.value.androidDecoderMode).toBe('hardware');
+
+    const reset = await store.reset();
+    expect(reset.ok && reset.value.androidDecoderMode).toBe('auto');
   });
 });

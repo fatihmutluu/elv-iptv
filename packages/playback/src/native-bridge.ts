@@ -1,4 +1,4 @@
-import type { BufferPreset } from '@elv/domain';
+import type { AndroidDecoderMode, BufferPreset } from '@elv/domain';
 import type {
   AttemptToken,
   ClockAnchor,
@@ -19,6 +19,7 @@ export interface NativeLoadCommand {
   softwareAudio?: boolean;
   preferHevcOverDolbyVision?: boolean;
   bufferPreset?: BufferPreset;
+  decoderMode?: AndroidDecoderMode;
   audioTrackId?: string;
   subtitleTrackId?: string | null;
 }
@@ -56,6 +57,7 @@ function toNativeLoad(cmd: LoadCommand): NativeLoadCommand {
       ? {}
       : { preferHevcOverDolbyVision: options.preferHevcOverDolbyVision }),
     ...(options?.bufferPreset === undefined ? {} : { bufferPreset: options.bufferPreset }),
+    ...(options?.decoderMode === undefined ? {} : { decoderMode: options.decoderMode }),
     ...(options?.audioTrackId === undefined ? {} : { audioTrackId: options.audioTrackId }),
     ...(options?.subtitleTrackId === undefined ? {} : { subtitleTrackId: options.subtitleTrackId }),
   };

@@ -16,6 +16,12 @@ export const BUFFER_PRESETS = ['auto', 'balanced', 'large'] as const;
 /** User-selectable playback buffer preset (`#147`). */
 export type BufferPreset = (typeof BUFFER_PRESETS)[number];
 
+/** Supported Android Media3 video decoder selection modes (`#411`). */
+export const ANDROID_DECODER_MODES = ['auto', 'hardware', 'software'] as const;
+
+/** User-selectable Android Media3 video decoder mode (`#411`). */
+export type AndroidDecoderMode = (typeof ANDROID_DECODER_MODES)[number];
+
 /** User-selectable default subtitle activation mode (`#401`). */
 export type SubtitleModePref = 'auto' | 'always' | 'off';
 
@@ -59,6 +65,7 @@ export interface ExtendedPreferencesFields {
   readonly artworkCacheLimitMb: ArtworkCacheLimitMbPref;
   readonly confirmExitOnBack: boolean;
   readonly preferredAudioDevice: string;
+  readonly androidDecoderMode: AndroidDecoderMode;
 }
 
 const MAX_PREF_STRING_LENGTH = 64;
@@ -96,6 +103,11 @@ export function isValidShortString(value: unknown): value is string {
 
 export function isBufferPreset(value: unknown): value is BufferPreset {
   return typeof value === 'string' && (BUFFER_PRESETS as readonly string[]).includes(value);
+}
+
+/** Returns true when `value` is a supported {@link AndroidDecoderMode}. */
+export function isAndroidDecoderMode(value: unknown): value is AndroidDecoderMode {
+  return typeof value === 'string' && (ANDROID_DECODER_MODES as readonly string[]).includes(value);
 }
 
 function normalizePrefLang(value: unknown): string {
@@ -234,6 +246,9 @@ export function parseExtendedPreferences(
         ? parsed.confirmExitOnBack
         : defaults.confirmExitOnBack,
     preferredAudioDevice: normalizeAudioDevice(parsed.preferredAudioDevice),
+    androidDecoderMode: isAndroidDecoderMode(parsed.androidDecoderMode)
+      ? parsed.androidDecoderMode
+      : defaults.androidDecoderMode,
   };
 }
 
@@ -275,6 +290,9 @@ export function serializeExtendedPreferences(
       : defaults.artworkCacheLimitMb,
     confirmExitOnBack: Boolean(snapshot.confirmExitOnBack),
     preferredAudioDevice: normalizeAudioDevice(snapshot.preferredAudioDevice),
+    androidDecoderMode: isAndroidDecoderMode(snapshot.androidDecoderMode)
+      ? snapshot.androidDecoderMode
+      : defaults.androidDecoderMode,
   };
 }
 
@@ -332,5 +350,8 @@ export function mergeExtendedPreferences(
       typeof patch.preferredAudioDevice === 'string'
         ? normalizeAudioDevice(patch.preferredAudioDevice)
         : base.preferredAudioDevice,
+    androidDecoderMode: isAndroidDecoderMode(patch.androidDecoderMode)
+      ? patch.androidDecoderMode
+      : base.androidDecoderMode,
   };
 }

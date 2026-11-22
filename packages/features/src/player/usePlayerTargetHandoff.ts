@@ -1,5 +1,5 @@
 import type { CatalogService } from '@elv/data';
-import type { BufferPreset } from '@elv/domain';
+import type { AndroidDecoderMode, BufferPreset } from '@elv/domain';
 import {
   type PlaybackClock,
   type PlaybackService,
@@ -38,6 +38,7 @@ export interface PlayerTargetHandoffParams {
   cancelScrubRef: MutableRefObject<() => void>;
   onTargetChangeRef: MutableRefObject<((next: PlayTarget) => void) | undefined>;
   bufferPresetRef?: MutableRefObject<BufferPreset>;
+  decoderModeRef?: MutableRefObject<AndroidDecoderMode | undefined>;
   resolvedNextEpisodeRef?: MutableRefObject<PlayableEntry | undefined>;
 }
 
@@ -58,6 +59,7 @@ export function usePlayerTargetHandoff({
   cancelScrubRef,
   onTargetChangeRef,
   bufferPresetRef,
+  decoderModeRef,
   resolvedNextEpisodeRef,
 }: PlayerTargetHandoffParams) {
   const [activeTarget, setActiveTarget] = useState<PlayTarget>(target);
@@ -85,6 +87,7 @@ export function usePlayerTargetHandoff({
   const tuneEntry = useCallback(
     (service: PlaybackService, entry: PlayableEntry, startMs?: number): void => {
       const bufferPreset = bufferPresetRef?.current;
+      const decoderMode = decoderModeRef?.current;
       service.tune({
         item: entry.itemKey,
         accountKey: entry.accountKey ?? entry.sourceId,
@@ -92,10 +95,36 @@ export function usePlayerTargetHandoff({
         resolve: () => catalogRef.current.resolveStream(entry.itemKey),
         ...(startMs !== undefined ? { startMs } : {}),
         ...(bufferPreset !== undefined ? { bufferPreset } : {}),
+        ...(decoderMode !== undefined ? { decoderMode } : {}),
       });
     },
-    [bufferPresetRef, catalogRef],
+    [bufferPresetRef, catalogRef, decoderModeRef],
   );
+
+  const reloadActiveTarget = useCallback((): void => {
+    const svc = serviceRef.current;
+    if (backgroundedRef.current) {
+      resumeOnActiveRef.current = true;
+      return;
+    }
+    if (svc === null) return;
+    const current = activeTargetRef.current;
+    let resumeStartMs: number | undefined;
+    if (current.kind === 'vod') {
+      const { anchor, status: st } = svc.getState();
+      if (st.kind === 'ended') {
+        resumeStartMs = 0;
+      } else if (anchor !== undefined) {
+        resumeStartMs = Math.max(0, Math.round(positionAt(anchor, clockRef.current.now())));
+      } else {
+        resumeStartMs = vodResumeMsRef.current ?? current.startPositionMs;
+      }
+      flushProgressRef.current(resumeStartMs);
+    }
+    cancelScrubRef.current();
+    cancelPendingResume();
+    tuneEntry(svc, current, current.kind === 'vod' ? resumeStartMs : undefined);
+  }, [cancelPendingResume, cancelScrubRef, clockRef, flushProgressRef, serviceRef, tuneEntry]);
 
   const tuneWithResume = useCallback(
     (service: PlaybackService, entry: PlayableEntry, explicitStartMs?: number): void => {
@@ -395,6 +424,7 @@ export function usePlayerTargetHandoff({
     selectChannel,
     jumpToChannel,
     onServiceReady,
+    reloadActiveTarget,
     handlePlayNextEpisode,
     handleJumpPreviousChannel,
   };

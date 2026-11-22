@@ -8,7 +8,7 @@ import {
   useMemo,
   useRef,
 } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { SettingsPreferencesController } from './appearance-controls';
 import {
   BUFFER_PRESET_OPTIONS,
@@ -16,6 +16,7 @@ import {
   SEEK_STEP_OPTIONS,
   SUBTITLE_MODE_OPTIONS,
   TRACK_LANGUAGE_CODES,
+  VIDEO_DECODER_OPTIONS,
 } from './playback-controls';
 import {
   type SettingsChipOption,
@@ -31,6 +32,8 @@ export interface PlaybackSettingsPanelProps {
   readonly preferences?: SettingsPreferencesController;
   /** Currently focused Playback control on 10-foot TV D-pad navigation. */
   readonly focusedControlId?: PlaybackFocusId | null;
+  /** Shows the Android-only Media3 Video decoder row (defaults to `Platform.OS === 'android'`, `#411`). */
+  readonly showAndroidDecoder?: boolean;
 }
 
 type ScrollViewHandle = ComponentRef<typeof ScrollView>;
@@ -43,6 +46,7 @@ type ScrollViewHandle = ComponentRef<typeof ScrollView>;
 export function PlaybackSettingsPanel({
   preferences: suppliedPrefs,
   focusedControlId = null,
+  showAndroidDecoder = Platform.OS === 'android',
 }: PlaybackSettingsPanelProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
@@ -73,7 +77,8 @@ export function PlaybackSettingsPanel({
     } else if (
       focusedControlId.startsWith('seek-step-') ||
       focusedControlId.startsWith('aspect-') ||
-      focusedControlId.startsWith('buffer-')
+      focusedControlId.startsWith('buffer-') ||
+      focusedControlId.startsWith('video-decoder-')
     ) {
       const y = cardYRef.current.transport;
       if (y !== undefined) targetY = Math.max(0, y - 12);
@@ -144,6 +149,17 @@ export function PlaybackSettingsPanel({
   const bufferOptions = useMemo(
     () =>
       BUFFER_PRESET_OPTIONS.map((opt) => ({
+        value: opt.value,
+        label: i18n.t(opt.labelKey),
+        focusId: opt.focusId,
+        testID: opt.testID,
+      })),
+    [i18n],
+  );
+
+  const videoDecoderOptions = useMemo(
+    () =>
+      VIDEO_DECODER_OPTIONS.map((opt) => ({
         value: opt.value,
         label: i18n.t(opt.labelKey),
         focusId: opt.focusId,
@@ -272,6 +288,20 @@ export function PlaybackSettingsPanel({
           isTv={isTv}
           onSelect={(bufferPreset) => applyPatch({ bufferPreset })}
         />
+
+        {showAndroidDecoder ? (
+          <>
+            <SettingsDivider />
+            <SettingsOptionRow
+              title={i18n.t('settings.playback.videoDecoder')}
+              options={videoDecoderOptions}
+              selectedValue={activePrefs.androidDecoderMode}
+              focusedControlId={focusedControlId}
+              isTv={isTv}
+              onSelect={(androidDecoderMode) => applyPatch({ androidDecoderMode })}
+            />
+          </>
+        ) : null}
       </Surface>
 
       <Surface

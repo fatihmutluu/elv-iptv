@@ -21,6 +21,7 @@ public final class EngineCore {
   var pendingPlaying = false
   var played = false
   var stalled = false
+  var externalPlaybackActive = false
   var seeking = false
   var reloading = false
   var userPaused = false
@@ -166,6 +167,7 @@ public final class EngineCore {
     serial += 1
     active = false
     userPaused = false
+    externalPlaybackActive = false
     playbackRate = 1.0
     currentRequest = nil
     currentPlan = nil
@@ -183,6 +185,7 @@ public final class EngineCore {
     serial += 1
     active = false
     userPaused = false
+    externalPlaybackActive = false
     playbackRate = 1.0
     trackState.onPrepareReuse()
     sink?.clearSubtitles()
@@ -205,6 +208,7 @@ public final class EngineCore {
     serial += 1
     active = false
     userPaused = false
+    externalPlaybackActive = false
     playbackRate = 1.0
     currentRequest = nil
     currentPlan = nil
@@ -273,6 +277,9 @@ public final class EngineCore {
     case let .progress(bytesReceived, bufferedSeconds):
       handleProgress(bytesReceived: bytesReceived, bufferedSeconds: bufferedSeconds)
 
+    case let .externalPlayback(active):
+      handleExternalPlayback(active)
+
     case let .readerFault(readerFailure):
       if latchedReaderFailure == nil { latchedReaderFailure = readerFailure }
 
@@ -313,6 +320,11 @@ public final class EngineCore {
     (shutterCovered, screenOn)
   }
 
+  /// Whether the active stream is live (`true` when idle or live, `false` for VOD).
+  public var isLivePlayback: Bool {
+    currentRequest?.live ?? true
+  }
+
   func emit(_ event: EngineEventOut) { sink?.send(event) }
 
   func adopt(_ attempt: Int) {
@@ -337,6 +349,7 @@ public final class EngineCore {
     pendingPlaying = false
     played = false
     stalled = false
+    externalPlaybackActive = false
     seeking = false
     reloading = false
     userPaused = false

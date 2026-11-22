@@ -9,7 +9,7 @@ import {
   webBackdropBlur,
 } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import {
   buildShellCrashProps,
   buildShellNavigation,
@@ -427,6 +427,14 @@ export function AppShell(props: AppShellProps): ReactElement {
                 onPersistAudioDevice={(preferredAudioDevice) => {
                   void preferences.updatePreferences({ preferredAudioDevice });
                 }}
+                {...(Platform.OS === 'android'
+                  ? {
+                      androidDecoderMode: preferences.preferences.androidDecoderMode,
+                      onSelectAndroidDecoderMode: (androidDecoderMode) => {
+                        void preferences.updatePreferences({ androidDecoderMode });
+                      },
+                    }
+                  : {})}
                 {...(appLifecycle !== undefined ? { appLifecycle } : {})}
                 onTargetChange={onPlayerTargetChange}
                 onExit={onPlayerExit}

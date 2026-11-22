@@ -7,9 +7,9 @@ window helpers (player core spec 6.1).
 - `createMedia3Engine(): PlayerEngine | null` (`src/index.ts`; `null` without `ElvEngineMedia3`) creates a native
   `Engine` shared object; `release()` frees it. `Media3Surface({ engine, style?, resizeMode?,
   subtitleBottomInsetPx?, surfaceRecreationToken?, useTextureView?, testID? })` renders `Media3SurfaceView`.
-- Native (`ElvEngineMedia3Module`, `LoadRequest`): `load(flattened LoadCommand + bufferPreset?)`, `retry`, `play`,
-  `pause`, `seek`, `setScrubbing` (VOD-only), `setAudioBoostDb`, `supportsHardwareHevc4k`, `selectAudioTrack`,
-  `selectSubtitleTrack`, `stop`, `recreate`, `onEngineEvent`, sync `uptimeMs()`.
+- Native (`ElvEngineMedia3Module`, `LoadRequest`): `load(flattened LoadCommand + bufferPreset? + decoderMode?)`,
+  `retry`, `play`, `pause`, `seek`, `setScrubbing` (VOD-only), `setAudioBoostDb`, `supportsHardwareHevc4k`,
+  `selectAudioTrack`, `selectSubtitleTrack`, `stop`, `recreate`, `onEngineEvent`, sync `uptimeMs()`.
 - Module events & window controls: `onStandbyChanged` (TV `StandbyMonitor`, 6 s debounce), `onSafeAreaInsetsChanged`
   (`max(systemBars, displayCutout)` dp, zero on TV), `onPictureInPictureChanged`, `setOrientationLocked`,
   `requestTemporaryOrientation` (`SmartOrientationController`), `applyShortEdgesCutoutMode`, `getSafeAreaInsets`,
@@ -20,14 +20,17 @@ window helpers (player core spec 6.1).
 - `Media3Engine` + `CommandFence`: runs `ExoPlayer` on its `HandlerThread`; synchronous `CommandFence` coalesces
   superseded `load`/`retry`/`recreate` and filters stale events; `OnDestroy`/release stops `StandbyMonitor`,
   `SmartOrientationController`, OkHttp, `AudioEffectsController`, and threads; rebuilds player on `(softwareAudio,
-  preferHevc, StreamKind, BufferPreset)` changes; resets `isScrubbingModeEnabled = false` on stop/load/retry/recreate.
+  preferHevc, StreamKind, BufferPreset, VideoDecoderMode)` changes (preserving `VideoDecoderMode` across `recreate`);
+  resets `isScrubbingModeEnabled = false` on stop/load/retry/recreate.
 - `PlayerFactory` + `LoadControlConfig`: splits `StreamKind` (`RAW_TS_LIVE`, `HLS_LIVE`, `VOD`) x `BufferPreset`
   (`auto`, `balanced`, `large`) with RAM-proportional non-low-RAM cap and low-RAM (`< 1.5 GiB`) `16 MiB` hard cap
   (`prioritizeTimeOverSizeThresholds = false`, live `backBufferMs = 0`); `DefaultTrackSelector` (`AudioOffloadPreferences`
   enabled, tunneling off, capability invalidation, `CaptioningManager` gated on `isEnabled`); `TAKE_AUDIO_FOCUS` fallback.
-- `CodecPolicy` + `FfmpegAudio` + `AudioEffectsController`: LGPL-2.1+ FFmpeg 9.0.2; off-UI-thread 4K HEVC hardware probe;
-  format-checked hardware-first video selector; Amlogic `CodecMaxValues` floor & Sony Bravia frame-drop quirks (`DeviceQuirks`);
-  `LoudnessEnhancer` stereo-only gain boost (skips `sessionId <= 0` and `channelCount > 2`, 5 min DRC refresh).
+- `CodecPolicy` + `PolicyVideoRenderer` + `FfmpegAudio` + `AudioEffectsController`: LGPL-2.1+ FFmpeg 9.0.2; off-UI-thread
+  4K HEVC hardware probe; manual `VideoDecoderMode` (`auto` format-checked hardware-first + automatic fallback,
+  `hardware` strict hardware-only, `software` immediate software video + `EXTENSION_RENDERER_MODE_PREFER`, #411); Amlogic
+  `CodecMaxValues` floor & Sony Bravia frame-drop quirks (`DeviceQuirks`); `LoudnessEnhancer` stereo-only gain boost
+  (skips `sessionId <= 0` and `channelCount > 2`, 5 min DRC refresh).
 - `SurfaceController` + `Media3SurfaceView` (`VIEW.md`): `SurfaceView` default + opt-in `useTextureView` (`TextureView`
   release on destroy) + `surfaceRecreationToken` child-0 swap with retired-callback suppression; `250 ms` bounded detach.
 

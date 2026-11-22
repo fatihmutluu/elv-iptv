@@ -1,5 +1,6 @@
 package io.github.fatihmutluu.elv.media3
 
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -41,6 +42,56 @@ class LoadRequestTest {
       assertFalse(withPreset, withPreset.contains(leak))
     }
     assertTrue(withPreset.contains("bufferPreset=large"))
+
+    val withSoftwareDecoder = secret.copy(decoderMode = VideoDecoderMode.SOFTWARE).toString()
+    for (leak in listOf("user", "pass", "tk9", "s3cret", "Bearer", "http", "/live", "Referer")) {
+      assertFalse(withSoftwareDecoder, withSoftwareDecoder.contains(leak))
+    }
+    assertTrue(withSoftwareDecoder.contains(", decoderMode=software"))
+
+    val withHardwareDecoder = secret.copy(decoderMode = VideoDecoderMode.HARDWARE).toString()
+    for (leak in listOf("user", "pass", "tk9", "s3cret", "Bearer", "http", "/live", "Referer")) {
+      assertFalse(withHardwareDecoder, withHardwareDecoder.contains(leak))
+    }
+    assertTrue(withHardwareDecoder.contains(", decoderMode=hardware"))
+  }
+
+  @Test
+  fun `parseVideoDecoderMode and parseLoadArgs handle auto, hardware, software, whitespace, case and fallback (#411)`() {
+    val previousLocale = Locale.getDefault()
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      assertEquals(VideoDecoderMode.AUTO, parseVideoDecoderMode(null))
+      assertEquals(VideoDecoderMode.AUTO, parseVideoDecoderMode(""))
+      assertEquals(VideoDecoderMode.AUTO, parseVideoDecoderMode("   "))
+      assertEquals(VideoDecoderMode.AUTO, parseVideoDecoderMode("auto"))
+      assertEquals(VideoDecoderMode.AUTO, parseVideoDecoderMode("AUTO"))
+      assertEquals(VideoDecoderMode.AUTO, parseVideoDecoderMode("unknown"))
+      assertEquals(VideoDecoderMode.HARDWARE, parseVideoDecoderMode("hardware"))
+      assertEquals(VideoDecoderMode.HARDWARE, parseVideoDecoderMode("  HARDWARE  "))
+      assertEquals(VideoDecoderMode.HARDWARE, parseVideoDecoderMode("HaRdWaRe"))
+      assertEquals(VideoDecoderMode.SOFTWARE, parseVideoDecoderMode("software"))
+      assertEquals(VideoDecoderMode.SOFTWARE, parseVideoDecoderMode("\tSoFtWaRe\n"))
+    } finally {
+      Locale.setDefault(previousLocale)
+    }
+
+    val (_, defaultReq) = parseLoadArgs(
+      mapOf("attempt" to 1, "url" to "http://h/live/1.ts", "kind" to "live")
+    )
+    val (_, hwReq) = parseLoadArgs(
+      mapOf("attempt" to 2, "url" to "http://h/live/1.ts", "kind" to "live", "decoderMode" to "hardware")
+    )
+    val (_, swReq) = parseLoadArgs(
+      mapOf("attempt" to 3, "url" to "http://h/live/1.ts", "kind" to "live", "decoderMode" to "  SOFTWARE ")
+    )
+    val (_, invalidReq) = parseLoadArgs(
+      mapOf("attempt" to 4, "url" to "http://h/live/1.ts", "kind" to "live", "decoderMode" to 42)
+    )
+    assertEquals(VideoDecoderMode.AUTO, defaultReq.decoderMode)
+    assertEquals(VideoDecoderMode.HARDWARE, hwReq.decoderMode)
+    assertEquals(VideoDecoderMode.SOFTWARE, swReq.decoderMode)
+    assertEquals(VideoDecoderMode.AUTO, invalidReq.decoderMode)
   }
 
   @Test

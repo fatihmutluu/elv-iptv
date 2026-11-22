@@ -84,8 +84,7 @@ export function createStallWatchdog(
   const cancel = (): void => {
     stallTimer = clear(stallTimer);
     stableTimer = clear(stableTimer);
-    seekSettleTimer = clear(seekSettleTimer);
-    stalledDuringSeek = false;
+    clearSeekSettle();
     clearFrozenClock();
     clearZeroFrame();
     lastNetworkActivityAtMs = undefined;
