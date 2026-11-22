@@ -764,4 +764,42 @@ class Media3EngineTest {
       engine.dispose()
     }
   }
+
+  @Test
+  fun `rejects disallowed playback URLs cleanly, preserves pendingRebuild, and trims accepted spaces`() {
+    val engine = Media3Engine(RuntimeEnvironment.getApplication())
+    val events = java.util.concurrent.CopyOnWriteArrayList<Map<String, Any?>>()
+    engine.eventObserverForTest = { events += it }
+    try {
+      val handler = Media3Engine::class.java.getDeclaredField("handler").apply { isAccessible = true }.get(engine) as android.os.Handler
+      val playerField = Media3Engine::class.java.getDeclaredField("player").apply { isAccessible = true }
+      val requestField = Media3Engine::class.java.getDeclaredField("request").apply { isAccessible = true }
+      fun flush(): Pair<androidx.media3.exoplayer.ExoPlayer?, LoadRequest?> {
+        var out: Pair<androidx.media3.exoplayer.ExoPlayer?, LoadRequest?> = null to null
+        val latch = CountDownLatch(1)
+        handler.post { out = (playerField.get(engine) as androidx.media3.exoplayer.ExoPlayer?) to (requestField.get(engine) as LoadRequest?); latch.countDown() }
+        assertTrue(latch.await(5, TimeUnit.SECONDS))
+        return out
+      }
+      val (initialPlayer, _) = flush()
+      engine.load(1, LoadRequest("file:///etc/passwd", emptyMap(), live = true, startMs = null, softwareAudio = false)); flush()
+      val err1 = events.lastOrNull { it["type"] == "error" && it["attempt"] == 1 }?.get("error") as? Map<*, *>
+      assertEquals("unsupported-format", err1?.get("code")); assertEquals("disallowed-url-scheme", err1?.get("detail"))
+      engine.load(2, LoadRequest("\r\nhttp://127.0.0.1:9/live/1.ts\r\n", emptyMap(), live = true, startMs = null, softwareAudio = false)); flush()
+      val err2 = events.lastOrNull { it["type"] == "error" && it["attempt"] == 2 }?.get("error") as? Map<*, *>
+      assertEquals("unsupported-format", err2?.get("code")); assertEquals("disallowed-url-scheme", err2?.get("detail"))
+      val hold = CountDownLatch(1); val entered = CountDownLatch(1)
+      handler.post { entered.countDown(); hold.await(5, TimeUnit.SECONDS) }
+      assertTrue(entered.await(5, TimeUnit.SECONDS))
+      engine.recreate(3)
+      engine.load(4, LoadRequest("javascript:alert(1)", emptyMap(), live = true, startMs = null, softwareAudio = false))
+      hold.countDown()
+      val (afterRejected, reqAfterRejected) = flush()
+      assertEquals(initialPlayer, afterRejected); org.junit.Assert.assertNull(reqAfterRejected)
+      engine.load(5, LoadRequest("  http://127.0.0.1:9/live/2.ts  ", emptyMap(), live = true, startMs = null, softwareAudio = false))
+      val (afterValid, reqAfterValid) = flush()
+      org.junit.Assert.assertNotSame("pendingRebuild must survive a rejected load", initialPlayer, afterValid)
+      assertEquals("http://127.0.0.1:9/live/2.ts", reqAfterValid?.url)
+    } finally { engine.dispose() }
+  }
 }

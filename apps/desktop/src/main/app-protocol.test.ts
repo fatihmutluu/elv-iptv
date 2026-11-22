@@ -1,5 +1,7 @@
-import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import { APP_ORIGIN, CONTENT_SECURITY_POLICY, resolveAppFile } from './app-protocol.ts';
 
 const root = resolve('/srv/renderer');
@@ -72,5 +74,69 @@ describe('resolveAppFile', () => {
 describe('resolveAppFile trailing slashes', () => {
   it('maps a trailing-slash path to the directory path inside the root', () => {
     expect(resolveAppFile(root, `${APP_ORIGIN}/assets/`)).toBe(resolve(root, 'assets'));
+  });
+});
+
+describe('resolveAppFile symlink containment', () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects symlinks inside root that escape outside rootDir while allowing in-root files and symlinks', () => {
+    const base = mkdtempSync(join(tmpdir(), 'elv-app-proto-'));
+    tempDirs.push(base);
+    const appRoot = join(base, 'renderer');
+    const outsideDir = join(base, 'outside');
+    mkdirSync(appRoot, { recursive: true });
+    mkdirSync(outsideDir, { recursive: true });
+    writeFileSync(join(appRoot, 'index.html'), '<html>ok</html>');
+    writeFileSync(join(outsideDir, 'secret.txt'), 'secret');
+
+    // Directory symlink (junction on Windows, dir symlink on POSIX) pointing outside appRoot
+    const escapeDirLink = join(appRoot, 'escape-dir');
+    symlinkSync(outsideDir, escapeDirLink, process.platform === 'win32' ? 'junction' : 'dir');
+
+    // In-root directory symlink stays allowed
+    const subDir = join(appRoot, 'sub');
+    mkdirSync(subDir, { recursive: true });
+    writeFileSync(join(subDir, 'app.js'), 'console.log(1);');
+    const safeDirLink = join(appRoot, 'safe-dir');
+    symlinkSync(subDir, safeDirLink, process.platform === 'win32' ? 'junction' : 'dir');
+
+    expect(resolveAppFile(appRoot, `${APP_ORIGIN}/index.html`)).toBe(
+      resolve(appRoot, 'index.html'),
+    );
+    expect(resolveAppFile(appRoot, `${APP_ORIGIN}/safe-dir/app.js`)).toBe(
+      resolve(appRoot, 'safe-dir/app.js'),
+    );
+    expect(resolveAppFile(appRoot, `${APP_ORIGIN}/missing-in-root.js`)).toBe(
+      resolve(appRoot, 'missing-in-root.js'),
+    );
+    expect(resolveAppFile(appRoot, `${APP_ORIGIN}/escape-dir/secret.txt`)).toBeNull();
+    expect(resolveAppFile(appRoot, `${APP_ORIGIN}/escape-dir/nonexistent.txt`)).toBeNull();
+
+    // Also test a direct file symlink when permitted by OS privileges
+    const fileLink = join(appRoot, 'escape-file.txt');
+    let createdFileLink = false;
+    try {
+      symlinkSync(join(outsideDir, 'secret.txt'), fileLink, 'file');
+      createdFileLink = true;
+    } catch {
+      // Unprivileged Windows without Developer Mode cannot create file symlinks; junction above covers realpath containment.
+    }
+    if (createdFileLink) {
+      expect(resolveAppFile(appRoot, `${APP_ORIGIN}/escape-file.txt`)).toBeNull();
+    }
+
+    // Dangling symlink pointing to a non-existent outside target must fail closed (null)
+    const danglingTarget = join(base, 'does-not-exist-outside');
+    const danglingLink = join(appRoot, 'dangling-link');
+    symlinkSync(danglingTarget, danglingLink, process.platform === 'win32' ? 'junction' : 'dir');
+    expect(resolveAppFile(appRoot, `${APP_ORIGIN}/dangling-link`)).toBeNull();
+    expect(resolveAppFile(appRoot, `${APP_ORIGIN}/dangling-link/secret.txt`)).toBeNull();
   });
 });

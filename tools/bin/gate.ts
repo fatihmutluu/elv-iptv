@@ -23,6 +23,7 @@ import {
   runListGate,
 } from '../src/gates/list-gate.ts';
 import { PLAYER_USAGE, playerMain } from '../src/gates/player-cli.ts';
+import { SECURITY_USAGE, securityMain } from '../src/gates/security-cli.ts';
 import { findRepoRoot } from '../src/root.ts';
 
 const USAGE =
@@ -66,6 +67,12 @@ function parseCli() {
       soak: { type: 'string' },
       stress: { type: 'boolean' },
       corpus: { type: 'boolean' },
+      'skip-audit': { type: 'boolean' },
+      tv: { type: 'boolean' },
+      artifact: { type: 'string', multiple: true },
+      'android-manifest': { type: 'string', multiple: true },
+      'apple-plist': { type: 'string', multiple: true },
+      'gradle-deps': { type: 'string', multiple: true },
     },
   });
 }
@@ -82,10 +89,11 @@ if (
     positionals[0] !== 'player' &&
     positionals[0] !== 'contract' &&
     positionals[0] !== 'corpus' &&
-    positionals[0] !== 'desktop')
+    positionals[0] !== 'desktop' &&
+    positionals[0] !== 'security')
 ) {
   fail(
-    `${USAGE}\n${IMPORT_USAGE}\n${PLAYER_USAGE}\n${CONTRACT_USAGE}\n${CORPUS_USAGE}\n${DESKTOP_USAGE}`,
+    `${USAGE}\n${IMPORT_USAGE}\n${PLAYER_USAGE}\n${CONTRACT_USAGE}\n${CORPUS_USAGE}\n${DESKTOP_USAGE}\n${SECURITY_USAGE}`,
     2,
   );
 }
@@ -109,6 +117,9 @@ if (positionals[0] === 'desktop') {
     process.exit(await corpusMain({ ...values, target: 'desktop' }, findRepoRoot(process.cwd())));
   }
   process.exit(await desktopMain(values, findRepoRoot(process.cwd())));
+}
+if (positionals[0] === 'security') {
+  process.exit(await securityMain(values, findRepoRoot(process.cwd())));
 }
 
 const count = (name: string, text: string | undefined): number | undefined => {

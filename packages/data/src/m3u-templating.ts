@@ -4,6 +4,7 @@ import { MAX_URLVARS_TOTAL_BYTES } from './urlvars-store';
 const PLACEHOLDER = /\{\{([^{}]+)\}\}/g;
 const PLAYLIST_URL = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)(?:\/[^?#]*)?(?:\?([^#]*))?/i;
 const TILDE_SUFFIX = /^(.+)~(\d+)$/;
+const PROTO_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
 const utf8 = new TextEncoder();
 
 /** Entries of the first rule judgement, and the most entries held back while a later host is judged. */
@@ -22,7 +23,7 @@ function utf8ByteLength(text: string): number {
  * Tracks exact UTF-8 byte length of `JSON.stringify(vars)`.
  */
 export class VarBook {
-  readonly vars: UrlVars = {};
+  readonly vars: UrlVars = Object.create(null) as UrlVars;
   private readonly byBase = new Map<string, Map<string, string>>();
   private readonly nextIndex = new Map<string, number>();
   private count = 0;
@@ -30,6 +31,7 @@ export class VarBook {
 
   constructor(seed: UrlVars = {}) {
     for (const [key, value] of Object.entries(seed)) {
+      if (PROTO_KEYS.has(key) || typeof value !== 'string') continue;
       this.insert(key, value);
       this.remember(key, value, key);
       const m = TILDE_SUFFIX.exec(key);
@@ -51,6 +53,7 @@ export class VarBook {
   absorb(t: { template: string; vars: UrlVars }): string {
     const renames = new Map<string, string>();
     for (const [name, value] of Object.entries(t.vars)) {
+      if (PROTO_KEYS.has(name) || typeof value !== 'string') continue;
       let valMap = this.byBase.get(name);
       if (valMap === undefined) {
         valMap = new Map();
@@ -90,6 +93,7 @@ export class VarBook {
   }
 
   private insert(key: string, value: string): void {
+    if (PROTO_KEYS.has(key)) return;
     this.vars[key] = value;
     const entryBytes =
       utf8ByteLength(JSON.stringify(key)) + 1 + utf8ByteLength(JSON.stringify(value));

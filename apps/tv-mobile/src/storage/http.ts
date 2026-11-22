@@ -4,22 +4,35 @@ import { fetch as expoFetch } from 'expo/fetch';
 type FetchResponse = Awaited<ReturnType<FetchLike>>;
 
 interface ExpoResponse extends Omit<FetchResponse, 'body'> {
+  url?: string;
   body?: FetchResponse['body'];
   arrayBuffer?(): Promise<ArrayBuffer>;
 }
 
+/** Response returned by {@link withWholeBody}, preserving `url` when present on the platform response. */
+export interface DeviceFetchResponse extends FetchResponse {
+  url?: string;
+}
+
 /**
- * Rebuilds the response from its fields: a real response keeps `status` and `headers` as prototype accessors,
- * which object spread would drop. Where it has no stream, the whole body is delivered as one chunk.
+ * Rebuilds the response from its fields: a real response keeps `status`, `headers`, and `url` as
+ * prototype accessors, which object spread would drop. Where it has no stream, the whole body is
+ * delivered as one chunk.
  */
-function withWholeBody(res: ExpoResponse): FetchResponse {
+export function withWholeBody(res: ExpoResponse): DeviceFetchResponse {
   const { status, headers } = res;
-  if (res.body !== null && res.body !== undefined) return { status, headers, body: res.body };
-  if (typeof res.arrayBuffer !== 'function') return { status, headers, body: null };
+  const urlField = typeof res.url === 'string' && res.url.length > 0 ? { url: res.url } : {};
+  if (res.body !== null && res.body !== undefined) {
+    return { status, headers, ...urlField, body: res.body };
+  }
+  if (typeof res.arrayBuffer !== 'function') {
+    return { status, headers, ...urlField, body: null };
+  }
   const read = () => res.arrayBuffer?.() as Promise<ArrayBuffer>;
   return {
     status,
     headers,
+    ...urlField,
     body: (async function* () {
       yield new Uint8Array(await read());
     })(),

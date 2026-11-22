@@ -149,7 +149,12 @@ const SUBTITLE_TRACK_ID = /^s:([1-9]\d{0,5})$/;
 const HEADER_TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 
 const isRecord = (x: unknown): x is Record<string, unknown> =>
-  typeof x === 'object' && x !== null && !Array.isArray(x);
+  typeof x === 'object' &&
+  x !== null &&
+  !Array.isArray(x) &&
+  !Object.hasOwn(x, '__proto__') &&
+  !Object.hasOwn(x, 'constructor') &&
+  !Object.hasOwn(x, 'prototype');
 const isAttempt = (x: unknown): x is number => Number.isSafeInteger(x) && (x as number) >= 0;
 const isNumber = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 const isCoordinate = (x: unknown): x is number => isNumber(x) && Math.abs(x) <= MAX_AREA_VALUE;

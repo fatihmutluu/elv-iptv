@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 const mocked = vi.hoisted(() => ({ fetch: vi.fn() }));
 vi.mock('expo/fetch', () => ({ fetch: mocked.fetch }));
 
-import { createDeviceHttpClient } from './http';
+import { createDeviceHttpClient, withWholeBody } from './http';
 
 const enc = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0));
 const dec = (b: Uint8Array) => String.fromCharCode(...b);
@@ -103,5 +103,87 @@ describe('createDeviceHttpClient', () => {
     mocked.fetch.mockResolvedValue(new ProtoResponse());
     const res = await createDeviceHttpClient().get('https://x.test/e');
     expect(res).toEqual({ ok: false, error: { category: 'auth', code: 'http-403' } });
+  });
+
+  it('preserves non-empty res.url (including prototype getters) across all withWholeBody branches', async () => {
+    const streamed = withWholeBody({
+      status: 200,
+      url: 'https://cdn.example/final.m3u8',
+      headers: new Headers(),
+      body: streamOf('ok'),
+    });
+    expect(streamed.url).toBe('https://cdn.example/final.m3u8');
+
+    class RedirectedProtoResponse {
+      get status() {
+        return 200;
+      }
+      get url() {
+        return 'https://cdn.example/redirected.m3u';
+      }
+      get headers() {
+        return new Headers();
+      }
+      get body() {
+        return null;
+      }
+      async arrayBuffer() {
+        return enc('data').buffer;
+      }
+    }
+    const buffered = withWholeBody(new RedirectedProtoResponse());
+    expect(buffered.url).toBe('https://cdn.example/redirected.m3u');
+
+    const emptyBody = withWholeBody({
+      status: 204,
+      url: 'https://cdn.example/empty',
+      headers: new Headers(),
+      body: null,
+    });
+    expect(emptyBody.url).toBe('https://cdn.example/empty');
+
+    const blankUrl = withWholeBody({
+      status: 200,
+      url: '',
+      headers: new Headers(),
+      body: null,
+    });
+    expect('url' in blankUrl).toBe(false);
+  });
+
+  it('propagates res.url to finalUrl and rejects non-HTTP(S) res.url end-to-end via createDeviceHttpClient', async () => {
+    mocked.fetch.mockResolvedValue({
+      status: 200,
+      url: 'https://cdn.example/final/playlist.m3u',
+      headers: new Headers(),
+      body: streamOf('#EXTM3U'),
+    });
+    const okRes = await createDeviceHttpClient().get('https://origin.example/start');
+    expect(okRes.ok).toBe(true);
+    if (!okRes.ok) throw new Error('expected ok');
+    expect(okRes.value.finalUrl).toBe('https://cdn.example/final/playlist.m3u');
+    expect(await drain(okRes.value.body)).toBe('#EXTM3U');
+
+    let cancelled = false;
+    mocked.fetch.mockResolvedValue({
+      status: 200,
+      url: 'file:///etc/passwd',
+      headers: new Headers(),
+      body: {
+        getReader: () => ({
+          read: async () => ({ done: true }),
+          cancel: async () => {
+            cancelled = true;
+          },
+          releaseLock: () => undefined,
+        }),
+      },
+    });
+    const blocked = await createDeviceHttpClient().get('https://origin.example/start');
+    expect(blocked).toEqual({
+      ok: false,
+      error: { category: 'network', code: 'fetch-failed' },
+    });
+    expect(cancelled).toBe(true);
   });
 });

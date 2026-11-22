@@ -8,11 +8,13 @@ export {
   sanitizeHeaders,
   sanitizeHeaderValue,
   scopeCredentialHeaders,
+  setSafeHeader,
 } from './headers';
 export * from './http';
 export * from './languages';
 export * from './playback-guard';
 export * from './preferences';
+export * from './redact';
 export * from './result';
 export * from './source';
 export * from './sql';

@@ -87,4 +87,42 @@ class LoadRequestTest {
     assertEquals(BufferPreset.LARGE, largeLiveHls.bufferPreset)
     assertEquals(StreamKind.HLS_LIVE, largeLiveHls.streamKind())
   }
+
+  @Test
+  fun `isAllowedPlaybackUrl accepts only http and https URLs with a non-empty host`() {
+    for (allowed in listOf(
+      "http://sim.test/live/demo/pass/1001.ts",
+      "https://cdn.example:8443/live/1.m3u8?token=abc",
+      "HTTP://SIM.TEST/movie/1.mp4",
+      "HTTPS://[::1]:8080/live/1.ts",
+      "  https://cdn.example/trimmed.m3u8  ",
+    )) {
+      assertTrue("expected allowed: $allowed", isAllowedPlaybackUrl(allowed))
+    }
+
+    for (disallowed in listOf(
+      "",
+      "   ",
+      "file:///etc/passwd",
+      "file://localhost/data/local/tmp/a.ts",
+      "content://com.example.provider/secret",
+      "data:video/mp4;base64,AAAA",
+      "javascript:alert(1)",
+      "blob:https://sim.test/uuid",
+      "about:blank",
+      "ftp://sim.test/stream.ts",
+      "rtsp://sim.test:554/stream",
+      "http://",
+      "http:///path",
+      "https:///path",
+      "http://\\evil.example/path",
+      "https://user:pass@/path",
+      "\r\nhttp://sim.test/live/1.ts\r\n",
+      "\thttp://sim.test/live/1.ts",
+      "http://sim.test/live/1.ts\r\nX-Injected: 1",
+      "http://sim.test/live/1.ts\u0000",
+    )) {
+      assertFalse("expected rejected: $disallowed", isAllowedPlaybackUrl(disallowed))
+    }
+  }
 }

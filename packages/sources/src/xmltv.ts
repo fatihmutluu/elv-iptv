@@ -8,20 +8,26 @@ import {
   BANG,
   BROKEN,
   countLf,
+  createMarkupScanCache,
+  type DeclResume,
   findClose,
+  findGt,
   findTagEnd,
   GT,
   INCOMPLETE,
   isMarkupStart,
   LT,
+  type MarkupScanCache,
   matchName,
   nameEnd,
   QUESTION,
   type Resume,
   readAttrs,
   SLASH,
+  shiftMarkupCache,
   skipMarkup,
   startsWith,
+  type TagResume,
 } from './xml-tokens';
 import { parseChildren } from './xmltv-children';
 import { createLanguageScorer, type LanguageScorer, resolveXmlPrologEncoding } from './xmltv-meta';
@@ -78,12 +84,16 @@ class XmltvScanner {
   channels: XmltvChannel[] = [];
   programmes: XmltvProgramme[] = [];
   private hint = 0;
+  private tagEndHint = 0;
   /** Set when a programme waits behind unreported channels, so the caller can grow `programmeChannels` first. */
   private flush = false;
   private encoding: XmlEncoding = 'utf-8';
   bomLocked = false;
   private kind = '';
   private readonly res: Resume = { at: 0 };
+  private readonly tagRes: TagResume = { at: 0, quote: 0 };
+  private readonly declRes: DeclResume = { at: 0, depth: 0, quote: 0 };
+  private readonly markupCache: MarkupScanCache = createMarkupScanCache();
   private readonly attrs: (string | undefined)[] = [undefined, undefined, undefined];
   private readonly encodingAttr: (string | undefined)[] = [undefined];
   private readonly scoreLang: LanguageScorer | undefined;
@@ -114,13 +124,13 @@ class XmltvScanner {
       if (this.flush) break;
       if (next !== NEED) {
         pos = next;
-        this.hint = 0;
+        this.resetPending();
         continue;
       }
       if (len - lt > MAX_ELEMENT) {
         this.fail(bytes, lt, 'element-too-long');
         pos = lt + 1;
-        this.hint = 0;
+        this.resetPending();
         continue;
       }
       if (final) {
@@ -131,6 +141,7 @@ class XmltvScanner {
     }
     this.stats.lines += countLf(bytes, pos);
     this.buf.consume(pos);
+    shiftMarkupCache(this.markupCache, pos);
   }
 
   private step(bytes: Uint8Array, lt: number): number {
@@ -138,11 +149,11 @@ class XmltvScanner {
     if (b1 === undefined) return NEED;
     if (!isMarkupStart(b1)) return lt + 1;
     if (b1 === SLASH) {
-      const gt = bytes.indexOf(GT, lt + 2);
+      const gt = findGt(bytes, lt + 2, this.markupCache);
       return gt < 0 ? NEED : gt + 1;
     }
     if (b1 === BANG || b1 === QUESTION) {
-      const e = skipMarkup(bytes, lt);
+      const e = skipMarkup(bytes, lt, this.markupCache, this.declRes);
       if (e === INCOMPLETE) return NEED;
       if (b1 === QUESTION && e > 0) this.checkProlog(bytes, lt, e);
       return e > 0 ? e : lt + 1;
@@ -159,13 +170,23 @@ class XmltvScanner {
     const c = matchName(bytes, lt + 1, 'channel');
     if (c < 0) return NEED;
     if (c === 1) return this.element(bytes, lt, 'channel');
-    const end = findTagEnd(bytes, lt);
+    const end = findTagEnd(bytes, lt, this.tagRes);
     if (end === INCOMPLETE) return NEED;
     return end === BROKEN ? lt + 1 : end;
   }
 
+  private resetPending(): void {
+    this.hint = 0;
+    this.tagEndHint = 0;
+    this.tagRes.at = 0;
+    this.tagRes.quote = 0;
+    this.declRes.at = 0;
+    this.declRes.depth = 0;
+    this.declRes.quote = 0;
+  }
+
   private element(bytes: Uint8Array, lt: number, kind: 'programme' | 'channel'): number {
-    const tagEnd = findTagEnd(bytes, lt);
+    const tagEnd = this.tagEndHint > 0 ? lt + this.tagEndHint : findTagEnd(bytes, lt, this.tagRes);
     if (tagEnd === INCOMPLETE) {
       this.kind = kind;
       return NEED;
@@ -174,10 +195,19 @@ class XmltvScanner {
       this.fail(bytes, lt, `${kind}-malformed`);
       return lt + 1;
     }
+    this.tagEndHint = tagEnd - lt;
     let bodyEnd = tagEnd;
     let end = tagEnd;
     if (bytes[tagEnd - 2] !== SLASH) {
-      const close = findClose(bytes, Math.max(tagEnd, lt + this.hint), kind, true, this.res);
+      const close = findClose(
+        bytes,
+        Math.max(tagEnd, lt + this.hint),
+        kind,
+        true,
+        this.res,
+        this.markupCache,
+        this.declRes,
+      );
       if (close === INCOMPLETE) {
         this.hint = this.res.at - lt;
         this.kind = kind;

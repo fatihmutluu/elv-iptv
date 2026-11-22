@@ -224,6 +224,34 @@ describe('isPlayerCommandMessage', () => {
     ];
     for (const m of bad) expect(isPlayerCommandMessage(m)).toBe(false);
   });
+
+  it('rejects prototype-polluting own keys (__proto__, constructor, prototype) in command, headers, options, and area', () => {
+    const protoTop = JSON.parse(
+      '{"engineId":"e1","command":{"name":"release"},"__proto__":{"x":1}}',
+    );
+    const protoCmd = JSON.parse(
+      '{"engineId":"e1","command":{"name":"release","constructor":"bad"}}',
+    );
+    const protoHeaders = JSON.parse(
+      `{"engineId":"e1","command":{"name":"load","cmd":{"attempt":1,"url":"http://sim.test/1.ts","kind":"live","headers":{"__proto__":"bad"}}}}`,
+    );
+    const ctorHeaders = JSON.parse(
+      `{"engineId":"e1","command":{"name":"load","cmd":{"attempt":1,"url":"http://sim.test/1.ts","kind":"live","headers":{"constructor":"bad"}}}}`,
+    );
+    const protoOptions = JSON.parse(
+      `{"engineId":"e1","command":{"name":"load","cmd":{"attempt":1,"url":"http://sim.test/1.ts","kind":"live","headers":{},"options":{"prototype":"bad"}}}}`,
+    );
+    const protoArea = JSON.parse(
+      '{"engineId":"e1","area":{"x":0,"y":0,"width":100,"height":100,"visible":true,"__proto__":{"polluted":true}}}',
+    );
+
+    expect(isPlayerCommandMessage(protoTop)).toBe(false);
+    expect(isPlayerCommandMessage(protoCmd)).toBe(false);
+    expect(isPlayerCommandMessage(protoHeaders)).toBe(false);
+    expect(isPlayerCommandMessage(ctorHeaders)).toBe(false);
+    expect(isPlayerCommandMessage(protoOptions)).toBe(false);
+    expect(isPlayerAreaMessage(protoArea)).toBe(false);
+  });
 });
 
 describe('isPlayerAreaMessage', () => {

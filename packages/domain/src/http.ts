@@ -1,5 +1,5 @@
 import { isAsyncIterable, openAsyncIterator } from './async-iterable';
-import { resolveRedirectUrl, sanitizeHeaders, scopeCredentialHeaders } from './headers';
+import { originOf, resolveRedirectUrl, sanitizeHeaders, scopeCredentialHeaders } from './headers';
 import { type ElvError, elvError, err, ok, type Result } from './result';
 
 /** A response whose body streams in chunks. */
@@ -43,6 +43,7 @@ export type FetchLike = (
   },
 ) => Promise<{
   status: number;
+  readonly url?: string;
   headers: { forEach(cb: (value: string, key: string) => void): void };
   body:
     | AsyncIterable<Uint8Array>
@@ -272,6 +273,7 @@ export function createFetchHttpClient(
 ): HttpClient {
   return {
     async get(url, options) {
+      if (originOf(url) === undefined) return err(elvError('network', 'fetch-failed'));
       const timeoutMs = options?.timeoutMs ?? defaults?.timeoutMs;
       const idleMs = options?.idleTimeoutMs ?? defaults?.idleTimeoutMs ?? DEFAULT_IDLE_MS;
       const controller = new AbortController();
@@ -327,10 +329,27 @@ export function createFetchHttpClient(
           });
         };
 
+        const adoptResponseUrl = async (
+          response: Awaited<ReturnType<FetchLike>>,
+          fallbackUrl: string,
+        ): Promise<string | undefined> => {
+          if (typeof response.url === 'string' && response.url.length > 0) {
+            if (originOf(response.url) === undefined) {
+              await discardBody(response.body);
+              return undefined;
+            }
+            return response.url;
+          }
+          return fallbackUrl;
+        };
+
         let currentUrl = url;
         let activeHeaders = sanitizedHeaders;
         let hops = 0;
         let res = await fetchOnce(currentUrl, activeHeaders);
+        const initialUrl = await adoptResponseUrl(res, currentUrl);
+        if (initialUrl === undefined) return err(elvError('network', 'fetch-failed'));
+        currentUrl = initialUrl;
         let headers = collectHeaders(res.headers);
         while (followRedirects && REDIRECT_STATUSES.has(res.status)) {
           const location = headers.location;
@@ -346,6 +365,9 @@ export function createFetchHttpClient(
           currentUrl = nextUrl;
           hops += 1;
           res = await fetchOnce(currentUrl, activeHeaders);
+          const hopUrl = await adoptResponseUrl(res, currentUrl);
+          if (hopUrl === undefined) return err(elvError('network', 'fetch-failed'));
+          currentUrl = hopUrl;
           headers = collectHeaders(res.headers);
         }
         if ((res.status < 200 || res.status >= 300) && res.status !== 304) {

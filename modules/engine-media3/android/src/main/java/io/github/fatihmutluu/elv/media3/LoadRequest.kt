@@ -1,5 +1,25 @@
 package io.github.fatihmutluu.elv.media3
 
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+
+/**
+ * Returns `true` only when [url] is a well-formed `http` or `https` URL with a non-empty host and no ASCII
+ * control characters, matching Apple `AetherEngine` (`MediaPlan.swift`) and desktop `player-ipc.ts`.
+ */
+internal fun isAllowedPlaybackUrl(url: String): Boolean {
+  if (url.any { it.code <= 0x1f || it.code == 0x7f }) return false
+  val trimmed = url.trim()
+  if (trimmed.isEmpty()) return false
+  val schemeEnd = trimmed.indexOf("://")
+  if (schemeEnd <= 0) return false
+  val scheme = trimmed.substring(0, schemeEnd).lowercase()
+  if (scheme != "http" && scheme != "https") return false
+  val afterScheme = trimmed.substring(schemeEnd + 3)
+  if (afterScheme.isEmpty() || afterScheme[0] == '/' || afterScheme[0] == '\\') return false
+  val parsed = trimmed.toHttpUrlOrNull() ?: return false
+  return (parsed.scheme == "http" || parsed.scheme == "https") && parsed.host.isNotEmpty()
+}
+
 /** Initial subtitle track preference carried on a `LoadCommand`. */
 internal sealed interface SubtitlePreference {
   /** Leave Media3's default subtitle track selection untouched. */

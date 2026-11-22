@@ -89,6 +89,7 @@ class Media3Engine : SharedObject {
   private var playerStreamKind: StreamKind = StreamKind.VOD
   private var playerBufferPreset: BufferPreset = BufferPreset.AUTO
   private var audioFallbackAttempted = false
+  private var pendingRebuildDeferred = false
   private var activeEpoch = 0
   private var token = 0
   private var generation = 0L
@@ -108,14 +109,19 @@ class Media3Engine : SharedObject {
       if (action !is CommandFence.MediaAction.Run) return@post
       activeEpoch = action.epoch
       reporter.end()
-      if (request?.url != next.url && !next.preferHevcOverDolbyVision) codecPolicy.clearDolbyVisionFallback()
+      if (!isAllowedPlaybackUrl(next.url)) {
+        rejectDisallowedUrl(attempt, rebuildFirst = action.rebuildFirst)
+        return@post
+      }
+      val normalized = next.copy(url = next.url.trim())
+      if (request?.url != normalized.url && !normalized.preferHevcOverDolbyVision) codecPolicy.clearDolbyVisionFallback()
       token = attempt
-      request = next
+      request = normalized
       audioFallbackAttempted = false
-      lastVodPositionMs = if (next.live) null else next.startMs?.coerceAtLeast(0L)
-      tracksBridge.onLoad(next)
+      lastVodPositionMs = if (normalized.live) null else normalized.startMs?.coerceAtLeast(0L)
+      tracksBridge.onLoad(normalized)
       surfaces.onLoad()
-      prepare(next, next.startMs, forceRebuild = action.rebuildFirst)
+      prepare(normalized, normalized.startMs, forceRebuild = action.rebuildFirst || pendingRebuildDeferred)
     }
   }
 
@@ -127,9 +133,18 @@ class Media3Engine : SharedObject {
       activeEpoch = action.epoch
       adopt(attempt)
       val current = request ?: action.request ?: return@post
-      request = current
+      if (!isAllowedPlaybackUrl(current.url)) {
+        rejectDisallowedUrl(attempt, rebuildFirst = action.rebuildFirst)
+        return@post
+      }
+      val normalized = current.copy(url = current.url.trim())
+      request = normalized
       snapshotVodPosition()
-      prepare(current, currentVodPositionOrStart(current), forceRebuild = action.rebuildFirst)
+      prepare(
+        normalized,
+        currentVodPositionOrStart(normalized),
+        forceRebuild = action.rebuildFirst || pendingRebuildDeferred,
+      )
     }
   }
 
@@ -183,6 +198,7 @@ class Media3Engine : SharedObject {
       surfaces.clearCues()
       reporter.end()
       beginGeneration()
+      pendingRebuildDeferred = false
       releasePlayer()
       player = buildPlayer(playerSoftwareAudio, playerPreferHevc, playerStreamKind, playerBufferPreset)
     }
@@ -258,6 +274,22 @@ class Media3Engine : SharedObject {
 
   private fun detachNow(old: Surface) = surfaces.detachNow(old, player, ::sendSurfaceChange)
   private fun sendSurfaceChange(change: String) = sendEvent(mapOf("type" to "surface", "change" to change))
+
+  private fun rejectDisallowedUrl(attempt: Int, rebuildFirst: Boolean) {
+    if (rebuildFirst) pendingRebuildDeferred = true
+    token = attempt
+    clearSessionState()
+    player?.stop()
+    player?.clearMediaItems()
+    Log.w(TAG, "rejected playback URL with disallowed scheme")
+    sendEvent(
+      mapOf(
+        "type" to "error",
+        "error" to mapOf("code" to "unsupported-format", "detail" to "disallowed-url-scheme"),
+      ),
+    )
+    surfaces.onCue(ScreenCue.ERROR, played = false)
+  }
 
   private fun clearSessionState() {
     reporter.end()
@@ -361,6 +393,7 @@ class Media3Engine : SharedObject {
       playerPreferHevc != next.preferHevcOverDolbyVision || playerStreamKind != streamKind ||
       playerBufferPreset != bufferPreset
     if (rebuild) {
+      pendingRebuildDeferred = false
       existing?.isScrubbingModeEnabled = false
       releasePlayer()
       player = buildPlayer(next.softwareAudio, next.preferHevcOverDolbyVision, streamKind, bufferPreset)

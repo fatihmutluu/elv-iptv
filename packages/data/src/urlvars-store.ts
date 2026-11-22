@@ -2,6 +2,18 @@ import { elvError, err, ok, type Result, type SecretStore } from '@elv/domain';
 import type { UrlVars } from './templates';
 
 const utf8 = new TextEncoder();
+const PROTO_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
+
+function emptyUrlVars(): UrlVars {
+  return Object.create(null) as UrlVars;
+}
+
+function copySafeUrlVars(src: Record<string, unknown>, dst: UrlVars): void {
+  for (const [k, v] of Object.entries(src)) {
+    if (PROTO_KEYS.has(k) || typeof v !== 'string') continue;
+    dst[k] = v;
+  }
+}
 
 /** Maximum UTF-8 byte length of a single serialized `urlvars` secret value (below 64 KiB keychain ceilings). */
 export const URLVARS_CHUNK_BYTES = 60_000;
@@ -79,14 +91,16 @@ async function readChunkCount(secrets: SecretStore, sourceId: string): Promise<n
 export function partitionUrlVars(vars: UrlVars, opts?: UrlVarsStoreOptions): string[] | undefined {
   const chunkBytes = opts?.chunkBytes ?? URLVARS_CHUNK_BYTES;
   const maxChunks = opts?.maxChunks ?? MAX_URLVARS_CHUNKS;
-  const full = JSON.stringify(vars);
+  const safe = emptyUrlVars();
+  copySafeUrlVars(vars, safe);
+  const full = JSON.stringify(safe);
   if (utf8Bytes(full) <= chunkBytes) return [full];
 
   const chunks: string[] = [];
   let entries: string[] = [];
   let currentBytes = 2;
 
-  for (const [k, v] of Object.entries(vars)) {
+  for (const [k, v] of Object.entries(safe)) {
     const entry = `${JSON.stringify(k)}:${JSON.stringify(v)}`;
     const entryBytes = utf8Bytes(entry);
     if (entryBytes + 2 > chunkBytes) return undefined;
@@ -108,27 +122,29 @@ export function partitionUrlVars(vars: UrlVars, opts?: UrlVarsStoreOptions): str
 /**
  * Reads the `urlvars` secret map of a source, transparently reassembling sharded keys
  * (`source.<id>.urlvars.0..N-1`) when `source.<id>.urlvars` holds a `{"__chunks": N}` manifest.
- * A missing, unreadable, or corrupt payload yields an empty object (or partial valid shards).
+ * A missing, unreadable, or corrupt payload yields an empty null-prototype object (or partial valid shards).
  */
 export async function readUrlVars(
   deps: { secrets: SecretStore },
   sourceId: string,
 ): Promise<UrlVars> {
   const raw = await safeGet(deps.secrets, urlvarsRootKey(sourceId));
-  if (raw === undefined) return {};
+  if (raw === undefined) return emptyUrlVars();
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return {};
+    return emptyUrlVars();
   }
-  if (!isPlainObject(parsed)) return {};
+  if (!isPlainObject(parsed)) return emptyUrlVars();
   const manifest = parseManifest(parsed);
   if (!manifest.isManifest) {
-    return parsed as UrlVars;
+    const out = emptyUrlVars();
+    copySafeUrlVars(parsed, out);
+    return out;
   }
-  if (manifest.count === undefined) return {};
-  const out: UrlVars = {};
+  if (manifest.count === undefined) return emptyUrlVars();
+  const out = emptyUrlVars();
   const shards = await Promise.all(
     Array.from({ length: manifest.count }, (_, i) =>
       safeGet(deps.secrets, urlvarsShardKey(sourceId, i)),
@@ -139,9 +155,7 @@ export async function readUrlVars(
     try {
       const obj: unknown = JSON.parse(shard);
       if (!isPlainObject(obj)) continue;
-      for (const [k, v] of Object.entries(obj)) {
-        if (typeof v === 'string') out[k] = v;
-      }
+      copySafeUrlVars(obj, out);
     } catch {
       // Ignore corrupt shard rather than failing every other stream in the source
     }
