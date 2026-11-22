@@ -165,7 +165,10 @@ export function PlayerInfoSheet({
   const theme = useTheme();
   const isWebDesktop = formFactor === 'desktop' && (Platform.OS as string) === 'web';
   const desktopPanelRef = useRef<ComponentRef<typeof View> | null>(null);
-  useDesktopDialogTrap(desktopPanelRef, visible && isWebDesktop, onClose);
+  useDesktopDialogTrap(desktopPanelRef, visible && isWebDesktop, onClose, {
+    modal: false,
+    initialFocus: 'container',
+  });
   if (!visible) return null;
 
   const headerTitle = i18n.t('player.info');

@@ -8,14 +8,14 @@ import {
 } from '@elv/playback';
 import { MicroPill, TvFocusAnchor, useFormFactor, useI18n, useTheme } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { type AppLifecyclePort, noopAppLifecycle } from '../ports/app-lifecycle';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
 import type { HostKey, VideoHost } from '../ports/video-host';
 import { describePlaybackFailure } from './errors';
 import { NextEpisodeBanner } from './NextEpisodeBanner';
-import { PlayerChannelDrawer } from './PlayerChannelDrawer';
+import { type ChannelDrawerNavHandle, PlayerChannelDrawer } from './PlayerChannelDrawer';
 import { PlayerInfoSheet } from './PlayerInfoSheet';
 import {
   DEFAULT_PLAYER_CLOCK,
@@ -28,7 +28,12 @@ import {
 } from './PlayerScreenParts';
 import { PlayerSettingsSheet } from './PlayerSettingsSheet';
 import { PlayerStatsHud } from './PlayerStatsHud';
-import { PlayerTouchGestures } from './PlayerTouchGestures';
+import {
+  computeBrightnessDimOpacity,
+  MIN_BRIGHTNESS,
+  PlayerTouchGestures,
+} from './PlayerTouchGestures';
+import { clampVolume } from './player-overlay-model';
 import { TrackPickerModal } from './TrackPickerModal';
 import { buildTouchHoverProps } from './touch-hover-guard';
 import { useNextEpisodeResolver } from './useNextEpisodeResolver';
@@ -52,6 +57,8 @@ export interface PlayerScreenProps {
   playbackGuard?: PlaybackGuard;
   appLifecycle?: AppLifecyclePort;
   clock?: PlaybackClock;
+  /** Wall-clock Unix epoch timestamp provider in ms for EPG Now/Next queries & progress (`Date.now`). */
+  wallClock?: () => number;
   timers?: PlaybackTimers;
   initialOsdHidden?: boolean;
   autoHideOsdMs?: number;
@@ -65,6 +72,8 @@ export interface PlayerScreenProps {
   onToggleAutoSubtitlesOnSkipBack?: () => void;
   /** Automatically advances to the next episode after countdown (`#392`). */
   autoPlayNextEpisode?: boolean;
+  /** Toggles persisted `autoPlayNextEpisode` preference (`#392`). */
+  onToggleAutoPlayNextEpisode?: () => void;
   /** Disables smooth motion transitions when reduced motion is enabled (`#392`). */
   reduceMotion?: boolean;
   /** User-selected playback buffer preset forwarded on load (`#147`). */
@@ -83,6 +92,7 @@ export function PlayerScreen({
   playbackGuard,
   appLifecycle = noopAppLifecycle,
   clock = DEFAULT_PLAYER_CLOCK,
+  wallClock = Date.now,
   timers = DEFAULT_PLAYER_TIMERS,
   initialOsdHidden,
   autoHideOsdMs,
@@ -91,6 +101,7 @@ export function PlayerScreen({
   autoSubtitlesOnSkipBack,
   onToggleAutoSubtitlesOnSkipBack,
   autoPlayNextEpisode,
+  onToggleAutoPlayNextEpisode,
   reduceMotion,
   bufferPreset = 'auto',
   useTextureView = false,
@@ -111,6 +122,9 @@ export function PlayerScreen({
   catalogRef.current = catalog;
   const clockRef = useRef(clock);
   clockRef.current = clock;
+  const wallClockRef = useRef(wallClock);
+  wallClockRef.current = wallClock;
+  const channelDrawerNavRef = useRef<ChannelDrawerNavHandle | null>(null);
   const timersRef = useRef(timers);
   timersRef.current = timers;
   const onTargetChangeRef = useRef(onTargetChange);
@@ -176,7 +190,7 @@ export function PlayerScreen({
     catalog,
     itemKey: activeTarget.itemKey,
     enabled: activeTarget.kind === 'live' && !inPip,
-    clock,
+    wallClock,
   });
   const nextEpisode = useNextEpisodeResolver({ catalog, activeTarget });
   resolvedNextEpisodeRef.current = nextEpisode;
@@ -247,16 +261,32 @@ export function PlayerScreen({
     onSetVolume: hostSetVolume,
     onPersistVolume,
     onToggleAutoSubtitlesOnSkipBack,
+    onToggleAutoPlayNextEpisode,
+    onChannelListMove: (delta) => channelDrawerNavRef.current?.move(delta),
+    onChannelListSelect: () => channelDrawerNavRef.current?.select(),
     onSetOrientationLocked: hostSetOrientationLocked,
     onSetDeinterlace: hostSetDeinterlace,
   });
   hostKeyRef.current = controls.handleHostKey;
   cancelScrubRef.current = controls.cancelScrub;
 
+  const latestVolumeRef = useRef(controls.volume);
+  latestVolumeRef.current = controls.volume;
+  const initialVolumeRef = useRef(initialVolume);
+  initialVolumeRef.current = initialVolume;
+  useEffect(() => {
+    if (openedEngine === undefined) return;
+    const effective =
+      initialVolumeRef.current !== undefined
+        ? latestVolumeRef.current
+        : (openedEngine.initialVolume ?? latestVolumeRef.current);
+    openedEngine.setVolume?.(clampVolume(effective));
+  }, [openedEngine]);
+
   const fetchChannelNowNext = useCallback(async (itemKey: string) => {
     const query = catalogRef.current.nowNext ?? catalogRef.current.epgNowNext;
     if (query === undefined) return null;
-    const rows = await query([itemKey], clockRef.current.now());
+    const rows = await query([itemKey], wallClockRef.current());
     return rows.find((r) => r.channelKey === itemKey) ?? rows[0] ?? null;
   }, []);
 
@@ -269,7 +299,7 @@ export function PlayerScreen({
       : controls.previewPositionMs;
 
   const handleBrightnessChange = (next: number): void => {
-    const clamped = Math.max(0.15, Math.min(1, next));
+    const clamped = Math.max(MIN_BRIGHTNESS, Math.min(1, next));
     setBrightness(clamped);
     hostSetBrightness?.(clamped);
   };
@@ -377,7 +407,7 @@ export function PlayerScreen({
       formFactor={formFactor}
       isTv={isTv}
       i18n={i18n}
-      nowMs={clock.now()}
+      nowMs={wallClock()}
       onClose={controls.closeInfo}
     />
   );
@@ -391,6 +421,7 @@ export function PlayerScreen({
       isTv={isTv}
       i18n={i18n}
       fetchNowNext={fetchChannelNowNext}
+      navigationRef={channelDrawerNavRef}
       onSelectChannel={(entry, index) => {
         handoff.selectChannel(entry, index);
         controls.closeChannelList();
@@ -416,6 +447,12 @@ export function PlayerScreen({
         ? {
             autoSubtitlesOnSkipBack: autoSubtitlesOnSkipBack === true,
             onToggleAutoSubtitlesOnSkipBack,
+          }
+        : {})}
+      {...(onToggleAutoPlayNextEpisode !== undefined
+        ? {
+            autoPlayNextEpisode: autoPlayNextEpisode !== false,
+            onToggleAutoPlayNextEpisode,
           }
         : {})}
       statsVisible={controls.statsVisible}
@@ -457,6 +494,7 @@ export function PlayerScreen({
       videoInfo={videoInfo}
       tracks={tracks}
       nowNext={nowNext}
+      nowMs={wallClock()}
       tvOsdFocused={controls.tvOsdFocused}
       tvScrubberFocused={controls.tvScrubberFocused}
       tvOsdAction={controls.tvOsdAction}
@@ -528,11 +566,26 @@ export function PlayerScreen({
         surfaceNode
       )}
 
+      {!inPip && !isTv && !isDesktop && brightness < 1 ? (
+        <View
+          testID="player-brightness-dim-overlay"
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            {
+              backgroundColor: theme.colors.bgCanvas,
+              opacity: computeBrightnessDimOpacity(brightness),
+            },
+          ]}
+        />
+      ) : null}
+
       {showTouchGestures ? (
         <PlayerTouchGestures
           isVod={activeTarget.kind === 'vod'}
           volume={controls.volume}
           brightness={brightness}
+          renderDimOverlay={false}
           durationMs={durationMs}
           positionMs={currentPosMs}
           i18n={i18n}

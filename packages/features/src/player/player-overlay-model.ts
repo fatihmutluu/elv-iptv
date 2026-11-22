@@ -146,6 +146,7 @@ export interface PlayerOverlayStateParams {
   hasInfo?: boolean | undefined;
   hasChannelList?: boolean | undefined;
   hasAutoSubtitlesOnSkipBack?: boolean | undefined;
+  hasAutoPlayNextEpisode?: boolean | undefined;
   hasNextEpisode: boolean;
   hasPreviousChannel: boolean;
   initialOsdHidden?: boolean | undefined;

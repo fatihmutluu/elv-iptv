@@ -52,13 +52,10 @@ export function routeDesktopUiEvent(event: PlayerUiEvent, handlers: DesktopUiHan
 }
 
 /**
- * Exits `PlayerScreen` via `onHostKey('back')` when mpv closes (`q` or own-window close), dismissing
- * an open `TrackPickerModal` first if present so a closed mpv window never leaves the player stranded.
+ * Exits `PlayerScreen` immediately when mpv closes (`q` or own-window close) by forwarding `'close'`
+ * directly to `usePlayerSession`'s `onHostKey` listener, bypassing any open sheets or drawers so a
+ * dead native engine never leaves the player stranded.
  */
-export function dispatchDesktopClose(
-  onHostKey: (key: DesktopHostKey) => void,
-  isTrackPickerOpen: boolean,
-): void {
-  if (isTrackPickerOpen) onHostKey('back');
-  onHostKey('back');
+export function dispatchDesktopClose(onHostKey: (key: DesktopHostKey) => void): void {
+  onHostKey('close' as DesktopHostKey);
 }

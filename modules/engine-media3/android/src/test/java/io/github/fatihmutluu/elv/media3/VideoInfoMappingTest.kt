@@ -12,7 +12,10 @@ import androidx.media3.common.util.UnstableApi
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 @OptIn(UnstableApi::class)
 class VideoInfoMappingTest {
   @Test

@@ -159,6 +159,7 @@ export interface PeekBarProps {
   readonly volume: number;
   readonly playbackSpeed: number;
   readonly nowNext?: NowNextEntry | null | undefined;
+  readonly nowMs?: number | undefined;
   readonly previewPositionMs?: number | undefined;
   readonly service: PlaybackService | null;
   readonly clock: PlaybackClock;
@@ -342,7 +343,7 @@ export function FloatingPeekOsd(
                 <MicroPill testID="player-channel-digits" label={p.channelDigits} tone="accent" />
               ) : null}
             </View>
-            <LiveNowNextStrip nowNext={p.nowNext} nowMs={p.clock.now()} i18n={p.i18n} />
+            <LiveNowNextStrip nowNext={p.nowNext} nowMs={p.nowMs ?? Date.now()} i18n={p.i18n} />
           </View>
         )}
       </View>

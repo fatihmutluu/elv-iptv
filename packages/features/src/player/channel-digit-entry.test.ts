@@ -56,6 +56,7 @@ describe('channel-digit-entry and hidden-OSD passthrough helpers (#439)', () => 
       'captions',
       'audioTrack',
       'info',
+      'guide',
       'lastChannel',
       ...DIGIT_KEYS,
     ];
@@ -70,7 +71,6 @@ describe('channel-digit-entry and hidden-OSD passthrough helpers (#439)', () => 
       'right',
       'select',
       'menu',
-      'guide',
       'search',
       'back',
       'channelUp',

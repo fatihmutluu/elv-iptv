@@ -46,13 +46,6 @@ const WorkbenchShell = IS_DEV
     )
   : null;
 
-function isTrackPickerModalOpen(): boolean {
-  return (
-    typeof document !== 'undefined' &&
-    document.querySelector('[data-testid="player-tracks-panel"]') !== null
-  );
-}
-
 function AppRoot() {
   const [refreshToken, setRefreshToken] = useState(0);
   const [catalogDisconnected, setCatalogDisconnected] = useState(false);
@@ -114,7 +107,7 @@ function AppRoot() {
               routeDesktopUiEvent(event, {
                 toggleFullscreen: () => listener('fullscreen'),
                 onHostKey: listener,
-                onClose: () => dispatchDesktopClose(listener, isTrackPickerModalOpen()),
+                onClose: () => dispatchDesktopClose(listener),
               }),
             );
             return () => {

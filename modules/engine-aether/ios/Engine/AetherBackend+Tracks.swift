@@ -324,7 +324,7 @@ extension AetherBackend {
           StreamVideoInfo(
             width: Int(size.width.rounded()),
             height: Int(size.height.rounded()),
-            hdr: target.currentAVPlayerItem == nil ? "sdr" : nil
+            hdr: nil
           )
         ),
         serial

@@ -1193,3 +1193,6 @@ msgstr "Next episode in {seconds}s"
 
 msgid "player.playNextNow"
 msgstr "Play now"
+
+msgid "player.autoPlayNextEpisode"
+msgstr "Auto-play next episode"

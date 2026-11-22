@@ -41,6 +41,10 @@ export interface DialogDocumentLike {
 export interface DesktopDialogTrapOptions {
   /** Called when `Escape` is pressed inside the trapped dialog. */
   readonly onEscape?: () => void;
+  /** Whether to isolate background siblings with `inert` and loop Tab focus (default `true`). */
+  readonly modal?: boolean;
+  /** Initial focus target when opening (`'first'` focusable child or `'container'`, default `'first'`). */
+  readonly initialFocus?: 'first' | 'container';
   /** Whether to restore focus to the previously focused element on cleanup (default `true`). */
   readonly restoreFocus?: boolean;
   /** Optional document override (defaults to `dialogEl.ownerDocument ?? globalThis.document`). */
@@ -176,15 +180,17 @@ export function attachDesktopDialogTrap(
     options?.doc ??
     dialogEl.ownerDocument ??
     (globalThis as { document?: DialogDocumentLike }).document;
+  const isModal = options?.modal !== false;
   const previousFocus = doc?.activeElement ?? null;
-  const savedSiblings = isolateBackgroundSiblings(dialogEl, doc?.body);
+  const savedSiblings = isModal ? isolateBackgroundSiblings(dialogEl, doc?.body) : [];
 
   let appliedFallbackTabIndex = false;
   const hadTabIndexAttr = dialogEl.hasAttribute?.('tabindex') === true;
   const prevTabIndexAttr = dialogEl.getAttribute?.('tabindex') ?? null;
   const prevTabIndexProp = dialogEl.tabIndex;
 
-  const initialFocusables = getFocusableDialogElements(dialogEl);
+  const initialFocusables =
+    options?.initialFocus === 'container' ? [] : getFocusableDialogElements(dialogEl);
   if (initialFocusables.length > 0) {
     initialFocusables[0]?.focus?.();
   } else {
@@ -201,7 +207,7 @@ export function attachDesktopDialogTrap(
       options?.onEscape?.();
       return;
     }
-    if (event.key !== 'Tab') return;
+    if (!isModal || event.key !== 'Tab') return;
 
     const focusables = getFocusableDialogElements(dialogEl);
     if (focusables.length === 0) {
@@ -274,14 +280,19 @@ export function useDesktopDialogTrap(
   ref: RefObject<unknown>,
   enabled: boolean,
   onEscape?: () => void,
+  options?: Pick<DesktopDialogTrapOptions, 'modal' | 'initialFocus'>,
 ): void {
   const onEscapeRef = useRef(onEscape);
   onEscapeRef.current = onEscape;
+  const modal = options?.modal;
+  const initialFocus = options?.initialFocus;
 
   useEffect(() => {
     if (!enabled) return;
     return attachDesktopDialogTrap(ref.current, {
       onEscape: () => onEscapeRef.current?.(),
+      ...(modal !== undefined ? { modal } : {}),
+      ...(initialFocus !== undefined ? { initialFocus } : {}),
     });
-  }, [enabled, ref]);
+  }, [enabled, initialFocus, modal, ref]);
 }

@@ -206,6 +206,23 @@ describe('PlayerChannelDrawer', () => {
     });
     expect(onSelectChannel).toHaveBeenCalledWith(makeChannel(2), 2);
 
+    // Pressing Enter/Space while a button (e.g. Close or channel row) is the event target must NOT
+    // trigger an extra onSelectChannel from the container handler (#57)
+    onSelectChannel.mockClear();
+    await act(async () => {
+      panel.props.onKeyDown?.({
+        key: 'Enter',
+        target: { getAttribute: (n: string) => (n === 'role' ? 'button' : null) },
+        preventDefault: jest.fn(),
+      });
+      panel.props.onKeyDown?.({
+        key: ' ',
+        target: { tagName: 'BUTTON' },
+        preventDefault: jest.fn(),
+      });
+    });
+    expect(onSelectChannel).not.toHaveBeenCalled();
+
     await act(async () => {
       panel.props.onKeyDown?.({ key: 'Escape', preventDefault: jest.fn() });
     });

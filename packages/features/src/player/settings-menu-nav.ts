@@ -18,6 +18,7 @@ export type SettingsRootItem =
   | 'aspect'
   | 'deinterlace'
   | 'autoSubtitlesOnSkipBack'
+  | 'autoPlayNextEpisode'
   | 'stats';
 
 /** Supported VOD playback speed multipliers (`0.5×` through `2×`). */
@@ -42,12 +43,14 @@ export function settingsRootItems(
   hasAspect = true,
   hasDeinterlace = false,
   hasAutoSubtitlesOnSkipBack = false,
+  hasAutoPlayNextEpisode = false,
 ): readonly SettingsRootItem[] {
   const items: SettingsRootItem[] = ['subtitles', 'audio'];
   if (isVod) items.push('speed');
   if (hasAspect) items.push('aspect');
   if (hasDeinterlace) items.push('deinterlace');
   if (hasAutoSubtitlesOnSkipBack) items.push('autoSubtitlesOnSkipBack');
+  if (hasAutoPlayNextEpisode) items.push('autoPlayNextEpisode');
   items.push('stats');
   return items;
 }
@@ -59,6 +62,7 @@ export interface SettingsMenuOptions {
   readonly hasAspect?: boolean;
   readonly hasDeinterlace?: boolean;
   readonly hasAutoSubtitlesOnSkipBack?: boolean;
+  readonly hasAutoPlayNextEpisode?: boolean;
 }
 
 /** Result of routing a {@link KeyEvent} while the Player Settings menu is open. */
@@ -68,6 +72,7 @@ export type SettingsMenuIntent =
   | { readonly kind: 'toggleResizeMode' }
   | { readonly kind: 'toggleDeinterlace' }
   | { readonly kind: 'toggleAutoSubtitlesOnSkipBack' }
+  | { readonly kind: 'toggleAutoPlayNextEpisode' }
   | { readonly kind: 'toggleStats' }
   | { readonly kind: 'audio'; readonly id: string }
   | { readonly kind: 'subtitle'; readonly id: string | null }
@@ -96,6 +101,7 @@ export function settingsRowCount(
       options?.hasAspect !== false,
       options?.hasDeinterlace === true,
       options?.hasAutoSubtitlesOnSkipBack === true,
+      options?.hasAutoPlayNextEpisode === true,
     ).length;
   }
   if (view === 'subtitles') return tracks.subtitles.length + 1;
@@ -140,12 +146,14 @@ export function rootIndexForSettingsView(
   hasAspect = true,
   hasDeinterlace = false,
   hasAutoSubtitlesOnSkipBack = false,
+  hasAutoPlayNextEpisode = false,
 ): number {
   const idx = settingsRootItems(
     isVod,
     hasAspect,
     hasDeinterlace,
     hasAutoSubtitlesOnSkipBack,
+    hasAutoPlayNextEpisode,
   ).indexOf(view);
   return Math.max(idx, 0);
 }
@@ -156,6 +164,7 @@ function returnToRoot(
   hasAspect: boolean,
   hasDeinterlace: boolean,
   hasAutoSubtitlesOnSkipBack: boolean,
+  hasAutoPlayNextEpisode: boolean,
 ): SettingsMenuIntent {
   return {
     kind: 'state',
@@ -167,6 +176,7 @@ function returnToRoot(
         hasAspect,
         hasDeinterlace,
         hasAutoSubtitlesOnSkipBack,
+        hasAutoPlayNextEpisode,
       ),
     },
   };
@@ -203,13 +213,27 @@ export function routeSettingsMenuKey(
   const hasAspect = options?.hasAspect !== false;
   const hasDeinterlace = options?.hasDeinterlace === true;
   const hasAutoSubtitlesOnSkipBack = options?.hasAutoSubtitlesOnSkipBack === true;
-  const rootItems = settingsRootItems(isVod, hasAspect, hasDeinterlace, hasAutoSubtitlesOnSkipBack);
+  const hasAutoPlayNextEpisode = options?.hasAutoPlayNextEpisode === true;
+  const rootItems = settingsRootItems(
+    isVod,
+    hasAspect,
+    hasDeinterlace,
+    hasAutoSubtitlesOnSkipBack,
+    hasAutoPlayNextEpisode,
+  );
   const cur = clampSettingsMenu(state, tracks, options);
 
   if (event.kind === 'press' && event.key === 'back') {
     return cur.view === 'root'
       ? { kind: 'close' }
-      : returnToRoot(cur.view, isVod, hasAspect, hasDeinterlace, hasAutoSubtitlesOnSkipBack);
+      : returnToRoot(
+          cur.view,
+          isVod,
+          hasAspect,
+          hasDeinterlace,
+          hasAutoSubtitlesOnSkipBack,
+          hasAutoPlayNextEpisode,
+        );
   }
 
   if (
@@ -226,7 +250,14 @@ export function routeSettingsMenuKey(
   if (event.kind === 'press' && event.key === 'left') {
     return cur.view === 'root'
       ? null
-      : returnToRoot(cur.view, isVod, hasAspect, hasDeinterlace, hasAutoSubtitlesOnSkipBack);
+      : returnToRoot(
+          cur.view,
+          isVod,
+          hasAspect,
+          hasDeinterlace,
+          hasAutoSubtitlesOnSkipBack,
+          hasAutoPlayNextEpisode,
+        );
   }
 
   if (event.kind === 'press' && event.key === 'right') {
@@ -241,6 +272,7 @@ export function routeSettingsMenuKey(
       if (item === 'aspect') return { kind: 'toggleResizeMode' };
       if (item === 'deinterlace') return { kind: 'toggleDeinterlace' };
       if (item === 'autoSubtitlesOnSkipBack') return { kind: 'toggleAutoSubtitlesOnSkipBack' };
+      if (item === 'autoPlayNextEpisode') return { kind: 'toggleAutoPlayNextEpisode' };
       if (item === 'stats') return { kind: 'toggleStats' };
       return item !== undefined ? openSubView(item, tracks, options) : null;
     }

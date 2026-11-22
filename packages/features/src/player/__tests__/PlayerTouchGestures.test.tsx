@@ -180,6 +180,17 @@ describe('PlayerTouchGestures interactions', () => {
     });
     expect(screen.queryByTestId('player-touch-feedback-pill')).toBeNull();
 
+    // Left vertical swipe far down clamps brightness cleanly to MIN_BRIGHTNESS (15%)
+    await act(async () => {
+      layer.props.onResponderGrant?.({ nativeEvent: { locationX: 150, locationY: 50 } });
+      layer.props.onResponderMove?.({ nativeEvent: { locationX: 150, locationY: 380 } });
+    });
+    expect(onBrightnessChange).toHaveBeenLastCalledWith(0.15);
+    expect(screen.getByTestId('player-touch-feedback-pill')).toHaveTextContent('Brightness 15%');
+    await act(async () => {
+      layer.props.onResponderRelease?.({ nativeEvent: { locationX: 150, locationY: 380 } });
+    });
+
     // Right vertical swipe up -> increases volume
     await act(async () => {
       layer.props.onResponderGrant?.({ nativeEvent: { locationX: 650, locationY: 250 } });

@@ -239,6 +239,17 @@ describe('usePlayerControls cinema ergonomics (#391, #58, #394, #114, #57)', () 
     await vod.hook.unmount();
     expect(vod.svc.fake.setSpeed).toHaveBeenLastCalledWith(1.25);
 
+    // Changing itemKey resets playback speed to 1x immediately on the service
+    const vodSwitch = await setupControls({ kind: 'vod' });
+    await act(async () => {
+      vodSwitch.hook.result.current.selectSpeed(1.5);
+    });
+    expect(vodSwitch.hook.result.current.playbackSpeed).toBe(1.5);
+    await vodSwitch.hook.rerender({ itemKey: 'vod:2' });
+    expect(vodSwitch.hook.result.current.playbackSpeed).toBe(1);
+    expect(vodSwitch.svc.fake.setSpeed).toHaveBeenLastCalledWith(1);
+    await vodSwitch.hook.unmount();
+
     // Live ignores hold speed
     const live = await setupControls({ kind: 'live' });
     await act(async () => {

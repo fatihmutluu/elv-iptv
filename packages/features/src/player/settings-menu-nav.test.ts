@@ -484,4 +484,38 @@ describe('settings-menu-nav', () => {
       ),
     ).toEqual({ kind: 'toggleStats' });
   });
+
+  it('includes autoPlayNextEpisode before stats on VOD and emits toggleAutoPlayNextEpisode on Select (#392)', () => {
+    const opts = {
+      isVod: true,
+      hasAspect: false,
+      hasDeinterlace: false,
+      hasAutoSubtitlesOnSkipBack: true,
+      hasAutoPlayNextEpisode: true,
+    };
+    expect(settingsRootItems(true, false, false, true, true)).toEqual([
+      'subtitles',
+      'audio',
+      'speed',
+      'autoSubtitlesOnSkipBack',
+      'autoPlayNextEpisode',
+      'stats',
+    ]);
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 4 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'toggleAutoPlayNextEpisode' });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 5 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'toggleStats' });
+  });
 });

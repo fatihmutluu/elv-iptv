@@ -369,4 +369,38 @@ describe('attachDesktopDialogTrap (#283)', () => {
     teardownNoRestore();
     expect(trigger.focusCount).toBe(countBeforeOptOut);
   });
+
+  it('supports non-blocking modal:false + initialFocus:container without setting inert on siblings or hijacking Tab (#58, #57)', () => {
+    const doc = createMockDoc();
+    const videoSibling = createMockEl(doc, { id: 'video', tagName: 'DIV' });
+    const panel = createMockEl(doc, { id: 'panel', tagName: 'DIV' });
+    const closeBtn = createMockEl(doc, { id: 'close', tagName: 'BUTTON' });
+    append(panel, closeBtn);
+    append(doc.body, videoSibling, panel);
+
+    const onEscape = vi.fn();
+    const teardown = attachDesktopDialogTrap(panel, {
+      doc,
+      modal: false,
+      initialFocus: 'container',
+      onEscape,
+    });
+
+    // Sibling video/bar stays interactive (never marked inert or aria-hidden)
+    expect(videoSibling.inert).toBe(false);
+    expect(videoSibling.getAttribute('aria-hidden')).toBeNull();
+    // Focus lands on container itself, not the Close button
+    expect(doc.activeElement).toBe(panel);
+    expect(closeBtn.focusCount).toBe(0);
+    // Tab is NOT trapped
+    const tabRes = panel.dispatchKey({ key: 'Tab' });
+    expect(tabRes.defaultPrevented).toBe(false);
+    // Escape still closes cleanly
+    const escRes = panel.dispatchKey({ key: 'Escape' });
+    expect(escRes.defaultPrevented).toBe(true);
+    expect(onEscape).toHaveBeenCalledTimes(1);
+
+    teardown();
+    expect(panel.hasAttribute('tabindex')).toBe(false);
+  });
 });

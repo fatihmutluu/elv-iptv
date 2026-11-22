@@ -21,6 +21,7 @@ describe('@elv/i18n Cinema Quietude v2 player strings (#391, #58, #394, #114, #5
       ['player.brightness', 'Brightness', 'Parlaklık'],
       ['player.holdSpeedActive', '2× speed', '2× hız'],
       ['player.autoSubtitlesOnSkipBack', 'Subtitles on skip back', 'Geri sararken altyazı'],
+      ['player.autoPlayNextEpisode', 'Auto-play next episode', 'Sonraki bölümü otomatik oynat'],
       ['player.playNextNow', 'Play now', 'Şimdi oynat'],
       ['player.exitFullscreen', 'Exit fullscreen', 'Tam ekrandan çık'],
     ];

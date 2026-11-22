@@ -17,17 +17,29 @@ export interface UsePlayerNowNextParams {
   readonly catalog: PlayerNowNextCatalog | undefined;
   readonly itemKey: string | undefined;
   readonly enabled: boolean;
+  /** Wall-clock Unix epoch timestamp provider in ms (defaults to `Date.now`). */
+  readonly wallClock?: () => number;
+  /** Legacy test clock override; prefer `wallClock` for Unix epoch timestamps. */
   readonly clock?: PlaybackClock;
   readonly refreshMs?: number;
 }
 
 /**
  * Fetches and periodically refreshes (every 60 s) Live Now/Next programme metadata for a single
- * channel key, dropping stale async responses cleanly on channel change or unmount (`#58`, `#57`).
+ * channel key using wall-clock epoch time, dropping stale async responses cleanly on change or unmount (`#58`, `#57`).
  */
 export function usePlayerNowNext(params: UsePlayerNowNextParams): NowNextEntry | null {
-  const { catalog, itemKey, enabled, clock, refreshMs = PLAYER_NOW_NEXT_REFRESH_MS } = params;
+  const {
+    catalog,
+    itemKey,
+    enabled,
+    wallClock,
+    clock,
+    refreshMs = PLAYER_NOW_NEXT_REFRESH_MS,
+  } = params;
   const query = catalog?.nowNext ?? catalog?.epgNowNext;
+  const wallClockRef = useRef(wallClock);
+  wallClockRef.current = wallClock;
   const clockRef = useRef(clock);
   clockRef.current = clock;
 
@@ -41,7 +53,12 @@ export function usePlayerNowNext(params: UsePlayerNowNextParams): NowNextEntry |
 
     let cancelled = false;
     const fetchNowNext = (): void => {
-      const nowMs = clockRef.current !== undefined ? clockRef.current.now() : Date.now();
+      const nowMs =
+        wallClockRef.current !== undefined
+          ? wallClockRef.current()
+          : clockRef.current !== undefined
+            ? clockRef.current.now()
+            : Date.now();
       void query([itemKey], nowMs).then(
         (rows) => {
           if (cancelled) return;

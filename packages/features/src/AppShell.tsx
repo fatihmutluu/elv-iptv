@@ -315,6 +315,11 @@ export function AppShell(props: AppShellProps): ReactElement {
                   });
                 }}
                 autoPlayNextEpisode={preferences.preferences.autoPlayNextEpisode}
+                onToggleAutoPlayNextEpisode={() => {
+                  void preferences.updatePreferences({
+                    autoPlayNextEpisode: !preferences.preferences.autoPlayNextEpisode,
+                  });
+                }}
                 reduceMotion={preferences.preferences.reduceMotion}
                 bufferPreset={preferences.preferences.bufferPreset}
                 useTextureView={preferences.preferences.useTextureView}

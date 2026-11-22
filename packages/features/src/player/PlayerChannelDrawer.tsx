@@ -1,4 +1,5 @@
 import type { NowNextEntry } from '@elv/data';
+import type { KeyEvent } from '@elv/focus-core';
 import type { AppI18n } from '@elv/i18n';
 import {
   AdaptiveSheet,
@@ -7,7 +8,7 @@ import {
   IconButton,
   SkeletonBox,
   TABULAR_NUMS_STYLE,
-  TvRemoteContext,
+  useKeyInterpreter,
   useTheme,
   useViewport,
   webBackdropBlur,
@@ -16,8 +17,8 @@ import {
 } from '@elv/ui-kit';
 import {
   type ComponentRef,
+  type MutableRefObject,
   type ReactElement,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -30,8 +31,15 @@ import { formatProgrammeWindow } from './PlayerInfoSheet';
 
 /** Default sliding window size materialized around the focused channel (`#57`). */
 const CHANNEL_DRAWER_WINDOW_SIZE = 25;
+const CHANNEL_ROW_PITCH = 46;
 const MAX_CACHED_SCHEDULES = 60;
 const MAX_CACHED_ENTRIES = 75;
+
+/** Imperative navigation handle used by `PlayerScreen` to route TV D-pad input cleanly (`#57`). */
+export interface ChannelDrawerNavHandle {
+  readonly move: (delta: 1 | -1) => void;
+  readonly select: () => void;
+}
 
 /** Props of {@link PlayerChannelDrawer}. */
 export interface PlayerChannelDrawerProps {
@@ -42,6 +50,8 @@ export interface PlayerChannelDrawerProps {
   readonly isTv: boolean;
   readonly i18n: AppI18n;
   readonly fetchNowNext?: (itemKey: string) => Promise<NowNextEntry | null>;
+  /** Optional parent-owned navigation handle for unified `usePlayerControls` TV key routing (`#57`). */
+  readonly navigationRef?: MutableRefObject<ChannelDrawerNavHandle | null>;
   readonly onSelectChannel: (entry: PlayableEntry, index: number) => void;
   readonly onClose: () => void;
 }
@@ -64,8 +74,52 @@ export function computeChannelWindow(
 
 interface KeyEventLike {
   readonly key?: string;
+  readonly target?: unknown;
   preventDefault?: () => void;
   stopPropagation?: () => void;
+}
+
+function isInteractiveButtonTarget(target: unknown): boolean {
+  if (typeof target !== 'object' || target === null) return false;
+  const el = target as {
+    readonly tagName?: unknown;
+    readonly role?: unknown;
+    getAttribute?: (name: string) => string | null;
+  };
+  const tag = typeof el.tagName === 'string' ? el.tagName.toUpperCase() : '';
+  if (tag === 'BUTTON' || tag === 'A') return true;
+  const role = el.getAttribute?.('role') ?? (typeof el.role === 'string' ? el.role : null);
+  return role === 'button';
+}
+
+function ChannelDrawerTvKeyFallback({
+  onMove,
+  onSelect,
+  onClose,
+}: {
+  readonly onMove: (delta: 1 | -1) => void;
+  readonly onSelect: () => void;
+  readonly onClose: () => void;
+}): null {
+  useKeyInterpreter((event: KeyEvent) => {
+    if (event.kind === 'press' && event.key === 'back') {
+      onClose();
+      return true;
+    }
+    if (
+      (event.kind === 'press' || event.kind === 'repeat') &&
+      (event.key === 'up' || event.key === 'down')
+    ) {
+      onMove(event.key === 'down' ? 1 : -1);
+      return true;
+    }
+    if (event.kind === 'press' && event.key === 'select') {
+      onSelect();
+      return true;
+    }
+    return false;
+  });
+  return null;
 }
 
 /**
@@ -80,6 +134,7 @@ export function PlayerChannelDrawer({
   isTv,
   i18n,
   fetchNowNext,
+  navigationRef,
   onSelectChannel,
   onClose,
 }: PlayerChannelDrawerProps): ReactElement | null {
@@ -89,7 +144,11 @@ export function PlayerChannelDrawer({
   const isPortraitOverlay =
     !isTv && formFactor !== 'desktop' && viewport.orientation === 'portrait';
   const desktopPanelRef = useRef<ComponentRef<typeof View> | null>(null);
-  useDesktopDialogTrap(desktopPanelRef, visible && isWebDesktop, onClose);
+  const listScrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
+  useDesktopDialogTrap(desktopPanelRef, visible && isWebDesktop, onClose, {
+    modal: false,
+    initialFocus: 'container',
+  });
 
   const totalCount = playlist?.count ?? 0;
   const initialIndex =
@@ -111,21 +170,27 @@ export function PlayerChannelDrawer({
   focusedIndexRef.current = focusedIndex;
   const onSelectRef = useRef(onSelectChannel);
   onSelectRef.current = onSelectChannel;
-  const tvDispatcher = useContext(TvRemoteContext);
 
-  useEffect(() => {
-    if (!visible || !isTv || tvDispatcher === null || totalCount <= 0) return;
-    return tvDispatcher.subscribe(({ input }) => {
-      if (input.action !== 'press' && input.action !== 'up') return;
-      if (input.key === 'down') setFocusedIndex((p) => Math.min(totalCount - 1, p + 1));
-      else if (input.key === 'up') setFocusedIndex((p) => Math.max(0, p - 1));
-      else if (input.key === 'select') {
-        const idx = focusedIndexRef.current;
-        const entry = entriesCacheRef.current.get(idx);
-        if (entry !== undefined) onSelectRef.current(entry, idx);
-      }
-    });
-  }, [isTv, totalCount, tvDispatcher, visible]);
+  const moveFocus = (delta: 1 | -1): void => {
+    if (totalCount <= 0) return;
+    setFocusedIndex((prev) => Math.max(0, Math.min(totalCount - 1, prev + delta)));
+  };
+  const selectFocused = (): void => {
+    const idx = focusedIndexRef.current;
+    const entry = entriesCacheRef.current.get(idx);
+    if (entry !== undefined) onSelectRef.current(entry, idx);
+  };
+
+  if (navigationRef !== undefined) {
+    navigationRef.current = visible ? { move: moveFocus, select: selectFocused } : null;
+  }
+
+  useEffect(
+    () => () => {
+      if (navigationRef !== undefined) navigationRef.current = null;
+    },
+    [navigationRef],
+  );
 
   useEffect(() => {
     if (visible && !wasVisibleRef.current) setFocusedIndex(initialIndex);
@@ -136,6 +201,15 @@ export function PlayerChannelDrawer({
     () => computeChannelWindow(totalCount, focusedIndex, CHANNEL_DRAWER_WINDOW_SIZE),
     [focusedIndex, totalCount],
   );
+
+  useEffect(() => {
+    if (!visible || totalCount <= 0) return;
+    const localIdx = Math.max(0, focusedIndex - windowStart);
+    listScrollRef.current?.scrollTo?.({
+      y: Math.max(0, (localIdx - 2) * CHANNEL_ROW_PITCH),
+      animated: false,
+    });
+  }, [focusedIndex, totalCount, visible, windowStart]);
 
   useEffect(() => {
     if (lastPlaylistRef.current !== playlist) {
@@ -223,6 +297,9 @@ export function PlayerChannelDrawer({
       event.stopPropagation?.();
       setFocusedIndex((prev) => Math.max(0, prev - 1));
     } else if (key === 'Enter' || key === ' ') {
+      const activeEl = (globalThis as { document?: { activeElement?: unknown } }).document
+        ?.activeElement;
+      if (isInteractiveButtonTarget(event.target ?? activeEl)) return;
       const entry = entriesCacheRef.current.get(focusedIndex);
       if (entry !== undefined) {
         event.preventDefault?.();
@@ -237,6 +314,9 @@ export function PlayerChannelDrawer({
 
   const content = (
     <View testID="player-channel-drawer-panel" style={styles.inner}>
+      {isTv && navigationRef === undefined ? (
+        <ChannelDrawerTvKeyFallback onMove={moveFocus} onSelect={selectFocused} onClose={onClose} />
+      ) : null}
       <View style={[styles.header, { borderBottomColor: theme.colors.surfaceBorder }]}>
         <Text
           numberOfLines={1}
@@ -263,6 +343,7 @@ export function PlayerChannelDrawer({
       ) : (
         <>
           <ScrollView
+            ref={listScrollRef}
             testID="player-channel-drawer-list"
             style={styles.list}
             showsVerticalScrollIndicator={false}

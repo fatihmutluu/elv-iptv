@@ -29,6 +29,7 @@ export interface PlayerSettingsSheetProps {
   readonly resizeMode?: VideoResizeMode;
   readonly deinterlace?: boolean;
   readonly autoSubtitlesOnSkipBack?: boolean;
+  readonly autoPlayNextEpisode?: boolean;
   readonly statsVisible: boolean;
   readonly isTv: boolean;
   readonly formFactor: FormFactor;
@@ -40,6 +41,7 @@ export interface PlayerSettingsSheetProps {
   readonly onToggleResizeMode?: () => void;
   readonly onToggleDeinterlace?: () => void;
   readonly onToggleAutoSubtitlesOnSkipBack?: () => void;
+  readonly onToggleAutoPlayNextEpisode?: () => void;
   readonly onToggleStats: () => void;
   readonly onClose: () => void;
 }
@@ -56,8 +58,10 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
   const showAspect = props.onToggleResizeMode !== undefined;
   const showDeinterlace = props.onToggleDeinterlace !== undefined;
   const showAutoSubtitlesOnSkipBack = isVod && props.onToggleAutoSubtitlesOnSkipBack !== undefined;
+  const showAutoPlayNextEpisode = isVod && props.onToggleAutoPlayNextEpisode !== undefined;
   const deinterlace = props.deinterlace === true;
   const autoSubtitlesOnSkipBack = props.autoSubtitlesOnSkipBack === true;
+  const autoPlayNextEpisode = props.autoPlayNextEpisode !== false;
   const resizeMode = props.resizeMode ?? 'fit';
   const resizeModeLabel =
     resizeMode === 'fill'
@@ -225,6 +229,30 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
               onPress={() => props.onToggleAutoSubtitlesOnSkipBack?.()}
             />
           ) : null}
+          {showAutoPlayNextEpisode ? (
+            <SettingsToggleRow
+              testID="player-auto-play-next-toggle"
+              icon="play"
+              label={i18n.t('player.autoPlayNextEpisode')}
+              pillLabel={
+                autoPlayNextEpisode ? i18n.t('player.stats.on') : i18n.t('player.stats.off')
+              }
+              active={autoPlayNextEpisode}
+              focused={
+                showCursor &&
+                menuState.index ===
+                  navRows.length +
+                    (showAspect ? 1 : 0) +
+                    (showDeinterlace ? 1 : 0) +
+                    (showAutoSubtitlesOnSkipBack ? 1 : 0)
+              }
+              isTv={isTv}
+              role="switch"
+              accessibilityLabel={i18n.t('player.autoPlayNextEpisode')}
+              theme={theme}
+              onPress={() => props.onToggleAutoPlayNextEpisode?.()}
+            />
+          ) : null}
           <SettingsToggleRow
             testID="player-stats-toggle"
             icon="info"
@@ -237,7 +265,8 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
                 navRows.length +
                   (showAspect ? 1 : 0) +
                   (showDeinterlace ? 1 : 0) +
-                  (showAutoSubtitlesOnSkipBack ? 1 : 0)
+                  (showAutoSubtitlesOnSkipBack ? 1 : 0) +
+                  (showAutoPlayNextEpisode ? 1 : 0)
             }
             isTv={isTv}
             role="switch"

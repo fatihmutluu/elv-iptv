@@ -439,6 +439,7 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'player.brightness': 'Parlaklık',
   'player.holdSpeedActive': '2× hız',
   'player.autoSubtitlesOnSkipBack': 'Geri sararken altyazı',
+  'player.autoPlayNextEpisode': 'Sonraki bölümü otomatik oynat',
   'player.nextUpCountdown': '{seconds} sn sonra sonraki bölüm',
   'player.playNextNow': 'Şimdi oynat',
 };

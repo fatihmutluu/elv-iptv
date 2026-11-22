@@ -242,6 +242,7 @@ function NextEpisodeBannerBody({
             variant="primary"
             icon="play"
             label={formatNextEpisodeLabel(nextEpisode, i18n)}
+            accessibilityLabel={`${i18n.t('player.playNextNow')}: ${formatNextEpisodeLabel(nextEpisode, i18n)}`}
             focusable={!isTv}
             focused={tvFocused}
             onPress={() => {

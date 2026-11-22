@@ -1193,3 +1193,6 @@ msgstr "{seconds} sn sonra sonraki bölüm"
 
 msgid "player.playNextNow"
 msgstr "Şimdi oynat"
+
+msgid "player.autoPlayNextEpisode"
+msgstr "Sonraki bölümü otomatik oynat"

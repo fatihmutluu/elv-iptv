@@ -425,6 +425,7 @@ export const enMessages = {
   'player.brightness': 'Brightness',
   'player.holdSpeedActive': '2× speed',
   'player.autoSubtitlesOnSkipBack': 'Subtitles on skip back',
+  'player.autoPlayNextEpisode': 'Auto-play next episode',
   'player.nextUpCountdown': 'Next episode in {seconds}s',
   'player.playNextNow': 'Play now',
 } as const;

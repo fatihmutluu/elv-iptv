@@ -100,20 +100,34 @@ export function usePlayerControls(params: PlayerControlsParams) {
     }
   }, [params.initialVolume]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset speed, hold-speed, scrubbing, skip-back subtitles, digit buffer, and select guard on item change
+  const latestItemKeyRef = useRef(activeTarget.itemKey);
+  latestItemKeyRef.current = activeTarget.itemKey;
+
   useEffect(() => {
+    const itemKey = activeTarget.itemKey;
+    const hadNonDefaultSpeed = priorSpeedRef.current !== null || playbackSpeedRef.current !== 1;
     priorSpeedRef.current = null;
+    playbackSpeedRef.current = 1;
     setHoldSpeedActive(false);
     setPlaybackSpeed(1);
+    if (hadNonDefaultSpeed) serviceRef.current?.setSpeed(1);
     setBarScrubbing(false);
     digitBuf.cancel();
     skipBackSubsRef.current?.reset();
     selectGuardRef.current?.reset();
     return () => {
+      if (
+        latestItemKeyRef.current !== itemKey &&
+        (priorSpeedRef.current !== null || playbackSpeedRef.current !== 1)
+      ) {
+        priorSpeedRef.current = null;
+        playbackSpeedRef.current = 1;
+        serviceRef.current?.setSpeed(1);
+      }
       digitBuf.cancel();
       skipBackSubsRef.current?.dispose();
     };
-  }, [activeTarget.itemKey, digitBuf]);
+  }, [activeTarget.itemKey, digitBuf, serviceRef]);
 
   useEffect(() => {
     return () => {
@@ -139,7 +153,19 @@ export function usePlayerControls(params: PlayerControlsParams) {
     serviceRef,
     clockRef,
     timersRef,
-    onSeekCommit: params.onSeekCommit,
+    onSeekCommit: (positionMs, priorPositionMs) => {
+      cbRef.current.onSeekCommit?.(positionMs);
+      if (
+        priorPositionMs !== undefined &&
+        positionMs < priorPositionMs &&
+        cbRef.current.activeTarget.kind === 'vod'
+      ) {
+        skipBackSubsRef.current?.onBackwardSeek({
+          enabled: cbRef.current.autoSubtitlesOnSkipBack === true,
+          tracks: cbRef.current.tracks,
+        });
+      }
+    },
   });
 
   const scrubbingActive =
@@ -162,6 +188,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
 
   const hasAutoSubtitlesToggle =
     activeTarget.kind === 'vod' && params.onToggleAutoSubtitlesOnSkipBack !== undefined;
+  const hasAutoPlayNextToggle =
+    activeTarget.kind === 'vod' && params.onToggleAutoPlayNextEpisode !== undefined;
 
   const overlay = usePlayerOverlayState({
     formFactor,
@@ -177,6 +205,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     hasInfo: params.hasInfo,
     hasChannelList: params.hasChannelList,
     hasAutoSubtitlesOnSkipBack: hasAutoSubtitlesToggle,
+    hasAutoPlayNextEpisode: hasAutoPlayNextToggle,
     hasNextEpisode: params.hasNextEpisode ?? false,
     hasPreviousChannel,
     initialOsdHidden: params.initialOsdHidden,
@@ -246,12 +275,6 @@ export function usePlayerControls(params: PlayerControlsParams) {
     if (hasVodAnchor) {
       if (overlay.liveRef.current.osdTier === 'hidden') overlay.showProgressOsd();
       else overlay.notifyOsdActivity();
-      if (deltaMs < 0) {
-        skipBackSubsRef.current?.onBackwardSeek({
-          enabled: cbRef.current.autoSubtitlesOnSkipBack === true,
-          tracks: overlay.liveRef.current.tracks,
-        });
-      }
     }
   };
 
@@ -314,6 +337,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
             formFactor !== 'desktop',
             cbRef.current.onSetDeinterlace !== undefined,
             isVodTarget && cbRef.current.onToggleAutoSubtitlesOnSkipBack !== undefined,
+            isVodTarget && cbRef.current.onToggleAutoPlayNextEpisode !== undefined,
           ),
         });
       } else overlay.closeSettings();
@@ -362,10 +386,18 @@ export function usePlayerControls(params: PlayerControlsParams) {
         zapByRef.current(event.key === 'channelUp' ? 1 : -1, event.kind === 'repeat');
         return true;
       }
-      overlay.showOsd();
-      if (!isHiddenOsdPassthroughKey(event.key)) {
-        if (event.kind === 'press' && event.key === 'select') allowTvSelect();
-        return true;
+      if (
+        cbRef.current.activeTarget.kind === 'vod' &&
+        (event.kind === 'press' || event.kind === 'repeat') &&
+        (event.key === 'rewind' || event.key === 'fastForward')
+      ) {
+        overlay.showProgressOsd();
+      } else {
+        overlay.showOsd();
+        if (!isHiddenOsdPassthroughKey(event.key)) {
+          if (event.kind === 'press' && event.key === 'select') allowTvSelect();
+          return true;
+        }
       }
     }
     if (
@@ -388,6 +420,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
         hasDeinterlace: cbRef.current.onSetDeinterlace !== undefined,
         hasAutoSubtitlesOnSkipBack:
           isVodTarget && cbRef.current.onToggleAutoSubtitlesOnSkipBack !== undefined,
+        hasAutoPlayNextEpisode:
+          isVodTarget && cbRef.current.onToggleAutoPlayNextEpisode !== undefined,
         playbackSpeed: playbackSpeedRef.current,
         state: s,
         service: serviceRef.current,
@@ -396,9 +430,14 @@ export function usePlayerControls(params: PlayerControlsParams) {
         allowTvSelect,
         showOsd: overlay.showOsd,
         toggleStats: overlay.toggleStats,
+        toggleInfo: overlay.toggleInfo,
+        toggleChannelList: overlay.toggleChannelList,
         toggleResizeMode: overlay.toggleResizeMode,
         toggleDeinterlace: overlay.toggleDeinterlace,
         toggleAutoSubtitlesOnSkipBack: cbRef.current.onToggleAutoSubtitlesOnSkipBack,
+        toggleAutoPlayNextEpisode: cbRef.current.onToggleAutoPlayNextEpisode,
+        onChannelListMove: cbRef.current.onChannelListMove,
+        onChannelListSelect: cbRef.current.onChannelListSelect,
         togglePlayPause,
         openTracks: overlay.openTracks,
         closeTracks: overlay.closeTracks,
@@ -438,10 +477,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
         applyPlayOrPause(event.key, statusKind);
       } else if ((event.kind === 'press' || event.kind === 'repeat') && isScrubKey(event.key)) {
         const direction = event.key === 'left' || event.key === 'rewind' ? -1 : 1;
-        if (!isTv) {
-          if (s.osdTier === 'hidden') overlay.showProgressOsd();
-          else overlay.notifyOsdActivity();
-        }
+        if (s.osdTier === 'hidden') overlay.showProgressOsd();
+        else overlay.notifyOsdActivity();
         scrub.step(direction, event.kind);
       } else if (isTv && event.kind === 'press' && event.key === 'up') overlay.hideOsd();
       else if (isTv && event.kind === 'press' && event.key === 'down') {

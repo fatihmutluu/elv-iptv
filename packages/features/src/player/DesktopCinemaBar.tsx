@@ -50,6 +50,8 @@ export interface PlayerOsdProps {
   videoInfo?: StreamVideoInfo | undefined;
   tracks?: MediaTracks;
   nowNext?: NowNextEntry | null | undefined;
+  /** Wall-clock Unix epoch timestamp in ms for Live EPG programme progress (defaults to `Date.now()`). */
+  nowMs?: number | undefined;
   tvOsdFocused: boolean;
   tvScrubberFocused?: boolean;
   tvOsdAction: TvOsdAction;
@@ -131,6 +133,7 @@ export function DesktopCinemaBar(p: PlayerOsdProps): ReactElement {
           volume={volume}
           playbackSpeed={playbackSpeed}
           nowNext={p.nowNext}
+          nowMs={p.nowMs}
           previewPositionMs={p.previewPositionMs}
           service={service}
           clock={p.clock}
@@ -295,7 +298,12 @@ export function DesktopCinemaBar(p: PlayerOsdProps): ReactElement {
           showStatus ? (
             <View style={styles.metaLine}>
               {hasNowProg ? (
-                <LiveNowNextStrip nowNext={p.nowNext} nowMs={p.clock.now()} i18n={i18n} compact />
+                <LiveNowNextStrip
+                  nowNext={p.nowNext}
+                  nowMs={p.nowMs ?? Date.now()}
+                  i18n={i18n}
+                  compact
+                />
               ) : trimmedSubtitle !== undefined && trimmedSubtitle.length > 0 ? (
                 <Text
                   testID="osd-subtitle"

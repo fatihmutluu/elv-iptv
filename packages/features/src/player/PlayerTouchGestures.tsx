@@ -6,6 +6,8 @@ import { formatPlaybackPosition } from './vod-progress-helpers';
 
 /** System gesture exclusion inset on all 4 screen edges (px). */
 export const EDGE_EXCLUSION_PX = 24;
+/** Minimum screen brightness ratio supported by touch brightness swipe and dim fallback (`#114`). */
+export const MIN_BRIGHTNESS = 0.15;
 const VERTICAL_SWIPE_THRESHOLD_PX = 16;
 const HORIZONTAL_SWIPE_THRESHOLD_PX = 18;
 const DOUBLE_TAP_WINDOW_MS = 280;
@@ -23,6 +25,8 @@ export interface PlayerTouchGesturesProps {
   readonly isVod: boolean;
   readonly volume: number;
   readonly brightness: number;
+  /** Whether to render the internal dim overlay (set `false` when `PlayerScreen` renders it persistently). */
+  readonly renderDimOverlay?: boolean;
   readonly durationMs?: number | undefined;
   readonly positionMs?: number | undefined;
   readonly i18n: AppI18n;
@@ -46,7 +50,14 @@ interface TouchPointEvent {
   };
 }
 
-const clamp01 = (v: number): number => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1);
+const clampBrightness = (v: number): number =>
+  Number.isFinite(v) ? Math.max(MIN_BRIGHTNESS, Math.min(1, v)) : 1;
+
+/** Computes the visual fallback dim-overlay opacity for a clamped `[MIN_BRIGHTNESS, 1]` brightness level. */
+export function computeBrightnessDimOpacity(brightness: number): number {
+  return Math.max(0, Math.min(0.7, (1 - clampBrightness(brightness)) * 0.7));
+}
+
 const clampVol = (v: number): number =>
   Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : 0;
 
@@ -190,7 +201,7 @@ export function PlayerTouchGestures(props: PlayerTouchGesturesProps): ReactEleme
       startX: pt.x,
       startY: pt.y,
       startVolume: clampVol(p.volume),
-      startBrightness: clamp01(p.brightness),
+      startBrightness: clampBrightness(p.brightness),
       kind: edgeExcluded ? 'edge-excluded' : 'none',
       lastScrubDeltaMs: 0,
       holdActive: false,
@@ -240,7 +251,7 @@ export function PlayerTouchGestures(props: PlayerTouchGesturesProps): ReactEleme
 
     const span = Math.max(160, height * 0.6);
     if (g.kind === 'brightness') {
-      const next = clamp01(g.startBrightness - dy / span);
+      const next = clampBrightness(g.startBrightness - dy / span);
       p.onBrightnessChange(next);
       setFeedbackText(`${p.i18n.t('player.brightness')} ${Math.round(next * 100)}%`);
     } else if (g.kind === 'volume') {
@@ -315,18 +326,20 @@ export function PlayerTouchGestures(props: PlayerTouchGesturesProps): ReactEleme
     if (g?.kind === 'scrub') propsRef.current.onScrubPreview?.(undefined);
   };
 
-  const dimOpacity = Math.max(0, Math.min(0.7, (1 - clamp01(props.brightness)) * 0.7));
+  const dimOpacity = computeBrightnessDimOpacity(props.brightness);
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      <View
-        testID="player-brightness-dim-overlay"
-        pointerEvents="none"
-        style={[
-          StyleSheet.absoluteFill,
-          { backgroundColor: theme.colors.bgCanvas, opacity: dimOpacity },
-        ]}
-      />
+      {props.renderDimOverlay !== false ? (
+        <View
+          testID="player-brightness-dim-overlay"
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            { backgroundColor: theme.colors.bgCanvas, opacity: dimOpacity },
+          ]}
+        />
+      ) : null}
       <View
         testID="player-touch-gestures"
         style={StyleSheet.absoluteFill}

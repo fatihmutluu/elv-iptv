@@ -90,6 +90,7 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
         volume={volume}
         playbackSpeed={playbackSpeed}
         nowNext={p.nowNext}
+        nowMs={p.nowMs}
         previewPositionMs={p.previewPositionMs}
         service={service}
         clock={p.clock}
@@ -349,7 +350,7 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
               : {})}
           />
         ) : (
-          <LiveNowNextStrip nowNext={p.nowNext} nowMs={p.clock.now()} i18n={i18n} />
+          <LiveNowNextStrip nowNext={p.nowNext} nowMs={p.nowMs ?? Date.now()} i18n={i18n} />
         )}
 
         {p.failure !== null ? <PlayerFailureBanner failure={p.failure} i18n={i18n} /> : null}

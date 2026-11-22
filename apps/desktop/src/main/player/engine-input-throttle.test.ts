@@ -100,7 +100,14 @@ describe('MpvEngine input repeat throttling', () => {
     const { fake, presenter, ui } = await setup({ now: () => clock });
     const client = presenter.attached[0];
 
-    for (const key of ['play-pause', 'mute', 'tracks', 'prev-channel'] as const) {
+    for (const key of [
+      'play-pause',
+      'mute',
+      'tracks',
+      'prev-channel',
+      'info',
+      'channel-list',
+    ] as const) {
       clock += 10;
       fake.clientMessage('elv-key', key);
       fake.clientMessage('elv-key', key);
@@ -115,6 +122,10 @@ describe('MpvEngine input repeat throttling', () => {
       { type: 'key', key: 'tracks' },
       { type: 'key', key: 'prev-channel' },
       { type: 'key', key: 'prev-channel' },
+      { type: 'key', key: 'info' },
+      { type: 'key', key: 'info' },
+      { type: 'key', key: 'channel-list' },
+      { type: 'key', key: 'channel-list' },
     ]);
 
     ui.length = 0;
@@ -164,6 +175,8 @@ describe('MpvEngine input repeat throttling', () => {
         'm script-message elv-key mute',
         'c script-message elv-key tracks',
         'p script-message elv-key prev-channel',
+        'i script-message elv-key info',
+        'g script-message elv-key channel-list',
       ]),
     );
   });
