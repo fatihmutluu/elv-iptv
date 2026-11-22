@@ -88,7 +88,7 @@ ffmpeg_flags=(
   --enable-videotoolbox --enable-audiotoolbox --enable-securetransport
 )
 mpv_flags=(
-  -Dgpl=false -Dcplayer=true -Dlibmpv=false -Dlua=luajit
+  -Dgpl=false -Dcplayer=true -Dlibmpv=true -Dlua=luajit
   -Drubberband=disabled -Ddvdnav=disabled -Dcdda=disabled
 )
 
@@ -123,6 +123,21 @@ res="$contents/Resources"
 rm -rf "$app"
 mkdir -p "$contents/MacOS" "$fw" "$res/licenses"
 cp "$prefix/bin/mpv" "$contents/MacOS/mpv"
+libmpv_copied=0
+for libmpv in "$prefix"/lib/libmpv*.dylib; do
+  if [ -f "$libmpv" ] && [ ! -L "$libmpv" ]; then
+    dest="$fw/$(basename "$libmpv")"
+    cp -L "$libmpv" "$dest"
+    chmod 755 "$dest"
+    libmpv_copied=1
+  fi
+done
+if [ "$libmpv_copied" -eq 0 ]; then
+  echo "libmpv dylib not found in $prefix/lib" >&2
+  exit 1
+fi
+mkdir -p "$res/include"
+cp -R -L "$prefix/include/mpv" "$res/include/mpv"
 cp "$here/Info.plist" "$contents/Info.plist"
 plutil -insert CFBundleShortVersionString -string "$(pin mpv version)" "$contents/Info.plist"
 plutil -insert CFBundleVersion -string "$(pin mpv version)" "$contents/Info.plist"
@@ -141,9 +156,14 @@ own_lib() {
   return 0
 }
 
-# Copy every library mpv needs, transitively, as a real file named like its load command.
+# Copy every library mpv and libmpv need, transitively, as a real file named like its load command.
 todo="$work/todo"
 echo "$contents/MacOS/mpv" >"$todo"
+for libmpv in "$fw"/libmpv*.dylib; do
+  if [ -f "$libmpv" ]; then
+    echo "$libmpv" >>"$todo"
+  fi
+done
 while [ -s "$todo" ]; do
   file="$(head -n 1 "$todo")"
   tail -n +2 "$todo" >"$todo.next"

@@ -44,6 +44,7 @@ import { createEngineFor } from './player/factory.ts';
 import { registerPlayerIpc } from './player/ipc.ts';
 import { sweepLeftovers, systemSweepDeps } from './player/mpv/pid-sweep.ts';
 import { createPowerBlocker } from './player/power-blocker.ts';
+import { parsePresenterOverride } from './player/presenter/choose.ts';
 import { sampleArea } from './player/presenter/visible.ts';
 import { mpvRuntimePaths } from './player/runtime-path.ts';
 import { lockDownSession, lockDownWebContents } from './security.ts';
@@ -146,7 +147,7 @@ async function startPlayer(): Promise<void> {
     log: logger.log,
     powerBlocker,
     gateReport: app.isPackaged ? undefined : (line, engine) => void printGateLine(line, engine),
-    createEngine: async (owner, onUi) => {
+    createEngine: async (owner, onUi, engineId) => {
       const window = BrowserWindow.fromWebContents(owner as WebContents);
       if (!window) throw new Error('the player needs an app window');
       const runtime = mpvRuntimePaths({
@@ -157,11 +158,14 @@ async function startPlayer(): Promise<void> {
         arch: process.arch,
       });
       if (!runtime) throw new Error('mpv runtime missing; run pnpm mpv fetch');
+      const presenterOverride = parsePresenterOverride(process.env.ELV_DESKTOP_PRESENTER);
       const engine = await createEngineFor(window, {
         runtime,
         platform: process.platform,
         loadMode: 'replace',
         pidFile,
+        engineId,
+        ...(presenterOverride === undefined ? {} : { presenterOverride }),
         onUi,
       });
       if (gateQuery !== null) {

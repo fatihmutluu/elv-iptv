@@ -167,13 +167,13 @@ const open = async (t: ReturnType<typeof setup>, owner: WebContentsLike) =>
   (await t.invoke(PLAYER_CHANNELS.open, owner)) as { engineId: string; mainNowMs: number };
 
 describe('registerPlayerIpc', () => {
-  it('open returns engineId and mainNowMs', async () => {
+  it('open returns engineId and mainNowMs and passes engineId to createEngine', async () => {
     const t = setup();
     const a = fakeContents(1);
     const reply = await open(t, a);
     expect(reply.engineId).toEqual(expect.any(String));
     expect(reply.mainNowMs).toBe(777);
-    expect(t.createEngine).toHaveBeenCalledWith(a, expect.any(Function));
+    expect(t.createEngine).toHaveBeenCalledWith(a, expect.any(Function), reply.engineId);
   });
 
   it('a second open from the same window releases the first engine', async () => {

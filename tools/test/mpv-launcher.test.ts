@@ -1,6 +1,9 @@
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildLauncher, findVcvars, launcherBuildCommand } from '../src/mpv/launcher.ts';
+import { hashLauncherSources } from '../src/mpv/real-deps.ts';
 
 describe('launcherBuildCommand', () => {
   it('quotes paths with spaces', () => {
@@ -97,5 +100,30 @@ describe('buildLauncher', () => {
   it('stops before compiling when Build Tools are missing', async () => {
     const run = async () => ({ code: 0, stdout: '' });
     await expect(buildLauncher(paths, run)).rejects.toThrow(/Build Tools/);
+  });
+});
+
+describe('hashLauncherSources', () => {
+  it('hashes all .c and .h files in sorted order and invalidates when a header changes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'elv-mpv-hash-'));
+    try {
+      writeFileSync(join(dir, 'elv-mpv.c'), 'int main(void) { return 0; }\n');
+      writeFileSync(join(dir, 'elv-mpv-canvas.h'), '/* v1 */\n');
+      writeFileSync(join(dir, 'README.txt'), 'ignored\n');
+      const h1 = await hashLauncherSources(dir);
+
+      writeFileSync(join(dir, 'README.txt'), 'still ignored\n');
+      expect(await hashLauncherSources(dir)).toBe(h1);
+
+      writeFileSync(join(dir, 'elv-mpv-canvas.h'), '/* v2 */\n');
+      const h2 = await hashLauncherSources(dir);
+      expect(h2).not.toBe(h1);
+
+      writeFileSync(join(dir, 'elv-mpv.c'), 'int main(void) { return 1; }\n');
+      const h3 = await hashLauncherSources(dir);
+      expect(h3).not.toBe(h2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

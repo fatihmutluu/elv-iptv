@@ -43,8 +43,12 @@ interface PlayerIpcTimers {
 /** What `registerPlayerIpc` needs from the app. */
 export interface PlayerIpcDeps {
   ipcMain: IpcMainLike;
-  /** Builds the engine for a renderer; `onUi` carries its presentation events to that renderer. */
-  createEngine(owner: WebContentsLike, onUi: (event: PlayerUiEvent) => void): Promise<MpvEngine>;
+  /** Builds the engine for a renderer; `onUi` carries its presentation events and `engineId` routes canvas frames. */
+  createEngine(
+    owner: WebContentsLike,
+    onUi: (event: PlayerUiEvent) => void,
+    engineId: string,
+  ): Promise<MpvEngine>;
   /** The main monotonic clock the engine stamps its events with; sent as `mainNowMs` for the renderer's offset. */
   now(): number;
   /** Receives drop notices; never a payload (payloads carry stream URLs). */
@@ -174,11 +178,15 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       !sender.isDestroyed() &&
       generations.get(sender.id) === gen &&
       (!registered || entries.has(engineId));
-    const engine = await deps.createEngine(sender, (ui) => {
-      if (!isCurrent()) return;
-      const message: PlayerUiMessage = { engineId, ui };
-      sendTo(sender, PLAYER_CHANNELS.ui, message);
-    });
+    const engine = await deps.createEngine(
+      sender,
+      (ui) => {
+        if (!isCurrent()) return;
+        const message: PlayerUiMessage = { engineId, ui };
+        sendTo(sender, PLAYER_CHANNELS.ui, message);
+      },
+      engineId,
+    );
     if (!isCurrent()) {
       engine.release();
       throw new Error('the player open was superseded or the window closed while starting');

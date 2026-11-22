@@ -254,7 +254,7 @@ describe('fetchRuntime launcher stamp', () => {
       expect(f.builds).toEqual([dir]);
       expect(f.written.get(stamp)).toBe('src2\n');
       expect(f.logs).toContain(
-        'mpv: win32-x64 elv-mpv.exe is out of date with elv-mpv.c; rebuilding',
+        'mpv: win32-x64 elv-mpv.exe is out of date with launcher sources; rebuilding',
       );
     }
   });
@@ -358,6 +358,21 @@ describe('fetchRuntime on darwin-arm64', () => {
       /libavformat\.62\.dylib.*--enable-gpl/,
     );
     expect([...gpl.written.keys()].some((k) => k.startsWith(dir))).toBe(false);
+  });
+
+  it('darwin fetch scans libmpv.2.dylib and rejects GPL mpv options in it', async () => {
+    const libmpvPath = `${app}/Frameworks/libmpv.2.dylib`;
+    const ok = fake({
+      archive: bundle({ [libmpvPath]: enc('-Dgpl=false -Dlibmpv=true -Dlua=luajit') }),
+    });
+    expect((await fetchRuntime(mac, ok.deps)).status).toBe('installed');
+    expect(ok.reads).toContain(`${staging}/${libmpvPath}`);
+    const gplLibmpv = fake({
+      archive: bundle({ [libmpvPath]: enc('-Dgpl=true -Dlibmpv=true -Dlua=luajit') }),
+    });
+    await expect(fetchRuntime(mac, gplLibmpv.deps)).rejects.toThrow(
+      /libmpv\.2\.dylib.*-Dgpl=false/,
+    );
   });
 });
 

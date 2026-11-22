@@ -24,7 +24,7 @@ Electron shell for Windows, macOS and Linux. The UI is `renderer/` (`@elv/deskto
 - Custom headers pass via `set_property http-header-fields string[]` (`[]` cleared on next load/stop); UA/Referer use `loadfile`. Windows pipe DACL is current-user; macOS `fd://3` has no path.
 
 ## Presentation (`src/main/player/presenter/`)
-- `VideoPresenter` has two implementations (`createPresenter` / `choosePresenter`).
-- Child window (Windows default): mpv draws (`--wid`) into a frameless `transparent`, non-focusable (`focusable: false`) owned video window; mpv fullscreen turns back to the app window.
-- Own window (macOS default; Windows fallback): follows host `move`/`resize`, syncs fullscreen bidirectionally (400 ms guard + post-transition geometry reconcile). Win `--geometry` is physical px; macOS takes backing px (`rect * scaleFactor`) from `display.workArea`, defaulting `fullscreenMode` to `'safe-area'` (notched `workArea`) without modesetting (`'desktop'` spans full `bounds`).
-- Go/no-go (Windows 10, 150 %): child passed; video in 719-793 ms, 1200x675 px for 800x450 DIP, JS ping 0-5 ms.
+- `VideoPresenter` has three implementations (`createPresenter` / `choosePresenter`, overridable via `ELV_DESKTOP_PRESENTER`).
+- Canvas (Windows default, `coversArea: false`): `elv-mpv.exe --elv-canvas-pipe=...` (`native/mpv-host/elv-mpv-canvas.h`) renders `vo=libmpv` (`--force-window=no`, `--video-timing-offset=0`) via `MPV_RENDER_API_TYPE_D3D11` into a triple-buffered shared `ID3D11Texture2D` ring, duplicates NT handles to main -> Electron `sharedTexture` -> sandboxed preload `onFrame` -> `<PlayerCanvas>`, so React DOM overlays composite over video in one `BrowserWindow`.
+- Child window (Windows fallback): mpv draws (`--wid`) into a frameless `transparent`, non-focusable (`focusable: false`) owned video window; mpv fullscreen turns back to the app window.
+- Own window (macOS/Linux default until macOS `libmpv.2.dylib` artifact lands): follows host `move`/`resize`, syncs fullscreen bidirectionally (400 ms guard + post-transition geometry reconcile). Win `--geometry` is physical px; macOS takes backing px (`rect * scaleFactor`) from `display.workArea`, defaulting `fullscreenMode` to `'safe-area'` (notched `workArea`) without modesetting (`'desktop'` spans full `bounds`).

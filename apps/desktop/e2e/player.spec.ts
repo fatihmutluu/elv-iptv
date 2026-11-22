@@ -1,4 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { EngineEvent, MediaTracks } from '@elv/playback';
 import { _electron as electron, expect, test } from '@playwright/test';
@@ -112,6 +114,7 @@ test('enumerates multi-audio and SRT subtitle tracks and switches aid/sid over p
   }
 
   const sim = await spawnEphemeralSim();
+  const userDataDir = mkdtempSync(join(tmpdir(), 'elv-e2e-player-'));
   let app: Awaited<ReturnType<typeof electron.launch>> | undefined;
   try {
     const playlistRes = await fetch(`${sim.url}/playlists/corpus.m3u`, {
@@ -133,7 +136,7 @@ test('enumerates multi-audio and SRT subtitle tracks and switches aid/sid over p
     }
     expect(warm.ok || warm.status === 206).toBe(true);
 
-    app = await electron.launch({ args: [DESKTOP_ROOT] });
+    app = await electron.launch({ args: [DESKTOP_ROOT, `--user-data-dir=${userDataDir}`] });
     const page = await app.firstWindow();
 
     const result = await page.evaluate(async (streamUrl: string) => {
@@ -251,5 +254,10 @@ test('enumerates multi-audio and SRT subtitle tracks and switches aid/sid over p
   } finally {
     await app?.close().catch(() => {});
     sim.child.kill();
+    try {
+      rmSync(userDataDir, { recursive: true, force: true });
+    } catch {
+      // ignore locked temp files on Windows teardown
+    }
   }
 });

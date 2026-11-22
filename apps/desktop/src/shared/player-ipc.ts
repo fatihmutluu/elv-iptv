@@ -9,8 +9,17 @@ export interface PlayerArea {
   visible: boolean;
 }
 
-/** How mpv's picture reaches the screen: a child window kept on the player area, or mpv's own window. */
-export type PresenterKind = 'child-window' | 'own-window';
+/** How mpv's picture reaches the screen: in-canvas shared texture, a child window, or mpv's own window. */
+export type PresenterKind = 'canvas' | 'child-window' | 'own-window';
+
+/** Minimal WebCodecs `VideoFrame` subset exposed to the renderer for in-canvas presentation (`#95`). */
+export interface VideoFrameLike {
+  readonly codedWidth: number;
+  readonly codedHeight: number;
+  readonly displayWidth?: number;
+  readonly displayHeight?: number;
+  close(): void;
+}
 
 /**
  * What the desktop mpv engine can do in 0.1: no live seek, no software-audio rung (FFmpeg already decodes audio in
@@ -120,6 +129,8 @@ export interface PlayerBridge {
   onEvent(listener: (message: PlayerEventMessage) => void): () => void;
   /** Returns the unsubscribe function. */
   onUi(listener: (message: PlayerUiMessage) => void): () => void;
+  /** Subscribes to decoded GPU `VideoFrame` deliveries for `engineId` in `'canvas'` mode (`#95`); returns unsubscribe. */
+  onFrame?(engineId: string, listener: (frame: VideoFrameLike) => void): () => void;
   /** Dev gate only: one `ELV_GATE_PLAYER {...}` line for main to print. */
   reportGate(line: string): void;
 }

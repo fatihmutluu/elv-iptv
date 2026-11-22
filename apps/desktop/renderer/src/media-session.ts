@@ -394,5 +394,6 @@ export function bindDesktopMediaSession(
         listener(event);
       });
     },
+    onFrame: (listener) => engine.onFrame?.(listener) ?? (() => undefined),
   };
 }

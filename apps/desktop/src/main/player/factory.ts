@@ -1,6 +1,6 @@
 import { dirname, join } from 'node:path';
 import type { BrowserWindow } from 'electron';
-import type { HwdecProfile, PlayerUiEvent } from '../../shared/player-ipc.ts';
+import type { HwdecProfile, PlayerUiEvent, PresenterKind } from '../../shared/player-ipc.ts';
 import { createMpvEngine, type LoadMode, type MpvEngine } from './engine.ts';
 import { launchArgs } from './mpv/options.ts';
 import { spawnMpv } from './mpv/process.ts';
@@ -20,9 +20,13 @@ export interface EngineFactoryDeps {
   loadMode: LoadMode;
   /** Recorded launcher pids, swept at the next start if the app crashes (`<userData>/mpv-pids.json`). */
   pidFile: string;
+  /** Engine identifier used by the `'canvas'` presenter to route shared textures to the renderer. */
+  engineId?: string;
+  /** Optional explicit presenter kind overriding the platform default (`ELV_DESKTOP_PRESENTER`). */
+  presenterOverride?: PresenterKind;
   /** Optional initial hardware decoding profile (defaults to `'auto-safe'`). */
   hwdec?: HwdecProfile;
-  /** True only when using mpv's render-context API (appends `--video-timing-offset=0`). */
+  /** True only when using mpv's render-context API (defaults to `presenter.kind === 'canvas'`). */
   renderContext?: boolean;
   /** Optional persistent adaptive readahead tier store (defaults to `<userData>/mpv-readahead.json`). */
   readaheadStore?: ReadaheadTierStore;
@@ -38,7 +42,14 @@ export async function createEngineFor(
   owner: BrowserWindow,
   deps: EngineFactoryDeps,
 ): Promise<MpvEngine> {
-  const presenter = createPresenter(choosePresenter(deps.platform), owner, deps.platform);
+  const kind = choosePresenter(deps.platform, deps.presenterOverride);
+  const presenter = createPresenter(
+    kind,
+    owner,
+    deps.platform,
+    deps.engineId === undefined ? undefined : { engineId: deps.engineId },
+  );
+  const renderContext = deps.renderContext ?? presenter.kind === 'canvas';
   const readaheadStore =
     deps.readaheadStore ??
     createReadaheadTierStore({
@@ -63,7 +74,7 @@ export async function createEngineFor(
       transportArgs: [],
       platform: deps.platform,
       ...(deps.hwdec === undefined ? {} : { hwdec: deps.hwdec }),
-      ...(deps.renderContext === undefined ? {} : { renderContext: deps.renderContext }),
+      renderContext,
     }),
     loadMode: deps.loadMode,
     platform: deps.platform,

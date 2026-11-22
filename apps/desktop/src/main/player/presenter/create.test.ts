@@ -6,6 +6,13 @@ const electron = vi.hoisted(() => ({
   made: [] as Array<{ options: unknown; openHandler?: () => { action: string } }>,
   screenListeners: new Map<string, Set<() => void>>(),
   dipCalls: [] as unknown[],
+  importedTextures: [] as Array<{ options: unknown; released: number }>,
+  sentTextures: [] as Array<{ options: unknown; args: unknown[] }>,
+  netServers: [] as Array<{
+    listenCalls: Array<{ path: string; exclusive: boolean }>;
+    closed: boolean;
+    connect: (socket: unknown) => void;
+  }>,
   displays: [
     {
       id: 1,
@@ -15,6 +22,46 @@ const electron = vi.hoisted(() => ({
     },
   ],
   matchingId: 1,
+}));
+
+vi.mock('node:net', () => ({
+  createServer: () => {
+    const connListeners = new Set<(socket: unknown) => void>();
+    const errListeners = new Set<(err: Error) => void>();
+    const record = {
+      listenCalls: [] as Array<{ path: string; exclusive: boolean }>,
+      closed: false,
+      connect: (socket: unknown) => {
+        for (const fn of [...connListeners]) fn(socket);
+      },
+    };
+    electron.netServers.push(record);
+    const server = {
+      listen(opts: { path: string; exclusive: boolean }, onListening: () => void) {
+        record.listenCalls.push(opts);
+        queueMicrotask(onListening);
+        return server;
+      },
+      on(event: string, listener: (...args: never[]) => void) {
+        if (event === 'connection') connListeners.add(listener as (socket: unknown) => void);
+        else if (event === 'error') errListeners.add(listener as (err: Error) => void);
+        return server;
+      },
+      once(event: string, listener: (err: Error) => void) {
+        if (event === 'error') errListeners.add(listener);
+        return server;
+      },
+      removeListener(event: string, listener: (err: Error) => void) {
+        if (event === 'error') errListeners.delete(listener);
+        return server;
+      },
+      close() {
+        record.closed = true;
+        return server;
+      },
+    };
+    return server;
+  },
 }));
 
 vi.mock('electron', () => {
@@ -34,6 +81,20 @@ vi.mock('electron', () => {
   }
   return {
     BrowserWindow,
+    sharedTexture: {
+      importSharedTexture: (options: unknown) => {
+        const rec = { options, released: 0 };
+        electron.importedTextures.push(rec);
+        return {
+          release: () => {
+            rec.released += 1;
+          },
+        };
+      },
+      sendSharedTexture: async (options: unknown, ...args: unknown[]) => {
+        electron.sentTextures.push({ options, args });
+      },
+    },
     screen: {
       on: (event: string, listener: () => void) => {
         const set = electron.screenListeners.get(event) ?? new Set();
@@ -71,6 +132,9 @@ beforeEach(() => {
   electron.made = [];
   electron.screenListeners.clear();
   electron.dipCalls = [];
+  electron.importedTextures = [];
+  electron.sentTextures = [];
+  electron.netServers = [];
   electron.displays = [
     {
       id: 1,
@@ -83,6 +147,63 @@ beforeEach(() => {
 });
 
 describe('createPresenter', () => {
+  it('canvas wires Electron sharedTexture, net.createServer, screen scaleFactor, mainFrame, and engineId', async () => {
+    const app = fakeAppWindow();
+    const mainFrame = { frameId: 7 };
+    let wcDestroyed = false;
+    Object.assign(app.window.webContents, {
+      isDestroyed: () => wcDestroyed,
+      mainFrame,
+    });
+    const appWindow = app.window as unknown as BrowserWindow;
+    const presenter = createPresenter('canvas', appWindow, 'win32', { engineId: 'engine-9' });
+    expect(presenter.kind).toBe('canvas');
+    expect(presenter.coversArea).toBe(false);
+
+    const args = await presenter.prepare();
+    expect(args).toHaveLength(2);
+    expect(args[0]).toMatch(/^--elv-canvas-pipe=\\\\\.\\pipe\\elv-mpv-canvas-[0-9a-f]{16}$/);
+    expect(args[1]).toBe('--input-vo-keyboard=no');
+    expect(electron.netServers).toHaveLength(1);
+    expect(electron.netServers[0]?.listenCalls[0]?.exclusive).toBe(true);
+    expect([...electron.screenListeners.keys()].sort()).toEqual([
+      'display-added',
+      'display-metrics-changed',
+      'display-removed',
+    ]);
+
+    const written: string[] = [];
+    const dataListeners: Array<(chunk: string) => void> = [];
+    const fakeSocket = {
+      write: (chunk: string) => written.push(chunk),
+      destroy: () => undefined,
+      on: (event: string, listener: (arg: never) => void) => {
+        if (event === 'data') dataListeners.push(listener as (chunk: string) => void);
+        return fakeSocket;
+      },
+    };
+    presenter.setArea(AREA);
+    electron.netServers[0]?.connect(fakeSocket);
+    // scaleFactor is 2 from mock display -> 640*2 x 360*2
+    expect(written).toEqual(['R 1280 720\n']);
+
+    for (const fn of dataListeners) fn('S 1 0 1234 1280 720\nF 1 0 1280 720\n');
+    expect(electron.importedTextures).toHaveLength(1);
+    await vi.waitFor(() => expect(electron.sentTextures).toHaveLength(1));
+    expect(electron.sentTextures[0]?.options).toMatchObject({ frame: mainFrame });
+    expect(electron.sentTextures[0]?.args).toEqual(['engine-9']);
+    await vi.waitFor(() => expect(written).toContain('A 1 0\n'));
+
+    // Destroyed webContents returns null mainFrame and acks without sending
+    wcDestroyed = true;
+    for (const fn of dataListeners) fn('F 1 0 1280 720\n');
+    expect(electron.sentTextures).toHaveLength(1);
+
+    presenter.dispose();
+    expect(electron.netServers[0]?.closed).toBe(true);
+    expect(listenerTotal()).toBe(0);
+  });
+
   it('child-window makes one video window owned by the app window and follows displays', async () => {
     const app = fakeAppWindow();
     const appWindow = app.window as unknown as BrowserWindow;

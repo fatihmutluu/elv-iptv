@@ -25,6 +25,8 @@ static void *symbol(HMODULE lib, const char *name)
     return (void *)GetProcAddress(lib, name);
 }
 
+#include "elv-mpv-canvas.h"
+
 static char *to_utf8(const wchar_t *w)
 {
     int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
@@ -79,7 +81,9 @@ static void arm_watchdog(DWORD ms)
 }
 
 /* Returns 0, or 2 when an argument is malformed or mpv rejects it. */
-static int apply_args(int argc, wchar_t **argv, set_option_string_fn set_option, mpv_handle *h, DWORD *parent_pid)
+static int apply_args(
+    int argc, wchar_t **argv, set_option_string_fn set_option, mpv_handle *h,
+    DWORD *parent_pid, const wchar_t **canvas_pipe)
 {
     int i;
     for (i = 1; i < argc; i++) {
@@ -96,6 +100,13 @@ static int apply_args(int argc, wchar_t **argv, set_option_string_fn set_option,
             if (pid == 0 || *end != L'\0')
                 return 2;
             *parent_pid = (DWORD)pid;
+            continue;
+        }
+        if (wcsncmp(arg, L"elv-canvas-pipe=", 16) == 0) {
+            const wchar_t *val = arg + 16;
+            if (wcsncmp(val, L"\\\\.\\pipe\\", 9) != 0 || val[9] == L'\0')
+                return 2;
+            *canvas_pipe = val;
             continue;
         }
         eq = wcschr(arg, L'=');
@@ -135,8 +146,13 @@ int wmain(int argc, wchar_t **argv)
     mpv_handle *h;
     HANDLE parent = NULL;
     DWORD parent_pid = 0;
+    const wchar_t *canvas_pipe = NULL;
+    CanvasState canvas;
+    int canvas_active = 0;
+    int quit_sent = 0;
     int code;
 
+    canvas_init(&canvas);
     become_dpi_aware();
     lib = load_libmpv();
     if (!lib)
@@ -162,14 +178,42 @@ int wmain(int argc, wchar_t **argv)
     set_option(h, "input-vo-keyboard", "no");
     set_option(h, "osc", "no");
     set_option(h, "osd-level", "0");
-    code = apply_args(argc, argv, set_option, h, &parent_pid);
-    if (code == 0 && parent_pid != 0 && !(parent = OpenProcess(SYNCHRONIZE, FALSE, parent_pid)))
-        code = 5;
+    code = apply_args(argc, argv, set_option, h, &parent_pid, &canvas_pipe);
+    if (code == 0) {
+        if (canvas_pipe != NULL) {
+            if (parent_pid == 0 ||
+                !(parent = OpenProcess(SYNCHRONIZE | PROCESS_DUP_HANDLE, FALSE, parent_pid)))
+                code = 5;
+        } else if (parent_pid != 0) {
+            if (!(parent = OpenProcess(SYNCHRONIZE, FALSE, parent_pid)))
+                code = 5;
+        }
+    }
+    if (code == 0 && canvas_pipe != NULL) {
+        if (!canvas_load_symbols(&canvas, lib))
+            code = 3;
+        else if (set_option(h, "vo", "libmpv") < 0 ||
+                 set_option(h, "force-window", "no") < 0 ||
+                 set_option(h, "video-timing-offset", "0") < 0)
+            code = 4;
+        else if (!canvas_prepare(&canvas, canvas_pipe, parent))
+            code = 4;
+        else
+            canvas_active = 1;
+    }
     if (code == 0 && initialize(h) < 0)
+        code = 4;
+    if (code == 0 && canvas_active && !canvas_start(&canvas, h, command))
         code = 4;
     if (code != 0) {
         arm_watchdog(3000);
+        if (canvas_pipe != NULL)
+            canvas_stop(&canvas);
+        if (parent)
+            CloseHandle(parent);
         destroy(h);
+        if (canvas_pipe != NULL)
+            canvas_unload(&canvas);
         return code;
     }
 
@@ -177,16 +221,27 @@ int wmain(int argc, wchar_t **argv)
         mpv_event *ev = wait_event(h, 0.25);
         if (ev->event_id == MPV_EVENT_SHUTDOWN)
             break;
-        if (parent && WaitForSingleObject(parent, 0) == WAIT_OBJECT_0) {
-            CloseHandle(parent);
-            parent = NULL;
+        if (!quit_sent && canvas_active && canvas_is_shutdown(&canvas)) {
+            quit_sent = 1;
+            arm_watchdog(3000);
+            command(h, "quit");
+        }
+        if (!quit_sent && parent && WaitForSingleObject(parent, 0) == WAIT_OBJECT_0) {
+            quit_sent = 1;
+            if (canvas_active)
+                canvas_signal_shutdown(&canvas);
             arm_watchdog(3000);
             command(h, "quit");
         }
     }
+    if (!quit_sent)
+        arm_watchdog(3000);
+    if (canvas_active)
+        canvas_stop(&canvas);
     if (parent)
         CloseHandle(parent);
-    arm_watchdog(3000);
     destroy(h);
+    if (canvas_active)
+        canvas_unload(&canvas);
     return 0;
 }

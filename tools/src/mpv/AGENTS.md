@@ -11,7 +11,7 @@
   removed and fetch fails. The licence gate then scans the binaries as strings (nothing runs) and the runtime moves to
   gitignored `apps/desktop/resources/mpv/<key>/` with `BUILDINFO.json`.
 - Licence gate: FFmpeg configuration without `--enable-gpl` and `--enable-nonfree`, mpv options with `-Dgpl=false`.
-  It scans `*.dll`, `libavcodec*`, `libavformat*` and `libavutil*` dylibs and the `mpv` binary.
+  It scans `*.dll`, `libavcodec*`, `libavformat*`, `libavutil*`, `libmpv*` dylibs and the `mpv` binary.
 - `verify` compares the installed `BUILDINFO.json` SHA-256 with the lock, then rescans; `verify --dir <folder>` only
   applies the gate to a folder (the CI build before upload).
 - Windows pin update: download the new archive and its `.asc`, `gpg --verify` against the mpv release key, then change
@@ -32,12 +32,14 @@
   `elv-mpv.exe` beside the DLL with MSVC (`vswhere` finds `vcvars64.bat`; `/W4 /WX`). libmpv is loaded at run time with
   `LoadLibraryExW` from the exe folder, so the DLL stays replaceable (LGPL). Without Build Tools fetch fails clearly.
 - Launcher contract: `--name=value`, `--name` (yes) and `--no-name` (no) become libmpv options; `--elv-parent-pid=<pid>`
-  makes it quit mpv when that process exits. Exit codes: 2 bad argument or rejected option, 3 libmpv missing, 4 init failed.
-- Hardening: before the caller's arguments the launcher sets `config=no`, `load-scripts=no`, `ytdl=no` and
-  `load-unsafe-playlists=no` (the caller may override). The OSC is built in and still runs (`user-data/osc` exists).
-  A watchdog thread ends the process 3 s after quit or shutdown starts. Exit 5: the parent pid cannot be opened.
+  makes it quit mpv when that process exits; `--elv-canvas-pipe=\\.\pipe\<name>` (requiring `--elv-parent-pid`) runs
+  `vo=libmpv` via `MPV_RENDER_API_TYPE_D3D11` over triple-buffered shared `ID3D11Texture2D` handles (`elv-mpv-canvas.h`).
+  Exit codes: 2 bad argument or rejected option, 3 libmpv or symbol missing, 4 init failed, 5 parent pid not openable.
+- Hardening: before the caller's arguments the launcher sets `config=no`, `load-scripts=no`, `ytdl=no`,
+  `load-unsafe-playlists=no`, `input-default-bindings=no`, `input-vo-keyboard=no`, `osc=no` and `osd-level=0`
+  (the caller may override). A watchdog thread ends the process 3 s after quit or shutdown starts.
   Manual check for the watchdog (no automated test can force a stuck shutdown): play from a socket that accepts and
   never answers, kill the parent, and confirm `elv-mpv.exe` is gone within about 4 s.
 - The launcher is Per-Monitor V2 DPI aware (like mpv.exe), so `--geometry` and a `--wid` child use physical pixels.
-  `elv-mpv.stamp` holds the SHA-256 of the `elv-mpv.c` it was built from; `fetch` rebuilds the launcher of a current
-  runtime when the stamp is missing or differs, or the exe is gone.
+  `elv-mpv.stamp` holds the SHA-256 of all `.c`/`.h` sources in `apps/desktop/native/mpv-host/`; `fetch` rebuilds the
+  launcher of a current runtime when the stamp is missing or differs, or the exe is gone.
