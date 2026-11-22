@@ -1109,3 +1109,12 @@ msgstr "Doldur"
 
 msgid "player.deinterlace"
 msgstr "Taramayı gider"
+
+msgid "desktop.catalogDisconnected.title"
+msgstr "Katalog servisi beklenmedik şekilde durdu"
+
+msgid "desktop.catalogDisconnected.retry"
+msgstr "Yeniden bağlan"
+
+msgid "desktop.catalogDisconnected.reconnecting"
+msgstr "Yeniden bağlanıyor…"

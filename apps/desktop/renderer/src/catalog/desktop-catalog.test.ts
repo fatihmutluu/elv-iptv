@@ -100,6 +100,7 @@ function makeFakeBridge(overrides?: Partial<CatalogBridge>): {
     epgWindow: async () => ({}),
     channelByNumber: async () => null,
     onChanged: () => () => undefined,
+    onDisconnected: () => () => undefined,
     close: async () => undefined,
   };
 

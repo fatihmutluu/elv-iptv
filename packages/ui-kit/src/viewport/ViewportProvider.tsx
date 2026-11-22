@@ -1,7 +1,21 @@
-import { createContext, type ReactElement, type ReactNode, useContext, useMemo } from 'react';
+import {
+  createContext,
+  type ReactElement,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { Platform, useWindowDimensions } from 'react-native';
 import { FormFactorContext, FormFactorProvider } from '../form-factor';
-import { resolveViewport, type ViewportInfo, type ViewportOverride } from './resolve-viewport';
+import {
+  type EdgeInsets,
+  resolveViewport,
+  type ViewportInfo,
+  type ViewportOverride,
+} from './resolve-viewport';
+import { edgeInsetsEqual, subscribeWebSafeArea } from './web-safe-area';
 
 const ViewportContext = createContext<ViewportInfo | undefined>(undefined);
 
@@ -18,6 +32,17 @@ export interface ViewportProviderProps {
  */
 export function ViewportProvider({ value, children }: ViewportProviderProps): ReactElement {
   const { width, height } = useWindowDimensions();
+  const [probedSafeArea, setProbedSafeArea] = useState<EdgeInsets | undefined>(undefined);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    return subscribeWebSafeArea((next) => {
+      setProbedSafeArea((prev) =>
+        prev !== undefined && edgeInsetsEqual(prev, next) ? prev : next,
+      );
+    });
+  }, []);
+
   const oFormFactor = value?.formFactor;
   const oOrientation = value?.orientation;
   const oModality = value?.inputModality;
@@ -31,27 +56,29 @@ export function ViewportProvider({ value, children }: ViewportProviderProps): Re
 
   const resolved = useMemo(() => {
     const safeArea =
+      probedSafeArea !== undefined ||
       oSafeTop !== undefined ||
       oSafeRight !== undefined ||
       oSafeBottom !== undefined ||
       oSafeLeft !== undefined
         ? {
-            ...(oSafeTop !== undefined ? { top: oSafeTop } : {}),
-            ...(oSafeRight !== undefined ? { right: oSafeRight } : {}),
-            ...(oSafeBottom !== undefined ? { bottom: oSafeBottom } : {}),
-            ...(oSafeLeft !== undefined ? { left: oSafeLeft } : {}),
+            top: oSafeTop ?? probedSafeArea?.top ?? 0,
+            right: oSafeRight ?? probedSafeArea?.right ?? 0,
+            bottom: oSafeBottom ?? probedSafeArea?.bottom ?? 0,
+            left: oSafeLeft ?? probedSafeArea?.left ?? 0,
           }
         : undefined;
-    const override: ViewportOverride | undefined = hasOverride
-      ? {
-          ...(oFormFactor !== undefined ? { formFactor: oFormFactor } : {}),
-          ...(oOrientation !== undefined ? { orientation: oOrientation } : {}),
-          ...(oModality !== undefined ? { inputModality: oModality } : {}),
-          ...(oWidth !== undefined ? { width: oWidth } : {}),
-          ...(oHeight !== undefined ? { height: oHeight } : {}),
-          ...(safeArea !== undefined ? { safeArea } : {}),
-        }
-      : undefined;
+    const override: ViewportOverride | undefined =
+      hasOverride || safeArea !== undefined
+        ? {
+            ...(oFormFactor !== undefined ? { formFactor: oFormFactor } : {}),
+            ...(oOrientation !== undefined ? { orientation: oOrientation } : {}),
+            ...(oModality !== undefined ? { inputModality: oModality } : {}),
+            ...(oWidth !== undefined ? { width: oWidth } : {}),
+            ...(oHeight !== undefined ? { height: oHeight } : {}),
+            ...(safeArea !== undefined ? { safeArea } : {}),
+          }
+        : undefined;
     return resolveViewport({
       isTV: Boolean(Platform.isTV),
       os: Platform.OS,
@@ -63,6 +90,7 @@ export function ViewportProvider({ value, children }: ViewportProviderProps): Re
     width,
     height,
     hasOverride,
+    probedSafeArea,
     oFormFactor,
     oOrientation,
     oModality,

@@ -59,6 +59,9 @@ export const PLAYER_CHANNELS = Object.freeze({
   gateReport: 'gate:report',
 } as const);
 
+/** Hardware video decoding profile for desktop `libmpv` (`#435`, `#210`). */
+export type HwdecProfile = 'auto-safe' | 'auto-copy' | 'no' | 'darwin-compat';
+
 /** A port command or a presenter command as it crosses the bridge (`fullscreen` is the presenter's, not the port's). */
 export type BridgeCommand =
   | { name: 'load'; cmd: LoadCommand }
@@ -72,6 +75,7 @@ export type BridgeCommand =
   | { name: 'setSubtitleDelay'; delaySec: number }
   | { name: 'setAudioDevice'; device: string }
   | { name: 'setDeinterlace'; enabled: boolean }
+  | { name: 'setHwdec'; profile: HwdecProfile }
   | { name: 'release' }
   | { name: 'fullscreen' }
   | { name: 'mute' };
@@ -214,6 +218,8 @@ const isVolume = (x: unknown): x is number => isNumber(x) && x >= 0 && x <= MAX_
 const isDelaySec = (x: unknown): x is number => isNumber(x) && Math.abs(x) <= MAX_DELAY_SEC;
 const isAudioDevice = (x: unknown): x is string =>
   typeof x === 'string' && x.length > 0 && x.length <= MAX_AUDIO_DEVICE_CHARS && !hasControlChar(x);
+const isHwdecProfile = (x: unknown): x is HwdecProfile =>
+  x === 'auto-safe' || x === 'auto-copy' || x === 'no' || x === 'darwin-compat';
 
 function isLoadCommand(x: unknown): x is LoadCommand {
   if (!isRecord(x)) return false;
@@ -262,6 +268,8 @@ function isBridgeCommand(x: unknown): x is BridgeCommand {
       return isAudioDevice(x['device']);
     case 'setDeinterlace':
       return typeof x['enabled'] === 'boolean';
+    case 'setHwdec':
+      return isHwdecProfile(x['profile']);
     case 'release':
     case 'fullscreen':
     case 'mute':

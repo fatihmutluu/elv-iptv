@@ -7,6 +7,7 @@ import type {
 } from '@elv/playback';
 import type {
   BridgeCommand,
+  HwdecProfile,
   PlayerArea,
   PlayerBridge,
   PlayerEventMessage,
@@ -49,6 +50,8 @@ export interface DesktopEngine extends PlayerEngine {
   setAudioDevice(device: string): void;
   /** Enables or disables per-file mpv deinterlacing (`#131`). */
   setDeinterlace(enabled: boolean): void;
+  /** Selects the desktop `libmpv` hardware video decoding profile (`#435`, `#210`). */
+  setHwdec(profile: HwdecProfile): void;
   /** Presentation events outside the port; the latest `presenter` event is replayed to a new listener. */
   onUi(listener: (event: PlayerUiEvent) => void): () => void;
 }
@@ -170,6 +173,7 @@ export async function createDesktopEngine(
     setSubtitleDelay: (delaySec) => send({ name: 'setSubtitleDelay', delaySec }),
     setAudioDevice: (device) => send({ name: 'setAudioDevice', device }),
     setDeinterlace: (enabled) => send({ name: 'setDeinterlace', enabled }),
+    setHwdec: (profile) => send({ name: 'setHwdec', profile }),
     setArea(area) {
       if (!released) bridge.setArea({ engineId: id, area });
     },

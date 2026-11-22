@@ -1,6 +1,6 @@
 import { BrowserWindow, screen } from 'electron';
 import type { PresenterKind } from '../../../shared/player-ipc.ts';
-import { macOwnWindowGeometry } from './bounds.ts';
+import { type FullscreenMode, macOwnWindowGeometry } from './bounds.ts';
 import { createChildWindowPresenter } from './child-window.ts';
 import { createOwnWindowPresenter } from './own-window.ts';
 import type { VideoPresenter } from './types.ts';
@@ -11,6 +11,7 @@ export function createPresenter(
   kind: PresenterKind,
   appWindow: BrowserWindow,
   platform: NodeJS.Platform,
+  opts?: { fullscreenMode?: FullscreenMode },
 ): VideoPresenter {
   if (kind === 'child-window') {
     return createChildWindowPresenter({
@@ -31,6 +32,7 @@ export function createPresenter(
   }
   return createOwnWindowPresenter({
     appWindow,
+    ...(opts?.fullscreenMode !== undefined ? { fullscreenMode: opts.fullscreenMode } : {}),
     toScreenPixels: (rect) => {
       if (platform === 'win32') return screen.dipToScreenRect(appWindow, rect);
       if (platform === 'darwin') {
@@ -41,6 +43,13 @@ export function createPresenter(
     },
     ...(platform === 'darwin'
       ? {
+          displayBoundsOf: (rect) => {
+            const display = screen.getDisplayMatching(rect);
+            return {
+              bounds: display.bounds ?? display.workArea,
+              workArea: display.workArea,
+            };
+          },
           screenIndexOf: (rect) => {
             const displays = screen.getAllDisplays();
             if (displays.length <= 1) return undefined;

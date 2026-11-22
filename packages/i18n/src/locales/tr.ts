@@ -409,4 +409,7 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'player.diag.codecUnsupported': 'Bu yayın biçimi veya çözücü bu cihazda desteklenmiyor.',
   'rail.scrollLeft': 'Sola kaydır',
   'rail.scrollRight': 'Sağa kaydır',
+  'desktop.catalogDisconnected.title': 'Katalog servisi beklenmedik şekilde durdu',
+  'desktop.catalogDisconnected.retry': 'Yeniden bağlan',
+  'desktop.catalogDisconnected.reconnecting': 'Yeniden bağlanıyor…',
 };

@@ -1,6 +1,7 @@
 import type { AttemptToken, EngineEvent, PlayerEngine } from '@elv/playback';
 import {
   DESKTOP_CAPABILITIES,
+  type HwdecProfile,
   type PlayerArea,
   type PlayerUiEvent,
   type PresenterKind,
@@ -16,6 +17,7 @@ import {
 } from './mpv/live-session.ts';
 import { createOpeningGate } from './mpv/opening-gate.ts';
 import type { MpvProcess } from './mpv/process.ts';
+import type { ReadaheadTierStore } from './mpv/readahead.ts';
 import { createTrackTracker } from './mpv/tracks.ts';
 import type { VideoPresenter } from './presenter/types.ts';
 
@@ -32,6 +34,9 @@ export interface MpvEngineDeps {
   timers: { setTimeout(fn: () => void, ms: number): unknown; clearTimeout(h: unknown): void };
   onUi(event: PlayerUiEvent): void;
   deferStart?: boolean;
+  platform?: NodeJS.Platform;
+  audioRampMs?: number;
+  readaheadStore?: ReadaheadTierStore;
 }
 
 /** The desktop `PlayerEngine`: one mpv process per player window, kept across zaps. */
@@ -50,6 +55,7 @@ export interface MpvEngine extends PlayerEngine {
   setSubtitleDelay(delaySec: number): void;
   setAudioDevice(device: string): void;
   setDeinterlace(enabled: boolean): void;
+  setHwdec(profile: HwdecProfile): void;
 }
 
 const QUIT_GRACE_MS = 500;
@@ -107,10 +113,12 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   const detach = (L: LiveSession): void => {
     if (live !== L) return;
     live = undefined;
+    controls.cancelRamp(false);
     controls.reset();
     if (media) media.entryId = undefined;
     L.hotplug.reset();
     L.repeatGate.reset();
+    L.readahead.reset();
     opening.finish();
     for (const waiter of [...L.endWaiters]) waiter.done(false);
   };
@@ -132,6 +140,8 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     ui,
     reportWedged,
     enqueueCommand: (cmd, slot) => queue.enqueueCommand(cmd, slot),
+    onAudioProperty: (name, value) => controls.onAudioProperty(name, value),
+    ...(deps.readaheadStore === undefined ? {} : { readaheadStore: deps.readaheadStore }),
   });
 
   const startProcess = async (): Promise<LiveSession | undefined> => {
@@ -241,10 +251,15 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
 
   const controls = createEngineControls({
     isReleased: () => released,
-    hasLive: () => live !== undefined,
+    getLive: () => live,
     getMedia: () => media,
     adopt,
     enqueueCommand: (cmd, slot) => queue.enqueueCommand(cmd, slot),
+    now: deps.now,
+    timers,
+    platform: deps.platform ?? process.platform,
+    initialDarwinCompat: deps.baseArgs.includes('--hwdec-image-format=uyvy422'),
+    ...(deps.audioRampMs === undefined ? {} : { audioRampMs: deps.audioRampMs }),
   });
 
   const startMedia = (token: AttemptToken, request: MediaRequest): void => {
@@ -252,6 +267,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     controls.reset();
     media = { token, request };
     queue.enqueueLoad(media);
+    controls.cancelRamp(true, true);
     opening.wake();
   };
 
@@ -286,12 +302,13 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       presenter.setArea(area);
     },
     toggleFullscreen: () => !released && presenter.toggleFullscreen(),
-    toggleMute: () => !released && queue.enqueueCommand(['cycle', 'mute']),
+    toggleMute: () => controls.toggleMute(),
     setVolume: (volume) => controls.setVolume(volume),
     setAudioDelay: (delaySec) => controls.setAudioDelay(delaySec),
     setSubtitleDelay: (delaySec) => controls.setSubtitleDelay(delaySec),
     setAudioDevice: (device) => controls.setAudioDevice(device),
     setDeinterlace: (enabled) => controls.setDeinterlace(enabled),
+    setHwdec: (profile) => controls.setHwdec(profile),
     get spawns() {
       return spawns;
     },
@@ -314,8 +331,8 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       const startMs = request.kind === 'vod' ? (lastPositionMs ?? request.startMs) : undefined;
       startMedia(attempt, withStart(request, startMs));
     },
-    play: (attempt) => command(attempt, ['set', 'pause', 'no']),
-    pause: (attempt) => command(attempt, ['set', 'pause', 'yes']),
+    play: (attempt) => controls.play(attempt),
+    pause: (attempt) => controls.pause(attempt),
     seek(attempt, positionMs) {
       if (released) return;
       controls.onSeekQueued();
@@ -338,17 +355,20 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       live?.repeatGate.reset();
       media = undefined;
       queue.enqueueStop();
+      controls.cancelRamp(true, true);
       opening.wake();
     },
     recreate(attempt) {
       if (released) return;
       adopt(attempt);
+      controls.cancelRamp(false);
       controls.reset();
       tracks.onRetryOrRecreate();
       queue.enqueueRecreate();
     },
     release() {
       if (released) return;
+      controls.cancelRamp(true, true);
       released = true;
       controls.reset();
       tracks.onStop();

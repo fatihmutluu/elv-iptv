@@ -66,6 +66,27 @@ export function fakeHttpError(status: number, reason: string): FakeMpvScript {
   ];
 }
 
+/** Stream-intrinsic properties cleared on every `start-file` in `FakeMpv`. */
+export const STREAM_INTRINSIC_PROPS: ReadonlyArray<[string, unknown]> = [
+  ['track-list', undefined],
+  ['video-params', undefined],
+  ['time-pos', undefined],
+  ['playback-time', undefined],
+  ['duration', undefined],
+];
+
+/** Properties reset on `start-file` when listed in `--reset-on-next-file`. */
+export const RESETTABLE_PROPS: ReadonlyArray<[string, unknown]> = [
+  ['vid', 'auto'],
+  ['aid', 'auto'],
+  ['sid', 'auto'],
+  ['speed', 1],
+  ['deinterlace', 'no'],
+  ['video-aspect-override', '-1'],
+  ['audio-delay', 0],
+  ['sub-delay', 0],
+];
+
 /** Extracts `--reset-on-next-file=...` property names passed to `spawn`. */
 export function parseResetOnNextFile(args: readonly string[]): Set<string> {
   const out = new Set<string>();

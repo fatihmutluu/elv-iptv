@@ -396,6 +396,9 @@ export const enMessages = {
   'player.diag.codecUnsupported': 'This stream format or codec is not supported on this device.',
   'rail.scrollLeft': 'Scroll left',
   'rail.scrollRight': 'Scroll right',
+  'desktop.catalogDisconnected.title': 'Catalog service stopped unexpectedly',
+  'desktop.catalogDisconnected.retry': 'Reconnect',
+  'desktop.catalogDisconnected.reconnecting': 'Reconnecting…',
 } as const;
 
 /** Valid message identifier across all supported locales. */

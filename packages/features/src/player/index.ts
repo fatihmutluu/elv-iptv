@@ -1,3 +1,4 @@
+export type { MediaSessionMetadata } from '../ports/video-host';
 export {
   type DescribedPlaybackFailure,
   describePlaybackFailure,

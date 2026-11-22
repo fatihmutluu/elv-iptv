@@ -27,6 +27,16 @@ export type HostKey =
   | 'tracks'
   | 'prev-channel';
 
+/** Typed playback metadata pushed from `PlayerScreen` to OS media controls (`MediaSession`, `#435`). */
+export interface MediaSessionMetadata {
+  readonly title: string;
+  readonly subtitle?: string;
+  readonly artworkUrl?: string;
+  readonly kind: 'live' | 'vod';
+  /** Whether previous/next track stepping (live playlist or episode queue) is available. */
+  readonly canStepTrack: boolean;
+}
+
 /** An opened platform player engine paired with its view surface renderer. */
 export interface OpenVideoEngine {
   readonly engine: PlayerEngine;
@@ -41,6 +51,8 @@ export interface OpenVideoEngine {
   setOrientationLocked?: (locked: boolean) => void;
   /** Optional per-stream deinterlace toggle (e.g. desktop mpv interlaced broadcast support, `#131`). */
   setDeinterlace?: (enabled: boolean) => void;
+  /** Optional typed media metadata sink for OS media session integrations (`#435`). */
+  setMediaMetadata?: (metadata: MediaSessionMetadata | null) => void;
 }
 
 /** Port supplied by the app composition root to open a `PlayerEngine` and render its surface. */

@@ -2,8 +2,14 @@ import { createCoalescedCatalog } from '@elv/data';
 import { AppProviders, AppShell, createLazyCatalog, type VideoHost } from '@elv/features';
 import { resolveLocale } from '@elv/i18n';
 import { UiAdaptersProvider } from '@elv/ui-kit';
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { attachMouseBackGuard } from './browser-back.ts';
+import {
+  attemptCatalogReconnect,
+  CatalogCrashBanner,
+  subscribeCatalogDisconnected,
+} from './CatalogCrashBanner.tsx';
 import { createDesktopCatalog } from './catalog/index.ts';
 import { GateScreen } from './gate/GateScreen.tsx';
 import { resolveGate } from './gate/params.ts';
@@ -47,13 +53,12 @@ function isTrackPickerModalOpen(): boolean {
   );
 }
 
-function readActiveOsdTitle(): string {
-  if (typeof document === 'undefined') return '';
-  return document.querySelector('[data-testid="osd-title"]')?.textContent?.trim() ?? '';
-}
-
 function AppRoot() {
   const [refreshToken, setRefreshToken] = useState(0);
+  const [catalogDisconnected, setCatalogDisconnected] = useState(false);
+  const [reconnectingCatalog, setReconnectingCatalog] = useState(false);
+  const mountedRef = useRef(true);
+  const reconnectingRef = useRef(false);
 
   const systemLocale = useMemo(() => {
     const languages = typeof navigator === 'undefined' ? [] : navigator.languages;
@@ -81,7 +86,6 @@ function AppRoot() {
         const mediaSession = createDesktopMediaSession();
         let activeHostKeyListener: ((key: DesktopHostKey) => void) | null = null;
         const engine = bindDesktopMediaSession(rawEngine, mediaSession, {
-          getTitle: readActiveOsdTitle,
           onTrackStep: (dir) =>
             activeHostKeyListener?.(dir === 'next' ? 'channel-up' : 'channel-down'),
         });
@@ -91,6 +95,7 @@ function AppRoot() {
           toggleFullscreen: () => rawEngine.toggleFullscreen(),
           toggleMute: () => rawEngine.toggleMute(),
           setDeinterlace: (enabled) => rawEngine.setDeinterlace(enabled),
+          setMediaMetadata: (metadata) => engine.setMediaMetadata(metadata),
           onHostKey: (listener) => {
             activeHostKeyListener = listener;
             const offUi = rawEngine.onUi((event) =>
@@ -112,10 +117,38 @@ function AppRoot() {
   );
 
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
     const bridge = window.elv?.catalog;
     if (!bridge || typeof bridge.onChanged !== 'function') return;
     return bridge.onChanged(() => {
       setRefreshToken((n) => n + 1);
+    });
+  }, []);
+
+  useEffect(() => {
+    return subscribeCatalogDisconnected(window.elv?.catalog, () => {
+      setCatalogDisconnected(true);
+    });
+  }, []);
+
+  const handleReconnectCatalog = useCallback(() => {
+    if (reconnectingRef.current) return;
+    reconnectingRef.current = true;
+    setReconnectingCatalog(true);
+    void attemptCatalogReconnect(window.elv?.catalog).then((reconnected) => {
+      reconnectingRef.current = false;
+      if (!mountedRef.current) return;
+      setReconnectingCatalog(false);
+      if (reconnected) {
+        setCatalogDisconnected(false);
+        setRefreshToken((n) => n + 1);
+      }
     });
   }, []);
 
@@ -141,11 +174,26 @@ function AppRoot() {
         systemLocale={systemLocale}
         viewport={{ formFactor: 'desktop' }}
       >
-        <AppShell catalog={catalog} videoHost={videoHost} externalRefreshToken={refreshToken} />
+        <View style={appStyles.root}>
+          {catalogDisconnected ? (
+            <CatalogCrashBanner
+              reconnecting={reconnectingCatalog}
+              onRetry={handleReconnectCatalog}
+            />
+          ) : null}
+          <View style={appStyles.shell}>
+            <AppShell catalog={catalog} videoHost={videoHost} externalRefreshToken={refreshToken} />
+          </View>
+        </View>
       </AppProviders>
     </UiAdaptersProvider>
   );
 }
+
+const appStyles = StyleSheet.create({
+  root: { flex: 1 },
+  shell: { flex: 1, minHeight: 0 },
+});
 
 /** Root of the desktop renderer: mounts the gate harness on `--elv-gate=`, the dev-only UI Workbench in plain browser dev mode, and `AppShell` (#13) otherwise. */
 export function App() {

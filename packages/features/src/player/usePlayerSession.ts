@@ -15,6 +15,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
+import type { PlayTarget } from '../ports/play-target';
 import type { HostKey, OpenVideoEngine, VideoHost } from '../ports/video-host';
 
 type SessionState =
@@ -45,6 +46,7 @@ function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
  */
 export function usePlayerSession(params: {
   videoHost: VideoHost;
+  activeTarget: PlayTarget;
   serviceRef: MutableRefObject<PlaybackService | null>;
   clockRef: MutableRefObject<PlaybackClock>;
   timersRef: MutableRefObject<PlaybackTimers>;
@@ -52,7 +54,8 @@ export function usePlayerSession(params: {
   onExitRef: MutableRefObject<() => void>;
   onServiceReady: (service: PlaybackService) => void;
 }) {
-  const { videoHost, serviceRef, clockRef, timersRef, hostKeyRef, onExitRef } = params;
+  const { videoHost, activeTarget, serviceRef, clockRef, timersRef, hostKeyRef, onExitRef } =
+    params;
   const onReadyRef = useRef(params.onServiceReady);
   onReadyRef.current = params.onServiceReady;
 
@@ -109,6 +112,7 @@ export function usePlayerSession(params: {
       cancelled = true;
       serviceRef.current = null;
       if (activeSession !== null) {
+        activeSession.opened.setMediaMetadata?.(null);
         activeSession.offHostKey?.();
         activeSession.service.dispose();
         activeSession.opened.engine.release();
@@ -116,6 +120,26 @@ export function usePlayerSession(params: {
       }
     };
   }, [clockRef, hostKeyRef, onExitRef, serviceRef, timersRef, videoHost]);
+
+  const openedEngine = sessionState.kind === 'ready' ? sessionState.opened : null;
+  const canStepTrack = activeTarget.kind === 'live' && (activeTarget.playlist?.count ?? 0) > 1;
+
+  useEffect(() => {
+    openedEngine?.setMediaMetadata?.({
+      title: activeTarget.title,
+      ...(activeTarget.subtitle ? { subtitle: activeTarget.subtitle } : {}),
+      ...(activeTarget.logo ? { artworkUrl: activeTarget.logo } : {}),
+      kind: activeTarget.kind,
+      canStepTrack,
+    });
+  }, [
+    openedEngine,
+    activeTarget.title,
+    activeTarget.subtitle,
+    activeTarget.logo,
+    activeTarget.kind,
+    canStepTrack,
+  ]);
 
   const activeService = sessionState.kind === 'ready' ? sessionState.service : null;
   const sliceRef = useRef<PlaybackUiSlice>(OPENING_PLAYBACK_SLICE);
