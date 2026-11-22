@@ -403,6 +403,28 @@ describe('createDesktopEngine', () => {
 
     f.ui('e1', { type: 'fullscreen-changed', fullscreen: false });
     expect(engine.isFullscreen()).toBe(false);
+
+    // Forwards setResizeMode, setFilterSdh, chapters, and telemetry events (#118, #124, #160, #310)
+    engine.setResizeMode('fill');
+    engine.setFilterSdh(true);
+    expect(f.sent).toContainEqual({
+      engineId: 'e1',
+      command: { name: 'setResizeMode', mode: 'fill' },
+    });
+    expect(f.sent).toContainEqual({
+      engineId: 'e1',
+      command: { name: 'setFilterSdh', enabled: true },
+    });
+    const chaptersEvent: EngineEvent = {
+      attempt: 2,
+      type: 'chapters',
+      chapters: [{ id: 'ch:0', title: 'Intro', startMs: 0, endMs: 60_000 }],
+    };
+    const telemetryEvent: EngineEvent = { attempt: 2, type: 'telemetry', droppedFrames: 5 };
+    f.event('e1', chaptersEvent);
+    f.event('e1', telemetryEvent);
+    expect(events).toContainEqual(chaptersEvent);
+    expect(events).toContainEqual(telemetryEvent);
   });
 
   it('tracks audio-devices UI updates, replays to late subscribers, and cleans up on release (#408)', async () => {

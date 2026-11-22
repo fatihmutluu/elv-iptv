@@ -1,5 +1,5 @@
 import { type AttemptToken, clampPlaybackSpeed } from '@elv/playback';
-import type { HwdecProfile } from '../../shared/player-ipc.ts';
+import type { HwdecProfile, ResizeMode } from '../../shared/player-ipc.ts';
 import { type AudioRampTimers, createAudioRamp } from './mpv/audio-ramp.ts';
 import type { MpvCommand } from './mpv/codec.ts';
 import type { LiveSession, MediaSlot } from './mpv/live-session.ts';
@@ -36,6 +36,8 @@ export interface EngineControls {
   getDesiredAudioDevice(): string | undefined;
   setDeinterlace(enabled: boolean): void;
   setHwdec(profile: HwdecProfile): void;
+  setResizeMode(mode: ResizeMode): void;
+  setFilterSdh(enabled: boolean): void;
 }
 
 /** Creates speed coalescing, audio ramp, and runtime property-setter controllers for `createMpvEngine`. */
@@ -188,6 +190,25 @@ export function createEngineControls(deps: EngineControlsDeps): EngineControls {
           setProp('hwdec-image-format', 'no');
         }
       }
+    },
+    setResizeMode(mode) {
+      if (deps.isReleased()) return;
+      if (mode === 'fit') {
+        setProp('keepaspect', 'yes');
+        setProp('panscan', 0);
+        setProp('video-aspect-override', '-1');
+      } else if (mode === 'fill') {
+        setProp('keepaspect', 'yes');
+        setProp('panscan', 1);
+        setProp('video-aspect-override', '-1');
+      } else {
+        setProp('keepaspect', 'no');
+        setProp('panscan', 0);
+        setProp('video-aspect-override', '-1');
+      }
+    },
+    setFilterSdh(enabled) {
+      setProp('sub-filter-sdh', enabled ? 'yes' : 'no');
     },
   };
 }

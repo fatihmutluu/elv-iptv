@@ -33,6 +33,8 @@ export interface MediaRequest {
   headers: Readonly<Record<string, string>>;
   kind: MediaKind;
   startMs?: number;
+  preferHevcOverDolbyVision?: boolean;
+  filterSdhSubtitles?: boolean;
 }
 
 /** Active media attempt and its bound mpv playlist entry id. */

@@ -9,23 +9,21 @@ export function blurWebTarget(target: unknown): void {
   }
 }
 
-/** Shared surface, border, and focus-ring styles for `PlayerSettingsSheet` rows. */
+/** Shared Cinema Quietude borderless list-row styles for `PlayerSettingsSheet`. */
 export function settingsRowStyle(theme: Theme, focused: boolean, selected: boolean, isTv: boolean) {
   return [
     rowStyles.row,
     {
-      borderRadius: theme.radius.card,
+      borderRadius: focused || selected ? theme.radius.button : 0,
       backgroundColor: selected
         ? theme.colors.accentTint
         : focused
           ? theme.colors.focusFill
-          : theme.colors.bgSurface,
-      borderColor: focused
-        ? theme.colors.focusRingColor
-        : selected
-          ? theme.colors.accent
-          : theme.colors.surfaceBorder,
-      borderWidth: focused ? theme.focus.ringWidth : selected ? 1.5 : 1,
+          : 'transparent',
+      borderColor: focused ? theme.colors.focusRingColor : 'transparent',
+      borderWidth: focused ? theme.focus.ringWidth : 0,
+      borderBottomWidth: focused ? theme.focus.ringWidth : StyleSheet.hairlineWidth,
+      borderBottomColor: focused ? theme.colors.focusRingColor : theme.colors.surfaceBorder,
     },
     webTransition(theme, 'border-color, background-color'),
     !isTv ? webCursorPointer() : undefined,
@@ -121,12 +119,12 @@ export function SettingsToggleRow({
 const rowStyles = StyleSheet.create({
   flex1: { flex: 1 },
   row: {
-    minHeight: 42,
+    minHeight: 38,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
   togglePill: {
     borderWidth: 1,

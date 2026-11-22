@@ -54,6 +54,12 @@ class LoadRequestTest {
       assertFalse(withHardwareDecoder, withHardwareDecoder.contains(leak))
     }
     assertTrue(withHardwareDecoder.contains(", decoderMode=hardware"))
+
+    val withSdhFilter = secret.copy(filterSdhSubtitles = true).toString()
+    for (leak in listOf("user", "pass", "tk9", "s3cret", "Bearer", "http", "/live", "Referer")) {
+      assertFalse(withSdhFilter, withSdhFilter.contains(leak))
+    }
+    assertTrue(withSdhFilter.contains(", filterSdhSubtitles=true"))
   }
 
   @Test
@@ -115,6 +121,7 @@ class LoadRequestTest {
         "kind" to "vod",
         "startMs" to 42_500.0,
         "preferHevcOverDolbyVision" to true,
+        "filterSdhSubtitles" to true,
         "bufferPreset" to "balanced",
       )
     )
@@ -129,10 +136,12 @@ class LoadRequestTest {
     assertNull(infReq.startMs)
     assertNull(nanReq.startMs)
     assertFalse(infReq.preferHevcOverDolbyVision)
+    assertFalse(infReq.filterSdhSubtitles)
     assertEquals(BufferPreset.AUTO, infReq.bufferPreset)
     assertEquals(StreamKind.VOD, infReq.streamKind())
     assertEquals(42_500L, validReq.startMs)
     assertTrue(validReq.preferHevcOverDolbyVision)
+    assertTrue(validReq.filterSdhSubtitles)
     assertEquals(BufferPreset.BALANCED, validReq.bufferPreset)
     assertEquals(StreamKind.VOD, validReq.streamKind())
     assertEquals(BufferPreset.LARGE, largeLiveHls.bufferPreset)

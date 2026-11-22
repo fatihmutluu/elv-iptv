@@ -4,6 +4,7 @@ import { createAppI18n } from '@elv/i18n';
 import type { MediaTracks } from '@elv/playback';
 import { createFakePlayerEngine } from '@elv/playback/testing';
 import {
+  buildTheme,
   type FormFactor,
   FormFactorProvider,
   I18nProvider,
@@ -566,9 +567,11 @@ describe('PlayerScreen Cinema Quietude OSD, 2-level Settings, Touch Lock, Next E
       engine.emit({ attempt, type: 'tracks', tracks: TRACKS });
     });
 
-    // High Contrast AAA canvas & CTA tokens
+    // High Contrast AAA canvas & translucent glass primary transport token
     expect(flatStyle('player-screen')?.backgroundColor).toBe(THEME_PRESETS.highContrast.bgCanvas);
-    expect(flatStyle('player-play-pause')?.backgroundColor).toBe(THEME_PRESETS.highContrast.ctaBg);
+    expect(flatStyle('player-play-pause')?.backgroundColor).toBe(
+      buildTheme({ preset: 'highContrast' }).colors.actionGlassBg,
+    );
 
     // D-pad Down -> focuses 'tracks', Right -> focuses 'settings' with AAA #FACC15 focus ring
     await act(async () => {
@@ -610,25 +613,23 @@ describe('PlayerScreen Cinema Quietude OSD, 2-level Settings, Touch Lock, Next E
     expect(screen.getByTestId('player-settings-row-subtitles')).toBeTruthy();
     expect(onExit).not.toHaveBeenCalled();
 
-    // Down x3 (audio -> speed -> aspect) -> Select toggles Fit/Fill -> Down to stats -> Select toggles Stats HUD on -> Up back to aspect
-    await act(async () => {
-      keys.tap(KEY_DOWN);
-    });
-    await act(async () => {
-      keys.tap(KEY_DOWN);
-    });
-    await act(async () => {
-      keys.tap(KEY_DOWN);
-    });
+    // Down x4 (audio -> speed -> sleepTimer -> aspect) -> Select toggles Fit/Fill -> Down x3 to stats -> Select toggles Stats HUD on -> Up back
+    for (let i = 0; i < 4; i += 1) {
+      await act(async () => {
+        keys.tap(KEY_DOWN);
+      });
+    }
     await act(async () => {
       keys.tap(KEY_SELECT);
     });
     expect(
       screen.getByTestId('player-resize-mode-toggle', { includeHiddenElements: true }),
     ).toHaveTextContent(/Fill/);
-    await act(async () => {
-      keys.tap(KEY_DOWN);
-    });
+    for (let i = 0; i < 3; i += 1) {
+      await act(async () => {
+        keys.tap(KEY_DOWN);
+      });
+    }
     await act(async () => {
       keys.tap(KEY_SELECT);
     });

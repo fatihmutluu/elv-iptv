@@ -124,6 +124,14 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
     listFavorites: async (limit, profileId) =>
       (await open()).listFavorites?.(limit, profileId) ?? [],
     listFavoriteKeys: async (profileId) => (await open()).listFavoriteKeys?.(profileId) ?? [],
+    getTrackPreference: async (scopeKey, profileId) =>
+      (await open()).getTrackPreference?.(scopeKey, profileId) ?? null,
+    saveTrackPreference: async (input) => {
+      await (await open()).saveTrackPreference?.(input);
+    },
+    clearTrackPreference: async (scopeKey, profileId) => {
+      await (await open()).clearTrackPreference?.(scopeKey, profileId);
+    },
     flushPendingWrites: async () => {
       if (cached === undefined) return;
       const cat = await cached.catch(() => undefined);

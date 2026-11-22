@@ -22,8 +22,14 @@ export const ANDROID_DECODER_MODES = ['auto', 'hardware', 'software'] as const;
 /** User-selectable Android Media3 video decoder mode (`#411`). */
 export type AndroidDecoderMode = (typeof ANDROID_DECODER_MODES)[number];
 
-/** User-selectable default subtitle activation mode (`#401`). */
-export type SubtitleModePref = 'auto' | 'always' | 'off';
+/** User-selectable default subtitle activation mode (`#393`, `#401`). */
+export type SubtitleModePref = 'default' | 'smart' | 'onlyForced' | 'always' | 'off';
+
+/** User-selectable OSD end-timestamp display mode (`#160`). */
+export type OsdTimeDisplayMode = 'total' | 'remaining' | 'endsAt';
+
+/** User-selectable sleep timer expiration action (`#160`). */
+export type SleepTimerAction = 'stop' | 'pause';
 
 /** User-selectable skip-forward / skip-back interval in seconds (`#401`). */
 export type SeekStepSecPref = 5 | 10 | 15 | 30;
@@ -50,9 +56,18 @@ export type ArtworkCacheLimitMbPref = 64 | 128 | 256;
 export interface ExtendedPreferencesFields {
   readonly preferredAudioLang: string;
   readonly preferredSubtitleLang: string;
+  readonly preferredAudioLanguages: readonly string[];
+  readonly preferredSubtitleLanguages: readonly string[];
+  readonly preferDefaultAudioTrack: boolean;
+  readonly preferHevcOverDolbyVision: boolean;
+  readonly filterSdhSubtitles: boolean;
   readonly subtitleMode: SubtitleModePref;
   readonly seekStepSec: SeekStepSecPref;
   readonly defaultResizeMode: DefaultResizeModePref;
+  readonly osdTimeDisplayMode: OsdTimeDisplayMode;
+  readonly oledScreensaverTimeoutMin: number;
+  readonly stillWatchingTimeoutMin: number;
+  readonly sleepTimerDefaultAction: SleepTimerAction;
   readonly epgTimeSpanHours: EpgTimeSpanHoursPref;
   readonly epgGenreTints: boolean;
   readonly epgShowClock: boolean;
@@ -70,11 +85,23 @@ export interface ExtendedPreferencesFields {
 
 const MAX_PREF_STRING_LENGTH = 64;
 const MAX_PREF_LANG_LENGTH = 12;
+const MAX_PREFERRED_LANGUAGES = 5;
+const MAX_OLED_SCREENSAVER_MIN = 60;
+const MAX_STILL_WATCHING_MIN = 480;
 const MAX_PREF_AUDIO_DEVICE_LENGTH = 160;
 const DEFAULT_AUDIO_DEVICE = 'auto';
 const PREF_LANG_PATTERN = /^[a-z]{2,3}(-[a-z0-9]{2,8})?$/i;
+const UNDETERMINED_LANGS = new Set(['und', 'zxx', 'mul', 'mis', 'unknown']);
 
-const SUBTITLE_MODES: readonly SubtitleModePref[] = ['auto', 'always', 'off'];
+const SUBTITLE_MODES: readonly SubtitleModePref[] = [
+  'default',
+  'smart',
+  'onlyForced',
+  'always',
+  'off',
+];
+const OSD_TIME_DISPLAY_MODES: readonly OsdTimeDisplayMode[] = ['total', 'remaining', 'endsAt'];
+const SLEEP_TIMER_ACTIONS: readonly SleepTimerAction[] = ['stop', 'pause'];
 const SEEK_STEP_SECS: readonly SeekStepSecPref[] = [5, 10, 15, 30];
 const DEFAULT_RESIZE_MODES: readonly DefaultResizeModePref[] = ['fit', 'fill', 'stretch'];
 const EPG_TIME_SPAN_HOURS: readonly EpgTimeSpanHoursPref[] = [2, 3, 6];
@@ -115,7 +142,46 @@ function normalizePrefLang(value: unknown): string {
   const trimmed = value.trim();
   if (trimmed.length === 0 || trimmed.length > MAX_PREF_LANG_LENGTH) return '';
   if (!PREF_LANG_PATTERN.test(trimmed)) return '';
-  return trimmed.toLowerCase();
+  const lower = trimmed.toLowerCase();
+  const primary = lower.split('-')[0] ?? lower;
+  if (UNDETERMINED_LANGS.has(primary)) return '';
+  return lower;
+}
+
+function normalizePrefLangList(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    const code = normalizePrefLang(item);
+    if (code.length === 0 || seen.has(code)) continue;
+    seen.add(code);
+    out.push(code);
+    if (out.length >= MAX_PREFERRED_LANGUAGES) break;
+  }
+  return Object.freeze(out);
+}
+
+function clampTimeoutMin(value: unknown, max: number, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  const clamped = Math.min(max, Math.max(0, Math.round(value)));
+  return clamped === 0 ? 0 : clamped;
+}
+
+function normalizeSubtitleModePref(value: unknown, fallback: SubtitleModePref): SubtitleModePref {
+  if (value === 'auto') return 'smart';
+  if (value === 'none') return 'off';
+  return typeof value === 'string' && (SUBTITLE_MODES as readonly string[]).includes(value)
+    ? (value as SubtitleModePref)
+    : fallback;
+}
+
+function isOsdTimeDisplayMode(value: unknown): value is OsdTimeDisplayMode {
+  return typeof value === 'string' && (OSD_TIME_DISPLAY_MODES as readonly string[]).includes(value);
+}
+
+function isSleepTimerAction(value: unknown): value is SleepTimerAction {
+  return typeof value === 'string' && (SLEEP_TIMER_ACTIONS as readonly string[]).includes(value);
 }
 
 function hasControlChar(value: string): boolean {
@@ -133,10 +199,6 @@ function normalizeAudioDevice(value: unknown): string {
     return DEFAULT_AUDIO_DEVICE;
   }
   return trimmed;
-}
-
-function isSubtitleModePref(value: unknown): value is SubtitleModePref {
-  return typeof value === 'string' && (SUBTITLE_MODES as readonly string[]).includes(value);
 }
 
 function isSeekStepSecPref(value: unknown): value is SeekStepSecPref {
@@ -196,20 +258,103 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function resolveLangPair(
+  rawList: unknown,
+  rawSingle: unknown,
+  fallbackList: readonly string[],
+): { readonly list: readonly string[]; readonly first: string } {
+  if (Array.isArray(rawList)) {
+    const list = normalizePrefLangList(rawList);
+    return { list, first: list[0] ?? '' };
+  }
+  const single = normalizePrefLang(rawSingle);
+  const list = single.length > 0 ? Object.freeze([single]) : fallbackList;
+  return { list, first: list[0] ?? '' };
+}
+
+function resolveSerializedLangPair(
+  rawList: readonly string[],
+  rawSingle: string,
+): { readonly list: readonly string[]; readonly first: string } {
+  const list = normalizePrefLangList(rawList);
+  if (list.length > 0) return { list, first: list[0] ?? '' };
+  const single = normalizePrefLang(rawSingle);
+  if (single.length > 0) return { list: Object.freeze([single]), first: single };
+  return { list: Object.freeze([]), first: '' };
+}
+
+function mergeLangPair(
+  baseList: readonly string[],
+  baseSingle: string,
+  patchList: readonly string[] | undefined,
+  patchSingle: string | undefined,
+): { readonly list: readonly string[]; readonly first: string } {
+  if (Array.isArray(patchList)) {
+    const list = normalizePrefLangList(patchList);
+    return { list, first: list[0] ?? '' };
+  }
+  if (typeof patchSingle === 'string') {
+    const single = normalizePrefLang(patchSingle);
+    return {
+      list: single.length > 0 ? Object.freeze([single]) : Object.freeze([]),
+      first: single,
+    };
+  }
+  return { list: baseList, first: baseSingle };
+}
+
 export function parseExtendedPreferences(
   parsed: Record<string, unknown>,
   defaults: ExtendedPreferencesFields,
 ): ExtendedPreferencesFields {
+  const audio = resolveLangPair(
+    parsed.preferredAudioLanguages,
+    parsed.preferredAudioLang,
+    defaults.preferredAudioLanguages,
+  );
+  const subtitle = resolveLangPair(
+    parsed.preferredSubtitleLanguages,
+    parsed.preferredSubtitleLang,
+    defaults.preferredSubtitleLanguages,
+  );
   return {
-    preferredAudioLang: normalizePrefLang(parsed.preferredAudioLang),
-    preferredSubtitleLang: normalizePrefLang(parsed.preferredSubtitleLang),
-    subtitleMode: isSubtitleModePref(parsed.subtitleMode)
-      ? parsed.subtitleMode
-      : defaults.subtitleMode,
+    preferredAudioLang: audio.first,
+    preferredSubtitleLang: subtitle.first,
+    preferredAudioLanguages: audio.list,
+    preferredSubtitleLanguages: subtitle.list,
+    preferDefaultAudioTrack:
+      typeof parsed.preferDefaultAudioTrack === 'boolean'
+        ? parsed.preferDefaultAudioTrack
+        : defaults.preferDefaultAudioTrack,
+    preferHevcOverDolbyVision:
+      typeof parsed.preferHevcOverDolbyVision === 'boolean'
+        ? parsed.preferHevcOverDolbyVision
+        : defaults.preferHevcOverDolbyVision,
+    filterSdhSubtitles:
+      typeof parsed.filterSdhSubtitles === 'boolean'
+        ? parsed.filterSdhSubtitles
+        : defaults.filterSdhSubtitles,
+    subtitleMode: normalizeSubtitleModePref(parsed.subtitleMode, defaults.subtitleMode),
     seekStepSec: isSeekStepSecPref(parsed.seekStepSec) ? parsed.seekStepSec : defaults.seekStepSec,
     defaultResizeMode: isDefaultResizeModePref(parsed.defaultResizeMode)
       ? parsed.defaultResizeMode
       : defaults.defaultResizeMode,
+    osdTimeDisplayMode: isOsdTimeDisplayMode(parsed.osdTimeDisplayMode)
+      ? parsed.osdTimeDisplayMode
+      : defaults.osdTimeDisplayMode,
+    oledScreensaverTimeoutMin: clampTimeoutMin(
+      parsed.oledScreensaverTimeoutMin,
+      MAX_OLED_SCREENSAVER_MIN,
+      defaults.oledScreensaverTimeoutMin,
+    ),
+    stillWatchingTimeoutMin: clampTimeoutMin(
+      parsed.stillWatchingTimeoutMin,
+      MAX_STILL_WATCHING_MIN,
+      defaults.stillWatchingTimeoutMin,
+    ),
+    sleepTimerDefaultAction: isSleepTimerAction(parsed.sleepTimerDefaultAction)
+      ? parsed.sleepTimerDefaultAction
+      : defaults.sleepTimerDefaultAction,
     epgTimeSpanHours: isEpgTimeSpanHoursPref(parsed.epgTimeSpanHours)
       ? parsed.epgTimeSpanHours
       : defaults.epgTimeSpanHours,
@@ -256,18 +401,45 @@ export function serializeExtendedPreferences(
   snapshot: ExtendedPreferencesFields,
   defaults: ExtendedPreferencesFields,
 ): ExtendedPreferencesFields {
+  const audio = resolveSerializedLangPair(
+    snapshot.preferredAudioLanguages,
+    snapshot.preferredAudioLang,
+  );
+  const subtitle = resolveSerializedLangPair(
+    snapshot.preferredSubtitleLanguages,
+    snapshot.preferredSubtitleLang,
+  );
   return {
-    preferredAudioLang: normalizePrefLang(snapshot.preferredAudioLang),
-    preferredSubtitleLang: normalizePrefLang(snapshot.preferredSubtitleLang),
-    subtitleMode: isSubtitleModePref(snapshot.subtitleMode)
-      ? snapshot.subtitleMode
-      : defaults.subtitleMode,
+    preferredAudioLang: audio.first,
+    preferredSubtitleLang: subtitle.first,
+    preferredAudioLanguages: audio.list,
+    preferredSubtitleLanguages: subtitle.list,
+    preferDefaultAudioTrack: Boolean(snapshot.preferDefaultAudioTrack),
+    preferHevcOverDolbyVision: Boolean(snapshot.preferHevcOverDolbyVision),
+    filterSdhSubtitles: Boolean(snapshot.filterSdhSubtitles),
+    subtitleMode: normalizeSubtitleModePref(snapshot.subtitleMode, defaults.subtitleMode),
     seekStepSec: isSeekStepSecPref(snapshot.seekStepSec)
       ? snapshot.seekStepSec
       : defaults.seekStepSec,
     defaultResizeMode: isDefaultResizeModePref(snapshot.defaultResizeMode)
       ? snapshot.defaultResizeMode
       : defaults.defaultResizeMode,
+    osdTimeDisplayMode: isOsdTimeDisplayMode(snapshot.osdTimeDisplayMode)
+      ? snapshot.osdTimeDisplayMode
+      : defaults.osdTimeDisplayMode,
+    oledScreensaverTimeoutMin: clampTimeoutMin(
+      snapshot.oledScreensaverTimeoutMin,
+      MAX_OLED_SCREENSAVER_MIN,
+      defaults.oledScreensaverTimeoutMin,
+    ),
+    stillWatchingTimeoutMin: clampTimeoutMin(
+      snapshot.stillWatchingTimeoutMin,
+      MAX_STILL_WATCHING_MIN,
+      defaults.stillWatchingTimeoutMin,
+    ),
+    sleepTimerDefaultAction: isSleepTimerAction(snapshot.sleepTimerDefaultAction)
+      ? snapshot.sleepTimerDefaultAction
+      : defaults.sleepTimerDefaultAction,
     epgTimeSpanHours: isEpgTimeSpanHoursPref(snapshot.epgTimeSpanHours)
       ? snapshot.epgTimeSpanHours
       : defaults.epgTimeSpanHours,
@@ -300,20 +472,56 @@ export function mergeExtendedPreferences(
   base: ExtendedPreferencesFields,
   patch: Partial<ExtendedPreferencesFields>,
 ): ExtendedPreferencesFields {
+  const audio = mergeLangPair(
+    base.preferredAudioLanguages,
+    base.preferredAudioLang,
+    patch.preferredAudioLanguages,
+    patch.preferredAudioLang,
+  );
+  const subtitle = mergeLangPair(
+    base.preferredSubtitleLanguages,
+    base.preferredSubtitleLang,
+    patch.preferredSubtitleLanguages,
+    patch.preferredSubtitleLang,
+  );
   return {
-    preferredAudioLang:
-      typeof patch.preferredAudioLang === 'string'
-        ? normalizePrefLang(patch.preferredAudioLang)
-        : base.preferredAudioLang,
-    preferredSubtitleLang:
-      typeof patch.preferredSubtitleLang === 'string'
-        ? normalizePrefLang(patch.preferredSubtitleLang)
-        : base.preferredSubtitleLang,
-    subtitleMode: isSubtitleModePref(patch.subtitleMode) ? patch.subtitleMode : base.subtitleMode,
+    preferredAudioLang: audio.first,
+    preferredSubtitleLang: subtitle.first,
+    preferredAudioLanguages: audio.list,
+    preferredSubtitleLanguages: subtitle.list,
+    preferDefaultAudioTrack:
+      typeof patch.preferDefaultAudioTrack === 'boolean'
+        ? patch.preferDefaultAudioTrack
+        : base.preferDefaultAudioTrack,
+    preferHevcOverDolbyVision:
+      typeof patch.preferHevcOverDolbyVision === 'boolean'
+        ? patch.preferHevcOverDolbyVision
+        : base.preferHevcOverDolbyVision,
+    filterSdhSubtitles:
+      typeof patch.filterSdhSubtitles === 'boolean'
+        ? patch.filterSdhSubtitles
+        : base.filterSdhSubtitles,
+    subtitleMode: normalizeSubtitleModePref(patch.subtitleMode, base.subtitleMode),
     seekStepSec: isSeekStepSecPref(patch.seekStepSec) ? patch.seekStepSec : base.seekStepSec,
     defaultResizeMode: isDefaultResizeModePref(patch.defaultResizeMode)
       ? patch.defaultResizeMode
       : base.defaultResizeMode,
+    osdTimeDisplayMode: isOsdTimeDisplayMode(patch.osdTimeDisplayMode)
+      ? patch.osdTimeDisplayMode
+      : base.osdTimeDisplayMode,
+    oledScreensaverTimeoutMin: clampTimeoutMin(
+      patch.oledScreensaverTimeoutMin,
+      MAX_OLED_SCREENSAVER_MIN,
+      base.oledScreensaverTimeoutMin,
+    ),
+    stillWatchingTimeoutMin: clampTimeoutMin(
+      patch.stillWatchingTimeoutMin,
+      MAX_STILL_WATCHING_MIN,
+      base.stillWatchingTimeoutMin,
+    ),
+    sleepTimerDefaultAction: isSleepTimerAction(patch.sleepTimerDefaultAction)
+      ? patch.sleepTimerDefaultAction
+      : base.sleepTimerDefaultAction,
     epgTimeSpanHours: isEpgTimeSpanHoursPref(patch.epgTimeSpanHours)
       ? patch.epgTimeSpanHours
       : base.epgTimeSpanHours,

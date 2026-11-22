@@ -10,14 +10,7 @@ import {
 } from 'react';
 import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { SettingsPreferencesController } from './appearance-controls';
-import {
-  BUFFER_PRESET_OPTIONS,
-  RESIZE_MODE_OPTIONS,
-  SEEK_STEP_OPTIONS,
-  SUBTITLE_MODE_OPTIONS,
-  TRACK_LANGUAGE_CODES,
-  VIDEO_DECODER_OPTIONS,
-} from './playback-controls';
+import { buildPlaybackChipOptions } from './playback-controls';
 import {
   type SettingsChipOption,
   SettingsDivider,
@@ -39,9 +32,9 @@ export interface PlaybackSettingsPanelProps {
 type ScrollViewHandle = ComponentRef<typeof ScrollView>;
 
 /**
- * Cinema Quietude Playback preferences panel (`#401`):
+ * Cinema Quietude Playback preferences panel (`#401`, `#393`, `#310`, `#124`, `#160`, `#118`):
  * preferred audio & subtitle languages, subtitle activation mode, skip interval, default aspect
- * ratio, buffer preset, auto-play next episode, and subtitles on skip back.
+ * ratio, buffer preset, codec/SDH preferences, OSD time display, OLED screensaver, and idle prompt.
  */
 export function PlaybackSettingsPanel({
   preferences: suppliedPrefs,
@@ -54,7 +47,9 @@ export function PlaybackSettingsPanel({
   const isTv = viewport.formFactor === 'tv';
 
   const scrollRef = useRef<ScrollViewHandle | null>(null);
-  const cardYRef = useRef<Partial<Record<'tracks' | 'transport' | 'automation', number>>>({});
+  const cardYRef = useRef<
+    Partial<Record<'tracks' | 'transport' | 'cinema' | 'automation', number>>
+  >({});
 
   const activePrefs: PreferencesSnapshot = suppliedPrefs?.preferences ?? DEFAULT_PREFERENCES;
 
@@ -82,6 +77,15 @@ export function PlaybackSettingsPanel({
     ) {
       const y = cardYRef.current.transport;
       if (y !== undefined) targetY = Math.max(0, y - 12);
+    } else if (
+      focusedControlId.startsWith('toggle-prefer-') ||
+      focusedControlId === 'toggle-filter-sdh' ||
+      focusedControlId.startsWith('osd-time-') ||
+      focusedControlId.startsWith('oled-') ||
+      focusedControlId.startsWith('still-watching-')
+    ) {
+      const y = cardYRef.current.cinema;
+      if (y !== undefined) targetY = Math.max(0, y - 12);
     } else {
       const y = cardYRef.current.automation;
       if (y !== undefined) targetY = Math.max(0, y - 12);
@@ -91,87 +95,12 @@ export function PlaybackSettingsPanel({
     }
   }, [focusedControlId, isTv, theme.reduceMotion]);
 
-  const audioLangOptions = useMemo<readonly SettingsChipOption<string>[]>(
-    () =>
-      TRACK_LANGUAGE_CODES.map((entry) => ({
-        value: entry.code,
-        label: entry.endonym ?? i18n.t('settings.playback.langAuto'),
-        focusId: `audio-lang-${entry.suffix}`,
-        testID: `settings-playback-audio-${entry.suffix}`,
-      })),
-    [i18n],
-  );
-
-  const subtitleLangOptions = useMemo<readonly SettingsChipOption<string>[]>(
-    () =>
-      TRACK_LANGUAGE_CODES.map((entry) => ({
-        value: entry.code,
-        label: entry.endonym ?? i18n.t('settings.playback.langAuto'),
-        focusId: `sub-lang-${entry.suffix}`,
-        testID: `settings-playback-subtitle-${entry.suffix}`,
-      })),
-    [i18n],
-  );
-
-  const subtitleModeOptions = useMemo(
-    () =>
-      SUBTITLE_MODE_OPTIONS.map((opt) => ({
-        value: opt.value,
-        label: i18n.t(opt.labelKey),
-        focusId: opt.focusId,
-        testID: opt.testID,
-      })),
-    [i18n],
-  );
-
-  const seekStepOptions = useMemo(
-    () =>
-      SEEK_STEP_OPTIONS.map((opt) => ({
-        value: opt.seconds,
-        label: i18n.t('settings.playback.seekStepValue', { seconds: opt.seconds }),
-        focusId: opt.focusId,
-        testID: opt.testID,
-      })),
-    [i18n],
-  );
-
-  const aspectOptions = useMemo(
-    () =>
-      RESIZE_MODE_OPTIONS.map((opt) => ({
-        value: opt.value,
-        label: i18n.t(opt.labelKey),
-        focusId: opt.focusId,
-        testID: opt.testID,
-      })),
-    [i18n],
-  );
-
-  const bufferOptions = useMemo(
-    () =>
-      BUFFER_PRESET_OPTIONS.map((opt) => ({
-        value: opt.value,
-        label: i18n.t(opt.labelKey),
-        focusId: opt.focusId,
-        testID: opt.testID,
-      })),
-    [i18n],
-  );
-
-  const videoDecoderOptions = useMemo(
-    () =>
-      VIDEO_DECODER_OPTIONS.map((opt) => ({
-        value: opt.value,
-        label: i18n.t(opt.labelKey),
-        focusId: opt.focusId,
-        testID: opt.testID,
-      })),
-    [i18n],
-  );
+  const opts = useMemo(() => buildPlaybackChipOptions(i18n), [i18n]);
 
   const savedAudioDevice = activePrefs.preferredAudioDevice.trim();
   const hasCustomAudioDevice = savedAudioDevice.length > 0 && savedAudioDevice !== 'auto';
   const audioDeviceOptions = useMemo<readonly SettingsChipOption<string>[]>(() => {
-    const opts: SettingsChipOption<string>[] = [
+    const list: SettingsChipOption<string>[] = [
       {
         value: 'auto',
         label: i18n.t('player.audioDeviceAuto'),
@@ -180,14 +109,14 @@ export function PlaybackSettingsPanel({
       },
     ];
     if (hasCustomAudioDevice) {
-      opts.push({
+      list.push({
         value: savedAudioDevice,
         label: savedAudioDevice,
         focusId: 'audio-device-current',
         testID: 'settings-playback-audio-device-current',
       });
     }
-    return opts;
+    return list;
   }, [hasCustomAudioDevice, i18n, savedAudioDevice]);
 
   return (
@@ -218,29 +147,25 @@ export function PlaybackSettingsPanel({
       >
         <SettingsOptionRow
           title={i18n.t('settings.playback.audioLang')}
-          options={audioLangOptions}
+          options={opts.audioLangOptions}
           selectedValue={activePrefs.preferredAudioLang}
           focusedControlId={focusedControlId}
           isTv={isTv}
           onSelect={(preferredAudioLang) => applyPatch({ preferredAudioLang })}
         />
-
         <SettingsDivider />
-
         <SettingsOptionRow
           title={i18n.t('settings.playback.subtitleLang')}
-          options={subtitleLangOptions}
+          options={opts.subtitleLangOptions}
           selectedValue={activePrefs.preferredSubtitleLang}
           focusedControlId={focusedControlId}
           isTv={isTv}
           onSelect={(preferredSubtitleLang) => applyPatch({ preferredSubtitleLang })}
         />
-
         <SettingsDivider />
-
         <SettingsOptionRow
           title={i18n.t('settings.playback.subtitleMode')}
-          options={subtitleModeOptions}
+          options={opts.subtitleModeOptions}
           selectedValue={activePrefs.subtitleMode}
           focusedControlId={focusedControlId}
           isTv={isTv}
@@ -259,42 +184,37 @@ export function PlaybackSettingsPanel({
       >
         <SettingsOptionRow
           title={i18n.t('settings.playback.seekStep')}
-          options={seekStepOptions}
+          options={opts.seekStepOptions}
           selectedValue={activePrefs.seekStepSec}
           focusedControlId={focusedControlId}
           isTv={isTv}
           tabularNums
           onSelect={(seekStepSec) => applyPatch({ seekStepSec })}
         />
-
         <SettingsDivider />
-
         <SettingsOptionRow
           title={i18n.t('settings.playback.defaultAspect')}
-          options={aspectOptions}
+          options={opts.aspectOptions}
           selectedValue={activePrefs.defaultResizeMode}
           focusedControlId={focusedControlId}
           isTv={isTv}
           onSelect={(defaultResizeMode) => applyPatch({ defaultResizeMode })}
         />
-
         <SettingsDivider />
-
         <SettingsOptionRow
           title={i18n.t('settings.playback.bufferPreset')}
-          options={bufferOptions}
+          options={opts.bufferOptions}
           selectedValue={activePrefs.bufferPreset}
           focusedControlId={focusedControlId}
           isTv={isTv}
           onSelect={(bufferPreset) => applyPatch({ bufferPreset })}
         />
-
         {showAndroidDecoder ? (
           <>
             <SettingsDivider />
             <SettingsOptionRow
               title={i18n.t('settings.playback.videoDecoder')}
-              options={videoDecoderOptions}
+              options={opts.videoDecoderOptions}
               selectedValue={activePrefs.androidDecoderMode}
               focusedControlId={focusedControlId}
               isTv={isTv}
@@ -302,6 +222,81 @@ export function PlaybackSettingsPanel({
             />
           </>
         ) : null}
+      </Surface>
+
+      <Surface
+        tone="surface"
+        bordered
+        rounded="modal"
+        style={styles.sectionCard}
+        onLayout={(e) => {
+          cardYRef.current.cinema = e.nativeEvent.layout.y;
+        }}
+      >
+        <SettingsToggleRow
+          testID="settings-playback-toggle-prefer-default-audio"
+          title={i18n.t('settings.playback.preferDefaultAudio')}
+          description={i18n.t('settings.playback.preferDefaultAudioDesc')}
+          checked={activePrefs.preferDefaultAudioTrack}
+          focused={focusedControlId === 'toggle-prefer-default-audio'}
+          isTv={isTv}
+          onToggle={() =>
+            applyPatch({ preferDefaultAudioTrack: !activePrefs.preferDefaultAudioTrack })
+          }
+        />
+        <SettingsDivider />
+        <SettingsToggleRow
+          testID="settings-playback-toggle-filter-sdh"
+          title={i18n.t('settings.playback.filterSdh')}
+          description={i18n.t('settings.playback.filterSdhDesc')}
+          checked={activePrefs.filterSdhSubtitles}
+          focused={focusedControlId === 'toggle-filter-sdh'}
+          isTv={isTv}
+          onToggle={() => applyPatch({ filterSdhSubtitles: !activePrefs.filterSdhSubtitles })}
+        />
+        <SettingsDivider />
+        <SettingsToggleRow
+          testID="settings-playback-toggle-prefer-hevc-dv"
+          title={i18n.t('settings.playback.preferHevcOverDv')}
+          description={i18n.t('settings.playback.preferHevcOverDvDesc')}
+          checked={activePrefs.preferHevcOverDolbyVision}
+          focused={focusedControlId === 'toggle-prefer-hevc-dv'}
+          isTv={isTv}
+          onToggle={() =>
+            applyPatch({ preferHevcOverDolbyVision: !activePrefs.preferHevcOverDolbyVision })
+          }
+        />
+        <SettingsDivider />
+        <SettingsOptionRow
+          title={i18n.t('settings.playback.osdTimeMode')}
+          options={opts.osdTimeOptions}
+          selectedValue={activePrefs.osdTimeDisplayMode}
+          focusedControlId={focusedControlId}
+          isTv={isTv}
+          onSelect={(osdTimeDisplayMode) => applyPatch({ osdTimeDisplayMode })}
+        />
+        <SettingsDivider />
+        <SettingsOptionRow
+          title={i18n.t('settings.playback.oledScreensaver')}
+          description={i18n.t('settings.playback.oledScreensaverDesc')}
+          options={opts.oledOptions}
+          selectedValue={activePrefs.oledScreensaverTimeoutMin}
+          focusedControlId={focusedControlId}
+          isTv={isTv}
+          tabularNums
+          onSelect={(oledScreensaverTimeoutMin) => applyPatch({ oledScreensaverTimeoutMin })}
+        />
+        <SettingsDivider />
+        <SettingsOptionRow
+          title={i18n.t('settings.playback.stillWatching')}
+          description={i18n.t('settings.playback.stillWatchingDesc')}
+          options={opts.stillWatchingOptions}
+          selectedValue={activePrefs.stillWatchingTimeoutMin}
+          focusedControlId={focusedControlId}
+          isTv={isTv}
+          tabularNums
+          onSelect={(stillWatchingTimeoutMin) => applyPatch({ stillWatchingTimeoutMin })}
+        />
       </Surface>
 
       <Surface
@@ -321,9 +316,7 @@ export function PlaybackSettingsPanel({
           isTv={isTv}
           onToggle={() => applyPatch({ autoPlayNextEpisode: !activePrefs.autoPlayNextEpisode })}
         />
-
         <SettingsDivider />
-
         <SettingsToggleRow
           testID="settings-playback-toggle-skip-back-subtitles"
           title={i18n.t('player.autoSubtitlesOnSkipBack')}
@@ -334,9 +327,7 @@ export function PlaybackSettingsPanel({
             applyPatch({ autoSubtitlesOnSkipBack: !activePrefs.autoSubtitlesOnSkipBack })
           }
         />
-
         <SettingsDivider />
-
         <SettingsOptionRow
           title={i18n.t('settings.playback.audioDevice')}
           options={audioDeviceOptions}

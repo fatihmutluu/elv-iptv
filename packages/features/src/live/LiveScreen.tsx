@@ -1,7 +1,7 @@
 import type { CatalogService, ItemRow, SourceRow } from '@elv/data';
 import type { DefaultLiveModePref, EpgTimeSpanHoursPref, LogoBackdropModePref } from '@elv/domain';
 import { IconButton, useI18n, useTheme, useViewport } from '@elv/ui-kit';
-import { type ReactElement, useCallback, useMemo, useRef, useState } from 'react';
+import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
@@ -55,6 +55,8 @@ export interface LiveScreenProps {
   readonly showSourceBadges?: boolean;
   readonly liveOkTwoStepPreview?: boolean;
   readonly cleanChannelTitles?: boolean;
+  /** Called when embedded live preview playback (Favorites stage or two-step preview) starts or stops (`#160`). */
+  readonly onEmbeddedPlaybackActiveChange?: (active: boolean) => void;
 }
 
 /**
@@ -73,6 +75,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     showSourceBadges = true,
     liveOkTwoStepPreview = false,
     cleanChannelTitles = false,
+    onEmbeddedPlaybackActiveChange,
   } = props;
   const theme = useTheme();
   const viewport = useViewport();
@@ -151,6 +154,18 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     ...(playbackGuard !== undefined ? { playbackGuard } : {}),
   });
   clearPreviewRef.current = clearTwoStepPreview;
+
+  const embeddedPlaybackActive = preview.opened !== null && !preview.failed;
+  const onEmbeddedPlaybackActiveChangeRef = useRef(onEmbeddedPlaybackActiveChange);
+  onEmbeddedPlaybackActiveChangeRef.current = onEmbeddedPlaybackActiveChange;
+  useEffect(() => {
+    onEmbeddedPlaybackActiveChangeRef.current?.(embeddedPlaybackActive);
+  }, [embeddedPlaybackActive]);
+  useEffect(() => {
+    return () => {
+      onEmbeddedPlaybackActiveChangeRef.current?.(false);
+    };
+  }, []);
 
   const handleSelectMode = useCallback(
     (nextMode: LiveMode) => {

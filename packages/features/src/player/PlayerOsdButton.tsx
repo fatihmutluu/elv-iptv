@@ -15,10 +15,10 @@ import {
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import type { ReactElement } from 'react';
+import { type ReactElement, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { usePlaybackTicker } from './usePlaybackTicker';
-import { formatPlaybackPosition } from './VodProgressBar';
+import { formatPlaybackPosition } from './vod-progress-math';
 
 /** Synchronized ARIA `aria-keyshortcuts` descriptors for desktop web player controls (#283). */
 export const PLAYER_KEY_SHORTCUTS = {
@@ -77,7 +77,9 @@ export function JumpToLiveButton(p: {
   return (
     <OsdButton
       testID="player-jump-to-live"
+      variant="pill-cta"
       icon="play"
+      iconSize={14}
       label={p.i18n.t('player.jumpToLive')}
       accessibilityLabel={p.i18n.t('player.jumpToLive')}
       compact={p.compact === true}
@@ -105,10 +107,10 @@ export function OsdClock(p: {
     <Text
       testID="osd-clock"
       style={[
-        theme.typography.title,
+        theme.typography.caption,
         TABULAR_NUMS_STYLE,
         styles.clock,
-        { color: theme.colors.textPrimary },
+        { color: theme.colors.textSecondary },
       ]}
     >
       {p.previewPositionMs === undefined ? text : formatPlaybackPosition(p.previewPositionMs)}
@@ -122,6 +124,9 @@ function blurWebTarget(target: unknown): void {
   }
 }
 
+/** Supported visual variants for {@link OsdButton}. */
+type OsdButtonVariant = 'default' | 'primary' | 'icon' | 'bare' | 'glass-primary' | 'pill-cta';
+
 /** Props of {@link OsdButton}. */
 export interface OsdButtonProps {
   testID: string;
@@ -130,7 +135,7 @@ export interface OsdButtonProps {
   keyShortcuts?: string;
   icon?: IconName;
   iconSize?: number;
-  variant?: 'default' | 'primary' | 'icon';
+  variant?: OsdButtonVariant;
   size?: number;
   circular?: boolean;
   compact?: boolean;
@@ -138,41 +143,105 @@ export interface OsdButtonProps {
   active?: boolean;
   loading?: boolean;
   onPress: () => void;
+  onHoverIn?: () => void;
+  onHoverOut?: () => void;
   isTv: boolean;
   tvFocused?: boolean;
 }
 
-/** Tokenized Cinema Quietude player OSD button (`default`, high-contrast `primary`, or `icon`). */
+/**
+ * Tokenized Cinema Quietude player OSD button supporting borderless `bare`, translucent circular
+ * `glass-primary`, dark-glass `pill-cta`, and legacy `default` / `primary` / `icon` variants.
+ */
 export function OsdButton(p: OsdButtonProps): ReactElement {
   const theme = useTheme();
-  const isPrimary = p.variant === 'primary';
-  const isIconOnly = p.variant === 'icon' || p.circular === true;
+  const [hovered, setHovered] = useState(false);
+  const [pressed, setPressed] = useState(false);
+
+  const variant: OsdButtonVariant = p.variant ?? 'default';
+  const isBare = variant === 'bare';
+  const isGlassPrimary = variant === 'glass-primary';
+  const isPillCta = variant === 'pill-cta';
+  const isPrimary = variant === 'primary';
+  const hasLabel = p.label !== undefined && p.label.length > 0;
+  const isIconOnly =
+    variant === 'icon' || isGlassPrimary || p.circular === true || (isBare && !hasLabel);
   const focused = p.tvFocused === true;
   const active = p.active === true;
-  const boxSize = p.size ?? 40;
-  const iconSize = p.iconSize ?? 18;
+  const boxSize = p.size ?? (isGlassPrimary ? 48 : 40);
+  const iconSize = p.iconSize ?? (isGlassPrimary ? 22 : 20);
 
-  const backgroundColor = isPrimary
-    ? theme.colors.ctaBg
-    : active
+  let backgroundColor: string;
+  let borderColor: string;
+  let borderWidth: number;
+  let borderRadius: number;
+  let foreground = theme.colors.textPrimary;
+
+  if (isBare) {
+    backgroundColor = focused
+      ? theme.colors.focusFill
+      : active
+        ? theme.colors.accentTint
+        : hovered || pressed
+          ? theme.colors.actionGlassBg
+          : 'transparent';
+    borderColor = focused ? theme.colors.focusRingColor : 'transparent';
+    borderWidth = focused ? theme.focus.ringWidth : 0;
+    borderRadius = isIconOnly ? theme.radius.pill : theme.radius.button;
+  } else if (isGlassPrimary) {
+    backgroundColor = focused
+      ? theme.colors.focusFill
+      : hovered || pressed
+        ? theme.colors.glassBg
+        : theme.colors.actionGlassBg;
+    borderColor = focused ? theme.colors.focusRingColor : theme.colors.actionGlassBorder;
+    borderWidth = focused ? theme.focus.ringWidth : 1;
+    borderRadius = theme.radius.pill;
+  } else if (isPillCta) {
+    backgroundColor = focused
+      ? theme.colors.focusFill
+      : active
+        ? theme.colors.accentTint
+        : hovered || pressed
+          ? theme.colors.glassBg
+          : theme.colors.actionGlassBg;
+    borderColor = focused
+      ? theme.colors.focusRingColor
+      : active
+        ? theme.colors.accent
+        : theme.colors.surfaceBorder;
+    borderWidth = focused ? theme.focus.ringWidth : StyleSheet.hairlineWidth;
+    borderRadius = theme.radius.pill;
+  } else if (isPrimary) {
+    backgroundColor = theme.colors.ctaBg;
+    borderColor = theme.colors.ctaBg;
+    borderWidth = 1;
+    borderRadius = isIconOnly ? theme.radius.pill : theme.radius.button;
+    foreground = theme.colors.ctaFg;
+  } else {
+    backgroundColor = active
       ? theme.colors.accentTint
       : focused
         ? theme.colors.focusFill
         : theme.colors.actionGlassBg;
-  const borderColor = isPrimary
-    ? theme.colors.ctaBg
-    : focused
+    borderColor = focused
       ? theme.colors.focusRingColor
       : active
         ? theme.colors.accent
         : theme.colors.actionGlassBorder;
-  const foreground = isPrimary ? theme.colors.ctaFg : theme.colors.textPrimary;
-  const scale = isPrimary && focused && !theme.reduceMotion ? theme.focus.buttonScale : 1;
+    borderWidth = focused ? theme.focus.ringWidth : 1;
+    borderRadius = isIconOnly ? theme.radius.pill : theme.radius.button;
+  }
+
+  const shouldScale = (isPrimary || isGlassPrimary) && focused && !theme.reduceMotion;
+  const scale = shouldScale ? theme.focus.buttonScale : 1;
 
   const webShortcutProps =
     (Platform.OS as string) === 'web' && p.keyShortcuts !== undefined
       ? ({ 'aria-keyshortcuts': p.keyShortcuts } as Record<string, unknown>)
       : undefined;
+
+  const useBlur = isGlassPrimary || isPillCta || (!isPrimary && !isBare);
 
   return (
     <Pressable
@@ -182,6 +251,16 @@ export function OsdButton(p: OsdButtonProps): ReactElement {
       accessibilityRole="button"
       accessibilityLabel={p.accessibilityLabel ?? p.label ?? p.testID}
       accessibilityState={{ selected: focused }}
+      onHoverIn={() => {
+        setHovered(true);
+        p.onHoverIn?.();
+      }}
+      onHoverOut={() => {
+        setHovered(false);
+        p.onHoverOut?.();
+      }}
+      onPressIn={() => setPressed(true)}
+      onPressOut={() => setPressed(false)}
       onPress={(e) => {
         blurWebTarget(e.currentTarget);
         p.onPress();
@@ -189,6 +268,8 @@ export function OsdButton(p: OsdButtonProps): ReactElement {
       style={[
         styles.button,
         p.compact === true ? styles.compactButton : null,
+        isPillCta ? styles.pillCtaButton : null,
+        isBare && hasLabel ? styles.bareLabelButton : null,
         isIconOnly ? styles.iconButton : isPrimary ? styles.primaryButton : null,
         isIconOnly
           ? { width: boxSize, height: boxSize, minWidth: boxSize, minHeight: boxSize }
@@ -196,11 +277,11 @@ export function OsdButton(p: OsdButtonProps): ReactElement {
         {
           backgroundColor,
           borderColor,
-          borderWidth: !isPrimary && focused ? theme.focus.ringWidth : 1,
-          borderRadius: isIconOnly ? theme.radius.pill : theme.radius.button,
-          ...(isPrimary && focused ? { transform: [{ scale }] } : {}),
+          borderWidth,
+          borderRadius,
+          ...(shouldScale ? { transform: [{ scale }] } : {}),
         },
-        !isPrimary ? webBackdropBlur(12) : undefined,
+        useBlur ? webBackdropBlur(12) : undefined,
         webTransition(theme, 'background-color, border-color, transform'),
         !p.isTv ? webCursorPointer() : undefined,
       ]}
@@ -210,7 +291,7 @@ export function OsdButton(p: OsdButtonProps): ReactElement {
       ) : p.icon !== undefined ? (
         <Icon name={p.icon} size={iconSize} color={foreground} />
       ) : null}
-      {!isIconOnly && p.label !== undefined ? (
+      {!isIconOnly && hasLabel ? (
         <Text
           numberOfLines={1}
           style={[
@@ -222,7 +303,7 @@ export function OsdButton(p: OsdButtonProps): ReactElement {
           {p.label}
         </Text>
       ) : null}
-      {isPrimary && focused ? (
+      {(isPrimary || isGlassPrimary) && focused ? (
         <View
           pointerEvents="none"
           testID={`${p.testID}-focus-ring`}
@@ -301,6 +382,8 @@ const styles = StyleSheet.create({
   },
   primaryButton: { paddingHorizontal: 18 },
   compactButton: { minHeight: 34, paddingHorizontal: 10, paddingVertical: 5 },
+  bareLabelButton: { minHeight: 36, paddingHorizontal: 10, paddingVertical: 6 },
+  pillCtaButton: { minHeight: 36, paddingHorizontal: 16, paddingVertical: 9 },
   primaryFocusRing: {
     position: 'absolute',
     top: -4,

@@ -15,6 +15,7 @@ public struct LoadRequest: Equatable, Sendable {
   public var startMs: Double?
   public var softwareAudio: Bool
   public var preferHevcOverDolbyVision: Bool
+  public var filterSdhSubtitles: Bool
   public var audioTrackId: String?
   public var subtitlePreference: SubtitlePreference
   public var liveEdgeCushionSeconds: Double?
@@ -26,6 +27,7 @@ public struct LoadRequest: Equatable, Sendable {
     startMs: Double? = nil,
     softwareAudio: Bool = false,
     preferHevcOverDolbyVision: Bool = false,
+    filterSdhSubtitles: Bool = false,
     audioTrackId: String? = nil,
     subtitlePreference: SubtitlePreference = .default,
     liveEdgeCushionSeconds: Double? = nil
@@ -36,6 +38,7 @@ public struct LoadRequest: Equatable, Sendable {
     self.startMs = startMs
     self.softwareAudio = softwareAudio
     self.preferHevcOverDolbyVision = preferHevcOverDolbyVision
+    self.filterSdhSubtitles = filterSdhSubtitles
     self.audioTrackId = audioTrackId
     self.subtitlePreference = subtitlePreference
     self.liveEdgeCushionSeconds = liveEdgeCushionSeconds
@@ -74,6 +77,7 @@ public struct EngineLoadOptions: Equatable, Sendable {
   public var initialSubtitleTrackId: Int?
   public var preferredSubtitleLanguages: [String]
   public var subtitlesDisabled: Bool
+  public var filterSdhSubtitles: Bool
 
   public init(
     isLive: Bool,
@@ -93,7 +97,8 @@ public struct EngineLoadOptions: Equatable, Sendable {
     preferredAudioLanguages: [String] = [],
     initialSubtitleTrackId: Int? = nil,
     preferredSubtitleLanguages: [String] = [],
-    subtitlesDisabled: Bool = false
+    subtitlesDisabled: Bool = false,
+    filterSdhSubtitles: Bool = false
   ) {
     self.isLive = isLive
     self.httpHeaders = httpHeaders
@@ -113,6 +118,7 @@ public struct EngineLoadOptions: Equatable, Sendable {
     self.initialSubtitleTrackId = initialSubtitleTrackId
     self.preferredSubtitleLanguages = preferredSubtitleLanguages
     self.subtitlesDisabled = subtitlesDisabled
+    self.filterSdhSubtitles = filterSdhSubtitles
   }
 }
 
@@ -175,6 +181,8 @@ public enum BackendObservation: Equatable, Sendable {
   case duration(Double)
   case tracks(MediaTracksOut)
   case mediaInfo(StreamVideoInfo)
+  case telemetry(droppedFrames: Int)
+  case chapters([ChapterInfoOut])
   case progress(bytesReceived: Int64?, bufferedSeconds: Double?)
   case externalPlayback(Bool)
   case readerFault(ReaderFailure)
@@ -229,30 +237,55 @@ public struct ClockAnchorOut: Equatable, Sendable {
   }
 }
 
-/// Decoded video stream metadata emitted on `onEngineEvent` (`#58`).
+/// One container chapter marker emitted on `onEngineEvent` (`#118`).
+public struct ChapterInfoOut: Equatable, Sendable {
+  public let id: String
+  public let title: String?
+  public let startMs: Double
+  public let endMs: Double?
+
+  public init(id: String, title: String? = nil, startMs: Double, endMs: Double? = nil) {
+    self.id = id
+    self.title = title
+    self.startMs = startMs
+    self.endMs = endMs
+  }
+
+  public func toDictionary() -> [String: Any] {
+    var out: [String: Any] = ["id": id, "startMs": startMs]
+    if let title, !title.isEmpty { out["title"] = title }
+    if let endMs { out["endMs"] = endMs }
+    return out
+  }
+}
+
+/// Decoded video stream metadata emitted on `onEngineEvent` (`#58`, `#160`).
 public struct StreamVideoInfo: Equatable, Sendable {
   public let width: Int?
   public let height: Int?
   public let fps: Double?
   public let codec: String?
   public let hdr: String?
+  public let droppedFrames: Int?
 
   public init(
     width: Int? = nil,
     height: Int? = nil,
     fps: Double? = nil,
     codec: String? = nil,
-    hdr: String? = nil
+    hdr: String? = nil,
+    droppedFrames: Int? = nil
   ) {
     self.width = width
     self.height = height
     self.fps = fps
     self.codec = codec
     self.hdr = hdr
+    self.droppedFrames = droppedFrames
   }
 
   public var isEmpty: Bool {
-    width == nil && height == nil && fps == nil && codec == nil && hdr == nil
+    width == nil && height == nil && fps == nil && codec == nil && hdr == nil && droppedFrames == nil
   }
 
   public func toDictionary() -> [String: Any] {
@@ -262,6 +295,7 @@ public struct StreamVideoInfo: Equatable, Sendable {
     if let fps { out["fps"] = fps }
     if let codec { out["codec"] = codec }
     if let hdr { out["hdr"] = hdr }
+    if let droppedFrames { out["droppedFrames"] = droppedFrames }
     return out
   }
 }
@@ -275,6 +309,8 @@ public enum EngineEventOut: Equatable, Sendable {
   case progress(attempt: Int, bytesReceived: Double?, atMs: Double)
   case tracks(attempt: Int, tracks: MediaTracksOut)
   case mediaInfo(attempt: Int, info: StreamVideoInfo)
+  case telemetry(attempt: Int, droppedFrames: Int)
+  case chapters(attempt: Int, chapters: [ChapterInfoOut])
   case externalPlayback(attempt: Int, active: Bool)
   case error(attempt: Int, error: MappedError)
   case surface(attempt: Int, change: SurfaceChangeOut)
@@ -314,6 +350,10 @@ public enum EngineEventOut: Equatable, Sendable {
       return ["attempt": attempt, "type": "tracks", "tracks": tracks.toDictionary()]
     case let .mediaInfo(attempt, info):
       return ["attempt": attempt, "type": "mediaInfo", "info": info.toDictionary()]
+    case let .telemetry(attempt, droppedFrames):
+      return ["attempt": attempt, "type": "telemetry", "droppedFrames": droppedFrames]
+    case let .chapters(attempt, chapters):
+      return ["attempt": attempt, "type": "chapters", "chapters": chapters.map { $0.toDictionary() }]
     case let .externalPlayback(attempt, active):
       return ["attempt": attempt, "type": "externalPlayback", "active": active]
     case let .error(attempt, error):

@@ -380,6 +380,9 @@ export function createObservedCatalog(
     ...(c.epgWindow ? { epgWindow: c.epgWindow.bind(c) } : {}),
     ...(c.channelByNumber ? { channelByNumber: c.channelByNumber.bind(c) } : {}),
     ...(c.queryNextEpisode ? { queryNextEpisode: c.queryNextEpisode.bind(c) } : {}),
+    ...(c.getTrackPreference ? { getTrackPreference: c.getTrackPreference.bind(c) } : {}),
+    ...(c.saveTrackPreference ? { saveTrackPreference: c.saveTrackPreference.bind(c) } : {}),
+    ...(c.clearTrackPreference ? { clearTrackPreference: c.clearTrackPreference.bind(c) } : {}),
     close: () => c.close(),
   };
 }

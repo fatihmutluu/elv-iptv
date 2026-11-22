@@ -14,6 +14,30 @@ import { TextEntryContext } from './text-entry';
 export { type TvPlatform, toKeyInput };
 
 /**
+ * Registers a top-most exclusive TV key interceptor on the active {@link TvRemoteDispatcher}
+ * (`#160`). Returning `true` consumes the key before any `useTvKeySource` subscriber sees it.
+ * Falls back to a direct platform key listener when no `TvRemoteProvider` is mounted.
+ */
+export function useTvKeyInterceptor(onInput: (k: KeyInput) => boolean): void {
+  const handler = useRef(onInput);
+  handler.current = onInput;
+  const dispatcher = useContext(TvRemoteContext);
+  const raw = useContext(RemoteKeysContext);
+  const fallbackRaw = dispatcher === null ? raw : null;
+
+  useEffect(() => {
+    if (dispatcher?.registerInterceptor !== undefined) {
+      return dispatcher.registerInterceptor((input) => handler.current(input));
+    }
+    return attachPlatformKeySource({
+      raw: fallbackRaw,
+      isTextEntryActive: () => false,
+      emit: (input) => handler.current(input),
+    });
+  }, [dispatcher, fallbackRaw]);
+}
+
+/**
  * Feeds remote keys to `onInput`, suspending non-`back` keys while a `TvTextInput` / `TextEntryBoundary` session is
  * active (#48). When rendered inside {@link TvRemoteProvider}, subscribes to its shared root dispatcher with zero
  * additional native/web listeners (#277); outside a provider, attaches a direct platform listener fallback.

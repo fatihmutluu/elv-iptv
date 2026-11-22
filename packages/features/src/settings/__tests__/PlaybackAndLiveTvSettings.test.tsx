@@ -409,4 +409,35 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
       expect((await tvStore.load()).androidDecoderMode).toBe('hardware');
     });
   });
+
+  it('persists all Wave C1 Playback preferences (#393, #310, #124, #160, #118)', async () => {
+    const store = createMemoryPreferencesStore();
+    await render(<Harness store={store} initialSection="playback" />);
+
+    // 5-mode subtitle selector (#393)
+    expect(screen.getByTestId('settings-playback-subtitle-mode-default')).toBeTruthy();
+    expect(screen.getByTestId('settings-playback-subtitle-mode-smart')).toBeTruthy();
+    expect(screen.getByTestId('settings-playback-subtitle-mode-onlyForced')).toBeTruthy();
+    expect(screen.getByTestId('settings-playback-subtitle-mode-always')).toBeTruthy();
+    expect(screen.getByTestId('settings-playback-subtitle-mode-off')).toBeTruthy();
+
+    await fireEvent.press(screen.getByTestId('settings-playback-subtitle-mode-onlyForced'));
+    await fireEvent.press(screen.getByTestId('settings-playback-toggle-prefer-default-audio'));
+    await fireEvent.press(screen.getByTestId('settings-playback-toggle-filter-sdh'));
+    await fireEvent.press(screen.getByTestId('settings-playback-toggle-prefer-hevc-dv'));
+    await fireEvent.press(screen.getByTestId('settings-playback-osd-time-endsAt'));
+    await fireEvent.press(screen.getByTestId('settings-playback-oled-15'));
+    await fireEvent.press(screen.getByTestId('settings-playback-still-watching-180'));
+
+    await waitFor(async () => {
+      const loaded = await store.load();
+      expect(loaded.subtitleMode).toBe('onlyForced');
+      expect(loaded.preferDefaultAudioTrack).toBe(false);
+      expect(loaded.filterSdhSubtitles).toBe(true);
+      expect(loaded.preferHevcOverDolbyVision).toBe(true);
+      expect(loaded.osdTimeDisplayMode).toBe('endsAt');
+      expect(loaded.oledScreensaverTimeoutMin).toBe(15);
+      expect(loaded.stillWatchingTimeoutMin).toBe(180);
+    });
+  });
 });

@@ -550,12 +550,20 @@ describe('vod', () => {
     error(r, 'decoder');
     error(r, 'decoder');
     await tick(1000);
-    expect(r.loads.at(-1)?.options).toEqual({ audioTrackId: 'a:1', subtitleTrackId: null });
+    expect(r.loads.at(-1)?.options).toEqual({
+      audioTrackId: 'a:1',
+      subtitleTrackId: null,
+      preferHevcOverDolbyVision: true,
+    });
     error(r, 'decoder');
     await tick(2000);
     expect(r.loads.at(-1)).toMatchObject({
       startMs: 95_000,
-      options: { audioTrackId: 'a:1', subtitleTrackId: null },
+      options: {
+        audioTrackId: 'a:1',
+        subtitleTrackId: null,
+        preferHevcOverDolbyVision: true,
+      },
     });
     error(r, 'decoder');
     await tick(4000);

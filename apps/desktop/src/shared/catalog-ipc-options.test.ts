@@ -150,4 +150,101 @@ describe('ListItemsOptions and allSourcesItems RPC validation (#125)', () => {
       expect(isCatalogClientMessage(msg)).toBe(false);
     }
   });
+
+  it('validates getTrackPreference, saveTrackPreference, and clearTrackPreference RPC calls (#208)', () => {
+    const valid: unknown[] = [
+      {
+        type: 'call',
+        reqId: 501,
+        call: { method: 'getTrackPreference', scopeKey: 'series:src_1:42' },
+      },
+      {
+        type: 'call',
+        reqId: 502,
+        call: { method: 'getTrackPreference', scopeKey: 'm:src_1:9', profileId: 'kids' },
+      },
+      {
+        type: 'call',
+        reqId: 503,
+        call: {
+          method: 'saveTrackPreference',
+          input: {
+            scopeKey: 'series:src_1:42',
+            sourceId: 'src_1',
+            profileId: 'default',
+            audioLang: 'tr',
+            audioLabel: 'Turkish 5.1',
+            subLang: 'en',
+            subLabel: 'English',
+            subDisabled: false,
+            audioDelayMs: -250,
+            subDelayMs: 500,
+            resizeMode: 'fill',
+          },
+        },
+      },
+      {
+        type: 'call',
+        reqId: 504,
+        call: {
+          method: 'saveTrackPreference',
+          input: {
+            scopeKey: 'm:src_1:9',
+            sourceId: 'src_1',
+            subDisabled: true,
+            subLang: null,
+            resizeMode: null,
+          },
+        },
+      },
+      {
+        type: 'call',
+        reqId: 505,
+        call: { method: 'clearTrackPreference', scopeKey: 'series:src_1:42', profileId: 'default' },
+      },
+    ];
+    for (const msg of valid) {
+      expect(isCatalogClientMessage(msg)).toBe(true);
+    }
+
+    const invalid: unknown[] = [
+      { type: 'call', reqId: 601, call: { method: 'getTrackPreference', scopeKey: '' } },
+      { type: 'call', reqId: 602, call: { method: 'clearTrackPreference', scopeKey: 'bad\nkey' } },
+      {
+        type: 'call',
+        reqId: 603,
+        call: {
+          method: 'saveTrackPreference',
+          input: { scopeKey: '', sourceId: 'src_1' },
+        },
+      },
+      {
+        type: 'call',
+        reqId: 604,
+        call: {
+          method: 'saveTrackPreference',
+          input: { scopeKey: 'm:src_1:9', sourceId: 'src_1', resizeMode: 'zoom' },
+        },
+      },
+      {
+        type: 'call',
+        reqId: 605,
+        call: {
+          method: 'saveTrackPreference',
+          input: { scopeKey: 'm:src_1:9', sourceId: 'src_1', audioDelayMs: 90_000 },
+        },
+      },
+      {
+        type: 'call',
+        reqId: 606,
+        call: {
+          method: 'saveTrackPreference',
+          input: { scopeKey: 'm:src_1:9', sourceId: 'src_1', subDisabled: 'yes' },
+        },
+      },
+    ];
+    for (const msg of invalid) {
+      expect(isCatalogClientMessage(msg)).toBe(false);
+    }
+  });
 });

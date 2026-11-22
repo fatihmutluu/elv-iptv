@@ -73,7 +73,8 @@ public func loadOptions(for plan: MediaPlan, request: LoadRequest) -> EngineLoad
     maxAnalyzeDurationMicros: nil,
     generatesBackgroundScrubPreviews: false,
     skipsContainerAttachments: true,
-    hostRetriesExhaustedLiveReplay: hostRetriesLiveReplay
+    hostRetriesExhaustedLiveReplay: hostRetriesLiveReplay,
+    filterSdhSubtitles: request.filterSdhSubtitles
   )
 }
 

@@ -53,6 +53,30 @@ export function PlayerView({
     [engine],
   );
 
+  const resizeModeRef = useRef<'fit' | 'fill' | 'stretch'>(resizeMode ?? 'fit');
+  resizeModeRef.current = resizeMode ?? 'fit';
+
+  useEffect(() => {
+    if (presenterKind !== undefined && presenterKind !== 'canvas') {
+      engine.setResizeMode?.(resizeMode ?? 'fit');
+    }
+  }, [engine, presenterKind, resizeMode]);
+
+  useEffect(() => {
+    if (
+      presenterKind === undefined ||
+      presenterKind === 'canvas' ||
+      typeof engine.subscribe !== 'function'
+    ) {
+      return;
+    }
+    return engine.subscribe((event) => {
+      if (event.type === 'state' && (event.state === 'ready' || event.state === 'playing')) {
+        engine.setResizeMode?.(resizeModeRef.current);
+      }
+    });
+  }, [engine, presenterKind]);
+
   const measure = useCallback((): void => {
     areaRef.current?.measureInWindow((x, y, width, height) => {
       sender.update({ x, y, width, height }, failedRef.current);

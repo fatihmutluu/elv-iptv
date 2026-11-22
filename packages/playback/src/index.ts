@@ -30,6 +30,7 @@ export {
 } from './diagnoser';
 export {
   type AttemptToken,
+  type ChapterInfo,
   type ClockAnchor,
   EMPTY_TRACKS,
   type EngineCapabilities,
@@ -54,6 +55,7 @@ export {
   type NativeLoadCommand,
 } from './native-bridge';
 export { nextLimitDelay } from './recovery';
+export { stripSdhAnnotations } from './sdh-filter';
 export { createPlaybackService, type PlaybackServiceDeps } from './service';
 export {
   clampPlaybackSpeed,
@@ -64,6 +66,14 @@ export {
   type SpeedCoalescer,
   type SpeedCoalescerOptions,
 } from './speed-coalescer';
+export {
+  type InitialTrackSelection,
+  type PersistedTrackSelectionPref,
+  type ProfileTrackRules,
+  resolveInitialTrackSelection,
+  type TrackSelectionOverride,
+  type TrackSelectionRules,
+} from './track-selection';
 export type {
   PlaybackClock,
   PlaybackService,

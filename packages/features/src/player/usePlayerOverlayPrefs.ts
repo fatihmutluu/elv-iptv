@@ -11,15 +11,30 @@ export function usePlayerOverlayPrefs(params: {
   itemKey: string;
   hasService: boolean;
   defaultResizeMode?: DefaultResizeModePref | undefined;
+  onResizeModeChange?: ((mode: VideoResizeMode) => void) | undefined;
   onSetDeinterlace?: ((enabled: boolean) => void) | undefined;
   onSetOrientationLocked?: ((locked: boolean) => void) | undefined;
 }) {
-  const { itemKey, hasService, defaultResizeMode, onSetDeinterlace, onSetOrientationLocked } =
-    params;
-  const [resizeMode, setResizeMode] = useState<VideoResizeMode>(() => defaultResizeMode ?? 'fit');
+  const {
+    itemKey,
+    hasService,
+    defaultResizeMode,
+    onResizeModeChange,
+    onSetDeinterlace,
+    onSetOrientationLocked,
+  } = params;
+  const [resizeMode, setResizeModeState] = useState<VideoResizeMode>(
+    () => defaultResizeMode ?? 'fit',
+  );
   const [deinterlace, setDeinterlace] = useState(false);
   const [statsVisible, setStatsVisible] = useState(false);
 
+  const defaultResizeModeRef = useRef<VideoResizeMode>(defaultResizeMode ?? 'fit');
+  defaultResizeModeRef.current = defaultResizeMode ?? 'fit';
+  const resizeModeRef = useRef(resizeMode);
+  resizeModeRef.current = resizeMode;
+  const onResizeModeChangeRef = useRef(onResizeModeChange);
+  onResizeModeChangeRef.current = onResizeModeChange;
   const onSetDeinterlaceRef = useRef(onSetDeinterlace);
   onSetDeinterlaceRef.current = onSetDeinterlace;
   const deinterlaceRef = useRef(false);
@@ -47,14 +62,28 @@ export function usePlayerOverlayPrefs(params: {
     }
   }, [hasService]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset deinterlace UI state on item change to mirror mpv --reset-on-next-file
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset deinterlace & resizeMode UI state on item change so per-item resizeMode never bleeds across items
   useEffect(() => {
     deinterlaceRef.current = false;
     setDeinterlace(false);
+    const fallback = defaultResizeModeRef.current;
+    resizeModeRef.current = fallback;
+    setResizeModeState(fallback);
   }, [itemKey]);
 
-  const toggleResizeMode = (): void =>
-    setResizeMode((prev) => (prev === 'fit' ? 'fill' : prev === 'fill' ? 'stretch' : 'fit'));
+  const setResizeMode = useCallback((next: VideoResizeMode, notify = false): void => {
+    resizeModeRef.current = next;
+    setResizeModeState(next);
+    if (notify) onResizeModeChangeRef.current?.(next);
+  }, []);
+
+  const toggleResizeMode = (): void => {
+    const prev = resizeModeRef.current;
+    const next: VideoResizeMode = prev === 'fit' ? 'fill' : prev === 'fill' ? 'stretch' : 'fit';
+    resizeModeRef.current = next;
+    setResizeModeState(next);
+    onResizeModeChangeRef.current?.(next);
+  };
   const toggleDeinterlace = (): void => {
     if (onSetDeinterlaceRef.current === undefined) return;
     const next = !deinterlaceRef.current;
@@ -69,6 +98,7 @@ export function usePlayerOverlayPrefs(params: {
       resizeMode,
       deinterlace,
       statsVisible,
+      setResizeMode,
       toggleResizeMode,
       toggleDeinterlace,
       toggleStats,

@@ -330,13 +330,14 @@ describe('Cinema Quietude v2 player redesign end-to-end (#391, #58, #394, #114, 
       });
       expect(screen.queryByTestId('player-osd')).toBeNull();
 
-      // Pointer hover wakes full 'controls' tier with 3-zone bar, volume slider, and dynamic fullscreen icon
+      // Pointer hover wakes full 'controls' tier with minimalist top/bottom bars, hover volume popover, and dynamic fullscreen icon
       await fireEvent(screen.getByTestId('player-screen'), 'pointerMove', {
         nativeEvent: { pointerType: 'mouse', clientX: 200, clientY: 200 },
       });
-      expect(screen.getByTestId('desktop-bar-left')).toBeTruthy();
-      expect(screen.getByTestId('desktop-bar-center')).toBeTruthy();
-      expect(screen.getByTestId('desktop-bar-right')).toBeTruthy();
+      expect(screen.getByTestId('player-osd-top')).toBeTruthy();
+      expect(screen.getByTestId('player-osd-bottom')).toBeTruthy();
+      expect(screen.getByTestId('player-bottom-transport')).toBeTruthy();
+      await fireEvent(screen.getByTestId('player-mute-button'), 'hoverIn');
       expect(screen.getByTestId('player-volume-slider')).toBeTruthy();
       expect(StyleSheet.flatten(screen.getByTestId('player-osd').props.style)?.position).not.toBe(
         'absolute',
@@ -692,8 +693,9 @@ describe('Cinema Quietude v2 player redesign end-to-end (#391, #58, #394, #114, 
     await waitFor(() => {
       expect(screen.getByTestId('player-live-now-next')).toBeTruthy();
     });
-    expect(screen.getByTestId('player-stream-badge-res')).toHaveTextContent('1080p');
-    expect(screen.getByTestId('player-stream-badge-fps')).toHaveTextContent('50 fps');
+    // Portrait phone hides StreamBadgePills so the top header stays sleek 2-line (badges live in Info & Settings)
+    expect(screen.queryByTestId('player-stream-badge-res')).toBeNull();
+    expect(screen.queryByTestId('player-stream-badge-fps')).toBeNull();
     // Live prev/next are sleek circular icon buttons with accessible labels (no text children)
     const prevBtn = screen.getByTestId('player-prev');
     const nextBtn = screen.getByTestId('player-next');
@@ -701,7 +703,6 @@ describe('Cinema Quietude v2 player redesign end-to-end (#391, #58, #394, #114, 
     expect(nextBtn.props.accessibilityLabel).toBe('Next');
     expect(StyleSheet.flatten(prevBtn.props.style)?.width).toBe(44);
     expect(screen.getByTestId('player-channel-list-button')).toBeTruthy();
-    expect(screen.getByTestId('player-info-button')).toBeTruthy();
     expect(screen.getByTestId('osd-clock')).toBeTruthy();
     await live.view.unmount();
 

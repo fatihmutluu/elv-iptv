@@ -44,6 +44,12 @@ const EXPECTED_ICON_NAMES: readonly IconName[] = [
   'chevronLeft',
   'chevronDown',
   'pin',
+  'skipBack10',
+  'skipForward10',
+  'moon',
+  'chapters',
+  'skipPrev',
+  'skipNext',
 ];
 
 const FILLED_ICONS: ReadonlySet<IconName> = new Set([
@@ -52,6 +58,8 @@ const FILLED_ICONS: ReadonlySet<IconName> = new Set([
   'dots',
   'keypad',
   'starFilled',
+  'skipPrev',
+  'skipNext',
 ]);
 
 function assertValidShape(shape: IconShape): void {
@@ -128,5 +136,42 @@ describe('ICON_PATHS', () => {
     expect(ICON_PATHS.check.shapes[0]?.strokeWidth).toBe(2.2);
     expect(ICON_PATHS.skipBack.shapes[0]?.strokeWidth).toBe(1.7);
     expect(ICON_PATHS.skipForward.shapes[0]?.strokeWidth).toBe(1.7);
+  });
+
+  it('defines crisp Wave C1 player cinema icons using only pure vector shapes', () => {
+    for (const name of [
+      'skipBack10',
+      'skipForward10',
+      'moon',
+      'chapters',
+      'skipPrev',
+      'skipNext',
+    ] as const) {
+      const spec = ICON_PATHS[name];
+      expect(spec.viewBox).toBe('0 0 24 24');
+      for (const shape of spec.shapes) {
+        expect(['path', 'circle', 'rect']).toContain(shape.kind);
+      }
+    }
+
+    // skipBack10 & skipForward10 combine outer arc + arrowhead + pure-vector "1" and "0" shapes.
+    expect(ICON_PATHS.skipBack10.shapes.length).toBeGreaterThanOrEqual(4);
+    expect(ICON_PATHS.skipForward10.shapes.length).toBeGreaterThanOrEqual(4);
+    expect(ICON_PATHS.skipBack10.shapes.some((shape) => shape.kind === 'rect')).toBe(true);
+    expect(ICON_PATHS.skipForward10.shapes.some((shape) => shape.kind === 'rect')).toBe(true);
+    expect(ICON_PATHS.skipBack10.filled).toBeUndefined();
+    expect(ICON_PATHS.skipForward10.filled).toBeUndefined();
+
+    // moon & chapters are crisp stroke icons.
+    expect(ICON_PATHS.moon.shapes.length).toBeGreaterThanOrEqual(1);
+    expect(ICON_PATHS.moon.filled).toBeUndefined();
+    expect(ICON_PATHS.chapters.shapes.length).toBeGreaterThanOrEqual(2);
+    expect(ICON_PATHS.chapters.filled).toBeUndefined();
+
+    // skipPrev & skipNext match play/pause filled transport style with bar + triangle.
+    expect(ICON_PATHS.skipPrev.filled).toBe(true);
+    expect(ICON_PATHS.skipNext.filled).toBe(true);
+    expect(ICON_PATHS.skipPrev.shapes.length).toBeGreaterThanOrEqual(2);
+    expect(ICON_PATHS.skipNext.shapes.length).toBeGreaterThanOrEqual(2);
   });
 });

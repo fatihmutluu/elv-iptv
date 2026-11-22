@@ -100,15 +100,26 @@ extension AetherBackend {
     sourceTime: Double,
     softwareSize: CGSize?
   ) {
+    let filterSdh = currentLoadOptions?.filterSdhSubtitles ?? false
     let activeCues = cues.filter { cue in
-      cue.startTime <= sourceTime && sourceTime < cue.endTime
+      guard cue.startTime <= sourceTime && sourceTime < cue.endTime else { return false }
+      guard filterSdh else { return true }
+      switch cue.body {
+      case let .text(raw):
+        return !SubtitlePresentation.stripSdhAnnotations(raw).isEmpty
+      case let .richText(runs):
+        return !SubtitlePresentation.stripSdhAnnotations(runs.map(\.text).joined()).isEmpty
+      case .image:
+        return true
+      }
     }
     let resolvedSize = Self.resolveVideoSize(from: target, softwareSize: softwareSize)
     publishSubtitlePresentation(
       SubtitlePresentation(
         cues: activeCues,
         videoSize: resolvedSize,
-        gravity: gravity
+        gravity: gravity,
+        filterSdhSubtitles: filterSdh
       )
     )
   }
@@ -334,26 +345,70 @@ extension AetherBackend {
       return
     }
     let asset = item.asset
+    let isVod = !target.isLive
     mediaInfoTask?.cancel()
     mediaInfoTask = Task { @MainActor [weak self] in
-      guard let videoTracks = try? await asset.loadTracks(withMediaType: .video),
-            let track = videoTracks.first,
-            !Task.isCancelled
-      else { return }
-      let loaded = try? await track.load(.naturalSize, .nominalFrameRate, .formatDescriptions)
-      guard let self, !Task.isCancelled, self.engineLoadSerial == serial, let loaded else { return }
-      let (naturalSize, nominalRate, descriptions) = loaded
-      let width = naturalSize.width > 0 ? Int(naturalSize.width.rounded()) : nil
-      let height = naturalSize.height > 0 ? Int(naturalSize.height.rounded()) : nil
-      let fps: Double? = (nominalRate.isFinite && nominalRate > 0)
-        ? (Double(nominalRate) * 100.0).rounded() / 100.0
-        : nil
-      let (codec, hdr) = Self.classifyFormatDescriptions(descriptions)
-      let info = StreamVideoInfo(width: width, height: height, fps: fps, codec: codec, hdr: hdr)
-      if !info.isEmpty {
-        self.onObservation?(.mediaInfo(info), serial)
+      if let videoTracks = try? await asset.loadTracks(withMediaType: .video),
+         let track = videoTracks.first,
+         !Task.isCancelled,
+         let loaded = try? await track.load(.naturalSize, .nominalFrameRate, .formatDescriptions)
+      {
+        guard let self, !Task.isCancelled, self.engineLoadSerial == serial else { return }
+        let (naturalSize, nominalRate, descriptions) = loaded
+        let width = naturalSize.width > 0 ? Int(naturalSize.width.rounded()) : nil
+        let height = naturalSize.height > 0 ? Int(naturalSize.height.rounded()) : nil
+        let fps: Double? = (nominalRate.isFinite && nominalRate > 0)
+          ? (Double(nominalRate) * 100.0).rounded() / 100.0
+          : nil
+        let (codec, hdr) = Self.classifyFormatDescriptions(descriptions)
+        let info = StreamVideoInfo(width: width, height: height, fps: fps, codec: codec, hdr: hdr)
+        if !info.isEmpty {
+          self.onObservation?(.mediaInfo(info), serial)
+        }
       }
+      guard isVod, !Task.isCancelled else { return }
+      let chapters = await Self.loadAssetChapters(asset)
+      guard let self, !Task.isCancelled, self.engineLoadSerial == serial, !chapters.isEmpty else { return }
+      self.onObservation?(.chapters(chapters), serial)
     }
+  }
+
+  private static func loadAssetChapters(_ asset: AVAsset) async -> [ChapterInfoOut] {
+    guard let locales = try? await asset.load(.availableChapterLocales),
+          let locale = locales.first,
+          let groups = try? await asset.loadChapterMetadataGroups(
+            withTitleLocale: locale,
+            containingItemsWithCommonKeys: [.commonKeyTitle]
+          ),
+          !groups.isEmpty
+    else { return [] }
+    var out: [ChapterInfoOut] = []
+    out.reserveCapacity(groups.count)
+    for (idx, group) in groups.enumerated() {
+      let startSec = CMTimeGetSeconds(group.timeRange.start)
+      guard startSec.isFinite, startSec >= 0 else { continue }
+      let durSec = CMTimeGetSeconds(group.timeRange.duration)
+      let endMs: Double? = (durSec.isFinite && durSec > 0) ? ((startSec + durSec) * 1_000.0).rounded() : nil
+      let titleItem = AVMetadataItem.metadataItems(
+        from: group.items,
+        filteredByIdentifier: .commonIdentifierTitle
+      ).first
+      let rawTitle: String? = if let titleItem {
+        try? await titleItem.load(.stringValue)
+      } else {
+        nil
+      }
+      let trimmed = rawTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+      out.append(
+        ChapterInfoOut(
+          id: "ch:\(idx)",
+          title: (trimmed?.isEmpty == false) ? trimmed : nil,
+          startMs: (startSec * 1_000.0).rounded(),
+          endMs: endMs
+        )
+      )
+    }
+    return out
   }
 
   private static func classifyFormatDescriptions(_ descriptions: [CMFormatDescription]) -> (codec: String?, hdr: String) {

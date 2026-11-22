@@ -650,4 +650,126 @@ describe('settings-menu-nav', () => {
       ),
     ).toEqual({ kind: 'state', state: { view: 'root', index: 3 } });
   });
+
+  it('supports Wave C1 chapters, sleepTimer, timeDisplay, info, and alwaysOnTop routing (#118, #160)', () => {
+    const chapters = [
+      { id: 'c:0', title: 'Intro', startMs: 0, endMs: 30_000 },
+      { id: 'c:1', title: 'Act 1', startMs: 30_000, endMs: 120_000 },
+    ];
+    const opts = {
+      isVod: true,
+      hasChapters: true,
+      chapters,
+      hasSleepTimer: true,
+      sleepTimerMinutes: 30,
+      sleepTimerAction: 'stop' as const,
+      hasAspect: true,
+      hasTimeDisplay: true,
+      hasInfo: true,
+      hasAlwaysOnTop: true,
+    };
+
+    // Row counts for new sub-views
+    expect(settingsRowCount('chapters', TRACKS, opts)).toBe(2);
+    expect(settingsRowCount('chapters', TRACKS, { hasChapters: false })).toBe(0);
+    // sleepTimer has action toggle row (index 0) + 9 presets = 10 rows
+    expect(settingsRowCount('sleepTimer', TRACKS, opts)).toBe(10);
+    expect(settingsRowCount('sleepTimer', TRACKS, { hasSleepTimer: false })).toBe(0);
+
+    // initialSettingsMenu lands on active sleep timer preset (30 -> index 3: action + [0,15,30])
+    expect(initialSettingsMenu('sleepTimer', opts)).toEqual({ view: 'sleepTimer', index: 3 });
+    expect(initialSettingsMenu('chapters', opts)).toEqual({ view: 'chapters', index: 0 });
+    expect(
+      clampSettingsMenu({ view: 'chapters', index: 1 }, TRACKS, { hasChapters: false }),
+    ).toEqual({ view: 'root', index: 0 });
+    expect(
+      clampSettingsMenu({ view: 'sleepTimer', index: 2 }, TRACKS, { hasSleepTimer: false }),
+    ).toEqual({ view: 'root', index: 0 });
+
+    // Enter chapters (root index 3: subtitles, audio, speed, chapters)
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 3 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'state', state: { view: 'chapters', index: 0 } });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'chapters', index: 1 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'chapter', startMs: 30_000 });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'back', kind: 'press', time: 0 },
+        { view: 'chapters', index: 1 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'state', state: { view: 'root', index: 3 } });
+
+    // Enter sleepTimer (root index 4) -> toggle action at index 0, pick 45 min at index 4
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 4 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'state', state: { view: 'sleepTimer', index: 3 } });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'sleepTimer', index: 0 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'toggleSleepTimerAction' });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'sleepTimer', index: 4 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'sleepTimer', minutes: 45 });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'left', kind: 'press', time: 0 },
+        { view: 'sleepTimer', index: 4 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'state', state: { view: 'root', index: 4 } });
+
+    // Root action rows: timeDisplay (index 6), info (index 7), alwaysOnTop (index 8)
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 6 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'toggleTimeDisplayMode' });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 7 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'toggleInfo' });
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 8 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'toggleAlwaysOnTop' });
+  });
 });

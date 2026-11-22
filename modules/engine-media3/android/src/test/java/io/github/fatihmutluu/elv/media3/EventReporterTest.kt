@@ -18,6 +18,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DecoderCounters
 import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecRenderer
@@ -597,6 +598,81 @@ class EventReporterTest {
       assertEquals(
         mapOf("width" to 3840, "height" to 2160, "fps" to 50.0, "codec" to "hevc", "hdr" to "hdr10"),
         events.last()["info"],
+      )
+      reporter.end()
+    } finally {
+      real.release()
+    }
+  }
+
+  @Test
+  fun `tracks cumulative dropped video frames across AnalyticsListener and DecoderCounters and resets on new load (#160)`() {
+    val events = mutableListOf<Map<String, Any?>>()
+    val real = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).setLooper(Looper.getMainLooper()).build()
+    try {
+      val player = ScriptedPlayer(real).apply {
+        state = Player.STATE_READY
+        playing = true
+      }
+      val reporter = EventReporter(
+        handler = Handler(Looper.getMainLooper()),
+        fence = PrepareFence(),
+        send = { events += it },
+        onHlsDetected = {},
+        onBehindLiveWindow = {},
+        onAudioFocusDenied = { false },
+        onVideoCodecFailed = {},
+        onFirstFrame = {},
+        onCue = { _, _ -> },
+      )
+      reporter.begin(player, live = false, prepareSerial = 1L, reused = false)
+      events.clear()
+
+      val eventTime = AnalyticsListener.EventTime(
+        0L,
+        androidx.media3.common.Timeline.EMPTY,
+        0,
+        null,
+        0L,
+        androidx.media3.common.Timeline.EMPTY,
+        0,
+        null,
+        0L,
+        0L,
+      )
+      reporter.onDroppedVideoFrames(eventTime, 4, 250L)
+      reporter.onDroppedVideoFrames(eventTime, 6, 500L)
+      reporter.onDroppedVideoFrames(eventTime, 0, 100L)
+      assertEquals(
+        listOf(
+          mapOf("type" to "telemetry", "droppedFrames" to 4),
+          mapOf("type" to "telemetry", "droppedFrames" to 10),
+        ),
+        events.filter { it["type"] == "telemetry" },
+      )
+
+      // DecoderCounters higher count advances telemetry without double-counting
+      player.scriptedVideoCounters = DecoderCounters().apply {
+        renderedOutputBufferCount = 100
+        droppedBufferCount = 15
+      }
+      reporter.onEvents(player, eventsFlag(Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_IS_PLAYING_CHANGED))
+      assertEquals(
+        mapOf("type" to "telemetry", "droppedFrames" to 15),
+        events.last { it["type"] == "telemetry" },
+      )
+
+      // New load resets cumulative dropped frame counter cleanly to 0
+      reporter.begin(player, live = false, prepareSerial = 2L, reused = false)
+      player.scriptedVideoCounters = DecoderCounters().apply {
+        renderedOutputBufferCount = 10
+        droppedBufferCount = 2
+      }
+      events.clear()
+      reporter.onDroppedVideoFrames(eventTime, 2, 100L)
+      assertEquals(
+        listOf(mapOf("type" to "telemetry", "droppedFrames" to 2)),
+        events.filter { it["type"] == "telemetry" },
       )
       reporter.end()
     } finally {

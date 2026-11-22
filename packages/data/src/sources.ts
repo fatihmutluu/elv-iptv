@@ -198,6 +198,7 @@ export const TABLES_BY_SOURCE: readonly string[] = [
   ...WITHOUT_ROWID_DELETE_SPECS.map(([table]) => table),
   'watch_progress',
   'favorites',
+  'track_preferences',
 ];
 const NON_URLVARS_PARTS = ['xtream', 'playlist'] as const;
 
@@ -408,6 +409,7 @@ export async function finishDeletingSource(
   await db.transaction(async (tx) => {
     await tx.run('DELETE FROM watch_progress WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM favorites WHERE source_id = ?', [id]);
+    await tx.run('DELETE FROM track_preferences WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM sources WHERE id = ?', [id]);
   });
 }

@@ -474,8 +474,8 @@ describe('Wave 3B Player TV focus, hidden-OSD passthrough, live controls, atomic
     expect(screen.getByTestId('player-settings-panel')).toBeTruthy();
     expect(getAnchor().props.hasTVPreferredFocus).toBe(false);
 
-    // Navigate to Stats row (index 4 on VOD TV: subtitles, audio, speed, aspect, stats)
-    for (let i = 0; i < 4; i += 1) await act(async () => tv.keys.tap(KEY_DOWN));
+    // Navigate to Stats row (index 7 on VOD TV: subtitles, audio, speed, sleepTimer, aspect, timeDisplay, info, stats)
+    for (let i = 0; i < 7; i += 1) await act(async () => tv.keys.tap(KEY_DOWN));
     // First Select toggles Stats ON; duplicate Select < 220ms later is SUPPRESSED (stays ON!)
     await act(async () => tv.keys.tap(KEY_SELECT));
     expect(screen.getByTestId('player-stats-hud', { includeHiddenElements: true })).toBeTruthy();
@@ -573,6 +573,9 @@ describe('Wave 3B Player TV focus, hidden-OSD passthrough, live controls, atomic
     expect(screen.queryByTestId('player-settings-sub-off')).toBeNull();
 
     // After >= 220ms, duplicate Select 5ms apart entering Subtitles submenu must NOT immediately select Off
+    const subCallsBefore = tv.engine.commands.filter(
+      (c) => c.name === 'selectSubtitleTrack',
+    ).length;
     await act(async () => {
       tv.manual.advance(250);
       tv.keys.tap(KEY_SELECT);
@@ -580,7 +583,9 @@ describe('Wave 3B Player TV focus, hidden-OSD passthrough, live controls, atomic
       tv.keys.tap(KEY_SELECT);
     });
     expect(screen.getByTestId('player-settings-sub-off')).toBeTruthy();
-    expect(tv.engine.commands.filter((c) => c.name === 'selectSubtitleTrack')).toHaveLength(0);
+    expect(tv.engine.commands.filter((c) => c.name === 'selectSubtitleTrack')).toHaveLength(
+      subCallsBefore,
+    );
 
     await tv.view.unmount();
   });

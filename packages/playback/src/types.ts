@@ -1,6 +1,7 @@
 import type { AndroidDecoderMode, BufferPreset, ElvError, Result } from '@elv/domain';
 import type {
   AttemptToken,
+  ChapterInfo,
   ClockAnchor,
   MediaKind,
   MediaTracks,
@@ -33,6 +34,10 @@ export interface TuneRequest {
   bufferPreset?: BufferPreset;
   /** User-selected Android video decoder mode forwarded on load and recovery reloads (`#411`). */
   decoderMode?: AndroidDecoderMode;
+  /** Prefer HEVC base-layer over Dolby Vision when decoding (`#124`, `#189`). */
+  preferHevcOverDolbyVision?: boolean;
+  /** Strip SDH annotations from rendered text subtitles (`#310`). */
+  filterSdhSubtitles?: boolean;
 }
 
 /** What the service is doing now. */
@@ -53,6 +58,10 @@ export interface PlaybackState {
   tracks: MediaTracks;
   /** Decoded video metadata reported by the engine for the active media (`#58`). */
   readonly videoInfo?: StreamVideoInfo;
+  /** Chapter markers reported for the active media (`#118`). */
+  readonly chapters?: readonly ChapterInfo[];
+  /** Cumulative dropped video frames reported for the active media (`#160`). */
+  readonly droppedFrames?: number;
   item?: string;
   accountKey?: string;
   anchor?: ClockAnchor;

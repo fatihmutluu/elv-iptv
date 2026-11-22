@@ -199,6 +199,8 @@ describe('removeSource', () => {
         "(profile_id, source_id, item_key, kind, title, position_ms, duration_ms, watched, updated_at) VALUES ('default', ?, ?, 'movie', 't', 20000, 60000, 0, 1)",
       favorites:
         "(profile_id, source_id, item_key, kind, title, added_at) VALUES ('default', ?, ?, 'movie', 't', 1)",
+      track_preferences:
+        "(profile_id, scope_key, source_id, audio_lang, updated_at) VALUES ('default', ?, ?, 'tr', 1)",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -208,6 +210,8 @@ describe('removeSource', () => {
           runId += 1;
         } else if (table === 'watch_progress' || table === 'favorites') {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [id, `k:${id}`]);
+        } else if (table === 'track_preferences') {
+          await s.db.run(`INSERT INTO ${table} ${rest}`, [`k:${id}`, id]);
         } else {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [id]);
         }
@@ -259,6 +263,8 @@ describe('removeSource', () => {
         "(profile_id, source_id, item_key, kind, title, position_ms, duration_ms, watched, updated_at) VALUES ('default', ?, ?, 'movie', 't', 20000, 60000, 0, 1)",
       favorites:
         "(profile_id, source_id, item_key, kind, title, added_at) VALUES ('default', ?, ?, 'movie', 't', 1)",
+      track_preferences:
+        "(profile_id, scope_key, source_id, audio_lang, updated_at) VALUES ('default', ?, ?, 'tr', 1)",
     };
     let runId = 1;
     for (const id of ['src1', 'src2']) {
@@ -268,6 +274,8 @@ describe('removeSource', () => {
           runId += 1;
         } else if (table === 'watch_progress' || table === 'favorites') {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [id, `k:${id}`]);
+        } else if (table === 'track_preferences') {
+          await s.db.run(`INSERT INTO ${table} ${rest}`, [`k:${id}`, id]);
         } else {
           await s.db.run(`INSERT INTO ${table} ${rest}`, [id]);
         }

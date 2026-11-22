@@ -1,7 +1,8 @@
-import { ANDROID_DECODER_MODES, type AndroidDecoderMode } from '@elv/domain';
+import { ANDROID_DECODER_MODES, type AndroidDecoderMode, type SleepTimerAction } from '@elv/domain';
 import type { KeyEvent } from '@elv/focus-core';
-import type { MediaTracks } from '@elv/playback';
+import type { ChapterInfo, MediaTracks } from '@elv/playback';
 import type { AudioDeviceInfo } from '../ports/video-host';
+import { SLEEP_TIMER_PRESETS_MIN } from './sleep-timer';
 
 /** Active level inside the 2-level Player Settings menu (`root` or a sub-view). */
 export type SettingsMenuView =
@@ -10,6 +11,8 @@ export type SettingsMenuView =
   | 'audio'
   | 'audioDevice'
   | 'speed'
+  | 'chapters'
+  | 'sleepTimer'
   | 'videoDecoder';
 
 /** Focused row state for the 2-level Player Settings menu. */
@@ -24,8 +27,13 @@ export type SettingsRootItem =
   | 'audio'
   | 'audioDevice'
   | 'speed'
+  | 'chapters'
+  | 'sleepTimer'
   | 'videoDecoder'
   | 'aspect'
+  | 'timeDisplay'
+  | 'info'
+  | 'alwaysOnTop'
   | 'deinterlace'
   | 'autoSubtitlesOnSkipBack'
   | 'autoPlayNextEpisode'
@@ -63,29 +71,7 @@ export const SETTINGS_ROOT_ITEMS: readonly SettingsRootItem[] = [
   'stats',
 ];
 
-/** Returns the ordered root Player Settings rows for the active stream kind and host capabilities. */
-export function settingsRootItems(
-  isVod: boolean,
-  hasAspect = true,
-  hasDeinterlace = false,
-  hasAutoSubtitlesOnSkipBack = false,
-  hasAutoPlayNextEpisode = false,
-  hasAudioDevice = false,
-  hasVideoDecoder = false,
-): readonly SettingsRootItem[] {
-  const items: SettingsRootItem[] = ['subtitles', 'audio'];
-  if (hasAudioDevice) items.push('audioDevice');
-  if (isVod) items.push('speed');
-  if (hasVideoDecoder) items.push('videoDecoder');
-  if (hasAspect) items.push('aspect');
-  if (hasDeinterlace) items.push('deinterlace');
-  if (hasAutoSubtitlesOnSkipBack) items.push('autoSubtitlesOnSkipBack');
-  if (hasAutoPlayNextEpisode) items.push('autoPlayNextEpisode');
-  items.push('stats');
-  return items;
-}
-
-/** Optional VOD and display context passed to Player Settings navigation helpers. */
+/** Optional VOD, chapter, sleep-timer, and display context passed to Player Settings navigation helpers. */
 export interface SettingsMenuOptions {
   readonly isVod?: boolean;
   readonly playbackSpeed?: number;
@@ -98,6 +84,54 @@ export interface SettingsMenuOptions {
   readonly activeAudioDevice?: string;
   readonly hasVideoDecoder?: boolean;
   readonly androidDecoderMode?: AndroidDecoderMode;
+  readonly hasChapters?: boolean;
+  readonly chapters?: readonly ChapterInfo[];
+  readonly hasSleepTimer?: boolean;
+  readonly sleepTimerMinutes?: number;
+  readonly sleepTimerAction?: SleepTimerAction;
+  readonly hasTimeDisplay?: boolean;
+  readonly hasInfo?: boolean;
+  readonly hasAlwaysOnTop?: boolean;
+}
+
+/** Builds ordered root Player Settings rows from a {@link SettingsMenuOptions} bag. */
+function settingsRootItemsFromOptions(options?: SettingsMenuOptions): readonly SettingsRootItem[] {
+  const items: SettingsRootItem[] = ['subtitles', 'audio'];
+  if (options?.hasAudioDevice === true) items.push('audioDevice');
+  if (options?.isVod === true) items.push('speed');
+  if (options?.hasChapters === true && (options.chapters?.length ?? 0) > 0) items.push('chapters');
+  if (options?.hasSleepTimer === true) items.push('sleepTimer');
+  if (options?.hasVideoDecoder === true) items.push('videoDecoder');
+  if (options?.hasAspect !== false) items.push('aspect');
+  if (options?.hasTimeDisplay === true) items.push('timeDisplay');
+  if (options?.hasInfo === true) items.push('info');
+  if (options?.hasAlwaysOnTop === true) items.push('alwaysOnTop');
+  if (options?.hasDeinterlace === true) items.push('deinterlace');
+  if (options?.hasAutoSubtitlesOnSkipBack === true) items.push('autoSubtitlesOnSkipBack');
+  if (options?.hasAutoPlayNextEpisode === true) items.push('autoPlayNextEpisode');
+  items.push('stats');
+  return items;
+}
+
+/** Returns the ordered root Player Settings rows for the active stream kind and host capabilities. */
+export function settingsRootItems(
+  isVod: boolean,
+  hasAspect = true,
+  hasDeinterlace = false,
+  hasAutoSubtitlesOnSkipBack = false,
+  hasAutoPlayNextEpisode = false,
+  hasAudioDevice = false,
+  hasVideoDecoder = false,
+): readonly SettingsRootItem[] {
+  return settingsRootItemsFromOptions({
+    isVod,
+    hasAspect,
+    hasDeinterlace,
+    hasAutoSubtitlesOnSkipBack,
+    hasAutoPlayNextEpisode,
+    hasAudioDevice,
+    hasVideoDecoder,
+  });
 }
 
 /** Result of routing a {@link KeyEvent} while the Player Settings menu is open. */
@@ -105,6 +139,9 @@ export type SettingsMenuIntent =
   | { readonly kind: 'state'; readonly state: SettingsMenuState }
   | { readonly kind: 'close' }
   | { readonly kind: 'toggleResizeMode' }
+  | { readonly kind: 'toggleTimeDisplayMode' }
+  | { readonly kind: 'toggleInfo' }
+  | { readonly kind: 'toggleAlwaysOnTop' }
   | { readonly kind: 'toggleDeinterlace' }
   | { readonly kind: 'toggleAutoSubtitlesOnSkipBack' }
   | { readonly kind: 'toggleAutoPlayNextEpisode' }
@@ -113,7 +150,48 @@ export type SettingsMenuIntent =
   | { readonly kind: 'audioDevice'; readonly name: string }
   | { readonly kind: 'subtitle'; readonly id: string | null }
   | { readonly kind: 'speed'; readonly rate: number }
+  | { readonly kind: 'chapter'; readonly startMs: number }
+  | { readonly kind: 'sleepTimer'; readonly minutes: number }
+  | { readonly kind: 'toggleSleepTimerAction' }
   | { readonly kind: 'videoDecoder'; readonly mode: AndroidDecoderMode };
+
+function selectedAudioIndex(tracks: MediaTracks): number {
+  return Math.max(
+    0,
+    tracks.audio.findIndex((t) => t.id === tracks.selectedAudioId),
+  );
+}
+
+function selectedAudioDeviceIndex(
+  devices: readonly AudioDeviceInfo[] | undefined,
+  activeAudioDevice: string | undefined,
+): number {
+  if (!activeAudioDevice || activeAudioDevice === 'auto') return 0;
+  const idx = normalizeAudioDeviceChoices(devices).findIndex((d) => d.name === activeAudioDevice);
+  return idx >= 0 ? idx + 1 : 0;
+}
+
+function selectedSubtitleIndex(tracks: MediaTracks): number {
+  return tracks.subtitles.findIndex((t) => t.id === tracks.selectedSubtitleId) + 1;
+}
+
+function selectedSpeedIndex(playbackSpeed: number | undefined): number {
+  const rate = playbackSpeed ?? 1;
+  const idx = PLAYBACK_SPEED_OPTIONS.indexOf(rate as (typeof PLAYBACK_SPEED_OPTIONS)[number]);
+  return idx >= 0 ? idx : PLAYBACK_SPEED_OPTIONS.indexOf(1);
+}
+
+function selectedVideoDecoderIndex(mode: AndroidDecoderMode | undefined): number {
+  return Math.max(ANDROID_DECODER_MODES.indexOf(mode ?? 'auto'), 0);
+}
+
+function selectedSleepTimerIndex(minutes: number | undefined): number {
+  const idx = SLEEP_TIMER_PRESETS_MIN.indexOf(
+    (minutes ?? 0) as (typeof SLEEP_TIMER_PRESETS_MIN)[number],
+  );
+  // Row 0 is the action toggle (Stop vs Pause); presets start at index 1
+  return idx >= 0 ? idx + 1 : 1;
+}
 
 /** Creates the initial focused state for the given Settings menu view (`root` by default). */
 export function initialSettingsMenu(
@@ -132,26 +210,19 @@ export function initialSettingsMenu(
   if (view === 'videoDecoder') {
     return { view, index: selectedVideoDecoderIndex(options?.androidDecoderMode) };
   }
+  if (view === 'sleepTimer') {
+    return { view, index: selectedSleepTimerIndex(options?.sleepTimerMinutes) };
+  }
   return { view, index: 0 };
 }
 
-/** Number of focusable rows in `view` (`subtitles` includes row 0 for "Off", `audioDevice` includes row 0 for "System default"). */
+/** Number of focusable rows in `view`. */
 export function settingsRowCount(
   view: SettingsMenuView,
   tracks: MediaTracks,
   options?: SettingsMenuOptions,
 ): number {
-  if (view === 'root') {
-    return settingsRootItems(
-      options?.isVod === true,
-      options?.hasAspect !== false,
-      options?.hasDeinterlace === true,
-      options?.hasAutoSubtitlesOnSkipBack === true,
-      options?.hasAutoPlayNextEpisode === true,
-      options?.hasAudioDevice === true,
-      options?.hasVideoDecoder === true,
-    ).length;
-  }
+  if (view === 'root') return settingsRootItemsFromOptions(options).length;
   if (view === 'subtitles') return tracks.subtitles.length + 1;
   if (view === 'audioDevice') {
     return options?.hasAudioDevice === true
@@ -159,6 +230,11 @@ export function settingsRowCount(
       : 0;
   }
   if (view === 'speed') return options?.isVod === true ? PLAYBACK_SPEED_OPTIONS.length : 0;
+  if (view === 'chapters')
+    return options?.hasChapters === true ? (options.chapters?.length ?? 0) : 0;
+  if (view === 'sleepTimer') {
+    return options?.hasSleepTimer === true ? SLEEP_TIMER_PRESETS_MIN.length + 1 : 0;
+  }
   if (view === 'videoDecoder') {
     return options?.hasVideoDecoder === true ? ANDROID_DECODER_MODES.length : 0;
   }
@@ -171,48 +247,33 @@ export function clampSettingsMenu(
   tracks: MediaTracks,
   options?: SettingsMenuOptions,
 ): SettingsMenuState {
-  const isVod = options?.isVod === true;
-  if (state.view === 'speed' && !isVod) return { view: 'root', index: 0 };
+  if (state.view === 'speed' && options?.isVod !== true) return { view: 'root', index: 0 };
   if (state.view === 'audioDevice' && options?.hasAudioDevice !== true) {
+    return { view: 'root', index: 0 };
+  }
+  if (
+    state.view === 'chapters' &&
+    (options?.hasChapters !== true || (options.chapters?.length ?? 0) === 0)
+  ) {
+    return { view: 'root', index: 0 };
+  }
+  if (state.view === 'sleepTimer' && options?.hasSleepTimer !== true) {
     return { view: 'root', index: 0 };
   }
   if (state.view === 'videoDecoder' && options?.hasVideoDecoder !== true) {
     return { view: 'root', index: 0 };
   }
   const count = settingsRowCount(state.view, tracks, options);
-  const max = Math.max(0, count - 1);
-  const index = Math.max(0, Math.min(max, state.index));
+  const index = Math.max(0, Math.min(Math.max(0, count - 1), state.index));
   return index === state.index ? state : { view: state.view, index };
 }
 
-function selectedAudioIndex(tracks: MediaTracks): number {
-  const idx = tracks.audio.findIndex((t) => t.id === tracks.selectedAudioId);
-  return Math.max(0, idx);
-}
-
-function selectedAudioDeviceIndex(
-  devices: readonly AudioDeviceInfo[] | undefined,
-  activeAudioDevice: string | undefined,
+/** Returns the root-level row index corresponding to `view` using an options bag. */
+export function rootIndexForSettingsViewOptions(
+  view: Exclude<SettingsMenuView, 'root'>,
+  options?: SettingsMenuOptions,
 ): number {
-  if (!activeAudioDevice || activeAudioDevice === 'auto') return 0;
-  const idx = normalizeAudioDeviceChoices(devices).findIndex((d) => d.name === activeAudioDevice);
-  return idx >= 0 ? idx + 1 : 0;
-}
-
-function selectedSubtitleIndex(tracks: MediaTracks): number {
-  const idx = tracks.subtitles.findIndex((t) => t.id === tracks.selectedSubtitleId);
-  return idx + 1;
-}
-
-function selectedSpeedIndex(playbackSpeed: number | undefined): number {
-  const rate = playbackSpeed ?? 1;
-  const idx = PLAYBACK_SPEED_OPTIONS.indexOf(rate as (typeof PLAYBACK_SPEED_OPTIONS)[number]);
-  return idx >= 0 ? idx : PLAYBACK_SPEED_OPTIONS.indexOf(1);
-}
-
-function selectedVideoDecoderIndex(mode: AndroidDecoderMode | undefined): number {
-  const idx = ANDROID_DECODER_MODES.indexOf(mode ?? 'auto');
-  return Math.max(idx, 0);
+  return Math.max(settingsRootItemsFromOptions(options).indexOf(view), 0);
 }
 
 /** Returns the root-level row index corresponding to `view`. */
@@ -226,7 +287,7 @@ export function rootIndexForSettingsView(
   hasAudioDevice = false,
   hasVideoDecoder = false,
 ): number {
-  const idx = settingsRootItems(
+  return rootIndexForSettingsViewOptions(view, {
     isVod,
     hasAspect,
     hasDeinterlace,
@@ -234,36 +295,7 @@ export function rootIndexForSettingsView(
     hasAutoPlayNextEpisode,
     hasAudioDevice,
     hasVideoDecoder,
-  ).indexOf(view);
-  return Math.max(idx, 0);
-}
-
-function returnToRoot(
-  view: Exclude<SettingsMenuView, 'root'>,
-  isVod: boolean,
-  hasAspect: boolean,
-  hasDeinterlace: boolean,
-  hasAutoSubtitlesOnSkipBack: boolean,
-  hasAutoPlayNextEpisode: boolean,
-  hasAudioDevice: boolean,
-  hasVideoDecoder: boolean,
-): SettingsMenuIntent {
-  return {
-    kind: 'state',
-    state: {
-      view: 'root',
-      index: rootIndexForSettingsView(
-        view,
-        isVod,
-        hasAspect,
-        hasDeinterlace,
-        hasAutoSubtitlesOnSkipBack,
-        hasAutoPlayNextEpisode,
-        hasAudioDevice,
-        hasVideoDecoder,
-      ),
-    },
-  };
+  });
 }
 
 function openSubView(
@@ -292,6 +324,15 @@ function openSubView(
       state: { view: 'speed', index: selectedSpeedIndex(options.playbackSpeed) },
     };
   }
+  if (item === 'chapters' && options?.hasChapters === true && (options.chapters?.length ?? 0) > 0) {
+    return { kind: 'state', state: { view: 'chapters', index: 0 } };
+  }
+  if (item === 'sleepTimer' && options?.hasSleepTimer === true) {
+    return {
+      kind: 'state',
+      state: { view: 'sleepTimer', index: selectedSleepTimerIndex(options.sleepTimerMinutes) },
+    };
+  }
   if (item === 'videoDecoder' && options?.hasVideoDecoder === true) {
     return {
       kind: 'state',
@@ -308,37 +349,16 @@ export function routeSettingsMenuKey(
   tracks: MediaTracks,
   options?: SettingsMenuOptions,
 ): SettingsMenuIntent | null {
-  const isVod = options?.isVod === true;
-  const hasAspect = options?.hasAspect !== false;
-  const hasDeinterlace = options?.hasDeinterlace === true;
-  const hasAutoSubtitlesOnSkipBack = options?.hasAutoSubtitlesOnSkipBack === true;
-  const hasAutoPlayNextEpisode = options?.hasAutoPlayNextEpisode === true;
-  const hasAudioDevice = options?.hasAudioDevice === true;
-  const hasVideoDecoder = options?.hasVideoDecoder === true;
-  const rootItems = settingsRootItems(
-    isVod,
-    hasAspect,
-    hasDeinterlace,
-    hasAutoSubtitlesOnSkipBack,
-    hasAutoPlayNextEpisode,
-    hasAudioDevice,
-    hasVideoDecoder,
-  );
+  const rootItems = settingsRootItemsFromOptions(options);
   const cur = clampSettingsMenu(state, tracks, options);
 
   if (event.kind === 'press' && event.key === 'back') {
     return cur.view === 'root'
       ? { kind: 'close' }
-      : returnToRoot(
-          cur.view,
-          isVod,
-          hasAspect,
-          hasDeinterlace,
-          hasAutoSubtitlesOnSkipBack,
-          hasAutoPlayNextEpisode,
-          hasAudioDevice,
-          hasVideoDecoder,
-        );
+      : {
+          kind: 'state',
+          state: { view: 'root', index: rootIndexForSettingsViewOptions(cur.view, options) },
+        };
   }
 
   if (
@@ -355,16 +375,10 @@ export function routeSettingsMenuKey(
   if (event.kind === 'press' && event.key === 'left') {
     return cur.view === 'root'
       ? null
-      : returnToRoot(
-          cur.view,
-          isVod,
-          hasAspect,
-          hasDeinterlace,
-          hasAutoSubtitlesOnSkipBack,
-          hasAutoPlayNextEpisode,
-          hasAudioDevice,
-          hasVideoDecoder,
-        );
+      : {
+          kind: 'state',
+          state: { view: 'root', index: rootIndexForSettingsViewOptions(cur.view, options) },
+        };
   }
 
   if (event.kind === 'press' && event.key === 'right') {
@@ -377,6 +391,9 @@ export function routeSettingsMenuKey(
     if (cur.view === 'root') {
       const item = rootItems[cur.index];
       if (item === 'aspect') return { kind: 'toggleResizeMode' };
+      if (item === 'timeDisplay') return { kind: 'toggleTimeDisplayMode' };
+      if (item === 'info') return { kind: 'toggleInfo' };
+      if (item === 'alwaysOnTop') return { kind: 'toggleAlwaysOnTop' };
       if (item === 'deinterlace') return { kind: 'toggleDeinterlace' };
       if (item === 'autoSubtitlesOnSkipBack') return { kind: 'toggleAutoSubtitlesOnSkipBack' };
       if (item === 'autoPlayNextEpisode') return { kind: 'toggleAutoPlayNextEpisode' };
@@ -396,6 +413,15 @@ export function routeSettingsMenuKey(
     if (cur.view === 'speed') {
       const rate = PLAYBACK_SPEED_OPTIONS[cur.index];
       return rate !== undefined ? { kind: 'speed', rate } : null;
+    }
+    if (cur.view === 'chapters') {
+      const ch = options?.chapters?.[cur.index];
+      return ch !== undefined ? { kind: 'chapter', startMs: ch.startMs } : null;
+    }
+    if (cur.view === 'sleepTimer') {
+      if (cur.index === 0) return { kind: 'toggleSleepTimerAction' };
+      const minutes = SLEEP_TIMER_PRESETS_MIN[cur.index - 1];
+      return minutes !== undefined ? { kind: 'sleepTimer', minutes } : null;
     }
     if (cur.view === 'videoDecoder') {
       const mode = ANDROID_DECODER_MODES[cur.index];

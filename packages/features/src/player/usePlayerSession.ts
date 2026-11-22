@@ -1,4 +1,5 @@
 import {
+  type ChapterInfo,
   createPlaybackService,
   EMPTY_TRACKS,
   type MediaTracks,
@@ -28,6 +29,8 @@ interface PlaybackUiSlice {
   readonly status: PlaybackStatus;
   readonly tracks: MediaTracks;
   readonly videoInfo: StreamVideoInfo | undefined;
+  readonly chapters: readonly ChapterInfo[] | undefined;
+  readonly droppedFrames: number | undefined;
   readonly surfaceRecreationToken: number;
 }
 
@@ -36,6 +39,8 @@ const OPENING_PLAYBACK_SLICE: PlaybackUiSlice = {
   status: OPENING_STATUS,
   tracks: EMPTY_TRACKS,
   videoInfo: undefined,
+  chapters: undefined,
+  droppedFrames: undefined,
   surfaceRecreationToken: 0,
 };
 
@@ -55,6 +60,7 @@ function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
 export function usePlayerSession(params: {
   videoHost: VideoHost;
   activeTarget: PlayTarget;
+  isDesktop?: boolean;
   serviceRef: MutableRefObject<PlaybackService | null>;
   clockRef: MutableRefObject<PlaybackClock>;
   timersRef: MutableRefObject<PlaybackTimers>;
@@ -62,8 +68,16 @@ export function usePlayerSession(params: {
   onExitRef: MutableRefObject<() => void>;
   onServiceReady: (service: PlaybackService) => void;
 }) {
-  const { videoHost, activeTarget, serviceRef, clockRef, timersRef, hostKeyRef, onExitRef } =
-    params;
+  const {
+    videoHost,
+    activeTarget,
+    isDesktop = false,
+    serviceRef,
+    clockRef,
+    timersRef,
+    hostKeyRef,
+    onExitRef,
+  } = params;
   const onReadyRef = useRef(params.onServiceReady);
   onReadyRef.current = params.onServiceReady;
 
@@ -133,6 +147,9 @@ export function usePlayerSession(params: {
   const [inPip, setInPip] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [alwaysOnTop, setAlwaysOnTop] = useState(false);
+  const [overlayMode, setOverlayMode] = useState<'floating' | 'docked'>(
+    isDesktop ? 'docked' : 'floating',
+  );
   const [audioDevices, setAudioDevices] = useState<readonly AudioDeviceInfo[]>([]);
   const [activeAudioDevice, setActiveAudioDevice] = useState('auto');
 
@@ -166,6 +183,18 @@ export function usePlayerSession(params: {
     if (subscribePin === undefined) return;
     return subscribePin((next) => setAlwaysOnTop(next));
   }, [openedEngine]);
+
+  useEffect(() => {
+    const fallback = isDesktop ? 'docked' : 'floating';
+    if (openedEngine === null) {
+      setOverlayMode(fallback);
+      return;
+    }
+    setOverlayMode(openedEngine.overlayMode ?? fallback);
+    const subscribeOverlay = openedEngine.onOverlayModeChange;
+    if (subscribeOverlay === undefined) return;
+    return subscribeOverlay((next) => setOverlayMode(next));
+  }, [isDesktop, openedEngine]);
 
   useEffect(() => {
     if (openedEngine === null) {
@@ -214,6 +243,8 @@ export function usePlayerSession(params: {
       status: st,
       tracks: tr,
       videoInfo: vi,
+      chapters: ch,
+      droppedFrames: df,
       surfaceRecreationToken: token,
     } = activeService.getState();
     const prev = sliceRef.current;
@@ -221,18 +252,24 @@ export function usePlayerSession(params: {
       prev.status === st &&
       prev.tracks === tr &&
       prev.videoInfo === vi &&
+      prev.chapters === ch &&
+      prev.droppedFrames === df &&
       prev.surfaceRecreationToken === token
     ) {
       return prev;
     }
-    sliceRef.current = { status: st, tracks: tr, videoInfo: vi, surfaceRecreationToken: token };
+    sliceRef.current = {
+      status: st,
+      tracks: tr,
+      videoInfo: vi,
+      chapters: ch,
+      droppedFrames: df,
+      surfaceRecreationToken: token,
+    };
     return sliceRef.current;
   }, [activeService]);
-  const { status, tracks, videoInfo, surfaceRecreationToken } = useSyncExternalStore(
-    subscribePlayback,
-    getPlaybackSnapshot,
-    getPlaybackSnapshot,
-  );
+  const { status, tracks, videoInfo, chapters, droppedFrames, surfaceRecreationToken } =
+    useSyncExternalStore(subscribePlayback, getPlaybackSnapshot, getPlaybackSnapshot);
 
   return {
     sessionState,
@@ -240,10 +277,13 @@ export function usePlayerSession(params: {
     status,
     tracks,
     videoInfo,
+    chapters,
+    droppedFrames,
     surfaceRecreationToken,
     inPip,
     isFullscreen,
     alwaysOnTop,
+    overlayMode,
     audioDevices,
     activeAudioDevice,
   };

@@ -75,7 +75,9 @@ class Media3Engine : SharedObject {
       }
     }
     override fun onCues(cueGroup: CueGroup) {
-      if (request != null && fence.isRendererOpen && !tracksBridge.isTextDisabled) surfaces.onCues(sanitizeCues(cueGroup.cues))
+      if (request != null && fence.isRendererOpen && !tracksBridge.isTextDisabled) {
+        surfaces.onCues(sanitizeCues(cueGroup.cues, filterSdh = request?.filterSdhSubtitles == true))
+      }
     }
     override fun onAudioSessionIdChanged(audioSessionId: Int) = audioEffects.onAudioSessionIdChanged(audioSessionId)
   }
@@ -446,6 +448,7 @@ class Media3Engine : SharedObject {
       decoderMode = decoderMode,
     ).also { built ->
       built.addListener(reporter)
+      built.addAnalyticsListener(reporter)
       built.addListener(pictures)
       audioEffects.onAudioSessionIdChanged(built.audioSessionId)
       surfaces.attachToNewPlayer(built, ::sendSurfaceChange)
@@ -457,6 +460,7 @@ class Media3Engine : SharedObject {
     player = null
     old.isScrubbingModeEnabled = false
     old.removeListener(reporter)
+    old.removeAnalyticsListener(reporter)
     old.removeListener(pictures)
     audioEffects.onStop()
     audioEffects.onAudioSessionIdChanged(C.AUDIO_SESSION_ID_UNSET)

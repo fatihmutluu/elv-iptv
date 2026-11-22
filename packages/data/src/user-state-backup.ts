@@ -1,6 +1,15 @@
 import { CREDENTIAL_PARAMS, type SqlDriver } from '@elv/domain';
 import { SOURCE_ID } from './sources';
 import {
+  clampTrackDelayMs,
+  mapTrackPreferenceRow,
+  type PersistedTrackPreference,
+  type RawTrackPreferenceRow,
+  sanitizeResizeMode,
+  sanitizeTrackLabel,
+  sanitizeTrackLang,
+} from './track-preferences-repo';
+import {
   clampMs,
   type FavoriteRow,
   mapFavoriteRow,
@@ -68,6 +77,7 @@ export interface UserDataSnapshot {
   readonly favorites: readonly FavoriteRow[];
   readonly progress: readonly WatchProgressRow[];
   readonly profiles?: readonly UserDataProfileEntry[];
+  readonly trackPreferences?: readonly PersistedTrackPreference[];
 }
 
 /** Sanitized decoded snapshot returned by {@link decodeUserDataSnapshot}. */
@@ -75,12 +85,14 @@ export interface DecodedUserDataSnapshot {
   favorites: FavoriteRow[];
   progress: WatchProgressRow[];
   profiles: UserDataProfileEntry[];
+  trackPreferences?: PersistedTrackPreference[];
 }
 
 /** Row counts restored by {@link reconcileUserData}. */
 export interface ReconcileUserDataResult {
   favoritesRestored: number;
   progressRestored: number;
+  trackPreferencesRestored?: number;
 }
 
 function hasControlChar(value: string): boolean {
@@ -262,31 +274,70 @@ function compareProgress(a: WatchProgressRow, b: WatchProgressRow): number {
   return a.itemKey < b.itemKey ? -1 : a.itemKey > b.itemKey ? 1 : 0;
 }
 
+function parseTrackPreferenceEntry(raw: unknown): PersistedTrackPreference | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  if (
+    typeof r.sourceId !== 'string' ||
+    !SOURCE_ID.test(r.sourceId) ||
+    typeof r.scopeKey !== 'string' ||
+    r.scopeKey.trim() === '' ||
+    typeof r.updatedAt !== 'number' ||
+    !Number.isFinite(r.updatedAt)
+  ) {
+    return null;
+  }
+  return {
+    profileId: normalizeProfileId(typeof r.profileId === 'string' ? r.profileId : undefined),
+    scopeKey: r.scopeKey.trim(),
+    sourceId: r.sourceId,
+    audioLang: sanitizeTrackLang(r.audioLang),
+    audioLabel: sanitizeTrackLabel(r.audioLabel),
+    subLang: sanitizeTrackLang(r.subLang),
+    subLabel: sanitizeTrackLabel(r.subLabel),
+    subDisabled: r.subDisabled === true,
+    audioDelayMs: clampTrackDelayMs(r.audioDelayMs),
+    subDelayMs: clampTrackDelayMs(r.subDelayMs),
+    resizeMode: sanitizeResizeMode(r.resizeMode),
+    updatedAt: Math.round(r.updatedAt),
+  };
+}
+
+function compareTrackPreferences(a: PersistedTrackPreference, b: PersistedTrackPreference): number {
+  if (b.updatedAt !== a.updatedAt) return b.updatedAt - a.updatedAt;
+  if (a.profileId !== b.profileId) return a.profileId < b.profileId ? -1 : 1;
+  return a.scopeKey < b.scopeKey ? -1 : a.scopeKey > b.scopeKey ? 1 : 0;
+}
+
 const EMPTY_ENVELOPE = '{"v":1,"favorites":[],"progress":[]}';
 const EMPTY_ENVELOPE_BYTES = utf8ByteLength(EMPTY_ENVELOPE);
 const PROFILES_ENVELOPE_OVERHEAD_BYTES = utf8ByteLength(',"profiles":[]');
+const TRACK_PREFS_ENVELOPE_OVERHEAD_BYTES = utf8ByteLength(',"trackPreferences":[]');
 
 function stringifyPayload(
   favorites: readonly FavoriteRow[],
   progress: readonly WatchProgressRow[],
   profiles: readonly UserDataProfileEntry[],
+  trackPreferences: readonly PersistedTrackPreference[],
 ): string {
-  return JSON.stringify(
-    profiles.length > 0
-      ? { v: VERSION, favorites, progress, profiles }
-      : { v: VERSION, favorites, progress },
-  );
+  return JSON.stringify({
+    v: VERSION,
+    favorites,
+    progress,
+    ...(profiles.length > 0 ? { profiles } : {}),
+    ...(trackPreferences.length > 0 ? { trackPreferences } : {}),
+  });
 }
 
 /**
  * Encodes a version-1 user-data snapshot to compact JSON within `maxBytes` UTF-8 bytes.
  * Sanitizes all logo/avatar URLs and greedily packs entries in strict priority order
- * (`profiles` -> newest `favorites` -> unwatched `progress` -> watched `progress`), skipping any
- * individual oversized row that would exceed `maxBytes` so normal rows are never starved.
+ * (`profiles` -> newest `favorites` -> unwatched `progress` -> watched `progress` -> `trackPreferences`),
+ * skipping any individual oversized row that would exceed `maxBytes` so normal rows are never starved.
  * Returns `''` when `maxBytes` cannot fit even the empty v1 envelope.
  */
 export function encodeUserDataSnapshot(
-  snapshot: Pick<UserDataSnapshot, 'favorites' | 'progress' | 'profiles'> & {
+  snapshot: Pick<UserDataSnapshot, 'favorites' | 'progress' | 'profiles' | 'trackPreferences'> & {
     readonly v?: typeof VERSION;
   },
   maxBytes: number = DEFAULT_USER_DATA_MAX_BYTES,
@@ -307,8 +358,12 @@ export function encodeUserDataSnapshot(
     .map((entry) => parseProgressEntry(entry))
     .filter((entry): entry is WatchProgressRow => entry !== null)
     .sort(compareProgress);
+  const trackPreferences = (snapshot.trackPreferences ?? [])
+    .map((entry) => parseTrackPreferenceEntry(entry))
+    .filter((entry): entry is PersistedTrackPreference => entry !== null)
+    .sort(compareTrackPreferences);
 
-  const full = stringifyPayload(favorites, progress, profiles);
+  const full = stringifyPayload(favorites, progress, profiles, trackPreferences);
   if (utf8ByteLength(full) <= budget) return full;
 
   let usedBytes = EMPTY_ENVELOPE_BYTES;
@@ -342,7 +397,17 @@ export function encodeUserDataSnapshot(
     }
   }
 
-  return stringifyPayload(keptFavorites, keptProgress, keptProfiles);
+  const keptTrackPrefs: PersistedTrackPreference[] = [];
+  for (const pref of trackPreferences) {
+    const overhead = keptTrackPrefs.length === 0 ? TRACK_PREFS_ENVELOPE_OVERHEAD_BYTES : 1;
+    const itemBytes = utf8ByteLength(JSON.stringify(pref));
+    if (usedBytes + overhead + itemBytes <= budget) {
+      keptTrackPrefs.push(pref);
+      usedBytes += overhead + itemBytes;
+    }
+  }
+
+  return stringifyPayload(keptFavorites, keptProgress, keptProfiles, keptTrackPrefs);
 }
 
 /** Decodes and sanitizes a persisted snapshot; returns empty arrays on missing, corrupt, or foreign payloads. */
@@ -359,6 +424,7 @@ export function decodeUserDataSnapshot(raw: string | undefined): DecodedUserData
     favorites?: unknown;
     progress?: unknown;
     profiles?: unknown;
+    trackPreferences?: unknown;
   } | null;
   if (obj === null || typeof obj !== 'object' || obj.v !== VERSION) {
     return { favorites: [], progress: [], profiles: [] };
@@ -378,7 +444,17 @@ export function decodeUserDataSnapshot(raw: string | undefined): DecodedUserData
         .map((entry) => parseProfileEntry(entry))
         .filter((entry): entry is UserDataProfileEntry => entry !== null)
     : [];
-  return { favorites, progress, profiles };
+  const trackPreferences = Array.isArray(obj.trackPreferences)
+    ? obj.trackPreferences
+        .map((entry) => parseTrackPreferenceEntry(entry))
+        .filter((entry): entry is PersistedTrackPreference => entry !== null)
+    : [];
+  return {
+    favorites,
+    progress,
+    profiles,
+    ...(trackPreferences.length > 0 ? { trackPreferences } : {}),
+  };
 }
 
 function readSnapshot(store: UserDataStore): DecodedUserDataSnapshot {
@@ -389,21 +465,25 @@ function readSnapshot(store: UserDataStore): DecodedUserDataSnapshot {
   }
 }
 
-/** Reads `favorites` and `watch_progress` from `db` and persists a budget-safe snapshot to `store`. */
+/** Reads `favorites`, `watch_progress`, and `track_preferences` from `db` and persists a budget-safe snapshot to `store`. */
 export async function saveUserDataSnapshot(db: SqlDriver, store: UserDataStore): Promise<void> {
   try {
-    const [rawFavorites, rawProgress] = await Promise.all([
+    const [rawFavorites, rawProgress, rawTrackPrefs] = await Promise.all([
       db.all<RawFavoriteRow>(
         'SELECT profile_id, source_id, item_key, kind, title, logo, year, rating, added_at FROM favorites ORDER BY added_at DESC, profile_id ASC, item_key ASC',
       ),
       db.all<RawProgressRow>(
         'SELECT profile_id, source_id, item_key, kind, title, subtitle, logo, series_key, season, episode, position_ms, duration_ms, watched, updated_at FROM watch_progress ORDER BY watched ASC, updated_at DESC, profile_id ASC, item_key ASC',
       ),
+      db.all<RawTrackPreferenceRow>(
+        'SELECT profile_id, scope_key, source_id, audio_lang, audio_label, sub_lang, sub_label, sub_disabled, audio_delay_ms, sub_delay_ms, resize_mode, updated_at FROM track_preferences ORDER BY updated_at DESC, profile_id ASC, scope_key ASC',
+      ),
     ]);
     const snapshot = {
       favorites: rawFavorites.map(mapFavoriteRow),
       progress: rawProgress.map(mapProgressRow),
       profiles: readSnapshot(store).profiles,
+      trackPreferences: rawTrackPrefs.map(mapTrackPreferenceRow),
     };
     const encoded = encodeUserDataSnapshot(snapshot, store.maxBytes ?? DEFAULT_USER_DATA_MAX_BYTES);
     try {
@@ -436,30 +516,42 @@ const RESTORE_PROGRESS_SQL = `INSERT OR IGNORE INTO watch_progress (
   series_key, season, episode, position_ms, duration_ms, watched, updated_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
+const RESTORE_TRACK_PREF_SQL = `INSERT OR IGNORE INTO track_preferences (
+  profile_id, scope_key, source_id, audio_lang, audio_label, sub_lang, sub_label,
+  sub_disabled, audio_delay_ms, sub_delay_ms, resize_mode, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
 /**
  * Reconciles SQLite user tables with persistent KV storage on startup (`#79`, ADR 0014).
- * When SQLite already holds favorites or watch progress, refreshes the backup snapshot.
- * When both tables are empty (e.g. after a tvOS `Library/Caches` purge), restores valid rows
+ * When SQLite already holds favorites, watch progress, or track preferences, refreshes the backup snapshot.
+ * When all tables are empty (e.g. after a tvOS `Library/Caches` purge), restores valid rows
  * atomically in a single transaction.
  */
 export async function reconcileUserData(
   db: SqlDriver,
   store: UserDataStore,
 ): Promise<ReconcileUserDataResult> {
-  const [favPresent, progPresent] = await Promise.all([
+  const [favPresent, progPresent, trackPresent] = await Promise.all([
     db.all<{ found: number }>('SELECT 1 AS found FROM favorites LIMIT 1'),
     db.all<{ found: number }>('SELECT 1 AS found FROM watch_progress LIMIT 1'),
+    db.all<{ found: number }>('SELECT 1 AS found FROM track_preferences LIMIT 1'),
   ]);
-  if (favPresent.length > 0 || progPresent.length > 0) {
+  if (favPresent.length > 0 || progPresent.length > 0 || trackPresent.length > 0) {
     await saveUserDataSnapshot(db, store);
     return { favoritesRestored: 0, progressRestored: 0 };
   }
   const snapshot = readSnapshot(store);
-  if (snapshot.favorites.length === 0 && snapshot.progress.length === 0) {
+  const trackPrefs = snapshot.trackPreferences ?? [];
+  if (
+    snapshot.favorites.length === 0 &&
+    snapshot.progress.length === 0 &&
+    trackPrefs.length === 0
+  ) {
     return { favoritesRestored: 0, progressRestored: 0 };
   }
   let favoritesRestored = 0;
   let progressRestored = 0;
+  let trackPreferencesRestored = 0;
   await db.transaction(async (tx) => {
     for (const fav of snapshot.favorites) {
       const res = await tx.run(RESTORE_FAVORITE_SQL, [
@@ -494,6 +586,27 @@ export async function reconcileUserData(
       ]);
       progressRestored += res.changes;
     }
+    for (const pref of trackPrefs) {
+      const res = await tx.run(RESTORE_TRACK_PREF_SQL, [
+        pref.profileId,
+        pref.scopeKey,
+        pref.sourceId,
+        pref.audioLang,
+        pref.audioLabel,
+        pref.subLang,
+        pref.subLabel,
+        pref.subDisabled ? 1 : 0,
+        pref.audioDelayMs,
+        pref.subDelayMs,
+        pref.resizeMode,
+        pref.updatedAt,
+      ]);
+      trackPreferencesRestored += res.changes;
+    }
   });
-  return { favoritesRestored, progressRestored };
+  return {
+    favoritesRestored,
+    progressRestored,
+    ...(trackPreferencesRestored > 0 ? { trackPreferencesRestored } : {}),
+  };
 }

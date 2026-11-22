@@ -35,6 +35,14 @@ export * from './sources';
 export * from './stream-resolver';
 export * from './templates';
 export * from './title-clean';
+export {
+  clearTrackPreference,
+  getTrackPreference,
+  type PersistedTrackPreference,
+  type SaveTrackPreferenceInput,
+  saveTrackPreference,
+  type TrackPreferenceResizeMode,
+} from './track-preferences-repo';
 export * from './user-state';
 export * from './user-state-backup';
 export * from './write-coalescer';

@@ -50,7 +50,9 @@ export type PlaybackFocusId =
   | 'sub-lang-de'
   | 'sub-lang-fr'
   | 'sub-lang-es'
-  | 'sub-mode-auto'
+  | 'sub-mode-default'
+  | 'sub-mode-smart'
+  | 'sub-mode-onlyForced'
   | 'sub-mode-always'
   | 'sub-mode-off'
   | 'seek-step-5'
@@ -66,6 +68,22 @@ export type PlaybackFocusId =
   | 'video-decoder-auto'
   | 'video-decoder-hardware'
   | 'video-decoder-software'
+  | 'toggle-prefer-default-audio'
+  | 'toggle-filter-sdh'
+  | 'toggle-prefer-hevc-dv'
+  | 'osd-time-total'
+  | 'osd-time-remaining'
+  | 'osd-time-endsAt'
+  | 'oled-0'
+  | 'oled-5'
+  | 'oled-10'
+  | 'oled-15'
+  | 'oled-30'
+  | 'still-watching-0'
+  | 'still-watching-60'
+  | 'still-watching-120'
+  | 'still-watching-180'
+  | 'still-watching-240'
   | 'toggle-auto-play-next'
   | 'toggle-skip-back-subtitles'
   | 'audio-device-auto';
@@ -114,7 +132,7 @@ const PLAYBACK_ROWS_HEAD: readonly (readonly PlaybackFocusId[])[] = [
     'audio-lang-es',
   ],
   ['sub-lang-auto', 'sub-lang-tr', 'sub-lang-en', 'sub-lang-de', 'sub-lang-fr', 'sub-lang-es'],
-  ['sub-mode-auto', 'sub-mode-always', 'sub-mode-off'],
+  ['sub-mode-default', 'sub-mode-smart', 'sub-mode-onlyForced', 'sub-mode-always', 'sub-mode-off'],
   ['seek-step-5', 'seek-step-10', 'seek-step-15', 'seek-step-30'],
   ['aspect-fit', 'aspect-fill', 'aspect-stretch'],
   ['buffer-auto', 'buffer-balanced', 'buffer-large'],
@@ -127,6 +145,18 @@ const PLAYBACK_DECODER_ROW: readonly PlaybackFocusId[] = [
 ];
 
 const PLAYBACK_ROWS_TAIL: readonly (readonly PlaybackFocusId[])[] = [
+  ['toggle-prefer-default-audio'],
+  ['toggle-filter-sdh'],
+  ['toggle-prefer-hevc-dv'],
+  ['osd-time-total', 'osd-time-remaining', 'osd-time-endsAt'],
+  ['oled-0', 'oled-5', 'oled-10', 'oled-15', 'oled-30'],
+  [
+    'still-watching-0',
+    'still-watching-60',
+    'still-watching-120',
+    'still-watching-180',
+    'still-watching-240',
+  ],
   ['toggle-auto-play-next'],
   ['toggle-skip-back-subtitles'],
   ['audio-device-auto'],

@@ -117,7 +117,7 @@ internal class CommandFence {
     if (snapDisposed) return null
     return when (eventType) {
       "surface" -> snapToken
-      "tracks", "mediaInfo" -> if (driverEpoch == snapEpoch) snapToken else null
+      "tracks", "mediaInfo", "telemetry" -> if (driverEpoch == snapEpoch) snapToken else null
       else -> if (driverEpoch == snapEpoch && driverToken == snapToken) driverToken else null
     }
   }

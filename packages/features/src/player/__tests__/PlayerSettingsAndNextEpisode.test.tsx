@@ -6,7 +6,7 @@ import {
   type PlaybackService,
   type PlaybackState,
 } from '@elv/playback';
-import { buildTheme, I18nProvider, THEME_PRESETS, ThemeProvider } from '@elv/ui-kit';
+import { buildTheme, I18nProvider, ThemeProvider } from '@elv/ui-kit';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 import type { PlayableEntry } from '../../ports/play-target';
@@ -97,14 +97,12 @@ describe('VodProgressBar tokenization and dimming', () => {
       </ThemeProvider>,
     );
 
-    expect(flatStyle('player-progress-fill')?.backgroundColor).toBe(
-      THEME_PRESETS.highContrast.accent,
-    );
-    expect(flatStyle('player-progress-rail')?.backgroundColor).toBe(
-      THEME_PRESETS.highContrast.bgCard,
-    );
-    expect(flatStyle('player-progress-time')?.color).toBe(THEME_PRESETS.highContrast.textSecondary);
+    const hc = buildTheme({ preset: 'highContrast' }).colors;
+    expect(flatStyle('player-progress-fill')?.backgroundColor).toBe(hc.textPrimary);
+    expect(flatStyle('player-progress-rail')?.backgroundColor).toBe(hc.actionGlassBorder);
+    expect(flatStyle('player-progress-time')?.color).toBe(hc.textSecondary);
     expect(flatStyle('player-progress-time')?.fontVariant).toEqual(['tabular-nums']);
+    expect(flatStyle('player-progress-time-current')?.color).toBe(hc.textPrimary);
     expect(flatStyle('player-progress-row')?.opacity).toBe(0.2);
 
     await view.rerender(

@@ -82,6 +82,9 @@ export const PLAYER_CHANNELS = Object.freeze({
 /** Hardware video decoding profile for desktop `libmpv` (`#435`, `#210`). */
 export type HwdecProfile = 'auto-safe' | 'auto-copy' | 'no' | 'darwin-compat';
 
+/** Picture scaling mode (`fit` letterboxed, `fill` cropped to cover, `stretch` fills bounds ignoring aspect, `#124`). */
+export type ResizeMode = 'fit' | 'fill' | 'stretch';
+
 /** A port command or a presenter command as it crosses the bridge (`fullscreen` is the presenter's, not the port's). */
 export type BridgeCommand =
   | { name: 'load'; cmd: LoadCommand }
@@ -96,6 +99,8 @@ export type BridgeCommand =
   | { name: 'setAudioDevice'; device: string }
   | { name: 'setDeinterlace'; enabled: boolean }
   | { name: 'setHwdec'; profile: HwdecProfile }
+  | { name: 'setResizeMode'; mode: ResizeMode }
+  | { name: 'setFilterSdh'; enabled: boolean }
   | { name: 'release' }
   | { name: 'fullscreen' }
   | { name: 'mute' };
@@ -247,6 +252,8 @@ const isAudioDevice = (x: unknown): x is string =>
   typeof x === 'string' && x.length > 0 && x.length <= MAX_AUDIO_DEVICE_CHARS && !hasControlChar(x);
 const isHwdecProfile = (x: unknown): x is HwdecProfile =>
   x === 'auto-safe' || x === 'auto-copy' || x === 'no' || x === 'darwin-compat';
+const isResizeMode = (x: unknown): x is ResizeMode =>
+  x === 'fit' || x === 'fill' || x === 'stretch';
 
 function isLoadCommand(x: unknown): x is LoadCommand {
   if (!isRecord(x)) return false;
@@ -260,6 +267,8 @@ function isLoadCommand(x: unknown): x is LoadCommand {
     (options['softwareAudio'] === undefined || typeof options['softwareAudio'] === 'boolean') &&
     (options['preferHevcOverDolbyVision'] === undefined ||
       typeof options['preferHevcOverDolbyVision'] === 'boolean') &&
+    (options['filterSdhSubtitles'] === undefined ||
+      typeof options['filterSdhSubtitles'] === 'boolean') &&
     (options['audioTrackId'] === undefined || isAudioTrackId(options['audioTrackId'])) &&
     (options['subtitleTrackId'] === undefined ||
       options['subtitleTrackId'] === null ||
@@ -294,9 +303,12 @@ function isBridgeCommand(x: unknown): x is BridgeCommand {
     case 'setAudioDevice':
       return isAudioDevice(x['device']);
     case 'setDeinterlace':
+    case 'setFilterSdh':
       return typeof x['enabled'] === 'boolean';
     case 'setHwdec':
       return isHwdecProfile(x['profile']);
+    case 'setResizeMode':
+      return isResizeMode(x['mode']);
     case 'release':
     case 'fullscreen':
     case 'mute':

@@ -121,7 +121,7 @@ describe('VodProgressBar Cinema Quietude v2 scrubber', () => {
         nativeEvent: { clientX: 200 },
         currentTarget: mockTarget,
       });
-      expect(flatStyle('player-progress-rail')?.height).toBe(6);
+      expect(flatStyle('player-progress-rail')?.height).toBe(5);
       const pill = screen.getByTestId('player-progress-hover-time');
       expect(pill).toHaveTextContent('1:00');
       expect(flatStyle('player-progress-hover-time')?.fontVariant).toEqual(['tabular-nums']);
@@ -136,11 +136,12 @@ describe('VodProgressBar Cinema Quietude v2 scrubber', () => {
         nativeEvent: { clientX: 150 },
         currentTarget: mockTarget,
       });
-      expect(flatStyle('player-progress-rail')?.height).toBe(6);
+      expect(flatStyle('player-progress-rail')?.height).toBe(5);
       expect(web.listenerCount('pointermove')).toBe(1);
 
       await web.emit('pointermove', { clientX: 250 });
-      expect(screen.getByTestId('player-progress-time')).toHaveTextContent('1:30 / 2:00');
+      expect(screen.getByTestId('player-progress-time-current')).toHaveTextContent('1:30');
+      expect(screen.getByTestId('player-progress-time')).toHaveTextContent('2:00');
       expect(screen.getByTestId('player-progress-hover-time')).toHaveTextContent('1:30');
       expect(onSeekRatio).not.toHaveBeenCalled();
 
@@ -407,17 +408,19 @@ describe('PlayerScreen Cinema Bar (Desktop) & Floating 3-Zone OSD (TV/Mobile)', 
     await view.unmount();
   });
 
-  it('renders Floating 3-Zone Cinema OSD with centered circular transport on TV and Phone', async () => {
+  it('renders Minimalist Cinema OSD with unobstructed center and bottom circular transport on TV and Phone', async () => {
     const tv = await mountPlayer('tv');
     expect(screen.getByTestId('player-osd-top')).toBeTruthy();
-    expect(screen.getByTestId('player-center-transport')).toBeTruthy();
+    expect(screen.queryByTestId('player-center-transport')).toBeNull();
+    expect(screen.getByTestId('player-bottom-transport')).toBeTruthy();
     expect(screen.getByTestId('player-osd-bottom')).toBeTruthy();
     expect(flatStyle('player-play-pause')?.width).toBe(54);
     await tv.view.unmount();
 
     const phone = await mountPlayer('phone');
     expect(screen.getByTestId('player-osd-top')).toBeTruthy();
-    expect(screen.getByTestId('player-center-transport')).toBeTruthy();
+    expect(screen.queryByTestId('player-center-transport')).toBeNull();
+    expect(screen.getByTestId('player-bottom-transport')).toBeTruthy();
     expect(screen.getByTestId('player-osd-bottom')).toBeTruthy();
     expect(flatStyle('player-play-pause')?.width).toBe(48);
     await phone.view.unmount();

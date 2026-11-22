@@ -99,4 +99,66 @@ struct MediaInfoTests {
         == .mediaInfo(attempt: 12, info: info)
     )
   }
+
+  @Test("propagates deduplicated droppedFrames telemetry and chapters, resets on new load, and fences by epoch (#160, #118)")
+  func telemetryAndChaptersPropagationAndReset() throws {
+    let (core, _, sink, _) = makeHarness()
+    core.load(LoadRequest(url: "http://h:7878/movie/demo/demo/1.mp4", live: false), attempt: 1)
+    sink.events.removeAll()
+
+    // Zero or negative droppedFrames are suppressed
+    core.observe(.telemetry(droppedFrames: 0), serial: 1)
+    core.observe(.telemetry(droppedFrames: -1), serial: 1)
+    #expect(sink.events.isEmpty)
+
+    // Strictly monotonic dropped frame counts emit and deduplicate
+    core.observe(.telemetry(droppedFrames: 4), serial: 1)
+    core.observe(.telemetry(droppedFrames: 4), serial: 1)
+    core.observe(.telemetry(droppedFrames: 9), serial: 1)
+    #expect(
+      sink.events == [
+        .telemetry(attempt: 1, droppedFrames: 4),
+        .telemetry(attempt: 1, droppedFrames: 9),
+      ]
+    )
+    let telemetryPayload = sink.events.last?.payload
+    #expect(telemetryPayload?["type"] as? String == "telemetry")
+    #expect(telemetryPayload?["droppedFrames"] as? Int == 9)
+
+    // Chapters emit once and deduplicate
+    let chapters = [
+      ChapterInfoOut(id: "ch:0", title: "Cold Open", startMs: 0, endMs: 500_000),
+      ChapterInfoOut(id: "ch:1", title: "Finale", startMs: 500_000, endMs: 1_200_000),
+    ]
+    sink.events.removeAll()
+    core.observe(.chapters(chapters), serial: 1)
+    core.observe(.chapters(chapters), serial: 1)
+    #expect(sink.events == [.chapters(attempt: 1, chapters: chapters)])
+    let chPayload = sink.events.singleOrFirst?.payload
+    #expect(chPayload?["type"] as? String == "chapters")
+
+    // New load resets dropped frames and chapters cleanly
+    core.load(LoadRequest(url: "http://h:7878/movie/demo/demo/2.mp4", live: false), attempt: 2)
+    sink.events.removeAll()
+    core.observe(.telemetry(droppedFrames: 2), serial: 2)
+    #expect(sink.events == [.telemetry(attempt: 2, droppedFrames: 2)])
+
+    // CommandFence fences telemetry and chapters by mediaEpoch
+    let fence = CommandFence()
+    let epoch1 = try #require(fence.recordLoad(attempt: 10))
+    #expect(fence.beginMedia(epoch: epoch1) == .run(epoch: epoch1, rebuildFirst: false))
+    _ = fence.recordInEpochCommand(attempt: 11)
+    #expect(
+      fence.filterOutbound(.telemetry(attempt: 10, droppedFrames: 7), driverEpoch: epoch1)
+        == .telemetry(attempt: 11, droppedFrames: 7)
+    )
+    #expect(
+      fence.filterOutbound(.chapters(attempt: 10, chapters: chapters), driverEpoch: epoch1)
+        == .chapters(attempt: 11, chapters: chapters)
+    )
+  }
+}
+
+private extension Array {
+  var singleOrFirst: Element? { count == 1 ? first : nil }
 }

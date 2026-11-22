@@ -222,7 +222,7 @@ describe('PlayerScreen preference wiring (#401)', () => {
           target={target}
           preferredAudioLang="tr"
           preferredSubtitleLang="en"
-          subtitleMode="auto"
+          subtitleMode="smart"
           onExit={jest.fn()}
         />,
       ),

@@ -117,6 +117,16 @@ export function createDesktopCatalogFromBridge(
       bridge.setFavorite({ ...input, title: sanitizeDisplayText(input.title) }, active),
     listFavorites: (limit, profileId) => bridge.listFavorites(limit, profileId),
     listFavoriteKeys: (profileId) => bridge.listFavoriteKeys(profileId),
+    getTrackPreference: (scopeKey, profileId) =>
+      bridge.getTrackPreference
+        ? bridge.getTrackPreference(scopeKey, profileId)
+        : Promise.resolve(null),
+    saveTrackPreference: (input) =>
+      bridge.saveTrackPreference ? bridge.saveTrackPreference(input) : Promise.resolve(),
+    clearTrackPreference: (scopeKey, profileId) =>
+      bridge.clearTrackPreference
+        ? bridge.clearTrackPreference(scopeKey, profileId)
+        : Promise.resolve(),
     async close() {
       onClose?.();
       await bridge.close();

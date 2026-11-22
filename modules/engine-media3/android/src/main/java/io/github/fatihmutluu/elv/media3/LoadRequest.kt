@@ -64,14 +64,17 @@ internal data class LoadRequest(
   val bufferPreset: BufferPreset = BufferPreset.AUTO,
   /** User-selected video decoder preference (#411). */
   val decoderMode: VideoDecoderMode = VideoDecoderMode.AUTO,
+  /** Strip SDH / Hearing-Impaired annotations from text subtitle cues (#310). */
+  val filterSdhSubtitles: Boolean = false,
 ) {
   /** Names no URL and no header value: both may carry credentials. */
   override fun toString(): String {
     val dvSuffix = if (preferHevcOverDolbyVision) ", preferHevcOverDolbyVision=true" else ""
     val presetSuffix = if (bufferPreset != BufferPreset.AUTO) ", bufferPreset=${bufferPreset.wireName}" else ""
     val decoderSuffix = if (decoderMode != VideoDecoderMode.AUTO) ", decoderMode=${decoderMode.wireName}" else ""
+    val sdhSuffix = if (filterSdhSubtitles) ", filterSdhSubtitles=true" else ""
     return "LoadRequest(live=$live, startMs=$startMs, softwareAudio=$softwareAudio, " +
-      "playlistDetected=$playlistDetected, headers=${headers.size}$dvSuffix$presetSuffix$decoderSuffix)"
+      "playlistDetected=$playlistDetected, headers=${headers.size}$dvSuffix$presetSuffix$decoderSuffix$sdhSuffix)"
   }
 }
 
@@ -94,6 +97,7 @@ internal fun parseLoadArgs(args: Map<String, Any?>): Pair<Int, LoadRequest> {
   val startMs = finiteLongOrNull(args["startMs"])
   val softwareAudio = args["softwareAudio"] as? Boolean ?: false
   val preferHevcOverDolbyVision = args["preferHevcOverDolbyVision"] as? Boolean ?: false
+  val filterSdhSubtitles = args["filterSdhSubtitles"] as? Boolean ?: false
   val audioTrackId = (args["audioTrackId"] as? String)?.takeIf { it.isNotEmpty() }
   val bufferPreset = parseBufferPreset(args["bufferPreset"] as? String)
   val decoderMode = parseVideoDecoderMode(args["decoderMode"] as? String)
@@ -118,6 +122,7 @@ internal fun parseLoadArgs(args: Map<String, Any?>): Pair<Int, LoadRequest> {
     subtitlePreference = subtitlePreference,
     bufferPreset = bufferPreset,
     decoderMode = decoderMode,
+    filterSdhSubtitles = filterSdhSubtitles,
   )
 }
 

@@ -5,9 +5,11 @@ import type {
   LinkSourceInput,
   ListItemsOptions,
   SaveProgressInput,
+  SaveTrackPreferenceInput,
   SearchOptions,
   SearchScope,
   ToggleFavoriteInput,
+  TrackPreferenceResizeMode,
   UserItemKind,
 } from '@elv/data';
 import type { ElvError, ErrorCategory, TransportSettings } from '@elv/domain';
@@ -150,6 +152,35 @@ export function isToggleFavoriteInput(x: unknown): x is ToggleFavoriteInput {
     isOptionalNullableCleanString(x['logo'], MAX_STRING_CHARS) &&
     isOptionalNullableSafeInt(x['year']) &&
     isOptionalNullableFinite(x['rating'])
+  );
+}
+
+const MAX_TRACK_LANG_CHARS = 16;
+const MAX_TRACK_LABEL_CHARS = 128;
+const MAX_TRACK_DELAY_MS = 60_000;
+const TRACK_RESIZE_MODES = new Set<TrackPreferenceResizeMode>(['fit', 'fill', 'stretch']);
+
+const isOptionalTrackDelayMs = (x: unknown): boolean =>
+  x === undefined || (isFiniteNumber(x) && Math.abs(x) <= MAX_TRACK_DELAY_MS);
+const isOptionalNullableResizeMode = (x: unknown): boolean =>
+  x === undefined ||
+  x === null ||
+  (typeof x === 'string' && TRACK_RESIZE_MODES.has(x as TrackPreferenceResizeMode));
+
+export function isSaveTrackPreferenceInput(x: unknown): x is SaveTrackPreferenceInput {
+  return (
+    isRecord(x) &&
+    isCleanKey(x['scopeKey']) &&
+    isCleanKey(x['sourceId'], MAX_ID_CHARS) &&
+    isOptionalProfileId(x['profileId']) &&
+    isOptionalNullableCleanString(x['audioLang'], MAX_TRACK_LANG_CHARS) &&
+    isOptionalNullableCleanString(x['audioLabel'], MAX_TRACK_LABEL_CHARS) &&
+    isOptionalNullableCleanString(x['subLang'], MAX_TRACK_LANG_CHARS) &&
+    isOptionalNullableCleanString(x['subLabel'], MAX_TRACK_LABEL_CHARS) &&
+    (x['subDisabled'] === undefined || typeof x['subDisabled'] === 'boolean') &&
+    isOptionalTrackDelayMs(x['audioDelayMs']) &&
+    isOptionalTrackDelayMs(x['subDelayMs']) &&
+    isOptionalNullableResizeMode(x['resizeMode'])
   );
 }
 

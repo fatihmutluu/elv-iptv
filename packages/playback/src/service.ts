@@ -148,11 +148,31 @@ export function createPlaybackServiceWith(
     const baseOptions: LoadOptions = {
       ...(current.bufferPreset === undefined ? {} : { bufferPreset: current.bufferPreset }),
       ...(current.decoderMode === undefined ? {} : { decoderMode: current.decoderMode }),
+      ...(current.preferHevcOverDolbyVision === undefined
+        ? {}
+        : { preferHevcOverDolbyVision: current.preferHevcOverDolbyVision }),
+      ...(current.filterSdhSubtitles === undefined
+        ? {}
+        : { filterSdhSubtitles: current.filterSdhSubtitles }),
       ...overrides.options,
     };
     const options = trackPrefs.loadOptions(
       Object.keys(baseOptions).length > 0 ? baseOptions : undefined,
     );
+    const curState = state();
+    if (
+      curState.chapters !== undefined ||
+      curState.droppedFrames !== undefined ||
+      curState.videoInfo?.droppedFrames !== undefined
+    ) {
+      const { chapters: _c, droppedFrames: _df, videoInfo, ...rest } = curState;
+      if (videoInfo !== undefined) {
+        const { droppedFrames: _vdf, ...cleanVideoInfo } = videoInfo;
+        store.replace({ ...rest, videoInfo: cleanVideoInfo });
+      } else {
+        store.replace(rest);
+      }
+    }
     loaded = true;
     mediaOpen = true;
     loadSeq += 1;
@@ -359,8 +379,13 @@ export function createPlaybackServiceWith(
         hooks.onReset?.();
         trackPrefs.beginReload();
         const next = nextAttempt();
-        const { externalPlaybackActive: _ep, ...rest } = state();
-        store.replace({ ...rest, status: { kind: 'tuning' } });
+        const { externalPlaybackActive: _ep, droppedFrames: _df, videoInfo, ...rest } = state();
+        if (videoInfo !== undefined) {
+          const { droppedFrames: _vdf, ...cleanVideoInfo } = videoInfo;
+          store.replace({ ...rest, videoInfo: cleanVideoInfo, status: { kind: 'tuning' } });
+        } else {
+          store.replace({ ...rest, status: { kind: 'tuning' } });
+        }
         return next;
       });
       armStartTimeout(startTimeoutMs());
@@ -377,6 +402,8 @@ export function createPlaybackServiceWith(
         anchor: _a,
         atLiveEdge: _l,
         videoInfo: _v,
+        chapters: _c,
+        droppedFrames: _df,
         externalPlaybackActive: _ep,
         ...rest
       } = state();

@@ -112,13 +112,17 @@ final class AetherSubtitleOverlayView: UIView {
   }
 
   private func announceVoiceOverIfNeeded(for cues: [SubtitleCue]) {
+    let filterSdh = presentation.filterSdhSubtitles
     var lines: [String] = []
     for cue in cues {
       switch cue.body {
       case let .text(raw):
-        lines.append(raw)
+        let text = filterSdh ? SubtitlePresentation.stripSdhAnnotations(raw) : raw
+        if !text.isEmpty { lines.append(text) }
       case let .richText(runs):
-        lines.append(runs.map(\.text).joined())
+        let joined = runs.map(\.text).joined()
+        let text = filterSdh ? SubtitlePresentation.stripSdhAnnotations(joined) : joined
+        if !text.isEmpty { lines.append(text) }
       case .image:
         break
       }
@@ -216,7 +220,9 @@ final class AetherSubtitleOverlayView: UIView {
         bitmapIdx += 1
 
       case let .text(raw):
-        let cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleaned = presentation.filterSdhSubtitles
+          ? SubtitlePresentation.stripSdhAnnotations(raw)
+          : raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { break }
         let slot = SubtitleSlot.from(assAlignment: cue.placement?.alignment)
         bucketed[slot, default: []].append(
@@ -225,7 +231,20 @@ final class AetherSubtitleOverlayView: UIView {
 
       case let .richText(runs):
         let slot = SubtitleSlot.from(assAlignment: cue.placement?.alignment)
-        if let styled = SubtitleTextStyling.makeRichString(runs: runs, fontSize: fontSize, slot: slot, style: captionStyle) {
+        if presentation.filterSdhSubtitles {
+          let combined = runs.map(\.text).joined()
+          let cleaned = SubtitlePresentation.stripSdhAnnotations(combined)
+          guard !cleaned.isEmpty else { break }
+          if cleaned == combined.trimmingCharacters(in: .whitespacesAndNewlines) {
+            if let styled = SubtitleTextStyling.makeRichString(runs: runs, fontSize: fontSize, slot: slot, style: captionStyle) {
+              bucketed[slot, default: []].append(styled)
+            }
+          } else {
+            bucketed[slot, default: []].append(
+              SubtitleTextStyling.makeStyledString(text: cleaned, fontSize: fontSize, slot: slot, style: captionStyle)
+            )
+          }
+        } else if let styled = SubtitleTextStyling.makeRichString(runs: runs, fontSize: fontSize, slot: slot, style: captionStyle) {
           bucketed[slot, default: []].append(styled)
         }
       }

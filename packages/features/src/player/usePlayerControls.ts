@@ -21,7 +21,7 @@ import {
 } from './player-key-routing';
 import { clampVolume, stepVolume } from './player-overlay-model';
 import { canPauseStatus, digitKeyToRatio, isScrubKey, STEP_SEEK_MS } from './scrub-controller';
-import { rootIndexForSettingsView } from './settings-menu-nav';
+import { rootIndexForSettingsViewOptions } from './settings-menu-nav';
 import {
   createSkipBackSubtitlesController,
   type SkipBackSubtitlesController,
@@ -219,6 +219,11 @@ export function usePlayerControls(params: PlayerControlsParams) {
     activeAudioDevice: params.activeAudioDevice,
     hasVideoDecoder,
     androidDecoderMode: params.androidDecoderMode,
+    chapters: params.chapters,
+    hasSleepTimer: params.onSelectSleepTimer !== undefined,
+    sleepTimerMinutes: params.sleepTimerMinutes,
+    hasTimeDisplay: params.onCycleTimeDisplayMode !== undefined,
+    hasAlwaysOnTop: params.onToggleAlwaysOnTop !== undefined,
     hasNextEpisode: params.hasNextEpisode ?? false,
     hasPreviousChannel,
     initialOsdHidden: params.initialOsdHidden,
@@ -228,6 +233,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     clockRef,
     timersRef,
     cancelScrub,
+    onResizeModeChange: params.onResizeModeChange,
     onSetOrientationLocked: params.onSetOrientationLocked,
     onSetDeinterlace: params.onSetDeinterlace,
   });
@@ -276,9 +282,15 @@ export function usePlayerControls(params: PlayerControlsParams) {
     serviceRef.current?.setSpeed(restore);
   };
 
+  const selectAudio = (id: string): void => {
+    serviceRef.current?.selectAudioTrack(id);
+    cbRef.current.onAudioTrackSelected?.(id);
+  };
+
   const selectSubtitle = (id: string | null): void => {
     skipBackSubsRef.current?.onManualSubtitleChange();
     serviceRef.current?.selectSubtitleTrack(id);
+    cbRef.current.onSubtitleTrackSelected?.(id);
   };
 
   const seekBy = (deltaMs: number): void => {
@@ -345,18 +357,27 @@ export function usePlayerControls(params: PlayerControlsParams) {
         const isVodTarget = cbRef.current.activeTarget.kind === 'vod';
         overlay.updateSettingsMenu({
           view: 'root',
-          index: rootIndexForSettingsView(
-            s.settingsMenu.view,
-            isVodTarget,
-            formFactor !== 'desktop',
-            cbRef.current.onSetDeinterlace !== undefined,
-            isVodTarget && cbRef.current.onToggleAutoSubtitlesOnSkipBack !== undefined,
-            isVodTarget && cbRef.current.onToggleAutoPlayNextEpisode !== undefined,
-            (cbRef.current.audioDevices?.length ?? 0) > 0 &&
+          index: rootIndexForSettingsViewOptions(s.settingsMenu.view, {
+            isVod: isVodTarget,
+            hasAspect: true,
+            hasDeinterlace: cbRef.current.onSetDeinterlace !== undefined,
+            hasAutoSubtitlesOnSkipBack:
+              isVodTarget && cbRef.current.onToggleAutoSubtitlesOnSkipBack !== undefined,
+            hasAutoPlayNextEpisode:
+              isVodTarget && cbRef.current.onToggleAutoPlayNextEpisode !== undefined,
+            hasAudioDevice:
+              (cbRef.current.audioDevices?.length ?? 0) > 0 &&
               cbRef.current.onSelectAudioDevice !== undefined,
-            cbRef.current.androidDecoderMode !== undefined &&
+            hasVideoDecoder:
+              cbRef.current.androidDecoderMode !== undefined &&
               cbRef.current.onSelectAndroidDecoderMode !== undefined,
-          ),
+            hasChapters: isVodTarget && (cbRef.current.chapters?.length ?? 0) > 0,
+            ...(cbRef.current.chapters !== undefined ? { chapters: cbRef.current.chapters } : {}),
+            hasSleepTimer: cbRef.current.onSelectSleepTimer !== undefined,
+            hasTimeDisplay: cbRef.current.onCycleTimeDisplayMode !== undefined,
+            hasInfo: s.canOpenInfo,
+            hasAlwaysOnTop: cbRef.current.onToggleAlwaysOnTop !== undefined,
+          }),
         });
       } else overlay.closeSettings();
     } else if (s.tracksOpen) overlay.closeTracks();
@@ -389,6 +410,13 @@ export function usePlayerControls(params: PlayerControlsParams) {
   };
 
   const handleKeyEvent = (event: KeyEvent): boolean => {
+    if (cbRef.current.stillWatchingVisible) {
+      if (event.kind === 'press') {
+        cbRef.current.onStillWatchingKey?.(event.key);
+      }
+      return true;
+    }
+    cbRef.current.onUserActivity?.();
     const s = overlay.liveRef.current;
     if (event.kind === 'press' && event.key === 'back') {
       handleBack();
@@ -434,7 +462,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
       routeOverlayAndMediaKey(event, {
         isTv,
         isVod: isVodTarget,
-        hasAspect: formFactor !== 'desktop',
+        hasAspect: true,
         hasDeinterlace: cbRef.current.onSetDeinterlace !== undefined,
         hasAutoSubtitlesOnSkipBack:
           isVodTarget && cbRef.current.onToggleAutoSubtitlesOnSkipBack !== undefined,
@@ -455,6 +483,14 @@ export function usePlayerControls(params: PlayerControlsParams) {
         ...(cbRef.current.androidDecoderMode !== undefined
           ? { androidDecoderMode: cbRef.current.androidDecoderMode }
           : {}),
+        hasChapters: isVodTarget && (cbRef.current.chapters?.length ?? 0) > 0,
+        ...(cbRef.current.chapters !== undefined ? { chapters: cbRef.current.chapters } : {}),
+        hasSleepTimer: cbRef.current.onSelectSleepTimer !== undefined,
+        ...(cbRef.current.sleepTimerMinutes !== undefined
+          ? { sleepTimerMinutes: cbRef.current.sleepTimerMinutes }
+          : {}),
+        hasTimeDisplay: cbRef.current.onCycleTimeDisplayMode !== undefined,
+        hasAlwaysOnTop: cbRef.current.onToggleAlwaysOnTop !== undefined,
         playbackSpeed: playbackSpeedRef.current,
         state: s,
         service: serviceRef.current,
@@ -464,6 +500,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
         showOsd: overlay.showOsd,
         toggleStats: overlay.toggleStats,
         toggleInfo: overlay.toggleInfo,
+        toggleAlwaysOnTop: cbRef.current.onToggleAlwaysOnTop,
+        toggleTimeDisplayMode: cbRef.current.onCycleTimeDisplayMode,
         toggleChannelList: overlay.toggleChannelList,
         toggleResizeMode: overlay.toggleResizeMode,
         toggleDeinterlace: overlay.toggleDeinterlace,
@@ -483,7 +521,11 @@ export function usePlayerControls(params: PlayerControlsParams) {
         blurTvScrubber: overlay.blurTvScrubber,
         activateTvOsd,
         selectSpeed,
+        selectAudio,
         selectSubtitle,
+        selectChapter: cbRef.current.onSelectChapter,
+        selectSleepTimer: cbRef.current.onSelectSleepTimer,
+        toggleSleepTimerAction: cbRef.current.onToggleSleepTimerAction,
         selectAudioDevice: cbRef.current.onSelectAudioDevice,
         selectAndroidDecoderMode: cbRef.current.onSelectAndroidDecoderMode,
         onExit: () => onExitRef.current(),
@@ -566,6 +608,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
   });
 
   const canUseDesktopShortcuts = (): boolean => {
+    if (cbRef.current.stillWatchingVisible) return false;
     const s = overlay.liveRef.current;
     return !s.locked && !s.tracksOpen && !s.settingsOpen && !s.infoOpen && !s.channelListOpen;
   };
@@ -584,6 +627,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
     cbRef.current.onToggleMute?.();
   };
   const handleHostKey = (key: HostKey): void => {
+    if (cbRef.current.stillWatchingVisible) return;
+    cbRef.current.onUserActivity?.();
     overlay.notifyOsdActivity();
     routeHostKey(key, {
       isVod: cbRef.current.activeTarget.kind === 'vod',
@@ -665,6 +710,12 @@ export function usePlayerControls(params: PlayerControlsParams) {
       onSeekBy: seekBy,
       onSeekToRatio: seekToRatio,
       onSeekToEnd: seekToEnd,
+      ...(cbRef.current.onPrevChapter !== undefined
+        ? { onPrevChapter: () => cbRef.current.onPrevChapter?.() }
+        : {}),
+      ...(cbRef.current.onNextChapter !== undefined
+        ? { onNextChapter: () => cbRef.current.onNextChapter?.() }
+        : {}),
       onTogglePlayPause: togglePlayPause,
       onKeyEvent: handleKeyEvent,
     },
@@ -693,7 +744,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     jumpToLiveEdge: () => {
       serviceRef.current?.jumpToLiveEdge();
     },
-    selectAudio: (id: string) => serviceRef.current?.selectAudioTrack(id),
+    selectAudio,
     selectSubtitle,
     selectSpeed,
     startHoldSpeed,
