@@ -2,6 +2,7 @@ import type { CatalogService } from '@elv/data';
 import {
   hexToRgba,
   Surface,
+  TABULAR_NUMS_STYLE,
   TextEntryBoundary,
   TvFocusAnchor,
   useFormFactor,
@@ -351,6 +352,18 @@ function SourcesScreenBody(props: SourcesScreenProps): ReactElement {
                   >
                     {i18n.t(ctrl.formError.messageId)}
                   </Text>
+                  {ctrl.formError.httpStatus !== undefined ? (
+                    <Text
+                      testID="sources-form-http-status"
+                      style={[
+                        theme.typography.caption,
+                        TABULAR_NUMS_STYLE,
+                        { color: theme.colors.textSecondary },
+                      ]}
+                    >
+                      {i18n.t('source.error.httpStatus', { status: ctrl.formError.httpStatus })}
+                    </Text>
+                  ) : null}
                   <Text
                     testID="sources-form-hint"
                     style={[theme.typography.caption, { color: theme.colors.textSecondary }]}

@@ -339,4 +339,48 @@ describe('createLazyCatalog', () => {
     await lazy.close();
     handle.close();
   });
+
+  it('forwards ListItemsOptions on items and allSourcesItems (#125)', async () => {
+    const itemsCalls: unknown[][] = [];
+    const allSourcesCalls: unknown[][] = [];
+    const handle = testDb();
+    await openCatalog(handle.db);
+    const underlying = createCatalogService({
+      db: handle.db,
+      secrets: memorySecrets(),
+      scheduler: countingScheduler(),
+      http: {
+        async get() {
+          return ok({
+            status: 200,
+            headers: {},
+            body: { async *[Symbol.asyncIterator]() {} },
+          });
+        },
+      },
+      clock: () => 100,
+    });
+
+    const lazy = createLazyCatalog(async () => ({
+      ...underlying,
+      items: async (...args) => {
+        itemsCalls.push(args);
+        return underlying.items(...args);
+      },
+      allSourcesItems: async (...args) => {
+        allSourcesCalls.push(args);
+        return underlying.allSourcesItems?.(...args) ?? [];
+      },
+    }));
+
+    const opts = { sortBy: 'alpha' as const, excludeWatched: true, profileId: 'p1' };
+    await lazy.items('src-1|movie|10', 0, 20, opts);
+    await lazy.allSourcesItems?.('movie', 0, 15, ['src-1'], opts);
+
+    expect(itemsCalls).toEqual([['src-1|movie|10', 0, 20, opts]]);
+    expect(allSourcesCalls).toEqual([['movie', 0, 15, ['src-1'], opts]]);
+
+    await lazy.close();
+    handle.close();
+  });
 });

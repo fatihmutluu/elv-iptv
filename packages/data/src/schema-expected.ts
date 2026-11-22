@@ -70,6 +70,7 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'backup_urls_json', alterDefinition: 'TEXT' },
     { name: 'epg_shift_ms', alterDefinition: 'INTEGER' },
     { name: 'content_hash', alterDefinition: 'TEXT' },
+    { name: 'sort_title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
   ],
   live_next: [
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
@@ -88,6 +89,7 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'backup_urls_json', alterDefinition: 'TEXT' },
     { name: 'epg_shift_ms', alterDefinition: 'INTEGER' },
     { name: 'content_hash', alterDefinition: 'TEXT' },
+    { name: 'sort_title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
   ],
   movies: [
     { name: 'id', alterDefinition: 'INTEGER' },
@@ -107,6 +109,7 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'is_hidden', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'backup_urls_json', alterDefinition: 'TEXT' },
     { name: 'content_hash', alterDefinition: 'TEXT' },
+    { name: 'sort_title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
   ],
   movies_next: [
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
@@ -125,6 +128,7 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'backup_urls_json', alterDefinition: 'TEXT' },
     { name: 'content_hash', alterDefinition: 'TEXT' },
+    { name: 'sort_title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
   ],
   series: [
     { name: 'id', alterDefinition: 'INTEGER' },
@@ -141,6 +145,7 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'is_hidden', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'content_hash', alterDefinition: 'TEXT' },
+    { name: 'sort_title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
   ],
   series_next: [
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
@@ -155,6 +160,7 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'last_modified', alterDefinition: 'INTEGER' },
     { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'content_hash', alterDefinition: 'TEXT' },
+    { name: 'sort_title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
   ],
   episodes: [
     { name: 'id', alterDefinition: 'INTEGER' },

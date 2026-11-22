@@ -1,15 +1,28 @@
 import type { ImportSummary } from '@elv/data';
 import type { ElvError } from '@elv/domain';
 import type { MessageId } from '@elv/i18n';
+import { extractHttpStatus, sanitizeErrorDetail } from '../shared/error-utils';
 
-/** Localized message and actionable recovery hint for a source add/import failure. */
+export { extractHttpStatus, sanitizeErrorDetail };
+
+/** Localized message, actionable recovery hint, and optional HTTP status code (`#63`). */
 export interface DescribedSourceFailure {
   readonly messageId: MessageId;
   readonly hintId: MessageId;
+  readonly httpStatus?: number;
+}
+
+function withStatus(
+  messageId: MessageId,
+  hintId: MessageId,
+  httpStatus: number | undefined,
+): DescribedSourceFailure {
+  return httpStatus !== undefined ? { messageId, hintId, httpStatus } : { messageId, hintId };
 }
 
 /** Maps a secret-free {@link ElvError} from `@elv/data` or `@elv/sources` to specific localized copy. */
 export function describeSourceFailure(error: ElvError): DescribedSourceFailure {
+  const httpStatus = extractHttpStatus(error);
   switch (error.category) {
     case 'auth':
       if (
@@ -17,71 +30,46 @@ export function describeSourceFailure(error: ElvError): DescribedSourceFailure {
         error.code === 'http-401' ||
         error.code === 'http-403'
       ) {
-        return {
-          messageId: 'source.error.invalidCredentials',
-          hintId: 'source.hint.invalidCredentials',
-        };
+        return withStatus(
+          'source.error.invalidCredentials',
+          'source.hint.invalidCredentials',
+          httpStatus,
+        );
       }
-      return {
-        messageId: 'source.error.accountExpired',
-        hintId: 'source.hint.accountExpired',
-      };
+      return withStatus('source.error.accountExpired', 'source.hint.accountExpired', httpStatus);
 
     case 'network':
       if (error.code === 'aborted') {
-        return {
-          messageId: 'source.error.aborted',
-          hintId: 'source.hint.aborted',
-        };
+        return withStatus('source.error.aborted', 'source.hint.aborted', httpStatus);
       }
       if (error.code === 'rate-limited' || error.code === 'http-429' || error.code === 'http-509') {
-        return {
-          messageId: 'source.error.rateLimited',
-          hintId: 'source.hint.rateLimited',
-        };
+        return withStatus('source.error.rateLimited', 'source.hint.rateLimited', httpStatus);
       }
       if (error.code === 'timeout') {
-        return {
-          messageId: 'source.error.timeout',
-          hintId: 'source.hint.timeout',
-        };
+        return withStatus('source.error.timeout', 'source.hint.timeout', httpStatus);
       }
       if (error.code === 'http-404') {
-        return {
-          messageId: 'source.error.notFound',
-          hintId: 'source.hint.notFound',
-        };
+        return withStatus('source.error.notFound', 'source.hint.notFound', httpStatus);
       }
-      return {
-        messageId: 'source.error.unreachable',
-        hintId: 'source.hint.unreachable',
-      };
+      return withStatus('source.error.unreachable', 'source.hint.unreachable', httpStatus);
 
     case 'source-format':
       if (error.code === 'empty-source') {
-        return {
-          messageId: 'source.error.emptyPlaylist',
-          hintId: 'source.hint.emptyPlaylist',
-        };
+        return withStatus('source.error.emptyPlaylist', 'source.hint.emptyPlaylist', httpStatus);
       }
       if (error.code === 'too-large' || error.code === 'urlvars-too-large') {
-        return {
-          messageId: 'source.error.tooLarge',
-          hintId: 'source.hint.tooLarge',
-        };
+        return withStatus('source.error.tooLarge', 'source.hint.tooLarge', httpStatus);
       }
-      return {
-        messageId: 'source.error.invalidFormat',
-        hintId: 'source.hint.invalidFormat',
-      };
+      return withStatus('source.error.invalidFormat', 'source.hint.invalidFormat', httpStatus);
 
     case 'storage':
     case 'playback':
       if (error.code === 'import-in-progress') {
-        return {
-          messageId: 'source.error.importInProgress',
-          hintId: 'source.hint.importInProgress',
-        };
+        return withStatus(
+          'source.error.importInProgress',
+          'source.hint.importInProgress',
+          httpStatus,
+        );
       }
       if (
         error.code === 'secret-store-failed' ||
@@ -89,15 +77,9 @@ export function describeSourceFailure(error: ElvError): DescribedSourceFailure {
         error.code === 'secret-missing' ||
         error.code === 'secret-delete-failed'
       ) {
-        return {
-          messageId: 'source.error.secretStore',
-          hintId: 'source.hint.secretStore',
-        };
+        return withStatus('source.error.secretStore', 'source.hint.secretStore', httpStatus);
       }
-      return {
-        messageId: 'source.error.storage',
-        hintId: 'source.hint.storage',
-      };
+      return withStatus('source.error.storage', 'source.hint.storage', httpStatus);
   }
 }
 

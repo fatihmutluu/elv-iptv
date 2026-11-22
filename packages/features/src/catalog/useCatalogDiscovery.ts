@@ -1,4 +1,11 @@
-import type { CatalogService, CategoryRow, ItemRow, SourceRow, WatchProgressRow } from '@elv/data';
+import type {
+  CatalogService,
+  CategoryRow,
+  ItemRow,
+  ItemSortOrder,
+  SourceRow,
+  WatchProgressRow,
+} from '@elv/data';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   batchLoadProgressByKeys,
@@ -25,6 +32,7 @@ export interface UseCatalogDiscoveryOptions {
   readonly userStateVersion?: number;
   readonly selectedCategoryId: string | null;
   readonly visibleCategoryCount: number;
+  readonly sortBy?: ItemSortOrder;
   readonly onVisibleCategoryCountChange: (nextCount: number) => void;
   readonly onClearStaleCategory?: () => void;
 }
@@ -61,6 +69,7 @@ export function useCatalogDiscovery({
   userStateVersion = 0,
   selectedCategoryId,
   visibleCategoryCount,
+  sortBy = 'default',
   onVisibleCategoryCountChange,
   onClearStaleCategory,
 }: UseCatalogDiscoveryOptions): CatalogDiscoveryState {
@@ -91,6 +100,7 @@ export function useCatalogDiscovery({
   const railGenRef = useRef(0);
   const hasLoadedRef = useRef(initialCached !== null);
   const lastRefreshTokenRef = useRef(refreshToken);
+  const lastSortByRef = useRef<ItemSortOrder>(sortBy);
   const uiCacheRef = useRef(uiCache);
   uiCacheRef.current = uiCache;
 
@@ -255,6 +265,13 @@ export function useCatalogDiscovery({
     }
   }, [hasLoadedCategories, onClearStaleCategory, selectedCategoryExists, selectedCategoryId]);
 
+  useEffect(() => {
+    if (lastSortByRef.current === sortBy) return;
+    lastSortByRef.current = sortBy;
+    loadedRailIdsRef.current = new Set();
+    setRailRefreshTick((t) => t + 1);
+  }, [sortBy]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: railRefreshTick, userStateVersion, and refreshToken hydrate rails and progress
   useEffect(() => {
     if (selectedCategoryExists || visibleCategories.length === 0) return undefined;
@@ -279,7 +296,12 @@ export function useCatalogDiscovery({
             const target = missing[idx];
             if (!target || railGenRef.current !== gen) return;
             const rows = await catalog
-              .items(target.row.id, 0, RAIL_ITEM_LIMIT)
+              .items(
+                target.row.id,
+                0,
+                RAIL_ITEM_LIMIT,
+                sortBy === 'alpha' ? { sortBy: 'alpha' } : undefined,
+              )
               .catch(() => [] as ItemRow[]);
             if (railGenRef.current !== gen) return;
             fetched.set(target.row.id, rows);
@@ -297,7 +319,7 @@ export function useCatalogDiscovery({
         railItemsRef.current = nextItems;
         setRailItemsByCategoryId(nextItems);
         setLoadingRailIds(EMPTY_LOADING_SET);
-        syncCache({ railItemsByCategoryId: nextItems });
+        if (sortBy === 'default') syncCache({ railItemsByCategoryId: nextItems });
       }
 
       const loadedKeys: string[] = [];
@@ -334,6 +356,7 @@ export function useCatalogDiscovery({
     railRefreshTick,
     refreshToken,
     selectedCategoryExists,
+    sortBy,
     syncCache,
     userStateVersion,
     visibleCategories,

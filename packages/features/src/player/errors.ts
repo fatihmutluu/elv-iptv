@@ -5,15 +5,19 @@ import {
   type PlaybackDiagnosisInput,
   type PlaybackVerdict,
 } from '@elv/playback';
+import { extractHttpStatus, sanitizeErrorDetail } from '../shared/error-utils';
+
+export { extractHttpStatus, sanitizeErrorDetail };
 
 /** Optional diagnostic context supplied alongside a playback failure error (`#316`). */
 export type PlaybackFailureContext = Omit<PlaybackDiagnosisInput, 'error'>;
 
-/** Localized message, actionable recovery hint, verdict, and optional redacted evidence (`#316`). */
+/** Localized message, recovery hint, verdict, HTTP status, and redacted evidence (`#63`, `#316`). */
 export interface DescribedPlaybackFailure {
   readonly messageId: MessageId;
   readonly hintId: MessageId;
   readonly verdict?: PlaybackVerdict;
+  readonly httpStatus?: number;
   readonly evidence?: string;
 }
 
@@ -68,7 +72,7 @@ const VERDICT_COPY: Readonly<
 
 /**
  * Maps a secret-free {@link ElvError} and optional playback diagnostic context to actionable
- * localized copy and a strictly host-only redacted evidence line (`#316`).
+ * localized copy, optional numeric HTTP status, and strictly redacted evidence (`#63`, `#316`).
  */
 export function describePlaybackFailure(
   error: ElvError,
@@ -80,10 +84,17 @@ export function describePlaybackFailure(
       ? 'codec-unsupported'
       : diagnosis.verdict;
   const copy = VERDICT_COPY[verdict];
+  const candidateStatus = diagnosis.httpStatus ?? extractHttpStatus(error);
+  const httpStatus =
+    candidateStatus !== undefined && candidateStatus >= 400 && candidateStatus <= 599
+      ? candidateStatus
+      : undefined;
+  const safeEvidence = sanitizeErrorDetail(diagnosis.evidence);
   return {
     messageId: copy.messageId,
     hintId: copy.hintId,
     verdict,
-    ...(diagnosis.evidence.length > 0 ? { evidence: diagnosis.evidence } : {}),
+    ...(httpStatus !== undefined ? { httpStatus } : {}),
+    ...(safeEvidence !== undefined ? { evidence: safeEvidence } : {}),
   };
 }

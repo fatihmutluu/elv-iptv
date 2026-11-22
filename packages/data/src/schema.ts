@@ -1,6 +1,7 @@
 import { MIGRATION_V5 } from './schema-v5';
 import { MIGRATION_V6 } from './schema-v6';
 import { MIGRATION_V7 } from './schema-v7';
+import { MIGRATION_V8 } from './schema-v8';
 
 export {
   EXPECTED_FTS_TABLES,
@@ -281,4 +282,5 @@ CREATE INDEX IF NOT EXISTS idx_programmes_source_start_stop ON programmes (sourc
   MIGRATION_V5,
   MIGRATION_V6,
   MIGRATION_V7,
+  MIGRATION_V8,
 ];

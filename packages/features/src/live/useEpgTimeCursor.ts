@@ -63,6 +63,7 @@ export interface UseEpgTimeCursorOptions {
   readonly channelCount: number;
   readonly maxMountedRows: number;
   readonly activeNowMs: number;
+  readonly spanMs?: number;
   readonly epgData: EpgWindowCursorPort;
   readonly onWatchChannel: (channel: ItemRow, index: number) => void;
   readonly onToggleFavorite?: (channel: ItemRow) => void;
@@ -102,6 +103,7 @@ export function useEpgTimeCursor({
   channelCount,
   maxMountedRows,
   activeNowMs,
+  spanMs = EPG_VISIBLE_SPAN_MS,
   epgData,
   onWatchChannel,
   onToggleFavorite,
@@ -146,10 +148,8 @@ export function useEpgTimeCursor({
 
   const slotsFor = useCallback(
     (ch: ItemRow | undefined) =>
-      ch
-        ? layoutEpgSlots(getProgrammes(ch.key), windowStartMs, EPG_VISIBLE_SPAN_MS, activeNowMs)
-        : [],
-    [activeNowMs, getProgrammes, windowStartMs],
+      ch ? layoutEpgSlots(getProgrammes(ch.key), windowStartMs, spanMs, activeNowMs) : [],
+    [activeNowMs, getProgrammes, spanMs, windowStartMs],
   );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset cursor state when category switches
@@ -262,11 +262,11 @@ export function useEpgTimeCursor({
       cursorRef.current.anchorMs =
         delta < 0
           ? Math.max(0, windowStartMs - EPG_SLOT_MS / 2)
-          : windowStartMs + EPG_VISIBLE_SPAN_MS + EPG_SLOT_MS / 2;
+          : windowStartMs + spanMs + EPG_SLOT_MS / 2;
       if (delta < 0) panEarlier();
       else panLater();
     },
-    [commitSlot, focusedSlots, panEarlier, panLater, windowStartMs],
+    [commitSlot, focusedSlots, panEarlier, panLater, spanMs, windowStartMs],
   );
 
   const activateToolbarAction = useCallback(

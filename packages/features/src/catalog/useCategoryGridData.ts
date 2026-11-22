@@ -1,4 +1,4 @@
-import type { CatalogService, ItemRow, WatchProgressRow } from '@elv/data';
+import type { CatalogService, ItemRow, ItemSortOrder, WatchProgressRow } from '@elv/data';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   batchLoadProgressByKeys,
@@ -18,6 +18,7 @@ export interface UseCategoryGridDataOptions {
   readonly userStateVersion: number;
   readonly cols: number;
   readonly visibleGridRows: number;
+  readonly sortBy?: ItemSortOrder;
 }
 
 /** O(1)-paged grid data state returned by {@link useCategoryGridData}. */
@@ -44,6 +45,7 @@ export function useCategoryGridData({
   userStateVersion,
   cols,
   visibleGridRows,
+  sortBy = 'default',
 }: UseCategoryGridDataOptions): CategoryGridDataState {
   const uiCache = useCatalogUiCache();
   const uiCacheRef = useRef(uiCache);
@@ -54,6 +56,7 @@ export function useCategoryGridData({
       catId: string,
       count: number,
       initialPage0: readonly ItemRow[] | undefined,
+      activeSortBy: ItemSortOrder,
     ): PagedListSource<ItemRow> =>
       createPagedListSource<ItemRow>({
         count,
@@ -61,8 +64,13 @@ export function useCategoryGridData({
         maxPages: GRID_MAX_PAGES,
         ...(initialPage0 !== undefined ? { initialPage0 } : {}),
         loadPage: async (offset, limit) => {
-          const rows = await catalog.items(catId, offset, limit);
-          if (offset === 0 && rows.length > 0) {
+          const rows = await catalog.items(
+            catId,
+            offset,
+            limit,
+            activeSortBy === 'alpha' ? { sortBy: 'alpha' } : undefined,
+          );
+          if (offset === 0 && rows.length > 0 && activeSortBy === 'default') {
             uiCacheRef.current?.setGridFirstPage(kind, catId, rows);
           }
           return rows;
@@ -77,16 +85,19 @@ export function useCategoryGridData({
     count: number;
     refreshToken: number;
     catalog: CatalogService;
+    sortBy: ItemSortOrder;
   } | null>(null);
 
   if (initialSourceRef.current === null) {
-    const seeded = uiCache?.getGridFirstPage(kind, category.row.id);
+    const seeded =
+      sortBy === 'default' ? uiCache?.getGridFirstPage(kind, category.row.id) : undefined;
     initialSourceRef.current = {
-      source: buildSource(category.row.id, category.row.itemCount, seeded),
+      source: buildSource(category.row.id, category.row.itemCount, seeded, sortBy),
       catId: category.row.id,
       count: category.row.itemCount,
       refreshToken,
       catalog,
+      sortBy,
     };
   }
 
@@ -107,6 +118,7 @@ export function useCategoryGridData({
     count: category.row.itemCount,
     refreshToken,
     catalog,
+    sortBy,
   });
   const unsubRef = useRef<(() => void) | null>(null);
   const fetchedKeysRef = useRef<Set<string>>(new Set());
@@ -131,7 +143,8 @@ export function useCategoryGridData({
       activeKeyRef.current.catId === catId &&
       activeKeyRef.current.count === count &&
       activeKeyRef.current.refreshToken === refreshToken &&
-      activeKeyRef.current.catalog === catalog;
+      activeKeyRef.current.catalog === catalog &&
+      activeKeyRef.current.sortBy === sortBy;
 
     const attachAndActivate = (next: PagedListSource<ItemRow>) => {
       if (pagedSourceRef.current && pagedSourceRef.current !== next) {
@@ -144,7 +157,7 @@ export function useCategoryGridData({
         if (alive) setPageVersion((v) => v + 1);
       });
       pagedSourceRef.current = next;
-      activeKeyRef.current = { catId, count, refreshToken, catalog };
+      activeKeyRef.current = { catId, count, refreshToken, catalog, sortBy };
       setPagedSource(next);
       setPageVersion((v) => v + 1);
       next.prefetch(0, (visibleGridRows + 4) * cols);
@@ -162,12 +175,15 @@ export function useCategoryGridData({
     }
 
     const tokenBumped = activeKeyRef.current.refreshToken !== refreshToken;
-    const cachedPage0 = tokenBumped ? undefined : uiCacheRef.current?.getGridFirstPage(kind, catId);
+    const cachedPage0 =
+      tokenBumped || sortBy !== 'default'
+        ? undefined
+        : uiCacheRef.current?.getGridFirstPage(kind, catId);
     const keepPreviousWhileFetching =
       pagedSourceRef.current !== null && count > 0 && cachedPage0 === undefined;
 
     if (!keepPreviousWhileFetching) {
-      attachAndActivate(buildSource(catId, count, cachedPage0));
+      attachAndActivate(buildSource(catId, count, cachedPage0, sortBy));
       return () => {
         alive = false;
       };
@@ -175,14 +191,21 @@ export function useCategoryGridData({
 
     // Keep previously rendered rows visible while fetching fresh page 0 of the target category.
     void catalog
-      .items(catId, 0, Math.min(GRID_PAGE_SIZE, count))
+      .items(
+        catId,
+        0,
+        Math.min(GRID_PAGE_SIZE, count),
+        sortBy === 'alpha' ? { sortBy: 'alpha' } : undefined,
+      )
       .then((rows) => {
         if (!alive) return;
-        if (rows.length > 0) uiCacheRef.current?.setGridFirstPage(kind, catId, rows);
-        attachAndActivate(buildSource(catId, count, rows));
+        if (rows.length > 0 && sortBy === 'default') {
+          uiCacheRef.current?.setGridFirstPage(kind, catId, rows);
+        }
+        attachAndActivate(buildSource(catId, count, rows, sortBy));
       })
       .catch(() => {
-        if (alive) attachAndActivate(buildSource(catId, count, undefined));
+        if (alive) attachAndActivate(buildSource(catId, count, undefined, sortBy));
       });
 
     return () => {
@@ -196,6 +219,7 @@ export function useCategoryGridData({
     cols,
     kind,
     refreshToken,
+    sortBy,
     visibleGridRows,
   ]);
 

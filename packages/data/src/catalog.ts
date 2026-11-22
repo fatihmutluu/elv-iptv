@@ -31,6 +31,7 @@ import {
   type EpisodeRow,
   type ItemDetailRow,
   type ItemRow,
+  type ListItemsOptions,
   parseCategoryId,
   queryAllSourcesItems,
   queryCategories,
@@ -138,12 +139,18 @@ export interface CatalogService {
   listSources(): Promise<SourceRow[]>;
   latestImportHealth?(sourceId?: string): Promise<SourceImportHealth[]>;
   categories(sourceId: string, kind: BrowseKind): Promise<CategoryRow[]>;
-  items(categoryId: string, offset: number, limit: number): Promise<ItemRow[]>;
+  items(
+    categoryId: string,
+    offset: number,
+    limit: number,
+    opts?: ListItemsOptions,
+  ): Promise<ItemRow[]>;
   allSourcesItems?(
     kind: BrowseKind,
     offset: number,
     limit: number,
     sourceIds?: readonly string[],
+    opts?: ListItemsOptions,
   ): Promise<ItemRow[]>;
   itemDetail?(itemKey: string): Promise<ItemDetailRow | null>;
   search?(query: string, opts?: SearchOptions): Promise<SearchResults>;
@@ -352,14 +359,16 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
 
     categories: (sourceId, kind) => queryCategories(db, sourceId, kind),
 
-    async items(categoryId, offset, limit) {
+    async items(categoryId, offset, limit, opts) {
       const ref = parseCategoryId(categoryId);
       if (ref === undefined) return [];
-      return playtime.resolveLogos(await queryItems(db, ref, offset, limit), ref.sourceId);
+      return playtime.resolveLogos(await queryItems(db, ref, offset, limit, opts), ref.sourceId);
     },
 
-    allSourcesItems: async (kind, offset, limit, sourceIds) =>
-      playtime.resolveRowLogos(await queryAllSourcesItems(db, kind, offset, limit, sourceIds)),
+    allSourcesItems: async (kind, offset, limit, sourceIds, opts) =>
+      playtime.resolveRowLogos(
+        await queryAllSourcesItems(db, kind, offset, limit, sourceIds, opts),
+      ),
 
     async itemDetail(itemKey) {
       const found = await queryItemDetail(db, itemKey);

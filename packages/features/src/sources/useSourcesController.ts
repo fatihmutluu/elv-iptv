@@ -82,6 +82,8 @@ export function useSourcesController({
   const [submitting, setSubmitting] = useState(false);
   const [sources, setSources] = useState<readonly SourceRow[]>([]);
   const [statusById, setStatusById] = useState<Record<string, SourceRuntimeStatus>>({});
+  const statusByIdRef = useRef(statusById);
+  statusByIdRef.current = statusById;
 
   const mountedRef = useRef(true);
   const submittingRef = useRef(false);
@@ -165,6 +167,7 @@ export function useSourcesController({
       if (controllersRef.current.has(sourceId) || removedIdsRef.current.has(sourceId)) {
         return;
       }
+      const previousStatus = statusByIdRef.current[sourceId];
       const ctl = new AbortController();
       controllersRef.current.set(sourceId, ctl);
       setStatus(sourceId, { kind: 'importing', progress: null });
@@ -189,11 +192,28 @@ export function useSourcesController({
       if (!mountedRef.current || removedIdsRef.current.has(sourceId)) {
         return;
       }
-      if (!rows.some((row) => row.id === sourceId)) {
+      const currentRow = rows.find((row) => row.id === sourceId);
+      if (currentRow === undefined) {
         return;
       }
 
       if (!result.ok) {
+        if (
+          result.error.category === 'network' &&
+          result.error.code === 'aborted' &&
+          !currentRow.needsImport
+        ) {
+          if (previousStatus?.kind === 'ready') {
+            setStatus(sourceId, previousStatus);
+          } else {
+            setStatusById((prev) => {
+              const next = { ...prev };
+              delete next[sourceId];
+              return next;
+            });
+          }
+          return;
+        }
         setStatus(sourceId, { kind: 'error', failure: describeSourceFailure(result.error) });
         return;
       }

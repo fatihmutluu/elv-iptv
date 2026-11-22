@@ -1,4 +1,5 @@
 import type { ItemRow, NowNextEntry } from '@elv/data';
+import type { LogoBackdropModePref } from '@elv/domain';
 import {
   ArtworkImage,
   CtaButton,
@@ -15,6 +16,8 @@ import type { OpenVideoEngine } from '../ports/video-host';
 import type { CatalogLayoutMetrics, PagedListSource } from '../shared';
 import { LiveZapDrawer, ZAP_DRAWER_WIDTH } from './LiveZapDrawer';
 import { computeProgramProgress } from './live-model';
+import { SourceBadgePill } from './SourceBadgePill';
+import { formatChannelDisplayName, type SourceBadgeInfo } from './source-badge';
 
 /** Embedded live preview slice rendered inside {@link LiveWatchStage}. */
 export interface LiveStagePreview {
@@ -44,6 +47,9 @@ export interface LiveWatchStageProps {
   readonly onWatchFullscreen: (channel: ItemRow, index: number) => void;
   readonly focusedControl?: 'miniguide' | 'favorite' | 'watch' | 'browse' | null;
   readonly focusedZapIndex?: number | null;
+  readonly logoBackdropMode?: LogoBackdropModePref;
+  readonly sourceBadges?: ReadonlyMap<string, SourceBadgeInfo>;
+  readonly cleanChannelTitles?: boolean;
   /** Injectable epoch clock in milliseconds for live progress bars (defaults to `() => Date.now()`). */
   readonly now?: () => number;
 }
@@ -58,6 +64,7 @@ export function LiveWatchStage(p: LiveWatchStageProps): ReactElement {
   const { activeChannel, activeChannelIndex, channelSource, sourceVersion } = p;
   const { nowNextByKey, nowNextVersion, zapDrawerOpen, layout, isFavorite = true } = p;
   const { isDesktop = false, preview, focusedControl = null, focusedZapIndex = null, now } = p;
+  const { logoBackdropMode = 'plate', sourceBadges, cleanChannelTitles = false } = p;
   const { onWatchFullscreen, onToggleFavorite, onBrowseChannels } = p;
 
   const theme = useTheme();
@@ -116,10 +123,16 @@ export function LiveWatchStage(p: LiveWatchStageProps): ReactElement {
   const nextProg = activeNowNext?.next ?? null;
   const ratio = nowProg ? computeProgramProgress(nowProg.start, nowProg.stop, nowMs) : 0;
   const pct = `${Math.round(ratio * 100)}%` as const;
+  const activeChannelName = activeChannel
+    ? formatChannelDisplayName(activeChannel.name, cleanChannelTitles)
+    : i18n.t('nav.live');
+  const activeSourceBadge = activeChannel
+    ? (sourceBadges?.get(activeChannel.sourceId) ?? null)
+    : null;
   const channelHeading = activeChannel
     ? activeChannel.num !== null && activeChannel.num !== undefined
-      ? `${activeChannel.num} · ${activeChannel.name}`
-      : activeChannel.name
+      ? `${activeChannel.num} · ${activeChannelName}`
+      : activeChannelName
     : i18n.t('nav.live');
   const openedPreview = preview?.opened ?? null;
   const desktopHwndSafe = isDesktop;
@@ -209,6 +222,7 @@ export function LiveWatchStage(p: LiveWatchStageProps): ReactElement {
     >
       <View style={styles.programHeadingRow}>
         <MicroPill label={i18n.t('ui.liveBadge')} tone="live" />
+        <SourceBadgePill badge={activeSourceBadge} testID="live-stage-source-badge" />
         <Text
           testID="live-stage-channel-title"
           numberOfLines={1}
@@ -271,6 +285,9 @@ export function LiveWatchStage(p: LiveWatchStageProps): ReactElement {
             activeChannelKey={activeChannel?.key ?? null}
             focusedZapIndex={focusedZapIndex}
             layout={layout}
+            logoBackdropMode={logoBackdropMode}
+            {...(sourceBadges !== undefined ? { sourceBadges } : {})}
+            cleanChannelTitles={cleanChannelTitles}
             hydrateNowNext={p.hydrateNowNext}
             onSelectChannel={p.onSelectChannel}
           />
@@ -291,9 +308,10 @@ export function LiveWatchStage(p: LiveWatchStageProps): ReactElement {
               <ArtworkImage
                 testID="live-stage-backdrop"
                 uri={activeChannel?.logo}
-                label={activeChannel?.name ?? i18n.t('nav.live')}
+                label={activeChannelName}
                 maxDecodePx={640}
                 resizeMode="cover"
+                logoBackdropMode={logoBackdropMode}
                 borderRadius={0}
                 decorative
                 style={styles.flex1}
@@ -323,9 +341,10 @@ export function LiveWatchStage(p: LiveWatchStageProps): ReactElement {
         <ArtworkImage
           testID="live-stage-backdrop"
           uri={activeChannel?.logo}
-          label={activeChannel?.name ?? i18n.t('nav.live')}
+          label={activeChannelName}
           maxDecodePx={640}
           resizeMode="cover"
+          logoBackdropMode={logoBackdropMode}
           borderRadius={0}
           decorative
           style={StyleSheet.absoluteFill}
@@ -345,6 +364,9 @@ export function LiveWatchStage(p: LiveWatchStageProps): ReactElement {
           activeChannelKey={activeChannel?.key ?? null}
           focusedZapIndex={focusedZapIndex}
           layout={layout}
+          logoBackdropMode={logoBackdropMode}
+          {...(sourceBadges !== undefined ? { sourceBadges } : {})}
+          cleanChannelTitles={cleanChannelTitles}
           hydrateNowNext={p.hydrateNowNext}
           onSelectChannel={p.onSelectChannel}
         />

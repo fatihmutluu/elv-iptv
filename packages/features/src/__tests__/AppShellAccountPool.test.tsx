@@ -279,6 +279,10 @@ describe('enrichPlayTargetAccountKey & AppShell cross-source accountKey pooling 
 
       await fireEvent.press(screen.getByTestId('nav-tab-live'));
       await waitFor(() => {
+        expect(screen.getByTestId('live-mode-channels')).toBeTruthy();
+      });
+      await fireEvent.press(screen.getByTestId('live-mode-channels'));
+      await waitFor(() => {
         expect(screen.getByTestId('live-channel-card-0')).toBeTruthy();
       });
 

@@ -1,9 +1,14 @@
-import type { PreferencesPatch, PreferencesSnapshot, Result } from '@elv/domain';
+import type {
+  ArtworkCacheLimitMbPref,
+  PreferencesPatch,
+  PreferencesSnapshot,
+  Result,
+} from '@elv/domain';
 import type { MessageId } from '@elv/i18n';
 import { THEME_PRESETS, type ThemePresetId } from '@elv/ui-kit';
 import type { AppearanceFocusId } from './useTvSettingsNavigation';
 
-/** Preferences read/write contract consumed by {@link AppearancePanel} and {@link SettingsScreen}. */
+/** Preferences read/write contract consumed by settings panels and {@link SettingsScreen}. */
 export interface SettingsPreferencesController {
   readonly preferences: PreferencesSnapshot;
   updatePreferences(patch: PreferencesPatch): Promise<Result<PreferencesSnapshot>>;
@@ -38,6 +43,16 @@ export const FONT_SCALE_OPTIONS: ReadonlyArray<{
   { scale: 1.2, label: '120%', focusId: 'font-120', testID: 'settings-font-120' },
 ];
 
+export const ARTWORK_CACHE_OPTIONS: ReadonlyArray<{
+  readonly mb: ArtworkCacheLimitMbPref;
+  readonly focusId: AppearanceFocusId;
+  readonly testID: string;
+}> = [
+  { mb: 64, focusId: 'artwork-cache-64', testID: 'settings-artwork-cache-64' },
+  { mb: 128, focusId: 'artwork-cache-128', testID: 'settings-artwork-cache-128' },
+  { mb: 256, focusId: 'artwork-cache-256', testID: 'settings-artwork-cache-256' },
+];
+
 const SECOND_THEME_ROW_IDS = new Set<AppearanceFocusId>([
   'theme-velvetViolet',
   'theme-pitchEmerald',
@@ -48,7 +63,10 @@ const SECOND_THEME_ROW_IDS = new Set<AppearanceFocusId>([
 export function computeAppearanceScrollY(
   controlId: AppearanceFocusId,
   layouts: Partial<
-    Record<'theme' | 'font' | 'reset', { readonly y: number; readonly height: number }>
+    Record<
+      'theme' | 'font' | 'artworkCache' | 'reset',
+      { readonly y: number; readonly height: number }
+    >
   >,
   motionOffsetY: number,
 ): number | undefined {
@@ -66,6 +84,9 @@ export function computeAppearanceScrollY(
   if (controlId === 'toggle-reduce-motion') {
     return layouts.font ? Math.max(0, layouts.font.y + motionOffsetY - 12) : undefined;
   }
+  if (controlId.startsWith('artwork-cache-')) {
+    return layouts.artworkCache ? Math.max(0, layouts.artworkCache.y - 12) : undefined;
+  }
   if (controlId === 'reset-preferences') {
     return layouts.reset ? Math.max(0, layouts.reset.y - 12) : undefined;
   }
@@ -82,6 +103,8 @@ export function activateAppearanceControl(
     setFontScale: (scale: number) => void;
     setReduceMotion: (next: boolean) => void;
     setLocale: (locale: 'tr' | 'en') => void;
+    onSetArtworkCacheLimitMb?: (mb: ArtworkCacheLimitMbPref) => void;
+    onClearArtworkCache?: () => void;
   },
 ): void {
   const { preferences } = deps;
@@ -109,6 +132,16 @@ export function activateAppearanceControl(
     const current = preferences ? preferences.preferences.reduceMotion : deps.reduceMotion;
     if (preferences) void preferences.updatePreferences({ reduceMotion: !current });
     else deps.setReduceMotion(!current);
+    return;
+  }
+  const cacheOpt = ARTWORK_CACHE_OPTIONS.find((opt) => opt.focusId === controlId);
+  if (cacheOpt) {
+    if (preferences) void preferences.updatePreferences({ artworkCacheLimitMb: cacheOpt.mb });
+    deps.onSetArtworkCacheLimitMb?.(cacheOpt.mb);
+    return;
+  }
+  if (controlId === 'artwork-cache-clear') {
+    deps.onClearArtworkCache?.();
     return;
   }
   if (controlId === 'reset-preferences') {

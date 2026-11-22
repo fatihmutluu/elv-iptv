@@ -5,8 +5,10 @@ import {
   ITEM_COLS,
   ITEM_TABLE,
   type ItemRow,
+  type ListItemsOptions,
   mapItemRow,
   type RawItemRow,
+  watchedFilterClause,
 } from './queries-shared';
 
 /**
@@ -68,15 +70,19 @@ async function fetchSourceSlice(
   sourceId: string,
   offset: number,
   limit: number,
+  opts?: ListItemsOptions,
 ): Promise<ItemRow[]> {
   if (limit <= 0) return [];
+  const watched = watchedFilterClause('t.key', opts);
+  const orderBy =
+    opts?.sortBy === 'alpha' ? 't.sort_title ASC, t.key ASC' : 't.name_fold ASC, t.id ASC';
   const rows = await db.all<RawItemRow>(
     `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, ${ITEM_COLS[kind]}
        FROM ${ITEM_TABLE[kind]} t
-      WHERE t.source_id = ? AND t.is_hidden = 0
-      ORDER BY t.name_fold ASC, t.id ASC
+      WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}
+      ORDER BY ${orderBy}
       LIMIT ? OFFSET ?`,
-    [sourceId, limit, offset],
+    [sourceId, ...watched.params, limit, offset],
   );
   return rows.map((r) => mapItemRow(kind, sourceId, r));
 }
@@ -162,27 +168,29 @@ async function fetchSourceCursorSlice(
   sourceId: string,
   cursor: SourceNameCursor | undefined,
   limit: number,
+  opts?: Pick<ListItemsOptions, 'excludeWatched' | 'profileId'>,
 ): Promise<{ rows: ItemRow[]; cursors: SourceNameCursor[] }> {
   if (limit <= 0) return { rows: [], cursors: [] };
   const table = ITEM_TABLE[kind];
+  const watched = watchedFilterClause('t.key', opts);
   const raw =
     cursor === undefined
       ? await db.all<CursorRawItemRow>(
           `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, t.name_fold, ${ITEM_COLS[kind]}
              FROM ${table} t
-            WHERE t.source_id = ? AND t.is_hidden = 0
+            WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}
             ORDER BY t.name_fold ASC, t.id ASC
             LIMIT ?`,
-          [sourceId, limit],
+          [sourceId, ...watched.params, limit],
         )
       : await db.all<CursorRawItemRow>(
           `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, t.name_fold, ${ITEM_COLS[kind]}
              FROM ${table} t
             WHERE t.source_id = ? AND t.is_hidden = 0
-              AND (t.name_fold > ? OR (t.name_fold = ? AND t.id > ?))
+              AND (t.name_fold > ? OR (t.name_fold = ? AND t.id > ?))${watched.clause}
             ORDER BY t.name_fold ASC, t.id ASC
             LIMIT ?`,
-          [sourceId, cursor.nameFold, cursor.nameFold, cursor.id, limit],
+          [sourceId, cursor.nameFold, cursor.nameFold, cursor.id, ...watched.params, limit],
         );
   return {
     rows: raw.map((r) => mapItemRow(kind, sourceId, r)),
@@ -200,6 +208,7 @@ export async function queryAllSourcesItemsByCursor(
   cursors: Readonly<Record<string, SourceNameCursor>>,
   limit: number,
   sourceIds?: readonly string[],
+  opts?: Pick<ListItemsOptions, 'excludeWatched' | 'profileId'>,
 ): Promise<AllSourcesCursorPage> {
   const page = clampPage(0, limit);
   const nextCursors: Record<string, SourceNameCursor> = { ...cursors };
@@ -209,7 +218,7 @@ export async function queryAllSourcesItemsByCursor(
 
   if (activeIds.length === 1) {
     const id = activeIds[0] ?? '';
-    const slice = await fetchSourceCursorSlice(db, kind, id, cursors[id], page.limit + 1);
+    const slice = await fetchSourceCursorSlice(db, kind, id, cursors[id], page.limit + 1, opts);
     const hasMore = slice.rows.length > page.limit;
     const items = hasMore ? slice.rows.slice(0, page.limit) : slice.rows;
     const lastCursor = slice.cursors[items.length - 1];
@@ -219,6 +228,7 @@ export async function queryAllSourcesItemsByCursor(
 
   const cap = page.limit + 1;
   const table = ITEM_TABLE[kind];
+  const watched = watchedFilterClause('t.key', opts);
   const counts = await Promise.all(
     activeIds.map(async (id) => {
       const c = cursors[id];
@@ -226,18 +236,18 @@ export async function queryAllSourcesItemsByCursor(
         c === undefined
           ? await db.all<{ n: number }>(
               `SELECT COUNT(*) AS n FROM (
-                 SELECT 1 FROM ${table} WHERE source_id = ? AND is_hidden = 0 LIMIT ?
+                 SELECT 1 FROM ${table} t WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause} LIMIT ?
                )`,
-              [id, cap],
+              [id, ...watched.params, cap],
             )
           : await db.all<{ n: number }>(
               `SELECT COUNT(*) AS n FROM (
                  SELECT 1 FROM ${table} t
                   WHERE t.source_id = ? AND t.is_hidden = 0
-                    AND (t.name_fold > ? OR (t.name_fold = ? AND t.id > ?))
+                    AND (t.name_fold > ? OR (t.name_fold = ? AND t.id > ?))${watched.clause}
                   LIMIT ?
                )`,
-              [id, c.nameFold, c.nameFold, c.id, cap],
+              [id, c.nameFold, c.nameFold, c.id, ...watched.params, cap],
             );
       return rows[0]?.n ?? 0;
     }),
@@ -245,7 +255,9 @@ export async function queryAllSourcesItemsByCursor(
 
   const quotas = allocateFairQuotas(counts, page.limit);
   const slices = await Promise.all(
-    activeIds.map((id, i) => fetchSourceCursorSlice(db, kind, id, cursors[id], quotas[i] ?? 0)),
+    activeIds.map((id, i) =>
+      fetchSourceCursorSlice(db, kind, id, cursors[id], quotas[i] ?? 0, opts),
+    ),
   );
   for (let i = 0; i < activeIds.length; i += 1) {
     const id = activeIds[i] ?? '';
@@ -275,24 +287,26 @@ export async function queryAllSourcesItems(
   offset: number,
   limit: number,
   sourceIds?: readonly string[],
+  opts?: ListItemsOptions,
 ): Promise<ItemRow[]> {
   const page = clampPage(offset, limit);
   if (page.limit === 0) return [];
   const activeIds = await resolveActiveSources(db, sourceIds);
   if (activeIds.length === 0) return [];
   if (activeIds.length === 1) {
-    return fetchSourceSlice(db, kind, activeIds[0] ?? '', page.offset, page.limit);
+    return fetchSourceSlice(db, kind, activeIds[0] ?? '', page.offset, page.limit, opts);
   }
 
   const endTarget = page.offset + page.limit;
   const table = ITEM_TABLE[kind];
+  const watched = watchedFilterClause('t.key', opts);
   const counts = await Promise.all(
     activeIds.map(async (id) => {
       const rows = await db.all<{ n: number }>(
         `SELECT COUNT(*) AS n FROM (
-           SELECT 1 FROM ${table} WHERE source_id = ? AND is_hidden = 0 LIMIT ?
+           SELECT 1 FROM ${table} t WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause} LIMIT ?
          )`,
-        [id, endTarget],
+        [id, ...watched.params, endTarget],
       );
       return rows[0]?.n ?? 0;
     }),
@@ -305,7 +319,7 @@ export async function queryAllSourcesItems(
     activeIds.map((id, i) => {
       const start = startAlloc[i] ?? 0;
       const count = (endAlloc[i] ?? 0) - start;
-      return fetchSourceSlice(db, kind, id, start, count);
+      return fetchSourceSlice(db, kind, id, start, count, opts);
     }),
   );
 

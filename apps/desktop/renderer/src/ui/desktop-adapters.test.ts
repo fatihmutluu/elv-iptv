@@ -31,6 +31,7 @@ vi.mock('react-native', () => ({
   },
 }));
 
+import { createLoadedUriCache } from '@elv/ui-kit';
 import {
   attachDeadHostOnlineReset,
   createDesktopUiAdapters,
@@ -67,6 +68,58 @@ describe('createDesktopUiAdapters (#311, #202)', () => {
 
     handleError(undefined);
     expect(onError).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it('wires artworkCache resolveUri, clear, setLimitBytes, and stats to Electron preload bridge and clears loadedUris (#405)', async () => {
+    const loadedUris = createLoadedUriCache();
+    loadedUris.markLoaded('https://cdn.example/poster.jpg');
+    const cachedUrl = `elv-art://cache/${'a'.repeat(64)}`;
+    const artworkBridge = {
+      clear: vi.fn(async () => undefined),
+      resolve: vi.fn(async () => cachedUrl),
+      setLimitBytes: vi.fn(async () => undefined),
+      stats: vi.fn(async () => ({ bytes: 4096, entries: 3, maxBytes: 128 * 1024 * 1024 })),
+    };
+
+    const adapters = createDesktopUiAdapters({ artworkBridge, loadedUris });
+    if (!adapters.artworkCache) throw new Error('expected artworkCache adapter');
+
+    expect(await adapters.artworkCache.resolveUri?.('https://cdn.example/poster.jpg', 320)).toBe(
+      cachedUrl,
+    );
+    expect(artworkBridge.resolve).toHaveBeenCalledWith('https://cdn.example/poster.jpg');
+
+    await adapters.artworkCache.setLimitBytes?.(256 * 1024 * 1024);
+    expect(artworkBridge.setLimitBytes).toHaveBeenCalledWith(256 * 1024 * 1024);
+
+    expect(await adapters.artworkCache.stats?.()).toEqual({
+      bytes: 4096,
+      entries: 3,
+      maxBytes: 128 * 1024 * 1024,
+    });
+
+    await adapters.artworkCache.clear();
+    expect(loadedUris.has('https://cdn.example/poster.jpg')).toBe(false);
+    expect(artworkBridge.clear).toHaveBeenCalledTimes(1);
+  });
+
+  it('degrades gracefully without an Electron artwork bridge in browser mode (#405)', async () => {
+    const loadedUris = createLoadedUriCache();
+    loadedUris.markLoaded('https://cdn.example/a.jpg');
+    const adapters = createDesktopUiAdapters({ loadedUris });
+    if (!adapters.artworkCache) throw new Error('expected artworkCache adapter');
+
+    expect(await adapters.artworkCache.resolveUri?.('https://cdn.example/a.jpg', 320)).toBeNull();
+
+    await adapters.artworkCache.setLimitBytes?.(64 * 1024 * 1024);
+    expect(await adapters.artworkCache.stats?.()).toEqual({
+      bytes: 0,
+      entries: 0,
+      maxBytes: 64 * 1024 * 1024,
+    });
+
+    await adapters.artworkCache.clear();
+    expect(loadedUris.size).toBe(0);
   });
 });
 

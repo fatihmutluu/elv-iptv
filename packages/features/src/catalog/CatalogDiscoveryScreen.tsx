@@ -85,6 +85,11 @@ export function CatalogDiscoveryScreen({
     (nextCount: number) => updateMemory({ visibleCategoryCount: nextCount }),
     [updateMemory],
   );
+  const sortBy = activeMemory.sortBy ?? 'default';
+  const handleToggleSort = useCallback(
+    () => updateMemory({ sortBy: sortBy === 'alpha' ? 'default' : 'alpha' }),
+    [sortBy, updateMemory],
+  );
 
   const discovery = useCatalogDiscovery({
     kind,
@@ -94,6 +99,7 @@ export function CatalogDiscoveryScreen({
     userStateVersion,
     selectedCategoryId: activeMemory.selectedCategoryId,
     visibleCategoryCount: activeMemory.visibleCategoryCount,
+    sortBy,
     onVisibleCategoryCountChange: handleVisibleCategoryCountChange,
     onClearStaleCategory: handleSelectAllCategories,
   });
@@ -152,6 +158,7 @@ export function CatalogDiscoveryScreen({
         railEntries,
         hasLoadMore: !isGridMode && discovery.hasMoreCategories,
         isGridMode,
+        gridHeaderCount: 2,
       }),
     [
       discovery.categories.length,
@@ -168,7 +175,9 @@ export function CatalogDiscoveryScreen({
   const handleActivateRow = useCallback(
     (rowId: CatalogNavRowId, colIndex: number) => {
       if (rowId === 'empty') return onOpenSources();
-      if (rowId === 'gridBack') return handleSelectCategory(null);
+      if (rowId === 'gridBack') {
+        return colIndex === 1 ? handleToggleSort() : handleSelectCategory(null);
+      }
       if (rowId === 'loadMore') return discovery.loadMoreCategories();
       if (rowId === 'catChips') {
         if (colIndex === 0) return handleSelectCategory(null);
@@ -192,7 +201,7 @@ export function CatalogDiscoveryScreen({
         if (target) onOpenDetail(target);
       }
     },
-    [discovery, handleSelectCategory, kind, onOpenDetail, onOpenSources],
+    [discovery, handleSelectCategory, handleToggleSort, kind, onOpenDetail, onOpenSources],
   );
 
   const handleActivateGridItem = useCallback(
@@ -296,8 +305,11 @@ export function CatalogDiscoveryScreen({
               refreshToken={refreshToken}
               userStateVersion={userStateVersion}
               layout={layout}
-              backFocused={tvNav.focusedRowId === 'gridBack'}
+              backFocused={tvNav.focusedRowId === 'gridBack' && tvNav.focusedCol === 0}
+              sortFocused={tvNav.focusedRowId === 'gridBack' && tvNav.focusedCol === 1}
               focusedGridPos={tvNav.focusedGridPos}
+              sortBy={sortBy}
+              onToggleSort={handleToggleSort}
               onBack={handleSelectAllCategories}
               onOpenDetail={onOpenDetail}
               onGridMetaChange={setGridMeta}

@@ -283,7 +283,23 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
     listSources: () => callValue({ method: 'listSources' }),
     importGuide: (id) => callResult({ method: 'importGuide', id }),
     categories: (sourceId, kind) => callValue({ method: 'categories', sourceId, kind }),
-    items: (categoryId, offset, limit) => callValue({ method: 'items', categoryId, offset, limit }),
+    items: (categoryId, offset, limit, opts) =>
+      callValue({
+        method: 'items',
+        categoryId,
+        offset,
+        limit,
+        ...(opts === undefined ? {} : { opts }),
+      }),
+    allSourcesItems: (kind, offset, limit, sourceIds, opts) =>
+      callValue({
+        method: 'allSourcesItems',
+        kind,
+        offset,
+        limit,
+        ...(sourceIds === undefined ? {} : { sourceIds }),
+        ...(opts === undefined ? {} : { opts }),
+      }),
     itemDetail: (itemKey) => callValue({ method: 'itemDetail', itemKey }),
     search: (query, opts) =>
       callValue({ method: 'search', query, ...(opts === undefined ? {} : { opts }) }),

@@ -1,6 +1,7 @@
 import { createContext, type ReactElement, type ReactNode, useContext } from 'react';
 import type { ImageResizeMode, ImageStyle, StyleProp, ViewStyle } from 'react-native';
 import type { IconSpec } from '../icons/paths';
+import type { ArtworkCacheAdapter } from '../primitives/artwork-cache';
 import type { ImageErrorInfo } from '../primitives/dead-host-registry';
 
 /** Props passed to an optional native gradient renderer (`expo-linear-gradient`, etc.). */
@@ -46,6 +47,7 @@ export interface UiAdapters {
   readonly renderBlur?: (props: BlurAdapterProps) => ReactElement;
   readonly renderImage?: (props: ImageAdapterProps) => ReactElement;
   readonly renderSvg?: (props: SvgAdapterProps) => ReactElement;
+  readonly artworkCache?: ArtworkCacheAdapter;
 }
 
 const EMPTY_ADAPTERS: UiAdapters = {};

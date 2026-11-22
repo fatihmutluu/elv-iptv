@@ -1,4 +1,34 @@
+import {
+  type BufferPreset,
+  clampFontScale,
+  clampPlayerVolume,
+  type ExtendedPreferencesFields,
+  isBufferPreset,
+  isRecord,
+  isValidShortString,
+  mergeExtendedPreferences,
+  parseExtendedPreferences,
+  serializeExtendedPreferences,
+  utf8ByteLength,
+} from './preferences-validators';
 import { elvError, err, ok, type Result } from './result';
+
+export {
+  type ArtworkCacheLimitMbPref,
+  BUFFER_PRESETS,
+  type BufferPreset,
+  type DefaultLiveModePref,
+  type DefaultResizeModePref,
+  type EpgTimeSpanHoursPref,
+  type GuideRefreshHoursPref,
+  type LogoBackdropModePref,
+  MAX_PREF_FONT_SCALE,
+  MAX_PREF_PLAYER_VOLUME,
+  MIN_PREF_FONT_SCALE,
+  MIN_PREF_PLAYER_VOLUME,
+  type SeekStepSecPref,
+  type SubtitleModePref,
+} from './preferences-validators';
 
 /** Schema version stored inside serialized preferences payloads. */
 export const PREFERENCES_SCHEMA_VERSION = 1 as const;
@@ -6,29 +36,10 @@ export const PREFERENCES_SCHEMA_VERSION = 1 as const;
 /** Maximum serialized UTF-8 byte budget for user preferences (well under tvOS's 500 KB UserDefaults limit). */
 export const MAX_PREFERENCES_BYTES = 4096;
 
-/** Minimum supported UI font scale multiplier. */
-export const MIN_PREF_FONT_SCALE = 0.9;
-
-/** Maximum supported UI font scale multiplier. */
-export const MAX_PREF_FONT_SCALE = 1.2;
-
-/** Minimum supported persisted player volume percentage. */
-export const MIN_PREF_PLAYER_VOLUME = 0;
-
-/** Maximum supported persisted player volume percentage. */
-export const MAX_PREF_PLAYER_VOLUME = 100;
-
-const MAX_PREF_STRING_LENGTH = 64;
 const DEFAULT_PREFERENCES_KEY = 'elv.preferences.v1';
 
-/** Supported Media3/player buffer size presets (`#147`). */
-export const BUFFER_PRESETS = ['auto', 'balanced', 'large'] as const;
-
-/** User-selectable playback buffer preset (`#147`). */
-export type BufferPreset = (typeof BUFFER_PRESETS)[number];
-
 /** Immutable snapshot of user-configurable app preferences. */
-export interface PreferencesSnapshot {
+export interface PreferencesSnapshot extends ExtendedPreferencesFields {
   readonly version: typeof PREFERENCES_SCHEMA_VERSION;
   readonly themePreset: string;
   readonly locale: string;
@@ -53,6 +64,21 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   autoSubtitlesOnSkipBack: false,
   autoPlayNextEpisode: true,
   playerVolume: 100,
+  preferredAudioLang: '',
+  preferredSubtitleLang: '',
+  subtitleMode: 'auto',
+  seekStepSec: 10,
+  defaultResizeMode: 'fit',
+  epgTimeSpanHours: 3,
+  epgGenreTints: true,
+  epgShowClock: true,
+  defaultLiveMode: 'favorites',
+  guideRefreshHours: 12,
+  logoBackdropMode: 'plate',
+  showSourceBadges: true,
+  liveOkTwoStepPreview: false,
+  cleanChannelTitles: false,
+  artworkCacheLimitMb: 128,
 });
 
 /** Partial update applied on top of the current {@link PreferencesSnapshot}. */
@@ -85,55 +111,6 @@ export interface PreferencesStore {
   reset(): Promise<Result<PreferencesSnapshot>>;
   flush?(): Promise<void>;
   subscribe(listener: (snapshot: PreferencesSnapshot) => void): () => void;
-}
-
-function clampFontScale(value: number): number {
-  return Math.min(MAX_PREF_FONT_SCALE, Math.max(MIN_PREF_FONT_SCALE, value));
-}
-
-function clampPlayerVolume(value: number): number {
-  const clamped = Math.min(
-    MAX_PREF_PLAYER_VOLUME,
-    Math.max(MIN_PREF_PLAYER_VOLUME, Math.round(value)),
-  );
-  return clamped === 0 ? 0 : clamped;
-}
-
-function isValidShortString(value: unknown): value is string {
-  return (
-    typeof value === 'string' && value.trim().length > 0 && value.length <= MAX_PREF_STRING_LENGTH
-  );
-}
-
-function isBufferPreset(value: unknown): value is BufferPreset {
-  return typeof value === 'string' && (BUFFER_PRESETS as readonly string[]).includes(value);
-}
-
-function utf8ByteLength(text: string): number {
-  let bytes = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    const code = text.charCodeAt(i);
-    if (code <= 0x7f) {
-      bytes += 1;
-    } else if (code <= 0x7ff) {
-      bytes += 2;
-    } else if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length) {
-      const next = text.charCodeAt(i + 1);
-      if (next >= 0xdc00 && next <= 0xdfff) {
-        bytes += 4;
-        i += 1;
-      } else {
-        bytes += 3;
-      }
-    } else {
-      bytes += 3;
-    }
-  }
-  return bytes;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -195,6 +172,7 @@ export function parsePreferences(raw: string | undefined): PreferencesSnapshot {
     autoSubtitlesOnSkipBack,
     autoPlayNextEpisode,
     playerVolume,
+    ...parseExtendedPreferences(parsed, DEFAULT_PREFERENCES),
   });
 }
 
@@ -221,6 +199,7 @@ export function serializePreferences(snapshot: PreferencesSnapshot): Result<stri
       typeof snapshot.playerVolume === 'number' && Number.isFinite(snapshot.playerVolume)
         ? clampPlayerVolume(snapshot.playerVolume)
         : DEFAULT_PREFERENCES.playerVolume,
+    ...serializeExtendedPreferences(snapshot, DEFAULT_PREFERENCES),
   });
   if (utf8ByteLength(payload) > MAX_PREFERENCES_BYTES) {
     return err(elvError('storage', 'preferences-too-large'));
@@ -263,6 +242,7 @@ function mergeCandidate(base: PreferencesSnapshot, patch: PreferencesPatch): Pre
     autoSubtitlesOnSkipBack,
     autoPlayNextEpisode,
     playerVolume,
+    ...mergeExtendedPreferences(base, patch),
   });
 }
 
@@ -300,6 +280,7 @@ function mergeRawCandidate(
       typeof patch.playerVolume === 'number' && Number.isFinite(patch.playerVolume)
         ? clampPlayerVolume(patch.playerVolume)
         : base.playerVolume,
+    ...mergeExtendedPreferences(base, patch),
   };
 }
 

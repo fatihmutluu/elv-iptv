@@ -15,10 +15,24 @@ import {
 } from '@elv/ui-kit';
 import { memo, type ReactElement } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { detailProgressRatio, type PrimaryPlayAction } from './detail-model';
+import type { DetailTechnicalMeta } from '../shared/detail-target';
+import { DetailPrePlayControls, DetailSynopsisBlock } from './DetailHeroExtras';
+import {
+  buildTechnicalBadges,
+  detailProgressRatio,
+  type PrimaryPlayAction,
+  SYNOPSIS_EXPAND_THRESHOLD,
+} from './detail-model';
 
 /** Focusable interactive slot identifiers inside {@link DetailHero}. */
-export type DetailHeroFocusSlot = 'back' | 'mylist' | 'watched' | 'play';
+export type DetailHeroFocusSlot =
+  | 'back'
+  | 'mylist'
+  | 'watched'
+  | 'play'
+  | 'preplay-audio'
+  | 'preplay-subtitles'
+  | 'synopsis';
 
 /** Props of {@link DetailHero}. */
 export interface DetailHeroProps {
@@ -29,10 +43,17 @@ export interface DetailHeroProps {
   readonly rating: number | null;
   readonly plot: string | null;
   readonly genres?: readonly string[];
+  readonly technicalMeta?: DetailTechnicalMeta;
   readonly seasonsCount: number;
   readonly inMyList: boolean;
   readonly watched: boolean;
   readonly primaryAction: PrimaryPlayAction;
+  readonly audioLang?: string;
+  readonly subtitleLang?: string;
+  readonly onCycleAudio?: () => void;
+  readonly onCycleSubtitles?: () => void;
+  readonly synopsisExpanded?: boolean;
+  readonly onToggleSynopsis?: () => void;
   readonly onBack: () => void;
   readonly onPlayPrimary: () => void;
   readonly onToggleMyList: () => void;
@@ -63,10 +84,17 @@ function DetailHeroInner({
   rating,
   plot,
   genres,
+  technicalMeta,
   seasonsCount,
   inMyList,
   watched,
   primaryAction,
+  audioLang = '',
+  subtitleLang = '',
+  onCycleAudio,
+  onCycleSubtitles,
+  synopsisExpanded = false,
+  onToggleSynopsis,
   onBack,
   onPlayPrimary,
   onToggleMyList,
@@ -85,9 +113,16 @@ function DetailHeroInner({
     primaryAction.kind !== 'pending' && primaryAction.resume && primaryAction.durationMs > 0
       ? detailProgressRatio(primaryAction.positionMs, primaryAction.durationMs)
       : undefined;
-  const synopsis = plot?.trim() ? plot.trim() : i18n.t('detail.noSynopsis');
+  const trimmedPlot = plot?.trim() ?? '';
+  const synopsis = trimmedPlot.length > 0 ? trimmedPlot : i18n.t('detail.noSynopsis');
+  const canExpandSynopsis =
+    onToggleSynopsis !== undefined && trimmedPlot.length >= SYNOPSIS_EXPAND_THRESHOLD;
+  const technicalBadges = buildTechnicalBadges(technicalMeta);
   const kindLabel = i18n.t(kind === 'movie' ? 'home.kind.movie' : 'home.kind.series');
   const backFocused = isTv && focusedSlot === 'back';
+  const synopsisFocused = isTv && focusedSlot === 'synopsis';
+  const prePlayFocused =
+    focusedSlot === 'preplay-audio' || focusedSlot === 'preplay-subtitles' ? focusedSlot : null;
   const backLabel = i18n.t('detail.back');
   const glassBlur = webBackdropBlur(12);
   const transition = webTransition(theme, 'transform, background-color, border-color, opacity');
@@ -325,19 +360,34 @@ function DetailHeroInner({
                   {genres.join(' · ')}
                 </Text>
               ) : null}
+              {technicalBadges.map((badge) => (
+                <MicroPill
+                  key={badge.key}
+                  label={badge.label}
+                  testID={`detail-tech-badge-${badge.key}`}
+                />
+              ))}
             </View>
 
-            <Text
-              testID="detail-synopsis"
-              numberOfLines={4}
-              style={[
-                theme.typography.body,
-                styles.synopsis,
-                { color: theme.colors.textSecondary, marginTop: theme.spacing.sm },
-              ]}
-            >
-              {synopsis}
-            </Text>
+            <DetailSynopsisBlock
+              synopsis={synopsis}
+              canExpand={canExpandSynopsis}
+              expanded={synopsisExpanded}
+              isTv={isTv}
+              focused={synopsisFocused}
+              {...(onToggleSynopsis !== undefined ? { onToggle: onToggleSynopsis } : {})}
+            />
+
+            {onCycleAudio && onCycleSubtitles ? (
+              <DetailPrePlayControls
+                audioLang={audioLang}
+                subtitleLang={subtitleLang}
+                onCycleAudio={onCycleAudio}
+                onCycleSubtitles={onCycleSubtitles}
+                isTv={isTv}
+                focusedControl={prePlayFocused}
+              />
+            ) : null}
           </View>
         </View>
       </View>
@@ -378,5 +428,4 @@ const styles = StyleSheet.create({
   metaCol: { minWidth: 0 },
   metaColFlex: { flex: 1 },
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
-  synopsis: { maxWidth: 640 },
 });

@@ -315,4 +315,27 @@ describe('desktop CatalogService', () => {
 
     expect(seenQueries).toEqual(['foo bar', 'a'.repeat(256)]);
   });
+
+  it('forwards ListItemsOptions on items and allSourcesItems (#125)', async () => {
+    const itemsCalls: unknown[][] = [];
+    const allCalls: unknown[][] = [];
+    const { bridge } = makeFakeBridge({
+      items: async (...args) => {
+        itemsCalls.push(args);
+        return [];
+      },
+      allSourcesItems: async (...args) => {
+        allCalls.push(args);
+        return [];
+      },
+    });
+    const service = createDesktopCatalogFromBridge(bridge);
+    const opts = { sortBy: 'alpha' as const, excludeWatched: true };
+
+    await service.items('src-1|movie|10', 0, 18, opts);
+    await service.allSourcesItems?.('movie', 0, 12, ['src-1'], opts);
+
+    expect(itemsCalls).toEqual([['src-1|movie|10', 0, 18, opts]]);
+    expect(allCalls).toEqual([['movie', 0, 12, ['src-1'], opts]]);
+  });
 });

@@ -7,6 +7,16 @@ export interface DetailCastMember {
   readonly avatarUri?: string | null;
 }
 
+/** Optional typed technical media badges shown on `DetailHero` (`#398`). */
+export interface DetailTechnicalMeta {
+  readonly resolution?: string;
+  readonly hdr?: string;
+  readonly codec?: string;
+  readonly audioChannels?: string;
+  readonly container?: string;
+  readonly durationMin?: number;
+}
+
 /**
  * Navigation target opening `DetailScreen` for a movie or series from Home, Catalog rails,
  * Category grids, or *More Like This*. Carries optional metadata fields so future enrichment
@@ -28,6 +38,8 @@ export interface DetailTarget {
   readonly overview?: string | null;
   readonly genres?: readonly string[];
   readonly cast?: readonly DetailCastMember[];
+  readonly director?: string | null;
+  readonly technicalMeta?: DetailTechnicalMeta;
 }
 
 /** Converts a movie or series {@link ItemRow} into a {@link DetailTarget}. */

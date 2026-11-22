@@ -1,4 +1,4 @@
-import type { CatalogService, ItemRow } from '@elv/data';
+import type { CatalogService, ItemRow, ItemSortOrder } from '@elv/data';
 import { TvScrollEdgeFade, useI18n, useTheme } from '@elv/ui-kit';
 import {
   type MutableRefObject,
@@ -51,11 +51,15 @@ export interface CategoryGridViewProps {
   readonly userStateVersion: number;
   readonly layout: CatalogLayoutMetrics;
   readonly backFocused: boolean;
+  readonly sortFocused?: boolean;
   readonly focusedGridPos: GridFocusPosition | null;
   readonly onBack: () => void;
   readonly onOpenDetail: (target: DetailTarget) => void;
   readonly onGridMetaChange?: (meta: CategoryGridMeta) => void;
   readonly gridAccessRef?: MutableRefObject<CategoryGridAccess>;
+  /** Optional sort order (`'default'` or `'alpha'` via `sort_title`). */
+  readonly sortBy?: ItemSortOrder;
+  readonly onToggleSort?: () => void;
   /** Optional top padding applied to the virtualized list content container. */
   readonly contentPaddingTop?: number;
   /** Optional top border width on the virtualized list container for scroll math alignment. */
@@ -84,6 +88,7 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
     userStateVersion,
     cols,
     visibleGridRows: layout.visibleGridRows,
+    ...(props.sortBy !== undefined ? { sortBy: props.sortBy } : {}),
   });
 
   const listRef = useRef<InstanceType<typeof VirtualizedList>>(null);
@@ -298,7 +303,10 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
         countLabel={countLabel}
         layout={layout}
         backFocused={props.backFocused}
+        {...(props.sortFocused !== undefined ? { sortFocused: props.sortFocused } : {})}
         onBack={props.onBack}
+        {...(props.sortBy !== undefined ? { sortBy: props.sortBy } : {})}
+        {...(props.onToggleSort !== undefined ? { onToggleSort: props.onToggleSort } : {})}
       />
 
       {layout.isTv ? (

@@ -9,6 +9,7 @@ import {
   transportHeaders,
 } from '@elv/domain';
 import { conditionalHeaders, extractValidators, sanitizeValidator } from './http-cache';
+import { parseContentLength } from './import-progress';
 import { checkAbort, Stop } from './import-run';
 import type { ImportDeps } from './import-types';
 import { openClient } from './import-xtream';
@@ -72,6 +73,7 @@ export type GuideOpen =
       slot: string;
       body: AsyncIterable<Uint8Array>;
       validator: HttpCacheValidator | undefined;
+      contentLength: number | undefined;
       failed: ElvError[];
     }
   | {
@@ -157,7 +159,16 @@ export async function openGuide(
         await discard(body);
         return { kind: 'not-modified', slot, validator, failed };
       }
-      if (status >= 200 && status < 300) return { kind: 'body', slot, body, validator, failed };
+      if (status >= 200 && status < 300) {
+        return {
+          kind: 'body',
+          slot,
+          body,
+          validator,
+          contentLength: parseContentLength(headers),
+          failed,
+        };
+      }
       await discard(body);
       lastError = httpStatusError(status);
       if (isTransientGuideError(lastError)) continue;

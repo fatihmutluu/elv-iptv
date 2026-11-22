@@ -23,6 +23,7 @@ export interface UseEpgWindowDataOptions {
   readonly categoryId: string;
   readonly refreshToken: number;
   readonly nowMs: number;
+  readonly spanMs?: number;
   readonly onGuideRefreshed?: () => void;
 }
 
@@ -51,6 +52,7 @@ export function useEpgWindowData({
   categoryId,
   refreshToken,
   nowMs,
+  spanMs = EPG_VISIBLE_SPAN_MS,
   onGuideRefreshed,
 }: UseEpgWindowDataOptions): EpgWindowData {
   const [windowStartMs, setWindowStartMs] = useState(() => floorToEpgSlot(nowMs));
@@ -78,8 +80,8 @@ export function useEpgWindowData({
 
   const windowStartRef = useRef(windowStartMs);
   windowStartRef.current = windowStartMs;
-  const propsRef = useRef({ catalog, nowMs, onGuideRefreshed });
-  propsRef.current = { catalog, nowMs, onGuideRefreshed };
+  const propsRef = useRef({ catalog, nowMs, spanMs, onGuideRefreshed });
+  propsRef.current = { catalog, nowMs, spanMs, onGuideRefreshed };
   const prevDepsRef = useRef({ categoryId, refreshToken });
 
   useEffect(() => {
@@ -131,6 +133,7 @@ export function useEpgWindowData({
     if (!epgWindow || channelKeys.length === 0) return;
 
     const currentStart = windowStartRef.current;
+    const currentSpan = propsRef.current.spanMs;
     const now = propsRef.current.nowMs;
     const seen = new Set<string>();
     const missing: string[] = [];
@@ -138,7 +141,7 @@ export function useEpgWindowData({
     for (const key of channelKeys) {
       if (key.length === 0 || seen.has(key)) continue;
       seen.add(key);
-      const cacheKey = `${key}|${currentStart}`;
+      const cacheKey = `${key}|${currentStart}|${currentSpan}`;
       if (inFlightRef.current.has(cacheKey)) continue;
       const hit = cacheRef.current.get(cacheKey, 0);
       if (hit !== undefined && now - hit.storedAt <= EPG_CACHE_TTL_MS) continue;
@@ -147,11 +150,11 @@ export function useEpgWindowData({
     if (missing.length === 0) return;
 
     const reqGen = genRef.current;
-    const toMs = currentStart + EPG_VISIBLE_SPAN_MS + EPG_FETCH_BUFFER_MS;
+    const toMs = currentStart + currentSpan + EPG_FETCH_BUFFER_MS;
 
     for (let offset = 0; offset < missing.length; offset += MAX_EPG_WINDOW_KEYS) {
       const chunk = missing.slice(offset, offset + MAX_EPG_WINDOW_KEYS);
-      const chunkCacheKeys = chunk.map((k) => `${k}|${currentStart}`);
+      const chunkCacheKeys = chunk.map((k) => `${k}|${currentStart}|${currentSpan}`);
       for (const ck of chunkCacheKeys) inFlightRef.current.add(ck);
 
       void epgWindow(chunk, currentStart, toMs)
@@ -161,7 +164,7 @@ export function useEpgWindowData({
           const storedAt = propsRef.current.nowMs;
           for (const chKey of chunk) {
             cacheRef.current.set(
-              `${chKey}|${currentStart}`,
+              `${chKey}|${currentStart}|${currentSpan}`,
               { rows: rowsByChannel[chKey] ?? EMPTY_PROGRAMMES, storedAt },
               0,
             );
@@ -177,7 +180,8 @@ export function useEpgWindowData({
   const getProgrammes = useCallback((channelKey: string): readonly ProgrammeRow[] => {
     if (channelKey.length === 0) return EMPTY_PROGRAMMES;
     return (
-      cacheRef.current.get(`${channelKey}|${windowStartRef.current}`, 0)?.rows ?? EMPTY_PROGRAMMES
+      cacheRef.current.get(`${channelKey}|${windowStartRef.current}|${propsRef.current.spanMs}`, 0)
+        ?.rows ?? EMPTY_PROGRAMMES
     );
   }, []);
 

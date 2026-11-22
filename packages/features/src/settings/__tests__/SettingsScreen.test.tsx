@@ -360,7 +360,13 @@ describe('SettingsScreen', () => {
     await pressKey(KEYCODE_DPAD_LEFT);
     await pressKey(KEYCODE_DPAD_LEFT);
 
-    // Down twice selects 'licenses' -> Right hands focus to embedded licenses slot
+    // Down x3 selects 'sources', Down again selects 'licenses' -> Right hands focus to embedded licenses slot
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(screen.getByTestId('settings-tab-playback').props.accessibilityState.selected).toBe(
+      true,
+    );
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(screen.getByTestId('settings-tab-liveTv').props.accessibilityState.selected).toBe(true);
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(screen.getByTestId('settings-tab-sources').props.accessibilityState.selected).toBe(true);
     await pressKey(KEYCODE_DPAD_DOWN);
@@ -482,6 +488,10 @@ describe('SettingsScreen', () => {
       'settings-font-100',
       'settings-font-110',
       'settings-font-120',
+      'settings-artwork-cache-64',
+      'settings-artwork-cache-128',
+      'settings-artwork-cache-256',
+      'settings-artwork-cache-clear',
       'settings-reset-preferences',
     ]) {
       expect(screen.getByTestId(id).props.focusable).toBe(false);
@@ -496,8 +506,11 @@ describe('SettingsScreen', () => {
     await fireEvent(screen.getByTestId('settings-toggle-reduce-motion'), 'layout', {
       nativeEvent: { layout: { x: 0, y: 110, width: 600, height: 48 } },
     });
+    await fireEvent(screen.getByTestId('settings-section-artwork-cache'), 'layout', {
+      nativeEvent: { layout: { x: 0, y: 550, width: 640, height: 120 } },
+    });
     await fireEvent(screen.getByTestId('settings-section-reset'), 'layout', {
-      nativeEvent: { layout: { x: 0, y: 560, width: 640, height: 52 } },
+      nativeEvent: { layout: { x: 0, y: 700, width: 640, height: 52 } },
     });
 
     // Right enters Appearance row 0 (Language) -> scrolls to y: 0
@@ -514,12 +527,20 @@ describe('SettingsScreen', () => {
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 458, animated: true });
 
+    // Down -> Artwork cache limit row -> scrolls to artworkCache section
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 538, animated: true });
+
+    // Down -> Artwork cache clear row -> stays on artworkCache section
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 538, animated: true });
+
     // Down -> Reset row -> scrolls to reset section
     await pressKey(KEYCODE_DPAD_DOWN);
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 548, animated: true });
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 688, animated: true });
 
-    // Up x5 -> back to Language row -> resets scroll to y: 0
-    for (let i = 0; i < 5; i += 1) {
+    // Up x7 -> back to Language row -> resets scroll to y: 0
+    for (let i = 0; i < 7; i += 1) {
       await pressKey(KEYCODE_DPAD_UP);
     }
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 0, animated: true });

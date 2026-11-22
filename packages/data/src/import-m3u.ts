@@ -24,7 +24,14 @@ import {
   sanitizeValidator,
   withPlaylistValidator,
 } from './http-cache';
-import { checkAbort, performRun, type RunCtx, Stop, unwrap } from './import-run';
+import {
+  createStreamProgressMeter,
+  parseContentLength,
+  type StreamProgressMeter,
+  trackBodyBytes,
+  wrapCleanupProgress,
+} from './import-progress';
+import { checkAbort, notify, performRun, type RunCtx, Stop, unwrap } from './import-run';
 import type { ImportDeps, ImportOptions, ImportSummary } from './import-types';
 import {
   createM3uImportState,
@@ -68,6 +75,7 @@ type PlaylistOpen =
       body: AsyncIterable<Uint8Array>;
       validator: HttpCacheValidator | undefined;
       finalUrl: string;
+      contentLength: number | undefined;
     }
   | { kind: 'not-modified'; validator: HttpCacheValidator | undefined };
 
@@ -115,7 +123,13 @@ async function openPlaylist(
     return { kind: 'not-modified', validator };
   }
   if (status >= 200 && status < 300) {
-    return { kind: 'body', body, validator, finalUrl: finalUrl ?? url };
+    return {
+      kind: 'body',
+      body,
+      validator,
+      finalUrl: finalUrl ?? url,
+      contentLength: parseContentLength(headers),
+    };
   }
   await discard(body);
   throw new Stop(httpStatusError(status));
@@ -124,10 +138,17 @@ async function openPlaylist(
 const groupsOf = (entry: M3uEntry): readonly string[] =>
   entry.groups.length === 0 ? [UNGROUPED] : entry.groups;
 
+interface M3uStreamTracker {
+  readonly meter: StreamProgressMeter;
+  readonly contentLength: number | undefined;
+  bytesRead: number;
+}
+
 async function processBatch(
   c: RunCtx,
   st: M3uImportState,
   entries: readonly M3uEntry[],
+  tracker: M3uStreamTracker,
 ): Promise<void> {
   const vod = st.settings.vodPlaylist === true;
   const filterPlaceholders = st.settings.includePlaceholderChannels !== true;
@@ -226,16 +247,29 @@ async function processBatch(
   for (const kind of ['live', 'movie', 'series'] as const) {
     await writePlacements(c.db, c.sourceId, kind, c.runId, links[kind]);
   }
+  const streamDone =
+    tracker.contentLength !== undefined
+      ? tracker.bytesRead
+      : st.written.live + st.written.movies + st.written.series + st.written.episodes;
   for (const phase of ['live', 'movies', 'series', 'episodes'] as const) {
-    if (st.written[phase] > 0) c.progress({ phase, done: st.written[phase] });
+    if (st.written[phase] > 0) {
+      c.progress(
+        tracker.meter.reportStream(phase, st.written[phase], streamDone, tracker.contentLength),
+      );
+    }
   }
   await c.deps.scheduler.yieldNow();
 }
 
-async function write(c: RunCtx, st: M3uImportState, entries: readonly M3uEntry[]): Promise<void> {
+async function write(
+  c: RunCtx,
+  st: M3uImportState,
+  entries: readonly M3uEntry[],
+  tracker: M3uStreamTracker,
+): Promise<void> {
   for (let i = 0; i < entries.length; i += c.batchSize) {
     checkAbort(c);
-    await processBatch(c, st, entries.slice(i, i + c.batchSize));
+    await processBatch(c, st, entries.slice(i, i + c.batchSize), tracker);
   }
 }
 
@@ -244,15 +278,24 @@ async function execute(
   source: SourceRecord,
   playlistUrl: string,
   oldVars: UrlVars,
+  meter: StreamProgressMeter,
 ): Promise<M3uOutcome> {
   const allowConditional = await hasStoredCatalog(c.db, c.sourceId);
   const opened = await openPlaylist(source, playlistUrl, c.deps, c.signal, allowConditional);
   if (opened.kind === 'not-modified') {
     c.unchanged = true;
     c.counts.unchanged = 1;
+    meter.completeStream();
     return { kind: 'not-modified', validator: opened.validator };
   }
-  const scan = scanM3u(opened.body, {
+  const tracker: M3uStreamTracker = { meter, contentLength: opened.contentLength, bytesRead: 0 };
+  const body =
+    opened.contentLength === undefined
+      ? opened.body
+      : trackBodyBytes(opened.body, (n) => {
+          tracker.bytesRead = n;
+        });
+  const scan = scanM3u(body, {
     batchSize: c.batchSize,
     baseUrl: opened.finalUrl,
     ...(c.deps.decompressor === undefined ? {} : { decompressor: c.deps.decompressor }),
@@ -292,17 +335,18 @@ async function execute(
         );
         st = createM3uImportState(source, playlistUrl, sample);
         gate = new M3uEntryGate(st);
-        await write(c, st, gate.admit(buffered));
+        await write(c, st, gate.admit(buffered), tracker);
         buffered.length = 0;
       } else {
-        await write(c, st, gate.admit(batch.entries));
+        await write(c, st, gate.admit(batch.entries), tracker);
       }
     }
   } finally {
     await scan.return(ok(undefined));
   }
   if (st === undefined || gate === undefined) throw new Stop(elvError('network', 'stream-failed'));
-  await write(c, st, gate.release());
+  await write(c, st, gate.release(), tracker);
+  meter.completeStream();
   const staged = finishM3uRun(c, st, oldVars, guideUrls);
   return { kind: 'imported', staged, validator: opened.validator, credentialFingerprint };
 }
@@ -322,12 +366,13 @@ export async function importM3u(
     .catch(() => undefined);
   if (playlistUrl === undefined) return err(elvError('storage', 'secret-missing'));
   const oldVars = await readUrlVars(deps, source.id);
+  const meter = createStreamProgressMeter();
   let outcome: M3uOutcome | undefined;
   let secretsStaged = false;
   let stagedMerged = false;
-  return performRun(source, deps, opts, {
+  return performRun(source, deps, wrapCleanupProgress(opts, meter, notify), {
     execute: async (c) => {
-      outcome = await execute(c, source, playlistUrl, oldVars);
+      outcome = await execute(c, source, playlistUrl, oldVars, meter);
     },
     beforeCommit: async () => {
       if (outcome?.kind !== 'imported') return;

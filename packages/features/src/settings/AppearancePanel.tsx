@@ -1,16 +1,22 @@
-import { DEFAULT_PREFERENCES, type PreferencesPatch, type PreferencesSnapshot } from '@elv/domain';
+import {
+  type ArtworkCacheLimitMbPref,
+  DEFAULT_PREFERENCES,
+  type PreferencesPatch,
+  type PreferencesSnapshot,
+} from '@elv/domain';
 import {
   CtaButton,
+  defaultLoadedArtworkUris,
   FilterChip,
   Surface,
+  TABULAR_NUMS_STYLE,
   THEME_PRESETS,
   type ThemePresetId,
   useI18n,
   useTheme,
   useThemeController,
+  useUiAdapters,
   useViewport,
-  webCursorPointer,
-  webTransition,
 } from '@elv/ui-kit';
 import {
   type ComponentRef,
@@ -20,13 +26,15 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
+  ARTWORK_CACHE_OPTIONS,
   computeAppearanceScrollY,
   FONT_SCALE_OPTIONS,
   LANGUAGE_OPTIONS,
   type SettingsPreferencesController,
 } from './appearance-controls';
+import { SettingsDivider, SettingsToggleRow } from './SettingsRowParts';
 import { ThemePresetGrid } from './ThemePresetGrid';
 import type { AppearanceFocusId } from './useTvSettingsNavigation';
 
@@ -35,34 +43,47 @@ export {
   type SettingsPreferencesController,
 } from './appearance-controls';
 
+const CLEAR_FEEDBACK_MS = 3_000;
+
 /** Props of {@link AppearancePanel}. */
 export interface AppearancePanelProps {
   /** Reactive preferences controller (supplied by `AppShell` via `usePreferences()`). */
   readonly preferences?: SettingsPreferencesController;
   /** Currently focused Appearance control on 10-foot TV D-pad navigation. */
   readonly focusedControlId?: AppearanceFocusId | null;
+  /** Optional external clear handler shared with TV D-pad activation in `SettingsScreen`. */
+  readonly onClearArtworkCache?: () => void;
+  /** Optional controlled cleared-confirmation flag owned by `SettingsScreen`. */
+  readonly artworkCacheCleared?: boolean;
 }
 
 type ScrollViewHandle = ComponentRef<typeof ScrollView>;
 type SectionLayout = { readonly y: number; readonly height: number };
 
 /**
- * Cinema Quietude Appearance & Accessibility settings panel:
+ * Cinema Quietude Appearance, Accessibility & Artwork Cache settings panel:
  * live in-app Language switcher (`#16`), 6 dynamic Theme Presets including WCAG AAA High Contrast
- * (`#325`), Text Size scaling (`90%–120%`, `#62`), Reduce Motion toggle (`#325`), and Reset.
+ * (`#325`), Text Size scaling (`90%–120%`, `#62`), Reduce Motion toggle (`#325`), bounded Artwork
+ * Cache budget & clear (`#405`), and Reset.
  */
 export function AppearancePanel({
   preferences: suppliedPrefs,
   focusedControlId = null,
+  onClearArtworkCache,
+  artworkCacheCleared: controlledCleared,
 }: AppearancePanelProps): ReactElement {
   const theme = useTheme();
   const themeCtrl = useThemeController();
   const i18n = useI18n();
   const viewport = useViewport();
-  const [hoveredToggle, setHoveredToggle] = useState(false);
+  const adapters = useUiAdapters();
+  const [localCleared, setLocalCleared] = useState(false);
 
   const scrollRef = useRef<ScrollViewHandle | null>(null);
-  const layoutsRef = useRef<Partial<Record<'theme' | 'font' | 'reset', SectionLayout>>>({});
+  const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const layoutsRef = useRef<
+    Partial<Record<'theme' | 'font' | 'artworkCache' | 'reset', SectionLayout>>
+  >({});
   const motionOffsetYRef = useRef(0);
 
   const isTv = viewport.formFactor === 'tv';
@@ -73,6 +94,12 @@ export function AppearancePanel({
     fontScale: theme.fontScale,
     reduceMotion: theme.reduceMotion,
   };
+
+  useEffect(() => {
+    return () => {
+      if (clearTimerRef.current !== null) clearTimeout(clearTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isTv || !focusedControlId) return;
@@ -102,6 +129,32 @@ export function AppearancePanel({
     [i18n, suppliedPrefs, themeCtrl],
   );
 
+  const handleSelectArtworkCacheLimit = useCallback(
+    (mb: ArtworkCacheLimitMbPref) => {
+      applyPatch({ artworkCacheLimitMb: mb });
+      const setLimitBytes = adapters.artworkCache?.setLimitBytes;
+      if (setLimitBytes !== undefined) {
+        void Promise.resolve(setLimitBytes(mb * 1024 * 1024)).catch(() => undefined);
+      }
+    },
+    [adapters.artworkCache, applyPatch],
+  );
+
+  const handleClearArtworkCache = useCallback(() => {
+    if (onClearArtworkCache) {
+      onClearArtworkCache();
+      return;
+    }
+    defaultLoadedArtworkUris.clear();
+    void Promise.resolve(adapters.artworkCache?.clear()).catch(() => undefined);
+    setLocalCleared(true);
+    if (clearTimerRef.current !== null) clearTimeout(clearTimerRef.current);
+    clearTimerRef.current = setTimeout(() => {
+      clearTimerRef.current = null;
+      setLocalCleared(false);
+    }, CLEAR_FEEDBACK_MS);
+  }, [adapters.artworkCache, onClearArtworkCache]);
+
   const handleReset = useCallback(() => {
     if (suppliedPrefs) {
       void suppliedPrefs.resetPreferences();
@@ -112,9 +165,7 @@ export function AppearancePanel({
     themeCtrl.setReduceMotion(false);
   }, [suppliedPrefs, themeCtrl]);
 
-  const cardTransition = webTransition(theme, 'transform, background-color, border-color');
-  const cursorPointer = webCursorPointer();
-  const toggleFocused = focusedControlId === 'toggle-reduce-motion';
+  const showClearedMessage = controlledCleared ?? localCleared;
 
   return (
     <ScrollView
@@ -216,75 +267,83 @@ export function AppearancePanel({
           </View>
         </View>
 
-        <View style={[styles.divider, { backgroundColor: theme.colors.surfaceBorder }]} />
+        <SettingsDivider />
 
-        <Pressable
+        <SettingsToggleRow
           testID="settings-toggle-reduce-motion"
-          accessibilityRole="switch"
-          accessibilityLabel={i18n.t('settings.reduceMotion.label')}
-          accessibilityState={{ checked: activePrefs.reduceMotion }}
-          aria-checked={activePrefs.reduceMotion}
-          {...(isTv ? { focusable: false } : {})}
-          onLayout={(e) => {
-            motionOffsetYRef.current = e.nativeEvent.layout.y;
+          title={i18n.t('settings.reduceMotion.label')}
+          description={i18n.t('settings.reduceMotion.description')}
+          checked={activePrefs.reduceMotion}
+          focused={focusedControlId === 'toggle-reduce-motion'}
+          isTv={isTv}
+          onLayoutY={(y) => {
+            motionOffsetYRef.current = y;
           }}
-          onPress={() => applyPatch({ reduceMotion: !activePrefs.reduceMotion })}
-          onHoverIn={() => setHoveredToggle(true)}
-          onHoverOut={() => setHoveredToggle(false)}
-          style={[
-            styles.toggleRow,
-            cardTransition,
-            cursorPointer,
-            {
-              borderRadius: theme.radius.card,
-              backgroundColor: toggleFocused
-                ? theme.colors.focusFill
-                : hoveredToggle
-                  ? theme.colors.subtleHighlight
-                  : 'transparent',
-              borderWidth: toggleFocused ? theme.focus.ringWidth : 1,
-              borderColor: toggleFocused ? theme.colors.focusRingColor : 'transparent',
-            },
-          ]}
-        >
-          <View style={styles.rowText}>
-            <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
-              {i18n.t('settings.reduceMotion.label')}
-            </Text>
-            <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
-              {i18n.t('settings.reduceMotion.description')}
-            </Text>
-          </View>
+          onToggle={() => applyPatch({ reduceMotion: !activePrefs.reduceMotion })}
+        />
+      </Surface>
 
-          <View
-            style={[
-              styles.switchTrack,
-              cardTransition,
-              {
-                borderRadius: theme.radius.pill,
-                backgroundColor: activePrefs.reduceMotion
-                  ? theme.colors.accent
-                  : theme.colors.bgCard,
-                borderColor: activePrefs.reduceMotion
-                  ? theme.colors.accent
-                  : theme.colors.chipBorder,
-              },
-            ]}
-          >
-            <View
+      <Surface
+        testID="settings-section-artwork-cache"
+        tone="surface"
+        bordered
+        rounded="modal"
+        style={styles.sectionCard}
+        onLayout={(e) => {
+          layoutsRef.current.artworkCache = {
+            y: e.nativeEvent.layout.y,
+            height: e.nativeEvent.layout.height,
+          };
+        }}
+      >
+        <View style={styles.rowHeader}>
+          <View style={styles.rowText}>
+            <Text
               style={[
-                styles.switchThumb,
-                {
-                  borderRadius: theme.radius.pill,
-                  backgroundColor: activePrefs.reduceMotion
-                    ? theme.colors.accentContrast
-                    : theme.colors.textPrimary,
-                  alignSelf: activePrefs.reduceMotion ? 'flex-end' : 'flex-start',
-                },
+                theme.typography.title,
+                TABULAR_NUMS_STYLE,
+                { color: theme.colors.textPrimary },
               ]}
-            />
+            >
+              {i18n.t('settings.artworkCache')}
+            </Text>
           </View>
-        </Pressable>
+          <View style={[styles.chipRow, { gap: theme.spacing.xs }]}>
+            {ARTWORK_CACHE_OPTIONS.map((opt) => (
+              <FilterChip
+                key={opt.testID}
+                testID={opt.testID}
+                label={i18n.t('settings.artworkCacheLimitMb', { mb: opt.mb })}
+                selected={activePrefs.artworkCacheLimitMb === opt.mb}
+                focused={focusedControlId === opt.focusId}
+                focusable={!isTv}
+                onPress={() => handleSelectArtworkCacheLimit(opt.mb)}
+              />
+            ))}
+          </View>
+        </View>
+
+        <SettingsDivider />
+
+        <View style={styles.cacheActionRow}>
+          <CtaButton
+            testID="settings-artwork-cache-clear"
+            variant="secondary"
+            label={i18n.t('settings.artworkCacheClear')}
+            focused={focusedControlId === 'artwork-cache-clear'}
+            focusable={!isTv}
+            onPress={handleClearArtworkCache}
+          />
+          {showClearedMessage ? (
+            <Text
+              testID="settings-artwork-cache-cleared"
+              accessibilityLiveRegion="polite"
+              style={[theme.typography.caption, { color: theme.colors.successColor }]}
+            >
+              {i18n.t('settings.artworkCacheCleared')}
+            </Text>
+          ) : null}
+        </View>
       </Surface>
 
       <View
@@ -324,18 +383,6 @@ const styles = StyleSheet.create({
   },
   rowText: { flex: 1, minWidth: 200, gap: 2 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
-  divider: { height: 1, width: '100%' },
-  toggleRow: {
-    minHeight: 48,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    marginHorizontal: -8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 14,
-  },
-  switchTrack: { width: 38, height: 22, borderWidth: 1, padding: 2, justifyContent: 'center' },
-  switchThumb: { width: 16, height: 16 },
+  cacheActionRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12 },
   footerRow: { flexDirection: 'row', alignItems: 'center', paddingTop: 4 },
 });

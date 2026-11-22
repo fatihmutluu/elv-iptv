@@ -82,6 +82,8 @@ export interface ScrubControllerDeps {
   readonly readPosition: () => ScrubPosition | undefined;
   readonly seek: (positionMs: number) => void;
   readonly onPreviewChange: (previewPositionMs: number | undefined) => void;
+  /** Optional single-press seek step in ms (defaults to {@link STEP_SEEK_MS}). */
+  readonly stepSeekMs?: number | (() => number);
 }
 
 /** VOD preview-seek state machine: steps move a preview, and one seek commits it. */
@@ -166,9 +168,15 @@ export function shouldCancelScrubOnStatus(
 }
 
 /** Step size for a press, or for the `repeatCount`-th held repeat (1-based) since the last press. */
-export function scrubStepMs(kind: 'press' | 'repeat', repeatCount: number): number {
-  if (kind === 'press') return STEP_SEEK_MS;
-  return repeatCount > SUSTAINED_AFTER_REPEATS ? SUSTAINED_STEP_MS : HOLD_STEP_MS;
+export function scrubStepMs(
+  kind: 'press' | 'repeat',
+  repeatCount: number,
+  stepSeekMs = STEP_SEEK_MS,
+): number {
+  if (kind === 'press') return stepSeekMs;
+  return repeatCount > SUSTAINED_AFTER_REPEATS
+    ? SUSTAINED_STEP_MS
+    : Math.max(HOLD_STEP_MS, stepSeekMs);
 }
 
 /** Clamps a millisecond seek target to `[0, durationMs]` when a positive duration is known. */
@@ -216,7 +224,14 @@ export function createScrubController(deps: ScrubControllerDeps): ScrubControlle
         repeatCount = 0;
       }
       repeatCount = kind === 'press' ? 0 : repeatCount + 1;
-      preview = clampSeekPosition(base + direction * scrubStepMs(kind, repeatCount), durationMs);
+      const stepMs =
+        typeof deps.stepSeekMs === 'function'
+          ? deps.stepSeekMs()
+          : (deps.stepSeekMs ?? STEP_SEEK_MS);
+      preview = clampSeekPosition(
+        base + direction * scrubStepMs(kind, repeatCount, stepMs),
+        durationMs,
+      );
       clearSettle();
       settle = deps.timers.setTimeout(commit, SCRUB_SETTLE_MS);
       deps.onPreviewChange(preview);

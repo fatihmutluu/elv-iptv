@@ -1,6 +1,6 @@
 import type { SqlDriver, SqlValue } from '@elv/domain';
 import { hashLiveRow, hashMovieRow, hashSeriesRow } from './content-hash';
-import { foldText } from './fold';
+import { foldText, sortTitleKey } from './fold';
 
 /** A playlist entry ready to stage: `key`, `legacyKey`, `template`, `headersJson` and `backupUrlsJson` are credential-free. */
 export interface M3uRow {
@@ -21,24 +21,24 @@ export interface M3uLiveRow extends M3uRow {
   epgShiftMs?: number | null;
 }
 
-const LIVE_SQL = `INSERT INTO live_next (source_id, key, legacy_key, num, name, name_fold, logo, guide_id, catchup_days, url_template, headers_json, backup_urls_json, epg_shift_ms, run_id, content_hash)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+const LIVE_SQL = `INSERT INTO live_next (source_id, key, legacy_key, num, name, name_fold, sort_title, logo, guide_id, catchup_days, url_template, headers_json, backup_urls_json, epg_shift_ms, run_id, content_hash)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(source_id, key) DO UPDATE SET legacy_key = excluded.legacy_key, num = excluded.num, name = excluded.name,
-    name_fold = excluded.name_fold, logo = excluded.logo, guide_id = excluded.guide_id,
+    name_fold = excluded.name_fold, sort_title = excluded.sort_title, logo = excluded.logo, guide_id = excluded.guide_id,
     catchup_days = excluded.catchup_days, url_template = excluded.url_template, headers_json = excluded.headers_json,
     backup_urls_json = excluded.backup_urls_json, epg_shift_ms = excluded.epg_shift_ms, run_id = excluded.run_id,
     content_hash = excluded.content_hash`;
 
-const MOVIE_SQL = `INSERT INTO movies_next (source_id, key, legacy_key, name, name_fold, logo, url_template, headers_json, backup_urls_json, run_id, content_hash)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+const MOVIE_SQL = `INSERT INTO movies_next (source_id, key, legacy_key, name, name_fold, sort_title, logo, url_template, headers_json, backup_urls_json, run_id, content_hash)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(source_id, key) DO UPDATE SET legacy_key = excluded.legacy_key, name = excluded.name,
-    name_fold = excluded.name_fold, logo = excluded.logo, url_template = excluded.url_template,
+    name_fold = excluded.name_fold, sort_title = excluded.sort_title, logo = excluded.logo, url_template = excluded.url_template,
     headers_json = excluded.headers_json, backup_urls_json = excluded.backup_urls_json, run_id = excluded.run_id,
     content_hash = excluded.content_hash`;
 
-const SERIES_SQL = `INSERT INTO series_next (source_id, key, name, name_fold, run_id, content_hash) VALUES (?, ?, ?, ?, ?, ?)
+const SERIES_SQL = `INSERT INTO series_next (source_id, key, name, name_fold, sort_title, run_id, content_hash) VALUES (?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(source_id, key) DO UPDATE SET name = excluded.name, name_fold = excluded.name_fold,
-    run_id = excluded.run_id, content_hash = excluded.content_hash`;
+    sort_title = excluded.sort_title, run_id = excluded.run_id, content_hash = excluded.content_hash`;
 
 const EPISODE_SQL = `INSERT INTO episodes_next (source_id, key, legacy_key, series_key, title, url_template, headers_json, backup_urls_json, run_id)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -59,6 +59,7 @@ export async function writeM3uLive(
     LIVE_SQL,
     rows.map((r) => {
       const nameFold = foldText(r.name);
+      const sortTitle = sortTitleKey(r.name);
       const contentHash = hashLiveRow({
         num: r.num,
         name: r.name,
@@ -78,6 +79,7 @@ export async function writeM3uLive(
         orNull(r.num),
         r.name,
         nameFold,
+        sortTitle,
         orNull(r.logo),
         orNull(r.guideId),
         orNull(r.catchupDays),
@@ -103,6 +105,7 @@ export async function writeM3uMovies(
     MOVIE_SQL,
     rows.map((r) => {
       const nameFold = foldText(r.name);
+      const sortTitle = sortTitleKey(r.name);
       const contentHash = hashMovieRow({
         name: r.name,
         nameFold,
@@ -117,6 +120,7 @@ export async function writeM3uMovies(
         orNull(r.legacyKey),
         r.name,
         nameFold,
+        sortTitle,
         orNull(r.logo),
         r.template,
         orNull(r.headersJson),
@@ -139,8 +143,9 @@ export async function writeM3uSeries(
     SERIES_SQL,
     rows.map((r) => {
       const nameFold = foldText(r.name);
+      const sortTitle = sortTitleKey(r.name);
       const contentHash = hashSeriesRow({ name: r.name, nameFold });
-      return [sourceId, r.key, r.name, nameFold, runId, contentHash];
+      return [sourceId, r.key, r.name, nameFold, sortTitle, runId, contentHash];
     }),
   );
 }

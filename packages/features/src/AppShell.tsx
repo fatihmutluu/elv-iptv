@@ -1,6 +1,6 @@
 import type { CatalogService, SearchScope } from '@elv/data';
 import type { ConnectionTracker } from '@elv/playback';
-import { TvFocusAnchor, useFormFactor, useI18n } from '@elv/ui-kit';
+import { TvFocusAnchor, useFormFactor, useI18n, useUiAdapters } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import {
@@ -40,6 +40,7 @@ import {
   useCatalogPrewarm,
   useConnectionLimitGuard,
   useDocumentVisible,
+  useGuideAutoRefresh,
   useImportHealth,
   usePreferences,
   useShellFlush,
@@ -70,13 +71,40 @@ export function AppShell(props: AppShellProps): ReactElement {
   const i18n = useI18n();
   const isTv = useFormFactor() === 'tv';
   const preferences = usePreferences();
+  const uiAdapters = useUiAdapters();
+  const artworkCacheLimitMb = preferences.preferences.artworkCacheLimitMb;
+  useEffect(() => {
+    const setLimitBytes = uiAdapters.artworkCache?.setLimitBytes;
+    if (setLimitBytes === undefined) return;
+    void Promise.resolve(setLimitBytes(artworkCacheLimitMb * 1024 * 1024)).catch(() => undefined);
+  }, [artworkCacheLimitMb, uiAdapters.artworkCache]);
   const [activeTab, setActiveTab] = useState<AppTab>('settings');
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('sources');
   const [topNavFocused, setTopNavFocused] = useState(false);
   const [heroScrolled, setHeroScrolled] = useState(false);
   const [userPickedTab, setUserPickedTab] = useState(false);
   const [userStateVersion, setUserStateVersion] = useState(0);
-  const [liveMemory, setLiveMemory] = useState<LiveTabMemory>(EMPTY_LIVE_MEMORY);
+  const defaultLiveMode = preferences.preferences.defaultLiveMode;
+  const userPickedLiveModeRef = useRef(false);
+  const prevDefaultLiveModeRef = useRef(defaultLiveMode);
+  const defaultLiveModeRef = useRef(defaultLiveMode);
+  defaultLiveModeRef.current = defaultLiveMode;
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+  const [liveMemory, setLiveMemory] = useState<LiveTabMemory>(() => ({
+    ...EMPTY_LIVE_MEMORY,
+    mode: defaultLiveMode,
+  }));
+  useEffect(() => {
+    if (prevDefaultLiveModeRef.current === defaultLiveMode) return;
+    prevDefaultLiveModeRef.current = defaultLiveMode;
+    if (!userPickedLiveModeRef.current || activeTabRef.current !== 'live') {
+      userPickedLiveModeRef.current = false;
+      setLiveMemory((prev) =>
+        prev.mode === defaultLiveMode ? prev : { ...prev, mode: defaultLiveMode },
+      );
+    }
+  }, [defaultLiveMode]);
   const [catalogMemoryByTab, setCatalogMemoryByTab] = useState(INITIAL_CATALOG_MEMORY);
   const [detailStack, setDetailStack] = useState<readonly DetailTarget[]>([]);
   const [recentSearches, setRecentSearches] = useState<readonly string[]>([]);
@@ -177,6 +205,16 @@ export function AppShell(props: AppShellProps): ReactElement {
     uiCache,
     activeTab,
   });
+  const handleGuideRefreshed = useCallback(() => {
+    void shell.syncSourcesAndBump();
+  }, [shell.syncSourcesAndBump]);
+  useGuideAutoRefresh({
+    catalog: observedCatalog,
+    sources,
+    guideRefreshHours: preferences.preferences.guideRefreshHours,
+    enabled: documentVisible && appForeground && playTarget === null,
+    onGuideRefreshed: handleGuideRefreshed,
+  });
   const selectTab = useCallback((tab: AppTab, focusContent = true) => {
     userPickedTabRef.current = true;
     setUserPickedTab(true);
@@ -209,6 +247,16 @@ export function AppShell(props: AppShellProps): ReactElement {
     setHeroScrolled(false);
     setUserStateVersion((v) => v + 1);
   }, []);
+  const handleSearchPerson = useCallback(
+    (personName: string) => {
+      const trimmed = personName.trim();
+      if (trimmed.length === 0) return;
+      setSearchQuery(trimmed);
+      setSearchScope('all');
+      selectTab('search', true);
+    },
+    [selectTab],
+  );
   const activeDetail = detailStack[detailStack.length - 1] ?? null;
   // biome-ignore lint/correctness/useExhaustiveDependencies: locale invalidates translated labels on live language switch
   const { destinations, utilities } = useMemo(
@@ -239,6 +287,14 @@ export function AppShell(props: AppShellProps): ReactElement {
       }),
     [activeDetail, activeTab, handleExitNavFocus, popDetail, selectTab],
   );
+  const handleLiveMemoryChange = useCallback((next: LiveTabMemory) => {
+    setLiveMemory((prev) => {
+      if (next.mode !== prev.mode) {
+        userPickedLiveModeRef.current = true;
+      }
+      return next;
+    });
+  }, []);
   const handleMovieMemoryChange = useCallback(
     (movie: CatalogTabMemory) => setCatalogMemoryByTab((p) => ({ ...p, movie })),
     [],
@@ -256,7 +312,8 @@ export function AppShell(props: AppShellProps): ReactElement {
           uiCache.clear();
           focusMemory.clear();
           shell.bumpCatalogRevision();
-          setLiveMemory(EMPTY_LIVE_MEMORY);
+          userPickedLiveModeRef.current = false;
+          setLiveMemory({ ...EMPTY_LIVE_MEMORY, mode: defaultLiveModeRef.current });
           setCatalogMemoryByTab(INITIAL_CATALOG_MEMORY);
           setDetailStack([]);
           clearSearchSession();
@@ -323,6 +380,11 @@ export function AppShell(props: AppShellProps): ReactElement {
                 reduceMotion={preferences.preferences.reduceMotion}
                 bufferPreset={preferences.preferences.bufferPreset}
                 useTextureView={preferences.preferences.useTextureView}
+                seekStepSec={preferences.preferences.seekStepSec}
+                defaultResizeMode={preferences.preferences.defaultResizeMode}
+                preferredAudioLang={preferences.preferences.preferredAudioLang}
+                preferredSubtitleLang={preferences.preferences.preferredSubtitleLang}
+                subtitleMode={preferences.preferences.subtitleMode}
                 {...(appLifecycle !== undefined ? { appLifecycle } : {})}
                 onTargetChange={onPlayerTargetChange}
                 onExit={onPlayerExit}
@@ -367,6 +429,9 @@ export function AppShell(props: AppShellProps): ReactElement {
                     key={activeDetail.itemKey}
                     target={activeDetail}
                     userStateVersion={userStateVersion}
+                    preferredAudioLang={preferences.preferences.preferredAudioLang}
+                    preferredSubtitleLang={preferences.preferences.preferredSubtitleLang}
+                    onSearchPerson={handleSearchPerson}
                     onBack={popDetail}
                     onPlay={handlePlay}
                     onOpenDetail={openDetail}
@@ -435,9 +500,17 @@ export function AppShell(props: AppShellProps): ReactElement {
                     sources={sources}
                     userStateVersion={userStateVersion}
                     memory={liveMemory}
-                    onMemoryChange={setLiveMemory}
+                    onMemoryChange={handleLiveMemoryChange}
                     videoHost={videoHost}
                     playbackGuard={playbackGuard}
+                    defaultLiveMode={preferences.preferences.defaultLiveMode}
+                    epgTimeSpanHours={preferences.preferences.epgTimeSpanHours}
+                    epgGenreTints={preferences.preferences.epgGenreTints}
+                    epgShowClock={preferences.preferences.epgShowClock}
+                    logoBackdropMode={preferences.preferences.logoBackdropMode}
+                    showSourceBadges={preferences.preferences.showSourceBadges}
+                    liveOkTwoStepPreview={preferences.preferences.liveOkTwoStepPreview}
+                    cleanChannelTitles={preferences.preferences.cleanChannelTitles}
                     onPlay={handlePlay}
                     onOpenSources={openSources}
                     {...stageProps}

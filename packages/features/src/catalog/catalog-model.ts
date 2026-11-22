@@ -1,4 +1,4 @@
-import { MIN_RESUME_POSITION_MS, type WatchProgressRow } from '@elv/data';
+import { type ItemSortOrder, MIN_RESUME_POSITION_MS, type WatchProgressRow } from '@elv/data';
 import type { DetailTarget, PagedListSource } from '../shared';
 
 /** Number of category rails loaded initially in Movies & Series Discovery Mode. */
@@ -27,6 +27,7 @@ export interface CatalogTabMemory {
   readonly selectedCategoryId: string | null;
   readonly visibleCategoryCount: number;
   readonly gridScrollRow?: number;
+  readonly sortBy?: ItemSortOrder;
 }
 
 /** Default clean {@link CatalogTabMemory} snapshot for initial tab entry. */
@@ -66,6 +67,7 @@ export interface BuildCatalogNavRowsInput {
   readonly railEntries?: readonly CatalogRailNavEntry[];
   readonly hasLoadMore?: boolean;
   readonly isGridMode?: boolean;
+  readonly gridHeaderCount?: number;
 }
 
 /** 2D `(row, col)` coordinate clamped inside a virtualized category grid. */
@@ -197,7 +199,7 @@ export function buildCatalogNavRows(input: BuildCatalogNavRowsInput): CatalogNav
   }
 
   if (input.isGridMode) {
-    rows.push({ id: 'gridBack', count: 1 });
+    rows.push({ id: 'gridBack', count: Math.max(1, input.gridHeaderCount ?? 1) });
     return rows;
   }
 

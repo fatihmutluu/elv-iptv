@@ -414,6 +414,8 @@ describe('App', () => {
 
     await fireEvent.press(screen.getByTestId('nav-tab-live'));
     expect(await screen.findByTestId('live-screen')).toBeOnTheScreen();
+    expect(await screen.findByTestId('live-favorites-empty')).toBeOnTheScreen();
+    await fireEvent.press(screen.getByTestId('live-mode-channels'));
     expect(await screen.findByTestId('live-channels-grid')).toBeOnTheScreen();
     expect(await screen.findByTestId('live-channel-card-0')).toBeOnTheScreen();
 

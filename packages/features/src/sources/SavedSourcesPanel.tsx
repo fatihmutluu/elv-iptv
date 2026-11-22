@@ -24,23 +24,18 @@ function renderSourceStatusText(
   source: SourceRow,
   runtime: SourceRuntimeStatus | undefined,
   i18n: AppI18n,
+  progressPct: number,
 ): string {
   if (runtime?.kind === 'importing') {
-    if (runtime.progress === null) {
-      return i18n.t('sources.status.importing', {
-        phase: i18n.t('sources.phase.categories'),
-        done: 0,
-      });
-    }
-    const phase = i18n.t(phaseMessageId(runtime.progress.phase));
-    if (runtime.progress.total !== undefined) {
-      return i18n.t('sources.status.importingTotal', {
-        phase,
-        done: runtime.progress.done,
-        total: runtime.progress.total,
-      });
-    }
-    return i18n.t('sources.status.importing', { phase, done: runtime.progress.done });
+    const phase =
+      runtime.progress === null
+        ? i18n.t('sources.phase.categories')
+        : i18n.t(phaseMessageId(runtime.progress.phase));
+    return i18n.t('sources.status.importingPercent', {
+      phase,
+      done: runtime.progress?.done ?? 0,
+      percent: progressPct,
+    });
   }
   if (runtime?.kind === 'ready') {
     return i18n.t('sources.status.readyCounts', {
@@ -69,14 +64,24 @@ function resolveStatusPill(
   return { label: i18n.t('sources.status.needsImport'), tone: 'accent' };
 }
 
-function importProgressPercent(runtime: SourceRuntimeStatus | undefined): number {
+/**
+ * Computes live monotonic import progress (`0..100`) preferring `@elv/data`'s `progress.percent`,
+ * falling back to `Math.round((done / total) * 100)`, and finally a smooth monotonic asymptotic
+ * curve from `done` so the bar never stalls at a static percentage (`#65`).
+ */
+export function importProgressPercent(runtime: SourceRuntimeStatus | undefined): number {
   if (runtime?.kind !== 'importing') return 0;
-  const total = runtime.progress?.total;
-  const done = runtime.progress?.done ?? 0;
-  if (total !== undefined && total > 0) {
-    return Math.min(100, Math.max(8, Math.round((done / total) * 100)));
+  const progress = runtime.progress;
+  if (progress === null || progress === undefined) return 4;
+  if (progress.percent !== undefined && Number.isFinite(progress.percent)) {
+    return Math.min(100, Math.max(0, Math.round(progress.percent)));
   }
-  return 45;
+  const done = Math.max(0, Number.isFinite(progress.done) ? progress.done : 0);
+  const total = progress.total;
+  if (total !== undefined && Number.isFinite(total) && total > 0) {
+    return Math.min(100, Math.max(0, Math.round((done / total) * 100)));
+  }
+  return Math.min(95, Math.round(5 + 90 * (1 - 1 / (1 + done / 250))));
 }
 
 /** Saved IPTV sources list panel with status pills, accent progress bar, and error banners. */
@@ -174,11 +179,14 @@ export function SavedSourcesPanel({
                     { color: theme.colors.textSecondary },
                   ]}
                 >
-                  {renderSourceStatusText(source, runtime, i18n)}
+                  {renderSourceStatusText(source, runtime, i18n, progressPct)}
                 </Text>
               </View>
               {isImporting ? (
                 <View
+                  testID={`source-progress-bar-${source.id}`}
+                  accessibilityRole="progressbar"
+                  accessibilityValue={{ min: 0, max: 100, now: progressPct }}
                   style={[
                     sourcesStyles.progressTrack,
                     { backgroundColor: theme.colors.chipBg, borderRadius: theme.radius.pill },
@@ -217,6 +225,18 @@ export function SavedSourcesPanel({
                   >
                     {i18n.t(runtime.failure.messageId)}
                   </Text>
+                  {runtime.failure.httpStatus !== undefined ? (
+                    <Text
+                      testID={`source-http-status-${source.id}`}
+                      style={[
+                        theme.typography.caption,
+                        TABULAR_NUMS_STYLE,
+                        { color: theme.colors.textSecondary },
+                      ]}
+                    >
+                      {i18n.t('source.error.httpStatus', { status: runtime.failure.httpStatus })}
+                    </Text>
+                  ) : null}
                   <Text
                     testID={`source-hint-${source.id}`}
                     style={[theme.typography.caption, { color: theme.colors.textSecondary }]}

@@ -67,6 +67,8 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
 
     await window.getByTestId('nav-tab-live').click();
     await expect(window.getByTestId('live-screen')).toBeVisible();
+    await expect(window.getByTestId('live-favorites-empty')).toBeVisible();
+    await window.getByTestId('live-mode-channels').click();
     await expect(window.getByTestId('live-channels-grid')).toBeVisible();
     const card0 = window.getByTestId('live-channel-card-0');
     const card1 = window.getByTestId('live-channel-card-1');

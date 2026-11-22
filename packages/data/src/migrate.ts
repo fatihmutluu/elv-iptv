@@ -1,12 +1,16 @@
 import { elvError, err, ok, type Result, type SqlDriver } from '@elv/domain';
 import { reapOrphanedRuns } from './runs';
 import { EXPECTED_FTS_TABLES, EXPECTED_TABLE_COLUMNS, MIGRATIONS, OPEN_PRAGMAS } from './schema';
+import { backfillSortTitles, type SortTitleTable } from './schema-v8';
 
 /** Schema version this build writes and understands (`PRAGMA user_version`). */
 export const SCHEMA_VERSION = MIGRATIONS.length;
 
+const SORT_TITLE_SET = new Set<string>(['live', 'movies', 'series']);
+
 async function verifyAndHealSchema(db: SqlDriver): Promise<Result<void>> {
   const repairs: string[] = [];
+  const repairedSortTables: SortTitleTable[] = [];
   for (const [table, expected] of Object.entries(EXPECTED_TABLE_COLUMNS)) {
     const cols = await db.all<{ name: string }>(`PRAGMA table_info(${table})`);
     if (cols.length === 0) {
@@ -16,6 +20,9 @@ async function verifyAndHealSchema(db: SqlDriver): Promise<Result<void>> {
     for (const column of expected) {
       if (!existing.has(column.name)) {
         repairs.push(`ALTER TABLE ${table} ADD COLUMN ${column.name} ${column.alterDefinition}`);
+        if (column.name === 'sort_title' && SORT_TITLE_SET.has(table)) {
+          repairedSortTables.push(table as SortTitleTable);
+        }
       }
     }
   }
@@ -31,6 +38,14 @@ async function verifyAndHealSchema(db: SqlDriver): Promise<Result<void>> {
   if (repairs.length > 0) {
     await db.transaction(async (tx) => {
       for (const sql of repairs) await tx.exec(sql);
+      if (repairedSortTables.length > 0) {
+        for (const table of repairedSortTables) {
+          await tx.exec(
+            `CREATE INDEX IF NOT EXISTS idx_${table}_sort_title ON ${table} (source_id, is_hidden, sort_title, key)`,
+          );
+        }
+        await backfillSortTitles(tx, repairedSortTables);
+      }
     });
   }
   return ok(undefined);
@@ -60,6 +75,7 @@ export async function openCatalog(
       await db.transaction(async (tx) => {
         for (let v = current; v < SCHEMA_VERSION; v++) {
           await tx.exec(MIGRATIONS[v] ?? '');
+          if (v === 7) await backfillSortTitles(tx);
           await tx.exec(`PRAGMA user_version = ${v + 1}`);
         }
       });

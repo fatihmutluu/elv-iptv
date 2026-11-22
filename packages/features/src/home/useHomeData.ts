@@ -138,10 +138,14 @@ export function useHomeData({
             ? catalog.items(firstLive.id, 0, HOME_LIVE_LIMIT).catch(() => [] as ItemRow[])
             : Promise.resolve([] as ItemRow[]),
           firstMovie
-            ? catalog.items(firstMovie.id, 0, HOME_MOVIES_LIMIT).catch(() => [] as ItemRow[])
+            ? catalog
+                .items(firstMovie.id, 0, HOME_MOVIES_LIMIT, { excludeWatched: true })
+                .catch(() => [] as ItemRow[])
             : Promise.resolve([] as ItemRow[]),
           firstSeries
-            ? catalog.items(firstSeries.id, 0, HOME_SERIES_LIMIT).catch(() => [] as ItemRow[])
+            ? catalog
+                .items(firstSeries.id, 0, HOME_SERIES_LIMIT, { excludeWatched: true })
+                .catch(() => [] as ItemRow[])
             : Promise.resolve([] as ItemRow[]),
         ]);
         if (cancelled) return;

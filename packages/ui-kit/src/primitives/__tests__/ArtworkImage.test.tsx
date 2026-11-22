@@ -1,8 +1,9 @@
-import { fireEvent, render, screen } from '@testing-library/react-native';
-import { Platform, View } from 'react-native';
+import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { UiAdaptersProvider } from '../../adapters';
-import { ThemeProvider } from '../../theme';
+import { buildTheme, ThemeProvider } from '../../theme';
 import { ArtworkImage } from '../ArtworkImage';
+import { createLoadedUriCache } from '../artwork-cache';
 import { createDeadHostRegistry } from '../dead-host-registry';
 
 describe('ArtworkImage decode caps & error classification (#202, #311)', () => {
@@ -266,5 +267,414 @@ describe('ArtworkImage decode caps & error classification (#202, #311)', () => {
     expect(fallback.props.accessibilityElementsHidden).toBe(true);
     expect(fallback.props.importantForAccessibility).toBe('no');
     expect(fallback.props.accessibilityLabel).toBeUndefined();
+  });
+});
+
+describe('ArtworkImage ambient placeholder, loaded-URI cache & resolveUri (#405)', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('shows ambient placeholder until onLoad, then reveals image and caches URI for zero-flicker revisits', async () => {
+    jest.replaceProperty(Platform, 'OS', 'web');
+    const registry = createDeadHostRegistry();
+    const loadedUris = createLoadedUriCache();
+    const theme = buildTheme();
+
+    const firstMount = await render(
+      <ThemeProvider>
+        <ArtworkImage
+          uri="https://img.example/cinema-1.jpg"
+          label="Cinema One"
+          deadHosts={registry}
+          loadedUris={loadedUris}
+          testID="poster"
+        />
+      </ThemeProvider>,
+    );
+
+    const placeholder = screen.getByTestId('poster-placeholder', { includeHiddenElements: true });
+    expect(StyleSheet.flatten(placeholder.props.style).backgroundColor).toBe(
+      theme.colors.bgElevated,
+    );
+    expect(placeholder.props.pointerEvents).toBe('none');
+
+    const revealBefore = StyleSheet.flatten(screen.getByTestId('poster-reveal').props.style);
+    expect(revealBefore.opacity).toBe(0);
+    expect((revealBefore as Record<string, unknown>).transitionProperty).toBe('opacity');
+    expect((revealBefore as Record<string, unknown>).transitionDuration).toBe('180ms');
+
+    await fireEvent(screen.getByTestId('poster-img'), 'load');
+
+    expect(loadedUris.has('https://img.example/cinema-1.jpg')).toBe(true);
+    expect(screen.queryByTestId('poster-placeholder', { includeHiddenElements: true })).toBeNull();
+    expect(StyleSheet.flatten(screen.getByTestId('poster-reveal').props.style).opacity).toBe(1);
+    await firstMount.unmount();
+
+    // Revisiting an already-loaded URI must start synchronously at opacity 1 with zero placeholder
+    await render(
+      <ThemeProvider>
+        <ArtworkImage
+          uri="https://img.example/cinema-1.jpg"
+          label="Cinema One"
+          deadHosts={registry}
+          loadedUris={loadedUris}
+          testID="revisit"
+        />
+      </ThemeProvider>,
+    );
+
+    expect(screen.queryByTestId('revisit-placeholder', { includeHiddenElements: true })).toBeNull();
+    expect(StyleSheet.flatten(screen.getByTestId('revisit-reveal').props.style).opacity).toBe(1);
+  });
+
+  it('reveals immediately at opacity 1 without transition when reduceMotion is enabled', async () => {
+    jest.replaceProperty(Platform, 'OS', 'web');
+    const registry = createDeadHostRegistry();
+    const loadedUris = createLoadedUriCache();
+
+    await render(
+      <ThemeProvider reduceMotion>
+        <ArtworkImage
+          uri="https://img.example/still.jpg"
+          label="Reduced Motion"
+          deadHosts={registry}
+          loadedUris={loadedUris}
+          testID="rm"
+        />
+      </ThemeProvider>,
+    );
+
+    const revealStyle = StyleSheet.flatten(screen.getByTestId('rm-reveal').props.style);
+    expect(revealStyle.opacity).toBe(1);
+    expect((revealStyle as Record<string, unknown>).transitionProperty).toBe('none');
+  });
+
+  it('waits for artworkCache.resolveUri before rendering Image (single request, no double-download) and falls back on local error', async () => {
+    jest.replaceProperty(Platform, 'OS', 'android');
+    const registry = createDeadHostRegistry();
+    const loadedUris = createLoadedUriCache();
+    let resolvePending: ((uri: string | null) => void) | undefined;
+    const resolveUri = jest.fn(
+      () =>
+        new Promise<string | null>((resolve) => {
+          resolvePending = resolve;
+        }),
+    );
+
+    await render(
+      <ThemeProvider>
+        <UiAdaptersProvider
+          adapters={{
+            artworkCache: {
+              resolveUri,
+              clear: async () => undefined,
+            },
+          }}
+        >
+          <ArtworkImage
+            uri="https://cdn.example/cached.jpg"
+            label="Cached Art"
+            maxDecodePx={240}
+            deadHosts={registry}
+            loadedUris={loadedUris}
+            testID="cached"
+          />
+        </UiAdaptersProvider>
+      </ThemeProvider>,
+    );
+
+    expect(resolveUri).toHaveBeenCalledTimes(1);
+    expect(resolveUri).toHaveBeenCalledWith('https://cdn.example/cached.jpg', 240);
+    // While resolveUri is in flight, show placeholder and do NOT issue a parallel <Image> network request
+    expect(screen.getByTestId('cached-placeholder', { includeHiddenElements: true })).toBeTruthy();
+    expect(screen.queryByTestId('cached-img')).toBeNull();
+
+    await act(async () => {
+      resolvePending?.('file:///cache/artwork/abc.img');
+    });
+
+    expect(screen.getByTestId('cached-img').props.source.uri).toBe('file:///cache/artwork/abc.img');
+
+    // If the cached local file fails, fall back to the original network URI without poisoning deadHosts
+    await fireEvent(screen.getByTestId('cached-img'), 'error', {
+      nativeEvent: { error: 'ENOENT' },
+    });
+    expect(screen.getByTestId('cached-img').props.source.uri).toBe(
+      'https://cdn.example/cached.jpg',
+    );
+    expect(registry.isDead('https://cdn.example/cached.jpg')).toBe(false);
+  });
+
+  it('falls back cleanly to original URI when resolveUri returns null or rejects', async () => {
+    jest.replaceProperty(Platform, 'OS', 'web');
+    const registry = createDeadHostRegistry();
+    const loadedUris = createLoadedUriCache();
+
+    const nullView = await render(
+      <ThemeProvider>
+        <UiAdaptersProvider
+          adapters={{
+            artworkCache: {
+              resolveUri: jest.fn(async () => null),
+              clear: async () => undefined,
+            },
+          }}
+        >
+          <ArtworkImage
+            uri="https://cdn.example/null-resolve.jpg"
+            label="Null Resolve"
+            deadHosts={registry}
+            loadedUris={loadedUris}
+            testID="null-res"
+          />
+        </UiAdaptersProvider>
+      </ThemeProvider>,
+    );
+    expect(screen.getByTestId('null-res-img').props.source.uri).toBe(
+      'https://cdn.example/null-resolve.jpg',
+    );
+    await nullView.unmount();
+
+    await render(
+      <ThemeProvider>
+        <UiAdaptersProvider
+          adapters={{
+            artworkCache: {
+              resolveUri: jest.fn(async () => {
+                throw new Error('ipc failed');
+              }),
+              clear: async () => undefined,
+            },
+          }}
+        >
+          <ArtworkImage
+            uri="https://cdn.example/reject-resolve.jpg"
+            label="Reject Resolve"
+            deadHosts={registry}
+            loadedUris={loadedUris}
+            testID="reject-res"
+          />
+        </UiAdaptersProvider>
+      </ThemeProvider>,
+    );
+    expect(screen.getByTestId('reject-res-img').props.source.uri).toBe(
+      'https://cdn.example/reject-resolve.jpg',
+    );
+  });
+
+  it('ignores stale onLoad and onError callbacks from recycled slot A after prop switches to URI B', async () => {
+    const registry = createDeadHostRegistry();
+    const loadedUris = createLoadedUriCache();
+    const capturedByUri = new Map<
+      string,
+      { onLoad?: () => void; onError?: (err?: { message?: string }) => void }
+    >();
+
+    const renderImage = jest.fn(
+      (props: {
+        uri: string;
+        onLoad?: () => void;
+        onError?: (err?: { message?: string }) => void;
+      }) => {
+        capturedByUri.set(props.uri, { onLoad: props.onLoad, onError: props.onError });
+        return <View testID="recycled-img" accessibilityLabel={props.uri} />;
+      },
+    );
+
+    const view = await render(
+      <ThemeProvider>
+        <UiAdaptersProvider adapters={{ renderImage }}>
+          <ArtworkImage
+            uri="https://host-a.example/poster-a.jpg"
+            label="Poster A"
+            deadHosts={registry}
+            loadedUris={loadedUris}
+            testID="slot"
+          />
+        </UiAdaptersProvider>
+      </ThemeProvider>,
+    );
+
+    const callbacksA = capturedByUri.get('https://host-a.example/poster-a.jpg');
+    expect(callbacksA?.onLoad).toBeDefined();
+    expect(callbacksA?.onError).toBeDefined();
+
+    // Recycle pooled slot to URI B before A settles
+    await view.rerender(
+      <ThemeProvider>
+        <UiAdaptersProvider adapters={{ renderImage }}>
+          <ArtworkImage
+            uri="https://host-b.example/poster-b.jpg"
+            label="Poster B"
+            deadHosts={registry}
+            loadedUris={loadedUris}
+            testID="slot"
+          />
+        </UiAdaptersProvider>
+      </ThemeProvider>,
+    );
+
+    // Late onLoad from A must NOT mark B loaded or hide B's placeholder
+    await act(async () => {
+      callbacksA?.onLoad?.();
+    });
+    expect(loadedUris.has('https://host-b.example/poster-b.jpg')).toBe(false);
+    expect(loadedUris.has('https://host-a.example/poster-a.jpg')).toBe(false);
+    expect(screen.getByTestId('slot-placeholder', { includeHiddenElements: true })).toBeTruthy();
+
+    // Late onError (DNS failure) from A must NOT mark B failed or blacklist B's host
+    await act(async () => {
+      callbacksA?.onError?.({ message: 'ENOTFOUND' });
+    });
+    expect(registry.isDead('https://host-b.example/other.jpg')).toBe(false);
+    expect(registry.isDead('https://host-a.example/other.jpg')).toBe(false);
+    expect(screen.queryByTestId('slot-fallback')).toBeNull();
+    expect(screen.getByTestId('recycled-img').props.accessibilityLabel).toBe(
+      'https://host-b.example/poster-b.jpg',
+    );
+
+    // Real onLoad from B still works cleanly
+    const callbacksB = capturedByUri.get('https://host-b.example/poster-b.jpg');
+    await act(async () => {
+      callbacksB?.onLoad?.();
+    });
+    expect(loadedUris.has('https://host-b.example/poster-b.jpg')).toBe(true);
+    expect(screen.queryByTestId('slot-placeholder', { includeHiddenElements: true })).toBeNull();
+  });
+
+  it('does not invoke resolveUri for confirmed dead hosts', async () => {
+    const registry = createDeadHostRegistry();
+    registry.recordFailure('https://dead.example/logo.png', { message: 'ENOTFOUND' });
+    const resolveUri = jest.fn(async () => 'file:///cache/never.img');
+
+    await render(
+      <ThemeProvider>
+        <UiAdaptersProvider
+          adapters={{
+            artworkCache: { resolveUri, clear: async () => undefined },
+          }}
+        >
+          <ArtworkImage
+            uri="https://dead.example/logo.png"
+            label="Dead"
+            deadHosts={registry}
+            testID="dead"
+          />
+        </UiAdaptersProvider>
+      </ThemeProvider>,
+    );
+
+    expect(resolveUri).not.toHaveBeenCalled();
+    expect(screen.getByTestId('dead-fallback')).toBeTruthy();
+  });
+});
+
+describe('ArtworkImage channel-logo readability modes (#126)', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('supports plate, invert (web CSS filter vs native plate), and off modes with legacy logoBackdrop compatibility', async () => {
+    const registry = createDeadHostRegistry();
+    const loadedUris = createLoadedUriCache();
+    const defaultTheme = buildTheme();
+    const hcTheme = buildTheme({ preset: 'highContrast' });
+
+    // Web invert applies CSS invert filter on logo wrapper and keeps dark frame
+    jest.replaceProperty(Platform, 'OS', 'web');
+    const webInvert = await render(
+      <ThemeProvider>
+        <ArtworkImage
+          uri="https://img.example/dark-logo.png"
+          label="Dark Logo"
+          resizeMode="contain"
+          logoBackdropMode="invert"
+          deadHosts={registry}
+          loadedUris={loadedUris}
+          testID="web-invert"
+        />
+      </ThemeProvider>,
+    );
+    expect(StyleSheet.flatten(screen.getByTestId('web-invert').props.style).backgroundColor).toBe(
+      defaultTheme.colors.bgCard,
+    );
+    expect(
+      (
+        StyleSheet.flatten(screen.getByTestId('web-invert-reveal').props.style) as Record<
+          string,
+          unknown
+        >
+      ).filter,
+    ).toBe('invert(1) brightness(1.15)');
+    await webInvert.unmount();
+
+    // Native invert applies high-readability light-neutral backing plate instead of CSS filter
+    jest.replaceProperty(Platform, 'OS', 'android');
+    const nativeInvert = await render(
+      <ThemeProvider>
+        <ArtworkImage
+          uri="https://img.example/dark-logo.png"
+          label="Dark Logo"
+          resizeMode="contain"
+          logoBackdropMode="invert"
+          deadHosts={registry}
+          loadedUris={loadedUris}
+          testID="native-invert"
+        />
+      </ThemeProvider>,
+    );
+    const nativeInvertFrame = StyleSheet.flatten(screen.getByTestId('native-invert').props.style);
+    expect(nativeInvertFrame.backgroundColor).toBe(defaultTheme.colors.actionGlassHoverBg);
+    expect(nativeInvertFrame.padding).toBe(defaultTheme.spacing.xxs);
+    expect(
+      (
+        StyleSheet.flatten(screen.getByTestId('native-invert-reveal').props.style) as Record<
+          string,
+          unknown
+        >
+      ).filter,
+    ).toBeUndefined();
+    await nativeInvert.unmount();
+
+    // Plate mode in High Contrast AAA adds subtle border and padding for contain logos
+    const plateHc = await render(
+      <ThemeProvider preset="highContrast">
+        <ArtworkImage
+          uri="https://img.example/ch.png"
+          label="Channel HC"
+          resizeMode="contain"
+          logoBackdrop
+          deadHosts={registry}
+          loadedUris={loadedUris}
+          testID="plate-hc"
+        />
+      </ThemeProvider>,
+    );
+    const plateFrame = StyleSheet.flatten(screen.getByTestId('plate-hc').props.style);
+    expect(plateFrame.backgroundColor).toBe(hcTheme.colors.subtleHighlight);
+    expect(plateFrame.borderWidth).toBe(1);
+    expect(plateFrame.borderColor).toBe(hcTheme.colors.surfaceBorder);
+    expect(plateFrame.padding).toBe(hcTheme.spacing.xxs);
+    await plateHc.unmount();
+
+    // Explicit logoBackdropMode="off" overrides legacy logoBackdrop={true}
+    await render(
+      <ThemeProvider>
+        <ArtworkImage
+          uri="https://img.example/raw.png"
+          label="Raw Logo"
+          resizeMode="contain"
+          logoBackdrop
+          logoBackdropMode="off"
+          deadHosts={registry}
+          loadedUris={loadedUris}
+          testID="off-mode"
+        />
+      </ThemeProvider>,
+    );
+    const offFrame = StyleSheet.flatten(screen.getByTestId('off-mode').props.style);
+    expect(offFrame.backgroundColor).toBe(defaultTheme.colors.bgCard);
+    expect(offFrame.padding).toBeUndefined();
   });
 });

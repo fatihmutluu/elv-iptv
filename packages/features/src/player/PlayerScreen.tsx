@@ -1,5 +1,10 @@
 import type { CatalogService } from '@elv/data';
-import type { BufferPreset } from '@elv/domain';
+import type {
+  BufferPreset,
+  DefaultResizeModePref,
+  SeekStepSecPref,
+  SubtitleModePref,
+} from '@elv/domain';
 import {
   type PlaybackClock,
   type PlaybackService,
@@ -36,6 +41,11 @@ import {
 import { clampVolume } from './player-overlay-model';
 import { TrackPickerModal } from './TrackPickerModal';
 import { buildTouchHoverProps } from './touch-hover-guard';
+import {
+  chooseInitialAudioTrack,
+  chooseInitialSubtitleTrack,
+  resolveEffectiveTrackPrefs,
+} from './track-preferences';
 import { useNextEpisodeResolver } from './useNextEpisodeResolver';
 import { usePlayerControls } from './usePlayerControls';
 import { usePlayerNowNext } from './usePlayerNowNext';
@@ -80,6 +90,16 @@ export interface PlayerScreenProps {
   bufferPreset?: BufferPreset;
   /** Opt-in TextureView fallback for broken Android SurfaceView compositing (`#262`). */
   useTextureView?: boolean;
+  /** Preferred VOD skip interval in seconds (`5 | 10 | 15 | 30`, `#401`). */
+  seekStepSec?: SeekStepSecPref;
+  /** Initial aspect / resize mode (`'fit' | 'fill' | 'stretch'`, `#401`). */
+  defaultResizeMode?: DefaultResizeModePref;
+  /** Preferred ISO 639-1/2 audio track language code (`''` = automatic, `#401`). */
+  preferredAudioLang?: string;
+  /** Preferred ISO 639-1/2 subtitle track language code (`''` = automatic, `#401`). */
+  preferredSubtitleLang?: string;
+  /** Default subtitle activation mode (`'auto' | 'always' | 'off'`, `#401`). */
+  subtitleMode?: SubtitleModePref;
   onTargetChange?: (next: PlayTarget) => void;
   onExit: () => void;
 }
@@ -105,6 +125,11 @@ export function PlayerScreen({
   reduceMotion,
   bufferPreset = 'auto',
   useTextureView = false,
+  seekStepSec = 10,
+  defaultResizeMode = 'fit',
+  preferredAudioLang,
+  preferredSubtitleLang,
+  subtitleMode = 'auto',
   onTargetChange,
   onExit,
 }: PlayerScreenProps): ReactElement {
@@ -199,13 +224,60 @@ export function PlayerScreen({
   const [nextEpisodeVisible, setNextEpisodeVisible] = useState(false);
   const [brightness, setBrightness] = useState(1);
   const [touchScrubDeltaMs, setTouchScrubDeltaMs] = useState<number | undefined>(undefined);
+  const appliedAudioItemRef = useRef<string | null>(null);
+  const appliedSubtitleItemRef = useRef<string | null>(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset per-item transient UI on item change
   useEffect(() => {
     setNextEpisodeDismissed(false);
     setNextEpisodeVisible(false);
     setTouchScrubDeltaMs(undefined);
+    appliedAudioItemRef.current = null;
+    appliedSubtitleItemRef.current = null;
   }, [activeTarget.itemKey]);
+
+  const targetTrackPrefs = activeTarget as PlayTarget & {
+    readonly preferredAudioLang?: string;
+    readonly preferredSubtitleLang?: string;
+  };
+  const effectiveTracks = resolveEffectiveTrackPrefs({
+    globalAudioLang: preferredAudioLang,
+    globalSubtitleLang: preferredSubtitleLang,
+    globalSubtitleMode: subtitleMode,
+    targetAudioLang: targetTrackPrefs.preferredAudioLang,
+    targetSubtitleLang: targetTrackPrefs.preferredSubtitleLang,
+  });
+
+  useEffect(() => {
+    if (activeService === null) return;
+    if (appliedAudioItemRef.current !== activeTarget.itemKey && tracks.audio.length > 0) {
+      appliedAudioItemRef.current = activeTarget.itemKey;
+      const chosenAudio = chooseInitialAudioTrack(tracks.audio, effectiveTracks.audioLang);
+      if (chosenAudio !== undefined && chosenAudio !== tracks.selectedAudioId) {
+        activeService.selectAudioTrack(chosenAudio);
+      }
+    }
+    if (
+      appliedSubtitleItemRef.current !== activeTarget.itemKey &&
+      (tracks.subtitles.length > 0 || tracks.selectedSubtitleId !== null)
+    ) {
+      appliedSubtitleItemRef.current = activeTarget.itemKey;
+      const chosenSubtitle = chooseInitialSubtitleTrack(tracks.subtitles, {
+        preferredLang: effectiveTracks.subtitleLang,
+        subtitleMode: effectiveTracks.subtitleMode,
+      });
+      if (chosenSubtitle !== undefined && chosenSubtitle !== tracks.selectedSubtitleId) {
+        activeService.selectSubtitleTrack(chosenSubtitle);
+      }
+    }
+  }, [
+    activeService,
+    activeTarget.itemKey,
+    effectiveTracks.audioLang,
+    effectiveTracks.subtitleLang,
+    effectiveTracks.subtitleMode,
+    tracks,
+  ]);
 
   const hasTracks = tracks.audio.length > 0 || tracks.subtitles.length > 0;
   const showRetry = status.kind === 'failed' && activeService !== null;
@@ -247,6 +319,8 @@ export function PlayerScreen({
     autoHideOsdMs,
     initialVolume: initialVolume ?? openedEngine?.initialVolume,
     autoSubtitlesOnSkipBack,
+    seekStepSec,
+    defaultResizeMode,
     serviceRef,
     clockRef,
     timersRef,

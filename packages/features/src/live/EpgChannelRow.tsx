@@ -1,6 +1,8 @@
 import type { ItemRow, ProgrammeRow } from '@elv/data';
+import type { LogoBackdropModePref } from '@elv/domain';
 import {
   ArtworkImage,
+  hexToRgba,
   SkeletonBox,
   TABULAR_NUMS_STYLE,
   useI18n,
@@ -16,6 +18,12 @@ import {
   formatClockTime,
   layoutEpgSlots,
 } from './live-model';
+import { SourceBadgePill } from './SourceBadgePill';
+import {
+  formatChannelDisplayName,
+  resolveEpgGenreTint,
+  type SourceBadgeInfo,
+} from './source-badge';
 
 type SelectCellHandler = (
   rowIndex: number,
@@ -28,10 +36,12 @@ interface EpgSlotCellProps {
   readonly rowIndex: number;
   readonly slotIndex: number;
   readonly channel: ItemRow;
+  readonly displayName: string;
   readonly slot: EpgPositionedSlot;
   readonly nowMs: number;
   readonly isTv: boolean;
   readonly isSelected: boolean;
+  readonly epgGenreTints: boolean;
   readonly focusBorderWidth: number;
   readonly onSelectCell: SelectCellHandler;
 }
@@ -40,10 +50,12 @@ const EpgSlotCell = memo(function EpgSlotCellInner({
   rowIndex,
   slotIndex,
   channel,
+  displayName,
   slot,
   nowMs,
   isTv,
   isSelected,
+  epgGenreTints,
   focusBorderWidth,
   onSelectCell,
 }: EpgSlotCellProps): ReactElement {
@@ -55,11 +67,17 @@ const EpgSlotCell = memo(function EpgSlotCellInner({
   const progressRatio = slot.isLive
     ? computeProgramProgress(slot.programme.start, slot.programme.stop, nowMs)
     : 0;
+  const genreTint =
+    epgGenreTints && !isSelected && !slot.isLive
+      ? resolveEpgGenreTint(slot.programme, theme)
+      : null;
   const bgColor = isSelected
     ? theme.colors.focusFill
     : slot.isLive
       ? theme.colors.accentTint
-      : theme.colors.bgCard;
+      : genreTint !== null
+        ? hexToRgba(genreTint.accentColor, 0.12)
+        : theme.colors.bgCard;
   const borderColor = isSelected
     ? theme.colors.focusRingColor
     : slot.isLive
@@ -77,7 +95,7 @@ const EpgSlotCell = memo(function EpgSlotCellInner({
         testID={`epg-cell-${rowIndex}-${slotIndex}`}
         focusable={!isTv}
         accessibilityRole="button"
-        accessibilityLabel={`${channel.name}, ${slot.programme.title}`}
+        accessibilityLabel={`${displayName}, ${slot.programme.title}`}
         accessibilityState={{ selected: isSelected }}
         onPress={handlePress}
         style={[
@@ -86,6 +104,9 @@ const EpgSlotCell = memo(function EpgSlotCellInner({
             backgroundColor: bgColor,
             borderColor,
             borderWidth: isSelected ? focusBorderWidth : 1,
+            ...(genreTint !== null
+              ? { borderLeftWidth: 3, borderLeftColor: genreTint.accentColor }
+              : {}),
             borderRadius: theme.radius.button,
           },
           webCursorPointer(),
@@ -143,6 +164,10 @@ export interface EpgChannelRowProps {
   readonly isTv: boolean;
   readonly isFocusedRow: boolean;
   readonly focusedSlotIndex: number;
+  readonly logoBackdropMode?: LogoBackdropModePref;
+  readonly sourceBadge?: SourceBadgeInfo | null;
+  readonly cleanChannelTitles?: boolean;
+  readonly epgGenreTints?: boolean;
   readonly onSelectCell: SelectCellHandler;
 }
 
@@ -163,6 +188,10 @@ export const EpgChannelRow = memo(function EpgChannelRowInner({
   isTv,
   isFocusedRow,
   focusedSlotIndex,
+  logoBackdropMode = 'plate',
+  sourceBadge = null,
+  cleanChannelTitles = false,
+  epgGenreTints = true,
   onSelectCell,
 }: EpgChannelRowProps): ReactElement {
   const theme = useTheme();
@@ -206,6 +235,7 @@ export const EpgChannelRow = memo(function EpgChannelRowInner({
     );
   }
 
+  const displayName = formatChannelDisplayName(channel.name, cleanChannelTitles);
   const focusBorderWidth = isTv ? theme.focus.ringWidth : 1.5;
   const cursor = webCursorPointer();
   const transition = webTransition(theme, 'background-color, border-color');
@@ -226,7 +256,7 @@ export const EpgChannelRow = memo(function EpgChannelRowInner({
         testID={`epg-channel-cell-${rowIndex}`}
         focusable={!isTv}
         accessibilityRole="button"
-        accessibilityLabel={channel.name}
+        accessibilityLabel={displayName}
         onPress={handleChannelPress}
         style={[
           styles.channelCol,
@@ -253,10 +283,10 @@ export const EpgChannelRow = memo(function EpgChannelRowInner({
         ) : null}
         <ArtworkImage
           uri={channel.logo}
-          label={channel.name}
+          label={displayName}
           maxDecodePx={96}
           resizeMode="contain"
-          logoBackdrop
+          logoBackdropMode={logoBackdropMode}
           borderRadius={theme.radius.button}
           style={styles.channelLogo}
         />
@@ -268,8 +298,9 @@ export const EpgChannelRow = memo(function EpgChannelRowInner({
             { color: theme.colors.textPrimary },
           ]}
         >
-          {channel.name}
+          {displayName}
         </Text>
+        <SourceBadgePill badge={sourceBadge} testID={`epg-source-badge-${rowIndex}`} />
       </Pressable>
 
       <View testID={`epg-row-track-${rowIndex}`} style={styles.track}>
@@ -278,7 +309,7 @@ export const EpgChannelRow = memo(function EpgChannelRowInner({
             testID={`epg-cell-${rowIndex}-0`}
             focusable={!isTv}
             accessibilityRole="button"
-            accessibilityLabel={`${channel.name}, ${i18n.t('epg.noGuideData')}`}
+            accessibilityLabel={`${displayName}, ${i18n.t('epg.noGuideData')}`}
             accessibilityState={{ selected: isFocusedRow && focusedSlotIndex === 0 }}
             onPress={handleEmptyPress}
             style={[
@@ -313,10 +344,12 @@ export const EpgChannelRow = memo(function EpgChannelRowInner({
               rowIndex={rowIndex}
               slotIndex={slotIdx}
               channel={channel}
+              displayName={displayName}
               slot={slot}
               nowMs={nowMs}
               isTv={isTv}
               isSelected={isFocusedRow && focusedSlotIndex === slotIdx}
+              epgGenreTints={epgGenreTints}
               focusBorderWidth={focusBorderWidth}
               onSelectCell={onSelectCell}
             />

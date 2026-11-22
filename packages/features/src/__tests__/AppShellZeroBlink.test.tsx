@@ -172,6 +172,8 @@ describe('AppShell zero-blink prewarm, startup anti-flash & background/unmount f
 
     await fireEvent.press(screen.getByTestId('nav-tab-live'));
     expect(screen.queryByTestId('live-loading-skeleton')).toBeNull();
+    await fireEvent.press(screen.getByTestId('live-mode-channels'));
+    expect(screen.queryByTestId('live-loading-skeleton')).toBeNull();
     expect(screen.getByTestId('live-channels-grid')).toBeTruthy();
     expect(screen.getByText('Live News One')).toBeTruthy();
 

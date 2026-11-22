@@ -4,7 +4,7 @@ import { useI18n } from '../i18n';
 import { Icon } from '../icons';
 import { TABULAR_NUMS_STYLE, useTheme, webCursorPointer, webShadow, webTransition } from '../theme';
 import { useViewport } from '../viewport';
-import { ArtworkImage } from './ArtworkImage';
+import { ArtworkImage, type LogoBackdropMode } from './ArtworkImage';
 import type { DeadHostRegistry } from './dead-host-registry';
 import { MicroPill } from './MicroPill';
 import { Scrim } from './Scrim';
@@ -19,6 +19,7 @@ export interface WideCardProps {
   progress?: number;
   badge?: string;
   logoBackdrop?: boolean;
+  logoBackdropMode?: LogoBackdropMode;
   /** Renders the circular play pill at bottom-left over artwork (defaults to `progress !== undefined && !live`). */
   showPlayBadge?: boolean;
   onPress?: () => void;
@@ -74,6 +75,7 @@ function WideCardInner({
   progress,
   badge,
   logoBackdrop = false,
+  logoBackdropMode,
   showPlayBadge,
   onPress,
   onFocus,
@@ -180,6 +182,7 @@ function WideCardInner({
                   maxDecodePx={maxDecodePx}
                   borderRadius={theme.radius.card}
                   logoBackdrop={logoBackdrop}
+                  {...(logoBackdropMode !== undefined ? { logoBackdropMode } : {})}
                   zoomed={showPointerHover}
                   {...(deadHosts !== undefined ? { deadHosts } : {})}
                   testID={testID ? `${testID}-image` : undefined}

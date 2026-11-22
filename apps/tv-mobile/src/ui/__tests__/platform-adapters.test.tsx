@@ -4,6 +4,8 @@ import { type AppStateStatus, View } from 'react-native';
 import { attachAppStateDeadHostReset, createMobileTvUiAdapters } from '../platform-adapters';
 
 let mockAppleDeviceModel: string | null = null;
+let mockExpoFileSystem: unknown = null;
+
 jest.mock('@elv/engine-aether', () => {
   const actual = jest.requireActual<typeof import('@elv/engine-aether')>('@elv/engine-aether');
   return {
@@ -12,8 +14,14 @@ jest.mock('@elv/engine-aether', () => {
   };
 });
 
+jest.mock('expo', () => ({
+  requireOptionalNativeModule: (name: string) =>
+    name === 'FileSystem' ? mockExpoFileSystem : null,
+}));
+
 afterEach(() => {
   mockAppleDeviceModel = null;
+  mockExpoFileSystem = null;
 });
 
 describe('createMobileTvUiAdapters (#311, #202)', () => {
@@ -122,6 +130,83 @@ describe('createMobileTvUiAdapters (#311, #202)', () => {
     if (tree === null || Array.isArray(tree)) throw new Error('expected single Image host node');
     expect(tree.props.accessible).toBe(false);
     expect(tree.props.accessibilityLabel).toBeUndefined();
+  });
+
+  it('wires a default artworkCache adapter with stats, setLimitBytes, and clear (#405)', async () => {
+    const adapters = createMobileTvUiAdapters();
+    if (!adapters.artworkCache) throw new Error('expected artworkCache adapter');
+
+    await adapters.artworkCache.setLimitBytes?.(64 * 1024 * 1024);
+    expect(await adapters.artworkCache.stats?.()).toEqual({
+      bytes: 0,
+      entries: 0,
+      maxBytes: 64 * 1024 * 1024,
+    });
+    await expect(adapters.artworkCache.clear()).resolves.toBeUndefined();
+  });
+
+  it('wires the Expo native FileSystem port into artworkCache when available (#405)', async () => {
+    const files = new Map<string, string | Uint8Array>();
+    mockExpoFileSystem = {
+      cacheDirectory: 'file:///device/cache/',
+      FileSystemDirectory: class {
+        readonly uri: string;
+        constructor(uri: string) {
+          this.uri = uri;
+        }
+        create() {
+          return undefined;
+        }
+        listAsRecords() {
+          const prefix = `${this.uri}/`;
+          return [...files.keys()]
+            .filter((k) => k.startsWith(prefix))
+            .map((uri) => ({ isDirectory: false, uri }));
+        }
+      },
+      FileSystemFile: class {
+        readonly uri: string;
+        constructor(uri: string) {
+          this.uri = uri;
+        }
+        info() {
+          const entry = files.get(this.uri);
+          if (entry === undefined) return { exists: false };
+          return {
+            exists: true,
+            size: typeof entry === 'string' ? entry.length : entry.byteLength,
+            modificationTime: 1000,
+          };
+        }
+        async text() {
+          const entry = files.get(this.uri);
+          if (typeof entry !== 'string') throw new Error('ENOENT');
+          return entry;
+        }
+        async write(content: string | Uint8Array) {
+          files.set(this.uri, content);
+        }
+        delete() {
+          files.delete(this.uri);
+        }
+      },
+    };
+
+    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]), {
+        status: 200,
+        headers: { 'content-type': 'image/png', 'content-length': '8' },
+      }),
+    );
+
+    try {
+      const adapters = createMobileTvUiAdapters();
+      const cached = await adapters.artworkCache?.resolveUri?.('https://cdn.example/art.png', 240);
+      expect(cached).toMatch(/^file:\/\/\/device\/cache\/artwork-cache\/[a-f0-9]+\.img$/);
+      expect((await adapters.artworkCache?.stats?.())?.bytes).toBe(8);
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 });
 

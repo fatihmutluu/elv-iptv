@@ -286,7 +286,10 @@ export function createWorkbenchRemoteCatalog(
       ),
     listSources: () => rpcQuery('listSources', []),
     categories: (sourceId, kind) => rpcQuery('categories', [sourceId, kind]),
-    items: (categoryId, offset, limit) => rpcQuery('items', [categoryId, offset, limit]),
+    items: (categoryId, offset, limit, opts) =>
+      rpcQuery('items', [categoryId, offset, limit, opts]),
+    allSourcesItems: (kind, offset, limit, sourceIds, opts) =>
+      rpcQuery('allSourcesItems', [kind, offset, limit, sourceIds, opts]),
     itemDetail: (itemKey) => rpcQuery('itemDetail', [itemKey]),
     search: (query, opts) => rpcQuery('search', [query, opts]),
     nowNext: (channelKeys, nowMs) => rpcQuery('nowNext', [channelKeys, nowMs]),

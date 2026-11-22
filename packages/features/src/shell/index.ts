@@ -45,6 +45,10 @@ export {
   useConnectionLimitGuard,
 } from './useConnectionLimitGuard';
 export {
+  type UseGuideAutoRefreshOptions,
+  useGuideAutoRefresh,
+} from './useGuideAutoRefresh';
+export {
   type ImportHealthState,
   type UseImportHealthOptions,
   useImportHealth,

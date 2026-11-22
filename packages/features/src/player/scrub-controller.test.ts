@@ -71,6 +71,7 @@ function setup(position: ScrubPosition | undefined = { positionMs: 50_000, durat
 describe('scrubStepMs', () => {
   it('uses 10s for a press, 30s for early repeats and 60s for sustained repeats', () => {
     expect(scrubStepMs('press', 0)).toBe(STEP_SEEK_MS);
+    expect(scrubStepMs('press', 0, 15_000)).toBe(15_000);
     expect(scrubStepMs('repeat', 1)).toBe(30_000);
     expect(scrubStepMs('repeat', 8)).toBe(30_000);
     expect(scrubStepMs('repeat', 9)).toBe(60_000);

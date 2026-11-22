@@ -327,7 +327,7 @@ describe('m3u import', () => {
     });
     expect(r.ok).toBe(true);
     expect(e.scheduler.count).toBeGreaterThanOrEqual(3);
-    expect(events.at(-1)).toEqual({ phase: 'cleanup', done: 0 });
+    expect(events.at(-1)).toEqual({ phase: 'cleanup', done: 0, fraction: 1, percent: 100 });
     expect(events.some((p) => p.phase === 'live')).toBe(true);
   });
 
