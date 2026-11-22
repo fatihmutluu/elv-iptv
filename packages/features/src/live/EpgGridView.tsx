@@ -1,5 +1,4 @@
 import type { CatalogService, ItemRow } from '@elv/data';
-import type { KeyEvent } from '@elv/focus-core';
 import {
   TvFocusAnchor,
   TvScrollEdgeFade,
@@ -15,7 +14,12 @@ import {
   View,
   VirtualizedList,
 } from 'react-native';
-import { type DisplayCategory, type PagedListSource, useActiveEffect } from '../shared';
+import {
+  type DisplayCategory,
+  type PagedListSource,
+  useActiveEffect,
+  useRouteActive,
+} from '../shared';
 import { EpgChannelRow } from './EpgChannelRow';
 import { EpgPreviewHeader, EpgTimeRuler } from './EpgPreviewHeader';
 import { buildEpgRulerTicks, computeNowLineRatio, EPG_VISIBLE_SPAN_MS } from './live-model';
@@ -27,10 +31,11 @@ const SCROLL_QUANTUM = 3;
 function EpgTvKeyBridge({
   onEvent,
 }: {
-  readonly onEvent: (event: KeyEvent) => void;
+  readonly onEvent: Parameters<typeof useKeyInterpreter>[0];
 }): ReactElement {
+  const routeActive = useRouteActive();
   useKeyInterpreter(onEvent);
-  return <TvFocusAnchor testID="epg-tv-focus-anchor" />;
+  return <TvFocusAnchor testID="epg-tv-focus-anchor" hasTVPreferredFocus={routeActive} />;
 }
 
 /** Props of {@link EpgGridView}. */
@@ -105,9 +110,10 @@ export function EpgGridView({
 
   const channelCount = channelSource.count();
   const refreshSourceIdRef = useRef(category.row.sourceId);
-  const handleRefreshGuide = useCallback(() => {
-    void epgData.refreshGuide(refreshSourceIdRef.current);
-  }, [epgData.refreshGuide]);
+  const handleRefreshGuide = useCallback(
+    () => void epgData.refreshGuide(refreshSourceIdRef.current),
+    [epgData.refreshGuide],
+  );
 
   const cursor = useEpgTimeCursor({
     categoryId: category.row.id,
@@ -164,12 +170,8 @@ export function EpgGridView({
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: activeNowMs triggers background stale-while-revalidate refresh on 30s ticks; effectiveSourceVersion and epgData.version re-hydrate as pages land or guide refreshes
   useEffect(() => {
-    if (isTv) {
-      hydrateRange(tvWindowStart, tvWindowEnd);
-    } else {
-      const { start, end } = visibleRangeRef.current;
-      hydrateRange(start, end);
-    }
+    if (isTv) hydrateRange(tvWindowStart, tvWindowEnd);
+    else hydrateRange(visibleRangeRef.current.start, visibleRangeRef.current.end);
   }, [
     activeNowMs,
     effectiveSourceVersion,
@@ -393,6 +395,6 @@ const styles = StyleSheet.create({
   edgeFadeLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 1 },
   focusedRowLayer: { zIndex: 2 },
   listFlex: { flex: 1 },
-  nowOverlay: { position: 'absolute', top: 0, bottom: 0, right: 0 },
+  nowOverlay: { position: 'absolute', top: 0, bottom: 0, right: 0, direction: 'ltr' },
   nowLine: { position: 'absolute', top: 0, bottom: 0, width: 2 },
 });

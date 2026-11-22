@@ -12,7 +12,11 @@ export interface FocusState {
   scopes: readonly ScopeState[];
 }
 
-/** Builds a scope, clamping every list index. Throws on an empty scope, duplicate list ids or an unknown `active`. */
+/**
+ * Builds a scope, clamping every list index. When the initial `active` list has `count === 0`,
+ * immediately resolves to a reachable non-empty fallback sibling if one exists (`#112`).
+ * Throws on an empty scope, duplicate list ids or an unknown `active`.
+ */
 export function createScope(id: string, lists: readonly ListState[], active: string): ScopeState {
   const byId: Record<string, ListState> = {};
   for (const list of lists) {
@@ -20,8 +24,24 @@ export function createScope(id: string, lists: readonly ListState[], active: str
     const count = Math.max(0, Math.floor(list.count) || 0);
     byId[list.id] = { ...list, count, index: clampIndex(list.index, count) };
   }
-  if (!byId[active]) throw new Error(`Active list "${active}" is not in scope "${id}"`);
-  return { id, lists: byId, active };
+  const initialActive = byId[active];
+  if (!initialActive) throw new Error(`Active list "${active}" is not in scope "${id}"`);
+  let resolvedActive = active;
+  if (initialActive.count === 0) {
+    const fallbackId = resolveFallbackId({ id, lists: byId, active }, active);
+    if (fallbackId !== undefined && (byId[fallbackId]?.count ?? 0) > 0) {
+      resolvedActive = fallbackId;
+    }
+  }
+  return { id, lists: byId, active: resolvedActive };
+}
+
+/** Reports whether at least one list in `scope` currently has `count > 0` (`#112`). */
+export function hasNonEmptyList(scope: ScopeState): boolean {
+  for (const key of Object.keys(scope.lists)) {
+    if ((scope.lists[key]?.count ?? 0) > 0) return true;
+  }
+  return false;
 }
 
 /** Finds the list in the topmost scope that owns `listId`. */

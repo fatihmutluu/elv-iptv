@@ -4,6 +4,7 @@ import {
   resolveAccountPoolKey,
   type SourceRow,
 } from '@elv/data';
+import type { AppI18n } from '@elv/i18n';
 import { type CatalogTabMemory, EMPTY_CATALOG_MEMORY } from './catalog';
 import { EMPTY_LIVE_MEMORY, type LiveTabMemory } from './live';
 import type { LiveChannelPlaylist, PlayableEntry, PlayTarget } from './ports/play-target';
@@ -14,8 +15,7 @@ import type { NavDestination, NavUtility } from './shell';
 /** Primary top-level destination tabs (`Home`, `Live`, `Movies`, `Series`). */
 export type PrimaryNavTab = 'home' | BrowseKind;
 
-/** Builds the canonical 4-destination navigation items for `AdaptiveNavShell`. */
-export function buildShellDestinations(labels: {
+function buildShellDestinations(labels: {
   readonly home: string;
   readonly live: string;
   readonly movies: string;
@@ -29,8 +29,7 @@ export function buildShellDestinations(labels: {
   ];
 }
 
-/** Builds the canonical 2-utility navigation items (`Search`, `Settings`) for `AdaptiveNavShell`. */
-export function buildShellUtilities(input: {
+function buildShellUtilities(input: {
   readonly searchLabel: string;
   readonly settingsLabel: string;
   readonly activeTab: string;
@@ -107,6 +106,77 @@ export function pushDetailStack(
 ): readonly DetailTarget[] {
   const next = [...stack, target];
   return next.length > MAX_DETAIL_STACK ? next.slice(next.length - MAX_DETAIL_STACK) : next;
+}
+
+/**
+ * Resolves TV top-nav `Back` presses in `AppShell` (`#425`): pops any active detail overlay,
+ * returns secondary tabs to `'home'` (keeping top-nav focused), or returns `false` at root
+ * `'home'` so Android TV's `BackHandler` exits cleanly to the system launcher.
+ */
+export function handleShellTopNavBack(input: {
+  readonly activeTab: string;
+  readonly hasActiveDetail: boolean;
+  readonly popDetail: () => void;
+  readonly exitNavFocus: () => void;
+  readonly selectHomeInTopNav: () => void;
+}): boolean {
+  if (input.hasActiveDetail) {
+    input.popDetail();
+    input.exitNavFocus();
+    return true;
+  }
+  if (input.activeTab !== 'home') {
+    input.selectHomeInTopNav();
+    return true;
+  }
+  return false;
+}
+
+/** Builds the `CrashRecoveryBoundary` recovery handlers shared by `AppShell` stage & player trees. */
+export function buildShellCrashProps(input: {
+  readonly stageKey: number;
+  readonly bumpStageKey: () => void;
+  readonly clearCaches: () => void;
+  readonly switchSource: () => void;
+}) {
+  return {
+    remountKey: input.stageKey,
+    onReload: input.bumpStageKey,
+    onClearUiCache: () => {
+      input.clearCaches();
+      input.bumpStageKey();
+    },
+    onSwitchSource: () => {
+      input.switchSource();
+      input.bumpStageKey();
+    },
+  };
+}
+
+/** Builds the canonical 4+2 `AdaptiveNavShell` destinations and utilities in one call. */
+export function buildShellNavigation(input: {
+  readonly t: AppI18n['t'];
+  readonly activeTab: string;
+  readonly hasActiveDetail: boolean;
+  readonly onOpenSearch: () => void;
+  readonly onOpenSettings: () => void;
+}) {
+  return {
+    destinations: buildShellDestinations({
+      home: input.t('nav.home'),
+      live: input.t('nav.live'),
+      movies: input.t('nav.movies'),
+      series: input.t('nav.series'),
+    }),
+    utilities: buildShellUtilities({
+      searchLabel: input.t('nav.search'),
+      settingsLabel: input.t('nav.settings'),
+      activeTab: input.activeTab,
+      hasActiveDetail: input.hasActiveDetail,
+      onOpenSearch: input.onOpenSearch,
+      onOpenSettings: input.onOpenSettings,
+    }),
+  };
 }
 
 const rawPlaylistOf = new WeakMap<LiveChannelPlaylist, LiveChannelPlaylist>();

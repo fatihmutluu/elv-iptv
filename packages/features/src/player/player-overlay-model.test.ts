@@ -4,9 +4,14 @@ import { EMPTY_TRACKS, type PlaybackState } from '@elv/playback';
 import { describe, expect, it } from 'vitest';
 import type { LiveChannelPlaylist, PlayableEntry, PlayTarget } from '../ports/play-target';
 import {
+  buildChannelJumpTarget,
   buildNextEpisodeTarget,
   buildPreviousChannelTarget,
+  canAutoHideOsd,
   formatStatsHudLines,
+  hasTargetMetaChanged,
+  isPromiseLike,
+  itemRowToPlayableEntry,
   NEXT_EPISODE_MIN_DURATION_MS,
   NEXT_EPISODE_RATIO_THRESHOLD,
   NEXT_EPISODE_REMAINING_MS,
@@ -374,6 +379,92 @@ describe('player-overlay-model', () => {
         i18nEn,
       );
       expect(idFallback[1]).toBe('Audio: a-raw · Subtitles: s-raw');
+    });
+  });
+
+  describe('buildChannelJumpTarget & itemRowToPlayableEntry', () => {
+    it('maps ItemRow to a live PlayableEntry preserving same-source accountKey', () => {
+      const current: PlayTarget = {
+        itemKey: 'ch:1',
+        sourceId: 's1',
+        accountKey: 'fp:abc',
+        title: '1. News',
+        kind: 'live',
+      };
+      const entry = itemRowToPlayableEntry(
+        {
+          id: 12,
+          key: 'ch:12',
+          kind: 'live',
+          sourceId: 's1',
+          providerId: '12',
+          name: '12. Sports',
+          logo: 'https://img.invalid/ch12.png',
+          rating: null,
+          year: null,
+          num: 12,
+        },
+        current,
+      );
+      expect(entry).toEqual({
+        itemKey: 'ch:12',
+        sourceId: 's1',
+        accountKey: 'fp:abc',
+        title: '12. Sports',
+        kind: 'live',
+        itemKind: 'live',
+        logo: 'https://img.invalid/ch12.png',
+      });
+    });
+
+    it('builds a live channel jump target preserving previousChannel and updating playlist index', () => {
+      const playlist: LiveChannelPlaylist = {
+        count: 5,
+        currentIndex: 1,
+        getAt: async () => undefined,
+        onChangeIndex: () => undefined,
+      };
+      const current: PlayTarget = {
+        itemKey: 'ch:2',
+        sourceId: 's1',
+        title: '2. News',
+        kind: 'live',
+        playlist,
+      };
+      const targetEntry: PlayableEntry = {
+        itemKey: 'ch:4',
+        sourceId: 's1',
+        title: '4. Cinema',
+        kind: 'live',
+      };
+      const next = buildChannelJumpTarget(current, targetEntry, 3);
+      expect(next).not.toBeNull();
+      expect(next?.itemKey).toBe('ch:4');
+      expect(next?.playlist?.currentIndex).toBe(3);
+      expect(next?.previousChannel?.itemKey).toBe('ch:2');
+      expect(next?.previousChannelIndex).toBe(1);
+      expect(buildChannelJumpTarget(current, { ...targetEntry, itemKey: 'ch:2' })).toBeNull();
+    });
+
+    it('evaluates canAutoHideOsd, isPromiseLike, and hasTargetMetaChanged cleanly', () => {
+      const clear = {
+        osdHidden: false,
+        tracksOpen: false,
+        settingsOpen: false,
+        locked: false,
+        tvOsdFocused: false,
+        tvScrubberFocused: false,
+      };
+      expect(canAutoHideOsd('playing', clear, false)).toBe(true);
+      expect(canAutoHideOsd('paused', clear, false)).toBe(false);
+      expect(canAutoHideOsd('playing', { ...clear, tvOsdFocused: true }, false)).toBe(false);
+      expect(canAutoHideOsd('playing', clear, true)).toBe(false);
+      expect(isPromiseLike(Promise.resolve(1))).toBe(true);
+      expect(isPromiseLike(42)).toBe(false);
+      expect(hasTargetMetaChanged(BASE_EP_TARGET, { ...BASE_EP_TARGET })).toBe(false);
+      expect(hasTargetMetaChanged(BASE_EP_TARGET, { ...BASE_EP_TARGET, title: 'Other' })).toBe(
+        true,
+      );
     });
   });
 });

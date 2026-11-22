@@ -1,8 +1,8 @@
 import type { AppI18n } from '@elv/i18n';
-import type { PlaybackStatus } from '@elv/playback';
+import type { PlaybackClock, PlaybackStatus, PlaybackTimers } from '@elv/playback';
 import { Icon, MicroPill, Scrim, useTheme, useViewport } from '@elv/ui-kit';
 import type { ReactElement } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { DesktopCinemaBar, type PlayerOsdProps } from './DesktopCinemaBar';
 import { describePlaybackFailure } from './errors';
 import { OsdButton, OsdClock, PlayerCanvasTapTarget, PlayerLockedOverlay } from './PlayerOsdButton';
@@ -10,6 +10,16 @@ import type { TvOsdAction } from './usePlayerControls';
 import { VodProgressBar } from './VodProgressBar';
 
 export { PlayerCanvasTapTarget, PlayerLockedOverlay, type PlayerOsdProps };
+
+/** Web-only cursor style applied while desktop OSD is hidden during playback. */
+export const HIDE_CURSOR_WEB_STYLE = { cursor: 'none' } as unknown as ViewStyle;
+/** Default monotonic playback clock for {@link PlayerScreen}. */
+export const DEFAULT_PLAYER_CLOCK: PlaybackClock = { now: () => performance.now() };
+/** Default timeout scheduler for {@link PlayerScreen}. */
+export const DEFAULT_PLAYER_TIMERS: PlaybackTimers = {
+  setTimeout: (fn, ms) => setTimeout(fn, ms),
+  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+};
 
 /** Formats localized OSD status text from `PlaybackStatus`. */
 export function formatStatusLine(status: PlaybackStatus, i18n: AppI18n): string {
@@ -103,6 +113,9 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
               </Text>
               {!isVod ? (
                 <MicroPill testID="player-live-badge" label={i18n.t('ui.liveBadge')} tone="live" />
+              ) : null}
+              {!isVod && p.channelDigits !== undefined && p.channelDigits.length > 0 ? (
+                <MicroPill testID="player-channel-digits" label={p.channelDigits} tone="accent" />
               ) : null}
             </View>
             {trimmedSubtitle !== undefined && trimmedSubtitle.length > 0 ? (
@@ -320,7 +333,6 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
 export const playerStyles = StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
   flex1: { flex: 1 },
-  tvFocusAnchor: { position: 'absolute', width: 1, height: 1, opacity: 0 },
   surfaceLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
   surfaceLayerDesktop: { flex: 1 },
   floatingOsd: { position: 'absolute', inset: 0, justifyContent: 'space-between' },

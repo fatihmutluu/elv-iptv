@@ -231,4 +231,38 @@ describe('subscribeWebKeys IME and ARIA editable guards (#136, #139)', () => {
 
     unsubscribe();
   });
+
+  it('maps extended TV and media DOM keys (#439)', () => {
+    const { win, emit } = createFakeWindow();
+    const inputs: KeyInput[] = [];
+    const unsubscribe = subscribeWebKeys(
+      win,
+      { isActive: () => false },
+      () => 300,
+      (k) => inputs.push(k),
+    );
+
+    const pairs: [string, string][] = [
+      ['MediaStop', 'stop'],
+      ['MediaTrackNext', 'next'],
+      ['MediaTrackPrevious', 'previous'],
+      ['ClosedCaptionToggle', 'captions'],
+      ['Subtitle', 'captions'],
+      ['MediaAudioTrack', 'audioTrack'],
+      ['Guide', 'guide'],
+      ['Info', 'info'],
+      ['BrowserSearch', 'search'],
+      ['MediaLast', 'lastChannel'],
+    ];
+
+    for (const [domKey] of pairs) {
+      emit('keydown', { key: domKey });
+      emit('keyup', { key: domKey });
+    }
+
+    expect(inputs.map((k) => `${k.key}:${k.action}`)).toEqual(
+      pairs.flatMap(([, mapped]) => [`${mapped}:down`, `${mapped}:up`]),
+    );
+    unsubscribe();
+  });
 });

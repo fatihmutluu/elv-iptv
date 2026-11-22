@@ -1,5 +1,4 @@
 import type { CatalogService, EpisodeRow, ItemRow } from '@elv/data';
-import type { KeyEvent } from '@elv/focus-core';
 import { TvFocusAnchor, useI18n, useKeyInterpreter, useTheme, useViewport } from '@elv/ui-kit';
 import {
   type ComponentRef,
@@ -17,7 +16,12 @@ import {
   View,
 } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
-import { computeCatalogLayout, type DetailTarget, detailTargetFromItem } from '../shared';
+import {
+  computeCatalogLayout,
+  type DetailTarget,
+  detailTargetFromItem,
+  useRouteActive,
+} from '../shared';
 import { DetailCastStrip } from './DetailCastStrip';
 import { DetailEpisodes } from './DetailEpisodes';
 import { DetailHero, type DetailHeroFocusSlot } from './DetailHero';
@@ -49,9 +53,12 @@ export interface DetailScreenProps {
 const SCROLL_FROST_THRESHOLD = 24;
 const EPISODE_ROW_ESTIMATE_HEIGHT = 112;
 
-function DetailTvKeyBridge({ onEvent }: { onEvent: (event: KeyEvent) => void }): ReactElement {
+type TvKeyHandler = Parameters<typeof useKeyInterpreter>[0];
+
+function DetailTvKeyBridge({ onEvent }: { onEvent: TvKeyHandler }): ReactElement {
+  const routeActive = useRouteActive();
   useKeyInterpreter(onEvent);
-  return <TvFocusAnchor testID="detail-tv-focus-anchor" />;
+  return <TvFocusAnchor testID="detail-tv-focus-anchor" hasTVPreferredFocus={routeActive} />;
 }
 
 /**
@@ -120,13 +127,8 @@ export function DetailScreen({
     onPlay(primaryAction.target);
   }, [onPlay, primaryAction]);
 
-  const handleToggleMyList = useCallback(() => {
-    void data.toggleMyList();
-  }, [data.toggleMyList]);
-
-  const handleToggleWatched = useCallback(() => {
-    void data.toggleWatched();
-  }, [data.toggleWatched]);
+  const handleToggleMyList = useCallback(() => void data.toggleMyList(), [data.toggleMyList]);
+  const handleToggleWatched = useCallback(() => void data.toggleWatched(), [data.toggleWatched]);
 
   const handlePressEpisode = useCallback(
     (episode: EpisodeRow, index: number) => {
@@ -294,7 +296,6 @@ export function DetailScreen({
   const recordEpisodesY = useCallback((y: number) => {
     episodesYRef.current = y;
   }, []);
-
   const recordRelatedY = useCallback((y: number) => {
     relatedYRef.current = y;
   }, []);
@@ -395,6 +396,4 @@ export function DetailScreen({
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1 },
-});
+const styles = StyleSheet.create({ root: { flex: 1 } });

@@ -3,6 +3,7 @@ export {
   type InputModality,
   type Orientation,
   resolveViewport,
+  scaleTv,
   type ViewportColumns,
   type ViewportInfo,
   type ViewportOverride,

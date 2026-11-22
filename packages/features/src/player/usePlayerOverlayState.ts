@@ -1,7 +1,9 @@
-import type { MediaTracks, PlaybackClock, PlaybackStatus, PlaybackTimers } from '@elv/playback';
-import type { FormFactor } from '@elv/ui-kit';
-import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
-import type { PlayerOverlayLive } from './player-overlay-model';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  canAutoHideOsd,
+  type PlayerOverlayLive,
+  type PlayerOverlayStateParams,
+} from './player-overlay-model';
 import {
   clampSettingsMenu,
   initialSettingsMenu,
@@ -13,7 +15,12 @@ import {
   type PointerPoint,
   type TouchHoverGuard,
 } from './touch-hover-guard';
-import { clampPickerCursor, initialPickerCursor, type TrackPickerCursor } from './track-picker-nav';
+import {
+  clampPickerCursor,
+  initialPickerCursor,
+  type TrackPickerColumn,
+  type TrackPickerCursor,
+} from './track-picker-nav';
 import { availableTvOsdActions, clampTvOsdAction, type TvOsdAction } from './tv-osd-nav';
 import { useOsdAutoHide } from './useOsdAutoHide';
 
@@ -23,27 +30,7 @@ export type { PlayerOverlayLive };
  * Owns track picker, 2-level Settings menu, Stats HUD toggle, mobile Touch Lock, TV OSD
  * visibility/auto-hide, and TV OSD/scrubber focus state for {@link usePlayerControls}.
  */
-export function usePlayerOverlayState(params: {
-  formFactor: FormFactor;
-  itemKey: string;
-  isVod: boolean;
-  playbackSpeed?: number;
-  statusKind: PlaybackStatus['kind'];
-  tracks: MediaTracks;
-  hasTracks: boolean;
-  hasService: boolean;
-  showRetry: boolean;
-  hasSettings: boolean;
-  hasNextEpisode: boolean;
-  hasPreviousChannel: boolean;
-  initialOsdHidden?: boolean | undefined;
-  autoHideOsdMs?: number | undefined;
-  isScrubbing: boolean;
-  clockRef: MutableRefObject<PlaybackClock>;
-  timersRef: MutableRefObject<PlaybackTimers>;
-  cancelScrub: () => void;
-  onSetOrientationLocked?: ((locked: boolean) => void) | undefined;
-}) {
+export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const { formFactor, itemKey, isVod, statusKind, tracks, hasTracks, hasService, showRetry } =
     params;
   const { hasSettings, hasNextEpisode, hasPreviousChannel, initialOsdHidden, autoHideOsdMs } =
@@ -75,6 +62,7 @@ export function usePlayerOverlayState(params: {
   const onSetOrientationLockedRef = useRef(params.onSetOrientationLocked);
   onSetOrientationLockedRef.current = params.onSetOrientationLocked;
   const orientationLockedRef = useRef(false);
+  const sheetOpenerRef = useRef<'tracks' | 'settings' | null>(null);
 
   const releaseOrientationLock = useCallback((): void => {
     if (!orientationLockedRef.current) return;
@@ -132,18 +120,9 @@ export function usePlayerOverlayState(params: {
     setTvScrubberFocused(false);
   }, []);
 
-  const canAutoHide =
-    statusKind === 'playing' &&
-    !osdHidden &&
-    !isScrubbing &&
-    !tracksOpen &&
-    !settingsOpen &&
-    !locked &&
-    !tvOsdFocused &&
-    !tvScrubberFocused;
   const { clearAutoHide, notifyOsdActivity } = useOsdAutoHide({
     autoHideOsdMs,
-    active: canAutoHide,
+    active: canAutoHideOsd(statusKind, liveSnapshot, isScrubbing),
     itemKey,
     timersRef,
     onAutoHide: () => {
@@ -154,10 +133,14 @@ export function usePlayerOverlayState(params: {
   });
 
   useEffect(() => {
-    if (rawTracksOpen && !hasTracks) setTracksOpen(false);
-    else if (tracksOpen && pickerCursor !== rawPickerCursor) setPickerCursor(pickerCursor);
-    if (rawSettingsOpen && !hasService) setSettingsOpen(false);
-    else if (settingsOpen && settingsMenu !== rawSettingsMenu) setSettingsMenu(settingsMenu);
+    if (rawTracksOpen && !hasTracks) {
+      sheetOpenerRef.current = null;
+      setTracksOpen(false);
+    } else if (tracksOpen && pickerCursor !== rawPickerCursor) setPickerCursor(pickerCursor);
+    if (rawSettingsOpen && !hasService) {
+      sheetOpenerRef.current = null;
+      setSettingsOpen(false);
+    } else if (settingsOpen && settingsMenu !== rawSettingsMenu) setSettingsMenu(settingsMenu);
     if (rawTvScrubberFocused && (!isTv || !isVod)) setTvScrubberFocused(false);
     if (tvOsdAction !== rawTvOsdAction) setTvOsdAction(tvOsdAction);
   }, [
@@ -181,6 +164,7 @@ export function usePlayerOverlayState(params: {
   useEffect(() => {
     cancelScrub();
     releaseOrientationLock();
+    sheetOpenerRef.current = null;
     liveRef.current.tracksOpen = false;
     liveRef.current.settingsOpen = false;
     liveRef.current.locked = false;
@@ -191,28 +175,31 @@ export function usePlayerOverlayState(params: {
     if (prevItemKeyRef.current !== itemKey) {
       prevItemKeyRef.current = itemKey;
       liveRef.current.osdHidden = false;
+      notifyOsdActivity();
       setOsdHidden(false);
     }
     return () => cancelScrub();
-  }, [itemKey, cancelScrub, clearTvFocus, releaseOrientationLock]);
+  }, [itemKey, cancelScrub, clearTvFocus, notifyOsdActivity, releaseOrientationLock]);
 
   useEffect(() => {
     if (statusKind === 'failed' || statusKind === 'paused' || statusKind === 'ended') {
       liveRef.current.osdHidden = false;
+      notifyOsdActivity();
       setOsdHidden(false);
     }
-  }, [statusKind]);
+  }, [notifyOsdActivity, statusKind]);
 
   const hideOsd = (): void => {
     cancelScrub();
     clearAutoHide();
+    sheetOpenerRef.current = null;
     liveRef.current.osdHidden = true;
     clearTvFocus();
     setOsdHidden(true);
   };
 
   const showOsd = (): void => {
-    clearAutoHide();
+    notifyOsdActivity();
     liveRef.current.osdHidden = false;
     setOsdHidden(false);
   };
@@ -271,10 +258,19 @@ export function usePlayerOverlayState(params: {
     setSettingsMenu(next);
   };
 
-  const openTracks = (): void => {
+  const restoreSheetOpenerFocus = (): void => {
+    const opener = sheetOpenerRef.current;
+    sheetOpenerRef.current = null;
+    if (isTv && opener !== null && liveRef.current.availableOsd.includes(opener)) {
+      focusTvOsd(opener);
+    }
+  };
+
+  const openTracks = (preferredColumn?: TrackPickerColumn): void => {
     if (!liveRef.current.hasTracks) return;
     cancelScrub();
-    const initial = initialPickerCursor(liveRef.current.tracks);
+    const initial = initialPickerCursor(liveRef.current.tracks, preferredColumn);
+    sheetOpenerRef.current = isTv ? 'tracks' : null;
     liveRef.current.pickerCursor = initial;
     liveRef.current.tracksOpen = true;
     liveRef.current.settingsOpen = false;
@@ -286,19 +282,22 @@ export function usePlayerOverlayState(params: {
     setTracksOpen(true);
   };
 
+  const readSettingsOpts = () => ({
+    isVod: liveRef.current.isVod,
+    playbackSpeed: liveRef.current.playbackSpeed,
+    hasAspect,
+  });
+
   const openSettings = (view: SettingsMenuView = 'root'): void => {
     if (!liveRef.current.hasService) return;
     cancelScrub();
-    const opts = {
-      isVod: liveRef.current.isVod,
-      playbackSpeed: liveRef.current.playbackSpeed,
-      hasAspect,
-    };
+    const opts = readSettingsOpts();
     const initial = clampSettingsMenu(
       initialSettingsMenu(view, opts),
       liveRef.current.tracks,
       opts,
     );
+    sheetOpenerRef.current = isTv ? 'settings' : null;
     liveRef.current.settingsMenu = initial;
     liveRef.current.settingsOpen = true;
     liveRef.current.tracksOpen = false;
@@ -313,6 +312,7 @@ export function usePlayerOverlayState(params: {
   const lockControls = (): void => {
     if (!canLock) return;
     cancelScrub();
+    sheetOpenerRef.current = null;
     liveRef.current.tracksOpen = false;
     liveRef.current.settingsOpen = false;
     liveRef.current.locked = true;
@@ -325,19 +325,19 @@ export function usePlayerOverlayState(params: {
   };
 
   const closeTracks = (): void => {
+    if (!liveRef.current.tracksOpen) return;
     liveRef.current.tracksOpen = false;
     setTracksOpen(false);
+    restoreSheetOpenerFocus();
   };
   const closeSettings = (): void => {
+    if (!liveRef.current.settingsOpen) return;
     liveRef.current.settingsOpen = false;
     setSettingsOpen(false);
+    restoreSheetOpenerFocus();
   };
   const openSettingsView = (view: SettingsMenuView): void => {
-    const opts = {
-      isVod: liveRef.current.isVod,
-      playbackSpeed: liveRef.current.playbackSpeed,
-      hasAspect,
-    };
+    const opts = readSettingsOpts();
     updateSettingsMenu(
       clampSettingsMenu(initialSettingsMenu(view, opts), liveRef.current.tracks, opts),
     );
@@ -347,8 +347,7 @@ export function usePlayerOverlayState(params: {
   const unlockControls = (): void => {
     liveRef.current.locked = false;
     setLocked(false);
-    orientationLockedRef.current = false;
-    onSetOrientationLockedRef.current?.(false);
+    releaseOrientationLock();
   };
 
   return {

@@ -30,7 +30,7 @@ export interface TvCatalogNavigationState {
   readonly focusedRowId: CatalogNavRowId | null;
   readonly focusedCol: number | null;
   readonly focusedGridPos: GridFocusPosition | null;
-  readonly handleTvKey: (event: KeyEvent) => void;
+  readonly handleTvKey: (event: KeyEvent) => boolean;
 }
 
 type FocusZone = CatalogNavRowId | 'grid' | null;
@@ -264,14 +264,14 @@ export function useTvCatalogNavigation({
   }, [commitGrid, commitRow, gridColumns, gridItemCount, isGridMode, rowSignature]);
 
   const handleTvKey = useCallback(
-    (event: KeyEvent) => {
+    (event: KeyEvent): boolean => {
       const currentRows = rowsRef.current;
       const inGridMode = isGridModeRef.current;
 
       if (event.kind === 'press' && event.key === 'back') {
         if (inGridMode) onExitGridRef.current();
         else onFocusTopNavRef.current?.();
-        return;
+        return true;
       }
 
       const isNav = event.kind === 'press' || event.kind === 'repeat';
@@ -283,9 +283,9 @@ export function useTvCatalogNavigation({
         const pos = gridPosRef.current;
         if (event.kind === 'press' && event.key === 'select') {
           onActivateGridItemRef.current(pos.row * cols + pos.col);
-          return;
+          return true;
         }
-        if (!isNav) return;
+        if (!isNav) return false;
         if (event.key === 'left') {
           if (pos.col > 0) commitGrid({ row: pos.row, col: pos.col - 1 });
         } else if (event.key === 'right') {
@@ -307,13 +307,18 @@ export function useTvCatalogNavigation({
               onFocusRowRef.current?.(lastHeader.id);
             }
           }
+        } else {
+          return false;
         }
-        return;
+        return true;
       }
 
       if (currentRows.length === 0) {
-        if (event.kind === 'press' && event.key === 'up') onFocusTopNavRef.current?.();
-        return;
+        if (event.kind === 'press' && event.key === 'up') {
+          onFocusTopNavRef.current?.();
+          return true;
+        }
+        return false;
       }
 
       const idx = Math.max(
@@ -321,41 +326,49 @@ export function useTvCatalogNavigation({
         currentRows.findIndex((r) => r.id === currentZone),
       );
       const currentRow = currentRows[idx];
-      if (!currentRow) return;
+      if (!currentRow) return false;
 
       if (event.kind === 'press' && event.key === 'select') {
         onActivateRowRef.current(currentRow.id, activeColRef.current);
-        return;
+        return true;
       }
-      if (!isNav) return;
+      if (!isNav) return false;
 
       if (event.key === 'up') {
         if (idx === 0) {
           onFocusTopNavRef.current?.();
-          return;
+          return true;
         }
         const prevRow = currentRows[idx - 1];
-        if (!prevRow) return;
+        if (!prevRow) return false;
         const saved = colMemoryRef.current.get(prevRow.id) ?? 0;
         commitRow(prevRow.id, Math.min(Math.max(0, saved), prevRow.count - 1));
         onFocusRowRef.current?.(prevRow.id);
-      } else if (event.key === 'down') {
+        return true;
+      }
+      if (event.key === 'down') {
         if (idx + 1 < currentRows.length) {
           const nextRow = currentRows[idx + 1];
-          if (!nextRow) return;
+          if (!nextRow) return false;
           const saved = colMemoryRef.current.get(nextRow.id) ?? 0;
           commitRow(nextRow.id, Math.min(Math.max(0, saved), nextRow.count - 1));
           onFocusRowRef.current?.(nextRow.id);
         } else if (inGridMode && gridItemCountRef.current > 0) {
           commitGrid({ row: 0, col: 0 });
         }
-      } else if (event.key === 'left') {
+        return true;
+      }
+      if (event.key === 'left') {
         const nextCol = Math.max(0, activeColRef.current - 1);
         if (nextCol !== activeColRef.current) commitRow(currentRow.id, nextCol);
-      } else if (event.key === 'right') {
+        return true;
+      }
+      if (event.key === 'right') {
         const nextCol = Math.min(currentRow.count - 1, activeColRef.current + 1);
         if (nextCol !== activeColRef.current) commitRow(currentRow.id, nextCol);
+        return true;
       }
+      return false;
     },
     [commitGrid, commitRow],
   );

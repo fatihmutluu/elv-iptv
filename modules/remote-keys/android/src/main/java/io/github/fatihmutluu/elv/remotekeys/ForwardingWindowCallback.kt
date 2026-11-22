@@ -18,17 +18,23 @@ import android.view.accessibility.AccessibilityEvent
  * Reference parameters are nullable wherever the SDK leaves them unannotated, so Kotlin adds no null checks the wrapped
  * callback would not make; the SDK marks the panel `Menu` and `MenuItem` parameters `@NonNull`, so those cannot be.
  */
-class ForwardingWindowCallback(private val wrapped: Window.Callback) : Window.Callback {
+class ForwardingWindowCallback(
+  internal val wrapped: Window.Callback,
+  private val onFocusLost: (() -> Unit)? = null,
+) : Window.Callback {
   override fun dispatchKeyEvent(event: KeyEvent?): Boolean {
-    val action = event?.let { KeyForwarding.action(it.action, it.repeatCount, it.flags) }
-    if (event != null && action != null) {
-      KeyForwarding.emit(KeyForwarding.payload(action, event.keyCode, event.flags, event.eventTime))
-    }
+    KeyForwarding.forwardKeyEvent(event)
     return wrapped.dispatchKeyEvent(event)
   }
 
   override fun onWindowFocusChanged(hasFocus: Boolean) {
-    if (!hasFocus) KeyForwarding.emitBlur()
+    if (!hasFocus) {
+      KeyForwarding.emitBlur()
+      try {
+        onFocusLost?.invoke()
+      } catch (_: Throwable) {
+      }
+    }
     wrapped.onWindowFocusChanged(hasFocus)
   }
 

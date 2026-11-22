@@ -1,4 +1,3 @@
-import type { KeyEvent } from '@elv/focus-core';
 import {
   CtaButton,
   EditorialCategoryBar,
@@ -11,7 +10,7 @@ import {
 } from '@elv/ui-kit';
 import { memo, type ReactElement, useCallback, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import type { CatalogLayoutMetrics, DisplayCategory } from '../shared';
+import { type CatalogLayoutMetrics, type DisplayCategory, useRouteActive } from '../shared';
 
 const ALL_CATEGORIES_ID = '__all__';
 
@@ -19,12 +18,20 @@ const ALL_CATEGORIES_ID = '__all__';
 export function CatalogTvKeyBridge({
   kind,
   onEvent,
+  preferredFocus = true,
 }: {
   readonly kind: 'movie' | 'series';
-  readonly onEvent: (event: KeyEvent) => void;
+  readonly onEvent: Parameters<typeof useKeyInterpreter>[0];
+  readonly preferredFocus?: boolean;
 }): ReactElement {
+  const routeActive = useRouteActive();
   useKeyInterpreter(onEvent);
-  return <TvFocusAnchor testID={`catalog-tv-focus-anchor-${kind}`} />;
+  return (
+    <TvFocusAnchor
+      testID={`catalog-tv-focus-anchor-${kind}`}
+      hasTVPreferredFocus={routeActive && preferredFocus}
+    />
+  );
 }
 
 const SKELETON_CHIPS = [0, 1, 2, 3, 4] as const;

@@ -1,8 +1,13 @@
 import type { ItemRow, WatchProgressRow } from '@elv/data';
-import { CtaButton, useI18n, useTheme } from '@elv/ui-kit';
+import { CtaButton, TvFocusGuideRegion, useI18n, useTheme } from '@elv/ui-kit';
 import type { ComponentRef, ReactElement, RefObject } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import type { CatalogLayoutMetrics, DetailTarget, DisplayCategory } from '../shared';
+import {
+  type CatalogLayoutMetrics,
+  type DetailTarget,
+  type DisplayCategory,
+  useRouteActive,
+} from '../shared';
 import { CatalogCategoryRail } from './CatalogCategoryRail';
 import { CatalogContinueWatchingRail } from './CatalogContinueWatchingRail';
 
@@ -49,6 +54,7 @@ export function CatalogRailsBody({
 }: CatalogRailsBodyProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
+  const routeActive = useRouteActive();
 
   return (
     <ScrollView
@@ -60,40 +66,58 @@ export function CatalogRailsBody({
       }}
     >
       {continueItems.length > 0 ? (
-        <CatalogContinueWatchingRail
-          kind={kind}
-          items={continueItems}
-          cardWidth={layout.wideRailWidth}
-          gap={layout.railGap}
-          padX={layout.padX}
-          isTv={layout.isTv}
-          focusedIndex={focusedRowId === 'continue' ? focusedCol : null}
-          onOpenDetail={onOpenDetail}
-          {...(onLayoutContinueY !== undefined ? { onLayoutY: onLayoutContinueY } : {})}
-        />
+        <View
+          onLayout={
+            onLayoutContinueY ? (e) => onLayoutContinueY(e.nativeEvent.layout.y) : undefined
+          }
+        >
+          <TvFocusGuideRegion
+            testID="catalog-continue-focus-guide"
+            enabled={layout.isTv && routeActive}
+            autoFocus
+          >
+            <CatalogContinueWatchingRail
+              kind={kind}
+              items={continueItems}
+              cardWidth={layout.wideRailWidth}
+              gap={layout.railGap}
+              padX={layout.padX}
+              isTv={layout.isTv}
+              focusedIndex={focusedRowId === 'continue' ? focusedCol : null}
+              onOpenDetail={onOpenDetail}
+            />
+          </TvFocusGuideRegion>
+        </View>
       ) : null}
 
       {visibleCategories.map((cat, catIndex) => {
         const items = loadedRailItems.get(cat.row.id) ?? [];
         const isRailLoading = loadingRailIds.has(cat.row.id) && !loadedRailItems.has(cat.row.id);
+        if (!isRailLoading && items.length === 0) return null;
         return (
-          <CatalogCategoryRail
-            key={cat.row.id}
-            category={cat}
-            catIndex={catIndex}
-            items={items}
-            loading={isRailLoading}
-            progressByKey={progressByKey}
-            cardWidth={layout.posterRailWidth}
-            gap={layout.railGap}
-            padX={layout.padX}
-            isTv={layout.isTv}
-            isTouch={layout.isTouch}
-            focusedIndex={focusedRowId === `rail-${catIndex}` ? focusedCol : null}
-            onOpenDetail={onOpenDetail}
-            onSeeAll={onSeeAll}
-            onLayoutY={onLayoutRailY}
-          />
+          <View key={cat.row.id} onLayout={(e) => onLayoutRailY(catIndex, e.nativeEvent.layout.y)}>
+            <TvFocusGuideRegion
+              testID={`catalog-rail-${catIndex}-focus-guide`}
+              enabled={layout.isTv && routeActive}
+              autoFocus
+            >
+              <CatalogCategoryRail
+                category={cat}
+                catIndex={catIndex}
+                items={items}
+                loading={isRailLoading}
+                progressByKey={progressByKey}
+                cardWidth={layout.posterRailWidth}
+                gap={layout.railGap}
+                padX={layout.padX}
+                isTv={layout.isTv}
+                isTouch={layout.isTouch}
+                focusedIndex={focusedRowId === `rail-${catIndex}` ? focusedCol : null}
+                onOpenDetail={onOpenDetail}
+                onSeeAll={onSeeAll}
+              />
+            </TvFocusGuideRegion>
+          </View>
         );
       })}
 

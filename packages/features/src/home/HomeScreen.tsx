@@ -1,5 +1,4 @@
 import type { BrowseKind, CatalogService, ItemRow, SourceRow } from '@elv/data';
-import type { KeyEvent } from '@elv/focus-core';
 import { TvFocusAnchor, useI18n, useKeyInterpreter, useTheme, useViewport } from '@elv/ui-kit';
 import {
   type ComponentRef,
@@ -18,7 +17,7 @@ import {
   View,
 } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
-import { type DetailTarget, useCatalogUiCache } from '../shared';
+import { type DetailTarget, useCatalogUiCache, useRouteActive } from '../shared';
 import { buildHeroActionIds, HomeHero, type HomeHeroActionId } from './HomeHero';
 import { buildHomeRailSpecs, HomeRail } from './HomeRail';
 import { computeHomeLayout, HomeEmptyState, HomeSkeleton } from './HomeSkeleton';
@@ -54,9 +53,12 @@ export interface HomeScreenProps {
 const SCROLL_FROST_THRESHOLD = 24;
 const RAIL_ORDER: readonly HomeRailKind[] = ['continue', 'live', 'mylist', 'movies', 'series'];
 
-function HomeTvKeyBridge({ onEvent }: { onEvent: (event: KeyEvent) => void }): ReactElement {
+type TvKeyHandler = Parameters<typeof useKeyInterpreter>[0];
+
+function HomeTvKeyBridge({ onEvent }: { onEvent: TvKeyHandler }): ReactElement {
+  const routeActive = useRouteActive();
   useKeyInterpreter(onEvent);
-  return <TvFocusAnchor testID="home-tv-focus-anchor" />;
+  return <TvFocusAnchor testID="home-tv-focus-anchor" hasTVPreferredFocus={routeActive} />;
 }
 
 /**

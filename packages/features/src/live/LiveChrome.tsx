@@ -1,4 +1,3 @@
-import type { KeyEvent } from '@elv/focus-core';
 import type { MessageId } from '@elv/i18n';
 import {
   CtaButton,
@@ -18,7 +17,7 @@ import {
 } from '@elv/ui-kit';
 import { memo, type ReactElement, useCallback, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import type { CatalogLayoutMetrics, DisplayCategory } from '../shared';
+import { type CatalogLayoutMetrics, type DisplayCategory, useRouteActive } from '../shared';
 import type { LiveMode } from './live-model';
 
 export { LiveNumberPad, type LiveNumberPadProps } from './LiveNumberPad';
@@ -219,11 +218,19 @@ const SKELETON_CARDS = [0, 1, 2, 3, 4, 5] as const;
 /** TV key interpreter bridge mounted only when `LiveScreen` owns the active 10-ft focus scope. */
 export function LiveTvKeyBridge({
   onEvent,
+  preferredFocus = true,
 }: {
-  readonly onEvent: (event: KeyEvent) => void;
+  readonly onEvent: Parameters<typeof useKeyInterpreter>[0];
+  readonly preferredFocus?: boolean;
 }): ReactElement {
+  const routeActive = useRouteActive();
   useKeyInterpreter(onEvent);
-  return <TvFocusAnchor testID="live-tv-focus-anchor" />;
+  return (
+    <TvFocusAnchor
+      testID="live-tv-focus-anchor"
+      hasTVPreferredFocus={routeActive && preferredFocus}
+    />
+  );
 }
 
 /** Tonal zero-CLS loading skeleton displayed while initial Live TV categories load. */

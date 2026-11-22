@@ -1,11 +1,16 @@
+import type { ItemRow } from '@elv/data';
 import { type AppI18n, resolveLanguageLabel } from '@elv/i18n';
 import {
   type MediaTracks,
+  type PlaybackClock,
   type PlaybackState,
   type PlaybackStatus,
+  type PlaybackTimers,
   positionAt,
   type TrackInfo,
 } from '@elv/playback';
+import type { FormFactor } from '@elv/ui-kit';
+import type { MutableRefObject } from 'react';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
 import { describePlaybackFailure } from './errors';
 import type { SettingsMenuState } from './settings-menu-nav';
@@ -29,6 +34,29 @@ export interface PlayerOverlayLive {
   hasService: boolean;
   isVod: boolean;
   playbackSpeed: number;
+}
+
+/** Parameters of {@link usePlayerOverlayState}. */
+export interface PlayerOverlayStateParams {
+  formFactor: FormFactor;
+  itemKey: string;
+  isVod: boolean;
+  playbackSpeed?: number;
+  statusKind: PlaybackStatus['kind'];
+  tracks: MediaTracks;
+  hasTracks: boolean;
+  hasService: boolean;
+  showRetry: boolean;
+  hasSettings: boolean;
+  hasNextEpisode: boolean;
+  hasPreviousChannel: boolean;
+  initialOsdHidden?: boolean | undefined;
+  autoHideOsdMs?: number | undefined;
+  isScrubbing: boolean;
+  clockRef: MutableRefObject<PlaybackClock>;
+  timersRef: MutableRefObject<PlaybackTimers>;
+  cancelScrub: () => void;
+  onSetOrientationLocked?: ((locked: boolean) => void) | undefined;
 }
 
 /** Progress ratio threshold (`>= 90%`) at which the Next Episode banner appears. */
@@ -80,7 +108,57 @@ export function buildNextEpisodeTarget(current: PlayTarget): PlayTarget | null {
   };
 }
 
-function toPlayableEntry(target: PlayTarget): PlayableEntry {
+/** Whether OSD auto-hide may arm based on playback status and active modal/focus state. */
+export function canAutoHideOsd(
+  statusKind: PlaybackStatus['kind'],
+  live: Pick<
+    PlayerOverlayLive,
+    'osdHidden' | 'tracksOpen' | 'settingsOpen' | 'locked' | 'tvOsdFocused' | 'tvScrubberFocused'
+  >,
+  isScrubbing: boolean,
+): boolean {
+  return (
+    statusKind === 'playing' &&
+    !live.osdHidden &&
+    !isScrubbing &&
+    !live.tracksOpen &&
+    !live.settingsOpen &&
+    !live.locked &&
+    !live.tvOsdFocused &&
+    !live.tvScrubberFocused
+  );
+}
+
+/** Whether `value` is a thenable / Promise. */
+export function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { then?: unknown }).then === 'function'
+  );
+}
+
+/** Whether any non-`itemKey` metadata field on {@link PlayTarget} changed across renders. */
+export function hasTargetMetaChanged(prev: PlayTarget, next: PlayTarget): boolean {
+  return (
+    prev.playlist !== next.playlist ||
+    prev.title !== next.title ||
+    prev.sourceId !== next.sourceId ||
+    prev.accountKey !== next.accountKey ||
+    prev.logo !== next.logo ||
+    prev.subtitle !== next.subtitle ||
+    prev.seriesKey !== next.seriesKey ||
+    prev.season !== next.season ||
+    prev.episode !== next.episode ||
+    prev.itemKind !== next.itemKind ||
+    prev.nextEpisodes !== next.nextEpisodes ||
+    prev.previousChannel !== next.previousChannel ||
+    prev.previousChannelIndex !== next.previousChannelIndex
+  );
+}
+
+/** Copies the flat {@link PlayableEntry} fields of a {@link PlayTarget} without nested history. */
+export function toPlayableEntry(target: PlayTarget): PlayableEntry {
   return {
     itemKey: target.itemKey,
     sourceId: target.sourceId,
@@ -94,6 +172,50 @@ function toPlayableEntry(target: PlayTarget): PlayableEntry {
     ...(target.season !== undefined ? { season: target.season } : {}),
     ...(target.episode !== undefined ? { episode: target.episode } : {}),
     ...(target.itemKind !== undefined ? { itemKind: target.itemKind } : {}),
+  };
+}
+
+/** Converts a live catalog {@link ItemRow} to a {@link PlayableEntry}, preserving same-source pool key. */
+export function itemRowToPlayableEntry(row: ItemRow, current: PlayTarget): PlayableEntry {
+  return {
+    itemKey: row.key,
+    sourceId: row.sourceId,
+    ...(current.accountKey !== undefined && row.sourceId === current.sourceId
+      ? { accountKey: current.accountKey }
+      : {}),
+    title: row.name,
+    kind: 'live',
+    itemKind: 'live',
+    ...(row.logo !== null ? { logo: row.logo } : {}),
+  };
+}
+
+/** Builds the next live {@link PlayTarget} for direct channel number entry, preserving previous-channel history. */
+export function buildChannelJumpTarget(
+  current: PlayTarget,
+  entry: PlayableEntry,
+  nextIndex?: number,
+): PlayTarget | null {
+  if (entry.itemKey === current.itemKey) return null;
+  const playlist = current.playlist;
+  const hasValidIdx =
+    playlist !== undefined &&
+    nextIndex !== undefined &&
+    Number.isInteger(nextIndex) &&
+    nextIndex >= 0 &&
+    nextIndex < playlist.count;
+  const nextPlaylist =
+    playlist !== undefined
+      ? hasValidIdx
+        ? { ...playlist, currentIndex: nextIndex }
+        : playlist
+      : undefined;
+  const prevIndex = playlist !== undefined ? playlist.currentIndex : undefined;
+  return {
+    ...entry,
+    ...(nextPlaylist !== undefined ? { playlist: nextPlaylist } : {}),
+    previousChannel: toPlayableEntry(current),
+    ...(prevIndex !== undefined ? { previousChannelIndex: prevIndex } : {}),
   };
 }
 

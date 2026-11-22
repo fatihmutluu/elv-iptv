@@ -70,7 +70,7 @@ export function usePlayerScrub(params: {
 
   const togglePlayPause = (): void => {
     const svc = serviceRef.current;
-    if (svc === null || cbRef.current.activeTarget.kind !== 'vod') return;
+    if (svc === null) return;
     scrub.cancel();
     const kind = svc.getState().status.kind;
     if (kind === 'paused' || kind === 'ended') svc.play();

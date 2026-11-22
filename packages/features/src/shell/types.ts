@@ -31,6 +31,11 @@ export interface AdaptiveNavShellProps<TId extends string = string> {
   readonly onSelectDestination: (id: TId) => void;
   readonly navFocused?: boolean;
   readonly onExitNavFocus?: () => void;
+  /**
+   * Handles TV `back` while top navigation is focused (`#425`).
+   * Return `true` when consumed (e.g. returning to Home from a secondary tab), or `false` at root Home to allow OS exit.
+   */
+  readonly onBack?: () => boolean;
   readonly frosted?: boolean;
   /** When true, positions the top bar absolutely over full-bleed hero content (`zIndex: 35`). */
   readonly overlay?: boolean;

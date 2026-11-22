@@ -454,6 +454,66 @@ describe('empty-panel focus recovery', () => {
     s.popScope();
     expect(s.isActive('main')).toBe(true);
   });
+
+  it('resolves non-empty fallback immediately on initial root scope and pushScope (#112)', () => {
+    const s = createFocusStore({
+      id: 'root',
+      lists: [l('items', { count: 0, fallbackId: 'cats' }), l('cats', { count: 5, index: 2 })],
+      active: 'items',
+    });
+    expect(s.isActive('cats')).toBe(true);
+    expect(active(s)).toMatchObject({ id: 'cats', index: 2 });
+    expect(s.hasNonEmptyList()).toBe(true);
+    expect(s.getFallbackTarget('items')).toBe('cats');
+
+    const changes: Array<{ listId: string; index: number }> = [];
+    s.subscribe((c) => changes.push(c));
+    s.pushScope(
+      'sheet',
+      [l('emptyA', { count: 0, fallbackId: 'nonEmptyB' }), l('nonEmptyB', { count: 4, index: 1 })],
+      'emptyA',
+    );
+    expect(s.isActive('nonEmptyB')).toBe(true);
+    expect(changes).toContainEqual({ listId: 'nonEmptyB', index: 1 });
+  });
+
+  it('notifies onEmptyScope and emits emptyScope intent on navigation when all lists in the top scope are empty (#112)', () => {
+    const onEmptyScope = vi.fn();
+    const s = createFocusStore(
+      {
+        id: 'root',
+        lists: [l('items', { count: 2, fallbackId: 'cats' }), l('cats', { count: 0 })],
+        active: 'items',
+      },
+      { onEmptyScope },
+    );
+
+    expect(s.hasNonEmptyList()).toBe(true);
+    s.setCount('items', 0);
+
+    expect(s.isActive('cats')).toBe(true);
+    expect(s.hasNonEmptyList()).toBe(false);
+    expect(onEmptyScope).toHaveBeenCalledWith({ scopeId: 'root', listId: 'cats' });
+
+    const up = ev('up');
+    expect(s.dispatch(up)).toEqual([
+      { kind: 'emptyScope', scopeId: 'root', listId: 'cats' },
+      { kind: 'key', event: up },
+    ]);
+    // select on an empty list still returns []
+    expect(s.dispatch(ev('select'))).toEqual([]);
+    // non-navigation keys pass through normally
+    const menu = ev('menu');
+    expect(s.dispatch(menu)).toEqual([{ kind: 'key', event: menu }]);
+
+    // popScope restoring an all-empty scope also notifies onEmptyScope
+    onEmptyScope.mockClear();
+    s.pushScope('modal', [l('m', { count: 2 })], 'm');
+    expect(s.hasNonEmptyList()).toBe(true);
+    s.popScope();
+    expect(s.hasNonEmptyList()).toBe(false);
+    expect(onEmptyScope).toHaveBeenCalledWith({ scopeId: 'root', listId: 'cats' });
+  });
 });
 
 describe('invariants', () => {

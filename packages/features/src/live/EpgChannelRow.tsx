@@ -109,7 +109,10 @@ const EpgSlotCell = memo(function EpgSlotCellInner({
           {`${formatClockTime(slot.programme.start)} – ${formatClockTime(slot.programme.stop)}`}
         </Text>
         {slot.isLive ? (
-          <View style={[styles.progressTrack, { backgroundColor: theme.colors.subtleHighlight }]}>
+          <View
+            testID={`epg-cell-progress-track-${rowIndex}-${slotIndex}`}
+            style={[styles.progressTrack, { backgroundColor: theme.colors.subtleHighlight }]}
+          >
             <View
               testID={`epg-cell-progress-${rowIndex}-${slotIndex}`}
               style={[
@@ -269,7 +272,7 @@ export const EpgChannelRow = memo(function EpgChannelRowInner({
         </Text>
       </Pressable>
 
-      <View style={styles.track}>
+      <View testID={`epg-row-track-${rowIndex}`} style={styles.track}>
         {slots.length === 0 ? (
           <Pressable
             testID={`epg-cell-${rowIndex}-0`}
@@ -327,6 +330,7 @@ export const EpgChannelRow = memo(function EpgChannelRowInner({
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
+    direction: 'ltr',
     alignItems: 'stretch',
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
@@ -341,10 +345,11 @@ const styles = StyleSheet.create({
   channelNum: { minWidth: 24, textAlign: 'right' },
   channelLogo: { width: 28, height: 28, flexShrink: 0 },
   channelName: { flex: 1, fontWeight: '600' },
-  track: { flex: 1, position: 'relative', overflow: 'hidden' },
+  track: { flex: 1, position: 'relative', overflow: 'hidden', direction: 'ltr' },
   trackSkeleton: {
     flex: 1,
     flexDirection: 'row',
+    direction: 'ltr',
     alignItems: 'center',
     paddingHorizontal: 6,
     gap: 6,
@@ -367,6 +372,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     justifyContent: 'center',
   },
-  progressTrack: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 3 },
+  progressTrack: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 3,
+    direction: 'ltr',
+  },
   progressFill: { height: '100%' },
 });

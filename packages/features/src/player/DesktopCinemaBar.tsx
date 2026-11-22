@@ -13,6 +13,7 @@ import { VodProgressBar } from './VodProgressBar';
 export interface PlayerOsdProps {
   title: string;
   subtitle?: string | null | undefined;
+  channelDigits?: string;
   statusLine: string;
   failure: DescribedPlaybackFailure | null;
   isVod: boolean;
@@ -231,6 +232,9 @@ export function DesktopCinemaBar(p: PlayerOsdProps): ReactElement {
               </Text>
               {!isVod ? (
                 <MicroPill testID="player-live-badge" label={i18n.t('ui.liveBadge')} tone="live" />
+              ) : null}
+              {!isVod && p.channelDigits !== undefined && p.channelDigits.length > 0 ? (
+                <MicroPill testID="player-channel-digits" label={p.channelDigits} tone="accent" />
               ) : null}
             </View>
             <View style={styles.metaLine}>

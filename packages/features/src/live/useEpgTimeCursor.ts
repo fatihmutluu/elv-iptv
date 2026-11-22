@@ -6,6 +6,7 @@ import {
   EPG_PAN_STEP_MS,
   EPG_SLOT_MS,
   EPG_VISIBLE_SPAN_MS,
+  findOverlappingProgramIndex,
   findProgramIndexAtTime,
   layoutEpgSlots,
 } from './live-model';
@@ -42,14 +43,17 @@ const FAV_TOOLBAR_ACTIONS: readonly EpgToolbarAction[] = [
   'later',
 ];
 
-function matchSlotIndex(slots: ReturnType<typeof layoutEpgSlots>, anchorMs: number): number {
-  return Math.max(
-    0,
-    findProgramIndexAtTime(
-      slots.map((s) => s.programme),
-      anchorMs,
-    ),
-  );
+function matchSlotIndex(
+  slots: ReturnType<typeof layoutEpgSlots>,
+  anchorMs: number,
+  originWindow: { readonly start: number; readonly stop: number } | null = null,
+): number {
+  const progs = slots.map((s) => s.programme);
+  const idx =
+    originWindow !== null
+      ? findOverlappingProgramIndex(progs, originWindow.start, originWindow.stop, anchorMs)
+      : findProgramIndexAtTime(progs, anchorMs);
+  return Math.max(0, idx);
 }
 
 /** Options for {@link useEpgTimeCursor}. */
@@ -84,7 +88,7 @@ export interface EpgTimeCursorState {
     channel: ItemRow,
     programme: ProgrammeRow | null,
   ) => void;
-  readonly handleTvKey: (event: KeyEvent) => void;
+  readonly handleTvKey: (event: KeyEvent) => boolean;
 }
 
 /**
@@ -112,12 +116,20 @@ export function useEpgTimeCursor({
   const [focusedRow, setFocusedRow] = useState(0);
   const [focusedSlotIndex, setFocusedSlotIndex] = useState(0);
 
-  const cursorRef = useRef({
-    area: 'grid' as EpgFocusArea,
+  const cursorRef = useRef<{
+    area: EpgFocusArea;
+    toolbarIdx: number;
+    row: number;
+    slot: number;
+    anchorMs: number;
+    originWindow: { readonly start: number; readonly stop: number } | null;
+  }>({
+    area: 'grid',
     toolbarIdx: 0,
     row: 0,
     slot: 0,
     anchorMs: activeNowMs,
+    originWindow: null,
   });
   cursorRef.current.area = focusedArea;
   cursorRef.current.toolbarIdx = focusedToolbarIndex;
@@ -142,7 +154,14 @@ export function useEpgTimeCursor({
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset cursor state when category switches
   useEffect(() => {
-    cursorRef.current = { area: 'grid', toolbarIdx: 0, row: 0, slot: 0, anchorMs: activeNowMs };
+    cursorRef.current = {
+      area: 'grid',
+      toolbarIdx: 0,
+      row: 0,
+      slot: 0,
+      anchorMs: activeNowMs,
+      originWindow: null,
+    };
     setFocusedArea('grid');
     setFocusedToolbarIndex(0);
     setFocusedRow(0);
@@ -165,21 +184,26 @@ export function useEpgTimeCursor({
 
   useEffect(() => {
     const nextIdx =
-      focusedSlots.length === 0 ? 0 : matchSlotIndex(focusedSlots, cursorRef.current.anchorMs);
+      focusedSlots.length === 0
+        ? 0
+        : matchSlotIndex(focusedSlots, cursorRef.current.anchorMs, cursorRef.current.originWindow);
     if (nextIdx !== cursorRef.current.slot) commitSlot(nextIdx);
   }, [commitSlot, focusedSlots]);
 
   const handlePanEarlier = useCallback(() => {
+    cursorRef.current.originWindow = null;
     cursorRef.current.anchorMs = Math.max(0, windowStartMs - EPG_PAN_STEP_MS) + EPG_SLOT_MS / 2;
     panEarlier();
   }, [panEarlier, windowStartMs]);
 
   const handlePanLater = useCallback(() => {
+    cursorRef.current.originWindow = null;
     cursorRef.current.anchorMs = windowStartMs + EPG_PAN_STEP_MS + EPG_SLOT_MS / 2;
     panLater();
   }, [panLater, windowStartMs]);
 
   const handleJumpToLive = useCallback(() => {
+    cursorRef.current.originWindow = null;
     cursorRef.current.anchorMs = activeNowMs;
     jumpToLive();
   }, [activeNowMs, jumpToLive]);
@@ -192,6 +216,7 @@ export function useEpgTimeCursor({
       }
       cursorRef.current.area = 'grid';
       cursorRef.current.row = rowIdx;
+      cursorRef.current.originWindow = null;
       setFocusedArea('grid');
       setFocusedRow(rowIdx);
       commitSlot(slotIdx);
@@ -204,9 +229,21 @@ export function useEpgTimeCursor({
 
   const moveRow = useCallback(
     (nextRow: number) => {
+      const originProg =
+        slotsFor(channelSource.get(cursorRef.current.row))[cursorRef.current.slot]?.programme ??
+        null;
+      const originWindow =
+        originProg !== null ? { start: originProg.start, stop: originProg.stop } : null;
       cursorRef.current.row = nextRow;
+      cursorRef.current.originWindow = originWindow;
       setFocusedRow(nextRow);
-      commitSlot(matchSlotIndex(slotsFor(channelSource.get(nextRow)), cursorRef.current.anchorMs));
+      commitSlot(
+        matchSlotIndex(
+          slotsFor(channelSource.get(nextRow)),
+          cursorRef.current.anchorMs,
+          originWindow,
+        ),
+      );
       channelSource.prefetch(Math.max(0, nextRow - 2), nextRow + maxMountedRows + 2);
     },
     [channelSource, commitSlot, maxMountedRows, slotsFor],
@@ -214,6 +251,7 @@ export function useEpgTimeCursor({
 
   const stepHorizontal = useCallback(
     (delta: -1 | 1) => {
+      cursorRef.current.originWindow = null;
       const target = cursorRef.current.slot + delta;
       if (target >= 0 && target < focusedSlots.length) {
         commitSlot(target);
@@ -254,15 +292,18 @@ export function useEpgTimeCursor({
   );
 
   const handleTvKey = useCallback(
-    (event: KeyEvent) => {
-      if (event.kind === 'press' && event.key === 'back') return callbacksRef.current.onEdgeTop?.();
+    (event: KeyEvent): boolean => {
+      if (event.kind === 'press' && event.key === 'back') {
+        callbacksRef.current.onEdgeTop?.();
+        return true;
+      }
 
       if (cursorRef.current.area === 'toolbar') {
         if (event.kind === 'press' && event.key === 'select') {
           activateToolbarAction(cursorRef.current.toolbarIdx);
-          return;
+          return true;
         }
-        if (event.kind !== 'press' && event.kind !== 'repeat') return;
+        if (event.kind !== 'press' && event.kind !== 'repeat') return false;
         if (event.key === 'up') {
           callbacksRef.current.onEdgeTop?.();
         } else if (event.key === 'down') {
@@ -276,16 +317,18 @@ export function useEpgTimeCursor({
           const next = Math.min(toolbarActions.length - 1, cursorRef.current.toolbarIdx + 1);
           cursorRef.current.toolbarIdx = next;
           setFocusedToolbarIndex(next);
+        } else {
+          return false;
         }
-        return;
+        return true;
       }
 
       if (event.kind === 'press' && event.key === 'select') {
         const current = channelSource.get(cursorRef.current.row);
         if (current) callbacksRef.current.onWatchChannel(current, cursorRef.current.row);
-        return;
+        return true;
       }
-      if (event.kind !== 'press' && event.kind !== 'repeat') return;
+      if (event.kind !== 'press' && event.kind !== 'repeat') return false;
       if (event.key === 'up') {
         if (cursorRef.current.row === 0) {
           cursorRef.current.area = 'toolbar';
@@ -293,13 +336,21 @@ export function useEpgTimeCursor({
         } else {
           moveRow(cursorRef.current.row - 1);
         }
-      } else if (event.key === 'down') {
-        if (cursorRef.current.row + 1 < channelCount) moveRow(cursorRef.current.row + 1);
-      } else if (event.key === 'left') {
-        stepHorizontal(-1);
-      } else if (event.key === 'right') {
-        stepHorizontal(1);
+        return true;
       }
+      if (event.key === 'down') {
+        if (cursorRef.current.row + 1 < channelCount) moveRow(cursorRef.current.row + 1);
+        return true;
+      }
+      if (event.key === 'left') {
+        stepHorizontal(-1);
+        return true;
+      }
+      if (event.key === 'right') {
+        stepHorizontal(1);
+        return true;
+      }
+      return false;
     },
     [activateToolbarAction, channelCount, channelSource, moveRow, stepHorizontal, toolbarActions],
   );

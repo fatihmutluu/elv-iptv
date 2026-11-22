@@ -74,7 +74,7 @@ export interface TvSettingsNavigationState {
   readonly ownsTvRemote: boolean;
   readonly focusedSection: SettingsSection | null;
   readonly focusedAppearanceId: AppearanceFocusId | null;
-  readonly handleTvKey: (event: KeyEvent) => void;
+  readonly handleTvKey: (event: KeyEvent) => boolean;
   readonly enterContentPane: () => void;
   readonly returnToSidebar: () => void;
 }
@@ -148,13 +148,13 @@ export function useTvSettingsNavigation({
   }, [store]);
 
   const handleTvKey = useCallback(
-    (event: KeyEvent) => {
+    (event: KeyEvent): boolean => {
       if (paneRef.current === 'nav') {
         const idx = SETTINGS_SECTIONS.indexOf(sectionRef.current);
         store.focus(NAV_LIST_ID, Math.max(0, idx));
         if (event.kind === 'press' && event.key === 'right') {
           enterContentPane();
-          return;
+          return true;
         }
         const intents = store.dispatch(event);
         const navList = findList(store.getState().scopes, NAV_LIST_ID)?.list;
@@ -167,17 +167,22 @@ export function useTvSettingsNavigation({
         for (const intent of intents) {
           if (intent.kind === 'edge' && intent.side === 'start' && event.key === 'up') {
             onFocusTopNavRef.current?.();
-          } else if (intent.kind === 'back') {
+            return true;
+          }
+          if (intent.kind === 'back') {
             onFocusTopNavRef.current?.();
-          } else if (intent.kind === 'select') {
+            return true;
+          }
+          if (intent.kind === 'select') {
             enterContentPane();
+            return true;
           }
         }
-        return;
+        return event.key === 'up' || event.key === 'down';
       }
 
       if (sectionRef.current !== 'appearance') {
-        return;
+        return false;
       }
 
       const currentRow = rowRef.current;
@@ -187,7 +192,7 @@ export function useTvSettingsNavigation({
       if ((event.kind === 'press' || event.kind === 'repeat') && event.key === 'up') {
         if (currentRow === 0) {
           onFocusTopNavRef.current?.();
-          return;
+          return true;
         }
         const nextRow = currentRow - 1;
         const currentList = findList(store.getState().scopes, activeListId)?.list;
@@ -197,11 +202,11 @@ export function useTvSettingsNavigation({
         store.focus(nextListId, nextCol);
         setAppearanceRow(nextRow);
         setAppearanceCol(nextCol);
-        return;
+        return true;
       }
 
       if ((event.kind === 'press' || event.kind === 'repeat') && event.key === 'down') {
-        if (currentRow >= APPEARANCE_ROWS.length - 1) return;
+        if (currentRow >= APPEARANCE_ROWS.length - 1) return false;
         const nextRow = currentRow + 1;
         const currentList = findList(store.getState().scopes, activeListId)?.list;
         const targetItems = APPEARANCE_ROWS[nextRow] ?? [];
@@ -210,7 +215,7 @@ export function useTvSettingsNavigation({
         store.focus(nextListId, nextCol);
         setAppearanceRow(nextRow);
         setAppearanceCol(nextCol);
-        return;
+        return true;
       }
 
       const intents = store.dispatch(event);
@@ -221,13 +226,19 @@ export function useTvSettingsNavigation({
       for (const intent of intents) {
         if (intent.kind === 'back') {
           returnToSidebar();
-        } else if (intent.kind === 'edge' && intent.side === 'start' && event.key === 'left') {
+          return true;
+        }
+        if (intent.kind === 'edge' && intent.side === 'start' && event.key === 'left') {
           returnToSidebar();
-        } else if (intent.kind === 'select') {
+          return true;
+        }
+        if (intent.kind === 'select') {
           const id = APPEARANCE_ROWS[currentRow]?.[col];
           if (id) onActivateRef.current(id);
+          return true;
         }
       }
+      return event.key === 'left' || event.key === 'right';
     },
     [enterContentPane, returnToSidebar, store],
   );

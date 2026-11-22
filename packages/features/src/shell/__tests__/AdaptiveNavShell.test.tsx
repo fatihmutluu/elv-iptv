@@ -7,7 +7,15 @@ import {
   ViewportProvider,
 } from '@elv/ui-kit';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
-import { Platform, StyleSheet, Text, type TextStyle, type ViewStyle } from 'react-native';
+import {
+  BackHandler,
+  Platform,
+  StyleSheet,
+  Text,
+  type TextStyle,
+  type ViewStyle,
+} from 'react-native';
+import { RouteActiveProvider } from '../../shared';
 import { AdaptiveNavShell } from '../AdaptiveNavShell';
 import type { NavDestination, NavUtility } from '../types';
 
@@ -443,12 +451,14 @@ describe('AdaptiveNavShell', () => {
       {}) as TextStyle;
     expect(accentStyle.color).toBe(THEME_PRESETS.obsidianCrimson.accent);
 
-    const overlayStyle = flattenStyle(screen.getByTestId('app-top-nav').props.style);
-    expect(overlayStyle.position).toBe('absolute');
-    expect(overlayStyle.top).toBe(0);
-    expect(overlayStyle.left).toBe(0);
-    expect(overlayStyle.right).toBe(0);
-    expect(overlayStyle.zIndex).toBe(35);
+    const overlayGuideStyle = flattenStyle(screen.getByTestId('nav-focus-guide-top').props.style);
+    expect(overlayGuideStyle.position).toBe('absolute');
+    expect(overlayGuideStyle.top).toBe(0);
+    expect(overlayGuideStyle.left).toBe(0);
+    expect(overlayGuideStyle.right).toBe(0);
+    expect(overlayGuideStyle.zIndex).toBe(35);
+    const innerTopNavStyle = flattenStyle(screen.getByTestId('app-top-nav').props.style);
+    expect(innerTopNavStyle.position).not.toBe('absolute');
 
     await view.rerender(
       <ViewportProvider
@@ -468,6 +478,8 @@ describe('AdaptiveNavShell', () => {
       </ViewportProvider>,
     );
 
+    const flowGuideStyle = flattenStyle(screen.getByTestId('nav-focus-guide-top').props.style);
+    expect(flowGuideStyle.position).not.toBe('absolute');
     const flowStyle = flattenStyle(screen.getByTestId('app-top-nav').props.style);
     expect(flowStyle.position).not.toBe('absolute');
   });
@@ -525,5 +537,118 @@ describe('AdaptiveNavShell', () => {
     const labeledUtilStyle = flattenStyle(screen.getByTestId('nav-util-sources').props.style);
     expect(Number(labeledUtilStyle.minHeight)).toBeGreaterThanOrEqual(40);
     expect(Number(labeledUtilStyle.minWidth)).toBeGreaterThanOrEqual(40);
+  });
+
+  it('delegates TV Back to onBack and propagates false to BackHandler at root (#425)', async () => {
+    jest.replaceProperty(Platform, 'OS', 'android');
+    jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
+
+    let backCb: Parameters<typeof BackHandler.addEventListener>[1] | undefined;
+    jest.spyOn(BackHandler, 'addEventListener').mockImplementation((_event, handler) => {
+      backCb = handler;
+      return { remove: jest.fn() };
+    });
+
+    const onBack = jest.fn(() => true);
+    const view = await render(
+      <RemoteKeysProvider android={null}>
+        <ViewportProvider
+          value={{ formFactor: 'tv', orientation: 'landscape', width: 1920, height: 1080 }}
+        >
+          <AdaptiveNavShell
+            brandTitle="ELV IPTV"
+            destinations={FOUR_DESTINATIONS}
+            activeId="movies"
+            navFocused
+            onSelectDestination={jest.fn()}
+            onBack={onBack}
+          >
+            <Text>TV Body</Text>
+          </AdaptiveNavShell>
+        </ViewportProvider>
+      </RemoteKeysProvider>,
+    );
+
+    let consumed: boolean | null | undefined;
+    await act(async () => {
+      consumed = (backCb as (() => boolean | null | undefined) | undefined)?.();
+    });
+    expect(onBack).toHaveBeenCalledTimes(1);
+    expect(consumed).toBe(true);
+
+    onBack.mockReturnValue(false);
+    await act(async () => {
+      consumed = (backCb as (() => boolean | null | undefined) | undefined)?.();
+    });
+    expect(onBack).toHaveBeenCalledTimes(2);
+    expect(consumed).toBe(false);
+
+    await view.unmount();
+  });
+
+  it('gates nav-tv-focus-anchor hasTVPreferredFocus by routeActive (#130), renders sibling TvFocusGuideRegions, and normalizes 960x540dp via scaleTv (#281)', async () => {
+    const view = await render(
+      <RouteActiveProvider active={false}>
+        <ViewportProvider
+          value={{ formFactor: 'tv', orientation: 'landscape', width: 960, height: 540 }}
+        >
+          <ThemeProvider preset="obsidianCrimson">
+            <AdaptiveNavShell
+              brandTitle="ELV IPTV"
+              destinations={FOUR_DESTINATIONS}
+              activeId="home"
+              navFocused
+              onSelectDestination={jest.fn()}
+            >
+              <Text>960dp TV Body</Text>
+            </AdaptiveNavShell>
+          </ThemeProvider>
+        </ViewportProvider>
+      </RouteActiveProvider>,
+    );
+
+    // Inactive route must NOT request preferred TV focus
+    const anchor = screen.getByTestId('nav-tv-focus-anchor', { includeHiddenElements: true });
+    expect(anchor.props.hasTVPreferredFocus).toBe(false);
+
+    // Top nav uses a single sibling TvFocusGuideRegion; body stays a plain View so inner rail guides are never nested
+    const topGuide = screen.getByTestId('nav-focus-guide-top');
+    const bodyView = screen.getByTestId('app-shell-body');
+    expect(topGuide).toBeTruthy();
+    expect(bodyView).toBeTruthy();
+    expect(screen.queryByTestId('nav-focus-guide-body')).toBeNull();
+    expect(topGuide.parent).toBe(bodyView.parent);
+
+    // 960x540dp (tvScale = 0.5) scales top bar below 1920x1080's 112px while keeping readable proportions
+    const topNav960 = flattenStyle(screen.getByTestId('app-top-nav').props.style);
+    expect(Number(topNav960.minHeight)).toBeLessThan(112);
+    expect(Number(topNav960.minHeight)).toBeGreaterThanOrEqual(44 + 27);
+
+    // Active route sets hasTVPreferredFocus={true}
+    await view.rerender(
+      <RouteActiveProvider active>
+        <ViewportProvider
+          value={{ formFactor: 'tv', orientation: 'landscape', width: 960, height: 540 }}
+        >
+          <ThemeProvider preset="obsidianCrimson">
+            <AdaptiveNavShell
+              brandTitle="ELV IPTV"
+              destinations={FOUR_DESTINATIONS}
+              activeId="home"
+              navFocused
+              onSelectDestination={jest.fn()}
+            >
+              <Text>960dp TV Body</Text>
+            </AdaptiveNavShell>
+          </ThemeProvider>
+        </ViewportProvider>
+      </RouteActiveProvider>,
+    );
+    expect(
+      screen.getByTestId('nav-tv-focus-anchor', { includeHiddenElements: true }).props
+        .hasTVPreferredFocus,
+    ).toBe(true);
+
+    await view.unmount();
   });
 });

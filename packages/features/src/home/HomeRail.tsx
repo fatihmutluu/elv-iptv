@@ -4,6 +4,7 @@ import {
   HorizontalRailScroll,
   Icon,
   PosterCard,
+  TvFocusGuideRegion,
   useI18n,
   useTheme,
   WideCard,
@@ -19,6 +20,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useRouteActive } from '../shared';
 import {
   formatRemainingMinutes,
   type HomeRailEntry,
@@ -204,6 +206,7 @@ function HomeRailInner({
 }: HomeRailProps): ReactElement | null {
   const theme = useTheme();
   const i18n = useI18n();
+  const routeActive = useRouteActive();
   const scrollRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
 
   useEffect(() => {
@@ -267,37 +270,39 @@ function HomeRailInner({
         ) : null}
       </View>
 
-      <HorizontalRailScroll
-        scrollRef={scrollRef}
-        testID={`${testID}-strip`}
-        isTv={isTv}
-        contentContainerStyle={[
-          styles.stripContent,
-          {
-            paddingHorizontal: padX,
-            paddingTop: isTv ? 18 : 8,
-            paddingBottom: isTv ? 20 : 12,
-            gap,
-          },
-        ]}
-      >
-        {items.map((entry, index) => (
-          <RailCardItem
-            key={entry.itemKey}
-            variant={variant}
-            entry={entry}
-            index={index}
-            cardWidth={cardWidth}
-            isTv={isTv}
-            focused={isTv && focusedIndex === index}
-            testID={`${itemTestIdPrefix}-${index}`}
-            liveKindLabel={liveKindLabel}
-            watchedLabel={watchedLabel}
-            formatRemMin={formatRemMin}
-            onPressItem={onPressItem}
-          />
-        ))}
-      </HorizontalRailScroll>
+      <TvFocusGuideRegion testID={`${testID}-focus-guide`} enabled={isTv && routeActive} autoFocus>
+        <HorizontalRailScroll
+          scrollRef={scrollRef}
+          testID={`${testID}-strip`}
+          isTv={isTv}
+          contentContainerStyle={[
+            styles.stripContent,
+            {
+              paddingHorizontal: padX,
+              paddingTop: isTv ? 18 : 8,
+              paddingBottom: isTv ? 20 : 12,
+              gap,
+            },
+          ]}
+        >
+          {items.map((entry, index) => (
+            <RailCardItem
+              key={entry.itemKey}
+              variant={variant}
+              entry={entry}
+              index={index}
+              cardWidth={cardWidth}
+              isTv={isTv}
+              focused={isTv && focusedIndex === index}
+              testID={`${itemTestIdPrefix}-${index}`}
+              liveKindLabel={liveKindLabel}
+              watchedLabel={watchedLabel}
+              formatRemMin={formatRemMin}
+              onPressItem={onPressItem}
+            />
+          ))}
+        </HorizontalRailScroll>
+      </TvFocusGuideRegion>
     </View>
   );
 }

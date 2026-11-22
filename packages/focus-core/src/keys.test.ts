@@ -27,7 +27,16 @@ describe('key constants', () => {
     expect(isDigitKey('select')).toBe(false);
     expect(isDigitKey('play')).toBe(false);
     expect(isDigitKey('pause')).toBe(false);
+    expect(isDigitKey('stop')).toBe(false);
     expect(isDigitKey('rewind')).toBe(false);
     expect(isDigitKey('fastForward')).toBe(false);
+    expect(isDigitKey('next')).toBe(false);
+    expect(isDigitKey('previous')).toBe(false);
+    expect(isDigitKey('captions')).toBe(false);
+    expect(isDigitKey('audioTrack')).toBe(false);
+    expect(isDigitKey('guide')).toBe(false);
+    expect(isDigitKey('info')).toBe(false);
+    expect(isDigitKey('search')).toBe(false);
+    expect(isDigitKey('lastChannel')).toBe(false);
   });
 });

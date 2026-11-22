@@ -21,6 +21,7 @@ import {
   useState,
 } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRouteActive } from '../shared';
 
 const FALLBACK_ERROR_CODE = 'ERR_UNEXPECTED';
 const SAFE_CODE_TOKEN = /^[A-Za-z0-9_.-]{1,48}$/;
@@ -173,6 +174,7 @@ function CrashRecoveryFallback(props: {
   const i18n = useI18n();
   const formFactor = useFormFactor();
   const viewport = useViewport();
+  const routeActive = useRouteActive();
   const isTv = formFactor === 'tv' || viewport.inputModality === 'tv';
   const isPortrait = viewport.orientation === 'portrait' && !isTv;
   const [focusedIndex, setFocusedIndex] = useState(0);
@@ -228,7 +230,9 @@ function CrashRecoveryFallback(props: {
         },
       ]}
     >
-      {isTv ? <TvFocusAnchor testID="crash-tv-focus-anchor" /> : null}
+      {isTv ? (
+        <TvFocusAnchor testID="crash-tv-focus-anchor" hasTVPreferredFocus={routeActive} />
+      ) : null}
       <View
         {...tvContainerProps}
         style={[

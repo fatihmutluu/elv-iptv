@@ -12,11 +12,13 @@ export {
   createTvRemoteDispatcher,
   TvRemoteContext,
   type TvRemoteDispatcher,
+  type TvRemoteDispatcherLifecycle,
   type TvRemoteEvent,
   TvRemoteProvider,
   type TvRemoteProviderProps,
 } from './remote-dispatcher';
 export { TvFocusAnchor, type TvFocusAnchorProps } from './TvFocusAnchor';
+export { TvFocusGuideRegion, type TvFocusGuideRegionProps } from './TvFocusGuideRegion';
 export { type FrameWindow, TvList, type TvListProps } from './TvList';
 export { TvScrollEdgeFade, type TvScrollEdgeFadeProps } from './TvScrollEdgeFade';
 export {

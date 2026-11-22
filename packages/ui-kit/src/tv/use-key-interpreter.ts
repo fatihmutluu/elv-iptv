@@ -17,7 +17,9 @@ export interface UseKeyInterpreterOptions extends KeyInterpreterOptions {
   /** Monotonic clock in ms; defaults to `() => performance.now()`. */
   now?: () => number;
   /** Underlying key source hook; defaults to {@link useTvKeySource}. */
-  keySource?: (onInput: (input: KeyInput) => void) => void;
+  keySource?: (
+    onInput: ((input: KeyInput) => boolean | undefined) | ((input: KeyInput) => void),
+  ) => void;
 }
 
 /**
@@ -28,9 +30,10 @@ export interface UseKeyInterpreterOptions extends KeyInterpreterOptions {
  * - Applies a 1-turn stall guard (`now - lastTickAt > 100` skips `tick` once) so queued `up` events drain before an
  *   overdue interval fires a false `long`.
  * - Integrates with {@link TextEntryBoundary} / {@link TvTextInput} and cleans up timers, rAF, and held keys on unmount.
+ * - Handlers may return `false` to indicate an event (such as root Android TV `back`) was not consumed (`#425`).
  */
 export function useKeyInterpreter(
-  onEvent: (event: KeyEvent) => void,
+  onEvent: ((event: KeyEvent) => boolean | undefined) | ((event: KeyEvent) => void),
   options?: UseKeyInterpreterOptions,
 ): void {
   const onEventRef = useRef(onEvent);
@@ -53,6 +56,7 @@ export function useKeyInterpreter(
   const ticker = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const ackFrame = useRef<number | undefined>(undefined);
   const lastTickAt = useRef(0);
+  const longConsumedBack = useRef(false);
 
   const readNow = useCallback(() => (nowRef.current ? nowRef.current() : performance.now()), []);
 
@@ -66,19 +70,19 @@ export function useKeyInterpreter(
   }, [interpreter]);
 
   const deliver = useCallback(
-    (event: KeyEvent) => {
+    (event: KeyEvent): boolean => {
       if (textEntry.isActive()) {
-        if (event.key !== 'back') return;
+        if (event.key !== 'back') return false;
         if (event.kind === 'press') {
           textEntry.exit();
-          return;
+          return true;
         }
       }
       if (event.kind === 'repeat') {
         pendingKeys.current.add(event.key);
         scheduleAck();
       }
-      onEventRef.current(event);
+      return onEventRef.current(event) !== false;
     },
     [textEntry, scheduleAck],
   );
@@ -91,8 +95,9 @@ export function useKeyInterpreter(
   }, []);
 
   const onInput = useCallback(
-    (k: KeyInput) => {
+    (k: KeyInput): boolean => {
       if (k.action === 'down') {
+        if (k.key === 'back') longConsumedBack.current = false;
         heldKeys.current.add(k.key);
         if (ticker.current === undefined) {
           lastTickAt.current = readNow();
@@ -103,15 +108,30 @@ export function useKeyInterpreter(
               return;
             }
             lastTickAt.current = t;
-            for (const e of interpreter.tick(t)) deliver(e);
+            for (const e of interpreter.tick(t)) {
+              const handled = deliver(e);
+              if (handled && e.key === 'back' && e.kind === 'long') {
+                longConsumedBack.current = true;
+              }
+            }
           }, TICK_MS);
         }
       } else if (k.action === 'up' || k.action === 'cancel') {
+        if (k.key === 'back' && k.action === 'cancel') longConsumedBack.current = false;
         heldKeys.current.delete(k.key);
         pendingKeys.current.delete(k.key);
         if (heldKeys.current.size === 0) stopTicker();
       }
-      for (const e of interpreter.input(k)) deliver(e);
+      const events = interpreter.input(k);
+      let consumed = false;
+      for (let i = 0; i < events.length; i += 1) {
+        if (deliver(events[i] as KeyEvent)) consumed = true;
+      }
+      if (!consumed && k.key === 'back' && k.action === 'up' && longConsumedBack.current) {
+        longConsumedBack.current = false;
+        return true;
+      }
+      return consumed;
     },
     [interpreter, deliver, readNow, stopTicker],
   );
@@ -125,6 +145,7 @@ export function useKeyInterpreter(
       }
       heldKeys.current.clear();
       pendingKeys.current.clear();
+      longConsumedBack.current = false;
       interpreter.reset();
     },
     [interpreter, stopTicker],

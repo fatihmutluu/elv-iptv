@@ -18,8 +18,12 @@ Spec: `docs/superpowers/specs/2026-11-14-android-remote-keys-design.md`.
 ## Capture rules (spec 6.1)
 - `ForwardingWindowCallback` wraps `window.callback` of the current activity, on the UI thread, on
   `OnActivityEntersForeground` and when JS starts observing `onKey` (that hook runs on the JS thread); a UI-thread
-  `WeakHashMap<Window, Boolean>` prevents double-wrapping without retaining the callback/activity strongly.
-  It delegates every `Window.Callback` method, including Java default ones, with nullable reference parameters where allowed.
+  `WeakHashMap<Any, WeakReference<ForwardingWindowCallback>>` avoids double-wrapping third-party wrappers (bounded
+  delegate-chain walk <= 6, including `getWrapped()`) while automatically re-wrapping if an SDK/DevSupport replaces
+  `window.callback` without retaining strong GC cycles (#439).
+- Secondary/modal windows: `KeyForwarding.wrapDialog(dialog)` and `KeyForwarding.installModalWindows(activity)` (API 29+
+  `WindowInspector.getGlobalWindowViews()`, preferring `wrapDialog` over `OnUnhandledKeyEventListener`, deduplicated by
+  decorView in `WeakHashMap`) forward modal/dialog keys on foreground and main-window focus-loss transitions (#439).
 - `KeyForwarding.action`: forward `ACTION_DOWN` only with `repeatCount == 0`, every `ACTION_UP` (with `canceled` from
   `FLAG_CANCELED`); drop `ACTION_MULTIPLE`, `FLAG_FALLBACK` and `FLAG_SOFT_KEYBOARD` (IME-injected) events. Window
   focus loss (`onWindowFocusChanged(false)`) and `OnActivityEntersBackground` (TV standby without lockscreen) send `blur`.

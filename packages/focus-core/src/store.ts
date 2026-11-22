@@ -1,4 +1,4 @@
-import type { KeyEvent } from './keys';
+import type { Key, KeyEvent } from './keys';
 import { clampIndex, type ListState, moveList } from './list';
 import {
   createScope,
@@ -6,9 +6,19 @@ import {
   findList,
   resolveFallbackId,
   type ScopeState,
+  hasNonEmptyList as scopeHasNonEmptyList,
   setListIndex,
   withCount,
 } from './scope';
+
+const NAV_KEYS: ReadonlySet<Key> = new Set<Key>([
+  'up',
+  'down',
+  'left',
+  'right',
+  'channelUp',
+  'channelDown',
+]);
 
 /** What the app should do after a key event. */
 export type Intent =
@@ -17,7 +27,20 @@ export type Intent =
   | { kind: 'back' }
   | { kind: 'backLong' }
   | { kind: 'edge'; listId: string; side: 'start' | 'end' }
+  | { kind: 'emptyScope'; scopeId: string; listId: string }
   | { kind: 'key'; event: KeyEvent };
+
+/** Notification emitted when the top scope loses its last non-empty list (`#112`). */
+export interface EmptyScopeEvent {
+  scopeId: string;
+  listId: string;
+}
+
+/** Optional callbacks for {@link createFocusStore}. */
+export interface FocusStoreOptions {
+  /** Invoked when `setCount` or `popScope` leaves the top scope with no non-empty lists (`#112`). */
+  onEmptyScope?: (event: EmptyScopeEvent) => void;
+}
 
 /** Change reported to subscribers on a focus, active-list, emptiness, or scope transition. */
 export interface FocusChange {
@@ -44,6 +67,10 @@ export interface FocusStore {
   activate(listId: string): boolean;
   /** Whether `listId` is the `active` list of the topmost scope. */
   isActive(listId: string): boolean;
+  /** Reports whether the top scope currently has at least one list with `count > 0` (`#112`). */
+  hasNonEmptyList(): boolean;
+  /** Resolves the fallback list id in the top scope for `listId` (defaults to the active list) (`#112`). */
+  getFallbackTarget(listId?: string): string | undefined;
 }
 
 /**
@@ -51,15 +78,19 @@ export interface FocusStore {
  * press pops a pushed scope, or at the root gives `back`; `back` long gives `backLong` and never pops; a list edge
  * gives `edge`; every other key the active list does not consume gives `key`.
  */
-export function createFocusStore(root: {
-  id: string;
-  lists: readonly ListState[];
-  active: string;
-}): FocusStore {
+export function createFocusStore(
+  root: {
+    id: string;
+    lists: readonly ListState[];
+    active: string;
+  },
+  options?: FocusStoreOptions,
+): FocusStore {
   let scopes: readonly ScopeState[] = [createScope(root.id, root.lists, root.active)];
   const listeners = new Set<(change: FocusChange) => void>();
   const queue: FocusChange[] = [];
   let flushing = false;
+  const onEmptyScope = options?.onEmptyScope;
 
   function enqueue(...changes: FocusChange[]): void {
     if (changes.length === 0) return;
@@ -107,6 +138,12 @@ export function createFocusStore(root: {
       return [];
     }
     if (result.kind === 'edge') return [{ kind: 'edge', listId: list.id, side: result.side }];
+    if (list.count <= 0 && NAV_KEYS.has(event.key) && !scopeHasNonEmptyList(top)) {
+      return [
+        { kind: 'emptyScope', scopeId: top.id, listId: list.id },
+        { kind: 'key', event },
+      ];
+    }
     return [{ kind: 'key', event }];
   }
 
@@ -149,6 +186,9 @@ export function createFocusStore(root: {
       index: (restored.lists[restored.active] as ListState).index,
     });
     enqueue(...changes);
+    if (!scopeHasNonEmptyList(restored)) {
+      onEmptyScope?.({ scopeId: restored.id, listId: restored.active });
+    }
   }
 
   function focusList(listId: string, index?: number): boolean {
@@ -186,6 +226,7 @@ export function createFocusStore(root: {
       }
       const scope = scopes[found.scope] as ScopeState;
       const isTopScope = found.scope === scopes.length - 1;
+      let notifyEmpty: EmptyScopeEvent | undefined;
       if (isTopScope && nextCount === 0 && scope.active === listId) {
         const fallbackId = resolveFallbackId(scope, listId);
         if (fallbackId !== undefined) {
@@ -193,8 +234,13 @@ export function createFocusStore(root: {
           scopes = setListIndex(scopes, found.scope, fallbackId, target.index, true);
           changes.push({ listId: fallbackId, index: target.index });
         }
+        const updatedScope = scopes[found.scope] as ScopeState;
+        if (!scopeHasNonEmptyList(updatedScope)) {
+          notifyEmpty = { scopeId: updatedScope.id, listId: updatedScope.active };
+        }
       }
       enqueue(...changes);
+      if (notifyEmpty) onEmptyScope?.(notifyEmpty);
     },
     focus(listId, index) {
       focusList(listId, index);
@@ -203,6 +249,14 @@ export function createFocusStore(root: {
     isActive(listId) {
       const top = scopes[scopes.length - 1] as ScopeState;
       return top.active === listId;
+    },
+    hasNonEmptyList() {
+      const top = scopes[scopes.length - 1] as ScopeState;
+      return scopeHasNonEmptyList(top);
+    },
+    getFallbackTarget(listId) {
+      const top = scopes[scopes.length - 1] as ScopeState;
+      return resolveFallbackId(top, listId ?? top.active);
     },
   };
 }
