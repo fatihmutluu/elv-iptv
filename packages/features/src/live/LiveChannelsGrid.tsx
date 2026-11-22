@@ -17,7 +17,7 @@ import {
   View,
   VirtualizedList,
 } from 'react-native';
-import type { CatalogLayoutMetrics, PagedListSource } from '../shared';
+import { type CatalogLayoutMetrics, type PagedListSource, useBrowseFocusMemory } from '../shared';
 import { ChannelGridRow, type LiveGridShared } from './LiveChannelTile';
 
 const SCROLL_QUANTUM = 2;
@@ -133,20 +133,44 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
     [cardHeight, cols, i18n, layout.gridGap, layout.isTouch, layout.isTv, layout.padX, rowHeight],
   );
 
+  const focusMemory = useBrowseFocusMemory();
+  const focusMemoryRef = useRef(focusMemory);
+  focusMemoryRef.current = focusMemory;
   const itemCount = channelSource?.count() ?? 0;
   const rowCount = itemCount > 0 ? Math.ceil(itemCount / cols) : 0;
-  const [focusPos, setFocusPos] = useState({ row: 0, col: 0 });
+  const [focusPos, setFocusPos] = useState(() => {
+    const saved = focusMemory?.get<{ row: number; col: number }>('live:channels');
+    if (!saved || rowCount === 0) return saved ?? { row: 0, col: 0 };
+    const row = Math.min(Math.max(0, saved.row), rowCount - 1);
+    const maxCol = Math.max(0, Math.min(cols, itemCount - row * cols) - 1);
+    return { row, col: Math.min(Math.max(0, saved.col), maxCol) };
+  });
   const focusPosRef = useRef(focusPos);
   focusPosRef.current = focusPos;
+  const commitFocusPos = useCallback((next: { row: number; col: number }) => {
+    focusPosRef.current = next;
+    setFocusPos(next);
+    focusMemoryRef.current?.set('live:channels', next);
+  }, []);
   const listRef = useRef<InstanceType<typeof VirtualizedList> | null>(null);
   const lastBucketRef = useRef(-1);
   const visibleWindowRef = useRef({ startRow: 0, endRow: visibleRows + 1 });
+  const mountedSourceRef = useRef(channelSource);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset scroll & focus on channelSource change
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset scroll & focus only when channelSource switches after mount
   useEffect(() => {
     lastBucketRef.current = -1;
     visibleWindowRef.current = { startRow: 0, endRow: visibleRows + 1 };
-    setFocusPos({ row: 0, col: 0 });
+    if (mountedSourceRef.current !== channelSource) {
+      mountedSourceRef.current = channelSource;
+      commitFocusPos({ row: 0, col: 0 });
+    } else if (rowCount > 0) {
+      const cur = focusPosRef.current;
+      const row = Math.min(Math.max(0, cur.row), rowCount - 1);
+      const maxCol = Math.max(0, Math.min(cols, itemCount - row * cols) - 1);
+      const col = Math.min(Math.max(0, cur.col), maxCol);
+      if (row !== cur.row || col !== cur.col) setFocusPos({ row, col });
+    }
     listRef.current?.scrollToOffset({ offset: 0, animated: false });
   }, [channelSource, cols, visibleRows]);
 
@@ -180,16 +204,16 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
       const cur = focusPosRef.current;
       if (event.key === 'up') {
         if (cur.row === 0) onEdgeTop?.();
-        else setFocusPos({ row: cur.row - 1, col: cur.col });
+        else commitFocusPos({ row: cur.row - 1, col: cur.col });
       } else if (event.key === 'down') {
         const nextRow = Math.min(rowCount - 1, cur.row + 1);
         const maxCol = Math.max(0, Math.min(cols, itemCount - nextRow * cols) - 1);
-        setFocusPos({ row: nextRow, col: Math.min(cur.col, maxCol) });
+        commitFocusPos({ row: nextRow, col: Math.min(cur.col, maxCol) });
       } else if (event.key === 'left') {
-        setFocusPos({ row: cur.row, col: Math.max(0, cur.col - 1) });
+        commitFocusPos({ row: cur.row, col: Math.max(0, cur.col - 1) });
       } else if (event.key === 'right') {
         const maxCol = Math.max(0, Math.min(cols, itemCount - cur.row * cols) - 1);
-        setFocusPos({ row: cur.row, col: Math.min(maxCol, cur.col + 1) });
+        commitFocusPos({ row: cur.row, col: Math.min(maxCol, cur.col + 1) });
       } else if (event.key === 'back' && event.kind === 'press') {
         onEdgeTop?.();
       } else if (event.key === 'select' && event.kind === 'press') {
@@ -200,7 +224,7 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
           void channelSource.loadItem(idx).then((loaded) => loaded && onWatchChannel(loaded, idx));
       }
     },
-    [channelSource, cols, itemCount, onEdgeTop, onWatchChannel, rowCount],
+    [channelSource, cols, commitFocusPos, itemCount, onEdgeTop, onWatchChannel, rowCount],
   );
 
   const handleScroll = useCallback(

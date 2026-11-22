@@ -362,4 +362,70 @@ describe('deriver', () => {
     expect(s.d.fileEvent({ event: 'client-message' })).toEqual([]);
     expect(s.d.fileEvent({ event: 'start-file' })).toEqual([]);
   });
+
+  it('emits throttled progress on cache advance during opening and mid-stream stall (#314)', () => {
+    const s = setup('vod');
+    s.clock.t = 1200;
+    expect(
+      s.d.property('demuxer-cache-state', { 'fw-bytes': 16_384, 'cache-duration': 0.5 }),
+    ).toEqual([{ attempt: 7, type: 'progress', bytesReceived: 16_384, atMs: 1200 }]);
+
+    // Throttled within 500ms
+    s.clock.t = 1500;
+    expect(
+      s.d.property('demuxer-cache-state', { 'fw-bytes': 32_768, 'cache-duration': 1.0 }),
+    ).toEqual([]);
+
+    // Emits again after 500ms when bytes advance
+    s.clock.t = 1800;
+    expect(
+      s.d.property('demuxer-cache-state', { 'fw-bytes': 49_152, 'cache-duration': 1.5 }),
+    ).toEqual([{ attempt: 7, type: 'progress', bytesReceived: 49_152, atMs: 1800 }]);
+
+    // Once playing, cache growth does not spam progress until a stall begins
+    play(s);
+    s.clock.t = 3000;
+    expect(
+      s.d.property('demuxer-cache-state', { 'fw-bytes': 65_536, 'cache-duration': 2.5 }),
+    ).toEqual([]);
+
+    s.d.property('paused-for-cache', true);
+    s.clock.t = 3600;
+    expect(s.d.property('demuxer-cache-duration', 3.2)).toEqual([
+      { attempt: 7, type: 'progress', atMs: 3600 },
+    ]);
+  });
+
+  it('populates hasVideoTrack and decodedVideoFrames on clock anchors (#321)', () => {
+    const black = setup('live');
+    black.d.fileEvent({ event: 'file-loaded' });
+    black.d.property('track-list', [
+      { id: 1, type: 'video', selected: true },
+      { id: 1, type: 'audio', selected: true },
+    ]);
+    black.d.property('vid', 1);
+    black.d.property('estimated-vf-fps', 0);
+    black.d.property('time-pos', 2);
+    const blackClocks = clocks(restart(black.d));
+    expect(blackClocks[0]).toMatchObject({ hasVideoTrack: true, decodedVideoFrames: 0 });
+
+    const healthy = setup('live');
+    healthy.d.fileEvent({ event: 'file-loaded' });
+    healthy.d.property('vid', 1);
+    healthy.d.property('video-params', { w: 1280, h: 720 });
+    healthy.d.property('estimated-vf-fps', 25);
+    healthy.d.property('time-pos', 1);
+    const healthyClocks = clocks(restart(healthy.d));
+    expect(healthyClocks[0]?.hasVideoTrack).toBe(true);
+    expect(healthyClocks[0]?.decodedVideoFrames).toBeGreaterThan(0);
+
+    const radio = setup('live');
+    radio.d.fileEvent({ event: 'file-loaded' });
+    radio.d.property('track-list', [{ id: 1, type: 'audio', selected: true }]);
+    radio.d.property('vid', false);
+    radio.d.property('time-pos', 1);
+    const radioClocks = clocks(restart(radio.d));
+    expect(radioClocks[0]?.hasVideoTrack).toBe(false);
+    expect(radioClocks[0]?.decodedVideoFrames).toBeUndefined();
+  });
 });

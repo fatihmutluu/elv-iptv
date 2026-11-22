@@ -5,6 +5,10 @@ import type { ReactElement } from 'react';
 export interface VideoSurfaceProps {
   statusText: string;
   failed: boolean;
+  /** Picture scaling mode (`fit` letterboxed, `fill` cropped to cover). */
+  resizeMode?: 'fit' | 'fill';
+  /** Extra bottom inset in dp/px to lift native subtitles above a visible OSD (`#136`). */
+  subtitleBottomInsetPx?: number;
   testID?: string;
 }
 
@@ -20,6 +24,8 @@ export interface OpenVideoEngine {
   toggleFullscreen?: () => void;
   /** Optional host audio mute toggle. */
   toggleMute?: () => void;
+  /** Optional native screen-orientation lock toggle for touch lock (`#440`). */
+  setOrientationLocked?: (locked: boolean) => void;
 }
 
 /** Port supplied by the app composition root to open a `PlayerEngine` and render its surface. */

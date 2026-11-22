@@ -14,6 +14,7 @@ public struct LoadRequest: Equatable, Sendable {
   public var live: Bool
   public var startMs: Double?
   public var softwareAudio: Bool
+  public var preferHevcOverDolbyVision: Bool
   public var audioTrackId: String?
   public var subtitlePreference: SubtitlePreference
   public var liveEdgeCushionSeconds: Double?
@@ -24,6 +25,7 @@ public struct LoadRequest: Equatable, Sendable {
     live: Bool = true,
     startMs: Double? = nil,
     softwareAudio: Bool = false,
+    preferHevcOverDolbyVision: Bool = false,
     audioTrackId: String? = nil,
     subtitlePreference: SubtitlePreference = .default,
     liveEdgeCushionSeconds: Double? = nil
@@ -33,6 +35,7 @@ public struct LoadRequest: Equatable, Sendable {
     self.live = live
     self.startMs = startMs
     self.softwareAudio = softwareAudio
+    self.preferHevcOverDolbyVision = preferHevcOverDolbyVision
     self.audioTrackId = audioTrackId
     self.subtitlePreference = subtitlePreference
     self.liveEdgeCushionSeconds = liveEdgeCushionSeconds
@@ -171,6 +174,7 @@ public enum BackendObservation: Equatable, Sendable {
   case clock(positionSeconds: Double, rate: Double, durationSeconds: Double?, liveEdgeSeconds: Double?)
   case duration(Double)
   case tracks(MediaTracksOut)
+  case progress(bytesReceived: Int64?, bufferedSeconds: Double?)
   case readerFault(ReaderFailure)
   case failure(BackendFailure)
 }
@@ -226,6 +230,7 @@ public enum EngineEventOut: Equatable, Sendable {
   case firstFrame(attempt: Int, atMs: Double)
   case clock(attempt: Int, anchor: ClockAnchorOut)
   case stall(attempt: Int, phase: StallPhaseOut, atMs: Double)
+  case progress(attempt: Int, bytesReceived: Double?, atMs: Double)
   case tracks(attempt: Int, tracks: MediaTracksOut)
   case error(attempt: Int, error: MappedError)
   case surface(attempt: Int, change: SurfaceChangeOut)
@@ -252,6 +257,12 @@ public enum EngineEventOut: Equatable, Sendable {
       return ["attempt": attempt, "type": "clock", "anchor": anchorDict]
     case let .stall(attempt, phase, atMs):
       return ["attempt": attempt, "type": "stall", "phase": phase.rawValue, "atMs": atMs]
+    case let .progress(attempt, bytesReceived, atMs):
+      var out: [String: Any] = ["attempt": attempt, "type": "progress", "atMs": atMs]
+      if let bytesReceived {
+        out["bytesReceived"] = bytesReceived
+      }
+      return out
     case let .tracks(attempt, tracks):
       return ["attempt": attempt, "type": "tracks", "tracks": tracks.toDictionary()]
     case let .error(attempt, error):

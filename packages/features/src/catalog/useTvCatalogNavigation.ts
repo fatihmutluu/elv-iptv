@@ -1,5 +1,6 @@
 import type { KeyEvent } from '@elv/focus-core';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useBrowseFocusMemory } from '../shared';
 import {
   type CatalogNavRowDescriptor,
   type CatalogNavRowId,
@@ -10,6 +11,7 @@ import {
 
 /** Options for {@link useTvCatalogNavigation}. */
 export interface UseTvCatalogNavigationOptions {
+  readonly focusMemoryKey?: 'movie' | 'series';
   readonly isTv: boolean;
   readonly isActiveScope: boolean;
   readonly isGridMode: boolean;
@@ -33,11 +35,19 @@ export interface TvCatalogNavigationState {
 
 type FocusZone = CatalogNavRowId | 'grid' | null;
 
+interface CatalogFocusSnapshot {
+  readonly zone: FocusZone;
+  readonly col: number;
+  readonly gridPos: GridFocusPosition;
+  readonly colByRow: Readonly<Partial<Record<CatalogNavRowId, number>>>;
+}
+
 /**
  * Manages 10-ft TV D-pad navigation across Catalog Discovery rows (`catChips`, `continue`,
  * `rail-N`, `loadMore`) and the O(1)-memory 2D `(row, col)` Category Grid viewport.
  */
 export function useTvCatalogNavigation({
+  focusMemoryKey,
   isTv,
   isActiveScope,
   isGridMode,
@@ -50,9 +60,45 @@ export function useTvCatalogNavigation({
   onFocusRow,
   onFocusTopNav,
 }: UseTvCatalogNavigationOptions): TvCatalogNavigationState {
-  const [zone, setZone] = useState<FocusZone>(() => rows[0]?.id ?? null);
-  const [activeCol, setActiveCol] = useState(0);
-  const [gridPos, setGridPos] = useState<GridFocusPosition>({ row: 0, col: 0 });
+  const focusMemory = useBrowseFocusMemory();
+  const focusMemoryRef = useRef(focusMemory);
+  focusMemoryRef.current = focusMemory;
+  const focusMemoryKeyRef = useRef(focusMemoryKey);
+  focusMemoryKeyRef.current = focusMemoryKey;
+  const savedOnMountRef = useRef<CatalogFocusSnapshot | null | undefined>(undefined);
+  if (savedOnMountRef.current === undefined) {
+    savedOnMountRef.current =
+      focusMemoryKey !== undefined
+        ? (focusMemory?.get<CatalogFocusSnapshot>(focusMemoryKey) ?? null)
+        : null;
+  }
+  const pendingRestoreRef = useRef<CatalogFocusSnapshot | null>(savedOnMountRef.current);
+
+  const [zone, setZone] = useState<FocusZone>(() => {
+    const saved = savedOnMountRef.current;
+    if (saved != null) {
+      if (saved.zone === 'grid' && isGridMode && gridItemCount > 0) return 'grid';
+      if (saved.zone !== null && saved.zone !== 'grid' && rows.some((r) => r.id === saved.zone)) {
+        return saved.zone;
+      }
+    }
+    return rows[0]?.id ?? null;
+  });
+  const [activeCol, setActiveCol] = useState(() => {
+    const saved = savedOnMountRef.current;
+    if (saved != null && saved.zone !== null && saved.zone !== 'grid') {
+      const matched = rows.find((r) => r.id === saved.zone);
+      if (matched) return Math.min(Math.max(0, saved.col), matched.count - 1);
+    }
+    return 0;
+  });
+  const [gridPos, setGridPos] = useState<GridFocusPosition>(() => {
+    const saved = savedOnMountRef.current;
+    if (saved != null && isGridMode && gridItemCount > 0) {
+      return clampGridFocus(saved.gridPos.row, saved.gridPos.col, gridItemCount, gridColumns);
+    }
+    return { row: 0, col: 0 };
+  });
 
   const zoneRef = useRef<FocusZone>(zone);
   zoneRef.current = zone;
@@ -60,7 +106,13 @@ export function useTvCatalogNavigation({
   activeColRef.current = activeCol;
   const gridPosRef = useRef(gridPos);
   gridPosRef.current = gridPos;
-  const colMemoryRef = useRef<Map<CatalogNavRowId, number>>(new Map());
+  const colMemoryRef = useRef<Map<CatalogNavRowId, number>>(
+    new Map(
+      savedOnMountRef.current
+        ? (Object.entries(savedOnMountRef.current.colByRow) as [CatalogNavRowId, number][])
+        : [],
+    ),
+  );
   const prevGridModeRef = useRef(isGridMode);
 
   const rowsRef = useRef(rows);
@@ -83,20 +135,51 @@ export function useTvCatalogNavigation({
   const onFocusTopNavRef = useRef(onFocusTopNav);
   onFocusTopNavRef.current = onFocusTopNav;
 
-  const commitRow = useCallback((rowId: CatalogNavRowId | null, col: number) => {
-    zoneRef.current = rowId;
-    activeColRef.current = col;
-    if (rowId !== null) colMemoryRef.current.set(rowId, col);
-    setZone(rowId);
-    setActiveCol(col);
-  }, []);
+  const persistCatalogFocus = useCallback(
+    (nextZone: FocusZone, nextCol: number, nextGridPos: GridFocusPosition) => {
+      const mem = focusMemoryRef.current;
+      const key = focusMemoryKeyRef.current;
+      if (!mem || !key || nextZone === null) return;
+      const colByRow: Partial<Record<CatalogNavRowId, number>> = {};
+      for (const [rowId, col] of colMemoryRef.current) colByRow[rowId] = col;
+      mem.set<CatalogFocusSnapshot>(key, {
+        zone: nextZone,
+        col: nextCol,
+        gridPos: nextGridPos,
+        colByRow,
+      });
+    },
+    [],
+  );
 
-  const commitGrid = useCallback((pos: GridFocusPosition) => {
-    zoneRef.current = 'grid';
-    gridPosRef.current = pos;
-    setZone('grid');
-    setGridPos(pos);
-  }, []);
+  const commitRow = useCallback(
+    (rowId: CatalogNavRowId | null, col: number, persist = true) => {
+      zoneRef.current = rowId;
+      activeColRef.current = col;
+      if (rowId !== null) colMemoryRef.current.set(rowId, col);
+      setZone(rowId);
+      setActiveCol(col);
+      if (persist) {
+        pendingRestoreRef.current = null;
+        persistCatalogFocus(rowId, col, gridPosRef.current);
+      }
+    },
+    [persistCatalogFocus],
+  );
+
+  const commitGrid = useCallback(
+    (pos: GridFocusPosition, persist = true) => {
+      zoneRef.current = 'grid';
+      gridPosRef.current = pos;
+      setZone('grid');
+      setGridPos(pos);
+      if (persist) {
+        pendingRestoreRef.current = null;
+        persistCatalogFocus('grid', activeColRef.current, pos);
+      }
+    },
+    [persistCatalogFocus],
+  );
 
   // Transition focus cleanly when entering or exiting Grid Mode.
   useEffect(() => {
@@ -123,10 +206,30 @@ export function useTvCatalogNavigation({
     const currentRows = rowsRef.current;
     const currentZone = zoneRef.current;
 
+    const pending = pendingRestoreRef.current;
+    if (pending !== null) {
+      if (pending.zone === 'grid' && isGridMode && gridItemCount > 0) {
+        pendingRestoreRef.current = null;
+        commitGrid(
+          clampGridFocus(pending.gridPos.row, pending.gridPos.col, gridItemCount, gridColumns),
+          false,
+        );
+        return;
+      }
+      if (pending.zone !== null && pending.zone !== 'grid') {
+        const matched = currentRows.find((r) => r.id === pending.zone);
+        if (matched) {
+          pendingRestoreRef.current = null;
+          commitRow(matched.id, Math.min(Math.max(0, pending.col), matched.count - 1), false);
+          return;
+        }
+      }
+    }
+
     if (currentZone === 'grid') {
       if (!isGridMode || gridItemCount <= 0) {
         const fallback = currentRows[0] ?? null;
-        commitRow(fallback?.id ?? null, 0);
+        commitRow(fallback?.id ?? null, 0, false);
         return;
       }
       const clamped = clampGridFocus(
@@ -136,27 +239,27 @@ export function useTvCatalogNavigation({
         gridColumns,
       );
       if (clamped.row !== gridPosRef.current.row || clamped.col !== gridPosRef.current.col) {
-        commitGrid(clamped);
+        commitGrid(clamped, false);
       }
       return;
     }
 
     if (currentRows.length === 0) {
-      commitRow(null, 0);
+      commitRow(null, 0, false);
       return;
     }
 
     const matched = currentRows.find((r) => r.id === currentZone);
     if (matched) {
       const clampedCol = Math.min(Math.max(0, activeColRef.current), matched.count - 1);
-      if (clampedCol !== activeColRef.current) commitRow(matched.id, clampedCol);
+      if (clampedCol !== activeColRef.current) commitRow(matched.id, clampedCol, false);
       return;
     }
 
     const target = currentRows[0];
     if (target) {
       const saved = colMemoryRef.current.get(target.id) ?? 0;
-      commitRow(target.id, Math.min(Math.max(0, saved), target.count - 1));
+      commitRow(target.id, Math.min(Math.max(0, saved), target.count - 1), false);
     }
   }, [commitGrid, commitRow, gridColumns, gridItemCount, isGridMode, rowSignature]);
 

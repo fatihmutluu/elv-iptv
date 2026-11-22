@@ -99,7 +99,9 @@ export function createLadderRunner(deps: LadderRunnerDeps) {
     return ctl.load({
       ...(stream === undefined ? {} : { stream }),
       ...(startMs === undefined ? {} : { startMs }),
-      ...(softwareAudio ? { options: { softwareAudio: true } } : {}),
+      ...(softwareAudio
+        ? { options: { softwareAudio: true, preferHevcOverDolbyVision: true } }
+        : {}),
     });
   };
 

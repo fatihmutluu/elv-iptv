@@ -18,6 +18,8 @@ export interface StreamRequest {
 export interface LoadOptions {
   /** Decode audio in software; recovery rung 4 asks for it after a `decoder` error when the engine can. */
   softwareAudio?: boolean;
+  /** Prefer HEVC base-layer / Profile 8.1 decoding over Dolby Vision Profile 7 (`#189`). */
+  preferHevcOverDolbyVision?: boolean;
   /** Preferred audio track ID to select once media tracks are available. */
   audioTrackId?: string;
   /** Preferred subtitle track ID to select, or `null` to disable subtitles explicitly. */
@@ -95,6 +97,10 @@ export interface ClockAnchor {
   rate: number;
   durationMs?: number;
   liveEdgeMs?: number;
+  /** Cumulative rendered/decoded video frames reported by the engine for black-screen detection (`#321`). */
+  decodedVideoFrames?: number;
+  /** Whether the active media declares a video track (distinguishes radio/audio-only from black screen). */
+  hasVideoTrack?: boolean;
 }
 
 /** Every event echoes the token of the media or command it belongs to. */
@@ -104,6 +110,7 @@ export type EngineEvent = { attempt: AttemptToken } & (
   | { type: 'clock'; anchor: ClockAnchor }
   | { type: 'tracks'; tracks: MediaTracks }
   | { type: 'stall'; phase: 'start' | 'end'; atMs: number }
+  | { type: 'progress'; bytesReceived?: number; atMs: number }
   | { type: 'error'; error: EngineError }
   | { type: 'surface'; change: 'created' | 'destroyed' }
 );

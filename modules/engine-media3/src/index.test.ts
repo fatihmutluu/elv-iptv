@@ -47,11 +47,12 @@ function fakeNative() {
     return engine;
   });
   const uptimeMs = vi.fn(() => clock.uptime);
-  requireOptionalNativeModule.mockReturnValue({ Engine, uptimeMs });
+  const setOrientationLocked = vi.fn();
+  requireOptionalNativeModule.mockReturnValue({ Engine, uptimeMs, setOrientationLocked });
   const emit = (event: EngineEvent) => {
     for (const listener of [...listeners]) listener(event);
   };
-  return { clock, engine, Engine, uptimeMs, remove, emit };
+  return { clock, engine, Engine, uptimeMs, setOrientationLocked, remove, emit };
 }
 
 afterEach(() => {
@@ -145,13 +146,29 @@ describe('Media3Surface', () => {
     expect(props?.engine).toBe(native.engine);
   });
 
-  it('passes the resize mode to the native view and leaves the default to native', async () => {
+  it('passes the resize mode and subtitle bottom inset to the native view and leaves defaults to native', async () => {
     const { native, engine, Media3Surface } = await engineWithView();
-    expect(Media3Surface({ engine, resizeMode: 'fill' })?.props).toEqual({
-      engine: native.engine,
-      resizeMode: 'fill',
-    });
+    expect(Media3Surface({ engine, resizeMode: 'fill', subtitleBottomInsetPx: 96 })?.props).toEqual(
+      {
+        engine: native.engine,
+        resizeMode: 'fill',
+        subtitleBottomInsetPx: 96,
+      },
+    );
     expect(Media3Surface({ engine })?.props).toEqual({ engine: native.engine });
+  });
+
+  it('forwards setOrientationLocked to the native module and no-ops when absent (#440)', async () => {
+    const native = fakeNative();
+    const { setOrientationLocked } = await load();
+    setOrientationLocked(true);
+    setOrientationLocked(false);
+    expect(native.setOrientationLocked).toHaveBeenNthCalledWith(1, true);
+    expect(native.setOrientationLocked).toHaveBeenNthCalledWith(2, false);
+
+    requireOptionalNativeModule.mockReturnValue(null);
+    const absent = await load();
+    expect(() => absent.setOrientationLocked(true)).not.toThrow();
   });
 
   it('keeps one native component type across renders', async () => {

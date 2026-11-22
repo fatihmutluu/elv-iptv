@@ -37,6 +37,7 @@ final class AetherSubtitleOverlayView: UIView {
   private var bitmapViews: [UIImageView] = []
   private var slotViews: [SubtitleSlot: SlotPillView] = [:]
   private var presentation: SubtitlePresentation = .empty
+  private var bottomInset: CGFloat = 0
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -74,6 +75,13 @@ final class AetherSubtitleOverlayView: UIView {
   func updateGravity(_ gravity: AVLayerVideoGravity) {
     guard presentation.gravity != gravity else { return }
     presentation.gravity = gravity
+    setNeedsLayout()
+  }
+
+  func updateBottomInset(_ inset: CGFloat) {
+    let clean: CGFloat = (inset.isFinite && inset > 0) ? inset : 0
+    guard clean != bottomInset else { return }
+    bottomInset = clean
     setNeedsLayout()
   }
 
@@ -203,7 +211,8 @@ final class AetherSubtitleOverlayView: UIView {
         slot: slot,
         visibleStage: visibleStage,
         measuredTextSize: LayoutSize(width: Double(measured.width), height: Double(measured.height)),
-        fontSize: Double(fontSize)
+        fontSize: Double(fontSize),
+        bottomInset: Double(bottomInset)
       )
       pill.frame = Self.toCGRect(placed.pillFrame)
       pill.label.frame = Self.toCGRect(placed.labelFrame)

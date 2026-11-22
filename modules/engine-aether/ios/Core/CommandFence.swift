@@ -135,6 +135,7 @@ public final class CommandFence: @unchecked Sendable {
       let .firstFrame(attempt, _),
       let .clock(attempt, _),
       let .stall(attempt, _, _),
+      let .progress(attempt, _, _),
       let .error(attempt, _):
       guard driverEpoch == snapshot.epoch, attempt == snapshot.token else { return nil }
       return event

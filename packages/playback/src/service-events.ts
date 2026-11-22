@@ -11,9 +11,84 @@ import {
 import type { RecoveryHooks } from './seam';
 import type { SeekCoalescer } from './seek-coalescer';
 import type { PlaybackStateStore } from './state-store';
-import type { PlaybackClock, PlaybackState, PlaybackStatus, TuneRequest } from './types';
+import type {
+  PlaybackClock,
+  PlaybackState,
+  PlaybackStatus,
+  PlaybackTimers,
+  TuneRequest,
+} from './types';
 
 const IGNORED_IN: ReadonlySet<PlaybackStatus['kind']> = new Set(['idle', 'failed', 'limited']);
+
+export interface StartTimeoutController {
+  isArmed(): boolean;
+  arm(ms: number): void;
+  clear(): void;
+  onProgress(bytesReceived?: number): void;
+}
+
+/** @internal Manages tune start timeout with bounded byte-progress extensions on VOD (`#314`). */
+export function createStartTimeoutController(deps: {
+  readonly clock: PlaybackClock;
+  readonly timers: PlaybackTimers;
+  readonly config: PlaybackConfig;
+  currentRequest(): TuneRequest | undefined;
+  getState(): PlaybackState;
+  onTimeout(): void;
+}): StartTimeoutController {
+  let timer: unknown;
+  let tuningStartedAtMs: number | undefined;
+  let lastBytes: number | undefined;
+
+  const clearTimer = (): void => {
+    if (timer !== undefined) deps.timers.clearTimeout(timer);
+    timer = undefined;
+  };
+
+  const schedule = (ms: number): void => {
+    clearTimer();
+    const token = deps.getState().attempt;
+    timer = deps.timers.setTimeout(() => {
+      timer = undefined;
+      tuningStartedAtMs = undefined;
+      lastBytes = undefined;
+      if (token === deps.getState().attempt) deps.onTimeout();
+    }, ms);
+  };
+
+  return {
+    isArmed: () => timer !== undefined,
+    arm(ms) {
+      tuningStartedAtMs = deps.clock.now();
+      lastBytes = undefined;
+      schedule(ms);
+    },
+    clear() {
+      clearTimer();
+      tuningStartedAtMs = undefined;
+      lastBytes = undefined;
+    },
+    onProgress(bytesReceived) {
+      if (
+        timer === undefined ||
+        tuningStartedAtMs === undefined ||
+        deps.currentRequest()?.kind !== 'vod' ||
+        deps.getState().status.kind !== 'tuning'
+      ) {
+        return;
+      }
+      if (bytesReceived !== undefined) {
+        if (!Number.isFinite(bytesReceived) || bytesReceived <= 0) return;
+        if (lastBytes !== undefined && bytesReceived <= lastBytes) return;
+        lastBytes = bytesReceived;
+      }
+      const remaining = tuningStartedAtMs + deps.config.vodStartMaxTimeoutMs - deps.clock.now();
+      if (remaining <= 0) return;
+      schedule(Math.min(deps.config.startTimeoutMs, remaining));
+    },
+  };
+}
 
 export interface EventRouterDeps {
   readonly engine: PlayerEngine;
@@ -30,6 +105,7 @@ export interface EventRouterDeps {
   setLastVodPosition(ms: number): void;
   freezeAnchor(): void;
   clearStartTimeout(): void;
+  onVodProgress?(bytesReceived?: number): void;
   onSeekSettled?(): void;
 }
 
@@ -110,6 +186,10 @@ export function createEngineEventRouter(deps: EventRouterDeps): (event: EngineEv
       }
       case 'stall':
         hooks.onStall?.(event.phase);
+        return;
+      case 'progress':
+        deps.onVodProgress?.(event.bytesReceived);
+        hooks.onProgress?.(event.atMs, event.bytesReceived);
         return;
       case 'error':
         store.batch(() => {

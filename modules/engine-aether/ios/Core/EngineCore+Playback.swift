@@ -129,6 +129,45 @@ extension EngineCore {
     emitAnchor(rate: rate, atMs: uptimeMs())
   }
 
+  func handleProgress(bytesReceived: Int64?, bufferedSeconds: Double?) {
+    var bytesAdvanced = false
+    if let bytes = bytesReceived, bytes > 0, bytes > lastProgressBytes {
+      bytesAdvanced = true
+    }
+    var bufferAdvanced = false
+    if let buffered = bufferedSeconds, buffered.isFinite, buffered >= 0 {
+      if buffered > lastProgressBufferedSeconds {
+        bufferAdvanced = true
+      } else if buffered < lastProgressBufferedSeconds {
+        lastProgressBufferedSeconds = buffered
+      }
+    }
+
+    let waiting = !played || stalled || reloading
+    guard waiting else {
+      if bytesAdvanced, let bytes = bytesReceived { lastProgressBytes = bytes }
+      if bufferAdvanced, let buffered = bufferedSeconds { lastProgressBufferedSeconds = buffered }
+      return
+    }
+
+    let isCheckpointAdvance = bytesReceived == nil && bufferedSeconds == nil
+    guard bytesAdvanced || bufferAdvanced || isCheckpointAdvance else { return }
+    let now = uptimeMs()
+    if let prev = lastProgressUptimeMs, now - prev < 500.0 {
+      return
+    }
+    lastProgressUptimeMs = now
+    if bytesAdvanced, let bytes = bytesReceived { lastProgressBytes = bytes }
+    if bufferAdvanced, let buffered = bufferedSeconds { lastProgressBufferedSeconds = buffered }
+    emit(
+      .progress(
+        attempt: token,
+        bytesReceived: bytesAdvanced ? bytesReceived.map(Double.init) : nil,
+        atMs: now
+      )
+    )
+  }
+
   func emitAnchor(rate: Double, atMs: Double) {
     let positionMs = lastPositionSeconds * 1_000.0
     lastAnchoredPositionMs = positionMs
@@ -154,7 +193,22 @@ extension EngineCore {
     setScreenOn(false)
     sink?.clearSubtitles()
     let live = currentRequest?.live ?? true
-    emit(.error(attempt: token, error: mapFailure(failure, url: currentRequest?.url ?? "", live: live, played: played)))
+    let allowDvFallback = !(currentRequest?.preferHevcOverDolbyVision ?? false) && !dolbyVisionFallbackLatched
+    if case let .engine(kind, _, _) = failure, kind == "dolbyVisionRequiresHardware", allowDvFallback {
+      dolbyVisionFallbackLatched = true
+    }
+    emit(
+      .error(
+        attempt: token,
+        error: mapFailure(
+          failure,
+          url: currentRequest?.url ?? "",
+          live: live,
+          played: played,
+          allowDolbyVisionFallback: allowDvFallback
+        )
+      )
+    )
   }
 
   private func applyGenuinePause() {

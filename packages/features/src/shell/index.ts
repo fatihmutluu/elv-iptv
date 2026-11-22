@@ -19,6 +19,14 @@ export {
   usePreferences,
 } from './AppProviders';
 export {
+  type BrowseFocusMemory,
+  BrowseFocusMemoryProvider,
+  type BrowseFocusMemoryProviderProps,
+  createBrowseFocusMemory,
+  DEFAULT_BROWSE_FOCUS_MAX_ENTRIES,
+  useBrowseFocusMemory,
+} from './browse-focus-memory';
+export {
   CrashRecoveryBoundary,
   type CrashRecoveryBoundaryProps,
   formatRedactedErrorCode,

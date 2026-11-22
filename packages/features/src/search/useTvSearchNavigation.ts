@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useBrowseFocusMemory } from '../shared';
 import {
   type SearchFocusPosition,
   type SearchNavRowDescriptor,
@@ -59,7 +60,26 @@ export function useTvSearchNavigation({
   onFocusPosition,
   onFocusTopNav,
 }: UseTvSearchNavigationOptions): TvSearchNavigationState {
-  const [pos, setPos] = useState<SearchFocusPosition>({ rowId: 'input', col: 0 });
+  const focusMemory = useBrowseFocusMemory();
+  const focusMemoryRef = useRef(focusMemory);
+  focusMemoryRef.current = focusMemory;
+  const savedOnMountRef = useRef<SearchFocusPosition | null | undefined>(undefined);
+  if (savedOnMountRef.current === undefined) {
+    savedOnMountRef.current = focusMemory?.get<SearchFocusPosition>('search') ?? null;
+  }
+  const pendingRestoreRef = useRef<SearchFocusPosition | null>(savedOnMountRef.current);
+
+  const [pos, setPos] = useState<SearchFocusPosition>(() => {
+    const saved = savedOnMountRef.current;
+    if (saved != null) {
+      const matched = rows.find((r) => r.id === saved.rowId && r.count > 0);
+      if (matched) {
+        pendingRestoreRef.current = null;
+        return { rowId: matched.id, col: Math.min(Math.max(0, saved.col), matched.count - 1) };
+      }
+    }
+    return { rowId: 'input', col: 0 };
+  });
   const [editingInput, setEditingInput] = useState(false);
 
   const inputRef = useRef<TvTextInputInstance | null>(null);
@@ -81,9 +101,13 @@ export function useTvSearchNavigation({
   const onFocusTopNavRef = useRef(onFocusTopNav);
   onFocusTopNavRef.current = onFocusTopNav;
 
-  const commitPos = useCallback((next: SearchFocusPosition) => {
+  const commitPos = useCallback((next: SearchFocusPosition, persist = true) => {
     posRef.current = next;
     setPos(next);
+    if (persist) {
+      pendingRestoreRef.current = null;
+      focusMemoryRef.current?.set<SearchFocusPosition>('search', next);
+    }
   }, []);
 
   const rowSignature = rows.map((r) => `${r.id}:${r.count}:${r.columns ?? 0}`).join('|');
@@ -92,18 +116,30 @@ export function useTvSearchNavigation({
   // biome-ignore lint/correctness/useExhaustiveDependencies: rowSignature tracks exact structural changes in rows
   useEffect(() => {
     const currentRows = rowsRef.current;
+    const pending = pendingRestoreRef.current;
+    if (pending !== null) {
+      const restored = currentRows.find((r) => r.id === pending.rowId && r.count > 0);
+      if (restored) {
+        pendingRestoreRef.current = null;
+        commitPos(
+          { rowId: restored.id, col: Math.min(Math.max(0, pending.col), restored.count - 1) },
+          false,
+        );
+        return;
+      }
+    }
     const current = posRef.current;
     const matched = currentRows.find((r) => r.id === current.rowId);
     if (matched) {
       const clampedCol = Math.min(Math.max(0, current.col), matched.count - 1);
       if (clampedCol !== current.col) {
-        commitPos({ rowId: matched.id, col: clampedCol });
+        commitPos({ rowId: matched.id, col: clampedCol }, false);
       }
       return;
     }
     const fallback = currentRows[0];
     if (fallback) {
-      commitPos({ rowId: fallback.id, col: 0 });
+      commitPos({ rowId: fallback.id, col: 0 }, false);
     }
   }, [commitPos, rowSignature]);
 

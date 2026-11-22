@@ -81,6 +81,7 @@ describe('recovery hooks', () => {
       onClock: () => calls.push('clock'),
       onError: (e) => calls.push(`error:${e.code}`),
       onStall: (p) => calls.push(`stall:${p}`),
+      onProgress: (atMs, bytes) => calls.push(`progress:${atMs}:${bytes ?? 'none'}`),
       onStartTimeout: () => calls.push('start-timeout'),
       onSurface: (c) => calls.push(`surface:${c}`),
       onDispose: () => calls.push('dispose'),
@@ -90,6 +91,7 @@ describe('recovery hooks', () => {
     await vi.advanceTimersByTimeAsync(8000);
     e.emit({ attempt: t, type: 'error', error: { code: 'network' } });
     e.emit({ attempt: t, type: 'stall', phase: 'start', atMs: 0 });
+    e.emit({ attempt: t, type: 'progress', bytesReceived: 2048, atMs: 9000 });
     e.emit({ attempt: t, type: 'state', state: 'buffering' });
     e.emit({ attempt: t, type: 'clock', anchor: { positionMs: 1, atMs: 1000, rate: 1 } });
     e.surface('created');
@@ -104,6 +106,7 @@ describe('recovery hooks', () => {
       'start-timeout',
       'error:network',
       'stall:start',
+      'progress:9000:2048',
       'state:buffering',
       'clock',
       'surface:created',

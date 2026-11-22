@@ -52,6 +52,8 @@ const OBSERVED = [
   'duration',
   'speed',
   'demuxer-cache-state',
+  'demuxer-cache-duration',
+  'estimated-vf-fps',
   'video-params',
   'vid',
   'track-list',
@@ -209,6 +211,7 @@ export function createSessionController(hooks: LiveSessionHooks) {
         }
         if (TRACK_PROPS.has(name)) {
           fromCurrent(L, tracks.property(name, e['data']));
+          if (name === 'track-list') fromCurrent(L, L.deriver.property(name, e['data']));
           if (!opening.isOpening()) queueReconcile(L);
           return;
         }

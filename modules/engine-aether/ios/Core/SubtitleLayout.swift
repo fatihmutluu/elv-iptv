@@ -197,7 +197,8 @@ public enum SubtitleLayout {
     slot: SubtitleSlot,
     visibleStage: LayoutRect,
     measuredTextSize: LayoutSize,
-    fontSize: Double
+    fontSize: Double,
+    bottomInset: Double = 0
   ) -> (pillFrame: LayoutRect, labelFrame: LayoutRect) {
     guard visibleStage.width > 0, visibleStage.height > 0 else {
       return (.zero, .zero)
@@ -219,6 +220,7 @@ public enum SubtitleLayout {
     }
     let clampedX = min(max(visibleStage.minX, rawX), max(visibleStage.minX, visibleStage.maxX - pillWidth))
 
+    let safeBottomInset = (bottomInset.isFinite && bottomInset > 0) ? min(bottomInset, visibleStage.height * 0.45) : 0
     let marginY = min(max(12, visibleStage.height * 0.06), max(0, (visibleStage.height - pillHeight) * 0.5))
     let rawY: Double
     switch slot.vertical {
@@ -227,7 +229,7 @@ public enum SubtitleLayout {
     case .middle:
       rawY = visibleStage.midY - pillHeight * 0.5
     case .bottom:
-      rawY = visibleStage.maxY - marginY - pillHeight
+      rawY = visibleStage.maxY - marginY - safeBottomInset - pillHeight
     }
     let clampedY = min(max(visibleStage.minY, rawY), max(visibleStage.minY, visibleStage.maxY - pillHeight))
 

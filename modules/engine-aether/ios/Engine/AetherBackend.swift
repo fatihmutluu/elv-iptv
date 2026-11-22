@@ -28,6 +28,7 @@ final class AetherBackend: PlayerBackend {
 
   var engine: AetherEngine?
   var cancellables = Set<AnyCancellable>()
+  var itemProgressCancellable: AnyCancellable?
   private var audioSessionObserver: AetherAudioSessionObserver?
   weak var boundPlayerView: AetherPlayerView?
   var gravity: AVLayerVideoGravity = .resizeAspect
@@ -228,6 +229,8 @@ final class AetherBackend: PlayerBackend {
   }
 
   func cancelTasksAndReader() {
+    itemProgressCancellable?.cancel()
+    itemProgressCancellable = nil
     loadTask?.cancel()
     loadTask = nil
     seekTask?.cancel()

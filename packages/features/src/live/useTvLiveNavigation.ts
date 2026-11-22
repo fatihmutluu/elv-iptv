@@ -1,5 +1,6 @@
 import type { KeyEvent } from '@elv/focus-core';
 import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useBrowseFocusMemory } from '../shared';
 import { EMPTY_LIVE_MEMORY, type LiveMode, type LiveTabMemory } from './live-model';
 
 /** Controlled-or-uncontrolled Live tab memory helper preserving mode, category, and channel history. */
@@ -112,22 +113,42 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
   const { channelCount, hasBody, zapDrawerOpen, numpadOpen } = opts;
   const hasCategoryBar = (mode === 'channels' || mode === 'epg') && categoryCount > 0;
 
-  const [nav, setNav] = useState<NavSnapshot>(() => ({
-    zone: 'header',
-    headerRow: 'modes',
-    modeCol: modeToIndex(mode),
-    catCol: 0,
-    watchZone: 'controls',
-    watchControlIdx: 0,
-    zapIdx: 0,
-    numpadRow: 0,
-    numpadCol: 0,
-  }));
+  const focusMemory = useBrowseFocusMemory();
+  const focusMemoryRef = useRef(focusMemory);
+  focusMemoryRef.current = focusMemory;
+  const savedOnMountRef = useRef<NavSnapshot | null | undefined>(undefined);
+  if (savedOnMountRef.current === undefined) {
+    savedOnMountRef.current = focusMemory?.get<NavSnapshot>('live') ?? null;
+  }
+  const pendingBodyRestoreRef = useRef(savedOnMountRef.current?.zone === 'body');
+
+  const [nav, setNav] = useState<NavSnapshot>(
+    () =>
+      savedOnMountRef.current ?? {
+        zone: 'header',
+        headerRow: 'modes',
+        modeCol: modeToIndex(mode),
+        catCol: 0,
+        watchZone: 'controls',
+        watchControlIdx: 0,
+        zapIdx: 0,
+        numpadRow: 0,
+        numpadCol: 0,
+      },
+  );
 
   const navRef = useRef(nav);
   navRef.current = nav;
   const optsRef = useRef(opts);
   optsRef.current = opts;
+  const updateNav = useCallback((updater: (prev: NavSnapshot) => NavSnapshot) => {
+    pendingBodyRestoreRef.current = false;
+    const next = updater(navRef.current);
+    if (next === navRef.current) return;
+    navRef.current = next;
+    focusMemoryRef.current?.set<NavSnapshot>('live', next);
+    setNav(next);
+  }, []);
 
   useEffect(() => {
     if (numpadOpen) {
@@ -148,7 +169,11 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
         !hasCategoryBar && prev.headerRow === 'categories' ? 'modes' : prev.headerRow;
       const nextZapIdx = channelCount > 0 ? Math.min(prev.zapIdx, channelCount - 1) : 0;
       const nextWatchZone = !zapDrawerOpen || channelCount === 0 ? 'controls' : prev.watchZone;
-      const nextZone = !hasBody && prev.zone === 'body' ? 'header' : prev.zone;
+      let nextZone = !hasBody && prev.zone === 'body' ? 'header' : prev.zone;
+      if (hasBody && pendingBodyRestoreRef.current) {
+        pendingBodyRestoreRef.current = false;
+        nextZone = 'body';
+      }
       if (
         nextModeCol === prev.modeCol &&
         nextCatCol === prev.catCol &&
@@ -175,144 +200,151 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
     const showCats =
       (optsRef.current.mode === 'channels' || optsRef.current.mode === 'epg') &&
       optsRef.current.categoryCount > 0;
-    setNav((prev) => ({
+    updateNav((prev) => ({
       ...prev,
       zone: 'header',
       headerRow: showCats ? 'categories' : 'modes',
     }));
-  }, []);
+  }, [updateNav]);
 
-  const handleTvKey = useCallback((event: KeyEvent) => {
-    const o = optsRef.current;
-    const cur = navRef.current;
+  const handleTvKey = useCallback(
+    (event: KeyEvent) => {
+      const o = optsRef.current;
+      const cur = navRef.current;
 
-    if (o.numpadOpen) {
-      if (event.kind === 'press' && event.key === 'back') {
-        o.onCloseNumpad();
-        return;
-      }
-      if (event.kind !== 'press' && event.kind !== 'repeat') return;
-      if (event.key === 'up') {
-        setNav((p) => ({ ...p, numpadRow: Math.max(0, p.numpadRow - 1) }));
-      } else if (event.key === 'down') {
-        setNav((p) => ({ ...p, numpadRow: Math.min(NUMPAD_GRID.length - 1, p.numpadRow + 1) }));
-      } else if (event.key === 'left') {
-        setNav((p) => ({ ...p, numpadCol: Math.max(0, p.numpadCol - 1) }));
-      } else if (event.key === 'right') {
-        setNav((p) => ({ ...p, numpadCol: Math.min(2, p.numpadCol + 1) }));
-      } else if (event.key === 'select' && event.kind === 'press') {
-        const keyVal = NUMPAD_GRID[cur.numpadRow]?.[cur.numpadCol];
-        if (keyVal) o.onPressNumpadKey(keyVal);
-      }
-      return;
-    }
-
-    if (event.kind === 'press' && event.key === 'back') {
-      if (cur.zone === 'body' && o.mode === 'favorites') {
-        if (cur.watchZone === 'zap') {
-          setNav((p) => ({ ...p, watchZone: 'controls' }));
-        } else {
-          setNav((p) => ({ ...p, zone: 'header', headerRow: 'modes' }));
+      if (o.numpadOpen) {
+        if (event.kind === 'press' && event.key === 'back') {
+          o.onCloseNumpad();
+          return;
         }
-        return;
-      }
-      o.onFocusTopNav?.();
-      return;
-    }
-
-    if (event.kind !== 'press' && event.kind !== 'repeat') return;
-
-    if (o.isEmpty) {
-      if (event.key === 'up') o.onFocusTopNav?.();
-      else if (event.key === 'select' && event.kind === 'press' && o.hasOpenSourcesCta) {
-        o.onOpenSources();
-      }
-      return;
-    }
-
-    const showCats = (o.mode === 'channels' || o.mode === 'epg') && o.categoryCount > 0;
-
-    if (cur.zone === 'header') {
-      if (cur.headerRow === 'modes') {
-        const maxCol = o.mode === 'channels' ? 3 : 2;
-        if (event.key === 'up') o.onFocusTopNav?.();
-        else if (event.key === 'left') {
-          setNav((p) => ({ ...p, modeCol: Math.max(0, p.modeCol - 1) }));
-        } else if (event.key === 'right') {
-          setNav((p) => ({ ...p, modeCol: Math.min(maxCol, p.modeCol + 1) }));
+        if (event.kind !== 'press' && event.kind !== 'repeat') return;
+        if (event.key === 'up') {
+          setNav((p) => ({ ...p, numpadRow: Math.max(0, p.numpadRow - 1) }));
         } else if (event.key === 'down') {
-          if (showCats) setNav((p) => ({ ...p, headerRow: 'categories' }));
-          else if (o.hasBody) setNav((p) => ({ ...p, zone: 'body', watchZone: 'controls' }));
+          setNav((p) => ({ ...p, numpadRow: Math.min(NUMPAD_GRID.length - 1, p.numpadRow + 1) }));
+        } else if (event.key === 'left') {
+          setNav((p) => ({ ...p, numpadCol: Math.max(0, p.numpadCol - 1) }));
+        } else if (event.key === 'right') {
+          setNav((p) => ({ ...p, numpadCol: Math.min(2, p.numpadCol + 1) }));
         } else if (event.key === 'select' && event.kind === 'press') {
-          if (cur.modeCol === 3 && o.mode === 'channels') {
-            o.onToggleNumpad();
+          const keyVal = NUMPAD_GRID[cur.numpadRow]?.[cur.numpadCol];
+          if (keyVal) o.onPressNumpadKey(keyVal);
+        }
+        return;
+      }
+
+      if (event.kind === 'press' && event.key === 'back') {
+        if (cur.zone === 'body' && o.mode === 'favorites') {
+          if (cur.watchZone === 'zap') {
+            updateNav((p) => ({ ...p, watchZone: 'controls' }));
           } else {
-            const target = MODE_ORDER[cur.modeCol];
-            if (target) o.onSelectMode(target);
+            updateNav((p) => ({ ...p, zone: 'header', headerRow: 'modes' }));
           }
+          return;
+        }
+        o.onFocusTopNav?.();
+        return;
+      }
+
+      if (event.kind !== 'press' && event.kind !== 'repeat') return;
+
+      if (o.isEmpty) {
+        if (event.key === 'up') o.onFocusTopNav?.();
+        else if (event.key === 'select' && event.kind === 'press' && o.hasOpenSourcesCta) {
+          o.onOpenSources();
+        }
+        return;
+      }
+
+      const showCats = (o.mode === 'channels' || o.mode === 'epg') && o.categoryCount > 0;
+
+      if (cur.zone === 'header') {
+        if (cur.headerRow === 'modes') {
+          const maxCol = o.mode === 'channels' ? 3 : 2;
+          if (event.key === 'up') o.onFocusTopNav?.();
+          else if (event.key === 'left') {
+            updateNav((p) => ({ ...p, modeCol: Math.max(0, p.modeCol - 1) }));
+          } else if (event.key === 'right') {
+            updateNav((p) => ({ ...p, modeCol: Math.min(maxCol, p.modeCol + 1) }));
+          } else if (event.key === 'down') {
+            if (showCats) updateNav((p) => ({ ...p, headerRow: 'categories' }));
+            else if (o.hasBody) updateNav((p) => ({ ...p, zone: 'body', watchZone: 'controls' }));
+          } else if (event.key === 'select' && event.kind === 'press') {
+            if (cur.modeCol === 3 && o.mode === 'channels') {
+              o.onToggleNumpad();
+            } else {
+              const target = MODE_ORDER[cur.modeCol];
+              if (target) o.onSelectMode(target);
+            }
+          }
+          return;
+        }
+
+        if (event.key === 'up') {
+          updateNav((p) => ({ ...p, headerRow: 'modes' }));
+        } else if (event.key === 'left') {
+          updateNav((p) => ({ ...p, catCol: Math.max(0, p.catCol - 1) }));
+        } else if (event.key === 'right') {
+          updateNav((p) => ({
+            ...p,
+            catCol: Math.min(Math.max(0, o.categoryCount - 1), p.catCol + 1),
+          }));
+        } else if (event.key === 'down') {
+          if (o.hasBody) updateNav((p) => ({ ...p, zone: 'body' }));
+        } else if (event.key === 'select' && event.kind === 'press') {
+          o.onSelectCategoryIndex(cur.catCol);
+        }
+        return;
+      }
+
+      if (o.mode !== 'favorites') return;
+
+      if (o.channelCount === 0) {
+        if (event.key === 'up') updateNav((p) => ({ ...p, zone: 'header', headerRow: 'modes' }));
+        else if (event.key === 'select' && event.kind === 'press')
+          o.onActivateWatchControl('browse');
+        return;
+      }
+
+      if (cur.watchZone === 'controls') {
+        if (event.key === 'up') {
+          updateNav((p) => ({ ...p, zone: 'header', headerRow: 'modes' }));
+        } else if (event.key === 'left' || event.key === 'right') {
+          const delta = event.key === 'left' ? -1 : 1;
+          updateNav((p) => ({
+            ...p,
+            watchControlIdx: Math.max(
+              0,
+              Math.min(WATCH_CONTROLS.length - 1, p.watchControlIdx + delta),
+            ),
+          }));
+        } else if (event.key === 'down') {
+          if (o.zapDrawerOpen && o.channelCount > 0) {
+            updateNav((p) => ({ ...p, watchZone: 'zap' }));
+          }
+        } else if (event.key === 'select' && event.kind === 'press') {
+          const ctrl = WATCH_CONTROLS[cur.watchControlIdx];
+          if (ctrl) o.onActivateWatchControl(ctrl);
         }
         return;
       }
 
       if (event.key === 'up') {
-        setNav((p) => ({ ...p, headerRow: 'modes' }));
-      } else if (event.key === 'left') {
-        setNav((p) => ({ ...p, catCol: Math.max(0, p.catCol - 1) }));
+        if (cur.zapIdx <= 0) updateNav((p) => ({ ...p, watchZone: 'controls' }));
+        else updateNav((p) => ({ ...p, zapIdx: p.zapIdx - 1 }));
+      } else if (event.key === 'down') {
+        updateNav((p) => ({
+          ...p,
+          zapIdx: Math.min(Math.max(0, o.channelCount - 1), p.zapIdx + 1),
+        }));
       } else if (event.key === 'right') {
-        setNav((p) => ({
-          ...p,
-          catCol: Math.min(Math.max(0, o.categoryCount - 1), p.catCol + 1),
-        }));
-      } else if (event.key === 'down') {
-        if (o.hasBody) setNav((p) => ({ ...p, zone: 'body' }));
+        updateNav((p) => ({ ...p, watchZone: 'controls' }));
       } else if (event.key === 'select' && event.kind === 'press') {
-        o.onSelectCategoryIndex(cur.catCol);
+        o.onSelectZapIndex(cur.zapIdx);
       }
-      return;
-    }
-
-    if (o.mode !== 'favorites') return;
-
-    if (o.channelCount === 0) {
-      if (event.key === 'up') setNav((p) => ({ ...p, zone: 'header', headerRow: 'modes' }));
-      else if (event.key === 'select' && event.kind === 'press') o.onActivateWatchControl('browse');
-      return;
-    }
-
-    if (cur.watchZone === 'controls') {
-      if (event.key === 'up') {
-        setNav((p) => ({ ...p, zone: 'header', headerRow: 'modes' }));
-      } else if (event.key === 'left' || event.key === 'right') {
-        const delta = event.key === 'left' ? -1 : 1;
-        setNav((p) => ({
-          ...p,
-          watchControlIdx: Math.max(
-            0,
-            Math.min(WATCH_CONTROLS.length - 1, p.watchControlIdx + delta),
-          ),
-        }));
-      } else if (event.key === 'down') {
-        if (o.zapDrawerOpen && o.channelCount > 0) {
-          setNav((p) => ({ ...p, watchZone: 'zap' }));
-        }
-      } else if (event.key === 'select' && event.kind === 'press') {
-        const ctrl = WATCH_CONTROLS[cur.watchControlIdx];
-        if (ctrl) o.onActivateWatchControl(ctrl);
-      }
-      return;
-    }
-
-    if (event.key === 'up') {
-      if (cur.zapIdx <= 0) setNav((p) => ({ ...p, watchZone: 'controls' }));
-      else setNav((p) => ({ ...p, zapIdx: p.zapIdx - 1 }));
-    } else if (event.key === 'down') {
-      setNav((p) => ({ ...p, zapIdx: Math.min(Math.max(0, o.channelCount - 1), p.zapIdx + 1) }));
-    } else if (event.key === 'right') {
-      setNav((p) => ({ ...p, watchZone: 'controls' }));
-    } else if (event.key === 'select' && event.kind === 'press') {
-      o.onSelectZapIndex(cur.zapIdx);
-    }
-  }, []);
+    },
+    [updateNav],
+  );
 
   const activeTv = isTv && isActiveScope;
   const numpadFocused = activeTv && numpadOpen;

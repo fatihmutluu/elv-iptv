@@ -13,6 +13,8 @@ let mockListener: ((event: unknown) => void) | undefined;
 let mockAetherEngine: PlayerEngine | null = null;
 let mockMedia3Engine: PlayerEngine | null = null;
 let mockCatalogOverride: CatalogService | undefined;
+const mockSetOrientationLocked = jest.fn();
+let lastMedia3SurfaceProps: { resizeMode?: string; subtitleBottomInsetPx?: number } | undefined;
 jest.mock('../catalog', () => {
   const actual = jest.requireActual<typeof import('../catalog')>('../catalog');
   return {
@@ -40,7 +42,17 @@ jest.mock('@elv/engine-aether', () => ({
 }));
 jest.mock('@elv/engine-media3', () => ({
   createMedia3Engine: () => mockMedia3Engine,
-  Media3Surface: ({ testID }: { testID?: string }) => {
+  setOrientationLocked: (locked: boolean) => mockSetOrientationLocked(locked),
+  Media3Surface: ({
+    testID,
+    resizeMode,
+    subtitleBottomInsetPx,
+  }: {
+    testID?: string;
+    resizeMode?: string;
+    subtitleBottomInsetPx?: number;
+  }) => {
+    lastMedia3SurfaceProps = { resizeMode, subtitleBottomInsetPx };
     const { View } = require('react-native');
     return <View testID={testID ?? 'media3-surface'} accessibilityLabel="media3-surface" />;
   },
@@ -103,6 +115,8 @@ afterEach(() => {
   mockAetherEngine = null;
   mockMedia3Engine = null;
   mockCatalogOverride = undefined;
+  lastMedia3SurfaceProps = undefined;
+  mockSetOrientationLocked.mockReset();
 });
 
 describe('App', () => {
@@ -379,5 +393,87 @@ describe('App', () => {
     expect(screen.getByTestId('settings-tab-sources')).toBeOnTheScreen();
 
     await view.unmount();
+  });
+
+  it('wires Android Media3Surface resizeMode/subtitleBottomInsetPx and setOrientationLocked on touch lock (#136, #440)', async () => {
+    jest.replaceProperty(Platform, 'OS', 'android');
+    jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(false);
+    mockMedia3Engine = {
+      capabilities: {
+        mpegTsOverHttp: true,
+        hls: true,
+        liveSeek: false,
+        softwareAudioFallback: true,
+        recreate: true,
+        audioTrackSelection: true,
+        subtitleTrackSelection: true,
+      },
+      subscribe: () => () => {},
+      load: () => {},
+      retry: () => {},
+      play: () => {},
+      pause: () => {},
+      seek: () => {},
+      stop: () => {},
+      recreate: () => {},
+      release: () => {},
+    };
+    mockCatalogOverride = {
+      listSources: async () => [
+        {
+          id: 'src-1',
+          kind: 'm3u',
+          name: 'Synthetic Source',
+          createdAt: 1,
+          lastSyncAt: 1,
+          lastError: null,
+        },
+      ],
+      categories: async (_sourceId: string, kind: string) =>
+        kind === 'live'
+          ? [
+              {
+                id: 'cat-1',
+                sourceId: 'src-1',
+                kind: 'live',
+                name: 'General',
+                itemCount: 1,
+                sortOrder: 0,
+              },
+            ]
+          : [],
+      items: async () => [
+        {
+          key: 'ck-1',
+          sourceId: 'src-1',
+          categoryId: 'cat-1',
+          kind: 'live',
+          name: 'Channel 0001',
+          channelNum: 1,
+          sortOrder: 0,
+        },
+      ],
+      resolveStream: async () => ({
+        ok: true,
+        value: { url: 'http://127.0.0.1:7878/live/demo/1001.ts', headers: {} },
+      }),
+    } as unknown as CatalogService;
+    openedWith(null);
+
+    const view = await render(<App />);
+    const liveCard = await screen.findByTestId('home-live-item-0');
+    await fireEvent.press(liveCard);
+
+    expect(await screen.findByTestId('player-surface')).toBeOnTheScreen();
+    expect(lastMedia3SurfaceProps).toEqual({ resizeMode: 'fit', subtitleBottomInsetPx: 96 });
+
+    // Lock controls -> calls setOrientationLocked(true) and drops subtitle inset to 0
+    await fireEvent.press(screen.getByTestId('player-lock-button'));
+    expect(mockSetOrientationLocked).toHaveBeenLastCalledWith(true);
+    expect(lastMedia3SurfaceProps?.subtitleBottomInsetPx).toBe(0);
+
+    // Unmount while locked -> guarantees setOrientationLocked(false)
+    await view.unmount();
+    expect(mockSetOrientationLocked).toHaveBeenLastCalledWith(false);
   });
 });

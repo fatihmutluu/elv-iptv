@@ -27,6 +27,7 @@ export interface PlayerSettingsSheetProps {
   readonly tracks: MediaTracks;
   readonly isVod?: boolean;
   readonly playbackSpeed?: number;
+  readonly resizeMode?: 'fit' | 'fill';
   readonly statsVisible: boolean;
   readonly isTv: boolean;
   readonly formFactor: FormFactor;
@@ -35,6 +36,7 @@ export interface PlayerSettingsSheetProps {
   readonly onSelectAudio: (id: string) => void;
   readonly onSelectSubtitle: (id: string | null) => void;
   readonly onSelectSpeed?: (rate: number) => void;
+  readonly onToggleResizeMode?: () => void;
   readonly onToggleStats: () => void;
   readonly onClose: () => void;
 }
@@ -67,15 +69,51 @@ function rowStyle(theme: Theme, focused: boolean, selected: boolean, isTv: boole
   ];
 }
 
+function TogglePill({
+  theme,
+  active,
+  label,
+}: {
+  readonly theme: Theme;
+  readonly active: boolean;
+  readonly label: string;
+}): ReactElement {
+  return (
+    <View
+      style={[
+        styles.togglePill,
+        {
+          borderRadius: theme.radius.pill,
+          backgroundColor: active ? theme.colors.accent : theme.colors.chipBg,
+          borderColor: active ? theme.colors.accent : theme.colors.chipBorder,
+        },
+      ]}
+    >
+      <Text
+        style={[
+          theme.typography.micro,
+          { color: active ? theme.colors.accentContrast : theme.colors.textSecondary },
+        ]}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
+
 /**
  * Adaptive 2-level Cinema Quietude Player Settings menu (`Subtitles`, `Audio`, VOD `Speed`,
- * `Stats HUD`). Flex-docked below the video canvas on `desktop` (HWND-safe) and wrapped in
- * `AdaptiveSheet` (right popover on Landscape, inset bottom sheet on Portrait) elsewhere.
+ * `Aspect` where supported, `Stats HUD`). Flex-docked below the video canvas on `desktop`
+ * (HWND-safe) and wrapped in `AdaptiveSheet` (right popover on Landscape, inset bottom sheet on Portrait) elsewhere.
  */
 export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactElement | null {
   const { visible, menuState, tracks, statsVisible, isTv, formFactor, i18n } = props;
   const isVod = props.isVod === true;
   const playbackSpeed = props.playbackSpeed ?? 1;
+  const showAspect = props.onToggleResizeMode !== undefined;
+  const resizeMode = props.resizeMode ?? 'fit';
+  const resizeModeLabel =
+    resizeMode === 'fill' ? i18n.t('player.aspect.fill') : i18n.t('player.aspect.fit');
   const theme = useTheme();
   const isWebDesktop = formFactor === 'desktop' && (Platform.OS as string) === 'web';
   const showCursor = isTv || formFactor === 'desktop';
@@ -185,6 +223,28 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
               <Icon name="chevronRight" size={16} color={theme.colors.textMuted} />
             </Pressable>
           ))}
+          {showAspect ? (
+            <Pressable
+              testID="player-resize-mode-toggle"
+              focusable={!isTv}
+              accessibilityRole="button"
+              accessibilityLabel={`${i18n.t('player.aspect')}: ${resizeModeLabel}`}
+              onPress={(e) => {
+                blurWebTarget(e.currentTarget);
+                props.onToggleResizeMode?.();
+              }}
+              style={rowStyle(theme, showCursor && menuState.index === navRows.length, false, isTv)}
+            >
+              <Icon name="aspect" size={18} color={theme.colors.textSecondary} />
+              <Text
+                numberOfLines={1}
+                style={[theme.typography.title, styles.flex1, { color: theme.colors.textPrimary }]}
+              >
+                {i18n.t('player.aspect')}
+              </Text>
+              <TogglePill theme={theme} active={resizeMode === 'fill'} label={resizeModeLabel} />
+            </Pressable>
+          ) : null}
           <Pressable
             testID="player-stats-toggle"
             focusable={!isTv}
@@ -195,7 +255,12 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
               blurWebTarget(e.currentTarget);
               props.onToggleStats();
             }}
-            style={rowStyle(theme, showCursor && menuState.index === navRows.length, false, isTv)}
+            style={rowStyle(
+              theme,
+              showCursor && menuState.index === navRows.length + (showAspect ? 1 : 0),
+              false,
+              isTv,
+            )}
           >
             <Icon name="info" size={18} color={theme.colors.textSecondary} />
             <Text
@@ -204,27 +269,11 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
             >
               {i18n.t('player.statsHud')}
             </Text>
-            <View
-              style={[
-                styles.togglePill,
-                {
-                  borderRadius: theme.radius.pill,
-                  backgroundColor: statsVisible ? theme.colors.accent : theme.colors.chipBg,
-                  borderColor: statsVisible ? theme.colors.accent : theme.colors.chipBorder,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  theme.typography.micro,
-                  {
-                    color: statsVisible ? theme.colors.accentContrast : theme.colors.textSecondary,
-                  },
-                ]}
-              >
-                {statsVisible ? i18n.t('player.stats.on') : i18n.t('player.stats.off')}
-              </Text>
-            </View>
+            <TogglePill
+              theme={theme}
+              active={statsVisible}
+              label={statsVisible ? i18n.t('player.stats.on') : i18n.t('player.stats.off')}
+            />
           </Pressable>
         </View>
       ) : (

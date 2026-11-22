@@ -10,6 +10,7 @@ struct LoadArgs: Record {
   @Field var kind: String = "live"
   @Field var startMs: Double? = nil
   @Field var softwareAudio: Bool = false
+  @Field var preferHevcOverDolbyVision: Bool = false
   @Field var audioTrackId: String? = nil
   @Field var subtitleTrackId: ValueOrUndefined<String?> = .undefined
 
@@ -35,6 +36,7 @@ struct LoadArgs: Record {
       live: kind != "vod",
       startMs: cleanStartMs,
       softwareAudio: softwareAudio,
+      preferHevcOverDolbyVision: preferHevcOverDolbyVision,
       audioTrackId: (trimmedAudio?.isEmpty == false) ? trimmedAudio : nil,
       subtitlePreference: subtitlePref
     )
@@ -125,6 +127,10 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
 
       Prop("resizeMode") { (view: AetherSurfaceView, mode: String?) in
         view.setResizeMode(mode)
+      }
+
+      Prop("subtitleBottomInsetPx") { (view: AetherSurfaceView, inset: Double?) in
+        view.setSubtitleBottomInsetPx(inset)
       }
     }
   }

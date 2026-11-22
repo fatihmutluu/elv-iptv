@@ -9,6 +9,7 @@ export interface PlayerSurfaceProps {
   engine: PlayerEngine;
   style?: StyleProp<ViewStyle>;
   resizeMode?: 'fit' | 'fill';
+  subtitleBottomInsetPx?: number;
   testID?: string;
 }
 
@@ -20,10 +21,27 @@ export function PlayerSurface({
   engine,
   style,
   resizeMode,
+  subtitleBottomInsetPx,
   testID,
 }: PlayerSurfaceProps): ReactElement | null {
   if (Platform.OS === 'ios') {
-    return <AetherSurface engine={engine} style={style} resizeMode={resizeMode} testID={testID} />;
+    return (
+      <AetherSurface
+        engine={engine}
+        style={style}
+        resizeMode={resizeMode}
+        subtitleBottomInsetPx={subtitleBottomInsetPx}
+        testID={testID}
+      />
+    );
   }
-  return <Media3Surface engine={engine} style={style} resizeMode={resizeMode} testID={testID} />;
+  return (
+    <Media3Surface
+      engine={engine}
+      style={style}
+      resizeMode={resizeMode}
+      subtitleBottomInsetPx={subtitleBottomInsetPx}
+      testID={testID}
+    />
+  );
 }

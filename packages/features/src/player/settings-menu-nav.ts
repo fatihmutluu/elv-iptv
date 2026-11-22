@@ -11,7 +11,7 @@ export interface SettingsMenuState {
 }
 
 /** Ordered rows shown on the root level of the Player Settings menu. */
-export type SettingsRootItem = 'subtitles' | 'audio' | 'speed' | 'stats';
+export type SettingsRootItem = 'subtitles' | 'audio' | 'speed' | 'aspect' | 'stats';
 
 /** Supported VOD playback speed multipliers (`0.5×` through `2×`). */
 export const PLAYBACK_SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
@@ -22,25 +22,48 @@ export function formatPlaybackSpeed(rate: number): string {
 }
 
 /** Canonical top-to-bottom order of root Player Settings rows for Live streams. */
-export const SETTINGS_ROOT_ITEMS: readonly SettingsRootItem[] = ['subtitles', 'audio', 'stats'];
+export const SETTINGS_ROOT_ITEMS: readonly SettingsRootItem[] = [
+  'subtitles',
+  'audio',
+  'aspect',
+  'stats',
+];
 
-const VOD_ROOT_ITEMS: readonly SettingsRootItem[] = ['subtitles', 'audio', 'speed', 'stats'];
+const LIVE_NO_ASPECT_ROOT_ITEMS: readonly SettingsRootItem[] = ['subtitles', 'audio', 'stats'];
 
-/** Returns the ordered root Player Settings rows for the active stream kind. */
-export function settingsRootItems(isVod: boolean): readonly SettingsRootItem[] {
-  return isVod ? VOD_ROOT_ITEMS : SETTINGS_ROOT_ITEMS;
+const VOD_ROOT_ITEMS: readonly SettingsRootItem[] = [
+  'subtitles',
+  'audio',
+  'speed',
+  'aspect',
+  'stats',
+];
+
+const VOD_NO_ASPECT_ROOT_ITEMS: readonly SettingsRootItem[] = [
+  'subtitles',
+  'audio',
+  'speed',
+  'stats',
+];
+
+/** Returns the ordered root Player Settings rows for the active stream kind and aspect capability. */
+export function settingsRootItems(isVod: boolean, hasAspect = true): readonly SettingsRootItem[] {
+  if (isVod) return hasAspect ? VOD_ROOT_ITEMS : VOD_NO_ASPECT_ROOT_ITEMS;
+  return hasAspect ? SETTINGS_ROOT_ITEMS : LIVE_NO_ASPECT_ROOT_ITEMS;
 }
 
-/** Optional VOD context passed to Player Settings navigation helpers. */
+/** Optional VOD and display context passed to Player Settings navigation helpers. */
 export interface SettingsMenuOptions {
   readonly isVod?: boolean;
   readonly playbackSpeed?: number;
+  readonly hasAspect?: boolean;
 }
 
 /** Result of routing a {@link KeyEvent} while the Player Settings menu is open. */
 export type SettingsMenuIntent =
   | { readonly kind: 'state'; readonly state: SettingsMenuState }
   | { readonly kind: 'close' }
+  | { readonly kind: 'toggleResizeMode' }
   | { readonly kind: 'toggleStats' }
   | { readonly kind: 'audio'; readonly id: string }
   | { readonly kind: 'subtitle'; readonly id: string | null }
@@ -63,7 +86,9 @@ export function settingsRowCount(
   tracks: MediaTracks,
   options?: SettingsMenuOptions,
 ): number {
-  if (view === 'root') return settingsRootItems(options?.isVod === true).length;
+  if (view === 'root') {
+    return settingsRootItems(options?.isVod === true, options?.hasAspect !== false).length;
+  }
   if (view === 'subtitles') return tracks.subtitles.length + 1;
   if (view === 'speed') return options?.isVod === true ? PLAYBACK_SPEED_OPTIONS.length : 0;
   return tracks.audio.length;
@@ -103,13 +128,21 @@ function selectedSpeedIndex(playbackSpeed: number | undefined): number {
 export function rootIndexForSettingsView(
   view: Exclude<SettingsMenuView, 'root'>,
   isVod: boolean,
+  hasAspect = true,
 ): number {
-  const idx = settingsRootItems(isVod).indexOf(view);
+  const idx = settingsRootItems(isVod, hasAspect).indexOf(view);
   return Math.max(idx, 0);
 }
 
-function returnToRoot(view: Exclude<SettingsMenuView, 'root'>, isVod: boolean): SettingsMenuIntent {
-  return { kind: 'state', state: { view: 'root', index: rootIndexForSettingsView(view, isVod) } };
+function returnToRoot(
+  view: Exclude<SettingsMenuView, 'root'>,
+  isVod: boolean,
+  hasAspect: boolean,
+): SettingsMenuIntent {
+  return {
+    kind: 'state',
+    state: { view: 'root', index: rootIndexForSettingsView(view, isVod, hasAspect) },
+  };
 }
 
 function openSubView(
@@ -140,11 +173,12 @@ export function routeSettingsMenuKey(
   options?: SettingsMenuOptions,
 ): SettingsMenuIntent | null {
   const isVod = options?.isVod === true;
-  const rootItems = settingsRootItems(isVod);
+  const hasAspect = options?.hasAspect !== false;
+  const rootItems = settingsRootItems(isVod, hasAspect);
   const cur = clampSettingsMenu(state, tracks, options);
 
   if (event.kind === 'press' && event.key === 'back') {
-    return cur.view === 'root' ? { kind: 'close' } : returnToRoot(cur.view, isVod);
+    return cur.view === 'root' ? { kind: 'close' } : returnToRoot(cur.view, isVod, hasAspect);
   }
 
   if (
@@ -159,7 +193,7 @@ export function routeSettingsMenuKey(
   }
 
   if (event.kind === 'press' && event.key === 'left') {
-    return cur.view === 'root' ? null : returnToRoot(cur.view, isVod);
+    return cur.view === 'root' ? null : returnToRoot(cur.view, isVod, hasAspect);
   }
 
   if (event.kind === 'press' && event.key === 'right') {
@@ -171,6 +205,7 @@ export function routeSettingsMenuKey(
   if (event.kind === 'press' && event.key === 'select') {
     if (cur.view === 'root') {
       const item = rootItems[cur.index];
+      if (item === 'aspect') return { kind: 'toggleResizeMode' };
       if (item === 'stats') return { kind: 'toggleStats' };
       return item !== undefined ? openSubView(item, tracks, options) : null;
     }

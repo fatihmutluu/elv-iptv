@@ -60,7 +60,12 @@ describe('bridgeNativeEngine', () => {
       headers: { 'User-Agent': 'ua' },
       kind: 'live',
       startMs: 5_000,
-      options: { softwareAudio: true, audioTrackId: '1:0', subtitleTrackId: null },
+      options: {
+        softwareAudio: true,
+        preferHevcOverDolbyVision: true,
+        audioTrackId: '1:0',
+        subtitleTrackId: null,
+      },
     });
     engine.retry(4);
     engine.play(4);
@@ -78,6 +83,7 @@ describe('bridgeNativeEngine', () => {
       kind: 'live',
       startMs: 5_000,
       softwareAudio: true,
+      preferHevcOverDolbyVision: true,
       audioTrackId: '1:0',
       subtitleTrackId: null,
     });
@@ -122,6 +128,7 @@ describe('bridgeNativeEngine', () => {
     engine.subscribe((event) => events.push(event));
     emit({ attempt: 2, type: 'firstFrame', atMs: 8_960 });
     emit({ attempt: 2, type: 'stall', phase: 'start', atMs: 8_900 });
+    emit({ attempt: 2, type: 'progress', bytesReceived: 4096, atMs: 8_850 });
     emit({
       attempt: 2,
       type: 'clock',
@@ -130,6 +137,7 @@ describe('bridgeNativeEngine', () => {
     expect(events).toEqual([
       { attempt: 2, type: 'firstFrame', atMs: 49_960 },
       { attempt: 2, type: 'stall', phase: 'start', atMs: 49_900 },
+      { attempt: 2, type: 'progress', bytesReceived: 4096, atMs: 49_850 },
       {
         attempt: 2,
         type: 'clock',

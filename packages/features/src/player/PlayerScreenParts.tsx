@@ -5,11 +5,11 @@ import type { ReactElement } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { DesktopCinemaBar, type PlayerOsdProps } from './DesktopCinemaBar';
 import { describePlaybackFailure } from './errors';
-import { OsdButton, OsdClock, PlayerLockedOverlay } from './PlayerOsdButton';
+import { OsdButton, OsdClock, PlayerCanvasTapTarget, PlayerLockedOverlay } from './PlayerOsdButton';
 import type { TvOsdAction } from './usePlayerControls';
 import { VodProgressBar } from './VodProgressBar';
 
-export { PlayerLockedOverlay, type PlayerOsdProps };
+export { PlayerCanvasTapTarget, PlayerLockedOverlay, type PlayerOsdProps };
 
 /** Formats localized OSD status text from `PlaybackStatus`. */
 export function formatStatusLine(status: PlaybackStatus, i18n: AppI18n): string {
@@ -245,6 +245,9 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
             previewPositionMs={p.previewPositionMs}
             dimmed={isPortrait && (p.tracksOpen || settingsOpen)}
             onSeekRatio={p.onSeekRatio}
+            {...(p.onScrubbingChange !== undefined
+              ? { onScrubbingChange: p.onScrubbingChange }
+              : {})}
           />
         ) : null}
 

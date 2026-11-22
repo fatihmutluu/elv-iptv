@@ -26,6 +26,7 @@ public final class EngineCore {
   var errorReported = false
   var latchedReaderFailure: ReaderFailure?
   var forceNextClock = false
+  var dolbyVisionFallbackLatched = false
 
   var lastClockUptimeMs: Double?
   var lastClockRate: Double?
@@ -33,6 +34,9 @@ public final class EngineCore {
   var lastDurationSeconds: Double?
   var lastLiveEdgeSeconds: Double?
   var lastAnchoredPositionMs: Double?
+  var lastProgressUptimeMs: Double?
+  var lastProgressBytes: Int64 = 0
+  var lastProgressBufferedSeconds: Double = 0
 
   private var shutterCovered = true
   private var screenOn = false
@@ -51,6 +55,9 @@ public final class EngineCore {
     backend.stopMedia()
 
     resetSerialState(startMs: request.startMs)
+    if currentRequest?.url != request.url && !request.preferHevcOverDolbyVision {
+      dolbyVisionFallbackLatched = false
+    }
     trackState.onLoad(request)
     sink?.clearSubtitles()
     currentRequest = request
@@ -134,6 +141,7 @@ public final class EngineCore {
     active = false
     userPaused = false
     currentRequest = nil
+    dolbyVisionFallbackLatched = false
     trackState.onStop()
     sink?.clearSubtitles()
     backend.stopMedia()
@@ -169,6 +177,7 @@ public final class EngineCore {
     active = false
     userPaused = false
     currentRequest = nil
+    dolbyVisionFallbackLatched = false
     trackState.onStop()
     sink?.clearSubtitles()
     backend.stopMedia()
@@ -226,6 +235,9 @@ public final class EngineCore {
 
     case let .tracks(observedTracks):
       handleTracksObservation(observedTracks)
+
+    case let .progress(bytesReceived, bufferedSeconds):
+      handleProgress(bytesReceived: bytesReceived, bufferedSeconds: bufferedSeconds)
 
     case let .readerFault(readerFailure):
       if latchedReaderFailure == nil { latchedReaderFailure = readerFailure }
@@ -298,5 +310,8 @@ public final class EngineCore {
     lastDurationSeconds = nil
     lastLiveEdgeSeconds = nil
     lastAnchoredPositionMs = validStartMs
+    lastProgressUptimeMs = nil
+    lastProgressBytes = 0
+    lastProgressBufferedSeconds = 0
   }
 }

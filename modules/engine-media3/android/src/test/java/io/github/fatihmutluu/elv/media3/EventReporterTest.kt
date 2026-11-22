@@ -14,6 +14,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackGroup
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DecoderCounters
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
 import androidx.media3.exoplayer.mediacodec.MediaCodecRenderer
@@ -37,6 +38,7 @@ class EventReporterTest {
     var scriptedDuration = C.TIME_UNSET
     var scriptedPosition = 0L
     var scriptedTracks: Tracks = Tracks.EMPTY
+    var scriptedVideoCounters: DecoderCounters? = null
 
     override fun getPlaybackState(): Int = state
     override fun isPlaying(): Boolean = playing
@@ -45,6 +47,7 @@ class EventReporterTest {
     override fun getDuration(): Long = scriptedDuration
     override fun getCurrentPosition(): Long = scriptedPosition
     override fun getCurrentTracks(): Tracks = scriptedTracks
+    override fun getVideoDecoderCounters(): DecoderCounters? = scriptedVideoCounters
   }
 
   private fun eventsFlag(vararg flags: Int): Player.Events =
@@ -290,6 +293,90 @@ class EventReporterTest {
       reporter.onPlayerError(secErr)
       assertEquals(1, focusDenied)
       assertTrue(events.isEmpty())
+    } finally {
+      real.release()
+    }
+  }
+
+  @Test
+  fun `reports transfer progress during opening and stall, video frame telemetry on clock, and DV fallback (#189, #314, #321)`() {
+    val events = mutableListOf<Map<String, Any?>>()
+    var dvFailures = 0
+    val real = ExoPlayer.Builder(RuntimeEnvironment.getApplication()).setLooper(Looper.getMainLooper()).build()
+    try {
+      val player = ScriptedPlayer(real)
+      val videoFmt = Format.Builder().setSampleMimeType(MimeTypes.VIDEO_H265).setWidth(1920).setHeight(1080).build()
+      val audioFmt = Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AAC).build()
+      player.scriptedTracks = Tracks(
+        listOf(
+          Tracks.Group(TrackGroup("v", videoFmt), false, intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true)),
+          Tracks.Group(TrackGroup("a", audioFmt), false, intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true)),
+        )
+      )
+      val reporter = EventReporter(
+        handler = Handler(Looper.getMainLooper()),
+        fence = PrepareFence(),
+        send = { events += it },
+        onHlsDetected = {},
+        onBehindLiveWindow = {},
+        onAudioFocusDenied = { false },
+        onVideoCodecFailed = {},
+        onDolbyVisionFailed = { dvFailures += 1 },
+        onFirstFrame = {},
+        onCue = { _, _ -> },
+      )
+      reporter.begin(player, live = false, prepareSerial = 1L, reused = false)
+      events.clear()
+
+      // Opening emits transfer progress
+      assertTrue(reporter.isWaitingForMedia)
+      reporter.onTransferProgress(bytesReceived = 65_536L, atMs = 1_200L)
+      assertEquals(
+        listOf(mapOf("type" to "progress", "bytesReceived" to 65_536.0, "atMs" to 1_200.0)),
+        events,
+      )
+
+      // Playing with null videoDecoderCounters reports hasVideoTrack=true, decodedVideoFrames=0.0
+      events.clear()
+      player.state = Player.STATE_READY
+      player.playing = true
+      reporter.onEvents(player, eventsFlag(Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_IS_PLAYING_CHANGED))
+      assertFalse(reporter.isWaitingForMedia)
+      val zeroClock = events.first { it["type"] == "clock" }["anchor"] as Map<*, *>
+      assertEquals(true, zeroClock["hasVideoTrack"])
+      assertEquals(0.0, zeroClock["decodedVideoFrames"])
+
+      // Steady playing suppresses transfer progress
+      events.clear()
+      reporter.onTransferProgress(bytesReceived = 131_072L, atMs = 2_000L)
+      assertTrue(events.isEmpty())
+
+      // Populated DecoderCounters reports renderedOutputBufferCount
+      player.scriptedVideoCounters = DecoderCounters().apply { renderedOutputBufferCount = 42 }
+      player.playing = false
+      player.state = Player.STATE_BUFFERING
+      reporter.onEvents(player, eventsFlag(Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_IS_PLAYING_CHANGED))
+      val activeClock = events.first { it["type"] == "clock" }["anchor"] as Map<*, *>
+      assertEquals(true, activeClock["hasVideoTrack"])
+      assertEquals(42.0, activeClock["decodedVideoFrames"])
+      assertTrue(reporter.isWaitingForMedia)
+
+      // Mid-stream stall allows transfer progress again
+      events.clear()
+      reporter.onTransferProgress(bytesReceived = 262_144L, atMs = 3_000L)
+      assertEquals(1, events.count { it["type"] == "progress" })
+
+      // Dolby Vision DecoderInitializationException invokes onDolbyVisionFailed even without codecInfo
+      val dvFmt = Format.Builder().setSampleMimeType(MimeTypes.VIDEO_DOLBY_VISION).setCodecs("dvhe.07.06").build()
+      val dvCause = MediaCodecRenderer.DecoderInitializationException(
+        dvFmt,
+        IllegalStateException("no DV7"),
+        false,
+        -49_999,
+      )
+      reporter.onPlayerError(PlaybackException("dv init failed", dvCause, PlaybackException.ERROR_CODE_DECODER_INIT_FAILED))
+      assertEquals(1, dvFailures)
+      reporter.end()
     } finally {
       real.release()
     }

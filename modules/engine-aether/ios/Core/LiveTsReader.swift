@@ -20,6 +20,7 @@ public final class LiveTsReader: @unchecked Sendable {
     var finishFifo: (shouldFinish: Bool, failure: ReaderFailure?) = (false, nil)
     var closeGate = false
     var reconnectStart: (ByteTransport, TransportRelay)?
+    var reportProgressBytes: Int64?
   }
 
   private let url: URL
@@ -27,6 +28,7 @@ public final class LiveTsReader: @unchecked Sendable {
   private let generation: Int
   private let gate: ConnectionGate
   private let makeTransport: @Sendable () -> ByteTransport
+  private let onBytesReceived: (@Sendable (Int64) -> Void)?
   private let fifo = ByteFifo()
   private let lock = NSLock()
   private var phase: Phase = .idle
@@ -40,12 +42,22 @@ public final class LiveTsReader: @unchecked Sendable {
   private var openContinuation: CheckedContinuation<ReaderOpen, Never>?
   private var sniffer = LiveTsSniffer()
   private var deliveredAnyBytes = false
+  private var cumulativeBytesReceived: Int64 = 0
+  private var lastProgressNotifiedAt: TimeInterval = -.infinity
   private var reconnectedOnce = false
   private var reconnectRejected = false
   private var storedFailure: ReaderFailure?
 
-  public init(url: URL, headers: [String: String], generation: Int, gate: ConnectionGate, makeTransport: @escaping @Sendable () -> ByteTransport) {
-    self.url = url; self.headers = headers; self.generation = generation; self.gate = gate; self.makeTransport = makeTransport
+  public init(
+    url: URL,
+    headers: [String: String],
+    generation: Int,
+    gate: ConnectionGate,
+    makeTransport: @escaping @Sendable () -> ByteTransport,
+    onBytesReceived: (@Sendable (Int64) -> Void)? = nil
+  ) {
+    self.url = url; self.headers = headers; self.generation = generation
+    self.gate = gate; self.makeTransport = makeTransport; self.onBytesReceived = onBytesReceived
   }
 
   deinit {
@@ -142,6 +154,14 @@ public final class LiveTsReader: @unchecked Sendable {
     var fx = SideEffects()
     lock.withLock {
       guard connectionId == activeConnectionId, !abortedByCaller else { return }
+      cumulativeBytesReceived += Int64(data.count)
+      if onBytesReceived != nil {
+        let now = ProcessInfo.processInfo.systemUptime
+        if now - lastProgressNotifiedAt >= 0.45 {
+          lastProgressNotifiedAt = now
+          fx.reportProgressBytes = cumulativeBytesReceived
+        }
+      }
       switch phase {
       case .openingSniff, .reconnectSniff:
         applySniffDecisionLocked(sniffer.onData(data), isReconnect: phase == .reconnectSniff, into: &fx)
@@ -197,6 +217,7 @@ public final class LiveTsReader: @unchecked Sendable {
   }
 
   private func flushSideEffects(_ fx: SideEffects) {
+    if let totalBytes = fx.reportProgressBytes { onBytesReceived?(totalBytes) }
     if let bytes = fx.forwardToFifo, !bytes.isEmpty { fifo.write(bytes) }
     switch fx.openResult?.1 {
     case .playlist: fifo.cancel()

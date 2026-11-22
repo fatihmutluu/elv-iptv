@@ -1,7 +1,35 @@
 import { type AppI18n, resolveLanguageLabel } from '@elv/i18n';
-import { type PlaybackState, type PlaybackStatus, positionAt, type TrackInfo } from '@elv/playback';
+import {
+  type MediaTracks,
+  type PlaybackState,
+  type PlaybackStatus,
+  positionAt,
+  type TrackInfo,
+} from '@elv/playback';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
 import { describePlaybackFailure } from './errors';
+import type { SettingsMenuState } from './settings-menu-nav';
+import type { TrackPickerCursor } from './track-picker-nav';
+import type { TvOsdAction } from './tv-osd-nav';
+
+/** Live mutable snapshot shared with synchronous key handlers in `usePlayerControls`. */
+export interface PlayerOverlayLive {
+  tracksOpen: boolean;
+  pickerCursor: TrackPickerCursor;
+  settingsOpen: boolean;
+  settingsMenu: SettingsMenuState;
+  locked: boolean;
+  osdHidden: boolean;
+  tvOsdFocused: boolean;
+  tvScrubberFocused: boolean;
+  tvOsdAction: TvOsdAction;
+  availableOsd: TvOsdAction[];
+  tracks: MediaTracks;
+  hasTracks: boolean;
+  hasService: boolean;
+  isVod: boolean;
+  playbackSpeed: number;
+}
 
 /** Progress ratio threshold (`>= 90%`) at which the Next Episode banner appears. */
 export const NEXT_EPISODE_RATIO_THRESHOLD = 0.9;

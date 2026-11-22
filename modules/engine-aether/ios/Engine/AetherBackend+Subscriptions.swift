@@ -1,6 +1,7 @@
 import AetherEngine
 import AVFoundation
 import Combine
+import CoreMedia
 import Foundation
 
 extension AetherBackend {
@@ -13,10 +14,14 @@ extension AetherBackend {
           if progress.checkpoint >= .sourceOpened {
             if self.openedMsForSerial == nil {
               self.openedMsForSerial = max(0, (ProcessInfo.processInfo.systemUptime * 1_000.0) - self.loadStartUptimeMs)
+              self.onObservation?(.progress(bytesReceived: nil, bufferedSeconds: nil), serial)
             }
             self.onObservation?(.opened, serial)
           }
           if progress.checkpoint == .ready {
+            if self.readySerial != serial {
+              self.onObservation?(.progress(bytesReceived: nil, bufferedSeconds: nil), serial)
+            }
             self.readySerial = serial
             self.onObservation?(.ready, serial)
             self.scheduleTracksSnapshot(from: target, serial: serial)
@@ -77,8 +82,34 @@ extension AetherBackend {
     target.$currentAVPlayerItem
       .sink { [weak self, weak target] _ in
         Self.onMainActor {
-          guard let self, let target, self.engineLoadSerial > 0 else { return }
+          guard let self, let target else { return }
+          self.itemProgressCancellable?.cancel()
+          self.itemProgressCancellable = nil
+          guard self.engineLoadSerial > 0 else { return }
           self.refreshSubtitleGeometry(from: target)
+          guard let item = target.currentAVPlayerItem else { return }
+          self.itemProgressCancellable = item.publisher(for: \.loadedTimeRanges)
+            .sink { [weak self, weak target] ranges in
+              let bufferedEnd = ranges.reduce(0.0) { acc, value in
+                let end = CMTimeGetSeconds(CMTimeRangeGetEnd(value.timeRangeValue))
+                return (end.isFinite && end > acc) ? end : acc
+              }
+              Self.onMainActor {
+                guard let self, let target, self.engineLoadSerial > 0 else { return }
+                let bytes = target.currentAVPlayerItem?.accessLog()?.events.reduce(Int64(0)) { acc, ev in
+                  acc + max(0, ev.numberOfBytesTransferred)
+                } ?? 0
+                if bytes > 0 || bufferedEnd > 0 {
+                  self.onObservation?(
+                    .progress(
+                      bytesReceived: bytes > 0 ? bytes : nil,
+                      bufferedSeconds: bufferedEnd > 0 ? bufferedEnd : nil
+                    ),
+                    self.engineLoadSerial
+                  )
+                }
+              }
+            }
         }
       }
       .store(in: &cancellables)

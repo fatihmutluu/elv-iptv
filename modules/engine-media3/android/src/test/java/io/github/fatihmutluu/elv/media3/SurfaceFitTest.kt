@@ -112,4 +112,14 @@ class SurfaceFitTest {
     assertFalse(fit.video(640, 480, -2f))
     assertFalse(fit.video(640, 480, Float.POSITIVE_INFINITY))
   }
+
+  @Test
+  fun `subtitleBottomPaddingFraction converts dp inset to clamped view-height fraction (#136)`() {
+    assertEquals(DEFAULT_SUBTITLE_BOTTOM_PADDING_FRACTION, subtitleBottomPaddingFraction(0f, 2f, 1080), 0.0001f)
+    assertEquals(DEFAULT_SUBTITLE_BOTTOM_PADDING_FRACTION, subtitleBottomPaddingFraction(-24f, 2f, 1080), 0.0001f)
+    assertEquals(DEFAULT_SUBTITLE_BOTTOM_PADDING_FRACTION, subtitleBottomPaddingFraction(Float.NaN, 2f, 1080), 0.0001f)
+    assertEquals(DEFAULT_SUBTITLE_BOTTOM_PADDING_FRACTION, subtitleBottomPaddingFraction(80f, 2f, 0), 0.0001f)
+    assertEquals(0.08f + 160f / 1080f, subtitleBottomPaddingFraction(80f, 2f, 1080), 0.0001f)
+    assertEquals(MAX_SUBTITLE_BOTTOM_PADDING_FRACTION, subtitleBottomPaddingFraction(500f, 2f, 1080), 0.0001f)
+  }
 }

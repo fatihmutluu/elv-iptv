@@ -1,6 +1,8 @@
 import Foundation
 
 private let undeterminedTags: Set<String> = ["und", "zxx", "mul", "mis", "unknown"]
+private let ambiguousTwoLetter: Set<String> = ["no", "is", "it", "hi", "id", "my", "he"]
+private let labelSeparators = CharacterSet(charactersIn: " \t\n\r[](){},.;:/|\\+")
 
 private let iso639Canonical: [String: String] = [
   "en": "en", "eng": "en",
@@ -26,6 +28,7 @@ private let iso639Canonical: [String: String] = [
   "ku": "ku", "kur": "ku",
   "az": "az", "aze": "az",
   "bg": "bg", "bul": "bg",
+  "bs": "bs", "bos": "bs",
   "da": "da", "dan": "da",
   "fi": "fi", "fin": "fi",
   "he": "he", "heb": "he",
@@ -51,6 +54,70 @@ private let iso639Canonical: [String: String] = [
   "eu": "eu", "eus": "eu", "baq": "eu",
   "bo": "bo", "bod": "bo", "tib": "bo",
   "my": "my", "mya": "my", "bur": "my",
+  "mi": "mi", "mri": "mi", "mao": "mi",
+  "bn": "bn", "ben": "bn",
+  "ca": "ca", "cat": "ca",
+  "gl": "gl", "glg": "gl",
+  "ta": "ta", "tam": "ta",
+  "te": "te", "tel": "te",
+  "ur": "ur", "urd": "ur",
+]
+
+private let languageLabelNames: [String: String] = [
+  "english": "en",
+  "turkish": "tr", "türkçe": "tr", "turkce": "tr",
+  "german": "de", "deutsch": "de",
+  "french": "fr", "français": "fr", "francais": "fr",
+  "spanish": "es", "español": "es", "espanol": "es", "castellano": "es",
+  "arabic": "ar",
+  "russian": "ru",
+  "italian": "it", "italiano": "it",
+  "portuguese": "pt", "português": "pt", "portugues": "pt",
+  "dutch": "nl", "nederlands": "nl",
+  "polish": "pl", "polski": "pl",
+  "chinese": "zh", "mandarin": "zh", "cantonese": "zh",
+  "japanese": "ja",
+  "korean": "ko",
+  "persian": "fa", "farsi": "fa",
+  "greek": "el",
+  "czech": "cs",
+  "romanian": "ro",
+  "swedish": "sv",
+  "ukrainian": "uk",
+  "kurdish": "ku",
+  "azerbaijani": "az",
+  "bulgarian": "bg",
+  "bosnian": "bs",
+  "danish": "da",
+  "finnish": "fi",
+  "hebrew": "he",
+  "hindi": "hi",
+  "croatian": "hr",
+  "hungarian": "hu",
+  "indonesian": "id",
+  "malay": "ms",
+  "norwegian": "no",
+  "slovak": "sk",
+  "slovenian": "sl",
+  "serbian": "sr",
+  "thai": "th",
+  "vietnamese": "vi",
+  "albanian": "sq",
+  "macedonian": "mk",
+  "georgian": "ka",
+  "armenian": "hy",
+  "icelandic": "is",
+  "welsh": "cy",
+  "basque": "eu",
+  "tibetan": "bo",
+  "burmese": "my",
+  "maori": "mi",
+  "bengali": "bn",
+  "catalan": "ca",
+  "galician": "gl",
+  "tamil": "ta",
+  "telugu": "te",
+  "urdu": "ur",
 ]
 
 /// Formats an `AetherEngine` audio track `id` into a stable `"a:<id>"` identifier.
@@ -102,6 +169,64 @@ public func canonicalTrackLanguage(_ raw: String?) -> String? {
 public func sameTrackLanguage(_ a: String?, _ b: String?) -> Bool {
   guard let canonA = canonicalTrackLanguage(a) else { return false }
   return canonA == canonicalTrackLanguage(b)
+}
+
+/// Extracts a canonical ISO 639-1 code from a free-text track label using whole-word token matching only
+/// (never substring matching, so `"es"` never matches `"Chinese"` or `"Japanese"`).
+public func extractTrackLanguageFromLabel(_ label: String?) -> String? {
+  guard let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+    return nil
+  }
+  let tokens = trimmed
+    .components(separatedBy: labelSeparators)
+    .filter { !$0.isEmpty && $0 != "-" && $0 != "_" }
+  guard !tokens.isEmpty else { return nil }
+
+  for token in tokens {
+    if let byName = languageLabelNames[token.lowercased()] {
+      return byName
+    }
+  }
+
+  for token in tokens {
+    let lower = token.lowercased()
+    if lower.contains("-") || lower.contains("_") {
+      let parts = lower.split(whereSeparator: { $0 == "-" || $0 == "_" }).map(String.init)
+      guard parts.count >= 2,
+            let primary = parts.first,
+            (2...3).contains(primary.count),
+            primary.allSatisfy({ $0.isASCII && $0.isLetter }),
+            isValidBcp47SecondarySubtag(parts[1]),
+            parts.dropFirst().allSatisfy({ (2...8).contains($0.count) && $0.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) } }),
+            !(primary == "hi" && parts[1] == "fi"),
+            let canonical = iso639Canonical[primary]
+      else {
+        continue
+      }
+      return canonical
+    }
+    guard (2...3).contains(lower.count),
+          lower.allSatisfy({ $0.isASCII && $0.isLetter }),
+          !undeterminedTags.contains(lower),
+          let canonical = iso639Canonical[lower]
+    else {
+      continue
+    }
+    if lower.count == 3 || tokens.count == 1 || !ambiguousTwoLetter.contains(lower) {
+      return canonical
+    }
+  }
+  return nil
+}
+
+private func isValidBcp47SecondarySubtag(_ subtag: String) -> Bool {
+  if subtag.count == 2 || subtag.count == 4 {
+    return subtag.allSatisfy { $0.isASCII && $0.isLetter }
+  }
+  if subtag.count == 3 {
+    return subtag.allSatisfy { $0.isASCII && $0.isNumber }
+  }
+  return false
 }
 
 private func parsePrefixedStreamId(_ raw: String, prefix: String) -> Int? {

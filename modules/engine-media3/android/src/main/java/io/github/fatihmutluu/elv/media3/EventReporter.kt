@@ -33,6 +33,7 @@ internal class EventReporter(
   private val onBehindLiveWindow: () -> Unit,
   private val onAudioFocusDenied: () -> Boolean,
   private val onVideoCodecFailed: (MediaCodecInfo) -> Unit,
+  private val onDolbyVisionFailed: () -> Unit = {},
   private val onFirstFrame: () -> Unit,
   private val onCue: (ScreenCue, Boolean) -> Unit,
 ) : Player.Listener {
@@ -46,6 +47,11 @@ internal class EventReporter(
   private var anchoredRate: Float? = null
   private val tick = Runnable { player?.let { anchor(it) } }
 
+  /** True while this prepare is opening, buffering, or stalled and transfer progress should be reported. */
+  @Volatile
+  var isWaitingForMedia: Boolean = false
+    private set
+
   /**
    * Starts reporting a new prepare [prepareSerial] of [player], sends the post-`stop` fence message through Media3's
    * playback thread and reports `opening`.
@@ -57,6 +63,7 @@ internal class EventReporter(
     fence.begin(prepareSerial, reused = reused)
     player.createMessage { _, _ -> fence.passed(prepareSerial) }.setLooper(handler.looper).send()
     active = true
+    isWaitingForMedia = true
     sendState("opening")
   }
 
@@ -64,6 +71,7 @@ internal class EventReporter(
   fun end() {
     if (active && stalled) sendStall("end")
     active = false
+    isWaitingForMedia = false
     fence.reset()
     lastState = null
     played = false
@@ -71,6 +79,18 @@ internal class EventReporter(
     behindLiveRecoveries = 0
     anchoredRate = null
     handler.removeCallbacks(tick)
+  }
+
+  /** Emits a byte-progress event while opening, buffering, or stalled (#314, #321). */
+  fun onTransferProgress(bytesReceived: Long, atMs: Long) {
+    if (!active || !isWaitingForMedia) return
+    send(
+      mapOf(
+        "type" to "progress",
+        "bytesReceived" to bytesReceived.toDouble(),
+        "atMs" to atMs.toDouble(),
+      )
+    )
   }
 
   override fun onEvents(player: Player, events: Player.Events) {
@@ -132,8 +152,16 @@ internal class EventReporter(
       (videoDecoderError?.let { !it.isSurfaceValid } == true) ||
         (videoInitError != null && hasInvalidAttachedSurface())
     val failedCodec = videoDecoderError?.codecInfo ?: videoInitError?.codecInfo
-    if (!surfaceLost && failedCodec != null) {
-      onVideoCodecFailed(failedCodec)
+    if (!surfaceLost) {
+      if (failedCodec != null) {
+        onVideoCodecFailed(failedCodec)
+      }
+      val isDolbyVisionFailure =
+        failedCodec?.mimeType.equals(MimeTypes.VIDEO_DOLBY_VISION, ignoreCase = true) ||
+          videoInitError?.mimeType.equals(MimeTypes.VIDEO_DOLBY_VISION, ignoreCase = true)
+      if (isDolbyVisionFailure) {
+        onDolbyVisionFailed()
+      }
     }
     val status = causeOf<HttpDataSource.InvalidResponseCodeException>(error)?.responseCode
     val contentType = causeOf<HttpDataSource.InvalidContentTypeException>(error)?.contentType
@@ -183,6 +211,7 @@ internal class EventReporter(
       stalled = nowStalled
       sendStall(if (nowStalled) "start" else "end")
     }
+    isWaitingForMedia = !played || stalled || lastState == "opening" || lastState == "buffering"
     if (effectiveRate(player) != anchoredRate) anchor(player)
   }
 
@@ -198,6 +227,16 @@ internal class EventReporter(
     )
     val duration = player.duration
     if (duration != C.TIME_UNSET) anchor[if (live) "liveEdgeMs" else "durationMs"] = duration.toDouble()
+    val tracks = player.currentTracks
+    val hasVideo = if (tracks.isEmpty) null else hasSelectedVideoTrack(tracks)
+    if (hasVideo != null) anchor["hasVideoTrack"] = hasVideo
+    val counters = (player as? ExoPlayer)?.videoDecoderCounters
+    if (counters != null) {
+      counters.ensureUpdated()
+      anchor["decodedVideoFrames"] = counters.renderedOutputBufferCount.toDouble()
+    } else if (hasVideo == true) {
+      anchor["decodedVideoFrames"] = 0.0
+    }
     send(mapOf("type" to "clock", "anchor" to anchor))
     if (rate > 0f) handler.postDelayed(tick, TICK_MS)
   }
@@ -219,6 +258,9 @@ internal class EventReporter(
 
   private companion object {
     fun effectiveRate(player: Player): Float = if (player.isPlaying) player.playbackParameters.speed else 0f
+
+    fun hasSelectedVideoTrack(tracks: Tracks): Boolean =
+      tracks.groups.any { group -> group.type == C.TRACK_TYPE_VIDEO && group.isSelected }
 
     fun isAudioOnlyTracks(tracks: Tracks): Boolean {
       var hasAudio = false

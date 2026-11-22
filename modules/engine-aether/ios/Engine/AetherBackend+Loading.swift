@@ -51,7 +51,13 @@ extension AetherBackend {
             headers: initialHeaders,
             generation: generation,
             gate: self.gate,
-            makeTransport: { URLSessionTransport(session: session) }
+            makeTransport: { URLSessionTransport(session: session) },
+            onBytesReceived: { [weak self] totalBytes in
+              Self.onMainActor {
+                guard let self, self.activeLoadSerial == serial else { return }
+                self.onObservation?(.progress(bytesReceived: totalBytes, bufferedSeconds: nil), serial)
+              }
+            }
           )
           self.currentReader = reader
           let verdict = await reader.open()

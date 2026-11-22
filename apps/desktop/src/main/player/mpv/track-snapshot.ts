@@ -1,4 +1,4 @@
-import { normalizeLanguageCode, sameLanguageCode } from '@elv/domain';
+import { extractLanguageCodeFromLabel, normalizeLanguageCode, sameLanguageCode } from '@elv/domain';
 import type { MediaTracks, TrackInfo } from '@elv/playback';
 import type { MpvCommand } from './codec.ts';
 
@@ -46,8 +46,8 @@ export function inspectMpvTracks(trackList: unknown, aid: unknown, sid: unknown)
     if (rawId === undefined || (type !== 'audio' && type !== 'sub')) continue;
 
     const id = type === 'audio' ? `a:${rawId}` : `s:${rawId}`;
-    const language = cleanLanguage(raw['lang']);
     const label = cleanString(raw['title']);
+    const language = cleanLanguage(raw['lang']) ?? extractLanguageCodeFromLabel(label);
     const codec = cleanString(raw['codec']);
     const channels =
       type === 'audio'

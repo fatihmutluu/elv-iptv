@@ -1,34 +1,23 @@
 import type { MediaTracks, PlaybackClock, PlaybackStatus, PlaybackTimers } from '@elv/playback';
 import type { FormFactor } from '@elv/ui-kit';
 import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
+import type { PlayerOverlayLive } from './player-overlay-model';
 import {
   clampSettingsMenu,
   initialSettingsMenu,
   type SettingsMenuState,
   type SettingsMenuView,
 } from './settings-menu-nav';
-import { createTouchHoverGuard, type TouchHoverGuard } from './touch-hover-guard';
+import {
+  createTouchHoverGuard,
+  type PointerPoint,
+  type TouchHoverGuard,
+} from './touch-hover-guard';
 import { clampPickerCursor, initialPickerCursor, type TrackPickerCursor } from './track-picker-nav';
 import { availableTvOsdActions, clampTvOsdAction, type TvOsdAction } from './tv-osd-nav';
+import { useOsdAutoHide } from './useOsdAutoHide';
 
-/** Live mutable snapshot shared with synchronous key handlers in {@link usePlayerControls}. */
-export interface PlayerOverlayLive {
-  tracksOpen: boolean;
-  pickerCursor: TrackPickerCursor;
-  settingsOpen: boolean;
-  settingsMenu: SettingsMenuState;
-  locked: boolean;
-  osdHidden: boolean;
-  tvOsdFocused: boolean;
-  tvScrubberFocused: boolean;
-  tvOsdAction: TvOsdAction;
-  availableOsd: TvOsdAction[];
-  tracks: MediaTracks;
-  hasTracks: boolean;
-  hasService: boolean;
-  isVod: boolean;
-  playbackSpeed: number;
-}
+export type { PlayerOverlayLive };
 
 /**
  * Owns track picker, 2-level Settings menu, Stats HUD toggle, mobile Touch Lock, TV OSD
@@ -53,6 +42,7 @@ export function usePlayerOverlayState(params: {
   clockRef: MutableRefObject<PlaybackClock>;
   timersRef: MutableRefObject<PlaybackTimers>;
   cancelScrub: () => void;
+  onSetOrientationLocked?: ((locked: boolean) => void) | undefined;
 }) {
   const { formFactor, itemKey, isVod, statusKind, tracks, hasTracks, hasService, showRetry } =
     params;
@@ -61,6 +51,7 @@ export function usePlayerOverlayState(params: {
   const { isScrubbing, clockRef, timersRef, cancelScrub } = params;
   const isTv = formFactor === 'tv';
   const canLock = formFactor === 'phone' || formFactor === 'tablet';
+  const hasAspect = formFactor !== 'desktop';
 
   const [rawTracksOpen, setTracksOpen] = useState(false);
   const [rawPickerCursor, setPickerCursor] = useState<TrackPickerCursor>({
@@ -71,13 +62,27 @@ export function usePlayerOverlayState(params: {
   const [rawSettingsMenu, setSettingsMenu] = useState<SettingsMenuState>(() =>
     initialSettingsMenu(),
   );
+  const [resizeMode, setResizeMode] = useState<'fit' | 'fill'>('fit');
   const [statsVisible, setStatsVisible] = useState(false);
   const [rawLocked, setLocked] = useState(false);
   const [rawOsdHidden, setOsdHidden] = useState(initialOsdHidden === true);
   const [tvOsdFocused, setTvOsdFocused] = useState(false);
   const [rawTvScrubberFocused, setTvScrubberFocused] = useState(false);
   const [rawTvOsdAction, setTvOsdAction] = useState<TvOsdAction>('playPause');
-  const [osdActivitySeq, setOsdActivitySeq] = useState(0);
+
+  const statusKindRef = useRef(statusKind);
+  statusKindRef.current = statusKind;
+  const onSetOrientationLockedRef = useRef(params.onSetOrientationLocked);
+  onSetOrientationLockedRef.current = params.onSetOrientationLocked;
+  const orientationLockedRef = useRef(false);
+
+  const releaseOrientationLock = useCallback((): void => {
+    if (!orientationLockedRef.current) return;
+    orientationLockedRef.current = false;
+    onSetOrientationLockedRef.current?.(false);
+  }, []);
+
+  useEffect(() => releaseOrientationLock, [releaseOrientationLock]);
 
   const tracksOpen = rawTracksOpen && hasTracks;
   const settingsOpen = rawSettingsOpen && hasService;
@@ -86,7 +91,7 @@ export function usePlayerOverlayState(params: {
   const tvScrubberFocused =
     isTv && isVod && rawTvScrubberFocused && !locked && !tracksOpen && !settingsOpen && !osdHidden;
   const pickerCursor = clampPickerCursor(rawPickerCursor, tracks);
-  const settingsMenu = clampSettingsMenu(rawSettingsMenu, tracks, { isVod });
+  const settingsMenu = clampSettingsMenu(rawSettingsMenu, tracks, { isVod, hasAspect });
   const availableOsd = availableTvOsdActions({
     isVod,
     hasService,
@@ -126,13 +131,27 @@ export function usePlayerOverlayState(params: {
     setTvOsdFocused(false);
     setTvScrubberFocused(false);
   }, []);
-  const autoHideHandleRef = useRef<unknown>(undefined);
-  const clearAutoHide = useCallback(() => {
-    if (autoHideHandleRef.current !== undefined) {
-      timersRef.current.clearTimeout(autoHideHandleRef.current);
-      autoHideHandleRef.current = undefined;
-    }
-  }, [timersRef]);
+
+  const canAutoHide =
+    statusKind === 'playing' &&
+    !osdHidden &&
+    !isScrubbing &&
+    !tracksOpen &&
+    !settingsOpen &&
+    !locked &&
+    !tvOsdFocused &&
+    !tvScrubberFocused;
+  const { clearAutoHide, notifyOsdActivity } = useOsdAutoHide({
+    autoHideOsdMs,
+    active: canAutoHide,
+    itemKey,
+    timersRef,
+    onAutoHide: () => {
+      liveRef.current.osdHidden = true;
+      clearTvFocus();
+      setOsdHidden(true);
+    },
+  });
 
   useEffect(() => {
     if (rawTracksOpen && !hasTracks) setTracksOpen(false);
@@ -161,6 +180,7 @@ export function usePlayerOverlayState(params: {
 
   useEffect(() => {
     cancelScrub();
+    releaseOrientationLock();
     liveRef.current.tracksOpen = false;
     liveRef.current.settingsOpen = false;
     liveRef.current.locked = false;
@@ -174,7 +194,7 @@ export function usePlayerOverlayState(params: {
       setOsdHidden(false);
     }
     return () => cancelScrub();
-  }, [itemKey, cancelScrub, clearTvFocus]);
+  }, [itemKey, cancelScrub, clearTvFocus, releaseOrientationLock]);
 
   useEffect(() => {
     if (statusKind === 'failed' || statusKind === 'paused' || statusKind === 'ended') {
@@ -182,53 +202,6 @@ export function usePlayerOverlayState(params: {
       setOsdHidden(false);
     }
   }, [statusKind]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: osdActivitySeq and itemKey intentionally re-arm the auto-hide timer
-  useEffect(() => {
-    clearAutoHide();
-    if (
-      autoHideOsdMs === undefined ||
-      autoHideOsdMs <= 0 ||
-      statusKind !== 'playing' ||
-      osdHidden ||
-      isScrubbing ||
-      tracksOpen ||
-      settingsOpen ||
-      locked ||
-      tvOsdFocused ||
-      tvScrubberFocused
-    ) {
-      return clearAutoHide;
-    }
-    autoHideHandleRef.current = timersRef.current.setTimeout(() => {
-      autoHideHandleRef.current = undefined;
-      liveRef.current.osdHidden = true;
-      clearTvFocus();
-      setOsdHidden(true);
-    }, autoHideOsdMs);
-    return clearAutoHide;
-  }, [
-    autoHideOsdMs,
-    statusKind,
-    osdHidden,
-    isScrubbing,
-    tracksOpen,
-    settingsOpen,
-    locked,
-    tvOsdFocused,
-    tvScrubberFocused,
-    itemKey,
-    osdActivitySeq,
-    timersRef,
-    clearAutoHide,
-    clearTvFocus,
-  ]);
-
-  const notifyOsdActivity = (): void => {
-    const wasArmed = autoHideHandleRef.current !== undefined;
-    clearAutoHide();
-    if (wasArmed) setOsdActivitySeq((n) => n + 1);
-  };
 
   const hideOsd = (): void => {
     cancelScrub();
@@ -246,10 +219,20 @@ export function usePlayerOverlayState(params: {
 
   const handleTouchActivity = (): void => hoverGuardRef.current?.markTouch();
 
-  const handlePointerHover = (pointerType?: string): void => {
-    if (!hoverGuardRef.current?.shouldAllowHover(pointerType)) return;
+  const handlePointerHover = (pointerType?: string, point?: PointerPoint): void => {
+    if (!hoverGuardRef.current?.shouldAllowHover(pointerType, point)) return;
     if (liveRef.current.osdHidden) showOsd();
     else notifyOsdActivity();
+  };
+
+  const toggleOsdByTouch = (): void => {
+    const s = liveRef.current;
+    if (!canLock || s.locked || s.tracksOpen || s.settingsOpen) return;
+    if (s.osdHidden) {
+      showOsd();
+      return;
+    }
+    if (statusKindRef.current === 'playing') hideOsd();
   };
 
   const blurTvOsd = (): void => {
@@ -306,7 +289,11 @@ export function usePlayerOverlayState(params: {
   const openSettings = (view: SettingsMenuView = 'root'): void => {
     if (!liveRef.current.hasService) return;
     cancelScrub();
-    const opts = { isVod: liveRef.current.isVod, playbackSpeed: liveRef.current.playbackSpeed };
+    const opts = {
+      isVod: liveRef.current.isVod,
+      playbackSpeed: liveRef.current.playbackSpeed,
+      hasAspect,
+    };
     const initial = clampSettingsMenu(
       initialSettingsMenu(view, opts),
       liveRef.current.tracks,
@@ -333,6 +320,8 @@ export function usePlayerOverlayState(params: {
     setTracksOpen(false);
     setSettingsOpen(false);
     setLocked(true);
+    orientationLockedRef.current = true;
+    onSetOrientationLockedRef.current?.(true);
   };
 
   const closeTracks = (): void => {
@@ -344,15 +333,22 @@ export function usePlayerOverlayState(params: {
     setSettingsOpen(false);
   };
   const openSettingsView = (view: SettingsMenuView): void => {
-    const opts = { isVod: liveRef.current.isVod, playbackSpeed: liveRef.current.playbackSpeed };
+    const opts = {
+      isVod: liveRef.current.isVod,
+      playbackSpeed: liveRef.current.playbackSpeed,
+      hasAspect,
+    };
     updateSettingsMenu(
       clampSettingsMenu(initialSettingsMenu(view, opts), liveRef.current.tracks, opts),
     );
   };
+  const toggleResizeMode = (): void => setResizeMode((prev) => (prev === 'fit' ? 'fill' : 'fit'));
   const toggleStats = (): void => setStatsVisible((prev) => !prev);
   const unlockControls = (): void => {
     liveRef.current.locked = false;
     setLocked(false);
+    orientationLockedRef.current = false;
+    onSetOrientationLockedRef.current?.(false);
   };
 
   return {
@@ -370,6 +366,7 @@ export function usePlayerOverlayState(params: {
     closeTracks,
     openSettings,
     closeSettings,
+    toggleResizeMode,
     toggleStats,
     unlockControls,
     publicState: {
@@ -377,6 +374,7 @@ export function usePlayerOverlayState(params: {
       pickerCursor,
       settingsOpen,
       settingsMenu,
+      resizeMode,
       statsVisible,
       canLock,
       locked,
@@ -389,9 +387,11 @@ export function usePlayerOverlayState(params: {
       openSettings,
       closeSettings,
       openSettingsView,
+      toggleResizeMode,
       toggleStats,
       lockControls,
       unlockControls,
+      toggleOsdByTouch,
       handleTouchActivity,
       handlePointerHover,
     },

@@ -49,6 +49,7 @@ export interface PlayerControlsParams {
   onJumpPreviousChannel?: () => void;
   onToggleFullscreen?: (() => void) | undefined;
   onToggleMute?: (() => void) | undefined;
+  onSetOrientationLocked?: ((locked: boolean) => void) | undefined;
 }
 
 /**
@@ -67,6 +68,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
 
   const [muted, setMuted] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [barScrubbing, setBarScrubbing] = useState(false);
   const playbackSpeedRef = useRef(1);
   playbackSpeedRef.current = playbackSpeed;
 
@@ -104,10 +106,11 @@ export function usePlayerControls(params: PlayerControlsParams) {
     hasPreviousChannel,
     initialOsdHidden: params.initialOsdHidden,
     autoHideOsdMs: params.autoHideOsdMs,
-    isScrubbing: previewPositionMs !== undefined,
+    isScrubbing: previewPositionMs !== undefined || barScrubbing,
     clockRef,
     timersRef,
     cancelScrub,
+    onSetOrientationLocked: params.onSetOrientationLocked,
   });
 
   const retry = (): void => {
@@ -133,6 +136,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
           index: rootIndexForSettingsView(
             s.settingsMenu.view,
             cbRef.current.activeTarget.kind === 'vod',
+            formFactor !== 'desktop',
           ),
         });
       } else overlay.closeSettings();
@@ -186,9 +190,11 @@ export function usePlayerControls(params: PlayerControlsParams) {
       const intent = routeSettingsMenuKey(event, s.settingsMenu, s.tracks, {
         isVod: cbRef.current.activeTarget.kind === 'vod',
         playbackSpeed: playbackSpeedRef.current,
+        hasAspect: formFactor !== 'desktop',
       });
       if (intent?.kind === 'close') overlay.closeSettings();
       else if (intent?.kind === 'state') overlay.updateSettingsMenu(intent.state);
+      else if (intent?.kind === 'toggleResizeMode') overlay.toggleResizeMode();
       else if (intent?.kind === 'toggleStats') overlay.toggleStats();
       else if (intent?.kind === 'audio') serviceRef.current?.selectAudioTrack(intent.id);
       else if (intent?.kind === 'subtitle') serviceRef.current?.selectSubtitleTrack(intent.id);
@@ -345,6 +351,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     seekStepBack: () => seekBy(-STEP_SEEK_MS),
     seekStepForward: () => seekBy(STEP_SEEK_MS),
     seekToRatio,
+    setBarScrubbing,
     selectAudio: (id: string) => serviceRef.current?.selectAudioTrack(id),
     selectSubtitle: (id: string | null) => serviceRef.current?.selectSubtitleTrack(id),
     selectSpeed,

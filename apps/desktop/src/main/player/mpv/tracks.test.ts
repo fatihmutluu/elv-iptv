@@ -106,6 +106,21 @@ describe('inspectMpvTracks', () => {
     expect(tracks.audio).toEqual([{ id: 'a:1' }, { id: 'a:2' }]);
     expect(tracks.selectedAudioId).toBe('a:1');
   });
+
+  it('extracts whole-word language from title when lang is und without substring collisions (#189)', () => {
+    const tracks = inspectMpvTracks(
+      [
+        { id: 1, type: 'audio', lang: 'und', title: 'Chinese (Mandarin)', selected: true },
+        { id: 2, type: 'audio', lang: 'und', title: 'Japanese', selected: false },
+        { id: 3, type: 'audio', lang: 'und', title: '[ES] Stereo', selected: false },
+        { id: 4, type: 'sub', lang: 'und', title: 'No Subtitles', selected: false },
+      ],
+      'auto',
+      false,
+    );
+    expect(tracks.audio.map((t) => t.language)).toEqual(['zh', 'ja', 'es']);
+    expect(tracks.subtitles[0]?.language).toBeUndefined();
+  });
 });
 
 describe('sameLanguage & parseTrackCommand', () => {

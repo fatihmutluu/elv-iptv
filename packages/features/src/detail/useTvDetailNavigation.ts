@@ -1,6 +1,13 @@
 import { createFocusStore, type FocusStore, findList, type KeyEvent } from '@elv/focus-core';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useBrowseFocusMemory } from '../shared';
 import type { DetailNavRowDescriptor, DetailNavRowId } from './detail-model';
+
+interface DetailFocusSnapshot {
+  readonly rowId: DetailNavRowId;
+  readonly col: number;
+  readonly colByRow: Readonly<Partial<Record<DetailNavRowId, number>>>;
+}
 
 const ALL_DETAIL_ROW_IDS: readonly DetailNavRowId[] = [
   'back',
@@ -64,14 +71,70 @@ export function useTvDetailNavigation({
   onFocusRow,
   onFocusTopNav,
 }: UseTvDetailNavigationOptions): TvDetailNavigationState {
+  const focusMemory = useBrowseFocusMemory();
+  const focusMemoryRef = useRef(focusMemory);
+  focusMemoryRef.current = focusMemory;
+  const targetKeyRef = useRef(targetKey);
+  targetKeyRef.current = targetKey;
+  const savedOnMountRef = useRef<DetailFocusSnapshot | null | undefined>(undefined);
+  if (savedOnMountRef.current === undefined) {
+    savedOnMountRef.current = focusMemory?.get<DetailFocusSnapshot>(`detail:${targetKey}`) ?? null;
+  }
+  const pendingRestoreRef = useRef<DetailFocusSnapshot | null>(savedOnMountRef.current);
+
   const storeRef = useRef<FocusStore | null>(null);
   if (storeRef.current === null) {
-    storeRef.current = createDetailFocusStore();
+    const created = createDetailFocusStore();
+    for (const r of rows) created.setCount(r.id, r.count);
+    const saved = pendingRestoreRef.current;
+    if (saved !== null) {
+      for (const r of rows) {
+        const c = saved.colByRow[r.id];
+        if (c !== undefined && r.count > 0) {
+          created.focus(r.id, Math.min(Math.max(0, c), r.count - 1));
+        }
+      }
+      const matched = rows.find((r) => r.id === saved.rowId && r.count > 0);
+      if (matched) {
+        created.focus(matched.id, Math.min(Math.max(0, saved.col), matched.count - 1));
+        created.activate(matched.id);
+        pendingRestoreRef.current = null;
+      }
+    }
+    storeRef.current = created;
   }
   const store = storeRef.current;
 
-  const [activeRowId, setActiveRowId] = useState<DetailNavRowId>('hero-play');
-  const [activeCol, setActiveCol] = useState(0);
+  const [activeRowId, setActiveRowId] = useState<DetailNavRowId>(() => {
+    const saved = savedOnMountRef.current;
+    if (saved != null && rows.some((r) => r.id === saved.rowId && r.count > 0)) {
+      return saved.rowId;
+    }
+    return 'hero-play';
+  });
+  const [activeCol, setActiveCol] = useState(() => {
+    const saved = savedOnMountRef.current;
+    if (saved != null) {
+      const matched = rows.find((r) => r.id === saved.rowId && r.count > 0);
+      if (matched) return Math.min(Math.max(0, saved.col), matched.count - 1);
+    }
+    return 0;
+  });
+
+  const persistDetailFocus = useCallback(
+    (rowId: DetailNavRowId, col: number) => {
+      const mem = focusMemoryRef.current;
+      if (!mem) return;
+      const colByRow: Partial<Record<DetailNavRowId, number>> = {};
+      for (const id of ALL_DETAIL_ROW_IDS) {
+        const list = findList(store.getState().scopes, id)?.list;
+        if (list && list.count > 0) colByRow[id] = list.index;
+      }
+      colByRow[rowId] = col;
+      mem.set<DetailFocusSnapshot>(`detail:${targetKeyRef.current}`, { rowId, col, colByRow });
+    },
+    [store],
+  );
 
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
@@ -86,8 +149,25 @@ export function useTvDetailNavigation({
   const onFocusTopNavRef = useRef(onFocusTopNav);
   onFocusTopNavRef.current = onFocusTopNav;
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset initial focus onto primary Play/Resume CTA whenever targetKey changes
+  const prevTargetKeyRef = useRef(targetKey);
   useEffect(() => {
+    if (prevTargetKeyRef.current === targetKey) return;
+    prevTargetKeyRef.current = targetKey;
+    const saved = focusMemoryRef.current?.get<DetailFocusSnapshot>(`detail:${targetKey}`) ?? null;
+    pendingRestoreRef.current = saved;
+    if (saved !== null) {
+      const matched = rowsRef.current.find((r) => r.id === saved.rowId && r.count > 0);
+      if (matched) {
+        const clamped = Math.min(Math.max(0, saved.col), matched.count - 1);
+        store.focus(matched.id, clamped);
+        store.activate(matched.id);
+        pendingRestoreRef.current = null;
+        activeRowIdRef.current = matched.id;
+        setActiveRowId(matched.id);
+        setActiveCol(clamped);
+        return;
+      }
+    }
     store.activate('hero-play');
     activeRowIdRef.current = 'hero-play';
     setActiveRowId('hero-play');
@@ -102,6 +182,27 @@ export function useTvDetailNavigation({
     const countById = new Map<DetailNavRowId, number>();
     for (const row of currentRows) countById.set(row.id, row.count);
     for (const id of ALL_DETAIL_ROW_IDS) store.setCount(id, countById.get(id) ?? 0);
+
+    const pending = pendingRestoreRef.current;
+    if (pending !== null) {
+      for (const row of currentRows) {
+        const c = pending.colByRow[row.id];
+        if (c !== undefined && row.count > 0) {
+          store.focus(row.id, Math.min(Math.max(0, c), row.count - 1));
+        }
+      }
+      const matched = currentRows.find((r) => r.id === pending.rowId && r.count > 0);
+      if (matched) {
+        const clamped = Math.min(Math.max(0, pending.col), matched.count - 1);
+        store.focus(matched.id, clamped);
+        store.activate(matched.id);
+        pendingRestoreRef.current = null;
+        activeRowIdRef.current = matched.id;
+        setActiveRowId(matched.id);
+        setActiveCol(clamped);
+        return;
+      }
+    }
 
     const current = activeRowIdRef.current;
     const stillValid = currentRows.some((r) => r.id === current && r.count > 0);
@@ -128,15 +229,17 @@ export function useTvDetailNavigation({
 
   const moveToRow = useCallback(
     (nextRow: DetailNavRowDescriptor) => {
+      pendingRestoreRef.current = null;
       store.activate(nextRow.id);
       const found = findList(store.getState().scopes, nextRow.id)?.list;
       const col = found?.index ?? 0;
       activeRowIdRef.current = nextRow.id;
       setActiveRowId(nextRow.id);
       setActiveCol(col);
+      persistDetailFocus(nextRow.id, col);
       onFocusRowRef.current?.(nextRow.id, col);
     },
-    [store],
+    [persistDetailFocus, store],
   );
 
   const handleTvKey = useCallback(
@@ -162,10 +265,12 @@ export function useTvDetailNavigation({
 
       if ((event.kind === 'press' || event.kind === 'repeat') && event.key === 'up') {
         if (currentRow.orientation === 'vertical' && currentCol > 0) {
+          pendingRestoreRef.current = null;
           store.dispatch(event);
           const updated = findList(store.getState().scopes, currentRow.id)?.list;
           const nextCol = updated?.index ?? 0;
           setActiveCol(nextCol);
+          persistDetailFocus(currentRow.id, nextCol);
           onFocusRowRef.current?.(currentRow.id, nextCol);
           return;
         }
@@ -180,10 +285,12 @@ export function useTvDetailNavigation({
 
       if ((event.kind === 'press' || event.kind === 'repeat') && event.key === 'down') {
         if (currentRow.orientation === 'vertical' && currentCol < currentRow.count - 1) {
+          pendingRestoreRef.current = null;
           store.dispatch(event);
           const updated = findList(store.getState().scopes, currentRow.id)?.list;
           const nextCol = updated?.index ?? 0;
           setActiveCol(nextCol);
+          persistDetailFocus(currentRow.id, nextCol);
           onFocusRowRef.current?.(currentRow.id, nextCol);
           return;
         }
@@ -204,6 +311,7 @@ export function useTvDetailNavigation({
       const updated = findList(store.getState().scopes, currentRow.id)?.list;
       const col = updated?.index ?? 0;
       setActiveCol(col);
+      persistDetailFocus(currentRow.id, col);
 
       for (const intent of intents) {
         if (intent.kind === 'back') {
@@ -213,7 +321,7 @@ export function useTvDetailNavigation({
         }
       }
     },
-    [moveToRow, store],
+    [moveToRow, persistDetailFocus, store],
   );
 
   const visibleFocus = isTv && isActiveScope;

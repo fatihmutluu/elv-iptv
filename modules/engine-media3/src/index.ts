@@ -14,6 +14,7 @@ declare const performance: { now(): number };
 interface NativeEngineModule {
   Engine: new () => NativeEngineHandle;
   uptimeMs(): number;
+  setOrientationLocked?(locked: boolean): void;
 }
 
 const CAPABILITIES: EngineCapabilities = Object.freeze({
@@ -58,6 +59,11 @@ export function createMedia3Engine(): PlayerEngine | null {
   return nativeModule === null ? null : wrap(nativeModule);
 }
 
+/** Locks or unlocks the current Android activity orientation for player touch lock (`#440`). */
+export function setOrientationLocked(locked: boolean): void {
+  nativeModule?.setOrientationLocked?.(locked);
+}
+
 /** Props of {@link Media3Surface}. */
 export interface Media3SurfaceProps {
   /** An engine from {@link createMedia3Engine}; one surface per engine. */
@@ -69,6 +75,8 @@ export interface Media3SurfaceProps {
    * black bars beside it, `fill` covers the view and crops the overflow.
    */
   resizeMode?: 'fit' | 'fill';
+  /** Extra bottom inset in dp to lift native `SubtitleView` cues above a visible OSD (`#136`). */
+  subtitleBottomInsetPx?: number;
   testID?: string;
 }
 
@@ -77,6 +85,7 @@ interface NativeSurfaceProps {
   engine: NativeEngineHandle;
   style?: StyleProp<ViewStyle>;
   resizeMode?: 'fit' | 'fill';
+  subtitleBottomInsetPx?: number;
   testID?: string;
 }
 
@@ -97,9 +106,16 @@ export function Media3Surface({
   engine,
   style,
   resizeMode,
+  subtitleBottomInsetPx,
   testID,
 }: Media3SurfaceProps): ReactElement | null {
   const native = handles.get(engine);
   if (NativeSurfaceView === null || native === undefined) return null;
-  return createElement(NativeSurfaceView, { engine: native, style, resizeMode, testID });
+  return createElement(NativeSurfaceView, {
+    engine: native,
+    style,
+    resizeMode,
+    subtitleBottomInsetPx,
+    testID,
+  });
 }

@@ -123,6 +123,7 @@ final class AetherSurfaceView: ExpoView {
     MainActor.assumeIsolated {
       bind(nil)
       setResizeMode("fit")
+      setSubtitleBottomInsetPx(0)
     }
   }
 
@@ -174,6 +175,12 @@ final class AetherSurfaceView: ExpoView {
     boundEngine?.withDriver { driver in
       driver.updateGravity(gravity, from: self)
     }
+  }
+
+  @MainActor
+  func setSubtitleBottomInsetPx(_ inset: Double?) {
+    let clean = inset.flatMap { $0.isFinite && $0 > 0 ? CGFloat($0) : nil } ?? 0
+    subtitleOverlayView.updateBottomInset(clean)
   }
 
   @MainActor
