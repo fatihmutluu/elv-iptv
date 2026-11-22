@@ -63,6 +63,7 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const { publicPrefs, acquireOrientationLock, releaseOrientationLock } = usePlayerOverlayPrefs({
     itemKey,
     hasService,
+    defaultResizeMode: params.defaultResizeMode,
     onSetDeinterlace: params.onSetDeinterlace,
     onSetOrientationLocked: params.onSetOrientationLocked,
   });

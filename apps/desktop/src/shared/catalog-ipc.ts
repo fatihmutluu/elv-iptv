@@ -9,6 +9,7 @@ import type {
   ItemDetailRow,
   ItemRow,
   LinkSourceInput,
+  ListItemsOptions,
   NextEpisodeRow,
   NowNextEntry,
   ProgrammeRow,
@@ -32,6 +33,7 @@ import {
   isImportProgress,
   isItemKeyList,
   isLinkSourceInput,
+  isListItemsOptions,
   isNonNegativeFinite,
   isNowNextKeyList,
   isOptionalProfileId,
@@ -43,6 +45,7 @@ import {
   isSaveProgressInput,
   isSearchOptions,
   isSearchQuery,
+  isSourceIdList,
   isToggleFavoriteInput,
   MAX_ID_CHARS,
   MAX_ITEM_KEY_CHARS,
@@ -87,7 +90,21 @@ export type CatalogRpcMethodCall =
   | { method: 'importGuide'; id: string }
   | { method: 'listSources' }
   | { method: 'categories'; sourceId: string; kind: BrowseKind }
-  | { method: 'items'; categoryId: string; offset: number; limit: number }
+  | {
+      method: 'items';
+      categoryId: string;
+      offset: number;
+      limit: number;
+      opts?: ListItemsOptions;
+    }
+  | {
+      method: 'allSourcesItems';
+      kind: BrowseKind;
+      offset: number;
+      limit: number;
+      sourceIds?: readonly string[];
+      opts?: ListItemsOptions;
+    }
   | { method: 'itemDetail'; itemKey: string }
   | { method: 'search'; query: string; opts?: SearchOptions }
   | { method: 'nowNext'; channelKeys: readonly string[]; nowMs: number }
@@ -143,7 +160,19 @@ export interface CatalogBridge {
   importGuide(id: string): Promise<Result<ImportSummary>>;
   listSources(): Promise<SourceRow[]>;
   categories(sourceId: string, kind: BrowseKind): Promise<CategoryRow[]>;
-  items(categoryId: string, offset: number, limit: number): Promise<ItemRow[]>;
+  items(
+    categoryId: string,
+    offset: number,
+    limit: number,
+    opts?: ListItemsOptions,
+  ): Promise<ItemRow[]>;
+  allSourcesItems?(
+    kind: BrowseKind,
+    offset: number,
+    limit: number,
+    sourceIds?: readonly string[],
+    opts?: ListItemsOptions,
+  ): Promise<ItemRow[]>;
   itemDetail(itemKey: string): Promise<ItemDetailRow | null>;
   search(query: string, opts?: SearchOptions): Promise<SearchResults>;
   nowNext(channelKeys: readonly string[], nowMs: number): Promise<NowNextEntry[]>;
@@ -207,7 +236,16 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
       return (
         isBoundedString(x['categoryId'], 0, 512) &&
         isFiniteNumber(x['offset']) &&
-        isFiniteNumber(x['limit'])
+        isFiniteNumber(x['limit']) &&
+        (x['opts'] === undefined || isListItemsOptions(x['opts']))
+      );
+    case 'allSourcesItems':
+      return (
+        (x['kind'] === 'live' || x['kind'] === 'movie' || x['kind'] === 'series') &&
+        isFiniteNumber(x['offset']) &&
+        isFiniteNumber(x['limit']) &&
+        (x['sourceIds'] === undefined || isSourceIdList(x['sourceIds'])) &&
+        (x['opts'] === undefined || isListItemsOptions(x['opts']))
       );
     case 'itemDetail':
       return isCleanKey(x['itemKey']);

@@ -1196,3 +1196,156 @@ msgstr "Play now"
 
 msgid "player.autoPlayNextEpisode"
 msgstr "Auto-play next episode"
+
+msgid "settings.section.playback"
+msgstr "Playback"
+
+msgid "settings.section.liveTv"
+msgstr "Live TV & Guide"
+
+msgid "settings.playback.title"
+msgstr "Playback"
+
+msgid "settings.playback.subtitle"
+msgstr "Audio, subtitles, seek step, and video defaults"
+
+msgid "settings.playback.audioLang"
+msgstr "Preferred audio language"
+
+msgid "settings.playback.subtitleLang"
+msgstr "Preferred subtitle language"
+
+msgid "settings.playback.langAuto"
+msgstr "Automatic"
+
+msgid "settings.playback.subtitleMode"
+msgstr "Subtitle mode"
+
+msgid "settings.playback.subtitleMode.auto"
+msgstr "Automatic"
+
+msgid "settings.playback.subtitleMode.always"
+msgstr "Always on"
+
+msgid "settings.playback.subtitleMode.off"
+msgstr "Off"
+
+msgid "settings.playback.seekStep"
+msgstr "Skip interval"
+
+msgid "settings.playback.seekStepValue"
+msgstr "{seconds} s"
+
+msgid "settings.playback.defaultAspect"
+msgstr "Default aspect ratio"
+
+msgid "settings.playback.bufferPreset"
+msgstr "Buffer preset"
+
+msgid "settings.playback.buffer.fast"
+msgstr "Fast zap"
+
+msgid "settings.playback.buffer.auto"
+msgstr "Balanced"
+
+msgid "settings.playback.buffer.resilient"
+msgstr "Resilient"
+
+msgid "settings.liveTv.title"
+msgstr "Live TV & Guide"
+
+msgid "settings.liveTv.subtitle"
+msgstr "Default view, TV guide window, channel logos, and zapping"
+
+msgid "settings.liveTv.defaultMode"
+msgstr "Default Live TV view"
+
+msgid "settings.liveTv.epgSpan"
+msgstr "TV guide time span"
+
+msgid "settings.liveTv.epgSpanHours"
+msgstr "{hours} hours"
+
+msgid "settings.liveTv.epgGenreTints"
+msgstr "Colour-code guide genres"
+
+msgid "settings.liveTv.epgShowClock"
+msgstr "Show clock in TV guide"
+
+msgid "settings.liveTv.guideRefresh"
+msgstr "Guide refresh interval"
+
+msgid "settings.liveTv.guideRefreshHours"
+msgstr "Every {hours} h"
+
+msgid "settings.liveTv.logoBackdrop"
+msgstr "Channel logo readability"
+
+msgid "settings.liveTv.logoBackdrop.plate"
+msgstr "Subtle plate"
+
+msgid "settings.liveTv.logoBackdrop.invert"
+msgstr "Invert dark logos"
+
+msgid "settings.liveTv.logoBackdrop.off"
+msgstr "Original"
+
+msgid "settings.liveTv.sourceBadges"
+msgstr "Show source badges"
+
+msgid "settings.liveTv.twoStepPreview"
+msgstr "Preview channel before fullscreen"
+
+msgid "settings.liveTv.cleanTitles"
+msgstr "Clean provider tags from channel names"
+
+msgid "settings.artworkCache"
+msgstr "Artwork cache limit"
+
+msgid "settings.artworkCacheLimitMb"
+msgstr "{mb} MB"
+
+msgid "settings.artworkCacheClear"
+msgstr "Clear artwork cache"
+
+msgid "settings.artworkCacheCleared"
+msgstr "Artwork cache cleared"
+
+msgid "source.error.httpStatus"
+msgstr "Server returned HTTP {status}"
+
+msgid "player.error.httpStatus"
+msgstr "Stream server returned HTTP {status}"
+
+msgid "sources.status.importingPercent"
+msgstr "{phase} · {done} ({percent}%)"
+
+msgid "home.details"
+msgstr "Details"
+
+msgid "detail.readMore"
+msgstr "Read more"
+
+msgid "detail.readLess"
+msgstr "Show less"
+
+msgid "detail.synopsisTitle"
+msgstr "Synopsis"
+
+msgid "detail.prePlayAudio"
+msgstr "Audio"
+
+msgid "detail.prePlaySubtitles"
+msgstr "Subtitles"
+
+msgid "detail.trackDefault"
+msgstr "Default"
+
+msgid "detail.director"
+msgstr "Director"
+
+msgid "detail.searchPerson"
+msgstr "Search {name}"
+
+msgid "live.pressAgainFullscreen"
+msgstr "Press OK again for fullscreen"

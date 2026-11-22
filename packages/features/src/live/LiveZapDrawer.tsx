@@ -1,4 +1,5 @@
 import type { ItemRow, NowNextEntry } from '@elv/data';
+import type { LogoBackdropModePref } from '@elv/domain';
 import { TvScrollEdgeFade, useI18n, useTheme, webBackdropBlur } from '@elv/ui-kit';
 import { memo, type ReactElement, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
@@ -10,6 +11,7 @@ import {
 } from 'react-native';
 import type { CatalogLayoutMetrics, PagedListSource } from '../shared';
 import { ZapChannelRow } from './LiveZapRow';
+import type { SourceBadgeInfo } from './source-badge';
 
 /** Width of the left-anchored Mini-Guide Zap Drawer on Landscape viewports (`UI_UX_PHILOSOPHY.md` §3). */
 export const ZAP_DRAWER_WIDTH = 306;
@@ -50,6 +52,9 @@ export interface LiveZapDrawerProps {
   readonly layout: CatalogLayoutMetrics;
   /** When `true`, renders in flex flow on the left (HWND-safe on desktop) instead of `position: 'absolute'`. */
   readonly docked?: boolean;
+  readonly logoBackdropMode?: LogoBackdropModePref;
+  readonly sourceBadges?: ReadonlyMap<string, SourceBadgeInfo>;
+  readonly cleanChannelTitles?: boolean;
   readonly hydrateNowNext: (channelKeys: readonly string[]) => void;
   readonly onSelectChannel: (channel: ItemRow, index: number) => void;
 }
@@ -68,6 +73,9 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
     focusedZapIndex,
     layout,
     docked = false,
+    logoBackdropMode = 'plate',
+    sourceBadges,
+    cleanChannelTitles = false,
     hydrateNowNext,
     onSelectChannel,
   } = p;
@@ -153,6 +161,9 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
             isTv={layout.isTv}
             isTouch={layout.isTouch}
             focused={isFocused}
+            logoBackdropMode={logoBackdropMode}
+            sourceBadge={row ? (sourceBadges?.get(row.sourceId) ?? null) : null}
+            cleanChannelTitles={cleanChannelTitles}
             onSelectChannel={onSelectChannel}
           />
         </View>
@@ -160,12 +171,15 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
     },
     [
       activeChannelKey,
+      cleanChannelTitles,
       focusedZapIndex,
       layout.isTouch,
       layout.isTv,
+      logoBackdropMode,
       noProgramLabel,
       nowNextByKey,
       onSelectChannel,
+      sourceBadges,
       zapRowHeight,
     ],
   );
@@ -185,8 +199,24 @@ export const LiveZapDrawer = memo(function LiveZapDrawerInner(p: LiveZapDrawerPr
   }, [channelSource, itemCount, layout.isTv, sourceVersion, tvWindowEnd, tvWindowStart]);
 
   const extraData = useMemo(
-    () => ({ sourceVersion, nowNextVersion, activeChannelKey, focusedZapIndex }),
-    [activeChannelKey, focusedZapIndex, nowNextVersion, sourceVersion],
+    () => ({
+      sourceVersion,
+      nowNextVersion,
+      activeChannelKey,
+      focusedZapIndex,
+      logoBackdropMode,
+      sourceBadges,
+      cleanChannelTitles,
+    }),
+    [
+      activeChannelKey,
+      cleanChannelTitles,
+      focusedZapIndex,
+      logoBackdropMode,
+      nowNextVersion,
+      sourceBadges,
+      sourceVersion,
+    ],
   );
 
   const useDocked = docked;

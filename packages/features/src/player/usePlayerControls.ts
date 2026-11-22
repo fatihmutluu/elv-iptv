@@ -139,6 +139,9 @@ export function usePlayerControls(params: PlayerControlsParams) {
     };
   }, [serviceRef]);
 
+  const getStepSeekMs = (): number =>
+    cbRef.current.seekStepSec !== undefined ? cbRef.current.seekStepSec * 1_000 : STEP_SEEK_MS;
+
   const {
     scrub,
     previewPositionMs,
@@ -153,6 +156,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     serviceRef,
     clockRef,
     timersRef,
+    stepSeekMs: params.seekStepSec !== undefined ? params.seekStepSec * 1_000 : STEP_SEEK_MS,
     onSeekCommit: (positionMs, priorPositionMs) => {
       cbRef.current.onSeekCommit?.(positionMs);
       if (
@@ -210,6 +214,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     hasPreviousChannel,
     initialOsdHidden: params.initialOsdHidden,
     autoHideOsdMs: params.autoHideOsdMs,
+    defaultResizeMode: params.defaultResizeMode,
     isScrubbing: previewPositionMs !== undefined || barScrubbing,
     clockRef,
     timersRef,
@@ -354,8 +359,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
     if (!allowTvSelect()) return;
     if (act === 'back') onExitRef.current();
     else if (act === 'playPause') togglePlayPause();
-    else if (act === 'seekBack') seekBy(-STEP_SEEK_MS);
-    else if (act === 'seekForward') seekBy(STEP_SEEK_MS);
+    else if (act === 'seekBack') seekBy(-getStepSeekMs());
+    else if (act === 'seekForward') seekBy(getStepSeekMs());
     else if (act === 'tracks') overlay.openTracks();
     else if (act === 'settings') overlay.openSettings();
     else if (act === 'info') overlay.toggleInfo();
@@ -557,6 +562,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
       toggleFullscreen,
       togglePlayPause,
       seekBy,
+      stepSeekMs: getStepSeekMs(),
       toggleMute: cbRef.current.onToggleMute !== undefined ? toggleMute : undefined,
       openTracks: overlay.openTracks,
       closeTracks: overlay.closeTracks,
@@ -619,6 +625,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
       onToggleFullscreen: toggleFullscreen,
       isVod: () => cbRef.current.activeTarget.kind === 'vod',
       canUseShortcuts: canUseDesktopShortcuts,
+      stepSeekMs: getStepSeekMs,
       onSeekBy: seekBy,
       onSeekToRatio: seekToRatio,
       onSeekToEnd: seekToEnd,
@@ -643,8 +650,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
     setVolume,
     stepVolumeBy,
     handleWheelVolume,
-    seekStepBack: () => seekBy(-STEP_SEEK_MS),
-    seekStepForward: () => seekBy(STEP_SEEK_MS),
+    seekStepBack: () => seekBy(-getStepSeekMs()),
+    seekStepForward: () => seekBy(getStepSeekMs()),
     seekToRatio,
     setBarScrubbing,
     jumpToLiveEdge: () => {

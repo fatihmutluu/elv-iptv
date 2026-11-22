@@ -1,31 +1,35 @@
 import type { UserItemKind } from '@elv/data';
 import type { MessageId } from '@elv/i18n';
 import {
-  ArtworkImage,
   CtaButton,
   IconButton,
   MicroPill,
-  Scrim,
   TABULAR_NUMS_STYLE,
   useI18n,
   useTheme,
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import type { ReactElement } from 'react';
+import { type ReactElement, useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { HomeHeroBackdrop } from './HomeHeroBackdrop';
 import { formatRemainingMinutes, type HomeHeroSlide } from './home-model';
 
 /** Focusable interactive slot identifiers inside {@link HomeHero}. */
-export type HomeHeroActionId = 'play' | 'mylist' | 'watched' | `dot-${number}`;
+export type HomeHeroActionId = 'play' | 'details' | 'mylist' | 'watched' | `dot-${number}`;
 
 /** Returns the ordered TV-focusable action ids for the active hero slide and slide count. */
 export function buildHeroActionIds(
   slide: HomeHeroSlide | undefined,
   slideCount: number,
+  hasDetails = false,
 ): HomeHeroActionId[] {
   if (!slide) return [];
-  const actions: HomeHeroActionId[] = ['play', 'mylist'];
+  const actions: HomeHeroActionId[] = ['play'];
+  if (hasDetails && (slide.kind === 'movie' || slide.kind === 'series')) {
+    actions.push('details');
+  }
+  actions.push('mylist');
   if (slide.kind !== 'live') actions.push('watched');
   if (slideCount > 1) {
     for (let i = 0; i < slideCount; i++) actions.push(`dot-${i}`);
@@ -40,8 +44,10 @@ export interface HomeHeroProps {
   readonly onSelectIndex: (index: number) => void;
   readonly inMyList: boolean;
   readonly onPlaySlide: (slide: HomeHeroSlide) => void;
+  readonly onOpenDetails?: (slide: HomeHeroSlide) => void;
   readonly onToggleMyList: (slide: HomeHeroSlide) => void;
   readonly onToggleWatched: (slide: HomeHeroSlide) => void;
+  readonly onHoverChange?: (hovered: boolean) => void;
   readonly isTv: boolean;
   readonly isTouch: boolean;
   readonly isPortrait: boolean;
@@ -70,8 +76,10 @@ export function HomeHero({
   onSelectIndex,
   inMyList,
   onPlaySlide,
+  onOpenDetails,
   onToggleMyList,
   onToggleWatched,
+  onHoverChange,
   isTv,
   isTouch,
   isPortrait,
@@ -85,6 +93,9 @@ export function HomeHero({
 
   const safeIndex = slides.length > 0 ? Math.min(Math.max(0, activeIndex), slides.length - 1) : 0;
   const slide = slides[safeIndex];
+  const handleHoverIn = useCallback(() => onHoverChange?.(true), [onHoverChange]);
+  const handleHoverOut = useCallback(() => onHoverChange?.(false), [onHoverChange]);
+
   if (slide === undefined) return null;
 
   const remMin = slide.isContinueWatching
@@ -99,13 +110,19 @@ export function HomeHero({
 
   const playLabel =
     slide.isContinueWatching && !slide.watched ? i18n.t('home.resume') : i18n.t('home.watchNow');
+  const canOpenDetails =
+    onOpenDetails !== undefined && (slide.kind === 'movie' || slide.kind === 'series');
   const canToggleWatched = slide.kind !== 'live';
   const dotTransition = webTransition(theme, 'width, background-color, border-color');
   const cursor = webCursorPointer();
 
   return (
-    <View
+    <Pressable
       testID="home-hero"
+      accessible={false}
+      focusable={false}
+      onHoverIn={handleHoverIn}
+      onHoverOut={handleHoverOut}
       style={[
         styles.container,
         {
@@ -117,17 +134,7 @@ export function HomeHero({
         },
       ]}
     >
-      <ArtworkImage
-        testID="home-hero-backdrop"
-        uri={slide.backdropUri}
-        label={slide.title}
-        maxDecodePx={960}
-        borderRadius={0}
-        decorative
-        style={StyleSheet.absoluteFill}
-      />
-      <Scrim direction="bottom" intensity="strong" testID="home-hero-scrim-bottom" />
-      <Scrim direction="left" intensity="strong" testID="home-hero-scrim-left" />
+      <HomeHeroBackdrop slideKey={slide.itemKey} uri={slide.backdropUri} title={slide.title} />
 
       <View style={styles.content}>
         <View style={styles.statusRow}>
@@ -235,6 +242,17 @@ export function HomeHero({
               focused={isTv && focusedAction === 'play'}
               onPress={() => onPlaySlide(slide)}
             />
+            {canOpenDetails ? (
+              <CtaButton
+                testID="home-hero-details"
+                variant="secondary"
+                icon="info"
+                label={i18n.t('home.details')}
+                focusable={!isTv}
+                focused={isTv && focusedAction === 'details'}
+                onPress={() => onOpenDetails(slide)}
+              />
+            ) : null}
             <IconButton
               testID="home-hero-mylist"
               icon={inMyList ? 'check' : 'plus'}
@@ -310,7 +328,7 @@ export function HomeHero({
           ) : null}
         </View>
       </View>
-    </View>
+    </Pressable>
   );
 }
 

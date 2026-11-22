@@ -1,0 +1,300 @@
+/** Minimum supported UI font scale multiplier. */
+export const MIN_PREF_FONT_SCALE = 0.9;
+
+/** Maximum supported UI font scale multiplier. */
+export const MAX_PREF_FONT_SCALE = 1.2;
+
+/** Minimum supported persisted player volume percentage. */
+export const MIN_PREF_PLAYER_VOLUME = 0;
+
+/** Maximum supported persisted player volume percentage. */
+export const MAX_PREF_PLAYER_VOLUME = 100;
+
+/** Supported Media3/player buffer size presets (`#147`). */
+export const BUFFER_PRESETS = ['auto', 'balanced', 'large'] as const;
+
+/** User-selectable playback buffer preset (`#147`). */
+export type BufferPreset = (typeof BUFFER_PRESETS)[number];
+
+/** User-selectable default subtitle activation mode (`#401`). */
+export type SubtitleModePref = 'auto' | 'always' | 'off';
+
+/** User-selectable skip-forward / skip-back interval in seconds (`#401`). */
+export type SeekStepSecPref = 5 | 10 | 15 | 30;
+
+/** User-selectable default video aspect / resize mode (`#401`). */
+export type DefaultResizeModePref = 'fit' | 'fill' | 'stretch';
+
+/** User-selectable EPG TV guide time window in hours (`#401`). */
+export type EpgTimeSpanHoursPref = 2 | 3 | 6;
+
+/** User-selectable default landing mode for Live TV (`#401`). */
+export type DefaultLiveModePref = 'favorites' | 'channels' | 'epg';
+
+/** User-selectable EPG guide auto-refresh interval in hours (`#401`). */
+export type GuideRefreshHoursPref = 6 | 12 | 24;
+
+/** User-selectable channel logo readability backdrop treatment (`#126`, `#401`). */
+export type LogoBackdropModePref = 'plate' | 'invert' | 'off';
+
+/** User-selectable on-device artwork cache budget in MiB (`#405`). */
+export type ArtworkCacheLimitMbPref = 64 | 128 | 256;
+
+/** Extended playback, Live TV, guide, and artwork cache preference fields. */
+export interface ExtendedPreferencesFields {
+  readonly preferredAudioLang: string;
+  readonly preferredSubtitleLang: string;
+  readonly subtitleMode: SubtitleModePref;
+  readonly seekStepSec: SeekStepSecPref;
+  readonly defaultResizeMode: DefaultResizeModePref;
+  readonly epgTimeSpanHours: EpgTimeSpanHoursPref;
+  readonly epgGenreTints: boolean;
+  readonly epgShowClock: boolean;
+  readonly defaultLiveMode: DefaultLiveModePref;
+  readonly guideRefreshHours: GuideRefreshHoursPref;
+  readonly logoBackdropMode: LogoBackdropModePref;
+  readonly showSourceBadges: boolean;
+  readonly liveOkTwoStepPreview: boolean;
+  readonly cleanChannelTitles: boolean;
+  readonly artworkCacheLimitMb: ArtworkCacheLimitMbPref;
+}
+
+const MAX_PREF_STRING_LENGTH = 64;
+const MAX_PREF_LANG_LENGTH = 12;
+const PREF_LANG_PATTERN = /^[a-z]{2,3}(-[a-z0-9]{2,8})?$/i;
+
+const SUBTITLE_MODES: readonly SubtitleModePref[] = ['auto', 'always', 'off'];
+const SEEK_STEP_SECS: readonly SeekStepSecPref[] = [5, 10, 15, 30];
+const DEFAULT_RESIZE_MODES: readonly DefaultResizeModePref[] = ['fit', 'fill', 'stretch'];
+const EPG_TIME_SPAN_HOURS: readonly EpgTimeSpanHoursPref[] = [2, 3, 6];
+const DEFAULT_LIVE_MODES: readonly DefaultLiveModePref[] = ['favorites', 'channels', 'epg'];
+const GUIDE_REFRESH_HOURS: readonly GuideRefreshHoursPref[] = [6, 12, 24];
+const LOGO_BACKDROP_MODES: readonly LogoBackdropModePref[] = ['plate', 'invert', 'off'];
+const ARTWORK_CACHE_LIMITS_MB: readonly ArtworkCacheLimitMbPref[] = [64, 128, 256];
+
+export function clampFontScale(value: number): number {
+  return Math.min(MAX_PREF_FONT_SCALE, Math.max(MIN_PREF_FONT_SCALE, value));
+}
+
+export function clampPlayerVolume(value: number): number {
+  const clamped = Math.min(
+    MAX_PREF_PLAYER_VOLUME,
+    Math.max(MIN_PREF_PLAYER_VOLUME, Math.round(value)),
+  );
+  return clamped === 0 ? 0 : clamped;
+}
+
+export function isValidShortString(value: unknown): value is string {
+  return (
+    typeof value === 'string' && value.trim().length > 0 && value.length <= MAX_PREF_STRING_LENGTH
+  );
+}
+
+export function isBufferPreset(value: unknown): value is BufferPreset {
+  return typeof value === 'string' && (BUFFER_PRESETS as readonly string[]).includes(value);
+}
+
+function normalizePrefLang(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_PREF_LANG_LENGTH) return '';
+  if (!PREF_LANG_PATTERN.test(trimmed)) return '';
+  return trimmed.toLowerCase();
+}
+
+function isSubtitleModePref(value: unknown): value is SubtitleModePref {
+  return typeof value === 'string' && (SUBTITLE_MODES as readonly string[]).includes(value);
+}
+
+function isSeekStepSecPref(value: unknown): value is SeekStepSecPref {
+  return typeof value === 'number' && (SEEK_STEP_SECS as readonly number[]).includes(value);
+}
+
+function isDefaultResizeModePref(value: unknown): value is DefaultResizeModePref {
+  return typeof value === 'string' && (DEFAULT_RESIZE_MODES as readonly string[]).includes(value);
+}
+
+function isEpgTimeSpanHoursPref(value: unknown): value is EpgTimeSpanHoursPref {
+  return typeof value === 'number' && (EPG_TIME_SPAN_HOURS as readonly number[]).includes(value);
+}
+
+function isDefaultLiveModePref(value: unknown): value is DefaultLiveModePref {
+  return typeof value === 'string' && (DEFAULT_LIVE_MODES as readonly string[]).includes(value);
+}
+
+function isGuideRefreshHoursPref(value: unknown): value is GuideRefreshHoursPref {
+  return typeof value === 'number' && (GUIDE_REFRESH_HOURS as readonly number[]).includes(value);
+}
+
+function isLogoBackdropModePref(value: unknown): value is LogoBackdropModePref {
+  return typeof value === 'string' && (LOGO_BACKDROP_MODES as readonly string[]).includes(value);
+}
+
+function isArtworkCacheLimitMbPref(value: unknown): value is ArtworkCacheLimitMbPref {
+  return (
+    typeof value === 'number' && (ARTWORK_CACHE_LIMITS_MB as readonly number[]).includes(value)
+  );
+}
+
+export function utf8ByteLength(text: string): number {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code <= 0x7f) {
+      bytes += 1;
+    } else if (code <= 0x7ff) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length) {
+      const next = text.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        i += 1;
+      } else {
+        bytes += 3;
+      }
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
+}
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function parseExtendedPreferences(
+  parsed: Record<string, unknown>,
+  defaults: ExtendedPreferencesFields,
+): ExtendedPreferencesFields {
+  return {
+    preferredAudioLang: normalizePrefLang(parsed.preferredAudioLang),
+    preferredSubtitleLang: normalizePrefLang(parsed.preferredSubtitleLang),
+    subtitleMode: isSubtitleModePref(parsed.subtitleMode)
+      ? parsed.subtitleMode
+      : defaults.subtitleMode,
+    seekStepSec: isSeekStepSecPref(parsed.seekStepSec) ? parsed.seekStepSec : defaults.seekStepSec,
+    defaultResizeMode: isDefaultResizeModePref(parsed.defaultResizeMode)
+      ? parsed.defaultResizeMode
+      : defaults.defaultResizeMode,
+    epgTimeSpanHours: isEpgTimeSpanHoursPref(parsed.epgTimeSpanHours)
+      ? parsed.epgTimeSpanHours
+      : defaults.epgTimeSpanHours,
+    epgGenreTints:
+      typeof parsed.epgGenreTints === 'boolean' ? parsed.epgGenreTints : defaults.epgGenreTints,
+    epgShowClock:
+      typeof parsed.epgShowClock === 'boolean' ? parsed.epgShowClock : defaults.epgShowClock,
+    defaultLiveMode: isDefaultLiveModePref(parsed.defaultLiveMode)
+      ? parsed.defaultLiveMode
+      : defaults.defaultLiveMode,
+    guideRefreshHours: isGuideRefreshHoursPref(parsed.guideRefreshHours)
+      ? parsed.guideRefreshHours
+      : defaults.guideRefreshHours,
+    logoBackdropMode: isLogoBackdropModePref(parsed.logoBackdropMode)
+      ? parsed.logoBackdropMode
+      : defaults.logoBackdropMode,
+    showSourceBadges:
+      typeof parsed.showSourceBadges === 'boolean'
+        ? parsed.showSourceBadges
+        : defaults.showSourceBadges,
+    liveOkTwoStepPreview:
+      typeof parsed.liveOkTwoStepPreview === 'boolean'
+        ? parsed.liveOkTwoStepPreview
+        : defaults.liveOkTwoStepPreview,
+    cleanChannelTitles:
+      typeof parsed.cleanChannelTitles === 'boolean'
+        ? parsed.cleanChannelTitles
+        : defaults.cleanChannelTitles,
+    artworkCacheLimitMb: isArtworkCacheLimitMbPref(parsed.artworkCacheLimitMb)
+      ? parsed.artworkCacheLimitMb
+      : defaults.artworkCacheLimitMb,
+  };
+}
+
+export function serializeExtendedPreferences(
+  snapshot: ExtendedPreferencesFields,
+  defaults: ExtendedPreferencesFields,
+): ExtendedPreferencesFields {
+  return {
+    preferredAudioLang: normalizePrefLang(snapshot.preferredAudioLang),
+    preferredSubtitleLang: normalizePrefLang(snapshot.preferredSubtitleLang),
+    subtitleMode: isSubtitleModePref(snapshot.subtitleMode)
+      ? snapshot.subtitleMode
+      : defaults.subtitleMode,
+    seekStepSec: isSeekStepSecPref(snapshot.seekStepSec)
+      ? snapshot.seekStepSec
+      : defaults.seekStepSec,
+    defaultResizeMode: isDefaultResizeModePref(snapshot.defaultResizeMode)
+      ? snapshot.defaultResizeMode
+      : defaults.defaultResizeMode,
+    epgTimeSpanHours: isEpgTimeSpanHoursPref(snapshot.epgTimeSpanHours)
+      ? snapshot.epgTimeSpanHours
+      : defaults.epgTimeSpanHours,
+    epgGenreTints: Boolean(snapshot.epgGenreTints),
+    epgShowClock: Boolean(snapshot.epgShowClock),
+    defaultLiveMode: isDefaultLiveModePref(snapshot.defaultLiveMode)
+      ? snapshot.defaultLiveMode
+      : defaults.defaultLiveMode,
+    guideRefreshHours: isGuideRefreshHoursPref(snapshot.guideRefreshHours)
+      ? snapshot.guideRefreshHours
+      : defaults.guideRefreshHours,
+    logoBackdropMode: isLogoBackdropModePref(snapshot.logoBackdropMode)
+      ? snapshot.logoBackdropMode
+      : defaults.logoBackdropMode,
+    showSourceBadges: Boolean(snapshot.showSourceBadges),
+    liveOkTwoStepPreview: Boolean(snapshot.liveOkTwoStepPreview),
+    cleanChannelTitles: Boolean(snapshot.cleanChannelTitles),
+    artworkCacheLimitMb: isArtworkCacheLimitMbPref(snapshot.artworkCacheLimitMb)
+      ? snapshot.artworkCacheLimitMb
+      : defaults.artworkCacheLimitMb,
+  };
+}
+
+export function mergeExtendedPreferences(
+  base: ExtendedPreferencesFields,
+  patch: Partial<ExtendedPreferencesFields>,
+): ExtendedPreferencesFields {
+  return {
+    preferredAudioLang:
+      typeof patch.preferredAudioLang === 'string'
+        ? normalizePrefLang(patch.preferredAudioLang)
+        : base.preferredAudioLang,
+    preferredSubtitleLang:
+      typeof patch.preferredSubtitleLang === 'string'
+        ? normalizePrefLang(patch.preferredSubtitleLang)
+        : base.preferredSubtitleLang,
+    subtitleMode: isSubtitleModePref(patch.subtitleMode) ? patch.subtitleMode : base.subtitleMode,
+    seekStepSec: isSeekStepSecPref(patch.seekStepSec) ? patch.seekStepSec : base.seekStepSec,
+    defaultResizeMode: isDefaultResizeModePref(patch.defaultResizeMode)
+      ? patch.defaultResizeMode
+      : base.defaultResizeMode,
+    epgTimeSpanHours: isEpgTimeSpanHoursPref(patch.epgTimeSpanHours)
+      ? patch.epgTimeSpanHours
+      : base.epgTimeSpanHours,
+    epgGenreTints:
+      typeof patch.epgGenreTints === 'boolean' ? patch.epgGenreTints : base.epgGenreTints,
+    epgShowClock: typeof patch.epgShowClock === 'boolean' ? patch.epgShowClock : base.epgShowClock,
+    defaultLiveMode: isDefaultLiveModePref(patch.defaultLiveMode)
+      ? patch.defaultLiveMode
+      : base.defaultLiveMode,
+    guideRefreshHours: isGuideRefreshHoursPref(patch.guideRefreshHours)
+      ? patch.guideRefreshHours
+      : base.guideRefreshHours,
+    logoBackdropMode: isLogoBackdropModePref(patch.logoBackdropMode)
+      ? patch.logoBackdropMode
+      : base.logoBackdropMode,
+    showSourceBadges:
+      typeof patch.showSourceBadges === 'boolean' ? patch.showSourceBadges : base.showSourceBadges,
+    liveOkTwoStepPreview:
+      typeof patch.liveOkTwoStepPreview === 'boolean'
+        ? patch.liveOkTwoStepPreview
+        : base.liveOkTwoStepPreview,
+    cleanChannelTitles:
+      typeof patch.cleanChannelTitles === 'boolean'
+        ? patch.cleanChannelTitles
+        : base.cleanChannelTitles,
+    artworkCacheLimitMb: isArtworkCacheLimitMbPref(patch.artworkCacheLimitMb)
+      ? patch.artworkCacheLimitMb
+      : base.artworkCacheLimitMb,
+  };
+}

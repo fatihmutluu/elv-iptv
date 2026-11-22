@@ -7,12 +7,17 @@ import { EMPTY_LIVE_MEMORY, type LiveMode, type LiveTabMemory } from './live-mod
 export function useLiveTabMemory(
   memory: LiveTabMemory | undefined,
   onMemoryChange: ((next: LiveTabMemory) => void) | undefined,
+  defaultMode?: LiveMode,
 ): {
   readonly memory: LiveTabMemory;
   readonly memoryRef: MutableRefObject<LiveTabMemory>;
   readonly updateMemory: (patch: Partial<LiveTabMemory>) => void;
 } {
-  const [localMemory, setLocalMemory] = useState<LiveTabMemory>(() => memory ?? EMPTY_LIVE_MEMORY);
+  const [localMemory, setLocalMemory] = useState<LiveTabMemory>(
+    () =>
+      memory ??
+      (defaultMode !== undefined ? { ...EMPTY_LIVE_MEMORY, mode: defaultMode } : EMPTY_LIVE_MEMORY),
+  );
   const activeMemory = onMemoryChange && memory !== undefined ? memory : localMemory;
   const memoryRef = useRef(activeMemory);
   memoryRef.current = activeMemory;

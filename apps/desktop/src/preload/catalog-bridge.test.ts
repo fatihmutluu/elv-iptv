@@ -447,4 +447,44 @@ describe('createCatalogBridge', () => {
     h.deliverDisconnected();
     expect(seenB).toHaveLength(2);
   });
+
+  it('forwards ListItemsOptions on items and allSourcesItems RPC calls (#125)', async () => {
+    const h = createFakeIpcRenderer();
+    const bridge = createCatalogBridge(h.ipc);
+
+    const openP = bridge.open();
+    const port = new FakeRendererPort();
+    h.deliverPort(1, port);
+    await Promise.resolve();
+    port.deliver({ type: 'result', reqId: 1, value: ok(undefined) });
+    expect(await openP).toEqual({ ok: true, value: undefined });
+
+    const opts = { sortBy: 'alpha' as const, excludeWatched: true, profileId: 'p1' };
+    const itemsP = bridge.items('src-1|movie|10', 0, 18, opts);
+    const allP = bridge.allSourcesItems?.('series', 0, 24, ['src-1'], opts);
+    await Promise.resolve();
+
+    expect(port.sent.at(-2)).toEqual({
+      type: 'call',
+      reqId: 2,
+      call: { method: 'items', categoryId: 'src-1|movie|10', offset: 0, limit: 18, opts },
+    });
+    expect(port.sent.at(-1)).toEqual({
+      type: 'call',
+      reqId: 3,
+      call: {
+        method: 'allSourcesItems',
+        kind: 'series',
+        offset: 0,
+        limit: 24,
+        sourceIds: ['src-1'],
+        opts,
+      },
+    });
+
+    port.deliver({ type: 'result', reqId: 2, value: [] });
+    port.deliver({ type: 'result', reqId: 3, value: [] });
+    expect(await itemsP).toEqual([]);
+    expect(await allP).toEqual([]);
+  });
 });

@@ -19,6 +19,7 @@ import {
 } from 'electron';
 import { CATALOG_CHANNELS } from '../shared/catalog-ipc.ts';
 import { APP_ORIGIN, APP_SCHEME } from './app-protocol.ts';
+import { createDesktopArtworkCache, registerArtworkIpc } from './artwork-cache.ts';
 import { attachBrowserBackGuard } from './browser-back.ts';
 import { type CatalogCoordinator, createCatalogCoordinator } from './catalog/coordinator.ts';
 import { parseDevSeedEnv, runDesktopDevSeedOnce } from './catalog/dev-seed.ts';
@@ -256,6 +257,15 @@ if (hasLock) {
   void app.whenReady().then(async () => {
     if (app.isPackaged) Menu.setApplicationMenu(null);
     lockDownSession(session.defaultSession);
+    const artworkCache = createDesktopArtworkCache({
+      userDataDir: app.getPath('userData'),
+      onClear: () => session.defaultSession.clearCache(),
+    });
+    registerArtworkIpc({
+      ipcMain,
+      cache: artworkCache,
+      log: logger.log,
+    });
     serveRenderer();
     catalogCoordinator = startCatalog();
     await startPlayer();

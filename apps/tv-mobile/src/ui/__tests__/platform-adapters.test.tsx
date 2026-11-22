@@ -123,6 +123,19 @@ describe('createMobileTvUiAdapters (#311, #202)', () => {
     expect(tree.props.accessible).toBe(false);
     expect(tree.props.accessibilityLabel).toBeUndefined();
   });
+
+  it('wires a default artworkCache adapter with stats, setLimitBytes, and clear (#405)', async () => {
+    const adapters = createMobileTvUiAdapters();
+    if (!adapters.artworkCache) throw new Error('expected artworkCache adapter');
+
+    await adapters.artworkCache.setLimitBytes?.(64 * 1024 * 1024);
+    expect(await adapters.artworkCache.stats?.()).toEqual({
+      bytes: 0,
+      entries: 0,
+      maxBytes: 64 * 1024 * 1024,
+    });
+    await expect(adapters.artworkCache.clear()).resolves.toBeUndefined();
+  });
 });
 
 describe('attachAppStateDeadHostReset (#202)', () => {

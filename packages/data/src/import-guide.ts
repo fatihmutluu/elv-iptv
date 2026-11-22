@@ -29,7 +29,13 @@ import {
   sameValidator,
   withGuideValidator,
 } from './http-cache';
-import { checkAbort, performRun, type RunCtx, Stop } from './import-run';
+import {
+  createStreamProgressMeter,
+  type StreamProgressMeter,
+  trackBodyBytes,
+  wrapCleanupProgress,
+} from './import-progress';
+import { checkAbort, notify, performRun, type RunCtx, Stop } from './import-run';
 import type { ImportDeps, ImportOptions, ImportSummary } from './import-types';
 import {
   getSource,
@@ -147,6 +153,7 @@ async function execute(
   candidates: readonly GuideCandidate[],
   now: number,
   retryDelayMs: (attempt: number) => number,
+  meter: StreamProgressMeter,
 ): Promise<GuideOutcome> {
   const allowConditional = await hasStoredProgrammes(c.db, c.sourceId);
   const opened = await openGuide(
@@ -164,6 +171,7 @@ async function execute(
     c.keepTables.add('guide_channels');
     c.counts.unchanged = 1;
     if (opened.failed.length > 0) c.counts.guideUrlFallbacks = opened.failed.length;
+    meter.completeStream();
     return { kind: 'not-modified', slot: opened.slot, validator: opened.validator };
   }
   c.counts.guideUrlFallbacks = opened.failed.length;
@@ -193,7 +201,14 @@ async function execute(
     seenProgrammes: 0,
   };
   const window = source.settings.guideWindow ?? DEFAULT_WINDOW;
-  const scan = scanXmltv(opened.body, {
+  let bytesRead = 0;
+  const body =
+    opened.contentLength === undefined
+      ? opened.body
+      : trackBodyBytes(opened.body, (n) => {
+          bytesRead = n;
+        });
+  const scan = scanXmltv(body, {
     batchSize: c.batchSize,
     from: now - window.daysBack * DAY_MS,
     to: now + window.daysForward * DAY_MS,
@@ -217,8 +232,12 @@ async function execute(
         st,
         closeOpenProgrammesBatch(c, st.open, batch.programmes, st.lastByChannel),
       );
-      c.progress({ phase: 'guide-channels', done: st.channels });
-      c.progress({ phase: 'programmes', done: st.programmes });
+      const streamDone =
+        opened.contentLength !== undefined ? bytesRead : st.channels + st.seenProgrammes;
+      c.progress(
+        meter.reportStream('guide-channels', st.channels, streamDone, opened.contentLength),
+      );
+      c.progress(meter.reportStream('programmes', st.programmes, streamDone, opened.contentLength));
       await c.deps.scheduler.yieldNow();
     }
   } finally {
@@ -229,6 +248,7 @@ async function execute(
   if (st.channels === 0 && st.seenProgrammes === 0) {
     throw new Stop(elvError('source-format', 'not-a-guide'));
   }
+  meter.completeStream();
   c.counts.guideChannels = st.channels;
   c.counts.programmes = st.programmes;
   return { kind: 'imported', slot: opened.slot, state: st, validator: opened.validator };
@@ -255,15 +275,16 @@ export async function importGuide(
   if (candidates.value.length === 0) return err(elvError('source-format', 'no-guide-url'));
   const now = opts.now ?? deps.clock();
   const retryDelayMs = opts.retryDelayMs ?? defaultGuideRetryDelayMs;
+  const meter = createStreamProgressMeter();
   let outcome: GuideOutcome | undefined;
   let runId: number | undefined;
-  const result = await performRun(source, deps, opts, {
+  const result = await performRun(source, deps, wrapCleanupProgress(opts, meter, notify), {
     kind: 'guide',
     staleTables: ['guide_channels'],
     requireItems: false,
     execute: async (c) => {
       runId = c.runId;
-      outcome = await execute(c, source, candidates.value, now, retryDelayMs);
+      outcome = await execute(c, source, candidates.value, now, retryDelayMs, meter);
     },
     beforeCleanup: async (tx, c) => {
       if (outcome === undefined) return;

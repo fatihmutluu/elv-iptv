@@ -4,10 +4,19 @@ import {
   MIN_RESUME_POSITION_MS,
   type WatchProgressRow,
 } from '@elv/data';
-import type { ElvError } from '@elv/domain';
-import type { AppI18n, MessageId } from '@elv/i18n';
+import type { AppI18n } from '@elv/i18n';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
 import type { DetailTarget } from '../shared';
+
+export {
+  buildTechnicalBadges,
+  cyclePrePlayOption,
+  type DescribedDetailError,
+  describeDetailSeasonsError,
+  PREPLAY_AUDIO_OPTIONS,
+  PREPLAY_SUBTITLE_OPTIONS,
+  SYNOPSIS_EXPAND_THRESHOLD,
+} from './detail-preplay';
 
 /** Resolved primary Play / Resume action displayed in the Detail Hero CTA. */
 export type PrimaryPlayAction =
@@ -40,17 +49,12 @@ export interface SeriesPrimaryEpisodeSelection {
   readonly durationMs: number;
 }
 
-/** Localized message and actionable recovery hint for a series seasons error. */
-export interface DescribedDetailError {
-  readonly messageId: MessageId;
-  readonly hintId: MessageId;
-}
-
 /** Navigable vertical row identifier inside `DetailScreen` for 10-ft TV D-pad focus. */
 export type DetailNavRowId =
   | 'back'
   | 'hero-actions'
   | 'hero-play'
+  | 'cast'
   | 'seasons'
   | 'episode-chunks'
   | 'episodes'
@@ -73,6 +77,8 @@ export interface BuildEpisodePlayTargetInput {
   readonly seriesTitle: string;
   readonly t: AppI18n['t'];
   readonly nextEpisodes?: readonly EpisodeRow[];
+  readonly preferredAudioLang?: string;
+  readonly preferredSubtitleLang?: string;
 }
 
 /** Input for {@link buildMoviePlayTarget}. */
@@ -80,6 +86,8 @@ export interface BuildMoviePlayTargetInput {
   readonly target: DetailTarget;
   readonly resolvedTitle?: string;
   readonly progress: WatchProgressRow | null | undefined;
+  readonly preferredAudioLang?: string;
+  readonly preferredSubtitleLang?: string;
 }
 
 /** Input for {@link buildPrimaryPlayAction}. */
@@ -90,11 +98,15 @@ export interface BuildPrimaryPlayActionInput {
   readonly episodes: readonly EpisodeRow[];
   readonly episodeProgressByKey: ReadonlyMap<string, WatchProgressRow>;
   readonly t: AppI18n['t'];
+  readonly preferredAudioLang?: string;
+  readonly preferredSubtitleLang?: string;
 }
 
 /** Input for {@link buildDetailNavRows}. */
 export interface BuildDetailNavRowsInput {
   readonly heroActionCount: number;
+  readonly heroPlayCount?: number;
+  readonly castCount?: number;
   readonly seasonsCount: number;
   readonly episodeChunksCount?: number;
   readonly episodesCount: number;
@@ -179,6 +191,16 @@ export function resolveSeriesPrimaryEpisode(
 
 const MAX_NEXT_EPISODES = 50;
 
+function langOverrides(
+  preferredAudioLang: string | undefined,
+  preferredSubtitleLang: string | undefined,
+): Pick<PlayableEntry, 'preferredAudioLang' | 'preferredSubtitleLang'> {
+  return {
+    ...(preferredAudioLang ? { preferredAudioLang } : {}),
+    ...(preferredSubtitleLang ? { preferredSubtitleLang } : {}),
+  };
+}
+
 function episodeToPlayableEntry(
   target: DetailTarget,
   episode: EpisodeRow,
@@ -186,6 +208,8 @@ function episodeToPlayableEntry(
   seriesTitle: string,
   startPositionMs: number,
   t: AppI18n['t'],
+  preferredAudioLang?: string,
+  preferredSubtitleLang?: string,
 ): PlayableEntry {
   const episodeNumber = episode.episode ?? index + 1;
   const trimmedTitle = episode.title?.trim() ?? '';
@@ -209,6 +233,7 @@ function episodeToPlayableEntry(
     logo: target.backdropUri ?? target.posterUri,
     subtitle,
     startPositionMs,
+    ...langOverrides(preferredAudioLang, preferredSubtitleLang),
   };
 }
 
@@ -221,13 +246,35 @@ export function buildEpisodePlayTarget({
   seriesTitle,
   t,
   nextEpisodes,
+  preferredAudioLang,
+  preferredSubtitleLang,
 }: BuildEpisodePlayTargetInput): PlayTarget {
   const startPositionMs = progress !== undefined ? computeResumePositionMs(progress) : 0;
-  const base = episodeToPlayableEntry(target, episode, index, seriesTitle, startPositionMs, t);
+  const base = episodeToPlayableEntry(
+    target,
+    episode,
+    index,
+    seriesTitle,
+    startPositionMs,
+    t,
+    preferredAudioLang,
+    preferredSubtitleLang,
+  );
   if (nextEpisodes === undefined || nextEpisodes.length === 0) return base;
   const mappedNext = nextEpisodes
     .slice(0, MAX_NEXT_EPISODES)
-    .map((ep, offset) => episodeToPlayableEntry(target, ep, index + 1 + offset, seriesTitle, 0, t));
+    .map((ep, offset) =>
+      episodeToPlayableEntry(
+        target,
+        ep,
+        index + 1 + offset,
+        seriesTitle,
+        0,
+        t,
+        preferredAudioLang,
+        preferredSubtitleLang,
+      ),
+    );
   return { ...base, nextEpisodes: mappedNext };
 }
 
@@ -236,6 +283,8 @@ export function buildMoviePlayTarget({
   target,
   resolvedTitle,
   progress,
+  preferredAudioLang,
+  preferredSubtitleLang,
 }: BuildMoviePlayTargetInput): PlayTarget {
   const startPositionMs =
     progress !== null && progress !== undefined ? computeResumePositionMs(progress) : 0;
@@ -248,6 +297,7 @@ export function buildMoviePlayTarget({
     logo: target.posterUri ?? target.backdropUri,
     subtitle: null,
     startPositionMs,
+    ...langOverrides(preferredAudioLang, preferredSubtitleLang),
   };
 }
 
@@ -259,7 +309,10 @@ export function buildPrimaryPlayAction({
   episodes,
   episodeProgressByKey,
   t,
+  preferredAudioLang,
+  preferredSubtitleLang,
 }: BuildPrimaryPlayActionInput): PrimaryPlayAction {
+  const langProps = langOverrides(preferredAudioLang, preferredSubtitleLang);
   if (target.kind === 'movie') {
     const resume =
       movieProgress !== null &&
@@ -270,7 +323,12 @@ export function buildPrimaryPlayAction({
       resume,
       positionMs: resume ? movieProgress.positionMs : 0,
       durationMs: movieProgress?.durationMs ?? 0,
-      target: buildMoviePlayTarget({ target, resolvedTitle, progress: movieProgress }),
+      target: buildMoviePlayTarget({
+        target,
+        resolvedTitle,
+        progress: movieProgress,
+        ...langProps,
+      }),
     };
   }
 
@@ -293,6 +351,7 @@ export function buildPrimaryPlayAction({
       seriesTitle: resolvedTitle,
       t,
       nextEpisodes: episodes.slice(picked.index + 1),
+      ...langProps,
     }),
   };
 }
@@ -318,61 +377,20 @@ export function formatEpisodeDuration(
   return t('detail.durationMin', { minutes: totalMinutes });
 }
 
-/** Maps a `CatalogService.seasons` {@link ElvError} to localized copy and recovery hint ids. */
-export function describeDetailSeasonsError(error: ElvError): DescribedDetailError {
-  if (error.category === 'auth') {
-    if (
-      error.code === 'invalid-credentials' ||
-      error.code === 'http-401' ||
-      error.code === 'http-403'
-    ) {
-      return {
-        messageId: 'source.error.invalidCredentials',
-        hintId: 'source.hint.invalidCredentials',
-      };
-    }
-    return {
-      messageId: 'source.error.accountExpired',
-      hintId: 'source.hint.accountExpired',
-    };
-  }
-  if (error.category === 'network') {
-    if (error.code === 'rate-limited' || error.code === 'http-429' || error.code === 'http-509') {
-      return {
-        messageId: 'source.error.rateLimited',
-        hintId: 'source.hint.rateLimited',
-      };
-    }
-    if (error.code === 'timeout') {
-      return {
-        messageId: 'source.error.timeout',
-        hintId: 'source.hint.timeout',
-      };
-    }
-    return {
-      messageId: 'source.error.unreachable',
-      hintId: 'source.hint.unreachable',
-    };
-  }
-  if (error.code === 'item-not-found' || error.code === 'http-404') {
-    return {
-      messageId: 'player.error.itemNotFound',
-      hintId: 'player.hint.itemNotFound',
-    };
-  }
-  return {
-    messageId: 'source.error.storage',
-    hintId: 'source.hint.storage',
-  };
-}
-
 /** Builds the ordered list of currently visible focusable rows for 10-ft TV D-pad traversal. */
 export function buildDetailNavRows(input: BuildDetailNavRowsInput): DetailNavRowDescriptor[] {
   const rows: DetailNavRowDescriptor[] = [{ id: 'back', count: 1, orientation: 'horizontal' }];
   if (input.heroActionCount > 0) {
     rows.push({ id: 'hero-actions', count: input.heroActionCount, orientation: 'horizontal' });
   }
-  rows.push({ id: 'hero-play', count: 1, orientation: 'horizontal' });
+  rows.push({
+    id: 'hero-play',
+    count: Math.max(1, input.heroPlayCount ?? 1),
+    orientation: 'horizontal',
+  });
+  if ((input.castCount ?? 0) > 0) {
+    rows.push({ id: 'cast', count: input.castCount ?? 0, orientation: 'horizontal' });
+  }
   if (input.seasonsCount > 0) {
     rows.push({ id: 'seasons', count: input.seasonsCount, orientation: 'horizontal' });
   }

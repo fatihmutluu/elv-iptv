@@ -47,6 +47,19 @@ export function PlayerFailureBanner({
         >
           {i18n.t(failure.hintId)}
         </Text>
+        {failure.httpStatus !== undefined ? (
+          <Text
+            testID="player-error-http-status"
+            numberOfLines={1}
+            style={[
+              theme.typography.caption,
+              TABULAR_NUMS_STYLE,
+              { color: theme.colors.textSecondary },
+            ]}
+          >
+            {i18n.t('player.error.httpStatus', { status: failure.httpStatus })}
+          </Text>
+        ) : null}
         {failure.evidence !== undefined && failure.evidence.trim().length > 0 ? (
           <Text
             testID="player-error-evidence"

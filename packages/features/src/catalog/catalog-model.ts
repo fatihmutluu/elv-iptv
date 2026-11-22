@@ -1,4 +1,4 @@
-import { MIN_RESUME_POSITION_MS, type WatchProgressRow } from '@elv/data';
+import { type ItemSortOrder, MIN_RESUME_POSITION_MS, type WatchProgressRow } from '@elv/data';
 import type { DetailTarget, PagedListSource } from '../shared';
 
 /** Number of category rails loaded initially in Movies & Series Discovery Mode. */
@@ -27,6 +27,7 @@ export interface CatalogTabMemory {
   readonly selectedCategoryId: string | null;
   readonly visibleCategoryCount: number;
   readonly gridScrollRow?: number;
+  readonly sortBy?: ItemSortOrder;
 }
 
 /** Default clean {@link CatalogTabMemory} snapshot for initial tab entry. */

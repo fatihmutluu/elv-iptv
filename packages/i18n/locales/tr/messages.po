@@ -1196,3 +1196,156 @@ msgstr "Şimdi oynat"
 
 msgid "player.autoPlayNextEpisode"
 msgstr "Sonraki bölümü otomatik oynat"
+
+msgid "settings.section.playback"
+msgstr "Oynatma"
+
+msgid "settings.section.liveTv"
+msgstr "Canlı TV ve Rehber"
+
+msgid "settings.playback.title"
+msgstr "Oynatma"
+
+msgid "settings.playback.subtitle"
+msgstr "Ses, altyazı, sarma adımı ve video varsayılanları"
+
+msgid "settings.playback.audioLang"
+msgstr "Tercih edilen ses dili"
+
+msgid "settings.playback.subtitleLang"
+msgstr "Tercih edilen altyazı dili"
+
+msgid "settings.playback.langAuto"
+msgstr "Otomatik"
+
+msgid "settings.playback.subtitleMode"
+msgstr "Altyazı modu"
+
+msgid "settings.playback.subtitleMode.auto"
+msgstr "Otomatik"
+
+msgid "settings.playback.subtitleMode.always"
+msgstr "Her zaman açık"
+
+msgid "settings.playback.subtitleMode.off"
+msgstr "Kapalı"
+
+msgid "settings.playback.seekStep"
+msgstr "Atlama süresi"
+
+msgid "settings.playback.seekStepValue"
+msgstr "{seconds} sn"
+
+msgid "settings.playback.defaultAspect"
+msgstr "Varsayılan en-boy oranı"
+
+msgid "settings.playback.bufferPreset"
+msgstr "Tampon ön ayarı"
+
+msgid "settings.playback.buffer.fast"
+msgstr "Hızlı geçiş"
+
+msgid "settings.playback.buffer.auto"
+msgstr "Dengeli"
+
+msgid "settings.playback.buffer.resilient"
+msgstr "Dayanıklı"
+
+msgid "settings.liveTv.title"
+msgstr "Canlı TV ve Rehber"
+
+msgid "settings.liveTv.subtitle"
+msgstr "Varsayılan görünüm, rehber aralığı, kanal logoları ve geçiş"
+
+msgid "settings.liveTv.defaultMode"
+msgstr "Varsayılan Canlı TV görünümü"
+
+msgid "settings.liveTv.epgSpan"
+msgstr "TV rehberi zaman aralığı"
+
+msgid "settings.liveTv.epgSpanHours"
+msgstr "{hours} saat"
+
+msgid "settings.liveTv.epgGenreTints"
+msgstr "Rehber türlerini renklendir"
+
+msgid "settings.liveTv.epgShowClock"
+msgstr "TV rehberinde saati göster"
+
+msgid "settings.liveTv.guideRefresh"
+msgstr "Rehber yenileme aralığı"
+
+msgid "settings.liveTv.guideRefreshHours"
+msgstr "Her {hours} sa"
+
+msgid "settings.liveTv.logoBackdrop"
+msgstr "Kanal logosu okunabilirliği"
+
+msgid "settings.liveTv.logoBackdrop.plate"
+msgstr "Hafif zemin"
+
+msgid "settings.liveTv.logoBackdrop.invert"
+msgstr "Koyu logoları ters çevir"
+
+msgid "settings.liveTv.logoBackdrop.off"
+msgstr "Orijinal"
+
+msgid "settings.liveTv.sourceBadges"
+msgstr "Kaynak rozetlerini göster"
+
+msgid "settings.liveTv.twoStepPreview"
+msgstr "Tam ekrandan önce kanalı önizle"
+
+msgid "settings.liveTv.cleanTitles"
+msgstr "Kanal adlarından sağlayıcı etiketlerini temizle"
+
+msgid "settings.artworkCache"
+msgstr "Görsel önbellek sınırı"
+
+msgid "settings.artworkCacheLimitMb"
+msgstr "{mb} MB"
+
+msgid "settings.artworkCacheClear"
+msgstr "Görsel önbelleğini temizle"
+
+msgid "settings.artworkCacheCleared"
+msgstr "Görsel önbelleği temizlendi"
+
+msgid "source.error.httpStatus"
+msgstr "Sunucu HTTP {status} döndürdü"
+
+msgid "player.error.httpStatus"
+msgstr "Yayın sunucusu HTTP {status} döndürdü"
+
+msgid "sources.status.importingPercent"
+msgstr "{phase} · {done} (%{percent})"
+
+msgid "home.details"
+msgstr "Detaylar"
+
+msgid "detail.readMore"
+msgstr "Devamını oku"
+
+msgid "detail.readLess"
+msgstr "Daha az göster"
+
+msgid "detail.synopsisTitle"
+msgstr "Özet"
+
+msgid "detail.prePlayAudio"
+msgstr "Ses"
+
+msgid "detail.prePlaySubtitles"
+msgstr "Altyazı"
+
+msgid "detail.trackDefault"
+msgstr "Varsayılan"
+
+msgid "detail.director"
+msgstr "Yönetmen"
+
+msgid "detail.searchPerson"
+msgstr "{name} için ara"
+
+msgid "live.pressAgainFullscreen"
+msgstr "Tam ekran için tekrar OK'a basın"

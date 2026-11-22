@@ -23,6 +23,7 @@ export function usePlayerScrub(params: {
   serviceRef: MutableRefObject<PlaybackService | null>;
   clockRef: MutableRefObject<PlaybackClock>;
   timersRef: MutableRefObject<PlaybackTimers>;
+  stepSeekMs?: number | undefined;
   onSeekCommit?: ((positionMs: number, priorPositionMs?: number) => void) | undefined;
 }) {
   const { statusKind, serviceRef, clockRef, timersRef } = params;
@@ -60,6 +61,7 @@ export function usePlayerScrub(params: {
         }
       },
       onPreviewChange: setPreviewPositionMs,
+      stepSeekMs: () => cbRef.current.stepSeekMs ?? STEP_SEEK_MS,
     });
   }
   const scrub = scrubRef.current;

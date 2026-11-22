@@ -7,7 +7,7 @@ import type {
   XtreamSeries,
 } from '@elv/sources';
 import { hashCategoryRow, hashLiveRow, hashMovieRow, hashSeriesRow } from './content-hash';
-import { foldText } from './fold';
+import { foldText, sortTitleKey } from './fold';
 
 /** An item with the fields every Xtream list shares. */
 export interface Listed {
@@ -25,15 +25,16 @@ const n = (v: number | undefined): SqlValue => v ?? null;
 const s = (v: string | undefined): SqlValue => v ?? null;
 
 export const liveWriter: ItemWriter<XtreamLive> = {
-  sql: `INSERT INTO live_next (source_id, key, provider_id, num, name, name_fold, logo, guide_id, catchup_days, run_id, content_hash)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  sql: `INSERT INTO live_next (source_id, key, provider_id, num, name, name_fold, sort_title, logo, guide_id, catchup_days, run_id, content_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_id, key) DO UPDATE SET provider_id = excluded.provider_id, num = excluded.num,
-          name = excluded.name, name_fold = excluded.name_fold, logo = excluded.logo,
+          name = excluded.name, name_fold = excluded.name_fold, sort_title = excluded.sort_title, logo = excluded.logo,
           guide_id = excluded.guide_id, catchup_days = excluded.catchup_days, run_id = excluded.run_id,
           content_hash = excluded.content_hash`,
   row: (sourceId, key, runId, i) => {
     const providerId = String(i.id);
     const nameFold = foldText(i.name);
+    const sortTitle = sortTitleKey(i.name);
     const contentHash = hashLiveRow({
       providerId,
       num: i.num,
@@ -50,6 +51,7 @@ export const liveWriter: ItemWriter<XtreamLive> = {
       n(i.num),
       i.name,
       nameFold,
+      sortTitle,
       s(i.icon),
       s(i.epgId),
       i.catchupDays,
@@ -60,15 +62,16 @@ export const liveWriter: ItemWriter<XtreamLive> = {
 };
 
 export const movieWriter: ItemWriter<XtreamMovie> = {
-  sql: `INSERT INTO movies_next (source_id, key, provider_id, name, name_fold, logo, rating, year, extension, added, run_id, content_hash)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  sql: `INSERT INTO movies_next (source_id, key, provider_id, name, name_fold, sort_title, logo, rating, year, extension, added, run_id, content_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_id, key) DO UPDATE SET provider_id = excluded.provider_id, name = excluded.name,
-          name_fold = excluded.name_fold, logo = excluded.logo, rating = excluded.rating, year = excluded.year,
+          name_fold = excluded.name_fold, sort_title = excluded.sort_title, logo = excluded.logo, rating = excluded.rating, year = excluded.year,
           extension = excluded.extension, added = excluded.added, run_id = excluded.run_id,
           content_hash = excluded.content_hash`,
   row: (sourceId, key, runId, i) => {
     const providerId = String(i.id);
     const nameFold = foldText(i.name);
+    const sortTitle = sortTitleKey(i.name);
     const contentHash = hashMovieRow({
       providerId,
       name: i.name,
@@ -85,6 +88,7 @@ export const movieWriter: ItemWriter<XtreamMovie> = {
       providerId,
       i.name,
       nameFold,
+      sortTitle,
       s(i.icon),
       n(i.rating),
       n(i.year),
@@ -97,15 +101,16 @@ export const movieWriter: ItemWriter<XtreamMovie> = {
 };
 
 export const seriesWriter: ItemWriter<XtreamSeries> = {
-  sql: `INSERT INTO series_next (source_id, key, provider_id, name, name_fold, cover, plot, rating, year, last_modified, run_id, content_hash)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  sql: `INSERT INTO series_next (source_id, key, provider_id, name, name_fold, sort_title, cover, plot, rating, year, last_modified, run_id, content_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_id, key) DO UPDATE SET provider_id = excluded.provider_id, name = excluded.name,
-          name_fold = excluded.name_fold, cover = excluded.cover, plot = excluded.plot, rating = excluded.rating,
+          name_fold = excluded.name_fold, sort_title = excluded.sort_title, cover = excluded.cover, plot = excluded.plot, rating = excluded.rating,
           year = excluded.year, last_modified = excluded.last_modified, run_id = excluded.run_id,
           content_hash = excluded.content_hash`,
   row: (sourceId, key, runId, i) => {
     const providerId = String(i.id);
     const nameFold = foldText(i.name);
+    const sortTitle = sortTitleKey(i.name);
     const contentHash = hashSeriesRow({
       providerId,
       name: i.name,
@@ -122,6 +127,7 @@ export const seriesWriter: ItemWriter<XtreamSeries> = {
       providerId,
       i.name,
       nameFold,
+      sortTitle,
       s(i.cover),
       s(i.plot),
       n(i.rating),

@@ -13,8 +13,11 @@ import {
   ITEM_COLS,
   ITEM_TABLE,
   type ItemRow,
+  type ItemSortOrder,
+  type ListItemsOptions,
   mapItemRow,
   type RawItemRow,
+  watchedFilterClause,
 } from './queries-shared';
 
 export {
@@ -22,6 +25,8 @@ export {
   allocateFairQuotas,
   type BrowseKind,
   type ItemRow,
+  type ItemSortOrder,
+  type ListItemsOptions,
   queryAllSourcesItems,
   queryAllSourcesItemsByCursor,
   queryCatalogByIdCursor,
@@ -126,27 +131,43 @@ export async function queryCategories(
   }));
 }
 
-/** One page of a category's visible items in provider order; filters hidden rows before `LIMIT`/`OFFSET`. */
+/** One page of a category's visible items; supports optional `'alpha'` (`sort_title`) ordering and `excludeWatched` filtering (`#125`). */
 export async function queryItems(
   db: SqlDriver,
   ref: { sourceId: string; kind: BrowseKind; providerId: string },
   offset: number,
   limit: number,
+  opts?: ListItemsOptions,
 ): Promise<ItemRow[]> {
   const page = clampPage(offset, limit);
   if (page.limit === 0) return [];
+  const table = ITEM_TABLE[ref.kind];
+  if (opts?.sortBy === 'alpha') {
+    const watched = watchedFilterClause('t.key', opts);
+    const rows = await db.all<RawItemRow>(
+      `SELECT t.id, t.key, t.provider_id, t.name, ${ITEM_COLS[ref.kind]}
+         FROM placements p
+         JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key
+        WHERE p.source_id = ? AND p.kind = ? AND p.category_id = ? AND p.is_hidden = 0 AND t.is_hidden = 0
+          AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}
+        ORDER BY t.sort_title ASC, t.key ASC LIMIT ? OFFSET ?`,
+      [ref.sourceId, ref.kind, ref.providerId, ...watched.params, page.limit, page.offset],
+    );
+    return rows.map((r) => mapItemRow(ref.kind, ref.sourceId, r));
+  }
+  const watched = watchedFilterClause('placements.item_key', opts);
   const rows = await db.all<RawItemRow>(
     `SELECT t.id, t.key, t.provider_id, t.name, ${ITEM_COLS[ref.kind]}
        FROM (
          SELECT source_id, item_key, position FROM placements
           WHERE source_id = ? AND kind = ? AND category_id = ? AND is_hidden = 0
             AND EXISTS (SELECT 1 FROM sources s WHERE s.id = placements.source_id AND s.deleting = 0)
-            AND EXISTS (SELECT 1 FROM ${ITEM_TABLE[ref.kind]} jt WHERE jt.source_id = placements.source_id AND jt.key = placements.item_key AND jt.is_hidden = 0)
+            AND EXISTS (SELECT 1 FROM ${table} jt WHERE jt.source_id = placements.source_id AND jt.key = placements.item_key AND jt.is_hidden = 0)${watched.clause}
           ORDER BY position, item_key LIMIT ? OFFSET ?
        ) p
-       JOIN ${ITEM_TABLE[ref.kind]} t ON t.source_id = p.source_id AND t.key = p.item_key
+       JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key
       ORDER BY p.position, t.id`,
-    [ref.sourceId, ref.kind, ref.providerId, page.limit, page.offset],
+    [ref.sourceId, ref.kind, ref.providerId, ...watched.params, page.limit, page.offset],
   );
   return rows.map((r) => mapItemRow(ref.kind, ref.sourceId, r));
 }
@@ -160,6 +181,7 @@ export async function queryItemsByCursor(
   categoryId: string | { sourceId: string; kind: BrowseKind; providerId: string },
   cursor: ItemsCursor | undefined,
   limit: number,
+  opts?: Pick<ListItemsOptions, 'excludeWatched' | 'profileId'>,
 ): Promise<CursorPage<ItemRow, ItemsCursor>> {
   const ref = typeof categoryId === 'string' ? parseCategoryId(categoryId) : categoryId;
   const page = clampPage(0, limit);
@@ -171,14 +193,22 @@ export async function queryItemsByCursor(
   const cursorParams = cursor
     ? [cursor.position, cursor.position, cursor.position, cursor.itemKey]
     : [];
-  const params = [ref.sourceId, ref.kind, ref.providerId, ...cursorParams, page.limit + 1];
+  const watched = watchedFilterClause('placements.item_key', opts);
+  const params = [
+    ref.sourceId,
+    ref.kind,
+    ref.providerId,
+    ...cursorParams,
+    ...watched.params,
+    page.limit + 1,
+  ];
   const rows = await db.all<RawItemRow & { _pos: number }>(
     `SELECT t.id, t.key, t.provider_id, t.name, ${ITEM_COLS[ref.kind]}, p.position AS _pos
        FROM (
          SELECT source_id, item_key, position FROM placements
           WHERE source_id = ? AND kind = ? AND category_id = ? AND is_hidden = 0${cursorClause}
             AND EXISTS (SELECT 1 FROM sources s WHERE s.id = placements.source_id AND s.deleting = 0)
-            AND EXISTS (SELECT 1 FROM ${table} jt WHERE jt.source_id = placements.source_id AND jt.key = placements.item_key AND jt.is_hidden = 0)
+            AND EXISTS (SELECT 1 FROM ${table} jt WHERE jt.source_id = placements.source_id AND jt.key = placements.item_key AND jt.is_hidden = 0)${watched.clause}
           ORDER BY position ASC, item_key ASC LIMIT ?
        ) p
        JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key

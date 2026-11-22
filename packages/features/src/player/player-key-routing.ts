@@ -1,3 +1,4 @@
+import type { DefaultResizeModePref, SeekStepSecPref } from '@elv/domain';
 import type { KeyEvent } from '@elv/focus-core';
 import type {
   MediaTracks,
@@ -40,6 +41,8 @@ export interface PlayerControlsParams {
   autoHideOsdMs?: number | undefined;
   initialVolume?: number | undefined;
   autoSubtitlesOnSkipBack?: boolean | undefined;
+  seekStepSec?: SeekStepSecPref | undefined;
+  defaultResizeMode?: DefaultResizeModePref | undefined;
   serviceRef: MutableRefObject<PlaybackService | null>;
   clockRef: MutableRefObject<PlaybackClock>;
   timersRef: MutableRefObject<PlaybackTimers>;
@@ -243,6 +246,7 @@ export interface HostKeyRouteDeps {
   readonly toggleFullscreen: () => void;
   readonly togglePlayPause: () => void;
   readonly seekBy: (deltaMs: number) => void;
+  readonly stepSeekMs?: number | undefined;
   readonly toggleMute?: (() => void) | undefined;
   readonly openTracks: () => void;
   readonly closeTracks: () => void;
@@ -278,10 +282,10 @@ export function routeHostKey(key: HostKey, d: HostKeyRouteDeps): void {
       if (canUseShortcuts) d.togglePlayPause();
       return;
     case 'seek-back':
-      if (canUseShortcuts && d.isVod) d.seekBy(-STEP_SEEK_MS);
+      if (canUseShortcuts && d.isVod) d.seekBy(-(d.stepSeekMs ?? STEP_SEEK_MS));
       return;
     case 'seek-forward':
-      if (canUseShortcuts && d.isVod) d.seekBy(STEP_SEEK_MS);
+      if (canUseShortcuts && d.isVod) d.seekBy(d.stepSeekMs ?? STEP_SEEK_MS);
       return;
     case 'seek-coarse-back':
       if (canUseShortcuts && d.isVod) d.seekBy(-COARSE_SEEK_MS);

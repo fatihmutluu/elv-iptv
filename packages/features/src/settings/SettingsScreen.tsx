@@ -1,5 +1,7 @@
+import type { ArtworkCacheLimitMbPref } from '@elv/domain';
 import type { MessageId } from '@elv/i18n';
 import {
+  defaultLoadedArtworkUris,
   EditorialCategoryBar,
   type EditorialCategoryItem,
   Icon,
@@ -9,11 +11,12 @@ import {
   useKeyInterpreter,
   useTheme,
   useThemeController,
+  useUiAdapters,
   useViewport,
   webCursorPointer,
   webTransition,
 } from '@elv/ui-kit';
-import { type ReactElement, useCallback, useMemo, useState } from 'react';
+import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouteActive } from '../shared';
 import { AboutLicensesPanel } from './AboutLicensesPanel';
@@ -22,12 +25,21 @@ import {
   activateAppearanceControl,
   type SettingsPreferencesController,
 } from './AppearancePanel';
+import { LiveTvSettingsPanel } from './LiveTvSettingsPanel';
+import { activateLiveTvControl } from './live-tv-controls';
+import { PlaybackSettingsPanel } from './PlaybackSettingsPanel';
+import { activatePlaybackControl } from './playback-controls';
 import {
   type AppearanceFocusId,
+  type LiveTvFocusId,
+  type PlaybackFocusId,
+  type PreferenceSettingsSection,
   SETTINGS_SECTIONS,
   type SettingsSection,
   useTvSettingsNavigation,
 } from './useTvSettingsNavigation';
+
+const CLEAR_FEEDBACK_MS = 3_000;
 
 function SettingsTvKeyBridge({
   onEvent,
@@ -51,7 +63,7 @@ export interface SettingsPaneSlotProps {
 
 /** Props of {@link SettingsScreen}. */
 export interface SettingsScreenProps {
-  /** Controlled active Settings section (`'appearance' | 'sources' | 'licenses'`). */
+  /** Controlled active Settings section (`'appearance' | 'playback' | 'liveTv' | 'sources' | 'licenses'`). */
   readonly section?: SettingsSection;
   /** Initial Settings section when uncontrolled (defaults to `'appearance'`). */
   readonly initialSection?: SettingsSection;
@@ -84,6 +96,18 @@ const SECTION_META: readonly NavSectionMeta[] = [
     testID: 'settings-tab-appearance',
   },
   {
+    id: 'playback',
+    icon: 'play',
+    labelKey: 'settings.section.playback',
+    testID: 'settings-tab-playback',
+  },
+  {
+    id: 'liveTv',
+    icon: 'tv',
+    labelKey: 'settings.section.liveTv',
+    testID: 'settings-tab-liveTv',
+  },
+  {
     id: 'sources',
     icon: 'sources',
     labelKey: 'settings.section.sources',
@@ -98,14 +122,16 @@ const SECTION_META: readonly NavSectionMeta[] = [
 ];
 
 /**
- * Cinema Quietude categorized Settings hub (`UI_UX_PHILOSOPHY.md` §2.2 & §3).
+ * Cinema Quietude categorized Settings hub (`UI_UX_PHILOSOPHY.md` §2.2 & §3):
+ * `Appearance`, `Playback`, `Live TV & Guide`, `Sources`, and `About & Licenses`.
  *
  * - **Landscape (`TV`, `Desktop`, `Tablet-L`, `Phone-L`):** Centered `maxWidth: 1120` 2-column
  *   shell (`220px` left category sidebar + `flex: 1` right detail pane without an outer ScrollView).
  * - **Portrait (`Phone-P`, `Tablet-P`):** Horizontal scrollable `EditorialCategoryBar` tab strip
  *   (`>= 40px` touch targets) above a `flex: 1` detail pane.
- * - **10-Foot TV D-Pad:** Uses `@elv/focus-core` for sidebar + Appearance controls and cleanly
- *   delegates `isActiveScope` to embedded Sources and Licenses views.
+ * - **10-Foot TV D-Pad:** Uses `@elv/focus-core` across sidebar + all 3 preference panels
+ *   (`appearance`, `playback`, `liveTv`) and cleanly delegates `isActiveScope` to embedded Sources
+ *   and Licenses views.
  */
 export function SettingsScreen({
   section: controlledSection,
@@ -121,9 +147,18 @@ export function SettingsScreen({
   const themeCtrl = useThemeController();
   const i18n = useI18n();
   const viewport = useViewport();
+  const adapters = useUiAdapters();
 
   const [uncontrolledSection, setUncontrolledSection] = useState<SettingsSection>(initialSection);
   const [hoveredSection, setHoveredSection] = useState<SettingsSection | null>(null);
+  const [artworkCacheCleared, setArtworkCacheCleared] = useState(false);
+  const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (clearTimerRef.current !== null) clearTimeout(clearTimerRef.current);
+    };
+  }, []);
 
   const activeSection = controlledSection ?? uncontrolledSection;
   const isTv = viewport.formFactor === 'tv';
@@ -156,18 +191,56 @@ export function SettingsScreen({
     [handleSelectSection],
   );
 
-  const handleActivateAppearanceControl = useCallback(
-    (controlId: AppearanceFocusId) => {
-      activateAppearanceControl(controlId, {
-        ...(preferences !== undefined ? { preferences } : {}),
-        reduceMotion: theme.reduceMotion,
-        setPreset: themeCtrl.setPreset,
-        setFontScale: themeCtrl.setFontScale,
-        setReduceMotion: themeCtrl.setReduceMotion,
-        setLocale: (loc) => i18n.setLocale(loc),
-      });
+  const handleSetArtworkCacheLimitMb = useCallback(
+    (mb: ArtworkCacheLimitMbPref) => {
+      const setLimitBytes = adapters.artworkCache?.setLimitBytes;
+      if (setLimitBytes !== undefined) {
+        void Promise.resolve(setLimitBytes(mb * 1024 * 1024)).catch(() => undefined);
+      }
     },
-    [i18n, preferences, theme.reduceMotion, themeCtrl],
+    [adapters.artworkCache],
+  );
+
+  const handleClearArtworkCache = useCallback(() => {
+    defaultLoadedArtworkUris.clear();
+    void Promise.resolve(adapters.artworkCache?.clear()).catch(() => undefined);
+    setArtworkCacheCleared(true);
+    if (clearTimerRef.current !== null) clearTimeout(clearTimerRef.current);
+    clearTimerRef.current = setTimeout(() => {
+      clearTimerRef.current = null;
+      setArtworkCacheCleared(false);
+    }, CLEAR_FEEDBACK_MS);
+  }, [adapters.artworkCache]);
+
+  const handleActivateControl = useCallback(
+    (sec: PreferenceSettingsSection, controlId: string) => {
+      if (sec === 'appearance') {
+        activateAppearanceControl(controlId as AppearanceFocusId, {
+          ...(preferences !== undefined ? { preferences } : {}),
+          reduceMotion: theme.reduceMotion,
+          setPreset: themeCtrl.setPreset,
+          setFontScale: themeCtrl.setFontScale,
+          setReduceMotion: themeCtrl.setReduceMotion,
+          setLocale: (loc) => i18n.setLocale(loc),
+          onSetArtworkCacheLimitMb: handleSetArtworkCacheLimitMb,
+          onClearArtworkCache: handleClearArtworkCache,
+        });
+        return;
+      }
+      if (sec === 'playback') {
+        activatePlaybackControl(controlId as PlaybackFocusId, preferences);
+        return;
+      }
+      activateLiveTvControl(controlId as LiveTvFocusId, preferences);
+    },
+    [
+      handleClearArtworkCache,
+      handleSetArtworkCacheLimitMb,
+      i18n,
+      preferences,
+      theme.reduceMotion,
+      themeCtrl,
+    ],
   );
 
   const tv = useTvSettingsNavigation({
@@ -175,7 +248,7 @@ export function SettingsScreen({
     isActiveScope,
     section: activeSection,
     onSectionChange: handleSelectSection,
-    onActivateAppearanceControl: handleActivateAppearanceControl,
+    onActivateControl: handleActivateControl,
     ...(onFocusTopNav !== undefined ? { onFocusTopNav } : {}),
   });
 
@@ -202,6 +275,22 @@ export function SettingsScreen({
       <AppearancePanel
         {...(preferences !== undefined ? { preferences } : {})}
         focusedControlId={tv.focusedAppearanceId}
+        onClearArtworkCache={handleClearArtworkCache}
+        artworkCacheCleared={artworkCacheCleared}
+      />
+    ) : activeSection === 'playback' ? (
+      <PlaybackSettingsPanel
+        {...(preferences !== undefined ? { preferences } : {})}
+        focusedControlId={
+          activeSection === 'playback' ? (tv.focusedControlId as PlaybackFocusId | null) : null
+        }
+      />
+    ) : activeSection === 'liveTv' ? (
+      <LiveTvSettingsPanel
+        {...(preferences !== undefined ? { preferences } : {})}
+        focusedControlId={
+          activeSection === 'liveTv' ? (tv.focusedControlId as LiveTvFocusId | null) : null
+        }
       />
     ) : activeSection === 'sources' ? (
       renderSources ? (

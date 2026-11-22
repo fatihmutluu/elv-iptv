@@ -15,6 +15,10 @@ export interface PlayableEntry {
   readonly season?: number | null;
   readonly episode?: number | null;
   readonly itemKind?: UserItemKind;
+  /** Optional pre-play preferred audio language code (e.g. `'tr'`, `'en'`) (`#398`). */
+  readonly preferredAudioLang?: string;
+  /** Optional pre-play preferred subtitle language code (e.g. `'tr'`, `'en'`, `'off'`) (`#398`). */
+  readonly preferredSubtitleLang?: string;
 }
 
 /** Channel list context enabling Up/Down live zapping across paged categories without materializing all rows. */

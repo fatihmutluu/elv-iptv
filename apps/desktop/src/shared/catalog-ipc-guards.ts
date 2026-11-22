@@ -1,7 +1,9 @@
 import type {
   AddSourceInput,
   ImportProgress,
+  ItemSortOrder,
   LinkSourceInput,
+  ListItemsOptions,
   SaveProgressInput,
   SearchOptions,
   SearchScope,
@@ -21,9 +23,11 @@ const MAX_NOW_NEXT_KEYS = 60;
 const MAX_EPG_WINDOW_KEYS = 40;
 const MAX_SEARCH_QUERY_CHARS = 256;
 const MAX_SEARCH_LIMIT = 60;
+const MAX_SOURCE_IDS = 64;
 
 const USER_ITEM_KINDS = new Set<UserItemKind>(['live', 'movie', 'series', 'episode']);
 const SEARCH_SCOPES = new Set<SearchScope>(['all', 'live', 'movie', 'series']);
+const ITEM_SORT_ORDERS = new Set<ItemSortOrder>(['default', 'alpha']);
 const ERROR_CATEGORIES = new Set<ErrorCategory>([
   'network',
   'auth',
@@ -212,6 +216,26 @@ export function isElvError(x: unknown): x is ElvError {
   );
 }
 
+export function isListItemsOptions(x: unknown): x is ListItemsOptions {
+  if (!isRecord(x)) return false;
+  const sortBy = x['sortBy'];
+  if (
+    sortBy !== undefined &&
+    (typeof sortBy !== 'string' || !ITEM_SORT_ORDERS.has(sortBy as ItemSortOrder))
+  ) {
+    return false;
+  }
+  const excludeWatched = x['excludeWatched'];
+  if (excludeWatched !== undefined && typeof excludeWatched !== 'boolean') return false;
+  return isOptionalProfileId(x['profileId']);
+}
+
+export function isSourceIdList(x: unknown): x is readonly string[] {
+  return (
+    Array.isArray(x) && x.length <= MAX_SOURCE_IDS && x.every((id) => isCleanKey(id, MAX_ID_CHARS))
+  );
+}
+
 export function isImportProgress(x: unknown): x is ImportProgress {
   return (
     isRecord(x) &&
@@ -221,6 +245,8 @@ export function isImportProgress(x: unknown): x is ImportProgress {
     x['done'] >= 0 &&
     (x['total'] === undefined || (isFiniteNumber(x['total']) && x['total'] >= 0)) &&
     (x['fraction'] === undefined ||
-      (isFiniteNumber(x['fraction']) && x['fraction'] >= 0 && x['fraction'] <= 1))
+      (isFiniteNumber(x['fraction']) && x['fraction'] >= 0 && x['fraction'] <= 1)) &&
+    (x['percent'] === undefined ||
+      (isSafeInt(x['percent']) && x['percent'] >= 0 && x['percent'] <= 100))
   );
 }

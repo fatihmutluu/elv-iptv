@@ -1,4 +1,16 @@
+import {
+  asymptoticProgressFraction,
+  createStreamProgressMeter,
+  DEFAULT_ASYMPTOTIC_SCALE,
+  parseContentLength,
+  type StreamProgressMeter,
+  sanitizeProgressCount,
+  toMonotonicPercent,
+  trackBodyBytes,
+} from './import-stream-progress';
 import type { ImportOptions, ImportProgress } from './import-types';
+
+export { createStreamProgressMeter, parseContentLength, type StreamProgressMeter, trackBodyBytes };
 
 type WeightedStage = 'categories' | 'live' | 'movies' | 'series' | 'cleanup';
 
@@ -11,17 +23,15 @@ const STAGE_WEIGHTS: Readonly<Record<WeightedStage, number>> = {
 };
 
 const TOTAL_WEIGHT = 100;
-const ASYMPTOTIC_CAP = 0.95;
-const ASYMPTOTIC_HALF_POINT = 1_000;
 
 interface StageState {
   done: number;
   fraction: number;
 }
 
-/** Monotonic multi-stage progress tracker for concurrent catalog imports (`#197`). */
+/** Monotonic multi-stage progress tracker for concurrent catalog imports (`#197`, `#65`). */
 export interface MonotonicProgressMeter {
-  /** Updates `phase` progress and returns an `ImportProgress` with monotonic `done` and `fraction`. */
+  /** Updates `phase` progress and returns an `ImportProgress` with monotonic `done`, `fraction`, and `percent`. */
   report(phase: ImportProgress['phase'], done: number, total?: number): ImportProgress;
   /** Marks `phase` complete (stage fraction = `1`) and returns an `ImportProgress` event. */
   complete(phase: ImportProgress['phase'], done?: number): ImportProgress;
@@ -29,28 +39,25 @@ export interface MonotonicProgressMeter {
   markComplete(phase: ImportProgress['phase']): void;
   /** Current monotonic high-water overall fraction in `[0, 1]`. */
   fraction(): number;
+  /** Current monotonic high-water overall integer percentage in `[0, 100]`. */
+  percent(): number;
 }
 
 const isWeightedStage = (phase: ImportProgress['phase']): phase is WeightedStage =>
   phase in STAGE_WEIGHTS;
 
-function sanitizeCount(value: number): number {
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
-}
-
-function asymptoticFraction(done: number): number {
-  if (done <= 0) return 0;
-  return ASYMPTOTIC_CAP * (done / (done + ASYMPTOTIC_HALF_POINT));
-}
-
 /**
  * Creates a monotonic progress meter tracking weighted stages (`categories: 0.10`, `live: 0.30`,
- * `movies: 0.30`, `series: 0.25`, `cleanup: 0.05`). Uses an asymptotic curve while streaming with
- * unknown totals and clamps both overall `fraction` and per-phase `done` monotonically.
+ * `movies: 0.30`, `series: 0.25`, `cleanup: 0.05`). Uses a bounded asymptotic curve (`1 - exp(-done / scale)`)
+ * while streaming with unknown totals and clamps `done`, `fraction`, and integer `percent` (`0..99` during
+ * phases, `100` on final completion) monotonically.
  */
-export function createMonotonicProgressMeter(): MonotonicProgressMeter {
+export function createMonotonicProgressMeter(
+  asymptoticScale: number = DEFAULT_ASYMPTOTIC_SCALE,
+): MonotonicProgressMeter {
   const stages = new Map<ImportProgress['phase'], StageState>();
   let highWater = 0;
+  let percentHighWater = 0;
 
   const getStage = (phase: ImportProgress['phase']): StageState => {
     let st = stages.get(phase);
@@ -61,7 +68,7 @@ export function createMonotonicProgressMeter(): MonotonicProgressMeter {
     return st;
   };
 
-  const recomputeOverall = (): number => {
+  const recomputeOverall = (): { fraction: number; percent: number } => {
     let weighted = 0;
     let allComplete = true;
     for (const [stage, weight] of Object.entries(STAGE_WEIGHTS) as [WeightedStage, number][]) {
@@ -71,7 +78,8 @@ export function createMonotonicProgressMeter(): MonotonicProgressMeter {
     }
     const raw = allComplete ? 1 : Math.min(1, Math.max(0, weighted / TOTAL_WEIGHT));
     if (raw > highWater) highWater = raw;
-    return highWater;
+    percentHighWater = toMonotonicPercent(highWater, allComplete, percentHighWater);
+    return { fraction: highWater, percent: percentHighWater };
   };
 
   const report = (
@@ -80,7 +88,7 @@ export function createMonotonicProgressMeter(): MonotonicProgressMeter {
     rawTotal?: number,
   ): ImportProgress => {
     const st = getStage(phase);
-    const done = Math.max(st.done, sanitizeCount(rawDone));
+    const done = Math.max(st.done, sanitizeProgressCount(rawDone));
     st.done = done;
 
     let total: number | undefined;
@@ -96,12 +104,14 @@ export function createMonotonicProgressMeter(): MonotonicProgressMeter {
             : 0
           : phase === 'cleanup'
             ? 0
-            : asymptoticFraction(done);
+            : asymptoticProgressFraction(done, asymptoticScale);
       if (next > st.fraction) st.fraction = next;
     }
 
-    const fraction = recomputeOverall();
-    return total === undefined ? { phase, done, fraction } : { phase, done, total, fraction };
+    const { fraction, percent } = recomputeOverall();
+    return total === undefined
+      ? { phase, done, fraction, percent }
+      : { phase, done, total, fraction, percent };
   };
 
   const markComplete = (phase: ImportProgress['phase']): void => {
@@ -113,14 +123,14 @@ export function createMonotonicProgressMeter(): MonotonicProgressMeter {
   const complete = (phase: ImportProgress['phase'], rawDone?: number): ImportProgress => {
     const st = getStage(phase);
     if (rawDone !== undefined) {
-      st.done = Math.max(st.done, sanitizeCount(rawDone));
+      st.done = Math.max(st.done, sanitizeProgressCount(rawDone));
     }
     st.fraction = 1;
-    const fraction = recomputeOverall();
+    const { fraction, percent } = recomputeOverall();
     if (phase === 'cleanup') {
-      return { phase, done: st.done, fraction };
+      return { phase, done: st.done, fraction, percent };
     }
-    return { phase, done: st.done, total: st.done, fraction };
+    return { phase, done: st.done, total: st.done, fraction, percent };
   };
 
   return {
@@ -128,16 +138,17 @@ export function createMonotonicProgressMeter(): MonotonicProgressMeter {
     complete,
     markComplete,
     fraction: () => highWater,
+    percent: () => percentHighWater,
   };
 }
 
 /**
  * Wraps `opts.onProgress` so `cleanup` phase events from `performRun` are enriched with monotonic
- * `fraction` values from `meter` (reaching `1` on final cleanup completion).
+ * `fraction` and `percent` values from `meter` (reaching `1` / `100` on final cleanup completion).
  */
 export function wrapCleanupProgress(
   opts: ImportOptions,
-  meter: MonotonicProgressMeter,
+  meter: Pick<MonotonicProgressMeter, 'report' | 'complete'>,
   notifyFn: (o: ImportOptions, p: ImportProgress) => void,
 ): ImportOptions {
   if (opts.onProgress === undefined) return opts;

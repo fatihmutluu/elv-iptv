@@ -4,6 +4,7 @@ import {
   type BrowseKind,
   type CatalogService,
   type LinkSourceInput,
+  type ListItemsOptions,
   queryPlayable,
   resolveAccountPoolKey,
   type SaveProgressInput,
@@ -11,6 +12,7 @@ import {
   type ToggleFavoriteInput,
 } from '@elv/data';
 import { elvError, err, ok, type SqlDriver } from '@elv/domain';
+import { isListItemsOptions, isSourceIdList } from '../shared/catalog-ipc-guards.ts';
 
 const PREVIEW_STREAM_URL = 'https://workbench.invalid/preview.m3u8';
 
@@ -23,6 +25,7 @@ export const ALLOWED_RPC_METHODS: ReadonlySet<string> = new Set([
   'listSources',
   'categories',
   'items',
+  'allSourcesItems',
   'itemDetail',
   'search',
   'nowNext',
@@ -122,8 +125,25 @@ export async function dispatchWorkbenchRpc(
       return service.listSources();
     case 'categories':
       return service.categories(String(args[0] ?? ''), args[1] as BrowseKind);
-    case 'items':
-      return service.items(String(args[0] ?? ''), Number(args[1] ?? 0), Number(args[2] ?? 0));
+    case 'items': {
+      const opts: ListItemsOptions | undefined = isListItemsOptions(args[3]) ? args[3] : undefined;
+      return service.items(String(args[0] ?? ''), Number(args[1] ?? 0), Number(args[2] ?? 0), opts);
+    }
+    case 'allSourcesItems': {
+      const rawKind = args[0];
+      if (rawKind !== 'live' && rawKind !== 'movie' && rawKind !== 'series') return [];
+      const sourceIds = isSourceIdList(args[3]) ? args[3] : undefined;
+      const opts: ListItemsOptions | undefined = isListItemsOptions(args[4]) ? args[4] : undefined;
+      return (
+        service.allSourcesItems?.(
+          rawKind,
+          Number(args[1] ?? 0),
+          Number(args[2] ?? 0),
+          sourceIds,
+          opts,
+        ) ?? []
+      );
+    }
     case 'itemDetail':
       return service.itemDetail?.(String(args[0] ?? '')) ?? null;
     case 'search':

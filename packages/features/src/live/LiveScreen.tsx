@@ -1,6 +1,7 @@
 import type { CatalogService, ItemRow, SourceRow } from '@elv/data';
+import type { DefaultLiveModePref, EpgTimeSpanHoursPref, LogoBackdropModePref } from '@elv/domain';
 import { IconButton, useI18n, useTheme, useViewport } from '@elv/ui-kit';
-import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactElement, useCallback, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
 import type { PlaybackGuard } from '../ports/playback-guard';
@@ -17,11 +18,13 @@ import {
   LiveNumberPad,
   LiveTvKeyBridge,
 } from './LiveChrome';
+import { LivePreviewBanner } from './LivePreviewBanner';
 import { LiveWatchStage } from './LiveWatchStage';
 import type { LiveMode, LiveTabMemory } from './live-model';
+import { buildSourceBadgeMap } from './source-badge';
 import { useLiveCatalog } from './useLiveCatalog';
-import { useLiveEmbeddedPreview } from './useLiveEmbeddedPreview';
 import { useLiveNumpadOverlay } from './useLiveNumberJump';
+import { useLiveTwoStepPreview } from './useLiveTwoStepPreview';
 import {
   type LiveWatchControl,
   useLiveTabMemory,
@@ -44,6 +47,14 @@ export interface LiveScreenProps {
   readonly playbackGuard?: PlaybackGuard;
   /** Optional fixed epoch timestamp in milliseconds for deterministic EPG/progress rendering. */
   readonly nowMs?: number;
+  readonly defaultLiveMode?: DefaultLiveModePref;
+  readonly epgTimeSpanHours?: EpgTimeSpanHoursPref;
+  readonly epgGenreTints?: boolean;
+  readonly epgShowClock?: boolean;
+  readonly logoBackdropMode?: LogoBackdropModePref;
+  readonly showSourceBadges?: boolean;
+  readonly liveOkTwoStepPreview?: boolean;
+  readonly cleanChannelTitles?: boolean;
 }
 
 /**
@@ -54,28 +65,36 @@ export interface LiveScreenProps {
 export function LiveScreen(props: LiveScreenProps): ReactElement {
   const { catalog, sources, refreshToken, userStateVersion = 0, memory, onMemoryChange } = props;
   const { onPlay, onOpenSources, onFocusTopNav, isActiveScope = true, videoHost } = props;
-  const { playbackGuard, nowMs } = props;
+  const { playbackGuard, nowMs, defaultLiveMode, epgTimeSpanHours } = props;
+  const {
+    epgGenreTints = true,
+    epgShowClock = true,
+    logoBackdropMode = 'plate',
+    showSourceBadges = true,
+    liveOkTwoStepPreview = false,
+    cleanChannelTitles = false,
+  } = props;
   const theme = useTheme();
   const viewport = useViewport();
   const i18n = useI18n();
   const layout = useMemo(() => computeCatalogLayout(viewport, theme), [theme, viewport]);
-  const tabMem = useLiveTabMemory(memory, onMemoryChange);
+  const tabMem = useLiveTabMemory(memory, onMemoryChange, defaultLiveMode);
   const { memory: activeMemory, memoryRef, updateMemory } = tabMem;
   const [guideRefreshTick, setGuideRefreshTick] = useState(0);
   const numpadResolvedRef = useRef<() => void>(() => undefined);
-  const mountedRef = useRef(true);
-  const handoffInFlightRef = useRef(false);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+  const clearPreviewRef = useRef<() => void>(() => undefined);
   const readySources = useMemo(() => sources.filter((s) => !s.needsImport), [sources]);
+  const sourceBadges = useMemo(
+    () => buildSourceBadgeMap(readySources, theme, showSourceBadges),
+    [readySources, showSourceBadges, theme],
+  );
   const clockFn = useMemo(() => (nowMs !== undefined ? () => nowMs : undefined), [nowMs]);
   const mode = activeMemory.mode;
   const handleSelectCategory = useCallback(
-    (categoryId: string | null) => updateMemory({ categoryId }),
+    (categoryId: string | null) => {
+      clearPreviewRef.current();
+      updateMemory({ categoryId });
+    },
     [updateMemory],
   );
   const handleChannelHistoryChange = useCallback(
@@ -112,47 +131,39 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
   const activeFavoriteChannel =
     activeFavoriteIdx >= 0 ? (live.favoriteChannels[activeFavoriteIdx] ?? null) : null;
 
-  const preview = useLiveEmbeddedPreview({
-    enabled: mode === 'favorites' && activeFavoriteChannel !== null,
-    activeChannel: activeFavoriteChannel,
-    sources: readySources,
+  const {
+    preview,
+    previewedChannel,
+    twoStepPreviewActive,
+    clearTwoStepPreview,
+    handleWatchAndPlay,
+    handleWatchFromFavorites,
+  } = useLiveTwoStepPreview({
+    mode,
+    liveOkTwoStepPreview,
+    activeFavoriteChannel,
+    readySources,
     catalog,
+    live,
+    memoryRef,
+    onPlay,
     ...(videoHost !== undefined ? { videoHost } : {}),
     ...(playbackGuard !== undefined ? { playbackGuard } : {}),
   });
+  clearPreviewRef.current = clearTwoStepPreview;
 
   const handleSelectMode = useCallback(
     (nextMode: LiveMode) => {
       numpad.close();
+      clearTwoStepPreview();
       updateMemory({ mode: nextMode });
     },
-    [numpad.close, updateMemory],
+    [clearTwoStepPreview, numpad.close, updateMemory],
   );
   const handleBrowseChannels = useCallback(() => handleSelectMode('channels'), [handleSelectMode]);
   const handleToggleZapDrawer = useCallback(
     () => updateMemory({ zapDrawerOpen: !memoryRef.current.zapDrawerOpen }),
     [memoryRef, updateMemory],
-  );
-  const handleWatchAndPlay = useCallback(
-    (ch: ItemRow, idx: number) => {
-      live.tuneChannel(ch, idx);
-      onPlay(live.buildPlayTarget(ch, idx, 'category'));
-    },
-    [live.buildPlayTarget, live.tuneChannel, onPlay],
-  );
-  const handleWatchFromFavorites = useCallback(
-    (ch: ItemRow, idx: number) => {
-      if (handoffInFlightRef.current) return;
-      live.tuneChannel(ch, idx);
-      const target = live.buildPlayTarget(ch, idx, 'favorites');
-      if (videoHost === undefined) return onPlay(target);
-      handoffInFlightRef.current = true;
-      void preview.stopAndRelease().then(() => {
-        handoffInFlightRef.current = false;
-        if (mountedRef.current && memoryRef.current.mode === 'favorites') onPlay(target);
-      });
-    },
-    [live.buildPlayTarget, live.tuneChannel, memoryRef, onPlay, preview.stopAndRelease, videoHost],
   );
   const handleToggleFavorite = useCallback(
     (ch: ItemRow) => void live.toggleFavorite(ch),
@@ -296,6 +307,20 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
           ) : null}
 
           <View style={styles.body}>
+            {twoStepPreviewActive && previewedChannel !== null ? (
+              <LivePreviewBanner
+                channel={previewedChannel.channel}
+                index={previewedChannel.index}
+                preview={preview}
+                padX={layout.padX}
+                isTv={layout.isTv}
+                logoBackdropMode={logoBackdropMode}
+                sourceBadge={sourceBadges.get(previewedChannel.channel.sourceId) ?? null}
+                cleanChannelTitles={cleanChannelTitles}
+                onOpenFullscreen={handleWatchAndPlay}
+              />
+            ) : null}
+
             {mode === 'channels' && numpad.open ? (
               <View style={[styles.numpadAnchor, { right: layout.padX }]}>
                 <LiveNumberPad
@@ -323,6 +348,9 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
                   activeChannelKey={live.activeChannel?.key ?? activeMemory.activeChannelKey}
                   favoriteKeys={live.favoriteKeys}
                   layout={layout}
+                  logoBackdropMode={logoBackdropMode}
+                  sourceBadges={sourceBadges}
+                  cleanChannelTitles={cleanChannelTitles}
                   hydrateNowNext={live.hydrateNowNext}
                   onWatchChannel={handleWatchAndPlay}
                   onToggleFavorite={handleToggleFavorite}
@@ -343,6 +371,12 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
                   refreshToken={refreshToken + guideRefreshTick}
                   favoriteKeys={live.favoriteKeys}
                   {...(nowMs !== undefined ? { nowMs } : {})}
+                  {...(epgTimeSpanHours !== undefined ? { epgTimeSpanHours } : {})}
+                  epgGenreTints={epgGenreTints}
+                  epgShowClock={epgShowClock}
+                  logoBackdropMode={logoBackdropMode}
+                  sourceBadges={sourceBadges}
+                  cleanChannelTitles={cleanChannelTitles}
                   onWatchChannel={handleWatchAndPlay}
                   onToggleFavorite={handleToggleFavorite}
                   onGuideRefreshed={handleGuideRefreshed}
@@ -367,6 +401,9 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
                 isDesktop={viewport.formFactor === 'desktop'}
                 preview={preview}
                 layout={layout}
+                logoBackdropMode={logoBackdropMode}
+                sourceBadges={sourceBadges}
+                cleanChannelTitles={cleanChannelTitles}
                 hydrateNowNext={live.hydrateNowNext}
                 onToggleZapDrawer={handleToggleZapDrawer}
                 onToggleFavorite={handleToggleFavorite}

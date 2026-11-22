@@ -1,4 +1,5 @@
 import type { ItemRow, NowNextEntry } from '@elv/data';
+import type { LogoBackdropModePref } from '@elv/domain';
 import type { KeyEvent } from '@elv/focus-core';
 import {
   TvFocusAnchor,
@@ -24,6 +25,7 @@ import {
   useRouteActive,
 } from '../shared';
 import { ChannelGridRow, type LiveGridShared } from './LiveChannelTile';
+import type { SourceBadgeInfo } from './source-badge';
 
 const SCROLL_QUANTUM = 2;
 
@@ -97,6 +99,9 @@ export interface LiveChannelsGridProps {
   readonly onToggleFavorite?: (channel: ItemRow) => void;
   readonly onEdgeTop?: () => void;
   readonly isActiveScope?: boolean;
+  readonly logoBackdropMode?: LogoBackdropModePref;
+  readonly sourceBadges?: ReadonlyMap<string, SourceBadgeInfo>;
+  readonly cleanChannelTitles?: boolean;
   /** Injectable epoch clock in milliseconds for live progress bars (defaults to `() => Date.now()`). */
   readonly now?: () => number;
 }
@@ -109,7 +114,13 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
   const { channelSource, sourceVersion, nowNextByKey, nowNextVersion, activeChannelKey, layout } =
     p;
   const { favoriteKeys, hydrateNowNext, onWatchChannel, onToggleFavorite, onEdgeTop } = p;
-  const { isActiveScope = false, now } = p;
+  const {
+    isActiveScope = false,
+    logoBackdropMode = 'plate',
+    sourceBadges,
+    cleanChannelTitles = false,
+    now,
+  } = p;
   const theme = useTheme();
   const i18n = useI18n();
   const viewport = useViewport();
@@ -135,8 +146,21 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
       noProgram: i18n.t('live.noProgramInfo'),
       favoriteAdd: i18n.t('live.favoriteAdd'),
       favoriteRemove: i18n.t('live.favoriteRemove'),
+      logoBackdropMode,
+      cleanChannelTitles,
     }),
-    [cardHeight, cols, i18n, layout.gridGap, layout.isTouch, layout.isTv, layout.padX, rowHeight],
+    [
+      cardHeight,
+      cleanChannelTitles,
+      cols,
+      i18n,
+      layout.gridGap,
+      layout.isTouch,
+      layout.isTv,
+      layout.padX,
+      logoBackdropMode,
+      rowHeight,
+    ],
   );
 
   const focusMemory = useBrowseFocusMemory();
@@ -291,17 +315,43 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
           nowMs={nowMs}
           activeChannelKey={activeChannelKey}
           {...(favoriteKeys !== undefined ? { favoriteKeys } : {})}
+          {...(sourceBadges !== undefined ? { sourceBadges } : {})}
           focusedCol={null}
           onWatchChannel={onWatchChannel}
           {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
         />
       );
     },
-    [activeChannelKey, favoriteKeys, nowMs, nowNextByKey, onToggleFavorite, onWatchChannel, shared],
+    [
+      activeChannelKey,
+      favoriteKeys,
+      nowMs,
+      nowNextByKey,
+      onToggleFavorite,
+      onWatchChannel,
+      shared,
+      sourceBadges,
+    ],
   );
   const extraData = useMemo(
-    () => ({ sourceVersion, nowNextVersion, activeChannelKey, favoriteKeys }),
-    [activeChannelKey, favoriteKeys, nowNextVersion, sourceVersion],
+    () => ({
+      sourceVersion,
+      nowNextVersion,
+      activeChannelKey,
+      favoriteKeys,
+      sourceBadges,
+      logoBackdropMode,
+      cleanChannelTitles,
+    }),
+    [
+      activeChannelKey,
+      cleanChannelTitles,
+      favoriteKeys,
+      logoBackdropMode,
+      nowNextVersion,
+      sourceBadges,
+      sourceVersion,
+    ],
   );
 
   // Memoized TV row slices independent of `focusPos.col` so Left/Right preserves React.memo on sibling rows.
@@ -332,6 +382,7 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
                   nowMs={nowMs}
                   activeChannelKey={activeChannelKey}
                   {...(favoriteKeys !== undefined ? { favoriteKeys } : {})}
+                  {...(sourceBadges !== undefined ? { sourceBadges } : {})}
                   focusedCol={isFocusedRow ? focusPos.col : null}
                   onWatchChannel={onWatchChannel}
                   {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}

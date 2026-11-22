@@ -32,6 +32,7 @@ export interface DesktopShortcutGuard {
   readonly onToggleFullscreen: () => void;
   readonly isVod: () => boolean;
   readonly canUseShortcuts: () => boolean;
+  readonly stepSeekMs?: () => number;
   readonly onSeekBy: (deltaMs: number) => void;
   readonly onSeekToRatio: (ratio: number) => void;
   readonly onSeekToEnd: () => void;
@@ -159,9 +160,10 @@ function dispatchVodShortcut(
     return true;
   }
 
+  const stepMs = guard.stepSeekMs?.() ?? STEP_SEEK_MS;
   if (e.key === 'j' || e.key === 'J') {
     e.preventDefault?.();
-    if (throttle.allow('j', repeat)) guard.onSeekBy(-STEP_SEEK_MS);
+    if (throttle.allow('j', repeat)) guard.onSeekBy(-stepMs);
     return true;
   }
   if (e.key === 'k' || e.key === 'K') {
@@ -171,7 +173,7 @@ function dispatchVodShortcut(
   }
   if (e.key === 'l' || e.key === 'L') {
     e.preventDefault?.();
-    if (throttle.allow('l', repeat)) guard.onSeekBy(STEP_SEEK_MS);
+    if (throttle.allow('l', repeat)) guard.onSeekBy(stepMs);
     return true;
   }
 

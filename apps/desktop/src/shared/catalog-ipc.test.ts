@@ -740,8 +740,35 @@ describe('isCatalogWorkerMessage', () => {
         progress: { phase: 'live', done: 1, fraction: Number.POSITIVE_INFINITY },
       },
       { type: 'progress', reqId: 1, progress: { phase: 'live', done: 1, fraction: '0.5' } },
+      { type: 'progress', reqId: 1, progress: { phase: 'live', done: 1, percent: -1 } },
+      { type: 'progress', reqId: 1, progress: { phase: 'live', done: 1, percent: 101 } },
+      { type: 'progress', reqId: 1, progress: { phase: 'live', done: 1, percent: 42.5 } },
+      { type: 'progress', reqId: 1, progress: { phase: 'live', done: 1, percent: Number.NaN } },
+      { type: 'progress', reqId: 1, progress: { phase: 'live', done: 1, percent: '50' } },
     ]) {
       expect(isCatalogWorkerMessage(bad)).toBe(false);
     }
+
+    expect(
+      isCatalogWorkerMessage({
+        type: 'progress',
+        reqId: 7,
+        progress: { phase: 'movies', done: 50, total: 100, fraction: 0.5, percent: 50 },
+      }),
+    ).toBe(true);
+    expect(
+      isCatalogWorkerMessage({
+        type: 'progress',
+        reqId: 8,
+        progress: { phase: 'categories', done: 0, percent: 0 },
+      }),
+    ).toBe(true);
+    expect(
+      isCatalogWorkerMessage({
+        type: 'progress',
+        reqId: 9,
+        progress: { phase: 'cleanup', done: 0, percent: 100 },
+      }),
+    ).toBe(true);
   });
 });

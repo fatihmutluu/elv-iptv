@@ -4,6 +4,7 @@ import {
   resolveAppleHardwareTier,
 } from '@elv/engine-aether';
 import {
+  type ArtworkCacheAdapter,
   DEFAULT_MAX_DECODE_PX,
   type DeadHostRegistry,
   defaultDeadHostRegistry,
@@ -12,6 +13,7 @@ import {
   type UiAdapters,
 } from '@elv/ui-kit';
 import { type AppStateStatus, Image } from 'react-native';
+import { createMobileArtworkCache } from './artwork-cache';
 
 const MIN_DECODE_PX = 32;
 
@@ -29,10 +31,13 @@ function clampDecodePx(maxDecodePx: number | undefined): number {
 export function createMobileTvUiAdapters(options?: {
   readonly hardwareTier?: AppleHardwareTier;
   readonly renderBlur?: UiAdapters['renderBlur'];
+  readonly artworkCache?: ArtworkCacheAdapter;
 }): UiAdapters {
   const tier = options?.hardwareTier ?? resolveAppleHardwareTier(getAppleDeviceModel());
   const renderBlur = tier === 'mid-power' ? undefined : options?.renderBlur;
+  const artworkCache = options?.artworkCache ?? createMobileArtworkCache();
   return {
+    artworkCache,
     ...(renderBlur !== undefined ? { renderBlur } : {}),
     renderImage({
       uri,

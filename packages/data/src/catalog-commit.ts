@@ -20,8 +20,8 @@ const UPSERT_CATEGORIES = `INSERT INTO categories (source_id, kind, provider_id,
      OR excluded.content_hash IS NULL
      OR categories.content_hash != excluded.content_hash`;
 
-const UPSERT_LIVE = `INSERT INTO live (source_id, key, provider_id, num, name, name_fold, logo, guide_id, catchup_days, url_template, headers_json, backup_urls_json, epg_shift_ms, run_id, content_hash)
-  SELECT source_id, key, provider_id, num, name, name_fold, logo, guide_id, catchup_days, url_template, headers_json, backup_urls_json, epg_shift_ms, run_id, content_hash
+const UPSERT_LIVE = `INSERT INTO live (source_id, key, provider_id, num, name, name_fold, sort_title, logo, guide_id, catchup_days, url_template, headers_json, backup_urls_json, epg_shift_ms, run_id, content_hash)
+  SELECT source_id, key, provider_id, num, name, name_fold, sort_title, logo, guide_id, catchup_days, url_template, headers_json, backup_urls_json, epg_shift_ms, run_id, content_hash
   FROM live_next
   WHERE source_id = ? AND run_id = ?
   ON CONFLICT(source_id, key) DO UPDATE SET
@@ -29,6 +29,7 @@ const UPSERT_LIVE = `INSERT INTO live (source_id, key, provider_id, num, name, n
     num = excluded.num,
     name = excluded.name,
     name_fold = excluded.name_fold,
+    sort_title = excluded.sort_title,
     logo = excluded.logo,
     guide_id = excluded.guide_id,
     catchup_days = excluded.catchup_days,
@@ -40,16 +41,18 @@ const UPSERT_LIVE = `INSERT INTO live (source_id, key, provider_id, num, name, n
     content_hash = excluded.content_hash
   WHERE live.content_hash IS NULL
      OR excluded.content_hash IS NULL
-     OR live.content_hash != excluded.content_hash`;
+     OR live.content_hash != excluded.content_hash
+     OR live.sort_title != excluded.sort_title`;
 
-const UPSERT_MOVIES = `INSERT INTO movies (source_id, key, provider_id, name, name_fold, logo, rating, year, extension, added, url_template, headers_json, backup_urls_json, run_id, content_hash)
-  SELECT source_id, key, provider_id, name, name_fold, logo, rating, year, extension, added, url_template, headers_json, backup_urls_json, run_id, content_hash
+const UPSERT_MOVIES = `INSERT INTO movies (source_id, key, provider_id, name, name_fold, sort_title, logo, rating, year, extension, added, url_template, headers_json, backup_urls_json, run_id, content_hash)
+  SELECT source_id, key, provider_id, name, name_fold, sort_title, logo, rating, year, extension, added, url_template, headers_json, backup_urls_json, run_id, content_hash
   FROM movies_next
   WHERE source_id = ? AND run_id = ?
   ON CONFLICT(source_id, key) DO UPDATE SET
     provider_id = excluded.provider_id,
     name = excluded.name,
     name_fold = excluded.name_fold,
+    sort_title = excluded.sort_title,
     logo = excluded.logo,
     rating = excluded.rating,
     year = excluded.year,
@@ -62,16 +65,18 @@ const UPSERT_MOVIES = `INSERT INTO movies (source_id, key, provider_id, name, na
     content_hash = excluded.content_hash
   WHERE movies.content_hash IS NULL
      OR excluded.content_hash IS NULL
-     OR movies.content_hash != excluded.content_hash`;
+     OR movies.content_hash != excluded.content_hash
+     OR movies.sort_title != excluded.sort_title`;
 
-const UPSERT_SERIES = `INSERT INTO series (source_id, key, provider_id, name, name_fold, cover, plot, rating, year, last_modified, run_id, content_hash)
-  SELECT source_id, key, provider_id, name, name_fold, cover, plot, rating, year, last_modified, run_id, content_hash
+const UPSERT_SERIES = `INSERT INTO series (source_id, key, provider_id, name, name_fold, sort_title, cover, plot, rating, year, last_modified, run_id, content_hash)
+  SELECT source_id, key, provider_id, name, name_fold, sort_title, cover, plot, rating, year, last_modified, run_id, content_hash
   FROM series_next
   WHERE source_id = ? AND run_id = ?
   ON CONFLICT(source_id, key) DO UPDATE SET
     provider_id = excluded.provider_id,
     name = excluded.name,
     name_fold = excluded.name_fold,
+    sort_title = excluded.sort_title,
     cover = excluded.cover,
     plot = excluded.plot,
     rating = excluded.rating,
@@ -81,7 +86,8 @@ const UPSERT_SERIES = `INSERT INTO series (source_id, key, provider_id, name, na
     content_hash = excluded.content_hash
   WHERE series.content_hash IS NULL
      OR excluded.content_hash IS NULL
-     OR series.content_hash != excluded.content_hash`;
+     OR series.content_hash != excluded.content_hash
+     OR series.sort_title != excluded.sort_title`;
 
 const UPSERT_EPISODES = `INSERT INTO episodes (source_id, key, provider_id, series_key, season, episode, title, extension, duration_sec, url_template, headers_json, backup_urls_json, run_id)
   SELECT source_id, key, provider_id, series_key, season, episode, title, extension, duration_sec, url_template, headers_json, backup_urls_json, run_id

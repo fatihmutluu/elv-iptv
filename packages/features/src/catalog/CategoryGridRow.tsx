@@ -1,4 +1,4 @@
-import type { ItemRow, WatchProgressRow } from '@elv/data';
+import type { ItemRow, ItemSortOrder, WatchProgressRow } from '@elv/data';
 import {
   Icon,
   PosterCard,
@@ -157,6 +157,8 @@ export interface GridHeaderBarProps {
   readonly layout: CatalogLayoutMetrics;
   readonly backFocused: boolean;
   readonly onBack: () => void;
+  readonly sortBy?: ItemSortOrder;
+  readonly onToggleSort?: () => void;
 }
 
 /** Header bar above {@link CategoryGridView} with `Back to Movies`/`Back to Series`, title, and count. */
@@ -167,10 +169,13 @@ export function GridHeaderBar({
   layout,
   backFocused,
   onBack,
+  sortBy = 'default',
+  onToggleSort,
 }: GridHeaderBarProps): ReactElement {
   const theme = useTheme();
   const cursor = webCursorPointer();
   const transition = webTransition(theme, 'background-color, opacity, transform');
+  const isAlpha = sortBy === 'alpha';
 
   return (
     <View style={[styles.header, { paddingHorizontal: layout.padX }]}>
@@ -216,6 +221,42 @@ export function GridHeaderBar({
         >
           {countLabel}
         </Text>
+        {onToggleSort ? (
+          <Pressable
+            testID="catalog-grid-sort"
+            accessibilityRole="button"
+            accessibilityLabel="A–Z"
+            accessibilityState={{ selected: isAlpha }}
+            focusable={!layout.isTv}
+            onPress={onToggleSort}
+            style={({ pressed }) => [
+              styles.sortButton,
+              layout.isTouch ? styles.touchTarget : null,
+              {
+                borderRadius: theme.radius.button,
+                backgroundColor: isAlpha ? theme.colors.accentTint : theme.colors.chipBg,
+                borderWidth: 1,
+                borderColor: isAlpha ? theme.colors.accent : theme.colors.chipBorder,
+                opacity: pressed ? 0.8 : 1,
+              },
+              cursor,
+              transition,
+            ]}
+          >
+            <Text
+              style={[
+                theme.typography.caption,
+                TABULAR_NUMS_STYLE,
+                {
+                  color: isAlpha ? theme.colors.textPrimary : theme.colors.textSecondary,
+                  fontWeight: '600',
+                },
+              ]}
+            >
+              A–Z
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
@@ -238,7 +279,14 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   touchTarget: { minHeight: 40, minWidth: 40 },
-  headerMeta: { flexDirection: 'row', alignItems: 'baseline', gap: 10, flexShrink: 1 },
+  sortButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  headerMeta: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 },
   categoryName: { flexShrink: 1 },
   row: { flexDirection: 'row', alignItems: 'flex-start' },
   skeletonLabel: { marginTop: 8 },

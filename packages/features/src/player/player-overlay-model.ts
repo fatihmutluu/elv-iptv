@@ -1,4 +1,5 @@
 import type { ItemRow } from '@elv/data';
+import type { DefaultResizeModePref } from '@elv/domain';
 import { type AppI18n, resolveLanguageLabel } from '@elv/i18n';
 import {
   type MediaTracks,
@@ -151,6 +152,7 @@ export interface PlayerOverlayStateParams {
   hasPreviousChannel: boolean;
   initialOsdHidden?: boolean | undefined;
   autoHideOsdMs?: number | undefined;
+  defaultResizeMode?: DefaultResizeModePref | undefined;
   isScrubbing: boolean;
   clockRef: MutableRefObject<PlaybackClock>;
   timersRef: MutableRefObject<PlaybackTimers>;

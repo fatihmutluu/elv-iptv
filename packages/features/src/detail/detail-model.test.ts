@@ -8,9 +8,13 @@ import {
   buildEpisodePlayTarget,
   buildMoviePlayTarget,
   buildPrimaryPlayAction,
+  buildTechnicalBadges,
+  cyclePrePlayOption,
   describeDetailSeasonsError,
   detailProgressRatio,
   formatEpisodeDuration,
+  PREPLAY_AUDIO_OPTIONS,
+  PREPLAY_SUBTITLE_OPTIONS,
   resolveSeriesPrimaryEpisode,
 } from './detail-model';
 
@@ -559,6 +563,88 @@ describe('detail-model', () => {
         { id: 'hero-play', count: 1, orientation: 'horizontal' },
         { id: 'retry', count: 1, orientation: 'horizontal' },
       ]);
+
+      expect(
+        buildDetailNavRows({
+          heroActionCount: 2,
+          heroPlayCount: 4,
+          castCount: 3,
+          seasonsCount: 2,
+          episodesCount: 5,
+          hasSeasonsError: false,
+          relatedCount: 2,
+        }),
+      ).toEqual([
+        { id: 'back', count: 1, orientation: 'horizontal' },
+        { id: 'hero-actions', count: 2, orientation: 'horizontal' },
+        { id: 'hero-play', count: 4, orientation: 'horizontal' },
+        { id: 'cast', count: 3, orientation: 'horizontal' },
+        { id: 'seasons', count: 2, orientation: 'horizontal' },
+        { id: 'episodes', count: 5, orientation: 'vertical' },
+        { id: 'related', count: 2, orientation: 'horizontal' },
+      ]);
+    });
+  });
+
+  describe('technical badges and pre-play track selectors (#398)', () => {
+    it('builds typed Cinema Quietude technical badges and skips blank or invalid fields', () => {
+      expect(buildTechnicalBadges(undefined)).toEqual([]);
+      expect(buildTechnicalBadges({ resolution: '  ', durationMin: 0 })).toEqual([]);
+      expect(
+        buildTechnicalBadges({
+          resolution: '4K',
+          hdr: 'HDR10',
+          codec: 'HEVC',
+          audioChannels: '5.1',
+          container: 'mkv',
+          durationMin: 124,
+        }),
+      ).toEqual([
+        { key: 'resolution', label: '4K' },
+        { key: 'hdr', label: 'HDR10' },
+        { key: 'codec', label: 'HEVC' },
+        { key: 'audioChannels', label: '5.1' },
+        { key: 'container', label: 'MKV' },
+        { key: 'durationMin', label: '124m' },
+      ]);
+    });
+
+    it('cycles pre-play audio and subtitle language options cleanly', () => {
+      expect(cyclePrePlayOption(PREPLAY_AUDIO_OPTIONS, '')).toBe('tr');
+      expect(cyclePrePlayOption(PREPLAY_AUDIO_OPTIONS, 'es')).toBe('');
+      expect(cyclePrePlayOption(PREPLAY_AUDIO_OPTIONS, 'unknown')).toBe('tr');
+      expect(cyclePrePlayOption(PREPLAY_SUBTITLE_OPTIONS, '')).toBe('off');
+      expect(cyclePrePlayOption(PREPLAY_SUBTITLE_OPTIONS, 'off')).toBe('tr');
+      expect(cyclePrePlayOption(PREPLAY_SUBTITLE_OPTIONS, 'es')).toBe('');
+    });
+
+    it('forwards preferredAudioLang and preferredSubtitleLang onto movie and episode PlayTargets', () => {
+      const moviePlay = buildMoviePlayTarget({
+        target: MOVIE_TARGET,
+        progress: null,
+        preferredAudioLang: 'tr',
+        preferredSubtitleLang: 'en',
+      });
+      expect(moviePlay.preferredAudioLang).toBe('tr');
+      expect(moviePlay.preferredSubtitleLang).toBe('en');
+
+      const ep1 = makeEpisode({ id: 1, key: 'x:s1:ep:1', season: 1, episode: 1, title: 'Pilot' });
+      const ep2 = makeEpisode({ id: 2, key: 'x:s1:ep:2', season: 1, episode: 2, title: 'Drift' });
+      const epPlay = buildEpisodePlayTarget({
+        target: SERIES_TARGET,
+        episode: ep1,
+        index: 0,
+        progress: undefined,
+        seriesTitle: 'Starlight Harbor',
+        t: i18n.t,
+        nextEpisodes: [ep2],
+        preferredAudioLang: 'de',
+        preferredSubtitleLang: 'off',
+      });
+      expect(epPlay.preferredAudioLang).toBe('de');
+      expect(epPlay.preferredSubtitleLang).toBe('off');
+      expect(epPlay.nextEpisodes?.[0]?.preferredAudioLang).toBe('de');
+      expect(epPlay.nextEpisodes?.[0]?.preferredSubtitleLang).toBe('off');
     });
   });
 });

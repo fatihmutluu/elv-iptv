@@ -43,6 +43,8 @@ export interface ImportProgress {
   total?: number;
   /** Optional overall run progress in `[0, 1]`, strictly non-decreasing across the run. */
   fraction?: number;
+  /** Optional overall run progress as an integer in `[0, 100]`, strictly non-decreasing across the run (`#65`). */
+  readonly percent?: number;
 }
 
 /** Outcome of a successful run. */

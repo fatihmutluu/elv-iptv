@@ -20,6 +20,7 @@ export {
   LiveNumberPad,
   type LiveNumberPadProps,
 } from './LiveChrome';
+export { LivePreviewBanner, type LivePreviewBannerProps } from './LivePreviewBanner';
 export { LiveScreen, type LiveScreenProps } from './LiveScreen';
 export {
   type LiveStagePreview,
@@ -60,6 +61,16 @@ export {
   parseNumberBuffer,
   recordChannelTune,
 } from './live-model';
+export { SourceBadgePill } from './SourceBadgePill';
+export {
+  buildSourceBadgeMap,
+  type EpgGenreKind,
+  type EpgGenreTint,
+  formatChannelDisplayName,
+  resolveEpgGenreTint,
+  resolveSourceBadge,
+  type SourceBadgeInfo,
+} from './source-badge';
 export {
   type EpgWindowData,
   type UseEpgTimeCursorOptions,

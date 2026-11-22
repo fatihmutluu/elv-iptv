@@ -1,4 +1,5 @@
 import type { CatalogService, ItemRow } from '@elv/data';
+import type { EpgTimeSpanHoursPref, LogoBackdropModePref } from '@elv/domain';
 import {
   TvFocusAnchor,
   TvScrollEdgeFade,
@@ -23,6 +24,7 @@ import {
 import { EpgChannelRow } from './EpgChannelRow';
 import { EpgPreviewHeader, EpgTimeRuler } from './EpgPreviewHeader';
 import { buildEpgRulerTicks, computeNowLineRatio, EPG_VISIBLE_SPAN_MS } from './live-model';
+import type { SourceBadgeInfo } from './source-badge';
 import { EMPTY_PROGRAMMES, useEpgTimeCursor, useEpgWindowData } from './useEpgWindowData';
 
 const LIVE_CLOCK_TICK_MS = 30_000;
@@ -52,6 +54,12 @@ export interface EpgGridViewProps {
   readonly onGuideRefreshed?: () => void;
   readonly onEdgeTop?: () => void;
   readonly isActiveScope?: boolean;
+  readonly epgTimeSpanHours?: EpgTimeSpanHoursPref;
+  readonly epgGenreTints?: boolean;
+  readonly epgShowClock?: boolean;
+  readonly logoBackdropMode?: LogoBackdropModePref;
+  readonly sourceBadges?: ReadonlyMap<string, SourceBadgeInfo>;
+  readonly cleanChannelTitles?: boolean;
 }
 
 /**
@@ -60,20 +68,19 @@ export interface EpgGridViewProps {
  * O(1) windowed TV viewport / `VirtualizedList` channel matrix, stale-while-revalidate bounded
  * LRU TTL programme caching, and 10-ft TV 2D D-pad time-cursor & toolbar navigation.
  */
-export function EpgGridView({
-  catalog,
-  category,
-  channelSource,
-  sourceVersion,
-  refreshToken,
-  nowMs,
-  favoriteKeys,
-  onWatchChannel,
-  onToggleFavorite,
-  onGuideRefreshed,
-  onEdgeTop,
-  isActiveScope = true,
-}: EpgGridViewProps): ReactElement {
+export function EpgGridView(p: EpgGridViewProps): ReactElement {
+  const { catalog, category, channelSource, sourceVersion, refreshToken, nowMs, favoriteKeys } = p;
+  const { onWatchChannel, onToggleFavorite, onGuideRefreshed, onEdgeTop, isActiveScope = true } = p;
+  const {
+    epgTimeSpanHours,
+    epgGenreTints = true,
+    epgShowClock = true,
+    logoBackdropMode = 'plate',
+    sourceBadges,
+    cleanChannelTitles = false,
+  } = p;
+  const visibleSpanMs =
+    epgTimeSpanHours !== undefined ? epgTimeSpanHours * 3_600_000 : EPG_VISIBLE_SPAN_MS;
   const theme = useTheme();
   const viewport = useViewport();
 
@@ -105,6 +112,7 @@ export function EpgGridView({
     categoryId: category.row.id,
     refreshToken,
     nowMs: activeNowMs,
+    spanMs: visibleSpanMs,
     onGuideRefreshed,
   });
 
@@ -121,6 +129,7 @@ export function EpgGridView({
     channelCount,
     maxMountedRows,
     activeNowMs,
+    spanMs: visibleSpanMs,
     epgData,
     onWatchChannel,
     ...(onToggleFavorite !== undefined ? { onToggleFavorite } : {}),
@@ -181,6 +190,7 @@ export function EpgGridView({
     isTv,
     tvWindowEnd,
     tvWindowStart,
+    visibleSpanMs,
   ]);
 
   const handleScroll = useCallback(
@@ -197,12 +207,12 @@ export function EpgGridView({
   );
 
   const rulerTicks = useMemo(
-    () => buildEpgRulerTicks(epgData.windowStartMs, EPG_VISIBLE_SPAN_MS),
-    [epgData.windowStartMs],
+    () => buildEpgRulerTicks(epgData.windowStartMs, visibleSpanMs),
+    [epgData.windowStartMs, visibleSpanMs],
   );
   const nowLineRatio = useMemo(
-    () => computeNowLineRatio(epgData.windowStartMs, EPG_VISIBLE_SPAN_MS, activeNowMs),
-    [activeNowMs, epgData.windowStartMs],
+    () => computeNowLineRatio(epgData.windowStartMs, visibleSpanMs, activeNowMs),
+    [activeNowMs, epgData.windowStartMs, visibleSpanMs],
   );
   const tvRowIndices = useMemo(() => {
     if (!isTv || tvWindowEnd < tvWindowStart) return [];
@@ -233,13 +243,17 @@ export function EpgGridView({
           channel={entry.channel}
           programmes={entry.channel ? epgData.getProgrammes(entry.channel.key) : EMPTY_PROGRAMMES}
           windowStartMs={epgData.windowStartMs}
-          spanMs={EPG_VISIBLE_SPAN_MS}
+          spanMs={visibleSpanMs}
           nowMs={activeNowMs}
           channelColWidth={channelColWidth}
           rowHeight={rowHeight}
           isTv={false}
           isFocusedRow={entry.index === cursor.focusedRow}
           focusedSlotIndex={entry.index === cursor.focusedRow ? cursor.focusedSlotIndex : 0}
+          logoBackdropMode={logoBackdropMode}
+          sourceBadge={entry.channel ? (sourceBadges?.get(entry.channel.sourceId) ?? null) : null}
+          cleanChannelTitles={cleanChannelTitles}
+          epgGenreTints={epgGenreTints}
           onSelectCell={cursor.handleSelectCell}
         />
       );
@@ -247,12 +261,17 @@ export function EpgGridView({
     [
       activeNowMs,
       channelColWidth,
+      cleanChannelTitles,
       cursor.focusedRow,
       cursor.focusedSlotIndex,
       cursor.handleSelectCell,
       epgData.getProgrammes,
       epgData.windowStartMs,
+      epgGenreTints,
+      logoBackdropMode,
       rowHeight,
+      sourceBadges,
+      visibleSpanMs,
     ],
   );
   const extraData = useMemo(
@@ -260,15 +279,25 @@ export function EpgGridView({
       effectiveSourceVersion,
       epgVersion: epgData.version,
       windowStartMs: epgData.windowStartMs,
+      visibleSpanMs,
       focusedRow: cursor.focusedRow,
       focusedSlotIndex: cursor.focusedSlotIndex,
+      epgGenreTints,
+      logoBackdropMode,
+      sourceBadges,
+      cleanChannelTitles,
     }),
     [
+      cleanChannelTitles,
       cursor.focusedRow,
       cursor.focusedSlotIndex,
       effectiveSourceVersion,
       epgData.version,
       epgData.windowStartMs,
+      epgGenreTints,
+      logoBackdropMode,
+      sourceBadges,
+      visibleSpanMs,
     ],
   );
 
@@ -300,6 +329,8 @@ export function EpgGridView({
           (favoriteKeys?.has(cursor.focusedChannel.key) ?? false)
         }
         focusedAction={previewFocusedAction}
+        logoBackdropMode={logoBackdropMode}
+        cleanChannelTitles={cleanChannelTitles}
         onWatchChannel={onWatchChannel}
         {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
         onRefreshGuide={handleRefreshGuide}
@@ -312,6 +343,8 @@ export function EpgGridView({
         isTv={isTv}
         isPortrait={isPortrait}
         jumpHighlighted={!epgData.isAtLiveWindow}
+        showClock={epgShowClock}
+        nowMs={activeNowMs}
         focusedButton={rulerFocusedButton}
         onPanEarlier={cursor.handlePanEarlier}
         onJumpToLive={cursor.handleJumpToLive}
@@ -331,13 +364,17 @@ export function EpgGridView({
                     channel={ch}
                     programmes={ch ? epgData.getProgrammes(ch.key) : EMPTY_PROGRAMMES}
                     windowStartMs={epgData.windowStartMs}
-                    spanMs={EPG_VISIBLE_SPAN_MS}
+                    spanMs={visibleSpanMs}
                     nowMs={activeNowMs}
                     channelColWidth={channelColWidth}
                     rowHeight={rowHeight}
                     isTv
                     isFocusedRow={isFocusedRow}
                     focusedSlotIndex={isFocusedRow ? cursor.focusedSlotIndex : 0}
+                    logoBackdropMode={logoBackdropMode}
+                    sourceBadge={ch ? (sourceBadges?.get(ch.sourceId) ?? null) : null}
+                    cleanChannelTitles={cleanChannelTitles}
+                    epgGenreTints={epgGenreTints}
                     onSelectCell={cursor.handleSelectCell}
                   />
                 </View>

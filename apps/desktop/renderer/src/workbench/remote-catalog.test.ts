@@ -515,4 +515,23 @@ describe('createWorkbenchRemoteCatalog', () => {
     expect(await malformedCatalog.seasons(1)).toEqual(err(elvError('network', 'unreachable')));
     await expect(malformedCatalog.listSources()).rejects.toThrow(/invalid payload/);
   });
+
+  it('forwards ListItemsOptions on items and allSourcesItems RPCs (#125)', async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const { fetchImpl } = createFetchMock(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { method: string; args: unknown[] };
+      calls.push(body);
+      return makeJsonResponse({ value: [] });
+    });
+    const catalog = createWorkbenchRemoteCatalog(CONFIG, fetchImpl);
+    const opts = { sortBy: 'alpha' as const, excludeWatched: true };
+
+    await catalog.items('src-1|movie|10', 0, 18, opts);
+    await catalog.allSourcesItems?.('series', 0, 12, ['src-1'], opts);
+
+    expect(calls).toEqual([
+      { method: 'items', args: ['src-1|movie|10', 0, 18, opts] },
+      { method: 'allSourcesItems', args: ['series', 0, 12, ['src-1'], opts] },
+    ]);
+  });
 });

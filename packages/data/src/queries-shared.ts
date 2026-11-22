@@ -1,6 +1,35 @@
 /** Kinds a menu browses; stored as `kind` in `categories` and `placements`. */
 export type BrowseKind = 'live' | 'movie' | 'series';
 
+/** Sort order for catalog browse queries (`#125`). */
+export type ItemSortOrder = 'default' | 'alpha';
+
+/** Optional sorting and watched-state filtering for catalog browse queries (`#125`). */
+export interface ListItemsOptions {
+  /** `'default'` preserves provider/category order; `'alpha'` orders by `sort_title ASC, key ASC`. */
+  readonly sortBy?: ItemSortOrder;
+  /** When `true`, excludes items marked `watched = 1` in `watch_progress` for `profileId`. */
+  readonly excludeWatched?: boolean;
+  /** Profile identifier for `excludeWatched` filtering (defaults to `'default'`). */
+  readonly profileId?: string;
+}
+
+const DEFAULT_QUERY_PROFILE_ID = 'default';
+
+/** @internal Builds an indexed `NOT EXISTS` predicate excluding watched items for a profile (`#125`). */
+export function watchedFilterClause(
+  keyExpr: 'placements.item_key' | 't.key',
+  opts?: Pick<ListItemsOptions, 'excludeWatched' | 'profileId'>,
+): { readonly clause: string; readonly params: readonly string[] } {
+  if (opts?.excludeWatched !== true) return { clause: '', params: [] };
+  const trimmed = opts.profileId?.trim();
+  const profileId = trimmed && trimmed.length > 0 ? trimmed : DEFAULT_QUERY_PROFILE_ID;
+  return {
+    clause: ` AND NOT EXISTS (SELECT 1 FROM watch_progress wp WHERE wp.profile_id = ? AND wp.item_key = ${keyExpr} AND wp.watched = 1)`,
+    params: [profileId],
+  };
+}
+
 /** Largest page `items` and `queryAllSourcesItems` return. */
 const MAX_PAGE = 500;
 

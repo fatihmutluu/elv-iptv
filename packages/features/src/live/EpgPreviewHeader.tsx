@@ -1,4 +1,5 @@
 import type { ItemRow, ProgrammeRow } from '@elv/data';
+import type { LogoBackdropModePref } from '@elv/domain';
 import {
   ArtworkImage,
   CtaButton,
@@ -12,6 +13,7 @@ import {
 import { memo, type ReactElement, useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { formatClockTime } from './live-model';
+import { formatChannelDisplayName } from './source-badge';
 
 /** Props of {@link EpgPreviewHeader}. */
 export interface EpgPreviewHeaderProps {
@@ -24,6 +26,8 @@ export interface EpgPreviewHeaderProps {
   readonly isPortrait: boolean;
   readonly isFavorite?: boolean;
   readonly focusedAction?: 'watch' | 'favorite' | 'refresh' | null;
+  readonly logoBackdropMode?: LogoBackdropModePref;
+  readonly cleanChannelTitles?: boolean;
   readonly onWatchChannel: (channel: ItemRow, channelIndex: number) => void;
   readonly onToggleFavorite?: (channel: ItemRow) => void;
   readonly onRefreshGuide: () => void;
@@ -37,7 +41,7 @@ export const EpgPreviewHeader = memo(function EpgPreviewHeaderInner(
 ): ReactElement {
   const { channel, channelIndex, programme, nowMs, refreshingGuide, isTv, isPortrait } = props;
   const { isFavorite = false, focusedAction = null, onWatchChannel, onToggleFavorite } = props;
-  const { onRefreshGuide } = props;
+  const { logoBackdropMode = 'plate', cleanChannelTitles = false, onRefreshGuide } = props;
   const theme = useTheme();
   const i18n = useI18n();
 
@@ -48,12 +52,15 @@ export const EpgPreviewHeader = memo(function EpgPreviewHeaderInner(
     if (channel) onToggleFavorite?.(channel);
   }, [channel, onToggleFavorite]);
 
+  const channelDisplayName = channel
+    ? formatChannelDisplayName(channel.name, cleanChannelTitles)
+    : '';
   const isLiveProgramme = programme !== null && programme.start <= nowMs && programme.stop > nowMs;
   const timeRangeLabel =
     programme !== null
       ? `${formatClockTime(programme.start)} – ${formatClockTime(programme.stop)}`
       : null;
-  const heading = programme?.title ?? channel?.name ?? i18n.t('epg.title');
+  const heading = programme?.title ?? (channel ? channelDisplayName : i18n.t('epg.title'));
   const description =
     programme?.description?.trim() || programme?.subTitle?.trim() || i18n.t('epg.noGuideData');
   const tileWidth = isPortrait ? 124 : isTv ? 200 : 176;
@@ -118,10 +125,10 @@ export const EpgPreviewHeader = memo(function EpgPreviewHeaderInner(
             <ArtworkImage
               testID="epg-preview-artwork"
               uri={channel?.logo}
-              label={channel?.name ?? i18n.t('epg.title')}
+              label={channel ? channelDisplayName : i18n.t('epg.title')}
               aspectRatio={16 / 9}
               resizeMode="contain"
-              logoBackdrop
+              logoBackdropMode={logoBackdropMode}
               maxDecodePx={240}
               borderRadius={theme.radius.card}
               style={styles.tileArt}
@@ -155,7 +162,7 @@ export const EpgPreviewHeader = memo(function EpgPreviewHeaderInner(
                 { color: theme.colors.textPrimary },
               ]}
             >
-              {channel?.name ?? ''}
+              {channelDisplayName}
             </Text>
           </View>
         </View>
@@ -206,6 +213,8 @@ export interface EpgTimeRulerProps {
   readonly isTv: boolean;
   readonly isPortrait: boolean;
   readonly jumpHighlighted: boolean;
+  readonly showClock?: boolean;
+  readonly nowMs?: number;
   readonly focusedButton?: 'earlier' | 'jump' | 'later' | null;
   readonly onPanEarlier: () => void;
   readonly onJumpToLive: () => void;
@@ -218,7 +227,8 @@ export interface EpgTimeRulerProps {
  */
 export const EpgTimeRuler = memo(function EpgTimeRulerInner(p: EpgTimeRulerProps): ReactElement {
   const { categoryLabel, rulerTicks, channelColWidth, isTv, isPortrait, jumpHighlighted } = p;
-  const { focusedButton = null, onPanEarlier, onJumpToLive, onPanLater } = p;
+  const { showClock = true, nowMs, focusedButton = null } = p;
+  const { onPanEarlier, onJumpToLive, onPanLater } = p;
   const theme = useTheme();
   const i18n = useI18n();
   const cursor = webCursorPointer();
@@ -241,6 +251,19 @@ export const EpgTimeRuler = memo(function EpgTimeRulerInner(p: EpgTimeRulerProps
           },
         ]}
       >
+        {showClock && nowMs !== undefined ? (
+          <Text
+            testID="epg-live-clock"
+            style={[
+              theme.typography.caption,
+              TABULAR_NUMS_STYLE,
+              styles.liveClock,
+              { color: theme.colors.textSecondary },
+            ]}
+          >
+            {formatClockTime(nowMs)}
+          </Text>
+        ) : null}
         {navButtons.map(([id, testID, label, highlighted, onPress]) => {
           const isFocused = focusedButton === id;
           const bg = isFocused
@@ -362,6 +385,7 @@ const styles = StyleSheet.create({
     gap: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  liveClock: { marginRight: 'auto', fontWeight: '600' },
   navBtn: {
     minWidth: 40,
     minHeight: 40,

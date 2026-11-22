@@ -1,3 +1,4 @@
+import type { DefaultResizeModePref } from '@elv/domain';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { VideoResizeMode } from '../ports/video-host';
 
@@ -9,11 +10,13 @@ import type { VideoResizeMode } from '../ports/video-host';
 export function usePlayerOverlayPrefs(params: {
   itemKey: string;
   hasService: boolean;
+  defaultResizeMode?: DefaultResizeModePref | undefined;
   onSetDeinterlace?: ((enabled: boolean) => void) | undefined;
   onSetOrientationLocked?: ((locked: boolean) => void) | undefined;
 }) {
-  const { itemKey, hasService, onSetDeinterlace, onSetOrientationLocked } = params;
-  const [resizeMode, setResizeMode] = useState<VideoResizeMode>('fit');
+  const { itemKey, hasService, defaultResizeMode, onSetDeinterlace, onSetOrientationLocked } =
+    params;
+  const [resizeMode, setResizeMode] = useState<VideoResizeMode>(() => defaultResizeMode ?? 'fit');
   const [deinterlace, setDeinterlace] = useState(false);
   const [statsVisible, setStatsVisible] = useState(false);
 

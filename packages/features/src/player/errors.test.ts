@@ -1,9 +1,10 @@
-import { elvError } from '@elv/domain';
+import { type ErrorCategory, elvError } from '@elv/domain';
+import { createAppI18n } from '@elv/i18n';
 import { describe, expect, it } from 'vitest';
-import { describePlaybackFailure } from './errors';
+import { describePlaybackFailure, extractHttpStatus, sanitizeErrorDetail } from './errors';
 
-describe('describePlaybackFailure (#316)', () => {
-  it('maps auth, rate-limit, network, codec/format, not-found, and generic errors to localized pairs with redacted evidence', () => {
+describe('describePlaybackFailure, extractHttpStatus & sanitizeErrorDetail (#316, #63)', () => {
+  it('maps auth, rate-limit, network, codec/format, not-found, and generic errors to localized pairs with HTTP status and redacted evidence', () => {
     expect(describePlaybackFailure(elvError('auth', 'invalid-credentials'))).toEqual({
       messageId: 'player.error.invalidCredentials',
       hintId: 'player.hint.invalidCredentials',
@@ -14,6 +15,7 @@ describe('describePlaybackFailure (#316)', () => {
       messageId: 'player.error.invalidCredentials',
       hintId: 'player.hint.invalidCredentials',
       verdict: 'auth-failed',
+      httpStatus: 401,
       evidence: 'code=playback/http-401',
     });
     expect(describePlaybackFailure(elvError('auth', 'account-expired'))).toEqual({
@@ -80,6 +82,7 @@ describe('describePlaybackFailure (#316)', () => {
       messageId: 'player.error.itemNotFound',
       hintId: 'player.hint.itemNotFound',
       verdict: 'not-found',
+      httpStatus: 404,
       evidence: 'code=playback/http-404',
     });
     expect(describePlaybackFailure(elvError('playback', 'unknown'))).toEqual({
@@ -118,6 +121,7 @@ describe('describePlaybackFailure (#316)', () => {
       messageId: 'player.diag.accountExpired',
       hintId: 'player.hint.accountExpired',
       verdict: 'account-expired',
+      httpStatus: 403,
       evidence: 'host=edge.example.test:8080 status=403',
     });
 
@@ -128,6 +132,7 @@ describe('describePlaybackFailure (#316)', () => {
       messageId: 'player.diag.accountDisabled',
       hintId: 'player.hint.accountExpired',
       verdict: 'account-disabled',
+      httpStatus: 403,
     });
 
     const silent = describePlaybackFailure(elvError('network', 'timeout'), {
@@ -139,6 +144,7 @@ describe('describePlaybackFailure (#316)', () => {
       messageId: 'player.diag.serverSilent',
       hintId: 'player.hint.unreachable',
       verdict: 'server-silent',
+      httpStatus: 503,
       evidence: 'host=edge.example.test:8080 status=503 bytes=0',
     });
 
@@ -151,7 +157,39 @@ describe('describePlaybackFailure (#316)', () => {
       messageId: 'player.error.unreachable',
       hintId: 'player.hint.unreachable',
       verdict: 'upstream-error',
+      httpStatus: 502,
       evidence: 'host=edge.example.test:8080 status=502 bytes=2048',
     });
+  });
+
+  it('extracts HTTP statuses cleanly, sanitizes raw class/stack/credential details, and localizes every ErrorCategory in EN & TR', () => {
+    const en = createAppI18n('en');
+    const tr = createAppI18n('tr');
+    const categories: readonly ErrorCategory[] = [
+      'auth',
+      'network',
+      'source-format',
+      'storage',
+      'playback',
+    ];
+    for (const category of categories) {
+      const described = describePlaybackFailure(
+        elvError(category, 'ExoPlaybackException', 'TypeError: fail at /app/x.ts:1:2'),
+      );
+      expect(en.t(described.messageId).length).toBeGreaterThan(0);
+      expect(tr.t(described.messageId).length).toBeGreaterThan(0);
+      expect(en.t(described.hintId).length).toBeGreaterThan(0);
+      expect(tr.t(described.hintId).length).toBeGreaterThan(0);
+      expect(described.evidence).toBeUndefined();
+    }
+
+    expect(extractHttpStatus(elvError('playback', 'http-509'))).toBe(509);
+    expect(extractHttpStatus(elvError('network', 'stream-failed', 'HTTP 500'))).toBe(500);
+    expect(extractHttpStatus(elvError('network', 'http-200'))).toBeUndefined();
+    expect(sanitizeErrorDetail('ExoPlaybackException: decoder error')).toBeUndefined();
+    expect(sanitizeErrorDetail('SQLITE_ERROR: locked')).toBeUndefined();
+    expect(sanitizeErrorDetail('host=edge.example.test status=503')).toBe(
+      'host=edge.example.test status=503',
+    );
   });
 });

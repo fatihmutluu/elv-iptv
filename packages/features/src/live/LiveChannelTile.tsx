@@ -1,4 +1,5 @@
 import type { ItemRow, NowNextEntry } from '@elv/data';
+import type { LogoBackdropModePref } from '@elv/domain';
 import {
   ArtworkImage,
   IconButton,
@@ -13,6 +14,8 @@ import {
 import { memo, type ReactElement, useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { computeProgramProgress, formatLiveTitle } from './live-model';
+import { SourceBadgePill } from './SourceBadgePill';
+import { formatChannelDisplayName, type SourceBadgeInfo } from './source-badge';
 
 const PAD_SLOTS = ['a', 'b'] as const;
 
@@ -30,6 +33,8 @@ export interface LiveGridShared {
   readonly noProgram: string;
   readonly favoriteAdd: string;
   readonly favoriteRemove: string;
+  readonly logoBackdropMode?: LogoBackdropModePref;
+  readonly cleanChannelTitles?: boolean;
 }
 
 function tileSurfaceStyle(
@@ -63,6 +68,7 @@ export const ChannelGridTile = memo(function ChannelGridTileInner(p: {
   readonly isActive: boolean;
   readonly isFavorite: boolean;
   readonly focused: boolean;
+  readonly sourceBadge?: SourceBadgeInfo | null;
   readonly onWatchChannel: (channel: ItemRow, index: number) => void;
   readonly onToggleFavorite?: (channel: ItemRow) => void;
 }): ReactElement {
@@ -87,6 +93,7 @@ export const ChannelGridTile = memo(function ChannelGridTileInner(p: {
     );
   }
 
+  const displayName = formatChannelDisplayName(p.item.name, p.shared.cleanChannelTitles ?? false);
   const nowProg = p.nowNext?.now ?? null;
   const nextProg = p.nowNext?.next ?? null;
   const ratio = nowProg ? computeProgramProgress(nowProg.start, nowProg.stop, p.nowMs) : 0;
@@ -100,7 +107,7 @@ export const ChannelGridTile = memo(function ChannelGridTileInner(p: {
         <Pressable
           testID={`live-channel-card-${p.itemIndex}`}
           accessibilityRole="button"
-          accessibilityLabel={formatLiveTitle(p.item)}
+          accessibilityLabel={formatLiveTitle({ num: p.item.num, name: displayName })}
           accessibilityState={{ selected: p.isActive }}
           focusable={!p.shared.isTv}
           onPress={handlePress}
@@ -108,10 +115,10 @@ export const ChannelGridTile = memo(function ChannelGridTileInner(p: {
         >
           <ArtworkImage
             uri={p.item.logo}
-            label={p.item.name}
+            label={displayName}
             maxDecodePx={160}
             resizeMode="contain"
-            logoBackdrop
+            logoBackdropMode={p.shared.logoBackdropMode ?? 'plate'}
             borderRadius={theme.radius.button}
             style={styles.logo}
           />
@@ -134,8 +141,12 @@ export const ChannelGridTile = memo(function ChannelGridTileInner(p: {
                 numberOfLines={1}
                 style={[theme.typography.title, styles.flex1, { color: theme.colors.textPrimary }]}
               >
-                {p.item.name}
+                {displayName}
               </Text>
+              <SourceBadgePill
+                badge={p.sourceBadge}
+                testID={`live-channel-source-badge-${p.itemIndex}`}
+              />
               <MicroPill label={p.shared.liveBadge} tone="live" />
             </View>
             <Text
@@ -194,6 +205,7 @@ export const ChannelGridRow = memo(function ChannelGridRowInner(p: {
   readonly nowMs: number;
   readonly activeChannelKey: string | null;
   readonly favoriteKeys?: ReadonlySet<string>;
+  readonly sourceBadges?: ReadonlyMap<string, SourceBadgeInfo>;
   readonly focusedCol: number | null;
   readonly onWatchChannel: (channel: ItemRow, index: number) => void;
   readonly onToggleFavorite?: (channel: ItemRow) => void;
@@ -220,6 +232,7 @@ export const ChannelGridRow = memo(function ChannelGridRowInner(p: {
             isActive={item !== undefined && item.key === p.activeChannelKey}
             isFavorite={item !== undefined && (p.favoriteKeys?.has(item.key) ?? false)}
             focused={p.shared.isTv && p.focusedCol === colIdx}
+            sourceBadge={item ? (p.sourceBadges?.get(item.sourceId) ?? null) : null}
             onWatchChannel={p.onWatchChannel}
             {...(p.onToggleFavorite !== undefined ? { onToggleFavorite: p.onToggleFavorite } : {})}
           />

@@ -3,10 +3,19 @@ import type { THEME_PRESET_IDS } from '@elv/ui-kit';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 /** Navigable category sections inside {@link SettingsScreen}. */
-export type SettingsSection = 'appearance' | 'sources' | 'licenses';
+export type SettingsSection = 'appearance' | 'playback' | 'liveTv' | 'sources' | 'licenses';
+
+/** Preference sections navigated row-by-row directly via {@link useTvSettingsNavigation}. */
+export type PreferenceSettingsSection = 'appearance' | 'playback' | 'liveTv';
 
 /** Ordered Settings sidebar sections. */
-export const SETTINGS_SECTIONS: readonly SettingsSection[] = ['appearance', 'sources', 'licenses'];
+export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
+  'appearance',
+  'playback',
+  'liveTv',
+  'sources',
+  'licenses',
+];
 
 /** Focusable control identifiers inside the Appearance settings panel. */
 export type AppearanceFocusId =
@@ -19,7 +28,61 @@ export type AppearanceFocusId =
   | 'font-110'
   | 'font-120'
   | 'toggle-reduce-motion'
+  | 'artwork-cache-64'
+  | 'artwork-cache-128'
+  | 'artwork-cache-256'
+  | 'artwork-cache-clear'
   | 'reset-preferences';
+
+/** Focusable control identifiers inside the Playback settings panel. */
+export type PlaybackFocusId =
+  | 'audio-lang-auto'
+  | 'audio-lang-tr'
+  | 'audio-lang-en'
+  | 'audio-lang-de'
+  | 'audio-lang-fr'
+  | 'audio-lang-es'
+  | 'sub-lang-auto'
+  | 'sub-lang-tr'
+  | 'sub-lang-en'
+  | 'sub-lang-de'
+  | 'sub-lang-fr'
+  | 'sub-lang-es'
+  | 'sub-mode-auto'
+  | 'sub-mode-always'
+  | 'sub-mode-off'
+  | 'seek-step-5'
+  | 'seek-step-10'
+  | 'seek-step-15'
+  | 'seek-step-30'
+  | 'aspect-fit'
+  | 'aspect-fill'
+  | 'aspect-stretch'
+  | 'buffer-auto'
+  | 'buffer-balanced'
+  | 'buffer-large'
+  | 'toggle-auto-play-next'
+  | 'toggle-skip-back-subtitles';
+
+/** Focusable control identifiers inside the Live TV & Guide settings panel. */
+export type LiveTvFocusId =
+  | 'live-mode-favorites'
+  | 'live-mode-channels'
+  | 'live-mode-epg'
+  | 'epg-span-2'
+  | 'epg-span-3'
+  | 'epg-span-6'
+  | 'toggle-epg-genre-tints'
+  | 'toggle-epg-show-clock'
+  | 'guide-refresh-6'
+  | 'guide-refresh-12'
+  | 'guide-refresh-24'
+  | 'logo-backdrop-plate'
+  | 'logo-backdrop-invert'
+  | 'logo-backdrop-off'
+  | 'toggle-source-badges'
+  | 'toggle-two-step-preview'
+  | 'toggle-clean-titles';
 
 const NAV_LIST_ID = 'settings-nav';
 
@@ -29,13 +92,72 @@ const APPEARANCE_ROWS: readonly (readonly AppearanceFocusId[])[] = [
   ['theme-velvetViolet', 'theme-pitchEmerald', 'theme-highContrast'],
   ['font-90', 'font-100', 'font-110', 'font-120'],
   ['toggle-reduce-motion'],
+  ['artwork-cache-64', 'artwork-cache-128', 'artwork-cache-256'],
+  ['artwork-cache-clear'],
   ['reset-preferences'],
 ];
 
-const rowListId = (rowIndex: number): string => `appearance-row-${rowIndex}`;
+const PLAYBACK_ROWS: readonly (readonly PlaybackFocusId[])[] = [
+  [
+    'audio-lang-auto',
+    'audio-lang-tr',
+    'audio-lang-en',
+    'audio-lang-de',
+    'audio-lang-fr',
+    'audio-lang-es',
+  ],
+  ['sub-lang-auto', 'sub-lang-tr', 'sub-lang-en', 'sub-lang-de', 'sub-lang-fr', 'sub-lang-es'],
+  ['sub-mode-auto', 'sub-mode-always', 'sub-mode-off'],
+  ['seek-step-5', 'seek-step-10', 'seek-step-15', 'seek-step-30'],
+  ['aspect-fit', 'aspect-fill', 'aspect-stretch'],
+  ['buffer-auto', 'buffer-balanced', 'buffer-large'],
+  ['toggle-auto-play-next'],
+  ['toggle-skip-back-subtitles'],
+];
+
+const LIVE_TV_ROWS: readonly (readonly LiveTvFocusId[])[] = [
+  ['live-mode-favorites', 'live-mode-channels', 'live-mode-epg'],
+  ['epg-span-2', 'epg-span-3', 'epg-span-6'],
+  ['toggle-epg-genre-tints'],
+  ['toggle-epg-show-clock'],
+  ['guide-refresh-6', 'guide-refresh-12', 'guide-refresh-24'],
+  ['logo-backdrop-plate', 'logo-backdrop-invert', 'logo-backdrop-off'],
+  ['toggle-source-badges'],
+  ['toggle-two-step-preview'],
+  ['toggle-clean-titles'],
+];
+
+const PREFERENCE_SECTIONS: readonly PreferenceSettingsSection[] = [
+  'appearance',
+  'playback',
+  'liveTv',
+];
+
+const SECTION_ROWS: Readonly<Record<PreferenceSettingsSection, readonly (readonly string[])[]>> = {
+  appearance: APPEARANCE_ROWS,
+  playback: PLAYBACK_ROWS,
+  liveTv: LIVE_TV_ROWS,
+};
+
+/** Whether `section` uses generalized row-by-row preference D-pad traversal. */
+function isPreferenceSection(section: SettingsSection): section is PreferenceSettingsSection {
+  return section === 'appearance' || section === 'playback' || section === 'liveTv';
+}
+
+const rowListId = (section: PreferenceSettingsSection, rowIndex: number): string =>
+  `${section}-row-${rowIndex}`;
 
 function createSettingsFocusStore(initialSection: SettingsSection): FocusStore {
   const initialIdx = Math.max(0, SETTINGS_SECTIONS.indexOf(initialSection));
+  const sectionLists = PREFERENCE_SECTIONS.flatMap((sec) =>
+    SECTION_ROWS[sec].map((row, i) => ({
+      id: rowListId(sec, i),
+      count: row.length,
+      index: 0,
+      orientation: 'horizontal' as const,
+      pageSize: row.length,
+    })),
+  );
   return createFocusStore({
     id: 'settings-scope',
     lists: [
@@ -46,17 +168,19 @@ function createSettingsFocusStore(initialSection: SettingsSection): FocusStore {
         orientation: 'vertical',
         pageSize: SETTINGS_SECTIONS.length,
       },
-      ...APPEARANCE_ROWS.map((row, i) => ({
-        id: rowListId(i),
-        count: row.length,
-        index: 0,
-        orientation: 'horizontal' as const,
-        pageSize: row.length,
-      })),
+      ...sectionLists,
     ],
     active: NAV_LIST_ID,
   });
 }
+
+type SectionCoords = Readonly<Record<PreferenceSettingsSection, { row: number; col: number }>>;
+
+const INITIAL_COORDS: SectionCoords = {
+  appearance: { row: 0, col: 0 },
+  playback: { row: 0, col: 0 },
+  liveTv: { row: 0, col: 0 },
+};
 
 /** Options for {@link useTvSettingsNavigation}. */
 export interface UseTvSettingsNavigationOptions {
@@ -64,7 +188,9 @@ export interface UseTvSettingsNavigationOptions {
   readonly isActiveScope: boolean;
   readonly section: SettingsSection;
   readonly onSectionChange: (next: SettingsSection) => void;
-  readonly onActivateAppearanceControl: (id: AppearanceFocusId) => void;
+  readonly onActivateControl?: (section: PreferenceSettingsSection, controlId: string) => void;
+  /** Backwards-compatible Appearance-only activation callback. */
+  readonly onActivateAppearanceControl?: (id: AppearanceFocusId) => void;
   readonly onFocusTopNav?: () => void;
 }
 
@@ -73,6 +199,8 @@ export interface TvSettingsNavigationState {
   readonly pane: 'nav' | 'content';
   readonly ownsTvRemote: boolean;
   readonly focusedSection: SettingsSection | null;
+  readonly focusedControlId: string | null;
+  /** Backwards-compatible alias populated when `section === 'appearance'`. */
   readonly focusedAppearanceId: AppearanceFocusId | null;
   readonly handleTvKey: (event: KeyEvent) => boolean;
   readonly enterContentPane: () => void;
@@ -80,22 +208,22 @@ export interface TvSettingsNavigationState {
 }
 
 /**
- * Manages 10-foot TV D-pad focus across the Settings sidebar (`pane === 'nav'`), Appearance
- * control rows (`pane === 'content'` on `'appearance'`), and embedded Sources / Notices panes.
+ * Manages 10-foot TV D-pad focus across the Settings sidebar (`pane === 'nav'`), generalized
+ * preference rows (`appearance`, `playback`, `liveTv`), and embedded Sources / Notices panes.
  */
 export function useTvSettingsNavigation({
   isTv,
   isActiveScope,
   section,
   onSectionChange,
+  onActivateControl,
   onActivateAppearanceControl,
   onFocusTopNav,
 }: UseTvSettingsNavigationOptions): TvSettingsNavigationState {
   const [pane, setPane] = useState<'nav' | 'content'>(() =>
     isActiveScope && section === 'sources' ? 'content' : 'nav',
   );
-  const [appearanceRow, setAppearanceRow] = useState(0);
-  const [appearanceCol, setAppearanceCol] = useState(0);
+  const [coords, setCoords] = useState<SectionCoords>(INITIAL_COORDS);
 
   const storeRef = useRef<FocusStore | null>(null);
   if (storeRef.current === null) {
@@ -107,12 +235,14 @@ export function useTvSettingsNavigation({
   paneRef.current = pane;
   const sectionRef = useRef(section);
   sectionRef.current = section;
-  const rowRef = useRef(appearanceRow);
-  rowRef.current = appearanceRow;
+  const coordsRef = useRef(coords);
+  coordsRef.current = coords;
   const onSectionChangeRef = useRef(onSectionChange);
   onSectionChangeRef.current = onSectionChange;
-  const onActivateRef = useRef(onActivateAppearanceControl);
-  onActivateRef.current = onActivateAppearanceControl;
+  const onActivateControlRef = useRef(onActivateControl);
+  onActivateControlRef.current = onActivateControl;
+  const onActivateAppearanceRef = useRef(onActivateAppearanceControl);
+  onActivateAppearanceRef.current = onActivateAppearanceControl;
   const onFocusTopNavRef = useRef(onFocusTopNav);
   onFocusTopNavRef.current = onFocusTopNav;
 
@@ -132,12 +262,14 @@ export function useTvSettingsNavigation({
 
   const enterContentPane = useCallback(() => {
     setPane('content');
-    if (sectionRef.current === 'appearance') {
-      const targetRow = rowRef.current;
-      const listId = rowListId(targetRow);
+    const curSection = sectionRef.current;
+    if (isPreferenceSection(curSection)) {
+      const targetRow = coordsRef.current[curSection].row;
+      const listId = rowListId(curSection, targetRow);
       store.activate(listId);
       const found = findList(store.getState().scopes, listId);
-      setAppearanceCol(found?.list.index ?? 0);
+      const col = found?.list.index ?? 0;
+      setCoords((prev) => ({ ...prev, [curSection]: { row: targetRow, col } }));
     }
   }, [store]);
 
@@ -181,12 +313,14 @@ export function useTvSettingsNavigation({
         return event.key === 'up' || event.key === 'down';
       }
 
-      if (sectionRef.current !== 'appearance') {
+      const activeSection = sectionRef.current;
+      if (!isPreferenceSection(activeSection)) {
         return false;
       }
 
-      const currentRow = rowRef.current;
-      const activeListId = rowListId(currentRow);
+      const rows = SECTION_ROWS[activeSection];
+      const currentRow = coordsRef.current[activeSection].row;
+      const activeListId = rowListId(activeSection, currentRow);
       store.activate(activeListId);
 
       if ((event.kind === 'press' || event.kind === 'repeat') && event.key === 'up') {
@@ -196,32 +330,30 @@ export function useTvSettingsNavigation({
         }
         const nextRow = currentRow - 1;
         const currentList = findList(store.getState().scopes, activeListId)?.list;
-        const targetItems = APPEARANCE_ROWS[nextRow] ?? [];
+        const targetItems = rows[nextRow] ?? [];
         const nextCol = Math.min(currentList?.index ?? 0, Math.max(0, targetItems.length - 1));
-        const nextListId = rowListId(nextRow);
+        const nextListId = rowListId(activeSection, nextRow);
         store.focus(nextListId, nextCol);
-        setAppearanceRow(nextRow);
-        setAppearanceCol(nextCol);
+        setCoords((prev) => ({ ...prev, [activeSection]: { row: nextRow, col: nextCol } }));
         return true;
       }
 
       if ((event.kind === 'press' || event.kind === 'repeat') && event.key === 'down') {
-        if (currentRow >= APPEARANCE_ROWS.length - 1) return false;
+        if (currentRow >= rows.length - 1) return false;
         const nextRow = currentRow + 1;
         const currentList = findList(store.getState().scopes, activeListId)?.list;
-        const targetItems = APPEARANCE_ROWS[nextRow] ?? [];
+        const targetItems = rows[nextRow] ?? [];
         const nextCol = Math.min(currentList?.index ?? 0, Math.max(0, targetItems.length - 1));
-        const nextListId = rowListId(nextRow);
+        const nextListId = rowListId(activeSection, nextRow);
         store.focus(nextListId, nextCol);
-        setAppearanceRow(nextRow);
-        setAppearanceCol(nextCol);
+        setCoords((prev) => ({ ...prev, [activeSection]: { row: nextRow, col: nextCol } }));
         return true;
       }
 
       const intents = store.dispatch(event);
       const updated = findList(store.getState().scopes, activeListId)?.list;
       const col = updated?.index ?? 0;
-      setAppearanceCol(col);
+      setCoords((prev) => ({ ...prev, [activeSection]: { row: currentRow, col } }));
 
       for (const intent of intents) {
         if (intent.kind === 'back') {
@@ -233,8 +365,13 @@ export function useTvSettingsNavigation({
           return true;
         }
         if (intent.kind === 'select') {
-          const id = APPEARANCE_ROWS[currentRow]?.[col];
-          if (id) onActivateRef.current(id);
+          const id = rows[currentRow]?.[col];
+          if (id) {
+            onActivateControlRef.current?.(activeSection, id);
+            if (activeSection === 'appearance') {
+              onActivateAppearanceRef.current?.(id as AppearanceFocusId);
+            }
+          }
           return true;
         }
       }
@@ -243,17 +380,20 @@ export function useTvSettingsNavigation({
     [enterContentPane, returnToSidebar, store],
   );
 
-  const ownsTvRemote = isTv && isActiveScope && (pane === 'nav' || section === 'appearance');
+  const ownsTvRemote = isTv && isActiveScope && (pane === 'nav' || isPreferenceSection(section));
   const focusedSection = isTv && isActiveScope && pane === 'nav' ? section : null;
-  const focusedAppearanceId =
-    isTv && isActiveScope && pane === 'content' && section === 'appearance'
-      ? (APPEARANCE_ROWS[appearanceRow]?.[appearanceCol] ?? null)
+  const focusedControlId =
+    isTv && isActiveScope && pane === 'content' && isPreferenceSection(section)
+      ? (SECTION_ROWS[section][coords[section].row]?.[coords[section].col] ?? null)
       : null;
+  const focusedAppearanceId =
+    section === 'appearance' ? (focusedControlId as AppearanceFocusId | null) : null;
 
   return {
     pane,
     ownsTvRemote,
     focusedSection,
+    focusedControlId,
     focusedAppearanceId,
     handleTvKey,
     enterContentPane,

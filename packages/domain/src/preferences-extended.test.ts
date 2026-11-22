@@ -1,0 +1,357 @@
+import { describe, expect, it } from 'vitest';
+import {
+  type ArtworkCacheLimitMbPref,
+  createKvPreferencesStore,
+  createMemoryPreferencesStore,
+  DEFAULT_PREFERENCES,
+  type DefaultLiveModePref,
+  type DefaultResizeModePref,
+  type EpgTimeSpanHoursPref,
+  type GuideRefreshHoursPref,
+  type LogoBackdropModePref,
+  MAX_PREFERENCES_BYTES,
+  type PreferencesKvBackend,
+  type PreferencesSnapshot,
+  parsePreferences,
+  type SeekStepSecPref,
+  type SubtitleModePref,
+  serializePreferences,
+} from './index';
+
+describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
+  it('includes all 15 new preference defaults on DEFAULT_PREFERENCES', () => {
+    expect(DEFAULT_PREFERENCES.preferredAudioLang).toBe('');
+    expect(DEFAULT_PREFERENCES.preferredSubtitleLang).toBe('');
+    expect(DEFAULT_PREFERENCES.subtitleMode).toBe('auto');
+    expect(DEFAULT_PREFERENCES.seekStepSec).toBe(10);
+    expect(DEFAULT_PREFERENCES.defaultResizeMode).toBe('fit');
+    expect(DEFAULT_PREFERENCES.epgTimeSpanHours).toBe(3);
+    expect(DEFAULT_PREFERENCES.epgGenreTints).toBe(true);
+    expect(DEFAULT_PREFERENCES.epgShowClock).toBe(true);
+    expect(DEFAULT_PREFERENCES.defaultLiveMode).toBe('favorites');
+    expect(DEFAULT_PREFERENCES.guideRefreshHours).toBe(12);
+    expect(DEFAULT_PREFERENCES.logoBackdropMode).toBe('plate');
+    expect(DEFAULT_PREFERENCES.showSourceBadges).toBe(true);
+    expect(DEFAULT_PREFERENCES.liveOkTwoStepPreview).toBe(false);
+    expect(DEFAULT_PREFERENCES.cleanChannelTitles).toBe(false);
+    expect(DEFAULT_PREFERENCES.artworkCacheLimitMb).toBe(128);
+  });
+
+  it('parses all valid union and boolean values across the new preference fields', () => {
+    const subtitleModes: readonly SubtitleModePref[] = ['auto', 'always', 'off'];
+    for (const subtitleMode of subtitleModes) {
+      expect(parsePreferences(JSON.stringify({ version: 1, subtitleMode })).subtitleMode).toBe(
+        subtitleMode,
+      );
+    }
+
+    const seekSteps: readonly SeekStepSecPref[] = [5, 10, 15, 30];
+    for (const seekStepSec of seekSteps) {
+      expect(parsePreferences(JSON.stringify({ version: 1, seekStepSec })).seekStepSec).toBe(
+        seekStepSec,
+      );
+    }
+
+    const resizeModes: readonly DefaultResizeModePref[] = ['fit', 'fill', 'stretch'];
+    for (const defaultResizeMode of resizeModes) {
+      expect(
+        parsePreferences(JSON.stringify({ version: 1, defaultResizeMode })).defaultResizeMode,
+      ).toBe(defaultResizeMode);
+    }
+
+    const epgSpans: readonly EpgTimeSpanHoursPref[] = [2, 3, 6];
+    for (const epgTimeSpanHours of epgSpans) {
+      expect(
+        parsePreferences(JSON.stringify({ version: 1, epgTimeSpanHours })).epgTimeSpanHours,
+      ).toBe(epgTimeSpanHours);
+    }
+
+    const liveModes: readonly DefaultLiveModePref[] = ['favorites', 'channels', 'epg'];
+    for (const defaultLiveMode of liveModes) {
+      expect(
+        parsePreferences(JSON.stringify({ version: 1, defaultLiveMode })).defaultLiveMode,
+      ).toBe(defaultLiveMode);
+    }
+
+    const refreshHours: readonly GuideRefreshHoursPref[] = [6, 12, 24];
+    for (const guideRefreshHours of refreshHours) {
+      expect(
+        parsePreferences(JSON.stringify({ version: 1, guideRefreshHours })).guideRefreshHours,
+      ).toBe(guideRefreshHours);
+    }
+
+    const backdropModes: readonly LogoBackdropModePref[] = ['plate', 'invert', 'off'];
+    for (const logoBackdropMode of backdropModes) {
+      expect(
+        parsePreferences(JSON.stringify({ version: 1, logoBackdropMode })).logoBackdropMode,
+      ).toBe(logoBackdropMode);
+    }
+
+    const cacheLimits: readonly ArtworkCacheLimitMbPref[] = [64, 128, 256];
+    for (const artworkCacheLimitMb of cacheLimits) {
+      expect(
+        parsePreferences(JSON.stringify({ version: 1, artworkCacheLimitMb })).artworkCacheLimitMb,
+      ).toBe(artworkCacheLimitMb);
+    }
+
+    const booleans = parsePreferences(
+      JSON.stringify({
+        version: 1,
+        epgGenreTints: false,
+        epgShowClock: false,
+        showSourceBadges: false,
+        liveOkTwoStepPreview: true,
+        cleanChannelTitles: true,
+      }),
+    );
+    expect(booleans.epgGenreTints).toBe(false);
+    expect(booleans.epgShowClock).toBe(false);
+    expect(booleans.showSourceBadges).toBe(false);
+    expect(booleans.liveOkTwoStepPreview).toBe(true);
+    expect(booleans.cleanChannelTitles).toBe(true);
+  });
+
+  it('normalizes valid BCP-47/ISO language preferences and rejects malformed or oversized values', () => {
+    const validCases: ReadonlyArray<readonly [string, string]> = [
+      ['en', 'en'],
+      ['  TR-tr  ', 'tr-tr'],
+      ['eng', 'eng'],
+      ['zh-Hans', 'zh-hans'],
+      ['es-419', 'es-419'],
+      ['abc-12345678', 'abc-12345678'],
+      ['', ''],
+      ['   ', ''],
+    ];
+    for (const [input, expected] of validCases) {
+      const parsed = parsePreferences(
+        JSON.stringify({
+          version: 1,
+          preferredAudioLang: input,
+          preferredSubtitleLang: input,
+        }),
+      );
+      expect(parsed.preferredAudioLang).toBe(expected);
+      expect(parsed.preferredSubtitleLang).toBe(expected);
+    }
+
+    const invalidInputs: readonly unknown[] = [
+      'a',
+      'abcd',
+      'en_US',
+      'en-a',
+      'en-US-x-1',
+      'abc-123456789',
+      '123',
+      'en!',
+      42,
+      null,
+      true,
+      ['en'],
+    ];
+    for (const bad of invalidInputs) {
+      const parsed = parsePreferences(
+        JSON.stringify({
+          version: 1,
+          preferredAudioLang: bad,
+          preferredSubtitleLang: bad,
+        }),
+      );
+      expect(parsed.preferredAudioLang).toBe('');
+      expect(parsed.preferredSubtitleLang).toBe('');
+    }
+  });
+
+  it('falls back per field to defaults when extended fields have invalid types or values', () => {
+    const parsed = parsePreferences(
+      JSON.stringify({
+        version: 1,
+        preferredAudioLang: 'invalid_lang',
+        preferredSubtitleLang: 99,
+        subtitleMode: 'forced',
+        seekStepSec: 20,
+        defaultResizeMode: 'zoom',
+        epgTimeSpanHours: 4,
+        epgGenreTints: 'yes',
+        epgShowClock: 0,
+        defaultLiveMode: 'watch',
+        guideRefreshHours: 1,
+        logoBackdropMode: 'glow',
+        showSourceBadges: 'true',
+        liveOkTwoStepPreview: 1,
+        cleanChannelTitles: 'false',
+        artworkCacheLimitMb: 512,
+      }),
+    );
+    expect(parsed).toEqual(DEFAULT_PREFERENCES);
+  });
+
+  it('serializes a fully populated snapshot well under 1500 bytes (and MAX_PREFERENCES_BYTES) and round-trips cleanly', () => {
+    const full: PreferencesSnapshot = {
+      version: 1,
+      themePreset: 'obsidianCrimson',
+      locale: 'tr-TR',
+      fontScale: 1.15,
+      reduceMotion: true,
+      bufferPreset: 'large',
+      useTextureView: true,
+      autoSubtitlesOnSkipBack: true,
+      autoPlayNextEpisode: false,
+      playerVolume: 85,
+      preferredAudioLang: 'abc-12345678',
+      preferredSubtitleLang: 'zh-hant',
+      subtitleMode: 'always',
+      seekStepSec: 30,
+      defaultResizeMode: 'stretch',
+      epgTimeSpanHours: 6,
+      epgGenreTints: false,
+      epgShowClock: false,
+      defaultLiveMode: 'channels',
+      guideRefreshHours: 24,
+      logoBackdropMode: 'invert',
+      showSourceBadges: false,
+      liveOkTwoStepPreview: true,
+      cleanChannelTitles: true,
+      artworkCacheLimitMb: 256,
+    };
+
+    const encoded = serializePreferences(full);
+    expect(encoded.ok).toBe(true);
+    if (encoded.ok) {
+      const byteLen = new TextEncoder().encode(encoded.value).byteLength;
+      expect(byteLen).toBeLessThan(1500);
+      expect(byteLen).toBeLessThan(MAX_PREFERENCES_BYTES);
+      expect(parsePreferences(encoded.value)).toEqual(full);
+    }
+  });
+
+  it('normalizes invalid extended values during direct serializePreferences calls', () => {
+    const encoded = serializePreferences({
+      ...DEFAULT_PREFERENCES,
+      preferredAudioLang: '  EN-us ',
+      preferredSubtitleLang: 'not_valid',
+      subtitleMode: 'bogus' as unknown as SubtitleModePref,
+      seekStepSec: 99 as unknown as SeekStepSecPref,
+      defaultResizeMode: 'bogus' as unknown as DefaultResizeModePref,
+      epgTimeSpanHours: 10 as unknown as EpgTimeSpanHoursPref,
+      defaultLiveMode: 'bogus' as unknown as DefaultLiveModePref,
+      guideRefreshHours: 48 as unknown as GuideRefreshHoursPref,
+      logoBackdropMode: 'bogus' as unknown as LogoBackdropModePref,
+      artworkCacheLimitMb: 1024 as unknown as ArtworkCacheLimitMbPref,
+    });
+    expect(encoded.ok).toBe(true);
+    if (encoded.ok) {
+      expect(parsePreferences(encoded.value)).toEqual({
+        ...DEFAULT_PREFERENCES,
+        preferredAudioLang: 'en-us',
+        preferredSubtitleLang: '',
+      });
+    }
+  });
+
+  it('updates, clears, validates, persists, and resets all extended fields through PreferencesStore', async () => {
+    const map = new Map<string, string>();
+    const backend: PreferencesKvBackend = {
+      get: (k) => map.get(k),
+      set: (k, v) => {
+        map.set(k, v);
+      },
+      delete: (k) => {
+        map.delete(k);
+      },
+    };
+    const kvStore = createKvPreferencesStore(backend);
+
+    const updated = await kvStore.update({
+      preferredAudioLang: '  TR-tr ',
+      preferredSubtitleLang: 'EN',
+      subtitleMode: 'always',
+      seekStepSec: 15,
+      defaultResizeMode: 'fill',
+      epgTimeSpanHours: 6,
+      epgGenreTints: false,
+      epgShowClock: false,
+      defaultLiveMode: 'epg',
+      guideRefreshHours: 24,
+      logoBackdropMode: 'off',
+      showSourceBadges: false,
+      liveOkTwoStepPreview: true,
+      cleanChannelTitles: true,
+      artworkCacheLimitMb: 64,
+    });
+    expect(updated.ok).toBe(true);
+    if (updated.ok) {
+      expect(updated.value).toEqual({
+        ...DEFAULT_PREFERENCES,
+        preferredAudioLang: 'tr-tr',
+        preferredSubtitleLang: 'en',
+        subtitleMode: 'always',
+        seekStepSec: 15,
+        defaultResizeMode: 'fill',
+        epgTimeSpanHours: 6,
+        epgGenreTints: false,
+        epgShowClock: false,
+        defaultLiveMode: 'epg',
+        guideRefreshHours: 24,
+        logoBackdropMode: 'off',
+        showSourceBadges: false,
+        liveOkTwoStepPreview: true,
+        cleanChannelTitles: true,
+        artworkCacheLimitMb: 64,
+      });
+    }
+
+    // Clearing language preferences back to automatic ('') works
+    const cleared = await kvStore.update({
+      preferredAudioLang: '',
+      preferredSubtitleLang: '   ',
+    });
+    expect(cleared.ok).toBe(true);
+    if (cleared.ok) {
+      expect(cleared.value.preferredAudioLang).toBe('');
+      expect(cleared.value.preferredSubtitleLang).toBe('');
+    }
+
+    // Invalid union patches preserve previously committed valid values
+    const ignoredInvalid = await kvStore.update({
+      subtitleMode: 'invalid' as unknown as SubtitleModePref,
+      seekStepSec: 99 as unknown as SeekStepSecPref,
+      defaultResizeMode: 'crop' as unknown as DefaultResizeModePref,
+      epgTimeSpanHours: 5 as unknown as EpgTimeSpanHoursPref,
+      defaultLiveMode: 'invalid' as unknown as DefaultLiveModePref,
+      guideRefreshHours: 3 as unknown as GuideRefreshHoursPref,
+      logoBackdropMode: 'shadow' as unknown as LogoBackdropModePref,
+      artworkCacheLimitMb: 32 as unknown as ArtworkCacheLimitMbPref,
+    });
+    expect(ignoredInvalid.ok).toBe(true);
+    if (ignoredInvalid.ok) {
+      expect(ignoredInvalid.value.subtitleMode).toBe('always');
+      expect(ignoredInvalid.value.seekStepSec).toBe(15);
+      expect(ignoredInvalid.value.defaultResizeMode).toBe('fill');
+      expect(ignoredInvalid.value.epgTimeSpanHours).toBe(6);
+      expect(ignoredInvalid.value.defaultLiveMode).toBe('epg');
+      expect(ignoredInvalid.value.guideRefreshHours).toBe(24);
+      expect(ignoredInvalid.value.logoBackdropMode).toBe('off');
+      expect(ignoredInvalid.value.artworkCacheLimitMb).toBe(64);
+    }
+
+    // Reloading from backend preserves persisted values
+    const reloaded = await createKvPreferencesStore(backend).load();
+    expect(reloaded.seekStepSec).toBe(15);
+    expect(reloaded.artworkCacheLimitMb).toBe(64);
+    expect(reloaded.liveOkTwoStepPreview).toBe(true);
+
+    // Memory store seeds and resets extended fields cleanly
+    const memStore = createMemoryPreferencesStore({
+      seekStepSec: 5,
+      logoBackdropMode: 'invert',
+      cleanChannelTitles: true,
+    });
+    const memLoaded = await memStore.load();
+    expect(memLoaded.seekStepSec).toBe(5);
+    expect(memLoaded.logoBackdropMode).toBe('invert');
+    expect(memLoaded.cleanChannelTitles).toBe(true);
+
+    const reset = await memStore.reset();
+    expect(reset).toEqual({ ok: true, value: DEFAULT_PREFERENCES });
+  });
+});

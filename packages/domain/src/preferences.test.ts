@@ -37,6 +37,21 @@ describe('preferences codec', () => {
       autoSubtitlesOnSkipBack: false,
       autoPlayNextEpisode: true,
       playerVolume: 100,
+      preferredAudioLang: '',
+      preferredSubtitleLang: '',
+      subtitleMode: 'auto',
+      seekStepSec: 10,
+      defaultResizeMode: 'fit',
+      epgTimeSpanHours: 3,
+      epgGenreTints: true,
+      epgShowClock: true,
+      defaultLiveMode: 'favorites',
+      guideRefreshHours: 12,
+      logoBackdropMode: 'plate',
+      showSourceBadges: true,
+      liveOkTwoStepPreview: false,
+      cleanChannelTitles: false,
+      artworkCacheLimitMb: 128,
     });
   });
 
@@ -66,16 +81,11 @@ describe('preferences codec', () => {
       }),
     );
     expect(valid).toEqual({
-      version: 1,
+      ...DEFAULT_PREFERENCES,
       themePreset: 'midnightSlate',
       locale: 'tr-TR',
       fontScale: 1.1,
       reduceMotion: true,
-      bufferPreset: 'auto',
-      useTextureView: false,
-      autoSubtitlesOnSkipBack: false,
-      autoPlayNextEpisode: true,
-      playerVolume: 100,
     });
 
     const withPlaybackFields = parsePreferences(
@@ -93,7 +103,7 @@ describe('preferences codec', () => {
       }),
     );
     expect(withPlaybackFields).toEqual({
-      version: 1,
+      ...DEFAULT_PREFERENCES,
       themePreset: 'midnightSlate',
       locale: 'en',
       fontScale: 1,
@@ -134,16 +144,13 @@ describe('preferences codec', () => {
       }),
     );
     expect(nonFinite).toEqual({
-      version: 1,
+      ...DEFAULT_PREFERENCES,
       themePreset: 'a'.repeat(64),
       locale: 'en',
       fontScale: 1,
       reduceMotion: true,
       bufferPreset: 'balanced',
       useTextureView: false,
-      autoSubtitlesOnSkipBack: false,
-      autoPlayNextEpisode: true,
-      playerVolume: 100,
     });
   });
 
@@ -158,16 +165,8 @@ describe('preferences codec', () => {
       }),
     );
     expect(parsed).toEqual({
-      version: 1,
-      themePreset: 'obsidianCrimson',
-      locale: 'system',
+      ...DEFAULT_PREFERENCES,
       fontScale: 0.9,
-      reduceMotion: false,
-      bufferPreset: 'auto',
-      useTextureView: false,
-      autoSubtitlesOnSkipBack: false,
-      autoPlayNextEpisode: true,
-      playerVolume: 100,
     });
 
     const high = parsePreferences(
@@ -243,7 +242,7 @@ describe('preferences codec', () => {
 
   it('serializes valid snapshots and rejects payloads over 4096 UTF-8 bytes', () => {
     const encoded = serializePreferences({
-      version: 1,
+      ...DEFAULT_PREFERENCES,
       themePreset: 'obsidianCrimson',
       locale: 'tr',
       fontScale: 1.05,
@@ -258,7 +257,7 @@ describe('preferences codec', () => {
     if (encoded.ok) {
       expect(encoded.value.length).toBeLessThan(2048);
       expect(parsePreferences(encoded.value)).toEqual({
-        version: 1,
+        ...DEFAULT_PREFERENCES,
         themePreset: 'obsidianCrimson',
         locale: 'tr',
         fontScale: 1.05,
@@ -314,16 +313,9 @@ describe('createMemoryPreferencesStore', () => {
   it('loads defaults or clamped initial values, updates, resets, and notifies subscribers', async () => {
     const store = createMemoryPreferencesStore({ fontScale: 5, locale: 'tr' });
     expect(await store.load()).toEqual({
-      version: 1,
-      themePreset: 'obsidianCrimson',
+      ...DEFAULT_PREFERENCES,
       locale: 'tr',
       fontScale: 1.2,
-      reduceMotion: false,
-      bufferPreset: 'auto',
-      useTextureView: false,
-      autoSubtitlesOnSkipBack: false,
-      autoPlayNextEpisode: true,
-      playerVolume: 100,
     });
 
     const seen: PreferencesSnapshot[] = [];
@@ -345,8 +337,7 @@ describe('createMemoryPreferencesStore', () => {
     expect(updated).toEqual({
       ok: true,
       value: {
-        version: 1,
-        themePreset: 'obsidianCrimson',
+        ...DEFAULT_PREFERENCES,
         locale: 'tr',
         fontScale: 0.9,
         reduceMotion: true,
@@ -473,7 +464,7 @@ describe('createKvPreferencesStore', () => {
 
     expect(r1.ok && r2.ok && r3.ok && r4.ok && r5.ok).toBe(true);
     const expected: PreferencesSnapshot = {
-      version: 1,
+      ...DEFAULT_PREFERENCES,
       themePreset: 'midnightSlate',
       locale: 'tr',
       fontScale: 1.15,
@@ -622,16 +613,11 @@ describe('createKvPreferencesStore', () => {
     // Optimistic notifications fired immediately, but backend.set has NOT been called yet
     expect(seen).toHaveLength(3);
     expect(seen[2]).toEqual({
-      version: 1,
+      ...DEFAULT_PREFERENCES,
       themePreset: 'midnightCobalt',
       locale: 'tr',
       fontScale: 1.15,
       reduceMotion: true,
-      bufferPreset: 'auto',
-      useTextureView: false,
-      autoSubtitlesOnSkipBack: false,
-      autoPlayNextEpisode: true,
-      playerVolume: 100,
     });
     expect(backend.set).not.toHaveBeenCalled();
     expect(timers.size).toBe(1);
@@ -644,16 +630,11 @@ describe('createKvPreferencesStore', () => {
       expect(r).toEqual({
         ok: true,
         value: {
-          version: 1,
+          ...DEFAULT_PREFERENCES,
           themePreset: 'midnightCobalt',
           locale: 'tr',
           fontScale: 1.15,
           reduceMotion: true,
-          bufferPreset: 'auto',
-          useTextureView: false,
-          autoSubtitlesOnSkipBack: false,
-          autoPlayNextEpisode: true,
-          playerVolume: 100,
         },
       });
     }

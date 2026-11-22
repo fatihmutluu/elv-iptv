@@ -19,6 +19,7 @@ import {
 import type { PlayTarget } from '../ports/play-target';
 import { type DetailTarget, useCatalogUiCache, useRouteActive } from '../shared';
 import { buildHeroActionIds, HomeHero, type HomeHeroActionId } from './HomeHero';
+import { HOME_HERO_AUTO_ROTATE_MS, useHomeHeroAutoRotate } from './HomeHeroBackdrop';
 import { buildHomeRailSpecs, HomeRail } from './HomeRail';
 import { computeHomeLayout, HomeEmptyState, HomeSkeleton } from './HomeSkeleton';
 import {
@@ -49,6 +50,8 @@ export interface HomeScreenProps {
   readonly onFocusTopNav?: () => void;
   readonly isActiveScope?: boolean;
 }
+
+export { HOME_HERO_AUTO_ROTATE_MS };
 
 const SCROLL_FROST_THRESHOLD = 24;
 const RAIL_ORDER: readonly HomeRailKind[] = ['continue', 'live', 'mylist', 'movies', 'series'];
@@ -89,8 +92,10 @@ export function HomeScreen({
   const { isTv, isTouch, isPortrait, padX, railGap, heroTopClearance } = layout;
 
   const uiCache = useCatalogUiCache();
+  const routeActive = useRouteActive();
   const data = useHomeData({ catalog, sources, refreshToken, userStateVersion });
   const [heroIndex, setHeroIndexState] = useState(() => uiCache?.getHome()?.heroIndex ?? 0);
+  const [heroHovered, setHeroHovered] = useState(false);
   const setHeroIndex = useCallback(
     (idx: number) => {
       setHeroIndexState(idx);
@@ -133,8 +138,8 @@ export function HomeScreen({
 
   const activeSlide = heroSlides[Math.min(heroIndex, Math.max(0, heroSlides.length - 1))];
   const heroActionIds = useMemo(
-    () => buildHeroActionIds(activeSlide, heroSlides.length),
-    [activeSlide, heroSlides.length],
+    () => buildHeroActionIds(activeSlide, heroSlides.length, onOpenDetail !== undefined),
+    [activeSlide, heroSlides.length, onOpenDetail],
   );
 
   const hasContent =
@@ -214,6 +219,13 @@ export function HomeScreen({
   );
 
   const { toggleMyList, toggleWatched } = data;
+  const handleOpenHeroDetails = useCallback(
+    (slide: HomeHeroSlide) => {
+      const detail = buildHomeDetailTarget(slide);
+      if (detail && onOpenDetail) onOpenDetail(detail);
+    },
+    [onOpenDetail],
+  );
   const handleToggleMyList = useCallback(
     (s: HomeHeroSlide) => void toggleMyList({ ...s, logo: s.posterUri ?? s.backdropUri }),
     [toggleMyList],
@@ -233,6 +245,7 @@ export function HomeScreen({
       if (rowId === 'hero' && activeSlide) {
         const action = heroActionIds[colIndex];
         if (action === 'play') openVodOrSeries(activeSlide);
+        else if (action === 'details') handleOpenHeroDetails(activeSlide);
         else if (action === 'mylist') handleToggleMyList(activeSlide);
         else if (action === 'watched') handleToggleWatched(activeSlide);
         else if (action?.startsWith('dot-')) {
@@ -254,6 +267,7 @@ export function HomeScreen({
       activateEntry,
       activatePosterEntry,
       activeSlide,
+      handleOpenHeroDetails,
       handleToggleMyList,
       handleToggleWatched,
       heroActionIds,
@@ -310,6 +324,22 @@ export function HomeScreen({
     tvNav.focusedRowId === 'hero' && tvNav.focusedCol !== null
       ? (heroActionIds[tvNav.focusedCol] ?? null)
       : null;
+  const advanceHeroSlide = useCallback(() => {
+    setHeroIndexState((prev) => {
+      const next = (prev + 1) % Math.max(1, heroSlides.length);
+      uiCache?.setHomeHeroIndex(next);
+      return next;
+    });
+  }, [heroSlides.length, uiCache]);
+
+  useHomeHeroAutoRotate({
+    slideCount: heroSlides.length,
+    reduceMotion: theme.reduceMotion,
+    routeActive,
+    hovered: heroHovered,
+    tvFocused: isTv && isActiveScope && tvNav.focusedRowId === 'hero',
+    onAdvance: advanceHeroSlide,
+  });
 
   useEffect(() => {
     scrolledRef.current = false;
@@ -359,8 +389,10 @@ export function HomeScreen({
             onSelectIndex={setHeroIndex}
             inMyList={activeSlide !== undefined && data.favoriteKeys.has(activeSlide.itemKey)}
             onPlaySlide={openVodOrSeries}
+            {...(onOpenDetail !== undefined ? { onOpenDetails: handleOpenHeroDetails } : {})}
             onToggleMyList={handleToggleMyList}
             onToggleWatched={handleToggleWatched}
+            onHoverChange={setHeroHovered}
             isTv={isTv}
             isTouch={isTouch}
             isPortrait={isPortrait}

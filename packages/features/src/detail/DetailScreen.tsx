@@ -1,4 +1,5 @@
 import type { CatalogService, EpisodeRow, ItemRow } from '@elv/data';
+import type { KeyEvent } from '@elv/focus-core';
 import { TvFocusAnchor, useI18n, useKeyInterpreter, useTheme, useViewport } from '@elv/ui-kit';
 import {
   type ComponentRef,
@@ -25,6 +26,7 @@ import {
 import { DetailCastStrip } from './DetailCastStrip';
 import { DetailEpisodes } from './DetailEpisodes';
 import { DetailHero, type DetailHeroFocusSlot } from './DetailHero';
+import { DetailSynopsisSheet } from './DetailHeroExtras';
 import { DetailRelatedRail } from './DetailRelatedRail';
 import {
   buildDetailNavRows,
@@ -33,6 +35,7 @@ import {
   type DetailNavRowId,
 } from './detail-model';
 import { useDetailData } from './useDetailData';
+import { useDetailExtrasState } from './useDetailExtrasState';
 import { useEpisodeChunks } from './useEpisodeChunks';
 import { useTvDetailNavigation } from './useTvDetailNavigation';
 
@@ -42,9 +45,12 @@ export interface DetailScreenProps {
   readonly catalog: CatalogService;
   readonly refreshToken: number;
   readonly userStateVersion?: number;
+  readonly preferredAudioLang?: string;
+  readonly preferredSubtitleLang?: string;
   readonly onBack: () => void;
   readonly onPlay: (target: PlayTarget) => void;
   readonly onOpenDetail: (target: DetailTarget) => void;
+  readonly onSearchPerson?: (name: string) => void;
   readonly onScrollTopChange?: (scrolled: boolean) => void;
   readonly onFocusTopNav?: () => void;
   readonly isActiveScope?: boolean;
@@ -72,9 +78,12 @@ export function DetailScreen({
   catalog,
   refreshToken,
   userStateVersion = 0,
+  preferredAudioLang,
+  preferredSubtitleLang,
   onBack,
   onPlay,
   onOpenDetail,
+  onSearchPerson,
   onScrollTopChange,
   onFocusTopNav,
   isActiveScope = true,
@@ -87,6 +96,12 @@ export function DetailScreen({
     computeCatalogLayout(viewport, theme);
 
   const data = useDetailData({ target, catalog, refreshToken, userStateVersion });
+  const extras = useDetailExtrasState({
+    target,
+    plot: data.plot,
+    ...(preferredAudioLang !== undefined ? { preferredAudioLang } : {}),
+    ...(preferredSubtitleLang !== undefined ? { preferredSubtitleLang } : {}),
+  });
   const scrollViewRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const scrolledRef = useRef(false);
   const episodesYRef = useRef<number | null>(null);
@@ -118,8 +133,19 @@ export function DetailScreen({
         episodes: data.episodes,
         episodeProgressByKey: data.episodeProgressByKey,
         t: i18n.t,
+        ...(extras.audioLang ? { preferredAudioLang: extras.audioLang } : {}),
+        ...(extras.subtitleLang ? { preferredSubtitleLang: extras.subtitleLang } : {}),
       }),
-    [data.episodeProgressByKey, data.episodes, data.movieProgress, data.title, i18n.t, target],
+    [
+      data.episodeProgressByKey,
+      data.episodes,
+      data.movieProgress,
+      data.title,
+      extras.audioLang,
+      extras.subtitleLang,
+      i18n.t,
+      target,
+    ],
   );
 
   const handlePlayPrimary = useCallback(() => {
@@ -141,10 +167,21 @@ export function DetailScreen({
           seriesTitle: data.title,
           t: i18n.t,
           nextEpisodes: data.episodes.slice(index + 1),
+          ...(extras.audioLang ? { preferredAudioLang: extras.audioLang } : {}),
+          ...(extras.subtitleLang ? { preferredSubtitleLang: extras.subtitleLang } : {}),
         }),
       );
     },
-    [data.episodeProgressByKey, data.episodes, data.title, i18n.t, onPlay, target],
+    [
+      data.episodeProgressByKey,
+      data.episodes,
+      data.title,
+      extras.audioLang,
+      extras.subtitleLang,
+      i18n.t,
+      onPlay,
+      target,
+    ],
   );
 
   const handlePressRelated = useCallback(
@@ -175,6 +212,8 @@ export function DetailScreen({
     () =>
       buildDetailNavRows({
         heroActionCount,
+        heroPlayCount: extras.heroPlaySlots.length,
+        castCount: extras.castPeople.length,
         seasonsCount: target.kind === 'series' ? seasons.length : 0,
         episodeChunksCount:
           target.kind === 'series' && !data.episodesLoading ? episodeChunks.length : 0,
@@ -188,6 +227,8 @@ export function DetailScreen({
       data.related.length,
       data.seasonsState.kind,
       episodeChunks.length,
+      extras.castPeople.length,
+      extras.heroPlaySlots.length,
       heroActionCount,
       seasons.length,
       target.kind,
@@ -203,7 +244,19 @@ export function DetailScreen({
         else if (colIndex === 1 && target.kind === 'movie') void data.toggleWatched();
         return;
       }
-      if (rowId === 'hero-play') return handlePlayPrimary();
+      if (rowId === 'hero-play') {
+        const slot = extras.heroPlaySlots[colIndex];
+        if (slot === 'play') handlePlayPrimary();
+        else if (slot === 'preplay-audio') extras.cycleAudio();
+        else if (slot === 'preplay-subtitles') extras.cycleSubtitles();
+        else if (slot === 'synopsis') extras.toggleSynopsis();
+        return;
+      }
+      if (rowId === 'cast') {
+        const person = extras.castPeople[colIndex];
+        if (person) onSearchPerson?.(person);
+        return;
+      }
       if (rowId === 'seasons') {
         const picked = seasons[colIndex];
         if (picked) data.selectSeason(picked.season);
@@ -232,11 +285,13 @@ export function DetailScreen({
       data.toggleWatched,
       episodeChunks,
       episodeIndexOffset,
+      extras,
       handlePlayPrimary,
       handlePressEpisode,
       handlePressRelated,
       handleSelectChunk,
       onBack,
+      onSearchPerson,
       seasons,
       target.kind,
       visibleEpisodes,
@@ -300,11 +355,16 @@ export function DetailScreen({
     relatedYRef.current = y;
   }, []);
 
+  const handleTvKeyWithSheet = useCallback(
+    (event: KeyEvent): boolean => extras.interceptTvKey(event, tvNav.handleTvKey),
+    [extras, tvNav.handleTvKey],
+  );
+
   const focusedHeroSlot: DetailHeroFocusSlot | null =
     tvNav.focusedRowId === 'back'
       ? 'back'
       : tvNav.focusedRowId === 'hero-play'
-        ? 'play'
+        ? (extras.heroPlaySlots[tvNav.focusedCol ?? 0] ?? 'play')
         : tvNav.focusedRowId === 'hero-actions'
           ? tvNav.focusedCol === 1 && target.kind === 'movie'
             ? 'watched'
@@ -313,7 +373,7 @@ export function DetailScreen({
 
   return (
     <View testID="detail-screen" style={[styles.root, { backgroundColor: theme.colors.bgCanvas }]}>
-      {isTv && isActiveScope ? <DetailTvKeyBridge onEvent={tvNav.handleTvKey} /> : null}
+      {isTv && isActiveScope ? <DetailTvKeyBridge onEvent={handleTvKeyWithSheet} /> : null}
 
       <ScrollView
         ref={scrollViewRef}
@@ -334,10 +394,17 @@ export function DetailScreen({
           rating={data.rating}
           plot={data.plot}
           {...(target.genres !== undefined ? { genres: target.genres } : {})}
+          {...(target.technicalMeta !== undefined ? { technicalMeta: target.technicalMeta } : {})}
           seasonsCount={seasons.length}
           inMyList={data.inMyList}
           watched={data.movieProgress?.watched === true}
           primaryAction={primaryAction}
+          audioLang={extras.audioLang}
+          subtitleLang={extras.subtitleLang}
+          onCycleAudio={extras.cycleAudio}
+          onCycleSubtitles={extras.cycleSubtitles}
+          synopsisExpanded={extras.synopsisExpanded}
+          onToggleSynopsis={extras.toggleSynopsis}
           onBack={onBack}
           onPlayPrimary={handlePlayPrimary}
           onToggleMyList={handleToggleMyList}
@@ -349,8 +416,15 @@ export function DetailScreen({
           focusedSlot={focusedHeroSlot}
         />
 
-        {target.cast && target.cast.length > 0 ? (
-          <DetailCastStrip cast={target.cast} padX={padX} isTv={isTv} />
+        {extras.castPeople.length > 0 ? (
+          <DetailCastStrip
+            cast={target.cast ?? []}
+            {...(target.director !== undefined ? { director: target.director } : {})}
+            padX={padX}
+            isTv={isTv}
+            focusedIndex={tvNav.focusedRowId === 'cast' ? tvNav.focusedCol : null}
+            {...(onSearchPerson !== undefined ? { onSearchPerson } : {})}
+          />
         ) : null}
 
         {target.kind === 'series' ? (
@@ -392,6 +466,14 @@ export function DetailScreen({
           onLayoutY={recordRelatedY}
         />
       </ScrollView>
+
+      <DetailSynopsisSheet
+        visible={extras.synopsisExpanded && extras.canExpandSynopsis}
+        title={data.title}
+        synopsis={extras.trimmedPlot}
+        isTv={isTv}
+        onDismiss={extras.dismissSynopsis}
+      />
     </View>
   );
 }

@@ -1,5 +1,24 @@
 export { AdaptiveSheet, type AdaptiveSheetProps } from './AdaptiveSheet';
-export { ArtworkImage, type ArtworkImageProps, DEFAULT_MAX_DECODE_PX } from './ArtworkImage';
+export {
+  ArtworkImage,
+  type ArtworkImageProps,
+  DEFAULT_MAX_DECODE_PX,
+  type LogoBackdropMode,
+} from './ArtworkImage';
+export {
+  ARTWORK_CACHE_MAX_MB,
+  ARTWORK_CACHE_MIN_MB,
+  type ArtworkCacheAdapter,
+  type ArtworkCacheIndex,
+  type ArtworkCacheIndexEntry,
+  type ArtworkCacheIndexOptions,
+  type ArtworkCacheStats,
+  createArtworkCacheIndex,
+  createLoadedUriCache,
+  DEFAULT_ARTWORK_CACHE_MB,
+  defaultLoadedArtworkUris,
+  type LoadedUriCache,
+} from './artwork-cache';
 export { CtaButton, type CtaButtonProps, type CtaButtonVariant } from './CtaButton';
 export {
   classifyImageError,

@@ -394,7 +394,13 @@ export async function loadSeriesEpisodes(
     });
     if (stored === 'no-source') return err(elvError('storage', 'source-not-found'));
     if (stored === 'no-series') return err(elvError('source-format', 'unknown-series'));
-    notify(opts, { phase: 'episodes', done: entries.length, total: entries.length });
+    notify(opts, {
+      phase: 'episodes',
+      done: entries.length,
+      total: entries.length,
+      fraction: 1,
+      percent: 100,
+    });
     await deps.scheduler.yieldNow();
     return ok(entries.length);
   } catch (e) {

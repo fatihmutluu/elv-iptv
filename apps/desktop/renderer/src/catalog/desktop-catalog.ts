@@ -79,7 +79,11 @@ export function createDesktopCatalogFromBridge(
         ? Promise.resolve(err(elvError('network', 'aborted')))
         : bridge.importGuide(id),
     categories: (sourceId, kind) => bridge.categories(sourceId, kind),
-    items: (categoryId, offset, limit) => bridge.items(categoryId, offset, limit),
+    items: (categoryId, offset, limit, opts) => bridge.items(categoryId, offset, limit, opts),
+    allSourcesItems: (kind, offset, limit, sourceIds, opts) =>
+      bridge.allSourcesItems
+        ? bridge.allSourcesItems(kind, offset, limit, sourceIds, opts)
+        : Promise.resolve([]),
     itemDetail: (itemKey) => bridge.itemDetail(itemKey),
     search: (query, opts) => bridge.search(sanitizeDisplayText(query).slice(0, 256), opts),
     nowNext: (channelKeys, nowMs) => bridge.nowNext(channelKeys, nowMs),

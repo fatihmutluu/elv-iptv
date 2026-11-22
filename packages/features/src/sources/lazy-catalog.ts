@@ -60,7 +60,10 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
       }),
     listSources: async () => (await open()).listSources(),
     categories: async (sourceId, kind) => (await open()).categories(sourceId, kind),
-    items: async (categoryId, offset, limit) => (await open()).items(categoryId, offset, limit),
+    items: async (categoryId, offset, limit, opts) =>
+      (await open()).items(categoryId, offset, limit, opts),
+    allSourcesItems: async (kind, offset, limit, sourceIds, opts) =>
+      (await open()).allSourcesItems?.(kind, offset, limit, sourceIds, opts) ?? [],
     itemDetail: async (itemKey) => {
       const svc = await open();
       return svc.itemDetail ? svc.itemDetail(itemKey) : null;

@@ -1,4 +1,5 @@
 import type { ItemRow } from '@elv/data';
+import type { LogoBackdropModePref } from '@elv/domain';
 import {
   ArtworkImage,
   SkeletonBox,
@@ -11,6 +12,8 @@ import {
 import { memo, type ReactElement, useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { formatLiveTitle } from './live-model';
+import { SourceBadgePill } from './SourceBadgePill';
+import { formatChannelDisplayName, type SourceBadgeInfo } from './source-badge';
 
 function zapRowStyle(
   theme: Theme,
@@ -47,6 +50,9 @@ export const ZapChannelRow = memo(function ZapChannelRowInner(p: {
   readonly isTv: boolean;
   readonly isTouch: boolean;
   readonly focused: boolean;
+  readonly logoBackdropMode?: LogoBackdropModePref;
+  readonly sourceBadge?: SourceBadgeInfo | null;
+  readonly cleanChannelTitles?: boolean;
   readonly onSelectChannel: (channel: ItemRow, index: number) => void;
 }): ReactElement {
   const theme = useTheme();
@@ -68,11 +74,13 @@ export const ZapChannelRow = memo(function ZapChannelRowInner(p: {
     );
   }
 
+  const displayName = formatChannelDisplayName(p.item.name, p.cleanChannelTitles ?? false);
+
   return (
     <Pressable
       testID={`live-zap-row-${p.index}`}
       accessibilityRole="button"
-      accessibilityLabel={formatLiveTitle(p.item)}
+      accessibilityLabel={formatLiveTitle({ num: p.item.num, name: displayName })}
       accessibilityState={{ selected: p.isActive }}
       focusable={!p.isTv}
       onPress={handlePress}
@@ -85,10 +93,10 @@ export const ZapChannelRow = memo(function ZapChannelRowInner(p: {
     >
       <ArtworkImage
         uri={p.item.logo}
-        label={p.item.name}
+        label={displayName}
         maxDecodePx={96}
         resizeMode="contain"
-        logoBackdrop
+        logoBackdropMode={p.logoBackdropMode ?? 'plate'}
         borderRadius={theme.radius.button}
         style={styles.zapLogo}
       />
@@ -113,8 +121,9 @@ export const ZapChannelRow = memo(function ZapChannelRowInner(p: {
             numberOfLines={1}
             style={[theme.typography.title, styles.flex1, { color: theme.colors.textPrimary }]}
           >
-            {p.item.name}
+            {displayName}
           </Text>
+          <SourceBadgePill badge={p.sourceBadge} testID={`live-zap-source-badge-${p.index}`} />
         </View>
         <Text
           numberOfLines={1}

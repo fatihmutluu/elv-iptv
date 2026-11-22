@@ -85,6 +85,11 @@ export function CatalogDiscoveryScreen({
     (nextCount: number) => updateMemory({ visibleCategoryCount: nextCount }),
     [updateMemory],
   );
+  const sortBy = activeMemory.sortBy ?? 'default';
+  const handleToggleSort = useCallback(
+    () => updateMemory({ sortBy: sortBy === 'alpha' ? 'default' : 'alpha' }),
+    [sortBy, updateMemory],
+  );
 
   const discovery = useCatalogDiscovery({
     kind,
@@ -94,6 +99,7 @@ export function CatalogDiscoveryScreen({
     userStateVersion,
     selectedCategoryId: activeMemory.selectedCategoryId,
     visibleCategoryCount: activeMemory.visibleCategoryCount,
+    sortBy,
     onVisibleCategoryCountChange: handleVisibleCategoryCountChange,
     onClearStaleCategory: handleSelectAllCategories,
   });
@@ -298,6 +304,8 @@ export function CatalogDiscoveryScreen({
               layout={layout}
               backFocused={tvNav.focusedRowId === 'gridBack'}
               focusedGridPos={tvNav.focusedGridPos}
+              sortBy={sortBy}
+              onToggleSort={handleToggleSort}
               onBack={handleSelectAllCategories}
               onOpenDetail={onOpenDetail}
               onGridMetaChange={setGridMeta}
