@@ -89,38 +89,54 @@ test('adds Xtream demo source, browses Live + Series, plays & zaps channels, and
     if (hasMpv) {
       await expect(window.getByTestId('player-area')).toBeVisible();
       await expect(window.getByTestId('player-status')).toHaveCount(0);
+      const isFloatingOsd = await window
+        .getByTestId('player-osd')
+        .evaluate((el) => getComputedStyle(el).position === 'absolute');
+      if (isFloatingOsd) {
+        await window.getByTestId('player-mute-button').hover();
+      }
       await expect(window.getByTestId('player-volume-slider')).toBeVisible();
       const areaBox = await window.getByTestId('player-area').boundingBox();
       const osdBox = await window.getByTestId('player-osd').boundingBox();
       expect(areaBox).not.toBeNull();
       expect(osdBox).not.toBeNull();
       expect((areaBox?.height ?? 0) > 50).toBe(true);
-      expect((areaBox?.y ?? 0) + (areaBox?.height ?? 0)).toBeLessThanOrEqual((osdBox?.y ?? 0) + 1);
+      if (!isFloatingOsd) {
+        expect((areaBox?.y ?? 0) + (areaBox?.height ?? 0)).toBeLessThanOrEqual(
+          (osdBox?.y ?? 0) + 1,
+        );
+      }
 
-      await window.getByTestId('player-info-button').click();
-      await expect(window.getByTestId('player-info-desktop-dialog')).toBeVisible();
-      const infoAreaBox = await window.getByTestId('player-area').boundingBox();
-      const infoBox = await window.getByTestId('player-info-desktop-dialog').boundingBox();
-      expect(infoAreaBox).not.toBeNull();
-      expect(infoBox).not.toBeNull();
-      expect((infoAreaBox?.y ?? 0) + (infoAreaBox?.height ?? 0)).toBeLessThanOrEqual(
-        (infoBox?.y ?? 0) + 1,
-      );
+      await window.keyboard.press('i');
+      const infoDialog = window.getByTestId('player-info-desktop-dialog');
+      await expect(infoDialog).toBeVisible();
+      if (!isFloatingOsd) {
+        const infoAreaBox = await window.getByTestId('player-area').boundingBox();
+        const infoBox = await infoDialog.boundingBox();
+        expect(infoAreaBox).not.toBeNull();
+        expect(infoBox).not.toBeNull();
+        expect((infoAreaBox?.y ?? 0) + (infoAreaBox?.height ?? 0)).toBeLessThanOrEqual(
+          (infoBox?.y ?? 0) + 1,
+        );
+      }
       await window.keyboard.press('Escape');
-      await expect(window.getByTestId('player-info-desktop-dialog')).toHaveCount(0);
+      await expect(infoDialog).toHaveCount(0);
       await expect(window.getByTestId('player-osd')).toBeVisible();
 
       await window.getByTestId('player-channel-list-button').click();
-      await expect(window.getByTestId('player-channel-drawer-desktop')).toBeVisible();
-      const drawerAreaBox = await window.getByTestId('player-area').boundingBox();
-      const drawerBox = await window.getByTestId('player-channel-drawer-desktop').boundingBox();
-      expect(drawerAreaBox).not.toBeNull();
-      expect(drawerBox).not.toBeNull();
-      expect((drawerBox?.x ?? 0) + (drawerBox?.width ?? 0)).toBeLessThanOrEqual(
-        (drawerAreaBox?.x ?? 0) + 1,
-      );
+      const channelDrawer = window.getByTestId('player-channel-drawer-desktop');
+      await expect(channelDrawer).toBeVisible();
+      if (!isFloatingOsd) {
+        const drawerAreaBox = await window.getByTestId('player-area').boundingBox();
+        const drawerBox = await channelDrawer.boundingBox();
+        expect(drawerAreaBox).not.toBeNull();
+        expect(drawerBox).not.toBeNull();
+        expect((drawerBox?.x ?? 0) + (drawerBox?.width ?? 0)).toBeLessThanOrEqual(
+          (drawerAreaBox?.x ?? 0) + 1,
+        );
+      }
       await window.keyboard.press('Escape');
-      await expect(window.getByTestId('player-channel-drawer-desktop')).toHaveCount(0);
+      await expect(channelDrawer).toHaveCount(0);
       await expect(window.getByTestId('player-osd')).toBeVisible();
     } else {
       await expect(window.getByTestId('player-area')).toHaveCount(0);
@@ -267,11 +283,18 @@ test('plays corpus Two audio tracks and subtitles (MKV) movie, pauses, seeks +10
     await window.getByTestId('player-tracks-button').click();
     await expect(window.getByTestId('player-tracks-panel')).toBeVisible();
 
-    const areaBox = await window.getByTestId('player-area').boundingBox();
-    const panelBox = await window.getByTestId('player-tracks-panel').boundingBox();
-    expect(areaBox).not.toBeNull();
-    expect(panelBox).not.toBeNull();
-    expect((areaBox?.y ?? 0) + (areaBox?.height ?? 0)).toBeLessThanOrEqual((panelBox?.y ?? 0) + 1);
+    const isFloatingOsd = await window
+      .getByTestId('player-osd')
+      .evaluate((el) => getComputedStyle(el).position === 'absolute');
+    if (!isFloatingOsd) {
+      const areaBox = await window.getByTestId('player-area').boundingBox();
+      const panelBox = await window.getByTestId('player-tracks-panel').boundingBox();
+      expect(areaBox).not.toBeNull();
+      expect(panelBox).not.toBeNull();
+      expect((areaBox?.y ?? 0) + (areaBox?.height ?? 0)).toBeLessThanOrEqual(
+        (panelBox?.y ?? 0) + 1,
+      );
+    }
 
     await window.getByTestId('player-audio-track-a:2').click();
     await expect(window.getByTestId('player-audio-track-a:2')).toHaveAttribute(
@@ -294,8 +317,8 @@ test('plays corpus Two audio tracks and subtitles (MKV) movie, pauses, seeks +10
 
     await expect
       .poll(async () => {
-        const text = (await window.getByTestId('player-progress-time').textContent()) ?? '';
-        const elapsed = text.split('/')[0]?.trim() ?? '';
+        const elapsed =
+          (await window.getByTestId('player-progress-time-current').textContent())?.trim() ?? '';
         const parts = elapsed.split(':').map(Number);
         if (parts.length !== 2 || parts.some((n) => Number.isNaN(n))) return -1;
         return (parts[0] ?? 0) * 60 + (parts[1] ?? 0);

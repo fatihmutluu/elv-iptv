@@ -232,7 +232,7 @@ export function PlayerOsdBottomBar(
                 tvFocused={isFocused('seekForward')}
               />
             </>
-          ) : service !== null ? (
+          ) : !isVod && (service !== null || p.canZap) ? (
             <>
               {p.canZap ? (
                 <OsdButton
@@ -246,22 +246,24 @@ export function PlayerOsdBottomBar(
                   isTv={isTv}
                 />
               ) : null}
-              <OsdButton
-                testID="player-play-pause"
-                variant="glass-primary"
-                circular
-                size={isTv ? 54 : 48}
-                iconSize={isTv ? 24 : 20}
-                loading={p.isBuffering === true}
-                icon={p.isPausedOrEnded ? 'play' : 'pause'}
-                accessibilityLabel={
-                  p.isPausedOrEnded ? i18n.t('player.play') : i18n.t('player.pause')
-                }
-                {...(isDesktop ? { keyShortcuts: PLAYER_KEY_SHORTCUTS.playPause } : {})}
-                onPress={p.onTogglePlayPause}
-                isTv={isTv}
-                tvFocused={isFocused('playPause')}
-              />
+              {service !== null ? (
+                <OsdButton
+                  testID="player-play-pause"
+                  variant="glass-primary"
+                  circular
+                  size={isTv ? 54 : 48}
+                  iconSize={isTv ? 24 : 20}
+                  loading={p.isBuffering === true}
+                  icon={p.isPausedOrEnded ? 'play' : 'pause'}
+                  accessibilityLabel={
+                    p.isPausedOrEnded ? i18n.t('player.play') : i18n.t('player.pause')
+                  }
+                  {...(isDesktop ? { keyShortcuts: PLAYER_KEY_SHORTCUTS.playPause } : {})}
+                  onPress={p.onTogglePlayPause}
+                  isTv={isTv}
+                  tvFocused={isFocused('playPause')}
+                />
+              ) : null}
               {p.canZap ? (
                 <OsdButton
                   testID="player-next"
