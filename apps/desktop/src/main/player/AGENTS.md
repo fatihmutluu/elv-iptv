@@ -12,6 +12,13 @@ over the JSON IPC client (`mpv/`) and a `VideoPresenter` (`presenter/`). Zero `e
 - `power-blocker.ts`: reference-counted `prevent-display-sleep` guard wired in `ipc.ts`/`main.ts` to `'playing'`,
   released after a 30 s buffering-stall grace timeout (re-acquired on `'playing'`) and on `paused`/`ended`/`error`/`stop`/`release`/crash.
 - `factory.ts`, `ipc.ts`, `runtime-path.ts`: Electron composition, fenced `WebContents` IPC, and bundled mpv lookup.
+  On macOS, `runtime-path.ts` exposes optional `canvasExecutable` (`ELV IPTV Player.app/Contents/MacOS/elv-mpv`) and
+  `ioSurfaceAddon` (`elv-iosurface.node`) when both exist; `factory.ts` defaults macOS to `'canvas'` with
+  `renderContext: true` when present and falls back cleanly to `'own-window'` (standalone `mpv`) when absent or overridden.
+- `presenter/canvas.ts`, `presenter/iosurface.ts`, `presenter/choose.ts`, `presenter/create.ts`: out-of-process in-canvas
+  shared-texture presenter (`#95`, default on Windows and macOS): uses an exclusive Windows named pipe (`ntHandle`) on
+  `win32` or a `0o700`-dir/`0o600` Unix domain socket + cached `process.dlopen` `elv-iosurface.node` (`IOSurfaceLookup` /
+  `CFRelease` in `finally`) on `darwin`, sending `I`/`A` acks and cleaning up the socket dir on dispose.
 - `mpv/live-session.ts` & `mpv/session-constants.ts`: per-process mpv event wiring, entry binding, `Deriver` + `AudioHotplug` + `ReadaheadController`, and `stop-then-load` / clean-exit handling.
 - `mpv/audio-ramp.ts` & `mpv/readahead.ts`: cancellable 7-step / 175 ms play/pause volume ramp with echo suppression;
   adaptive 3-tier (`fast` 2s / `normal` 8s / `aggressive` 20s) `demuxer-readahead-secs` controller + URL-free SHA-256 host+path 500-entry LRU store.

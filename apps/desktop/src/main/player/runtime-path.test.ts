@@ -55,6 +55,87 @@ describe('mpvRuntimePaths', () => {
     ).toEqual({ executable: devExe, inputConf: join('/app', 'resources', 'mpv-input.conf') });
   });
 
+  it('exposes macOS canvasExecutable and ioSurfaceAddon only when both are present', () => {
+    const packagedExe = join('/res', 'mpv', 'ELV IPTV Player.app', 'Contents', 'MacOS', 'mpv');
+    const packagedCanvasExe = join(
+      '/res',
+      'mpv',
+      'ELV IPTV Player.app',
+      'Contents',
+      'MacOS',
+      'elv-mpv',
+    );
+    const packagedAddon = join('/res', 'mpv', 'elv-iosurface.node');
+
+    expect(
+      mpvRuntimePaths(
+        {
+          isPackaged: true,
+          resourcesPath: '/res',
+          appPath: '/app',
+          platform: 'darwin',
+          arch: 'arm64',
+        },
+        present(packagedExe, packagedCanvasExe, packagedAddon),
+      ),
+    ).toEqual({
+      executable: packagedExe,
+      inputConf: join('/res', 'mpv-input.conf'),
+      canvasExecutable: packagedCanvasExe,
+      ioSurfaceAddon: packagedAddon,
+    });
+
+    const devDir = join('/app', 'resources', 'mpv', 'darwin-arm64');
+    const devExe = join(devDir, 'ELV IPTV Player.app', 'Contents', 'MacOS', 'mpv');
+    const devCanvasExe = join(devDir, 'ELV IPTV Player.app', 'Contents', 'MacOS', 'elv-mpv');
+    const devAddon = join(devDir, 'elv-iosurface.node');
+
+    expect(
+      mpvRuntimePaths(
+        {
+          isPackaged: false,
+          resourcesPath: '/res',
+          appPath: '/app',
+          platform: 'darwin',
+          arch: 'arm64',
+        },
+        present(devExe, devCanvasExe, devAddon),
+      ),
+    ).toEqual({
+      executable: devExe,
+      inputConf: join('/app', 'resources', 'mpv-input.conf'),
+      canvasExecutable: devCanvasExe,
+      ioSurfaceAddon: devAddon,
+    });
+
+    // When only one of elv-mpv or elv-iosurface.node exists, omit both
+    expect(
+      mpvRuntimePaths(
+        {
+          isPackaged: true,
+          resourcesPath: '/res',
+          appPath: '/app',
+          platform: 'darwin',
+          arch: 'arm64',
+        },
+        present(packagedExe, packagedCanvasExe),
+      ),
+    ).toEqual({ executable: packagedExe, inputConf: join('/res', 'mpv-input.conf') });
+
+    expect(
+      mpvRuntimePaths(
+        {
+          isPackaged: true,
+          resourcesPath: '/res',
+          appPath: '/app',
+          platform: 'darwin',
+          arch: 'arm64',
+        },
+        present(packagedExe, packagedAddon),
+      ),
+    ).toEqual({ executable: packagedExe, inputConf: join('/res', 'mpv-input.conf') });
+  });
+
   it('finds the development runtime under resources/mpv/<platform>-<arch>', () => {
     const exe = join('/app', 'resources', 'mpv', 'win32-x64', 'elv-mpv.exe');
     const paths = mpvRuntimePaths(

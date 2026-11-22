@@ -113,14 +113,29 @@ async function buildStamped(dir: string, hash: string | null, deps: FetchDeps): 
   if (hash !== null) await deps.writeText(`${dir}/elv-mpv.stamp`, `${hash}\n`);
 }
 
-/** A current runtime keeps its launcher only while the stamp matches the launcher sources and the exe exists. */
-async function refreshLauncher(dir: string, key: string, deps: FetchDeps): Promise<void> {
+function launcherOutputs(dir: string, platform: string): string[] {
+  if (platform === 'win32') return [`${dir}/elv-mpv.exe`];
+  if (platform === 'darwin') {
+    return [`${dir}/ELV IPTV Player.app/Contents/MacOS/elv-mpv`, `${dir}/elv-iosurface.node`];
+  }
+  return [];
+}
+
+/** A current runtime keeps its launcher only while the stamp matches the launcher sources and all outputs exist. */
+async function refreshLauncher(
+  dir: string,
+  key: string,
+  platform: string,
+  deps: FetchDeps,
+): Promise<void> {
   const hash = await deps.launcherSourceHash();
   if (hash === null) return;
+  const outputs = launcherOutputs(dir, platform);
   const stamp = `${dir}/elv-mpv.stamp`;
   const built = deps.exists(stamp) ? (await deps.readText(stamp)).trim() : null;
-  if (built === hash && deps.exists(`${dir}/elv-mpv.exe`)) return;
-  deps.log(`mpv: ${key} elv-mpv.exe is out of date with launcher sources; rebuilding`);
+  if (built === hash && outputs.every((out) => deps.exists(out))) return;
+  const label = platform === 'win32' ? 'elv-mpv.exe' : 'elv-mpv';
+  deps.log(`mpv: ${key} ${label} is out of date with launcher sources; rebuilding`);
   await buildStamped(dir, hash, deps);
 }
 
@@ -169,7 +184,7 @@ export async function fetchRuntime(opts: FetchOptions, deps: FetchDeps): Promise
   const dir = runtimeDir(opts.root, key);
   const installed = opts.force === true ? null : await readInstalled(dir, deps);
   if (installed?.sha256 === entry.sha256) {
-    await refreshLauncher(dir, key, deps);
+    await refreshLauncher(dir, key, opts.platform, deps);
     deps.log(summary(key, 'current', entry.mpv, installed.licence));
     return { status: 'current', dir, verdict: installed.licence };
   }

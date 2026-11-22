@@ -4,42 +4,37 @@
 
 - `apps/desktop/mpv-runtime.lock.json` pins one runtime per `<platform>-<arch>` (URL or CI artifact, SHA-256). Windows
   entries must come from `github.com/mpv-player/mpv/releases/download/`.
-- `fetch` downloads into `.cache/mpv/<key>/` (Windows: a temporary name, then renamed; macOS: `gh run download <runId>
-  -R <repo> -n <artifact>`, which needs `GH_TOKEN` with `actions: read` in CI), checks the SHA-256 (a mismatch deletes
-  the file; a stale cached file is replaced), then extracts with the system `tar` (`-xzf` for `.tar.gz`) into a fresh
-  staging folder. Every staged path must resolve inside it and none may be a symlink, else the staging folder is
-  removed and fetch fails. The licence gate then scans the binaries as strings (nothing runs) and the runtime moves to
-  gitignored `apps/desktop/resources/mpv/<key>/` with `BUILDINFO.json`.
-- Licence gate: FFmpeg configuration without `--enable-gpl` and `--enable-nonfree`, mpv options with `-Dgpl=false`.
-  It scans `*.dll`, `libavcodec*`, `libavformat*`, `libavutil*`, `libmpv*` dylibs and the `mpv` binary.
-- `verify` compares the installed `BUILDINFO.json` SHA-256 with the lock, then rescans; `verify --dir <folder>` only
-  applies the gate to a folder (the CI build before upload).
-- Windows pin update: download the new archive and its `.asc`, `gpg --verify` against the mpv release key, then change
-  URL and SHA-256 in a normal PR.
-- macOS runtime: `.github/workflows/mpv-runtime.yml` runs `tools/mpv-runtime/build-macos.sh` on `macos-26` from the
-  pins in `tools/mpv-runtime/versions.json` (exact versions, tarball SHA-256 or tag commit; pkg-config sees only its
-  own prefix). Output `ELV IPTV Player.app` (`Info.plist` from `tools/mpv-runtime/`; mpv in `MacOS/`, dylibs in
-  `Frameworks/` loaded from `@executable_path/../Frameworks/`, licences and `BUILDINFO.json` in `Resources/`), signed
-  ad hoc. The job summary prints the lock entry (run id, SHA-256); the artifact expires after 90 days: re-run the
-  workflow and update the lock in a normal PR. Source pin update: check the upstream signature or release digest.
-  `backports` replace one source file with its upstream version from a later commit (SHA-256 before and after);
-  drop each one when a release contains it.
-- The macOS build has no Vulkan, so `gpu`/`gpu-next` find no GPU context and mpv draws through `cocoa-cb`
-  (`vo=libmpv`, OpenGL).
-- Mac without `gh`: on a PC `gh run download <runId> -n mpv-runtime-darwin-arm64 -D .cache/mpv/darwin-arm64`, copy the
-  `.tar.gz` into the Mac checkout's `.cache/mpv/darwin-arm64/`, then `pnpm mpv fetch` there uses it.
-- Windows launcher: after the install, `launcher.ts` builds `apps/desktop/native/mpv-host/elv-mpv.c` into
-  `elv-mpv.exe` beside the DLL with MSVC (`vswhere` finds `vcvars64.bat`; `/W4 /WX`). libmpv is loaded at run time with
-  `LoadLibraryExW` from the exe folder, so the DLL stays replaceable (LGPL). Without Build Tools fetch fails clearly.
-- Launcher contract: `--name=value`, `--name` (yes) and `--no-name` (no) become libmpv options; `--elv-parent-pid=<pid>`
-  makes it quit mpv when that process exits; `--elv-canvas-pipe=\\.\pipe\<name>` (requiring `--elv-parent-pid`) runs
-  `vo=libmpv` via `MPV_RENDER_API_TYPE_D3D11` over triple-buffered shared `ID3D11Texture2D` handles (`elv-mpv-canvas.h`).
-  Exit codes: 2 bad argument or rejected option, 3 libmpv or symbol missing, 4 init failed, 5 parent pid not openable.
-- Hardening: before the caller's arguments the launcher sets `config=no`, `load-scripts=no`, `ytdl=no`,
-  `load-unsafe-playlists=no`, `input-default-bindings=no`, `input-vo-keyboard=no`, `osc=no` and `osd-level=0`
-  (the caller may override). A watchdog thread ends the process 3 s after quit or shutdown starts.
-  Manual check for the watchdog (no automated test can force a stuck shutdown): play from a socket that accepts and
-  never answers, kill the parent, and confirm `elv-mpv.exe` is gone within about 4 s.
-- The launcher is Per-Monitor V2 DPI aware (like mpv.exe), so `--geometry` and a `--wid` child use physical pixels.
-  `elv-mpv.stamp` holds the SHA-256 of all `.c`/`.h` sources in `apps/desktop/native/mpv-host/`; `fetch` rebuilds the
-  launcher of a current runtime when the stamp is missing or differs, or the exe is gone.
+- `fetch` downloads into `.cache/mpv/<key>/` (Windows: temp `.part` rename; macOS: `gh run download <runId> -R <repo>
+  -n <artifact>`, needing `GH_TOKEN` with `actions: read` in CI), checks SHA-256 (mismatches delete; stale cache files
+  are replaced), and extracts via system `tar` (`-xzf` for `.tar.gz`) into a fresh staging folder. Every path must stay
+  contained with zero symlinks, else staging is removed and fetch fails. After the licence gate scans binaries as
+  strings (nothing runs), the runtime moves to gitignored `apps/desktop/resources/mpv/<key>/` with `BUILDINFO.json`.
+- Licence gate: FFmpeg without `--enable-gpl`/`--enable-nonfree`, mpv with `-Dgpl=false`. Scans `*.dll`, `libavcodec*`,
+  `libavformat*`, `libavutil*`, `libmpv*` dylibs and `mpv`.
+- `verify` checks `BUILDINFO.json` SHA-256 against the lock and rescans; `verify --dir <folder>` gates a build folder.
+- Windows pin update: download archive + `.asc`, `gpg --verify` against the mpv release key, then update URL + SHA-256.
+- macOS runtime: `.github/workflows/mpv-runtime.yml` runs `tools/mpv-runtime/build-macos.sh` on `macos-26` from
+  `tools/mpv-runtime/versions.json` (pkg-config sees only its prefix). Output `ELV IPTV Player.app` (`Info.plist`,
+  `MacOS/mpv`, `Frameworks/*.dylib` via `@executable_path/../Frameworks/`, `Resources/include/mpv/`, licences,
+  `BUILDINFO.json`), signed ad hoc. Artifacts expire after 90 days: re-run workflow and update lock. `backports` replace
+  one source file (checked before/after SHA-256); drop once upstream releases it. No Vulkan -> mpv uses `vo=libmpv`/GL.
+- Mac without `gh`: download on PC (`gh run download <runId> -n mpv-runtime-darwin-arm64 -D .cache/mpv/darwin-arm64`),
+  copy `.tar.gz` to the Mac's `.cache/mpv/darwin-arm64/`, then run `pnpm mpv fetch`.
+- Windows launcher: `launcher.ts` compiles `apps/desktop/native/mpv-host/elv-mpv.c` to `elv-mpv.exe` with MSVC
+  (`vswhere` -> `vcvars64.bat`, `/W4 /WX`, Per-Monitor V2 DPI aware); loads `libmpv-2.dll` dynamically via
+  `LoadLibraryExW` (LGPL replaceable). Fails clearly without Build Tools.
+- macOS launcher & IOSurface addon: `launcher.ts` compiles `elv-mpv-macos.c` (with `elv-mpv-macos-canvas.h`) into
+  `ELV IPTV Player.app/Contents/MacOS/elv-mpv` and `elv-iosurface.c` into `elv-iosurface.node` against Node's bundled
+  `include/node/node_api.h` (`clang -O2 -mmacosx-version-min=13.0 -Wall -Wextra -Werror`), then ad-hoc signs both and
+  re-signs `ELV IPTV Player.app`. `elv-mpv` dynamically `dlopen`s `../Frameworks/libmpv.2.dylib` via
+  `_NSGetExecutablePath` (LGPL replaceable).
+- Launcher contract: `--name=value`, `--name` (`yes`), `--no-name` (`no`) map to libmpv options; `--elv-parent-pid`
+  quits mpv on parent exit (optional on macOS, defaults to `getppid()` via `kqueue` `EVFILT_PROC`/`NOTE_EXIT`);
+  `--elv-canvas-pipe` drives `vo=libmpv` triple-buffered shared textures (Win: `\\.\pipe\*` + D3D11; macOS: `/abs/sock`
+  + OpenGL/CGL 3.2 Core + `'BGRA'` `IOSurface` with `kCGLRendererGenericFloatID` fallback). Exit codes: 2 bad/rejected
+  arg, 3 libmpv/symbol missing, 4 init failed, 5 parent pid unopenable.
+- Hardening: sets `config=no`, `load-scripts=no`, `ytdl=no`, `load-unsafe-playlists=no`, `input-default-bindings=no`,
+  `input-vo-keyboard=no`, `osc=no`, `osd-level=0` before caller args. A 3 s watchdog terminates stuck shutdowns (manual
+  check: play a hung socket, kill parent, confirm gone within ~4 s).
+- `elv-mpv.stamp` stores the SHA-256 of `apps/desktop/native/mpv-host/*.{c,h}`; `fetch` rebuilds a current Windows or
+  macOS runtime when the stamp differs or any output (`elv-mpv.exe`, or `elv-mpv` + `elv-iosurface.node`) is missing.

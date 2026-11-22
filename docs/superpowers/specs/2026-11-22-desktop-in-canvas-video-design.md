@@ -39,8 +39,23 @@ This first delivery (Wave 4C-1) ships:
 - `tools/src/mpv/fetch.ts` scans `libmpv[^/]*\.dylib` alongside FFmpeg dylibs and `mpv` for LGPL verification.
 - `apps/desktop/electron-builder.yml` adds `mpv-input.conf` to `linux.extraResources`.
 
+### 2.5 macOS Zero-Copy `IOSurface` In-Canvas Compositing (Wave 4C-2)
+- **Out-of-process macOS host (`elv-mpv-macos.c` + `elv-mpv-macos-canvas.h`):**
+  - Compiled with `clang -O2 -Wall -Wextra -Werror` and ad-hoc signed (`codesign --force --sign -`) into `ELV IPTV Player.app/Contents/MacOS/elv-mpv` right next to `mpv`. Because it sits inside `Contents/MacOS/`, `dlopen` of sibling `../Frameworks/libmpv.2.dylib` resolves all `@executable_path/../Frameworks/*.dylib` dependencies natively with no `DYLD_LIBRARY_PATH` and full Hardened Runtime compatibility.
+  - Enforces the same hardened defaults as Windows `elv-mpv.exe`, accepts `--input-ipc-client=fd://3` (matching `spawnDarwinMpv` unchanged) and `--elv-canvas-pipe=<unix-socket-path>`, monitors parent exit via `kqueue` `EVFILT_PROC`/`NOTE_EXIT` plus Unix socket EOF, and arms a 3-second shutdown watchdog.
+  - Owns its entire OpenGL 3.2 Core (`CGL`) context and `mpv_render_context` (`MPV_RENDER_API_TYPE_OPENGL`) strictly on a single dedicated render thread (trying `kCGLPFAAccelerated` first and falling back to Apple's software GL renderer `kCGLRendererGenericFloatID` on headless VMs).
+  - Allocates a triple-buffered `'BGRA'` `IOSurface` ring bound via `CGLTexImageIOSurface2D` (`GL_TEXTURE_RECTANGLE`) to FBOs, renders with `MPV_RENDER_PARAM_FLIP_Y = 0` (empirically verified on Apple Silicon macOS 26 so IOSurface row 0 matches the top of the video frame), calls `glFlush()` + `glFinish()` before `mpv_render_context_report_swap`, and retains each emitted `IOSurfaceRef` in a bounded `PendingSurfaceTable` until Main acknowledges `I <gen> <slot>\n` (or EOF/shutdown), guaranteeing zero lookup races and zero leaked `IOSurface`s.
+- **Minimal ABI-stable N-API helper (`elv-iosurface.c` -> `elv-iosurface.node`):**
+  - ~75 lines of C compiled directly by `tools/src/mpv/launcher.ts` against Node's bundled `include/node/node_api.h` (`NAPI_VERSION 8`, zero npm dependencies, zero `node-gyp`), ad-hoc signed, and shipped under `resources/mpv/elv-iosurface.node` (outside `app.asar`, loaded via `process.dlopen`).
+  - Exports strictly `lookup(surfaceId: number): Buffer | null` (`IOSurfaceLookup` returning an 8-byte `IOSurfaceRef` pointer buffer) and `release(surfaceBuf: Buffer): void` (`CFRelease`).
+- **Main-process presenter & runtime selection:**
+  - `CanvasPresenter` creates a per-session Unix domain socket inside a `0o700` temp directory (kept well under the 104-byte `SUN_LEN` limit, with socket mode `0o600` and deterministic cleanup on dispose), looks up each `S` `IOSurfaceID` into a local `IOSurfaceRef`, passes `handle: { ioSurface }` to Electron's `sharedTexture.importSharedTexture`, releases the temporary `IOSurfaceRef` in `finally`, and sends `I <gen> <slot>\n`.
+  - `DARWIN_DEFAULT_PRESENTER = 'canvas'` makes in-canvas compositing the macOS default whenever `elv-mpv` and `elv-iosurface.node` are present, while preserving `ELV_DESKTOP_PRESENTER=own-window` (using standalone `Contents/MacOS/mpv`) as an explicit fallback.
+  - `apps/desktop/mpv-runtime.lock.json` pins the LGPL `darwin-arm64` runtime from `mpv-runtime.yml` run `44996151000` (`libmpv.2.dylib` + `include/mpv/`).
+
 ## 3. Verification
 
-- Strict TDD across `canvas.test.ts`, `choose.test.ts`, `create.test.ts`, `options.test.ts`, `factory.test.ts`, `ipc.test.ts`, `player-bridge.test.ts`, `desktop-engine.test.ts`, `PlayerCanvas.test.tsx`, `mpv-fetch.test.ts`, and `mpv-launcher.integration.test.ts`.
-- Rebuild `elv-mpv.exe` via MSVC `/O2 /W4 /WX` and verify real `--elv-canvas-pipe` frame rendering + Electron Playwright `e2e/player.spec.ts`.
+- Strict TDD across `canvas.test.ts`, `iosurface.test.ts`, `choose.test.ts`, `create.test.ts`, `runtime-path.test.ts`, `options.test.ts`, `factory.test.ts`, `ipc.test.ts`, `player-bridge.test.ts`, `desktop-engine.test.ts`, `PlayerCanvas.test.tsx`, `mpv-fetch.test.ts`, `mpv-launcher.test.ts`, and `mpv-launcher.integration.test.ts`.
+- Windows: MSVC `/O2 /W4 /WX` build + integration tests + Playwright `e2e/player.spec.ts` + `e2e/browse-play.spec.ts`.
+- macOS (`elv-mac` Apple Silicon + GitHub Actions `macos-26`): `clang -O2 -Wall -Wextra -Werror` build of `elv-mpv` and `elv-iosurface.node`, live `mpv-launcher.integration.test.ts` (including `fd://3` IPC, `S`/`F`/`R`/`I`/`A`, cross-process `IOSurfaceLookup`, and 20-resize zero-leak check), packaged `.dmg` build + `e2e/packaged.spec.ts` + `e2e/player.spec.ts`.
 - Full `pnpm check` (`11 passed, 0 failed`) and independent `Gemini 4 Neon (XHigh)` whole-branch code review (`VERDICT: PASS`).

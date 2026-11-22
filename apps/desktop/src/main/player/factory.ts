@@ -10,7 +10,7 @@ import {
   type ReadaheadTierStore,
 } from './mpv/readahead.ts';
 import { choosePresenter } from './presenter/choose.ts';
-import { createPresenter } from './presenter/create.ts';
+import { type CreatePresenterOptions, createPresenter } from './presenter/create.ts';
 import type { MpvRuntimePaths } from './runtime-path.ts';
 
 /** What `createEngineFor` needs besides the window. */
@@ -42,13 +42,26 @@ export async function createEngineFor(
   owner: BrowserWindow,
   deps: EngineFactoryDeps,
 ): Promise<MpvEngine> {
-  const kind = choosePresenter(deps.platform, deps.presenterOverride);
-  const presenter = createPresenter(
-    kind,
-    owner,
-    deps.platform,
-    deps.engineId === undefined ? undefined : { engineId: deps.engineId },
-  );
+  const requestedKind = choosePresenter(deps.platform, deps.presenterOverride);
+  const kind: PresenterKind =
+    deps.platform === 'darwin' &&
+    requestedKind === 'canvas' &&
+    (!deps.runtime.canvasExecutable || !deps.runtime.ioSurfaceAddon)
+      ? 'own-window'
+      : requestedKind;
+  const ioSurfaceAddon = kind === 'canvas' ? deps.runtime.ioSurfaceAddon : undefined;
+  const presenterOpts: CreatePresenterOptions | undefined =
+    deps.engineId !== undefined || ioSurfaceAddon !== undefined
+      ? {
+          ...(deps.engineId !== undefined ? { engineId: deps.engineId } : {}),
+          ...(ioSurfaceAddon !== undefined ? { ioSurfaceAddon } : {}),
+        }
+      : undefined;
+  const presenter = createPresenter(kind, owner, deps.platform, presenterOpts);
+  const executable =
+    kind === 'canvas' && deps.runtime.canvasExecutable
+      ? deps.runtime.canvasExecutable
+      : deps.runtime.executable;
   const renderContext = deps.renderContext ?? presenter.kind === 'canvas';
   const readaheadStore =
     deps.readaheadStore ??
@@ -60,7 +73,7 @@ export async function createEngineFor(
   const engine = createMpvEngine({
     spawn: (args, signal) =>
       spawnMpv({
-        executable: deps.runtime.executable,
+        executable,
         args,
         platform: deps.platform,
         parentPid: process.pid,

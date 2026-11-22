@@ -5,9 +5,13 @@ import { join } from 'node:path';
 export interface MpvRuntimePaths {
   executable: string;
   inputConf: string;
+  canvasExecutable?: string;
+  ioSurfaceAddon?: string;
 }
 
 const MAC_EXECUTABLE = ['ELV IPTV Player.app', 'Contents', 'MacOS', 'mpv'];
+const MAC_CANVAS_EXECUTABLE = ['ELV IPTV Player.app', 'Contents', 'MacOS', 'elv-mpv'];
+const MAC_IOSURFACE_ADDON = 'elv-iosurface.node';
 
 /**
  * Locates the bundled mpv runtime: packaged next to the app under `resources/` (outside the asar), in development
@@ -32,5 +36,13 @@ export function mpvRuntimePaths(
   else if (p.platform === 'darwin') executable = join(runtimeDir, ...MAC_EXECUTABLE);
   else return null;
   if (!exists(executable)) return null;
-  return { executable, inputConf: join(resources, 'mpv-input.conf') };
+  const inputConf = join(resources, 'mpv-input.conf');
+  if (p.platform === 'darwin') {
+    const macCanvasExe = join(runtimeDir, ...MAC_CANVAS_EXECUTABLE);
+    const macAddon = join(runtimeDir, MAC_IOSURFACE_ADDON);
+    if (exists(macCanvasExe) && exists(macAddon)) {
+      return { executable, inputConf, canvasExecutable: macCanvasExe, ioSurfaceAddon: macAddon };
+    }
+  }
+  return { executable, inputConf };
 }

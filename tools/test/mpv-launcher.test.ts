@@ -1,8 +1,16 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildLauncher, findVcvars, launcherBuildCommand } from '../src/mpv/launcher.ts';
+import {
+  buildLauncher,
+  buildMacLauncher,
+  findNodeIncludeDir,
+  findVcvars,
+  launcherBuildCommand,
+  macIoSurfaceAddonBuildCommand,
+  macLauncherBuildCommand,
+} from '../src/mpv/launcher.ts';
 import { hashLauncherSources } from '../src/mpv/real-deps.ts';
 
 describe('launcherBuildCommand', () => {
@@ -125,5 +133,168 @@ describe('hashLauncherSources', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('findNodeIncludeDir', () => {
+  it('resolves symlinked node execPath to sibling ../include/node containing node_api.h', () => {
+    const dir = findNodeIncludeDir('/opt/homebrew/bin/node', {
+      realpathSync: () => '/opt/homebrew/Cellar/node/24.0.0/bin/node',
+      existsSync: (p) => p === '/opt/homebrew/Cellar/node/24.0.0/include/node/node_api.h',
+    });
+    expect(dir).toBe('/opt/homebrew/Cellar/node/24.0.0/include/node');
+  });
+
+  it('finds real include/node/node_api.h relative to execPath on disk', () => {
+    const root = mkdtempSync(join(tmpdir(), 'elv-node-inc-'));
+    try {
+      const binDir = join(root, 'bin');
+      const incDir = join(root, 'include', 'node');
+      mkdirSync(binDir, { recursive: true });
+      mkdirSync(incDir, { recursive: true });
+      const nodeBin = join(binDir, 'node');
+      writeFileSync(nodeBin, '');
+      writeFileSync(join(incDir, 'node_api.h'), '/* header */\n');
+      expect(findNodeIncludeDir(nodeBin)).toBe(realpathSync(incDir));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('throws a clear error when node_api.h is missing', () => {
+    expect(() =>
+      findNodeIncludeDir('/usr/local/bin/node', {
+        realpathSync: () => {
+          throw new Error('ENOENT');
+        },
+        existsSync: () => false,
+      }),
+    ).toThrow(/node_api\.h/);
+  });
+});
+
+describe('macLauncherBuildCommand', () => {
+  it('builds a strict clang command with OpenGL, IOSurface and CoreFoundation frameworks', () => {
+    const { command, args } = macLauncherBuildCommand({
+      source: '/repo/apps/desktop/native/mpv-host/elv-mpv-macos.c',
+      includeDir: '/rt/ELV IPTV Player.app/Contents/Resources/include',
+      outExe: '/rt/ELV IPTV Player.app/Contents/MacOS/elv-mpv',
+    });
+    expect(command).toBe('clang');
+    expect(args).toEqual([
+      '-O2',
+      '-mmacosx-version-min=13.0',
+      '-Wall',
+      '-Wextra',
+      '-Werror',
+      '-I',
+      '/rt/ELV IPTV Player.app/Contents/Resources/include',
+      '/repo/apps/desktop/native/mpv-host/elv-mpv-macos.c',
+      '-o',
+      '/rt/ELV IPTV Player.app/Contents/MacOS/elv-mpv',
+      '-framework',
+      'OpenGL',
+      '-framework',
+      'IOSurface',
+      '-framework',
+      'CoreFoundation',
+    ]);
+  });
+});
+
+describe('macIoSurfaceAddonBuildCommand', () => {
+  it('builds a strict clang N-API shared library command with dynamic_lookup', () => {
+    const { command, args } = macIoSurfaceAddonBuildCommand({
+      source: '/repo/apps/desktop/native/mpv-host/elv-iosurface.c',
+      nodeIncludeDir: '/opt/node/include/node',
+      outNode: '/rt/elv-iosurface.node',
+    });
+    expect(command).toBe('clang');
+    expect(args).toEqual([
+      '-O2',
+      '-mmacosx-version-min=13.0',
+      '-Wall',
+      '-Wextra',
+      '-Werror',
+      '-shared',
+      '-undefined',
+      'dynamic_lookup',
+      '-I',
+      '/opt/node/include/node',
+      '/repo/apps/desktop/native/mpv-host/elv-iosurface.c',
+      '-o',
+      '/rt/elv-iosurface.node',
+      '-framework',
+      'IOSurface',
+      '-framework',
+      'CoreFoundation',
+    ]);
+  });
+});
+
+describe('buildMacLauncher', () => {
+  const paths = {
+    runtimeDir: '/rt/darwin-arm64',
+    launcherSource: '/repo/apps/desktop/native/mpv-host/elv-mpv-macos.c',
+    addonSource: '/repo/apps/desktop/native/mpv-host/elv-iosurface.c',
+    nodeIncludeDir: '/opt/node/include/node',
+  };
+
+  it('compiles elv-mpv and elv-iosurface.node then ad-hoc signs both and re-signs the app bundle', async () => {
+    const calls: { cmd: string; args: string[] }[] = [];
+    const run = async (cmd: string, args: string[]) => {
+      calls.push({ cmd, args });
+      return { code: 0, stdout: '' };
+    };
+    await buildMacLauncher(paths, run);
+    expect(calls).toHaveLength(5);
+    expect(calls[0]?.cmd).toBe('clang');
+    expect(calls[0]?.args).toContain('-mmacosx-version-min=13.0');
+    expect(calls[0]?.args).toContain('/rt/darwin-arm64/ELV IPTV Player.app/Contents/MacOS/elv-mpv');
+    expect(calls[0]?.args).toContain(
+      '/rt/darwin-arm64/ELV IPTV Player.app/Contents/Resources/include',
+    );
+    expect(calls[1]?.cmd).toBe('clang');
+    expect(calls[1]?.args).toContain('-mmacosx-version-min=13.0');
+    expect(calls[1]?.args).toContain('/rt/darwin-arm64/elv-iosurface.node');
+    expect(calls[1]?.args).toContain('/opt/node/include/node');
+    expect(calls[2]).toEqual({
+      cmd: 'codesign',
+      args: [
+        '--force',
+        '--sign',
+        '-',
+        '/rt/darwin-arm64/ELV IPTV Player.app/Contents/MacOS/elv-mpv',
+      ],
+    });
+    expect(calls[3]).toEqual({
+      cmd: 'codesign',
+      args: ['--force', '--sign', '-', '/rt/darwin-arm64/elv-iosurface.node'],
+    });
+    expect(calls[4]).toEqual({
+      cmd: 'codesign',
+      args: ['--force', '--sign', '-', '/rt/darwin-arm64/ELV IPTV Player.app'],
+    });
+  });
+
+  it('surfaces compiler exit code and output when a build step fails', async () => {
+    let step = 0;
+    const run = async () => {
+      step += 1;
+      if (step === 2) return { code: 1, stdout: 'elv-iosurface.c:12: error: undeclared' };
+      return { code: 0, stdout: '' };
+    };
+    await expect(buildMacLauncher(paths, run)).rejects.toThrow(
+      /building elv-iosurface\.node failed \(exit 1\)[\s\S]*undeclared/,
+    );
+  });
+
+  it('surfaces spawn failures cleanly', async () => {
+    const run = async () => {
+      throw new Error('spawn clang ENOENT');
+    };
+    await expect(buildMacLauncher(paths, run)).rejects.toThrow(
+      /building elv-mpv failed to start clang: spawn clang ENOENT/,
+    );
   });
 });

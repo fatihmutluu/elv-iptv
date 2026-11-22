@@ -374,6 +374,52 @@ describe('fetchRuntime on darwin-arm64', () => {
       /libmpv\.2\.dylib.*-Dgpl=false/,
     );
   });
+
+  it('stamps and refreshes darwin elv-mpv and elv-iosurface.node outputs', async () => {
+    const dir = '/repo/apps/desktop/resources/mpv/darwin-arm64';
+    const info = JSON.stringify({
+      sha256: HASH,
+      licence: { ffmpegConfig: 'c', mpvOptions: 'o', lua: true },
+    });
+    const macExe = `${dir}/${app}/MacOS/elv-mpv`;
+    const addon = `${dir}/elv-iosurface.node`;
+    const stamp = `${dir}/elv-mpv.stamp`;
+    const baseFiles = (extra: Record<string, string> = {}): Record<string, string> => ({
+      [`${dir}/BUILDINFO.json`]: info,
+      [macExe]: 'exe',
+      [addon]: 'node',
+      ...extra,
+    });
+
+    const fresh = fake({ archive: bundle(), launcherHash: 'mac1' });
+    await fetchRuntime(mac, fresh.deps);
+    expect(fresh.builds).toEqual([dir]);
+    expect(fresh.written.get(stamp)).toBe('mac1\n');
+
+    const ok = fake({ files: baseFiles({ [stamp]: 'mac2\n' }), launcherHash: 'mac2' });
+    await fetchRuntime(mac, ok.deps);
+    expect(ok.builds).toEqual([]);
+
+    const missingExe = baseFiles({ [stamp]: 'mac2\n' });
+    delete missingExe[macExe];
+    const missingAddon = baseFiles({ [stamp]: 'mac2\n' });
+    delete missingAddon[addon];
+    for (const files of [
+      baseFiles({}),
+      baseFiles({ [stamp]: 'old\n' }),
+      missingExe,
+      missingAddon,
+    ]) {
+      const f = fake({ files, launcherHash: 'mac2' });
+      const r = await fetchRuntime(mac, f.deps);
+      expect(r.status).toBe('current');
+      expect(f.builds).toEqual([dir]);
+      expect(f.written.get(stamp)).toBe('mac2\n');
+      expect(f.logs).toContain(
+        'mpv: darwin-arm64 elv-mpv is out of date with launcher sources; rebuilding',
+      );
+    }
+  });
 });
 
 describe('verifyDirectory', () => {
