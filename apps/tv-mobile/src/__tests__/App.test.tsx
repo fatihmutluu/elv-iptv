@@ -31,7 +31,14 @@ let lastMedia3SurfaceProps:
       useTextureView?: boolean;
     }
   | undefined;
-let lastAetherSurfaceProps: { osdVisible?: boolean } | undefined;
+const mockAppleSafeAreaListeners = new Set<
+  (insets: { top: number; right: number; bottom: number; left: number }) => void
+>();
+const mockAppleHardwareKeyListeners = new Set<(key: string) => void>();
+const mockGetAppleSafeAreaInsets = jest.fn(() => ({ top: 47, right: 0, bottom: 34, left: 0 }));
+const mockSetAppleEngineMuted = jest.fn();
+const mockSetAppleEngineVolume = jest.fn();
+let lastAetherSurfaceProps: { osdVisible?: boolean; resizeMode?: string } | undefined;
 jest.mock('../catalog', () => {
   const actual = jest.requireActual<typeof import('../catalog')>('../catalog');
   return {
@@ -56,8 +63,35 @@ jest.mock('@elv/engine-aether', () => {
     ...actual,
     createAetherEngine: () => mockAetherEngine,
     getAppleDeviceModel: () => null,
-    AetherSurface: ({ testID, osdVisible }: { testID?: string; osdVisible?: boolean }) => {
-      lastAetherSurfaceProps = { osdVisible };
+    getAppleSafeAreaInsets: () => mockGetAppleSafeAreaInsets(),
+    subscribeAppleSafeAreaInsets: (
+      listener: (insets: { top: number; right: number; bottom: number; left: number }) => void,
+    ) => {
+      mockAppleSafeAreaListeners.add(listener);
+      return () => {
+        mockAppleSafeAreaListeners.delete(listener);
+      };
+    },
+    subscribeAppleHardwareKeys: (listener: (key: string) => void) => {
+      mockAppleHardwareKeyListeners.add(listener);
+      return () => {
+        mockAppleHardwareKeyListeners.delete(listener);
+      };
+    },
+    setAppleEngineMuted: (engine: PlayerEngine, muted: boolean) =>
+      mockSetAppleEngineMuted(engine, muted),
+    setAppleEngineVolume: (engine: PlayerEngine, volume: number) =>
+      mockSetAppleEngineVolume(engine, volume),
+    AetherSurface: ({
+      testID,
+      osdVisible,
+      resizeMode,
+    }: {
+      testID?: string;
+      osdVisible?: boolean;
+      resizeMode?: string;
+    }) => {
+      lastAetherSurfaceProps = { osdVisible, resizeMode };
       const { View } = require('react-native');
       return <View testID={testID ?? 'aether-surface'} accessibilityLabel="aether-surface" />;
     },
@@ -181,6 +215,11 @@ afterEach(() => {
   mockStandbyListeners.clear();
   mockSafeAreaListeners.clear();
   mockPipListeners.clear();
+  mockAppleSafeAreaListeners.clear();
+  mockAppleHardwareKeyListeners.clear();
+  mockGetAppleSafeAreaInsets.mockClear();
+  mockSetAppleEngineMuted.mockReset();
+  mockSetAppleEngineVolume.mockReset();
 });
 
 describe('App', () => {
@@ -429,11 +468,26 @@ describe('App', () => {
 
     const surface = await screen.findByTestId('player-surface');
     expect(surface.props.accessibilityLabel).toBe('aether-surface');
-    expect(lastAetherSurfaceProps).toEqual({ osdVisible: true });
+    expect(lastAetherSurfaceProps).toEqual({ osdVisible: true, resizeMode: 'fit' });
     expect(loadedUrls).toEqual(['http://127.0.0.1:7878/live/demo/1001.ts']);
+    expect(mockAppleSafeAreaListeners.size).toBe(1);
+    expect(mockAppleHardwareKeyListeners.size).toBe(1);
+
+    // Hardware keyboard shortcuts on iPadOS (#415): F toggles resizeMode, M toggles mute.
+    await act(async () => {
+      for (const l of mockAppleHardwareKeyListeners) l('aspect');
+    });
+    expect(lastAetherSurfaceProps?.resizeMode).toBe('fill');
+
+    await act(async () => {
+      for (const l of mockAppleHardwareKeyListeners) l('mute');
+    });
+    expect(mockSetAppleEngineMuted).toHaveBeenCalledWith(mockAetherEngine, true);
 
     await view.unmount();
     expect(released).toBe(true);
+    expect(mockAppleSafeAreaListeners.size).toBe(0);
+    expect(mockAppleHardwareKeyListeners.size).toBe(0);
   });
 
   it('mounts AppShell inside AppProviders and hydrates persisted device preferences', async () => {

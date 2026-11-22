@@ -66,12 +66,17 @@ final class AetherSurfaceView: ExpoView {
   private let shutterView = ShutterOverlayView(frame: .zero)
   private let cleanupState = SurfaceCleanupState()
 
-  private weak var boundEngine: EngineObject?
+  weak var boundEngine: EngineObject?
   private var boundOwnerId: ObjectIdentifier?
   private var appInBackground = false
   private var wantsScreenOn = false
   private(set) var currentVideoGravity: AVLayerVideoGravity = .resizeAspect
+  private var currentResizeMode: SurfaceResizeMode = .fit
   private(set) var currentOsdVisible = true
+  #if os(iOS)
+  var keyboardMapper = HardwareKeyboardMapper()
+  private var playbackKeyCommands: [UIKeyCommand] = []
+  #endif
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -104,10 +109,63 @@ final class AetherSurfaceView: ExpoView {
     false
   }
 
+  #if os(iOS)
+  override var canBecomeFirstResponder: Bool {
+    MainActor.assumeIsolated {
+      window != nil
+        && !isAppInBackground
+        && boundEngine != nil
+        && !isAnyTextInputFirstResponder(in: window)
+    }
+  }
+
+  override var keyCommands: [UIKeyCommand]? {
+    MainActor.assumeIsolated {
+      guard window != nil,
+            !isAppInBackground,
+            boundEngine != nil,
+            !isAnyTextInputFirstResponder(in: window)
+      else {
+        return []
+      }
+      return playbackKeyCommands
+    }
+  }
+  #endif
+
+  override func safeAreaInsetsDidChange() {
+    super.safeAreaInsetsDidChange()
+    MainActor.assumeIsolated {
+      setNeedsLayout()
+      #if os(iOS)
+      reportCurrentSafeAreaInsets()
+      #endif
+    }
+  }
+
   override func layoutSubviews() {
     super.layoutSubviews()
-    playerView.frame = bounds
-    subtitleOverlayView.frame = bounds
+    #if os(iOS)
+    let applySafeAreaOnFit = true
+    #else
+    let applySafeAreaOnFit = false
+    #endif
+    let insets = SurfaceEdgeInsets(
+      top: Double(safeAreaInsets.top),
+      left: Double(safeAreaInsets.left),
+      bottom: Double(safeAreaInsets.bottom),
+      right: Double(safeAreaInsets.right)
+    )
+    let resolved = resolveSurfaceVideoRect(
+      boundsWidth: Double(bounds.width),
+      boundsHeight: Double(bounds.height),
+      safeAreaInsets: insets,
+      resizeMode: currentResizeMode,
+      applySafeAreaOnFit: applySafeAreaOnFit
+    )
+    let videoFrame = CGRect(x: resolved.x, y: resolved.y, width: resolved.width, height: resolved.height)
+    playerView.frame = videoFrame
+    subtitleOverlayView.frame = videoFrame
     shutterView.frame = bounds
   }
 
@@ -116,6 +174,12 @@ final class AetherSurfaceView: ExpoView {
     MainActor.assumeIsolated {
       refreshIdleTimer()
       notifySurfaceAvailability(isBackground: isAppInBackground)
+      #if os(iOS)
+      if window != nil {
+        reportCurrentSafeAreaInsets()
+      }
+      refreshKeyboardResponder()
+      #endif
     }
   }
 
@@ -171,21 +235,30 @@ final class AetherSurfaceView: ExpoView {
       wantsScreenOn = false
       refreshIdleTimer()
     }
+    #if os(iOS)
+    refreshKeyboardResponder()
+    #endif
   }
 
   @MainActor
   func setResizeMode(_ mode: String?) {
     let gravity: AVLayerVideoGravity
+    let resizeMode: SurfaceResizeMode
     switch mode {
     case "fill":
       gravity = .resizeAspectFill
+      resizeMode = .fill
     case "stretch":
       gravity = .resize
+      resizeMode = .stretch
     default:
       gravity = .resizeAspect
+      resizeMode = .fit
     }
-    guard gravity != currentVideoGravity else { return }
+    guard gravity != currentVideoGravity || resizeMode != currentResizeMode else { return }
     currentVideoGravity = gravity
+    currentResizeMode = resizeMode
+    setNeedsLayout()
     subtitleOverlayView.updateGravity(gravity)
     boundEngine?.withDriver { driver in
       driver.updateGravity(gravity, from: self)
@@ -239,12 +312,20 @@ final class AetherSurfaceView: ExpoView {
       IdleTimer.setHeld(false, ownerId: prevId)
     }
     cleanupState.updateBinding(engine: nil, ownerId: nil, playerViewId: ObjectIdentifier(playerView))
+    #if os(iOS)
+    refreshKeyboardResponder()
+    #endif
   }
 
   @MainActor
   private func configureHierarchy() {
     backgroundColor = .black
     clipsToBounds = true
+    #if os(iOS)
+    playbackKeyCommands = AetherKeyCommandHost.makePlaybackKeyCommands(
+      action: #selector(handlePlaybackKeyCommand(_:))
+    )
+    #endif
 
     playerView.isUserInteractionEnabled = false
     playerView.isAccessibilityElement = false
@@ -273,6 +354,9 @@ final class AetherSurfaceView: ExpoView {
         self.appInBackground = true
         self.refreshIdleTimer()
         self.notifySurfaceAvailability(isBackground: true)
+        #if os(iOS)
+        self.refreshKeyboardResponder()
+        #endif
       }
     }
 
@@ -286,6 +370,9 @@ final class AetherSurfaceView: ExpoView {
         self.appInBackground = false
         self.refreshIdleTimer()
         self.notifySurfaceAvailability(isBackground: false)
+        #if os(iOS)
+        self.refreshKeyboardResponder()
+        #endif
       }
     }
 
@@ -295,14 +382,32 @@ final class AetherSurfaceView: ExpoView {
       queue: nil
     ) { [weak self] _ in
       AetherBackend.onMainActor {
-        guard let self, self.appInBackground else { return }
-        self.appInBackground = false
-        self.refreshIdleTimer()
-        self.notifySurfaceAvailability(isBackground: false)
+        guard let self else { return }
+        if self.appInBackground {
+          self.appInBackground = false
+          self.refreshIdleTimer()
+          self.notifySurfaceAvailability(isBackground: false)
+        }
+        #if os(iOS)
+        self.refreshKeyboardResponder()
+        #endif
       }
     }
 
-    cleanupState.setTokens([backgroundToken, foregroundToken, activeToken])
+    var allTokens: [NSObjectProtocol] = [backgroundToken, foregroundToken, activeToken]
+    #if os(iOS)
+    allTokens.append(
+      contentsOf: AetherKeyCommandHost.installTextEditingObservers(
+        onBeginEditing: { [weak self] in
+          self?.resignKeyboardFocus()
+        },
+        onEndEditing: { [weak self] in
+          self?.refreshKeyboardResponder()
+        }
+      )
+    )
+    #endif
+    cleanupState.setTokens(allTokens)
   }
 
   @MainActor

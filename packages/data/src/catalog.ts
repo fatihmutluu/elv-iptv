@@ -78,6 +78,7 @@ import {
   toggleFavorite,
   type WatchProgressRow,
 } from './user-state';
+import { saveUserDataSnapshot, type UserDataStore } from './user-state-backup';
 
 export type { StreamRequest };
 
@@ -108,6 +109,8 @@ export interface CatalogDeps {
   newId?: () => string;
   /** Apple platforms: rewritten after every add, remove and import (see `reconcileManifest`). */
   manifest?: ManifestStore;
+  /** Apple platforms: mirrored after user-state mutations (see `reconcileUserData`, `#79`). */
+  userData?: UserDataStore;
   /** Invoked synchronously at the start of `removeSource(id)` before deleting rows or secrets (`#67`). */
   beforeRemoveSource?: (sourceId: string) => void | Promise<void>;
   /** Platform gzip decompressor used for compressed guides and playlists. */
@@ -273,8 +276,15 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
   const queue = createSerializedImportQueue(db);
   const playtime = createPlaytimeResolverCache({ db, secrets, http: deps.http });
   let closePromise: Promise<void> | undefined;
-  const { manifest } = deps;
+  const { manifest, userData } = deps;
   const syncManifest = () => (manifest === undefined ? undefined : saveManifest(db, manifest));
+  let userDataTail: Promise<void> = Promise.resolve();
+  const syncUserData = (): Promise<void> | undefined => {
+    if (userData === undefined) return undefined;
+    const next = userDataTail.then(() => saveUserDataSnapshot(db, userData));
+    userDataTail = next.catch(() => undefined);
+    return next;
+  };
 
   const mapped = async (p: Promise<Result<SourceRecord>>): Promise<Result<SourceRow>> => {
     const r = await p;
@@ -304,6 +314,7 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
         const removed = await removeSource(id, { db, secrets, scheduler: deps.scheduler });
         playtime.evict(id);
         await syncManifest();
+        await syncUserData();
         return removed;
       } finally {
         queue.unmarkRemoving(id);
@@ -441,11 +452,15 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     async saveProgress(input) {
       const saved = await saveWatchProgress(db, input, clock);
       if (!saved.ok) return saved;
+      await syncUserData();
       const [resolved] = await playtime.resolveRowLogos([saved.value]);
       return ok(resolved ?? saved.value);
     },
-    setWatched: (itemKey, watched, profileId) =>
-      setItemWatched(db, itemKey, watched, clock, profileId),
+    async setWatched(itemKey, watched, profileId) {
+      const updated = await setItemWatched(db, itemKey, watched, clock, profileId);
+      if (updated.ok) await syncUserData();
+      return updated;
+    },
     async getProgress(itemKey, profileId) {
       const found = await getWatchProgress(db, itemKey, profileId);
       if (found === null) return null;
@@ -458,9 +473,21 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
       playtime.resolveRowLogos(await listProgressByKeys(db, itemKeys, profileId)),
     listSeriesUnplayedCounts: (seriesKeys, profileId) =>
       listSeriesUnplayedCounts(db, seriesKeys, profileId),
-    clearProgress: (itemKey, profileId) => clearWatchProgress(db, itemKey, profileId),
-    toggleFavorite: (input) => toggleFavorite(db, input, clock),
-    setFavorite: (input, active) => setFavorite(db, input, active, clock),
+    async clearProgress(itemKey, profileId) {
+      const cleared = await clearWatchProgress(db, itemKey, profileId);
+      if (cleared.ok) await syncUserData();
+      return cleared;
+    },
+    async toggleFavorite(input) {
+      const toggled = await toggleFavorite(db, input, clock);
+      if (toggled.ok) await syncUserData();
+      return toggled;
+    },
+    async setFavorite(input, active) {
+      const updated = await setFavorite(db, input, active, clock);
+      if (updated.ok) await syncUserData();
+      return updated;
+    },
     listFavorites: async (limit, profileId) =>
       playtime.resolveRowLogos(await listFavorites(db, limit, profileId)),
     listFavoriteKeys: (profileId) => listFavoriteKeys(db, profileId),

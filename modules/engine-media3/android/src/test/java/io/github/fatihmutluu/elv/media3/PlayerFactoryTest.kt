@@ -4,9 +4,13 @@ import android.os.Looper
 import android.provider.Settings
 import androidx.annotation.OptIn
 import androidx.media3.common.C
+import androidx.media3.common.Format
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.SeekParameters
+import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -201,6 +205,42 @@ class PlayerFactoryTest {
     } finally {
       api30Player.release()
       api29Player.release()
+    }
+  }
+
+  @Test
+  fun `propagates VideoDecoderMode to PolicyVideoRenderer and extension renderer preference (#411)`() {
+    val app = RuntimeEnvironment.getApplication()
+    val factory = PlayerFactory(app, Looper.getMainLooper(), loadControlFor(lowRam = false), CodecPolicy())
+    val hwCodec = MediaCodecInfo.newInstance("c2.qti.avc.decoder", MimeTypes.VIDEO_H264, MimeTypes.VIDEO_H264, null, true, false, true, false, false)
+    val swCodec = MediaCodecInfo.newInstance("c2.android.avc.decoder", MimeTypes.VIDEO_H264, MimeTypes.VIDEO_H264, null, false, true, false, false, false)
+    val selector = MediaCodecSelector { _, _, _ -> listOf(hwCodec, swCodec) }
+    val format = Format.Builder().setSampleMimeType(MimeTypes.VIDEO_H264).setWidth(1920).setHeight(1080).build()
+
+    val autoPlayer = factory.build(softwareAudio = false, decoderMode = VideoDecoderMode.AUTO)
+    val hwPlayer = factory.build(softwareAudio = false, decoderMode = VideoDecoderMode.HARDWARE)
+    val swPlayer = factory.build(softwareAudio = false, decoderMode = VideoDecoderMode.SOFTWARE)
+    try {
+      fun videoRenderer(player: androidx.media3.exoplayer.ExoPlayer): PolicyVideoRenderer =
+        (0 until player.rendererCount).map { player.getRenderer(it) }.filterIsInstance<PolicyVideoRenderer>().single()
+
+      fun audioRenderers(player: androidx.media3.exoplayer.ExoPlayer): List<String> =
+        (0 until player.rendererCount).map { player.getRenderer(it) }.filter { it.trackType == C.TRACK_TYPE_AUDIO }.map { it.javaClass.name }
+
+      val autoVideo = videoRenderer(autoPlayer)
+      val hwVideo = videoRenderer(hwPlayer)
+      val swVideo = videoRenderer(swPlayer)
+      assertEquals(VideoDecoderMode.AUTO, autoVideo.decoderModeForTest)
+      assertEquals(VideoDecoderMode.HARDWARE, hwVideo.decoderModeForTest)
+      assertEquals(VideoDecoderMode.SOFTWARE, swVideo.decoderModeForTest)
+      assertEquals(listOf(hwCodec.name), hwVideo.resolveDecoderInfosForTest(selector, format).map { it.name })
+      assertEquals(listOf(swCodec.name), swVideo.resolveDecoderInfosForTest(selector, format).map { it.name })
+      assertEquals("androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer", audioRenderers(swPlayer).first())
+      assertEquals("androidx.media3.exoplayer.audio.MediaCodecAudioRenderer", audioRenderers(hwPlayer).first())
+    } finally {
+      autoPlayer.release()
+      hwPlayer.release()
+      swPlayer.release()
     }
   }
 }

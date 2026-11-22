@@ -73,6 +73,21 @@ struct CommandFenceTests {
     #expect(fence.filterOutbound(.tracks(attempt: 12, tracks: sample), driverEpoch: epoch2) == .tracks(attempt: 12, tracks: sample))
   }
 
+  @Test("externalPlayback adopts the latest in-epoch token and drops stale epochs (#234)")
+  func externalPlaybackFencedByMediaEpoch() throws {
+    let fence = CommandFence()
+    let epoch1 = try #require(fence.recordLoad(attempt: 4))
+    #expect(fence.beginMedia(epoch: epoch1) == .run(epoch: epoch1, rebuildFirst: false))
+    _ = try #require(fence.recordInEpochCommand(attempt: 5))
+
+    let delivered = fence.filterOutbound(.externalPlayback(attempt: 4, active: true), driverEpoch: epoch1)
+    #expect(delivered == .externalPlayback(attempt: 5, active: true))
+
+    let epoch2 = try #require(fence.recordLoad(attempt: 6))
+    #expect(fence.filterOutbound(.externalPlayback(attempt: 5, active: false), driverEpoch: epoch1) == nil)
+    #expect(fence.filterOutbound(.externalPlayback(attempt: 6, active: true), driverEpoch: epoch2) == .externalPlayback(attempt: 6, active: true))
+  }
+
   @Test("dispose rejects all future commands and outbound events")
   func disposeRejectsEverything() throws {
     let fence = CommandFence()

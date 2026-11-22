@@ -176,6 +176,7 @@ public enum BackendObservation: Equatable, Sendable {
   case tracks(MediaTracksOut)
   case mediaInfo(StreamVideoInfo)
   case progress(bytesReceived: Int64?, bufferedSeconds: Double?)
+  case externalPlayback(Bool)
   case readerFault(ReaderFailure)
   case failure(BackendFailure)
 }
@@ -274,6 +275,7 @@ public enum EngineEventOut: Equatable, Sendable {
   case progress(attempt: Int, bytesReceived: Double?, atMs: Double)
   case tracks(attempt: Int, tracks: MediaTracksOut)
   case mediaInfo(attempt: Int, info: StreamVideoInfo)
+  case externalPlayback(attempt: Int, active: Bool)
   case error(attempt: Int, error: MappedError)
   case surface(attempt: Int, change: SurfaceChangeOut)
 
@@ -312,6 +314,8 @@ public enum EngineEventOut: Equatable, Sendable {
       return ["attempt": attempt, "type": "tracks", "tracks": tracks.toDictionary()]
     case let .mediaInfo(attempt, info):
       return ["attempt": attempt, "type": "mediaInfo", "info": info.toDictionary()]
+    case let .externalPlayback(attempt, active):
+      return ["attempt": attempt, "type": "externalPlayback", "active": active]
     case let .error(attempt, error):
       var errorDict: [String: Any] = [
         "code": error.code,

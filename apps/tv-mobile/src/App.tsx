@@ -1,5 +1,13 @@
 import { type CatalogService, createCoalescedCatalog } from '@elv/data';
 import {
+  type AppleSafeAreaInsets,
+  getAppleSafeAreaInsets,
+  setAppleEngineMuted,
+  setAppleEngineVolume,
+  subscribeAppleHardwareKeys,
+  subscribeAppleSafeAreaInsets,
+} from '@elv/engine-aether';
+import {
   type AndroidSafeAreaInsets,
   applyAndroidShortEdgesCutoutMode,
   enterAndroidPictureInPicture,
@@ -42,8 +50,14 @@ import { attachAppStateDeadHostReset, createMobileTvUiAdapters } from './ui/plat
 function AppRoot() {
   const [refreshToken, setRefreshToken] = useState(0);
   const isAndroidMobile = Platform.OS === 'android' && !Platform.isTV;
-  const [safeArea, setSafeArea] = useState<AndroidSafeAreaInsets | undefined>(() =>
-    isAndroidMobile ? getAndroidSafeAreaInsets() : undefined,
+  const isAppleMobile = Platform.OS === 'ios' && !Platform.isTV;
+  const [safeArea, setSafeArea] = useState<AndroidSafeAreaInsets | AppleSafeAreaInsets | undefined>(
+    () =>
+      isAndroidMobile
+        ? getAndroidSafeAreaInsets()
+        : isAppleMobile
+          ? getAppleSafeAreaInsets()
+          : undefined,
   );
 
   const systemLocale = useMemo(
@@ -55,14 +69,18 @@ function AppRoot() {
   const uiAdapters = useMemo(() => createMobileTvUiAdapters(), []);
 
   useEffect(() => {
-    if (!isAndroidMobile) {
-      setSafeArea(undefined);
-      return;
+    if (isAndroidMobile) {
+      applyAndroidShortEdgesCutoutMode();
+      setSafeArea(getAndroidSafeAreaInsets());
+      return subscribeAndroidSafeAreaInsets(setSafeArea);
     }
-    applyAndroidShortEdgesCutoutMode();
-    setSafeArea(getAndroidSafeAreaInsets());
-    return subscribeAndroidSafeAreaInsets(setSafeArea);
-  }, [isAndroidMobile]);
+    if (isAppleMobile) {
+      setSafeArea(getAppleSafeAreaInsets());
+      return subscribeAppleSafeAreaInsets(setSafeArea);
+    }
+    setSafeArea(undefined);
+    return undefined;
+  }, [isAndroidMobile, isAppleMobile]);
 
   const viewportOverride = useMemo(
     () => (safeArea !== undefined ? { safeArea } : undefined),
@@ -92,6 +110,7 @@ function AppRoot() {
       open() {
         const engine = createPlatformEngine();
         if (engine === null) return null;
+        let appleMuted = false;
         return {
           engine,
           renderSurface: ({
@@ -113,6 +132,16 @@ function AppRoot() {
               {...(testID !== undefined ? { testID } : {})}
             />
           ),
+          ...(isAppleMobile
+            ? {
+                onHostKey: subscribeAppleHardwareKeys,
+                toggleMute: () => {
+                  appleMuted = !appleMuted;
+                  setAppleEngineMuted(engine, appleMuted);
+                },
+                setVolume: (volume: number) => setAppleEngineVolume(engine, volume),
+              }
+            : {}),
           ...(Platform.OS === 'android' ? { setOrientationLocked } : {}),
           ...(isAndroidMobile
             ? {
@@ -124,7 +153,7 @@ function AppRoot() {
         };
       },
     }),
-    [isAndroidMobile],
+    [isAndroidMobile, isAppleMobile],
   );
 
   const appLifecycle = useMemo<AppLifecyclePort>(

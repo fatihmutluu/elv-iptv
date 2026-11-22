@@ -1,4 +1,4 @@
-import type { DefaultResizeModePref, SeekStepSecPref } from '@elv/domain';
+import type { AndroidDecoderMode, DefaultResizeModePref, SeekStepSecPref } from '@elv/domain';
 import type { KeyEvent } from '@elv/focus-core';
 import type {
   MediaTracks,
@@ -57,6 +57,8 @@ export interface PlayerControlsParams {
   audioDevices?: readonly AudioDeviceInfo[] | undefined;
   activeAudioDevice?: string | undefined;
   onSelectAudioDevice?: ((name: string) => void) | undefined;
+  androidDecoderMode?: AndroidDecoderMode | undefined;
+  onSelectAndroidDecoderMode?: ((mode: AndroidDecoderMode) => void) | undefined;
   onToggleMute?: (() => void) | undefined;
   onSetVolume?: ((volume: number) => void) | undefined;
   onPersistVolume?: ((volume: number) => void) | undefined;
@@ -79,6 +81,8 @@ export interface OverlayKeyRouteDeps {
   readonly hasAudioDevice?: boolean;
   readonly audioDevices?: readonly AudioDeviceInfo[];
   readonly activeAudioDevice?: string;
+  readonly hasVideoDecoder?: boolean;
+  readonly androidDecoderMode?: AndroidDecoderMode;
   readonly playbackSpeed: number;
   readonly state: PlayerOverlayLive;
   readonly service: PlaybackService | null;
@@ -109,6 +113,7 @@ export interface OverlayKeyRouteDeps {
   readonly selectSpeed: (rate: number) => void;
   readonly selectSubtitle?: (id: string | null) => void;
   readonly selectAudioDevice?: ((name: string) => void) | undefined;
+  readonly selectAndroidDecoderMode?: ((mode: AndroidDecoderMode) => void) | undefined;
   readonly onExit: () => void;
   readonly onJumpPreviousChannel?: (() => void) | undefined;
 }
@@ -170,6 +175,8 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       hasAudioDevice: d.hasAudioDevice === true,
       ...(d.audioDevices !== undefined ? { audioDevices: d.audioDevices } : {}),
       ...(d.activeAudioDevice !== undefined ? { activeAudioDevice: d.activeAudioDevice } : {}),
+      hasVideoDecoder: d.hasVideoDecoder === true,
+      ...(d.androidDecoderMode !== undefined ? { androidDecoderMode: d.androidDecoderMode } : {}),
     });
     if (intent !== null && event.key === 'select' && !d.allowTvSelect()) return true;
     if (intent?.kind === 'close') d.closeSettings();
@@ -181,6 +188,7 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
     else if (intent?.kind === 'toggleStats') d.toggleStats();
     else if (intent?.kind === 'audio') d.service?.selectAudioTrack(intent.id);
     else if (intent?.kind === 'audioDevice') d.selectAudioDevice?.(intent.name);
+    else if (intent?.kind === 'videoDecoder') d.selectAndroidDecoderMode?.(intent.mode);
     else if (intent?.kind === 'subtitle') {
       if (d.selectSubtitle !== undefined) d.selectSubtitle(intent.id);
       else d.service?.selectSubtitleTrack(intent.id);
@@ -256,10 +264,12 @@ export interface HostKeyRouteDeps {
   >;
   readonly handleBack: () => void;
   readonly toggleFullscreen: () => void;
+  readonly toggleResizeMode?: (() => void) | undefined;
   readonly toggleAlwaysOnTop?: (() => void) | undefined;
   readonly togglePlayPause: () => void;
   readonly seekBy: (deltaMs: number) => void;
   readonly stepSeekMs?: number | undefined;
+  readonly stepVolumeBy?: ((delta: number) => void) | undefined;
   readonly toggleMute?: (() => void) | undefined;
   readonly openTracks: () => void;
   readonly closeTracks: () => void;
@@ -326,6 +336,15 @@ export function routeHostKey(key: HostKey, d: HostKeyRouteDeps): void {
       return;
     case 'always-on-top':
       if (canUseShortcuts) d.toggleAlwaysOnTop?.();
+      return;
+    case 'aspect':
+      if (canUseShortcuts) d.toggleResizeMode?.();
+      return;
+    case 'volume-up':
+      if (canUseShortcuts) d.stepVolumeBy?.(5);
+      return;
+    case 'volume-down':
+      if (canUseShortcuts) d.stepVolumeBy?.(-5);
       return;
   }
 }

@@ -1,4 +1,5 @@
 import type {
+  AndroidDecoderMode,
   BufferPreset,
   DefaultResizeModePref,
   SeekStepSecPref,
@@ -110,6 +111,32 @@ export const BUFFER_PRESET_OPTIONS: ReadonlyArray<{
   },
 ];
 
+export const VIDEO_DECODER_OPTIONS: ReadonlyArray<{
+  readonly value: AndroidDecoderMode;
+  readonly focusId: PlaybackFocusId;
+  readonly testID: string;
+  readonly labelKey: MessageId;
+}> = [
+  {
+    value: 'auto',
+    focusId: 'video-decoder-auto',
+    testID: 'settings-playback-decoder-auto',
+    labelKey: 'settings.playback.videoDecoder.auto',
+  },
+  {
+    value: 'hardware',
+    focusId: 'video-decoder-hardware',
+    testID: 'settings-playback-decoder-hardware',
+    labelKey: 'settings.playback.videoDecoder.hardware',
+  },
+  {
+    value: 'software',
+    focusId: 'video-decoder-software',
+    testID: 'settings-playback-decoder-software',
+    labelKey: 'settings.playback.videoDecoder.software',
+  },
+];
+
 /** Applies a TV D-pad activation on a Playback settings control (`#401`). */
 export function activatePlaybackControl(
   controlId: PlaybackFocusId,
@@ -146,6 +173,11 @@ export function activatePlaybackControl(
   const bufferOpt = BUFFER_PRESET_OPTIONS.find((o) => o.focusId === controlId);
   if (bufferOpt) {
     void preferences.updatePreferences({ bufferPreset: bufferOpt.value });
+    return;
+  }
+  const decoderOpt = VIDEO_DECODER_OPTIONS.find((o) => o.focusId === controlId);
+  if (decoderOpt) {
+    void preferences.updatePreferences({ androidDecoderMode: decoderOpt.value });
     return;
   }
   if (controlId === 'toggle-auto-play-next') {

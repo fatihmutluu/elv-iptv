@@ -166,6 +166,9 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
       supportsTablet: true,
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
+        NSBonjourServices: ['_airplay._tcp'],
+        NSLocalNetworkUsageDescription:
+          'ELV IPTV discovers AirPlay receivers on your local network to match supported audio formats.',
         // Users bring plain-HTTP providers. Never add NSAllowsLocalNetworking here: when both keys are
         // present Apple ignores NSAllowsArbitraryLoads, so plain HTTP is blocked again.
         NSAppTransportSecurity: { NSAllowsArbitraryLoads: true },

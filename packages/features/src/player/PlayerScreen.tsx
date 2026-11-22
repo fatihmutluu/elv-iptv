@@ -1,5 +1,6 @@
 import type { CatalogService } from '@elv/data';
 import type {
+  AndroidDecoderMode,
   BufferPreset,
   DefaultResizeModePref,
   SeekStepSecPref,
@@ -41,16 +42,15 @@ import {
 import { clampVolume } from './player-overlay-model';
 import { TrackPickerModal } from './TrackPickerModal';
 import { buildTouchHoverProps } from './touch-hover-guard';
-import {
-  chooseInitialAudioTrack,
-  chooseInitialSubtitleTrack,
-  resolveEffectiveTrackPrefs,
-} from './track-preferences';
 import { useNextEpisodeResolver } from './useNextEpisodeResolver';
 import { usePlayerControls } from './usePlayerControls';
 import { usePlayerNowNext } from './usePlayerNowNext';
 import { usePlayerSession } from './usePlayerSession';
 import { usePlayerTargetHandoff } from './usePlayerTargetHandoff';
+import {
+  useAndroidDecoderModeSync,
+  useInitialTrackSelection,
+} from './usePlayerTrackAndDecoderSync';
 import { useWatchProgressSync } from './useWatchProgressSync';
 
 /** Default production OSD auto-hide delay in milliseconds (`#421`). */
@@ -100,10 +100,12 @@ export interface PlayerScreenProps {
   preferredSubtitleLang?: string;
   /** Default subtitle activation mode (`'auto' | 'always' | 'off'`, `#401`). */
   subtitleMode?: SubtitleModePref;
-  /** Preferred output audio device name (`'auto'` = system default, `#408`). */
   preferredAudioDevice?: string;
-  /** Persists user-selected output audio device (`#408`). */
   onPersistAudioDevice?: (deviceName: string) => void;
+  /** Android Media3 video decoder preference (`#411`). */
+  androidDecoderMode?: AndroidDecoderMode;
+  /** Persists Android Media3 video decoder preference (`#411`). */
+  onSelectAndroidDecoderMode?: (mode: AndroidDecoderMode) => void;
   onTargetChange?: (next: PlayTarget) => void;
   onExit: () => void;
 }
@@ -136,6 +138,8 @@ export function PlayerScreen({
   subtitleMode = 'auto',
   preferredAudioDevice,
   onPersistAudioDevice,
+  androidDecoderMode,
+  onSelectAndroidDecoderMode,
   onTargetChange,
   onExit,
 }: PlayerScreenProps): ReactElement {
@@ -164,6 +168,13 @@ export function PlayerScreen({
   onExitRef.current = onExit;
   const bufferPresetRef = useRef<BufferPreset>(bufferPreset);
   bufferPresetRef.current = bufferPreset;
+  const reloadActiveTargetRef = useRef<() => void>(() => undefined);
+  const { decoderModeRef, activeDecoderMode, showAndroidDecoder, handleSelectAndroidDecoderMode } =
+    useAndroidDecoderModeSync({
+      androidDecoderMode,
+      onSelectAndroidDecoderMode,
+      reloadActiveTarget: () => reloadActiveTargetRef.current(),
+    });
 
   const handoff = usePlayerTargetHandoff({
     target,
@@ -177,8 +188,10 @@ export function PlayerScreen({
     cancelScrubRef,
     onTargetChangeRef,
     bufferPresetRef,
+    decoderModeRef,
     resolvedNextEpisodeRef,
   });
+  reloadActiveTargetRef.current = handoff.reloadActiveTarget;
   const { activeTarget, zapBy, jumpToChannel } = handoff;
 
   const zapByRef = useRef<(delta: 1 | -1, repeat?: boolean) => void>(zapBy);
@@ -233,60 +246,22 @@ export function PlayerScreen({
   const [nextEpisodeVisible, setNextEpisodeVisible] = useState(false);
   const [brightness, setBrightness] = useState(1);
   const [touchScrubDeltaMs, setTouchScrubDeltaMs] = useState<number | undefined>(undefined);
-  const appliedAudioItemRef = useRef<string | null>(null);
-  const appliedSubtitleItemRef = useRef<string | null>(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset per-item transient UI on item change
   useEffect(() => {
     setNextEpisodeDismissed(false);
     setNextEpisodeVisible(false);
     setTouchScrubDeltaMs(undefined);
-    appliedAudioItemRef.current = null;
-    appliedSubtitleItemRef.current = null;
   }, [activeTarget.itemKey]);
 
-  const targetTrackPrefs = activeTarget as PlayTarget & {
-    readonly preferredAudioLang?: string;
-    readonly preferredSubtitleLang?: string;
-  };
-  const effectiveTracks = resolveEffectiveTrackPrefs({
-    globalAudioLang: preferredAudioLang,
-    globalSubtitleLang: preferredSubtitleLang,
-    globalSubtitleMode: subtitleMode,
-    targetAudioLang: targetTrackPrefs.preferredAudioLang,
-    targetSubtitleLang: targetTrackPrefs.preferredSubtitleLang,
-  });
-
-  useEffect(() => {
-    if (activeService === null) return;
-    if (appliedAudioItemRef.current !== activeTarget.itemKey && tracks.audio.length > 0) {
-      appliedAudioItemRef.current = activeTarget.itemKey;
-      const chosenAudio = chooseInitialAudioTrack(tracks.audio, effectiveTracks.audioLang);
-      if (chosenAudio !== undefined && chosenAudio !== tracks.selectedAudioId) {
-        activeService.selectAudioTrack(chosenAudio);
-      }
-    }
-    if (
-      appliedSubtitleItemRef.current !== activeTarget.itemKey &&
-      (tracks.subtitles.length > 0 || tracks.selectedSubtitleId !== null)
-    ) {
-      appliedSubtitleItemRef.current = activeTarget.itemKey;
-      const chosenSubtitle = chooseInitialSubtitleTrack(tracks.subtitles, {
-        preferredLang: effectiveTracks.subtitleLang,
-        subtitleMode: effectiveTracks.subtitleMode,
-      });
-      if (chosenSubtitle !== undefined && chosenSubtitle !== tracks.selectedSubtitleId) {
-        activeService.selectSubtitleTrack(chosenSubtitle);
-      }
-    }
-  }, [
+  useInitialTrackSelection({
     activeService,
-    activeTarget.itemKey,
-    effectiveTracks.audioLang,
-    effectiveTracks.subtitleLang,
-    effectiveTracks.subtitleMode,
+    activeTarget,
     tracks,
-  ]);
+    preferredAudioLang,
+    preferredSubtitleLang,
+    subtitleMode,
+  });
 
   const hasTracks = tracks.audio.length > 0 || tracks.subtitles.length > 0;
   const showRetry = status.kind === 'failed' && activeService !== null;
@@ -354,6 +329,12 @@ export function PlayerScreen({
     audioDevices,
     activeAudioDevice,
     onSelectAudioDevice: hostSetAudioDevice !== undefined ? selectAudioDevice : undefined,
+    ...(showAndroidDecoder
+      ? {
+          androidDecoderMode: activeDecoderMode,
+          onSelectAndroidDecoderMode: handleSelectAndroidDecoderMode,
+        }
+      : {}),
     onToggleMute: hostToggleMute,
     onSetVolume: hostSetVolume,
     onPersistVolume,
@@ -560,10 +541,12 @@ export function PlayerScreen({
         : {})}
       statsVisible={controls.statsVisible}
       {...(hostSetAudioDevice !== undefined
+        ? { audioDevices, activeAudioDevice, onSelectAudioDevice: selectAudioDevice }
+        : {})}
+      {...(showAndroidDecoder
         ? {
-            audioDevices,
-            activeAudioDevice,
-            onSelectAudioDevice: selectAudioDevice,
+            androidDecoderMode: activeDecoderMode,
+            onSelectAndroidDecoderMode: handleSelectAndroidDecoderMode,
           }
         : {})}
       isTv={isTv}

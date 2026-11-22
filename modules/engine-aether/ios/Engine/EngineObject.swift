@@ -85,6 +85,27 @@ final class EngineObject: SharedObject, @unchecked Sendable {
     }
   }
 
+  func setMuted(_ muted: Bool) {
+    guard !fence.isDisposedNow else { return }
+    enqueueMain { [weak self] in
+      guard let self, !self.fence.isDisposedNow, let driver = self.ensureDriver() else { return }
+      driver.backend.setMuted(muted)
+    }
+  }
+
+  func setVolume(_ volume: Double) {
+    guard !fence.isDisposedNow, volume.isFinite else { return }
+    enqueueMain { [weak self] in
+      guard let self, !self.fence.isDisposedNow, let driver = self.ensureDriver() else { return }
+      driver.backend.setVolume(volume)
+    }
+  }
+
+  @MainActor
+  func isCurrentlyLive() -> Bool {
+    driver?.core.isLivePlayback ?? true
+  }
+
   func selectAudioTrack(_ attempt: Int, id: String) {
     guard let epoch = fence.recordInEpochCommand(attempt: attempt) else { return }
     enqueueMain { [weak self] in

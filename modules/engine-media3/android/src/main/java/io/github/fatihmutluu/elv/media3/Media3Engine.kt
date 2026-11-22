@@ -88,6 +88,7 @@ class Media3Engine : SharedObject {
   private var playerPreferHevc = false
   private var playerStreamKind: StreamKind = StreamKind.VOD
   private var playerBufferPreset: BufferPreset = BufferPreset.AUTO
+  private var playerDecoderMode: VideoDecoderMode = VideoDecoderMode.AUTO
   private var audioFallbackAttempted = false
   private var pendingRebuildDeferred = false
   private var activeEpoch = 0
@@ -200,7 +201,7 @@ class Media3Engine : SharedObject {
       beginGeneration()
       pendingRebuildDeferred = false
       releasePlayer()
-      player = buildPlayer(playerSoftwareAudio, playerPreferHevc, playerStreamKind, playerBufferPreset)
+      player = buildPlayer(playerSoftwareAudio, playerPreferHevc, playerStreamKind, playerBufferPreset, playerDecoderMode)
     }
   }
 
@@ -388,15 +389,16 @@ class Media3Engine : SharedObject {
     val existing = player
     val streamKind = next.streamKind()
     val bufferPreset = next.bufferPreset
+    val decoderMode = next.decoderMode
     val terminal = existing != null && (existing.playbackState == Player.STATE_ENDED || existing.playerError != null)
     val rebuild = forceRebuild || existing == null || terminal || playerSoftwareAudio != next.softwareAudio ||
       playerPreferHevc != next.preferHevcOverDolbyVision || playerStreamKind != streamKind ||
-      playerBufferPreset != bufferPreset
+      playerBufferPreset != bufferPreset || playerDecoderMode != decoderMode
     if (rebuild) {
       pendingRebuildDeferred = false
       existing?.isScrubbingModeEnabled = false
       releasePlayer()
-      player = buildPlayer(next.softwareAudio, next.preferHevcOverDolbyVision, streamKind, bufferPreset)
+      player = buildPlayer(next.softwareAudio, next.preferHevcOverDolbyVision, streamKind, bufferPreset, decoderMode)
     } else {
       existing.isScrubbingModeEnabled = false
       existing.stop()
@@ -428,12 +430,21 @@ class Media3Engine : SharedObject {
     preferHevc: Boolean = false,
     streamKind: StreamKind = StreamKind.VOD,
     bufferPreset: BufferPreset = BufferPreset.AUTO,
+    decoderMode: VideoDecoderMode = VideoDecoderMode.AUTO,
   ): ExoPlayer {
     playerSoftwareAudio = softwareAudio
     playerPreferHevc = preferHevc
     playerStreamKind = streamKind
     playerBufferPreset = bufferPreset
-    return playerFactory.build(softwareAudio, preferHevc, live = streamKind != StreamKind.VOD, streamKind = streamKind, bufferPreset = bufferPreset).also { built ->
+    playerDecoderMode = decoderMode
+    return playerFactory.build(
+      softwareAudio = softwareAudio,
+      preferHevcOverDolbyVision = preferHevc,
+      live = streamKind != StreamKind.VOD,
+      streamKind = streamKind,
+      bufferPreset = bufferPreset,
+      decoderMode = decoderMode,
+    ).also { built ->
       built.addListener(reporter)
       built.addListener(pictures)
       audioEffects.onAudioSessionIdChanged(built.audioSessionId)

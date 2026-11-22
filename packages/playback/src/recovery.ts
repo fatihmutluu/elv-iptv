@@ -23,12 +23,13 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
   let errorWhilePaused = false;
   let liveCleanEndRetried = false;
   let liveFrozenResetTried = false;
+  let externalPlayback = false;
 
   const inBatch = <T>(fn: () => T): T => (ctl.batch !== undefined ? ctl.batch(fn) : fn());
   const isVod = (): boolean => ctl.request()?.kind === 'vod';
   const hasStream = (): boolean => ctl.stream === undefined || ctl.stream() !== undefined;
   const canWatchStall = (): boolean =>
-    ctl.getState().status.kind === 'playing' && !paused && !awaitingSurface;
+    ctl.getState().status.kind === 'playing' && !paused && !awaitingSurface && !externalPlayback;
   const positions = createPositionTracker(ctl);
 
   const reloadLiveEdge = (): boolean =>
@@ -89,6 +90,7 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
     errorWhilePaused = false;
     liveCleanEndRetried = false;
     liveFrozenResetTried = false;
+    externalPlayback = false;
   };
 
   const reset = (): void => {
@@ -284,6 +286,12 @@ export function createRecovery(ctl: ServiceControl): RecoveryHooks {
     },
     onStall(phase) {
       watchdog.onStall(phase, canWatchStall());
+    },
+    onExternalPlayback(active) {
+      externalPlayback = active;
+      if (active) {
+        watchdog.cancel();
+      }
     },
     onProgress(atMs, bytesReceived) {
       watchdog.onProgress(atMs, bytesReceived);

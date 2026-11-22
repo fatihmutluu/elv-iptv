@@ -49,6 +49,8 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const hasAudioDevice = params.hasAudioDevice === true;
   const audioDevices = params.audioDevices;
   const activeAudioDevice = params.activeAudioDevice;
+  const hasVideoDecoder = params.hasVideoDecoder === true;
+  const androidDecoderMode = params.androidDecoderMode;
   const canOpenInfo = params.hasInfo !== false;
   const canOpenChannelList = !isVod && params.hasChannelList === true;
 
@@ -102,6 +104,8 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     hasAudioDevice,
     ...(audioDevices !== undefined ? { audioDevices } : {}),
     ...(activeAudioDevice !== undefined ? { activeAudioDevice } : {}),
+    hasVideoDecoder,
+    ...(androidDecoderMode !== undefined ? { androidDecoderMode } : {}),
   });
   const availableOsd = availableTvOsdActions({
     isVod,
@@ -367,6 +371,8 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     hasAudioDevice,
     ...(audioDevices !== undefined ? { audioDevices } : {}),
     ...(activeAudioDevice !== undefined ? { activeAudioDevice } : {}),
+    hasVideoDecoder,
+    ...(androidDecoderMode !== undefined ? { androidDecoderMode } : {}),
   });
 
   const openSettings = (view: SettingsMenuView = 'root'): void => {

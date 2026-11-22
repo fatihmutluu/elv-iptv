@@ -1385,3 +1385,18 @@ msgstr "Geri tuşuyla çıkmadan önce sor"
 
 msgid "settings.playback.audioDevice"
 msgstr "Ses çıkış aygıtı"
+
+msgid "settings.playback.videoDecoder"
+msgstr "Video çözücü"
+
+msgid "settings.playback.videoDecoder.auto"
+msgstr "Otomatik"
+
+msgid "settings.playback.videoDecoder.hardware"
+msgstr "Donanım"
+
+msgid "settings.playback.videoDecoder.software"
+msgstr "Yazılım"
+
+msgid "player.videoDecoder"
+msgstr "Video çözücü"

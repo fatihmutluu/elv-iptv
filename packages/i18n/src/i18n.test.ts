@@ -774,4 +774,20 @@ describe('@elv/i18n', () => {
     expect(en.t('player.connectionLimit.unknownBody', { max: 3 })).toContain('3');
     expect(tr.t('player.connectionLimit.unknownBody', { max: 3 })).toContain('3');
   });
+
+  it('localizes Wave P5 Android video decoder strings (#411) in English and Turkish', () => {
+    const en = createAppI18n('en');
+    const tr = createAppI18n('tr');
+    const cases: ReadonlyArray<readonly [MessageId, string, string]> = [
+      ['settings.playback.videoDecoder', 'Video decoder', 'Video çözücü'],
+      ['settings.playback.videoDecoder.auto', 'Auto', 'Otomatik'],
+      ['settings.playback.videoDecoder.hardware', 'Hardware', 'Donanım'],
+      ['settings.playback.videoDecoder.software', 'Software', 'Yazılım'],
+      ['player.videoDecoder', 'Video decoder', 'Video çözücü'],
+    ];
+    for (const [id, expectedEn, expectedTr] of cases) {
+      expect(en.t(id)).toBe(expectedEn);
+      expect(tr.t(id)).toBe(expectedTr);
+    }
+  });
 });

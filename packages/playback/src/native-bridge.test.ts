@@ -66,6 +66,7 @@ describe('bridgeNativeEngine', () => {
         softwareAudio: true,
         preferHevcOverDolbyVision: true,
         bufferPreset: 'large',
+        decoderMode: 'hardware',
         audioTrackId: '1:0',
         subtitleTrackId: null,
       },
@@ -91,6 +92,7 @@ describe('bridgeNativeEngine', () => {
       softwareAudio: true,
       preferHevcOverDolbyVision: true,
       bufferPreset: 'large',
+      decoderMode: 'hardware',
       audioTrackId: '1:0',
       subtitleTrackId: null,
     });
@@ -219,6 +221,7 @@ describe('bridgeNativeEngine', () => {
     engine.subscribe((event) => events.push(event));
     const unchanged: EngineEvent[] = [
       { attempt: 1, type: 'state', state: 'playing' },
+      { attempt: 1, type: 'externalPlayback', active: true },
       { attempt: 1, type: 'error', error: { code: 'http-509', httpStatus: 509, detail: 'x' } },
       { attempt: 1, type: 'surface', change: 'destroyed' },
     ];

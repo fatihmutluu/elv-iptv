@@ -647,3 +647,143 @@ describe('#144, #147, #150, #222: surfaceRecreationToken, bufferPreset, rolling 
     });
   });
 });
+
+describe('#234 & #411: AirPlay externalPlayback stall suspension and Android decoderMode forwarding', () => {
+  it('suspends stall, frozen-clock, and zero-frame watchdogs while externalPlayback is active and resumes cleanly when inactive (#234)', async () => {
+    const r = rig({ chan: [] });
+    const seenExternal: Array<boolean | undefined> = [];
+    r.service.subscribe((s) => seenExternal.push(s.externalPlaybackActive));
+
+    await playing(r, live('chan'));
+    expect(r.service.getState().externalPlaybackActive).toBeUndefined();
+
+    // Activate AirPlay external playback
+    r.engine.emit({
+      attempt: r.service.getState().attempt,
+      type: 'externalPlayback',
+      active: true,
+    });
+    expect(r.service.getState().externalPlaybackActive).toBe(true);
+    expect(seenExternal).toContain(true);
+
+    // Stall, frozen live clock, and zero-decoded-frame black screen MUST NOT escalate while externalPlayback is active
+    stall(r, 'start');
+    await tick(10_000);
+    expect(status(r)).toEqual({ kind: 'playing' });
+    expect(r.loads).toHaveLength(1);
+
+    emitClock(r, { positionMs: 10_000, atMs: Date.now(), rate: 1 });
+    await tick(6_000);
+    emitClock(r, { positionMs: 10_000, atMs: Date.now(), rate: 1 });
+    expect(status(r)).toEqual({ kind: 'playing' });
+
+    emitVideoClock(r, 12_000, 0);
+    await tick(6_000);
+    emitVideoClock(r, 18_000, 0);
+    expect(status(r)).toEqual({ kind: 'playing' });
+    expect(r.loads).toHaveLength(1);
+
+    // Return to local playback -> externalPlaybackActive becomes false and stall watchdog resumes cleanly!
+    r.engine.emit({
+      attempt: r.service.getState().attempt,
+      type: 'externalPlayback',
+      active: false,
+    });
+    expect(r.service.getState().externalPlaybackActive).toBe(false);
+
+    stall(r, 'start');
+    await tick(DEFAULT_PLAYBACK_CONFIG.liveStallWindowMs);
+    expect(status(r)).toEqual(recovering(1, 0));
+
+    // New tune and stop both reset externalPlaybackActive cleanly
+    await playing(r, live('chan'));
+    r.engine.emit({
+      attempt: r.service.getState().attempt,
+      type: 'externalPlayback',
+      active: true,
+    });
+    expect(r.service.getState().externalPlaybackActive).toBe(true);
+    r.service.stop();
+    expect(r.service.getState().externalPlaybackActive).toBeUndefined();
+  });
+
+  it('cancels an already-armed stall timer immediately when externalPlayback activates (#234)', async () => {
+    const r = rig({ chan: [] });
+    await playing(r, live('chan'));
+
+    stall(r, 'start');
+    await tick(2_000);
+    r.engine.emit({
+      attempt: r.service.getState().attempt,
+      type: 'externalPlayback',
+      active: true,
+    });
+    await tick(10_000);
+    expect(status(r)).toEqual({ kind: 'playing' });
+    expect(r.loads).toHaveLength(1);
+  });
+
+  it('clears seek-settling during externalPlayback handoff and resets externalPlaybackActive on retry/fail (#234)', async () => {
+    const r = rig({ movie: [] });
+    await playing(r, vod('movie'));
+    emitClock(r, { positionMs: 10_000, atMs: Date.now(), rate: 1, durationMs: 300_000 });
+
+    // Seek starts seekSettling, then AirPlay activates & returns to local -> stall MUST still escalate
+    r.service.seek(60_000);
+    r.engine.emit({
+      attempt: r.service.getState().attempt,
+      type: 'externalPlayback',
+      active: true,
+    });
+    r.engine.emit({
+      attempt: r.service.getState().attempt,
+      type: 'externalPlayback',
+      active: false,
+    });
+    stall(r, 'start');
+    await tick(DEFAULT_PLAYBACK_CONFIG.liveStallWindowMs);
+    expect(status(r)).toEqual(recovering(1, 0));
+
+    // retry() and terminal fail() both clear externalPlaybackActive
+    play(r);
+    r.engine.emit({
+      attempt: r.service.getState().attempt,
+      type: 'externalPlayback',
+      active: true,
+    });
+    expect(r.service.getState().externalPlaybackActive).toBe(true);
+    r.service.retry();
+    expect(r.service.getState().externalPlaybackActive).toBeUndefined();
+
+    play(r);
+    r.engine.emit({
+      attempt: r.service.getState().attempt,
+      type: 'externalPlayback',
+      active: true,
+    });
+    expect(r.service.getState().externalPlaybackActive).toBe(true);
+    error(r, 'http-401');
+    expect(status(r).kind).toBe('failed');
+    expect(r.service.getState().externalPlaybackActive).toBeUndefined();
+  });
+
+  it('forwards TuneRequest.decoderMode to initial load and recovery reloads (#411)', async () => {
+    const r = rig({ chan: [] });
+    r.service.tune(live('chan', { decoderMode: 'software' }));
+    await tick(0);
+    expect(r.loads[0]).toMatchObject({
+      url: 'chan',
+      options: { decoderMode: 'software' },
+    });
+
+    // Recovery rung 2 reload preserves decoderMode
+    error(r, 'network');
+    await tick(0);
+    error(r, 'network');
+    await tick(1_000);
+    expect(r.loads[1]).toMatchObject({
+      url: 'chan',
+      options: { decoderMode: 'software' },
+    });
+  });
+});

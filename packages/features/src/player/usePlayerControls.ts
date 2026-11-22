@@ -196,6 +196,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
     activeTarget.kind === 'vod' && params.onToggleAutoPlayNextEpisode !== undefined;
   const hasAudioDevicePicker =
     (params.audioDevices?.length ?? 0) > 0 && params.onSelectAudioDevice !== undefined;
+  const hasVideoDecoder =
+    params.androidDecoderMode !== undefined && params.onSelectAndroidDecoderMode !== undefined;
 
   const overlay = usePlayerOverlayState({
     formFactor,
@@ -215,6 +217,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
     hasAudioDevice: hasAudioDevicePicker,
     audioDevices: params.audioDevices,
     activeAudioDevice: params.activeAudioDevice,
+    hasVideoDecoder,
+    androidDecoderMode: params.androidDecoderMode,
     hasNextEpisode: params.hasNextEpisode ?? false,
     hasPreviousChannel,
     initialOsdHidden: params.initialOsdHidden,
@@ -350,6 +354,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
             isVodTarget && cbRef.current.onToggleAutoPlayNextEpisode !== undefined,
             (cbRef.current.audioDevices?.length ?? 0) > 0 &&
               cbRef.current.onSelectAudioDevice !== undefined,
+            cbRef.current.androidDecoderMode !== undefined &&
+              cbRef.current.onSelectAndroidDecoderMode !== undefined,
           ),
         });
       } else overlay.closeSettings();
@@ -443,6 +449,12 @@ export function usePlayerControls(params: PlayerControlsParams) {
         ...(cbRef.current.activeAudioDevice !== undefined
           ? { activeAudioDevice: cbRef.current.activeAudioDevice }
           : {}),
+        hasVideoDecoder:
+          cbRef.current.androidDecoderMode !== undefined &&
+          cbRef.current.onSelectAndroidDecoderMode !== undefined,
+        ...(cbRef.current.androidDecoderMode !== undefined
+          ? { androidDecoderMode: cbRef.current.androidDecoderMode }
+          : {}),
         playbackSpeed: playbackSpeedRef.current,
         state: s,
         service: serviceRef.current,
@@ -473,6 +485,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
         selectSpeed,
         selectSubtitle,
         selectAudioDevice: cbRef.current.onSelectAudioDevice,
+        selectAndroidDecoderMode: cbRef.current.onSelectAndroidDecoderMode,
         onExit: () => onExitRef.current(),
         onJumpPreviousChannel: cbRef.current.onJumpPreviousChannel,
       })
@@ -577,10 +590,12 @@ export function usePlayerControls(params: PlayerControlsParams) {
       state: overlay.liveRef.current,
       handleBack,
       toggleFullscreen,
+      toggleResizeMode: overlay.toggleResizeMode,
       toggleAlwaysOnTop: cbRef.current.onToggleAlwaysOnTop,
       togglePlayPause,
       seekBy,
       stepSeekMs: getStepSeekMs(),
+      stepVolumeBy,
       toggleMute: cbRef.current.onToggleMute !== undefined ? toggleMute : undefined,
       openTracks: overlay.openTracks,
       closeTracks: overlay.closeTracks,

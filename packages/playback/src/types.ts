@@ -1,4 +1,4 @@
-import type { BufferPreset, ElvError, Result } from '@elv/domain';
+import type { AndroidDecoderMode, BufferPreset, ElvError, Result } from '@elv/domain';
 import type {
   AttemptToken,
   ClockAnchor,
@@ -31,6 +31,8 @@ export interface TuneRequest {
   startMs?: number;
   /** User-selected playback buffer preset forwarded on load and recovery reloads (`#147`). */
   bufferPreset?: BufferPreset;
+  /** User-selected Android video decoder mode forwarded on load and recovery reloads (`#411`). */
+  decoderMode?: AndroidDecoderMode;
 }
 
 /** What the service is doing now. */
@@ -61,6 +63,8 @@ export interface PlaybackState {
   staleEventsDropped: number;
   /** Monotonic token incremented only on Rung 3 decoder-error recreate to request a fresh native surface (`#144`). */
   readonly surfaceRecreationToken: number;
+  /** Whether playback is currently routed to an external receiver such as AirPlay (`#234`). */
+  readonly externalPlaybackActive?: boolean;
 }
 
 /** Playback controller; the UI talks to this, never to the engine. */

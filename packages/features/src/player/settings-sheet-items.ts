@@ -1,3 +1,4 @@
+import { ANDROID_DECODER_MODES, type AndroidDecoderMode } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type { MediaTracks, TrackInfo } from '@elv/playback';
 import type { IconName } from '@elv/ui-kit';
@@ -52,7 +53,13 @@ function activeAudioDeviceSummary(
   return match !== undefined ? match.description || match.name : activeAudioDevice;
 }
 
-/** Builds ordered root navigation rows for `PlayerSettingsSheet` (`Subtitles`, `Audio`, optional `Audio output`, VOD `Speed`). */
+function formatVideoDecoderLabel(mode: AndroidDecoderMode, i18n: AppI18n): string {
+  if (mode === 'hardware') return i18n.t('settings.playback.videoDecoder.hardware');
+  if (mode === 'software') return i18n.t('settings.playback.videoDecoder.software');
+  return i18n.t('settings.playback.videoDecoder.auto');
+}
+
+/** Builds ordered root navigation rows for `PlayerSettingsSheet` (`Subtitles`, `Audio`, optional `Audio output`, VOD `Speed`, optional Android `Video decoder`). */
 export function buildSettingsNavRows(
   tracks: MediaTracks,
   isVod: boolean,
@@ -62,6 +69,10 @@ export function buildSettingsNavRows(
     readonly show: boolean;
     readonly devices: readonly AudioDeviceInfo[];
     readonly activeDevice: string;
+  },
+  videoDecoder?: {
+    readonly show: boolean;
+    readonly mode: AndroidDecoderMode;
   },
 ): readonly SettingsNavRow[] {
   const subSummary = activeTrackSummary(
@@ -114,6 +125,16 @@ export function buildSettingsNavRows(
       true,
     ]);
   }
+  if (videoDecoder?.show === true) {
+    rows.push([
+      'player-settings-row-video-decoder',
+      'layers',
+      i18n.t('player.videoDecoder'),
+      formatVideoDecoderLabel(videoDecoder.mode, i18n),
+      'videoDecoder',
+      false,
+    ]);
+  }
   return rows;
 }
 
@@ -124,11 +145,13 @@ export function buildSettingsRadioItems(params: {
   playbackSpeed: number;
   audioDevices?: readonly AudioDeviceInfo[] | undefined;
   activeAudioDevice?: string | undefined;
+  androidDecoderMode?: AndroidDecoderMode | undefined;
   i18n: AppI18n;
   onSelectAudio: (id: string) => void;
   onSelectAudioDevice?: ((name: string) => void) | undefined;
   onSelectSubtitle: (id: string | null) => void;
   onSelectSpeed?: ((rate: number) => void) | undefined;
+  onSelectAndroidDecoderMode?: ((mode: AndroidDecoderMode) => void) | undefined;
 }): readonly SettingsRadioItem[] {
   const {
     view,
@@ -136,12 +159,23 @@ export function buildSettingsRadioItems(params: {
     playbackSpeed,
     audioDevices,
     activeAudioDevice = 'auto',
+    androidDecoderMode = 'auto',
     i18n,
     onSelectAudio,
     onSelectAudioDevice,
     onSelectSubtitle,
     onSelectSpeed,
+    onSelectAndroidDecoderMode,
   } = params;
+  if (view === 'videoDecoder') {
+    return ANDROID_DECODER_MODES.map((mode) => ({
+      key: `decoder-${mode}`,
+      testID: `player-settings-decoder-${mode}`,
+      label: formatVideoDecoderLabel(mode, i18n),
+      selected: androidDecoderMode === mode,
+      onPress: () => onSelectAndroidDecoderMode?.(mode),
+    }));
+  }
   if (view === 'audioDevice') {
     const normalized = normalizeAudioDeviceChoices(audioDevices);
     const isAuto = activeAudioDevice === '' || activeAudioDevice === 'auto';

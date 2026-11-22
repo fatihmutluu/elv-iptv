@@ -1,9 +1,16 @@
+import { ANDROID_DECODER_MODES, type AndroidDecoderMode } from '@elv/domain';
 import type { KeyEvent } from '@elv/focus-core';
 import type { MediaTracks } from '@elv/playback';
 import type { AudioDeviceInfo } from '../ports/video-host';
 
 /** Active level inside the 2-level Player Settings menu (`root` or a sub-view). */
-export type SettingsMenuView = 'root' | 'subtitles' | 'audio' | 'audioDevice' | 'speed';
+export type SettingsMenuView =
+  | 'root'
+  | 'subtitles'
+  | 'audio'
+  | 'audioDevice'
+  | 'speed'
+  | 'videoDecoder';
 
 /** Focused row state for the 2-level Player Settings menu. */
 export interface SettingsMenuState {
@@ -17,6 +24,7 @@ export type SettingsRootItem =
   | 'audio'
   | 'audioDevice'
   | 'speed'
+  | 'videoDecoder'
   | 'aspect'
   | 'deinterlace'
   | 'autoSubtitlesOnSkipBack'
@@ -63,10 +71,12 @@ export function settingsRootItems(
   hasAutoSubtitlesOnSkipBack = false,
   hasAutoPlayNextEpisode = false,
   hasAudioDevice = false,
+  hasVideoDecoder = false,
 ): readonly SettingsRootItem[] {
   const items: SettingsRootItem[] = ['subtitles', 'audio'];
   if (hasAudioDevice) items.push('audioDevice');
   if (isVod) items.push('speed');
+  if (hasVideoDecoder) items.push('videoDecoder');
   if (hasAspect) items.push('aspect');
   if (hasDeinterlace) items.push('deinterlace');
   if (hasAutoSubtitlesOnSkipBack) items.push('autoSubtitlesOnSkipBack');
@@ -86,6 +96,8 @@ export interface SettingsMenuOptions {
   readonly hasAudioDevice?: boolean;
   readonly audioDevices?: readonly AudioDeviceInfo[];
   readonly activeAudioDevice?: string;
+  readonly hasVideoDecoder?: boolean;
+  readonly androidDecoderMode?: AndroidDecoderMode;
 }
 
 /** Result of routing a {@link KeyEvent} while the Player Settings menu is open. */
@@ -100,7 +112,8 @@ export type SettingsMenuIntent =
   | { readonly kind: 'audio'; readonly id: string }
   | { readonly kind: 'audioDevice'; readonly name: string }
   | { readonly kind: 'subtitle'; readonly id: string | null }
-  | { readonly kind: 'speed'; readonly rate: number };
+  | { readonly kind: 'speed'; readonly rate: number }
+  | { readonly kind: 'videoDecoder'; readonly mode: AndroidDecoderMode };
 
 /** Creates the initial focused state for the given Settings menu view (`root` by default). */
 export function initialSettingsMenu(
@@ -115,6 +128,9 @@ export function initialSettingsMenu(
       view,
       index: selectedAudioDeviceIndex(options?.audioDevices, options?.activeAudioDevice),
     };
+  }
+  if (view === 'videoDecoder') {
+    return { view, index: selectedVideoDecoderIndex(options?.androidDecoderMode) };
   }
   return { view, index: 0 };
 }
@@ -133,6 +149,7 @@ export function settingsRowCount(
       options?.hasAutoSubtitlesOnSkipBack === true,
       options?.hasAutoPlayNextEpisode === true,
       options?.hasAudioDevice === true,
+      options?.hasVideoDecoder === true,
     ).length;
   }
   if (view === 'subtitles') return tracks.subtitles.length + 1;
@@ -142,6 +159,9 @@ export function settingsRowCount(
       : 0;
   }
   if (view === 'speed') return options?.isVod === true ? PLAYBACK_SPEED_OPTIONS.length : 0;
+  if (view === 'videoDecoder') {
+    return options?.hasVideoDecoder === true ? ANDROID_DECODER_MODES.length : 0;
+  }
   return tracks.audio.length;
 }
 
@@ -154,6 +174,9 @@ export function clampSettingsMenu(
   const isVod = options?.isVod === true;
   if (state.view === 'speed' && !isVod) return { view: 'root', index: 0 };
   if (state.view === 'audioDevice' && options?.hasAudioDevice !== true) {
+    return { view: 'root', index: 0 };
+  }
+  if (state.view === 'videoDecoder' && options?.hasVideoDecoder !== true) {
     return { view: 'root', index: 0 };
   }
   const count = settingsRowCount(state.view, tracks, options);
@@ -187,6 +210,11 @@ function selectedSpeedIndex(playbackSpeed: number | undefined): number {
   return idx >= 0 ? idx : PLAYBACK_SPEED_OPTIONS.indexOf(1);
 }
 
+function selectedVideoDecoderIndex(mode: AndroidDecoderMode | undefined): number {
+  const idx = ANDROID_DECODER_MODES.indexOf(mode ?? 'auto');
+  return Math.max(idx, 0);
+}
+
 /** Returns the root-level row index corresponding to `view`. */
 export function rootIndexForSettingsView(
   view: Exclude<SettingsMenuView, 'root'>,
@@ -196,6 +224,7 @@ export function rootIndexForSettingsView(
   hasAutoSubtitlesOnSkipBack = false,
   hasAutoPlayNextEpisode = false,
   hasAudioDevice = false,
+  hasVideoDecoder = false,
 ): number {
   const idx = settingsRootItems(
     isVod,
@@ -204,6 +233,7 @@ export function rootIndexForSettingsView(
     hasAutoSubtitlesOnSkipBack,
     hasAutoPlayNextEpisode,
     hasAudioDevice,
+    hasVideoDecoder,
   ).indexOf(view);
   return Math.max(idx, 0);
 }
@@ -216,6 +246,7 @@ function returnToRoot(
   hasAutoSubtitlesOnSkipBack: boolean,
   hasAutoPlayNextEpisode: boolean,
   hasAudioDevice: boolean,
+  hasVideoDecoder: boolean,
 ): SettingsMenuIntent {
   return {
     kind: 'state',
@@ -229,6 +260,7 @@ function returnToRoot(
         hasAutoSubtitlesOnSkipBack,
         hasAutoPlayNextEpisode,
         hasAudioDevice,
+        hasVideoDecoder,
       ),
     },
   };
@@ -260,6 +292,12 @@ function openSubView(
       state: { view: 'speed', index: selectedSpeedIndex(options.playbackSpeed) },
     };
   }
+  if (item === 'videoDecoder' && options?.hasVideoDecoder === true) {
+    return {
+      kind: 'state',
+      state: { view: 'videoDecoder', index: selectedVideoDecoderIndex(options.androidDecoderMode) },
+    };
+  }
   return null;
 }
 
@@ -276,6 +314,7 @@ export function routeSettingsMenuKey(
   const hasAutoSubtitlesOnSkipBack = options?.hasAutoSubtitlesOnSkipBack === true;
   const hasAutoPlayNextEpisode = options?.hasAutoPlayNextEpisode === true;
   const hasAudioDevice = options?.hasAudioDevice === true;
+  const hasVideoDecoder = options?.hasVideoDecoder === true;
   const rootItems = settingsRootItems(
     isVod,
     hasAspect,
@@ -283,6 +322,7 @@ export function routeSettingsMenuKey(
     hasAutoSubtitlesOnSkipBack,
     hasAutoPlayNextEpisode,
     hasAudioDevice,
+    hasVideoDecoder,
   );
   const cur = clampSettingsMenu(state, tracks, options);
 
@@ -297,6 +337,7 @@ export function routeSettingsMenuKey(
           hasAutoSubtitlesOnSkipBack,
           hasAutoPlayNextEpisode,
           hasAudioDevice,
+          hasVideoDecoder,
         );
   }
 
@@ -322,6 +363,7 @@ export function routeSettingsMenuKey(
           hasAutoSubtitlesOnSkipBack,
           hasAutoPlayNextEpisode,
           hasAudioDevice,
+          hasVideoDecoder,
         );
   }
 
@@ -354,6 +396,10 @@ export function routeSettingsMenuKey(
     if (cur.view === 'speed') {
       const rate = PLAYBACK_SPEED_OPTIONS[cur.index];
       return rate !== undefined ? { kind: 'speed', rate } : null;
+    }
+    if (cur.view === 'videoDecoder') {
+      const mode = ANDROID_DECODER_MODES[cur.index];
+      return mode !== undefined ? { kind: 'videoDecoder', mode } : null;
     }
     const track = tracks.audio[cur.index];
     return track !== undefined ? { kind: 'audio', id: track.id } : null;

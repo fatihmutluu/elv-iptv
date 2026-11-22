@@ -11,11 +11,95 @@ import type { StyleProp, ViewStyle } from 'react-native';
 /** The JS clock of React Native and Node; declared here because the package compiles without DOM types. */
 declare const performance: { now(): number };
 
+/** Safe-area edge insets reported by iOS `UIWindow` / `AetherSurfaceView` in points (`#415`). */
+export interface AppleSafeAreaInsets {
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly left: number;
+}
+
+/** Hardware keyboard playback shortcut emitted by iOS/iPadOS `UIKeyCommand` (`#415`). */
+export type AppleHardwareKey =
+  | 'play-pause'
+  | 'seek-back'
+  | 'seek-forward'
+  | 'channel-up'
+  | 'channel-down'
+  | 'volume-up'
+  | 'volume-down'
+  | 'mute'
+  | 'aspect'
+  | 'back';
+
+const ZERO_INSETS: AppleSafeAreaInsets = Object.freeze({ top: 0, right: 0, bottom: 0, left: 0 });
+
+const VALID_HARDWARE_KEYS: ReadonlySet<string> = new Set<AppleHardwareKey>([
+  'play-pause',
+  'seek-back',
+  'seek-forward',
+  'channel-up',
+  'channel-down',
+  'volume-up',
+  'volume-down',
+  'mute',
+  'aspect',
+  'back',
+]);
+
+interface RawInsets {
+  top?: unknown;
+  right?: unknown;
+  bottom?: unknown;
+  left?: unknown;
+}
+
+interface AetherNativeEngineHandle extends NativeEngineHandle {
+  setMuted?(muted: boolean): void;
+  setVolume?(volume: number): void;
+}
+
 interface NativeEngineModule {
-  Engine: new () => NativeEngineHandle;
+  Engine: new () => AetherNativeEngineHandle;
   uptimeMs(): number;
   engineVersion(): string;
   deviceModel?(): string;
+  readPersistentValue?(key: string): string | null | undefined;
+  writePersistentValue?(key: string, value: string): boolean;
+  writeLocalPersistentValue?(key: string, value: string): boolean;
+  persistentStorageBudgetBytes?(): number;
+  getSafeAreaInsets?(): RawInsets | null | undefined;
+  addListener?(
+    eventName: 'onSafeAreaInsetsChanged' | 'onHardwareKey',
+    listener: (payload: unknown) => void,
+  ): { remove(): void };
+}
+
+function finiteNonNeg(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function normalizeInsets(raw: unknown): AppleSafeAreaInsets {
+  if (typeof raw !== 'object' || raw === null) return ZERO_INSETS;
+  const r = raw as RawInsets;
+  return {
+    top: finiteNonNeg(r.top),
+    right: finiteNonNeg(r.right),
+    bottom: finiteNonNeg(r.bottom),
+    left: finiteNonNeg(r.left),
+  };
+}
+
+function parseHardwareKey(payload: unknown): AppleHardwareKey | null {
+  const candidate =
+    typeof payload === 'string'
+      ? payload
+      : typeof payload === 'object' && payload !== null && 'key' in payload
+        ? (payload as Record<string, unknown>).key
+        : null;
+  return typeof candidate === 'string' && VALID_HARDWARE_KEYS.has(candidate)
+    ? (candidate as AppleHardwareKey)
+    : null;
 }
 
 /** Hardware rendering tier derived from the Apple machine identifier (`#186`). */
@@ -34,7 +118,7 @@ const CAPABILITIES: EngineCapabilities = Object.freeze({
 });
 
 /** The native shared object behind each live engine this module created; `AetherSurface` binds its view to it. */
-const handles = new WeakMap<PlayerEngine, NativeEngineHandle>();
+const handles = new WeakMap<PlayerEngine, AetherNativeEngineHandle>();
 
 const nativeModule = requireOptionalNativeModule<NativeEngineModule>('ElvEngineAether');
 
@@ -66,6 +150,99 @@ export function getAppleDeviceModel(): string | null {
   if (typeof raw !== 'string') return null;
   const trimmed = raw.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * Reads a purge-safe string value from Apple persistent KV storage (iCloud KVS when entitled,
+ * falling back to `NSUserDefaults`), or `null` when absent or unavailable (`#79`).
+ */
+export function readApplePersistentValue(key: string): string | null {
+  if (key.length === 0) return null;
+  try {
+    const raw = nativeModule?.readPersistentValue?.(key);
+    return typeof raw === 'string' && raw.length > 0 ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Writes a byte-budgeted string value to Apple persistent KV storage (iCloud KVS up to 900 KB
+ * when entitled and `NSUserDefaults` mirror up to 384 KB), returning `true` when persisted (`#79`).
+ */
+export function writeApplePersistentValue(key: string, value: string): boolean {
+  if (key.length === 0) return false;
+  try {
+    return Boolean(nativeModule?.writePersistentValue?.(key, value));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Writes a strictly byte-clamped (`<= 384 KB`) string mirror directly to Apple `NSUserDefaults`
+ * so local purge recovery stays fresh when an iCloud KVS payload exceeds `384 KB` (`#79`).
+ */
+export function writeAppleLocalPersistentValue(key: string, value: string): boolean {
+  if (key.length === 0) return false;
+  try {
+    return Boolean(nativeModule?.writeLocalPersistentValue?.(key, value));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Returns the active UTF-8 payload byte ceiling for Apple persistent KV storage (`921_600` with
+ * iCloud KVS, `393_216` local-only), or `null` where the native bridge is unavailable (`#79`).
+ */
+export function getApplePersistentBudgetBytes(): number | null {
+  try {
+    const raw = nativeModule?.persistentStorageBudgetBytes?.();
+    return typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Reads current iOS safe-area edge insets in points (`0` on tvOS or when native module is absent, `#415`). */
+export function getAppleSafeAreaInsets(): AppleSafeAreaInsets {
+  return normalizeInsets(nativeModule?.getSafeAreaInsets?.());
+}
+
+/** Subscribes to live iOS safe-area inset updates across portrait and landscape rotations (`#415`). */
+export function subscribeAppleSafeAreaInsets(
+  listener: (insets: AppleSafeAreaInsets) => void,
+): () => void {
+  const sub = nativeModule?.addListener?.('onSafeAreaInsetsChanged', (payload) => {
+    listener(normalizeInsets(payload));
+  });
+  return () => {
+    sub?.remove();
+  };
+}
+
+/** Subscribes to iOS/iPadOS `UIKeyCommand` hardware keyboard playback actions (`#415`). */
+export function subscribeAppleHardwareKeys(listener: (key: AppleHardwareKey) => void): () => void {
+  const sub = nativeModule?.addListener?.('onHardwareKey', (payload) => {
+    const key = parseHardwareKey(payload);
+    if (key !== null) listener(key);
+  });
+  return () => {
+    sub?.remove();
+  };
+}
+
+/** Sets native `AVPlayer.isMuted` on a live engine created by {@link createAetherEngine} (`#415`). */
+export function setAppleEngineMuted(engine: PlayerEngine, muted: boolean): void {
+  handles.get(engine)?.setMuted?.(Boolean(muted));
+}
+
+/** Sets native `AVPlayer.volume` (`0`–`100`, clamped) on a live engine created by {@link createAetherEngine} (`#415`). */
+export function setAppleEngineVolume(engine: PlayerEngine, volume: number): void {
+  if (!Number.isFinite(volume)) return;
+  const clamped = Math.min(100, Math.max(0, volume));
+  handles.get(engine)?.setVolume?.(clamped);
 }
 
 function wrap(module: NativeEngineModule): PlayerEngine {

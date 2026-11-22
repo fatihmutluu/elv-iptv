@@ -128,6 +128,7 @@ internal class PlayerFactory(
     live: Boolean = false,
     streamKind: StreamKind = if (live) StreamKind.HLS_LIVE else StreamKind.VOD,
     bufferPreset: BufferPreset = BufferPreset.AUTO,
+    decoderMode: VideoDecoderMode = VideoDecoderMode.AUTO,
   ): ExoPlayer {
     if (audioFocusAllowed) {
       try {
@@ -137,6 +138,7 @@ internal class PlayerFactory(
           preferHevcOverDolbyVision = preferHevcOverDolbyVision,
           streamKind = streamKind,
           bufferPreset = bufferPreset,
+          decoderMode = decoderMode,
           handleAudioFocus = true,
         )
       } catch (e: SecurityException) {
@@ -150,6 +152,7 @@ internal class PlayerFactory(
       preferHevcOverDolbyVision = preferHevcOverDolbyVision,
       streamKind = streamKind,
       bufferPreset = bufferPreset,
+      decoderMode = decoderMode,
       handleAudioFocus = false,
     )
   }
@@ -159,6 +162,7 @@ internal class PlayerFactory(
     preferHevcOverDolbyVision: Boolean,
     streamKind: StreamKind,
     bufferPreset: BufferPreset,
+    decoderMode: VideoDecoderMode,
     handleAudioFocus: Boolean,
   ): ExoPlayer {
     val buffers = loadControlForStream(streamKind, bufferPreset)
@@ -168,6 +172,7 @@ internal class PlayerFactory(
       softwareAudio = softwareAudio,
       preferHevcOverDolbyVision = preferHevcOverDolbyVision,
       deviceQuirks = deviceQuirks,
+      decoderMode = decoderMode,
     )
     val loadControl = DefaultLoadControl.Builder()
       .setBufferDurationsMs(

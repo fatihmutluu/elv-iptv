@@ -14,6 +14,8 @@ import {
 import { elvError, err, ok, type Result } from './result';
 
 export {
+  ANDROID_DECODER_MODES,
+  type AndroidDecoderMode,
   type ArtworkCacheLimitMbPref,
   BUFFER_PRESETS,
   type BufferPreset,
@@ -21,6 +23,7 @@ export {
   type DefaultResizeModePref,
   type EpgTimeSpanHoursPref,
   type GuideRefreshHoursPref,
+  isAndroidDecoderMode,
   type LogoBackdropModePref,
   MAX_PREF_FONT_SCALE,
   MAX_PREF_PLAYER_VOLUME,
@@ -81,6 +84,7 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   artworkCacheLimitMb: 128,
   confirmExitOnBack: true,
   preferredAudioDevice: 'auto',
+  androidDecoderMode: 'auto',
 });
 
 /** Partial update applied on top of the current {@link PreferencesSnapshot}. */

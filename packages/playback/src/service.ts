@@ -133,7 +133,8 @@ export function createPlaybackServiceWith(
       hooks.onReset?.();
       stopEngine();
       freezeAnchor();
-      store.update({ status: { kind: 'failed', error } });
+      const { externalPlaybackActive: _ep, ...rest } = state();
+      store.replace({ ...rest, status: { kind: 'failed', error } });
     });
 
   const sendLoad = (overrides: LoadOverrides = {}): boolean => {
@@ -146,6 +147,7 @@ export function createPlaybackServiceWith(
     trackPrefs.beginReload();
     const baseOptions: LoadOptions = {
       ...(current.bufferPreset === undefined ? {} : { bufferPreset: current.bufferPreset }),
+      ...(current.decoderMode === undefined ? {} : { decoderMode: current.decoderMode }),
       ...overrides.options,
     };
     const options = trackPrefs.loadOptions(
@@ -357,7 +359,8 @@ export function createPlaybackServiceWith(
         hooks.onReset?.();
         trackPrefs.beginReload();
         const next = nextAttempt();
-        store.update({ status: { kind: 'tuning' } });
+        const { externalPlaybackActive: _ep, ...rest } = state();
+        store.replace({ ...rest, status: { kind: 'tuning' } });
         return next;
       });
       armStartTimeout(startTimeoutMs());
@@ -370,7 +373,13 @@ export function createPlaybackServiceWith(
       stopEngine();
       trackPrefs.reset();
       lastVodPositionMs = undefined;
-      const { anchor: _a, atLiveEdge: _l, videoInfo: _v, ...rest } = state();
+      const {
+        anchor: _a,
+        atLiveEdge: _l,
+        videoInfo: _v,
+        externalPlaybackActive: _ep,
+        ...rest
+      } = state();
       store.replace({ ...rest, status: { kind: 'idle' }, tracks: EMPTY_TRACKS });
     },
     play() {

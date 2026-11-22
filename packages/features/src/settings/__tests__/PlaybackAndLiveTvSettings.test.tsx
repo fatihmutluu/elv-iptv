@@ -43,6 +43,7 @@ interface HarnessProps {
   androidSource?: AndroidKeySource;
   artworkCache?: ArtworkCacheAdapter;
   initialSection?: SettingsSection;
+  showAndroidDecoder?: boolean;
 }
 
 function Harness({
@@ -57,6 +58,7 @@ function Harness({
   androidSource,
   artworkCache,
   initialSection,
+  showAndroidDecoder,
 }: HarnessProps): ReactElement {
   const [store] = useState(() => suppliedStore ?? createMemoryPreferencesStore());
   const [i18n] = useState(() => createAppI18n('en'));
@@ -102,6 +104,7 @@ function Harness({
               <SettingsScreen
                 preferences={controller}
                 {...(initialSection !== undefined ? { initialSection } : {})}
+                {...(showAndroidDecoder !== undefined ? { showAndroidDecoder } : {})}
                 renderSources={() => <View testID="mock-sources-pane" />}
                 renderLicenses={() => <View testID="mock-licenses-pane" />}
               />
@@ -335,5 +338,75 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
     // Up back to row 0 stays inside Live TV panel cleanly
     await pressKey(KEYCODE_DPAD_UP);
     expect(screen.getByTestId('settings-panel-liveTv')).toBeTruthy();
+  });
+
+  it('shows Video decoder row only when showAndroidDecoder is enabled (#411)', async () => {
+    const store = createMemoryPreferencesStore();
+    const { unmount } = await render(
+      <Harness store={store} initialSection="playback" showAndroidDecoder={false} />,
+    );
+    expect(screen.queryByTestId('settings-playback-decoder-auto')).toBeNull();
+    await unmount();
+
+    await render(<Harness store={store} initialSection="playback" showAndroidDecoder={true} />);
+    expect(screen.getByTestId('settings-playback-decoder-auto')).toBeTruthy();
+    expect(screen.getByTestId('settings-playback-decoder-hardware')).toBeTruthy();
+    expect(screen.getByTestId('settings-playback-decoder-software')).toBeTruthy();
+
+    await fireEvent.press(screen.getByTestId('settings-playback-decoder-software'));
+    await waitFor(async () => {
+      expect((await store.load()).androidDecoderMode).toBe('software');
+    });
+  });
+
+  it('reaches Video decoder row via 10-foot Android TV D-pad and activates Hardware (#411)', async () => {
+    jest.replaceProperty(Platform, 'OS', 'android');
+    jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
+    let keyListener: ((e: AndroidKeyEvent) => void) | undefined;
+    const androidSource: AndroidKeySource = {
+      addListener: (l) => {
+        keyListener = l;
+        return {
+          remove: () => {
+            keyListener = undefined;
+          },
+        };
+      },
+    };
+    const pressKey = async (keyCode: number) => {
+      await act(async () => {
+        keyListener?.({ action: 'down', keyCode, canceled: false, ageMs: 0 });
+        keyListener?.({ action: 'up', keyCode, canceled: false, ageMs: 10 });
+      });
+    };
+
+    const tvStore = createMemoryPreferencesStore();
+    await render(
+      <Harness
+        store={tvStore}
+        androidSource={androidSource}
+        initialSection="playback"
+        showAndroidDecoder={true}
+        viewport={{
+          formFactor: 'tv',
+          orientation: 'landscape',
+          inputModality: 'tv',
+          width: 1920,
+          height: 1080,
+        }}
+      />,
+    );
+
+    // Enter Playback content pane (row 0), move down 6 rows to Video decoder row, Right to Hardware, Select
+    await pressKey(KEYCODE_DPAD_RIGHT);
+    for (let i = 0; i < 6; i += 1) {
+      await pressKey(KEYCODE_DPAD_DOWN);
+    }
+    await pressKey(KEYCODE_DPAD_RIGHT);
+    await pressKey(KEYCODE_DPAD_CENTER);
+
+    await waitFor(async () => {
+      expect((await tvStore.load()).androidDecoderMode).toBe('hardware');
+    });
   });
 });

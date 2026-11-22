@@ -134,6 +134,9 @@ public final class CommandFence: @unchecked Sendable {
     case let .mediaInfo(_, info):
       guard driverEpoch == snapshot.epoch else { return nil }
       return .mediaInfo(attempt: snapshot.token, info: info)
+    case let .externalPlayback(_, active):
+      guard driverEpoch == snapshot.epoch else { return nil }
+      return .externalPlayback(attempt: snapshot.token, active: active)
     case let .state(attempt, _),
       let .firstFrame(attempt, _),
       let .clock(attempt, _),

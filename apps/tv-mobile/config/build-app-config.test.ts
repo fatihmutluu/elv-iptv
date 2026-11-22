@@ -174,6 +174,10 @@ describe('buildAppConfig', () => {
       expect(config.ios?.infoPlist?.NSAppTransportSecurity).toEqual({
         NSAllowsArbitraryLoads: true,
       });
+      expect(config.ios?.infoPlist?.NSBonjourServices).toEqual(['_airplay._tcp']);
+      expect(config.ios?.infoPlist?.NSLocalNetworkUsageDescription).toBe(
+        'ELV IPTV discovers AirPlay receivers on your local network to match supported audio formats.',
+      );
       expect(config.ios?.infoPlist?.NSAppTransportSecurity).not.toHaveProperty(
         'NSAllowsLocalNetworking',
       );

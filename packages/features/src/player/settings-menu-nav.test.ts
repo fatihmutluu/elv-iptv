@@ -597,4 +597,57 @@ describe('settings-menu-nav', () => {
       ),
     ).toEqual({ kind: 'state', state: { view: 'root', index: 2 } });
   });
+
+  it('supports Android videoDecoder sub-view navigation, clamping, and selection (#411)', () => {
+    const opts = {
+      isVod: true,
+      hasAspect: true,
+      hasVideoDecoder: true,
+      androidDecoderMode: 'hardware' as const,
+    };
+    expect(settingsRootItems(true, true, false, false, false, false, true)).toEqual([
+      'subtitles',
+      'audio',
+      'speed',
+      'videoDecoder',
+      'aspect',
+      'stats',
+    ]);
+    expect(
+      rootIndexForSettingsView('videoDecoder', true, true, false, false, false, false, true),
+    ).toBe(3);
+    expect(settingsRowCount('videoDecoder', TRACKS, opts)).toBe(3);
+    expect(settingsRowCount('videoDecoder', TRACKS, { hasVideoDecoder: false })).toBe(0);
+    expect(initialSettingsMenu('videoDecoder', opts)).toEqual({ view: 'videoDecoder', index: 1 });
+    expect(
+      clampSettingsMenu({ view: 'videoDecoder', index: 2 }, TRACKS, { hasVideoDecoder: false }),
+    ).toEqual({ view: 'root', index: 0 });
+
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'root', index: 3 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'state', state: { view: 'videoDecoder', index: 1 } });
+
+    expect(
+      routeSettingsMenuKey(
+        { key: 'select', kind: 'press', time: 0 },
+        { view: 'videoDecoder', index: 2 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'videoDecoder', mode: 'software' });
+
+    expect(
+      routeSettingsMenuKey(
+        { key: 'left', kind: 'press', time: 0 },
+        { view: 'videoDecoder', index: 2 },
+        TRACKS,
+        opts,
+      ),
+    ).toEqual({ kind: 'state', state: { view: 'root', index: 3 } });
+  });
 });

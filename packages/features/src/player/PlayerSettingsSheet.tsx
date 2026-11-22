@@ -1,3 +1,4 @@
+import type { AndroidDecoderMode } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type { MediaTracks } from '@elv/playback';
 import {
@@ -33,6 +34,7 @@ export interface PlayerSettingsSheetProps {
   readonly statsVisible: boolean;
   readonly audioDevices?: readonly AudioDeviceInfo[];
   readonly activeAudioDevice?: string;
+  readonly androidDecoderMode?: AndroidDecoderMode;
   readonly isTv: boolean;
   readonly formFactor: FormFactor;
   readonly i18n: AppI18n;
@@ -41,6 +43,7 @@ export interface PlayerSettingsSheetProps {
   readonly onSelectAudioDevice?: (name: string) => void;
   readonly onSelectSubtitle: (id: string | null) => void;
   readonly onSelectSpeed?: (rate: number) => void;
+  readonly onSelectAndroidDecoderMode?: (mode: AndroidDecoderMode) => void;
   readonly onToggleResizeMode?: () => void;
   readonly onToggleDeinterlace?: () => void;
   readonly onToggleAutoSubtitlesOnSkipBack?: () => void;
@@ -97,6 +100,9 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
   const showAudioDevice =
     (props.audioDevices?.length ?? 0) > 0 && props.onSelectAudioDevice !== undefined;
   const activeAudioDevice = props.activeAudioDevice ?? 'auto';
+  const showVideoDecoder =
+    props.androidDecoderMode !== undefined && props.onSelectAndroidDecoderMode !== undefined;
+  const androidDecoderMode = props.androidDecoderMode ?? 'auto';
   const isRoot = menuState.view === 'root';
   const title = isRoot
     ? i18n.t('player.settings')
@@ -106,14 +112,26 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         ? i18n.t('player.audioDevice')
         : menuState.view === 'speed'
           ? i18n.t('player.speed')
-          : i18n.t('player.audioTracks');
+          : menuState.view === 'videoDecoder'
+            ? i18n.t('player.videoDecoder')
+            : i18n.t('player.audioTracks');
 
   const navRows = isRoot
-    ? buildSettingsNavRows(tracks, isVod, playbackSpeed, i18n, {
-        show: showAudioDevice,
-        devices: props.audioDevices ?? [],
-        activeDevice: activeAudioDevice,
-      })
+    ? buildSettingsNavRows(
+        tracks,
+        isVod,
+        playbackSpeed,
+        i18n,
+        {
+          show: showAudioDevice,
+          devices: props.audioDevices ?? [],
+          activeDevice: activeAudioDevice,
+        },
+        {
+          show: showVideoDecoder,
+          mode: androidDecoderMode,
+        },
+      )
     : [];
   const radioItems = isRoot
     ? []
@@ -123,11 +141,13 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         playbackSpeed,
         audioDevices: props.audioDevices,
         activeAudioDevice,
+        androidDecoderMode,
         i18n,
         onSelectAudio: props.onSelectAudio,
         onSelectAudioDevice: props.onSelectAudioDevice,
         onSelectSubtitle: props.onSelectSubtitle,
         onSelectSpeed: props.onSelectSpeed,
+        onSelectAndroidDecoderMode: props.onSelectAndroidDecoderMode,
       });
 
   const content = (

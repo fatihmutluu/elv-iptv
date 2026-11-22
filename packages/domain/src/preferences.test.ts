@@ -54,6 +54,7 @@ describe('preferences codec', () => {
       artworkCacheLimitMb: 128,
       confirmExitOnBack: true,
       preferredAudioDevice: 'auto',
+      androidDecoderMode: 'auto',
     });
   });
 

@@ -74,6 +74,28 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
   public func definition() -> ModuleDefinition {
     Name("ElvEngineAether")
 
+    Events("onSafeAreaInsetsChanged", "onHardwareKey")
+
+    OnCreate {
+      AppleModuleEventHub.shared.attach(module: self)
+    }
+
+    OnStartObserving("onSafeAreaInsetsChanged") {
+      AppleModuleEventHub.shared.setObservingSafeArea(true, from: self)
+    }
+
+    OnStopObserving("onSafeAreaInsetsChanged") {
+      AppleModuleEventHub.shared.setObservingSafeArea(false, from: self)
+    }
+
+    OnStartObserving("onHardwareKey") {
+      AppleModuleEventHub.shared.setObservingHardwareKey(true, from: self)
+    }
+
+    OnStopObserving("onHardwareKey") {
+      AppleModuleEventHub.shared.setObservingHardwareKey(false, from: self)
+    }
+
     Function("uptimeMs") { () -> Double in
       ProcessInfo.processInfo.systemUptime * 1_000.0
     }
@@ -86,7 +108,28 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
       resolveAppleDeviceModel()
     }
 
+    Function("readPersistentValue") { (key: String) -> String? in
+      ApplePersistentKVStore.read(key: key)
+    }
+
+    Function("writePersistentValue") { (key: String, value: String) -> Bool in
+      ApplePersistentKVStore.write(key: key, value: value)
+    }
+
+    Function("writeLocalPersistentValue") { (key: String, value: String) -> Bool in
+      ApplePersistentKVStore.writeLocal(key: key, value: value)
+    }
+
+    Function("persistentStorageBudgetBytes") { () -> Int in
+      ApplePersistentKVStore.budgetBytes()
+    }
+
+    Function("getSafeAreaInsets") { () -> [String: Double] in
+      AppleModuleEventHub.shared.currentSafeAreaInsetsDictionary()
+    }
+
     OnDestroy {
+      AppleModuleEventHub.shared.detach(module: self)
       let remaining: [EngineObject] = self.enginesLock.withLock {
         let list = self.engineTable.values.compactMap(\.value)
         self.engineTable.removeAll()
@@ -128,6 +171,14 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
 
       Function("setSpeed") { (engine: EngineObject, attempt: Int, rate: Double) in
         engine.setSpeed(attempt, rate: rate)
+      }
+
+      Function("setMuted") { (engine: EngineObject, muted: Bool) in
+        engine.setMuted(muted)
+      }
+
+      Function("setVolume") { (engine: EngineObject, volume: Double) in
+        engine.setVolume(volume)
       }
 
       Function("selectAudioTrack") { (engine: EngineObject, attempt: Int, id: String) in

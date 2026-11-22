@@ -1385,3 +1385,18 @@ msgstr "Confirm before exiting with Back"
 
 msgid "settings.playback.audioDevice"
 msgstr "Audio output device"
+
+msgid "settings.playback.videoDecoder"
+msgstr "Video decoder"
+
+msgid "settings.playback.videoDecoder.auto"
+msgstr "Auto"
+
+msgid "settings.playback.videoDecoder.hardware"
+msgstr "Hardware"
+
+msgid "settings.playback.videoDecoder.software"
+msgstr "Software"
+
+msgid "player.videoDecoder"
+msgstr "Video decoder"

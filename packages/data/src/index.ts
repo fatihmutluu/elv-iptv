@@ -36,4 +36,5 @@ export * from './stream-resolver';
 export * from './templates';
 export * from './title-clean';
 export * from './user-state';
+export * from './user-state-backup';
 export * from './write-coalescer';

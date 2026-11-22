@@ -1,5 +1,5 @@
 import type { ItemRow } from '@elv/data';
-import type { DefaultResizeModePref } from '@elv/domain';
+import type { AndroidDecoderMode, DefaultResizeModePref } from '@elv/domain';
 import { type AppI18n, resolveLanguageLabel } from '@elv/i18n';
 import {
   type MediaTracks,
@@ -152,6 +152,8 @@ export interface PlayerOverlayStateParams {
   hasAudioDevice?: boolean | undefined;
   audioDevices?: readonly AudioDeviceInfo[] | undefined;
   activeAudioDevice?: string | undefined;
+  hasVideoDecoder?: boolean | undefined;
+  androidDecoderMode?: AndroidDecoderMode | undefined;
   hasNextEpisode: boolean;
   hasPreviousChannel: boolean;
   initialOsdHidden?: boolean | undefined;
