@@ -1,12 +1,16 @@
 package io.github.fatihmutluu.elv.media3
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.os.SystemClock
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.Exceptions
+import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.lang.ref.WeakReference
 import java.util.Collections
+import kotlin.concurrent.thread
 
 /**
  * Exposes the Media3 engine as the shared object class `Engine` with the player core spec 5.1 commands and
@@ -23,6 +27,7 @@ class ElvEngineMedia3Module : Module() {
   private var observedInsetsActivity: WeakReference<Activity>? = null
   private var detachPipObserver: (() -> Unit)? = null
   private var observedPipActivity: WeakReference<Activity>? = null
+  private var pendingPlaylistPick: Promise? = null
 
   override fun definition() = ModuleDefinition {
     Name("ElvEngineMedia3")
@@ -70,6 +75,63 @@ class ElvEngineMedia3Module : Module() {
       }
     }
 
+    AsyncFunction("readClipboardText") { ->
+      val context = appContext.currentActivity ?: appContext.reactContext ?: return@AsyncFunction null
+      readClipboardTextFromContext(context)
+    }.runOnQueue(Queues.MAIN)
+
+    AsyncFunction("pickPlaylistFile") { promise: Promise ->
+      val activity = appContext.currentActivity
+      if (activity == null) {
+        promise.resolve(null)
+        return@AsyncFunction
+      }
+      val intent = createPlaylistPickerIntent()
+      val canHandle = runCatching { intent.resolveActivity(activity.packageManager) != null }.getOrDefault(false)
+      if (!canHandle) {
+        promise.resolve(null)
+        return@AsyncFunction
+      }
+      val displaced = synchronized(lifecycleLock) {
+        val prev = pendingPlaylistPick
+        pendingPlaylistPick = promise
+        prev
+      }
+      displaced?.resolve(null)
+      try {
+        activity.startActivityForResult(intent, PICK_PLAYLIST_REQUEST_CODE)
+      } catch (_: ActivityNotFoundException) {
+        clearPendingPickIfSame(promise)?.resolve(null)
+      } catch (_: SecurityException) {
+        clearPendingPickIfSame(promise)?.resolve(null)
+      }
+    }.runOnQueue(Queues.MAIN)
+
+    OnActivityResult { activity, payload ->
+      if (payload.requestCode != PICK_PLAYLIST_REQUEST_CODE) return@OnActivityResult
+      val promise = synchronized(lifecycleLock) {
+        val pending = pendingPlaylistPick
+        pendingPlaylistPick = null
+        pending
+      } ?: return@OnActivityResult
+      val uri = if (payload.resultCode == Activity.RESULT_OK) payload.data?.data else null
+      if (uri == null) {
+        promise.resolve(null)
+        return@OnActivityResult
+      }
+      val appCtx = activity.applicationContext
+      thread(isDaemon = true, name = "ElvSafPlaylistRead") {
+        try {
+          val picked = readBoundedPlaylistDocument(appCtx, uri)
+          promise.resolve(picked?.toBridgeMap())
+        } catch (tooLarge: PlaylistTooLargeException) {
+          promise.reject("E_PLAYLIST_TOO_LARGE", tooLarge.message ?: "Playlist file too large", tooLarge)
+        } catch (err: Exception) {
+          promise.reject("E_PLAYLIST_READ_FAILED", err.message ?: "Failed to read playlist file", err)
+        }
+      }
+    }
+
     OnCreate {
       startStandbyMonitor()
       attachSafeAreaObserver()
@@ -86,6 +148,7 @@ class ElvEngineMedia3Module : Module() {
       val monitorToStop: StandbyMonitor?
       val insetsToDetach: (() -> Unit)?
       val pipToDetach: (() -> Unit)?
+      val pickToCancel: Promise?
       synchronized(lifecycleLock) {
         monitorToStop = standbyMonitor
         standbyMonitor = null
@@ -95,7 +158,10 @@ class ElvEngineMedia3Module : Module() {
         pipToDetach = detachPipObserver
         detachPipObserver = null
         observedPipActivity = null
+        pickToCancel = pendingPlaylistPick
+        pendingPlaylistPick = null
       }
+      pickToCancel?.resolve(null)
       monitorToStop?.stop()
       insetsToDetach?.invoke()
       pipToDetach?.invoke()
@@ -223,4 +289,14 @@ class ElvEngineMedia3Module : Module() {
     }
     previous?.invoke()
   }
+
+  private fun clearPendingPickIfSame(target: Promise): Promise? =
+    synchronized(lifecycleLock) {
+      if (pendingPlaylistPick === target) {
+        pendingPlaylistPick = null
+        target
+      } else {
+        null
+      }
+    }
 }

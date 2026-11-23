@@ -65,6 +65,7 @@ describe('bridgeNativeEngine', () => {
       options: {
         softwareAudio: true,
         preferHevcOverDolbyVision: true,
+        allowLegacyTls: true,
         bufferPreset: 'large',
         decoderMode: 'hardware',
         audioTrackId: '1:0',
@@ -91,6 +92,7 @@ describe('bridgeNativeEngine', () => {
       startMs: 5_000,
       softwareAudio: true,
       preferHevcOverDolbyVision: true,
+      allowLegacyTls: true,
       bufferPreset: 'large',
       decoderMode: 'hardware',
       audioTrackId: '1:0',

@@ -226,10 +226,12 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
       home = { snapshot: home.snapshot, heroIndex };
     },
 
-    getCatalog: (kind) => {
+    getCatalog: (kind, opts) => {
       const hit = catalogByKind[kind];
-      recordLookup(hit !== null);
-      return hit;
+      const wantGrouped = kind === 'movie' && opts?.groupVersions === true;
+      const valid = hit !== null && (hit.groupVersions === true) === wantGrouped ? hit : null;
+      recordLookup(valid !== null);
+      return valid;
     },
     setCatalog(kind, state) {
       catalogByKind[kind] = {
@@ -237,16 +239,21 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
         continueItems: state.continueItems,
         railItemsByCategoryId: capCatalogRails(state.railItemsByCategoryId),
         progressByKey: state.progressByKey,
+        ...(kind === 'movie' && state.groupVersions === true ? { groupVersions: true } : {}),
       };
     },
 
-    getGridFirstPage: (kind, categoryId) => {
-      const hit = gridFirstPages[kind].get(categoryId);
+    getGridFirstPage: (kind, categoryId, opts) => {
+      const key =
+        kind === 'movie' && opts?.groupVersions === true ? `${categoryId}|gv` : categoryId;
+      const hit = gridFirstPages[kind].get(key);
       recordLookup(hit !== undefined);
       return hit;
     },
-    setGridFirstPage(kind, categoryId, rows) {
-      gridFirstPages[kind].set(categoryId, rows);
+    setGridFirstPage(kind, categoryId, rows, opts) {
+      const key =
+        kind === 'movie' && opts?.groupVersions === true ? `${categoryId}|gv` : categoryId;
+      gridFirstPages[kind].set(key, rows);
     },
 
     getLive: () => {
@@ -330,6 +337,7 @@ export function createCatalogUiCache(opts: CatalogUiCacheOptions = {}): CatalogU
             continueItems: cur.continueItems.filter((r) => r.sourceId !== sourceId),
             railItemsByCategoryId: nextRails,
             progressByKey: cur.progressByKey,
+            ...(cur.groupVersions === true ? { groupVersions: true } : {}),
           };
         }
         gridFirstPages[kind].deleteWhere((catId) => catId.startsWith(catPrefix));

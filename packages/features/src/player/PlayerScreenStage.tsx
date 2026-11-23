@@ -43,6 +43,7 @@ export interface PlayerScreenProps {
         | 'saveTrackPreference'
         | 'recordRecentChannel'
         | 'listRecentChannels'
+        | 'liveVariants'
       >
     > & {
       readonly epgNowNext?: CatalogService['nowNext'];

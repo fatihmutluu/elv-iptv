@@ -11,6 +11,7 @@ import {
   transportHeaders,
 } from '@elv/domain';
 import { type M3uEntry, scanM3u } from '@elv/sources';
+import { allowlistForKind, reconcileCategorySelection } from './category-selection';
 import { fingerprintM3uCredentials } from './credential-fingerprint';
 import { foldText } from './fold';
 import {
@@ -85,6 +86,7 @@ type M3uOutcome =
       staged: StagedM3u;
       validator: HttpCacheValidator | undefined;
       credentialFingerprint: string | undefined;
+      discoveredCategories: Readonly<Record<M3uBrowseKind, readonly string[]>>;
     }
   | { kind: 'not-modified'; validator: HttpCacheValidator | undefined };
 
@@ -103,6 +105,14 @@ async function openPlaylist(
   signal: AbortSignal | undefined,
   allowConditional: boolean,
 ): Promise<PlaylistOpen> {
+  if (source.settings.isLocalPlaylist === true) {
+    if (deps.localPlaylistStore === undefined) {
+      throw new Stop(elvError('storage', 'local-playlist-unsupported'));
+    }
+    const body = await deps.localPlaylistStore.openRead(source.id);
+    if (body === undefined) throw new Stop(elvError('storage', 'local-playlist-missing'));
+    return { kind: 'body', body, validator: undefined, finalUrl: '', contentLength: undefined };
+  }
   const sent = allowConditional
     ? sanitizeValidator(source.settings.httpCache?.playlist)
     : undefined;
@@ -111,6 +121,7 @@ async function openPlaylist(
     response = await deps.http.get(url, {
       headers: conditionalHeaders(transportHeaders(source.settings.transport), sent),
       timeoutMs: REQUEST_TIMEOUT_MS,
+      ...(source.settings.transport?.allowLegacyTls ? { allowLegacyTls: true } : {}),
       ...(signal === undefined ? {} : { signal }),
     });
   } catch {
@@ -141,6 +152,8 @@ const groupsOf = (entry: M3uEntry): readonly string[] =>
 interface M3uStreamTracker {
   readonly meter: StreamProgressMeter;
   readonly contentLength: number | undefined;
+  readonly allowlists: Readonly<Record<M3uBrowseKind, ReadonlySet<string> | undefined>>;
+  readonly discovered: Readonly<Record<M3uBrowseKind, Set<string>>>;
   bytesRead: number;
 }
 
@@ -173,6 +186,12 @@ async function processBatch(
       c.counts.skippedPlaceholders = (c.counts.skippedPlaceholders ?? 0) + 1;
       continue;
     }
+    const browseKind: M3uBrowseKind = kind === 'episode' ? 'series' : kind;
+    const rawGroups = groupsOf(entry);
+    for (const g of rawGroups) tracker.discovered[browseKind].add(g);
+    const allow = tracker.allowlists[browseKind];
+    const allowedGroups = allow === undefined ? rawGroups : rawGroups.filter((g) => allow.has(g));
+    if (allowedGroups.length === 0) continue;
     const template = templated(st, entry.url);
     const legacyKey = m3uKey(c.sourceId, keyTemplate(template), entry.name);
     const backupUrlsJson =
@@ -194,16 +213,15 @@ async function processBatch(
     if (kind === 'movie') {
       movies.push(row);
       st.written.movies += 1;
-      placeM3uEntry(st, 'movie', row.key, groupsOf(entry), fresh, links);
+      placeM3uEntry(st, 'movie', row.key, allowedGroups, fresh, links);
     } else if (entry.kindHint === 'episode') {
-      const group = entry.groups[0] ?? UNGROUPED;
+      const group = allowedGroups[0] ?? UNGROUPED;
       const folded = foldText(group);
       const seriesKey = `m:${c.sourceId}:series:${folded === '' ? 'ungrouped' : folded}`;
       episodes.push({ ...row, seriesKey });
       st.written.episodes += 1;
       if (!series.has(seriesKey)) series.set(seriesKey, group);
-      const groups = groupsOf(entry);
-      const freshGroups = groups.filter((g) => !st.placedSeries.has(`${seriesKey}\n${g}`));
+      const freshGroups = allowedGroups.filter((g) => !st.placedSeries.has(`${seriesKey}\n${g}`));
       if (freshGroups.length > 0) {
         st.written.series += 1;
         placeM3uEntry(st, 'series', seriesKey, freshGroups, fresh, links);
@@ -221,7 +239,7 @@ async function processBatch(
             : null,
       });
       st.written.live += 1;
-      placeM3uEntry(st, 'live', row.key, groupsOf(entry), fresh, links);
+      placeM3uEntry(st, 'live', row.key, allowedGroups, fresh, links);
     }
   }
   for (const kind of ['live', 'movie', 'series'] as const) {
@@ -288,7 +306,23 @@ async function execute(
     meter.completeStream();
     return { kind: 'not-modified', validator: opened.validator };
   }
-  const tracker: M3uStreamTracker = { meter, contentLength: opened.contentLength, bytesRead: 0 };
+  const allowlists: Record<M3uBrowseKind, ReadonlySet<string> | undefined> = {
+    live: allowlistForKind(source.settings.categorySelection, 'live'),
+    movie: allowlistForKind(source.settings.categorySelection, 'movie'),
+    series: allowlistForKind(source.settings.categorySelection, 'series'),
+  };
+  for (const kind of ['live', 'movie', 'series'] as const) {
+    if (allowlists[kind] !== undefined && allowlists[kind].size === 0) {
+      c.intentionallyEmptyKinds.add(kind);
+    }
+  }
+  const tracker: M3uStreamTracker = {
+    meter,
+    contentLength: opened.contentLength,
+    allowlists,
+    discovered: { live: new Set(), movie: new Set(), series: new Set() },
+    bytesRead: 0,
+  };
   const body =
     opened.contentLength === undefined
       ? opened.body
@@ -297,7 +331,7 @@ async function execute(
         });
   const scan = scanM3u(body, {
     batchSize: c.batchSize,
-    baseUrl: opened.finalUrl,
+    ...(opened.finalUrl === '' ? {} : { baseUrl: opened.finalUrl }),
     ...(c.deps.decompressor === undefined ? {} : { decompressor: c.deps.decompressor }),
   });
   const buffered: M3uEntry[] = [];
@@ -348,7 +382,17 @@ async function execute(
   await write(c, st, gate.release(), tracker);
   meter.completeStream();
   const staged = finishM3uRun(c, st, oldVars, guideUrls);
-  return { kind: 'imported', staged, validator: opened.validator, credentialFingerprint };
+  return {
+    kind: 'imported',
+    staged,
+    validator: opened.validator,
+    credentialFingerprint,
+    discoveredCategories: {
+      live: [...tracker.discovered.live],
+      movie: [...tracker.discovered.movie],
+      series: [...tracker.discovered.series],
+    },
+  };
 }
 
 /**
@@ -361,10 +405,14 @@ export async function importM3u(
   deps: ImportDeps,
   opts: ImportOptions,
 ): Promise<Result<ImportSummary>> {
-  const playlistUrl = await deps.secrets
-    .get(secretKey(source.id, 'playlist'))
-    .catch(() => undefined);
-  if (playlistUrl === undefined) return err(elvError('storage', 'secret-missing'));
+  let playlistUrl = '';
+  if (source.settings.isLocalPlaylist !== true) {
+    const storedUrl = await deps.secrets
+      .get(secretKey(source.id, 'playlist'))
+      .catch(() => undefined);
+    if (storedUrl === undefined) return err(elvError('storage', 'secret-missing'));
+    playlistUrl = storedUrl;
+  }
   const oldVars = await readUrlVars(deps, source.id);
   const meter = createStreamProgressMeter();
   let outcome: M3uOutcome | undefined;
@@ -410,6 +458,11 @@ export async function importM3u(
       if (outcome.credentialFingerprint !== undefined)
         settings.credentialFingerprint = outcome.credentialFingerprint;
       else delete settings.credentialFingerprint;
+      const reconciledSelection = reconcileCategorySelection(
+        current.categorySelection,
+        outcome.discoveredCategories,
+      );
+      if (reconciledSelection !== undefined) settings.categorySelection = reconciledSelection;
       if (
         discoveredGuidesChanged(
           current.discoveredGuideUrls,

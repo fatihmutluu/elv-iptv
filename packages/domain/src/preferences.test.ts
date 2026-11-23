@@ -66,6 +66,8 @@ describe('preferences codec', () => {
       confirmExitOnBack: true,
       preferredAudioDevice: 'auto',
       androidDecoderMode: 'auto',
+      collapseLiveVariants: false,
+      groupVodVersions: true,
     });
   });
 

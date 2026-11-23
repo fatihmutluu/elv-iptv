@@ -14,6 +14,8 @@ export interface StreamRequest {
   finalUrl?: string;
   /** Inline backup stream requests associated with the primary stream (`#287`). */
   alternates?: readonly StreamRequest[];
+  /** Opt-in legacy TLS (TLS 1.0/1.1) compatibility carried by the resolved stream (`#182`). */
+  readonly allowLegacyTls?: boolean;
 }
 
 /** Engine choices for one load. */
@@ -24,6 +26,8 @@ export interface LoadOptions {
   preferHevcOverDolbyVision?: boolean;
   /** Strip SDH / hearing-impaired annotations from rendered text subtitles (`#310`). */
   filterSdhSubtitles?: boolean;
+  /** Opt-in legacy TLS (TLS 1.0/1.1) compatibility for older servers (`#182`). */
+  readonly allowLegacyTls?: boolean;
   /** User-configured buffer size preset forwarded to the native engine (`#147`). */
   bufferPreset?: BufferPreset;
   /** User-configured Android video decoder selection mode forwarded to Media3 (`#411`). */

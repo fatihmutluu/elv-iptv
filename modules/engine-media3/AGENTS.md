@@ -7,9 +7,10 @@ window helpers (player core spec 6.1).
 - `createMedia3Engine(): PlayerEngine | null` (`src/index.ts`; `null` without `ElvEngineMedia3`) creates a native
   `Engine` shared object; `release()` frees it. `Media3Surface({ engine, style?, resizeMode?,
   subtitleBottomInsetPx?, surfaceRecreationToken?, useTextureView?, testID? })` renders `Media3SurfaceView`.
-- Native (`ElvEngineMedia3Module`, `LoadRequest`): `load(flattened LoadCommand + bufferPreset? + decoderMode?)`,
+- Native (`ElvEngineMedia3Module`, `LoadRequest`): `load(flattened LoadCommand + bufferPreset? + decoderMode? + allowLegacyTls?)`,
   `retry`, `play`, `pause`, `seek`, `setScrubbing` (VOD-only), `setAudioBoostDb`, `supportsHardwareHevc4k`,
-  `selectAudioTrack`, `selectSubtitleTrack`, `stop`, `recreate`, `onEngineEvent`, sync `uptimeMs()`.
+  `selectAudioTrack`, `selectSubtitleTrack`, `stop`, `recreate`, `onEngineEvent`, sync `uptimeMs()`, plus zero-permission
+  `readClipboardText()` / `pickPlaylistFile()` (`AndroidSourceImport.kt`, SAF `ACTION_OPEN_DOCUMENT`, 64 MiB cap, `#51`).
 - Module events & window controls: `onStandbyChanged` (TV `StandbyMonitor`, 6 s debounce), `onSafeAreaInsetsChanged`
   (`max(systemBars, displayCutout)` dp, zero on TV), `onPictureInPictureChanged`, `setOrientationLocked`,
   `requestTemporaryOrientation` (`SmartOrientationController`), `applyShortEdgesCutoutMode`, `getSafeAreaInsets`,
@@ -45,6 +46,4 @@ window helpers (player core spec 6.1).
   daemon `closer`), `GatedDataSource`, `StreamHttp`, `SniffingDataSource`, `ServiceOwnedRetryPolicy`, `ErrorMapping`.
 
 ## Tests and rules
-- `pnpm --filter @elv/engine-media3 test`; in `apps/tv-mobile/android` (`EXPO_TV=1`): `./gradlew.bat
-  :elv-engine-media3:testDebugUnitTest :elv-engine-media3:assembleRelease` and `:connectedDebugAndroidTest`.
-  Imports `expo-modules-core`, `@elv/playback` types and `react`/`react-native` peers only.
+- `pnpm --filter @elv/engine-media3 test`; in `apps/tv-mobile/android` (`EXPO_TV=1`): `./gradlew.bat :elv-engine-media3:testDebugUnitTest :elv-engine-media3:assembleRelease` & `:connectedDebugAndroidTest`. Imports `expo-modules-core`, `@elv/playback` types, `react`/`react-native` peers only.

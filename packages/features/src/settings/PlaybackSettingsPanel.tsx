@@ -328,6 +328,16 @@ export function PlaybackSettingsPanel({
           }
         />
         <SettingsDivider />
+        <SettingsToggleRow
+          testID="settings-playback-toggle-group-vod-versions"
+          title={i18n.t('settings.playback.groupVodVersions')}
+          description={i18n.t('settings.playback.groupVodVersionsDesc')}
+          checked={activePrefs.groupVodVersions}
+          focused={focusedControlId === 'toggle-group-vod-versions'}
+          isTv={isTv}
+          onToggle={() => applyPatch({ groupVodVersions: !activePrefs.groupVodVersions })}
+        />
+        <SettingsDivider />
         <SettingsOptionRow
           title={i18n.t('settings.playback.audioDevice')}
           options={audioDeviceOptions}

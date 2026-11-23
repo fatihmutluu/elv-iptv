@@ -2,7 +2,7 @@ import type { ItemRow } from '@elv/data';
 import type { AppI18n } from '@elv/i18n';
 import type { PlaybackClock, PlaybackStatus, PlaybackTimers } from '@elv/playback';
 import { Scrim, useTheme, useViewport } from '@elv/ui-kit';
-import type { ReactElement } from 'react';
+import { type ReactElement, useRef } from 'react';
 import { ActivityIndicator, StyleSheet, View, type ViewStyle } from 'react-native';
 import type { PlayableEntry } from '../ports/play-target';
 import {
@@ -161,6 +161,13 @@ export function PlayerOsd(p: PlayerOsdProps): ReactElement {
       </View>
     </View>
   );
+}
+
+/** Stores the latest render value in a stable React ref without re-creating callbacks. */
+export function useLatestRef<T>(value: T) {
+  const ref = useRef(value);
+  ref.current = value;
+  return ref;
 }
 
 export const playerStyles = StyleSheet.create({

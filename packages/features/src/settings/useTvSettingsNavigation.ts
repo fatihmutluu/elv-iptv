@@ -86,6 +86,7 @@ export type PlaybackFocusId =
   | 'still-watching-240'
   | 'toggle-auto-play-next'
   | 'toggle-skip-back-subtitles'
+  | 'toggle-group-vod-versions'
   | 'audio-device-auto';
 
 /** Focusable control identifiers inside the Live TV & Guide settings panel. */
@@ -114,7 +115,8 @@ export type LiveTvFocusId =
   | 'logo-backdrop-off'
   | 'toggle-source-badges'
   | 'toggle-two-step-preview'
-  | 'toggle-clean-titles';
+  | 'toggle-clean-titles'
+  | 'toggle-collapse-variants';
 
 const NAV_LIST_ID = 'settings-nav';
 
@@ -167,6 +169,7 @@ const PLAYBACK_ROWS_TAIL: readonly (readonly PlaybackFocusId[])[] = [
   ],
   ['toggle-auto-play-next'],
   ['toggle-skip-back-subtitles'],
+  ['toggle-group-vod-versions'],
   ['audio-device-auto'],
 ];
 
@@ -199,6 +202,7 @@ const LIVE_TV_ROWS: readonly (readonly LiveTvFocusId[])[] = [
   ['toggle-source-badges'],
   ['toggle-two-step-preview'],
   ['toggle-clean-titles'],
+  ['toggle-collapse-variants'],
 ];
 
 const PREFERENCE_SECTIONS: readonly PreferenceSettingsSection[] = [

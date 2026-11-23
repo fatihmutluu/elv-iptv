@@ -1,14 +1,16 @@
+import { dirname } from 'node:path';
 import {
   type AddSourceInput,
   type CatalogService,
   createCatalogService,
   createSyncSqlDriver,
   type LinkSourceInput,
+  type LocalM3uSourceInput,
+  type LocalPlaylistStore,
   openCatalog,
   type SyncDatabase,
 } from '@elv/data';
 import {
-  createFetchHttpClient,
   type Decompressor,
   type ElvError,
   elvError,
@@ -30,6 +32,8 @@ import {
   type CatalogWorkerMessage,
   isCatalogClientMessage,
 } from '../shared/catalog-ipc.ts';
+import { createDesktopHttpClient } from './legacy-tls-http.ts';
+import { createLocalPlaylistStore } from './local-playlist-store.ts';
 import { formatSqliteOpenError, openSqliteWithRetry } from './sqlite-open-retry.ts';
 
 const SAFE_SOURCE_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
@@ -65,6 +69,8 @@ export interface CatalogWorkerRuntimeDeps {
   parentPort: WorkerParentPortLike;
   openDatabase: (filePath: string) => SyncDatabase;
   fetchImpl: FetchLike;
+  legacyFetchImpl?: FetchLike;
+  localPlaylistStore?: LocalPlaylistStore;
   decompressor?: Decompressor;
   clock?: () => number;
   yieldNow?: () => Promise<void>;
@@ -180,37 +186,14 @@ function sanitizeLinkSourceInput(input: LinkSourceInput): Result<LinkSourceInput
   });
 }
 
-async function cancelFetchBody(body: Awaited<ReturnType<FetchLike>>['body']): Promise<void> {
-  if (body == null) return;
-  const cancellable = body as {
-    cancel?: () => Promise<void>;
-    getReader?: () => { cancel?: () => Promise<void> };
-  };
-  if (typeof cancellable.cancel === 'function') {
-    await cancellable.cancel().catch(() => undefined);
-    return;
-  }
-  if (typeof cancellable.getReader === 'function') {
-    await cancellable
-      .getReader()
-      .cancel?.()
-      .catch(() => undefined);
-  }
-}
-
-function createHttpOnlyFetch(fetchImpl: FetchLike): FetchLike {
-  return async (url, init) => {
-    if (!isHttpUrl(url)) {
-      throw new TypeError('unsupported URL protocol');
-    }
-    const res = await fetchImpl(url, init);
-    const finalUrl = (res as { readonly url?: unknown }).url;
-    if (typeof finalUrl === 'string' && finalUrl !== '' && !isHttpUrl(finalUrl)) {
-      await cancelFetchBody(res.body);
-      throw new TypeError('unsupported redirect URL protocol');
-    }
-    return res;
-  };
+function sanitizeLocalM3uInput(input: LocalM3uSourceInput): Result<LocalM3uSourceInput> {
+  const guide = sanitizeGuideUrl(input.guideUrl);
+  if (!guide.ok) return guide;
+  const { guideUrl: _prevGuide, ...rest } = input;
+  return ok({
+    ...rest,
+    ...(guide.value === undefined ? {} : { guideUrl: guide.value }),
+  });
 }
 
 /**
@@ -222,7 +205,10 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
   const clock = deps.clock ?? Date.now;
   const yieldNow = deps.yieldNow ?? (() => new Promise<void>((resolve) => setImmediate(resolve)));
   const log = deps.log ?? ((line: string) => process.stderr.write(`${line}\n`));
-  const safeFetch = createHttpOnlyFetch(fetchImpl);
+  const desktopHttp = createDesktopHttpClient(
+    fetchImpl,
+    deps.legacyFetchImpl === undefined ? undefined : { legacyFetchImpl: deps.legacyFetchImpl },
+  );
 
   let configuredDbPath: string | undefined;
   let openState: Promise<Result<OpenedCatalog>> | undefined;
@@ -290,11 +276,14 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
             await db.close?.().catch(() => undefined);
             return opened;
           }
+          const localPlaylistStore =
+            deps.localPlaylistStore ?? createLocalPlaylistStore(dirname(dbPath));
           const service = createCatalogService({
             db,
             secrets,
             scheduler: { yieldNow },
-            http: createFetchHttpClient(safeFetch),
+            http: desktopHttp,
+            localPlaylistStore,
             maxBodyBytes: DESKTOP_MAX_BODY_BYTES,
             clock,
             ...(deps.decompressor === undefined ? {} : { decompressor: deps.decompressor }),
@@ -361,6 +350,25 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
         if (!sanitized.ok) return sanitized;
         return service.addSourceFromLink(sanitized.value);
       }
+      case 'addLocalM3uSource': {
+        if (!service.addLocalM3uSource) return err(elvError('storage', 'unsupported'));
+        const sanitized = sanitizeLocalM3uInput(call.input);
+        if (!sanitized.ok) return sanitized;
+        return service.addLocalM3uSource(sanitized.value);
+      }
+      case 'discoverSourceCategories': {
+        if (!service.discoverSourceCategories) return err(elvError('storage', 'unsupported'));
+        return service.discoverSourceCategories(
+          call.sourceId,
+          ctl === undefined ? undefined : { signal: ctl.signal },
+        );
+      }
+      case 'updateSourceSettings': {
+        if (!service.updateSourceSettings) return undefined;
+        await service.updateSourceSettings(call.sourceId, call.patch);
+        await checkpointWal(db);
+        return undefined;
+      }
       case 'removeSource': {
         if (!SAFE_SOURCE_ID_RE.test(call.id)) return ok(undefined);
         const res = await service.removeSource(call.id);
@@ -393,9 +401,13 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
       case 'listSources':
         return service.listSources();
       case 'categories':
-        return service.categories(call.sourceId, call.kind);
+        return service.categories(call.sourceId, call.kind, call.opts);
       case 'items':
         return service.items(call.categoryId, call.offset, call.limit, call.opts);
+      case 'liveVariants':
+        return service.liveVariants ? service.liveVariants(call.itemKey, call.categoryId) : [];
+      case 'itemVersions':
+        return service.itemVersions ? service.itemVersions(call.itemKey) : [];
       case 'allSourcesItems':
         return service.allSourcesItems
           ? service.allSourcesItems(call.kind, call.offset, call.limit, call.sourceIds, call.opts)
@@ -542,7 +554,9 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
       }
       const { reqId, call } = raw;
       const ctl =
-        call.method === 'importSource' || call.method === 'importGuide'
+        call.method === 'importSource' ||
+        call.method === 'importGuide' ||
+        call.method === 'discoverSourceCategories'
           ? new AbortController()
           : undefined;
       if (ctl !== undefined) session.controllers.set(reqId, ctl);

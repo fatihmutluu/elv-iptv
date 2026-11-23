@@ -71,6 +71,8 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'epg_shift_ms', alterDefinition: 'INTEGER' },
     { name: 'content_hash', alterDefinition: 'TEXT' },
     { name: 'sort_title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'variant_base_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'quality_rank', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
   ],
   live_next: [
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
@@ -90,6 +92,8 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'epg_shift_ms', alterDefinition: 'INTEGER' },
     { name: 'content_hash', alterDefinition: 'TEXT' },
     { name: 'sort_title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'variant_base_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'quality_rank', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
   ],
   movies: [
     { name: 'id', alterDefinition: 'INTEGER' },
@@ -110,6 +114,8 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'backup_urls_json', alterDefinition: 'TEXT' },
     { name: 'content_hash', alterDefinition: 'TEXT' },
     { name: 'sort_title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'version_group_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'version_label', alterDefinition: 'TEXT' },
   ],
   movies_next: [
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
@@ -129,6 +135,8 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'backup_urls_json', alterDefinition: 'TEXT' },
     { name: 'content_hash', alterDefinition: 'TEXT' },
     { name: 'sort_title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'version_group_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'version_label', alterDefinition: 'TEXT' },
   ],
   series: [
     { name: 'id', alterDefinition: 'INTEGER' },
@@ -218,6 +226,7 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'name_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
     { name: 'icon', alterDefinition: 'TEXT' },
     { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'lcn', alterDefinition: 'TEXT' },
   ],
   channel_guide: [
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
@@ -238,6 +247,8 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'genre', alterDefinition: 'TEXT' },
     { name: 'flags', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'rating_system', alterDefinition: 'TEXT' },
+    { name: 'rating_value', alterDefinition: 'TEXT' },
   ],
   programmes_next: [
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
@@ -253,6 +264,8 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'genre', alterDefinition: 'TEXT' },
     { name: 'flags', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'rating_system', alterDefinition: 'TEXT' },
+    { name: 'rating_value', alterDefinition: 'TEXT' },
   ],
   watch_progress: [
     { name: 'profile_id', alterDefinition: "TEXT NOT NULL DEFAULT 'default'" },
@@ -269,6 +282,8 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'duration_ms', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'watched', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'updated_at', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
+    { name: 'version_group_key', alterDefinition: 'TEXT' },
+    { name: 'preferred_item_key', alterDefinition: 'TEXT' },
   ],
   favorites: [
     { name: 'profile_id', alterDefinition: "TEXT NOT NULL DEFAULT 'default'" },

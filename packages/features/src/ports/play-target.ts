@@ -15,6 +15,8 @@ export interface PlayableEntry {
   readonly season?: number | null;
   readonly episode?: number | null;
   readonly itemKind?: UserItemKind;
+  /** Optional live category ID (`sourceId|live|providerId`) for same-category variant switching (`#218`). */
+  readonly categoryId?: string;
   /** Optional pre-play preferred audio language code (e.g. `'tr'`, `'en'`) (`#398`). */
   readonly preferredAudioLang?: string;
   /** Optional pre-play preferred subtitle language code (e.g. `'tr'`, `'en'`, `'off'`) (`#398`). */

@@ -40,6 +40,22 @@ export function createDesktopCatalogFromBridge(
   return {
     addSource: (input) => bridge.addSource(input),
     addSourceFromLink: (input) => bridge.addSourceFromLink(input),
+    addLocalM3uSource: (input) =>
+      bridge.addLocalM3uSource
+        ? bridge.addLocalM3uSource(input)
+        : Promise.resolve(err(elvError('storage', 'unsupported'))),
+    discoverSourceCategories: (sourceId, opts) => {
+      if (opts?.signal?.aborted) {
+        return Promise.resolve(err(elvError('network', 'aborted')));
+      }
+      return bridge.discoverSourceCategories
+        ? bridge.discoverSourceCategories(sourceId)
+        : Promise.resolve(err(elvError('storage', 'unsupported')));
+    },
+    updateSourceSettings: (sourceId, patch) =>
+      bridge.updateSourceSettings
+        ? bridge.updateSourceSettings(sourceId, patch)
+        : Promise.resolve(),
     removeSource: (id) => bridge.removeSource(id),
     async importSource(id, opts?: DeviceImportOptions) {
       if (opts?.signal?.aborted) {
@@ -78,8 +94,12 @@ export function createDesktopCatalogFromBridge(
       opts?.signal?.aborted
         ? Promise.resolve(err(elvError('network', 'aborted')))
         : bridge.importGuide(id),
-    categories: (sourceId, kind) => bridge.categories(sourceId, kind),
+    categories: (sourceId, kind, opts) => bridge.categories(sourceId, kind, opts),
     items: (categoryId, offset, limit, opts) => bridge.items(categoryId, offset, limit, opts),
+    liveVariants: (itemKey, categoryId) =>
+      bridge.liveVariants ? bridge.liveVariants(itemKey, categoryId) : Promise.resolve([]),
+    itemVersions: (itemKey) =>
+      bridge.itemVersions ? bridge.itemVersions(itemKey) : Promise.resolve([]),
     allSourcesItems: (kind, offset, limit, sourceIds, opts) =>
       bridge.allSourcesItems
         ? bridge.allSourcesItems(kind, offset, limit, sourceIds, opts)

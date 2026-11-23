@@ -16,6 +16,7 @@ import {
   formatStatusLine,
   mapRecentChannelRows,
   playerStyles,
+  useLatestRef,
 } from './PlayerScreenParts';
 import { type PlayerScreenProps, PlayerScreenStage } from './PlayerScreenStage';
 import { PlayerSettingsSheet } from './PlayerSettingsSheet';
@@ -23,6 +24,7 @@ import { MIN_BRIGHTNESS } from './PlayerTouchGestures';
 import { clampVolume } from './player-overlay-model';
 import { TrackPickerModal } from './TrackPickerModal';
 import { buildTouchHoverProps } from './touch-hover-guard';
+import { useLiveQualityVariants } from './useLiveQualityVariants';
 import { useNextEpisodeResolver } from './useNextEpisodeResolver';
 import { usePlayerCinemaExtras } from './usePlayerCinemaExtras';
 import { usePlayerControls } from './usePlayerControls';
@@ -41,52 +43,52 @@ export type { PlayerScreenProps };
 export const DEFAULT_AUTO_HIDE_OSD_MS = 3_500;
 
 /** Cross-platform Minimalist Cinema playback screen over injected {@link VideoHost} and {@link AppLifecyclePort} ports. */
-export function PlayerScreen({
-  catalog,
-  videoHost,
-  target,
-  playbackGuard,
-  appLifecycle = noopAppLifecycle,
-  clock = DEFAULT_PLAYER_CLOCK,
-  wallClock = Date.now,
-  timers = DEFAULT_PLAYER_TIMERS,
-  initialOsdHidden,
-  autoHideOsdMs,
-  initialVolume,
-  onPersistVolume,
-  autoSubtitlesOnSkipBack,
-  onToggleAutoSubtitlesOnSkipBack,
-  autoPlayNextEpisode,
-  onToggleAutoPlayNextEpisode,
-  reduceMotion,
-  bufferPreset = 'auto',
-  useTextureView = false,
-  seekStepSec = 10,
-  defaultResizeMode = 'fit',
-  onPersistResizeMode,
-  preferredAudioLang,
-  preferredSubtitleLang,
-  preferredAudioLanguages,
-  preferredSubtitleLanguages,
-  preferDefaultAudioTrack = true,
-  preferHevcOverDolbyVision = false,
-  filterSdhSubtitles = false,
-  subtitleMode = 'smart',
-  osdTimeDisplayMode = 'total',
-  onPersistOsdTimeDisplayMode,
-  sleepTimerDefaultAction = 'stop',
-  onPersistSleepTimerAction,
-  stillWatchingTimeoutMin = 0,
-  onPlaybackActiveChange,
-  onFineScrubHaptic,
-  preferredAudioDevice,
-  onPersistAudioDevice,
-  androidDecoderMode,
-  onSelectAndroidDecoderMode,
-  liveChannelSwitchMode = 'instant',
-  onTargetChange,
-  onExit,
-}: PlayerScreenProps): ReactElement {
+export function PlayerScreen(props: PlayerScreenProps): ReactElement {
+  const { catalog, videoHost, target, playbackGuard, onTargetChange, onExit } = props;
+  const {
+    appLifecycle = noopAppLifecycle,
+    clock = DEFAULT_PLAYER_CLOCK,
+    wallClock = Date.now,
+    timers = DEFAULT_PLAYER_TIMERS,
+    initialOsdHidden,
+    autoHideOsdMs,
+    initialVolume,
+    onPersistVolume,
+  } = props;
+  const {
+    autoSubtitlesOnSkipBack,
+    onToggleAutoSubtitlesOnSkipBack,
+    autoPlayNextEpisode,
+    onToggleAutoPlayNextEpisode,
+    reduceMotion,
+    bufferPreset = 'auto',
+    useTextureView = false,
+    seekStepSec = 10,
+    defaultResizeMode = 'fit',
+    onPersistResizeMode,
+  } = props;
+  const {
+    preferredAudioLang,
+    preferredSubtitleLang,
+    preferredAudioLanguages,
+    preferredSubtitleLanguages,
+    preferDefaultAudioTrack = true,
+    preferHevcOverDolbyVision = false,
+    filterSdhSubtitles = false,
+    subtitleMode = 'smart',
+    osdTimeDisplayMode = 'total',
+    onPersistOsdTimeDisplayMode,
+    sleepTimerDefaultAction = 'stop',
+    onPersistSleepTimerAction,
+    stillWatchingTimeoutMin = 0,
+    onPlaybackActiveChange,
+    onFineScrubHaptic,
+    preferredAudioDevice,
+    onPersistAudioDevice,
+    androidDecoderMode,
+    onSelectAndroidDecoderMode,
+    liveChannelSwitchMode = 'instant',
+  } = props;
   const formFactor = useFormFactor();
   const i18n = useI18n();
   const isTv = formFactor === 'tv';
@@ -98,25 +100,17 @@ export function PlayerScreen({
   const resolvedNextEpisodeRef = useRef<PlayableEntry | undefined>(undefined);
   const catalogRef = useRef(catalog);
   catalogRef.current = catalog;
-  const clockRef = useRef(clock);
-  clockRef.current = clock;
+  const clockRef = useLatestRef(clock);
   const wallClockRef = useRef(wallClock);
   wallClockRef.current = wallClock;
   const channelDrawerNavRef = useRef<ChannelDrawerNavHandle | null>(null);
-  const timersRef = useRef(timers);
-  timersRef.current = timers;
-  const onTargetChangeRef = useRef(onTargetChange);
-  onTargetChangeRef.current = onTargetChange;
-  const onExitRef = useRef(onExit);
-  onExitRef.current = onExit;
-  const bufferPresetRef = useRef<BufferPreset>(bufferPreset);
-  bufferPresetRef.current = bufferPreset;
-  const preferHevcRef = useRef<boolean>(preferHevcOverDolbyVision);
-  preferHevcRef.current = preferHevcOverDolbyVision;
-  const filterSdhRef = useRef<boolean>(filterSdhSubtitles);
-  filterSdhRef.current = filterSdhSubtitles;
-  const switchModeRef = useRef<LiveChannelSwitchModePref>(liveChannelSwitchMode);
-  switchModeRef.current = liveChannelSwitchMode;
+  const timersRef = useLatestRef(timers);
+  const onTargetChangeRef = useLatestRef(onTargetChange);
+  const onExitRef = useLatestRef(onExit);
+  const bufferPresetRef = useLatestRef<BufferPreset>(bufferPreset);
+  const preferHevcRef = useLatestRef<boolean>(preferHevcOverDolbyVision);
+  const filterSdhRef = useLatestRef<boolean>(filterSdhSubtitles);
+  const switchModeRef = useLatestRef<LiveChannelSwitchModePref>(liveChannelSwitchMode);
   const reloadActiveTargetRef = useRef<() => void>(() => undefined);
   const { decoderModeRef, activeDecoderMode, showAndroidDecoder, handleSelectAndroidDecoderMode } =
     useAndroidDecoderModeSync({
@@ -146,8 +140,7 @@ export function PlayerScreen({
   reloadActiveTargetRef.current = handoff.reloadActiveTarget;
   const { activeTarget, previewTarget, zapBy, jumpToChannel } = handoff;
 
-  const zapByRef = useRef<(delta: 1 | -1, repeat?: boolean) => void>(zapBy);
-  zapByRef.current = zapBy;
+  const zapByRef = useLatestRef(zapBy);
   const hostKeyRef = useRef<(key: HostKey) => void>((key) => {
     if (key === 'back') onExitRef.current();
   });
@@ -196,6 +189,11 @@ export function PlayerScreen({
   });
   const nextEpisode = useNextEpisodeResolver({ catalog, activeTarget });
   resolvedNextEpisodeRef.current = nextEpisode;
+  const quality = useLiveQualityVariants({
+    catalog,
+    activeTarget,
+    onSelect: handoff.selectQualityVariant,
+  });
 
   const [nextEpisodeDismissed, setNextEpisodeDismissed] = useState(false);
   const [nextEpisodeVisible, setNextEpisodeVisible] = useState(false);
@@ -265,8 +263,7 @@ export function PlayerScreen({
   );
 
   const [stillWatchingAction, setStillWatchingAction] = useState<'continue' | 'stop'>('continue');
-  const stillWatchingActionRef = useRef(stillWatchingAction);
-  stillWatchingActionRef.current = stillWatchingAction;
+  const stillWatchingActionRef = useLatestRef(stillWatchingAction);
   useEffect(() => {
     if (extras.stillWatching.promptVisible) setStillWatchingAction('continue');
   }, [extras.stillWatching.promptVisible]);
@@ -298,6 +295,8 @@ export function PlayerScreen({
     onSeekCommit: flushProgress,
     onPlayNextEpisode: () => handoff.handlePlayNextEpisode(undefined, nextEpisode),
     onJumpPreviousChannel: handoff.handleJumpPreviousChannel,
+    qualityVariants: quality.variants,
+    onSelectQualityVariant: quality.selectVariant,
     onJumpToChannel: jumpToChannel,
     onToggleFullscreen: hostToggleFullscreen,
     onToggleAlwaysOnTop: hostToggleAlwaysOnTop,
@@ -614,10 +613,7 @@ export function PlayerScreen({
           }
         : {})}
       {...(onToggleAutoPlayNextEpisode !== undefined
-        ? {
-            autoPlayNextEpisode: autoPlayNextEpisode !== false,
-            onToggleAutoPlayNextEpisode,
-          }
+        ? { autoPlayNextEpisode: autoPlayNextEpisode !== false, onToggleAutoPlayNextEpisode }
         : {})}
       chapters={chapters}
       onSelectChapter={extras.handleSelectChapter}
@@ -625,6 +621,7 @@ export function PlayerScreen({
       onSelectSleepTimer={extras.selectSleepTimer}
       onToggleSleepTimerAction={extras.toggleSleepTimerAction}
       statsVisible={controls.statsVisible}
+      {...quality.sheetProps}
       {...(hostSetAudioDevice !== undefined
         ? { audioDevices, activeAudioDevice, onSelectAudioDevice: selectAudioDevice }
         : {})}

@@ -226,6 +226,11 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
     open: () => callResult<void>({ method: 'ping' }),
     addSource: (input) => callResult({ method: 'addSource', input }),
     addSourceFromLink: (input) => callResult({ method: 'addSourceFromLink', input }),
+    addLocalM3uSource: (input) => callResult({ method: 'addLocalM3uSource', input }),
+    discoverSourceCategories: (sourceId) =>
+      callResult({ method: 'discoverSourceCategories', sourceId }),
+    updateSourceSettings: (sourceId, patch) =>
+      callValue({ method: 'updateSourceSettings', sourceId, patch }),
     removeSource: (id) => callResult({ method: 'removeSource', id }),
     startImport(id: string, opts?: CatalogBridgeImportOptions): CatalogImportHandle {
       const reqId = ++nextReqId;
@@ -282,7 +287,13 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
     },
     listSources: () => callValue({ method: 'listSources' }),
     importGuide: (id) => callResult({ method: 'importGuide', id }),
-    categories: (sourceId, kind) => callValue({ method: 'categories', sourceId, kind }),
+    categories: (sourceId, kind, opts) =>
+      callValue({
+        method: 'categories',
+        sourceId,
+        kind,
+        ...(opts === undefined ? {} : { opts }),
+      }),
     items: (categoryId, offset, limit, opts) =>
       callValue({
         method: 'items',
@@ -291,6 +302,13 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
         limit,
         ...(opts === undefined ? {} : { opts }),
       }),
+    liveVariants: (itemKey, categoryId) =>
+      callValue({
+        method: 'liveVariants',
+        itemKey,
+        ...(categoryId === undefined ? {} : { categoryId }),
+      }),
+    itemVersions: (itemKey) => callValue({ method: 'itemVersions', itemKey }),
     allSourcesItems: (kind, offset, limit, sourceIds, opts) =>
       callValue({
         method: 'allSourcesItems',

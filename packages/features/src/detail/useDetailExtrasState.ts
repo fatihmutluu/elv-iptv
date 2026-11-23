@@ -16,6 +16,7 @@ export interface UseDetailExtrasStateOptions {
   readonly plot: string | null;
   readonly preferredAudioLang?: string;
   readonly preferredSubtitleLang?: string;
+  readonly hasVersions?: boolean;
 }
 
 /** Local pre-play language selectors, synopsis sheet toggle, and derived TV focus slots for `DetailScreen`. */
@@ -43,6 +44,7 @@ export function useDetailExtrasState({
   plot,
   preferredAudioLang,
   preferredSubtitleLang,
+  hasVersions = false,
 }: UseDetailExtrasStateOptions): DetailExtrasState {
   const [audioLang, setAudioLang] = useState(() =>
     normalizePrePlayLang(preferredAudioLang, PREPLAY_AUDIO_OPTIONS),
@@ -76,11 +78,12 @@ export function useDetailExtrasState({
   const heroPlaySlots = useMemo<readonly DetailHeroFocusSlot[]>(
     () => [
       'play',
+      ...(hasVersions ? (['preplay-version'] as const) : []),
       'preplay-audio',
       'preplay-subtitles',
       ...(canExpandSynopsis ? (['synopsis'] as const) : []),
     ],
-    [canExpandSynopsis],
+    [canExpandSynopsis, hasVersions],
   );
 
   const castPeople = useMemo<readonly string[]>(() => {

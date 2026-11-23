@@ -270,15 +270,21 @@ export function buildLiveHubPlayTarget(opts: {
     maxPages: 4,
     loadPage: opts.loadPage,
   });
+  const categoryScope = opts.categoryId !== 'favorites' ? opts.categoryId : undefined;
   return {
     ...toLiveEntry(opts.item),
+    ...(categoryScope !== undefined ? { categoryId: categoryScope } : {}),
     playlist: {
       count,
       currentIndex: opts.currentIndex,
       onChangeIndex: opts.onChangeIndex ?? (() => undefined),
       async getAt(index: number): Promise<PlayableEntry | undefined> {
         const row = await loader.loadItem(index);
-        return row === undefined ? undefined : toLiveEntry(row);
+        if (row === undefined) return undefined;
+        return {
+          ...toLiveEntry(row),
+          ...(categoryScope !== undefined ? { categoryId: categoryScope } : {}),
+        };
       },
     },
   };

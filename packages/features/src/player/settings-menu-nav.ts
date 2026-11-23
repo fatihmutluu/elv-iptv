@@ -1,3 +1,4 @@
+import type { LiveVariantOption } from '@elv/data';
 import { ANDROID_DECODER_MODES, type AndroidDecoderMode, type SleepTimerAction } from '@elv/domain';
 import type { KeyEvent } from '@elv/focus-core';
 import type { ChapterInfo, MediaTracks } from '@elv/playback';
@@ -10,6 +11,7 @@ export type SettingsMenuView =
   | 'subtitles'
   | 'audio'
   | 'audioDevice'
+  | 'quality'
   | 'speed'
   | 'chapters'
   | 'sleepTimer'
@@ -26,6 +28,7 @@ export type SettingsRootItem =
   | 'subtitles'
   | 'audio'
   | 'audioDevice'
+  | 'quality'
   | 'speed'
   | 'chapters'
   | 'sleepTimer'
@@ -82,6 +85,9 @@ export interface SettingsMenuOptions {
   readonly hasAudioDevice?: boolean;
   readonly audioDevices?: readonly AudioDeviceInfo[];
   readonly activeAudioDevice?: string;
+  readonly hasQuality?: boolean;
+  readonly qualityVariants?: readonly LiveVariantOption[];
+  readonly activeQualityKey?: string;
   readonly hasVideoDecoder?: boolean;
   readonly androidDecoderMode?: AndroidDecoderMode;
   readonly hasChapters?: boolean;
@@ -98,6 +104,9 @@ export interface SettingsMenuOptions {
 function settingsRootItemsFromOptions(options?: SettingsMenuOptions): readonly SettingsRootItem[] {
   const items: SettingsRootItem[] = ['subtitles', 'audio'];
   if (options?.hasAudioDevice === true) items.push('audioDevice');
+  if (options?.hasQuality === true && (options.qualityVariants?.length ?? 0) > 1) {
+    items.push('quality');
+  }
   if (options?.isVod === true) items.push('speed');
   if (options?.hasChapters === true && (options.chapters?.length ?? 0) > 0) items.push('chapters');
   if (options?.hasSleepTimer === true) items.push('sleepTimer');
@@ -148,6 +157,7 @@ export type SettingsMenuIntent =
   | { readonly kind: 'toggleStats' }
   | { readonly kind: 'audio'; readonly id: string }
   | { readonly kind: 'audioDevice'; readonly name: string }
+  | { readonly kind: 'quality'; readonly itemKey: string }
   | { readonly kind: 'subtitle'; readonly id: string | null }
   | { readonly kind: 'speed'; readonly rate: number }
   | { readonly kind: 'chapter'; readonly startMs: number }
@@ -193,6 +203,17 @@ function selectedSleepTimerIndex(minutes: number | undefined): number {
   return idx >= 0 ? idx + 1 : 1;
 }
 
+function selectedQualityIndex(
+  variants: readonly LiveVariantOption[] | undefined,
+  activeKey: string | undefined,
+): number {
+  if (!variants || variants.length === 0 || !activeKey) return 0;
+  return Math.max(
+    0,
+    variants.findIndex((v) => v.key === activeKey),
+  );
+}
+
 /** Creates the initial focused state for the given Settings menu view (`root` by default). */
 export function initialSettingsMenu(
   view: SettingsMenuView = 'root',
@@ -200,6 +221,12 @@ export function initialSettingsMenu(
 ): SettingsMenuState {
   if (view === 'speed' && options?.playbackSpeed !== undefined) {
     return { view, index: selectedSpeedIndex(options.playbackSpeed) };
+  }
+  if (view === 'quality') {
+    return {
+      view,
+      index: selectedQualityIndex(options?.qualityVariants, options?.activeQualityKey),
+    };
   }
   if (view === 'audioDevice') {
     return {
@@ -229,6 +256,9 @@ export function settingsRowCount(
       ? normalizeAudioDeviceChoices(options?.audioDevices).length + 1
       : 0;
   }
+  if (view === 'quality') {
+    return options?.hasQuality === true ? (options.qualityVariants?.length ?? 0) : 0;
+  }
   if (view === 'speed') return options?.isVod === true ? PLAYBACK_SPEED_OPTIONS.length : 0;
   if (view === 'chapters')
     return options?.hasChapters === true ? (options.chapters?.length ?? 0) : 0;
@@ -249,6 +279,12 @@ export function clampSettingsMenu(
 ): SettingsMenuState {
   if (state.view === 'speed' && options?.isVod !== true) return { view: 'root', index: 0 };
   if (state.view === 'audioDevice' && options?.hasAudioDevice !== true) {
+    return { view: 'root', index: 0 };
+  }
+  if (
+    state.view === 'quality' &&
+    (options?.hasQuality !== true || (options.qualityVariants?.length ?? 0) <= 1)
+  ) {
     return { view: 'root', index: 0 };
   }
   if (
@@ -315,6 +351,19 @@ function openSubView(
       state: {
         view: 'audioDevice',
         index: selectedAudioDeviceIndex(options.audioDevices, options.activeAudioDevice),
+      },
+    };
+  }
+  if (
+    item === 'quality' &&
+    options?.hasQuality === true &&
+    (options.qualityVariants?.length ?? 0) > 1
+  ) {
+    return {
+      kind: 'state',
+      state: {
+        view: 'quality',
+        index: selectedQualityIndex(options.qualityVariants, options.activeQualityKey),
       },
     };
   }
@@ -409,6 +458,10 @@ export function routeSettingsMenuKey(
       if (cur.index === 0) return { kind: 'audioDevice', name: 'auto' };
       const device = normalizeAudioDeviceChoices(options?.audioDevices)[cur.index - 1];
       return device !== undefined ? { kind: 'audioDevice', name: device.name } : null;
+    }
+    if (cur.view === 'quality') {
+      const variant = options?.qualityVariants?.[cur.index];
+      return variant !== undefined ? { kind: 'quality', itemKey: variant.key } : null;
     }
     if (cur.view === 'speed') {
       const rate = PLAYBACK_SPEED_OPTIONS[cur.index];

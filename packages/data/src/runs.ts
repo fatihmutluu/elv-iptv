@@ -118,9 +118,11 @@ export async function emptiedKinds(
   sourceId: string,
   runId: number,
   counts: Readonly<Record<string, number>>,
+  skipKinds?: ReadonlySet<CatalogKind>,
 ): Promise<CatalogKind[]> {
   const kinds: CatalogKind[] = [];
   for (const kind of KINDS) {
+    if (skipKinds?.has(kind)) continue;
     if ((counts[KIND_COUNTS[kind]] ?? 0) > 0) continue;
     const table = KIND_TABLES[kind][0] as string;
     const older = await db.all(

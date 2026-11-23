@@ -188,4 +188,21 @@ describe('validateSourceForm and detectPastedXtreamLink', () => {
       },
     });
   });
+
+  it('uses caller-supplied localized fallback name when local M3U filename stem is blank (#51)', () => {
+    const res = validateSourceForm(
+      m3uForm({
+        name: '   ',
+        localFile: {
+          name: '.m3u8',
+          bytes: new Uint8Array([1, 2, 3]),
+        },
+      }),
+      { defaultLocalPlaylistName: 'Yerel dosya' },
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok && res.value.kind === 'local-m3u') {
+      expect(res.value.input.name).toBe('Yerel dosya');
+    }
+  });
 });

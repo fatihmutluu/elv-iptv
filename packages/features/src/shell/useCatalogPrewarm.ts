@@ -33,6 +33,8 @@ export interface RunCatalogPrewarmOptions {
   readonly isCancelled: () => boolean;
   /** Optional active tab hint so background tabs warm first while the visible tab loads itself. */
   readonly activeTab?: string;
+  /** Whether multi-version movie grouping is enabled for the Movies discovery cache (`#404`). */
+  readonly groupVodVersions?: boolean;
 }
 
 /** Options for {@link useCatalogPrewarm}. */
@@ -44,6 +46,7 @@ export interface UseCatalogPrewarmOptions {
   readonly uiCache: CatalogUiCache;
   readonly activeTab?: string;
   readonly enabled?: boolean;
+  readonly groupVodVersions?: boolean;
 }
 
 function pickFirstCategory(lists: readonly (readonly CategoryRow[])[]): CategoryRow | null {
@@ -91,6 +94,7 @@ export async function runCatalogPrewarm({
   uiCache,
   isCancelled,
   activeTab,
+  groupVodVersions = false,
 }: RunCatalogPrewarmOptions): Promise<void> {
   if (sources.length === 0 || isCancelled()) return;
 
@@ -131,12 +135,13 @@ export async function runCatalogPrewarm({
   ): Promise<Map<string, readonly CategoryRow[]>> => {
     const existing = categoriesCache.get(kind);
     if (existing !== undefined && list.every((s) => existing.has(s.id))) return existing;
+    const catOpts = kind === 'movie' && groupVodVersions ? { groupVersions: true } : undefined;
     const entries = await Promise.all(
       list.map(
         async (source) =>
           [
             source.id,
-            await catalog.categories(source.id, kind).catch(() => [] as CategoryRow[]),
+            await catalog.categories(source.id, kind, catOpts).catch(() => [] as CategoryRow[]),
           ] as const,
       ),
     );
@@ -260,24 +265,26 @@ export async function runCatalogPrewarm({
   };
 
   const warmCatalogKind = async (kind: 'movie' | 'series'): Promise<void> => {
-    if (!stillValid() || uiCache.getCatalog(kind) !== null) return;
+    const effectiveGroupVersions = kind === 'movie' && groupVodVersions;
+    const cacheOpts = effectiveGroupVersions ? { groupVersions: true } : undefined;
+    if (!stillValid() || uiCache.getCatalog(kind, cacheOpts) !== null) return;
     const [catMap, cwAll] = await Promise.all([
       loadKindCategories(kind, activeSources),
       getContinue(),
     ]);
-    if (!stillValid() || uiCache.getCatalog(kind) !== null) return;
+    if (!stillValid() || uiCache.getCatalog(kind, cacheOpts) !== null) return;
 
     const categories = buildSharedDisplayCategories(activeSources, catMap);
     const topCats = categories.slice(0, PREWARM_CATALOG_RAILS);
     const railEntries = await Promise.all(
       topCats.map(async (cat) => {
         const rows = await catalog
-          .items(cat.row.id, 0, MAX_CATALOG_RAIL_ITEMS)
+          .items(cat.row.id, 0, MAX_CATALOG_RAIL_ITEMS, cacheOpts)
           .catch(() => [] as ItemRow[]);
         return [cat.row.id, rows] as const;
       }),
     );
-    if (!stillValid() || uiCache.getCatalog(kind) !== null) return;
+    if (!stillValid() || uiCache.getCatalog(kind, cacheOpts) !== null) return;
 
     const railItemsByCategoryId = new Map<string, readonly ItemRow[]>(railEntries);
     const keys: string[] = [];
@@ -290,13 +297,14 @@ export async function runCatalogPrewarm({
             () => new Map<string, WatchProgressRow>(),
           )
         : new Map<string, WatchProgressRow>();
-    if (!stillValid() || uiCache.getCatalog(kind) !== null) return;
+    if (!stillValid() || uiCache.getCatalog(kind, cacheOpts) !== null) return;
 
     uiCache.setCatalog(kind, {
       categories,
       continueItems: filterContinueByKind(cwAll, kind),
       railItemsByCategoryId,
       progressByKey,
+      ...(effectiveGroupVersions ? { groupVersions: true } : {}),
     });
   };
 
@@ -319,6 +327,7 @@ export function useCatalogPrewarm({
   uiCache,
   activeTab,
   enabled = true,
+  groupVodVersions = false,
 }: UseCatalogPrewarmOptions): void {
   const activeTabRef = useRef(activeTab);
   activeTabRef.current = activeTab;
@@ -334,6 +343,7 @@ export function useCatalogPrewarm({
           sources,
           uiCache,
           isCancelled: () => cancelled,
+          groupVodVersions,
           ...(activeTabRef.current !== undefined ? { activeTab: activeTabRef.current } : {}),
         }),
       )
@@ -341,5 +351,5 @@ export function useCatalogPrewarm({
     return () => {
       cancelled = true;
     };
-  }, [catalog, catalogRevision, enabled, locale, sources, uiCache]);
+  }, [catalog, catalogRevision, enabled, groupVodVersions, locale, sources, uiCache]);
 }

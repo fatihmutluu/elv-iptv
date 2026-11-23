@@ -217,6 +217,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     hasAudioDevice: hasAudioDevicePicker,
     audioDevices: params.audioDevices,
     activeAudioDevice: params.activeAudioDevice,
+    qualityVariants: params.qualityVariants,
     hasVideoDecoder,
     androidDecoderMode: params.androidDecoderMode,
     chapters: params.chapters,
@@ -372,6 +373,16 @@ export function usePlayerControls(params: PlayerControlsParams) {
             hasAudioDevice:
               (cbRef.current.audioDevices?.length ?? 0) > 0 &&
               cbRef.current.onSelectAudioDevice !== undefined,
+            hasQuality:
+              !isVodTarget &&
+              (cbRef.current.qualityVariants?.length ?? 0) > 1 &&
+              cbRef.current.onSelectQualityVariant !== undefined,
+            ...(cbRef.current.qualityVariants !== undefined
+              ? {
+                  qualityVariants: cbRef.current.qualityVariants,
+                  activeQualityKey: cbRef.current.activeTarget.itemKey,
+                }
+              : {}),
             hasVideoDecoder:
               cbRef.current.androidDecoderMode !== undefined &&
               cbRef.current.onSelectAndroidDecoderMode !== undefined,
@@ -492,6 +503,16 @@ export function usePlayerControls(params: PlayerControlsParams) {
         ...(cbRef.current.activeAudioDevice !== undefined
           ? { activeAudioDevice: cbRef.current.activeAudioDevice }
           : {}),
+        hasQuality:
+          !isVodTarget &&
+          (cbRef.current.qualityVariants?.length ?? 0) > 1 &&
+          cbRef.current.onSelectQualityVariant !== undefined,
+        ...(cbRef.current.qualityVariants !== undefined
+          ? {
+              qualityVariants: cbRef.current.qualityVariants,
+              activeQualityKey: cbRef.current.activeTarget.itemKey,
+            }
+          : {}),
         hasVideoDecoder:
           cbRef.current.androidDecoderMode !== undefined &&
           cbRef.current.onSelectAndroidDecoderMode !== undefined,
@@ -543,6 +564,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
         selectSleepTimer: cbRef.current.onSelectSleepTimer,
         toggleSleepTimerAction: cbRef.current.onToggleSleepTimerAction,
         selectAudioDevice: cbRef.current.onSelectAudioDevice,
+        selectQualityVariant: cbRef.current.onSelectQualityVariant,
         selectAndroidDecoderMode: cbRef.current.onSelectAndroidDecoderMode,
         onExit: () => onExitRef.current(),
         onJumpPreviousChannel: cbRef.current.onJumpPreviousChannel,

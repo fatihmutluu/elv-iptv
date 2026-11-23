@@ -32,6 +32,8 @@ describe('scanXmltv content', () => {
         categories: ['News', 'Live'],
         episodeNum: 'S1 E2',
         icon: 'http://img.example/p.png',
+        ratingSystem: 'x',
+        ratingValue: 'PG',
       },
       { channel: 'b.example', start: D('0100'), title: 'No stop', categories: [] },
     ]);

@@ -1,3 +1,12 @@
+export { CategoryPickerPanel, type CategoryPickerPanelProps } from './CategoryPickerPanel';
+export {
+  buildCategorySelection,
+  clearPendingCategories,
+  countPendingCategories,
+  discoveredCategoryKey,
+  initialSelectedCategoryKeys,
+  mergePendingCategories,
+} from './category-selection-model';
 export {
   type DescribedSourceFailure,
   describeSourceFailure,
@@ -6,6 +15,7 @@ export {
 export { createLazyCatalog } from './lazy-catalog';
 export { SourcesScreen, type SourcesScreenProps } from './SourcesScreen';
 export {
+  type CategoryPickerState,
   phaseMessageId,
   type SourceRuntimeStatus,
   type SourcesController,
@@ -15,6 +25,7 @@ export {
 export {
   createInitialSourceForm,
   detectPastedXtreamLink,
+  isValidIanaTimeZone,
   type SourceFormState,
   type SourceValidationCode,
   type SourceValidationError,

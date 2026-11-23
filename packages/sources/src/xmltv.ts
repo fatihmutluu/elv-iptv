@@ -31,7 +31,7 @@ import {
 } from './xml-tokens';
 import { parseChildren } from './xmltv-children';
 import { createLanguageScorer, type LanguageScorer, resolveXmlPrologEncoding } from './xmltv-meta';
-import { parseXmltvTime } from './xmltv-time';
+import { type ParseXmltvTimeOptions, parseXmltvTime } from './xmltv-time';
 import type { XmltvBatch, XmltvChannel, XmltvOptions, XmltvProgramme } from './xmltv-types';
 
 export { parseXmltvTime } from './xmltv-time';
@@ -100,11 +100,14 @@ class XmltvScanner {
 
   private readonly size: number;
   private readonly opts: XmltvOptions;
+  private readonly timeOpts: ParseXmltvTimeOptions | undefined;
 
   constructor(size: number, opts: XmltvOptions) {
     this.size = size;
     this.opts = opts;
     this.scoreLang = createLanguageScorer(opts.preferredLanguages);
+    this.timeOpts =
+      opts.defaultTimeZone !== undefined ? { defaultTimeZone: opts.defaultTimeZone } : undefined;
   }
 
   /** Processes complete elements (all remaining input when `final`) until the batch is full or input runs out. */
@@ -277,8 +280,8 @@ class XmltvScanner {
       this.fail(bytes, lt, 'programme-missing-start');
       return;
     }
-    const start = parseXmltvTime(startText);
-    const stop = stopText === undefined ? undefined : parseXmltvTime(stopText);
+    const start = parseXmltvTime(startText, this.timeOpts);
+    const stop = stopText === undefined ? undefined : parseXmltvTime(stopText, this.timeOpts);
     if (
       start === undefined ||
       (stopText !== undefined && stop === undefined) ||

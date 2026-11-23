@@ -52,6 +52,7 @@ export interface CatalogDiscoveryScreenProps {
   readonly onOpenSources: () => void;
   readonly onFocusTopNav?: () => void;
   readonly isActiveScope?: boolean;
+  readonly groupVersions?: boolean;
 }
 
 /**
@@ -73,6 +74,7 @@ export function CatalogDiscoveryScreen({
   onOpenSources,
   onFocusTopNav,
   isActiveScope = true,
+  groupVersions = false,
 }: CatalogDiscoveryScreenProps): ReactElement {
   const theme = useTheme();
   const viewport = useViewport();
@@ -108,6 +110,7 @@ export function CatalogDiscoveryScreen({
     selectedCategoryId: activeMemory.selectedCategoryId,
     visibleCategoryCount: activeMemory.visibleCategoryCount,
     sortBy,
+    groupVersions,
     onVisibleCategoryCountChange: handleVisibleCategoryCountChange,
     onClearStaleCategory: handleSelectAllCategories,
   });
@@ -351,6 +354,7 @@ export function CatalogDiscoveryScreen({
               sortFocused={tvNav.focusedRowId === 'gridBack' && tvNav.focusedCol === 1}
               focusedGridPos={tvNav.focusedGridPos}
               sortBy={sortBy}
+              groupVersions={groupVersions}
               onToggleSort={handleToggleSort}
               onBack={handleSelectAllCategories}
               onOpenDetail={onOpenDetail}

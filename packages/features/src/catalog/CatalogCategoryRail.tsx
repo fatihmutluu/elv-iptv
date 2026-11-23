@@ -114,6 +114,7 @@ const CatalogPosterCardItem = memo(function CatalogPosterCardItemInner({
     const target = detailTargetFromItem(item, categoryId);
     if (target) onOpenDetail(target);
   }, [categoryId, item, onOpenDetail]);
+  const i18n = useI18n();
 
   const isSeries = item.kind === 'series';
   const progressWatched = progress?.watched === true;
@@ -170,7 +171,11 @@ const CatalogPosterCardItem = memo(function CatalogPosterCardItemInner({
         watchedLabel,
       })
     : {};
-  const badge = !isSeries && effectiveWatched ? watchedLabel : undefined;
+  const versionBadge =
+    !isSeries && (item.versionCount ?? 0) > 1
+      ? i18n.t('detail.versionCount', { count: item.versionCount ?? 0 })
+      : undefined;
+  const badge = !isSeries && effectiveWatched ? watchedLabel : versionBadge;
 
   return (
     <PosterCard

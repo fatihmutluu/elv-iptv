@@ -1,4 +1,5 @@
 import type { Decompressor, HttpClient, Scheduler, SecretStore, SqlDriver } from '@elv/domain';
+import type { LocalPlaylistStore } from './sources';
 
 /** Collaborators of an import; every platform capability is injected so the engine stays pure. */
 export interface ImportDeps {
@@ -9,6 +10,8 @@ export interface ImportDeps {
   /** Epoch milliseconds. */
   clock: () => number;
   decompressor?: Decompressor;
+  /** Optional sandboxed local M3U byte store for local file imports (`#51`). */
+  localPlaylistStore?: LocalPlaylistStore;
   /**
    * Largest Xtream response body the client buffers (default 128 MiB). This is the memory and jank control for small
    * devices: one list is parsed from one buffer, so a lower cap bounds both, and a list above it falls back to

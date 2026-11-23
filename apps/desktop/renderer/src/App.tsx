@@ -1,5 +1,12 @@
 import { createCoalescedCatalog } from '@elv/data';
-import { AppProviders, AppShell, createLazyCatalog, type VideoHost } from '@elv/features';
+import {
+  AppProviders,
+  AppShell,
+  type AppShellProps,
+  createLazyCatalog,
+  type SourceImportHost,
+  type VideoHost,
+} from '@elv/features';
 import { resolveLocale } from '@elv/i18n';
 import { UiAdaptersProvider } from '@elv/ui-kit';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -257,6 +264,22 @@ function AppRoot() {
     return attachDeadHostOnlineReset(window);
   }, []);
 
+  const sourceImportHost = useMemo<SourceImportHost | undefined>(() => {
+    const sourcesBridge = window.elv?.sources;
+    if (!sourcesBridge) return undefined;
+    return {
+      readClipboardText: () => sourcesBridge.readClipboardText(),
+      pickPlaylistFile: () => sourcesBridge.pickPlaylistFile(),
+    };
+  }, []);
+
+  const shellProps: AppShellProps & { sourceImportHost?: SourceImportHost } = {
+    catalog,
+    videoHost,
+    externalRefreshToken: refreshToken,
+    ...(sourceImportHost === undefined ? {} : { sourceImportHost }),
+  };
+
   return (
     <UiAdaptersProvider adapters={uiAdapters}>
       <AppProviders
@@ -272,7 +295,7 @@ function AppRoot() {
             />
           ) : null}
           <View style={appStyles.shell}>
-            <AppShell catalog={catalog} videoHost={videoHost} externalRefreshToken={refreshToken} />
+            <AppShell {...shellProps} />
           </View>
         </View>
       </AppProviders>

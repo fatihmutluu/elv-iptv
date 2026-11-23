@@ -78,6 +78,26 @@ export function normalizeActiveConnections(raw: unknown): number | undefined {
   return Math.floor(num);
 }
 
+/** Per-source category allowlist and pending-new-category tracking (`#39`). */
+export interface SourceCategorySelection {
+  readonly live?: readonly string[];
+  readonly movie?: readonly string[];
+  readonly series?: readonly string[];
+  readonly knownLive?: readonly string[];
+  readonly knownMovie?: readonly string[];
+  readonly knownSeries?: readonly string[];
+  readonly pendingLive?: readonly string[];
+  readonly pendingMovie?: readonly string[];
+  readonly pendingSeries?: readonly string[];
+}
+
+/** Sandboxed local M3U playlist byte storage keyed strictly by `sourceId` (never raw host paths, `#51`). */
+export interface LocalPlaylistStore {
+  write(sourceId: string, bytes: Uint8Array): Promise<void>;
+  openRead(sourceId: string): Promise<AsyncIterable<Uint8Array> | undefined>;
+  remove(sourceId: string): Promise<void>;
+}
+
 /** Non-secret, per-source settings stored as JSON in the `sources` table. */
 export interface SourceSettings {
   transport?: TransportSettings;
@@ -100,6 +120,12 @@ export interface SourceSettings {
   credentialFingerprint?: string;
   /** Optional source-wide EPG time shift in milliseconds applied at query time (`#121`). */
   epgShiftMs?: number;
+  /** Optional default IANA timezone (e.g. `Europe/Berlin`) for offset-less XMLTV timestamps (`#182`). */
+  xmltvTimezone?: string;
+  /** Optional pre-import category selection & pending-category tracking (`#39`). */
+  categorySelection?: SourceCategorySelection;
+  /** Marks a local sandboxed M3U source whose bytes are stored in {@link LocalPlaylistStore} (`#51`). */
+  isLocalPlaylist?: boolean;
 }
 
 /** A row of the `sources` table. */
@@ -120,6 +146,8 @@ export interface XtreamSourceInput {
   transport?: TransportSettings;
   /** User guide override, stored whole as a secret like an M3U guide URL. */
   guideUrl?: string;
+  /** Optional default IANA timezone for offset-less XMLTV timestamps (`#182`). */
+  readonly xmltvTimezone?: string;
 }
 
 /** Input for {@link addM3uSource}. */
@@ -129,6 +157,19 @@ export interface M3uSourceInput {
   guideUrl?: string;
   vodPlaylist?: boolean;
   transport?: TransportSettings;
+  /** Optional default IANA timezone for offset-less XMLTV timestamps (`#182`). */
+  readonly xmltvTimezone?: string;
+}
+
+/** Input for {@link addLocalM3uSource} (`#51`). */
+export interface LocalM3uSourceInput {
+  name: string;
+  bytes: Uint8Array;
+  guideUrl?: string;
+  vodPlaylist?: boolean;
+  transport?: TransportSettings;
+  /** Optional default IANA timezone for offset-less XMLTV timestamps (`#182`). */
+  readonly xmltvTimezone?: string;
 }
 
 /** Collaborators for adding a source; `newId` and `clock` are injected so tests stay deterministic. */
@@ -260,6 +301,9 @@ export async function addXtreamSource(
   const id = deps.newId();
   const settings: SourceSettings =
     input.transport === undefined ? {} : { transport: input.transport };
+  if (typeof input.xmltvTimezone === 'string' && input.xmltvTimezone.trim() !== '') {
+    settings.xmltvTimezone = input.xmltvTimezone.trim();
+  }
   const record: SourceRecord = {
     id,
     kind: 'xtream',
@@ -304,6 +348,9 @@ export async function addM3uSource(
   const vars: UrlVars = {};
   if (input.transport !== undefined) settings.transport = input.transport;
   if (input.vodPlaylist !== undefined) settings.vodPlaylist = input.vodPlaylist;
+  if (typeof input.xmltvTimezone === 'string' && input.xmltvTimezone.trim() !== '') {
+    settings.xmltvTimezone = input.xmltvTimezone.trim();
+  }
   if (input.guideUrl !== undefined && input.guideUrl.trim() !== '') {
     const g = guideSecret(input.guideUrl);
     settings.guideUrl = g.template;
@@ -320,6 +367,51 @@ export async function addM3uSource(
     [secretKey(id, 'playlist'), input.playlistUrl],
     [secretKey(id, 'urlvars'), JSON.stringify(vars)],
   ]);
+}
+
+/**
+ * Adds a local sandboxed M3U source (`#51`): writes playlist bytes to `localPlaylistStore` keyed by `sourceId`
+ * and marks `settings.isLocalPlaylist = true` without ever storing filesystem paths in SQLite or `SecretStore`.
+ */
+export async function addLocalM3uSource(
+  input: LocalM3uSourceInput,
+  deps: AddSourceDeps & { localPlaylistStore?: LocalPlaylistStore },
+): Promise<Result<SourceRecord>> {
+  if (input.name.trim() === '' || input.bytes.byteLength === 0) return invalid();
+  if (deps.localPlaylistStore === undefined) {
+    return err(elvError('storage', 'local-playlist-unsupported'));
+  }
+  const id = deps.newId();
+  if (!SOURCE_ID.test(id)) return err(elvError('storage', 'invalid-source-id'));
+  const settings: SourceSettings = { isLocalPlaylist: true };
+  const vars: UrlVars = {};
+  if (input.transport !== undefined) settings.transport = input.transport;
+  if (input.vodPlaylist !== undefined) settings.vodPlaylist = input.vodPlaylist;
+  if (typeof input.xmltvTimezone === 'string' && input.xmltvTimezone.trim() !== '') {
+    settings.xmltvTimezone = input.xmltvTimezone.trim();
+  }
+  if (input.guideUrl !== undefined && input.guideUrl.trim() !== '') {
+    const g = guideSecret(input.guideUrl);
+    settings.guideUrl = g.template;
+    Object.assign(vars, g.vars);
+  }
+  try {
+    await deps.localPlaylistStore.write(id, input.bytes);
+  } catch {
+    return err(elvError('storage', 'local-playlist-write-failed'));
+  }
+  const record: SourceRecord = {
+    id,
+    kind: 'm3u',
+    name: input.name,
+    createdAt: deps.clock(),
+    settings,
+  };
+  const persisted = await persist(deps, record, [[secretKey(id, 'urlvars'), JSON.stringify(vars)]]);
+  if (!persisted.ok) {
+    await deps.localPlaylistStore.remove(id).catch(() => undefined);
+  }
+  return persisted;
 }
 
 /** Reads one active source; `undefined` when the id is unknown or marked `deleting = 1`. */
@@ -396,7 +488,7 @@ export async function purgeSourceRows(
 export async function finishDeletingSource(
   db: SqlDriver,
   id: string,
-  opts?: { chunkSize?: number; scheduler?: Scheduler },
+  opts?: { chunkSize?: number; scheduler?: Scheduler; localPlaylistStore?: LocalPlaylistStore },
 ): Promise<void> {
   const chunkSize = Math.max(1, Math.floor(opts?.chunkSize ?? DEFAULT_DELETE_CHUNK_SIZE));
   for (const spec of BULK_DELETE_SPECS) {
@@ -414,6 +506,7 @@ export async function finishDeletingSource(
     await tx.run('DELETE FROM recent_channels WHERE source_id = ?', [id]);
     await tx.run('DELETE FROM sources WHERE id = ?', [id]);
   });
+  await opts?.localPlaylistStore?.remove(id).catch(() => undefined);
 }
 
 /**
@@ -424,7 +517,12 @@ export async function finishDeletingSource(
  */
 export async function removeSource(
   id: string,
-  deps: { db: SqlDriver; secrets: SecretStore; scheduler?: Scheduler },
+  deps: {
+    db: SqlDriver;
+    secrets: SecretStore;
+    scheduler?: Scheduler;
+    localPlaylistStore?: LocalPlaylistStore;
+  },
   opts?: { chunkSize?: number },
 ): Promise<Result<void>> {
   const busy = await deps.db.transaction(async (tx) => {
@@ -440,6 +538,9 @@ export async function removeSource(
   await finishDeletingSource(deps.db, id, {
     ...(opts?.chunkSize === undefined ? {} : { chunkSize: opts.chunkSize }),
     ...(deps.scheduler === undefined ? {} : { scheduler: deps.scheduler }),
+    ...(deps.localPlaylistStore === undefined
+      ? {}
+      : { localPlaylistStore: deps.localPlaylistStore }),
   });
   return removeSecrets(id, deps.secrets);
 }

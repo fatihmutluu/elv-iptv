@@ -355,6 +355,12 @@ export function activatePlaybackControl(
     });
     return;
   }
+  if (controlId === 'toggle-group-vod-versions') {
+    void preferences.updatePreferences({
+      groupVodVersions: !preferences.preferences.groupVodVersions,
+    });
+    return;
+  }
   if (controlId === 'toggle-prefer-default-audio') {
     void preferences.updatePreferences({
       preferDefaultAudioTrack: !preferences.preferences.preferDefaultAudioTrack,

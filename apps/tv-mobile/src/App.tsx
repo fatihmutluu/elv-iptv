@@ -2,6 +2,8 @@ import { type CatalogService, createCoalescedCatalog } from '@elv/data';
 import {
   type AppleSafeAreaInsets,
   getAppleSafeAreaInsets,
+  pickApplePlaylistFile,
+  readAppleClipboardText,
   setAppleEngineMuted,
   setAppleEngineVolume,
   subscribeAppleHardwareKeys,
@@ -12,6 +14,8 @@ import {
   applyAndroidShortEdgesCutoutMode,
   enterAndroidPictureInPicture,
   getAndroidSafeAreaInsets,
+  pickAndroidPlaylistFile,
+  readAndroidClipboardText,
   requestTemporaryOrientation,
   setOrientationLocked,
   subscribeAndroidPictureInPicture,
@@ -23,6 +27,7 @@ import {
   AppProviders,
   AppShell,
   createLazyCatalog,
+  type SourceImportHost,
   type VideoHost,
 } from '@elv/features';
 import { resolveLocale } from '@elv/i18n';
@@ -166,6 +171,25 @@ function AppRoot() {
     [isAndroidMobile],
   );
 
+  const sourceImportHost = useMemo<SourceImportHost | undefined>(() => {
+    if (isAndroidMobile) {
+      return {
+        readClipboardText: readAndroidClipboardText,
+        pickPlaylistFile: pickAndroidPlaylistFile,
+      };
+    }
+    if (Platform.OS === 'android') {
+      return { readClipboardText: readAndroidClipboardText };
+    }
+    if (isAppleMobile) {
+      return {
+        readClipboardText: readAppleClipboardText,
+        pickPlaylistFile: pickApplePlaylistFile,
+      };
+    }
+    return undefined;
+  }, [isAndroidMobile, isAppleMobile]);
+
   useEffect(() => {
     let cancelled = false;
     if (__DEV__) {
@@ -209,6 +233,7 @@ function AppRoot() {
           catalog={catalog}
           videoHost={videoHost}
           appLifecycle={appLifecycle}
+          {...(sourceImportHost !== undefined ? { sourceImportHost } : {})}
           externalRefreshToken={refreshToken}
         />
         <StatusBar style="light" />

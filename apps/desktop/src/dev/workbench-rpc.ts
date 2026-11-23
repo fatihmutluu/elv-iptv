@@ -3,6 +3,7 @@ import {
   type AddSourceInput,
   type BrowseKind,
   type CatalogService,
+  type CategoryQueryOptions,
   type LinkSourceInput,
   type ListItemsOptions,
   queryPlayable,
@@ -13,10 +14,12 @@ import {
 } from '@elv/data';
 import { elvError, err, ok, type SqlDriver } from '@elv/domain';
 import {
+  isCategoryQueryOptions,
   isListItemsOptions,
   isOptionalProfileId,
   isSeriesKeyList,
   isSourceIdList,
+  isSourceSettingsPatch,
 } from '../shared/catalog-ipc-guards.ts';
 
 const PREVIEW_STREAM_URL = 'https://workbench.invalid/preview.m3u8';
@@ -25,11 +28,15 @@ const PREVIEW_STREAM_URL = 'https://workbench.invalid/preview.m3u8';
 export const ALLOWED_RPC_METHODS: ReadonlySet<string> = new Set([
   'addSource',
   'addSourceFromLink',
+  'discoverSourceCategories',
+  'updateSourceSettings',
   'removeSource',
   'importGuide',
   'listSources',
   'categories',
   'items',
+  'liveVariants',
+  'itemVersions',
   'allSourcesItems',
   'itemDetail',
   'search',
@@ -98,6 +105,17 @@ export async function dispatchWorkbenchRpc(
       return service.addSource(args[0] as AddSourceInput);
     case 'addSourceFromLink':
       return service.addSourceFromLink(args[0] as LinkSourceInput);
+    case 'discoverSourceCategories':
+      return (
+        service.discoverSourceCategories?.(String(args[0] ?? '')) ??
+        err(elvError('storage', 'unsupported'))
+      );
+    case 'updateSourceSettings': {
+      if (!service.updateSourceSettings || !isSourceSettingsPatch(args[1])) return undefined;
+      await service.updateSourceSettings(String(args[0] ?? ''), args[1]);
+      await checkpointWal();
+      return undefined;
+    }
     case 'removeSource': {
       const result = await service.removeSource(String(args[0] ?? ''));
       await checkpointWal();
@@ -129,12 +147,20 @@ export async function dispatchWorkbenchRpc(
     }
     case 'listSources':
       return service.listSources();
-    case 'categories':
-      return service.categories(String(args[0] ?? ''), args[1] as BrowseKind);
+    case 'categories': {
+      const opts: CategoryQueryOptions | undefined = isCategoryQueryOptions(args[2])
+        ? args[2]
+        : undefined;
+      return service.categories(String(args[0] ?? ''), args[1] as BrowseKind, opts);
+    }
     case 'items': {
       const opts: ListItemsOptions | undefined = isListItemsOptions(args[3]) ? args[3] : undefined;
       return service.items(String(args[0] ?? ''), Number(args[1] ?? 0), Number(args[2] ?? 0), opts);
     }
+    case 'liveVariants':
+      return service.liveVariants?.(String(args[0] ?? ''), optStr(args[1])) ?? [];
+    case 'itemVersions':
+      return service.itemVersions?.(String(args[0] ?? '')) ?? [];
     case 'allSourcesItems': {
       const rawKind = args[0];
       if (rawKind !== 'live' && rawKind !== 'movie' && rawKind !== 'series') return [];

@@ -44,8 +44,9 @@ extension AetherBackend {
           )
 
         case let .liveTs(url):
-          let session = self.httpSession
-          let initialHeaders = (self.currentLoadOptions ?? fallbackOptions).httpHeaders
+          let activeOpts = self.currentLoadOptions ?? fallbackOptions
+          let session = self.sessionForLoad(allowLegacyTls: activeOpts.allowLegacyTls)
+          let initialHeaders = activeOpts.httpHeaders
           let reader = LiveTsReader(
             url: url,
             headers: initialHeaders,
@@ -185,5 +186,13 @@ extension AetherBackend {
     if let rf = currentReader?.lastFailure {
       onObservation?(.readerFault(rf), serial)
     }
+  }
+
+  func sessionForLoad(allowLegacyTls: Bool) -> EngineHttpSession {
+    guard allowLegacyTls else { return httpSession }
+    if let existing = legacyHttpSession { return existing }
+    let created = EngineHttpSession(allowLegacyTls: true)
+    legacyHttpSession = created
+    return created
   }
 }

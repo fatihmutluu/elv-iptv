@@ -6,6 +6,8 @@ export interface XmltvChannel {
   id: string;
   names: string[];
   icon?: string;
+  /** Logical Channel Number parsed from top-level `<lcn>` (`#182`). */
+  lcn?: string;
 }
 
 /** A guide programme; times are epoch milliseconds. A programme without a `title` element has `title: ''`. */
@@ -23,6 +25,10 @@ export interface XmltvProgramme {
   isNew?: boolean;
   isPremiere?: boolean;
   previouslyShown?: boolean;
+  /** Content rating system parsed from `<rating system="...">` (`#182`). */
+  ratingSystem?: string;
+  /** Content rating value parsed from `<rating><value>...</value></rating>` (`#182`). */
+  ratingValue?: string;
 }
 
 /** One batch of a scan; the last one has `done: true` and the statistics. */
@@ -55,4 +61,6 @@ export interface XmltvOptions {
   maxDecompressedBytes?: number;
   /** Ordered BCP-47 / ISO-639 language preferences for selecting `<title>`, `<sub-title>`, and `<desc>` (`#121`, `#429`). */
   preferredLanguages?: readonly string[];
+  /** Default IANA timezone (e.g. `Europe/Berlin`) applied to offset-less XMLTV timestamps (`#182`). */
+  defaultTimeZone?: string;
 }

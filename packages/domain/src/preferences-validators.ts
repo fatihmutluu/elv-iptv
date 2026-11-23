@@ -89,6 +89,8 @@ export interface ExtendedPreferencesFields {
   readonly confirmExitOnBack: boolean;
   readonly preferredAudioDevice: string;
   readonly androidDecoderMode: AndroidDecoderMode;
+  readonly collapseLiveVariants: boolean;
+  readonly groupVodVersions: boolean;
 }
 
 const MAX_PREF_STRING_LENGTH = 64;
@@ -420,6 +422,14 @@ export function parseExtendedPreferences(
     androidDecoderMode: isAndroidDecoderMode(parsed.androidDecoderMode)
       ? parsed.androidDecoderMode
       : defaults.androidDecoderMode,
+    collapseLiveVariants:
+      typeof parsed.collapseLiveVariants === 'boolean'
+        ? parsed.collapseLiveVariants
+        : defaults.collapseLiveVariants,
+    groupVodVersions:
+      typeof parsed.groupVodVersions === 'boolean'
+        ? parsed.groupVodVersions
+        : defaults.groupVodVersions,
   };
 }
 
@@ -497,6 +507,8 @@ export function serializeExtendedPreferences(
     androidDecoderMode: isAndroidDecoderMode(snapshot.androidDecoderMode)
       ? snapshot.androidDecoderMode
       : defaults.androidDecoderMode,
+    collapseLiveVariants: Boolean(snapshot.collapseLiveVariants),
+    groupVodVersions: Boolean(snapshot.groupVodVersions),
   };
 }
 
@@ -599,5 +611,11 @@ export function mergeExtendedPreferences(
     androidDecoderMode: isAndroidDecoderMode(patch.androidDecoderMode)
       ? patch.androidDecoderMode
       : base.androidDecoderMode,
+    collapseLiveVariants:
+      typeof patch.collapseLiveVariants === 'boolean'
+        ? patch.collapseLiveVariants
+        : base.collapseLiveVariants,
+    groupVodVersions:
+      typeof patch.groupVodVersions === 'boolean' ? patch.groupVodVersions : base.groupVodVersions,
   };
 }

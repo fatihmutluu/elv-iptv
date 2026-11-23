@@ -74,7 +74,8 @@ public func loadOptions(for plan: MediaPlan, request: LoadRequest) -> EngineLoad
     generatesBackgroundScrubPreviews: false,
     skipsContainerAttachments: true,
     hostRetriesExhaustedLiveReplay: hostRetriesLiveReplay,
-    filterSdhSubtitles: request.filterSdhSubtitles
+    filterSdhSubtitles: request.filterSdhSubtitles,
+    allowLegacyTls: request.allowLegacyTls
   )
 }
 

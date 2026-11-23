@@ -138,6 +138,7 @@ export async function openGuide(
         response = await deps.http.get(url, {
           headers: conditionalHeaders(baseHeaders, sent),
           timeoutMs: REQUEST_TIMEOUT_MS,
+          ...(source.settings.transport?.allowLegacyTls ? { allowLegacyTls: true } : {}),
           ...(signal === undefined ? {} : { signal }),
         });
       } catch {

@@ -1676,3 +1676,93 @@ msgstr "Programme details"
 
 msgid "live.context.hideChannel"
 msgstr "Hide channel"
+
+msgid "sources.pasteClipboard"
+msgstr "Paste"
+
+msgid "sources.chooseLocalFile"
+msgstr "Choose M3U file"
+
+msgid "sources.localFileSelected"
+msgstr "File: {name}"
+
+msgid "sources.clearLocalFile"
+msgstr "Clear file"
+
+msgid "sources.clipboardEmpty"
+msgstr "Clipboard has no text to paste."
+
+msgid "sources.localFileBadge"
+msgstr "Local file"
+
+msgid "sources.chooseCategories"
+msgstr "Choose categories"
+
+msgid "sources.discoveringCategories"
+msgstr "Loading categories…"
+
+msgid "sources.categoriesStepTitle"
+msgstr "Select categories to import"
+
+msgid "sources.categoriesSelectedCount"
+msgstr "{selected} of {total} selected"
+
+msgid "sources.selectAllCategories"
+msgstr "Select all"
+
+msgid "sources.clearCategories"
+msgstr "Select none"
+
+msgid "sources.importSelected"
+msgstr "Import selected"
+
+msgid "sources.pendingCategoriesBanner"
+msgstr "{count} new categories available"
+
+msgid "sources.reviewNewCategories"
+msgstr "Review"
+
+msgid "sources.dismissNewCategories"
+msgstr "Dismiss"
+
+msgid "sources.includeNewCategories"
+msgstr "Include new"
+
+msgid "sources.xmltvTimezoneLabel"
+msgstr "XMLTV timezone (IANA)"
+
+msgid "sources.xmltvTimezonePlaceholder"
+msgstr "Auto (e.g. Europe/Istanbul)"
+
+msgid "sources.xmltvTimezoneHint"
+msgstr "Used only when guide timestamps omit timezone offsets."
+
+msgid "sources.allowLegacyTls"
+msgstr "Allow legacy TLS (older endpoints)"
+
+msgid "sources.allowLegacyTlsDesc"
+msgstr "Opt-in compatibility for older local tuners or TLS 1.0/1.1 servers."
+
+msgid "settings.liveTv.collapseVariants"
+msgstr "Collapse live quality variants"
+
+msgid "settings.liveTv.collapseVariantsDesc"
+msgstr "Group same-category 4K/FHD/HD/SD duplicates into one row with in-player switching"
+
+msgid "player.qualityVariant"
+msgstr "Stream quality"
+
+msgid "player.qualityVariantCount"
+msgstr "{count} qualities"
+
+msgid "settings.playback.groupVodVersions"
+msgstr "Group multi-version movies"
+
+msgid "settings.playback.groupVodVersionsDesc"
+msgstr "Combine duplicate quality or language editions under one card"
+
+msgid "detail.versionLabel"
+msgstr "Version"
+
+msgid "detail.versionCount"
+msgstr "{count} versions"

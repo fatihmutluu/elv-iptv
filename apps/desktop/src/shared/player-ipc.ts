@@ -269,6 +269,7 @@ function isLoadCommand(x: unknown): x is LoadCommand {
       typeof options['preferHevcOverDolbyVision'] === 'boolean') &&
     (options['filterSdhSubtitles'] === undefined ||
       typeof options['filterSdhSubtitles'] === 'boolean') &&
+    (options['allowLegacyTls'] === undefined || typeof options['allowLegacyTls'] === 'boolean') &&
     (options['audioTrackId'] === undefined || isAudioTrackId(options['audioTrackId'])) &&
     (options['subtitleTrackId'] === undefined ||
       options['subtitleTrackId'] === null ||

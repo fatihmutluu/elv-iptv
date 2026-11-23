@@ -1,18 +1,23 @@
 import type {
   AddSourceInput,
+  CategoryQueryOptions,
   ImportProgress,
   ItemSortOrder,
   LinkSourceInput,
   ListItemsOptions,
+  LocalM3uSourceInput,
   SaveProgressInput,
   SaveTrackPreferenceInput,
   SearchOptions,
   SearchScope,
+  SourceCategorySelection,
+  SourceSettings,
   ToggleFavoriteInput,
   TrackPreferenceResizeMode,
   UserItemKind,
 } from '@elv/data';
 import type { ElvError, ErrorCategory, TransportSettings } from '@elv/domain';
+import { MAX_PICKED_PLAYLIST_BYTES } from './sources-ipc.ts';
 
 const MAX_STRING_CHARS = 8_192;
 export const MAX_ID_CHARS = 256;
@@ -208,14 +213,88 @@ export const isEpgWindowKeyList = (x: unknown): x is readonly string[] =>
 function isTransportSettings(x: unknown): x is TransportSettings {
   if (!isRecord(x)) return false;
   if (!isOptionalCleanString(x['userAgent']) || !isOptionalCleanString(x['referer'])) return false;
+  if (x['allowLegacyTls'] !== undefined && typeof x['allowLegacyTls'] !== 'boolean') return false;
   const fmt = x['xtreamFormat'];
   return fmt === undefined || fmt === 'ts' || fmt === 'm3u8';
+}
+
+const MAX_TIMEZONE_CHARS = 128;
+const MAX_CATEGORY_SELECTION_IDS = 4_096;
+const CATEGORY_SELECTION_KEYS = new Set<keyof SourceCategorySelection>([
+  'live',
+  'movie',
+  'series',
+  'knownLive',
+  'knownMovie',
+  'knownSeries',
+  'pendingLive',
+  'pendingMovie',
+  'pendingSeries',
+]);
+const SOURCE_SETTINGS_PATCH_KEYS = new Set<keyof SourceSettings>([
+  'xmltvTimezone',
+  'categorySelection',
+  'transport',
+  'epgShiftMs',
+  'includePlaceholderChannels',
+  'vodPlaylist',
+]);
+
+const isOptionalTimezoneString = (x: unknown): boolean =>
+  x === undefined || (isBoundedString(x, 0, MAX_TIMEZONE_CHARS) && !hasControlChar(x.trim()));
+
+function isSourceCategorySelection(x: unknown): x is SourceCategorySelection {
+  if (!isRecord(x)) return false;
+  for (const [key, value] of Object.entries(x)) {
+    if (!CATEGORY_SELECTION_KEYS.has(key as keyof SourceCategorySelection)) return false;
+    if (value === undefined) continue;
+    if (
+      !Array.isArray(value) ||
+      value.length > MAX_CATEGORY_SELECTION_IDS ||
+      !value.every((entry) => isCleanKey(entry, MAX_ID_CHARS))
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function isSourceSettingsPatch(x: unknown): x is Partial<SourceSettings> {
+  if (!isRecord(x)) return false;
+  for (const key of Object.keys(x)) {
+    if (!SOURCE_SETTINGS_PATCH_KEYS.has(key as keyof SourceSettings)) return false;
+  }
+  if (!isOptionalTimezoneString(x['xmltvTimezone'])) return false;
+  if (x['categorySelection'] !== undefined && !isSourceCategorySelection(x['categorySelection'])) {
+    return false;
+  }
+  if (x['transport'] !== undefined && !isTransportSettings(x['transport'])) return false;
+  if (x['epgShiftMs'] !== undefined && !isFiniteNumber(x['epgShiftMs'])) return false;
+  if (
+    x['includePlaceholderChannels'] !== undefined &&
+    typeof x['includePlaceholderChannels'] !== 'boolean'
+  ) {
+    return false;
+  }
+  if (x['vodPlaylist'] !== undefined && typeof x['vodPlaylist'] !== 'boolean') return false;
+  return true;
+}
+
+export function isLocalM3uSourceInput(x: unknown): x is LocalM3uSourceInput {
+  if (!isRecord(x) || !isBoundedString(x['name'])) return false;
+  const bytes = x['bytes'];
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength > MAX_PICKED_PLAYLIST_BYTES) return false;
+  if (!isOptionalTrimmedCleanString(x['guideUrl'])) return false;
+  if (!isOptionalTimezoneString(x['xmltvTimezone'])) return false;
+  if (x['vodPlaylist'] !== undefined && typeof x['vodPlaylist'] !== 'boolean') return false;
+  return x['transport'] === undefined || isTransportSettings(x['transport']);
 }
 
 export function isAddSourceInput(x: unknown): x is AddSourceInput {
   if (!isRecord(x) || !isBoundedString(x['name'])) return false;
   if (x['transport'] !== undefined && !isTransportSettings(x['transport'])) return false;
   if (!isOptionalTrimmedCleanString(x['guideUrl'])) return false;
+  if (!isOptionalTimezoneString(x['xmltvTimezone'])) return false;
   if (x['kind'] === 'xtream') {
     return (
       isTrimmedCleanString(x['server']) &&
@@ -257,6 +336,14 @@ export function isElvError(x: unknown): x is ElvError {
   );
 }
 
+export function isCategoryQueryOptions(x: unknown): x is CategoryQueryOptions {
+  if (!isRecord(x)) return false;
+  if (x['collapseVariants'] !== undefined && typeof x['collapseVariants'] !== 'boolean') {
+    return false;
+  }
+  return x['groupVersions'] === undefined || typeof x['groupVersions'] === 'boolean';
+}
+
 export function isListItemsOptions(x: unknown): x is ListItemsOptions {
   if (!isRecord(x)) return false;
   const sortBy = x['sortBy'];
@@ -268,6 +355,12 @@ export function isListItemsOptions(x: unknown): x is ListItemsOptions {
   }
   const excludeWatched = x['excludeWatched'];
   if (excludeWatched !== undefined && typeof excludeWatched !== 'boolean') return false;
+  if (x['collapseVariants'] !== undefined && typeof x['collapseVariants'] !== 'boolean') {
+    return false;
+  }
+  if (x['groupVersions'] !== undefined && typeof x['groupVersions'] !== 'boolean') {
+    return false;
+  }
   return isOptionalProfileId(x['profileId']);
 }
 

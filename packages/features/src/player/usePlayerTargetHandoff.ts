@@ -128,7 +128,13 @@ export function usePlayerTargetHandoff({
         item: entry.itemKey,
         accountKey: entry.accountKey ?? entry.sourceId,
         kind: entry.kind,
-        resolve: () => catalogRef.current.resolveStream(entry.itemKey),
+        resolve: async () => {
+          const res = await catalogRef.current.resolveStream(entry.itemKey);
+          if (res.ok && res.value.allowLegacyTls === true) {
+            return { ok: true, value: { ...res.value, allowLegacyTls: true } };
+          }
+          return res;
+        },
         ...(startMs !== undefined ? { startMs } : {}),
         ...(bufferPreset !== undefined ? { bufferPreset } : {}),
         ...(decoderMode !== undefined ? { decoderMode } : {}),
@@ -375,6 +381,20 @@ export function usePlayerTargetHandoff({
     [commitLiveTarget],
   );
 
+  const selectQualityVariant = useCallback(
+    (variantKey: string, variantTitle?: string): void => {
+      const current = activeTargetRef.current;
+      if (current.kind !== 'live' || variantKey === current.itemKey) return;
+      const next: PlayTarget = {
+        ...current,
+        itemKey: variantKey,
+        ...(variantTitle !== undefined ? { title: variantTitle } : {}),
+      };
+      commitLiveTarget(next);
+    },
+    [commitLiveTarget],
+  );
+
   const confirmPreviewChannel = useCallback((): void => {
     const preview = previewTargetRef.current;
     cancelPreviewChannel();
@@ -527,6 +547,7 @@ export function usePlayerTargetHandoff({
     confirmPreviewChannel,
     cancelPreviewChannel,
     selectChannel,
+    selectQualityVariant,
     jumpToChannel,
     onServiceReady,
     reloadActiveTarget,

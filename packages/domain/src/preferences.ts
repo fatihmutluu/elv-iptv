@@ -100,6 +100,8 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   confirmExitOnBack: true,
   preferredAudioDevice: 'auto',
   androidDecoderMode: 'auto',
+  collapseLiveVariants: false,
+  groupVodVersions: true,
 });
 
 /** Partial update applied on top of the current {@link PreferencesSnapshot}. */

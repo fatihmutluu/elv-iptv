@@ -108,4 +108,18 @@ struct MediaPlanTests {
     #expect(handoff.subtitlesDisabled)
     #expect(handoff.httpHeaders == ["Referer": "http://panel.example/"])
   }
+
+  @Test("allowLegacyTls defaults to false and propagates cleanly through loadOptions and hlsHandoffOptions (#182)")
+  func allowLegacyTlsPropagation() throws {
+    let defaultReq = LoadRequest(url: "https://modern.example/live/1.ts", live: true)
+    let defaultOpts = loadOptions(for: try #require(planMedia(defaultReq)), request: defaultReq)
+    #expect(!defaultReq.allowLegacyTls)
+    #expect(!defaultOpts.allowLegacyTls)
+
+    let legacyReq = LoadRequest(url: "https://legacy.example/live/1.ts", live: true, allowLegacyTls: true)
+    let legacyOpts = loadOptions(for: try #require(planMedia(legacyReq)), request: legacyReq)
+    #expect(legacyReq.allowLegacyTls)
+    #expect(legacyOpts.allowLegacyTls)
+    #expect(hlsHandoffOptions(from: legacyOpts).allowLegacyTls)
+  }
 }

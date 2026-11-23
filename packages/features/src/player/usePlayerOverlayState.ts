@@ -49,6 +49,8 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const hasAudioDevice = params.hasAudioDevice === true;
   const audioDevices = params.audioDevices;
   const activeAudioDevice = params.activeAudioDevice;
+  const qualityVariants = params.qualityVariants;
+  const hasQuality = !isVod && (qualityVariants?.length ?? 0) > 1;
   const hasVideoDecoder = params.hasVideoDecoder === true;
   const androidDecoderMode = params.androidDecoderMode;
   const chapters = params.chapters;
@@ -111,6 +113,8 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     hasAudioDevice,
     ...(audioDevices !== undefined ? { audioDevices } : {}),
     ...(activeAudioDevice !== undefined ? { activeAudioDevice } : {}),
+    hasQuality,
+    ...(qualityVariants !== undefined ? { qualityVariants, activeQualityKey: itemKey } : {}),
     hasVideoDecoder,
     ...(androidDecoderMode !== undefined ? { androidDecoderMode } : {}),
     hasChapters,
@@ -385,6 +389,8 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     hasAudioDevice,
     ...(audioDevices !== undefined ? { audioDevices } : {}),
     ...(activeAudioDevice !== undefined ? { activeAudioDevice } : {}),
+    hasQuality,
+    ...(qualityVariants !== undefined ? { qualityVariants, activeQualityKey: itemKey } : {}),
     hasVideoDecoder,
     ...(androidDecoderMode !== undefined ? { androidDecoderMode } : {}),
     hasChapters,

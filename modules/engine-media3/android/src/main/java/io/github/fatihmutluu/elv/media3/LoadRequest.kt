@@ -66,6 +66,8 @@ internal data class LoadRequest(
   val decoderMode: VideoDecoderMode = VideoDecoderMode.AUTO,
   /** Strip SDH / Hearing-Impaired annotations from text subtitle cues (#310). */
   val filterSdhSubtitles: Boolean = false,
+  /** Opt-in legacy TLS (TLS 1.0/1.1) compatibility for older servers (#182). */
+  val allowLegacyTls: Boolean = false,
 ) {
   /** Names no URL and no header value: both may carry credentials. */
   override fun toString(): String {
@@ -73,8 +75,9 @@ internal data class LoadRequest(
     val presetSuffix = if (bufferPreset != BufferPreset.AUTO) ", bufferPreset=${bufferPreset.wireName}" else ""
     val decoderSuffix = if (decoderMode != VideoDecoderMode.AUTO) ", decoderMode=${decoderMode.wireName}" else ""
     val sdhSuffix = if (filterSdhSubtitles) ", filterSdhSubtitles=true" else ""
+    val tlsSuffix = if (allowLegacyTls) ", allowLegacyTls=true" else ""
     return "LoadRequest(live=$live, startMs=$startMs, softwareAudio=$softwareAudio, " +
-      "playlistDetected=$playlistDetected, headers=${headers.size}$dvSuffix$presetSuffix$decoderSuffix$sdhSuffix)"
+      "playlistDetected=$playlistDetected, headers=${headers.size}$dvSuffix$presetSuffix$decoderSuffix$sdhSuffix$tlsSuffix)"
   }
 }
 
@@ -98,6 +101,7 @@ internal fun parseLoadArgs(args: Map<String, Any?>): Pair<Int, LoadRequest> {
   val softwareAudio = args["softwareAudio"] as? Boolean ?: false
   val preferHevcOverDolbyVision = args["preferHevcOverDolbyVision"] as? Boolean ?: false
   val filterSdhSubtitles = args["filterSdhSubtitles"] as? Boolean ?: false
+  val allowLegacyTls = args["allowLegacyTls"] as? Boolean ?: false
   val audioTrackId = (args["audioTrackId"] as? String)?.takeIf { it.isNotEmpty() }
   val bufferPreset = parseBufferPreset(args["bufferPreset"] as? String)
   val decoderMode = parseVideoDecoderMode(args["decoderMode"] as? String)
@@ -123,6 +127,7 @@ internal fun parseLoadArgs(args: Map<String, Any?>): Pair<Int, LoadRequest> {
     bufferPreset = bufferPreset,
     decoderMode = decoderMode,
     filterSdhSubtitles = filterSdhSubtitles,
+    allowLegacyTls = allowLegacyTls,
   )
 }
 

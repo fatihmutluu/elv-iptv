@@ -310,6 +310,18 @@ export function LiveTvSettingsPanel({
           isTv={isTv}
           onToggle={() => applyPatch({ cleanChannelTitles: !activePrefs.cleanChannelTitles })}
         />
+
+        <SettingsDivider />
+
+        <SettingsToggleRow
+          testID="settings-livetv-toggle-collapse-variants"
+          title={i18n.t('settings.liveTv.collapseVariants')}
+          description={i18n.t('settings.liveTv.collapseVariantsDesc')}
+          checked={activePrefs.collapseLiveVariants}
+          focused={focusedControlId === 'toggle-collapse-variants'}
+          isTv={isTv}
+          onToggle={() => applyPatch({ collapseLiveVariants: !activePrefs.collapseLiveVariants })}
+        />
       </Surface>
     </ScrollView>
   );

@@ -276,6 +276,9 @@ export function createWorkbenchRemoteCatalog(
   return {
     addSource: (input) => rpcResult('addSource', [input]),
     addSourceFromLink: (input) => rpcResult('addSourceFromLink', [input]),
+    discoverSourceCategories: (sourceId, opts) =>
+      rpcResult('discoverSourceCategories', [sourceId], opts?.signal),
+    updateSourceSettings: (sourceId, patch) => rpcQuery('updateSourceSettings', [sourceId, patch]),
     removeSource: (id) => rpcResult('removeSource', [id]),
     importSource,
     importGuide: (sourceId: string, opts?: ImportOptions) =>
@@ -285,9 +288,11 @@ export function createWorkbenchRemoteCatalog(
         opts?.signal,
       ),
     listSources: () => rpcQuery('listSources', []),
-    categories: (sourceId, kind) => rpcQuery('categories', [sourceId, kind]),
+    categories: (sourceId, kind, opts) => rpcQuery('categories', [sourceId, kind, opts]),
     items: (categoryId, offset, limit, opts) =>
       rpcQuery('items', [categoryId, offset, limit, opts]),
+    liveVariants: (itemKey, categoryId) => rpcQuery('liveVariants', [itemKey, categoryId]),
+    itemVersions: (itemKey) => rpcQuery('itemVersions', [itemKey]),
     allSourcesItems: (kind, offset, limit, sourceIds, opts) =>
       rpcQuery('allSourcesItems', [kind, offset, limit, sourceIds, opts]),
     itemDetail: (itemKey) => rpcQuery('itemDetail', [itemKey]),

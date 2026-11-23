@@ -59,6 +59,12 @@ function fakeNative(version = '7.66.1', model?: string) {
   const getSafeAreaInsets = vi.fn<
     () => { top?: unknown; right?: unknown; bottom?: unknown; left?: unknown }
   >(() => ({ top: 0, right: 0, bottom: 0, left: 0 }));
+  const readClipboardText = vi.fn<() => Promise<string | null>>(
+    async () => 'https://apple.example/list.m3u',
+  );
+  const pickPlaylistFile = vi.fn<() => Promise<{ name?: unknown; base64?: unknown } | null>>(
+    async () => ({ name: 'apple.m3u', base64: 'I0VYVE0zVQ==' }),
+  );
   const addModuleListener = vi.fn((name: ModuleEventName, listener: ModuleListener) => {
     let bucket = moduleListeners.get(name);
     if (bucket === undefined) {
@@ -83,6 +89,8 @@ function fakeNative(version = '7.66.1', model?: string) {
     writeLocalPersistentValue,
     persistentStorageBudgetBytes,
     getSafeAreaInsets,
+    readClipboardText,
+    pickPlaylistFile,
     addListener: addModuleListener,
   });
   const emit = (event: EngineEvent) => {
@@ -103,6 +111,8 @@ function fakeNative(version = '7.66.1', model?: string) {
     writeLocalPersistentValue,
     persistentStorageBudgetBytes,
     getSafeAreaInsets,
+    readClipboardText,
+    pickPlaylistFile,
     addModuleListener,
     remove,
     moduleRemove,
@@ -533,5 +543,41 @@ describe('Apple mute/volume, safe-area insets, and hardware keys (#415)', () => 
     expect(native.moduleRemove).toHaveBeenCalledTimes(1);
     native.emitModule('onHardwareKey', { key: 'mute' });
     expect(keys).toHaveLength(11);
+  });
+
+  it('forwards allowLegacyTls through load and exposes clipboard + document picker helpers (#51, #182)', async () => {
+    const native = fakeNative();
+    const mod = await load();
+    const engine = mod.createAetherEngine();
+    engine?.load({
+      attempt: 2,
+      url: 'https://legacy-apple.example/live.ts',
+      headers: {},
+      kind: 'live',
+      options: { allowLegacyTls: true },
+    });
+    expect(native.engine.load).toHaveBeenCalledWith({
+      attempt: 2,
+      url: 'https://legacy-apple.example/live.ts',
+      headers: {},
+      kind: 'live',
+      allowLegacyTls: true,
+    });
+
+    expect(await mod.readAppleClipboardText()).toBe('https://apple.example/list.m3u');
+    const picked = await mod.pickApplePlaylistFile();
+    expect(picked?.name).toBe('apple.m3u');
+    expect(Array.from(picked?.bytes ?? [])).toEqual([35, 69, 88, 84, 77, 51, 85]);
+
+    native.pickPlaylistFile.mockResolvedValueOnce(null);
+    expect(await mod.pickApplePlaylistFile()).toBeNull();
+
+    native.readClipboardText.mockResolvedValueOnce('');
+    expect(await mod.readAppleClipboardText()).toBeNull();
+
+    requireOptionalNativeModule.mockReturnValue(null);
+    const absent = await load();
+    expect(await absent.readAppleClipboardText()).toBeNull();
+    expect(await absent.pickApplePlaylistFile()).toBeNull();
   });
 });

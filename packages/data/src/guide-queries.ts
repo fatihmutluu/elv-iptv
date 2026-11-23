@@ -47,6 +47,8 @@ export interface ProgrammeRow {
   readonly icon: string | null;
   readonly genre: EpgGenre | null;
   readonly flags: number;
+  readonly ratingSystem?: string | null;
+  readonly ratingValue?: string | null;
 }
 
 /** Current (`now`) and upcoming (`next`) programme pair for a single live channel. */
@@ -73,6 +75,8 @@ interface RawProgrammeRow {
   icon: string | null;
   genre: string | null;
   flags: number | null;
+  rating_system: string | null;
+  rating_value: string | null;
 }
 
 const VALID_GENRES = new Set<EpgGenre>(['sports', 'movie', 'news', 'kids', 'series', 'other']);
@@ -104,6 +108,10 @@ function toProgrammeRow(
     icon: r.icon,
     genre: toEpgGenre(r.genre),
     flags: typeof r.flags === 'number' && Number.isFinite(r.flags) ? Math.trunc(r.flags) : 0,
+    ...(r.rating_system !== null && r.rating_system !== ''
+      ? { ratingSystem: r.rating_system }
+      : {}),
+    ...(r.rating_value !== null && r.rating_value !== '' ? { ratingValue: r.rating_value } : {}),
   };
 }
 
@@ -218,7 +226,7 @@ export async function queryNowNext(
     if (guideIds.length === 0) continue;
 
     const progRows = await db.all<RawProgrammeRow>(
-      `SELECT guide_id, start, stop, title, sub_title, description, episode_num, icon, genre, flags
+      `SELECT guide_id, start, stop, title, sub_title, description, episode_num, icon, genre, flags, rating_system, rating_value
          FROM programmes
         WHERE source_id = ? AND guide_id IN (${placeholders(guideIds.length)})
           AND start < ? AND stop > ?
@@ -313,7 +321,7 @@ export async function queryEpgWindow(
     if (guideIds.length === 0) continue;
 
     const progRows = await db.all<RawProgrammeRow>(
-      `SELECT guide_id, start, stop, title, sub_title, description, episode_num, icon, genre, flags
+      `SELECT guide_id, start, stop, title, sub_title, description, episode_num, icon, genre, flags, rating_system, rating_value
          FROM programmes
         WHERE source_id = ? AND guide_id IN (${placeholders(guideIds.length)})
           AND start < ? AND stop > ?

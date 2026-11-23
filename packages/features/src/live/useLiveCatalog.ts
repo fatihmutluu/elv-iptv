@@ -39,6 +39,8 @@ export interface UseLiveCatalogOptions {
   }) => void;
   /** Injectable epoch clock in milliseconds (defaults to `() => Date.now()`). */
   readonly now?: () => number;
+  /** When true, collapse same-category 4K/FHD/HD/SD live channel duplicates (`#218`). */
+  readonly collapseVariants?: boolean;
 }
 
 /** Live catalog, favorites, O(1) paged channel source, Now/Next TTL cache, channel history, and 0–9 jump state. */
@@ -98,11 +100,20 @@ function pickActiveCategory(
 export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState {
   const { catalog, sources, refreshToken = 0, userStateVersion = 0, mode = 'channels' } = options;
   const { selectedCategoryId, activeChannelKey, previousChannelKey, now = defaultNow } = options;
+  const collapseVariants = options.collapseVariants === true;
+  const variantItemOpts = useMemo(
+    () => (collapseVariants ? { collapseVariants: true } : undefined),
+    [collapseVariants],
+  );
+  const variantCatOpts = useMemo(
+    () => (collapseVariants ? { collapseVariants: true } : undefined),
+    [collapseVariants],
+  );
 
   const uiCache = useCatalogUiCache();
   const uiCacheRef = useRef(uiCache);
   uiCacheRef.current = uiCache;
-  const initialLive = sources.length > 0 ? (uiCache?.getLive() ?? null) : null;
+  const initialLive = sources.length > 0 && !collapseVariants ? (uiCache?.getLive() ?? null) : null;
   const initialCats = initialLive?.hasLoadedCategories ? initialLive.categories : [];
   const initialActiveCat = pickActiveCategory(initialCats, selectedCategoryId);
   const initialSlice = initialActiveCat
@@ -117,13 +128,13 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
         maxPages: LIVE_MAX_PAGES,
         ...(seeded !== undefined ? { initialPage0: seeded } : {}),
         loadPage: async (offset, limit) => {
-          const rows = await catalog.items(catId, offset, limit);
-          if (offset === 0 && rows.length > 0)
+          const rows = await catalog.items(catId, offset, limit, variantItemOpts);
+          if (offset === 0 && rows.length > 0 && !collapseVariants)
             uiCacheRef.current?.setLiveFirstChannels(catId, rows);
           return rows;
         },
       }),
-    [catalog],
+    [catalog, collapseVariants, variantItemOpts],
   );
 
   const initialSourceMetaRef = useRef<{
@@ -131,6 +142,7 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
     catId: string | null;
     count: number;
     refreshToken: number;
+    collapseVariants: boolean;
     catalog: CatalogService;
   } | null>(null);
   if (initialSourceMetaRef.current === null) {
@@ -143,6 +155,7 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
       catId: initialActiveCat?.row.id ?? null,
       count: initialActiveCat?.row.itemCount ?? 0,
       refreshToken,
+      collapseVariants,
       catalog,
     };
   }
@@ -174,6 +187,7 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
     catId: initialSourceMetaRef.current?.catId ?? null,
     count: initialSourceMetaRef.current?.count ?? 0,
     refreshToken,
+    collapseVariants,
     catalog,
   });
 
@@ -224,14 +238,17 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
     void Promise.all(
       sources.map(
         async (s) =>
-          [s.id, await catalog.categories(s.id, 'live').catch(() => [] as CategoryRow[])] as const,
+          [
+            s.id,
+            await catalog.categories(s.id, 'live', variantCatOpts).catch(() => [] as CategoryRow[]),
+          ] as const,
       ),
     )
       .then((entries) => {
         if (!alive) return;
         const nextCats = buildSharedDisplayCategories(sources, new Map(entries));
         hasCatsRef.current = true;
-        uiCacheRef.current?.setLiveCategories(nextCats);
+        if (!collapseVariants) uiCacheRef.current?.setLiveCategories(nextCats);
         setCategories(nextCats);
       })
       .finally(() => {
@@ -240,7 +257,7 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
     return () => {
       alive = false;
     };
-  }, [catalog, refreshToken, resetHistory, sources]);
+  }, [catalog, collapseVariants, refreshToken, resetHistory, sources, variantCatOpts]);
 
   useEffect(() => {
     if (
@@ -258,7 +275,13 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
     if (!activeCategory || activeCategory.row.itemCount <= 0) {
       activeSourceRef.current?.dispose();
       activeSourceRef.current = null;
-      activeSourceKeyRef.current = { catId: null, count: 0, refreshToken, catalog };
+      activeSourceKeyRef.current = {
+        catId: null,
+        count: 0,
+        refreshToken,
+        collapseVariants,
+        catalog,
+      };
       setChannelSource(null);
       return undefined;
     }
@@ -270,14 +293,22 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
       prevKey.catId === categoryId &&
       prevKey.count === count &&
       prevKey.refreshToken === refreshToken &&
+      prevKey.collapseVariants === collapseVariants &&
       prevKey.catalog === catalog;
 
     let unsub: (() => void) | undefined;
-    const tokenBumped = prevKey.refreshToken !== refreshToken;
+    const tokenBumped =
+      prevKey.refreshToken !== refreshToken || prevKey.collapseVariants !== collapseVariants;
     const activateSource = (next: PagedListSource<ItemRow>, bumpVersion: boolean) => {
       if (activeSourceRef.current !== next) activeSourceRef.current?.dispose();
       activeSourceRef.current = next;
-      activeSourceKeyRef.current = { catId: categoryId, count, refreshToken, catalog };
+      activeSourceKeyRef.current = {
+        catId: categoryId,
+        count,
+        refreshToken,
+        collapseVariants,
+        catalog,
+      };
       unsub = next.onChange(() => {
         if (alive) setSourceVersion((v) => v + 1);
       });
@@ -289,19 +320,23 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
     if (reuseExisting && activeSourceRef.current) {
       activateSource(activeSourceRef.current, false);
     } else if (tokenBumped && activeSourceRef.current !== null) {
-      // On refreshToken bump, do NOT seed stale uiCache page 0; keep previous source visible until fresh page 0 lands.
+      // On refreshToken or collapseVariants toggle, do NOT seed stale uiCache page 0; keep previous source visible until fresh page 0 lands.
       void catalog
-        .items(categoryId, 0, Math.min(LIVE_PAGE_SIZE, count))
+        .items(categoryId, 0, Math.min(LIVE_PAGE_SIZE, count), variantItemOpts)
         .then((rows) => {
           if (!alive) return;
-          if (rows.length > 0) uiCacheRef.current?.setLiveFirstChannels(categoryId, rows);
+          if (rows.length > 0 && !collapseVariants)
+            uiCacheRef.current?.setLiveFirstChannels(categoryId, rows);
           activateSource(buildChannelSource(categoryId, count, rows), true);
         })
         .catch(() => {
           if (alive) activateSource(buildChannelSource(categoryId, count, undefined), false);
         });
     } else {
-      const seeded = tokenBumped ? undefined : uiCacheRef.current?.getLiveFirstChannels(categoryId);
+      const seeded =
+        tokenBumped || collapseVariants
+          ? undefined
+          : uiCacheRef.current?.getLiveFirstChannels(categoryId);
       activateSource(buildChannelSource(categoryId, count, seeded), false);
     }
 
@@ -314,7 +349,9 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
     activeCategory?.row.itemCount,
     buildChannelSource,
     catalog,
+    collapseVariants,
     refreshToken,
+    variantItemOpts,
   ]);
 
   const numJump = useLiveNumberJump({ catalog, activeSourceIdRef, onResolved: tuneChannel });
@@ -338,7 +375,7 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
         currentIndex: index ?? historyRef.current.activeIndex,
         loadPage: useFavorites
           ? async (offset, limit) => favoriteChannels.slice(offset, offset + limit)
-          : (offset, limit) => catalog.items(categoryId, offset, limit),
+          : (offset, limit) => catalog.items(categoryId, offset, limit, variantItemOpts),
       });
       const prev = historyRef.current.previous;
       return prev !== null && prev.key !== channel.key
@@ -349,7 +386,14 @@ export function useLiveCatalog(options: UseLiveCatalogOptions): LiveCatalogState
           }
         : base;
     },
-    [activeCategory?.row.id, activeCategory?.row.itemCount, catalog, favoriteChannels, historyRef],
+    [
+      activeCategory?.row.id,
+      activeCategory?.row.itemCount,
+      catalog,
+      favoriteChannels,
+      historyRef,
+      variantItemOpts,
+    ],
   );
 
   const channelCount = activeCategory?.row.itemCount ?? 0;

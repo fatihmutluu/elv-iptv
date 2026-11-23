@@ -118,23 +118,18 @@ public final class EngineHttpSession: HttpTaskSession, @unchecked Sendable {
   private let mux: DelegateMux
   private let urlSession: URLSession
 
-  public init(cookieJar: OriginCookieJar = OriginCookieJar()) {
+  public init(cookieJar: OriginCookieJar = OriginCookieJar(), allowLegacyTls: Bool = false) {
     self.cookieJar = cookieJar
     let mux = DelegateMux(cookieJar: cookieJar)
     self.mux = mux
 
-    let config = URLSessionConfiguration.ephemeral
-    config.httpMaximumConnectionsPerHost = 1
-    config.urlCache = nil
-    config.requestCachePolicy = .reloadIgnoringLocalCacheData
-    config.httpShouldSetCookies = false
-    config.httpCookieStorage = nil
-    config.timeoutIntervalForRequest = 10
-    config.waitsForConnectivity = false
+    let config = makeStreamSessionConfiguration(allowLegacyTls: allowLegacyTls)
 
     let queue = OperationQueue()
     queue.maxConcurrentOperationCount = 1
-    queue.name = "io.github.fatihmutluu.elv.aether.http"
+    queue.name = allowLegacyTls
+      ? "io.github.fatihmutluu.elv.aether.http.legacy"
+      : "io.github.fatihmutluu.elv.aether.http"
 
     self.urlSession = URLSession(configuration: config, delegate: mux, delegateQueue: queue)
   }

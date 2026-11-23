@@ -130,6 +130,7 @@ export function createXtreamClient(options: XtreamClientOptions): XtreamClient {
       response = await http.get(`${serverBase}/player_api.php?${credentials}${query}`, {
         headers,
         timeoutMs,
+        ...(transport?.allowLegacyTls ? { allowLegacyTls: true } : {}),
         ...(call?.signal ? { signal: call.signal } : {}),
       });
     } catch {

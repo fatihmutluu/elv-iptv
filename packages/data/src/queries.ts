@@ -98,17 +98,32 @@ export function parseCategoryId(
   return { sourceId: id.slice(0, first), kind, providerId: id.slice(second + 1) };
 }
 
+/** Optional deduplication flags for {@link queryCategories} (`#218`, `#404`). */
+export interface CategoryQueryOptions {
+  /** When `true` on `live`, counts distinct `variant_base_fold` groups per category (`#218`). */
+  readonly collapseVariants?: boolean;
+  /** When `true` on `movie`, counts distinct `version_group_key` groups per category (`#404`). */
+  readonly groupVersions?: boolean;
+}
+
 /** Visible categories of one kind with the number of visible items placed in each, in provider order. */
 export async function queryCategories(
   db: SqlDriver,
   sourceId: string,
   kind: BrowseKind,
+  opts?: CategoryQueryOptions,
 ): Promise<CategoryRow[]> {
+  const countExpr =
+    kind === 'live' && opts?.collapseVariants === true
+      ? "COUNT(DISTINCT COALESCE(NULLIF(t.variant_base_fold, ''), t.key))"
+      : kind === 'movie' && opts?.groupVersions === true
+        ? "COUNT(DISTINCT COALESCE(NULLIF(t.version_group_key, ''), t.key))"
+        : 'COUNT(*)';
   const rows = await db.all<{ provider_id: string; name: string; position: number; n: number }>(
     `SELECT c.provider_id, c.name, c.position, COALESCE(p.n, 0) AS n
        FROM categories c
        LEFT JOIN (
-         SELECT pl.category_id, COUNT(*) AS n
+         SELECT pl.category_id, ${countExpr} AS n
            FROM placements pl
            JOIN ${ITEM_TABLE[kind]} t
              ON t.source_id = pl.source_id AND t.key = pl.item_key
@@ -131,7 +146,34 @@ export async function queryCategories(
   }));
 }
 
-/** One page of a category's visible items; supports optional `'alpha'` (`sort_title`) ordering and `excludeWatched` filtering (`#125`). */
+function dedupGroupSpec(
+  kind: BrowseKind,
+  opts?: Pick<ListItemsOptions, 'collapseVariants' | 'groupVersions'>,
+):
+  | {
+      readonly groupExpr: string;
+      readonly rankOrder: string;
+      readonly countCol: 'variant_count' | 'version_count';
+    }
+  | undefined {
+  if (kind === 'live' && opts?.collapseVariants === true) {
+    return {
+      groupExpr: "COALESCE(NULLIF(t.variant_base_fold, ''), t.key)",
+      rankOrder: 't.quality_rank DESC, p.position ASC, t.key ASC',
+      countCol: 'variant_count',
+    };
+  }
+  if (kind === 'movie' && opts?.groupVersions === true) {
+    return {
+      groupExpr: "COALESCE(NULLIF(t.version_group_key, ''), t.key)",
+      rankOrder: 'p.position ASC, t.key ASC',
+      countCol: 'version_count',
+    };
+  }
+  return undefined;
+}
+
+/** One page of a category's visible items; supports optional `'alpha'` (`sort_title`) ordering, `excludeWatched` filtering (`#125`), and variant/version deduplication (`#218`, `#404`). */
 export async function queryItems(
   db: SqlDriver,
   ref: { sourceId: string; kind: BrowseKind; providerId: string },
@@ -142,6 +184,30 @@ export async function queryItems(
   const page = clampPage(offset, limit);
   if (page.limit === 0) return [];
   const table = ITEM_TABLE[ref.kind];
+  const dedup = dedupGroupSpec(ref.kind, opts);
+  if (dedup !== undefined) {
+    const watched = watchedFilterClause('t.key', opts);
+    const orderBy = opts?.sortBy === 'alpha' ? 'sort_title ASC, key ASC' : 'group_pos ASC, key ASC';
+    const rows = await db.all<RawItemRow>(
+      `WITH ranked AS (
+         SELECT t.id, t.key, t.provider_id, t.name, t.sort_title, ${ITEM_COLS[ref.kind]},
+                COUNT(*) OVER (PARTITION BY ${dedup.groupExpr}) AS ${dedup.countCol},
+                ROW_NUMBER() OVER (PARTITION BY ${dedup.groupExpr} ORDER BY ${dedup.rankOrder}) AS rn,
+                MIN(p.position) OVER (PARTITION BY ${dedup.groupExpr}) AS group_pos
+           FROM placements p
+           JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key
+          WHERE p.source_id = ? AND p.kind = ? AND p.category_id = ? AND p.is_hidden = 0 AND t.is_hidden = 0
+            AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}
+       )
+       SELECT id, key, provider_id, name, logo, rating, year, num, ${dedup.countCol}
+         FROM ranked
+        WHERE rn = 1
+        ORDER BY ${orderBy}
+        LIMIT ? OFFSET ?`,
+      [ref.sourceId, ref.kind, ref.providerId, ...watched.params, page.limit, page.offset],
+    );
+    return rows.map((r) => mapItemRow(ref.kind, ref.sourceId, r));
+  }
   if (opts?.sortBy === 'alpha') {
     const watched = watchedFilterClause('t.key', opts);
     const rows = await db.all<RawItemRow>(
@@ -181,12 +247,47 @@ export async function queryItemsByCursor(
   categoryId: string | { sourceId: string; kind: BrowseKind; providerId: string },
   cursor: ItemsCursor | undefined,
   limit: number,
-  opts?: Pick<ListItemsOptions, 'excludeWatched' | 'profileId'>,
+  opts?: Pick<
+    ListItemsOptions,
+    'excludeWatched' | 'profileId' | 'collapseVariants' | 'groupVersions'
+  >,
 ): Promise<CursorPage<ItemRow, ItemsCursor>> {
   const ref = typeof categoryId === 'string' ? parseCategoryId(categoryId) : categoryId;
   const page = clampPage(0, limit);
   if (ref === undefined || page.limit === 0) return { items: [], nextCursor: null, hasMore: false };
   const table = ITEM_TABLE[ref.kind];
+  const dedup = dedupGroupSpec(ref.kind, opts);
+  if (dedup !== undefined) {
+    const watched = watchedFilterClause('t.key', opts);
+    const cursorClause = cursor ? ' AND (group_pos > ? OR (group_pos = ? AND key > ?))' : '';
+    const cursorParams = cursor ? [cursor.position, cursor.position, cursor.itemKey] : [];
+    const rows = await db.all<RawItemRow & { _pos: number }>(
+      `WITH ranked AS (
+         SELECT t.id, t.key, t.provider_id, t.name, ${ITEM_COLS[ref.kind]},
+                COUNT(*) OVER (PARTITION BY ${dedup.groupExpr}) AS ${dedup.countCol},
+                ROW_NUMBER() OVER (PARTITION BY ${dedup.groupExpr} ORDER BY ${dedup.rankOrder}) AS rn,
+                MIN(p.position) OVER (PARTITION BY ${dedup.groupExpr}) AS group_pos
+           FROM placements p
+           JOIN ${table} t ON t.source_id = p.source_id AND t.key = p.item_key
+          WHERE p.source_id = ? AND p.kind = ? AND p.category_id = ? AND p.is_hidden = 0 AND t.is_hidden = 0
+            AND EXISTS (SELECT 1 FROM sources s WHERE s.id = p.source_id AND s.deleting = 0)${watched.clause}
+       )
+       SELECT id, key, provider_id, name, logo, rating, year, num, ${dedup.countCol}, group_pos AS _pos
+         FROM ranked
+        WHERE rn = 1${cursorClause}
+        ORDER BY group_pos ASC, key ASC
+        LIMIT ?`,
+      [ref.sourceId, ref.kind, ref.providerId, ...watched.params, ...cursorParams, page.limit + 1],
+    );
+    const hasMore = rows.length > page.limit;
+    const slice = hasMore ? rows.slice(0, page.limit) : rows;
+    const last = slice[slice.length - 1];
+    return {
+      items: slice.map((r) => mapItemRow(ref.kind, ref.sourceId, r)),
+      nextCursor: hasMore && last !== undefined ? { position: last._pos, itemKey: last.key } : null,
+      hasMore,
+    };
+  }
   const cursorClause = cursor
     ? ' AND position >= ? AND (position > ? OR (position = ? AND item_key > ?))'
     : '';

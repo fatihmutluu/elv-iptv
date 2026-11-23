@@ -4,7 +4,7 @@ export type BrowseKind = 'live' | 'movie' | 'series';
 /** Sort order for catalog browse queries (`#125`). */
 export type ItemSortOrder = 'default' | 'alpha';
 
-/** Optional sorting and watched-state filtering for catalog browse queries (`#125`). */
+/** Optional sorting, watched-state filtering, and variant/version deduplication for browse queries (`#125`, `#218`, `#404`). */
 export interface ListItemsOptions {
   /** `'default'` preserves provider/category order; `'alpha'` orders by `sort_title ASC, key ASC`. */
   readonly sortBy?: ItemSortOrder;
@@ -12,6 +12,10 @@ export interface ListItemsOptions {
   readonly excludeWatched?: boolean;
   /** Profile identifier for `excludeWatched` filtering (defaults to `'default'`). */
   readonly profileId?: string;
+  /** When `true` on `live` queries, collapses quality variants within `(source_id, category_id)` (`#218`). */
+  readonly collapseVariants?: boolean;
+  /** When `true` on `movie` queries, groups multi-version titles within `(source_id, category_id)` (`#404`). */
+  readonly groupVersions?: boolean;
 }
 
 const DEFAULT_QUERY_PROFILE_ID = 'default';
@@ -49,6 +53,10 @@ export interface ItemRow {
   year: number | null;
   /** Channel number (live only). */
   num: number | null;
+  /** Number of collapsed live quality variants when `collapseVariants` is enabled and `> 1` (`#218`). */
+  readonly variantCount?: number;
+  /** Number of grouped movie versions when `groupVersions` is enabled and `> 1` (`#404`). */
+  readonly versionCount?: number;
 }
 
 /** @internal Raw SQLite item projection shared by category and multi-source browse queries. */
@@ -62,6 +70,8 @@ export interface RawItemRow {
   rating: number | null;
   year: number | null;
   num: number | null;
+  variant_count?: number;
+  version_count?: number;
 }
 
 /** @internal Columns per kind; fixed strings, never built from data. */
@@ -100,5 +110,11 @@ export function mapItemRow(kind: BrowseKind, sourceId: string, r: RawItemRow): I
     rating: r.rating,
     year: r.year,
     num: r.num,
+    ...(typeof r.variant_count === 'number' && r.variant_count > 1
+      ? { variantCount: r.variant_count }
+      : {}),
+    ...(typeof r.version_count === 'number' && r.version_count > 1
+      ? { versionCount: r.version_count }
+      : {}),
   };
 }

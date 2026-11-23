@@ -220,4 +220,129 @@ describe('CatalogDiscovery & CategoryGridView zero-blink + tvOS edge fade (#445,
 
     await view.unmount();
   });
+
+  it('invalidates stale CatalogUiCache and refetches when groupVodVersions toggles on discovery and grid (#404)', async () => {
+    const makeMovie = (id: number, key: string, name: string, versionCount?: number): ItemRow => ({
+      id,
+      key,
+      sourceId: 'src-1',
+      providerId: String(id),
+      kind: 'movie',
+      name,
+      logo: null,
+      rating: 8.1,
+      year: 2025,
+      num: null,
+      ...(versionCount !== undefined ? { versionCount } : {}),
+    });
+    const ungroupedRows = [
+      makeMovie(1, 'x:src-1:movie:Dune4K-1', 'Dune [4K]'),
+      makeMovie(2, 'x:src-1:movie:Dune1080-2', 'Dune [1080p]'),
+    ];
+    const groupedRows = [makeMovie(1, 'x:src-1:movie:DuneGrouped-1', 'Dune (Grouped)', 2)];
+
+    const catalog = {
+      listSources: jest.fn(async () => [SOURCE]),
+      categories: jest.fn(
+        async (_srcId: string, _kind: string, opts?: { groupVersions?: boolean }) => [
+          { ...CAT_A, itemCount: opts?.groupVersions ? 1 : 2 },
+        ],
+      ),
+      items: jest.fn(
+        async (_catId: string, _off: number, _lim: number, opts?: { groupVersions?: boolean }) =>
+          opts?.groupVersions ? groupedRows : ungroupedRows,
+      ),
+      listContinueWatching: jest.fn(async () => []),
+      listProgressByKeys: jest.fn(async () => []),
+      close: jest.fn(async () => undefined),
+    } as unknown as CatalogService;
+
+    const uiCache = createCatalogUiCache({ locale: 'en' });
+    const renderDiscovery = (groupVersions: boolean) => (
+      <ViewportProvider
+        value={{
+          formFactor: 'desktop',
+          orientation: 'landscape',
+          inputModality: 'pointer',
+          width: 1280,
+          height: 800,
+        }}
+      >
+        <ThemeProvider>
+          <I18nProvider i18n={createAppI18n('en')}>
+            <CatalogUiCacheProvider cache={uiCache}>
+              <CatalogDiscoveryScreen
+                kind="movie"
+                catalog={catalog}
+                sources={[SOURCE]}
+                refreshToken={1}
+                groupVersions={groupVersions}
+                onOpenDetail={jest.fn()}
+                onOpenSources={jest.fn()}
+              />
+            </CatalogUiCacheProvider>
+          </I18nProvider>
+        </ThemeProvider>
+      </ViewportProvider>
+    );
+
+    const view1 = await render(renderDiscovery(false));
+    await waitFor(() => {
+      expect(screen.getByText('Dune [4K]')).toBeTruthy();
+      expect(screen.getByText('Dune [1080p]')).toBeTruthy();
+    });
+    await view1.unmount();
+
+    // Re-mounting Movies discovery after toggling groupVersions=true must NOT hydrate stale ungrouped cache
+    const view2 = await render(renderDiscovery(true));
+    await waitFor(() => {
+      expect(screen.getByText('Dune (Grouped)')).toBeTruthy();
+    });
+    expect(screen.queryByText('Dune [1080p]')).toBeNull();
+    await view2.unmount();
+
+    // CategoryGridView live toggle from false -> true must pass groupVersions: true and update rows
+    const displayA: DisplayCategory = { row: { ...CAT_A, itemCount: 2 }, label: 'Action' };
+    const renderGrid = (groupVersions: boolean) => (
+      <ViewportProvider
+        value={{
+          formFactor: 'desktop',
+          orientation: 'landscape',
+          inputModality: 'pointer',
+          width: 1280,
+          height: 800,
+        }}
+      >
+        <ThemeProvider>
+          <I18nProvider i18n={createAppI18n('en')}>
+            <CatalogUiCacheProvider cache={uiCache}>
+              <CategoryGridView
+                kind="movie"
+                category={displayA}
+                catalog={catalog}
+                refreshToken={1}
+                userStateVersion={0}
+                groupVersions={groupVersions}
+                layout={makeLayout()}
+                backFocused={false}
+                focusedGridPos={null}
+                onBack={jest.fn()}
+                onOpenDetail={jest.fn()}
+              />
+            </CatalogUiCacheProvider>
+          </I18nProvider>
+        </ThemeProvider>
+      </ViewportProvider>
+    );
+
+    const gridView = await render(renderGrid(false));
+    await waitFor(() => {
+      expect(screen.getByText('Dune [1080p]')).toBeTruthy();
+    });
+    await gridView.rerender(renderGrid(true));
+    await waitFor(() => {
+      expect(screen.getByText('Dune (Grouped)')).toBeTruthy();
+    });
+    await gridView.unmount();
+  });
 });

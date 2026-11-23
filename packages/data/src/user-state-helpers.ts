@@ -27,6 +27,10 @@ export interface WatchProgressRow {
   durationMs: number;
   watched: boolean;
   updatedAt: number;
+  /** Movie version group key when synced across multi-version VOD titles (`#404`). */
+  versionGroupKey?: string | null;
+  /** Most recently played version item key within `versionGroupKey` (`#404`). */
+  preferredItemKey?: string | null;
 }
 
 /** One row of the `favorites` table. */
@@ -58,6 +62,8 @@ export interface RawProgressRow {
   duration_ms: number;
   watched: number;
   updated_at: number;
+  version_group_key?: string | null;
+  preferred_item_key?: string | null;
 }
 
 /** @internal Raw SQLite shape for `favorites`. */
@@ -135,6 +141,16 @@ export const mapProgressRow = (r: RawProgressRow): WatchProgressRow => ({
   durationMs: r.duration_ms,
   watched: r.watched !== 0,
   updatedAt: r.updated_at,
+  ...(r.version_group_key !== undefined &&
+  r.version_group_key !== null &&
+  r.version_group_key !== ''
+    ? { versionGroupKey: r.version_group_key }
+    : {}),
+  ...(r.preferred_item_key !== undefined &&
+  r.preferred_item_key !== null &&
+  r.preferred_item_key !== ''
+    ? { preferredItemKey: r.preferred_item_key }
+    : {}),
 });
 
 /** @internal Maps a raw SQLite `favorites` row to {@link FavoriteRow}. */

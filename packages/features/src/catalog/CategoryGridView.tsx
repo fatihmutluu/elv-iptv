@@ -64,6 +64,7 @@ export interface CategoryGridViewProps {
   readonly gridAccessRef?: MutableRefObject<CategoryGridAccess>;
   /** Optional sort order (`'default'` or `'alpha'` via `sort_title`). */
   readonly sortBy?: ItemSortOrder;
+  readonly groupVersions?: boolean;
   readonly onToggleSort?: () => void;
   /** Optional top padding applied to the virtualized list content container. */
   readonly contentPaddingTop?: number;
@@ -94,6 +95,7 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
     cols,
     visibleGridRows: layout.visibleGridRows,
     ...(props.sortBy !== undefined ? { sortBy: props.sortBy } : {}),
+    ...(props.groupVersions !== undefined ? { groupVersions: props.groupVersions } : {}),
   });
 
   const listRef = useRef<InstanceType<typeof VirtualizedList>>(null);

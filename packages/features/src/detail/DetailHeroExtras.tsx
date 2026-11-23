@@ -16,19 +16,23 @@ import { formatPrePlayLangLabel } from './detail-preplay';
 export interface DetailPrePlayControlsProps {
   readonly audioLang: string;
   readonly subtitleLang: string;
+  readonly versionLabel?: string;
+  readonly onCycleVersion?: () => void;
   readonly onCycleAudio: () => void;
   readonly onCycleSubtitles: () => void;
   readonly isTv: boolean;
-  readonly focusedControl: 'preplay-audio' | 'preplay-subtitles' | null;
+  readonly focusedControl: 'preplay-version' | 'preplay-audio' | 'preplay-subtitles' | null;
 }
 
 /**
- * Compact Cinema Quietude pre-play Audio & Subtitle language cyclers for VOD Detail screens (`#398`).
+ * Compact Cinema Quietude pre-play Version, Audio & Subtitle cyclers for VOD Detail screens (`#398`, `#404`).
  * Uses sharp `4px` frosted surfaces (never pill-bubble chips) with crisp 10-ft TV focus rings.
  */
 export const DetailPrePlayControls = memo(function DetailPrePlayControlsInner({
   audioLang,
   subtitleLang,
+  versionLabel,
+  onCycleVersion,
   onCycleAudio,
   onCycleSubtitles,
   isTv,
@@ -42,12 +46,13 @@ export const DetailPrePlayControls = memo(function DetailPrePlayControlsInner({
 
   const audioValue = formatPrePlayLangLabel(audioLang, i18n.t);
   const subValue = formatPrePlayLangLabel(subtitleLang, i18n.t);
+  const versionFocused = isTv && focusedControl === 'preplay-version';
   const audioFocused = isTv && focusedControl === 'preplay-audio';
   const subFocused = isTv && focusedControl === 'preplay-subtitles';
 
   const renderControl = (
     testID: string,
-    icon: 'audio' | 'subtitles',
+    icon: 'layers' | 'audio' | 'subtitles',
     prefix: string,
     value: string,
     focused: boolean,
@@ -115,6 +120,16 @@ export const DetailPrePlayControls = memo(function DetailPrePlayControlsInner({
       testID="detail-preplay-controls"
       style={[styles.controlsRow, { marginTop: theme.spacing.sm, gap: theme.spacing.sm }]}
     >
+      {versionLabel !== undefined && onCycleVersion !== undefined
+        ? renderControl(
+            'detail-preplay-version',
+            'layers',
+            i18n.t('detail.versionLabel'),
+            versionLabel,
+            versionFocused,
+            onCycleVersion,
+          )
+        : null}
       {renderControl(
         'detail-preplay-audio',
         'audio',

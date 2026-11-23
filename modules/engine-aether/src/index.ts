@@ -19,6 +19,18 @@ export interface AppleSafeAreaInsets {
   readonly left: number;
 }
 
+/** A local playlist file picked through iOS `UIDocumentPickerViewController` (`#51`). */
+export interface ApplePickedPlaylistFile {
+  readonly name: string;
+  readonly bytes: Uint8Array;
+}
+
+interface RawPickedPlaylistFile {
+  name?: unknown;
+  bytes?: unknown;
+  base64?: unknown;
+}
+
 /** Hardware keyboard playback shortcut emitted by iOS/iPadOS `UIKeyCommand` (`#415`). */
 export type AppleHardwareKey =
   | 'play-pause'
@@ -69,6 +81,8 @@ interface NativeEngineModule {
   writeLocalPersistentValue?(key: string, value: string): boolean;
   persistentStorageBudgetBytes?(): number;
   getSafeAreaInsets?(): RawInsets | null | undefined;
+  readClipboardText?(): Promise<string | null | undefined>;
+  pickPlaylistFile?(): Promise<RawPickedPlaylistFile | null | undefined>;
   addListener?(
     eventName: 'onSafeAreaInsetsChanged' | 'onHardwareKey',
     listener: (payload: unknown) => void,
@@ -100,6 +114,62 @@ function parseHardwareKey(payload: unknown): AppleHardwareKey | null {
   return typeof candidate === 'string' && VALID_HARDWARE_KEYS.has(candidate)
     ? (candidate as AppleHardwareKey)
     : null;
+}
+
+const B64_TABLE = new Int16Array(128).fill(-1);
+for (let i = 0; i < 26; i += 1) {
+  B64_TABLE[65 + i] = i;
+  B64_TABLE[97 + i] = i + 26;
+}
+for (let i = 0; i < 10; i += 1) B64_TABLE[48 + i] = i + 52;
+B64_TABLE[43] = 62;
+B64_TABLE[47] = 63;
+
+function decodeBase64(input: string): Uint8Array | null {
+  let cleanLen = 0;
+  let padding = 0;
+  for (let i = 0; i < input.length; i += 1) {
+    const code = input.charCodeAt(i);
+    if (code === 10 || code === 13 || code === 32 || code === 9) continue;
+    if (code === 61) {
+      padding += 1;
+      cleanLen += 1;
+      continue;
+    }
+    if (padding > 0 || code >= 128 || B64_TABLE[code] === -1) return null;
+    cleanLen += 1;
+  }
+  if (cleanLen === 0) return new Uint8Array(0);
+  if (cleanLen % 4 !== 0 || padding > 2) return null;
+  const out = new Uint8Array((cleanLen / 4) * 3 - padding);
+  let outIdx = 0;
+  let acc = 0;
+  let bits = 0;
+  for (let i = 0; i < input.length; i += 1) {
+    const code = input.charCodeAt(i);
+    if (code === 10 || code === 13 || code === 32 || code === 9 || code === 61) continue;
+    const val = B64_TABLE[code] ?? -1;
+    acc = (acc << 6) | val;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      if (outIdx < out.length) out[outIdx++] = (acc >> bits) & 0xff;
+    }
+  }
+  return out;
+}
+
+function normalizePickedPlaylist(raw: unknown): ApplePickedPlaylistFile | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const r = raw as RawPickedPlaylistFile;
+  const name =
+    typeof r.name === 'string' && r.name.trim().length > 0 ? r.name.trim() : 'playlist.m3u';
+  if (r.bytes instanceof Uint8Array) return { name, bytes: r.bytes };
+  if (typeof r.base64 === 'string') {
+    const decoded = decodeBase64(r.base64);
+    if (decoded !== null) return { name, bytes: decoded };
+  }
+  return null;
 }
 
 /** Hardware rendering tier derived from the Apple machine identifier (`#186`). */
@@ -243,6 +313,31 @@ export function setAppleEngineVolume(engine: PlayerEngine, volume: number): void
   if (!Number.isFinite(volume)) return;
   const clamped = Math.min(100, Math.max(0, volume));
   handles.get(engine)?.setVolume?.(clamped);
+}
+
+/**
+ * Reads plain text from iOS `UIPasteboard.general.string`, returning `null` on tvOS or when empty/unavailable (`#51`).
+ */
+export async function readAppleClipboardText(): Promise<string | null> {
+  const read = nativeModule?.readClipboardText;
+  if (typeof read !== 'function') return null;
+  try {
+    const text = await read();
+    return typeof text === 'string' && text.length > 0 ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Opens iOS `UIDocumentPickerViewController` to copy a local playlist file (bounded to 64 MiB).
+ * Safely returns `null` on tvOS, when cancelled, or when the native module is absent (`#51`).
+ */
+export async function pickApplePlaylistFile(): Promise<ApplePickedPlaylistFile | null> {
+  const pick = nativeModule?.pickPlaylistFile;
+  if (typeof pick !== 'function') return null;
+  const raw = await pick();
+  return normalizePickedPlaylist(raw);
 }
 
 function wrap(module: NativeEngineModule): PlayerEngine {

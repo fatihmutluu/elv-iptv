@@ -174,6 +174,9 @@ export function parseChildren(
       if (is(body, ns, len, 'display-name')) {
         const t = readText(body, tagEnd, close, encoding);
         if (t) chan.names.push(t);
+      } else if (open.starts.length === 0 && is(body, ns, len, 'lcn') && chan.lcn === undefined) {
+        const t = readText(body, tagEnd, close, encoding);
+        if (t) chan.lcn = t;
       }
     } else if (prog) {
       if (is(body, ns, len, 'title')) {
@@ -219,6 +222,18 @@ export function parseChildren(
             episodeRank = rank;
           }
         }
+      } else if (
+        open.starts.length === 0 &&
+        is(body, ns, len, 'rating') &&
+        prog.ratingValue === undefined
+      ) {
+        readAttrs(body, ns + len, tagEnd - 1, SYSTEM, ONE_ATTR, encoding);
+        const system = ONE_ATTR[0]?.trim();
+        const value = extractRatingValue(body, tagEnd, close, encoding);
+        if (value !== undefined) {
+          prog.ratingValue = value;
+          if (system) prog.ratingSystem = system;
+        }
       }
     }
   }
@@ -236,14 +251,63 @@ function readLangScore(
   return scoreLang(ONE_ATTR[0]);
 }
 
+function extractRatingValue(
+  body: Uint8Array,
+  from: number,
+  to: number,
+  encoding: XmlEncoding,
+): string | undefined {
+  const res: Resume = { at: 0 };
+  let pos = from;
+  while (pos < to) {
+    const lt = body.indexOf(LT, pos);
+    if (lt < 0 || lt >= to) return undefined;
+    const b1 = body[lt + 1];
+    if (b1 === undefined || !isMarkupStart(b1)) {
+      pos = lt + 1;
+      continue;
+    }
+    if (b1 === SLASH) {
+      const gt = body.indexOf(GT, lt + 2);
+      if (gt < 0 || gt >= to) return undefined;
+      pos = gt + 1;
+      continue;
+    }
+    if (b1 === BANG || b1 === QUESTION) {
+      const e = skipMarkup(body, lt);
+      if (e < 0 || e > to) return undefined;
+      pos = e;
+      continue;
+    }
+    const tagEnd = findTagEnd(body, lt);
+    if (tagEnd < 0 || tagEnd > to) return undefined;
+    const ns = lt + 1;
+    const len = nameEnd(body, ns) - ns;
+    const selfClosing = body[tagEnd - 2] === SLASH;
+    if (!selfClosing && is(body, ns, len, 'value')) {
+      const close = findClose(body, tagEnd, 'value', false, res);
+      if (close === INCOMPLETE || close > to) return undefined;
+      const t = readText(body, tagEnd, close, encoding);
+      if (t) return t;
+      const gt = body.indexOf(GT, close);
+      if (gt < 0 || gt >= to) return undefined;
+      pos = gt + 1;
+      continue;
+    }
+    pos = tagEnd;
+  }
+  return undefined;
+}
+
 function isWanted(body: Uint8Array, at: number, len: number, isProgramme: boolean): boolean {
-  if (!isProgramme) return is(body, at, len, 'display-name');
+  if (!isProgramme) return is(body, at, len, 'display-name') || is(body, at, len, 'lcn');
   return (
     is(body, at, len, 'title') ||
     is(body, at, len, 'sub-title') ||
     is(body, at, len, 'desc') ||
     is(body, at, len, 'category') ||
-    is(body, at, len, 'episode-num')
+    is(body, at, len, 'episode-num') ||
+    is(body, at, len, 'rating')
   );
 }
 
