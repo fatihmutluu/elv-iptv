@@ -94,8 +94,27 @@ export const PLAYER_CHANNELS = Object.freeze({
   event: 'player:event',
   area: 'player:area',
   ui: 'player:ui',
+  remoteMediaAction: 'player:remote-media-action',
   gateReport: 'gate:report',
 } as const);
+
+/** Sanitized playback metadata mirrored from renderer to OS media bridges (`#238`, `#301`). */
+export interface DesktopMediaMetadata {
+  readonly title: string;
+  readonly subtitle?: string;
+  readonly artworkUrl?: string;
+  readonly kind: 'live' | 'vod';
+  readonly canStepTrack: boolean;
+}
+
+/** Track-step remote media action initiated by MPRIS2 or macOS `MPRemoteCommandCenter` (`#238`, `#301`). */
+export type RemoteMediaAction = 'next' | 'previous';
+
+/** Main to renderer (`player:remote-media-action`). */
+export interface PlayerRemoteMediaActionMessage {
+  readonly engineId: string;
+  readonly action: RemoteMediaAction;
+}
 
 /** Hardware video decoding profile for desktop `libmpv` (`#435`, `#210`). */
 export type HwdecProfile = 'auto-safe' | 'auto-copy' | 'no' | 'darwin-compat';
@@ -125,6 +144,7 @@ export type BridgeCommand =
   | { name: 'setResizeMode'; mode: ResizeMode }
   | { name: 'setFilterSdh'; enabled: boolean }
   | { name: 'setSubtitleFontFamily'; family: AccessibilityFontFamily }
+  | { name: 'setMediaMetadata'; metadata: DesktopMediaMetadata | null }
   | { name: 'release' }
   | { name: 'fullscreen' }
   | { name: 'mute' };
@@ -169,6 +189,8 @@ export interface PlayerBridge {
   onEvent(listener: (message: PlayerEventMessage) => void): () => void;
   /** Returns the unsubscribe function. */
   onUi(listener: (message: PlayerUiMessage) => void): () => void;
+  /** Subscribes to OS remote track-step actions (`next` / `previous`) from MPRIS2 or macOS MediaPlayer; returns unsubscribe. */
+  onRemoteMediaAction?(listener: (message: PlayerRemoteMediaActionMessage) => void): () => void;
   /** Subscribes to decoded GPU `VideoFrame` deliveries for `engineId` in `'canvas'` mode (`#95`); returns unsubscribe. */
   onFrame?(engineId: string, listener: (frame: VideoFrameLike) => void): () => void;
   /** Dev gate only: one `ELV_GATE_PLAYER {...}` line for main to print. */
@@ -268,6 +290,84 @@ const MAX_VOLUME = 100;
 const MAX_DELAY_SEC = 30;
 const MAX_AUDIO_DEVICE_CHARS = 160;
 const MAX_ITEM_KEY_CHARS = 512;
+const MAX_MEDIA_TEXT_CHARS = 512;
+
+const ARTWORK_CREDENTIAL_QUERY_KEYS = new Set(
+  'username password user pass token access_token api_key apikey auth key secret sig signature'.split(
+    ' ',
+  ),
+);
+
+/**
+ * Validates and sanitizes an artwork URL before handing it to OS media overlays (MPRIS2 / macOS
+ * Now Playing): accepts only `http:` / `https:` URLs without control chars and strips embedded
+ * userinfo and credential query parameters.
+ */
+export function sanitizeDesktopArtworkUrl(rawUrl?: string): string | undefined {
+  const trimmed = rawUrl?.trim();
+  if (!trimmed || trimmed.length > MAX_STREAM_URL_CHARS || hasControlChar(trimmed)) {
+    return undefined;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return undefined;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined;
+  parsed.username = '';
+  parsed.password = '';
+  for (const key of [...parsed.searchParams.keys()]) {
+    if (ARTWORK_CREDENTIAL_QUERY_KEYS.has(key.toLowerCase())) parsed.searchParams.delete(key);
+  }
+  return parsed.toString();
+}
+
+/** Returns a credential-safe copy of `metadata` suitable for OS media integrations. */
+export function sanitizeDesktopMediaMetadata(
+  metadata: DesktopMediaMetadata | null,
+): DesktopMediaMetadata | null {
+  if (metadata === null) return null;
+  const safeArtwork = sanitizeDesktopArtworkUrl(metadata.artworkUrl);
+  return {
+    title: metadata.title.trim(),
+    ...(metadata.subtitle !== undefined && metadata.subtitle.trim().length > 0
+      ? { subtitle: metadata.subtitle.trim() }
+      : {}),
+    ...(safeArtwork !== undefined ? { artworkUrl: safeArtwork } : {}),
+    kind: metadata.kind,
+    canStepTrack: metadata.canStepTrack,
+  };
+}
+
+function isDesktopMediaMetadata(x: unknown): x is DesktopMediaMetadata {
+  if (!isRecord(x)) return false;
+  if (
+    typeof x['title'] !== 'string' ||
+    x['title'].length > MAX_MEDIA_TEXT_CHARS ||
+    hasControlChar(x['title'])
+  ) {
+    return false;
+  }
+  if (
+    x['subtitle'] !== undefined &&
+    (typeof x['subtitle'] !== 'string' ||
+      x['subtitle'].length > MAX_MEDIA_TEXT_CHARS ||
+      hasControlChar(x['subtitle']))
+  ) {
+    return false;
+  }
+  if (
+    x['artworkUrl'] !== undefined &&
+    (typeof x['artworkUrl'] !== 'string' ||
+      x['artworkUrl'].length > MAX_STREAM_URL_CHARS ||
+      hasControlChar(x['artworkUrl']))
+  ) {
+    return false;
+  }
+  if (x['kind'] !== 'live' && x['kind'] !== 'vod') return false;
+  return typeof x['canStepTrack'] === 'boolean';
+}
 
 const isSpeedRate = (x: unknown): x is number =>
   isNumber(x) && x >= MIN_SPEED_RATE && x <= MAX_SPEED_RATE;
@@ -374,6 +474,8 @@ function isBridgeCommand(x: unknown): x is BridgeCommand {
       return isResizeMode(x['mode']);
     case 'setSubtitleFontFamily':
       return isSubtitleFontFamily(x['family']);
+    case 'setMediaMetadata':
+      return x['metadata'] === null || isDesktopMediaMetadata(x['metadata']);
     case 'release':
     case 'fullscreen':
     case 'mute':

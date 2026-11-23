@@ -30,6 +30,8 @@ export interface EngineFactoryDeps {
   renderContext?: boolean;
   /** Optional persistent adaptive readahead tier store (defaults to `<userData>/mpv-readahead.json`). */
   readaheadStore?: ReadaheadTierStore;
+  /** Optional macOS `[NSScreen screensHaveSeparateSpaces]` query for multi-monitor fullscreen guard (`#301`). */
+  screensHaveSeparateSpaces?: () => boolean;
   /** Presentation events for the window's renderer. */
   onUi(event: PlayerUiEvent): void;
 }
@@ -50,11 +52,22 @@ export async function createEngineFor(
       ? 'own-window'
       : requestedKind;
   const ioSurfaceAddon = kind === 'canvas' ? deps.runtime.ioSurfaceAddon : undefined;
+  const emitFullscreen = (fullscreen: boolean): void => {
+    deps.onUi({ type: 'fullscreen-changed', fullscreen });
+  };
   const presenterOpts: CreatePresenterOptions | undefined =
-    deps.engineId !== undefined || ioSurfaceAddon !== undefined
+    deps.engineId !== undefined ||
+    ioSurfaceAddon !== undefined ||
+    deps.screensHaveSeparateSpaces !== undefined
       ? {
           ...(deps.engineId !== undefined ? { engineId: deps.engineId } : {}),
           ...(ioSurfaceAddon !== undefined ? { ioSurfaceAddon } : {}),
+          ...(deps.screensHaveSeparateSpaces !== undefined
+            ? {
+                screensHaveSeparateSpaces: deps.screensHaveSeparateSpaces,
+                onFullscreenChange: emitFullscreen,
+              }
+            : {}),
         }
       : undefined;
   const presenter = createPresenter(kind, owner, deps.platform, presenterOpts);
@@ -107,14 +120,16 @@ export async function createEngineFor(
     typeof owner.removeListener === 'function' &&
     typeof owner.isFullScreen === 'function'
   ) {
-    const emitFullscreen = (fullscreen: boolean): void => {
-      deps.onUi({ type: 'fullscreen-changed', fullscreen });
-    };
     const onEnterFullScreen = (): void => emitFullscreen(true);
     const onLeaveFullScreen = (): void => emitFullscreen(false);
     owner.on('enter-full-screen', onEnterFullScreen);
     owner.on('leave-full-screen', onLeaveFullScreen);
-    if (owner.isFullScreen()) emitFullscreen(true);
+    if (
+      owner.isFullScreen() ||
+      (typeof owner.isSimpleFullScreen === 'function' && owner.isSimpleFullScreen())
+    ) {
+      emitFullscreen(true);
+    }
     const baseRelease = engine.release;
     let cleanedUp = false;
     engine.release = () => {

@@ -183,15 +183,50 @@ export function macIoSurfaceAddonBuildCommand(p: {
   };
 }
 
+/** The `clang` command that compiles `elv-macos-media.m` into the ABI-stable N-API `.node` addon (`#301`). */
+function macMediaAddonBuildCommand(p: {
+  source: string;
+  nodeIncludeDir: string;
+  outNode: string;
+}): { command: 'clang'; args: string[] } {
+  return {
+    command: 'clang',
+    args: [
+      '-O2',
+      `-mmacosx-version-min=${MACOS_MIN_VERSION}`,
+      '-Wall',
+      '-Wextra',
+      '-Werror',
+      '-fobjc-arc',
+      '-shared',
+      '-undefined',
+      'dynamic_lookup',
+      '-I',
+      p.nodeIncludeDir,
+      p.source,
+      '-o',
+      p.outNode,
+      '-framework',
+      'MediaPlayer',
+      '-framework',
+      'AppKit',
+      '-framework',
+      'Foundation',
+    ],
+  };
+}
+
 /**
- * Builds the macOS `elv-mpv` host inside `ELV IPTV Player.app/Contents/MacOS/elv-mpv` and
- * `elv-iosurface.node` in `runtimeDir`, then ad-hoc signs both binaries and re-signs the app bundle.
+ * Builds the macOS `elv-mpv` host inside `ELV IPTV Player.app/Contents/MacOS/elv-mpv`,
+ * `elv-iosurface.node`, and optionally `elv-macos-media.node` in `runtimeDir`, then ad-hoc signs
+ * each binary and re-signs the app bundle.
  */
 export async function buildMacLauncher(
   p: {
     runtimeDir: string;
     launcherSource: string;
     addonSource: string;
+    mediaAddonSource?: string;
     nodeIncludeDir?: string;
   },
   run: Exec = spawnExec,
@@ -202,6 +237,7 @@ export async function buildMacLauncher(
   const includeDir = `${appContents}/Resources/include`;
   const outExe = `${appContents}/MacOS/elv-mpv`;
   const outNode = `${p.runtimeDir}/elv-iosurface.node`;
+  const outMediaNode = `${p.runtimeDir}/elv-macos-media.node`;
 
   const steps: { label: string; command: string; args: string[] }[] = [
     {
@@ -212,6 +248,18 @@ export async function buildMacLauncher(
       label: 'building elv-iosurface.node',
       ...macIoSurfaceAddonBuildCommand({ source: p.addonSource, nodeIncludeDir, outNode }),
     },
+    ...(p.mediaAddonSource !== undefined
+      ? [
+          {
+            label: 'building elv-macos-media.node',
+            ...macMediaAddonBuildCommand({
+              source: p.mediaAddonSource,
+              nodeIncludeDir,
+              outNode: outMediaNode,
+            }),
+          },
+        ]
+      : []),
     {
       label: 'signing elv-mpv',
       command: 'codesign',
@@ -222,6 +270,15 @@ export async function buildMacLauncher(
       command: 'codesign',
       args: ['--force', '--sign', '-', outNode],
     },
+    ...(p.mediaAddonSource !== undefined
+      ? [
+          {
+            label: 'signing elv-macos-media.node',
+            command: 'codesign',
+            args: ['--force', '--sign', '-', outMediaNode],
+          },
+        ]
+      : []),
     {
       label: 'signing ELV IPTV Player.app',
       command: 'codesign',

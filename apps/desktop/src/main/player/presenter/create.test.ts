@@ -381,4 +381,66 @@ describe('createPresenter', () => {
     ]);
     macDesktop.dispose();
   });
+
+  it('guards multi-monitor darwin fullscreen with simpleFullscreen when screensHaveSeparateSpaces is false and pins screenIndexOf to appWindow content bounds (#301)', async () => {
+    electron.displays = [
+      {
+        id: 1,
+        bounds: { x: 0, y: 0, width: 1512, height: 982 },
+        workArea: { x: 0, y: 37, width: 1512, height: 945 },
+        scaleFactor: 2,
+      },
+      {
+        id: 2,
+        bounds: { x: 1512, y: 0, width: 2560, height: 1440 },
+        workArea: { x: 1512, y: 25, width: 2560, height: 1415 },
+        scaleFactor: 1,
+      },
+    ];
+    electron.matchingId = 2;
+
+    const app = fakeAppWindow({ x: 1600, y: 100, width: 1280, height: 720 });
+    const fsChanges: boolean[] = [];
+    const ownPresenter = createPresenter(
+      'own-window',
+      app.window as unknown as BrowserWindow,
+      'darwin',
+      {
+        screensHaveSeparateSpaces: () => false,
+        onFullscreenChange: (fs) => fsChanges.push(fs),
+      },
+    );
+    ownPresenter.setArea(AREA);
+    expect(await ownPresenter.prepare()).toContain('--screen=1');
+
+    ownPresenter.toggleFullscreen();
+    expect(app.state.simpleFullscreen).toBe(true);
+    expect(app.state.fullscreenCalls).toEqual([]);
+    expect(fsChanges).toEqual([true]);
+
+    ownPresenter.toggleFullscreen();
+    expect(app.state.simpleFullscreen).toBe(false);
+    expect(fsChanges).toEqual([true, false]);
+    ownPresenter.dispose();
+
+    // Canvas presenter also uses simpleFullscreen on multi-monitor darwin with screensHaveSeparateSpaces=false
+    const canvasApp = fakeAppWindow({ x: 1600, y: 100, width: 1280, height: 720 });
+    const canvasFs: boolean[] = [];
+    const canvasPresenter = createPresenter(
+      'canvas',
+      canvasApp.window as unknown as BrowserWindow,
+      'darwin',
+      {
+        engineId: 'e-mac',
+        ioSurfaceResolver: { lookup: () => null, release: () => undefined },
+        screensHaveSeparateSpaces: () => false,
+        onFullscreenChange: (fs) => canvasFs.push(fs),
+      },
+    );
+    canvasPresenter.toggleFullscreen();
+    expect(canvasApp.state.simpleFullscreen).toBe(true);
+    expect(canvasApp.state.fullscreenCalls).toEqual([]);
+    expect(canvasFs).toEqual([true]);
+    canvasPresenter.dispose();
+  });
 });

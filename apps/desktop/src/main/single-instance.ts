@@ -1,8 +1,17 @@
+/** Callback invoked in the primary instance when a second instance launches (`#259`). */
+export type SecondInstanceListener = (
+  commandLine: readonly string[],
+  workingDirectory: string,
+) => void;
+
 /** The part of Electron's `app` the single-instance lock uses. */
 export interface SingleInstanceApp {
   requestSingleInstanceLock(): boolean;
   quit(): void;
-  on(event: 'second-instance', listener: () => void): unknown;
+  on(
+    event: 'second-instance',
+    listener: (event: unknown, commandLine: string[], workingDirectory: string) => void,
+  ): unknown;
 }
 
 /** The part of a `BrowserWindow` that `focusWindow` uses. */
@@ -14,14 +23,22 @@ export interface FocusableWindow {
 
 /**
  * Takes the single-instance lock. Without it the app quits at once and the caller must create nothing (no sweep of
- * the running instance's mpv, no window); with it, a later launch calls `onSecond` in this instance.
+ * the running instance's mpv, no window); with it, a later launch calls `onSecond(argv, cwd)` in this instance.
  */
-export function startSingleInstance(app: SingleInstanceApp, opts: { onSecond(): void }): boolean {
+export function startSingleInstance(
+  app: SingleInstanceApp,
+  opts: { onSecond: SecondInstanceListener },
+): boolean {
   if (!app.requestSingleInstanceLock()) {
     app.quit();
     return false;
   }
-  app.on('second-instance', opts.onSecond);
+  app.on('second-instance', (_event, commandLine, workingDirectory) => {
+    opts.onSecond(
+      Array.isArray(commandLine) ? commandLine : [],
+      typeof workingDirectory === 'string' ? workingDirectory : '',
+    );
+  });
   return true;
 }
 

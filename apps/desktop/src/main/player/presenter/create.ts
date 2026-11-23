@@ -5,6 +5,7 @@ import { type FullscreenMode, macOwnWindowGeometry } from './bounds.ts';
 import { createCanvasPresenter } from './canvas.ts';
 import { createChildWindowPresenter } from './child-window.ts';
 import { createCanvasEndpoint, type IoSurfaceResolver, loadIoSurfaceAddon } from './iosurface.ts';
+import { shouldUseSimpleFullscreen } from './macos-spaces.ts';
 import { createOwnWindowPresenter } from './own-window.ts';
 import type { VideoPresenter } from './types.ts';
 import { createVideoWindow, nativeHwnd } from './video-window-options.ts';
@@ -26,6 +27,10 @@ export interface CreatePresenterOptions {
   engineId?: string;
   ioSurfaceAddon?: string;
   ioSurfaceResolver?: IoSurfaceResolver;
+  /** Live query for macOS `[NSScreen screensHaveSeparateSpaces]` (`#301`). */
+  screensHaveSeparateSpaces?: () => boolean;
+  /** Callback notified when `simpleFullscreen` toggles without a native `enter-full-screen` event. */
+  onFullscreenChange?: (fullscreen: boolean) => void;
 }
 
 /** Builds the presenter of `kind` for an app window with Electron's real windows and screen. */
@@ -35,6 +40,13 @@ export function createPresenter(
   platform: NodeJS.Platform,
   opts?: CreatePresenterOptions,
 ): VideoPresenter {
+  const useSimpleFullscreen = (): boolean =>
+    shouldUseSimpleFullscreen({
+      platform,
+      displayCount: screen.getAllDisplays().length,
+      screensHaveSeparateSpaces: opts?.screensHaveSeparateSpaces?.() ?? true,
+    });
+
   if (kind === 'canvas') {
     let ioSurfaceResolver = opts?.ioSurfaceResolver;
     if (!ioSurfaceResolver && platform === 'darwin') {
@@ -59,6 +71,10 @@ export function createPresenter(
       createPipeServer: () => createServer(),
       createEndpoint: () => createCanvasEndpoint(platform),
       onDisplayChange: subscribeDisplayChanges,
+      useSimpleFullscreen,
+      ...(opts?.onFullscreenChange !== undefined
+        ? { onFullscreenChange: opts.onFullscreenChange }
+        : {}),
       ...(ioSurfaceResolver ? { ioSurfaceResolver } : {}),
     });
   }
@@ -73,6 +89,10 @@ export function createPresenter(
   return createOwnWindowPresenter({
     appWindow,
     ...(opts?.fullscreenMode !== undefined ? { fullscreenMode: opts.fullscreenMode } : {}),
+    useSimpleFullscreen,
+    ...(opts?.onFullscreenChange !== undefined
+      ? { onFullscreenChange: opts.onFullscreenChange }
+      : {}),
     toScreenPixels: (rect) => {
       if (platform === 'win32') return screen.dipToScreenRect(appWindow, rect);
       if (platform === 'darwin') {
@@ -93,7 +113,8 @@ export function createPresenter(
           screenIndexOf: (rect) => {
             const displays = screen.getAllDisplays();
             if (displays.length <= 1) return undefined;
-            const target = screen.getDisplayMatching(rect);
+            const hostRect = appWindow.isDestroyed() ? rect : appWindow.getContentBounds();
+            const target = screen.getDisplayMatching(hostRect);
             const idx = displays.findIndex((d) => d.id === target.id);
             return idx >= 0 ? idx : undefined;
           },

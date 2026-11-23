@@ -385,4 +385,47 @@ describe('Wave C3 UI flows (#51, #39, #182)', () => {
       jest.restoreAllMocks();
     }
   });
+
+  it('clears an open category picker when staging an incoming OS-opened local playlist (#259)', async () => {
+    const saved: SourceRow = {
+      id: 's1',
+      kind: 'xtream',
+      name: 'Provider',
+      createdAt: 1,
+      needsImport: false,
+    };
+    const catalog = makeStubCatalog({
+      listSources: jest.fn(async () => [saved]),
+    });
+    const onConsume = jest.fn();
+
+    const screen = await render(
+      wrap(<SourcesScreen catalog={catalog} onConsumeIncomingLocalPlaylist={onConsume} />),
+    );
+    await waitFor(() => expect(screen.getByTestId('source-categories-s1')).toBeTruthy());
+    await fireEvent.press(screen.getByTestId('source-categories-s1'));
+    await waitFor(() => expect(screen.getByTestId('category-picker-s1')).toBeTruthy());
+
+    await screen.rerender(
+      wrap(
+        <SourcesScreen
+          catalog={catalog}
+          incomingLocalPlaylist={{
+            name: 'fresh-list.m3u8',
+            bytes: new TextEncoder().encode('#EXTM3U\n#EXTINF:-1,Ch\nhttp://a/1.ts\n'),
+          }}
+          onConsumeIncomingLocalPlaylist={onConsume}
+        />,
+      ),
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('category-picker-s1')).toBeNull();
+      expect(screen.getByTestId('sources-local-file-selected')).toHaveTextContent(
+        'File: fresh-list.m3u8',
+      );
+      expect(onConsume).toHaveBeenCalledTimes(1);
+    });
+    await screen.unmount();
+  });
 });

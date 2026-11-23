@@ -7,6 +7,7 @@ import {
   type SharedTexturePlatformHandle,
   withPlatformSurfaceHandle,
 } from './iosurface.ts';
+import { isAppWindowFullscreen, setAppWindowFullscreen } from './macos-spaces.ts';
 import {
   type AppWindowEvent,
   type AppWindowLike,
@@ -71,6 +72,8 @@ export interface CanvasPresenterDeps<
   ioSurfaceResolver?: IoSurfaceResolver;
   createEndpoint?(): CanvasEndpoint;
   generatePipeName?(): string;
+  useSimpleFullscreen?(): boolean;
+  onFullscreenChange?(fullscreen: boolean): void;
 }
 
 const MIN_DIM = 16;
@@ -377,7 +380,14 @@ export function createCanvasPresenter<
       syncSize();
     },
     toggleFullscreen() {
-      if (!disposed && !appWindow.isDestroyed()) appWindow.setFullScreen(!appWindow.isFullScreen());
+      if (disposed || appWindow.isDestroyed()) return;
+      const useSimple = deps.useSimpleFullscreen?.() === true;
+      const next = !isAppWindowFullscreen(appWindow);
+      const mode = setAppWindowFullscreen(appWindow, next, useSimple);
+      if (mode === 'simple') {
+        deps.onFullscreenChange?.(next);
+        syncSize();
+      }
     },
     onEvent: (listener) => surface.onEvent(listener),
     dispose() {

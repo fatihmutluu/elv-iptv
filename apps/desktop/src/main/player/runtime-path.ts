@@ -13,6 +13,29 @@ export interface MpvRuntimePaths {
 const MAC_EXECUTABLE = ['ELV IPTV Player.app', 'Contents', 'MacOS', 'mpv'];
 const MAC_CANVAS_EXECUTABLE = ['ELV IPTV Player.app', 'Contents', 'MacOS', 'elv-mpv'];
 const MAC_IOSURFACE_ADDON = 'elv-iosurface.node';
+const MAC_MEDIA_ADDON = 'elv-macos-media.node';
+
+/**
+ * Resolves the optional macOS `elv-macos-media.node` native addon when present on disk (`#301`).
+ */
+export function resolveMacMediaAddonPath(
+  p: {
+    isPackaged: boolean;
+    resourcesPath: string;
+    appPath: string;
+    platform: string;
+    arch: string;
+  },
+  exists: (path: string) => boolean = existsSync,
+): string | undefined {
+  if (p.platform !== 'darwin') return undefined;
+  const resources = p.isPackaged ? p.resourcesPath : join(p.appPath, 'resources');
+  const runtimeDir = p.isPackaged
+    ? join(resources, 'mpv')
+    : join(resources, 'mpv', `${p.platform}-${p.arch}`);
+  const addonPath = join(runtimeDir, MAC_MEDIA_ADDON);
+  return exists(addonPath) ? addonPath : undefined;
+}
 
 /**
  * Resolves the bundled subtitle fonts directory when present on disk: `<resourcesPath>/fonts` in packaged builds,

@@ -238,6 +238,7 @@ describe('createDesktopMediaSession', () => {
 describe('bindDesktopMediaSession', () => {
   function createFakeEngine() {
     const listeners = new Set<(event: EngineEvent) => void>();
+    const remoteListeners = new Set<(action: 'next' | 'previous') => void>();
     const subscribeSpy = vi.fn((listener: (event: EngineEvent) => void) => {
       listeners.add(listener);
       return () => {
@@ -285,6 +286,13 @@ describe('bindDesktopMediaSession', () => {
       setResizeMode: vi.fn(),
       setFilterSdh: vi.fn(),
       setSubtitleFontFamily: vi.fn(),
+      setMediaMetadata: vi.fn(),
+      onRemoteMediaAction: vi.fn((listener: (action: 'next' | 'previous') => void) => {
+        remoteListeners.add(listener);
+        return () => {
+          remoteListeners.delete(listener);
+        };
+      }),
       onUi: vi.fn(() => () => undefined),
       release: vi.fn(),
       subscribe: subscribeSpy,
@@ -292,7 +300,10 @@ describe('bindDesktopMediaSession', () => {
     const emit = (ev: EngineEvent) => {
       for (const l of listeners) l(ev);
     };
-    return { engine, subscribeSpy, emit };
+    const emitRemote = (action: 'next' | 'previous') => {
+      for (const l of [...remoteListeners]) l(action);
+    };
+    return { engine, subscribeSpy, emit, emitRemote, remoteListeners };
   }
 
   it('drives metadata from typed MediaSessionMetadata, gates standalone VOD track actions, and preserves heldEvents ordering (#435)', () => {
@@ -476,5 +487,40 @@ describe('bindDesktopMediaSession', () => {
     const noop = wrappedLegacy.onFrame?.(vi.fn());
     expect(noop).toBeTypeOf('function');
     expect(() => noop?.()).not.toThrow();
+  });
+
+  it('forwards setMediaMetadata to main engine and routes remote media actions to onTrackStep (#238, #301)', () => {
+    const env = createFakeMediaSessionEnv();
+    const session = createDesktopMediaSession({
+      navigator: env.navigator,
+      MediaMetadata: FakeMediaMetadata,
+    });
+    const { engine, emitRemote, remoteListeners } = createFakeEngine();
+    const onTrackStep = vi.fn();
+    const wrapped = bindDesktopMediaSession(engine, session, { onTrackStep });
+
+    const liveMeta = {
+      title: 'Channel One',
+      subtitle: 'News',
+      kind: 'live' as const,
+      canStepTrack: true,
+    };
+    wrapped.setMediaMetadata(liveMeta);
+    expect(engine.setMediaMetadata).toHaveBeenCalledWith(liveMeta);
+
+    emitRemote('next');
+    emitRemote('previous');
+    expect(onTrackStep).toHaveBeenNthCalledWith(1, 'next');
+    expect(onTrackStep).toHaveBeenNthCalledWith(2, 'previous');
+
+    wrapped.setMediaMetadata({ title: 'Movie', kind: 'vod', canStepTrack: false });
+    emitRemote('next');
+    expect(onTrackStep).toHaveBeenCalledTimes(2);
+
+    wrapped.setMediaMetadata(null);
+    expect(engine.setMediaMetadata).toHaveBeenLastCalledWith(null);
+
+    wrapped.release();
+    expect(remoteListeners.size).toBe(0);
   });
 });

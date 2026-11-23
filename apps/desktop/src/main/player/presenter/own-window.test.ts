@@ -378,4 +378,48 @@ describe('createOwnWindowPresenter', () => {
     expect(app.state.fullscreenCalls).toEqual([false]);
     presenter.dispose();
   });
+
+  it('uses simpleFullscreen and avoids native Space transitions when useSimpleFullscreen is enabled (#301)', async () => {
+    const display = {
+      bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+      workArea: { x: 0, y: 25, width: 1920, height: 1055 },
+    };
+    const app = fakeAppWindow({ x: 100, y: 100, width: 1280, height: 720 });
+    const fsEvents: boolean[] = [];
+    const presenter = createOwnWindowPresenter({
+      appWindow: app.window,
+      toScreenPixels: scale(1),
+      displayBoundsOf: () => display,
+      useSimpleFullscreen: () => true,
+      onFullscreenChange: (fs) => fsEvents.push(fs),
+    });
+    presenter.setArea(AREA);
+    const mpv = fakeMpvClient();
+    presenter.attach(mpv.client);
+
+    presenter.toggleFullscreen();
+    expect(app.state.simpleFullscreen).toBe(true);
+    expect(app.state.simpleFullscreenCalls).toEqual([true]);
+    expect(app.state.fullscreenCalls).toEqual([]);
+    expect(fsEvents).toEqual([true]);
+    expect(mpv.commands).toContainEqual(['set_property', 'border', 'no']);
+    expect(mpv.commands).not.toContainEqual(['cycle', 'fullscreen']);
+
+    // Entering simpleFullscreen updates window bounds; resize/setArea MUST sync mpv to fullscreen bounds!
+    app.state.content = { x: 0, y: 0, width: 1920, height: 1080 };
+    presenter.setArea({ x: 0, y: 0, width: 1920, height: 1080, visible: true });
+    expect(mpv.commands.at(-1)).toEqual(['set_property', 'geometry', '1920x1055+0+25']);
+
+    const countBeforeResize = mpv.commands.length;
+    app.emit('resize');
+    expect(mpv.commands).toHaveLength(countBeforeResize + 1);
+    expect(mpv.commands.at(-1)).toEqual(['set_property', 'geometry', '1920x1055+0+25']);
+
+    presenter.toggleFullscreen();
+    expect(app.state.simpleFullscreen).toBe(false);
+    expect(app.state.simpleFullscreenCalls).toEqual([true, false]);
+    expect(fsEvents).toEqual([true, false]);
+    expect(mpv.commands).toContainEqual(['set_property', 'border', 'yes']);
+    presenter.dispose();
+  });
 });

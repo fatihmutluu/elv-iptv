@@ -49,6 +49,8 @@ export interface AppWindowLike {
   isVisible(): boolean;
   isFullScreen(): boolean;
   setFullScreen(flag: boolean): void;
+  isSimpleFullScreen?(): boolean;
+  setSimpleFullScreen?(flag: boolean): void;
   focus?(): void;
   isDestroyed(): boolean;
   on(event: AppWindowEvent, listener: () => void): unknown;

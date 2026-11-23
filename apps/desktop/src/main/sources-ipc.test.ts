@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SOURCES_CHANNELS } from '../shared/sources-ipc.ts';
+import { createPendingPlaylistQueue } from './playlist-open.ts';
 import { registerSourcesIpc } from './sources-ipc.ts';
 
 const dirs: string[] = [];
@@ -46,6 +47,108 @@ describe('registerSourcesIpc (#51)', () => {
     dispose();
     expect(ipcMain.removeHandler).toHaveBeenCalledWith(SOURCES_CHANNELS.readClipboardText);
     expect(ipcMain.removeHandler).toHaveBeenCalledWith(SOURCES_CHANNELS.pickPlaylistFile);
+    expect(ipcMain.removeHandler).toHaveBeenCalledWith(SOURCES_CHANNELS.consumePendingPlaylists);
+  });
+
+  it('drains buffered OS-opened playlists via sources:consume-pending-playlists and subscribes sender safely (#259)', async () => {
+    const handlers = new Map<string, (...args: unknown[]) => unknown>();
+    const ipcMain = {
+      handle: vi.fn((ch: string, fn: (...args: unknown[]) => unknown) => {
+        handlers.set(ch, fn);
+      }),
+      removeHandler: vi.fn(),
+    };
+    const pendingPlaylists = createPendingPlaylistQueue();
+    const payload = { name: 'launched.m3u8', bytes: new Uint8Array([35, 69, 88, 84]) };
+    const livePayload = { name: 'second.m3u', bytes: new Uint8Array([1, 2, 3]) };
+    const afterNavPayload = { name: 'after-nav.m3u', bytes: new Uint8Array([4, 5, 6]) };
+    pendingPlaylists.enqueue(payload);
+
+    const makeSender = () => {
+      let destroyed = false;
+      const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+      const sent: Array<{ channel: string; payload: unknown }> = [];
+      return {
+        sent,
+        sender: {
+          isDestroyed: () => destroyed,
+          send: (channel: string, data: unknown) => {
+            sent.push({ channel, payload: data });
+          },
+          on: (event: string, listener: (...args: unknown[]) => void) => {
+            const set = listeners.get(event) ?? new Set();
+            set.add(listener);
+            listeners.set(event, set);
+          },
+          once: (event: string, listener: (...args: unknown[]) => void) => {
+            const set = listeners.get(event) ?? new Set();
+            set.add(listener);
+            listeners.set(event, set);
+          },
+          removeListener: (event: string, listener: (...args: unknown[]) => void) => {
+            listeners.get(event)?.delete(listener);
+          },
+        },
+        emit: (event: string, ...args: unknown[]) => {
+          for (const l of [...(listeners.get(event) ?? [])]) l(...args);
+        },
+        destroy: () => {
+          destroyed = true;
+          for (const l of [...(listeners.get('destroyed') ?? [])]) l();
+        },
+        listenerCount: (event: string) => listeners.get(event)?.size ?? 0,
+      };
+    };
+
+    const dispose = registerSourcesIpc({
+      ipcMain,
+      getWindowFromSender: () => null,
+      readClipboardText: () => '',
+      showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] })),
+      pendingPlaylists,
+    });
+
+    const consumeHandler = handlers.get(SOURCES_CHANNELS.consumePendingPlaylists);
+    const webContents = makeSender();
+
+    // First consume drains buffered cold-start files and attaches a live subscription
+    expect(await consumeHandler?.({ sender: webContents.sender })).toEqual([payload]);
+    // Calling consume a second time does not create duplicate subscriptions
+    expect(await consumeHandler?.({ sender: webContents.sender })).toEqual([]);
+    expect(webContents.listenerCount('did-start-navigation')).toBe(1);
+
+    // Live file arrives and is forwarded exactly once
+    pendingPlaylists.enqueue(livePayload);
+    expect(webContents.sent).toEqual([
+      { channel: SOURCES_CHANNELS.openPlaylistFile, payload: livePayload },
+    ]);
+
+    // Subframe and same-document navigations keep the subscription active
+    webContents.emit('did-start-navigation', { isMainFrame: false, isSameDocument: false });
+    webContents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: true });
+    expect(webContents.listenerCount('did-start-navigation')).toBe(1);
+
+    // Main-frame non-same-document navigation detaches so subsequent files buffer until reloaded page consumes
+    webContents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+    expect(webContents.listenerCount('did-start-navigation')).toBe(0);
+    pendingPlaylists.enqueue(afterNavPayload);
+    expect(webContents.sent).toHaveLength(1);
+    expect(pendingPlaylists.pendingCount).toBe(1);
+
+    // Re-attaching drains buffered file and detaches on render-process-gone / destroyed
+    expect(await consumeHandler?.({ sender: webContents.sender })).toEqual([afterNavPayload]);
+    webContents.emit('render-process-gone');
+    expect(webContents.listenerCount('render-process-gone')).toBe(0);
+
+    expect(await consumeHandler?.({ sender: webContents.sender })).toEqual([]);
+    webContents.destroy();
+    expect(webContents.listenerCount('destroyed')).toBe(0);
+
+    // Disposed registerSourcesIpc cleans up active subscriptions
+    const webContents2 = makeSender();
+    expect(await consumeHandler?.({ sender: webContents2.sender })).toEqual([]);
+    dispose();
+    expect(webContents2.listenerCount('did-start-navigation')).toBe(0);
   });
 
   it('picks a local playlist file with bounded <= 64 MiB read and strips host directory paths', async () => {

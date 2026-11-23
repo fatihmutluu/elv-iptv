@@ -5,10 +5,13 @@ export interface PickedPlaylistFile {
 }
 
 /**
- * Platform port for clipboard paste and sandboxed local playlist file picking (`#51`).
+ * Platform port for clipboard paste, sandboxed local playlist file picking (`#51`), and OS
+ * `open-file` / `second-instance` local playlist launches (`#259`).
  * Each capability is optional so platforms without it (e.g. tvOS) simply omit the UI control.
  */
 export interface SourceImportHost {
   readClipboardText?: () => Promise<string | null>;
   pickPlaylistFile?: () => Promise<PickedPlaylistFile | null>;
+  readonly consumePendingPlaylistFiles?: () => Promise<readonly PickedPlaylistFile[]>;
+  readonly onOpenPlaylistFile?: (listener: (file: PickedPlaylistFile) => void) => () => void;
 }

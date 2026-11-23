@@ -65,7 +65,17 @@ describe('createPlayerBridge', () => {
     const { ipc } = fakeIpcRenderer();
     const bridge = createPlayerBridge(ipc);
     expect(Object.keys(bridge).sort()).toEqual(
-      ['close', 'onEvent', 'onFrame', 'onUi', 'open', 'reportGate', 'send', 'setArea'].sort(),
+      [
+        'close',
+        'onEvent',
+        'onFrame',
+        'onRemoteMediaAction',
+        'onUi',
+        'open',
+        'reportGate',
+        'send',
+        'setArea',
+      ].sort(),
     );
     for (const value of Object.values(bridge)) expect(typeof value).toBe('function');
     expect(Object.values(bridge)).not.toContain(ipc);
@@ -87,18 +97,27 @@ describe('createPlayerBridge', () => {
     const bridge = createPlayerBridge(ipc);
     const onEvent = vi.fn();
     const onUi = vi.fn();
+    const onRemote = vi.fn();
     const offEvent = bridge.onEvent(onEvent);
     const offUi = bridge.onUi(onUi);
+    const offRemote = bridge.onRemoteMediaAction?.(onRemote);
     expect(count(PLAYER_CHANNELS.event)).toBe(1);
     expect(count(PLAYER_CHANNELS.ui)).toBe(1);
+    expect(count(PLAYER_CHANNELS.remoteMediaAction)).toBe(1);
+    deliver(PLAYER_CHANNELS.remoteMediaAction, { engineId: 'e1', action: 'next' });
+    expect(onRemote).toHaveBeenCalledWith({ engineId: 'e1', action: 'next' });
     offEvent();
     offUi();
+    offRemote?.();
     expect(count(PLAYER_CHANNELS.event)).toBe(0);
     expect(count(PLAYER_CHANNELS.ui)).toBe(0);
+    expect(count(PLAYER_CHANNELS.remoteMediaAction)).toBe(0);
     deliver(PLAYER_CHANNELS.event, { engineId: 'e1' });
     deliver(PLAYER_CHANNELS.ui, { engineId: 'e1' });
+    deliver(PLAYER_CHANNELS.remoteMediaAction, { engineId: 'e1', action: 'previous' });
     expect(onEvent).not.toHaveBeenCalled();
     expect(onUi).not.toHaveBeenCalled();
+    expect(onRemote).toHaveBeenCalledTimes(1);
   });
 
   it('open invokes player:open and validates the reply', async () => {

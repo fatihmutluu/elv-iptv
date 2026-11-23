@@ -6,6 +6,7 @@ import {
   type PlayerBridge,
   type PlayerCommandMessage,
   type PlayerEventMessage,
+  type PlayerRemoteMediaActionMessage,
   type PlayerUiEvent,
   type PlayerUiMessage,
   type VideoFrameLike,
@@ -19,6 +20,7 @@ function fakeBridge(
 ) {
   const eventListeners = new Set<(m: PlayerEventMessage) => void>();
   const uiListeners = new Set<(m: PlayerUiMessage) => void>();
+  const remoteListeners = new Set<(m: PlayerRemoteMediaActionMessage) => void>();
   const frameListeners = new Map<string, (frame: VideoFrameLike) => void>();
   const sent: PlayerCommandMessage[] = [];
   const areas: unknown[] = [];
@@ -39,6 +41,10 @@ function fakeBridge(
       uiListeners.add(l);
       return () => uiListeners.delete(l);
     },
+    onRemoteMediaAction: (l) => {
+      remoteListeners.add(l);
+      return () => remoteListeners.delete(l);
+    },
     ...(opts?.omitOnFrame
       ? {}
       : {
@@ -58,12 +64,16 @@ function fakeBridge(
     closed,
     eventListeners,
     uiListeners,
+    remoteListeners,
     frameListeners,
     event: (engineId: string, event: EngineEvent) => {
       for (const l of [...eventListeners]) l({ engineId, event });
     },
     ui: (engineId: string, ui: PlayerUiEvent) => {
       for (const l of [...uiListeners]) l({ engineId, ui });
+    },
+    remoteAction: (engineId: string, action: 'next' | 'previous') => {
+      for (const l of [...remoteListeners]) l({ engineId, action });
     },
     frame: (engineId: string, frame: VideoFrameLike) => {
       frameListeners.get(engineId)?.(frame);
@@ -471,5 +481,40 @@ describe('createDesktopEngine', () => {
 
     engine.release();
     expect(engine.onAudioDevicesChange(() => undefined)).toBeTypeOf('function');
+  });
+
+  it('forwards setMediaMetadata and delivers filtered onRemoteMediaAction events (#238, #301)', async () => {
+    const f = fakeBridge();
+    const engine = await createDesktopEngine(f.bridge, () => 0);
+
+    const meta = {
+      title: 'Channel One',
+      subtitle: 'News',
+      artworkUrl: 'https://cdn.example.test/logo.png',
+      kind: 'live' as const,
+      canStepTrack: true,
+    };
+    engine.setMediaMetadata(meta);
+    engine.setMediaMetadata(null);
+    expect(f.sent).toEqual([
+      { engineId: 'e1', command: { name: 'setMediaMetadata', metadata: meta } },
+      { engineId: 'e1', command: { name: 'setMediaMetadata', metadata: null } },
+    ]);
+    for (const msg of f.sent) expect(isPlayerCommandMessage(msg)).toBe(true);
+
+    const actions: string[] = [];
+    const off = engine.onRemoteMediaAction((a) => actions.push(a));
+    f.remoteAction('other', 'next');
+    f.remoteAction('e1', 'next');
+    f.remoteAction('e1', 'previous');
+    expect(actions).toEqual(['next', 'previous']);
+
+    off();
+    f.remoteAction('e1', 'next');
+    expect(actions).toEqual(['next', 'previous']);
+
+    engine.release();
+    expect(f.remoteListeners.size).toBe(0);
+    expect(engine.onRemoteMediaAction(() => undefined)).toBeTypeOf('function');
   });
 });

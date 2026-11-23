@@ -555,4 +555,39 @@ describe('SourcesScreen (#71)', () => {
       await env.cleanup();
     }
   });
+
+  it('stages an incoming OS-launched local playlist into M3U mode with clean filename stem (#259)', async () => {
+    const env = await openTestCatalog();
+    const onConsume = jest.fn();
+    const incoming = {
+      name: 'weekend-sports.m3u.gz',
+      bytes: new TextEncoder().encode('#EXTM3U\n#EXTINF:-1,Sports\nhttp://a/1.ts\n'),
+    };
+    try {
+      const view = await render(
+        <FormFactorProvider value="desktop">
+          <I18nProvider i18n={createAppI18n('en')}>
+            <SourcesScreen
+              catalog={env.catalog}
+              incomingLocalPlaylist={incoming}
+              onConsumeIncomingLocalPlaylist={onConsume}
+            />
+          </I18nProvider>
+        </FormFactorProvider>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('sources-local-file-selected')).toHaveTextContent(
+          'File: weekend-sports.m3u.gz',
+        );
+      });
+      expect(screen.getByTestId('sources-input-name').props.value).toBe('weekend-sports');
+      expect(screen.getByTestId('sources-mode-m3u').props.accessibilityState?.selected).toBe(true);
+      expect(onConsume).toHaveBeenCalledTimes(1);
+
+      await view.unmount();
+    } finally {
+      await env.cleanup();
+    }
+  });
 });
