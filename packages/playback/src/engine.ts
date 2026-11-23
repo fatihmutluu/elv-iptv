@@ -128,10 +128,12 @@ export interface ChapterInfo {
   readonly endMs?: number;
 }
 
-/** Real decoded video stream telemetry emitted by native and desktop engines (`#58`, `#160`). */
+/** Real decoded video stream telemetry emitted by native and desktop engines (`#58`, `#160`, `#332`). */
 export interface StreamVideoInfo {
   readonly width?: number;
   readonly height?: number;
+  /** Positive finite display aspect ratio (DAR), e.g. `16 / 9`, `2.39`, or `4 / 3` (`#332`). */
+  readonly aspectRatio?: number;
   readonly fps?: number;
   readonly codec?: string;
   readonly hdr?: StreamHdrKind;
@@ -186,6 +188,8 @@ export interface PlayerEngine {
   /** Toggles VOD scrubbing mode (e.g. Media3 `isScrubbingModeEnabled`, `#222`). */
   setScrubbing?(attempt: AttemptToken, scrubbing: boolean): void;
   setSpeed?(attempt: AttemptToken, rate: number): void;
+  /** Toggles audio pitch preservation when playback speed differs from `1.0` (`#243`, `#264`). */
+  setPitchLock?(attempt: AttemptToken, locked: boolean): void;
   selectAudioTrack?(attempt: AttemptToken, id: string): void;
   selectSubtitleTrack?(attempt: AttemptToken, id: string | null): void;
   stop(attempt: AttemptToken): void;

@@ -38,6 +38,8 @@ describe('launchArgs', () => {
       '--cache-on-disk=no',
       '--demuxer-donate-buffer=no',
       '--autoload-files=no',
+      '--prefetch-playlist=no',
+      '--audio-pitch-correction=yes',
       '--tls-verify=yes',
       '--stream-lavf-o=icy=0,reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5',
       '--reset-on-next-file=aid,sid,vid,sub-visibility,audio-delay,sub-delay,video-aspect-override,deinterlace,speed,panscan,keepaspect,video-unscaled,gamma,brightness,contrast,saturation',
@@ -249,5 +251,20 @@ describe('loadfileCommand', () => {
     })[4] as Record<string, string>;
     expect(offOpts).not.toHaveProperty('hwdec');
     expect(offOpts['sub-filter-sdh']).toBe('no');
+  });
+
+  it('supports append-play mode for gapless VOD queueing (#205)', () => {
+    const cmd = loadfileCommand(
+      { ...base, kind: 'vod', preferHevcOverDolbyVision: true, filterSdhSubtitles: true },
+      'append-play',
+    );
+    expect(cmd.slice(0, 4)).toEqual(['loadfile', 'http://h/1.ts', 'append-play', -1]);
+    expect(cmd[4]).toMatchObject({
+      'demuxer-max-bytes': '64MiB',
+      'demuxer-max-back-bytes': '16MiB',
+      'demuxer-hysteresis-secs': '10',
+      hwdec: 'no',
+      'sub-filter-sdh': 'yes',
+    });
   });
 });

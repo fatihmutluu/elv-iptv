@@ -34,6 +34,7 @@ export interface FakeProc {
   logLevel?: string;
   nextEntryId: number;
   playlist: number[];
+  queued: Array<{ id: number; steps: FakeMpvScript }>;
   media?: FakeMedia;
   hung: boolean;
   gone: boolean;

@@ -3,6 +3,7 @@ import {
   areaToScreen,
   countBuckets,
   cropInThumbnail,
+  lockContentRectToAspect,
   macOwnWindowGeometry,
   resolveFullscreenRect,
 } from './bounds.ts';
@@ -173,5 +174,90 @@ describe('resolveFullscreenRect', () => {
     expect(
       resolveFullscreenRect({ x: 0, y: 37, width: 1512, height: 945 }, notchedDisplay, 'desktop'),
     ).toEqual(notchedDisplay.bounds);
+  });
+});
+
+describe('lockContentRectToAspect (#332)', () => {
+  const minSize = { width: 800, height: 500 };
+
+  it('snaps width and height to physical pixel grid with zero 1px letterbox mismatch at 100%, 125%, 150%, and 200% DPI', () => {
+    const scaleFactors = [1.0, 1.25, 1.5, 2.0];
+    const aspects = [16 / 9, 4 / 3, 21 / 9, 2.39];
+    const sampleWidths = [900, 960, 1000, 1024, 1111, 1280, 1366, 1440, 1600];
+
+    for (const scale of scaleFactors) {
+      for (const dar of aspects) {
+        for (const w of sampleWidths) {
+          const locked = lockContentRectToAspect(
+            { x: 100, y: 80, width: w, height: 700 },
+            dar,
+            scale,
+            minSize,
+            'width',
+          );
+          expect(locked.width).toBeGreaterThanOrEqual(minSize.width);
+          expect(locked.height).toBeGreaterThanOrEqual(minSize.height);
+          const physW = Math.round(locked.width * scale);
+          const physH = Math.round(locked.height * scale);
+          expect(Math.round(physW / dar)).toBe(physH);
+          expect(Math.round(physH * dar)).toBe(physW);
+        }
+      }
+    }
+  });
+
+  it('respects minContentSize when width-driven height would drop below minContentSize.height', () => {
+    for (const scale of [1.0, 1.25, 1.5, 2.0]) {
+      const locked = lockContentRectToAspect(
+        { x: 40, y: 50, width: 800, height: 450 },
+        16 / 9,
+        scale,
+        minSize,
+        'width',
+      );
+      expect(locked.width).toBeGreaterThanOrEqual(minSize.width);
+      expect(locked.height).toBeGreaterThanOrEqual(minSize.height);
+      const physW = Math.round(locked.width * scale);
+      const physH = Math.round(locked.height * scale);
+      expect(Math.round(physW / (16 / 9))).toBe(physH);
+      expect(Math.round(physH * (16 / 9))).toBe(physW);
+    }
+  });
+
+  it('supports height-driven resizing (preferredAxis = height) across all HiDPI scale factors', () => {
+    for (const scale of [1.0, 1.25, 1.5, 2.0]) {
+      const locked = lockContentRectToAspect(
+        { x: 10, y: 20, width: 1200, height: 615 },
+        16 / 9,
+        scale,
+        minSize,
+        'height',
+      );
+      expect(locked.width).toBeGreaterThanOrEqual(minSize.width);
+      expect(locked.height).toBeGreaterThanOrEqual(minSize.height);
+      const physW = Math.round(locked.width * scale);
+      const physH = Math.round(locked.height * scale);
+      expect(Math.round(physW / (16 / 9))).toBe(physH);
+      expect(Math.round(physH * (16 / 9))).toBe(physW);
+    }
+  });
+
+  it('clamps to minContentSize without locking when aspectRatio is non-positive or non-finite', () => {
+    expect(
+      lockContentRectToAspect({ x: 5, y: 10, width: 600, height: 400 }, 0, 1.5, minSize),
+    ).toEqual({
+      x: 5,
+      y: 10,
+      width: 800,
+      height: 500,
+    });
+    expect(
+      lockContentRectToAspect({ x: 5, y: 10, width: 950, height: 620 }, Number.NaN, 1.25, minSize),
+    ).toEqual({
+      x: 5,
+      y: 10,
+      width: 950,
+      height: 620,
+    });
   });
 });

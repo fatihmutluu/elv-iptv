@@ -1,5 +1,5 @@
 import { createCoalescedCatalog } from '@elv/data';
-import type { AccessibilityFontFamily } from '@elv/domain';
+import type { AccessibilityFontFamily, DeinterlaceMode } from '@elv/domain';
 import {
   AppProviders,
   AppShell,
@@ -9,6 +9,7 @@ import {
   type VideoHost,
 } from '@elv/features';
 import { resolveLocale } from '@elv/i18n';
+import type { StreamRequest } from '@elv/playback';
 import { UiAdaptersProvider } from '@elv/ui-kit';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -168,6 +169,18 @@ function AppRoot() {
           toggleMute: () => rawEngine.toggleMute(),
           setVolume: (volume: number) => rawEngine.setVolume(volume),
           setDeinterlace: (enabled: boolean) => rawEngine.setDeinterlace(enabled),
+          setDeinterlaceMode: (mode: DeinterlaceMode) => rawEngine.setDeinterlaceMode(mode),
+          setPitchLock: (locked: boolean) => rawEngine.setPitchLock(locked),
+          setAudioNormalization: (enabled: boolean) => rawEngine.setAudioNormalization(enabled),
+          queueNext: (request: {
+            readonly itemKey: string;
+            readonly stream: StreamRequest;
+            readonly preferHevcOverDolbyVision?: boolean;
+            readonly filterSdhSubtitles?: boolean;
+          }) => rawEngine.queueNext(request),
+          clearQueue: () => rawEngine.clearQueue(),
+          onQueueAdvanced: (listener: (itemKey: string) => void) =>
+            rawEngine.onQueueAdvanced(listener),
           setResizeMode: (mode: 'fit' | 'fill' | 'stretch') => rawEngine.setResizeMode(mode),
           setFilterSdh: (enabled: boolean) => rawEngine.setFilterSdh(enabled),
           setSubtitleFontFamily: (family: AccessibilityFontFamily) =>
@@ -267,6 +280,24 @@ function AppRoot() {
     if (typeof window === 'undefined') return;
     return attachDeadHostOnlineReset(window);
   }, []);
+
+  useEffect(() => {
+    const windowBridge = window.elv?.window;
+    if (!windowBridge || typeof windowBridge.setAspectRatioLock !== 'function') return;
+    let active = true;
+    let lastSent: boolean | undefined;
+    const syncLock = (enabled: boolean): void => {
+      if (!active || lastSent === enabled) return;
+      lastSent = enabled;
+      void windowBridge.setAspectRatioLock(enabled).catch(() => undefined);
+    };
+    void preferencesStore.load().then((snap) => syncLock(snap.windowAspectRatioLock));
+    const unsubscribe = preferencesStore.subscribe((snap) => syncLock(snap.windowAspectRatioLock));
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [preferencesStore]);
 
   const sourceImportHost = useMemo<SourceImportHost | undefined>(() => {
     const sourcesBridge = window.elv?.sources;

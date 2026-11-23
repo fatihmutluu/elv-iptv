@@ -82,6 +82,26 @@ describe('isPlayerCommandMessage', () => {
       { name: 'setAudioDevice', device: 'a'.repeat(160) },
       { name: 'setDeinterlace', enabled: true },
       { name: 'setDeinterlace', enabled: false },
+      { name: 'setDeinterlaceMode', mode: 'off' },
+      { name: 'setDeinterlaceMode', mode: 'auto' },
+      { name: 'setDeinterlaceMode', mode: 'bwdif' },
+      { name: 'setPitchLock', locked: true },
+      { name: 'setPitchLock', locked: false },
+      { name: 'setAudioNormalization', enabled: true },
+      { name: 'setAudioNormalization', enabled: false },
+      {
+        name: 'queueNext',
+        request: {
+          itemKey: 'xtream:s1:ep:102',
+          stream: {
+            url: 'https://sim.test/series/demo/demo/102.mkv',
+            headers: { 'User-Agent': 'ELV/1' },
+          },
+          preferHevcOverDolbyVision: true,
+          filterSdhSubtitles: false,
+        },
+      },
+      { name: 'clearQueue' },
       { name: 'setHwdec', profile: 'auto-safe' },
       { name: 'setHwdec', profile: 'auto-copy' },
       { name: 'setHwdec', profile: 'no' },
@@ -192,6 +212,59 @@ describe('isPlayerCommandMessage', () => {
       msg({ name: 'setAudioDevice', device: 123 }),
       msg({ name: 'setDeinterlace', enabled: 'yes' }),
       msg({ name: 'setDeinterlace' }),
+      msg({ name: 'setDeinterlaceMode' }),
+      msg({ name: 'setDeinterlaceMode', mode: 'yadif' }),
+      msg({ name: 'setDeinterlaceMode', mode: true }),
+      msg({ name: 'setPitchLock' }),
+      msg({ name: 'setPitchLock', locked: 'yes' }),
+      msg({ name: 'setAudioNormalization' }),
+      msg({ name: 'setAudioNormalization', enabled: 'yes' }),
+      msg({ name: 'queueNext' }),
+      msg({ name: 'queueNext', request: null }),
+      msg({
+        name: 'queueNext',
+        request: {
+          itemKey: '',
+          stream: { url: 'http://sim.test/ep2.mkv', headers: {} },
+        },
+      }),
+      msg({
+        name: 'queueNext',
+        request: {
+          itemKey: 'ep2\n',
+          stream: { url: 'http://sim.test/ep2.mkv', headers: {} },
+        },
+      }),
+      msg({
+        name: 'queueNext',
+        request: {
+          itemKey: 'ep2',
+          kind: 'live',
+          stream: { url: 'http://sim.test/ep2.mkv', headers: {} },
+        },
+      }),
+      msg({
+        name: 'queueNext',
+        request: {
+          itemKey: 'ep2',
+          stream: { url: 'file:///etc/passwd', headers: {} },
+        },
+      }),
+      msg({
+        name: 'queueNext',
+        request: {
+          itemKey: 'ep2',
+          stream: { url: 'http://sim.test/ep2.mkv', headers: { 'X-Bad\n': '1' } },
+        },
+      }),
+      msg({
+        name: 'queueNext',
+        request: {
+          itemKey: 'ep2',
+          stream: { url: 'http://sim.test/ep2.mkv', headers: {} },
+          preferHevcOverDolbyVision: 'yes',
+        },
+      }),
       msg({ name: 'setHwdec' }),
       msg({ name: 'setHwdec', profile: '' }),
       msg({ name: 'setHwdec', profile: 'vaapi' }),

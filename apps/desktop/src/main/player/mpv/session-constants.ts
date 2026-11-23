@@ -25,10 +25,13 @@ export const OBSERVED_PROPERTIES = [
   'sid',
   'audio-device',
   'audio-device-list',
+  'audio-spdif',
   'volume',
   'mute',
   'chapter-list',
   'frame-drop-count',
+  'playlist-pos',
+  'playlist-count',
 ] as const;
 
 /** Properties routed to `TrackTracker`. */

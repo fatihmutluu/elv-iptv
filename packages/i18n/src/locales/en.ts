@@ -662,6 +662,17 @@ export const enMessages = {
   'settings.tvClockMenus': 'Menus only',
   'settings.tvClockPlayer': 'Player only',
   'settings.tvClockNever': 'Never',
+  'settings.deinterlaceMode': 'Deinterlacing',
+  'settings.deinterlaceModeHint': 'Smooth interlaced 50i/60i live broadcast feeds on desktop',
+  'settings.deinterlaceOff': 'Off',
+  'settings.deinterlaceAuto': 'Auto',
+  'settings.deinterlaceBwdif': 'Broadcast (bwdif)',
+  'settings.pitchLock': 'Preserve audio pitch',
+  'settings.pitchLockHint': 'Keep voices natural when changing playback speed',
+  'settings.audioNormalization': 'Loudness normalization',
+  'settings.audioNormalizationHint': 'Balance quiet dialogue and loud channels using EBU R128',
+  'settings.windowAspectRatioLock': 'Lock window aspect ratio',
+  'settings.windowAspectRatioLockHint': 'Keep windowed playback bar-free when resizing on desktop',
 } as const;
 
 /** Valid message identifier across all supported locales. */

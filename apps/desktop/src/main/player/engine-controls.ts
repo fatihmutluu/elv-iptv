@@ -1,8 +1,23 @@
 import { type AttemptToken, clampPlaybackSpeed } from '@elv/playback';
-import type { AccessibilityFontFamily, HwdecProfile, ResizeMode } from '../../shared/player-ipc.ts';
+import type {
+  AccessibilityFontFamily,
+  DeinterlaceMode,
+  HwdecProfile,
+  ResizeMode,
+} from '../../shared/player-ipc.ts';
 import { type AudioRampTimers, createAudioRamp } from './mpv/audio-ramp.ts';
 import type { MpvCommand } from './mpv/codec.ts';
 import type { LiveSession, MediaSlot } from './mpv/live-session.ts';
+import {
+  audioNormalizationCommand,
+  DEINTERLACE_BWDIF_FILTER,
+  deinterlaceCommands,
+  isSpdifPassthroughValue,
+  LOUDNORM_FILTER,
+  pitchLockCommand,
+} from './mpv/options.ts';
+
+export { DEINTERLACE_BWDIF_FILTER, isSpdifPassthroughValue, LOUDNORM_FILTER };
 
 /** Maps an {@link AccessibilityFontFamily} preference to mpv's `sub-font` property value (`'sans-serif'` restores mpv's documented default). */
 export function mapSubtitleFontFamily(family: AccessibilityFontFamily): string {
@@ -28,6 +43,7 @@ export interface EngineControlsDeps {
   platform?: string;
   audioRampMs?: number;
   initialDarwinCompat?: boolean;
+  initialSpdifPassthrough?: boolean;
 }
 
 /** Speed/seek coalescing, audio ramp play/pause, and runtime property-setter helpers for `MpvEngine`. */
@@ -36,6 +52,8 @@ export interface EngineControls {
   onSeekQueued(): void;
   onCommandSettled(command: MpvCommand): void;
   onAudioProperty(name: 'volume' | 'mute', value: unknown): void;
+  onAudioSpdifProperty(value: unknown): void;
+  isSpdifPassthroughActive(): boolean;
   cancelRamp(restoreVolume: boolean, direct?: boolean): void;
   play(attempt: AttemptToken): void;
   pause(attempt: AttemptToken): void;
@@ -47,6 +65,12 @@ export interface EngineControls {
   setAudioDevice(device: string): void;
   getDesiredAudioDevice(): string | undefined;
   setDeinterlace(enabled: boolean): void;
+  setDeinterlaceMode(mode: DeinterlaceMode): void;
+  getDesiredDeinterlaceMode(): DeinterlaceMode | undefined;
+  setPitchLock(lockedOrAttempt: boolean | AttemptToken, maybeLocked?: boolean): void;
+  getDesiredPitchLock(): boolean | undefined;
+  setAudioNormalization(enabled: boolean): void;
+  getDesiredAudioNormalization(): boolean | undefined;
   setHwdec(profile: HwdecProfile): void;
   setResizeMode(mode: ResizeMode): void;
   setFilterSdh(enabled: boolean): void;
@@ -60,8 +84,12 @@ export function createEngineControls(deps: EngineControlsDeps): EngineControls {
   let speedInFlight = false;
   let pendingSpeed: { slot: MediaSlot | undefined; rate: number } | undefined;
   let darwinCompatActive = deps.initialDarwinCompat === true;
+  let spdifPassthroughActive = deps.initialSpdifPassthrough === true;
   let desiredAudioDevice: string | undefined;
   let desiredSubtitleFont: string | undefined;
+  let desiredDeinterlaceMode: DeinterlaceMode | undefined;
+  let desiredPitchLock: boolean | undefined;
+  let desiredAudioNormalization: boolean | undefined;
 
   const restoreVolumeDirect = (volume: number): void => {
     const live = deps.getLive();
@@ -118,6 +146,26 @@ export function createEngineControls(deps: EngineControlsDeps): EngineControls {
     },
     onAudioProperty(name, value) {
       audioRamp.onProperty(name, value);
+    },
+    onAudioSpdifProperty(value) {
+      if (value === undefined) return;
+      const next = isSpdifPassthroughValue(value);
+      if (next === spdifPassthroughActive) return;
+      spdifPassthroughActive = next;
+      const live = deps.getLive();
+      if (deps.isReleased() || live === undefined) return;
+      if (next) {
+        if (desiredAudioNormalization === true) {
+          live.appliedAudioNormalization = false;
+          deps.enqueueCommand(audioNormalizationCommand(false));
+        }
+      } else if (desiredAudioNormalization === true) {
+        live.appliedAudioNormalization = true;
+        deps.enqueueCommand(audioNormalizationCommand(true));
+      }
+    },
+    isSpdifPassthroughActive() {
+      return spdifPassthroughActive;
     },
     cancelRamp(restoreVolume, direct = false) {
       audioRamp.cancel(restoreVolume, direct ? restoreVolumeDirect : undefined);
@@ -190,7 +238,50 @@ export function createEngineControls(deps: EngineControlsDeps): EngineControls {
       return desiredAudioDevice;
     },
     setDeinterlace(enabled) {
-      setProp('deinterlace', enabled ? 'yes' : 'no');
+      this.setDeinterlaceMode(enabled ? 'auto' : 'off');
+    },
+    setDeinterlaceMode(mode) {
+      if (deps.isReleased()) return;
+      desiredDeinterlaceMode = mode;
+      if (deps.getLive() !== undefined) {
+        for (const cmd of deinterlaceCommands(mode)) deps.enqueueCommand(cmd);
+      }
+    },
+    getDesiredDeinterlaceMode() {
+      return desiredDeinterlaceMode;
+    },
+    setPitchLock(lockedOrAttempt, maybeLocked) {
+      if (deps.isReleased()) return;
+      const locked = typeof lockedOrAttempt === 'boolean' ? lockedOrAttempt : Boolean(maybeLocked);
+      if (typeof lockedOrAttempt === 'number') deps.adopt(lockedOrAttempt);
+      desiredPitchLock = locked;
+      if (deps.getLive() !== undefined) deps.enqueueCommand(pitchLockCommand(locked));
+    },
+    getDesiredPitchLock() {
+      return desiredPitchLock;
+    },
+    setAudioNormalization(enabled) {
+      if (deps.isReleased()) return;
+      desiredAudioNormalization = enabled;
+      const live = deps.getLive();
+      if (live === undefined) return;
+      if (enabled) {
+        if (spdifPassthroughActive) {
+          if (live.appliedAudioNormalization === true) {
+            live.appliedAudioNormalization = false;
+            deps.enqueueCommand(audioNormalizationCommand(false));
+          }
+          return;
+        }
+        live.appliedAudioNormalization = true;
+        deps.enqueueCommand(audioNormalizationCommand(true));
+      } else {
+        live.appliedAudioNormalization = false;
+        deps.enqueueCommand(audioNormalizationCommand(false));
+      }
+    },
+    getDesiredAudioNormalization() {
+      return desiredAudioNormalization;
     },
     setHwdec(profile) {
       if (deps.isReleased()) return;

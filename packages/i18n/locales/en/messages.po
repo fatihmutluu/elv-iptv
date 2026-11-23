@@ -1871,3 +1871,36 @@ msgstr "Player only"
 
 msgid "settings.tvClockNever"
 msgstr "Never"
+
+msgid "settings.deinterlaceMode"
+msgstr "Deinterlacing"
+
+msgid "settings.deinterlaceModeHint"
+msgstr "Smooth interlaced 50i/60i live broadcast feeds on desktop"
+
+msgid "settings.deinterlaceOff"
+msgstr "Off"
+
+msgid "settings.deinterlaceAuto"
+msgstr "Auto"
+
+msgid "settings.deinterlaceBwdif"
+msgstr "Broadcast (bwdif)"
+
+msgid "settings.pitchLock"
+msgstr "Preserve audio pitch"
+
+msgid "settings.pitchLockHint"
+msgstr "Keep voices natural when changing playback speed"
+
+msgid "settings.audioNormalization"
+msgstr "Loudness normalization"
+
+msgid "settings.audioNormalizationHint"
+msgstr "Balance quiet dialogue and loud channels using EBU R128"
+
+msgid "settings.windowAspectRatioLock"
+msgstr "Lock window aspect ratio"
+
+msgid "settings.windowAspectRatioLockHint"
+msgstr "Keep windowed playback bar-free when resizing on desktop"

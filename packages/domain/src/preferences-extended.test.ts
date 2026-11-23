@@ -244,6 +244,10 @@ describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
       tvClockMode: 'player',
       overscanX: 0.08,
       overscanY: 0.04,
+      deinterlaceMode: 'bwdif',
+      pitchLock: false,
+      audioNormalization: true,
+      windowAspectRatioLock: true,
     };
 
     const encoded = serializePreferences(full);

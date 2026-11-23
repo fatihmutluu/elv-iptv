@@ -29,4 +29,22 @@ describe('Wave C3 settings toggles (#218, #404)', () => {
     activatePlaybackControl('toggle-group-vod-versions', controller);
     expect(patches).toEqual([{ groupVodVersions: false }]);
   });
+
+  it('activates Wave C5A deinterlaceMode, pitchLock, audioNormalization, and windowAspectRatioLock controls (#243, #332)', () => {
+    const { controller, patches } = makeController();
+    activatePlaybackControl('deinterlace-auto', controller);
+    activatePlaybackControl('deinterlace-bwdif', controller);
+    activatePlaybackControl('deinterlace-off', controller);
+    activatePlaybackControl('toggle-pitch-lock', controller);
+    activatePlaybackControl('toggle-audio-normalization', controller);
+    activatePlaybackControl('toggle-window-aspect-ratio-lock', controller);
+    expect(patches).toEqual([
+      { deinterlaceMode: 'auto' },
+      { deinterlaceMode: 'bwdif' },
+      { deinterlaceMode: 'off' },
+      { pitchLock: false },
+      { audioNormalization: true },
+      { windowAspectRatioLock: true },
+    ]);
+  });
 });

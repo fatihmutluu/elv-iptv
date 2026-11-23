@@ -326,6 +326,7 @@ function mergeVideoInfo(
 ): StreamVideoInfo | undefined {
   const width = positiveNumber(incoming.width) ?? prev?.width;
   const height = positiveNumber(incoming.height) ?? prev?.height;
+  const aspectRatio = positiveNumber(incoming.aspectRatio) ?? prev?.aspectRatio;
   const fps = positiveNumber(incoming.fps) ?? prev?.fps;
   const codec = cleanCodec(incoming.codec) ?? prev?.codec;
   const hdr = incoming.hdr ?? prev?.hdr;
@@ -333,6 +334,7 @@ function mergeVideoInfo(
   if (
     width === undefined &&
     height === undefined &&
+    aspectRatio === undefined &&
     fps === undefined &&
     codec === undefined &&
     hdr === undefined &&
@@ -343,6 +345,7 @@ function mergeVideoInfo(
   return {
     ...(width === undefined ? {} : { width }),
     ...(height === undefined ? {} : { height }),
+    ...(aspectRatio === undefined ? {} : { aspectRatio }),
     ...(fps === undefined ? {} : { fps }),
     ...(codec === undefined ? {} : { codec }),
     ...(hdr === undefined ? {} : { hdr }),

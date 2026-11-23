@@ -4,6 +4,7 @@ import type {
   AndroidDecoderMode,
   BufferPreset,
   DefaultResizeModePref,
+  DeinterlaceMode,
   LiveChannelSwitchModePref,
   OsdTimeDisplayMode,
   SeekStepSecPref,
@@ -93,6 +94,14 @@ export interface PlayerScreenProps {
   onPersistAudioDevice?: (deviceName: string) => void;
   androidDecoderMode?: AndroidDecoderMode;
   onSelectAndroidDecoderMode?: (mode: AndroidDecoderMode) => void;
+  deinterlaceMode?: DeinterlaceMode;
+  onPersistDeinterlaceMode?: (mode: DeinterlaceMode) => void;
+  pitchLock?: boolean;
+  onPersistPitchLock?: (locked: boolean) => void;
+  audioNormalization?: boolean;
+  onPersistAudioNormalization?: (enabled: boolean) => void;
+  windowAspectRatioLock?: boolean;
+  onWindowAspectRatioLockChange?: (enabled: boolean) => void;
   liveChannelSwitchMode?: LiveChannelSwitchModePref;
   onTargetChange?: (next: PlayTarget) => void;
   onExit: () => void;

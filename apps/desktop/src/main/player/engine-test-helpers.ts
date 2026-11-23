@@ -39,10 +39,13 @@ export const OBSERVED = [
   'sid',
   'audio-device',
   'audio-device-list',
+  'audio-spdif',
   'volume',
   'mute',
   'chapter-list',
   'frame-drop-count',
+  'playlist-pos',
+  'playlist-count',
 ];
 
 export const VOD: FakeMpvScript = [

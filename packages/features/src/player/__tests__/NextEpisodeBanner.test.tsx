@@ -392,4 +392,80 @@ describe('NextEpisodeBanner Cinema Quietude v2 countdown (#392)', () => {
       jest.restoreAllMocks();
     }
   });
+
+  it('suppresses auto-countdown while autoAdvanceDisabled (gapless armed) while keeping manual Play now active (#205)', async () => {
+    const i18n = createAppI18n('en');
+    const manual = createManualTimers();
+    const onPlayNext = jest.fn();
+    const service = createFakeService();
+
+    const view = await render(
+      <ThemeProvider>
+        <NextEpisodeBanner
+          nextEpisode={EP_2}
+          statusKind="playing"
+          dismissed={false}
+          service={service}
+          clock={{ now: () => 1_000 }}
+          isTv={false}
+          i18n={i18n}
+          autoPlayNextEpisode
+          autoAdvanceDisabled
+          countdownSeconds={3}
+          timers={manual.timers}
+          onPlayNext={onPlayNext}
+          onDismiss={jest.fn()}
+        />
+      </ThemeProvider>,
+    );
+
+    expect(screen.getByTestId('player-next-episode-banner')).toHaveTextContent(/Up next/);
+    expect(screen.getByTestId('player-next-episode')).toBeTruthy();
+    expect(screen.queryByTestId('player-next-episode-countdown')).toBeNull();
+    expect(screen.queryByTestId('player-next-episode-progress')).toBeNull();
+
+    // Must NOT auto-fire while gapless append-play is armed
+    await act(async () => {
+      manual.advance(10_000);
+    });
+    expect(onPlayNext).not.toHaveBeenCalled();
+
+    // Manual "Play now" CTA still triggers immediate skip
+    await fireEvent.press(screen.getByTestId('player-next-episode'));
+    expect(onPlayNext).toHaveBeenCalledTimes(1);
+    expect(onPlayNext).toHaveBeenCalledWith(EP_2.itemKey);
+
+    // When disarmed on a new episode, auto-countdown resumes normally
+    onPlayNext.mockClear();
+    await view.rerender(
+      <ThemeProvider>
+        <NextEpisodeBanner
+          nextEpisode={EP_3}
+          statusKind="playing"
+          dismissed={false}
+          service={service}
+          clock={{ now: () => 1_000 }}
+          isTv={false}
+          i18n={i18n}
+          autoPlayNextEpisode
+          autoAdvanceDisabled={false}
+          countdownSeconds={2}
+          timers={manual.timers}
+          onPlayNext={onPlayNext}
+          onDismiss={jest.fn()}
+        />
+      </ThemeProvider>,
+    );
+
+    expect(screen.getByTestId('player-next-episode-countdown')).toHaveTextContent(
+      'Next episode in 2s',
+    );
+    await act(async () => {
+      manual.advance(2_000);
+    });
+    expect(onPlayNext).toHaveBeenCalledTimes(1);
+    expect(onPlayNext).toHaveBeenCalledWith(EP_3.itemKey);
+
+    await view.unmount();
+  });
 });

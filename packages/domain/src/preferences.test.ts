@@ -73,6 +73,10 @@ describe('preferences codec', () => {
       tvClockMode: 'always',
       overscanX: 0.05,
       overscanY: 0.05,
+      deinterlaceMode: 'off',
+      pitchLock: true,
+      audioNormalization: false,
+      windowAspectRatioLock: false,
     });
   });
 

@@ -38,6 +38,8 @@ export interface NextEpisodeBannerProps {
   readonly tvFocused?: boolean;
   readonly i18n: AppI18n;
   readonly autoPlayNextEpisode?: boolean;
+  /** Suppresses the automatic countdown timer (e.g. while gapless `append-play` is armed, `#205`). */
+  readonly autoAdvanceDisabled?: boolean;
   readonly countdownSeconds?: number;
   readonly reduceMotion?: boolean;
   readonly timers?: PlaybackTimers;
@@ -66,6 +68,7 @@ function NextEpisodeBannerBody({
   tvFocused = false,
   i18n,
   autoPlayNextEpisode = true,
+  autoAdvanceDisabled = false,
   countdownSeconds = DEFAULT_COUNTDOWN_SECONDS,
   reduceMotion = false,
   timers = DEFAULT_BANNER_TIMERS,
@@ -132,9 +135,10 @@ function NextEpisodeBannerBody({
 
   const resetKey = `${nextEpisode.itemKey}:${totalSeconds}:${visible ? '1' : '0'}`;
   const lastResetKeyRef = useRef(resetKey);
+  const autoAdvanceActive = autoPlayNextEpisode && !autoAdvanceDisabled;
   const countdownRunning =
     visible &&
-    autoPlayNextEpisode &&
+    autoAdvanceActive &&
     !tvFocused &&
     !hovered &&
     (statusKind === 'playing' || statusKind === 'ended');
@@ -214,7 +218,7 @@ function NextEpisodeBannerBody({
           <Text style={[theme.typography.micro, { color: theme.colors.textMuted }]}>
             {i18n.t('player.upNext')}
           </Text>
-          {autoPlayNextEpisode ? (
+          {autoAdvanceActive ? (
             <Text
               testID="player-next-episode-countdown"
               style={[
@@ -260,7 +264,7 @@ function NextEpisodeBannerBody({
           />
         </View>
       </View>
-      {autoPlayNextEpisode ? (
+      {autoAdvanceActive ? (
         <View
           testID="player-next-episode-progress"
           style={[styles.progressTrack, { backgroundColor: theme.colors.surfaceBorder }]}

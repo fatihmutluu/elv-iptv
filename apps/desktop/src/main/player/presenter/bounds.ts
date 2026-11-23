@@ -142,3 +142,89 @@ export function countBuckets(bgra: Uint8Array): number {
   }
   return seen.size;
 }
+
+/**
+ * Snaps a windowed content rectangle (DIPs) to `aspectRatio` on the `1 / scaleFactor` physical
+ * pixel grid (`1.0`, `1.25`, `1.5`, `2.0` DPR) so `Math.round(dim * scaleFactor)` has zero 1 px
+ * letterboxing/cropping mismatch while respecting `minContentSize` (`#332`).
+ */
+export function lockContentRectToAspect(
+  contentRect: Rect,
+  aspectRatio: number,
+  scaleFactor: number,
+  minContentSize: { readonly width: number; readonly height: number },
+  preferredAxis: 'width' | 'height' = 'width',
+): Rect {
+  const x = Math.round(contentRect.x) + 0;
+  const y = Math.round(contentRect.y) + 0;
+  const minW = Math.max(1, Math.ceil(minContentSize.width));
+  const minH = Math.max(1, Math.ceil(minContentSize.height));
+  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) {
+    return {
+      x,
+      y,
+      width: Math.max(minW, Math.round(contentRect.width)),
+      height: Math.max(minH, Math.round(contentRect.height)),
+    };
+  }
+  const scale = Number.isFinite(scaleFactor) && scaleFactor > 0 ? scaleFactor : 1;
+  const minPhysW = Math.ceil(minW * scale);
+  const minPhysH = Math.ceil(minH * scale);
+
+  let baseW = Math.max(minW, Math.round(contentRect.width));
+  let baseH = Math.max(minH, Math.round(contentRect.height));
+  if (preferredAxis === 'height') {
+    baseW = Math.max(minW, Math.round(baseH * aspectRatio));
+    if (Math.round(baseW / aspectRatio) < minH || baseW === minW) {
+      baseH = Math.max(minH, Math.round(baseW / aspectRatio));
+    }
+  } else {
+    baseH = Math.max(minH, Math.round(baseW / aspectRatio));
+    if (baseH === minH && Math.round(minH * aspectRatio) > baseW) {
+      baseW = Math.max(minW, Math.round(minH * aspectRatio));
+    }
+  }
+
+  let best: { width: number; height: number; err: number } | undefined;
+  const MAX_SEARCH_DELTA = 32;
+  for (let step = 0; step <= MAX_SEARCH_DELTA; step += 1) {
+    const deltas = step === 0 ? [0] : [step, -step];
+    for (const delta of deltas) {
+      let candW: number;
+      let candH: number;
+      if (preferredAxis === 'height') {
+        candH = baseH + delta;
+        if (candH < minH) continue;
+        const physH = Math.round(candH * scale);
+        if (physH < minPhysH) continue;
+        const targetPhysW = Math.max(minPhysW, Math.round(physH * aspectRatio));
+        candW = Math.max(minW, Math.round(targetPhysW / scale));
+      } else {
+        candW = baseW + delta;
+        if (candW < minW) continue;
+        const physW = Math.round(candW * scale);
+        if (physW < minPhysW) continue;
+        const targetPhysH = Math.max(minPhysH, Math.round(physW / aspectRatio));
+        candH = Math.max(minH, Math.round(targetPhysH / scale));
+      }
+      if (candW < minW || candH < minH) continue;
+      const physW = Math.round(candW * scale);
+      const physH = Math.round(candH * scale);
+      const errH = Math.abs(Math.round(physW / aspectRatio) - physH);
+      const errW = Math.abs(Math.round(physH * aspectRatio) - physW);
+      const err = errH + errW;
+      if (err === 0) {
+        return { x, y, width: candW, height: candH };
+      }
+      if (!best || err < best.err) {
+        best = { width: candW, height: candH, err };
+      }
+    }
+  }
+  return {
+    x,
+    y,
+    width: best?.width ?? baseW,
+    height: best?.height ?? baseH,
+  };
+}

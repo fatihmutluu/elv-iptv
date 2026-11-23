@@ -85,6 +85,12 @@ export type PlaybackFocusId =
   | 'toggle-prefer-default-audio'
   | 'toggle-filter-sdh'
   | 'toggle-prefer-hevc-dv'
+  | 'deinterlace-off'
+  | 'deinterlace-auto'
+  | 'deinterlace-bwdif'
+  | 'toggle-pitch-lock'
+  | 'toggle-audio-normalization'
+  | 'toggle-window-aspect-ratio-lock'
   | 'osd-time-total'
   | 'osd-time-remaining'
   | 'osd-time-endsAt'
@@ -194,6 +200,9 @@ const PLAYBACK_ROWS_TAIL: readonly (readonly PlaybackFocusId[])[] = [
   ['toggle-prefer-default-audio'],
   ['toggle-filter-sdh'],
   ['toggle-prefer-hevc-dv'],
+  ['deinterlace-off', 'deinterlace-auto', 'deinterlace-bwdif'],
+  ['toggle-pitch-lock'],
+  ['toggle-audio-normalization'],
   ['osd-time-total', 'osd-time-remaining', 'osd-time-endsAt'],
   ['oled-0', 'oled-5', 'oled-10', 'oled-15', 'oled-30'],
   [

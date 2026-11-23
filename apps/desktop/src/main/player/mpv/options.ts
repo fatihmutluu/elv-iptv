@@ -1,6 +1,62 @@
 import type { MediaKind } from '@elv/playback';
-import type { HwdecProfile } from '../../../shared/player-ipc.ts';
+import type { DeinterlaceMode, HwdecProfile } from '../../../shared/player-ipc.ts';
 import type { MpvCommand } from './codec.ts';
+
+/** Labeled mpv video filter for broadcast-grade `bwdif` deinterlacing (`#243`). */
+export const DEINTERLACE_BWDIF_FILTER =
+  '@elv_deint:lavfi=[bwdif=mode=send_frame:parity=auto:deint=interlaced]';
+
+/** Labeled mpv audio filter for EBU R128 loudness normalization (`#243`). */
+export const LOUDNORM_FILTER = '@elv_loudnorm:lavfi=[loudnorm=I=-16:TP=-1.5:LRA=11]';
+
+/** Builds the mpv commands for a {@link DeinterlaceMode} without clobbering unrelated `vf` entries (`#243`). */
+export function deinterlaceCommands(mode: DeinterlaceMode): readonly MpvCommand[] {
+  switch (mode) {
+    case 'off':
+      return [
+        ['set_property', 'deinterlace', 'no'],
+        ['vf', 'remove', '@elv_deint'],
+      ];
+    case 'auto':
+      return [
+        ['set_property', 'deinterlace', 'auto'],
+        ['vf', 'remove', '@elv_deint'],
+      ];
+    case 'bwdif':
+      return [
+        ['set_property', 'deinterlace', 'no'],
+        ['vf', 'add', DEINTERLACE_BWDIF_FILTER],
+      ];
+  }
+}
+
+/** Builds the mpv `audio-pitch-correction` (`scaletempo2`) property command (`#243`). */
+export function pitchLockCommand(locked: boolean): MpvCommand {
+  return ['set_property', 'audio-pitch-correction', locked ? 'yes' : 'no'];
+}
+
+/** Builds the labeled `@elv_loudnorm` `af` add/remove command (`#243`). */
+export function audioNormalizationCommand(enabled: boolean): MpvCommand {
+  return enabled ? ['af', 'add', LOUDNORM_FILTER] : ['af', 'remove', '@elv_loudnorm'];
+}
+
+/** Returns whether an `audio-spdif` property value indicates active S/PDIF/HDMI bitstream passthrough. */
+export function isSpdifPassthroughValue(value: unknown): boolean {
+  if (typeof value === 'string') {
+    const trimmed = value.trim().toLowerCase();
+    return trimmed.length > 0 && trimmed !== 'no' && trimmed !== 'none';
+  }
+  if (Array.isArray(value)) {
+    return value.some(
+      (v) =>
+        typeof v === 'string' &&
+        v.trim().length > 0 &&
+        v.trim().toLowerCase() !== 'no' &&
+        v.trim().toLowerCase() !== 'none',
+    );
+  }
+  return false;
+}
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional HTTP header control-char stripper
 const HEADER_CONTROL_CHARS = /[\u0000-\u001f\u007f]/g;
@@ -26,6 +82,8 @@ export const LAUNCH_OPTIONS: readonly string[] = [
   '--cache-on-disk=no',
   '--demuxer-donate-buffer=no',
   '--autoload-files=no',
+  '--prefetch-playlist=no',
+  '--audio-pitch-correction=yes',
   '--tls-verify=yes',
   '--stream-lavf-o=icy=0,reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5',
   '--reset-on-next-file=aid,sid,vid,sub-visibility,audio-delay,sub-delay,video-aspect-override,deinterlace,speed,panscan,keepaspect,video-unscaled,gamma,brightness,contrast,saturation',
@@ -110,15 +168,18 @@ export function headerFields(headers: Readonly<Record<string, string>>): string[
   return Array.from(deduplicated.values(), ({ name, value }) => `${name}: ${value}`);
 }
 
-/** Builds the `loadfile` command that replaces the current media; all option values are strings. */
-export function loadfileCommand(r: {
-  url: string;
-  headers: Readonly<Record<string, string>>;
-  kind: MediaKind;
-  startMs?: number;
-  preferHevcOverDolbyVision?: boolean;
-  filterSdhSubtitles?: boolean;
-}): MpvCommand {
+/** Builds the `loadfile` command that replaces or appends media; all option values are strings (`#205`). */
+export function loadfileCommand(
+  r: {
+    url: string;
+    headers: Readonly<Record<string, string>>;
+    kind: MediaKind;
+    startMs?: number;
+    preferHevcOverDolbyVision?: boolean;
+    filterSdhSubtitles?: boolean;
+  },
+  mode: 'replace' | 'append-play' = 'replace',
+): MpvCommand {
   const options: Record<string, string> = {
     ...headerOptions(r.headers),
     ...(r.kind === 'live'
@@ -134,5 +195,5 @@ export function loadfileCommand(r: {
   if (r.filterSdhSubtitles !== undefined) {
     options['sub-filter-sdh'] = r.filterSdhSubtitles ? 'yes' : 'no';
   }
-  return ['loadfile', r.url, 'replace', -1, options];
+  return ['loadfile', r.url, mode, -1, options];
 }

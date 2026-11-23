@@ -4,6 +4,7 @@ import type { MpvCommand } from './mpv/codec.ts';
 export type QueuedOp<TSlot> =
   | { type: 'load'; generation: number; slot: TSlot }
   | { type: 'command'; generation: number; slot: TSlot | undefined; command: MpvCommand }
+  | { type: 'task'; generation: number; slot: TSlot | undefined; task: () => Promise<void> }
   | { type: 'stop'; generation: number }
   | { type: 'recreate'; generation: number };
 
@@ -12,6 +13,7 @@ export interface EngineQueue<TSlot> {
   readonly generation: number;
   enqueueLoad(slot: TSlot): void;
   enqueueCommand(command: MpvCommand, slot?: TSlot): void;
+  enqueueTask(task: () => Promise<void>, slot?: TSlot): void;
   enqueueStop(): void;
   enqueueRecreate(): void;
   clear(): void;
@@ -29,7 +31,7 @@ export function createEngineQueue<TSlot>(opts: {
   const purgeTransientOps = (): void => {
     for (let i = queue.length - 1; i >= 0; i -= 1) {
       const kind = queue[i]?.type;
-      if (kind === 'load' || kind === 'command') {
+      if (kind === 'load' || kind === 'command' || kind === 'task') {
         queue.splice(i, 1);
       }
     }
@@ -63,6 +65,10 @@ export function createEngineQueue<TSlot>(opts: {
     },
     enqueueCommand(command, slot) {
       queue.push({ type: 'command', generation, slot, command });
+      void pump();
+    },
+    enqueueTask(task, slot) {
+      queue.push({ type: 'task', generation, slot, task });
       void pump();
     },
     enqueueStop() {

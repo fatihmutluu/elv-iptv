@@ -46,6 +46,8 @@ export interface WatchProgressSyncParams {
 export interface WatchProgressSyncHandle {
   /** Flushes active VOD progress immediately, optionally overriding the saved position (e.g. after seek). */
   readonly flushProgress: (overridePosMs?: number) => void;
+  /** Marks the current VOD item as completed (`watched: true`) immediately (e.g. gapless auto-advance, `#205`). */
+  readonly flushEndedProgress: () => void;
 }
 
 function resolveProgressKind(entry: PlayableEntry): UserItemKind {
@@ -208,6 +210,23 @@ export function useWatchProgressSync({
     [flush],
   );
 
+  const flushEndedProgress = useCallback((): void => {
+    const entry = targetRef.current;
+    if (entry.kind !== 'vod') return;
+    if (catalogRef.current.saveProgress === undefined) return;
+    const svc = serviceRef.current;
+    const anchor = svc?.getState().anchor;
+    const durationMs =
+      anchor?.durationMs !== undefined && Number.isFinite(anchor.durationMs)
+        ? Math.max(0, Math.round(anchor.durationMs))
+        : 0;
+    const lastPos =
+      anchor !== undefined
+        ? Math.max(0, Math.round(positionAt(anchor, clockRef.current.now())))
+        : 0;
+    persistSnapshot(entry, durationMs > 0 ? durationMs : lastPos, durationMs, 'ended');
+  }, [catalogRef, clockRef, persistSnapshot, serviceRef]);
+
   const prevStatusRef = useRef<PlaybackStatus['kind']>(status.kind);
   const prevItemKeyRef = useRef<string>(activeTarget.itemKey);
 
@@ -267,5 +286,5 @@ export function useWatchProgressSync({
     };
   }, [flush]);
 
-  return { flushProgress };
+  return { flushProgress, flushEndedProgress };
 }

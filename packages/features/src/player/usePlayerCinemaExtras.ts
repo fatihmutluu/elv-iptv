@@ -1,5 +1,5 @@
 import type { CatalogService } from '@elv/data';
-import type { OsdTimeDisplayMode, SleepTimerAction } from '@elv/domain';
+import type { DeinterlaceMode, OsdTimeDisplayMode, SleepTimerAction } from '@elv/domain';
 import {
   type ChapterInfo,
   type MediaTracks,
@@ -13,6 +13,7 @@ import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 
 import type { PlayTarget } from '../ports/play-target';
 import type { OpenVideoEngine, VideoResizeMode } from '../ports/video-host';
 import { resolveChapterJumpTarget } from './chapters';
+import { mapRecentChannelRows } from './PlayerScreenParts';
 import { resolveTrackPreferenceScopeKey } from './track-preferences';
 import { useSleepTimer } from './useSleepTimer';
 import { useStillWatching } from './useStillWatching';
@@ -52,7 +53,12 @@ export function usePlayerCinemaExtras(params: {
   readonly tracks: MediaTracks;
   readonly chapters: readonly ChapterInfo[] | undefined;
   readonly openedEngine: OpenVideoEngine | undefined;
-  readonly catalogRef: MutableRefObject<Partial<Pick<CatalogService, 'saveTrackPreference'>>>;
+  readonly catalogRef: MutableRefObject<
+    Partial<Pick<CatalogService, 'saveTrackPreference' | 'nowNext' | 'listRecentChannels'>> & {
+      readonly epgNowNext?: CatalogService['nowNext'];
+    }
+  >;
+  readonly wallClockRef?: MutableRefObject<() => number> | undefined;
   readonly serviceRef: MutableRefObject<PlaybackService | null>;
   readonly clockRef: MutableRefObject<PlaybackClock>;
   readonly timersRef: MutableRefObject<PlaybackTimers>;
@@ -66,6 +72,16 @@ export function usePlayerCinemaExtras(params: {
   readonly onPersistSleepTimerAction?: ((action: SleepTimerAction) => void) | undefined;
   readonly stillWatchingTimeoutMin: number;
   readonly onPlaybackActiveChange?: ((active: boolean) => void) | undefined;
+  readonly deinterlaceMode?: DeinterlaceMode | undefined;
+  readonly onPersistDeinterlaceMode?: ((mode: DeinterlaceMode) => void) | undefined;
+  readonly pitchLock?: boolean | undefined;
+  readonly onPersistPitchLock?: ((locked: boolean) => void) | undefined;
+  readonly audioNormalization?: boolean | undefined;
+  readonly onPersistAudioNormalization?: ((enabled: boolean) => void) | undefined;
+  readonly initialVolume?: number | undefined;
+  readonly volume?: number | undefined;
+  readonly resizeMode?: VideoResizeMode | undefined;
+  readonly preferredAudioDevice?: string | undefined;
 }) {
   const {
     activeTarget,
@@ -74,6 +90,7 @@ export function usePlayerCinemaExtras(params: {
     chapters,
     openedEngine,
     catalogRef,
+    wallClockRef,
     serviceRef,
     clockRef,
     timersRef,
@@ -87,6 +104,16 @@ export function usePlayerCinemaExtras(params: {
     onPersistSleepTimerAction,
     stillWatchingTimeoutMin,
     onPlaybackActiveChange,
+    deinterlaceMode,
+    onPersistDeinterlaceMode,
+    pitchLock,
+    onPersistPitchLock,
+    audioNormalization,
+    onPersistAudioNormalization,
+    initialVolume,
+    volume,
+    resizeMode,
+    preferredAudioDevice,
   } = params;
 
   const activeTargetRef = useRef(activeTarget);
@@ -107,6 +134,54 @@ export function usePlayerCinemaExtras(params: {
     setTimeDisplayMode(initialTimeMode);
   }, [initialTimeMode]);
 
+  const [activeDeinterlaceMode, setActiveDeinterlaceMode] = useState<DeinterlaceMode>(
+    deinterlaceMode ?? 'off',
+  );
+  const [activePitchLock, setActivePitchLock] = useState<boolean>(pitchLock ?? true);
+  const [activeAudioNorm, setActiveAudioNorm] = useState<boolean>(audioNormalization ?? false);
+  useEffect(() => {
+    if (deinterlaceMode !== undefined) setActiveDeinterlaceMode(deinterlaceMode);
+  }, [deinterlaceMode]);
+  useEffect(() => {
+    if (pitchLock !== undefined) setActivePitchLock(pitchLock);
+  }, [pitchLock]);
+  useEffect(() => {
+    if (audioNormalization !== undefined) setActiveAudioNorm(audioNormalization);
+  }, [audioNormalization]);
+
+  const cycleDeinterlaceMode =
+    openedEngine?.setDeinterlaceMode !== undefined || onPersistDeinterlaceMode !== undefined
+      ? () => {
+          const next: DeinterlaceMode =
+            activeDeinterlaceMode === 'off'
+              ? 'auto'
+              : activeDeinterlaceMode === 'auto'
+                ? 'bwdif'
+                : 'off';
+          setActiveDeinterlaceMode(next);
+          openedEngineRef.current?.setDeinterlaceMode?.(next);
+          onPersistDeinterlaceMode?.(next);
+        }
+      : undefined;
+  const togglePitchLock =
+    openedEngine?.setPitchLock !== undefined || onPersistPitchLock !== undefined
+      ? () => {
+          const next = !activePitchLock;
+          setActivePitchLock(next);
+          openedEngineRef.current?.setPitchLock?.(next);
+          onPersistPitchLock?.(next);
+        }
+      : undefined;
+  const toggleAudioNormalization =
+    openedEngine?.setAudioNormalization !== undefined || onPersistAudioNormalization !== undefined
+      ? () => {
+          const next = !activeAudioNorm;
+          setActiveAudioNorm(next);
+          openedEngineRef.current?.setAudioNormalization?.(next);
+          onPersistAudioNormalization?.(next);
+        }
+      : undefined;
+
   const handleCycleTimeDisplayMode = useCallback((): void => {
     setTimeDisplayMode((prev) => {
       const next = cycleOsdTimeDisplayMode(prev);
@@ -119,6 +194,39 @@ export function usePlayerCinemaExtras(params: {
   useEffect(() => {
     openedEngine?.setFilterSdh?.(filterSdhSubtitles);
   }, [filterSdhSubtitles, openedEngine]);
+
+  const latestVolumeRef = useRef(volume);
+  latestVolumeRef.current = volume;
+  const latestResizeModeRef = useRef<VideoResizeMode>(resizeMode ?? 'fit');
+  latestResizeModeRef.current = resizeMode ?? 'fit';
+  const initialVolumeRef = useRef(initialVolume);
+  initialVolumeRef.current = initialVolume;
+  const preferredAudioDeviceRef = useRef(preferredAudioDevice);
+  preferredAudioDeviceRef.current = preferredAudioDevice;
+
+  useEffect(() => {
+    if (openedEngine === undefined) return;
+    const effective =
+      initialVolumeRef.current ?? openedEngine.initialVolume ?? latestVolumeRef.current ?? 100;
+    openedEngine.setVolume?.(Math.max(0, Math.min(100, Math.round(effective))));
+    openedEngine.setResizeMode?.(latestResizeModeRef.current);
+    const savedDevice = preferredAudioDeviceRef.current?.trim();
+    if (savedDevice && savedDevice !== 'auto') {
+      openedEngine.setAudioDevice?.(savedDevice);
+    }
+  }, [openedEngine]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-send resizeMode when activeTarget.itemKey changes so mpv --reset-on-next-file never reverts to fit
+  useEffect(() => {
+    if (openedEngine === undefined || resizeMode === undefined) return;
+    if (status.kind === 'playing' || status.kind === 'paused') {
+      openedEngine.setResizeMode?.(resizeMode);
+    }
+  }, [openedEngine, activeTarget.itemKey, status.kind, resizeMode]);
+
+  const [stillWatchingAction, setStillWatchingAction] = useState<'continue' | 'stop'>('continue');
+  const stillWatchingActionRef = useRef(stillWatchingAction);
+  stillWatchingActionRef.current = stillWatchingAction;
 
   // Notify AppShell OLED screensaver whether playback is actively running (#160)
   const isPlaybackActive =
@@ -164,6 +272,23 @@ export function usePlayerCinemaExtras(params: {
     timersRef,
     onStop: stopAndExit,
   });
+
+  useEffect(() => {
+    if (stillWatching.promptVisible) setStillWatchingAction('continue');
+  }, [stillWatching.promptVisible]);
+
+  const handleStillWatchingKey = useCallback(
+    (key: string): void => {
+      if (key === 'left' || key === 'up') setStillWatchingAction('continue');
+      else if (key === 'right' || key === 'down') setStillWatchingAction('stop');
+      else if (key === 'back') stillWatching.keepWatching();
+      else if (key === 'select') {
+        if (stillWatchingActionRef.current === 'stop') stillWatching.stopNow();
+        else stillWatching.keepWatching();
+      }
+    },
+    [stillWatching],
+  );
 
   const handleAudioTrackSelected = useCallback(
     (id: string): void => {
@@ -262,18 +387,43 @@ export function usePlayerCinemaExtras(params: {
   const handlePrevChapter = useCallback((): void => stepChapter('prev'), [stepChapter]);
   const handleNextChapter = useCallback((): void => stepChapter('next'), [stepChapter]);
 
+  const fetchChannelNowNext = useCallback(
+    async (itemKey: string) => {
+      const query = catalogRef.current.nowNext ?? catalogRef.current.epgNowNext;
+      if (query === undefined) return null;
+      const now = wallClockRef?.current() ?? Date.now();
+      const rows = await query([itemKey], now);
+      return rows.find((r) => r.channelKey === itemKey) ?? rows[0] ?? null;
+    },
+    [catalogRef, wallClockRef],
+  );
+  const fetchRecentChannels = useCallback(
+    async () => mapRecentChannelRows((await catalogRef.current.listRecentChannels?.(20)) ?? []),
+    [catalogRef],
+  );
+
   return {
     timeDisplayMode,
     handleCycleTimeDisplayMode,
+    activeDeinterlaceMode,
+    cycleDeinterlaceMode,
+    activePitchLock,
+    togglePitchLock,
+    activeAudioNorm,
+    toggleAudioNormalization,
     sleepTimer,
     selectSleepTimer,
     toggleSleepTimerAction,
     stillWatching,
+    stillWatchingAction,
+    handleStillWatchingKey,
     handleAudioTrackSelected,
     handleSubtitleTrackSelected,
     handleResizeModeChange,
     handleSelectChapter,
     handlePrevChapter,
     handleNextChapter,
+    fetchChannelNowNext,
+    fetchRecentChannels,
   };
 }

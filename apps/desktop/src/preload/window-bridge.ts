@@ -1,4 +1,9 @@
-import { isAlwaysOnTopFlag, WINDOW_CHANNELS, type WindowBridge } from '../shared/window-ipc.ts';
+import {
+  isAlwaysOnTopFlag,
+  isAspectRatioLockFlag,
+  WINDOW_CHANNELS,
+  type WindowBridge,
+} from '../shared/window-ipc.ts';
 
 /** Subset of Electron's `ipcRenderer` used by {@link createWindowBridge}. */
 export interface WindowIpcRendererLike {
@@ -7,7 +12,7 @@ export interface WindowIpcRendererLike {
   removeListener(channel: string, listener: (event: unknown, ...args: unknown[]) => void): unknown;
 }
 
-/** Builds the frozen `window.elv.window` bridge inside the sandboxed Electron preload (`#408`). */
+/** Builds the frozen `window.elv.window` bridge inside the sandboxed Electron preload (`#408`, `#332`). */
 export function createWindowBridge(ipc: WindowIpcRendererLike): WindowBridge {
   const bridge: WindowBridge = {
     async setAlwaysOnTop(enabled: boolean): Promise<boolean> {
@@ -32,6 +37,13 @@ export function createWindowBridge(ipc: WindowIpcRendererLike): WindowBridge {
       return () => {
         ipc.removeListener(WINDOW_CHANNELS.alwaysOnTopChanged, wrapped);
       };
+    },
+    async setAspectRatioLock(enabled: boolean): Promise<boolean> {
+      const reply = await ipc.invoke(WINDOW_CHANNELS.setAspectRatioLock, enabled);
+      if (!isAspectRatioLockFlag(reply)) {
+        throw new Error('window:set-aspect-ratio-lock returned an unexpected reply');
+      }
+      return reply;
     },
   };
   return Object.freeze(bridge);

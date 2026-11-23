@@ -6,7 +6,7 @@ over the JSON IPC client (`mpv/`) and a `VideoPresenter` (`presenter/`). Zero `e
 
 ## Module layout
 - `engine.ts` & `engine-controls.ts`: orchestrator composing `EngineQueue`, `OpeningGate`, `LiveSession`,
-  `TrackTracker`, speed coalescing, 175 ms play/pause audio ramp (`mpv/audio-ramp.ts`), `setHwdec` / property setters, and `VideoPresenter`.
+  `TrackTracker`, speed coalescing, 175 ms play/pause audio ramp (`mpv/audio-ramp.ts`), `setHwdec` / property setters, labeled `vf`/`af` filters (`setDeinterlaceMode` `'off'|'auto'|'bwdif'` via `@elv_deint`, `setPitchLock` via `audio-pitch-correction`, `setAudioNormalization` via `@elv_loudnorm` with S/PDIF passthrough suppression, `#243`), gapless VOD `append-play` queue (`queueNext`/`clearQueue`/`queueAdvanced` with `--prefetch-playlist=no` and custom-header match guard, `#205`), and `VideoPresenter`.
 - `engine-queue.ts`: generation-tagged serialized async op queue (`load`, `command`, `stop`, `recreate`) that purges
   superseded `load`/`command` ops on `load`, `stop` or `recreate`.
 - `power-blocker.ts`: reference-counted `prevent-display-sleep` guard wired in `ipc.ts`/`main.ts` to `'playing'`,

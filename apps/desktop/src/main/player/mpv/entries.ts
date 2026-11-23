@@ -11,6 +11,8 @@ interface CurrentEntry {
 export interface EntryTable {
   /** Records the entry a `loadfile` created, with its command's token. */
   bind(entryId: number, token: AttemptToken, kind: MediaKind): void;
+  /** Removes a bound entry (e.g. when a queued `append-play` entry is cleared before starting, `#205`). */
+  unbind(entryId: number): void;
   /** `start-file`: the entry becomes current. Unbound entries are ignored. */
   started(entryId: number): void;
   /** `end-file`: the entry is forgotten and stops being current. */
@@ -28,6 +30,10 @@ export function createEntryTable(): EntryTable {
   let currentId: number | undefined;
   return {
     bind: (entryId, token, kind) => void entries.set(entryId, { token, kind }),
+    unbind(entryId) {
+      entries.delete(entryId);
+      if (currentId === entryId) currentId = undefined;
+    },
     started(entryId) {
       if (entries.has(entryId)) currentId = entryId;
     },

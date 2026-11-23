@@ -484,6 +484,19 @@ export function AppShell(props: AppShellProps): ReactElement {
                   onPersistAudioDevice={(preferredAudioDevice) => {
                     void preferences.updatePreferences({ preferredAudioDevice });
                   }}
+                  deinterlaceMode={preferences.preferences.deinterlaceMode}
+                  onPersistDeinterlaceMode={(deinterlaceMode) => {
+                    void preferences.updatePreferences({ deinterlaceMode });
+                  }}
+                  pitchLock={preferences.preferences.pitchLock}
+                  onPersistPitchLock={(pitchLock) => {
+                    void preferences.updatePreferences({ pitchLock });
+                  }}
+                  audioNormalization={preferences.preferences.audioNormalization}
+                  onPersistAudioNormalization={(audioNormalization) => {
+                    void preferences.updatePreferences({ audioNormalization });
+                  }}
+                  windowAspectRatioLock={preferences.preferences.windowAspectRatioLock}
                   {...(Platform.OS === 'android'
                     ? {
                         androidDecoderMode: preferences.preferences.androidDecoderMode,

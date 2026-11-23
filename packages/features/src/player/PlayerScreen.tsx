@@ -14,16 +14,15 @@ import {
   DEFAULT_PLAYER_CLOCK,
   DEFAULT_PLAYER_TIMERS,
   formatStatusLine,
-  mapRecentChannelRows,
   playerStyles,
   useLatestRef,
 } from './PlayerScreenParts';
 import { type PlayerScreenProps, PlayerScreenStage } from './PlayerScreenStage';
 import { PlayerSettingsSheet } from './PlayerSettingsSheet';
 import { MIN_BRIGHTNESS } from './PlayerTouchGestures';
-import { clampVolume } from './player-overlay-model';
 import { TrackPickerModal } from './TrackPickerModal';
 import { buildTouchHoverProps } from './touch-hover-guard';
+import { useGaplessEpisodeQueue } from './useGaplessEpisodeQueue';
 import { useLiveQualityVariants } from './useLiveQualityVariants';
 import { useNextEpisodeResolver } from './useNextEpisodeResolver';
 import { usePlayerCinemaExtras } from './usePlayerCinemaExtras';
@@ -72,6 +71,16 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   const { stillWatchingTimeoutMin = 0, onPlaybackActiveChange, onFineScrubHaptic } = props;
   const { preferredAudioDevice, onPersistAudioDevice, androidDecoderMode } = props;
   const { onSelectAndroidDecoderMode, liveChannelSwitchMode = 'instant' } = props;
+  const {
+    deinterlaceMode,
+    onPersistDeinterlaceMode,
+    pitchLock,
+    onPersistPitchLock,
+    audioNormalization,
+    onPersistAudioNormalization,
+    windowAspectRatioLock,
+    onWindowAspectRatioLockChange,
+  } = props;
   const formFactor = useFormFactor();
   const i18n = useI18n();
   const isTv = formFactor === 'tv';
@@ -79,6 +88,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
 
   const serviceRef = useRef<PlaybackService | null>(null);
   const flushProgressRef = useRef<(overridePosMs?: number) => void>(() => undefined);
+  const flushEndedProgressRef = useRef<() => void>(() => undefined);
   const cancelScrubRef = useRef<() => void>(() => undefined);
   const resolvedNextEpisodeRef = useRef<PlayableEntry | undefined>(undefined);
   const catalogRef = useRef(catalog);
@@ -111,6 +121,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     clockRef,
     timersRef,
     flushProgressRef,
+    flushEndedProgressRef,
     cancelScrubRef,
     onTargetChangeRef,
     bufferPresetRef,
@@ -127,6 +138,9 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   const hostKeyRef = useRef<(key: HostKey) => void>((key) => {
     if (key === 'back') onExitRef.current();
   });
+
+  const nextEpisode = useNextEpisodeResolver({ catalog, activeTarget });
+  resolvedNextEpisodeRef.current = nextEpisode;
 
   const {
     sessionState,
@@ -147,6 +161,11 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     activeTarget,
     isDesktop,
     subtitleFontFamily,
+    ...(deinterlaceMode !== undefined ? { deinterlaceMode } : {}),
+    ...(pitchLock !== undefined ? { pitchLock } : {}),
+    ...(audioNormalization !== undefined ? { audioNormalization } : {}),
+    ...(windowAspectRatioLock !== undefined ? { windowAspectRatioLock } : {}),
+    ...(onWindowAspectRatioLockChange !== undefined ? { onWindowAspectRatioLockChange } : {}),
     serviceRef,
     clockRef,
     timersRef,
@@ -155,7 +174,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     onServiceReady: handoff.onServiceReady,
   });
 
-  const { flushProgress } = useWatchProgressSync({
+  const { flushProgress, flushEndedProgress } = useWatchProgressSync({
     activeTarget,
     status,
     serviceRef,
@@ -164,6 +183,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     timersRef,
   });
   flushProgressRef.current = flushProgress;
+  flushEndedProgressRef.current = flushEndedProgress;
 
   const nowNext = usePlayerNowNext({
     catalog,
@@ -171,8 +191,6 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     enabled: activeTarget.kind === 'live' && !inPip,
     wallClock,
   });
-  const nextEpisode = useNextEpisodeResolver({ catalog, activeTarget });
-  resolvedNextEpisodeRef.current = nextEpisode;
   const quality = useLiveQualityVariants({
     catalog,
     activeTarget,
@@ -192,6 +210,17 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   }, [activeTarget.itemKey]);
 
   const openedEngine = sessionState.kind === 'ready' ? sessionState.opened : undefined;
+  const { isGaplessArmed } = useGaplessEpisodeQueue({
+    activeTarget,
+    nextEpisode,
+    autoPlayNextEpisode,
+    statusKind: status.kind,
+    openedEngine,
+    catalogRef,
+    preferHevcOverDolbyVision,
+    filterSdhSubtitles,
+    onQueueAdvanced: handoff.handleQueueAdvanced,
+  });
   const extras = usePlayerCinemaExtras({
     activeTarget,
     status,
@@ -199,6 +228,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     chapters,
     openedEngine,
     catalogRef,
+    wallClockRef,
     serviceRef,
     clockRef,
     timersRef,
@@ -212,6 +242,14 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     onPersistSleepTimerAction,
     stillWatchingTimeoutMin,
     onPlaybackActiveChange,
+    deinterlaceMode,
+    onPersistDeinterlaceMode,
+    pitchLock,
+    onPersistPitchLock,
+    audioNormalization,
+    onPersistAudioNormalization,
+    initialVolume,
+    preferredAudioDevice,
   });
 
   const hasTracks = tracks.audio.length > 0 || tracks.subtitles.length > 0;
@@ -245,12 +283,6 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     },
     [hostSetAudioDevice, onPersistAudioDevice],
   );
-
-  const [stillWatchingAction, setStillWatchingAction] = useState<'continue' | 'stop'>('continue');
-  const stillWatchingActionRef = useLatestRef(stillWatchingAction);
-  useEffect(() => {
-    if (extras.stillWatching.promptVisible) setStillWatchingAction('continue');
-  }, [extras.stillWatching.promptVisible]);
 
   const controls = usePlayerControls({
     formFactor,
@@ -303,6 +335,9 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     onChannelListSelect: () => channelDrawerNavRef.current?.select(),
     onSetOrientationLocked: hostSetOrientationLocked,
     onSetDeinterlace: hostSetDeinterlace,
+    onCycleDeinterlaceMode: extras.cycleDeinterlaceMode,
+    onTogglePitchLock: extras.togglePitchLock,
+    onToggleAudioNormalization: extras.toggleAudioNormalization,
     onResizeModeChange: extras.handleResizeModeChange,
     onAudioTrackSelected: extras.handleAudioTrackSelected,
     onSubtitleTrackSelected: extras.handleSubtitleTrackSelected,
@@ -319,15 +354,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     onConfirmPreviewChannel: handoff.confirmPreviewChannel,
     onCancelPreviewChannel: handoff.cancelPreviewChannel,
     stillWatchingVisible: !inPip && extras.stillWatching.promptVisible,
-    onStillWatchingKey: (key) => {
-      if (key === 'left' || key === 'up') setStillWatchingAction('continue');
-      else if (key === 'right' || key === 'down') setStillWatchingAction('stop');
-      else if (key === 'back') extras.stillWatching.keepWatching();
-      else if (key === 'select') {
-        if (stillWatchingActionRef.current === 'stop') extras.stillWatching.stopNow();
-        else extras.stillWatching.keepWatching();
-      }
-    },
+    onStillWatchingKey: extras.handleStillWatchingKey,
   });
   hostKeyRef.current = controls.handleHostKey;
   cancelScrubRef.current = controls.cancelScrub;
@@ -352,28 +379,6 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     },
   });
 
-  const latestVolumeRef = useRef(controls.volume);
-  latestVolumeRef.current = controls.volume;
-  const latestResizeModeRef = useRef(controls.resizeMode);
-  latestResizeModeRef.current = controls.resizeMode;
-  const initialVolumeRef = useRef(initialVolume);
-  initialVolumeRef.current = initialVolume;
-  const preferredAudioDeviceRef = useRef(preferredAudioDevice);
-  preferredAudioDeviceRef.current = preferredAudioDevice;
-  useEffect(() => {
-    if (openedEngine === undefined) return;
-    const effective =
-      initialVolumeRef.current !== undefined
-        ? latestVolumeRef.current
-        : (openedEngine.initialVolume ?? latestVolumeRef.current);
-    openedEngine.setVolume?.(clampVolume(effective));
-    openedEngine.setResizeMode?.(latestResizeModeRef.current);
-    const savedDevice = preferredAudioDeviceRef.current?.trim();
-    if (savedDevice && savedDevice !== 'auto') {
-      openedEngine.setAudioDevice?.(savedDevice);
-    }
-  }, [openedEngine]);
-
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-send resizeMode when activeTarget.itemKey changes so mpv --reset-on-next-file never reverts to fit
   useEffect(() => {
     if (openedEngine === undefined) return;
@@ -394,18 +399,6 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     prevOsdHiddenRef.current = controls.osdHidden;
     if (!wasHidden && controls.osdHidden && previewTarget !== null) cancelPreview();
   }, [cancelPreview, controls.osdHidden, previewTarget]);
-
-  const fetchChannelNowNext = useCallback(async (itemKey: string) => {
-    const query = catalogRef.current.nowNext ?? catalogRef.current.epgNowNext;
-    if (query === undefined) return null;
-    const rows = await query([itemKey], wallClockRef.current());
-    return rows.find((r) => r.channelKey === itemKey) ?? rows[0] ?? null;
-  }, []);
-  const fetchRecentChannels = useCallback(
-    async (): Promise<readonly PlayableEntry[]> =>
-      mapRecentChannelRows((await catalogRef.current.listRecentChannels?.(20)) ?? []),
-    [],
-  );
 
   const anchor = activeService?.getState().anchor;
   const currentPosMs = anchor !== undefined ? positionAt(anchor, clock.now()) : undefined;
@@ -508,6 +501,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
       tvFocused={isTv && controls.tvOsdFocused && controls.tvOsdAction === 'nextEpisode'}
       i18n={i18n}
       {...(autoPlayNextEpisode !== undefined ? { autoPlayNextEpisode } : {})}
+      autoAdvanceDisabled={isGaplessArmed}
       {...(reduceMotion !== undefined ? { reduceMotion } : {})}
       timers={timers}
       onPlayNext={(expectedKey) => handoff.handlePlayNextEpisode(expectedKey, nextEpisode)}
@@ -560,8 +554,10 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
       formFactor={formFactor}
       isTv={isTv}
       i18n={i18n}
-      fetchNowNext={fetchChannelNowNext}
-      {...(catalog.listRecentChannels !== undefined ? { fetchRecentChannels } : {})}
+      fetchNowNext={extras.fetchChannelNowNext}
+      {...(catalog.listRecentChannels !== undefined
+        ? { fetchRecentChannels: extras.fetchRecentChannels }
+        : {})}
       navigationRef={channelDrawerNavRef}
       onSelectChannel={(entry, index) => {
         extras.stillWatching.recordUserActivity();
@@ -588,8 +584,22 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
       {...(hostToggleAlwaysOnTop !== undefined
         ? { alwaysOnTop, onToggleAlwaysOnTop: hostToggleAlwaysOnTop }
         : {})}
-      {...(hostSetDeinterlace !== undefined
-        ? { deinterlace: controls.deinterlace, onToggleDeinterlace: controls.toggleDeinterlace }
+      {...(extras.cycleDeinterlaceMode !== undefined
+        ? {
+            deinterlaceMode: extras.activeDeinterlaceMode,
+            onCycleDeinterlaceMode: extras.cycleDeinterlaceMode,
+          }
+        : hostSetDeinterlace !== undefined
+          ? { deinterlace: controls.deinterlace, onToggleDeinterlace: controls.toggleDeinterlace }
+          : {})}
+      {...(extras.togglePitchLock !== undefined
+        ? { pitchLock: extras.activePitchLock, onTogglePitchLock: extras.togglePitchLock }
+        : {})}
+      {...(extras.toggleAudioNormalization !== undefined
+        ? {
+            audioNormalization: extras.activeAudioNorm,
+            onToggleAudioNormalization: extras.toggleAudioNormalization,
+          }
         : {})}
       {...(onToggleAutoSubtitlesOnSkipBack !== undefined
         ? {
@@ -754,7 +764,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
       settingsSheetNode={settingsSheetNode}
       stillWatchingVisible={extras.stillWatching.promptVisible}
       stillWatchingRemainingSec={extras.stillWatching.remainingSeconds}
-      stillWatchingFocusedAction={stillWatchingAction}
+      stillWatchingFocusedAction={extras.stillWatchingAction}
       onKeepWatching={extras.stillWatching.keepWatching}
       onStopWatching={extras.stillWatching.stopNow}
       onTouchActivity={() => {

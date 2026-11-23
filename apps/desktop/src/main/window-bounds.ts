@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { lockContentRectToAspect } from './player/presenter/bounds.ts';
 
 /** Rectangle in screen DIP coordinates. */
 export interface Rect {
@@ -390,6 +391,198 @@ export function createWindowBoundsController(
         window.removeListener('maximize', onMaximize);
         window.removeListener('unmaximize', onUnmaximize);
         window.removeListener('close', onClose);
+      }
+    },
+  };
+}
+
+/** Minimal `BrowserWindow` surface used by {@link createWindowAspectRatioLockController} (`#332`). */
+export interface AspectRatioLockWindowLike {
+  getBounds(): Rect;
+  getContentBounds(): Rect;
+  setBounds(bounds: Rect): void;
+  isMaximized(): boolean;
+  isFullScreen(): boolean;
+  isMinimized?(): boolean;
+  isDestroyed(): boolean;
+  on(
+    event: 'will-resize',
+    listener: (
+      event: { preventDefault(): void },
+      newBounds: Rect,
+      details?: { readonly edge?: string },
+    ) => void,
+  ): unknown;
+  removeListener(
+    event: 'will-resize',
+    listener: (
+      event: { preventDefault(): void },
+      newBounds: Rect,
+      details?: { readonly edge?: string },
+    ) => void,
+  ): unknown;
+}
+
+/** Minimal `screen` surface used by {@link createWindowAspectRatioLockController} (`#332`). */
+export interface AspectRatioLockScreenLike {
+  getDisplayMatching?(rect: Rect): { readonly scaleFactor?: number };
+}
+
+/** Handle returned by {@link createWindowAspectRatioLockController} (`#332`). */
+export interface WindowAspectRatioLockController {
+  setEnabled(enabled: boolean): void;
+  isEnabled(): boolean;
+  setAspectRatio(aspectRatio: number | undefined): void;
+  getAspectRatio(): number | undefined;
+  dispose(): void;
+}
+
+/**
+ * Intercepts `will-resize` on a desktop `BrowserWindow` when windowed aspect-ratio lock is enabled
+ * and an active video DAR is present (`#332`), snapping content dimensions to the display's
+ * `1 / scaleFactor` physical pixel grid while skipping maximized, fullscreen, minimized, and gate windows.
+ */
+export function createWindowAspectRatioLockController(
+  window: AspectRatioLockWindowLike,
+  screen: AspectRatioLockScreenLike,
+  opts?: {
+    readonly gate?: boolean;
+    readonly initialEnabled?: boolean;
+    readonly initialAspectRatio?: number;
+    readonly minContentSize?: { readonly width: number; readonly height: number };
+  },
+): WindowAspectRatioLockController {
+  let enabled = opts?.initialEnabled === true;
+  let activeAspectRatio =
+    typeof opts?.initialAspectRatio === 'number' &&
+    Number.isFinite(opts.initialAspectRatio) &&
+    opts.initialAspectRatio > 0
+      ? opts.initialAspectRatio
+      : undefined;
+  let applyingBounds = false;
+  let disposed = false;
+
+  const onWillResize = (
+    event: { preventDefault(): void },
+    newBounds: Rect,
+    details?: { readonly edge?: string },
+  ): void => {
+    if (
+      disposed ||
+      applyingBounds ||
+      opts?.gate === true ||
+      !enabled ||
+      activeAspectRatio === undefined ||
+      activeAspectRatio <= 0 ||
+      window.isDestroyed() ||
+      window.isMaximized() ||
+      window.isFullScreen() ||
+      window.isMinimized?.() === true
+    ) {
+      return;
+    }
+
+    const outer = window.getBounds();
+    const content = window.getContentBounds();
+    const chromeX = outer.x - content.x;
+    const chromeY = outer.y - content.y;
+    const chromeW = Math.max(0, outer.width - content.width);
+    const chromeH = Math.max(0, outer.height - content.height);
+
+    const desiredContent: Rect = {
+      x: newBounds.x - chromeX,
+      y: newBounds.y - chromeY,
+      width: Math.max(1, newBounds.width - chromeW),
+      height: Math.max(1, newBounds.height - chromeH),
+    };
+
+    const edge = details?.edge;
+    const preferredAxis: 'width' | 'height' =
+      edge === 'top' || edge === 'bottom'
+        ? 'height'
+        : edge === 'left' || edge === 'right'
+          ? 'width'
+          : Math.abs(newBounds.width - outer.width) === 0 &&
+              Math.abs(newBounds.height - outer.height) > 0
+            ? 'height'
+            : 'width';
+
+    const display = screen.getDisplayMatching?.(newBounds);
+    const scaleFactor =
+      typeof display?.scaleFactor === 'number' &&
+      Number.isFinite(display.scaleFactor) &&
+      display.scaleFactor > 0
+        ? display.scaleFactor
+        : 1;
+
+    const minContentSize = opts?.minContentSize ?? {
+      width: Math.max(1, DEFAULT_BOUNDS.minWidth - chromeW),
+      height: Math.max(1, DEFAULT_BOUNDS.minHeight - chromeH),
+    };
+
+    const lockedContent = lockContentRectToAspect(
+      desiredContent,
+      activeAspectRatio,
+      scaleFactor,
+      minContentSize,
+      preferredAxis,
+    );
+
+    const lockedWidth = Math.round(lockedContent.width + chromeW);
+    const lockedHeight = Math.round(lockedContent.height + chromeH);
+    const anchorRight =
+      edge === 'left' || edge === 'top-left' || edge === 'bottom-left' || newBounds.x !== outer.x;
+    const anchorBottom =
+      edge === 'top' || edge === 'top-left' || edge === 'top-right' || newBounds.y !== outer.y;
+    const lockedX = anchorRight
+      ? Math.round(outer.x + outer.width - lockedWidth)
+      : Math.round(newBounds.x);
+    const lockedY = anchorBottom
+      ? Math.round(outer.y + outer.height - lockedHeight)
+      : Math.round(newBounds.y);
+
+    const lockedOuter: Rect = {
+      x: lockedX,
+      y: lockedY,
+      width: lockedWidth,
+      height: lockedHeight,
+    };
+
+    event.preventDefault();
+    if (
+      lockedOuter.x === outer.x &&
+      lockedOuter.y === outer.y &&
+      lockedOuter.width === outer.width &&
+      lockedOuter.height === outer.height
+    ) {
+      return;
+    }
+
+    applyingBounds = true;
+    try {
+      window.setBounds(lockedOuter);
+    } finally {
+      applyingBounds = false;
+    }
+  };
+
+  window.on('will-resize', onWillResize);
+
+  return {
+    setEnabled(next) {
+      enabled = Boolean(next);
+    },
+    isEnabled: () => enabled,
+    setAspectRatio(next) {
+      activeAspectRatio =
+        typeof next === 'number' && Number.isFinite(next) && next > 0 ? next : undefined;
+    },
+    getAspectRatio: () => activeAspectRatio,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      if (!window.isDestroyed()) {
+        window.removeListener('will-resize', onWillResize);
       }
     },
   };

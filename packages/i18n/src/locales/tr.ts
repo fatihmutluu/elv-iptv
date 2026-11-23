@@ -677,4 +677,16 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'settings.tvClockMenus': 'Yalnızca menülerde',
   'settings.tvClockPlayer': 'Yalnızca oynatıcıda',
   'settings.tvClockNever': 'Kapalı',
+  'settings.deinterlaceMode': 'Taramasızlaştırma',
+  'settings.deinterlaceModeHint': 'Masaüstünde geçmeli 50i/60i canlı yayınları akıcılaştırır',
+  'settings.deinterlaceOff': 'Kapalı',
+  'settings.deinterlaceAuto': 'Otomatik',
+  'settings.deinterlaceBwdif': 'Yayın (bwdif)',
+  'settings.pitchLock': 'Ses tonunu koru',
+  'settings.pitchLockHint': 'Oynatma hızı değiştiğinde ses tonunu doğal tutar',
+  'settings.audioNormalization': 'Ses seviyesi dengeleme',
+  'settings.audioNormalizationHint': 'EBU R128 ile kısık diyalogları ve yüksek kanalları dengeler',
+  'settings.windowAspectRatioLock': 'Pencere en-boy oranını kilitle',
+  'settings.windowAspectRatioLockHint':
+    'Masaüstünde pencereyi boyutlandırırken siyah kenarlıkları önler',
 };

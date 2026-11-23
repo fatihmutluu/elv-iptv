@@ -45,6 +45,7 @@ export function PlaybackSettingsPanel({
   const i18n = useI18n();
   const viewport = useViewport();
   const isTv = viewport.formFactor === 'tv';
+  const isDesktop = viewport.formFactor === 'desktop';
 
   const scrollRef = useRef<ScrollViewHandle | null>(null);
   const cardYRef = useRef<
@@ -80,6 +81,10 @@ export function PlaybackSettingsPanel({
     } else if (
       focusedControlId.startsWith('toggle-prefer-') ||
       focusedControlId === 'toggle-filter-sdh' ||
+      focusedControlId.startsWith('deinterlace-') ||
+      focusedControlId === 'toggle-pitch-lock' ||
+      focusedControlId === 'toggle-audio-normalization' ||
+      focusedControlId === 'toggle-window-aspect-ratio-lock' ||
       focusedControlId.startsWith('osd-time-') ||
       focusedControlId.startsWith('oled-') ||
       focusedControlId.startsWith('still-watching-')
@@ -266,6 +271,52 @@ export function PlaybackSettingsPanel({
             applyPatch({ preferHevcOverDolbyVision: !activePrefs.preferHevcOverDolbyVision })
           }
         />
+        <SettingsDivider />
+        <SettingsOptionRow
+          title={i18n.t('settings.deinterlaceMode')}
+          description={i18n.t('settings.deinterlaceModeHint')}
+          options={opts.deinterlaceOptions}
+          selectedValue={activePrefs.deinterlaceMode}
+          focusedControlId={focusedControlId}
+          isTv={isTv}
+          onSelect={(deinterlaceMode) => applyPatch({ deinterlaceMode })}
+        />
+        <SettingsDivider />
+        <SettingsToggleRow
+          testID="settings-playback-toggle-pitch-lock"
+          title={i18n.t('settings.pitchLock')}
+          description={i18n.t('settings.pitchLockHint')}
+          checked={activePrefs.pitchLock}
+          focused={focusedControlId === 'toggle-pitch-lock'}
+          isTv={isTv}
+          onToggle={() => applyPatch({ pitchLock: !activePrefs.pitchLock })}
+        />
+        <SettingsDivider />
+        <SettingsToggleRow
+          testID="settings-playback-toggle-audio-normalization"
+          title={i18n.t('settings.audioNormalization')}
+          description={i18n.t('settings.audioNormalizationHint')}
+          checked={activePrefs.audioNormalization}
+          focused={focusedControlId === 'toggle-audio-normalization'}
+          isTv={isTv}
+          onToggle={() => applyPatch({ audioNormalization: !activePrefs.audioNormalization })}
+        />
+        {isDesktop ? (
+          <>
+            <SettingsDivider />
+            <SettingsToggleRow
+              testID="settings-playback-toggle-window-aspect-ratio-lock"
+              title={i18n.t('settings.windowAspectRatioLock')}
+              description={i18n.t('settings.windowAspectRatioLockHint')}
+              checked={activePrefs.windowAspectRatioLock}
+              focused={focusedControlId === 'toggle-window-aspect-ratio-lock'}
+              isTv={isTv}
+              onToggle={() =>
+                applyPatch({ windowAspectRatioLock: !activePrefs.windowAspectRatioLock })
+              }
+            />
+          </>
+        ) : null}
         <SettingsDivider />
         <SettingsOptionRow
           title={i18n.t('settings.playback.osdTimeMode')}

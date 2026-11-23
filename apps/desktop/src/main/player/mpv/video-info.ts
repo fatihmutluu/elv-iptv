@@ -22,8 +22,20 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
 const posInt = (v: unknown): number | undefined =>
   typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : undefined;
 
+const posFloat = (v: unknown): number | undefined =>
+  typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
+
 const posFps = (v: unknown): number | undefined =>
   typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v * 100) / 100 : undefined;
+
+function extractAspectRatio(params: Record<string, unknown>, w: number, h: number): number {
+  const aspect = posFloat(params['aspect']);
+  if (aspect !== undefined) return aspect;
+  const dw = posFloat(params['dw']);
+  const dh = posFloat(params['dh']);
+  if (dw !== undefined && dh !== undefined) return dw / dh;
+  return w / h;
+}
 
 const lowerStr = (v: unknown): string | undefined => {
   if (typeof v !== 'string') return undefined;
@@ -77,6 +89,7 @@ function sameInfo(a: StreamVideoInfo | undefined, b: StreamVideoInfo): boolean {
     a !== undefined &&
     a.width === b.width &&
     a.height === b.height &&
+    a.aspectRatio === b.aspectRatio &&
     a.fps === b.fps &&
     a.codec === b.codec &&
     a.hdr === b.hdr
@@ -87,6 +100,7 @@ function sameInfo(a: StreamVideoInfo | undefined, b: StreamVideoInfo): boolean {
 export function createMpvVideoInfoTracker(): MpvVideoInfoTracker {
   let width: number | undefined;
   let height: number | undefined;
+  let aspectRatio: number | undefined;
   let containerFps: number | undefined;
   let estimatedFps: number | undefined;
   let formatCodec: string | undefined;
@@ -102,6 +116,7 @@ export function createMpvVideoInfoTracker(): MpvVideoInfoTracker {
     if (
       width === undefined &&
       height === undefined &&
+      aspectRatio === undefined &&
       fps === undefined &&
       codec === undefined &&
       hdr === undefined
@@ -111,6 +126,7 @@ export function createMpvVideoInfoTracker(): MpvVideoInfoTracker {
     const next: StreamVideoInfo = {
       ...(width === undefined ? {} : { width }),
       ...(height === undefined ? {} : { height }),
+      ...(aspectRatio === undefined ? {} : { aspectRatio }),
       ...(fps === undefined ? {} : { fps }),
       ...(codec === undefined ? {} : { codec }),
       ...(hdr === undefined ? {} : { hdr }),
@@ -128,6 +144,7 @@ export function createMpvVideoInfoTracker(): MpvVideoInfoTracker {
       if (w === undefined || h === undefined) return undefined;
       width = w;
       height = h;
+      aspectRatio = extractAspectRatio(value, w, h);
       lastParams = value;
       return commit();
     },

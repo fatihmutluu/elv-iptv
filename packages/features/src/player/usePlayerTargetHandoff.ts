@@ -5,6 +5,8 @@ import {
   type PlaybackService,
   type PlaybackTimers,
   positionAt,
+  type StreamRequest,
+  type TuneRequest,
 } from '@elv/playback';
 import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
 import type { AppLifecyclePort } from '../ports/app-lifecycle';
@@ -35,6 +37,7 @@ export interface PlayerTargetHandoffParams {
   clockRef: MutableRefObject<PlaybackClock>;
   timersRef: MutableRefObject<PlaybackTimers>;
   flushProgressRef: MutableRefObject<(overridePosMs?: number) => void>;
+  flushEndedProgressRef?: MutableRefObject<() => void>;
   cancelScrubRef: MutableRefObject<() => void>;
   onTargetChangeRef: MutableRefObject<((next: PlayTarget) => void) | undefined>;
   bufferPresetRef?: MutableRefObject<BufferPreset>;
@@ -59,6 +62,7 @@ export function usePlayerTargetHandoff({
   clockRef,
   timersRef,
   flushProgressRef,
+  flushEndedProgressRef,
   cancelScrubRef,
   onTargetChangeRef,
   bufferPresetRef,
@@ -117,14 +121,13 @@ export function usePlayerTargetHandoff({
     [catalogRef],
   );
 
-  const tuneEntry = useCallback(
-    (service: PlaybackService, entry: PlayableEntry, startMs?: number): void => {
+  const buildTuneRequest = useCallback(
+    (entry: PlayableEntry, startMs?: number): TuneRequest => {
       const bufferPreset = bufferPresetRef?.current;
       const decoderMode = decoderModeRef?.current;
       const preferHevcOverDolbyVision = preferHevcOverDolbyVisionRef?.current;
       const filterSdhSubtitles = filterSdhSubtitlesRef?.current;
-      recordSettledRecentChannel(entry);
-      service.tune({
+      return {
         item: entry.itemKey,
         accountKey: entry.accountKey ?? entry.sourceId,
         kind: entry.kind,
@@ -140,7 +143,7 @@ export function usePlayerTargetHandoff({
         ...(decoderMode !== undefined ? { decoderMode } : {}),
         ...(preferHevcOverDolbyVision !== undefined ? { preferHevcOverDolbyVision } : {}),
         ...(filterSdhSubtitles !== undefined ? { filterSdhSubtitles } : {}),
-      });
+      };
     },
     [
       bufferPresetRef,
@@ -148,8 +151,15 @@ export function usePlayerTargetHandoff({
       decoderModeRef,
       filterSdhSubtitlesRef,
       preferHevcOverDolbyVisionRef,
-      recordSettledRecentChannel,
     ],
+  );
+
+  const tuneEntry = useCallback(
+    (service: PlaybackService, entry: PlayableEntry, startMs?: number): void => {
+      recordSettledRecentChannel(entry);
+      service.tune(buildTuneRequest(entry, startMs));
+    },
+    [buildTuneRequest, recordSettledRecentChannel],
   );
 
   const reloadActiveTarget = useCallback((): void => {
@@ -322,6 +332,46 @@ export function usePlayerTargetHandoff({
       resolvedNextEpisodeRef,
       serviceRef,
       tuneEntry,
+    ],
+  );
+
+  const handleQueueAdvanced = useCallback(
+    (advancedItemKey: string, resolvedNext?: PlayableEntry, queuedStream?: StreamRequest): void => {
+      const current = activeTargetRef.current;
+      if (!mountedRef.current || current.itemKey === advancedItemKey) return;
+      const queuedNext = buildNextEpisodeTarget(current);
+      const fallbackEntry = resolvedNext ?? resolvedNextEpisodeRef?.current;
+      const next: PlayTarget | null =
+        queuedNext !== null && queuedNext.itemKey === advancedItemKey
+          ? queuedNext
+          : fallbackEntry !== undefined && fallbackEntry.itemKey === advancedItemKey
+            ? { ...fallbackEntry, startPositionMs: 0 }
+            : null;
+      if (next === null) return;
+      transitioningToRef.current = next.itemKey;
+      cancelScrubRef.current();
+      if (flushEndedProgressRef !== undefined) {
+        flushEndedProgressRef.current();
+      } else {
+        flushProgressRef.current();
+      }
+      cancelPendingResume();
+      vodResumeMsRef.current = undefined;
+      prevPropKeyRef.current = next.itemKey;
+      activeTargetRef.current = next;
+      serviceRef.current?.adoptQueuedTarget(buildTuneRequest(next, 0), queuedStream);
+      setActiveTarget(next);
+      onTargetChangeRef.current?.(next);
+    },
+    [
+      buildTuneRequest,
+      cancelPendingResume,
+      cancelScrubRef,
+      flushEndedProgressRef,
+      flushProgressRef,
+      onTargetChangeRef,
+      resolvedNextEpisodeRef,
+      serviceRef,
     ],
   );
 
@@ -552,6 +602,7 @@ export function usePlayerTargetHandoff({
     onServiceReady,
     reloadActiveTarget,
     handlePlayNextEpisode,
+    handleQueueAdvanced,
     handleJumpPreviousChannel,
   };
 }

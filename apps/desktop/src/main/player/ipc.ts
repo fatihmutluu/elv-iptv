@@ -65,6 +65,8 @@ export interface PlayerIpcDeps {
     owner: WebContentsLike,
     onAction: (action: TaskbarAction) => void,
   ): TaskbarController | undefined;
+  /** Optional active video display aspect ratio sink for windowed aspect-ratio lock (`#332`). */
+  onVideoAspectRatioChange?(owner: WebContentsLike, aspectRatio: number | undefined): void;
   /**
    * Dev gate only: receives each valid `gate:report` line and the sender's engine (`undefined` when it has none). The
    * channel is not registered without it.
@@ -153,6 +155,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     const entry = entries.get(id);
     if (!entry) return;
     entries.delete(id);
+    deps.onVideoAspectRatioChange?.(entry.owner, undefined);
     entry.taskbar?.clear();
     entry.unsubscribe();
     entry.engine.release();
@@ -250,6 +253,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
             taskbarState.active = false;
             taskbarState.paused = false;
             taskbar?.clear();
+            deps.onVideoAspectRatioChange?.(sender, undefined);
           }
         } else {
           clearBufferingTimer(engineId);
@@ -259,11 +263,20 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
         if (event.anchor.durationMs !== undefined)
           taskbarState.durationMs = event.anchor.durationMs;
         if (taskbarState.active) syncTaskbar(taskbar, taskbarState);
+      } else if (event.type === 'mediaInfo') {
+        if (
+          typeof event.info.aspectRatio === 'number' &&
+          Number.isFinite(event.info.aspectRatio) &&
+          event.info.aspectRatio > 0
+        ) {
+          deps.onVideoAspectRatioChange?.(sender, event.info.aspectRatio);
+        }
       } else if (event.type === 'error') {
         releasePowerBlocker(engineId);
         taskbarState.active = false;
         taskbarState.paused = false;
         taskbar?.clear();
+        deps.onVideoAspectRatioChange?.(sender, undefined);
       }
       const message: PlayerEventMessage = { engineId, event };
       sendTo(sender, PLAYER_CHANNELS.event, message);
@@ -312,6 +325,7 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
     switch (command.name) {
       case 'load':
         releasePowerBlocker(engineId);
+        deps.onVideoAspectRatioChange?.(sender, undefined);
         entry.taskbarState.isVod = command.cmd.kind === 'vod';
         entry.taskbarState.positionMs = command.cmd.startMs ?? 0;
         entry.taskbarState.durationMs = 0;
@@ -325,9 +339,12 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       case 'recreate':
         releasePowerBlocker(engineId);
         if (command.name === 'stop') {
+          deps.onVideoAspectRatioChange?.(sender, undefined);
           entry.taskbarState.active = false;
           entry.taskbarState.paused = false;
           entry.taskbar?.clear();
+        } else if (command.name === 'recreate') {
+          deps.onVideoAspectRatioChange?.(sender, undefined);
         }
         engine[command.name](command.attempt);
         break;
@@ -361,6 +378,21 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
         break;
       case 'setDeinterlace':
         engine.setDeinterlace(command.enabled);
+        break;
+      case 'setDeinterlaceMode':
+        engine.setDeinterlaceMode(command.mode);
+        break;
+      case 'setPitchLock':
+        engine.setPitchLock(command.locked);
+        break;
+      case 'setAudioNormalization':
+        engine.setAudioNormalization(command.enabled);
+        break;
+      case 'queueNext':
+        engine.queueNext(command.request);
+        break;
+      case 'clearQueue':
+        engine.clearQueue();
         break;
       case 'setHwdec':
         engine.setHwdec(command.profile);

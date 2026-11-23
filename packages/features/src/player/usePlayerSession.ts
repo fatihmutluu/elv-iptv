@@ -1,4 +1,4 @@
-import type { AccessibilityFontFamily } from '@elv/domain';
+import type { AccessibilityFontFamily, DeinterlaceMode } from '@elv/domain';
 import {
   type ChapterInfo,
   createPlaybackService,
@@ -63,6 +63,11 @@ export function usePlayerSession(params: {
   activeTarget: PlayTarget;
   isDesktop?: boolean;
   subtitleFontFamily?: AccessibilityFontFamily;
+  deinterlaceMode?: DeinterlaceMode;
+  pitchLock?: boolean;
+  audioNormalization?: boolean;
+  windowAspectRatioLock?: boolean;
+  onWindowAspectRatioLockChange?: (enabled: boolean) => void;
   serviceRef: MutableRefObject<PlaybackService | null>;
   clockRef: MutableRefObject<PlaybackClock>;
   timersRef: MutableRefObject<PlaybackTimers>;
@@ -75,6 +80,11 @@ export function usePlayerSession(params: {
     activeTarget,
     isDesktop = false,
     subtitleFontFamily = 'system',
+    deinterlaceMode,
+    pitchLock,
+    audioNormalization,
+    windowAspectRatioLock,
+    onWindowAspectRatioLockChange,
     serviceRef,
     clockRef,
     timersRef,
@@ -219,6 +229,31 @@ export function usePlayerSession(params: {
   useEffect(() => {
     openedEngine?.setSubtitleFontFamily?.(subtitleFontFamily);
   }, [openedEngine, subtitleFontFamily]);
+
+  // Forward deinterlaceMode, pitchLock, and audioNormalization on open & preference update (#243)
+  useEffect(() => {
+    if (deinterlaceMode !== undefined) {
+      openedEngine?.setDeinterlaceMode?.(deinterlaceMode);
+    }
+  }, [deinterlaceMode, openedEngine]);
+
+  useEffect(() => {
+    if (pitchLock !== undefined) {
+      openedEngine?.setPitchLock?.(pitchLock);
+    }
+  }, [openedEngine, pitchLock]);
+
+  useEffect(() => {
+    if (audioNormalization !== undefined) {
+      openedEngine?.setAudioNormalization?.(audioNormalization);
+    }
+  }, [audioNormalization, openedEngine]);
+
+  useEffect(() => {
+    if (windowAspectRatioLock !== undefined) {
+      onWindowAspectRatioLockChange?.(windowAspectRatioLock);
+    }
+  }, [onWindowAspectRatioLockChange, windowAspectRatioLock]);
 
   const canStepTrack = activeTarget.kind === 'live' && (activeTarget.playlist?.count ?? 0) > 1;
 

@@ -773,7 +773,7 @@ describe('MpvEngine setSpeed coalescing (#302)', () => {
     expect(fake.sent).toContainEqual(['set_property', 'audio-delay', 0.25]);
     expect(fake.sent).toContainEqual(['set_property', 'sub-delay', -0.5]);
     expect(fake.sent).toContainEqual(['set_property', 'audio-device', 'wasapi/usb']);
-    expect(fake.sent).toContainEqual(['set_property', 'deinterlace', 'yes']);
+    expect(fake.sent).toContainEqual(['set_property', 'deinterlace', 'auto']);
 
     const countBeforeRelease = fake.sent.length;
     engine.release();

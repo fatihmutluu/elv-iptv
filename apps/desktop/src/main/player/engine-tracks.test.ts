@@ -349,7 +349,7 @@ describe('MpvEngine audio and subtitle track selection', () => {
         ).toBe(true),
       );
       e2.setSpeed?.(1, 2);
-      e2.setDeinterlace(true);
+      await c?.command(['set_property', 'deinterlace', 'yes']);
       e2.setAudioDelay(0.5);
       e2.setSubtitleDelay(-0.25);
       await c?.command(['set_property', 'video-aspect-override', '16:9']);

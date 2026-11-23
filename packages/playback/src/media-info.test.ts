@@ -166,4 +166,88 @@ describe('PlaybackService mediaInfo handling (#58)', () => {
     });
     expect(service.getState().videoInfo).toBeUndefined();
   });
+
+  it('preserves, updates, deduplicates, and validates positive finite aspectRatio (#332)', async () => {
+    const { engine, service } = setup();
+    const notifications: Array<StreamVideoInfo | undefined> = [];
+    service.subscribe((s: PlaybackState) => notifications.push(s.videoInfo));
+
+    const attempt = service.tune(tuneReq('http://sim/live/aspect.ts'));
+    await vi.advanceTimersByTimeAsync(0);
+    notifications.length = 0;
+
+    // Invalid aspectRatio values alone do not create videoInfo
+    engine.emit({
+      attempt,
+      type: 'mediaInfo',
+      info: { aspectRatio: 0 },
+    });
+    engine.emit({
+      attempt,
+      type: 'mediaInfo',
+      info: { aspectRatio: -1.77 },
+    });
+    engine.emit({
+      attempt,
+      type: 'mediaInfo',
+      info: { aspectRatio: Number.NaN },
+    });
+    engine.emit({
+      attempt,
+      type: 'mediaInfo',
+      info: { aspectRatio: Number.POSITIVE_INFINITY },
+    });
+    expect(service.getState().videoInfo).toBeUndefined();
+    expect(notifications).toHaveLength(0);
+
+    // Valid aspectRatio is stored and preserved across partial updates
+    const dar16x9 = 16 / 9;
+    engine.emit({
+      attempt,
+      type: 'mediaInfo',
+      info: { width: 1920, height: 1080, aspectRatio: dar16x9 },
+    });
+    expect(service.getState().videoInfo).toEqual({
+      width: 1920,
+      height: 1080,
+      aspectRatio: dar16x9,
+    });
+    expect(notifications).toHaveLength(1);
+
+    // Identical aspectRatio does not re-notify
+    engine.emit({
+      attempt,
+      type: 'mediaInfo',
+      info: { aspectRatio: dar16x9 },
+    });
+    expect(notifications).toHaveLength(1);
+
+    // Partial update without aspectRatio preserves previous aspectRatio
+    engine.emit({
+      attempt,
+      type: 'mediaInfo',
+      info: { fps: 50 },
+    });
+    expect(service.getState().videoInfo).toEqual({
+      width: 1920,
+      height: 1080,
+      fps: 50,
+      aspectRatio: dar16x9,
+    });
+    expect(notifications).toHaveLength(2);
+
+    // Changing only aspectRatio notifies subscribers
+    engine.emit({
+      attempt,
+      type: 'mediaInfo',
+      info: { aspectRatio: 2.39 },
+    });
+    expect(service.getState().videoInfo).toEqual({
+      width: 1920,
+      height: 1080,
+      fps: 50,
+      aspectRatio: 2.39,
+    });
+    expect(notifications).toHaveLength(3);
+  });
 });
