@@ -139,6 +139,19 @@ describe('launchArgs', () => {
     expect(launchArgs({ ...base, platform: 'darwin' })).not.toContain('--pulse-buffer=50');
     expect(launchArgs(base)).not.toContain('--pulse-buffer=50');
   });
+
+  it('appends --sub-fonts-dir only when fontsDir is a non-empty string (#163)', () => {
+    const base = {
+      inputConf: '/r/mpv-input.conf',
+      presenterArgs: [],
+      transportArgs: [],
+    };
+    expect(launchArgs({ ...base, fontsDir: '/res/fonts' })).toContain('--sub-fonts-dir=/res/fonts');
+    expect(
+      launchArgs({ ...base, fontsDir: '' }).some((a) => a.startsWith('--sub-fonts-dir=')),
+    ).toBe(false);
+    expect(launchArgs(base).some((a) => a.startsWith('--sub-fonts-dir='))).toBe(false);
+  });
 });
 
 describe('headerOptions and headerFields', () => {

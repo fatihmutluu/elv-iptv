@@ -613,4 +613,71 @@ describe('TvRemoteProvider (#277)', () => {
 
     await view.unmount();
   });
+
+  it('dispatches programmable color keys (183–186) on down/press while preserving TextEntryBoundary guards (#133)', async () => {
+    mockTvApis('android', true);
+    const raw = fakeAndroidSource();
+    const onInput = jest.fn<void, [KeyInput]>();
+
+    const view = await render(
+      <RemoteKeysProvider android={raw.source}>
+        <TvRemoteProvider>
+          <TextEntryBoundary>
+            <Consumer onInput={onInput} />
+            <TvTextInput testID="color-text-input" />
+          </TextEntryBoundary>
+        </TvRemoteProvider>
+      </RemoteKeysProvider>,
+    );
+
+    const colorCodes: Array<[number, string]> = [
+      [183, 'colorRed'],
+      [184, 'colorGreen'],
+      [185, 'colorYellow'],
+      [186, 'colorBlue'],
+    ];
+
+    for (const [keyCode, expectedKey] of colorCodes) {
+      onInput.mockClear();
+      raw.emit({ action: 'down', keyCode, canceled: false, ageMs: 0 });
+      raw.emit({ action: 'up', keyCode, canceled: false, ageMs: 0 });
+      expect(onInput.mock.calls.map(([k]) => `${k.key}:${k.action}`)).toEqual([
+        `${expectedKey}:down`,
+        `${expectedKey}:up`,
+      ]);
+    }
+
+    // Active text entry suppresses programmable color keys just like other non-back keys.
+    onInput.mockClear();
+    await act(async () => {
+      fireEvent(screen.getByTestId('color-text-input'), 'focus');
+    });
+    for (const [keyCode] of colorCodes) {
+      raw.emit({ action: 'down', keyCode, canceled: false, ageMs: 0 });
+      raw.emit({ action: 'up', keyCode, canceled: false, ageMs: 0 });
+    }
+    expect(onInput).not.toHaveBeenCalled();
+
+    await view.unmount();
+
+    // TVEventHandler press path also dispatches color keys cleanly.
+    const tvApis = mockTvApis('ios', true);
+    const onTvInput = jest.fn<void, [KeyInput]>();
+    const tvView = await render(
+      <TvRemoteProvider>
+        <Consumer onInput={onTvInput} />
+      </TvRemoteProvider>,
+    );
+    tvApis.emitRemote({ eventType: 'colorRed' });
+    tvApis.emitRemote({ eventType: 'colorGreen' });
+    tvApis.emitRemote({ eventType: 'colorYellow' });
+    tvApis.emitRemote({ eventType: 'colorBlue' });
+    expect(onTvInput.mock.calls.map(([k]) => `${k.key}:${k.action}`)).toEqual([
+      'colorRed:press',
+      'colorGreen:press',
+      'colorYellow:press',
+      'colorBlue:press',
+    ]);
+    await tvView.unmount();
+  });
 });

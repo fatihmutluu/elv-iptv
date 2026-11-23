@@ -1,5 +1,5 @@
 import type { AppI18n } from '@elv/i18n';
-import { CtaButton, TABULAR_NUMS_STYLE, useTheme, webBackdropBlur } from '@elv/ui-kit';
+import { CtaButton, TABULAR_NUMS_STYLE, useTheme, useViewport, webBackdropBlur } from '@elv/ui-kit';
 import { type ComponentRef, type ReactElement, useRef } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useDesktopDialogTrap } from './desktop-dialog-trap';
@@ -35,6 +35,7 @@ export function StillWatchingPrompt({
   onStopNow,
 }: StillWatchingPromptProps): ReactElement | null {
   const theme = useTheme();
+  const viewport = useViewport();
   const dialogRef = useRef<ComponentRef<typeof View> | null>(null);
 
   useDesktopDialogTrap(dialogRef, visible && !isTv, onKeepWatching, { modal: true });
@@ -49,6 +50,12 @@ export function StillWatchingPrompt({
         {
           backgroundColor: docked ? theme.colors.bgElevated : theme.colors.scrimStrong,
           borderTopColor: docked ? theme.colors.surfaceBorder : undefined,
+          ...(!docked
+            ? {
+                paddingHorizontal: 24 + viewport.overscan.x,
+                paddingVertical: 24 + viewport.overscan.y,
+              }
+            : {}),
         },
       ]}
     >

@@ -6,6 +6,7 @@ import type {
   PlayerEngine,
 } from '@elv/playback';
 import type {
+  AccessibilityFontFamily,
   AudioDeviceInfo,
   BridgeCommand,
   HwdecProfile,
@@ -69,6 +70,8 @@ export interface DesktopEngine extends PlayerEngine {
   setResizeMode(mode: ResizeMode): void;
   /** Toggles mpv's built-in SDH subtitle annotation filter (`sub-filter-sdh`, `#310`). */
   setFilterSdh(enabled: boolean): void;
+  /** Selects the mpv subtitle font family (`sub-font`, `#163`). */
+  setSubtitleFontFamily(family: AccessibilityFontFamily): void;
   /** Presentation events outside the port; the latest `presenter` event is replayed to a new listener. */
   onUi(listener: (event: PlayerUiEvent) => void): () => void;
   /** Subscribes to decoded GPU `VideoFrame` deliveries in `'canvas'` mode (`#95`); returns unsubscribe. */
@@ -237,6 +240,7 @@ export async function createDesktopEngine(
     setHwdec: (profile) => send({ name: 'setHwdec', profile }),
     setResizeMode: (mode) => send({ name: 'setResizeMode', mode }),
     setFilterSdh: (enabled) => send({ name: 'setFilterSdh', enabled }),
+    setSubtitleFontFamily: (family) => send({ name: 'setSubtitleFontFamily', family }),
     setArea(area) {
       if (!released) bridge.setArea({ engineId: id, area });
     },

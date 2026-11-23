@@ -190,6 +190,34 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       d.openTracks(event.key === 'captions' ? 'subtitles' : 'audio');
       return true;
     }
+    if (event.key === 'colorRed') {
+      if (s.tracksOpen && s.pickerCursor.column === 'subtitles') d.closeTracks();
+      else if (s.hasTracks) d.openTracks('subtitles');
+      else d.showOsd();
+      return true;
+    }
+    if (event.key === 'colorGreen') {
+      if (s.tracksOpen && s.pickerCursor.column === 'audio') d.closeTracks();
+      else if (s.hasTracks) d.openTracks('audio');
+      else d.showOsd();
+      return true;
+    }
+    if (event.key === 'colorYellow') {
+      d.showOsd();
+      d.toggleStats();
+      return true;
+    }
+    if (event.key === 'colorBlue') {
+      if (!d.isVod && d.toggleChannelList !== undefined && s.canOpenChannelList) {
+        d.digitBuf.cancel();
+        d.toggleChannelList();
+      } else if (d.toggleInfo !== undefined && s.canOpenInfo) {
+        d.toggleInfo();
+      } else {
+        d.showOsd();
+      }
+      return true;
+    }
     if (event.key === 'lastChannel') {
       d.digitBuf.cancel();
       d.onJumpPreviousChannel?.();

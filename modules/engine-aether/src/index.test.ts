@@ -331,6 +331,35 @@ describe('AetherSurface', () => {
       testID: undefined,
     });
   });
+
+  it('forwards subtitleFontFamily when defined and omits it when undefined (#163)', async () => {
+    const { native, engine, AetherSurface } = await engineWithView();
+    expect(AetherSurface({ engine, subtitleFontFamily: 'atkinson' })?.props).toEqual({
+      engine: native.engine,
+      style: undefined,
+      resizeMode: undefined,
+      subtitleBottomInsetPx: undefined,
+      subtitleFontFamily: 'atkinson',
+      testID: undefined,
+    });
+    expect(AetherSurface({ engine, subtitleFontFamily: 'opendyslexic' })?.props).toEqual({
+      engine: native.engine,
+      style: undefined,
+      resizeMode: undefined,
+      subtitleBottomInsetPx: undefined,
+      subtitleFontFamily: 'opendyslexic',
+      testID: undefined,
+    });
+    expect(AetherSurface({ engine, subtitleFontFamily: 'system' })?.props).toEqual({
+      engine: native.engine,
+      style: undefined,
+      resizeMode: undefined,
+      subtitleBottomInsetPx: undefined,
+      subtitleFontFamily: 'system',
+      testID: undefined,
+    });
+    expect(AetherSurface({ engine })?.props).not.toHaveProperty('subtitleFontFamily');
+  });
 });
 
 describe('Apple hardware tiering (#186)', () => {

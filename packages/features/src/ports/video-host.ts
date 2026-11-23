@@ -1,3 +1,4 @@
+import type { AccessibilityFontFamily } from '@elv/domain';
 import type { PlayerEngine } from '@elv/playback';
 import type { ReactElement } from 'react';
 
@@ -12,6 +13,8 @@ export interface VideoSurfaceProps {
   resizeMode?: VideoResizeMode;
   /** Extra bottom inset in dp/px to lift native subtitles above a visible OSD (`#136`). */
   subtitleBottomInsetPx?: number;
+  /** Preferred high-legibility subtitle typeface (`#163`). */
+  subtitleFontFamily?: AccessibilityFontFamily;
   /** Monotonic token incremented on Rung 3 decoder reset to swap in a fresh native surface (`#144`). */
   surfaceRecreationToken?: number;
   /** Opt-in TextureView fallback on Android devices with broken SurfaceView compositing (`#262`). */
@@ -114,6 +117,8 @@ export interface OpenVideoEngine {
   setResizeMode?: (mode: VideoResizeMode) => void;
   /** Optional live SDH subtitle annotation filter toggle (`#310`). */
   setFilterSdh?: (enabled: boolean) => void;
+  /** Optional live subtitle typeface setter (e.g. desktop `mpv` `sub-font`, `#163`). */
+  readonly setSubtitleFontFamily?: (family: AccessibilityFontFamily) => void;
 }
 
 /** Port supplied by the app composition root to open a `PlayerEngine` and render its surface. */

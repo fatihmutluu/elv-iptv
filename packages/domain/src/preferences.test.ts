@@ -68,6 +68,11 @@ describe('preferences codec', () => {
       androidDecoderMode: 'auto',
       collapseLiveVariants: false,
       groupVodVersions: true,
+      uiFontFamily: 'system',
+      subtitleFontFamily: 'system',
+      tvClockMode: 'always',
+      overscanX: 0.05,
+      overscanY: 0.05,
     });
   });
 

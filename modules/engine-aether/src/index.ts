@@ -379,6 +379,8 @@ export interface AetherSurfaceProps {
   resizeMode?: 'fit' | 'fill' | 'stretch';
   /** Extra bottom inset in pt to lift native subtitle cues above a visible OSD (`#136`). */
   subtitleBottomInsetPx?: number;
+  /** High-legibility subtitle font override (`'system'`, `'atkinson'`, or `'opendyslexic'`, `#163`). */
+  subtitleFontFamily?: 'system' | 'atkinson' | 'opendyslexic';
   /** Whether the player OSD is currently visible so native can throttle hidden-OSD clock ticks (`#442`). */
   osdVisible?: boolean;
   testID?: string;
@@ -389,6 +391,7 @@ interface NativeSurfaceProps {
   style?: StyleProp<ViewStyle>;
   resizeMode?: 'fit' | 'fill' | 'stretch';
   subtitleBottomInsetPx?: number;
+  subtitleFontFamily?: 'system' | 'atkinson' | 'opendyslexic';
   osdVisible?: boolean;
   testID?: string;
 }
@@ -410,6 +413,7 @@ export function AetherSurface({
   style,
   resizeMode,
   subtitleBottomInsetPx,
+  subtitleFontFamily,
   osdVisible,
   testID,
 }: AetherSurfaceProps): ReactElement | null {
@@ -420,6 +424,7 @@ export function AetherSurface({
     style,
     resizeMode,
     subtitleBottomInsetPx,
+    ...(subtitleFontFamily !== undefined ? { subtitleFontFamily } : {}),
     ...(osdVisible !== undefined ? { osdVisible } : {}),
     testID,
   });

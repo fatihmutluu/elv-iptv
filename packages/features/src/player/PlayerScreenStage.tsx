@@ -1,5 +1,6 @@
 import type { CatalogService } from '@elv/data';
 import type {
+  AccessibilityFontFamily,
   AndroidDecoderMode,
   BufferPreset,
   DefaultResizeModePref,
@@ -8,10 +9,11 @@ import type {
   SeekStepSecPref,
   SleepTimerAction,
   SubtitleModePref,
+  TvClockMode,
 } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type { PlaybackClock, PlaybackService, PlaybackTimers } from '@elv/playback';
-import { MicroPill, TvFocusAnchor, useTheme } from '@elv/ui-kit';
+import { MicroPill, TvFocusAnchor, useTheme, useViewport } from '@elv/ui-kit';
 import type { ReactElement } from 'react';
 import { StyleSheet, View } from 'react-native';
 import type { AppLifecyclePort } from '../ports/app-lifecycle';
@@ -78,6 +80,8 @@ export interface PlayerScreenProps {
   preferHevcOverDolbyVision?: boolean;
   filterSdhSubtitles?: boolean;
   subtitleMode?: SubtitleModePref;
+  subtitleFontFamily?: AccessibilityFontFamily;
+  tvClockMode?: TvClockMode;
   osdTimeDisplayMode?: OsdTimeDisplayMode;
   onPersistOsdTimeDisplayMode?: (mode: OsdTimeDisplayMode) => void;
   sleepTimerDefaultAction?: SleepTimerAction;
@@ -149,6 +153,7 @@ export interface PlayerScreenStageProps {
  */
 export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
   const theme = useTheme();
+  const viewport = useViewport();
   const osdNode = <PlayerOsd {...p.osdProps} />;
 
   return (
@@ -222,7 +227,13 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
       ) : null}
 
       {p.holdSpeedActive && !p.showTouchGestures ? (
-        <View pointerEvents="none" style={playerStyles.holdSpeedWrap}>
+        <View
+          pointerEvents="none"
+          style={[
+            playerStyles.holdSpeedWrap,
+            { top: 20 + viewport.safeArea.top + viewport.overscan.y },
+          ]}
+        >
           <MicroPill
             testID="player-hold-speed-pill"
             label={p.i18n.t('player.holdSpeedActive')}
@@ -254,12 +265,25 @@ export function PlayerScreenStage(p: PlayerScreenStageProps): ReactElement {
       ) : (
         <>
           <View
+            testID="player-next-episode-container"
             pointerEvents="box-none"
             style={
               p.nextEpisodeVisible
                 ? p.isTv
-                  ? playerStyles.nextEpisodeOverlayTv
-                  : playerStyles.nextEpisodeOverlay
+                  ? [
+                      playerStyles.nextEpisodeOverlayTv,
+                      {
+                        right: 48 + viewport.overscan.x,
+                        bottom: 112 + viewport.overscan.y,
+                      },
+                    ]
+                  : [
+                      playerStyles.nextEpisodeOverlay,
+                      {
+                        right: 16 + viewport.safeArea.right,
+                        bottom: 96 + viewport.safeArea.bottom,
+                      },
+                    ]
                 : undefined
             }
           >

@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { mpvRuntimePaths } from './runtime-path.ts';
+import { mpvRuntimePaths, resolveFontsDir } from './runtime-path.ts';
 
 const present = (...paths: string[]) => {
   const set = new Set(paths);
@@ -176,5 +176,70 @@ describe('mpvRuntimePaths', () => {
         () => true,
       ),
     ).toBeNull();
+  });
+
+  it('includes fontsDir for packaged and development builds when resources/fonts exists (#163)', () => {
+    const packagedExe = join('/res', 'mpv', 'elv-mpv.exe');
+    const packagedFonts = join('/res', 'fonts');
+    expect(
+      mpvRuntimePaths(
+        {
+          isPackaged: true,
+          resourcesPath: '/res',
+          appPath: '/app',
+          platform: 'win32',
+          arch: 'x64',
+        },
+        present(packagedExe, packagedFonts),
+      ),
+    ).toEqual({
+      executable: packagedExe,
+      inputConf: join('/res', 'mpv-input.conf'),
+      fontsDir: packagedFonts,
+    });
+
+    const devExe = join('/app', 'resources', 'mpv', 'win32-x64', 'elv-mpv.exe');
+    const devFonts = join('/app', 'resources', 'fonts');
+    expect(
+      mpvRuntimePaths(
+        {
+          isPackaged: false,
+          resourcesPath: '/res',
+          appPath: '/app',
+          platform: 'win32',
+          arch: 'x64',
+        },
+        present(devExe, devFonts),
+      ),
+    ).toEqual({
+      executable: devExe,
+      inputConf: join('/app', 'resources', 'mpv-input.conf'),
+      fontsDir: devFonts,
+    });
+  });
+});
+
+describe('resolveFontsDir', () => {
+  it('resolves packaged and dev font dirs only when present on disk (#163)', () => {
+    const packagedFonts = join('/res', 'fonts');
+    const devFonts = join('/app', 'resources', 'fonts');
+    expect(
+      resolveFontsDir(
+        { isPackaged: true, resourcesPath: '/res', appPath: '/app' },
+        present(packagedFonts),
+      ),
+    ).toBe(packagedFonts);
+    expect(
+      resolveFontsDir({ isPackaged: true, resourcesPath: '/res', appPath: '/app' }, present()),
+    ).toBeUndefined();
+    expect(
+      resolveFontsDir(
+        { isPackaged: false, resourcesPath: '/res', appPath: '/app' },
+        present(devFonts),
+      ),
+    ).toBe(devFonts);
+    expect(
+      resolveFontsDir({ isPackaged: false, resourcesPath: '/res', appPath: '/app' }, present()),
+    ).toBeUndefined();
   });
 });

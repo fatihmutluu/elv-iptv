@@ -80,7 +80,10 @@ export function CatalogDiscoveryScreen({
   const theme = useTheme();
   const viewport = useViewport();
   const i18n = useI18n();
-  const layout = useMemo(() => computeCatalogLayout(viewport, theme), [theme, viewport]);
+  const layout = useMemo(
+    () => computeCatalogLayout(viewport, theme, theme.fontScale),
+    [theme, viewport],
+  );
 
   const { memory: activeMemory, updateMemory } = useCatalogTabMemory(memory, onMemoryChange);
 

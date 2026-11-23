@@ -194,6 +194,16 @@ function createSyntheticRepo(): string {
     'packages/features/package.json',
     JSON.stringify({ name: '@elv/features', license: 'GPL-3.0-only', dependencies: {} }),
   );
+  writeRepoFile(
+    dir,
+    'packages/ui-kit/assets/fonts/AtkinsonHyperlegibleNext-OFL.txt',
+    'Copyright 2020-2024 The Atkinson Hyperlegible Next Project Authors\nSIL OPEN FONT LICENSE Version 1.1\n',
+  );
+  writeRepoFile(
+    dir,
+    'packages/ui-kit/assets/fonts/OpenDyslexic-OFL.txt',
+    'Copyright (c) 2019-07-29, Abbie Gonzalez\nSIL OPEN FONT LICENSE Version 1.1\n',
+  );
 
   addFakeNodeModule(
     dir,
@@ -293,6 +303,30 @@ describe('third-party notices generator and drift verifier', () => {
     expect(`${mpv?.modificationNote ?? ''}\n${mpv?.noticeText ?? ''}`).toContain(
       'github.com/mpv-player/mpv/releases/download/v0.42.0',
     );
+
+    const atkinson = byId.get('atkinson-hyperlegible-next');
+    expect(atkinson?.name).toBe('Atkinson Hyperlegible Next');
+    expect(atkinson?.license).toBe('OFL-1.1');
+    expect(atkinson?.sourceUrl).toBe('https://github.com/googlefonts/atkinson-hyperlegible-next');
+    expect(atkinson?.noticeText).toContain('SIL OPEN FONT LICENSE Version 1.1');
+    expect(atkinson?.platforms).toEqual([
+      'Android',
+      'Android TV',
+      'Fire OS',
+      'iOS',
+      'iPadOS',
+      'tvOS',
+      'Windows',
+      'macOS',
+      'Linux',
+    ]);
+
+    const openDyslexic = byId.get('opendyslexic');
+    expect(openDyslexic?.name).toBe('OpenDyslexic');
+    expect(openDyslexic?.license).toBe('OFL-1.1');
+    expect(openDyslexic?.sourceUrl).toBe('https://github.com/antijingoist/opendyslexic');
+    expect(openDyslexic?.noticeText).toContain('SIL OPEN FONT LICENSE Version 1.1');
+    expect(openDyslexic?.platforms).toEqual(atkinson?.platforms);
 
     for (const expectedName of [
       '@op-engineering/op-sqlite',

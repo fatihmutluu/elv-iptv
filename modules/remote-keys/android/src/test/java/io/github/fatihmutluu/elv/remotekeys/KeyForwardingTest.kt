@@ -341,6 +341,52 @@ class KeyForwardingTest {
   }
 
   @Test
+  fun `forwards TV media, captions, audio track, and programmable color keys on down and up while filtering repeats (#133)`() {
+    val tvKeyCodes = listOf(
+      KeyEvent.KEYCODE_MEDIA_REWIND to 89,
+      KeyEvent.KEYCODE_MEDIA_FAST_FORWARD to 90,
+      KeyEvent.KEYCODE_CAPTIONS to 175,
+      KeyEvent.KEYCODE_PROG_RED to 183,
+      KeyEvent.KEYCODE_PROG_GREEN to 184,
+      KeyEvent.KEYCODE_PROG_YELLOW to 185,
+      KeyEvent.KEYCODE_PROG_BLUE to 186,
+      KeyEvent.KEYCODE_MEDIA_AUDIO_TRACK to 222,
+    )
+
+    val events = mutableListOf<Map<String, Any>>()
+    KeyForwarding.setSink { events.add(it) }
+
+    for ((index, pair) in tvKeyCodes.withIndex()) {
+      val (keyCode, expectedCode) = pair
+      assertEquals(expectedCode, keyCode)
+      val baseTime = 1_000L + index * 10L
+      assertTrue(KeyForwarding.forwardRawKey(KeyEvent.ACTION_DOWN, 0, 0, keyCode, baseTime))
+      assertFalse(KeyForwarding.forwardRawKey(KeyEvent.ACTION_DOWN, 1, 0, keyCode, baseTime + 1))
+      assertTrue(KeyForwarding.forwardRawKey(KeyEvent.ACTION_UP, 0, 0, keyCode, baseTime + 2))
+      assertTrue(KeyForwarding.forwardRawKey(KeyEvent.ACTION_UP, 0, KeyEvent.FLAG_CANCELED, keyCode, baseTime + 3))
+    }
+
+    assertEquals(tvKeyCodes.size * 3, events.size)
+    for ((index, pair) in tvKeyCodes.withIndex()) {
+      val (keyCode, _) = pair
+      val baseTime = (1_000L + index * 10L).toDouble()
+      val offset = index * 3
+      assertEquals(
+        mapOf("action" to "down", "keyCode" to keyCode, "canceled" to false, "eventTime" to baseTime),
+        events[offset],
+      )
+      assertEquals(
+        mapOf("action" to "up", "keyCode" to keyCode, "canceled" to false, "eventTime" to baseTime + 2.0),
+        events[offset + 1],
+      )
+      assertEquals(
+        mapOf("action" to "up", "keyCode" to keyCode, "canceled" to true, "eventTime" to baseTime + 3.0),
+        events[offset + 2],
+      )
+    }
+  }
+
+  @Test
   fun `wrapWindow allows garbage collection when callback strongly references windowKey`() {
     val weakWindow = wrapTransientWindow()
     for (attempt in 0 until 50) {

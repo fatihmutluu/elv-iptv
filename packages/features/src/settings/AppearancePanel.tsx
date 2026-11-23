@@ -33,9 +33,13 @@ import {
   FONT_SCALE_OPTIONS,
   LANGUAGE_OPTIONS,
   type SettingsPreferencesController,
+  SUBTITLE_FONT_OPTIONS,
+  stepOverscanRatio,
+  UI_FONT_OPTIONS,
 } from './appearance-controls';
 import { SettingsDivider, SettingsToggleRow } from './SettingsRowParts';
 import { ThemePresetGrid } from './ThemePresetGrid';
+import { TvDisplaySettingsCard } from './TvDisplaySettingsCard';
 import type { AppearanceFocusId } from './useTvSettingsNavigation';
 
 export {
@@ -82,7 +86,7 @@ export function AppearancePanel({
   const scrollRef = useRef<ScrollViewHandle | null>(null);
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const layoutsRef = useRef<
-    Partial<Record<'theme' | 'font' | 'artworkCache' | 'reset', SectionLayout>>
+    Partial<Record<'theme' | 'font' | 'tvDisplay' | 'artworkCache' | 'reset', SectionLayout>>
   >({});
   const motionOffsetYRef = useRef(0);
 
@@ -93,6 +97,7 @@ export function AppearancePanel({
     locale: i18n.locale,
     fontScale: theme.fontScale,
     reduceMotion: theme.reduceMotion,
+    uiFontFamily: theme.uiFontFamily,
   };
 
   useEffect(() => {
@@ -124,6 +129,7 @@ export function AppearancePanel({
       }
       if (patch.fontScale !== undefined) themeCtrl.setFontScale(patch.fontScale);
       if (patch.reduceMotion !== undefined) themeCtrl.setReduceMotion(patch.reduceMotion);
+      if (patch.uiFontFamily !== undefined) themeCtrl.setUiFontFamily(patch.uiFontFamily);
       if (patch.locale === 'tr' || patch.locale === 'en') i18n.setLocale(patch.locale);
     },
     [i18n, suppliedPrefs, themeCtrl],
@@ -163,6 +169,7 @@ export function AppearancePanel({
     themeCtrl.setPreset('obsidianCrimson');
     themeCtrl.setFontScale(1);
     themeCtrl.setReduceMotion(false);
+    themeCtrl.setUiFontFamily('system');
   }, [suppliedPrefs, themeCtrl]);
 
   const showClearedMessage = controlledCleared ?? localCleared;
@@ -269,6 +276,58 @@ export function AppearancePanel({
 
         <SettingsDivider />
 
+        <View style={styles.rowHeader}>
+          <View style={styles.rowText}>
+            <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
+              {i18n.t('settings.uiFont')}
+            </Text>
+            <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
+              {i18n.t('settings.uiFontHint')}
+            </Text>
+          </View>
+          <View style={[styles.chipRow, { gap: theme.spacing.xs }]}>
+            {UI_FONT_OPTIONS.map((opt) => (
+              <FilterChip
+                key={opt.id}
+                testID={opt.testID}
+                label={i18n.t(opt.labelKey)}
+                selected={activePrefs.uiFontFamily === opt.id}
+                focused={focusedControlId === opt.focusId}
+                focusable={!isTv}
+                onPress={() => applyPatch({ uiFontFamily: opt.id })}
+              />
+            ))}
+          </View>
+        </View>
+
+        <SettingsDivider />
+
+        <View style={styles.rowHeader}>
+          <View style={styles.rowText}>
+            <Text style={[theme.typography.title, { color: theme.colors.textPrimary }]}>
+              {i18n.t('settings.subtitleFont')}
+            </Text>
+            <Text style={[theme.typography.caption, { color: theme.colors.textSecondary }]}>
+              {i18n.t('settings.subtitleFontHint')}
+            </Text>
+          </View>
+          <View style={[styles.chipRow, { gap: theme.spacing.xs }]}>
+            {SUBTITLE_FONT_OPTIONS.map((opt) => (
+              <FilterChip
+                key={opt.id}
+                testID={opt.testID}
+                label={i18n.t(opt.labelKey)}
+                selected={activePrefs.subtitleFontFamily === opt.id}
+                focused={focusedControlId === opt.focusId}
+                focusable={!isTv}
+                onPress={() => applyPatch({ subtitleFontFamily: opt.id })}
+              />
+            ))}
+          </View>
+        </View>
+
+        <SettingsDivider />
+
         <SettingsToggleRow
           testID="settings-toggle-reduce-motion"
           title={i18n.t('settings.reduceMotion.label')}
@@ -293,6 +352,26 @@ export function AppearancePanel({
           onToggle={() => applyPatch({ confirmExitOnBack: !activePrefs.confirmExitOnBack })}
         />
       </Surface>
+
+      {isTv ? (
+        <TvDisplaySettingsCard
+          overscanX={activePrefs.overscanX}
+          overscanY={activePrefs.overscanY}
+          tvClockMode={activePrefs.tvClockMode}
+          focusedControlId={focusedControlId}
+          onStepOverscan={(axis, delta) => {
+            if (axis === 'x') {
+              applyPatch({ overscanX: stepOverscanRatio(activePrefs.overscanX, delta) });
+            } else {
+              applyPatch({ overscanY: stepOverscanRatio(activePrefs.overscanY, delta) });
+            }
+          }}
+          onSelectTvClockMode={(tvClockMode) => applyPatch({ tvClockMode })}
+          onLayoutBox={(box) => {
+            layoutsRef.current.tvDisplay = box;
+          }}
+        />
+      ) : null}
 
       <Surface
         testID="settings-section-artwork-cache"

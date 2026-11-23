@@ -1817,3 +1817,57 @@ msgstr "Kanal sırası"
 
 msgid "live.sortAlpha"
 msgstr "A–Z"
+
+msgid "settings.uiFont"
+msgstr "Arayüz yazı tipi"
+
+msgid "settings.uiFontHint"
+msgstr "Menüler, listeler ve rehber için yüksek okunabilirlikli yazı tipi"
+
+msgid "settings.subtitleFont"
+msgstr "Altyazı yazı tipi"
+
+msgid "settings.subtitleFontHint"
+msgstr "Metin altyazılar için kullanılan yazı tipi"
+
+msgid "settings.fontSystem"
+msgstr "Sistem varsayılanı"
+
+msgid "settings.fontAtkinson"
+msgstr "Atkinson Hyperlegible"
+
+msgid "settings.fontOpenDyslexic"
+msgstr "OpenDyslexic"
+
+msgid "settings.overscanX"
+msgstr "Yatay ekran kenar boşluğu"
+
+msgid "settings.overscanY"
+msgstr "Dikey ekran kenar boşluğu"
+
+msgid "settings.overscanHint"
+msgstr "Menü ve oynatıcı çubuklarının kesilmemesi için TV güvenli kenar boşluklarını ayarlayın"
+
+msgid "settings.overscanValue"
+msgstr "%{pct}"
+
+msgid "player.remainingTimeAnnouncement"
+msgstr "{time} kaldı"
+
+msgid "settings.tvClockMode"
+msgstr "TV ortam saati"
+
+msgid "settings.tvClockModeHint"
+msgstr "TV'de sağ üst köşede güncel saati göster"
+
+msgid "settings.tvClockAlways"
+msgstr "Her zaman"
+
+msgid "settings.tvClockMenus"
+msgstr "Yalnızca menülerde"
+
+msgid "settings.tvClockPlayer"
+msgstr "Yalnızca oynatıcıda"
+
+msgid "settings.tvClockNever"
+msgstr "Kapalı"

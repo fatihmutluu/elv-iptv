@@ -1,8 +1,12 @@
-import type {
-  ArtworkCacheLimitMbPref,
-  PreferencesPatch,
-  PreferencesSnapshot,
-  Result,
+import {
+  type AccessibilityFontFamily,
+  type ArtworkCacheLimitMbPref,
+  MAX_PREF_OVERSCAN,
+  MIN_PREF_OVERSCAN,
+  type PreferencesPatch,
+  type PreferencesSnapshot,
+  type Result,
+  type TvClockMode,
 } from '@elv/domain';
 import type { MessageId } from '@elv/i18n';
 import { THEME_PRESETS, type ThemePresetId } from '@elv/ui-kit';
@@ -43,6 +47,90 @@ export const FONT_SCALE_OPTIONS: ReadonlyArray<{
   { scale: 1.2, label: '120%', focusId: 'font-120', testID: 'settings-font-120' },
 ];
 
+export const UI_FONT_OPTIONS: ReadonlyArray<{
+  readonly id: AccessibilityFontFamily;
+  readonly focusId: AppearanceFocusId;
+  readonly testID: string;
+  readonly labelKey: MessageId;
+}> = [
+  {
+    id: 'system',
+    focusId: 'ui-font-system',
+    testID: 'settings-ui-font-system',
+    labelKey: 'settings.fontSystem',
+  },
+  {
+    id: 'atkinson',
+    focusId: 'ui-font-atkinson',
+    testID: 'settings-ui-font-atkinson',
+    labelKey: 'settings.fontAtkinson',
+  },
+  {
+    id: 'opendyslexic',
+    focusId: 'ui-font-opendyslexic',
+    testID: 'settings-ui-font-opendyslexic',
+    labelKey: 'settings.fontOpenDyslexic',
+  },
+];
+
+export const SUBTITLE_FONT_OPTIONS: ReadonlyArray<{
+  readonly id: AccessibilityFontFamily;
+  readonly focusId: AppearanceFocusId;
+  readonly testID: string;
+  readonly labelKey: MessageId;
+}> = [
+  {
+    id: 'system',
+    focusId: 'sub-font-system',
+    testID: 'settings-sub-font-system',
+    labelKey: 'settings.fontSystem',
+  },
+  {
+    id: 'atkinson',
+    focusId: 'sub-font-atkinson',
+    testID: 'settings-sub-font-atkinson',
+    labelKey: 'settings.fontAtkinson',
+  },
+  {
+    id: 'opendyslexic',
+    focusId: 'sub-font-opendyslexic',
+    testID: 'settings-sub-font-opendyslexic',
+    labelKey: 'settings.fontOpenDyslexic',
+  },
+];
+
+export const TV_CLOCK_MODE_OPTIONS: ReadonlyArray<{
+  readonly id: TvClockMode;
+  readonly focusId: AppearanceFocusId;
+  readonly testID: string;
+  readonly labelKey: MessageId;
+}> = [
+  {
+    id: 'always',
+    focusId: 'tv-clock-always',
+    testID: 'settings-tv-clock-always',
+    labelKey: 'settings.tvClockAlways',
+  },
+  {
+    id: 'menus',
+    focusId: 'tv-clock-menus',
+    testID: 'settings-tv-clock-menus',
+    labelKey: 'settings.tvClockMenus',
+  },
+  {
+    id: 'player',
+    focusId: 'tv-clock-player',
+    testID: 'settings-tv-clock-player',
+    labelKey: 'settings.tvClockPlayer',
+  },
+  {
+    id: 'never',
+    focusId: 'tv-clock-never',
+    testID: 'settings-tv-clock-never',
+    labelKey: 'settings.tvClockNever',
+  },
+];
+
 export const ARTWORK_CACHE_OPTIONS: ReadonlyArray<{
   readonly mb: ArtworkCacheLimitMbPref;
   readonly focusId: AppearanceFocusId;
@@ -52,6 +140,13 @@ export const ARTWORK_CACHE_OPTIONS: ReadonlyArray<{
   { mb: 128, focusId: 'artwork-cache-128', testID: 'settings-artwork-cache-128' },
   { mb: 256, focusId: 'artwork-cache-256', testID: 'settings-artwork-cache-256' },
 ];
+
+/** Steps an overscan ratio cleanly by `delta` (`±0.01`), clamped to `[0, 0.1]`. */
+export function stepOverscanRatio(current: number, delta: number): number {
+  const safe = Number.isFinite(current) ? current : 0.05;
+  const clamped = Math.max(MIN_PREF_OVERSCAN, Math.min(MAX_PREF_OVERSCAN, safe + delta));
+  return Math.round(clamped * 100) / 100;
+}
 
 const SECOND_THEME_ROW_IDS = new Set<AppearanceFocusId>([
   'theme-velvetViolet',
@@ -64,7 +159,7 @@ export function computeAppearanceScrollY(
   controlId: AppearanceFocusId,
   layouts: Partial<
     Record<
-      'theme' | 'font' | 'artworkCache' | 'reset',
+      'theme' | 'font' | 'tvDisplay' | 'artworkCache' | 'reset',
       { readonly y: number; readonly height: number }
     >
   >,
@@ -78,11 +173,18 @@ export function computeAppearanceScrollY(
       ? Math.max(0, box.y + Math.round(box.height * 0.45) - 12)
       : Math.max(0, box.y - 12);
   }
-  if (controlId.startsWith('font-')) {
+  if (
+    controlId.startsWith('font-') ||
+    controlId.startsWith('ui-font-') ||
+    controlId.startsWith('sub-font-')
+  ) {
     return layouts.font ? Math.max(0, layouts.font.y - 12) : undefined;
   }
   if (controlId === 'toggle-reduce-motion' || controlId === 'toggle-confirm-exit') {
     return layouts.font ? Math.max(0, layouts.font.y + motionOffsetY - 12) : undefined;
+  }
+  if (controlId.startsWith('overscan-') || controlId.startsWith('tv-clock-')) {
+    return layouts.tvDisplay ? Math.max(0, layouts.tvDisplay.y - 12) : undefined;
   }
   if (controlId.startsWith('artwork-cache-')) {
     return layouts.artworkCache ? Math.max(0, layouts.artworkCache.y - 12) : undefined;
@@ -102,6 +204,7 @@ export function activateAppearanceControl(
     setPreset: (id: ThemePresetId) => void;
     setFontScale: (scale: number) => void;
     setReduceMotion: (next: boolean) => void;
+    setUiFontFamily?: (family: AccessibilityFontFamily) => void;
     setLocale: (locale: 'tr' | 'en') => void;
     onSetArtworkCacheLimitMb?: (mb: ArtworkCacheLimitMbPref) => void;
     onClearArtworkCache?: () => void;
@@ -128,6 +231,17 @@ export function activateAppearanceControl(
     else deps.setFontScale(fontOpt.scale);
     return;
   }
+  const uiFontOpt = UI_FONT_OPTIONS.find((opt) => opt.focusId === controlId);
+  if (uiFontOpt) {
+    if (preferences) void preferences.updatePreferences({ uiFontFamily: uiFontOpt.id });
+    else deps.setUiFontFamily?.(uiFontOpt.id);
+    return;
+  }
+  const subFontOpt = SUBTITLE_FONT_OPTIONS.find((opt) => opt.focusId === controlId);
+  if (subFontOpt) {
+    if (preferences) void preferences.updatePreferences({ subtitleFontFamily: subFontOpt.id });
+    return;
+  }
   if (controlId === 'toggle-reduce-motion') {
     const current = preferences ? preferences.preferences.reduceMotion : deps.reduceMotion;
     if (preferences) void preferences.updatePreferences({ reduceMotion: !current });
@@ -140,6 +254,31 @@ export function activateAppearanceControl(
         confirmExitOnBack: !preferences.preferences.confirmExitOnBack,
       });
     }
+    return;
+  }
+  if (controlId === 'overscan-x-dec' || controlId === 'overscan-x-inc') {
+    if (preferences) {
+      const next = stepOverscanRatio(
+        preferences.preferences.overscanX,
+        controlId === 'overscan-x-inc' ? 0.01 : -0.01,
+      );
+      void preferences.updatePreferences({ overscanX: next });
+    }
+    return;
+  }
+  if (controlId === 'overscan-y-dec' || controlId === 'overscan-y-inc') {
+    if (preferences) {
+      const next = stepOverscanRatio(
+        preferences.preferences.overscanY,
+        controlId === 'overscan-y-inc' ? 0.01 : -0.01,
+      );
+      void preferences.updatePreferences({ overscanY: next });
+    }
+    return;
+  }
+  const clockOpt = TV_CLOCK_MODE_OPTIONS.find((opt) => opt.focusId === controlId);
+  if (clockOpt) {
+    if (preferences) void preferences.updatePreferences({ tvClockMode: clockOpt.id });
     return;
   }
   const cacheOpt = ARTWORK_CACHE_OPTIONS.find((opt) => opt.focusId === controlId);
@@ -158,6 +297,7 @@ export function activateAppearanceControl(
       deps.setPreset('obsidianCrimson');
       deps.setFontScale(1);
       deps.setReduceMotion(false);
+      deps.setUiFontFamily?.('system');
     }
   }
 }

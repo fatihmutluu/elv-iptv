@@ -4,6 +4,7 @@ import {
   type FormFactor,
   Icon,
   useTheme,
+  useViewport,
   webBackdropBlur,
   webCursorPointer,
   webTransition,
@@ -64,7 +65,7 @@ function TrackRow({
       style={[
         styles.optionRow,
         {
-          minHeight: isTouch ? 44 : 40,
+          minHeight: Math.round((isTouch ? 44 : 40) * Math.max(1, theme.fontScale)),
           borderRadius: theme.radius.card,
           backgroundColor: selected ? theme.colors.accentTint : theme.colors.bgSurface,
           borderColor,
@@ -116,6 +117,9 @@ export function TrackPickerModal({
   onClose: () => void;
 }): ReactElement {
   const theme = useTheme();
+  const viewport = useViewport();
+  const safeFontScale = Number.isFinite(theme.fontScale) ? Math.max(1, theme.fontScale) : 1;
+  const rowPitch = Math.round(APPROX_ROW_PITCH * safeFontScale);
   const offLabel = i18n.t('player.subtitlesOff');
   const offSelected = tracks.selectedSubtitleId === null;
   const closeLabel = i18n.t('player.closeTracks');
@@ -133,10 +137,10 @@ export function TrackPickerModal({
     if (!showCursor) return;
     const targetRef = cursor.column === 'audio' ? audioScrollRef : subtitleScrollRef;
     targetRef.current?.scrollTo?.({
-      y: Math.max(0, (cursor.index - 1) * APPROX_ROW_PITCH),
+      y: Math.max(0, (cursor.index - 1) * rowPitch),
       animated: false,
     });
-  }, [cursor.column, cursor.index, showCursor]);
+  }, [cursor.column, cursor.index, rowPitch, showCursor]);
 
   const listStyle = [styles.list, isPhone ? styles.listPhone : null];
   const dialogA11yProps = isWebDesktop
@@ -154,7 +158,13 @@ export function TrackPickerModal({
       {...dialogA11yProps}
       style={[
         styles.panel,
-        isTv ? styles.panelTv : null,
+        isTv
+          ? {
+              paddingHorizontal: 48 + viewport.overscan.x,
+              paddingTop: 16,
+              paddingBottom: 16 + viewport.overscan.y,
+            }
+          : null,
         {
           backgroundColor: theme.colors.glassBg,
           borderTopColor: theme.colors.glassBorder,
@@ -268,10 +278,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     gap: 10,
-  },
-  panelTv: {
-    paddingHorizontal: 48,
-    paddingVertical: 16,
   },
   headerRow: {
     flexDirection: 'row',

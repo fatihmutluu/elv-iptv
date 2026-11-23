@@ -61,6 +61,40 @@ public func resolveCaptionAppearance(source: (any CaptionAppearanceSource)?) -> 
   )
 }
 
+/// Maps a JS `subtitleFontFamily` preference (`"atkinson"`, `"opendyslexic"`, `"system"`) to the bundled
+/// PostScript font name, or `nil` when system caption font styling should be preserved (`#163`).
+public func resolveSubtitleFontName(_ family: String?) -> String? {
+  guard let raw = family?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+    return nil
+  }
+  switch raw {
+  case "atkinson":
+    return "AtkinsonHyperlegibleNext-Regular"
+  case "opendyslexic":
+    return "OpenDyslexic-Regular"
+  default:
+    return nil
+  }
+}
+
+/// Applies an explicit subtitle font override to a resolved `CaptionAppearanceStyle` while leaving system
+/// foreground, background, window, and relative character size intact (`#163`).
+public func applyingSubtitleFontOverride(
+  _ style: CaptionAppearanceStyle,
+  family: String?
+) -> CaptionAppearanceStyle {
+  guard let overrideFont = resolveSubtitleFontName(family) else {
+    return style
+  }
+  return CaptionAppearanceStyle(
+    foreground: style.foreground,
+    background: style.background,
+    window: style.window,
+    relativeCharacterSize: style.relativeCharacterSize,
+    fontName: overrideFont
+  )
+}
+
 /// Deduplicates sequential subtitle cue strings for VoiceOver announcements, resetting on empty gaps.
 public struct VoiceOverAnnouncementDeduper: Equatable, Sendable {
   private var lastAnnounced: String?

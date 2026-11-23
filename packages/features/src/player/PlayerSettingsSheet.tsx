@@ -113,6 +113,8 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
   const isVod = props.isVod === true;
   const playbackSpeed = props.playbackSpeed ?? 1;
   const theme = useTheme();
+  const safeFontScale = Number.isFinite(theme.fontScale) ? Math.max(1, theme.fontScale) : 1;
+  const rowPitch = Math.round(APPROX_ROW_PITCH * safeFontScale);
   const isWebDesktop = formFactor === 'desktop' && (Platform.OS as string) === 'web';
   const showCursor = isTv || formFactor === 'desktop';
   const desktopPanelRef = useRef<ComponentRef<typeof View> | null>(null);
@@ -127,10 +129,10 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
   useEffect(() => {
     if (!visible || !showCursor || menuState.view === 'root') return;
     listScrollRef.current?.scrollTo?.({
-      y: Math.max(0, (menuState.index - 1) * APPROX_ROW_PITCH),
+      y: Math.max(0, (menuState.index - 1) * rowPitch),
       animated: false,
     });
-  }, [menuState.index, menuState.view, showCursor, visible]);
+  }, [menuState.index, menuState.view, rowPitch, showCursor, visible]);
 
   if (!visible) return null;
 

@@ -58,6 +58,7 @@ export interface LiveSession {
   userQuit: boolean;
   hasCustomHeaders: boolean;
   appliedAudioDevice?: string;
+  appliedSubtitleFont?: string;
   inFlight?: MediaSlot;
   readonly endWaiters: Set<{ id: number; done(ended: boolean): void }>;
 }
@@ -86,6 +87,7 @@ export interface LiveSessionHooks {
   enqueueCommand(cmd: MpvCommand, slot?: MediaSlot): void;
   onAudioProperty?(name: 'volume' | 'mute', value: unknown): void;
   getDesiredAudioDevice?(): string | undefined;
+  getDesiredSubtitleFont?(): string | undefined;
   readaheadStore?: ReadaheadTierStore;
 }
 
@@ -357,6 +359,11 @@ export function createSessionController(hooks: LiveSessionHooks) {
         L.appliedAudioDevice = desiredAudio;
         void send(L, ['set_property', 'audio-device', desiredAudio]);
       }
+      const desiredSubFont = hooks.getDesiredSubtitleFont?.();
+      if (desiredSubFont !== undefined) {
+        L.appliedSubtitleFont = desiredSubFont;
+        void send(L, ['set_property', 'sub-font', desiredSubFont]);
+      }
       return L;
     },
     async loadSlot(L: LiveSession, slot: MediaSlot, stopFirst: boolean): Promise<void> {
@@ -366,6 +373,12 @@ export function createSessionController(hooks: LiveSessionHooks) {
       if (desiredAudio !== undefined && L.appliedAudioDevice !== desiredAudio) {
         L.appliedAudioDevice = desiredAudio;
         await send(L, ['set_property', 'audio-device', desiredAudio]);
+        if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
+      }
+      const desiredSubFont = hooks.getDesiredSubtitleFont?.();
+      if (desiredSubFont !== undefined && L.appliedSubtitleFont !== desiredSubFont) {
+        L.appliedSubtitleFont = desiredSubFont;
+        await send(L, ['set_property', 'sub-font', desiredSubFont]);
         if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
       }
       const fields = headerFields(slot.request.headers);

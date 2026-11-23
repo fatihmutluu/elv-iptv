@@ -1,4 +1,12 @@
-import { CtaButton, Icon, useFormFactor, useI18n, useTheme, webBackdropBlur } from '@elv/ui-kit';
+import {
+  CtaButton,
+  Icon,
+  useFormFactor,
+  useI18n,
+  useTheme,
+  useViewport,
+  webBackdropBlur,
+} from '@elv/ui-kit';
 import { type ComponentRef, type ReactElement, useRef } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { useDesktopDialogTrap } from './desktop-dialog-trap';
@@ -38,6 +46,7 @@ export function ConnectionLimitDialog({
   const theme = useTheme();
   const i18n = useI18n();
   const formFactor = useFormFactor();
+  const viewport = useViewport();
   const isTv = formFactor === 'tv';
   const isWebDesktop = formFactor === 'desktop' && (Platform.OS as string) === 'web';
   const panelRef = useRef<ComponentRef<typeof View> | null>(null);
@@ -83,7 +92,14 @@ export function ConnectionLimitDialog({
   return (
     <View
       testID={testID}
-      style={[styles.backdrop, { backgroundColor: theme.colors.overlayBackdrop }]}
+      style={[
+        styles.backdrop,
+        {
+          backgroundColor: theme.colors.overlayBackdrop,
+          paddingHorizontal: 20 + viewport.overscan.x,
+          paddingVertical: 20 + viewport.overscan.y,
+        },
+      ]}
     >
       <View
         ref={panelRef}

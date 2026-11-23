@@ -278,6 +278,7 @@ describe('bindDesktopMediaSession', () => {
       setHwdec: vi.fn(),
       setResizeMode: vi.fn(),
       setFilterSdh: vi.fn(),
+      setSubtitleFontFamily: vi.fn(),
       onUi: vi.fn(() => () => undefined),
       release: vi.fn(),
       subscribe: subscribeSpy,

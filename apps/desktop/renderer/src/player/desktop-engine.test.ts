@@ -404,9 +404,12 @@ describe('createDesktopEngine', () => {
     f.ui('e1', { type: 'fullscreen-changed', fullscreen: false });
     expect(engine.isFullscreen()).toBe(false);
 
-    // Forwards setResizeMode, setFilterSdh, chapters, and telemetry events (#118, #124, #160, #310)
+    // Forwards setResizeMode, setFilterSdh, setSubtitleFontFamily, chapters, and telemetry events (#118, #124, #160, #163, #310)
     engine.setResizeMode('fill');
     engine.setFilterSdh(true);
+    engine.setSubtitleFontFamily('atkinson');
+    engine.setSubtitleFontFamily('opendyslexic');
+    engine.setSubtitleFontFamily('system');
     expect(f.sent).toContainEqual({
       engineId: 'e1',
       command: { name: 'setResizeMode', mode: 'fill' },
@@ -414,6 +417,18 @@ describe('createDesktopEngine', () => {
     expect(f.sent).toContainEqual({
       engineId: 'e1',
       command: { name: 'setFilterSdh', enabled: true },
+    });
+    expect(f.sent).toContainEqual({
+      engineId: 'e1',
+      command: { name: 'setSubtitleFontFamily', family: 'atkinson' },
+    });
+    expect(f.sent).toContainEqual({
+      engineId: 'e1',
+      command: { name: 'setSubtitleFontFamily', family: 'opendyslexic' },
+    });
+    expect(f.sent).toContainEqual({
+      engineId: 'e1',
+      command: { name: 'setSubtitleFontFamily', family: 'system' },
     });
     const chaptersEvent: EngineEvent = {
       attempt: 2,

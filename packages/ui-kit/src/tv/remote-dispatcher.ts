@@ -67,6 +67,10 @@ const KEYS: Readonly<Record<string, Key>> = {
   channelDown: 'channelDown',
   pageUp: 'channelUp',
   pageDown: 'channelDown',
+  colorRed: 'colorRed',
+  colorGreen: 'colorGreen',
+  colorYellow: 'colorYellow',
+  colorBlue: 'colorBlue',
 };
 
 const RAW_BACK_DEDUP_MS = 1000;

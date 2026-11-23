@@ -153,6 +153,8 @@ export function PlayerChannelDrawer({
 }: PlayerChannelDrawerProps): ReactElement | null {
   const theme = useTheme();
   const viewport = useViewport();
+  const safeFontScale = Number.isFinite(theme.fontScale) ? Math.max(1, theme.fontScale) : 1;
+  const channelRowPitch = Math.round(CHANNEL_ROW_PITCH * safeFontScale);
   const isWebDesktop = formFactor === 'desktop' && (Platform.OS as string) === 'web';
   const isPortraitOverlay =
     !isTv && formFactor !== 'desktop' && viewport.orientation === 'portrait';
@@ -266,10 +268,10 @@ export function PlayerChannelDrawer({
     if (!visible || totalCount <= 0) return;
     const localIdx = Math.max(0, focusedIndex - windowStart);
     listScrollRef.current?.scrollTo?.({
-      y: Math.max(0, (localIdx - 2) * CHANNEL_ROW_PITCH),
+      y: Math.max(0, (localIdx - 2) * channelRowPitch),
       animated: false,
     });
-  }, [focusedIndex, totalCount, visible, windowStart]);
+  }, [channelRowPitch, focusedIndex, totalCount, visible, windowStart]);
 
   useEffect(() => {
     if (lastPlaylistRef.current !== playlist) {
@@ -483,7 +485,7 @@ export function PlayerChannelDrawer({
               const isFocused = idx === focusedIndex;
               if (entry === undefined) {
                 return (
-                  <View key={`slot-${idx}`} style={styles.row}>
+                  <View key={`slot-${idx}`} style={[styles.row, { minHeight: channelRowPitch }]}>
                     <SkeletonBox width={32} height={32} borderRadius={theme.radius.button} />
                     <SkeletonBox width="70%" height={14} borderRadius={theme.radius.button} />
                   </View>
@@ -510,6 +512,7 @@ export function PlayerChannelDrawer({
                   style={({ pressed }) => [
                     styles.row,
                     {
+                      minHeight: channelRowPitch,
                       backgroundColor: isPlaying
                         ? theme.colors.accentTint
                         : isFocused

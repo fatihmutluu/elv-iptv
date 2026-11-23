@@ -177,7 +177,8 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
   }, [p.onToggleSort, p.sortBy]);
 
   const cols = computeLiveGridColumns(viewport);
-  const cardHeight = layout.isTv ? 116 : layout.isTouch ? 108 : 102;
+  const safeFontScale = Number.isFinite(theme.fontScale) ? Math.max(1, theme.fontScale) : 1;
+  const cardHeight = Math.round((layout.isTv ? 116 : layout.isTouch ? 108 : 102) * safeFontScale);
   const rowHeight = cardHeight + layout.gridGap;
   const usableHeight = Math.max(rowHeight * 2, viewport.height - layout.heroTopClearance - 120);
   const visibleRows = Math.max(3, Math.ceil(usableHeight / rowHeight));

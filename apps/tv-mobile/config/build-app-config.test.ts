@@ -5,6 +5,7 @@ import {
   type Env,
   isNativeDebugConfigEmbed,
 } from './build-app-config';
+import { withAccessibilityFonts } from './with-accessibility-fonts.ts';
 import { withAetherFrameworks } from './with-aether-frameworks.ts';
 import { withAndroidDisplay } from './with-android-display.ts';
 
@@ -186,7 +187,7 @@ describe('buildAppConfig', () => {
       );
       const custom = (config.plugins ?? []).some(
         (p) =>
-          (typeof p === 'function' && p !== withAetherFrameworks) ||
+          (typeof p === 'function' && p !== withAetherFrameworks && p !== withAccessibilityFonts) ||
           (Array.isArray(p) && typeof p[0] === 'function' && p[0] !== withAndroidDisplay),
       );
       expect(custom).toBe(false);
@@ -215,9 +216,14 @@ describe('buildAppConfig', () => {
     { APP_VARIANT: 'development', EXPO_TV: undefined },
     { APP_VARIANT: 'production', EXPO_TV: '1' },
     { APP_VARIANT: 'production', EXPO_TV: undefined },
-  ])('wires the AetherEngine frameworks plugin in every variant (%o)', (env) => {
-    expect(build(env).plugins).toContain(withAetherFrameworks);
-  });
+  ])(
+    'wires the AetherEngine frameworks and accessibility fonts plugins in every variant (%o)',
+    (env) => {
+      const plugins = build(env).plugins;
+      expect(plugins).toContain(withAetherFrameworks);
+      expect(plugins).toContain(withAccessibilityFonts);
+    },
+  );
 
   it('adds the TV plugin only when EXPO_TV is set', () => {
     expect(pluginOptions({}, '@react-native-tvos/config-tv')).toBeUndefined();

@@ -1,4 +1,5 @@
 import { createCoalescedCatalog } from '@elv/data';
+import type { AccessibilityFontFamily } from '@elv/domain';
 import {
   AppProviders,
   AppShell,
@@ -11,6 +12,7 @@ import { resolveLocale } from '@elv/i18n';
 import { UiAdaptersProvider } from '@elv/ui-kit';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { attachAccessibilityFonts } from './accessibility-fonts.ts';
 import { attachMouseBackGuard } from './browser-back.ts';
 import {
   attemptCatalogReconnect,
@@ -168,6 +170,8 @@ function AppRoot() {
           setDeinterlace: (enabled: boolean) => rawEngine.setDeinterlace(enabled),
           setResizeMode: (mode: 'fit' | 'fill' | 'stretch') => rawEngine.setResizeMode(mode),
           setFilterSdh: (enabled: boolean) => rawEngine.setFilterSdh(enabled),
+          setSubtitleFontFamily: (family: AccessibilityFontFamily) =>
+            rawEngine.setSubtitleFontFamily(family),
           setMediaMetadata: (metadata: Parameters<typeof engine.setMediaMetadata>[0]) =>
             engine.setMediaMetadata(metadata),
           getAudioDevices: () => rawEngine.getAudioDevices(),
@@ -310,6 +314,11 @@ const appStyles = StyleSheet.create({
 
 /** Root of the desktop renderer: mounts the gate harness on `--elv-gate=`, the dev-only UI Workbench in plain browser dev mode, and `AppShell` (#13) otherwise. */
 export function App() {
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    return attachAccessibilityFonts(window);
+  }, []);
+
   if (GATE) return <GateScreen params={GATE} />;
   if (MOUNT_WORKBENCH && WorkbenchShell !== null) {
     return (

@@ -1,10 +1,11 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** Where the mpv launcher and its input configuration live. */
+/** Where the mpv launcher, its input configuration, and optional bundled subtitle fonts live. */
 export interface MpvRuntimePaths {
   executable: string;
   inputConf: string;
+  fontsDir?: string;
   canvasExecutable?: string;
   ioSurfaceAddon?: string;
 }
@@ -12,6 +13,19 @@ export interface MpvRuntimePaths {
 const MAC_EXECUTABLE = ['ELV IPTV Player.app', 'Contents', 'MacOS', 'mpv'];
 const MAC_CANVAS_EXECUTABLE = ['ELV IPTV Player.app', 'Contents', 'MacOS', 'elv-mpv'];
 const MAC_IOSURFACE_ADDON = 'elv-iosurface.node';
+
+/**
+ * Resolves the bundled subtitle fonts directory when present on disk: `<resourcesPath>/fonts` in packaged builds,
+ * `<appPath>/resources/fonts` in development (`#163`).
+ */
+export function resolveFontsDir(
+  p: { isPackaged: boolean; resourcesPath: string; appPath: string },
+  exists: (path: string) => boolean = existsSync,
+): string | undefined {
+  const resources = p.isPackaged ? p.resourcesPath : join(p.appPath, 'resources');
+  const dir = join(resources, 'fonts');
+  return exists(dir) ? dir : undefined;
+}
 
 /**
  * Locates the bundled mpv runtime: packaged next to the app under `resources/` (outside the asar), in development
@@ -37,12 +51,20 @@ export function mpvRuntimePaths(
   else return null;
   if (!exists(executable)) return null;
   const inputConf = join(resources, 'mpv-input.conf');
+  const fontsDir = resolveFontsDir(p, exists);
+  const fontsField = fontsDir === undefined ? {} : { fontsDir };
   if (p.platform === 'darwin') {
     const macCanvasExe = join(runtimeDir, ...MAC_CANVAS_EXECUTABLE);
     const macAddon = join(runtimeDir, MAC_IOSURFACE_ADDON);
     if (exists(macCanvasExe) && exists(macAddon)) {
-      return { executable, inputConf, canvasExecutable: macCanvasExe, ioSurfaceAddon: macAddon };
+      return {
+        executable,
+        inputConf,
+        ...fontsField,
+        canvasExecutable: macCanvasExe,
+        ioSurfaceAddon: macAddon,
+      };
     }
   }
-  return { executable, inputConf };
+  return { executable, inputConf, ...fontsField };
 }

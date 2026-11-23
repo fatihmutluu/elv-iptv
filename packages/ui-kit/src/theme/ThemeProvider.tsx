@@ -1,3 +1,4 @@
+import type { AccessibilityFontFamily } from '@elv/domain';
 import {
   createContext,
   type ReactElement,
@@ -112,9 +113,11 @@ export interface ThemeController {
   readonly preset: ThemePresetId;
   readonly fontScale: number;
   readonly reduceMotion: boolean;
+  readonly uiFontFamily: AccessibilityFontFamily;
   setPreset(next: ThemePresetId): void;
   setFontScale(next: number): void;
   setReduceMotion(next: boolean | undefined): void;
+  setUiFontFamily(next: AccessibilityFontFamily): void;
 }
 
 /** Props of {@link ThemeProvider}. */
@@ -127,11 +130,14 @@ export interface ThemeProviderProps {
   fontScale?: number;
   /** Explicit reduce-motion override (`true`/`false`), `'system'` (controlled follow-OS), or omitted (uncontrolled). */
   reduceMotion?: boolean | 'system';
-  /** Notified when preset, font scale, or reduce-motion changes through {@link useThemeController}. */
+  /** Controlled or initial UI typography family (`'system'`, `'atkinson'`, or `'opendyslexic'`). */
+  uiFontFamily?: AccessibilityFontFamily;
+  /** Notified when preset, font scale, reduce-motion, or UI font family changes through {@link useThemeController}. */
   onChange?: (next: {
     preset: ThemePresetId;
     fontScale: number;
     reduceMotion: boolean | undefined;
+    uiFontFamily: AccessibilityFontFamily;
   }) => void;
   children: ReactNode;
 }
@@ -143,9 +149,11 @@ const ThemeContext = createContext<ThemeController>({
   preset: DEFAULT_THEME_PRESET,
   fontScale: 1.0,
   reduceMotion: false,
+  uiFontFamily: 'system',
   setPreset: () => undefined,
   setFontScale: () => undefined,
   setReduceMotion: () => undefined,
+  setUiFontFamily: () => undefined,
 });
 
 /** Provides reactive Cinema Quietude design tokens and live theme/accessibility switching. */
@@ -154,6 +162,7 @@ export function ThemeProvider({
   palette,
   fontScale,
   reduceMotion,
+  uiFontFamily,
   onChange,
   children,
 }: ThemeProviderProps): ReactElement {
@@ -163,6 +172,9 @@ export function ThemeProvider({
   const [internalFontScale, setInternalFontScale] = useState<number>(clampFontScale(fontScale));
   const [internalReduceMotion, setInternalReduceMotion] = useState<boolean | undefined>(
     typeof reduceMotion === 'boolean' ? reduceMotion : undefined,
+  );
+  const [internalUiFontFamily, setInternalUiFontFamily] = useState<AccessibilityFontFamily>(
+    uiFontFamily ?? 'system',
   );
   const [systemReduceMotion, setSystemReduceMotion] = useState(false);
 
@@ -204,6 +216,7 @@ export function ThemeProvider({
         ? reduceMotion
         : internalReduceMotion;
   const activeReduceMotion = activeReduceMotionOverride ?? systemReduceMotion;
+  const activeUiFontFamily: AccessibilityFontFamily = uiFontFamily ?? internalUiFontFamily;
 
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -215,9 +228,10 @@ export function ThemeProvider({
         preset: next,
         fontScale: activeFontScale,
         reduceMotion: activeReduceMotionOverride,
+        uiFontFamily: activeUiFontFamily,
       });
     },
-    [preset, activeFontScale, activeReduceMotionOverride],
+    [preset, activeFontScale, activeReduceMotionOverride, activeUiFontFamily],
   );
 
   const setFontScale = useCallback(
@@ -228,9 +242,10 @@ export function ThemeProvider({
         preset: activePreset,
         fontScale: clamped,
         reduceMotion: activeReduceMotionOverride,
+        uiFontFamily: activeUiFontFamily,
       });
     },
-    [fontScale, activePreset, activeReduceMotionOverride],
+    [fontScale, activePreset, activeReduceMotionOverride, activeUiFontFamily],
   );
 
   const setReduceMotion = useCallback(
@@ -240,9 +255,23 @@ export function ThemeProvider({
         preset: activePreset,
         fontScale: activeFontScale,
         reduceMotion: next,
+        uiFontFamily: activeUiFontFamily,
       });
     },
-    [reduceMotion, activePreset, activeFontScale],
+    [reduceMotion, activePreset, activeFontScale, activeUiFontFamily],
+  );
+
+  const setUiFontFamily = useCallback(
+    (next: AccessibilityFontFamily) => {
+      if (uiFontFamily === undefined) setInternalUiFontFamily(next);
+      onChangeRef.current?.({
+        preset: activePreset,
+        fontScale: activeFontScale,
+        reduceMotion: activeReduceMotionOverride,
+        uiFontFamily: next,
+      });
+    },
+    [uiFontFamily, activePreset, activeFontScale, activeReduceMotionOverride],
   );
 
   const theme = useMemo(
@@ -252,8 +281,9 @@ export function ThemeProvider({
         ...(palette !== undefined ? { palette } : {}),
         fontScale: activeFontScale,
         reduceMotion: activeReduceMotion,
+        uiFontFamily: activeUiFontFamily,
       }),
-    [activePreset, palette, activeFontScale, activeReduceMotion],
+    [activePreset, palette, activeFontScale, activeReduceMotion, activeUiFontFamily],
   );
 
   const focusVisibleCss = useMemo(() => buildFocusVisibleCss(theme), [theme]);
@@ -272,18 +302,22 @@ export function ThemeProvider({
       preset: activePreset,
       fontScale: activeFontScale,
       reduceMotion: activeReduceMotion,
+      uiFontFamily: activeUiFontFamily,
       setPreset,
       setFontScale,
       setReduceMotion,
+      setUiFontFamily,
     }),
     [
       theme,
       activePreset,
       activeFontScale,
       activeReduceMotion,
+      activeUiFontFamily,
       setPreset,
       setFontScale,
       setReduceMotion,
+      setUiFontFamily,
     ],
   );
 

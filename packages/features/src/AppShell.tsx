@@ -2,10 +2,10 @@ import type { CatalogService, SearchScope } from '@elv/data';
 import type { ConnectionTracker } from '@elv/playback';
 import {
   TvFocusAnchor,
-  useFormFactor,
   useI18n,
   useTheme,
   useUiAdapters,
+  useViewport,
   webBackdropBlur,
 } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -84,7 +84,8 @@ export function AppShell(props: AppShellProps): ReactElement {
   const externalRefreshToken = props.externalRefreshToken ?? 0;
   const i18n = useI18n();
   const theme = useTheme();
-  const isTv = useFormFactor() === 'tv';
+  const viewport = useViewport();
+  const isTv = viewport.formFactor === 'tv';
   const preferences = usePreferences();
   const confirmExitOnBack = preferences.preferences.confirmExitOnBack;
   const confirmExitOnBackRef = useRef(confirmExitOnBack);
@@ -467,6 +468,8 @@ export function AppShell(props: AppShellProps): ReactElement {
                   preferHevcOverDolbyVision={preferences.preferences.preferHevcOverDolbyVision}
                   filterSdhSubtitles={preferences.preferences.filterSdhSubtitles}
                   subtitleMode={preferences.preferences.subtitleMode}
+                  subtitleFontFamily={preferences.preferences.subtitleFontFamily}
+                  tvClockMode={preferences.preferences.tvClockMode}
                   osdTimeDisplayMode={preferences.preferences.osdTimeDisplayMode}
                   onPersistOsdTimeDisplayMode={(osdTimeDisplayMode) => {
                     void preferences.updatePreferences({ osdTimeDisplayMode });
@@ -508,6 +511,7 @@ export function AppShell(props: AppShellProps): ReactElement {
                 onBack={handleNavBack}
                 overlay={hasHeroOverlay}
                 frosted={hasHeroOverlay ? heroScrolled : true}
+                tvClockMode={preferences.preferences.tvClockMode}
                 testID="app-shell"
               >
                 <CrashRecoveryBoundary
@@ -636,7 +640,17 @@ export function AppShell(props: AppShellProps): ReactElement {
               </AdaptiveNavShell>
             )}
             {exitToastVisible && playTarget === null ? (
-              <View pointerEvents="none" style={styles.exitToastWrap}>
+              <View
+                pointerEvents="none"
+                style={[
+                  styles.exitToastWrap,
+                  {
+                    bottom: 28 + viewport.safeArea.bottom + viewport.overscan.y,
+                    left: viewport.overscan.x,
+                    right: viewport.overscan.x,
+                  },
+                ]}
+              >
                 <View
                   testID="shell-exit-confirm-toast"
                   accessibilityLiveRegion="polite"

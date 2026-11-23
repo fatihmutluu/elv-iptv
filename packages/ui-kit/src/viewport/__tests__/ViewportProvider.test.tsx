@@ -102,6 +102,11 @@ function SafeAreaReadout() {
   );
 }
 
+function OverscanReadout() {
+  const { overscan } = useViewport();
+  return <Text testID="overscan">{`${overscan.x},${overscan.y}`}</Text>;
+}
+
 describe('ViewportProvider web CSS env(safe-area-inset-*) probe (#269)', () => {
   const originalOs = Platform.OS;
 
@@ -212,5 +217,63 @@ describe('ViewportProvider web CSS env(safe-area-inset-*) probe (#269)', () => {
     } finally {
       dom.restore();
     }
+  });
+});
+
+describe('ViewportProvider configurable overscanX / overscanY (#133)', () => {
+  it('updates TV viewport.overscan live across 0, 0.03, 0.08, and clamped out-of-range values without restart', async () => {
+    const view = await render(
+      <ViewportProvider value={{ formFactor: 'tv', width: 1920, height: 1080 }}>
+        <OverscanReadout />
+      </ViewportProvider>,
+    );
+    expect(screen.getByTestId('overscan').props.children).toBe('96,54');
+
+    await view.rerender(
+      <ViewportProvider
+        value={{ formFactor: 'tv', width: 1920, height: 1080 }}
+        overscanX={0}
+        overscanY={0}
+      >
+        <OverscanReadout />
+      </ViewportProvider>,
+    );
+    expect(screen.getByTestId('overscan').props.children).toBe('0,0');
+
+    await view.rerender(
+      <ViewportProvider
+        value={{ formFactor: 'tv', width: 1920, height: 1080 }}
+        overscanX={0.03}
+        overscanY={0.08}
+      >
+        <OverscanReadout />
+      </ViewportProvider>,
+    );
+    expect(screen.getByTestId('overscan').props.children).toBe('58,86');
+
+    await view.rerender(
+      <ViewportProvider
+        value={{ formFactor: 'tv', width: 1920, height: 1080 }}
+        overscanX={-0.1}
+        overscanY={0.25}
+      >
+        <OverscanReadout />
+      </ViewportProvider>,
+    );
+    expect(screen.getByTestId('overscan').props.children).toBe('0,108');
+
+    // Non-TV form factor ignores overscan ratios and stays 0,0.
+    await view.rerender(
+      <ViewportProvider
+        value={{ formFactor: 'desktop', width: 1920, height: 1080 }}
+        overscanX={0.08}
+        overscanY={0.08}
+      >
+        <OverscanReadout />
+      </ViewportProvider>,
+    );
+    expect(screen.getByTestId('overscan').props.children).toBe('0,0');
+
+    await view.unmount();
   });
 });

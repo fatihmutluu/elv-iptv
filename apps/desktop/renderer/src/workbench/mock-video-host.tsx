@@ -349,6 +349,7 @@ export function createWorkbenchVideoHost(): VideoHost {
         },
         setResizeMode: (_mode: 'fit' | 'fill' | 'stretch') => undefined,
         setFilterSdh: (_enabled: boolean) => undefined,
+        setSubtitleFontFamily: (_family: 'system' | 'atkinson' | 'opendyslexic') => undefined,
         initialVolume: volume,
         toggleFullscreen: () => {
           fullscreen = !fullscreen;

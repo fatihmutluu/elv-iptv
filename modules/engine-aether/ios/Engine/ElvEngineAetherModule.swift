@@ -234,6 +234,10 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
         view.setSubtitleBottomInsetPx(inset)
       }
 
+      Prop("subtitleFontFamily") { (view: AetherSurfaceView, family: String?) in
+        view.setSubtitleFontFamily(family)
+      }
+
       Prop("osdVisible") { (view: AetherSurfaceView, visible: Bool?) in
         view.setOsdVisible(visible)
       }

@@ -15,6 +15,9 @@ export const DIGIT_KEYS = [
 /** The four directional keys. */
 export const ARROW_KEYS = ['up', 'down', 'left', 'right'] as const;
 
+/** The four programmable color keys of a TV remote control (`#133`). */
+export const COLOR_KEYS = ['colorRed', 'colorGreen', 'colorYellow', 'colorBlue'] as const;
+
 /** Logical remote-control keys, independent of the runtime that reports them. */
 export type Key =
   | (typeof ARROW_KEYS)[number]
@@ -37,6 +40,7 @@ export type Key =
   | 'lastChannel'
   | 'channelUp'
   | 'channelDown'
+  | (typeof COLOR_KEYS)[number]
   | (typeof DIGIT_KEYS)[number];
 
 /**
@@ -80,4 +84,9 @@ export interface KeyInterpreter {
 /** Whether `key` is one of the ten digit keys. */
 export function isDigitKey(key: Key): boolean {
   return (DIGIT_KEYS as readonly string[]).includes(key);
+}
+
+/** Whether `key` is one of the four programmable TV color keys (`#133`). */
+export function isColorKey(key: Key): boolean {
+  return (COLOR_KEYS as readonly string[]).includes(key);
 }

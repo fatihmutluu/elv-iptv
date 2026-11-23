@@ -121,6 +121,7 @@ function AppRoot() {
           renderSurface: ({
             resizeMode,
             subtitleBottomInsetPx,
+            subtitleFontFamily,
             surfaceRecreationToken,
             useTextureView,
             osdVisible,
@@ -131,6 +132,7 @@ function AppRoot() {
               style={styles.surface}
               {...(resizeMode !== undefined ? { resizeMode } : {})}
               {...(subtitleBottomInsetPx !== undefined ? { subtitleBottomInsetPx } : {})}
+              {...(subtitleFontFamily !== undefined ? { subtitleFontFamily } : {})}
               {...(surfaceRecreationToken !== undefined ? { surfaceRecreationToken } : {})}
               {...(useTextureView !== undefined ? { useTextureView } : {})}
               {...(osdVisible !== undefined ? { osdVisible } : {})}

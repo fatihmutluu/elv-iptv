@@ -1,5 +1,5 @@
 import type { NowNextEntry } from '@elv/data';
-import type { OsdTimeDisplayMode } from '@elv/domain';
+import type { OsdTimeDisplayMode, TvClockMode } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type {
   ChapterInfo,
@@ -12,6 +12,7 @@ import type {
 import { MicroPill, useTheme, useViewport, webBackdropBlur } from '@elv/ui-kit';
 import { type ReactElement, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { AmbientTvClock } from '../shared/AmbientTvClock';
 import type { DescribedPlaybackFailure } from './errors';
 import { OsdVolumeSlider } from './OsdVolumeSlider';
 import { OsdButton, PLAYER_KEY_SHORTCUTS } from './PlayerOsdButton';
@@ -55,6 +56,8 @@ export interface PlayerOsdProps {
   /** Wall-clock Unix epoch timestamp in ms for Live EPG programme progress (defaults to `Date.now()`). */
   nowMs?: number | undefined;
   wallClock?: (() => number) | undefined;
+  /** Ambient TV clock visibility preference (`#416`). */
+  tvClockMode?: TvClockMode | undefined;
   /** Suppresses `player-next-episode-pill` TV focus highlight when `NextEpisodeBanner` is already visible. */
   nextEpisodeBannerVisible?: boolean;
   tvOsdFocused: boolean;
@@ -159,7 +162,9 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
         ? trimmedSubtitle
         : null;
   const displayTitle = deduplicateOsdTitle(p.title, topSubtitle);
-  const titleFontSize = isTv ? 28 : isPortraitPhone ? 20 : 24;
+  const safeFontScale = Number.isFinite(theme.fontScale) ? theme.fontScale : 1;
+  const titleFontSize = Math.round((isTv ? 28 : isPortraitPhone ? 20 : 24) * safeFontScale);
+  const titleFontFamily = theme.typography.h1.fontFamily;
 
   return (
     <View style={styles.osdTopRow}>
@@ -184,8 +189,9 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
             style={[
               styles.titleText,
               {
+                ...(titleFontFamily !== undefined ? { fontFamily: titleFontFamily } : {}),
                 fontSize: titleFontSize,
-                lineHeight: titleFontSize + 6,
+                lineHeight: titleFontSize + Math.round(6 * Math.max(1, safeFontScale)),
                 color: theme.colors.textPrimary,
               },
             ]}
@@ -367,6 +373,13 @@ export function PlayerOsdTopBar(p: PlayerOsdProps & { readonly docked?: boolean 
             tvFocused={isFocused('settings')}
           />
         ) : null}
+
+        <AmbientTvClock
+          surface="player"
+          mode={p.tvClockMode}
+          now={p.wallClock}
+          testID="player-ambient-clock"
+        />
       </View>
     </View>
   );

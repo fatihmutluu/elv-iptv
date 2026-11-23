@@ -87,6 +87,7 @@ export async function createEngineFor(
       transportArgs: [],
       platform: deps.platform,
       ...(deps.hwdec === undefined ? {} : { hwdec: deps.hwdec }),
+      ...(deps.runtime.fontsDir === undefined ? {} : { fontsDir: deps.runtime.fontsDir }),
       renderContext,
     }),
     loadMode: deps.loadMode,

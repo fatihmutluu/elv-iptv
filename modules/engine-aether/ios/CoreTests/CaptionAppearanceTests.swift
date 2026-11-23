@@ -69,4 +69,46 @@ struct CaptionAppearanceTests {
     deduper.reset()
     #expect(deduper.nextAnnouncement(for: ["Different cue"]) == "Different cue")
   }
+
+  @Test("resolveSubtitleFontName maps accessibility font families to PostScript names and nil for system (#163)")
+  func resolveSubtitleFontNameMapping() {
+    #expect(resolveSubtitleFontName("atkinson") == "AtkinsonHyperlegibleNext-Regular")
+    #expect(resolveSubtitleFontName("  Atkinson  ") == "AtkinsonHyperlegibleNext-Regular")
+    #expect(resolveSubtitleFontName("opendyslexic") == "OpenDyslexic-Regular")
+    #expect(resolveSubtitleFontName("OpenDyslexic") == "OpenDyslexic-Regular")
+    #expect(resolveSubtitleFontName("system") == nil)
+    #expect(resolveSubtitleFontName(nil) == nil)
+    #expect(resolveSubtitleFontName("") == nil)
+    #expect(resolveSubtitleFontName("unknown-font") == nil)
+  }
+
+  @Test("applyingSubtitleFontOverride overrides only fontName while preserving system colors, window, and scale (#163)")
+  func applyingSubtitleFontOverridePreservesSystemAppearance() {
+    let systemStyle = CaptionAppearanceStyle(
+      foreground: CaptionAppearanceColor(red: 1.0, green: 0.95, blue: 0.2, alpha: 1.0),
+      background: CaptionAppearanceColor(red: 0.05, green: 0.1, blue: 0.2, alpha: 0.8),
+      window: CaptionAppearanceColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.4),
+      relativeCharacterSize: 1.35,
+      fontName: "HelveticaNeue-Medium"
+    )
+
+    let atkinson = applyingSubtitleFontOverride(systemStyle, family: "atkinson")
+    #expect(atkinson.fontName == "AtkinsonHyperlegibleNext-Regular")
+    #expect(atkinson.foreground == systemStyle.foreground)
+    #expect(atkinson.background == systemStyle.background)
+    #expect(atkinson.window == systemStyle.window)
+    #expect(atkinson.relativeCharacterSize == systemStyle.relativeCharacterSize)
+
+    let dyslexic = applyingSubtitleFontOverride(systemStyle, family: "opendyslexic")
+    #expect(dyslexic.fontName == "OpenDyslexic-Regular")
+    #expect(dyslexic.foreground == systemStyle.foreground)
+    #expect(dyslexic.background == systemStyle.background)
+    #expect(dyslexic.window == systemStyle.window)
+    #expect(dyslexic.relativeCharacterSize == systemStyle.relativeCharacterSize)
+
+    // System / nil / unknown preserves the system font choice cleanly.
+    #expect(applyingSubtitleFontOverride(systemStyle, family: "system") == systemStyle)
+    #expect(applyingSubtitleFontOverride(systemStyle, family: nil) == systemStyle)
+    #expect(applyingSubtitleFontOverride(systemStyle, family: "other") == systemStyle)
+  }
 }

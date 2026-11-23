@@ -189,6 +189,7 @@ final class AetherSurfaceView: ExpoView {
       bind(nil)
       setResizeMode("fit")
       setSubtitleBottomInsetPx(0)
+      setSubtitleFontFamily(nil)
       setOsdVisible(true)
     }
   }
@@ -269,6 +270,11 @@ final class AetherSurfaceView: ExpoView {
   func setSubtitleBottomInsetPx(_ inset: Double?) {
     let clean = inset.flatMap { $0.isFinite && $0 > 0 ? CGFloat($0) : nil } ?? 0
     subtitleOverlayView.updateBottomInset(clean)
+  }
+
+  @MainActor
+  func setSubtitleFontFamily(_ family: String?) {
+    subtitleOverlayView.updateSubtitleFontFamily(family)
   }
 
   @MainActor

@@ -1,5 +1,6 @@
 import type { AttemptToken, EngineEvent, PlayerEngine } from '@elv/playback';
 import {
+  type AccessibilityFontFamily,
   DESKTOP_CAPABILITIES,
   type HwdecProfile,
   type PlayerArea,
@@ -59,6 +60,7 @@ export interface MpvEngine extends PlayerEngine {
   setHwdec(profile: HwdecProfile): void;
   setResizeMode(mode: ResizeMode): void;
   setFilterSdh(enabled: boolean): void;
+  setSubtitleFontFamily(family: AccessibilityFontFamily): void;
 }
 
 const QUIT_GRACE_MS = 500;
@@ -146,6 +148,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     enqueueCommand: (cmd, slot) => queue.enqueueCommand(cmd, slot),
     onAudioProperty: (name, value) => controls.onAudioProperty(name, value),
     getDesiredAudioDevice: () => controls.getDesiredAudioDevice(),
+    getDesiredSubtitleFont: () => controls.getDesiredSubtitleFont(),
     ...(deps.readaheadStore === undefined ? {} : { readaheadStore: deps.readaheadStore }),
   });
 
@@ -233,6 +236,14 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
                 live === target
               ) {
                 target.appliedAudioDevice = op.command[2];
+              }
+              if (
+                op.command[0] === 'set_property' &&
+                op.command[1] === 'sub-font' &&
+                typeof op.command[2] === 'string' &&
+                live === target
+              ) {
+                target.appliedSubtitleFont = op.command[2];
               }
             }
           } finally {
@@ -325,6 +336,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     setHwdec: (profile) => controls.setHwdec(profile),
     setResizeMode: (mode) => controls.setResizeMode(mode),
     setFilterSdh: (enabled) => controls.setFilterSdh(enabled),
+    setSubtitleFontFamily: (family) => controls.setSubtitleFontFamily(family),
     get spawns() {
       return spawns;
     },

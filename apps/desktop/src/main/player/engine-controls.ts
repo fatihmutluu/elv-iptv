@@ -1,8 +1,20 @@
 import { type AttemptToken, clampPlaybackSpeed } from '@elv/playback';
-import type { HwdecProfile, ResizeMode } from '../../shared/player-ipc.ts';
+import type { AccessibilityFontFamily, HwdecProfile, ResizeMode } from '../../shared/player-ipc.ts';
 import { type AudioRampTimers, createAudioRamp } from './mpv/audio-ramp.ts';
 import type { MpvCommand } from './mpv/codec.ts';
 import type { LiveSession, MediaSlot } from './mpv/live-session.ts';
+
+/** Maps an {@link AccessibilityFontFamily} preference to mpv's `sub-font` property value (`'sans-serif'` restores mpv's documented default). */
+export function mapSubtitleFontFamily(family: AccessibilityFontFamily): string {
+  switch (family) {
+    case 'atkinson':
+      return 'Atkinson Hyperlegible Next';
+    case 'opendyslexic':
+      return 'OpenDyslexic';
+    case 'system':
+      return 'sans-serif';
+  }
+}
 
 /** Hooks connecting {@link createEngineControls} to `createMpvEngine`. */
 export interface EngineControlsDeps {
@@ -38,6 +50,8 @@ export interface EngineControls {
   setHwdec(profile: HwdecProfile): void;
   setResizeMode(mode: ResizeMode): void;
   setFilterSdh(enabled: boolean): void;
+  setSubtitleFontFamily(family: AccessibilityFontFamily): void;
+  getDesiredSubtitleFont(): string | undefined;
 }
 
 /** Creates speed coalescing, audio ramp, and runtime property-setter controllers for `createMpvEngine`. */
@@ -47,6 +61,7 @@ export function createEngineControls(deps: EngineControlsDeps): EngineControls {
   let pendingSpeed: { slot: MediaSlot | undefined; rate: number } | undefined;
   let darwinCompatActive = deps.initialDarwinCompat === true;
   let desiredAudioDevice: string | undefined;
+  let desiredSubtitleFont: string | undefined;
 
   const restoreVolumeDirect = (volume: number): void => {
     const live = deps.getLive();
@@ -209,6 +224,15 @@ export function createEngineControls(deps: EngineControlsDeps): EngineControls {
     },
     setFilterSdh(enabled) {
       setProp('sub-filter-sdh', enabled ? 'yes' : 'no');
+    },
+    setSubtitleFontFamily(family) {
+      if (deps.isReleased()) return;
+      const mapped = mapSubtitleFontFamily(family);
+      desiredSubtitleFont = mapped;
+      if (deps.getLive() !== undefined) setProp('sub-font', mapped);
+    },
+    getDesiredSubtitleFont() {
+      return desiredSubtitleFont;
     },
   };
 }

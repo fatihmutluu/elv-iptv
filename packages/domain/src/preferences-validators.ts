@@ -10,6 +10,27 @@ export const MIN_PREF_PLAYER_VOLUME = 0;
 /** Maximum supported persisted player volume percentage. */
 export const MAX_PREF_PLAYER_VOLUME = 100;
 
+/** Minimum supported TV overscan safe-area inset ratio (`#133`). */
+export const MIN_PREF_OVERSCAN = 0;
+
+/** Maximum supported TV overscan safe-area inset ratio (`#133`). */
+export const MAX_PREF_OVERSCAN = 0.1;
+
+/** Default TV overscan safe-area inset ratio (`#133`). */
+export const DEFAULT_PREF_OVERSCAN = 0.05;
+
+/** Supported high-legibility accessibility typeface options (`#163`). */
+export const ACCESSIBILITY_FONT_FAMILIES = ['system', 'atkinson', 'opendyslexic'] as const;
+
+/** User-selectable accessibility font family for UI or subtitles (`#163`). */
+export type AccessibilityFontFamily = (typeof ACCESSIBILITY_FONT_FAMILIES)[number];
+
+/** Supported ambient TV clock visibility modes (`#416`). */
+export const TV_CLOCK_MODES = ['always', 'menus', 'player', 'never'] as const;
+
+/** User-selectable ambient TV clock visibility mode (`#416`). */
+export type TvClockMode = (typeof TV_CLOCK_MODES)[number];
+
 /** Supported Media3/player buffer size presets (`#147`). */
 export const BUFFER_PRESETS = ['auto', 'balanced', 'large'] as const;
 
@@ -91,6 +112,11 @@ export interface ExtendedPreferencesFields {
   readonly androidDecoderMode: AndroidDecoderMode;
   readonly collapseLiveVariants: boolean;
   readonly groupVodVersions: boolean;
+  readonly uiFontFamily: AccessibilityFontFamily;
+  readonly subtitleFontFamily: AccessibilityFontFamily;
+  readonly tvClockMode: TvClockMode;
+  readonly overscanX: number;
+  readonly overscanY: number;
 }
 
 const MAX_PREF_STRING_LENGTH = 64;
@@ -147,6 +173,29 @@ export function isBufferPreset(value: unknown): value is BufferPreset {
 /** Returns true when `value` is a supported {@link AndroidDecoderMode}. */
 export function isAndroidDecoderMode(value: unknown): value is AndroidDecoderMode {
   return typeof value === 'string' && (ANDROID_DECODER_MODES as readonly string[]).includes(value);
+}
+
+/** Returns true when `value` is a supported {@link AccessibilityFontFamily}. */
+export function isAccessibilityFontFamily(value: unknown): value is AccessibilityFontFamily {
+  return (
+    typeof value === 'string' && (ACCESSIBILITY_FONT_FAMILIES as readonly string[]).includes(value)
+  );
+}
+
+/** Returns true when `value` is a supported {@link TvClockMode}. */
+export function isTvClockMode(value: unknown): value is TvClockMode {
+  return typeof value === 'string' && (TV_CLOCK_MODES as readonly string[]).includes(value);
+}
+
+/** Clamps an overscan inset ratio to `[MIN_PREF_OVERSCAN, MAX_PREF_OVERSCAN]` rounded to 2 decimal places. */
+export function clampOverscan(value: number): number {
+  const clamped = Math.min(MAX_PREF_OVERSCAN, Math.max(MIN_PREF_OVERSCAN, value));
+  const rounded = Math.round(clamped * 100) / 100;
+  return rounded === 0 ? 0 : rounded;
+}
+
+function normalizeOverscan(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? clampOverscan(value) : fallback;
 }
 
 function normalizePrefLang(value: unknown): string {
@@ -430,6 +479,15 @@ export function parseExtendedPreferences(
       typeof parsed.groupVodVersions === 'boolean'
         ? parsed.groupVodVersions
         : defaults.groupVodVersions,
+    uiFontFamily: isAccessibilityFontFamily(parsed.uiFontFamily)
+      ? parsed.uiFontFamily
+      : defaults.uiFontFamily,
+    subtitleFontFamily: isAccessibilityFontFamily(parsed.subtitleFontFamily)
+      ? parsed.subtitleFontFamily
+      : defaults.subtitleFontFamily,
+    tvClockMode: isTvClockMode(parsed.tvClockMode) ? parsed.tvClockMode : defaults.tvClockMode,
+    overscanX: normalizeOverscan(parsed.overscanX, defaults.overscanX),
+    overscanY: normalizeOverscan(parsed.overscanY, defaults.overscanY),
   };
 }
 
@@ -509,6 +567,15 @@ export function serializeExtendedPreferences(
       : defaults.androidDecoderMode,
     collapseLiveVariants: Boolean(snapshot.collapseLiveVariants),
     groupVodVersions: Boolean(snapshot.groupVodVersions),
+    uiFontFamily: isAccessibilityFontFamily(snapshot.uiFontFamily)
+      ? snapshot.uiFontFamily
+      : defaults.uiFontFamily,
+    subtitleFontFamily: isAccessibilityFontFamily(snapshot.subtitleFontFamily)
+      ? snapshot.subtitleFontFamily
+      : defaults.subtitleFontFamily,
+    tvClockMode: isTvClockMode(snapshot.tvClockMode) ? snapshot.tvClockMode : defaults.tvClockMode,
+    overscanX: normalizeOverscan(snapshot.overscanX, defaults.overscanX),
+    overscanY: normalizeOverscan(snapshot.overscanY, defaults.overscanY),
   };
 }
 
@@ -617,5 +684,14 @@ export function mergeExtendedPreferences(
         : base.collapseLiveVariants,
     groupVodVersions:
       typeof patch.groupVodVersions === 'boolean' ? patch.groupVodVersions : base.groupVodVersions,
+    uiFontFamily: isAccessibilityFontFamily(patch.uiFontFamily)
+      ? patch.uiFontFamily
+      : base.uiFontFamily,
+    subtitleFontFamily: isAccessibilityFontFamily(patch.subtitleFontFamily)
+      ? patch.subtitleFontFamily
+      : base.subtitleFontFamily,
+    tvClockMode: isTvClockMode(patch.tvClockMode) ? patch.tvClockMode : base.tvClockMode,
+    overscanX: normalizeOverscan(patch.overscanX, base.overscanX),
+    overscanY: normalizeOverscan(patch.overscanY, base.overscanY),
   };
 }

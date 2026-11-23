@@ -273,6 +273,8 @@ export interface Media3SurfaceProps {
   resizeMode?: 'fit' | 'fill' | 'stretch';
   /** Extra bottom inset in dp to lift native `SubtitleView` cues above a visible OSD (`#136`). */
   subtitleBottomInsetPx?: number;
+  /** High-legibility subtitle font override (`'system'`, `'atkinson'`, or `'opendyslexic'`, `#163`). */
+  subtitleFontFamily?: 'system' | 'atkinson' | 'opendyslexic';
   /** Monotonic token incremented on Rung 3 decoder reset to swap in a fresh `SurfaceView` (`#144`). */
   surfaceRecreationToken?: number;
   /** Opt-in `TextureView` rendering fallback for devices with broken `SurfaceView` compositing (`#262`). */
@@ -286,6 +288,7 @@ interface NativeSurfaceProps {
   style?: StyleProp<ViewStyle>;
   resizeMode?: 'fit' | 'fill' | 'stretch';
   subtitleBottomInsetPx?: number;
+  subtitleFontFamily?: 'system' | 'atkinson' | 'opendyslexic';
   surfaceRecreationToken?: number;
   useTextureView?: boolean;
   testID?: string;
@@ -309,6 +312,7 @@ export function Media3Surface({
   style,
   resizeMode,
   subtitleBottomInsetPx,
+  subtitleFontFamily,
   surfaceRecreationToken,
   useTextureView,
   testID,
@@ -320,6 +324,7 @@ export function Media3Surface({
     ...(style !== undefined ? { style } : {}),
     ...(resizeMode !== undefined ? { resizeMode } : {}),
     ...(subtitleBottomInsetPx !== undefined ? { subtitleBottomInsetPx } : {}),
+    ...(subtitleFontFamily !== undefined ? { subtitleFontFamily } : {}),
     ...(surfaceRecreationToken !== undefined ? { surfaceRecreationToken } : {}),
     ...(useTextureView !== undefined ? { useTextureView } : {}),
     ...(testID !== undefined ? { testID } : {}),

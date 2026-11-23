@@ -137,6 +137,81 @@ describe('theme color utilities & WCAG contrast invariants (#325)', () => {
     expect(webTheme.typography.body.fontFamily).toContain('Plus Jakarta Sans');
   });
 
+  it('resolves high-legibility uiFontFamily per weight on native and web (#163)', () => {
+    const sysNative = buildTheme({ uiFontFamily: 'system' });
+    expect(sysNative.uiFontFamily).toBe('system');
+    expect(sysNative.typography.display.fontFamily).toBeUndefined();
+    expect(sysNative.typography.body.fontFamily).toBeUndefined();
+
+    const atkinsonNative = buildTheme({ uiFontFamily: 'atkinson' });
+    expect(atkinsonNative.uiFontFamily).toBe('atkinson');
+    expect(atkinsonNative.typography.display.fontFamily).toBe('AtkinsonHyperlegibleNext-Bold');
+    expect(atkinsonNative.typography.h1.fontFamily).toBe('AtkinsonHyperlegibleNext-Bold');
+    expect(atkinsonNative.typography.h2.fontFamily).toBe('AtkinsonHyperlegibleNext-Bold');
+    expect(atkinsonNative.typography.title.fontFamily).toBe('AtkinsonHyperlegibleNext-Bold');
+    expect(atkinsonNative.typography.micro.fontFamily).toBe('AtkinsonHyperlegibleNext-Bold');
+    expect(atkinsonNative.typography.body.fontFamily).toBe('AtkinsonHyperlegibleNext-Regular');
+    expect(atkinsonNative.typography.caption.fontFamily).toBe('AtkinsonHyperlegibleNext-Regular');
+
+    const dyslexicNative = buildTheme({ uiFontFamily: 'opendyslexic' });
+    expect(dyslexicNative.uiFontFamily).toBe('opendyslexic');
+    expect(dyslexicNative.typography.display.fontFamily).toBe('OpenDyslexic-Bold');
+    expect(dyslexicNative.typography.h1.fontFamily).toBe('OpenDyslexic-Bold');
+    expect(dyslexicNative.typography.h2.fontFamily).toBe('OpenDyslexic-Bold');
+    expect(dyslexicNative.typography.title.fontFamily).toBe('OpenDyslexic-Bold');
+    expect(dyslexicNative.typography.micro.fontFamily).toBe('OpenDyslexic-Bold');
+    expect(dyslexicNative.typography.body.fontFamily).toBe('OpenDyslexic-Regular');
+    expect(dyslexicNative.typography.caption.fontFamily).toBe('OpenDyslexic-Regular');
+
+    withPlatformOs('android', () => {
+      const sysAndroid = buildTheme({ uiFontFamily: 'system' });
+      expect(sysAndroid.uiFontFamily).toBe('system');
+      expect(sysAndroid.typography.display.fontFamily).toBeUndefined();
+      expect(sysAndroid.typography.body.fontFamily).toBeUndefined();
+
+      const atkinsonAndroid = buildTheme({ uiFontFamily: 'atkinson' });
+      expect(atkinsonAndroid.uiFontFamily).toBe('atkinson');
+      expect(atkinsonAndroid.typography.display.fontFamily).toBe('AtkinsonHyperlegibleNext');
+      expect(atkinsonAndroid.typography.h1.fontFamily).toBe('AtkinsonHyperlegibleNext');
+      expect(atkinsonAndroid.typography.h2.fontFamily).toBe('AtkinsonHyperlegibleNext');
+      expect(atkinsonAndroid.typography.title.fontFamily).toBe('AtkinsonHyperlegibleNext');
+      expect(atkinsonAndroid.typography.micro.fontFamily).toBe('AtkinsonHyperlegibleNext');
+      expect(atkinsonAndroid.typography.body.fontFamily).toBe('AtkinsonHyperlegibleNext');
+      expect(atkinsonAndroid.typography.caption.fontFamily).toBe('AtkinsonHyperlegibleNext');
+
+      const dyslexicAndroid = buildTheme({ uiFontFamily: 'opendyslexic' });
+      expect(dyslexicAndroid.uiFontFamily).toBe('opendyslexic');
+      expect(dyslexicAndroid.typography.display.fontFamily).toBe('OpenDyslexic');
+      expect(dyslexicAndroid.typography.h1.fontFamily).toBe('OpenDyslexic');
+      expect(dyslexicAndroid.typography.h2.fontFamily).toBe('OpenDyslexic');
+      expect(dyslexicAndroid.typography.title.fontFamily).toBe('OpenDyslexic');
+      expect(dyslexicAndroid.typography.micro.fontFamily).toBe('OpenDyslexic');
+      expect(dyslexicAndroid.typography.body.fontFamily).toBe('OpenDyslexic');
+      expect(dyslexicAndroid.typography.caption.fontFamily).toBe('OpenDyslexic');
+    });
+
+    withPlatformOs('web', () => {
+      const sysWeb = buildTheme({ uiFontFamily: 'system' });
+      expect(sysWeb.uiFontFamily).toBe('system');
+      expect(sysWeb.typography.display.fontFamily).toContain('Plus Jakarta Sans');
+      expect(sysWeb.typography.body.fontFamily).toContain('Plus Jakarta Sans');
+
+      const atkinsonWeb = buildTheme({ uiFontFamily: 'atkinson' });
+      expect(atkinsonWeb.uiFontFamily).toBe('atkinson');
+      expect(atkinsonWeb.typography.display.fontFamily).toBe(
+        'Atkinson Hyperlegible Next, system-ui, sans-serif',
+      );
+      expect(atkinsonWeb.typography.body.fontFamily).toBe(
+        'Atkinson Hyperlegible Next, system-ui, sans-serif',
+      );
+
+      const dyslexicWeb = buildTheme({ uiFontFamily: 'opendyslexic' });
+      expect(dyslexicWeb.uiFontFamily).toBe('opendyslexic');
+      expect(dyslexicWeb.typography.display.fontFamily).toBe('OpenDyslexic, system-ui, sans-serif');
+      expect(dyslexicWeb.typography.body.fontFamily).toBe('OpenDyslexic, system-ui, sans-serif');
+    });
+  });
+
   it('clamps fontScale to [0.9, 1.2] and collapses motion & focus scaling under reduceMotion', () => {
     expect(clampFontScale(0.5)).toBe(0.9);
     expect(clampFontScale(2.5)).toBe(1.2);
@@ -196,9 +271,14 @@ function ThemeControlProbe() {
       <Text testID="canvas">{theme.colors.bgCanvas}</Text>
       <Text testID="scale">{String(theme.fontScale)}</Text>
       <Text testID="motion">{String(theme.motion.fastMs)}</Text>
+      <Text testID="ui-font">{theme.uiFontFamily}</Text>
+      <Text testID="body-font">{theme.typography.body.fontFamily ?? 'system-default'}</Text>
+      <Text testID="h2-font">{theme.typography.h2.fontFamily ?? 'system-default'}</Text>
       <Pressable testID="to-hc" onPress={() => ctrl.setPreset('highContrast')} />
       <Pressable testID="to-scale" onPress={() => ctrl.setFontScale(1.15)} />
       <Pressable testID="to-reduce" onPress={() => ctrl.setReduceMotion(true)} />
+      <Pressable testID="to-atkinson" onPress={() => ctrl.setUiFontFamily('atkinson')} />
+      <Pressable testID="to-opendyslexic" onPress={() => ctrl.setUiFontFamily('opendyslexic')} />
     </>
   );
 }
@@ -231,6 +311,61 @@ describe('ThemeProvider & useThemeController', () => {
     await fireEvent.press(screen.getByTestId('to-reduce'));
     expect(screen.getByTestId('motion').props.children).toBe('0');
     expect(onChange).toHaveBeenCalledTimes(3);
+
+    await fireEvent.press(screen.getByTestId('to-atkinson'));
+    expect(screen.getByTestId('ui-font').props.children).toBe('atkinson');
+    expect(screen.getByTestId('body-font').props.children).toBe('AtkinsonHyperlegibleNext-Regular');
+    expect(screen.getByTestId('h2-font').props.children).toBe('AtkinsonHyperlegibleNext-Bold');
+    expect(onChange).toHaveBeenCalledTimes(4);
+  });
+
+  it('propagates controlled uiFontFamily prop live across native and web (#163)', async () => {
+    const view = await render(
+      <ThemeProvider uiFontFamily="opendyslexic">
+        <ThemeControlProbe />
+      </ThemeProvider>,
+    );
+    expect(screen.getByTestId('ui-font').props.children).toBe('opendyslexic');
+    expect(screen.getByTestId('body-font').props.children).toBe('OpenDyslexic-Regular');
+    expect(screen.getByTestId('h2-font').props.children).toBe('OpenDyslexic-Bold');
+
+    await view.rerender(
+      <ThemeProvider uiFontFamily="atkinson">
+        <ThemeControlProbe />
+      </ThemeProvider>,
+    );
+    expect(screen.getByTestId('ui-font').props.children).toBe('atkinson');
+    expect(screen.getByTestId('body-font').props.children).toBe('AtkinsonHyperlegibleNext-Regular');
+    expect(screen.getByTestId('h2-font').props.children).toBe('AtkinsonHyperlegibleNext-Bold');
+
+    await view.rerender(
+      <ThemeProvider uiFontFamily="system">
+        <ThemeControlProbe />
+      </ThemeProvider>,
+    );
+    expect(screen.getByTestId('ui-font').props.children).toBe('system');
+    expect(screen.getByTestId('body-font').props.children).toBe('system-default');
+    expect(screen.getByTestId('h2-font').props.children).toBe('system-default');
+    await view.unmount();
+
+    const originalOs = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { value: 'web', configurable: true });
+    try {
+      const webView = await render(
+        <ThemeProvider uiFontFamily="atkinson">
+          <ThemeControlProbe />
+        </ThemeProvider>,
+      );
+      expect(screen.getByTestId('body-font').props.children).toBe(
+        'Atkinson Hyperlegible Next, system-ui, sans-serif',
+      );
+      expect(screen.getByTestId('h2-font').props.children).toBe(
+        'Atkinson Hyperlegible Next, system-ui, sans-serif',
+      );
+      await webView.unmount();
+    } finally {
+      Object.defineProperty(Platform, 'OS', { value: originalOs, configurable: true });
+    }
   });
 
   it('tracks AccessibilityInfo reduceMotionChanged when reduceMotion prop is uncontrolled', async () => {

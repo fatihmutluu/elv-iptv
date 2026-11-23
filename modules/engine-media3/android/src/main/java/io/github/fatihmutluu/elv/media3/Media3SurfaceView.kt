@@ -73,6 +73,7 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
   private var surfaceRecreationToken = 0
   private var screenWanted = false
   private var subtitleBottomInsetDp = 0f
+  private var subtitleFontFamily = SUBTITLE_FONT_SYSTEM
 
   internal val activeTextureSurfaceForTest: Surface?
     get() = textureSurface
@@ -140,6 +141,14 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
     if (next == subtitleBottomInsetDp) return
     subtitleBottomInsetDp = next
     applySubtitleBottomPadding()
+  }
+
+  /** The `subtitleFontFamily` prop (`#163`): `'system'` (default), `'atkinson'`, or `'opendyslexic'`. */
+  fun setSubtitleFontFamily(family: String?) {
+    val next = SubtitleFontResolver.normalizeFamily(family)
+    if (next == subtitleFontFamily) return
+    subtitleFontFamily = next
+    applySubtitleFontFamily()
   }
 
   /**
@@ -339,6 +348,15 @@ class Media3SurfaceView(context: Context, appContext: AppContext) :
         viewHeightPx = viewHeight,
       )
     )
+  }
+
+  private fun applySubtitleFontFamily() {
+    val typeface = SubtitleFontResolver.loadTypeface(context, subtitleFontFamily)
+    if (typeface == null) {
+      subtitleView.setUserDefaultStyle()
+    } else {
+      subtitleView.setStyle(SubtitleFontResolver.buildCaptionStyle(context, typeface))
+    }
   }
 
   private fun detach(from: Media3Engine, old: Surface) {

@@ -5,6 +5,7 @@ import {
   FINE_SCRUB_QUARTER_DY_PX,
   FINE_SCRUB_ULTRA_DY_PX,
   formatPlaybackPosition,
+  formatVodEndAccessibilityLabel,
   formatVodEndTimestamp,
   formatWallClockHm,
   integrateFineScrubStep,
@@ -12,6 +13,7 @@ import {
 } from './vod-progress-math';
 
 const i18nEn = createAppI18n('en');
+const i18nTr = createAppI18n('tr');
 
 describe('vod-progress-math (#160, #355)', () => {
   it('cycles total -> remaining -> endsAt -> total', () => {
@@ -39,6 +41,26 @@ describe('vod-progress-math (#160, #355)', () => {
 
     const endsAt1x = formatVodEndTimestamp(0, 3_600_000, 1, 'endsAt', baseWall, i18nEn);
     expect(endsAt1x).toBe('Ends at 21:00');
+  });
+
+  it('clamps remaining time >= 0 on overshoot, scales by playback speed, and formats non-negative accessibility labels (#133)', () => {
+    // 60m remaining at 2x speed -> -30:00 wall remaining & "30:00 remaining" announcement
+    expect(formatVodEndTimestamp(0, 3_600_000, 2, 'remaining', 0, i18nEn)).toBe('-30:00');
+    expect(formatVodEndAccessibilityLabel(0, 3_600_000, 2, 'remaining', 0, i18nEn)).toBe(
+      '30:00 remaining',
+    );
+    expect(formatVodEndAccessibilityLabel(0, 3_600_000, 2, 'remaining', 0, i18nTr)).toBe(
+      '30:00 kaldı',
+    );
+
+    // Overshoot (positionMs > durationMs) strictly clamps to 0:00, never negative
+    expect(formatVodEndTimestamp(5_000_000, 1_252_000, 1, 'remaining', 0, i18nEn)).toBe('-0:00');
+    expect(formatVodEndAccessibilityLabel(5_000_000, 1_252_000, 1, 'remaining', 0, i18nEn)).toBe(
+      '0:00 remaining',
+    );
+    expect(formatVodEndAccessibilityLabel(10_000, undefined, 1, 'remaining', 0, i18nEn)).toBe(
+      '--:--',
+    );
   });
 
   it('resolves fine-scrub tiers and integrates incrementally with zero jump across tier boundaries (#355)', () => {

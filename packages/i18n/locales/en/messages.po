@@ -1817,3 +1817,57 @@ msgstr "Channel order"
 
 msgid "live.sortAlpha"
 msgstr "A–Z"
+
+msgid "settings.uiFont"
+msgstr "Interface font"
+
+msgid "settings.uiFontHint"
+msgstr "High-legibility typeface for menus, lists, and guide"
+
+msgid "settings.subtitleFont"
+msgstr "Subtitle font"
+
+msgid "settings.subtitleFontHint"
+msgstr "Typeface used for closed captions and text subtitles"
+
+msgid "settings.fontSystem"
+msgstr "System default"
+
+msgid "settings.fontAtkinson"
+msgstr "Atkinson Hyperlegible"
+
+msgid "settings.fontOpenDyslexic"
+msgstr "OpenDyslexic"
+
+msgid "settings.overscanX"
+msgstr "Horizontal overscan"
+
+msgid "settings.overscanY"
+msgstr "Vertical overscan"
+
+msgid "settings.overscanHint"
+msgstr "Adjust TV safe margins so menus and player bars never clip"
+
+msgid "settings.overscanValue"
+msgstr "{pct}%"
+
+msgid "player.remainingTimeAnnouncement"
+msgstr "{time} remaining"
+
+msgid "settings.tvClockMode"
+msgstr "TV ambient clock"
+
+msgid "settings.tvClockModeHint"
+msgstr "Show current time in the top-right corner on TV"
+
+msgid "settings.tvClockAlways"
+msgstr "Always"
+
+msgid "settings.tvClockMenus"
+msgstr "Menus only"
+
+msgid "settings.tvClockPlayer"
+msgstr "Player only"
+
+msgid "settings.tvClockNever"
+msgstr "Never"

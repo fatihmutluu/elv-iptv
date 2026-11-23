@@ -6,7 +6,7 @@ window helpers (player core spec 6.1).
 ## API and contract
 - `createMedia3Engine(): PlayerEngine | null` (`src/index.ts`; `null` without `ElvEngineMedia3`) creates a native
   `Engine` shared object; `release()` frees it. `Media3Surface({ engine, style?, resizeMode?,
-  subtitleBottomInsetPx?, surfaceRecreationToken?, useTextureView?, testID? })` renders `Media3SurfaceView`.
+  subtitleBottomInsetPx?, subtitleFontFamily?, surfaceRecreationToken?, useTextureView?, testID? })` renders `Media3SurfaceView`.
 - Native (`ElvEngineMedia3Module`, `LoadRequest`): `load(flattened LoadCommand + bufferPreset? + decoderMode? + allowLegacyTls?)`,
   `retry`, `play`, `pause`, `seek`, `setScrubbing` (VOD-only), `setAudioBoostDb`, `supportsHardwareHevc4k`,
   `selectAudioTrack`, `selectSubtitleTrack`, `stop`, `recreate`, `onEngineEvent`, sync `uptimeMs()`, plus zero-permission

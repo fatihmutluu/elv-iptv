@@ -101,7 +101,8 @@ export function EpgGridView(p: EpgGridViewProps): ReactElement {
 
   const isTv = viewport.inputModality === 'tv';
   const isPortrait = viewport.orientation === 'portrait';
-  const rowHeight = isTv ? 68 : 60;
+  const safeFontScale = Number.isFinite(theme.fontScale) ? Math.max(1, theme.fontScale) : 1;
+  const rowHeight = Math.round((isTv ? 68 : 60) * safeFontScale);
   const channelColWidth = isPortrait ? 116 : isTv ? 200 : 176;
   const visibleRows = Math.max(
     4,

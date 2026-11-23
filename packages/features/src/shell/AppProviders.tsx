@@ -1,4 +1,5 @@
 import {
+  type AccessibilityFontFamily,
   createMemoryPreferencesStore,
   DEFAULT_PREFERENCES,
   ok,
@@ -140,12 +141,18 @@ export function AppProviders({
     : DEFAULT_THEME_PRESET;
 
   const handleThemeChange = useCallback(
-    (next: { preset: ThemePresetId; fontScale: number; reduceMotion: boolean | undefined }) => {
+    (next: {
+      preset: ThemePresetId;
+      fontScale: number;
+      reduceMotion: boolean | undefined;
+      uiFontFamily: AccessibilityFontFamily;
+    }) => {
       const current = preferencesRef.current;
       const patch: {
         themePreset?: ThemePresetId;
         fontScale?: number;
         reduceMotion?: boolean;
+        uiFontFamily?: AccessibilityFontFamily;
       } = {};
       if (next.preset !== current.themePreset) {
         patch.themePreset = next.preset;
@@ -156,6 +163,9 @@ export function AppProviders({
       const nextReduceMotion = next.reduceMotion ?? false;
       if (nextReduceMotion !== current.reduceMotion) {
         patch.reduceMotion = nextReduceMotion;
+      }
+      if (next.uiFontFamily !== current.uiFontFamily) {
+        patch.uiFontFamily = next.uiFontFamily;
       }
       if (Object.keys(patch).length > 0) {
         void store.update(patch);
@@ -191,12 +201,17 @@ export function AppProviders({
 
   return (
     <TvRemoteProvider>
-      <ViewportProvider {...(viewport !== undefined ? { value: viewport } : {})}>
+      <ViewportProvider
+        overscanX={preferences.overscanX}
+        overscanY={preferences.overscanY}
+        {...(viewport !== undefined ? { value: viewport } : {})}
+      >
         <I18nProvider i18n={activeI18n}>
           <ThemeProvider
             preset={themePreset}
             fontScale={preferences.fontScale}
             reduceMotion={preferences.reduceMotion ? true : 'system'}
+            uiFontFamily={preferences.uiFontFamily}
             onChange={handleThemeChange}
           >
             <PreferencesContext.Provider value={contextValue}>

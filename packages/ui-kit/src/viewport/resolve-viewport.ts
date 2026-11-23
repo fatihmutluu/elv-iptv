@@ -47,12 +47,21 @@ export interface ViewportOverride {
   readonly height?: number;
   readonly safeArea?: Partial<EdgeInsets>;
   readonly overscanEnabled?: boolean;
+  readonly overscanX?: number;
+  readonly overscanY?: number;
 }
 
 const ZERO_INSETS: EdgeInsets = { top: 0, right: 0, bottom: 0, left: 0 };
 const TV_REFERENCE_WIDTH = 1920;
+const MIN_OVERSCAN_RATIO = 0;
+const MAX_OVERSCAN_RATIO = 0.1;
 const TV_OVERSCAN_RATIO = 0.05;
 const TABLET_MIN_SHORT_EDGE_DP = 600;
+
+function clampOverscanRatio(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) return TV_OVERSCAN_RATIO;
+  return Math.min(MAX_OVERSCAN_RATIO, Math.max(MIN_OVERSCAN_RATIO, value));
+}
 
 function classifyFormFactor(input: {
   isTV: boolean;
@@ -126,6 +135,8 @@ export function resolveViewport(input: {
   os: string;
   width: number;
   height: number;
+  overscanX?: number;
+  overscanY?: number;
   override?: ViewportOverride;
 }): ViewportInfo {
   const safeWidth = Number.isFinite(input.width) && input.width > 0 ? input.width : 1280;
@@ -154,10 +165,12 @@ export function resolveViewport(input: {
   };
 
   const applyOverscan = override?.overscanEnabled ?? formFactor === 'tv';
+  const clampedOverscanX = clampOverscanRatio(override?.overscanX ?? input.overscanX);
+  const clampedOverscanY = clampOverscanRatio(override?.overscanY ?? input.overscanY);
   const overscan = applyOverscan
     ? {
-        x: Math.round(width * TV_OVERSCAN_RATIO),
-        y: Math.round(height * TV_OVERSCAN_RATIO),
+        x: Math.round(width * clampedOverscanX),
+        y: Math.round(height * clampedOverscanY),
       }
     : { x: 0, y: 0 };
 
