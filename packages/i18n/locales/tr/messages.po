@@ -1904,3 +1904,9 @@ msgstr "Pencere en-boy oranını kilitle"
 
 msgid "settings.windowAspectRatioLockHint"
 msgstr "Masaüstünde pencereyi boyutlandırırken siyah kenarlıkları önler"
+
+msgid "settings.backgroundAudio"
+msgstr "Arka planda ses oynatma"
+
+msgid "settings.backgroundAudioHint"
+msgstr "Uygulama mobilde arka plana alındığında sesi oynatmaya devam eder"

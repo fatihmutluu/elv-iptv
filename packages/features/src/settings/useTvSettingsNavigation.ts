@@ -91,6 +91,7 @@ export type PlaybackFocusId =
   | 'toggle-pitch-lock'
   | 'toggle-audio-normalization'
   | 'toggle-window-aspect-ratio-lock'
+  | 'toggle-background-audio'
   | 'osd-time-total'
   | 'osd-time-remaining'
   | 'osd-time-endsAt'

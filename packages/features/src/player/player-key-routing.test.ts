@@ -83,6 +83,22 @@ describe('routeHostKey Wave P5 shortcuts (#415)', () => {
     expect(sheetDeps.toggleResizeMode).not.toHaveBeenCalled();
     expect(sheetDeps.stepVolumeBy).not.toHaveBeenCalled();
   });
+
+  it('routes stop host key unconditionally even when locked or a sheet is open (#412)', () => {
+    const onStop = vi.fn();
+    const lockedSheetDeps = makeHostDeps({
+      state: {
+        locked: true,
+        tracksOpen: false,
+        settingsOpen: true,
+        infoOpen: false,
+        channelListOpen: false,
+      },
+      onStop,
+    });
+    routeHostKey('stop', lockedSheetDeps);
+    expect(onStop).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('routeOverlayAndMediaKey videoDecoder submenu (#411)', () => {

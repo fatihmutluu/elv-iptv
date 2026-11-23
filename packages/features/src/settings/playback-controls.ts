@@ -430,6 +430,12 @@ export function activatePlaybackControl(
     });
     return;
   }
+  if (controlId === 'toggle-background-audio') {
+    void preferences.updatePreferences({
+      backgroundAudioPlayback: !preferences.preferences.backgroundAudioPlayback,
+    });
+    return;
+  }
   if (controlId === 'audio-device-auto') {
     void preferences.updatePreferences({ preferredAudioDevice: 'auto' });
   }

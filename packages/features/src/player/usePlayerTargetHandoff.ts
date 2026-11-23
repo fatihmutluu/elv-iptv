@@ -46,6 +46,7 @@ export interface PlayerTargetHandoffParams {
   filterSdhSubtitlesRef?: MutableRefObject<boolean>;
   liveChannelSwitchModeRef?: MutableRefObject<LiveChannelSwitchModePref>;
   resolvedNextEpisodeRef?: MutableRefObject<PlayableEntry | undefined>;
+  backgroundAudioPlaybackRef?: MutableRefObject<boolean>;
 }
 
 /**
@@ -71,6 +72,7 @@ export function usePlayerTargetHandoff({
   filterSdhSubtitlesRef,
   liveChannelSwitchModeRef,
   resolvedNextEpisodeRef,
+  backgroundAudioPlaybackRef,
 }: PlayerTargetHandoffParams) {
   const [activeTarget, setActiveTarget] = useState<PlayTarget>(target);
   const [previewTarget, setPreviewTarget] = useState<PlayTarget | null>(null);
@@ -547,6 +549,10 @@ export function usePlayerTargetHandoff({
   useEffect(() => {
     return appLifecycle.subscribe((lifecycleState) => {
       if (lifecycleState === 'background') {
+        if (backgroundAudioPlaybackRef?.current === true) {
+          flushProgressRef.current();
+          return;
+        }
         backgroundedRef.current = true;
         const hadPendingZap = zapController.takePendingTune();
         const hadPendingResume = pendingResumeRef.current;
@@ -582,6 +588,7 @@ export function usePlayerTargetHandoff({
     });
   }, [
     appLifecycle,
+    backgroundAudioPlaybackRef,
     cancelPendingResume,
     clockRef,
     flushProgressRef,

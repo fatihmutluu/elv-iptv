@@ -248,6 +248,7 @@ describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
       pitchLock: false,
       audioNormalization: true,
       windowAspectRatioLock: true,
+      backgroundAudioPlayback: true,
     };
 
     const encoded = serializePreferences(full);

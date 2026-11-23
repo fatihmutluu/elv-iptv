@@ -21,8 +21,10 @@ type NativeListener = (event: EngineEvent) => void;
 function fakeNative() {
   const clock = { uptime: 0 };
   const listeners = new Set<NativeListener>();
+  const remoteActionListeners = new Set<(payload: unknown) => void>();
   const moduleListeners = new Map<string, Set<(payload: unknown) => void>>();
   const remove = vi.fn();
+  const remoteActionRemove = vi.fn();
   const moduleRemove = vi.fn();
   const engine = {
     load: vi.fn(),
@@ -31,17 +33,31 @@ function fakeNative() {
     pause: vi.fn(),
     seek: vi.fn(),
     setScrubbing: vi.fn(),
+    setSpeed: vi.fn(),
+    setPitchLock: vi.fn(),
+    setMediaMetadata: vi.fn(),
+    setBackgroundAudioEnabled: vi.fn(),
     selectAudioTrack: vi.fn(),
     selectSubtitleTrack: vi.fn(),
     stop: vi.fn(),
     recreate: vi.fn(),
     release: vi.fn(),
-    addListener: vi.fn((_name: string, listener: NativeListener) => {
-      listeners.add(listener);
+    addListener: vi.fn((name: string, listener: (payload: unknown) => void) => {
+      if (name === 'onRemoteMediaAction') {
+        remoteActionListeners.add(listener);
+        return {
+          remove: () => {
+            remoteActionRemove();
+            remoteActionListeners.delete(listener);
+          },
+        };
+      }
+      const typed = listener as NativeListener;
+      listeners.add(typed);
       return {
         remove: () => {
           remove();
-          listeners.delete(listener);
+          listeners.delete(typed);
         },
       };
     }),
@@ -89,6 +105,9 @@ function fakeNative() {
   const emit = (event: EngineEvent) => {
     for (const listener of [...listeners]) listener(event);
   };
+  const emitRemoteAction = (payload: unknown) => {
+    for (const listener of [...remoteActionListeners]) listener(payload);
+  };
   const emitModule = (eventName: string, payload: unknown) => {
     for (const listener of [...(moduleListeners.get(eventName) ?? [])]) listener(payload);
   };
@@ -106,8 +125,10 @@ function fakeNative() {
     pickPlaylistFile,
     addListener,
     remove,
+    remoteActionRemove,
     moduleRemove,
     emit,
+    emitRemoteAction,
     emitModule,
   };
 }
@@ -193,6 +214,68 @@ describe('createMedia3Engine', () => {
     };
     native.emit(mediaInfo);
     expect(events).toEqual([mediaInfo]);
+  });
+
+  it('forwards setSpeed, setPitchLock, setMediaMetadata, setBackgroundAudioEnabled, and onRemoteMediaAction (#264, #412)', async () => {
+    const native = fakeNative();
+    const mod = await load();
+    const engine = mod.createMedia3Engine();
+    if (engine === null) throw new Error('engine expected');
+
+    engine.setSpeed?.(4, 1.5);
+    engine.setPitchLock?.(4, false);
+    mod.setMedia3PitchLock(engine, true);
+    mod.setMedia3MediaMetadata(engine, {
+      title: 'Channel One',
+      subtitle: 'News',
+      artworkUrl: 'https://cdn.example.com/ch1.png',
+      kind: 'live',
+      canStepTrack: true,
+    });
+    mod.setMedia3MediaMetadata(engine, null);
+    mod.setMedia3BackgroundAudioEnabled(engine, true);
+    mod.setMedia3BackgroundAudioEnabled(engine, false);
+
+    expect(native.engine.setSpeed).toHaveBeenCalledWith(4, 1.5);
+    expect(native.engine.setPitchLock).toHaveBeenNthCalledWith(1, false);
+    expect(native.engine.setPitchLock).toHaveBeenNthCalledWith(2, true);
+    expect(native.engine.setMediaMetadata).toHaveBeenNthCalledWith(1, {
+      title: 'Channel One',
+      subtitle: 'News',
+      artworkUrl: 'https://cdn.example.com/ch1.png',
+      kind: 'live',
+      canStepTrack: true,
+    });
+    expect(native.engine.setMediaMetadata).toHaveBeenNthCalledWith(2, null);
+    expect(native.engine.setBackgroundAudioEnabled).toHaveBeenNthCalledWith(1, true);
+    expect(native.engine.setBackgroundAudioEnabled).toHaveBeenNthCalledWith(2, false);
+
+    const actions: string[] = [];
+    const off = mod.subscribeMedia3RemoteMediaAction(engine, (action) => actions.push(action));
+    native.emitRemoteAction({ engineId: 1, action: 'next' });
+    native.emitRemoteAction({ engineId: 1, action: 'previous' });
+    native.emitRemoteAction({ engineId: 1, action: 'stop' });
+    native.emitRemoteAction({ engineId: 1, action: 'invalid' });
+    native.emitRemoteAction('next');
+    native.emitRemoteAction('stop');
+    native.emitRemoteAction(null);
+    off();
+    native.emitRemoteAction({ engineId: 1, action: 'previous' });
+    expect(actions).toEqual(['next', 'previous', 'stop', 'next', 'stop']);
+    expect(native.remoteActionRemove).toHaveBeenCalledTimes(1);
+
+    // Released engine ignores all calls cleanly
+    engine.release();
+    engine.setSpeed?.(5, 2.0);
+    engine.setPitchLock?.(5, false);
+    mod.setMedia3PitchLock(engine, false);
+    mod.setMedia3MediaMetadata(engine, { title: 'After release' });
+    mod.setMedia3BackgroundAudioEnabled(engine, true);
+    expect(() => mod.subscribeMedia3RemoteMediaAction(engine, () => {})()).not.toThrow();
+    expect(native.engine.setSpeed).toHaveBeenCalledTimes(1);
+    expect(native.engine.setPitchLock).toHaveBeenCalledTimes(2);
+    expect(native.engine.setMediaMetadata).toHaveBeenCalledTimes(2);
+    expect(native.engine.setBackgroundAudioEnabled).toHaveBeenCalledTimes(2);
   });
 });
 

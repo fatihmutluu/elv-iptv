@@ -1904,3 +1904,9 @@ msgstr "Lock window aspect ratio"
 
 msgid "settings.windowAspectRatioLockHint"
 msgstr "Keep windowed playback bar-free when resizing on desktop"
+
+msgid "settings.backgroundAudio"
+msgstr "Background audio playback"
+
+msgid "settings.backgroundAudioHint"
+msgstr "Keep audio playing when the app moves to the background on mobile"

@@ -673,6 +673,9 @@ export const enMessages = {
   'settings.audioNormalizationHint': 'Balance quiet dialogue and loud channels using EBU R128',
   'settings.windowAspectRatioLock': 'Lock window aspect ratio',
   'settings.windowAspectRatioLockHint': 'Keep windowed playback bar-free when resizing on desktop',
+  'settings.backgroundAudio': 'Background audio playback',
+  'settings.backgroundAudioHint':
+    'Keep audio playing when the app moves to the background on mobile',
 } as const;
 
 /** Valid message identifier across all supported locales. */

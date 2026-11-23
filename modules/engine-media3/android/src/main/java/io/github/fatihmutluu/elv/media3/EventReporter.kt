@@ -41,6 +41,7 @@ internal class EventReporter(
   private val onAudioCodecFailed: () -> Boolean = { false },
   private val onFirstFrame: () -> Unit,
   private val onCue: (ScreenCue, Boolean) -> Unit,
+  private val onTerminalError: () -> Unit = {},
 ) : Player.Listener, AnalyticsListener {
   private var player: Player? = null
   private var active = false
@@ -329,6 +330,7 @@ internal class EventReporter(
     if (httpStatus != null) error["httpStatus"] = httpStatus
     send(mapOf("type" to "error", "error" to error))
     onCue(ScreenCue.ERROR, played)
+    onTerminalError()
   }
 
   private fun maybeEmitMediaInfo(player: Player, tracks: Tracks = player.currentTracks) {

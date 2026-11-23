@@ -8,6 +8,7 @@ import android.util.Log
 import android.view.Surface
 import androidx.annotation.OptIn
 import androidx.media3.common.C
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
@@ -19,9 +20,12 @@ import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.sharedobjects.SharedObject
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 private const val TAG = "ElvMedia3"
 private const val EVENT = "onEngineEvent"
+private const val REMOTE_ACTION_EVENT = "onRemoteMediaAction"
+private val ENGINE_IDS = AtomicInteger(0)
 
 /**
  * The `PlayerEngine` of player core spec 5.1 on Media3, one per player screen (an Expo shared object). ExoPlayer
@@ -30,11 +34,13 @@ private const val EVENT = "onEngineEvent"
  */
 @OptIn(UnstableApi::class)
 class Media3Engine : SharedObject {
+  private val engineId: Int = ENGINE_IDS.incrementAndGet()
   private val hasAppContext: Boolean
   private val onDisposed: (Media3Engine) -> Unit
   private var lowRamDevice = false
   private lateinit var playerFactory: PlayerFactory
   private lateinit var tracksBridge: TrackSelectorBridge
+  private lateinit var mediaSessionController: MediaSessionController
 
   constructor(context: Context, appContext: AppContext, onDisposed: (Media3Engine) -> Unit) : super(appContext) {
     this.hasAppContext = true
@@ -65,6 +71,7 @@ class Media3Engine : SharedObject {
     onAudioFocusDenied = ::handleAudioFocusDenied, onVideoCodecFailed = codecPolicy::recordVideoCodecFailure,
     onDolbyVisionFailed = codecPolicy::recordDolbyVisionFallback, onAudioCodecFailed = ::handleAudioCodecFailed,
     onFirstFrame = surfaces::onFramed, onCue = surfaces::onCue,
+    onTerminalError = { mediaSessionController.onPlaybackStopped() },
   )
   private val pictures = object : Player.Listener {
     override fun onVideoSizeChanged(videoSize: VideoSize) { if (fence.isRendererOpen) surfaces.onVideoSizeChanged(videoSize) }
@@ -81,10 +88,19 @@ class Media3Engine : SharedObject {
       }
     }
     override fun onAudioSessionIdChanged(audioSessionId: Int) = audioEffects.onAudioSessionIdChanged(audioSessionId)
+    override fun onIsPlayingChanged(isPlaying: Boolean) {
+      val current = player ?: return
+      if (request != null && fence.acceptsPlayer(current)) {
+        mediaSessionController.updatePlayingState(isPlaying)
+      }
+    }
   }
 
   @Volatile
   internal var eventObserverForTest: ((Map<String, Any?>) -> Unit)? = null
+
+  @Volatile
+  internal var remoteActionObserverForTest: ((Map<String, Any?>) -> Unit)? = null
 
   private var player: ExoPlayer? = null
   private var playerSoftwareAudio = false
@@ -92,6 +108,8 @@ class Media3Engine : SharedObject {
   private var playerStreamKind: StreamKind = StreamKind.VOD
   private var playerBufferPreset: BufferPreset = BufferPreset.AUTO
   private var playerDecoderMode: VideoDecoderMode = VideoDecoderMode.AUTO
+  private var currentSpeed: Float = PlaybackSpeedPolicy.DEFAULT_SPEED
+  private var pitchLock: Boolean = true
   private var audioFallbackAttempted = false
   private var pendingRebuildDeferred = false
   private var activeEpoch = 0
@@ -122,6 +140,7 @@ class Media3Engine : SharedObject {
       token = attempt
       request = normalized
       audioFallbackAttempted = false
+      currentSpeed = PlaybackSpeedPolicy.DEFAULT_SPEED
       lastVodPositionMs = if (normalized.live) null else normalized.startMs?.coerceAtLeast(0L)
       tracksBridge.onLoad(normalized)
       surfaces.onLoad()
@@ -152,7 +171,10 @@ class Media3Engine : SharedObject {
     }
   }
 
-  fun play(attempt: Int) = postInEpoch(attempt) { player?.play() }
+  fun play(attempt: Int) = postInEpoch(attempt) {
+    player?.play()
+    if (request != null) mediaSessionController.onPlaybackActive()
+  }
   fun pause(attempt: Int) = postInEpoch(attempt) { player?.pause() }
 
   fun seek(attempt: Int, positionMs: Long) = postInEpoch(attempt) {
@@ -169,6 +191,31 @@ class Media3Engine : SharedObject {
   /** Enables Media3's scrubbing mode on VOD streams only; reset unconditionally on stop/load/retry/recreate (#222). */
   fun setScrubbing(attempt: Int, scrubbing: Boolean) = postInEpoch(attempt) {
     player?.let { it.isScrubbingModeEnabled = scrubbing && request?.live == false }
+  }
+
+  /** Applies clamped `[0.25, 4.0]` playback speed on VOD streams only with current [pitchLock] (#264). */
+  fun setSpeed(attempt: Int, rate: Double) = postInEpoch(attempt) {
+    if (request?.live != false) return@postInEpoch
+    currentSpeed = PlaybackSpeedPolicy.clampSpeed(rate)
+    player?.playbackParameters = PlaybackSpeedPolicy.parameters(currentSpeed, pitchLock)
+  }
+
+  /** Updates pitch-lock preference and re-applies [PlaybackParameters] immediately while VOD is active (#264). */
+  fun setPitchLock(locked: Boolean) = post {
+    pitchLock = locked
+    if (request?.live == false) {
+      player?.playbackParameters = PlaybackSpeedPolicy.parameters(currentSpeed, pitchLock)
+    }
+  }
+
+  /** Updates Android lock-screen / Bluetooth `MediaSession` metadata and track-stepping state (#412). */
+  internal fun setMediaMetadata(payload: MediaSessionMetadataPayload?) = post {
+    mediaSessionController.setMediaMetadata(payload)
+  }
+
+  /** Enables or disables opt-in background audio playback across task removal (#412). */
+  fun setBackgroundAudioEnabled(enabled: Boolean) = post {
+    mediaSessionController.setBackgroundAudioEnabled(enabled)
   }
 
   /** Configures stereo loudness boost in dB via [AudioEffectsController] (multichannel-safe, #260). */
@@ -203,8 +250,7 @@ class Media3Engine : SharedObject {
       reporter.end()
       beginGeneration()
       pendingRebuildDeferred = false
-      releasePlayer()
-      player = buildPlayer(playerSoftwareAudio, playerPreferHevc, playerStreamKind, playerBufferPreset, playerDecoderMode)
+      replacePlayer(playerSoftwareAudio, playerPreferHevc, playerStreamKind, playerBufferPreset, playerDecoderMode)
     }
   }
 
@@ -241,6 +287,7 @@ class Media3Engine : SharedObject {
     http.dispatcher.cancelAll()
     handler.post {
       clearSessionState()
+      mediaSessionController.dispose()
       http.dispatcher.cancelAll()
       codecPolicy.stopAudioCapabilities()
       releasePlayer()
@@ -269,6 +316,7 @@ class Media3Engine : SharedObject {
         command()
       } catch (e: Exception) {
         reporter.end()
+        mediaSessionController.onPlaybackStopped()
         Log.e(TAG, "engine command failed: ${e.javaClass.simpleName}")
         sendEvent(mapOf("type" to "error", "error" to mapOf("code" to "unknown", "detail" to e.javaClass.simpleName)))
         surfaces.onCue(ScreenCue.ERROR, played = false)
@@ -298,13 +346,43 @@ class Media3Engine : SharedObject {
   private fun clearSessionState() {
     reporter.end()
     player?.isScrubbingModeEnabled = false
+    currentSpeed = PlaybackSpeedPolicy.DEFAULT_SPEED
+    player?.playbackParameters = PlaybackParameters.DEFAULT
     audioEffects.onStop()
+    mediaSessionController.onPlaybackStopped()
     request = null
     audioFallbackAttempted = false
     lastVodPositionMs = null
     tracksBridge.onStop()
     surfaces.onStop()
     beginGeneration()
+  }
+
+  private fun stopFromTaskRemoved() {
+    post {
+      clearSessionState()
+      player?.stop()
+      player?.clearMediaItems()
+    }
+  }
+
+  private fun stopFromRemoteController() {
+    val runStop = {
+      if (!commandFence.isDisposedNow) {
+        clearSessionState()
+        player?.stop()
+        player?.clearMediaItems()
+        sendRemoteMediaAction(SessionForwardingPlayer.ACTION_STOP)
+      }
+    }
+    if (Looper.myLooper() === thread.looper) runStop() else post(runStop)
+  }
+
+  private fun sendRemoteMediaAction(action: String) {
+    if (commandFence.isDisposedNow) return
+    val payload = mapOf("engineId" to engineId, "action" to action)
+    remoteActionObserverForTest?.invoke(payload)
+    if (hasAppContext) emit(REMOTE_ACTION_EVENT, payload)
   }
 
   private fun snapshotVodPosition() {
@@ -336,6 +414,12 @@ class Media3Engine : SharedObject {
       onTracks = { snapshot -> if (request != null) sendEvent(mapOf("type" to "tracks", "tracks" to snapshot)) },
       onClearCues = surfaces::clearCues,
       captioningEnabled = { isSystemCaptioningEnabled(context) },
+    )
+    mediaSessionController = MediaSessionController(
+      context = context,
+      onRemoteMediaAction = ::sendRemoteMediaAction,
+      onTaskRemovedStop = ::stopFromTaskRemoved,
+      onRemoteStop = ::stopFromRemoteController,
     )
     post {
       codecPolicy.startAudioCapabilities(context, handler)
@@ -399,15 +483,15 @@ class Media3Engine : SharedObject {
       playerBufferPreset != bufferPreset || playerDecoderMode != decoderMode
     if (rebuild) {
       pendingRebuildDeferred = false
-      existing?.isScrubbingModeEnabled = false
-      releasePlayer()
-      player = buildPlayer(next.softwareAudio, next.preferHevcOverDolbyVision, streamKind, bufferPreset, decoderMode)
+      replacePlayer(next.softwareAudio, next.preferHevcOverDolbyVision, streamKind, bufferPreset, decoderMode)
     } else {
       existing.isScrubbingModeEnabled = false
       existing.stop()
     }
     val current = player ?: return
     current.isScrubbingModeEnabled = false
+    current.playbackParameters =
+      if (next.live) PlaybackParameters.DEFAULT else PlaybackSpeedPolicy.parameters(currentSpeed, pitchLock)
     current.setSeekParameters(if (next.live) SeekParameters.EXACT else vodSeekParametersFor(positionMs ?: 0L, null))
     tracksBridge.applyInitialParameters(current)
     val serial = ++prepares
@@ -427,6 +511,7 @@ class Media3Engine : SharedObject {
     if (positionMs == null) current.setMediaSource(source, true) else current.setMediaSource(source, positionMs)
     current.playWhenReady = true
     current.prepare()
+    mediaSessionController.onPlaybackActive()
   }
 
   private fun buildPlayer(
@@ -452,8 +537,45 @@ class Media3Engine : SharedObject {
       built.addListener(reporter)
       built.addAnalyticsListener(reporter)
       built.addListener(pictures)
+      built.playbackParameters =
+        if (streamKind == StreamKind.VOD) PlaybackSpeedPolicy.parameters(currentSpeed, pitchLock) else PlaybackParameters.DEFAULT
       audioEffects.onAudioSessionIdChanged(built.audioSessionId)
       surfaces.attachToNewPlayer(built, ::sendSurfaceChange)
+      mediaSessionController.onPlayerChanged(built)
+    }
+  }
+
+  private fun replacePlayer(
+    softwareAudio: Boolean,
+    preferHevc: Boolean = false,
+    streamKind: StreamKind = StreamKind.VOD,
+    bufferPreset: BufferPreset = BufferPreset.AUTO,
+    decoderMode: VideoDecoderMode = VideoDecoderMode.AUTO,
+  ): ExoPlayer {
+    val old = player
+    player = null
+    if (old != null) {
+      old.isScrubbingModeEnabled = false
+      old.removeListener(reporter)
+      old.removeAnalyticsListener(reporter)
+      old.removeListener(pictures)
+      old.clearVideoSurface()
+      audioEffects.onStop()
+      audioEffects.onAudioSessionIdChanged(C.AUDIO_SESSION_ID_UNSET)
+      mediaSessionController.updatePlayingState(false)
+    }
+    try {
+      val built = buildPlayer(softwareAudio, preferHevc, streamKind, bufferPreset, decoderMode)
+      player = built
+      return built
+    } finally {
+      if (old != null) {
+        if (player == null) {
+          mediaSessionController.onPlaybackStopped()
+        }
+        old.release()
+        gate.dropForced()
+      }
     }
   }
 
@@ -466,6 +588,7 @@ class Media3Engine : SharedObject {
     old.removeListener(pictures)
     audioEffects.onStop()
     audioEffects.onAudioSessionIdChanged(C.AUDIO_SESSION_ID_UNSET)
+    mediaSessionController.updatePlayingState(false)
     old.release()
     gate.dropForced()
   }

@@ -396,6 +396,7 @@ export interface HostKeyRouteDeps {
     'locked' | 'tracksOpen' | 'settingsOpen' | 'infoOpen' | 'channelListOpen'
   >;
   readonly handleBack: () => void;
+  readonly onStop?: (() => void) | undefined;
   readonly toggleFullscreen: () => void;
   readonly toggleResizeMode?: (() => void) | undefined;
   readonly toggleAlwaysOnTop?: (() => void) | undefined;
@@ -424,6 +425,9 @@ export function routeHostKey(key: HostKey, d: HostKeyRouteDeps): void {
   switch (key) {
     case 'back':
       d.handleBack();
+      return;
+    case 'stop':
+      d.onStop?.();
       return;
     case 'fullscreen':
       if (!state.locked) d.toggleFullscreen();

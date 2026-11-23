@@ -39,6 +39,7 @@ const BLOCKED_ANDROID_PERMISSIONS = [
   'android.permission.READ_EXTERNAL_STORAGE',
   'android.permission.WRITE_EXTERNAL_STORAGE',
 ];
+const FIRE_OS_VOICE_PERMISSION = 'com.amazon.permission.media.session.voicecommandcontrol';
 
 function parseStore(value: string | undefined): Store {
   if (value === undefined || value === '') return 'direct';
@@ -108,8 +109,10 @@ export function isNativeDebugConfigEmbed(argv: readonly string[]): boolean {
 export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
   const development = env.APP_VARIANT === 'development';
   const tv = env.EXPO_TV === '1' || env.EXPO_TV === 'true';
+  const store = parseStore(env.STORE);
   const id = development ? `${APP_ID}.dev` : APP_ID;
   const seed = development && options.embedDevSeed === true ? parseDevSeedEnv(env) : undefined;
+  const androidPermissions = tv || store === 'amazon' ? [FIRE_OS_VOICE_PERMISSION] : undefined;
 
   const plugins: NonNullable<ExpoConfig['plugins']> = [
     [
@@ -156,6 +159,7 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
     icon: './assets/icon.png',
     android: {
       package: id,
+      ...(androidPermissions !== undefined ? { permissions: androidPermissions } : {}),
       blockedPermissions: [...BLOCKED_ANDROID_PERMISSIONS],
       predictiveBackGestureEnabled: false,
       adaptiveIcon: {
@@ -178,7 +182,7 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
     },
     plugins,
     extra: {
-      store: parseStore(env.STORE),
+      store,
       build: {
         commit: env.GITHUB_SHA ?? 'local',
         branch: env.GITHUB_REF_NAME ?? 'local',

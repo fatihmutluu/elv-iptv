@@ -240,6 +240,24 @@ describe('buildAppConfig', () => {
     expect(() => build({ STORE: 'huawei' })).toThrow('STORE must be one of');
   });
 
+  it('includes Fire OS voice command permission only on TV or Amazon store builds (#132)', () => {
+    const voicePermission = 'com.amazon.permission.media.session.voicecommandcontrol';
+    expect(build({ EXPO_TV: '1', STORE: 'play' }).android?.permissions).toContain(voicePermission);
+    expect(build({ EXPO_TV: 'true', STORE: 'direct' }).android?.permissions).toContain(
+      voicePermission,
+    );
+    expect(build({ STORE: 'amazon' }).android?.permissions).toContain(voicePermission);
+    expect(build({ EXPO_TV: '1', STORE: 'amazon' }).android?.permissions).toContain(
+      voicePermission,
+    );
+
+    expect(build({ STORE: 'play' }).android?.permissions).toBeUndefined();
+    expect(build({}).android?.permissions).toBeUndefined();
+    expect(
+      build({ STORE: 'direct', APP_VARIANT: 'development' }).android?.permissions,
+    ).toBeUndefined();
+  });
+
   it('records build metadata', () => {
     const env = { GITHUB_SHA: 'abc', GITHUB_REF_NAME: 'main', GITHUB_RUN_NUMBER: '7' };
     expect(build(env).extra?.build).toEqual({

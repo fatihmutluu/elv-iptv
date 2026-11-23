@@ -125,6 +125,7 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   pitchLock: true,
   audioNormalization: false,
   windowAspectRatioLock: false,
+  backgroundAudioPlayback: false,
 });
 
 /** Partial update applied on top of the current {@link PreferencesSnapshot}. */

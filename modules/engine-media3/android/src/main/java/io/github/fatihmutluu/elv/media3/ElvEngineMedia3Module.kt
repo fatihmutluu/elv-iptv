@@ -176,7 +176,7 @@ class ElvEngineMedia3Module : Module() {
         Media3Engine(context, appContext) { engines.remove(it) }.also { engines.add(it) }
       }
 
-      Events("onEngineEvent")
+      Events("onEngineEvent", "onRemoteMediaAction")
 
       Function("load") { engine: Media3Engine, args: Map<String, Any?> ->
         val (attempt, request) = parseLoadArgs(args)
@@ -195,6 +195,22 @@ class ElvEngineMedia3Module : Module() {
 
       Function("setScrubbing") { engine: Media3Engine, attempt: Int, scrubbing: Boolean ->
         engine.setScrubbing(attempt, scrubbing)
+      }
+
+      Function("setSpeed") { engine: Media3Engine, attempt: Int, rate: Double ->
+        engine.setSpeed(attempt, rate)
+      }
+
+      Function("setPitchLock") { engine: Media3Engine, locked: Boolean ->
+        engine.setPitchLock(locked)
+      }
+
+      Function("setMediaMetadata") { engine: Media3Engine, metadata: Map<String, Any?>? ->
+        engine.setMediaMetadata(parseMediaMetadataArgs(metadata))
+      }
+
+      Function("setBackgroundAudioEnabled") { engine: Media3Engine, enabled: Boolean ->
+        engine.setBackgroundAudioEnabled(enabled)
       }
 
       Function("setAudioBoostDb") { engine: Media3Engine, attempt: Int, db: Double ->
