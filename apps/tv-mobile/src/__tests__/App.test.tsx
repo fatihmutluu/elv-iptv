@@ -14,6 +14,10 @@ let mockAetherEngine: PlayerEngine | null = null;
 let mockMedia3Engine: PlayerEngine | null = null;
 let mockCatalogOverride: CatalogService | undefined;
 const mockSetOrientationLocked = jest.fn();
+const mockSetMedia3PitchLock = jest.fn();
+const mockSetMedia3MediaMetadata = jest.fn();
+const mockSetMedia3BackgroundAudioEnabled = jest.fn();
+const mockMedia3RemoteActionListeners = new Set<(action: 'next' | 'previous' | 'stop') => void>();
 const mockRequestTemporaryOrientation = jest.fn();
 const mockApplyShortEdgesCutoutMode = jest.fn();
 const mockGetSafeAreaInsets = jest.fn(() => ({ top: 24, right: 0, bottom: 16, left: 0 }));
@@ -100,6 +104,21 @@ jest.mock('@elv/engine-aether', () => {
 jest.mock('@elv/engine-media3', () => ({
   createMedia3Engine: () => mockMedia3Engine,
   setOrientationLocked: (locked: boolean) => mockSetOrientationLocked(locked),
+  setMedia3PitchLock: (engine: PlayerEngine, locked: boolean) =>
+    mockSetMedia3PitchLock(engine, locked),
+  setMedia3MediaMetadata: (engine: PlayerEngine, metadata: unknown) =>
+    mockSetMedia3MediaMetadata(engine, metadata),
+  setMedia3BackgroundAudioEnabled: (engine: PlayerEngine, enabled: boolean) =>
+    mockSetMedia3BackgroundAudioEnabled(engine, enabled),
+  subscribeMedia3RemoteMediaAction: (
+    _engine: PlayerEngine,
+    listener: (action: 'next' | 'previous' | 'stop') => void,
+  ) => {
+    mockMedia3RemoteActionListeners.add(listener);
+    return () => {
+      mockMedia3RemoteActionListeners.delete(listener);
+    };
+  },
   requestTemporaryOrientation: (landscape: boolean) => mockRequestTemporaryOrientation(landscape),
   applyAndroidShortEdgesCutoutMode: () => mockApplyShortEdgesCutoutMode(),
   getAndroidSafeAreaInsets: () => mockGetSafeAreaInsets(),
@@ -208,6 +227,10 @@ afterEach(() => {
   lastMedia3SurfaceProps = undefined;
   lastAetherSurfaceProps = undefined;
   mockSetOrientationLocked.mockReset();
+  mockSetMedia3PitchLock.mockReset();
+  mockSetMedia3MediaMetadata.mockReset();
+  mockSetMedia3BackgroundAudioEnabled.mockReset();
+  mockMedia3RemoteActionListeners.clear();
   mockRequestTemporaryOrientation.mockReset();
   mockApplyShortEdgesCutoutMode.mockReset();
   mockGetSafeAreaInsets.mockClear();
@@ -519,6 +542,7 @@ describe('App', () => {
   it('wires Android Media3Surface resizeMode/subtitleBottomInsetPx and setOrientationLocked on touch lock (#136, #440)', async () => {
     jest.replaceProperty(Platform, 'OS', 'android');
     jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(false);
+    const mockStop = jest.fn();
     mockMedia3Engine = {
       capabilities: {
         mpegTsOverHttp: true,
@@ -535,7 +559,7 @@ describe('App', () => {
       play: () => {},
       pause: () => {},
       seek: () => {},
-      stop: () => {},
+      stop: mockStop,
       recreate: () => {},
       release: () => {},
     };
@@ -588,6 +612,18 @@ describe('App', () => {
     expect(await screen.findByTestId('player-surface')).toBeOnTheScreen();
     expect(mockApplyShortEdgesCutoutMode).toHaveBeenCalledTimes(1);
     expect(mockSafeAreaListeners.size).toBe(1);
+    expect(mockSetMedia3PitchLock).toHaveBeenCalledWith(mockMedia3Engine, true);
+    expect(mockSetMedia3BackgroundAudioEnabled).toHaveBeenCalledWith(mockMedia3Engine, false);
+    expect(mockSetMedia3MediaMetadata).toHaveBeenCalledWith(mockMedia3Engine, {
+      title: 'Channel 0001',
+      kind: 'live',
+      canStepTrack: false,
+    });
+    expect(mockMedia3RemoteActionListeners.size).toBe(1);
+    await act(async () => {
+      for (const l of mockMedia3RemoteActionListeners) l('next');
+      for (const l of mockMedia3RemoteActionListeners) l('previous');
+    });
     expect(lastMedia3SurfaceProps).toEqual({
       resizeMode: 'fit',
       subtitleBottomInsetPx: 96,
@@ -606,9 +642,17 @@ describe('App', () => {
     });
     expect(screen.queryByTestId('player-locked-overlay')).toBeNull();
 
-    // Unmount while locked -> guarantees setOrientationLocked(false)
-    await view.unmount();
+    // External Bluetooth/MediaSession stop synchronizes JS PlaybackService and exits player (#412)
+    await act(async () => {
+      for (const l of mockMedia3RemoteActionListeners) l('stop');
+    });
+    expect(mockStop).toHaveBeenCalled();
+    expect(screen.queryByTestId('player-surface')).toBeNull();
     expect(mockSetOrientationLocked).toHaveBeenLastCalledWith(false);
+    expect(mockSetMedia3MediaMetadata).toHaveBeenLastCalledWith(mockMedia3Engine, null);
+    expect(mockMedia3RemoteActionListeners.size).toBe(0);
+
+    await view.unmount();
     expect(mockSafeAreaListeners.size).toBe(0);
   });
 

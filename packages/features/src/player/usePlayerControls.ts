@@ -606,7 +606,18 @@ export function usePlayerControls(params: PlayerControlsParams) {
     });
     cbRef.current.onToggleMute?.();
   };
+  const handleStop = (): void => {
+    scrub.cancel();
+    digitBuf.cancel();
+    selectGuardRef.current?.reset();
+    serviceRef.current?.stop();
+    onExitRef.current();
+  };
   const handleHostKey = (key: HostKey): void => {
+    if (key === 'stop') {
+      handleStop();
+      return;
+    }
     if (cbRef.current.stillWatchingVisible) return;
     cbRef.current.onUserActivity?.();
     overlay.notifyOsdActivity();
@@ -614,6 +625,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
       isVod: cbRef.current.activeTarget.kind === 'vod',
       state: overlay.liveRef.current,
       handleBack,
+      onStop: handleStop,
       toggleFullscreen,
       toggleResizeMode: overlay.toggleResizeMode,
       toggleAlwaysOnTop: cbRef.current.onToggleAlwaysOnTop,

@@ -80,11 +80,13 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     onPersistAudioNormalization,
     windowAspectRatioLock,
     onWindowAspectRatioLockChange,
+    backgroundAudioPlayback = false,
   } = props;
   const formFactor = useFormFactor();
   const i18n = useI18n();
   const isTv = formFactor === 'tv';
   const isDesktop = formFactor === 'desktop';
+  const effectiveBackgroundAudio = !isTv && !isDesktop && backgroundAudioPlayback;
 
   const serviceRef = useRef<PlaybackService | null>(null);
   const flushProgressRef = useRef<(overridePosMs?: number) => void>(() => undefined);
@@ -104,6 +106,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
   const preferHevcRef = useLatestRef<boolean>(preferHevcOverDolbyVision);
   const filterSdhRef = useLatestRef<boolean>(filterSdhSubtitles);
   const switchModeRef = useLatestRef<LiveChannelSwitchModePref>(liveChannelSwitchMode);
+  const backgroundAudioRef = useLatestRef<boolean>(effectiveBackgroundAudio);
   const reloadActiveTargetRef = useRef<() => void>(() => undefined);
   const { decoderModeRef, activeDecoderMode, showAndroidDecoder, handleSelectAndroidDecoderMode } =
     useAndroidDecoderModeSync({
@@ -130,6 +133,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     filterSdhSubtitlesRef: filterSdhRef,
     liveChannelSwitchModeRef: switchModeRef,
     resolvedNextEpisodeRef,
+    backgroundAudioPlaybackRef: backgroundAudioRef,
   });
   reloadActiveTargetRef.current = handoff.reloadActiveTarget;
   const { activeTarget, previewTarget, zapBy, jumpToChannel } = handoff;
@@ -164,6 +168,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     ...(deinterlaceMode !== undefined ? { deinterlaceMode } : {}),
     ...(pitchLock !== undefined ? { pitchLock } : {}),
     ...(audioNormalization !== undefined ? { audioNormalization } : {}),
+    backgroundAudioPlayback: effectiveBackgroundAudio,
     ...(windowAspectRatioLock !== undefined ? { windowAspectRatioLock } : {}),
     ...(onWindowAspectRatioLockChange !== undefined ? { onWindowAspectRatioLockChange } : {}),
     serviceRef,

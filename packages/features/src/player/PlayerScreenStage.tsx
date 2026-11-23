@@ -102,6 +102,7 @@ export interface PlayerScreenProps {
   onPersistAudioNormalization?: (enabled: boolean) => void;
   windowAspectRatioLock?: boolean;
   onWindowAspectRatioLockChange?: (enabled: boolean) => void;
+  backgroundAudioPlayback?: boolean;
   liveChannelSwitchMode?: LiveChannelSwitchModePref;
   onTargetChange?: (next: PlayTarget) => void;
   onExit: () => void;

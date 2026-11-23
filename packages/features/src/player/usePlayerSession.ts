@@ -66,6 +66,7 @@ export function usePlayerSession(params: {
   deinterlaceMode?: DeinterlaceMode;
   pitchLock?: boolean;
   audioNormalization?: boolean;
+  backgroundAudioPlayback?: boolean;
   windowAspectRatioLock?: boolean;
   onWindowAspectRatioLockChange?: (enabled: boolean) => void;
   serviceRef: MutableRefObject<PlaybackService | null>;
@@ -83,6 +84,7 @@ export function usePlayerSession(params: {
     deinterlaceMode,
     pitchLock,
     audioNormalization,
+    backgroundAudioPlayback,
     windowAspectRatioLock,
     onWindowAspectRatioLockChange,
     serviceRef,
@@ -126,7 +128,10 @@ export function usePlayerSession(params: {
       });
       const offHostKey = opened.onHostKey?.((key) => {
         if ((key as string) === 'close') onExitRef.current();
-        else hostKeyRef.current(key);
+        else if (key === 'stop') {
+          service.stop();
+          onExitRef.current();
+        } else hostKeyRef.current(key);
       });
       activeSession = { opened, service, ...(offHostKey !== undefined ? { offHostKey } : {}) };
       serviceRef.current = service;
@@ -248,6 +253,12 @@ export function usePlayerSession(params: {
       openedEngine?.setAudioNormalization?.(audioNormalization);
     }
   }, [audioNormalization, openedEngine]);
+
+  useEffect(() => {
+    if (backgroundAudioPlayback !== undefined) {
+      openedEngine?.setBackgroundAudioEnabled?.(backgroundAudioPlayback);
+    }
+  }, [backgroundAudioPlayback, openedEngine]);
 
   useEffect(() => {
     if (windowAspectRatioLock !== undefined) {

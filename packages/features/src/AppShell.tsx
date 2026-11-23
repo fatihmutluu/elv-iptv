@@ -536,6 +536,7 @@ export function AppShell(props: AppShellProps): ReactElement {
                     void preferences.updatePreferences({ audioNormalization });
                   }}
                   windowAspectRatioLock={preferences.preferences.windowAspectRatioLock}
+                  backgroundAudioPlayback={preferences.preferences.backgroundAudioPlayback}
                   {...(Platform.OS === 'android'
                     ? {
                         androidDecoderMode: preferences.preferences.androidDecoderMode,

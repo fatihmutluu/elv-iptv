@@ -37,6 +37,7 @@ export type HostKey =
   | 'channel-up'
   | 'channel-down'
   | 'back'
+  | 'stop'
   | 'fullscreen'
   | 'play-pause'
   | 'seek-back'
@@ -133,6 +134,8 @@ export interface OpenVideoEngine {
   readonly setPitchLock?: (locked: boolean) => void;
   /** Optional EBU R128 loudness normalization toggle (`#243`). */
   readonly setAudioNormalization?: (enabled: boolean) => void;
+  /** Optional background audio playback toggle for mobile foreground services / audio sessions (`#412`, `#413`). */
+  readonly setBackgroundAudioEnabled?: (enabled: boolean) => void;
   /** Optional gapless next-episode queue setter (`#205`). */
   readonly queueNext?: (request: QueuedEpisodeHostRequest) => void;
   /** Optional gapless next-episode queue clearer (`#205`). */

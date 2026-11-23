@@ -77,6 +77,7 @@ describe('preferences codec', () => {
       pitchLock: true,
       audioNormalization: false,
       windowAspectRatioLock: false,
+      backgroundAudioPlayback: false,
     });
   });
 

@@ -1,6 +1,7 @@
 import {
   bridgeNativeEngine,
   type EngineCapabilities,
+  type EngineEvent,
   type NativeEngineHandle,
   type PlayerEngine,
 } from '@elv/playback';
@@ -25,6 +26,18 @@ export interface AndroidPickedPlaylistFile {
   readonly bytes: Uint8Array;
 }
 
+/** Typed playback metadata forwarded to Android Media3's `MediaSession` (`#412`). */
+export interface AndroidMediaMetadata {
+  readonly title: string;
+  readonly subtitle?: string;
+  readonly artworkUrl?: string;
+  readonly kind?: 'live' | 'vod';
+  readonly canStepTrack?: boolean;
+}
+
+/** Remote media transport action emitted from Android lock-screen / Bluetooth controls (`#412`). */
+export type AndroidRemoteMediaAction = 'next' | 'previous' | 'stop';
+
 interface RawPickedPlaylistFile {
   name?: unknown;
   bytes?: unknown;
@@ -40,8 +53,18 @@ interface RawInsets {
   left?: unknown;
 }
 
+interface Media3NativeEngineHandle extends NativeEngineHandle {
+  setPitchLock?(locked: boolean): void;
+  setMediaMetadata?(metadata: AndroidMediaMetadata | null): void;
+  setBackgroundAudioEnabled?(enabled: boolean): void;
+  addListener: {
+    (eventName: 'onEngineEvent', listener: (event: EngineEvent) => void): { remove(): void };
+    (eventName: 'onRemoteMediaAction', listener: (payload: unknown) => void): { remove(): void };
+  };
+}
+
 interface NativeEngineModule {
-  Engine: new () => NativeEngineHandle;
+  Engine: new () => Media3NativeEngineHandle;
   uptimeMs(): number;
   setOrientationLocked?(locked: boolean): void;
   requestTemporaryOrientation?(landscape: boolean): void;
@@ -77,6 +100,18 @@ function readBooleanField(payload: unknown, key: string): boolean {
     return Boolean((payload as Record<string, unknown>)[key]);
   }
   return false;
+}
+
+function parseRemoteMediaAction(payload: unknown): AndroidRemoteMediaAction | null {
+  const candidate =
+    typeof payload === 'string'
+      ? payload
+      : typeof payload === 'object' && payload !== null && 'action' in payload
+        ? (payload as Record<string, unknown>).action
+        : null;
+  return candidate === 'next' || candidate === 'previous' || candidate === 'stop'
+    ? candidate
+    : null;
 }
 
 const B64_TABLE = new Int16Array(128).fill(-1);
@@ -146,7 +181,7 @@ const CAPABILITIES: EngineCapabilities = Object.freeze({
 });
 
 /** The native shared object behind each live engine this module created; `Media3Surface` binds its view to it. */
-const handles = new WeakMap<PlayerEngine, NativeEngineHandle>();
+const handles = new WeakMap<PlayerEngine, Media3NativeEngineHandle>();
 
 function wrap(module: NativeEngineModule): PlayerEngine {
   const native = new module.Engine();
@@ -155,9 +190,18 @@ function wrap(module: NativeEngineModule): PlayerEngine {
     uptimeMs: () => module.uptimeMs(),
     now: () => performance.now(),
   });
+  let released = false;
   const engine: PlayerEngine = {
     ...bridged,
+    ...(native.setPitchLock === undefined
+      ? {}
+      : {
+          setPitchLock(_attempt, locked) {
+            if (!released) native.setPitchLock?.(Boolean(locked));
+          },
+        }),
     release() {
+      released = true;
       handles.delete(engine);
       bridged.release();
     },
@@ -175,6 +219,39 @@ const nativeModule = requireOptionalNativeModule<NativeEngineModule>('ElvEngineM
  */
 export function createMedia3Engine(): PlayerEngine | null {
   return nativeModule === null ? null : wrap(nativeModule);
+}
+
+/** Toggles VOD audio pitch preservation on a live Media3 engine created by {@link createMedia3Engine} (`#264`). */
+export function setMedia3PitchLock(engine: PlayerEngine, locked: boolean): void {
+  handles.get(engine)?.setPitchLock?.(Boolean(locked));
+}
+
+/** Publishes or clears lock-screen / Bluetooth `MediaSession` metadata on a live Media3 engine (`#412`). */
+export function setMedia3MediaMetadata(
+  engine: PlayerEngine,
+  metadata: AndroidMediaMetadata | null,
+): void {
+  handles.get(engine)?.setMediaMetadata?.(metadata);
+}
+
+/** Enables or disables opt-in background audio playback on a live Media3 engine (`#412`). */
+export function setMedia3BackgroundAudioEnabled(engine: PlayerEngine, enabled: boolean): void {
+  handles.get(engine)?.setBackgroundAudioEnabled?.(Boolean(enabled));
+}
+
+/** Subscribes to Android `MediaSession` remote next/previous/stop actions on a live Media3 engine (`#412`). */
+export function subscribeMedia3RemoteMediaAction(
+  engine: PlayerEngine,
+  listener: (action: AndroidRemoteMediaAction) => void,
+): () => void {
+  const native = handles.get(engine);
+  const sub = native?.addListener('onRemoteMediaAction', (payload) => {
+    const action = parseRemoteMediaAction(payload);
+    if (action !== null) listener(action);
+  });
+  return () => {
+    sub?.remove();
+  };
 }
 
 /** Locks or unlocks the current Android activity orientation for player touch lock (`#440`). */

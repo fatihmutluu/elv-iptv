@@ -127,6 +127,7 @@ export interface ExtendedPreferencesFields {
   readonly pitchLock: boolean;
   readonly audioNormalization: boolean;
   readonly windowAspectRatioLock: boolean;
+  readonly backgroundAudioPlayback: boolean;
 }
 
 const MAX_PREF_STRING_LENGTH = 64;
@@ -515,6 +516,10 @@ export function parseExtendedPreferences(
       typeof parsed.windowAspectRatioLock === 'boolean'
         ? parsed.windowAspectRatioLock
         : defaults.windowAspectRatioLock,
+    backgroundAudioPlayback:
+      typeof parsed.backgroundAudioPlayback === 'boolean'
+        ? parsed.backgroundAudioPlayback
+        : defaults.backgroundAudioPlayback,
   };
 }
 
@@ -609,6 +614,7 @@ export function serializeExtendedPreferences(
     pitchLock: Boolean(snapshot.pitchLock),
     audioNormalization: Boolean(snapshot.audioNormalization),
     windowAspectRatioLock: Boolean(snapshot.windowAspectRatioLock),
+    backgroundAudioPlayback: Boolean(snapshot.backgroundAudioPlayback),
   };
 }
 
@@ -738,5 +744,9 @@ export function mergeExtendedPreferences(
       typeof patch.windowAspectRatioLock === 'boolean'
         ? patch.windowAspectRatioLock
         : base.windowAspectRatioLock,
+    backgroundAudioPlayback:
+      typeof patch.backgroundAudioPlayback === 'boolean'
+        ? patch.backgroundAudioPlayback
+        : base.backgroundAudioPlayback,
   };
 }

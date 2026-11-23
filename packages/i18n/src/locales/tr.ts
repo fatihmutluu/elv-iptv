@@ -689,4 +689,7 @@ export const trMessages: Readonly<Record<MessageId, string>> = {
   'settings.windowAspectRatioLock': 'Pencere en-boy oranını kilitle',
   'settings.windowAspectRatioLockHint':
     'Masaüstünde pencereyi boyutlandırırken siyah kenarlıkları önler',
+  'settings.backgroundAudio': 'Arka planda ses oynatma',
+  'settings.backgroundAudioHint':
+    'Uygulama mobilde arka plana alındığında sesi oynatmaya devam eder',
 };

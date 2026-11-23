@@ -46,6 +46,7 @@ export function PlaybackSettingsPanel({
   const viewport = useViewport();
   const isTv = viewport.formFactor === 'tv';
   const isDesktop = viewport.formFactor === 'desktop';
+  const isMobile = viewport.formFactor === 'phone' || viewport.formFactor === 'tablet';
 
   const scrollRef = useRef<ScrollViewHandle | null>(null);
   const cardYRef = useRef<
@@ -85,6 +86,7 @@ export function PlaybackSettingsPanel({
       focusedControlId === 'toggle-pitch-lock' ||
       focusedControlId === 'toggle-audio-normalization' ||
       focusedControlId === 'toggle-window-aspect-ratio-lock' ||
+      focusedControlId === 'toggle-background-audio' ||
       focusedControlId.startsWith('osd-time-') ||
       focusedControlId.startsWith('oled-') ||
       focusedControlId.startsWith('still-watching-')
@@ -313,6 +315,22 @@ export function PlaybackSettingsPanel({
               isTv={isTv}
               onToggle={() =>
                 applyPatch({ windowAspectRatioLock: !activePrefs.windowAspectRatioLock })
+              }
+            />
+          </>
+        ) : null}
+        {isMobile ? (
+          <>
+            <SettingsDivider />
+            <SettingsToggleRow
+              testID="settings-playback-toggle-background-audio"
+              title={i18n.t('settings.backgroundAudio')}
+              description={i18n.t('settings.backgroundAudioHint')}
+              checked={activePrefs.backgroundAudioPlayback}
+              focused={focusedControlId === 'toggle-background-audio'}
+              isTv={isTv}
+              onToggle={() =>
+                applyPatch({ backgroundAudioPlayback: !activePrefs.backgroundAudioPlayback })
               }
             />
           </>

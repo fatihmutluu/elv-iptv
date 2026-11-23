@@ -17,10 +17,14 @@ import {
   pickAndroidPlaylistFile,
   readAndroidClipboardText,
   requestTemporaryOrientation,
+  setMedia3BackgroundAudioEnabled,
+  setMedia3MediaMetadata,
+  setMedia3PitchLock,
   setOrientationLocked,
   subscribeAndroidPictureInPicture,
   subscribeAndroidSafeAreaInsets,
   subscribeAndroidStandby,
+  subscribeMedia3RemoteMediaAction,
 } from '@elv/engine-media3';
 import {
   type AppLifecyclePort,
@@ -149,7 +153,25 @@ function AppRoot() {
                 setVolume: (volume: number) => setAppleEngineVolume(engine, volume),
               }
             : {}),
-          ...(Platform.OS === 'android' ? { setOrientationLocked } : {}),
+          ...(Platform.OS === 'android'
+            ? {
+                setOrientationLocked,
+                setPitchLock: (locked) => setMedia3PitchLock(engine, locked),
+                setMediaMetadata: (metadata) => setMedia3MediaMetadata(engine, metadata),
+                setBackgroundAudioEnabled: (enabled) =>
+                  setMedia3BackgroundAudioEnabled(engine, enabled),
+                onHostKey: (listener) =>
+                  subscribeMedia3RemoteMediaAction(engine, (action) =>
+                    listener(
+                      action === 'next'
+                        ? 'channel-up'
+                        : action === 'previous'
+                          ? 'channel-down'
+                          : 'stop',
+                    ),
+                  ),
+              }
+            : {}),
           ...(isAndroidMobile
             ? {
                 requestTemporaryOrientation,

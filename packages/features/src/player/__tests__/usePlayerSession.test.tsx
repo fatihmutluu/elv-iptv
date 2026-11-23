@@ -101,4 +101,74 @@ describe('usePlayerSession videoInfo and fullscreen tracking (#58, #394)', () =>
     await hook.unmount();
     expect(unsubscribeFs).toHaveBeenCalledTimes(1);
   });
+
+  it('stops PlaybackService and invokes onExit when host emits stop (#412)', async () => {
+    const manual = createManualClock();
+    const engine = createFakePlayerEngine({
+      now: manual.now,
+      schedule: manual.schedule,
+      cancel: manual.cancel,
+    });
+    let hostKeyListener: ((key: HostKey) => void) | undefined;
+    const videoHost: VideoHost = {
+      open: () => ({
+        engine,
+        renderSurface: () => <View />,
+        onHostKey: (listener) => {
+          hostKeyListener = listener;
+          return () => {
+            hostKeyListener = undefined;
+          };
+        },
+      }),
+    };
+    const serviceRef = { current: null as PlaybackService | null };
+    const clockRef = { current: { now: manual.now } };
+    const timersRef = {
+      current: { setTimeout: manual.schedule, clearTimeout: manual.cancel },
+    };
+    const hostKeyRef = { current: jest.fn<void, [HostKey]>() };
+    const onExitRef = { current: jest.fn() };
+
+    const hook = await renderHook(() =>
+      usePlayerSession({
+        videoHost,
+        activeTarget: TARGET,
+        serviceRef,
+        clockRef,
+        timersRef,
+        hostKeyRef,
+        onExitRef,
+        onServiceReady: () => undefined,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(hook.result.current.sessionState.kind).toBe('ready');
+    });
+
+    const svc = hook.result.current.activeService;
+    expect(svc).not.toBeNull();
+    svc?.tune({
+      item: TARGET.itemKey,
+      accountKey: TARGET.sourceId,
+      kind: 'vod',
+      resolve: async () => ({
+        ok: true as const,
+        value: { url: 'http://sim.example.test/vod.mkv', headers: {} },
+      }),
+    });
+    await waitFor(() => {
+      expect(engine.commands.some((c) => c.name === 'load')).toBe(true);
+    });
+
+    await act(async () => {
+      hostKeyListener?.('stop');
+    });
+    expect(engine.commands.some((c) => c.name === 'stop')).toBe(true);
+    expect(onExitRef.current).toHaveBeenCalledTimes(1);
+    expect(hostKeyRef.current).not.toHaveBeenCalled();
+
+    await hook.unmount();
+  });
 });
