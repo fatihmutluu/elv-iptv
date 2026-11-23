@@ -16,6 +16,7 @@ import {
 } from './channel-digit-entry';
 import {
   type PlayerControlsParams,
+  readSettingsMenuOptionsFromControls,
   routeHostKey,
   routeOverlayAndMediaKey,
 } from './player-key-routing';
@@ -212,6 +213,8 @@ export function usePlayerControls(params: PlayerControlsParams) {
     hasSettings: params.hasSettings ?? false,
     hasInfo: params.hasInfo,
     hasChannelList: params.hasChannelList,
+    hasPitchLock: params.onTogglePitchLock !== undefined,
+    hasAudioNormalization: params.onToggleAudioNormalization !== undefined,
     hasAutoSubtitlesOnSkipBack: hasAutoSubtitlesToggle,
     hasAutoPlayNextEpisode: hasAutoPlayNextToggle,
     hasAudioDevice: hasAudioDevicePicker,
@@ -236,7 +239,11 @@ export function usePlayerControls(params: PlayerControlsParams) {
     cancelScrub,
     onResizeModeChange: params.onResizeModeChange,
     onSetOrientationLocked: params.onSetOrientationLocked,
-    onSetDeinterlace: params.onSetDeinterlace,
+    onSetDeinterlace:
+      params.onSetDeinterlace ??
+      (params.onCycleDeinterlaceMode !== undefined
+        ? () => params.onCycleDeinterlaceMode?.()
+        : undefined),
   });
 
   const allowTvSelect = (): boolean =>
@@ -359,40 +366,12 @@ export function usePlayerControls(params: PlayerControlsParams) {
     if (s.locked) overlay.unlockControls();
     else if (s.settingsOpen) {
       if (s.settingsMenu.view !== 'root') {
-        const isVodTarget = cbRef.current.activeTarget.kind === 'vod';
         overlay.updateSettingsMenu({
           view: 'root',
-          index: rootIndexForSettingsViewOptions(s.settingsMenu.view, {
-            isVod: isVodTarget,
-            hasAspect: true,
-            hasDeinterlace: cbRef.current.onSetDeinterlace !== undefined,
-            hasAutoSubtitlesOnSkipBack:
-              isVodTarget && cbRef.current.onToggleAutoSubtitlesOnSkipBack !== undefined,
-            hasAutoPlayNextEpisode:
-              isVodTarget && cbRef.current.onToggleAutoPlayNextEpisode !== undefined,
-            hasAudioDevice:
-              (cbRef.current.audioDevices?.length ?? 0) > 0 &&
-              cbRef.current.onSelectAudioDevice !== undefined,
-            hasQuality:
-              !isVodTarget &&
-              (cbRef.current.qualityVariants?.length ?? 0) > 1 &&
-              cbRef.current.onSelectQualityVariant !== undefined,
-            ...(cbRef.current.qualityVariants !== undefined
-              ? {
-                  qualityVariants: cbRef.current.qualityVariants,
-                  activeQualityKey: cbRef.current.activeTarget.itemKey,
-                }
-              : {}),
-            hasVideoDecoder:
-              cbRef.current.androidDecoderMode !== undefined &&
-              cbRef.current.onSelectAndroidDecoderMode !== undefined,
-            hasChapters: isVodTarget && (cbRef.current.chapters?.length ?? 0) > 0,
-            ...(cbRef.current.chapters !== undefined ? { chapters: cbRef.current.chapters } : {}),
-            hasSleepTimer: cbRef.current.onSelectSleepTimer !== undefined,
-            hasTimeDisplay: cbRef.current.onCycleTimeDisplayMode !== undefined,
-            hasInfo: s.canOpenInfo,
-            hasAlwaysOnTop: cbRef.current.onToggleAlwaysOnTop !== undefined,
-          }),
+          index: rootIndexForSettingsViewOptions(
+            s.settingsMenu.view,
+            readSettingsMenuOptionsFromControls(cbRef.current, s.canOpenInfo),
+          ),
         });
       } else overlay.closeSettings();
     } else if (s.tracksOpen) overlay.closeTracks();
@@ -487,46 +466,7 @@ export function usePlayerControls(params: PlayerControlsParams) {
     if (
       routeOverlayAndMediaKey(event, {
         isTv,
-        isVod: isVodTarget,
-        hasAspect: true,
-        hasDeinterlace: cbRef.current.onSetDeinterlace !== undefined,
-        hasAutoSubtitlesOnSkipBack:
-          isVodTarget && cbRef.current.onToggleAutoSubtitlesOnSkipBack !== undefined,
-        hasAutoPlayNextEpisode:
-          isVodTarget && cbRef.current.onToggleAutoPlayNextEpisode !== undefined,
-        hasAudioDevice:
-          (cbRef.current.audioDevices?.length ?? 0) > 0 &&
-          cbRef.current.onSelectAudioDevice !== undefined,
-        ...(cbRef.current.audioDevices !== undefined
-          ? { audioDevices: cbRef.current.audioDevices }
-          : {}),
-        ...(cbRef.current.activeAudioDevice !== undefined
-          ? { activeAudioDevice: cbRef.current.activeAudioDevice }
-          : {}),
-        hasQuality:
-          !isVodTarget &&
-          (cbRef.current.qualityVariants?.length ?? 0) > 1 &&
-          cbRef.current.onSelectQualityVariant !== undefined,
-        ...(cbRef.current.qualityVariants !== undefined
-          ? {
-              qualityVariants: cbRef.current.qualityVariants,
-              activeQualityKey: cbRef.current.activeTarget.itemKey,
-            }
-          : {}),
-        hasVideoDecoder:
-          cbRef.current.androidDecoderMode !== undefined &&
-          cbRef.current.onSelectAndroidDecoderMode !== undefined,
-        ...(cbRef.current.androidDecoderMode !== undefined
-          ? { androidDecoderMode: cbRef.current.androidDecoderMode }
-          : {}),
-        hasChapters: isVodTarget && (cbRef.current.chapters?.length ?? 0) > 0,
-        ...(cbRef.current.chapters !== undefined ? { chapters: cbRef.current.chapters } : {}),
-        hasSleepTimer: cbRef.current.onSelectSleepTimer !== undefined,
-        ...(cbRef.current.sleepTimerMinutes !== undefined
-          ? { sleepTimerMinutes: cbRef.current.sleepTimerMinutes }
-          : {}),
-        hasTimeDisplay: cbRef.current.onCycleTimeDisplayMode !== undefined,
-        hasAlwaysOnTop: cbRef.current.onToggleAlwaysOnTop !== undefined,
+        ...readSettingsMenuOptionsFromControls(cbRef.current, s.canOpenInfo),
         playbackSpeed: playbackSpeedRef.current,
         state: s,
         service: serviceRef.current,
@@ -540,7 +480,9 @@ export function usePlayerControls(params: PlayerControlsParams) {
         toggleTimeDisplayMode: cbRef.current.onCycleTimeDisplayMode,
         toggleChannelList: overlay.toggleChannelList,
         toggleResizeMode: overlay.toggleResizeMode,
-        toggleDeinterlace: overlay.toggleDeinterlace,
+        toggleDeinterlace: cbRef.current.onCycleDeinterlaceMode ?? overlay.toggleDeinterlace,
+        togglePitchLock: cbRef.current.onTogglePitchLock,
+        toggleAudioNormalization: cbRef.current.onToggleAudioNormalization,
         toggleAutoSubtitlesOnSkipBack: cbRef.current.onToggleAutoSubtitlesOnSkipBack,
         toggleAutoPlayNextEpisode: cbRef.current.onToggleAutoPlayNextEpisode,
         onChannelListMove: cbRef.current.onChannelListMove,

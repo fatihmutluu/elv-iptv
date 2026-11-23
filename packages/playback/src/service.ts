@@ -362,6 +362,34 @@ export function createPlaybackServiceWith(
       lastVodPositionMs = request.kind === 'vod' ? request.startMs : undefined;
       return startTune(request);
     },
+    adoptQueuedTarget(request, nextStream) {
+      if (disposed) return;
+      clearStartTimeout();
+      clearResolveTimeout();
+      resetCoalescers();
+      clearScrubbing(false);
+      hooks.onReset?.();
+      trackPrefs.reset();
+      current = request;
+      stream = nextStream;
+      lastVodPositionMs = request.kind === 'vod' ? (request.startMs ?? 0) : undefined;
+      const {
+        anchor: _a,
+        atLiveEdge: _l,
+        firstFrameAt: _f,
+        videoInfo: _v,
+        chapters: _c,
+        droppedFrames: _df,
+        ...rest
+      } = state();
+      store.replace({
+        ...rest,
+        tracks: EMPTY_TRACKS,
+        item: request.item,
+        accountKey: request.accountKey,
+        tuneAt: clock.now(),
+      });
+    },
     retry() {
       if (disposed || current === undefined || state().status.kind === 'idle') return;
       if (state().status.kind === 'ended') {

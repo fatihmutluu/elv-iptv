@@ -2,13 +2,15 @@ import type { AttemptToken, EngineEvent, PlayerEngine } from '@elv/playback';
 import {
   type AccessibilityFontFamily,
   DESKTOP_CAPABILITIES,
+  type DeinterlaceMode,
   type HwdecProfile,
   type PlayerArea,
   type PlayerUiEvent,
   type PresenterKind,
+  type QueueNextRequest,
   type ResizeMode,
 } from '../../shared/player-ipc.ts';
-import { createEngineControls } from './engine-controls.ts';
+import { createEngineControls, isSpdifPassthroughValue } from './engine-controls.ts';
 import { createEngineQueue, type QueuedOp } from './engine-queue.ts';
 import type { MpvCommand } from './mpv/codec.ts';
 import {
@@ -16,8 +18,10 @@ import {
   type LiveSession,
   type MediaRequest,
   type MediaSlot,
+  type QueuedMediaSlot,
 } from './mpv/live-session.ts';
 import { createOpeningGate } from './mpv/opening-gate.ts';
+import { headerFields } from './mpv/options.ts';
 import type { MpvProcess } from './mpv/process.ts';
 import type { ReadaheadTierStore } from './mpv/readahead.ts';
 import { createTrackTracker } from './mpv/tracks.ts';
@@ -57,6 +61,12 @@ export interface MpvEngine extends PlayerEngine {
   setSubtitleDelay(delaySec: number): void;
   setAudioDevice(device: string): void;
   setDeinterlace(enabled: boolean): void;
+  setDeinterlaceMode(mode: DeinterlaceMode): void;
+  setPitchLock(lockedOrAttempt: boolean | AttemptToken, maybeLocked?: boolean): void;
+  setAudioNormalization(enabled: boolean): void;
+  queueNext(request: QueueNextRequest): void;
+  clearQueue(): void;
+  onQueueAdvanced(listener: (itemKey: string) => void): () => void;
   setHwdec(profile: HwdecProfile): void;
   setResizeMode(mode: ResizeMode): void;
   setFilterSdh(enabled: boolean): void;
@@ -65,6 +75,14 @@ export interface MpvEngine extends PlayerEngine {
 
 const QUIT_GRACE_MS = 500;
 const CLOCK_INTERVAL_MS = 1000;
+
+const sameHeaderFields = (a: readonly string[], b: readonly string[]): boolean => {
+  if (a.length !== b.length) return false;
+  if (a.length === 0) return true;
+  const sa = [...a].sort();
+  const sb = [...b].sort();
+  return sa.every((v, i) => v === sb[i]);
+};
 
 const withStart = (request: MediaRequest, startMs: number | undefined): MediaRequest => {
   const { startMs: _old, ...rest } = request;
@@ -75,6 +93,7 @@ const withStart = (request: MediaRequest, startMs: number | undefined): MediaReq
 export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   const { presenter, timers } = deps;
   const listeners = new Set<(event: EngineEvent) => void>();
+  const queueAdvancedListeners = new Set<(itemKey: string) => void>();
   const tracks = createTrackTracker();
   const opening = createOpeningGate<MediaSlot>({ now: deps.now, timers });
   let released = false;
@@ -82,6 +101,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
   let lastArea: PlayerArea | undefined;
   let latestToken: AttemptToken = 0;
   let media: MediaSlot | undefined;
+  let queuedSlot: QueuedMediaSlot | undefined;
   let live: LiveSession | undefined;
   let spawning: Promise<LiveSession | undefined> | undefined;
   let spawnAbort: AbortController | undefined;
@@ -103,6 +123,15 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
 
   const ui = (event: PlayerUiEvent): void => {
     if (released) return;
+    if (event.type === 'queueAdvanced') {
+      for (const listener of [...queueAdvancedListeners]) {
+        try {
+          listener(event.itemKey);
+        } catch {
+          // isolate faulty queueAdvanced listeners
+        }
+      }
+    }
     try {
       deps.onUi(event);
     } catch {
@@ -121,6 +150,10 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     controls.cancelRamp(false);
     controls.reset();
     if (media) media.entryId = undefined;
+    queuedSlot = undefined;
+    L.hasQueuedPlaylist = false;
+    L.queuedEntryId = undefined;
+    L.inFlightQueued = undefined;
     L.hotplug.reset();
     L.audioDevices.reset();
     L.repeatGate.reset();
@@ -141,14 +174,27 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       live = next;
     },
     getMedia: () => media,
+    getQueued: () => queuedSlot,
+    setQueued: (next) => {
+      queuedSlot = next;
+    },
+    promoteQueued: (slot) => {
+      media = slot;
+      queuedSlot = undefined;
+    },
     detach,
     emit,
     ui,
     reportWedged,
     enqueueCommand: (cmd, slot) => queue.enqueueCommand(cmd, slot),
     onAudioProperty: (name, value) => controls.onAudioProperty(name, value),
+    onAudioSpdifProperty: (value) => controls.onAudioSpdifProperty(value),
     getDesiredAudioDevice: () => controls.getDesiredAudioDevice(),
     getDesiredSubtitleFont: () => controls.getDesiredSubtitleFont(),
+    getDesiredDeinterlaceMode: () => controls.getDesiredDeinterlaceMode(),
+    getDesiredPitchLock: () => controls.getDesiredPitchLock(),
+    getDesiredAudioNormalization: () => controls.getDesiredAudioNormalization(),
+    isSpdifPassthroughActive: () => controls.isSpdifPassthroughActive(),
     ...(deps.readaheadStore === undefined ? {} : { readaheadStore: deps.readaheadStore }),
   });
 
@@ -195,6 +241,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     }
     const L = live;
     if (L) {
+      if (L.hasQueuedPlaylist) await session.clearQueuedPlaylist(L);
       detach(L);
       await L.proc.quit(QUIT_GRACE_MS).catch(() => undefined);
     }
@@ -212,12 +259,23 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
         case 'stop': {
           const L = live;
           if (!L) return;
+          if (L.hasQueuedPlaylist) await session.clearQueuedPlaylist(L);
           if (L.hasCustomHeaders) {
             const propReply = await session.send(L, ['set_property', 'http-header-fields', []]);
             if (propReply?.error === 'success') L.hasCustomHeaders = false;
           }
           await session.send(L, ['stop']);
           opening.finish();
+          return;
+        }
+        case 'task': {
+          if (
+            live &&
+            op.generation === queue.generation &&
+            (op.slot === undefined || op.slot === media)
+          ) {
+            await op.task();
+          }
           return;
         }
         case 'command': {
@@ -229,21 +287,59 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
             ) {
               const target = live;
               await session.send(target, op.command);
-              if (
-                op.command[0] === 'set_property' &&
-                op.command[1] === 'audio-device' &&
-                typeof op.command[2] === 'string' &&
-                live === target
-              ) {
-                target.appliedAudioDevice = op.command[2];
-              }
-              if (
-                op.command[0] === 'set_property' &&
-                op.command[1] === 'sub-font' &&
-                typeof op.command[2] === 'string' &&
-                live === target
-              ) {
-                target.appliedSubtitleFont = op.command[2];
+              if (live === target) {
+                if (
+                  op.command[0] === 'set_property' &&
+                  op.command[1] === 'audio-device' &&
+                  typeof op.command[2] === 'string'
+                ) {
+                  target.appliedAudioDevice = op.command[2];
+                } else if (
+                  op.command[0] === 'set_property' &&
+                  op.command[1] === 'sub-font' &&
+                  typeof op.command[2] === 'string'
+                ) {
+                  target.appliedSubtitleFont = op.command[2];
+                } else if (
+                  op.command[0] === 'set_property' &&
+                  op.command[1] === 'audio-pitch-correction' &&
+                  typeof op.command[2] === 'string'
+                ) {
+                  target.appliedPitchLock = op.command[2] === 'yes';
+                } else if (
+                  op.command[0] === 'set_property' &&
+                  op.command[1] === 'deinterlace' &&
+                  op.command[2] === 'auto'
+                ) {
+                  target.appliedDeinterlaceMode = 'auto';
+                } else if (
+                  op.command[0] === 'vf' &&
+                  op.command[1] === 'add' &&
+                  typeof op.command[2] === 'string' &&
+                  op.command[2].startsWith('@elv_deint:')
+                ) {
+                  target.appliedDeinterlaceMode = 'bwdif';
+                } else if (
+                  op.command[0] === 'vf' &&
+                  op.command[1] === 'remove' &&
+                  op.command[2] === '@elv_deint' &&
+                  controls.getDesiredDeinterlaceMode() === 'off'
+                ) {
+                  target.appliedDeinterlaceMode = 'off';
+                } else if (
+                  op.command[0] === 'af' &&
+                  op.command[1] === 'add' &&
+                  typeof op.command[2] === 'string' &&
+                  op.command[2].startsWith('@elv_loudnorm:')
+                ) {
+                  target.appliedAudioNormalization = true;
+                } else if (
+                  op.command[0] === 'af' &&
+                  op.command[1] === 'remove' &&
+                  op.command[2] === '@elv_loudnorm'
+                ) {
+                  target.appliedAudioNormalization = false;
+                }
               }
             }
           } finally {
@@ -272,6 +368,12 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     } else if (L.entries.tokenOf(media.entryId) !== undefined) {
       L.entries.bind(media.entryId, token, media.request.kind);
     }
+    if (queuedSlot && token > queuedSlot.token) {
+      queuedSlot.token = token;
+      if (queuedSlot.entryId !== undefined && L.entries.tokenOf(queuedSlot.entryId) !== undefined) {
+        L.entries.bind(queuedSlot.entryId, token, queuedSlot.request.kind);
+      }
+    }
   };
 
   const controls = createEngineControls({
@@ -284,12 +386,27 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     timers,
     platform: deps.platform ?? process.platform,
     initialDarwinCompat: deps.baseArgs.includes('--hwdec-image-format=uyvy422'),
+    initialSpdifPassthrough: deps.baseArgs.some(
+      (arg) =>
+        arg.startsWith('--audio-spdif=') &&
+        isSpdifPassthroughValue(arg.slice('--audio-spdif='.length)),
+    ),
     ...(deps.audioRampMs === undefined ? {} : { audioRampMs: deps.audioRampMs }),
   });
+
+  const clearQueue = (): void => {
+    if (released) return;
+    queuedSlot = undefined;
+    queue.enqueueTask(async () => {
+      const L = live;
+      if (L) await session.clearQueuedPlaylist(L);
+    });
+  };
 
   const startMedia = (token: AttemptToken, request: MediaRequest): void => {
     note(token);
     controls.reset();
+    queuedSlot = undefined;
     media = { token, request };
     queue.enqueueLoad(media);
     controls.cancelRamp(true, true);
@@ -333,6 +450,49 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
     setSubtitleDelay: (delaySec) => controls.setSubtitleDelay(delaySec),
     setAudioDevice: (device) => controls.setAudioDevice(device),
     setDeinterlace: (enabled) => controls.setDeinterlace(enabled),
+    setDeinterlaceMode: (mode) => controls.setDeinterlaceMode(mode),
+    setPitchLock: (lockedOrAttempt, maybeLocked) =>
+      controls.setPitchLock(lockedOrAttempt, maybeLocked),
+    setAudioNormalization: (enabled) => controls.setAudioNormalization(enabled),
+    queueNext(request) {
+      if (released || !media || media.request.kind !== 'vod') return;
+      const activeCustom = headerFields(media.request.headers);
+      const nextCustom = headerFields(request.stream.headers);
+      if (!sameHeaderFields(activeCustom, nextCustom)) {
+        if (queuedSlot !== undefined || live?.hasQueuedPlaylist) clearQueue();
+        return;
+      }
+      const nextReq: MediaRequest = {
+        url: request.stream.url,
+        headers: request.stream.headers,
+        kind: 'vod',
+        ...(request.preferHevcOverDolbyVision === undefined
+          ? {}
+          : { preferHevcOverDolbyVision: request.preferHevcOverDolbyVision }),
+        ...(request.filterSdhSubtitles === undefined
+          ? {}
+          : { filterSdhSubtitles: request.filterSdhSubtitles }),
+      };
+      const nextSlot: QueuedMediaSlot = {
+        itemKey: request.itemKey,
+        token: media.token,
+        request: nextReq,
+      };
+      const ownerSlot = media;
+      queuedSlot = nextSlot;
+      queue.enqueueTask(async () => {
+        const L = live;
+        if (L) await session.queueSlot(L, ownerSlot, nextSlot);
+      }, ownerSlot);
+    },
+    clearQueue,
+    onQueueAdvanced(listener) {
+      if (released) return () => undefined;
+      queueAdvancedListeners.add(listener);
+      return () => {
+        queueAdvancedListeners.delete(listener);
+      };
+    },
     setHwdec: (profile) => controls.setHwdec(profile),
     setResizeMode: (mode) => controls.setResizeMode(mode),
     setFilterSdh: (enabled) => controls.setFilterSdh(enabled),
@@ -395,6 +555,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       controls.reset();
       tracks.onStop();
       live?.repeatGate.reset();
+      queuedSlot = undefined;
       media = undefined;
       queue.enqueueStop();
       controls.cancelRamp(true, true);
@@ -406,6 +567,7 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       controls.cancelRamp(false);
       controls.reset();
       tracks.onRetryOrRecreate();
+      queuedSlot = undefined;
       queue.enqueueRecreate();
     },
     release() {
@@ -414,8 +576,10 @@ export function createMpvEngine(deps: MpvEngineDeps): MpvEngine {
       released = true;
       controls.reset();
       tracks.onStop();
+      queuedSlot = undefined;
       queue.clear();
       listeners.clear();
+      queueAdvancedListeners.clear();
       timers.clearTimeout(tickHandle);
       spawnAbort?.abort();
       opening.wake();

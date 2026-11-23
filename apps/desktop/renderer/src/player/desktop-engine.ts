@@ -9,12 +9,14 @@ import type {
   AccessibilityFontFamily,
   AudioDeviceInfo,
   BridgeCommand,
+  DeinterlaceMode,
   HwdecProfile,
   PlayerArea,
   PlayerBridge,
   PlayerEventMessage,
   PlayerUiEvent,
   PlayerUiMessage,
+  QueueNextRequest,
   ResizeMode,
   VideoFrameLike,
 } from '../../../src/shared/player-ipc.ts';
@@ -64,6 +66,18 @@ export interface DesktopEngine extends PlayerEngine {
   ): () => void;
   /** Enables or disables per-file mpv deinterlacing (`#131`). */
   setDeinterlace(enabled: boolean): void;
+  /** Selects the mpv deinterlacing pipeline (`off` / `auto` / `bwdif`, `#243`). */
+  setDeinterlaceMode(mode: DeinterlaceMode): void;
+  /** Toggles mpv `scaletempo2` pitch preservation (`audio-pitch-correction`, `#243`). */
+  setPitchLock(lockedOrAttempt: boolean | AttemptToken, maybeLocked?: boolean): void;
+  /** Toggles labeled EBU R128 `@elv_loudnorm` audio normalization (`#243`). */
+  setAudioNormalization(enabled: boolean): void;
+  /** Queues the next resolved VOD episode via mpv `append-play` (`#205`). */
+  queueNext(request: QueueNextRequest): void;
+  /** Clears any pending queued `append-play` episode (`#205`). */
+  clearQueue(): void;
+  /** Subscribes to gapless queue advancement notifications (`#205`); returns unsubscribe. */
+  onQueueAdvanced(listener: (itemKey: string) => void): () => void;
   /** Selects the desktop `libmpv` hardware video decoding profile (`#435`, `#210`). */
   setHwdec(profile: HwdecProfile): void;
   /** Sets picture scaling mode (`fit` / `fill` / `stretch`) on non-canvas mpv presenters (`#124`). */
@@ -106,6 +120,7 @@ export async function createDesktopEngine(
   const audioDeviceListeners = new Set<
     (devices: readonly AudioDeviceInfo[], active: string) => void
   >();
+  const queueAdvancedListeners = new Set<(itemKey: string) => void>();
   const frameUnsubs = new Set<() => void>();
   let engineId: string | undefined;
   let offset = 0;
@@ -151,6 +166,15 @@ export async function createDesktopEngine(
           listener(ui.devices, ui.active);
         } catch {
           // isolate audio device subscribers
+        }
+      }
+    }
+    if (ui.type === 'queueAdvanced') {
+      for (const listener of [...queueAdvancedListeners]) {
+        try {
+          listener(ui.itemKey);
+        } catch {
+          // isolate queueAdvanced subscribers
         }
       }
     }
@@ -237,6 +261,21 @@ export async function createDesktopEngine(
       };
     },
     setDeinterlace: (enabled) => send({ name: 'setDeinterlace', enabled }),
+    setDeinterlaceMode: (mode) => send({ name: 'setDeinterlaceMode', mode }),
+    setPitchLock: (lockedOrAttempt, maybeLocked) => {
+      const locked = typeof lockedOrAttempt === 'boolean' ? lockedOrAttempt : Boolean(maybeLocked);
+      send({ name: 'setPitchLock', locked });
+    },
+    setAudioNormalization: (enabled) => send({ name: 'setAudioNormalization', enabled }),
+    queueNext: (request) => send({ name: 'queueNext', request }),
+    clearQueue: () => send({ name: 'clearQueue' }),
+    onQueueAdvanced(listener) {
+      if (released) return () => undefined;
+      queueAdvancedListeners.add(listener);
+      return () => {
+        queueAdvancedListeners.delete(listener);
+      };
+    },
     setHwdec: (profile) => send({ name: 'setHwdec', profile }),
     setResizeMode: (mode) => send({ name: 'setResizeMode', mode }),
     setFilterSdh: (enabled) => send({ name: 'setFilterSdh', enabled }),
@@ -251,6 +290,7 @@ export async function createDesktopEngine(
       listeners.clear();
       uiListeners.clear();
       audioDeviceListeners.clear();
+      queueAdvancedListeners.clear();
       for (const offFrame of [...frameUnsubs]) offFrame();
       frameUnsubs.clear();
       offEvent();

@@ -1,7 +1,21 @@
-import type { AccessibilityFontFamily } from '@elv/domain';
-import type { AttemptToken, EngineCapabilities, EngineEvent, LoadCommand } from '@elv/playback';
+import type { AccessibilityFontFamily, DeinterlaceMode } from '@elv/domain';
+import type {
+  AttemptToken,
+  EngineCapabilities,
+  EngineEvent,
+  LoadCommand,
+  StreamRequest,
+} from '@elv/playback';
 
-export type { AccessibilityFontFamily };
+export type { AccessibilityFontFamily, DeinterlaceMode };
+
+/** Request payload for queueing the next VOD episode via mpv `append-play` (`#205`). */
+export interface QueueNextRequest {
+  readonly itemKey: string;
+  readonly stream: StreamRequest;
+  readonly preferHevcOverDolbyVision?: boolean;
+  readonly filterSdhSubtitles?: boolean;
+}
 
 /** The player area in CSS pixels of the app window's content, and whether video should show there. */
 export interface PlayerArea {
@@ -68,6 +82,7 @@ export type PlayerUiEvent =
   | { type: 'presenter'; kind: PresenterKind; coversArea: boolean }
   | { type: 'fullscreen-changed'; fullscreen: boolean }
   | { type: 'audio-devices'; devices: readonly AudioDeviceInfo[]; active: string }
+  | { type: 'queueAdvanced'; itemKey: string; attempt?: AttemptToken }
   | { type: 'key'; key: PlayerUiKey }
   | { type: 'closed' };
 
@@ -101,6 +116,11 @@ export type BridgeCommand =
   | { name: 'setSubtitleDelay'; delaySec: number }
   | { name: 'setAudioDevice'; device: string }
   | { name: 'setDeinterlace'; enabled: boolean }
+  | { name: 'setDeinterlaceMode'; mode: DeinterlaceMode }
+  | { name: 'setPitchLock'; locked: boolean }
+  | { name: 'setAudioNormalization'; enabled: boolean }
+  | { name: 'queueNext'; request: QueueNextRequest }
+  | { name: 'clearQueue' }
   | { name: 'setHwdec'; profile: HwdecProfile }
   | { name: 'setResizeMode'; mode: ResizeMode }
   | { name: 'setFilterSdh'; enabled: boolean }
@@ -247,6 +267,7 @@ const MAX_SPEED_RATE = 4;
 const MAX_VOLUME = 100;
 const MAX_DELAY_SEC = 30;
 const MAX_AUDIO_DEVICE_CHARS = 160;
+const MAX_ITEM_KEY_CHARS = 512;
 
 const isSpeedRate = (x: unknown): x is number =>
   isNumber(x) && x >= MIN_SPEED_RATE && x <= MAX_SPEED_RATE;
@@ -254,12 +275,38 @@ const isVolume = (x: unknown): x is number => isNumber(x) && x >= 0 && x <= MAX_
 const isDelaySec = (x: unknown): x is number => isNumber(x) && Math.abs(x) <= MAX_DELAY_SEC;
 const isAudioDevice = (x: unknown): x is string =>
   typeof x === 'string' && x.length > 0 && x.length <= MAX_AUDIO_DEVICE_CHARS && !hasControlChar(x);
+const isDeinterlaceMode = (x: unknown): x is DeinterlaceMode =>
+  x === 'off' || x === 'auto' || x === 'bwdif';
 const isHwdecProfile = (x: unknown): x is HwdecProfile =>
   x === 'auto-safe' || x === 'auto-copy' || x === 'no' || x === 'darwin-compat';
 const isResizeMode = (x: unknown): x is ResizeMode =>
   x === 'fit' || x === 'fill' || x === 'stretch';
 const isSubtitleFontFamily = (x: unknown): x is AccessibilityFontFamily =>
   x === 'system' || x === 'atkinson' || x === 'opendyslexic';
+
+function isQueueNextRequest(x: unknown): x is QueueNextRequest {
+  if (!isRecord(x)) return false;
+  const itemKey = x['itemKey'];
+  if (
+    typeof itemKey !== 'string' ||
+    itemKey.trim().length === 0 ||
+    itemKey.length > MAX_ITEM_KEY_CHARS ||
+    hasControlChar(itemKey)
+  ) {
+    return false;
+  }
+  if (x['kind'] !== undefined && x['kind'] !== 'vod') return false;
+  const stream = x['stream'];
+  if (!isRecord(stream) || !isStreamUrl(stream['url']) || !isHeaders(stream['headers'])) {
+    return false;
+  }
+  if (stream['kind'] !== undefined && stream['kind'] !== 'vod') return false;
+  return (
+    (x['preferHevcOverDolbyVision'] === undefined ||
+      typeof x['preferHevcOverDolbyVision'] === 'boolean') &&
+    (x['filterSdhSubtitles'] === undefined || typeof x['filterSdhSubtitles'] === 'boolean')
+  );
+}
 
 function isLoadCommand(x: unknown): x is LoadCommand {
   if (!isRecord(x)) return false;
@@ -311,7 +358,16 @@ function isBridgeCommand(x: unknown): x is BridgeCommand {
       return isAudioDevice(x['device']);
     case 'setDeinterlace':
     case 'setFilterSdh':
+    case 'setAudioNormalization':
       return typeof x['enabled'] === 'boolean';
+    case 'setDeinterlaceMode':
+      return isDeinterlaceMode(x['mode']);
+    case 'setPitchLock':
+      return typeof x['locked'] === 'boolean';
+    case 'queueNext':
+      return isQueueNextRequest(x['request']);
+    case 'clearQueue':
+      return true;
     case 'setHwdec':
       return isHwdecProfile(x['profile']);
     case 'setResizeMode':

@@ -1871,3 +1871,36 @@ msgstr "Yalnızca oynatıcıda"
 
 msgid "settings.tvClockNever"
 msgstr "Kapalı"
+
+msgid "settings.deinterlaceMode"
+msgstr "Taramasızlaştırma"
+
+msgid "settings.deinterlaceModeHint"
+msgstr "Masaüstünde geçmeli 50i/60i canlı yayınları akıcılaştırır"
+
+msgid "settings.deinterlaceOff"
+msgstr "Kapalı"
+
+msgid "settings.deinterlaceAuto"
+msgstr "Otomatik"
+
+msgid "settings.deinterlaceBwdif"
+msgstr "Yayın (bwdif)"
+
+msgid "settings.pitchLock"
+msgstr "Ses tonunu koru"
+
+msgid "settings.pitchLockHint"
+msgstr "Oynatma hızı değiştiğinde ses tonunu doğal tutar"
+
+msgid "settings.audioNormalization"
+msgstr "Ses seviyesi dengeleme"
+
+msgid "settings.audioNormalizationHint"
+msgstr "EBU R128 ile kısık diyalogları ve yüksek kanalları dengeler"
+
+msgid "settings.windowAspectRatioLock"
+msgstr "Pencere en-boy oranını kilitle"
+
+msgid "settings.windowAspectRatioLockHint"
+msgstr "Masaüstünde pencereyi boyutlandırırken siyah kenarlıkları önler"

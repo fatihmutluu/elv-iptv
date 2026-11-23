@@ -25,12 +25,15 @@ export {
   type CatalogRefreshHoursPref,
   clampOverscan,
   DEFAULT_PREF_OVERSCAN,
+  DEINTERLACE_MODES,
   type DefaultLiveModePref,
   type DefaultResizeModePref,
+  type DeinterlaceMode,
   type EpgTimeSpanHoursPref,
   type GuideRefreshHoursPref,
   isAccessibilityFontFamily,
   isAndroidDecoderMode,
+  isDeinterlaceMode,
   isTvClockMode,
   type LiveChannelSwitchModePref,
   type LogoBackdropModePref,
@@ -118,6 +121,10 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   tvClockMode: 'always',
   overscanX: DEFAULT_PREF_OVERSCAN,
   overscanY: DEFAULT_PREF_OVERSCAN,
+  deinterlaceMode: 'off',
+  pitchLock: true,
+  audioNormalization: false,
+  windowAspectRatioLock: false,
 });
 
 /** Partial update applied on top of the current {@link PreferencesSnapshot}. */

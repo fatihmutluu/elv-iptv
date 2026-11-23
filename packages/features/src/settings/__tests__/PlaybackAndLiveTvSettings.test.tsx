@@ -440,4 +440,48 @@ describe('SettingsScreen Playback, Live TV & Guide, and Artwork Cache (#401, #40
       expect(loaded.stillWatchingTimeoutMin).toBe(180);
     });
   });
+
+  it('renders deinterlaceMode, pitchLock, audioNormalization, and desktop-only windowAspectRatioLock in PlaybackSettingsPanel (#243, #332)', async () => {
+    const store = createMemoryPreferencesStore();
+    const { unmount } = await render(<Harness store={store} initialSection="playback" />);
+
+    expect(screen.getByTestId('settings-playback-deinterlace-off')).toBeTruthy();
+    expect(screen.getByTestId('settings-playback-deinterlace-auto')).toBeTruthy();
+    expect(screen.getByTestId('settings-playback-deinterlace-bwdif')).toBeTruthy();
+    expect(screen.getByTestId('settings-playback-toggle-pitch-lock')).toBeTruthy();
+    expect(screen.getByTestId('settings-playback-toggle-audio-normalization')).toBeTruthy();
+    expect(screen.getByTestId('settings-playback-toggle-window-aspect-ratio-lock')).toBeTruthy();
+
+    await fireEvent.press(screen.getByTestId('settings-playback-deinterlace-bwdif'));
+    await fireEvent.press(screen.getByTestId('settings-playback-toggle-pitch-lock'));
+    await fireEvent.press(screen.getByTestId('settings-playback-toggle-audio-normalization'));
+    await fireEvent.press(screen.getByTestId('settings-playback-toggle-window-aspect-ratio-lock'));
+
+    await waitFor(async () => {
+      const loaded = await store.load();
+      expect(loaded.deinterlaceMode).toBe('bwdif');
+      expect(loaded.pitchLock).toBe(false);
+      expect(loaded.audioNormalization).toBe(true);
+      expect(loaded.windowAspectRatioLock).toBe(true);
+    });
+    await unmount();
+
+    await render(
+      <Harness
+        store={store}
+        initialSection="playback"
+        viewport={{
+          formFactor: 'tv',
+          orientation: 'landscape',
+          inputModality: 'tv',
+          width: 1920,
+          height: 1080,
+        }}
+      />,
+    );
+    expect(screen.queryByTestId('settings-playback-toggle-window-aspect-ratio-lock')).toBeNull();
+    expect(screen.getByTestId('settings-playback-deinterlace-bwdif')).toBeTruthy();
+    expect(screen.getByTestId('settings-playback-toggle-pitch-lock')).toBeTruthy();
+    expect(screen.getByTestId('settings-playback-toggle-audio-normalization')).toBeTruthy();
+  });
 });

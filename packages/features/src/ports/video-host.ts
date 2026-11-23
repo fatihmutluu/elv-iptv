@@ -1,9 +1,17 @@
-import type { AccessibilityFontFamily } from '@elv/domain';
-import type { PlayerEngine } from '@elv/playback';
+import type { AccessibilityFontFamily, DeinterlaceMode } from '@elv/domain';
+import type { PlayerEngine, StreamRequest } from '@elv/playback';
 import type { ReactElement } from 'react';
 
 /** Picture scaling mode (`fit` letterboxed, `fill` cropped to cover, `stretch` fills bounds ignoring aspect). */
 export type VideoResizeMode = 'fit' | 'fill' | 'stretch';
+
+/** Payload queued onto a gapless host engine for the next series episode (`#205`). */
+export interface QueuedEpisodeHostRequest {
+  readonly itemKey: string;
+  readonly stream: StreamRequest;
+  readonly preferHevcOverDolbyVision?: boolean;
+  readonly filterSdhSubtitles?: boolean;
+}
 
 /** Props passed to the platform video surface rendered underneath or alongside the OSD. */
 export interface VideoSurfaceProps {
@@ -119,6 +127,18 @@ export interface OpenVideoEngine {
   setFilterSdh?: (enabled: boolean) => void;
   /** Optional live subtitle typeface setter (e.g. desktop `mpv` `sub-font`, `#163`). */
   readonly setSubtitleFontFamily?: (family: AccessibilityFontFamily) => void;
+  /** Optional broadcast deinterlacing mode setter (`'off' | 'auto' | 'bwdif'`, `#243`). */
+  readonly setDeinterlaceMode?: (mode: DeinterlaceMode) => void;
+  /** Optional audio pitch lock toggle for non-1.0× playback speeds (`#243`, `#264`). */
+  readonly setPitchLock?: (locked: boolean) => void;
+  /** Optional EBU R128 loudness normalization toggle (`#243`). */
+  readonly setAudioNormalization?: (enabled: boolean) => void;
+  /** Optional gapless next-episode queue setter (`#205`). */
+  readonly queueNext?: (request: QueuedEpisodeHostRequest) => void;
+  /** Optional gapless next-episode queue clearer (`#205`). */
+  readonly clearQueue?: () => void;
+  /** Optional callback fired when a gapless queued episode becomes active (`#205`). */
+  readonly onQueueAdvanced?: (listener: (itemKey: string) => void) => () => void;
 }
 
 /** Port supplied by the app composition root to open a `PlayerEngine` and render its surface. */

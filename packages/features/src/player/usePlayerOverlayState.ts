@@ -44,6 +44,8 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
   const canLock = formFactor === 'phone' || formFactor === 'tablet';
   const hasAspect = true;
   const hasDeinterlace = params.onSetDeinterlace !== undefined;
+  const hasPitchLock = params.hasPitchLock === true;
+  const hasAudioNormalization = params.hasAudioNormalization === true;
   const hasAutoSubtitlesOnSkipBack = params.hasAutoSubtitlesOnSkipBack === true;
   const hasAutoPlayNextEpisode = params.hasAutoPlayNextEpisode === true;
   const hasAudioDevice = params.hasAudioDevice === true;
@@ -108,6 +110,8 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     isVod,
     hasAspect,
     hasDeinterlace,
+    hasPitchLock,
+    hasAudioNormalization,
     hasAutoSubtitlesOnSkipBack,
     hasAutoPlayNextEpisode,
     hasAudioDevice,
@@ -384,6 +388,8 @@ export function usePlayerOverlayState(params: PlayerOverlayStateParams) {
     playbackSpeed: liveRef.current.playbackSpeed,
     hasAspect,
     hasDeinterlace,
+    hasPitchLock,
+    hasAudioNormalization,
     hasAutoSubtitlesOnSkipBack,
     hasAutoPlayNextEpisode,
     hasAudioDevice,

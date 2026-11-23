@@ -85,6 +85,12 @@ export interface PlaybackService {
    * backoff a tune of the same account keeps the `limited` status and loads when the backoff ends.
    */
   tune(request: TuneRequest): AttemptToken;
+  /**
+   * Adopts a gaplessly queued target (e.g. mpv `append-play` next episode, `#205`) without
+   * stopping/reloading or bumping `attempt`, so watch-progress writes, controls, recovery reloads,
+   * and replays target the newly active item.
+   */
+  adoptQueuedTarget(request: TuneRequest, stream?: StreamRequest): void;
   /** Re-prepares loaded media, replays ended VOD from 0, or tunes the last request again after a failure. */
   retry(): void;
   stop(): void;

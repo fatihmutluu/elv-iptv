@@ -489,7 +489,9 @@ describe('deriver', () => {
           gamma: 'pq',
         }),
       ),
-    ).toEqual([{ width: 3840, height: 2160, fps: 23.98, codec: 'hevc', hdr: 'hdr10' }]);
+    ).toEqual([
+      { width: 3840, height: 2160, aspectRatio: 16 / 9, fps: 23.98, codec: 'hevc', hdr: 'hdr10' },
+    ]);
     // Identical re-emission and tiny estimated-vf-fps jitter are suppressed
     expect(
       mediaInfos(
@@ -504,7 +506,7 @@ describe('deriver', () => {
     expect(mediaInfos(hdr.d.property('estimated-vf-fps', 24.02))).toEqual([]);
     // Genuine frame rate jump (e.g. bob deinterlace or 50p) updates cleanly
     expect(mediaInfos(hdr.d.property('estimated-vf-fps', 50))).toEqual([
-      { width: 3840, height: 2160, fps: 50, codec: 'hevc', hdr: 'hdr10' },
+      { width: 3840, height: 2160, aspectRatio: 16 / 9, fps: 50, codec: 'hevc', hdr: 'hdr10' },
     ]);
 
     // HLG and verbose video-codec normalization
@@ -513,7 +515,7 @@ describe('deriver', () => {
       mediaInfos(hlg.d.property('video-codec', 'H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10')),
     ).toEqual([{ codec: 'h264' }]);
     expect(mediaInfos(hlg.d.property('video-params', { w: 1920, h: 1080, gamma: 'hlg' }))).toEqual([
-      { width: 1920, height: 1080, codec: 'h264', hdr: 'hlg' },
+      { width: 1920, height: 1080, aspectRatio: 16 / 9, codec: 'h264', hdr: 'hlg' },
     ]);
 
     // Dolby Vision detection from colormatrix/gamma or codec
@@ -527,19 +529,30 @@ describe('deriver', () => {
           gamma: 'pq',
         }),
       ),
-    ).toEqual([{ width: 3840, height: 2160, hdr: 'dv' }]);
+    ).toEqual([{ width: 3840, height: 2160, aspectRatio: 16 / 9, hdr: 'dv' }]);
 
     // SDR default when video-params has w & h without HDR transfer, and AV1 / VP9 normalization
     const sdr = setup('live');
     expect(mediaInfos(sdr.d.property('video-format', 'av01'))).toEqual([{ codec: 'av1' }]);
     expect(
       mediaInfos(sdr.d.property('video-params', { w: 1280, h: 720, gamma: 'bt.1886' })),
-    ).toEqual([{ width: 1280, height: 720, codec: 'av1', hdr: 'sdr' }]);
+    ).toEqual([{ width: 1280, height: 720, aspectRatio: 16 / 9, codec: 'av1', hdr: 'sdr' }]);
 
     // Reset on new begin() clears previous stream metadata
     sdr.d.begin(99, 'live');
     expect(
       mediaInfos(sdr.d.property('video-params', { w: 1920, h: 1080, gamma: 'bt.1886' })),
-    ).toEqual([{ width: 1920, height: 1080, hdr: 'sdr' }]);
+    ).toEqual([{ width: 1920, height: 1080, aspectRatio: 16 / 9, hdr: 'sdr' }]);
+
+    // DAR priority: explicit aspect > dw/dh > w/h (#332)
+    const dar = setup('vod');
+    expect(
+      mediaInfos(dar.d.property('video-params', { w: 720, h: 576, dw: 1024, dh: 576 })),
+    ).toEqual([{ width: 720, height: 576, aspectRatio: 1024 / 576, hdr: 'sdr' }]);
+    expect(
+      mediaInfos(
+        dar.d.property('video-params', { w: 720, h: 576, dw: 1024, dh: 576, aspect: 2.39 }),
+      ),
+    ).toEqual([{ width: 720, height: 576, aspectRatio: 2.39, hdr: 'sdr' }]);
   });
 });

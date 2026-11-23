@@ -103,6 +103,7 @@ describe('window-ipc (#408)', () => {
       setAlwaysOnTop: 'window:set-always-on-top',
       getAlwaysOnTop: 'window:get-always-on-top',
       alwaysOnTopChanged: 'window:always-on-top-changed',
+      setAspectRatioLock: 'window:set-aspect-ratio-lock',
     });
     expect(isAlwaysOnTopFlag(true)).toBe(true);
     expect(isAlwaysOnTopFlag(false)).toBe(true);
@@ -212,5 +213,35 @@ describe('window-ipc (#408)', () => {
 
     dispose();
     expect(fw.listenerCount()).toBe(0);
+  });
+
+  it('validates and forwards window:set-aspect-ratio-lock to onSetAspectRatioLock (#332)', async () => {
+    const ipc = fakeIpcMain();
+    const fw = fakeWindow();
+    const logs: string[] = [];
+    const lockChanges: boolean[] = [];
+
+    const dispose = registerWindowIpc({
+      ipcMain: ipc.ipcMain,
+      getWindowFromSender: (s) => (s === fw.sender ? fw.win : null),
+      onSetAspectRatioLock: (_win, enabled) => lockChanges.push(enabled),
+      log: (line) => logs.push(line),
+    });
+
+    expect(await ipc.invoke(WINDOW_CHANNELS.setAspectRatioLock, fw.sender, true)).toBe(true);
+    expect(lockChanges).toEqual([true]);
+
+    // Invalid payload is dropped and returns current lock state
+    expect(await ipc.invoke(WINDOW_CHANNELS.setAspectRatioLock, fw.sender, 'invalid')).toBe(true);
+    expect(logs).toHaveLength(1);
+    expect(lockChanges).toEqual([true]);
+
+    expect(await ipc.invoke(WINDOW_CHANNELS.setAspectRatioLock, fw.sender, false)).toBe(false);
+    expect(lockChanges).toEqual([true, false]);
+
+    fw.destroy();
+    expect(await ipc.invoke(WINDOW_CHANNELS.setAspectRatioLock, fw.sender, true)).toBe(false);
+
+    dispose();
   });
 });

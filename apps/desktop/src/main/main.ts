@@ -69,9 +69,11 @@ import {
   type TaskbarIcons,
 } from './taskbar-controls.ts';
 import {
+  createWindowAspectRatioLockController,
   createWindowBoundsController,
   loadWindowState,
   orderedDisplays,
+  type WindowAspectRatioLockController,
   type WindowBoundsController,
 } from './window-bounds.ts';
 import { registerWindowIpc } from './window-ipc.ts';
@@ -97,6 +99,8 @@ if (gateQuery !== null) {
 }
 const samplers = new WeakMap<MpvEngine, VideoSampler>();
 const windowBoundsControllers = new Set<WindowBoundsController>();
+const aspectRatioLockControllers = new Map<BrowserWindow, WindowAspectRatioLockController>();
+let aspectRatioLockEnabled = false;
 const powerBlocker = createPowerBlocker(powerSaveBlocker);
 let cachedTaskbarIcons: TaskbarIcons<NativeImage> | undefined;
 
@@ -197,6 +201,15 @@ function createWindow(): void {
       windowBoundsControllers.delete(boundsController);
     });
   }
+  const aspectLockController = createWindowAspectRatioLockController(window, screen, {
+    gate: isGate,
+    initialEnabled: aspectRatioLockEnabled,
+  });
+  aspectRatioLockControllers.set(window, aspectLockController);
+  window.on('closed', () => {
+    aspectLockController.dispose();
+    aspectRatioLockControllers.delete(window);
+  });
   window.setMenuBarVisibility(false);
   lockDownWebContents(
     window.webContents,
@@ -232,6 +245,12 @@ async function startPlayer(): Promise<void> {
         icons: getTaskbarIcons(),
         onAction,
       });
+    },
+    onVideoAspectRatioChange: (owner, aspectRatio) => {
+      const window = BrowserWindow.fromWebContents(owner as WebContents);
+      if (window && !window.isDestroyed()) {
+        aspectRatioLockControllers.get(window)?.setAspectRatio(aspectRatio);
+      }
     },
     gateReport: app.isPackaged ? undefined : (line, engine) => void printGateLine(line, engine),
     createEngine: async (owner, onUi, engineId) => {
@@ -357,6 +376,10 @@ if (hasLock) {
     registerWindowIpc({
       ipcMain,
       getWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender as WebContents),
+      onSetAspectRatioLock: (win, enabled) => {
+        aspectRatioLockEnabled = enabled;
+        aspectRatioLockControllers.get(win as BrowserWindow)?.setEnabled(enabled);
+      },
       log: logger.log,
     });
     registerSourcesIpc<BrowserWindow>({
@@ -393,6 +416,8 @@ if (hasLock) {
 app.on('will-quit', () => {
   for (const ctl of [...windowBoundsControllers]) ctl.dispose();
   windowBoundsControllers.clear();
+  for (const ctl of [...aspectRatioLockControllers.values()]) ctl.dispose();
+  aspectRatioLockControllers.clear();
   void artworkCache?.dispose();
   powerBlocker.releaseAll();
 });

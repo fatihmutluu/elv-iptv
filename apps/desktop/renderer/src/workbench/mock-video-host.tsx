@@ -1,3 +1,4 @@
+import type { DeinterlaceMode } from '@elv/domain';
 import type { VideoHost } from '@elv/features';
 import type {
   AttemptToken,
@@ -6,6 +7,7 @@ import type {
   LoadCommand,
   MediaTracks,
   PlayerEngine,
+  StreamRequest,
   StreamVideoInfo,
 } from '@elv/playback';
 import { MicroPill, TABULAR_NUMS_STYLE, useTheme } from '@elv/ui-kit';
@@ -348,6 +350,17 @@ export function createWorkbenchVideoHost(): VideoHost {
           if (volume > 0) muted = false;
         },
         setResizeMode: (_mode: 'fit' | 'fill' | 'stretch') => undefined,
+        setDeinterlaceMode: (_mode: DeinterlaceMode) => undefined,
+        setPitchLock: (_locked: boolean) => undefined,
+        setAudioNormalization: (_enabled: boolean) => undefined,
+        queueNext: (_request: {
+          readonly itemKey: string;
+          readonly stream: StreamRequest;
+          readonly preferHevcOverDolbyVision?: boolean;
+          readonly filterSdhSubtitles?: boolean;
+        }) => undefined,
+        clearQueue: () => undefined,
+        onQueueAdvanced: (_listener: (itemKey: string) => void) => () => undefined,
         setFilterSdh: (_enabled: boolean) => undefined,
         setSubtitleFontFamily: (_family: 'system' | 'atkinson' | 'opendyslexic') => undefined,
         initialVolume: volume,

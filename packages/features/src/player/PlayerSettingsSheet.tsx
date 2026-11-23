@@ -1,5 +1,5 @@
 import type { LiveVariantOption } from '@elv/data';
-import type { AndroidDecoderMode, OsdTimeDisplayMode } from '@elv/domain';
+import type { AndroidDecoderMode, DeinterlaceMode, OsdTimeDisplayMode } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type { ChapterInfo, MediaTracks } from '@elv/playback';
 import {
@@ -35,6 +35,9 @@ export interface PlayerSettingsSheetProps {
   readonly timeDisplayMode?: OsdTimeDisplayMode;
   readonly alwaysOnTop?: boolean;
   readonly deinterlace?: boolean;
+  readonly deinterlaceMode?: DeinterlaceMode;
+  readonly pitchLock?: boolean;
+  readonly audioNormalization?: boolean;
   readonly autoSubtitlesOnSkipBack?: boolean;
   readonly autoPlayNextEpisode?: boolean;
   readonly statsVisible: boolean;
@@ -63,6 +66,9 @@ export interface PlayerSettingsSheetProps {
   readonly onToggleInfo?: () => void;
   readonly onToggleAlwaysOnTop?: () => void;
   readonly onToggleDeinterlace?: () => void;
+  readonly onCycleDeinterlaceMode?: () => void;
+  readonly onTogglePitchLock?: () => void;
+  readonly onToggleAudioNormalization?: () => void;
   readonly onToggleAutoSubtitlesOnSkipBack?: () => void;
   readonly onToggleAutoPlayNextEpisode?: () => void;
   readonly onToggleStats: () => void;
@@ -235,7 +241,26 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         onPress: props.onToggleAlwaysOnTop,
       });
     }
-    if (props.onToggleDeinterlace !== undefined) {
+    if (props.onCycleDeinterlaceMode !== undefined) {
+      const mode: DeinterlaceMode =
+        props.deinterlaceMode ?? (props.deinterlace === true ? 'auto' : 'off');
+      const modeLabel =
+        mode === 'bwdif'
+          ? i18n.t('settings.deinterlaceBwdif')
+          : mode === 'auto'
+            ? i18n.t('settings.deinterlaceAuto')
+            : i18n.t('settings.deinterlaceOff');
+      toggles.push({
+        testID: 'player-deinterlace-toggle',
+        icon: 'layers',
+        label: i18n.t('player.deinterlace'),
+        pillLabel: modeLabel,
+        active: mode !== 'off',
+        role: 'button',
+        accessibilityLabel: `${i18n.t('player.deinterlace')}: ${modeLabel}`,
+        onPress: props.onCycleDeinterlaceMode,
+      });
+    } else if (props.onToggleDeinterlace !== undefined) {
       const on = props.deinterlace === true;
       toggles.push({
         testID: 'player-deinterlace-toggle',
@@ -246,6 +271,32 @@ export function PlayerSettingsSheet(props: PlayerSettingsSheetProps): ReactEleme
         role: 'switch',
         accessibilityLabel: i18n.t('player.deinterlace'),
         onPress: props.onToggleDeinterlace,
+      });
+    }
+    if (props.onTogglePitchLock !== undefined) {
+      const on = props.pitchLock !== false;
+      toggles.push({
+        testID: 'player-pitch-lock-toggle',
+        icon: 'speed',
+        label: i18n.t('settings.pitchLock'),
+        pillLabel: on ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
+        active: on,
+        role: 'switch',
+        accessibilityLabel: i18n.t('settings.pitchLock'),
+        onPress: props.onTogglePitchLock,
+      });
+    }
+    if (props.onToggleAudioNormalization !== undefined) {
+      const on = props.audioNormalization === true;
+      toggles.push({
+        testID: 'player-audio-normalization-toggle',
+        icon: 'audio',
+        label: i18n.t('settings.audioNormalization'),
+        pillLabel: on ? i18n.t('player.stats.on') : i18n.t('player.stats.off'),
+        active: on,
+        role: 'switch',
+        accessibilityLabel: i18n.t('settings.audioNormalization'),
+        onPress: props.onToggleAudioNormalization,
       });
     }
     if (isVod && props.onToggleAutoSubtitlesOnSkipBack !== undefined) {

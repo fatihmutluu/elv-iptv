@@ -43,6 +43,10 @@ describe('createWindowBridge (#408)', () => {
     expect(await bridge.getAlwaysOnTop()).toBe(false);
     expect(fake.invoke).toHaveBeenCalledWith(WINDOW_CHANNELS.getAlwaysOnTop);
 
+    fake.invoke.mockResolvedValueOnce(true);
+    expect(await bridge.setAspectRatioLock(true)).toBe(true);
+    expect(fake.invoke).toHaveBeenCalledWith(WINDOW_CHANNELS.setAspectRatioLock, true);
+
     const received: boolean[] = [];
     const off = bridge.onAlwaysOnTopChanged((enabled) => received.push(enabled));
     expect(fake.listenerCount(WINDOW_CHANNELS.alwaysOnTopChanged)).toBe(1);
@@ -67,5 +71,8 @@ describe('createWindowBridge (#408)', () => {
 
     fake.invoke.mockResolvedValueOnce(123);
     await expect(bridge.setAlwaysOnTop(true)).rejects.toThrow('unexpected reply');
+
+    fake.invoke.mockResolvedValueOnce('nope');
+    await expect(bridge.setAspectRatioLock(false)).rejects.toThrow('unexpected reply');
   });
 });

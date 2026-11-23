@@ -43,6 +43,12 @@ export const ANDROID_DECODER_MODES = ['auto', 'hardware', 'software'] as const;
 /** User-selectable Android Media3 video decoder mode (`#411`). */
 export type AndroidDecoderMode = (typeof ANDROID_DECODER_MODES)[number];
 
+/** Supported desktop `mpv` broadcast deinterlacing modes (`#243`). */
+export const DEINTERLACE_MODES = ['off', 'auto', 'bwdif'] as const;
+
+/** User-selectable desktop `mpv` deinterlacing mode (`#243`). */
+export type DeinterlaceMode = (typeof DEINTERLACE_MODES)[number];
+
 /** User-selectable default subtitle activation mode (`#393`, `#401`). */
 export type SubtitleModePref = 'default' | 'smart' | 'onlyForced' | 'always' | 'off';
 
@@ -117,6 +123,10 @@ export interface ExtendedPreferencesFields {
   readonly tvClockMode: TvClockMode;
   readonly overscanX: number;
   readonly overscanY: number;
+  readonly deinterlaceMode: DeinterlaceMode;
+  readonly pitchLock: boolean;
+  readonly audioNormalization: boolean;
+  readonly windowAspectRatioLock: boolean;
 }
 
 const MAX_PREF_STRING_LENGTH = 64;
@@ -173,6 +183,11 @@ export function isBufferPreset(value: unknown): value is BufferPreset {
 /** Returns true when `value` is a supported {@link AndroidDecoderMode}. */
 export function isAndroidDecoderMode(value: unknown): value is AndroidDecoderMode {
   return typeof value === 'string' && (ANDROID_DECODER_MODES as readonly string[]).includes(value);
+}
+
+/** Returns true when `value` is a supported {@link DeinterlaceMode}. */
+export function isDeinterlaceMode(value: unknown): value is DeinterlaceMode {
+  return typeof value === 'string' && (DEINTERLACE_MODES as readonly string[]).includes(value);
 }
 
 /** Returns true when `value` is a supported {@link AccessibilityFontFamily}. */
@@ -488,6 +503,18 @@ export function parseExtendedPreferences(
     tvClockMode: isTvClockMode(parsed.tvClockMode) ? parsed.tvClockMode : defaults.tvClockMode,
     overscanX: normalizeOverscan(parsed.overscanX, defaults.overscanX),
     overscanY: normalizeOverscan(parsed.overscanY, defaults.overscanY),
+    deinterlaceMode: isDeinterlaceMode(parsed.deinterlaceMode)
+      ? parsed.deinterlaceMode
+      : defaults.deinterlaceMode,
+    pitchLock: typeof parsed.pitchLock === 'boolean' ? parsed.pitchLock : defaults.pitchLock,
+    audioNormalization:
+      typeof parsed.audioNormalization === 'boolean'
+        ? parsed.audioNormalization
+        : defaults.audioNormalization,
+    windowAspectRatioLock:
+      typeof parsed.windowAspectRatioLock === 'boolean'
+        ? parsed.windowAspectRatioLock
+        : defaults.windowAspectRatioLock,
   };
 }
 
@@ -576,6 +603,12 @@ export function serializeExtendedPreferences(
     tvClockMode: isTvClockMode(snapshot.tvClockMode) ? snapshot.tvClockMode : defaults.tvClockMode,
     overscanX: normalizeOverscan(snapshot.overscanX, defaults.overscanX),
     overscanY: normalizeOverscan(snapshot.overscanY, defaults.overscanY),
+    deinterlaceMode: isDeinterlaceMode(snapshot.deinterlaceMode)
+      ? snapshot.deinterlaceMode
+      : defaults.deinterlaceMode,
+    pitchLock: Boolean(snapshot.pitchLock),
+    audioNormalization: Boolean(snapshot.audioNormalization),
+    windowAspectRatioLock: Boolean(snapshot.windowAspectRatioLock),
   };
 }
 
@@ -693,5 +726,17 @@ export function mergeExtendedPreferences(
     tvClockMode: isTvClockMode(patch.tvClockMode) ? patch.tvClockMode : base.tvClockMode,
     overscanX: normalizeOverscan(patch.overscanX, base.overscanX),
     overscanY: normalizeOverscan(patch.overscanY, base.overscanY),
+    deinterlaceMode: isDeinterlaceMode(patch.deinterlaceMode)
+      ? patch.deinterlaceMode
+      : base.deinterlaceMode,
+    pitchLock: typeof patch.pitchLock === 'boolean' ? patch.pitchLock : base.pitchLock,
+    audioNormalization:
+      typeof patch.audioNormalization === 'boolean'
+        ? patch.audioNormalization
+        : base.audioNormalization,
+    windowAspectRatioLock:
+      typeof patch.windowAspectRatioLock === 'boolean'
+        ? patch.windowAspectRatioLock
+        : base.windowAspectRatioLock,
   };
 }

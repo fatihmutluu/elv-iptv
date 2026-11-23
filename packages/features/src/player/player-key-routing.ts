@@ -73,6 +73,9 @@ export interface PlayerControlsParams {
   onChannelListSelect?: (() => void) | undefined;
   onSetOrientationLocked?: ((locked: boolean) => void) | undefined;
   onSetDeinterlace?: ((enabled: boolean) => void) | undefined;
+  onCycleDeinterlaceMode?: (() => void) | undefined;
+  onTogglePitchLock?: (() => void) | undefined;
+  onToggleAudioNormalization?: (() => void) | undefined;
   onResizeModeChange?: ((mode: VideoResizeMode) => void) | undefined;
   onAudioTrackSelected?: ((id: string) => void) | undefined;
   onSubtitleTrackSelected?: ((id: string | null) => void) | undefined;
@@ -92,12 +95,46 @@ export interface PlayerControlsParams {
   onCancelPreviewChannel?: (() => void) | undefined;
 }
 
+/** Builds shared {@link SettingsMenuOptions} from live {@link PlayerControlsParams}. */
+export function readSettingsMenuOptionsFromControls(p: PlayerControlsParams, canOpenInfo: boolean) {
+  const isVod = p.activeTarget.kind === 'vod';
+  return {
+    isVod,
+    hasAspect: true as const,
+    hasDeinterlace: p.onSetDeinterlace !== undefined || p.onCycleDeinterlaceMode !== undefined,
+    hasPitchLock: p.onTogglePitchLock !== undefined,
+    hasAudioNormalization: p.onToggleAudioNormalization !== undefined,
+    hasAutoSubtitlesOnSkipBack: isVod && p.onToggleAutoSubtitlesOnSkipBack !== undefined,
+    hasAutoPlayNextEpisode: isVod && p.onToggleAutoPlayNextEpisode !== undefined,
+    hasAudioDevice: (p.audioDevices?.length ?? 0) > 0 && p.onSelectAudioDevice !== undefined,
+    ...(p.audioDevices !== undefined ? { audioDevices: p.audioDevices } : {}),
+    ...(p.activeAudioDevice !== undefined ? { activeAudioDevice: p.activeAudioDevice } : {}),
+    hasQuality:
+      !isVod && (p.qualityVariants?.length ?? 0) > 1 && p.onSelectQualityVariant !== undefined,
+    ...(p.qualityVariants !== undefined
+      ? { qualityVariants: p.qualityVariants, activeQualityKey: p.activeTarget.itemKey }
+      : {}),
+    hasVideoDecoder:
+      p.androidDecoderMode !== undefined && p.onSelectAndroidDecoderMode !== undefined,
+    ...(p.androidDecoderMode !== undefined ? { androidDecoderMode: p.androidDecoderMode } : {}),
+    hasChapters: isVod && (p.chapters?.length ?? 0) > 0,
+    ...(p.chapters !== undefined ? { chapters: p.chapters } : {}),
+    hasSleepTimer: p.onSelectSleepTimer !== undefined,
+    ...(p.sleepTimerMinutes !== undefined ? { sleepTimerMinutes: p.sleepTimerMinutes } : {}),
+    hasTimeDisplay: p.onCycleTimeDisplayMode !== undefined,
+    hasInfo: canOpenInfo,
+    hasAlwaysOnTop: p.onToggleAlwaysOnTop !== undefined,
+  };
+}
+
 /** Collaborators for {@link routeOverlayAndMediaKey}. */
 export interface OverlayKeyRouteDeps {
   readonly isTv: boolean;
   readonly isVod: boolean;
   readonly hasAspect: boolean;
   readonly hasDeinterlace?: boolean;
+  readonly hasPitchLock?: boolean;
+  readonly hasAudioNormalization?: boolean;
   readonly hasAutoSubtitlesOnSkipBack?: boolean;
   readonly hasAutoPlayNextEpisode?: boolean;
   readonly hasAudioDevice?: boolean;
@@ -128,6 +165,8 @@ export interface OverlayKeyRouteDeps {
   readonly toggleChannelList?: () => void;
   readonly toggleResizeMode: () => void;
   readonly toggleDeinterlace?: () => void;
+  readonly togglePitchLock?: () => void;
+  readonly toggleAudioNormalization?: () => void;
   readonly toggleAutoSubtitlesOnSkipBack?: () => void;
   readonly toggleAutoPlayNextEpisode?: () => void;
   readonly onChannelListMove?: (delta: 1 | -1) => void;
@@ -237,6 +276,8 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
       playbackSpeed: d.playbackSpeed,
       hasAspect: d.hasAspect,
       hasDeinterlace: d.hasDeinterlace === true,
+      hasPitchLock: d.hasPitchLock === true,
+      hasAudioNormalization: d.hasAudioNormalization === true,
       hasAutoSubtitlesOnSkipBack: d.hasAutoSubtitlesOnSkipBack === true,
       hasAutoPlayNextEpisode: d.hasAutoPlayNextEpisode === true,
       hasAudioDevice: d.hasAudioDevice === true,
@@ -263,6 +304,8 @@ export function routeOverlayAndMediaKey(event: KeyEvent, d: OverlayKeyRouteDeps)
     else if (intent?.kind === 'toggleInfo') d.toggleInfo?.();
     else if (intent?.kind === 'toggleAlwaysOnTop') d.toggleAlwaysOnTop?.();
     else if (intent?.kind === 'toggleDeinterlace') d.toggleDeinterlace?.();
+    else if (intent?.kind === 'togglePitchLock') d.togglePitchLock?.();
+    else if (intent?.kind === 'toggleAudioNormalization') d.toggleAudioNormalization?.();
     else if (intent?.kind === 'toggleAutoSubtitlesOnSkipBack') d.toggleAutoSubtitlesOnSkipBack?.();
     else if (intent?.kind === 'toggleAutoPlayNextEpisode') d.toggleAutoPlayNextEpisode?.();
     else if (intent?.kind === 'toggleStats') d.toggleStats();

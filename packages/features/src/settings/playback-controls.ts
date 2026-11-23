@@ -2,6 +2,7 @@ import type {
   AndroidDecoderMode,
   BufferPreset,
   DefaultResizeModePref,
+  DeinterlaceMode,
   OsdTimeDisplayMode,
   SeekStepSecPref,
   SubtitleModePref,
@@ -151,6 +152,32 @@ const VIDEO_DECODER_OPTIONS: ReadonlyArray<{
   },
 ];
 
+const DEINTERLACE_MODE_OPTIONS: ReadonlyArray<{
+  readonly value: DeinterlaceMode;
+  readonly focusId: PlaybackFocusId;
+  readonly testID: string;
+  readonly labelKey: MessageId;
+}> = [
+  {
+    value: 'off',
+    focusId: 'deinterlace-off',
+    testID: 'settings-playback-deinterlace-off',
+    labelKey: 'settings.deinterlaceOff',
+  },
+  {
+    value: 'auto',
+    focusId: 'deinterlace-auto',
+    testID: 'settings-playback-deinterlace-auto',
+    labelKey: 'settings.deinterlaceAuto',
+  },
+  {
+    value: 'bwdif',
+    focusId: 'deinterlace-bwdif',
+    testID: 'settings-playback-deinterlace-bwdif',
+    labelKey: 'settings.deinterlaceBwdif',
+  },
+];
+
 const OSD_TIME_MODE_OPTIONS: ReadonlyArray<{
   readonly value: OsdTimeDisplayMode;
   readonly focusId: PlaybackFocusId;
@@ -253,6 +280,7 @@ export function buildPlaybackChipOptions(i18n: AppI18n) {
     aspectOptions: mapLabeled(RESIZE_MODE_OPTIONS),
     bufferOptions: mapLabeled(BUFFER_PRESET_OPTIONS),
     videoDecoderOptions: mapLabeled(VIDEO_DECODER_OPTIONS),
+    deinterlaceOptions: mapLabeled(DEINTERLACE_MODE_OPTIONS),
     osdTimeOptions: OSD_TIME_MODE_OPTIONS.map((opt) => ({
       value: opt.value,
       label:
@@ -328,6 +356,11 @@ export function activatePlaybackControl(
     void preferences.updatePreferences({ androidDecoderMode: decoderOpt.value });
     return;
   }
+  const deintOpt = DEINTERLACE_MODE_OPTIONS.find((o) => o.focusId === controlId);
+  if (deintOpt) {
+    void preferences.updatePreferences({ deinterlaceMode: deintOpt.value });
+    return;
+  }
   const osdTimeOpt = OSD_TIME_MODE_OPTIONS.find((o) => o.focusId === controlId);
   if (osdTimeOpt) {
     void preferences.updatePreferences({ osdTimeDisplayMode: osdTimeOpt.value });
@@ -376,6 +409,24 @@ export function activatePlaybackControl(
   if (controlId === 'toggle-prefer-hevc-dv') {
     void preferences.updatePreferences({
       preferHevcOverDolbyVision: !preferences.preferences.preferHevcOverDolbyVision,
+    });
+    return;
+  }
+  if (controlId === 'toggle-pitch-lock') {
+    void preferences.updatePreferences({
+      pitchLock: !preferences.preferences.pitchLock,
+    });
+    return;
+  }
+  if (controlId === 'toggle-audio-normalization') {
+    void preferences.updatePreferences({
+      audioNormalization: !preferences.preferences.audioNormalization,
+    });
+    return;
+  }
+  if (controlId === 'toggle-window-aspect-ratio-lock') {
+    void preferences.updatePreferences({
+      windowAspectRatioLock: !preferences.preferences.windowAspectRatioLock,
     });
     return;
   }

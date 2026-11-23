@@ -3,9 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  type AspectRatioLockWindowLike,
   type BoundsScreenLike,
   type BoundsWindowLike,
   clampWindowBounds,
+  createWindowAspectRatioLockController,
   createWindowBoundsController,
   type DisplayWorkArea,
   loadWindowState,
@@ -337,5 +339,233 @@ describe('loadWindowState & createWindowBoundsController (#408)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('createWindowAspectRatioLockController (#332)', () => {
+  function fakeResizableWindow(
+    initialOuter: Rect,
+    chrome = { left: 8, top: 32, right: 8, bottom: 8 },
+  ) {
+    let outer = { ...initialOuter };
+    let maximized = false;
+    let fullscreen = false;
+    let minimized = false;
+    let destroyed = false;
+    let reentrantResizeOnSetBounds = false;
+    const setBoundsCalls: Rect[] = [];
+    const listeners = new Set<
+      (
+        event: { preventDefault(): void },
+        newBounds: Rect,
+        details?: { readonly edge?: string },
+      ) => void
+    >();
+
+    const win: AspectRatioLockWindowLike = {
+      getBounds: () => ({ ...outer }),
+      getContentBounds: () => ({
+        x: outer.x + chrome.left,
+        y: outer.y + chrome.top,
+        width: outer.width - chrome.left - chrome.right,
+        height: outer.height - chrome.top - chrome.bottom,
+      }),
+      setBounds: (next) => {
+        outer = { ...next };
+        setBoundsCalls.push({ ...next });
+        if (reentrantResizeOnSetBounds) {
+          for (const l of [...listeners]) {
+            l({ preventDefault: () => undefined }, { ...next });
+          }
+        }
+      },
+      isMaximized: () => maximized,
+      isFullScreen: () => fullscreen,
+      isMinimized: () => minimized,
+      isDestroyed: () => destroyed,
+      on(_event, listener) {
+        listeners.add(listener);
+      },
+      removeListener(_event, listener) {
+        listeners.delete(listener);
+      },
+    };
+
+    const emitWillResize = (newBounds: Rect, edge?: string): { prevented: boolean } => {
+      let prevented = false;
+      const event = {
+        preventDefault: () => {
+          prevented = true;
+        },
+      };
+      for (const l of [...listeners]) {
+        l(event, newBounds, edge === undefined ? undefined : { edge });
+      }
+      return { prevented };
+    };
+
+    return {
+      win,
+      setBoundsCalls,
+      emitWillResize,
+      setMaximized: (v: boolean) => {
+        maximized = v;
+      },
+      setFullScreen: (v: boolean) => {
+        fullscreen = v;
+      },
+      setMinimized: (v: boolean) => {
+        minimized = v;
+      },
+      setReentrant: (v: boolean) => {
+        reentrantResizeOnSetBounds = v;
+      },
+      destroy: () => {
+        destroyed = true;
+      },
+    };
+  }
+
+  it('locks content bounds to active DAR on will-resize across 100%, 125%, 150%, 200% DPI and preserves frame chrome', () => {
+    const fw = fakeResizableWindow({ x: 100, y: 100, width: 1296, height: 760 }); // 1280x720 content + 16x40 chrome
+    let scaleFactor = 1.25;
+    const ctl = createWindowAspectRatioLockController(fw.win, {
+      getDisplayMatching: () => ({ scaleFactor }),
+    });
+
+    ctl.setEnabled(true);
+    ctl.setAspectRatio(16 / 9);
+
+    for (const dpr of [1.0, 1.25, 1.5, 2.0]) {
+      scaleFactor = dpr;
+      const res = fw.emitWillResize({ x: 100, y: 100, width: 1016, height: 640 }, 'right');
+      expect(res.prevented).toBe(true);
+      const latest = fw.setBoundsCalls.at(-1);
+      expect(latest).toBeDefined();
+      if (!latest) return;
+      const contentW = latest.width - 16;
+      const contentH = latest.height - 40;
+      const physW = Math.round(contentW * dpr);
+      const physH = Math.round(contentH * dpr);
+      expect(Math.round(physW / (16 / 9))).toBe(physH);
+      expect(Math.round(physH * (16 / 9))).toBe(physW);
+    }
+
+    ctl.dispose();
+  });
+
+  it('does not intercept will-resize when disabled, no active DAR, maximized, fullscreen, minimized, or in gate mode', () => {
+    const fw = fakeResizableWindow({ x: 100, y: 100, width: 1296, height: 760 });
+    const ctl = createWindowAspectRatioLockController(fw.win, {
+      getDisplayMatching: () => ({ scaleFactor: 1.5 }),
+    });
+
+    // Disabled by default
+    expect(fw.emitWillResize({ x: 100, y: 100, width: 1100, height: 700 }).prevented).toBe(false);
+
+    // Enabled without active DAR
+    ctl.setEnabled(true);
+    expect(fw.emitWillResize({ x: 100, y: 100, width: 1100, height: 700 }).prevented).toBe(false);
+
+    // Active DAR set, but maximized / fullscreen / minimized
+    ctl.setAspectRatio(16 / 9);
+    fw.setMaximized(true);
+    expect(fw.emitWillResize({ x: 100, y: 100, width: 1100, height: 700 }).prevented).toBe(false);
+    fw.setMaximized(false);
+
+    fw.setFullScreen(true);
+    expect(fw.emitWillResize({ x: 100, y: 100, width: 1100, height: 700 }).prevented).toBe(false);
+    fw.setFullScreen(false);
+
+    fw.setMinimized(true);
+    expect(fw.emitWillResize({ x: 100, y: 100, width: 1100, height: 700 }).prevented).toBe(false);
+    fw.setMinimized(false);
+
+    // Clearing DAR on stop/ended/error disables locking
+    ctl.setAspectRatio(undefined);
+    expect(fw.emitWillResize({ x: 100, y: 100, width: 1100, height: 700 }).prevented).toBe(false);
+    ctl.dispose();
+
+    // Gate mode never locks even when enabled + DAR set
+    const gateCtl = createWindowAspectRatioLockController(
+      fw.win,
+      { getDisplayMatching: () => ({ scaleFactor: 1 }) },
+      { gate: true, initialEnabled: true, initialAspectRatio: 16 / 9 },
+    );
+    expect(fw.emitWillResize({ x: 100, y: 100, width: 1100, height: 700 }).prevented).toBe(false);
+    gateCtl.dispose();
+  });
+
+  it('guards against re-entrant will-resize loops when setBounds triggers will-resize', () => {
+    const fw = fakeResizableWindow({ x: 100, y: 100, width: 1296, height: 760 });
+    fw.setReentrant(true);
+    const ctl = createWindowAspectRatioLockController(
+      fw.win,
+      { getDisplayMatching: () => ({ scaleFactor: 2.0 }) },
+      { initialEnabled: true, initialAspectRatio: 16 / 9 },
+    );
+
+    const res = fw.emitWillResize({ x: 80, y: 90, width: 1016, height: 640 }, 'top-left');
+    expect(res.prevented).toBe(true);
+    expect(fw.setBoundsCalls).toHaveLength(1);
+    ctl.dispose();
+  });
+
+  it('anchors opposite right/bottom edge on inward shrink from left, top, and top-left edges (#332)', () => {
+    const initialOuter: Rect = { x: 100, y: 100, width: 1296, height: 760 };
+    const rightEdge = initialOuter.x + initialOuter.width; // 1396
+    const bottomEdge = initialOuter.y + initialOuter.height; // 860
+
+    // Left-edge inward shrink at 125% DPI (newBounds.x > outer.x) must keep rightEdge fixed!
+    const fwLeft = fakeResizableWindow(initialOuter);
+    const ctlLeft = createWindowAspectRatioLockController(
+      fwLeft.win,
+      { getDisplayMatching: () => ({ scaleFactor: 1.25 }) },
+      { initialEnabled: true, initialAspectRatio: 16 / 9 },
+    );
+    const resLeft = fwLeft.emitWillResize({ x: 300, y: 100, width: 1096, height: 760 }, 'left');
+    expect(resLeft.prevented).toBe(true);
+    const leftBounds = fwLeft.setBoundsCalls.at(-1);
+    expect(leftBounds).toBeDefined();
+    expect((leftBounds?.x ?? 0) + (leftBounds?.width ?? 0)).toBe(rightEdge);
+    expect(leftBounds?.y).toBe(initialOuter.y);
+    ctlLeft.dispose();
+
+    // Top-edge inward shrink at 150% DPI (newBounds.y > outer.y) must keep bottomEdge fixed!
+    const fwTop = fakeResizableWindow(initialOuter);
+    const ctlTop = createWindowAspectRatioLockController(
+      fwTop.win,
+      { getDisplayMatching: () => ({ scaleFactor: 1.5 }) },
+      { initialEnabled: true, initialAspectRatio: 16 / 9 },
+    );
+    const resTop = fwTop.emitWillResize({ x: 100, y: 260, width: 1296, height: 600 }, 'top');
+    expect(resTop.prevented).toBe(true);
+    const topBounds = fwTop.setBoundsCalls.at(-1);
+    expect(topBounds).toBeDefined();
+    expect((topBounds?.y ?? 0) + (topBounds?.height ?? 0)).toBe(bottomEdge);
+    expect(topBounds?.x).toBe(initialOuter.x);
+    ctlTop.dispose();
+
+    // Top-left inward shrink clamped by minContentSize must keep BOTH rightEdge and bottomEdge fixed!
+    const fwCorner = fakeResizableWindow(initialOuter);
+    const ctlCorner = createWindowAspectRatioLockController(
+      fwCorner.win,
+      { getDisplayMatching: () => ({ scaleFactor: 1.25 }) },
+      {
+        initialEnabled: true,
+        initialAspectRatio: 16 / 9,
+        minContentSize: { width: 640, height: 360 },
+      },
+    );
+    const resCorner = fwCorner.emitWillResize(
+      { x: 1100, y: 700, width: 296, height: 160 },
+      'top-left',
+    );
+    expect(resCorner.prevented).toBe(true);
+    const cornerBounds = fwCorner.setBoundsCalls.at(-1);
+    expect(cornerBounds).toBeDefined();
+    expect((cornerBounds?.x ?? 0) + (cornerBounds?.width ?? 0)).toBe(rightEdge);
+    expect((cornerBounds?.y ?? 0) + (cornerBounds?.height ?? 0)).toBe(bottomEdge);
+    ctlCorner.dispose();
   });
 });

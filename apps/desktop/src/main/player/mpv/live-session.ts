@@ -1,5 +1,5 @@
 import type { AttemptToken, EngineEvent, MediaKind } from '@elv/playback';
-import type { PlayerUiEvent } from '../../../shared/player-ipc.ts';
+import type { DeinterlaceMode, PlayerUiEvent } from '../../../shared/player-ipc.ts';
 import type { VideoPresenter } from '../presenter/types.ts';
 import { type AudioDeviceTracker, createAudioDeviceTracker } from './audio-devices.ts';
 import { type AudioHotplug, createAudioHotplug } from './audio-hotplug.ts';
@@ -9,7 +9,13 @@ import { createDeriver, type Deriver, isLiveMpegTsUrl } from './derive.ts';
 import { createEntryTable, type EntryTable } from './entries.ts';
 import { createInputRepeatGate, type InputRepeatGate } from './input-repeat-gate.ts';
 import type { OpeningGate } from './opening-gate.ts';
-import { headerFields, loadfileCommand } from './options.ts';
+import {
+  audioNormalizationCommand,
+  deinterlaceCommands,
+  headerFields,
+  loadfileCommand,
+  pitchLockCommand,
+} from './options.ts';
 import type { MpvProcess } from './process.ts';
 import {
   createReadaheadController,
@@ -45,6 +51,11 @@ export interface MediaSlot {
   lastPositionMs?: number;
 }
 
+/** Queued next VOD episode bound to an mpv `append-play` playlist entry (`#205`). */
+export interface QueuedMediaSlot extends MediaSlot {
+  readonly itemKey: string;
+}
+
 /** Connected mpv process and all per-process state (entry ids restart per process). */
 export interface LiveSession {
   readonly proc: MpvProcess;
@@ -57,9 +68,15 @@ export interface LiveSession {
   paused: boolean;
   userQuit: boolean;
   hasCustomHeaders: boolean;
+  hasQueuedPlaylist: boolean;
+  queuedEntryId?: number;
   appliedAudioDevice?: string;
   appliedSubtitleFont?: string;
+  appliedDeinterlaceMode?: DeinterlaceMode;
+  appliedPitchLock?: boolean;
+  appliedAudioNormalization?: boolean;
   inFlight?: MediaSlot;
+  inFlightQueued?: QueuedMediaSlot;
   readonly endWaiters: Set<{ id: number; done(ended: boolean): void }>;
 }
 
@@ -80,14 +97,22 @@ export interface LiveSessionHooks {
   getLive(): LiveSession | undefined;
   setLive(session: LiveSession): void;
   getMedia(): MediaSlot | undefined;
+  getQueued?(): QueuedMediaSlot | undefined;
+  setQueued?(slot: QueuedMediaSlot | undefined): void;
+  promoteQueued?(slot: QueuedMediaSlot): void;
   detach(session: LiveSession): void;
   emit(events: readonly EngineEvent[]): void;
   ui(event: PlayerUiEvent): void;
   reportWedged(detail: string): void;
   enqueueCommand(cmd: MpvCommand, slot?: MediaSlot): void;
   onAudioProperty?(name: 'volume' | 'mute', value: unknown): void;
+  onAudioSpdifProperty?(value: unknown): void;
   getDesiredAudioDevice?(): string | undefined;
   getDesiredSubtitleFont?(): string | undefined;
+  getDesiredDeinterlaceMode?(): DeinterlaceMode | undefined;
+  getDesiredPitchLock?(): boolean | undefined;
+  getDesiredAudioNormalization?(): boolean | undefined;
+  isSpdifPassthroughActive?(): boolean;
   readaheadStore?: ReadaheadTierStore;
 }
 
@@ -140,6 +165,34 @@ export function createSessionController(hooks: LiveSessionHooks) {
   };
 
   const onStartFile = (L: LiveSession, entryId: number): void => {
+    const queued = hooks.getQueued?.();
+    const isQueuedAdvance =
+      queued !== undefined &&
+      (queued.entryId === entryId || (queued.entryId === undefined && L.inFlightQueued === queued));
+    if (isQueuedAdvance && queued) {
+      const prevMedia = hooks.getMedia();
+      if (prevMedia) queued.token = prevMedia.token;
+      bind(L, queued, entryId);
+      L.hasQueuedPlaylist = false;
+      L.queuedEntryId = undefined;
+      L.inFlightQueued = undefined;
+      hooks.promoteQueued?.(queued);
+      opening.onStarted(entryId, OPEN_WAIT_MS);
+      L.entries.started(entryId);
+      const current = L.entries.current();
+      if (current?.entryId !== entryId) return;
+      tracks.beginMedia(current.token);
+      const events = L.deriver.begin(current.token, current.kind, false);
+      if (L.paused) events.push(...L.deriver.property('pause', true));
+      L.readahead.beginMedia(queued.request.url);
+      if (L.paused) L.readahead.property('pause', true);
+      if (hooks.getDesiredDeinterlaceMode?.() === 'auto') {
+        hooks.enqueueCommand(['set_property', 'deinterlace', 'auto'], queued);
+      }
+      hooks.ui({ type: 'queueAdvanced', itemKey: queued.itemKey, attempt: current.token });
+      hooks.emit(events);
+      return;
+    }
     if (L.entries.tokenOf(entryId) === undefined && L.inFlight) bind(L, L.inFlight, entryId);
     opening.onStarted(entryId, OPEN_WAIT_MS);
     L.entries.started(entryId);
@@ -160,6 +213,9 @@ export function createSessionController(hooks: LiveSessionHooks) {
       const media = hooks.getMedia();
       if (media) L.readahead.beginMedia(media.request.url);
       if (L.paused) L.readahead.property('pause', true);
+      if (hooks.getDesiredDeinterlaceMode?.() === 'auto') {
+        hooks.enqueueCommand(['set_property', 'deinterlace', 'auto'], media);
+      }
       hooks.emit(events);
     }
   };
@@ -169,14 +225,18 @@ export function createSessionController(hooks: LiveSessionHooks) {
     if (e['reason'] === 'quit') L.userQuit = true;
     const active = isActive(L, entryId);
     const isCurrent = entryId !== undefined && L.entries.current()?.entryId === entryId;
-    const events = isCurrent ? L.deriver.fileEvent(e) : [];
+    const rawEvents = isCurrent ? L.deriver.fileEvent(e) : [];
+    const suppressEnded = active && e['reason'] === 'eof' && hooks.getQueued?.() !== undefined;
+    const events = suppressEnded
+      ? rawEvents.filter((ev) => !(ev.type === 'state' && ev.state === 'ended'))
+      : rawEvents;
     if (isCurrent) tracks.onRetryOrRecreate();
     if (entryId !== undefined) {
       L.entries.ended(entryId);
       opening.onEnded(entryId);
     }
     for (const waiter of [...L.endWaiters]) if (waiter.id === entryId) waiter.done(true);
-    if (active) hooks.emit(events);
+    if (active && events.length > 0) hooks.emit(events);
   };
 
   const onMpvEvent = (L: LiveSession, e: MpvEvent): void => {
@@ -206,6 +266,10 @@ export function createSessionController(hooks: LiveSessionHooks) {
         if (name === 'pause') L.paused = e['data'] === true;
         if (name === 'volume' || name === 'mute') {
           hooks.onAudioProperty?.(name, e['data']);
+          return;
+        }
+        if (name === 'audio-spdif') {
+          hooks.onAudioSpdifProperty?.(e['data']);
           return;
         }
         if (name === 'audio-device') {
@@ -344,6 +408,7 @@ export function createSessionController(hooks: LiveSessionHooks) {
         paused: false,
         userQuit: false,
         hasCustomHeaders: false,
+        hasQueuedPlaylist: false,
         endWaiters: new Set(),
       };
       hooks.setLive(L);
@@ -364,9 +429,94 @@ export function createSessionController(hooks: LiveSessionHooks) {
         L.appliedSubtitleFont = desiredSubFont;
         void send(L, ['set_property', 'sub-font', desiredSubFont]);
       }
+      const desiredDeinterlace = hooks.getDesiredDeinterlaceMode?.();
+      if (desiredDeinterlace !== undefined) {
+        L.appliedDeinterlaceMode = desiredDeinterlace;
+        for (const cmd of deinterlaceCommands(desiredDeinterlace)) void send(L, cmd);
+      }
+      const desiredPitchLock = hooks.getDesiredPitchLock?.();
+      if (desiredPitchLock !== undefined) {
+        L.appliedPitchLock = desiredPitchLock;
+        void send(L, pitchLockCommand(desiredPitchLock));
+      }
+      const desiredNorm = hooks.getDesiredAudioNormalization?.();
+      if (desiredNorm !== undefined) {
+        const effectiveNorm = desiredNorm && !hooks.isSpdifPassthroughActive?.();
+        L.appliedAudioNormalization = effectiveNorm;
+        if (effectiveNorm || !desiredNorm) {
+          void send(L, audioNormalizationCommand(effectiveNorm));
+        }
+      }
       return L;
     },
+    async clearQueuedPlaylist(L: LiveSession): Promise<void> {
+      if (hooks.getLive() !== L) return;
+      if (L.queuedEntryId !== undefined) {
+        L.entries.unbind(L.queuedEntryId);
+        L.queuedEntryId = undefined;
+      }
+      L.inFlightQueued = undefined;
+      L.hasQueuedPlaylist = false;
+      await send(L, ['playlist-clear']);
+    },
+    async queueSlot(L: LiveSession, ownerSlot: MediaSlot, queued: QueuedMediaSlot): Promise<void> {
+      if (
+        hooks.getLive() !== L ||
+        hooks.getMedia() !== ownerSlot ||
+        hooks.getQueued?.() !== queued
+      ) {
+        return;
+      }
+      if (L.hasQueuedPlaylist) {
+        if (L.queuedEntryId !== undefined) {
+          L.entries.unbind(L.queuedEntryId);
+          L.queuedEntryId = undefined;
+        }
+        await send(L, ['playlist-clear']);
+        L.hasQueuedPlaylist = false;
+        if (
+          hooks.getLive() !== L ||
+          hooks.getMedia() !== ownerSlot ||
+          hooks.getQueued?.() !== queued
+        ) {
+          return;
+        }
+      }
+      L.inFlightQueued = queued;
+      L.hasQueuedPlaylist = true;
+      const reply = await send(L, loadfileCommand(queued.request, 'append-play'));
+      L.inFlightQueued = undefined;
+      if (!reply || hooks.getLive() !== L) return;
+      if (reply.error !== 'success') {
+        L.hasQueuedPlaylist = false;
+        if (hooks.getQueued?.() === queued) hooks.setQueued?.(undefined);
+        return;
+      }
+      const entryId =
+        queued.entryId ??
+        replyEntryId(reply) ??
+        entryIdOf((await send(L, ['get_property', 'playlist/1/id']))?.data);
+      if (hooks.getLive() !== L) return;
+      if (hooks.getMedia() === queued) return;
+      if (hooks.getQueued?.() !== queued) {
+        if (entryId !== undefined) L.entries.unbind(entryId);
+        return;
+      }
+      if (entryId !== undefined) {
+        if (queued.entryId === undefined) bind(L, queued, entryId);
+        L.queuedEntryId = entryId;
+      }
+    },
     async loadSlot(L: LiveSession, slot: MediaSlot, stopFirst: boolean): Promise<void> {
+      if (L.hasQueuedPlaylist) {
+        if (L.queuedEntryId !== undefined) {
+          L.entries.unbind(L.queuedEntryId);
+          L.queuedEntryId = undefined;
+        }
+        await send(L, ['playlist-clear']);
+        L.hasQueuedPlaylist = false;
+        if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
+      }
       if (stopFirst && !(await stopCurrent(L))) return;
       if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
       const desiredAudio = hooks.getDesiredAudioDevice?.();
@@ -380,6 +530,32 @@ export function createSessionController(hooks: LiveSessionHooks) {
         L.appliedSubtitleFont = desiredSubFont;
         await send(L, ['set_property', 'sub-font', desiredSubFont]);
         if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
+      }
+      const desiredDeinterlace = hooks.getDesiredDeinterlaceMode?.();
+      if (
+        desiredDeinterlace !== undefined &&
+        (L.appliedDeinterlaceMode !== desiredDeinterlace || desiredDeinterlace !== 'off')
+      ) {
+        L.appliedDeinterlaceMode = desiredDeinterlace;
+        for (const cmd of deinterlaceCommands(desiredDeinterlace)) {
+          await send(L, cmd);
+          if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
+        }
+      }
+      const desiredPitchLock = hooks.getDesiredPitchLock?.();
+      if (desiredPitchLock !== undefined && L.appliedPitchLock !== desiredPitchLock) {
+        L.appliedPitchLock = desiredPitchLock;
+        await send(L, pitchLockCommand(desiredPitchLock));
+        if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
+      }
+      const desiredNorm = hooks.getDesiredAudioNormalization?.();
+      if (desiredNorm !== undefined) {
+        const effectiveNorm = desiredNorm && !hooks.isSpdifPassthroughActive?.();
+        if (L.appliedAudioNormalization !== effectiveNorm) {
+          L.appliedAudioNormalization = effectiveNorm;
+          await send(L, audioNormalizationCommand(effectiveNorm));
+          if (slot !== hooks.getMedia() || hooks.getLive() !== L) return;
+        }
       }
       const fields = headerFields(slot.request.headers);
       if (fields.length > 0 || L.hasCustomHeaders) {

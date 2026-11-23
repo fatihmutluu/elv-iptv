@@ -153,7 +153,21 @@ export function createFakeMpv(opts: {
       }
     } else if (step.event === 'end-file') {
       endMedia(p, step.reason, step.fileError);
+      if (step.reason === 'eof' && p.queued.length > 0) {
+        const next = p.queued.shift();
+        if (next) {
+          p.playlist = [next.id, ...p.queued.map((q) => q.id)];
+          setProp(p, 'playlist-pos', 0);
+          setProp(p, 'playlist-count', p.playlist.length);
+          const nextMedia: FakeMedia = { id: next.id, started: false, timers: [] };
+          p.media = nextMedia;
+          scheduleFakeScript(p, nextMedia, next.steps, runStep);
+          return;
+        }
+      }
+      p.queued = [];
       p.playlist = [];
+      setProp(p, 'playlist-count', 0);
     } else write(p, { event: step.event });
   };
 
@@ -195,9 +209,26 @@ export function createFakeMpv(opts: {
         return;
       case 'loadfile': {
         const id = ++p.nextEntryId;
-        p.playlist = [id];
-        reply(fake.entryIdInReply ? { data: { playlist_entry_id: id } } : {});
+        const mode = String(args[1] ?? 'replace');
         const steps = opts.scripts[String(args[0])] ?? FAKE_PLAYING;
+        if (mode === 'append-play') {
+          p.playlist.push(id);
+          setProp(p, 'playlist-count', p.playlist.length);
+          reply(fake.entryIdInReply ? { data: { playlist_entry_id: id } } : {});
+          if (!p.media) {
+            const media: FakeMedia = { id, started: false, timers: [] };
+            p.media = media;
+            scheduleFakeScript(p, media, steps, runStep);
+          } else {
+            p.queued.push({ id, steps });
+          }
+          return;
+        }
+        p.queued = [];
+        p.playlist = [id];
+        setProp(p, 'playlist-pos', 0);
+        setProp(p, 'playlist-count', 1);
+        reply(fake.entryIdInReply ? { data: { playlist_entry_id: id } } : {});
         endLater(p, () => {
           const media: FakeMedia = { id, started: false, timers: [] };
           p.media = media;
@@ -205,9 +236,21 @@ export function createFakeMpv(opts: {
         });
         return;
       }
+      case 'playlist-clear': {
+        p.queued = [];
+        p.playlist = p.media ? [p.media.id] : [];
+        setProp(p, 'playlist-count', p.playlist.length);
+        reply();
+        return;
+      }
       case 'get_property': {
         const prop = String(args[0]);
-        const value = prop === 'playlist/0/id' ? p.playlist[0] : p.props.get(prop);
+        const value =
+          prop === 'playlist/0/id'
+            ? p.playlist[0]
+            : prop === 'playlist/1/id'
+              ? p.playlist[1]
+              : p.props.get(prop);
         if (value === undefined) fail('property unavailable');
         else reply({ data: value });
         return;
@@ -245,7 +288,9 @@ export function createFakeMpv(opts: {
       }
       case 'stop':
         reply();
+        p.queued = [];
         p.playlist = [];
+        setProp(p, 'playlist-count', 0);
         endLater(p, () => write(p, { event: 'idle' }));
         return;
       case 'quit':
@@ -258,7 +303,10 @@ export function createFakeMpv(opts: {
     }
   };
 
-  const listen = async (resetOnNextFile: ReadonlySet<string>): Promise<FakeProc> => {
+  const listen = async (
+    resetOnNextFile: ReadonlySet<string>,
+    audioSpdif: string,
+  ): Promise<FakeProc> => {
     const server = createServer();
     let finish: (info: FakeExit) => void = () => undefined;
     const exited = new Promise<FakeExit>((resolve) => {
@@ -279,12 +327,14 @@ export function createFakeMpv(opts: {
         ['vid', 'auto'],
         ['aid', 'auto'],
         ['sid', 'auto'],
+        ['audio-spdif', audioSpdif],
         ['volume', 100],
         ['mute', false],
       ]),
       resetOnNextFile,
       nextEntryId: 0,
       playlist: [],
+      queued: [],
       hung: false,
       gone: false,
       exited,
@@ -333,7 +383,9 @@ export function createFakeMpv(opts: {
           signal.addEventListener('abort', onAbort, { once: true });
         });
       }
-      const p = await listen(parseResetOnNextFile(args));
+      const audioSpdifArg = args.find((a) => a.startsWith('--audio-spdif='));
+      const audioSpdif = audioSpdifArg ? audioSpdifArg.slice('--audio-spdif='.length) : '';
+      const p = await listen(parseResetOnNextFile(args), audioSpdif);
       procs.push(p);
       return connectFakeProcess(p, nextPid++, REPLY_TIMEOUT_MS, () => {
         if (!p.gone) killed += 1;

@@ -1,4 +1,4 @@
-import { isAlwaysOnTopFlag, WINDOW_CHANNELS } from '../shared/window-ipc.ts';
+import { isAlwaysOnTopFlag, isAspectRatioLockFlag, WINDOW_CHANNELS } from '../shared/window-ipc.ts';
 
 type IpcHandler = (event: { sender: unknown }, ...args: unknown[]) => unknown;
 
@@ -40,6 +40,7 @@ export interface AlwaysOnTopWindowLike {
 export interface WindowIpcDeps {
   ipcMain: WindowIpcMainLike;
   getWindowFromSender(sender: unknown): AlwaysOnTopWindowLike | null | undefined;
+  onSetAspectRatioLock?(win: AlwaysOnTopWindowLike, enabled: boolean): void;
   log?(line: string): void;
 }
 
@@ -63,8 +64,9 @@ function syncChildWindowZOrder(win: AlwaysOnTopWindowLike, enabled: boolean): vo
  * events back to the owning renderer (`#408`). Returns the disposer.
  */
 export function registerWindowIpc(deps: WindowIpcDeps): () => void {
-  const { ipcMain, getWindowFromSender, log } = deps;
+  const { ipcMain, getWindowFromSender, onSetAspectRatioLock, log } = deps;
   const lastNotified = new WeakMap<AlwaysOnTopWindowLike, boolean>();
+  const aspectRatioLocked = new WeakMap<AlwaysOnTopWindowLike, boolean>();
   const watched = new WeakSet<AlwaysOnTopWindowLike>();
   const detachListeners: Array<() => void> = [];
 
@@ -117,9 +119,22 @@ export function registerWindowIpc(deps: WindowIpcDeps): () => void {
     return actual;
   });
 
+  ipcMain.handle(WINDOW_CHANNELS.setAspectRatioLock, ({ sender }, enabled) => {
+    const win = getWindowFromSender(sender);
+    if (!isAspectRatioLockFlag(enabled)) {
+      log?.(`window ipc: dropped an invalid ${WINDOW_CHANNELS.setAspectRatioLock} payload`);
+      return win && !win.isDestroyed() ? (aspectRatioLocked.get(win) ?? false) : false;
+    }
+    if (!win || win.isDestroyed()) return false;
+    aspectRatioLocked.set(win, enabled);
+    onSetAspectRatioLock?.(win, enabled);
+    return enabled;
+  });
+
   return () => {
     ipcMain.removeHandler(WINDOW_CHANNELS.getAlwaysOnTop);
     ipcMain.removeHandler(WINDOW_CHANNELS.setAlwaysOnTop);
+    ipcMain.removeHandler(WINDOW_CHANNELS.setAspectRatioLock);
     for (const detach of detachListeners.splice(0)) detach();
   };
 }

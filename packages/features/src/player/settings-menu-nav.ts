@@ -38,6 +38,8 @@ export type SettingsRootItem =
   | 'info'
   | 'alwaysOnTop'
   | 'deinterlace'
+  | 'pitchLock'
+  | 'audioNormalization'
   | 'autoSubtitlesOnSkipBack'
   | 'autoPlayNextEpisode'
   | 'stats';
@@ -80,6 +82,8 @@ export interface SettingsMenuOptions {
   readonly playbackSpeed?: number;
   readonly hasAspect?: boolean;
   readonly hasDeinterlace?: boolean;
+  readonly hasPitchLock?: boolean;
+  readonly hasAudioNormalization?: boolean;
   readonly hasAutoSubtitlesOnSkipBack?: boolean;
   readonly hasAutoPlayNextEpisode?: boolean;
   readonly hasAudioDevice?: boolean;
@@ -116,6 +120,8 @@ function settingsRootItemsFromOptions(options?: SettingsMenuOptions): readonly S
   if (options?.hasInfo === true) items.push('info');
   if (options?.hasAlwaysOnTop === true) items.push('alwaysOnTop');
   if (options?.hasDeinterlace === true) items.push('deinterlace');
+  if (options?.hasPitchLock === true) items.push('pitchLock');
+  if (options?.hasAudioNormalization === true) items.push('audioNormalization');
   if (options?.hasAutoSubtitlesOnSkipBack === true) items.push('autoSubtitlesOnSkipBack');
   if (options?.hasAutoPlayNextEpisode === true) items.push('autoPlayNextEpisode');
   items.push('stats');
@@ -152,6 +158,8 @@ export type SettingsMenuIntent =
   | { readonly kind: 'toggleInfo' }
   | { readonly kind: 'toggleAlwaysOnTop' }
   | { readonly kind: 'toggleDeinterlace' }
+  | { readonly kind: 'togglePitchLock' }
+  | { readonly kind: 'toggleAudioNormalization' }
   | { readonly kind: 'toggleAutoSubtitlesOnSkipBack' }
   | { readonly kind: 'toggleAutoPlayNextEpisode' }
   | { readonly kind: 'toggleStats' }
@@ -444,6 +452,8 @@ export function routeSettingsMenuKey(
       if (item === 'info') return { kind: 'toggleInfo' };
       if (item === 'alwaysOnTop') return { kind: 'toggleAlwaysOnTop' };
       if (item === 'deinterlace') return { kind: 'toggleDeinterlace' };
+      if (item === 'pitchLock') return { kind: 'togglePitchLock' };
+      if (item === 'audioNormalization') return { kind: 'toggleAudioNormalization' };
       if (item === 'autoSubtitlesOnSkipBack') return { kind: 'toggleAutoSubtitlesOnSkipBack' };
       if (item === 'autoPlayNextEpisode') return { kind: 'toggleAutoPlayNextEpisode' };
       if (item === 'stats') return { kind: 'toggleStats' };

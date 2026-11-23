@@ -43,6 +43,7 @@ function sameVideoInfo(a: StreamVideoInfo | undefined, b: StreamVideoInfo | unde
   return (
     a.width === b.width &&
     a.height === b.height &&
+    a.aspectRatio === b.aspectRatio &&
     a.fps === b.fps &&
     a.codec === b.codec &&
     a.hdr === b.hdr
