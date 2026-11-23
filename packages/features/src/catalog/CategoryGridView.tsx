@@ -1,5 +1,13 @@
-import type { CatalogService, ItemRow, ItemSortOrder } from '@elv/data';
-import { TvScrollEdgeFade, useI18n, useTheme } from '@elv/ui-kit';
+import type { AlphabetBucket, CatalogService, ItemRow, ItemSortOrder } from '@elv/data';
+import type { KeyEvent } from '@elv/focus-core';
+import {
+  AlphabetJumpRail,
+  TvFocusAnchor,
+  TvScrollEdgeFade,
+  useI18n,
+  useKeyInterpreter,
+  useTheme,
+} from '@elv/ui-kit';
 import {
   type MutableRefObject,
   type ReactElement,
@@ -7,6 +15,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
 } from 'react';
 import {
   type LayoutChangeEvent,
@@ -16,9 +25,23 @@ import {
   View,
   VirtualizedList,
 } from 'react-native';
-import type { CatalogLayoutMetrics, DetailTarget, DisplayCategory } from '../shared';
+import {
+  type CatalogLayoutMetrics,
+  type DetailTarget,
+  type DisplayCategory,
+  detailTargetFromItem,
+  useRouteActive,
+} from '../shared';
 import { GridHeaderBar, GridRowView } from './CategoryGridRow';
-import { chunkRowItems, computeRowCount, type GridFocusPosition } from './catalog-model';
+import {
+  ALPHABET_RAIL_MIN_ITEMS,
+  chunkRowItems,
+  clampGridFocus,
+  computeRowCount,
+  type GridFocusPosition,
+  resolveActiveAlphabetLetter,
+  stepAlphabetRailLetter,
+} from './catalog-model';
 import { useCategoryGridData } from './useCategoryGridData';
 import {
   computeVirtualGridRowFromOffset,
@@ -32,14 +55,26 @@ interface VirtualGridRowItem {
   readonly items: readonly (ItemRow | undefined)[];
 }
 
-/** Live item count reported to parent TV navigation. */
+/** Live item count and A–Z buckets reported to parent TV navigation (`#407`). */
 export interface CategoryGridMeta {
   readonly itemCount: number;
+  readonly alphabetBuckets?: readonly AlphabetBucket[];
 }
 
-/** Synchronous handle exposed to parent TV navigation for O(1) 2D grid activation. */
+/** Synchronous handle exposed to parent TV navigation for O(1) 2D grid & A–Z rail activation. */
 export interface CategoryGridAccess extends CategoryGridMeta {
   readonly getItem: (index: number) => ItemRow | undefined;
+  readonly selectLetter?: (letter: string, offset: number) => void;
+}
+
+function StandaloneGridTvKeyBridge({
+  onEvent,
+}: {
+  readonly onEvent: Parameters<typeof useKeyInterpreter>[0];
+}): ReactElement {
+  const routeActive = useRouteActive();
+  useKeyInterpreter(onEvent);
+  return <TvFocusAnchor testID="catalog-grid-tv-focus-anchor" hasTVPreferredFocus={routeActive} />;
 }
 
 /** Props of {@link CategoryGridView}. */
@@ -53,6 +88,8 @@ export interface CategoryGridViewProps {
   readonly backFocused: boolean;
   readonly sortFocused?: boolean;
   readonly focusedGridPos: GridFocusPosition | null;
+  readonly focusedAlphabetLetter?: string | null;
+  readonly alphabetBuckets?: readonly AlphabetBucket[];
   readonly onBack: () => void;
   readonly onOpenDetail: (target: DetailTarget) => void;
   readonly favoriteKeys?: ReadonlySet<string>;
@@ -62,6 +99,7 @@ export interface CategoryGridViewProps {
   readonly onQuickToggleWatched?: (item: ItemRow, currentWatched: boolean) => void;
   readonly onGridMetaChange?: (meta: CategoryGridMeta) => void;
   readonly gridAccessRef?: MutableRefObject<CategoryGridAccess>;
+  readonly onJumpToGridPos?: (pos: GridFocusPosition) => void;
   /** Optional sort order (`'default'` or `'alpha'` via `sort_title`). */
   readonly sortBy?: ItemSortOrder;
   readonly groupVersions?: boolean;
@@ -75,13 +113,15 @@ export interface CategoryGridViewProps {
 /**
  * Responsive O(1)-memory row-virtualized Category Grid.
  * Uses `createPagedListSource` (`pageSize = 180`, `maxPages = 8`) with deterministic `VirtualizedList`
- * row layouts on pointer/touch and a strict bounded `[windowStart, windowEnd]` TV viewport.
+ * row layouts on pointer/touch, a strict bounded `[windowStart, windowEnd]` TV viewport, and an A–Z
+ * `AlphabetJumpRail` (`#407`) when `sortBy === 'alpha'` and `total >= 40`.
  */
 export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
   const { kind, category, catalog, refreshToken, userStateVersion, layout } = props;
-  const { focusedGridPos, onOpenDetail, onGridMetaChange, gridAccessRef } = props;
+  const { focusedGridPos, onOpenDetail, onGridMetaChange, gridAccessRef, onJumpToGridPos } = props;
   const contentPaddingTop = props.contentPaddingTop ?? 0;
   const borderTopWidth = props.borderTopWidth ?? 0;
+  const sortBy = props.sortBy ?? 'default';
   const theme = useTheme();
   const i18n = useI18n();
   const cols = layout.gridColumns;
@@ -94,7 +134,7 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
     userStateVersion,
     cols,
     visibleGridRows: layout.visibleGridRows,
-    ...(props.sortBy !== undefined ? { sortBy: props.sortBy } : {}),
+    sortBy,
     ...(props.groupVersions !== undefined ? { groupVersions: props.groupVersions } : {}),
   });
 
@@ -104,9 +144,35 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
   const lastScrollBucketRef = useRef(-1);
   const visibleWindowRef = useRef({ startRow: 0, endRow: layout.visibleGridRows + 2 });
 
+  const [topVisibleRow, setTopVisibleRow] = useState(0);
+  const [selectedLetterOverride, setSelectedLetterOverride] = useState<string | null>(null);
+  const [standaloneGridPos, setStandaloneGridPos] = useState<GridFocusPosition>(
+    () => focusedGridPos ?? { row: 0, col: 0 },
+  );
+  const [standaloneFocusedLetter, setStandaloneFocusedLetter] = useState<string | null>(null);
+
+  const isStandaloneTv = layout.isTv && onGridMetaChange === undefined;
+  const effectiveFocusedGridPos = isStandaloneTv
+    ? standaloneFocusedLetter !== null
+      ? null
+      : standaloneGridPos
+    : focusedGridPos;
+  const effectiveFocusedLetter = isStandaloneTv
+    ? standaloneFocusedLetter
+    : (props.focusedAlphabetLetter ?? null);
+
+  useEffect(() => {
+    if (focusedGridPos !== null) {
+      setStandaloneGridPos(focusedGridPos);
+    }
+  }, [focusedGridPos]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset scroll offset only when category changes
   useEffect(() => {
     scrollOffsetRef.current = 0;
+    setTopVisibleRow(0);
+    setSelectedLetterOverride(null);
+    setStandaloneFocusedLetter(null);
   }, [category.row.id]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: invalidate scroll bucket on category or grid resize
@@ -114,6 +180,23 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
     lastScrollBucketRef.current = -1;
     visibleWindowRef.current = { startRow: 0, endRow: layout.visibleGridRows + 2 };
   }, [category.row.id, cols, layout.visibleGridRows]);
+
+  const effectiveBuckets = props.alphabetBuckets ?? gridData.alphabetBuckets;
+  const availableBuckets = useMemo(
+    () => effectiveBuckets.filter((b) => b.count > 0),
+    [effectiveBuckets],
+  );
+  const showAlphabetRail =
+    sortBy === 'alpha' &&
+    gridData.itemCount >= ALPHABET_RAIL_MIN_ITEMS &&
+    availableBuckets.length > 0;
+
+  useEffect(() => {
+    if (!showAlphabetRail) {
+      setSelectedLetterOverride(null);
+      setStandaloneFocusedLetter(null);
+    }
+  }, [showAlphabetRail]);
 
   const handleListLayout = useCallback((event: LayoutChangeEvent) => {
     if (event.nativeEvent.layout.height > 0) {
@@ -137,21 +220,17 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
 
   const rowCount = computeRowCount(gridData.itemCount, cols);
   const maxMountedRows = layout.visibleGridRows + 2;
-  const tvFocusRow = focusedGridPos?.row ?? 0;
+  const tvAnchorPos = isStandaloneTv ? standaloneGridPos : focusedGridPos;
+  const tvFocusRow = tvAnchorPos?.row ?? 0;
   const tvWindowStart =
-    rowCount <= maxMountedRows
-      ? 0
-      : Math.max(0, Math.min(rowCount - maxMountedRows, tvFocusRow - 1));
+    rowCount <= maxMountedRows ? 0 : Math.max(0, Math.min(rowCount - maxMountedRows, tvFocusRow));
   const tvWindowEnd = Math.min(rowCount - 1, tvWindowStart + maxMountedRows - 1);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: pageVersion and progressResetToken re-hydrate visible rows when pages land or user state changes
   useEffect(() => {
     if (!gridData.pagedSource) return;
     if (layout.isTv) {
-      gridData.pagedSource.prefetch(
-        Math.max(0, tvWindowStart - 2) * cols,
-        (tvWindowEnd + 4) * cols,
-      );
+      gridData.pagedSource.prefetch(Math.max(0, tvWindowStart) * cols, (tvWindowEnd + 3) * cols);
       gridData.hydrateProgressRange(tvWindowStart, tvWindowEnd);
     } else {
       const { startRow, endRow } = visibleWindowRef.current;
@@ -168,16 +247,82 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
     tvWindowStart,
   ]);
 
+  const handleSelectLetter = useCallback(
+    (letter: string, offset: number) => {
+      if (gridData.itemCount <= 0) return;
+      const safeOffset = Math.max(
+        0,
+        Math.min(gridData.itemCount - 1, Number.isFinite(offset) ? Math.floor(offset) : 0),
+      );
+      const targetPos = clampGridFocus(
+        Math.floor(safeOffset / cols),
+        safeOffset % cols,
+        gridData.itemCount,
+        cols,
+      );
+      const targetRow = targetPos.row;
+      const endRow = Math.max(
+        targetRow,
+        Math.min(Math.max(0, rowCount - 1), targetRow + layout.visibleGridRows + 2),
+      );
+      visibleWindowRef.current = { startRow: targetRow, endRow };
+      lastScrollBucketRef.current = Math.floor(targetRow / SCROLL_QUANTUM);
+      setTopVisibleRow(targetRow);
+      setSelectedLetterOverride(letter.trim().toUpperCase());
+      setStandaloneGridPos(targetPos);
+      onJumpToGridPos?.(targetPos);
+
+      gridData.pagedSource?.prefetch(
+        targetRow * cols,
+        Math.min(gridData.itemCount, (endRow + 2) * cols),
+      );
+      gridData.hydrateProgressRange(targetRow, endRow);
+
+      if (!layout.isTv) {
+        const targetScrollOffset = computeVirtualGridScrollOffset({
+          rowIndex: targetRow,
+          rowStride: layout.gridRowHeight,
+          paddingTop: contentPaddingTop,
+          borderTopWidth,
+          viewportHeight: viewportHeightRef.current,
+          currentOffset: scrollOffsetRef.current,
+          align: 'start',
+        });
+        scrollOffsetRef.current = targetScrollOffset;
+        if (typeof listRef.current?.scrollToIndex === 'function') {
+          listRef.current.scrollToIndex({ index: targetRow, animated: false });
+        } else {
+          listRef.current?.scrollToOffset?.({ offset: targetScrollOffset, animated: false });
+        }
+      }
+    },
+    [
+      borderTopWidth,
+      cols,
+      contentPaddingTop,
+      gridData.hydrateProgressRange,
+      gridData.itemCount,
+      gridData.pagedSource,
+      layout.gridRowHeight,
+      layout.isTv,
+      layout.visibleGridRows,
+      onJumpToGridPos,
+      rowCount,
+    ],
+  );
+
   if (gridAccessRef) {
     gridAccessRef.current = {
       itemCount: gridData.itemCount,
+      alphabetBuckets: availableBuckets,
       getItem: gridData.getItemAt,
+      selectLetter: handleSelectLetter,
     };
   }
 
   useEffect(() => {
-    onGridMetaChange?.({ itemCount: gridData.itemCount });
-  }, [gridData.itemCount, onGridMetaChange]);
+    onGridMetaChange?.({ itemCount: gridData.itemCount, alphabetBuckets: availableBuckets });
+  }, [availableBuckets, gridData.itemCount, onGridMetaChange]);
 
   const handleScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -194,6 +339,8 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
         paddingTop: contentPaddingTop,
         borderTopWidth,
       });
+      setTopVisibleRow(topRow);
+      setSelectedLetterOverride(null);
       const bucket = Math.floor(topRow / SCROLL_QUANTUM);
       if (bucket === lastScrollBucketRef.current) return;
       lastScrollBucketRef.current = bucket;
@@ -210,6 +357,115 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
       gridData.pagedSource,
       layout.gridRowHeight,
       layout.visibleGridRows,
+    ],
+  );
+
+  const activeOffset = layout.isTv
+    ? tvAnchorPos !== null
+      ? tvAnchorPos.row * cols + tvAnchorPos.col
+      : 0
+    : (topVisibleRow + 1) * cols - 1;
+  const activeLetter = useMemo(
+    () => selectedLetterOverride ?? resolveActiveAlphabetLetter(availableBuckets, activeOffset),
+    [activeOffset, availableBuckets, selectedLetterOverride],
+  );
+
+  const handleStandaloneTvKey = useCallback(
+    (event: KeyEvent): boolean => {
+      const count = gridData.itemCount;
+      const isNav = event.kind === 'press' || event.kind === 'repeat';
+
+      if (standaloneFocusedLetter !== null) {
+        if (event.kind === 'press' && (event.key === 'left' || event.key === 'back')) {
+          setStandaloneFocusedLetter(null);
+          return true;
+        }
+        if (event.kind === 'press' && event.key === 'select') {
+          const norm = standaloneFocusedLetter.trim().toUpperCase();
+          const bucket =
+            availableBuckets.find((b) => b.letter.trim().toUpperCase() === norm) ??
+            availableBuckets[0];
+          if (bucket) {
+            handleSelectLetter(bucket.letter, bucket.offset);
+          }
+          setStandaloneFocusedLetter(null);
+          return true;
+        }
+        if (!isNav) return false;
+        if (event.key === 'up' || event.key === 'down') {
+          const next = stepAlphabetRailLetter(availableBuckets, standaloneFocusedLetter, event.key);
+          if (next !== null) setStandaloneFocusedLetter(next);
+          return true;
+        }
+        return event.key === 'right';
+      }
+
+      if (event.kind === 'press' && event.key === 'back') {
+        props.onBack();
+        return true;
+      }
+      if (count <= 0) return false;
+
+      if (event.kind === 'press' && event.key === 'select') {
+        const idx = standaloneGridPos.row * cols + standaloneGridPos.col;
+        const item = gridData.getItemAt(idx);
+        const target = item ? detailTargetFromItem(item, category.row.id) : undefined;
+        if (target) onOpenDetail(target);
+        return true;
+      }
+      if (!isNav) return false;
+
+      if (event.key === 'left') {
+        if (standaloneGridPos.col > 0) {
+          setSelectedLetterOverride(null);
+          setStandaloneGridPos({ row: standaloneGridPos.row, col: standaloneGridPos.col - 1 });
+        }
+        return true;
+      }
+      if (event.key === 'right') {
+        const rowItems = Math.min(cols, count - standaloneGridPos.row * cols);
+        if (standaloneGridPos.col + 1 < rowItems) {
+          setSelectedLetterOverride(null);
+          setStandaloneGridPos({ row: standaloneGridPos.row, col: standaloneGridPos.col + 1 });
+        } else if (showAlphabetRail) {
+          const initial = activeLetter ?? availableBuckets[0]?.letter ?? null;
+          if (initial !== null) setStandaloneFocusedLetter(initial);
+        }
+        return true;
+      }
+      if (event.key === 'down') {
+        if (standaloneGridPos.row + 1 < rowCount) {
+          setSelectedLetterOverride(null);
+          setStandaloneGridPos(
+            clampGridFocus(standaloneGridPos.row + 1, standaloneGridPos.col, count, cols),
+          );
+        }
+        return true;
+      }
+      if (event.key === 'up') {
+        if (standaloneGridPos.row > 0) {
+          setSelectedLetterOverride(null);
+          setStandaloneGridPos(
+            clampGridFocus(standaloneGridPos.row - 1, standaloneGridPos.col, count, cols),
+          );
+        }
+        return true;
+      }
+      return false;
+    },
+    [
+      activeLetter,
+      availableBuckets,
+      category.row.id,
+      cols,
+      gridData,
+      handleSelectLetter,
+      onOpenDetail,
+      props.onBack,
+      rowCount,
+      showAlphabetRail,
+      standaloneFocusedLetter,
+      standaloneGridPos,
     ],
   );
 
@@ -337,6 +593,7 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
 
   return (
     <View testID="catalog-grid" style={styles.root}>
+      {isStandaloneTv ? <StandaloneGridTvKeyBridge onEvent={handleStandaloneTvKey} /> : null}
       <GridHeaderBar
         backLabel={backLabel}
         categoryLabel={category.label}
@@ -349,63 +606,92 @@ export function CategoryGridView(props: CategoryGridViewProps): ReactElement {
         {...(props.onToggleSort !== undefined ? { onToggleSort: props.onToggleSort } : {})}
       />
 
-      {layout.isTv ? (
-        <View testID="catalog-grid-tv-viewport" style={styles.tvViewport}>
-          {tvWindowRows.map((row) => {
-            const isFocusedRow = focusedGridPos?.row === row.rowIndex;
-            return (
-              <View key={row.rowIndex} style={isFocusedRow ? styles.focusedRowLayer : undefined}>
-                <GridRowView
-                  rowIndex={row.rowIndex}
-                  items={row.items}
-                  focusedCol={isFocusedRow ? focusedGridPos.col : null}
-                  {...rowCommonProps}
-                />
-              </View>
-            );
-          })}
-          <View pointerEvents="none" style={styles.edgeFadeLayer}>
-            <TvScrollEdgeFade
-              testID="catalog-grid-edge-fade"
-              showTop={tvWindowStart > 0}
-              showBottom={tvWindowEnd < rowCount - 1}
+      <View style={styles.bodyWrap}>
+        {layout.isTv ? (
+          <View testID="catalog-grid-tv-viewport" style={styles.tvViewport}>
+            {tvWindowRows.map((row) => {
+              const isFocusedRow = effectiveFocusedGridPos?.row === row.rowIndex;
+              return (
+                <View key={row.rowIndex} style={isFocusedRow ? styles.focusedRowLayer : undefined}>
+                  <GridRowView
+                    rowIndex={row.rowIndex}
+                    items={row.items}
+                    focusedCol={isFocusedRow ? effectiveFocusedGridPos.col : null}
+                    {...rowCommonProps}
+                  />
+                </View>
+              );
+            })}
+            <View pointerEvents="none" style={styles.edgeFadeLayer}>
+              <TvScrollEdgeFade
+                testID="catalog-grid-edge-fade"
+                showTop={tvWindowStart > 0}
+                showBottom={tvWindowEnd < rowCount - 1}
+              />
+            </View>
+          </View>
+        ) : (
+          <VirtualizedList
+            ref={listRef}
+            testID="catalog-grid-list"
+            style={styles.listFlex}
+            data={gridData.pagedSource}
+            extraData={extraData}
+            getItemCount={getItemCount}
+            getItem={getRowData}
+            keyExtractor={keyExtractor}
+            getItemLayout={getItemLayout}
+            renderItem={renderRow}
+            windowSize={5}
+            initialNumToRender={layout.visibleGridRows + 2}
+            maxToRenderPerBatch={4}
+            onLayout={handleListLayout}
+            onScroll={handleScroll}
+            scrollEventThrottle={32}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{
+              paddingTop: contentPaddingTop,
+              paddingBottom: theme.spacing.xl,
+              ...(borderTopWidth > 0 ? { borderTopWidth } : {}),
+            }}
+          />
+        )}
+
+        {showAlphabetRail ? (
+          <View
+            pointerEvents="box-none"
+            style={[
+              styles.alphabetRailOverlay,
+              { right: Math.max(4, Math.floor(layout.padX / 4)) },
+            ]}
+          >
+            <AlphabetJumpRail
+              buckets={availableBuckets}
+              activeLetter={activeLetter}
+              focusedLetter={effectiveFocusedLetter}
+              onSelectLetter={handleSelectLetter}
+              isTv={layout.isTv}
             />
           </View>
-        </View>
-      ) : (
-        <VirtualizedList
-          ref={listRef}
-          testID="catalog-grid-list"
-          style={styles.listFlex}
-          data={gridData.pagedSource}
-          extraData={extraData}
-          getItemCount={getItemCount}
-          getItem={getRowData}
-          keyExtractor={keyExtractor}
-          getItemLayout={getItemLayout}
-          renderItem={renderRow}
-          windowSize={5}
-          initialNumToRender={layout.visibleGridRows + 2}
-          maxToRenderPerBatch={4}
-          onLayout={handleListLayout}
-          onScroll={handleScroll}
-          scrollEventThrottle={32}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{
-            paddingTop: contentPaddingTop,
-            paddingBottom: theme.spacing.xl,
-            ...(borderTopWidth > 0 ? { borderTopWidth } : {}),
-          }}
-        />
-      )}
+        ) : null}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  bodyWrap: { flex: 1, position: 'relative' },
   listFlex: { flex: 1 },
   tvViewport: { flex: 1, overflow: 'hidden', position: 'relative' },
   edgeFadeLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 1 },
   focusedRowLayer: { zIndex: 2 },
+  alphabetRailOverlay: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
 });

@@ -17,9 +17,12 @@ import {
   formatClockTime,
   formatLiveTitle,
   indexNowNext,
+  LIVE_ALPHABET_RAIL_MIN_ITEMS,
   layoutEpgSlots,
   parseNumberBuffer,
   recordChannelTune,
+  resolveLiveAlphabetLetter,
+  stepLiveAlphabetLetter,
 } from './live-model';
 
 const HOUR = 3_600_000;
@@ -243,5 +246,22 @@ describe('live-model pure helpers', () => {
     expect(source.count()).toBe(0);
     expect(source.get(0)).toBeUndefined();
     expect(await source.loadItem(0)).toBeUndefined();
+  });
+
+  it('resolves and steps Live A-Z alphabet buckets (#407)', () => {
+    const buckets = [
+      { letter: 'A', offset: 0, count: 15 },
+      { letter: 'C', offset: 15, count: 20 },
+      { letter: 'T', offset: 35, count: 10 },
+    ] as const;
+    expect(LIVE_ALPHABET_RAIL_MIN_ITEMS).toBe(40);
+    expect(resolveLiveAlphabetLetter([], 0)).toBeNull();
+    expect(resolveLiveAlphabetLetter(buckets, 0)).toBe('A');
+    expect(resolveLiveAlphabetLetter(buckets, 14)).toBe('A');
+    expect(resolveLiveAlphabetLetter(buckets, 15)).toBe('C');
+    expect(resolveLiveAlphabetLetter(buckets, 40)).toBe('T');
+    expect(stepLiveAlphabetLetter(buckets, 'A', 'down')).toBe('C');
+    expect(stepLiveAlphabetLetter(buckets, 'C', 'down')).toBe('T');
+    expect(stepLiveAlphabetLetter(buckets, 'T', 'up')).toBe('C');
   });
 });

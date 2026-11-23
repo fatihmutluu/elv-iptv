@@ -9,6 +9,7 @@ import {
   type SecretStore,
   type SqlDriver,
 } from '@elv/domain';
+import { type AlphabetBucket, type AlphabetIndexInput, queryAlphabetIndex } from './alphabet-index';
 import { isCredentialFingerprint } from './credential-fingerprint';
 import { type DiscoveredCategory, discoverSourceCategories } from './discover-categories';
 import {
@@ -52,7 +53,14 @@ import {
 } from './queries-variants';
 import { listRecentChannels, recordRecentChannel } from './recent-channels-repo';
 import { latestImportHealth, type SourceImportHealth } from './runs';
-import { querySearch, type SearchOptions, type SearchResults } from './search';
+import {
+  querySearch,
+  querySearchSuggestions,
+  type SearchOptions,
+  type SearchResults,
+  type SearchSuggestion,
+  type SearchSuggestionsOptions,
+} from './search';
 import { addSourceFromLink, type LinkSourceInput } from './source-link';
 import {
   addLocalM3uSource,
@@ -205,6 +213,10 @@ export interface CatalogService {
   ): Promise<ItemRow[]>;
   itemDetail?(itemKey: string): Promise<ItemDetailRow | null>;
   search?(query: string, opts?: SearchOptions): Promise<SearchResults>;
+  /** Queries bounded on-device idle search suggestions (`#397`). */
+  searchSuggestions?(options?: SearchSuggestionsOptions): Promise<readonly SearchSuggestion[]>;
+  /** Computes `#`, `A..Z` prefix buckets and cumulative 0-based offsets for `'alpha'` browsing (`#407`). */
+  alphabetIndex?(input: AlphabetIndexInput): Promise<readonly AlphabetBucket[]>;
   nowNext?(channelKeys: readonly string[], nowMs: number): Promise<NowNextEntry[]>;
   epgWindow?(
     channelKeys: readonly string[],
@@ -644,14 +656,31 @@ export function createCatalogService(deps: CatalogDeps): CatalogService {
     },
 
     async search(query, opts) {
-      const res = await querySearch(db, query, opts);
-      const [live, movies, series] = await Promise.all([
+      const effectiveOpts = opts?.nowMs !== undefined ? opts : { ...opts, nowMs: clock() };
+      const res = await querySearch(db, query, effectiveOpts);
+      const [live, epgLogos, movies, series, episodePosters] = await Promise.all([
         playtime.resolveRowLogos(res.live),
+        playtime.resolveRowLogos(
+          res.epg.map((hit) => ({ sourceId: hit.sourceId, logo: hit.channelLogoUrl })),
+        ),
         playtime.resolveRowLogos(res.movies),
         playtime.resolveRowLogos(res.series),
+        playtime.resolveRowLogos(
+          res.episodes.map((hit) => ({ sourceId: hit.sourceId, logo: hit.posterUrl })),
+        ),
       ]);
-      return { live, movies, series };
+      const epg = res.epg.map((hit, idx) => {
+        const resolvedLogo = epgLogos[idx]?.logo ?? hit.channelLogoUrl;
+        return resolvedLogo === hit.channelLogoUrl ? hit : { ...hit, channelLogoUrl: resolvedLogo };
+      });
+      const episodes = res.episodes.map((hit, idx) => {
+        const resolvedPoster = episodePosters[idx]?.logo ?? hit.posterUrl;
+        return resolvedPoster === hit.posterUrl ? hit : { ...hit, posterUrl: resolvedPoster };
+      });
+      return { live, epg, movies, series, episodes };
     },
+    searchSuggestions: (options) => querySearchSuggestions(db, options),
+    alphabetIndex: (input) => queryAlphabetIndex(db, input),
 
     nowNext: (channelKeys, nowMs) => queryNowNext(db, channelKeys, nowMs),
     epgWindow: (channelKeys, fromMs, toMs) => queryEpgWindow(db, channelKeys, fromMs, toMs),

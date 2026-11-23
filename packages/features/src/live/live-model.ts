@@ -1,9 +1,12 @@
-import type { ItemRow, NowNextEntry, ProgrammeRow } from '@elv/data';
+import type { AlphabetBucket, ItemRow, ItemSortOrder, NowNextEntry, ProgrammeRow } from '@elv/data';
 import type { PlayableEntry, PlayTarget } from '../ports/play-target';
 import { createPagedListSource, type PagedListSource } from '../shared/paged-list-source';
 
 /** Active sub-mode inside the unified Cinema Quietude Live TV hub (`UI_UX_PHILOSOPHY.md` §2.1). */
 export type LiveMode = 'favorites' | 'channels' | 'epg';
+
+/** Minimum channel count required before rendering the Live A–Z `AlphabetJumpRail` (`#407`). */
+export const LIVE_ALPHABET_RAIL_MIN_ITEMS = 40;
 
 /** Persisted per-session Live TV hub memory preserved across tab switches and Player visits. */
 export interface LiveTabMemory {
@@ -12,6 +15,7 @@ export interface LiveTabMemory {
   readonly activeChannelKey: string | null;
   readonly previousChannelKey: string | null;
   readonly zapDrawerOpen: boolean;
+  readonly sortBy?: ItemSortOrder;
 }
 
 /** Default initial Live TV hub memory (`Channels` grid ready immediately, switchable to `Favorites` / `TV Guide`). */
@@ -21,6 +25,7 @@ export const EMPTY_LIVE_MEMORY: LiveTabMemory = {
   activeChannelKey: null,
   previousChannelKey: null,
   zapDrawerOpen: true,
+  sortBy: 'default',
 };
 
 /** 30-minute time ruler tick size in milliseconds. */
@@ -43,6 +48,57 @@ export const LIVE_MAX_PAGES = 8;
 export const EPG_CACHE_TTL_MS = 90_000;
 /** Maximum channel entries kept in the in-memory EPG cache (`#250`). */
 export const EPG_CACHE_MAX_ENTRIES = 240;
+
+/**
+ * Resolves the active `#` or `A..Z` bucket letter owning `currentOffset` in Live Channels (`#407`).
+ */
+export function resolveLiveAlphabetLetter(
+  buckets: readonly AlphabetBucket[],
+  currentOffset: number,
+): string | null {
+  const available = buckets.filter((b) => b.count > 0);
+  if (available.length === 0) return null;
+  const safeOffset = Number.isFinite(currentOffset) ? Math.max(0, Math.floor(currentOffset)) : 0;
+  let active = available[0]?.letter ?? null;
+  for (const bucket of available) {
+    if (bucket.offset <= safeOffset) {
+      active = bucket.letter;
+    } else {
+      break;
+    }
+  }
+  return active;
+}
+
+function isLiveRailLetter(letter: string): boolean {
+  const normalized = letter.trim().toUpperCase();
+  return normalized === '#' || (normalized.length === 1 && normalized >= 'A' && normalized <= 'Z');
+}
+
+/**
+ * Steps TV focus `up` or `down` across available (`count > 0`) Live rail alphabet buckets (`#`, `A..Z`, `#407`).
+ */
+export function stepLiveAlphabetLetter(
+  buckets: readonly AlphabetBucket[],
+  currentLetter: string | null,
+  direction: 'up' | 'down',
+): string | null {
+  const available = buckets.filter((b) => b.count > 0 && isLiveRailLetter(b.letter));
+  if (available.length === 0) return null;
+  const normalized = currentLetter?.trim().toUpperCase() ?? null;
+  const currentIdx =
+    normalized !== null
+      ? available.findIndex((b) => b.letter.trim().toUpperCase() === normalized)
+      : -1;
+  if (currentIdx === -1) {
+    return available[0]?.letter ?? null;
+  }
+  const nextIdx =
+    direction === 'up'
+      ? Math.max(0, currentIdx - 1)
+      : Math.min(available.length - 1, currentIdx + 1);
+  return available[nextIdx]?.letter ?? null;
+}
 
 /** Floors an epoch timestamp onto the nearest 30-minute boundary for crisp EPG time rulers. */
 export function floorToEpgSlot(ms: number): number {

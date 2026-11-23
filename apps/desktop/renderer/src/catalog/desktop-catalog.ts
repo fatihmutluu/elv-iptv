@@ -106,6 +106,10 @@ export function createDesktopCatalogFromBridge(
         : Promise.resolve([]),
     itemDetail: (itemKey) => bridge.itemDetail(itemKey),
     search: (query, opts) => bridge.search(sanitizeDisplayText(query).slice(0, 256), opts),
+    searchSuggestions: (options) =>
+      bridge.searchSuggestions ? bridge.searchSuggestions(options) : Promise.resolve([]),
+    alphabetIndex: (input) =>
+      bridge.alphabetIndex ? bridge.alphabetIndex(input) : Promise.resolve([]),
     nowNext: (channelKeys, nowMs) => bridge.nowNext(channelKeys, nowMs),
     epgWindow: (channelKeys, fromMs, toMs) => bridge.epgWindow(channelKeys, fromMs, toMs),
     channelByNumber: (num, sourceId) => bridge.channelByNumber(num, sourceId),

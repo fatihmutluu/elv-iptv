@@ -4,8 +4,14 @@ export interface ExpectedColumn {
   readonly alterDefinition: string;
 }
 
-/** External-content FTS5 virtual tables verified via `sqlite_master` (cannot be altered with `ADD COLUMN`). */
-export const EXPECTED_FTS_TABLES = ['live_fts', 'movies_fts', 'series_fts'] as const;
+/** FTS5 virtual tables verified via `sqlite_master` (`programmes_fts` is standalone because `programmes` is `WITHOUT ROWID`). */
+export const EXPECTED_FTS_TABLES = [
+  'live_fts',
+  'movies_fts',
+  'series_fts',
+  'episodes_fts',
+  'programmes_fts',
+] as const;
 
 /**
  * Expected catalog tables and columns matching {@link MIGRATIONS}, with SQLite-valid
@@ -116,6 +122,10 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'sort_title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
     { name: 'version_group_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
     { name: 'version_label', alterDefinition: 'TEXT' },
+    { name: 'cast_text', alterDefinition: 'TEXT' },
+    { name: 'director_text', alterDefinition: 'TEXT' },
+    { name: 'cast_fold', alterDefinition: 'TEXT' },
+    { name: 'director_fold', alterDefinition: 'TEXT' },
   ],
   movies_next: [
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
@@ -137,6 +147,10 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'sort_title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
     { name: 'version_group_key', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
     { name: 'version_label', alterDefinition: 'TEXT' },
+    { name: 'cast_text', alterDefinition: 'TEXT' },
+    { name: 'director_text', alterDefinition: 'TEXT' },
+    { name: 'cast_fold', alterDefinition: 'TEXT' },
+    { name: 'director_fold', alterDefinition: 'TEXT' },
   ],
   series: [
     { name: 'id', alterDefinition: 'INTEGER' },
@@ -154,6 +168,10 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'is_hidden', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'content_hash', alterDefinition: 'TEXT' },
     { name: 'sort_title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'cast_text', alterDefinition: 'TEXT' },
+    { name: 'director_text', alterDefinition: 'TEXT' },
+    { name: 'cast_fold', alterDefinition: 'TEXT' },
+    { name: 'director_fold', alterDefinition: 'TEXT' },
   ],
   series_next: [
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
@@ -169,6 +187,10 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'content_hash', alterDefinition: 'TEXT' },
     { name: 'sort_title', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
+    { name: 'cast_text', alterDefinition: 'TEXT' },
+    { name: 'director_text', alterDefinition: 'TEXT' },
+    { name: 'cast_fold', alterDefinition: 'TEXT' },
+    { name: 'director_fold', alterDefinition: 'TEXT' },
   ],
   episodes: [
     { name: 'id', alterDefinition: 'INTEGER' },
@@ -185,6 +207,7 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'headers_json', alterDefinition: 'TEXT' },
     { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'backup_urls_json', alterDefinition: 'TEXT' },
+    { name: 'title_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
   ],
   episodes_next: [
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
@@ -201,6 +224,7 @@ export const EXPECTED_TABLE_COLUMNS: Readonly<Record<string, readonly ExpectedCo
     { name: 'headers_json', alterDefinition: 'TEXT' },
     { name: 'run_id', alterDefinition: 'INTEGER NOT NULL DEFAULT 0' },
     { name: 'backup_urls_json', alterDefinition: 'TEXT' },
+    { name: 'title_fold', alterDefinition: "TEXT NOT NULL DEFAULT ''" },
   ],
   placements: [
     { name: 'source_id', alterDefinition: "TEXT NOT NULL DEFAULT ''" },

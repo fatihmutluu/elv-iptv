@@ -99,13 +99,49 @@ describe('seriesInfo', () => {
       ],
     });
   });
+
+  it('extracts optional cast (or actors) and director on seriesInfo (#397)', async () => {
+    const info1 = value(
+      await client(() => ({
+        json: {
+          info: {
+            cast: 'Haluk Bilginer, Cansu Dere',
+            director: 'Onur Saylak',
+          },
+          episodes: {},
+        },
+      })).c.seriesInfo(10),
+    );
+    expect(info1.cast).toBe('Haluk Bilginer, Cansu Dere');
+    expect(info1.director).toBe('Onur Saylak');
+
+    const info2 = value(
+      await client(() => ({
+        json: {
+          info: {
+            actors: ['Ali Atay', ' Serkan Keskin '],
+          },
+          director: 'Onur Ünlü',
+          episodes: {},
+        },
+      })).c.seriesInfo(11),
+    );
+    expect(info2.cast).toBe('Ali Atay, Serkan Keskin');
+    expect(info2.director).toBe('Onur Ünlü');
+  });
 });
 
 describe('vodInfo', () => {
   it('maps info and movie data', async () => {
     const { c, requests } = client(() => ({
       json: {
-        info: { duration_secs: '5400', plot: ' Plot ', releasedate: '2020-03-04' },
+        info: {
+          duration_secs: '5400',
+          plot: ' Plot ',
+          releasedate: '2020-03-04',
+          actors: ['Cem Yılmaz', 'Ozan Güven'],
+          director: ' Ali Taner Baltacı ',
+        },
         movie_data: { container_extension: 'mkv' },
       },
     }));
@@ -113,6 +149,8 @@ describe('vodInfo', () => {
       durationSec: 5400,
       plot: 'Plot',
       year: 2020,
+      cast: 'Cem Yılmaz, Ozan Güven',
+      director: 'Ali Taner Baltacı',
       extension: 'mkv',
     });
     expect(requests[0]?.url).toContain('action=get_vod_info&vod_id=8');

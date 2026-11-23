@@ -57,7 +57,7 @@ function makeFakeBridge(overrides?: Partial<CatalogBridge>): {
     categories: async () => [],
     items: async () => [],
     itemDetail: async () => null,
-    search: async () => ({ live: [], movies: [], series: [] }),
+    search: async () => ({ live: [], epg: [], movies: [], series: [], episodes: [] }),
     seasons: async () => ok([]),
     episodes: async () => [],
     resolveStream: async () =>
@@ -145,9 +145,13 @@ describe('desktop CatalogService', () => {
     expect(await c1.itemDetail?.('x:s1:series:1')).toBeNull();
     expect(await c1.search?.('horizon', { scope: 'movie', limit: 10 })).toEqual({
       live: [],
+      epg: [],
       movies: [],
       series: [],
+      episodes: [],
     });
+    expect(await c1.searchSuggestions?.({ limit: 8 })).toEqual([]);
+    expect(await c1.alphabetIndex?.({ kind: 'movie' })).toEqual([]);
     expect((await c1.seasons(1)).ok).toBe(true);
     expect(await c1.episodes(1, 1)).toEqual([]);
     expect((await c1.resolveStream('x:s1:live:1')).ok).toBe(true);
@@ -305,7 +309,7 @@ describe('desktop CatalogService', () => {
     const { bridge } = makeFakeBridge({
       search: async (query) => {
         seenQueries.push(query);
-        return { live: [], movies: [], series: [] };
+        return { live: [], epg: [], movies: [], series: [], episodes: [] };
       },
     });
     const service = createDesktopCatalogFromBridge(bridge);
@@ -314,6 +318,35 @@ describe('desktop CatalogService', () => {
     await service.search?.(`  ${'a'.repeat(300)}  `);
 
     expect(seenQueries).toEqual(['foo bar', 'a'.repeat(256)]);
+  });
+
+  it('forwards searchSuggestions and alphabetIndex and falls back to [] when bridge omits them (#397, #407)', async () => {
+    const suggestions = [
+      { kind: 'favorite' as const, label: 'Orbital Nine', query: 'Orbital Nine' },
+    ];
+    const buckets = [{ letter: 'O', offset: 0, count: 1 }];
+    const suggestionCalls: unknown[] = [];
+    const alphabetCalls: unknown[] = [];
+    const { bridge } = makeFakeBridge({
+      searchSuggestions: async (options) => {
+        suggestionCalls.push(options);
+        return suggestions;
+      },
+      alphabetIndex: async (input) => {
+        alphabetCalls.push(input);
+        return buckets;
+      },
+    });
+    const service = createDesktopCatalogFromBridge(bridge);
+    expect(await service.searchSuggestions?.({ limit: 6, sourceId: 's1' })).toEqual(suggestions);
+    expect(await service.alphabetIndex?.({ kind: 'movie', sourceId: 's1' })).toEqual(buckets);
+    expect(suggestionCalls).toEqual([{ limit: 6, sourceId: 's1' }]);
+    expect(alphabetCalls).toEqual([{ kind: 'movie', sourceId: 's1' }]);
+
+    const { bridge: legacyBridge } = makeFakeBridge();
+    const legacyService = createDesktopCatalogFromBridge(legacyBridge);
+    expect(await legacyService.searchSuggestions?.()).toEqual([]);
+    expect(await legacyService.alphabetIndex?.({ kind: 'movie' })).toEqual([]);
   });
 
   it('forwards ListItemsOptions on items and allSourcesItems (#125)', async () => {

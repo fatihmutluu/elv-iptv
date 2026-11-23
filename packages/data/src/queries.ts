@@ -57,10 +57,14 @@ export interface CategoryRow {
   itemCount: number;
 }
 
-/** Detail lookup row for a live channel, movie or series, including series synopsis when present. */
+/** Detail lookup row for a live channel, movie or series, including series synopsis and optional credits when present. */
 export interface ItemDetailRow extends ItemRow {
   /** Series synopsis (`series.plot`); `null` for live channels and movies. */
   plot: string | null;
+  /** Cast / actors metadata (`movies.cast_text` / `series.cast_text`) when present (`#397`). */
+  readonly cast?: string | null;
+  /** Director metadata (`movies.director_text` / `series.director_text`) when present (`#397`). */
+  readonly director?: string | null;
 }
 
 /** One season of a series with the episodes stored for it. */
@@ -408,21 +412,34 @@ export async function queryItemDetail(
   const sourceId = sourceOfKey(itemKey);
   if (sourceId === undefined) return undefined;
   const rows = await db.all<
-    RawItemRow & { kind: BrowseKind; source_id: string; plot: string | null }
+    RawItemRow & {
+      kind: BrowseKind;
+      source_id: string;
+      plot: string | null;
+      cast_text: string | null;
+      director_text: string | null;
+    }
   >(
-    `SELECT id, key, 'live' AS kind, source_id, provider_id, name, logo, NULL AS rating, NULL AS year, num, NULL AS plot
+    `SELECT id, key, 'live' AS kind, source_id, provider_id, name, logo, NULL AS rating, NULL AS year, num, NULL AS plot, NULL AS cast_text, NULL AS director_text
        FROM live WHERE source_id = ? AND key = ?
      UNION ALL
-     SELECT id, key, 'movie', source_id, provider_id, name, logo, rating, year, NULL, NULL
+     SELECT id, key, 'movie', source_id, provider_id, name, logo, rating, year, NULL, NULL, cast_text, director_text
        FROM movies WHERE source_id = ? AND key = ?
      UNION ALL
-     SELECT id, key, 'series', source_id, provider_id, name, cover, rating, year, NULL, plot
+     SELECT id, key, 'series', source_id, provider_id, name, cover, rating, year, NULL, plot, cast_text, director_text
        FROM series WHERE source_id = ? AND key = ?
      LIMIT 1`,
     [sourceId, itemKey, sourceId, itemKey, sourceId, itemKey],
   );
   const r = rows[0];
-  return r === undefined ? undefined : { ...mapItemRow(r.kind, r.source_id, r), plot: r.plot };
+  return r === undefined
+    ? undefined
+    : {
+        ...mapItemRow(r.kind, r.source_id, r),
+        plot: r.plot,
+        ...(r.cast_text !== null ? { cast: r.cast_text } : {}),
+        ...(r.director_text !== null ? { director: r.director_text } : {}),
+      };
 }
 
 /** Finds a live channel, movie or episode by content key. */

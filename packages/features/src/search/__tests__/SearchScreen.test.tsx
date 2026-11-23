@@ -96,10 +96,19 @@ function createAndroidSource() {
 }
 
 function createMockSearchCatalog(opts: {
-  searchImpl: (query: string, options?: SearchOptions) => Promise<SearchResults>;
+  searchImpl: (query: string, options?: SearchOptions) => Promise<Partial<SearchResults>>;
   progressRows?: readonly WatchProgressRow[];
 }) {
-  const search = jest.fn(opts.searchImpl);
+  const search = jest.fn(async (query: string, options?: SearchOptions): Promise<SearchResults> => {
+    const res = await opts.searchImpl(query, options);
+    return {
+      live: res.live ?? [],
+      epg: res.epg ?? [],
+      movies: res.movies ?? [],
+      series: res.series ?? [],
+      episodes: res.episodes ?? [],
+    };
+  });
   const listProgressByKeys = jest.fn(async (keys: readonly string[]) => {
     const allowed = new Set(keys);
     return (opts.progressRows ?? []).filter((r) => allowed.has(r.itemKey));
@@ -245,15 +254,15 @@ describe('SearchScreen', () => {
   });
 
   it('cancels stale slow search promises so older responses never overwrite newer results', async () => {
-    let resolveFirst!: (res: SearchResults) => void;
-    let resolveSecond!: (res: SearchResults) => void;
+    let resolveFirst!: (res: Partial<SearchResults>) => void;
+    let resolveSecond!: (res: Partial<SearchResults>) => void;
 
     const firstMovie = makeItem('movie', 0, { name: 'Alpha Old Result' });
     const secondMovie = makeItem('movie', 1, { name: 'Beta Fresh Result' });
 
     const { catalog, search } = createMockSearchCatalog({
       searchImpl: (q) =>
-        new Promise<SearchResults>((resolve) => {
+        new Promise<Partial<SearchResults>>((resolve) => {
           if (q === 'alpha') resolveFirst = resolve;
           else resolveSecond = resolve;
         }),

@@ -627,6 +627,23 @@ export const enMessages = {
     'Combine duplicate quality or language editions under one card',
   'detail.versionLabel': 'Version',
   'detail.versionCount': '{count} versions',
+  'search.scopeEpg': 'On Now & Guide',
+  'search.scopeEpisodes': 'Episodes',
+  'search.sectionEpg': 'On Now & Guide',
+  'search.sectionEpisodes': 'Episodes',
+  'search.suggestionsTitle': 'Quick picks',
+  'search.suggestionFavorites': 'Favorites',
+  'search.suggestionRecent': 'Recently watched',
+  'search.suggestionCategory': 'Category',
+  'search.clearHistory': 'Clear history',
+  'search.matchedInCast': 'Cast & crew',
+  'search.airingNow': 'On now',
+  'search.upcoming': 'Upcoming',
+  'search.episodeLabel': 'S{season} E{episode}',
+  'catalog.alphabetJumpLabel': 'Jump to letter',
+  'catalog.alphabetJumpToLetter': 'Jump to {letter}',
+  'live.sortDefault': 'Channel order',
+  'live.sortAlpha': 'A–Z',
 } as const;
 
 /** Valid message identifier across all supported locales. */

@@ -89,7 +89,15 @@ export function createLazyCatalog(load: () => Promise<CatalogService>): CatalogS
       return svc.itemDetail ? svc.itemDetail(itemKey) : null;
     },
     search: async (query, opts) =>
-      (await open()).search?.(query, opts) ?? { live: [], movies: [], series: [] },
+      (await open()).search?.(query, opts) ?? {
+        live: [],
+        epg: [],
+        movies: [],
+        series: [],
+        episodes: [],
+      },
+    searchSuggestions: async (options) => (await open()).searchSuggestions?.(options) ?? [],
+    alphabetIndex: async (input) => (await open()).alphabetIndex?.(input) ?? [],
     nowNext: async (channelKeys, nowMs) => (await open()).nowNext?.(channelKeys, nowMs) ?? [],
     epgWindow: async (channelKeys, fromMs, toMs) =>
       (await open()).epgWindow?.(channelKeys, fromMs, toMs) ?? {},

@@ -164,6 +164,8 @@ describe('createCatalogBridge', () => {
     const itemsP = bridge.items('c1', 0, 20);
     const detailP = bridge.itemDetail('m:s1:1');
     const searchP = bridge.search('horizon', { scope: 'movie', limit: 10 });
+    const suggestionsP = bridge.searchSuggestions?.({ limit: 8, sourceId: 's1' });
+    const alphabetP = bridge.alphabetIndex?.({ kind: 'movie', sourceId: 's1' });
     const seasonsP = bridge.seasons(10);
     const episodesP = bridge.episodes(10, 1);
     const streamP = bridge.resolveStream('m:s1:key');
@@ -221,6 +223,8 @@ describe('createCatalogBridge', () => {
           msg.call.method === 'listProgressByKeys' ||
           msg.call.method === 'listFavorites' ||
           msg.call.method === 'listFavoriteKeys' ||
+          msg.call.method === 'searchSuggestions' ||
+          msg.call.method === 'alphabetIndex' ||
           msg.call.method === 'nowNext'
             ? []
             : msg.call.method === 'getProgress' ||
@@ -229,7 +233,7 @@ describe('createCatalogBridge', () => {
                 msg.call.method === 'queryNextEpisode'
               ? null
               : msg.call.method === 'search'
-                ? { live: [], movies: [], series: [] }
+                ? { live: [], epg: [], movies: [], series: [], episodes: [] }
                 : msg.call.method === 'epgWindow'
                   ? {}
                   : ok(undefined);
@@ -239,7 +243,9 @@ describe('createCatalogBridge', () => {
     expect(await catsP).toEqual([]);
     expect(await itemsP).toEqual([]);
     expect(await detailP).toBeNull();
-    expect(await searchP).toEqual({ live: [], movies: [], series: [] });
+    expect(await searchP).toEqual({ live: [], epg: [], movies: [], series: [], episodes: [] });
+    expect(await suggestionsP).toEqual([]);
+    expect(await alphabetP).toEqual([]);
     expect((await seasonsP).ok).toBe(true);
     expect(await episodesP).toEqual([]);
     expect((await streamP).ok).toBe(true);
@@ -358,6 +364,12 @@ describe('createCatalogBridge', () => {
     await expect(bridge.itemDetail('bad\nkey')).rejects.toThrow(/source-format\/invalid-request/);
     await expect(bridge.search('bad\nquery')).rejects.toThrow(/source-format\/invalid-request/);
     await expect(bridge.search('ok', { limit: 61 })).rejects.toThrow(
+      /source-format\/invalid-request/,
+    );
+    await expect(bridge.searchSuggestions?.({ limit: 17 })).rejects.toThrow(
+      /source-format\/invalid-request/,
+    );
+    await expect(bridge.alphabetIndex?.({ kind: 'movie', sourceId: '' })).rejects.toThrow(
       /source-format\/invalid-request/,
     );
     await expect(bridge.listContinueWatching(101)).rejects.toThrow(

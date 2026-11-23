@@ -1,5 +1,7 @@
 import type {
   AddSourceInput,
+  AlphabetBucket,
+  AlphabetIndexInput,
   BrowseKind,
   CategoryQueryOptions,
   CategoryRow,
@@ -22,6 +24,8 @@ import type {
   SaveTrackPreferenceInput,
   SearchOptions,
   SearchResults,
+  SearchSuggestion,
+  SearchSuggestionsOptions,
   SeasonRow,
   SeriesUnplayedSummary,
   SourceRow,
@@ -34,6 +38,7 @@ import type {
 import type { ElvError, Result } from '@elv/domain';
 import {
   isAddSourceInput,
+  isAlphabetIndexInput,
   isBoundedString,
   isCategoryQueryOptions,
   isCleanKey,
@@ -58,6 +63,7 @@ import {
   isSaveTrackPreferenceInput,
   isSearchOptions,
   isSearchQuery,
+  isSearchSuggestionsOptions,
   isSeriesKeyList,
   isSourceIdList,
   isSourceSettingsPatch,
@@ -127,6 +133,8 @@ export type CatalogRpcMethodCall =
     }
   | { method: 'itemDetail'; itemKey: string }
   | { method: 'search'; query: string; opts?: SearchOptions }
+  | { method: 'searchSuggestions'; options?: SearchSuggestionsOptions }
+  | { method: 'alphabetIndex'; input: AlphabetIndexInput }
   | { method: 'nowNext'; channelKeys: readonly string[]; nowMs: number }
   | { method: 'epgWindow'; channelKeys: readonly string[]; fromMs: number; toMs: number }
   | { method: 'channelByNumber'; num: number; sourceId?: string }
@@ -210,6 +218,8 @@ export interface CatalogBridge {
   ): Promise<ItemRow[]>;
   itemDetail(itemKey: string): Promise<ItemDetailRow | null>;
   search(query: string, opts?: SearchOptions): Promise<SearchResults>;
+  searchSuggestions?(options?: SearchSuggestionsOptions): Promise<readonly SearchSuggestion[]>;
+  alphabetIndex?(input: AlphabetIndexInput): Promise<readonly AlphabetBucket[]>;
   nowNext(channelKeys: readonly string[], nowMs: number): Promise<NowNextEntry[]>;
   epgWindow(
     channelKeys: readonly string[],
@@ -312,6 +322,10 @@ function isRpcCall(x: unknown): x is CatalogRpcMethodCall {
       return isCleanKey(x['itemKey']);
     case 'search':
       return isSearchQuery(x['query']) && (x['opts'] === undefined || isSearchOptions(x['opts']));
+    case 'searchSuggestions':
+      return x['options'] === undefined || isSearchSuggestionsOptions(x['options']);
+    case 'alphabetIndex':
+      return isAlphabetIndexInput(x['input']);
     case 'nowNext':
       return isNowNextKeyList(x['channelKeys']) && isNonNegativeFinite(x['nowMs']);
     case 'epgWindow':

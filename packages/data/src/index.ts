@@ -9,6 +9,7 @@ export {
   encodeProgrammeFlags,
   normalizeEpgGenre,
 } from '@elv/sources';
+export * from './alphabet-index';
 export * from './catalog';
 export * from './category-selection';
 export * from './content-hash';

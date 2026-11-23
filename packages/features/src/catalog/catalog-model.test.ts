@@ -2,6 +2,7 @@ import type { ItemRow, WatchProgressRow } from '@elv/data';
 import { describe, expect, it } from 'vitest';
 import { createPagedListSource } from '../shared';
 import {
+  ALPHABET_RAIL_MIN_ITEMS,
   buildCatalogNavRows,
   CATEGORY_LOAD_BATCH,
   chunkRowItems,
@@ -16,6 +17,8 @@ import {
   INITIAL_VISIBLE_CATEGORIES,
   MAX_CONCURRENT_RAIL_QUERIES,
   RAIL_ITEM_LIMIT,
+  resolveActiveAlphabetLetter,
+  stepAlphabetRailLetter,
 } from './catalog-model';
 
 function makeItem(index: number, kind: 'movie' | 'series' = 'movie'): ItemRow {
@@ -287,5 +290,36 @@ describe('buildCatalogNavRows', () => {
       { id: 'catChips', count: 4 },
       { id: 'gridBack', count: 1 },
     ]);
+  });
+});
+
+describe('resolveActiveAlphabetLetter & stepAlphabetRailLetter (#407)', () => {
+  const buckets = [
+    { letter: '#', offset: 0, count: 5 },
+    { letter: 'A', offset: 5, count: 12 },
+    { letter: 'B', offset: 17, count: 0 },
+    { letter: 'M', offset: 17, count: 25 },
+    { letter: 'Z', offset: 42, count: 8 },
+  ] as const;
+
+  it('resolves active letter by offset and steps across available buckets', () => {
+    expect(ALPHABET_RAIL_MIN_ITEMS).toBe(40);
+    expect(resolveActiveAlphabetLetter([], 0)).toBeNull();
+    expect(resolveActiveAlphabetLetter(buckets, 0)).toBe('#');
+    expect(resolveActiveAlphabetLetter(buckets, 4)).toBe('#');
+    expect(resolveActiveAlphabetLetter(buckets, 5)).toBe('A');
+    expect(resolveActiveAlphabetLetter(buckets, 16)).toBe('A');
+    expect(resolveActiveAlphabetLetter(buckets, 17)).toBe('M');
+    expect(resolveActiveAlphabetLetter(buckets, 99)).toBe('Z');
+
+    expect(stepAlphabetRailLetter([], 'A', 'down')).toBeNull();
+    expect(stepAlphabetRailLetter(buckets, null, 'down')).toBe('#');
+    expect(stepAlphabetRailLetter(buckets, '#', 'up')).toBe('#');
+    expect(stepAlphabetRailLetter(buckets, '#', 'down')).toBe('A');
+    // Skips B (count === 0) and lands on M
+    expect(stepAlphabetRailLetter(buckets, 'A', 'down')).toBe('M');
+    expect(stepAlphabetRailLetter(buckets, 'M', 'down')).toBe('Z');
+    expect(stepAlphabetRailLetter(buckets, 'Z', 'down')).toBe('Z');
+    expect(stepAlphabetRailLetter(buckets, 'Z', 'up')).toBe('M');
   });
 });

@@ -48,6 +48,8 @@ describe('createWorkbenchCatalog', () => {
       expect(detail).toMatchObject({ ...movie });
       expect(typeof detail?.plot).toBe('string');
       expect((detail?.plot ?? '').trim().length).toBeGreaterThan(40);
+      expect(typeof detail?.cast).toBe('string');
+      expect(typeof detail?.director).toBe('string');
     }
 
     const seriesCats = await catalog.categories(srcId, 'series');
@@ -58,6 +60,8 @@ describe('createWorkbenchCatalog', () => {
       expect(detail).toMatchObject({ ...show });
       expect(typeof detail?.plot).toBe('string');
       expect((detail?.plot ?? '').trim().length).toBeGreaterThan(40);
+      expect(typeof detail?.cast).toBe('string');
+      expect(typeof detail?.director).toBe('string');
     }
 
     const liveCats = await catalog.categories(srcId, 'live');
@@ -159,28 +163,61 @@ describe('createWorkbenchCatalog', () => {
     expect((await catalog.listFavoriteKeys?.())?.includes('wb:temp:1')).toBe(false);
   });
 
-  it('supports folded prefix search across live, movies, and series with scope, sourceId, and limit filtering', async () => {
+  it('supports folded prefix search across live, epg, movies, series, and episodes with credits attribution, scope, sourceId, and limit filtering', async () => {
     const catalog = createWorkbenchCatalog();
+    const nowMs = Date.UTC(2026, 10, 21, 14, 20, 0);
 
     // Empty / punctuation-only returns empty sets
-    expect(await catalog.search?.('   ')).toEqual({ live: [], movies: [], series: [] });
-    expect(await catalog.search?.('meridian', { limit: 0 })).toEqual({
+    expect(await catalog.search?.('   ')).toEqual({
       live: [],
+      epg: [],
       movies: [],
       series: [],
+      episodes: [],
+    });
+    expect(await catalog.search?.('meridian', { limit: 0 })).toEqual({
+      live: [],
+      epg: [],
+      movies: [],
+      series: [],
+      episodes: [],
     });
 
-    // Cross-kind search ("Meridian" appears in live 'Meridian Business' and movie 'Glass Meridian')
-    const cross = await catalog.search?.('MERİDİAN');
+    // Cross-kind search ("Meridian" appears in live 'Meridian Business', EPG 'Glass Meridian', and movie 'Glass Meridian')
+    const cross = await catalog.search?.('MERİDİAN', { nowMs });
     expect(cross?.live.map((i) => i.name)).toEqual(['Meridian Business']);
+    expect(cross?.epg.length).toBeGreaterThan(0);
     expect(cross?.movies.map((i) => i.name)).toEqual(['Glass Meridian']);
+    expect(cross?.movies[0]?.matchedBy).toBe('title');
     expect(cross?.series).toEqual([]);
+
+    // Cast & director credit matching (#397)
+    const castHit = await catalog.search?.('Defne Yıldız', { scope: 'movie' });
+    expect(castHit?.movies.map((m) => ({ name: m.name, matchedBy: m.matchedBy }))).toEqual([
+      { name: 'Orbital Nine', matchedBy: 'cast' },
+    ]);
+    const directorHit = await catalog.search?.('Aylin Şahin', { scope: 'movie' });
+    expect(directorHit?.movies.map((m) => ({ name: m.name, matchedBy: m.matchedBy }))).toEqual([
+      { name: 'Orbital Nine', matchedBy: 'director' },
+    ]);
 
     // Scope filtering
     const movieOnly = await catalog.search?.('merid', { scope: 'movie' });
     expect(movieOnly?.live).toEqual([]);
+    expect(movieOnly?.epg).toEqual([]);
     expect(movieOnly?.movies.map((i) => i.name)).toEqual(['Glass Meridian']);
     expect(movieOnly?.series).toEqual([]);
+    expect(movieOnly?.episodes).toEqual([]);
+
+    const epgOnly = await catalog.search?.('Radar', { scope: 'epg', nowMs });
+    expect(epgOnly?.epg.length).toBeGreaterThan(0);
+    expect(epgOnly?.epg[0]?.title).toContain('Radar');
+    expect(epgOnly?.live).toEqual([]);
+
+    const episodeOnly = await catalog.search?.('Night Crossing', { scope: 'episode' });
+    expect(episodeOnly?.episodes.length).toBeGreaterThan(0);
+    expect(episodeOnly?.episodes[0]?.title).toBe('Night Crossing');
+    expect(episodeOnly?.movies).toEqual([]);
 
     const seriesOnly = await catalog.search?.('north sig', { scope: 'series' });
     expect(seriesOnly?.series.map((i) => i.name)).toEqual(['Northern Signal']);
@@ -190,9 +227,38 @@ describe('createWorkbenchCatalog', () => {
     expect(limited?.live.length).toBeLessThanOrEqual(1);
     expect(await catalog.search?.('meridian', { sourceId: 'nonexistent-source' })).toEqual({
       live: [],
+      epg: [],
       movies: [],
       series: [],
+      episodes: [],
     });
+  });
+
+  it('provides searchSuggestions and alphabetIndex buckets aligned with alphabetical sorting (#397, #407)', async () => {
+    const catalog = createWorkbenchCatalog();
+    const suggestions = await catalog.searchSuggestions?.({ limit: 8 });
+    expect(suggestions?.length).toBe(8);
+    expect(suggestions?.some((s) => s.kind === 'favorite' && s.label === 'Orbital Nine')).toBe(
+      true,
+    );
+    expect(suggestions?.some((s) => s.kind === 'recent')).toBe(true);
+    expect(suggestions?.some((s) => s.kind === 'category')).toBe(true);
+    expect(await catalog.searchSuggestions?.({ limit: 0 })).toEqual([]);
+
+    const movieBuckets = await catalog.alphabetIndex?.({ kind: 'movie' });
+    expect(movieBuckets).toEqual([
+      { letter: 'E', offset: 0, count: 1 },
+      { letter: 'G', offset: 1, count: 1 },
+      { letter: 'H', offset: 2, count: 1 },
+      { letter: 'O', offset: 3, count: 1 },
+      { letter: 'P', offset: 4, count: 1 },
+      { letter: 'S', offset: 5, count: 1 },
+      { letter: 'W', offset: 6, count: 1 },
+    ]);
+    const sortedMovies = await catalog.allSourcesItems?.('movie', 0, 50, undefined, {
+      sortBy: 'alpha',
+    });
+    expect(sortedMovies?.map((m) => m.name.charAt(0))).toEqual(['E', 'G', 'H', 'O', 'P', 'S', 'W']);
   });
 
   it('provides synthetic multi-hour EPG schedules for all 10 workbench live channels, channelByNumber, and importGuide', async () => {

@@ -3,6 +3,7 @@ import { reapOrphanedRuns } from './runs';
 import { EXPECTED_FTS_TABLES, EXPECTED_TABLE_COLUMNS, MIGRATIONS, OPEN_PRAGMAS } from './schema';
 import { backfillSortTitles, type SortTitleTable } from './schema-v8';
 import { backfillWaveC3Metadata } from './schema-v11';
+import { backfillProgrammesFtsIfEmpty, backfillWaveC4aMetadata } from './schema-v12';
 
 /** Schema version this build writes and understands (`PRAGMA user_version`). */
 export const SCHEMA_VERSION = MIGRATIONS.length;
@@ -13,6 +14,7 @@ async function verifyAndHealSchema(db: SqlDriver): Promise<Result<void>> {
   const repairs: string[] = [];
   const repairedSortTables: SortTitleTable[] = [];
   let needsWaveC3Backfill = false;
+  let needsWaveC4aBackfill = false;
   for (const [table, expected] of Object.entries(EXPECTED_TABLE_COLUMNS)) {
     const cols = await db.all<{ name: string }>(`PRAGMA table_info(${table})`);
     if (cols.length === 0) {
@@ -32,6 +34,13 @@ async function verifyAndHealSchema(db: SqlDriver): Promise<Result<void>> {
         ) {
           needsWaveC3Backfill = true;
         }
+        if (
+          (table === 'episodes' && column.name === 'title_fold') ||
+          ((table === 'movies' || table === 'series') &&
+            (column.name === 'cast_fold' || column.name === 'director_fold'))
+        ) {
+          needsWaveC4aBackfill = true;
+        }
       }
     }
   }
@@ -44,7 +53,15 @@ async function verifyAndHealSchema(db: SqlDriver): Promise<Result<void>> {
       return err(elvError('storage', 'schema-corrupt', `missing table ${fts}`));
     }
   }
-  if (repairs.length > 0) {
+  const hasProgs = await db.all<{ one: number }>('SELECT 1 AS one FROM programmes LIMIT 1');
+  let needsProgrammesFtsRepopulate = false;
+  if (hasProgs.length > 0) {
+    const hasProgsFts = await db.all<{ one: number }>(
+      'SELECT 1 AS one FROM programmes_fts LIMIT 1',
+    );
+    needsProgrammesFtsRepopulate = hasProgsFts.length === 0;
+  }
+  if (repairs.length > 0 || needsProgrammesFtsRepopulate) {
     await db.transaction(async (tx) => {
       for (const sql of repairs) await tx.exec(sql);
       if (repairedSortTables.length > 0) {
@@ -66,6 +83,11 @@ async function verifyAndHealSchema(db: SqlDriver): Promise<Result<void>> {
           'CREATE INDEX IF NOT EXISTS idx_watch_progress_vgroup ON watch_progress (profile_id, version_group_key)',
         );
         await backfillWaveC3Metadata(tx);
+      }
+      if (needsWaveC4aBackfill) {
+        await backfillWaveC4aMetadata(tx);
+      } else if (needsProgrammesFtsRepopulate) {
+        await backfillProgrammesFtsIfEmpty(tx, true);
       }
     });
   }
@@ -98,6 +120,7 @@ export async function openCatalog(
           await tx.exec(MIGRATIONS[v] ?? '');
           if (v === 7) await backfillSortTitles(tx);
           if (v === 10) await backfillWaveC3Metadata(tx);
+          if (v === 11) await backfillWaveC4aMetadata(tx);
           await tx.exec(`PRAGMA user_version = ${v + 1}`);
         }
       });

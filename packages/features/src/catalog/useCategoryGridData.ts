@@ -1,4 +1,5 @@
 import type {
+  AlphabetBucket,
   CatalogService,
   ItemRow,
   ItemSortOrder,
@@ -14,7 +15,9 @@ import {
   useCatalogUiCache,
   useSeriesUnplayedCounts,
 } from '../shared';
-import { GRID_MAX_PAGES, GRID_PAGE_SIZE } from './catalog-model';
+import { ALPHABET_RAIL_MIN_ITEMS, GRID_MAX_PAGES, GRID_PAGE_SIZE } from './catalog-model';
+
+const EMPTY_BUCKETS: readonly AlphabetBucket[] = [];
 
 /** Options for {@link useCategoryGridData}. */
 export interface UseCategoryGridDataOptions {
@@ -36,15 +39,17 @@ export interface CategoryGridDataState {
   readonly progressResetToken: number;
   readonly progressByKey: ReadonlyMap<string, WatchProgressRow>;
   readonly unplayedBySeriesKey: ReadonlyMap<string, SeriesUnplayedSummary>;
+  readonly alphabetBuckets: readonly AlphabetBucket[];
   readonly itemCount: number;
   readonly getItemAt: (index: number) => ItemRow | undefined;
   readonly hydrateProgressRange: (startRow: number, endRow: number) => void;
 }
 
 /**
- * Manages O(1)-memory `PagedListSource` pagination and deduped visible-window watch-progress
- * hydration for {@link CategoryGridView}. Hydrates page 0 synchronously from `CatalogUiCache` and
- * keeps previously visible rows rendered while switching to an uncached category (`#445`).
+ * Manages O(1)-memory `PagedListSource` pagination, alphabetical `#`/`A–Z` offset buckets (`#407`),
+ * and deduped visible-window watch-progress hydration for {@link CategoryGridView}. Hydrates page 0
+ * synchronously from `CatalogUiCache` and keeps previously visible rows rendered while switching to
+ * an uncached category (`#445`).
  */
 export function useCategoryGridData({
   kind = 'movie',
@@ -131,6 +136,10 @@ export function useCategoryGridData({
     () => new Map(),
   );
   const [visibleSeriesKeys, setVisibleSeriesKeys] = useState<readonly string[]>(() => []);
+  const [alphabetBuckets, setAlphabetBuckets] = useState<readonly AlphabetBucket[]>(EMPTY_BUCKETS);
+
+  const bucketsCacheRef = useRef<Map<string, readonly AlphabetBucket[]>>(new Map());
+  const alphabetGenRef = useRef(0);
 
   const pagedSourceRef = useRef<PagedListSource<ItemRow> | null>(
     initialSourceRef.current?.source ?? null,
@@ -156,6 +165,61 @@ export function useCategoryGridData({
       pagedSourceRef.current = null;
     };
   }, []);
+
+  // Load A–Z alphabet prefix buckets when sortBy === 'alpha' and total >= 40 (#407).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken refreshes cached alphabet buckets
+  useEffect(() => {
+    const gen = ++alphabetGenRef.current;
+    const catId = category.row.id;
+    const sourceId = category.row.sourceId;
+    const count = category.row.itemCount;
+    const cacheKey = `${catId}|${effectiveGroupVersions ? 'gv' : 'raw'}`;
+
+    if (sortBy !== 'alpha' || count < ALPHABET_RAIL_MIN_ITEMS || !catalog.alphabetIndex) {
+      setAlphabetBuckets(EMPTY_BUCKETS);
+      return;
+    }
+
+    const cached = bucketsCacheRef.current.get(cacheKey);
+    if (cached !== undefined) {
+      setAlphabetBuckets(cached);
+    } else {
+      setAlphabetBuckets(EMPTY_BUCKETS);
+    }
+
+    void catalog
+      .alphabetIndex({
+        sourceId,
+        kind,
+        categoryId: catId,
+        ...(effectiveGroupVersions ? { groupVersions: true } : {}),
+      })
+      .then((rows) => {
+        if (gen !== alphabetGenRef.current) return;
+        const resolved = rows ?? EMPTY_BUCKETS;
+        bucketsCacheRef.current.set(cacheKey, resolved);
+        setAlphabetBuckets(resolved);
+      })
+      .catch(() => {
+        if (gen !== alphabetGenRef.current) return;
+        if (!bucketsCacheRef.current.has(cacheKey)) {
+          setAlphabetBuckets(EMPTY_BUCKETS);
+        }
+      });
+
+    return () => {
+      alphabetGenRef.current += 1;
+    };
+  }, [
+    catalog,
+    category.row.id,
+    category.row.itemCount,
+    category.row.sourceId,
+    effectiveGroupVersions,
+    kind,
+    refreshToken,
+    sortBy,
+  ]);
 
   useEffect(() => {
     let alive = true;
@@ -338,11 +402,13 @@ export function useCategoryGridData({
       progressResetToken,
       progressByKey,
       unplayedBySeriesKey,
+      alphabetBuckets,
       itemCount,
       getItemAt,
       hydrateProgressRange,
     }),
     [
+      alphabetBuckets,
       getItemAt,
       hydrateProgressRange,
       itemCount,

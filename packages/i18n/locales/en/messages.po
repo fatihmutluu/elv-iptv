@@ -1766,3 +1766,54 @@ msgstr "Version"
 
 msgid "detail.versionCount"
 msgstr "{count} versions"
+
+msgid "search.scopeEpg"
+msgstr "On Now & Guide"
+
+msgid "search.scopeEpisodes"
+msgstr "Episodes"
+
+msgid "search.sectionEpg"
+msgstr "On Now & Guide"
+
+msgid "search.sectionEpisodes"
+msgstr "Episodes"
+
+msgid "search.suggestionsTitle"
+msgstr "Quick picks"
+
+msgid "search.suggestionFavorites"
+msgstr "Favorites"
+
+msgid "search.suggestionRecent"
+msgstr "Recently watched"
+
+msgid "search.suggestionCategory"
+msgstr "Category"
+
+msgid "search.clearHistory"
+msgstr "Clear history"
+
+msgid "search.matchedInCast"
+msgstr "Cast & crew"
+
+msgid "search.airingNow"
+msgstr "On now"
+
+msgid "search.upcoming"
+msgstr "Upcoming"
+
+msgid "search.episodeLabel"
+msgstr "S{season} E{episode}"
+
+msgid "catalog.alphabetJumpLabel"
+msgstr "Jump to letter"
+
+msgid "catalog.alphabetJumpToLetter"
+msgstr "Jump to {letter}"
+
+msgid "live.sortDefault"
+msgstr "Channel order"
+
+msgid "live.sortAlpha"
+msgstr "A–Z"

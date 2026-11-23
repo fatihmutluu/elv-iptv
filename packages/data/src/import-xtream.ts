@@ -9,6 +9,7 @@ import {
 } from '@elv/sources';
 import { allowlistForKind, reconcileCategorySelection } from './category-selection';
 import { fingerprintXtreamCredentials } from './credential-fingerprint';
+import { foldText } from './fold';
 import { importM3u } from './import-m3u';
 import {
   createMonotonicProgressMeter,
@@ -462,6 +463,19 @@ export async function loadSeriesEpisodes(
       if (!(await sourceExists(tx, sourceId))) return 'no-source';
       const current = (await lookup(tx))[0];
       if (current?.provider_id == null) return 'no-series';
+      if (info.cast !== undefined || info.director !== undefined) {
+        const castFold = info.cast !== undefined ? foldText(info.cast) : null;
+        const directorFold = info.director !== undefined ? foldText(info.director) : null;
+        await tx.run(
+          `UPDATE series
+              SET cast_text = COALESCE(?, cast_text),
+                  director_text = COALESCE(?, director_text),
+                  cast_fold = COALESCE(?, cast_fold),
+                  director_fold = COALESCE(?, director_fold)
+            WHERE source_id = ? AND key = ?`,
+          [info.cast ?? null, info.director ?? null, castFold, directorFold, sourceId, seriesKey],
+        );
+      }
       const previous = await tx.all<{ key: string }>(
         'SELECT key FROM episodes WHERE source_id = ? AND series_key = ?',
         [sourceId, seriesKey],

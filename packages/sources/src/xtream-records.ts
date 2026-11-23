@@ -61,6 +61,31 @@ function artworkUrl(value: unknown): string | undefined {
   return text === undefined ? undefined : sanitizeArtworkUrl(text).url;
 }
 
+const MAX_CAST_CHARS = 512;
+const MAX_DIRECTOR_CHARS = 256;
+
+function creditText(maxChars: number, ...candidates: unknown[]): string | undefined {
+  for (const candidate of candidates) {
+    let text: string | undefined;
+    if (typeof candidate === 'string') {
+      text = toText(candidate);
+    } else if (Array.isArray(candidate)) {
+      const parts: string[] = [];
+      for (const item of candidate) {
+        if (typeof item === 'string') {
+          const part = toText(item);
+          if (part !== undefined) parts.push(part);
+        }
+      }
+      if (parts.length > 0) text = parts.join(', ');
+    }
+    if (text !== undefined) {
+      return text.length > maxChars ? text.slice(0, maxChars).trimEnd() : text;
+    }
+  }
+  return undefined;
+}
+
 /** Maps `user_info`/`server_info`; the caller has already checked `auth` and `status`. */
 export function toAccount(userInfo: Raw, serverInfo: Raw, status: string): XtreamAccount {
   const account: XtreamAccount = {
@@ -129,6 +154,8 @@ export function toMovies(rows: Raw[]): XtreamMovie[] {
     put(movie, 'icon', artworkUrl(r.stream_icon));
     put(movie, 'rating', toNumber(r.rating));
     put(movie, 'year', yearOf(r.year));
+    put(movie, 'cast', creditText(MAX_CAST_CHARS, r.cast, r.actors));
+    put(movie, 'director', creditText(MAX_DIRECTOR_CHARS, r.director));
     put(movie, 'added', ms(r.added));
     out.push(movie);
   }
@@ -146,6 +173,8 @@ export function toSeries(rows: Raw[]): XtreamSeries[] {
     put(series, 'plot', toText(r.plot));
     put(series, 'rating', toNumber(r.rating));
     put(series, 'year', yearOf(r.year, r.release_date, r.releaseDate));
+    put(series, 'cast', creditText(MAX_CAST_CHARS, r.cast, r.actors));
+    put(series, 'director', creditText(MAX_DIRECTOR_CHARS, r.director));
     put(series, 'lastModified', ms(r.last_modified));
     out.push(series);
   }
@@ -208,18 +237,41 @@ export function toSeriesInfo(raw: Raw): XtreamSeriesInfo {
     }
   }
   episodes.sort((a, b) => a.season - b.season || a.episode - b.episode);
-  return { seasons: [...seasons].sort((a, b) => a - b), episodes };
+  const info = asRaw(raw.info);
+  const seriesInfo: XtreamSeriesInfo = { seasons: [...seasons].sort((a, b) => a - b), episodes };
+  put(seriesInfo, 'cast', creditText(MAX_CAST_CHARS, info.cast, info.actors, raw.cast, raw.actors));
+  put(seriesInfo, 'director', creditText(MAX_DIRECTOR_CHARS, info.director, raw.director));
+  return seriesInfo;
 }
 
 /** Maps `get_vod_info`. */
 export function toVodInfo(raw: Raw): XtreamVodInfo {
   const info = asRaw(raw.info);
+  const movieData = asRaw(raw.movie_data);
   const vod: XtreamVodInfo = {
-    extension: toText(asRaw(raw.movie_data).container_extension) ?? 'mp4',
+    extension: toText(movieData.container_extension) ?? 'mp4',
   };
   put(vod, 'durationSec', toNumber(info.duration_secs));
   put(vod, 'plot', toText(info.plot));
   put(vod, 'year', yearOf(info.year, info.releasedate));
+  put(
+    vod,
+    'cast',
+    creditText(
+      MAX_CAST_CHARS,
+      info.cast,
+      info.actors,
+      movieData.cast,
+      movieData.actors,
+      raw.cast,
+      raw.actors,
+    ),
+  );
+  put(
+    vod,
+    'director',
+    creditText(MAX_DIRECTOR_CHARS, info.director, movieData.director, raw.director),
+  );
   return vod;
 }
 

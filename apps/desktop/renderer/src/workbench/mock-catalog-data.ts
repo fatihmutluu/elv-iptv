@@ -146,6 +146,52 @@ export const WORKBENCH_PLOTS: Readonly<Record<string, string>> = {
     'Inside an underground transit hub that runs through the small hours, dispatchers, conductors, and night-shift botanists keep a sprawling coastal metropolis moving until dawn.',
 };
 
+/** Synthetic cast and director credits for UI Workbench movies and series (`#397`). */
+export const WORKBENCH_CREDITS: Readonly<
+  Record<string, { readonly cast: string; readonly director: string }>
+> = {
+  'wb:movie:401': {
+    cast: 'Elif Karaca, Jonas Lindqvist, Mira Solis',
+    director: 'Kaan Demir',
+  },
+  'wb:movie:402': {
+    cast: 'Soren Hald, Defne Yıldız, Tarek Mansour',
+    director: 'Aylin Şahin',
+  },
+  'wb:movie:403': {
+    cast: 'Nadia Vance, Emre Çelik',
+    director: 'Mateo Serra',
+  },
+  'wb:movie:404': {
+    cast: 'Astrid Holm, Kerem Aydın',
+    director: 'Clara Vester',
+  },
+  'wb:movie:501': {
+    cast: 'Hakan Özdemir, Freja Lind',
+    director: 'Selin Kaya',
+  },
+  'wb:movie:502': {
+    cast: 'Lukas Brenner, Zeynep Arslan',
+    director: 'Tomasz Kowalski',
+  },
+  'wb:movie:503': {
+    cast: 'Mei Lin, Caner Tekin',
+    director: 'Hana Morita',
+  },
+  'wb:series:601': {
+    cast: 'Ingrid Solberg, Barış Korkmaz',
+    director: 'Henrik Nyman',
+  },
+  'wb:series:602': {
+    cast: 'Arthur Pendelton, Derya Aksoy',
+    director: 'Claire Beaumont',
+  },
+  'wb:series:603': {
+    cast: 'Kenji Sato,Sibel Kurt',
+    director: 'Mert Alkan',
+  },
+};
+
 /** Generates synthetic episodes for one season of a workbench series. */
 export const makeWorkbenchEpisodes = (seriesId: number, season: number): EpisodeRow[] =>
   ['Opening Signal', 'Night Crossing', 'Static Line'].map((title, idx) => ({

@@ -14,9 +14,12 @@ import {
 } from '@elv/data';
 import { elvError, err, ok, type SqlDriver } from '@elv/domain';
 import {
+  isAlphabetIndexInput,
   isCategoryQueryOptions,
   isListItemsOptions,
   isOptionalProfileId,
+  isSearchOptions,
+  isSearchSuggestionsOptions,
   isSeriesKeyList,
   isSourceIdList,
   isSourceSettingsPatch,
@@ -40,6 +43,8 @@ export const ALLOWED_RPC_METHODS: ReadonlySet<string> = new Set([
   'allSourcesItems',
   'itemDetail',
   'search',
+  'searchSuggestions',
+  'alphabetIndex',
   'nowNext',
   'epgWindow',
   'channelByNumber',
@@ -178,14 +183,29 @@ export async function dispatchWorkbenchRpc(
     }
     case 'itemDetail':
       return service.itemDetail?.(String(args[0] ?? '')) ?? null;
-    case 'search':
+    case 'search': {
+      const opts: SearchOptions | undefined = isSearchOptions(args[1]) ? args[1] : undefined;
       return (
-        service.search?.(String(args[0] ?? ''), args[1] as SearchOptions | undefined) ?? {
+        service.search?.(String(args[0] ?? ''), opts) ?? {
           live: [],
+          epg: [],
           movies: [],
           series: [],
+          episodes: [],
         }
       );
+    }
+    case 'searchSuggestions': {
+      if (args[0] !== undefined && args[0] !== null && !isSearchSuggestionsOptions(args[0])) {
+        return [];
+      }
+      const options = isSearchSuggestionsOptions(args[0]) ? args[0] : undefined;
+      return service.searchSuggestions?.(options) ?? [];
+    }
+    case 'alphabetIndex': {
+      if (!isAlphabetIndexInput(args[0])) return [];
+      return service.alphabetIndex?.(args[0]) ?? [];
+    }
     case 'nowNext':
       return service.nowNext?.(args[0] as readonly string[], Number(args[1] ?? 0)) ?? [];
     case 'epgWindow':

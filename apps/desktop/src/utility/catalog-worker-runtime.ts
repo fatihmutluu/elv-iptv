@@ -417,7 +417,11 @@ export function createCatalogWorkerRuntime(deps: CatalogWorkerRuntimeDeps): () =
       case 'search':
         return service.search
           ? service.search(call.query, call.opts)
-          : { live: [], movies: [], series: [] };
+          : { live: [], epg: [], movies: [], series: [], episodes: [] };
+      case 'searchSuggestions':
+        return service.searchSuggestions ? service.searchSuggestions(call.options) : [];
+      case 'alphabetIndex':
+        return service.alphabetIndex ? service.alphabetIndex(call.input) : [];
       case 'nowNext':
         return service.nowNext ? service.nowNext(call.channelKeys, call.nowMs) : [];
       case 'epgWindow':

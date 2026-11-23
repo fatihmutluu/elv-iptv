@@ -1,4 +1,10 @@
-import type { CatalogService, ItemRow, SearchScope } from '@elv/data';
+import type {
+  CatalogService,
+  ItemRow,
+  SearchEpisodeHit,
+  SearchProgrammeHit,
+  SearchScope,
+} from '@elv/data';
 import { TextEntryBoundary, useI18n, useTheme, useViewport } from '@elv/ui-kit';
 import {
   type ComponentRef,
@@ -16,16 +22,20 @@ import {
   SearchEmptyPanel,
   SearchHeaderBar,
   SearchIdlePanel,
+  SearchProgrammeDetailOverlay,
   SearchTvKeyBridge,
 } from './SearchChrome';
 import { SearchResultsSection } from './SearchResultsSection';
 import {
+  buildEpgSearchPlayTarget,
+  buildEpisodeSearchPlayTarget,
   buildLiveSearchPlayTarget,
   buildSearchNavRows,
   countScopeResults,
   SEARCH_SCOPES,
   type SearchFocusPosition,
   type SearchNavRowId,
+  type SearchResultSectionId,
   sanitizeSearchQuery,
 } from './search-model';
 import { useCatalogSearch } from './useCatalogSearch';
@@ -101,14 +111,15 @@ function SearchScreenBody({
   });
 
   const [inputFocused, setInputFocused] = useState(false);
+  const [selectedEpgProgramme, setSelectedEpgProgramme] = useState<SearchProgrammeHit | null>(null);
   const scrollViewRef = useRef<ComponentRef<typeof ScrollView> | null>(null);
   const resultsContainerYRef = useRef(0);
-  const sectionYRef = useRef<Map<'live' | 'movies' | 'series', number>>(new Map());
+  const sectionYRef = useRef<Map<SearchResultSectionId, number>>(new Map());
 
   const recordResultsContainerY = useCallback((y: number) => {
     resultsContainerYRef.current = y;
   }, []);
-  const recordSectionY = useCallback((section: 'live' | 'movies' | 'series', y: number) => {
+  const recordSectionY = useCallback((section: SearchResultSectionId, y: number) => {
     sectionYRef.current.set(section, y);
   }, []);
 
@@ -117,6 +128,36 @@ function SearchScreenBody({
       onPlay(buildLiveSearchPlayTarget(item));
     },
     [onPlay],
+  );
+
+  const handleTuneEpgProgramme = useCallback(
+    (programme: SearchProgrammeHit) => {
+      onPlay(buildEpgSearchPlayTarget(programme));
+    },
+    [onPlay],
+  );
+
+  const handleSelectEpg = useCallback(
+    (programme: SearchProgrammeHit) => {
+      if (programme.isLiveNow) {
+        onPlay(buildEpgSearchPlayTarget(programme));
+      } else {
+        setSelectedEpgProgramme(programme);
+      }
+    },
+    [onPlay],
+  );
+
+  const handleSelectEpisode = useCallback(
+    (episode: SearchEpisodeHit) => {
+      const progress = search.progressByKey.get(episode.itemKey);
+      const episodeLabel = i18n.t('search.episodeLabel', {
+        season: episode.season,
+        episode: episode.episode,
+      });
+      onPlay(buildEpisodeSearchPlayTarget(episode, progress, episodeLabel));
+    },
+    [i18n, onPlay, search.progressByKey],
   );
 
   const sanitizedQuery = sanitizeSearchQuery(search.query);
@@ -133,11 +174,16 @@ function SearchScreenBody({
         hasClearButton: search.query.length > 0,
         scope: search.scope,
         recentCount: search.recentSearches.length,
+        suggestionCount: search.suggestions.length,
         liveCount: search.results.live.length,
+        epgCount: search.results.epg.length,
         movieCount: search.results.movies.length,
         seriesCount: search.results.series.length,
+        episodeCount: search.results.episodes.length,
         liveColumns: wideColumns,
+        epgColumns: wideColumns,
         vodColumns: layout.gridColumns,
+        episodeColumns: wideColumns,
         searching: search.searching,
         hasSearched: search.hasSearched,
       }),
@@ -147,11 +193,14 @@ function SearchScreenBody({
       search.hasSearched,
       search.query.length,
       search.recentSearches.length,
+      search.results.epg.length,
+      search.results.episodes.length,
       search.results.live.length,
       search.results.movies.length,
       search.results.series.length,
       search.scope,
       search.searching,
+      search.suggestions.length,
       wideColumns,
     ],
   );
@@ -176,9 +225,19 @@ function SearchScreenBody({
         if (term) search.selectRecent(term);
         return;
       }
+      if (rowId === 'suggestions') {
+        const suggestion = search.suggestions[col];
+        if (suggestion) search.selectSuggestion(suggestion);
+        return;
+      }
       if (rowId === 'live') {
         const item = search.results.live[col];
         if (item) handlePlayLive(item);
+        return;
+      }
+      if (rowId === 'epg') {
+        const hit = search.results.epg[col];
+        if (hit) handleSelectEpg(hit);
         return;
       }
       if (rowId === 'movies') {
@@ -193,23 +252,45 @@ function SearchScreenBody({
         if (target) onOpenDetail(target);
         return;
       }
+      if (rowId === 'episodes') {
+        const hit = search.results.episodes[col];
+        if (hit) handleSelectEpisode(hit);
+        return;
+      }
       if (rowId === 'clearEmpty') {
         search.clearSearch();
       }
     },
-    [handlePlayLive, onOpenDetail, search],
+    [handlePlayLive, handleSelectEpg, handleSelectEpisode, onOpenDetail, search],
   );
 
   const handleFocusPosition = useCallback(
     (pos: SearchFocusPosition) => {
-      if (pos.rowId === 'input' || pos.rowId === 'scopes' || pos.rowId === 'recent') {
+      if (
+        pos.rowId === 'input' ||
+        pos.rowId === 'scopes' ||
+        pos.rowId === 'recent' ||
+        pos.rowId === 'suggestions'
+      ) {
         scrollViewRef.current?.scrollTo({ y: 0, animated: !theme.reduceMotion });
         return;
       }
-      if (pos.rowId === 'live' || pos.rowId === 'movies' || pos.rowId === 'series') {
+      if (
+        pos.rowId === 'live' ||
+        pos.rowId === 'epg' ||
+        pos.rowId === 'movies' ||
+        pos.rowId === 'series' ||
+        pos.rowId === 'episodes'
+      ) {
         const sectionY = sectionYRef.current.get(pos.rowId) ?? 0;
-        const cols = pos.rowId === 'live' ? wideColumns : layout.gridColumns;
-        const rowStride = pos.rowId === 'live' ? wideRowHeight : layout.gridRowHeight;
+        const isVodGrid = pos.rowId === 'movies' || pos.rowId === 'series';
+        const cols = isVodGrid ? layout.gridColumns : wideColumns;
+        const rowStride =
+          pos.rowId === 'epg' || pos.rowId === 'episodes'
+            ? 96 + layout.gridGap
+            : isVodGrid
+              ? layout.gridRowHeight
+              : wideRowHeight;
         const visualRow = Math.floor(pos.col / Math.max(1, cols));
         const targetY = Math.max(
           0,
@@ -218,12 +299,19 @@ function SearchScreenBody({
         scrollViewRef.current?.scrollTo({ y: targetY, animated: !theme.reduceMotion });
       }
     },
-    [layout.gridColumns, layout.gridRowHeight, theme.reduceMotion, wideColumns, wideRowHeight],
+    [
+      layout.gridColumns,
+      layout.gridGap,
+      layout.gridRowHeight,
+      theme.reduceMotion,
+      wideColumns,
+      wideRowHeight,
+    ],
   );
 
   const tv = useTvSearchNavigation({
     isTv: layout.isTv,
-    isActiveScope,
+    isActiveScope: isActiveScope && selectedEpgProgramme === null,
     hasQuery,
     rows: navRows,
     onActivate: handleActivateRow,
@@ -259,16 +347,24 @@ function SearchScreenBody({
       live: search.hasSearched
         ? i18n.t('search.scope.live', { count: search.results.live.length })
         : i18n.t('nav.live'),
+      epg: search.hasSearched
+        ? `${i18n.t('search.scopeEpg')} (${search.results.epg.length})`
+        : i18n.t('search.scopeEpg'),
       movie: search.hasSearched
         ? i18n.t('search.scope.movies', { count: search.results.movies.length })
         : i18n.t('nav.movies'),
       series: search.hasSearched
         ? i18n.t('search.scope.series', { count: search.results.series.length })
         : i18n.t('nav.series'),
+      episode: search.hasSearched
+        ? `${i18n.t('search.scopeEpisodes')} (${search.results.episodes.length})`
+        : i18n.t('search.scopeEpisodes'),
     }),
     [
       i18n,
       search.hasSearched,
+      search.results.epg.length,
+      search.results.episodes.length,
       search.results.live.length,
       search.results.movies.length,
       search.results.series.length,
@@ -283,7 +379,9 @@ function SearchScreenBody({
 
   return (
     <View testID="search-screen" style={[styles.root, { backgroundColor: theme.colors.bgCanvas }]}>
-      {layout.isTv && isActiveScope ? <SearchTvKeyBridge onEvent={tv.handleTvKey} /> : null}
+      {layout.isTv && isActiveScope && selectedEpgProgramme === null ? (
+        <SearchTvKeyBridge onEvent={tv.handleTvKey} />
+      ) : null}
 
       <ScrollView
         ref={scrollViewRef}
@@ -325,11 +423,16 @@ function SearchScreenBody({
         {!hasQuery ? (
           <SearchIdlePanel
             recentSearches={search.recentSearches}
+            suggestions={search.suggestions}
             padX={layout.padX}
             isTv={layout.isTv}
             focusedRecentIndex={layout.isTv && tv.focusedRowId === 'recent' ? tv.focusedCol : null}
+            focusedSuggestionIndex={
+              layout.isTv && tv.focusedRowId === 'suggestions' ? tv.focusedCol : null
+            }
             onSelectRecent={search.selectRecent}
             onClearRecent={search.clearRecent}
+            onSelectSuggestion={search.selectSuggestion}
           />
         ) : isEmptySettled ? (
           <SearchEmptyPanel
@@ -354,20 +457,29 @@ function SearchScreenBody({
             focusedRowId={tv.focusedRowId}
             focusedCol={tv.focusedCol}
             onPlayLive={handlePlayLive}
+            onSelectEpg={handleSelectEpg}
             onOpenDetail={onOpenDetail}
+            onSelectEpisode={handleSelectEpisode}
             onContainerLayoutY={recordResultsContainerY}
             onSectionLayoutY={recordSectionY}
           />
         )}
       </ScrollView>
+
+      <SearchProgrammeDetailOverlay
+        programme={selectedEpgProgramme}
+        isTv={layout.isTv}
+        onTune={handleTuneEpgProgramme}
+        onClose={() => setSelectedEpgProgramme(null)}
+      />
     </View>
   );
 }
 
 /**
  * Cinema Quietude instant Turkish-tolerant Search screen (`UI_UX_PHILOSOPHY.md` §2.1, §3, §4).
- * Provides debounced FTS5 search, instant single-query scope chips, recent searches, grouped
- * Live (`WideCard`) and VOD (`PosterCard`) results, and 10-ft TV D-pad ergonomics.
+ * Provides debounced FTS5 search, 6 scope underline tabs (`All`, `Live`, `On Now & Guide`, `Movies`,
+ * `Series`, `Episodes`), recent searches, on-device quick picks, grouped result sections, and 10-ft TV D-pad.
  */
 export function SearchScreen(props: SearchScreenProps): ReactElement {
   return (
