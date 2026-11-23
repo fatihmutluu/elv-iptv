@@ -1,24 +1,25 @@
 import {
   type AddSourceInput,
+  type AlphabetBucket,
+  type AlphabetIndexInput,
   type BrowseKind,
   type CatalogService,
   DEFAULT_PROFILE_ID,
-  DEFAULT_SEARCH_LIMIT,
-  foldText,
   type ItemDetailRow,
   type ItemRow,
   isCompletedProgress,
   type LinkSourceInput,
+  type ListItemsOptions,
   type LiveVariantOption,
   type LocalM3uSourceInput,
-  MAX_SEARCH_LIMIT,
-  MAX_SEARCH_TOKENS,
   MIN_RESUME_POSITION_MS,
   parseLiveVariant,
   parseVodVersion,
   type SaveProgressInput,
   type SearchOptions,
   type SearchResults,
+  type SearchSuggestion,
+  type SearchSuggestionsOptions,
   type SourceRow,
   type ToggleFavoriteInput,
   type VodVersionOption,
@@ -29,6 +30,7 @@ import {
   DEMO_SOURCE_ID,
   makeWorkbenchEpisodes,
   WORKBENCH_CATEGORIES,
+  WORKBENCH_CREDITS,
   WORKBENCH_ITEMS_BY_CATEGORY,
   WORKBENCH_ITEMS_BY_KEY,
   WORKBENCH_PLOTS,
@@ -40,31 +42,23 @@ import {
   buildWorkbenchNowNext,
   findWorkbenchChannelByNumber,
 } from './mock-catalog-epg.ts';
+import {
+  buildWorkbenchAlphabetIndex,
+  buildWorkbenchSearchSuggestions,
+  clampWorkbenchLimit,
+  normWorkbenchProfile,
+  runWorkbenchSearch,
+  workbenchItemSortKey,
+} from './mock-catalog-search.ts';
 
 const MAX_LIST_LIMIT = 100;
 const MAX_PROGRESS_KEYS = 200;
 
 const pKey = (profileId: string, itemKey: string): string => `${profileId}\0${itemKey}`;
-const normProfile = (profileId?: string): string => {
-  const t = profileId?.trim();
-  return t && t.length > 0 ? t : DEFAULT_PROFILE_ID;
-};
-const clampLimit = (limit: number | undefined, fallback: number, max = MAX_LIST_LIMIT): number => {
-  const n = limit === undefined || !Number.isFinite(limit) ? fallback : Math.floor(limit);
-  return Math.min(max, Math.max(0, n));
-};
-
-const WORKBENCH_SEARCH_INDEX: readonly {
-  readonly row: ItemRow;
-  readonly words: readonly string[];
-}[] = [...WORKBENCH_ITEMS_BY_KEY.values()].map((row) => ({
-  row,
-  words: foldText(row.name).split(/\s+/).filter(Boolean),
-}));
-
-function matchesTokens(words: readonly string[], tokens: readonly string[]): boolean {
-  return tokens.every((tok) => words.some((w) => w.startsWith(tok)));
-}
+const normProfile = normWorkbenchProfile;
+const clampLimit = (limit: number | undefined, fallback: number, max = MAX_LIST_LIMIT): number =>
+  clampWorkbenchLimit(limit, fallback, max);
+const itemSortKey = workbenchItemSortKey;
 
 /**
  * In-memory synthetic {@link CatalogService} powering the browser UI Workbench (`pnpm dev:ui`)
@@ -260,11 +254,52 @@ export function createWorkbenchCatalog(): CatalogService {
         id: c.id.replace(DEMO_SOURCE_ID, sourceId),
       }));
     },
-    async items(categoryId: string, offset: number, limit: number) {
+    async items(categoryId: string, offset: number, limit: number, opts?: ListItemsOptions) {
       const [sourceId = DEMO_SOURCE_ID, ...rest] = categoryId.split('|');
       const all = WORKBENCH_ITEMS_BY_CATEGORY[`${DEMO_SOURCE_ID}|${rest.join('|')}`] ?? [];
+      const pid = normProfile(opts?.profileId);
+      const filtered =
+        opts?.excludeWatched === true
+          ? all.filter((item) => progress.get(pKey(pid, item.key))?.watched !== true)
+          : [...all];
+      if (opts?.sortBy === 'alpha') {
+        filtered.sort(
+          (a, b) =>
+            itemSortKey(a.name).localeCompare(itemSortKey(b.name)) || a.key.localeCompare(b.key),
+        );
+      }
       const start = Math.max(0, offset);
-      return all.slice(start, start + Math.max(0, limit)).map((i) => ({ ...i, sourceId }));
+      return filtered.slice(start, start + Math.max(0, limit)).map((i) => ({ ...i, sourceId }));
+    },
+    async allSourcesItems(
+      kind: BrowseKind,
+      offset: number,
+      limit: number,
+      sourceIds?: readonly string[],
+      opts?: ListItemsOptions,
+    ) {
+      const allowedIds =
+        sourceIds && sourceIds.length > 0
+          ? new Set(sourceIds)
+          : new Set(sources.filter((s) => !s.needsImport).map((s) => s.id));
+      const activeSource = sources.find((s) => !s.needsImport && allowedIds.has(s.id));
+      if (!activeSource) return [];
+      const pid = normProfile(opts?.profileId);
+      const filtered = [...WORKBENCH_ITEMS_BY_KEY.values()].filter(
+        (item) =>
+          item.kind === kind &&
+          (opts?.excludeWatched !== true || progress.get(pKey(pid, item.key))?.watched !== true),
+      );
+      if (opts?.sortBy === 'alpha') {
+        filtered.sort(
+          (a, b) =>
+            itemSortKey(a.name).localeCompare(itemSortKey(b.name)) || a.key.localeCompare(b.key),
+        );
+      }
+      const start = Math.max(0, offset);
+      return filtered
+        .slice(start, start + Math.max(0, limit))
+        .map((i) => ({ ...i, sourceId: activeSource.id }));
     },
     async liveVariants(itemKey: string): Promise<readonly LiveVariantOption[]> {
       const found = WORKBENCH_ITEMS_BY_KEY.get(itemKey);
@@ -295,30 +330,24 @@ export function createWorkbenchCatalog(): CatalogService {
     },
     async itemDetail(itemKey: string): Promise<ItemDetailRow | null> {
       const found = WORKBENCH_ITEMS_BY_KEY.get(itemKey);
-      return found ? { ...found, plot: WORKBENCH_PLOTS[itemKey] ?? null } : null;
+      if (!found) return null;
+      const credits = WORKBENCH_CREDITS[itemKey];
+      return {
+        ...found,
+        plot: WORKBENCH_PLOTS[itemKey] ?? null,
+        ...(credits === undefined ? {} : { cast: credits.cast, director: credits.director }),
+      };
     },
     async search(query: string, opts?: SearchOptions): Promise<SearchResults> {
-      const limit = clampLimit(opts?.limit, DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
-      const tokens = foldText(query).split(/\s+/).filter(Boolean).slice(0, MAX_SEARCH_TOKENS);
-      if (limit === 0 || tokens.length === 0) return { live: [], movies: [], series: [] };
-      const scope = opts?.scope ?? 'all';
-      const activeSources = sources.filter(
-        (s) => !s.needsImport && (opts?.sourceId === undefined || s.id === opts.sourceId),
-      );
-      if (activeSources.length === 0) return { live: [], movies: [], series: [] };
-      const sourceId = activeSources[0]?.id ?? DEMO_SOURCE_ID;
-      const collect = (kind: BrowseKind): ItemRow[] => {
-        if (scope !== 'all' && scope !== kind) return [];
-        const out: ItemRow[] = [];
-        for (const entry of WORKBENCH_SEARCH_INDEX) {
-          if (entry.row.kind === kind && matchesTokens(entry.words, tokens)) {
-            out.push({ ...entry.row, sourceId });
-            if (out.length >= limit) break;
-          }
-        }
-        return out;
-      };
-      return { live: collect('live'), movies: collect('movie'), series: collect('series') };
+      return runWorkbenchSearch(sources, query, opts);
+    },
+    async searchSuggestions(
+      options?: SearchSuggestionsOptions,
+    ): Promise<readonly SearchSuggestion[]> {
+      return buildWorkbenchSearchSuggestions(sources, favorites, progress, recentChannels, options);
+    },
+    async alphabetIndex(input: AlphabetIndexInput): Promise<readonly AlphabetBucket[]> {
+      return buildWorkbenchAlphabetIndex(sources, progress, input);
     },
     async nowNext(channelKeys: readonly string[], nowMs: number) {
       const activeSource = sources.find((s) => !s.needsImport);

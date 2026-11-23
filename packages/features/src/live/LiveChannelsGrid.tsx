@@ -1,7 +1,15 @@
-import type { ItemRow, NowNextEntry, ProgrammeRow } from '@elv/data';
+import type {
+  AlphabetBucket,
+  CatalogService,
+  ItemRow,
+  ItemSortOrder,
+  NowNextEntry,
+  ProgrammeRow,
+} from '@elv/data';
 import type { LogoBackdropModePref } from '@elv/domain';
 import type { KeyEvent } from '@elv/focus-core';
 import {
+  AlphabetJumpRail,
   TvFocusAnchor,
   TvScrollEdgeFade,
   useI18n,
@@ -24,10 +32,16 @@ import {
   useBrowseFocusMemory,
   useRouteActive,
 } from '../shared';
-import { ChannelGridRow, type LiveGridShared } from './LiveChannelTile';
+import { ChannelGridRow, type LiveGridShared, LiveGridSortToolbar } from './LiveChannelTile';
+import {
+  LIVE_ALPHABET_RAIL_MIN_ITEMS,
+  resolveLiveAlphabetLetter,
+  stepLiveAlphabetLetter,
+} from './live-model';
 import type { SourceBadgeInfo } from './source-badge';
 
 const SCROLL_QUANTUM = 2;
+const EMPTY_BUCKETS: readonly AlphabetBucket[] = [];
 
 interface ChannelRowData {
   readonly rowIndex: number;
@@ -63,8 +77,12 @@ function syncChannelWindow(
   endRow: number,
   cols: number,
   hydrateNowNext: (keys: readonly string[]) => void,
+  exactStart = false,
 ): void {
-  source.prefetch(Math.max(0, startRow - 1) * cols, (endRow + 2) * cols);
+  const prefetchStart = exactStart
+    ? Math.max(0, startRow) * cols
+    : Math.max(0, startRow - 1) * cols;
+  source.prefetch(prefetchStart, (endRow + 2) * cols);
   const from = Math.max(0, startRow * cols);
   const to = Math.min(source.count(), (endRow + 1) * cols);
   const keys: string[] = [];
@@ -108,13 +126,23 @@ export interface LiveChannelsGridProps {
   readonly logoBackdropMode?: LogoBackdropModePref;
   readonly sourceBadges?: ReadonlyMap<string, SourceBadgeInfo>;
   readonly cleanChannelTitles?: boolean;
+  /** Optional sort order (`'default'` or `'alpha'` via `sort_title`, `#407`). */
+  readonly sortBy?: ItemSortOrder;
+  readonly onToggleSort?: () => void;
+  readonly sortFocused?: boolean;
+  readonly alphabetBuckets?: readonly AlphabetBucket[];
+  readonly catalog?: CatalogService;
+  readonly categoryId?: string;
+  readonly sourceId?: string;
+  readonly collapseVariants?: boolean;
   /** Injectable epoch clock in milliseconds for live progress bars (defaults to `() => Date.now()`). */
   readonly now?: () => number;
 }
 
 /**
- * O(1)-memory row-virtualized Cinema Quietude Live Channels Grid (`#13`) with live Now/Next
- * schedule progress, deterministic `VirtualizedList` on pointer/touch, and bounded 2D D-pad TV window.
+ * O(1)-memory row-virtualized Cinema Quietude Live Channels Grid (`#13`, `#407`) with `Channel order | A–Z`
+ * sort toggle (`testID="live-grid-sort"`), A–Z `AlphabetJumpRail` (`testID="live-alphabet-rail"`),
+ * live Now/Next schedule progress, deterministic `VirtualizedList` on pointer/touch, and 2D TV D-pad.
  */
 export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
   const { channelSource, sourceVersion, nowNextByKey, nowNextVersion, activeChannelKey, layout } =
@@ -138,6 +166,15 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
   const theme = useTheme();
   const i18n = useI18n();
   const viewport = useViewport();
+
+  const [localSortBy, setLocalSortBy] = useState<ItemSortOrder>(() => p.sortBy ?? 'default');
+  const activeSortBy: ItemSortOrder = p.sortBy ?? localSortBy;
+  const isAlpha = activeSortBy === 'alpha';
+
+  const handleToggleSort = useCallback(() => {
+    setLocalSortBy((prev) => ((p.sortBy ?? prev) === 'alpha' ? 'default' : 'alpha'));
+    p.onToggleSort?.();
+  }, [p.onToggleSort, p.sortBy]);
 
   const cols = computeLiveGridColumns(viewport);
   const cardHeight = layout.isTv ? 116 : layout.isTouch ? 108 : 102;
@@ -196,6 +233,71 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
     setFocusPos(next);
     focusMemoryRef.current?.set('live:channels', next);
   }, []);
+
+  const [topVisibleRow, setTopVisibleRow] = useState(0);
+  const [selectedLetterOverride, setSelectedLetterOverride] = useState<string | null>(null);
+  const [focusedLetter, setFocusedLetter] = useState<string | null>(null);
+  const [standaloneSortFocused, setStandaloneSortFocused] = useState(false);
+  const [fetchedBuckets, setFetchedBuckets] = useState<readonly AlphabetBucket[]>(EMPTY_BUCKETS);
+  const alphabetGenRef = useRef(0);
+
+  // Fetch alphabetIndex directly if LiveChannelsGrid is mounted standalone with a catalog (#407).
+  useEffect(() => {
+    if (p.alphabetBuckets !== undefined) return;
+    const gen = ++alphabetGenRef.current;
+    if (
+      activeSortBy !== 'alpha' ||
+      itemCount < LIVE_ALPHABET_RAIL_MIN_ITEMS ||
+      !p.catalog?.alphabetIndex
+    ) {
+      setFetchedBuckets(EMPTY_BUCKETS);
+      return;
+    }
+    void p.catalog
+      .alphabetIndex({
+        ...(p.sourceId !== undefined ? { sourceId: p.sourceId } : {}),
+        kind: 'live',
+        ...(p.categoryId !== undefined ? { categoryId: p.categoryId } : {}),
+        ...(p.collapseVariants ? { collapseVariants: true } : {}),
+      })
+      .then((rows) => {
+        if (gen !== alphabetGenRef.current) return;
+        setFetchedBuckets(rows ?? EMPTY_BUCKETS);
+      })
+      .catch(() => {
+        if (gen !== alphabetGenRef.current) return;
+        setFetchedBuckets(EMPTY_BUCKETS);
+      });
+    return () => {
+      alphabetGenRef.current += 1;
+    };
+  }, [
+    activeSortBy,
+    itemCount,
+    p.alphabetBuckets,
+    p.catalog,
+    p.categoryId,
+    p.collapseVariants,
+    p.sourceId,
+  ]);
+
+  const effectiveBuckets = p.alphabetBuckets ?? fetchedBuckets;
+  const availableBuckets = useMemo(
+    () => effectiveBuckets.filter((b) => b.count > 0),
+    [effectiveBuckets],
+  );
+  const showAlphabetRail =
+    activeSortBy === 'alpha' &&
+    itemCount >= LIVE_ALPHABET_RAIL_MIN_ITEMS &&
+    availableBuckets.length > 0;
+
+  useEffect(() => {
+    if (!showAlphabetRail) {
+      setFocusedLetter(null);
+      setSelectedLetterOverride(null);
+    }
+  }, [showAlphabetRail]);
+
   const listRef = useRef<InstanceType<typeof VirtualizedList> | null>(null);
   const lastBucketRef = useRef(-1);
   const visibleWindowRef = useRef({ startRow: 0, endRow: visibleRows + 1 });
@@ -205,6 +307,9 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
   useEffect(() => {
     lastBucketRef.current = -1;
     visibleWindowRef.current = { startRow: 0, endRow: visibleRows + 1 };
+    setTopVisibleRow(0);
+    setSelectedLetterOverride(null);
+    setFocusedLetter(null);
     if (mountedSourceRef.current !== channelSource) {
       mountedSourceRef.current = channelSource;
       commitFocusPos({ row: 0, col: 0 });
@@ -219,9 +324,7 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
   }, [channelSource, cols, visibleRows]);
 
   const tvWindowStart =
-    rowCount <= maxMountedRows
-      ? 0
-      : Math.max(0, Math.min(rowCount - maxMountedRows, focusPos.row - 1));
+    rowCount <= maxMountedRows ? 0 : Math.max(0, Math.min(rowCount - maxMountedRows, focusPos.row));
   const tvWindowEnd = Math.min(rowCount - 1, tvWindowStart + maxMountedRows - 1);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: sourceVersion re-hydrates Now/Next as pages land
@@ -229,7 +332,7 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
     if (!channelSource || rowCount === 0) return;
     const startRow = layout.isTv ? tvWindowStart : visibleWindowRef.current.startRow;
     const endRow = layout.isTv ? tvWindowEnd : visibleWindowRef.current.endRow;
-    syncChannelWindow(channelSource, startRow, endRow, cols, hydrateNowNext);
+    syncChannelWindow(channelSource, startRow, endRow, cols, hydrateNowNext, true);
   }, [
     channelSource,
     cols,
@@ -241,12 +344,106 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
     tvWindowStart,
   ]);
 
+  const handleSelectLetter = useCallback(
+    (letter: string, offset: number) => {
+      if (!channelSource || itemCount <= 0) return;
+      const safeOffset = Math.max(
+        0,
+        Math.min(itemCount - 1, Number.isFinite(offset) ? Math.floor(offset) : 0),
+      );
+      const targetRow = Math.min(Math.max(0, rowCount - 1), Math.floor(safeOffset / cols));
+      const maxCol = Math.max(0, Math.min(cols, itemCount - targetRow * cols) - 1);
+      const targetCol = Math.min(maxCol, safeOffset % cols);
+      const endRow = Math.max(targetRow, Math.min(rowCount - 1, targetRow + visibleRows + 1));
+
+      visibleWindowRef.current = { startRow: targetRow, endRow };
+      lastBucketRef.current = Math.floor(targetRow / SCROLL_QUANTUM);
+      setTopVisibleRow(targetRow);
+      setSelectedLetterOverride(letter.trim().toUpperCase());
+      commitFocusPos({ row: targetRow, col: targetCol });
+
+      syncChannelWindow(channelSource, targetRow, endRow, cols, hydrateNowNext, true);
+
+      if (!layout.isTv) {
+        if (typeof listRef.current?.scrollToIndex === 'function') {
+          listRef.current.scrollToIndex({ index: targetRow, animated: false });
+        } else {
+          listRef.current?.scrollToOffset?.({ offset: targetRow * rowHeight, animated: false });
+        }
+      }
+    },
+    [
+      channelSource,
+      cols,
+      commitFocusPos,
+      hydrateNowNext,
+      itemCount,
+      layout.isTv,
+      rowCount,
+      rowHeight,
+      visibleRows,
+    ],
+  );
+
+  const activeOffset = layout.isTv
+    ? focusPos.row * cols + focusPos.col
+    : (topVisibleRow + 1) * cols - 1;
+  const activeLetter = useMemo(
+    () => selectedLetterOverride ?? resolveLiveAlphabetLetter(availableBuckets, activeOffset),
+    [activeOffset, availableBuckets, selectedLetterOverride],
+  );
+
   const handleTvKey = useCallback(
     (event: KeyEvent): boolean => {
       if (event.key === 'lastChannel' && event.kind === 'press') {
         onJumpPreviousChannel?.();
         return true;
       }
+
+      const isNav = event.kind === 'press' || event.kind === 'repeat';
+
+      if (focusedLetter !== null) {
+        if (event.kind === 'press' && (event.key === 'left' || event.key === 'back')) {
+          setFocusedLetter(null);
+          return true;
+        }
+        if (event.kind === 'press' && event.key === 'select') {
+          const norm = focusedLetter.trim().toUpperCase();
+          const bucket =
+            availableBuckets.find((b) => b.letter.trim().toUpperCase() === norm) ??
+            availableBuckets[0];
+          if (bucket) {
+            handleSelectLetter(bucket.letter, bucket.offset);
+          }
+          setFocusedLetter(null);
+          return true;
+        }
+        if (!isNav) return false;
+        if (event.key === 'up' || event.key === 'down') {
+          const next = stepLiveAlphabetLetter(availableBuckets, focusedLetter, event.key);
+          if (next !== null) setFocusedLetter(next);
+          return true;
+        }
+        return event.key === 'right';
+      }
+
+      if (standaloneSortFocused) {
+        if (event.kind === 'press' && event.key === 'back') {
+          setStandaloneSortFocused(false);
+          return true;
+        }
+        if (event.kind === 'press' && event.key === 'select') {
+          handleToggleSort();
+          return true;
+        }
+        if (!isNav) return false;
+        if (event.key === 'down') {
+          setStandaloneSortFocused(false);
+          return true;
+        }
+        return true;
+      }
+
       if (event.key === 'back' && event.kind === 'press') {
         onEdgeTop?.();
         return true;
@@ -272,25 +469,38 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
         }
         return true;
       }
-      if (event.kind !== 'press' && event.kind !== 'repeat') return false;
+      if (!isNav) return false;
       if (event.key === 'up') {
-        if (cur.row === 0) onEdgeTop?.();
-        else commitFocusPos({ row: cur.row - 1, col: cur.col });
+        if (cur.row === 0) {
+          if (onEdgeTop) onEdgeTop();
+          else setStandaloneSortFocused(true);
+        } else {
+          setSelectedLetterOverride(null);
+          commitFocusPos({ row: cur.row - 1, col: cur.col });
+        }
         return true;
       }
       if (event.key === 'down') {
         const nextRow = Math.min(rowCount - 1, cur.row + 1);
         const maxCol = Math.max(0, Math.min(cols, itemCount - nextRow * cols) - 1);
+        setSelectedLetterOverride(null);
         commitFocusPos({ row: nextRow, col: Math.min(cur.col, maxCol) });
         return true;
       }
       if (event.key === 'left') {
+        setSelectedLetterOverride(null);
         commitFocusPos({ row: cur.row, col: Math.max(0, cur.col - 1) });
         return true;
       }
       if (event.key === 'right') {
         const maxCol = Math.max(0, Math.min(cols, itemCount - cur.row * cols) - 1);
-        commitFocusPos({ row: cur.row, col: Math.min(maxCol, cur.col + 1) });
+        if (cur.col < maxCol) {
+          setSelectedLetterOverride(null);
+          commitFocusPos({ row: cur.row, col: cur.col + 1 });
+        } else if (showAlphabetRail) {
+          const initial = activeLetter ?? availableBuckets[0]?.letter ?? null;
+          if (initial !== null) setFocusedLetter(initial);
+        }
         return true;
       }
       if (event.key === 'select' && event.kind === 'press') {
@@ -304,9 +514,14 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
       return false;
     },
     [
+      activeLetter,
+      availableBuckets,
       channelSource,
       cols,
       commitFocusPos,
+      focusedLetter,
+      handleSelectLetter,
+      handleToggleSort,
       itemCount,
       nowNextByKey,
       onEdgeTop,
@@ -314,6 +529,8 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
       onOpenContextMenu,
       onWatchChannel,
       rowCount,
+      showAlphabetRail,
+      standaloneSortFocused,
     ],
   );
 
@@ -321,6 +538,8 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       if (!channelSource) return;
       const topRow = Math.floor(Math.max(0, event.nativeEvent.contentOffset.y) / rowHeight);
+      setTopVisibleRow(topRow);
+      setSelectedLetterOverride(null);
       const bucket = Math.floor(topRow / SCROLL_QUANTUM);
       if (bucket === lastBucketRef.current) return;
       lastBucketRef.current = bucket;
@@ -415,68 +634,114 @@ export function LiveChannelsGrid(p: LiveChannelsGridProps): ReactElement {
     return out;
   }, [channelSource, cols, layout.isTv, rowCount, sourceVersion, tvWindowEnd, tvWindowStart]);
 
+  const effectiveSortFocused = Boolean(p.sortFocused) || standaloneSortFocused;
+
   return (
     <View testID="live-channels-grid" style={styles.flex1}>
       {layout.isTv && isActiveScope ? <TvChannelsKeyBridge onEvent={handleTvKey} /> : null}
-      {layout.isTv ? (
-        <View testID="live-channels-tv-viewport" style={styles.tvViewport}>
-          {tvWindowRows.map((row) => {
-            const isFocusedRow = isActiveScope && focusPos.row === row.rowIndex;
-            return (
-              <View key={row.rowIndex} style={isFocusedRow ? styles.focusedRowLayer : undefined}>
-                <ChannelGridRow
-                  rowIndex={row.rowIndex}
-                  items={row.items}
-                  shared={shared}
-                  nowNextByKey={nowNextByKey}
-                  nowMs={nowMs}
-                  activeChannelKey={activeChannelKey}
-                  {...(favoriteKeys !== undefined ? { favoriteKeys } : {})}
-                  {...(sourceBadges !== undefined ? { sourceBadges } : {})}
-                  focusedCol={isFocusedRow ? focusPos.col : null}
-                  onWatchChannel={onWatchChannel}
-                  {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
-                  {...(onOpenContextMenu !== undefined ? { onOpenContextMenu } : {})}
-                />
-              </View>
-            );
-          })}
-          <View pointerEvents="none" style={styles.edgeFadeLayer}>
-            <TvScrollEdgeFade
-              testID="live-channels-edge-fade"
-              showTop={tvWindowStart > 0}
-              showBottom={tvWindowEnd < rowCount - 1}
+
+      <LiveGridSortToolbar
+        isAlpha={isAlpha}
+        isTv={layout.isTv}
+        isTouch={layout.isTouch}
+        padX={layout.padX}
+        focused={effectiveSortFocused}
+        onToggle={handleToggleSort}
+      />
+
+      <View style={styles.bodyWrap}>
+        {layout.isTv ? (
+          <View testID="live-channels-tv-viewport" style={styles.tvViewport}>
+            {tvWindowRows.map((row) => {
+              const isFocusedRow =
+                isActiveScope &&
+                focusedLetter === null &&
+                !standaloneSortFocused &&
+                focusPos.row === row.rowIndex;
+              return (
+                <View key={row.rowIndex} style={isFocusedRow ? styles.focusedRowLayer : undefined}>
+                  <ChannelGridRow
+                    rowIndex={row.rowIndex}
+                    items={row.items}
+                    shared={shared}
+                    nowNextByKey={nowNextByKey}
+                    nowMs={nowMs}
+                    activeChannelKey={activeChannelKey}
+                    {...(favoriteKeys !== undefined ? { favoriteKeys } : {})}
+                    {...(sourceBadges !== undefined ? { sourceBadges } : {})}
+                    focusedCol={isFocusedRow ? focusPos.col : null}
+                    onWatchChannel={onWatchChannel}
+                    {...(onToggleFavorite !== undefined ? { onToggleFavorite } : {})}
+                    {...(onOpenContextMenu !== undefined ? { onOpenContextMenu } : {})}
+                  />
+                </View>
+              );
+            })}
+            <View pointerEvents="none" style={styles.edgeFadeLayer}>
+              <TvScrollEdgeFade
+                testID="live-channels-edge-fade"
+                showTop={tvWindowStart > 0}
+                showBottom={tvWindowEnd < rowCount - 1}
+              />
+            </View>
+          </View>
+        ) : (
+          <VirtualizedList
+            ref={listRef}
+            testID="live-channels-list"
+            style={styles.flex1}
+            data={channelSource}
+            extraData={extraData}
+            getItemCount={getItemCount}
+            getItem={getRowData}
+            keyExtractor={keyExtractor}
+            getItemLayout={getItemLayout}
+            renderItem={renderRow}
+            windowSize={5}
+            initialNumToRender={visibleRows + 2}
+            maxToRenderPerBatch={4}
+            onScroll={handleScroll}
+            scrollEventThrottle={32}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingTop: 6, paddingBottom: theme.spacing.xl }}
+          />
+        )}
+
+        {showAlphabetRail ? (
+          <View
+            pointerEvents="box-none"
+            style={[
+              styles.alphabetRailOverlay,
+              { right: Math.max(4, Math.floor(layout.padX / 4)) },
+            ]}
+          >
+            <AlphabetJumpRail
+              testID="live-alphabet-rail"
+              buckets={availableBuckets}
+              activeLetter={activeLetter}
+              focusedLetter={layout.isTv && isActiveScope ? focusedLetter : null}
+              onSelectLetter={handleSelectLetter}
+              isTv={layout.isTv}
             />
           </View>
-        </View>
-      ) : (
-        <VirtualizedList
-          ref={listRef}
-          testID="live-channels-list"
-          style={styles.flex1}
-          data={channelSource}
-          extraData={extraData}
-          getItemCount={getItemCount}
-          getItem={getRowData}
-          keyExtractor={keyExtractor}
-          getItemLayout={getItemLayout}
-          renderItem={renderRow}
-          windowSize={5}
-          initialNumToRender={visibleRows + 2}
-          maxToRenderPerBatch={4}
-          onScroll={handleScroll}
-          scrollEventThrottle={32}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingTop: 6, paddingBottom: theme.spacing.xl }}
-        />
-      )}
+        ) : null}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   flex1: { flex: 1 },
+  bodyWrap: { flex: 1, position: 'relative' },
   tvViewport: { flex: 1, overflow: 'hidden', paddingTop: 6, position: 'relative' },
   edgeFadeLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 1 },
   focusedRowLayer: { zIndex: 2 },
+  alphabetRailOverlay: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
 });

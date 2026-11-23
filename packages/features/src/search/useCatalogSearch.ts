@@ -1,4 +1,10 @@
-import type { CatalogService, SearchResults, SearchScope, WatchProgressRow } from '@elv/data';
+import type {
+  CatalogService,
+  SearchResults,
+  SearchScope,
+  SearchSuggestion,
+  WatchProgressRow,
+} from '@elv/data';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { batchLoadProgressByKeys, useCatalogUiCache } from '../shared';
 import {
@@ -7,10 +13,31 @@ import {
   EMPTY_SEARCH_RESULTS,
   SEARCH_DEBOUNCE_MS,
   SEARCH_RESULT_LIMIT,
+  SEARCH_SUGGESTIONS_LIMIT,
   sanitizeSearchQuery,
 } from './search-model';
 
 const EMPTY_PROGRESS_MAP: ReadonlyMap<string, WatchProgressRow> = new Map();
+const EMPTY_SUGGESTIONS: readonly SearchSuggestion[] = [];
+
+function normalizeSearchResults(raw: Partial<SearchResults> | null | undefined): SearchResults {
+  if (!raw) return EMPTY_SEARCH_RESULTS;
+  return {
+    live: raw.live ?? [],
+    epg: raw.epg ?? [],
+    movies: raw.movies ?? [],
+    series: raw.series ?? [],
+    episodes: raw.episodes ?? [],
+  };
+}
+
+function collectVodKeys(results: SearchResults): string[] {
+  return [
+    ...results.movies.map((item) => item.key),
+    ...results.series.map((item) => item.key),
+    ...results.episodes.map((ep) => ep.itemKey),
+  ];
+}
 
 /** Options accepted by {@link useCatalogSearch}. */
 export interface UseCatalogSearchOptions {
@@ -36,16 +63,18 @@ export interface CatalogSearchState {
   readonly searching: boolean;
   readonly hasSearched: boolean;
   readonly recentSearches: readonly string[];
+  readonly suggestions: readonly SearchSuggestion[];
   readonly commitRecent: (rawQuery: string) => void;
   readonly clearSearch: () => void;
   readonly selectRecent: (term: string) => void;
+  readonly selectSuggestion: (suggestion: SearchSuggestion) => void;
   readonly clearRecent: () => void;
 }
 
 /**
  * Debounced (`150ms`) catalog search hook with monotonic generation cancellation, single-query
  * instant scope filtering, `CatalogUiCache` synchronous warm return hydration (`#445`), isolated
- * VOD watch-progress hydration, and recent-search history.
+ * VOD watch-progress hydration, recent-search history, and on-device idle suggestions (`#397`).
  */
 export function useCatalogSearch({
   catalog,
@@ -68,14 +97,15 @@ export function useCatalogSearch({
 
   const [query, setQueryState] = useState(initialQuery);
   const [scope, setScopeState] = useState<SearchScope>(initialScope);
-  const [results, setResults] = useState<SearchResults>(
-    () => initialCached?.results ?? EMPTY_SEARCH_RESULTS,
+  const [results, setResults] = useState<SearchResults>(() =>
+    initialCached ? normalizeSearchResults(initialCached.results) : EMPTY_SEARCH_RESULTS,
   );
   const [progressByKey, setProgressByKey] = useState<ReadonlyMap<string, WatchProgressRow>>(
     () => initialCached?.progressByKey ?? EMPTY_PROGRESS_MAP,
   );
   const [searching, setSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(() => initialCached !== null);
+  const [suggestions, setSuggestions] = useState<readonly SearchSuggestion[]>(EMPTY_SUGGESTIONS);
 
   const [localRecent, setLocalRecent] = useState<readonly string[]>(() => initialRecent ?? []);
   const recentSearches =
@@ -112,6 +142,7 @@ export function useCatalogSearch({
 
   const generationRef = useRef(0);
   const progressGenRef = useRef(0);
+  const suggestionsGenRef = useRef(0);
   const searchingRef = useRef(false);
   const resultsRef = useRef<SearchResults>(results);
   resultsRef.current = results;
@@ -123,6 +154,29 @@ export function useCatalogSearch({
   const sanitizedQuery = sanitizeSearchQuery(query);
   const sanitizedQueryRef = useRef(sanitizedQuery);
   sanitizedQueryRef.current = sanitizedQuery;
+
+  // Load bounded on-device idle search suggestions (#397).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshToken and userStateVersion refresh idle suggestions
+  useEffect(() => {
+    const sGen = ++suggestionsGenRef.current;
+    if (!catalog.searchSuggestions) {
+      setSuggestions(EMPTY_SUGGESTIONS);
+      return;
+    }
+    void catalog
+      .searchSuggestions({ limit: SEARCH_SUGGESTIONS_LIMIT })
+      .then((rows) => {
+        if (sGen !== suggestionsGenRef.current) return;
+        setSuggestions(rows ?? EMPTY_SUGGESTIONS);
+      })
+      .catch(() => {
+        if (sGen !== suggestionsGenRef.current) return;
+        setSuggestions(EMPTY_SUGGESTIONS);
+      });
+    return () => {
+      suggestionsGenRef.current += 1;
+    };
+  }, [catalog, refreshToken, userStateVersion]);
 
   const persistSearchCache = useCallback(
     (
@@ -204,6 +258,16 @@ export function useCatalogSearch({
     [setQuery],
   );
 
+  const selectSuggestion = useCallback(
+    (suggestion: SearchSuggestion) => {
+      const targetQuery = suggestion.query.trim() || suggestion.label.trim();
+      if (targetQuery !== '') {
+        setQuery(targetQuery);
+      }
+    },
+    [setQuery],
+  );
+
   useEffect(() => {
     const gen = ++generationRef.current;
     progressGenRef.current += 1;
@@ -225,21 +289,20 @@ export function useCatalogSearch({
       ? (uiCacheRef.current?.getSearch(sanitizedQuery, scopeRef.current) ?? null)
       : null;
     if (cachedHit !== null) {
+      const normalizedCached = normalizeSearchResults(cachedHit.results);
       searchingRef.current = false;
-      setResults(cachedHit.results);
+      setResults(normalizedCached);
       setProgressByKey(cachedHit.progressByKey);
       setHasSearched(true);
       setSearching(false);
-      const vodKeys = [...cachedHit.results.movies, ...cachedHit.results.series].map(
-        (item) => item.key,
-      );
+      const vodKeys = collectVodKeys(normalizedCached);
       if (vodKeys.length > 0) {
         const pGen = ++progressGenRef.current;
         void batchLoadProgressByKeys(catalog, vodKeys)
           .then((progressMap) => {
             if (gen !== generationRef.current || pGen !== progressGenRef.current) return;
             setProgressByKey(progressMap);
-            persistSearchCache(sanitizedQuery, scopeRef.current, cachedHit.results, progressMap);
+            persistSearchCache(sanitizedQuery, scopeRef.current, normalizedCached, progressMap);
           })
           .catch(() => undefined);
       }
@@ -252,10 +315,11 @@ export function useCatalogSearch({
       void (async () => {
         if (gen !== generationRef.current) return;
         try {
-          const fetched = catalog.search
+          const rawFetched = catalog.search
             ? await catalog.search(sanitizedQuery, { scope: 'all', limit: SEARCH_RESULT_LIMIT })
             : EMPTY_SEARCH_RESULTS;
           if (gen !== generationRef.current) return;
+          const fetched = normalizeSearchResults(rawFetched);
 
           searchingRef.current = false;
           setResults(fetched);
@@ -267,7 +331,7 @@ export function useCatalogSearch({
             commitRecent(sanitizedQuery);
           }
 
-          const vodKeys = [...fetched.movies, ...fetched.series].map((item) => item.key);
+          const vodKeys = collectVodKeys(fetched);
           const pGen = ++progressGenRef.current;
           if (vodKeys.length === 0) {
             setProgressByKey(EMPTY_PROGRESS_MAP);
@@ -303,7 +367,7 @@ export function useCatalogSearch({
     if (searchingRef.current) return;
 
     const current = resultsRef.current;
-    const vodKeys = [...current.movies, ...current.series].map((item) => item.key);
+    const vodKeys = collectVodKeys(current);
     if (vodKeys.length === 0) return;
 
     const sGen = generationRef.current;
@@ -331,9 +395,11 @@ export function useCatalogSearch({
       searching,
       hasSearched,
       recentSearches,
+      suggestions,
       commitRecent,
       clearSearch,
       selectRecent,
+      selectSuggestion,
       clearRecent,
     }),
     [
@@ -348,8 +414,10 @@ export function useCatalogSearch({
       scope,
       searching,
       selectRecent,
+      selectSuggestion,
       setQuery,
       setScope,
+      suggestions,
     ],
   );
 }

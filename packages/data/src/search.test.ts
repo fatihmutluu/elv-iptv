@@ -139,11 +139,19 @@ describe('querySearch', () => {
         },
       };
 
-      expect(await querySearch(spy, '   ')).toEqual({ live: [], movies: [], series: [] });
-      expect(await querySearch(spy, 'horizon', { limit: 0 })).toEqual({
+      expect(await querySearch(spy, '   ')).toEqual({
         live: [],
+        epg: [],
         movies: [],
         series: [],
+        episodes: [],
+      });
+      expect(await querySearch(spy, 'horizon', { limit: 0 })).toEqual({
+        live: [],
+        epg: [],
+        movies: [],
+        series: [],
+        episodes: [],
       });
       expect(queriedTables).toHaveLength(0);
 
@@ -257,8 +265,20 @@ describe('querySearch', () => {
       // removeSource purges s1 entries from live_fts and movies_fts while keeping s2 intact
       const removed = await removeSource('s1', { db, secrets });
       expect(removed.ok).toBe(true);
-      expect(await querySearch(db, 'renamed')).toEqual({ live: [], movies: [], series: [] });
-      expect(await querySearch(db, 'remove')).toEqual({ live: [], movies: [], series: [] });
+      expect(await querySearch(db, 'renamed')).toEqual({
+        live: [],
+        epg: [],
+        movies: [],
+        series: [],
+        episodes: [],
+      });
+      expect(await querySearch(db, 'remove')).toEqual({
+        live: [],
+        epg: [],
+        movies: [],
+        series: [],
+        episodes: [],
+      });
       expect((await querySearch(db, 'keep')).series.map((s) => s.key)).toEqual(['x:s2:series:1']);
     } finally {
       close();
@@ -327,8 +347,20 @@ describe('querySearch', () => {
 
       // Removing source purges all FTS5 entries
       expect((await service.removeSource(added.value.id)).ok).toBe(true);
-      expect(await service.search?.('ıstanbul')).toEqual({ live: [], movies: [], series: [] });
-      expect(await service.search?.('gunes')).toEqual({ live: [], movies: [], series: [] });
+      expect(await service.search?.('ıstanbul')).toEqual({
+        live: [],
+        epg: [],
+        movies: [],
+        series: [],
+        episodes: [],
+      });
+      expect(await service.search?.('gunes')).toEqual({
+        live: [],
+        epg: [],
+        movies: [],
+        series: [],
+        episodes: [],
+      });
 
       await service.close();
     } finally {

@@ -270,6 +270,69 @@ describe('lists', () => {
     expect(action(requests[0]?.url ?? '')).toBe('get_series');
   });
 
+  it('extracts and bounds cast (or actors) and director on movies and series (#397)', async () => {
+    const longCast = `${'A'.repeat(510)}   ${'B'.repeat(40)}`;
+    const longDirector = `${'D'.repeat(255)}   ${'E'.repeat(30)}`;
+    const movies = value(
+      await client(() => ({
+        json: [
+          {
+            stream_id: 1,
+            name: 'Movie 1',
+            category_id: '1',
+            cast: '  Haluk Bilginer &amp; Cansu Dere ',
+            director: ' Nuri Bilge Ceylan ',
+          },
+          {
+            stream_id: 2,
+            name: 'Movie 2',
+            category_id: '1',
+            cast: '   ',
+            actors: [' Kıvanç Tatlıtuğ ', '', ' Serenay Sarıkaya '],
+            director: ['Çağan Irmak', '  '],
+          },
+          {
+            stream_id: 3,
+            name: 'Movie 3',
+            category_id: '1',
+            cast: longCast,
+            director: longDirector,
+          },
+        ],
+      })).c.vodStreams(),
+    );
+    expect(movies[0]?.cast).toBe('Haluk Bilginer & Cansu Dere');
+    expect(movies[0]?.director).toBe('Nuri Bilge Ceylan');
+    expect(movies[1]?.cast).toBe('Kıvanç Tatlıtuğ, Serenay Sarıkaya');
+    expect(movies[1]?.director).toBe('Çağan Irmak');
+    expect(movies[2]?.cast?.length).toBe(510);
+    expect(movies[2]?.director?.length).toBe(255);
+
+    const series = value(
+      await client(() => ({
+        json: [
+          {
+            series_id: 10,
+            name: 'Series 1',
+            category_id: '1',
+            actors: 'Aras Bulut İynemli, Erkan Kolçak Köstendil',
+            director: 'Sinan Öztürk',
+          },
+          {
+            series_id: 11,
+            name: 'Series 2',
+            category_id: '1',
+            cast: ['Demet Evgar', 'Buğra Gülsoy'],
+          },
+        ],
+      })).c.series(),
+    );
+    expect(series[0]?.cast).toBe('Aras Bulut İynemli, Erkan Kolçak Köstendil');
+    expect(series[0]?.director).toBe('Sinan Öztürk');
+    expect(series[1]?.cast).toBe('Demet Evgar, Buğra Gülsoy');
+    expect(series[1]?.director).toBeUndefined();
+  });
+
   it('rejects unsafe and relative artwork URLs in live stream_icon, movie stream_icon, and series cover (#428)', async () => {
     const liveRes = value(
       await client(() => ({

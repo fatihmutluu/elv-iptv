@@ -1,5 +1,6 @@
+import type { AlphabetBucket } from '@elv/data';
 import type { KeyEvent } from '@elv/focus-core';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useBrowseFocusMemory } from '../shared';
 import {
   type CatalogNavRowDescriptor,
@@ -7,7 +8,11 @@ import {
   clampGridFocus,
   computeRowCount,
   type GridFocusPosition,
+  resolveActiveAlphabetLetter,
+  stepAlphabetRailLetter,
 } from './catalog-model';
+
+const EMPTY_BUCKETS: readonly AlphabetBucket[] = [];
 
 /** Options for {@link useTvCatalogNavigation}. */
 export interface UseTvCatalogNavigationOptions {
@@ -18,8 +23,10 @@ export interface UseTvCatalogNavigationOptions {
   readonly rows: readonly CatalogNavRowDescriptor[];
   readonly gridColumns: number;
   readonly gridItemCount: number;
+  readonly alphabetBuckets?: readonly AlphabetBucket[];
   readonly onActivateRow: (rowId: CatalogNavRowId, colIndex: number) => void;
   readonly onActivateGridItem: (itemIndex: number) => void;
+  readonly onSelectAlphabetLetter?: (letter: string, offset: number) => void;
   readonly onExitGrid: () => void;
   readonly onFocusRow?: (rowId: CatalogNavRowId) => void;
   readonly onFocusTopNav?: () => void;
@@ -30,10 +37,12 @@ export interface TvCatalogNavigationState {
   readonly focusedRowId: CatalogNavRowId | null;
   readonly focusedCol: number | null;
   readonly focusedGridPos: GridFocusPosition | null;
+  readonly focusedAlphabetLetter: string | null;
+  readonly jumpToGridPos: (pos: GridFocusPosition) => void;
   readonly handleTvKey: (event: KeyEvent) => boolean;
 }
 
-type FocusZone = CatalogNavRowId | 'grid' | null;
+type FocusZone = CatalogNavRowId | 'grid' | 'alphabetRail' | null;
 
 interface CatalogFocusSnapshot {
   readonly zone: FocusZone;
@@ -44,7 +53,8 @@ interface CatalogFocusSnapshot {
 
 /**
  * Manages 10-ft TV D-pad navigation across Catalog Discovery rows (`catChips`, `continue`,
- * `rail-N`, `loadMore`) and the O(1)-memory 2D `(row, col)` Category Grid viewport.
+ * `rail-N`, `loadMore`), the O(1)-memory 2D `(row, col)` Category Grid viewport, and the trailing
+ * A–Z `AlphabetJumpRail` (`#407`).
  */
 export function useTvCatalogNavigation({
   focusMemoryKey,
@@ -54,8 +64,10 @@ export function useTvCatalogNavigation({
   rows,
   gridColumns,
   gridItemCount,
+  alphabetBuckets = EMPTY_BUCKETS,
   onActivateRow,
   onActivateGridItem,
+  onSelectAlphabetLetter,
   onExitGrid,
   onFocusRow,
   onFocusTopNav,
@@ -77,8 +89,19 @@ export function useTvCatalogNavigation({
   const [zone, setZone] = useState<FocusZone>(() => {
     const saved = savedOnMountRef.current;
     if (saved != null) {
-      if (saved.zone === 'grid' && isGridMode && gridItemCount > 0) return 'grid';
-      if (saved.zone !== null && saved.zone !== 'grid' && rows.some((r) => r.id === saved.zone)) {
+      if (
+        (saved.zone === 'grid' || saved.zone === 'alphabetRail') &&
+        isGridMode &&
+        gridItemCount > 0
+      ) {
+        return 'grid';
+      }
+      if (
+        saved.zone !== null &&
+        saved.zone !== 'grid' &&
+        saved.zone !== 'alphabetRail' &&
+        rows.some((r) => r.id === saved.zone)
+      ) {
         return saved.zone;
       }
     }
@@ -86,7 +109,12 @@ export function useTvCatalogNavigation({
   });
   const [activeCol, setActiveCol] = useState(() => {
     const saved = savedOnMountRef.current;
-    if (saved != null && saved.zone !== null && saved.zone !== 'grid') {
+    if (
+      saved != null &&
+      saved.zone !== null &&
+      saved.zone !== 'grid' &&
+      saved.zone !== 'alphabetRail'
+    ) {
       const matched = rows.find((r) => r.id === saved.zone);
       if (matched) return Math.min(Math.max(0, saved.col), matched.count - 1);
     }
@@ -99,6 +127,14 @@ export function useTvCatalogNavigation({
     }
     return { row: 0, col: 0 };
   });
+  const [alphabetLetter, setAlphabetLetter] = useState<string | null>(null);
+
+  const availableBuckets = useMemo(
+    () => alphabetBuckets.filter((b) => b.count > 0),
+    [alphabetBuckets],
+  );
+  const availableBucketsRef = useRef(availableBuckets);
+  availableBucketsRef.current = availableBuckets;
 
   const zoneRef = useRef<FocusZone>(zone);
   zoneRef.current = zone;
@@ -106,6 +142,8 @@ export function useTvCatalogNavigation({
   activeColRef.current = activeCol;
   const gridPosRef = useRef(gridPos);
   gridPosRef.current = gridPos;
+  const alphabetLetterRef = useRef<string | null>(alphabetLetter);
+  alphabetLetterRef.current = alphabetLetter;
   const colMemoryRef = useRef<Map<CatalogNavRowId, number>>(
     new Map(
       savedOnMountRef.current
@@ -128,6 +166,8 @@ export function useTvCatalogNavigation({
   onActivateRowRef.current = onActivateRow;
   const onActivateGridItemRef = useRef(onActivateGridItem);
   onActivateGridItemRef.current = onActivateGridItem;
+  const onSelectAlphabetLetterRef = useRef(onSelectAlphabetLetter);
+  onSelectAlphabetLetterRef.current = onSelectAlphabetLetter;
   const onExitGridRef = useRef(onExitGrid);
   onExitGridRef.current = onExitGrid;
   const onFocusRowRef = useRef(onFocusRow);
@@ -143,7 +183,7 @@ export function useTvCatalogNavigation({
       const colByRow: Partial<Record<CatalogNavRowId, number>> = {};
       for (const [rowId, col] of colMemoryRef.current) colByRow[rowId] = col;
       mem.set<CatalogFocusSnapshot>(key, {
-        zone: nextZone,
+        zone: nextZone === 'alphabetRail' ? 'grid' : nextZone,
         col: nextCol,
         gridPos: nextGridPos,
         colByRow,
@@ -156,9 +196,11 @@ export function useTvCatalogNavigation({
     (rowId: CatalogNavRowId | null, col: number, persist = true) => {
       zoneRef.current = rowId;
       activeColRef.current = col;
+      alphabetLetterRef.current = null;
       if (rowId !== null) colMemoryRef.current.set(rowId, col);
       setZone(rowId);
       setActiveCol(col);
+      setAlphabetLetter(null);
       if (persist) {
         pendingRestoreRef.current = null;
         persistCatalogFocus(rowId, col, gridPosRef.current);
@@ -171,8 +213,10 @@ export function useTvCatalogNavigation({
     (pos: GridFocusPosition, persist = true) => {
       zoneRef.current = 'grid';
       gridPosRef.current = pos;
+      alphabetLetterRef.current = null;
       setZone('grid');
       setGridPos(pos);
+      setAlphabetLetter(null);
       if (persist) {
         pendingRestoreRef.current = null;
         persistCatalogFocus('grid', activeColRef.current, pos);
@@ -180,6 +224,20 @@ export function useTvCatalogNavigation({
     },
     [persistCatalogFocus],
   );
+
+  const commitAlphabetRail = useCallback((letter: string) => {
+    zoneRef.current = 'alphabetRail';
+    alphabetLetterRef.current = letter;
+    setZone('alphabetRail');
+    setAlphabetLetter(letter);
+  }, []);
+
+  // If alphabet rail disappears while focused, return focus to grid cleanly.
+  useEffect(() => {
+    if (zoneRef.current === 'alphabetRail' && availableBuckets.length === 0) {
+      commitGrid(gridPosRef.current, false);
+    }
+  }, [availableBuckets.length, commitGrid]);
 
   // Transition focus cleanly when entering or exiting Grid Mode.
   useEffect(() => {
@@ -208,7 +266,11 @@ export function useTvCatalogNavigation({
 
     const pending = pendingRestoreRef.current;
     if (pending !== null) {
-      if (pending.zone === 'grid' && isGridMode && gridItemCount > 0) {
+      if (
+        (pending.zone === 'grid' || pending.zone === 'alphabetRail') &&
+        isGridMode &&
+        gridItemCount > 0
+      ) {
         pendingRestoreRef.current = null;
         commitGrid(
           clampGridFocus(pending.gridPos.row, pending.gridPos.col, gridItemCount, gridColumns),
@@ -216,7 +278,7 @@ export function useTvCatalogNavigation({
         );
         return;
       }
-      if (pending.zone !== null && pending.zone !== 'grid') {
+      if (pending.zone !== null && pending.zone !== 'grid' && pending.zone !== 'alphabetRail') {
         const matched = currentRows.find((r) => r.id === pending.zone);
         if (matched) {
           pendingRestoreRef.current = null;
@@ -226,7 +288,7 @@ export function useTvCatalogNavigation({
       }
     }
 
-    if (currentZone === 'grid') {
+    if (currentZone === 'grid' || currentZone === 'alphabetRail') {
       if (!isGridMode || gridItemCount <= 0) {
         const fallback = currentRows[0] ?? null;
         commitRow(fallback?.id ?? null, 0, false);
@@ -239,7 +301,12 @@ export function useTvCatalogNavigation({
         gridColumns,
       );
       if (clamped.row !== gridPosRef.current.row || clamped.col !== gridPosRef.current.col) {
-        commitGrid(clamped, false);
+        if (currentZone === 'grid') {
+          commitGrid(clamped, false);
+        } else {
+          gridPosRef.current = clamped;
+          setGridPos(clamped);
+        }
       }
       return;
     }
@@ -263,19 +330,69 @@ export function useTvCatalogNavigation({
     }
   }, [commitGrid, commitRow, gridColumns, gridItemCount, isGridMode, rowSignature]);
 
+  const jumpToGridPos = useCallback(
+    (pos: GridFocusPosition) => {
+      const count = gridItemCountRef.current;
+      const cols = gridColumnsRef.current;
+      commitGrid(clampGridFocus(pos.row, pos.col, count, cols));
+    },
+    [commitGrid],
+  );
+
   const handleTvKey = useCallback(
     (event: KeyEvent): boolean => {
       const currentRows = rowsRef.current;
       const inGridMode = isGridModeRef.current;
+      const currentZone = zoneRef.current;
+      const isNav = event.kind === 'press' || event.kind === 'repeat';
+
+      if (currentZone === 'alphabetRail') {
+        const buckets = availableBucketsRef.current;
+        if (event.kind === 'press' && (event.key === 'back' || event.key === 'left')) {
+          commitGrid(gridPosRef.current);
+          return true;
+        }
+        if (event.kind === 'press' && event.key === 'select') {
+          const curLetter = alphabetLetterRef.current?.trim().toUpperCase() ?? null;
+          const bucket =
+            (curLetter !== null
+              ? buckets.find((b) => b.letter.trim().toUpperCase() === curLetter)
+              : undefined) ?? buckets[0];
+          if (bucket) {
+            onSelectAlphabetLetterRef.current?.(bucket.letter, bucket.offset);
+            const cols = Math.max(1, gridColumnsRef.current);
+            const count = gridItemCountRef.current;
+            const targetPos = clampGridFocus(
+              Math.floor(bucket.offset / cols),
+              bucket.offset % cols,
+              count,
+              cols,
+            );
+            commitGrid(targetPos);
+          } else {
+            commitGrid(gridPosRef.current);
+          }
+          return true;
+        }
+        if (!isNav) return false;
+        if (event.key === 'up' || event.key === 'down') {
+          const nextLetter = stepAlphabetRailLetter(buckets, alphabetLetterRef.current, event.key);
+          if (nextLetter !== null) {
+            commitAlphabetRail(nextLetter);
+          }
+          return true;
+        }
+        if (event.key === 'right') {
+          return true;
+        }
+        return false;
+      }
 
       if (event.kind === 'press' && event.key === 'back') {
         if (inGridMode) onExitGridRef.current();
         else onFocusTopNavRef.current?.();
         return true;
       }
-
-      const isNav = event.kind === 'press' || event.kind === 'repeat';
-      const currentZone = zoneRef.current;
 
       if (currentZone === 'grid') {
         const count = gridItemCountRef.current;
@@ -290,7 +407,18 @@ export function useTvCatalogNavigation({
           if (pos.col > 0) commitGrid({ row: pos.row, col: pos.col - 1 });
         } else if (event.key === 'right') {
           const rowItems = Math.min(cols, count - pos.row * cols);
-          if (pos.col + 1 < rowItems) commitGrid({ row: pos.row, col: pos.col + 1 });
+          if (pos.col + 1 < rowItems) {
+            commitGrid({ row: pos.row, col: pos.col + 1 });
+          } else if (availableBucketsRef.current.length > 0) {
+            const currentOffset = pos.row * cols + pos.col;
+            const initialLetter =
+              resolveActiveAlphabetLetter(availableBucketsRef.current, currentOffset) ??
+              availableBucketsRef.current[0]?.letter ??
+              null;
+            if (initialLetter !== null) {
+              commitAlphabetRail(initialLetter);
+            }
+          }
         } else if (event.key === 'down') {
           const totalRows = computeRowCount(count, cols);
           if (pos.row + 1 < totalRows) {
@@ -370,14 +498,17 @@ export function useTvCatalogNavigation({
       }
       return false;
     },
-    [commitGrid, commitRow],
+    [commitAlphabetRail, commitGrid, commitRow],
   );
 
   const visible = isTv && isActiveScope;
   return {
-    focusedRowId: visible && zone !== 'grid' ? zone : null,
-    focusedCol: visible && zone !== 'grid' && zone !== null ? activeCol : null,
+    focusedRowId: visible && zone !== 'grid' && zone !== 'alphabetRail' ? zone : null,
+    focusedCol:
+      visible && zone !== 'grid' && zone !== 'alphabetRail' && zone !== null ? activeCol : null,
     focusedGridPos: visible && zone === 'grid' ? gridPos : null,
+    focusedAlphabetLetter: visible && zone === 'alphabetRail' ? alphabetLetter : null,
+    jumpToGridPos,
     handleTvKey,
   };
 }

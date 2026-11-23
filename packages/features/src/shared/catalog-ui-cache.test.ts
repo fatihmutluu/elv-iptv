@@ -249,8 +249,10 @@ describe('createCatalogUiCache', () => {
 
     const results: SearchResults = {
       live: [],
+      epg: [],
       movies: [makeItem('src-1', 'movie', 1)],
       series: [],
+      episodes: [],
     };
     cache.setSearch({
       query: 'Matrix',
@@ -299,7 +301,7 @@ describe('createCatalogUiCache', () => {
       query: 'Item',
       scope: 'all',
       catalogRevision: 0,
-      results: { live: [ch1, ch2], movies: [], series: [] },
+      results: { live: [ch1, ch2], epg: [], movies: [], series: [], episodes: [] },
       progressByKey: new Map(),
     });
 

@@ -64,6 +64,33 @@ async function resolveActiveSources(
   return rows.map((r) => r.id);
 }
 
+function allSourcesDedupSpec(
+  kind: BrowseKind,
+  opts?: Pick<ListItemsOptions, 'collapseVariants' | 'groupVersions'>,
+):
+  | {
+      readonly groupExpr: string;
+      readonly rankOrder: string;
+      readonly countCol: 'variant_count' | 'version_count';
+    }
+  | undefined {
+  if (kind === 'live' && opts?.collapseVariants === true) {
+    return {
+      groupExpr: "COALESCE(NULLIF(t.variant_base_fold, ''), t.key)",
+      rankOrder: 't.quality_rank DESC, t.id ASC, t.key ASC',
+      countCol: 'variant_count',
+    };
+  }
+  if (kind === 'movie' && opts?.groupVersions === true) {
+    return {
+      groupExpr: "COALESCE(NULLIF(t.version_group_key, ''), t.key)",
+      rankOrder: 't.id ASC, t.key ASC',
+      countCol: 'version_count',
+    };
+  }
+  return undefined;
+}
+
 async function fetchSourceSlice(
   db: SqlDriver,
   kind: BrowseKind,
@@ -74,6 +101,26 @@ async function fetchSourceSlice(
 ): Promise<ItemRow[]> {
   if (limit <= 0) return [];
   const watched = watchedFilterClause('t.key', opts);
+  const dedup = allSourcesDedupSpec(kind, opts);
+  if (dedup !== undefined) {
+    const orderBy = opts?.sortBy === 'alpha' ? 'sort_title ASC, key ASC' : 'name_fold ASC, id ASC';
+    const rows = await db.all<RawItemRow>(
+      `WITH ranked AS (
+         SELECT t.id, t.key, t.source_id, t.provider_id, t.name, t.name_fold, t.sort_title, ${ITEM_COLS[kind]},
+                COUNT(*) OVER (PARTITION BY ${dedup.groupExpr}) AS ${dedup.countCol},
+                ROW_NUMBER() OVER (PARTITION BY ${dedup.groupExpr} ORDER BY ${dedup.rankOrder}) AS rn
+           FROM ${ITEM_TABLE[kind]} t
+          WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}
+       )
+       SELECT id, key, source_id, provider_id, name, logo, rating, year, num, ${dedup.countCol}
+         FROM ranked
+        WHERE rn = 1
+        ORDER BY ${orderBy}
+        LIMIT ? OFFSET ?`,
+      [sourceId, ...watched.params, limit, offset],
+    );
+    return rows.map((r) => mapItemRow(kind, sourceId, r));
+  }
   const orderBy =
     opts?.sortBy === 'alpha' ? 't.sort_title ASC, t.key ASC' : 't.name_fold ASC, t.id ASC';
   const rows = await db.all<RawItemRow>(
@@ -276,10 +323,53 @@ export async function queryAllSourcesItemsByCursor(
   return { items, nextCursors, hasMore };
 }
 
+async function fetchGlobalAlphaSlice(
+  db: SqlDriver,
+  kind: BrowseKind,
+  activeIds: readonly string[],
+  offset: number,
+  limit: number,
+  opts?: ListItemsOptions,
+): Promise<ItemRow[]> {
+  if (limit <= 0 || activeIds.length === 0) return [];
+  const table = ITEM_TABLE[kind];
+  const placeholders = activeIds.map(() => '?').join(', ');
+  const watched = watchedFilterClause('t.key', opts);
+  const dedup = allSourcesDedupSpec(kind, opts);
+  if (dedup !== undefined) {
+    const rows = await db.all<RawItemRow>(
+      `WITH ranked AS (
+         SELECT t.id, t.key, t.source_id, t.provider_id, t.name, t.name_fold, t.sort_title, ${ITEM_COLS[kind]},
+                COUNT(*) OVER (PARTITION BY t.source_id, ${dedup.groupExpr}) AS ${dedup.countCol},
+                ROW_NUMBER() OVER (PARTITION BY t.source_id, ${dedup.groupExpr} ORDER BY ${dedup.rankOrder}) AS rn
+           FROM ${table} t
+          WHERE t.source_id IN (${placeholders}) AND t.is_hidden = 0${watched.clause}
+       )
+       SELECT id, key, source_id, provider_id, name, logo, rating, year, num, ${dedup.countCol}
+         FROM ranked
+        WHERE rn = 1
+        ORDER BY sort_title ASC, key ASC
+        LIMIT ? OFFSET ?`,
+      [...activeIds, ...watched.params, limit, offset],
+    );
+    return rows.map((r) => mapItemRow(kind, r.source_id ?? '', r));
+  }
+  const rows = await db.all<RawItemRow>(
+    `SELECT t.id, t.key, t.source_id, t.provider_id, t.name, ${ITEM_COLS[kind]}
+       FROM ${table} t
+      WHERE t.source_id IN (${placeholders}) AND t.is_hidden = 0${watched.clause}
+      ORDER BY t.sort_title ASC, t.key ASC
+      LIMIT ? OFFSET ?`,
+    [...activeIds, ...watched.params, limit, offset],
+  );
+  return rows.map((r) => mapItemRow(kind, r.source_id ?? '', r));
+}
+
 /**
  * Queries visible items (`is_hidden = 0`) of `kind` across active (`sources.deleting = 0`)
- * sources using fair per-source quotas (`floor(limit / activeSourceCount)` with remainder
- * redistribution when smaller sources exhaust early) so large sources never drown out small ones.
+ * sources. Uses global `ORDER BY sort_title ASC, key ASC` when `opts?.sortBy === 'alpha'` so
+ * all-sources alphabetical browsing aligns 1:1 with `queryAlphabetIndex`, and fair per-source
+ * quotas (`floor(limit / activeSourceCount)` with remainder redistribution) for `'default'` order.
  */
 export async function queryAllSourcesItems(
   db: SqlDriver,
@@ -296,18 +386,34 @@ export async function queryAllSourcesItems(
   if (activeIds.length === 1) {
     return fetchSourceSlice(db, kind, activeIds[0] ?? '', page.offset, page.limit, opts);
   }
+  if (opts?.sortBy === 'alpha') {
+    return fetchGlobalAlphaSlice(db, kind, activeIds, page.offset, page.limit, opts);
+  }
 
   const endTarget = page.offset + page.limit;
   const table = ITEM_TABLE[kind];
   const watched = watchedFilterClause('t.key', opts);
+  const dedup = allSourcesDedupSpec(kind, opts);
   const counts = await Promise.all(
     activeIds.map(async (id) => {
-      const rows = await db.all<{ n: number }>(
-        `SELECT COUNT(*) AS n FROM (
-           SELECT 1 FROM ${table} t WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause} LIMIT ?
-         )`,
-        [id, ...watched.params, endTarget],
-      );
+      const rows =
+        dedup === undefined
+          ? await db.all<{ n: number }>(
+              `SELECT COUNT(*) AS n FROM (
+                 SELECT 1 FROM ${table} t WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause} LIMIT ?
+               )`,
+              [id, ...watched.params, endTarget],
+            )
+          : await db.all<{ n: number }>(
+              `SELECT COUNT(*) AS n FROM (
+                 SELECT 1 FROM (
+                   SELECT ROW_NUMBER() OVER (PARTITION BY ${dedup.groupExpr} ORDER BY ${dedup.rankOrder}) AS rn
+                     FROM ${table} t
+                    WHERE t.source_id = ? AND t.is_hidden = 0${watched.clause}
+                 ) WHERE rn = 1 LIMIT ?
+               )`,
+              [id, ...watched.params, endTarget],
+            );
       return rows[0]?.n ?? 0;
     }),
   );

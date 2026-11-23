@@ -406,6 +406,9 @@ export function createObservedCatalog(
     ...(c.listFavoriteKeys ? { listFavoriteKeys: c.listFavoriteKeys.bind(c) } : {}),
     ...(c.flushPendingWrites ? { flushPendingWrites: c.flushPendingWrites.bind(c) } : {}),
     ...(c.search ? { search: c.search.bind(c) } : {}),
+    ...(c.searchSuggestions ? { searchSuggestions: c.searchSuggestions.bind(c) } : {}),
+    ...(c.alphabetIndex ? { alphabetIndex: c.alphabetIndex.bind(c) } : {}),
+    ...(c.epgSlice ? { epgSlice: c.epgSlice.bind(c) } : {}),
     ...(c.importGuide
       ? {
           importGuide: async (

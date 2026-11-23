@@ -292,16 +292,16 @@ describe('sort_title writing, alpha sorting & watched filtering (#125)', () => {
       'Zeta Drift',
     ]);
 
-    // Multi-source allSourcesItems alpha + excludeWatched interleaves fairly without watched items
+    // Multi-source allSourcesItems alpha + excludeWatched sorts globally by sort_title without watched items
     const multiAll = await m3uService.allSourcesItems?.('movie', 0, 10, undefined, {
       sortBy: 'alpha',
       excludeWatched: true,
     });
     expect(multiAll?.map((i) => i.name)).toEqual([
-      'An American Tale',
       'The Abyss',
-      'A Quiet Place',
+      'An American Tale',
       'An Orchard',
+      'A Quiet Place',
       'Zeta Drift',
     ]);
 

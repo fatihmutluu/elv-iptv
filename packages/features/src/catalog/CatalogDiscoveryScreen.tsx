@@ -29,6 +29,7 @@ import {
   CategoryGridView,
 } from './CategoryGridView';
 import {
+  ALPHABET_RAIL_MIN_ITEMS,
   buildCatalogNavRows,
   type CatalogNavRowId,
   type CatalogRailNavEntry,
@@ -285,6 +286,15 @@ export function CatalogDiscoveryScreen({
     [theme.reduceMotion],
   );
 
+  const handleSelectAlphabetLetter = useCallback((letter: string, offset: number) => {
+    gridAccessRef.current.selectLetter?.(letter, offset);
+  }, []);
+
+  const activeAlphabetBuckets =
+    isGridMode && sortBy === 'alpha' && effectiveGridItemCount >= ALPHABET_RAIL_MIN_ITEMS
+      ? (gridMeta.alphabetBuckets ?? [])
+      : [];
+
   const tvNav = useTvCatalogNavigation({
     focusMemoryKey: kind,
     isTv: layout.isTv,
@@ -293,8 +303,10 @@ export function CatalogDiscoveryScreen({
     rows: navRows,
     gridColumns: layout.gridColumns,
     gridItemCount: effectiveGridItemCount,
+    alphabetBuckets: activeAlphabetBuckets,
     onActivateRow: handleActivateRow,
     onActivateGridItem: handleActivateGridItem,
+    onSelectAlphabetLetter: handleSelectAlphabetLetter,
     onExitGrid: handleSelectAllCategories,
     onFocusRow: handleFocusRow,
     ...(onFocusTopNav !== undefined ? { onFocusTopNav } : {}),
@@ -353,11 +365,13 @@ export function CatalogDiscoveryScreen({
               backFocused={tvNav.focusedRowId === 'gridBack' && tvNav.focusedCol === 0}
               sortFocused={tvNav.focusedRowId === 'gridBack' && tvNav.focusedCol === 1}
               focusedGridPos={tvNav.focusedGridPos}
+              focusedAlphabetLetter={tvNav.focusedAlphabetLetter}
               sortBy={sortBy}
               groupVersions={groupVersions}
               onToggleSort={handleToggleSort}
               onBack={handleSelectAllCategories}
               onOpenDetail={onOpenDetail}
+              onJumpToGridPos={tvNav.jumpToGridPos}
               favoriteKeys={quickActionsState.favoriteKeys}
               watchedOverrides={quickActionsState.watchedOverrides}
               onQuickPlay={handleQuickPlay}

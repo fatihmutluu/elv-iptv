@@ -68,20 +68,24 @@ export const liveWriter: ItemWriter<XtreamLive> = {
 };
 
 export const movieWriter: ItemWriter<XtreamMovie> = {
-  sql: `INSERT INTO movies_next (source_id, key, provider_id, name, name_fold, sort_title, version_group_key, version_label, logo, rating, year, extension, added, run_id, content_hash)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  sql: `INSERT INTO movies_next (source_id, key, provider_id, name, name_fold, sort_title, version_group_key, version_label, logo, rating, year, extension, added, cast_text, director_text, cast_fold, director_fold, run_id, content_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_id, key) DO UPDATE SET provider_id = excluded.provider_id, name = excluded.name,
           name_fold = excluded.name_fold, sort_title = excluded.sort_title,
           version_group_key = excluded.version_group_key, version_label = excluded.version_label,
           logo = excluded.logo, rating = excluded.rating, year = excluded.year,
-          extension = excluded.extension, added = excluded.added, run_id = excluded.run_id,
-          content_hash = excluded.content_hash`,
+          extension = excluded.extension, added = excluded.added,
+          cast_text = excluded.cast_text, director_text = excluded.director_text,
+          cast_fold = excluded.cast_fold, director_fold = excluded.director_fold,
+          run_id = excluded.run_id, content_hash = excluded.content_hash`,
   row: (sourceId, key, runId, i) => {
     const providerId = String(i.id);
     const nameFold = foldText(i.name);
     const sortTitle = sortTitleKey(i.name);
     const version = parseVodVersion(i.name, i.year);
     const versionLabel = version.versionLabel.length > 0 ? version.versionLabel : null;
+    const castFold = i.cast !== undefined ? foldText(i.cast) : null;
+    const directorFold = i.director !== undefined ? foldText(i.director) : null;
     const contentHash = hashMovieRow({
       providerId,
       name: i.name,
@@ -91,6 +95,8 @@ export const movieWriter: ItemWriter<XtreamMovie> = {
       year: i.year,
       extension: i.extension,
       added: i.added,
+      castText: i.cast,
+      directorText: i.director,
     });
     return [
       sourceId,
@@ -106,6 +112,10 @@ export const movieWriter: ItemWriter<XtreamMovie> = {
       n(i.year),
       i.extension,
       n(i.added),
+      s(i.cast),
+      s(i.director),
+      castFold,
+      directorFold,
       runId,
       contentHash,
     ];
@@ -113,16 +123,20 @@ export const movieWriter: ItemWriter<XtreamMovie> = {
 };
 
 export const seriesWriter: ItemWriter<XtreamSeries> = {
-  sql: `INSERT INTO series_next (source_id, key, provider_id, name, name_fold, sort_title, cover, plot, rating, year, last_modified, run_id, content_hash)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  sql: `INSERT INTO series_next (source_id, key, provider_id, name, name_fold, sort_title, cover, plot, rating, year, last_modified, cast_text, director_text, cast_fold, director_fold, run_id, content_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_id, key) DO UPDATE SET provider_id = excluded.provider_id, name = excluded.name,
           name_fold = excluded.name_fold, sort_title = excluded.sort_title, cover = excluded.cover, plot = excluded.plot, rating = excluded.rating,
-          year = excluded.year, last_modified = excluded.last_modified, run_id = excluded.run_id,
-          content_hash = excluded.content_hash`,
+          year = excluded.year, last_modified = excluded.last_modified,
+          cast_text = excluded.cast_text, director_text = excluded.director_text,
+          cast_fold = excluded.cast_fold, director_fold = excluded.director_fold,
+          run_id = excluded.run_id, content_hash = excluded.content_hash`,
   row: (sourceId, key, runId, i) => {
     const providerId = String(i.id);
     const nameFold = foldText(i.name);
     const sortTitle = sortTitleKey(i.name);
+    const castFold = i.cast !== undefined ? foldText(i.cast) : null;
+    const directorFold = i.director !== undefined ? foldText(i.director) : null;
     const contentHash = hashSeriesRow({
       providerId,
       name: i.name,
@@ -132,6 +146,8 @@ export const seriesWriter: ItemWriter<XtreamSeries> = {
       rating: i.rating,
       year: i.year,
       lastModified: i.lastModified,
+      castText: i.cast,
+      directorText: i.director,
     });
     return [
       sourceId,
@@ -145,6 +161,10 @@ export const seriesWriter: ItemWriter<XtreamSeries> = {
       n(i.rating),
       n(i.year),
       n(i.lastModified),
+      s(i.cast),
+      s(i.director),
+      castFold,
+      directorFold,
       runId,
       contentHash,
     ];
@@ -161,12 +181,12 @@ const PLACEMENT_SQL = `INSERT INTO placements_next (source_id, kind, item_key, c
   ON CONFLICT(source_id, kind, category_id, item_key) DO UPDATE SET position = excluded.position,
     run_id = excluded.run_id`;
 
-const EPISODE_SQL = `INSERT INTO episodes (source_id, key, provider_id, series_key, season, episode, title, extension,
+const EPISODE_SQL = `INSERT INTO episodes (source_id, key, provider_id, series_key, season, episode, title, title_fold, extension,
     duration_sec, run_id)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(source_id, key) DO UPDATE SET provider_id = excluded.provider_id, series_key = excluded.series_key,
-    season = excluded.season, episode = excluded.episode, title = excluded.title, extension = excluded.extension,
-    duration_sec = excluded.duration_sec, run_id = excluded.run_id`;
+    season = excluded.season, episode = excluded.episode, title = excluded.title, title_fold = excluded.title_fold,
+    extension = excluded.extension, duration_sec = excluded.duration_sec, run_id = excluded.run_id`;
 
 /** Upserts categories of one kind; `offset` is the position of the first one. */
 export async function writeCategories(
@@ -235,6 +255,7 @@ export async function writeEpisodes(
       e.season,
       e.episode,
       e.title,
+      foldText(e.title),
       e.extension,
       n(e.durationSec),
       runId,

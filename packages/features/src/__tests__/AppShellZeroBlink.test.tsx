@@ -197,8 +197,10 @@ describe('AppShell zero-blink prewarm, startup anti-flash & background/unmount f
   it('hydrates Search results synchronously when returning from Detail without re-searching', async () => {
     const searchMock = jest.fn(async () => ({
       live: [],
+      epg: [],
       movies: [makeItem('movie', 'Warm Movie One')],
       series: [],
+      episodes: [],
     }));
     const catalog = createStubCatalog({ search: searchMock });
 

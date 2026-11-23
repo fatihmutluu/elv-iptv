@@ -5,6 +5,7 @@ import { createServer, type Server, type ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type {
+  AlphabetBucket,
   CategoryRow,
   EpisodeRow,
   FavoriteRow,
@@ -13,6 +14,7 @@ import type {
   ItemDetailRow,
   ItemRow,
   SearchResults,
+  SearchSuggestion,
   SeasonRow,
   SourceRow,
   StreamRequest,
@@ -494,8 +496,20 @@ describe('createCatalogWorkerRuntime', () => {
     }).promise;
     expect(searchHits.live.map((r) => r.name)).toEqual(['Channel One']);
     expect(searchHits.live[0]?.logo).toContain(SYNTH_M3U_VAL);
+    expect(searchHits.epg).toEqual([]);
     expect(searchHits.movies).toEqual([]);
     expect(searchHits.series).toEqual([]);
+    expect(searchHits.episodes).toEqual([]);
+    const suggestions = await client.call<readonly SearchSuggestion[]>({
+      method: 'searchSuggestions',
+      options: { sourceId: m3uId, limit: 5 },
+    }).promise;
+    expect(suggestions.some((s) => s.kind === 'category' && s.label === 'News')).toBe(true);
+    const alphaBuckets = await client.call<readonly AlphabetBucket[]>({
+      method: 'alphabetIndex',
+      input: { kind: 'live', sourceId: m3uId },
+    }).promise;
+    expect(alphaBuckets).toEqual([{ letter: 'C', offset: 0, count: 2 }]);
     const m3uStream = await client.call<Result<StreamRequest>>({
       method: 'resolveStream',
       itemKey: m3uItems[0]?.key ?? '',
@@ -537,7 +551,7 @@ describe('createCatalogWorkerRuntime', () => {
         query: 'Channel One',
         opts: { scope: 'live', sourceId: m3uId },
       }).promise,
-    ).toEqual({ live: [], movies: [], series: [] });
+    ).toEqual({ live: [], epg: [], movies: [], series: [], episodes: [] });
 
     await h.shutdown();
     expect(h.shutdownCount).toBe(1);

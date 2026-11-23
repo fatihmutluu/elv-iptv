@@ -7,6 +7,7 @@ import {
   SkeletonBox,
   TABULAR_NUMS_STYLE,
   type Theme,
+  useI18n,
   useTheme,
   webCursorPointer,
   webTransition,
@@ -275,8 +276,126 @@ export const ChannelGridRow = memo(function ChannelGridRowInner(p: {
   );
 });
 
+/** Compact `Channel order | A–Z` sort toggle bar above `LiveChannelsGrid` (`#407`). */
+export const LiveGridSortToolbar = memo(function LiveGridSortToolbarInner(p: {
+  readonly isAlpha: boolean;
+  readonly isTv: boolean;
+  readonly isTouch: boolean;
+  readonly padX: number;
+  readonly focused: boolean;
+  readonly onToggle: () => void;
+}): ReactElement {
+  const theme = useTheme();
+  const i18n = useI18n();
+  const cursor = webCursorPointer();
+  const transition = webTransition(theme, 'background-color, border-color, opacity, transform');
+  const sortA11yLabel = p.isAlpha
+    ? i18n.t('catalog.sortDefaultLabel')
+    : i18n.t('catalog.sortAlphaLabel');
+
+  return (
+    <View style={[styles.toolbarRow, { paddingHorizontal: p.padX }]}>
+      <Pressable
+        testID="live-grid-sort"
+        accessibilityRole="button"
+        accessibilityLabel={sortA11yLabel}
+        accessibilityState={{ selected: p.isAlpha }}
+        focusable={!p.isTv}
+        onPress={p.onToggle}
+        style={({ pressed }) => [
+          styles.sortButton,
+          p.isTouch ? styles.touchTarget : null,
+          {
+            borderRadius: theme.radius.button,
+            backgroundColor: p.focused
+              ? theme.colors.focusFill
+              : p.isAlpha
+                ? theme.colors.accentTint
+                : theme.colors.chipBg,
+            borderWidth: 1,
+            borderColor: p.focused
+              ? 'transparent'
+              : p.isAlpha
+                ? theme.colors.accent
+                : theme.colors.chipBorder,
+            opacity: pressed ? 0.8 : 1,
+            transform: [{ scale: p.focused ? theme.focus.buttonScale : 1 }],
+          },
+          cursor,
+          transition,
+        ]}
+      >
+        <Text
+          testID="live-grid-sort-default"
+          style={[
+            theme.typography.caption,
+            {
+              color: !p.isAlpha ? theme.colors.textPrimary : theme.colors.textMuted,
+              fontWeight: !p.isAlpha ? '700' : '500',
+            },
+          ]}
+        >
+          {i18n.t('live.sortDefault')}
+        </Text>
+        <Text style={[theme.typography.caption, { color: theme.colors.textMuted }]}>·</Text>
+        <Text
+          testID="live-grid-sort-alpha"
+          style={[
+            theme.typography.caption,
+            TABULAR_NUMS_STYLE,
+            {
+              color: p.isAlpha ? theme.colors.textPrimary : theme.colors.textSecondary,
+              fontWeight: p.isAlpha ? '700' : '600',
+            },
+          ]}
+        >
+          {i18n.t('live.sortAlpha')}
+        </Text>
+        {p.focused ? (
+          <View
+            pointerEvents="none"
+            testID="live-grid-sort-focus-ring"
+            style={[
+              styles.sortFocusRing,
+              {
+                borderRadius: theme.radius.button,
+                borderWidth: theme.focus.ringWidth,
+                borderColor: theme.colors.focusRingColor,
+              },
+            ]}
+          />
+        ) : null}
+      </Pressable>
+    </View>
+  );
+});
+
 const styles = StyleSheet.create({
   flex1: { flex: 1 },
+  toolbarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingTop: 6,
+    paddingBottom: 2,
+  },
+  sortButton: {
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  touchTarget: { minHeight: 40, minWidth: 40 },
+  sortFocusRing: {
+    position: 'absolute',
+    top: -3,
+    bottom: -3,
+    left: -3,
+    right: -3,
+  },
   row: { flexDirection: 'row', alignItems: 'flex-start' },
   tile: { flex: 1, overflow: 'hidden', justifyContent: 'space-between' },
   tileContentRow: { flex: 1, flexDirection: 'row', alignItems: 'center' },

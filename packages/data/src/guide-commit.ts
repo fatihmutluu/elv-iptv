@@ -1,6 +1,7 @@
 import type { SqlDriver, SqlValue } from '@elv/domain';
 import { resolveMappings } from './guide-match';
 import { type RunCtx, warn } from './import-run';
+import { populateProgrammesFtsForSource } from './schema-v12';
 
 const PROGRAMME_COLUMNS =
   'source_id, guide_id, start, stop, title, sub_title, description, categories_json, episode_num, icon, run_id, genre, flags, rating_system, rating_value';
@@ -105,6 +106,10 @@ export async function commitGuide(tx: SqlDriver, c: RunCtx, g: GuideResult): Pro
   }
   await tx.run('DELETE FROM programmes WHERE source_id = ?', [c.sourceId]);
   const swapped = await tx.run(SWAP_PROGRAMMES, [c.sourceId, c.runId, c.sourceId]);
+  await tx.run('DELETE FROM programmes_fts WHERE source_id = ?', [c.sourceId]);
+  if (swapped.changes > 0) {
+    await populateProgrammesFtsForSource(tx, c.sourceId, c.batchSize);
+  }
   await tx.run('DELETE FROM programmes_next WHERE source_id = ? AND run_id = ?', [
     c.sourceId,
     c.runId,

@@ -73,6 +73,7 @@ export interface UseTvLiveNavigationOptions {
   readonly numpadOpen: boolean;
   readonly onSelectMode: (mode: LiveMode) => void;
   readonly onSelectCategoryIndex: (index: number) => void;
+  readonly onToggleSort?: () => void;
   readonly onToggleNumpad: () => void;
   readonly onCloseNumpad: () => void;
   readonly onPressNumpadKey: (key: string) => void;
@@ -90,6 +91,7 @@ export interface TvLiveNavigationState {
   readonly focusedModeIndex: number | null;
   readonly focusedNumpadToggle: boolean;
   readonly focusedCategoryIndex: number | null;
+  readonly focusedSortToggle: boolean;
   readonly focusedEmptyCta: boolean;
   readonly focusedWatchControl: LiveWatchControl | null;
   readonly focusedZapIndex: number | null;
@@ -112,13 +114,14 @@ interface NavSnapshot {
 
 /**
  * 10-ft TV D-pad focus orchestrator for {@link LiveScreen}.
- * Coordinates `Top Nav <-> Mode Switcher <-> Category Bar <-> Body` and traps D-pad input inside
- * the 4×3 `LiveNumberPad` overlay in `Channels` mode, with zero duplicate key listeners.
+ * Coordinates `Top Nav <-> Mode Switcher <-> Category Bar (+ Sort Toggle) <-> Body` and traps D-pad
+ * input inside the 4×3 `LiveNumberPad` overlay in `Channels` mode, with zero duplicate key listeners.
  */
 export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNavigationState {
   const { isTv, isActiveScope, isEmpty, hasOpenSourcesCta, mode, categoryCount } = opts;
-  const { channelCount, hasBody, zapDrawerOpen, numpadOpen } = opts;
+  const { channelCount, hasBody, zapDrawerOpen, numpadOpen, onToggleSort } = opts;
   const hasCategoryBar = (mode === 'channels' || mode === 'epg') && categoryCount > 0;
+  const hasSortSlot = mode === 'channels' && onToggleSort !== undefined;
 
   const focusMemory = useBrowseFocusMemory();
   const focusMemoryRef = useRef(focusMemory);
@@ -170,8 +173,9 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
   useEffect(() => {
     setNav((prev) => {
       const maxModeCol = mode === 'channels' ? 3 : 2;
+      const maxCatCol = categoryCount > 0 ? categoryCount - 1 + (hasSortSlot ? 1 : 0) : 0;
       const nextModeCol = Math.min(prev.modeCol, maxModeCol);
-      const nextCatCol = categoryCount > 0 ? Math.min(prev.catCol, categoryCount - 1) : 0;
+      const nextCatCol = Math.min(prev.catCol, maxCatCol);
       const nextHeaderRow =
         !hasCategoryBar && prev.headerRow === 'categories' ? 'modes' : prev.headerRow;
       const nextZapIdx = channelCount > 0 ? Math.min(prev.zapIdx, channelCount - 1) : 0;
@@ -201,7 +205,7 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
         zapIdx: nextZapIdx,
       };
     });
-  }, [categoryCount, channelCount, hasBody, hasCategoryBar, mode, zapDrawerOpen]);
+  }, [categoryCount, channelCount, hasBody, hasCategoryBar, hasSortSlot, mode, zapDrawerOpen]);
 
   const handleChildEdgeTop = useCallback(() => {
     const showCats =
@@ -275,6 +279,7 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
       }
 
       const showCats = (o.mode === 'channels' || o.mode === 'epg') && o.categoryCount > 0;
+      const sortSlotAvailable = o.mode === 'channels' && o.onToggleSort !== undefined;
 
       if (cur.zone === 'header') {
         if (cur.headerRow === 'modes') {
@@ -297,19 +302,24 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
           return true;
         }
 
+        const maxCatCol = Math.max(0, o.categoryCount - 1) + (sortSlotAvailable ? 1 : 0);
         if (event.key === 'up') updateNav((p) => ({ ...p, headerRow: 'modes' }));
         else if (event.key === 'left')
           updateNav((p) => ({ ...p, catCol: Math.max(0, p.catCol - 1) }));
         else if (event.key === 'right')
           updateNav((p) => ({
             ...p,
-            catCol: Math.min(Math.max(0, o.categoryCount - 1), p.catCol + 1),
+            catCol: Math.min(maxCatCol, p.catCol + 1),
           }));
         else if (event.key === 'down') {
           if (o.hasBody) updateNav((p) => ({ ...p, zone: 'body' }));
-        } else if (event.key === 'select' && event.kind === 'press')
-          o.onSelectCategoryIndex(cur.catCol);
-        else return false;
+        } else if (event.key === 'select' && event.kind === 'press') {
+          if (sortSlotAvailable && cur.catCol === o.categoryCount) {
+            o.onToggleSort?.();
+          } else {
+            o.onSelectCategoryIndex(cur.catCol);
+          }
+        } else return false;
         return true;
       }
 
@@ -372,6 +382,12 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
     activeTv && !numpadOpen && !isEmpty && nav.zone === 'body' && mode === 'favorites';
   const watchCtrl: LiveWatchControl | null =
     channelCount === 0 ? 'browse' : (WATCH_CONTROLS[nav.watchControlIdx] ?? null);
+  const isSortColFocused =
+    inHeader &&
+    nav.headerRow === 'categories' &&
+    hasSortSlot &&
+    categoryCount > 0 &&
+    nav.catCol === categoryCount;
 
   return useMemo<TvLiveNavigationState>(
     () => ({
@@ -380,7 +396,9 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
         inHeader && nav.headerRow === 'modes' && nav.modeCol < 3 ? nav.modeCol : null,
       focusedNumpadToggle:
         inHeader && nav.headerRow === 'modes' && mode === 'channels' && nav.modeCol === 3,
-      focusedCategoryIndex: inHeader && nav.headerRow === 'categories' ? nav.catCol : null,
+      focusedCategoryIndex:
+        inHeader && nav.headerRow === 'categories' && !isSortColFocused ? nav.catCol : null,
+      focusedSortToggle: isSortColFocused,
       focusedEmptyCta: activeTv && !numpadOpen && isEmpty && hasOpenSourcesCta,
       focusedWatchControl: inFavBody && nav.watchZone === 'controls' ? watchCtrl : null,
       focusedZapIndex: inFavBody && channelCount > 0 && nav.watchZone === 'zap' ? nav.zapIdx : null,
@@ -397,6 +415,7 @@ export function useTvLiveNavigation(opts: UseTvLiveNavigationOptions): TvLiveNav
       inFavBody,
       inHeader,
       isEmpty,
+      isSortColFocused,
       mode,
       nav.catCol,
       nav.headerRow,

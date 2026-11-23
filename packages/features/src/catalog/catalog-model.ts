@@ -1,4 +1,9 @@
-import { type ItemSortOrder, MIN_RESUME_POSITION_MS, type WatchProgressRow } from '@elv/data';
+import {
+  type AlphabetBucket,
+  type ItemSortOrder,
+  MIN_RESUME_POSITION_MS,
+  type WatchProgressRow,
+} from '@elv/data';
 import type { DetailTarget, PagedListSource } from '../shared';
 
 /** Number of category rails loaded initially in Movies & Series Discovery Mode. */
@@ -21,6 +26,9 @@ export const GRID_MAX_PAGES = 8;
 
 /** Maximum Continue Watching cards loaded at the top of Movies & Series Discovery. */
 export const CATALOG_CONTINUE_LIMIT = 20;
+
+/** Minimum item count required before rendering the A–Z `AlphabetJumpRail` (`#407`). */
+export const ALPHABET_RAIL_MIN_ITEMS = 40;
 
 /** Preserved tab navigation state for a Movies or Series tab across tab switches. */
 export interface CatalogTabMemory {
@@ -185,6 +193,58 @@ export function clampGridFocus(
   const maxCol = Math.max(0, rowItems - 1);
   const clampedCol = Math.min(maxCol, Math.max(0, Math.floor(col)));
   return { row: clampedRow, col: clampedCol };
+}
+
+/**
+ * Resolves the active `#` or `A..Z` bucket letter owning `currentOffset` (`#407`).
+ * Returns `null` when no non-empty buckets exist.
+ */
+export function resolveActiveAlphabetLetter(
+  buckets: readonly AlphabetBucket[],
+  currentOffset: number,
+): string | null {
+  const available = buckets.filter((b) => b.count > 0);
+  if (available.length === 0) return null;
+  const safeOffset = Number.isFinite(currentOffset) ? Math.max(0, Math.floor(currentOffset)) : 0;
+  let active = available[0]?.letter ?? null;
+  for (const bucket of available) {
+    if (bucket.offset <= safeOffset) {
+      active = bucket.letter;
+    } else {
+      break;
+    }
+  }
+  return active;
+}
+
+function isRailLetter(letter: string): boolean {
+  const normalized = letter.trim().toUpperCase();
+  return normalized === '#' || (normalized.length === 1 && normalized >= 'A' && normalized <= 'Z');
+}
+
+/**
+ * Steps TV focus `up` or `down` across available (`count > 0`) rail alphabet buckets (`#`, `A..Z`, `#407`).
+ */
+export function stepAlphabetRailLetter(
+  buckets: readonly AlphabetBucket[],
+  currentLetter: string | null,
+  direction: 'up' | 'down',
+): string | null {
+  const available = buckets.filter((b) => b.count > 0 && isRailLetter(b.letter));
+  if (available.length === 0) return null;
+  const normalized = currentLetter?.trim().toUpperCase() ?? null;
+  const currentIdx =
+    normalized !== null
+      ? available.findIndex((b) => b.letter.trim().toUpperCase() === normalized)
+      : -1;
+  if (currentIdx === -1) {
+    return available[0]?.letter ?? null;
+  }
+  const nextIdx =
+    direction === 'up'
+      ? Math.max(0, currentIdx - 1)
+      : Math.min(available.length - 1, currentIdx + 1);
+  return available[nextIdx]?.letter ?? null;
 }
 
 /** Builds the ordered list of focusable horizontal rows for 10-ft TV D-pad navigation. */

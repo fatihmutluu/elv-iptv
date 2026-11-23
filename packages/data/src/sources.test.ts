@@ -195,6 +195,8 @@ describe('removeSource', () => {
       guide_channels: "(source_id, guide_id, name, name_fold, run_id) VALUES (?, 'g', 'n', 'n', 1)",
       channel_guide: "(source_id, channel_key, guide_id) VALUES (?, 'k', 'g')",
       programmes: "(source_id, guide_id, start, stop, title, run_id) VALUES (?, 'g', 1, 2, 't', 1)",
+      programmes_fts:
+        "(source_id, guide_id, start, stop, title_fold, description_fold) VALUES (?, 'g', 1, 2, 't', '')",
       watch_progress:
         "(profile_id, source_id, item_key, kind, title, position_ms, duration_ms, watched, updated_at) VALUES ('default', ?, ?, 'movie', 't', 20000, 60000, 0, 1)",
       favorites:
@@ -262,6 +264,8 @@ describe('removeSource', () => {
       guide_channels: "(source_id, guide_id, name, name_fold, run_id) VALUES (?, 'g', 'n', 'n', 1)",
       channel_guide: "(source_id, channel_key, guide_id) VALUES (?, 'k', 'g')",
       programmes: "(source_id, guide_id, start, stop, title, run_id) VALUES (?, 'g', 1, 2, 't', 1)",
+      programmes_fts:
+        "(source_id, guide_id, start, stop, title_fold, description_fold) VALUES (?, 'g', 1, 2, 't', '')",
       programmes_next:
         "(source_id, guide_id, start, stop, title, run_id) VALUES (?, 'g', 1, 2, 't', 1)",
       watch_progress:

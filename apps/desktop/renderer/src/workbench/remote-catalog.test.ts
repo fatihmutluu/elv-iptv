@@ -212,7 +212,9 @@ describe('createWorkbenchRemoteCatalog', () => {
       categories: [{ id: 'src-1|live|1', sourceId: 'src-1', kind: 'live', name: 'News', count: 5 }],
       items: [],
       itemDetail: null,
-      search: { live: [], movies: [], series: [] },
+      search: { live: [], epg: [], movies: [], series: [], episodes: [] },
+      searchSuggestions: [],
+      alphabetIndex: [],
       nowNext: [],
       epgWindow: {},
       channelByNumber: null,
@@ -280,9 +282,13 @@ describe('createWorkbenchRemoteCatalog', () => {
     expect(await catalog.itemDetail?.('m:src-1:1')).toBeNull();
     expect(await catalog.search?.('news', { scope: 'live', limit: 10 })).toEqual({
       live: [],
+      epg: [],
       movies: [],
       series: [],
+      episodes: [],
     });
+    expect(await catalog.searchSuggestions?.({ limit: 8, sourceId: 'src-1' })).toEqual([]);
+    expect(await catalog.alphabetIndex?.({ kind: 'movie', sourceId: 'src-1' })).toEqual([]);
     expect(await catalog.nowNext?.(['m:src-1:1'], 1_700_000_000_000)).toEqual([]);
     expect(await catalog.epgWindow?.(['m:src-1:1'], 1000, 2000)).toEqual({});
     expect(await catalog.channelByNumber?.(101, 'src-1')).toBeNull();
@@ -319,7 +325,7 @@ describe('createWorkbenchRemoteCatalog', () => {
 
     await catalog.close();
 
-    expect(calls).toHaveLength(24);
+    expect(calls).toHaveLength(26);
     expect(calls.every((c) => c.url === 'http://127.0.0.1:8082/rpc')).toBe(true);
     expect(calls.every((c) => c.token === CONFIG.token)).toBe(true);
     expect(calls.find((c) => c.method === 'importGuide')?.args).toEqual([

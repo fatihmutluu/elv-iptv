@@ -1,5 +1,6 @@
 import type {
   AddSourceInput,
+  AlphabetIndexInput,
   CategoryQueryOptions,
   ImportProgress,
   ItemSortOrder,
@@ -10,13 +11,14 @@ import type {
   SaveTrackPreferenceInput,
   SearchOptions,
   SearchScope,
+  SearchSuggestionsOptions,
   SourceCategorySelection,
   SourceSettings,
   ToggleFavoriteInput,
   TrackPreferenceResizeMode,
   UserItemKind,
 } from '@elv/data';
-import type { ElvError, ErrorCategory, TransportSettings } from '@elv/domain';
+import type { ContentKind, ElvError, ErrorCategory, TransportSettings } from '@elv/domain';
 import { MAX_PICKED_PLAYLIST_BYTES } from './sources-ipc.ts';
 
 const MAX_STRING_CHARS = 8_192;
@@ -30,10 +32,12 @@ const MAX_NOW_NEXT_KEYS = 60;
 const MAX_EPG_WINDOW_KEYS = 40;
 const MAX_SEARCH_QUERY_CHARS = 256;
 const MAX_SEARCH_LIMIT = 60;
+const MAX_SEARCH_SUGGESTIONS_LIMIT = 16;
 const MAX_SOURCE_IDS = 64;
 
+const CONTENT_KINDS = new Set<ContentKind>(['live', 'movie', 'series']);
 const USER_ITEM_KINDS = new Set<UserItemKind>(['live', 'movie', 'series', 'episode']);
-const SEARCH_SCOPES = new Set<SearchScope>(['all', 'live', 'movie', 'series']);
+const SEARCH_SCOPES = new Set<SearchScope>(['all', 'live', 'epg', 'movie', 'series', 'episode']);
 const ITEM_SORT_ORDERS = new Set<ItemSortOrder>(['default', 'alpha']);
 const ERROR_CATEGORIES = new Set<ErrorCategory>([
   'network',
@@ -132,7 +136,43 @@ export function isSearchOptions(x: unknown): x is SearchOptions {
     return false;
   }
   const sourceId = x['sourceId'];
-  return sourceId === undefined || isCleanKey(sourceId, MAX_ID_CHARS);
+  if (sourceId !== undefined && !isCleanKey(sourceId, MAX_ID_CHARS)) {
+    return false;
+  }
+  const nowMs = x['nowMs'];
+  return nowMs === undefined || isNonNegativeFinite(nowMs);
+}
+
+export function isSearchSuggestionsOptions(x: unknown): x is SearchSuggestionsOptions {
+  if (!isRecord(x)) return false;
+  const limit = x['limit'];
+  if (
+    limit !== undefined &&
+    (!isSafeInt(limit) || limit < 0 || limit > MAX_SEARCH_SUGGESTIONS_LIMIT)
+  ) {
+    return false;
+  }
+  return isOptionalSourceId(x['sourceId']) && isOptionalProfileId(x['profileId']);
+}
+
+export function isAlphabetIndexInput(x: unknown): x is AlphabetIndexInput {
+  if (!isRecord(x)) return false;
+  const kind = x['kind'];
+  if (typeof kind !== 'string' || !CONTENT_KINDS.has(kind as ContentKind)) {
+    return false;
+  }
+  if (!isOptionalSourceId(x['sourceId'])) return false;
+  if (x['categoryId'] !== undefined && !isCleanKey(x['categoryId'], 512)) return false;
+  if (x['collapseVariants'] !== undefined && typeof x['collapseVariants'] !== 'boolean') {
+    return false;
+  }
+  if (x['groupVersions'] !== undefined && typeof x['groupVersions'] !== 'boolean') {
+    return false;
+  }
+  if (x['excludeWatched'] !== undefined && typeof x['excludeWatched'] !== 'boolean') {
+    return false;
+  }
+  return isOptionalProfileId(x['profileId']);
 }
 
 export function isSaveProgressInput(x: unknown): x is SaveProgressInput {

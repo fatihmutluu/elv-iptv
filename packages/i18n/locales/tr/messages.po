@@ -1766,3 +1766,54 @@ msgstr "Sürüm"
 
 msgid "detail.versionCount"
 msgstr "{count} sürüm"
+
+msgid "search.scopeEpg"
+msgstr "Şimdi ve Rehber"
+
+msgid "search.scopeEpisodes"
+msgstr "Bölümler"
+
+msgid "search.sectionEpg"
+msgstr "Şimdi ve Rehber"
+
+msgid "search.sectionEpisodes"
+msgstr "Bölümler"
+
+msgid "search.suggestionsTitle"
+msgstr "Hızlı öneriler"
+
+msgid "search.suggestionFavorites"
+msgstr "Favoriler"
+
+msgid "search.suggestionRecent"
+msgstr "Son izlenenler"
+
+msgid "search.suggestionCategory"
+msgstr "Kategori"
+
+msgid "search.clearHistory"
+msgstr "Geçmişi temizle"
+
+msgid "search.matchedInCast"
+msgstr "Oyuncular ve yönetmen"
+
+msgid "search.airingNow"
+msgstr "Şimdi yayında"
+
+msgid "search.upcoming"
+msgstr "Yaklaşan"
+
+msgid "search.episodeLabel"
+msgstr "S{season} B{episode}"
+
+msgid "catalog.alphabetJumpLabel"
+msgstr "Harfe git"
+
+msgid "catalog.alphabetJumpToLetter"
+msgstr "{letter} harfine git"
+
+msgid "live.sortDefault"
+msgstr "Kanal sırası"
+
+msgid "live.sortAlpha"
+msgstr "A–Z"

@@ -297,6 +297,8 @@ export function createWorkbenchRemoteCatalog(
       rpcQuery('allSourcesItems', [kind, offset, limit, sourceIds, opts]),
     itemDetail: (itemKey) => rpcQuery('itemDetail', [itemKey]),
     search: (query, opts) => rpcQuery('search', [query, opts]),
+    searchSuggestions: (options) => rpcQuery('searchSuggestions', [options]),
+    alphabetIndex: (input) => rpcQuery('alphabetIndex', [input]),
     nowNext: (channelKeys, nowMs) => rpcQuery('nowNext', [channelKeys, nowMs]),
     epgWindow: (channelKeys, fromMs, toMs) => rpcQuery('epgWindow', [channelKeys, fromMs, toMs]),
     channelByNumber: (num, sourceId) => rpcQuery('channelByNumber', [num, sourceId]),

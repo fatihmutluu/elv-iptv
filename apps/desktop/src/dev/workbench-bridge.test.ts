@@ -518,6 +518,23 @@ describe('createWorkbenchBridge', () => {
       ]);
       expect(hits.live.map((r) => r.name)).toEqual(['Alpha News']);
 
+      const suggestions = await rpc<Array<{ kind: string; label: string }>>(
+        bridge,
+        'searchSuggestions',
+        [{ sourceId: m3uId, limit: 5 }],
+      );
+      expect(suggestions.some((s) => s.kind === 'category' && s.label === 'News')).toBe(true);
+
+      const alpha = await rpc<Array<{ letter: string; offset: number; count: number }>>(
+        bridge,
+        'alphabetIndex',
+        [{ kind: 'live', sourceId: m3uId }],
+      );
+      expect(alpha).toEqual([
+        { letter: 'A', offset: 0, count: 1 },
+        { letter: 'B', offset: 1, count: 1 },
+      ]);
+
       expect(await rpc(bridge, 'channelByNumber', [101, m3uId])).toMatchObject({
         name: 'Alpha News',
       });

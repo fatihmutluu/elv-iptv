@@ -116,6 +116,8 @@ describe('createLazyCatalog', () => {
     const {
       itemDetail: _omitted,
       search: _omittedSearch,
+      searchSuggestions: _omittedSuggestions,
+      alphabetIndex: _omittedAlphabet,
       importGuide: _omittedGuide,
       nowNext: _omittedNowNext,
       epgWindow: _omittedEpg,
@@ -126,7 +128,15 @@ describe('createLazyCatalog', () => {
     } = underlying;
     const lazy = createLazyCatalog(async () => withoutDetail);
     expect(await lazy.itemDetail?.('x:s1:movie:1')).toBeNull();
-    expect(await lazy.search?.('horizon')).toEqual({ live: [], movies: [], series: [] });
+    expect(await lazy.search?.('horizon')).toEqual({
+      live: [],
+      epg: [],
+      movies: [],
+      series: [],
+      episodes: [],
+    });
+    expect(await lazy.searchSuggestions?.({ limit: 8 })).toEqual([]);
+    expect(await lazy.alphabetIndex?.({ kind: 'movie' })).toEqual([]);
     expect(await lazy.importGuide?.('s1')).toEqual({
       ok: false,
       error: { category: 'storage', code: 'unsupported' },

@@ -44,10 +44,10 @@ const SERIES_SQL = `INSERT INTO series_next (source_id, key, name, name_fold, so
   ON CONFLICT(source_id, key) DO UPDATE SET name = excluded.name, name_fold = excluded.name_fold,
     sort_title = excluded.sort_title, run_id = excluded.run_id, content_hash = excluded.content_hash`;
 
-const EPISODE_SQL = `INSERT INTO episodes_next (source_id, key, legacy_key, series_key, title, url_template, headers_json, backup_urls_json, run_id)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+const EPISODE_SQL = `INSERT INTO episodes_next (source_id, key, legacy_key, series_key, title, title_fold, url_template, headers_json, backup_urls_json, run_id)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(source_id, key) DO UPDATE SET legacy_key = excluded.legacy_key, series_key = excluded.series_key,
-    title = excluded.title, url_template = excluded.url_template, headers_json = excluded.headers_json,
+    title = excluded.title, title_fold = excluded.title_fold, url_template = excluded.url_template, headers_json = excluded.headers_json,
     backup_urls_json = excluded.backup_urls_json, run_id = excluded.run_id`;
 
 const orNull = (v: SqlValue | undefined): SqlValue => v ?? null;
@@ -176,6 +176,7 @@ export async function writeM3uEpisodes(
       orNull(r.legacyKey),
       r.seriesKey,
       r.name,
+      foldText(r.name),
       r.template,
       orNull(r.headersJson),
       orNull(r.backupUrlsJson),

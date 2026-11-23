@@ -321,6 +321,12 @@ export function createCatalogBridge(ipc: CatalogIpcRendererLike): CatalogBridge 
     itemDetail: (itemKey) => callValue({ method: 'itemDetail', itemKey }),
     search: (query, opts) =>
       callValue({ method: 'search', query, ...(opts === undefined ? {} : { opts }) }),
+    searchSuggestions: (options) =>
+      callValue({
+        method: 'searchSuggestions',
+        ...(options === undefined ? {} : { options }),
+      }),
+    alphabetIndex: (input) => callValue({ method: 'alphabetIndex', input }),
     nowNext: (channelKeys, nowMs) => callValue({ method: 'nowNext', channelKeys, nowMs }),
     epgWindow: (channelKeys, fromMs, toMs) =>
       callValue({ method: 'epgWindow', channelKeys, fromMs, toMs }),

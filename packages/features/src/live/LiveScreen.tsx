@@ -107,6 +107,13 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
   );
   const clockFn = useMemo(() => (nowMs !== undefined ? () => nowMs : undefined), [nowMs]);
   const mode = activeMemory.mode;
+  const sortBy = activeMemory.sortBy ?? 'default';
+  const handleToggleSort = useCallback(() => {
+    clearPreviewRef.current();
+    updateMemory({
+      sortBy: (memoryRef.current.sortBy ?? 'default') === 'alpha' ? 'default' : 'alpha',
+    });
+  }, [memoryRef, updateMemory]);
   const handleSelectCategory = useCallback(
     (categoryId: string | null) => {
       clearPreviewRef.current();
@@ -131,6 +138,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     selectedCategoryId: activeMemory.categoryId,
     activeChannelKey: activeMemory.activeChannelKey,
     previousChannelKey: activeMemory.previousChannelKey,
+    sortBy,
     onSelectCategoryId: handleSelectCategory,
     onChannelHistoryChange: handleChannelHistoryChange,
     collapseVariants,
@@ -334,6 +342,7 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
     numpadOpen: numpad.open,
     onSelectMode: handleSelectMode,
     onSelectCategoryIndex: handleSelectCategoryIndex,
+    onToggleSort: handleToggleSort,
     onToggleNumpad: numpad.toggle,
     onCloseNumpad: numpad.close,
     onPressNumpadKey: numpad.pressKey,
@@ -474,6 +483,18 @@ export function LiveScreen(props: LiveScreenProps): ReactElement {
                   logoBackdropMode={logoBackdropMode}
                   sourceBadges={sourceBadges}
                   cleanChannelTitles={cleanChannelTitles}
+                  sortBy={live.sortBy}
+                  onToggleSort={handleToggleSort}
+                  sortFocused={tvNav.focusedSortToggle}
+                  alphabetBuckets={live.alphabetBuckets}
+                  catalog={catalog}
+                  {...(live.activeCategory !== null
+                    ? {
+                        categoryId: live.activeCategory.row.id,
+                        sourceId: live.activeCategory.row.sourceId,
+                      }
+                    : {})}
+                  collapseVariants={collapseVariants}
                   hydrateNowNext={live.hydrateNowNext}
                   onWatchChannel={handleWatchAndPlay}
                   onToggleFavorite={handleToggleFavorite}

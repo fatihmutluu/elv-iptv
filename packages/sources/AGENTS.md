@@ -42,5 +42,5 @@ M3U and XMLTV scanners and the Xtream client.
   `seriesInfo`, `vodInfo`, `shortEpg`), `playlistUrl`, `guideUrl`, `streamUrl`; `streamXtreamRecords` (`xtream-stream.ts`) parses `[...]` and numeric-keyed
   `{ "0": ... }` incrementally in `O(batchSize)` memory; `probeXtreamLiveFormat` (`xtream-probe.ts`) auto-detects `ts` vs `m3u8` in <=512 B.
   Per-`HttpClient` account-scoped `429` cooldowns (`Retry-After`, no failover on `429`) and ordered mirror failover (`xtream-mirrors.ts`).
-  Empty `{}` -> `[]`, `[]` -> `{}`; array `episodes` keep Season `0` and deduplicate. Credentials only in URL builders; errors omit URLs.
+  Empty `{}` -> `[]`, `[]` -> `{}`; array `episodes` keep Season `0` and deduplicate; extracts optional bounded `cast` (`<=512` chars, from `cast` or `actors`) and `director` (`<=256` chars) on VOD/Series rows and info. Credentials only in URL builders; errors omit URLs.
   Files: `xtream.ts`, `xtream-stream.ts`, `xtream-probe.ts`, `xtream-json.ts`, `xtream-mirrors.ts`, `xtream-records.ts`, `xtream-normalize.ts`, `xtream-types.ts`.

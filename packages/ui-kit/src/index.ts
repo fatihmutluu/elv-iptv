@@ -1,5 +1,11 @@
 export * from './adapters';
 export {
+  ALPHABET_JUMP_LETTERS,
+  type AlphabetJumpBucket,
+  AlphabetJumpRail,
+  type AlphabetJumpRailProps,
+} from './components/AlphabetJumpRail';
+export {
   detectFormFactor,
   type FormFactor,
   FormFactorProvider,
