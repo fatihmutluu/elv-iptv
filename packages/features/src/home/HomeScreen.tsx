@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
 import { type DetailTarget, useCatalogUiCache, useRouteActive } from '../shared';
+import { AmbientBackdrop } from '../shared/AmbientBackdrop';
 import { buildHeroActionIds, HomeHero, type HomeHeroActionId } from './HomeHero';
 import { HOME_HERO_AUTO_ROTATE_MS, useHomeHeroAutoRotate } from './HomeHeroBackdrop';
 import { buildHomeRailSpecs, HomeRail } from './HomeRail';
@@ -389,9 +390,25 @@ export function HomeScreen({
     railYRef.current.set(id, y);
   }, []);
   const railSpecs = useMemo(() => buildHomeRailSpecs(i18n.t), [i18n]);
+  const focusedAmbientEntry =
+    isTv &&
+    tvNav.focusedRowId !== null &&
+    tvNav.focusedRowId !== 'hero' &&
+    tvNav.focusedRowId !== 'empty' &&
+    tvNav.focusedCol !== null
+      ? (railSets[tvNav.focusedRowId]?.[tvNav.focusedCol] ?? null)
+      : null;
 
   return (
     <View testID="home-screen" style={[styles.root, { backgroundColor: theme.colors.bgCanvas }]}>
+      {isTv ? (
+        <AmbientBackdrop
+          testID="home-ambient-backdrop"
+          backdropKey={focusedAmbientEntry?.itemKey ?? null}
+          uri={focusedAmbientEntry?.backdropUri ?? focusedAmbientEntry?.posterUri ?? null}
+          title={focusedAmbientEntry?.title ?? ''}
+        />
+      ) : null}
       {isTv && isActiveScope ? <HomeTvKeyBridge onEvent={tvNav.handleTvKey} /> : null}
 
       {isLoadingInitial ? (

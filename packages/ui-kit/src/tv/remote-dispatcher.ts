@@ -246,7 +246,7 @@ export function createTvRemoteDispatcher(
   };
 }
 
-/** Attaches a single platform key listener (web, Android raw + BackHandler, or TVEventHandler + BackHandler). */
+/** Attaches a single platform key listener (web, Android/tvOS raw + BackHandler/Menu retention, or TVEventHandler). */
 export function attachPlatformKeySource(options: {
   raw: AndroidKeySource | null;
   isTextEntryActive: () => boolean;
@@ -272,7 +272,9 @@ export function attachPlatformKeySource(options: {
     };
   }
 
-  if (Platform.OS === 'android' && raw) {
+  const isTvos = Platform.OS === 'ios' && Platform.isTV;
+  if ((Platform.OS === 'android' || isTvos) && raw) {
+    const releaseMenu = isTvos ? retainTvMenuKey() : undefined;
     const adapt = createAndroidKeyAdapter();
     let rawBackHeld = false;
     let pendingRawBackUp = false;
@@ -311,24 +313,28 @@ export function attachPlatformKeySource(options: {
         emit(input, true);
       }
     });
-    const consume = BackHandler?.addEventListener?.('hardwareBackPress', () => {
-      const now = performance.now();
-      if (rawBackHeld) return true;
-      if (pendingRawBackUp && now - lastRawBackUpAt < RAW_BACK_DEDUP_MS) {
-        pendingRawBackUp = false;
-        return lastRawBackConsumed;
-      }
-      pendingRawBackUp = false;
-      return emit({ key: 'back', action: 'press', time: now }, false);
-    });
+    const consume =
+      Platform.OS === 'android'
+        ? BackHandler?.addEventListener?.('hardwareBackPress', () => {
+            const now = performance.now();
+            if (rawBackHeld) return true;
+            if (pendingRawBackUp && now - lastRawBackUpAt < RAW_BACK_DEDUP_MS) {
+              pendingRawBackUp = false;
+              return lastRawBackConsumed;
+            }
+            pendingRawBackUp = false;
+            return emit({ key: 'back', action: 'press', time: now }, false);
+          })
+        : undefined;
     return () => {
       for (const input of adapt({ action: 'blur' }, performance.now())) emit(input, true);
       sub.remove();
       consume?.remove();
+      releaseMenu?.();
     };
   }
 
-  const releaseMenu = Platform.OS === 'ios' && Platform.isTV ? retainTvMenuKey() : undefined;
+  const releaseMenu = isTvos ? retainTvMenuKey() : undefined;
   const remote = TVEventHandler?.addListener?.((event) => {
     const input = toKeyInput(event, performance.now(), Platform.OS === 'ios' ? 'ios' : 'android');
     if (input) emit(input, false);

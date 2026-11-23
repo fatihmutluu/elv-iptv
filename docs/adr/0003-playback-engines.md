@@ -1,7 +1,7 @@
 # 0003 Playback engines behind one PlayerEngine contract
 
 - Status: Accepted
-- Date: 2026-11-13, amended 2026-11-14, 2026-11-15
+- Date: 2026-11-13, amended 2026-11-14, 2026-11-15, 2026-11-23
 
 ## Context and problem
 
@@ -51,6 +51,15 @@ One `PlayerEngine` contract: enqueue-and-return commands, an attempt token on ev
   permissive notice alongside `dav1d`/`zimg`/`zvbi`.
 - Fallback rule: `VLCKit` (`TVVLCKit` / `MobileVLCKit`, LGPL-2.1) remains the unlinked Apple fallback and is never
   co-linked into the same binary as `AetherEngine`.
+
+### Amendment 2026-11-23 (Apple engine toolchain re-check, #85)
+
+- Re-check: tested newest upstream tag `AetherEngine 7.73.0` (`bbcf3b8359252b361258dc79817c4f81683df7b8`) on
+  2026-11-23 against `Xcode 26.4.1 (17E202)` / `Apple Swift 6.3.1` (`Release`) for all three targets
+  (`tvOS Simulator`, `tvOS` device, `iOS Simulator`).
+- Result: all three targets fail deterministically at `Sources/AetherEngine/Diagnostics/PerFrameBenchmark.swift:374:16`
+  (`error: the compiler is unable to type-check this expression in reasonable time`).
+- Pin decision: Apple pin remains `7.66.1`.
 
 ### Consequences
 

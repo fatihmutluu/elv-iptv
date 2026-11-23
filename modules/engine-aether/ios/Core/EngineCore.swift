@@ -333,6 +333,23 @@ public final class EngineCore {
     currentRequest?.live ?? true
   }
 
+  /// Current adopted attempt token for synchronizing native remote commands with `CommandFence`.
+  public var currentToken: Int {
+    token
+  }
+
+  /// Current `NowPlayingPlaybackState` snapshot for `MPNowPlayingInfoCenter` / `MPRemoteCommandCenter` (`#413`).
+  public var nowPlayingPlaybackState: NowPlayingPlaybackState {
+    NowPlayingPlaybackState(
+      isActive: active && !released && !errorReported,
+      isPlaying: active && played && !userPaused && !stalled && !seeking && !reloading,
+      isLive: currentRequest?.live ?? true,
+      rate: playbackRate,
+      positionSeconds: lastPositionSeconds,
+      durationSeconds: lastDurationSeconds
+    )
+  }
+
   func emit(_ event: EngineEventOut) { sink?.send(event) }
 
   func adopt(_ attempt: Int) {

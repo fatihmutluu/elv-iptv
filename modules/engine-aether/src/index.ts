@@ -1,6 +1,7 @@
 import {
   bridgeNativeEngine,
   type EngineCapabilities,
+  type EngineEvent,
   type NativeEngineHandle,
   type PlayerEngine,
 } from '@elv/playback';
@@ -30,6 +31,18 @@ interface RawPickedPlaylistFile {
   bytes?: unknown;
   base64?: unknown;
 }
+
+/** Typed playback metadata forwarded to Apple `MPNowPlayingInfoCenter` (`#413`). */
+export interface AetherMediaMetadata {
+  readonly title: string;
+  readonly subtitle?: string;
+  readonly artworkUrl?: string;
+  readonly kind?: 'live' | 'vod';
+  readonly canStepTrack?: boolean;
+}
+
+/** Remote media transport action emitted from Apple Control Center / Lock Screen / Siri Remote (`#413`). */
+export type AetherRemoteMediaAction = 'next' | 'previous' | 'stop';
 
 /** Hardware keyboard playback shortcut emitted by iOS/iPadOS `UIKeyCommand` (`#415`). */
 export type AppleHardwareKey =
@@ -69,6 +82,12 @@ interface RawInsets {
 interface AetherNativeEngineHandle extends NativeEngineHandle {
   setMuted?(muted: boolean): void;
   setVolume?(volume: number): void;
+  setBackgroundAudioEnabled?(enabled: boolean): void;
+  setMediaMetadata?(metadata: AetherMediaMetadata | null): void;
+  addListener: {
+    (eventName: 'onEngineEvent', listener: (event: EngineEvent) => void): { remove(): void };
+    (eventName: 'onRemoteMediaAction', listener: (payload: unknown) => void): { remove(): void };
+  };
 }
 
 interface NativeEngineModule {
@@ -113,6 +132,18 @@ function parseHardwareKey(payload: unknown): AppleHardwareKey | null {
         : null;
   return typeof candidate === 'string' && VALID_HARDWARE_KEYS.has(candidate)
     ? (candidate as AppleHardwareKey)
+    : null;
+}
+
+function parseRemoteMediaAction(payload: unknown): AetherRemoteMediaAction | null {
+  const candidate =
+    typeof payload === 'string'
+      ? payload
+      : typeof payload === 'object' && payload !== null && 'action' in payload
+        ? (payload as Record<string, unknown>).action
+        : null;
+  return candidate === 'next' || candidate === 'previous' || candidate === 'stop'
+    ? candidate
     : null;
 }
 
@@ -313,6 +344,34 @@ export function setAppleEngineVolume(engine: PlayerEngine, volume: number): void
   if (!Number.isFinite(volume)) return;
   const clamped = Math.min(100, Math.max(0, volume));
   handles.get(engine)?.setVolume?.(clamped);
+}
+
+/** Enables or disables opt-in background audio playback on a live AetherEngine (`#413`). */
+export function setAetherBackgroundAudioEnabled(engine: PlayerEngine, enabled: boolean): void {
+  handles.get(engine)?.setBackgroundAudioEnabled?.(Boolean(enabled));
+}
+
+/** Publishes or clears Apple `MPNowPlayingInfoCenter` metadata on a live AetherEngine (`#413`). */
+export function setAetherMediaMetadata(
+  engine: PlayerEngine,
+  metadata: AetherMediaMetadata | null,
+): void {
+  handles.get(engine)?.setMediaMetadata?.(metadata);
+}
+
+/** Subscribes to Apple `MPRemoteCommandCenter` remote next/previous/stop actions on a live AetherEngine (`#413`). */
+export function subscribeAetherRemoteMediaAction(
+  engine: PlayerEngine,
+  listener: (action: AetherRemoteMediaAction) => void,
+): () => void {
+  const native = handles.get(engine);
+  const sub = native?.addListener('onRemoteMediaAction', (payload) => {
+    const action = parseRemoteMediaAction(payload);
+    if (action !== null) listener(action);
+  });
+  return () => {
+    sub?.remove();
+  };
 }
 
 /**

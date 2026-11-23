@@ -1,7 +1,7 @@
 import type { ItemRow, WatchProgressRow } from '@elv/data';
 import { createAppI18n } from '@elv/i18n';
 import { I18nProvider, ThemeProvider, type ViewportOverride, ViewportProvider } from '@elv/ui-kit';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import { Platform, ScrollView, StyleSheet } from 'react-native';
 import { CatalogDiscoveryScreen } from '../CatalogDiscoveryScreen';
 import * as catalogModel from '../catalog-model';
@@ -250,6 +250,60 @@ describe('CatalogDiscoveryScreen — grid hydration, touch, and TV focus', () =>
     await sendKey(KEYCODE_DPAD_RIGHT);
     await sendKey(KEYCODE_DPAD_LEFT);
     expect(chunkSpy).not.toHaveBeenCalled();
+
+    await view.unmount();
+  });
+
+  it('mounts debounced AmbientBackdrop on TV focus over catalog rails (#414)', async () => {
+    jest.replaceProperty(Platform, 'OS', 'android');
+    jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
+
+    const actionCat = makeCategory(0, { name: 'Action', itemCount: 2 });
+    const categories = [actionCat];
+    const itemsByCategory = new Map<string, ItemRow[]>([
+      [
+        actionCat.id,
+        [
+          { ...makeItem(0, 0), logo: 'https://cdn.example/cat-0.jpg' },
+          { ...makeItem(0, 1), logo: 'https://cdn.example/cat-1.jpg' },
+        ],
+      ],
+    ]);
+    const { catalog } = createMockCatalog({ categories, itemsByCategory });
+    const { source: androidSource, sendKey } = createAndroidSource();
+
+    const view = await renderCatalog(
+      { catalog, sources: [makeSource()] },
+      {
+        androidSource,
+        viewport: {
+          formFactor: 'tv',
+          orientation: 'landscape',
+          inputModality: 'tv',
+          width: 1280,
+          height: 720,
+        },
+      },
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('catalog-rail-0-item-0')).toBeTruthy();
+    });
+
+    jest.useFakeTimers();
+    try {
+      expect(screen.queryByTestId('catalog-ambient-backdrop-movie')).toBeNull();
+      await sendKey(KEYCODE_DPAD_DOWN);
+      await sendKey(KEYCODE_DPAD_RIGHT);
+      expect(screen.queryByTestId('catalog-ambient-backdrop-movie')).toBeNull();
+
+      await act(async () => {
+        jest.advanceTimersByTime(500);
+      });
+      expect(screen.getByTestId('catalog-ambient-backdrop-movie')).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
 
     await view.unmount();
   });

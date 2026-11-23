@@ -39,6 +39,11 @@ const mockAppleSafeAreaListeners = new Set<
   (insets: { top: number; right: number; bottom: number; left: number }) => void
 >();
 const mockAppleHardwareKeyListeners = new Set<(key: string) => void>();
+const mockAetherRemoteActionListeners = new Set<(action: 'next' | 'previous' | 'stop') => void>();
+const mockSetAetherMediaMetadata = jest.fn();
+const mockSetAetherBackgroundAudioEnabled = jest.fn();
+const mockSetPanGestureEnabled = jest.fn();
+const mockPanGestureListeners = new Set<(event: unknown) => void>();
 const mockGetAppleSafeAreaInsets = jest.fn(() => ({ top: 47, right: 0, bottom: 34, left: 0 }));
 const mockSetAppleEngineMuted = jest.fn();
 const mockSetAppleEngineVolume = jest.fn();
@@ -58,6 +63,17 @@ jest.mock('@elv/remote-keys', () => ({
     addListener: (l: (event: unknown) => void) => {
       mockListener = l;
       return { remove: () => {} };
+    },
+  },
+  remotePanGestures: {
+    setEnabled: (enabled: boolean) => mockSetPanGestureEnabled(enabled),
+    addListener: (l: (event: unknown) => void) => {
+      mockPanGestureListeners.add(l);
+      return {
+        remove: () => {
+          mockPanGestureListeners.delete(l);
+        },
+      };
     },
   },
 }));
@@ -80,6 +96,19 @@ jest.mock('@elv/engine-aether', () => {
       mockAppleHardwareKeyListeners.add(listener);
       return () => {
         mockAppleHardwareKeyListeners.delete(listener);
+      };
+    },
+    setAetherMediaMetadata: (engine: PlayerEngine, metadata: unknown) =>
+      mockSetAetherMediaMetadata(engine, metadata),
+    setAetherBackgroundAudioEnabled: (engine: PlayerEngine, enabled: boolean) =>
+      mockSetAetherBackgroundAudioEnabled(engine, enabled),
+    subscribeAetherRemoteMediaAction: (
+      _engine: PlayerEngine,
+      listener: (action: 'next' | 'previous' | 'stop') => void,
+    ) => {
+      mockAetherRemoteActionListeners.add(listener);
+      return () => {
+        mockAetherRemoteActionListeners.delete(listener);
       };
     },
     setAppleEngineMuted: (engine: PlayerEngine, muted: boolean) =>
@@ -200,6 +229,73 @@ jest.mock('react-native/Libraries/Settings/NativeSettingsManager', () => ({
   },
 }));
 
+function createStubEngine(overrides: Partial<PlayerEngine> = {}): PlayerEngine {
+  return {
+    capabilities: {
+      mpegTsOverHttp: true,
+      hls: true,
+      liveSeek: false,
+      softwareAudioFallback: true,
+      recreate: true,
+      audioTrackSelection: true,
+      subtitleTrackSelection: true,
+    },
+    subscribe: () => () => {},
+    load: () => {},
+    retry: () => {},
+    play: () => {},
+    pause: () => {},
+    seek: () => {},
+    stop: () => {},
+    recreate: () => {},
+    release: () => {},
+    ...overrides,
+  };
+}
+
+function createStubLiveCatalog(): CatalogService {
+  return {
+    listSources: async () => [
+      {
+        id: 'src-1',
+        kind: 'm3u',
+        name: 'Synthetic Source',
+        createdAt: 1,
+        lastSyncAt: 1,
+        lastError: null,
+      },
+    ],
+    categories: async (_sourceId: string, kind: string) =>
+      kind === 'live'
+        ? [
+            {
+              id: 'cat-1',
+              sourceId: 'src-1',
+              kind: 'live',
+              name: 'General',
+              itemCount: 1,
+              sortOrder: 0,
+            },
+          ]
+        : [],
+    items: async () => [
+      {
+        key: 'ck-1',
+        sourceId: 'src-1',
+        categoryId: 'cat-1',
+        kind: 'live',
+        name: 'Channel 0001',
+        channelNum: 1,
+        sortOrder: 0,
+      },
+    ],
+    resolveStream: async () => ({
+      ok: true,
+      value: { url: 'http://127.0.0.1:7878/live/demo/1001.ts', headers: {} },
+    }),
+  } as unknown as CatalogService;
+}
+
 const GATE_URL = 'elviptv://gate/list?items=50';
 
 function openedWith(url: string | null) {
@@ -240,6 +336,11 @@ afterEach(() => {
   mockPipListeners.clear();
   mockAppleSafeAreaListeners.clear();
   mockAppleHardwareKeyListeners.clear();
+  mockAetherRemoteActionListeners.clear();
+  mockSetAetherMediaMetadata.mockReset();
+  mockSetAetherBackgroundAudioEnabled.mockReset();
+  mockSetPanGestureEnabled.mockReset();
+  mockPanGestureListeners.clear();
   mockGetAppleSafeAreaInsets.mockClear();
   mockSetAppleEngineMuted.mockReset();
   mockSetAppleEngineVolume.mockReset();
@@ -404,71 +505,15 @@ describe('App', () => {
     jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(false);
     const loadedUrls: string[] = [];
     let released = false;
-    mockAetherEngine = {
-      capabilities: {
-        mpegTsOverHttp: true,
-        hls: true,
-        liveSeek: false,
-        softwareAudioFallback: true,
-        recreate: true,
-        audioTrackSelection: true,
-        subtitleTrackSelection: true,
-      },
-      subscribe: () => () => {},
+    mockAetherEngine = createStubEngine({
       load: (cmd) => {
         loadedUrls.push(cmd.url);
       },
-      retry: () => {},
-      play: () => {},
-      pause: () => {},
-      seek: () => {},
-      stop: () => {},
-      recreate: () => {},
       release: () => {
         released = true;
       },
-    };
-    const stubCatalog = {
-      listSources: async () => [
-        {
-          id: 'src-1',
-          kind: 'm3u',
-          name: 'Synthetic Source',
-          createdAt: 1,
-          lastSyncAt: 1,
-          lastError: null,
-        },
-      ],
-      categories: async (_sourceId: string, kind: string) =>
-        kind === 'live'
-          ? [
-              {
-                id: 'cat-1',
-                sourceId: 'src-1',
-                kind: 'live',
-                name: 'General',
-                itemCount: 1,
-                sortOrder: 0,
-              },
-            ]
-          : [],
-      items: async () => [
-        {
-          key: 'ck-1',
-          sourceId: 'src-1',
-          categoryId: 'cat-1',
-          kind: 'live',
-          name: 'Channel 0001',
-          channelNum: 1,
-          sortOrder: 0,
-        },
-      ],
-      resolveStream: async () => ({
-        ok: true,
-        value: { url: 'http://127.0.0.1:7878/live/demo/1001.ts', headers: {} },
-      }),
-    } as unknown as CatalogService;
-    mockCatalogOverride = stubCatalog;
+    });
+    mockCatalogOverride = createStubLiveCatalog();
     openedWith(null);
 
     const view = await render(<App />);
@@ -495,6 +540,13 @@ describe('App', () => {
     expect(loadedUrls).toEqual(['http://127.0.0.1:7878/live/demo/1001.ts']);
     expect(mockAppleSafeAreaListeners.size).toBe(1);
     expect(mockAppleHardwareKeyListeners.size).toBe(1);
+    expect(mockAetherRemoteActionListeners.size).toBe(1);
+    expect(mockSetAetherBackgroundAudioEnabled).toHaveBeenCalledWith(mockAetherEngine, false);
+    expect(mockSetAetherMediaMetadata).toHaveBeenCalledWith(mockAetherEngine, {
+      title: 'Channel 0001',
+      kind: 'live',
+      canStepTrack: false,
+    });
 
     // Hardware keyboard shortcuts on iPadOS (#415): F toggles resizeMode, M toggles mute.
     await act(async () => {
@@ -506,6 +558,15 @@ describe('App', () => {
       for (const l of mockAppleHardwareKeyListeners) l('mute');
     });
     expect(mockSetAppleEngineMuted).toHaveBeenCalledWith(mockAetherEngine, true);
+
+    // Apple MPRemoteCommandCenter remote stop synchronizes PlaybackService and exits player (#413).
+    await act(async () => {
+      for (const l of mockAetherRemoteActionListeners) l('stop');
+    });
+    expect(screen.queryByTestId('player-surface')).toBeNull();
+    expect(mockSetAetherMediaMetadata).toHaveBeenLastCalledWith(mockAetherEngine, null);
+    expect(mockAetherRemoteActionListeners.size).toBe(0);
+    expect(mockAppleHardwareKeyListeners.size).toBe(0);
 
     await view.unmount();
     expect(released).toBe(true);
@@ -543,66 +604,8 @@ describe('App', () => {
     jest.replaceProperty(Platform, 'OS', 'android');
     jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(false);
     const mockStop = jest.fn();
-    mockMedia3Engine = {
-      capabilities: {
-        mpegTsOverHttp: true,
-        hls: true,
-        liveSeek: false,
-        softwareAudioFallback: true,
-        recreate: true,
-        audioTrackSelection: true,
-        subtitleTrackSelection: true,
-      },
-      subscribe: () => () => {},
-      load: () => {},
-      retry: () => {},
-      play: () => {},
-      pause: () => {},
-      seek: () => {},
-      stop: mockStop,
-      recreate: () => {},
-      release: () => {},
-    };
-    mockCatalogOverride = {
-      listSources: async () => [
-        {
-          id: 'src-1',
-          kind: 'm3u',
-          name: 'Synthetic Source',
-          createdAt: 1,
-          lastSyncAt: 1,
-          lastError: null,
-        },
-      ],
-      categories: async (_sourceId: string, kind: string) =>
-        kind === 'live'
-          ? [
-              {
-                id: 'cat-1',
-                sourceId: 'src-1',
-                kind: 'live',
-                name: 'General',
-                itemCount: 1,
-                sortOrder: 0,
-              },
-            ]
-          : [],
-      items: async () => [
-        {
-          key: 'ck-1',
-          sourceId: 'src-1',
-          categoryId: 'cat-1',
-          kind: 'live',
-          name: 'Channel 0001',
-          channelNum: 1,
-          sortOrder: 0,
-        },
-      ],
-      resolveStream: async () => ({
-        ok: true,
-        value: { url: 'http://127.0.0.1:7878/live/demo/1001.ts', headers: {} },
-      }),
-    } as unknown as CatalogService;
+    mockMedia3Engine = createStubEngine({ stop: mockStop });
+    mockCatalogOverride = createStubLiveCatalog();
     openedWith(null);
 
     const view = await render(<App />);
@@ -677,6 +680,36 @@ describe('App', () => {
       resolveInitialUrl?.(null);
     });
     expect(await screen.findByTestId('sources-screen')).toBeOnTheScreen();
+    await view.unmount();
+  });
+
+  it('wires Apple tvOS AetherEngine Now Playing and remotePanGestures without mobile hardware keyboard listener (#413, #225)', async () => {
+    jest.replaceProperty(Platform, 'OS', 'ios');
+    jest.spyOn(Platform, 'isTV', 'get').mockReturnValue(true);
+    mockAetherEngine = createStubEngine();
+    mockCatalogOverride = createStubLiveCatalog();
+    openedWith(null);
+
+    const view = await render(<App />);
+    const liveCard = await screen.findByTestId('home-live-item-0');
+    await fireEvent.press(liveCard);
+
+    expect(await screen.findByTestId('player-surface')).toBeOnTheScreen();
+    expect(mockAppleSafeAreaListeners.size).toBe(0);
+    expect(mockAppleHardwareKeyListeners.size).toBe(0);
+    expect(mockAetherRemoteActionListeners.size).toBe(1);
+    expect(mockSetAetherBackgroundAudioEnabled).toHaveBeenCalledWith(mockAetherEngine, false);
+    expect(mockSetAetherMediaMetadata).toHaveBeenCalledWith(mockAetherEngine, {
+      title: 'Channel 0001',
+      kind: 'live',
+      canStepTrack: false,
+    });
+
+    await act(async () => {
+      for (const l of mockAetherRemoteActionListeners) l('stop');
+    });
+    expect(screen.queryByTestId('player-surface')).toBeNull();
+    expect(mockAetherRemoteActionListeners.size).toBe(0);
     await view.unmount();
   });
 });

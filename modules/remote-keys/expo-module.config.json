@@ -1,6 +1,9 @@
 {
-  "platforms": ["android"],
+  "platforms": ["android", "apple"],
   "android": {
     "modules": ["io.github.fatihmutluu.elv.remotekeys.ElvRemoteKeysModule"]
+  },
+  "apple": {
+    "modules": ["ElvRemoteKeysModule"]
   }
 }

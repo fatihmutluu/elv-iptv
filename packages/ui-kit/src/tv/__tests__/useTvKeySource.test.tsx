@@ -285,16 +285,38 @@ describe('useTvKeySource', () => {
       expect(apis.addRemote).toHaveBeenCalledTimes(1);
     });
 
-    it('uses TVEventHandler on tvOS even with a source', async () => {
-      const apis = mockTvApis('ios');
+    it('uses the raw source on tvOS while retaining TVEventControl menu key without TVEventHandler', async () => {
+      const apis = mockTvApis('ios', true);
+      const fake = fakeSource();
+      const onInput = jest.fn<void, [KeyInput]>();
+      const hook = await renderHook(() => useTvKeySource(onInput), {
+        wrapper: ({ children }) => (
+          <RemoteKeysProvider android={fake.source}>{children}</RemoteKeysProvider>
+        ),
+      });
+      expect(apis.addRemote).not.toHaveBeenCalled();
+      expect(fake.addListener).toHaveBeenCalledTimes(1);
+      expect(apis.enableMenu).toHaveBeenCalledTimes(1);
+      fake.emit(down);
+      expect(onInput).toHaveBeenCalledWith({
+        key: 'down',
+        action: 'down',
+        time: expect.any(Number),
+      });
+      await hook.unmount();
+      expect(apis.disableMenu).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores the raw source on non-TV iOS devices', async () => {
+      const apis = mockTvApis('ios', false);
       const fake = fakeSource();
       await renderHook(() => useTvKeySource(() => {}), {
         wrapper: ({ children }) => (
           <RemoteKeysProvider android={fake.source}>{children}</RemoteKeysProvider>
         ),
       });
-      expect(apis.addRemote).toHaveBeenCalledTimes(1);
       expect(fake.addListener).not.toHaveBeenCalled();
+      expect(apis.enableMenu).not.toHaveBeenCalled();
     });
   });
 

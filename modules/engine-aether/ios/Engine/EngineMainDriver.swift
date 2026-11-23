@@ -9,6 +9,7 @@ final class EngineMainDriver: EngineSink {
   private let ownerId: ObjectIdentifier
   let backend: AetherBackend
   private(set) var core: EngineCore!
+  private var nowPlayingBridge: AetherNowPlayingBridge!
   weak var boundSurface: AetherSurfaceView?
   var activeEpoch = 0
 
@@ -21,6 +22,64 @@ final class EngineMainDriver: EngineSink {
       sink: self,
       uptimeMs: { ProcessInfo.processInfo.systemUptime * 1_000.0 }
     )
+    self.nowPlayingBridge = AetherNowPlayingBridge(
+      actions: NowPlayingRemoteActions(
+        onPlay: { [weak self] in
+          guard let self, self.core.nowPlayingPlaybackState.isActive else { return }
+          self.core.play(self.core.currentToken)
+          self.syncNowPlaying(force: true)
+        },
+        onPause: { [weak self] in
+          guard let self, self.core.nowPlayingPlaybackState.isActive else { return }
+          self.core.pause(self.core.currentToken)
+          self.syncNowPlaying(force: true)
+        },
+        onTogglePlayPause: { [weak self] in
+          guard let self else { return }
+          let state = self.core.nowPlayingPlaybackState
+          guard state.isActive else { return }
+          if state.isPlaying {
+            self.core.pause(self.core.currentToken)
+          } else {
+            self.core.play(self.core.currentToken)
+          }
+          self.syncNowPlaying(force: true)
+        },
+        onStop: { [weak self] in
+          guard let self else { return }
+          self.stopPlayback(self.core.currentToken)
+          self.owner?.emitRemoteMediaAction("stop")
+        },
+        onSkipBy: { [weak self] deltaSeconds in
+          guard let self else { return }
+          let state = self.core.nowPlayingPlaybackState
+          guard state.isActive, !state.isLive else { return }
+          let targetMs = max(0.0, (state.positionSeconds + deltaSeconds) * 1_000.0)
+          self.core.seek(self.core.currentToken, positionMs: targetMs)
+          self.syncNowPlaying(force: true)
+        },
+        onSeekTo: { [weak self] positionSeconds in
+          guard let self else { return }
+          let state = self.core.nowPlayingPlaybackState
+          guard state.isActive, !state.isLive else { return }
+          self.core.seek(self.core.currentToken, positionMs: max(0.0, positionSeconds) * 1_000.0)
+          self.syncNowPlaying(force: true)
+        },
+        onChangeRate: { [weak self] rate in
+          guard let self else { return }
+          let state = self.core.nowPlayingPlaybackState
+          guard state.isActive, !state.isLive else { return }
+          self.core.setSpeed(self.core.currentToken, rate: rate)
+          self.syncNowPlaying(force: true)
+        },
+        onNextTrack: { [weak self] in
+          self?.owner?.emitRemoteMediaAction("next")
+        },
+        onPreviousTrack: { [weak self] in
+          self?.owner?.emitRemoteMediaAction("previous")
+        }
+      )
+    )
     self.backend.onObservation = { [weak self] observation, serial in
       self?.core.observe(observation, serial: serial)
     }
@@ -32,6 +91,39 @@ final class EngineMainDriver: EngineSink {
 
   func send(_ event: EngineEventOut) {
     owner?.deliverToJavaScript(event, driverEpoch: activeEpoch)
+    switch event {
+    case .state(_, .ended), .error:
+      nowPlayingBridge.clear()
+    case .state, .stall:
+      syncNowPlaying(force: true)
+    case .clock:
+      syncNowPlaying(force: false)
+    case .firstFrame, .progress, .tracks, .mediaInfo, .telemetry, .chapters, .externalPlayback, .surface:
+      break
+    }
+  }
+
+  func setMediaMetadata(_ metadata: NowPlayingMetadata?) {
+    nowPlayingBridge.setMetadata(metadata, playbackState: core.nowPlayingPlaybackState)
+  }
+
+  func setBackgroundAudioEnabled(_ enabled: Bool) {
+    backend.setBackgroundAudioEnabled(enabled)
+  }
+
+  func stopPlayback(_ attempt: Int) {
+    core.stop(attempt)
+    nowPlayingBridge.clear()
+  }
+
+  @discardableResult
+  func recreatePlayback(_ attempt: Int) -> Bool {
+    nowPlayingBridge.clear()
+    return core.recreate(attempt)
+  }
+
+  private func syncNowPlaying(force: Bool) {
+    nowPlayingBridge.update(state: core.nowPlayingPlaybackState, force: force)
   }
 
   func setShutter(covered: Bool) {
@@ -102,6 +194,7 @@ final class EngineMainDriver: EngineSink {
   }
 
   func dispose() {
+    nowPlayingBridge.dispose()
     if let previous = boundSurface {
       previous.detachEngineReference(owner)
       boundSurface = nil

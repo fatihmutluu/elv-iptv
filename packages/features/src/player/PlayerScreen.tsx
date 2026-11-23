@@ -2,7 +2,7 @@ import type { BufferPreset, LiveChannelSwitchModePref } from '@elv/domain';
 import { type PlaybackService, positionAt } from '@elv/playback';
 import { useFormFactor, useI18n } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, View } from 'react-native';
+import { Platform } from 'react-native';
 import { noopAppLifecycle } from '../ports/app-lifecycle';
 import type { PlayableEntry } from '../ports/play-target';
 import type { HostKey } from '../ports/video-host';
@@ -11,10 +11,12 @@ import { NextEpisodeBanner } from './NextEpisodeBanner';
 import { type ChannelDrawerNavHandle, PlayerChannelDrawer } from './PlayerChannelDrawer';
 import { PlayerInfoSheet } from './PlayerInfoSheet';
 import {
+  buildDesktopWebProps,
+  computeSubtitleBottomInsetPx,
   DEFAULT_PLAYER_CLOCK,
   DEFAULT_PLAYER_TIMERS,
   formatStatusLine,
-  playerStyles,
+  PlayerSurfaceLayer,
   useLatestRef,
 } from './PlayerScreenParts';
 import { type PlayerScreenProps, PlayerScreenStage } from './PlayerScreenStage';
@@ -34,6 +36,7 @@ import {
   useAndroidDecoderModeSync,
   useInitialTrackSelection,
 } from './usePlayerTrackAndDecoderSync';
+import { usePlayerTvPan } from './useTvPanGesture';
 import { useWatchProgressSync } from './useWatchProgressSync';
 
 export type { PlayerScreenProps };
@@ -431,68 +434,63 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
 
   const anySheetOpen =
     controls.tracksOpen || controls.settingsOpen || controls.infoOpen || controls.channelListOpen;
+  const recordActivity = extras.stillWatching.recordUserActivity;
+  usePlayerTvPan({
+    openedEngine,
+    isTv,
+    hasService: activeService !== null,
+    isVod: activeTarget.kind === 'vod',
+    hasChannelList: canZap,
+    anySheetOpen,
+    stillWatchingVisible: !inPip && extras.stillWatching.promptVisible,
+    durationMs,
+    controls,
+    recordActivity,
+    setScrubDeltaMs: setTouchScrubDeltaMs,
+    commitScrub: handleTouchScrubCommit,
+  });
   const isWebDesktop = isDesktop && (Platform.OS as string) === 'web';
   const useDockedDesktopLayout = isDesktop && overlayMode === 'docked';
   const hideDesktopCursor =
     isWebDesktop && controls.osdHidden && status.kind === 'playing' && !anySheetOpen;
-  const desktopWebProps = isWebDesktop
-    ? ({
-        onContextMenu: (e?: { preventDefault?: () => void }) => {
-          e?.preventDefault?.();
-        },
-        onWheel: (e?: {
-          deltaY?: number;
-          nativeEvent?: { deltaY?: number };
-          preventDefault?: () => void;
-        }) => {
-          if (controls.handleWheelVolume(e?.deltaY ?? e?.nativeEvent?.deltaY ?? 0)) {
-            extras.stillWatching.recordUserActivity();
-            e?.preventDefault?.();
-          }
-        },
-      } as Record<string, unknown>)
-    : undefined;
+  const desktopWebProps = buildDesktopWebProps(
+    isWebDesktop,
+    controls.handleWheelVolume,
+    recordActivity,
+  );
   const touchHoverProps = buildTouchHoverProps(
     () => {
-      extras.stillWatching.recordUserActivity();
+      recordActivity();
       controls.handleTouchActivity();
     },
-    (pointerType, point) => {
-      extras.stillWatching.recordUserActivity();
-      controls.handlePointerHover(pointerType, point);
+    (pt, pos) => {
+      recordActivity();
+      controls.handlePointerHover(pt, pos);
     },
   );
   const osdVisible = !inPip && !controls.osdHidden && !controls.locked;
-  const subtitleBottomInsetPx =
-    !useDockedDesktopLayout && osdVisible
-      ? isTv
-        ? 120
-        : controls.osdTier === 'progress'
-          ? 64
-          : 96
-      : 0;
+  const subtitleBottomInsetPx = computeSubtitleBottomInsetPx({
+    useDockedDesktopLayout,
+    osdVisible,
+    isTv,
+    osdTier: controls.osdTier,
+  });
   const showTouchGestures = !inPip && !isTv && !isDesktop && !controls.locked && !anySheetOpen;
 
   const surfaceNode =
     sessionState.kind === 'ready' ? (
-      <View
-        testID="player-surface-layer"
-        style={
-          useDockedDesktopLayout ? playerStyles.surfaceLayerDesktop : playerStyles.surfaceLayer
-        }
-      >
-        {sessionState.opened.renderSurface({
-          statusText: `${activeTarget.title} — ${statusLine}`,
-          failed: status.kind === 'failed',
-          resizeMode: controls.resizeMode,
-          subtitleBottomInsetPx,
-          subtitleFontFamily,
-          surfaceRecreationToken,
-          useTextureView,
-          osdVisible,
-          testID: 'player-surface',
-        })}
-      </View>
+      <PlayerSurfaceLayer
+        opened={sessionState.opened}
+        useDockedDesktopLayout={useDockedDesktopLayout}
+        statusText={`${activeTarget.title} — ${statusLine}`}
+        failed={status.kind === 'failed'}
+        resizeMode={controls.resizeMode}
+        subtitleBottomInsetPx={subtitleBottomInsetPx}
+        subtitleFontFamily={subtitleFontFamily}
+        surfaceRecreationToken={surfaceRecreationToken}
+        useTextureView={useTextureView}
+        osdVisible={osdVisible}
+      />
     ) : null;
 
   const nextEpisodeNode = (

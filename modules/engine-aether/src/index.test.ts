@@ -13,12 +13,15 @@ async function load() {
 }
 
 type NativeListener = (event: EngineEvent) => void;
+type EngineEventName = 'onEngineEvent' | 'onRemoteMediaAction';
+type EnginePayloadListener = (payload: unknown) => void;
 type ModuleEventName = 'onSafeAreaInsetsChanged' | 'onHardwareKey';
 type ModuleListener = (payload: unknown) => void;
 
 function fakeNative(version = '7.66.1', model?: string) {
   const clock = { uptime: 0 };
   const listeners = new Set<NativeListener>();
+  const enginePayloadListeners = new Map<EngineEventName, Set<EnginePayloadListener>>();
   const moduleListeners = new Map<ModuleEventName, Set<ModuleListener>>();
   const remove = vi.fn();
   const moduleRemove = vi.fn();
@@ -31,17 +34,28 @@ function fakeNative(version = '7.66.1', model?: string) {
     setSpeed: vi.fn(),
     setMuted: vi.fn(),
     setVolume: vi.fn(),
+    setBackgroundAudioEnabled: vi.fn(),
+    setMediaMetadata: vi.fn(),
     selectAudioTrack: vi.fn(),
     selectSubtitleTrack: vi.fn(),
     stop: vi.fn(),
     recreate: vi.fn(),
     release: vi.fn(),
-    addListener: vi.fn((_name: string, listener: NativeListener) => {
-      listeners.add(listener);
+    addListener: vi.fn((name: string, listener: EnginePayloadListener) => {
+      if (name === 'onEngineEvent') {
+        listeners.add(listener as NativeListener);
+      }
+      let bucket = enginePayloadListeners.get(name as EngineEventName);
+      if (bucket === undefined) {
+        bucket = new Set();
+        enginePayloadListeners.set(name as EngineEventName, bucket);
+      }
+      bucket.add(listener);
       return {
         remove: () => {
           remove();
-          listeners.delete(listener);
+          listeners.delete(listener as NativeListener);
+          bucket?.delete(listener);
         },
       };
     }),
@@ -96,6 +110,11 @@ function fakeNative(version = '7.66.1', model?: string) {
   const emit = (event: EngineEvent) => {
     for (const listener of [...listeners]) listener(event);
   };
+  const emitRemoteAction = (payload: unknown) => {
+    for (const listener of [...(enginePayloadListeners.get('onRemoteMediaAction') ?? [])]) {
+      listener(payload);
+    }
+  };
   const emitModule = (name: ModuleEventName, payload: unknown) => {
     for (const listener of [...(moduleListeners.get(name) ?? [])]) listener(payload);
   };
@@ -117,6 +136,7 @@ function fakeNative(version = '7.66.1', model?: string) {
     remove,
     moduleRemove,
     emit,
+    emitRemoteAction,
     emitModule,
   };
 }
@@ -608,5 +628,60 @@ describe('Apple mute/volume, safe-area insets, and hardware keys (#415)', () => 
     const absent = await load();
     expect(await absent.readAppleClipboardText()).toBeNull();
     expect(await absent.pickApplePlaylistFile()).toBeNull();
+  });
+
+  it('forwards Now Playing metadata, background audio toggle, and remote media actions (#413)', async () => {
+    const native = fakeNative();
+    const mod = await load();
+    const engine = mod.createAetherEngine();
+    if (engine === null) throw new Error('engine expected');
+
+    mod.setAetherBackgroundAudioEnabled(engine, true);
+    mod.setAetherBackgroundAudioEnabled(engine, false);
+    expect(native.engine.setBackgroundAudioEnabled).toHaveBeenNthCalledWith(1, true);
+    expect(native.engine.setBackgroundAudioEnabled).toHaveBeenNthCalledWith(2, false);
+
+    const metadata = {
+      title: 'Channel 1 HD',
+      subtitle: 'Evening News',
+      artworkUrl: 'https://cdn.example/ch1.png',
+      kind: 'live' as const,
+      canStepTrack: true,
+    };
+    mod.setAetherMediaMetadata(engine, metadata);
+    mod.setAetherMediaMetadata(engine, null);
+    expect(native.engine.setMediaMetadata).toHaveBeenNthCalledWith(1, metadata);
+    expect(native.engine.setMediaMetadata).toHaveBeenNthCalledWith(2, null);
+
+    const actions: string[] = [];
+    const unsub = mod.subscribeAetherRemoteMediaAction(engine, (action) => actions.push(action));
+    expect(native.engine.addListener).toHaveBeenCalledWith(
+      'onRemoteMediaAction',
+      expect.any(Function),
+    );
+    native.emitRemoteAction({ action: 'next' });
+    native.emitRemoteAction({ action: 'previous' });
+    native.emitRemoteAction({ action: 'stop' });
+    native.emitRemoteAction('next');
+    native.emitRemoteAction({ action: 'invalid' });
+    native.emitRemoteAction(null);
+    expect(actions).toEqual(['next', 'previous', 'stop', 'next']);
+
+    unsub();
+    native.emitRemoteAction({ action: 'stop' });
+    expect(actions).toHaveLength(4);
+
+    // Foreign and released engines are ignored safely.
+    const foreign = { release() {} } as unknown as PlayerEngine;
+    mod.setAetherBackgroundAudioEnabled(foreign, true);
+    mod.setAetherMediaMetadata(foreign, metadata);
+    const noopUnsub = mod.subscribeAetherRemoteMediaAction(foreign, vi.fn());
+    expect(() => noopUnsub()).not.toThrow();
+
+    engine.release();
+    mod.setAetherBackgroundAudioEnabled(engine, true);
+    mod.setAetherMediaMetadata(engine, metadata);
+    expect(native.engine.setBackgroundAudioEnabled).toHaveBeenCalledTimes(2);
+    expect(native.engine.setMediaMetadata).toHaveBeenCalledTimes(2);
   });
 });
