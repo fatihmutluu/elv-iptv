@@ -348,10 +348,20 @@ export function bindDesktopMediaSession(
       fn(attempt, ...args);
     };
 
+  const offRemoteAction =
+    hooks?.onTrackStep && typeof engine.onRemoteMediaAction === 'function'
+      ? engine.onRemoteMediaAction((action) => {
+          if (activeMeta?.canStepTrack === true) hooks.onTrackStep?.(action);
+        })
+      : undefined;
+
   return {
     ...engine,
     setMediaMetadata(meta) {
       activeMeta = meta;
+      if (typeof engine.setMediaMetadata === 'function') {
+        engine.setMediaMetadata(meta);
+      }
       if (meta === null) {
         session.clear();
         return;
@@ -385,6 +395,7 @@ export function bindDesktopMediaSession(
     },
     release() {
       activeMeta = null;
+      offRemoteAction?.();
       session.dispose();
       engine.release();
     },

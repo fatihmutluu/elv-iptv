@@ -10,13 +10,16 @@ import type {
   AudioDeviceInfo,
   BridgeCommand,
   DeinterlaceMode,
+  DesktopMediaMetadata,
   HwdecProfile,
   PlayerArea,
   PlayerBridge,
   PlayerEventMessage,
+  PlayerRemoteMediaActionMessage,
   PlayerUiEvent,
   PlayerUiMessage,
   QueueNextRequest,
+  RemoteMediaAction,
   ResizeMode,
   VideoFrameLike,
 } from '../../../src/shared/player-ipc.ts';
@@ -86,6 +89,10 @@ export interface DesktopEngine extends PlayerEngine {
   setFilterSdh(enabled: boolean): void;
   /** Selects the mpv subtitle font family (`sub-font`, `#163`). */
   setSubtitleFontFamily(family: AccessibilityFontFamily): void;
+  /** Mirrors typed playback metadata to main-process OS media bridges (MPRIS2 / macOS Now Playing, `#238`, `#301`). */
+  setMediaMetadata(metadata: DesktopMediaMetadata | null): void;
+  /** Subscribes to OS remote track-step actions (`next` / `previous`) from main; returns unsubscribe. */
+  onRemoteMediaAction(listener: (action: RemoteMediaAction) => void): () => void;
   /** Presentation events outside the port; the latest `presenter` event is replayed to a new listener. */
   onUi(listener: (event: PlayerUiEvent) => void): () => void;
   /** Subscribes to decoded GPU `VideoFrame` deliveries in `'canvas'` mode (`#95`); returns unsubscribe. */
@@ -121,6 +128,7 @@ export async function createDesktopEngine(
     (devices: readonly AudioDeviceInfo[], active: string) => void
   >();
   const queueAdvancedListeners = new Set<(itemKey: string) => void>();
+  const remoteMediaActionListeners = new Set<(action: RemoteMediaAction) => void>();
   const frameUnsubs = new Set<() => void>();
   let engineId: string | undefined;
   let offset = 0;
@@ -135,6 +143,7 @@ export async function createDesktopEngine(
   let activeAudioDevice = 'auto';
   const earlyEvents: PlayerEventMessage[] = [];
   const earlyUi: PlayerUiMessage[] = [];
+  const earlyRemoteActions: PlayerRemoteMediaActionMessage[] = [];
 
   const deliverEvent = (event: EngineEvent): void => {
     const mapped = shiftAnchor(event, offset);
@@ -187,6 +196,16 @@ export async function createDesktopEngine(
     }
   };
 
+  const deliverRemoteAction = (action: RemoteMediaAction): void => {
+    for (const listener of [...remoteMediaActionListeners]) {
+      try {
+        listener(action);
+      } catch {
+        // isolate remote media action subscribers
+      }
+    }
+  };
+
   const offEvent = bridge.onEvent((message) => {
     if (engineId === undefined) {
       if (earlyEvents.length < MAX_HELD_EVENTS) earlyEvents.push(message);
@@ -202,6 +221,14 @@ export async function createDesktopEngine(
       deliverUi(message.ui);
     }
   });
+  const offRemoteAction =
+    bridge.onRemoteMediaAction?.((message) => {
+      if (engineId === undefined) {
+        if (earlyRemoteActions.length < MAX_HELD_EVENTS) earlyRemoteActions.push(message);
+      } else if (message.engineId === engineId) {
+        deliverRemoteAction(message.action);
+      }
+    }) ?? (() => undefined);
 
   const t0 = now();
   let reply: Awaited<ReturnType<PlayerBridge['open']>>;
@@ -210,6 +237,7 @@ export async function createDesktopEngine(
   } catch (error) {
     offEvent();
     offUi();
+    offRemoteAction();
     throw error;
   }
   offset = (t0 + now()) / 2 - reply.mainNowMs;
@@ -217,6 +245,8 @@ export async function createDesktopEngine(
   const id = reply.engineId;
   for (const m of earlyUi.splice(0)) if (m.engineId === id) deliverUi(m.ui);
   for (const m of earlyEvents.splice(0)) if (m.engineId === id) deliverEvent(m.event);
+  for (const m of earlyRemoteActions.splice(0))
+    if (m.engineId === id) deliverRemoteAction(m.action);
 
   const send = (command: BridgeCommand): void => {
     if (!released) bridge.send({ engineId: id, command });
@@ -280,6 +310,14 @@ export async function createDesktopEngine(
     setResizeMode: (mode) => send({ name: 'setResizeMode', mode }),
     setFilterSdh: (enabled) => send({ name: 'setFilterSdh', enabled }),
     setSubtitleFontFamily: (family) => send({ name: 'setSubtitleFontFamily', family }),
+    setMediaMetadata: (metadata) => send({ name: 'setMediaMetadata', metadata }),
+    onRemoteMediaAction(listener) {
+      if (released) return () => undefined;
+      remoteMediaActionListeners.add(listener);
+      return () => {
+        remoteMediaActionListeners.delete(listener);
+      };
+    },
     setArea(area) {
       if (!released) bridge.setArea({ engineId: id, area });
     },
@@ -291,10 +329,12 @@ export async function createDesktopEngine(
       uiListeners.clear();
       audioDeviceListeners.clear();
       queueAdvancedListeners.clear();
+      remoteMediaActionListeners.clear();
       for (const offFrame of [...frameUnsubs]) offFrame();
       frameUnsubs.clear();
       offEvent();
       offUi();
+      offRemoteAction();
       bridge.close(id).catch(() => undefined);
     },
     subscribe(listener) {

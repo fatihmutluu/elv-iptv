@@ -35,7 +35,7 @@ import { ConnectionLimitDialog } from './player/ConnectionLimitDialog';
 import type { AppLifecyclePort } from './ports/app-lifecycle';
 import type { PlayTarget } from './ports/play-target';
 import { createPlaybackGuard, type PlaybackGuard } from './ports/playback-guard';
-import type { SourceImportHost } from './ports/source-import-host';
+import type { PickedPlaylistFile, SourceImportHost } from './ports/source-import-host';
 import type { VideoHost } from './ports/video-host';
 import { OledScreensaverOverlay, useOledScreensaver } from './screensaver';
 import { SearchScreen } from './search';
@@ -288,6 +288,45 @@ export function AppShell(props: AppShellProps): ReactElement {
     setSettingsSection('sources');
     selectTab('settings', true);
   }, [selectTab]);
+  const [incomingLocalPlaylist, setIncomingLocalPlaylist] = useState<PickedPlaylistFile | null>(
+    null,
+  );
+  const consumeIncomingLocalPlaylist = useCallback(() => {
+    setIncomingLocalPlaylist(null);
+  }, []);
+  const handleIncomingLocalPlaylist = useCallback(
+    (file: PickedPlaylistFile) => {
+      if (playTargetRef.current !== null) {
+        connectionGuard.releaseActive();
+        playTargetRef.current = null;
+        setPlayTarget(null);
+      }
+      setIncomingLocalPlaylist(file);
+      openSources();
+    },
+    [connectionGuard.releaseActive, openSources],
+  );
+  const sourceImportHost = props.sourceImportHost;
+  useEffect(() => {
+    let active = true;
+    const unsubscribe = sourceImportHost?.onOpenPlaylistFile?.((file) => {
+      if (active) handleIncomingLocalPlaylist(file);
+    });
+    const consumePending = sourceImportHost?.consumePendingPlaylistFiles;
+    if (consumePending !== undefined) {
+      void Promise.resolve(consumePending())
+        .then((pending) => {
+          if (!active || pending.length === 0) return;
+          const latest = pending[pending.length - 1];
+          if (latest !== undefined) handleIncomingLocalPlaylist(latest);
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
+  }, [handleIncomingLocalPlaylist, sourceImportHost]);
   const openDetail = useCallback((target: DetailTarget) => {
     exitBackGuardRef.current?.reset();
     setDetailStack((prev) => pushDetailStack(prev, target));
@@ -574,6 +613,12 @@ export function AppShell(props: AppShellProps): ReactElement {
                           playbackGuard={playbackGuard}
                           {...(props.sourceImportHost !== undefined
                             ? { sourceImportHost: props.sourceImportHost }
+                            : {})}
+                          {...(incomingLocalPlaylist !== null
+                            ? {
+                                incomingLocalPlaylist,
+                                onConsumeIncomingLocalPlaylist: consumeIncomingLocalPlaylist,
+                              }
                             : {})}
                           externalRefreshToken={externalRefreshToken + refreshToken}
                           {...(readySourcesCount > 0

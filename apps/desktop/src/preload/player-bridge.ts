@@ -3,6 +3,7 @@ import {
   type PlayerBridge,
   type PlayerEventMessage,
   type PlayerOpenReply,
+  type PlayerRemoteMediaActionMessage,
   type PlayerUiMessage,
   type VideoFrameLike,
 } from '../shared/player-ipc.ts';
@@ -97,6 +98,8 @@ export function createPlayerBridge(
     },
     onEvent: (listener) => subscribe<PlayerEventMessage>(ipc, PLAYER_CHANNELS.event, listener),
     onUi: (listener) => subscribe<PlayerUiMessage>(ipc, PLAYER_CHANNELS.ui, listener),
+    onRemoteMediaAction: (listener) =>
+      subscribe<PlayerRemoteMediaActionMessage>(ipc, PLAYER_CHANNELS.remoteMediaAction, listener),
     onFrame(engineId, listener) {
       frameListeners.set(engineId, listener);
       return () => {

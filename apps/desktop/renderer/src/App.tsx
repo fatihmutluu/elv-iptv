@@ -305,6 +305,16 @@ function AppRoot() {
     return {
       readClipboardText: () => sourcesBridge.readClipboardText(),
       pickPlaylistFile: () => sourcesBridge.pickPlaylistFile(),
+      ...(typeof sourcesBridge.consumePendingPlaylistFiles === 'function'
+        ? {
+            consumePendingPlaylistFiles: () => sourcesBridge.consumePendingPlaylistFiles(),
+          }
+        : {}),
+      ...(typeof sourcesBridge.onOpenPlaylistFile === 'function'
+        ? {
+            onOpenPlaylistFile: (listener) => sourcesBridge.onOpenPlaylistFile(listener),
+          }
+        : {}),
     };
   }, []);
 

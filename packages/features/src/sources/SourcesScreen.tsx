@@ -13,7 +13,7 @@ import {
 import type { ReactElement } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import type { PlaybackGuard } from '../ports/playback-guard';
-import type { SourceImportHost } from '../ports/source-import-host';
+import type { PickedPlaylistFile, SourceImportHost } from '../ports/source-import-host';
 import { useRouteActive } from '../shared';
 import { CategoryPickerPanel } from './CategoryPickerPanel';
 import { SavedSourcesPanel } from './SavedSourcesPanel';
@@ -34,6 +34,10 @@ export interface SourcesScreenProps {
   isActiveScope?: boolean;
   /** When true, omits outer canvas background, duplicate brand header, and outer scroll padding for Settings embedding. */
   embedded?: boolean;
+  /** Optional OS-launched local playlist file to stage into the M3U form (`#259`). */
+  incomingLocalPlaylist?: PickedPlaylistFile | null;
+  /** Called after {@link incomingLocalPlaylist} has been staged into the form (`#259`). */
+  onConsumeIncomingLocalPlaylist?: () => void;
   /** Clock returning epoch milliseconds for deterministic expiry badges (defaults to `Date.now`). */
   now?: () => number;
 }

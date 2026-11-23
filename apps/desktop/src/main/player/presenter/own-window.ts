@@ -2,6 +2,7 @@ import type { PlayerArea } from '../../../shared/player-ipc.ts';
 import type { MpvClient } from '../mpv/client.ts';
 import type { DisplayBounds, FullscreenMode, Rect } from './bounds.ts';
 import { areaToScreen, resolveFullscreenRect } from './bounds.ts';
+import { isAppWindowFullscreen, setAppWindowFullscreen } from './macos-spaces.ts';
 import type { AppWindowLike, VideoPresenter } from './types.ts';
 import { createSurfaceTracker } from './types.ts';
 
@@ -23,6 +24,10 @@ export interface OwnWindowDeps {
   firstAreaTimeoutMs?: number;
   /** Bounded window after fullscreen transitions during which non-essential fullscreen IPC is paused (default 400 ms). */
   fullscreenTransitionMs?: number;
+  /** When `true`, prefers macOS borderless `simpleFullscreen` over native Space fullscreen (`#301`). */
+  useSimpleFullscreen?(): boolean;
+  /** Notified when `simpleFullscreen` toggles (Electron does not fire `enter-full-screen` for `setSimpleFullScreen`). */
+  onFullscreenChange?(fullscreen: boolean): void;
 }
 
 const DEFAULT_FIRST_AREA_TIMEOUT_MS = 1000;
@@ -57,7 +62,7 @@ export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
       appWindow.webContents.getZoomFactor(),
     );
     const dip =
-      appWindow.isFullScreen() && deps.displayBoundsOf
+      isAppWindowFullscreen(appWindow) && deps.displayBoundsOf
         ? resolveFullscreenRect(rawDip, deps.displayBoundsOf(rawDip), fullscreenMode)
         : rawDip;
     const px = deps.toScreenPixels(dip);
@@ -122,7 +127,7 @@ export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
       appWindow.isDestroyed() ||
       appWindow.isMinimized?.() ||
       fullscreenTransitioning ||
-      appWindow.isFullScreen() ||
+      appWindow.isFullScreen?.() === true ||
       mpvFullscreen === true
     ) {
       return;
@@ -209,16 +214,28 @@ export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
         }
         pendingMpvFullscreen = undefined;
         if (wasUnknown && !value) {
-          if (!appWindow.isDestroyed() && appWindow.isFullScreen()) {
-            pendingMpvFullscreen = true;
-            mpvFullscreen = true;
-            next.command(['set_property', 'fullscreen', true]).catch(() => undefined);
+          if (!appWindow.isDestroyed() && isAppWindowFullscreen(appWindow)) {
+            if (appWindow.isSimpleFullScreen?.() === true) {
+              if (visibleArea) {
+                const { spec } = computeGeometry(visibleArea);
+                next.command(['set_property', 'geometry', spec]).catch(() => undefined);
+              }
+            } else {
+              pendingMpvFullscreen = true;
+              mpvFullscreen = true;
+              next.command(['set_property', 'fullscreen', true]).catch(() => undefined);
+            }
           }
           return;
         }
-        if (!appWindow.isDestroyed() && appWindow.isFullScreen() !== value) {
-          pendingAppFullscreen = value;
-          appWindow.setFullScreen(value);
+        if (!appWindow.isDestroyed() && isAppWindowFullscreen(appWindow) !== value) {
+          const useSimple = deps.useSimpleFullscreen?.() === true;
+          const mode = setAppWindowFullscreen(appWindow, value, useSimple);
+          if (mode === 'simple') {
+            deps.onFullscreenChange?.(value);
+          } else {
+            pendingAppFullscreen = value;
+          }
         }
       });
       const offClose = next.onClose(() => {
@@ -245,6 +262,21 @@ export function createOwnWindowPresenter(deps: OwnWindowDeps): VideoPresenter {
     },
     toggleFullscreen() {
       if (disposed || fullscreenTransitioning) return;
+      if (deps.useSimpleFullscreen?.() === true && !appWindow.isDestroyed()) {
+        const next = !isAppWindowFullscreen(appWindow);
+        const mode = setAppWindowFullscreen(appWindow, next, true);
+        if (mode === 'simple') {
+          deps.onFullscreenChange?.(next);
+          if (client) {
+            client.command(['set_property', 'border', next ? 'no' : 'yes']).catch(() => undefined);
+            if (visibleArea) {
+              const { spec } = computeGeometry(visibleArea);
+              client.command(['set_property', 'geometry', spec]).catch(() => undefined);
+            }
+          }
+          return;
+        }
+      }
       client?.command(['cycle', 'fullscreen']).catch(() => undefined);
     },
     onEvent: (listener) => surface.onEvent(listener),

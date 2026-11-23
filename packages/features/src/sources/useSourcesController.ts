@@ -9,7 +9,7 @@ import { elvError, err } from '@elv/domain';
 import type { MessageId } from '@elv/i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { noopPlaybackGuard, type PlaybackGuard } from '../ports/playback-guard';
-import type { SourceImportHost } from '../ports/source-import-host';
+import type { PickedPlaylistFile, SourceImportHost } from '../ports/source-import-host';
 import {
   buildCategorySelection,
   clearPendingCategories,
@@ -50,6 +50,10 @@ export interface UseSourcesControllerOptions {
   externalRefreshToken?: number;
   /** Localized fallback name when a picked local playlist file has no usable stem (`#51`). */
   defaultLocalPlaylistName?: string;
+  /** Optional OS-launched local playlist file to stage into the M3U form (`#259`). */
+  incomingLocalPlaylist?: PickedPlaylistFile | null;
+  /** Called after {@link incomingLocalPlaylist} has been staged into the form (`#259`). */
+  onConsumeIncomingLocalPlaylist?: () => void;
 }
 
 /** Reactive state and actions exposed to {@link SourcesScreen}. */
@@ -115,6 +119,10 @@ export function phaseMessageId(phase: ImportProgress['phase']): MessageId {
   }
 }
 
+function defaultSourceNameFromFilename(filename: string): string {
+  return filename.replace(/\.(?:m3u\.gz|m3u8?|gz)$/i, '').trim();
+}
+
 /** Stateful view-model hook coordinating `CatalogService` operations for `SourcesScreen`. */
 export function useSourcesController({
   catalog,
@@ -122,6 +130,8 @@ export function useSourcesController({
   sourceImportHost,
   externalRefreshToken = 0,
   defaultLocalPlaylistName,
+  incomingLocalPlaylist,
+  onConsumeIncomingLocalPlaylist,
 }: UseSourcesControllerOptions): SourcesController {
   const [form, setForm] = useState<SourceFormState>(createInitialSourceForm);
   const formRef = useRef<SourceFormState>(form);
@@ -247,7 +257,7 @@ export function useSourcesController({
     try {
       const picked = await pick();
       if (!mountedRef.current || picked === null) return;
-      const defaultName = picked.name.replace(/\.(?:m3u8?|gz)$/i, '').trim();
+      const defaultName = defaultSourceNameFromFilename(picked.name);
       const next: SourceFormState = {
         ...formRef.current,
         localFile: picked,
@@ -261,6 +271,36 @@ export function useSourcesController({
       // Cancelled or unavailable picker leaves form intact.
     }
   }, [sourceImportHost]);
+
+  const onConsumeIncomingRef = useRef(onConsumeIncomingLocalPlaylist);
+  onConsumeIncomingRef.current = onConsumeIncomingLocalPlaylist;
+  const lastConsumedIncomingRef = useRef<PickedPlaylistFile | null>(null);
+
+  useEffect(() => {
+    if (
+      incomingLocalPlaylist == null ||
+      incomingLocalPlaylist === lastConsumedIncomingRef.current
+    ) {
+      return;
+    }
+    lastConsumedIncomingRef.current = incomingLocalPlaylist;
+    discoverCtlRef.current?.abort();
+    discoverCtlRef.current = null;
+    setCategoryPicker(null);
+    const defaultName = defaultSourceNameFromFilename(incomingLocalPlaylist.name);
+    const next: SourceFormState = {
+      ...formRef.current,
+      mode: 'm3u',
+      playlistUrl: '',
+      localFile: incomingLocalPlaylist,
+      name: defaultName,
+    };
+    formRef.current = next;
+    setForm(next);
+    setFormError(null);
+    setClipboardNotice(null);
+    onConsumeIncomingRef.current?.();
+  }, [incomingLocalPlaylist]);
 
   const clearLocalFile = useCallback(() => {
     const next = { ...formRef.current, localFile: null };

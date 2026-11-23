@@ -5,6 +5,7 @@ import {
   type PickedPlaylistFile,
   SOURCES_CHANNELS,
 } from '../shared/sources-ipc.ts';
+import type { PendingPlaylistQueue } from './playlist-open.ts';
 
 type IpcHandler = (event: { sender: unknown }, ...args: unknown[]) => unknown;
 
@@ -32,6 +33,7 @@ export interface SourcesIpcDeps<TWindow = unknown> {
     window: TWindow | null | undefined,
     options: PlaylistOpenDialogOptions,
   ): Promise<PlaylistOpenDialogResult>;
+  pendingPlaylists?: PendingPlaylistQueue;
   maxPlaylistBytes?: number;
   maxClipboardChars?: number;
 }
@@ -73,14 +75,78 @@ async function readBoundedPlaylistFile(filePath: string, maxBytes: number): Prom
   }
 }
 
+interface SubscribableWebContents {
+  isDestroyed(): boolean;
+  send(channel: string, ...args: unknown[]): void;
+  once?(event: 'destroyed', listener: () => void): unknown;
+  on?(
+    event: 'did-start-navigation',
+    listener: (details: { isMainFrame: boolean; isSameDocument: boolean }) => void,
+  ): unknown;
+  on?(event: 'render-process-gone', listener: () => void): unknown;
+  removeListener?(event: string, listener: (...args: unknown[]) => void): unknown;
+}
+
+function isSubscribableWebContents(value: unknown): value is SubscribableWebContents {
+  if (value === null || typeof value !== 'object') return false;
+  const candidate = value as Partial<SubscribableWebContents>;
+  return typeof candidate.send === 'function' && typeof candidate.isDestroyed === 'function';
+}
+
 /**
- * Registers `sources:read-clipboard-text` and `sources:pick-playlist-file` handlers on `ipcMain`
- * while keeping `lockDownSession` 100% strict (`#51`). Never leaks full host paths to the renderer.
+ * Registers `sources:read-clipboard-text`, `sources:pick-playlist-file`, and
+ * `sources:consume-pending-playlists` handlers on `ipcMain` while keeping `lockDownSession` 100%
+ * strict (`#51`, `#259`). Never leaks full host paths to the renderer.
  */
 export function registerSourcesIpc<TWindow = unknown>(deps: SourcesIpcDeps<TWindow>): () => void {
   const { ipcMain, getWindowFromSender, readClipboardText, showOpenDialog } = deps;
   const maxPlaylistBytes = deps.maxPlaylistBytes ?? MAX_PICKED_PLAYLIST_BYTES;
   const maxClipboardChars = deps.maxClipboardChars ?? DEFAULT_MAX_CLIPBOARD_CHARS;
+  const pendingSubscriptions = new Map<SubscribableWebContents, () => void>();
+
+  const detachPendingSubscriber = (sender: SubscribableWebContents): void => {
+    const cleanup = pendingSubscriptions.get(sender);
+    if (!cleanup) return;
+    pendingSubscriptions.delete(sender);
+    cleanup();
+  };
+
+  const subscribePendingSender = (sender: unknown): void => {
+    const queue = deps.pendingPlaylists;
+    if (!queue || !isSubscribableWebContents(sender)) return;
+    if (sender.isDestroyed() || pendingSubscriptions.has(sender)) return;
+
+    const unsubscribeQueue = queue.subscribe((file) => {
+      if (sender.isDestroyed()) {
+        detachPendingSubscriber(sender);
+        return;
+      }
+      sender.send(SOURCES_CHANNELS.openPlaylistFile, file);
+    });
+
+    const onNavigation = (details: { isMainFrame: boolean; isSameDocument: boolean }): void => {
+      if (details.isMainFrame && !details.isSameDocument) {
+        detachPendingSubscriber(sender);
+      }
+    };
+    const onGone = (): void => {
+      detachPendingSubscriber(sender);
+    };
+    const onDestroyed = (): void => {
+      detachPendingSubscriber(sender);
+    };
+
+    sender.on?.('did-start-navigation', onNavigation);
+    sender.on?.('render-process-gone', onGone);
+    sender.once?.('destroyed', onDestroyed);
+
+    pendingSubscriptions.set(sender, () => {
+      unsubscribeQueue();
+      sender.removeListener?.('did-start-navigation', onNavigation as (...args: unknown[]) => void);
+      sender.removeListener?.('render-process-gone', onGone);
+      sender.removeListener?.('destroyed', onDestroyed);
+    });
+  };
 
   ipcMain.handle(SOURCES_CHANNELS.readClipboardText, async () => {
     try {
@@ -109,8 +175,17 @@ export function registerSourcesIpc<TWindow = unknown>(deps: SourcesIpcDeps<TWind
     return picked;
   });
 
+  ipcMain.handle(SOURCES_CHANNELS.consumePendingPlaylists, async ({ sender }) => {
+    subscribePendingSender(sender);
+    return deps.pendingPlaylists?.consumePending() ?? [];
+  });
+
   return () => {
+    for (const sender of [...pendingSubscriptions.keys()]) {
+      detachPendingSubscriber(sender);
+    }
     ipcMain.removeHandler(SOURCES_CHANNELS.readClipboardText);
     ipcMain.removeHandler(SOURCES_CHANNELS.pickPlaylistFile);
+    ipcMain.removeHandler(SOURCES_CHANNELS.consumePendingPlaylists);
   };
 }

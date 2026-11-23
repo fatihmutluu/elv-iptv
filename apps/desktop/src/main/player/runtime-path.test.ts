@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { mpvRuntimePaths, resolveFontsDir } from './runtime-path.ts';
+import { mpvRuntimePaths, resolveFontsDir, resolveMacMediaAddonPath } from './runtime-path.ts';
 
 const present = (...paths: string[]) => {
   const set = new Set(paths);
@@ -240,6 +240,49 @@ describe('resolveFontsDir', () => {
     ).toBe(devFonts);
     expect(
       resolveFontsDir({ isPackaged: false, resourcesPath: '/res', appPath: '/app' }, present()),
+    ).toBeUndefined();
+  });
+});
+
+describe('resolveMacMediaAddonPath', () => {
+  it('resolves elv-macos-media.node only on darwin when present on disk (#301)', () => {
+    const packagedAddon = join('/res', 'mpv', 'elv-macos-media.node');
+    const devAddon = join('/app', 'resources', 'mpv', 'darwin-arm64', 'elv-macos-media.node');
+    expect(
+      resolveMacMediaAddonPath(
+        {
+          isPackaged: true,
+          resourcesPath: '/res',
+          appPath: '/app',
+          platform: 'darwin',
+          arch: 'arm64',
+        },
+        present(packagedAddon),
+      ),
+    ).toBe(packagedAddon);
+    expect(
+      resolveMacMediaAddonPath(
+        {
+          isPackaged: false,
+          resourcesPath: '/res',
+          appPath: '/app',
+          platform: 'darwin',
+          arch: 'arm64',
+        },
+        present(devAddon),
+      ),
+    ).toBe(devAddon);
+    expect(
+      resolveMacMediaAddonPath(
+        {
+          isPackaged: true,
+          resourcesPath: '/res',
+          appPath: '/app',
+          platform: 'win32',
+          arch: 'x64',
+        },
+        () => true,
+      ),
     ).toBeUndefined();
   });
 });

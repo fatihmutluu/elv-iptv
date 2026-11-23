@@ -383,11 +383,13 @@ describe('fetchRuntime on darwin-arm64', () => {
     });
     const macExe = `${dir}/${app}/MacOS/elv-mpv`;
     const addon = `${dir}/elv-iosurface.node`;
+    const mediaAddon = `${dir}/elv-macos-media.node`;
     const stamp = `${dir}/elv-mpv.stamp`;
     const baseFiles = (extra: Record<string, string> = {}): Record<string, string> => ({
       [`${dir}/BUILDINFO.json`]: info,
       [macExe]: 'exe',
       [addon]: 'node',
+      [mediaAddon]: 'node',
       ...extra,
     });
 
@@ -404,11 +406,14 @@ describe('fetchRuntime on darwin-arm64', () => {
     delete missingExe[macExe];
     const missingAddon = baseFiles({ [stamp]: 'mac2\n' });
     delete missingAddon[addon];
+    const missingMediaAddon = baseFiles({ [stamp]: 'mac2\n' });
+    delete missingMediaAddon[mediaAddon];
     for (const files of [
       baseFiles({}),
       baseFiles({ [stamp]: 'old\n' }),
       missingExe,
       missingAddon,
+      missingMediaAddon,
     ]) {
       const f = fake({ files, launcherHash: 'mac2' });
       const r = await fetchRuntime(mac, f.deps);

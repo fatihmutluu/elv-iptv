@@ -21,8 +21,10 @@ export function fakeAppWindow(content: Rect = { x: 100, y: 50, width: 1280, heig
     alwaysOnTop: false,
     visible: true,
     fullscreen: false,
+    simpleFullscreen: false,
     destroyed: false,
     fullscreenCalls: [] as boolean[],
+    simpleFullscreenCalls: [] as boolean[],
     focusCalls: 0,
   };
   const window: AppWindowLike = {
@@ -47,6 +49,11 @@ export function fakeAppWindow(content: Rect = { x: 100, y: 50, width: 1280, heig
         state.maximized = false;
         state.alwaysOnTop = false;
       }
+    },
+    isSimpleFullScreen: () => state.simpleFullscreen,
+    setSimpleFullScreen: (flag) => {
+      state.simpleFullscreenCalls.push(flag);
+      state.simpleFullscreen = flag;
     },
     focus: () => {
       state.focusCalls += 1;

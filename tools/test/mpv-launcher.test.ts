@@ -297,4 +297,28 @@ describe('buildMacLauncher', () => {
       /building elv-mpv failed to start clang: spawn clang ENOENT/,
     );
   });
+
+  it('compiles and signs elv-macos-media.node when mediaAddonSource is provided (#301)', async () => {
+    const calls: { cmd: string; args: string[] }[] = [];
+    const run = async (cmd: string, args: string[]) => {
+      calls.push({ cmd, args });
+      return { code: 0, stdout: '' };
+    };
+    await buildMacLauncher(
+      {
+        ...paths,
+        mediaAddonSource: '/repo/apps/desktop/native/mpv-host/elv-macos-media.m',
+      },
+      run,
+    );
+    expect(calls).toHaveLength(7);
+    expect(calls[2]?.cmd).toBe('clang');
+    expect(calls[2]?.args).toContain('-fobjc-arc');
+    expect(calls[2]?.args).toContain('MediaPlayer');
+    expect(calls[2]?.args).toContain('/rt/darwin-arm64/elv-macos-media.node');
+    expect(calls[5]).toEqual({
+      cmd: 'codesign',
+      args: ['--force', '--sign', '-', '/rt/darwin-arm64/elv-macos-media.node'],
+    });
+  });
 });

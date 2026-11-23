@@ -5,6 +5,8 @@ import {
   isPlayerAreaMessage,
   isPlayerCommandMessage,
   PLAYER_CHANNELS,
+  sanitizeDesktopArtworkUrl,
+  sanitizeDesktopMediaMetadata,
 } from './player-ipc.ts';
 
 const load = {
@@ -24,6 +26,7 @@ describe('PLAYER_CHANNELS', () => {
       event: 'player:event',
       area: 'player:area',
       ui: 'player:ui',
+      remoteMediaAction: 'player:remote-media-action',
       gateReport: 'gate:report',
     });
   });
@@ -114,6 +117,21 @@ describe('isPlayerCommandMessage', () => {
       { name: 'setSubtitleFontFamily', family: 'system' },
       { name: 'setSubtitleFontFamily', family: 'atkinson' },
       { name: 'setSubtitleFontFamily', family: 'opendyslexic' },
+      { name: 'setMediaMetadata', metadata: null },
+      {
+        name: 'setMediaMetadata',
+        metadata: {
+          title: 'Channel One',
+          subtitle: 'Live News',
+          artworkUrl: 'https://cdn.example.test/logo.png',
+          kind: 'live',
+          canStepTrack: true,
+        },
+      },
+      {
+        name: 'setMediaMetadata',
+        metadata: { title: 'Movie', kind: 'vod', canStepTrack: false },
+      },
       { name: 'release' },
       { name: 'fullscreen' },
       { name: 'mute' },
@@ -279,6 +297,29 @@ describe('isPlayerCommandMessage', () => {
       msg({ name: 'setSubtitleFontFamily', family: 'comic-sans' }),
       msg({ name: 'setSubtitleFontFamily', family: 'Atkinson Hyperlegible Next' }),
       msg({ name: 'setSubtitleFontFamily', family: 42 }),
+      msg({ name: 'setMediaMetadata' }),
+      msg({ name: 'setMediaMetadata', metadata: 'bad' }),
+      msg({ name: 'setMediaMetadata', metadata: { title: 42, kind: 'live', canStepTrack: true } }),
+      msg({
+        name: 'setMediaMetadata',
+        metadata: { title: 'Ch\n1', kind: 'live', canStepTrack: true },
+      }),
+      msg({
+        name: 'setMediaMetadata',
+        metadata: { title: 'Ch', subtitle: 'Sub\r', kind: 'live', canStepTrack: true },
+      }),
+      msg({
+        name: 'setMediaMetadata',
+        metadata: { title: 'Ch', artworkUrl: 'http://x/\n', kind: 'live', canStepTrack: true },
+      }),
+      msg({
+        name: 'setMediaMetadata',
+        metadata: { title: 'Ch', kind: 'radio', canStepTrack: true },
+      }),
+      msg({
+        name: 'setMediaMetadata',
+        metadata: { title: 'Ch', kind: 'live', canStepTrack: 'yes' },
+      }),
       msg({ name: 'load', cmd: { ...load, options: { filterSdhSubtitles: 'yes' } } }),
       msg({ name: 'load', cmd: { ...load, options: { allowLegacyTls: 'yes' } } }),
       msg({ name: 'load' }),
@@ -396,5 +437,45 @@ describe('isGateReport', () => {
     expect(isGateReport('ELV_GATE_PLAYER {"a":1}\r')).toBe(false);
     expect(isGateReport(`ELV_GATE_PLAYER {"x":"${'a'.repeat(64 * 1024)}"}`)).toBe(false);
     expect(isGateReport(`ELV_GATE_PLAYER {${'a'.repeat(64 * 1024 - 17)}`)).toBe(true);
+  });
+});
+
+describe('sanitizeDesktopArtworkUrl & sanitizeDesktopMediaMetadata', () => {
+  it('strips userinfo and credential query params and rejects non-http(s) artwork URLs', () => {
+    expect(
+      sanitizeDesktopArtworkUrl('https://alice:secret@cdn.example.test/art.jpg?token=xyz&w=320'),
+    ).toBe('https://cdn.example.test/art.jpg?w=320');
+    expect(sanitizeDesktopArtworkUrl('file:///etc/passwd')).toBeUndefined();
+    expect(sanitizeDesktopArtworkUrl('javascript:alert(1)')).toBeUndefined();
+    expect(sanitizeDesktopArtworkUrl('https://cdn.example.test/a\nb')).toBeUndefined();
+    expect(sanitizeDesktopMediaMetadata(null)).toBeNull();
+    expect(
+      sanitizeDesktopMediaMetadata({
+        title: '  Channel 1  ',
+        subtitle: '  Evening  ',
+        artworkUrl: 'https://user:pass@cdn.example.test/p.png?api_key=k&h=100',
+        kind: 'live',
+        canStepTrack: true,
+      }),
+    ).toEqual({
+      title: 'Channel 1',
+      subtitle: 'Evening',
+      artworkUrl: 'https://cdn.example.test/p.png?h=100',
+      kind: 'live',
+      canStepTrack: true,
+    });
+    expect(
+      sanitizeDesktopMediaMetadata({
+        title: 'Movie',
+        subtitle: '   ',
+        artworkUrl: 'file:///local/secret.png',
+        kind: 'vod',
+        canStepTrack: false,
+      }),
+    ).toEqual({
+      title: 'Movie',
+      kind: 'vod',
+      canStepTrack: false,
+    });
   });
 });

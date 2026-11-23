@@ -1,14 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
 import { focusWindow, startSingleInstance } from './single-instance.ts';
 
+type SecondInstanceHandler = (
+  event: unknown,
+  commandLine: string[],
+  workingDirectory: string,
+) => void;
+
 function fakeApp(granted: boolean) {
-  const handlers: Array<() => void> = [];
+  const handlers: SecondInstanceHandler[] = [];
   return {
     handlers,
     app: {
       requestSingleInstanceLock: vi.fn(() => granted),
       quit: vi.fn(),
-      on: vi.fn((_event: 'second-instance', listener: () => void) => void handlers.push(listener)),
+      on: vi.fn(
+        (_event: 'second-instance', listener: SecondInstanceHandler) =>
+          void handlers.push(listener),
+      ),
     },
   };
 }
@@ -22,13 +31,25 @@ describe('startSingleInstance', () => {
     expect(handlers).toHaveLength(0);
   });
 
-  it('keeps running and handles second-instance when granted', () => {
+  it('keeps running and forwards commandLine and workingDirectory on second-instance', () => {
     const { app, handlers } = fakeApp(true);
     const onSecond = vi.fn();
     expect(startSingleInstance(app, { onSecond })).toBe(true);
     expect(app.quit).not.toHaveBeenCalled();
-    handlers[0]?.();
+    handlers[0]?.({}, ['elv-iptv', 'channels.m3u8'], '/home/user/playlists');
     expect(onSecond).toHaveBeenCalledTimes(1);
+    expect(onSecond).toHaveBeenCalledWith(['elv-iptv', 'channels.m3u8'], '/home/user/playlists');
+  });
+
+  it('keeps backwards compatibility with zero-arg callbacks and missing event payload fields', () => {
+    const { app, handlers } = fakeApp(true);
+    let called = 0;
+    const onSecond = () => {
+      called += 1;
+    };
+    expect(startSingleInstance(app, { onSecond })).toBe(true);
+    (handlers[0] as unknown as (() => void) | undefined)?.();
+    expect(called).toBe(1);
   });
 });
 

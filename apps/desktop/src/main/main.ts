@@ -7,6 +7,7 @@ import {
   BrowserWindow,
   clipboard,
   dialog,
+  globalShortcut,
   ipcMain,
   Menu,
   MessageChannelMain,
@@ -51,6 +52,13 @@ import {
   type VideoSampler,
 } from './gate.ts';
 import { createDesktopLogger } from './log.ts';
+import {
+  createMacOsMediaBridge,
+  loadMacOsMediaAddon,
+  queryMacScreensHaveSeparateSpaces,
+} from './macos-media.ts';
+import type { DesktopMediaBridge } from './media-bridge.ts';
+import { createMprisBridge } from './mpris/mpris-bridge.ts';
 import type { MpvEngine } from './player/engine.ts';
 import { createEngineFor } from './player/factory.ts';
 import { registerPlayerIpc } from './player/ipc.ts';
@@ -58,7 +66,12 @@ import { sweepLeftovers, systemSweepDeps } from './player/mpv/pid-sweep.ts';
 import { createPowerBlocker } from './player/power-blocker.ts';
 import { parsePresenterOverride } from './player/presenter/choose.ts';
 import { sampleArea } from './player/presenter/visible.ts';
-import { mpvRuntimePaths } from './player/runtime-path.ts';
+import { mpvRuntimePaths, resolveMacMediaAddonPath } from './player/runtime-path.ts';
+import {
+  createPendingPlaylistQueue,
+  extractPlaylistPathsFromArgv,
+  readValidatedPlaylistFile,
+} from './playlist-open.ts';
 import { lockDownSession, lockDownWebContents } from './security.ts';
 import { type ServeDeps, serveAppRequest } from './serve-app.ts';
 import { focusWindow, startSingleInstance } from './single-instance.ts';
@@ -83,7 +96,34 @@ declare const __ELV_DEV_SEED__: boolean;
 
 const rendererDir = join(__dirname, '..', 'renderer');
 
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('disable-features', 'MediaSessionService,HardwareMediaKeyHandling');
+}
+
 const gateQuery = parseGateFlag(process.argv, app.isPackaged);
+const pendingPlaylists = createPendingPlaylistQueue();
+let hasLock = false;
+let appInitialized = false;
+const enqueuePlaylistPaths = (paths: readonly string[]): void => {
+  for (const p of paths) {
+    void readValidatedPlaylistFile(p)
+      .then((file) => {
+        if (file) pendingPlaylists.enqueue(file);
+      })
+      .catch(() => undefined);
+  }
+};
+const focusOrCreateWindow = (): void => {
+  const existing = BrowserWindow.getAllWindows()[0];
+  if (existing) focusWindow(existing);
+  else if (appInitialized) createWindow();
+};
+app.on('open-file', (event, filePath) => {
+  event.preventDefault();
+  if (!hasLock || gateQuery !== null) return;
+  enqueuePlaylistPaths([filePath]);
+  if (app.isReady()) focusOrCreateWindow();
+});
 const devServerOrigin =
   gateQuery !== null
     ? null
@@ -226,15 +266,48 @@ function createWindow(): void {
   void window.loadURL(targetUrl);
 }
 
+let mediaBridge: DesktopMediaBridge | undefined;
+
 /** Kills mpv launchers a crashed run left behind, then serves the player IPC. */
 async function startPlayer(): Promise<void> {
   const pidFile = join(app.getPath('userData'), 'mpv-pids.json');
   await sweepLeftovers(pidFile, systemSweepDeps).catch(() => 0);
+  const macMediaAddon =
+    process.platform === 'darwin'
+      ? loadMacOsMediaAddon(
+          resolveMacMediaAddonPath({
+            isPackaged: app.isPackaged,
+            resourcesPath: process.resourcesPath,
+            appPath: app.getAppPath(),
+            platform: process.platform,
+            arch: process.arch,
+          }),
+        )
+      : undefined;
+  const screensHaveSeparateSpaces = (): boolean =>
+    queryMacScreensHaveSeparateSpaces(macMediaAddon, process.platform);
+  if (gateQuery === null) {
+    mediaBridge =
+      process.platform === 'linux'
+        ? createMprisBridge({
+            onRaise: () => focusWindow(BrowserWindow.getAllWindows()[0]),
+            onQuit: () => app.quit(),
+            log: logger.log,
+          })
+        : process.platform === 'darwin'
+          ? createMacOsMediaBridge({
+              addon: macMediaAddon ?? null,
+              globalShortcut,
+              log: logger.log,
+            })
+          : undefined;
+  }
   registerPlayerIpc({
     ipcMain,
     now: () => performance.now(),
     log: logger.log,
     powerBlocker,
+    ...(mediaBridge ? { mediaBridge } : {}),
     createTaskbarController: (owner, onAction) => {
       if (process.platform !== 'win32') return undefined;
       const window = BrowserWindow.fromWebContents(owner as WebContents);
@@ -271,6 +344,7 @@ async function startPlayer(): Promise<void> {
         loadMode: 'replace',
         pidFile,
         engineId,
+        screensHaveSeparateSpaces,
         ...(presenterOverride === undefined ? {} : { presenterOverride }),
         onUi,
       });
@@ -346,8 +420,13 @@ function startCatalog(): CatalogCoordinator<MessagePortMain> {
   return coordinator;
 }
 
-const hasLock = startSingleInstance(app, {
-  onSecond: () => focusWindow(BrowserWindow.getAllWindows()[0]),
+hasLock = startSingleInstance(app, {
+  onSecond: (argv, cwd) => {
+    focusOrCreateWindow();
+    if (gateQuery === null) {
+      enqueuePlaylistPaths(extractPlaylistPathsFromArgv(argv.slice(1), cwd));
+    }
+  },
 });
 
 let catalogCoordinator: CatalogCoordinator<MessagePortMain> | undefined;
@@ -360,6 +439,11 @@ registerCatalogQuitHandler({
 });
 
 if (hasLock) {
+  if (gateQuery === null) {
+    enqueuePlaylistPaths(
+      extractPlaylistPathsFromArgv(process.argv.slice(app.isPackaged ? 1 : 2), process.cwd()),
+    );
+  }
   void app.whenReady().then(async () => {
     if (app.isPackaged) Menu.setApplicationMenu(null);
     lockDownSession(session.defaultSession);
@@ -385,6 +469,7 @@ if (hasLock) {
     registerSourcesIpc<BrowserWindow>({
       ipcMain,
       getWindowFromSender: (sender) => BrowserWindow.fromWebContents(sender as WebContents),
+      pendingPlaylists,
       readClipboardText: () => clipboard.readText(),
       showOpenDialog: (win, options) =>
         win && !win.isDestroyed()
@@ -407,6 +492,7 @@ if (hasLock) {
     catalogCoordinator = startCatalog();
     await startPlayer();
     createWindow();
+    appInitialized = true;
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
@@ -414,6 +500,8 @@ if (hasLock) {
 }
 
 app.on('will-quit', () => {
+  mediaBridge?.dispose();
+  mediaBridge = undefined;
   for (const ctl of [...windowBoundsControllers]) ctl.dispose();
   windowBoundsControllers.clear();
   for (const ctl of [...aspectRatioLockControllers.values()]) ctl.dispose();

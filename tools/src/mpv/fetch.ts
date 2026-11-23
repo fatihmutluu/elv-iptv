@@ -116,7 +116,11 @@ async function buildStamped(dir: string, hash: string | null, deps: FetchDeps): 
 function launcherOutputs(dir: string, platform: string): string[] {
   if (platform === 'win32') return [`${dir}/elv-mpv.exe`];
   if (platform === 'darwin') {
-    return [`${dir}/ELV IPTV Player.app/Contents/MacOS/elv-mpv`, `${dir}/elv-iosurface.node`];
+    return [
+      `${dir}/ELV IPTV Player.app/Contents/MacOS/elv-mpv`,
+      `${dir}/elv-iosurface.node`,
+      `${dir}/elv-macos-media.node`,
+    ];
   }
   return [];
 }

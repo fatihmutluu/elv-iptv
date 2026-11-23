@@ -47,14 +47,15 @@ function systemTar(): string {
   return join(windir, 'System32', 'tar.exe');
 }
 
-/** SHA-256 of all `.c` and `.h` launcher sources in `dir` in deterministic sorted order. */
+/** SHA-256 of all `.c`, `.h`, and `.m` launcher/addon sources in `dir` in deterministic sorted order. */
 export async function hashLauncherSources(dir: string): Promise<string> {
   const entries = await readdir(dir, { withFileTypes: true });
   const names = entries
-    .filter((entry) => entry.isFile() && /\.[ch]$/.test(entry.name))
+    .filter((entry) => entry.isFile() && /\.[chm]$/.test(entry.name))
     .map((entry) => entry.name)
     .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  if (names.length === 0) throw new Error(`mpv: no launcher source files (.c/.h) found in ${dir}`);
+  if (names.length === 0)
+    throw new Error(`mpv: no launcher source files (.c/.h/.m) found in ${dir}`);
   const hash = createHash('sha256');
   for (const name of names) {
     hash.update(`${name}\0`);
@@ -70,6 +71,7 @@ export function realDeps(log: (line: string) => void, root: string): FetchDeps {
   const launcherSource = `${launcherDir}/elv-mpv.c`;
   const macLauncherSource = `${launcherDir}/elv-mpv-macos.c`;
   const macAddonSource = `${launcherDir}/elv-iosurface.c`;
+  const macMediaAddonSource = `${launcherDir}/elv-macos-media.m`;
   return {
     async download(url, file) {
       const res = await fetch(url, { redirect: 'follow' });
@@ -115,8 +117,9 @@ export function realDeps(log: (line: string) => void, root: string): FetchDeps {
           runtimeDir,
           launcherSource: macLauncherSource,
           addonSource: macAddonSource,
+          mediaAddonSource: macMediaAddonSource,
         });
-        log('mpv: built elv-mpv and elv-iosurface.node');
+        log('mpv: built elv-mpv, elv-iosurface.node, and elv-macos-media.node');
       }
     },
     async launcherSourceHash() {
