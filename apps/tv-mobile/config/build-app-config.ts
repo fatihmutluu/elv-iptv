@@ -1,4 +1,5 @@
 import type { ExpoConfig } from 'expo/config';
+import { withAccessibilityFonts } from './with-accessibility-fonts.ts';
 import { withAetherFrameworks } from './with-aether-frameworks.ts';
 import { withAndroidDisplay } from './with-android-display.ts';
 
@@ -141,6 +142,7 @@ export function buildAppConfig(env: Env, options: BuildOptions): ExpoConfig {
 
   // `@expo/config-types` omits `ConfigPlugin` functions from `ExpoConfig['plugins']`; `@expo/config-plugins` runs them.
   plugins.push(withAetherFrameworks as unknown as NonNullable<ExpoConfig['plugins']>[number]);
+  plugins.push(withAccessibilityFonts as unknown as NonNullable<ExpoConfig['plugins']>[number]);
   plugins.push([withAndroidDisplay, { isTv: tv }] as unknown as NonNullable<
     ExpoConfig['plugins']
   >[number]);

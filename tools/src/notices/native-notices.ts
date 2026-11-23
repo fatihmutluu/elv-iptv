@@ -207,11 +207,60 @@ function collectMpvNotices(repoRoot: string): ThirdPartyNotice[] {
   ];
 }
 
-/** Collects pinned native media engine notices from podspec and runtime lockfiles. */
+const ALL_PLATFORMS = [
+  'Android',
+  'Android TV',
+  'Fire OS',
+  'iOS',
+  'iPadOS',
+  'tvOS',
+  'Windows',
+  'macOS',
+  'Linux',
+] as const;
+
+/** Collects third-party notices for bundled OFL-1.1 accessibility typefaces (`#163`). */
+function collectAccessibilityFontNotices(repoRoot: string): ThirdPartyNotice[] {
+  const fontsDir = join(repoRoot, 'packages', 'ui-kit', 'assets', 'fonts');
+  const atkinsonOfl = readFileSync(join(fontsDir, 'AtkinsonHyperlegibleNext-OFL.txt'), 'utf8')
+    .replace(/\r\n/g, '\n')
+    .trim();
+  const openDyslexicOfl = readFileSync(join(fontsDir, 'OpenDyslexic-OFL.txt'), 'utf8')
+    .replace(/\r\n/g, '\n')
+    .trim();
+
+  return [
+    {
+      id: 'atkinson-hyperlegible-next',
+      name: 'Atkinson Hyperlegible Next',
+      version: 'bundled',
+      license: 'OFL-1.1',
+      platforms: ALL_PLATFORMS,
+      sourceUrl: 'https://github.com/googlefonts/atkinson-hyperlegible-next',
+      modificationNote:
+        'Unmodified Regular and Bold TTF binaries bundled for high-legibility UI and subtitle rendering.',
+      noticeText: atkinsonOfl,
+    },
+    {
+      id: 'opendyslexic',
+      name: 'OpenDyslexic',
+      version: 'bundled',
+      license: 'OFL-1.1',
+      platforms: ALL_PLATFORMS,
+      sourceUrl: 'https://github.com/antijingoist/opendyslexic',
+      modificationNote:
+        'Unmodified Regular and Bold OTF binaries bundled for dyslexia-friendly UI and subtitle rendering.',
+      noticeText: openDyslexicOfl,
+    },
+  ];
+}
+
+/** Collects pinned native media engine and bundled accessibility font notices. */
 export function collectNativeNotices(repoRoot: string): ThirdPartyNotice[] {
   return [
     ...collectAetherNotices(repoRoot),
     ...collectMedia3Notices(repoRoot),
     ...collectMpvNotices(repoRoot),
+    ...collectAccessibilityFontNotices(repoRoot),
   ];
 }

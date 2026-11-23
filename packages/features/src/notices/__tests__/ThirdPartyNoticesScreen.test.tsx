@@ -103,6 +103,9 @@ describe('ThirdPartyNoticesScreen', () => {
     await act(async () => {
       desktopKeys.props.onKeyDown({ key: 'PageDown', preventDefault: jest.fn() });
     });
+    await act(async () => {
+      desktopKeys.props.onKeyDown({ key: 'PageDown', preventDefault: jest.fn() });
+    });
     expect(screen.getByTestId('notices-detail-name')).toHaveTextContent('react-native-web');
     await act(async () => {
       desktopKeys.props.onKeyDown({ key: 'ArrowUp', preventDefault: jest.fn() });

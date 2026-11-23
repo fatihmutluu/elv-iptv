@@ -76,7 +76,11 @@ function SearchScreenBody({
   const theme = useTheme();
   const viewport = useViewport();
   const i18n = useI18n();
-  const layout = useMemo(() => computeCatalogLayout(viewport, theme), [theme, viewport]);
+  const layout = useMemo(
+    () => computeCatalogLayout(viewport, theme, theme.fontScale),
+    [theme, viewport],
+  );
+  const safeFontScale = Number.isFinite(theme.fontScale) ? Math.max(1, theme.fontScale) : 1;
 
   const { wideColumns, wideCardWidth, wideRowHeight } = useMemo(() => {
     const safeWidth = Number.isFinite(viewport.width) && viewport.width > 0 ? viewport.width : 1280;
@@ -94,9 +98,17 @@ function SearchScreenBody({
       Math.min(296, Math.floor((available - Math.max(0, cols - 1) * layout.gridGap) / cols)),
     );
     const cardHeight = Math.round((cardWidth * 9) / 16);
-    const rowHeight = cardHeight + (layout.isTv ? 64 : 52) + layout.gridGap;
+    const rowHeight =
+      cardHeight + Math.round((layout.isTv ? 64 : 52) * safeFontScale) + layout.gridGap;
     return { wideColumns: cols, wideCardWidth: cardWidth, wideRowHeight: rowHeight };
-  }, [layout.gridGap, layout.isTv, layout.padX, viewport.columns.wideRail, viewport.width]);
+  }, [
+    layout.gridGap,
+    layout.isTv,
+    layout.padX,
+    safeFontScale,
+    viewport.columns.wideRail,
+    viewport.width,
+  ]);
 
   const search = useCatalogSearch({
     catalog,
@@ -287,7 +299,7 @@ function SearchScreenBody({
         const cols = isVodGrid ? layout.gridColumns : wideColumns;
         const rowStride =
           pos.rowId === 'epg' || pos.rowId === 'episodes'
-            ? 96 + layout.gridGap
+            ? Math.round(96 * safeFontScale) + layout.gridGap
             : isVodGrid
               ? layout.gridRowHeight
               : wideRowHeight;
@@ -303,6 +315,7 @@ function SearchScreenBody({
       layout.gridColumns,
       layout.gridGap,
       layout.gridRowHeight,
+      safeFontScale,
       theme.reduceMotion,
       wideColumns,
       wideRowHeight,

@@ -28,8 +28,22 @@ export type AppearanceFocusId =
   | 'font-100'
   | 'font-110'
   | 'font-120'
+  | 'ui-font-system'
+  | 'ui-font-atkinson'
+  | 'ui-font-opendyslexic'
+  | 'sub-font-system'
+  | 'sub-font-atkinson'
+  | 'sub-font-opendyslexic'
   | 'toggle-reduce-motion'
   | 'toggle-confirm-exit'
+  | 'overscan-x-dec'
+  | 'overscan-x-inc'
+  | 'overscan-y-dec'
+  | 'overscan-y-inc'
+  | 'tv-clock-always'
+  | 'tv-clock-menus'
+  | 'tv-clock-player'
+  | 'tv-clock-never'
   | 'artwork-cache-64'
   | 'artwork-cache-128'
   | 'artwork-cache-256'
@@ -120,16 +134,38 @@ export type LiveTvFocusId =
 
 const NAV_LIST_ID = 'settings-nav';
 
-const APPEARANCE_ROWS: readonly (readonly AppearanceFocusId[])[] = [
+const APPEARANCE_ROWS_HEAD: readonly (readonly AppearanceFocusId[])[] = [
   ['lang-system', 'lang-tr', 'lang-en'],
   ['theme-obsidianCrimson', 'theme-abyssalSapphire', 'theme-theaterAmber'],
   ['theme-velvetViolet', 'theme-pitchEmerald', 'theme-highContrast'],
   ['font-90', 'font-100', 'font-110', 'font-120'],
+  ['ui-font-system', 'ui-font-atkinson', 'ui-font-opendyslexic'],
+  ['sub-font-system', 'sub-font-atkinson', 'sub-font-opendyslexic'],
   ['toggle-reduce-motion'],
   ['toggle-confirm-exit'],
+];
+
+const APPEARANCE_TV_ROWS: readonly (readonly AppearanceFocusId[])[] = [
+  ['overscan-x-dec', 'overscan-x-inc'],
+  ['overscan-y-dec', 'overscan-y-inc'],
+  ['tv-clock-always', 'tv-clock-menus', 'tv-clock-player', 'tv-clock-never'],
+];
+
+const APPEARANCE_ROWS_TAIL: readonly (readonly AppearanceFocusId[])[] = [
   ['artwork-cache-64', 'artwork-cache-128', 'artwork-cache-256'],
   ['artwork-cache-clear'],
   ['reset-preferences'],
+];
+
+const APPEARANCE_ROWS_DEFAULT: readonly (readonly AppearanceFocusId[])[] = [
+  ...APPEARANCE_ROWS_HEAD,
+  ...APPEARANCE_ROWS_TAIL,
+];
+
+const APPEARANCE_ROWS_TV: readonly (readonly AppearanceFocusId[])[] = [
+  ...APPEARANCE_ROWS_HEAD,
+  ...APPEARANCE_TV_ROWS,
+  ...APPEARANCE_ROWS_TAIL,
 ];
 
 const PLAYBACK_ROWS_HEAD: readonly (readonly PlaybackFocusId[])[] = [
@@ -213,9 +249,10 @@ const PREFERENCE_SECTIONS: readonly PreferenceSettingsSection[] = [
 
 function getSectionRows(
   showAndroidDecoder: boolean,
+  includeTvDisplayRows: boolean,
 ): Readonly<Record<PreferenceSettingsSection, readonly (readonly string[])[]>> {
   return {
-    appearance: APPEARANCE_ROWS,
+    appearance: includeTvDisplayRows ? APPEARANCE_ROWS_TV : APPEARANCE_ROWS_DEFAULT,
     playback: showAndroidDecoder ? PLAYBACK_ROWS_WITH_DECODER : PLAYBACK_ROWS_DEFAULT,
     liveTv: LIVE_TV_ROWS,
   };
@@ -232,9 +269,10 @@ const rowListId = (section: PreferenceSettingsSection, rowIndex: number): string
 function createSettingsFocusStore(
   initialSection: SettingsSection,
   showAndroidDecoder: boolean,
+  includeTvDisplayRows: boolean,
 ): FocusStore {
   const initialIdx = Math.max(0, SETTINGS_SECTIONS.indexOf(initialSection));
-  const sectionRows = getSectionRows(showAndroidDecoder);
+  const sectionRows = getSectionRows(showAndroidDecoder, includeTvDisplayRows);
   const sectionLists = PREFERENCE_SECTIONS.flatMap((sec) =>
     sectionRows[sec].map((row, i) => ({
       id: rowListId(sec, i),
@@ -314,14 +352,15 @@ export function useTvSettingsNavigation({
   );
   const [coords, setCoords] = useState<SectionCoords>(INITIAL_COORDS);
 
-  const sectionRows = getSectionRows(showAndroidDecoder);
+  const sectionRows = getSectionRows(showAndroidDecoder, isTv);
   const sectionRowsRef = useRef(sectionRows);
   sectionRowsRef.current = sectionRows;
   const storeRef = useRef<FocusStore | null>(null);
-  const storeDecoderFlagRef = useRef(showAndroidDecoder);
-  if (storeRef.current === null || storeDecoderFlagRef.current !== showAndroidDecoder) {
-    storeDecoderFlagRef.current = showAndroidDecoder;
-    storeRef.current = createSettingsFocusStore(section, showAndroidDecoder);
+  const storeConfigKey = `${showAndroidDecoder ? '1' : '0'}:${isTv ? '1' : '0'}`;
+  const storeConfigKeyRef = useRef(storeConfigKey);
+  if (storeRef.current === null || storeConfigKeyRef.current !== storeConfigKey) {
+    storeConfigKeyRef.current = storeConfigKey;
+    storeRef.current = createSettingsFocusStore(section, showAndroidDecoder, isTv);
   }
   const store = storeRef.current;
 

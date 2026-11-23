@@ -13,6 +13,7 @@ import {
 import { type ReactElement, useCallback, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, type TextStyle, View } from 'react-native';
 import { useRouteActive } from '../shared';
+import { AmbientTvClock } from '../shared/AmbientTvClock';
 import { PortraitBottomBar, UtilitiesRow } from './NavBars';
 import type { AdaptiveNavShellProps } from './types';
 
@@ -55,6 +56,7 @@ export function AdaptiveNavShell<TId extends string = string>({
   onBack,
   frosted = true,
   overlay = false,
+  tvClockMode = 'always',
   testID = 'app-shell',
   children,
 }: AdaptiveNavShellProps<TId>): ReactElement {
@@ -296,15 +298,18 @@ export function AdaptiveNavShell<TId extends string = string>({
             ) : null}
           </View>
 
-          <UtilitiesRow
-            utilities={utilities}
-            activeId={activeId}
-            isTv={isTv}
-            isTouch={isTouch}
-            {...(focusedItemId !== undefined ? { focusedItemId } : {})}
-            compactPortrait={!isLandscape}
-            {...(onExitNavFocus !== undefined ? { onExitNavFocus } : {})}
-          />
+          <View style={[styles.rightCluster, { gap: isTv ? theme.spacing.md : theme.spacing.sm }]}>
+            <UtilitiesRow
+              utilities={utilities}
+              activeId={activeId}
+              isTv={isTv}
+              isTouch={isTouch}
+              {...(focusedItemId !== undefined ? { focusedItemId } : {})}
+              compactPortrait={!isLandscape}
+              {...(onExitNavFocus !== undefined ? { onExitNavFocus } : {})}
+            />
+            <AmbientTvClock surface="menus" mode={tvClockMode} testID="nav-ambient-clock" />
+          </View>
         </GlassBar>
       </TvFocusGuideRegion>
 
@@ -345,6 +350,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flexShrink: 1,
+  },
+  rightCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
   },
   brandTitle: {
     fontWeight: '800',

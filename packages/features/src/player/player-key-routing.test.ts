@@ -150,4 +150,73 @@ describe('routeOverlayAndMediaKey videoDecoder submenu (#411)', () => {
     expect(routeOverlayAndMediaKey(event, deps)).toBe(true);
     expect(selectAndroidDecoderMode).toHaveBeenCalledWith('software');
   });
+
+  it('cancels pending digit buffer before toggling channel list on colorBlue (#133)', () => {
+    const order: string[] = [];
+    const cancel = vi.fn(() => {
+      order.push('cancel');
+    });
+    const toggleChannelList = vi.fn(() => {
+      order.push('toggleChannelList');
+    });
+    const state: PlayerOverlayLive = {
+      tracksOpen: false,
+      pickerCursor: { column: 'audio', index: 0 },
+      settingsOpen: false,
+      settingsMenu: { view: 'root', index: 0 },
+      infoOpen: false,
+      channelListOpen: false,
+      canOpenInfo: true,
+      canOpenChannelList: true,
+      locked: false,
+      osdTier: 'controls',
+      osdHidden: false,
+      tvOsdFocused: false,
+      tvScrubberFocused: false,
+      tvOsdAction: 'settings',
+      availableOsd: ['settings'],
+      tracks: EMPTY_TRACKS,
+      hasTracks: false,
+      hasService: true,
+      isVod: false,
+      playbackSpeed: 1,
+    };
+    const deps: OverlayKeyRouteDeps = {
+      isTv: true,
+      isVod: false,
+      hasAspect: true,
+      playbackSpeed: 1,
+      state,
+      service: null,
+      scrub: {
+        previewPositionMs: undefined,
+        step: vi.fn(),
+        commit: vi.fn(),
+        cancel: vi.fn(),
+      },
+      digitBuf: { push: vi.fn(), cancel, value: '12' },
+      allowTvSelect: () => true,
+      showOsd: vi.fn(),
+      toggleStats: vi.fn(),
+      toggleResizeMode: vi.fn(),
+      togglePlayPause: vi.fn(),
+      openTracks: vi.fn(),
+      closeTracks: vi.fn(),
+      closeSettings: vi.fn(),
+      toggleChannelList,
+      updateSettingsMenu: vi.fn(),
+      updatePickerCursor: vi.fn(),
+      focusTvOsd: vi.fn(),
+      blurTvOsd: vi.fn(),
+      focusTvScrubber: vi.fn(),
+      blurTvScrubber: vi.fn(),
+      activateTvOsd: vi.fn(),
+      selectSpeed: vi.fn(),
+      onExit: vi.fn(),
+    };
+
+    const event: KeyEvent = { key: 'colorBlue', kind: 'press', time: 200 };
+    expect(routeOverlayAndMediaKey(event, deps)).toBe(true);
+    expect(order).toEqual(['cancel', 'toggleChannelList']);
+  });
 });

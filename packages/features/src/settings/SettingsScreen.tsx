@@ -224,6 +224,7 @@ export function SettingsScreen({
           setPreset: themeCtrl.setPreset,
           setFontScale: themeCtrl.setFontScale,
           setReduceMotion: themeCtrl.setReduceMotion,
+          setUiFontFamily: themeCtrl.setUiFontFamily,
           setLocale: (loc) => i18n.setLocale(loc),
           onSetArtworkCacheLimitMb: handleSetArtworkCacheLimitMb,
           onClearArtworkCache: handleClearArtworkCache,

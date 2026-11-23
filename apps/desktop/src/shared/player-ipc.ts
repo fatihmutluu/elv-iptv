@@ -1,4 +1,7 @@
+import type { AccessibilityFontFamily } from '@elv/domain';
 import type { AttemptToken, EngineCapabilities, EngineEvent, LoadCommand } from '@elv/playback';
+
+export type { AccessibilityFontFamily };
 
 /** The player area in CSS pixels of the app window's content, and whether video should show there. */
 export interface PlayerArea {
@@ -101,6 +104,7 @@ export type BridgeCommand =
   | { name: 'setHwdec'; profile: HwdecProfile }
   | { name: 'setResizeMode'; mode: ResizeMode }
   | { name: 'setFilterSdh'; enabled: boolean }
+  | { name: 'setSubtitleFontFamily'; family: AccessibilityFontFamily }
   | { name: 'release' }
   | { name: 'fullscreen' }
   | { name: 'mute' };
@@ -254,6 +258,8 @@ const isHwdecProfile = (x: unknown): x is HwdecProfile =>
   x === 'auto-safe' || x === 'auto-copy' || x === 'no' || x === 'darwin-compat';
 const isResizeMode = (x: unknown): x is ResizeMode =>
   x === 'fit' || x === 'fill' || x === 'stretch';
+const isSubtitleFontFamily = (x: unknown): x is AccessibilityFontFamily =>
+  x === 'system' || x === 'atkinson' || x === 'opendyslexic';
 
 function isLoadCommand(x: unknown): x is LoadCommand {
   if (!isRecord(x)) return false;
@@ -310,6 +316,8 @@ function isBridgeCommand(x: unknown): x is BridgeCommand {
       return isHwdecProfile(x['profile']);
     case 'setResizeMode':
       return isResizeMode(x['mode']);
+    case 'setSubtitleFontFamily':
+      return isSubtitleFontFamily(x['family']);
     case 'release':
     case 'fullscreen':
     case 'mute':

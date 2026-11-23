@@ -239,6 +239,11 @@ describe('Wave P3 extended preferences schema (#401, #405, #126, #145)', () => {
       androidDecoderMode: 'hardware',
       collapseLiveVariants: true,
       groupVodVersions: false,
+      uiFontFamily: 'atkinson',
+      subtitleFontFamily: 'opendyslexic',
+      tvClockMode: 'player',
+      overscanX: 0.08,
+      overscanY: 0.04,
     };
 
     const encoded = serializePreferences(full);

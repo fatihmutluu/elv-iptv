@@ -112,6 +112,9 @@ function stubEngine(): StubEngine {
     setAudioDevice: (device: string) => e.calls.push(['setAudioDevice', device]),
     setDeinterlace: (enabled: boolean) => e.calls.push(['setDeinterlace', enabled]),
     setHwdec: (profile: string) => e.calls.push(['setHwdec', profile]),
+    setResizeMode: (mode: string) => e.calls.push(['setResizeMode', mode]),
+    setFilterSdh: (enabled: boolean) => e.calls.push(['setFilterSdh', enabled]),
+    setSubtitleFontFamily: (family: string) => e.calls.push(['setSubtitleFontFamily', family]),
     stop: (a: number) => e.calls.push(['stop', a]),
     recreate: (a: number) => e.calls.push(['recreate', a]),
     release: () => {
@@ -752,5 +755,34 @@ describe('registerPlayerIpc powerBlocker buffering stall timeout (#435)', () => 
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('dispatches valid setSubtitleFontFamily commands and drops invalid ones (#163)', async () => {
+    const t = setup();
+    const a = fakeContents(1);
+    const { engineId } = await open(t, a);
+    t.emit(PLAYER_CHANNELS.command, a, {
+      engineId,
+      command: { name: 'setSubtitleFontFamily', family: 'atkinson' },
+    });
+    t.emit(PLAYER_CHANNELS.command, a, {
+      engineId,
+      command: { name: 'setSubtitleFontFamily', family: 'opendyslexic' },
+    });
+    t.emit(PLAYER_CHANNELS.command, a, {
+      engineId,
+      command: { name: 'setSubtitleFontFamily', family: 'system' },
+    });
+    t.emit(PLAYER_CHANNELS.command, a, {
+      engineId,
+      command: { name: 'setSubtitleFontFamily', family: 'invalid-font' },
+    });
+    expect(t.engines[0]?.calls).toEqual([
+      ['setSubtitleFontFamily', 'atkinson'],
+      ['setSubtitleFontFamily', 'opendyslexic'],
+      ['setSubtitleFontFamily', 'system'],
+    ]);
+    expect(t.logs).toHaveLength(1);
+    t.dispose();
   });
 });

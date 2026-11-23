@@ -488,6 +488,20 @@ describe('SettingsScreen', () => {
       'settings-font-100',
       'settings-font-110',
       'settings-font-120',
+      'settings-ui-font-system',
+      'settings-ui-font-atkinson',
+      'settings-ui-font-opendyslexic',
+      'settings-sub-font-system',
+      'settings-sub-font-atkinson',
+      'settings-sub-font-opendyslexic',
+      'settings-overscan-x-dec',
+      'settings-overscan-x-inc',
+      'settings-overscan-y-dec',
+      'settings-overscan-y-inc',
+      'settings-tv-clock-always',
+      'settings-tv-clock-menus',
+      'settings-tv-clock-player',
+      'settings-tv-clock-never',
       'settings-artwork-cache-64',
       'settings-artwork-cache-128',
       'settings-artwork-cache-256',
@@ -506,11 +520,14 @@ describe('SettingsScreen', () => {
     await fireEvent(screen.getByTestId('settings-toggle-reduce-motion'), 'layout', {
       nativeEvent: { layout: { x: 0, y: 110, width: 600, height: 48 } },
     });
+    await fireEvent(screen.getByTestId('settings-section-tv-display'), 'layout', {
+      nativeEvent: { layout: { x: 0, y: 500, width: 640, height: 180 } },
+    });
     await fireEvent(screen.getByTestId('settings-section-artwork-cache'), 'layout', {
-      nativeEvent: { layout: { x: 0, y: 550, width: 640, height: 120 } },
+      nativeEvent: { layout: { x: 0, y: 700, width: 640, height: 120 } },
     });
     await fireEvent(screen.getByTestId('settings-section-reset'), 'layout', {
-      nativeEvent: { layout: { x: 0, y: 700, width: 640, height: 52 } },
+      nativeEvent: { layout: { x: 0, y: 850, width: 640, height: 52 } },
     });
 
     // Right enters Appearance row 0 (Language) -> scrolls to y: 0
@@ -523,6 +540,12 @@ describe('SettingsScreen', () => {
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 348, animated: true });
 
+    // Down x2 -> Interface font & Subtitle font rows -> stay in font section
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 348, animated: true });
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 348, animated: true });
+
     // Down -> Reduce Motion row -> scrolls to font.y + motionOffsetY - 12
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 458, animated: true });
@@ -531,20 +554,28 @@ describe('SettingsScreen', () => {
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 458, animated: true });
 
+    // Down x3 -> TV Display card (overscanX, overscanY, tvClockMode) -> scrolls to tvDisplay section
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 488, animated: true });
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 488, animated: true });
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 488, animated: true });
+
     // Down -> Artwork cache limit row -> scrolls to artworkCache section
-    await pressKey(KEYCODE_DPAD_DOWN);
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 538, animated: true });
-
-    // Down -> Artwork cache clear row -> stays on artworkCache section
-    await pressKey(KEYCODE_DPAD_DOWN);
-    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 538, animated: true });
-
-    // Down -> Reset row -> scrolls to reset section
     await pressKey(KEYCODE_DPAD_DOWN);
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 688, animated: true });
 
-    // Up x8 -> back to Language row -> resets scroll to y: 0
-    for (let i = 0; i < 8; i += 1) {
+    // Down -> Artwork cache clear row -> stays on artworkCache section
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 688, animated: true });
+
+    // Down -> Reset row -> scrolls to reset section
+    await pressKey(KEYCODE_DPAD_DOWN);
+    expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 838, animated: true });
+
+    // Up x13 -> back to Language row -> resets scroll to y: 0
+    for (let i = 0; i < 13; i += 1) {
       await pressKey(KEYCODE_DPAD_UP);
     }
     expect(scrollToSpy).toHaveBeenLastCalledWith({ y: 0, animated: true });

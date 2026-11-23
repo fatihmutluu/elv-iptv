@@ -137,6 +137,20 @@ describe('createEngineFor', () => {
     expect(baseArgs).not.toContain('--video-timing-offset=0');
   });
 
+  it('forwards runtime.fontsDir as --sub-fonts-dir in baseArgs (#163)', async () => {
+    await createEngineFor(fakeOwner, {
+      runtime: { ...runtime, fontsDir: 'C:\\res\\fonts' },
+      platform: 'win32',
+      loadMode: 'replace',
+      pidFile: 'C:\\tmp\\mpv-pids.json',
+      readaheadStore: stubReadaheadStore,
+      onUi: () => undefined,
+    });
+
+    const baseArgs = mocks.engineDeps[0]?.baseArgs ?? [];
+    expect(baseArgs).toContain('--sub-fonts-dir=C:\\res\\fonts');
+  });
+
   it('defaults darwin with canvasExecutable and ioSurfaceAddon to canvas, forwards ioSurfaceAddon, enables renderContext, and spawns canvasExecutable', async () => {
     const uiEvents: PlayerUiEvent[] = [];
     const macRuntime = {

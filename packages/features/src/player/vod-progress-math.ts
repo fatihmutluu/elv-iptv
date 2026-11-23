@@ -36,10 +36,23 @@ export function cycleOsdTimeDisplayMode(mode: OsdTimeDisplayMode): OsdTimeDispla
   return 'total';
 }
 
+/** Computes speed-adjusted remaining playback duration clamped strictly `>= 0` (`#133`). */
+function computeScaledRemainingMs(
+  positionMs: number,
+  durationMs: number,
+  playbackSpeed: number,
+): number {
+  const safePos = Number.isFinite(positionMs) ? Math.min(Math.max(0, positionMs), durationMs) : 0;
+  const rawRemainingMs = Math.max(0, durationMs - safePos);
+  const speed =
+    Number.isFinite(playbackSpeed) && playbackSpeed > 0 ? Math.max(0.25, playbackSpeed) : 1;
+  return Math.max(0, Math.round(rawRemainingMs / speed));
+}
+
 /**
- * Formats the VOD right-hand timestamp according to {@link OsdTimeDisplayMode} (`#160`):
+ * Formats the VOD right-hand timestamp according to {@link OsdTimeDisplayMode} (`#160`, `#133`):
  * - `'total'`: total duration (e.g. `20:52`)
- * - `'remaining'`: negated remaining duration (e.g. `-20:21`)
+ * - `'remaining'`: speed-adjusted negated remaining duration clamped `>= 0` (e.g. `-20:21`)
  * - `'endsAt'`: speed-adjusted projected wall-clock end time (e.g. `Ends at 21:14`)
  */
 export function formatVodEndTimestamp(
@@ -53,14 +66,36 @@ export function formatVodEndTimestamp(
   if (durationMs === undefined || !Number.isFinite(durationMs) || durationMs <= 0) {
     return '--:--';
   }
-  const safePos = Number.isFinite(positionMs) ? Math.min(Math.max(0, positionMs), durationMs) : 0;
   if (mode === 'total') return formatPlaybackPosition(durationMs);
-  const remainingMs = Math.max(0, durationMs - safePos);
-  if (mode === 'remaining') return `-${formatPlaybackPosition(remainingMs)}`;
-  const speed =
-    Number.isFinite(playbackSpeed) && playbackSpeed > 0 ? Math.max(0.25, playbackSpeed) : 1;
-  const endEpochMs = wallClockMs + remainingMs / speed;
+  const scaledRemainingMs = computeScaledRemainingMs(positionMs, durationMs, playbackSpeed);
+  if (mode === 'remaining') return `-${formatPlaybackPosition(scaledRemainingMs)}`;
+  const endEpochMs = wallClockMs + scaledRemainingMs;
   return i18n.t('player.endsAt', { time: formatWallClockHm(endEpochMs) });
+}
+
+/**
+ * Formats the screen-reader accessibility label for the VOD end timestamp control (`#133`).
+ * In `'remaining'` mode, announces a clamped non-negative duration (`player.remainingTimeAnnouncement`)
+ * so TalkBack/VoiceOver never reads a negative sign.
+ */
+export function formatVodEndAccessibilityLabel(
+  positionMs: number,
+  durationMs: number | undefined,
+  playbackSpeed: number,
+  mode: OsdTimeDisplayMode,
+  wallClockMs: number,
+  i18n: Pick<AppI18n, 't'>,
+): string {
+  if (durationMs === undefined || !Number.isFinite(durationMs) || durationMs <= 0) {
+    return '--:--';
+  }
+  if (mode === 'remaining') {
+    const scaledRemainingMs = computeScaledRemainingMs(positionMs, durationMs, playbackSpeed);
+    return i18n.t('player.remainingTimeAnnouncement', {
+      time: formatPlaybackPosition(scaledRemainingMs),
+    });
+  }
+  return formatVodEndTimestamp(positionMs, durationMs, playbackSpeed, mode, wallClockMs, i18n);
 }
 
 /** Resolves the touch fine-scrubbing tier and horizontal multiplier from vertical displacement `|dy|` (`#355`). */

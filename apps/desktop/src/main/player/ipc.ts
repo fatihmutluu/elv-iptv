@@ -371,6 +371,9 @@ export function registerPlayerIpc(deps: PlayerIpcDeps): () => void {
       case 'setFilterSdh':
         engine.setFilterSdh(command.enabled);
         break;
+      case 'setSubtitleFontFamily':
+        engine.setSubtitleFontFamily(command.family);
+        break;
       case 'fullscreen':
         engine.toggleFullscreen();
         break;

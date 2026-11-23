@@ -24,6 +24,10 @@ const HIDDEN_OSD_PASSTHROUGH_KEYS: ReadonlySet<Key> = new Set([
   'info',
   'guide',
   'lastChannel',
+  'colorRed',
+  'colorGreen',
+  'colorYellow',
+  'colorBlue',
 ]);
 
 const DIGIT_KEY_CHARS: Readonly<Partial<Record<Key, string>>> = {

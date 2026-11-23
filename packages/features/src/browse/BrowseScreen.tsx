@@ -1,6 +1,6 @@
 import type { BrowseKind, CatalogService, ItemRow, SourceRow } from '@elv/data';
 import type { FocusStore, KeyEvent } from '@elv/focus-core';
-import { useFormFactor } from '@elv/ui-kit';
+import { useFormFactor, useTheme } from '@elv/ui-kit';
 import { type ReactElement, useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { View } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
@@ -13,12 +13,11 @@ import {
   useTaggedItemsSource,
 } from './BrowseHelpers';
 import {
-  BROWSE_ROW_HEIGHT_POINTER,
-  BROWSE_ROW_HEIGHT_TV,
   BrowseCategoriesAndItems,
   BrowseTvKeyBridge,
   browseStyles,
   CATEGORIES_LIST_ID,
+  computeBrowseRowHeight,
   createArrayListSource,
   ITEMS_LIST_ID,
 } from './BrowseParts';
@@ -62,9 +61,10 @@ export function BrowseScreen({
   isActiveScope = true,
 }: BrowseScreenProps): ReactElement {
   const formFactor = useFormFactor();
+  const theme = useTheme();
   const isTv = formFactor === 'tv';
   const isPhone = formFactor === 'phone';
-  const rowHeight = isTv ? BROWSE_ROW_HEIGHT_TV : BROWSE_ROW_HEIGHT_POINTER;
+  const rowHeight = computeBrowseRowHeight(isTv, theme.fontScale);
 
   const readySources = useMemo(() => sources.filter((s) => !s.needsImport), [sources]);
   const { categories, loading: categoriesLoading } = useBrowseCategories(

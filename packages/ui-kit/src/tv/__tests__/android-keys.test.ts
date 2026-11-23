@@ -48,6 +48,10 @@ const TABLE: [number, Key][] = [
   [92, 'channelUp'],
   [167, 'channelDown'],
   [93, 'channelDown'],
+  [183, 'colorRed'],
+  [184, 'colorGreen'],
+  [185, 'colorYellow'],
+  [186, 'colorBlue'],
   ...Array.from({ length: 10 }, (_, i): [number, Key] => [7 + i, `digit${i}` as Key]),
   ...Array.from({ length: 10 }, (_, i): [number, Key] => [144 + i, `digit${i}` as Key]),
 ];

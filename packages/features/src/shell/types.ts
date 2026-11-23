@@ -1,3 +1,4 @@
+import type { TvClockMode } from '@elv/domain';
 import type { IconName } from '@elv/ui-kit';
 import type { ReactNode } from 'react';
 
@@ -39,6 +40,8 @@ export interface AdaptiveNavShellProps<TId extends string = string> {
   readonly frosted?: boolean;
   /** When true, positions the top bar absolutely over full-bleed hero content (`zIndex: 35`). */
   readonly overlay?: boolean;
+  /** Ambient TV clock visibility preference (`#416`). */
+  readonly tvClockMode?: TvClockMode;
   readonly testID?: string;
   readonly children: ReactNode;
 }

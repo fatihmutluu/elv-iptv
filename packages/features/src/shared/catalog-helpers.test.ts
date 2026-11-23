@@ -6,7 +6,10 @@ import {
   buildSharedDisplayCategories,
   computeCatalogLayout,
   detailTargetFromItem,
+  formatAmbientClockTime,
   formatVodMeta,
+  msUntilNextMinuteBoundary,
+  shouldShowAmbientClock,
 } from './index';
 
 const MOCK_THEME = {
@@ -205,5 +208,50 @@ describe('shared catalog helpers', () => {
     expect(listProgressByKeys.mock.calls[0]?.[0]).toHaveLength(100);
     expect(listProgressByKeys.mock.calls[1]?.[0]).toHaveLength(45);
     expect(map.size).toBe(2);
+  });
+
+  it('scales gridRowHeight deterministically at fontScale = 1.2 without shrinking below 1.0 or NaN (#62)', () => {
+    const tvViewport = makeViewport({
+      formFactor: 'tv',
+      inputModality: 'tv',
+      width: 1920,
+      height: 1080,
+      overscan: { x: 48, y: 27 },
+    });
+    const baseTv = computeCatalogLayout(tvViewport, { ...MOCK_THEME, fontScale: 1 } as Theme);
+    const smallTv = computeCatalogLayout(tvViewport, { ...MOCK_THEME, fontScale: 0.9 } as Theme);
+    const largeTv = computeCatalogLayout(tvViewport, { ...MOCK_THEME, fontScale: 1.2 } as Theme);
+    const explicitLarge = computeCatalogLayout(tvViewport, MOCK_THEME, 1.2);
+    const nanSafe = computeCatalogLayout(tvViewport, MOCK_THEME, Number.NaN);
+
+    expect(smallTv.gridRowHeight).toBe(baseTv.gridRowHeight);
+    expect(largeTv.gridRowHeight).toBe(baseTv.gridRowHeight + Math.round(68 * 1.2) - 68);
+    expect(explicitLarge.gridRowHeight).toBe(largeTv.gridRowHeight);
+    expect(Number.isFinite(nanSafe.gridRowHeight)).toBe(true);
+    expect(nanSafe.gridRowHeight).toBe(baseTv.gridRowHeight);
+
+    const desktopBase = computeCatalogLayout(makeViewport(), MOCK_THEME, 1);
+    const desktopLarge = computeCatalogLayout(makeViewport(), MOCK_THEME, 1.2);
+    expect(desktopLarge.gridRowHeight).toBe(desktopBase.gridRowHeight + Math.round(54 * 1.2) - 54);
+  });
+
+  it('evaluates AmbientTvClock visibility matrix, minute boundary math, and locale formatting (#416)', () => {
+    expect(shouldShowAmbientClock('always', 'menus')).toBe(true);
+    expect(shouldShowAmbientClock('always', 'player')).toBe(true);
+    expect(shouldShowAmbientClock('menus', 'menus')).toBe(true);
+    expect(shouldShowAmbientClock('menus', 'player')).toBe(false);
+    expect(shouldShowAmbientClock('player', 'menus')).toBe(false);
+    expect(shouldShowAmbientClock('player', 'player')).toBe(true);
+    expect(shouldShowAmbientClock('never', 'menus')).toBe(false);
+    expect(shouldShowAmbientClock('never', 'player')).toBe(false);
+
+    expect(msUntilNextMinuteBoundary(60_000 * 100 + 15_000)).toBe(45_050);
+    expect(msUntilNextMinuteBoundary(60_000 * 100)).toBe(60_050);
+    expect(msUntilNextMinuteBoundary(Number.NaN)).toBe(60_050);
+
+    const sampleMs = new Date(2026, 10, 23, 21, 5, 0).getTime();
+    expect(formatAmbientClockTime(sampleMs, 'en').length).toBeGreaterThan(0);
+    expect(formatAmbientClockTime(sampleMs, 'tr').length).toBeGreaterThan(0);
+    expect(formatAmbientClockTime(Number.NaN, 'en')).toBe('--:--');
   });
 });

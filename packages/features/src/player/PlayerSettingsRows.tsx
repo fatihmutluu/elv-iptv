@@ -11,9 +11,11 @@ export function blurWebTarget(target: unknown): void {
 
 /** Shared Cinema Quietude borderless list-row styles for `PlayerSettingsSheet`. */
 export function settingsRowStyle(theme: Theme, focused: boolean, selected: boolean, isTv: boolean) {
+  const safeFontScale = Number.isFinite(theme.fontScale) ? Math.max(1, theme.fontScale) : 1;
   return [
     rowStyles.row,
     {
+      minHeight: Math.round(38 * safeFontScale),
       borderRadius: focused || selected ? theme.radius.button : 0,
       backgroundColor: selected
         ? theme.colors.accentTint

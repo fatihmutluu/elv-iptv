@@ -7,10 +7,16 @@ import { useRouteActive } from '../shared';
 import { type DisplayCategory, formatItemTitle } from './browse-model';
 
 export const BROWSE_VISIBLE_ROWS = 10;
-export const BROWSE_ROW_HEIGHT_TV = 50;
-export const BROWSE_ROW_HEIGHT_POINTER = 44;
+const BROWSE_ROW_HEIGHT_TV = 50;
+const BROWSE_ROW_HEIGHT_POINTER = 44;
 export const CATEGORIES_LIST_ID = 'browse-categories';
 export const ITEMS_LIST_ID = 'browse-items';
+
+/** Computes font-scale-aware row height for legacy browse `ElvList` surfaces (`#62`). */
+export function computeBrowseRowHeight(isTv: boolean, fontScale = 1): number {
+  const safeScale = Number.isFinite(fontScale) ? Math.max(1, fontScale) : 1;
+  return Math.round((isTv ? BROWSE_ROW_HEIGHT_TV : BROWSE_ROW_HEIGHT_POINTER) * safeScale);
+}
 
 /** Wraps a small in-memory array (`categories`, `seasons`, `episodes`) as an O(1) {@link ListSource}. */
 export function createArrayListSource<T>(items: readonly T[]): ListSource<T> {

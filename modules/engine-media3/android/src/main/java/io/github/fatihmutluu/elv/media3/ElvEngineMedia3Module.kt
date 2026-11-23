@@ -227,6 +227,10 @@ class ElvEngineMedia3Module : Module() {
         view.setSubtitleBottomInsetPx(inset)
       }
 
+      Prop("subtitleFontFamily") { view: Media3SurfaceView, family: String? ->
+        view.setSubtitleFontFamily(family)
+      }
+
       Prop("surfaceRecreationToken") { view: Media3SurfaceView, token: Int? ->
         view.setSurfaceRecreationToken(token ?: 0)
       }

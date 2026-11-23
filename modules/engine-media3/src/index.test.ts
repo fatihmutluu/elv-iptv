@@ -230,6 +230,7 @@ describe('Media3Surface', () => {
         engine,
         resizeMode: 'fill',
         subtitleBottomInsetPx: 96,
+        subtitleFontFamily: 'atkinson',
         surfaceRecreationToken: 2,
         useTextureView: true,
       })?.props,
@@ -237,8 +238,17 @@ describe('Media3Surface', () => {
       engine: native.engine,
       resizeMode: 'fill',
       subtitleBottomInsetPx: 96,
+      subtitleFontFamily: 'atkinson',
       surfaceRecreationToken: 2,
       useTextureView: true,
+    });
+    expect(Media3Surface({ engine, subtitleFontFamily: 'opendyslexic' })?.props).toEqual({
+      engine: native.engine,
+      subtitleFontFamily: 'opendyslexic',
+    });
+    expect(Media3Surface({ engine, subtitleFontFamily: 'system' })?.props).toEqual({
+      engine: native.engine,
+      subtitleFontFamily: 'system',
     });
     expect(Media3Surface({ engine })?.props).toEqual({ engine: native.engine });
   });

@@ -16,6 +16,7 @@ import {
   attachWebProgressDrag,
   createTouchScrubResponder,
   formatPlaybackPosition,
+  formatVodEndAccessibilityLabel,
   formatVodEndTimestamp,
   type PressGeometry,
   previewProgressSnapshot,
@@ -197,6 +198,7 @@ export function VodProgressBar({
   const hoverPillLeftPct =
     pillRatio !== null ? Math.max(8, Math.min(92, Math.round(pillRatio * 1000) / 10)) : 50;
 
+  const nowWallMs = wallClock();
   const endTimestampText =
     i18n !== undefined
       ? formatVodEndTimestamp(
@@ -204,12 +206,23 @@ export function VodProgressBar({
           snapshot.durationMs,
           playbackSpeed,
           timeDisplayMode,
-          wallClock(),
+          nowWallMs,
           i18n,
         )
       : snapshot.hasDuration && snapshot.durationMs !== undefined
         ? formatPlaybackPosition(snapshot.durationMs)
         : '--:--';
+  const endTimestampA11yLabel =
+    i18n !== undefined
+      ? formatVodEndAccessibilityLabel(
+          snapshot.positionMs,
+          snapshot.durationMs,
+          playbackSpeed,
+          timeDisplayMode,
+          nowWallMs,
+          i18n,
+        )
+      : endTimestampText;
 
   const startWebDrag = (event: PressGeometry): void => {
     if (!isWeb || isTv || !live.hasDuration) return;
@@ -448,7 +461,7 @@ export function VodProgressBar({
         disabled={onCycleTimeDisplayMode === undefined}
         focusable={false}
         accessibilityRole={onCycleTimeDisplayMode !== undefined ? 'button' : 'text'}
-        accessibilityLabel={endTimestampText}
+        accessibilityLabel={endTimestampA11yLabel}
         accessibilityHint={
           onCycleTimeDisplayMode !== undefined ? i18n?.t('player.timeDisplayToggleHint') : undefined
         }

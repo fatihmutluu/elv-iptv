@@ -1,3 +1,4 @@
+import type { AccessibilityFontFamily } from '@elv/domain';
 import { Platform, type TextStyle } from 'react-native';
 import { hexToRgba } from './color-utils';
 import {
@@ -67,6 +68,7 @@ export interface Theme {
   readonly highContrast: boolean;
   readonly fontScale: number;
   readonly reduceMotion: boolean;
+  readonly uiFontFamily: AccessibilityFontFamily;
   readonly colors: ThemeColors;
   readonly radius: {
     readonly button: number;
@@ -111,6 +113,7 @@ export interface ThemeOptions {
   readonly palette?: ThemePalette;
   readonly fontScale?: number;
   readonly reduceMotion?: boolean;
+  readonly uiFontFamily?: AccessibilityFontFamily;
 }
 
 /** Clamps a user font scale multiplier to `[0.9, 1.2]`. */
@@ -119,8 +122,53 @@ export function clampFontScale(value: number | undefined): number {
   return Math.round(Math.min(MAX_FONT_SCALE, Math.max(MIN_FONT_SCALE, value)) * 100) / 100;
 }
 
-function resolveSansFontFamily(): string | undefined {
-  return Platform.OS === 'web' ? WEB_FONT_FAMILY_SANS : FONT_FAMILY_SANS;
+const BOLD_FONT_WEIGHTS = new Set<TextStyle['fontWeight']>(['600', '700', '800', '900', 'bold']);
+
+const WEB_ACCESSIBILITY_FONT_FAMILIES: Readonly<
+  Record<Exclude<AccessibilityFontFamily, 'system'>, string>
+> = {
+  atkinson: 'Atkinson Hyperlegible Next, system-ui, sans-serif',
+  opendyslexic: 'OpenDyslexic, system-ui, sans-serif',
+};
+
+const ANDROID_ACCESSIBILITY_FONT_FAMILIES: Readonly<
+  Record<Exclude<AccessibilityFontFamily, 'system'>, string>
+> = {
+  atkinson: 'AtkinsonHyperlegibleNext',
+  opendyslexic: 'OpenDyslexic',
+};
+
+const APPLE_ACCESSIBILITY_FONT_FAMILIES: Readonly<
+  Record<
+    Exclude<AccessibilityFontFamily, 'system'>,
+    { readonly regular: string; readonly bold: string }
+  >
+> = {
+  atkinson: {
+    regular: 'AtkinsonHyperlegibleNext-Regular',
+    bold: 'AtkinsonHyperlegibleNext-Bold',
+  },
+  opendyslexic: {
+    regular: 'OpenDyslexic-Regular',
+    bold: 'OpenDyslexic-Bold',
+  },
+};
+
+function resolveTypographyFontFamily(
+  uiFontFamily: AccessibilityFontFamily,
+  fontWeight: TextStyle['fontWeight'],
+): string | undefined {
+  if (uiFontFamily === 'system') {
+    return Platform.OS === 'web' ? WEB_FONT_FAMILY_SANS : FONT_FAMILY_SANS;
+  }
+  if (Platform.OS === 'web') {
+    return WEB_ACCESSIBILITY_FONT_FAMILIES[uiFontFamily];
+  }
+  if (Platform.OS === 'android') {
+    return ANDROID_ACCESSIBILITY_FONT_FAMILIES[uiFontFamily];
+  }
+  const faces = APPLE_ACCESSIBILITY_FONT_FAMILIES[uiFontFamily];
+  return BOLD_FONT_WEIGHTS.has(fontWeight) ? faces.bold : faces.regular;
 }
 
 function scaleStep(
@@ -128,9 +176,10 @@ function scaleStep(
   lineHeight: number,
   fontWeight: TextStyle['fontWeight'],
   scale: number,
+  uiFontFamily: AccessibilityFontFamily,
   letterSpacing?: number,
 ): TypeScaleStep {
-  const fontFamily = resolveSansFontFamily();
+  const fontFamily = resolveTypographyFontFamily(uiFontFamily, fontWeight);
   return {
     fontSize: Math.round(fontSize * scale * 2) / 2,
     lineHeight: Math.round(lineHeight * scale),
@@ -147,6 +196,7 @@ export function buildTheme(options: ThemeOptions = {}): Theme {
   const highContrast = Boolean(palette.highContrast);
   const fontScale = clampFontScale(options.fontScale);
   const reduceMotion = Boolean(options.reduceMotion);
+  const uiFontFamily: AccessibilityFontFamily = options.uiFontFamily ?? 'system';
 
   const colors: ThemeColors = {
     ...palette,
@@ -177,6 +227,7 @@ export function buildTheme(options: ThemeOptions = {}): Theme {
     highContrast,
     fontScale,
     reduceMotion,
+    uiFontFamily,
     colors,
     radius: {
       button: 4,
@@ -205,13 +256,13 @@ export function buildTheme(options: ThemeOptions = {}): Theme {
       easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
     },
     typography: {
-      display: scaleStep(34, 38, '800', fontScale, -0.9),
-      h1: scaleStep(24, 29, '800', fontScale, -0.5),
-      h2: scaleStep(17, 23, '700', fontScale, -0.25),
-      title: scaleStep(14, 19, '600', fontScale, -0.1),
-      body: scaleStep(13.5, 20, '400', fontScale),
-      caption: scaleStep(12, 16, '500', fontScale),
-      micro: scaleStep(10.5, 14, '700', fontScale, 0.25),
+      display: scaleStep(34, 38, '800', fontScale, uiFontFamily, -0.9),
+      h1: scaleStep(24, 29, '800', fontScale, uiFontFamily, -0.5),
+      h2: scaleStep(17, 23, '700', fontScale, uiFontFamily, -0.25),
+      title: scaleStep(14, 19, '600', fontScale, uiFontFamily, -0.1),
+      body: scaleStep(13.5, 20, '400', fontScale, uiFontFamily),
+      caption: scaleStep(12, 16, '500', fontScale, uiFontFamily),
+      micro: scaleStep(10.5, 14, '700', fontScale, uiFontFamily, 0.25),
     },
   };
 }

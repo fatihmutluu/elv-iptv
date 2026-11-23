@@ -57,8 +57,12 @@ export function formatVodMeta(year: number | null, rating: number | null): strin
   return parts.length > 0 ? parts.join(' · ') : undefined;
 }
 
-/** Computes responsive peek/grid poster & wide card widths with form-factor max-width caps. */
-export function computeCatalogLayout(viewport: ViewportInfo, theme: Theme): CatalogLayoutMetrics {
+/** Computes responsive peek/grid poster & wide card widths with form-factor max-width caps (`#62`). */
+export function computeCatalogLayout(
+  viewport: ViewportInfo,
+  theme: Theme,
+  fontScale?: number,
+): CatalogLayoutMetrics {
   const isTv = viewport.formFactor === 'tv';
   const isTouch = viewport.inputModality === 'touch';
   const isPortrait =
@@ -69,6 +73,12 @@ export function computeCatalogLayout(viewport: ViewportInfo, theme: Theme): Cata
   const safeWidth = Number.isFinite(viewport.width) && viewport.width > 0 ? viewport.width : 1280;
   const safeHeight =
     Number.isFinite(viewport.height) && viewport.height > 0 ? viewport.height : 720;
+  const effectiveFontScale =
+    fontScale !== undefined && Number.isFinite(fontScale)
+      ? Math.max(1, fontScale)
+      : typeof theme.fontScale === 'number' && Number.isFinite(theme.fontScale)
+        ? Math.max(1, theme.fontScale)
+        : 1;
 
   const padX = isTv
     ? Math.max(theme.spacing.xl, viewport.overscan.x)
@@ -112,7 +122,7 @@ export function computeCatalogLayout(viewport: ViewportInfo, theme: Theme): Cata
     ),
   );
   const posterHeight = Math.round(gridCardWidth * 1.5);
-  const textAndPad = isTv ? 68 : 54;
+  const textAndPad = Math.round((isTv ? 68 : 54) * effectiveFontScale);
   const gridRowHeight = posterHeight + textAndPad + gridGap;
   const usableHeight = Math.max(gridRowHeight, safeHeight - heroTopClearance - 110);
   const visibleGridRows = Math.max(2, Math.ceil(usableHeight / gridRowHeight));

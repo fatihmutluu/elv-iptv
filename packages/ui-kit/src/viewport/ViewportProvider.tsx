@@ -23,6 +23,10 @@ const ViewportContext = createContext<ViewportInfo | undefined>(undefined);
 export interface ViewportProviderProps {
   /** Partial or full viewport overrides (e.g. device preview frames or unit tests). */
   value?: ViewportOverride;
+  /** Optional TV horizontal overscan inset ratio (`0..0.1`, default `0.05`). Ignored on non-TV. */
+  overscanX?: number;
+  /** Optional TV vertical overscan inset ratio (`0..0.1`, default `0.05`). Ignored on non-TV. */
+  overscanY?: number;
   children: ReactNode;
 }
 
@@ -30,7 +34,12 @@ export interface ViewportProviderProps {
  * Provides responsive {@link ViewportInfo} (`formFactor`, `orientation`, `inputModality`, overscan,
  * safe area, and rail/grid column counts) and syncs `FormFactorProvider` for legacy callers.
  */
-export function ViewportProvider({ value, children }: ViewportProviderProps): ReactElement {
+export function ViewportProvider({
+  value,
+  overscanX,
+  overscanY,
+  children,
+}: ViewportProviderProps): ReactElement {
   const { width, height } = useWindowDimensions();
   const [probedSafeArea, setProbedSafeArea] = useState<EdgeInsets | undefined>(undefined);
 
@@ -52,6 +61,9 @@ export function ViewportProvider({ value, children }: ViewportProviderProps): Re
   const oSafeRight = value?.safeArea?.right;
   const oSafeBottom = value?.safeArea?.bottom;
   const oSafeLeft = value?.safeArea?.left;
+  const oOverscanEnabled = value?.overscanEnabled;
+  const oOverscanX = value?.overscanX;
+  const oOverscanY = value?.overscanY;
   const hasOverride = value !== undefined;
 
   const resolved = useMemo(() => {
@@ -77,6 +89,9 @@ export function ViewportProvider({ value, children }: ViewportProviderProps): Re
             ...(oWidth !== undefined ? { width: oWidth } : {}),
             ...(oHeight !== undefined ? { height: oHeight } : {}),
             ...(safeArea !== undefined ? { safeArea } : {}),
+            ...(oOverscanEnabled !== undefined ? { overscanEnabled: oOverscanEnabled } : {}),
+            ...(oOverscanX !== undefined ? { overscanX: oOverscanX } : {}),
+            ...(oOverscanY !== undefined ? { overscanY: oOverscanY } : {}),
           }
         : undefined;
     return resolveViewport({
@@ -84,11 +99,15 @@ export function ViewportProvider({ value, children }: ViewportProviderProps): Re
       os: Platform.OS,
       width,
       height,
+      ...(overscanX !== undefined ? { overscanX } : {}),
+      ...(overscanY !== undefined ? { overscanY } : {}),
       ...(override !== undefined ? { override } : {}),
     });
   }, [
     width,
     height,
+    overscanX,
+    overscanY,
     hasOverride,
     probedSafeArea,
     oFormFactor,
@@ -100,6 +119,9 @@ export function ViewportProvider({ value, children }: ViewportProviderProps): Re
     oSafeRight,
     oSafeBottom,
     oSafeLeft,
+    oOverscanEnabled,
+    oOverscanX,
+    oOverscanY,
   ]);
   return (
     <ViewportContext.Provider value={resolved}>

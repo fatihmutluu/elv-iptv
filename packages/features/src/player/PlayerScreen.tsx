@@ -49,46 +49,29 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     appLifecycle = noopAppLifecycle,
     clock = DEFAULT_PLAYER_CLOCK,
     wallClock = Date.now,
-    timers = DEFAULT_PLAYER_TIMERS,
-    initialOsdHidden,
-    autoHideOsdMs,
-    initialVolume,
-    onPersistVolume,
   } = props;
+  const { timers = DEFAULT_PLAYER_TIMERS, initialOsdHidden, autoHideOsdMs, initialVolume } = props;
+  const { onPersistVolume, autoSubtitlesOnSkipBack, onToggleAutoSubtitlesOnSkipBack } = props;
   const {
-    autoSubtitlesOnSkipBack,
-    onToggleAutoSubtitlesOnSkipBack,
     autoPlayNextEpisode,
     onToggleAutoPlayNextEpisode,
     reduceMotion,
     bufferPreset = 'auto',
-    useTextureView = false,
-    seekStepSec = 10,
-    defaultResizeMode = 'fit',
-    onPersistResizeMode,
   } = props;
+  const { useTextureView = false, seekStepSec = 10, defaultResizeMode = 'fit' } = props;
+  const { onPersistResizeMode, preferredAudioLang, preferredSubtitleLang } = props;
   const {
-    preferredAudioLang,
-    preferredSubtitleLang,
     preferredAudioLanguages,
     preferredSubtitleLanguages,
     preferDefaultAudioTrack = true,
-    preferHevcOverDolbyVision = false,
-    filterSdhSubtitles = false,
-    subtitleMode = 'smart',
-    osdTimeDisplayMode = 'total',
-    onPersistOsdTimeDisplayMode,
-    sleepTimerDefaultAction = 'stop',
-    onPersistSleepTimerAction,
-    stillWatchingTimeoutMin = 0,
-    onPlaybackActiveChange,
-    onFineScrubHaptic,
-    preferredAudioDevice,
-    onPersistAudioDevice,
-    androidDecoderMode,
-    onSelectAndroidDecoderMode,
-    liveChannelSwitchMode = 'instant',
   } = props;
+  const { preferHevcOverDolbyVision = false, filterSdhSubtitles = false } = props;
+  const { subtitleMode = 'smart', subtitleFontFamily = 'system', tvClockMode = 'always' } = props;
+  const { osdTimeDisplayMode = 'total', onPersistOsdTimeDisplayMode } = props;
+  const { sleepTimerDefaultAction = 'stop', onPersistSleepTimerAction } = props;
+  const { stillWatchingTimeoutMin = 0, onPlaybackActiveChange, onFineScrubHaptic } = props;
+  const { preferredAudioDevice, onPersistAudioDevice, androidDecoderMode } = props;
+  const { onSelectAndroidDecoderMode, liveChannelSwitchMode = 'instant' } = props;
   const formFactor = useFormFactor();
   const i18n = useI18n();
   const isTv = formFactor === 'tv';
@@ -163,6 +146,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     videoHost,
     activeTarget,
     isDesktop,
+    subtitleFontFamily,
     serviceRef,
     clockRef,
     timersRef,
@@ -504,6 +488,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
           failed: status.kind === 'failed',
           resizeMode: controls.resizeMode,
           subtitleBottomInsetPx,
+          subtitleFontFamily,
           surfaceRecreationToken,
           useTextureView,
           osdVisible,
@@ -677,6 +662,7 @@ export function PlayerScreen(props: PlayerScreenProps): ReactElement {
     nowNext,
     nowMs: wallClock(),
     wallClock,
+    tvClockMode,
     tvOsdFocused: controls.tvOsdFocused,
     tvScrubberFocused: controls.tvScrubberFocused,
     tvOsdAction: controls.tvOsdAction,

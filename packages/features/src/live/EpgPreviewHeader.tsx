@@ -342,6 +342,8 @@ export const EpgTimeRuler = memo(function EpgTimeRulerInner(p: EpgTimeRulerProps
   const theme = useTheme();
   const i18n = useI18n();
   const cursor = webCursorPointer();
+  const safeFontScale = Number.isFinite(theme.fontScale) ? Math.max(1, theme.fontScale) : 1;
+  const rulerHeight = Math.round(32 * safeFontScale);
 
   const navButtons = [
     ['earlier', 'epg-pan-earlier', i18n.t('epg.earlier'), false, onPanEarlier],
@@ -427,6 +429,7 @@ export const EpgTimeRuler = memo(function EpgTimeRulerInner(p: EpgTimeRulerProps
         style={[
           styles.rulerRow,
           {
+            height: rulerHeight,
             backgroundColor: theme.colors.bgElevated,
             borderBottomColor: theme.colors.surfaceBorder,
           },

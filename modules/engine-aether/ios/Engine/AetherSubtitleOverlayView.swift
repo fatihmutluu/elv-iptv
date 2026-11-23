@@ -39,12 +39,16 @@ final class AetherSubtitleOverlayView: UIView {
   private var presentation: SubtitlePresentation = .empty
   private var bottomInset: CGFloat = 0
   private let captionAppearanceSource = SystemCaptionAppearanceSource()
+  private var systemCaptionStyle: CaptionAppearanceStyle
   private var captionStyle: CaptionAppearanceStyle
+  private var subtitleFontFamily: String?
   private var captionObserver: SystemCaptionAppearanceObserver?
   private var voiceOverDeduper = VoiceOverAnnouncementDeduper()
 
   override init(frame: CGRect) {
-    self.captionStyle = resolveCaptionAppearance(source: captionAppearanceSource)
+    let initialSystemStyle = resolveCaptionAppearance(source: captionAppearanceSource)
+    self.systemCaptionStyle = initialSystemStyle
+    self.captionStyle = initialSystemStyle
     super.init(frame: frame)
     backgroundColor = .clear
     clipsToBounds = true
@@ -95,13 +99,23 @@ final class AetherSubtitleOverlayView: UIView {
     setNeedsLayout()
   }
 
+  func updateSubtitleFontFamily(_ family: String?) {
+    subtitleFontFamily = family
+    let updated = applyingSubtitleFontOverride(systemCaptionStyle, family: family)
+    guard updated != captionStyle else { return }
+    captionStyle = updated
+    setNeedsLayout()
+  }
+
   func clear() {
     voiceOverDeduper.reset()
     apply(.empty)
   }
 
   private func refreshCaptionStyle() {
-    let updated = resolveCaptionAppearance(source: captionAppearanceSource)
+    let resolvedSystem = resolveCaptionAppearance(source: captionAppearanceSource)
+    systemCaptionStyle = resolvedSystem
+    let updated = applyingSubtitleFontOverride(resolvedSystem, family: subtitleFontFamily)
     guard updated != captionStyle else { return }
     captionStyle = updated
     let pillBg = (updated.window ?? updated.background).uiColor

@@ -2,6 +2,7 @@ import {
   type BufferPreset,
   clampFontScale,
   clampPlayerVolume,
+  DEFAULT_PREF_OVERSCAN,
   type ExtendedPreferencesFields,
   isBufferPreset,
   isRecord,
@@ -14,27 +15,37 @@ import {
 import { elvError, err, ok, type Result } from './result';
 
 export {
+  ACCESSIBILITY_FONT_FAMILIES,
+  type AccessibilityFontFamily,
   ANDROID_DECODER_MODES,
   type AndroidDecoderMode,
   type ArtworkCacheLimitMbPref,
   BUFFER_PRESETS,
   type BufferPreset,
   type CatalogRefreshHoursPref,
+  clampOverscan,
+  DEFAULT_PREF_OVERSCAN,
   type DefaultLiveModePref,
   type DefaultResizeModePref,
   type EpgTimeSpanHoursPref,
   type GuideRefreshHoursPref,
+  isAccessibilityFontFamily,
   isAndroidDecoderMode,
+  isTvClockMode,
   type LiveChannelSwitchModePref,
   type LogoBackdropModePref,
   MAX_PREF_FONT_SCALE,
+  MAX_PREF_OVERSCAN,
   MAX_PREF_PLAYER_VOLUME,
   MIN_PREF_FONT_SCALE,
+  MIN_PREF_OVERSCAN,
   MIN_PREF_PLAYER_VOLUME,
   type OsdTimeDisplayMode,
   type SeekStepSecPref,
   type SleepTimerAction,
   type SubtitleModePref,
+  TV_CLOCK_MODES,
+  type TvClockMode,
 } from './preferences-validators';
 
 /** Schema version stored inside serialized preferences payloads. */
@@ -102,6 +113,11 @@ export const DEFAULT_PREFERENCES: PreferencesSnapshot = Object.freeze({
   androidDecoderMode: 'auto',
   collapseLiveVariants: false,
   groupVodVersions: true,
+  uiFontFamily: 'system',
+  subtitleFontFamily: 'system',
+  tvClockMode: 'always',
+  overscanX: DEFAULT_PREF_OVERSCAN,
+  overscanY: DEFAULT_PREF_OVERSCAN,
 });
 
 /** Partial update applied on top of the current {@link PreferencesSnapshot}. */

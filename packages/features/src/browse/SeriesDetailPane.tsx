@@ -1,6 +1,6 @@
 import type { CatalogService, EpisodeRow, SeasonRow } from '@elv/data';
 import type { FocusStore, KeyEvent } from '@elv/focus-core';
-import { useFormFactor, useI18n } from '@elv/ui-kit';
+import { useFormFactor, useI18n, useTheme } from '@elv/ui-kit';
 import {
   type ReactElement,
   useCallback,
@@ -14,10 +14,9 @@ import { View } from 'react-native';
 import type { PlayTarget } from '../ports/play-target';
 import { createTwoPaneFocusStore, SeriesStatusBox, syncTwoPaneScopeActive } from './BrowseHelpers';
 import {
-  BROWSE_ROW_HEIGHT_POINTER,
-  BROWSE_ROW_HEIGHT_TV,
   BrowseTvKeyBridge,
   browseStyles,
+  computeBrowseRowHeight,
   createArrayListSource,
 } from './BrowseParts';
 import {
@@ -61,10 +60,11 @@ export function SeriesDetailPane({
   isActiveScope,
 }: SeriesDetailPaneProps): ReactElement {
   const formFactor = useFormFactor();
+  const theme = useTheme();
   const i18n = useI18n();
   const isTv = formFactor === 'tv';
   const isPhone = formFactor === 'phone';
-  const rowHeight = isTv ? BROWSE_ROW_HEIGHT_TV : BROWSE_ROW_HEIGHT_POINTER;
+  const rowHeight = computeBrowseRowHeight(isTv, theme.fontScale);
 
   const [seasonsState, setSeasonsState] = useState<SeasonsState>({ kind: 'loading' });
   const [episodesState, setEpisodesState] = useState<EpisodesState>({

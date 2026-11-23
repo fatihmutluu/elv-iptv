@@ -62,6 +62,7 @@ export function launchArgs(p: {
   platform?: string;
   hwdec?: HwdecProfile;
   renderContext?: boolean;
+  fontsDir?: string;
 }): string[] {
   const profile = p.hwdec ?? 'auto-safe';
   const base = LAUNCH_OPTIONS.flatMap((opt) => {
@@ -75,6 +76,9 @@ export function launchArgs(p: {
   const extra: string[] = [];
   if (p.platform === 'linux') extra.push('--pulse-buffer=50');
   if (p.renderContext === true) extra.push('--vo=libmpv', '--video-timing-offset=0');
+  if (p.fontsDir !== undefined && p.fontsDir.length > 0) {
+    extra.push(`--sub-fonts-dir=${p.fontsDir}`);
+  }
   return [...base, ...extra, `--input-conf=${p.inputConf}`, ...p.presenterArgs, ...p.transportArgs];
 }
 

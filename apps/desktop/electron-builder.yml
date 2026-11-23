@@ -35,6 +35,8 @@ win:
       to: mpv
     - from: resources/mpv-input.conf
       to: mpv-input.conf
+    - from: resources/fonts
+      to: fonts
   target:
     - nsis
 nsis:
@@ -60,6 +62,8 @@ mac:
       to: mpv
     - from: resources/mpv-input.conf
       to: mpv-input.conf
+    - from: resources/fonts
+      to: fonts
   target:
     - dmg
 dmg:
@@ -76,5 +80,7 @@ linux:
   extraResources:
     - from: resources/mpv-input.conf
       to: mpv-input.conf
+    - from: resources/fonts
+      to: fonts
   target:
     - AppImage

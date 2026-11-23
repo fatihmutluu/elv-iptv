@@ -1,3 +1,4 @@
+import type { AccessibilityFontFamily } from '@elv/domain';
 import {
   type ChapterInfo,
   createPlaybackService,
@@ -61,6 +62,7 @@ export function usePlayerSession(params: {
   videoHost: VideoHost;
   activeTarget: PlayTarget;
   isDesktop?: boolean;
+  subtitleFontFamily?: AccessibilityFontFamily;
   serviceRef: MutableRefObject<PlaybackService | null>;
   clockRef: MutableRefObject<PlaybackClock>;
   timersRef: MutableRefObject<PlaybackTimers>;
@@ -72,6 +74,7 @@ export function usePlayerSession(params: {
     videoHost,
     activeTarget,
     isDesktop = false,
+    subtitleFontFamily = 'system',
     serviceRef,
     clockRef,
     timersRef,
@@ -211,6 +214,11 @@ export function usePlayerSession(params: {
       setActiveAudioDevice(active || 'auto');
     });
   }, [openedEngine]);
+
+  // Forward live subtitle font family changes to engine host on open & preference update (#163)
+  useEffect(() => {
+    openedEngine?.setSubtitleFontFamily?.(subtitleFontFamily);
+  }, [openedEngine, subtitleFontFamily]);
 
   const canStepTrack = activeTarget.kind === 'live' && (activeTarget.playlist?.count ?? 0) > 1;
 

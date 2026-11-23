@@ -3,12 +3,18 @@ import { Platform } from 'react-native';
 import {
   clampProgressRatio,
   formatPlaybackPosition,
+  formatVodEndAccessibilityLabel,
   formatVodEndTimestamp,
   integrateFineScrubStep,
   type TouchScrubSensitivityTier,
 } from './vod-progress-math';
 
-export { formatPlaybackPosition, formatVodEndTimestamp, type TouchScrubSensitivityTier };
+export {
+  formatPlaybackPosition,
+  formatVodEndAccessibilityLabel,
+  formatVodEndTimestamp,
+  type TouchScrubSensitivityTier,
+};
 
 export interface ProgressSnapshot {
   readonly timeText: string;

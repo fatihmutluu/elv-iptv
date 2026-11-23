@@ -46,6 +46,10 @@ const KEY_CODES = new Map<number, Key>([
   [92, 'channelUp'],
   [167, 'channelDown'],
   [93, 'channelDown'],
+  [183, 'colorRed'],
+  [184, 'colorGreen'],
+  [185, 'colorYellow'],
+  [186, 'colorBlue'],
 ]);
 
 const DIGITS: readonly Key[] = [

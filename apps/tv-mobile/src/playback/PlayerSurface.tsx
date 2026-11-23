@@ -1,3 +1,4 @@
+import type { AccessibilityFontFamily } from '@elv/domain';
 import { AetherSurface } from '@elv/engine-aether';
 import { Media3Surface } from '@elv/engine-media3';
 import type { PlayerEngine } from '@elv/playback';
@@ -10,6 +11,7 @@ export interface PlayerSurfaceProps {
   style?: StyleProp<ViewStyle>;
   resizeMode?: 'fit' | 'fill' | 'stretch';
   subtitleBottomInsetPx?: number;
+  subtitleFontFamily?: AccessibilityFontFamily;
   surfaceRecreationToken?: number;
   useTextureView?: boolean;
   osdVisible?: boolean;
@@ -25,6 +27,7 @@ export function PlayerSurface({
   style,
   resizeMode,
   subtitleBottomInsetPx,
+  subtitleFontFamily,
   surfaceRecreationToken,
   useTextureView,
   osdVisible,
@@ -37,6 +40,7 @@ export function PlayerSurface({
         style={style}
         resizeMode={resizeMode}
         subtitleBottomInsetPx={subtitleBottomInsetPx}
+        {...(subtitleFontFamily !== undefined ? { subtitleFontFamily } : {})}
         {...(osdVisible !== undefined ? { osdVisible } : {})}
         testID={testID}
       />
@@ -48,6 +52,7 @@ export function PlayerSurface({
       style={style}
       resizeMode={resizeMode}
       subtitleBottomInsetPx={subtitleBottomInsetPx}
+      {...(subtitleFontFamily !== undefined ? { subtitleFontFamily } : {})}
       {...(surfaceRecreationToken !== undefined ? { surfaceRecreationToken } : {})}
       {...(useTextureView !== undefined ? { useTextureView } : {})}
       testID={testID}
