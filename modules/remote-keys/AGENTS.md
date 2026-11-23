@@ -1,49 +1,34 @@
 # remote-keys (`@elv/remote-keys`)
 
-Android-only Expo module that reports the main window's raw remote keys to JavaScript, because react-native-tvos 0.88
-delivers TV keys only at release and never repeats holds (issue #43).
-Spec: `docs/superpowers/specs/2026-11-14-android-remote-keys-design.md`.
+Android and Apple tvOS Expo module forwarding raw remote key phases (`down`/`up`/`cancel`/`blur`, `#43`, `#414`)
+and axis-locked Siri Remote directional pan gestures on tvOS (`#225`).
+Specs: `docs/superpowers/specs/2026-11-14-android-remote-keys-design.md`,
+`docs/superpowers/specs/2026-11-23-wave-c7-apple-tvos-polish-design.md`.
 
 ## API
-- `remoteKeys: RemoteKeySource | null` from `src/index.ts`; `null` where the native module is absent (iOS, web).
-  `addListener(fn)` subscribes to the native event `onKey` and returns `{ remove() }`; it hands `fn`
-  `{ action: 'down' | 'up', keyCode, canceled, ageMs }` or `{ action: 'blur' }`.
-- Native module name `ElvRemoteKeys`: event `onKey` with `{ action, keyCode, canceled, eventTime }` (the `KeyEvent`'s
-  uptime stamp) or `{ action: 'blur' }`, and the synchronous function `uptimeMs()` (`SystemClock.uptimeMillis()`).
-  `ageMs = max(0, uptimeMs() - eventTime)` is computed in `src/index.ts` when the listener receives the event, so
-  the wait for a busy JS thread counts.
-- The types are structurally identical to ui-kit's `AndroidKeySource`; neither package imports the other. The app passes
-  `remoteKeys` to ui-kit's `RemoteKeysProvider`.
+- `remoteKeys: RemoteKeySource | null` (`src/index.ts`): subscribes to `onKey` and reports
+  `{ action: 'down' | 'up', keyCode, canceled, ageMs }` or `{ action: 'blur' }`, where `ageMs = max(0, uptimeMs() - eventTime)`.
+- `remotePanGestures: RemotePanGestureSource | null` (`src/index.ts`): present on Apple tvOS (`setPanGestureEnabled` +
+  `onPanGesture` emitting `{ axis: 'horizontal' | 'vertical', phase, translation, velocity }`); `null` on Android/web.
+- Structurally matches `@elv/ui-kit`'s `AndroidKeySource` and `@elv/features`'s `TvPanGestureEvent`; `apps/tv-mobile` wires both.
 
-## Capture rules (spec 6.1)
-- `ForwardingWindowCallback` wraps `window.callback` of the current activity, on the UI thread, on
-  `OnActivityEntersForeground` and when JS starts observing `onKey` (that hook runs on the JS thread); a UI-thread
-  `WeakHashMap<Any, WeakReference<ForwardingWindowCallback>>` avoids double-wrapping third-party wrappers (bounded
-  delegate-chain walk <= 6, including `getWrapped()`) while automatically re-wrapping if an SDK/DevSupport replaces
-  `window.callback` without retaining strong GC cycles (#439).
-- Secondary/modal windows: `KeyForwarding.wrapDialog(dialog)` and `KeyForwarding.installModalWindows(activity)` (API 29+
-  `WindowInspector.getGlobalWindowViews()`, preferring `wrapDialog` over `OnUnhandledKeyEventListener`, deduplicated by
-  decorView in `WeakHashMap`) forward modal/dialog keys on foreground and main-window focus-loss transitions (#439).
-- `KeyForwarding.action`: forward `ACTION_DOWN` only with `repeatCount == 0`, every `ACTION_UP` (with `canceled` from
-  `FLAG_CANCELED`); drop `ACTION_MULTIPLE`, `FLAG_FALLBACK` and `FLAG_SOFT_KEYBOARD` (IME-injected) events. Window
-  focus loss (`onWindowFocusChanged(false)`) and `OnActivityEntersBackground` (TV standby without lockscreen) send `blur`.
-- Never consume a key: `dispatchKeyEvent` always returns the wrapped callback's result. While a native text field has
-  focus, `@elv/ui-kit` suspends non-`back` keys on the JS side (`TvTextInput` / `TextEntryBoundary`, issue #48).
-- Raw Back depends on Android dispatching `KEYCODE_BACK` to the window; enabling `enableOnBackInvokedCallback`
-  (predictive back) on API 33+ would remove Back and long Back from the raw path.
-- Events go to a process-wide `AtomicReference` sink in `KeyForwarding`, set on `OnStartObserving` and cleared via
-  `compareAndSet` on `OnStopObserving` / `OnDestroy`, so a JS reload reattaches cleanly. Sink failures never block delegation.
+## Apple tvOS capture (`ios/Core/`, `ios/Apple/ElvRemoteKeysModule.swift`)
+- Compiles on both iOS (safe no-op) and tvOS (`#if os(tvOS)`). `ios/Core/` is pure `Foundation` (`swift test --package-path modules/remote-keys/ios`).
+- `TvPressKeyMap` maps `ApplePressKind` to canonical keyCodes (`19,20,21,22,23,4,85,92,93`) with held-key tracking in `ApplePressTracker`.
+- `DirectionalPanPolicy` locks axis after `18 pt` deadzone and `1.35x` dominance ratio, ignoring orthogonal drift and cancelling on disable.
+- `TvPressObserverGestureRecognizer` (non-consuming, simultaneous) attaches to the key `UIWindow` while `onKey` is observed, emits `blur`
+  on `willResignActiveNotification`, and cleans up on `OnStopObserving`/`OnDestroy`. `TvDirectionalPanGestureRecognizer` starts disabled.
 
-## Rules
-- Imports `expo-modules-core` and playback types only; the app wires the module.
-- Platforms: `android` only (`expo-module.config.json`, module class `ElvRemoteKeysModule`).
-- Autolinking finds the module through the `@elv/remote-keys` dependency of `apps/tv-mobile`; the Gradle project is
-  `:elv-remote-keys`. Never edit `apps/tv-mobile/android`; run `pnpm run:app android-tv build` after changing native
-  config.
+## Android capture (`android/`, spec 6.1)
+- `ForwardingWindowCallback` wraps `window.callback` on UI thread (`OnActivityEntersForeground` + `onKey` observe) via
+  `WeakHashMap<Any, WeakReference<ForwardingWindowCallback>>` (delegate walk <= 6) without retaining GC cycles (`#439`).
+- Modal/dialog windows (`KeyForwarding.wrapDialog` / `installModalWindows` via API 29+ `WindowInspector`) forward keys cleanly (`#439`).
+- Forwards `ACTION_DOWN` (`repeatCount == 0`) and every `ACTION_UP` (`canceled` from `FLAG_CANCELED`); drops `ACTION_MULTIPLE`,
+  `ACTION_FALLBACK`, and `FLAG_SOFT_KEYBOARD`. Window focus loss and `OnActivityEntersBackground` send `blur`.
+- Never consumes keys; JS `TvTextInput` / `TextEntryBoundary` suspends non-`back` keys during text entry (`#48`).
+- Process-wide `AtomicReference` sink in `KeyForwarding` uses `compareAndSet` on stop/destroy so JS reloads reattach cleanly.
 
-## Tests
-- TypeScript: `pnpm --filter @elv/remote-keys test` (Vitest, `expo-modules-core` mocked).
-- JVM (JUnit 4, no device): after `pnpm run:app android-tv build`, in `apps/tv-mobile/android` run
-  `APP_VARIANT=development EXPO_TV=1 ./gradlew.bat :elv-remote-keys:testDebugUnitTest` (`./gradlew` on Linux/macOS).
-  Gradle needs `ANDROID_HOME` (or `local.properties`). The release unit-test task does not exist for this library.
-  Tests that set the process-wide sink clear it in `@After`.
+## Rules & Tests
+- Imports `expo-modules-core` only; platforms `android` & `apple` (`:elv-remote-keys` / `ElvRemoteKeys`). Never edit generated `android/` or `ios/` in `apps/tv-mobile`.
+- TS: `pnpm --filter @elv/remote-keys test`. Swift 6: `swift test --package-path modules/remote-keys/ios`.
+- JVM: `APP_VARIANT=development EXPO_TV=1 ./gradlew.bat :elv-remote-keys:testDebugUnitTest` (tests clear sink in `@After`).

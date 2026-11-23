@@ -22,6 +22,7 @@ const ALL_HOME_ROW_IDS: readonly HomeNavRowId[] = [
   'empty',
   'hero',
   'continue',
+  'recentChannels',
   'live',
   'mylist',
   'movies',

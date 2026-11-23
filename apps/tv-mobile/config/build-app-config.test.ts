@@ -234,6 +234,18 @@ describe('buildAppConfig', () => {
     });
   });
 
+  it('includes UIBackgroundModes audio only on iOS/iPadOS mobile builds and omits it on tvOS (#413)', () => {
+    expect(build({}).ios?.infoPlist?.UIBackgroundModes).toEqual(['audio']);
+    expect(build({ APP_VARIANT: 'development' }).ios?.infoPlist?.UIBackgroundModes).toEqual([
+      'audio',
+    ]);
+    expect(build({ EXPO_TV: '1' }).ios?.infoPlist).not.toHaveProperty('UIBackgroundModes');
+    expect(build({ EXPO_TV: 'true' }).ios?.infoPlist).not.toHaveProperty('UIBackgroundModes');
+    expect(build({ APP_VARIANT: 'development', EXPO_TV: '1' }).ios?.infoPlist).not.toHaveProperty(
+      'UIBackgroundModes',
+    );
+  });
+
   it('records the store, defaulting to direct, and rejects unknown stores', () => {
     expect(build({}).extra?.store).toBe('direct');
     expect(build({ STORE: 'amazon' }).extra?.store).toBe('amazon');

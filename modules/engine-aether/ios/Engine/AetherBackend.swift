@@ -72,6 +72,7 @@ final class AetherBackend: PlayerBackend {
   var airPlayMonitor: AetherAirPlayMonitor?
   var osdClockThrottle = OsdClockThrottle(hiddenIntervalSeconds: 5.0, osdVisible: true)
   var requestedRate: Double = 1.0
+  var backgroundAudioEnabled = false
   var desiredMuted = false
   var desiredVolume: Float = 1.0
   var lastAVBufferReportedBuffering = false
@@ -196,6 +197,12 @@ final class AetherBackend: PlayerBackend {
     guard rate.isFinite, rate > 0 else { return }
     requestedRate = rate
     engine?.setRate(Float(rate))
+  }
+
+  /// Toggles opt-in background audio playback (`false` by default for single-connection IPTV safety, `#413`).
+  func setBackgroundAudioEnabled(_ enabled: Bool) {
+    backgroundAudioEnabled = enabled
+    engine?.backgroundPlaybackEnabled = enabled
   }
 
   func setOsdVisible(_ visible: Bool) {
@@ -389,7 +396,7 @@ final class AetherBackend: PlayerBackend {
   @discardableResult
   private func installFreshEngine() throws -> AetherEngine {
     let fresh = try AetherEngine()
-    fresh.backgroundPlaybackEnabled = false
+    fresh.backgroundPlaybackEnabled = backgroundAudioEnabled
     fresh.videoGravity = gravity
     fresh.currentAVPlayer?.preventsDisplaySleepDuringVideoPlayback = true
     fresh.currentAVPlayer?.allowsExternalPlayback = true

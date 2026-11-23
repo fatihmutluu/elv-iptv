@@ -317,6 +317,10 @@ Rungs, each bounded and visible as a status the OSD can show:
   and x86_64, for tvOS and iOS). 7.66.1 builds for the tvOS simulator, a tvOS device and the iOS simulator, so phase 2
   pins 7.66.1 (step 1 of the §6.2 fallback order) and re-pins only when a newer tag builds with the `tvos` job's
   Xcode.
+- Apple toolchain re-check (2026-11-23, #85, Xcode 26.4.1 / Swift 6.3.1, Release): tested newest upstream tag
+  AetherEngine 7.73.0 (`bbcf3b8359252b361258dc79817c4f81683df7b8`) across `tvOS Simulator`, `tvOS` device, and
+  `iOS Simulator`; all three targets fail deterministically at `PerFrameBenchmark.swift:374:16` ("unable to type-check
+  this expression in reasonable time"), so the pin remains `7.66.1`.
 - Final review (2026-11-14): Media3's default HTTP data source cannot abort a request that is still connecting or
   waiting for its status line, so the gate's force-close was a no-op there and the next media opened beside it. The
   engine now uses Media3's OkHttp data source on React Native's OkHttp, cancels superseded calls at once when a new

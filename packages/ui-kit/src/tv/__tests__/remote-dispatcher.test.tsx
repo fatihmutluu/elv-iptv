@@ -680,4 +680,65 @@ describe('TvRemoteProvider (#277)', () => {
     ]);
     await tvView.unmount();
   });
+
+  it('uses native raw key source on tvOS with down/up/cancel/blur, retains TVMenuKey, and avoids TVEventHandler double-subscription (#414)', async () => {
+    const apis = mockTvApis('ios', true);
+    const raw = fakeAndroidSource();
+    const onInput = jest.fn<void, [KeyInput]>();
+
+    const view = await render(
+      <RemoteKeysProvider android={raw.source}>
+        <TvRemoteProvider>
+          <Consumer onInput={onInput} />
+        </TvRemoteProvider>
+      </RemoteKeysProvider>,
+    );
+
+    expect(raw.activeCount()).toBe(1);
+    expect(apis.addRemote).not.toHaveBeenCalled();
+    expect(apis.activeRemoteListeners()).toBe(0);
+    expect(apis.enableMenu).toHaveBeenCalledTimes(1);
+    expect(apis.disableMenu).not.toHaveBeenCalled();
+
+    raw.emit({ action: 'down', keyCode: 4, canceled: false, ageMs: 0 });
+    raw.emit({ action: 'up', keyCode: 4, canceled: false, ageMs: 0 });
+    raw.emit({ action: 'down', keyCode: 20, canceled: false, ageMs: 0 });
+    raw.emit({ action: 'up', keyCode: 20, canceled: true, ageMs: 0 });
+    raw.emit({ action: 'down', keyCode: 23, canceled: false, ageMs: 0 });
+    raw.emit({ action: 'blur' });
+
+    expect(onInput.mock.calls.map(([k]) => `${k.key}:${k.action}`)).toEqual([
+      'back:down',
+      'back:up',
+      'down:down',
+      'down:cancel',
+      'select:down',
+      'select:cancel',
+    ]);
+
+    await view.unmount();
+    expect(raw.activeCount()).toBe(0);
+    expect(apis.disableMenu).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to TVEventHandler on tvOS when raw key source is null while retaining TVMenuKey (#414)', async () => {
+    const apis = mockTvApis('ios', true);
+    const onInput = jest.fn<void, [KeyInput]>();
+
+    const view = await render(
+      <RemoteKeysProvider android={null}>
+        <TvRemoteProvider>
+          <Consumer onInput={onInput} />
+        </TvRemoteProvider>
+      </RemoteKeysProvider>,
+    );
+
+    expect(apis.addRemote).toHaveBeenCalledTimes(1);
+    expect(apis.enableMenu).toHaveBeenCalledTimes(1);
+    apis.emitRemote({ eventType: 'menu' });
+    expect(onInput).toHaveBeenCalledWith(expect.objectContaining({ key: 'back', action: 'press' }));
+
+    await view.unmount();
+    expect(apis.disableMenu).toHaveBeenCalledTimes(1);
+  });
 });

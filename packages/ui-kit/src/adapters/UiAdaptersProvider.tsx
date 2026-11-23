@@ -48,6 +48,8 @@ export interface UiAdapters {
   readonly renderImage?: (props: ImageAdapterProps) => ReactElement;
   readonly renderSvg?: (props: SvgAdapterProps) => ReactElement;
   readonly artworkCache?: ArtworkCacheAdapter;
+  /** True on constrained 2–3 GB TV hardware (e.g. Apple TV `'mid-power'` tier, `#186`, `#414`). */
+  readonly lowPowerTier?: boolean;
 }
 
 const EMPTY_ADAPTERS: UiAdapters = {};

@@ -1,10 +1,12 @@
 import type { ItemRow } from '@elv/data';
+import type { AccessibilityFontFamily } from '@elv/domain';
 import type { AppI18n } from '@elv/i18n';
 import type { PlaybackClock, PlaybackStatus, PlaybackTimers } from '@elv/playback';
 import { Scrim, useTheme, useViewport } from '@elv/ui-kit';
 import { type ReactElement, useRef } from 'react';
 import { ActivityIndicator, StyleSheet, View, type ViewStyle } from 'react-native';
 import type { PlayableEntry } from '../ports/play-target';
+import type { OpenVideoEngine, VideoResizeMode } from '../ports/video-host';
 import {
   DesktopCinemaBar,
   DesktopDockedTopBar,
@@ -18,8 +20,81 @@ import { FloatingPeekOsd } from './PlayerOsdChrome';
 
 export { DesktopDockedTopBar, PlayerLockedOverlay, type PlayerOsdProps };
 
+/** Renders the active native video surface layer when a host engine session is ready. */
+export function PlayerSurfaceLayer(props: {
+  readonly opened: OpenVideoEngine;
+  readonly useDockedDesktopLayout: boolean;
+  readonly statusText: string;
+  readonly failed: boolean;
+  readonly resizeMode: VideoResizeMode;
+  readonly subtitleBottomInsetPx: number;
+  readonly subtitleFontFamily: AccessibilityFontFamily | undefined;
+  readonly surfaceRecreationToken: number;
+  readonly useTextureView: boolean;
+  readonly osdVisible: boolean;
+}): ReactElement {
+  return (
+    <View
+      testID="player-surface-layer"
+      style={
+        props.useDockedDesktopLayout ? playerStyles.surfaceLayerDesktop : playerStyles.surfaceLayer
+      }
+    >
+      {props.opened.renderSurface({
+        statusText: props.statusText,
+        failed: props.failed,
+        resizeMode: props.resizeMode,
+        subtitleBottomInsetPx: props.subtitleBottomInsetPx,
+        ...(props.subtitleFontFamily !== undefined
+          ? { subtitleFontFamily: props.subtitleFontFamily }
+          : {}),
+        surfaceRecreationToken: props.surfaceRecreationToken,
+        useTextureView: props.useTextureView,
+        osdVisible: props.osdVisible,
+        testID: 'player-surface',
+      })}
+    </View>
+  );
+}
+
+/** Computes extra bottom inset (dp/px) to lift native subtitles above a visible OSD (`#136`). */
+export function computeSubtitleBottomInsetPx(opts: {
+  readonly useDockedDesktopLayout: boolean;
+  readonly osdVisible: boolean;
+  readonly isTv: boolean;
+  readonly osdTier: string;
+}): number {
+  if (opts.useDockedDesktopLayout || !opts.osdVisible) return 0;
+  if (opts.isTv) return 120;
+  return opts.osdTier === 'progress' ? 64 : 96;
+}
+
 /** Web-only cursor style applied while desktop OSD is hidden during playback. */
 export const HIDE_CURSOR_WEB_STYLE = { cursor: 'none' } as unknown as ViewStyle;
+
+/** Builds desktop-web pointer/wheel event props for {@link PlayerScreen}. */
+export function buildDesktopWebProps(
+  enabled: boolean,
+  onWheelVolume: (deltaY: number) => boolean,
+  onActivity: () => void,
+): Record<string, unknown> | undefined {
+  if (!enabled) return undefined;
+  return {
+    onContextMenu: (e?: { preventDefault?: () => void }) => {
+      e?.preventDefault?.();
+    },
+    onWheel: (e?: {
+      deltaY?: number;
+      nativeEvent?: { deltaY?: number };
+      preventDefault?: () => void;
+    }) => {
+      if (onWheelVolume(e?.deltaY ?? e?.nativeEvent?.deltaY ?? 0)) {
+        onActivity();
+        e?.preventDefault?.();
+      }
+    },
+  };
+}
 /** Default monotonic playback clock for {@link PlayerScreen}. */
 export const DEFAULT_PLAYER_CLOCK: PlaybackClock = { now: () => performance.now() };
 /** Default timeout scheduler for {@link PlayerScreen}. */

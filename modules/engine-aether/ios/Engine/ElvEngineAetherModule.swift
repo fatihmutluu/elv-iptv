@@ -66,6 +66,31 @@ struct LoadArgs: Record {
   }
 }
 
+/// Playback metadata record passed from JavaScript to `MPNowPlayingInfoCenter` (`#413`).
+struct MediaMetadataArgs: Record {
+  @Field var title: String = ""
+  @Field var subtitle: String? = nil
+  @Field var artworkUrl: String? = nil
+  @Field var kind: String = "live"
+  @Field var canStepTrack: Bool = false
+
+  init() {}
+
+  func toNowPlayingMetadata() -> NowPlayingMetadata? {
+    let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedTitle.isEmpty else { return nil }
+    let trimmedSubtitle = subtitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmedArtwork = artworkUrl?.trimmingCharacters(in: .whitespacesAndNewlines)
+    return NowPlayingMetadata(
+      title: trimmedTitle,
+      subtitle: (trimmedSubtitle?.isEmpty == false) ? trimmedSubtitle : nil,
+      artworkUrl: (trimmedArtwork?.isEmpty == false) ? trimmedArtwork : nil,
+      isLive: kind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != "vod",
+      canStepTrack: canStepTrack
+    )
+  }
+}
+
 private struct WeakEngineRef {
   weak var value: EngineObject?
 }
@@ -202,6 +227,14 @@ public final class ElvEngineAetherModule: Module, @unchecked Sendable {
 
       Function("setVolume") { (engine: EngineObject, volume: Double) in
         engine.setVolume(volume)
+      }
+
+      Function("setBackgroundAudioEnabled") { (engine: EngineObject, enabled: Bool) in
+        engine.setBackgroundAudioEnabled(enabled)
+      }
+
+      Function("setMediaMetadata") { (engine: EngineObject, args: MediaMetadataArgs?) in
+        engine.setMediaMetadata(args?.toNowPlayingMetadata())
       }
 
       Function("selectAudioTrack") { (engine: EngineObject, attempt: Int, id: String) in

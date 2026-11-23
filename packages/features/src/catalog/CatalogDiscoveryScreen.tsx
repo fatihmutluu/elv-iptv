@@ -16,6 +16,7 @@ import {
   detailTargetFromItem,
   useCardQuickActionsState,
 } from '../shared';
+import { AmbientBackdrop } from '../shared/AmbientBackdrop';
 import {
   CatalogEmptyState,
   CatalogFilterHeader,
@@ -316,12 +317,57 @@ export function CatalogDiscoveryScreen({
   });
 
   const screenTitle = i18n.t(kind === 'movie' ? 'catalog.moviesTitle' : 'catalog.seriesTitle');
+  const ambientTarget = useMemo<{
+    readonly key: string;
+    readonly uri: string | null;
+    readonly title: string;
+  } | null>(() => {
+    if (!layout.isTv) return null;
+    if (isGridMode && tvNav.focusedGridPos !== null && gridMeta.itemCount > 0) {
+      const gridIndex = tvNav.focusedGridPos.row * layout.gridColumns + tvNav.focusedGridPos.col;
+      const item = gridAccessRef.current.getItem(gridIndex);
+      if (item) return { key: item.key, uri: item.logo, title: item.name };
+      return null;
+    }
+    if (tvNav.focusedRowId === 'continue' && tvNav.focusedCol !== null) {
+      const row = discovery.continueItems[tvNav.focusedCol];
+      if (row) return { key: row.itemKey, uri: row.logo, title: row.title };
+      return null;
+    }
+    if (tvNav.focusedRowId?.startsWith('rail-') && tvNav.focusedCol !== null) {
+      const cat = discovery.visibleCategories[Number(tvNav.focusedRowId.slice(5))];
+      if (!cat) return null;
+      const items = discovery.railItemsByCategoryId.get(cat.row.id);
+      const item = items?.[tvNav.focusedCol];
+      if (item) return { key: item.key, uri: item.logo, title: item.name };
+    }
+    return null;
+  }, [
+    discovery.continueItems,
+    discovery.railItemsByCategoryId,
+    discovery.visibleCategories,
+    gridMeta.itemCount,
+    isGridMode,
+    layout.gridColumns,
+    layout.isTv,
+    tvNav.focusedCol,
+    tvNav.focusedGridPos,
+    tvNav.focusedRowId,
+  ]);
 
   return (
     <View
       testID={`catalog-screen-${kind}`}
       style={[styles.root, { backgroundColor: theme.colors.bgCanvas }]}
     >
+      {layout.isTv ? (
+        <AmbientBackdrop
+          testID={`catalog-ambient-backdrop-${kind}`}
+          backdropKey={ambientTarget?.key ?? null}
+          uri={ambientTarget?.uri ?? null}
+          title={ambientTarget?.title ?? ''}
+        />
+      ) : null}
       {layout.isTv && isActiveScope ? (
         <CatalogTvKeyBridge kind={kind} onEvent={tvNav.handleTvKey} />
       ) : null}

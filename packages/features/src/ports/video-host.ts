@@ -70,6 +70,14 @@ export interface MediaSessionMetadata {
   readonly canStepTrack: boolean;
 }
 
+/** Axis-locked Siri Remote touch-surface pan event emitted on tvOS (`#225`). */
+export interface TvPanGestureEvent {
+  readonly axis: 'horizontal' | 'vertical';
+  readonly phase: 'began' | 'changed' | 'ended' | 'cancelled';
+  readonly translation: number;
+  readonly velocity: number;
+}
+
 /** An opened platform player engine paired with its view surface renderer. */
 export interface OpenVideoEngine {
   readonly engine: PlayerEngine;
@@ -142,6 +150,10 @@ export interface OpenVideoEngine {
   readonly clearQueue?: () => void;
   /** Optional callback fired when a gapless queued episode becomes active (`#205`). */
   readonly onQueueAdvanced?: (listener: (itemKey: string) => void) => () => void;
+  /** Optional tvOS Siri Remote directional pan gesture gate (`#225`). */
+  readonly setTvPanGestureEnabled?: (enabled: boolean) => void;
+  /** Optional tvOS Siri Remote axis-locked pan gesture subscription (`#225`). */
+  readonly onTvPanGesture?: (listener: (event: TvPanGestureEvent) => void) => () => void;
 }
 
 /** Port supplied by the app composition root to open a `PlayerEngine` and render its surface. */

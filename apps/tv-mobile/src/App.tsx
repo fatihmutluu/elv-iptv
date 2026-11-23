@@ -4,8 +4,11 @@ import {
   getAppleSafeAreaInsets,
   pickApplePlaylistFile,
   readAppleClipboardText,
+  setAetherBackgroundAudioEnabled,
+  setAetherMediaMetadata,
   setAppleEngineMuted,
   setAppleEngineVolume,
+  subscribeAetherRemoteMediaAction,
   subscribeAppleHardwareKeys,
   subscribeAppleSafeAreaInsets,
 } from '@elv/engine-aether';
@@ -35,7 +38,7 @@ import {
   type VideoHost,
 } from '@elv/features';
 import { resolveLocale } from '@elv/i18n';
-import { remoteKeys } from '@elv/remote-keys';
+import { remoteKeys, remotePanGestures } from '@elv/remote-keys';
 import { RemoteKeysProvider, TvFocusAnchor, UiAdaptersProvider } from '@elv/ui-kit';
 import Constants from 'expo-constants';
 import { getLocales } from 'expo-localization';
@@ -60,6 +63,7 @@ function AppRoot() {
   const [refreshToken, setRefreshToken] = useState(0);
   const isAndroidMobile = Platform.OS === 'android' && !Platform.isTV;
   const isAppleMobile = Platform.OS === 'ios' && !Platform.isTV;
+  const isAppleTv = Platform.OS === 'ios' && Platform.isTV;
   const [safeArea, setSafeArea] = useState<AndroidSafeAreaInsets | AppleSafeAreaInsets | undefined>(
     () =>
       isAndroidMobile
@@ -120,6 +124,7 @@ function AppRoot() {
         const engine = createPlatformEngine();
         if (engine === null) return null;
         let appleMuted = false;
+        const panGestures = isAppleTv ? remotePanGestures : null;
         return {
           engine,
           renderSurface: ({
@@ -143,14 +148,45 @@ function AppRoot() {
               {...(testID !== undefined ? { testID } : {})}
             />
           ),
-          ...(isAppleMobile
+          ...(Platform.OS === 'ios'
             ? {
-                onHostKey: subscribeAppleHardwareKeys,
+                setMediaMetadata: (metadata) => setAetherMediaMetadata(engine, metadata),
+                setBackgroundAudioEnabled: (enabled) =>
+                  setAetherBackgroundAudioEnabled(engine, enabled),
+                onHostKey: (listener) => {
+                  const unsubRemote = subscribeAetherRemoteMediaAction(engine, (action) =>
+                    listener(
+                      action === 'next'
+                        ? 'channel-up'
+                        : action === 'previous'
+                          ? 'channel-down'
+                          : 'stop',
+                    ),
+                  );
+                  const unsubKeyboard = isAppleMobile
+                    ? subscribeAppleHardwareKeys(listener)
+                    : undefined;
+                  return () => {
+                    unsubRemote();
+                    unsubKeyboard?.();
+                  };
+                },
                 toggleMute: () => {
                   appleMuted = !appleMuted;
                   setAppleEngineMuted(engine, appleMuted);
                 },
                 setVolume: (volume: number) => setAppleEngineVolume(engine, volume),
+              }
+            : {}),
+          ...(panGestures !== null
+            ? {
+                setTvPanGestureEnabled: (enabled) => panGestures.setEnabled(enabled),
+                onTvPanGesture: (listener) => {
+                  const sub = panGestures.addListener(listener);
+                  return () => {
+                    sub.remove();
+                  };
+                },
               }
             : {}),
           ...(Platform.OS === 'android'
@@ -182,7 +218,7 @@ function AppRoot() {
         };
       },
     }),
-    [isAndroidMobile, isAppleMobile],
+    [isAndroidMobile, isAppleMobile, isAppleTv],
   );
 
   const appLifecycle = useMemo<AppLifecyclePort>(
@@ -274,10 +310,12 @@ function AppRoot() {
  */
 export function App() {
   const gate = useGateRoute();
+  const rawRemoteKeys =
+    Platform.OS === 'android' || (Platform.OS === 'ios' && Platform.isTV) ? remoteKeys : null;
 
   if (gate === 'pending') {
     return (
-      <RemoteKeysProvider android={remoteKeys}>
+      <RemoteKeysProvider android={rawRemoteKeys}>
         <View style={styles.pending}>
           {Platform.isTV ? <TvFocusAnchor testID="app-pending-focus-anchor" /> : null}
           <StatusBar style="light" />
@@ -288,7 +326,7 @@ export function App() {
 
   if (gate !== undefined) {
     return (
-      <RemoteKeysProvider android={remoteKeys}>
+      <RemoteKeysProvider android={rawRemoteKeys}>
         {gate.name === 'list' && <GateListScreen key={JSON.stringify(gate)} params={gate.params} />}
         {gate.name === 'import' && (
           <ImportGateScreen key={JSON.stringify(gate)} params={gate.params} />
@@ -308,7 +346,7 @@ export function App() {
   }
 
   return (
-    <RemoteKeysProvider android={remoteKeys}>
+    <RemoteKeysProvider android={rawRemoteKeys}>
       <AppRoot />
     </RemoteKeysProvider>
   );

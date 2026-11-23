@@ -62,6 +62,7 @@ export function createMobileTvUiAdapters(options?: {
     options?.artworkCache ?? createMobileArtworkCache(fs !== undefined ? { fs } : undefined);
   return {
     artworkCache,
+    lowPowerTier: tier === 'mid-power',
     ...(renderBlur !== undefined ? { renderBlur } : {}),
     renderImage({
       uri,

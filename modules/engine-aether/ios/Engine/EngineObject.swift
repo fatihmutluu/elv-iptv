@@ -31,7 +31,7 @@ final class EngineObject: SharedObject, @unchecked Sendable {
             let driver = self.ensureDriver()
       else { return }
       driver.activeEpoch = activeEpoch
-      if rebuildFirst, !driver.core.recreate(attempt) {
+      if rebuildFirst, !driver.recreatePlayback(attempt) {
         return
       }
       driver.core.load(request, attempt: attempt)
@@ -46,7 +46,7 @@ final class EngineObject: SharedObject, @unchecked Sendable {
             let driver = self.driver
       else { return }
       driver.activeEpoch = activeEpoch
-      if rebuildFirst, !driver.core.recreate(attempt) {
+      if rebuildFirst, !driver.recreatePlayback(attempt) {
         return
       }
       driver.core.retry(attempt)
@@ -101,6 +101,22 @@ final class EngineObject: SharedObject, @unchecked Sendable {
     }
   }
 
+  func setBackgroundAudioEnabled(_ enabled: Bool) {
+    guard !fence.isDisposedNow else { return }
+    enqueueMain { [weak self] in
+      guard let self, !self.fence.isDisposedNow, let driver = self.ensureDriver() else { return }
+      driver.setBackgroundAudioEnabled(enabled)
+    }
+  }
+
+  func setMediaMetadata(_ metadata: NowPlayingMetadata?) {
+    guard !fence.isDisposedNow else { return }
+    enqueueMain { [weak self] in
+      guard let self, !self.fence.isDisposedNow, let driver = self.ensureDriver() else { return }
+      driver.setMediaMetadata(metadata)
+    }
+  }
+
   @MainActor
   func isCurrentlyLive() -> Bool {
     driver?.core.isLivePlayback ?? true
@@ -127,7 +143,7 @@ final class EngineObject: SharedObject, @unchecked Sendable {
     enqueueMain { [weak self] in
       guard let self, self.fence.canRunStop(), let driver = self.driver else { return }
       driver.activeEpoch = max(driver.activeEpoch, epoch)
-      driver.core.stop(attempt)
+      driver.stopPlayback(attempt)
     }
   }
 
@@ -139,7 +155,7 @@ final class EngineObject: SharedObject, @unchecked Sendable {
             let driver = self.ensureDriver()
       else { return }
       driver.activeEpoch = activeEpoch
-      _ = driver.core.recreate(attempt)
+      _ = driver.recreatePlayback(attempt)
     }
   }
 
@@ -169,6 +185,12 @@ final class EngineObject: SharedObject, @unchecked Sendable {
   func deliverToJavaScript(_ event: EngineEventOut, driverEpoch: Int) {
     guard let filtered = fence.filterOutbound(event, driverEpoch: driverEpoch) else { return }
     emit(event: "onEngineEvent", payload: filtered.payload)
+  }
+
+  @MainActor
+  func emitRemoteMediaAction(_ action: String) {
+    guard !fence.isDisposedNow else { return }
+    emit(event: "onRemoteMediaAction", payload: ["action": action])
   }
 
   @MainActor
